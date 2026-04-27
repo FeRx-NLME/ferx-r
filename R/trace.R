@@ -1,11 +1,18 @@
-#' Read optimizer trace CSV from a ferx fit
+#' Read the optimizer trace from a ferx fit
 #'
 #' Reads the per-iteration trace CSV written when \code{optimizer_trace = TRUE}
 #' was passed to \code{\link{ferx_fit}}. Returns a tidy data frame with one row
 #' per optimizer iteration (or per OFV evaluation for NLopt-based methods).
 #'
-#' @param fit A \code{ferx_fit} object returned by \code{\link{ferx_fit}}, or a
-#'   character string giving the path to a trace CSV file written by ferx.
+#' Called with no argument, returns the trace from the most recent
+#' \code{ferx_fit()} call in the current R session and prints a one-line
+#' message indicating when that fit was started. Named \code{ferx_trace()}
+#' rather than \code{trace()} to avoid masking \code{base::trace()}.
+#'
+#' @param fit Optional. A \code{ferx_fit} object returned by
+#'   \code{\link{ferx_fit}}, or a character string giving the path to a trace
+#'   CSV file written by ferx. If omitted, uses the trace from the last
+#'   \code{ferx_fit()} call in this session.
 #'
 #' @return A data frame with columns:
 #'   \item{iter}{Iteration / evaluation index (integer)}
@@ -27,13 +34,28 @@
 #' @examples
 #' \dontrun{
 #' fit <- ferx_fit("warfarin.ferx", "warfarin.csv", optimizer_trace = TRUE)
-#' tr  <- ferx_read_trace(fit)
-#' head(tr)
+#' head(ferx_trace(fit))
+#' head(ferx_trace())              # same trace, recalled from last run
 #' }
 #'
 #' @export
-ferx_read_trace <- function(fit) {
-  if (is.character(fit)) {
+ferx_trace <- function(fit) {
+  if (missing(fit) || is.null(fit)) {
+    path <- .ferx_state$last_trace_path
+    if (is.null(path)) {
+      stop("No trace from a previous ferx_fit() call found in this session. ",
+           "Run ferx_fit(..., optimizer_trace = TRUE) first, or pass a fit ",
+           "object / trace path explicitly.")
+    }
+    started   <- .ferx_state$last_trace_time
+    model_lbl <- .ferx_state$last_trace_model
+    msg <- sprintf("Last ferx_fit() started at %s",
+                   format(started, "%Y-%m-%d %H:%M:%S"))
+    if (!is.null(model_lbl)) {
+      msg <- paste0(msg, " (model: ", basename(model_lbl), ")")
+    }
+    message(msg)
+  } else if (is.character(fit)) {
     path <- fit
   } else if (inherits(fit, "ferx_fit")) {
     path <- fit$trace_path
@@ -76,12 +98,12 @@ ferx_read_trace <- function(fit) {
 #' boundaries are drawn as vertical dashed lines.
 #'
 #' @param fit A \code{ferx_fit} object or path to a trace CSV file (see
-#'   \code{\link{ferx_read_trace}}).
+#'   \code{\link{ferx_trace}}).
 #' @param log_ofv Logical; plot OFV on a log scale relative to the final value
 #'   (\eqn{OFV - OFV_{final}}). Default \code{FALSE}.
 #'
 #' @return Invisibly returns the trace data frame (from
-#'   \code{\link{ferx_read_trace}}).
+#'   \code{\link{ferx_trace}}).
 #'
 #' @examples
 #' \dontrun{
@@ -91,7 +113,7 @@ ferx_read_trace <- function(fit) {
 #'
 #' @export
 ferx_plot_trace <- function(fit, log_ofv = FALSE) {
-  tr <- ferx_read_trace(fit)
+  tr <- ferx_trace(fit)
 
   old_par <- par(no.readonly = TRUE)
   on.exit(par(old_par))
@@ -181,7 +203,7 @@ ferx_plot_trace <- function(fit, log_ofv = FALSE) {
 #'
 #' @return A named list with:
 #'   \item{fit}{The \code{ferx_fit} object from the pilot run}
-#'   \item{trace}{The trace data frame (from \code{\link{ferx_read_trace}})}
+#'   \item{trace}{The trace data frame (from \code{\link{ferx_trace}})}
 #'   \item{summary}{A one-row data frame with \code{n_iter}, \code{ofv_start},
 #'     \code{ofv_end}, \code{ofv_drop}, and \code{converged}}
 #'
@@ -214,7 +236,7 @@ ferx_check_init <- function(model, data, method = "focei", maxiter = NULL, ...) 
          optimizer_trace = TRUE),
     dots
   ))
-  tr <- ferx_read_trace(fit)
+  tr <- ferx_trace(fit)
   ofv_start <- tr$ofv[1L]
   ofv_end   <- tr$ofv[nrow(tr)]
   summary_df <- data.frame(
