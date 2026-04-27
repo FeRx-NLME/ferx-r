@@ -98,7 +98,8 @@ fn ferx_rust_fit(
             }
         };
 
-    let population = match ferx_nlme::read_nonmem_csv(Path::new(data_path), None, None) {
+    let iov_col = parsed.fit_options.iov_column.clone();
+    let population = match ferx_nlme::read_nonmem_csv(Path::new(data_path), None, iov_col.as_deref()) {
         Ok(p) => p,
         Err(e) => {
             rprintln!("Error reading data: {}", e);
