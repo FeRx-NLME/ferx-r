@@ -292,7 +292,8 @@ ferx_fit <- function(model, data,
       rownames(m_iov) <- colnames(m_iov) <- result$kappa_names
     }
     result$omega_iov <- m_iov
-    if (length(result$kappa_names) > 0L) names(result$shrinkage_kappa) <- result$kappa_names
+    if (length(result$kappa_names) > 0L && length(result$shrinkage_kappa) == length(result$kappa_names))
+      names(result$shrinkage_kappa) <- result$kappa_names
     if (length(result$se_kappa) == 0L) {
       result$se_kappa <- NULL
     } else {
