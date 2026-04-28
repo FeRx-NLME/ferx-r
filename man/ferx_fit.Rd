@@ -15,6 +15,7 @@ ferx_fit(
   mu_referencing = TRUE,
   sir = FALSE,
   gradient = c("auto", "ad", "fd"),
+  optimizer_trace = FALSE,
   settings = NULL
 )
 }
@@ -107,6 +108,12 @@ Set \code{FERX_TIME_GRADIENTS=1} in the environment to print
 per-gradient-call timings at the end of a fit, which is the easiest
 way to check which method is faster on your specific model/data.}
 
+\item{optimizer_trace}{Logical. If \code{TRUE}, write a per-iteration CSV
+trace to a temporary file and store its path in \code{fit$trace_path}.
+Pass the result to \code{\link{ferx_read_trace}} or
+\code{\link{ferx_plot_trace}} to inspect optimizer progress. Default
+\code{FALSE}.}
+
 \item{settings}{Optional named list of estimation-method-specific options
 forwarded to the Rust \code{FitOptions}. Use this to tune knobs that do
 not have a dedicated \code{ferx_fit()} argument, without needing a new
@@ -147,6 +154,9 @@ A list with components:
 \item{sir_ess}{SIR effective sample size (NULL if SIR not run)}
 \item{sir_ci_theta, sir_ci_omega, sir_ci_sigma}{SIR 95\\% CI matrices
 with columns \code{lower} and \code{upper} (NULL if SIR not run)}
+\item{trace_path}{Path to the optimizer trace CSV, or \code{NULL} when
+\code{optimizer_trace = FALSE}. Pass to \code{\link{ferx_read_trace}}
+or \code{\link{ferx_plot_trace}}.}
 }
 \description{
 Fits a NLME model using FOCE or FOCEI estimation with a Rust backend

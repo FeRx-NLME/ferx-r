@@ -608,6 +608,11 @@ fn fit_result_to_list(result: &FitResult, population: &Population) -> List {
     let sir_ci_omega = flatten_ci(&result.sir_ci_omega);
     let sir_ci_sigma = flatten_ci(&result.sir_ci_sigma);
 
+    let trace_path: Robj = match &result.trace_path {
+        Some(p) => p.clone().into(),
+        None => ().into(),
+    };
+
     list!(
         converged = result.converged,
         method = method_label,
@@ -632,7 +637,8 @@ fn fit_result_to_list(result: &FitResult, population: &Population) -> List {
         sir_ess = sir_ess,
         sir_ci_theta = sir_ci_theta,
         sir_ci_omega = sir_ci_omega,
-        sir_ci_sigma = sir_ci_sigma
+        sir_ci_sigma = sir_ci_sigma,
+        trace_path = trace_path
     )
 }
 
