@@ -86,6 +86,38 @@
 #'   Pass the result to \code{\link{ferx_read_trace}} or
 #'   \code{\link{ferx_plot_trace}} to inspect optimizer progress. Default
 #'   \code{FALSE}.
+#' @param scale_params Logical. If \code{TRUE} (default), apply a per-coordinate
+#'   scaling layer on top of the existing log/Cholesky parameterization so
+#'   that every transformed parameter the outer optimizer sees is O(1).
+#'
+#'   \strong{Why it helps.} Population PK parameters often differ by orders
+#'   of magnitude on the natural scale (e.g. \code{CL = 0.0015}, \code{V =
+#'   200}, \code{Ka = 0.8}). Even after the log transform, the packed
+#'   optimizer vector mixes large negatives (\code{log(0.0015) ≈ -6.5}) with
+#'   large positives (\code{log(200) ≈ 5.3}), which leaves the Hessian
+#'   poorly conditioned and slows down NLopt / BFGS / Gauss-Newton. With
+#'   \code{scale_params = TRUE} each coordinate is divided by
+#'   \code{|x0[i]|} (when \code{|x0[i]| > 0.1}, otherwise by \code{1.0}), so
+#'   the optimizer works in a near-unit-magnitude space. The scale is
+#'   computed once from the initial point and held fixed for the entire run.
+#'
+#'   \strong{When to set \code{FALSE}.} Mathematically the scaling is
+#'   transparent — the OFV, estimates, standard errors, and diagnostics
+#'   should match the unscaled fit to numerical tolerance. Set
+#'   \code{scale_params = FALSE} to:
+#'   \itemize{
+#'     \item reproduce the bit-exact iteration trajectory of a pre-scaling
+#'       fit (e.g. when comparing against a baseline produced by an older
+#'       \code{ferx} build),
+#'     \item debug suspected scaling-related issues by toggling the layer
+#'       off without changing anything else,
+#'     \item validate that scaled and unscaled fits land on the same
+#'       optimum on a new model.
+#'   }
+#'
+#'   Applies to all outer optimizers: NLopt FOCE/FOCEI (BOBYQA, SLSQP,
+#'   L-BFGS, MMA), the hand-rolled BFGS, Gauss-Newton / BHHH, and the SAEM
+#'   M-step.
 #' @param settings Optional named list of estimation-method-specific options
 #'   forwarded to the Rust \code{FitOptions}. Use this to tune knobs that do
 #'   not have a dedicated \code{ferx_fit()} argument, without needing a new
@@ -128,6 +160,12 @@
 #'   \item{trace_path}{Path to the optimizer trace CSV, or \code{NULL} when
 #'     \code{optimizer_trace = FALSE}. Pass to \code{\link{ferx_read_trace}}
 #'     or \code{\link{ferx_plot_trace}}.}
+#'   \item{ebe_convergence_warnings}{Number of outer iterations in which too
+#'     many EBEs were unconverged (step was rejected by the guard).}
+#'   \item{max_unconverged_subjects}{Worst-case number of unconverged subjects
+#'     in a single outer iteration.}
+#'   \item{total_ebe_fallbacks}{Total Nelder-Mead fallback invocations across
+#'     all subjects and iterations.}
 #'
 #' @examples
 #' \dontrun{
@@ -183,6 +221,9 @@ ferx_fit <- function(model, data,
                      sir = FALSE,
                      gradient = c("auto", "ad", "fd"),
                      optimizer_trace = FALSE,
+                     scale_params = TRUE,
+                     max_unconverged_frac = NULL,
+                     min_obs_for_convergence_check = NULL,
                      settings = NULL) {
   gradient <- match.arg(gradient)
   stopifnot(file.exists(model), file.exists(data))
@@ -230,12 +271,38 @@ ferx_fit <- function(model, data,
   if (!is.logical(optimizer_trace) || length(optimizer_trace) != 1L || is.na(optimizer_trace)) {
     stop("`optimizer_trace` must be TRUE or FALSE")
   }
+  if (!is.logical(scale_params) || length(scale_params) != 1L || is.na(scale_params)) {
+    stop("`scale_params` must be TRUE or FALSE")
+  }
   # Merge optimizer_trace into settings so apply_fit_option handles it on the
   # Rust side (it's already in framework_keys()).  User-supplied settings take
   # precedence if somehow duplicated, which Rust will reject as a duplicate key
   # — but we forbid that below via the RESERVED list.
   if (isTRUE(optimizer_trace)) {
     settings <- c(list(optimizer_trace = TRUE), settings)
+  }
+  # Only inject scale_params when FALSE — the Rust default is true, so omitting
+  # it preserves the behaviour callers expect when they don't pass the argument.
+  if (isFALSE(scale_params)) {
+    settings <- c(list(scale_params = FALSE), settings)
+  }
+  if (!is.null(max_unconverged_frac)) {
+    if (!is.numeric(max_unconverged_frac) || length(max_unconverged_frac) != 1L ||
+        !is.finite(max_unconverged_frac) || max_unconverged_frac < 0 || max_unconverged_frac > 1) {
+      stop("`max_unconverged_frac` must be a numeric scalar between 0 and 1")
+    }
+    settings <- c(list(max_unconverged_frac = max_unconverged_frac), settings)
+  }
+  if (!is.null(min_obs_for_convergence_check)) {
+    if (!is.numeric(min_obs_for_convergence_check) ||
+        length(min_obs_for_convergence_check) != 1L ||
+        !is.finite(min_obs_for_convergence_check) ||
+        min_obs_for_convergence_check != as.integer(min_obs_for_convergence_check) ||
+        min_obs_for_convergence_check < 0L) {
+      stop("`min_obs_for_convergence_check` must be a non-negative integer scalar")
+    }
+    settings <- c(list(min_obs_for_convergence_check = as.integer(min_obs_for_convergence_check)),
+                  settings)
   }
   settings_parts <- .ferx_settings_to_strings(settings)
 
