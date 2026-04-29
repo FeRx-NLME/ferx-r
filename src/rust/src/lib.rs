@@ -638,11 +638,7 @@ fn fit_result_to_list(result: &FitResult, population: &Population) -> List {
         sir_ci_theta = sir_ci_theta,
         sir_ci_omega = sir_ci_omega,
         sir_ci_sigma = sir_ci_sigma,
-        trace_path = trace_path,
-        saem_mu_ref_m_step_evals_saved = match result.saem_mu_ref_m_step_evals_saved {
-            Some(v) => r!(v as i32),
-            None => r!(NULL),
-        }
+        trace_path = trace_path
     )
 }
 
