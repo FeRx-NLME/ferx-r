@@ -86,6 +86,38 @@
 #'   Pass the result to \code{\link{ferx_read_trace}} or
 #'   \code{\link{ferx_plot_trace}} to inspect optimizer progress. Default
 #'   \code{FALSE}.
+#' @param scale_params Logical. If \code{TRUE} (default), apply a per-coordinate
+#'   scaling layer on top of the existing log/Cholesky parameterization so
+#'   that every transformed parameter the outer optimizer sees is O(1).
+#'
+#'   \strong{Why it helps.} Population PK parameters often differ by orders
+#'   of magnitude on the natural scale (e.g. \code{CL = 0.0015}, \code{V =
+#'   200}, \code{Ka = 0.8}). Even after the log transform, the packed
+#'   optimizer vector mixes large negatives (\code{log(0.0015) ≈ -6.5}) with
+#'   large positives (\code{log(200) ≈ 5.3}), which leaves the Hessian
+#'   poorly conditioned and slows down NLopt / BFGS / Gauss-Newton. With
+#'   \code{scale_params = TRUE} each coordinate is divided by
+#'   \code{|x0[i]|} (when \code{|x0[i]| > 0.1}, otherwise by \code{1.0}), so
+#'   the optimizer works in a near-unit-magnitude space. The scale is
+#'   computed once from the initial point and held fixed for the entire run.
+#'
+#'   \strong{When to set \code{FALSE}.} Mathematically the scaling is
+#'   transparent — the OFV, estimates, standard errors, and diagnostics
+#'   should match the unscaled fit to numerical tolerance. Set
+#'   \code{scale_params = FALSE} to:
+#'   \itemize{
+#'     \item reproduce the bit-exact iteration trajectory of a pre-scaling
+#'       fit (e.g. when comparing against a baseline produced by an older
+#'       \code{ferx} build),
+#'     \item debug suspected scaling-related issues by toggling the layer
+#'       off without changing anything else,
+#'     \item validate that scaled and unscaled fits land on the same
+#'       optimum on a new model.
+#'   }
+#'
+#'   Applies to all outer optimizers: NLopt FOCE/FOCEI (BOBYQA, SLSQP,
+#'   L-BFGS, MMA), the hand-rolled BFGS, Gauss-Newton / BHHH, and the SAEM
+#'   M-step.
 #' @param settings Optional named list of estimation-method-specific options
 #'   forwarded to the Rust \code{FitOptions}. Use this to tune knobs that do
 #'   not have a dedicated \code{ferx_fit()} argument, without needing a new
@@ -291,6 +323,7 @@ ferx_fit <- function(model, data,
   }
   settings_parts <- .ferx_settings_to_strings(settings)
 
+  fit_started_at <- Sys.time()
   raw <- ferx_rust_fit(
     model_path = normalizePath(model),
     data_path = normalizePath(data),
@@ -353,6 +386,10 @@ ferx_fit <- function(model, data,
   tp <- result$trace_path
   if (is.null(tp) || length(tp) == 0L || !nzchar(tp[[1L]])) {
     result$trace_path <- NULL
+  } else {
+    .ferx_state$last_trace_path  <- result$trace_path
+    .ferx_state$last_trace_time  <- fit_started_at
+    .ferx_state$last_trace_model <- model
   }
 
   # Normalize shrinkage: NaN → NA (consistent with other optional numerics)
