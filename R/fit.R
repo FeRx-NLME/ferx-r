@@ -306,6 +306,7 @@ ferx_fit <- function(model, data,
   }
   settings_parts <- .ferx_settings_to_strings(settings)
 
+  fit_started_at <- Sys.time()
   raw <- ferx_rust_fit(
     model_path = normalizePath(model),
     data_path = normalizePath(data),
@@ -368,6 +369,10 @@ ferx_fit <- function(model, data,
   tp <- result$trace_path
   if (is.null(tp) || length(tp) == 0L || !nzchar(tp[[1L]])) {
     result$trace_path <- NULL
+  } else {
+    .ferx_state$last_trace_path  <- result$trace_path
+    .ferx_state$last_trace_time  <- fit_started_at
+    .ferx_state$last_trace_model <- model
   }
 
   # Clean up internal fields
