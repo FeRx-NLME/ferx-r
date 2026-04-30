@@ -613,6 +613,28 @@ fn fit_result_to_list(result: &FitResult, population: &Population) -> List {
         None => ().into(),
     };
 
+    // Full parameter covariance matrix (row-major flat); empty when not computed
+    let (cov_matrix_flat, cov_matrix_dim): (Vec<f64>, i32) =
+        match &result.covariance_matrix {
+            Some(m) => {
+                let n = m.nrows();
+                let mut v = Vec::with_capacity(n * n);
+                for i in 0..n {
+                    for j in 0..n {
+                        v.push(m[(i, j)]);
+                    }
+                }
+                (v, n as i32)
+            }
+            None => (Vec::new(), 0i32),
+        };
+
+    let covariance_status_str = match result.covariance_status {
+        CovarianceStatus::Computed => "computed",
+        CovarianceStatus::Failed => "failed",
+        CovarianceStatus::NotRequested => "not_requested",
+    };
+
     list!(
         converged = result.converged,
         method = method_label,
@@ -638,7 +660,18 @@ fn fit_result_to_list(result: &FitResult, population: &Population) -> List {
         sir_ci_theta = sir_ci_theta,
         sir_ci_omega = sir_ci_omega,
         sir_ci_sigma = sir_ci_sigma,
-        trace_path = trace_path
+        trace_path = trace_path,
+        ebe_convergence_warnings = result.ebe_convergence_warnings as i32,
+        max_unconverged_subjects = result.max_unconverged_subjects as i32,
+        total_ebe_fallbacks = result.total_ebe_fallbacks as i32,
+        covariance_status = covariance_status_str,
+        shrinkage_eta = result.shrinkage_eta.clone(),
+        shrinkage_eps = result.shrinkage_eps,
+        wall_time_secs = result.wall_time_secs,
+        model_name = result.model_name.clone(),
+        ferx_version = result.ferx_version.clone(),
+        cov_matrix = cov_matrix_flat,
+        cov_matrix_dim = cov_matrix_dim
     )
 }
 

@@ -166,6 +166,23 @@
 #'     in a single outer iteration.}
 #'   \item{total_ebe_fallbacks}{Total Nelder-Mead fallback invocations across
 #'     all subjects and iterations.}
+#'   \item{covariance_status}{String: \code{"computed"}, \code{"failed"}, or
+#'     \code{"not_requested"}.}
+#'   \item{shrinkage_eta}{Numeric vector of ETA shrinkage per random effect
+#'     (\code{1 - SD(eta_hat_k) / sqrt(omega_kk)}). \code{NA} when
+#'     \code{omega_kk = 0} or fewer than 2 subjects.}
+#'   \item{shrinkage_eps}{EPS shrinkage: \code{1 - SD(IWRES)}. \code{NA} when
+#'     fewer than 2 valid residuals.}
+#'   \item{wall_time_secs}{Total wall-clock time for the fit in seconds.}
+#'   \item{model_name}{Model name from the \code{.ferx} file.}
+#'   \item{ferx_version}{ferx-nlme library version string.}
+#'   \item{cov_matrix}{Full parameter covariance matrix as a named numeric
+#'     matrix (params × params). \code{NULL} when covariance step was not run
+#'     or failed. Use \code{\link{ferx_cor_matrix}} to inspect correlations.}
+#'   \item{eta_normality}{Data frame with Shapiro-Wilk normality test for each
+#'     ETA: columns \code{eta}, \code{W}, \code{p_val}, \code{flag}. A
+#'     \code{[!]} flag appears when \code{p < 0.05}. \code{NULL} when fewer
+#'     than 3 subjects or no ETA columns in \code{sdtab}.}
 #'
 #' @examples
 #' \dontrun{
@@ -375,6 +392,69 @@ ferx_fit <- function(model, data,
     .ferx_state$last_trace_model <- model
   }
 
+  # Normalize shrinkage: NaN → NA (consistent with other optional numerics)
+  if (!is.null(result$shrinkage_eta)) {
+    result$shrinkage_eta[!is.finite(result$shrinkage_eta)] <- NA_real_
+  }
+  if (!is.null(result$shrinkage_eps) && !is.finite(result$shrinkage_eps)) {
+    result$shrinkage_eps <- NA_real_
+  }
+
+  # Normalize covariance_status: missing from older binaries → "not_requested"
+  if (is.null(result$covariance_status)) {
+    result$covariance_status <- "not_requested"
+  }
+
+  # Reshape cov_matrix into a named square matrix (param × param)
+  d <- result$cov_matrix_dim %||% 0L
+  if (!is.null(result$cov_matrix) && length(result$cov_matrix) > 0L && d > 0L) {
+    m <- matrix(result$cov_matrix, nrow = d, ncol = d, byrow = TRUE)
+    n_theta  <- length(result$theta_names)
+    n_eta    <- result$omega_dim %||% 0L
+    n_sigma  <- length(result$sigma)
+    n_omega_packed <- d - n_theta - n_sigma
+    # Determine parameterisation: diagonal (n_omega_packed == n_eta) or block
+    omega_names <- if (n_omega_packed == n_eta) {
+      paste0("OMEGA(", seq_len(n_eta), ",", seq_len(n_eta), ")")
+    } else {
+      # Block lower-triangle: L(i,j) for i >= j, column-major
+      nm <- character(n_omega_packed)
+      k  <- 0L
+      for (i in seq_len(n_eta)) {
+        for (j in seq_len(i)) {
+          k <- k + 1L
+          nm[k] <- sprintf("OMEGA_L(%d,%d)", i, j)
+        }
+      }
+      nm
+    }
+    pnames <- c(
+      result$theta_names,
+      if (n_omega_packed > 0L) omega_names else character(0L),
+      if (n_sigma > 0L) paste0("SIGMA(", seq_len(n_sigma), ")") else character(0L)
+    )
+    if (length(pnames) == d) rownames(m) <- colnames(m) <- pnames
+    result$cov_matrix <- m
+  } else {
+    result$cov_matrix <- NULL
+  }
+  result$cov_matrix_dim <- NULL
+
+  # ETA normality (Shapiro-Wilk) — computed in R from sdtab EBEs
+  result$eta_normality <- .ferx_compute_eta_normality(result$sdtab)
+  # Push normality warnings into the warnings vector
+  if (!is.null(result$eta_normality)) {
+    for (i in seq_len(nrow(result$eta_normality))) {
+      row <- result$eta_normality[i, ]
+      if (nzchar(row$flag) && !is.na(row$p_val)) {
+        result$warnings <- c(
+          result$warnings,
+          sprintf("%s Shapiro-Wilk p=%.4f — distribution may be non-normal", row$eta, row$p_val)
+        )
+      }
+    }
+  }
+
   # Clean up internal fields
   result$theta_names <- NULL
   result$omega_dim <- NULL
@@ -388,6 +468,28 @@ ferx_fit <- function(model, data,
 
   class(result) <- "ferx_fit"
   result
+}
+
+# Compute Shapiro-Wilk normality test for each ETA, one row per ID.
+# Returns a data.frame with columns: eta, W, p_val, flag.
+.ferx_compute_eta_normality <- function(sdtab) {
+  if (is.null(sdtab) || !is.data.frame(sdtab)) return(NULL)
+  eta_cols <- grep("^ETA", names(sdtab), value = TRUE)
+  if (length(eta_cols) == 0L) return(NULL)
+  id_col   <- if ("ID" %in% names(sdtab)) "ID" else names(sdtab)[1L]
+  one_per  <- sdtab[!duplicated(sdtab[[id_col]]), eta_cols, drop = FALSE]
+  do.call(rbind, lapply(eta_cols, function(col) {
+    vals <- one_per[[col]]
+    vals <- vals[is.finite(vals)]
+    if (length(vals) < 3L) {
+      return(data.frame(eta = col, W = NA_real_, p_val = NA_real_, flag = "",
+                        stringsAsFactors = FALSE))
+    }
+    sw  <- shapiro.test(vals)
+    flg <- if (sw$p.value < 0.05) "[!]" else ""
+    data.frame(eta = col, W = round(as.numeric(sw$statistic), 3),
+               p_val = round(sw$p.value, 4), flag = flg, stringsAsFactors = FALSE)
+  }))
 }
 
 #' @export
@@ -501,12 +603,116 @@ print.ferx_fit <- function(x, ...) {
     print_ci(x$sir_ci_sigma)
   }
 
+  # Shrinkage
+  has_shrinkage <- (!is.null(x$shrinkage_eta) && any(!is.na(x$shrinkage_eta))) ||
+                   (!is.null(x$shrinkage_eps) && !is.na(x$shrinkage_eps))
+  if (has_shrinkage) {
+    cat("\n--- Shrinkage ---\n")
+    if (!is.null(x$shrinkage_eta)) {
+      for (k in seq_along(x$shrinkage_eta)) {
+        sh <- x$shrinkage_eta[k]
+        if (!is.na(sh)) cat(sprintf("  ETA%d shrinkage: %.1f%%\n", k, sh * 100))
+      }
+    }
+    if (!is.null(x$shrinkage_eps) && !is.na(x$shrinkage_eps)) {
+      cat(sprintf("  EPS shrinkage:  %.1f%%\n", x$shrinkage_eps * 100))
+    }
+  }
+
+  # Run info
+  cov_status <- if (!is.null(x$covariance_status)) x$covariance_status else "unknown"
+  cov_str <- switch(cov_status,
+    computed      = "computed",
+    failed        = "FAILED",
+    not_requested = "not requested",
+    cov_status
+  )
+  cat("\n--- Run Info ---\n")
+  cat("  Covariance:", cov_str, "\n")
+  if (!is.null(x$wall_time_secs)) {
+    cat(sprintf("  Wall time:  %.1fs\n", x$wall_time_secs))
+  }
+  if (!is.null(x$ferx_version)) {
+    cat("  ferx v", x$ferx_version, "\n", sep = "")
+  }
+
   if (length(x$warnings) > 0) {
     cat("\n--- Warnings ---\n")
     for (w in x$warnings) cat("  *", w, "\n")
   }
 
   cat(bar, "\n", sep = "")
+  invisible(x)
+}
+
+#' Summarize a ferx fit result
+#'
+#' Returns a compact list with the most-used diagnostic fields: OFV/AIC/BIC,
+#' parameter estimates, standard errors, shrinkage, and run metadata.
+#'
+#' @param object A `ferx_fit` object returned by \code{\link{ferx_fit}}.
+#' @param ... Ignored.
+#' @return A `ferx_summary` list (invisibly). Print method formats the output.
+#' @export
+summary.ferx_fit <- function(object, ...) {
+  x <- object
+  s <- list(
+    model_name      = x$model_name %||% NA_character_,
+    method          = x$method,
+    converged       = x$converged,
+    ofv             = x$ofv,
+    aic             = x$aic,
+    bic             = x$bic,
+    n_subjects      = x$n_subjects,
+    n_obs           = x$n_obs,
+    n_parameters    = x$n_parameters,
+    n_iterations    = x$n_iterations,
+    theta           = x$theta,
+    se_theta        = x$se_theta,
+    omega           = x$omega,
+    se_omega        = x$se_omega,
+    sigma           = x$sigma,
+    se_sigma        = x$se_sigma,
+    shrinkage_eta   = x$shrinkage_eta,
+    shrinkage_eps   = x$shrinkage_eps,
+    covariance_status = x$covariance_status,
+    wall_time_secs  = x$wall_time_secs,
+    ferx_version    = x$ferx_version,
+    ebe_convergence_warnings = x$ebe_convergence_warnings,
+    max_unconverged_subjects = x$max_unconverged_subjects,
+    total_ebe_fallbacks      = x$total_ebe_fallbacks
+  )
+  class(s) <- "ferx_summary"
+  s
+}
+
+`%||%` <- function(a, b) if (!is.null(a)) a else b
+
+#' @export
+print.ferx_summary <- function(x, ...) {
+  cat(sprintf("ferx %s — %s\n", x$ferx_version %||% "?", toupper(x$method)))
+  cat(sprintf("Model: %s  |  Converged: %s\n",
+              x$model_name %||% "?",
+              if (isTRUE(x$converged)) "YES" else "NO"))
+  cat(sprintf("OFV: %.4f  AIC: %.4f  BIC: %.4f\n", x$ofv, x$aic, x$bic))
+  cat(sprintf("Subjects: %d  Obs: %d  Params: %d  Iter: %d\n",
+              x$n_subjects, x$n_obs, x$n_parameters %||% NA, x$n_iterations))
+
+  if (!is.null(x$shrinkage_eta) && any(!is.na(x$shrinkage_eta))) {
+    sh_str <- paste(sprintf("ETA%d=%.1f%%", seq_along(x$shrinkage_eta),
+                            x$shrinkage_eta * 100), collapse = "  ")
+    cat("Shrinkage:", sh_str, "\n")
+  }
+  if (!is.null(x$shrinkage_eps) && !is.na(x$shrinkage_eps)) {
+    cat(sprintf("EPS shrinkage: %.1f%%\n", x$shrinkage_eps * 100))
+  }
+
+  cov_str <- switch(x$covariance_status %||% "unknown",
+    computed = "computed", failed = "FAILED", not_requested = "not requested",
+    x$covariance_status)
+  wall <- if (!is.null(x$wall_time_secs)) sprintf("%.1fs", x$wall_time_secs) else "?"
+  cat(sprintf("Covariance: %s  |  Wall time: %s\n", cov_str, wall))
+
   invisible(x)
 }
 

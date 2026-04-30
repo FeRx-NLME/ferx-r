@@ -42,11 +42,27 @@ all: C_clean
 
 $(SHLIB): $(STATLIB)
 
+# If a sibling ../ferx-nlme/ checkout exists alongside the R package, use it
+# as a cargo path override so local changes are picked up without editing
+# Cargo.toml. Falls back to the git dependency declared in src/rust/Cargo.toml
+# when the sibling checkout is absent (e.g. fresh installs).
+LOCAL_FERX_NLME := $(wildcard ../../ferx-nlme/Cargo.toml)
+
 $(STATLIB):
 	@# Ensure .cargo/config.toml and rust-toolchain.toml exist (R CMD INSTALL
 	@# strips hidden directories and these files are needed by cargo).
 	@mkdir -p rust/.cargo
-	@echo '[build]' > rust/.cargo/config.toml
+	@: > rust/.cargo/config.toml
+ifneq ($(LOCAL_FERX_NLME),)
+	@# `paths` is a top-level key, so it must be written BEFORE any [section]
+	@# header — otherwise TOML scopes it inside that section and cargo
+	@# silently ignores it. The path is resolved relative to cargo's working
+	@# directory (rust/), so ../../../ferx-nlme reaches the sibling of the
+	@# R package root.
+	@echo 'paths = ["../../../ferx-nlme"]' >> rust/.cargo/config.toml
+	@echo "ferx: using local ../ferx-nlme checkout (cargo paths override)"
+endif
+	@echo '[build]' >> rust/.cargo/config.toml
 ifeq ($(FERX_NO_AUTODIFF),1)
 	@echo '[toolchain]' > rust/rust-toolchain.toml
 	@echo 'channel = "$(HOST_TOOLCHAIN_CHANNEL)"' >> rust/rust-toolchain.toml
