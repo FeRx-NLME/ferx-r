@@ -189,6 +189,7 @@ dependencies = [
 [[package]]
 name = "ferx-nlme"
 version = "0.1.0"
+source = "git+https://github.com/InsightRX/ferx-nlme?branch=main#a2fbd441068b100216faa1d88a9d2923bf92fb49"
 dependencies = [
  "argmin",
  "argmin-math",

@@ -81,6 +81,43 @@
 #'   \code{covariance = TRUE}. Tuning knobs (\code{sir_samples},
 #'   \code{sir_resamples}, \code{sir_seed}) still flow through
 #'   \code{settings}. Default \code{FALSE}.
+#' @param optimizer_trace Logical. If \code{TRUE}, write a per-iteration CSV
+#'   trace to a temporary file and store its path in \code{fit$trace_path}.
+#'   Pass the result to \code{\link{ferx_read_trace}} or
+#'   \code{\link{ferx_plot_trace}} to inspect optimizer progress. Default
+#'   \code{FALSE}.
+#' @param scale_params Logical. If \code{TRUE} (default), apply a per-coordinate
+#'   scaling layer on top of the existing log/Cholesky parameterization so
+#'   that every transformed parameter the outer optimizer sees is O(1).
+#'
+#'   \strong{Why it helps.} Population PK parameters often differ by orders
+#'   of magnitude on the natural scale (e.g. \code{CL = 0.0015}, \code{V =
+#'   200}, \code{Ka = 0.8}). Even after the log transform, the packed
+#'   optimizer vector mixes large negatives (\code{log(0.0015) ≈ -6.5}) with
+#'   large positives (\code{log(200) ≈ 5.3}), which leaves the Hessian
+#'   poorly conditioned and slows down NLopt / BFGS / Gauss-Newton. With
+#'   \code{scale_params = TRUE} each coordinate is divided by
+#'   \code{|x0[i]|} (when \code{|x0[i]| > 0.1}, otherwise by \code{1.0}), so
+#'   the optimizer works in a near-unit-magnitude space. The scale is
+#'   computed once from the initial point and held fixed for the entire run.
+#'
+#'   \strong{When to set \code{FALSE}.} Mathematically the scaling is
+#'   transparent — the OFV, estimates, standard errors, and diagnostics
+#'   should match the unscaled fit to numerical tolerance. Set
+#'   \code{scale_params = FALSE} to:
+#'   \itemize{
+#'     \item reproduce the bit-exact iteration trajectory of a pre-scaling
+#'       fit (e.g. when comparing against a baseline produced by an older
+#'       \code{ferx} build),
+#'     \item debug suspected scaling-related issues by toggling the layer
+#'       off without changing anything else,
+#'     \item validate that scaled and unscaled fits land on the same
+#'       optimum on a new model.
+#'   }
+#'
+#'   Applies to all outer optimizers: NLopt FOCE/FOCEI (BOBYQA, SLSQP,
+#'   L-BFGS, MMA), the hand-rolled BFGS, Gauss-Newton / BHHH, and the SAEM
+#'   M-step.
 #' @param settings Optional named list of estimation-method-specific options
 #'   forwarded to the Rust \code{FitOptions}. Use this to tune knobs that do
 #'   not have a dedicated \code{ferx_fit()} argument, without needing a new
@@ -120,12 +157,43 @@
 #'   \item{sir_ess}{SIR effective sample size (NULL if SIR not run)}
 #'   \item{sir_ci_theta, sir_ci_omega, sir_ci_sigma}{SIR 95\% CI matrices
 #'     with columns \code{lower} and \code{upper} (NULL if SIR not run)}
-#'   \item{omega_iov}{IOV variance matrix for kappa parameters (NULL if no IOV)}
-#'   \item{kappa_names}{Names of kappa (IOV) parameters (NULL if no IOV)}
-#'   \item{se_kappa}{Standard errors for kappa parameters: length \code{d} (diagonal kappa) or \code{d*(d+1)/2} (block_kappa, lower-triangle order). NULL if covariance step not run or no IOV.}
-#'   \item{shrinkage_kappa}{Shrinkage values for kappa EBEs (NULL if no IOV)}
-#'   \item{ebe_kappas}{Data frame with columns ID, OCC, and one column per kappa parameter
-#'     containing per-subject per-occasion kappa EBEs (NULL if no IOV)}
+#'   \item{trace_path}{Path to the optimizer trace CSV, or \code{NULL} when
+#'     \code{optimizer_trace = FALSE}. Pass to \code{\link{ferx_read_trace}}
+#'     or \code{\link{ferx_plot_trace}}.}
+#'   \item{ebe_convergence_warnings}{Number of outer iterations in which too
+#'     many EBEs were unconverged (step was rejected by the guard).}
+#'   \item{max_unconverged_subjects}{Worst-case number of unconverged subjects
+#'     in a single outer iteration.}
+#'   \item{total_ebe_fallbacks}{Total Nelder-Mead fallback invocations across
+#'     all subjects and iterations.}
+#'   \item{covariance_status}{String: \code{"computed"}, \code{"failed"}, or
+#'     \code{"not_requested"}.}
+#'   \item{shrinkage_eta}{Numeric vector of ETA shrinkage per random effect
+#'     (\code{1 - SD(eta_hat_k) / sqrt(omega_kk)}). \code{NA} when
+#'     \code{omega_kk = 0} or fewer than 2 subjects.}
+#'   \item{shrinkage_eps}{EPS shrinkage: \code{1 - SD(IWRES)}. \code{NA} when
+#'     fewer than 2 valid residuals.}
+#'   \item{wall_time_secs}{Total wall-clock time for the fit in seconds.}
+#'   \item{model_name}{Model name from the \code{.ferx} file.}
+#'   \item{ferx_version}{ferx-nlme library version string.}
+#'   \item{cov_matrix}{Full parameter covariance matrix as a named numeric
+#'     matrix (params × params). \code{NULL} when covariance step was not run
+#'     or failed. Use \code{\link{ferx_cor_matrix}} to inspect correlations.}
+#'   \item{eta_normality}{Data frame with Shapiro-Wilk normality test for each
+#'     ETA: columns \code{eta}, \code{W}, \code{p_val}, \code{flag}. A
+#'     \code{[!]} flag appears when \code{p < 0.05}. \code{NULL} when fewer
+#'     than 3 subjects or no ETA columns in \code{sdtab}.}
+#'   \item{omega_iov}{IOV variance matrix for kappa parameters (\code{NULL} if no IOV).}
+#'   \item{kappa_names}{Names of kappa (IOV) parameters (\code{NULL} if no IOV).}
+#'   \item{se_kappa}{Standard errors for kappa parameters: length \code{d}
+#'     (diagonal kappa) or \code{d*(d+1)/2} (block_kappa, lower-triangle order).
+#'     \code{NULL} if covariance step not run or no IOV.}
+#'   \item{shrinkage_kappa}{Shrinkage values for kappa EBEs (\code{NULL} if no IOV).}
+#'   \item{ebe_kappas}{Data frame with columns \code{ID}, \code{OCC}, and one
+#'     column per kappa parameter containing per-subject per-occasion kappa
+#'     EBEs. \code{ID} carries the original subject identifier (matching
+#'     \code{sdtab}); \code{OCC} carries the labeled occasion in first-seen
+#'     order. \code{NULL} when no IOV.}
 #'
 #' @examples
 #' \dontrun{
@@ -180,6 +248,10 @@ ferx_fit <- function(model, data,
                      mu_referencing = TRUE,
                      sir = FALSE,
                      gradient = c("auto", "ad", "fd"),
+                     optimizer_trace = FALSE,
+                     scale_params = TRUE,
+                     max_unconverged_frac = NULL,
+                     min_obs_for_convergence_check = NULL,
                      settings = NULL) {
   gradient <- match.arg(gradient)
   stopifnot(file.exists(model), file.exists(data))
@@ -224,8 +296,45 @@ ferx_fit <- function(model, data,
     threads_arg <- as.integer(threads)
   }
 
+  if (!is.logical(optimizer_trace) || length(optimizer_trace) != 1L || is.na(optimizer_trace)) {
+    stop("`optimizer_trace` must be TRUE or FALSE")
+  }
+  if (!is.logical(scale_params) || length(scale_params) != 1L || is.na(scale_params)) {
+    stop("`scale_params` must be TRUE or FALSE")
+  }
+  # Merge optimizer_trace into settings so apply_fit_option handles it on the
+  # Rust side (it's already in framework_keys()).  User-supplied settings take
+  # precedence if somehow duplicated, which Rust will reject as a duplicate key
+  # — but we forbid that below via the RESERVED list.
+  if (isTRUE(optimizer_trace)) {
+    settings <- c(list(optimizer_trace = TRUE), settings)
+  }
+  # Only inject scale_params when FALSE — the Rust default is true, so omitting
+  # it preserves the behaviour callers expect when they don't pass the argument.
+  if (isFALSE(scale_params)) {
+    settings <- c(list(scale_params = FALSE), settings)
+  }
+  if (!is.null(max_unconverged_frac)) {
+    if (!is.numeric(max_unconverged_frac) || length(max_unconverged_frac) != 1L ||
+        !is.finite(max_unconverged_frac) || max_unconverged_frac < 0 || max_unconverged_frac > 1) {
+      stop("`max_unconverged_frac` must be a numeric scalar between 0 and 1")
+    }
+    settings <- c(list(max_unconverged_frac = max_unconverged_frac), settings)
+  }
+  if (!is.null(min_obs_for_convergence_check)) {
+    if (!is.numeric(min_obs_for_convergence_check) ||
+        length(min_obs_for_convergence_check) != 1L ||
+        !is.finite(min_obs_for_convergence_check) ||
+        min_obs_for_convergence_check != as.integer(min_obs_for_convergence_check) ||
+        min_obs_for_convergence_check < 0L) {
+      stop("`min_obs_for_convergence_check` must be a non-negative integer scalar")
+    }
+    settings <- c(list(min_obs_for_convergence_check = as.integer(min_obs_for_convergence_check)),
+                  settings)
+  }
   settings_parts <- .ferx_settings_to_strings(settings)
 
+  fit_started_at <- Sys.time()
   raw <- ferx_rust_fit(
     model_path = normalizePath(model),
     data_path = normalizePath(data),
@@ -284,6 +393,79 @@ ferx_fit <- function(model, data,
   sig_names <- paste0("SIGMA(", seq_along(result$sigma), ")")
   result$sir_ci_sigma <- reshape_ci(result$sir_ci_sigma, sig_names)
 
+  # Normalize trace_path: NULL/empty means no trace was written
+  tp <- result$trace_path
+  if (is.null(tp) || length(tp) == 0L || !nzchar(tp[[1L]])) {
+    result$trace_path <- NULL
+  } else {
+    .ferx_state$last_trace_path  <- result$trace_path
+    .ferx_state$last_trace_time  <- fit_started_at
+    .ferx_state$last_trace_model <- model
+  }
+
+  # Normalize shrinkage: NaN → NA (consistent with other optional numerics)
+  if (!is.null(result$shrinkage_eta)) {
+    result$shrinkage_eta[!is.finite(result$shrinkage_eta)] <- NA_real_
+  }
+  if (!is.null(result$shrinkage_eps) && !is.finite(result$shrinkage_eps)) {
+    result$shrinkage_eps <- NA_real_
+  }
+
+  # Normalize covariance_status: missing from older binaries → "not_requested"
+  if (is.null(result$covariance_status)) {
+    result$covariance_status <- "not_requested"
+  }
+
+  # Reshape cov_matrix into a named square matrix (param × param)
+  d <- result$cov_matrix_dim %||% 0L
+  if (!is.null(result$cov_matrix) && length(result$cov_matrix) > 0L && d > 0L) {
+    m <- matrix(result$cov_matrix, nrow = d, ncol = d, byrow = TRUE)
+    n_theta  <- length(result$theta_names)
+    n_eta    <- result$omega_dim %||% 0L
+    n_sigma  <- length(result$sigma)
+    n_omega_packed <- d - n_theta - n_sigma
+    # Determine parameterisation: diagonal (n_omega_packed == n_eta) or block
+    omega_names <- if (n_omega_packed == n_eta) {
+      paste0("OMEGA(", seq_len(n_eta), ",", seq_len(n_eta), ")")
+    } else {
+      # Block lower-triangle: L(i,j) for i >= j, column-major
+      nm <- character(n_omega_packed)
+      k  <- 0L
+      for (i in seq_len(n_eta)) {
+        for (j in seq_len(i)) {
+          k <- k + 1L
+          nm[k] <- sprintf("OMEGA_L(%d,%d)", i, j)
+        }
+      }
+      nm
+    }
+    pnames <- c(
+      result$theta_names,
+      if (n_omega_packed > 0L) omega_names else character(0L),
+      if (n_sigma > 0L) paste0("SIGMA(", seq_len(n_sigma), ")") else character(0L)
+    )
+    if (length(pnames) == d) rownames(m) <- colnames(m) <- pnames
+    result$cov_matrix <- m
+  } else {
+    result$cov_matrix <- NULL
+  }
+  result$cov_matrix_dim <- NULL
+
+  # ETA normality (Shapiro-Wilk) — computed in R from sdtab EBEs
+  result$eta_normality <- .ferx_compute_eta_normality(result$sdtab)
+  # Push normality warnings into the warnings vector
+  if (!is.null(result$eta_normality)) {
+    for (i in seq_len(nrow(result$eta_normality))) {
+      row <- result$eta_normality[i, ]
+      if (nzchar(row$flag) && !is.na(row$p_val)) {
+        result$warnings <- c(
+          result$warnings,
+          sprintf("%s Shapiro-Wilk p=%.4f — distribution may be non-normal", row$eta, row$p_val)
+        )
+      }
+    }
+  }
+
   # Reshape omega_iov into a named matrix (NULL when no IOV)
   d_iov <- result$omega_iov_dim %||% 0L
   if (!is.null(result$omega_iov) && length(result$omega_iov) > 0L && d_iov > 0L) {
@@ -339,6 +521,28 @@ ferx_fit <- function(model, data,
 
   class(result) <- "ferx_fit"
   result
+}
+
+# Compute Shapiro-Wilk normality test for each ETA, one row per ID.
+# Returns a data.frame with columns: eta, W, p_val, flag.
+.ferx_compute_eta_normality <- function(sdtab) {
+  if (is.null(sdtab) || !is.data.frame(sdtab)) return(NULL)
+  eta_cols <- grep("^ETA", names(sdtab), value = TRUE)
+  if (length(eta_cols) == 0L) return(NULL)
+  id_col   <- if ("ID" %in% names(sdtab)) "ID" else names(sdtab)[1L]
+  one_per  <- sdtab[!duplicated(sdtab[[id_col]]), eta_cols, drop = FALSE]
+  do.call(rbind, lapply(eta_cols, function(col) {
+    vals <- one_per[[col]]
+    vals <- vals[is.finite(vals)]
+    if (length(vals) < 3L) {
+      return(data.frame(eta = col, W = NA_real_, p_val = NA_real_, flag = "",
+                        stringsAsFactors = FALSE))
+    }
+    sw  <- shapiro.test(vals)
+    flg <- if (sw$p.value < 0.05) "[!]" else ""
+    data.frame(eta = col, W = round(as.numeric(sw$statistic), 3),
+               p_val = round(sw$p.value, 4), flag = flg, stringsAsFactors = FALSE)
+  }))
 }
 
 #' @export
@@ -505,12 +709,116 @@ print.ferx_fit <- function(x, ...) {
     print_ci(x$sir_ci_sigma)
   }
 
+  # Shrinkage
+  has_shrinkage <- (!is.null(x$shrinkage_eta) && any(!is.na(x$shrinkage_eta))) ||
+                   (!is.null(x$shrinkage_eps) && !is.na(x$shrinkage_eps))
+  if (has_shrinkage) {
+    cat("\n--- Shrinkage ---\n")
+    if (!is.null(x$shrinkage_eta)) {
+      for (k in seq_along(x$shrinkage_eta)) {
+        sh <- x$shrinkage_eta[k]
+        if (!is.na(sh)) cat(sprintf("  ETA%d shrinkage: %.1f%%\n", k, sh * 100))
+      }
+    }
+    if (!is.null(x$shrinkage_eps) && !is.na(x$shrinkage_eps)) {
+      cat(sprintf("  EPS shrinkage:  %.1f%%\n", x$shrinkage_eps * 100))
+    }
+  }
+
+  # Run info
+  cov_status <- if (!is.null(x$covariance_status)) x$covariance_status else "unknown"
+  cov_str <- switch(cov_status,
+    computed      = "computed",
+    failed        = "FAILED",
+    not_requested = "not requested",
+    cov_status
+  )
+  cat("\n--- Run Info ---\n")
+  cat("  Covariance:", cov_str, "\n")
+  if (!is.null(x$wall_time_secs)) {
+    cat(sprintf("  Wall time:  %.1fs\n", x$wall_time_secs))
+  }
+  if (!is.null(x$ferx_version)) {
+    cat("  ferx v", x$ferx_version, "\n", sep = "")
+  }
+
   if (length(x$warnings) > 0) {
     cat("\n--- Warnings ---\n")
     for (w in x$warnings) cat("  *", w, "\n")
   }
 
   cat(bar, "\n", sep = "")
+  invisible(x)
+}
+
+#' Summarize a ferx fit result
+#'
+#' Returns a compact list with the most-used diagnostic fields: OFV/AIC/BIC,
+#' parameter estimates, standard errors, shrinkage, and run metadata.
+#'
+#' @param object A `ferx_fit` object returned by \code{\link{ferx_fit}}.
+#' @param ... Ignored.
+#' @return A `ferx_summary` list (invisibly). Print method formats the output.
+#' @export
+summary.ferx_fit <- function(object, ...) {
+  x <- object
+  s <- list(
+    model_name      = x$model_name %||% NA_character_,
+    method          = x$method,
+    converged       = x$converged,
+    ofv             = x$ofv,
+    aic             = x$aic,
+    bic             = x$bic,
+    n_subjects      = x$n_subjects,
+    n_obs           = x$n_obs,
+    n_parameters    = x$n_parameters,
+    n_iterations    = x$n_iterations,
+    theta           = x$theta,
+    se_theta        = x$se_theta,
+    omega           = x$omega,
+    se_omega        = x$se_omega,
+    sigma           = x$sigma,
+    se_sigma        = x$se_sigma,
+    shrinkage_eta   = x$shrinkage_eta,
+    shrinkage_eps   = x$shrinkage_eps,
+    covariance_status = x$covariance_status,
+    wall_time_secs  = x$wall_time_secs,
+    ferx_version    = x$ferx_version,
+    ebe_convergence_warnings = x$ebe_convergence_warnings,
+    max_unconverged_subjects = x$max_unconverged_subjects,
+    total_ebe_fallbacks      = x$total_ebe_fallbacks
+  )
+  class(s) <- "ferx_summary"
+  s
+}
+
+`%||%` <- function(a, b) if (!is.null(a)) a else b
+
+#' @export
+print.ferx_summary <- function(x, ...) {
+  cat(sprintf("ferx %s — %s\n", x$ferx_version %||% "?", toupper(x$method)))
+  cat(sprintf("Model: %s  |  Converged: %s\n",
+              x$model_name %||% "?",
+              if (isTRUE(x$converged)) "YES" else "NO"))
+  cat(sprintf("OFV: %.4f  AIC: %.4f  BIC: %.4f\n", x$ofv, x$aic, x$bic))
+  cat(sprintf("Subjects: %d  Obs: %d  Params: %d  Iter: %d\n",
+              x$n_subjects, x$n_obs, x$n_parameters %||% NA, x$n_iterations))
+
+  if (!is.null(x$shrinkage_eta) && any(!is.na(x$shrinkage_eta))) {
+    sh_str <- paste(sprintf("ETA%d=%.1f%%", seq_along(x$shrinkage_eta),
+                            x$shrinkage_eta * 100), collapse = "  ")
+    cat("Shrinkage:", sh_str, "\n")
+  }
+  if (!is.null(x$shrinkage_eps) && !is.na(x$shrinkage_eps)) {
+    cat(sprintf("EPS shrinkage: %.1f%%\n", x$shrinkage_eps * 100))
+  }
+
+  cov_str <- switch(x$covariance_status %||% "unknown",
+    computed = "computed", failed = "FAILED", not_requested = "not requested",
+    x$covariance_status)
+  wall <- if (!is.null(x$wall_time_secs)) sprintf("%.1fs", x$wall_time_secs) else "?"
+  cat(sprintf("Covariance: %s  |  Wall time: %s\n", cov_str, wall))
+
   invisible(x)
 }
 
