@@ -185,7 +185,7 @@ A list with components:
 \item{se_theta}{Standard errors for theta (NULL if covariance step failed)}
 \item{se_omega}{Standard errors for omega diagonal}
 \item{se_sigma}{Standard errors for sigma}
-\item{sdtab}{Data frame with ID, TIME, DV, PRED, IPRED, CWRES, IWRES, ETA1..n}
+\item{sdtab}{Data frame with ID, TIME, DV, PRED, IPRED, CWRES, IWRES, ETA1..n, OCC (if IOV)}
 \item{warnings}{Character vector of warnings}
 \item{sir_ess}{SIR effective sample size (NULL if SIR not run)}
 \item{sir_ci_theta, sir_ci_omega, sir_ci_sigma}{SIR 95\\% CI matrices
@@ -199,6 +199,34 @@ many EBEs were unconverged (step was rejected by the guard).}
 in a single outer iteration.}
 \item{total_ebe_fallbacks}{Total Nelder-Mead fallback invocations across
 all subjects and iterations.}
+\item{covariance_status}{String: \code{"computed"}, \code{"failed"}, or
+\code{"not_requested"}.}
+\item{shrinkage_eta}{Numeric vector of ETA shrinkage per random effect
+(\code{1 - SD(eta_hat_k) / sqrt(omega_kk)}). \code{NA} when
+\code{omega_kk = 0} or fewer than 2 subjects.}
+\item{shrinkage_eps}{EPS shrinkage: \code{1 - SD(IWRES)}. \code{NA} when
+fewer than 2 valid residuals.}
+\item{wall_time_secs}{Total wall-clock time for the fit in seconds.}
+\item{model_name}{Model name from the \code{.ferx} file.}
+\item{ferx_version}{ferx-nlme library version string.}
+\item{cov_matrix}{Full parameter covariance matrix as a named numeric
+matrix (params × params). \code{NULL} when covariance step was not run
+or failed. Use \code{\link{ferx_cor_matrix}} to inspect correlations.}
+\item{eta_normality}{Data frame with Shapiro-Wilk normality test for each
+ETA: columns \code{eta}, \code{W}, \code{p_val}, \code{flag}. A
+\code{[!]} flag appears when \code{p < 0.05}. \code{NULL} when fewer
+than 3 subjects or no ETA columns in \code{sdtab}.}
+\item{omega_iov}{IOV variance matrix for kappa parameters (\code{NULL} if no IOV).}
+\item{kappa_names}{Names of kappa (IOV) parameters (\code{NULL} if no IOV).}
+\item{se_kappa}{Standard errors for kappa parameters: length \code{d}
+(diagonal kappa) or \code{d*(d+1)/2} (block_kappa, lower-triangle order).
+\code{NULL} if covariance step not run or no IOV.}
+\item{shrinkage_kappa}{Shrinkage values for kappa EBEs (\code{NULL} if no IOV).}
+\item{ebe_kappas}{Data frame with columns \code{ID}, \code{OCC}, and one
+column per kappa parameter containing per-subject per-occasion kappa
+EBEs. \code{ID} carries the original subject identifier (matching
+\code{sdtab}); \code{OCC} carries the labeled occasion in first-seen
+order. \code{NULL} when no IOV.}
 }
 \description{
 Fits a NLME model using FOCE or FOCEI estimation with a Rust backend
