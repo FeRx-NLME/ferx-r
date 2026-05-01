@@ -98,7 +98,8 @@ fn ferx_rust_fit(
             }
         };
 
-    let population = match ferx_nlme::read_nonmem_csv(Path::new(data_path), None) {
+    let iov_col = parsed.fit_options.iov_column.clone();
+    let population = match ferx_nlme::read_nonmem_csv(Path::new(data_path), None, iov_col.as_deref()) {
         Ok(p) => p,
         Err(e) => {
             rprintln!("Error reading data: {}", e);
@@ -286,26 +287,31 @@ fn ferx_rust_simulate(
     n_sim: i32,
     seed: i32,
 ) -> Robj {
-    let model = match ferx_nlme::parse_model_file(Path::new(model_path)) {
-        Ok(m) => m,
+    // parse_full_model_file (vs parse_model_file) so we can thread iov_column
+    // through to read_nonmem_csv — without it, models with kappa declarations
+    // panic in pk_param_fn (Eta index >= n_bsv_eta).
+    let parsed = match ferx_nlme::parse_full_model_file(Path::new(model_path)) {
+        Ok(p) => p,
         Err(e) => {
             rprintln!("Error parsing model: {}", e);
             return ().into();
         }
     };
+    let iov_col = parsed.fit_options.iov_column.clone();
 
-    let population = match ferx_nlme::read_nonmem_csv(Path::new(data_path), None) {
-        Ok(p) => p,
-        Err(e) => {
-            rprintln!("Error reading data: {}", e);
-            return ().into();
-        }
-    };
+    let population =
+        match ferx_nlme::read_nonmem_csv(Path::new(data_path), None, iov_col.as_deref()) {
+            Ok(p) => p,
+            Err(e) => {
+                rprintln!("Error reading data: {}", e);
+                return ().into();
+            }
+        };
 
     let results = ferx_nlme::simulate_with_seed(
-        &model,
+        &parsed.model,
         &population,
-        &model.default_params,
+        &parsed.model.default_params,
         n_sim as usize,
         seed as u64,
     );
@@ -337,23 +343,25 @@ fn ferx_rust_simulate_from_fit(
     n_sim: i32,
     seed: i32,
 ) -> Robj {
-    let model = match ferx_nlme::parse_model_file(Path::new(model_path)) {
-        Ok(m) => m,
+    let parsed = match ferx_nlme::parse_full_model_file(Path::new(model_path)) {
+        Ok(p) => p,
         Err(e) => {
             rprintln!("Error parsing model: {}", e);
             return ().into();
         }
     };
+    let iov_col = parsed.fit_options.iov_column.clone();
 
-    let population = match ferx_nlme::read_nonmem_csv(Path::new(data_path), None) {
-        Ok(p) => p,
-        Err(e) => {
-            rprintln!("Error reading data: {}", e);
-            return ().into();
-        }
-    };
+    let population =
+        match ferx_nlme::read_nonmem_csv(Path::new(data_path), None, iov_col.as_deref()) {
+            Ok(p) => p,
+            Err(e) => {
+                rprintln!("Error reading data: {}", e);
+                return ().into();
+            }
+        };
 
-    let params = match params_from_fit(&model, &theta, &omega_flat, omega_dim, &sigma) {
+    let params = match params_from_fit(&parsed.model, &theta, &omega_flat, omega_dim, &sigma) {
         Ok(p) => p,
         Err(e) => {
             rprintln!("{}", e);
@@ -361,8 +369,13 @@ fn ferx_rust_simulate_from_fit(
         }
     };
 
-    let results =
-        ferx_nlme::simulate_with_seed(&model, &population, &params, n_sim as usize, seed as u64);
+    let results = ferx_nlme::simulate_with_seed(
+        &parsed.model,
+        &population,
+        &params,
+        n_sim as usize,
+        seed as u64,
+    );
     sim_results_to_df(&results)
 }
 
@@ -377,23 +390,25 @@ fn ferx_rust_predict(
     model_path: &str,
     data_path: &str,
 ) -> Robj {
-    let model = match ferx_nlme::parse_model_file(Path::new(model_path)) {
-        Ok(m) => m,
+    let parsed = match ferx_nlme::parse_full_model_file(Path::new(model_path)) {
+        Ok(p) => p,
         Err(e) => {
             rprintln!("Error parsing model: {}", e);
             return ().into();
         }
     };
+    let iov_col = parsed.fit_options.iov_column.clone();
 
-    let population = match ferx_nlme::read_nonmem_csv(Path::new(data_path), None) {
-        Ok(p) => p,
-        Err(e) => {
-            rprintln!("Error reading data: {}", e);
-            return ().into();
-        }
-    };
+    let population =
+        match ferx_nlme::read_nonmem_csv(Path::new(data_path), None, iov_col.as_deref()) {
+            Ok(p) => p,
+            Err(e) => {
+                rprintln!("Error reading data: {}", e);
+                return ().into();
+            }
+        };
 
-    let results = ferx_nlme::predict(&model, &population, &model.default_params);
+    let results = ferx_nlme::predict(&parsed.model, &population, &parsed.model.default_params);
 
     let id: Vec<String> = results.iter().map(|r| r.id.clone()).collect();
     let time: Vec<f64> = results.iter().map(|r| r.time).collect();
@@ -421,23 +436,25 @@ fn ferx_rust_predict_from_fit(
     omega_dim: i32,
     sigma: Vec<f64>,
 ) -> Robj {
-    let model = match ferx_nlme::parse_model_file(Path::new(model_path)) {
-        Ok(m) => m,
+    let parsed = match ferx_nlme::parse_full_model_file(Path::new(model_path)) {
+        Ok(p) => p,
         Err(e) => {
             rprintln!("Error parsing model: {}", e);
             return ().into();
         }
     };
+    let iov_col = parsed.fit_options.iov_column.clone();
 
-    let population = match ferx_nlme::read_nonmem_csv(Path::new(data_path), None) {
-        Ok(p) => p,
-        Err(e) => {
-            rprintln!("Error reading data: {}", e);
-            return ().into();
-        }
-    };
+    let population =
+        match ferx_nlme::read_nonmem_csv(Path::new(data_path), None, iov_col.as_deref()) {
+            Ok(p) => p,
+            Err(e) => {
+                rprintln!("Error reading data: {}", e);
+                return ().into();
+            }
+        };
 
-    let params = match params_from_fit(&model, &theta, &omega_flat, omega_dim, &sigma) {
+    let params = match params_from_fit(&parsed.model, &theta, &omega_flat, omega_dim, &sigma) {
         Ok(p) => p,
         Err(e) => {
             rprintln!("{}", e);
@@ -445,7 +462,7 @@ fn ferx_rust_predict_from_fit(
         }
     };
 
-    let results = ferx_nlme::predict(&model, &population, &params);
+    let results = ferx_nlme::predict(&parsed.model, &population, &params);
 
     let id: Vec<String> = results.iter().map(|r| r.id.clone()).collect();
     let time: Vec<f64> = results.iter().map(|r| r.time).collect();
@@ -540,6 +557,8 @@ fn params_from_fit(
             names: template.sigma.names.clone(),
         },
         sigma_fixed: template.sigma_fixed.clone(),
+        omega_iov: None,
+        kappa_fixed: Vec::new(),
     })
 }
 
@@ -635,6 +654,70 @@ fn fit_result_to_list(result: &FitResult, population: &Population) -> List {
         CovarianceStatus::NotRequested => "not_requested",
     };
 
+    // IOV kappa omega (row-major flat); empty when no IOV
+    let (omega_iov_flat, omega_iov_dim): (Vec<f64>, i32) = match &result.omega_iov {
+        Some(m) => {
+            let n = m.nrows();
+            let mut v = Vec::with_capacity(n * n);
+            for i in 0..n {
+                for j in 0..n {
+                    v.push(m[(i, j)]);
+                }
+            }
+            (v, n as i32)
+        }
+        None => (Vec::new(), 0i32),
+    };
+    let kappa_names: Vec<String> = result.kappa_names.clone();
+    let se_kappa: Vec<f64> = result.se_kappa.clone().unwrap_or_default();
+    let shrinkage_kappa: Vec<f64> = result.shrinkage_kappa.clone();
+
+    // EBE kappas as a data frame: ID, OCC, KAPPA_1, ...
+    // Rows: one per (subject, occasion); empty when no IOV.
+    // - ID: original subject identifier (matches sdtab).
+    // - OCC: labeled occasion in first-seen order, matching the kappa[k]
+    //   indexing used by the inner optimizer (see split_obs_by_occasion in
+    //   ferx-nlme). Falls back to a 1-based positional index for any subject
+    //   missing an occasion column entry.
+    let ebe_kappas_df: Robj = if result.ebe_kappas.is_empty() || kappa_names.is_empty() {
+        ().into()
+    } else {
+        let n_kappa = kappa_names.len();
+        let mut ids: Vec<String> = Vec::new();
+        let mut occs: Vec<i32> = Vec::new();
+        let mut kappa_cols: Vec<Vec<f64>> = vec![Vec::new(); n_kappa];
+        for (si, subj_kappas) in result.ebe_kappas.iter().enumerate() {
+            let subj = &population.subjects[si];
+            // Unique occasion labels in first-seen order (matches kappa[k]).
+            let mut unique_occs: Vec<u32> = Vec::new();
+            for &occ in &subj.occasions {
+                if !unique_occs.contains(&occ) {
+                    unique_occs.push(occ);
+                }
+            }
+            for (oi, kappa_vec) in subj_kappas.iter().enumerate() {
+                ids.push(subj.id.clone());
+                let occ_label = unique_occs.get(oi).copied().unwrap_or(oi as u32 + 1);
+                occs.push(occ_label as i32);
+                for k in 0..n_kappa {
+                    kappa_cols[k].push(if k < kappa_vec.len() { kappa_vec[k] } else { f64::NAN });
+                }
+            }
+        }
+        let n_rows = ids.len();
+        let mut pairs: Vec<(&str, Robj)> = Vec::new();
+        pairs.push(("ID", ids.into()));
+        pairs.push(("OCC", occs.into()));
+        for (k, name) in kappa_names.iter().enumerate() {
+            pairs.push((name.as_str(), kappa_cols[k].clone().into()));
+        }
+        let mut df = List::from_pairs(pairs);
+        df.set_class(&["data.frame"]).unwrap();
+        let row_names: Vec<i32> = (1..=n_rows as i32).collect();
+        df.set_attrib("row.names", row_names).unwrap();
+        df.into()
+    };
+
     list!(
         converged = result.converged,
         method = method_label,
@@ -671,7 +754,13 @@ fn fit_result_to_list(result: &FitResult, population: &Population) -> List {
         model_name = result.model_name.clone(),
         ferx_version = result.ferx_version.clone(),
         cov_matrix = cov_matrix_flat,
-        cov_matrix_dim = cov_matrix_dim
+        cov_matrix_dim = cov_matrix_dim,
+        omega_iov = omega_iov_flat,
+        omega_iov_dim = omega_iov_dim,
+        kappa_names = kappa_names,
+        se_kappa = se_kappa,
+        shrinkage_kappa = shrinkage_kappa,
+        ebe_kappas = ebe_kappas_df
     )
 }
 
