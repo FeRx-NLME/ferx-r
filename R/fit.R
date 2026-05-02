@@ -519,6 +519,12 @@ ferx_fit <- function(model, data,
     message("Mu-referencing detected for: ", eta_names)
   }
 
+  # Store the dataset name (basename without extension) from the data path
+  result$data_name <- tools::file_path_sans_ext(basename(data))
+
+  # Store the requested gradient method
+  result$gradient <- gradient
+
   class(result) <- "ferx_fit"
   result
 }
@@ -552,6 +558,12 @@ print.ferx_fit <- function(x, ...) {
   cat("NONLINEAR MIXED EFFECTS MODEL ESTIMATION\n")
   cat(bar, "\n\n", sep = "")
 
+  if (!is.null(x$model_name) && nzchar(x$model_name)) {
+    cat("Model:     ", x$model_name, "\n", sep = "")
+  }
+  if (!is.null(x$data_name) && nzchar(x$data_name)) {
+    cat("Dataset:   ", x$data_name, "\n", sep = "")
+  }
   cat("Converged: ", if (isTRUE(x$converged)) "YES" else "NO", "\n", sep = "")
   if (!is.null(x$method_chain) && length(x$method_chain) > 1) {
     cat("Estimation chain:  ", paste(x$method_chain, collapse = " -> "), "\n", sep = "")
@@ -735,6 +747,9 @@ print.ferx_fit <- function(x, ...) {
   )
   cat("\n--- Run Info ---\n")
   cat("  Covariance:", cov_str, "\n")
+  if (!is.null(x$gradient)) {
+    cat("  Gradient (requested): ", x$gradient, "\n", sep = "")
+  }
   if (!is.null(x$wall_time_secs)) {
     cat(sprintf("  Wall time:  %.1fs\n", x$wall_time_secs))
   }
@@ -764,6 +779,8 @@ summary.ferx_fit <- function(object, ...) {
   x <- object
   s <- list(
     model_name      = x$model_name %||% NA_character_,
+    data_name       = x$data_name %||% NA_character_,
+    gradient        = x$gradient %||% NA_character_,
     method          = x$method,
     converged       = x$converged,
     ofv             = x$ofv,
@@ -796,9 +813,11 @@ summary.ferx_fit <- function(object, ...) {
 
 #' @export
 print.ferx_summary <- function(x, ...) {
-  cat(sprintf("ferx %s — %s\n", x$ferx_version %||% "?", toupper(x$method)))
-  cat(sprintf("Model: %s  |  Converged: %s\n",
+  cat(sprintf("ferx %s — %s  [gradient requested: %s]\n",
+              x$ferx_version %||% "?", toupper(x$method), x$gradient %||% "?"))
+  cat(sprintf("Model: %s  |  Dataset: %s  |  Converged: %s\n",
               x$model_name %||% "?",
+              x$data_name %||% "?",
               if (isTRUE(x$converged)) "YES" else "NO"))
   cat(sprintf("OFV: %.4f  AIC: %.4f  BIC: %.4f\n", x$ofv, x$aic, x$bic))
   cat(sprintf("Subjects: %d  Obs: %d  Params: %d  Iter: %d\n",
