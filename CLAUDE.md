@@ -51,3 +51,7 @@ Models are defined in `.ferx` text files with sections: `[parameters]`, `[indivi
 `ferx_simulate()` returns a data frame: SIM, ID, TIME, IPRED, DV_SIM.
 
 `ferx_predict()` returns a data frame: ID, TIME, PRED.
+
+## Pull Requests
+
+When creating a PR in this repo, always read `.github/PULL_REQUEST_TEMPLATE.md` and fill every section before calling `gh pr create`.
