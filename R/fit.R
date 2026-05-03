@@ -174,7 +174,14 @@
 #'   \item{shrinkage_eps}{EPS shrinkage: \code{1 - SD(IWRES)}. \code{NA} when
 #'     fewer than 2 valid residuals.}
 #'   \item{wall_time_secs}{Total wall-clock time for the fit in seconds.}
-#'   \item{model_name}{Model name from the \code{.ferx} file.}
+#'   \item{model_name}{Model name from the \code{.ferx} file. Falls back to
+#'     the model file's basename (without extension) when the file declares
+#'     no name.}
+#'   \item{data_name}{Dataset name, derived as the basename of the \code{data}
+#'     path with its extension stripped.}
+#'   \item{gradient}{The inner-loop gradient method as requested by the
+#'     caller (one of \code{"auto"}, \code{"ad"}, \code{"fd"}). The
+#'     \emph{resolved} method may differ — see the \code{gradient} argument.}
 #'   \item{ferx_version}{ferx-nlme library version string.}
 #'   \item{cov_matrix}{Full parameter covariance matrix as a named numeric
 #'     matrix (params × params). \code{NULL} when covariance step was not run
@@ -204,21 +211,29 @@
 #'
 #' # Gradient-based SLSQP — faster on smooth, well-behaved problems
 #' fit_slsqp <- ferx_fit(ex$model, ex$data,
-#'                       settings = list(optimizer = "slsqp"))
+#'   settings = list(optimizer = "slsqp")
+#' )
 #'
 #' # Second-order trust region with a tuned CG budget
 #' fit_tr <- ferx_fit(ex$model, ex$data,
-#'                    settings = list(optimizer          = "trust_region",
-#'                                    steihaug_max_iters = 100L))
+#'   settings = list(
+#'     optimizer = "trust_region",
+#'     steihaug_max_iters = 100L
+#'   )
+#' )
 #'
 #' # Fine-tune inner (per-subject EBE) loop via `settings`
 #' fit_fast <- ferx_fit(ex$model, ex$data,
-#'                      settings = list(inner_maxiter = 100L,
-#'                                      inner_tol     = 1e-6))
+#'   settings = list(
+#'     inner_maxiter = 100L,
+#'     inner_tol = 1e-6
+#'   )
+#' )
 #'
 #' # Chain SAEM to FOCEI (SAEM explores, FOCEI polishes):
 #' result <- ferx_fit("warfarin.ferx", "warfarin.csv",
-#'                    method = c("saem", "focei"))
+#'   method = c("saem", "focei")
+#' )
 #'
 #' # Compare with mu-referencing off
 #' fit_no_mu <- ferx_fit("warfarin.ferx", "warfarin.csv", mu_referencing = FALSE)
@@ -232,10 +247,13 @@
 #'
 #' # Tune SAEM phase lengths via `settings`:
 #' result <- ferx_fit("warfarin.ferx", "warfarin.csv",
-#'                    method  = "saem",
-#'                    settings = list(n_exploration = 200,
-#'                                    n_convergence = 400,
-#'                                    seed = 42L))
+#'   method = "saem",
+#'   settings = list(
+#'     n_exploration = 200,
+#'     n_convergence = 400,
+#'     seed = 42L
+#'   )
+#' )
 #' }
 #'
 #' @export
@@ -290,7 +308,7 @@ ferx_fit <- function(model, data,
     threads_arg <- 0L
   } else {
     if (!is.numeric(threads) || length(threads) != 1L || !is.finite(threads) ||
-        threads != as.integer(threads) || threads < 0L) {
+      threads != as.integer(threads) || threads < 0L) {
       stop("`threads` must be NULL or a non-negative integer scalar")
     }
     threads_arg <- as.integer(threads)
@@ -316,21 +334,23 @@ ferx_fit <- function(model, data,
   }
   if (!is.null(max_unconverged_frac)) {
     if (!is.numeric(max_unconverged_frac) || length(max_unconverged_frac) != 1L ||
-        !is.finite(max_unconverged_frac) || max_unconverged_frac < 0 || max_unconverged_frac > 1) {
+      !is.finite(max_unconverged_frac) || max_unconverged_frac < 0 || max_unconverged_frac > 1) {
       stop("`max_unconverged_frac` must be a numeric scalar between 0 and 1")
     }
     settings <- c(list(max_unconverged_frac = max_unconverged_frac), settings)
   }
   if (!is.null(min_obs_for_convergence_check)) {
     if (!is.numeric(min_obs_for_convergence_check) ||
-        length(min_obs_for_convergence_check) != 1L ||
-        !is.finite(min_obs_for_convergence_check) ||
-        min_obs_for_convergence_check != as.integer(min_obs_for_convergence_check) ||
-        min_obs_for_convergence_check < 0L) {
+      length(min_obs_for_convergence_check) != 1L ||
+      !is.finite(min_obs_for_convergence_check) ||
+      min_obs_for_convergence_check != as.integer(min_obs_for_convergence_check) ||
+      min_obs_for_convergence_check < 0L) {
       stop("`min_obs_for_convergence_check` must be a non-negative integer scalar")
     }
-    settings <- c(list(min_obs_for_convergence_check = as.integer(min_obs_for_convergence_check)),
-                  settings)
+    settings <- c(
+      list(min_obs_for_convergence_check = as.integer(min_obs_for_convergence_check)),
+      settings
+    )
   }
   settings_parts <- .ferx_settings_to_strings(settings)
 
@@ -381,9 +401,13 @@ ferx_fit <- function(model, data,
     result$sir_ess <- NULL
   }
   reshape_ci <- function(v, row_names = NULL) {
-    if (length(v) == 0) return(NULL)
-    m <- matrix(v, ncol = 2, byrow = TRUE,
-                dimnames = list(row_names, c("lower", "upper")))
+    if (length(v) == 0) {
+      return(NULL)
+    }
+    m <- matrix(v,
+      ncol = 2, byrow = TRUE,
+      dimnames = list(row_names, c("lower", "upper"))
+    )
     m
   }
   result$sir_ci_theta <- reshape_ci(result$sir_ci_theta, result$theta_names)
@@ -398,8 +422,8 @@ ferx_fit <- function(model, data,
   if (is.null(tp) || length(tp) == 0L || !nzchar(tp[[1L]])) {
     result$trace_path <- NULL
   } else {
-    .ferx_state$last_trace_path  <- result$trace_path
-    .ferx_state$last_trace_time  <- fit_started_at
+    .ferx_state$last_trace_path <- result$trace_path
+    .ferx_state$last_trace_time <- fit_started_at
     .ferx_state$last_trace_model <- model
   }
 
@@ -420,9 +444,9 @@ ferx_fit <- function(model, data,
   d <- result$cov_matrix_dim %||% 0L
   if (!is.null(result$cov_matrix) && length(result$cov_matrix) > 0L && d > 0L) {
     m <- matrix(result$cov_matrix, nrow = d, ncol = d, byrow = TRUE)
-    n_theta  <- length(result$theta_names)
-    n_eta    <- result$omega_dim %||% 0L
-    n_sigma  <- length(result$sigma)
+    n_theta <- length(result$theta_names)
+    n_eta <- result$omega_dim %||% 0L
+    n_sigma <- length(result$sigma)
     n_omega_packed <- d - n_theta - n_sigma
     # Determine parameterisation: diagonal (n_omega_packed == n_eta) or block
     omega_names <- if (n_omega_packed == n_eta) {
@@ -430,7 +454,7 @@ ferx_fit <- function(model, data,
     } else {
       # Block lower-triangle: L(i,j) for i >= j, column-major
       nm <- character(n_omega_packed)
-      k  <- 0L
+      k <- 0L
       for (i in seq_len(n_eta)) {
         for (j in seq_len(i)) {
           k <- k + 1L
@@ -474,8 +498,9 @@ ferx_fit <- function(model, data,
       rownames(m_iov) <- colnames(m_iov) <- result$kappa_names
     }
     result$omega_iov <- m_iov
-    if (length(result$kappa_names) > 0L && length(result$shrinkage_kappa) == length(result$kappa_names))
+    if (length(result$kappa_names) > 0L && length(result$shrinkage_kappa) == length(result$kappa_names)) {
       names(result$shrinkage_kappa) <- result$kappa_names
+    }
     if (length(result$se_kappa) == 0L) {
       result$se_kappa <- NULL
     } else {
@@ -519,6 +544,17 @@ ferx_fit <- function(model, data,
     message("Mu-referencing detected for: ", eta_names)
   }
 
+  # Store the dataset name (basename without extension) from the data path
+  result$data_name <- tools::file_path_sans_ext(basename(data))
+
+  # Fall back to the model file's basename when the .ferx file declares no name
+  if (is.null(result$model_name) || !nzchar(result$model_name)) {
+    result$model_name <- tools::file_path_sans_ext(basename(model))
+  }
+
+  # Store the requested gradient method
+  result$gradient <- gradient
+
   class(result) <- "ferx_fit"
   result
 }
@@ -526,22 +562,30 @@ ferx_fit <- function(model, data,
 # Compute Shapiro-Wilk normality test for each ETA, one row per ID.
 # Returns a data.frame with columns: eta, W, p_val, flag.
 .ferx_compute_eta_normality <- function(sdtab) {
-  if (is.null(sdtab) || !is.data.frame(sdtab)) return(NULL)
+  if (is.null(sdtab) || !is.data.frame(sdtab)) {
+    return(NULL)
+  }
   eta_cols <- grep("^ETA", names(sdtab), value = TRUE)
-  if (length(eta_cols) == 0L) return(NULL)
-  id_col   <- if ("ID" %in% names(sdtab)) "ID" else names(sdtab)[1L]
-  one_per  <- sdtab[!duplicated(sdtab[[id_col]]), eta_cols, drop = FALSE]
+  if (length(eta_cols) == 0L) {
+    return(NULL)
+  }
+  id_col <- if ("ID" %in% names(sdtab)) "ID" else names(sdtab)[1L]
+  one_per <- sdtab[!duplicated(sdtab[[id_col]]), eta_cols, drop = FALSE]
   do.call(rbind, lapply(eta_cols, function(col) {
     vals <- one_per[[col]]
     vals <- vals[is.finite(vals)]
     if (length(vals) < 3L) {
-      return(data.frame(eta = col, W = NA_real_, p_val = NA_real_, flag = "",
-                        stringsAsFactors = FALSE))
+      return(data.frame(
+        eta = col, W = NA_real_, p_val = NA_real_, flag = "",
+        stringsAsFactors = FALSE
+      ))
     }
-    sw  <- shapiro.test(vals)
+    sw <- shapiro.test(vals)
     flg <- if (sw$p.value < 0.05) "[!]" else ""
-    data.frame(eta = col, W = round(as.numeric(sw$statistic), 3),
-               p_val = round(sw$p.value, 4), flag = flg, stringsAsFactors = FALSE)
+    data.frame(
+      eta = col, W = round(as.numeric(sw$statistic), 3),
+      p_val = round(sw$p.value, 4), flag = flg, stringsAsFactors = FALSE
+    )
   }))
 }
 
@@ -552,6 +596,12 @@ print.ferx_fit <- function(x, ...) {
   cat("NONLINEAR MIXED EFFECTS MODEL ESTIMATION\n")
   cat(bar, "\n\n", sep = "")
 
+  if (!is.null(x$model_name) && nzchar(x$model_name)) {
+    cat("Model:     ", x$model_name, "\n", sep = "")
+  }
+  if (!is.null(x$data_name) && nzchar(x$data_name)) {
+    cat("Dataset:   ", x$data_name, "\n", sep = "")
+  }
   cat("Converged: ", if (isTRUE(x$converged)) "YES" else "NO", "\n", sep = "")
   if (!is.null(x$method_chain) && length(x$method_chain) > 1) {
     cat("Estimation chain:  ", paste(x$method_chain, collapse = " -> "), "\n", sep = "")
@@ -588,7 +638,8 @@ print.ferx_fit <- function(x, ...) {
       se_str <- sprintf("%.6f", se_val)
       rse_str <- sprintf("%.1f", rse)
     } else {
-      se_str <- "N/A"; rse_str <- "N/A"
+      se_str <- "N/A"
+      rse_str <- "N/A"
     }
     cat(sprintf("%-16s %12.6f %12s %10s\n", theta_names[i], est, se_str, rse_str))
   }
@@ -620,7 +671,8 @@ print.ferx_fit <- function(x, ...) {
     for (i in seq_len(n_eta)) {
       for (j in seq_len(i - 1L)) {
         cov_ij <- om[i, j]
-        var_i <- om[i, i]; var_j <- om[j, j]
+        var_i <- om[i, i]
+        var_j <- om[j, j]
         corr <- if (var_i > 0 && var_j > 0) cov_ij / (sqrt(var_i) * sqrt(var_j)) else 0
         cat(sprintf(
           "  OMEGA(%d,%d) = %.6f  (corr = %.4f)\n",
@@ -672,7 +724,8 @@ print.ferx_fit <- function(x, ...) {
       for (i in seq_len(n_kap)) {
         for (j in seq_len(i - 1L)) {
           cov_ij <- m_iov[i, j]
-          var_i <- m_iov[i, i]; var_j <- m_iov[j, j]
+          var_i <- m_iov[i, i]
+          var_j <- m_iov[j, j]
           corr <- if (var_i > 0 && var_j > 0) cov_ij / (sqrt(var_i) * sqrt(var_j)) else 0
           cat(sprintf(
             "  %s ~ %s : cov = %.6f  (corr = %.4f)\n",
@@ -699,7 +752,9 @@ print.ferx_fit <- function(x, ...) {
     cat("\n--- SIR Uncertainty (95% CI) ---\n")
     cat(sprintf("Effective sample size: %.1f\n", x$sir_ess))
     print_ci <- function(m) {
-      if (is.null(m)) return(invisible())
+      if (is.null(m)) {
+        return(invisible())
+      }
       for (i in seq_len(nrow(m))) {
         cat(sprintf("  %s : [%.6f, %.6f]\n", rownames(m)[i], m[i, 1], m[i, 2]))
       }
@@ -711,7 +766,7 @@ print.ferx_fit <- function(x, ...) {
 
   # Shrinkage
   has_shrinkage <- (!is.null(x$shrinkage_eta) && any(!is.na(x$shrinkage_eta))) ||
-                   (!is.null(x$shrinkage_eps) && !is.na(x$shrinkage_eps))
+    (!is.null(x$shrinkage_eps) && !is.na(x$shrinkage_eps))
   if (has_shrinkage) {
     cat("\n--- Shrinkage ---\n")
     if (!is.null(x$shrinkage_eta)) {
@@ -735,6 +790,9 @@ print.ferx_fit <- function(x, ...) {
   )
   cat("\n--- Run Info ---\n")
   cat("  Covariance:", cov_str, "\n")
+  if (!is.null(x$gradient)) {
+    cat("  Gradient (requested): ", x$gradient, "\n", sep = "")
+  }
   if (!is.null(x$wall_time_secs)) {
     cat(sprintf("  Wall time:  %.1fs\n", x$wall_time_secs))
   }
@@ -763,30 +821,32 @@ print.ferx_fit <- function(x, ...) {
 summary.ferx_fit <- function(object, ...) {
   x <- object
   s <- list(
-    model_name      = x$model_name %||% NA_character_,
-    method          = x$method,
-    converged       = x$converged,
-    ofv             = x$ofv,
-    aic             = x$aic,
-    bic             = x$bic,
-    n_subjects      = x$n_subjects,
-    n_obs           = x$n_obs,
-    n_parameters    = x$n_parameters,
-    n_iterations    = x$n_iterations,
-    theta           = x$theta,
-    se_theta        = x$se_theta,
-    omega           = x$omega,
-    se_omega        = x$se_omega,
-    sigma           = x$sigma,
-    se_sigma        = x$se_sigma,
-    shrinkage_eta   = x$shrinkage_eta,
-    shrinkage_eps   = x$shrinkage_eps,
+    model_name = x$model_name %||% NA_character_,
+    data_name = x$data_name %||% NA_character_,
+    gradient = x$gradient %||% NA_character_,
+    method = x$method,
+    converged = x$converged,
+    ofv = x$ofv,
+    aic = x$aic,
+    bic = x$bic,
+    n_subjects = x$n_subjects,
+    n_obs = x$n_obs,
+    n_parameters = x$n_parameters,
+    n_iterations = x$n_iterations,
+    theta = x$theta,
+    se_theta = x$se_theta,
+    omega = x$omega,
+    se_omega = x$se_omega,
+    sigma = x$sigma,
+    se_sigma = x$se_sigma,
+    shrinkage_eta = x$shrinkage_eta,
+    shrinkage_eps = x$shrinkage_eps,
     covariance_status = x$covariance_status,
-    wall_time_secs  = x$wall_time_secs,
-    ferx_version    = x$ferx_version,
+    wall_time_secs = x$wall_time_secs,
+    ferx_version = x$ferx_version,
     ebe_convergence_warnings = x$ebe_convergence_warnings,
     max_unconverged_subjects = x$max_unconverged_subjects,
-    total_ebe_fallbacks      = x$total_ebe_fallbacks
+    total_ebe_fallbacks = x$total_ebe_fallbacks
   )
   class(s) <- "ferx_summary"
   s
@@ -796,17 +856,27 @@ summary.ferx_fit <- function(object, ...) {
 
 #' @export
 print.ferx_summary <- function(x, ...) {
-  cat(sprintf("ferx %s - %s\n", x$ferx_version %||% "?", toupper(x$method)))
-  cat(sprintf("Model: %s  |  Converged: %s\n",
-              x$model_name %||% "?",
-              if (isTRUE(x$converged)) "YES" else "NO"))
+  cat(sprintf(
+    "ferx %s — %s  [gradient: %s (requested)]\n",
+    x$ferx_version %||% "?", toupper(x$method), x$gradient %||% "?"
+  ))
+  cat(sprintf(
+    "Model: %s  |  Dataset: %s  |  Converged: %s\n",
+    x$model_name %||% "?",
+    x$data_name %||% "?",
+    if (isTRUE(x$converged)) "YES" else "NO"
+  ))
   cat(sprintf("OFV: %.4f  AIC: %.4f  BIC: %.4f\n", x$ofv, x$aic, x$bic))
-  cat(sprintf("Subjects: %d  Obs: %d  Params: %d  Iter: %d\n",
-              x$n_subjects, x$n_obs, x$n_parameters %||% NA, x$n_iterations))
+  cat(sprintf(
+    "Subjects: %d  Obs: %d  Params: %d  Iter: %d\n",
+    x$n_subjects, x$n_obs, x$n_parameters %||% NA, x$n_iterations
+  ))
 
   if (!is.null(x$shrinkage_eta) && any(!is.na(x$shrinkage_eta))) {
-    sh_str <- paste(sprintf("ETA%d=%.1f%%", seq_along(x$shrinkage_eta),
-                            x$shrinkage_eta * 100), collapse = "  ")
+    sh_str <- paste(sprintf(
+      "ETA%d=%.1f%%", seq_along(x$shrinkage_eta),
+      x$shrinkage_eta * 100
+    ), collapse = "  ")
     cat("Shrinkage:", sh_str, "\n")
   }
   if (!is.null(x$shrinkage_eps) && !is.na(x$shrinkage_eps)) {
@@ -814,8 +884,11 @@ print.ferx_summary <- function(x, ...) {
   }
 
   cov_str <- switch(x$covariance_status %||% "unknown",
-    computed = "computed", failed = "FAILED", not_requested = "not requested",
-    x$covariance_status)
+    computed = "computed",
+    failed = "FAILED",
+    not_requested = "not requested",
+    x$covariance_status
+  )
   wall <- if (!is.null(x$wall_time_secs)) sprintf("%.1fs", x$wall_time_secs) else "?"
   cat(sprintf("Covariance: %s  |  Wall time: %s\n", cov_str, wall))
 
@@ -841,18 +914,24 @@ print.ferx_summary <- function(x, ...) {
     stop("`settings` must be a uniquely-named list (all entries must have a non-empty name)")
   }
   stringify <- function(key, v) {
-    if (is.null(v) || (length(v) == 1L && is.na(v))) return("null")
+    if (is.null(v) || (length(v) == 1L && is.na(v))) {
+      return("null")
+    }
     if (length(v) != 1L) {
       stop(sprintf("`settings$%s` must be a length-1 scalar", key))
     }
-    if (is.logical(v)) return(if (isTRUE(v)) "true" else "false")
+    if (is.logical(v)) {
+      return(if (isTRUE(v)) "true" else "false")
+    }
     if (is.numeric(v)) {
       if (!is.finite(v)) {
         stop(sprintf("`settings$%s` must be a finite number", key))
       }
       return(format(v, scientific = FALSE, trim = TRUE, digits = 17))
     }
-    if (is.character(v)) return(v)
+    if (is.character(v)) {
+      return(v)
+    }
     stop(sprintf("`settings$%s` has unsupported type `%s`", key, class(v)[1L]))
   }
   values <- vapply(
