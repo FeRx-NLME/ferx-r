@@ -14,7 +14,7 @@ autodiff = ["ferx-nlme/autodiff"]
 ci = ["ferx-nlme/ci"]
 
 [dependencies]
-extendr-api = "0.7"
+extendr-api = "0.9"
 ferx-nlme = { git = "https://github.com/InsightRX/ferx-nlme", branch = "main", default-features = false }
 nalgebra = "0.33"
 
