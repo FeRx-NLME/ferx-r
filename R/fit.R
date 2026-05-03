@@ -174,7 +174,14 @@
 #'   \item{shrinkage_eps}{EPS shrinkage: \code{1 - SD(IWRES)}. \code{NA} when
 #'     fewer than 2 valid residuals.}
 #'   \item{wall_time_secs}{Total wall-clock time for the fit in seconds.}
-#'   \item{model_name}{Model name from the \code{.ferx} file.}
+#'   \item{model_name}{Model name from the \code{.ferx} file. Falls back to
+#'     the model file's basename (without extension) when the file declares
+#'     no name.}
+#'   \item{data_name}{Dataset name, derived as the basename of the \code{data}
+#'     path with its extension stripped.}
+#'   \item{gradient}{The inner-loop gradient method as requested by the
+#'     caller (one of \code{"auto"}, \code{"ad"}, \code{"fd"}). The
+#'     \emph{resolved} method may differ — see the \code{gradient} argument.}
 #'   \item{ferx_version}{ferx-nlme library version string.}
 #'   \item{cov_matrix}{Full parameter covariance matrix as a named numeric
 #'     matrix (params × params). \code{NULL} when covariance step was not run
@@ -522,6 +529,11 @@ ferx_fit <- function(model, data,
   # Store the dataset name (basename without extension) from the data path
   result$data_name <- tools::file_path_sans_ext(basename(data))
 
+  # Fall back to the model file's basename when the .ferx file declares no name
+  if (is.null(result$model_name) || !nzchar(result$model_name)) {
+    result$model_name <- tools::file_path_sans_ext(basename(model))
+  }
+
   # Store the requested gradient method
   result$gradient <- gradient
 
@@ -813,7 +825,7 @@ summary.ferx_fit <- function(object, ...) {
 
 #' @export
 print.ferx_summary <- function(x, ...) {
-  cat(sprintf("ferx %s — %s  [gradient requested: %s]\n",
+  cat(sprintf("ferx %s — %s  [gradient: %s (requested)]\n",
               x$ferx_version %||% "?", toupper(x$method), x$gradient %||% "?"))
   cat(sprintf("Model: %s  |  Dataset: %s  |  Converged: %s\n",
               x$model_name %||% "?",
