@@ -207,7 +207,14 @@ all subjects and iterations.}
 \item{shrinkage_eps}{EPS shrinkage: \code{1 - SD(IWRES)}. \code{NA} when
 fewer than 2 valid residuals.}
 \item{wall_time_secs}{Total wall-clock time for the fit in seconds.}
-\item{model_name}{Model name from the \code{.ferx} file.}
+\item{model_name}{Model name from the \code{.ferx} file. Falls back to
+the model file's basename (without extension) when the file declares
+no name.}
+\item{data_name}{Dataset name, derived as the basename of the \code{data}
+path with its extension stripped.}
+\item{gradient}{The inner-loop gradient method as requested by the
+caller (one of \code{"auto"}, \code{"ad"}, \code{"fd"}). The
+\emph{resolved} method may differ — see the \code{gradient} argument.}
 \item{ferx_version}{ferx-nlme library version string.}
 \item{cov_matrix}{Full parameter covariance matrix as a named numeric
 matrix (params × params). \code{NULL} when covariance step was not run
