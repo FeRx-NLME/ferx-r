@@ -133,7 +133,7 @@ ferx_plot_trace <- function(fit, log_ofv = FALSE) {
   plot(tr$iter, ofv_vals,
        type = "l", col = "steelblue", lwd = 1.5,
        xlab = "", ylab = y_label,
-       main = "Optimizer trace — OFV")
+       main = "Optimizer trace - OFV")
 
   # phase boundaries (vertical lines)
   .add_phase_lines(tr)
@@ -158,7 +158,7 @@ ferx_plot_trace <- function(fit, log_ofv = FALSE) {
     plot(tr$iter, metric,
          type = "l", col = m_color, lwd = 1.5,
          xlab = "Iteration", ylab = m_label,
-         main = paste("Optimizer trace —", m_label))
+         main = paste("Optimizer trace -", m_label))
     .add_phase_lines(tr)
   } else {
     plot.new()

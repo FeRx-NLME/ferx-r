@@ -50,7 +50,7 @@ ferx_eta_cov <- function(fit, data) {
     stop("`fit$sdtab` is not available.")
   }
   if (is.null(data) || !is.data.frame(data)) {
-    stop("`data` must be a data.frame — pass the dataset used in ferx_fit().")
+    stop("`data` must be a data.frame - pass the dataset used in ferx_fit().")
   }
 
   eta_cols <- grep("^ETA", names(fit$sdtab), value = TRUE)

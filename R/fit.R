@@ -460,7 +460,7 @@ ferx_fit <- function(model, data,
       if (nzchar(row$flag) && !is.na(row$p_val)) {
         result$warnings <- c(
           result$warnings,
-          sprintf("%s Shapiro-Wilk p=%.4f — distribution may be non-normal", row$eta, row$p_val)
+          sprintf("%s Shapiro-Wilk p=%.4f - distribution may be non-normal", row$eta, row$p_val)
         )
       }
     }
@@ -796,7 +796,7 @@ summary.ferx_fit <- function(object, ...) {
 
 #' @export
 print.ferx_summary <- function(x, ...) {
-  cat(sprintf("ferx %s — %s\n", x$ferx_version %||% "?", toupper(x$method)))
+  cat(sprintf("ferx %s - %s\n", x$ferx_version %||% "?", toupper(x$method)))
   cat(sprintf("Model: %s  |  Converged: %s\n",
               x$model_name %||% "?",
               if (isTRUE(x$converged)) "YES" else "NO"))
