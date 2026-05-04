@@ -269,7 +269,7 @@ fn ferx_rust_fit(
     };
 
     // Convert to R list
-    fit_result_to_list(&result, &population)
+    fit_result_to_list(&result, &population, &parsed.model)
 }
 
 /// Simulate from a NLME model.
@@ -583,7 +583,11 @@ fn sim_results_to_df(results: &[ferx_nlme::api::SimulationResult]) -> Robj {
 
 // -- Helper: convert FitResult + Population to R named list --
 
-fn fit_result_to_list(result: &FitResult, population: &Population) -> List {
+fn fit_result_to_list(
+    result: &FitResult,
+    population: &Population,
+    model: &CompiledModel,
+) -> List {
     // Theta
     let theta_names: Vec<String> = result.theta_names.clone();
     let theta_values: Vec<f64> = result.theta.clone();
@@ -718,6 +722,16 @@ fn fit_result_to_list(result: &FitResult, population: &Population) -> List {
         df.into()
     };
 
+    // Per-subject EBE etas: ID + one column per BSV eta (named).
+    let ebe_etas_df: Robj = build_ebe_etas(result, population);
+
+    // Per-subject individual parameter estimates: ID + one column per
+    // [individual_parameters] declaration. Computed by evaluating
+    // `pk_param_fn` at the subject's BSV eta + zero kappas + covariates, so
+    // each value is the subject's typical (kappa-free) parameter under the
+    // model's covariate effects. Per-occasion variation lives in `ebe_kappas`.
+    let individual_estimates_df: Robj = build_individual_estimates(result, population, model);
+
     list!(
         converged = result.converged,
         method = method_label,
@@ -760,8 +774,125 @@ fn fit_result_to_list(result: &FitResult, population: &Population) -> List {
         kappa_names = kappa_names,
         se_kappa = se_kappa,
         shrinkage_kappa = shrinkage_kappa,
-        ebe_kappas = ebe_kappas_df
+        ebe_kappas = ebe_kappas_df,
+        ebe_etas = ebe_etas_df,
+        individual_estimates = individual_estimates_df
     )
+}
+
+// -- Helper: build per-subject EBE eta data frame --
+//
+// Returns a data.frame with one row per subject and columns ID + one column
+// per BSV eta (named after the model's eta declarations). Returns NULL when
+// there are no subjects or the model declares no etas.
+fn build_ebe_etas(result: &FitResult, population: &Population) -> Robj {
+    let n_subj = result.subjects.len();
+    if n_subj == 0 {
+        return ().into();
+    }
+    let n_eta = if result.subjects.is_empty() {
+        0
+    } else {
+        result.subjects[0].eta.len()
+    };
+    if n_eta == 0 {
+        return ().into();
+    }
+
+    let eta_names: Vec<String> = if result.eta_names.len() == n_eta {
+        result.eta_names.clone()
+    } else {
+        (0..n_eta).map(|i| format!("ETA{}", i + 1)).collect()
+    };
+
+    let mut ids: Vec<String> = Vec::with_capacity(n_subj);
+    let mut eta_cols: Vec<Vec<f64>> = (0..n_eta).map(|_| Vec::with_capacity(n_subj)).collect();
+
+    for (si, sr) in result.subjects.iter().enumerate() {
+        let subj = &population.subjects[si];
+        ids.push(subj.id.clone());
+        for k in 0..n_eta {
+            eta_cols[k].push(sr.eta.get(k).copied().unwrap_or(f64::NAN));
+        }
+    }
+
+    let mut pairs: Vec<(&str, Robj)> = Vec::new();
+    pairs.push(("ID", ids.into()));
+    for k in 0..n_eta {
+        pairs.push((eta_names[k].as_str(), eta_cols[k].clone().into()));
+    }
+    let mut df = List::from_pairs(pairs);
+    df.set_class(&["data.frame"]).unwrap();
+    let row_names: Vec<i32> = (1..=n_subj as i32).collect();
+    df.set_attrib("row.names", row_names).unwrap();
+    df.into()
+}
+
+// -- Helper: build per-subject individual parameter data frame --
+//
+// Returns a data.frame with one row per subject and columns ID + one column
+// per `[individual_parameters]` declaration (in declaration order). Each cell
+// is the value produced by evaluating `pk_param_fn` at the subject's EBE
+// eta + zero kappas + covariates. Returns NULL when there are no subjects or
+// the model declares no individual parameters.
+fn build_individual_estimates(
+    result: &FitResult,
+    population: &Population,
+    model: &CompiledModel,
+) -> Robj {
+    let n_subj = result.subjects.len();
+    if n_subj == 0 {
+        return ().into();
+    }
+    let n_eta = model.n_eta;
+    let n_kappa = model.n_kappa;
+    let indiv_names = &model.indiv_param_names;
+    let n_indiv = indiv_names.len();
+    if n_indiv == 0 {
+        return ().into();
+    }
+
+    let mut ids: Vec<String> = Vec::with_capacity(n_subj);
+    let mut param_cols: Vec<Vec<f64>> =
+        (0..n_indiv).map(|_| Vec::with_capacity(n_subj)).collect();
+
+    let is_ode = model.is_ode_based();
+    let mut eta_buf: Vec<f64> = vec![0.0; n_eta + n_kappa];
+
+    for (si, sr) in result.subjects.iter().enumerate() {
+        let subj = &population.subjects[si];
+        ids.push(subj.id.clone());
+
+        for k in 0..n_eta {
+            eta_buf[k] = sr.eta.get(k).copied().unwrap_or(0.0);
+        }
+        for k in 0..n_kappa {
+            eta_buf[n_eta + k] = 0.0;
+        }
+        let pk = (model.pk_param_fn)(&result.theta, &eta_buf, &subj.covariates);
+        for i in 0..n_indiv {
+            // Analytical models route via pk_indices; ODE models write
+            // sequentially into slots 0..n_indiv.
+            let slot = if is_ode {
+                i
+            } else {
+                model.pk_indices.get(i).copied().unwrap_or(i)
+            };
+            let v = pk.values.get(slot).copied().unwrap_or(f64::NAN);
+            param_cols[i].push(v);
+        }
+    }
+
+    let mut pairs: Vec<(&str, Robj)> = Vec::new();
+    pairs.push(("ID", ids.into()));
+    for i in 0..n_indiv {
+        pairs.push((indiv_names[i].as_str(), param_cols[i].clone().into()));
+    }
+    let mut df = List::from_pairs(pairs);
+    df.set_class(&["data.frame"]).unwrap();
+    let row_names: Vec<i32> = (1..=n_subj as i32).collect();
+    df.set_attrib("row.names", row_names).unwrap();
+    df.into()
 }
 
 fn sdtab_to_dataframe(cols: &[(String, Vec<f64>)]) -> Robj {

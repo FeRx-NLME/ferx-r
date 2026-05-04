@@ -46,16 +46,21 @@ ferx_cor_matrix <- function(fit) {
 #'   invisibly; the full table is printed to the console.
 #' @export
 ferx_eta_cov <- function(fit, data) {
-  if (is.null(fit$sdtab) || !is.data.frame(fit$sdtab)) {
-    stop("`fit$sdtab` is not available.")
+  if (is.null(fit$ebe_etas) || !is.data.frame(fit$ebe_etas)) {
+    stop("`fit$ebe_etas` is not available.")
   }
   if (is.null(data) || !is.data.frame(data)) {
     stop("`data` must be a data.frame - pass the dataset used in ferx_fit().")
   }
 
-  eta_cols <- grep("^ETA", names(fit$sdtab), value = TRUE)
+  # ebe_etas is purpose-built: ID + one column per BSV eta. Treat every
+  # non-ID column as an eta — a "^ETA" prefix filter would silently drop
+  # columns from models that don't follow the conventional naming.
+  ebe_id  <- if ("ID" %in% names(fit$ebe_etas)) "ID" else names(fit$ebe_etas)[1L]
+  data_id <- if ("ID" %in% names(data))         "ID" else names(data)[1L]
+  eta_cols <- setdiff(names(fit$ebe_etas), ebe_id)
   if (length(eta_cols) == 0L) {
-    message("No ETA columns found in fit$sdtab.")
+    message("No ETA columns found in fit$ebe_etas.")
     return(invisible(NULL))
   }
 
@@ -63,12 +68,8 @@ ferx_eta_cov <- function(fit, data) {
   SKIP <- c("TIME", "DV", "AMT", "EVID", "MDV", "CMT", "RATE",
             "II", "SS", "CENS", "LLOQ", "BLQ")
 
-  sdtab_id <- if ("ID" %in% names(fit$sdtab)) "ID" else names(fit$sdtab)[1L]
-  data_id  <- if ("ID" %in% names(data))      "ID" else names(data)[1L]
-
-  # One row per subject from sdtab
-  etas <- fit$sdtab[!duplicated(fit$sdtab[[sdtab_id]]),
-                    c(sdtab_id, eta_cols), drop = FALSE]
+  # One row per subject already in ebe_etas
+  etas <- fit$ebe_etas[, c(ebe_id, eta_cols), drop = FALSE]
 
   # Numeric columns in data that could be covariates
   num_cols <- names(data)[vapply(data, is.numeric, logical(1L))]
@@ -104,7 +105,7 @@ ferx_eta_cov <- function(fit, data) {
   }
 
   merged <- merge(etas, data_sub[, c(data_id, cov_cols), drop = FALSE],
-                  by.x = sdtab_id, by.y = data_id)
+                  by.x = ebe_id, by.y = data_id)
 
   rows <- vector("list", length(eta_cols) * length(cov_cols))
   k    <- 0L
