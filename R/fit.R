@@ -152,7 +152,23 @@
 #'   \item{se_theta}{Standard errors for theta (NULL if covariance step failed)}
 #'   \item{se_omega}{Standard errors for omega diagonal}
 #'   \item{se_sigma}{Standard errors for sigma}
-#'   \item{sdtab}{Data frame with ID, TIME, DV, PRED, IPRED, CWRES, IWRES, ETA1..n, OCC (if IOV)}
+#'   \item{sdtab}{Data frame with ID, TIME, DV, PRED, IPRED, CWRES, IWRES,
+#'     EBE_OFV, N_OBS; OCC if any subject carries an occasion column; CENS
+#'     if any rows are below LLOQ. Per-subject ETAs live in
+#'     \code{ebe_etas}; per-subject parameter values in
+#'     \code{individual_estimates}.}
+#'   \item{ebe_etas}{Data frame with one row per subject containing the BSV
+#'     empirical Bayes estimates: \code{ID} plus one column per eta named
+#'     after the model's eta declarations (e.g. \code{ETA_CL}, \code{ETA_V}).
+#'     \code{NULL} when the model declares no etas.}
+#'   \item{individual_estimates}{Data frame with one row per subject containing
+#'     each subject's individual parameter values: \code{ID} plus one column
+#'     per parameter declared in the \code{[individual_parameters]} block
+#'     (e.g. \code{CL}, \code{V}, \code{KA}). Computed by evaluating the
+#'     individual-parameter expressions at the subject's EBE eta with kappa
+#'     fixed at zero, so the result reflects each subject's typical value
+#'     under the model's covariate effects. For inter-occasion variation see
+#'     \code{ebe_kappas}.}
 #'   \item{warnings}{Character vector of warnings}
 #'   \item{sir_ess}{SIR effective sample size (NULL if SIR not run)}
 #'   \item{sir_ci_theta, sir_ci_omega, sir_ci_sigma}{SIR 95\% CI matrices
@@ -189,7 +205,7 @@
 #'   \item{eta_normality}{Data frame with Shapiro-Wilk normality test for each
 #'     ETA: columns \code{eta}, \code{W}, \code{p_val}, \code{flag}. A
 #'     \code{[!]} flag appears when \code{p < 0.05}. \code{NULL} when fewer
-#'     than 3 subjects or no ETA columns in \code{sdtab}.}
+#'     than 3 subjects or no ETA columns in \code{ebe_etas}.}
 #'   \item{omega_iov}{IOV variance matrix for kappa parameters (\code{NULL} if no IOV).}
 #'   \item{kappa_names}{Names of kappa (IOV) parameters (\code{NULL} if no IOV).}
 #'   \item{se_kappa}{Standard errors for kappa parameters: length \code{d}
@@ -475,8 +491,8 @@ ferx_fit <- function(model, data,
   }
   result$cov_matrix_dim <- NULL
 
-  # ETA normality (Shapiro-Wilk) — computed in R from sdtab EBEs
-  result$eta_normality <- .ferx_compute_eta_normality(result$sdtab)
+  # ETA normality (Shapiro-Wilk) — computed in R from per-subject EBEs
+  result$eta_normality <- .ferx_compute_eta_normality(result$ebe_etas)
   # Push normality warnings into the warnings vector
   if (!is.null(result$eta_normality)) {
     for (i in seq_len(nrow(result$eta_normality))) {
@@ -565,16 +581,15 @@ ferx_fit <- function(model, data,
 # ETA is systematically subsampled to 5000 values to keep the diagnostic
 # from failing, and a single warning is emitted to flag that the result
 # is approximate.
-.ferx_compute_eta_normality <- function(sdtab) {
-  if (is.null(sdtab) || !is.data.frame(sdtab)) {
+.ferx_compute_eta_normality <- function(ebe_etas) {
+  if (is.null(ebe_etas) || !is.data.frame(ebe_etas)) {
     return(NULL)
   }
-  eta_cols <- grep("^ETA", names(sdtab), value = TRUE)
+  eta_cols <- grep("^ETA", names(ebe_etas), value = TRUE)
   if (length(eta_cols) == 0L) {
     return(NULL)
   }
-  id_col <- if ("ID" %in% names(sdtab)) "ID" else names(sdtab)[1L]
-  one_per <- sdtab[!duplicated(sdtab[[id_col]]), eta_cols, drop = FALSE]
+  one_per <- ebe_etas[, eta_cols, drop = FALSE]
   sw_cap <- 5000L
   if (nrow(one_per) > sw_cap) {
     warning(

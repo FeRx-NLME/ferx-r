@@ -185,7 +185,23 @@ A list with components:
 \item{se_theta}{Standard errors for theta (NULL if covariance step failed)}
 \item{se_omega}{Standard errors for omega diagonal}
 \item{se_sigma}{Standard errors for sigma}
-\item{sdtab}{Data frame with ID, TIME, DV, PRED, IPRED, CWRES, IWRES, ETA1..n, OCC (if IOV)}
+\item{sdtab}{Data frame with ID, TIME, DV, PRED, IPRED, CWRES, IWRES,
+EBE_OFV, N_OBS; OCC if any subject carries an occasion column; CENS
+if any rows are below LLOQ. Per-subject ETAs live in
+\code{ebe_etas}; per-subject parameter values in
+\code{individual_estimates}.}
+\item{ebe_etas}{Data frame with one row per subject containing the BSV
+empirical Bayes estimates: \code{ID} plus one column per eta named
+after the model's eta declarations (e.g. \code{ETA_CL}, \code{ETA_V}).
+\code{NULL} when the model declares no etas.}
+\item{individual_estimates}{Data frame with one row per subject containing
+each subject's individual parameter values: \code{ID} plus one column
+per parameter declared in the \code{[individual_parameters]} block
+(e.g. \code{CL}, \code{V}, \code{KA}). Computed by evaluating the
+individual-parameter expressions at the subject's EBE eta with kappa
+fixed at zero, so the result reflects each subject's typical value
+under the model's covariate effects. For inter-occasion variation see
+\code{ebe_kappas}.}
 \item{warnings}{Character vector of warnings}
 \item{sir_ess}{SIR effective sample size (NULL if SIR not run)}
 \item{sir_ci_theta, sir_ci_omega, sir_ci_sigma}{SIR 95\\% CI matrices
@@ -222,7 +238,7 @@ or failed. Use \code{\link{ferx_cor_matrix}} to inspect correlations.}
 \item{eta_normality}{Data frame with Shapiro-Wilk normality test for each
 ETA: columns \code{eta}, \code{W}, \code{p_val}, \code{flag}. A
 \code{[!]} flag appears when \code{p < 0.05}. \code{NULL} when fewer
-than 3 subjects or no ETA columns in \code{sdtab}.}
+than 3 subjects or no ETA columns in \code{ebe_etas}.}
 \item{omega_iov}{IOV variance matrix for kappa parameters (\code{NULL} if no IOV).}
 \item{kappa_names}{Names of kappa (IOV) parameters (\code{NULL} if no IOV).}
 \item{se_kappa}{Standard errors for kappa parameters: length \code{d}
@@ -248,21 +264,29 @@ fit <- ferx_fit(ex$model, ex$data)
 
 # Gradient-based SLSQP — faster on smooth, well-behaved problems
 fit_slsqp <- ferx_fit(ex$model, ex$data,
-                      settings = list(optimizer = "slsqp"))
+  settings = list(optimizer = "slsqp")
+)
 
 # Second-order trust region with a tuned CG budget
 fit_tr <- ferx_fit(ex$model, ex$data,
-                   settings = list(optimizer          = "trust_region",
-                                   steihaug_max_iters = 100L))
+  settings = list(
+    optimizer = "trust_region",
+    steihaug_max_iters = 100L
+  )
+)
 
 # Fine-tune inner (per-subject EBE) loop via `settings`
 fit_fast <- ferx_fit(ex$model, ex$data,
-                     settings = list(inner_maxiter = 100L,
-                                     inner_tol     = 1e-6))
+  settings = list(
+    inner_maxiter = 100L,
+    inner_tol = 1e-6
+  )
+)
 
 # Chain SAEM to FOCEI (SAEM explores, FOCEI polishes):
 result <- ferx_fit("warfarin.ferx", "warfarin.csv",
-                   method = c("saem", "focei"))
+  method = c("saem", "focei")
+)
 
 # Compare with mu-referencing off
 fit_no_mu <- ferx_fit("warfarin.ferx", "warfarin.csv", mu_referencing = FALSE)
@@ -276,10 +300,13 @@ result <- ferx_fit(bloq$model, bloq$data, method = "focei", bloq_method = "m3")
 
 # Tune SAEM phase lengths via `settings`:
 result <- ferx_fit("warfarin.ferx", "warfarin.csv",
-                   method  = "saem",
-                   settings = list(n_exploration = 200,
-                                   n_convergence = 400,
-                                   seed = 42L))
+  method = "saem",
+  settings = list(
+    n_exploration = 200,
+    n_convergence = 400,
+    seed = 42L
+  )
+)
 }
 
 }
