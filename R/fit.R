@@ -561,6 +561,10 @@ ferx_fit <- function(model, data,
 
 # Compute Shapiro-Wilk normality test for each ETA, one row per ID.
 # Returns a data.frame with columns: eta, W, p_val, flag.
+# `shapiro.test()` is hard-capped at 5000 observations; for larger N each
+# ETA is systematically subsampled to 5000 values to keep the diagnostic
+# from failing, and a single warning is emitted to flag that the result
+# is approximate.
 .ferx_compute_eta_normality <- function(sdtab) {
   if (is.null(sdtab) || !is.data.frame(sdtab)) {
     return(NULL)
@@ -571,6 +575,17 @@ ferx_fit <- function(model, data,
   }
   id_col <- if ("ID" %in% names(sdtab)) "ID" else names(sdtab)[1L]
   one_per <- sdtab[!duplicated(sdtab[[id_col]]), eta_cols, drop = FALSE]
+  sw_cap <- 5000L
+  if (nrow(one_per) > sw_cap) {
+    warning(
+      "ETA normality: ", nrow(one_per), " subjects exceeds the ",
+      sw_cap, "-sample limit of shapiro.test(); each ETA was subsampled ",
+      "to ", sw_cap, " values. Shapiro-Wilk is also known to over-reject ",
+      "normality at large N — treat the result as a rough indicator and ",
+      "prefer QQ-plots for diagnosis on large datasets.",
+      call. = FALSE
+    )
+  }
   do.call(rbind, lapply(eta_cols, function(col) {
     vals <- one_per[[col]]
     vals <- vals[is.finite(vals)]
@@ -579,6 +594,9 @@ ferx_fit <- function(model, data,
         eta = col, W = NA_real_, p_val = NA_real_, flag = "",
         stringsAsFactors = FALSE
       ))
+    }
+    if (length(vals) > sw_cap) {
+      vals <- vals[round(seq.int(1L, length(vals), length.out = sw_cap))]
     }
     sw <- shapiro.test(vals)
     flg <- if (sw$p.value < 0.05) "[!]" else ""
