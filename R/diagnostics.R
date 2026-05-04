@@ -53,7 +53,12 @@ ferx_eta_cov <- function(fit, data) {
     stop("`data` must be a data.frame - pass the dataset used in ferx_fit().")
   }
 
-  eta_cols <- grep("^ETA", names(fit$ebe_etas), value = TRUE)
+  # ebe_etas is purpose-built: ID + one column per BSV eta. Treat every
+  # non-ID column as an eta — a "^ETA" prefix filter would silently drop
+  # columns from models that don't follow the conventional naming.
+  ebe_id  <- if ("ID" %in% names(fit$ebe_etas)) "ID" else names(fit$ebe_etas)[1L]
+  data_id <- if ("ID" %in% names(data))         "ID" else names(data)[1L]
+  eta_cols <- setdiff(names(fit$ebe_etas), ebe_id)
   if (length(eta_cols) == 0L) {
     message("No ETA columns found in fit$ebe_etas.")
     return(invisible(NULL))
@@ -62,9 +67,6 @@ ferx_eta_cov <- function(fit, data) {
   # Time-varying or non-covariate columns to skip
   SKIP <- c("TIME", "DV", "AMT", "EVID", "MDV", "CMT", "RATE",
             "II", "SS", "CENS", "LLOQ", "BLQ")
-
-  ebe_id  <- if ("ID" %in% names(fit$ebe_etas)) "ID" else names(fit$ebe_etas)[1L]
-  data_id <- if ("ID" %in% names(data))         "ID" else names(data)[1L]
 
   # One row per subject already in ebe_etas
   etas <- fit$ebe_etas[, c(ebe_id, eta_cols), drop = FALSE]

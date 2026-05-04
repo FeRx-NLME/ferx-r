@@ -235,10 +235,13 @@ caller (one of \code{"auto"}, \code{"ad"}, \code{"fd"}). The
 \item{cov_matrix}{Full parameter covariance matrix as a named numeric
 matrix (params × params). \code{NULL} when covariance step was not run
 or failed. Use \code{\link{ferx_cor_matrix}} to inspect correlations.}
-\item{eta_normality}{Data frame with Shapiro-Wilk normality test for each
-ETA: columns \code{eta}, \code{W}, \code{p_val}, \code{flag}. A
-\code{[!]} flag appears when \code{p < 0.05}. \code{NULL} when fewer
-than 3 subjects or no ETA columns in \code{ebe_etas}.}
+\item{eta_normality}{Data frame with Shapiro-Wilk normality test for
+each ETA: columns \code{eta}, \code{W}, \code{p_val}, \code{flag}.
+A \code{[!]} flag appears when \code{p < 0.05}. \code{NULL} only
+when \code{ebe_etas} is missing or has no eta columns. When an ETA
+has fewer than 3 finite values (e.g. tiny populations or fixed
+etas), its row is still returned but \code{W} and \code{p_val} are
+\code{NA}.}
 \item{omega_iov}{IOV variance matrix for kappa parameters (\code{NULL} if no IOV).}
 \item{kappa_names}{Names of kappa (IOV) parameters (\code{NULL} if no IOV).}
 \item{se_kappa}{Standard errors for kappa parameters: length \code{d}
