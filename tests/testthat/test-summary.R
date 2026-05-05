@@ -48,7 +48,8 @@ test_that("summary.ferx_fit returns a ferx_summary with expected fields", {
     "converged", "ofv", "aic", "bic", "n_subjects", "n_obs",
     "n_parameters", "n_iterations", "theta", "se_theta", "omega",
     "se_omega", "sigma", "se_sigma", "shrinkage_eta", "shrinkage_eps",
-    "covariance_status", "wall_time_secs", "ferx_version",
+    "covariance_status", "eigenvalues", "condition_number",
+    "wall_time_secs", "ferx_version",
     "ebe_convergence_warnings", "max_unconverged_subjects",
     "total_ebe_fallbacks", "model_structure", "call_settings", "sir_ess", "warnings"
   ), ignore.order = TRUE)

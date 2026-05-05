@@ -202,6 +202,15 @@
 #'   \item{cov_matrix}{Full parameter covariance matrix as a named numeric
 #'     matrix (params × params). \code{NULL} when covariance step was not run
 #'     or failed. Use \code{\link{ferx_cor_matrix}} to inspect correlations.}
+#'   \item{eigenvalues}{Numeric vector of eigenvalues of the correlation matrix
+#'     of estimated (non-fixed) parameters, sorted descending. Computed by the
+#'     Rust backend. \code{NULL} when the covariance step was not run, failed,
+#'     or fewer than two free parameters exist.}
+#'   \item{condition_number}{Ratio of the largest to smallest eigenvalue of the
+#'     correlation matrix of estimated parameters. Values above 1000 are flagged
+#'     as potentially ill-conditioned and also appear in \code{warnings}.
+#'     \code{Inf} when the smallest eigenvalue is non-positive. \code{NULL}
+#'     when \code{eigenvalues} is \code{NULL}.}
 #'   \item{eta_normality}{Data frame with Shapiro-Wilk normality test for
 #'     each ETA: columns \code{eta}, \code{W}, \code{p_val}, \code{flag}.
 #'     A \code{[!]} flag appears when \code{p < 0.05}. \code{NULL} only
@@ -285,6 +294,11 @@
 #'     seed = 42L
 #'   )
 #' )
+#'
+#' # Inspect covariance diagnostics (requires covariance = TRUE):
+#' fit_cov <- ferx_fit(ex$model, ex$data, covariance = TRUE)
+#' fit_cov$eigenvalues       # sorted descending; length = number of free params
+#' fit_cov$condition_number  # > 1000 suggests ill-conditioned parameter space
 #' }
 #'
 #' @export
@@ -511,6 +525,24 @@ ferx_fit <- function(model, data,
     result$cov_matrix <- NULL
   }
   result$cov_matrix_dim <- NULL
+
+  # Eigenvalues and condition number pre-computed by the Rust backend.
+  # Empty vector / NaN are sentinels for "not available" (covariance step not
+  # run, failed, or fewer than two free parameters).
+  result$eigenvalues <- if (length(result$cov_eigenvalues) == 0L) NULL else result$cov_eigenvalues
+  result$condition_number <- if (is.nan(result$cov_condition_number)) NULL else result$cov_condition_number
+  result$cov_eigenvalues <- NULL
+  result$cov_condition_number <- NULL
+  if (!is.null(result$condition_number) && is.finite(result$condition_number) &&
+        result$condition_number > 1000) {
+    result$warnings <- c(
+      result$warnings,
+      sprintf(
+        "High condition number (%.1f) — parameter space may be ill-conditioned",
+        result$condition_number
+      )
+    )
+  }
 
   # ETA normality (Shapiro-Wilk) — computed in R from per-subject EBEs
   result$eta_normality <- .ferx_compute_eta_normality(result$ebe_etas)
@@ -860,7 +892,10 @@ print.ferx_fit <- function(x, ...) {
     cov_status
   )
   cat("\n--- Run Info ---\n")
-  cat("  Covariance:", cov_str, "\n")
+  cond_str <- if (!is.null(x$condition_number)) {
+    if (is.infinite(x$condition_number)) " (cond: Inf)" else sprintf(" (cond: %.1f)", x$condition_number)
+  } else ""
+  cat(sprintf("  Covariance: %s%s\n", cov_str, cond_str))
   if (!is.null(x$gradient)) {
     cat("  Gradient (requested): ", x$gradient, "\n", sep = "")
   }
@@ -897,9 +932,11 @@ print.ferx_fit <- function(x, ...) {
 #'   \code{n_obs}, \code{n_parameters}, \code{n_iterations}, \code{theta},
 #'   \code{se_theta}, \code{omega}, \code{se_omega}, \code{sigma},
 #'   \code{se_sigma}, \code{shrinkage_eta}, \code{shrinkage_eps},
-#'   \code{covariance_status}, \code{wall_time_secs}, \code{ferx_version},
-#'   \code{call_settings}, \code{sir_ess}, \code{warnings},
-#'   \code{ebe_convergence_warnings}, \code{max_unconverged_subjects},
+#'   \code{covariance_status}, \code{eigenvalues}, \code{condition_number}
+#'   (see \code{\link{ferx_fit}} for definitions), \code{wall_time_secs},
+#'   \code{ferx_version}, \code{call_settings}, \code{sir_ess},
+#'   \code{warnings}, \code{ebe_convergence_warnings},
+#'   \code{max_unconverged_subjects},
 #'   \code{total_ebe_fallbacks}.
 #' @examples
 #' \dontrun{
@@ -942,6 +979,8 @@ summary.ferx_fit <- function(object, ...) {
     shrinkage_eta = x$shrinkage_eta,
     shrinkage_eps = x$shrinkage_eps,
     covariance_status = x$covariance_status,
+    eigenvalues = x$eigenvalues,
+    condition_number = x$condition_number,
     wall_time_secs = x$wall_time_secs,
     ferx_version = x$ferx_version,
     ebe_convergence_warnings = x$ebe_convergence_warnings,
@@ -1021,8 +1060,11 @@ print.ferx_summary <- function(x, ...) {
     not_requested = "not requested",
     x$covariance_status
   )
+  cond_str <- if (!is.null(x$condition_number)) {
+    if (is.infinite(x$condition_number)) "  Cond: Inf" else sprintf("  Cond: %.1f", x$condition_number)
+  } else ""
   wall <- if (!is.null(x$wall_time_secs)) sprintf("%.1fs", x$wall_time_secs) else "?"
-  cat(sprintf("Covariance: %s  |  Wall time: %s\n", cov_str, wall))
+  cat(sprintf("Covariance: %s%s  |  Wall time: %s\n", cov_str, cond_str, wall))
 
   warn_msgs <- x$warnings
   if (!is.null(x$ebe_convergence_warnings) && x$ebe_convergence_warnings > 0L) {

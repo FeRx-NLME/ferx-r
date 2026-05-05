@@ -235,6 +235,15 @@ caller (one of \code{"auto"}, \code{"ad"}, \code{"fd"}). The
 \item{cov_matrix}{Full parameter covariance matrix as a named numeric
 matrix (params × params). \code{NULL} when covariance step was not run
 or failed. Use \code{\link{ferx_cor_matrix}} to inspect correlations.}
+\item{eigenvalues}{Numeric vector of eigenvalues of the correlation matrix
+of estimated (non-fixed) parameters, sorted descending. Computed by the
+Rust backend. \code{NULL} when the covariance step was not run, failed,
+or fewer than two free parameters exist.}
+\item{condition_number}{Ratio of the largest to smallest eigenvalue of the
+correlation matrix of estimated parameters. Values above 1000 are flagged
+as potentially ill-conditioned and also appear in \code{warnings}.
+\code{Inf} when the smallest eigenvalue is non-positive. \code{NULL}
+when \code{eigenvalues} is \code{NULL}.}
 \item{eta_normality}{Data frame with Shapiro-Wilk normality test for
 each ETA: columns \code{eta}, \code{W}, \code{p_val}, \code{flag}.
 A \code{[!]} flag appears when \code{p < 0.05}. \code{NULL} only
@@ -261,6 +270,10 @@ column per kappa parameter containing per-subject per-occasion kappa
 EBEs. \code{ID} carries the original subject identifier (matching
 \code{sdtab}); \code{OCC} carries the labeled occasion in first-seen
 order. \code{NULL} when no IOV.}
+\item{call_settings}{Named list of the effective settings passed to Rust,
+with values typed back to their natural R types (logical, numeric, or
+character). Includes merged defaults such as \code{optimizer_trace} and
+\code{scale_params}. Empty list when no settings were supplied.}
 }
 \description{
 Fits a NLME model using FOCE or FOCEI estimation with a Rust backend
@@ -318,6 +331,11 @@ result <- ferx_fit("warfarin.ferx", "warfarin.csv",
     seed = 42L
   )
 )
+
+# Inspect covariance diagnostics (requires covariance = TRUE):
+fit_cov <- ferx_fit(ex$model, ex$data, covariance = TRUE)
+fit_cov$eigenvalues       # sorted descending; length = number of free params
+fit_cov$condition_number  # > 1000 suggests ill-conditioned parameter space
 }
 
 }

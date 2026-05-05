@@ -769,6 +769,8 @@ fn fit_result_to_list(
         ferx_version = result.ferx_version.clone(),
         cov_matrix = cov_matrix_flat,
         cov_matrix_dim = cov_matrix_dim,
+        cov_eigenvalues = result.cov_eigenvalues.clone().unwrap_or_default(),
+        cov_condition_number = result.cov_condition_number.unwrap_or(f64::NAN),
         omega_iov = omega_iov_flat,
         omega_iov_dim = omega_iov_dim,
         kappa_names = kappa_names,
