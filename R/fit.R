@@ -201,6 +201,10 @@
 #'     EBEs. \code{ID} carries the original subject identifier (matching
 #'     \code{sdtab}); \code{OCC} carries the labeled occasion in first-seen
 #'     order. \code{NULL} when no IOV.}
+#'   \item{call_settings}{Named list of the effective settings passed to Rust,
+#'     with values typed back to their natural R types (logical, numeric, or
+#'     character). Includes merged defaults such as \code{optimizer_trace} and
+#'     \code{scale_params}. Empty list when no settings were supplied.}
 #'
 #' @examples
 #' \dontrun{
