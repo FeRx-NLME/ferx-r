@@ -353,11 +353,9 @@ ferx_fit <- function(model, data,
     )
   }
   settings_parts <- .ferx_settings_to_strings(settings)
-  # Snapshot of the effective settings for later inspection / summary output.
-  # We reconstruct from settings_parts so the stored list reflects exactly what
-  # was sent to Rust (merged optimizer_trace / scale_params / etc.).
+  # Effective settings as sent to Rust, with merged defaults, for summary display.
   settings_used <- if (length(settings_parts$keys) > 0L) {
-    setNames(as.list(settings_parts$values), settings_parts$keys)
+    setNames(lapply(settings_parts$values, .ferx_parse_setting_value), settings_parts$keys)
   } else {
     list()
   }
@@ -633,9 +631,9 @@ print.ferx_fit <- function(x, ...) {
   }
   cat("Converged: ", if (isTRUE(x$converged)) "YES" else "NO", "\n", sep = "")
   if (!is.null(x$method_chain) && length(x$method_chain) > 1) {
-    cat("Estimation chain:  ", paste(x$method_chain, collapse = " -> "), "\n", sep = "")
+    cat("Estimation chain:  ", paste(toupper(x$method_chain), collapse = " -> "), "\n", sep = "")
   } else {
-    cat("Estimation method: ", x$method, "\n", sep = "")
+    cat("Estimation method: ", toupper(x$method %||% "?"), "\n", sep = "")
   }
   if (!is.null(x$n_iterations)) {
     cat("Iterations: ", x$n_iterations, "\n", sep = "")
@@ -927,7 +925,7 @@ print.ferx_summary <- function(x, ...) {
   cat(sprintf("Converged: %s\n", if (isTRUE(x$converged)) "YES" else "NO"))
 
   if (!is.null(x$method_chain) && length(x$method_chain) > 1L) {
-    cat("Method:    ", paste(x$method_chain, collapse = " -> "), "\n", sep = "")
+    cat("Method:    ", paste(toupper(x$method_chain), collapse = " -> "), "\n", sep = "")
   } else {
     cat(sprintf("Method:    %s\n", toupper(x$method %||% "?")))
   }
@@ -991,6 +989,17 @@ print.ferx_summary <- function(x, ...) {
 
   cat(bar, "\n", sep = "")
   invisible(x)
+}
+
+# Reverse of the stringify step in .ferx_settings_to_strings: parse a single
+# string value back to its natural R type for human-readable summary display.
+.ferx_parse_setting_value <- function(v) {
+  if (v == "true") return(TRUE)
+  if (v == "false") return(FALSE)
+  if (v == "null") return(NA)
+  num <- suppressWarnings(as.numeric(v))
+  if (!is.na(num)) return(num)
+  v
 }
 
 # Convert a named-list of settings into two parallel character vectors for the
