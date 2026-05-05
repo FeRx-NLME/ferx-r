@@ -9,7 +9,7 @@ License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.3
-SystemRequirements: Rust (>= 1.70), Cargo; optionally Enzyme toolchain for autodiff
+SystemRequirements: Cargo (Rust's package manager), rustc (>= 1.70); optionally Enzyme toolchain for autodiff
 Config/rextendr/version: 0.5.0
 Suggests:
     testthat (>= 3.0.0)

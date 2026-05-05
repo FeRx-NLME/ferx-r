@@ -214,6 +214,14 @@
 #'   \item{se_kappa}{Standard errors for kappa parameters: length \code{d}
 #'     (diagonal kappa) or \code{d*(d+1)/2} (block_kappa, lower-triangle order).
 #'     \code{NULL} if covariance step not run or no IOV.}
+#'   \item{model_structure}{Named list auto-derived from the \code{.ferx} file
+#'     (not from the Rust engine — see \href{https://github.com/InsightRX/ferx-nlme/issues/49}{ferx-nlme#49}
+#'     for the future canonical version). Fields: \code{theta_names}
+#'     (character vector of population parameter names), \code{model_type}
+#'     (short label such as \code{"1-cpt oral"} or \code{NULL}), \code{iiv}
+#'     (omega names), \code{iov} (kappa names), \code{residual} (error type
+#'     string). Use \code{\link{ferx_model_inspect}} to view this before or
+#'     after fitting.}
 #'   \item{shrinkage_kappa}{Shrinkage values for kappa EBEs (\code{NULL} if no IOV).}
 #'   \item{ebe_kappas}{Data frame with columns \code{ID}, \code{OCC}, and one
 #'     column per kappa parameter containing per-subject per-occasion kappa
@@ -581,6 +589,11 @@ ferx_fit <- function(model, data,
     result$model_name <- tools::file_path_sans_ext(basename(model))
   }
 
+  # Auto-derived structural summary — parsed from the model file, not from Rust.
+  # Lets users verify ferx interpreted the model as expected (see ferx-nlme#49
+  # for a future version that sources this from the fit engine directly).
+  result$model_structure <- .ferx_parse_structure(model)
+
   # Store the requested gradient method
   result$gradient <- gradient
 
@@ -655,6 +668,10 @@ print.ferx_fit <- function(x, ...) {
   }
   if (!is.null(x$data_name) && nzchar(x$data_name)) {
     cat("Dataset:   ", x$data_name, "\n", sep = "")
+  }
+  if (!is.null(x$model_structure)) {
+    cat("\n--- Model Structure (auto-derived) ---\n")
+    .ferx_print_structure(x$model_structure)
   }
   cat("Converged: ", if (isTRUE(x$converged)) "YES" else "NO", "\n", sep = "")
   if (!is.null(x$method_chain) && length(x$method_chain) > 1) {
@@ -930,6 +947,7 @@ summary.ferx_fit <- function(object, ...) {
     ebe_convergence_warnings = x$ebe_convergence_warnings,
     max_unconverged_subjects = x$max_unconverged_subjects,
     total_ebe_fallbacks = x$total_ebe_fallbacks,
+    model_structure = x$model_structure,
     call_settings = x$call_settings %||% list(),
     sir_ess = x$sir_ess,
     warnings = x$warnings
@@ -964,6 +982,14 @@ print.ferx_summary <- function(x, ...) {
     for (nm in names(x$call_settings)) {
       cat(sprintf("  %-30s %s\n", nm, x$call_settings[[nm]]))
     }
+  }
+
+  if (!is.null(x$model_structure)) {
+    ms <- x$model_structure
+    iiv_str <- if (length(ms$iiv) > 0L) paste(ms$iiv, collapse = ", ") else "none"
+    iov_str <- if (length(ms$iov) > 0L) paste(ms$iov, collapse = ", ") else "none"
+    cat(sprintf("\nStructure: %s  |  IIV: %s  |  IOV: %s  |  Residual: %s\n",
+                .ferx_format_structural(ms), iiv_str, iov_str, ms$residual))
   }
 
   cat(sprintf("\nOFV: %.4f  AIC: %.4f  BIC: %.4f\n", x$ofv, x$aic, x$bic))

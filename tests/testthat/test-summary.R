@@ -50,7 +50,7 @@ test_that("summary.ferx_fit returns a ferx_summary with expected fields", {
     "se_omega", "sigma", "se_sigma", "shrinkage_eta", "shrinkage_eps",
     "covariance_status", "wall_time_secs", "ferx_version",
     "ebe_convergence_warnings", "max_unconverged_subjects",
-    "total_ebe_fallbacks", "call_settings", "sir_ess", "warnings"
+    "total_ebe_fallbacks", "model_structure", "call_settings", "sir_ess", "warnings"
   ), ignore.order = TRUE)
 })
 
@@ -183,37 +183,61 @@ test_that("print.ferx_summary wraps output in dashed borders", {
   expect_gte(length(bars), 2L)
 })
 
+test_that("print.ferx_summary shows Structure line when model_structure is non-NULL", {
+  s <- summary(make_fake_fit(model_structure = list(
+    theta_names = c("TVCL", "TVV"),
+    model_type  = "1-cpt oral",
+    iiv         = c("ETA_CL", "ETA_V"),
+    iov         = character(0),
+    residual    = "proportional"
+  )))
+  out <- capture.output(print(s))
+
+  expect_true(any(grepl("^Structure:", out)))
+  expect_true(any(grepl("1-cpt oral", out)))
+  expect_true(any(grepl("ETA_CL", out)))
+  expect_true(any(grepl("proportional", out)))
+})
+
+test_that("print.ferx_summary omits Structure line when model_structure is NULL", {
+  s <- summary(make_fake_fit())
+  s$model_structure <- NULL
+  out <- capture.output(print(s))
+
+  expect_false(any(grepl("^Structure:", out)))
+})
+
 # .ferx_parse_setting_value --------------------------------------------
 
 test_that(".ferx_parse_setting_value converts booleans", {
-  expect_identical(.ferx_parse_setting_value("true"), TRUE)
-  expect_identical(.ferx_parse_setting_value("false"), FALSE)
+  expect_identical(ferx:::.ferx_parse_setting_value("true"), TRUE)
+  expect_identical(ferx:::.ferx_parse_setting_value("false"), FALSE)
 })
 
 test_that(".ferx_parse_setting_value converts numerics", {
-  expect_equal(.ferx_parse_setting_value("200"), 200)
-  expect_equal(.ferx_parse_setting_value("3.14"), 3.14)
+  expect_equal(ferx:::.ferx_parse_setting_value("200"), 200)
+  expect_equal(ferx:::.ferx_parse_setting_value("3.14"), 3.14)
 })
 
 test_that(".ferx_parse_setting_value converts null to NA", {
-  expect_identical(.ferx_parse_setting_value("null"), NA)
+  expect_identical(ferx:::.ferx_parse_setting_value("null"), NA)
 })
 
 test_that(".ferx_parse_setting_value leaves strings as character", {
-  expect_identical(.ferx_parse_setting_value("slsqp"), "slsqp")
+  expect_identical(ferx:::.ferx_parse_setting_value("slsqp"), "slsqp")
 })
 
 # call_settings round-trip type fidelity --------------------------------
 
 test_that("call_settings stores typed values after settings are serialised", {
   # Simulate what ferx_fit() does: serialise then parse back.
-  parts <- .ferx_settings_to_strings(list(
+  parts <- ferx:::.ferx_settings_to_strings(list(
     optimizer = "slsqp",
     max_iter = 200L,
     scale_params = TRUE
   ))
   typed <- setNames(
-    lapply(parts$values, .ferx_parse_setting_value),
+    lapply(parts$values, ferx:::.ferx_parse_setting_value),
     parts$keys
   )
 

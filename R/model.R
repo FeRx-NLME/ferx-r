@@ -14,7 +14,7 @@
 #' @export
 ferx_model_show <- function(path) {
   if (!file.exists(path)) stop("File not found: ", path)
-  if (tools::file_ext(path) != "ferx") stop("'path' must be a .ferx file")
+  if (tolower(tools::file_ext(path)) != "ferx") stop("'path' must be a .ferx file")
   lines <- readLines(path, warn = FALSE)
   cat("# model:", basename(path), "\n")
   cat(lines, sep = "\n")
@@ -84,6 +84,7 @@ ferx_section_headers <- function(lines) {
   list(positions = pos, names = names)
 }
 
+
 #' Extract a section from a ferx model file
 #'
 #' Returns the lines belonging to a named section of a \code{.ferx} model file,
@@ -105,7 +106,7 @@ ferx_section_headers <- function(lines) {
 #' @export
 ferx_model_section <- function(path, section) {
   if (!file.exists(path)) stop("File not found: ", path)
-  if (tools::file_ext(path) != "ferx") stop("'path' must be a .ferx file")
+  if (tolower(tools::file_ext(path)) != "ferx") stop("'path' must be a .ferx file")
 
   file_lines <- readLines(path, warn = FALSE)
   hdr        <- ferx_section_headers(file_lines)
@@ -162,7 +163,7 @@ ferx_model_section <- function(path, section) {
 #' @export
 ferx_model_set_section <- function(path, section, lines) {
   if (!file.exists(path)) stop("File not found: ", path)
-  if (tools::file_ext(path) != "ferx") stop("'path' must be a .ferx file")
+  if (tolower(tools::file_ext(path)) != "ferx") stop("'path' must be a .ferx file")
 
   file_lines <- readLines(path, warn = FALSE)
   hdr        <- ferx_section_headers(file_lines)
@@ -434,4 +435,179 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
 
   if (edit) utils::file.edit(path)
   invisible(path)
+}
+
+# Extract all named [section] blocks from a .ferx file.
+# Returns a named list: section name → character vector of (comment-stripped, trimmed) lines.
+.ferx_extract_blocks <- function(path) {
+  raw <- readLines(path, warn = FALSE)
+  blocks  <- list()
+  current <- NULL
+  for (line in raw) {
+    stripped <- trimws(sub("(#|//).*$", "", line))
+    if (!nzchar(stripped)) next
+    m <- regmatches(stripped, regexpr("^\\[(\\w+)\\]$", stripped, perl = TRUE))
+    if (length(m) > 0L) {
+      current <- tolower(gsub("^\\[|\\]$", "", m))
+      if (is.null(blocks[[current]])) blocks[[current]] <- character(0)
+      next
+    }
+    if (!is.null(current)) blocks[[current]] <- c(blocks[[current]], stripped)
+  }
+  blocks
+}
+
+# Detect an unambiguous model-type label from [structural_model] lines.
+# Returns a short string ("1-cpt oral", "ODE", etc.) or NULL when unrecognised.
+.ferx_model_type <- function(lines) {
+  s <- paste(lines, collapse = " ")
+  if      (grepl("two_cpt_oral", s, fixed = TRUE)) "2-cpt oral"
+  else if (grepl("two_cpt_iv",   s, fixed = TRUE)) "2-cpt IV bolus"
+  else if (grepl("one_cpt_oral", s, fixed = TRUE)) "1-cpt oral"
+  else if (grepl("one_cpt_iv",   s, fixed = TRUE)) "1-cpt IV bolus"
+  else if (grepl("\\bode\\(",    s, perl  = TRUE)) "ODE"
+  else                                               NULL
+}
+
+# Format the structural display string from a model_structure list.
+# Combines the optional type label with the population parameter (theta) names.
+.ferx_format_structural <- function(ms) {
+  theta_str <- if (length(ms$theta_names) > 0L)
+    paste(ms$theta_names, collapse = ", ")
+  else
+    NULL
+  if (!is.null(ms$model_type) && !is.null(theta_str))
+    sprintf("%s  (%s)", ms$model_type, theta_str)
+  else if (!is.null(ms$model_type))
+    ms$model_type
+  else if (!is.null(theta_str))
+    theta_str
+  else
+    "unknown"
+}
+
+# Print the four structural detail lines (Structural / IIV / IOV / Residual).
+# The caller is responsible for any preceding header line.
+.ferx_print_structure <- function(ms) {
+  cat(sprintf("  Structural:  %s\n", .ferx_format_structural(ms)))
+  cat(sprintf("  IIV:         %s\n",
+    if (length(ms$iiv) > 0L) paste(ms$iiv, collapse = ", ") else "none"))
+  cat(sprintf("  IOV:         %s\n",
+    if (length(ms$iov) > 0L) paste(ms$iov, collapse = ", ") else "none"))
+  cat(sprintf("  Residual:    %s\n", ms$residual))
+  invisible(NULL)
+}
+
+# Parse a .ferx file and return a named list describing model structure.
+# Fields: theta_names (pop param names), model_type (label or NULL),
+#         iiv, iov, residual.
+# Used by ferx_model_inspect() (pre-fit) and attached to ferx_fit() results.
+.ferx_parse_structure <- function(path) {
+  b <- .ferx_extract_blocks(path)
+
+  # Population (theta) parameter names from [parameters]
+  params      <- b[["parameters"]] %||% character(0)
+  theta_lines <- grep("^theta\\s", params, value = TRUE)
+  thetas <- if (length(theta_lines) > 0L)
+    sub("^theta\\s+(\\w+).*", "\\1", theta_lines)
+  else
+    character(0)
+
+  # Optional model-type label from [structural_model]
+  struct_lines <- b[["structural_model"]] %||% character(0)
+  model_type   <- if (length(struct_lines) > 0L) .ferx_model_type(struct_lines) else NULL
+
+  # IIV: omega lines
+  omega_lines <- grep("^omega\\s", params, value = TRUE)
+  iiv <- if (length(omega_lines) > 0L)
+    sub("^omega\\s+(\\w+).*", "\\1", omega_lines)
+  else
+    character(0)
+
+  # IOV: kappa lines
+  kappa_lines <- grep("^kappa\\s", params, value = TRUE)
+  iov <- if (length(kappa_lines) > 0L)
+    sub("^kappa\\s+(\\w+).*", "\\1", kappa_lines)
+  else
+    character(0)
+
+  # Residual error type from [error_model]
+  err_line <- (b[["error_model"]] %||% character(0))[1L]
+  residual <- if (is.na(err_line) || !nzchar(err_line %||% "")) {
+    "unknown"
+  } else if (grepl("proportional", err_line, ignore.case = TRUE)) {
+    "proportional"
+  } else if (grepl("additive",     err_line, ignore.case = TRUE)) {
+    "additive"
+  } else if (grepl("combined",     err_line, ignore.case = TRUE)) {
+    "combined"
+  } else {
+    warning("Unrecognised residual error type; reporting as \"unknown\". Line: ",
+            err_line, call. = FALSE)
+    "unknown"
+  }
+
+  list(
+    theta_names = thetas,
+    model_type  = model_type,
+    iiv         = iiv,
+    iov         = iov,
+    residual    = residual
+  )
+}
+
+#' Inspect the structure of a ferx model file
+#'
+#' Parses a \code{.ferx} file without fitting and prints a compact summary of
+#' its model structure: PK model type, inter-individual variability (IIV),
+#' inter-occasion variability (IOV), and residual error type. Useful for
+#' verifying that a model file will be interpreted as expected before committing
+#' to a potentially long estimation run.
+#'
+#' Alternatively, pass a \code{ferx_fit} object to display the structure that
+#' was auto-derived during fitting (reads \code{fit$model_structure} directly,
+#' so no file path is needed post-fit).
+#'
+#' @param path Path to a \code{.ferx} model file, \emph{or} a
+#'   \code{ferx_fit} object returned by \code{\link{ferx_fit}}.
+#'
+#' @return A named list (invisibly) with fields: \code{theta_names}
+#'   (character vector of population parameter names), \code{model_type}
+#'   (short label such as \code{"1-cpt oral"} or \code{NULL} when not
+#'   unambiguously detectable), \code{iiv} (omega names), \code{iov}
+#'   (kappa names), and \code{residual} (error type).
+#'
+#' @examples
+#' ex <- ferx_example("warfarin")
+#' ferx_model_inspect(ex$model)
+#'
+#' # Programmatic access
+#' s <- ferx_model_inspect(ex$model)
+#' s$theta_names  # c("TVCL", "TVV", "TVKA")
+#' s$model_type   # "1-cpt oral"
+#' s$iiv          # c("ETA_CL", "ETA_V", "ETA_KA")
+#' s$residual     # "proportional"
+#'
+#' @seealso \code{\link{ferx_model_show}}, \code{\link{ferx_model_edit}},
+#'   \code{\link{ferx_fit}}
+#' @export
+ferx_model_inspect <- function(path) {
+  if (inherits(path, "ferx_fit")) {
+    s <- path$model_structure
+    if (is.null(s)) stop("No model_structure found on this ferx_fit object.")
+    label <- if (!is.null(path$model_name) && nzchar(path$model_name))
+      paste0(path$model_name, ".ferx") else "ferx_fit"
+    cat("Model structure (", label, ")\n", sep = "")
+    .ferx_print_structure(s)
+    return(invisible(s))
+  }
+  if (!file.exists(path)) stop("File not found: ", path)
+  if (tolower(tools::file_ext(path)) != "ferx") stop("'path' must be a .ferx file")
+
+  s <- .ferx_parse_structure(path)
+
+  cat("Model structure (", basename(path), ")\n", sep = "")
+  .ferx_print_structure(s)
+
+  invisible(s)
 }

@@ -247,6 +247,14 @@ etas), its row is still returned but \code{W} and \code{p_val} are
 \item{se_kappa}{Standard errors for kappa parameters: length \code{d}
 (diagonal kappa) or \code{d*(d+1)/2} (block_kappa, lower-triangle order).
 \code{NULL} if covariance step not run or no IOV.}
+\item{model_structure}{Named list auto-derived from the \code{.ferx} file
+(not from the Rust engine — see \href{https://github.com/InsightRX/ferx-nlme/issues/49}{ferx-nlme#49}
+for the future canonical version). Fields: \code{theta_names}
+(character vector of population parameter names), \code{model_type}
+(short label such as \code{"1-cpt oral"} or \code{NULL}), \code{iiv}
+(omega names), \code{iov} (kappa names), \code{residual} (error type
+string). Use \code{\link{ferx_model_inspect}} to view this before or
+after fitting.}
 \item{shrinkage_kappa}{Shrinkage values for kappa EBEs (\code{NULL} if no IOV).}
 \item{ebe_kappas}{Data frame with columns \code{ID}, \code{OCC}, and one
 column per kappa parameter containing per-subject per-occasion kappa
