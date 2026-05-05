@@ -220,6 +220,10 @@
 #'     EBEs. \code{ID} carries the original subject identifier (matching
 #'     \code{sdtab}); \code{OCC} carries the labeled occasion in first-seen
 #'     order. \code{NULL} when no IOV.}
+#'   \item{call_settings}{Named list of the effective settings passed to Rust,
+#'     with values typed back to their natural R types (logical, numeric, or
+#'     character). Includes merged defaults such as \code{optimizer_trace} and
+#'     \code{scale_params}. Empty list when no settings were supplied.}
 #'
 #' @examples
 #' \dontrun{
@@ -372,6 +376,12 @@ ferx_fit <- function(model, data,
     )
   }
   settings_parts <- .ferx_settings_to_strings(settings)
+  # Effective settings as sent to Rust, with merged defaults, for summary display.
+  settings_used <- if (length(settings_parts$keys) > 0L) {
+    setNames(lapply(settings_parts$values, .ferx_parse_setting_value), settings_parts$keys)
+  } else {
+    list()
+  }
 
   fit_started_at <- Sys.time()
   raw <- ferx_rust_fit(
@@ -574,6 +584,9 @@ ferx_fit <- function(model, data,
   # Store the requested gradient method
   result$gradient <- gradient
 
+  # Store effective settings (already serialised from settings_parts above)
+  result$call_settings <- settings_used
+
   class(result) <- "ferx_fit"
   result
 }
@@ -645,9 +658,9 @@ print.ferx_fit <- function(x, ...) {
   }
   cat("Converged: ", if (isTRUE(x$converged)) "YES" else "NO", "\n", sep = "")
   if (!is.null(x$method_chain) && length(x$method_chain) > 1) {
-    cat("Estimation chain:  ", paste(x$method_chain, collapse = " -> "), "\n", sep = "")
+    cat("Estimation chain:  ", paste(toupper(x$method_chain), collapse = " -> "), "\n", sep = "")
   } else {
-    cat("Estimation method: ", x$method, "\n", sep = "")
+    cat("Estimation method: ", toupper(x$method %||% "?"), "\n", sep = "")
   }
   if (!is.null(x$n_iterations)) {
     cat("Iterations: ", x$n_iterations, "\n", sep = "")
@@ -852,12 +865,40 @@ print.ferx_fit <- function(x, ...) {
 
 #' Summarize a ferx fit result
 #'
-#' Returns a compact list with the most-used diagnostic fields: OFV/AIC/BIC,
-#' parameter estimates, standard errors, shrinkage, and run metadata.
+#' Returns a compact list with the most-used diagnostic fields: model name,
+#' dataset, estimation method (including the full chain when multiple methods
+#' were chained), OFV/AIC/BIC, parameter estimates, standard errors, shrinkage,
+#' effective settings, SIR ESS (when available), warnings, and run metadata.
+#' Printing the returned object via \code{print()} or auto-printing formats
+#' all fields in a human-readable layout.
 #'
 #' @param object A `ferx_fit` object returned by \code{\link{ferx_fit}}.
 #' @param ... Ignored.
-#' @return A `ferx_summary` list (invisibly). Print method formats the output.
+#' @return A `ferx_summary` list (invisibly). Fields include: \code{model_name},
+#'   \code{data_name}, \code{method}, \code{method_chain}, \code{gradient},
+#'   \code{converged}, \code{ofv}, \code{aic}, \code{bic}, \code{n_subjects},
+#'   \code{n_obs}, \code{n_parameters}, \code{n_iterations}, \code{theta},
+#'   \code{se_theta}, \code{omega}, \code{se_omega}, \code{sigma},
+#'   \code{se_sigma}, \code{shrinkage_eta}, \code{shrinkage_eps},
+#'   \code{covariance_status}, \code{wall_time_secs}, \code{ferx_version},
+#'   \code{call_settings}, \code{sir_ess}, \code{warnings},
+#'   \code{ebe_convergence_warnings}, \code{max_unconverged_subjects},
+#'   \code{total_ebe_fallbacks}.
+#' @examples
+#' \dontrun{
+#' ex  <- ferx_example("warfarin")
+#' fit <- ferx_fit(ex$model, ex$data)
+#' summary(fit)
+#'
+#' # Chained estimation: SAEM warm-start followed by FOCEI refinement
+#' fit_chain <- ferx_fit(ex$model, ex$data, method = c("saem", "focei"))
+#' summary(fit_chain)
+#'
+#' # With custom settings — shown in the Settings block
+#' fit_custom <- ferx_fit(ex$model, ex$data,
+#'   settings = list(optimizer = "slsqp", max_iter = 200L))
+#' summary(fit_custom)
+#' }
 #' @export
 summary.ferx_fit <- function(object, ...) {
   x <- object
@@ -866,6 +907,7 @@ summary.ferx_fit <- function(object, ...) {
     data_name = x$data_name %||% NA_character_,
     gradient = x$gradient %||% NA_character_,
     method = x$method,
+    method_chain = x$method_chain,
     converged = x$converged,
     ofv = x$ofv,
     aic = x$aic,
@@ -887,7 +929,10 @@ summary.ferx_fit <- function(object, ...) {
     ferx_version = x$ferx_version,
     ebe_convergence_warnings = x$ebe_convergence_warnings,
     max_unconverged_subjects = x$max_unconverged_subjects,
-    total_ebe_fallbacks = x$total_ebe_fallbacks
+    total_ebe_fallbacks = x$total_ebe_fallbacks,
+    call_settings = x$call_settings %||% list(),
+    sir_ess = x$sir_ess,
+    warnings = x$warnings
   )
   class(s) <- "ferx_summary"
   s
@@ -897,20 +942,36 @@ summary.ferx_fit <- function(object, ...) {
 
 #' @export
 print.ferx_summary <- function(x, ...) {
+  bar <- strrep("-", 50)
+  cat(bar, "\n", sep = "")
+  cat("ferx NLME Fit Summary\n")
+  cat(bar, "\n", sep = "")
+
+  cat(sprintf("Model:     %s\n", x$model_name %||% "?"))
+  cat(sprintf("Dataset:   %s\n", x$data_name %||% "?"))
+  cat(sprintf("Converged: %s\n", if (isTRUE(x$converged)) "YES" else "NO"))
+
+  if (!is.null(x$method_chain) && length(x$method_chain) > 1L) {
+    cat("Method:    ", paste(toupper(x$method_chain), collapse = " -> "), "\n", sep = "")
+  } else {
+    cat(sprintf("Method:    %s\n", toupper(x$method %||% "?")))
+  }
+  cat(sprintf("Gradient:  %s (requested)\n", x$gradient %||% "?"))
+  cat(sprintf("ferx v%s\n", x$ferx_version %||% "?"))
+
+  if (length(x$call_settings) > 0L) {
+    cat("\nSettings:\n")
+    for (nm in names(x$call_settings)) {
+      cat(sprintf("  %-30s %s\n", nm, x$call_settings[[nm]]))
+    }
+  }
+
+  cat(sprintf("\nOFV: %.4f  AIC: %.4f  BIC: %.4f\n", x$ofv, x$aic, x$bic))
   cat(sprintf(
-    "ferx %s — %s  [gradient: %s (requested)]\n",
-    x$ferx_version %||% "?", toupper(x$method), x$gradient %||% "?"
-  ))
-  cat(sprintf(
-    "Model: %s  |  Dataset: %s  |  Converged: %s\n",
-    x$model_name %||% "?",
-    x$data_name %||% "?",
-    if (isTRUE(x$converged)) "YES" else "NO"
-  ))
-  cat(sprintf("OFV: %.4f  AIC: %.4f  BIC: %.4f\n", x$ofv, x$aic, x$bic))
-  cat(sprintf(
-    "Subjects: %d  Obs: %d  Params: %d  Iter: %d\n",
-    x$n_subjects, x$n_obs, x$n_parameters %||% NA, x$n_iterations
+    "Subjects: %d  Obs: %d  Params: %s  Iter: %d\n",
+    x$n_subjects, x$n_obs,
+    if (is.null(x$n_parameters) || is.na(x$n_parameters)) "?" else format(x$n_parameters),
+    x$n_iterations
   ))
 
   if (!is.null(x$shrinkage_eta) && any(!is.na(x$shrinkage_eta))) {
@@ -924,6 +985,10 @@ print.ferx_summary <- function(x, ...) {
     cat(sprintf("EPS shrinkage: %.1f%%\n", x$shrinkage_eps * 100))
   }
 
+  if (!is.null(x$sir_ess)) {
+    cat(sprintf("SIR ESS:   %.1f\n", x$sir_ess))
+  }
+
   cov_str <- switch(x$covariance_status %||% "unknown",
     computed = "computed",
     failed = "FAILED",
@@ -933,7 +998,35 @@ print.ferx_summary <- function(x, ...) {
   wall <- if (!is.null(x$wall_time_secs)) sprintf("%.1fs", x$wall_time_secs) else "?"
   cat(sprintf("Covariance: %s  |  Wall time: %s\n", cov_str, wall))
 
+  warn_msgs <- x$warnings
+  if (!is.null(x$ebe_convergence_warnings) && x$ebe_convergence_warnings > 0L) {
+    warn_msgs <- c(warn_msgs, sprintf(
+      "%d EBE convergence warning(s) (max unconverged subjects: %s)",
+      x$ebe_convergence_warnings,
+      x$max_unconverged_subjects %||% "?"
+    ))
+  }
+  if (!is.null(x$total_ebe_fallbacks) && x$total_ebe_fallbacks > 0L) {
+    warn_msgs <- c(warn_msgs, sprintf("%d EBE fallback(s)", x$total_ebe_fallbacks))
+  }
+  if (length(warn_msgs) > 0L) {
+    cat("\nWarnings:\n")
+    for (w in warn_msgs) cat("  *", w, "\n")
+  }
+
+  cat(bar, "\n", sep = "")
   invisible(x)
+}
+
+# Reverse of the stringify step in .ferx_settings_to_strings: parse a single
+# string value back to its natural R type for human-readable summary display.
+.ferx_parse_setting_value <- function(v) {
+  if (v == "true") return(TRUE)
+  if (v == "false") return(FALSE)
+  if (v == "null") return(NA)
+  num <- suppressWarnings(as.numeric(v))
+  if (!is.na(num)) return(num)
+  v
 }
 
 # Convert a named-list of settings into two parallel character vectors for the
