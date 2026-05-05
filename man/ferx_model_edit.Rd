@@ -4,7 +4,7 @@
 \alias{ferx_model_edit}
 \title{Open a ferx model file in an editor}
 \usage{
-ferx_model_edit(path, dest = ".")
+ferx_model_edit(path, dest = ".", overwrite = FALSE)
 }
 \arguments{
 \item{path}{Path to a \code{.ferx} model file.}
@@ -12,6 +12,10 @@ ferx_model_edit(path, dest = ".")
 \item{dest}{Directory to copy read-only package files into before editing.
 Defaults to the current working directory. Ignored when \code{path} is
 already a writable user-owned file.}
+
+\item{overwrite}{Logical. If \code{TRUE}, overwrite an existing file in
+\code{dest} when copying a package example. If \code{FALSE} (default) and
+the destination file already exists, an error is raised.}
 }
 \value{
 The path of the file that was opened (i.e. \code{path} for
@@ -35,5 +39,6 @@ ferx_model_edit("my_model.ferx")
 
 }
 \seealso{
-\code{\link{ferx_model_show}}, \code{\link{ferx_example}}
+\code{\link{ferx_model_show}}, \code{\link{ferx_model_new}},
+\code{\link{ferx_example}}
 }

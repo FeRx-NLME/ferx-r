@@ -32,6 +32,9 @@ ferx_model_show <- function(path) {
 #' @param dest Directory to copy read-only package files into before editing.
 #'   Defaults to the current working directory. Ignored when \code{path} is
 #'   already a writable user-owned file.
+#' @param overwrite Logical. If \code{TRUE}, overwrite an existing file in
+#'   \code{dest} when copying a package example. If \code{FALSE} (default) and
+#'   the destination file already exists, an error is raised.
 #'
 #' @return The path of the file that was opened (i.e. \code{path} for
 #'   user-owned files, or the copied path for package examples), invisibly.
@@ -47,9 +50,10 @@ ferx_model_show <- function(path) {
 #' ferx_model_edit("my_model.ferx")
 #' }
 #'
-#' @seealso \code{\link{ferx_model_show}}, \code{\link{ferx_example}}
+#' @seealso \code{\link{ferx_model_show}}, \code{\link{ferx_model_new}},
+#'   \code{\link{ferx_example}}
 #' @export
-ferx_model_edit <- function(path, dest = ".") {
+ferx_model_edit <- function(path, dest = ".", overwrite = FALSE) {
   if (!file.exists(path)) stop("File not found: ", path)
 
   pkg_dir <- system.file("", package = "ferx")
@@ -57,11 +61,377 @@ ferx_model_edit <- function(path, dest = ".") {
 
   if (in_pkg) {
     dest_path <- file.path(dest, basename(path))
-    file.copy(path, dest_path, overwrite = FALSE)
+    if (file.exists(dest_path) && !overwrite) {
+      stop(
+        dest_path, " already exists. ",
+        "Use overwrite = TRUE to replace it, or choose a different dest."
+      )
+    }
+    file.copy(path, dest_path, overwrite = overwrite)
     message("Copied to ", dest_path, "; editing your copy.")
     path <- dest_path
   }
 
   utils::file.edit(path)
+  invisible(path)
+}
+
+# Parse section header positions and names from a character vector of file
+# lines. Returns a list with $positions (integer indices) and $names (strings).
+ferx_section_headers <- function(lines) {
+  pos   <- grep("^\\s*\\[.+\\]\\s*$", lines)
+  names <- gsub("^\\s*\\[|\\]\\s*$", "", lines[pos])
+  list(positions = pos, names = names)
+}
+
+#' Extract a section from a ferx model file
+#'
+#' Returns the lines belonging to a named section of a \code{.ferx} model file,
+#' excluding the section header itself. Prints the lines to the console and
+#' returns them invisibly.
+#'
+#' @param path Path to a \code{.ferx} model file.
+#' @param section Name of the section to extract, without brackets (e.g.
+#'   \code{"parameters"}).
+#'
+#' @return Character vector of lines in the requested section, invisibly.
+#'
+#' @examples
+#' ex <- ferx_example("warfarin")
+#' ferx_model_section(ex$model, "parameters")
+#'
+#' @seealso \code{\link{ferx_model_show}}, \code{\link{ferx_model_edit}},
+#'   \code{\link{ferx_model_set_section}}
+#' @export
+ferx_model_section <- function(path, section) {
+  if (!file.exists(path)) stop("File not found: ", path)
+  if (tools::file_ext(path) != "ferx") stop("'path' must be a .ferx file")
+
+  file_lines <- readLines(path, warn = FALSE)
+  hdr        <- ferx_section_headers(file_lines)
+
+  idx <- which(hdr$names == section)
+  if (length(idx) == 0L) {
+    stop(
+      "Section '", section, "' not found. ",
+      "Available sections: ", paste(hdr$names, collapse = ", ")
+    )
+  }
+
+  start <- hdr$positions[idx] + 1L
+  end   <- if (idx < length(hdr$positions)) hdr$positions[idx + 1L] - 1L else length(file_lines)
+  body  <- if (start <= end) file_lines[start:end] else character(0)
+
+  cat("# [", section, "]\n", sep = "")
+  cat(body, sep = "\n")
+  cat("\n")
+  invisible(body)
+}
+
+#' Replace a section in a ferx model file
+#'
+#' Overwrites the body of a named section in a \code{.ferx} file with new
+#' lines, leaving all other sections untouched. Use this to modify a model
+#' programmatically without opening an editor.
+#'
+#' @param path Path to a \code{.ferx} model file.
+#' @param section Name of the section to replace, without brackets (e.g.
+#'   \code{"fit_options"}).
+#' @param lines Character vector of replacement lines. These become the new
+#'   body of the section (do not include the \code{[section]} header line).
+#'
+#' @return \code{path}, invisibly.
+#'
+#' @examples
+#' \dontrun{
+#' # Switch estimation method without opening an editor
+#' ferx_model_set_section("my_model.ferx", "fit_options", c(
+#'   "  method     = focei",
+#'   "  maxiter    = 500",
+#'   "  covariance = false"
+#' ))
+#'
+#' # Read-modify-write a section
+#' lines <- ferx_model_section("my_model.ferx", "parameters")
+#' lines <- sub("TVCL\\(.*\\)", "TVCL(0.5, 0.001, 10.0)", lines)
+#' ferx_model_set_section("my_model.ferx", "parameters", lines)
+#' }
+#'
+#' @seealso \code{\link{ferx_model_section}}, \code{\link{ferx_model_show}},
+#'   \code{\link{ferx_model_new}}
+#' @export
+ferx_model_set_section <- function(path, section, lines) {
+  if (!file.exists(path)) stop("File not found: ", path)
+  if (tools::file_ext(path) != "ferx") stop("'path' must be a .ferx file")
+
+  file_lines <- readLines(path, warn = FALSE)
+  hdr        <- ferx_section_headers(file_lines)
+
+  idx <- which(hdr$names == section)
+  if (length(idx) == 0L) {
+    stop(
+      "Section '", section, "' not found. ",
+      "Available sections: ", paste(hdr$names, collapse = ", ")
+    )
+  }
+
+  start      <- hdr$positions[idx] + 1L
+  end        <- if (idx < length(hdr$positions)) hdr$positions[idx + 1L] - 1L else length(file_lines)
+  tail_lines <- if (end < length(file_lines)) file_lines[seq.int(end + 1L, length(file_lines))] else character(0)
+
+  writeLines(c(file_lines[seq_len(hdr$positions[idx])], lines, tail_lines), path)
+  invisible(path)
+}
+
+#' Create a new ferx model file from a skeleton template
+#'
+#' Writes a new \code{.ferx} file pre-filled with a skeleton for the chosen
+#' model type, then opens it in an editor. Pass \code{print = TRUE} instead of
+#' supplying a \code{path} to print the skeleton to the console without writing
+#' any file — useful for copy-pasting or piping in a scripted workflow.
+#'
+#' @param path Path for the new \code{.ferx} file. Must not already exist
+#'   unless \code{overwrite = TRUE}. Ignored when \code{print = TRUE}.
+#' @param template One of \code{"1cpt_oral"} (default), \code{"1cpt_iv"},
+#'   \code{"2cpt_oral"}, \code{"2cpt_iv"}, or \code{"ode"}.
+#' @param overwrite Logical. Overwrite \code{path} if it already exists?
+#'   Defaults to \code{FALSE}.
+#' @param edit Logical. Open the file in an editor after writing? Defaults to
+#'   \code{TRUE}. Ignored when \code{print = TRUE}.
+#' @param print Logical. If \code{TRUE}, print the skeleton to the console
+#'   instead of writing a file. No file is created and no editor is opened.
+#'   Defaults to \code{FALSE}.
+#'
+#' @return \code{path} invisibly, or \code{NULL} invisibly when
+#'   \code{print = TRUE}.
+#'
+#' @examples
+#' # Print a skeleton to the console (no file written, no editor opened)
+#' ferx_model_new(print = TRUE)
+#' ferx_model_new(template = "2cpt_iv", print = TRUE)
+#'
+#' \dontrun{
+#' # Write a file and open it for editing
+#' ferx_model_new("my_model.ferx")
+#'
+#' # Write a file without opening an editor
+#' ferx_model_new("my_model.ferx", edit = FALSE)
+#' }
+#'
+#' @seealso \code{\link{ferx_model_edit}}, \code{\link{ferx_model_show}},
+#'   \code{\link{ferx_model_set_section}}
+#' @export
+ferx_model_new <- function(path = NULL, template = "1cpt_oral",
+                            overwrite = FALSE, edit = TRUE, print = FALSE) {
+  if (!print) {
+    if (is.null(path)) stop("'path' is required when print = FALSE")
+    if (tools::file_ext(path) != "ferx") stop("'path' must end in .ferx")
+    if (file.exists(path) && !overwrite) {
+      stop(path, " already exists. Use overwrite = TRUE to replace it.")
+    }
+  }
+
+  templates <- list(
+    `1cpt_oral` = c(
+      "# One-compartment oral PK model",
+      "",
+      "[parameters]",
+      "  theta TVCL(1.0, 0.001, 100.0)",
+      "  theta TVV(10.0, 0.1, 1000.0)",
+      "  theta TVKA(1.0, 0.01, 50.0)",
+      "",
+      "  omega ETA_CL ~ 0.09",
+      "  omega ETA_V  ~ 0.09",
+      "  omega ETA_KA ~ 0.25",
+      "",
+      "  sigma PROP_ERR ~ 0.01",
+      "",
+      "[individual_parameters]",
+      "  CL = TVCL * exp(ETA_CL)",
+      "  V  = TVV  * exp(ETA_V)",
+      "  KA = TVKA * exp(ETA_KA)",
+      "",
+      "[structural_model]",
+      "  pk one_cpt_oral(cl=CL, v=V, ka=KA)",
+      "",
+      "[error_model]",
+      "  DV ~ proportional(PROP_ERR)",
+      "",
+      "[initial_values]",
+      "  theta = [1.0, 10.0, 1.0]",
+      "  omega = [0.09, 0.09, 0.25]",
+      "  sigma = [0.01]",
+      "",
+      "[fit_options]",
+      "  method     = foce",
+      "  maxiter    = 300",
+      "  covariance = true"
+    ),
+    `1cpt_iv` = c(
+      "# One-compartment IV bolus PK model",
+      "",
+      "[parameters]",
+      "  theta TVCL(5.0, 0.1, 100.0)",
+      "  theta TVV(20.0, 1.0, 500.0)",
+      "",
+      "  omega ETA_CL ~ 0.09",
+      "  omega ETA_V  ~ 0.09",
+      "",
+      "  sigma PROP_ERR ~ 0.01",
+      "",
+      "[individual_parameters]",
+      "  CL = TVCL * exp(ETA_CL)",
+      "  V  = TVV  * exp(ETA_V)",
+      "",
+      "[structural_model]",
+      "  pk one_cpt_iv_bolus(cl=CL, v=V)",
+      "",
+      "[error_model]",
+      "  DV ~ proportional(PROP_ERR)",
+      "",
+      "[initial_values]",
+      "  theta = [5.0, 20.0]",
+      "  omega = [0.09, 0.09]",
+      "  sigma = [0.01]",
+      "",
+      "[fit_options]",
+      "  method     = foce",
+      "  maxiter    = 300",
+      "  covariance = true"
+    ),
+    `2cpt_oral` = c(
+      "# Two-compartment oral PK model",
+      "",
+      "[parameters]",
+      "  theta TVCL(5.0, 0.1, 100.0)",
+      "  theta TVV1(50.0, 1.0, 500.0)",
+      "  theta TVQ(10.0, 0.1, 100.0)",
+      "  theta TVV2(100.0, 1.0, 1000.0)",
+      "  theta TVKA(1.2, 0.01, 10.0)",
+      "",
+      "  omega ETA_CL ~ 0.10",
+      "  omega ETA_V1 ~ 0.10",
+      "  omega ETA_Q  ~ 0.05",
+      "  omega ETA_V2 ~ 0.05",
+      "  omega ETA_KA ~ 0.15",
+      "",
+      "  sigma PROP_ERR ~ 0.02",
+      "",
+      "[individual_parameters]",
+      "  CL = TVCL * exp(ETA_CL)",
+      "  V1 = TVV1 * exp(ETA_V1)",
+      "  Q  = TVQ  * exp(ETA_Q)",
+      "  V2 = TVV2 * exp(ETA_V2)",
+      "  KA = TVKA * exp(ETA_KA)",
+      "",
+      "[structural_model]",
+      "  pk two_cpt_oral(cl=CL, v1=V1, q=Q, v2=V2, ka=KA)",
+      "",
+      "[error_model]",
+      "  DV ~ proportional(PROP_ERR)",
+      "",
+      "[initial_values]",
+      "  theta = [5.0, 50.0, 10.0, 100.0, 1.2]",
+      "  omega = [0.10, 0.10, 0.05, 0.05, 0.15]",
+      "  sigma = [0.02]",
+      "",
+      "[fit_options]",
+      "  method     = focei",
+      "  maxiter    = 500",
+      "  covariance = true"
+    ),
+    `2cpt_iv` = c(
+      "# Two-compartment IV bolus PK model",
+      "",
+      "[parameters]",
+      "  theta TVCL(5.0, 0.1, 100.0)",
+      "  theta TVV1(15.0, 1.0, 500.0)",
+      "  theta TVQ(3.0, 0.01, 100.0)",
+      "  theta TVV2(30.0, 1.0, 500.0)",
+      "",
+      "  omega ETA_CL ~ 0.10",
+      "  omega ETA_V1 ~ 0.10",
+      "  omega ETA_Q  ~ 0.10",
+      "  omega ETA_V2 ~ 0.10",
+      "",
+      "  sigma PROP_ERR ~ 0.01",
+      "",
+      "[individual_parameters]",
+      "  CL = TVCL * exp(ETA_CL)",
+      "  V1 = TVV1 * exp(ETA_V1)",
+      "  Q  = TVQ  * exp(ETA_Q)",
+      "  V2 = TVV2 * exp(ETA_V2)",
+      "",
+      "[structural_model]",
+      "  pk two_cpt_iv_bolus(cl=CL, v1=V1, q=Q, v2=V2)",
+      "",
+      "[error_model]",
+      "  DV ~ proportional(PROP_ERR)",
+      "",
+      "[initial_values]",
+      "  theta = [5.0, 15.0, 3.0, 30.0]",
+      "  omega = [0.10, 0.10, 0.10, 0.10]",
+      "  sigma = [0.01]",
+      "",
+      "[fit_options]",
+      "  method     = foce",
+      "  maxiter    = 500",
+      "  covariance = true"
+    ),
+    ode = c(
+      "# ODE-based PK model",
+      "",
+      "[parameters]",
+      "  theta TVPARAM(1.0, 0.001, 1000.0)",
+      "",
+      "  omega ETA_PARAM ~ 0.09",
+      "",
+      "  sigma PROP_ERR ~ 0.01",
+      "",
+      "[individual_parameters]",
+      "  PARAM = TVPARAM * exp(ETA_PARAM)",
+      "",
+      "[structural_model]",
+      "  ode(obs_cmt=central, states=[depot, central])",
+      "",
+      "[odes]",
+      "  d/dt(depot)   = 0  # replace with your equations",
+      "  d/dt(central) = 0",
+      "",
+      "[error_model]",
+      "  DV ~ proportional(PROP_ERR)",
+      "",
+      "[initial_values]",
+      "  theta = [1.0]",
+      "  omega = [0.09]",
+      "  sigma = [0.01]",
+      "",
+      "[fit_options]",
+      "  method     = focei",
+      "  maxiter    = 500",
+      "  covariance = true"
+    )
+  )
+
+  valid <- names(templates)
+  if (!template %in% valid) {
+    stop(
+      "Unknown template '", template, "'. ",
+      "Choose one of: ", paste(valid, collapse = ", ")
+    )
+  }
+
+  skeleton <- templates[[template]]
+
+  if (print) {
+    cat(skeleton, sep = "\n")
+    cat("\n")
+    return(invisible(NULL))
+  }
+
+  writeLines(skeleton, path)
+  message("Created ", path)
+
+  if (edit) utils::file.edit(path)
   invisible(path)
 }
