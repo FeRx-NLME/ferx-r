@@ -533,6 +533,9 @@ ferx_fit <- function(model, data,
   result$condition_number <- if (is.nan(result$cov_condition_number)) NULL else result$cov_condition_number
   result$cov_eigenvalues <- NULL
   result$cov_condition_number <- NULL
+  # Inf means a non-positive eigenvalue — the covariance step itself would have
+  # already emitted a warning (covariance_status != "computed"), so we don't
+  # double-warn here.
   if (!is.null(result$condition_number) && is.finite(result$condition_number) &&
         result$condition_number > 1000) {
     result$warnings <- c(

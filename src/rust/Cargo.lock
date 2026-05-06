@@ -197,7 +197,7 @@ dependencies = [
 [[package]]
 name = "ferx-nlme"
 version = "0.1.0"
-source = "git+https://github.com/InsightRX/ferx-nlme?branch=feat%2Fcov-eigenvalues#d75c4cbccdad133408e91d5b203d0db6ea0cd6a4"
+source = "git+https://github.com/InsightRX/ferx-nlme?branch=main#e1dd6122a10e2c461411d23e860eb9e82f98143a"
 dependencies = [
  "argmin",
  "argmin-math",
