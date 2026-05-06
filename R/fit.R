@@ -526,26 +526,7 @@ ferx_fit <- function(model, data,
   }
   result$cov_matrix_dim <- NULL
 
-  # Eigenvalues and condition number pre-computed by the Rust backend.
-  # Empty vector / NaN are sentinels for "not available" (covariance step not
-  # run, failed, or fewer than two free parameters).
-  result$eigenvalues <- if (length(result$cov_eigenvalues) == 0L) NULL else result$cov_eigenvalues
-  result$condition_number <- if (is.nan(result$cov_condition_number)) NULL else result$cov_condition_number
-  result$cov_eigenvalues <- NULL
-  result$cov_condition_number <- NULL
-  # Inf means a non-positive eigenvalue — the covariance step itself would have
-  # already emitted a warning (covariance_status != "computed"), so we don't
-  # double-warn here.
-  if (!is.null(result$condition_number) && is.finite(result$condition_number) &&
-        result$condition_number > 1000) {
-    result$warnings <- c(
-      result$warnings,
-      sprintf(
-        "High condition number (%.1f) — parameter space may be ill-conditioned",
-        result$condition_number
-      )
-    )
-  }
+  result <- .ferx_apply_cov_sentinels(result)
 
   # ETA normality (Shapiro-Wilk) — computed in R from per-subject EBEs
   result$eta_normality <- .ferx_compute_eta_normality(result$ebe_etas)
@@ -641,6 +622,28 @@ ferx_fit <- function(model, data,
 
 # Compute Shapiro-Wilk normality test for each ETA, one row per ID.
 # Returns a data.frame with columns: eta, W, p_val, flag.
+# Converts the raw FFI sentinels (empty vec, NaN) to idiomatic R (NULL) and
+# appends a warning when condition_number > 1000 (NONMEM convention).
+# Inf is kept as-is: it signals a non-positive eigenvalue, which the covariance
+# step already warned about (covariance_status != "computed").
+.ferx_apply_cov_sentinels <- function(result) {
+  result$eigenvalues <- if (length(result$cov_eigenvalues) == 0L) NULL else result$cov_eigenvalues
+  result$condition_number <- if (is.nan(result$cov_condition_number)) NULL else result$cov_condition_number
+  result$cov_eigenvalues <- NULL
+  result$cov_condition_number <- NULL
+  if (!is.null(result$condition_number) && is.finite(result$condition_number) &&
+        result$condition_number > 1000) {
+    result$warnings <- c(
+      result$warnings,
+      sprintf(
+        "High condition number (%.1f) — parameter space may be ill-conditioned",
+        result$condition_number
+      )
+    )
+  }
+  result
+}
+
 # `shapiro.test()` is hard-capped at 5000 observations; for larger N each
 # ETA is systematically subsampled to 5000 values to keep the diagnostic
 # from failing, and a single warning is emitted to flag that the result

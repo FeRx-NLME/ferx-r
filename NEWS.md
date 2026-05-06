@@ -1,4 +1,4 @@
-# ferx 0.1.1
+# ferx 0.1.2
 
 ## New features
 
