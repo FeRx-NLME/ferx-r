@@ -2,6 +2,8 @@ Package: ferx
 Title: Nonlinear Mixed Effects Modeling with Rust Backend
 Version: 0.1.2
 Authors@R: person("InsightRx", role = c("aut", "cre"), email = "dev@insightrx.com")
+Author: InsightRx [aut, cre]
+Maintainer: InsightRx <dev@insightrx.com>
 Description: Fast NLME estimation using FOCE/FOCEI with automatic differentiation.
     Powered by a Rust engine with Enzyme autodiff for exact gradients.
     Supports analytical PK models (1/2-compartment) and ODE-based models.
