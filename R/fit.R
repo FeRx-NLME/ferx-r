@@ -723,15 +723,25 @@ print.ferx_fit <- function(x, ...) {
   has_offdiag <- FALSE
   for (i in seq_len(n_eta)) {
     var_ii <- om[i, i]
-    cv_pct <- if (var_ii > 0) sqrt(var_ii) * 100 else 0
+    # Fall back to "log_normal" until ferx-nlme exposes eta_param_types (#53).
+    eta_type <- if (!is.null(x$eta_param_types) && length(x$eta_param_types) >= i) x$eta_param_types[i] else "log_normal"
+    # Exact CV for EXP(OMEGA) log-normal ETAs: sqrt(exp(omega) - 1) * 100
+    # doi:10.1002/psp4.12507; other ETA types display handled in #53
+    cv_str <- if (eta_type == "log_normal" && var_ii > 0) {
+      sprintf("%.1f", sqrt(exp(var_ii) - 1) * 100)
+    } else if (eta_type == "log_normal") {
+      "0.0"
+    } else {
+      "N/A"
+    }
     se_str <- if (!is.null(x$se_omega) && length(x$se_omega) >= i) {
       sprintf("%.6f", x$se_omega[i])
     } else {
       "N/A"
     }
     cat(sprintf(
-      "  OMEGA(%d,%d) = %.6f  (CV%% = %.1f)  SE = %s\n",
-      i, i, var_ii, cv_pct, se_str
+      "  OMEGA(%d,%d) = %.6f  (CV%% = %s)  SE = %s\n",
+      i, i, var_ii, cv_str, se_str
     ))
     for (j in seq_len(i - 1L)) {
       if (abs(om[i, j]) > 1e-15) has_offdiag <- TRUE
@@ -770,7 +780,17 @@ print.ferx_fit <- function(x, ...) {
     iov_has_offdiag <- FALSE
     for (i in seq_len(n_kap)) {
       var_ii <- m_iov[i, i]
-      cv_pct <- if (var_ii > 0) sqrt(var_ii) * 100 else 0
+      # Fall back to "log_normal" until ferx-nlme exposes eta_param_types (#53).
+      kap_type <- if (!is.null(x$kappa_param_types) && length(x$kappa_param_types) >= i) x$kappa_param_types[i] else "log_normal"
+      # Exact CV for EXP(OMEGA_IOV) log-normal kappas: sqrt(exp(omega) - 1) * 100
+      # doi:10.1002/psp4.12507; other kappa types display handled in #53
+      cv_str <- if (kap_type == "log_normal" && var_ii > 0) {
+        sprintf("%.1f", sqrt(exp(var_ii) - 1) * 100)
+      } else if (kap_type == "log_normal") {
+        "0.0"
+      } else {
+        "N/A"
+      }
       se_idx <- if (is_block_se) diag_se_idx(i) else i
       se_str <- if (!is.null(x$se_kappa) && n_se >= se_idx) {
         sprintf("%.6f", x$se_kappa[se_idx])
@@ -783,8 +803,8 @@ print.ferx_fit <- function(x, ...) {
         "N/A"
       }
       cat(sprintf(
-        "  %s = %.6f  (CV%% = %.1f)  SE = %s  Shrinkage = %s\n",
-        kap_names[i], var_ii, cv_pct, se_str, shr_str
+        "  %s = %.6f  (CV%% = %s)  SE = %s  Shrinkage = %s\n",
+        kap_names[i], var_ii, cv_str, se_str, shr_str
       ))
       for (j in seq_len(i - 1L)) {
         if (abs(m_iov[i, j]) > 1e-15) iov_has_offdiag <- TRUE

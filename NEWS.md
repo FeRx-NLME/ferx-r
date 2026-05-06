@@ -31,6 +31,13 @@
 
 ## Bug fixes
 
+- `print.ferx_fit()` now uses the exact coefficient of variation formula for
+  `EXP(OMEGA)` log-normal parameters: `sqrt(exp(omega) - 1) * 100` instead of
+  the approximation `sqrt(omega) * 100` (doi:10.1002/psp4.12507). Applied only
+  when `eta_param_types == "log_normal"` (defaults to log-normal when the field
+  is absent). Display for logit, additive, and custom ETA types is deferred to
+  #53.
+
 - `ferx_model_section()`: fixed a descending-index bug where an empty section
   body (header immediately followed by another header) returned lines in reverse
   instead of `character(0)`.

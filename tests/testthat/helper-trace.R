@@ -1,3 +1,31 @@
+# Build a minimal ferx_fit S3 object for unit tests that don't need a real fit.
+make_fake_fit <- function(...) {
+  defaults <- list(
+    model_name    = "test_model",
+    data_name     = "test_data",
+    converged     = TRUE,
+    method        = "focei",
+    method_chain  = NULL,
+    ofv           = -100.0,
+    aic           = -90.0,
+    bic           = -80.0,
+    n_subjects    = 10L,
+    n_obs         = 100L,
+    n_parameters  = 5L,
+    n_iterations  = 50L,
+    theta         = c(CL = 1.0, V = 10.0),
+    se_theta      = NULL,
+    omega         = NULL,
+    se_omega      = NULL,
+    sigma         = NULL,
+    se_sigma      = NULL,
+    shrinkage_eta = NULL,
+    shrinkage_eps = NULL,
+    warnings      = character(0)
+  )
+  structure(modifyList(defaults, list(...)), class = "ferx_fit")
+}
+
 # Build a minimal trace CSV mirroring the columns the Rust backend writes,
 # so trace tests don't need a real fit.
 write_fake_trace <- function(path = tempfile(fileext = ".csv"),
