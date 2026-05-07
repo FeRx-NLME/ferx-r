@@ -2,26 +2,8 @@
 # the Rust engine (built from the parsed CompiledModel) rather than re-parsed
 # in R from the .ferx file. See ferx-nlme#49.
 #
-# Uses the bundled warfarin example so the test is self-contained; FOCEI is
-# capped at a low maxiter because we are only checking the structural-summary
-# shape, not convergence quality.
-
-warfarin_fit <- local({
-  fit <- NULL
-  function() {
-    if (is.null(fit)) {
-      ex <- ferx_example("warfarin")
-      fit <<- ferx_fit(
-        ex$model, ex$data,
-        method = "focei",
-        verbose = FALSE,
-        covariance = FALSE,
-        settings = list(maxiter = 5L)
-      )
-    }
-    fit
-  }
-})
+# Uses the shared `warfarin_fit()` helper (helper-warfarin-fit.R) so the
+# real FOCEI fit is reused across test files.
 
 test_that("fit$model_structure has the documented shape", {
   fit <- warfarin_fit()

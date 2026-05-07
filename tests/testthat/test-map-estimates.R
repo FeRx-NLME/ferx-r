@@ -6,26 +6,8 @@
 # checks the downstream consumers (`eta_normality`, `ferx_eta_cov`) read
 # from `ebe_etas`.
 #
-# Uses the bundled warfarin example so the test is self-contained; FOCEI is
-# capped at a low maxiter because we are checking output shape, not
-# convergence quality.
-
-warfarin_fit <- local({
-  fit <- NULL
-  function() {
-    if (is.null(fit)) {
-      ex <- ferx_example("warfarin")
-      fit <<- ferx_fit(
-        ex$model, ex$data,
-        method = "focei",
-        verbose = FALSE,
-        covariance = FALSE,
-        settings = list(maxiter = 30L)
-      )
-    }
-    fit
-  }
-})
+# Uses the shared `warfarin_fit()` helper (helper-warfarin-fit.R) so the
+# real FOCEI fit is reused across test files.
 
 test_that("fit$ebe_etas has one row per subject with named ETA columns", {
   fit <- warfarin_fit()
