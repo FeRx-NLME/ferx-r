@@ -256,11 +256,12 @@ etas), its row is still returned but \code{W} and \code{p_val} are
 \item{se_kappa}{Standard errors for kappa parameters: length \code{d}
 (diagonal kappa) or \code{d*(d+1)/2} (block_kappa, lower-triangle order).
 \code{NULL} if covariance step not run or no IOV.}
-\item{model_structure}{Named list auto-derived from the \code{.ferx} file
-(not from the Rust engine — see \href{https://github.com/InsightRX/ferx-nlme/issues/49}{ferx-nlme#49}
-for the future canonical version). Fields: \code{theta_names}
-(character vector of population parameter names), \code{model_type}
-(short label such as \code{"1-cpt oral"} or \code{NULL}), \code{iiv}
+\item{model_structure}{Named list returned by the Rust engine, derived
+from the parsed \code{CompiledModel} so it reflects exactly what
+ferx-nlme ran. Fields: \code{theta_names} (character vector of
+population parameter names), \code{model_type} (short label such as
+\code{"1-cpt oral"}, \code{"ODE"}, or \code{NULL} when the structural
+form is not one of the known analytical PK families), \code{iiv}
 (omega names), \code{iov} (kappa names), \code{residual} (error type
 string). Use \code{\link{ferx_model_inspect}} to view this before or
 after fitting.}

@@ -26,6 +26,15 @@
 
 ## Changes to existing functions
 
+- `result$model_structure` is now sourced from the Rust engine (built from the
+  parsed `CompiledModel`) instead of an R-side regex re-parse of the `.ferx`
+  file (closes ferx-nlme#49). The shape is unchanged — `theta_names`,
+  `model_type`, `iiv`, `iov`, `residual` — so `ferx_model_inspect()` callers
+  see the same fields. `model_type` now distinguishes IV bolus from infusion
+  (e.g. `"1-cpt IV infusion"`) and adds 3-cpt variants; the pre-fit
+  `ferx_model_inspect(path)` parser was updated to the same label set so both
+  the file-based and fit-based inspection paths report identical strings.
+
 - `ferx_model_edit()` gains `overwrite = FALSE`. Previously the function
   silently skipped the file copy when the destination already existed; it now
   errors with a clear message. Callers that relied on the silent-skip must add
