@@ -459,14 +459,34 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
 
 # Detect an unambiguous model-type label from [structural_model] lines.
 # Returns a short string ("1-cpt oral", "ODE", etc.) or NULL when unrecognised.
+# Labels and the recognised function names are kept in sync with the Rust
+# parser (ferx-nlme src/parser/model_parser.rs `pk_func_name` match arms) so
+# pre-fit `ferx_model_inspect(path)` reports the same string the engine would
+# attach to a fitted result.
 .ferx_model_type <- function(lines) {
   s <- paste(lines, collapse = " ")
-  if      (grepl("two_cpt_oral", s, fixed = TRUE)) "2-cpt oral"
-  else if (grepl("two_cpt_iv",   s, fixed = TRUE)) "2-cpt IV bolus"
-  else if (grepl("one_cpt_oral", s, fixed = TRUE)) "1-cpt oral"
-  else if (grepl("one_cpt_iv",   s, fixed = TRUE)) "1-cpt IV bolus"
-  else if (grepl("\\bode\\(",    s, perl  = TRUE)) "ODE"
-  else                                               NULL
+  if (grepl("\\bode\\(", s, perl = TRUE)) return("ODE")
+
+  m <- regmatches(s, regexpr("\\bpk\\s+([A-Za-z_][A-Za-z_0-9]*)\\s*\\(",
+                             s, perl = TRUE))
+  if (length(m) == 0L) return(NULL)
+  fn <- sub("^pk\\s+([A-Za-z_][A-Za-z_0-9]*)\\s*\\(.*", "\\1", m, perl = TRUE)
+
+  # Long `*_compartment_*` aliases collapse to their `*_cpt_*` equivalents.
+  fn <- sub("_compartment_", "_cpt_", fn, fixed = TRUE)
+
+  switch(fn,
+    one_cpt_iv_bolus    = "1-cpt IV bolus",
+    one_cpt_infusion    = "1-cpt IV infusion",
+    one_cpt_oral        = "1-cpt oral",
+    two_cpt_iv_bolus    = "2-cpt IV bolus",
+    two_cpt_infusion    = "2-cpt IV infusion",
+    two_cpt_oral        = "2-cpt oral",
+    three_cpt_iv_bolus  = "3-cpt IV bolus",
+    three_cpt_infusion  = "3-cpt IV infusion",
+    three_cpt_oral      = "3-cpt oral",
+    NULL
+  )
 }
 
 # Format the structural display string from a model_structure list.

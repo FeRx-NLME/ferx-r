@@ -48,11 +48,22 @@ test_that(".ferx_extract_blocks handles an empty file", {
 
 # --- .ferx_model_type ---
 
-test_that(".ferx_model_type detects all analytical model labels", {
-  expect_equal(ferx:::.ferx_model_type("pk one_cpt_oral(cl=CL, v=V, ka=KA)"),         "1-cpt oral")
-  expect_equal(ferx:::.ferx_model_type("pk one_cpt_iv_bolus(cl=CL, v=V)"),             "1-cpt IV bolus")
-  expect_equal(ferx:::.ferx_model_type("pk two_cpt_oral(cl=CL, v1=V1, q=Q, v2=V2)"),  "2-cpt oral")
-  expect_equal(ferx:::.ferx_model_type("pk two_cpt_iv_bolus(cl=CL, v1=V1, q=Q, v2=V2)"), "2-cpt IV bolus")
+test_that(".ferx_model_type detects all analytical model labels (matches Rust)", {
+  # Labels mirror pk_model_type_label() in src/rust/src/lib.rs — keep in sync.
+  expect_equal(ferx:::.ferx_model_type("pk one_cpt_oral(cl=CL, v=V, ka=KA)"),               "1-cpt oral")
+  expect_equal(ferx:::.ferx_model_type("pk one_cpt_iv_bolus(cl=CL, v=V)"),                  "1-cpt IV bolus")
+  expect_equal(ferx:::.ferx_model_type("pk one_cpt_infusion(cl=CL, v=V)"),                  "1-cpt IV infusion")
+  expect_equal(ferx:::.ferx_model_type("pk two_cpt_oral(cl=CL, v1=V1, q=Q, v2=V2)"),       "2-cpt oral")
+  expect_equal(ferx:::.ferx_model_type("pk two_cpt_iv_bolus(cl=CL, v1=V1, q=Q, v2=V2)"),    "2-cpt IV bolus")
+  expect_equal(ferx:::.ferx_model_type("pk two_cpt_infusion(cl=CL, v1=V1, q=Q, v2=V2)"),    "2-cpt IV infusion")
+  expect_equal(ferx:::.ferx_model_type("pk three_cpt_oral(cl=CL, v1=V1, q2=Q2, v2=V2, q3=Q3, v3=V3, ka=KA)"), "3-cpt oral")
+  expect_equal(ferx:::.ferx_model_type("pk three_cpt_iv_bolus(cl=CL, v1=V1, q2=Q2, v2=V2, q3=Q3, v3=V3)"),    "3-cpt IV bolus")
+  expect_equal(ferx:::.ferx_model_type("pk three_cpt_infusion(cl=CL, v1=V1, q2=Q2, v2=V2, q3=Q3, v3=V3)"),    "3-cpt IV infusion")
+})
+
+test_that(".ferx_model_type accepts the long `*_compartment_*` aliases", {
+  expect_equal(ferx:::.ferx_model_type("pk one_compartment_oral(cl=CL, v=V, ka=KA)"),     "1-cpt oral")
+  expect_equal(ferx:::.ferx_model_type("pk two_compartment_iv_bolus(cl=CL, v1=V1, q=Q, v2=V2)"), "2-cpt IV bolus")
 })
 
 test_that(".ferx_model_type detects ODE at any position in lines", {

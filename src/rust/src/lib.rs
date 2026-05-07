@@ -581,6 +581,56 @@ fn sim_results_to_df(results: &[ferx_nlme::api::SimulationResult]) -> Robj {
     .into()
 }
 
+// -- Helper: short label for the structural model, or None when ODE has no
+//    obvious analytical equivalent. ODE models always report "ODE" regardless
+//    of the placeholder `pk_model` value the parser stores for them. --
+fn pk_model_type_label(model: &CompiledModel) -> Option<String> {
+    if model.is_ode_based() {
+        return Some("ODE".to_string());
+    }
+    Some(
+        match model.pk_model {
+            PkModel::OneCptIvBolus => "1-cpt IV bolus",
+            PkModel::OneCptInfusion => "1-cpt IV infusion",
+            PkModel::OneCptOral => "1-cpt oral",
+            PkModel::TwoCptIvBolus => "2-cpt IV bolus",
+            PkModel::TwoCptInfusion => "2-cpt IV infusion",
+            PkModel::TwoCptOral => "2-cpt oral",
+            PkModel::ThreeCptIvBolus => "3-cpt IV bolus",
+            PkModel::ThreeCptInfusion => "3-cpt IV infusion",
+            PkModel::ThreeCptOral => "3-cpt oral",
+        }
+        .to_string(),
+    )
+}
+
+fn error_model_to_string(em: ErrorModel) -> &'static str {
+    match em {
+        ErrorModel::Additive => "additive",
+        ErrorModel::Proportional => "proportional",
+        ErrorModel::Combined => "combined",
+    }
+}
+
+// -- Helper: build the model_structure sub-list from the parsed/compiled
+//    model. Mirrors the shape that the R layer historically derived by
+//    re-parsing the .ferx file (theta_names, model_type, iiv, iov, residual)
+//    so it can be a drop-in canonical source for `ferx_model_inspect()`. --
+fn model_structure_list(model: &CompiledModel) -> Robj {
+    let model_type: Robj = match pk_model_type_label(model) {
+        Some(s) => s.into(),
+        None => ().into(),
+    };
+    list!(
+        theta_names = model.theta_names.clone(),
+        model_type = model_type,
+        iiv = model.eta_names.clone(),
+        iov = model.kappa_names.clone(),
+        residual = error_model_to_string(model.error_model).to_string()
+    )
+    .into()
+}
+
 // -- Helper: convert FitResult + Population to R named list --
 
 fn fit_result_to_list(
@@ -778,7 +828,8 @@ fn fit_result_to_list(
         shrinkage_kappa = shrinkage_kappa,
         ebe_kappas = ebe_kappas_df,
         ebe_etas = ebe_etas_df,
-        individual_estimates = individual_estimates_df
+        individual_estimates = individual_estimates_df,
+        model_structure = model_structure_list(model)
     )
 }
 
