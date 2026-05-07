@@ -12,9 +12,40 @@
 \item{...}{Ignored.}
 }
 \value{
-A \code{ferx_summary} list (invisibly). Print method formats the output.
+A \code{ferx_summary} list (invisibly). Fields include: \code{model_name},
+\code{data_name}, \code{method}, \code{method_chain}, \code{gradient},
+\code{converged}, \code{ofv}, \code{aic}, \code{bic}, \code{n_subjects},
+\code{n_obs}, \code{n_parameters}, \code{n_iterations}, \code{theta},
+\code{se_theta}, \code{omega}, \code{se_omega}, \code{sigma},
+\code{se_sigma}, \code{shrinkage_eta}, \code{shrinkage_eps},
+\code{covariance_status}, \code{eigenvalues}, \code{condition_number}
+(see \code{\link{ferx_fit}} for definitions), \code{wall_time_secs},
+\code{ferx_version}, \code{call_settings}, \code{sir_ess},
+\code{warnings}, \code{ebe_convergence_warnings},
+\code{max_unconverged_subjects},
+\code{total_ebe_fallbacks}.
 }
 \description{
-Returns a compact list with the most-used diagnostic fields: OFV/AIC/BIC,
-parameter estimates, standard errors, shrinkage, and run metadata.
+Returns a compact list with the most-used diagnostic fields: model name,
+dataset, estimation method (including the full chain when multiple methods
+were chained), OFV/AIC/BIC, parameter estimates, standard errors, shrinkage,
+effective settings, SIR ESS (when available), warnings, and run metadata.
+Printing the returned object via \code{print()} or auto-printing formats
+all fields in a human-readable layout.
+}
+\examples{
+\dontrun{
+ex  <- ferx_example("warfarin")
+fit <- ferx_fit(ex$model, ex$data)
+summary(fit)
+
+# Chained estimation: SAEM warm-start followed by FOCEI refinement
+fit_chain <- ferx_fit(ex$model, ex$data, method = c("saem", "focei"))
+summary(fit_chain)
+
+# With custom settings — shown in the Settings block
+fit_custom <- ferx_fit(ex$model, ex$data,
+  settings = list(optimizer = "slsqp", max_iter = 200L))
+summary(fit_custom)
+}
 }

@@ -1,6 +1,13 @@
-# ferx 0.1.1
+# ferx 0.1.2
 
 ## New features
+
+- `ferx_fit()` now returns `$eigenvalues` (sorted descending) and
+  `$condition_number` (ratio of largest to smallest eigenvalue) for the
+  covariance correlation matrix. Both are `NULL` when the covariance step was
+  not run or failed. `condition_number = Inf` signals a non-positive eigenvalue.
+  A warning is appended when `condition_number > 1000`. The condition number is
+  shown on the `Covariance:` line in `print()` and `summary()` output.
 
 - `ferx_model_inspect(path)` parses a `.ferx` file without fitting and prints
   a compact structural summary (model type, IIV, IOV, residual error). Pass a
