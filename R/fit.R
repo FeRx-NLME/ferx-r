@@ -148,10 +148,20 @@
 #'   \item{bic}{Bayesian Information Criterion}
 #'   \item{theta}{Named numeric vector of fixed effect estimates}
 #'   \item{omega}{Between-subject variability covariance matrix}
-#'   \item{sigma}{Residual error parameter estimates}
+#'   \item{sigma}{Residual error parameter estimates on the
+#'     \emph{standard-deviation} scale. For a proportional component
+#'     \code{CV\% = sigma * 100}; for an additive component the value is in
+#'     observation units. Variance is \code{sigma^2} for either type.}
+#'   \item{sigma_names}{Names of the sigma parameters as declared in the
+#'     \code{[parameters]} block of the \code{.ferx} file. Parallel to
+#'     \code{sigma}.}
+#'   \item{sigma_types}{Per-component error type label, parallel to
+#'     \code{sigma}: \code{"proportional"} or \code{"additive"}. Combined
+#'     error models report \code{c("proportional", "additive")} in that order.}
 #'   \item{se_theta}{Standard errors for theta (NULL if covariance step failed)}
 #'   \item{se_omega}{Standard errors for omega diagonal}
-#'   \item{se_sigma}{Standard errors for sigma}
+#'   \item{se_sigma}{Standard errors for sigma (on the SD scale, like
+#'     \code{sigma} itself)}
 #'   \item{sdtab}{Data frame with ID, TIME, DV, PRED, IPRED, CWRES, IWRES,
 #'     EBE_OFV, N_OBS; OCC if any subject carries an occasion column; CENS
 #'     if any rows are below LLOQ. Per-subject ETAs live in
@@ -866,15 +876,32 @@ print.ferx_fit <- function(x, ...) {
     }
   }
 
-  # SIGMA
+  # SIGMA — sigma is on the SD scale (see ferx-nlme `docs/src/model-file/error-model.md`).
+  # For proportional components CV% = sigma * 100; for additive components the
+  # value is in observation units and no CV% applies. Variance = sigma^2 in
+  # both cases, mirroring the YAML output (ferx-nlme#57).
   cat("\n--- SIGMA Estimates ---\n")
   for (i in seq_along(x$sigma)) {
+    s   <- x$sigma[i]
+    nm  <- if (length(x$sigma_names) >= i && nzchar(x$sigma_names[i])) {
+      x$sigma_names[i]
+    } else {
+      sprintf("SIGMA(%d)", i)
+    }
+    typ <- if (length(x$sigma_types) >= i) x$sigma_types[i] else NA_character_
     se_str <- if (!is.null(x$se_sigma) && length(x$se_sigma) >= i) {
       sprintf("%.6f", x$se_sigma[i])
     } else {
       "N/A"
     }
-    cat(sprintf("  SIGMA(%d) = %.6f  SE = %s\n", i, x$sigma[i], se_str))
+    var_str <- sprintf("var = %.6f", s * s)
+    if (identical(typ, "proportional")) {
+      cat(sprintf("  %-16s = %.6f  (%s, CV%% = %.1f)  SE = %s\n",
+                  nm, s, var_str, s * 100, se_str))
+    } else {
+      cat(sprintf("  %-16s = %.6f  (%s)  SE = %s\n",
+                  nm, s, var_str, se_str))
+    }
   }
 
   # SIR uncertainty
