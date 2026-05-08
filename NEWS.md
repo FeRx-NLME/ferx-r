@@ -1,3 +1,12 @@
+# ferx (development)
+
+## Documentation
+
+- New vignette *"Editing ferx model files programmatically"* covering
+  `ferx_model_new()`, `ferx_model_section()`, and `ferx_model_set_section()`:
+  skeleton creation, section inspection, read-modify-write patterns, a
+  console-only fit workflow, and overwrite-guard behaviour.
+
 # ferx 0.1.2
 
 ## New features

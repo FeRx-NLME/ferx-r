@@ -1,0 +1,133 @@
+---
+title: "Editing ferx model files programmatically"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Editing ferx model files programmatically}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+library(ferx)
+```
+
+ferx model files (`.ferx`) are plain text, so you can create and modify them
+entirely from R without opening an editor. This vignette covers the three
+functions that support that workflow: `ferx_model_new()`,
+`ferx_model_section()`, and `ferx_model_set_section()`.
+
+## Starting from scratch
+
+`ferx_model_new()` writes a skeleton `.ferx` file for one of five built-in
+templates: `"1cpt_oral"` (default), `"1cpt_iv"`, `"2cpt_oral"`, `"2cpt_iv"`,
+and `"ode"`.
+
+Pass `print = TRUE` to preview a template in the console without writing any
+file — useful when you are exploring or copy-pasting a starting point:
+
+```{r new-print}
+ferx_model_new(print = TRUE)
+```
+
+```{r new-print-2cpt, eval = FALSE}
+ferx_model_new(template = "2cpt_iv", print = TRUE)
+```
+
+To write a file, supply a path. By default the file is also opened in your
+editor (`edit = TRUE`); pass `edit = FALSE` to skip that:
+
+```{r new-write, eval = FALSE}
+ferx_model_new("my_model.ferx", edit = FALSE)
+```
+
+## Inspecting a section
+
+`ferx_model_section()` extracts the body of a named section and prints it.
+Start with the bundled warfarin example:
+
+```{r section}
+ex <- ferx_example("warfarin")
+ferx_model_section(ex$model, "parameters")
+```
+
+The return value is the character vector of lines, returned invisibly, so you
+can capture it:
+
+```{r section-capture}
+params <- ferx_model_section(ex$model, "parameters")
+params
+```
+
+## Scripted read-modify-write
+
+The extract → modify → write-back pattern lets you change a model
+programmatically without an editor. Here we lower the initial CL estimate in
+the `parameters` section and write the result to a temporary copy:
+
+```{r read-modify-write}
+# work in a temp dir so we don't touch the package example
+model_path <- file.path(tempdir(), "warfarin.ferx")
+file.copy(ex$model, model_path)
+
+# read the section
+lines <- ferx_model_section(model_path, "parameters")
+
+# modify: change the TVCL initial value from 0.13 to 0.5
+lines <- sub("TVCL\\([^,]+,", "TVCL(0.5,", lines)
+
+# write back
+ferx_model_set_section(model_path, "parameters", lines)
+
+# verify
+ferx_model_section(model_path, "parameters")
+```
+
+`ferx_model_set_section()` replaces only the targeted section; all other
+sections are left untouched.
+
+## Console-only workflow: create, tweak, fit
+
+You can go from nothing to an estimated model without ever opening a text
+editor. The steps below create a one-compartment oral model file, switch the
+estimation method to FOCEI, and run `ferx_fit()`:
+
+```{r console-only, eval = FALSE}
+model_path <- file.path(tempdir(), "run1.ferx")
+
+# 1. Write a skeleton
+ferx_model_new(model_path, template = "1cpt_oral", edit = FALSE)
+
+# 2. Switch method to focei
+ferx_model_set_section(model_path, "fit_options", c(
+  "  method     = focei",
+  "  maxiter    = 300",
+  "  covariance = true"
+))
+
+# 3. Fit (uses the bundled warfarin data for illustration)
+ex   <- ferx_example("warfarin")
+fit  <- ferx_fit(model_path, ex$data)
+print(fit)
+```
+
+## Overwrite guards
+
+By default `ferx_model_new()` refuses to overwrite an existing file:
+
+```{r overwrite-error}
+model_path <- file.path(tempdir(), "guard_demo.ferx")
+ferx_model_new(model_path, edit = FALSE)            # creates the file
+
+tryCatch(
+  ferx_model_new(model_path, edit = FALSE),          # would overwrite — error
+  error = function(e) message(conditionMessage(e))
+)
+```
+
+Opt in explicitly with `overwrite = TRUE`:
+
+```{r overwrite-ok}
+ferx_model_new(model_path, template = "1cpt_iv", overwrite = TRUE, edit = FALSE)
+ferx_model_section(model_path, "structural_model")
+```
