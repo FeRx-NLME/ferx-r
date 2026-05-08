@@ -3,7 +3,7 @@
 #' Fits a NLME model using FOCE or FOCEI estimation with a Rust backend
 #' powered by automatic differentiation (Enzyme).
 #'
-#' @param model Path to a .ferx model file
+#' @param model Path to a \code{.ferx} model file, or a \code{\link{ferx_model}} object.
 #' @param data Path to a NONMEM-format CSV file (ID, TIME, DV, EVID, AMT, CMT, ...)
 #' @param method Estimation method(s). Either a single string or a character
 #'   vector of methods to run in sequence. Each stage is seeded with the
@@ -303,7 +303,23 @@
 #' }
 #'
 #' @export
-ferx_fit <- function(model, data,
+#' @rdname ferx_fit
+ferx_fit <- function(model, data = NULL, ...) UseMethod("ferx_fit")
+
+#' @export
+#' @rdname ferx_fit
+ferx_fit.ferx_model <- function(x, data = x$data, ...) {
+  if (is.null(data)) {
+    stop(
+      "No data path supplied. Either pass `data` to ferx_fit() ",
+      "or include it in ferx_model()."
+    )
+  }
+  ferx_fit.default(x$model, data, ...)
+}
+
+#' @export
+ferx_fit.default <- function(model, data,
                      method = "foce",
                      covariance = TRUE,
                      verbose = TRUE,

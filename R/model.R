@@ -1,3 +1,122 @@
+#' Create a ferx_model object
+#'
+#' Constructs a \code{ferx_model} S3 object that bundles a \code{.ferx} model
+#' file path with an optional data path. The object is the entry point for
+#' pipe-based workflows:
+#'
+#' \preformatted{
+#' ferx_model("pk.ferx", data = "data.csv") |>
+#'   ferx_set_section("fit_options", c("  method = focei")) |>
+#'   ferx_fit() |>
+#'   summary()
+#' }
+#'
+#' @param model Path to a \code{.ferx} model file. The file must exist.
+#' @param data Optional path to a NONMEM-format CSV data file. Can be supplied
+#'   later at \code{ferx_fit()} if omitted here.
+#'
+#' @return An object of class \code{ferx_model} with fields \code{$model} and
+#'   \code{$data}.
+#'
+#' @examples
+#' ex <- ferx_example("warfarin")
+#' m <- ferx_model(ex$model, data = ex$data)
+#' print(m)
+#'
+#' @seealso \code{\link{ferx_set_section}}, \code{\link{ferx_get_section}},
+#'   \code{\link{ferx_fit}}
+#' @export
+ferx_model <- function(model, data = NULL) {
+  if (!file.exists(model)) stop("File not found: ", model)
+  if (tolower(tools::file_ext(model)) != "ferx") stop("'model' must be a .ferx file")
+  if (!is.null(data) && !file.exists(data)) stop("Data file not found: ", data)
+  structure(list(model = model, data = data), class = "ferx_model")
+}
+
+#' @export
+print.ferx_model <- function(x, ...) {
+  cat("ferx_model\n")
+  cat("  Model: ", x$model, "\n", sep = "")
+  cat("  Data:  ", if (is.null(x$data)) "<none>" else x$data, "\n", sep = "")
+  s <- tryCatch(.ferx_parse_structure(x$model), error = function(e) NULL)
+  if (!is.null(s)) {
+    cat("  ---\n")
+    .ferx_print_structure(s)
+  }
+  invisible(x)
+}
+
+#' Replace a section in a ferx model (pipe-friendly)
+#'
+#' Updates the body of a named section in a \code{.ferx} model file and
+#' returns the input object so calls can be chained with \code{|>} or
+#' \code{\%>\%}.
+#'
+#' When \code{x} is a \code{ferx_model} object the section is written to
+#' \code{x$model} and \code{x} is returned invisibly, allowing further
+#' pipe steps. When \code{x} is a plain path string the call is equivalent
+#' to \code{\link{ferx_model_set_section}(x, section, lines)} for backwards
+#' compatibility.
+#'
+#' @param x A \code{ferx_model} object or a path to a \code{.ferx} file.
+#' @param section Name of the section to replace, without brackets.
+#' @param lines Character vector of replacement lines (do not include the
+#'   header line).
+#'
+#' @return \code{x}, invisibly.
+#'
+#' @examples
+#' \dontrun{
+#' ex <- ferx_example("warfarin")
+#' ferx_model(ex$model, data = ex$data) |>
+#'   ferx_set_section("fit_options", c(
+#'     "  method  = focei",
+#'     "  maxiter = 500"
+#'   )) |>
+#'   ferx_fit()
+#' }
+#'
+#' @seealso \code{\link{ferx_model_set_section}}, \code{\link{ferx_get_section}}
+#' @export
+ferx_set_section <- function(x, section, lines) {
+  if (inherits(x, "ferx_model")) {
+    ferx_model_set_section(x$model, section, lines)
+    invisible(x)
+  } else {
+    ferx_model_set_section(x, section, lines)
+  }
+}
+
+#' Inspect a section of a ferx model (pipe-friendly)
+#'
+#' Prints the contents of a named section of a \code{.ferx} model file to the
+#' console and returns the input object invisibly so the pipe can continue.
+#'
+#' When \code{x} is a \code{ferx_model} object the section is read from
+#' \code{x$model}. When \code{x} is a plain path string the call is equivalent
+#' to \code{\link{ferx_model_section}(x, section)}.
+#'
+#' @param x A \code{ferx_model} object or a path to a \code{.ferx} file.
+#' @param section Name of the section to display, without brackets.
+#'
+#' @return \code{x}, invisibly.
+#'
+#' @examples
+#' ex <- ferx_example("warfarin")
+#' ferx_model(ex$model, data = ex$data) |>
+#'   ferx_get_section("parameters")
+#'
+#' @seealso \code{\link{ferx_model_section}}, \code{\link{ferx_set_section}}
+#' @export
+ferx_get_section <- function(x, section) {
+  if (inherits(x, "ferx_model")) {
+    ferx_model_section(x$model, section)
+    invisible(x)
+  } else {
+    ferx_model_section(x, section)
+  }
+}
+
 #' Display a ferx model file in the console
 #'
 #' Prints the contents of a \code{.ferx} model file to the console.
