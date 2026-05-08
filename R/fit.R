@@ -586,6 +586,27 @@ ferx_fit <- function(model, data,
     result$ebe_kappas <- NULL
   }
 
+  # Parameter transform metadata — fall back gracefully for older ferx-nlme binaries
+  # that don't populate these vectors (empty character() from FFI → treat as absent).
+  n_eta_fit   <- if (!is.null(result$omega)) nrow(result$omega) else 0L
+  n_theta_fit <- length(result$theta)
+  n_sigma_fit <- length(result$sigma)
+
+  if (is.null(result$eta_param_types) || length(result$eta_param_types) != n_eta_fit) {
+    result$eta_param_types <- rep("log_normal", n_eta_fit)
+  }
+  if (is.null(result$eta_linked_theta) || length(result$eta_linked_theta) != n_eta_fit) {
+    result$eta_linked_theta <- rep("", n_eta_fit)
+  }
+  if (is.null(result$theta_transforms) || length(result$theta_transforms) != n_theta_fit) {
+    result$theta_transforms <- rep("identity", n_theta_fit)
+  }
+  if (is.null(result$sigma_types) || length(result$sigma_types) != n_sigma_fit) {
+    result$sigma_types <- rep("proportional", n_sigma_fit)
+  }
+  names(result$theta_transforms) <- names(result$theta)
+  names(result$sigma_types)      <- names(result$sigma)
+
   # Clean up internal fields
   result$theta_names <- NULL
   result$omega_dim <- NULL
@@ -741,17 +762,39 @@ print.ferx_fit <- function(x, ...) {
   theta_names <- names(x$theta)
   if (is.null(theta_names)) theta_names <- paste0("THETA", seq_along(x$theta))
   for (i in seq_along(x$theta)) {
-    est <- x$theta[i]
+    est       <- x$theta[i]
+    transform <- if (!is.null(x$theta_transforms) && length(x$theta_transforms) >= i) x$theta_transforms[i] else "identity"
     if (!is.null(x$se_theta) && length(x$se_theta) >= i) {
-      se_val <- x$se_theta[i]
-      rse <- if (abs(est) > 1e-12) abs(se_val / est) * 100 else NaN
-      se_str <- sprintf("%.6f", se_val)
+      se_val  <- x$se_theta[i]
+      rse     <- if (abs(est) > 1e-12) abs(se_val / est) * 100 else NaN
+      se_str  <- sprintf("%.6f", se_val)
       rse_str <- sprintf("%.1f", rse)
     } else {
-      se_str <- "N/A"
+      se_val  <- NA_real_
+      se_str  <- "N/A"
       rse_str <- "N/A"
     }
-    cat(sprintf("%-16s %12.6f %12s %10s\n", theta_names[i], est, se_str, rse_str))
+    scale_tag <- switch(transform,
+      log              = "  [log scale]",
+      logit            = "  [logit scale]",
+      logit_probability = "  [logit scale]",
+      ""
+    )
+    cat(sprintf("%-16s %12.6f %12s %10s%s\n", theta_names[i], est, se_str, rse_str, scale_tag))
+    # Natural-scale typical value for log/logit transforms
+    if (transform == "log") {
+      tv <- exp(est)
+      ci_str <- if (!is.na(se_val)) {
+        sprintf("95%% CI: [%.4f, %.4f]", exp(est - 1.96 * se_val), exp(est + 1.96 * se_val))
+      } else ""
+      cat(sprintf("  %-14s %12.4f                    %s\n", "(typical)", tv, ci_str))
+    } else if (transform %in% c("logit", "logit_probability")) {
+      tv <- .ferx_inv_logit(est)
+      ci_str <- if (!is.na(se_val)) {
+        sprintf("95%% CI: [%.4f, %.4f]", .ferx_inv_logit(est - 1.96 * se_val), .ferx_inv_logit(est + 1.96 * se_val))
+      } else ""
+      cat(sprintf("  %-14s %12.4f                    %s\n", "(typical)", tv, ci_str))
+    }
   }
 
   # OMEGA
@@ -761,26 +804,52 @@ print.ferx_fit <- function(x, ...) {
   n_eta <- nrow(om)
   has_offdiag <- FALSE
   for (i in seq_len(n_eta)) {
-    var_ii <- om[i, i]
-    # Fall back to "log_normal" until ferx-nlme exposes eta_param_types (#53).
+    var_ii   <- om[i, i]
     eta_type <- if (!is.null(x$eta_param_types) && length(x$eta_param_types) >= i) x$eta_param_types[i] else "log_normal"
-    # Exact CV for EXP(OMEGA) log-normal ETAs: sqrt(exp(omega) - 1) * 100
-    # doi:10.1002/psp4.12507; other ETA types display handled in #53
-    cv_str <- if (eta_type == "log_normal" && var_ii > 0) {
-      sprintf("%.1f", sqrt(exp(var_ii) - 1) * 100)
-    } else if (eta_type == "log_normal") {
-      "0.0"
-    } else {
-      "N/A"
-    }
+    linked_theta_name <- if (!is.null(x$eta_linked_theta) && length(x$eta_linked_theta) >= i) x$eta_linked_theta[i] else ""
     se_str <- if (!is.null(x$se_omega) && length(x$se_omega) >= i) {
       sprintf("%.6f", x$se_omega[i])
     } else {
       "N/A"
     }
+
+    extra <- if (eta_type == "log_normal") {
+      cv <- if (var_ii > 0) sqrt(exp(var_ii) - 1) * 100 else 0
+      sprintf("CV%% = %.1f", cv)
+    } else if (eta_type == "additive") {
+      sd_val  <- sqrt(max(var_ii, 0))
+      tv_name <- if (nzchar(linked_theta_name)) linked_theta_name else NULL
+      tv_val  <- if (!is.null(tv_name)) x$theta[tv_name] else NA_real_
+      cv_part <- if (!is.null(tv_val) && !is.na(tv_val) && abs(tv_val) > 1e-12) {
+        sprintf("  CV%% = %.1f (at %s=%.3g)", sd_val / abs(tv_val) * 100, tv_name, tv_val)
+      } else ""
+      sprintf("SD = %.4f%s", sd_val, cv_part)
+    } else if (eta_type %in% c("logit", "logit_probability")) {
+      # Natural-scale ±1 SD range using linked theta (if known)
+      tv_name <- if (nzchar(linked_theta_name)) linked_theta_name else NULL
+      tv_val  <- if (!is.null(tv_name)) x$theta[tv_name] else NA_real_
+      if (!is.null(tv_val) && !is.na(tv_val)) {
+        sd_logit <- sqrt(max(var_ii, 0))
+        lo <- .ferx_inv_logit(tv_val - sd_logit)
+        hi <- .ferx_inv_logit(tv_val + sd_logit)
+        sprintf("SD_logit = %.4f  ±1SD = [%.3f, %.3f]", sd_logit, lo, hi)
+      } else {
+        sprintf("SD_logit = %.4f", sqrt(max(var_ii, 0)))
+      }
+    } else {
+      "CV% = N/A"
+    }
+    type_tag <- switch(eta_type,
+      log_normal        = "[log-normal]",
+      additive          = "[additive]",
+      logit             = "[logit]",
+      logit_probability = "[logit]",
+      custom            = "[custom]",
+      ""
+    )
     cat(sprintf(
-      "  OMEGA(%d,%d) = %.6f  (CV%% = %s)  SE = %s\n",
-      i, i, var_ii, cv_str, se_str
+      "  OMEGA(%d,%d) %-13s = %.6f  %s  SE = %s\n",
+      i, i, type_tag, var_ii, extra, se_str
     ))
     for (j in seq_len(i - 1L)) {
       if (abs(om[i, j]) > 1e-15) has_offdiag <- TRUE
@@ -818,29 +887,18 @@ print.ferx_fit <- function(x, ...) {
     diag_se_idx <- function(j) j * n_kap - j * (j - 1L) / 2L - (n_kap - j)
     iov_has_offdiag <- FALSE
     for (i in seq_len(n_kap)) {
-      var_ii <- m_iov[i, i]
-      # Fall back to "log_normal" until ferx-nlme exposes eta_param_types (#53).
+      var_ii   <- m_iov[i, i]
       kap_type <- if (!is.null(x$kappa_param_types) && length(x$kappa_param_types) >= i) x$kappa_param_types[i] else "log_normal"
-      # Exact CV for EXP(OMEGA_IOV) log-normal kappas: sqrt(exp(omega) - 1) * 100
-      # doi:10.1002/psp4.12507; other kappa types display handled in #53
-      cv_str <- if (kap_type == "log_normal" && var_ii > 0) {
-        sprintf("%.1f", sqrt(exp(var_ii) - 1) * 100)
-      } else if (kap_type == "log_normal") {
-        "0.0"
-      } else {
-        "N/A"
-      }
-      se_idx <- if (is_block_se) diag_se_idx(i) else i
-      se_str <- if (!is.null(x$se_kappa) && n_se >= se_idx) {
-        sprintf("%.6f", x$se_kappa[se_idx])
-      } else {
-        "N/A"
-      }
-      shr_str <- if (!is.null(x$shrinkage_kappa) && length(x$shrinkage_kappa) >= i) {
+      se_idx   <- if (is_block_se) diag_se_idx(i) else i
+      se_str   <- if (!is.null(x$se_kappa) && n_se >= se_idx) sprintf("%.6f", x$se_kappa[se_idx]) else "N/A"
+      shr_str  <- if (!is.null(x$shrinkage_kappa) && length(x$shrinkage_kappa) >= i) {
         sprintf("%.1f%%", x$shrinkage_kappa[i] * 100)
-      } else {
-        "N/A"
-      }
+      } else "N/A"
+      cv_str <- if (kap_type == "log_normal") {
+        if (var_ii > 0) sprintf("%.1f", sqrt(exp(var_ii) - 1) * 100) else "0.0"
+      } else if (kap_type == "additive") {
+        sprintf("SD = %.4f", sqrt(max(var_ii, 0)))
+      } else "N/A"
       cat(sprintf(
         "  %s = %.6f  (CV%% = %s)  SE = %s  Shrinkage = %s\n",
         kap_names[i], var_ii, cv_str, se_str, shr_str
@@ -869,12 +927,16 @@ print.ferx_fit <- function(x, ...) {
   # SIGMA
   cat("\n--- SIGMA Estimates ---\n")
   for (i in seq_along(x$sigma)) {
-    se_str <- if (!is.null(x$se_sigma) && length(x$se_sigma) >= i) {
-      sprintf("%.6f", x$se_sigma[i])
+    se_str   <- if (!is.null(x$se_sigma) && length(x$se_sigma) >= i) sprintf("%.6f", x$se_sigma[i]) else "N/A"
+    sig_type <- if (!is.null(x$sigma_types) && length(x$sigma_types) >= i) x$sigma_types[i] else "proportional"
+    var_i    <- x$sigma[i]
+    type_tag <- if (sig_type == "additive") "[additive]" else "[proportional]"
+    extra    <- if (sig_type == "additive") {
+      sprintf("SD = %.4f (var = %.6f)", sqrt(max(var_i, 0)), var_i)
     } else {
-      "N/A"
+      sprintf("CV%% = %.1f", sqrt(max(var_i, 0)) * 100)
     }
-    cat(sprintf("  SIGMA(%d) = %.6f  SE = %s\n", i, x$sigma[i], se_str))
+    cat(sprintf("  SIGMA(%d) %-14s = %.6f  %s  SE = %s\n", i, type_tag, var_i, extra, se_str))
   }
 
   # SIR uncertainty
