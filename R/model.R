@@ -518,6 +518,26 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
   invisible(NULL)
 }
 
+# Parse the [fit_options] block of a .ferx file into a named character vector.
+# Keys are lower-cased; values are the raw trimmed strings from the file
+# (before Rust type coercion). Returns an empty character(0) when the section
+# is absent or empty. Uses .ferx_extract_blocks() so comments are stripped.
+.ferx_parse_model_fit_options <- function(path) {
+  blocks <- .ferx_extract_blocks(path)
+  lines  <- blocks[["fit_options"]] %||% character(0)
+  if (length(lines) == 0L) return(setNames(character(0), character(0)))
+  parts <- lapply(strsplit(lines, "=", fixed = TRUE), function(x) {
+    if (length(x) < 2L) return(NULL)
+    list(key = tolower(trimws(x[[1L]])),
+         val = trimws(paste(x[-1L], collapse = "=")))
+  })
+  parts <- Filter(Negate(is.null), parts)
+  if (length(parts) == 0L) return(setNames(character(0), character(0)))
+  keys <- vapply(parts, `[[`, character(1L), "key")
+  vals <- vapply(parts, `[[`, character(1L), "val")
+  setNames(vals, keys)
+}
+
 # Parse a .ferx file and return a named list describing model structure.
 # Fields: theta_names (pop param names), model_type (label or NULL),
 #         iiv, iov, residual.

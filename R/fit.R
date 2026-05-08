@@ -136,8 +136,13 @@
 #'   (\code{method}, \code{covariance}, \code{verbose},
 #'   \code{bloq_method}, \code{threads}, \code{sir}) are rejected — pass
 #'   them via the dedicated argument. Unknown keys and malformed values
-#'   also raise an error. Settings apply on top of the model file's
-#'   \code{[fit_options]} block.
+#'   also raise an error.
+#'   \strong{Precedence}: dedicated \code{ferx_fit()} arguments win over
+#'   \code{settings}, which in turn win over the model file's
+#'   \code{[fit_options]} block. A \code{warning()} is issued whenever a
+#'   call-time value overrides a different value from \code{[fit_options]}.
+#'   Inspect \code{fit$model_file_settings} and \code{fit$call_settings} to
+#'   audit the full picture.
 #'
 #' @return A list with components:
 #'   \item{converged}{Logical; did the optimizer converge}
@@ -242,6 +247,13 @@
 #'     with values typed back to their natural R types (logical, numeric, or
 #'     character). Includes merged defaults such as \code{optimizer_trace} and
 #'     \code{scale_params}. Empty list when no settings were supplied.}
+#'   \item{model_file_settings}{Named list of raw \code{key = value} pairs from
+#'     the model file's \code{[fit_options]} block, as character strings
+#'     (before Rust type coercion). Empty list when no \code{[fit_options]}
+#'     block is present. Use this alongside \code{call_settings} to audit which
+#'     values the model file requested and which were overridden at the R call
+#'     site. A \code{warning()} is issued automatically for each key that
+#'     appears in both sources with a different value.}
 #'
 #' @examples
 #' \dontrun{
@@ -404,6 +416,70 @@ ferx_fit <- function(model, data,
     setNames(lapply(settings_parts$values, .ferx_parse_setting_value), settings_parts$keys)
   } else {
     list()
+  }
+
+  # Read [fit_options] from the model file and detect conflicts with R call-time
+  # arguments. Precedence: dedicated R args > settings list > model file. We
+  # warn (not error) so the user is informed which value actually runs.
+  model_file_opts <- .ferx_parse_model_fit_options(model)
+
+  # Map from model file key → the R call-time value that overrides it (as a
+  # character string for comparison). Dedicated args are checked first because
+  # they win unconditionally; the settings list is checked second.
+  #
+  # Keys covered by RESERVED in Rust (method, covariance, bloq_method, threads,
+  # mu_referencing, sir, gradient) are mapped to their R call-time values.
+  # Keys that flow through `settings` are compared against settings list names.
+  .warn_override <- function(key, model_val, call_val) {
+    call_str <- as.character(call_val)
+    model_str <- as.character(model_val)
+    if (!identical(tolower(model_str), tolower(call_str))) {
+      warning(
+        "Model file [fit_options] sets `", key, " = ", model_str,
+        "` but ferx_fit() argument overrides it with `", call_str, "`.",
+        " The call-time value will be used.",
+        call. = FALSE
+      )
+    }
+  }
+
+  if (length(model_file_opts) > 0L) {
+    # Dedicated args (always win)
+    dedicated <- list(
+      method        = paste(method, collapse = ", "),
+      covariance    = tolower(as.character(covariance)),
+      bloq_method   = if (nzchar(bloq_arg)) bloq_arg else NULL,
+      threads       = if (!is.null(threads)) as.character(threads) else NULL,
+      mu_referencing = tolower(as.character(mu_referencing)),
+      sir           = tolower(as.character(sir)),
+      gradient      = gradient
+    )
+    # Aliases used in model files
+    key_aliases <- list(bloq_method = c("bloq_method", "bloq"),
+                        gradient    = c("gradient", "gradient_method"),
+                        method      = "method",
+                        covariance  = "covariance",
+                        threads     = "threads",
+                        mu_referencing = "mu_referencing",
+                        sir         = "sir")
+    for (arg in names(dedicated)) {
+      call_val <- dedicated[[arg]]
+      if (is.null(call_val)) next
+      aliases <- key_aliases[[arg]]
+      for (alias in aliases) {
+        mval <- model_file_opts[[alias]]
+        if (!is.null(mval)) .warn_override(alias, mval, call_val)
+      }
+    }
+    # settings list keys
+    for (skey in settings_parts$keys) {
+      mkey <- tolower(skey)
+      mval <- model_file_opts[[mkey]]
+      if (!is.null(mval)) {
+        sval <- settings_parts$values[[match(skey, settings_parts$keys)]]
+        .warn_override(mkey, mval, sval)
+      }
+    }
   }
 
   fit_started_at <- Sys.time()
@@ -616,6 +692,10 @@ ferx_fit <- function(model, data,
 
   # Store effective settings (already serialised from settings_parts above)
   result$call_settings <- settings_used
+
+  # Raw [fit_options] from the model file, for inspection and conflict auditing.
+  result$model_file_settings <- if (length(model_file_opts) > 0L)
+    as.list(model_file_opts) else list()
 
   class(result) <- "ferx_fit"
   result
@@ -933,6 +1013,33 @@ print.ferx_fit <- function(x, ...) {
     cat("  ferx v", x$ferx_version, "\n", sep = "")
   }
 
+  mfs <- x$model_file_settings %||% list()
+  cs  <- x$call_settings %||% list()
+  if (length(mfs) > 0L || length(cs) > 0L) {
+    cat("\n--- Settings (model file / call-time override) ---\n")
+    all_keys <- union(names(mfs), names(cs))
+    for (nm in all_keys) {
+      mval <- mfs[[nm]]
+      cval <- cs[[nm]]
+      if (!is.null(mval) && !is.null(cval) &&
+          !identical(tolower(as.character(mval)), tolower(as.character(cval)))) {
+        cat(sprintf("  %-28s %s  [model: %s] *\n", nm, cval, mval))
+      } else if (!is.null(cval)) {
+        cat(sprintf("  %-28s %s\n", nm, cval))
+      } else {
+        cat(sprintf("  %-28s %s  [model only]\n", nm, mval))
+      }
+    }
+    if (any(vapply(all_keys, function(nm) {
+      mval <- mfs[[nm]]
+      cval <- cs[[nm]]
+      !is.null(mval) && !is.null(cval) &&
+        !identical(tolower(as.character(mval)), tolower(as.character(cval)))
+    }, logical(1L)))) {
+      cat("  (* model file value overridden by call-time argument)\n")
+    }
+  }
+
   if (length(x$warnings) > 0) {
     cat("\n--- Warnings ---\n")
     for (w in x$warnings) cat("  *", w, "\n")
@@ -961,10 +1068,9 @@ print.ferx_fit <- function(x, ...) {
 #'   \code{se_sigma}, \code{shrinkage_eta}, \code{shrinkage_eps},
 #'   \code{covariance_status}, \code{eigenvalues}, \code{condition_number}
 #'   (see \code{\link{ferx_fit}} for definitions), \code{wall_time_secs},
-#'   \code{ferx_version}, \code{call_settings}, \code{sir_ess},
-#'   \code{warnings}, \code{ebe_convergence_warnings},
-#'   \code{max_unconverged_subjects},
-#'   \code{total_ebe_fallbacks}.
+#'   \code{ferx_version}, \code{call_settings}, \code{model_file_settings},
+#'   \code{sir_ess}, \code{warnings}, \code{ebe_convergence_warnings},
+#'   \code{max_unconverged_subjects}, \code{total_ebe_fallbacks}.
 #' @examples
 #' \dontrun{
 #' ex  <- ferx_example("warfarin")
@@ -1015,6 +1121,7 @@ summary.ferx_fit <- function(object, ...) {
     total_ebe_fallbacks = x$total_ebe_fallbacks,
     model_structure = x$model_structure,
     call_settings = x$call_settings %||% list(),
+    model_file_settings = x$model_file_settings %||% list(),
     sir_ess = x$sir_ess,
     warnings = x$warnings
   )
@@ -1043,10 +1150,28 @@ print.ferx_summary <- function(x, ...) {
   cat(sprintf("Gradient:  %s (requested)\n", x$gradient %||% "?"))
   cat(sprintf("ferx v%s\n", x$ferx_version %||% "?"))
 
-  if (length(x$call_settings) > 0L) {
-    cat("\nSettings:\n")
-    for (nm in names(x$call_settings)) {
-      cat(sprintf("  %-30s %s\n", nm, x$call_settings[[nm]]))
+  if (length(x$model_file_settings) > 0L || length(x$call_settings) > 0L) {
+    cat("\nSettings (model file / call-time override):\n")
+    all_keys <- union(names(x$model_file_settings), names(x$call_settings))
+    for (nm in all_keys) {
+      mval <- x$model_file_settings[[nm]]
+      cval <- x$call_settings[[nm]]
+      if (!is.null(mval) && !is.null(cval) &&
+          !identical(tolower(as.character(mval)), tolower(as.character(cval)))) {
+        cat(sprintf("  %-28s %s  [model: %s] *\n", nm, cval, mval))
+      } else if (!is.null(cval)) {
+        cat(sprintf("  %-28s %s\n", nm, cval))
+      } else {
+        cat(sprintf("  %-28s %s  [model only]\n", nm, mval))
+      }
+    }
+    if (any(vapply(all_keys, function(nm) {
+      mval <- x$model_file_settings[[nm]]
+      cval <- x$call_settings[[nm]]
+      !is.null(mval) && !is.null(cval) &&
+        !identical(tolower(as.character(mval)), tolower(as.character(cval)))
+    }, logical(1L)))) {
+      cat("  (* model file value overridden by call-time argument)\n")
     }
   }
 
