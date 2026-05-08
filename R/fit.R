@@ -243,63 +243,247 @@
 #'     character). Includes merged defaults such as \code{optimizer_trace} and
 #'     \code{scale_params}. Empty list when no settings were supplied.}
 #'
+#' @section Specifying model and data:
+#'
+#' There are two equivalent ways to supply the model and data:
+#'
+#' \strong{1. Path strings (classic style):}
+#' \preformatted{
+#' ferx_fit("pk.ferx", "data.csv")
+#' ferx_fit(model = "pk.ferx", data = "data.csv")
+#' }
+#'
+#' \strong{2. \code{ferx_model} object (pipe style):}
+#' \preformatted{
+#' ferx_model("pk.ferx", data = "data.csv") |> ferx_fit()
+#' }
+#'
+#' Both dispatch to the same Rust backend. The \code{ferx_model} form is
+#' convenient when combined with \code{\link{ferx_set_section}} to modify model
+#' options in the same chain (see Examples). The data path stored in the
+#' \code{ferx_model} object can always be overridden by supplying \code{data}
+#' explicitly to \code{ferx_fit()}.
+#'
+#' @section Controlling estimation:
+#'
+#' \strong{Estimation method} — pass a single method or a vector to chain
+#' methods in sequence (each stage seeds the next with its converged
+#' parameters):
+#' \preformatted{
+#' ferx_fit(m, d, method = "focei")
+#' ferx_fit(m, d, method = c("saem", "focei"))  # SAEM warm-start, FOCEI polish
+#' }
+#'
+#' \strong{Standard errors} — the covariance step is on by default:
+#' \preformatted{
+#' ferx_fit(m, d, covariance = TRUE)   # default — produces SE / %RSE
+#' ferx_fit(m, d, covariance = FALSE)  # skip for speed during development
+#' }
+#'
+#' \strong{Parallelism} — cap the Rust thread pool:
+#' \preformatted{
+#' ferx_fit(m, d, threads = parallel::detectCores(logical = FALSE))
+#' }
+#'
+#' \strong{BLOQ handling}:
+#' \preformatted{
+#' ferx_fit(m, d, bloq_method = "m3")    # Beal M3 likelihood (needs CENS column)
+#' ferx_fit(m, d, bloq_method = "drop")  # discard BLOQ rows
+#' }
+#'
+#' \strong{Gradient method} for the inner EBE loop:
+#' \preformatted{
+#' ferx_fit(m, d, gradient = "auto")  # default: AD when available, else FD
+#' ferx_fit(m, d, gradient = "ad")    # force automatic differentiation
+#' ferx_fit(m, d, gradient = "fd")    # force finite differences
+#' }
+#'
+#' \strong{Optimizer trace} — write a per-iteration CSV for convergence
+#' diagnostics:
+#' \preformatted{
+#' fit <- ferx_fit(m, d, optimizer_trace = TRUE)
+#' ferx_plot_trace(fit)
+#' }
+#'
+#' @section Fine-tuning with \code{settings}:
+#'
+#' The \code{settings} argument forwards a named list of low-level options to
+#' the Rust backend without requiring a new wrapper release. Arguments with
+#' dedicated parameters (e.g. \code{method}, \code{covariance}) cannot be
+#' duplicated in \code{settings} — pass them via the named argument.
+#'
+#' \strong{Outer optimizer selection:}
+#' \preformatted{
+#' ferx_fit(m, d, settings = list(optimizer = "bobyqa"))      # default
+#' ferx_fit(m, d, settings = list(optimizer = "slsqp"))       # gradient-based
+#' ferx_fit(m, d, settings = list(optimizer = "lbfgs"))
+#' ferx_fit(m, d, settings = list(optimizer = "bfgs"))
+#' ferx_fit(m, d, settings = list(optimizer = "trust_region"))
+#' ferx_fit(m, d, settings = list(optimizer = "mma"))
+#' }
+#'
+#' \strong{Iteration cap and inner loop:}
+#' \preformatted{
+#' ferx_fit(m, d, settings = list(
+#'   maxiter       = 500L,
+#'   inner_maxiter = 100L,
+#'   inner_tol     = 1e-6
+#' ))
+#' }
+#'
+#' \strong{SAEM tuning:}
+#' \preformatted{
+#' ferx_fit(m, d, method = "saem", settings = list(
+#'   n_exploration = 200,
+#'   n_convergence = 400,
+#'   n_mh_steps    = 3,
+#'   seed          = 42L
+#' ))
+#' }
+#'
+#' \strong{SIR uncertainty (requires \code{sir = TRUE, covariance = TRUE}):}
+#' \preformatted{
+#' ferx_fit(m, d, sir = TRUE, settings = list(
+#'   sir_samples   = 2000L,
+#'   sir_resamples = 500L,
+#'   sir_seed      = 1L
+#' ))
+#' }
+#'
+#' \strong{Global search before local refinement:}
+#' \preformatted{
+#' ferx_fit(m, d, settings = list(
+#'   global_search  = TRUE,
+#'   global_maxeval = 1000L
+#' ))
+#' }
+#'
+#' \strong{Trust-region CG budget:}
+#' \preformatted{
+#' ferx_fit(m, d, settings = list(
+#'   optimizer          = "trust_region",
+#'   steihaug_max_iters = 100L
+#' ))
+#' }
+#'
+#' @section Post-fit outputs and pipe extensions:
+#'
+#' \code{ferx_fit()} returns a \code{ferx_fit} object. All of the following
+#' work both as standalone calls and as the tail of a \code{|>} pipe:
+#'
+#' \preformatted{
+#' fit |> print()              # full parameter table
+#' fit |> summary()            # compact diagnostic summary
+#' fit |> ferx_estimates()     # tidy data frame: theta / omega / sigma + SE / %RSE
+#' fit |> ferx_cor_matrix()    # parameter correlation matrix (needs covariance = TRUE)
+#' fit |> ferx_model_inspect() # model structure auto-derived by the engine
+#' fit |> ferx_plot_trace()    # convergence trace (needs optimizer_trace = TRUE)
+#' }
+#'
+#' Diagnostics data frame (PRED, IPRED, CWRES, ETAs, …) lives in
+#' \code{fit$sdtab} and can be used directly:
+#' \preformatted{
+#' fit$sdtab
+#' fit$ebe_etas
+#' fit$individual_estimates
+#' }
+#'
 #' @examples
 #' \dontrun{
 #' ex <- ferx_example("warfarin")
 #'
-#' # Default: derivative-free BOBYQA — robust on the FOCE surface
+#' # ── Classic style (path strings) ─────────────────────────────────────────
+#'
+#' # Minimal call — FOCE with BOBYQA, covariance step on
 #' fit <- ferx_fit(ex$model, ex$data)
 #'
-#' # Gradient-based SLSQP — faster on smooth, well-behaved problems
-#' fit_slsqp <- ferx_fit(ex$model, ex$data,
-#'   settings = list(optimizer = "slsqp")
+#' # Named arguments — fully equivalent
+#' fit <- ferx_fit(model = ex$model, data = ex$data, method = "focei")
+#'
+#' # All common options at once
+#' fit <- ferx_fit(ex$model, ex$data,
+#'   method      = "focei",
+#'   covariance  = TRUE,
+#'   threads     = 4L,
+#'   gradient    = "auto",
+#'   verbose     = TRUE,
+#'   scale_params = TRUE
 #' )
 #'
-#' # Second-order trust region with a tuned CG budget
-#' fit_tr <- ferx_fit(ex$model, ex$data,
-#'   settings = list(
-#'     optimizer = "trust_region",
-#'     steihaug_max_iters = 100L
-#'   )
-#' )
+#' # SAEM warm-start, then FOCEI polish
+#' fit <- ferx_fit(ex$model, ex$data, method = c("saem", "focei"))
 #'
-#' # Fine-tune inner (per-subject EBE) loop via `settings`
-#' fit_fast <- ferx_fit(ex$model, ex$data,
+#' # Fine-tune via settings
+#' fit <- ferx_fit(ex$model, ex$data,
+#'   method   = "focei",
 #'   settings = list(
+#'     optimizer     = "slsqp",
+#'     maxiter       = 500L,
 #'     inner_maxiter = 100L,
-#'     inner_tol = 1e-6
+#'     inner_tol     = 1e-6
 #'   )
 #' )
 #'
-#' # Chain SAEM to FOCEI (SAEM explores, FOCEI polishes):
-#' result <- ferx_fit("warfarin.ferx", "warfarin.csv",
-#'   method = c("saem", "focei")
-#' )
-#'
-#' # Compare with mu-referencing off
-#' fit_no_mu <- ferx_fit("warfarin.ferx", "warfarin.csv", mu_referencing = FALSE)
-#'
-#' # Check which ETAs were detected
-#' result$warnings
-#'
-#' # Likelihood-based BLOQ handling (M3):
+#' # BLOQ (M3 method)
 #' bloq <- ferx_example("warfarin_bloq")
-#' result <- ferx_fit(bloq$model, bloq$data, method = "focei", bloq_method = "m3")
+#' fit  <- ferx_fit(bloq$model, bloq$data, method = "focei", bloq_method = "m3")
 #'
-#' # Tune SAEM phase lengths via `settings`:
-#' result <- ferx_fit("warfarin.ferx", "warfarin.csv",
-#'   method = "saem",
-#'   settings = list(
-#'     n_exploration = 200,
-#'     n_convergence = 400,
-#'     seed = 42L
-#'   )
+#' # SIR parameter uncertainty
+#' fit <- ferx_fit(ex$model, ex$data,
+#'   sir      = TRUE,
+#'   settings = list(sir_samples = 2000L, sir_resamples = 500L)
 #' )
 #'
-#' # Inspect covariance diagnostics (requires covariance = TRUE):
-#' fit_cov <- ferx_fit(ex$model, ex$data, covariance = TRUE)
-#' fit_cov$eigenvalues       # sorted descending; length = number of free params
-#' fit_cov$condition_number  # > 1000 suggests ill-conditioned parameter space
+#' # ── Pipe style (ferx_model object) ───────────────────────────────────────
+#'
+#' # Basic pipe — model and data bundled, fit options passed to ferx_fit()
+#' ferx_model(ex$model, data = ex$data) |>
+#'   ferx_fit(method = "focei", covariance = TRUE)
+#'
+#' # Modify a model section, then fit
+#' ferx_model(ex$model, data = ex$data) |>
+#'   ferx_set_section("fit_options", c(
+#'     "  method     = focei",
+#'     "  maxiter    = 500",
+#'     "  covariance = true"
+#'   )) |>
+#'   ferx_fit()
+#'
+#' # Full pipeline including post-fit outputs
+#' ferx_model(ex$model, data = ex$data) |>
+#'   ferx_set_section("fit_options", c("  method = focei")) |>
+#'   ferx_fit(covariance = TRUE, threads = 4L,
+#'            settings = list(optimizer = "slsqp")) |>
+#'   summary()
+#'
+#' # Inspect then continue (ferx_get_section returns the ferx_model invisibly)
+#' ferx_model(ex$model, data = ex$data) |>
+#'   ferx_get_section("parameters") |>
+#'   ferx_fit() |>
+#'   ferx_estimates()
+#'
+#' # Override data stored in ferx_model at fit time
+#' m <- ferx_model(ex$model, data = ex$data)
+#' ferx_fit(m, data = "other_cohort.csv", method = "focei")
+#'
+#' # ── Post-fit outputs ─────────────────────────────────────────────────────
+#'
+#' fit <- ferx_fit(ex$model, ex$data, covariance = TRUE, optimizer_trace = TRUE)
+#'
+#' summary(fit)              # compact diagnostic table
+#' ferx_estimates(fit)       # tidy data frame with SE and %RSE
+#' ferx_cor_matrix(fit)      # parameter correlation matrix
+#' ferx_model_inspect(fit)   # model structure auto-derived by the engine
+#' ferx_plot_trace(fit)      # convergence plot (optimizer_trace = TRUE required)
+#'
+#' fit$sdtab                 # per-observation diagnostics (PRED, IPRED, CWRES, …)
+#' fit$ebe_etas              # per-subject empirical Bayes ETAs
+#' fit$individual_estimates  # per-subject individual PK parameters
+#' fit$eigenvalues           # sorted eigenvalues of parameter correlation matrix
+#' fit$condition_number      # > 1000 flags potential ill-conditioning
+#'
+#' # Covariance diagnostics in a pipe
+#' ferx_fit(ex$model, ex$data, covariance = TRUE) |> ferx_cor_matrix()
 #' }
 #'
 #' @export

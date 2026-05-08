@@ -1,15 +1,27 @@
 #' Create a ferx_model object
 #'
 #' Constructs a \code{ferx_model} S3 object that bundles a \code{.ferx} model
-#' file path with an optional data path. The object is the entry point for
-#' pipe-based workflows:
+#' file path with an optional data path. This is the entry point for pipe-based
+#' workflows. Both the model file and data path are validated at construction
+#' time (the data path may be omitted and supplied later to
+#' \code{\link{ferx_fit}}).
 #'
+#' \strong{Typical pipe workflow:}
 #' \preformatted{
 #' ferx_model("pk.ferx", data = "data.csv") |>
-#'   ferx_set_section("fit_options", c("  method = focei")) |>
+#'   ferx_set_section("fit_options", c(
+#'     "  method     = focei",
+#'     "  maxiter    = 500",
+#'     "  covariance = true"
+#'   )) |>
 #'   ferx_fit() |>
 #'   summary()
 #' }
+#'
+#' All fit options (\code{method}, \code{covariance}, \code{threads},
+#' \code{settings}, …) can still be passed directly to \code{ferx_fit()} in
+#' the pipe — the \code{ferx_model} object only carries the file paths. See
+#' \code{\link{ferx_fit}} for the full list of options and post-fit outputs.
 #'
 #' @param model Path to a \code{.ferx} model file. The file must exist.
 #' @param data Optional path to a NONMEM-format CSV data file. Can be supplied
@@ -20,8 +32,26 @@
 #'
 #' @examples
 #' ex <- ferx_example("warfarin")
+#'
+#' # With data bundled
 #' m <- ferx_model(ex$model, data = ex$data)
 #' print(m)
+#'
+#' # Without data — supply at fit time
+#' m <- ferx_model(ex$model)
+#'
+#' \dontrun{
+#' # Pipe with section edit and all fit options set in ferx_fit()
+#' ferx_model(ex$model, data = ex$data) |>
+#'   ferx_set_section("fit_options", c("  method = focei", "  maxiter = 500")) |>
+#'   ferx_fit(covariance = TRUE, threads = 4L,
+#'            settings = list(optimizer = "slsqp")) |>
+#'   summary()
+#'
+#' # Data can be overridden at fit time even when stored in ferx_model
+#' ferx_model(ex$model, data = ex$data) |>
+#'   ferx_fit(data = "other_cohort.csv")
+#' }
 #'
 #' @seealso \code{\link{ferx_set_section}}, \code{\link{ferx_get_section}},
 #'   \code{\link{ferx_fit}}
