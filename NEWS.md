@@ -24,6 +24,13 @@
 - `ferx_model_set_section(path, section, lines)` — replace the body of a named
   section in-place; the write complement to `ferx_model_section()`.
 
+## Documentation
+
+- New vignette **"Model workflow: inspect, edit, fit"** (`vignette("model-workflow", package = "ferx")`)
+  demonstrates the pre-fit inspection workflow: `ferx_model_inspect()` before
+  `ferx_fit()` to catch structural mistakes cheaply, and re-inspecting the
+  fitted result via `ferx_model_inspect(fit)` (closes #57).
+
 ## Changes to existing functions
 
 - `result$model_structure` is now sourced from the Rust engine (built from the
