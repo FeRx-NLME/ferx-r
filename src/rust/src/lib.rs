@@ -973,6 +973,19 @@ fn ferx_rust_autodiff_enabled() -> bool {
     cfg!(feature = "autodiff")
 }
 
+/// Validate a .ferx model file by parsing it without fitting.
+///
+/// @param model_path Path to .ferx model file
+/// @return Named list with `ok` (logical), `errors` (character vector)
+/// @export
+#[extendr]
+fn ferx_rust_validate_model(model_path: &str) -> List {
+    match ferx_nlme::parser::model_parser::parse_full_model_file(Path::new(model_path)) {
+        Ok(_) => list!(ok = true, errors = Vec::<String>::new()),
+        Err(e) => list!(ok = false, errors = vec![e.to_string()]),
+    }
+}
+
 extendr_module! {
     mod ferx;
     fn ferx_rust_fit;
@@ -981,4 +994,5 @@ extendr_module! {
     fn ferx_rust_predict;
     fn ferx_rust_predict_from_fit;
     fn ferx_rust_autodiff_enabled;
+    fn ferx_rust_validate_model;
 }
