@@ -28,6 +28,10 @@ ferx_model_show <- function(path) {
 #' installed ferx package directory (i.e. a bundled read-only example), a copy
 #' is written to \code{dest} first and that copy is opened instead.
 #'
+#' After the editor closes, an optional \code{save_as} step lets you copy the
+#' edited file to a new path — useful when iterating on a model to keep
+#' versioned copies.
+#'
 #' @param path Path to a \code{.ferx} model file.
 #' @param dest Directory to copy read-only package files into before editing.
 #'   Defaults to the current working directory. Ignored when \code{path} is
@@ -35,9 +39,18 @@ ferx_model_show <- function(path) {
 #' @param overwrite Logical. If \code{TRUE}, overwrite an existing file in
 #'   \code{dest} when copying a package example. If \code{FALSE} (default) and
 #'   the destination file already exists, an error is raised.
+#' @param save_as Controls post-edit save-as behaviour:
+#'   \itemize{
+#'     \item \code{NULL} (default) — no extra action after editing.
+#'     \item \code{TRUE} — interactively prompt the user for a destination path.
+#'     \item A character string — silently copy the edited file to that path.
+#'   }
+#'   When a copy is made the \emph{copy} path is returned; otherwise the edited
+#'   file path is returned.
 #'
-#' @return The path of the file that was opened (i.e. \code{path} for
-#'   user-owned files, or the copied path for package examples), invisibly.
+#' @return The path of the file in its final location, invisibly. When
+#'   \code{save_as} produces a copy, that copy's path is returned; otherwise
+#'   the path of the edited file is returned.
 #'
 #' @examples
 #' \dontrun{
@@ -48,12 +61,18 @@ ferx_model_show <- function(path) {
 #'
 #' # Edit a user-owned model directly
 #' ferx_model_edit("my_model.ferx")
+#'
+#' # After editing, save a copy to a new versioned path
+#' ferx_model_edit("run1.ferx", save_as = "run2.ferx")
+#'
+#' # After editing, interactively ask for the destination
+#' ferx_model_edit("run1.ferx", save_as = TRUE)
 #' }
 #'
 #' @seealso \code{\link{ferx_model_show}}, \code{\link{ferx_model_new}},
 #'   \code{\link{ferx_example}}
 #' @export
-ferx_model_edit <- function(path, dest = ".", overwrite = FALSE) {
+ferx_model_edit <- function(path, dest = ".", overwrite = FALSE, save_as = NULL) {
   if (!file.exists(path)) stop("File not found: ", path)
 
   pkg_dir <- system.file("", package = "ferx")
@@ -73,6 +92,29 @@ ferx_model_edit <- function(path, dest = ".", overwrite = FALSE) {
   }
 
   utils::file.edit(path)
+
+  if (!is.null(save_as)) {
+    if (isTRUE(save_as)) {
+      save_as <- readline(prompt = paste0("Save a copy of '", basename(path), "' to: "))
+      if (!nzchar(trimws(save_as))) {
+        message("No path entered; keeping edited file at ", path)
+        return(invisible(path))
+      }
+    }
+    if (!is.character(save_as) || length(save_as) != 1L) {
+      stop("'save_as' must be NULL, TRUE, or a single character string.")
+    }
+    if (file.exists(save_as) && !overwrite) {
+      stop(
+        save_as, " already exists. ",
+        "Use overwrite = TRUE to replace it."
+      )
+    }
+    file.copy(path, save_as, overwrite = overwrite)
+    message("Saved copy to ", save_as)
+    return(invisible(save_as))
+  }
+
   invisible(path)
 }
 

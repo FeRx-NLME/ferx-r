@@ -4,7 +4,7 @@
 \alias{ferx_model_edit}
 \title{Open a ferx model file in an editor}
 \usage{
-ferx_model_edit(path, dest = ".", overwrite = FALSE)
+ferx_model_edit(path, dest = ".", overwrite = FALSE, save_as = NULL)
 }
 \arguments{
 \item{path}{Path to a \code{.ferx} model file.}
@@ -16,15 +16,29 @@ already a writable user-owned file.}
 \item{overwrite}{Logical. If \code{TRUE}, overwrite an existing file in
 \code{dest} when copying a package example. If \code{FALSE} (default) and
 the destination file already exists, an error is raised.}
+
+\item{save_as}{Controls post-edit save-as behaviour:
+\itemize{
+  \item \code{NULL} (default) — no extra action after editing.
+  \item \code{TRUE} — interactively prompt the user for a destination path.
+  \item A character string — silently copy the edited file to that path.
+}
+When a copy is made the \emph{copy} path is returned; otherwise the edited
+file path is returned.}
 }
 \value{
-The path of the file that was opened (i.e. \code{path} for
-user-owned files, or the copied path for package examples), invisibly.
+The path of the file in its final location, invisibly. When
+\code{save_as} produces a copy, that copy's path is returned; otherwise
+the path of the edited file is returned.
 }
 \description{
 Opens a \code{.ferx} model file for editing. If the file lives inside the
 installed ferx package directory (i.e. a bundled read-only example), a copy
 is written to \code{dest} first and that copy is opened instead.
+
+After the editor closes, an optional \code{save_as} step lets you copy the
+edited file to a new path — useful when iterating on a model to keep
+versioned copies.
 }
 \examples{
 \dontrun{
@@ -35,6 +49,12 @@ my_model <- ferx_model_edit(ex$model, dest = tempdir())
 
 # Edit a user-owned model directly
 ferx_model_edit("my_model.ferx")
+
+# After editing, save a copy to a new versioned path
+ferx_model_edit("run1.ferx", save_as = "run2.ferx")
+
+# After editing, interactively ask for the destination
+ferx_model_edit("run1.ferx", save_as = TRUE)
 }
 
 }
