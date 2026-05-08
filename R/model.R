@@ -589,8 +589,34 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
 #'   invisibly. The function always prints a report to the console.
 #'
 #' @examples
+#' # Valid model — all required sections present
 #' ex <- ferx_example("warfarin")
 #' ferx_model_validate(ex$model)
+#'
+#' \dontrun{
+#' # Invalid model — missing required sections
+#' bad <- tempfile(fileext = ".ferx")
+#' writeLines(c(
+#'   "[parameters]",
+#'   "  theta TVCL(1.0, 0.001, 100.0)",
+#'   "[structural_model]",
+#'   "  pk one_cpt_oral(cl=CL, v=V, ka=KA)"
+#' ), bad)
+#' ferx_model_validate(bad)
+#' # Validating: <file>.ferx
+#' #
+#' # Sections present:
+#' #   parameters                     [ok]
+#' #   individual_parameters          [MISSING]
+#' #   structural_model               [ok]
+#' #   error_model                    [MISSING]
+#' #   initial_values                 [MISSING]
+#' #
+#' # Result: INVALID
+#' #   * Missing required section: [individual_parameters]
+#' #   * Missing required section: [error_model]
+#' #   * Missing required section: [initial_values]
+#' }
 #'
 #' @seealso \code{\link{ferx_model_inspect}}, \code{\link{ferx_model_show}}
 #' @export
