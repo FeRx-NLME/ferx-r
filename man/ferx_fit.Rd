@@ -168,8 +168,13 @@ Values that duplicate a dedicated argument
 (\code{method}, \code{covariance}, \code{verbose},
 \code{bloq_method}, \code{threads}, \code{sir}) are rejected — pass
 them via the dedicated argument. Unknown keys and malformed values
-also raise an error. Settings apply on top of the model file's
-\code{[fit_options]} block.}
+also raise an error.
+\strong{Precedence}: dedicated \code{ferx_fit()} arguments win over
+\code{settings}, which in turn win over the model file's
+\code{[fit_options]} block. A \code{warning()} is issued whenever a
+call-time value overrides a different value from \code{[fit_options]}.
+Inspect \code{fit$model_file_settings} and \code{fit$call_settings} to
+audit the full picture.}
 }
 \value{
 A list with components:
@@ -181,10 +186,20 @@ A list with components:
 \item{bic}{Bayesian Information Criterion}
 \item{theta}{Named numeric vector of fixed effect estimates}
 \item{omega}{Between-subject variability covariance matrix}
-\item{sigma}{Residual error parameter estimates}
+\item{sigma}{Residual error parameter estimates on the
+\emph{standard-deviation} scale. For a proportional component
+\code{CV\% = sigma * 100}; for an additive component the value is in
+observation units. Variance is \code{sigma^2} for either type.}
+\item{sigma_names}{Names of the sigma parameters as declared in the
+\code{[parameters]} block of the \code{.ferx} file. Parallel to
+\code{sigma}.}
+\item{sigma_types}{Per-component error type label, parallel to
+\code{sigma}: \code{"proportional"} or \code{"additive"}. Combined
+error models report \code{c("proportional", "additive")} in that order.}
 \item{se_theta}{Standard errors for theta (NULL if covariance step failed)}
 \item{se_omega}{Standard errors for omega diagonal}
-\item{se_sigma}{Standard errors for sigma}
+\item{se_sigma}{Standard errors for sigma (on the SD scale, like
+\code{sigma} itself)}
 \item{sdtab}{Data frame with ID, TIME, DV, PRED, IPRED, CWRES, IWRES,
 EBE_OFV, N_OBS; OCC if any subject carries an occasion column; CENS
 if any rows are below LLOQ. Per-subject ETAs live in
@@ -271,10 +286,27 @@ column per kappa parameter containing per-subject per-occasion kappa
 EBEs. \code{ID} carries the original subject identifier (matching
 \code{sdtab}); \code{OCC} carries the labeled occasion in first-seen
 order. \code{NULL} when no IOV.}
+\item{omega_param_corr}{Parameter-level correlation matrix for block omega.
+Uses the bivariate lognormal formula for lognormal pairs and falls back
+to the eta-level formula for additive or unknown parameterisations.
+\code{NULL} when omega is diagonal (no off-diagonal elements to report).}
+\item{omega_iov_param_corr}{Same as \code{omega_param_corr} but for the
+IOV kappa block. \code{NULL} when kappa is diagonal or absent.}
+\item{eta_log_transformed}{Logical vector of length \code{n_eta}; \code{TRUE}
+when the eta is lognormally parameterised (\code{THETA * exp(ETA)}),
+\code{FALSE} for additive or unknown parameterisations. \code{NULL} when
+the engine does not supply the information.}
 \item{call_settings}{Named list of the effective settings passed to Rust,
 with values typed back to their natural R types (logical, numeric, or
 character). Includes merged defaults such as \code{optimizer_trace} and
 \code{scale_params}. Empty list when no settings were supplied.}
+\item{model_file_settings}{Named list of raw \code{key = value} pairs from
+the model file's \code{[fit_options]} block, as character strings
+(before Rust type coercion). Empty list when no \code{[fit_options]}
+block is present. Use this alongside \code{call_settings} to audit which
+values the model file requested and which were overridden at the R call
+site. A \code{warning()} is issued automatically for each key that
+appears in both sources with a different value.}
 }
 \description{
 Fits a NLME model using FOCE or FOCEI estimation with a Rust backend

@@ -177,6 +177,10 @@ ferx_model_show <- function(path) {
 #' installed ferx package directory (i.e. a bundled read-only example), a copy
 #' is written to \code{dest} first and that copy is opened instead.
 #'
+#' After the editor closes, an optional \code{save_as} step lets you copy the
+#' edited file to a new path — useful when iterating on a model to keep
+#' versioned copies.
+#'
 #' @param path Path to a \code{.ferx} model file.
 #' @param dest Directory to copy read-only package files into before editing.
 #'   Defaults to the current working directory. Ignored when \code{path} is
@@ -184,9 +188,20 @@ ferx_model_show <- function(path) {
 #' @param overwrite Logical. If \code{TRUE}, overwrite an existing file in
 #'   \code{dest} when copying a package example. If \code{FALSE} (default) and
 #'   the destination file already exists, an error is raised.
+#' @param save_as Controls post-edit save-as behaviour:
+#'   \itemize{
+#'     \item \code{NULL} or \code{FALSE} (default) — no extra action after
+#'       editing. Accepting \code{FALSE} lets you pass expressions like
+#'       \code{save_as = interactive()}.
+#'     \item \code{TRUE} — interactively prompt the user for a destination path.
+#'     \item A character string — silently copy the edited file to that path.
+#'   }
+#'   When a copy is made the \emph{copy} path is returned; otherwise the edited
+#'   file path is returned.
 #'
-#' @return The path of the file that was opened (i.e. \code{path} for
-#'   user-owned files, or the copied path for package examples), invisibly.
+#' @return The path of the file in its final location, invisibly. When
+#'   \code{save_as} produces a copy, that copy's path is returned; otherwise
+#'   the path of the edited file is returned.
 #'
 #' @examples
 #' \dontrun{
@@ -197,13 +212,28 @@ ferx_model_show <- function(path) {
 #'
 #' # Edit a user-owned model directly
 #' ferx_model_edit("my_model.ferx")
+#'
+#' # After editing, save a copy to a new versioned path
+#' ferx_model_edit("run1.ferx", save_as = "run2.ferx")
+#'
+#' # After editing, interactively ask for the destination
+#' ferx_model_edit("run1.ferx", save_as = TRUE)
 #' }
 #'
 #' @seealso \code{\link{ferx_model_show}}, \code{\link{ferx_model_new}},
 #'   \code{\link{ferx_example}}
 #' @export
-ferx_model_edit <- function(path, dest = ".", overwrite = FALSE) {
+ferx_model_edit <- function(path, dest = ".", overwrite = FALSE, save_as = NULL) {
   if (!file.exists(path)) stop("File not found: ", path)
+
+  # Validate save_as up front so invalid input fails fast — before opening an
+  # editor or copying any files. FALSE collapses to NULL so callers can pass
+  # `save_as = interactive()` and have it no-op in non-interactive sessions.
+  if (isFALSE(save_as)) save_as <- NULL
+  if (!is.null(save_as) && !isTRUE(save_as) &&
+      !(is.character(save_as) && length(save_as) == 1L && !is.na(save_as))) {
+    stop("'save_as' must be NULL, TRUE, FALSE, or a single character string.")
+  }
 
   pkg_dir <- system.file("", package = "ferx")
   in_pkg  <- nzchar(pkg_dir) && startsWith(normalizePath(path), normalizePath(pkg_dir))
@@ -216,13 +246,38 @@ ferx_model_edit <- function(path, dest = ".", overwrite = FALSE) {
         "Use overwrite = TRUE to replace it, or choose a different dest."
       )
     }
-    file.copy(path, dest_path, overwrite = overwrite)
+    if (!isTRUE(file.copy(path, dest_path, overwrite = overwrite))) {
+      stop("Failed to copy ", path, " to ", dest_path)
+    }
     message("Copied to ", dest_path, "; editing your copy.")
     path <- dest_path
   }
 
   utils::file.edit(path)
-  invisible(path)
+
+  if (is.null(save_as)) return(invisible(path))
+
+  if (isTRUE(save_as)) {
+    save_as <- trimws(readline(
+      prompt = paste0("Save a copy of '", basename(path), "' to: ")
+    ))
+    if (!nzchar(save_as)) {
+      message("No path entered; keeping edited file at ", path)
+      return(invisible(path))
+    }
+  }
+
+  if (file.exists(save_as) && !overwrite) {
+    stop(
+      save_as, " already exists. ",
+      "Use overwrite = TRUE to replace it."
+    )
+  }
+  if (!isTRUE(file.copy(path, save_as, overwrite = overwrite))) {
+    stop("Failed to copy ", path, " to ", save_as)
+  }
+  message("Saved copy to ", save_as)
+  invisible(save_as)
 }
 
 # Parse section header positions and names from a character vector of file
@@ -243,17 +298,22 @@ ferx_section_headers <- function(lines) {
 #' @param path Path to a \code{.ferx} model file.
 #' @param section Name of the section to extract, without brackets (e.g.
 #'   \code{"parameters"}).
+#' @param strip Logical. If \code{TRUE}, leading whitespace is trimmed from each
+#'   returned line via \code{\link[base]{trimws}}. Defaults to \code{FALSE} to
+#'   preserve the round-trip guarantee with
+#'   \code{\link{ferx_model_set_section}}.
 #'
 #' @return Character vector of lines in the requested section, invisibly.
 #'
 #' @examples
 #' ex <- ferx_example("warfarin")
 #' ferx_model_section(ex$model, "parameters")
+#' ferx_model_section(ex$model, "parameters", strip = TRUE)
 #'
 #' @seealso \code{\link{ferx_model_show}}, \code{\link{ferx_model_edit}},
 #'   \code{\link{ferx_model_set_section}}
 #' @export
-ferx_model_section <- function(path, section) {
+ferx_model_section <- function(path, section, strip = FALSE) {
   if (!file.exists(path)) stop("File not found: ", path)
   if (tolower(tools::file_ext(path)) != "ferx") stop("'path' must be a .ferx file")
 
@@ -271,6 +331,7 @@ ferx_model_section <- function(path, section) {
   start <- hdr$positions[idx] + 1L
   end   <- if (idx < length(hdr$positions)) hdr$positions[idx + 1L] - 1L else length(file_lines)
   body  <- if (start <= end) file_lines[start:end] else character(0)
+  if (strip) body <- trimws(body, which = "left")
 
   cat("# [", section, "]\n", sep = "")
   cat(body, sep = "\n")
@@ -612,6 +673,23 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
 # parser (ferx-nlme src/parser/model_parser.rs `pk_func_name` match arms) so
 # pre-fit `ferx_model_inspect(path)` reports the same string the engine would
 # attach to a fitted result.
+# Format a pk function name (snake_case) into a readable label.
+# e.g. "one_cpt_oral" -> "1-cpt oral", "two_cpt_iv_bolus" -> "2-cpt IV bolus"
+.ferx_fmt_pk_name <- function(fn) {
+  label <- fn
+  label <- sub("^one_",   "1_",   label)
+  label <- sub("^two_",   "2_",   label)
+  label <- sub("^three_", "3_",   label)
+  label <- sub("_cpt_",   "-cpt ", label, fixed = TRUE)
+  label <- sub("_cpt$",   "-cpt", label)
+  label <- gsub("_", " ", label, fixed = TRUE)
+  label <- gsub("(?<![a-z])iv(?![a-z])", "IV", label, perl = TRUE)
+  # Rust label for `*_infusion` is "X-cpt IV infusion"; the bare function name
+  # has no `iv` token, so inject "IV " here to keep the R/Rust labels aligned.
+  label <- sub("\\binfusion\\b", "IV infusion", label, perl = TRUE)
+  label
+}
+
 .ferx_model_type <- function(lines) {
   s <- paste(lines, collapse = " ")
   if (grepl("\\bode\\(", s, perl = TRUE)) return("ODE")
@@ -624,18 +702,7 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
   # Long `*_compartment_*` aliases collapse to their `*_cpt_*` equivalents.
   fn <- sub("_compartment_", "_cpt_", fn, fixed = TRUE)
 
-  switch(fn,
-    one_cpt_iv_bolus    = "1-cpt IV bolus",
-    one_cpt_infusion    = "1-cpt IV infusion",
-    one_cpt_oral        = "1-cpt oral",
-    two_cpt_iv_bolus    = "2-cpt IV bolus",
-    two_cpt_infusion    = "2-cpt IV infusion",
-    two_cpt_oral        = "2-cpt oral",
-    three_cpt_iv_bolus  = "3-cpt IV bolus",
-    three_cpt_infusion  = "3-cpt IV infusion",
-    three_cpt_oral      = "3-cpt oral",
-    NULL
-  )
+  .ferx_fmt_pk_name(fn)
 }
 
 # Format the structural display string from a model_structure list.
@@ -665,6 +732,26 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
     if (length(ms$iov) > 0L) paste(ms$iov, collapse = ", ") else "none"))
   cat(sprintf("  Residual:    %s\n", ms$residual))
   invisible(NULL)
+}
+
+# Parse the [fit_options] block of a .ferx file into a named character vector.
+# Keys are lower-cased; values are the raw trimmed strings from the file
+# (before Rust type coercion). Returns an empty character(0) when the section
+# is absent or empty. Uses .ferx_extract_blocks() so comments are stripped.
+.ferx_parse_model_fit_options <- function(path) {
+  blocks <- .ferx_extract_blocks(path)
+  lines  <- blocks[["fit_options"]] %||% character(0)
+  if (length(lines) == 0L) return(setNames(character(0), character(0)))
+  parts <- lapply(strsplit(lines, "=", fixed = TRUE), function(x) {
+    if (length(x) < 2L) return(NULL)
+    list(key = tolower(trimws(x[[1L]])),
+         val = trimws(paste(x[-1L], collapse = "=")))
+  })
+  parts <- Filter(Negate(is.null), parts)
+  if (length(parts) == 0L) return(setNames(character(0), character(0)))
+  keys <- vapply(parts, `[[`, character(1L), "key")
+  vals <- vapply(parts, `[[`, character(1L), "val")
+  setNames(vals, keys)
 }
 
 # Parse a .ferx file and return a named list describing model structure.

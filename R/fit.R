@@ -136,8 +136,13 @@
 #'   (\code{method}, \code{covariance}, \code{verbose},
 #'   \code{bloq_method}, \code{threads}, \code{sir}) are rejected — pass
 #'   them via the dedicated argument. Unknown keys and malformed values
-#'   also raise an error. Settings apply on top of the model file's
-#'   \code{[fit_options]} block.
+#'   also raise an error.
+#'   \strong{Precedence}: dedicated \code{ferx_fit()} arguments win over
+#'   \code{settings}, which in turn win over the model file's
+#'   \code{[fit_options]} block. A \code{warning()} is issued whenever a
+#'   call-time value overrides a different value from \code{[fit_options]}.
+#'   Inspect \code{fit$model_file_settings} and \code{fit$call_settings} to
+#'   audit the full picture.
 #'
 #' @return A list with components:
 #'   \item{converged}{Logical; did the optimizer converge}
@@ -148,10 +153,20 @@
 #'   \item{bic}{Bayesian Information Criterion}
 #'   \item{theta}{Named numeric vector of fixed effect estimates}
 #'   \item{omega}{Between-subject variability covariance matrix}
-#'   \item{sigma}{Residual error parameter estimates}
+#'   \item{sigma}{Residual error parameter estimates on the
+#'     \emph{standard-deviation} scale. For a proportional component
+#'     \code{CV\% = sigma * 100}; for an additive component the value is in
+#'     observation units. Variance is \code{sigma^2} for either type.}
+#'   \item{sigma_names}{Names of the sigma parameters as declared in the
+#'     \code{[parameters]} block of the \code{.ferx} file. Parallel to
+#'     \code{sigma}.}
+#'   \item{sigma_types}{Per-component error type label, parallel to
+#'     \code{sigma}: \code{"proportional"} or \code{"additive"}. Combined
+#'     error models report \code{c("proportional", "additive")} in that order.}
 #'   \item{se_theta}{Standard errors for theta (NULL if covariance step failed)}
 #'   \item{se_omega}{Standard errors for omega diagonal}
-#'   \item{se_sigma}{Standard errors for sigma}
+#'   \item{se_sigma}{Standard errors for sigma (on the SD scale, like
+#'     \code{sigma} itself)}
 #'   \item{sdtab}{Data frame with ID, TIME, DV, PRED, IPRED, CWRES, IWRES,
 #'     EBE_OFV, N_OBS; OCC if any subject carries an occasion column; CENS
 #'     if any rows are below LLOQ. Per-subject ETAs live in
@@ -238,10 +253,27 @@
 #'     EBEs. \code{ID} carries the original subject identifier (matching
 #'     \code{sdtab}); \code{OCC} carries the labeled occasion in first-seen
 #'     order. \code{NULL} when no IOV.}
+#'   \item{omega_param_corr}{Parameter-level correlation matrix for block omega.
+#'     Uses the bivariate lognormal formula for lognormal pairs and falls back
+#'     to the eta-level formula for additive or unknown parameterisations.
+#'     \code{NULL} when omega is diagonal (no off-diagonal elements to report).}
+#'   \item{omega_iov_param_corr}{Same as \code{omega_param_corr} but for the
+#'     IOV kappa block. \code{NULL} when kappa is diagonal or absent.}
+#'   \item{eta_log_transformed}{Logical vector of length \code{n_eta}; \code{TRUE}
+#'     when the eta is lognormally parameterised (\code{THETA * exp(ETA)}),
+#'     \code{FALSE} for additive or unknown parameterisations. \code{NULL} when
+#'     the engine does not supply the information.}
 #'   \item{call_settings}{Named list of the effective settings passed to Rust,
 #'     with values typed back to their natural R types (logical, numeric, or
 #'     character). Includes merged defaults such as \code{optimizer_trace} and
 #'     \code{scale_params}. Empty list when no settings were supplied.}
+#'   \item{model_file_settings}{Named list of raw \code{key = value} pairs from
+#'     the model file's \code{[fit_options]} block, as character strings
+#'     (before Rust type coercion). Empty list when no \code{[fit_options]}
+#'     block is present. Use this alongside \code{call_settings} to audit which
+#'     values the model file requested and which were overridden at the R call
+#'     site. A \code{warning()} is issued automatically for each key that
+#'     appears in both sources with a different value.}
 #'
 #' @section Specifying model and data:
 #'
@@ -606,6 +638,24 @@ ferx_fit.default <- function(model, data,
     list()
   }
 
+  # Read [fit_options] from the model file and detect conflicts with R call-time
+  # arguments. Precedence: dedicated R args > settings list > model file. We
+  # warn (not error) so the user is informed which value actually runs. Only
+  # args the caller *explicitly* passed are flagged — accepting a default is
+  # not an override of the model file.
+  model_file_opts <- .ferx_parse_model_fit_options(model)
+  explicit_args <- names(match.call())[-1L]
+  dedicated_explicit <- list(
+    method         = if ("method"         %in% explicit_args) paste(method, collapse = ", "),
+    covariance     = if ("covariance"     %in% explicit_args) tolower(as.character(covariance)),
+    bloq_method    = if ("bloq_method"    %in% explicit_args && !is.null(bloq_method)) bloq_arg,
+    threads        = if ("threads"        %in% explicit_args && !is.null(threads)) as.character(threads),
+    mu_referencing = if ("mu_referencing" %in% explicit_args) tolower(as.character(mu_referencing)),
+    sir            = if ("sir"            %in% explicit_args) tolower(as.character(sir)),
+    gradient       = if ("gradient"       %in% explicit_args) gradient
+  )
+  .ferx_warn_fit_option_conflicts(model_file_opts, dedicated_explicit, settings_parts)
+
   fit_started_at <- Sys.time()
   raw <- ferx_rust_fit(
     model_path = normalizePath(model),
@@ -786,6 +836,61 @@ ferx_fit.default <- function(model, data,
     result$ebe_kappas <- NULL
   }
 
+  # Reshape omega_param_corr into a square matrix using omega_dim to guard
+  # against unexpected vector lengths (NULL when diagonal or absent).
+  if (!is.null(result$omega_param_corr) && length(result$omega_param_corr) > 0L) {
+    d_pc <- result$omega_dim %||% 0L
+    if (d_pc > 0L && length(result$omega_param_corr) == d_pc * d_pc) {
+      result$omega_param_corr <- matrix(
+        result$omega_param_corr, nrow = d_pc, ncol = d_pc, byrow = TRUE
+      )
+    } else {
+      result$omega_param_corr <- NULL
+    }
+  } else {
+    result$omega_param_corr <- NULL
+  }
+
+  # Reshape omega_iov_param_corr into a square matrix (NULL when diagonal or absent)
+  if (!is.null(result$omega_iov_param_corr) && length(result$omega_iov_param_corr) > 0L) {
+    d_ipc <- result$omega_iov_dim %||% 0L
+    if (d_ipc > 0L && length(result$omega_iov_param_corr) == d_ipc * d_ipc) {
+      result$omega_iov_param_corr <- matrix(
+        result$omega_iov_param_corr, nrow = d_ipc, ncol = d_ipc, byrow = TRUE
+      )
+    } else {
+      result$omega_iov_param_corr <- NULL
+    }
+  } else {
+    result$omega_iov_param_corr <- NULL
+  }
+
+  # eta_log_transformed: empty vector -> NULL
+  if (is.null(result$eta_log_transformed) || length(result$eta_log_transformed) == 0L) {
+    result$eta_log_transformed <- NULL
+  }
+
+  # Parameter transform metadata — fall back gracefully for older ferx-nlme binaries
+  # that don't populate these vectors (empty character() from FFI → treat as absent).
+  n_eta_fit   <- if (!is.null(result$omega)) nrow(result$omega) else 0L
+  n_theta_fit <- length(result$theta)
+  n_sigma_fit <- length(result$sigma)
+
+  if (is.null(result$eta_param_types) || length(result$eta_param_types) != n_eta_fit) {
+    result$eta_param_types <- rep("log_normal", n_eta_fit)
+  }
+  if (is.null(result$eta_linked_theta) || length(result$eta_linked_theta) != n_eta_fit) {
+    result$eta_linked_theta <- rep("", n_eta_fit)
+  }
+  if (is.null(result$theta_transforms) || length(result$theta_transforms) != n_theta_fit) {
+    result$theta_transforms <- rep("identity", n_theta_fit)
+  }
+  if (is.null(result$sigma_types) || length(result$sigma_types) != n_sigma_fit) {
+    result$sigma_types <- rep("proportional", n_sigma_fit)
+  }
+  names(result$theta_transforms) <- names(result$theta)
+  names(result$sigma_types)      <- names(result$sigma)
+
   # Clean up internal fields
   result$theta_names <- NULL
   result$omega_dim <- NULL
@@ -816,6 +921,10 @@ ferx_fit.default <- function(model, data,
 
   # Store effective settings (already serialised from settings_parts above)
   result$call_settings <- settings_used
+
+  # Raw [fit_options] from the model file, for inspection and conflict auditing.
+  result$model_file_settings <- if (length(model_file_opts) > 0L)
+    as.list(model_file_opts) else list()
 
   class(result) <- "ferx_fit"
   result
@@ -941,17 +1050,39 @@ print.ferx_fit <- function(x, ...) {
   theta_names <- names(x$theta)
   if (is.null(theta_names)) theta_names <- paste0("THETA", seq_along(x$theta))
   for (i in seq_along(x$theta)) {
-    est <- x$theta[i]
+    est       <- x$theta[i]
+    transform <- if (!is.null(x$theta_transforms) && length(x$theta_transforms) >= i) x$theta_transforms[i] else "identity"
     if (!is.null(x$se_theta) && length(x$se_theta) >= i) {
-      se_val <- x$se_theta[i]
-      rse <- if (abs(est) > 1e-12) abs(se_val / est) * 100 else NaN
-      se_str <- sprintf("%.6f", se_val)
+      se_val  <- x$se_theta[i]
+      rse     <- if (abs(est) > 1e-12) abs(se_val / est) * 100 else NaN
+      se_str  <- sprintf("%.6f", se_val)
       rse_str <- sprintf("%.1f", rse)
     } else {
-      se_str <- "N/A"
+      se_val  <- NA_real_
+      se_str  <- "N/A"
       rse_str <- "N/A"
     }
-    cat(sprintf("%-16s %12.6f %12s %10s\n", theta_names[i], est, se_str, rse_str))
+    scale_tag <- switch(transform,
+      log              = "  [log scale]",
+      logit            = "  [logit scale]",
+      logit_probability = "  [logit scale]",
+      ""
+    )
+    cat(sprintf("%-16s %12.6f %12s %10s%s\n", theta_names[i], est, se_str, rse_str, scale_tag))
+    # Natural-scale typical value for log/logit transforms
+    if (transform == "log") {
+      tv <- exp(est)
+      ci_str <- if (!is.na(se_val)) {
+        sprintf("95%% CI: [%.4f, %.4f]", exp(est - 1.96 * se_val), exp(est + 1.96 * se_val))
+      } else ""
+      cat(sprintf("  %-14s %12.4f                    %s\n", "(typical)", tv, ci_str))
+    } else if (transform %in% c("logit", "logit_probability")) {
+      tv <- .ferx_inv_logit(est)
+      ci_str <- if (!is.na(se_val)) {
+        sprintf("95%% CI: [%.4f, %.4f]", .ferx_inv_logit(est - 1.96 * se_val), .ferx_inv_logit(est + 1.96 * se_val))
+      } else ""
+      cat(sprintf("  %-14s %12.4f                    %s\n", "(typical)", tv, ci_str))
+    }
   }
 
   # OMEGA
@@ -961,26 +1092,52 @@ print.ferx_fit <- function(x, ...) {
   n_eta <- nrow(om)
   has_offdiag <- FALSE
   for (i in seq_len(n_eta)) {
-    var_ii <- om[i, i]
-    # Fall back to "log_normal" until ferx-nlme exposes eta_param_types (#53).
+    var_ii   <- om[i, i]
     eta_type <- if (!is.null(x$eta_param_types) && length(x$eta_param_types) >= i) x$eta_param_types[i] else "log_normal"
-    # Exact CV for EXP(OMEGA) log-normal ETAs: sqrt(exp(omega) - 1) * 100
-    # doi:10.1002/psp4.12507; other ETA types display handled in #53
-    cv_str <- if (eta_type == "log_normal" && var_ii > 0) {
-      sprintf("%.1f", sqrt(exp(var_ii) - 1) * 100)
-    } else if (eta_type == "log_normal") {
-      "0.0"
-    } else {
-      "N/A"
-    }
+    linked_theta_name <- if (!is.null(x$eta_linked_theta) && length(x$eta_linked_theta) >= i) x$eta_linked_theta[i] else ""
     se_str <- if (!is.null(x$se_omega) && length(x$se_omega) >= i) {
       sprintf("%.6f", x$se_omega[i])
     } else {
       "N/A"
     }
+
+    extra <- if (eta_type == "log_normal") {
+      cv <- if (var_ii > 0) sqrt(exp(var_ii) - 1) * 100 else 0
+      sprintf("CV%% = %.1f", cv)
+    } else if (eta_type == "additive") {
+      sd_val  <- sqrt(max(var_ii, 0))
+      tv_name <- if (nzchar(linked_theta_name)) linked_theta_name else NULL
+      tv_val  <- if (!is.null(tv_name)) x$theta[tv_name] else NA_real_
+      cv_part <- if (!is.null(tv_val) && !is.na(tv_val) && abs(tv_val) > 1e-12) {
+        sprintf("  CV%% = %.1f (at %s=%.3g)", sd_val / abs(tv_val) * 100, tv_name, tv_val)
+      } else ""
+      sprintf("SD = %.4f%s", sd_val, cv_part)
+    } else if (eta_type %in% c("logit", "logit_probability")) {
+      # Natural-scale +/-1 SD range using linked theta (if known)
+      tv_name <- if (nzchar(linked_theta_name)) linked_theta_name else NULL
+      tv_val  <- if (!is.null(tv_name)) x$theta[tv_name] else NA_real_
+      if (!is.null(tv_val) && !is.na(tv_val)) {
+        sd_logit <- sqrt(max(var_ii, 0))
+        lo <- .ferx_inv_logit(tv_val - sd_logit)
+        hi <- .ferx_inv_logit(tv_val + sd_logit)
+        sprintf("SD_logit = %.4f  +/-1SD = [%.3f, %.3f]", sd_logit, lo, hi)
+      } else {
+        sprintf("SD_logit = %.4f", sqrt(max(var_ii, 0)))
+      }
+    } else {
+      "CV% = N/A"
+    }
+    type_tag <- switch(eta_type,
+      log_normal        = "[log-normal]",
+      additive          = "[additive]",
+      logit             = "[logit]",
+      logit_probability = "[logit]",
+      custom            = "[custom]",
+      ""
+    )
     cat(sprintf(
-      "  OMEGA(%d,%d) = %.6f  (CV%% = %s)  SE = %s\n",
-      i, i, var_ii, cv_str, se_str
+      "  OMEGA(%d,%d) %-13s = %.6f  %s  SE = %s\n",
+      i, i, type_tag, var_ii, extra, se_str
     ))
     for (j in seq_len(i - 1L)) {
       if (abs(om[i, j]) > 1e-15) has_offdiag <- TRUE
@@ -991,12 +1148,17 @@ print.ferx_fit <- function(x, ...) {
     for (i in seq_len(n_eta)) {
       for (j in seq_len(i - 1L)) {
         cov_ij <- om[i, j]
-        var_i <- om[i, i]
-        var_j <- om[j, j]
-        corr <- if (var_i > 0 && var_j > 0) cov_ij / (sqrt(var_i) * sqrt(var_j)) else 0
+        param_corr <- if (!is.null(x$omega_param_corr)) {
+          x$omega_param_corr[i, j]
+        } else {
+          var_i <- om[i, i]
+          var_j <- om[j, j]
+          if (var_i > 0 && var_j > 0) cov_ij / (sqrt(var_i) * sqrt(var_j)) else 0
+        }
+        corr_label <- if (!is.null(x$omega_param_corr)) "param corr" else "corr"
         cat(sprintf(
-          "  OMEGA(%d,%d) = %.6f  (corr = %.4f)\n",
-          i, j, cov_ij, corr
+          "  OMEGA(%d,%d) = %.6f  (%s = %.4f)\n",
+          i, j, cov_ij, corr_label, param_corr
         ))
       }
     }
@@ -1018,29 +1180,18 @@ print.ferx_fit <- function(x, ...) {
     diag_se_idx <- function(j) j * n_kap - j * (j - 1L) / 2L - (n_kap - j)
     iov_has_offdiag <- FALSE
     for (i in seq_len(n_kap)) {
-      var_ii <- m_iov[i, i]
-      # Fall back to "log_normal" until ferx-nlme exposes eta_param_types (#53).
+      var_ii   <- m_iov[i, i]
       kap_type <- if (!is.null(x$kappa_param_types) && length(x$kappa_param_types) >= i) x$kappa_param_types[i] else "log_normal"
-      # Exact CV for EXP(OMEGA_IOV) log-normal kappas: sqrt(exp(omega) - 1) * 100
-      # doi:10.1002/psp4.12507; other kappa types display handled in #53
-      cv_str <- if (kap_type == "log_normal" && var_ii > 0) {
-        sprintf("%.1f", sqrt(exp(var_ii) - 1) * 100)
-      } else if (kap_type == "log_normal") {
-        "0.0"
-      } else {
-        "N/A"
-      }
-      se_idx <- if (is_block_se) diag_se_idx(i) else i
-      se_str <- if (!is.null(x$se_kappa) && n_se >= se_idx) {
-        sprintf("%.6f", x$se_kappa[se_idx])
-      } else {
-        "N/A"
-      }
-      shr_str <- if (!is.null(x$shrinkage_kappa) && length(x$shrinkage_kappa) >= i) {
+      se_idx   <- if (is_block_se) diag_se_idx(i) else i
+      se_str   <- if (!is.null(x$se_kappa) && n_se >= se_idx) sprintf("%.6f", x$se_kappa[se_idx]) else "N/A"
+      shr_str  <- if (!is.null(x$shrinkage_kappa) && length(x$shrinkage_kappa) >= i) {
         sprintf("%.1f%%", x$shrinkage_kappa[i] * 100)
-      } else {
-        "N/A"
-      }
+      } else "N/A"
+      cv_str <- if (kap_type == "log_normal") {
+        if (var_ii > 0) sprintf("%.1f", sqrt(exp(var_ii) - 1) * 100) else "0.0"
+      } else if (kap_type == "additive") {
+        sprintf("SD = %.4f", sqrt(max(var_ii, 0)))
+      } else "N/A"
       cat(sprintf(
         "  %s = %.6f  (CV%% = %s)  SE = %s  Shrinkage = %s\n",
         kap_names[i], var_ii, cv_str, se_str, shr_str
@@ -1054,27 +1205,57 @@ print.ferx_fit <- function(x, ...) {
       for (i in seq_len(n_kap)) {
         for (j in seq_len(i - 1L)) {
           cov_ij <- m_iov[i, j]
-          var_i <- m_iov[i, i]
-          var_j <- m_iov[j, j]
-          corr <- if (var_i > 0 && var_j > 0) cov_ij / (sqrt(var_i) * sqrt(var_j)) else 0
+          param_corr <- if (!is.null(x$omega_iov_param_corr)) {
+            x$omega_iov_param_corr[i, j]
+          } else {
+            var_i <- m_iov[i, i]
+            var_j <- m_iov[j, j]
+            if (var_i > 0 && var_j > 0) cov_ij / (sqrt(var_i) * sqrt(var_j)) else 0
+          }
+          corr_label <- if (!is.null(x$omega_iov_param_corr)) "param corr" else "corr"
           cat(sprintf(
-            "  %s ~ %s : cov = %.6f  (corr = %.4f)\n",
-            kap_names[i], kap_names[j], cov_ij, corr
+            "  %s ~ %s : cov = %.6f  (%s = %.4f)\n",
+            kap_names[i], kap_names[j], cov_ij, corr_label, param_corr
           ))
         }
       }
     }
   }
 
-  # SIGMA
+  # SIGMA — sigma is on the SD scale (see ferx-nlme `docs/src/model-file/error-model.md`).
+  # For proportional components CV% = sigma * 100; for additive components the
+  # value is in observation units and no CV% applies. Variance = sigma^2 in
+  # both cases, mirroring the YAML output (ferx-nlme#57).
   cat("\n--- SIGMA Estimates ---\n")
   for (i in seq_along(x$sigma)) {
+    s   <- x$sigma[i]
+    nm  <- if (length(x$sigma_names) >= i && nzchar(x$sigma_names[i])) {
+      x$sigma_names[i]
+    } else {
+      sprintf("SIGMA(%d)", i)
+    }
+    typ <- if (length(x$sigma_types) >= i) x$sigma_types[i] else NA_character_
     se_str <- if (!is.null(x$se_sigma) && length(x$se_sigma) >= i) {
       sprintf("%.6f", x$se_sigma[i])
     } else {
       "N/A"
     }
-    cat(sprintf("  SIGMA(%d) = %.6f  SE = %s\n", i, x$sigma[i], se_str))
+    var_str  <- sprintf("var = %.6f", s * s)
+    type_tag <- switch(as.character(typ),
+      proportional = "[proportional]",
+      additive     = "[additive]",
+      ""
+    )
+    if (identical(typ, "proportional")) {
+      cat(sprintf("  %-16s %-14s = %.6f  (%s, CV%% = %.1f)  SE = %s\n",
+                  nm, type_tag, s, var_str, s * 100, se_str))
+    } else if (identical(typ, "additive")) {
+      cat(sprintf("  %-16s %-14s = %.6f  (SD = %.4f, %s)  SE = %s\n",
+                  nm, type_tag, s, s, var_str, se_str))
+    } else {
+      cat(sprintf("  %-16s = %.6f  (%s)  SE = %s\n",
+                  nm, s, var_str, se_str))
+    }
   }
 
   # SIR uncertainty
@@ -1133,6 +1314,33 @@ print.ferx_fit <- function(x, ...) {
     cat("  ferx v", x$ferx_version, "\n", sep = "")
   }
 
+  mfs <- x$model_file_settings %||% list()
+  cs  <- x$call_settings %||% list()
+  if (length(mfs) > 0L || length(cs) > 0L) {
+    cat("\n--- Settings (model file / call-time override) ---\n")
+    all_keys <- union(names(mfs), names(cs))
+    for (nm in all_keys) {
+      mval <- mfs[[nm]]
+      cval <- cs[[nm]]
+      if (!is.null(mval) && !is.null(cval) &&
+          !identical(tolower(as.character(mval)), tolower(as.character(cval)))) {
+        cat(sprintf("  %-28s %s  [model: %s] *\n", nm, cval, mval))
+      } else if (!is.null(cval)) {
+        cat(sprintf("  %-28s %s\n", nm, cval))
+      } else {
+        cat(sprintf("  %-28s %s  [model only]\n", nm, mval))
+      }
+    }
+    if (any(vapply(all_keys, function(nm) {
+      mval <- mfs[[nm]]
+      cval <- cs[[nm]]
+      !is.null(mval) && !is.null(cval) &&
+        !identical(tolower(as.character(mval)), tolower(as.character(cval)))
+    }, logical(1L)))) {
+      cat("  (* model file value overridden by call-time argument)\n")
+    }
+  }
+
   if (length(x$warnings) > 0) {
     cat("\n--- Warnings ---\n")
     for (w in x$warnings) cat("  *", w, "\n")
@@ -1161,10 +1369,9 @@ print.ferx_fit <- function(x, ...) {
 #'   \code{se_sigma}, \code{shrinkage_eta}, \code{shrinkage_eps},
 #'   \code{covariance_status}, \code{eigenvalues}, \code{condition_number}
 #'   (see \code{\link{ferx_fit}} for definitions), \code{wall_time_secs},
-#'   \code{ferx_version}, \code{call_settings}, \code{sir_ess},
-#'   \code{warnings}, \code{ebe_convergence_warnings},
-#'   \code{max_unconverged_subjects},
-#'   \code{total_ebe_fallbacks}.
+#'   \code{ferx_version}, \code{call_settings}, \code{model_file_settings},
+#'   \code{sir_ess}, \code{warnings}, \code{ebe_convergence_warnings},
+#'   \code{max_unconverged_subjects}, \code{total_ebe_fallbacks}.
 #' @examples
 #' \dontrun{
 #' ex  <- ferx_example("warfarin")
@@ -1215,6 +1422,7 @@ summary.ferx_fit <- function(object, ...) {
     total_ebe_fallbacks = x$total_ebe_fallbacks,
     model_structure = x$model_structure,
     call_settings = x$call_settings %||% list(),
+    model_file_settings = x$model_file_settings %||% list(),
     sir_ess = x$sir_ess,
     warnings = x$warnings
   )
@@ -1243,10 +1451,28 @@ print.ferx_summary <- function(x, ...) {
   cat(sprintf("Gradient:  %s (requested)\n", x$gradient %||% "?"))
   cat(sprintf("ferx v%s\n", x$ferx_version %||% "?"))
 
-  if (length(x$call_settings) > 0L) {
-    cat("\nSettings:\n")
-    for (nm in names(x$call_settings)) {
-      cat(sprintf("  %-30s %s\n", nm, x$call_settings[[nm]]))
+  if (length(x$model_file_settings) > 0L || length(x$call_settings) > 0L) {
+    cat("\nSettings (model file / call-time override):\n")
+    all_keys <- union(names(x$model_file_settings), names(x$call_settings))
+    for (nm in all_keys) {
+      mval <- x$model_file_settings[[nm]]
+      cval <- x$call_settings[[nm]]
+      if (!is.null(mval) && !is.null(cval) &&
+          !identical(tolower(as.character(mval)), tolower(as.character(cval)))) {
+        cat(sprintf("  %-28s %s  [model: %s] *\n", nm, cval, mval))
+      } else if (!is.null(cval)) {
+        cat(sprintf("  %-28s %s\n", nm, cval))
+      } else {
+        cat(sprintf("  %-28s %s  [model only]\n", nm, mval))
+      }
+    }
+    if (any(vapply(all_keys, function(nm) {
+      mval <- x$model_file_settings[[nm]]
+      cval <- x$call_settings[[nm]]
+      !is.null(mval) && !is.null(cval) &&
+        !identical(tolower(as.character(mval)), tolower(as.character(cval)))
+    }, logical(1L)))) {
+      cat("  (* model file value overridden by call-time argument)\n")
     }
   }
 
@@ -1311,6 +1537,58 @@ print.ferx_summary <- function(x, ...) {
 
   cat(bar, "\n", sep = "")
   invisible(x)
+}
+
+# Emit a warning() for each model file [fit_options] key that disagrees with
+# an explicit R call-time value. `dedicated_explicit` is a named list keyed by
+# R argument name; entries are NULL for args the user did not pass explicitly
+# (those silently defer to the model file). `settings_parts` is the output of
+# .ferx_settings_to_strings(): every key in it was supplied by the caller.
+.ferx_warn_fit_option_conflicts <- function(model_file_opts,
+                                            dedicated_explicit,
+                                            settings_parts) {
+  if (length(model_file_opts) == 0L) return(invisible(NULL))
+
+  warn <- function(key, model_val, call_val) {
+    call_str  <- as.character(call_val)
+    model_str <- as.character(model_val)
+    if (!identical(tolower(model_str), tolower(call_str))) {
+      warning(
+        "Model file [fit_options] sets `", key, " = ", model_str,
+        "` but ferx_fit() argument overrides it with `", call_str, "`.",
+        " The call-time value will be used.",
+        call. = FALSE
+      )
+    }
+  }
+
+  # Aliases the model file may use for each dedicated R argument.
+  key_aliases <- list(
+    method         = "method",
+    covariance     = "covariance",
+    bloq_method    = c("bloq_method", "bloq"),
+    threads        = "threads",
+    mu_referencing = "mu_referencing",
+    sir            = "sir",
+    gradient       = c("gradient", "gradient_method")
+  )
+  mf_names <- names(model_file_opts)
+  for (arg in names(dedicated_explicit)) {
+    call_val <- dedicated_explicit[[arg]]
+    if (is.null(call_val)) next
+    for (alias in key_aliases[[arg]]) {
+      if (alias %in% mf_names) warn(alias, model_file_opts[[alias]], call_val)
+    }
+  }
+
+  # Settings list keys are always explicit by construction.
+  for (i in seq_along(settings_parts$keys)) {
+    mkey <- tolower(settings_parts$keys[[i]])
+    if (mkey %in% mf_names) {
+      warn(mkey, model_file_opts[[mkey]], settings_parts$values[[i]])
+    }
+  }
+  invisible(NULL)
 }
 
 # Reverse of the stringify step in .ferx_settings_to_strings: parse a single
