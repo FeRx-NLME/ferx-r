@@ -10,14 +10,17 @@ ferx_estimates(fit)
 \item{fit}{A \code{ferx_fit} object returned by \code{\link{ferx_fit}}.}
 }
 \value{
-A data frame with columns \code{param}, \code{estimate}, \code{se},
-\code{rse_pct}, \code{lower_95}, \code{upper_95}. SE-derived columns are
-\code{NA} when the covariance step was not run or failed.
+A data frame with columns \code{param}, \code{transform},
+\code{estimate}, \code{se}, \code{rse_pct}, \code{lower_95},
+\code{upper_95}, \code{estimate_natural}, \code{lower_95_natural},
+\code{upper_95_natural}. SE-derived and natural-scale columns are
+\code{NA} when not applicable or when the covariance step was not run.
 }
 \description{
 Extracts all estimated parameters (theta, omega diagonal, sigma) into a
-single tidy data frame, adding percent relative standard error (\\%RSE) and
-95\\% confidence intervals when the covariance step was run.
+single tidy data frame, adding percent relative standard error (\\%RSE),
+95\\% confidence intervals, and—for log/logit-transformed thetas—natural-scale
+back-transformed estimates and CIs.
 }
 \details{
 Omega is reported on the variance scale (matching the \code{.ferx} model

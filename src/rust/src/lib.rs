@@ -705,6 +705,37 @@ fn fit_result_to_list(
         CovarianceStatus::NotRequested => "not_requested",
     };
 
+    // Parameter-level correlation for block omega (row-major flat); empty when diagonal or absent
+    let omega_param_corr_flat: Vec<f64> = match &result.omega_param_corr {
+        Some(m) => {
+            let n = m.nrows();
+            let mut v = Vec::with_capacity(n * n);
+            for i in 0..n {
+                for j in 0..n {
+                    v.push(m[(i, j)]);
+                }
+            }
+            v
+        }
+        None => Vec::new(),
+    };
+    // Parameter-level correlation for block kappa IOV (row-major flat); empty when diagonal or absent
+    let omega_iov_param_corr_flat: Vec<f64> = match &result.omega_iov_param_corr {
+        Some(m) => {
+            let n = m.nrows();
+            let mut v = Vec::with_capacity(n * n);
+            for i in 0..n {
+                for j in 0..n {
+                    v.push(m[(i, j)]);
+                }
+            }
+            v
+        }
+        None => Vec::new(),
+    };
+    // Whether each BSV eta is lognormal (true) or additive/unknown (false)
+    let eta_log_transformed: Vec<bool> = result.eta_log_transformed.clone();
+
     // IOV kappa omega (row-major flat); empty when no IOV
     let (omega_iov_flat, omega_iov_dim): (Vec<f64>, i32) = match &result.omega_iov {
         Some(m) => {
@@ -865,6 +896,9 @@ fn fit_result_to_list(
         ebe_etas = ebe_etas_df,
         individual_estimates = individual_estimates_df,
         model_structure = model_structure_list(model),
+        omega_param_corr = omega_param_corr_flat,
+        omega_iov_param_corr = omega_iov_param_corr_flat,
+        eta_log_transformed = eta_log_transformed,
         eta_param_types = eta_param_types,
         eta_linked_theta = eta_linked_theta,
         theta_transforms = theta_transforms

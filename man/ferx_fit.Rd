@@ -286,6 +286,16 @@ column per kappa parameter containing per-subject per-occasion kappa
 EBEs. \code{ID} carries the original subject identifier (matching
 \code{sdtab}); \code{OCC} carries the labeled occasion in first-seen
 order. \code{NULL} when no IOV.}
+\item{omega_param_corr}{Parameter-level correlation matrix for block omega.
+Uses the bivariate lognormal formula for lognormal pairs and falls back
+to the eta-level formula for additive or unknown parameterisations.
+\code{NULL} when omega is diagonal (no off-diagonal elements to report).}
+\item{omega_iov_param_corr}{Same as \code{omega_param_corr} but for the
+IOV kappa block. \code{NULL} when kappa is diagonal or absent.}
+\item{eta_log_transformed}{Logical vector of length \code{n_eta}; \code{TRUE}
+when the eta is lognormally parameterised (\code{THETA * exp(ETA)}),
+\code{FALSE} for additive or unknown parameterisations. \code{NULL} when
+the engine does not supply the information.}
 \item{call_settings}{Named list of the effective settings passed to Rust,
 with values typed back to their natural R types (logical, numeric, or
 character). Includes merged defaults such as \code{optimizer_trace} and

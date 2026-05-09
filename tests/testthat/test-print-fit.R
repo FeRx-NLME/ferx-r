@@ -103,6 +103,57 @@ test_that("print.ferx_fit falls back to SIGMA(i) when sigma_names is missing", {
   expect_true(any(grepl("SIGMA\\(1\\)", out)))
 })
 
+# Block-omega correlations (#60): print uses omega_param_corr when the engine
+# provides it (bivariate-lognormal formula), and falls back to the eta-level
+# Pearson formula when it is absent.
+
+test_that("print.ferx_fit uses omega_param_corr value and 'param corr' label when present", {
+  om <- matrix(c(0.10, 0.025, 0.025, 0.10), 2, 2)
+  pc <- matrix(c(1.0, 0.5227, 0.5227, 1.0), 2, 2)
+  fit <- make_fake_fit(
+    omega            = om,
+    omega_param_corr = pc,
+    eta_param_types  = c("log_normal", "log_normal")
+  )
+  out <- capture.output(print(fit))
+  corr_line <- out[grepl("OMEGA\\(2,1\\)", out)]
+  expect_length(corr_line, 1L)
+  expect_true(grepl("param corr = 0\\.5227", corr_line))
+})
+
+test_that("print.ferx_fit falls back to eta-level corr label when omega_param_corr is NULL", {
+  # cov = 0.025, vars = 0.10 -> Pearson corr = 0.025 / 0.10 = 0.25
+  om <- matrix(c(0.10, 0.025, 0.025, 0.10), 2, 2)
+  fit <- make_fake_fit(
+    omega            = om,
+    omega_param_corr = NULL,
+    eta_param_types  = c("log_normal", "log_normal")
+  )
+  out <- capture.output(print(fit))
+  corr_line <- out[grepl("OMEGA\\(2,1\\)", out)]
+  expect_length(corr_line, 1L)
+  expect_true(grepl("\\(corr = 0\\.2500\\)", corr_line))
+  expect_false(grepl("param corr", corr_line))
+})
+
+test_that("print.ferx_fit uses omega_iov_param_corr when present for IOV correlations", {
+  om     <- matrix(0.10, 1, 1)
+  iov    <- matrix(c(0.10, 0.025, 0.025, 0.10), 2, 2)
+  iov_pc <- matrix(c(1.0, 0.5227, 0.5227, 1.0), 2, 2)
+  fit <- make_fake_fit(
+    omega                 = om,
+    omega_iov             = iov,
+    omega_iov_param_corr  = iov_pc,
+    kappa_names           = c("KAPPA1", "KAPPA2"),
+    se_kappa              = NULL,
+    shrinkage_kappa       = NULL
+  )
+  out <- capture.output(print(fit))
+  corr_line <- out[grepl("KAPPA2 ~ KAPPA1", out)]
+  expect_length(corr_line, 1L)
+  expect_true(grepl("param corr = 0\\.5227", corr_line))
+})
+
 test_that("print.ferx_fit uses exact log-normal CV% for OMEGA_IOV when kappa_param_types absent", {
   # kappa = 0.20 -> exact CV% = sqrt(exp(0.20) - 1) * 100 ≈ 47.1 (not 44.7 from sqrt(0.20)*100)
   fit <- make_fake_fit(

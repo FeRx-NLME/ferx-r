@@ -253,6 +253,16 @@
 #'     EBEs. \code{ID} carries the original subject identifier (matching
 #'     \code{sdtab}); \code{OCC} carries the labeled occasion in first-seen
 #'     order. \code{NULL} when no IOV.}
+#'   \item{omega_param_corr}{Parameter-level correlation matrix for block omega.
+#'     Uses the bivariate lognormal formula for lognormal pairs and falls back
+#'     to the eta-level formula for additive or unknown parameterisations.
+#'     \code{NULL} when omega is diagonal (no off-diagonal elements to report).}
+#'   \item{omega_iov_param_corr}{Same as \code{omega_param_corr} but for the
+#'     IOV kappa block. \code{NULL} when kappa is diagonal or absent.}
+#'   \item{eta_log_transformed}{Logical vector of length \code{n_eta}; \code{TRUE}
+#'     when the eta is lognormally parameterised (\code{THETA * exp(ETA)}),
+#'     \code{FALSE} for additive or unknown parameterisations. \code{NULL} when
+#'     the engine does not supply the information.}
 #'   \item{call_settings}{Named list of the effective settings passed to Rust,
 #'     with values typed back to their natural R types (logical, numeric, or
 #'     character). Includes merged defaults such as \code{optimizer_trace} and
@@ -626,6 +636,40 @@ ferx_fit <- function(model, data,
     result$ebe_kappas <- NULL
   }
 
+  # Reshape omega_param_corr into a square matrix using omega_dim to guard
+  # against unexpected vector lengths (NULL when diagonal or absent).
+  if (!is.null(result$omega_param_corr) && length(result$omega_param_corr) > 0L) {
+    d_pc <- result$omega_dim %||% 0L
+    if (d_pc > 0L && length(result$omega_param_corr) == d_pc * d_pc) {
+      result$omega_param_corr <- matrix(
+        result$omega_param_corr, nrow = d_pc, ncol = d_pc, byrow = TRUE
+      )
+    } else {
+      result$omega_param_corr <- NULL
+    }
+  } else {
+    result$omega_param_corr <- NULL
+  }
+
+  # Reshape omega_iov_param_corr into a square matrix (NULL when diagonal or absent)
+  if (!is.null(result$omega_iov_param_corr) && length(result$omega_iov_param_corr) > 0L) {
+    d_ipc <- result$omega_iov_dim %||% 0L
+    if (d_ipc > 0L && length(result$omega_iov_param_corr) == d_ipc * d_ipc) {
+      result$omega_iov_param_corr <- matrix(
+        result$omega_iov_param_corr, nrow = d_ipc, ncol = d_ipc, byrow = TRUE
+      )
+    } else {
+      result$omega_iov_param_corr <- NULL
+    }
+  } else {
+    result$omega_iov_param_corr <- NULL
+  }
+
+  # eta_log_transformed: empty vector -> NULL
+  if (is.null(result$eta_log_transformed) || length(result$eta_log_transformed) == 0L) {
+    result$eta_log_transformed <- NULL
+  }
+
   # Parameter transform metadata — fall back gracefully for older ferx-nlme binaries
   # that don't populate these vectors (empty character() from FFI → treat as absent).
   n_eta_fit   <- if (!is.null(result$omega)) nrow(result$omega) else 0L
@@ -904,12 +948,17 @@ print.ferx_fit <- function(x, ...) {
     for (i in seq_len(n_eta)) {
       for (j in seq_len(i - 1L)) {
         cov_ij <- om[i, j]
-        var_i <- om[i, i]
-        var_j <- om[j, j]
-        corr <- if (var_i > 0 && var_j > 0) cov_ij / (sqrt(var_i) * sqrt(var_j)) else 0
+        param_corr <- if (!is.null(x$omega_param_corr)) {
+          x$omega_param_corr[i, j]
+        } else {
+          var_i <- om[i, i]
+          var_j <- om[j, j]
+          if (var_i > 0 && var_j > 0) cov_ij / (sqrt(var_i) * sqrt(var_j)) else 0
+        }
+        corr_label <- if (!is.null(x$omega_param_corr)) "param corr" else "corr"
         cat(sprintf(
-          "  OMEGA(%d,%d) = %.6f  (corr = %.4f)\n",
-          i, j, cov_ij, corr
+          "  OMEGA(%d,%d) = %.6f  (%s = %.4f)\n",
+          i, j, cov_ij, corr_label, param_corr
         ))
       }
     }
@@ -956,12 +1005,17 @@ print.ferx_fit <- function(x, ...) {
       for (i in seq_len(n_kap)) {
         for (j in seq_len(i - 1L)) {
           cov_ij <- m_iov[i, j]
-          var_i <- m_iov[i, i]
-          var_j <- m_iov[j, j]
-          corr <- if (var_i > 0 && var_j > 0) cov_ij / (sqrt(var_i) * sqrt(var_j)) else 0
+          param_corr <- if (!is.null(x$omega_iov_param_corr)) {
+            x$omega_iov_param_corr[i, j]
+          } else {
+            var_i <- m_iov[i, i]
+            var_j <- m_iov[j, j]
+            if (var_i > 0 && var_j > 0) cov_ij / (sqrt(var_i) * sqrt(var_j)) else 0
+          }
+          corr_label <- if (!is.null(x$omega_iov_param_corr)) "param corr" else "corr"
           cat(sprintf(
-            "  %s ~ %s : cov = %.6f  (corr = %.4f)\n",
-            kap_names[i], kap_names[j], cov_ij, corr
+            "  %s ~ %s : cov = %.6f  (%s = %.4f)\n",
+            kap_names[i], kap_names[j], cov_ij, corr_label, param_corr
           ))
         }
       }
