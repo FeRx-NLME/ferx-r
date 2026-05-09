@@ -4,6 +4,7 @@
 ^Dockerfile$
 ^INSTALL-SYSADMIN\.md$
 ^CLAUDE\.md$
+^LICENSE\.md$
 ^examples$
 ^src/rust/target$
 ^src/rust/\.cargo$
