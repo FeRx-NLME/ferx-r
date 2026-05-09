@@ -705,6 +705,37 @@ fn fit_result_to_list(
         CovarianceStatus::NotRequested => "not_requested",
     };
 
+    // Parameter-level correlation for block omega (row-major flat); empty when diagonal or absent
+    let omega_param_corr_flat: Vec<f64> = match &result.omega_param_corr {
+        Some(m) => {
+            let n = m.nrows();
+            let mut v = Vec::with_capacity(n * n);
+            for i in 0..n {
+                for j in 0..n {
+                    v.push(m[(i, j)]);
+                }
+            }
+            v
+        }
+        None => Vec::new(),
+    };
+    // Parameter-level correlation for block kappa IOV (row-major flat); empty when diagonal or absent
+    let omega_iov_param_corr_flat: Vec<f64> = match &result.omega_iov_param_corr {
+        Some(m) => {
+            let n = m.nrows();
+            let mut v = Vec::with_capacity(n * n);
+            for i in 0..n {
+                for j in 0..n {
+                    v.push(m[(i, j)]);
+                }
+            }
+            v
+        }
+        None => Vec::new(),
+    };
+    // Whether each BSV eta is lognormal (true) or additive/unknown (false)
+    let eta_log_transformed: Vec<bool> = result.eta_log_transformed.clone();
+
     // IOV kappa omega (row-major flat); empty when no IOV
     let (omega_iov_flat, omega_iov_dim): (Vec<f64>, i32) = match &result.omega_iov {
         Some(m) => {
@@ -723,6 +754,29 @@ fn fit_result_to_list(
     let se_kappa: Vec<f64> = result.se_kappa.clone().unwrap_or_default();
     let shrinkage_kappa: Vec<f64> = result.shrinkage_kappa.clone();
 
+    // Parameter transform metadata (added in ferx-nlme PR #54; empty vecs for
+    // older binaries that don't populate these fields).
+    let eta_param_types: Vec<String> = result.eta_param_info.iter().map(|info| {
+        match info.param_type {
+            ferx_nlme::types::EtaParamType::LogNormal        => "log_normal",
+            ferx_nlme::types::EtaParamType::Additive         => "additive",
+            ferx_nlme::types::EtaParamType::Logit            => "logit",
+            ferx_nlme::types::EtaParamType::LogitProbability => "logit_probability",
+            ferx_nlme::types::EtaParamType::Custom           => "custom",
+        }.to_string()
+    }).collect();
+    // Linked theta name for each ETA (empty string when not detected).
+    let eta_linked_theta: Vec<String> = result.eta_param_info.iter()
+        .map(|info| info.linked_theta.clone().unwrap_or_default())
+        .collect();
+    let theta_transforms: Vec<String> = result.theta_transform.iter().map(|t| {
+        match t {
+            ferx_nlme::types::ThetaTransform::Identity         => "identity",
+            ferx_nlme::types::ThetaTransform::Log              => "log",
+            ferx_nlme::types::ThetaTransform::Logit            => "logit",
+            ferx_nlme::types::ThetaTransform::LogitProbability => "logit_probability",
+        }.to_string()
+    }).collect();
     // EBE kappas as a data frame: ID, OCC, KAPPA_1, ...
     // Rows: one per (subject, occasion); empty when no IOV.
     // - ID: original subject identifier (matches sdtab).
@@ -795,6 +849,21 @@ fn fit_result_to_list(
         omega = omega_flat,
         omega_dim = n_eta as i32,
         sigma = result.sigma.clone(),
+        sigma_names = result.sigma_names.clone(),
+        // Per-sigma component type — "proportional" or "additive". Parallel
+        // to `sigma` and `sigma_names`. The R layer uses this to decide
+        // whether to display CV% (proportional) or just SD/variance
+        // (additive) for each component without re-deriving from
+        // `model_structure$residual`. See ferx-nlme#57 for the YAML
+        // counterpart.
+        sigma_types = result
+            .sigma_types
+            .iter()
+            .map(|t| match t {
+                SigmaType::Proportional => "proportional".to_string(),
+                SigmaType::Additive => "additive".to_string(),
+            })
+            .collect::<Vec<_>>(),
         se_theta = se_theta,
         se_omega = se_omega,
         se_sigma = se_sigma,
@@ -826,7 +895,13 @@ fn fit_result_to_list(
         ebe_kappas = ebe_kappas_df,
         ebe_etas = ebe_etas_df,
         individual_estimates = individual_estimates_df,
-        model_structure = model_structure_list(model)
+        model_structure = model_structure_list(model),
+        omega_param_corr = omega_param_corr_flat,
+        omega_iov_param_corr = omega_iov_param_corr_flat,
+        eta_log_transformed = eta_log_transformed,
+        eta_param_types = eta_param_types,
+        eta_linked_theta = eta_linked_theta,
+        theta_transforms = theta_transforms
     )
 }
 

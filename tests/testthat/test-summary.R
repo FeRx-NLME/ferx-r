@@ -51,7 +51,8 @@ test_that("summary.ferx_fit returns a ferx_summary with expected fields", {
     "covariance_status", "eigenvalues", "condition_number",
     "wall_time_secs", "ferx_version",
     "ebe_convergence_warnings", "max_unconverged_subjects",
-    "total_ebe_fallbacks", "model_structure", "call_settings", "sir_ess", "warnings"
+    "total_ebe_fallbacks", "model_structure", "call_settings",
+    "model_file_settings", "sir_ess", "warnings"
   ), ignore.order = TRUE)
 })
 
@@ -109,18 +110,18 @@ test_that("print.ferx_summary shows full chain in uppercase when method_chain > 
   expect_false(any(grepl("saem|focei", out)))
 })
 
-test_that("print.ferx_summary omits Settings block when call_settings is empty", {
+test_that("print.ferx_summary omits Settings block when both settings sources are empty", {
   s <- summary(make_fake_fit(call_settings = list()))
   out <- capture.output(print(s))
 
-  expect_false(any(grepl("^Settings:", out)))
+  expect_false(any(grepl("^Settings", out)))
 })
 
 test_that("print.ferx_summary shows Settings block when call_settings is non-empty", {
   s <- summary(make_fake_fit(call_settings = list(optimizer = "slsqp", max_iter = 200)))
   out <- capture.output(print(s))
 
-  expect_true(any(grepl("^Settings:", out)))
+  expect_true(any(grepl("^Settings", out)))
   expect_true(any(grepl("optimizer", out)))
   expect_true(any(grepl("slsqp", out)))
   expect_true(any(grepl("max_iter", out)))
