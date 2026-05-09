@@ -463,6 +463,20 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
 # parser (ferx-nlme src/parser/model_parser.rs `pk_func_name` match arms) so
 # pre-fit `ferx_model_inspect(path)` reports the same string the engine would
 # attach to a fitted result.
+# Format a pk function name (snake_case) into a readable label.
+# e.g. "one_cpt_oral" -> "1-cpt oral", "two_cpt_iv_bolus" -> "2-cpt IV bolus"
+.ferx_fmt_pk_name <- function(fn) {
+  label <- fn
+  label <- sub("^one_",   "1_",   label)
+  label <- sub("^two_",   "2_",   label)
+  label <- sub("^three_", "3_",   label)
+  label <- sub("_cpt_",   "-cpt ", label, fixed = TRUE)
+  label <- sub("_cpt$",   "-cpt", label)
+  label <- gsub("_", " ", label, fixed = TRUE)
+  label <- gsub("(?<![a-z])iv(?![a-z])", "IV", label, perl = TRUE)
+  label
+}
+
 .ferx_model_type <- function(lines) {
   s <- paste(lines, collapse = " ")
   if (grepl("\\bode\\(", s, perl = TRUE)) return("ODE")
@@ -475,18 +489,7 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
   # Long `*_compartment_*` aliases collapse to their `*_cpt_*` equivalents.
   fn <- sub("_compartment_", "_cpt_", fn, fixed = TRUE)
 
-  switch(fn,
-    one_cpt_iv_bolus    = "1-cpt IV bolus",
-    one_cpt_infusion    = "1-cpt IV infusion",
-    one_cpt_oral        = "1-cpt oral",
-    two_cpt_iv_bolus    = "2-cpt IV bolus",
-    two_cpt_infusion    = "2-cpt IV infusion",
-    two_cpt_oral        = "2-cpt oral",
-    three_cpt_iv_bolus  = "3-cpt IV bolus",
-    three_cpt_infusion  = "3-cpt IV infusion",
-    three_cpt_oral      = "3-cpt oral",
-    NULL
-  )
+  .ferx_fmt_pk_name(fn)
 }
 
 # Format the structural display string from a model_structure list.
