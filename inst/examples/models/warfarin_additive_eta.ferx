@@ -1,0 +1,43 @@
+# One-compartment oral PK — additive ETA on lag time
+#
+# Demonstrates additive ETA parameterisation: the individual lag time is
+# modelled as TLAG + ETA_TLAG (normal distribution), rather than the usual
+# log-normal TLAG * exp(ETA).  This is appropriate when the parameter has a
+# natural additive variability structure and cannot go negative by definition
+# (or is bounded away from zero by the individual's biology).
+#
+# Use ferx_example("warfarin_additive_eta") to get file paths.
+
+[parameters]
+  theta TVCL(0.134, 0.001, 10.0)
+  theta TVV(8.1, 0.1, 500.0)
+  theta TVKA(1.0, 0.01, 50.0)
+  theta TVTLAG(0.5, 0.0, 5.0)        # typical lag time (h)
+
+  omega ETA_CL   ~ 0.07              # BSV on CL (log-normal)
+  omega ETA_V    ~ 0.02              # BSV on V  (log-normal)
+  omega ETA_TLAG ~ 0.04              # BSV on TLAG (additive, variance in h^2)
+
+  sigma PROP_ERR ~ 0.01
+
+[individual_parameters]
+  CL   = TVCL  * exp(ETA_CL)
+  V    = TVV   * exp(ETA_V)
+  KA   = TVKA
+  TLAG = TVTLAG + ETA_TLAG
+
+[structural_model]
+  pk one_cpt_oral(cl=CL, v=V, ka=KA, tlag=TLAG)
+
+[error_model]
+  DV ~ proportional(PROP_ERR)
+
+[initial_values]
+  theta = [0.134, 8.1, 1.0, 0.5]
+  omega = [0.07, 0.02, 0.04]
+  sigma = [0.01]
+
+[fit_options]
+  method     = focei
+  maxiter    = 300
+  covariance = true

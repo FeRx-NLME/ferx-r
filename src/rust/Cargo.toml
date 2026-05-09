@@ -15,7 +15,7 @@ ci = ["ferx-nlme/ci"]
 
 [dependencies]
 extendr-api = "0.9"
-ferx-nlme = { git = "https://github.com/InsightRX/ferx-nlme", branch = "claude/reverent-allen-e60b35", default-features = false }
+ferx-nlme = { git = "https://github.com/InsightRX/ferx-nlme", branch = "main", default-features = false }
 nalgebra = "0.33"
 
 [profile.release]

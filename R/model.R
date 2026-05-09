@@ -94,17 +94,22 @@ ferx_section_headers <- function(lines) {
 #' @param path Path to a \code{.ferx} model file.
 #' @param section Name of the section to extract, without brackets (e.g.
 #'   \code{"parameters"}).
+#' @param strip Logical. If \code{TRUE}, leading whitespace is trimmed from each
+#'   returned line via \code{\link[base]{trimws}}. Defaults to \code{FALSE} to
+#'   preserve the round-trip guarantee with
+#'   \code{\link{ferx_model_set_section}}.
 #'
 #' @return Character vector of lines in the requested section, invisibly.
 #'
 #' @examples
 #' ex <- ferx_example("warfarin")
 #' ferx_model_section(ex$model, "parameters")
+#' ferx_model_section(ex$model, "parameters", strip = TRUE)
 #'
 #' @seealso \code{\link{ferx_model_show}}, \code{\link{ferx_model_edit}},
 #'   \code{\link{ferx_model_set_section}}
 #' @export
-ferx_model_section <- function(path, section) {
+ferx_model_section <- function(path, section, strip = FALSE) {
   if (!file.exists(path)) stop("File not found: ", path)
   if (tolower(tools::file_ext(path)) != "ferx") stop("'path' must be a .ferx file")
 
@@ -122,6 +127,7 @@ ferx_model_section <- function(path, section) {
   start <- hdr$positions[idx] + 1L
   end   <- if (idx < length(hdr$positions)) hdr$positions[idx + 1L] - 1L else length(file_lines)
   body  <- if (start <= end) file_lines[start:end] else character(0)
+  if (strip) body <- trimws(body, which = "left")
 
   cat("# [", section, "]\n", sep = "")
   cat(body, sep = "\n")
@@ -463,6 +469,20 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
 # parser (ferx-nlme src/parser/model_parser.rs `pk_func_name` match arms) so
 # pre-fit `ferx_model_inspect(path)` reports the same string the engine would
 # attach to a fitted result.
+# Format a pk function name (snake_case) into a readable label.
+# e.g. "one_cpt_oral" -> "1-cpt oral", "two_cpt_iv_bolus" -> "2-cpt IV bolus"
+.ferx_fmt_pk_name <- function(fn) {
+  label <- fn
+  label <- sub("^one_",   "1_",   label)
+  label <- sub("^two_",   "2_",   label)
+  label <- sub("^three_", "3_",   label)
+  label <- sub("_cpt_",   "-cpt ", label, fixed = TRUE)
+  label <- sub("_cpt$",   "-cpt", label)
+  label <- gsub("_", " ", label, fixed = TRUE)
+  label <- gsub("(?<![a-z])iv(?![a-z])", "IV", label, perl = TRUE)
+  label
+}
+
 .ferx_model_type <- function(lines) {
   s <- paste(lines, collapse = " ")
   if (grepl("\\bode\\(", s, perl = TRUE)) return("ODE")
@@ -475,18 +495,7 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
   # Long `*_compartment_*` aliases collapse to their `*_cpt_*` equivalents.
   fn <- sub("_compartment_", "_cpt_", fn, fixed = TRUE)
 
-  switch(fn,
-    one_cpt_iv_bolus    = "1-cpt IV bolus",
-    one_cpt_infusion    = "1-cpt IV infusion",
-    one_cpt_oral        = "1-cpt oral",
-    two_cpt_iv_bolus    = "2-cpt IV bolus",
-    two_cpt_infusion    = "2-cpt IV infusion",
-    two_cpt_oral        = "2-cpt oral",
-    three_cpt_iv_bolus  = "3-cpt IV bolus",
-    three_cpt_infusion  = "3-cpt IV infusion",
-    three_cpt_oral      = "3-cpt oral",
-    NULL
-  )
+  .ferx_fmt_pk_name(fn)
 }
 
 # Format the structural display string from a model_structure list.
@@ -516,6 +525,26 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
     if (length(ms$iov) > 0L) paste(ms$iov, collapse = ", ") else "none"))
   cat(sprintf("  Residual:    %s\n", ms$residual))
   invisible(NULL)
+}
+
+# Parse the [fit_options] block of a .ferx file into a named character vector.
+# Keys are lower-cased; values are the raw trimmed strings from the file
+# (before Rust type coercion). Returns an empty character(0) when the section
+# is absent or empty. Uses .ferx_extract_blocks() so comments are stripped.
+.ferx_parse_model_fit_options <- function(path) {
+  blocks <- .ferx_extract_blocks(path)
+  lines  <- blocks[["fit_options"]] %||% character(0)
+  if (length(lines) == 0L) return(setNames(character(0), character(0)))
+  parts <- lapply(strsplit(lines, "=", fixed = TRUE), function(x) {
+    if (length(x) < 2L) return(NULL)
+    list(key = tolower(trimws(x[[1L]])),
+         val = trimws(paste(x[-1L], collapse = "=")))
+  })
+  parts <- Filter(Negate(is.null), parts)
+  if (length(parts) == 0L) return(setNames(character(0), character(0)))
+  keys <- vapply(parts, `[[`, character(1L), "key")
+  vals <- vapply(parts, `[[`, character(1L), "val")
+  setNames(vals, keys)
 }
 
 # Parse a .ferx file and return a named list describing model structure.
