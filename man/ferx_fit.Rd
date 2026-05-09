@@ -168,8 +168,13 @@ Values that duplicate a dedicated argument
 (\code{method}, \code{covariance}, \code{verbose},
 \code{bloq_method}, \code{threads}, \code{sir}) are rejected — pass
 them via the dedicated argument. Unknown keys and malformed values
-also raise an error. Settings apply on top of the model file's
-\code{[fit_options]} block.}
+also raise an error.
+\strong{Precedence}: dedicated \code{ferx_fit()} arguments win over
+\code{settings}, which in turn win over the model file's
+\code{[fit_options]} block. A \code{warning()} is issued whenever a
+call-time value overrides a different value from \code{[fit_options]}.
+Inspect \code{fit$model_file_settings} and \code{fit$call_settings} to
+audit the full picture.}
 }
 \value{
 A list with components:
@@ -285,6 +290,13 @@ order. \code{NULL} when no IOV.}
 with values typed back to their natural R types (logical, numeric, or
 character). Includes merged defaults such as \code{optimizer_trace} and
 \code{scale_params}. Empty list when no settings were supplied.}
+\item{model_file_settings}{Named list of raw \code{key = value} pairs from
+the model file's \code{[fit_options]} block, as character strings
+(before Rust type coercion). Empty list when no \code{[fit_options]}
+block is present. Use this alongside \code{call_settings} to audit which
+values the model file requested and which were overridden at the R call
+site. A \code{warning()} is issued automatically for each key that
+appears in both sources with a different value.}
 }
 \description{
 Fits a NLME model using FOCE or FOCEI estimation with a Rust backend
