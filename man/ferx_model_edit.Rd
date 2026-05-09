@@ -19,7 +19,9 @@ the destination file already exists, an error is raised.}
 
 \item{save_as}{Controls post-edit save-as behaviour:
 \itemize{
-  \item \code{NULL} (default) — no extra action after editing.
+  \item \code{NULL} or \code{FALSE} (default) — no extra action after
+    editing. Accepting \code{FALSE} lets you pass expressions like
+    \code{save_as = interactive()}.
   \item \code{TRUE} — interactively prompt the user for a destination path.
   \item A character string — silently copy the edited file to that path.
 }

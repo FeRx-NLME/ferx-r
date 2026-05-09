@@ -288,3 +288,24 @@ test_that("ferx_model_edit() errors when dest file exists and overwrite = FALSE"
     regexp = "already exists"
   )
 })
+
+test_that("ferx_model_edit() rejects malformed save_as before opening the editor", {
+  # Use a user-owned (non-package) file so we exercise the save_as validation
+  # path without triggering the in-package copy step. The error must fire
+  # before utils::file.edit() is reached.
+  path <- write_test_model(list(parameters = c("  theta TVCL(1.0, 0.001, 100.0)")))
+  on.exit(unlink(path))
+
+  expect_error(
+    ferx_model_edit(path, save_as = c("a.ferx", "b.ferx")),
+    regexp = "must be NULL, TRUE, FALSE, or a single character string"
+  )
+  expect_error(
+    ferx_model_edit(path, save_as = 42),
+    regexp = "must be NULL, TRUE, FALSE, or a single character string"
+  )
+  expect_error(
+    ferx_model_edit(path, save_as = NA_character_),
+    regexp = "must be NULL, TRUE, FALSE, or a single character string"
+  )
+})

@@ -41,7 +41,9 @@ ferx_model_show <- function(path) {
 #'   the destination file already exists, an error is raised.
 #' @param save_as Controls post-edit save-as behaviour:
 #'   \itemize{
-#'     \item \code{NULL} (default) — no extra action after editing.
+#'     \item \code{NULL} or \code{FALSE} (default) — no extra action after
+#'       editing. Accepting \code{FALSE} lets you pass expressions like
+#'       \code{save_as = interactive()}.
 #'     \item \code{TRUE} — interactively prompt the user for a destination path.
 #'     \item A character string — silently copy the edited file to that path.
 #'   }
@@ -75,6 +77,15 @@ ferx_model_show <- function(path) {
 ferx_model_edit <- function(path, dest = ".", overwrite = FALSE, save_as = NULL) {
   if (!file.exists(path)) stop("File not found: ", path)
 
+  # Validate save_as up front so invalid input fails fast — before opening an
+  # editor or copying any files. FALSE collapses to NULL so callers can pass
+  # `save_as = interactive()` and have it no-op in non-interactive sessions.
+  if (isFALSE(save_as)) save_as <- NULL
+  if (!is.null(save_as) && !isTRUE(save_as) &&
+      !(is.character(save_as) && length(save_as) == 1L && !is.na(save_as))) {
+    stop("'save_as' must be NULL, TRUE, FALSE, or a single character string.")
+  }
+
   pkg_dir <- system.file("", package = "ferx")
   in_pkg  <- nzchar(pkg_dir) && startsWith(normalizePath(path), normalizePath(pkg_dir))
 
@@ -86,36 +97,38 @@ ferx_model_edit <- function(path, dest = ".", overwrite = FALSE, save_as = NULL)
         "Use overwrite = TRUE to replace it, or choose a different dest."
       )
     }
-    file.copy(path, dest_path, overwrite = overwrite)
+    if (!isTRUE(file.copy(path, dest_path, overwrite = overwrite))) {
+      stop("Failed to copy ", path, " to ", dest_path)
+    }
     message("Copied to ", dest_path, "; editing your copy.")
     path <- dest_path
   }
 
   utils::file.edit(path)
 
-  if (!is.null(save_as)) {
-    if (isTRUE(save_as)) {
-      save_as <- readline(prompt = paste0("Save a copy of '", basename(path), "' to: "))
-      if (!nzchar(trimws(save_as))) {
-        message("No path entered; keeping edited file at ", path)
-        return(invisible(path))
-      }
+  if (is.null(save_as)) return(invisible(path))
+
+  if (isTRUE(save_as)) {
+    save_as <- trimws(readline(
+      prompt = paste0("Save a copy of '", basename(path), "' to: ")
+    ))
+    if (!nzchar(save_as)) {
+      message("No path entered; keeping edited file at ", path)
+      return(invisible(path))
     }
-    if (!is.character(save_as) || length(save_as) != 1L) {
-      stop("'save_as' must be NULL, TRUE, or a single character string.")
-    }
-    if (file.exists(save_as) && !overwrite) {
-      stop(
-        save_as, " already exists. ",
-        "Use overwrite = TRUE to replace it."
-      )
-    }
-    file.copy(path, save_as, overwrite = overwrite)
-    message("Saved copy to ", save_as)
-    return(invisible(save_as))
   }
 
-  invisible(path)
+  if (file.exists(save_as) && !overwrite) {
+    stop(
+      save_as, " already exists. ",
+      "Use overwrite = TRUE to replace it."
+    )
+  }
+  if (!isTRUE(file.copy(path, save_as, overwrite = overwrite))) {
+    stop("Failed to copy ", path, " to ", save_as)
+  }
+  message("Saved copy to ", save_as)
+  invisible(save_as)
 }
 
 # Parse section header positions and names from a character vector of file
