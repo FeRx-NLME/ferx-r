@@ -78,6 +78,37 @@ test_that("ferx_model_section() errors on wrong extension", {
   expect_error(ferx_model_section(path, "parameters"), regexp = "\\.ferx")
 })
 
+test_that("ferx_model_section(strip = FALSE) preserves leading whitespace (default)", {
+  path <- write_test_model(list(
+    parameters = c("  theta TVCL(1.0, 0.001, 100.0)", "    omega ETA_CL ~ 0.09")
+  ))
+  on.exit(unlink(path))
+
+  expect_equal(
+    ferx_model_section(path, "parameters"),
+    c("  theta TVCL(1.0, 0.001, 100.0)", "    omega ETA_CL ~ 0.09")
+  )
+})
+
+test_that("ferx_model_section(strip = TRUE) trims only leading whitespace", {
+  path <- write_test_model(list(
+    parameters = c("  theta TVCL(1.0, 0.001, 100.0)  ", "    omega ETA_CL ~ 0.09")
+  ))
+  on.exit(unlink(path))
+
+  result <- ferx_model_section(path, "parameters", strip = TRUE)
+  # Leading whitespace removed
+  expect_equal(
+    result,
+    c("theta TVCL(1.0, 0.001, 100.0)  ", "omega ETA_CL ~ 0.09")
+  )
+  # Internal spacing untouched (between tokens)
+  expect_true(grepl("theta TVCL", result[1]))
+  expect_true(grepl("omega ETA_CL ~ 0.09", result[2]))
+  # Trailing whitespace not trimmed
+  expect_true(grepl("  $", result[1]))
+})
+
 # ---------------------------------------------------------------------------
 # ferx_model_set_section
 # ---------------------------------------------------------------------------

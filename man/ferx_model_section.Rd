@@ -4,13 +4,18 @@
 \alias{ferx_model_section}
 \title{Extract a section from a ferx model file}
 \usage{
-ferx_model_section(path, section)
+ferx_model_section(path, section, strip = FALSE)
 }
 \arguments{
 \item{path}{Path to a \code{.ferx} model file.}
 
 \item{section}{Name of the section to extract, without brackets (e.g.
 \code{"parameters"}).}
+
+\item{strip}{Logical. If \code{TRUE}, leading whitespace is trimmed from each
+returned line via \code{\link[base]{trimws}}. Defaults to \code{FALSE} to
+preserve the round-trip guarantee with
+\code{\link{ferx_model_set_section}}.}
 }
 \value{
 Character vector of lines in the requested section, invisibly.
@@ -23,6 +28,7 @@ returns them invisibly.
 \examples{
 ex <- ferx_example("warfarin")
 ferx_model_section(ex$model, "parameters")
+ferx_model_section(ex$model, "parameters", strip = TRUE)
 
 }
 \seealso{
