@@ -795,6 +795,21 @@ fn fit_result_to_list(
         omega = omega_flat,
         omega_dim = n_eta as i32,
         sigma = result.sigma.clone(),
+        sigma_names = result.sigma_names.clone(),
+        // Per-sigma component type — "proportional" or "additive". Parallel
+        // to `sigma` and `sigma_names`. The R layer uses this to decide
+        // whether to display CV% (proportional) or just SD/variance
+        // (additive) for each component without re-deriving from
+        // `model_structure$residual`. See ferx-nlme#57 for the YAML
+        // counterpart.
+        sigma_types = result
+            .sigma_types
+            .iter()
+            .map(|t| match t {
+                SigmaType::Proportional => "proportional".to_string(),
+                SigmaType::Additive => "additive".to_string(),
+            })
+            .collect::<Vec<_>>(),
         se_theta = se_theta,
         se_omega = se_omega,
         se_sigma = se_sigma,

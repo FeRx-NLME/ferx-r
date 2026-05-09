@@ -26,6 +26,13 @@
 
 ## Changes to existing functions
 
+- `ferx_fit()` now returns `$sigma_names` and `$sigma_types` (parallel to
+  `$sigma`), and `print()` displays each sigma with its declared name, the
+  derived variance (`sigma^2`), and — for proportional components — the
+  CV% (`sigma * 100`). Sigma is on the standard-deviation scale for both
+  proportional and additive components, matching the new YAML output added
+  in ferx-nlme#57. Closes #59.
+
 - `result$model_structure` is now sourced from the Rust engine (built from the
   parsed `CompiledModel`) instead of an R-side regex re-parse of the `.ferx`
   file (closes ferx-nlme#49). The shape is unchanged — `theta_names`,
