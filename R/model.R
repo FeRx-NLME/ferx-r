@@ -480,6 +480,9 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
   label <- sub("_cpt$",   "-cpt", label)
   label <- gsub("_", " ", label, fixed = TRUE)
   label <- gsub("(?<![a-z])iv(?![a-z])", "IV", label, perl = TRUE)
+  # Rust label for `*_infusion` is "X-cpt IV infusion"; the bare function name
+  # has no `iv` token, so inject "IV " here to keep the R/Rust labels aligned.
+  label <- sub("\\binfusion\\b", "IV infusion", label, perl = TRUE)
   label
 }
 

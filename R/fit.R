@@ -913,14 +913,14 @@ print.ferx_fit <- function(x, ...) {
       } else ""
       sprintf("SD = %.4f%s", sd_val, cv_part)
     } else if (eta_type %in% c("logit", "logit_probability")) {
-      # Natural-scale ±1 SD range using linked theta (if known)
+      # Natural-scale +/-1 SD range using linked theta (if known)
       tv_name <- if (nzchar(linked_theta_name)) linked_theta_name else NULL
       tv_val  <- if (!is.null(tv_name)) x$theta[tv_name] else NA_real_
       if (!is.null(tv_val) && !is.na(tv_val)) {
         sd_logit <- sqrt(max(var_ii, 0))
         lo <- .ferx_inv_logit(tv_val - sd_logit)
         hi <- .ferx_inv_logit(tv_val + sd_logit)
-        sprintf("SD_logit = %.4f  ±1SD = [%.3f, %.3f]", sd_logit, lo, hi)
+        sprintf("SD_logit = %.4f  +/-1SD = [%.3f, %.3f]", sd_logit, lo, hi)
       } else {
         sprintf("SD_logit = %.4f", sqrt(max(var_ii, 0)))
       }

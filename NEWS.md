@@ -68,3 +68,16 @@
 - `ferx_model_set_section()`: fixed a last-section splice bug where
   `seq.int(end+1, length)` produced a descending sequence and appended `NA`
   plus a duplicate line when replacing the last section in a file.
+
+- `ferx_estimates()`: `estimate_natural` is now `NA` when SE is unavailable,
+  matching the documented contract that all natural-scale columns are `NA`
+  when the covariance step was not run. Previously the back-transform was
+  always populated for `log` and `logit` thetas regardless of SE.
+
+- `.ferx_model_type()` (used by `ferx_model_inspect()`): now returns
+  `"X-cpt IV infusion"` for `*_infusion` PK models, matching the label the
+  Rust engine attaches post-fit. Previously the pre-fit label dropped the
+  `IV` token.
+
+- `print.ferx_fit()`: the logit-ETA `+/-1SD` summary line is now ASCII; the
+  previous `±` rendered as `<U+00B1>` under non-UTF-8 locales.

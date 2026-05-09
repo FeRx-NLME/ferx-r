@@ -206,14 +206,14 @@ ferx_estimates <- function(fit) {
   } else if (transform == "log") {
     lower_95          <- if (!is.na(se)) estimate - 1.96 * se else NA_real_
     upper_95          <- if (!is.na(se)) estimate + 1.96 * se else NA_real_
-    estimate_natural  <- exp(estimate)
+    estimate_natural  <- if (!is.na(se)) exp(estimate) else NA_real_
     lower_95_natural  <- if (!is.na(se)) exp(estimate - 1.96 * se) else NA_real_
     upper_95_natural  <- if (!is.na(se)) exp(estimate + 1.96 * se) else NA_real_
   } else if (transform %in% c("logit", "logit_probability")) {
     # theta is on the logit scale; CI is symmetric on logit then back-transformed
     lower_95          <- if (!is.na(se)) estimate - 1.96 * se else NA_real_
     upper_95          <- if (!is.na(se)) estimate + 1.96 * se else NA_real_
-    estimate_natural  <- .ferx_inv_logit(estimate)
+    estimate_natural  <- if (!is.na(se)) .ferx_inv_logit(estimate) else NA_real_
     lower_95_natural  <- if (!is.na(se)) .ferx_inv_logit(estimate - 1.96 * se) else NA_real_
     upper_95_natural  <- if (!is.na(se)) .ferx_inv_logit(estimate + 1.96 * se) else NA_real_
   } else {
