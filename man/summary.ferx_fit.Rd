@@ -20,10 +20,9 @@ A \code{ferx_summary} list (invisibly). Fields include: \code{model_name},
 \code{se_sigma}, \code{shrinkage_eta}, \code{shrinkage_eps},
 \code{covariance_status}, \code{eigenvalues}, \code{condition_number}
 (see \code{\link{ferx_fit}} for definitions), \code{wall_time_secs},
-\code{ferx_version}, \code{call_settings}, \code{sir_ess},
-\code{warnings}, \code{ebe_convergence_warnings},
-\code{max_unconverged_subjects},
-\code{total_ebe_fallbacks}.
+\code{ferx_version}, \code{call_settings}, \code{model_file_settings},
+\code{sir_ess}, \code{warnings}, \code{ebe_convergence_warnings},
+\code{max_unconverged_subjects}, \code{total_ebe_fallbacks}.
 }
 \description{
 Returns a compact list with the most-used diagnostic fields: model name,
