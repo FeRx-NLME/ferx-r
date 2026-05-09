@@ -723,6 +723,29 @@ fn fit_result_to_list(
     let se_kappa: Vec<f64> = result.se_kappa.clone().unwrap_or_default();
     let shrinkage_kappa: Vec<f64> = result.shrinkage_kappa.clone();
 
+    // Parameter transform metadata (added in ferx-nlme PR #54; empty vecs for
+    // older binaries that don't populate these fields).
+    let eta_param_types: Vec<String> = result.eta_param_info.iter().map(|info| {
+        match info.param_type {
+            ferx_nlme::types::EtaParamType::LogNormal        => "log_normal",
+            ferx_nlme::types::EtaParamType::Additive         => "additive",
+            ferx_nlme::types::EtaParamType::Logit            => "logit",
+            ferx_nlme::types::EtaParamType::LogitProbability => "logit_probability",
+            ferx_nlme::types::EtaParamType::Custom           => "custom",
+        }.to_string()
+    }).collect();
+    // Linked theta name for each ETA (empty string when not detected).
+    let eta_linked_theta: Vec<String> = result.eta_param_info.iter()
+        .map(|info| info.linked_theta.clone().unwrap_or_default())
+        .collect();
+    let theta_transforms: Vec<String> = result.theta_transform.iter().map(|t| {
+        match t {
+            ferx_nlme::types::ThetaTransform::Identity         => "identity",
+            ferx_nlme::types::ThetaTransform::Log              => "log",
+            ferx_nlme::types::ThetaTransform::Logit            => "logit",
+            ferx_nlme::types::ThetaTransform::LogitProbability => "logit_probability",
+        }.to_string()
+    }).collect();
     // EBE kappas as a data frame: ID, OCC, KAPPA_1, ...
     // Rows: one per (subject, occasion); empty when no IOV.
     // - ID: original subject identifier (matches sdtab).
@@ -841,7 +864,10 @@ fn fit_result_to_list(
         ebe_kappas = ebe_kappas_df,
         ebe_etas = ebe_etas_df,
         individual_estimates = individual_estimates_df,
-        model_structure = model_structure_list(model)
+        model_structure = model_structure_list(model),
+        eta_param_types = eta_param_types,
+        eta_linked_theta = eta_linked_theta,
+        theta_transforms = theta_transforms
     )
 }
 

@@ -141,16 +141,19 @@ ferx_eta_cov <- function(fit, data) {
 #' Tidy parameter estimates table
 #'
 #' Extracts all estimated parameters (theta, omega diagonal, sigma) into a
-#' single tidy data frame, adding percent relative standard error (\%RSE) and
-#' 95\% confidence intervals when the covariance step was run.
+#' single tidy data frame, adding percent relative standard error (\%RSE),
+#' 95\% confidence intervals, and—for log/logit-transformed thetas—natural-scale
+#' back-transformed estimates and CIs.
 #'
 #' Omega is reported on the variance scale (matching the \code{.ferx} model
 #' file convention). For block omega, only the diagonal variances are included.
 #'
 #' @param fit A \code{ferx_fit} object returned by \code{\link{ferx_fit}}.
-#' @return A data frame with columns \code{param}, \code{estimate}, \code{se},
-#'   \code{rse_pct}, \code{lower_95}, \code{upper_95}. SE-derived columns are
-#'   \code{NA} when the covariance step was not run or failed.
+#' @return A data frame with columns \code{param}, \code{transform},
+#'   \code{estimate}, \code{se}, \code{rse_pct}, \code{lower_95},
+#'   \code{upper_95}, \code{estimate_natural}, \code{lower_95_natural},
+#'   \code{upper_95_natural}. SE-derived and natural-scale columns are
+#'   \code{NA} when not applicable or when the covariance step was not run.
 #' @seealso \code{\link{ferx_cor_matrix}} for parameter correlations.
 #' @export
 ferx_estimates <- function(fit) {
@@ -160,8 +163,9 @@ ferx_estimates <- function(fit) {
   theta_names <- names(fit$theta)
   if (is.null(theta_names)) theta_names <- paste0("THETA", seq_along(fit$theta))
   for (i in seq_along(fit$theta)) {
-    se <- if (!is.null(fit$se_theta) && length(fit$se_theta) >= i) fit$se_theta[i] else NA_real_
-    rows[[length(rows) + 1L]] <- .ferx_est_row(theta_names[i], fit$theta[i], se)
+    se        <- if (!is.null(fit$se_theta) && length(fit$se_theta) >= i) fit$se_theta[i] else NA_real_
+    transform <- if (!is.null(fit$theta_transforms) && length(fit$theta_transforms) >= i) fit$theta_transforms[i] else "identity"
+    rows[[length(rows) + 1L]] <- .ferx_est_row(theta_names[i], fit$theta[i], se, transform)
   }
 
   # Omega diagonal (variance scale)
@@ -171,14 +175,15 @@ ferx_estimates <- function(fit) {
   for (i in seq_len(n_eta)) {
     pname <- sprintf("OMEGA(%d,%d)", i, i)
     se    <- if (!is.null(fit$se_omega) && length(fit$se_omega) >= i) fit$se_omega[i] else NA_real_
-    rows[[length(rows) + 1L]] <- .ferx_est_row(pname, om[i, i], se)
+    rows[[length(rows) + 1L]] <- .ferx_est_row(pname, om[i, i], se, "variance")
   }
 
   # Sigma
   for (i in seq_along(fit$sigma)) {
-    pname <- sprintf("SIGMA(%d)", i)
-    se    <- if (!is.null(fit$se_sigma) && length(fit$se_sigma) >= i) fit$se_sigma[i] else NA_real_
-    rows[[length(rows) + 1L]] <- .ferx_est_row(pname, fit$sigma[i], se)
+    pname     <- sprintf("SIGMA(%d)", i)
+    se        <- if (!is.null(fit$se_sigma) && length(fit$se_sigma) >= i) fit$se_sigma[i] else NA_real_
+    sig_transform <- if (!is.null(fit$sigma_types) && length(fit$sigma_types) >= i) fit$sigma_types[i] else "proportional"
+    rows[[length(rows) + 1L]] <- .ferx_est_row(pname, fit$sigma[i], se, sig_transform)
   }
 
   result <- do.call(rbind, rows)
@@ -186,15 +191,48 @@ ferx_estimates <- function(fit) {
   result
 }
 
-.ferx_est_row <- function(param, estimate, se) {
+.ferx_inv_logit <- function(x) 1 / (1 + exp(-x))
+
+.ferx_est_row <- function(param, estimate, se, transform = "identity") {
   rse_pct  <- if (!is.na(se) && abs(estimate) > 1e-12) abs(se / estimate) * 100 else NA_real_
-  lower_95 <- if (!is.na(se)) estimate - 1.96 * se else NA_real_
-  upper_95 <- if (!is.na(se)) estimate + 1.96 * se else NA_real_
-  data.frame(param    = param,
-             estimate = estimate,
-             se       = se,
-             rse_pct  = rse_pct,
-             lower_95 = lower_95,
-             upper_95 = upper_95,
+
+  # Asymmetric CI and natural-scale back-transform per theta type
+  if (transform %in% c("identity", "variance", "proportional", "additive")) {
+    lower_95          <- if (!is.na(se)) estimate - 1.96 * se else NA_real_
+    upper_95          <- if (!is.na(se)) estimate + 1.96 * se else NA_real_
+    estimate_natural  <- NA_real_
+    lower_95_natural  <- NA_real_
+    upper_95_natural  <- NA_real_
+  } else if (transform == "log") {
+    lower_95          <- if (!is.na(se)) estimate - 1.96 * se else NA_real_
+    upper_95          <- if (!is.na(se)) estimate + 1.96 * se else NA_real_
+    estimate_natural  <- exp(estimate)
+    lower_95_natural  <- if (!is.na(se)) exp(estimate - 1.96 * se) else NA_real_
+    upper_95_natural  <- if (!is.na(se)) exp(estimate + 1.96 * se) else NA_real_
+  } else if (transform %in% c("logit", "logit_probability")) {
+    # theta is on the logit scale; CI is symmetric on logit then back-transformed
+    lower_95          <- if (!is.na(se)) estimate - 1.96 * se else NA_real_
+    upper_95          <- if (!is.na(se)) estimate + 1.96 * se else NA_real_
+    estimate_natural  <- .ferx_inv_logit(estimate)
+    lower_95_natural  <- if (!is.na(se)) .ferx_inv_logit(estimate - 1.96 * se) else NA_real_
+    upper_95_natural  <- if (!is.na(se)) .ferx_inv_logit(estimate + 1.96 * se) else NA_real_
+  } else {
+    lower_95          <- if (!is.na(se)) estimate - 1.96 * se else NA_real_
+    upper_95          <- if (!is.na(se)) estimate + 1.96 * se else NA_real_
+    estimate_natural  <- NA_real_
+    lower_95_natural  <- NA_real_
+    upper_95_natural  <- NA_real_
+  }
+
+  data.frame(param            = param,
+             transform        = transform,
+             estimate         = estimate,
+             se               = se,
+             rse_pct          = rse_pct,
+             lower_95         = lower_95,
+             upper_95         = upper_95,
+             estimate_natural = estimate_natural,
+             lower_95_natural = lower_95_natural,
+             upper_95_natural = upper_95_natural,
              stringsAsFactors = FALSE)
 }

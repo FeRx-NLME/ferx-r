@@ -20,12 +20,14 @@ test_that("print.ferx_fit uses exact log-normal CV% when eta_param_types is 'log
   expect_true(grepl("70\\.1", omega_line))
 })
 
-test_that("print.ferx_fit shows CV% = N/A for non-log-normal eta_param_types (handled in #53)", {
-  # logit/additive display is deferred to #53; show N/A rather than a misleading 0
+test_that("print.ferx_fit shows SD_logit for logit eta_param_types", {
   fit <- make_fake_fit(omega = matrix(0.40, 1, 1), eta_param_types = "logit")
   out <- capture.output(print(fit))
   omega_line <- out[grepl("OMEGA\\(1,1\\)", out)]
-  expect_true(grepl("CV% = N/A", omega_line))
+  expect_true(grepl("logit", omega_line))
+  expect_true(grepl("SD_logit", omega_line))
+  # CV% is not meaningful for logit ETAs — must not appear
+  expect_false(grepl("CV% =", omega_line))
 })
 
 test_that("print.ferx_fit CV% equals zero when omega diagonal is zero", {
