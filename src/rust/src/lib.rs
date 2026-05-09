@@ -746,13 +746,6 @@ fn fit_result_to_list(
             ferx_nlme::types::ThetaTransform::LogitProbability => "logit_probability",
         }.to_string()
     }).collect();
-    let sigma_types: Vec<String> = result.sigma_types.iter().map(|t| {
-        match t {
-            ferx_nlme::types::SigmaType::Proportional => "proportional",
-            ferx_nlme::types::SigmaType::Additive     => "additive",
-        }.to_string()
-    }).collect();
-
     // EBE kappas as a data frame: ID, OCC, KAPPA_1, ...
     // Rows: one per (subject, occasion); empty when no IOV.
     // - ID: original subject identifier (matches sdtab).
@@ -825,6 +818,21 @@ fn fit_result_to_list(
         omega = omega_flat,
         omega_dim = n_eta as i32,
         sigma = result.sigma.clone(),
+        sigma_names = result.sigma_names.clone(),
+        // Per-sigma component type — "proportional" or "additive". Parallel
+        // to `sigma` and `sigma_names`. The R layer uses this to decide
+        // whether to display CV% (proportional) or just SD/variance
+        // (additive) for each component without re-deriving from
+        // `model_structure$residual`. See ferx-nlme#57 for the YAML
+        // counterpart.
+        sigma_types = result
+            .sigma_types
+            .iter()
+            .map(|t| match t {
+                SigmaType::Proportional => "proportional".to_string(),
+                SigmaType::Additive => "additive".to_string(),
+            })
+            .collect::<Vec<_>>(),
         se_theta = se_theta,
         se_omega = se_omega,
         se_sigma = se_sigma,
@@ -859,8 +867,7 @@ fn fit_result_to_list(
         model_structure = model_structure_list(model),
         eta_param_types = eta_param_types,
         eta_linked_theta = eta_linked_theta,
-        theta_transforms = theta_transforms,
-        sigma_types = sigma_types
+        theta_transforms = theta_transforms
     )
 }
 

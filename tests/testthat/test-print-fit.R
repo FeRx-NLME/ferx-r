@@ -37,6 +37,72 @@ test_that("print.ferx_fit CV% equals zero when omega diagonal is zero", {
   expect_true(grepl("CV% = 0\\.0", omega_line))
 })
 
+# SIGMA display (ferx#59 / ferx-nlme#57): sigma is on the SD scale, so
+# print() must show variance = sigma^2 always and CV% = sigma * 100 only
+# for proportional components.
+
+test_that("print.ferx_fit shows variance + CV% for proportional sigma using its declared name", {
+  fit <- make_fake_fit(
+    omega       = matrix(0.09, 1, 1),
+    sigma       = 0.1,
+    sigma_names = "PROP_ERR",
+    sigma_types = "proportional"
+  )
+  out <- capture.output(print(fit))
+  sigma_line <- out[grepl("PROP_ERR", out)]
+  expect_length(sigma_line, 1L)
+  # variance = 0.1^2 = 0.01; CV% = 0.1 * 100 = 10.0.
+  expect_true(grepl("var = 0\\.010000", sigma_line))
+  expect_true(grepl("CV% = 10\\.0", sigma_line))
+  # No legacy SIGMA(1) label when a name is supplied.
+  expect_false(any(grepl("SIGMA\\(1\\)", out)))
+})
+
+test_that("print.ferx_fit shows variance but no CV% for additive sigma", {
+  fit <- make_fake_fit(
+    omega       = matrix(0.09, 1, 1),
+    sigma       = 0.5,
+    sigma_names = "ADD_ERR",
+    sigma_types = "additive"
+  )
+  out <- capture.output(print(fit))
+  sigma_line <- out[grepl("ADD_ERR", out)]
+  expect_length(sigma_line, 1L)
+  # variance = 0.5^2 = 0.25; no CV% on observation-unit scale.
+  expect_true(grepl("var = 0\\.250000", sigma_line))
+  expect_false(grepl("CV%", sigma_line))
+})
+
+test_that("print.ferx_fit handles combined error: CV% on prop component only", {
+  fit <- make_fake_fit(
+    omega       = matrix(0.09, 1, 1),
+    sigma       = c(0.2, 0.5),
+    sigma_names = c("PROP_ERR", "ADD_ERR"),
+    sigma_types = c("proportional", "additive")
+  )
+  out <- capture.output(print(fit))
+  prop_line <- out[grepl("PROP_ERR", out)]
+  add_line  <- out[grepl("ADD_ERR",  out)]
+  expect_length(prop_line, 1L)
+  expect_length(add_line,  1L)
+  expect_true(grepl("CV% = 20\\.0", prop_line))
+  expect_false(grepl("CV%", add_line))
+  expect_true(grepl("var = 0\\.040000", prop_line))
+  expect_true(grepl("var = 0\\.250000", add_line))
+})
+
+test_that("print.ferx_fit falls back to SIGMA(i) when sigma_names is missing", {
+  # sigma_names absent (older Rust binary or unit test that didn't pass them).
+  fit <- make_fake_fit(
+    omega       = matrix(0.09, 1, 1),
+    sigma       = 0.1,
+    sigma_names = NULL,
+    sigma_types = NULL
+  )
+  out <- capture.output(print(fit))
+  expect_true(any(grepl("SIGMA\\(1\\)", out)))
+})
+
 test_that("print.ferx_fit uses exact log-normal CV% for OMEGA_IOV when kappa_param_types absent", {
   # kappa = 0.20 -> exact CV% = sqrt(exp(0.20) - 1) * 100 ≈ 47.1 (not 44.7 from sqrt(0.20)*100)
   fit <- make_fake_fit(

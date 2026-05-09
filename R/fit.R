@@ -136,8 +136,13 @@
 #'   (\code{method}, \code{covariance}, \code{verbose},
 #'   \code{bloq_method}, \code{threads}, \code{sir}) are rejected — pass
 #'   them via the dedicated argument. Unknown keys and malformed values
-#'   also raise an error. Settings apply on top of the model file's
-#'   \code{[fit_options]} block.
+#'   also raise an error.
+#'   \strong{Precedence}: dedicated \code{ferx_fit()} arguments win over
+#'   \code{settings}, which in turn win over the model file's
+#'   \code{[fit_options]} block. A \code{warning()} is issued whenever a
+#'   call-time value overrides a different value from \code{[fit_options]}.
+#'   Inspect \code{fit$model_file_settings} and \code{fit$call_settings} to
+#'   audit the full picture.
 #'
 #' @return A list with components:
 #'   \item{converged}{Logical; did the optimizer converge}
@@ -148,10 +153,20 @@
 #'   \item{bic}{Bayesian Information Criterion}
 #'   \item{theta}{Named numeric vector of fixed effect estimates}
 #'   \item{omega}{Between-subject variability covariance matrix}
-#'   \item{sigma}{Residual error parameter estimates}
+#'   \item{sigma}{Residual error parameter estimates on the
+#'     \emph{standard-deviation} scale. For a proportional component
+#'     \code{CV\% = sigma * 100}; for an additive component the value is in
+#'     observation units. Variance is \code{sigma^2} for either type.}
+#'   \item{sigma_names}{Names of the sigma parameters as declared in the
+#'     \code{[parameters]} block of the \code{.ferx} file. Parallel to
+#'     \code{sigma}.}
+#'   \item{sigma_types}{Per-component error type label, parallel to
+#'     \code{sigma}: \code{"proportional"} or \code{"additive"}. Combined
+#'     error models report \code{c("proportional", "additive")} in that order.}
 #'   \item{se_theta}{Standard errors for theta (NULL if covariance step failed)}
 #'   \item{se_omega}{Standard errors for omega diagonal}
-#'   \item{se_sigma}{Standard errors for sigma}
+#'   \item{se_sigma}{Standard errors for sigma (on the SD scale, like
+#'     \code{sigma} itself)}
 #'   \item{sdtab}{Data frame with ID, TIME, DV, PRED, IPRED, CWRES, IWRES,
 #'     EBE_OFV, N_OBS; OCC if any subject carries an occasion column; CENS
 #'     if any rows are below LLOQ. Per-subject ETAs live in
@@ -242,6 +257,13 @@
 #'     with values typed back to their natural R types (logical, numeric, or
 #'     character). Includes merged defaults such as \code{optimizer_trace} and
 #'     \code{scale_params}. Empty list when no settings were supplied.}
+#'   \item{model_file_settings}{Named list of raw \code{key = value} pairs from
+#'     the model file's \code{[fit_options]} block, as character strings
+#'     (before Rust type coercion). Empty list when no \code{[fit_options]}
+#'     block is present. Use this alongside \code{call_settings} to audit which
+#'     values the model file requested and which were overridden at the R call
+#'     site. A \code{warning()} is issued automatically for each key that
+#'     appears in both sources with a different value.}
 #'
 #' @examples
 #' \dontrun{
@@ -405,6 +427,24 @@ ferx_fit <- function(model, data,
   } else {
     list()
   }
+
+  # Read [fit_options] from the model file and detect conflicts with R call-time
+  # arguments. Precedence: dedicated R args > settings list > model file. We
+  # warn (not error) so the user is informed which value actually runs. Only
+  # args the caller *explicitly* passed are flagged — accepting a default is
+  # not an override of the model file.
+  model_file_opts <- .ferx_parse_model_fit_options(model)
+  explicit_args <- names(match.call())[-1L]
+  dedicated_explicit <- list(
+    method         = if ("method"         %in% explicit_args) paste(method, collapse = ", "),
+    covariance     = if ("covariance"     %in% explicit_args) tolower(as.character(covariance)),
+    bloq_method    = if ("bloq_method"    %in% explicit_args && !is.null(bloq_method)) bloq_arg,
+    threads        = if ("threads"        %in% explicit_args && !is.null(threads)) as.character(threads),
+    mu_referencing = if ("mu_referencing" %in% explicit_args) tolower(as.character(mu_referencing)),
+    sir            = if ("sir"            %in% explicit_args) tolower(as.character(sir)),
+    gradient       = if ("gradient"       %in% explicit_args) gradient
+  )
+  .ferx_warn_fit_option_conflicts(model_file_opts, dedicated_explicit, settings_parts)
 
   fit_started_at <- Sys.time()
   raw <- ferx_rust_fit(
@@ -637,6 +677,10 @@ ferx_fit <- function(model, data,
 
   # Store effective settings (already serialised from settings_parts above)
   result$call_settings <- settings_used
+
+  # Raw [fit_options] from the model file, for inspection and conflict auditing.
+  result$model_file_settings <- if (length(model_file_opts) > 0L)
+    as.list(model_file_opts) else list()
 
   class(result) <- "ferx_fit"
   result
@@ -924,19 +968,40 @@ print.ferx_fit <- function(x, ...) {
     }
   }
 
-  # SIGMA
+  # SIGMA — sigma is on the SD scale (see ferx-nlme `docs/src/model-file/error-model.md`).
+  # For proportional components CV% = sigma * 100; for additive components the
+  # value is in observation units and no CV% applies. Variance = sigma^2 in
+  # both cases, mirroring the YAML output (ferx-nlme#57).
   cat("\n--- SIGMA Estimates ---\n")
   for (i in seq_along(x$sigma)) {
-    se_str   <- if (!is.null(x$se_sigma) && length(x$se_sigma) >= i) sprintf("%.6f", x$se_sigma[i]) else "N/A"
-    sig_type <- if (!is.null(x$sigma_types) && length(x$sigma_types) >= i) x$sigma_types[i] else "proportional"
-    var_i    <- x$sigma[i]
-    type_tag <- if (sig_type == "additive") "[additive]" else "[proportional]"
-    extra    <- if (sig_type == "additive") {
-      sprintf("SD = %.4f (var = %.6f)", sqrt(max(var_i, 0)), var_i)
+    s   <- x$sigma[i]
+    nm  <- if (length(x$sigma_names) >= i && nzchar(x$sigma_names[i])) {
+      x$sigma_names[i]
     } else {
-      sprintf("CV%% = %.1f", sqrt(max(var_i, 0)) * 100)
+      sprintf("SIGMA(%d)", i)
     }
-    cat(sprintf("  SIGMA(%d) %-14s = %.6f  %s  SE = %s\n", i, type_tag, var_i, extra, se_str))
+    typ <- if (length(x$sigma_types) >= i) x$sigma_types[i] else NA_character_
+    se_str <- if (!is.null(x$se_sigma) && length(x$se_sigma) >= i) {
+      sprintf("%.6f", x$se_sigma[i])
+    } else {
+      "N/A"
+    }
+    var_str  <- sprintf("var = %.6f", s * s)
+    type_tag <- switch(as.character(typ),
+      proportional = "[proportional]",
+      additive     = "[additive]",
+      ""
+    )
+    if (identical(typ, "proportional")) {
+      cat(sprintf("  %-16s %-14s = %.6f  (%s, CV%% = %.1f)  SE = %s\n",
+                  nm, type_tag, s, var_str, s * 100, se_str))
+    } else if (identical(typ, "additive")) {
+      cat(sprintf("  %-16s %-14s = %.6f  (SD = %.4f, %s)  SE = %s\n",
+                  nm, type_tag, s, s, var_str, se_str))
+    } else {
+      cat(sprintf("  %-16s = %.6f  (%s)  SE = %s\n",
+                  nm, s, var_str, se_str))
+    }
   }
 
   # SIR uncertainty
@@ -995,6 +1060,33 @@ print.ferx_fit <- function(x, ...) {
     cat("  ferx v", x$ferx_version, "\n", sep = "")
   }
 
+  mfs <- x$model_file_settings %||% list()
+  cs  <- x$call_settings %||% list()
+  if (length(mfs) > 0L || length(cs) > 0L) {
+    cat("\n--- Settings (model file / call-time override) ---\n")
+    all_keys <- union(names(mfs), names(cs))
+    for (nm in all_keys) {
+      mval <- mfs[[nm]]
+      cval <- cs[[nm]]
+      if (!is.null(mval) && !is.null(cval) &&
+          !identical(tolower(as.character(mval)), tolower(as.character(cval)))) {
+        cat(sprintf("  %-28s %s  [model: %s] *\n", nm, cval, mval))
+      } else if (!is.null(cval)) {
+        cat(sprintf("  %-28s %s\n", nm, cval))
+      } else {
+        cat(sprintf("  %-28s %s  [model only]\n", nm, mval))
+      }
+    }
+    if (any(vapply(all_keys, function(nm) {
+      mval <- mfs[[nm]]
+      cval <- cs[[nm]]
+      !is.null(mval) && !is.null(cval) &&
+        !identical(tolower(as.character(mval)), tolower(as.character(cval)))
+    }, logical(1L)))) {
+      cat("  (* model file value overridden by call-time argument)\n")
+    }
+  }
+
   if (length(x$warnings) > 0) {
     cat("\n--- Warnings ---\n")
     for (w in x$warnings) cat("  *", w, "\n")
@@ -1023,10 +1115,9 @@ print.ferx_fit <- function(x, ...) {
 #'   \code{se_sigma}, \code{shrinkage_eta}, \code{shrinkage_eps},
 #'   \code{covariance_status}, \code{eigenvalues}, \code{condition_number}
 #'   (see \code{\link{ferx_fit}} for definitions), \code{wall_time_secs},
-#'   \code{ferx_version}, \code{call_settings}, \code{sir_ess},
-#'   \code{warnings}, \code{ebe_convergence_warnings},
-#'   \code{max_unconverged_subjects},
-#'   \code{total_ebe_fallbacks}.
+#'   \code{ferx_version}, \code{call_settings}, \code{model_file_settings},
+#'   \code{sir_ess}, \code{warnings}, \code{ebe_convergence_warnings},
+#'   \code{max_unconverged_subjects}, \code{total_ebe_fallbacks}.
 #' @examples
 #' \dontrun{
 #' ex  <- ferx_example("warfarin")
@@ -1077,6 +1168,7 @@ summary.ferx_fit <- function(object, ...) {
     total_ebe_fallbacks = x$total_ebe_fallbacks,
     model_structure = x$model_structure,
     call_settings = x$call_settings %||% list(),
+    model_file_settings = x$model_file_settings %||% list(),
     sir_ess = x$sir_ess,
     warnings = x$warnings
   )
@@ -1105,10 +1197,28 @@ print.ferx_summary <- function(x, ...) {
   cat(sprintf("Gradient:  %s (requested)\n", x$gradient %||% "?"))
   cat(sprintf("ferx v%s\n", x$ferx_version %||% "?"))
 
-  if (length(x$call_settings) > 0L) {
-    cat("\nSettings:\n")
-    for (nm in names(x$call_settings)) {
-      cat(sprintf("  %-30s %s\n", nm, x$call_settings[[nm]]))
+  if (length(x$model_file_settings) > 0L || length(x$call_settings) > 0L) {
+    cat("\nSettings (model file / call-time override):\n")
+    all_keys <- union(names(x$model_file_settings), names(x$call_settings))
+    for (nm in all_keys) {
+      mval <- x$model_file_settings[[nm]]
+      cval <- x$call_settings[[nm]]
+      if (!is.null(mval) && !is.null(cval) &&
+          !identical(tolower(as.character(mval)), tolower(as.character(cval)))) {
+        cat(sprintf("  %-28s %s  [model: %s] *\n", nm, cval, mval))
+      } else if (!is.null(cval)) {
+        cat(sprintf("  %-28s %s\n", nm, cval))
+      } else {
+        cat(sprintf("  %-28s %s  [model only]\n", nm, mval))
+      }
+    }
+    if (any(vapply(all_keys, function(nm) {
+      mval <- x$model_file_settings[[nm]]
+      cval <- x$call_settings[[nm]]
+      !is.null(mval) && !is.null(cval) &&
+        !identical(tolower(as.character(mval)), tolower(as.character(cval)))
+    }, logical(1L)))) {
+      cat("  (* model file value overridden by call-time argument)\n")
     }
   }
 
@@ -1173,6 +1283,58 @@ print.ferx_summary <- function(x, ...) {
 
   cat(bar, "\n", sep = "")
   invisible(x)
+}
+
+# Emit a warning() for each model file [fit_options] key that disagrees with
+# an explicit R call-time value. `dedicated_explicit` is a named list keyed by
+# R argument name; entries are NULL for args the user did not pass explicitly
+# (those silently defer to the model file). `settings_parts` is the output of
+# .ferx_settings_to_strings(): every key in it was supplied by the caller.
+.ferx_warn_fit_option_conflicts <- function(model_file_opts,
+                                            dedicated_explicit,
+                                            settings_parts) {
+  if (length(model_file_opts) == 0L) return(invisible(NULL))
+
+  warn <- function(key, model_val, call_val) {
+    call_str  <- as.character(call_val)
+    model_str <- as.character(model_val)
+    if (!identical(tolower(model_str), tolower(call_str))) {
+      warning(
+        "Model file [fit_options] sets `", key, " = ", model_str,
+        "` but ferx_fit() argument overrides it with `", call_str, "`.",
+        " The call-time value will be used.",
+        call. = FALSE
+      )
+    }
+  }
+
+  # Aliases the model file may use for each dedicated R argument.
+  key_aliases <- list(
+    method         = "method",
+    covariance     = "covariance",
+    bloq_method    = c("bloq_method", "bloq"),
+    threads        = "threads",
+    mu_referencing = "mu_referencing",
+    sir            = "sir",
+    gradient       = c("gradient", "gradient_method")
+  )
+  mf_names <- names(model_file_opts)
+  for (arg in names(dedicated_explicit)) {
+    call_val <- dedicated_explicit[[arg]]
+    if (is.null(call_val)) next
+    for (alias in key_aliases[[arg]]) {
+      if (alias %in% mf_names) warn(alias, model_file_opts[[alias]], call_val)
+    }
+  }
+
+  # Settings list keys are always explicit by construction.
+  for (i in seq_along(settings_parts$keys)) {
+    mkey <- tolower(settings_parts$keys[[i]])
+    if (mkey %in% mf_names) {
+      warn(mkey, model_file_opts[[mkey]], settings_parts$values[[i]])
+    }
+  }
+  invisible(NULL)
 }
 
 # Reverse of the stringify step in .ferx_settings_to_strings: parse a single
