@@ -420,67 +420,21 @@ ferx_fit <- function(model, data,
 
   # Read [fit_options] from the model file and detect conflicts with R call-time
   # arguments. Precedence: dedicated R args > settings list > model file. We
-  # warn (not error) so the user is informed which value actually runs.
+  # warn (not error) so the user is informed which value actually runs. Only
+  # args the caller *explicitly* passed are flagged — accepting a default is
+  # not an override of the model file.
   model_file_opts <- .ferx_parse_model_fit_options(model)
-
-  # Map from model file key → the R call-time value that overrides it (as a
-  # character string for comparison). Dedicated args are checked first because
-  # they win unconditionally; the settings list is checked second.
-  #
-  # Keys covered by RESERVED in Rust (method, covariance, bloq_method, threads,
-  # mu_referencing, sir, gradient) are mapped to their R call-time values.
-  # Keys that flow through `settings` are compared against settings list names.
-  .warn_override <- function(key, model_val, call_val) {
-    call_str <- as.character(call_val)
-    model_str <- as.character(model_val)
-    if (!identical(tolower(model_str), tolower(call_str))) {
-      warning(
-        "Model file [fit_options] sets `", key, " = ", model_str,
-        "` but ferx_fit() argument overrides it with `", call_str, "`.",
-        " The call-time value will be used.",
-        call. = FALSE
-      )
-    }
-  }
-
-  if (length(model_file_opts) > 0L) {
-    # Dedicated args (always win)
-    dedicated <- list(
-      method        = paste(method, collapse = ", "),
-      covariance    = tolower(as.character(covariance)),
-      bloq_method   = if (nzchar(bloq_arg)) bloq_arg else NULL,
-      threads       = if (!is.null(threads)) as.character(threads) else NULL,
-      mu_referencing = tolower(as.character(mu_referencing)),
-      sir           = tolower(as.character(sir)),
-      gradient      = gradient
-    )
-    # Aliases used in model files
-    key_aliases <- list(bloq_method = c("bloq_method", "bloq"),
-                        gradient    = c("gradient", "gradient_method"),
-                        method      = "method",
-                        covariance  = "covariance",
-                        threads     = "threads",
-                        mu_referencing = "mu_referencing",
-                        sir         = "sir")
-    for (arg in names(dedicated)) {
-      call_val <- dedicated[[arg]]
-      if (is.null(call_val)) next
-      aliases <- key_aliases[[arg]]
-      for (alias in aliases) {
-        mval <- model_file_opts[[alias]]
-        if (!is.null(mval)) .warn_override(alias, mval, call_val)
-      }
-    }
-    # settings list keys
-    for (skey in settings_parts$keys) {
-      mkey <- tolower(skey)
-      mval <- model_file_opts[[mkey]]
-      if (!is.null(mval)) {
-        sval <- settings_parts$values[[match(skey, settings_parts$keys)]]
-        .warn_override(mkey, mval, sval)
-      }
-    }
-  }
+  explicit_args <- names(match.call())[-1L]
+  dedicated_explicit <- list(
+    method         = if ("method"         %in% explicit_args) paste(method, collapse = ", "),
+    covariance     = if ("covariance"     %in% explicit_args) tolower(as.character(covariance)),
+    bloq_method    = if ("bloq_method"    %in% explicit_args && !is.null(bloq_method)) bloq_arg,
+    threads        = if ("threads"        %in% explicit_args && !is.null(threads)) as.character(threads),
+    mu_referencing = if ("mu_referencing" %in% explicit_args) tolower(as.character(mu_referencing)),
+    sir            = if ("sir"            %in% explicit_args) tolower(as.character(sir)),
+    gradient       = if ("gradient"       %in% explicit_args) gradient
+  )
+  .ferx_warn_fit_option_conflicts(model_file_opts, dedicated_explicit, settings_parts)
 
   fit_started_at <- Sys.time()
   raw <- ferx_rust_fit(
@@ -1236,6 +1190,58 @@ print.ferx_summary <- function(x, ...) {
 
   cat(bar, "\n", sep = "")
   invisible(x)
+}
+
+# Emit a warning() for each model file [fit_options] key that disagrees with
+# an explicit R call-time value. `dedicated_explicit` is a named list keyed by
+# R argument name; entries are NULL for args the user did not pass explicitly
+# (those silently defer to the model file). `settings_parts` is the output of
+# .ferx_settings_to_strings(): every key in it was supplied by the caller.
+.ferx_warn_fit_option_conflicts <- function(model_file_opts,
+                                            dedicated_explicit,
+                                            settings_parts) {
+  if (length(model_file_opts) == 0L) return(invisible(NULL))
+
+  warn <- function(key, model_val, call_val) {
+    call_str  <- as.character(call_val)
+    model_str <- as.character(model_val)
+    if (!identical(tolower(model_str), tolower(call_str))) {
+      warning(
+        "Model file [fit_options] sets `", key, " = ", model_str,
+        "` but ferx_fit() argument overrides it with `", call_str, "`.",
+        " The call-time value will be used.",
+        call. = FALSE
+      )
+    }
+  }
+
+  # Aliases the model file may use for each dedicated R argument.
+  key_aliases <- list(
+    method         = "method",
+    covariance     = "covariance",
+    bloq_method    = c("bloq_method", "bloq"),
+    threads        = "threads",
+    mu_referencing = "mu_referencing",
+    sir            = "sir",
+    gradient       = c("gradient", "gradient_method")
+  )
+  mf_names <- names(model_file_opts)
+  for (arg in names(dedicated_explicit)) {
+    call_val <- dedicated_explicit[[arg]]
+    if (is.null(call_val)) next
+    for (alias in key_aliases[[arg]]) {
+      if (alias %in% mf_names) warn(alias, model_file_opts[[alias]], call_val)
+    }
+  }
+
+  # Settings list keys are always explicit by construction.
+  for (i in seq_along(settings_parts$keys)) {
+    mkey <- tolower(settings_parts$keys[[i]])
+    if (mkey %in% mf_names) {
+      warn(mkey, model_file_opts[[mkey]], settings_parts$values[[i]])
+    }
+  }
+  invisible(NULL)
 }
 
 # Reverse of the stringify step in .ferx_settings_to_strings: parse a single
