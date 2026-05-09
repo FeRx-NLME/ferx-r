@@ -188,7 +188,7 @@ test_that("print.ferx_fit shows [additive] label and SD for additive ETA", {
   expect_true(any(grepl("SD = 0\\.2", omega_line)))
 })
 
-test_that("print.ferx_fit shows [logit] label and ±1SD range for logit ETA", {
+test_that("print.ferx_fit shows [logit] label and +/-1SD range for logit ETA", {
   logit_theta <- log(0.7 / 0.3)
   fit <- make_fake_fit(
     theta            = c(THETA_F = logit_theta),
@@ -201,7 +201,7 @@ test_that("print.ferx_fit shows [logit] label and ±1SD range for logit ETA", {
   out <- capture.output(print(fit))
   omega_line <- out[grepl("OMEGA\\(1,1\\)", out)]
   expect_true(any(grepl("logit", omega_line)))
-  expect_true(any(grepl("±1SD", omega_line)))
+  expect_true(any(grepl("+/-1SD", omega_line, fixed = TRUE)))
 })
 
 # print.ferx_fit — SIGMA section type labels ----------------------------
