@@ -1,0 +1,44 @@
+# One-compartment oral PK — logit-normal bioavailability
+#
+# Bioavailability F is constrained to (0, 1) via a logit transformation:
+#   F_i = inv_logit(logit(THETA_F) + ETA_F_i)
+#
+# THETA_F is set directly on the (0, 1) scale; ferx maps it to the logit
+# scale internally so the optimiser works on an unbounded parameter space.
+# omega ETA_F is the BSV variance on the logit scale.
+#
+# Use ferx_example("warfarin_logit_f") to get file paths.
+
+[parameters]
+  theta TVCL(0.134, 0.001, 10.0)
+  theta TVV(8.1, 0.1, 500.0)
+  theta TVKA(1.0, 0.01, 50.0)
+  theta THETA_F(0.80, 0.001, 0.999)   # typical bioavailability, (0,1) scale
+
+  omega ETA_CL ~ 0.07                 # BSV on CL (log-normal)
+  omega ETA_V  ~ 0.02                 # BSV on V  (log-normal)
+  omega ETA_F  ~ 0.10                 # BSV on F  (logit-normal)
+
+  sigma PROP_ERR ~ 0.01
+
+[individual_parameters]
+  CL = TVCL * exp(ETA_CL)
+  V  = TVV  * exp(ETA_V)
+  KA = TVKA
+  F  = inv_logit(logit(THETA_F) + ETA_F)
+
+[structural_model]
+  pk one_cpt_oral(cl=CL, v=V, ka=KA, f=F)
+
+[error_model]
+  DV ~ proportional(PROP_ERR)
+
+[initial_values]
+  theta = [0.134, 8.1, 1.0, 0.80]
+  omega = [0.07, 0.02, 0.10]
+  sigma = [0.01]
+
+[fit_options]
+  method     = focei
+  maxiter    = 300
+  covariance = true
