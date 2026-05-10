@@ -636,7 +636,7 @@ ferx_fit <- function(model, data,
     result$warnings <- c(
       result$warnings,
       sprintf(
-        "High condition number (%.1f) — parameter space may be ill-conditioned",
+        "High condition number (%.1f) -- parameter space may be ill-conditioned",
         result$condition_number
       )
     )
@@ -668,7 +668,7 @@ ferx_fit <- function(model, data,
       "ETA normality: ", nrow(one_per), " subjects exceeds the ",
       sw_cap, "-sample limit of shapiro.test(); each ETA was subsampled ",
       "to ", sw_cap, " values. Shapiro-Wilk is also known to over-reject ",
-      "normality at large N — treat the result as a rough indicator and ",
+      "normality at large N -- treat the result as a rough indicator and ",
       "prefer QQ-plots for diagnosis on large datasets.",
       call. = FALSE
     )
