@@ -216,13 +216,33 @@ test_that("pipe chain: ferx_model() |> ferx_model_set_section |> ferx_model_show
 })
 
 # ---------------------------------------------------------------------------
-# Block 6 — ferx_fit dispatch on ferx_model (if #47 includes it)
+# Block 6 — ferx_fit dispatch on ferx_model
+#
+# ferx_fit.ferx_model is part of #47. Both call forms must work:
+#   ferx_fit("my_model.ferx", data = my_data)          # already works today
+#   ferx_model("my_model.ferx") |> ferx_fit(data = my_data)  # added by #47
+#
+# ferx_fit() must return a plain ferx_fit — NOT a ferx_model. The pipe chain
+# terminates here; fitting result should not be wrapped back into ferx_model.
+#
+# Remove the skip() below once #47 is merged and reinstalled.
 # ---------------------------------------------------------------------------
 
 test_that("ferx_fit() dispatches on ferx_model and returns a ferx_fit", {
   skip_if_no_ferx_model()
-  skip("enable once ferx_fit.ferx_model dispatch is confirmed in #47")
+  skip("remove this skip once ferx_fit.ferx_model is merged in #47")
   ex     <- ferx_example("warfarin")
   result <- ferx_model(ex$model) |> ferx_fit(data = ex$data)
   expect_s3_class(result, "ferx_fit")
+  expect_false(inherits(result, "ferx_model"))
+})
+
+test_that("ferx_fit() on ferx_model produces same result as ferx_fit() on path", {
+  skip_if_no_ferx_model()
+  skip("remove this skip once ferx_fit.ferx_model is merged in #47")
+  ex      <- ferx_example("warfarin")
+  by_path <- ferx_fit(ex$model, data = ex$data)
+  by_pipe <- ferx_model(ex$model) |> ferx_fit(data = ex$data)
+  expect_equal(by_path$ofv,   by_pipe$ofv)
+  expect_equal(by_path$theta, by_pipe$theta)
 })
