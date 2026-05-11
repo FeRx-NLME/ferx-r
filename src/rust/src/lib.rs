@@ -901,6 +901,7 @@ fn fit_result_to_list(
         eta_log_transformed = eta_log_transformed,
         eta_param_types = eta_param_types,
         eta_linked_theta = eta_linked_theta,
+        eta_names = result.eta_names.clone(),
         theta_transforms = theta_transforms
     )
 }

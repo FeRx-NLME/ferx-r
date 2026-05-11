@@ -259,6 +259,9 @@
 #'     \code{NULL} when omega is diagonal (no off-diagonal elements to report).}
 #'   \item{omega_iov_param_corr}{Same as \code{omega_param_corr} but for the
 #'     IOV kappa block. \code{NULL} when kappa is diagonal or absent.}
+#'   \item{eta_names}{Character vector of ETA parameter names as declared in the
+#'     model file (e.g. \code{"ETA_CL"}, \code{"ETA_V"}). Used to label OMEGA
+#'     rows in \code{ferx_estimates()} and \code{print.ferx_fit()}.}
 #'   \item{eta_log_transformed}{Logical vector of length \code{n_eta}; \code{TRUE}
 #'     when the eta is lognormally parameterised (\code{THETA * exp(ETA)}),
 #'     \code{FALSE} for additive or unknown parameterisations. \code{NULL} when
@@ -1142,9 +1145,11 @@ print.ferx_fit <- function(x, ...) {
       custom            = "[custom]",
       ""
     )
+    eta_label <- if (!is.null(x$eta_names) && length(x$eta_names) >= i && nzchar(x$eta_names[i])) x$eta_names[i] else NULL
+    omega_id  <- if (!is.null(eta_label)) sprintf("(%s)", eta_label) else sprintf("(%d,%d)", i, i)
     cat(sprintf(
-      "  OMEGA(%d,%d) %-13s = %.6f  %s  SE = %s\n",
-      i, i, type_tag, var_ii, extra, se_str
+      "  OMEGA%-20s %-13s = %.6f  %s  SE = %s\n",
+      omega_id, type_tag, var_ii, extra, se_str
     ))
     for (j in seq_len(i - 1L)) {
       if (abs(om[i, j]) > 1e-15) has_offdiag <- TRUE
@@ -1163,9 +1168,11 @@ print.ferx_fit <- function(x, ...) {
           if (var_i > 0 && var_j > 0) cov_ij / (sqrt(var_i) * sqrt(var_j)) else 0
         }
         corr_label <- if (!is.null(x$omega_param_corr)) "param corr" else "corr"
+        lbl_i <- if (!is.null(x$eta_names) && length(x$eta_names) >= i && nzchar(x$eta_names[i])) x$eta_names[i] else as.character(i)
+        lbl_j <- if (!is.null(x$eta_names) && length(x$eta_names) >= j && nzchar(x$eta_names[j])) x$eta_names[j] else as.character(j)
         cat(sprintf(
-          "  OMEGA(%d,%d) = %.6f  (%s = %.4f)\n",
-          i, j, cov_ij, corr_label, param_corr
+          "  OMEGA(%s,%s) = %.6f  (%s = %.4f)\n",
+          lbl_i, lbl_j, cov_ij, corr_label, param_corr
         ))
       }
     }
