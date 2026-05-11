@@ -187,6 +187,24 @@ ferx_estimates <- function(fit) {
     rows[[length(rows) + 1L]] <- .ferx_est_row(pname, fit$sigma[i], se, sig_transform)
   }
 
+  # Kappa (IOV diagonal)
+  if (!is.null(fit$omega_iov)) {
+    m_iov  <- fit$omega_iov
+    if (is.null(dim(m_iov))) m_iov <- matrix(m_iov, 1L, 1L)
+    n_kap  <- nrow(m_iov)
+    kap_names <- if (!is.null(fit$kappa_names) && length(fit$kappa_names) == n_kap) fit$kappa_names else paste0("KAPPA", seq_len(n_kap))
+    n_se   <- length(fit$se_kappa)
+    n_tri  <- n_kap * (n_kap + 1L) / 2L
+    is_block_se <- (n_se == n_tri && n_kap > 1L)
+    diag_se_idx <- function(j) j * n_kap - j * (j - 1L) / 2L - (n_kap - j)
+    for (i in seq_len(n_kap)) {
+      se_idx <- if (is_block_se) diag_se_idx(i) else i
+      se     <- if (n_se >= se_idx) fit$se_kappa[se_idx] else NA_real_
+      kap_type <- if (!is.null(fit$kappa_param_types) && length(fit$kappa_param_types) >= i) fit$kappa_param_types[i] else "variance"
+      rows[[length(rows) + 1L]] <- .ferx_est_row(kap_names[i], m_iov[i, i], se, kap_type)
+    }
+  }
+
   result <- do.call(rbind, rows)
   rownames(result) <- NULL
   result
