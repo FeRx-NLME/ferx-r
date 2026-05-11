@@ -187,6 +187,36 @@ Currently only one `ferx_eta_cov()` test (error path). Add:
 
 ---
 
+### `tests/testthat/test-model-validate.R` — Tier 1 (calls Rust validator, fast — no optimisation loop)
+
+| # | Test | What to check |
+|---|---|---|
+| 1 | valid warfarin model prints "Validating:" header and returns invisibly | `capture.output()`, `withVisible()$visible == FALSE` |
+| 2 | valid model: `$ok` is `TRUE` | |
+| 3 | valid model: `$missing_sections` is `character(0)` | |
+| 4 | valid model: `$unknown_sections` is `character(0)` | |
+| 5 | model missing a required section: `$ok` is `FALSE` | write a file omitting `error_model` |
+| 6 | model missing a required section: section name appears in `$missing_sections` | |
+| 7 | model with an unknown section: section name appears in `$unknown_sections` | write a file with `[foo]` section |
+| 8 | syntax error in model body: `$ok` is `FALSE` and `$errors` is non-empty | write a file with bad syntax (Rust validator catches this) |
+| 9 | errors on missing file | `expect_error(..., "File not found")` |
+| 10 | errors on wrong extension | `expect_error(..., ".ferx")` |
+
+---
+
+### Add to `test-trace.R` — `ferx_plot_trace()` — Tier 1, no Rust needed
+
+Uses `warfarin_fit()` fixture. `ferx_plot_trace()` is a pure R graphics
+function that operates on the trace data frame — no Rust call.
+
+| # | Test | What to check |
+|---|---|---|
+| + | `ferx_plot_trace(fit)` returns invisibly without error | `expect_no_error`, `withVisible()$visible == FALSE` |
+| + | `ferx_plot_trace(fit, log_ofv = TRUE)` also runs without error | OFV panel uses shifted scale |
+| + | errors on object with no trace | `expect_error` when `fit$trace` is absent |
+
+---
+
 ## Implementation order
 
 1. `test-example.R` — zero Rust, done in minutes, good warm-up
@@ -197,7 +227,9 @@ Currently only one `ferx_eta_cov()` test (error path). Add:
 4. `test-simulate.R`
 5. `test-predict.R`
 6. Expand `test-map-estimates.R`
+7. `test-model-validate.R`
+8. Expand `test-trace.R` with `ferx_plot_trace()` tests
 
-Tests 1–3, 5–6 can be written and verified entirely on a no-autodiff build.
+Tests 1–3, 5–8 can be written and verified entirely on a no-autodiff build.
 **Only test #24 in test-fit.R requires the Enzyme toolchain** — all others
 run cleanly with `FERX_NO_AUTODIFF=1`.
