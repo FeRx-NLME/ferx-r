@@ -524,14 +524,14 @@ ferx_fit <- function(model, data = NULL, ...) UseMethod("ferx_fit")
 
 #' @export
 #' @rdname ferx_fit
-ferx_fit.ferx_model <- function(x, data = x$data, ...) {
+ferx_fit.ferx_model <- function(model, data = model$data, ...) {
   if (is.null(data)) {
     stop(
       "No data path supplied. Either pass `data` to ferx_fit() ",
       "or include it in ferx_model()."
     )
   }
-  ferx_fit.default(x$model, data, ...)
+  ferx_fit.default(model$model, data, ...)
 }
 
 #' @export
@@ -550,6 +550,9 @@ ferx_fit.default <- function(model, data,
                      min_obs_for_convergence_check = NULL,
                      settings = NULL) {
   gradient <- match.arg(gradient)
+  if (is.null(data)) {
+    stop("`data` is required. Pass a path to a NONMEM CSV file.")
+  }
   stopifnot(file.exists(model), file.exists(data))
   if (!is.logical(covariance) || length(covariance) != 1L || is.na(covariance)) {
     stop("`covariance` must be TRUE or FALSE")
