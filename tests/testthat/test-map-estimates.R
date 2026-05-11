@@ -66,3 +66,32 @@ test_that("ferx_eta_cov() consumes ebe_etas (errors when absent)", {
   bad$ebe_etas <- NULL
   expect_error(ferx_eta_cov(bad, data.frame(ID = 1L)), regexp = "ebe_etas")
 })
+
+test_that("ferx_eta_cov() returns a data frame with ID + one col per ETA", {
+  fit  <- warfarin_fit()
+  ex   <- ferx_example("warfarin")
+  dat  <- read.csv(ex$data)
+  res  <- ferx_eta_cov(fit, dat)
+  expect_s3_class(res, "data.frame")
+  expect_true("eta" %in% names(res))
+  eta_names <- setdiff(names(fit$ebe_etas), "ID")
+  expect_true(all(eta_names %in% unique(res$eta)))
+})
+
+test_that("ferx_eta_cov() values are finite numerics", {
+  fit <- warfarin_fit()
+  ex  <- ferx_example("warfarin")
+  dat <- read.csv(ex$data)
+  res <- ferx_eta_cov(fit, dat)
+  expect_true(is.numeric(res$r))
+  expect_true(all(is.finite(res$r)))
+})
+
+test_that("ferx_eta_cov() nrow equals number of ETA-covariate pairs", {
+  fit <- warfarin_fit()
+  ex  <- ferx_example("warfarin")
+  dat <- read.csv(ex$data)
+  res <- ferx_eta_cov(fit, dat)
+  n_etas <- length(setdiff(names(fit$ebe_etas), "ID"))
+  expect_true(nrow(res) >= n_etas)
+})
