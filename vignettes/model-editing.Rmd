@@ -62,18 +62,18 @@ params
 ## Scripted read-modify-write
 
 The extract → modify → write-back pattern lets you change a model
-programmatically without an editor. Here we lower the initial CL estimate in
+programmatically without an editor. Here we raise the initial CL estimate in
 the `parameters` section and write the result to a temporary copy:
 
 ```{r read-modify-write}
-# work in a temp dir so we don't touch the package example
-model_path <- file.path(tempdir(), "warfarin.ferx")
-file.copy(ex$model, model_path)
+# work in a fresh temp file so re-knitting the vignette never reuses stale state
+model_path <- tempfile(fileext = ".ferx")
+stopifnot(file.copy(ex$model, model_path))
 
 # read the section
 lines <- ferx_model_section(model_path, "parameters")
 
-# modify: change the TVCL initial value from 0.13 to 0.5
+# modify: change the TVCL initial value from 0.134 to 0.5
 lines <- sub("TVCL\\([^,]+,", "TVCL(0.5,", lines)
 
 # write back
@@ -116,7 +116,7 @@ print(fit)
 By default `ferx_model_new()` refuses to overwrite an existing file:
 
 ```{r overwrite-error}
-model_path <- file.path(tempdir(), "guard_demo.ferx")
+model_path <- tempfile(fileext = ".ferx")
 ferx_model_new(model_path, edit = FALSE)            # creates the file
 
 tryCatch(
