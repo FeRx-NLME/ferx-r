@@ -191,8 +191,12 @@ ferx_plot_trace <- function(fit, log_ofv = FALSE) {
 #' Useful for diagnosing poor starting values, ill-scaled parameters, or
 #' structural model issues.
 #'
-#' @param model Path to a \code{.ferx} model file.
-#' @param data  Path to a NONMEM-format CSV file.
+#' @param model Path to a \code{.ferx} model file, or a \code{ferx_model}
+#'   object created by \code{\link{ferx_model}}. When a \code{ferx_model} is
+#'   passed and \code{data} is not supplied, the data path on the object is
+#'   used.
+#' @param data  Path to a NONMEM-format CSV file. Optional when \code{model}
+#'   is a \code{ferx_model} that already carries a data path.
 #' @param method Estimation method string, passed to \code{\link{ferx_fit}}.
 #'   Default \code{"focei"}.
 #' @param maxiter Maximum iterations for the pilot fit. Default: 5 for
@@ -209,13 +213,29 @@ ferx_plot_trace <- function(fit, log_ofv = FALSE) {
 #'
 #' @examples
 #' \dontrun{
+#' # Plain paths
 #' chk <- ferx_check_init("warfarin.ferx", "warfarin.csv")
 #' ferx_plot_trace(chk$fit)
 #' chk$summary
+#'
+#' # Pipe from a ferx_model — data is picked up from the object
+#' ex <- ferx_example("warfarin")
+#' ferx_model(ex$model, data = ex$data) |>
+#'   ferx_check_init(method = "focei")
 #' }
 #'
 #' @export
-ferx_check_init <- function(model, data, method = "focei", maxiter = NULL, ...) {
+ferx_check_init <- function(model, data = NULL, method = "focei", maxiter = NULL, ...) {
+  if (inherits(model, "ferx_model")) {
+    if (is.null(data)) data <- model$data
+    model <- model$model
+  }
+  if (is.null(data)) {
+    stop(
+      "No data path supplied. Either pass `data` to ferx_check_init() ",
+      "or include it in ferx_model()."
+    )
+  }
   if (is.null(maxiter)) {
     maxiter <- if (tolower(method) == "saem") 20L else 5L
   }

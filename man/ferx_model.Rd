@@ -60,12 +60,10 @@ fit <- ferx_model(ex$model, data = ex$data) |>
 
 # ── Override fit options before fitting ─────────────────────────────────
 # ferx_set_section() rewrites [fit_options] on disk and passes the
-# ferx_model through unchanged so the pipe continues.
-# Note: copy the model file first — ferx_set_section() edits in place.
-model_copy <- file.path(tempdir(), "warfarin.ferx")
-file.copy(ex$model, model_copy)
-
-fit <- ferx_model(model_copy, data = ex$data) |>
+# ferx_model through so the pipe continues. When the model file lives
+# inside the installed package (as for ferx_example()), the file is
+# copied to tempdir() first so the bundled example is never mutated.
+fit <- ferx_model(ex$model, data = ex$data) |>
   ferx_set_section("fit_options", c(
     "  method     = focei",
     "  maxiter    = 500",

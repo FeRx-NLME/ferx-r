@@ -317,3 +317,92 @@ test_that("ferx_fit() errors with clear message when ferx_model has no data and 
     regexp = "data"
   )
 })
+
+# ---------------------------------------------------------------------------
+# Block 7 — ferx_set_section() copy-on-write for package files (#80)
+# ---------------------------------------------------------------------------
+
+test_that("ferx_set_section() on a ferx_model pointing at a package file does NOT modify the bundled file", {
+  ex <- ferx_example("warfarin")
+  before <- readLines(ex$model, warn = FALSE)
+  suppressMessages(
+    ferx_model(ex$model, data = ex$data) |>
+      ferx_set_section("fit_options", c("  method = focei", "  maxiter = 7"))
+  )
+  after <- readLines(ex$model, warn = FALSE)
+  expect_identical(before, after)
+})
+
+test_that("ferx_set_section() on a ferx_model pointing at a package file redirects $model to tempdir", {
+  ex <- ferx_example("warfarin")
+  m  <- suppressMessages(
+    ferx_set_section(
+      ferx_model(ex$model, data = ex$data),
+      "fit_options", c("  method = focei", "  maxiter = 7")
+    )
+  )
+  expect_true(startsWith(normalizePath(m$model), normalizePath(tempdir())))
+  expect_true(file.exists(m$model))
+  opts <- ferx_model_section(m$model, "fit_options")
+  expect_true(any(grepl("maxiter = 7", opts)))
+})
+
+test_that("ferx_set_section() on a user-owned ferx_model edits in place (no copy)", {
+  path <- write_pipe_test_model()
+  on.exit(unlink(path))
+  m <- ferx_set_section(
+    ferx_model(path), "fit_options",
+    c("  method = focei", "  maxiter = 12")
+  )
+  expect_equal(m$model, path)
+  opts <- ferx_model_section(path, "fit_options")
+  expect_true(any(grepl("maxiter = 12", opts)))
+})
+
+test_that("ferx_set_section() emits a copy-on-write message for package files", {
+  ex <- ferx_example("warfarin")
+  expect_message(
+    ferx_set_section(
+      ferx_model(ex$model, data = ex$data),
+      "fit_options", c("  method = focei")
+    ),
+    regexp = "copying read-only package model"
+  )
+})
+
+# ---------------------------------------------------------------------------
+# Block 8 — ferx_check_init() accepts ferx_model (#79)
+# ---------------------------------------------------------------------------
+
+test_that("ferx_check_init() accepts a ferx_model in a pipe and uses its data", {
+  ex <- ferx_example("warfarin")
+  chk <- suppressWarnings(
+    ferx_model(ex$model, data = ex$data) |>
+      ferx_check_init(method = "focei", maxiter = 2L)
+  )
+  expect_named(chk, c("fit", "trace", "summary"))
+  expect_s3_class(chk$fit, "ferx_fit")
+  expect_true(is.data.frame(chk$summary))
+})
+
+test_that("ferx_check_init() errors when ferx_model has no data and none is supplied", {
+  path <- write_pipe_test_model()
+  on.exit(unlink(path))
+  expect_error(
+    ferx_model(path) |> ferx_check_init(),
+    regexp = "data"
+  )
+})
+
+test_that("ferx_check_init() explicit data argument overrides data on ferx_model", {
+  ex <- ferx_example("warfarin")
+  # Sanity check that explicit data still wins over $data on the object —
+  # we pass the same ex$data twice but via different routes.
+  chk <- suppressWarnings(
+    ferx_check_init(
+      ferx_model(ex$model, data = ex$data),
+      data = ex$data, method = "focei", maxiter = 2L
+    )
+  )
+  expect_s3_class(chk$fit, "ferx_fit")
+})

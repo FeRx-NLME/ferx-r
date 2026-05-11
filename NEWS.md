@@ -1,5 +1,21 @@
 # ferx (development)
 
+## Bug fixes
+
+- `ferx_set_section()` now applies copy-on-write when the underlying
+  `ferx_model` points at a file inside the installed `ferx` package
+  directory (e.g. a model returned by `ferx_example()`). The file is
+  copied to `tempdir()` before editing and the returned `ferx_model`'s
+  `$model` field is updated to the copy, preventing accidental
+  modification of bundled examples. Plain-path callers are unaffected —
+  passing a path string still edits in place (#80).
+
+- `ferx_check_init()` now accepts a `ferx_model` as its first argument
+  (in addition to a plain path), so it can be placed directly in a pipe:
+  `ferx_model(ex$model, data = ex$data) |> ferx_check_init()`. When a
+  `ferx_model` is supplied and `data` is not, the data path on the
+  object is used (#79).
+
 ## Documentation
 
 - New vignette *"Editing ferx model files programmatically"* covering

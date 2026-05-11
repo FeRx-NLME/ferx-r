@@ -279,6 +279,9 @@ to the eta-level formula for additive or unknown parameterisations.
 \code{NULL} when omega is diagonal (no off-diagonal elements to report).}
 \item{omega_iov_param_corr}{Same as \code{omega_param_corr} but for the
 IOV kappa block. \code{NULL} when kappa is diagonal or absent.}
+\item{eta_names}{Character vector of ETA parameter names as declared in the
+model file (e.g. \code{"ETA_CL"}, \code{"ETA_V"}). Used to label OMEGA
+rows in \code{ferx_estimates()} and \code{print.ferx_fit()}.}
 \item{eta_log_transformed}{Logical vector of length \code{n_eta}; \code{TRUE}
 when the eta is lognormally parameterised (\code{THETA * exp(ETA)}),
 \code{FALSE} for additive or unknown parameterisations. \code{NULL} when
