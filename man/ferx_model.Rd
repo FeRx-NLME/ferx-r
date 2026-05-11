@@ -102,6 +102,11 @@ pred <- ferx_predict(ex$model, ex$data, fit = fit)
 # ── Data can be overridden at fit time ───────────────────────────────────
 ferx_model(ex$model, data = ex$data) |>
   ferx_fit(data = "other_cohort.csv")
+
+# ── Data-first pipe (R >= 4.2) ───────────────────────────────────────────
+# ferx_model() takes model first, like lm(formula, data). To start a pipe
+# from the data object, use the _ placeholder to route it to `data`:
+ex$data |> ferx_model(ex$model, data = _) |> ferx_fit() |> summary()
 }
 
 }

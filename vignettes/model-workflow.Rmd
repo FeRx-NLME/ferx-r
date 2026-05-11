@@ -24,6 +24,21 @@ This vignette covers two complementary workflows:
 
 Both workflows produce the same `ferx_fit` result.
 
+**Entry point:** `ferx_model(model, data)` takes the model file first, following the convention of R modelling APIs like `lm(formula, data)`. The natural pipe entry is therefore the model:
+
+```r
+ferx_model(ex$model, data = ex$data) |> ferx_fit() |> summary()
+```
+
+If you prefer to start with the data — common in EDA pipelines — use the R 4.2+ `_` placeholder to route it to the named `data` argument:
+
+```r
+# Requires R >= 4.2
+ex$data |> ferx_model(ex$model, data = _) |> ferx_fit() |> summary()
+```
+
+See [issue #81](https://github.com/InsightRX/ferx/issues/81) for the ongoing discussion on argument order.
+
 ---
 
 ## Path-based workflow
