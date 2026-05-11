@@ -1,6 +1,22 @@
+# ferx (development)
+
+## Documentation
+
+- New vignette *"Editing ferx model files programmatically"* covering
+  `ferx_model_new()`, `ferx_model_section()`, and `ferx_model_set_section()`:
+  skeleton creation, section inspection, read-modify-write patterns, a
+  console-only fit workflow, and overwrite-guard behaviour.
+
 # ferx 0.1.2
 
 ## New features
+
+- New `ferx_model_validate(path)` checks a `.ferx` file for syntax errors and
+  missing required sections without running the optimizer. Prints a section
+  presence report and returns `TRUE`/`FALSE` invisibly. Required sections are
+  `[parameters]`, `[individual_parameters]`, `[structural_model]`,
+  `[error_model]`, and `[initial_values]`; `[odes]` and `[fit_options]` are
+  optional.
 
 - `ferx_fit()` now returns `$eigenvalues` (sorted descending) and
   `$condition_number` (ratio of largest to smallest eigenvalue) for the
@@ -23,6 +39,13 @@
 
 - `ferx_model_set_section(path, section, lines)` — replace the body of a named
   section in-place; the write complement to `ferx_model_section()`.
+
+## Documentation
+
+- New vignette **"Model workflow: inspect, edit, fit"** (`vignette("model-workflow", package = "ferx")`)
+  demonstrates the pre-fit inspection workflow: `ferx_model_inspect()` before
+  `ferx_fit()` to catch structural mistakes cheaply, and re-inspecting the
+  fitted result via `ferx_model_inspect(fit)` (closes #57).
 
 ## Changes to existing functions
 

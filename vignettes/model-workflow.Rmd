@@ -1,0 +1,110 @@
+---
+title: "Model workflow: inspect, edit, fit"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Model workflow: inspect, edit, fit}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+library(ferx)
+```
+
+## Overview
+
+This vignette covers the recommended pre-fit inspection workflow:
+
+1. Point ferx at a model file.
+2. **Inspect** the parsed structure before committing to a (potentially long) estimation run.
+3. Fit the model.
+4. Re-inspect the fitted result without re-supplying the file path.
+
+## Step 1 — Get a model file
+
+`ferx_example()` returns paths to the bundled example models and their data:
+
+```{r example}
+ex <- ferx_example("warfarin")
+ex$model  # path to warfarin.ferx
+ex$data   # path to warfarin.csv
+```
+
+In a real workflow you would supply your own `.ferx` file here.
+
+## Step 2 — Inspect before fitting
+
+`ferx_model_inspect()` parses the model file and prints a concise summary of
+its structure without running the optimizer. Use this to verify that ferx
+interprets your model the way you expect before committing to a long run.
+
+```{r inspect-pre}
+ferx_model_inspect(ex$model)
+```
+
+The printed summary has four lines:
+
+| Line | Meaning |
+|------|---------|
+| **Structural** | Detected PK model type and population parameter (theta) names |
+| **IIV** | Inter-individual variability (omega) parameter names |
+| **IOV** | Inter-occasion variability (kappa) parameter names, or `none` |
+| **Residual** | Error model type (`proportional`, `additive`, or `combined`) |
+
+`ferx_model_inspect()` returns the structure as a named list (invisibly), which
+is useful for programmatic checks:
+
+```{r inspect-programmatic}
+s <- ferx_model_inspect(ex$model)
+s$theta_names   # population parameter names
+s$model_type    # short label for the PK model
+s$iiv           # IIV parameter names
+s$residual      # error model type
+```
+
+If the printed summary does not match your expectations — for example the model
+type shows `NULL` or a parameter name is missing — fix the `.ferx` file before
+proceeding. This catches typos and structural mistakes cheaply, before the
+optimizer runs.
+
+## Step 3 — Fit
+
+Once the structure looks correct, pass the same paths to `ferx_fit()`:
+
+```{r fit, eval = FALSE}
+fit <- ferx_fit(ex$model, ex$data)
+fit
+```
+
+## Step 4 — Re-inspect from the fitted result
+
+After fitting you can call `ferx_model_inspect()` directly on the `ferx_fit`
+object returned by `ferx_fit()` — no need to supply the model path again:
+
+```{r inspect-post, eval = FALSE}
+ferx_model_inspect(fit)
+```
+
+The output is identical to the pre-fit inspection. This is convenient when you
+want to confirm the structure inside a script or report without keeping the
+model path in scope.
+
+## Summary
+
+```r
+# 1. Get model and data paths
+ex <- ferx_example("warfarin")
+
+# 2. Inspect before fitting — verify structure without running the optimizer
+ferx_model_inspect(ex$model)
+
+# 3. Fit
+fit <- ferx_fit(ex$model, ex$data)
+
+# 4. Re-inspect post-fit (no path required)
+ferx_model_inspect(fit)
+```

@@ -1,3 +1,152 @@
+#' Create a ferx_model object
+#'
+#' Constructs a \code{ferx_model} S3 object that bundles a \code{.ferx} model
+#' file path with an optional data path. This is the entry point for pipe-based
+#' workflows. Both the model file and data path are validated at construction
+#' time (the data path may be omitted and supplied later to
+#' \code{\link{ferx_fit}}).
+#'
+#' \strong{Typical pipe workflow:}
+#' \preformatted{
+#' ferx_model("pk.ferx", data = "data.csv") |>
+#'   ferx_set_section("fit_options", c(
+#'     "  method     = focei",
+#'     "  maxiter    = 500",
+#'     "  covariance = true"
+#'   )) |>
+#'   ferx_fit() |>
+#'   summary()
+#' }
+#'
+#' All fit options (\code{method}, \code{covariance}, \code{threads},
+#' \code{settings}, …) can still be passed directly to \code{ferx_fit()} in
+#' the pipe — the \code{ferx_model} object only carries the file paths. See
+#' \code{\link{ferx_fit}} for the full list of options and post-fit outputs.
+#'
+#' @param model Path to a \code{.ferx} model file. The file must exist.
+#' @param data Optional path to a NONMEM-format CSV data file. Can be supplied
+#'   later at \code{ferx_fit()} if omitted here.
+#'
+#' @return An object of class \code{ferx_model} with fields \code{$model} and
+#'   \code{$data}.
+#'
+#' @examples
+#' ex <- ferx_example("warfarin")
+#'
+#' # With data bundled
+#' m <- ferx_model(ex$model, data = ex$data)
+#' print(m)
+#'
+#' # Without data — supply at fit time
+#' m <- ferx_model(ex$model)
+#'
+#' \dontrun{
+#' # Pipe with section edit and all fit options set in ferx_fit()
+#' ferx_model(ex$model, data = ex$data) |>
+#'   ferx_set_section("fit_options", c("  method = focei", "  maxiter = 500")) |>
+#'   ferx_fit(covariance = TRUE, threads = 4L,
+#'            settings = list(optimizer = "slsqp")) |>
+#'   summary()
+#'
+#' # Data can be overridden at fit time even when stored in ferx_model
+#' ferx_model(ex$model, data = ex$data) |>
+#'   ferx_fit(data = "other_cohort.csv")
+#' }
+#'
+#' @seealso \code{\link{ferx_set_section}}, \code{\link{ferx_get_section}},
+#'   \code{\link{ferx_fit}}
+#' @export
+ferx_model <- function(model, data = NULL) {
+  if (!file.exists(model)) stop("File not found: ", model)
+  if (tolower(tools::file_ext(model)) != "ferx") stop("'model' must be a .ferx file")
+  if (!is.null(data) && !file.exists(data)) stop("Data file not found: ", data)
+  structure(list(model = model, data = data), class = "ferx_model")
+}
+
+#' @export
+print.ferx_model <- function(x, ...) {
+  cat("ferx_model\n")
+  cat("  Model: ", x$model, "\n", sep = "")
+  cat("  Data:  ", if (is.null(x$data)) "<none>" else x$data, "\n", sep = "")
+  s <- tryCatch(.ferx_parse_structure(x$model), error = function(e) NULL)
+  if (!is.null(s)) {
+    cat("  ---\n")
+    .ferx_print_structure(s)
+  }
+  invisible(x)
+}
+
+#' Replace a section in a ferx model (pipe-friendly)
+#'
+#' Updates the body of a named section in a \code{.ferx} model file and
+#' returns the input object so calls can be chained with \code{|>} or
+#' \code{\%>\%}.
+#'
+#' When \code{x} is a \code{ferx_model} object the section is written to
+#' \code{x$model} and \code{x} is returned invisibly, allowing further
+#' pipe steps. When \code{x} is a plain path string the call is equivalent
+#' to \code{\link{ferx_model_set_section}(x, section, lines)} for backwards
+#' compatibility.
+#'
+#' @param x A \code{ferx_model} object or a path to a \code{.ferx} file.
+#' @param section Name of the section to replace, without brackets.
+#' @param lines Character vector of replacement lines (do not include the
+#'   header line).
+#'
+#' @return \code{x}, invisibly.
+#'
+#' @examples
+#' \dontrun{
+#' ex <- ferx_example("warfarin")
+#' ferx_model(ex$model, data = ex$data) |>
+#'   ferx_set_section("fit_options", c(
+#'     "  method  = focei",
+#'     "  maxiter = 500"
+#'   )) |>
+#'   ferx_fit()
+#' }
+#'
+#' @seealso \code{\link{ferx_model_set_section}}, \code{\link{ferx_get_section}}
+#' @export
+ferx_set_section <- function(x, section, lines) {
+  if (inherits(x, "ferx_model")) {
+    ferx_model_set_section(x$model, section, lines)
+    invisible(x)
+  } else {
+    ferx_model_set_section(x, section, lines)
+  }
+}
+
+#' Inspect a section of a ferx model (pipe-friendly)
+#'
+#' Prints the contents of a named section of a \code{.ferx} model file to the
+#' console and returns the input object invisibly so the pipe can continue.
+#'
+#' When \code{x} is a \code{ferx_model} object the section is read from
+#' \code{x$model}. When \code{x} is a plain path string the call is equivalent
+#' to \code{\link{ferx_model_section}(x, section)}.
+#'
+#' @param x A \code{ferx_model} object or a path to a \code{.ferx} file.
+#' @param section Name of the section to display, without brackets.
+#'
+#' @return \code{x}, invisibly.
+#'
+#' @examples
+#' ex <- ferx_example("warfarin")
+#' ferx_model(ex$model, data = ex$data) |>
+#'   ferx_get_section("parameters")
+#'
+#' @seealso \code{\link{ferx_model_section}}, \code{\link{ferx_set_section}}
+#' @export
+ferx_get_section <- function(x, section) {
+  if (inherits(x, "ferx_model")) {
+    ferx_model_section(x$model, section)
+  } else {
+    ferx_model_section(x, section)
+  }
+  invisible(x)
+}
+
 #' Display a ferx model file in the console
 #'
 #' Prints the contents of a \code{.ferx} model file to the console.
@@ -665,6 +814,107 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
     iov         = iov,
     residual    = residual
   )
+}
+
+#' Validate a ferx model file for syntax and structural errors
+#'
+#' Parses a \code{.ferx} model file using the Rust engine and checks for
+#' required sections, without running the optimizer. Useful for catching
+#' syntax errors and missing sections before committing to a long estimation
+#' run.
+#'
+#' @param path Path to a \code{.ferx} model file. The file must exist and have
+#'   a \code{.ferx} extension; otherwise an error is raised (these are caller
+#'   errors, not validation failures).
+#'
+#' @return \code{TRUE} if the model file is structurally valid (all required
+#'   sections present and the Rust parser accepts it), \code{FALSE} otherwise,
+#'   invisibly. The function always prints a report to the console. Note that
+#'   a missing file or non-\code{.ferx} extension raises an error rather than
+#'   returning \code{FALSE} — pass an existing \code{.ferx} path.
+#'
+#' @examples
+#' # Valid model — all required sections present
+#' ex <- ferx_example("warfarin")
+#' ferx_model_validate(ex$model)
+#'
+#' \dontrun{
+#' # Invalid model — missing required sections
+#' bad <- tempfile(fileext = ".ferx")
+#' writeLines(c(
+#'   "[parameters]",
+#'   "  theta TVCL(1.0, 0.001, 100.0)",
+#'   "[structural_model]",
+#'   "  pk one_cpt_oral(cl=CL, v=V, ka=KA)"
+#' ), bad)
+#' ferx_model_validate(bad)
+#' # Validating: <file>.ferx
+#' #
+#' # Sections present:
+#' #   parameters                     [ok]
+#' #   individual_parameters          [MISSING]
+#' #   structural_model               [ok]
+#' #   error_model                    [MISSING]
+#' #   initial_values                 [MISSING]
+#' #
+#' # Result: INVALID
+#' #   * Missing required section: [individual_parameters]
+#' #   * Missing required section: [error_model]
+#' #   * Missing required section: [initial_values]
+#' }
+#'
+#' @seealso \code{\link{ferx_model_inspect}}, \code{\link{ferx_model_show}}
+#' @export
+ferx_model_validate <- function(path) {
+  if (!file.exists(path)) stop("File not found: ", path)
+  if (tolower(tools::file_ext(path)) != "ferx") stop("'path' must be a .ferx file")
+
+  required_sections <- c(
+    "parameters", "individual_parameters", "structural_model",
+    "error_model", "initial_values"
+  )
+  optional_sections <- c("odes", "fit_options")
+  known_sections <- c(required_sections, optional_sections)
+
+  blocks   <- .ferx_extract_blocks(path)
+  present  <- names(blocks)
+  missing  <- setdiff(required_sections, present)
+  unknown  <- setdiff(present, known_sections)
+
+  # Deep parse via Rust (syntax + semantic checks)
+  rust_result <- ferx_rust_validate_model(normalizePath(path))
+
+  ok <- isTRUE(rust_result$ok) && length(missing) == 0L
+
+  cat("Validating:", basename(path), "\n\n")
+
+  # Section presence report
+  cat("Sections present:\n")
+  for (s in required_sections) {
+    status <- if (s %in% present) "[ok]" else "[MISSING]"
+    cat(sprintf("  %-30s %s\n", s, status))
+  }
+  for (s in optional_sections) {
+    if (s %in% present) cat(sprintf("  %-30s [ok] (optional)\n", s))
+  }
+  if (length(unknown) > 0L) {
+    for (s in unknown) cat(sprintf("  %-30s [unknown section]\n", s))
+  }
+  cat("\n")
+
+  if (isTRUE(rust_result$ok) && length(missing) == 0L) {
+    cat("Result: VALID\n")
+  } else {
+    cat("Result: INVALID\n")
+    if (length(missing) > 0L) {
+      for (s in missing) cat("  * Missing required section: [", s, "]\n", sep = "")
+    }
+    if (!isTRUE(rust_result$ok) && length(rust_result$errors) > 0L) {
+      for (e in rust_result$errors) cat("  * Parse error:", e, "\n")
+    }
+  }
+
+  invisible(ok)
 }
 
 #' Inspect the structure of a ferx model file
