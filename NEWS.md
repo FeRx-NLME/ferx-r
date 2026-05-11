@@ -11,6 +11,13 @@
 
 ## New features
 
+- New `ferx_model_validate(path)` checks a `.ferx` file for syntax errors and
+  missing required sections without running the optimizer. Prints a section
+  presence report and returns `TRUE`/`FALSE` invisibly. Required sections are
+  `[parameters]`, `[individual_parameters]`, `[structural_model]`,
+  `[error_model]`, and `[initial_values]`; `[odes]` and `[fit_options]` are
+  optional.
+
 - `ferx_fit()` now returns `$eigenvalues` (sorted descending) and
   `$condition_number` (ratio of largest to smallest eigenvalue) for the
   covariance correlation matrix. Both are `NULL` when the covariance step was

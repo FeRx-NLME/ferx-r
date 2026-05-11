@@ -38,4 +38,9 @@ ferx_rust_autodiff_enabled <- function() {
   .Call("wrap__ferx_rust_autodiff_enabled")
 }
 
+#' @export
+ferx_rust_validate_model <- function(model_path) {
+  .Call("wrap__ferx_rust_validate_model", model_path)
+}
+
 # nolint end

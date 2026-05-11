@@ -812,6 +812,107 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
   )
 }
 
+#' Validate a ferx model file for syntax and structural errors
+#'
+#' Parses a \code{.ferx} model file using the Rust engine and checks for
+#' required sections, without running the optimizer. Useful for catching
+#' syntax errors and missing sections before committing to a long estimation
+#' run.
+#'
+#' @param path Path to a \code{.ferx} model file. The file must exist and have
+#'   a \code{.ferx} extension; otherwise an error is raised (these are caller
+#'   errors, not validation failures).
+#'
+#' @return \code{TRUE} if the model file is structurally valid (all required
+#'   sections present and the Rust parser accepts it), \code{FALSE} otherwise,
+#'   invisibly. The function always prints a report to the console. Note that
+#'   a missing file or non-\code{.ferx} extension raises an error rather than
+#'   returning \code{FALSE} — pass an existing \code{.ferx} path.
+#'
+#' @examples
+#' # Valid model — all required sections present
+#' ex <- ferx_example("warfarin")
+#' ferx_model_validate(ex$model)
+#'
+#' \dontrun{
+#' # Invalid model — missing required sections
+#' bad <- tempfile(fileext = ".ferx")
+#' writeLines(c(
+#'   "[parameters]",
+#'   "  theta TVCL(1.0, 0.001, 100.0)",
+#'   "[structural_model]",
+#'   "  pk one_cpt_oral(cl=CL, v=V, ka=KA)"
+#' ), bad)
+#' ferx_model_validate(bad)
+#' # Validating: <file>.ferx
+#' #
+#' # Sections present:
+#' #   parameters                     [ok]
+#' #   individual_parameters          [MISSING]
+#' #   structural_model               [ok]
+#' #   error_model                    [MISSING]
+#' #   initial_values                 [MISSING]
+#' #
+#' # Result: INVALID
+#' #   * Missing required section: [individual_parameters]
+#' #   * Missing required section: [error_model]
+#' #   * Missing required section: [initial_values]
+#' }
+#'
+#' @seealso \code{\link{ferx_model_inspect}}, \code{\link{ferx_model_show}}
+#' @export
+ferx_model_validate <- function(path) {
+  if (!file.exists(path)) stop("File not found: ", path)
+  if (tolower(tools::file_ext(path)) != "ferx") stop("'path' must be a .ferx file")
+
+  required_sections <- c(
+    "parameters", "individual_parameters", "structural_model",
+    "error_model", "initial_values"
+  )
+  optional_sections <- c("odes", "fit_options")
+  known_sections <- c(required_sections, optional_sections)
+
+  blocks   <- .ferx_extract_blocks(path)
+  present  <- names(blocks)
+  missing  <- setdiff(required_sections, present)
+  unknown  <- setdiff(present, known_sections)
+
+  # Deep parse via Rust (syntax + semantic checks)
+  rust_result <- ferx_rust_validate_model(normalizePath(path))
+
+  ok <- isTRUE(rust_result$ok) && length(missing) == 0L
+
+  cat("Validating:", basename(path), "\n\n")
+
+  # Section presence report
+  cat("Sections present:\n")
+  for (s in required_sections) {
+    status <- if (s %in% present) "[ok]" else "[MISSING]"
+    cat(sprintf("  %-30s %s\n", s, status))
+  }
+  for (s in optional_sections) {
+    if (s %in% present) cat(sprintf("  %-30s [ok] (optional)\n", s))
+  }
+  if (length(unknown) > 0L) {
+    for (s in unknown) cat(sprintf("  %-30s [unknown section]\n", s))
+  }
+  cat("\n")
+
+  if (isTRUE(rust_result$ok) && length(missing) == 0L) {
+    cat("Result: VALID\n")
+  } else {
+    cat("Result: INVALID\n")
+    if (length(missing) > 0L) {
+      for (s in missing) cat("  * Missing required section: [", s, "]\n", sep = "")
+    }
+    if (!isTRUE(rust_result$ok) && length(rust_result$errors) > 0L) {
+      for (e in rust_result$errors) cat("  * Parse error:", e, "\n")
+    }
+  }
+
+  invisible(ok)
+}
+
 #' Inspect the structure of a ferx model file
 #'
 #' Parses a \code{.ferx} file without fitting and prints a compact summary of
