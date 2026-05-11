@@ -25,7 +25,7 @@ test_that("PRED is finite numeric with no NAs", {
   expect_true(all(is.finite(pred$PRED)))
 })
 
-test_that("PRED matches $sdtab PRED from a full fit on same model + data", {
+test_that("PRED from ferx_predict(fit=) matches sdtab$PRED from ferx_fit()", {
   ex   <- ferx_example("warfarin")
   pred <- ferx_predict(ex$model, ex$data, fit = warfarin_fit())
   sdtab_pred <- warfarin_fit()$sdtab$PRED

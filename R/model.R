@@ -41,8 +41,6 @@
 #' m <- ferx_model(ex$model)
 #'
 #' \dontrun{
-#' ex <- ferx_example("warfarin")
-#'
 #' # ── Minimal pipe ────────────────────────────────────────────────────────
 #' # ferx_fit() picks up $data automatically from the ferx_model object.
 #' fit <- ferx_model(ex$model, data = ex$data) |>

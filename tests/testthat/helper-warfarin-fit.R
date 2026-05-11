@@ -15,7 +15,7 @@ warfarin_fit_cov <- local({
       ex  <- ferx_example("warfarin")
       fit <<- ferx_fit(ex$model, ex$data,
                        method = "focei", verbose = FALSE,
-                       covariance = TRUE, settings = list(maxiter = 30L))
+                       covariance = TRUE, settings = list(maxiter = 100L))
     }
     fit
   }

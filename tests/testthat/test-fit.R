@@ -73,14 +73,11 @@ test_that("$se_theta absent when covariance = FALSE", {
 })
 
 test_that("$se_theta present when covariance = TRUE", {
-  fit <- warfarin_fit_cov()
-  skip_if(is.null(fit$se_theta), "covariance step did not converge at maxiter = 30 — skipping")
-  expect_false(is.null(fit$se_theta))
+  expect_false(is.null(warfarin_fit_cov()$se_theta))
 })
 
 test_that("$se_theta length matches $theta length when covariance = TRUE", {
   fit <- warfarin_fit_cov()
-  skip_if(is.null(fit$se_theta), "covariance step did not converge at maxiter = 30 — skipping")
   expect_equal(length(fit$se_theta), length(fit$theta))
 })
 
@@ -129,25 +126,20 @@ test_that("ferx_check_init errors on missing data file", {
 
 # ferx_cor_matrix — Tier 1, requires covariance = TRUE
 
-test_that("ferx_cor_matrix returns a matrix with same dimnames as $omega", {
+test_that("ferx_cor_matrix returns a matrix with same dimnames as $cov_matrix", {
   fit <- warfarin_fit_cov()
-  skip_if(is.null(fit$cov_matrix), "covariance step did not converge at maxiter = 30 — skipping")
   cor <- ferx_cor_matrix(fit)
   expect_true(is.matrix(cor))
   expect_equal(dimnames(cor), dimnames(fit$cov_matrix))
 })
 
 test_that("ferx_cor_matrix diagonal is all 1s", {
-  fit <- warfarin_fit_cov()
-  skip_if(is.null(fit$cov_matrix), "covariance step did not converge at maxiter = 30 — skipping")
-  cor <- ferx_cor_matrix(fit)
+  cor <- ferx_cor_matrix(warfarin_fit_cov())
   expect_true(all(diag(cor) == 1))
 })
 
 test_that("ferx_cor_matrix off-diagonal values are in [-1, 1]", {
-  fit <- warfarin_fit_cov()
-  skip_if(is.null(fit$cov_matrix), "covariance step did not converge at maxiter = 30 — skipping")
-  cor <- ferx_cor_matrix(fit)
+  cor <- ferx_cor_matrix(warfarin_fit_cov())
   d <- nrow(cor)
   if (d > 1L) {
     off <- cor[row(cor) != col(cor)]

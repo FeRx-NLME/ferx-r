@@ -67,36 +67,40 @@ test_that("ferx_eta_cov() consumes ebe_etas (errors when absent)", {
   expect_error(ferx_eta_cov(bad, data.frame(ID = 1L)), regexp = "ebe_etas")
 })
 
-test_that("ferx_eta_cov() returns a data frame with eta column when covariates present", {
-  fit  <- warfarin_fit()
-  ex   <- ferx_example("warfarin")
-  dat  <- read.csv(ex$data)
-  res  <- ferx_eta_cov(fit, dat)
-  skip_if(is.null(res), "no covariate columns in warfarin data — structure check not applicable")
+# Warfarin data has no non-NONMEM covariate columns, so a synthetic WT column
+# is added to exercise the ferx_eta_cov() happy path. One value per subject
+# (constant within subject) so it qualifies as a covariate.
+warfarin_dat_with_cov <- function() {
+  ex  <- ferx_example("warfarin")
+  dat <- read.csv(ex$data)
+  ids <- unique(dat$ID)
+  set.seed(42L)
+  wt_map <- setNames(rnorm(length(ids), mean = 70, sd = 10), ids)
+  dat$WT <- wt_map[as.character(dat$ID)]
+  dat
+}
+
+test_that("ferx_eta_cov() returns a data frame with eta and covariate columns", {
+  fit <- warfarin_fit()
+  res <- ferx_eta_cov(fit, warfarin_dat_with_cov())
   expect_s3_class(res, "data.frame")
   expect_true("eta" %in% names(res))
+  expect_true("covariate" %in% names(res))
   eta_names <- setdiff(names(fit$ebe_etas), "ID")
   expect_true(all(eta_names %in% unique(res$eta)))
 })
 
 test_that("ferx_eta_cov() values are finite numerics", {
   fit <- warfarin_fit()
-  ex  <- ferx_example("warfarin")
-  dat <- read.csv(ex$data)
-  res <- ferx_eta_cov(fit, dat)
-  skip_if(is.null(res), "no covariate columns in warfarin data — value check not applicable")
+  res <- ferx_eta_cov(fit, warfarin_dat_with_cov())
   expect_true(is.numeric(res$r))
   expect_true(all(is.finite(res$r)))
 })
 
-test_that("ferx_eta_cov() nrow equals number of ETA-covariate pairs", {
-  fit <- warfarin_fit()
-  ex  <- ferx_example("warfarin")
-  dat <- read.csv(ex$data)
-  res <- ferx_eta_cov(fit, dat)
-  # Warfarin data has no numeric covariates beyond standard NONMEM columns,
-  # so ferx_eta_cov() returns NULL — skip the nrow check in that case.
-  skip_if(is.null(res), "no covariate columns in warfarin data — nrow check not applicable")
-  n_etas <- length(setdiff(names(fit$ebe_etas), "ID"))
-  expect_true(nrow(res) >= n_etas)
+test_that("ferx_eta_cov() has one row per ETA-covariate pair", {
+  fit     <- warfarin_fit()
+  res     <- ferx_eta_cov(fit, warfarin_dat_with_cov())
+  n_etas  <- length(setdiff(names(fit$ebe_etas), "ID"))
+  # One covariate (WT) × n_etas rows expected
+  expect_equal(nrow(res), n_etas)
 })
