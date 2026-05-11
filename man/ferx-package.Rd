@@ -8,6 +8,14 @@
 \description{
 Fast NLME estimation using FOCE/FOCEI with automatic differentiation. Powered by a Rust engine with Enzyme autodiff for exact gradients. Supports analytical PK models (1/2-compartment) and ODE-based models.
 }
+\seealso{
+Vignettes:
+\itemize{
+\item \code{vignette("model-workflow", package = "ferx")} — inspect, edit, and fit models
+\item \code{vignette("parameter-transforms", package = "ferx")} — log, logit, and additive ETAs
+\item \code{vignette("model-editing", package = "ferx")} — editing model sections
+}
+}
 \author{
 \strong{Maintainer}: InsightRx \email{dev@insightrx.com}
 
