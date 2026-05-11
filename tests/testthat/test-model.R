@@ -13,19 +13,6 @@ write_test_model <- function(sections) {
   path
 }
 
-# Write a .ferx file with all 7 canonical sections populated.
-write_full_test_model <- function() {
-  write_test_model(list(
-    parameters           = c("  theta TVCL(1.0, 0.001, 100.0)", "  omega ETA_CL ~ 0.09", "  sigma PROP_ERR ~ 0.01"),
-    individual_parameters = c("  CL = TVCL * exp(ETA_CL)"),
-    structural_model     = c("  pk one_cpt_oral(cl=CL, v=10, ka=1)"),
-    odes                 = character(0),
-    error_model          = c("  DV ~ proportional(PROP_ERR)"),
-    initial_values       = c("  theta = [1.0]", "  omega = [0.09]", "  sigma = [0.01]"),
-    fit_options          = c("  method = foce", "  maxiter = 300", "  covariance = true")
-  ))
-}
-
 # Build a minimal ferx_fit stub for ferx_model_inspect() dispatch tests.
 make_ferx_fit_stub <- function(model_structure = NULL, model_name = "test_model") {
   obj <- list(model_structure = model_structure, model_name = model_name)
