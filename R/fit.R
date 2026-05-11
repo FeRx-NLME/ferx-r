@@ -758,8 +758,10 @@ ferx_fit.default <- function(model, data,
     n_sigma <- length(result$sigma)
     n_omega_packed <- d - n_theta - n_sigma
     # Determine parameterisation: diagonal (n_omega_packed == n_eta) or block
+    eta_nms <- if (!is.null(result$eta_names) && length(result$eta_names) == n_eta) result$eta_names else NULL
     omega_names <- if (n_omega_packed == n_eta) {
-      paste0("OMEGA(", seq_len(n_eta), ",", seq_len(n_eta), ")")
+      if (!is.null(eta_nms)) sprintf("OMEGA(%s)", eta_nms)
+      else paste0("OMEGA(", seq_len(n_eta), ",", seq_len(n_eta), ")")
     } else {
       # Block lower-triangle: L(i,j) for i >= j, column-major
       nm <- character(n_omega_packed)
@@ -767,15 +769,16 @@ ferx_fit.default <- function(model, data,
       for (i in seq_len(n_eta)) {
         for (j in seq_len(i)) {
           k <- k + 1L
-          nm[k] <- sprintf("OMEGA_L(%d,%d)", i, j)
+          nm[k] <- if (!is.null(eta_nms)) sprintf("OMEGA(%s,%s)", eta_nms[i], eta_nms[j]) else sprintf("OMEGA_L(%d,%d)", i, j)
         }
       }
       nm
     }
+    sig_nms <- if (!is.null(result$sigma_names) && length(result$sigma_names) == n_sigma) result$sigma_names else NULL
     pnames <- c(
       result$theta_names,
       if (n_omega_packed > 0L) omega_names else character(0L),
-      if (n_sigma > 0L) paste0("SIGMA(", seq_len(n_sigma), ")") else character(0L)
+      if (n_sigma > 0L) (if (!is.null(sig_nms)) sig_nms else paste0("SIGMA(", seq_len(n_sigma), ")")) else character(0L)
     )
     if (length(pnames) == d) rownames(m) <- colnames(m) <- pnames
     result$cov_matrix <- m
