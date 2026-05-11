@@ -7,11 +7,16 @@
 ferx_model_validate(path)
 }
 \arguments{
-\item{path}{Path to a \code{.ferx} model file.}
+\item{path}{Path to a \code{.ferx} model file. The file must exist and have
+a \code{.ferx} extension; otherwise an error is raised (these are caller
+errors, not validation failures).}
 }
 \value{
-\code{TRUE} if the model file is valid, \code{FALSE} otherwise,
-  invisibly. The function always prints a report to the console.
+\code{TRUE} if the model file is structurally valid (all required
+sections present and the Rust parser accepts it), \code{FALSE} otherwise,
+invisibly. The function always prints a report to the console. Note that
+a missing file or non-\code{.ferx} extension raises an error rather than
+returning \code{FALSE} — pass an existing \code{.ferx} path.
 }
 \description{
 Parses a \code{.ferx} model file using the Rust engine and checks for
@@ -48,6 +53,7 @@ ferx_model_validate(bad)
 #   * Missing required section: [error_model]
 #   * Missing required section: [initial_values]
 }
+
 }
 \seealso{
 \code{\link{ferx_model_inspect}}, \code{\link{ferx_model_show}}

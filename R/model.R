@@ -670,10 +670,15 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
 #' syntax errors and missing sections before committing to a long estimation
 #' run.
 #'
-#' @param path Path to a \code{.ferx} model file.
+#' @param path Path to a \code{.ferx} model file. The file must exist and have
+#'   a \code{.ferx} extension; otherwise an error is raised (these are caller
+#'   errors, not validation failures).
 #'
-#' @return \code{TRUE} if the model file is valid, \code{FALSE} otherwise,
-#'   invisibly. The function always prints a report to the console.
+#' @return \code{TRUE} if the model file is structurally valid (all required
+#'   sections present and the Rust parser accepts it), \code{FALSE} otherwise,
+#'   invisibly. The function always prints a report to the console. Note that
+#'   a missing file or non-\code{.ferx} extension raises an error rather than
+#'   returning \code{FALSE} — pass an existing \code{.ferx} path.
 #'
 #' @examples
 #' # Valid model — all required sections present
