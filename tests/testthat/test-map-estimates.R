@@ -66,3 +66,41 @@ test_that("ferx_eta_cov() consumes ebe_etas (errors when absent)", {
   bad$ebe_etas <- NULL
   expect_error(ferx_eta_cov(bad, data.frame(ID = 1L)), regexp = "ebe_etas")
 })
+
+# Warfarin data has no non-NONMEM covariate columns, so a synthetic WT column
+# is added to exercise the ferx_eta_cov() happy path. One value per subject
+# (constant within subject) so it qualifies as a covariate.
+warfarin_dat_with_cov <- function() {
+  ex  <- ferx_example("warfarin")
+  dat <- read.csv(ex$data)
+  ids <- unique(dat$ID)
+  set.seed(42L)
+  wt_map <- setNames(rnorm(length(ids), mean = 70, sd = 10), ids)
+  dat$WT <- wt_map[as.character(dat$ID)]
+  dat
+}
+
+test_that("ferx_eta_cov() returns a data frame with eta and covariate columns", {
+  fit <- warfarin_fit()
+  res <- ferx_eta_cov(fit, warfarin_dat_with_cov())
+  expect_s3_class(res, "data.frame")
+  expect_true("eta" %in% names(res))
+  expect_true("covariate" %in% names(res))
+  eta_names <- setdiff(names(fit$ebe_etas), "ID")
+  expect_true(all(eta_names %in% unique(res$eta)))
+})
+
+test_that("ferx_eta_cov() values are finite numerics", {
+  fit <- warfarin_fit()
+  res <- ferx_eta_cov(fit, warfarin_dat_with_cov())
+  expect_true(is.numeric(res$r))
+  expect_true(all(is.finite(res$r)))
+})
+
+test_that("ferx_eta_cov() has one row per ETA-covariate pair", {
+  fit     <- warfarin_fit()
+  res     <- ferx_eta_cov(fit, warfarin_dat_with_cov())
+  n_etas  <- length(setdiff(names(fit$ebe_etas), "ID"))
+  # One covariate (WT) × n_etas rows expected
+  expect_equal(nrow(res), n_etas)
+})

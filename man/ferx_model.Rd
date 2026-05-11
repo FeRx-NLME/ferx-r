@@ -44,28 +44,71 @@ the pipe — the \code{ferx_model} object only carries the file paths. See
 \examples{
 ex <- ferx_example("warfarin")
 
-# With data bundled
+# Inspect the object — prints model path, data path, and structure summary
 m <- ferx_model(ex$model, data = ex$data)
 print(m)
 
-# Without data — supply at fit time
+# Without data — supply at fit time via ferx_fit(data = ...)
 m <- ferx_model(ex$model)
 
 \dontrun{
-# Pipe with section edit and all fit options set in ferx_fit()
-ferx_model(ex$model, data = ex$data) |>
-  ferx_set_section("fit_options", c("  method = focei", "  maxiter = 500")) |>
-  ferx_fit(covariance = TRUE, threads = 4L,
-           settings = list(optimizer = "slsqp")) |>
+# ── Minimal pipe ────────────────────────────────────────────────────────
+# ferx_fit() picks up $data automatically from the ferx_model object.
+fit <- ferx_model(ex$model, data = ex$data) |>
+  ferx_fit(method = "focei", covariance = TRUE) |>
   summary()
 
-# Data can be overridden at fit time even when stored in ferx_model
+# ── Override fit options before fitting ─────────────────────────────────
+# ferx_set_section() rewrites [fit_options] on disk and passes the
+# ferx_model through unchanged so the pipe continues.
+# Note: copy the model file first — ferx_set_section() edits in place.
+model_copy <- file.path(tempdir(), "warfarin.ferx")
+file.copy(ex$model, model_copy)
+
+fit <- ferx_model(model_copy, data = ex$data) |>
+  ferx_set_section("fit_options", c(
+    "  method     = focei",
+    "  maxiter    = 500",
+    "  covariance = true"
+  )) |>
+  ferx_fit()
+
+summary(fit)
+ferx_model_inspect(fit)   # structure (no path needed post-fit)
+ferx_cor_matrix(fit)      # parameter correlation matrix
+ferx_plot_trace(fit)      # OFV + gradient norm over iterations
+
+# ── Peek at a section mid-pipe without breaking the chain ────────────────
+fit <- ferx_model(ex$model, data = ex$data) |>
+  ferx_get_section("parameters") |>   # prints [parameters], passes through
+  ferx_fit(method = "focei")
+
+# ── Validate initialisation before a long run ────────────────────────────
+# ferx_check_init() runs 5 iterations and returns trace + diagnostics.
+chk <- ferx_check_init(ex$model, ex$data, method = "focei")
+chk$summary   # ofv_start, ofv_end, ofv_drop — confirm OFV is dropping
+ferx_plot_trace(chk$fit)  # visual check of first few iterations
+
+# ── Multi-stage chain: SAEM → FOCEI ─────────────────────────────────────
+fit <- ferx_model(ex$model, data = ex$data) |>
+  ferx_fit(method = c("saem", "focei"), covariance = TRUE)
+
+# ── Simulate and predict from fitted parameters ──────────────────────────
+sim  <- ferx_simulate(ex$model, ex$data, n_sim = 100, seed = 42, fit = fit)
+pred <- ferx_predict(ex$model, ex$data, fit = fit)
+
+# ── Data can be overridden at fit time ───────────────────────────────────
 ferx_model(ex$model, data = ex$data) |>
   ferx_fit(data = "other_cohort.csv")
+
+# ── Data-first pipe (R >= 4.2) ───────────────────────────────────────────
+# ferx_model() takes model first, like lm(formula, data). To start a pipe
+# from the data object, use the _ placeholder to route it to `data`:
+ex$data |> ferx_model(ex$model, data = _) |> ferx_fit() |> summary()
 }
 
 }
 \seealso{
 \code{\link{ferx_set_section}}, \code{\link{ferx_get_section}},
-\code{\link{ferx_fit}}
+\code{\link{ferx_fit}}, \code{\link{ferx_check_init}}
 }

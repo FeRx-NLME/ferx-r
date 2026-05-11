@@ -32,12 +32,20 @@ compatibility.
 \examples{
 \dontrun{
 ex <- ferx_example("warfarin")
-ferx_model(ex$model, data = ex$data) |>
+
+# ferx_set_section() edits the file on disk, so copy first when working
+# with bundled examples or any model you do not want to overwrite.
+model_copy <- file.path(tempdir(), "warfarin.ferx")
+file.copy(ex$model, model_copy)
+
+ferx_model(model_copy, data = ex$data) |>
   ferx_set_section("fit_options", c(
-    "  method  = focei",
-    "  maxiter = 500"
+    "  method     = focei",
+    "  maxiter    = 500",
+    "  covariance = true"
   )) |>
-  ferx_fit()
+  ferx_fit() |>
+  summary()
 }
 
 }

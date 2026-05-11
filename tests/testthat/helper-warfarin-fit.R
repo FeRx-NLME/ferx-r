@@ -8,6 +8,19 @@
 # `maxiter = 30L` is enough for the warfarin example to settle to a sensible
 # point — tests using this helper check output shape, not convergence
 # quality, so a low cap keeps CI fast.
+warfarin_fit_cov <- local({
+  fit <- NULL
+  function() {
+    if (is.null(fit)) {
+      ex  <- ferx_example("warfarin")
+      fit <<- ferx_fit(ex$model, ex$data,
+                       method = "focei", verbose = FALSE,
+                       covariance = TRUE, settings = list(maxiter = 30L))
+    }
+    fit
+  }
+})
+
 warfarin_fit <- local({
   fit <- NULL
   function() {

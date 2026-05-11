@@ -68,3 +68,27 @@ test_that("last-run state is per-session: starts NULL on a fresh load", {
   expect_null(ferx_state()$last_trace_time)
   expect_null(ferx_state()$last_trace_model)
 })
+
+# ferx_plot_trace — Tier 1, no Rust needed
+
+test_that("ferx_plot_trace(fit) returns invisibly without error", {
+  path <- write_fake_trace()
+  on.exit(unlink(path))
+  fit <- structure(list(trace_path = path), class = "ferx_fit")
+  expect_no_error({
+    res <- withVisible(ferx_plot_trace(fit))
+  })
+  expect_false(res$visible)
+})
+
+test_that("ferx_plot_trace(fit, log_ofv = TRUE) runs without error", {
+  path <- write_fake_trace()
+  on.exit(unlink(path))
+  fit <- structure(list(trace_path = path), class = "ferx_fit")
+  expect_no_error(ferx_plot_trace(fit, log_ofv = TRUE))
+})
+
+test_that("ferx_plot_trace errors on object with no trace", {
+  fit <- structure(list(trace_path = NULL), class = "ferx_fit")
+  expect_error(ferx_plot_trace(fit))
+})

@@ -17,14 +17,33 @@ library(ferx)
 
 ## Overview
 
-This vignette covers the recommended pre-fit inspection workflow:
+This vignette covers two complementary workflows:
 
-1. Point ferx at a model file.
-2. **Inspect** the parsed structure before committing to a (potentially long) estimation run.
-3. Fit the model.
-4. Re-inspect the fitted result without re-supplying the file path.
+1. **Path-based workflow** — pass file paths directly to `ferx_fit()`. Straightforward for one-off fits.
+2. **Pipe-based workflow** — bundle paths into a `ferx_model` object and chain steps with `|>`. Cleaner when you need to tweak options before fitting or chain post-fit steps.
 
-## Step 1 — Get a model file
+Both workflows produce the same `ferx_fit` result.
+
+**Entry point:** `ferx_model(model, data)` takes the model file first, following the convention of R modelling APIs like `lm(formula, data)`. The natural pipe entry is therefore the model:
+
+```r
+ferx_model(ex$model, data = ex$data) |> ferx_fit() |> summary()
+```
+
+If you prefer to start with the data — common in EDA pipelines — use the R 4.2+ `_` placeholder to route it to the named `data` argument:
+
+```r
+# Requires R >= 4.2
+ex$data |> ferx_model(ex$model, data = _) |> ferx_fit() |> summary()
+```
+
+See [issue #81](https://github.com/InsightRX/ferx/issues/81) for the ongoing discussion on argument order.
+
+---
+
+## Path-based workflow
+
+### Step 1 — Get a model file
 
 `ferx_example()` returns paths to the bundled example models and their data:
 
@@ -36,7 +55,7 @@ ex$data   # path to warfarin.csv
 
 In a real workflow you would supply your own `.ferx` file here.
 
-## Step 2 — Inspect before fitting
+### Step 2 — Inspect before fitting
 
 `ferx_model_inspect()` parses the model file and prints a concise summary of
 its structure without running the optimizer. Use this to verify that ferx
@@ -71,7 +90,7 @@ type shows `NULL` or a parameter name is missing — fix the `.ferx` file before
 proceeding. This catches typos and structural mistakes cheaply, before the
 optimizer runs.
 
-## Step 3 — Fit
+### Step 3 — Fit
 
 Once the structure looks correct, pass the same paths to `ferx_fit()`:
 
@@ -80,7 +99,7 @@ fit <- ferx_fit(ex$model, ex$data)
 fit
 ```
 
-## Step 4 — Re-inspect from the fitted result
+### Step 4 — Re-inspect from the fitted result
 
 After fitting you can call `ferx_model_inspect()` directly on the `ferx_fit`
 object returned by `ferx_fit()` — no need to supply the model path again:
@@ -93,18 +112,152 @@ The output is identical to the pre-fit inspection. This is convenient when you
 want to confirm the structure inside a script or report without keeping the
 model path in scope.
 
+---
+
+## Pipe-based workflow
+
+`ferx_model()` bundles model and data paths into a single object that flows
+through a `|>` chain. This is the preferred style when you need to adjust
+options before fitting or chain several post-fit steps.
+
+### Entry point
+
+```{r ferx-model}
+ex <- ferx_example("warfarin")
+m <- ferx_model(ex$model, data = ex$data)
+m   # prints path, data path, and structure summary
+```
+
+### Minimal pipe — inspect, fit, summarise
+
+`ferx_fit()` dispatches on the `ferx_model` object and picks up `$data`
+automatically.
+
+```{r minimal-pipe, eval = FALSE}
+ferx_model(ex$model, data = ex$data) |>
+  ferx_fit(method = "focei", covariance = TRUE) |>
+  summary()
+```
+
+### Peek at a section mid-pipe
+
+`ferx_get_section()` prints the named section to the console and passes the
+`ferx_model` object through unchanged, so the pipe continues:
+
+```{r get-section}
+ferx_model(ex$model, data = ex$data) |>
+  ferx_get_section("parameters")
+```
+
+```{r get-section-fit, eval = FALSE}
+# Print [parameters] then fit without interrupting the chain
+fit <- ferx_model(ex$model, data = ex$data) |>
+  ferx_get_section("parameters") |>
+  ferx_fit(method = "focei")
+```
+
+### Override fit options before fitting
+
+`ferx_set_section()` rewrites a section on disk and returns the `ferx_model`
+unchanged.
+**Important:** it edits the file in place — copy first if you do not want to
+modify the original.
+
+```{r set-section, eval = FALSE}
+model_copy <- file.path(tempdir(), "warfarin.ferx")
+file.copy(ex$model, model_copy)
+
+fit <- ferx_model(model_copy, data = ex$data) |>
+  ferx_set_section("fit_options", c(
+    "  method     = focei",
+    "  maxiter    = 500",
+    "  covariance = true"
+  )) |>
+  ferx_fit()
+
+summary(fit)
+ferx_model_inspect(fit)    # no path needed after fitting
+ferx_cor_matrix(fit)       # parameter correlation matrix
+ferx_plot_trace(fit)       # OFV + gradient norm convergence plot
+```
+
+### Validate before a long run
+
+`ferx_check_init()` runs only 5 iterations and returns a trace and a summary
+table. Use it to confirm the OFV is dropping before committing to a long
+estimation:
+
+```{r check-init, eval = FALSE}
+chk <- ferx_check_init(ex$model, ex$data, method = "focei")
+chk$summary      # ofv_start, ofv_end, ofv_drop — is OFV decreasing?
+ferx_plot_trace(chk$fit)   # visual check: first few iterations
+```
+
+### Multi-stage method chain
+
+Pass a character vector to `method` to chain stages — each stage starts from
+the previous stage's converged parameters:
+
+```{r method-chain, eval = FALSE}
+fit <- ferx_model(ex$model, data = ex$data) |>
+  ferx_fit(method = c("saem", "focei"), covariance = TRUE)
+```
+
+### Simulate and predict from fitted parameters
+
+```{r sim-pred, eval = FALSE}
+# Simulate 100 replicates using individual parameters from the fit
+sim <- ferx_simulate(ex$model, ex$data, n_sim = 100, seed = 42, fit = fit)
+
+# Population predictions using fitted theta (eta = 0)
+pred <- ferx_predict(ex$model, ex$data, fit = fit)
+```
+
+### Post-fit diagnostics
+
+All diagnostic outputs are fields on the `ferx_fit` object:
+
+```{r diagnostics, eval = FALSE}
+head(fit$sdtab)               # PRED, IPRED, CWRES, IWRES per observation
+head(fit$ebe_etas)            # empirical Bayes ETAs per subject
+head(fit$individual_estimates) # individual PK parameters (CL, V, KA, ...)
+fit$eta_normality             # Shapiro-Wilk normality test per ETA
+```
+
+---
+
 ## Summary
 
+### Path-based
+
 ```r
-# 1. Get model and data paths
+ex <- ferx_example("warfarin")
+ferx_model_inspect(ex$model)          # verify structure before fitting
+fit <- ferx_fit(ex$model, ex$data)
+ferx_model_inspect(fit)               # re-inspect post-fit (no path needed)
+```
+
+### Pipe-based
+
+```r
 ex <- ferx_example("warfarin")
 
-# 2. Inspect before fitting — verify structure without running the optimizer
-ferx_model_inspect(ex$model)
+# Inspect, fit, summarise in one chain
+ferx_model(ex$model, data = ex$data) |>
+  ferx_get_section("parameters") |>  # optional: peek before fitting
+  ferx_fit(method = "focei", covariance = TRUE) |>
+  summary()
 
-# 3. Fit
-fit <- ferx_fit(ex$model, ex$data)
+# Edit options then fit (copy model file first)
+model_copy <- file.path(tempdir(), "warfarin.ferx")
+file.copy(ex$model, model_copy)
 
-# 4. Re-inspect post-fit (no path required)
-ferx_model_inspect(fit)
+ferx_model(model_copy, data = ex$data) |>
+  ferx_set_section("fit_options", c(
+    "  method     = focei",
+    "  maxiter    = 500",
+    "  covariance = true"
+  )) |>
+  ferx_fit() |>
+  summary()
 ```
