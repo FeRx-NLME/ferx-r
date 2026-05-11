@@ -49,6 +49,11 @@ test_that("$method equals requested method", {
   expect_equal(tolower(fit$method), "focei")
 })
 
+test_that("$model_name falls back to basename when engine returns Unnamed", {
+  fit <- warfarin_fit()
+  expect_equal(fit$model_name, "warfarin")
+})
+
 test_that("$sdtab is a data frame", {
   fit <- warfarin_fit()
   expect_s3_class(fit$sdtab, "data.frame")

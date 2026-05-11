@@ -909,8 +909,11 @@ ferx_fit.default <- function(model, data,
   # Store the dataset name (basename without extension) from the data path
   result$data_name <- tools::file_path_sans_ext(basename(data))
 
-  # Fall back to the model file's basename when the .ferx file declares no name
-  if (is.null(result$model_name) || !nzchar(result$model_name)) {
+  # Fall back to the model file's basename when the .ferx file declares no name.
+  # ferx-nlme returns "Unnamed" (not NULL/"") when no [model_name] is declared —
+  # treat it the same as absent. See fit_result_to_list() in src/rust/src/lib.rs.
+  # Long-term fix: engine should return "" so this sentinel check can be removed.
+  if (is.null(result$model_name) || !nzchar(result$model_name) || identical(result$model_name, "Unnamed")) {
     result$model_name <- tools::file_path_sans_ext(basename(model))
   }
 
