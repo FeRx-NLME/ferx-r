@@ -141,10 +141,10 @@ ferx_set_section <- function(x, section, lines) {
 ferx_get_section <- function(x, section) {
   if (inherits(x, "ferx_model")) {
     ferx_model_section(x$model, section)
-    invisible(x)
   } else {
     ferx_model_section(x, section)
   }
+  invisible(x)
 }
 
 #' Display a ferx model file in the console
