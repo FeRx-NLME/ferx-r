@@ -226,6 +226,24 @@ fit$eta_normality             # Shapiro-Wilk normality test per ETA
 
 ---
 
+## Parameter transforms
+
+ferx supports log and logit transforms for both thetas and ETAs directly in the
+model DSL. When a transform is in use, `print()` and `ferx_estimates()` display
+results on the natural scale alongside the estimation-scale values.
+
+```r
+# Log-normal CL (typical in PK — ETA_CL is additive on the log scale)
+CL = TVCL * exp(ETA_CL)  # TVCL is on the natural scale; BSV is log-normal
+
+# Logit-transformed bioavailability (constrained to (0, 1))
+F = inv_logit(logit(THETA_F) + ETA_F)
+```
+
+See `vignette("parameter-transforms")` for worked examples with bundled models.
+
+---
+
 ## Summary
 
 ### Path-based

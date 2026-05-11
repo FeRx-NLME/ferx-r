@@ -87,6 +87,7 @@
 #' pred <- ferx_predict(ex$model, ex$data, fit = fit)
 #'
 #' # ── Data can be overridden at fit time ───────────────────────────────────
+#' # (substitute the path to your own dataset for "other_cohort.csv")
 #' ferx_model(ex$model, data = ex$data) |>
 #'   ferx_fit(data = "other_cohort.csv")
 #'

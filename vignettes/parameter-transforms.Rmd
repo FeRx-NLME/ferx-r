@@ -1,0 +1,165 @@
+---
+title: "Parameter transforms: log, logit, and additive ETAs"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Parameter transforms: log, logit, and additive ETAs}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+library(ferx)
+```
+
+## Overview
+
+ferx supports three parameterisation styles for individual parameters:
+
+| Style | DSL pattern | Use case |
+|---|---|---|
+| **Log-normal** | `P = TVP * exp(ETA_P)` | Most PK parameters (CL, V, KA) — positive by construction |
+| **Logit-normal** | `P = inv_logit(logit(THETA_P) + ETA_P)` | Fractions/probabilities (F, bioavailability) — bounded (0, 1) |
+| **Additive** | `P = TVP + ETA_P` | Parameters with natural additive variability (lag time, threshold) |
+
+The optimiser always works on the unbounded or transformed scale; ferx
+back-transforms to the natural scale when reporting results.
+
+---
+
+## Log-normal ETAs (default)
+
+The standard warfarin model uses log-normal ETAs for CL, V, and KA. This is
+the default: each individual parameter equals the typical value multiplied by
+`exp(ETA)`, which keeps the parameter positive and gives a log-normal
+distribution across subjects.
+
+```{r logn-inspect}
+ex <- ferx_example("warfarin")
+ferx_model_inspect(ex$model)
+```
+
+After fitting, `print()` reports omega as `[log-normal]` with a CV%:
+
+```{r logn-fit, eval = FALSE}
+fit <- ferx_fit(ex$model, ex$data)
+fit   # omega block shows "[log-normal]  CV% = ..."
+```
+
+`ferx_estimates()` returns the omega variance on the log scale in `estimate`,
+with `transform = "log_normal"`:
+
+```{r logn-estimates, eval = FALSE}
+ferx_estimates(fit)
+```
+
+---
+
+## Logit-normal ETA (bioavailability)
+
+When a parameter is a fraction bounded between 0 and 1, use `inv_logit` /
+`logit` to ensure the individual values stay in (0, 1):
+
+```
+F = inv_logit(logit(THETA_F) + ETA_F)
+```
+
+`THETA_F` is specified on the natural (0, 1) scale in `[parameters]`; ferx
+maps it to the logit scale internally so the optimiser works on an unbounded
+space. The omega for `ETA_F` is the variance on the logit scale.
+
+```{r logit-inspect}
+ex_logit <- ferx_example("warfarin_logit_f")
+ferx_model_inspect(ex_logit$model)
+```
+
+After fitting, `print()` shows:
+
+- `THETA_F` with `[logit scale]` and a 95 % CI back-transformed through
+  `inv_logit` so the CI is on the (0, 1) scale.
+- `ETA_F` with `[logit]`, `SD_logit`, and a ±1 SD interval on the (0, 1)
+  scale.
+
+```{r logit-fit, eval = FALSE}
+fit_logit <- ferx_fit(ex_logit$model, ex_logit$data)
+fit_logit
+```
+
+`ferx_estimates()` populates `estimate_natural`, `lower_95_natural`, and
+`upper_95_natural` for logit-transformed thetas:
+
+```{r logit-estimates, eval = FALSE}
+est <- ferx_estimates(fit_logit)
+est[est$param == "THETA_F", ]
+# estimate         — logit scale
+# estimate_natural — (0, 1) scale (inv_logit back-transform)
+# lower_95_natural / upper_95_natural — asymmetric CI on (0, 1) scale
+```
+
+---
+
+## Additive ETA (lag time)
+
+When the BSV on a parameter has an additive rather than multiplicative
+structure — for example, a lag time where the subject-level deviation is in
+hours — use a plain sum:
+
+```
+TLAG = TVTLAG + ETA_TLAG
+```
+
+`ETA_TLAG` follows a normal distribution with mean 0 and variance given by the
+corresponding omega element. The individual lag times are therefore normally
+distributed around `TVTLAG`.
+
+```{r add-inspect}
+ex_add <- ferx_example("warfarin_additive_eta")
+ferx_model_inspect(ex_add$model)
+```
+
+After fitting, the `ETA_TLAG` row in the omega block is printed with
+`[additive]` and an SD in the original units (hours):
+
+```{r add-fit, eval = FALSE}
+fit_add <- ferx_fit(ex_add$model, ex_add$data)
+fit_add
+```
+
+`ferx_estimates()` returns `transform = "additive"` for that omega element;
+the CI is symmetric (no back-transform needed):
+
+```{r add-estimates, eval = FALSE}
+ferx_estimates(fit_add)
+```
+
+---
+
+## Mixing transforms in one model
+
+All three styles can appear in the same model. The standard two-compartment
+oral model with a logit bioavailability and an additive lag time would declare:
+
+```
+[individual_parameters]
+  CL   = TVCL  * exp(ETA_CL)        # log-normal
+  V1   = TVV1  * exp(ETA_V1)        # log-normal
+  KA   = TVKA  * exp(ETA_KA)        # log-normal
+  F    = inv_logit(logit(THETA_F) + ETA_F)   # logit-normal
+  TLAG = TVTLAG + ETA_TLAG          # additive
+```
+
+Each ETA is handled independently; the omega matrix contains the corresponding
+variances on the respective scales (log, logit, or natural units).
+
+---
+
+## Summary table
+
+| Transform | Omega interpretation | Print label | `ferx_estimates()` columns |
+|---|---|---|---|
+| Log-normal | variance on log scale | `[log-normal]` + CV% | `estimate` (log var), `transform = "log_normal"` |
+| Logit-normal | variance on logit scale | `[logit]` + SD_logit + ±1 SD interval | same; theta gets `estimate_natural` etc. |
+| Additive | variance in original units | `[additive]` + SD | `estimate` (variance), symmetric CI |

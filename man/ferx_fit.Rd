@@ -527,6 +527,7 @@ ferx_model(ex$model, data = ex$data) |>
   ferx_estimates()
 
 # Override data stored in ferx_model at fit time
+# (substitute the path to your own dataset for "other_cohort.csv")
 m <- ferx_model(ex$model, data = ex$data)
 ferx_fit(m, data = "other_cohort.csv", method = "focei")
 
