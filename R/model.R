@@ -6,26 +6,31 @@
 #' time (the data path may be omitted and supplied later to
 #' \code{\link{ferx_fit}}).
 #'
-#' \strong{Typical pipe workflow:}
+#' \strong{Argument order:} \code{data} comes first so a data object can flow
+#' naturally into a pipeline:
+#'
 #' \preformatted{
-#' ferx_model("pk.ferx", data = "data.csv") |>
-#'   ferx_set_section("fit_options", c(
-#'     "  method     = focei",
-#'     "  maxiter    = 500",
-#'     "  covariance = true"
-#'   )) |>
-#'   ferx_fit() |>
-#'   summary()
+#' ex$data |> ferx_model(ex$model) |> ferx_fit() |> summary()
 #' }
+#'
+#' This is a change from earlier versions (where \code{model} was the first
+#' argument). Old positional calls of the form \code{ferx_model("pk.ferx")} or
+#' \code{ferx_model("pk.ferx", "data.csv")} are detected by the \code{.ferx}
+#' extension on what is now the \code{data} slot and silently rewritten with a
+#' deprecation warning; this auto-correction will be removed in a future
+#' release. Calls that name \code{data} explicitly
+#' (\code{ferx_model("pk.ferx", data = "data.csv")}) keep working unchanged
+#' because R matches \code{data =} by name first and the remaining positional
+#' argument falls into the \code{model} slot.
 #'
 #' All fit options (\code{method}, \code{covariance}, \code{threads},
 #' \code{settings}, …) can still be passed directly to \code{ferx_fit()} in
 #' the pipe — the \code{ferx_model} object only carries the file paths. See
 #' \code{\link{ferx_fit}} for the full list of options and post-fit outputs.
 #'
+#' @param data Optional path to a NONMEM-format CSV data file. Can be omitted
+#'   here and supplied later to \code{\link{ferx_fit}}.
 #' @param model Path to a \code{.ferx} model file. The file must exist.
-#' @param data Optional path to a NONMEM-format CSV data file. Can be supplied
-#'   later at \code{ferx_fit()} if omitted here.
 #'
 #' @return An object of class \code{ferx_model} with fields \code{$model} and
 #'   \code{$data}.
@@ -34,27 +39,27 @@
 #' ex <- ferx_example("warfarin")
 #'
 #' # Inspect the object — prints model path, data path, and structure summary
-#' m <- ferx_model(ex$model, data = ex$data)
+#' m <- ferx_model(ex$data, ex$model)
 #' print(m)
 #'
 #' # Without data — supply at fit time via ferx_fit(data = ...)
-#' m <- ferx_model(ex$model)
+#' m <- ferx_model(model = ex$model)
 #'
 #' \dontrun{
 #' # ── Minimal pipe ────────────────────────────────────────────────────────
 #' # ferx_fit() picks up $data automatically from the ferx_model object.
-#' fit <- ferx_model(ex$model, data = ex$data) |>
+#' fit <- ex$data |>
+#'   ferx_model(ex$model) |>
 #'   ferx_fit(method = "focei", covariance = TRUE) |>
 #'   summary()
 #'
 #' # ── Override fit options before fitting ─────────────────────────────────
 #' # ferx_set_section() rewrites [fit_options] on disk and passes the
-#' # ferx_model through unchanged so the pipe continues.
-#' # Note: copy the model file first — ferx_set_section() edits in place.
-#' model_copy <- file.path(tempdir(), "warfarin.ferx")
-#' file.copy(ex$model, model_copy)
-#'
-#' fit <- ferx_model(model_copy, data = ex$data) |>
+#' # ferx_model through so the pipe continues. When the model file lives
+#' # inside the installed package (as for ferx_example()), the file is
+#' # copied to tempdir() first so the bundled example is never mutated.
+#' fit <- ex$data |>
+#'   ferx_model(ex$model) |>
 #'   ferx_set_section("fit_options", c(
 #'     "  method     = focei",
 #'     "  maxiter    = 500",
@@ -68,7 +73,8 @@
 #' ferx_plot_trace(fit)      # OFV + gradient norm over iterations
 #'
 #' # ── Peek at a section mid-pipe without breaking the chain ────────────────
-#' fit <- ferx_model(ex$model, data = ex$data) |>
+#' fit <- ex$data |>
+#'   ferx_model(ex$model) |>
 #'   ferx_get_section("parameters") |>   # prints [parameters], passes through
 #'   ferx_fit(method = "focei")
 #'
@@ -79,7 +85,8 @@
 #' ferx_plot_trace(chk$fit)  # visual check of first few iterations
 #'
 #' # ── Multi-stage chain: SAEM → FOCEI ─────────────────────────────────────
-#' fit <- ferx_model(ex$model, data = ex$data) |>
+#' fit <- ex$data |>
+#'   ferx_model(ex$model) |>
 #'   ferx_fit(method = c("saem", "focei"), covariance = TRUE)
 #'
 #' # ── Simulate and predict from fitted parameters ──────────────────────────
@@ -88,19 +95,53 @@
 #'
 #' # ── Data can be overridden at fit time ───────────────────────────────────
 #' # (substitute the path to your own dataset for "other_cohort.csv")
-#' ferx_model(ex$model, data = ex$data) |>
+#' ferx_model(ex$data, ex$model) |>
 #'   ferx_fit(data = "other_cohort.csv")
-#'
-#' # ── Data-first pipe (R >= 4.2) ───────────────────────────────────────────
-#' # ferx_model() takes model first, like lm(formula, data). To start a pipe
-#' # from the data object, use the _ placeholder to route it to `data`:
-#' ex$data |> ferx_model(ex$model, data = _) |> ferx_fit() |> summary()
 #' }
 #'
 #' @seealso \code{\link{ferx_set_section}}, \code{\link{ferx_get_section}},
 #'   \code{\link{ferx_fit}}, \code{\link{ferx_check_init}}
 #' @export
-ferx_model <- function(model, data = NULL) {
+ferx_model <- function(data = NULL, model) {
+  # Backwards-compat shim: in earlier versions the signature was
+  # `ferx_model(model, data = NULL)`. Detect old-style positional calls by
+  # the .ferx extension on what is now `data` and silently rewrite them
+  # with a deprecation warning.
+  data_is_ferx <- !missing(data) && !is.null(data) && is.character(data) &&
+    length(data) == 1L && tolower(tools::file_ext(data)) == "ferx"
+
+  if (data_is_ferx) {
+    if (missing(model)) {
+      # `ferx_model("pk.ferx")` → treat as `ferx_model(model = "pk.ferx")`.
+      warning(
+        "ferx_model() argument order changed: data is now the first ",
+        "argument and model is the second. Call has been auto-corrected ",
+        "for compatibility; pass `model =` by name to silence this ",
+        "warning. The compatibility shim will be removed in a future release.",
+        call. = FALSE
+      )
+      model <- data
+      data  <- NULL
+    } else if (is.character(model) && length(model) == 1L &&
+               tolower(tools::file_ext(model)) != "ferx") {
+      # `ferx_model("pk.ferx", "data.csv")` → swap arguments.
+      warning(
+        "ferx_model() argument order changed: data is now the first ",
+        "argument and model is the second. Positional call has been ",
+        "auto-corrected for compatibility; pass arguments by name to ",
+        "silence this warning. The compatibility shim will be removed ",
+        "in a future release.",
+        call. = FALSE
+      )
+      tmp   <- model
+      model <- data
+      data  <- tmp
+    }
+  }
+
+  if (missing(model)) {
+    stop("'model' is required. Pass a path to a .ferx file.")
+  }
   if (!file.exists(model)) stop("File not found: ", model)
   if (tolower(tools::file_ext(model)) != "ferx") stop("'model' must be a .ferx file")
   if (!is.null(data) && !file.exists(data)) stop("Data file not found: ", data)
@@ -128,27 +169,31 @@ print.ferx_model <- function(x, ...) {
 #'
 #' When \code{x} is a \code{ferx_model} object the section is written to
 #' \code{x$model} and \code{x} is returned invisibly, allowing further
-#' pipe steps. When \code{x} is a plain path string the call is equivalent
-#' to \code{\link{ferx_model_set_section}(x, section, lines)} for backwards
-#' compatibility.
+#' pipe steps. \strong{Copy-on-write for bundled examples}: if \code{x$model}
+#' points to a file inside the installed \code{ferx} package directory
+#' (typically the result of \code{\link{ferx_example}()}), the file is first
+#' copied to \code{tempdir()} and \code{x$model} is updated to that copy
+#' before the edit. This prevents accidental modification of read-only
+#' package examples. When \code{x} is a plain path string the call is
+#' equivalent to \code{\link{ferx_model_set_section}(x, section, lines)}
+#' and the file is edited in place.
 #'
 #' @param x A \code{ferx_model} object or a path to a \code{.ferx} file.
 #' @param section Name of the section to replace, without brackets.
 #' @param lines Character vector of replacement lines (do not include the
 #'   header line).
 #'
-#' @return \code{x}, invisibly.
+#' @return \code{x}, invisibly. For a \code{ferx_model} pointing at a
+#'   bundled package file, the returned object's \code{$model} field will
+#'   point at the temp-directory copy that was actually edited.
 #'
 #' @examples
 #' \dontrun{
 #' ex <- ferx_example("warfarin")
 #'
-#' # ferx_set_section() edits the file on disk, so copy first when working
-#' # with bundled examples or any model you do not want to overwrite.
-#' model_copy <- file.path(tempdir(), "warfarin.ferx")
-#' file.copy(ex$model, model_copy)
-#'
-#' ferx_model(model_copy, data = ex$data) |>
+#' # Safe by default: editing a bundled example transparently copies the
+#' # file to tempdir() and edits the copy. ex$model on disk is untouched.
+#' fit <- ferx_model(ex$data, ex$model) |>
 #'   ferx_set_section("fit_options", c(
 #'     "  method     = focei",
 #'     "  maxiter    = 500",
@@ -162,11 +207,34 @@ print.ferx_model <- function(x, ...) {
 #' @export
 ferx_set_section <- function(x, section, lines) {
   if (inherits(x, "ferx_model")) {
+    x$model <- .ferx_copy_if_in_pkg(x$model)
     ferx_model_set_section(x$model, section, lines)
     invisible(x)
   } else {
     ferx_model_set_section(x, section, lines)
   }
+}
+
+# Copy-on-write guard: if `path` is inside the installed ferx package
+# directory, copy it to `tempdir()` and return the new path so subsequent
+# in-place edits do not mutate the installed package files. Otherwise
+# return `path` unchanged.
+.ferx_copy_if_in_pkg <- function(path) {
+  pkg_dir <- system.file("", package = "ferx")
+  if (!nzchar(pkg_dir)) return(path)
+  pkg_norm  <- normalizePath(pkg_dir, mustWork = FALSE)
+  path_norm <- normalizePath(path,    mustWork = FALSE)
+  if (!startsWith(path_norm, pkg_norm)) return(path)
+
+  dest <- file.path(tempdir(), basename(path))
+  if (!isTRUE(file.copy(path, dest, overwrite = TRUE))) {
+    stop("Failed to copy ", path, " to ", dest)
+  }
+  message(
+    "ferx_set_section: copying read-only package model to ", dest,
+    " before editing."
+  )
+  dest
 }
 
 #' Inspect a section of a ferx model (pipe-friendly)
@@ -188,12 +256,12 @@ ferx_set_section <- function(x, section, lines) {
 #'
 #' # Inspect [parameters] and continue piping — ferx_get_section() prints
 #' # the section and passes the ferx_model object through unchanged.
-#' ferx_model(ex$model, data = ex$data) |>
+#' ferx_model(ex$data, ex$model) |>
 #'   ferx_get_section("parameters")
 #'
 #' \dontrun{
 #' # Mid-pipe peek: print [parameters] then fit without interrupting the chain
-#' fit <- ferx_model(ex$model, data = ex$data) |>
+#' fit <- ferx_model(ex$data, ex$model) |>
 #'   ferx_get_section("parameters") |>
 #'   ferx_fit(method = "focei")
 #' }

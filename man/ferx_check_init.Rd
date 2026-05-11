@@ -4,12 +4,16 @@
 \alias{ferx_check_init}
 \title{Quick convergence check with an optimizer trace}
 \usage{
-ferx_check_init(model, data, method = "focei", maxiter = NULL, ...)
+ferx_check_init(model, data = NULL, method = "focei", maxiter = NULL, ...)
 }
 \arguments{
-\item{model}{Path to a \code{.ferx} model file.}
+\item{model}{Path to a \code{.ferx} model file, or a \code{ferx_model}
+object created by \code{\link{ferx_model}}. When a \code{ferx_model} is
+passed and \code{data} is not supplied, the data path on the object is
+used.}
 
-\item{data}{Path to a NONMEM-format CSV file.}
+\item{data}{Path to a NONMEM-format CSV file. Optional when \code{model}
+is a \code{ferx_model} that already carries a data path.}
 
 \item{method}{Estimation method string, passed to \code{\link{ferx_fit}}.
 Default \code{"focei"}.}
@@ -37,9 +41,16 @@ structural model issues.
 }
 \examples{
 \dontrun{
+# Plain paths
 chk <- ferx_check_init("warfarin.ferx", "warfarin.csv")
 ferx_plot_trace(chk$fit)
 chk$summary
+
+# Pipe from a ferx_model — data is picked up from the object
+ex <- ferx_example("warfarin")
+ex$data |>
+  ferx_model(ex$model) |>
+  ferx_check_init(method = "focei")
 }
 
 }

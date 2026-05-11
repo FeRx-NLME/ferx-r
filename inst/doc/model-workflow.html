@@ -14,63 +14,103 @@
 
 <title>Model workflow: inspect, edit, fit</title>
 
+<script>// Pandoc 2.9 adds attributes on both header and div. We remove the former (to
+// be compatible with the behavior of Pandoc < 2.8).
+document.addEventListener('DOMContentLoaded', function(e) {
+  var hs = document.querySelectorAll("div.section[class*='level'] > :first-child");
+  var i, h, a;
+  for (i = 0; i < hs.length; i++) {
+    h = hs[i];
+    if (!/^h[1-6]$/i.test(h.tagName)) continue;  // it should be a header h1-h6
+    a = h.attributes;
+    while (a.length > 0) h.removeAttribute(a[0].name);
+  }
+});
+</script>
 
 <style type="text/css">
-  code{white-space: pre-wrap;}
-  span.smallcaps{font-variant: small-caps;}
-  span.underline{text-decoration: underline;}
-  div.column{display: inline-block; vertical-align: top; width: 50%;}
-  div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
-  ul.task-list{list-style: none;}
-    </style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+span.underline{text-decoration: underline;}
+div.column{display: inline-block; vertical-align: top; width: 50%;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+</style>
 
 
 
 <style type="text/css">
-  code {
-    white-space: pre;
-  }
-  .sourceCode {
-    overflow: visible;
-  }
+code {
+white-space: pre;
+}
+.sourceCode {
+overflow: visible;
+}
 </style>
 <style type="text/css" data-origin="pandoc">
-div.sourceCode { overflow-x: auto; }
-table.sourceCode, tr.sourceCode, td.lineNumbers, td.sourceCode {
-  margin: 0; padding: 0; vertical-align: baseline; border: none; }
-table.sourceCode { width: 100%; line-height: 100%; }
-td.lineNumbers { text-align: right; padding-right: 4px; padding-left: 4px; color: #aaaaaa; border-right: 1px solid #aaaaaa; }
-td.sourceCode { padding-left: 5px; }
-code > span.kw { color: #007020; font-weight: bold; } /* Keyword */
-code > span.dt { color: #902000; } /* DataType */
-code > span.dv { color: #40a070; } /* DecVal */
-code > span.bn { color: #40a070; } /* BaseN */
-code > span.fl { color: #40a070; } /* Float */
-code > span.ch { color: #4070a0; } /* Char */
-code > span.st { color: #4070a0; } /* String */
-code > span.co { color: #60a0b0; font-style: italic; } /* Comment */
-code > span.ot { color: #007020; } /* Other */
-code > span.al { color: #ff0000; font-weight: bold; } /* Alert */
-code > span.fu { color: #06287e; } /* Function */
-code > span.er { color: #ff0000; font-weight: bold; } /* Error */
-code > span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
-code > span.cn { color: #880000; } /* Constant */
-code > span.sc { color: #4070a0; } /* SpecialChar */
-code > span.vs { color: #4070a0; } /* VerbatimString */
-code > span.ss { color: #bb6688; } /* SpecialString */
-code > span.im { } /* Import */
-code > span.va { color: #19177c; } /* Variable */
-code > span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
-code > span.op { color: #666666; } /* Operator */
-code > span.bu { } /* BuiltIn */
-code > span.ex { } /* Extension */
-code > span.pp { color: #bc7a00; } /* Preprocessor */
-code > span.at { color: #7d9029; } /* Attribute */
-code > span.do { color: #ba2121; font-style: italic; } /* Documentation */
-code > span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
-code > span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } /* CommentVar */
-code > span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
-
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { display: inline-block; text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+{ counter-reset: source-line 0; }
+pre.numberSource code > span
+{ position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+{ content: counter(source-line);
+position: relative; left: -1em; text-align: right; vertical-align: baseline;
+border: none; display: inline-block;
+-webkit-touch-callout: none; -webkit-user-select: none;
+-khtml-user-select: none; -moz-user-select: none;
+-ms-user-select: none; user-select: none;
+padding: 0 4px; width: 4em;
+color: #aaaaaa;
+}
+pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa; padding-left: 4px; }
+div.sourceCode
+{ }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+code span.al { color: #ff0000; font-weight: bold; } 
+code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.at { color: #7d9029; } 
+code span.bn { color: #40a070; } 
+code span.bu { color: #008000; } 
+code span.cf { color: #007020; font-weight: bold; } 
+code span.ch { color: #4070a0; } 
+code span.cn { color: #880000; } 
+code span.co { color: #60a0b0; font-style: italic; } 
+code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.do { color: #ba2121; font-style: italic; } 
+code span.dt { color: #902000; } 
+code span.dv { color: #40a070; } 
+code span.er { color: #ff0000; font-weight: bold; } 
+code span.ex { } 
+code span.fl { color: #40a070; } 
+code span.fu { color: #06287e; } 
+code span.im { color: #008000; font-weight: bold; } 
+code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.kw { color: #007020; font-weight: bold; } 
+code span.op { color: #666666; } 
+code span.ot { color: #007020; } 
+code span.pp { color: #bc7a00; } 
+code span.sc { color: #4070a0; } 
+code span.ss { color: #bb6688; } 
+code span.st { color: #4070a0; } 
+code span.va { color: #19177c; } 
+code span.vs { color: #4070a0; } 
+code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } 
 </style>
 <script>
 // apply pandoc div.sourceCode style to pre.sourceCode instead
@@ -104,7 +144,187 @@ code > span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Inf
 
 
 
-<link href="data:text/css;charset=utf-8,body%20%7B%0Abackground%2Dcolor%3A%20%23fff%3B%0Amargin%3A%201em%20auto%3B%0Amax%2Dwidth%3A%20700px%3B%0Aoverflow%3A%20visible%3B%0Apadding%2Dleft%3A%202em%3B%0Apadding%2Dright%3A%202em%3B%0Afont%2Dfamily%3A%20%22Open%20Sans%22%2C%20%22Helvetica%20Neue%22%2C%20Helvetica%2C%20Arial%2C%20sans%2Dserif%3B%0Afont%2Dsize%3A%2014px%3B%0Aline%2Dheight%3A%201%2E35%3B%0A%7D%0A%23TOC%20%7B%0Aclear%3A%20both%3B%0Amargin%3A%200%200%2010px%2010px%3B%0Apadding%3A%204px%3B%0Awidth%3A%20400px%3B%0Aborder%3A%201px%20solid%20%23CCCCCC%3B%0Aborder%2Dradius%3A%205px%3B%0Abackground%2Dcolor%3A%20%23f6f6f6%3B%0Afont%2Dsize%3A%2013px%3B%0Aline%2Dheight%3A%201%2E3%3B%0A%7D%0A%23TOC%20%2Etoctitle%20%7B%0Afont%2Dweight%3A%20bold%3B%0Afont%2Dsize%3A%2015px%3B%0Amargin%2Dleft%3A%205px%3B%0A%7D%0A%23TOC%20ul%20%7B%0Apadding%2Dleft%3A%2040px%3B%0Amargin%2Dleft%3A%20%2D1%2E5em%3B%0Amargin%2Dtop%3A%205px%3B%0Amargin%2Dbottom%3A%205px%3B%0A%7D%0A%23TOC%20ul%20ul%20%7B%0Amargin%2Dleft%3A%20%2D2em%3B%0A%7D%0A%23TOC%20li%20%7B%0Aline%2Dheight%3A%2016px%3B%0A%7D%0Atable%20%7B%0Amargin%3A%201em%20auto%3B%0Aborder%2Dwidth%3A%201px%3B%0Aborder%2Dcolor%3A%20%23DDDDDD%3B%0Aborder%2Dstyle%3A%20outset%3B%0Aborder%2Dcollapse%3A%20collapse%3B%0A%7D%0Atable%20th%20%7B%0Aborder%2Dwidth%3A%202px%3B%0Apadding%3A%205px%3B%0Aborder%2Dstyle%3A%20inset%3B%0A%7D%0Atable%20td%20%7B%0Aborder%2Dwidth%3A%201px%3B%0Aborder%2Dstyle%3A%20inset%3B%0Aline%2Dheight%3A%2018px%3B%0Apadding%3A%205px%205px%3B%0A%7D%0Atable%2C%20table%20th%2C%20table%20td%20%7B%0Aborder%2Dleft%2Dstyle%3A%20none%3B%0Aborder%2Dright%2Dstyle%3A%20none%3B%0A%7D%0Atable%20thead%2C%20table%20tr%2Eeven%20%7B%0Abackground%2Dcolor%3A%20%23f7f7f7%3B%0A%7D%0Ap%20%7B%0Amargin%3A%200%2E5em%200%3B%0A%7D%0Ablockquote%20%7B%0Abackground%2Dcolor%3A%20%23f6f6f6%3B%0Apadding%3A%200%2E25em%200%2E75em%3B%0A%7D%0Ahr%20%7B%0Aborder%2Dstyle%3A%20solid%3B%0Aborder%3A%20none%3B%0Aborder%2Dtop%3A%201px%20solid%20%23777%3B%0Amargin%3A%2028px%200%3B%0A%7D%0Adl%20%7B%0Amargin%2Dleft%3A%200%3B%0A%7D%0Adl%20dd%20%7B%0Amargin%2Dbottom%3A%2013px%3B%0Amargin%2Dleft%3A%2013px%3B%0A%7D%0Adl%20dt%20%7B%0Afont%2Dweight%3A%20bold%3B%0A%7D%0Aul%20%7B%0Amargin%2Dtop%3A%200%3B%0A%7D%0Aul%20li%20%7B%0Alist%2Dstyle%3A%20circle%20outside%3B%0A%7D%0Aul%20ul%20%7B%0Amargin%2Dbottom%3A%200%3B%0A%7D%0Apre%2C%20code%20%7B%0Abackground%2Dcolor%3A%20%23f7f7f7%3B%0Aborder%2Dradius%3A%203px%3B%0Acolor%3A%20%23333%3B%0Awhite%2Dspace%3A%20pre%2Dwrap%3B%20%0A%7D%0Apre%20%7B%0Aborder%2Dradius%3A%203px%3B%0Amargin%3A%205px%200px%2010px%200px%3B%0Apadding%3A%2010px%3B%0A%7D%0Apre%3Anot%28%5Bclass%5D%29%20%7B%0Abackground%2Dcolor%3A%20%23f7f7f7%3B%0A%7D%0Acode%20%7B%0Afont%2Dfamily%3A%20Consolas%2C%20Monaco%2C%20%27Courier%20New%27%2C%20monospace%3B%0Afont%2Dsize%3A%2085%25%3B%0A%7D%0Ap%20%3E%20code%2C%20li%20%3E%20code%20%7B%0Apadding%3A%202px%200px%3B%0A%7D%0Adiv%2Efigure%20%7B%0Atext%2Dalign%3A%20center%3B%0A%7D%0Aimg%20%7B%0Abackground%2Dcolor%3A%20%23FFFFFF%3B%0Apadding%3A%202px%3B%0Aborder%3A%201px%20solid%20%23DDDDDD%3B%0Aborder%2Dradius%3A%203px%3B%0Aborder%3A%201px%20solid%20%23CCCCCC%3B%0Amargin%3A%200%205px%3B%0A%7D%0Ah1%20%7B%0Amargin%2Dtop%3A%200%3B%0Afont%2Dsize%3A%2035px%3B%0Aline%2Dheight%3A%2040px%3B%0A%7D%0Ah2%20%7B%0Aborder%2Dbottom%3A%204px%20solid%20%23f7f7f7%3B%0Apadding%2Dtop%3A%2010px%3B%0Apadding%2Dbottom%3A%202px%3B%0Afont%2Dsize%3A%20145%25%3B%0A%7D%0Ah3%20%7B%0Aborder%2Dbottom%3A%202px%20solid%20%23f7f7f7%3B%0Apadding%2Dtop%3A%2010px%3B%0Afont%2Dsize%3A%20120%25%3B%0A%7D%0Ah4%20%7B%0Aborder%2Dbottom%3A%201px%20solid%20%23f7f7f7%3B%0Amargin%2Dleft%3A%208px%3B%0Afont%2Dsize%3A%20105%25%3B%0A%7D%0Ah5%2C%20h6%20%7B%0Aborder%2Dbottom%3A%201px%20solid%20%23ccc%3B%0Afont%2Dsize%3A%20105%25%3B%0A%7D%0Aa%20%7B%0Acolor%3A%20%230033dd%3B%0Atext%2Ddecoration%3A%20none%3B%0A%7D%0Aa%3Ahover%20%7B%0Acolor%3A%20%236666ff%3B%20%7D%0Aa%3Avisited%20%7B%0Acolor%3A%20%23800080%3B%20%7D%0Aa%3Avisited%3Ahover%20%7B%0Acolor%3A%20%23BB00BB%3B%20%7D%0Aa%5Bhref%5E%3D%22http%3A%22%5D%20%7B%0Atext%2Ddecoration%3A%20underline%3B%20%7D%0Aa%5Bhref%5E%3D%22https%3A%22%5D%20%7B%0Atext%2Ddecoration%3A%20underline%3B%20%7D%0A%0Acode%20%3E%20span%2Ekw%20%7B%20color%3A%20%23555%3B%20font%2Dweight%3A%20bold%3B%20%7D%20%0Acode%20%3E%20span%2Edt%20%7B%20color%3A%20%23902000%3B%20%7D%20%0Acode%20%3E%20span%2Edv%20%7B%20color%3A%20%2340a070%3B%20%7D%20%0Acode%20%3E%20span%2Ebn%20%7B%20color%3A%20%23d14%3B%20%7D%20%0Acode%20%3E%20span%2Efl%20%7B%20color%3A%20%23d14%3B%20%7D%20%0Acode%20%3E%20span%2Ech%20%7B%20color%3A%20%23d14%3B%20%7D%20%0Acode%20%3E%20span%2Est%20%7B%20color%3A%20%23d14%3B%20%7D%20%0Acode%20%3E%20span%2Eco%20%7B%20color%3A%20%23888888%3B%20font%2Dstyle%3A%20italic%3B%20%7D%20%0Acode%20%3E%20span%2Eot%20%7B%20color%3A%20%23007020%3B%20%7D%20%0Acode%20%3E%20span%2Eal%20%7B%20color%3A%20%23ff0000%3B%20font%2Dweight%3A%20bold%3B%20%7D%20%0Acode%20%3E%20span%2Efu%20%7B%20color%3A%20%23900%3B%20font%2Dweight%3A%20bold%3B%20%7D%20%0Acode%20%3E%20span%2Eer%20%7B%20color%3A%20%23a61717%3B%20background%2Dcolor%3A%20%23e3d2d2%3B%20%7D%20%0A" rel="stylesheet" type="text/css" />
+<style type="text/css">body {
+background-color: #fff;
+margin: 1em auto;
+max-width: 700px;
+overflow: visible;
+padding-left: 2em;
+padding-right: 2em;
+font-family: "Open Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+font-size: 14px;
+line-height: 1.35;
+}
+#TOC {
+clear: both;
+margin: 0 0 10px 10px;
+padding: 4px;
+width: 400px;
+border: 1px solid #CCCCCC;
+border-radius: 5px;
+background-color: #f6f6f6;
+font-size: 13px;
+line-height: 1.3;
+}
+#TOC .toctitle {
+font-weight: bold;
+font-size: 15px;
+margin-left: 5px;
+}
+#TOC ul {
+padding-left: 40px;
+margin-left: -1.5em;
+margin-top: 5px;
+margin-bottom: 5px;
+}
+#TOC ul ul {
+margin-left: -2em;
+}
+#TOC li {
+line-height: 16px;
+}
+table {
+margin: 1em auto;
+border-width: 1px;
+border-color: #DDDDDD;
+border-style: outset;
+border-collapse: collapse;
+}
+table th {
+border-width: 2px;
+padding: 5px;
+border-style: inset;
+}
+table td {
+border-width: 1px;
+border-style: inset;
+line-height: 18px;
+padding: 5px 5px;
+}
+table, table th, table td {
+border-left-style: none;
+border-right-style: none;
+}
+table thead, table tr.even {
+background-color: #f7f7f7;
+}
+p {
+margin: 0.5em 0;
+}
+blockquote {
+background-color: #f6f6f6;
+padding: 0.25em 0.75em;
+}
+hr {
+border-style: solid;
+border: none;
+border-top: 1px solid #777;
+margin: 28px 0;
+}
+dl {
+margin-left: 0;
+}
+dl dd {
+margin-bottom: 13px;
+margin-left: 13px;
+}
+dl dt {
+font-weight: bold;
+}
+ul {
+margin-top: 0;
+}
+ul li {
+list-style: circle outside;
+}
+ul ul {
+margin-bottom: 0;
+}
+pre, code {
+background-color: #f7f7f7;
+border-radius: 3px;
+color: #333;
+white-space: pre-wrap; 
+}
+pre {
+border-radius: 3px;
+margin: 5px 0px 10px 0px;
+padding: 10px;
+}
+pre:not([class]) {
+background-color: #f7f7f7;
+}
+code {
+font-family: Consolas, Monaco, 'Courier New', monospace;
+font-size: 85%;
+}
+p > code, li > code {
+padding: 2px 0px;
+}
+div.figure {
+text-align: center;
+}
+img {
+background-color: #FFFFFF;
+padding: 2px;
+border: 1px solid #DDDDDD;
+border-radius: 3px;
+border: 1px solid #CCCCCC;
+margin: 0 5px;
+}
+h1 {
+margin-top: 0;
+font-size: 35px;
+line-height: 40px;
+}
+h2 {
+border-bottom: 4px solid #f7f7f7;
+padding-top: 10px;
+padding-bottom: 2px;
+font-size: 145%;
+}
+h3 {
+border-bottom: 2px solid #f7f7f7;
+padding-top: 10px;
+font-size: 120%;
+}
+h4 {
+border-bottom: 1px solid #f7f7f7;
+margin-left: 8px;
+font-size: 105%;
+}
+h5, h6 {
+border-bottom: 1px solid #ccc;
+font-size: 105%;
+}
+a {
+color: #0033dd;
+text-decoration: none;
+}
+a:hover {
+color: #6666ff; }
+a:visited {
+color: #800080; }
+a:visited:hover {
+color: #BB00BB; }
+a[href^="http:"] {
+text-decoration: underline; }
+a[href^="https:"] {
+text-decoration: underline; }
+
+code > span.kw { color: #555; font-weight: bold; } 
+code > span.dt { color: #902000; } 
+code > span.dv { color: #40a070; } 
+code > span.bn { color: #d14; } 
+code > span.fl { color: #d14; } 
+code > span.ch { color: #d14; } 
+code > span.st { color: #d14; } 
+code > span.co { color: #888888; font-style: italic; } 
+code > span.ot { color: #007020; } 
+code > span.al { color: #ff0000; font-weight: bold; } 
+code > span.fu { color: #900; font-weight: bold; } 
+code > span.er { color: #a61717; background-color: #e3d2d2; } 
+</style>
 
 
 
@@ -124,233 +344,284 @@ code > span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Inf
 <h2>Overview</h2>
 <p>This vignette covers two complementary workflows:</p>
 <ol style="list-style-type: decimal">
-<li><strong>Path-based workflow</strong> — pass file paths directly to <code>ferx_fit()</code>. Straightforward for one-off fits.</li>
-<li><strong>Pipe-based workflow</strong> — bundle paths into a <code>ferx_model</code> object and chain steps with <code>|&gt;</code>. Cleaner when you need to tweak options before fitting or chain post-fit steps.</li>
+<li><strong>Path-based workflow</strong> — pass file paths directly to
+<code>ferx_fit()</code>. Straightforward for one-off fits.</li>
+<li><strong>Pipe-based workflow</strong> — bundle paths into a
+<code>ferx_model</code> object and chain steps with <code>|&gt;</code>.
+Cleaner when you need to tweak options before fitting or chain post-fit
+steps.</li>
 </ol>
 <p>Both workflows produce the same <code>ferx_fit</code> result.</p>
-<p><strong>Entry point:</strong> <code>ferx_model(model, data)</code> takes the model file first, following the convention of R modelling APIs like <code>lm(formula, data)</code>. The natural pipe entry is therefore the model:</p>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">ferx_model</span>(ex$model, <span class="dt">data =</span> ex$data) |<span class="er">&gt;</span><span class="st"> </span><span class="kw">ferx_fit</span>() |<span class="er">&gt;</span><span class="st"> </span><span class="kw">summary</span>()</code></pre></div>
-<p>If you prefer to start with the data — common in EDA pipelines — use the R 4.2+ <code>_</code> placeholder to route it to the named <code>data</code> argument:</p>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="co"># Requires R &gt;= 4.2</span>
-ex$data |<span class="er">&gt;</span><span class="st"> </span><span class="kw">ferx_model</span>(ex$model, <span class="dt">data =</span> _) |<span class="er">&gt;</span><span class="st"> </span><span class="kw">ferx_fit</span>() |<span class="er">&gt;</span><span class="st"> </span><span class="kw">summary</span>()</code></pre></div>
-<p>See <a href="https://github.com/InsightRX/ferx/issues/81">issue #81</a> for the ongoing discussion on argument order.</p>
+<p><strong>Entry point:</strong> <code>ferx_model(data, model)</code>
+takes the data file first, which lets a data object flow naturally into
+a pipeline:</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" tabindex="-1"></a>ex<span class="sc">$</span>data <span class="sc">|&gt;</span> <span class="fu">ferx_model</span>(ex<span class="sc">$</span>model) <span class="sc">|&gt;</span> <span class="fu">ferx_fit</span>() <span class="sc">|&gt;</span> <span class="fu">summary</span>()</span></code></pre></div>
+<p>You can also call it positionally or by name:</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" tabindex="-1"></a><span class="fu">ferx_model</span>(ex<span class="sc">$</span>data, ex<span class="sc">$</span>model) <span class="sc">|&gt;</span> <span class="fu">ferx_fit</span>() <span class="sc">|&gt;</span> <span class="fu">summary</span>()</span>
+<span id="cb2-2"><a href="#cb2-2" tabindex="-1"></a><span class="fu">ferx_model</span>(<span class="at">data =</span> ex<span class="sc">$</span>data, <span class="at">model =</span> ex<span class="sc">$</span>model) <span class="sc">|&gt;</span> <span class="fu">ferx_fit</span>() <span class="sc">|&gt;</span> <span class="fu">summary</span>()</span></code></pre></div>
+<p><strong>Migration note:</strong> Earlier versions used the order
+<code>ferx_model(model, data)</code>. Old-style positional calls
+(<code>ferx_model(&quot;pk.ferx&quot;)</code> or
+<code>ferx_model(&quot;pk.ferx&quot;, &quot;data.csv&quot;)</code>) are detected by the
+<code>.ferx</code> extension and auto-corrected with a deprecation
+warning; this shim will be removed in a future release. Calls that pass
+<code>data</code> by name
+(<code>ferx_model(&quot;pk.ferx&quot;, data = &quot;data.csv&quot;)</code>) keep working
+unchanged.</p>
 <hr />
 </div>
 <div id="path-based-workflow" class="section level2">
 <h2>Path-based workflow</h2>
 <div id="step-1-get-a-model-file" class="section level3">
 <h3>Step 1 — Get a model file</h3>
-<p><code>ferx_example()</code> returns paths to the bundled example models and their data:</p>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r">ex &lt;-<span class="st"> </span><span class="kw">ferx_example</span>(<span class="st">&quot;warfarin&quot;</span>)
-ex$model  <span class="co"># path to warfarin.ferx</span>
-<span class="co">#&gt; [1] &quot;/Library/Frameworks/R.framework/Versions/4.5-x86_64/Resources/library/ferx/examples/models/warfarin.ferx&quot;</span>
-ex$data   <span class="co"># path to warfarin.csv</span>
-<span class="co">#&gt; [1] &quot;/Library/Frameworks/R.framework/Versions/4.5-x86_64/Resources/library/ferx/examples/data/warfarin.csv&quot;</span></code></pre></div>
-<p>In a real workflow you would supply your own <code>.ferx</code> file here.</p>
+<p><code>ferx_example()</code> returns paths to the bundled example
+models and their data:</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" tabindex="-1"></a>ex <span class="ot">&lt;-</span> <span class="fu">ferx_example</span>(<span class="st">&quot;warfarin&quot;</span>)</span>
+<span id="cb3-2"><a href="#cb3-2" tabindex="-1"></a>ex<span class="sc">$</span>model  <span class="co"># path to warfarin.ferx</span></span>
+<span id="cb3-3"><a href="#cb3-3" tabindex="-1"></a><span class="co">#&gt; [1] &quot;/Users/ronkeizer/git/insightrx/ferx/inst/examples/models/warfarin.ferx&quot;</span></span>
+<span id="cb3-4"><a href="#cb3-4" tabindex="-1"></a>ex<span class="sc">$</span>data   <span class="co"># path to warfarin.csv</span></span>
+<span id="cb3-5"><a href="#cb3-5" tabindex="-1"></a><span class="co">#&gt; [1] &quot;/Users/ronkeizer/git/insightrx/ferx/inst/examples/data/warfarin.csv&quot;</span></span></code></pre></div>
+<p>In a real workflow you would supply your own <code>.ferx</code> file
+here.</p>
 </div>
 <div id="step-2-inspect-before-fitting" class="section level3">
 <h3>Step 2 — Inspect before fitting</h3>
-<p><code>ferx_model_inspect()</code> parses the model file and prints a concise summary of its structure without running the optimizer. Use this to verify that ferx interprets your model the way you expect before committing to a long run.</p>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">ferx_model_inspect</span>(ex$model)
-<span class="co">#&gt; Model structure (warfarin.ferx)</span>
-<span class="co">#&gt;   Structural:  1-cpt oral  (TVCL, TVV, TVKA)</span>
-<span class="co">#&gt;   IIV:         ETA_CL, ETA_V, ETA_KA</span>
-<span class="co">#&gt;   IOV:         none</span>
-<span class="co">#&gt;   Residual:    proportional</span></code></pre></div>
+<p><code>ferx_model_inspect()</code> parses the model file and prints a
+concise summary of its structure without running the optimizer. Use this
+to verify that ferx interprets your model the way you expect before
+committing to a long run.</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" tabindex="-1"></a><span class="fu">ferx_model_inspect</span>(ex<span class="sc">$</span>model)</span>
+<span id="cb4-2"><a href="#cb4-2" tabindex="-1"></a><span class="co">#&gt; Model structure (warfarin.ferx)</span></span>
+<span id="cb4-3"><a href="#cb4-3" tabindex="-1"></a><span class="co">#&gt;   Structural:  1-cpt oral  (TVCL, TVV, TVKA)</span></span>
+<span id="cb4-4"><a href="#cb4-4" tabindex="-1"></a><span class="co">#&gt;   IIV:         ETA_CL, ETA_V, ETA_KA</span></span>
+<span id="cb4-5"><a href="#cb4-5" tabindex="-1"></a><span class="co">#&gt;   IOV:         none</span></span>
+<span id="cb4-6"><a href="#cb4-6" tabindex="-1"></a><span class="co">#&gt;   Residual:    proportional</span></span></code></pre></div>
 <p>The printed summary has four lines:</p>
 <table>
+<colgroup>
+<col width="40%" />
+<col width="60%" />
+</colgroup>
 <thead>
 <tr class="header">
-<th align="left">Line</th>
-<th align="left">Meaning</th>
+<th>Line</th>
+<th>Meaning</th>
 </tr>
 </thead>
 <tbody>
 <tr class="odd">
-<td align="left"><strong>Structural</strong></td>
-<td align="left">Detected PK model type and population parameter (theta) names</td>
+<td><strong>Structural</strong></td>
+<td>Detected PK model type and population parameter (theta) names</td>
 </tr>
 <tr class="even">
-<td align="left"><strong>IIV</strong></td>
-<td align="left">Inter-individual variability (omega) parameter names</td>
+<td><strong>IIV</strong></td>
+<td>Inter-individual variability (omega) parameter names</td>
 </tr>
 <tr class="odd">
-<td align="left"><strong>IOV</strong></td>
-<td align="left">Inter-occasion variability (kappa) parameter names, or <code>none</code></td>
+<td><strong>IOV</strong></td>
+<td>Inter-occasion variability (kappa) parameter names, or
+<code>none</code></td>
 </tr>
 <tr class="even">
-<td align="left"><strong>Residual</strong></td>
-<td align="left">Error model type (<code>proportional</code>, <code>additive</code>, or <code>combined</code>)</td>
+<td><strong>Residual</strong></td>
+<td>Error model type (<code>proportional</code>, <code>additive</code>,
+or <code>combined</code>)</td>
 </tr>
 </tbody>
 </table>
-<p><code>ferx_model_inspect()</code> returns the structure as a named list (invisibly), which is useful for programmatic checks:</p>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r">s &lt;-<span class="st"> </span><span class="kw">ferx_model_inspect</span>(ex$model)
-<span class="co">#&gt; Model structure (warfarin.ferx)</span>
-<span class="co">#&gt;   Structural:  1-cpt oral  (TVCL, TVV, TVKA)</span>
-<span class="co">#&gt;   IIV:         ETA_CL, ETA_V, ETA_KA</span>
-<span class="co">#&gt;   IOV:         none</span>
-<span class="co">#&gt;   Residual:    proportional</span>
-s$theta_names   <span class="co"># population parameter names</span>
-<span class="co">#&gt; [1] &quot;TVCL&quot; &quot;TVV&quot;  &quot;TVKA&quot;</span>
-s$model_type    <span class="co"># short label for the PK model</span>
-<span class="co">#&gt; [1] &quot;1-cpt oral&quot;</span>
-s$iiv           <span class="co"># IIV parameter names</span>
-<span class="co">#&gt; [1] &quot;ETA_CL&quot; &quot;ETA_V&quot;  &quot;ETA_KA&quot;</span>
-s$residual      <span class="co"># error model type</span>
-<span class="co">#&gt; [1] &quot;proportional&quot;</span></code></pre></div>
-<p>If the printed summary does not match your expectations — for example the model type shows <code>NULL</code> or a parameter name is missing — fix the <code>.ferx</code> file before proceeding. This catches typos and structural mistakes cheaply, before the optimizer runs.</p>
+<p><code>ferx_model_inspect()</code> returns the structure as a named
+list (invisibly), which is useful for programmatic checks:</p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" tabindex="-1"></a>s <span class="ot">&lt;-</span> <span class="fu">ferx_model_inspect</span>(ex<span class="sc">$</span>model)</span>
+<span id="cb5-2"><a href="#cb5-2" tabindex="-1"></a><span class="co">#&gt; Model structure (warfarin.ferx)</span></span>
+<span id="cb5-3"><a href="#cb5-3" tabindex="-1"></a><span class="co">#&gt;   Structural:  1-cpt oral  (TVCL, TVV, TVKA)</span></span>
+<span id="cb5-4"><a href="#cb5-4" tabindex="-1"></a><span class="co">#&gt;   IIV:         ETA_CL, ETA_V, ETA_KA</span></span>
+<span id="cb5-5"><a href="#cb5-5" tabindex="-1"></a><span class="co">#&gt;   IOV:         none</span></span>
+<span id="cb5-6"><a href="#cb5-6" tabindex="-1"></a><span class="co">#&gt;   Residual:    proportional</span></span>
+<span id="cb5-7"><a href="#cb5-7" tabindex="-1"></a>s<span class="sc">$</span>theta_names   <span class="co"># population parameter names</span></span>
+<span id="cb5-8"><a href="#cb5-8" tabindex="-1"></a><span class="co">#&gt; [1] &quot;TVCL&quot; &quot;TVV&quot;  &quot;TVKA&quot;</span></span>
+<span id="cb5-9"><a href="#cb5-9" tabindex="-1"></a>s<span class="sc">$</span>model_type    <span class="co"># short label for the PK model</span></span>
+<span id="cb5-10"><a href="#cb5-10" tabindex="-1"></a><span class="co">#&gt; [1] &quot;1-cpt oral&quot;</span></span>
+<span id="cb5-11"><a href="#cb5-11" tabindex="-1"></a>s<span class="sc">$</span>iiv           <span class="co"># IIV parameter names</span></span>
+<span id="cb5-12"><a href="#cb5-12" tabindex="-1"></a><span class="co">#&gt; [1] &quot;ETA_CL&quot; &quot;ETA_V&quot;  &quot;ETA_KA&quot;</span></span>
+<span id="cb5-13"><a href="#cb5-13" tabindex="-1"></a>s<span class="sc">$</span>residual      <span class="co"># error model type</span></span>
+<span id="cb5-14"><a href="#cb5-14" tabindex="-1"></a><span class="co">#&gt; [1] &quot;proportional&quot;</span></span></code></pre></div>
+<p>If the printed summary does not match your expectations — for example
+the model type shows <code>NULL</code> or a parameter name is missing —
+fix the <code>.ferx</code> file before proceeding. This catches typos
+and structural mistakes cheaply, before the optimizer runs.</p>
 </div>
 <div id="step-3-fit" class="section level3">
 <h3>Step 3 — Fit</h3>
-<p>Once the structure looks correct, pass the same paths to <code>ferx_fit()</code>:</p>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r">fit &lt;-<span class="st"> </span><span class="kw">ferx_fit</span>(ex$model, ex$data)
-fit</code></pre></div>
+<p>Once the structure looks correct, pass the same paths to
+<code>ferx_fit()</code>:</p>
+<div class="sourceCode" id="cb6"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" tabindex="-1"></a>fit <span class="ot">&lt;-</span> <span class="fu">ferx_fit</span>(ex<span class="sc">$</span>model, ex<span class="sc">$</span>data)</span>
+<span id="cb6-2"><a href="#cb6-2" tabindex="-1"></a>fit</span></code></pre></div>
 </div>
 <div id="step-4-re-inspect-from-the-fitted-result" class="section level3">
 <h3>Step 4 — Re-inspect from the fitted result</h3>
-<p>After fitting you can call <code>ferx_model_inspect()</code> directly on the <code>ferx_fit</code> object returned by <code>ferx_fit()</code> — no need to supply the model path again:</p>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">ferx_model_inspect</span>(fit)</code></pre></div>
-<p>The output is identical to the pre-fit inspection. This is convenient when you want to confirm the structure inside a script or report without keeping the model path in scope.</p>
+<p>After fitting you can call <code>ferx_model_inspect()</code> directly
+on the <code>ferx_fit</code> object returned by <code>ferx_fit()</code>
+— no need to supply the model path again:</p>
+<div class="sourceCode" id="cb7"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" tabindex="-1"></a><span class="fu">ferx_model_inspect</span>(fit)</span></code></pre></div>
+<p>The output is identical to the pre-fit inspection. This is convenient
+when you want to confirm the structure inside a script or report without
+keeping the model path in scope.</p>
 <hr />
 </div>
 </div>
 <div id="pipe-based-workflow" class="section level2">
 <h2>Pipe-based workflow</h2>
-<p><code>ferx_model()</code> bundles model and data paths into a single object that flows through a <code>|&gt;</code> chain. This is the preferred style when you need to adjust options before fitting or chain several post-fit steps.</p>
+<p><code>ferx_model()</code> bundles model and data paths into a single
+object that flows through a <code>|&gt;</code> chain. This is the
+preferred style when you need to adjust options before fitting or chain
+several post-fit steps.</p>
 <div id="entry-point" class="section level3">
 <h3>Entry point</h3>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r">ex &lt;-<span class="st"> </span><span class="kw">ferx_example</span>(<span class="st">&quot;warfarin&quot;</span>)
-m &lt;-<span class="st"> </span><span class="kw">ferx_model</span>(ex$model, <span class="dt">data =</span> ex$data)
-m   <span class="co"># prints path, data path, and structure summary</span>
-<span class="co">#&gt; ferx_model</span>
-<span class="co">#&gt;   Model: /Library/Frameworks/R.framework/Versions/4.5-x86_64/Resources/library/ferx/examples/models/warfarin.ferx</span>
-<span class="co">#&gt;   Data:  /Library/Frameworks/R.framework/Versions/4.5-x86_64/Resources/library/ferx/examples/data/warfarin.csv</span>
-<span class="co">#&gt;   ---</span>
-<span class="co">#&gt;   Structural:  1-cpt oral  (TVCL, TVV, TVKA)</span>
-<span class="co">#&gt;   IIV:         ETA_CL, ETA_V, ETA_KA</span>
-<span class="co">#&gt;   IOV:         none</span>
-<span class="co">#&gt;   Residual:    proportional</span></code></pre></div>
+<div class="sourceCode" id="cb8"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" tabindex="-1"></a>ex <span class="ot">&lt;-</span> <span class="fu">ferx_example</span>(<span class="st">&quot;warfarin&quot;</span>)</span>
+<span id="cb8-2"><a href="#cb8-2" tabindex="-1"></a>m <span class="ot">&lt;-</span> <span class="fu">ferx_model</span>(ex<span class="sc">$</span>data, ex<span class="sc">$</span>model)</span>
+<span id="cb8-3"><a href="#cb8-3" tabindex="-1"></a>m   <span class="co"># prints path, data path, and structure summary</span></span>
+<span id="cb8-4"><a href="#cb8-4" tabindex="-1"></a><span class="co">#&gt; ferx_model</span></span>
+<span id="cb8-5"><a href="#cb8-5" tabindex="-1"></a><span class="co">#&gt;   Model: /Users/ronkeizer/git/insightrx/ferx/inst/examples/models/warfarin.ferx</span></span>
+<span id="cb8-6"><a href="#cb8-6" tabindex="-1"></a><span class="co">#&gt;   Data:  /Users/ronkeizer/git/insightrx/ferx/inst/examples/data/warfarin.csv</span></span>
+<span id="cb8-7"><a href="#cb8-7" tabindex="-1"></a><span class="co">#&gt;   ---</span></span>
+<span id="cb8-8"><a href="#cb8-8" tabindex="-1"></a><span class="co">#&gt;   Structural:  1-cpt oral  (TVCL, TVV, TVKA)</span></span>
+<span id="cb8-9"><a href="#cb8-9" tabindex="-1"></a><span class="co">#&gt;   IIV:         ETA_CL, ETA_V, ETA_KA</span></span>
+<span id="cb8-10"><a href="#cb8-10" tabindex="-1"></a><span class="co">#&gt;   IOV:         none</span></span>
+<span id="cb8-11"><a href="#cb8-11" tabindex="-1"></a><span class="co">#&gt;   Residual:    proportional</span></span></code></pre></div>
 </div>
 <div id="minimal-pipe-inspect-fit-summarise" class="section level3">
 <h3>Minimal pipe — inspect, fit, summarise</h3>
-<p><code>ferx_fit()</code> dispatches on the <code>ferx_model</code> object and picks up <code>$data</code> automatically.</p>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">ferx_model</span>(ex$model, <span class="dt">data =</span> ex$data) |<span class="er">&gt;</span>
-<span class="st">  </span><span class="kw">ferx_fit</span>(<span class="dt">method =</span> <span class="st">&quot;focei&quot;</span>, <span class="dt">covariance =</span> <span class="ot">TRUE</span>) |<span class="er">&gt;</span>
-<span class="st">  </span><span class="kw">summary</span>()</code></pre></div>
+<p><code>ferx_fit()</code> dispatches on the <code>ferx_model</code>
+object and picks up <code>$data</code> automatically.</p>
+<div class="sourceCode" id="cb9"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" tabindex="-1"></a><span class="fu">ferx_model</span>(ex<span class="sc">$</span>data, ex<span class="sc">$</span>model) <span class="sc">|&gt;</span></span>
+<span id="cb9-2"><a href="#cb9-2" tabindex="-1"></a>  <span class="fu">ferx_fit</span>(<span class="at">method =</span> <span class="st">&quot;focei&quot;</span>, <span class="at">covariance =</span> <span class="cn">TRUE</span>) <span class="sc">|&gt;</span></span>
+<span id="cb9-3"><a href="#cb9-3" tabindex="-1"></a>  <span class="fu">summary</span>()</span></code></pre></div>
 </div>
 <div id="peek-at-a-section-mid-pipe" class="section level3">
 <h3>Peek at a section mid-pipe</h3>
-<p><code>ferx_get_section()</code> prints the named section to the console and passes the <code>ferx_model</code> object through unchanged, so the pipe continues:</p>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">ferx_model</span>(ex$model, <span class="dt">data =</span> ex$data) |<span class="er">&gt;</span>
-<span class="st">  </span><span class="kw">ferx_get_section</span>(<span class="st">&quot;parameters&quot;</span>)
-<span class="co">#&gt; # [parameters]</span>
-<span class="co">#&gt;   theta TVCL(0.134, 0.001, 10.0)</span>
-<span class="co">#&gt;   theta TVV(8.1, 0.1, 500.0)</span>
-<span class="co">#&gt;   theta TVKA(1.0, 0.01, 50.0)</span>
-<span class="co">#&gt; </span>
-<span class="co">#&gt;   omega ETA_CL ~ 0.07</span>
-<span class="co">#&gt;   omega ETA_V  ~ 0.02</span>
-<span class="co">#&gt;   omega ETA_KA ~ 0.40</span>
-<span class="co">#&gt; </span>
-<span class="co">#&gt;   sigma PROP_ERR ~ 0.01</span></code></pre></div>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="co"># Print [parameters] then fit without interrupting the chain</span>
-fit &lt;-<span class="st"> </span><span class="kw">ferx_model</span>(ex$model, <span class="dt">data =</span> ex$data) |<span class="er">&gt;</span>
-<span class="st">  </span><span class="kw">ferx_get_section</span>(<span class="st">&quot;parameters&quot;</span>) |<span class="er">&gt;</span>
-<span class="st">  </span><span class="kw">ferx_fit</span>(<span class="dt">method =</span> <span class="st">&quot;focei&quot;</span>)</code></pre></div>
+<p><code>ferx_get_section()</code> prints the named section to the
+console and passes the <code>ferx_model</code> object through unchanged,
+so the pipe continues:</p>
+<div class="sourceCode" id="cb10"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1" tabindex="-1"></a><span class="fu">ferx_model</span>(ex<span class="sc">$</span>data, ex<span class="sc">$</span>model) <span class="sc">|&gt;</span></span>
+<span id="cb10-2"><a href="#cb10-2" tabindex="-1"></a>  <span class="fu">ferx_get_section</span>(<span class="st">&quot;parameters&quot;</span>)</span>
+<span id="cb10-3"><a href="#cb10-3" tabindex="-1"></a><span class="co">#&gt; # [parameters]</span></span>
+<span id="cb10-4"><a href="#cb10-4" tabindex="-1"></a><span class="co">#&gt;   theta TVCL(0.134, 0.001, 10.0)</span></span>
+<span id="cb10-5"><a href="#cb10-5" tabindex="-1"></a><span class="co">#&gt;   theta TVV(8.1, 0.1, 500.0)</span></span>
+<span id="cb10-6"><a href="#cb10-6" tabindex="-1"></a><span class="co">#&gt;   theta TVKA(1.0, 0.01, 50.0)</span></span>
+<span id="cb10-7"><a href="#cb10-7" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb10-8"><a href="#cb10-8" tabindex="-1"></a><span class="co">#&gt;   omega ETA_CL ~ 0.07</span></span>
+<span id="cb10-9"><a href="#cb10-9" tabindex="-1"></a><span class="co">#&gt;   omega ETA_V  ~ 0.02</span></span>
+<span id="cb10-10"><a href="#cb10-10" tabindex="-1"></a><span class="co">#&gt;   omega ETA_KA ~ 0.40</span></span>
+<span id="cb10-11"><a href="#cb10-11" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb10-12"><a href="#cb10-12" tabindex="-1"></a><span class="co">#&gt;   sigma PROP_ERR ~ 0.01</span></span></code></pre></div>
+<div class="sourceCode" id="cb11"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb11-1"><a href="#cb11-1" tabindex="-1"></a><span class="co"># Print [parameters] then fit without interrupting the chain</span></span>
+<span id="cb11-2"><a href="#cb11-2" tabindex="-1"></a>fit <span class="ot">&lt;-</span> <span class="fu">ferx_model</span>(ex<span class="sc">$</span>data, ex<span class="sc">$</span>model) <span class="sc">|&gt;</span></span>
+<span id="cb11-3"><a href="#cb11-3" tabindex="-1"></a>  <span class="fu">ferx_get_section</span>(<span class="st">&quot;parameters&quot;</span>) <span class="sc">|&gt;</span></span>
+<span id="cb11-4"><a href="#cb11-4" tabindex="-1"></a>  <span class="fu">ferx_fit</span>(<span class="at">method =</span> <span class="st">&quot;focei&quot;</span>)</span></code></pre></div>
 </div>
 <div id="override-fit-options-before-fitting" class="section level3">
 <h3>Override fit options before fitting</h3>
-<p><code>ferx_set_section()</code> rewrites a section on disk and returns the <code>ferx_model</code> unchanged. <strong>Important:</strong> it edits the file in place — copy first if you do not want to modify the original.</p>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r">model_copy &lt;-<span class="st"> </span><span class="kw">file.path</span>(<span class="kw">tempdir</span>(), <span class="st">&quot;warfarin.ferx&quot;</span>)
-<span class="kw">file.copy</span>(ex$model, model_copy)
-
-fit &lt;-<span class="st"> </span><span class="kw">ferx_model</span>(model_copy, <span class="dt">data =</span> ex$data) |<span class="er">&gt;</span>
-<span class="st">  </span><span class="kw">ferx_set_section</span>(<span class="st">&quot;fit_options&quot;</span>, <span class="kw">c</span>(
-    <span class="st">&quot;  method     = focei&quot;</span>,
-    <span class="st">&quot;  maxiter    = 500&quot;</span>,
-    <span class="st">&quot;  covariance = true&quot;</span>
-  )) |<span class="er">&gt;</span>
-<span class="st">  </span><span class="kw">ferx_fit</span>()
-
-<span class="kw">summary</span>(fit)
-<span class="kw">ferx_model_inspect</span>(fit)    <span class="co"># no path needed after fitting</span>
-<span class="kw">ferx_cor_matrix</span>(fit)       <span class="co"># parameter correlation matrix</span>
-<span class="kw">ferx_plot_trace</span>(fit)       <span class="co"># OFV + gradient norm convergence plot</span></code></pre></div>
+<p><code>ferx_set_section()</code> rewrites a section on disk and
+returns the <code>ferx_model</code> unchanged.
+<strong>Important:</strong> it edits the file in place — copy first if
+you do not want to modify the original.</p>
+<div class="sourceCode" id="cb12"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb12-1"><a href="#cb12-1" tabindex="-1"></a>model_copy <span class="ot">&lt;-</span> <span class="fu">file.path</span>(<span class="fu">tempdir</span>(), <span class="st">&quot;warfarin.ferx&quot;</span>)</span>
+<span id="cb12-2"><a href="#cb12-2" tabindex="-1"></a><span class="fu">file.copy</span>(ex<span class="sc">$</span>model, model_copy)</span>
+<span id="cb12-3"><a href="#cb12-3" tabindex="-1"></a></span>
+<span id="cb12-4"><a href="#cb12-4" tabindex="-1"></a>fit <span class="ot">&lt;-</span> <span class="fu">ferx_model</span>(ex<span class="sc">$</span>data, model_copy) <span class="sc">|&gt;</span></span>
+<span id="cb12-5"><a href="#cb12-5" tabindex="-1"></a>  <span class="fu">ferx_set_section</span>(<span class="st">&quot;fit_options&quot;</span>, <span class="fu">c</span>(</span>
+<span id="cb12-6"><a href="#cb12-6" tabindex="-1"></a>    <span class="st">&quot;  method     = focei&quot;</span>,</span>
+<span id="cb12-7"><a href="#cb12-7" tabindex="-1"></a>    <span class="st">&quot;  maxiter    = 500&quot;</span>,</span>
+<span id="cb12-8"><a href="#cb12-8" tabindex="-1"></a>    <span class="st">&quot;  covariance = true&quot;</span></span>
+<span id="cb12-9"><a href="#cb12-9" tabindex="-1"></a>  )) <span class="sc">|&gt;</span></span>
+<span id="cb12-10"><a href="#cb12-10" tabindex="-1"></a>  <span class="fu">ferx_fit</span>()</span>
+<span id="cb12-11"><a href="#cb12-11" tabindex="-1"></a></span>
+<span id="cb12-12"><a href="#cb12-12" tabindex="-1"></a><span class="fu">summary</span>(fit)</span>
+<span id="cb12-13"><a href="#cb12-13" tabindex="-1"></a><span class="fu">ferx_model_inspect</span>(fit)    <span class="co"># no path needed after fitting</span></span>
+<span id="cb12-14"><a href="#cb12-14" tabindex="-1"></a><span class="fu">ferx_cor_matrix</span>(fit)       <span class="co"># parameter correlation matrix</span></span>
+<span id="cb12-15"><a href="#cb12-15" tabindex="-1"></a><span class="fu">ferx_plot_trace</span>(fit)       <span class="co"># OFV + gradient norm convergence plot</span></span></code></pre></div>
 </div>
 <div id="validate-before-a-long-run" class="section level3">
 <h3>Validate before a long run</h3>
-<p><code>ferx_check_init()</code> runs only 5 iterations and returns a trace and a summary table. Use it to confirm the OFV is dropping before committing to a long estimation:</p>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r">chk &lt;-<span class="st"> </span><span class="kw">ferx_check_init</span>(ex$model, ex$data, <span class="dt">method =</span> <span class="st">&quot;focei&quot;</span>)
-chk$summary      <span class="co"># ofv_start, ofv_end, ofv_drop — is OFV decreasing?</span>
-<span class="kw">ferx_plot_trace</span>(chk$fit)   <span class="co"># visual check: first few iterations</span></code></pre></div>
+<p><code>ferx_check_init()</code> runs only 5 iterations and returns a
+trace and a summary table. Use it to confirm the OFV is dropping before
+committing to a long estimation:</p>
+<div class="sourceCode" id="cb13"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb13-1"><a href="#cb13-1" tabindex="-1"></a>chk <span class="ot">&lt;-</span> <span class="fu">ferx_check_init</span>(ex<span class="sc">$</span>model, ex<span class="sc">$</span>data, <span class="at">method =</span> <span class="st">&quot;focei&quot;</span>)</span>
+<span id="cb13-2"><a href="#cb13-2" tabindex="-1"></a>chk<span class="sc">$</span>summary      <span class="co"># ofv_start, ofv_end, ofv_drop — is OFV decreasing?</span></span>
+<span id="cb13-3"><a href="#cb13-3" tabindex="-1"></a><span class="fu">ferx_plot_trace</span>(chk<span class="sc">$</span>fit)   <span class="co"># visual check: first few iterations</span></span></code></pre></div>
 </div>
 <div id="multi-stage-method-chain" class="section level3">
 <h3>Multi-stage method chain</h3>
-<p>Pass a character vector to <code>method</code> to chain stages — each stage starts from the previous stage's converged parameters:</p>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r">fit &lt;-<span class="st"> </span><span class="kw">ferx_model</span>(ex$model, <span class="dt">data =</span> ex$data) |<span class="er">&gt;</span>
-<span class="st">  </span><span class="kw">ferx_fit</span>(<span class="dt">method =</span> <span class="kw">c</span>(<span class="st">&quot;saem&quot;</span>, <span class="st">&quot;focei&quot;</span>), <span class="dt">covariance =</span> <span class="ot">TRUE</span>)</code></pre></div>
+<p>Pass a character vector to <code>method</code> to chain stages — each
+stage starts from the previous stage’s converged parameters:</p>
+<div class="sourceCode" id="cb14"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb14-1"><a href="#cb14-1" tabindex="-1"></a>fit <span class="ot">&lt;-</span> <span class="fu">ferx_model</span>(ex<span class="sc">$</span>data, ex<span class="sc">$</span>model) <span class="sc">|&gt;</span></span>
+<span id="cb14-2"><a href="#cb14-2" tabindex="-1"></a>  <span class="fu">ferx_fit</span>(<span class="at">method =</span> <span class="fu">c</span>(<span class="st">&quot;saem&quot;</span>, <span class="st">&quot;focei&quot;</span>), <span class="at">covariance =</span> <span class="cn">TRUE</span>)</span></code></pre></div>
 </div>
 <div id="simulate-and-predict-from-fitted-parameters" class="section level3">
 <h3>Simulate and predict from fitted parameters</h3>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="co"># Simulate 100 replicates using individual parameters from the fit</span>
-sim &lt;-<span class="st"> </span><span class="kw">ferx_simulate</span>(ex$model, ex$data, <span class="dt">n_sim =</span> <span class="dv">100</span>, <span class="dt">seed =</span> <span class="dv">42</span>, <span class="dt">fit =</span> fit)
-
-<span class="co"># Population predictions using fitted theta (eta = 0)</span>
-pred &lt;-<span class="st"> </span><span class="kw">ferx_predict</span>(ex$model, ex$data, <span class="dt">fit =</span> fit)</code></pre></div>
+<div class="sourceCode" id="cb15"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb15-1"><a href="#cb15-1" tabindex="-1"></a><span class="co"># Simulate 100 replicates using individual parameters from the fit</span></span>
+<span id="cb15-2"><a href="#cb15-2" tabindex="-1"></a>sim <span class="ot">&lt;-</span> <span class="fu">ferx_simulate</span>(ex<span class="sc">$</span>model, ex<span class="sc">$</span>data, <span class="at">n_sim =</span> <span class="dv">100</span>, <span class="at">seed =</span> <span class="dv">42</span>, <span class="at">fit =</span> fit)</span>
+<span id="cb15-3"><a href="#cb15-3" tabindex="-1"></a></span>
+<span id="cb15-4"><a href="#cb15-4" tabindex="-1"></a><span class="co"># Population predictions using fitted theta (eta = 0)</span></span>
+<span id="cb15-5"><a href="#cb15-5" tabindex="-1"></a>pred <span class="ot">&lt;-</span> <span class="fu">ferx_predict</span>(ex<span class="sc">$</span>model, ex<span class="sc">$</span>data, <span class="at">fit =</span> fit)</span></code></pre></div>
 </div>
 <div id="post-fit-diagnostics" class="section level3">
 <h3>Post-fit diagnostics</h3>
-<p>All diagnostic outputs are fields on the <code>ferx_fit</code> object:</p>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">head</span>(fit$sdtab)               <span class="co"># PRED, IPRED, CWRES, IWRES per observation</span>
-<span class="kw">head</span>(fit$ebe_etas)            <span class="co"># empirical Bayes ETAs per subject</span>
-<span class="kw">head</span>(fit$individual_estimates) <span class="co"># individual PK parameters (CL, V, KA, ...)</span>
-fit$eta_normality             <span class="co"># Shapiro-Wilk normality test per ETA</span></code></pre></div>
+<p>All diagnostic outputs are fields on the <code>ferx_fit</code>
+object:</p>
+<div class="sourceCode" id="cb16"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb16-1"><a href="#cb16-1" tabindex="-1"></a><span class="fu">head</span>(fit<span class="sc">$</span>sdtab)               <span class="co"># PRED, IPRED, CWRES, IWRES per observation</span></span>
+<span id="cb16-2"><a href="#cb16-2" tabindex="-1"></a><span class="fu">head</span>(fit<span class="sc">$</span>ebe_etas)            <span class="co"># empirical Bayes ETAs per subject</span></span>
+<span id="cb16-3"><a href="#cb16-3" tabindex="-1"></a><span class="fu">head</span>(fit<span class="sc">$</span>individual_estimates) <span class="co"># individual PK parameters (CL, V, KA, ...)</span></span>
+<span id="cb16-4"><a href="#cb16-4" tabindex="-1"></a>fit<span class="sc">$</span>eta_normality             <span class="co"># Shapiro-Wilk normality test per ETA</span></span></code></pre></div>
 <hr />
 </div>
 </div>
 <div id="parameter-transforms" class="section level2">
 <h2>Parameter transforms</h2>
-<p>ferx supports log and logit transforms for both thetas and ETAs directly in the model DSL. When a transform is in use, <code>print()</code> and <code>ferx_estimates()</code> display results on the natural scale alongside the estimation-scale values.</p>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="co"># Log-normal CL (typical in PK — ETA_CL is additive on the log scale)</span>
-CL =<span class="st"> </span>TVCL *<span class="st"> </span><span class="kw">exp</span>(ETA_CL)  <span class="co"># TVCL is on the natural scale; BSV is log-normal</span>
-
-<span class="co"># Logit-transformed bioavailability (constrained to (0, 1))</span>
-F =<span class="st"> </span><span class="kw">inv_logit</span>(<span class="kw">logit</span>(THETA_F) +<span class="st"> </span>ETA_F)</code></pre></div>
-<p>See <code>vignette(&quot;parameter-transforms&quot;)</code> for worked examples with bundled models.</p>
+<p>ferx supports log and logit transforms for both thetas and ETAs
+directly in the model DSL. When a transform is in use,
+<code>print()</code> and <code>ferx_estimates()</code> display results
+on the natural scale alongside the estimation-scale values.</p>
+<div class="sourceCode" id="cb17"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb17-1"><a href="#cb17-1" tabindex="-1"></a><span class="co"># Log-normal CL (typical in PK — ETA_CL is additive on the log scale)</span></span>
+<span id="cb17-2"><a href="#cb17-2" tabindex="-1"></a>CL <span class="ot">=</span> TVCL <span class="sc">*</span> <span class="fu">exp</span>(ETA_CL)  <span class="co"># TVCL is on the natural scale; BSV is log-normal</span></span>
+<span id="cb17-3"><a href="#cb17-3" tabindex="-1"></a></span>
+<span id="cb17-4"><a href="#cb17-4" tabindex="-1"></a><span class="co"># Logit-transformed bioavailability (constrained to (0, 1))</span></span>
+<span id="cb17-5"><a href="#cb17-5" tabindex="-1"></a>F <span class="ot">=</span> <span class="fu">inv_logit</span>(<span class="fu">logit</span>(THETA_F) <span class="sc">+</span> ETA_F)</span></code></pre></div>
+<p>See <code>vignette(&quot;parameter-transforms&quot;)</code> for worked examples
+with bundled models.</p>
 <hr />
 </div>
 <div id="summary" class="section level2">
 <h2>Summary</h2>
 <div id="path-based" class="section level3">
 <h3>Path-based</h3>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r">ex &lt;-<span class="st"> </span><span class="kw">ferx_example</span>(<span class="st">&quot;warfarin&quot;</span>)
-<span class="kw">ferx_model_inspect</span>(ex$model)          <span class="co"># verify structure before fitting</span>
-fit &lt;-<span class="st"> </span><span class="kw">ferx_fit</span>(ex$model, ex$data)
-<span class="kw">ferx_model_inspect</span>(fit)               <span class="co"># re-inspect post-fit (no path needed)</span></code></pre></div>
+<div class="sourceCode" id="cb18"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb18-1"><a href="#cb18-1" tabindex="-1"></a>ex <span class="ot">&lt;-</span> <span class="fu">ferx_example</span>(<span class="st">&quot;warfarin&quot;</span>)</span>
+<span id="cb18-2"><a href="#cb18-2" tabindex="-1"></a><span class="fu">ferx_model_inspect</span>(ex<span class="sc">$</span>model)          <span class="co"># verify structure before fitting</span></span>
+<span id="cb18-3"><a href="#cb18-3" tabindex="-1"></a>fit <span class="ot">&lt;-</span> <span class="fu">ferx_fit</span>(ex<span class="sc">$</span>model, ex<span class="sc">$</span>data)</span>
+<span id="cb18-4"><a href="#cb18-4" tabindex="-1"></a><span class="fu">ferx_model_inspect</span>(fit)               <span class="co"># re-inspect post-fit (no path needed)</span></span></code></pre></div>
 </div>
 <div id="pipe-based" class="section level3">
 <h3>Pipe-based</h3>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r">ex &lt;-<span class="st"> </span><span class="kw">ferx_example</span>(<span class="st">&quot;warfarin&quot;</span>)
-
-<span class="co"># Inspect, fit, summarise in one chain</span>
-<span class="kw">ferx_model</span>(ex$model, <span class="dt">data =</span> ex$data) |<span class="er">&gt;</span>
-<span class="st">  </span><span class="kw">ferx_get_section</span>(<span class="st">&quot;parameters&quot;</span>) |<span class="er">&gt;</span><span class="st">  </span><span class="co"># optional: peek before fitting</span>
-<span class="st">  </span><span class="kw">ferx_fit</span>(<span class="dt">method =</span> <span class="st">&quot;focei&quot;</span>, <span class="dt">covariance =</span> <span class="ot">TRUE</span>) |<span class="er">&gt;</span>
-<span class="st">  </span><span class="kw">summary</span>()
-
-<span class="co"># Edit options then fit (copy model file first)</span>
-model_copy &lt;-<span class="st"> </span><span class="kw">file.path</span>(<span class="kw">tempdir</span>(), <span class="st">&quot;warfarin.ferx&quot;</span>)
-<span class="kw">file.copy</span>(ex$model, model_copy)
-
-<span class="kw">ferx_model</span>(model_copy, <span class="dt">data =</span> ex$data) |<span class="er">&gt;</span>
-<span class="st">  </span><span class="kw">ferx_set_section</span>(<span class="st">&quot;fit_options&quot;</span>, <span class="kw">c</span>(
-    <span class="st">&quot;  method     = focei&quot;</span>,
-    <span class="st">&quot;  maxiter    = 500&quot;</span>,
-    <span class="st">&quot;  covariance = true&quot;</span>
-  )) |<span class="er">&gt;</span>
-<span class="st">  </span><span class="kw">ferx_fit</span>() |<span class="er">&gt;</span>
-<span class="st">  </span><span class="kw">summary</span>()</code></pre></div>
+<div class="sourceCode" id="cb19"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb19-1"><a href="#cb19-1" tabindex="-1"></a>ex <span class="ot">&lt;-</span> <span class="fu">ferx_example</span>(<span class="st">&quot;warfarin&quot;</span>)</span>
+<span id="cb19-2"><a href="#cb19-2" tabindex="-1"></a></span>
+<span id="cb19-3"><a href="#cb19-3" tabindex="-1"></a><span class="co"># Inspect, fit, summarise in one chain</span></span>
+<span id="cb19-4"><a href="#cb19-4" tabindex="-1"></a><span class="fu">ferx_model</span>(ex<span class="sc">$</span>data, ex<span class="sc">$</span>model) <span class="sc">|&gt;</span></span>
+<span id="cb19-5"><a href="#cb19-5" tabindex="-1"></a>  <span class="fu">ferx_get_section</span>(<span class="st">&quot;parameters&quot;</span>) <span class="sc">|&gt;</span>  <span class="co"># optional: peek before fitting</span></span>
+<span id="cb19-6"><a href="#cb19-6" tabindex="-1"></a>  <span class="fu">ferx_fit</span>(<span class="at">method =</span> <span class="st">&quot;focei&quot;</span>, <span class="at">covariance =</span> <span class="cn">TRUE</span>) <span class="sc">|&gt;</span></span>
+<span id="cb19-7"><a href="#cb19-7" tabindex="-1"></a>  <span class="fu">summary</span>()</span>
+<span id="cb19-8"><a href="#cb19-8" tabindex="-1"></a></span>
+<span id="cb19-9"><a href="#cb19-9" tabindex="-1"></a><span class="co"># Edit options then fit (copy model file first)</span></span>
+<span id="cb19-10"><a href="#cb19-10" tabindex="-1"></a>model_copy <span class="ot">&lt;-</span> <span class="fu">file.path</span>(<span class="fu">tempdir</span>(), <span class="st">&quot;warfarin.ferx&quot;</span>)</span>
+<span id="cb19-11"><a href="#cb19-11" tabindex="-1"></a><span class="fu">file.copy</span>(ex<span class="sc">$</span>model, model_copy)</span>
+<span id="cb19-12"><a href="#cb19-12" tabindex="-1"></a></span>
+<span id="cb19-13"><a href="#cb19-13" tabindex="-1"></a><span class="fu">ferx_model</span>(model_copy, <span class="at">data =</span> ex<span class="sc">$</span>data) <span class="sc">|&gt;</span></span>
+<span id="cb19-14"><a href="#cb19-14" tabindex="-1"></a>  <span class="fu">ferx_set_section</span>(<span class="st">&quot;fit_options&quot;</span>, <span class="fu">c</span>(</span>
+<span id="cb19-15"><a href="#cb19-15" tabindex="-1"></a>    <span class="st">&quot;  method     = focei&quot;</span>,</span>
+<span id="cb19-16"><a href="#cb19-16" tabindex="-1"></a>    <span class="st">&quot;  maxiter    = 500&quot;</span>,</span>
+<span id="cb19-17"><a href="#cb19-17" tabindex="-1"></a>    <span class="st">&quot;  covariance = true&quot;</span></span>
+<span id="cb19-18"><a href="#cb19-18" tabindex="-1"></a>  )) <span class="sc">|&gt;</span></span>
+<span id="cb19-19"><a href="#cb19-19" tabindex="-1"></a>  <span class="fu">ferx_fit</span>() <span class="sc">|&gt;</span></span>
+<span id="cb19-20"><a href="#cb19-20" tabindex="-1"></a>  <span class="fu">summary</span>()</span></code></pre></div>
 </div>
 </div>
 

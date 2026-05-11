@@ -35,24 +35,24 @@ s$residual      # error model type
 
 ## ----ferx-model---------------------------------------------------------------
 ex <- ferx_example("warfarin")
-m <- ferx_model(ex$model, data = ex$data)
+m <- ferx_model(ex$data, ex$model)
 m   # prints path, data path, and structure summary
 
 
 ## ----minimal-pipe, eval = FALSE-----------------------------------------------
-# ferx_model(ex$model, data = ex$data) |>
+# ferx_model(ex$data, ex$model) |>
 #   ferx_fit(method = "focei", covariance = TRUE) |>
 #   summary()
 
 
 ## ----get-section--------------------------------------------------------------
-ferx_model(ex$model, data = ex$data) |>
+ferx_model(ex$data, ex$model) |>
   ferx_get_section("parameters")
 
 
 ## ----get-section-fit, eval = FALSE--------------------------------------------
 # # Print [parameters] then fit without interrupting the chain
-# fit <- ferx_model(ex$model, data = ex$data) |>
+# fit <- ferx_model(ex$data, ex$model) |>
 #   ferx_get_section("parameters") |>
 #   ferx_fit(method = "focei")
 
@@ -61,7 +61,7 @@ ferx_model(ex$model, data = ex$data) |>
 # model_copy <- file.path(tempdir(), "warfarin.ferx")
 # file.copy(ex$model, model_copy)
 # 
-# fit <- ferx_model(model_copy, data = ex$data) |>
+# fit <- ferx_model(ex$data, model_copy) |>
 #   ferx_set_section("fit_options", c(
 #     "  method     = focei",
 #     "  maxiter    = 500",
@@ -82,7 +82,7 @@ ferx_model(ex$model, data = ex$data) |>
 
 
 ## ----method-chain, eval = FALSE-----------------------------------------------
-# fit <- ferx_model(ex$model, data = ex$data) |>
+# fit <- ferx_model(ex$data, ex$model) |>
 #   ferx_fit(method = c("saem", "focei"), covariance = TRUE)
 
 

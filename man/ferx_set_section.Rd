@@ -15,7 +15,9 @@ ferx_set_section(x, section, lines)
 header line).}
 }
 \value{
-\code{x}, invisibly.
+\code{x}, invisibly. For a \code{ferx_model} pointing at a
+bundled package file, the returned object's \code{$model} field will
+point at the temp-directory copy that was actually edited.
 }
 \description{
 Updates the body of a named section in a \code{.ferx} model file and
@@ -25,20 +27,22 @@ returns the input object so calls can be chained with \code{|>} or
 \details{
 When \code{x} is a \code{ferx_model} object the section is written to
 \code{x$model} and \code{x} is returned invisibly, allowing further
-pipe steps. When \code{x} is a plain path string the call is equivalent
-to \code{\link{ferx_model_set_section}(x, section, lines)} for backwards
-compatibility.
+pipe steps. \strong{Copy-on-write for bundled examples}: if \code{x$model}
+points to a file inside the installed \code{ferx} package directory
+(typically the result of \code{\link{ferx_example}()}), the file is first
+copied to \code{tempdir()} and \code{x$model} is updated to that copy
+before the edit. This prevents accidental modification of read-only
+package examples. When \code{x} is a plain path string the call is
+equivalent to \code{\link{ferx_model_set_section}(x, section, lines)}
+and the file is edited in place.
 }
 \examples{
 \dontrun{
 ex <- ferx_example("warfarin")
 
-# ferx_set_section() edits the file on disk, so copy first when working
-# with bundled examples or any model you do not want to overwrite.
-model_copy <- file.path(tempdir(), "warfarin.ferx")
-file.copy(ex$model, model_copy)
-
-ferx_model(model_copy, data = ex$data) |>
+# Safe by default: editing a bundled example transparently copies the
+# file to tempdir() and edits the copy. ex$model on disk is untouched.
+fit <- ferx_model(ex$data, ex$model) |>
   ferx_set_section("fit_options", c(
     "  method     = focei",
     "  maxiter    = 500",

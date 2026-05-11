@@ -28,12 +28,12 @@ ex <- ferx_example("warfarin")
 
 # Inspect [parameters] and continue piping — ferx_get_section() prints
 # the section and passes the ferx_model object through unchanged.
-ferx_model(ex$model, data = ex$data) |>
+ferx_model(ex$data, ex$model) |>
   ferx_get_section("parameters")
 
 \dontrun{
 # Mid-pipe peek: print [parameters] then fit without interrupting the chain
-fit <- ferx_model(ex$model, data = ex$data) |>
+fit <- ferx_model(ex$data, ex$model) |>
   ferx_get_section("parameters") |>
   ferx_fit(method = "focei")
 }
