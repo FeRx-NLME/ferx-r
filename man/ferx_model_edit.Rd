@@ -4,7 +4,13 @@
 \alias{ferx_model_edit}
 \title{Open a ferx model file in an editor}
 \usage{
-ferx_model_edit(path, dest = ".", overwrite = FALSE, save_as = NULL)
+ferx_model_edit(
+  path,
+  dest = ".",
+  overwrite = FALSE,
+  save_as = NULL,
+  .editor = utils::file.edit
+)
 }
 \arguments{
 \item{path}{Path to a \code{.ferx} model file.}
@@ -27,6 +33,10 @@ editing. Accepting \code{FALSE} lets you pass expressions like
 }
 When a copy is made the \emph{copy} path is returned; otherwise the edited
 file path is returned.}
+
+\item{.editor}{Function used to open the file. Defaults to
+\code{utils::file.edit}. Override in tests or non-interactive contexts to
+replace or suppress the editor call.}
 }
 \value{
 The path of the file in its final location, invisibly. When

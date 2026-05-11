@@ -261,6 +261,9 @@ ferx_model_show <- function(path) {
 #'   }
 #'   When a copy is made the \emph{copy} path is returned; otherwise the edited
 #'   file path is returned.
+#' @param .editor Function used to open the file. Defaults to
+#'   \code{utils::file.edit}. Override in tests or non-interactive contexts to
+#'   replace or suppress the editor call.
 #'
 #' @return The path of the file in its final location, invisibly. When
 #'   \code{save_as} produces a copy, that copy's path is returned; otherwise
@@ -286,7 +289,8 @@ ferx_model_show <- function(path) {
 #' @seealso \code{\link{ferx_model_show}}, \code{\link{ferx_model_new}},
 #'   \code{\link{ferx_example}}
 #' @export
-ferx_model_edit <- function(path, dest = ".", overwrite = FALSE, save_as = NULL) {
+ferx_model_edit <- function(path, dest = ".", overwrite = FALSE, save_as = NULL,
+                            .editor = utils::file.edit) {
   if (!file.exists(path)) stop("File not found: ", path)
 
   # Validate save_as up front so invalid input fails fast — before opening an
@@ -316,7 +320,7 @@ ferx_model_edit <- function(path, dest = ".", overwrite = FALSE, save_as = NULL)
     path <- dest_path
   }
 
-  utils::file.edit(path)
+  .editor(path)
 
   if (is.null(save_as)) return(invisible(path))
 
