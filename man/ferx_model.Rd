@@ -4,13 +4,13 @@
 \alias{ferx_model}
 \title{Create a ferx_model object}
 \usage{
-ferx_model(model, data = NULL)
+ferx_model(data = NULL, model)
 }
 \arguments{
-\item{model}{Path to a \code{.ferx} model file. The file must exist.}
+\item{data}{Optional path to a NONMEM-format CSV data file. Can be omitted
+here and supplied later to \code{\link{ferx_fit}}.}
 
-\item{data}{Optional path to a NONMEM-format CSV data file. Can be supplied
-later at \code{ferx_fit()} if omitted here.}
+\item{model}{Path to a \code{.ferx} model file. The file must exist.}
 }
 \value{
 An object of class \code{ferx_model} with fields \code{$model} and
@@ -24,17 +24,22 @@ time (the data path may be omitted and supplied later to
 \code{\link{ferx_fit}}).
 }
 \details{
-\strong{Typical pipe workflow:}
+\strong{Argument order:} \code{data} comes first so a data object can flow
+naturally into a pipeline:
+
 \preformatted{
-ferx_model("pk.ferx", data = "data.csv") |>
-  ferx_set_section("fit_options", c(
-    "  method     = focei",
-    "  maxiter    = 500",
-    "  covariance = true"
-  )) |>
-  ferx_fit() |>
-  summary()
+ex$data |> ferx_model(ex$model) |> ferx_fit() |> summary()
 }
+
+This is a change from earlier versions (where \code{model} was the first
+argument). Old positional calls of the form \code{ferx_model("pk.ferx")} or
+\code{ferx_model("pk.ferx", "data.csv")} are detected by the \code{.ferx}
+extension on what is now the \code{data} slot and silently rewritten with a
+deprecation warning; this auto-correction will be removed in a future
+release. Calls that name \code{data} explicitly
+(\code{ferx_model("pk.ferx", data = "data.csv")}) keep working unchanged
+because R matches \code{data =} by name first and the remaining positional
+argument falls into the \code{model} slot.
 
 All fit options (\code{method}, \code{covariance}, \code{threads},
 \code{settings}, …) can still be passed directly to \code{ferx_fit()} in
@@ -45,16 +50,17 @@ the pipe — the \code{ferx_model} object only carries the file paths. See
 ex <- ferx_example("warfarin")
 
 # Inspect the object — prints model path, data path, and structure summary
-m <- ferx_model(ex$model, data = ex$data)
+m <- ferx_model(ex$data, ex$model)
 print(m)
 
 # Without data — supply at fit time via ferx_fit(data = ...)
-m <- ferx_model(ex$model)
+m <- ferx_model(model = ex$model)
 
 \dontrun{
 # ── Minimal pipe ────────────────────────────────────────────────────────
 # ferx_fit() picks up $data automatically from the ferx_model object.
-fit <- ferx_model(ex$model, data = ex$data) |>
+fit <- ex$data |>
+  ferx_model(ex$model) |>
   ferx_fit(method = "focei", covariance = TRUE) |>
   summary()
 
@@ -63,7 +69,8 @@ fit <- ferx_model(ex$model, data = ex$data) |>
 # ferx_model through so the pipe continues. When the model file lives
 # inside the installed package (as for ferx_example()), the file is
 # copied to tempdir() first so the bundled example is never mutated.
-fit <- ferx_model(ex$model, data = ex$data) |>
+fit <- ex$data |>
+  ferx_model(ex$model) |>
   ferx_set_section("fit_options", c(
     "  method     = focei",
     "  maxiter    = 500",
@@ -77,7 +84,8 @@ ferx_cor_matrix(fit)      # parameter correlation matrix
 ferx_plot_trace(fit)      # OFV + gradient norm over iterations
 
 # ── Peek at a section mid-pipe without breaking the chain ────────────────
-fit <- ferx_model(ex$model, data = ex$data) |>
+fit <- ex$data |>
+  ferx_model(ex$model) |>
   ferx_get_section("parameters") |>   # prints [parameters], passes through
   ferx_fit(method = "focei")
 
@@ -88,7 +96,8 @@ chk$summary   # ofv_start, ofv_end, ofv_drop — confirm OFV is dropping
 ferx_plot_trace(chk$fit)  # visual check of first few iterations
 
 # ── Multi-stage chain: SAEM → FOCEI ─────────────────────────────────────
-fit <- ferx_model(ex$model, data = ex$data) |>
+fit <- ex$data |>
+  ferx_model(ex$model) |>
   ferx_fit(method = c("saem", "focei"), covariance = TRUE)
 
 # ── Simulate and predict from fitted parameters ──────────────────────────
@@ -97,13 +106,8 @@ pred <- ferx_predict(ex$model, ex$data, fit = fit)
 
 # ── Data can be overridden at fit time ───────────────────────────────────
 # (substitute the path to your own dataset for "other_cohort.csv")
-ferx_model(ex$model, data = ex$data) |>
+ferx_model(ex$data, ex$model) |>
   ferx_fit(data = "other_cohort.csv")
-
-# ── Data-first pipe (R >= 4.2) ───────────────────────────────────────────
-# ferx_model() takes model first, like lm(formula, data). To start a pipe
-# from the data object, use the _ placeholder to route it to `data`:
-ex$data |> ferx_model(ex$model, data = _) |> ferx_fit() |> summary()
 }
 
 }

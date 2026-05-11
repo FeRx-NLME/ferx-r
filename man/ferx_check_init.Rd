@@ -48,7 +48,8 @@ chk$summary
 
 # Pipe from a ferx_model — data is picked up from the object
 ex <- ferx_example("warfarin")
-ferx_model(ex$model, data = ex$data) |>
+ex$data |>
+  ferx_model(ex$model) |>
   ferx_check_init(method = "focei")
 }
 

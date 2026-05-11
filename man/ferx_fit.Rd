@@ -315,7 +315,7 @@ ferx_fit(model = "pk.ferx", data = "data.csv")
 
 \strong{2. \code{ferx_model} object (pipe style):}
 \preformatted{
-ferx_model("pk.ferx", data = "data.csv") |> ferx_fit()
+"data.csv" |> ferx_model("pk.ferx") |> ferx_fit()
 }
 
 Both dispatch to the same Rust backend. The \code{ferx_model} form is
@@ -503,12 +503,14 @@ fit <- ferx_fit(ex$model, ex$data,
 
 # ── Pipe style (ferx_model object) ───────────────────────────────────────
 
-# Basic pipe — model and data bundled, fit options passed to ferx_fit()
-ferx_model(ex$model, data = ex$data) |>
+# Basic pipe — data flows into ferx_model() which bundles the model path
+ex$data |>
+  ferx_model(ex$model) |>
   ferx_fit(method = "focei", covariance = TRUE)
 
 # Modify a model section, then fit
-ferx_model(ex$model, data = ex$data) |>
+ex$data |>
+  ferx_model(ex$model) |>
   ferx_set_section("fit_options", c(
     "  method     = focei",
     "  maxiter    = 500",
@@ -517,21 +519,23 @@ ferx_model(ex$model, data = ex$data) |>
   ferx_fit()
 
 # Full pipeline including post-fit outputs
-ferx_model(ex$model, data = ex$data) |>
+ex$data |>
+  ferx_model(ex$model) |>
   ferx_set_section("fit_options", c("  method = focei")) |>
   ferx_fit(covariance = TRUE, threads = 4L,
            settings = list(optimizer = "slsqp")) |>
   summary()
 
 # Inspect then continue (ferx_get_section returns the ferx_model invisibly)
-ferx_model(ex$model, data = ex$data) |>
+ex$data |>
+  ferx_model(ex$model) |>
   ferx_get_section("parameters") |>
   ferx_fit() |>
   ferx_estimates()
 
 # Override data stored in ferx_model at fit time
 # (substitute the path to your own dataset for "other_cohort.csv")
-m <- ferx_model(ex$model, data = ex$data)
+m <- ferx_model(ex$data, ex$model)
 ferx_fit(m, data = "other_cohort.csv", method = "focei")
 
 # ── Post-fit outputs ─────────────────────────────────────────────────────

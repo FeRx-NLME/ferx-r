@@ -24,20 +24,20 @@ This vignette covers two complementary workflows:
 
 Both workflows produce the same `ferx_fit` result.
 
-**Entry point:** `ferx_model(model, data)` takes the model file first, following the convention of R modelling APIs like `lm(formula, data)`. The natural pipe entry is therefore the model:
+**Entry point:** `ferx_model(data, model)` takes the data file first, which lets a data object flow naturally into a pipeline:
 
 ```r
-ferx_model(ex$model, data = ex$data) |> ferx_fit() |> summary()
+ex$data |> ferx_model(ex$model) |> ferx_fit() |> summary()
 ```
 
-If you prefer to start with the data — common in EDA pipelines — use the R 4.2+ `_` placeholder to route it to the named `data` argument:
+You can also call it positionally or by name:
 
 ```r
-# Requires R >= 4.2
-ex$data |> ferx_model(ex$model, data = _) |> ferx_fit() |> summary()
+ferx_model(ex$data, ex$model) |> ferx_fit() |> summary()
+ferx_model(data = ex$data, model = ex$model) |> ferx_fit() |> summary()
 ```
 
-See [issue #81](https://github.com/InsightRX/ferx/issues/81) for the ongoing discussion on argument order.
+**Migration note:** Earlier versions used the order `ferx_model(model, data)`. Old-style positional calls (`ferx_model("pk.ferx")` or `ferx_model("pk.ferx", "data.csv")`) are detected by the `.ferx` extension and auto-corrected with a deprecation warning; this shim will be removed in a future release. Calls that pass `data` by name (`ferx_model("pk.ferx", data = "data.csv")`) keep working unchanged.
 
 ---
 
@@ -124,7 +124,7 @@ options before fitting or chain several post-fit steps.
 
 ```{r ferx-model}
 ex <- ferx_example("warfarin")
-m <- ferx_model(ex$model, data = ex$data)
+m <- ferx_model(ex$data, ex$model)
 m   # prints path, data path, and structure summary
 ```
 
@@ -134,7 +134,7 @@ m   # prints path, data path, and structure summary
 automatically.
 
 ```{r minimal-pipe, eval = FALSE}
-ferx_model(ex$model, data = ex$data) |>
+ferx_model(ex$data, ex$model) |>
   ferx_fit(method = "focei", covariance = TRUE) |>
   summary()
 ```
@@ -145,13 +145,13 @@ ferx_model(ex$model, data = ex$data) |>
 `ferx_model` object through unchanged, so the pipe continues:
 
 ```{r get-section}
-ferx_model(ex$model, data = ex$data) |>
+ferx_model(ex$data, ex$model) |>
   ferx_get_section("parameters")
 ```
 
 ```{r get-section-fit, eval = FALSE}
 # Print [parameters] then fit without interrupting the chain
-fit <- ferx_model(ex$model, data = ex$data) |>
+fit <- ferx_model(ex$data, ex$model) |>
   ferx_get_section("parameters") |>
   ferx_fit(method = "focei")
 ```
@@ -167,7 +167,7 @@ modify the original.
 model_copy <- file.path(tempdir(), "warfarin.ferx")
 file.copy(ex$model, model_copy)
 
-fit <- ferx_model(model_copy, data = ex$data) |>
+fit <- ferx_model(ex$data, model_copy) |>
   ferx_set_section("fit_options", c(
     "  method     = focei",
     "  maxiter    = 500",
@@ -199,7 +199,7 @@ Pass a character vector to `method` to chain stages — each stage starts from
 the previous stage's converged parameters:
 
 ```{r method-chain, eval = FALSE}
-fit <- ferx_model(ex$model, data = ex$data) |>
+fit <- ferx_model(ex$data, ex$model) |>
   ferx_fit(method = c("saem", "focei"), covariance = TRUE)
 ```
 
@@ -261,7 +261,7 @@ ferx_model_inspect(fit)               # re-inspect post-fit (no path needed)
 ex <- ferx_example("warfarin")
 
 # Inspect, fit, summarise in one chain
-ferx_model(ex$model, data = ex$data) |>
+ferx_model(ex$data, ex$model) |>
   ferx_get_section("parameters") |>  # optional: peek before fitting
   ferx_fit(method = "focei", covariance = TRUE) |>
   summary()

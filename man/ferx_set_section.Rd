@@ -42,7 +42,7 @@ ex <- ferx_example("warfarin")
 
 # Safe by default: editing a bundled example transparently copies the
 # file to tempdir() and edits the copy. ex$model on disk is untouched.
-fit <- ferx_model(ex$model, data = ex$data) |>
+fit <- ferx_model(ex$data, ex$model) |>
   ferx_set_section("fit_options", c(
     "  method     = focei",
     "  maxiter    = 500",

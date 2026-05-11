@@ -1,5 +1,20 @@
 # ferx (development)
 
+## Breaking changes
+
+- `ferx_model()` argument order is now `ferx_model(data, model)` (data
+  first). This enables the natural data-first pipe entry point
+  `ex$data |> ferx_model(ex$model) |> ferx_fit()` (#81).
+
+  Old-style positional calls (`ferx_model("pk.ferx")` or
+  `ferx_model("pk.ferx", "data.csv")`) are detected by the `.ferx`
+  extension on what is now the `data` argument and auto-corrected with a
+  deprecation warning. The compatibility shim will be removed in a
+  future release. Calls that pass `data` by name
+  (`ferx_model("pk.ferx", data = "data.csv")`) keep working unchanged
+  because R matches `data =` by name first and the remaining positional
+  argument falls into the `model` slot.
+
 ## Bug fixes
 
 - `ferx_set_section()` now applies copy-on-write when the underlying
@@ -12,7 +27,7 @@
 
 - `ferx_check_init()` now accepts a `ferx_model` as its first argument
   (in addition to a plain path), so it can be placed directly in a pipe:
-  `ferx_model(ex$model, data = ex$data) |> ferx_check_init()`. When a
+  `ex$data |> ferx_model(ex$model) |> ferx_check_init()`. When a
   `ferx_model` is supplied and `data` is not, the data path on the
   object is used (#79).
 
