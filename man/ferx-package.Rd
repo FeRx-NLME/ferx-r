@@ -17,7 +17,12 @@ Vignettes:
 }
 }
 \author{
-\strong{Maintainer}: InsightRx \email{dev@insightrx.com}
+\strong{Maintainer}: Ron Keizer \email{ron@insightrx.com}
+
+Authors:
+\itemize{
+  \item Teun Post \email{teunpost@gmail.com}
+}
 
 }
 \keyword{internal}

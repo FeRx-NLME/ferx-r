@@ -3,24 +3,24 @@ name = "ferx"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-authors = ["InsightRX, Inc."]
+authors = ["Ron Keizer", "Teun Post"]
 
 [lib]
 crate-type = ["staticlib"]
 
 [features]
 default = ["autodiff"]
-autodiff = ["ferx-nlme/autodiff"]
-ci = ["ferx-nlme/ci"]
+autodiff = ["ferx-core/autodiff"]
+ci = ["ferx-core/ci"]
 
 [dependencies]
 extendr-api = "0.9"
-ferx-nlme = { git = "https://github.com/InsightRX/ferx-nlme", branch = "main", default-features = false }
+ferx-core = { git = "https://github.com/FeRx-NLME/ferx-core", branch = "main", default-features = false }
 nalgebra = "0.33"
 
 [profile.release]
 # fat LTO is required for cross-crate Enzyme autodiff (functions differentiated
-# in this crate live in ferx-nlme; thin LTO keeps modules separate and Enzyme
+# in this crate live in ferx-core; thin LTO keeps modules separate and Enzyme
 # can fail to find their bodies). The Makevars no-autodiff branch overrides
 # this to "thin" via CARGO_PROFILE_RELEASE_LTO when building without Enzyme.
 lto = "fat"

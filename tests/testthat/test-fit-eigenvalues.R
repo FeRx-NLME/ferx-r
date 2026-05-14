@@ -1,7 +1,7 @@
 # Tests for the R-layer handling of eigenvalues and condition_number fields
 # that are pre-computed by the Rust backend and exposed via the FFI.
 #
-# The Rust side (ferx-nlme) is tested for computation correctness
+# The Rust side (ferx-core) is tested for computation correctness
 # (fixed-param exclusion, Inf for non-positive eigenvalue) in api.rs
 # tests_cov_diagnostics. These tests cover the R-side sentinel-to-NULL
 # conversion and the high-condition-number warning injection, exercised

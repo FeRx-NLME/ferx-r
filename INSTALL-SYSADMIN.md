@@ -142,7 +142,7 @@ RUSTUP_TOOLCHAIN=enzyme
 
 Restart R, then:
 ```r
-devtools::install_github("InsightRX/ferx")
+devtools::install_github("FeRx-NLME/ferx-r")
 ```
 
 ## Troubleshooting
@@ -159,7 +159,7 @@ devtools::install_github("InsightRX/ferx")
 - R is resolving a stable rustc. Check `Sys.which("rustc")` in R, ensure `~/.Renviron` `PATH` includes `/opt/rust-nightly/bin` first.
 
 **`"Enzyme: cannot handle (forward) unknown intrinsic llvm.maximumnum"`** during ferx build
-- Not a sysadmin issue — this is a ferx-nlme code limitation. Recent rustc lowers `.max()`/`.min()` to intrinsics Enzyme doesn't differentiate. Report upstream or use an older commit of ferx-nlme if urgent.
+- Not a sysadmin issue — this is a ferx-core code limitation. Recent rustc lowers `.max()`/`.min()` to intrinsics Enzyme doesn't differentiate. Report upstream or use an older commit of ferx-core if urgent.
 
 ## Refresh after rustc nightly updates
 
@@ -170,4 +170,4 @@ Upstream nightly rolls forward, but `/opt/rust-nightly` is frozen at whatever yo
 3. If it did — rebuild Enzyme against the new LLVM (step 5), update the `<MAJOR>` in step 7
 4. Re-stage `/opt/rust-nightly` (step 6) and drop the new Enzyme `.so` (step 7)
 
-Plan a refresh roughly quarterly, or whenever a user reports `autodiff_forward` or similar std items aren't found — a sign ferx-nlme moved ahead of your cached toolchain.
+Plan a refresh roughly quarterly, or whenever a user reports `autodiff_forward` or similar std items aren't found — a sign ferx-core moved ahead of your cached toolchain.

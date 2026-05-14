@@ -1,6 +1,6 @@
 use extendr_api::prelude::*;
-use ferx_nlme::cancel::CancelFlag;
-use ferx_nlme::types::*;
+use ferx_core::cancel::CancelFlag;
+use ferx_core::types::*;
 use nalgebra::DMatrix;
 use std::path::Path;
 
@@ -16,7 +16,7 @@ use std::path::Path;
 //      `R_CheckUserInterrupt` in `R_ToplevelExec` so the longjmp is contained
 //      (avoids UB from skipping Rust frames).
 //   3. When an interrupt is pending, flip the cancel flag and let the worker
-//      exit cooperatively; ferx_nlme::fit returns Err("cancelled by user").
+//      exit cooperatively; ferx_core::fit returns Err("cancelled by user").
 //
 // Declared here rather than pulling libR-sys to keep the dependency surface
 // small. These symbols are stable parts of R's public API (R.h / Rinterface.h).
@@ -90,7 +90,7 @@ fn ferx_rust_fit(
     settings_values: Vec<String>,
 ) -> List {
     let mut parsed =
-        match ferx_nlme::parser::model_parser::parse_full_model_file(Path::new(model_path)) {
+        match ferx_core::parser::model_parser::parse_full_model_file(Path::new(model_path)) {
             Ok(p) => p,
             Err(e) => {
                 rprintln!("Error parsing model: {}", e);
@@ -99,7 +99,7 @@ fn ferx_rust_fit(
         };
 
     let iov_col = parsed.fit_options.iov_column.clone();
-    let population = match ferx_nlme::read_nonmem_csv(Path::new(data_path), None, iov_col.as_deref()) {
+    let population = match ferx_core::read_nonmem_csv(Path::new(data_path), None, iov_col.as_deref()) {
         Ok(p) => p,
         Err(e) => {
             rprintln!("Error reading data: {}", e);
@@ -152,7 +152,7 @@ fn ferx_rust_fit(
             );
             return List::new(0);
         }
-        match ferx_nlme::parser::model_parser::apply_fit_option(&mut opts, key, v) {
+        match ferx_core::parser::model_parser::apply_fit_option(&mut opts, key, v) {
             Ok(true) => {}
             Ok(false) => {
                 rprintln!("Error: unknown fit setting `{}`", key);
@@ -208,17 +208,17 @@ fn ferx_rust_fit(
 
     // Gradient method override. Empty string → keep model/option default.
     match gradient.trim().to_lowercase().as_str() {
-        "" | "auto" => opts.gradient_method = ferx_nlme::GradientMethod::Auto,
-        "ad" | "autodiff" => opts.gradient_method = ferx_nlme::GradientMethod::Ad,
+        "" | "auto" => opts.gradient_method = ferx_core::GradientMethod::Auto,
+        "ad" | "autodiff" => opts.gradient_method = ferx_core::GradientMethod::Ad,
         "fd" | "finite" | "finite_difference" => {
-            opts.gradient_method = ferx_nlme::GradientMethod::Fd
+            opts.gradient_method = ferx_core::GradientMethod::Fd
         }
         other => {
             rprintln!(
                 "Unknown gradient method '{}' — expected 'auto', 'ad', or 'fd' (falling back to auto)",
                 other
             );
-            opts.gradient_method = ferx_nlme::GradientMethod::Auto;
+            opts.gradient_method = ferx_core::GradientMethod::Auto;
         }
     }
     parsed.model.gradient_method = opts.gradient_method;
@@ -236,7 +236,7 @@ fn ferx_rust_fit(
     // set — there is a small (poll-interval bounded) tail where the worker
     // drains its last iteration before returning Err("cancelled by user").
     let result = std::thread::scope(|s| {
-        let handle = s.spawn(|| ferx_nlme::fit(&parsed.model, &population, &init_params, &opts));
+        let handle = s.spawn(|| ferx_core::fit(&parsed.model, &population, &init_params, &opts));
 
         while !handle.is_finished() {
             if pending_interrupt() {
@@ -290,7 +290,7 @@ fn ferx_rust_simulate(
     // parse_full_model_file (vs parse_model_file) so we can thread iov_column
     // through to read_nonmem_csv — without it, models with kappa declarations
     // panic in pk_param_fn (Eta index >= n_bsv_eta).
-    let parsed = match ferx_nlme::parse_full_model_file(Path::new(model_path)) {
+    let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
         Ok(p) => p,
         Err(e) => {
             rprintln!("Error parsing model: {}", e);
@@ -300,7 +300,7 @@ fn ferx_rust_simulate(
     let iov_col = parsed.fit_options.iov_column.clone();
 
     let population =
-        match ferx_nlme::read_nonmem_csv(Path::new(data_path), None, iov_col.as_deref()) {
+        match ferx_core::read_nonmem_csv(Path::new(data_path), None, iov_col.as_deref()) {
             Ok(p) => p,
             Err(e) => {
                 rprintln!("Error reading data: {}", e);
@@ -308,7 +308,7 @@ fn ferx_rust_simulate(
             }
         };
 
-    let results = ferx_nlme::simulate_with_seed(
+    let results = ferx_core::simulate_with_seed(
         &parsed.model,
         &population,
         &parsed.model.default_params,
@@ -343,7 +343,7 @@ fn ferx_rust_simulate_from_fit(
     n_sim: i32,
     seed: i32,
 ) -> Robj {
-    let parsed = match ferx_nlme::parse_full_model_file(Path::new(model_path)) {
+    let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
         Ok(p) => p,
         Err(e) => {
             rprintln!("Error parsing model: {}", e);
@@ -353,7 +353,7 @@ fn ferx_rust_simulate_from_fit(
     let iov_col = parsed.fit_options.iov_column.clone();
 
     let population =
-        match ferx_nlme::read_nonmem_csv(Path::new(data_path), None, iov_col.as_deref()) {
+        match ferx_core::read_nonmem_csv(Path::new(data_path), None, iov_col.as_deref()) {
             Ok(p) => p,
             Err(e) => {
                 rprintln!("Error reading data: {}", e);
@@ -369,7 +369,7 @@ fn ferx_rust_simulate_from_fit(
         }
     };
 
-    let results = ferx_nlme::simulate_with_seed(
+    let results = ferx_core::simulate_with_seed(
         &parsed.model,
         &population,
         &params,
@@ -390,7 +390,7 @@ fn ferx_rust_predict(
     model_path: &str,
     data_path: &str,
 ) -> Robj {
-    let parsed = match ferx_nlme::parse_full_model_file(Path::new(model_path)) {
+    let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
         Ok(p) => p,
         Err(e) => {
             rprintln!("Error parsing model: {}", e);
@@ -400,7 +400,7 @@ fn ferx_rust_predict(
     let iov_col = parsed.fit_options.iov_column.clone();
 
     let population =
-        match ferx_nlme::read_nonmem_csv(Path::new(data_path), None, iov_col.as_deref()) {
+        match ferx_core::read_nonmem_csv(Path::new(data_path), None, iov_col.as_deref()) {
             Ok(p) => p,
             Err(e) => {
                 rprintln!("Error reading data: {}", e);
@@ -408,7 +408,7 @@ fn ferx_rust_predict(
             }
         };
 
-    let results = ferx_nlme::predict(&parsed.model, &population, &parsed.model.default_params);
+    let results = ferx_core::predict(&parsed.model, &population, &parsed.model.default_params);
 
     let id: Vec<String> = results.iter().map(|r| r.id.clone()).collect();
     let time: Vec<f64> = results.iter().map(|r| r.time).collect();
@@ -436,7 +436,7 @@ fn ferx_rust_predict_from_fit(
     omega_dim: i32,
     sigma: Vec<f64>,
 ) -> Robj {
-    let parsed = match ferx_nlme::parse_full_model_file(Path::new(model_path)) {
+    let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
         Ok(p) => p,
         Err(e) => {
             rprintln!("Error parsing model: {}", e);
@@ -446,7 +446,7 @@ fn ferx_rust_predict_from_fit(
     let iov_col = parsed.fit_options.iov_column.clone();
 
     let population =
-        match ferx_nlme::read_nonmem_csv(Path::new(data_path), None, iov_col.as_deref()) {
+        match ferx_core::read_nonmem_csv(Path::new(data_path), None, iov_col.as_deref()) {
             Ok(p) => p,
             Err(e) => {
                 rprintln!("Error reading data: {}", e);
@@ -462,7 +462,7 @@ fn ferx_rust_predict_from_fit(
         }
     };
 
-    let results = ferx_nlme::predict(&parsed.model, &population, &params);
+    let results = ferx_core::predict(&parsed.model, &population, &params);
 
     let id: Vec<String> = results.iter().map(|r| r.id.clone()).collect();
     let time: Vec<f64> = results.iter().map(|r| r.time).collect();
@@ -564,7 +564,7 @@ fn params_from_fit(
 
 // -- Helper: SimulationResult slice → R data frame --
 
-fn sim_results_to_df(results: &[ferx_nlme::api::SimulationResult]) -> Robj {
+fn sim_results_to_df(results: &[ferx_core::api::SimulationResult]) -> Robj {
     let sim: Vec<i32> = results.iter().map(|r| r.sim as i32).collect();
     let id: Vec<String> = results.iter().map(|r| r.id.clone()).collect();
     let time: Vec<f64> = results.iter().map(|r| r.time).collect();
@@ -654,7 +654,7 @@ fn fit_result_to_list(
     let se_sigma: Vec<f64> = result.se_sigma.clone().unwrap_or_default();
 
     // SDTAB as data frame
-    let sdtab_cols = ferx_nlme::io::output::sdtab(result, population);
+    let sdtab_cols = ferx_core::io::output::sdtab(result, population);
     let sdtab = sdtab_to_dataframe(&sdtab_cols);
 
     // Warnings
@@ -754,15 +754,15 @@ fn fit_result_to_list(
     let se_kappa: Vec<f64> = result.se_kappa.clone().unwrap_or_default();
     let shrinkage_kappa: Vec<f64> = result.shrinkage_kappa.clone();
 
-    // Parameter transform metadata (added in ferx-nlme PR #54; empty vecs for
+    // Parameter transform metadata (added in ferx-core PR #54; empty vecs for
     // older binaries that don't populate these fields).
     let eta_param_types: Vec<String> = result.eta_param_info.iter().map(|info| {
         match info.param_type {
-            ferx_nlme::types::EtaParamType::LogNormal        => "log_normal",
-            ferx_nlme::types::EtaParamType::Additive         => "additive",
-            ferx_nlme::types::EtaParamType::Logit            => "logit",
-            ferx_nlme::types::EtaParamType::LogitProbability => "logit_probability",
-            ferx_nlme::types::EtaParamType::Custom           => "custom",
+            ferx_core::types::EtaParamType::LogNormal        => "log_normal",
+            ferx_core::types::EtaParamType::Additive         => "additive",
+            ferx_core::types::EtaParamType::Logit            => "logit",
+            ferx_core::types::EtaParamType::LogitProbability => "logit_probability",
+            ferx_core::types::EtaParamType::Custom           => "custom",
         }.to_string()
     }).collect();
     // Linked theta name for each ETA (empty string when not detected).
@@ -771,10 +771,10 @@ fn fit_result_to_list(
         .collect();
     let theta_transforms: Vec<String> = result.theta_transform.iter().map(|t| {
         match t {
-            ferx_nlme::types::ThetaTransform::Identity         => "identity",
-            ferx_nlme::types::ThetaTransform::Log              => "log",
-            ferx_nlme::types::ThetaTransform::Logit            => "logit",
-            ferx_nlme::types::ThetaTransform::LogitProbability => "logit_probability",
+            ferx_core::types::ThetaTransform::Identity         => "identity",
+            ferx_core::types::ThetaTransform::Log              => "log",
+            ferx_core::types::ThetaTransform::Logit            => "logit",
+            ferx_core::types::ThetaTransform::LogitProbability => "logit_probability",
         }.to_string()
     }).collect();
     // EBE kappas as a data frame: ID, OCC, KAPPA_1, ...
@@ -782,7 +782,7 @@ fn fit_result_to_list(
     // - ID: original subject identifier (matches sdtab).
     // - OCC: labeled occasion in first-seen order, matching the kappa[k]
     //   indexing used by the inner optimizer (see split_obs_by_occasion in
-    //   ferx-nlme). Falls back to a 1-based positional index for any subject
+    //   ferx-core). Falls back to a 1-based positional index for any subject
     //   missing an occasion column entry.
     let ebe_kappas_df: Robj = if result.ebe_kappas.is_empty() || kappa_names.is_empty() {
         ().into()
@@ -854,7 +854,7 @@ fn fit_result_to_list(
         // to `sigma` and `sigma_names`. The R layer uses this to decide
         // whether to display CV% (proportional) or just SD/variance
         // (additive) for each component without re-deriving from
-        // `model_structure$residual`. See ferx-nlme#57 for the YAML
+        // `model_structure$residual`. See ferx-core#57 for the YAML
         // counterpart.
         sigma_types = result
             .sigma_types
@@ -1056,7 +1056,7 @@ fn ferx_rust_autodiff_enabled() -> bool {
 /// @export
 #[extendr]
 fn ferx_rust_validate_model(model_path: &str) -> List {
-    match ferx_nlme::parser::model_parser::parse_full_model_file(Path::new(model_path)) {
+    match ferx_core::parser::model_parser::parse_full_model_file(Path::new(model_path)) {
         Ok(_) => list!(ok = true, errors = Vec::<String>::new()),
         Err(e) => list!(ok = false, errors = vec![e.to_string()]),
     }
