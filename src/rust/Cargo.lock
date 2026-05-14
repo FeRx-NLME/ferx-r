@@ -190,14 +190,14 @@ name = "ferx"
 version = "0.1.0"
 dependencies = [
  "extendr-api",
- "ferx-nlme",
+ "ferx-core",
  "nalgebra 0.33.3",
 ]
 
 [[package]]
-name = "ferx-nlme"
+name = "ferx-core"
 version = "0.1.0"
-source = "git+https://github.com/InsightRX/ferx-nlme?branch=main#308106086b451eab5a518f0137b9e2941d460109"
+source = "git+https://github.com/FeRx-NLME/ferx-core?branch=main#8f1315f94bdcaa3f9d0da69c4fef60018654cb45"
 dependencies = [
  "argmin",
  "argmin-math",
