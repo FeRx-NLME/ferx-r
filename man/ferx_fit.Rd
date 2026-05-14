@@ -461,7 +461,7 @@ ex <- ferx_example("warfarin")
 
 # ── Classic style (path strings) ─────────────────────────────────────────
 
-# Minimal call — FOCE with BOBYQA, covariance step on
+# Minimal call — FOCEI with default optimizer, covariance step on
 fit <- ferx_fit(ex$model, ex$data)
 
 # Named arguments — fully equivalent

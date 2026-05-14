@@ -429,7 +429,7 @@
 #'
 #' # ── Classic style (path strings) ─────────────────────────────────────────
 #'
-#' # Minimal call — FOCE with BOBYQA, covariance step on
+#' # Minimal call — FOCEI with default optimizer, covariance step on
 #' fit <- ferx_fit(ex$model, ex$data)
 #'
 #' # Named arguments — fully equivalent
@@ -544,7 +544,7 @@ ferx_fit.ferx_model <- function(model, data = model$data, ...) {
 
 #' @export
 ferx_fit.default <- function(model, data,
-                     method = "foce",
+                     method = "focei",
                      covariance = TRUE,
                      verbose = TRUE,
                      bloq_method = NULL,
