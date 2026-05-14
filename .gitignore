@@ -8,3 +8,4 @@ src/*.dylib
 src/rust/.cargo/
 src/rust/rust-toolchain.toml
 .Rproj.user
+.positai
