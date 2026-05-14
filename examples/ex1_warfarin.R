@@ -1,13 +1,6 @@
-## To re-install ferx:
-withr::with_dir("~/git/insightrx/ferx", {
-  system("cd src/rust && cargo build --release")
-  devtools::load_all()
-})
-
 ## Initialize
 library(vpc)
 library(dplyr)
-setwd("~/git/insightrx/ferx-nlme/examples")
 
 model <- "warfarin.ferx"
 data <- "../data/warfarin.csv"

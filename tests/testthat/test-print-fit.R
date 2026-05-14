@@ -37,7 +37,7 @@ test_that("print.ferx_fit CV% equals zero when omega diagonal is zero", {
   expect_true(grepl("CV% = 0\\.0", omega_line))
 })
 
-# SIGMA display (ferx#59 / ferx-nlme#57): sigma is on the SD scale, so
+# SIGMA display (ferx#59 / ferx-core#57): sigma is on the SD scale, so
 # print() must show variance = sigma^2 always and CV% = sigma * 100 only
 # for proportional components.
 

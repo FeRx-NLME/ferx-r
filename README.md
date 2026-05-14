@@ -16,14 +16,14 @@ Fast nonlinear mixed effects (NLME) modeling in R, powered by a Rust backend wit
 A Rust installation with the Enzyme AutoDifferentiation engine is required for FeRx to compute gradients. Most likely
 you will need to build Rust from source, which may take an hour or so.
 
-See [documentation](https://insightrx.github.io/ferx-nlme/installation.html) for installation instructions. 
+See [documentation](https://ferx-nlme.github.io/ferx-core/installation.html) for installation instructions. 
 
 ### Install the package
 
 After installing Rust, in R run:
 
 ```r
-devtools::install_github("InsightRX/ferx")
+devtools::install_github("FeRx-NLME/ferx-r")
 ```
 
 Or from a local clone:
@@ -126,5 +126,3 @@ See `ferx_example()` for available bundled examples.
 ## License
 
 MIT — see [LICENSE.md](LICENSE.md).
-
-Copyright © 2026 InsightRX, Inc.

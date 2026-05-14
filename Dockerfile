@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 #
-# ferx: R package + Rust (ferx-nlme) engine + RStudio Server
+# ferx: R package + Rust (ferx-core) engine + RStudio Server
 #
 # Build (from this directory):
 #   docker build -t ferx:latest .
@@ -92,13 +92,13 @@ RUN rustup toolchain link enzyme /opt/enzyme-toolchain \
 ENV RUSTUP_TOOLCHAIN=enzyme
 
 # ---------------------------------------------------------------------------
-# 4. Clone ferx-nlme from GitHub, build the `ferx` CLI binary, keep the
-#    source tree at /opt/ferx-nlme (the R package's Cargo.toml has a
+# 4. Clone ferx-core from GitHub, build the `ferx` CLI binary, keep the
+#    source tree at /opt/ferx-core (the R package's Cargo.toml has a
 #    relative path dep). Drop build artifacts and cargo caches.
 # ---------------------------------------------------------------------------
 RUN set -eux; \
-    git clone --depth 1 https://github.com/InsightRX/ferx-nlme /opt/ferx-nlme; \
-    cd /opt/ferx-nlme; \
+    git clone --depth 1 https://github.com/FeRx-NLME/ferx-core /opt/ferx-core; \
+    cd /opt/ferx-core; \
     RUSTFLAGS="-Z autodiff=Enable" cargo build --release; \
     install -m 0755 target/release/ferx /usr/local/bin/ferx; \
     rm -rf target .git; \
@@ -106,7 +106,7 @@ RUN set -eux; \
 
 # ---------------------------------------------------------------------------
 # 5. Copy the R package source, install it (which rebuilds the Rust staticlib
-#    against the retained /opt/ferx-nlme via the relative path dep in
+#    against the retained /opt/ferx-core via the relative path dep in
 #    src/rust/Cargo.toml), then clean all build/caching state.
 # ---------------------------------------------------------------------------
 COPY . /opt/ferx
