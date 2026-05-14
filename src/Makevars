@@ -130,6 +130,19 @@ else
 	@echo "ferx: building WITH autodiff (Enzyme toolchain)"
 endif
 	cd rust && CARGO_PROFILE_RELEASE_LTO=$(CARGO_PROFILE_RELEASE_LTO) cargo build --release $(CARGO_FEATURES)
+ifeq ($(OS),Windows_NT)
+	@# Strip split-DWARF .dwo members from the static lib so R's nm.exe
+	@# doesn't spam "no symbols" warnings during the DLL link step. Cargo
+	@# may bake .dwo files into libferx.a even with SPLIT_DEBUGINFO=off if
+	@# its build cache holds objects from an older configuration; this
+	@# post-step is idempotent and runs every build.
+	@dwos=`ar t $(STATLIB) 2>/dev/null | grep '\.dwo$$' || true`; \
+	  if [ -n "$$dwos" ]; then \
+	    n=`echo "$$dwos" | wc -l | tr -d ' '`; \
+	    echo "ferx: stripping $$n .dwo debug-info members from libferx.a"; \
+	    echo "$$dwos" | xargs ar d $(STATLIB); \
+	  fi
+endif
 
 C_clean:
 	rm -Rf $(SHLIB) $(STATLIB) $(OBJECTS)
