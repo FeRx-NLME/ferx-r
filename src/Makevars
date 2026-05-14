@@ -3,6 +3,16 @@ LIBDIR = $(TARGET_DIR)/release
 STATLIB = $(LIBDIR)/libferx.a
 PKG_LIBS = -L$(LIBDIR) -lferx -lm -ldl -lpthread
 
+# On Windows, the final link is performed by R's gcc (not cargo), so Rust's
+# auto-linking of native system libraries doesn't fire. Rust's gnu std calls
+# NT syscalls directly (NtReadFile, NtWriteFile, RtlNtStatusToDosError) and
+# getrandom uses bcrypt; we have to name those import libs explicitly. The
+# extras (advapi32, userenv, ws2_32, kernel32, psapi) cover the rest of the
+# stdlib's surface so we don't have to iterate one symbol at a time.
+ifeq ($(OS),Windows_NT)
+  PKG_LIBS += -lntdll -lbcrypt -ladvapi32 -luserenv -lws2_32 -lkernel32 -lpsapi
+endif
+
 # Autodiff mode. If FERX_NO_AUTODIFF is not explicitly set, probe for the
 # `enzyme` rustup toolchain; if it's missing, silently fall back to the
 # stable-Rust path so an install on a machine without Enzyme still works.
