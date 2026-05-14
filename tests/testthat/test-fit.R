@@ -182,7 +182,7 @@ test_that("ferx_cor_matrix errors gracefully when covariance was FALSE", {
 #
 # 2. Missing API: comparing autodiff vs finite-difference gradients requires
 #    a gradient inspection entry point to be exposed from the Rust side. No
-#    such API exists yet in ferx-nlme. Once it lands, replace the inner
+#    such API exists yet in ferx-core. Once it lands, replace the inner
 #    skip() with a real comparison (e.g. relative error < 1e-4 per element).
 
 test_that("autodiff OFV gradient matches finite-difference gradient within tolerance", {
@@ -190,5 +190,5 @@ test_that("autodiff OFV gradient matches finite-difference gradient within toler
     !isTRUE(ferx_rust_autodiff_enabled()),
     "Enzyme autodiff not available — skipping gradient-correctness test"
   )
-  skip("Gradient inspection API not yet exposed from ferx-nlme — implement once available")
+  skip("Gradient inspection API not yet exposed from ferx-core — implement once available")
 })

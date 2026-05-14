@@ -225,7 +225,7 @@
 #'     \code{gradient_used} for display.}
 #'   \item{gradient_method_outer}{Engine label for the population-level
 #'     optimizer's gradient ("Enzyme AD", "finite differences", or "N/A").}
-#'   \item{ferx_version}{ferx-nlme library version string.}
+#'   \item{ferx_version}{ferx-core library version string.}
 #'   \item{cov_matrix}{Full parameter covariance matrix as a named numeric
 #'     matrix (params × params). \code{NULL} when covariance step was not run
 #'     or failed. Use \code{\link{ferx_cor_matrix}} to inspect correlations.}
@@ -252,7 +252,7 @@
 #'     \code{NULL} if covariance step not run or no IOV.}
 #'   \item{model_structure}{Named list returned by the Rust engine, derived
 #'     from the parsed \code{CompiledModel} so it reflects exactly what
-#'     ferx-nlme ran. Fields: \code{theta_names} (character vector of
+#'     ferx-core ran. Fields: \code{theta_names} (character vector of
 #'     population parameter names), \code{model_type} (short label such as
 #'     \code{"1-cpt oral"}, \code{"ODE"}, or \code{NULL} when the structural
 #'     form is not one of the known analytical PK families), \code{iiv}
@@ -896,7 +896,7 @@ ferx_fit.default <- function(model, data,
     result$eta_log_transformed <- NULL
   }
 
-  # Parameter transform metadata — fall back gracefully for older ferx-nlme binaries
+  # Parameter transform metadata — fall back gracefully for older ferx-core binaries
   # that don't populate these vectors (empty character() from FFI → treat as absent).
   n_eta_fit   <- if (!is.null(result$omega)) nrow(result$omega) else 0L
   n_theta_fit <- length(result$theta)
@@ -933,7 +933,7 @@ ferx_fit.default <- function(model, data,
   result$data_name <- tools::file_path_sans_ext(basename(data))
 
   # Fall back to the model file's basename when the .ferx file declares no name.
-  # ferx-nlme returns "Unnamed" (not NULL/"") when no [model_name] is declared —
+  # ferx-core returns "Unnamed" (not NULL/"") when no [model_name] is declared —
   # treat it the same as absent. See fit_result_to_list() in src/rust/src/lib.rs.
   # Long-term fix: engine should return "" so this sentinel check can be removed.
   if (is.null(result$model_name) || !nzchar(result$model_name) || identical(result$model_name, "Unnamed")) {
@@ -941,8 +941,8 @@ ferx_fit.default <- function(model, data,
   }
 
   # `result$model_structure` is now populated by the Rust engine in
-  # `fit_result_to_list()` from the parsed CompiledModel (ferx-nlme#49), so it
-  # reflects exactly what ferx-nlme ran. The R-side `.ferx_parse_structure()`
+  # `fit_result_to_list()` from the parsed CompiledModel (ferx-core#49), so it
+  # reflects exactly what ferx-core ran. The R-side `.ferx_parse_structure()`
   # remains for the pre-fit `ferx_model_inspect(path)` workflow only.
 
   # Store the requested gradient method, and the method the engine actually
@@ -1275,10 +1275,10 @@ print.ferx_fit <- function(x, ...) {
     }
   }
 
-  # SIGMA — sigma is on the SD scale (see ferx-nlme `docs/src/model-file/error-model.md`).
+  # SIGMA — sigma is on the SD scale (see ferx-core `docs/src/model-file/error-model.md`).
   # For proportional components CV% = sigma * 100; for additive components the
   # value is in observation units and no CV% applies. Variance = sigma^2 in
-  # both cases, mirroring the YAML output (ferx-nlme#57).
+  # both cases, mirroring the YAML output (ferx-core#57).
   cat("\n--- SIGMA Estimates ---\n")
   for (i in seq_along(x$sigma)) {
     s   <- x$sigma[i]

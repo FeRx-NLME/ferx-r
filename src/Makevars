@@ -3,6 +3,16 @@ LIBDIR = $(TARGET_DIR)/release
 STATLIB = $(LIBDIR)/libferx.a
 PKG_LIBS = -L$(LIBDIR) -lferx -lm -ldl -lpthread
 
+# On Windows, the final link is performed by R's gcc (not cargo), so Rust's
+# auto-linking of native system libraries doesn't fire. Rust's gnu std calls
+# NT syscalls directly (NtReadFile, NtWriteFile, RtlNtStatusToDosError) and
+# getrandom uses bcrypt; we have to name those import libs explicitly. The
+# extras (advapi32, userenv, ws2_32, kernel32, psapi) cover the rest of the
+# stdlib's surface so we don't have to iterate one symbol at a time.
+ifeq ($(OS),Windows_NT)
+  PKG_LIBS += -lntdll -lbcrypt -ladvapi32 -luserenv -lws2_32 -lkernel32 -lpsapi
+endif
+
 # Autodiff mode. If FERX_NO_AUTODIFF is not explicitly set, probe for the
 # `enzyme` rustup toolchain; if it's missing, silently fall back to the
 # stable-Rust path so an install on a machine without Enzyme still works.
@@ -44,30 +54,65 @@ ifeq ($(UNAME_S),Darwin)
     HOST_TOOLCHAIN_CHANNEL = stable-x86_64-apple-darwin
   endif
 endif
+# On Windows, R/Rtools44 uses the MinGW (GNU) ABI. The rustup default host on
+# Windows is MSVC, which produces .lib archives whose CRT/SEH symbols
+# (__chkstk, __security_cookie, __GSHandlerCheck, __imp_*) MinGW's ld cannot
+# resolve. Pin the GNU toolchain so the staticlib (and any cmake-built C deps
+# like nlopt) are link-compatible with Rtools. Use $(OS), which make picks up
+# from the environment as "Windows_NT" — more reliable than `uname -s`, which
+# may not be on PATH under R CMD INSTALL's make.
+ifeq ($(OS),Windows_NT)
+  HOST_TOOLCHAIN_CHANNEL = stable-x86_64-pc-windows-gnu
+  # Work around GNU binutils dlltool failure when the project path contains
+  # spaces (e.g. C:\Users\First Last\...). dlltool, invoked by rustc to build
+  # MinGW import libraries, splits its --temp-prefix argument at the first
+  # space and then errors with "Permission denied" on the truncated path
+  # (rust-lang/rust#108819). Point cargo at the same physical target dir via
+  # the 8.3 short name (no spaces). cygpath ships with Rtools.
+  #
+  # IMPORTANT: shorten $(CURDIR) (the src/ dir, which always exists during a
+  # build) and append /rust/target manually. Calling cygpath on the full
+  # rust/target path is fragile because cygpath returns empty when the path
+  # doesn't yet exist (e.g. right after a `cargo clean`), which would skip
+  # the export and reintroduce the bug.
+  WIN_SHORT_CURDIR := $(shell cygpath -ms "$(CURDIR)" 2>/dev/null)
+  ifneq ($(WIN_SHORT_CURDIR),)
+    export CARGO_TARGET_DIR := $(WIN_SHORT_CURDIR)/rust/target
+  endif
+  # Suppress dozens of "nm.exe: ...rcgu.dwo: no symbols" warnings during R's
+  # link step. Rust's default release split-debuginfo on Windows bundles .dwo
+  # debug-info members into libferx.a; nm.exe iterates every archive member
+  # to build the DLL's export table and prints a noisy (but harmless) line
+  # for each empty .dwo. Disabling split-debuginfo keeps debug info inside
+  # the .o files so the .dwo members don't exist.
+  export CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO := off
+endif
 
 all: C_clean
 
 $(SHLIB): $(STATLIB)
 
-# If a sibling ../ferx-nlme/ checkout exists alongside the R package, use it
-# as a cargo path override so local changes are picked up without editing
+# If a sibling ../ferx-core/ checkout exists alongside the R package, use it
+# as a cargo override so local changes are picked up without editing
 # Cargo.toml. Falls back to the git dependency declared in src/rust/Cargo.toml
 # when the sibling checkout is absent (e.g. fresh installs).
-LOCAL_FERX_NLME := $(wildcard ../../ferx-nlme/Cargo.toml)
+LOCAL_FERX_CORE := $(wildcard ../../ferx-core/Cargo.toml)
 
 $(STATLIB):
 	@# Ensure .cargo/config.toml and rust-toolchain.toml exist (R CMD INSTALL
 	@# strips hidden directories and these files are needed by cargo).
 	@mkdir -p rust/.cargo
 	@: > rust/.cargo/config.toml
-ifneq ($(LOCAL_FERX_NLME),)
-	@# `paths` is a top-level key, so it must be written BEFORE any [section]
-	@# header — otherwise TOML scopes it inside that section and cargo
-	@# silently ignores it. The path is resolved relative to cargo's working
-	@# directory (rust/), so ../../../ferx-nlme reaches the sibling of the
-	@# R package root.
-	@echo 'paths = ["../../../ferx-nlme"]' >> rust/.cargo/config.toml
-	@echo "ferx: using local ../ferx-nlme checkout (cargo paths override)"
+ifneq ($(LOCAL_FERX_CORE),)
+	@# Override the git dep with the local sibling checkout via [patch].
+	@# Cargo's `paths = [...]` override is silently ignored for git deps in
+	@# recent cargo versions, so [patch."<git URL>"] is the reliable
+	@# mechanism. The path is resolved relative to cargo's working directory
+	@# (rust/), so ../../../ferx-core reaches the sibling of the R package
+	@# root.
+	@echo '[patch."https://github.com/FeRx-NLME/ferx-core"]' >> rust/.cargo/config.toml
+	@echo 'ferx-core = { path = "../../../ferx-core" }' >> rust/.cargo/config.toml
+	@echo "ferx: using local ../ferx-core checkout ([patch] override)"
 endif
 	@echo '[build]' >> rust/.cargo/config.toml
 ifeq ($(FERX_NO_AUTODIFF),1)
@@ -85,6 +130,19 @@ else
 	@echo "ferx: building WITH autodiff (Enzyme toolchain)"
 endif
 	cd rust && CARGO_PROFILE_RELEASE_LTO=$(CARGO_PROFILE_RELEASE_LTO) cargo build --release $(CARGO_FEATURES)
+ifeq ($(OS),Windows_NT)
+	@# Strip split-DWARF .dwo members from the static lib so R's nm.exe
+	@# doesn't spam "no symbols" warnings during the DLL link step. Cargo
+	@# may bake .dwo files into libferx.a even with SPLIT_DEBUGINFO=off if
+	@# its build cache holds objects from an older configuration; this
+	@# post-step is idempotent and runs every build.
+	@dwos=`ar t $(STATLIB) 2>/dev/null | grep '\.dwo$$' || true`; \
+	  if [ -n "$$dwos" ]; then \
+	    n=`echo "$$dwos" | wc -l | tr -d ' '`; \
+	    echo "ferx: stripping $$n .dwo debug-info members from libferx.a"; \
+	    echo "$$dwos" | xargs ar d $(STATLIB); \
+	  fi
+endif
 
 C_clean:
 	rm -Rf $(SHLIB) $(STATLIB) $(OBJECTS)

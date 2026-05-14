@@ -804,7 +804,7 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
 # Detect an unambiguous model-type label from [structural_model] lines.
 # Returns a short string ("1-cpt oral", "ODE", etc.) or NULL when unrecognised.
 # Labels and the recognised function names are kept in sync with the Rust
-# parser (ferx-nlme src/parser/model_parser.rs `pk_func_name` match arms) so
+# parser (ferx-core src/parser/model_parser.rs `pk_func_name` match arms) so
 # pre-fit `ferx_model_inspect(path)` reports the same string the engine would
 # attach to a fitted result.
 # Format a pk function name (snake_case) into a readable label.

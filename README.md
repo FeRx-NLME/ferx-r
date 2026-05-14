@@ -16,14 +16,14 @@ Fast nonlinear mixed effects (NLME) modeling in R, powered by a Rust backend wit
 A Rust installation with the Enzyme AutoDifferentiation engine is required for FeRx to compute gradients. Most likely
 you will need to build Rust from source, which may take an hour or so.
 
-See [documentation](https://insightrx.github.io/ferx-nlme/installation.html) for installation instructions. 
+See [documentation](https://ferx-nlme.github.io/ferx-core/installation.html) for installation instructions. 
 
 ### Install the package
 
 After installing Rust, in R run:
 
 ```r
-devtools::install_github("InsightRX/ferx")
+devtools::install_github("FeRx-NLME/ferx-r")
 ```
 
 Or from a local clone:
@@ -31,9 +31,30 @@ Or from a local clone:
 R CMD INSTALL .
 ```
 
+### Windows (native, without Enzyme autodiff)
+
+Native Windows installs are supported, but **without** the Enzyme autodiff backend — gradients fall back to finite differences, which is slower and less accurate. For full-fidelity autodiff on Windows, use the Docker image below.
+
+Prerequisites:
+
+- [R](https://cran.r-project.org/bin/windows/base/) and [Rtools44](https://cran.r-project.org/bin/windows/Rtools/) (Rtools44 ships the MinGW gcc that R uses to link the package)
+- [rustup](https://www.rust-lang.org/tools/install) with the GNU-ABI toolchain:
+
+```powershell
+rustup toolchain install stable-x86_64-pc-windows-gnu
+```
+
+You do **not** need to `rustup default` it — the package's build pins this toolchain automatically on Windows. (The rustup default on Windows is the MSVC ABI, which is not link-compatible with Rtools' MinGW linker.)
+
+Then install in R:
+
+```r
+devtools::install_github("FeRx-NLME/ferx-r")
+```
+
 ### Docker
 
-A Docker image is available that bundles the Enzyme toolchain (built from source), ferx CLI, the ferx R package, and RStudio Server — no local Rust/Enzyme setup required. If you're on Windows, this is currently the only supported way of running FeRx.
+A Docker image is available that bundles the Enzyme toolchain (built from source), ferx CLI, the ferx R package, and RStudio Server — no local Rust/Enzyme setup required. On Windows, this is the recommended path if you need Enzyme autodiff.
 
 ```bash
 # Build (first build takes ~45-60 min; cached after that)
@@ -126,5 +147,3 @@ See `ferx_example()` for available bundled examples.
 ## License
 
 MIT — see [LICENSE.md](LICENSE.md).
-
-Copyright © 2026 InsightRX, Inc.

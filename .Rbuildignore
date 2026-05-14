@@ -11,3 +11,4 @@
 ^src/rust/rust-toolchain\.toml$
 ^\.Rproj\.user$
 ^.*\.Rproj$
+^\.positai$

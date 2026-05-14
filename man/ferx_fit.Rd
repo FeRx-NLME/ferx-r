@@ -245,7 +245,7 @@ engine binaries that did not populate this field.}
 \code{gradient_used} for display.}
 \item{gradient_method_outer}{Engine label for the population-level
 optimizer's gradient ("Enzyme AD", "finite differences", or "N/A").}
-\item{ferx_version}{ferx-nlme library version string.}
+\item{ferx_version}{ferx-core library version string.}
 \item{cov_matrix}{Full parameter covariance matrix as a named numeric
 matrix (params × params). \code{NULL} when covariance step was not run
 or failed. Use \code{\link{ferx_cor_matrix}} to inspect correlations.}
@@ -272,7 +272,7 @@ etas), its row is still returned but \code{W} and \code{p_val} are
 \code{NULL} if covariance step not run or no IOV.}
 \item{model_structure}{Named list returned by the Rust engine, derived
 from the parsed \code{CompiledModel} so it reflects exactly what
-ferx-nlme ran. Fields: \code{theta_names} (character vector of
+ferx-core ran. Fields: \code{theta_names} (character vector of
 population parameter names), \code{model_type} (short label such as
 \code{"1-cpt oral"}, \code{"ODE"}, or \code{NULL} when the structural
 form is not one of the known analytical PK families), \code{iiv}

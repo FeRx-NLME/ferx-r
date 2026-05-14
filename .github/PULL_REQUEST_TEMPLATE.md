@@ -7,7 +7,7 @@
 
 ## Why
 <!-- What problem does this solve for R users?
-     Link to a ferx-nlme PR if this exposes a new engine capability. -->
+     Link to a ferx-core PR if this exposes a new engine capability. -->
 
 ## What changed
 <!-- Function signatures, new arguments, output columns, parsing logic. -->
@@ -18,14 +18,14 @@
 ## Cross-repo dependency
 | Repo | PR | Status | Must merge first |
 |------|----|--------|-----------------|
-| ferx-nlme (engine) | InsightRX/ferx-nlme#___ | open / merged / not needed | yes / no / — |
+| ferx-core (engine) | FeRx-NLME/ferx-core#___ | open / merged / not needed | yes / no / — |
 
 <!-- If the engine PR is not yet merged, keep this PR as Draft. -->
 
 ## Breaking changes (R users)
 - [ ] Function signature changed
 - [ ] Output column names / types changed (add migration note below)
-- [ ] New minimum ferx-nlme version required — `DESCRIPTION` git dep updated to commit `______`
+- [ ] New minimum ferx-core version required — `DESCRIPTION` git dep updated to commit `______`
 - [ ] None
 
 <details>
@@ -53,7 +53,7 @@
 ## Tests
 - [ ] `testthat` tests added / updated
 - [ ] `R CMD check` passes (no ERRORs or WARNINGs)
-- [ ] Test against real ferx-nlme binary (not mocked)
+- [ ] Test against real ferx-core binary (not mocked)
 
 ## Example (user-facing features only)
 <!-- If this adds or changes any user-visible behaviour (new argument, new output column,
@@ -80,7 +80,7 @@
 
 ## Checklist
 - [ ] `DESCRIPTION` version bumped if warranted
-- [ ] `DESCRIPTION` ferx-nlme git dep points to merged engine commit (not a branch)
+- [ ] `DESCRIPTION` ferx-core git dep points to merged engine commit (not a branch)
 
 ## Reviewer hints
 <!-- Where to focus. What's subtle. What can be skimmed. -->

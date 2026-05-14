@@ -236,7 +236,7 @@ test_that("print.ferx_fit shows [additive] label and SD for additive sigma", {
 
 test_that("print.ferx_fit works without eta_param_types (falls back to log_normal)", {
   fit <- make_fake_fit(omega = matrix(0.40, 1, 1), sigma = 0.01)
-  # Remove transform fields to simulate old ferx-nlme binary
+  # Remove transform fields to simulate old ferx-core binary
   fit$eta_param_types  <- NULL
   fit$theta_transforms <- NULL
   fit$sigma_types      <- NULL

@@ -1,6 +1,6 @@
 # Pins the contract that ferx_fit() returns `$model_structure` sourced from
 # the Rust engine (built from the parsed CompiledModel) rather than re-parsed
-# in R from the .ferx file. See ferx-nlme#49.
+# in R from the .ferx file. See ferx-core#49.
 #
 # Uses the shared `warfarin_fit()` helper (helper-warfarin-fit.R) so the
 # real FOCEI fit is reused across test files.
@@ -12,7 +12,7 @@ test_that("fit$model_structure has the documented shape", {
   expect_named(ms, c("theta_names", "model_type", "iiv", "iov", "residual"))
 })
 
-test_that("fit$model_structure reflects what ferx-nlme actually parsed (warfarin = 1-cpt oral, proportional)", {
+test_that("fit$model_structure reflects what ferx-core actually parsed (warfarin = 1-cpt oral, proportional)", {
   fit <- warfarin_fit()
   ms <- fit$model_structure
 

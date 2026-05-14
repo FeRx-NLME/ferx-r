@@ -97,11 +97,11 @@
   derived variance (`sigma^2`), and — for proportional components — the
   CV% (`sigma * 100`). Sigma is on the standard-deviation scale for both
   proportional and additive components, matching the new YAML output added
-  in ferx-nlme#57. Closes #59.
+  in ferx-core#57. Closes #59.
 
 - `result$model_structure` is now sourced from the Rust engine (built from the
   parsed `CompiledModel`) instead of an R-side regex re-parse of the `.ferx`
-  file (closes ferx-nlme#49). The shape is unchanged — `theta_names`,
+  file (closes ferx-core#49). The shape is unchanged — `theta_names`,
   `model_type`, `iiv`, `iov`, `residual` — so `ferx_model_inspect()` callers
   see the same fields. `model_type` now distinguishes IV bolus from infusion
   (e.g. `"1-cpt IV infusion"`) and adds 3-cpt variants; the pre-fit
