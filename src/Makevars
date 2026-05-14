@@ -53,6 +53,16 @@ endif
 # may not be on PATH under R CMD INSTALL's make.
 ifeq ($(OS),Windows_NT)
   HOST_TOOLCHAIN_CHANNEL = stable-x86_64-pc-windows-gnu
+  # Work around GNU binutils dlltool failure when the project path contains
+  # spaces (e.g. C:\Users\First Last\...). dlltool, invoked by rustc to build
+  # MinGW import libraries, splits its --temp-prefix argument at the first
+  # space and then errors with "Permission denied" on the truncated path
+  # (rust-lang/rust#108819). Point cargo at the same physical target dir via
+  # its 8.3 short name, which has no spaces. cygpath ships with Rtools.
+  WIN_SHORT_TARGET := $(shell cygpath -ms "$(CURDIR)/rust/target" 2>/dev/null)
+  ifneq ($(WIN_SHORT_TARGET),)
+    export CARGO_TARGET_DIR := $(WIN_SHORT_TARGET)
+  endif
 endif
 
 all: C_clean
