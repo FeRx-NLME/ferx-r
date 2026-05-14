@@ -73,6 +73,13 @@ ifeq ($(OS),Windows_NT)
   ifneq ($(WIN_SHORT_TARGET),)
     export CARGO_TARGET_DIR := $(WIN_SHORT_TARGET)
   endif
+  # Suppress dozens of "nm.exe: ...rcgu.dwo: no symbols" warnings during R's
+  # link step. Rust's default release split-debuginfo on Windows bundles .dwo
+  # debug-info members into libferx.a; nm.exe iterates every archive member
+  # to build the DLL's export table and prints a noisy (but harmless) line
+  # for each empty .dwo. Disabling split-debuginfo keeps debug info inside
+  # the .o files so the .dwo members don't exist.
+  export CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO := off
 endif
 
 all: C_clean
