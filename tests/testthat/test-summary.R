@@ -44,7 +44,8 @@ test_that("summary.ferx_fit returns a ferx_summary with expected fields", {
 
   expect_s3_class(s, "ferx_summary")
   expect_named(s, c(
-    "model_name", "data_name", "gradient", "method", "method_chain",
+    "model_name", "data_name", "gradient", "gradient_used",
+    "method", "method_chain",
     "converged", "ofv", "aic", "bic", "n_subjects", "n_obs",
     "n_parameters", "n_iterations", "theta", "se_theta", "omega",
     "se_omega", "sigma", "se_sigma", "shrinkage_eta", "shrinkage_eps",
@@ -207,6 +208,35 @@ test_that("print.ferx_summary omits Structure line when model_structure is NULL"
   out <- capture.output(print(s))
 
   expect_false(any(grepl("^Structure:", out)))
+})
+
+# gradient_used display ------------------------------------------------
+
+test_that(".ferx_short_gradient_label maps engine labels to short tokens", {
+  expect_identical(ferx:::.ferx_short_gradient_label("Enzyme AD"), "ad")
+  expect_identical(ferx:::.ferx_short_gradient_label("finite differences"), "fd")
+  expect_identical(ferx:::.ferx_short_gradient_label("N/A"), "N/A")
+  expect_identical(ferx:::.ferx_short_gradient_label(""), NA_character_)
+  expect_identical(ferx:::.ferx_short_gradient_label(NULL), NA_character_)
+})
+
+test_that("summary.ferx_fit carries gradient_used through", {
+  fit <- make_fake_fit(gradient = "auto", gradient_used = "ad")
+  s <- summary(fit)
+  expect_identical(s$gradient_used, "ad")
+})
+
+test_that("print.ferx_summary shows requested -> used arrow when used is known", {
+  s <- summary(make_fake_fit(gradient = "auto", gradient_used = "ad"))
+  out <- capture.output(print(s))
+  expect_true(any(grepl("Gradient:\\s+auto \\(requested\\) -> ad \\(used\\)", out)))
+})
+
+test_that("print.ferx_summary falls back to (requested) only when used is NA", {
+  s <- summary(make_fake_fit(gradient = "auto", gradient_used = NA_character_))
+  out <- capture.output(print(s))
+  expect_true(any(grepl("Gradient:\\s+auto \\(requested\\)$", out)))
+  expect_false(any(grepl("\\(used\\)", out)))
 })
 
 # .ferx_parse_setting_value --------------------------------------------

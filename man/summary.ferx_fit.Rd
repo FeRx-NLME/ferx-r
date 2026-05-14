@@ -14,6 +14,7 @@
 \value{
 A \code{ferx_summary} list (invisibly). Fields include: \code{model_name},
 \code{data_name}, \code{method}, \code{method_chain}, \code{gradient},
+\code{gradient_used},
 \code{converged}, \code{ofv}, \code{aic}, \code{bic}, \code{n_subjects},
 \code{n_obs}, \code{n_parameters}, \code{n_iterations}, \code{theta},
 \code{se_theta}, \code{omega}, \code{se_omega}, \code{sigma},

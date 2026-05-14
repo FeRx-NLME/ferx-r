@@ -212,7 +212,19 @@
 #'     path with its extension stripped.}
 #'   \item{gradient}{The inner-loop gradient method as requested by the
 #'     caller (one of \code{"auto"}, \code{"ad"}, \code{"fd"}). The
-#'     \emph{resolved} method may differ — see the \code{gradient} argument.}
+#'     \emph{resolved} method may differ — see \code{gradient_used} and the
+#'     \code{gradient} argument.}
+#'   \item{gradient_used}{The inner-loop gradient method the engine actually
+#'     used: \code{"ad"}, \code{"fd"}, or \code{"N/A"} (derivative-free /
+#'     sampling step). When \code{gradient = "auto"} this records which
+#'     branch resolved at fit time; for ODE models with \code{gradient = "ad"}
+#'     this shows the silent fallback to \code{"fd"}. \code{NA} on older
+#'     engine binaries that did not populate this field.}
+#'   \item{gradient_method_inner}{Engine label for the inner-loop gradient
+#'     ("Enzyme AD", "finite differences", or "N/A"). Prefer
+#'     \code{gradient_used} for display.}
+#'   \item{gradient_method_outer}{Engine label for the population-level
+#'     optimizer's gradient ("Enzyme AD", "finite differences", or "N/A").}
 #'   \item{ferx_version}{ferx-core library version string.}
 #'   \item{cov_matrix}{Full parameter covariance matrix as a named numeric
 #'     matrix (params × params). \code{NULL} when covariance step was not run
@@ -933,8 +945,14 @@ ferx_fit.default <- function(model, data,
   # reflects exactly what ferx-core ran. The R-side `.ferx_parse_structure()`
   # remains for the pre-fit `ferx_model_inspect(path)` workflow only.
 
-  # Store the requested gradient method
+  # Store the requested gradient method, and the method the engine actually
+  # resolved to. The engine reports `gradient_method_inner` as one of
+  # "Enzyme AD", "finite differences", or "N/A"; map to the short tokens used
+  # by the `gradient` argument so the two values can be compared directly
+  # (e.g. requested "auto" -> used "ad"). When the engine omitted the field
+  # (older binaries return ""), `gradient_used` is NA.
   result$gradient <- gradient
+  result$gradient_used <- .ferx_short_gradient_label(result$gradient_method_inner)
 
   # Store effective settings (already serialised from settings_parts above)
   result$call_settings <- settings_used
@@ -945,6 +963,20 @@ ferx_fit.default <- function(model, data,
 
   class(result) <- "ferx_fit"
   result
+}
+
+# Map the engine's gradient-kind label to the short tokens used by the
+# `gradient` argument so requested/used can be compared at a glance.
+# Returns NA_character_ when the engine field is missing or unrecognized so
+# downstream display code can fall back gracefully on older binaries.
+.ferx_short_gradient_label <- function(kind) {
+  if (is.null(kind) || !nzchar(kind)) return(NA_character_)
+  switch(kind,
+    "Enzyme AD"          = "ad",
+    "finite differences" = "fd",
+    "N/A"                = "N/A",
+    kind
+  )
 }
 
 # Compute Shapiro-Wilk normality test for each ETA, one row per ID.
@@ -1328,6 +1360,9 @@ print.ferx_fit <- function(x, ...) {
   if (!is.null(x$gradient)) {
     cat("  Gradient (requested): ", x$gradient, "\n", sep = "")
   }
+  if (!is.null(x$gradient_used) && !is.na(x$gradient_used)) {
+    cat("  Gradient (used):      ", x$gradient_used, "\n", sep = "")
+  }
   if (!is.null(x$wall_time_secs)) {
     cat(sprintf("  Wall time:  %.1fs\n", x$wall_time_secs))
   }
@@ -1384,6 +1419,7 @@ print.ferx_fit <- function(x, ...) {
 #' @param ... Ignored.
 #' @return A `ferx_summary` list (invisibly). Fields include: \code{model_name},
 #'   \code{data_name}, \code{method}, \code{method_chain}, \code{gradient},
+#'   \code{gradient_used},
 #'   \code{converged}, \code{ofv}, \code{aic}, \code{bic}, \code{n_subjects},
 #'   \code{n_obs}, \code{n_parameters}, \code{n_iterations}, \code{theta},
 #'   \code{se_theta}, \code{omega}, \code{se_omega}, \code{sigma},
@@ -1415,6 +1451,7 @@ summary.ferx_fit <- function(object, ...) {
     model_name = x$model_name %||% NA_character_,
     data_name = x$data_name %||% NA_character_,
     gradient = x$gradient %||% NA_character_,
+    gradient_used = x$gradient_used %||% NA_character_,
     method = x$method,
     method_chain = x$method_chain,
     converged = x$converged,
@@ -1469,7 +1506,13 @@ print.ferx_summary <- function(x, ...) {
   } else {
     cat(sprintf("Method:    %s\n", toupper(x$method %||% "?")))
   }
-  cat(sprintf("Gradient:  %s (requested)\n", x$gradient %||% "?"))
+  used <- x$gradient_used
+  if (is.null(used) || (length(used) == 1L && is.na(used))) {
+    cat(sprintf("Gradient:  %s (requested)\n", x$gradient %||% "?"))
+  } else {
+    cat(sprintf("Gradient:  %s (requested) -> %s (used)\n",
+                x$gradient %||% "?", used))
+  }
   cat(sprintf("ferx v%s\n", x$ferx_version %||% "?"))
 
   if (length(x$model_file_settings) > 0L || length(x$call_settings) > 0L) {

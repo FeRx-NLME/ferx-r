@@ -1,5 +1,17 @@
 # ferx (development)
 
+## New features
+
+- `ferx_fit()` now returns `$gradient_used` — the inner-loop gradient
+  method the engine actually used (`"ad"`, `"fd"`, or `"N/A"`). When
+  `gradient = "auto"` it shows which branch resolved at fit time; ODE
+  models silently fall back from AD to FD even when `gradient = "ad"`
+  was requested, and this field surfaces that fallback without needing
+  to read warnings. The raw engine labels are also exposed as
+  `$gradient_method_inner` / `$gradient_method_outer`. `print()` shows
+  both requested and used; `summary()` formats them as `auto
+  (requested) -> ad (used)` (ferx-core#1).
+
 ## Breaking changes
 
 - `ferx_model()` argument order is now `ferx_model(data, model)` (data
