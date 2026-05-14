@@ -44,6 +44,16 @@ ifeq ($(UNAME_S),Darwin)
     HOST_TOOLCHAIN_CHANNEL = stable-x86_64-apple-darwin
   endif
 endif
+# On Windows, R/Rtools44 uses the MinGW (GNU) ABI. The rustup default host on
+# Windows is MSVC, which produces .lib archives whose CRT/SEH symbols
+# (__chkstk, __security_cookie, __GSHandlerCheck, __imp_*) MinGW's ld cannot
+# resolve. Pin the GNU toolchain so the staticlib (and any cmake-built C deps
+# like nlopt) are link-compatible with Rtools. Use $(OS), which make picks up
+# from the environment as "Windows_NT" — more reliable than `uname -s`, which
+# may not be on PATH under R CMD INSTALL's make.
+ifeq ($(OS),Windows_NT)
+  HOST_TOOLCHAIN_CHANNEL = stable-x86_64-pc-windows-gnu
+endif
 
 all: C_clean
 
