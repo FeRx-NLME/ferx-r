@@ -902,7 +902,15 @@ fn fit_result_to_list(
         eta_param_types = eta_param_types,
         eta_linked_theta = eta_linked_theta,
         eta_names = result.eta_names.clone(),
-        theta_transforms = theta_transforms
+        theta_transforms = theta_transforms,
+        // Resolved gradient methods reported by the engine. `gradient_method_inner`
+        // tracks the per-subject EBE gradient (what the user's `gradient` argument
+        // controls — Auto resolves to AD or FD at fit time based on build and model
+        // shape); `gradient_method_outer` tracks the population-level optimizer's
+        // gradient (always FD or N/A today). Strings come from
+        // `GradientMethodKind::as_str`: "Enzyme AD", "finite differences", "N/A".
+        gradient_method_inner = result.gradient_method_inner.clone(),
+        gradient_method_outer = result.gradient_method_outer.clone()
     )
 }
 

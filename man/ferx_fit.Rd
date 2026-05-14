@@ -232,7 +232,19 @@ no name.}
 path with its extension stripped.}
 \item{gradient}{The inner-loop gradient method as requested by the
 caller (one of \code{"auto"}, \code{"ad"}, \code{"fd"}). The
-\emph{resolved} method may differ — see the \code{gradient} argument.}
+\emph{resolved} method may differ — see \code{gradient_used} and the
+\code{gradient} argument.}
+\item{gradient_used}{The inner-loop gradient method the engine actually
+used: \code{"ad"}, \code{"fd"}, or \code{"N/A"} (derivative-free /
+sampling step). When \code{gradient = "auto"} this records which
+branch resolved at fit time; for ODE models with \code{gradient = "ad"}
+this shows the silent fallback to \code{"fd"}. \code{NA} on older
+engine binaries that did not populate this field.}
+\item{gradient_method_inner}{Engine label for the inner-loop gradient
+("Enzyme AD", "finite differences", or "N/A"). Prefer
+\code{gradient_used} for display.}
+\item{gradient_method_outer}{Engine label for the population-level
+optimizer's gradient ("Enzyme AD", "finite differences", or "N/A").}
 \item{ferx_version}{ferx-nlme library version string.}
 \item{cov_matrix}{Full parameter covariance matrix as a named numeric
 matrix (params × params). \code{NULL} when covariance step was not run
