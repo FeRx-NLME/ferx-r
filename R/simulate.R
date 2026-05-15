@@ -16,16 +16,10 @@
 #' @return A data.frame with columns: SIM, ID, TIME, IPRED, DV_SIM
 #'
 #' @examples
-#' \dontrun{
 #' ex <- ferx_example("warfarin")
-#'
-#' # Simulate at the model file's initial estimates:
-#' sim0 <- ferx_simulate(ex$model, ex$data, n_sim = 100, seed = 42)
-#'
-#' # Fit, then simulate at the fitted estimates (typical VPC flow):
-#' fit <- ferx_fit(ex$model, ex$data)
-#' sim <- ferx_simulate(ex$model, ex$data, n_sim = 100, seed = 42, fit = fit)
-#' }
+#' fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
+#' sim <- ferx_simulate(ex$model, ex$data, n_sim = 10L, seed = 1L, fit = fit)
+#' head(sim)
 #'
 #' @export
 ferx_simulate <- function(model, data, n_sim = 1L, seed = 42L, fit = NULL) {
@@ -65,14 +59,10 @@ ferx_simulate <- function(model, data, n_sim = 1L, seed = 42L, fit = NULL) {
 #' @return A data.frame with columns: ID, TIME, PRED
 #'
 #' @examples
-#' \dontrun{
 #' ex <- ferx_example("warfarin")
-#'
-#' preds <- ferx_predict(ex$model, ex$data)
-#'
-#' fit <- ferx_fit(ex$model, ex$data)
-#' preds_fitted <- ferx_predict(ex$model, ex$data, fit = fit)
-#' }
+#' fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
+#' preds <- ferx_predict(ex$model, ex$data, fit = fit)
+#' head(preds)
 #'
 #' @export
 ferx_predict <- function(model, data, fit = NULL) {

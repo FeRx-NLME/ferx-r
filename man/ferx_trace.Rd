@@ -42,10 +42,10 @@ message indicating when that fit was started. Named \code{ferx_trace()}
 rather than \code{trace()} to avoid masking \code{base::trace()}.
 }
 \examples{
-\dontrun{
-fit <- ferx_fit("warfarin.ferx", "warfarin.csv", optimizer_trace = TRUE)
-head(ferx_trace(fit))
-head(ferx_trace())              # same trace, recalled from last run
-}
+ex  <- ferx_example("warfarin")
+fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE,
+                optimizer_trace = TRUE)
+tr  <- ferx_trace(fit)
+head(tr)
 
 }

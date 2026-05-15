@@ -24,10 +24,8 @@ worth testing in a formal covariate search. Only columns that are constant
 within each subject are treated as covariates.
 }
 \examples{
-\dontrun{
-ex   <- ferx_example("warfarin")
-fit  <- ferx_fit(ex$model, ex$data)
-data <- read.csv(ex$data)
-ferx_eta_cov(fit, data)
-}
+ex  <- ferx_example("warfarin")
+fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
+obs <- read.csv(ex$data)
+ferx_eta_cov(fit, obs)
 }

@@ -34,11 +34,12 @@ FITRX_FORMAT_VERSION <- "1"
 #' @seealso \code{\link{ferx_load_fit}}, \code{\link{ferx_fit}} (and its
 #'   \code{output} argument for save-during-fit).
 #' @examples
-#' \dontrun{
-#' fit <- ferx_fit("warfarin.ferx", "warfarin.csv")
-#' ferx_save_fit(fit, "run1.fitrx", include_data = TRUE)
-#' loaded <- ferx_load_fit("run1.fitrx")
-#' }
+#' ex  <- ferx_example("warfarin")
+#' fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
+#' tmp <- tempfile(fileext = ".rds")
+#' ferx_save_fit(fit, tmp)
+#' fit2 <- ferx_load_fit(tmp)
+#' identical(fit$theta, fit2$theta)
 ferx_save_fit <- function(fit, output, include_data = FALSE) {
   if (!inherits(fit, "ferx_fit")) {
     stop("`fit` must be a ferx_fit object (returned by ferx_fit()).")
@@ -146,6 +147,13 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
 #'
 #' @param path Path to a \code{.fitrx} file.
 #' @return A \code{ferx_fit}-classed list.
+#' @examples
+#' ex  <- ferx_example("warfarin")
+#' fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
+#' tmp <- tempfile(fileext = ".rds")
+#' ferx_save_fit(fit, tmp)
+#' fit2 <- ferx_load_fit(tmp)
+#' identical(fit$theta, fit2$theta)
 #' @export
 #' @seealso \code{\link{ferx_save_fit}}.
 ferx_load_fit <- function(path) {

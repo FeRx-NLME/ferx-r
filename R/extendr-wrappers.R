@@ -8,42 +8,55 @@
 # rextendr >= 0.4, the preamble will not be re-emitted. With an older
 # rextendr it will be re-added; delete the block again (or upgrade rextendr).
 
-#' @export
+# NOTE (manual edit): the ferx_rust_* functions below are internal Rust FFI
+# bindings. Their `@export` annotations were intentionally replaced with
+# `@keywords internal` so they do not appear in the public namespace. If
+# rextendr regenerates this file and restores `@export`, replace them again.
+
+#' @title Internal Rust backend binding
+#' @keywords internal
 ferx_rust_fit <- function(model_path, data_path, method, covariance, verbose, bloq_method, threads, mu_referencing, sir, gradient, settings_keys, settings_values) {
   .Call("wrap__ferx_rust_fit", model_path, data_path, as.character(method), covariance, verbose, bloq_method, threads, mu_referencing, sir, gradient, as.character(settings_keys), as.character(settings_values))
 }
 
-#' @export
+#' @title Internal Rust backend binding
+#' @keywords internal
 ferx_rust_simulate <- function(model_path, data_path, n_sim, seed) {
   .Call("wrap__ferx_rust_simulate", model_path, data_path, n_sim, seed)
 }
 
-#' @export
+#' @title Internal Rust backend binding
+#' @keywords internal
 ferx_rust_simulate_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, n_sim, seed) {
   .Call("wrap__ferx_rust_simulate_from_fit", model_path, data_path, theta, omega_flat, omega_dim, sigma, n_sim, seed)
 }
 
-#' @export
+#' @title Internal Rust backend binding
+#' @keywords internal
 ferx_rust_simulate_with_uncertainty <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, method, cov_matrix_flat, cov_matrix_dim, sir_resamples_flat, sir_resamples_n, sir_resamples_dim, n_uncertainty_draws, n_sim_per_draw, seed) {
   .Call("wrap__ferx_rust_simulate_with_uncertainty", model_path, data_path, theta, omega_flat, omega_dim, sigma, method, cov_matrix_flat, as.integer(cov_matrix_dim), sir_resamples_flat, as.integer(sir_resamples_n), as.integer(sir_resamples_dim), as.integer(n_uncertainty_draws), as.integer(n_sim_per_draw), as.integer(seed))
 }
 
-#' @export
+#' @title Internal Rust backend binding
+#' @keywords internal
 ferx_rust_predict <- function(model_path, data_path) {
   .Call("wrap__ferx_rust_predict", model_path, data_path)
 }
 
-#' @export
+#' @title Internal Rust backend binding
+#' @keywords internal
 ferx_rust_predict_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma) {
   .Call("wrap__ferx_rust_predict_from_fit", model_path, data_path, theta, omega_flat, omega_dim, sigma)
 }
 
-#' @export
+#' @title Internal Rust backend binding
+#' @keywords internal
 ferx_rust_autodiff_enabled <- function() {
   .Call("wrap__ferx_rust_autodiff_enabled")
 }
 
-#' @export
+#' @title Internal Rust backend binding
+#' @keywords internal
 ferx_rust_validate_model <- function(model_path) {
   .Call("wrap__ferx_rust_validate_model", model_path)
 }

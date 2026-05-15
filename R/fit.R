@@ -446,6 +446,11 @@
 #' }
 #'
 #' @examples
+#' ex <- ferx_example("warfarin")
+#' fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
+#' fit$theta
+#' fit$ofv
+#'
 #' \dontrun{
 #' ex <- ferx_example("warfarin")
 #'

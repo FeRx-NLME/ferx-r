@@ -32,11 +32,11 @@
 #'   \item{mh_accept_rate}{Metropolis-Hastings acceptance rate (SAEM only)}
 #'
 #' @examples
-#' \dontrun{
-#' fit <- ferx_fit("warfarin.ferx", "warfarin.csv", optimizer_trace = TRUE)
-#' head(ferx_trace(fit))
-#' head(ferx_trace())              # same trace, recalled from last run
-#' }
+#' ex  <- ferx_example("warfarin")
+#' fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE,
+#'                 optimizer_trace = TRUE)
+#' tr  <- ferx_trace(fit)
+#' head(tr)
 #'
 #' @export
 ferx_trace <- function(fit) {
@@ -106,10 +106,11 @@ ferx_trace <- function(fit) {
 #'   \code{\link{ferx_trace}}).
 #'
 #' @examples
-#' \dontrun{
-#' fit <- ferx_fit("warfarin.ferx", "warfarin.csv", optimizer_trace = TRUE)
-#' ferx_plot_trace(fit)
-#' }
+#' ex  <- ferx_example("warfarin")
+#' fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE,
+#'                 optimizer_trace = TRUE)
+#' tr  <- ferx_trace(fit)
+#' head(tr)
 #'
 #' @export
 ferx_plot_trace <- function(fit, log_ofv = FALSE) {

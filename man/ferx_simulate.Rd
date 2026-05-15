@@ -29,15 +29,9 @@ and sigma replace the model file's initial values — which is the usual flow
 after \code{\link{ferx_fit}} (e.g. for posterior-predictive checks or VPCs).
 }
 \examples{
-\dontrun{
 ex <- ferx_example("warfarin")
-
-# Simulate at the model file's initial estimates:
-sim0 <- ferx_simulate(ex$model, ex$data, n_sim = 100, seed = 42)
-
-# Fit, then simulate at the fitted estimates (typical VPC flow):
-fit <- ferx_fit(ex$model, ex$data)
-sim <- ferx_simulate(ex$model, ex$data, n_sim = 100, seed = 42, fit = fit)
-}
+fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
+sim <- ferx_simulate(ex$model, ex$data, n_sim = 10L, seed = 1L, fit = fit)
+head(sim)
 
 }
