@@ -249,7 +249,7 @@ fn ferx_rust_fit(
         handle.join()
     });
 
-    let result = match result {
+    let mut result = match result {
         Ok(Ok(r)) => r,
         Ok(Err(_)) if cancel.is_cancelled() => {
             // Raise a proper R error so the user sees a clean condition
@@ -267,6 +267,17 @@ fn ferx_rust_fit(
             return List::new(0);
         }
     };
+
+    // Record source-file provenance on the result so `ferx_sir(fit)` can
+    // refuse to run against a tampered model or dataset later. We compute
+    // the hashes here (not inside ferx_core::fit) because the R binding
+    // owns the path strings the user supplied. Hashing failures are
+    // non-fatal — the fit already succeeded, and missing hashes just mean
+    // `ferx_sir` will fall back to a no-verification call.
+    result.model_path = Some(model_path.to_string());
+    result.data_path = Some(data_path.to_string());
+    result.model_hash = ferx_core::io::hash::sha256_file(Path::new(model_path)).ok();
+    result.data_hash = ferx_core::io::hash::sha256_file(Path::new(data_path)).ok();
 
     // Convert to R list
     fit_result_to_list(&result, &population, &parsed.model)
@@ -866,6 +877,10 @@ fn default_fit_result(
         eta_log_transformed: Vec::new(),
         omega_param_corr: None,
         omega_iov_param_corr: None,
+        model_path: None,
+        data_path: None,
+        model_hash: None,
+        data_hash: None,
     }
 }
 
@@ -1243,7 +1258,15 @@ fn fit_result_to_list(
         // gradient (always FD or N/A today). Strings come from
         // `GradientMethodKind::as_str`: "Enzyme AD", "finite differences", "N/A".
         gradient_method_inner = result.gradient_method_inner.clone(),
-        gradient_method_outer = result.gradient_method_outer.clone()
+        gradient_method_outer = result.gradient_method_outer.clone(),
+        // Source-file provenance. `ferx_sir(fit)` reads these to re-parse
+        // the model + data and verify SHA-256 hashes; empty strings mean
+        // the fit didn't carry them (e.g. older binaries, or a path the
+        // hasher couldn't read).
+        model_path = result.model_path.clone().unwrap_or_default(),
+        data_path = result.data_path.clone().unwrap_or_default(),
+        model_hash = result.model_hash.clone().unwrap_or_default(),
+        data_hash = result.data_hash.clone().unwrap_or_default()
     )
 }
 
@@ -1403,6 +1426,296 @@ fn ferx_rust_validate_model(model_path: &str) -> List {
     }
 }
 
+/// Standalone SIR — run Sampling Importance Resampling against an existing fit.
+///
+/// The R wrapper `ferx_sir()` flattens the fit list into the primitives this
+/// binding expects: parameter estimates, per-subject EBE etas, the asymptotic
+/// covariance matrix, the original fit's OFV, and the source paths + hashes
+/// captured at fit time. We rebuild a minimal `FitResult` Rust-side (only the
+/// fields `ferx_core::run_sir` reads), then call the standalone wrapper which
+/// re-parses model + data from the paths, verifies hashes, and runs SIR.
+///
+/// @param model_path Path to the `.ferx` model file as recorded on the fit.
+/// @param data_path Path to the NONMEM CSV as recorded on the fit.
+/// @param model_hash Expected SHA-256 of the model file; empty string disables the check.
+/// @param data_hash Expected SHA-256 of the data file; empty string disables the check.
+/// @param ofv Original fit's OFV (= 2 * nll).
+/// @param interaction TRUE for a FOCEI fit, FALSE for FOCE. Controls the inner-loop NLL.
+/// @param theta Vector of theta point estimates.
+/// @param omega_flat Row-major flattened omega matrix.
+/// @param omega_dim Dimension of the omega matrix.
+/// @param sigma Vector of sigma point estimates.
+/// @param cov_matrix_flat Row-major flattened parameter covariance matrix.
+/// @param cov_matrix_dim Dimension of the covariance matrix.
+/// @param eta_hats_flat Row-major flattened per-subject EBE etas (n_subjects × n_eta).
+/// @param n_subjects Number of subjects.
+/// @param sir_samples Number of proposal samples (M).
+/// @param sir_resamples Number of resamples (m); must be <= M.
+/// @param sir_seed Random seed; pass -1 for the engine default.
+/// @param sir_keep_samples When TRUE, retains the resampled packed parameter vectors.
+/// @param verbose When TRUE, the engine prints progress to stderr.
+/// @return Named list with `sir_ess`, `sir_ci_theta`, `sir_ci_omega`, `sir_ci_sigma`,
+///   `sir_resamples`, `sir_resamples_n`, `sir_resamples_dim`.
+#[extendr]
+#[allow(clippy::too_many_arguments)]
+fn ferx_rust_sir(
+    model_path: &str,
+    data_path: &str,
+    model_hash: &str,
+    data_hash: &str,
+    ofv: f64,
+    interaction: bool,
+    theta: Vec<f64>,
+    omega_flat: Vec<f64>,
+    omega_dim: i32,
+    sigma: Vec<f64>,
+    cov_matrix_flat: Vec<f64>,
+    cov_matrix_dim: i32,
+    eta_hats_flat: Vec<f64>,
+    n_subjects: i32,
+    sir_samples: i32,
+    sir_resamples: i32,
+    sir_seed: i32,
+    sir_keep_samples: bool,
+    verbose: bool,
+) -> Robj {
+    // Parse the model up-front so we can validate omega dim before
+    // bothering the user with a multi-second wait. ferx_core::run_sir
+    // re-parses internally too; this just gives us a fast pre-flight.
+    let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
+        Ok(p) => p,
+        Err(e) => {
+            rprintln!("ferx_sir: error parsing model at {}: {}", model_path, e);
+            return ().into();
+        }
+    };
+    let model = &parsed.model;
+    let template = &model.default_params;
+
+    let n_theta = theta.len();
+    let n_sigma = sigma.len();
+    let n_eta = omega_dim as usize;
+    let n_subj = n_subjects.max(0) as usize;
+    let n_packed = cov_matrix_dim as usize;
+
+    if n_theta != template.theta.len() {
+        rprintln!(
+            "ferx_sir: theta length {} does not match model ({} expected)",
+            n_theta,
+            template.theta.len()
+        );
+        return ().into();
+    }
+    if n_sigma != template.sigma.values.len() {
+        rprintln!(
+            "ferx_sir: sigma length {} does not match model ({} expected)",
+            n_sigma,
+            template.sigma.values.len()
+        );
+        return ().into();
+    }
+    if n_eta != template.omega.dim() {
+        rprintln!(
+            "ferx_sir: omega dim {} does not match model ({} expected)",
+            n_eta,
+            template.omega.dim()
+        );
+        return ().into();
+    }
+    if omega_flat.len() != n_eta * n_eta {
+        rprintln!(
+            "ferx_sir: omega_flat length {} does not match dim^2 = {}",
+            omega_flat.len(),
+            n_eta * n_eta
+        );
+        return ().into();
+    }
+    if n_packed == 0 || cov_matrix_flat.len() != n_packed * n_packed {
+        rprintln!(
+            "ferx_sir: cov_matrix is missing or malformed (dim={}, len={}). \
+             Re-fit with `covariance = TRUE`.",
+            n_packed,
+            cov_matrix_flat.len()
+        );
+        return ().into();
+    }
+    if eta_hats_flat.len() != n_subj * n_eta {
+        rprintln!(
+            "ferx_sir: eta_hats_flat length {} does not match n_subjects * n_eta = {}",
+            eta_hats_flat.len(),
+            n_subj * n_eta
+        );
+        return ().into();
+    }
+
+    let omega_mat = DMatrix::from_row_slice(n_eta, n_eta, &omega_flat);
+    let cov_mat = DMatrix::from_row_slice(n_packed, n_packed, &cov_matrix_flat);
+
+    // Build SubjectResult vec with only `eta` populated (the only field
+    // ferx_core::run_sir reads off subjects). IDs are synthesised because
+    // SIR doesn't consume them; the original IDs live on the R fit list.
+    let mut subjects: Vec<SubjectResult> = Vec::with_capacity(n_subj);
+    for i in 0..n_subj {
+        let mut eta = nalgebra::DVector::<f64>::zeros(n_eta);
+        for k in 0..n_eta {
+            eta[k] = eta_hats_flat[i * n_eta + k];
+        }
+        subjects.push(SubjectResult {
+            id: format!("{}", i + 1),
+            eta,
+            ipred: Vec::new(),
+            pred: Vec::new(),
+            iwres: Vec::new(),
+            cwres: Vec::new(),
+            ofv_contribution: 0.0,
+            cens: Vec::new(),
+            n_obs: 0,
+        });
+    }
+
+    // Skeleton FitResult — only the fields ferx_core::run_sir actually
+    // reads are populated; everything else gets a neutral default.
+    let fit = FitResult {
+        method: if interaction {
+            EstimationMethod::FoceI
+        } else {
+            EstimationMethod::Foce
+        },
+        method_chain: vec![if interaction {
+            EstimationMethod::FoceI
+        } else {
+            EstimationMethod::Foce
+        }],
+        converged: true,
+        ofv,
+        aic: 0.0,
+        bic: 0.0,
+        theta: theta.clone(),
+        theta_names: template.theta_names.clone(),
+        eta_names: template.omega.eta_names.clone(),
+        omega: omega_mat,
+        sigma: sigma.clone(),
+        sigma_names: template.sigma.names.clone(),
+        error_model: model.error_model,
+        covariance_matrix: Some(cov_mat),
+        se_theta: None,
+        se_omega: None,
+        se_sigma: None,
+        theta_fixed: template.theta_fixed.clone(),
+        omega_fixed: template.omega_fixed.clone(),
+        sigma_fixed: template.sigma_fixed.clone(),
+        subjects,
+        n_obs: 0,
+        n_subjects: n_subj,
+        n_parameters: n_packed,
+        n_iterations: 0,
+        interaction,
+        warnings: Vec::new(),
+        sir_ci_theta: None,
+        sir_ci_omega: None,
+        sir_ci_sigma: None,
+        sir_ess: None,
+        sir_resamples_packed: None,
+        omega_iov: None,
+        kappa_names: model.kappa_names.clone(),
+        kappa_fixed: template.kappa_fixed.clone(),
+        se_kappa: None,
+        shrinkage_kappa: Vec::new(),
+        ebe_kappas: Vec::new(),
+        saem_mu_ref_m_step_evals_saved: None,
+        gradient_method_inner: String::new(),
+        gradient_method_outer: String::new(),
+        uses_ode_solver: model.is_ode_based(),
+        n_threads_used: 1,
+        nlopt_missing_algorithms: Vec::new(),
+        covariance_n_evals_estimated: None,
+        trace_path: None,
+        ebe_convergence_warnings: 0,
+        max_unconverged_subjects: 0,
+        total_ebe_fallbacks: 0,
+        covariance_status: CovarianceStatus::Computed,
+        shrinkage_eta: Vec::new(),
+        shrinkage_eps: f64::NAN,
+        wall_time_secs: 0.0,
+        model_name: model.name.clone(),
+        ferx_version: String::new(),
+        eta_param_info: Vec::new(),
+        theta_transform: Vec::new(),
+        sigma_types: Vec::new(),
+        cov_eigenvalues: None,
+        cov_condition_number: None,
+        eta_log_transformed: Vec::new(),
+        omega_param_corr: None,
+        omega_iov_param_corr: None,
+        model_path: Some(model_path.to_string()),
+        data_path: Some(data_path.to_string()),
+        model_hash: if model_hash.is_empty() {
+            None
+        } else {
+            Some(model_hash.to_string())
+        },
+        data_hash: if data_hash.is_empty() {
+            None
+        } else {
+            Some(data_hash.to_string())
+        },
+    };
+
+    let mut opts = FitOptions::default();
+    opts.sir_samples = sir_samples.max(0) as usize;
+    opts.sir_resamples = sir_resamples.max(0) as usize;
+    opts.sir_seed = if sir_seed < 0 {
+        None
+    } else {
+        Some(sir_seed as u64)
+    };
+    opts.sir_keep_samples = sir_keep_samples;
+    opts.interaction = interaction;
+    opts.verbose = verbose;
+
+    // ferx_core::run_sir verifies hashes (when set), re-parses model + data,
+    // reconstructs the inner ModelParameters, and runs SIR. We pass None for
+    // model/population so that path goes through and the integrity check
+    // fires — that is the whole point of having hashes here.
+    let new_fit = match ferx_core::run_sir(&fit, None, None, &opts) {
+        Ok(f) => f,
+        Err(e) => {
+            rprintln!("ferx_sir: {}", e);
+            return ().into();
+        }
+    };
+
+    let flatten_ci = |ci: &Option<Vec<(f64, f64)>>| -> Vec<f64> {
+        ci.as_ref()
+            .map(|v| v.iter().flat_map(|(lo, hi)| [*lo, *hi]).collect())
+            .unwrap_or_default()
+    };
+    let (sir_resamples_flat, sir_resamples_n, sir_resamples_dim): (Vec<f64>, i32, i32) =
+        match &new_fit.sir_resamples_packed {
+            Some(pool) if !pool.is_empty() => {
+                let n = pool.len();
+                let d = pool[0].len();
+                let mut v = Vec::with_capacity(n * d);
+                for row in pool {
+                    v.extend_from_slice(row);
+                }
+                (v, n as i32, d as i32)
+            }
+            _ => (Vec::new(), 0i32, 0i32),
+        };
+
+    list!(
+        sir_ess = new_fit.sir_ess.unwrap_or(f64::NAN),
+        sir_ci_theta = flatten_ci(&new_fit.sir_ci_theta),
+        sir_ci_omega = flatten_ci(&new_fit.sir_ci_omega),
+        sir_ci_sigma = flatten_ci(&new_fit.sir_ci_sigma),
+        sir_resamples = sir_resamples_flat,
+        sir_resamples_n = sir_resamples_n,
+        sir_resamples_dim = sir_resamples_dim
+    )
+    .into()
+}
+
 extendr_module! {
     mod ferx;
     fn ferx_rust_fit;
@@ -1411,6 +1724,7 @@ extendr_module! {
     fn ferx_rust_simulate_with_uncertainty;
     fn ferx_rust_predict;
     fn ferx_rust_predict_from_fit;
+    fn ferx_rust_sir;
     fn ferx_rust_autodiff_enabled;
     fn ferx_rust_validate_model;
 }

@@ -980,10 +980,20 @@ ferx_fit.default <- function(model, data,
     paste(readLines(model, warn = FALSE), collapse = "\n"),
     error = function(e) ""
   )
-  result$data_path <- tryCatch(
-    normalizePath(data, mustWork = FALSE),
-    error = function(e) NA_character_
-  )
+
+  # Source-file provenance. The Rust binding now emits these directly
+  # (computed via ferx_core::io::hash::sha256_file); the empty-string ->
+  # NULL coercion handles older binaries that didn't populate them, so the
+  # %||% fallback can fire.
+  empty_to_null <- function(x) {
+    if (is.null(x) || length(x) == 0L || !nzchar(x[[1L]])) NULL else as.character(x)
+  }
+  result$model_path <- empty_to_null(result$model_path) %||%
+    tryCatch(normalizePath(model, mustWork = FALSE), error = function(e) NA_character_)
+  result$data_path <- empty_to_null(result$data_path) %||%
+    tryCatch(normalizePath(data, mustWork = FALSE), error = function(e) NA_character_)
+  result$model_hash <- empty_to_null(result$model_hash) %||% NA_character_
+  result$data_hash <- empty_to_null(result$data_hash) %||% NA_character_
 
   class(result) <- "ferx_fit"
 
