@@ -33,7 +33,7 @@ uncertainty distribution}
 }
 \value{
 A data.frame with columns: DRAW, SIM, ID, TIME, IPRED, DV_SIM.
-  Row count: \code{n_uncertainty_draws * n_sim_per_draw * n_obs}.
+Row count: \code{n_uncertainty_draws * n_sim_per_draw * n_obs}.
 }
 \description{
 For each parameter set drawn from the uncertainty distribution, the
@@ -46,14 +46,14 @@ where treating the ML estimates as fixed would understate variability.
 \details{
 Two uncertainty sources are supported:
 \describe{
-  \item{\code{method = "asymptotic"}}{Multivariate normal around the ML
-    estimate in the engine's packed (log-theta, Cholesky-omega, log-sigma)
-    parameter space, using \code{fit$cov_matrix}. Requires \code{fit}
-    to come from a \code{ferx_fit()} call with \code{covariance = TRUE}.}
-  \item{\code{method = "sir"}}{Sample with replacement from
-    \code{fit$sir_resamples}. Requires the fit to have been run with
-    \code{sir = TRUE} and \code{sir_keep_samples = TRUE} (passed via
-    \code{settings}).}
+\item{\code{method = "asymptotic"}}{Multivariate normal around the ML
+estimate in the engine's packed (log-theta, Cholesky-omega, log-sigma)
+parameter space, using \code{fit$cov_matrix}. Requires \code{fit}
+to come from a \code{ferx_fit()} call with \code{covariance = TRUE}.}
+\item{\code{method = "sir"}}{Sample with replacement from
+\code{fit$sir_resamples}. Requires the fit to have been run with
+\code{sir = TRUE} and \code{sir_keep_samples = TRUE} (passed via
+\code{settings}).}
 }
 }
 \examples{

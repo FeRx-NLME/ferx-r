@@ -162,6 +162,18 @@ also raise an error.
 call-time value overrides a different value from \code{[fit_options]}.
 Inspect \code{fit$model_file_settings} and \code{fit$call_settings} to
 audit the full picture.}
+
+\item{output}{Optional path to a \code{.fitrx} file. When non-\code{NULL},
+\code{\link{ferx_save_fit}} is invoked on the result so the fit is
+persisted to disk in a portable, cross-language bundle (zip of JSON +
+CSV) before the function returns. Equivalent to calling
+\code{ferx_save_fit(fit, output)} after the fit. See the format
+reference in the ferx-core docs for the on-disk schema.}
+
+\item{include_data}{Logical. Only meaningful with \code{output}. When
+\code{TRUE}, embeds the input \code{data} CSV verbatim inside the
+\code{.fitrx} bundle so the file is self-contained. Default
+\code{FALSE}.}
 }
 \value{
 A list with components:
