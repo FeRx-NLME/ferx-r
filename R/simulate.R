@@ -181,15 +181,18 @@ ferx_simulate_with_uncertainty <- function(model, data, fit,
   stopifnot(file.exists(model), file.exists(data))
   method <- match.arg(method)
 
-  fit_pieces <- validate_fit_for_params(fit)
-  unc_pieces <- validate_fit_for_uncertainty(fit, method)
-
+  # Check the cheap, user-facing arg constraints before the fit-object
+  # validation so callers passing `n_uncertainty_draws = 0` see the obvious
+  # error rather than a follow-on complaint about `cov_matrix` / `sir_resamples`.
   if (n_uncertainty_draws < 1L) {
     stop("`n_uncertainty_draws` must be >= 1.")
   }
   if (n_sim_per_draw < 1L) {
     stop("`n_sim_per_draw` must be >= 1.")
   }
+
+  fit_pieces <- validate_fit_for_params(fit)
+  unc_pieces <- validate_fit_for_uncertainty(fit, method)
 
   ferx_rust_simulate_with_uncertainty(
     model_path           = normalizePath(model),
