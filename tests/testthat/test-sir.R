@@ -70,6 +70,27 @@ test_that("ferx_sir runs end-to-end and populates SIR fields", {
   expect_s3_class(out, "ferx_fit")
 })
 
+test_that("ferx_sir retains resamples when sir_keep_samples = TRUE", {
+  fit <- warfarin_fit_cov()
+  skip_if(is.null(fit$cov_matrix), sir_cov_skip)
+  out <- ferx_sir(
+    fit,
+    sir_samples = 8L,
+    sir_resamples = 4L,
+    sir_seed = 2L,
+    sir_keep_samples = TRUE,
+    verbose = FALSE
+  )
+
+  # The resamples pool is a long flat vector; n × packed_dim
+  # establishes the matrix shape on the consumer side.
+  expect_true(is.numeric(out$sir_resamples))
+  expect_equal(out$sir_resamples_n, 4L)
+  expect_true(is.integer(out$sir_resamples_dim) && out$sir_resamples_dim > 0L)
+  expect_equal(length(out$sir_resamples),
+               out$sir_resamples_n * out$sir_resamples_dim)
+})
+
 test_that("ferx_sir refuses to run after the model file is tampered with", {
   # Run against a temp copy of the example so we don't mutate the bundled
   # example file. ferx_fit normalises paths, so the fit will point at the

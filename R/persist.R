@@ -240,6 +240,14 @@ ferx_load_fit <- function(path) {
     persisted_model <- tempfile("fitrx_model_", fileext = ".ferx")
     file.copy(model_staging, persisted_model, overwrite = TRUE)
     result$model_path <- persisted_model
+  } else if (is.null(result$model_path) || !nzchar(result$model_path) ||
+             !file.exists(result$model_path)) {
+    # `model.ferx` should always be present in a well-formed bundle, but
+    # be defensive: if it's missing AND the wire path doesn't resolve
+    # locally, clear `model_path` to NA so `ferx_sir()`'s "no recorded
+    # model path" branch fires with a clear message instead of the
+    # generic "file not found".
+    result$model_path <- NA_character_
   }
   data_staging <- file.path(staging, "data.csv")
   if (file.exists(data_staging)) {
@@ -251,9 +259,9 @@ ferx_load_fit <- function(path) {
     # No bundled data and the wire didn't carry a path either.
     result$data_path <- NA_character_
   }
-  # If the wire carried model_path / data_path but neither was bundled,
-  # leave them as-is — `ferx_sir()` will surface a clear error if they
-  # don't exist on this machine.
+  # If the wire carried model_path / data_path and neither was bundled
+  # but the path resolves locally, leave it as-is — `ferx_sir()` will
+  # use it directly (and the hash check still applies).
 
   # Warnings — fit.json is the source of truth, warnings.txt is a mirror.
   if (is.null(result$warnings)) result$warnings <- character()

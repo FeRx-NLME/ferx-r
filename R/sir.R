@@ -161,15 +161,43 @@ ferx_sir <- function(fit,
 
   # The Rust binding wants row-major matrices and treats empty hash strings
   # as "no integrity check needed". Pass the recorded hashes through; the
-  # Rust wrapper enforces equality.
+  # Rust wrapper enforces equality when non-empty.
+  #
+  # Hash plumbing has three states we need to handle:
+  #   1. Non-empty hex string: forward it; Rust enforces equality.
+  #   2. NULL (older binary that didn't populate the field): forward "";
+  #      Rust skips the check. (This is the "as-given" semantics.)
+  #   3. NA_character_ (Rust ran but sha256_file failed; the post-fit
+  #      `.ok()` in api.rs converts the Err to None, which the R wrapper
+  #      stores as NA): we MUST coerce to "" here. `%||%` only catches
+  #      NULL, and NA at the FFI boundary stringifies to "NA", which
+  #      compares unequal to any real digest and would trigger a
+  #      spurious "hash mismatch" error.
+  empty_if_missing <- function(x) {
+    if (is.null(x) || length(x) == 0L || (length(x) == 1L && is.na(x[[1L]]))) {
+      ""
+    } else {
+      as.character(x)
+    }
+  }
+  model_hash_arg <- empty_if_missing(fit$model_hash)
+  data_hash_arg <- empty_if_missing(fit$data_hash)
+  if (!nzchar(model_hash_arg) || !nzchar(data_hash_arg)) {
+    warning(
+      "ferx_sir: one or more file hashes are missing on the fit; ",
+      "the integrity check will be skipped for the affected file(s). ",
+      "Re-fit (or load a newer .fitrx) to enable hash verification."
+    )
+  }
+
   omega_flat <- as.numeric(t(fit$omega))
   cov_flat <- as.numeric(t(fit$cov_matrix))
 
   raw <- ferx_rust_sir(
     model_path = model_path,
     data_path = data_path,
-    model_hash = fit$model_hash %||% "",
-    data_hash = fit$data_hash %||% "",
+    model_hash = model_hash_arg,
+    data_hash = data_hash_arg,
     ofv = as.numeric(fit$ofv),
     interaction = isTRUE(fit$interaction),
     theta = as.numeric(fit$theta),
@@ -194,7 +222,20 @@ ferx_sir <- function(fit,
   # Merge results onto the fit object. Mirrors the post-processing
   # `ferx_fit()` applies to its inline SIR output so downstream code sees
   # the same shapes regardless of which entry point produced them.
-  fit$sir_ess <- if (is.finite(raw$sir_ess)) raw$sir_ess else NULL
+  #
+  # Non-finite ESS shouldn't happen in the standalone path (the engine
+  # would have thrown an error before returning), but if it does, warn
+  # before discarding it so users know the run was degenerate.
+  if (!is.finite(raw$sir_ess)) {
+    warning(
+      "ferx_sir: effective sample size is not finite (got ", raw$sir_ess,
+      "). The proposal distribution may be a poor match for the true ",
+      "uncertainty — increase `sir_samples`, or reconsider the underlying fit."
+    )
+    fit$sir_ess <- NULL
+  } else {
+    fit$sir_ess <- raw$sir_ess
+  }
 
   reshape_ci <- function(v, row_names = NULL) {
     if (length(v) == 0L) return(NULL)
