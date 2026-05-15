@@ -1041,6 +1041,12 @@ ferx_fit.default <- function(model, data,
         stringsAsFactors = FALSE
       ))
     }
+    if (length(unique(vals)) == 1L) {
+      return(data.frame(
+        eta = col, W = NA_real_, p_val = NA_real_, flag = "",
+        stringsAsFactors = FALSE
+      ))
+    }
     if (length(vals) > sw_cap) {
       vals <- vals[round(seq.int(1L, length(vals), length.out = sw_cap))]
     }
