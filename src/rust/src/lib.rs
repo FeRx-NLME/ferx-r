@@ -379,6 +379,129 @@ fn ferx_rust_simulate_from_fit(
     sim_results_to_df(&results)
 }
 
+/// Simulate with parameter uncertainty propagation.
+///
+/// For each parameter set drawn from the uncertainty distribution
+/// (`method = "asymptotic"` uses the FD covariance matrix; `method = "sir"`
+/// reuses SIR resamples) the per-subject eta/eps sampler runs
+/// `n_sim_per_draw` times. Returns a long data frame with a leading `DRAW`
+/// column so downstream code can compute prediction bands that include
+/// parameter uncertainty.
+///
+/// Both uncertainty sources need data attached to the fit:
+/// - "asymptotic" requires `cov_matrix_flat` populated (run `ferx_fit` with
+///   `covariance = TRUE`).
+/// - "sir" requires `sir_resamples_flat` populated (run with
+///   `sir = TRUE` and `sir_keep_samples = TRUE` in `settings`).
+///
+/// @param model_path Path to .ferx model file
+/// @param data_path Path to NONMEM-format CSV (provides population structure)
+/// @param theta Fitted theta vector — the ML estimate that anchors the proposal
+/// @param omega_flat Row-major flattened fitted omega matrix
+/// @param omega_dim Side length of the omega matrix
+/// @param sigma Fitted sigma vector
+/// @param method Uncertainty method: `"asymptotic"` or `"sir"`
+/// @param cov_matrix_flat Row-major flattened packed-space covariance matrix
+///   (empty when not using asymptotic mode)
+/// @param cov_matrix_dim Side length of the covariance matrix (0 when unused)
+/// @param sir_resamples_flat Flattened SIR resample pool, row-major
+///   (`n_resamples * n_packed` values; empty when not using SIR mode)
+/// @param sir_resamples_n Number of SIR resamples (rows)
+/// @param sir_resamples_dim Packed-parameter dimension (columns)
+/// @param n_uncertainty_draws Number of parameter sets to draw from the
+///   uncertainty distribution
+/// @param n_sim_per_draw Number of eta/eps replicates per parameter draw
+/// @param seed Random seed for reproducibility
+/// @return Data frame with DRAW, SIM, ID, TIME, IPRED, DV_SIM columns
+/// @export
+#[extendr]
+#[allow(clippy::too_many_arguments)]
+fn ferx_rust_simulate_with_uncertainty(
+    model_path: &str,
+    data_path: &str,
+    theta: Vec<f64>,
+    omega_flat: Vec<f64>,
+    omega_dim: i32,
+    sigma: Vec<f64>,
+    method: &str,
+    cov_matrix_flat: Vec<f64>,
+    cov_matrix_dim: i32,
+    sir_resamples_flat: Vec<f64>,
+    sir_resamples_n: i32,
+    sir_resamples_dim: i32,
+    n_uncertainty_draws: i32,
+    n_sim_per_draw: i32,
+    seed: i32,
+) -> Robj {
+    let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
+        Ok(p) => p,
+        Err(e) => {
+            rprintln!("Error parsing model: {}", e);
+            return ().into();
+        }
+    };
+    let iov_col = parsed.fit_options.iov_column.clone();
+    let population =
+        match ferx_core::read_nonmem_csv(Path::new(data_path), None, iov_col.as_deref()) {
+            Ok(p) => p,
+            Err(e) => {
+                rprintln!("Error reading data: {}", e);
+                return ().into();
+            }
+        };
+
+    // Decode the method string to the engine enum.
+    let uncertainty_method = match method.trim().to_lowercase().as_str() {
+        "asymptotic" | "cov" | "covariance" => {
+            ferx_core::UncertaintyMethod::Asymptotic
+        }
+        "sir" => ferx_core::UncertaintyMethod::Sir,
+        other => {
+            rprintln!(
+                "Unknown uncertainty method '{}' — expected 'asymptotic' or 'sir'",
+                other
+            );
+            return ().into();
+        }
+    };
+
+    let fit_result =
+        match build_fit_result_for_uncertainty(
+            &parsed.model,
+            &theta,
+            &omega_flat,
+            omega_dim,
+            &sigma,
+            uncertainty_method,
+            &cov_matrix_flat,
+            cov_matrix_dim,
+            &sir_resamples_flat,
+            sir_resamples_n,
+            sir_resamples_dim,
+        ) {
+            Ok(f) => f,
+            Err(e) => {
+                rprintln!("{}", e);
+                return ().into();
+            }
+        };
+
+    let opts = ferx_core::SimulateUncertaintyOptions {
+        n_uncertainty_draws: n_uncertainty_draws.max(0) as usize,
+        n_sim_per_draw: n_sim_per_draw.max(0) as usize,
+        method: uncertainty_method,
+        seed: Some(seed as u64),
+    };
+
+    match ferx_core::simulate_with_uncertainty(&parsed.model, &population, &fit_result, &opts) {
+        Ok(results) => sim_results_to_df(&results),
+        Err(e) => {
+            rprintln!("simulate_with_uncertainty error: {}", e);
+            ().into()
+        }
+    }
+}
+
 /// Population predictions from a NLME model.
 ///
 /// @param model_path Path to .ferx model file
@@ -562,16 +685,206 @@ fn params_from_fit(
     })
 }
 
+// -- Helper: build a minimal FitResult from R-supplied arrays so the
+//    uncertainty path can be exercised without re-running fit() from R.
+//    Only the fields that simulate_with_uncertainty / fitted_params_from_result
+//    actually read are populated with real values; the rest get sensible
+//    defaults that won't be inspected. --
+#[allow(clippy::too_many_arguments)]
+fn build_fit_result_for_uncertainty(
+    model: &CompiledModel,
+    theta: &[f64],
+    omega_flat: &[f64],
+    omega_dim: i32,
+    sigma: &[f64],
+    method: ferx_core::UncertaintyMethod,
+    cov_matrix_flat: &[f64],
+    cov_matrix_dim: i32,
+    sir_resamples_flat: &[f64],
+    sir_resamples_n: i32,
+    sir_resamples_dim: i32,
+) -> std::result::Result<FitResult, String> {
+    let template = &model.default_params;
+    if theta.len() != template.theta.len() {
+        return Err(format!(
+            "Uncertainty error: theta length {} does not match model ({} expected)",
+            theta.len(),
+            template.theta.len()
+        ));
+    }
+    if sigma.len() != template.sigma.values.len() {
+        return Err(format!(
+            "Uncertainty error: sigma length {} does not match model ({} expected)",
+            sigma.len(),
+            template.sigma.values.len()
+        ));
+    }
+    let d = omega_dim as usize;
+    if d != template.omega.dim() {
+        return Err(format!(
+            "Uncertainty error: omega dim {} does not match model ({} expected)",
+            d,
+            template.omega.dim()
+        ));
+    }
+    if omega_flat.len() != d * d {
+        return Err(format!(
+            "Uncertainty error: omega_flat length {} does not match dim²={}",
+            omega_flat.len(),
+            d * d
+        ));
+    }
+    let omega_mat = DMatrix::from_row_slice(d, d, omega_flat);
+
+    let (covariance_matrix, sir_resamples_packed) = match method {
+        ferx_core::UncertaintyMethod::Asymptotic => {
+            let cd = cov_matrix_dim as usize;
+            if cd == 0 || cov_matrix_flat.is_empty() {
+                return Err("Asymptotic uncertainty requires a covariance matrix on the \
+                    fit object — re-fit with `covariance = TRUE`."
+                    .to_string());
+            }
+            if cov_matrix_flat.len() != cd * cd {
+                return Err(format!(
+                    "Uncertainty error: cov_matrix_flat length {} does not match dim²={}",
+                    cov_matrix_flat.len(),
+                    cd * cd
+                ));
+            }
+            let cov = DMatrix::from_row_slice(cd, cd, cov_matrix_flat);
+            (Some(cov), None)
+        }
+        ferx_core::UncertaintyMethod::Sir => {
+            let n = sir_resamples_n as usize;
+            let pd = sir_resamples_dim as usize;
+            if n == 0 || pd == 0 || sir_resamples_flat.is_empty() {
+                return Err("SIR uncertainty requires resamples on the fit object — \
+                    re-fit with `sir = TRUE` and `sir_keep_samples = TRUE` in `settings`."
+                    .to_string());
+            }
+            if sir_resamples_flat.len() != n * pd {
+                return Err(format!(
+                    "Uncertainty error: sir_resamples_flat length {} does not match \
+                     n_resamples * packed_dim = {} * {} = {}",
+                    sir_resamples_flat.len(),
+                    n,
+                    pd,
+                    n * pd
+                ));
+            }
+            let mut pool: Vec<Vec<f64>> = Vec::with_capacity(n);
+            for i in 0..n {
+                pool.push(sir_resamples_flat[i * pd..(i + 1) * pd].to_vec());
+            }
+            (None, Some(pool))
+        }
+    };
+
+    Ok(default_fit_result(
+        model,
+        theta.to_vec(),
+        omega_mat,
+        sigma.to_vec(),
+        covariance_matrix,
+        sir_resamples_packed,
+    ))
+}
+
+// Build a defaulted FitResult populated with the fields that
+// fitted_params_from_result / simulate_with_uncertainty actually read. Other
+// fields get neutral defaults — none of them are inspected on this path.
+fn default_fit_result(
+    model: &CompiledModel,
+    theta: Vec<f64>,
+    omega: DMatrix<f64>,
+    sigma: Vec<f64>,
+    covariance_matrix: Option<DMatrix<f64>>,
+    sir_resamples_packed: Option<Vec<Vec<f64>>>,
+) -> FitResult {
+    let template = &model.default_params;
+    FitResult {
+        method: EstimationMethod::FoceI,
+        method_chain: vec![EstimationMethod::FoceI],
+        converged: true,
+        ofv: 0.0,
+        aic: 0.0,
+        bic: 0.0,
+        theta,
+        theta_names: model.theta_names.clone(),
+        eta_names: template.omega.eta_names.clone(),
+        omega,
+        sigma,
+        sigma_names: template.sigma.names.clone(),
+        error_model: model.error_model,
+        covariance_matrix,
+        se_theta: None,
+        se_omega: None,
+        se_sigma: None,
+        theta_fixed: template.theta_fixed.clone(),
+        omega_fixed: template.omega_fixed.clone(),
+        sigma_fixed: template.sigma_fixed.clone(),
+        subjects: Vec::new(),
+        n_obs: 0,
+        n_subjects: 0,
+        n_parameters: 0,
+        n_iterations: 0,
+        interaction: true,
+        warnings: Vec::new(),
+        sir_ci_theta: None,
+        sir_ci_omega: None,
+        sir_ci_sigma: None,
+        sir_ess: None,
+        sir_resamples_packed,
+        omega_iov: None,
+        kappa_names: model.kappa_names.clone(),
+        kappa_fixed: template.kappa_fixed.clone(),
+        se_kappa: None,
+        shrinkage_kappa: Vec::new(),
+        ebe_kappas: Vec::new(),
+        saem_mu_ref_m_step_evals_saved: None,
+        gradient_method_inner: String::new(),
+        gradient_method_outer: String::new(),
+        uses_ode_solver: model.is_ode_based(),
+        n_threads_used: 1,
+        nlopt_missing_algorithms: Vec::new(),
+        covariance_n_evals_estimated: None,
+        trace_path: None,
+        ebe_convergence_warnings: 0,
+        max_unconverged_subjects: 0,
+        total_ebe_fallbacks: 0,
+        covariance_status: CovarianceStatus::Computed,
+        shrinkage_eta: Vec::new(),
+        shrinkage_eps: f64::NAN,
+        wall_time_secs: 0.0,
+        model_name: model.name.clone(),
+        ferx_version: String::new(),
+        eta_param_info: Vec::new(),
+        theta_transform: Vec::new(),
+        sigma_types: Vec::new(),
+        cov_eigenvalues: None,
+        cov_condition_number: None,
+        eta_log_transformed: Vec::new(),
+        omega_param_corr: None,
+        omega_iov_param_corr: None,
+    }
+}
+
 // -- Helper: SimulationResult slice → R data frame --
 
 fn sim_results_to_df(results: &[ferx_core::api::SimulationResult]) -> Robj {
+    let draw: Vec<i32> = results.iter().map(|r| r.draw as i32).collect();
     let sim: Vec<i32> = results.iter().map(|r| r.sim as i32).collect();
     let id: Vec<String> = results.iter().map(|r| r.id.clone()).collect();
     let time: Vec<f64> = results.iter().map(|r| r.time).collect();
     let ipred: Vec<f64> = results.iter().map(|r| r.ipred).collect();
     let dv_sim: Vec<f64> = results.iter().map(|r| r.dv_sim).collect();
 
+    // DRAW is leading because for legacy `simulate*` paths every row is
+    // DRAW = 1 and downstream code can ignore the column; for
+    // `simulate_with_uncertainty` it's the primary grouping variable for
+    // computing uncertainty bands.
     data_frame!(
+        DRAW = draw,
         SIM = sim,
         ID = id,
         TIME = time,
@@ -677,6 +990,23 @@ fn fit_result_to_list(
     let sir_ci_theta = flatten_ci(&result.sir_ci_theta);
     let sir_ci_omega = flatten_ci(&result.sir_ci_omega);
     let sir_ci_sigma = flatten_ci(&result.sir_ci_sigma);
+
+    // SIR resamples flattened row-major as a length-(n_resamples * n_packed)
+    // vector; (sir_resamples_n, sir_resamples_dim) lets R re-shape on read.
+    // Empty when sir_keep_samples was off (or SIR didn't run).
+    let (sir_resamples_flat, sir_resamples_n, sir_resamples_dim): (Vec<f64>, i32, i32) =
+        match &result.sir_resamples_packed {
+            Some(pool) if !pool.is_empty() => {
+                let n = pool.len();
+                let d = pool[0].len();
+                let mut v = Vec::with_capacity(n * d);
+                for row in pool {
+                    v.extend_from_slice(row);
+                }
+                (v, n as i32, d as i32)
+            }
+            _ => (Vec::new(), 0i32, 0i32),
+        };
 
     let trace_path: Robj = match &result.trace_path {
         Some(p) => p.clone().into(),
@@ -873,6 +1203,9 @@ fn fit_result_to_list(
         sir_ci_theta = sir_ci_theta,
         sir_ci_omega = sir_ci_omega,
         sir_ci_sigma = sir_ci_sigma,
+        sir_resamples = sir_resamples_flat,
+        sir_resamples_n = sir_resamples_n,
+        sir_resamples_dim = sir_resamples_dim,
         trace_path = trace_path,
         ebe_convergence_warnings = result.ebe_convergence_warnings as i32,
         max_unconverged_subjects = result.max_unconverged_subjects as i32,
@@ -1075,6 +1408,7 @@ extendr_module! {
     fn ferx_rust_fit;
     fn ferx_rust_simulate;
     fn ferx_rust_simulate_from_fit;
+    fn ferx_rust_simulate_with_uncertainty;
     fn ferx_rust_predict;
     fn ferx_rust_predict_from_fit;
     fn ferx_rust_autodiff_enabled;

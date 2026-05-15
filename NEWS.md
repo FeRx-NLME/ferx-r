@@ -2,6 +2,25 @@
 
 ## New features
 
+- `ferx_simulate_with_uncertainty()` — simulate observations while
+  propagating population parameter uncertainty in addition to the usual
+  between-subject (eta) and residual (eps) variability. For each
+  parameter set drawn from the uncertainty distribution
+  (`method = "asymptotic"` uses `fit$cov_matrix`; `method = "sir"`
+  reuses SIR resamples) the standard simulator runs `n_sim_per_draw`
+  replicates. Output is a long data frame with a leading `DRAW` column
+  so downstream code can compute uncertainty-aware prediction bands.
+  Requires `covariance = TRUE` for asymptotic mode; SIR mode requires
+  `sir = TRUE` and `sir_keep_samples = TRUE` (passed via `settings`)
+  at fit time. `ferx_fit()` now also exposes `sir_resamples`,
+  `sir_resamples_n`, and `sir_resamples_dim` for downstream consumers.
+  Pairs with ferx-core#7.
+
+- `ferx_simulate()` output now includes a leading `DRAW` column
+  (always `1` for non-uncertainty paths) for forward compatibility with
+  `ferx_simulate_with_uncertainty()`. Downstream code that uses
+  `subset(sim, ...)` or column selection by name is unaffected.
+
 - `ferx_fit()` now returns `$gradient_used` — the inner-loop gradient
   method the engine actually used (`"ad"`, `"fd"`, or `"N/A"`). When
   `gradient = "auto"` it shows which branch resolved at fit time; ODE
