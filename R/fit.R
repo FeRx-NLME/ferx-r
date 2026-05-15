@@ -143,6 +143,16 @@
 #'   call-time value overrides a different value from \code{[fit_options]}.
 #'   Inspect \code{fit$model_file_settings} and \code{fit$call_settings} to
 #'   audit the full picture.
+#' @param output Optional path to a \code{.fitrx} file. When non-\code{NULL},
+#'   \code{\link{ferx_save_fit}} is invoked on the result so the fit is
+#'   persisted to disk in a portable, cross-language bundle (zip of JSON +
+#'   CSV) before the function returns. Equivalent to calling
+#'   \code{ferx_save_fit(fit, output)} after the fit. See the format
+#'   reference in the ferx-core docs for the on-disk schema.
+#' @param include_data Logical. Only meaningful with \code{output}. When
+#'   \code{TRUE}, embeds the input \code{data} CSV verbatim inside the
+#'   \code{.fitrx} bundle so the file is self-contained. Default
+#'   \code{FALSE}.
 #'
 #' @return A list with components:
 #'   \item{converged}{Logical; did the optimizer converge}
@@ -568,7 +578,9 @@ ferx_fit.default <- function(model, data,
                      scale_params = TRUE,
                      max_unconverged_frac = NULL,
                      min_obs_for_convergence_check = NULL,
-                     settings = NULL) {
+                     settings = NULL,
+                     output = NULL,
+                     include_data = FALSE) {
   gradient <- match.arg(gradient)
   if (is.null(data)) {
     stop("`data` is required. Pass a path to a NONMEM CSV file.")
@@ -961,7 +973,27 @@ ferx_fit.default <- function(model, data,
   result$model_file_settings <- if (length(model_file_opts) > 0L)
     as.list(model_file_opts) else list()
 
+  # Stash inputs so ferx_save_fit() can embed `model.ferx` and (optionally)
+  # `data.csv` into a portable .fitrx bundle. Read failures here must not
+  # break the fit, so wrap in tryCatch.
+  result$model_source <- tryCatch(
+    paste(readLines(model, warn = FALSE), collapse = "\n"),
+    error = function(e) ""
+  )
+  result$data_path <- tryCatch(
+    normalizePath(data, mustWork = FALSE),
+    error = function(e) NA_character_
+  )
+
   class(result) <- "ferx_fit"
+
+  if (!is.null(output)) {
+    if (!is.character(output) || length(output) != 1L || is.na(output)) {
+      stop("`output` must be a single .fitrx file path or NULL")
+    }
+    ferx_save_fit(result, output, include_data = isTRUE(include_data))
+  }
+
   result
 }
 
