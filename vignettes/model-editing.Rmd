@@ -111,6 +111,47 @@ fit  <- ferx_fit(model_path, ex$data)
 print(fit)
 ```
 
+## Opening a model in an editor
+
+`ferx_model_edit()` copies a bundled example to a destination directory (or
+leaves a user-owned file in place) and opens it in your editor. It is the
+interactive companion to the scripted functions above.
+
+```{r model-edit, eval = FALSE}
+# Copy the bundled warfarin model to the working directory and open it
+my_model <- ferx_model_edit(ex$model, dest = tempdir())
+
+# After editing, save the result under a new name for version control
+ferx_model_edit("run1.ferx", save_as = "run2.ferx")
+```
+
+The `dest` argument controls where the copy lands. If the source file is
+already outside the installed package directory, `ferx_model_edit()` edits it
+in place (no copy) unless `dest` is set explicitly.
+
+## Validating a model file
+
+`ferx_model_validate()` checks that all required sections are present and
+reports the result. Use it after creating or editing a model to catch missing
+sections before running the optimizer:
+
+```{r validate-ok}
+ferx_model_validate(ex$model)
+```
+
+A model missing required sections produces a clear error list:
+
+```{r validate-bad}
+bad <- tempfile(fileext = ".ferx")
+writeLines(c(
+  "[parameters]",
+  "  theta TVCL(1.0, 0.001, 100.0)",
+  "[structural_model]",
+  "  pk one_cpt_oral(cl=CL, v=V, ka=KA)"
+), bad)
+ferx_model_validate(bad)
+```
+
 ## Overwrite guards
 
 By default `ferx_model_new()` refuses to overwrite an existing file:

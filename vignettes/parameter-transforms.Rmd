@@ -46,14 +46,29 @@ After fitting, `print()` reports omega as `[log-normal]` with a CV%:
 
 ```{r logn-fit, eval = FALSE}
 fit <- ferx_fit(ex$model, ex$data)
-fit   # omega block shows "[log-normal]  CV% = ..."
+fit
+# Omega (between-subject variability):
+#   ETA_CL  [log-normal]  var = 0.0423   CV% = 21.1
+#   ETA_V   [log-normal]  var = 0.0198   CV% = 14.2
+#   ETA_KA  [log-normal]  var = 0.157    CV% = 40.9
 ```
 
+The CV% is derived from the log-scale variance as
+`CV% = 100 * sqrt(exp(omega_var) - 1)`. For small variances this is
+approximately `100 * sqrt(omega_var)`, but the exact formula is always used.
+
 `ferx_estimates()` returns the omega variance on the log scale in `estimate`,
-with `transform = "log_normal"`:
+with `transform = "log_normal"`. SE and 95 % CI columns are on the same
+log-variance scale:
 
 ```{r logn-estimates, eval = FALSE}
 ferx_estimates(fit)
+#   param              transform    estimate      se  rse_pct  lower_95  upper_95
+#   OMEGA(ETA_CL)      log_normal     0.0423  0.0121     28.6    0.0186    0.0660
+#   OMEGA(ETA_V)       log_normal     0.0198  0.0089     44.9    0.0024    0.0372
+#   OMEGA(ETA_KA)      log_normal     0.1570  0.0480     30.6    0.0629    0.2511
+# estimate_natural / lower_95_natural / upper_95_natural are NA for omega rows
+# (back-transform is not defined for variance parameters)
 ```
 
 ---
@@ -89,14 +104,27 @@ fit_logit
 ```
 
 `ferx_estimates()` populates `estimate_natural`, `lower_95_natural`, and
-`upper_95_natural` for logit-transformed thetas:
+`upper_95_natural` for logit-transformed thetas. The CI is computed
+symmetrically on the logit scale and then back-transformed through `inv_logit`,
+giving an asymmetric interval on the (0, 1) scale:
 
 ```{r logit-estimates, eval = FALSE}
 est <- ferx_estimates(fit_logit)
 est[est$param == "THETA_F", ]
-# estimate         — logit scale
-# estimate_natural — (0, 1) scale (inv_logit back-transform)
-# lower_95_natural / upper_95_natural — asymmetric CI on (0, 1) scale
+#   param    transform  estimate    se  rse_pct  lower_95  upper_95  estimate_natural  lower_95_natural  upper_95_natural
+#   THETA_F  logit        0.847  0.143     16.9     0.567     1.127             0.700             0.638             0.755
+# estimate         — logit scale (what the optimiser works with)
+# estimate_natural — inv_logit(estimate) = probability on (0, 1) scale
+# lower/upper_95_natural — asymmetric CI back-transformed to (0, 1)
+```
+
+The omega for `ETA_F` has `transform = "variance"` (variance on the logit
+scale) with a symmetric CI:
+
+```{r logit-omega, eval = FALSE}
+est[est$param == "OMEGA(ETA_F)", ]
+#   param         transform  estimate     se  rse_pct
+#   OMEGA(ETA_F)  variance     0.0631  0.028     44.4
 ```
 
 ---
@@ -128,11 +156,16 @@ fit_add <- ferx_fit(ex_add$model, ex_add$data)
 fit_add
 ```
 
-`ferx_estimates()` returns `transform = "additive"` for that omega element;
-the CI is symmetric (no back-transform needed):
+`ferx_estimates()` returns `transform = "additive"` for that omega element.
+The `estimate` is the variance in the original units (hours²), and the CI is
+symmetric — no back-transform is applied:
 
 ```{r add-estimates, eval = FALSE}
 ferx_estimates(fit_add)
+#   param              transform  estimate     se  rse_pct  lower_95  upper_95
+#   OMEGA(ETA_TLAG)    additive     0.312   0.098     31.4     0.120     0.504
+# SD in original units = sqrt(0.312) ≈ 0.56 h
+# estimate_natural / lower_95_natural / upper_95_natural are NA (not applicable)
 ```
 
 ---

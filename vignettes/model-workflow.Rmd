@@ -218,10 +218,77 @@ pred <- ferx_predict(ex$model, ex$data, fit = fit)
 All diagnostic outputs are fields on the `ferx_fit` object:
 
 ```{r diagnostics, eval = FALSE}
-head(fit$sdtab)               # PRED, IPRED, CWRES, IWRES per observation
-head(fit$ebe_etas)            # empirical Bayes ETAs per subject
+head(fit$sdtab)                # PRED, IPRED, CWRES, IWRES per observation
+head(fit$ebe_etas)             # empirical Bayes ETAs per subject
 head(fit$individual_estimates) # individual PK parameters (CL, V, KA, ...)
-fit$eta_normality             # Shapiro-Wilk normality test per ETA
+fit$eta_normality              # Shapiro-Wilk normality test per ETA
+```
+
+`ferx_estimates()` collects all estimated parameters (theta, omega, sigma) into
+a tidy data frame with SEs, %RSE, and 95 % CIs. Run it after any fit that used
+`covariance = TRUE`:
+
+```{r estimates, eval = FALSE}
+ferx_estimates(fit)
+#   param    transform  estimate     se  rse_pct  lower_95  upper_95
+#   TVCL  log_normal    -2.01    0.081     4.0     -2.17     -1.85
+#   TVV   log_normal     3.45    0.054     1.6      3.34      3.56
+#   ...
+```
+
+`ferx_cor_matrix()` converts the parameter covariance matrix to correlations.
+A value near ±1 between two parameters signals a structural identifiability
+problem worth investigating:
+
+```{r cor-matrix, eval = FALSE}
+ferx_cor_matrix(fit)
+```
+
+**Goodness-of-fit plots** from `fit$sdtab` with ggplot2:
+
+```{r gof-plots, eval = FALSE}
+library(ggplot2)
+
+sdtab <- fit$sdtab
+
+# DV vs PRED
+ggplot(sdtab, aes(PRED, DV)) +
+  geom_point(alpha = 0.4) +
+  geom_abline(slope = 1, intercept = 0, colour = "steelblue") +
+  labs(title = "DV vs PRED", x = "Population prediction", y = "Observed")
+
+# DV vs IPRED
+ggplot(sdtab, aes(IPRED, DV)) +
+  geom_point(alpha = 0.4) +
+  geom_abline(slope = 1, intercept = 0, colour = "steelblue") +
+  labs(title = "DV vs IPRED", x = "Individual prediction", y = "Observed")
+
+# CWRES vs TIME
+ggplot(sdtab, aes(TIME, CWRES)) +
+  geom_point(alpha = 0.4) +
+  geom_hline(yintercept = c(-2, 0, 2), linetype = c("dashed", "solid", "dashed"),
+             colour = "steelblue") +
+  labs(title = "CWRES vs TIME")
+
+# CWRES vs PRED
+ggplot(sdtab, aes(PRED, CWRES)) +
+  geom_point(alpha = 0.4) +
+  geom_hline(yintercept = c(-2, 0, 2), linetype = c("dashed", "solid", "dashed"),
+             colour = "steelblue") +
+  labs(title = "CWRES vs PRED")
+```
+
+ETA-covariate correlations — identifies covariates worth testing in a formal
+covariate search:
+
+```{r eta-cov, eval = FALSE}
+data <- read.csv(ex$data)
+ferx_eta_cov(fit, data)
+#   eta      covariate    r   p_val  flag
+#   ETA_CL   WT        0.41  0.003   [!]
+#   ETA_V    WT        0.28  0.041
+#   ...
+# [!] flags |r| >= 0.3
 ```
 
 ---
