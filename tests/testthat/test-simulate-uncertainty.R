@@ -136,10 +136,12 @@ test_that("SIR errors when no resamples are stored on the fit", {
 test_that("ferx_simulate_with_uncertainty errors on missing model / data files", {
   ex <- ferx_example("warfarin")
   expect_error(
-    ferx_simulate_with_uncertainty("no_such_model.ferx", ex$data, warfarin_fit_cov())
+    ferx_simulate_with_uncertainty("no_such_model.ferx", ex$data, warfarin_fit_cov()),
+    "file.exists"
   )
   expect_error(
-    ferx_simulate_with_uncertainty(ex$model, "no_such_data.csv", warfarin_fit_cov())
+    ferx_simulate_with_uncertainty(ex$model, "no_such_data.csv", warfarin_fit_cov()),
+    "file.exists"
   )
 })
 
@@ -151,5 +153,16 @@ test_that("n_uncertainty_draws < 1 raises an informative error", {
       n_uncertainty_draws = 0L, n_sim_per_draw = 1L
     ),
     "n_uncertainty_draws"
+  )
+})
+
+test_that("n_sim_per_draw < 1 raises an informative error", {
+  ex <- ferx_example("warfarin")
+  expect_error(
+    ferx_simulate_with_uncertainty(
+      ex$model, ex$data, warfarin_fit_cov(),
+      n_uncertainty_draws = 2L, n_sim_per_draw = 0L
+    ),
+    "n_sim_per_draw"
   )
 })
