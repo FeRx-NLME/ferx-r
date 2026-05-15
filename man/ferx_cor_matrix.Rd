@@ -18,6 +18,13 @@ into a correlation matrix, making off-diagonal structure immediately visible.
 A correlation close to \eqn{\pm 1} between two parameters flags a structural
 identifiability problem in the model.
 }
+\examples{
+\dontrun{
+ex  <- ferx_example("warfarin")
+fit <- ferx_fit(ex$model, ex$data, covariance = TRUE)
+ferx_cor_matrix(fit)
+}
+}
 \seealso{
 \code{\link{ferx_estimates}} for SEs and \\%RSE.
 }

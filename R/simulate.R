@@ -17,13 +17,14 @@
 #'
 #' @examples
 #' \dontrun{
+#' ex <- ferx_example("warfarin")
+#'
 #' # Simulate at the model file's initial estimates:
-#' sim0 <- ferx_simulate("warfarin.ferx", "warfarin.csv", n_sim = 100, seed = 42)
+#' sim0 <- ferx_simulate(ex$model, ex$data, n_sim = 100, seed = 42)
 #'
 #' # Fit, then simulate at the fitted estimates (typical VPC flow):
-#' result <- ferx_fit("warfarin.ferx", "warfarin.csv")
-#' sim <- ferx_simulate("warfarin.ferx", "warfarin.csv",
-#'                      n_sim = 100, seed = 42, fit = result)
+#' fit <- ferx_fit(ex$model, ex$data)
+#' sim <- ferx_simulate(ex$model, ex$data, n_sim = 100, seed = 42, fit = fit)
 #' }
 #'
 #' @export
@@ -65,10 +66,12 @@ ferx_simulate <- function(model, data, n_sim = 1L, seed = 42L, fit = NULL) {
 #'
 #' @examples
 #' \dontrun{
-#' preds <- ferx_predict("warfarin.ferx", "warfarin.csv")
+#' ex <- ferx_example("warfarin")
 #'
-#' result <- ferx_fit("warfarin.ferx", "warfarin.csv")
-#' preds_fitted <- ferx_predict("warfarin.ferx", "warfarin.csv", fit = result)
+#' preds <- ferx_predict(ex$model, ex$data)
+#'
+#' fit <- ferx_fit(ex$model, ex$data)
+#' preds_fitted <- ferx_predict(ex$model, ex$data, fit = fit)
 #' }
 #'
 #' @export
