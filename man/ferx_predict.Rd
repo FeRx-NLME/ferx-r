@@ -22,10 +22,12 @@ Computes population-level predictions (eta = 0) for all subjects.
 }
 \examples{
 \dontrun{
-preds <- ferx_predict("warfarin.ferx", "warfarin.csv")
+ex <- ferx_example("warfarin")
 
-result <- ferx_fit("warfarin.ferx", "warfarin.csv")
-preds_fitted <- ferx_predict("warfarin.ferx", "warfarin.csv", fit = result)
+preds <- ferx_predict(ex$model, ex$data)
+
+fit <- ferx_fit(ex$model, ex$data)
+preds_fitted <- ferx_predict(ex$model, ex$data, fit = fit)
 }
 
 }

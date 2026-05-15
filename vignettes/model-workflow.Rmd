@@ -218,10 +218,86 @@ pred <- ferx_predict(ex$model, ex$data, fit = fit)
 All diagnostic outputs are fields on the `ferx_fit` object:
 
 ```{r diagnostics, eval = FALSE}
-head(fit$sdtab)               # PRED, IPRED, CWRES, IWRES per observation
-head(fit$ebe_etas)            # empirical Bayes ETAs per subject
+head(fit$sdtab)                # PRED, IPRED, CWRES, IWRES per observation
+head(fit$ebe_etas)             # empirical Bayes ETAs per subject
 head(fit$individual_estimates) # individual PK parameters (CL, V, KA, ...)
-fit$eta_normality             # Shapiro-Wilk normality test per ETA
+fit$eta_normality              # Shapiro-Wilk normality test per ETA
+```
+
+`ferx_estimates()` collects all estimated parameters (theta, omega, sigma) into
+a tidy data frame with SEs, %RSE, and 95 % CIs. Run it after any fit that used
+`covariance = TRUE`. The `transform` column reflects the parameterisation
+reported by the backend (`"identity"`, `"log"`, `"logit"`, or `"variance"` for
+omega rows):
+
+```{r estimates, eval = FALSE}
+ferx_estimates(fit)
+#   param           transform  estimate     se  rse_pct  lower_95  upper_95  ...
+#   TVCL            identity     0.134  0.0108     8.1     0.113     0.155
+#   TVV             identity     7.94   0.420      5.3     7.12      8.76
+#   TVKA            identity     1.07   0.160     14.9     0.756     1.38
+#   OMEGA(ETA_CL)   variance     0.042  0.012     28.6    0.019     0.066
+#   OMEGA(ETA_V)    variance     0.020  0.009     44.9    0.002     0.037
+#   OMEGA(ETA_KA)   variance     0.157  0.048     30.6    0.063     0.251
+#   PROP_ERR        proportional 0.011  0.001      9.1    0.009     0.013
+```
+
+`ferx_cor_matrix()` converts the parameter covariance matrix to correlations.
+A value near ±1 between two parameters signals a structural identifiability
+problem worth investigating:
+
+```{r cor-matrix, eval = FALSE}
+ferx_cor_matrix(fit)
+```
+
+**Goodness-of-fit plots** from `fit$sdtab` with ggplot2:
+
+```{r gof-plots, eval = FALSE}
+library(ggplot2)
+
+sdtab <- fit$sdtab
+
+# DV vs PRED
+ggplot(sdtab, aes(PRED, DV)) +
+  geom_point(alpha = 0.4) +
+  geom_abline(slope = 1, intercept = 0, colour = "steelblue") +
+  labs(title = "DV vs PRED", x = "Population prediction", y = "Observed")
+
+# DV vs IPRED
+ggplot(sdtab, aes(IPRED, DV)) +
+  geom_point(alpha = 0.4) +
+  geom_abline(slope = 1, intercept = 0, colour = "steelblue") +
+  labs(title = "DV vs IPRED", x = "Individual prediction", y = "Observed")
+
+# CWRES vs TIME
+ggplot(sdtab, aes(TIME, CWRES)) +
+  geom_point(alpha = 0.4) +
+  geom_hline(yintercept = c(-2, 0, 2), linetype = c("dashed", "solid", "dashed"),
+             colour = "steelblue") +
+  labs(title = "CWRES vs TIME")
+
+# CWRES vs PRED
+ggplot(sdtab, aes(PRED, CWRES)) +
+  geom_point(alpha = 0.4) +
+  geom_hline(yintercept = c(-2, 0, 2), linetype = c("dashed", "solid", "dashed"),
+             colour = "steelblue") +
+  labs(title = "CWRES vs PRED")
+```
+
+ETA-covariate correlations — identifies covariates worth testing in a formal
+covariate search. Pass the original data frame (not the path); any numeric
+column that is constant within a subject and not a standard NONMEM column
+(TIME, DV, AMT, EVID, MDV, CMT, RATE) is treated as a covariate:
+
+```{r eta-cov, eval = FALSE}
+data <- read.csv(ex$data)
+ferx_eta_cov(fit, data)
+#   eta      covariate    r   p_val  flag
+#   ETA_CL   AGE       0.41  0.003   [!]
+#   ETA_V    WT        0.31  0.021   [!]
+#   ETA_KA   AGE       0.12  0.281
+#   ...
+# [!] flags |r| >= 0.3; flag covariates worth formal testing
 ```
 
 ---

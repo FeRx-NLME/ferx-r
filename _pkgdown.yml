@@ -1,0 +1,50 @@
+url: https://ferx-nlme.github.io/reference/
+
+reference:
+  - title: "Fitting"
+    desc: "Fit NLME models and inspect results."
+    contents:
+      - ferx_fit
+      - summary.ferx_fit
+
+  - title: "Simulation & Prediction"
+    desc: "Simulate observations or compute population predictions from a fitted model."
+    contents:
+      - ferx_simulate
+      - ferx_predict
+
+  - title: "Model editing"
+    desc: "Create, inspect, and programmatically edit .ferx model files."
+    contents:
+      - ferx_model
+      - ferx_model_new
+      - ferx_model_edit
+      - ferx_model_show
+      - ferx_model_inspect
+      - ferx_model_validate
+      - ferx_model_section
+      - ferx_get_section
+      - ferx_set_section
+      - ferx_model_set_section
+
+  - title: "Diagnostics & output"
+    desc: "Extract and visualise parameter estimates, ETAs, and optimizer traces."
+    contents:
+      - ferx_estimates
+      - ferx_eta_cov
+      - ferx_cor_matrix
+      - ferx_plot_trace
+      - ferx_trace
+
+  - title: "Utilities"
+    desc: "Helper functions for exploring bundled examples and checking model initialisation."
+    contents:
+      - ferx_example
+      - ferx_check_init
+
+articles:
+  - title: "User guides"
+    contents:
+      - model-workflow
+      - model-editing
+      - parameter-transforms

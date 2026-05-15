@@ -8,6 +8,12 @@
 #' @param fit A \code{ferx_fit} object returned by \code{\link{ferx_fit}}.
 #' @return Named correlation matrix (invisibly). Printed to the console.
 #' @seealso \code{\link{ferx_estimates}} for SEs and \%RSE.
+#' @examples
+#' \dontrun{
+#' ex  <- ferx_example("warfarin")
+#' fit <- ferx_fit(ex$model, ex$data, covariance = TRUE)
+#' ferx_cor_matrix(fit)
+#' }
 #' @export
 ferx_cor_matrix <- function(fit) {
   if (is.null(fit$cov_matrix)) {
@@ -44,6 +50,13 @@ ferx_cor_matrix <- function(fit) {
 #' @return Data frame with columns \code{eta}, \code{covariate}, \code{r},
 #'   \code{p_val}, \code{flag}, sorted by descending \code{|r|}. Returned
 #'   invisibly; the full table is printed to the console.
+#' @examples
+#' \dontrun{
+#' ex   <- ferx_example("warfarin")
+#' fit  <- ferx_fit(ex$model, ex$data)
+#' data <- read.csv(ex$data)
+#' ferx_eta_cov(fit, data)
+#' }
 #' @export
 ferx_eta_cov <- function(fit, data) {
   if (is.null(fit$ebe_etas) || !is.data.frame(fit$ebe_etas)) {
@@ -155,6 +168,12 @@ ferx_eta_cov <- function(fit, data) {
 #'   \code{upper_95_natural}. SE-derived and natural-scale columns are
 #'   \code{NA} when not applicable or when the covariance step was not run.
 #' @seealso \code{\link{ferx_cor_matrix}} for parameter correlations.
+#' @examples
+#' \dontrun{
+#' ex  <- ferx_example("warfarin")
+#' fit <- ferx_fit(ex$model, ex$data, covariance = TRUE)
+#' ferx_estimates(fit)
+#' }
 #' @export
 ferx_estimates <- function(fit) {
   rows <- list()
