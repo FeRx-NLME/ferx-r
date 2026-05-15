@@ -1035,7 +1035,7 @@ ferx_fit.default <- function(model, data,
   do.call(rbind, lapply(eta_cols, function(col) {
     vals <- one_per[[col]]
     vals <- vals[is.finite(vals)]
-    if (length(vals) < 3L) {
+    if (length(vals) < 3L || length(unique(vals)) < 2L) {
       return(data.frame(
         eta = col, W = NA_real_, p_val = NA_real_, flag = "",
         stringsAsFactors = FALSE
