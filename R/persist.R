@@ -160,8 +160,12 @@ ferx_load_fit <- function(path) {
   dir.create(staging)
   on.exit(unlink(staging, recursive = TRUE), add = TRUE)
 
+  # `junkpaths = TRUE` flattens every entry into `staging` using only its
+  # basename. The .fitrx layout is intentionally flat — no subdirectories —
+  # so this is a no-op for well-formed archives and a defence against Zip
+  # Slip (entries with `../` or absolute paths) for malformed ones.
   files <- tryCatch(
-    utils::unzip(path, exdir = staging, overwrite = TRUE),
+    utils::unzip(path, exdir = staging, junkpaths = TRUE, overwrite = TRUE),
     error = function(e) stop("Failed to read .fitrx archive '", path, "': ", conditionMessage(e))
   )
   if (length(files) == 0L) {
@@ -435,8 +439,11 @@ ferx_load_fit <- function(path) {
   if (!all(c("ofv_contribution", "n_obs") %in% names(ebes))) {
     per_subj <- .fitrx_per_subject_ofv_nobs(fit)
     if (!is.null(per_subj)) {
-      ebes$ofv_contribution <- per_subj$ofv[match(seq_len(nrow(ebes)), per_subj$subj_idx)]
-      ebes$n_obs <- per_subj$n_obs[match(seq_len(nrow(ebes)), per_subj$subj_idx)]
+      # Match by string ID so character IDs work (PT001 etc.). Falls back to
+      # NA on subjects whose ID isn't represented in sdtab.
+      idx <- match(as.character(ebes$ID), per_subj$id)
+      ebes$ofv_contribution <- per_subj$ofv[idx]
+      ebes$n_obs <- per_subj$n_obs[idx]
     } else {
       ebes$ofv_contribution <- NA_real_
       ebes$n_obs <- NA_integer_
@@ -465,14 +472,18 @@ ferx_load_fit <- function(path) {
     cat("ID,TIME,DV,PRED,IPRED,CWRES,IWRES,EBE_OFV,N_OBS\n", file = path)
     return(invisible())
   }
-  # sdtab$ID is a 1-based numeric subject index from ferx_core::io::output::sdtab.
-  # Translate to the string IDs stored on ebe_etas so a cross-language reader
-  # can join with data.csv. Falls back to the numeric index if ebe_etas is
-  # missing or shorter than the largest index.
-  string_ids <- .fitrx_subject_string_ids(fit)
-  if (!is.null(string_ids) && length(string_ids) >= max(sdtab$ID, 0L, na.rm = TRUE)) {
-    sdtab <- sdtab
-    sdtab$ID <- string_ids[as.integer(sdtab$ID)]
+  # sdtab$ID coming straight from the Rust shim is a 1-based numeric subject
+  # index; translate to the string IDs stored on ebe_etas so a cross-language
+  # reader can join with data.csv. When sdtab$ID is already character (e.g.
+  # because the fit was previously loaded from a .fitrx, where predictions.csv
+  # stores string IDs), leave it untouched — the remap would be a no-op and
+  # `max(sdtab$ID, ...)` would error on character input.
+  if (is.numeric(sdtab$ID)) {
+    string_ids <- .fitrx_subject_string_ids(fit)
+    if (!is.null(string_ids) &&
+        length(string_ids) >= max(sdtab$ID, 0L, na.rm = TRUE)) {
+      sdtab$ID <- string_ids[as.integer(sdtab$ID)]
+    }
   }
   utils::write.table(
     sdtab, path,
@@ -493,7 +504,7 @@ ferx_load_fit <- function(path) {
   if (!all(needed %in% names(sdtab))) return(NULL)
   ord <- !duplicated(sdtab$ID)
   list(
-    subj_idx = as.integer(sdtab$ID[ord]),
+    id = as.character(sdtab$ID[ord]),
     ofv = as.numeric(sdtab$EBE_OFV[ord]),
     n_obs = as.integer(sdtab$N_OBS[ord])
   )
