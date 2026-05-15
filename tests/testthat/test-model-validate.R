@@ -17,12 +17,7 @@ VALID_WARFARIN_SECTIONS <- c(
   "  pk one_cpt_oral(cl=CL, v=10.0, ka=1.0)",
   "",
   "[error_model]",
-  "  DV ~ proportional(PROP_ERR)",
-  "",
-  "[initial_values]",
-  "  theta = [0.134]",
-  "  omega = [0.07]",
-  "  sigma = [0.01]"
+  "  DV ~ proportional(PROP_ERR)"
 )
 
 test_that("valid warfarin model prints 'Validating:' header and returns invisibly", {
@@ -88,11 +83,7 @@ test_that("syntax error in model body returns FALSE and prints errors", {
     "  pk one_cpt_oral(cl=CL, v=10.0, ka=1.0)",
     "",
     "[error_model]",
-    "  DV ~ proportional(0.01)",
-    "",
-    "[initial_values]",
-    "  theta = [0.1]",
-    "  sigma = [0.01]"
+    "  DV ~ proportional(0.01)"
   )
   path <- write_ferx(lines)
   on.exit(unlink(path))

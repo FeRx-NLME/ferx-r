@@ -46,12 +46,10 @@ ferx_model_validate(bad)
 #   individual_parameters          [MISSING]
 #   structural_model               [ok]
 #   error_model                    [MISSING]
-#   initial_values                 [MISSING]
 #
 # Result: INVALID
 #   * Missing required section: [individual_parameters]
 #   * Missing required section: [error_model]
-#   * Missing required section: [initial_values]
 }
 
 }

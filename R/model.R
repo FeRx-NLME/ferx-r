@@ -602,11 +602,6 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
       "[error_model]",
       "  DV ~ proportional(PROP_ERR)",
       "",
-      "[initial_values]",
-      "  theta = [1.0, 10.0, 1.0]",
-      "  omega = [0.09, 0.09, 0.25]",
-      "  sigma = [0.01]",
-      "",
       "[fit_options]",
       "  method     = foce",
       "  maxiter    = 300",
@@ -633,11 +628,6 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
       "",
       "[error_model]",
       "  DV ~ proportional(PROP_ERR)",
-      "",
-      "[initial_values]",
-      "  theta = [5.0, 20.0]",
-      "  omega = [0.09, 0.09]",
-      "  sigma = [0.01]",
       "",
       "[fit_options]",
       "  method     = foce",
@@ -675,11 +665,6 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
       "[error_model]",
       "  DV ~ proportional(PROP_ERR)",
       "",
-      "[initial_values]",
-      "  theta = [5.0, 50.0, 10.0, 100.0, 1.2]",
-      "  omega = [0.10, 0.10, 0.05, 0.05, 0.15]",
-      "  sigma = [0.02]",
-      "",
       "[fit_options]",
       "  method     = focei",
       "  maxiter    = 500",
@@ -713,11 +698,6 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
       "[error_model]",
       "  DV ~ proportional(PROP_ERR)",
       "",
-      "[initial_values]",
-      "  theta = [5.0, 15.0, 3.0, 30.0]",
-      "  omega = [0.10, 0.10, 0.10, 0.10]",
-      "  sigma = [0.01]",
-      "",
       "[fit_options]",
       "  method     = foce",
       "  maxiter    = 500",
@@ -745,11 +725,6 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
       "",
       "[error_model]",
       "  DV ~ proportional(PROP_ERR)",
-      "",
-      "[initial_values]",
-      "  theta = [1.0]",
-      "  omega = [0.09]",
-      "  sigma = [0.01]",
       "",
       "[fit_options]",
       "  method     = focei",
@@ -985,12 +960,10 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
 #' #   individual_parameters          [MISSING]
 #' #   structural_model               [ok]
 #' #   error_model                    [MISSING]
-#' #   initial_values                 [MISSING]
 #' #
 #' # Result: INVALID
 #' #   * Missing required section: [individual_parameters]
 #' #   * Missing required section: [error_model]
-#' #   * Missing required section: [initial_values]
 #' }
 #'
 #' @seealso \code{\link{ferx_model_inspect}}, \code{\link{ferx_model_show}}
@@ -1001,7 +974,7 @@ ferx_model_validate <- function(path) {
 
   required_sections <- c(
     "parameters", "individual_parameters", "structural_model",
-    "error_model", "initial_values"
+    "error_model"
   )
   optional_sections <- c("odes", "fit_options")
   known_sections <- c(required_sections, optional_sections)
