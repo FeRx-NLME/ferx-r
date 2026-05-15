@@ -118,7 +118,7 @@ leaves a user-owned file in place) and opens it in your editor. It is the
 interactive companion to the scripted functions above.
 
 ```{r model-edit, eval = FALSE}
-# Copy the bundled warfarin model to the working directory and open it
+# Copy the bundled warfarin model to tempdir() and open it
 my_model <- ferx_model_edit(ex$model, dest = tempdir())
 
 # After editing, save the result under a new name for version control
