@@ -29,6 +29,17 @@
 
 ## Bug fixes
 
+- `ferx_model_validate()` no longer flags `[initial_values]` as a missing
+  required section. The block was removed from the engine in
+  [ferx-core e5e934d](https://github.com/FeRx-NLME/ferx-core/commit/e5e934d)
+  — theta / omega / sigma initial values are read from `[parameters]` and
+  the parser silently ignores any leftover `[initial_values]` block. The
+  R-side validator and `ferx_model_new()` templates hadn't been updated.
+  Now: validator's `required_sections` drops `initial_values`, all five
+  `ferx_model_new()` templates and every bundled `.ferx` example file
+  emit the trimmed shape, and a regression test guards against the
+  block creeping back into templates (#16).
+
 - `ferx_set_section()` now applies copy-on-write when the underlying
   `ferx_model` points at a file inside the installed `ferx` package
   directory (e.g. a model returned by `ferx_example()`). The file is

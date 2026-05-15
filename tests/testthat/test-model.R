@@ -543,7 +543,7 @@ test_that("ferx_model_set_section() pipe chain: new |> set_section |> show", {
 
 test_that("ferx_model_new() each template contains all required sections", {
   required <- c("parameters", "individual_parameters", "structural_model",
-                "error_model", "initial_values", "fit_options")
+                "error_model", "fit_options")
   for (tmpl in c("1cpt_oral", "1cpt_iv", "2cpt_oral", "2cpt_iv", "ode")) {
     path <- tempfile(fileext = ".ferx")
     on.exit(unlink(path), add = TRUE)
@@ -558,29 +558,19 @@ test_that("ferx_model_new() each template contains all required sections", {
   }
 })
 
-test_that("ferx_model_new() initial_values vector lengths match parameters counts", {
-  count_vals <- function(line) length(strsplit(gsub(".*\\[|\\].*", "", line), ",")[[1]])
-
-  for (tmpl in c("1cpt_oral", "1cpt_iv", "2cpt_oral", "2cpt_iv")) {
+test_that("ferx_model_new() templates do not emit the deprecated [initial_values] block", {
+  # Initial values now live inline in [parameters] — re-emitting them in a
+  # separate block would be redundant boilerplate that the parser silently
+  # ignores. Guards against regressing the issue-16 fix.
+  for (tmpl in c("1cpt_oral", "1cpt_iv", "2cpt_oral", "2cpt_iv", "ode")) {
     path <- tempfile(fileext = ".ferx")
     on.exit(unlink(path), add = TRUE)
     ferx_model_new(path, template = tmpl, edit = FALSE)
-
-    # Count definitions only within [parameters] to avoid matching [initial_values] lines
-    params <- ferx_model_section(path, "parameters")
-    n_theta <- sum(grepl("^\\s*theta\\s", params))
-    n_omega <- sum(grepl("^\\s*omega\\s", params))
-    n_sigma <- sum(grepl("^\\s*sigma\\s", params))
-
-    # Count values in [initial_values] assignment vectors
-    iv <- ferx_model_section(path, "initial_values")
-    theta_iv <- iv[grepl("^\\s*theta\\s*=\\s*\\[", iv)]
-    omega_iv <- iv[grepl("^\\s*omega\\s*=\\s*\\[", iv)]
-    sigma_iv <- iv[grepl("^\\s*sigma\\s*=\\s*\\[", iv)]
-
-    expect_equal(count_vals(theta_iv), n_theta, info = paste(tmpl, "theta count"))
-    expect_equal(count_vals(omega_iv), n_omega, info = paste(tmpl, "omega count"))
-    expect_equal(count_vals(sigma_iv), n_sigma, info = paste(tmpl, "sigma count"))
+    content <- readLines(path)
+    expect_false(
+      any(grepl("^\\[initial_values\\]", content)),
+      info = paste("template", tmpl, "still emits [initial_values]")
+    )
   }
 })
 
