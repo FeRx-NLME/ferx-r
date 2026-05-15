@@ -1,5 +1,7 @@
 url: https://ferx-nlme.github.io/reference/
 
+navbar: ~
+
 reference:
   - title: "Fitting"
     desc: "Fit NLME models and inspect results."
