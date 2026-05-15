@@ -62,6 +62,14 @@ and verifies the hashes; if either file changed since the fit, the call
 is a \strong{hard error}. The point of running SIR against the original fit
 is to refine its uncertainty estimate, which is meaningless against a
 modified model or dataset.
+
+Edge case: if hashing failed at fit time (e.g. permission flip between
+parse and hash) the corresponding \verb{fit$*_hash} is \code{NA} and the
+integrity check silently passes on that side. This is rare in
+practice — hashing would have to fail while the parse just
+succeeded — but if you require integrity verification, check
+\code{!is.na(fit$model_hash) && !is.na(fit$data_hash)} before relying on
+the protection.
 }
 }
 \examples{

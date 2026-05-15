@@ -24,6 +24,14 @@ writer preserved under \code{r_extras}.
 To call \code{\link{ferx_predict}} on a loaded fit, the embedded model
 source can be re-parsed through the existing pipeline.
 }
+\examples{
+ex  <- ferx_example("warfarin")
+fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
+tmp <- tempfile(fileext = ".rds")
+ferx_save_fit(fit, tmp)
+fit2 <- ferx_load_fit(tmp)
+identical(fit$theta, fit2$theta)
+}
 \seealso{
 \code{\link{ferx_save_fit}}.
 }

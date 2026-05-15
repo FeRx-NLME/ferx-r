@@ -26,9 +26,10 @@ methods, MH accept rate for SAEM, LM lambda for Gauss-Newton). Phase
 boundaries are drawn as vertical dashed lines.
 }
 \examples{
-\dontrun{
-fit <- ferx_fit("warfarin.ferx", "warfarin.csv", optimizer_trace = TRUE)
-ferx_plot_trace(fit)
-}
+ex  <- ferx_example("warfarin")
+fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE,
+                optimizer_trace = TRUE)
+tr  <- ferx_trace(fit)
+head(tr)
 
 }

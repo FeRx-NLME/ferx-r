@@ -19,11 +19,9 @@ A correlation close to \eqn{\pm 1} between two parameters flags a structural
 identifiability problem in the model.
 }
 \examples{
-\dontrun{
 ex  <- ferx_example("warfarin")
-fit <- ferx_fit(ex$model, ex$data, covariance = TRUE)
-ferx_cor_matrix(fit)
-}
+fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = TRUE)
+if (!is.null(fit$cov_matrix)) ferx_cor_matrix(fit)
 }
 \seealso{
 \code{\link{ferx_estimates}} for SEs and \\%RSE.

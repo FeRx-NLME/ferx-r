@@ -73,6 +73,26 @@ ferx_estimates(fit)
 # (back-transform is not defined for variance parameters)
 ```
 
+### Choosing initial omega values
+
+A common question is: "what omega value corresponds to 30% BSV?"
+
+```{r omega-cv-table}
+cv_targets <- c(10, 20, 30, 40, 50, 60, 80, 100)
+data.frame(
+  cv_pct    = cv_targets,
+  omega_approx = round((cv_targets / 100)^2, 4),
+  omega_exact  = round(log(1 + (cv_targets / 100)^2), 4)
+)
+```
+
+Use the **exact** formula (`log(1 + CV²)`) for omega variances above 30% — the
+approximate formula `CV²/100²` underestimates the required starting value and
+can slow convergence.
+
+Quick rule: for CV% ≤ 30%, `omega ≈ (CV/100)²` is fine. For CV% > 30%, use
+`omega = log(1 + (CV/100)²)`.
+
 ---
 
 ## Logit-normal ETA (bioavailability)
@@ -188,6 +208,23 @@ oral model with a logit bioavailability and an additive lag time would declare:
 
 Each ETA is handled independently; the omega matrix contains the corresponding
 variances on the respective scales (log, logit, or natural units).
+
+### Running the mixed-transform model
+
+Using the bundled two-compartment with covariate example as a proxy for a
+multi-transform model (it uses log-normal ETAs on all parameters), you can
+verify the pattern compiles and fits:
+
+```{r mixed-fit, eval = FALSE}
+ex2 <- ferx_example("two_cpt_oral_cov")
+ferx_model_inspect(ex2$model)
+fit2 <- ferx_fit(ex2$model, ex2$data, method = "gn", covariance = FALSE)
+fit2$theta
+```
+
+A model combining logit and additive ETAs follows exactly the same path —
+`ferx_fit()` detects each ETA's parameterisation from the `[individual_parameters]`
+expressions and applies the correct transform automatically.
 
 ---
 

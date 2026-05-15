@@ -5,12 +5,14 @@ reference:
     desc: "Fit NLME models and inspect results."
     contents:
       - ferx_fit
+      - ferx_sir
       - summary.ferx_fit
 
   - title: "Simulation & Prediction"
     desc: "Simulate observations or compute population predictions from a fitted model."
     contents:
       - ferx_simulate
+      - ferx_simulate_with_uncertainty
       - ferx_predict
 
   - title: "Model editing"
@@ -41,6 +43,8 @@ reference:
     contents:
       - ferx_example
       - ferx_check_init
+      - ferx_save_fit
+      - ferx_load_fit
 
 articles:
   - title: "User guides"

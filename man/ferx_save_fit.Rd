@@ -31,11 +31,12 @@ The schema is shared with the ferx-core Rust crate; see its
 \code{docs/src/file-formats/fitrx.md} for the full field reference.
 }
 \examples{
-\dontrun{
-fit <- ferx_fit("warfarin.ferx", "warfarin.csv")
-ferx_save_fit(fit, "run1.fitrx", include_data = TRUE)
-loaded <- ferx_load_fit("run1.fitrx")
-}
+ex  <- ferx_example("warfarin")
+fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
+tmp <- tempfile(fileext = ".rds")
+ferx_save_fit(fit, tmp)
+fit2 <- ferx_load_fit(tmp)
+identical(fit$theta, fit2$theta)
 }
 \seealso{
 \code{\link{ferx_load_fit}}, \code{\link{ferx_fit}} (and its

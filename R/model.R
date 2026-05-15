@@ -555,6 +555,10 @@ ferx_model_set_section <- function(path, section, lines) {
 #' ferx_model_new(print = TRUE)
 #' ferx_model_new(template = "2cpt_iv", print = TRUE)
 #'
+#' # Write a skeleton to a temp file and show it
+#' tmp <- ferx_model_new(tempfile(fileext = ".ferx"), edit = FALSE)
+#' ferx_model_show(tmp)
+#'
 #' \dontrun{
 #' # Write a file and open it for editing
 #' ferx_model_new("my_model.ferx")

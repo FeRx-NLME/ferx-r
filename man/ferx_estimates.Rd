@@ -27,11 +27,9 @@ Omega is reported on the variance scale (matching the \code{.ferx} model
 file convention). For block omega, only the diagonal variances are included.
 }
 \examples{
-\dontrun{
 ex  <- ferx_example("warfarin")
-fit <- ferx_fit(ex$model, ex$data, covariance = TRUE)
+fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
 ferx_estimates(fit)
-}
 }
 \seealso{
 \code{\link{ferx_cor_matrix}} for parameter correlations.

@@ -21,13 +21,9 @@ A data.frame with columns: ID, TIME, PRED
 Computes population-level predictions (eta = 0) for all subjects.
 }
 \examples{
-\dontrun{
 ex <- ferx_example("warfarin")
-
-preds <- ferx_predict(ex$model, ex$data)
-
-fit <- ferx_fit(ex$model, ex$data)
-preds_fitted <- ferx_predict(ex$model, ex$data, fit = fit)
-}
+fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
+preds <- ferx_predict(ex$model, ex$data, fit = fit)
+head(preds)
 
 }

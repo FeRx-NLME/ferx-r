@@ -203,6 +203,21 @@ fit <- ferx_model(ex$data, ex$model) |>
   ferx_fit(method = c("saem", "focei"), covariance = TRUE)
 ```
 
+### Convergence check before a long run
+
+`ferx_check_init()` runs a short warm-up (default 5 iterations) and returns
+an early OFV trace plus a convergence summary. Use it to confirm the gradient
+is pointing in the right direction before committing to a full estimation:
+
+```{r check-init, eval = FALSE}
+chk <- ferx_check_init(ex$model, ex$data, method = "focei")
+chk$summary        # ofv_start, ofv_end, ofv_drop
+ferx_plot_trace(chk$fit)   # visual: first few OFV steps
+```
+
+If `ofv_drop` is small or negative, the initial values are likely poor — adjust
+them in `[initial_values]` or widen the bounds before proceeding.
+
 ### Simulate and predict from fitted parameters
 
 ```{r sim-pred, eval = FALSE}
@@ -317,6 +332,38 @@ F = inv_logit(logit(THETA_F) + ETA_F)
 ```
 
 See `vignette("parameter-transforms")` for worked examples with bundled models.
+
+---
+
+## Saving and reloading fits
+
+Long estimation runs can be saved to disk and reloaded in a later session with
+`ferx_save_fit()` / `ferx_load_fit()`. The saved file is a compressed RDS and
+preserves the full `ferx_fit` object including `sdtab`, `ebe_etas`, trace path,
+and all metadata.
+
+```{r save-load, eval = FALSE}
+# Save after a long run
+fit <- ferx_fit(ex$model, ex$data, method = "focei", covariance = TRUE)
+ferx_save_fit(fit, "warfarin_focei.rds")
+
+# Later — restore and continue working
+fit2 <- ferx_load_fit("warfarin_focei.rds")
+identical(fit$theta, fit2$theta)   # TRUE
+ferx_estimates(fit2)
+```
+
+The loaded object is indistinguishable from the original: all downstream
+functions (`ferx_estimates()`, `ferx_cor_matrix()`, `ferx_plot_trace()`,
+`ferx_simulate()`, etc.) work without modification.
+
+**Tip:** save immediately after fitting so a crash or session restart does not
+lose results. Use a naming convention that records the run number, method, and
+date:
+
+```{r save-naming, eval = FALSE}
+ferx_save_fit(fit, sprintf("run%02d_focei_%s.rds", run_number, Sys.Date()))
+```
 
 ---
 
