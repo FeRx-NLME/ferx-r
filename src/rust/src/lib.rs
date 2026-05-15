@@ -1479,15 +1479,20 @@ fn ferx_rust_sir(
     sir_keep_samples: bool,
     verbose: bool,
 ) -> Robj {
-    // Parse the model up-front so we can validate omega dim before
-    // bothering the user with a multi-second wait. ferx_core::run_sir
-    // re-parses internally too; this just gives us a fast pre-flight.
+    // All error paths in this binding throw an R condition (via
+    // `throw_r_error`) rather than printing to stderr + returning NULL.
+    // The latter pattern (used by `ferx_rust_fit`) loses the engine
+    // message to stderr — callers using `tryCatch()` or
+    // `expect_error(..., regexp = ...)` see only a generic
+    // "backend returned no result" from the R wrapper. Throwing
+    // propagates the actual message (e.g. "hash mismatch") into the R
+    // condition, which is what test code expects and what users want.
     let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
         Ok(p) => p,
-        Err(e) => {
-            rprintln!("ferx_sir: error parsing model at {}: {}", model_path, e);
-            return ().into();
-        }
+        Err(e) => throw_r_error(&format!(
+            "ferx_sir: error parsing model at {}: {}",
+            model_path, e
+        )),
     };
     let model = &parsed.model;
     let template = &model.default_params;
@@ -1499,53 +1504,47 @@ fn ferx_rust_sir(
     let n_packed = cov_matrix_dim as usize;
 
     if n_theta != template.theta.len() {
-        rprintln!(
+        throw_r_error(&format!(
             "ferx_sir: theta length {} does not match model ({} expected)",
             n_theta,
             template.theta.len()
-        );
-        return ().into();
+        ));
     }
     if n_sigma != template.sigma.values.len() {
-        rprintln!(
+        throw_r_error(&format!(
             "ferx_sir: sigma length {} does not match model ({} expected)",
             n_sigma,
             template.sigma.values.len()
-        );
-        return ().into();
+        ));
     }
     if n_eta != template.omega.dim() {
-        rprintln!(
+        throw_r_error(&format!(
             "ferx_sir: omega dim {} does not match model ({} expected)",
             n_eta,
             template.omega.dim()
-        );
-        return ().into();
+        ));
     }
     if omega_flat.len() != n_eta * n_eta {
-        rprintln!(
+        throw_r_error(&format!(
             "ferx_sir: omega_flat length {} does not match dim^2 = {}",
             omega_flat.len(),
             n_eta * n_eta
-        );
-        return ().into();
+        ));
     }
     if n_packed == 0 || cov_matrix_flat.len() != n_packed * n_packed {
-        rprintln!(
+        throw_r_error(&format!(
             "ferx_sir: cov_matrix is missing or malformed (dim={}, len={}). \
              Re-fit with `covariance = TRUE`.",
             n_packed,
             cov_matrix_flat.len()
-        );
-        return ().into();
+        ));
     }
     if eta_hats_flat.len() != n_subj * n_eta {
-        rprintln!(
+        throw_r_error(&format!(
             "ferx_sir: eta_hats_flat length {} does not match n_subjects * n_eta = {}",
             eta_hats_flat.len(),
             n_subj * n_eta
-        );
-        return ().into();
+        ));
     }
 
     let omega_mat = DMatrix::from_row_slice(n_eta, n_eta, &omega_flat);
@@ -1679,10 +1678,7 @@ fn ferx_rust_sir(
     // fires — that is the whole point of having hashes here.
     let new_fit = match ferx_core::run_sir(&fit, None, None, &opts) {
         Ok(f) => f,
-        Err(e) => {
-            rprintln!("ferx_sir: {}", e);
-            return ().into();
-        }
+        Err(e) => throw_r_error(&format!("ferx_sir: {}", e)),
     };
 
     let flatten_ci = |ci: &Option<Vec<(f64, f64)>>| -> Vec<f64> {

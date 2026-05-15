@@ -76,7 +76,28 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   entries <- c(entries, "predictions.csv")
 
   # model.ferx
-  writeLines(fit$model_source %||% "", file.path(staging, "model.ferx"))
+  #
+  # Prefer `file.copy(fit$model_path, ...)` so the bundled bytes match
+  # the original file exactly — including line endings, BOM, and the
+  # presence/absence of a trailing newline. `fit$model_source` was
+  # produced by `readLines + paste(collapse = "\n")` and writing it back
+  # via `writeLines` loses that fidelity, which causes
+  # `sha256(staging/model.ferx)` to drift from the stored
+  # `fit$model_hash`. That drift would then trip the hash-mismatch
+  # check inside `ferx_sir(loaded_fit)` after a save/load round-trip on
+  # any model whose bytes don't round-trip through readLines/writeLines
+  # (CRLF endings, missing trailing newline, etc.).
+  #
+  # Fall back to `writeLines(fit$model_source)` only when no `model_path`
+  # is available (e.g. a hand-constructed fit) — in that case the bundle
+  # carries the best representation we have.
+  model_src_path <- fit$model_path
+  if (!is.null(model_src_path) && !is.na(model_src_path) &&
+      nzchar(model_src_path) && file.exists(model_src_path)) {
+    file.copy(model_src_path, file.path(staging, "model.ferx"), overwrite = TRUE)
+  } else {
+    writeLines(fit$model_source %||% "", file.path(staging, "model.ferx"))
+  }
   entries <- c(entries, "model.ferx")
 
   # warnings.txt

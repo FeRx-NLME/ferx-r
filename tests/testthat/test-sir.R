@@ -102,6 +102,55 @@ test_that("ferx_sir refuses to run after the model file is tampered with", {
   )
 })
 
+test_that(".fitrx bundle preserves model.ferx bytes verbatim", {
+  # Regression test for the writeLines() vs file.copy() byte-fidelity bug.
+  # Doesn't need a fit covariance matrix.
+  #
+  # Specifically uses a model file *without* a trailing newline — that's
+  # the case where `readLines + paste(collapse = "\n") + writeLines`
+  # silently adds bytes that didn't exist, breaking the SHA-256 the engine
+  # captured at fit time. The bundled warfarin example happens to end in
+  # LF and round-trips fine through the buggy code path, which is why
+  # we construct a degenerate copy here instead of reusing it.
+  src <- ferx_example("warfarin")
+  tmp <- tempfile("ferx_sir_bytes_")
+  dir.create(tmp)
+  on.exit(unlink(tmp, recursive = TRUE), add = TRUE)
+  model_tmp <- file.path(tmp, "warfarin.ferx")
+  data_tmp <- file.path(tmp, "warfarin.csv")
+  # Strip the trailing newline so writeLines() would re-add one.
+  model_bytes <- readBin(src$model, "raw", n = file.info(src$model)$size)
+  if (length(model_bytes) > 0 && model_bytes[length(model_bytes)] == as.raw(0x0a)) {
+    model_bytes <- model_bytes[-length(model_bytes)]
+  }
+  writeBin(model_bytes, model_tmp)
+  file.copy(src$data, data_tmp)
+
+  fit <- ferx_fit(model_tmp, data_tmp,
+                  method = "focei", verbose = FALSE,
+                  covariance = FALSE,
+                  settings = list(maxiter = 30L))
+  expect_match(fit$model_hash, "^[0-9a-f]{64}$")
+
+  out <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(out), add = TRUE)
+  ferx_save_fit(fit, out, include_data = FALSE)
+
+  # Pull the bundled model.ferx and compare byte-for-byte with the
+  # on-disk original we just fit against. The buggy writeLines() path
+  # would have re-added a trailing 0x0a, so the bundled file would be
+  # exactly one byte longer than the original.
+  staging <- tempfile("fitrx_byte_check_")
+  dir.create(staging)
+  on.exit(unlink(staging, recursive = TRUE), add = TRUE)
+  utils::unzip(out, files = "model.ferx", exdir = staging, junkpaths = TRUE)
+  bundled <- file.path(staging, "model.ferx")
+  expect_true(file.exists(bundled))
+
+  bundled_bytes <- readBin(bundled, "raw", n = file.info(bundled)$size)
+  expect_identical(bundled_bytes, model_bytes)
+})
+
 test_that("path/hash fields round-trip through .fitrx save/load", {
   fit <- warfarin_fit_cov()
   skip_if(is.null(fit$cov_matrix), sir_cov_skip)

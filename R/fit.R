@@ -981,17 +981,29 @@ ferx_fit.default <- function(model, data,
     error = function(e) ""
   )
 
-  # Source-file provenance. The Rust binding now emits these directly
-  # (computed via ferx_core::io::hash::sha256_file); the empty-string ->
-  # NULL coercion handles older binaries that didn't populate them, so the
-  # %||% fallback can fire.
+  # Source-file provenance. The Rust binding emits the four fields
+  # directly (paths as the caller-supplied strings, hashes via
+  # `ferx_core::io::hash::sha256_file`). Always run `normalizePath` on
+  # the path fields here, regardless of source: the old R-side behavior
+  # was to store absolute paths (`normalizePath(data)`), and downstream
+  # code (notably ferx_save_fit, where `fit$data_path` is opened from a
+  # potentially-different working directory at save time) depends on
+  # that. Falling back to NULL → NA when the binding returns nothing
+  # keeps older binaries working.
   empty_to_null <- function(x) {
     if (is.null(x) || length(x) == 0L || !nzchar(x[[1L]])) NULL else as.character(x)
   }
-  result$model_path <- empty_to_null(result$model_path) %||%
-    tryCatch(normalizePath(model, mustWork = FALSE), error = function(e) NA_character_)
-  result$data_path <- empty_to_null(result$data_path) %||%
-    tryCatch(normalizePath(data, mustWork = FALSE), error = function(e) NA_character_)
+  normalize_or_na <- function(path_str) {
+    if (is.null(path_str)) return(NA_character_)
+    tryCatch(normalizePath(path_str, mustWork = FALSE),
+             error = function(e) NA_character_)
+  }
+  result$model_path <- normalize_or_na(
+    empty_to_null(result$model_path) %||% model
+  )
+  result$data_path <- normalize_or_na(
+    empty_to_null(result$data_path) %||% data
+  )
   result$model_hash <- empty_to_null(result$model_hash) %||% NA_character_
   result$data_hash <- empty_to_null(result$data_hash) %||% NA_character_
 

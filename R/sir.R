@@ -22,6 +22,14 @@
 #' is to refine its uncertainty estimate, which is meaningless against a
 #' modified model or dataset.
 #'
+#' Edge case: if hashing failed at fit time (e.g. permission flip between
+#' parse and hash) the corresponding `fit$*_hash` is `NA` and the
+#' integrity check silently passes on that side. This is rare in
+#' practice — hashing would have to fail while the parse just
+#' succeeded — but if you require integrity verification, check
+#' `!is.na(fit$model_hash) && !is.na(fit$data_hash)` before relying on
+#' the protection.
+#'
 #' @param fit A `ferx_fit` object produced by [ferx_fit()] or
 #'   [ferx_load_fit()].
 #' @param sir_samples Number of proposal samples drawn from the asymptotic
@@ -63,6 +71,29 @@ ferx_sir <- function(fit,
                      verbose = FALSE) {
   if (!inherits(fit, "ferx_fit")) {
     stop("`fit` must be a ferx_fit object (from ferx_fit() or ferx_load_fit()).")
+  }
+
+  # Validate the SIR knobs up-front so user errors surface as clean R
+  # conditions rather than as the engine's "weighted sampler failed"
+  # or the binding's i32-clamped 0 after a bad cast.
+  is_positive_count <- function(x) {
+    length(x) == 1L && is.finite(x) && x > 0 && x == as.integer(x)
+  }
+  if (!is_positive_count(sir_samples)) {
+    stop("`sir_samples` must be a single positive integer (got: ",
+         paste(format(sir_samples), collapse = ", "), ").")
+  }
+  if (!is_positive_count(sir_resamples)) {
+    stop("`sir_resamples` must be a single positive integer (got: ",
+         paste(format(sir_resamples), collapse = ", "), ").")
+  }
+  if (!is.null(sir_seed)) {
+    if (!is_positive_count(sir_seed) && !(length(sir_seed) == 1L &&
+                                          is.finite(sir_seed) &&
+                                          sir_seed == as.integer(sir_seed) &&
+                                          sir_seed >= 0)) {
+      stop("`sir_seed` must be NULL or a single non-negative integer.")
+    }
   }
 
   model_path <- fit$model_path
@@ -114,6 +145,16 @@ ferx_sir <- function(fit,
   if (length(eta_cols) == 0L) {
     stop("ferx_sir: fit$ebe_etas has no ETA columns.")
   }
+  n_eta <- nrow(fit$omega)
+  if (length(eta_cols) != n_eta) {
+    stop(
+      "ferx_sir: fit$ebe_etas has ", length(eta_cols), " ETA columns (",
+      paste(eta_cols, collapse = ", "),
+      ") but fit$omega is ", n_eta, "x", n_eta, ". ",
+      "The EBE table and the omega matrix must agree on n_eta — was ",
+      "this fit object hand-edited or assembled from incompatible parts?"
+    )
+  }
   eta_mat <- as.matrix(ebes[, eta_cols, drop = FALSE])
   storage.mode(eta_mat) <- "double"
   eta_hats_flat <- as.numeric(t(eta_mat))  # row-major
@@ -146,9 +187,9 @@ ferx_sir <- function(fit,
     verbose = isTRUE(verbose)
   )
 
-  if (is.null(raw) || length(raw) == 0L) {
-    stop("ferx_sir: backend returned no result (see messages above).")
-  }
+  # All error paths inside `ferx_rust_sir` throw an R condition (via
+  # `throw_r_error`) and never return `NULL`, so we don't need to test
+  # for that here.
 
   # Merge results onto the fit object. Mirrors the post-processing
   # `ferx_fit()` applies to its inline SIR output so downstream code sees
@@ -165,7 +206,6 @@ ferx_sir <- function(fit,
     )
   }
   fit$sir_ci_theta <- reshape_ci(raw$sir_ci_theta, names(fit$theta))
-  n_eta <- nrow(fit$omega)
   eta_row_names <- paste0("OMEGA(", seq_len(n_eta), ",", seq_len(n_eta), ")")
   fit$sir_ci_omega <- reshape_ci(raw$sir_ci_omega, eta_row_names)
   sig_names <- paste0("SIGMA(", seq_along(fit$sigma), ")")
