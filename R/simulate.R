@@ -214,14 +214,23 @@ ferx_simulate_with_uncertainty <- function(model, data, fit,
 validate_fit_for_uncertainty <- function(fit, method) {
   if (method == "asymptotic") {
     cov <- fit$cov_matrix
-    dim <- fit$cov_matrix_dim
-    if (is.null(cov) || length(cov) == 0L || is.null(dim) || dim == 0L) {
+    if (is.null(cov) || length(cov) == 0L) {
       stop("`fit$cov_matrix` is empty — re-fit with `covariance = TRUE` for ",
            "asymptotic uncertainty.")
     }
+    # `cov` is a square R matrix after `process_fit_result()`. Flatten
+    # row-major to match the engine's `DMatrix::from_row_slice` reader on
+    # the Rust side — same convention used for `omega` above. The
+    # transpose is mathematically a no-op for any well-formed covariance
+    # (which must be symmetric), but the explicit `t()` keeps the FFI
+    # contract uniform with `omega_flat` and prevents a future footgun
+    # if the Rust reader ever changes.
+    if (!is.matrix(cov) || nrow(cov) != ncol(cov)) {
+      stop("`fit$cov_matrix` must be a square matrix.")
+    }
     list(
-      cov_matrix_flat    = as.numeric(cov),
-      cov_matrix_dim     = as.integer(dim),
+      cov_matrix_flat    = as.numeric(t(cov)),
+      cov_matrix_dim     = as.integer(nrow(cov)),
       sir_resamples_flat = numeric(0),
       sir_resamples_n    = 0L,
       sir_resamples_dim  = 0L

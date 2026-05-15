@@ -89,7 +89,11 @@ test_that("same seed produces identical output (asymptotic)", {
 test_that("uncertainty-aware sims show wider DV_SIM spread than fixed-param sims", {
   # n_uncertainty_draws = 1 ≈ no parameter uncertainty (one draw). Bumping
   # n_uncertainty_draws should widen the empirical spread of DV_SIM at any
-  # given (ID, TIME). Use IQR to make the comparison robust to outliers.
+  # given (ID, TIME). Both calls use the same total sample size (150) and
+  # the same seed, so the only difference is whether the population
+  # parameters are perturbed between draws — which means `many` must show a
+  # strictly wider IQR than `few`. A small safety margin (`* 1.02`)
+  # guards against ULP-level ties without weakening the directional claim.
   ex  <- ferx_example("warfarin")
   fit <- warfarin_fit_cov()
   many <- ferx_simulate_with_uncertainty(
@@ -102,7 +106,7 @@ test_that("uncertainty-aware sims show wider DV_SIM spread than fixed-param sims
   )
   iqr_many <- diff(quantile(many$DV_SIM, c(0.25, 0.75), names = FALSE))
   iqr_few  <- diff(quantile(few$DV_SIM,  c(0.25, 0.75), names = FALSE))
-  expect_gt(iqr_many, iqr_few * 0.9)  # generous to tolerate Monte-Carlo noise
+  expect_gt(iqr_many, iqr_few * 1.02)
 })
 
 test_that("asymptotic errors when covariance step was not run", {
