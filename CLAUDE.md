@@ -4,7 +4,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-ferx is an R package for nonlinear mixed effects (NLME) modeling. It provides a user-facing R API that delegates to a high-performance Rust backend via extendr FFI. The core computation engine lives in the sibling **ferx-core** crate (`../ferx-core`), referenced as a path dependency in `src/rust/Cargo.toml`.
+ferx is an R package for nonlinear mixed effects (NLME) modeling. It provides a user-facing R API that delegates to a high-performance Rust backend via extendr FFI. The core computation engine lives in the sibling **ferx-core** crate at `../ferx-core` (sibling directory).
+
+## ferx-core dependency: do NOT edit `src/rust/Cargo.toml`
+
+`src/rust/Cargo.toml` declares `ferx-core` as a **git dependency** pinned to `main`. Don't change it to a path dep when working locally — the local-vs-GitHub swap is already handled by `src/rust/.cargo/config.toml`:
+
+```toml
+[patch."https://github.com/FeRx-NLME/ferx-core"]
+ferx-core = { path = "../../../ferx-core" }
+```
+
+When the sibling `../ferx-core` checkout exists, cargo automatically uses it (verify with `cd src/rust && cargo tree -p ferx-core` — it should show the local path). When the sibling doesn't exist (e.g. CI without a paired checkout), cargo falls back to the GitHub source.
+
+This means: develop against a feature branch in `../ferx-core` freely, but never commit Cargo.toml changes that flip the dep to a path. Reviewers and CI run against the GitHub `main`, so a path dep in Cargo.toml would break their builds.
 
 ## Build & Install
 

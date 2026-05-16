@@ -77,7 +77,28 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   entries <- c(entries, "predictions.csv")
 
   # model.ferx
-  writeLines(fit$model_source %||% "", file.path(staging, "model.ferx"))
+  #
+  # Prefer `file.copy(fit$model_path, ...)` so the bundled bytes match
+  # the original file exactly — including line endings, BOM, and the
+  # presence/absence of a trailing newline. `fit$model_source` was
+  # produced by `readLines + paste(collapse = "\n")` and writing it back
+  # via `writeLines` loses that fidelity, which causes
+  # `sha256(staging/model.ferx)` to drift from the stored
+  # `fit$model_hash`. That drift would then trip the hash-mismatch
+  # check inside `ferx_sir(loaded_fit)` after a save/load round-trip on
+  # any model whose bytes don't round-trip through readLines/writeLines
+  # (CRLF endings, missing trailing newline, etc.).
+  #
+  # Fall back to `writeLines(fit$model_source)` only when no `model_path`
+  # is available (e.g. a hand-constructed fit) — in that case the bundle
+  # carries the best representation we have.
+  model_src_path <- fit$model_path
+  if (!is.null(model_src_path) && !is.na(model_src_path) &&
+      nzchar(model_src_path) && file.exists(model_src_path)) {
+    file.copy(model_src_path, file.path(staging, "model.ferx"), overwrite = TRUE)
+  } else {
+    writeLines(fit$model_source %||% "", file.path(staging, "model.ferx"))
+  }
   entries <- c(entries, "model.ferx")
 
   # warnings.txt
@@ -212,20 +233,43 @@ ferx_load_fit <- function(path) {
     result$ebe_kappas <- NULL
   }
 
-  # Model source + optional data CSV
-  model_path <- file.path(staging, "model.ferx")
-  if (file.exists(model_path)) {
-    result$model_source <- paste(readLines(model_path, warn = FALSE), collapse = "\n")
+  # Model source + optional data CSV.
+  #
+  # Both files are bundled into the .fitrx archive. Persist each to a
+  # tempfile (outside the staging dir which gets cleaned on exit), and
+  # *override* the wire-provided `model_path` / `data_path` with the
+  # local copy. That way `ferx_sir(fit)` and `ferx_predict(fit)` work on
+  # the loading machine even if the original-machine paths don't exist
+  # — and the stored `model_hash` / `data_hash` still match, because
+  # the bundle is a verbatim copy of the source bytes.
+  model_staging <- file.path(staging, "model.ferx")
+  if (file.exists(model_staging)) {
+    result$model_source <- paste(readLines(model_staging, warn = FALSE), collapse = "\n")
+    persisted_model <- tempfile("fitrx_model_", fileext = ".ferx")
+    file.copy(model_staging, persisted_model, overwrite = TRUE)
+    result$model_path <- persisted_model
+  } else if (is.null(result$model_path) || !nzchar(result$model_path) ||
+             !file.exists(result$model_path)) {
+    # `model.ferx` should always be present in a well-formed bundle, but
+    # be defensive: if it's missing AND the wire path doesn't resolve
+    # locally, clear `model_path` to NA so `ferx_sir()`'s "no recorded
+    # model path" branch fires with a clear message instead of the
+    # generic "file not found".
+    result$model_path <- NA_character_
   }
-  data_path <- file.path(staging, "data.csv")
-  if (file.exists(data_path)) {
+  data_staging <- file.path(staging, "data.csv")
+  if (file.exists(data_staging)) {
     # Copy out of the staging dir so it survives the on.exit() cleanup.
-    persisted <- tempfile("fitrx_data_", fileext = ".csv")
-    file.copy(data_path, persisted, overwrite = TRUE)
-    result$data_path <- persisted
-  } else {
+    persisted_data <- tempfile("fitrx_data_", fileext = ".csv")
+    file.copy(data_staging, persisted_data, overwrite = TRUE)
+    result$data_path <- persisted_data
+  } else if (is.null(result$data_path) || !nzchar(result$data_path)) {
+    # No bundled data and the wire didn't carry a path either.
     result$data_path <- NA_character_
   }
+  # If the wire carried model_path / data_path and neither was bundled
+  # but the path resolves locally, leave it as-is — `ferx_sir()` will
+  # use it directly (and the hash check still applies).
 
   # Warnings — fit.json is the source of truth, warnings.txt is a mirror.
   if (is.null(result$warnings)) result$warnings <- character()
@@ -308,6 +352,13 @@ ferx_load_fit <- function(path) {
     model_name = as.character(fit$model_name %||% ""),
     ferx_version = as.character(fit$ferx_version %||% ""),
 
+    # Source-file provenance (matches the ferx-core FitWire layout). Only
+    # written when present so older readers don't trip on unknown nulls.
+    model_path = .fitrx_opt_chr(fit$model_path),
+    data_path = .fitrx_opt_chr(fit$data_path),
+    model_hash = .fitrx_opt_chr(fit$model_hash),
+    data_hash = .fitrx_opt_chr(fit$data_hash),
+
     r_extras = .fitrx_collect_r_extras(fit)
   )
 
@@ -387,7 +438,12 @@ ferx_load_fit <- function(path) {
     cov_condition_number = .fitrx_unwrap_opt_num(w$cov_condition_number),
 
     model_name = as.character(w$model_name %||% ""),
-    ferx_version = as.character(w$ferx_version %||% "")
+    ferx_version = as.character(w$ferx_version %||% ""),
+
+    model_path = .fitrx_unwrap_opt_chr(w$model_path),
+    data_path = .fitrx_unwrap_opt_chr(w$data_path),
+    model_hash = .fitrx_unwrap_opt_chr(w$model_hash),
+    data_hash = .fitrx_unwrap_opt_chr(w$data_hash)
   )
 
   # eta_param_info → parallel R vectors
