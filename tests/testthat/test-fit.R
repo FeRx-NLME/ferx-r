@@ -186,8 +186,12 @@ test_that("ferx_cor_matrix errors gracefully when covariance was FALSE", {
 #    skip() with a real comparison (e.g. relative error < 1e-4 per element).
 
 test_that("autodiff OFV gradient matches finite-difference gradient within tolerance", {
+  # `ferx_rust_*` bindings are marked `@keywords internal`, so they are not
+  # in the exported namespace that `library(ferx)` makes available to test
+  # code. Access via `:::` so this test loads under `testthat::test_dir()`
+  # rather than failing with "could not find function".
   skip_if(
-    !isTRUE(ferx_rust_autodiff_enabled()),
+    !isTRUE(ferx:::ferx_rust_autodiff_enabled()),
     "Enzyme autodiff not available — skipping gradient-correctness test"
   )
   skip("Gradient inspection API not yet exposed from ferx-core — implement once available")
