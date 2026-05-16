@@ -3,7 +3,7 @@ Title: Nonlinear Mixed Effects Modeling with Rust Backend
 Version: 0.1.2
 Authors@R: c(
     person("Ron Keizer", role = c("aut", "cre"), email = "ron@insightrx.com"),
-    person("Teun Post", role = "aut", email = "teunpost@gmail.com"))
+    person("Teun Post", role = "aut", email = "teunpost at gmail.com"))
 Author: Ron Keizer [aut, cre], Teun Post [aut]
 Maintainer: Ron Keizer <ron@insightrx.com>
 Description: Fast NLME estimation using FOCE/FOCEI with automatic differentiation.
