@@ -6,6 +6,10 @@
 # natural additive variability structure and cannot go negative by definition
 # (or is bounded away from zero by the individual's biology).
 #
+# Lag time is routed via the `lagtime=` PK parameter (NONMEM-style `alag=`
+# is also accepted) — the variable name on the left of the assignment can
+# be anything (here, `TLAG`).
+#
 # Use ferx_example("warfarin_additive_eta") to get file paths.
 
 [parameters]
@@ -27,7 +31,7 @@
   TLAG = TVTLAG + ETA_TLAG
 
 [structural_model]
-  pk one_cpt_oral(cl=CL, v=V, ka=KA, tlag=TLAG)
+  pk one_cpt_oral(cl=CL, v=V, ka=KA, lagtime=TLAG)
 
 [error_model]
   DV ~ proportional(PROP_ERR)

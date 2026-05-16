@@ -2,6 +2,15 @@
 
 ## New features
 
+- Lag time parameter (`lagtime=` on the structural_model line, NONMEM-
+  style `alag=` accepted as an alias) is now supported in `.ferx`
+  models. Delays the effective start of every dose record by the
+  parameter's value; defaults to `0.0` when omitted so existing models
+  are unaffected. Random effects on lag time work the same as on any
+  other PK parameter (`LAGTIME = TVLAGTIME * exp(ETA_LAGTIME)` for
+  log-normal, or the additive form covered in the
+  `parameter-transforms` vignette). Pairs with ferx-core#12.
+
 - `ferx_sir(fit)` — run SIR (Sampling Importance Resampling) as a
   standalone post-fit step, without having to set `sir = TRUE` at fit
   time. Useful for expensive fits where you want to add SIR-based
@@ -56,6 +65,14 @@
   argument falls into the `model` slot.
 
 ## Bug fixes
+
+- Bundled example `warfarin_additive_eta.ferx` used `tlag=TLAG` on its
+  structural_model line. `tlag` was never a recognized PK parameter
+  key in the engine, so the parser silently interpreted the value as
+  the `cl=` parameter, overwriting the clearance value and producing
+  incorrect fits. Updated to `lagtime=TLAG`. If you derived a local
+  model from this example, change `tlag=` to `lagtime=` (or `alag=`).
+  Pairs with ferx-core#12.
 
 - `ferx_model_validate()` no longer flags `[initial_values]` as a missing
   required section. The block was removed from the engine in
