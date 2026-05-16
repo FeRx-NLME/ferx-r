@@ -1279,17 +1279,19 @@ print.ferx_fit <- function(x, ...) {
         }
         corr_label <- if (!is.null(x$omega_param_corr)) "param corr" else "corr"
         has_nms <- !is.null(x$eta_names) && length(x$eta_names) >= i
-        cov_lbl <- if (has_nms) {
-          sprintf("%s,%s",
-            if (nzchar(x$eta_names[i])) x$eta_names[i] else sprintf("OMEGA(%d,%d)", i, i),
-            if (nzchar(x$eta_names[j])) x$eta_names[j] else sprintf("OMEGA(%d,%d)", j, j))
+        if (has_nms) {
+          lbl_i <- if (nzchar(x$eta_names[i])) x$eta_names[i] else sprintf("OMEGA(%d,%d)", i, i)
+          lbl_j <- if (nzchar(x$eta_names[j])) x$eta_names[j] else sprintf("OMEGA(%d,%d)", j, j)
+          cat(sprintf(
+            "  %s ~ %s : cov = %.6f  (%s = %.4f)\n",
+            lbl_i, lbl_j, cov_ij, corr_label, param_corr
+          ))
         } else {
-          sprintf("OMEGA(%d,%d)", i, j)
+          cat(sprintf(
+            "  OMEGA(%d,%d) : cov = %.6f  (%s = %.4f)\n",
+            i, j, cov_ij, corr_label, param_corr
+          ))
         }
-        cat(sprintf(
-          "  %s = %.6f  (%s = %.4f)\n",
-          cov_lbl, cov_ij, corr_label, param_corr
-        ))
       }
     }
   }

@@ -116,7 +116,7 @@ test_that("print.ferx_fit uses omega_param_corr value and 'param corr' label whe
     eta_param_types  = c("log_normal", "log_normal")
   )
   out <- capture.output(print(fit))
-  corr_line <- out[grepl("OMEGA\\(2,1\\)", out)]
+  corr_line <- out[grepl("OMEGA\\(2,1\\) : cov =", out)]
   expect_length(corr_line, 1L)
   expect_true(grepl("param corr = 0\\.5227", corr_line))
 })
@@ -130,7 +130,7 @@ test_that("print.ferx_fit falls back to eta-level corr label when omega_param_co
     eta_param_types  = c("log_normal", "log_normal")
   )
   out <- capture.output(print(fit))
-  corr_line <- out[grepl("OMEGA\\(2,1\\)", out)]
+  corr_line <- out[grepl("OMEGA\\(2,1\\) : cov =", out)]
   expect_length(corr_line, 1L)
   expect_true(grepl("\\(corr = 0\\.2500\\)", corr_line))
   expect_false(grepl("param corr", corr_line))
