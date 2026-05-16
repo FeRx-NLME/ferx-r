@@ -728,6 +728,9 @@ ferx_fit.default <- function(model, data,
   if (length(result$omega) > 0 && !is.null(result$omega_dim)) {
     d <- result$omega_dim
     result$omega <- matrix(result$omega, nrow = d, ncol = d)
+    eta_nms_om <- result$eta_names
+    omega_dim_nms <- if (!is.null(eta_nms_om) && length(eta_nms_om) == d) eta_nms_om else paste0("OMEGA(", seq_len(d), ",", seq_len(d), ")")
+    rownames(result$omega) <- colnames(result$omega) <- omega_dim_nms
   }
 
   # Name SE vectors
@@ -754,9 +757,13 @@ ferx_fit.default <- function(model, data,
   }
   result$sir_ci_theta <- reshape_ci(result$sir_ci_theta, result$theta_names)
   n_eta <- if (is.null(dim(result$omega))) NULL else nrow(result$omega)
-  eta_names <- if (!is.null(n_eta)) paste0("OMEGA(", seq_len(n_eta), ",", seq_len(n_eta), ")") else NULL
+  eta_names <- if (!is.null(n_eta)) {
+    en <- result$eta_names
+    if (!is.null(en) && length(en) == n_eta) en else paste0("OMEGA(", seq_len(n_eta), ",", seq_len(n_eta), ")")
+  } else NULL
   result$sir_ci_omega <- reshape_ci(result$sir_ci_omega, eta_names)
-  sig_names <- paste0("SIGMA(", seq_along(result$sigma), ")")
+  sn <- result$sigma_names
+  sig_names <- if (!is.null(sn) && length(sn) == length(result$sigma)) sn else paste0("SIGMA(", seq_along(result$sigma), ")")
   result$sir_ci_sigma <- reshape_ci(result$sir_ci_sigma, sig_names)
 
   # Normalize trace_path: NULL/empty means no trace was written
@@ -793,7 +800,7 @@ ferx_fit.default <- function(model, data,
     # Determine parameterisation: diagonal (n_omega_packed == n_eta) or block
     eta_nms <- if (!is.null(result$eta_names) && length(result$eta_names) == n_eta) result$eta_names else NULL
     omega_names <- if (n_omega_packed == n_eta) {
-      if (!is.null(eta_nms)) sprintf("OMEGA(%s)", eta_nms)
+      if (!is.null(eta_nms)) eta_nms
       else paste0("OMEGA(", seq_len(n_eta), ",", seq_len(n_eta), ")")
     } else {
       # Block lower-triangle: L(i,j) for i >= j, column-major
@@ -802,7 +809,7 @@ ferx_fit.default <- function(model, data,
       for (i in seq_len(n_eta)) {
         for (j in seq_len(i)) {
           k <- k + 1L
-          nm[k] <- if (!is.null(eta_nms)) sprintf("OMEGA(%s,%s)", eta_nms[i], eta_nms[j]) else sprintf("OMEGA_L(%d,%d)", i, j)
+          nm[k] <- if (!is.null(eta_nms)) sprintf("%s,%s", eta_nms[i], eta_nms[j]) else sprintf("OMEGA(%d,%d)", i, j)
         }
       }
       nm
@@ -1249,11 +1256,10 @@ print.ferx_fit <- function(x, ...) {
       custom            = "[custom]",
       ""
     )
-    eta_label <- if (!is.null(x$eta_names) && length(x$eta_names) >= i && nzchar(x$eta_names[i])) x$eta_names[i] else NULL
-    omega_id  <- if (!is.null(eta_label)) sprintf("(%s)", eta_label) else sprintf("(%d,%d)", i, i)
+    eta_label <- if (!is.null(x$eta_names) && length(x$eta_names) >= i && nzchar(x$eta_names[i])) x$eta_names[i] else sprintf("OMEGA(%d,%d)", i, i)
     cat(sprintf(
-      "  OMEGA%-20s %-13s = %.6f  %s  SE = %s\n",
-      omega_id, type_tag, var_ii, extra, se_str
+      "  %-24s %-13s = %.6f  %s  SE = %s\n",
+      eta_label, type_tag, var_ii, extra, se_str
     ))
     for (j in seq_len(i - 1L)) {
       if (abs(om[i, j]) > 1e-15) has_offdiag <- TRUE
@@ -1272,11 +1278,17 @@ print.ferx_fit <- function(x, ...) {
           if (var_i > 0 && var_j > 0) cov_ij / (sqrt(var_i) * sqrt(var_j)) else 0
         }
         corr_label <- if (!is.null(x$omega_param_corr)) "param corr" else "corr"
-        lbl_i <- if (!is.null(x$eta_names) && length(x$eta_names) >= i && nzchar(x$eta_names[i])) x$eta_names[i] else as.character(i)
-        lbl_j <- if (!is.null(x$eta_names) && length(x$eta_names) >= j && nzchar(x$eta_names[j])) x$eta_names[j] else as.character(j)
+        has_nms <- !is.null(x$eta_names) && length(x$eta_names) >= i
+        cov_lbl <- if (has_nms) {
+          sprintf("%s,%s",
+            if (nzchar(x$eta_names[i])) x$eta_names[i] else sprintf("OMEGA(%d,%d)", i, i),
+            if (nzchar(x$eta_names[j])) x$eta_names[j] else sprintf("OMEGA(%d,%d)", j, j))
+        } else {
+          sprintf("OMEGA(%d,%d)", i, j)
+        }
         cat(sprintf(
-          "  OMEGA(%s,%s) = %.6f  (%s = %.4f)\n",
-          lbl_i, lbl_j, cov_ij, corr_label, param_corr
+          "  %s = %.6f  (%s = %.4f)\n",
+          cov_lbl, cov_ij, corr_label, param_corr
         ))
       }
     }
@@ -1400,8 +1412,9 @@ print.ferx_fit <- function(x, ...) {
     cat("\n--- Shrinkage ---\n")
     if (!is.null(x$shrinkage_eta)) {
       for (k in seq_along(x$shrinkage_eta)) {
-        sh <- x$shrinkage_eta[k]
-        if (!is.na(sh)) cat(sprintf("  ETA%d shrinkage: %.1f%%\n", k, sh * 100))
+        sh  <- x$shrinkage_eta[k]
+        lbl <- if (!is.null(x$eta_names) && length(x$eta_names) >= k && nzchar(x$eta_names[k])) x$eta_names[k] else sprintf("ETA%d", k)
+        if (!is.na(sh)) cat(sprintf("  %s shrinkage: %.1f%%\n", lbl, sh * 100))
       }
     }
     if (!is.null(x$shrinkage_eps) && !is.na(x$shrinkage_eps)) {
@@ -1622,10 +1635,8 @@ print.ferx_summary <- function(x, ...) {
   ))
 
   if (!is.null(x$shrinkage_eta) && any(!is.na(x$shrinkage_eta))) {
-    sh_str <- paste(sprintf(
-      "ETA%d=%.1f%%", seq_along(x$shrinkage_eta),
-      x$shrinkage_eta * 100
-    ), collapse = "  ")
+    sh_lbls <- if (!is.null(x$eta_names) && length(x$eta_names) == length(x$shrinkage_eta)) x$eta_names else sprintf("ETA%d", seq_along(x$shrinkage_eta))
+    sh_str <- paste(sprintf("%s=%.1f%%", sh_lbls, x$shrinkage_eta * 100), collapse = "  ")
     cat("Shrinkage:", sh_str, "\n")
   }
   if (!is.null(x$shrinkage_eps) && !is.na(x$shrinkage_eps)) {

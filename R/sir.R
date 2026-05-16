@@ -247,9 +247,11 @@ ferx_sir <- function(fit,
     )
   }
   fit$sir_ci_theta <- reshape_ci(raw$sir_ci_theta, names(fit$theta))
-  eta_row_names <- paste0("OMEGA(", seq_len(n_eta), ",", seq_len(n_eta), ")")
+  en <- fit$eta_names
+  eta_row_names <- if (!is.null(en) && length(en) == n_eta) en else paste0("OMEGA(", seq_len(n_eta), ",", seq_len(n_eta), ")")
   fit$sir_ci_omega <- reshape_ci(raw$sir_ci_omega, eta_row_names)
-  sig_names <- paste0("SIGMA(", seq_along(fit$sigma), ")")
+  sn <- fit$sigma_names
+  sig_names <- if (!is.null(sn) && length(sn) == length(fit$sigma)) sn else paste0("SIGMA(", seq_along(fit$sigma), ")")
   fit$sir_ci_sigma <- reshape_ci(raw$sir_ci_sigma, sig_names)
 
   if (isTRUE(sir_keep_samples)) {
