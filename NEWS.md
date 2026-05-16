@@ -11,16 +11,6 @@
   log-normal, or the additive form covered in the
   `parameter-transforms` vignette). Pairs with ferx-core#12.
 
-## Bug fixes
-
-- Bundled example `warfarin_additive_eta.ferx` used `tlag=TLAG` on its
-  structural_model line — a key that the parser silently dropped
-  (rerouting `TLAG`'s value to the `cl=` slot, which silently produced
-  incorrect fits). Updated to `lagtime=TLAG`. If you derived a local
-  model from this example, change `tlag=` to `lagtime=` (or `alag=`).
-
-## New features
-
 - `ferx_simulate_with_uncertainty()` — simulate observations while
   propagating population parameter uncertainty in addition to the usual
   between-subject (eta) and residual (eps) variability. For each
@@ -66,6 +56,14 @@
   argument falls into the `model` slot.
 
 ## Bug fixes
+
+- Bundled example `warfarin_additive_eta.ferx` used `tlag=TLAG` on its
+  structural_model line. `tlag` was never a recognized PK parameter
+  key in the engine, so the parser silently interpreted the value as
+  the `cl=` parameter, overwriting the clearance value and producing
+  incorrect fits. Updated to `lagtime=TLAG`. If you derived a local
+  model from this example, change `tlag=` to `lagtime=` (or `alag=`).
+  Pairs with ferx-core#12.
 
 - `ferx_model_validate()` no longer flags `[initial_values]` as a missing
   required section. The block was removed from the engine in
