@@ -413,13 +413,7 @@ ferx_load_fit <- function(path) {
     se_theta = .fitrx_unwrap_named_se(w$theta$se, w$theta$names),
 
     eta_names = unlist(w$omega$names, use.names = FALSE),
-    omega = {
-      om <- .fitrx_matrix_from_wire(w$omega$matrix)
-      en <- unlist(w$omega$names, use.names = FALSE)
-      if (!is.null(om) && !is.null(en) && length(en) == nrow(om))
-        rownames(om) <- colnames(om) <- en
-      om
-    },
+    omega = .fitrx_named_omega(w$omega),
     omega_fixed = as.logical(unlist(w$omega$fixed %||% list(), use.names = FALSE)),
     eta_log_transformed = as.logical(unlist(w$omega$log_transformed %||% list(), use.names = FALSE)),
     omega_param_corr = .fitrx_matrix_from_wire(w$omega$param_corr),
@@ -799,6 +793,16 @@ ferx_load_fit <- function(path) {
   v <- as.numeric(unlist(x, use.names = FALSE))
   if (length(v) == 0L) return(NULL)
   v
+}
+
+.fitrx_named_omega <- function(omega_wire) {
+  om <- .fitrx_matrix_from_wire(omega_wire$matrix)
+  if (is.null(om)) return(om)
+  en <- unlist(omega_wire$names, use.names = FALSE)
+  d  <- nrow(om)
+  nms <- if (!is.null(en) && length(en) == d) en else paste0("OMEGA(", seq_len(d), ",", seq_len(d), ")")
+  rownames(om) <- colnames(om) <- nms
+  om
 }
 
 .fitrx_unwrap_named_se <- function(se_wire, names_wire) {
