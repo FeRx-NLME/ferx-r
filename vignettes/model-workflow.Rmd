@@ -194,7 +194,7 @@ ferx_plot_trace(chk$fit)   # visual check: first few iterations
 ```
 
 If `ofv_drop` is small or negative, the initial values are likely poor — adjust
-them in `[initial_values]` or widen the parameter bounds before proceeding.
+them in `[parameters]` or widen the parameter bounds before proceeding.
 
 ### Multi-stage method chain
 
@@ -293,13 +293,16 @@ column that is constant within a subject and not a standard NONMEM column
 (TIME, DV, AMT, EVID, MDV, CMT, RATE) is treated as a covariate:
 
 ```{r eta-cov, eval = FALSE}
-data <- read.csv(ex$data)
-ferx_eta_cov(fit, data)
+# The warfarin dataset has no covariate columns. The following example uses
+# two_cpt_oral_cov, which has body weight (WT) and creatinine clearance (CRCL).
+ex_cov <- ferx_example("two_cpt_oral_cov")
+fit_cov <- ferx_fit(ex_cov$model, ex_cov$data)
+data_cov <- read.csv(ex_cov$data)
+ferx_eta_cov(fit_cov, data_cov)
 #   eta      covariate    r   p_val  flag
-#   ETA_CL   AGE       0.41  0.003   [!]
-#   ETA_V    WT        0.31  0.021   [!]
-#   ETA_KA   AGE       0.12  0.281
-#   ...
+#   ETA_CL   WT        0.38  0.008   [!]
+#   ETA_CL   CRCL      0.41  0.003   [!]
+#   ETA_V1   WT        0.29  0.047
 # [!] flags |r| >= 0.3; flag covariates worth formal testing
 ```
 

@@ -1,0 +1,34 @@
+# Warfarin 1-compartment model with Inter-Occasion Variability (IOV)
+#
+# Demonstrates the `kappa` keyword (Option A: diagonal IOV omega).
+# Each occasion (identified by the OCC column) gets its own kappa for CL,
+# drawn from Omega_IOV.  The individual CL is:
+#   CL = TVCL * exp(ETA_CL + KAPPA_CL)
+#
+# Dataset must contain an OCC column (integer occasion index per row).
+
+[parameters]
+  theta TVCL(0.134, 0.001, 10.0)
+  theta TVV(8.1, 0.1, 500.0)
+  theta TVKA(1.0, 0.01, 50.0)
+  omega ETA_CL ~ 0.07
+  omega ETA_V  ~ 0.02
+  omega ETA_KA ~ 0.40
+  kappa KAPPA_CL ~ 0.04
+  sigma PROP_ERR ~ 0.01
+
+[individual_parameters]
+  CL = TVCL * exp(ETA_CL + KAPPA_CL)
+  V  = TVV  * exp(ETA_V)
+  KA = TVKA * exp(ETA_KA)
+
+[structural_model]
+  pk one_cpt_oral(cl=CL, v=V, ka=KA)
+
+[error_model]
+  DV ~ proportional(PROP_ERR)
+
+[fit_options]
+  method     = foce
+  iov_column = OCC
+  covariance = false

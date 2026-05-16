@@ -3,7 +3,6 @@ library(ferx)
 library(vpc)
 library(dplyr)
 library(ggplot2)
-load_all()
 
 ex <- ferx_example("warfarin")
 
