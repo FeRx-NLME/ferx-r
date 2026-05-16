@@ -193,6 +193,9 @@ chk$summary      # ofv_start, ofv_end, ofv_drop — is OFV decreasing?
 ferx_plot_trace(chk$fit)   # visual check: first few iterations
 ```
 
+If `ofv_drop` is small or negative, the initial values are likely poor — adjust
+them in `[initial_values]` or widen the parameter bounds before proceeding.
+
 ### Multi-stage method chain
 
 Pass a character vector to `method` to chain stages — each stage starts from
@@ -202,21 +205,6 @@ the previous stage's converged parameters:
 fit <- ferx_model(ex$data, ex$model) |>
   ferx_fit(method = c("saem", "focei"), covariance = TRUE)
 ```
-
-### Convergence check before a long run
-
-`ferx_check_init()` runs a short warm-up (default 5 iterations) and returns
-an early OFV trace plus a convergence summary. Use it to confirm the gradient
-is pointing in the right direction before committing to a full estimation:
-
-```{r check-init, eval = FALSE}
-chk <- ferx_check_init(ex$model, ex$data, method = "focei")
-chk$summary        # ofv_start, ofv_end, ofv_drop
-ferx_plot_trace(chk$fit)   # visual: first few OFV steps
-```
-
-If `ofv_drop` is small or negative, the initial values are likely poor — adjust
-them in `[initial_values]` or widen the bounds before proceeding.
 
 ### Simulate and predict from fitted parameters
 
