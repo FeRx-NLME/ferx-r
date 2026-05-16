@@ -9,3 +9,4 @@ src/rust/.cargo/
 src/rust/rust-toolchain.toml
 .Rproj.user
 .positai
+ROADMAP.md
