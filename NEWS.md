@@ -11,6 +11,15 @@
   log-normal, or the additive form covered in the
   `parameter-transforms` vignette). Pairs with ferx-core#12.
 
+- `ferx_sir(fit)` — run SIR (Sampling Importance Resampling) as a
+  standalone post-fit step, without having to set `sir = TRUE` at fit
+  time. Useful for expensive fits where you want to add SIR-based
+  uncertainty after the fact, or when working with a fit loaded via
+  `ferx_load_fit()`. `ferx_fit()` now records `model_path` /
+  `data_path` and SHA-256 `model_hash` / `data_hash` on the fit; the
+  hashes round-trip through `.fitrx` save/load and `ferx_sir()`
+  refuses to run when either file has changed since the fit.
+
 - `ferx_simulate_with_uncertainty()` — simulate observations while
   propagating population parameter uncertainty in addition to the usual
   between-subject (eta) and residual (eps) variability. For each

@@ -51,6 +51,12 @@ ferx_rust_predict_from_fit <- function(model_path, data_path, theta, omega_flat,
 
 #' @title Internal Rust backend binding
 #' @keywords internal
+ferx_rust_sir <- function(model_path, data_path, model_hash, data_hash, ofv, interaction, theta, omega_flat, omega_dim, sigma, cov_matrix_flat, cov_matrix_dim, eta_hats_flat, n_subjects, sir_samples, sir_resamples, sir_seed, sir_keep_samples, verbose) {
+  .Call("wrap__ferx_rust_sir", model_path, data_path, model_hash, data_hash, ofv, interaction, theta, omega_flat, as.integer(omega_dim), sigma, cov_matrix_flat, as.integer(cov_matrix_dim), eta_hats_flat, as.integer(n_subjects), as.integer(sir_samples), as.integer(sir_resamples), as.integer(sir_seed), sir_keep_samples, verbose)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
 ferx_rust_autodiff_enabled <- function() {
   .Call("wrap__ferx_rust_autodiff_enabled")
 }
