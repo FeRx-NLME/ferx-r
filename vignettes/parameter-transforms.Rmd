@@ -204,6 +204,9 @@ oral model with a logit bioavailability and an additive lag time would declare:
   KA   = TVKA  * exp(ETA_KA)        # log-normal
   F    = inv_logit(logit(THETA_F) + ETA_F)   # logit-normal
   TLAG = TVTLAG + ETA_TLAG          # additive
+
+[structural_model]
+  pk two_cpt_oral(cl=CL, v1=V1, q=Q, v2=V2, ka=KA, f=F, lagtime=TLAG)
 ```
 
 Each ETA is handled independently; the omega matrix contains the corresponding

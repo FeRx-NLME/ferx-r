@@ -2,6 +2,25 @@
 
 ## New features
 
+- Lag time parameter (`lagtime=` on the structural_model line, NONMEM-
+  style `alag=` accepted as an alias) is now supported in `.ferx`
+  models. Delays the effective start of every dose record by the
+  parameter's value; defaults to `0.0` when omitted so existing models
+  are unaffected. Random effects on lag time work the same as on any
+  other PK parameter (`LAGTIME = TVLAGTIME * exp(ETA_LAGTIME)` for
+  log-normal, or the additive form covered in the
+  `parameter-transforms` vignette). Pairs with ferx-core#12.
+
+## Bug fixes
+
+- Bundled example `warfarin_additive_eta.ferx` used `tlag=TLAG` on its
+  structural_model line — a key that the parser silently dropped
+  (rerouting `TLAG`'s value to the `cl=` slot, which silently produced
+  incorrect fits). Updated to `lagtime=TLAG`. If you derived a local
+  model from this example, change `tlag=` to `lagtime=` (or `alag=`).
+
+## New features
+
 - `ferx_simulate_with_uncertainty()` — simulate observations while
   propagating population parameter uncertainty in addition to the usual
   between-subject (eta) and residual (eps) variability. For each
