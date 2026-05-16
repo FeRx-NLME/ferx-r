@@ -109,6 +109,46 @@ test_that("ferx_estimates() omega rows carry transform = 'variance'", {
   expect_equal(omega_row$transform, "variance")
 })
 
+# ferx_estimates() — bare eta/sigma names when declared ------------------
+
+test_that("ferx_estimates() uses bare eta_names for omega rows, not OMEGA() wrapper", {
+  fit <- make_fake_fit(
+    theta            = c(TVCL = 1),
+    theta_transforms = "identity",
+    omega            = matrix(0.09, 1, 1),
+    eta_names        = "ETA_CL",
+    sigma            = 0.1,
+    sigma_names      = "EPS_PROP",
+    sigma_types      = "proportional"
+  )
+  est <- ferx_estimates(fit)
+  expect_true("ETA_CL"  %in% est$param)
+  expect_true("EPS_PROP" %in% est$param)
+  expect_false(any(grepl("OMEGA\\(ETA", est$param)))
+})
+
+test_that("ferx_estimates() falls back to OMEGA(i,i) when eta_names absent", {
+  fit <- make_fake_fit(
+    theta            = c(CL = 1),
+    theta_transforms = "identity",
+    omega            = matrix(0.07, 1, 1),
+    sigma            = 0.01
+  )
+  est <- ferx_estimates(fit)
+  expect_true("OMEGA(1,1)" %in% est$param)
+})
+
+test_that("print.ferx_fit uses bare eta_names in OMEGA section", {
+  fit <- make_fake_fit(
+    omega         = matrix(0.09, 1, 1),
+    eta_names     = "ETA_CL",
+    eta_param_types = "log_normal"
+  )
+  out <- capture.output(print(fit))
+  expect_true(any(grepl("ETA_CL", out)))
+  expect_false(any(grepl("OMEGA\\(ETA_CL\\)", out)))
+})
+
 # ferx_estimates() — no SE → NA columns ---------------------------------
 
 test_that("ferx_estimates() returns NA for SE-derived columns when se_theta absent", {
