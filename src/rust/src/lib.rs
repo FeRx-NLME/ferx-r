@@ -866,6 +866,10 @@ fn default_fit_result(
         eta_log_transformed: Vec::new(),
         omega_param_corr: None,
         omega_iov_param_corr: None,
+        model_path: None,
+        data_path: None,
+        model_hash: None,
+        data_hash: None,
     }
 }
 
