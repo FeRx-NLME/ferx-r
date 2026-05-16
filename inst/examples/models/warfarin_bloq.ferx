@@ -3,15 +3,15 @@
 # (data/warfarin-bloq.csv); their DV cell carries the LLOQ value.
 
 [parameters]
-  theta TVCL(0.2, 0.001, 10.0)
-  theta TVV(10.0, 0.1, 500.0)
-  theta TVKA(1.5, 0.01, 50.0)
+  theta TVCL(0.134, 0.001, 10.0)
+  theta TVV(8.1, 0.1, 500.0)
+  theta TVKA(1.0, 0.01, 50.0)
 
-  omega ETA_CL ~ 0.09
-  omega ETA_V  ~ 0.04
-  omega ETA_KA ~ 0.30
+  omega ETA_CL ~ 0.07
+  omega ETA_V  ~ 0.02
+  omega ETA_KA ~ 0.40
 
-  sigma PROP_ERR ~ 0.02
+  sigma PROP_ERR ~ 0.01
 
 [individual_parameters]
   CL = TVCL * exp(ETA_CL)

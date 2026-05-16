@@ -184,7 +184,9 @@ A list with components:
 \item{aic}{Akaike Information Criterion}
 \item{bic}{Bayesian Information Criterion}
 \item{theta}{Named numeric vector of fixed effect estimates}
-\item{omega}{Between-subject variability covariance matrix}
+\item{omega}{Between-subject variability covariance matrix. Row and column
+names are the declared ETA names (e.g. \code{"ETA_CL"}); fallback is
+\code{"OMEGA(1,1)"} when names are absent.}
 \item{sigma}{Residual error parameter estimates on the
 \emph{standard-deviation} scale. For a proportional component
 \code{CV\% = sigma * 100}; for an additive component the value is in
@@ -259,8 +261,11 @@ engine binaries that did not populate this field.}
 optimizer's gradient ("Enzyme AD", "finite differences", or "N/A").}
 \item{ferx_version}{ferx-core library version string.}
 \item{cov_matrix}{Full parameter covariance matrix as a named numeric
-matrix (params × params). \code{NULL} when covariance step was not run
-or failed. Use \code{\link{ferx_cor_matrix}} to inspect correlations.}
+matrix (params × params). Row/column names use declared variable names
+(\code{"TVCL"}, \code{"ETA_CL"}, \code{"EPS_PROP"}); fallback is
+\code{"OMEGA(1,1)"} / \code{"SIGMA(1)"}. \code{NULL} when covariance
+step was not run or failed. Use \code{\link{ferx_cor_matrix}} to
+inspect correlations.}
 \item{eigenvalues}{Numeric vector of eigenvalues of the correlation matrix
 of estimated (non-fixed) parameters, sorted descending. Computed by the
 Rust backend. \code{NULL} when the covariance step was not run, failed,
