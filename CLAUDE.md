@@ -65,6 +65,30 @@ Models are defined in `.ferx` text files with sections: `[parameters]`, `[indivi
 
 `ferx_predict()` returns a data frame: ID, TIME, PRED.
 
+## Output Label Convention
+
+All output functions must display the **bare declared variable name** — never wrap in `OMEGA()`, `SIGMA()`, or `KAPPA()`:
+
+| Parameter type | Named | Fallback (no name) |
+|---|---|---|
+| IIV (omega diagonal) | `ETA_CL` | `OMEGA(1,1)` |
+| Sigma | `EPS_PROP` | `SIGMA(1)` |
+| IOV (kappa diagonal) | `KAPPA_CL` | `KAPPA1` |
+| Theta | `TVCL` | `THETA1` |
+| Shrinkage | `ETA_CL shrinkage` | `ETA1 shrinkage` |
+
+**Off-diagonal covariances** (both IIV and IOV) use `~` and `: cov =`:
+- Named: `ETA_V ~ ETA_CL : cov = 0.025  (param corr = 0.26)`
+- Fallback IIV: `OMEGA(2,1) : cov = 0.025  (...)`
+
+This applies to: `print.ferx_fit`, `ferx_estimates()`, `ferx_cor_matrix()` (via `fit$cov_matrix` dimnames), `fit$omega` row/colnames, `fit$sir_ci_omega`, `fit$sir_ci_sigma`, `summary.ferx_fit`, and any future output surface.
+
+**Implementation rules:**
+- Use `eta_names[i]` / `sigma_names[i]` / `kappa_names[i]` directly as labels.
+- Always set `rownames`/`colnames` on any new matrix field holding omega/sigma values.
+- Use `.fitrx_named_omega()` in `persist.R` when deserialising the omega matrix so dimnames survive a `ferx_save`/`ferx_load` round-trip.
+- Update `roxygen2` `@return` docs when adding new output fields.
+
 ## Pull Requests
 
 When creating a PR in this repo, always read `.github/PULL_REQUEST_TEMPLATE.md` and fill every section before calling `gh pr create`.
