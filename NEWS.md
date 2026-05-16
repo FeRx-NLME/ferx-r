@@ -1,5 +1,15 @@
 # ferx (development)
 
+## Bug fixes
+
+- All output functions now display the declared variable name (`ETA_CL`,
+  `EPS_PROP`) rather than wrapping it in `OMEGA()`/`SIGMA()`. Affected
+  surfaces: `print(fit)` OMEGA section and shrinkage, `ferx_estimates()`,
+  `ferx_cor_matrix()` (via `fit$cov_matrix` dimnames), `fit$omega`
+  row/column names, `fit$sir_ci_omega`, `fit$sir_ci_sigma`, and
+  `summary(fit)` shrinkage. When names are absent the fallback remains
+  the conventional numbered form: `OMEGA(1,1)`, `SIGMA(1)`. (#19)
+
 ## New features
 
 - Lag time parameter (`lagtime=` on the structural_model line, NONMEM-

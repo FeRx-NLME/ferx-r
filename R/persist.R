@@ -413,7 +413,13 @@ ferx_load_fit <- function(path) {
     se_theta = .fitrx_unwrap_named_se(w$theta$se, w$theta$names),
 
     eta_names = unlist(w$omega$names, use.names = FALSE),
-    omega = .fitrx_matrix_from_wire(w$omega$matrix),
+    omega = {
+      om <- .fitrx_matrix_from_wire(w$omega$matrix)
+      en <- unlist(w$omega$names, use.names = FALSE)
+      if (!is.null(om) && !is.null(en) && length(en) == nrow(om))
+        rownames(om) <- colnames(om) <- en
+      om
+    },
     omega_fixed = as.logical(unlist(w$omega$fixed %||% list(), use.names = FALSE)),
     eta_log_transformed = as.logical(unlist(w$omega$log_transformed %||% list(), use.names = FALSE)),
     omega_param_corr = .fitrx_matrix_from_wire(w$omega$param_corr),
