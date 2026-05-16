@@ -6,11 +6,6 @@
 #' @param name Name of the example (e.g. "warfarin"). If NULL, returns
 #'   a character vector of available example names.
 #'
-#' @return If \code{name} is NULL, a character vector of available examples.
-#'   Otherwise, a list with components:
-#'   \item{model}{Path to the .ferx model file}
-#'   \item{data}{Path to the NONMEM-format CSV data file}
-#'
 #' @details
 #' Available bundled examples:
 #' \describe{
@@ -28,6 +23,11 @@
 #'   \item{mm_oral}{One-compartment oral with Michaelis-Menten elimination (ODE)}
 #' }
 #' Call \code{ferx_example()} with no arguments to list all available names.
+#'
+#' @return If \code{name} is NULL, a character vector of available examples.
+#'   Otherwise, a list with components:
+#'   \item{model}{Path to the .ferx model file}
+#'   \item{data}{Path to the NONMEM-format CSV data file}
 #'
 #' @examples
 #' ferx_example()
