@@ -1,0 +1,31 @@
+# One-compartment oral PK model (warfarin) — SAEM estimation
+
+[parameters]
+  theta TVCL(0.134, 0.001, 10.0)
+  theta TVV(8.1, 0.1, 500.0)
+  theta TVKA(1.0, 0.01, 50.0)
+
+  omega ETA_CL ~ 0.07
+  omega ETA_V  ~ 0.02
+  omega ETA_KA ~ 0.40
+
+  sigma PROP_ERR ~ 0.01
+
+[individual_parameters]
+  CL = TVCL * exp(ETA_CL)
+  V  = TVV  * exp(ETA_V)
+  KA = TVKA * exp(ETA_KA)
+
+[structural_model]
+  pk one_cpt_oral(cl=CL, v=V, ka=KA)
+
+[error_model]
+  DV ~ proportional(PROP_ERR)
+
+[fit_options]
+  method        = saem
+  n_exploration = 150
+  n_convergence = 250
+  n_mh_steps    = 3
+  seed          = 12345
+  covariance    = true

@@ -2,8 +2,8 @@
 library(ferx)
 library(vpc)
 library(dplyr)
+library(tidyr)
 library(ggplot2)
-load_all()
 
 ex <- ferx_example("warfarin")
 

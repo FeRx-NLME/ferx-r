@@ -20,6 +20,24 @@ Otherwise, a list with components:
 Returns file paths to bundled example models and datasets.
 Called without arguments, lists available example names.
 }
+\details{
+Available bundled examples:
+\describe{
+\item{warfarin}{One-compartment oral PK (standard warfarin dataset)}
+\item{warfarin_bloq}{One-compartment oral with BLOQ observations (M3 method)}
+\item{warfarin_iov}{One-compartment oral with inter-occasion variability (kappa)}
+\item{warfarin_block_omega}{One-compartment oral with correlated random effects}
+\item{warfarin_saem}{One-compartment oral estimated with SAEM}
+\item{warfarin_additive_eta}{One-compartment oral with additive ETA on lag time}
+\item{warfarin_logit_f}{One-compartment oral with logit-normal bioavailability}
+\item{warfarin_if}{Two-compartment oral with conditional if/else covariate (WT)}
+\item{two_cpt_iv}{Two-compartment IV bolus}
+\item{two_cpt_oral_cov}{Two-compartment oral with continuous covariates (WT, CRCL)}
+\item{three_cpt_iv}{Three-compartment IV bolus}
+\item{mm_oral}{One-compartment oral with Michaelis-Menten elimination (ODE)}
+}
+Call \code{ferx_example()} with no arguments to list all available names.
+}
 \examples{
 ferx_example()
 ex <- ferx_example("warfarin")
