@@ -594,6 +594,17 @@
 #'
 #' # Covariance diagnostics in a pipe
 #' ferx_fit(ex$model, ex$data, covariance = TRUE) |> ferx_cor_matrix()
+#'
+#' # ── SDE model (Extended Kalman Filter) ───────────────────────────────────
+#'
+#' # The [diffusion] block in the .ferx file enables SDE mode.
+#' # DIFF_CENTRAL is a within-subject process-noise variance on the central
+#' # compartment.  Autodiff is forced to finite differences automatically.
+#' sde <- ferx_example("warfarin_sde")
+#' fit_sde <- ferx_fit(sde$model, sde$data)
+#' fit_sde$uses_sde                  # TRUE
+#' fit_sde$theta["DIFF_CENTRAL"]     # fitted diffusion variance
+#' ferx_estimates(fit_sde)           # DIFF_CENTRAL appears in theta block
 #' }
 #'
 #' @export

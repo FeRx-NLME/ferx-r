@@ -21,6 +21,8 @@
 #'   \item{two_cpt_oral_cov}{Two-compartment oral with continuous covariates (WT, CRCL)}
 #'   \item{three_cpt_iv}{Three-compartment IV bolus}
 #'   \item{mm_oral}{One-compartment oral with Michaelis-Menten elimination (ODE)}
+#'   \item{warfarin_sde}{One-compartment oral as ODE with SDE process noise
+#'     (\code{[diffusion]} block, EKF likelihood; \code{DIFF_CENTRAL} in theta)}
 #' }
 #' Call \code{ferx_example()} with no arguments to list all available names.
 #'
