@@ -881,6 +881,7 @@ fn default_fit_result(
         data_path: None,
         model_hash: None,
         data_hash: None,
+        uses_sde: false,
     }
 }
 
@@ -1659,6 +1660,7 @@ fn ferx_rust_sir(
         } else {
             Some(data_hash.to_string())
         },
+        uses_sde: false,
     };
 
     let mut opts = FitOptions::default();
