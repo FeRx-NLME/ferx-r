@@ -304,6 +304,44 @@
 #'     values the model file requested and which were overridden at the R call
 #'     site. A \code{warning()} is issued automatically for each key that
 #'     appears in both sources with a different value.}
+#'   \item{uses_sde}{Logical; \code{TRUE} when the model file contained a
+#'     \code{[diffusion]} block and the fit used the Extended Kalman Filter
+#'     (EKF) likelihood. \code{FALSE} for standard ODE/analytical models.
+#'     When \code{TRUE}, one or more \code{DIFF_*} entries appear in
+#'     \code{theta} and \code{theta_names} — these are diffusion
+#'     \emph{variances} (not standard deviations) for the named state
+#'     compartments.}
+#'
+#' @section Process noise (SDE / diffusion):
+#'
+#' ODE-based PK/PD models occasionally produce autocorrelated IWRES when the
+#' structural model is misspecified (missing compartment, unmodelled feedback).
+#' Adding continuous within-subject process noise via an SDE framework — solved
+#' by an Extended Kalman Filter (EKF) — absorbs this drift and yields a
+#' better-calibrated likelihood.
+#'
+#' Add a \code{[diffusion]} block to the \code{.ferx} model file to enable SDE
+#' mode. Each line declares the diffusion variance for one ODE state:
+#' \preformatted{
+#' [diffusion]
+#'   central ~ 0.5   # initial estimate for DIFF_CENTRAL (variance units)
+#' }
+#'
+#' \strong{Key points:}
+#' \itemize{
+#'   \item The declared value and the fitted estimate are \emph{variances}, not
+#'         standard deviations. A value of 0.5 means \eqn{\sigma^2 = 0.5}, not
+#'         \eqn{\sigma = 0.5}.
+#'   \item Each diffusion parameter appears in \code{fit$theta} as
+#'         \code{DIFF_<STATE>} (e.g. \code{DIFF_CENTRAL}). Standard errors and
+#'         \code{ferx_estimates()} treat them as regular thetas.
+#'   \item Autodifferentiation (Enzyme AD) is incompatible with the EKF
+#'         covariance propagation — the engine automatically falls back to
+#'         finite differences and emits a warning.
+#'   \item SAEM is not supported with SDE models; a hard error is raised.
+#'   \item \code{fit$uses_sde} is \code{TRUE} whenever a \code{[diffusion]}
+#'         block was present.
+#' }
 #'
 #' @section Specifying model and data:
 #'
@@ -1148,10 +1186,11 @@ print.ferx_fit <- function(x, ...) {
     .ferx_print_structure(x$model_structure)
   }
   cat("Converged: ", if (isTRUE(x$converged)) "YES" else "NO", "\n", sep = "")
+  sde_tag <- if (isTRUE(x$uses_sde)) " + SDE (EKF)" else ""
   if (!is.null(x$method_chain) && length(x$method_chain) > 1) {
-    cat("Estimation chain:  ", paste(toupper(x$method_chain), collapse = " -> "), "\n", sep = "")
+    cat("Estimation chain:  ", paste(toupper(x$method_chain), collapse = " -> "), sde_tag, "\n", sep = "")
   } else {
-    cat("Estimation method: ", toupper(x$method %||% "?"), "\n", sep = "")
+    cat("Estimation method: ", toupper(x$method %||% "?"), sde_tag, "\n", sep = "")
   }
   if (!is.null(x$n_iterations)) {
     cat("Iterations: ", x$n_iterations, "\n", sep = "")
@@ -1567,7 +1606,8 @@ summary.ferx_fit <- function(object, ...) {
     call_settings = x$call_settings %||% list(),
     model_file_settings = x$model_file_settings %||% list(),
     sir_ess = x$sir_ess,
-    warnings = x$warnings
+    warnings = x$warnings,
+    uses_sde = isTRUE(x$uses_sde)
   )
   class(s) <- "ferx_summary"
   s
@@ -1586,10 +1626,11 @@ print.ferx_summary <- function(x, ...) {
   cat(sprintf("Dataset:   %s\n", x$data_name %||% "?"))
   cat(sprintf("Converged: %s\n", if (isTRUE(x$converged)) "YES" else "NO"))
 
+  sde_tag <- if (isTRUE(x$uses_sde)) " + SDE (EKF)" else ""
   if (!is.null(x$method_chain) && length(x$method_chain) > 1L) {
-    cat("Method:    ", paste(toupper(x$method_chain), collapse = " -> "), "\n", sep = "")
+    cat("Method:    ", paste(toupper(x$method_chain), collapse = " -> "), sde_tag, "\n", sep = "")
   } else {
-    cat(sprintf("Method:    %s\n", toupper(x$method %||% "?")))
+    cat(sprintf("Method:    %s%s\n", toupper(x$method %||% "?"), sde_tag))
   }
   used <- x$gradient_used
   if (is.null(used) || (length(used) == 1L && is.na(used))) {

@@ -53,7 +53,7 @@ test_that("summary.ferx_fit returns a ferx_summary with expected fields", {
     "wall_time_secs", "ferx_version",
     "ebe_convergence_warnings", "max_unconverged_subjects",
     "total_ebe_fallbacks", "model_structure", "call_settings",
-    "model_file_settings", "sir_ess", "warnings"
+    "model_file_settings", "sir_ess", "warnings", "uses_sde"
   ), ignore.order = TRUE)
 })
 

@@ -881,6 +881,7 @@ fn default_fit_result(
         data_path: None,
         model_hash: None,
         data_hash: None,
+        uses_sde: false,
     }
 }
 
@@ -1266,7 +1267,8 @@ fn fit_result_to_list(
         model_path = result.model_path.clone().unwrap_or_default(),
         data_path = result.data_path.clone().unwrap_or_default(),
         model_hash = result.model_hash.clone().unwrap_or_default(),
-        data_hash = result.data_hash.clone().unwrap_or_default()
+        data_hash = result.data_hash.clone().unwrap_or_default(),
+        uses_sde = result.uses_sde
     )
 }
 
@@ -1658,6 +1660,7 @@ fn ferx_rust_sir(
         } else {
             Some(data_hash.to_string())
         },
+        uses_sde: false,
     };
 
     let mut opts = FitOptions::default();
