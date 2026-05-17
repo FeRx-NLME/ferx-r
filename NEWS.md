@@ -12,6 +12,13 @@
 
 ## New features
 
+- SDE support via Extended Kalman Filter: models with a `[diffusion]` block
+  in the `.ferx` file now run through the EKF likelihood. `fit$uses_sde` is
+  `TRUE` for these fits; diffusion variance parameters appear in `fit$theta`
+  as `DIFF_<STATE>` (e.g. `DIFF_CENTRAL`). Autodiff is automatically forced
+  to finite differences for SDE models; SAEM is not supported and raises a
+  hard error. Requires ferx-core ≥ 0.1.0 (commit 03332951).
+
 - Lag time parameter (`lagtime=` on the structural_model line, NONMEM-
   style `alag=` accepted as an alias) is now supported in `.ferx`
   models. Delays the effective start of every dose record by the

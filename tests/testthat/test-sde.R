@@ -82,3 +82,48 @@ test_that("DIFF_* theta parameters appear in print.ferx_fit theta table", {
   out <- capture.output(print(fit))
   expect_true(any(grepl("DIFF_CENTRAL", out)))
 })
+
+# ferx_estimates() with DIFF_* theta -------------------------------------
+
+test_that("ferx_estimates() includes DIFF_* theta rows", {
+  fit <- make_fake_fit(
+    uses_sde = TRUE,
+    theta    = c(TVCL = 5.0, TVV = 50.0, DIFF_CENTRAL = 0.5),
+    omega    = matrix(0.09, 1, 1)
+  )
+  est <- ferx_estimates(fit)
+  expect_true(any(est$param == "DIFF_CENTRAL"))
+  diff_row <- est[est$param == "DIFF_CENTRAL", ]
+  expect_equal(diff_row$estimate, 0.5)
+})
+
+# ferx_save_fit / ferx_load_fit round-trip --------------------------------
+
+test_that("uses_sde survives a ferx_save_fit / ferx_load_fit round-trip (TRUE)", {
+  fit <- make_fake_fit(
+    uses_sde = TRUE,
+    theta    = c(TVCL = 5.0, TVV = 50.0, DIFF_CENTRAL = 0.5),
+    omega    = matrix(0.09, 1, 1),
+    sigma    = 1.0,
+    sigma_names = "ADD"
+  )
+  tmp <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(tmp))
+  ferx_save_fit(fit, tmp)
+  fit2 <- ferx_load_fit(tmp)
+  expect_true(isTRUE(fit2$uses_sde))
+})
+
+test_that("uses_sde survives a ferx_save_fit / ferx_load_fit round-trip (FALSE)", {
+  fit <- make_fake_fit(
+    uses_sde = FALSE,
+    omega    = matrix(0.09, 1, 1),
+    sigma    = 1.0,
+    sigma_names = "ADD"
+  )
+  tmp <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(tmp))
+  ferx_save_fit(fit, tmp)
+  fit2 <- ferx_load_fit(tmp)
+  expect_false(isTRUE(fit2$uses_sde))
+})
