@@ -1268,7 +1268,9 @@ fn fit_result_to_list(
         data_path = result.data_path.clone().unwrap_or_default(),
         model_hash = result.model_hash.clone().unwrap_or_default(),
         data_hash = result.data_hash.clone().unwrap_or_default(),
-        uses_sde = result.uses_sde
+        uses_sde = result.uses_sde,
+        dw_statistic = result.dw_statistic,
+        iwres_lag1_r = result.iwres_lag1_r
     )
 }
 

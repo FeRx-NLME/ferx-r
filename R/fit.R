@@ -216,6 +216,14 @@
 #'     \code{omega_kk = 0} or fewer than 2 subjects.}
 #'   \item{shrinkage_eps}{EPS shrinkage: \code{1 - SD(IWRES)}. \code{NA} when
 #'     fewer than 2 valid residuals.}
+#'   \item{dw_statistic}{Pooled Durbin-Watson statistic for IWRES within
+#'     subjects. 2.0 = no autocorrelation; < 1.5 = positive autocorrelation
+#'     (possible missing dynamics); > 2.5 = negative autocorrelation (possible
+#'     over-parameterisation). \code{NA} when no subject has \eqn{\ge 2} valid
+#'     IWRES values.}
+#'   \item{iwres_lag1_r}{Pooled lag-1 Pearson correlation of IWRES within
+#'     subjects. Positive values indicate under-fitting, negative values
+#'     indicate over-fitting. \code{NA} when insufficient observations.}
 #'   \item{wall_time_secs}{Total wall-clock time for the fit in seconds.}
 #'   \item{model_name}{Model name from the \code{.ferx} file. Falls back to
 #'     the model file's basename (without extension) when the file declares
@@ -826,6 +834,12 @@ ferx_fit.default <- function(model, data,
   if (!is.null(result$shrinkage_eps) && !is.finite(result$shrinkage_eps)) {
     result$shrinkage_eps <- NA_real_
   }
+  if (!is.null(result$dw_statistic) && !is.finite(result$dw_statistic)) {
+    result$dw_statistic <- NA_real_
+  }
+  if (!is.null(result$iwres_lag1_r) && !is.finite(result$iwres_lag1_r)) {
+    result$iwres_lag1_r <- NA_real_
+  }
 
   # Normalize covariance_status: missing from older binaries → "not_requested"
   if (is.null(result$covariance_status)) {
@@ -1061,6 +1075,33 @@ ferx_fit.default <- function(model, data,
   )
   result$model_hash <- empty_to_null(result$model_hash) %||% NA_character_
   result$data_hash <- empty_to_null(result$data_hash) %||% NA_character_
+
+  # Emit actionable message when IWRES autocorrelation is flagged
+  dw <- result$dw_statistic
+  if (!is.null(dw) && !is.na(dw)) {
+    if (dw < 1.5) {
+      sde_hint <- if (isTRUE(result$uses_sde)) "" else
+        "\n  4. For ODE models: consider SDE process noise ([diffusion] block)"
+      message(sprintf(
+        paste0(
+          "Positive IWRES autocorrelation detected (Durbin-Watson = %.2f, lag-1 r = %.2f).\n",
+          "Structural model may be missing dynamics. Consider in order:\n",
+          "  1. Check observation time ordering within each subject\n",
+          "  2. Transit absorption model or additional compartment\n",
+          "  3. IOV on ka or F%s"
+        ),
+        dw, result$iwres_lag1_r %||% NA_real_, sde_hint
+      ))
+    } else if (dw > 2.5) {
+      message(sprintf(
+        paste0(
+          "Negative IWRES autocorrelation detected (Durbin-Watson = %.2f, lag-1 r = %.2f).\n",
+          "Possible over-parameterisation or misspecified residual error model."
+        ),
+        dw, result$iwres_lag1_r %||% NA_real_
+      ))
+    }
+  }
 
   class(result) <- "ferx_fit"
 
@@ -1468,6 +1509,17 @@ print.ferx_fit <- function(x, ...) {
     }
   }
 
+  # Diagnostics (DW autocorrelation)
+  dw <- x$dw_statistic
+  if (!is.null(dw) && !is.na(dw)) {
+    dw_label <- if (dw < 1.5) "positive autocorrelation" else if (dw > 2.5) "negative autocorrelation" else "no autocorrelation"
+    cat("\n--- Diagnostics ---\n")
+    cat(sprintf("  Durbin-Watson:  %.2f  [%s]\n", dw, dw_label))
+    if (!is.null(x$iwres_lag1_r) && !is.na(x$iwres_lag1_r)) {
+      cat(sprintf("  IWRES lag-1 r:  %.3f\n", x$iwres_lag1_r))
+    }
+  }
+
   # Run info
   cov_status <- if (!is.null(x$covariance_status)) x$covariance_status else "unknown"
   cov_str <- switch(cov_status,
@@ -1552,7 +1604,8 @@ print.ferx_fit <- function(x, ...) {
 #'   (see \code{\link{ferx_fit}} for definitions), \code{wall_time_secs},
 #'   \code{ferx_version}, \code{call_settings}, \code{model_file_settings},
 #'   \code{sir_ess}, \code{warnings}, \code{ebe_convergence_warnings},
-#'   \code{max_unconverged_subjects}, \code{total_ebe_fallbacks}.
+#'   \code{max_unconverged_subjects}, \code{total_ebe_fallbacks},
+#'   \code{dw_statistic}, \code{iwres_lag1_r}.
 #' @examples
 #' \dontrun{
 #' ex  <- ferx_example("warfarin")
@@ -1607,7 +1660,9 @@ summary.ferx_fit <- function(object, ...) {
     model_file_settings = x$model_file_settings %||% list(),
     sir_ess = x$sir_ess,
     warnings = x$warnings,
-    uses_sde = isTRUE(x$uses_sde)
+    uses_sde = isTRUE(x$uses_sde),
+    dw_statistic = x$dw_statistic,
+    iwres_lag1_r = x$iwres_lag1_r
   )
   class(s) <- "ferx_summary"
   s
@@ -1689,6 +1744,13 @@ print.ferx_summary <- function(x, ...) {
   }
   if (!is.null(x$shrinkage_eps) && !is.na(x$shrinkage_eps)) {
     cat(sprintf("EPS shrinkage: %.1f%%\n", x$shrinkage_eps * 100))
+  }
+
+  if (!is.null(x$dw_statistic) && !is.na(x$dw_statistic)) {
+    dw_label <- if (x$dw_statistic < 1.5) "positive autocorrelation" else if (x$dw_statistic > 2.5) "negative autocorrelation" else "no autocorrelation"
+    cat(sprintf("DW: %.2f [%s]", x$dw_statistic, dw_label))
+    if (!is.null(x$iwres_lag1_r) && !is.na(x$iwres_lag1_r)) cat(sprintf("  lag-1 r: %.3f", x$iwres_lag1_r))
+    cat("\n")
   }
 
   if (!is.null(x$sir_ess)) {
