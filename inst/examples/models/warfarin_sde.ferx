@@ -35,11 +35,14 @@
   ode(obs_cmt=central, states=[depot, central])
 
 [odes]
+  # `central` is concentration (mg/L): the absorption term carries `/V` so the
+  # ODE state matches the concentration-scale DV column. See the existing
+  # `examples/bioavailability_ode.ferx` in ferx-core for the same convention.
   d/dt(depot)   = -KA * depot
-  d/dt(central) =  KA * depot - (CL / V) * central
+  d/dt(central) =  KA * depot / V - (CL / V) * central
 
 [diffusion]
-  central ~ 0.1
+  central ~ 0.01
 
 [error_model]
   DV ~ proportional(PROP_ERR)
