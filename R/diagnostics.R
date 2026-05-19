@@ -35,13 +35,13 @@
 #'   abline(h = 0, lty = 2)
 #' }
 #' }
-#' @export
 .dw_label <- function(dw) {
   if (dw < 1.5) "positive autocorrelation"
   else if (dw > 2.5) "negative autocorrelation"
   else "no autocorrelation"
 }
 
+#' @export
 check_diagnostics <- function(fit) {
   # Autocorrelation
   dw  <- fit$dw_statistic
