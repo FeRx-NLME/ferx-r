@@ -37,9 +37,7 @@ cat("Dataset: ", ex$data, "  (",
 fit <- ferx_fit(
   model      = ex$model,
   data       = ex$data,
-  method     = "focei",
-  covariance = FALSE,        # disable SE estimation for speed
-  settings   = list(outer_maxiter = 50)  # quick demo; raise for production
+  method     = "focei"
 )
 
 ## ── 3. Print the fit ───────────────────────────────────────────────────────
@@ -88,14 +86,166 @@ if (length(fit$neural_networks) > 0) {
       sep = "")
 }
 
-## ── 5. Predictions look reasonable ────────────────────────────────────────
-## Even at 50 outer iterations with a Glorot-initialised NN, FOCEI should
-## bring per-subject predictions into the right order of magnitude. For a
-## real DCM workflow, fit to convergence (maxiter ~500-1000) and then
-## generate a VPC with ferx_simulate() as in ex3_two_cmt_oral_cov.R.
-cat("\nOFV:", sprintf("%.2f", fit$ofv), "\n")
-cat("Per-subject ipred range:",
-    sprintf("%.4f", min(fit$sdtab$IPRED, na.rm = TRUE)),
-    "to",
-    sprintf("%.4f", max(fit$sdtab$IPRED, na.rm = TRUE)),
-    "\n")
+## ── 5. Are the covariates useful? Interpreting the NN ─────────────────────
+##
+## A classical analytical model lets us read covariate effects directly:
+## a significant `THETA_WT` with %RSE under, say, 30% says "WT matters".
+## A neural network is harder to read — there's no single weight to test.
+## The first-order question for a DCM is therefore not "what's the weight"
+## but: **is the NN actually using the inputs, or did the optimizer find a
+## constant function that fits via etas alone?**
+##
+## Two interpretable lenses for that:
+##
+##   (a) Spread of per-subject typical values. If the NN ignores its
+##       inputs, every subject gets the same typical CL/V/etc, and all
+##       cross-subject variation is absorbed by etas. A wide range of
+##       individual estimates *that correlates with the covariates*
+##       indicates the NN is doing real work.
+##
+##   (b) Correlation between input covariates and individual PK
+##       estimates. If `cor(WT, individual$CL)` is small (|r| < 0.15)
+##       the NN is not propagating WT into CL. If it's substantial
+##       (|r| > 0.30 ish), WT is materially shaping CL — which is what
+##       you want a "deep covariate model" to do.
+##
+## Note: `fit$individual_estimates$CL` is at the *subject's* eta, so
+## variation across subjects bundles together (i) the NN's covariate
+## response and (ii) random IIV. For the correlation lens, that's fine —
+## (ii) is noise around (i) and won't manufacture a covariate effect that
+## isn't there.
+
+if (length(fit$neural_networks) > 0) {
+  ## Pull per-subject covariates from the source data.
+  raw    <- read.csv(ex$data, stringsAsFactors = FALSE)
+  cov_df <- aggregate(
+    raw[, c("WT", "CRCL")],
+    by = list(ID = raw$ID),
+    FUN = function(x) suppressWarnings(as.numeric(x))[1]   # first non-NA per subject
+  )
+  ## Merge with per-subject individual estimates.
+  est <- fit$individual_estimates
+  est$ID <- as.character(est$ID)
+  cov_df$ID <- as.character(cov_df$ID)
+  joined <- merge(cov_df, est, by = "ID")
+
+  cat("\n--- NN covariate-importance heuristics ---\n")
+
+  ## (a) Spread of individual estimates.
+  cat("\n  (a) Per-subject individual-estimate spread\n")
+  cat("      (wide spread = the NN's output drives meaningful between-subject differences)\n")
+  for (pk in c("CL", "V1", "Q", "V2", "KA")) {
+    if (pk %in% names(joined)) {
+      v <- joined[[pk]]
+      cat(sprintf("      %-4s: min=%.4f  max=%.4f  CV%% across subjects = %.1f%%\n",
+                  pk, min(v), max(v), sd(v) / mean(v) * 100))
+    }
+  }
+
+  ## (b) Correlation lens: do the inputs explain the spread?
+  cat("\n  (b) Pearson correlations: covariate vs individual PK estimate\n")
+  cat("      (|r| > ~0.30 indicates the NN is propagating that covariate;\n",
+      "       |r| < ~0.15 means the NN is largely ignoring it)\n", sep = "")
+  cat(sprintf("      %-12s %10s %10s\n", "PK param", "r(WT)", "r(CRCL)"))
+  cat(sprintf("      %s\n", strrep("-", 38)))
+  for (pk in c("CL", "V1", "Q", "V2", "KA")) {
+    if (pk %in% names(joined)) {
+      r_wt   <- suppressWarnings(cor(joined[[pk]], joined$WT))
+      r_crcl <- suppressWarnings(cor(joined[[pk]], joined$CRCL))
+      cat(sprintf("      %-12s %10.3f %10.3f\n", pk, r_wt, r_crcl))
+    }
+  }
+
+  ## Optional: a quick partial-dependence-style table by predicting the
+  ## NN forward at each subject's actual covariates, with eta=0. We
+  ## reconstruct the typical value from the individual estimate by
+  ## dividing out exp(eta_i) — works because the model is mu-ref
+  ## lognormal (`CL = TYPICAL_PK.CL * exp(ETA_CL)`).
+  if (!is.null(fit$ebe_etas) && "ETA_CL" %in% names(fit$ebe_etas)) {
+    ebe <- fit$ebe_etas
+    ebe$ID <- as.character(ebe$ID)
+    joined2 <- merge(joined, ebe, by = "ID", suffixes = c("", ".eta"))
+    joined2$CL_tv <- joined2$CL / exp(joined2$ETA_CL)
+    ord <- order(joined2$WT)
+    cat("\n  Typical CL across the WT range (eta=0, low→high WT):\n")
+    cat(sprintf("      WT %.0f -> CL_tv %.4f\n",
+                joined2$WT[ord[1]], joined2$CL_tv[ord[1]]))
+    n  <- nrow(joined2)
+    cat(sprintf("      WT %.0f -> CL_tv %.4f\n",
+                joined2$WT[ord[n %/% 2]], joined2$CL_tv[ord[n %/% 2]]))
+    cat(sprintf("      WT %.0f -> CL_tv %.4f\n",
+                joined2$WT[ord[n]], joined2$CL_tv[ord[n]]))
+    cat("      (a monotonic ramp = NN learned a sensible body-weight effect;\n",
+        "       flat values = NN ignored WT)\n", sep = "")
+  }
+}
+
+## ── 6. Compare to a regular NLME fit on the same data ─────────────────────
+##
+## `examples/models/two_cpt_oral_cov.ferx` is the analytical equivalent of
+## `warfarin_dcm.ferx`: same data (`data/two_cpt_oral_cov.csv`), same eta /
+## omega / sigma structure, same `two_cpt_oral(...)` PK. The only
+## difference is the covariate model — analytical power functions
+## (`(WT/70)^THETA_WT * (CRCL/100)^THETA_CRCL`) vs the MLP.
+##
+## We fit it side-by-side and look at three things:
+##   * OFV — same dataset, so directly comparable (smaller is better).
+##   * AIC / BIC — penalise the DCM's much-higher parameter count.
+##     The NN ships ~140 parameters, the analytical model ~13.
+##   * Predictions — if the DCM's IPRED column tracks the analytical
+##     IPRED, the NN didn't learn anything weird.
+##
+## For reference, `examples/models/warfarin.ferx` is the textbook
+## one-compartment warfarin model with no covariates and a *different*
+## dataset (warfarin.csv has no WT/CRCL). It's not data-compatible here
+## but is useful as a no-covariate baseline if you load its dataset
+## separately.
+
+cat("\n\n========== Comparison: DCM vs analytical NLME ==========\n\n")
+ex_an <- ferx_example("two_cpt_oral_cov")
+cat("Fitting analytical comparison model (", ex_an$model, ")...\n", sep = "")
+
+fit_an <- ferx_fit(
+  model      = ex_an$model,
+  data       = ex_an$data,
+  method     = "focei",
+  covariance = FALSE
+)
+
+cmp <- data.frame(
+  model    = c("DCM (NN typical values)", "Analytical (power-function covariates)"),
+  ofv      = c(fit$ofv,      fit_an$ofv),
+  aic      = c(fit$aic,      fit_an$aic),
+  bic      = c(fit$bic,      fit_an$bic),
+  n_params = c(fit$n_parameters, fit_an$n_parameters),
+  iters    = c(fit$n_iterations, fit_an$n_iterations)
+)
+print(cmp, row.names = FALSE)
+
+cat("\nInterpretation:\n")
+cat("  * If OFV is similar, the NN didn't extract more information from\n")
+cat("    the covariates than the analytical power model — the simpler\n")
+cat("    model is preferable.\n")
+cat("  * If the DCM's OFV is substantially lower (>5–10 OFV units per\n")
+cat("    extra parameter), the NN captured a non-linear covariate effect\n")
+cat("    the analytical form missed. Check whether the AIC/BIC penalty\n")
+cat("    keeps the DCM ahead.\n")
+cat("  * For warfarin-style PK these two should be close — body weight\n")
+cat("    and renal function on CL/V are almost linear-in-log-space, so\n")
+cat("    the power model nails them. DCM tends to win on more complex\n")
+cat("    drugs (e.g. monoclonal antibodies; see Janssen 2022 §3 case\n")
+cat("    studies on factor VIII and edoxaban).\n")
+
+## ── 7. Predictions look reasonable ────────────────────────────────────────
+## Final sanity check: per-subject IPRED ranges from both models.
+cat("\n--- Per-subject IPRED range ---\n")
+cat(sprintf("  DCM:        [%.3f, %.3f]\n",
+            min(fit$sdtab$IPRED, na.rm = TRUE),
+            max(fit$sdtab$IPRED, na.rm = TRUE)))
+cat(sprintf("  Analytical: [%.3f, %.3f]\n",
+            min(fit_an$sdtab$IPRED, na.rm = TRUE),
+            max(fit_an$sdtab$IPRED, na.rm = TRUE)))
+
+## For a real DCM workflow you'd now bump `maxiter` to 500–1000 and
+## generate a VPC with ferx_simulate() — see inst/examples/ex3_two_cmt_oral_cov.R
+## for the analytical-side recipe; the DCM is a drop-in replacement.
