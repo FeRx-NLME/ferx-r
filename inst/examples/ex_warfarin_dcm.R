@@ -81,8 +81,14 @@ cat("                    CRCL range:",
 ## ── 2. Fit the DCM ─────────────────────────────────────────────────────────
 ##
 ## The bundled `warfarin_dcm.ferx` declares method=focei + maxiter=200.
-## We override outer_maxiter here for a quick demonstration; bump back
-## up for a real fit.
+## We override maxiter for a quick demonstration; bump back up for a
+## real fit.
+##
+## We also override `optimizer = "lbfgs"`. The default outer optimizer
+## (SLSQP) currently silently terminates at iter 1 with theta unchanged
+## from init when mu-referencing is active — open issue in ferx-core.
+## L-BFGS, BOBYQA, and BFGS all work; we pick L-BFGS here for its
+## gradient-driven convergence speed.
 ex_dcm <- ferx_example("warfarin_dcm")
 cat("\n── Fitting DCM model:", ex_dcm$model, "──\n")
 fit <- ferx_fit(
@@ -90,7 +96,7 @@ fit <- ferx_fit(
   data       = dataset_path,
   method     = "focei",
   covariance = FALSE,
-  settings   = list(outer_maxiter = 100)
+  settings   = list(maxiter = 100, optimizer = "lbfgs")
 )
 
 ## ── 3. Print the fit (Option E rendering) ─────────────────────────────────
@@ -211,7 +217,7 @@ fit_an <- ferx_fit(
   data       = dataset_path,
   method     = "focei",
   covariance = FALSE,
-  settings   = list(outer_maxiter = 100)
+  settings   = list(maxiter = 100, optimizer = "lbfgs")
 )
 
 cmp <- data.frame(
@@ -244,7 +250,7 @@ if (aic_delta > 0) {
   cat("  ✗ DCM didn't improve on the analytical model. Either the analytical\n")
   cat("    form already captured the covariate effect (so the kink wasn't\n")
   cat("    actually a problem for it) or the DCM hasn't converged — bump\n")
-  cat("    outer_maxiter and retry.\n")
+  cat("    maxiter and retry.\n")
 }
 
 ## ── 7. Per-subject IPRED sanity check ────────────────────────────────────
@@ -464,7 +470,7 @@ if (RUN_VPC) {
 ## ── Wrap-up ───────────────────────────────────────────────────────────────
 ##
 ## For a production DCM workflow you'd now:
-##   * Bump outer_maxiter to 500–1000 for actual convergence.
+##   * Bump maxiter to 500–1000 for actual convergence.
 ##   * Generate a VPC with ferx_simulate() (see ex3_two_cmt_oral_cov.R).
 ##   * If the AIC verdict is "analytical wins", that's a real result, not
 ##     a failure — DCM only helps when covariates are genuinely non-linear.
