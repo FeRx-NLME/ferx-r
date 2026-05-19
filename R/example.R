@@ -23,6 +23,13 @@
 #'   \item{mm_oral}{One-compartment oral with Michaelis-Menten elimination (ODE)}
 #'   \item{warfarin_sde}{One-compartment oral as ODE with SDE process noise
 #'     (\code{[diffusion]} block, EKF likelihood; \code{DIFF_CENTRAL} in theta)}
+#'   \item{mm_multistart}{One-compartment oral with Michaelis-Menten elimination (ODE);
+#'     starting values intentionally far from truth to demonstrate multi-start
+#'     (\code{n_starts}, \code{start_sigma}, \code{multi_start_seed} in \code{settings})}
+#'   \item{bioavailability}{One-compartment oral with logit-normal bioavailability F
+#'     (analytical; THETA_F specified directly on the (0,1) scale)}
+#'   \item{bioavailability_ode}{ODE equivalent of \code{bioavailability} — same model
+#'     and data via explicit depot/central ODEs; useful for comparing analytical vs ODE paths}
 #' }
 #' Call \code{ferx_example()} with no arguments to list all available names.
 #'
