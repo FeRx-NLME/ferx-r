@@ -1,0 +1,56 @@
+# Oral bioavailability — ODE implementation of one-compartment oral model
+#
+# Demonstrates logit-transformed bioavailability F in an ODE context.
+# This is the ODE equivalent of bioavailability.ferx (same data, same true
+# parameters) — useful for verifying the ODE and analytical paths agree.
+#
+# F is the oral bioavailability, constrained to (0,1) via logit transform.
+#
+# ── ODE unit convention ────────────────────────────────────────────────────
+# ferx adds dose.amt directly to the state: u[cmt-1] += dose.amt.
+# Oral doses (CMT=1, AMT=100 mg) go to the depot (amount) compartment.
+# The central state is in concentration (mg/L): C = amount / V.
+#
+# States:
+#   CMT=1  depot     — oral dose in mg, amount compartment
+#   CMT=2  central   — concentration compartment (mg/L = depot-derived / V)
+#
+# Dataset: data/bioavailability_oral.csv (oral-only, 20 subjects × 7 obs)
+#
+# True simulation parameters:
+#   TVCL=5, TVV=50, TVKA=1.5, F=0.70 (THETA_F ≈ 0.847), omega_CL=0.09,
+#   omega_F=0.10, sigma_prop=0.15
+
+[parameters]
+  theta TVCL(5.0,   0.1,  50.0)    # typical clearance (L/h)
+  theta TVV(50.0,   5.0, 500.0)    # typical volume (L)
+  theta TVKA(1.5,  0.05,  20.0)    # typical absorption rate constant (/h)
+  theta THETA_F(0.70, 0.001, 0.999) # typical bioavailability, directly on (0,1) scale
+
+  omega ETA_CL ~ 0.09              # BSV on CL (log-normal)
+  omega ETA_F  ~ 0.10              # BSV on F  (logit-normal)
+
+  sigma PROP_ERR ~ 0.15
+
+[individual_parameters]
+  CL = TVCL * exp(ETA_CL)
+  V  = TVV
+  KA = TVKA
+  F  = inv_logit(logit(THETA_F) + ETA_F)  # individual bioavailability ∈ (0, 1)
+
+[structural_model]
+  ode(obs_cmt=central, states=[depot, central])
+
+[odes]
+  # depot  : oral-dose compartment (mg)
+  # central: concentration compartment (mg/L)
+  d/dt(depot)   = -KA * depot
+  d/dt(central) = F * KA * depot / V - CL/V * central
+
+[error_model]
+  DV ~ proportional(PROP_ERR)
+
+[fit_options]
+  method     = focei
+  maxiter    = 500
+  covariance = true
