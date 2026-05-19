@@ -1,54 +1,104 @@
 ## ── ex_warfarin_dcm.R ─────────────────────────────────────────────────────
 ##
 ## Fit a Deep Compartment Model (DCM) — Janssen et al. 2022 (CPT:PSP,
-## DOI 10.1002/psp4.12808). The analytical covariate model
+## DOI 10.1002/psp4.12808) — and show *when* it actually helps over a
+## classical analytical NLME fit.
+##
+## DCM replaces the analytical covariate model
 ##
 ##     CL = TVCL * (WT / 70)^THETA_WT * (CRCL / 100)^THETA_CRCL * exp(ETA_CL)
 ##
-## is replaced by a small neural network whose inputs are subject
-## covariates (WT, CRCL) and whose outputs ARE the typical PK values
-## (CL, V1, Q, V2, KA). Lognormal IIV is composed on top of the NN
-## outputs in the standard mu-ref form (`TYPICAL_PK.CL * exp(ETA_CL)`).
+## with a small neural network whose inputs are subject covariates and
+## whose outputs ARE the typical PK values. Lognormal IIV is composed on
+## top in the standard mu-ref form (`TYPICAL_PK.CL * exp(ETA_CL)`).
 ##
+## ──────────── Why this script generates its own data ───────────────────
+##
+## The bundled `two_cpt_oral_cov.csv` is simulated with a clean
+## power-function effect — `CL ∝ (WT/70)^0.75`, `CL ∝ (CRCL/100)^0.50`.
+## An analytical power-function model fits that perfectly, so a DCM
+## would tie or lose on AIC/BIC. That's the wrong story to tell about
+## DCM: the value-add is **non-linear covariate effects**, the kind a
+## power function can't represent.
+##
+## So we use the bundled `warfarin_if.ferx` model — which has a sharp
+## kink in clearance at WT = 70 (`if (WT > 70)` allometric, else flat)
+## — to simulate a fresh dataset where:
+##   * WT genuinely drives CL (with a non-linear kink)
+##   * CRCL is present but doesn't affect anything (a "distractor")
+##
+## We then fit DCM and analytical models to that simulated data and
+## compare. DCM should win on AIC because the analytical power model
+## can only find a single compromise exponent across the kink.
+##
+## ──────────── Requirements ──────────────────────────────────────────────
 ## Requires ferx-r built with `--features nn` (which forwards to
-## ferx-core's `nn` feature). To enable in a local checkout, edit
-## `src/rust/Cargo.toml` and add `"nn"` to the `default` features list,
-## then reinstall the package.
-##
-## Compare with inst/examples/ex3_two_cmt_oral_cov.R — same dataset,
-## same eta/omega/sigma structure, the only difference is the covariate
-## model. Run side-by-side to see the DCM output rendering vs the
-## classical analytical fit.
+## ferx-core's `nn` feature). Edit `src/rust/Cargo.toml` and add `"nn"`
+## to the `default` features list, then reinstall the package.
 
 library(ferx)
+set.seed(42)
 
-## ── 1. Load the bundled DCM example ────────────────────────────────────────
-ex <- ferx_example("warfarin_dcm")
-stopifnot(file.exists(ex$model), file.exists(ex$data))
+## ── 1. Simulate a dataset with a non-linear covariate effect ──────────────
+##
+## Strategy:
+##   (i)   Take the bundled warfarin_if data file's covariate + dosing rows
+##         (it already has WT spanning the kink and CRCL noise columns).
+##   (ii)  Use `ferx_simulate()` with the warfarin_if MODEL file (which has
+##         the `if (WT > 70)` kink in its [individual_parameters]) to
+##         simulate fresh DV concentrations from that non-linear ground
+##         truth.
+##   (iii) Stitch the simulated DVs back into the NONMEM-format CSV,
+##         write to a tempfile, and use that as our "real" dataset for
+##         both fits.
+gt <- ferx_example("warfarin_if")
+cat("Ground-truth model: ", gt$model, "\n")
+cat("Simulating fresh DVs from a non-linear kink-at-WT=70 model...\n")
 
-cat("Model:   ", ex$model, "\n")
-cat("Dataset: ", ex$data, "  (",
-    length(readLines(ex$data)) - 1L, " rows)\n", sep = "")
+sim <- ferx_simulate(gt$model, gt$data, n_sim = 1L, seed = 42L)
+## sim columns: SIM, ID, TIME, IPRED, DV_SIM
 
-## ── 2. Fit ─────────────────────────────────────────────────────────────────
-## The bundled model declares method=focei with maxiter=200 inside
-## [fit_options]. We override maxiter here for a quick demonstration;
-## bump back up for a real run.
+## Stitch simulated DV back into the NONMEM CSV. Observation rows
+## (EVID==0, MDV==0) get their DV replaced; dose rows stay as-is.
+orig <- read.csv(gt$data, stringsAsFactors = FALSE)
+obs_mask <- orig$EVID == 0 & orig$MDV == 0
+key_orig <- paste(orig$ID[obs_mask], orig$TIME[obs_mask])
+key_sim  <- paste(sim$ID,            sim$TIME)
+orig$DV  <- as.character(orig$DV)   # original CSV uses "." for dose rows
+orig$DV[obs_mask] <- sprintf("%.4f", sim$DV_SIM[match(key_orig, key_sim)])
+
+dataset_path <- tempfile(fileext = ".csv")
+write.csv(orig, dataset_path, row.names = FALSE, quote = FALSE)
+cat("Simulated dataset:  ", dataset_path, "\n")
+cat("                    ", sum(obs_mask), "observations across",
+    length(unique(orig$ID)), "subjects\n")
+cat("                    WT range:  ",
+    sprintf("%.1f to %.1f", min(orig$WT), max(orig$WT)), "\n")
+cat("                    CRCL range:",
+    sprintf("%.1f to %.1f", min(orig$CRCL), max(orig$CRCL)),
+    " (distractor — no PK effect in the ground truth)\n")
+
+## ── 2. Fit the DCM ─────────────────────────────────────────────────────────
+##
+## The bundled `warfarin_dcm.ferx` declares method=focei + maxiter=200.
+## We override outer_maxiter here for a quick demonstration; bump back
+## up for a real fit.
+ex_dcm <- ferx_example("warfarin_dcm")
+cat("\n── Fitting DCM model:", ex_dcm$model, "──\n")
 fit <- ferx_fit(
-  model      = ex$model,
-  data       = ex$data,
-  method     = "focei"
+  model      = ex_dcm$model,
+  data       = dataset_path,
+  method     = "focei",
+  covariance = FALSE,
+  settings   = list(outer_maxiter = 100)
 )
 
-## ── 3. Print the fit ───────────────────────────────────────────────────────
-## The Option E rendering kicks in here: instead of 141 rows of
-## `W_TYPICAL_PK_*` / `B_TYPICAL_PK_*` thetas, you'll see a compact
-## --- NEURAL NETWORKS --- block summarising each NN block.
+## ── 3. Print the fit (Option E rendering) ─────────────────────────────────
+## NN-weight thetas are collapsed into the `--- NEURAL NETWORKS ---` block
+## instead of cluttering the THETA Estimates table.
 print(fit)
 
 ## ── 4. Programmatic access to the NN metadata ─────────────────────────────
-## `fit$neural_networks` is a named list, one entry per [covariate_nn]
-## block. Empty when ferx-r is built without `--features nn`.
 if (length(fit$neural_networks) > 0) {
   nn <- fit$neural_networks[[1]]
   cat("\n--- Programmatic NN inspection ---\n")
@@ -58,72 +108,40 @@ if (length(fit$neural_networks) > 0) {
       "  output=", nn$output_activation, "\n", sep = "")
   cat("Weight count:      ", nn$n_weights, "\n")
   cat("Theta-vector slot: ", nn$weights_offset, "..",
-      nn$weights_offset + nn$n_weights - 1L,
-      "  (in fit$theta)\n", sep = "")
+      nn$weights_offset + nn$n_weights - 1L, "\n", sep = "")
   cat("Inputs:            [", paste(nn$input_names, collapse = ", "), "]\n", sep = "")
   cat("Outputs:           [", paste(nn$output_names, collapse = ", "), "]\n", sep = "")
-
-  ## Trained weight values (length == n_weights).
-  cat("Weight summary:    min=", sprintf("%.4f", min(nn$weights)),
-      "  max=",  sprintf("%.4f", max(nn$weights)),
-      "  mean=", sprintf("%.4f", mean(nn$weights)),
-      "  sd=",   sprintf("%.4f", stats::sd(nn$weights)),
-      "\n", sep = "")
-
-  ## Sanity check: the same weights are also reachable via fit$theta
-  ## using the offset (R uses 1-based indexing; weights_offset is 0-based
-  ## as exposed from Rust).
-  weights_from_theta <- fit$theta[
-    (nn$weights_offset + 1L):(nn$weights_offset + nn$n_weights)
-  ]
-  stopifnot(isTRUE(all.equal(unname(weights_from_theta), nn$weights)))
-  cat("Round-trip:        fit$theta slice matches fit$neural_networks weights ✓\n")
 } else {
-  cat("\n",
-      "NOTE: fit$neural_networks is empty. This means ferx-r was built\n",
-      "      without `--features nn`. Edit src/rust/Cargo.toml's `default`\n",
-      "      feature list to add \"nn\" and reinstall.\n",
-      sep = "")
+  cat("\nNOTE: fit$neural_networks is empty. ferx-r was built without\n")
+  cat("      `--features nn`. Edit src/rust/Cargo.toml's `default`\n")
+  cat("      feature list to add \"nn\" and reinstall.\n")
 }
 
 ## ── 5. Are the covariates useful? Interpreting the NN ─────────────────────
 ##
-## A classical analytical model lets us read covariate effects directly:
-## a significant `THETA_WT` with %RSE under, say, 30% says "WT matters".
-## A neural network is harder to read — there's no single weight to test.
-## The first-order question for a DCM is therefore not "what's the weight"
-## but: **is the NN actually using the inputs, or did the optimizer find a
-## constant function that fits via etas alone?**
+## We expect to find:
+##   * `cor(WT, CL)` substantially > 0  — WT drove CL in the ground truth
+##   * `cor(CRCL, CL)` close to 0       — CRCL is a distractor; NN should ignore
 ##
-## Two interpretable lenses for that:
+## Two interpretable lenses on the fitted NN:
 ##
-##   (a) Spread of per-subject typical values. If the NN ignores its
-##       inputs, every subject gets the same typical CL/V/etc, and all
-##       cross-subject variation is absorbed by etas. A wide range of
-##       individual estimates *that correlates with the covariates*
+##   (a) Spread of per-subject typical values. If the NN ignored its
+##       inputs, every subject gets the same typical CL/V/etc and all
+##       cross-subject variation is absorbed by etas — flat individual
+##       estimates. A wide spread that *correlates with the covariates*
 ##       indicates the NN is doing real work.
 ##
 ##   (b) Correlation between input covariates and individual PK
-##       estimates. If `cor(WT, individual$CL)` is small (|r| < 0.15)
-##       the NN is not propagating WT into CL. If it's substantial
-##       (|r| > 0.30 ish), WT is materially shaping CL — which is what
-##       you want a "deep covariate model" to do.
-##
-## Note: `fit$individual_estimates$CL` is at the *subject's* eta, so
-## variation across subjects bundles together (i) the NN's covariate
-## response and (ii) random IIV. For the correlation lens, that's fine —
-## (ii) is noise around (i) and won't manufacture a covariate effect that
-## isn't there.
+##       estimates. The expected pattern for this ground truth: strong
+##       `cor(WT, CL)`, near-zero `cor(CRCL, CL)`.
 
 if (length(fit$neural_networks) > 0) {
-  ## Pull per-subject covariates from the source data.
-  raw    <- read.csv(ex$data, stringsAsFactors = FALSE)
+  raw <- read.csv(dataset_path, stringsAsFactors = FALSE)
   cov_df <- aggregate(
     raw[, c("WT", "CRCL")],
     by = list(ID = raw$ID),
-    FUN = function(x) suppressWarnings(as.numeric(x))[1]   # first non-NA per subject
+    FUN = function(x) suppressWarnings(as.numeric(x))[1]
   )
-  ## Merge with per-subject individual estimates.
   est <- fit$individual_estimates
   est$ID <- as.character(est$ID)
   cov_df$ID <- as.character(cov_df$ID)
@@ -131,7 +149,6 @@ if (length(fit$neural_networks) > 0) {
 
   cat("\n--- NN covariate-importance heuristics ---\n")
 
-  ## (a) Spread of individual estimates.
   cat("\n  (a) Per-subject individual-estimate spread\n")
   cat("      (wide spread = the NN's output drives meaningful between-subject differences)\n")
   for (pk in c("CL", "V1", "Q", "V2", "KA")) {
@@ -142,10 +159,9 @@ if (length(fit$neural_networks) > 0) {
     }
   }
 
-  ## (b) Correlation lens: do the inputs explain the spread?
   cat("\n  (b) Pearson correlations: covariate vs individual PK estimate\n")
-  cat("      (|r| > ~0.30 indicates the NN is propagating that covariate;\n",
-      "       |r| < ~0.15 means the NN is largely ignoring it)\n", sep = "")
+  cat("      Ground truth: WT drives CL with a kink at WT=70; CRCL has no effect.\n")
+  cat("      Expected: |r(WT, CL)| substantially > 0; |r(CRCL, *)| close to 0.\n")
   cat(sprintf("      %-12s %10s %10s\n", "PK param", "r(WT)", "r(CRCL)"))
   cat(sprintf("      %s\n", strrep("-", 38)))
   for (pk in c("CL", "V1", "Q", "V2", "KA")) {
@@ -156,89 +172,83 @@ if (length(fit$neural_networks) > 0) {
     }
   }
 
-  ## Optional: a quick partial-dependence-style table by predicting the
-  ## NN forward at each subject's actual covariates, with eta=0. We
-  ## reconstruct the typical value from the individual estimate by
-  ## dividing out exp(eta_i) — works because the model is mu-ref
-  ## lognormal (`CL = TYPICAL_PK.CL * exp(ETA_CL)`).
+  ## Partial-dependence-style: typical CL vs WT, reconstructed from
+  ## individual_estimates / exp(eta) (mu-ref lognormal model).
   if (!is.null(fit$ebe_etas) && "ETA_CL" %in% names(fit$ebe_etas)) {
     ebe <- fit$ebe_etas
-    ebe$ID <- as.character(ebe$ID)
-    joined2 <- merge(joined, ebe, by = "ID", suffixes = c("", ".eta"))
-    joined2$CL_tv <- joined2$CL / exp(joined2$ETA_CL)
-    ord <- order(joined2$WT)
-    cat("\n  Typical CL across the WT range (eta=0, low→high WT):\n")
-    cat(sprintf("      WT %.0f -> CL_tv %.4f\n",
-                joined2$WT[ord[1]], joined2$CL_tv[ord[1]]))
-    n  <- nrow(joined2)
-    cat(sprintf("      WT %.0f -> CL_tv %.4f\n",
-                joined2$WT[ord[n %/% 2]], joined2$CL_tv[ord[n %/% 2]]))
-    cat(sprintf("      WT %.0f -> CL_tv %.4f\n",
-                joined2$WT[ord[n]], joined2$CL_tv[ord[n]]))
-    cat("      (a monotonic ramp = NN learned a sensible body-weight effect;\n",
-        "       flat values = NN ignored WT)\n", sep = "")
+    ebe$ID  <- as.character(ebe$ID)
+    j2      <- merge(joined, ebe, by = "ID", suffixes = c("", ".eta"))
+    j2$CL_tv <- j2$CL / exp(j2$ETA_CL)
+    ord <- order(j2$WT)
+    cat("\n  Typical CL as a function of WT (eta=0, low→high WT):\n")
+    cat("  A non-linear ramp (especially a kink near WT=70) means the NN\n")
+    cat("  recovered the simulated kink. A flat line means it ignored WT.\n")
+    breaks <- round(seq(1, nrow(j2), length.out = 5))
+    for (k in breaks) {
+      cat(sprintf("      WT %5.1f  →  CL_tv = %.4f\n",
+                  j2$WT[ord[k]], j2$CL_tv[ord[k]]))
+    }
   }
 }
 
-## ── 6. Compare to a regular NLME fit on the same data ─────────────────────
+## ── 6. Compare to a regular NLME fit on the same simulated data ───────────
 ##
-## `examples/models/two_cpt_oral_cov.ferx` is the analytical equivalent of
-## `warfarin_dcm.ferx`: same data (`data/two_cpt_oral_cov.csv`), same eta /
-## omega / sigma structure, same `two_cpt_oral(...)` PK. The only
-## difference is the covariate model — analytical power functions
-## (`(WT/70)^THETA_WT * (CRCL/100)^THETA_CRCL`) vs the MLP.
+## `two_cpt_oral_cov.ferx` is the textbook analytical NLME — same eta /
+## omega / sigma, same `two_cpt_oral` PK, but covariates enter as
+## power functions: `CL = TVCL * (WT/70)^THETA_WT * (CRCL/100)^THETA_CRCL`.
 ##
-## We fit it side-by-side and look at three things:
-##   * OFV — same dataset, so directly comparable (smaller is better).
-##   * AIC / BIC — penalise the DCM's much-higher parameter count.
-##     The NN ships ~140 parameters, the analytical model ~13.
-##   * Predictions — if the DCM's IPRED column tracks the analytical
-##     IPRED, the NN didn't learn anything weird.
-##
-## For reference, `examples/models/warfarin.ferx` is the textbook
-## one-compartment warfarin model with no covariates and a *different*
-## dataset (warfarin.csv has no WT/CRCL). It's not data-compatible here
-## but is useful as a no-covariate baseline if you load its dataset
-## separately.
-
-cat("\n\n========== Comparison: DCM vs analytical NLME ==========\n\n")
+## On our kink-y simulated data the power function can't represent the
+## sharp change in CL at WT=70 cleanly — it has to pick a single exponent
+## that compromises across both regimes. The NN, with extra capacity, can
+## represent the kink. So we expect DCM to win on OFV; the AIC/BIC
+## verdict depends on whether the OFV improvement exceeds the NN's
+## parameter-count penalty.
 ex_an <- ferx_example("two_cpt_oral_cov")
+cat("\n\n══════════ Comparison: DCM vs analytical NLME ══════════\n\n")
 cat("Fitting analytical comparison model (", ex_an$model, ")...\n", sep = "")
-
 fit_an <- ferx_fit(
   model      = ex_an$model,
-  data       = ex_an$data,
+  data       = dataset_path,
   method     = "focei",
-  covariance = FALSE
+  covariance = FALSE,
+  settings   = list(outer_maxiter = 100)
 )
 
 cmp <- data.frame(
   model    = c("DCM (NN typical values)", "Analytical (power-function covariates)"),
-  ofv      = c(fit$ofv,      fit_an$ofv),
-  aic      = c(fit$aic,      fit_an$aic),
-  bic      = c(fit$bic,      fit_an$bic),
-  n_params = c(fit$n_parameters, fit_an$n_parameters),
-  iters    = c(fit$n_iterations, fit_an$n_iterations)
+  ofv      = c(fit$ofv,           fit_an$ofv),
+  aic      = c(fit$aic,           fit_an$aic),
+  bic      = c(fit$bic,           fit_an$bic),
+  n_params = c(fit$n_parameters,  fit_an$n_parameters),
+  iters    = c(fit$n_iterations,  fit_an$n_iterations)
 )
 print(cmp, row.names = FALSE)
 
-cat("\nInterpretation:\n")
-cat("  * If OFV is similar, the NN didn't extract more information from\n")
-cat("    the covariates than the analytical power model — the simpler\n")
-cat("    model is preferable.\n")
-cat("  * If the DCM's OFV is substantially lower (>5–10 OFV units per\n")
-cat("    extra parameter), the NN captured a non-linear covariate effect\n")
-cat("    the analytical form missed. Check whether the AIC/BIC penalty\n")
-cat("    keeps the DCM ahead.\n")
-cat("  * For warfarin-style PK these two should be close — body weight\n")
-cat("    and renal function on CL/V are almost linear-in-log-space, so\n")
-cat("    the power model nails them. DCM tends to win on more complex\n")
-cat("    drugs (e.g. monoclonal antibodies; see Janssen 2022 §3 case\n")
-cat("    studies on factor VIII and edoxaban).\n")
+ofv_delta <- fit_an$ofv - fit$ofv
+aic_delta <- fit_an$aic - fit$aic
+cat("\nΔOFV (analytical − DCM): ", sprintf("%+.2f", ofv_delta),
+    "  (positive ⇒ DCM fits better)\n", sep = "")
+cat("ΔAIC (analytical − DCM): ", sprintf("%+.2f", aic_delta),
+    "  (positive ⇒ DCM wins overall after the parameter penalty)\n", sep = "")
 
-## ── 7. Predictions look reasonable ────────────────────────────────────────
-## Final sanity check: per-subject IPRED ranges from both models.
-cat("\n--- Per-subject IPRED range ---\n")
+cat("\nInterpretation:\n")
+if (aic_delta > 0) {
+  cat("  ✓ DCM wins on AIC. The NN captured the non-linear WT effect that\n")
+  cat("    the analytical power model couldn't represent. The extra weight\n")
+  cat("    parameters earned their keep.\n")
+} else if (ofv_delta > 0) {
+  cat("  ~ DCM has lower OFV but loses on AIC. The NN fit better but its\n")
+  cat("    extra parameters aren't justified by the OFV gain. The simpler\n")
+  cat("    analytical model is preferable here.\n")
+} else {
+  cat("  ✗ DCM didn't improve on the analytical model. Either the analytical\n")
+  cat("    form already captured the covariate effect (so the kink wasn't\n")
+  cat("    actually a problem for it) or the DCM hasn't converged — bump\n")
+  cat("    outer_maxiter and retry.\n")
+}
+
+## ── 7. Per-subject IPRED sanity check ────────────────────────────────────
+cat("\n--- Per-subject IPRED range (both models) ---\n")
 cat(sprintf("  DCM:        [%.3f, %.3f]\n",
             min(fit$sdtab$IPRED, na.rm = TRUE),
             max(fit$sdtab$IPRED, na.rm = TRUE)))
@@ -246,6 +256,18 @@ cat(sprintf("  Analytical: [%.3f, %.3f]\n",
             min(fit_an$sdtab$IPRED, na.rm = TRUE),
             max(fit_an$sdtab$IPRED, na.rm = TRUE)))
 
-## For a real DCM workflow you'd now bump `maxiter` to 500–1000 and
-## generate a VPC with ferx_simulate() — see inst/examples/ex3_two_cmt_oral_cov.R
-## for the analytical-side recipe; the DCM is a drop-in replacement.
+## ── Wrap-up ───────────────────────────────────────────────────────────────
+##
+## For a production DCM workflow you'd now:
+##   * Bump outer_maxiter to 500–1000 for actual convergence.
+##   * Generate a VPC with ferx_simulate() (see ex3_two_cmt_oral_cov.R).
+##   * If the AIC verdict is "analytical wins", that's a real result, not
+##     a failure — DCM only helps when covariates are genuinely non-linear.
+##   * If DCM wins, inspect the per-output correlations (§5b above) to
+##     identify which covariates are pulling weight. Drop "distractor"
+##     covariates from `inputs = [...]` to reduce parameter count.
+##
+## Reference: Janssen A. et al. (2022). Deep compartment models: A deep
+## learning approach for the reliable prediction of time-series data in
+## pharmacokinetic modeling. CPT Pharmacometrics Syst Pharmacol 11:934-945.
+## DOI 10.1002/psp4.12808.
