@@ -8,9 +8,19 @@
 ##
 ##     CL = TVCL * (WT / 70)^THETA_WT * (CRCL / 100)^THETA_CRCL * exp(ETA_CL)
 ##
-## with a small neural network whose inputs are subject covariates and
-## whose outputs ARE the typical PK values. Lognormal IIV is composed on
-## top in the standard mu-ref form (`TYPICAL_PK.CL * exp(ETA_CL)`).
+## with a small neural network whose inputs are subject covariates. The
+## bundled `warfarin_dcm.ferx` uses the **baseline × NN-modulator**
+## factoring from Janssen 2022 — baseline thetas (TVCL, TVV1, …) carry the
+## absolute PK scale, and the NN learns a multiplicative covariate-driven
+## modulator on top:
+##
+##     CL = TVCL * TYPICAL_PK.CL * exp(ETA_CL)
+##           └── scale ─┘   └── NN modulator, ≈ 1.0 at init ──┘
+##
+## Trying to make the NN produce *absolute* PK values directly from
+## Glorot-init weights fails — softplus(0) ≈ 0.69 for every output and
+## the optimizer can't span the 1-100× range across CL/V/Q/V2/KA. See
+## the `warfarin_dcm.ferx` block comment for the full rationale.
 ##
 ## ──────────── Why this script generates its own data ───────────────────
 ##
