@@ -29,14 +29,18 @@ FITRX_FORMAT_VERSION <- "1"
 #'   to fit the model is embedded verbatim inside the archive (as
 #'   \code{data.csv}). Requires that the file is still accessible at the
 #'   path captured at fit time (\code{fit$data_path}). Default \code{FALSE}.
-#' @return Invisibly returns \code{output}.
+#' @return Invisibly returns \code{fit}, so the function can be used inside a
+#'   pipe without breaking the chain:
+#'   \preformatted{
+#'   fit |> ferx_save_fit("run1.fitrx") |> ferx_estimates()
+#'   }
 #' @export
 #' @seealso \code{\link{ferx_load_fit}}, \code{\link{ferx_fit}} (and its
 #'   \code{output} argument for save-during-fit).
 #' @examples
 #' ex  <- ferx_example("warfarin")
 #' fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
-#' tmp <- tempfile(fileext = ".rds")
+#' tmp <- tempfile(fileext = ".fitrx")
 #' ferx_save_fit(fit, tmp)
 #' fit2 <- ferx_load_fit(tmp)
 #' identical(fit$theta, fit2$theta)
@@ -149,7 +153,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
     stop(sprintf("zip command failed with status %d while writing %s", zip_status, output))
   }
 
-  invisible(output)
+  invisible(fit)
 }
 
 # ----- load -----------------------------------------------------------------
