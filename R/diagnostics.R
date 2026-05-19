@@ -67,13 +67,23 @@ check_diagnostics <- function(fit) {
       }
     }
   }
-  # TODO(#multi-sigma): when multi-sigma lands, iterate fit$sigma_names and
-  # per-component shrinkage here instead of the single shrinkage_eps scalar.
-  if (!is.null(fit$shrinkage_eps) && !is.na(fit$shrinkage_eps)) {
-    rows[[length(rows) + 1L]] <- data.frame(
-      param = "EPS", type = "eps",
-      shrinkage = fit$shrinkage_eps, shrinkage_pct = fit$shrinkage_eps * 100,
-      stringsAsFactors = FALSE)
+  eps_vec <- fit$shrinkage_eps
+  if (!is.null(eps_vec)) {
+    eps_vec <- eps_vec[!is.na(eps_vec)]
+    if (length(eps_vec) > 0L) {
+      eps_lbls <- if (!is.null(fit$sigma_names) && length(fit$sigma_names) == length(fit$shrinkage_eps))
+        fit$sigma_names[!is.na(fit$shrinkage_eps)]
+      else if (length(eps_vec) == 1L)
+        "EPS"
+      else
+        sprintf("EPS%d", seq_along(eps_vec))
+      for (i in seq_along(eps_vec)) {
+        rows[[length(rows) + 1L]] <- data.frame(
+          param = eps_lbls[i], type = "eps",
+          shrinkage = eps_vec[i], shrinkage_pct = eps_vec[i] * 100,
+          stringsAsFactors = FALSE)
+      }
+    }
   }
   shrinkage_df <- if (length(rows) > 0L) do.call(rbind, rows) else NULL
 

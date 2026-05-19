@@ -68,6 +68,26 @@ test_that("check_diagnostics flag values match .dw_label output", {
   expect_equal(d$autocorrelation$flag, "no autocorrelation")
 })
 
+test_that("check_diagnostics handles multi-sigma shrinkage_eps vector", {
+  fit <- warfarin_fit()
+  fit$shrinkage_eps  <- c(0.10, 0.15)
+  fit$sigma_names    <- c("EPS_PROP", "EPS_ADD")
+  fit$shrinkage_eta  <- NULL
+  d <- check_diagnostics(fit)
+  expect_equal(nrow(d$shrinkage), 2L)
+  expect_equal(d$shrinkage$param, c("EPS_PROP", "EPS_ADD"))
+  expect_equal(d$shrinkage$shrinkage_pct, c(10, 15))
+})
+
+test_that("check_diagnostics uses EPS1/EPS2 fallback when sigma_names absent for multi-sigma", {
+  fit <- warfarin_fit()
+  fit$shrinkage_eps <- c(0.08, 0.12)
+  fit$sigma_names   <- NULL
+  fit$shrinkage_eta <- NULL
+  d <- check_diagnostics(fit)
+  expect_equal(d$shrinkage$param, c("EPS1", "EPS2"))
+})
+
 test_that("positive DW < 1.5 emits message; negative DW > 2.5 emits message; no message otherwise", {
   fit <- list(dw_statistic = 1.2, iwres_lag1_r = 0.4, uses_sde = FALSE)
   expect_message(ferx:::.ferx_emit_dw_message(fit), "Positive IWRES autocorrelation")
