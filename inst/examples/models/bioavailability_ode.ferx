@@ -15,7 +15,7 @@
 #   CMT=1  depot     — oral dose in mg, amount compartment
 #   CMT=2  central   — concentration compartment (mg/L = depot-derived / V)
 #
-# Dataset: data/bioavailability_oral.csv (oral-only, 20 subjects × 7 obs)
+# Dataset: data/bioavailability_ode.csv (oral-only, 20 subjects × 7 obs)
 #
 # True simulation parameters:
 #   TVCL=5, TVV=50, TVKA=1.5, F=0.70 (THETA_F ≈ 0.847), omega_CL=0.09,

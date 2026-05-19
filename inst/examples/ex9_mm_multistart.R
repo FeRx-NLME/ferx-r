@@ -13,11 +13,13 @@ library(ferx)
 
 ex <- ferx_example("mm_multistart")
 
-# Single-start — may land on a local minimum from the inflated starting values
+# Single-start — may land on a local minimum from the inflated starting values.
+# Override n_starts = 1 to suppress the model-file default of 8.
 fit_single <- ferx_fit(
-  model = ex$model,
-  data  = ex$data,
-  method = "focei"
+  model    = ex$model,
+  data     = ex$data,
+  method   = "focei",
+  settings = list(n_starts = 1L)
 )
 
 # Multi-start — 8 parallel runs with wider perturbation for a ridge surface
