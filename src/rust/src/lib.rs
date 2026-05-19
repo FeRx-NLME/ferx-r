@@ -884,6 +884,12 @@ fn default_fit_result(
         dw_statistic: f64::NAN,
         iwres_lag1_r: f64::NAN,
         uses_sde: false,
+        // Phase A M1 (ferx-core PR #52). Always empty in this helper —
+        // ferx-r forwards the `nn` feature optionally; when off, the field
+        // doesn't exist in ferx-core; when on, the helper still constructs
+        // a non-NN minimal result.
+        #[cfg(feature = "nn")]
+        neural_networks: Vec::new(),
     }
 }
 
@@ -1272,8 +1278,54 @@ fn fit_result_to_list(
         data_hash = result.data_hash.clone().unwrap_or_default(),
         uses_sde = result.uses_sde,
         dw_statistic = result.dw_statistic,
-        iwres_lag1_r = result.iwres_lag1_r
+        iwres_lag1_r = result.iwres_lag1_r,
+        // `[covariate_nn]` blocks from the model file (Phase A M1 of ferx-core's
+        // DCM plan). One R sub-list per NN; empty list when the `nn` feature is
+        // off or no NN blocks are declared. Inspectable in R as
+        // `fit$neural_networks[[1]]$shape`, etc.
+        neural_networks = neural_networks_list(result)
     )
+}
+
+/// Build the R-side `neural_networks` list from `result.neural_networks`.
+/// Empty list when the `nn` feature is off (each NN's info doesn't exist
+/// on FitResult in that build). Each sub-list mirrors `NeuralNetworkInfo`
+/// plus a `weights` vector of the trained values for downstream rendering
+/// (e.g. a `print()` method or a heatmap).
+#[cfg(feature = "nn")]
+fn neural_networks_list(result: &FitResult) -> Robj {
+    let mut out: Vec<Robj> = Vec::with_capacity(result.neural_networks.len());
+    let mut names: Vec<String> = Vec::with_capacity(result.neural_networks.len());
+    for nn in &result.neural_networks {
+        let weights: Vec<f64> = result.theta
+            [nn.weights_offset..nn.weights_offset + nn.n_weights]
+            .to_vec();
+        let entry = list!(
+            name = nn.name.clone(),
+            shape = nn.shape.iter().map(|s| *s as i32).collect::<Vec<i32>>(),
+            hidden_activation = nn.hidden_activation.clone(),
+            output_activation = nn.output_activation.clone(),
+            n_weights = nn.n_weights as i32,
+            weights_offset = nn.weights_offset as i32,
+            input_names = nn.input_names.clone(),
+            output_names = nn.output_names.clone(),
+            weights = weights,
+        );
+        names.push(nn.name.clone());
+        out.push(entry.into());
+    }
+    let mut list = List::from_values(out);
+    let _ = list.set_names(&names);
+    list.into()
+}
+
+/// Empty list when the `nn` feature isn't built. Keeps the R-side schema
+/// stable (callers always see `fit$neural_networks` as a list) so they can
+/// `length(fit$neural_networks)` without branching on build features.
+#[cfg(not(feature = "nn"))]
+fn neural_networks_list(_result: &FitResult) -> Robj {
+    let v: Vec<Robj> = Vec::new();
+    List::from_values(v).into()
 }
 
 // -- Helper: build per-subject EBE eta data frame --
@@ -1667,6 +1719,11 @@ fn ferx_rust_sir(
         dw_statistic: f64::NAN,
         iwres_lag1_r: f64::NAN,
         uses_sde: false,
+        // Phase A M1 (ferx-core PR #52). Always empty in the SIR
+        // skeleton — SIR doesn't fit NN weights, it just propagates
+        // existing parameter uncertainty.
+        #[cfg(feature = "nn")]
+        neural_networks: Vec::new(),
     };
 
     let mut opts = FitOptions::default();

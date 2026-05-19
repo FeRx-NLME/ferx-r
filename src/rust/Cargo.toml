@@ -12,6 +12,12 @@ crate-type = ["staticlib"]
 default = ["autodiff"]
 autodiff = ["ferx-core/autodiff"]
 ci = ["ferx-core/ci"]
+# Deep Compartment Models (DCM) and low-dim neural ODEs — Phase A from
+# ferx-core's plans/dcm-and-low-dim-node.md. Off by default. Opt in via
+# `cargo build --features nn` (or by adding it to `default` for a local
+# build) to enable parsing of `[covariate_nn]` blocks and the matching
+# `neural_networks` section in `FitResult` / fit YAML / .fitrx output.
+nn = ["ferx-core/nn"]
 
 [dependencies]
 extendr-api = "0.9"
