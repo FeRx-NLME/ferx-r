@@ -1432,6 +1432,23 @@ fn ferx_rust_validate_model(model_path: &str) -> List {
     }
 }
 
+/// Translate an mrgsolve `.cpp` / `.mod` model file into ferx's native
+/// `.ferx` DSL.
+///
+/// @param input_path Path to the mrgsolve source file. Must exist.
+/// @return Named list with `ok` (logical), `ferx_source` (character — the
+///   translated `.ferx` text on success, empty otherwise), and `error`
+///   (character — empty string on success, the file:line error message
+///   on failure).
+/// @export
+#[extendr]
+fn ferx_rust_translate_mrgsolve(input_path: &str) -> List {
+    match ferx_core::translate_mrgsolve_file(Path::new(input_path)) {
+        Ok(text) => list!(ok = true, ferx_source = text, error = ""),
+        Err(e) => list!(ok = false, ferx_source = "", error = e),
+    }
+}
+
 /// Standalone SIR — run Sampling Importance Resampling against an existing fit.
 ///
 /// The R wrapper `ferx_sir()` flattens the fit list into the primitives this
@@ -1732,4 +1749,5 @@ extendr_module! {
     fn ferx_rust_sir;
     fn ferx_rust_autodiff_enabled;
     fn ferx_rust_validate_model;
+    fn ferx_rust_translate_mrgsolve;
 }

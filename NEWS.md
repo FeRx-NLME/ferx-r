@@ -1,5 +1,15 @@
 # ferx (development)
 
+## New features
+
+- `ferx_translate_mrgsolve()`: convert an existing mrgsolve `.cpp` /
+  `.mod` model file into ferx's native `.ferx` DSL. Returns the
+  translated source as a string, or writes it to a file when `output =`
+  is given. Supported blocks: `$PROB`, `$PARAM`, `$INPUT`, `$THETA`,
+  `$CMT`, `$INIT`, `$OMEGA`, `$SIGMA` (diagonal + `@block` + `@labels`),
+  `$MAIN`/`$PK`, `$ODE`, `$TABLE`/`$ERROR`, `$CAPTURE`, `$PKMODEL`,
+  `$SET`. Unsupported constructs raise a clear `file:line:` error.
+
 ## Bug fixes
 
 - All output functions now display the declared variable name (`ETA_CL`,
