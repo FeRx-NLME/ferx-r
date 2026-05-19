@@ -256,6 +256,211 @@ cat(sprintf("  Analytical: [%.3f, %.3f]\n",
             min(fit_an$sdtab$IPRED, na.rm = TRUE),
             max(fit_an$sdtab$IPRED, na.rm = TRUE)))
 
+## ── 8. Visual diagnostics ──────────────────────────────────────────────────
+##
+## Standard PK goodness-of-fit (GOF) plots plus a covariate-effect plot
+## that's specific to DCM: typical CL as a function of WT, for both
+## models. The kink-at-WT=70 ground truth should appear as a bend in the
+## DCM curve and a smooth power-law line for the analytical model — the
+## visual signature of "the analytical form can't capture this".
+##
+## Base R only — no `ggplot2` / `vpc` dependency. Output goes to a PDF
+## under tempdir; we print the path. Open with `open <path>` on macOS,
+## `xdg-open` on Linux, or just attach to your R session interactively
+## and re-run without `pdf()`/`dev.off()` to plot to a device.
+
+cat("\n── Generating diagnostic plots ──\n")
+
+## Helper: build typical-CL-by-WT data frame for one fit (lognormal mu-ref:
+## CL = CL_tv * exp(ETA_CL), so CL_tv = CL_indiv / exp(ETA_CL)).
+build_tv_cl <- function(this_fit, cov_df) {
+  ebe <- this_fit$ebe_etas
+  ebe$ID <- as.character(ebe$ID)
+  est <- this_fit$individual_estimates
+  est$ID <- as.character(est$ID)
+  df <- merge(est, ebe, by = "ID", suffixes = c("", ".eta"))
+  df <- merge(df, cov_df, by = "ID")
+  df$CL_tv <- df$CL / exp(df$ETA_CL)
+  df[order(df$WT), c("ID", "WT", "CRCL", "CL", "ETA_CL", "CL_tv")]
+}
+
+## Subject-level covariate frame (one row per subject) — re-pulled from
+## the same simulated CSV so it stays consistent regardless of fit order.
+raw <- read.csv(dataset_path, stringsAsFactors = FALSE)
+cov_df <- aggregate(
+  raw[, c("WT", "CRCL")],
+  by = list(ID = raw$ID),
+  FUN = function(x) suppressWarnings(as.numeric(x))[1]
+)
+cov_df$ID <- as.character(cov_df$ID)
+tv_dcm <- build_tv_cl(fit,    cov_df)
+tv_an  <- build_tv_cl(fit_an, cov_df)
+
+## ── Page 1: GOF + typical-CL-vs-WT ──────────────────────────────────────
+pdf_path <- tempfile(fileext = ".pdf")
+pdf(pdf_path, width = 11, height = 8.5)
+par(mfrow = c(2, 3), mar = c(4, 4, 3, 1))
+
+## DV vs IPRED — both models, log-log so low concentrations are visible.
+plot_dv_pred <- function(sdtab, title, col_pred = "IPRED") {
+  xy <- range(c(sdtab$DV, sdtab[[col_pred]]), na.rm = TRUE)
+  xy[1] <- max(xy[1], 0.01)  # guard against zeros for log scale
+  plot(sdtab[[col_pred]], sdtab$DV, pch = 20, col = rgb(0, 0, 0, 0.35),
+       log = "xy", xlim = xy, ylim = xy,
+       main = title, xlab = col_pred, ylab = "DV")
+  abline(0, 1, col = "red", lwd = 2)
+}
+
+plot_dv_pred(fit$sdtab,    "DCM:  DV vs IPRED",        col_pred = "IPRED")
+plot_dv_pred(fit_an$sdtab, "Analytical:  DV vs IPRED", col_pred = "IPRED")
+
+## Typical CL as a function of WT, both models overlaid.
+## With the kink ground truth (CL flat below WT=70, allometric above),
+## the analytical line should be smooth-monotone (it has only one
+## exponent to play with), while the DCM curve should bend near WT=70
+## if the NN captured the kink.
+xrng <- range(c(tv_dcm$WT, tv_an$WT))
+yrng <- range(c(tv_dcm$CL_tv, tv_an$CL_tv))
+plot(tv_dcm$WT, tv_dcm$CL_tv, type = "b", pch = 20, col = "steelblue",
+     xlim = xrng, ylim = yrng,
+     main = "Typical CL vs WT", xlab = "WT", ylab = "Typical CL (eta = 0)")
+lines(tv_an$WT, tv_an$CL_tv, type = "b", pch = 20, col = "firebrick")
+abline(v = 70, lty = 2, col = "gray60")
+text(70, yrng[1] + diff(yrng) * 0.04, " ground-truth kink (WT = 70)",
+     pos = 4, col = "gray40", cex = 0.9)
+legend("topleft",
+       legend = c("DCM (NN)", "Analytical (power)"),
+       col = c("steelblue", "firebrick"),
+       lty = 1, pch = 20, bty = "n")
+
+## DV vs PRED (population predictions — eta=0). Captures whether the
+## structural model + covariate model alone are adequate, independent of
+## individual eta estimates.
+plot_dv_pred(fit$sdtab,    "DCM:  DV vs PRED",        col_pred = "PRED")
+plot_dv_pred(fit_an$sdtab, "Analytical:  DV vs PRED", col_pred = "PRED")
+
+## CWRES vs TIME — symmetric clouds centred on 0 ⇒ residuals are well
+## behaved. Drift, fanning, or persistent sign indicate misspecification.
+plot_cwres <- function(sdtab, title) {
+  plot(sdtab$TIME, sdtab$CWRES, pch = 20, col = rgb(0, 0, 0, 0.35),
+       main = title, xlab = "TIME", ylab = "CWRES",
+       ylim = range(c(sdtab$CWRES, c(-3, 3)), na.rm = TRUE))
+  abline(h = 0, col = "red", lwd = 2)
+  abline(h = c(-2, 2), lty = 2, col = "gray60")
+}
+plot_cwres(fit$sdtab,    "DCM:  CWRES vs TIME")
+plot_cwres(fit_an$sdtab, "Analytical:  CWRES vs TIME")
+
+## ── Page 2: Individual concentration profiles ──────────────────────────
+## Pick 4 representative subjects: 2 with WT < 70 (below the kink, where
+## the ground truth has no covariate effect on CL) and 2 with WT > 70
+## (above the kink, where allometric scaling kicks in). For each subject,
+## plot observed DV + IPRED from both models over TIME.
+ids_below <- head(cov_df$ID[cov_df$WT < 70 & cov_df$WT > 55], 2)
+ids_above <- head(cov_df$ID[cov_df$WT > 70], 2)
+selected_ids <- c(ids_below, ids_above)
+
+par(mfrow = c(2, 2), mar = c(4, 4, 3, 1))
+for (id in selected_ids) {
+  wt_i <- cov_df$WT[cov_df$ID == id]
+  ## sdtab.ID is numeric; cast for the comparison.
+  rows_dcm <- fit$sdtab[fit$sdtab$ID == as.numeric(id), ]
+  rows_an  <- fit_an$sdtab[fit_an$sdtab$ID == as.numeric(id), ]
+  ord_dcm  <- order(rows_dcm$TIME)
+  ord_an   <- order(rows_an$TIME)
+
+  yrng <- range(c(rows_dcm$DV, rows_dcm$IPRED, rows_an$IPRED), na.rm = TRUE)
+  plot(rows_dcm$TIME[ord_dcm], rows_dcm$DV[ord_dcm],
+       pch = 19, col = "black", ylim = yrng,
+       main = sprintf("Subject %s  (WT=%.1f)", id, wt_i),
+       xlab = "TIME", ylab = "Concentration")
+  lines(rows_dcm$TIME[ord_dcm], rows_dcm$IPRED[ord_dcm],
+        col = "steelblue", lwd = 2)
+  lines(rows_an$TIME[ord_an],  rows_an$IPRED[ord_an],
+        col = "firebrick",  lwd = 2, lty = 2)
+  if (id == selected_ids[1]) {
+    legend("topright",
+           legend = c("Observed", "DCM IPRED", "Analytical IPRED"),
+           col   = c("black", "steelblue", "firebrick"),
+           pch   = c(19, NA, NA),
+           lty   = c(NA, 1, 2),
+           bty = "n", cex = 0.85)
+  }
+}
+
+dev.off()
+cat("Diagnostic plots written to: ", pdf_path, "\n", sep = "")
+cat("Open with:                   open ", shQuote(pdf_path), "\n", sep = "")
+
+## ── 9. Visual Predictive Check (optional, slower) ──────────────────────────
+##
+## Set RUN_VPC <- TRUE to also produce a simple 2-panel VPC: the
+## 5/50/95th percentiles of simulated concentrations from each fit,
+## overlaid on observed DVs. Costs ~10-30 s extra wall time per model.
+RUN_VPC <- FALSE
+
+if (RUN_VPC) {
+  cat("\n── Running visual predictive checks (200 replicates per model) ──\n")
+  vpc_n  <- 200L
+  sim_dcm <- ferx_simulate(ex_dcm$model, dataset_path, n_sim = vpc_n,
+                           seed = 1L, fit = fit)
+  sim_an  <- ferx_simulate(ex_an$model,  dataset_path, n_sim = vpc_n,
+                           seed = 1L, fit = fit_an)
+
+  ## Bin times into ~10 bins and compute observed + simulated percentiles
+  ## per bin. Simple binned VPC — not as fancy as the vpc package's
+  ## prediction-corrected version but enough to spot bias.
+  binned_pctiles <- function(times, values, n_bins = 10) {
+    breaks <- quantile(times, probs = seq(0, 1, length.out = n_bins + 1),
+                       na.rm = TRUE, names = FALSE)
+    breaks[1] <- breaks[1] - 1e-9
+    bin <- cut(times, breaks = breaks, include.lowest = TRUE)
+    centres <- tapply(times, bin, mean, na.rm = TRUE)
+    q05 <- tapply(values, bin, quantile, probs = 0.05, na.rm = TRUE)
+    q50 <- tapply(values, bin, quantile, probs = 0.50, na.rm = TRUE)
+    q95 <- tapply(values, bin, quantile, probs = 0.95, na.rm = TRUE)
+    data.frame(t = as.numeric(centres),
+               q05 = as.numeric(q05),
+               q50 = as.numeric(q50),
+               q95 = as.numeric(q95))
+  }
+
+  obs_q <- binned_pctiles(fit$sdtab$TIME, fit$sdtab$DV)
+  sim_q_dcm <- binned_pctiles(sim_dcm$TIME, sim_dcm$DV_SIM)
+  sim_q_an  <- binned_pctiles(sim_an$TIME,  sim_an$DV_SIM)
+
+  vpc_pdf <- tempfile(fileext = ".pdf")
+  pdf(vpc_pdf, width = 10, height = 5)
+  par(mfrow = c(1, 2), mar = c(4, 4, 3, 1))
+  yrng <- range(c(obs_q$q05, obs_q$q95, sim_q_dcm$q05, sim_q_dcm$q95,
+                  sim_q_an$q05, sim_q_an$q95), na.rm = TRUE)
+
+  for (panel in list(list(q = sim_q_dcm, title = "VPC — DCM",        col = "steelblue"),
+                     list(q = sim_q_an,  title = "VPC — Analytical", col = "firebrick"))) {
+    sim_q <- panel$q
+    plot(obs_q$t, obs_q$q50, type = "n", ylim = yrng,
+         main = panel$title, xlab = "TIME",
+         ylab = "DV (5/50/95th percentile)")
+    polygon(c(sim_q$t, rev(sim_q$t)),
+            c(sim_q$q05, rev(sim_q$q95)),
+            col = adjustcolor(panel$col, alpha.f = 0.25), border = NA)
+    lines(sim_q$t, sim_q$q50, col = panel$col, lwd = 2)
+    lines(obs_q$t, obs_q$q05, col = "black", lty = 3)
+    lines(obs_q$t, obs_q$q50, col = "black", lwd = 2)
+    lines(obs_q$t, obs_q$q95, col = "black", lty = 3)
+    legend("topright",
+           legend = c("Obs 5/50/95%", paste("Sim 5–95% (", panel$title, ")", sep = ""),
+                      "Sim median"),
+           col = c("black", panel$col, panel$col),
+           lty = c(1, NA, 1), lwd = c(2, NA, 2),
+           fill = c(NA, adjustcolor(panel$col, alpha.f = 0.25), NA),
+           border = c(NA, panel$col, NA),
+           bty = "n", cex = 0.75)
+  }
+  dev.off()
+  cat("VPC plots written to:        ", vpc_pdf, "\n", sep = "")
+}
+
 ## ── Wrap-up ───────────────────────────────────────────────────────────────
 ##
 ## For a production DCM workflow you'd now:
