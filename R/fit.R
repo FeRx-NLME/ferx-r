@@ -1076,32 +1076,7 @@ ferx_fit.default <- function(model, data,
   result$model_hash <- empty_to_null(result$model_hash) %||% NA_character_
   result$data_hash <- empty_to_null(result$data_hash) %||% NA_character_
 
-  # Emit actionable message when IWRES autocorrelation is flagged
-  dw <- result$dw_statistic
-  if (!is.null(dw) && !is.na(dw)) {
-    if (dw < 1.5) {
-      sde_hint <- if (isTRUE(result$uses_sde)) "" else
-        "\n  4. For ODE models: consider SDE process noise ([diffusion] block)"
-      message(sprintf(
-        paste0(
-          "Positive IWRES autocorrelation detected (Durbin-Watson = %.2f, lag-1 r = %.2f).\n",
-          "Structural model may be missing dynamics. Consider in order:\n",
-          "  1. Check observation time ordering within each subject\n",
-          "  2. Transit absorption model or additional compartment\n",
-          "  3. IOV on ka or F%s"
-        ),
-        dw, result$iwres_lag1_r %||% NA_real_, sde_hint
-      ))
-    } else if (dw > 2.5) {
-      message(sprintf(
-        paste0(
-          "Negative IWRES autocorrelation detected (Durbin-Watson = %.2f, lag-1 r = %.2f).\n",
-          "Possible over-parameterisation or misspecified residual error model."
-        ),
-        dw, result$iwres_lag1_r %||% NA_real_
-      ))
-    }
-  }
+  .ferx_emit_dw_message(result)
 
   class(result) <- "ferx_fit"
 
@@ -1113,6 +1088,35 @@ ferx_fit.default <- function(model, data,
   }
 
   result
+}
+
+.ferx_emit_dw_message <- function(result) {
+  dw <- result$dw_statistic
+  if (is.null(dw) || is.na(dw)) return(invisible(NULL))
+  r <- result$iwres_lag1_r %||% NA_real_
+  if (dw < 1.5) {
+    sde_hint <- if (isTRUE(result$uses_sde)) "" else
+      "\n  4. For ODE models: consider SDE process noise ([diffusion] block)"
+    message(sprintf(
+      paste0(
+        "Positive IWRES autocorrelation detected (Durbin-Watson = %.2f, lag-1 r = %.2f).\n",
+        "Structural model may be missing dynamics. Consider in order:\n",
+        "  1. Check observation time ordering within each subject\n",
+        "  2. Transit absorption model or additional compartment\n",
+        "  3. IOV on ka or F%s"
+      ),
+      dw, r, sde_hint
+    ))
+  } else if (dw > 2.5) {
+    message(sprintf(
+      paste0(
+        "Negative IWRES autocorrelation detected (Durbin-Watson = %.2f, lag-1 r = %.2f).\n",
+        "Possible over-parameterisation or misspecified residual error model."
+      ),
+      dw, r
+    ))
+  }
+  invisible(NULL)
 }
 
 # Map the engine's gradient-kind label to the short tokens used by the
@@ -1512,9 +1516,8 @@ print.ferx_fit <- function(x, ...) {
   # Diagnostics (DW autocorrelation)
   dw <- x$dw_statistic
   if (!is.null(dw) && !is.na(dw)) {
-    dw_label <- if (dw < 1.5) "positive autocorrelation" else if (dw > 2.5) "negative autocorrelation" else "no autocorrelation"
     cat("\n--- Diagnostics ---\n")
-    cat(sprintf("  Durbin-Watson:  %.2f  [%s]\n", dw, dw_label))
+    cat(sprintf("  Durbin-Watson:  %.2f  [%s]\n", dw, .dw_label(dw)))
     if (!is.null(x$iwres_lag1_r) && !is.na(x$iwres_lag1_r)) {
       cat(sprintf("  IWRES lag-1 r:  %.3f\n", x$iwres_lag1_r))
     }
@@ -1747,10 +1750,10 @@ print.ferx_summary <- function(x, ...) {
   }
 
   if (!is.null(x$dw_statistic) && !is.na(x$dw_statistic)) {
-    dw_label <- if (x$dw_statistic < 1.5) "positive autocorrelation" else if (x$dw_statistic > 2.5) "negative autocorrelation" else "no autocorrelation"
-    cat(sprintf("DW: %.2f [%s]", x$dw_statistic, dw_label))
-    if (!is.null(x$iwres_lag1_r) && !is.na(x$iwres_lag1_r)) cat(sprintf("  lag-1 r: %.3f", x$iwres_lag1_r))
-    cat("\n")
+    cat(sprintf("DW: %.2f [%s]\n", x$dw_statistic, .dw_label(x$dw_statistic)))
+    if (!is.null(x$iwres_lag1_r) && !is.na(x$iwres_lag1_r)) {
+      cat(sprintf("lag-1 r: %.3f\n", x$iwres_lag1_r))
+    }
   }
 
   if (!is.null(x$sir_ess)) {

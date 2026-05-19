@@ -51,3 +51,30 @@ test_that("check_diagnostics works on a fit with no autocorrelation data", {
   d <- check_diagnostics(fit2)
   expect_null(d$autocorrelation)
 })
+
+test_that("check_diagnostics flag values match .dw_label output", {
+  fit <- warfarin_fit()
+  fit$dw_statistic <- 1.2
+  fit$iwres_lag1_r <- 0.4
+  d <- check_diagnostics(fit)
+  expect_equal(d$autocorrelation$flag, "positive autocorrelation")
+
+  fit$dw_statistic <- 2.8
+  d <- check_diagnostics(fit)
+  expect_equal(d$autocorrelation$flag, "negative autocorrelation")
+
+  fit$dw_statistic <- 2.0
+  d <- check_diagnostics(fit)
+  expect_equal(d$autocorrelation$flag, "no autocorrelation")
+})
+
+test_that("positive DW < 1.5 emits message; negative DW > 2.5 emits message; no message otherwise", {
+  fit <- list(dw_statistic = 1.2, iwres_lag1_r = 0.4, uses_sde = FALSE)
+  expect_message(ferx:::.ferx_emit_dw_message(fit), "Positive IWRES autocorrelation")
+
+  fit$dw_statistic <- 2.8
+  expect_message(ferx:::.ferx_emit_dw_message(fit), "Negative IWRES autocorrelation")
+
+  fit$dw_statistic <- 2.0
+  expect_silent(ferx:::.ferx_emit_dw_message(fit))
+})

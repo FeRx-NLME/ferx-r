@@ -36,15 +36,19 @@
 #' }
 #' }
 #' @export
+.dw_label <- function(dw) {
+  if (dw < 1.5) "positive autocorrelation"
+  else if (dw > 2.5) "negative autocorrelation"
+  else "no autocorrelation"
+}
+
 check_diagnostics <- function(fit) {
   # Autocorrelation
   dw  <- fit$dw_statistic
   r   <- fit$iwres_lag1_r
   autocorr <- if (!is.null(dw) && !is.na(dw)) {
-    flag <- if (dw < 1.5) "positive autocorrelation — possible missing dynamics" else
-            if (dw > 2.5) "negative autocorrelation — possible over-parameterisation" else
-            "no autocorrelation"
-    data.frame(dw_statistic = dw, lag1_r = r %||% NA_real_, flag = flag,
+    data.frame(dw_statistic = dw, lag1_r = r %||% NA_real_,
+               flag = .dw_label(dw),
                stringsAsFactors = FALSE)
   } else NULL
 
@@ -63,6 +67,8 @@ check_diagnostics <- function(fit) {
       }
     }
   }
+  # TODO(#multi-sigma): when multi-sigma lands, iterate fit$sigma_names and
+  # per-component shrinkage here instead of the single shrinkage_eps scalar.
   if (!is.null(fit$shrinkage_eps) && !is.na(fit$shrinkage_eps)) {
     rows[[length(rows) + 1L]] <- data.frame(
       param = "EPS", type = "eps",
