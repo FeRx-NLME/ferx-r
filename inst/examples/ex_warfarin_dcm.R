@@ -2,7 +2,7 @@
 ##
 ## Fit a Deep Compartment Model (DCM) — Janssen et al. 2022 (CPT:PSP,
 ## DOI 10.1002/psp4.12808) — and show *when* it actually helps over a
-## classical analytical NLME fit.
+## classical NLME fit that ignores covariates.
 ##
 ## DCM replaces the analytical covariate model
 ##
@@ -24,12 +24,10 @@
 ##
 ## ──────────── Why this script generates its own data ───────────────────
 ##
-## The bundled `two_cpt_oral_cov.csv` is simulated with a clean
+## The bundled `two_cpt_oral_cov.csv` is simulated with a smooth
 ## power-function effect — `CL ∝ (WT/70)^0.75`, `CL ∝ (CRCL/100)^0.50`.
-## An analytical power-function model fits that perfectly, so a DCM
-## would tie or lose on AIC/BIC. That's the wrong story to tell about
-## DCM: the value-add is **non-linear covariate effects**, the kind a
-## power function can't represent.
+## A power-function analytical model fits that perfectly and there's
+## very little headroom for a DCM to show value on top.
 ##
 ## So we use the bundled `warfarin_if.ferx` model — which has a sharp
 ## kink in clearance at WT = 70 (`if (WT > 70)` allometric, else flat)
@@ -37,9 +35,11 @@
 ##   * WT genuinely drives CL (with a non-linear kink)
 ##   * CRCL is present but doesn't affect anything (a "distractor")
 ##
-## We then fit DCM and analytical models to that simulated data and
-## compare. DCM should win on AIC because the analytical power model
-## can only find a single compromise exponent across the kink.
+## We then fit DCM and a **no-covariate** classical NLME to that
+## simulated data and compare. The no-covariate fit absorbs all WT-driven
+## variability into etas; DCM should win on OFV because the NN can
+## actually use WT. The AIC verdict depends on whether that OFV gain
+## exceeds the cost of ~141 NN-weight parameters.
 ##
 ## ──────────── Requirements ──────────────────────────────────────────────
 ## Requires ferx-r built with `--features nn` (which forwards to
@@ -207,23 +207,67 @@ if (length(fit$neural_networks) > 0) {
   }
 }
 
-## ── 6. Compare to a regular NLME fit on the same simulated data ───────────
+## ── 6. Compare to a no-covariate NLME fit on the same simulated data ─────
 ##
-## `two_cpt_oral_cov.ferx` is the textbook analytical NLME — same eta /
-## omega / sigma, same `two_cpt_oral` PK, but covariates enter as
-## power functions: `CL = TVCL * (WT/70)^THETA_WT * (CRCL/100)^THETA_CRCL`.
+## The comparator is a **no-covariate** two-compartment oral PK model:
+## same `two_cpt_oral` structural form, same eta / omega / sigma layout,
+## but the typical PK params are pure thetas with no WT or CRCL term.
+## All between-subject variability is therefore absorbed into ETA_CL,
+## ETA_V1, etc.
 ##
-## On our kink-y simulated data the power function can't represent the
-## sharp change in CL at WT=70 cleanly — it has to pick a single exponent
-## that compromises across both regimes. The NN, with extra capacity, can
-## represent the kink. So we expect DCM to win on OFV; the AIC/BIC
-## verdict depends on whether the OFV improvement exceeds the NN's
-## parameter-count penalty.
-ex_an <- ferx_example("two_cpt_oral_cov")
-cat("\n\n══════════ Comparison: DCM vs analytical NLME ══════════\n\n")
-cat("Fitting analytical comparison model (", ex_an$model, ")...\n", sep = "")
+## This is the cleanest baseline for "does the NN-modeled WT effect
+## actually help?": if DCM and the no-covariate model fit equally well,
+## the NN learned nothing useful and the etas were already absorbing
+## everything. If DCM wins on OFV, the NN explained variability that
+## was otherwise eta noise. The AIC verdict then weighs that OFV gain
+## against the ~141 extra NN-weight parameters.
+##
+## We write the comparator model to a tempfile rather than shipping it
+## as a separate bundled example — it's a one-off for this script.
+nocov_model_path <- tempfile(fileext = ".ferx")
+writeLines(c(
+  "# No-covariate two-compartment oral PK comparator for the DCM example.",
+  "# Same structural form and eta/omega/sigma layout as warfarin_dcm.ferx,",
+  "# but typical PK params are pure thetas — no WT or CRCL.",
+  "",
+  "[parameters]",
+  "  theta TVCL(5.0, 0.1, 100.0)",
+  "  theta TVV1(50.0, 1.0, 500.0)",
+  "  theta TVQ(10.0, 0.1, 100.0)",
+  "  theta TVV2(100.0, 1.0, 500.0)",
+  "  theta TVKA(1.2, 0.01, 10.0)",
+  "",
+  "  omega ETA_CL ~ 0.15",
+  "  omega ETA_V1 ~ 0.15",
+  "  omega ETA_Q  ~ 0.08",
+  "  omega ETA_V2 ~ 0.08",
+  "  omega ETA_KA ~ 0.20",
+  "",
+  "  sigma PROP_ERR ~ 0.04",
+  "",
+  "[individual_parameters]",
+  "  CL = TVCL * exp(ETA_CL)",
+  "  V1 = TVV1 * exp(ETA_V1)",
+  "  Q  = TVQ  * exp(ETA_Q)",
+  "  V2 = TVV2 * exp(ETA_V2)",
+  "  KA = TVKA * exp(ETA_KA)",
+  "",
+  "[structural_model]",
+  "  pk two_cpt_oral(cl=CL, v1=V1, q=Q, v2=V2, ka=KA)",
+  "",
+  "[error_model]",
+  "  DV ~ proportional(PROP_ERR)",
+  "",
+  "[fit_options]",
+  "  method = focei",
+  "  maxiter = 200",
+  "  optimizer = lbfgs"
+), nocov_model_path)
+
+cat("\n\n══════════ Comparison: DCM vs no-covariate NLME ══════════\n\n")
+cat("Fitting no-covariate comparison model (", nocov_model_path, ")...\n", sep = "")
 fit_an <- ferx_fit(
-  model      = ex_an$model,
+  model      = nocov_model_path,
   data       = dataset_path,
   method     = "focei",
   covariance = FALSE,
@@ -231,7 +275,7 @@ fit_an <- ferx_fit(
 )
 
 cmp <- data.frame(
-  model    = c("DCM (NN typical values)", "Analytical (power-function covariates)"),
+  model    = c("DCM (NN covariate modulator)", "No-covariate baseline"),
   ofv      = c(fit$ofv,           fit_an$ofv),
   aic      = c(fit$aic,           fit_an$aic),
   bic      = c(fit$bic,           fit_an$bic),
@@ -242,25 +286,24 @@ print(cmp, row.names = FALSE)
 
 ofv_delta <- fit_an$ofv - fit$ofv
 aic_delta <- fit_an$aic - fit$aic
-cat("\nΔOFV (analytical − DCM): ", sprintf("%+.2f", ofv_delta),
+cat("\nΔOFV (no-cov − DCM): ", sprintf("%+.2f", ofv_delta),
     "  (positive ⇒ DCM fits better)\n", sep = "")
-cat("ΔAIC (analytical − DCM): ", sprintf("%+.2f", aic_delta),
+cat("ΔAIC (no-cov − DCM): ", sprintf("%+.2f", aic_delta),
     "  (positive ⇒ DCM wins overall after the parameter penalty)\n", sep = "")
 
 cat("\nInterpretation:\n")
 if (aic_delta > 0) {
-  cat("  ✓ DCM wins on AIC. The NN captured the non-linear WT effect that\n")
-  cat("    the analytical power model couldn't represent. The extra weight\n")
-  cat("    parameters earned their keep.\n")
+  cat("  ✓ DCM wins on AIC. The NN found real covariate-driven variability\n")
+  cat("    that the no-covariate model could only absorb into etas. The\n")
+  cat("    extra NN-weight parameters earned their keep.\n")
 } else if (ofv_delta > 0) {
-  cat("  ~ DCM has lower OFV but loses on AIC. The NN fit better but its\n")
-  cat("    extra parameters aren't justified by the OFV gain. The simpler\n")
-  cat("    analytical model is preferable here.\n")
+  cat("  ~ DCM has lower OFV but loses on AIC. The NN found some covariate\n")
+  cat("    signal, but it's too weak to justify the ~141 extra weights —\n")
+  cat("    a simpler covariate model (or just etas) would do.\n")
 } else {
-  cat("  ✗ DCM didn't improve on the analytical model. Either the analytical\n")
-  cat("    form already captured the covariate effect (so the kink wasn't\n")
-  cat("    actually a problem for it) or the DCM hasn't converged — bump\n")
-  cat("    maxiter and retry.\n")
+  cat("  ✗ DCM didn't improve on the no-covariate baseline. Either WT/CRCL\n")
+  cat("    carry no real PK signal on this data, or the DCM hasn't\n")
+  cat("    converged — bump maxiter and retry.\n")
 }
 
 ## ── 7. Per-subject IPRED sanity check ────────────────────────────────────
@@ -268,7 +311,7 @@ cat("\n--- Per-subject IPRED range (both models) ---\n")
 cat(sprintf("  DCM:        [%.3f, %.3f]\n",
             min(fit$sdtab$IPRED, na.rm = TRUE),
             max(fit$sdtab$IPRED, na.rm = TRUE)))
-cat(sprintf("  Analytical: [%.3f, %.3f]\n",
+cat(sprintf("  No-cov:     [%.3f, %.3f]\n",
             min(fit_an$sdtab$IPRED, na.rm = TRUE),
             max(fit_an$sdtab$IPRED, na.rm = TRUE)))
 
@@ -277,8 +320,9 @@ cat(sprintf("  Analytical: [%.3f, %.3f]\n",
 ## Standard PK goodness-of-fit (GOF) plots plus a covariate-effect plot
 ## that's specific to DCM: typical CL as a function of WT, for both
 ## models. The kink-at-WT=70 ground truth should appear as a bend in the
-## DCM curve and a smooth power-law line for the analytical model — the
-## visual signature of "the analytical form can't capture this".
+## DCM curve and a flat horizontal line for the no-covariate baseline
+## (typical CL doesn't depend on WT there) — the visual signature of
+## "the no-covariate form has nothing to vary with WT".
 ##
 ## Base R only — no `ggplot2` / `vpc` dependency. Output goes to a PDF
 ## under tempdir; we print the path. Open with `open <path>` on macOS,
@@ -327,14 +371,14 @@ plot_dv_pred <- function(sdtab, title, col_pred = "IPRED") {
   abline(0, 1, col = "red", lwd = 2)
 }
 
-plot_dv_pred(fit$sdtab,    "DCM:  DV vs IPRED",        col_pred = "IPRED")
-plot_dv_pred(fit_an$sdtab, "Analytical:  DV vs IPRED", col_pred = "IPRED")
+plot_dv_pred(fit$sdtab,    "DCM:  DV vs IPRED",     col_pred = "IPRED")
+plot_dv_pred(fit_an$sdtab, "No-cov:  DV vs IPRED",  col_pred = "IPRED")
 
 ## Typical CL as a function of WT, both models overlaid.
 ## With the kink ground truth (CL flat below WT=70, allometric above),
-## the analytical line should be smooth-monotone (it has only one
-## exponent to play with), while the DCM curve should bend near WT=70
-## if the NN captured the kink.
+## the no-covariate baseline draws a horizontal line (typical CL doesn't
+## depend on WT), while the DCM curve should bend near WT=70 if the NN
+## captured the kink.
 xrng <- range(c(tv_dcm$WT, tv_an$WT))
 yrng <- range(c(tv_dcm$CL_tv, tv_an$CL_tv))
 plot(tv_dcm$WT, tv_dcm$CL_tv, type = "b", pch = 20, col = "steelblue",
@@ -345,15 +389,15 @@ abline(v = 70, lty = 2, col = "gray60")
 text(70, yrng[1] + diff(yrng) * 0.04, " ground-truth kink (WT = 70)",
      pos = 4, col = "gray40", cex = 0.9)
 legend("topleft",
-       legend = c("DCM (NN)", "Analytical (power)"),
+       legend = c("DCM (NN)", "No-cov baseline"),
        col = c("steelblue", "firebrick"),
        lty = 1, pch = 20, bty = "n")
 
 ## DV vs PRED (population predictions — eta=0). Captures whether the
 ## structural model + covariate model alone are adequate, independent of
 ## individual eta estimates.
-plot_dv_pred(fit$sdtab,    "DCM:  DV vs PRED",        col_pred = "PRED")
-plot_dv_pred(fit_an$sdtab, "Analytical:  DV vs PRED", col_pred = "PRED")
+plot_dv_pred(fit$sdtab,    "DCM:  DV vs PRED",     col_pred = "PRED")
+plot_dv_pred(fit_an$sdtab, "No-cov:  DV vs PRED",  col_pred = "PRED")
 
 ## CWRES vs TIME — symmetric clouds centred on 0 ⇒ residuals are well
 ## behaved. Drift, fanning, or persistent sign indicate misspecification.
@@ -365,7 +409,7 @@ plot_cwres <- function(sdtab, title) {
   abline(h = c(-2, 2), lty = 2, col = "gray60")
 }
 plot_cwres(fit$sdtab,    "DCM:  CWRES vs TIME")
-plot_cwres(fit_an$sdtab, "Analytical:  CWRES vs TIME")
+plot_cwres(fit_an$sdtab, "No-cov:  CWRES vs TIME")
 
 ## ── Page 2: Individual concentration profiles ──────────────────────────
 ## Pick 4 representative subjects: 2 with WT < 70 (below the kink, where
@@ -396,7 +440,7 @@ for (id in selected_ids) {
         col = "firebrick",  lwd = 2, lty = 2)
   if (id == selected_ids[1]) {
     legend("topright",
-           legend = c("Observed", "DCM IPRED", "Analytical IPRED"),
+           legend = c("Observed", "DCM IPRED", "No-cov IPRED"),
            col   = c("black", "steelblue", "firebrick"),
            pch   = c(19, NA, NA),
            lty   = c(NA, 1, 2),
@@ -420,7 +464,7 @@ if (RUN_VPC) {
   vpc_n  <- 200L
   sim_dcm <- ferx_simulate(ex_dcm$model, dataset_path, n_sim = vpc_n,
                            seed = 1L, fit = fit)
-  sim_an  <- ferx_simulate(ex_an$model,  dataset_path, n_sim = vpc_n,
+  sim_an  <- ferx_simulate(nocov_model_path, dataset_path, n_sim = vpc_n,
                            seed = 1L, fit = fit_an)
 
   ## Bin times into ~10 bins and compute observed + simulated percentiles
@@ -451,8 +495,8 @@ if (RUN_VPC) {
   yrng <- range(c(obs_q$q05, obs_q$q95, sim_q_dcm$q05, sim_q_dcm$q95,
                   sim_q_an$q05, sim_q_an$q95), na.rm = TRUE)
 
-  for (panel in list(list(q = sim_q_dcm, title = "VPC — DCM",        col = "steelblue"),
-                     list(q = sim_q_an,  title = "VPC — Analytical", col = "firebrick"))) {
+  for (panel in list(list(q = sim_q_dcm, title = "VPC — DCM",    col = "steelblue"),
+                     list(q = sim_q_an,  title = "VPC — No-cov", col = "firebrick"))) {
     sim_q <- panel$q
     plot(obs_q$t, obs_q$q50, type = "n", ylim = yrng,
          main = panel$title, xlab = "TIME",
@@ -482,8 +526,12 @@ if (RUN_VPC) {
 ## For a production DCM workflow you'd now:
 ##   * Bump maxiter to 500–1000 for actual convergence.
 ##   * Generate a VPC with ferx_simulate() (see ex3_two_cmt_oral_cov.R).
-##   * If the AIC verdict is "analytical wins", that's a real result, not
-##     a failure — DCM only helps when covariates are genuinely non-linear.
+##   * If the AIC verdict is "no-cov wins", that's a real result, not a
+##     failure — DCM only helps when covariates are genuinely informative,
+##     and the parameter penalty for ~141 NN weights is steep.
+##   * Try swapping the no-cov comparator for an analytical power-function
+##     model (e.g. `two_cpt_oral_cov.ferx`) if you want to ask the harder
+##     question: "is DCM worth it vs a parametric covariate model?"
 ##   * If DCM wins, inspect the per-output correlations (§5b above) to
 ##     identify which covariates are pulling weight. Drop "distractor"
 ##     covariates from `inputs = [...]` to reduce parameter count.
