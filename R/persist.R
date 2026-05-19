@@ -342,6 +342,8 @@ ferx_load_fit <- function(path) {
     ),
     error_model = .fitrx_error_model_from_sigma_types(fit$sigma_types),
     shrinkage_eps = as.numeric(fit$shrinkage_eps %||% NA_real_),
+    dw_statistic = .fitrx_opt_num(fit$dw_statistic),
+    iwres_lag1_r = .fitrx_opt_num(fit$iwres_lag1_r),
     covariance_matrix = .fitrx_matrix_to_wire(fit$cov_matrix),
     cov_eigenvalues = .fitrx_opt_num_vec(fit$cov_eigenvalues),
     cov_condition_number = .fitrx_opt_num(fit$cov_condition_number),
@@ -435,6 +437,8 @@ ferx_load_fit <- function(path) {
     se_sigma = .fitrx_unwrap_opt_num_vec(w$sigma$se),
 
     shrinkage_eps = as.numeric(w$shrinkage_eps),
+    dw_statistic = .fitrx_unwrap_opt_num(w$dw_statistic),
+    iwres_lag1_r = .fitrx_unwrap_opt_num(w$iwres_lag1_r),
     cov_matrix = .fitrx_matrix_from_wire(w$covariance_matrix),
     cov_eigenvalues = .fitrx_unwrap_opt_num_vec(w$cov_eigenvalues),
     cov_condition_number = .fitrx_unwrap_opt_num(w$cov_condition_number),

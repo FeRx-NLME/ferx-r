@@ -12,6 +12,16 @@
 
 ## New features
 
+- IWRES autocorrelation diagnostic: `fit$dw_statistic` (pooled Durbin-Watson)
+  and `fit$iwres_lag1_r` (pooled lag-1 Pearson r) are now returned by
+  `ferx_fit()`. A `--- Diagnostics ---` block is printed by `print(fit)` when
+  the values are available; an actionable `message()` is emitted when DW < 1.5
+  or DW > 2.5. The new `check_diagnostics(fit)` function returns a structured
+  list with an `$autocorrelation` data frame and a tidy `$shrinkage` data frame
+  covering both ETA and EPS components. Both fields round-trip through
+  `ferx_save`/`ferx_load`; old `.fitrx` files deserialize with `NA`. Requires
+  ferx-core ≥ 0.1.0 (commit 5653ddae, ferx-core#20). (#6)
+
 - SDE support via Extended Kalman Filter: models with a `[diffusion]` block
   in the `.ferx` file now run through the EKF likelihood. `fit$uses_sde` is
   `TRUE` for these fits; diffusion variance parameters appear in `fit$theta`
