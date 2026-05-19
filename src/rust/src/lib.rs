@@ -881,6 +881,8 @@ fn default_fit_result(
         data_path: None,
         model_hash: None,
         data_hash: None,
+        dw_statistic: f64::NAN,
+        iwres_lag1_r: f64::NAN,
         uses_sde: false,
     }
 }
