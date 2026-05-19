@@ -1664,6 +1664,8 @@ fn ferx_rust_sir(
         } else {
             Some(data_hash.to_string())
         },
+        dw_statistic: f64::NAN,
+        iwres_lag1_r: f64::NAN,
         uses_sde: false,
     };
 
