@@ -1,29 +1,52 @@
 # Two-compartment oral PK, deep compartment model (DCM) variant.
 #
-# Replaces the analytical covariate model with a neural network: a small
-# MLP `TYPICAL_PK` maps subject covariates (WT, CRCL) directly to typical
-# values of CL, V1, Q, V2, KA. Etas attach to the *final* PK parameters
-# (not the NN weights), giving lognormal IIV in the standard mu-ref form.
+# Architecture: baseline PK parameters × NN-driven covariate modulator.
+# A small MLP `TYPICAL_PK` reads subject covariates (WT, CRCL) and
+# outputs a multiplicative *modulation factor* for each PK parameter.
+# Baseline typical values (TVCL, TVV1, ...) carry the absolute scale;
+# the NN learns the (potentially non-linear) covariate-driven deviation
+# from baseline. Etas then apply lognormal IIV on top of the modulated
+# typical value:
+#
+#     CL = TVCL * TYPICAL_PK.CL * exp(ETA_CL)
+#                 └── NN output, ≈ 1.0 at init via exp activation ──┘
+#
+# This factoring is what Janssen 2022 (DOI 10.1002/psp4.12808) actually
+# uses — the NN learns covariate effects, the explicit thetas carry
+# magnitudes. Trying to make the NN produce *absolute* PK values
+# directly from Glorot-initialised weights fails: softplus(0) ≈ 0.69
+# for every output, and the optimizer can't easily span the 1-100×
+# range across CL/V/Q/V2/KA from there — it collapses into degenerate
+# solutions with one output saturated at 0 and the etas absorbing
+# misfit. Keeping a baseline + multiplicative NN modulator side-steps
+# that.
 #
 # Compare with `examples/two_cpt_oral_cov.ferx` — same data, same eta /
-# omega / sigma structure, the only difference is that the analytical
-# covariate model `(WT/70)^THETA_WT * (CRCL/100)^THETA_CRCL` is replaced
-# by an MLP. Janssen et al. 2022 (DOI 10.1002/psp4.12808) introduced this
-# class of model.
+# omega / sigma structure, same baseline thetas. The only difference is
+# that the analytical model multiplies by `(WT/70)^THETA_WT * (CRCL/100)^THETA_CRCL`
+# while this one multiplies by `TYPICAL_PK.CL` (the NN output).
 #
 # Run with the matching R script:
 #   Rscript inst/examples/ex_warfarin_dcm.R
 # Or inline:
 #   library(ferx)
 #   ex <- ferx_example("warfarin_dcm")
-#   fit <- ferx_fit(ex$model, ex$data)
+#   fit <- ferx_fit(ex$model, ex$data, settings = list(optimizer = "lbfgs"))
 #   print(fit)
 #
 # Requires ferx-r built with the `nn` cargo feature (forwards to
-# ferx-core/nn). See `vignette("dcm")` once it ships.
+# ferx-core/nn). See `docs/src/model-file/covariate-nn.md` in ferx-core.
 
 [parameters]
-  # No theta-on-covariate (THETA_WT, THETA_CRCL) needed — the NN learns those.
+  # Baseline typical values. Initial estimates roughly match the values
+  # used to simulate the bundled covariate datasets (see Janssen 2022
+  # §3 for typical warfarin-style numbers).
+  theta TVCL(4.0,  0.1,  100.0)
+  theta TVV1(40.0, 1.0,  500.0)
+  theta TVQ (8.0,  0.1,  100.0)
+  theta TVV2(80.0, 1.0,  500.0)
+  theta TVKA(1.0,  0.01, 10.0)
+
   omega ETA_CL ~ 0.15
   omega ETA_V1 ~ 0.15
   omega ETA_Q  ~ 0.08
@@ -35,30 +58,40 @@
 [covariate_nn TYPICAL_PK]
   # Inputs: subject-static covariates from the NONMEM CSV.
   inputs     = [WT, CRCL]
-  # Outputs: PK parameter names. They're routed by name into PkParams
-  # slots via `name_to_index` (`cl`, `v` | `v1`, `q` | `q2`, `v2`, `ka`,
-  # `f`, `q3`, `v3`, `lagtime` | `alag`).
+  # Outputs: PK parameter names. The slot routing uses name_to_index
+  # (`cl`, `v` | `v1`, `q` | `q2`, `v2`, `ka`, …). Semantics here are
+  # "multiplicative covariate modulator on the named PK param", not
+  # "absolute PK value".
   outputs    = [CL, V1, Q, V2, KA]
   # MLP shape: 2 → 8 → 8 → 5. Total weights:
-  #   2*8 + 8 + 8*8 + 8 + 8*5 + 5 = 141.
+  #   2*8 + 8 + 8*8 + 8 + 8*5 + 5 = 141 parameters auto-added to theta.
   layers     = [8, 8]
-  # Hidden activation: tanh keeps hidden units in a smooth bounded regime.
-  # Output activation: softplus guarantees positive PK parameters without
-  # exponential blow-up. See docs/src/model-file/covariate-nn.md for the
-  # tradeoffs.
+  # Hidden activation: tanh — bounded, smooth, sensible default.
+  # Output activation: exp — gives a strictly-positive multiplier that's
+  # exactly 1.0 at init (exp(0) = 1). Softplus would give 0.69 at init,
+  # close enough but biased low; exp keeps the baseline thetas truly
+  # capturing the typical-value at init.
   activation = tanh
-  output     = softplus
+  output     = exp
 
 [individual_parameters]
-  # Mu-ref composition: `TYPICAL_PK.X` is the NN output for output X (in
-  # the declared `outputs` order). Combine with `exp(ETA_X)` for the
-  # standard lognormal IIV form. The parser recognises this as a
-  # lognormal mu-ref and reports it as such in `mu_refs` / `eta_param_info`.
-  CL = TYPICAL_PK.CL * exp(ETA_CL)
-  V1 = TYPICAL_PK.V1 * exp(ETA_V1)
-  Q  = TYPICAL_PK.Q  * exp(ETA_Q)
-  V2 = TYPICAL_PK.V2 * exp(ETA_V2)
-  KA = TYPICAL_PK.KA * exp(ETA_KA)
+  # Multiplicative form: baseline × NN modulator × exp(eta).
+  # At init the NN output ≈ 1.0, so initial typical values fall back to
+  # the declared TVCL / TVV1 / ... thetas. As the fit progresses, the NN
+  # learns the covariate-driven deviations from baseline.
+  #
+  # Note on mu-ref: Pattern 1 (`<anchor> * exp(eta)`) requires exactly
+  # one anchor candidate in the multiplicative chain. This expression
+  # has TWO — TVCL (Theta) and TYPICAL_PK.CL (NnOutput) — so the
+  # parser does NOT register it as a mu-ref. FOCEI still works fine
+  # (mu-ref is a performance fast-path, not a correctness requirement),
+  # just without the AD-aware re-centering. A future extension that
+  # supports composite anchors (`Theta × NnOutput`) would close that gap.
+  CL = TVCL * TYPICAL_PK.CL * exp(ETA_CL)
+  V1 = TVV1 * TYPICAL_PK.V1 * exp(ETA_V1)
+  Q  = TVQ  * TYPICAL_PK.Q  * exp(ETA_Q)
+  V2 = TVV2 * TYPICAL_PK.V2 * exp(ETA_V2)
+  KA = TVKA * TYPICAL_PK.KA * exp(ETA_KA)
 
 [structural_model]
   pk two_cpt_oral(cl=CL, v1=V1, q=Q, v2=V2, ka=KA)
@@ -67,19 +100,16 @@
   DV ~ proportional(PROP_ERR)
 
 [fit_options]
-  # FOCEI runs end-to-end on NN-bearing models today. The optimizer
-  # treats the auto-generated NN weight thetas (`W_TYPICAL_PK_*`,
-  # `B_TYPICAL_PK_*`) as ordinary parameters and minimises the FOCEI
-  # OFV through gradient steps that include them.
-  #
-  # Convergence on a real fit will be slow (the NN weight space is much
-  # larger than a classical model's). For exploration, start with the
-  # `maxiter` here and monitor OFV between iterations; bump to 500–1000
-  # once a model is showing sensible behavior.
+  # FOCEI works on NN-bearing models today, with a caveat: the default
+  # SLSQP outer optimizer currently silently no-ops on mu-ref-active
+  # models (see ferx-core#55). Use `optimizer = "lbfgs"` at call time
+  # via ferx_fit's `settings` argument, or set it here.
   method = focei
   maxiter = 200
-  # Covariance is left enabled by default; NN-weight standard errors are
-  # expected to be poorly conditioned but omega/sigma SEs remain
-  # meaningful. Set to `false` to skip if the post-fit covariance step
-  # is taking too long on large NN models.
+  optimizer = lbfgs
+  # Covariance is left enabled by default; NN-weight standard errors
+  # are expected to be poorly conditioned but the baseline TVCL/TVV1
+  # SEs + omega/sigma SEs remain meaningful. Set to `false` to skip
+  # if the post-fit covariance step is taking too long on large NN
+  # models.
   covariance = true
