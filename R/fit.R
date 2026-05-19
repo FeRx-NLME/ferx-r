@@ -474,6 +474,30 @@
 #' ))
 #' }
 #'
+#' \strong{Multi-start optimization:}
+#'
+#' Runs \code{n_starts} independent fits from perturbed initial values in
+#' parallel (via rayon) and returns the converged result with the lowest OFV.
+#' Default \code{n_starts = 1} disables multi-start (single run, no overhead).
+#' Useful for models prone to local minima: Michaelis-Menten elimination,
+#' full-block omega, or many covariate parameters. On an 8-core machine
+#' \code{n_starts = 8} costs approximately the same wall-clock time as a single run.
+#'
+#' Start 0 always uses the exact initial values from the model file.
+#' Starts 1..n apply a log-space perturbation of size \code{start_sigma}
+#' (default 0.3) to each theta.
+#'
+#' \preformatted{
+#' # 8 parallel starts — approximately the same wall time as one run on 8 cores
+#' ferx_fit(m, d, settings = list(n_starts = 8L))
+#'
+#' # Wider perturbation for ridge-shaped surfaces (e.g. Michaelis-Menten):
+#' ferx_fit(m, d, settings = list(n_starts = 8L, start_sigma = 0.5))
+#'
+#' # Pin the perturbation RNG seed for reproducibility (independent of the SAEM seed):
+#' ferx_fit(m, d, settings = list(n_starts = 8L, multi_start_seed = 123L))
+#' }
+#'
 #' @section Post-fit outputs and pipe extensions:
 #'
 #' \code{ferx_fit()} returns a \code{ferx_fit} object. All of the following
