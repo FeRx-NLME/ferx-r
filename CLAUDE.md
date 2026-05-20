@@ -93,7 +93,25 @@ This applies to: `print.ferx_fit`, `ferx_estimates()`, `ferx_cor_matrix()` (via 
 
 Always run `roxygen2::roxygenize()` and commit the updated `man/` files before opening or updating a PR — the `.Rd` files are checked into the repo and must stay in sync with the `#'` comments in `R/`.
 
-Never use `\uXXXX` escape sequences in roxygen `#'` comments. Also never use non-ASCII characters (em-dashes, ellipses, etc.) inside `\preformatted{}` blocks or in `@examples` code comment lines (lines starting with `#' #`) — RStudio's Rd renderer renders them as `?` or silently truncates the help page. Use ASCII alternatives (`:`, `(...)`, `etc.`) in those contexts. They get written literally into `.Rd` files, and `R CMD check --as-cran` on older R versions does not support `\uXXXX` in Rd, producing warnings. Use the actual UTF-8 characters directly (e.g. `—` not `—`, `…` not `…`).
+**No non-ASCII characters anywhere in `R/*.R` files.** `R CMD check --as-cran` requires pure ASCII in all R source files. Violations that have burned us before:
+
+| What to avoid | Use instead |
+|---|---|
+| `\uXXXX` escape sequences in `#'` comments | literal ASCII |
+| em-dash `—`, en-dash `–` | `-` or `:` |
+| ellipsis `…` | `...` or `etc.` |
+| box-drawing chars in comment banners | `-- Section title --` |
+
+Non-ASCII in `\preformatted{}` blocks or `@examples` code comments (`#' #`) also causes RStudio's help viewer to render `?` or silently truncate the page.
+
+**Before every PR, verify with:**
+```r
+for (f in list.files("R", pattern = "\\.R$", full.names = TRUE)) {
+  n <- sum(chartr(rawToChar(as.raw(128:255)), strrep("x", 128), readLines(f, warn = FALSE)) != readLines(f, warn = FALSE))
+  if (n > 0) message(f, ": ", n, " non-ASCII lines")
+}
+```
+Or from the shell: `python3 -c "import os; [print(f) for f in __import__('glob').glob('R/*.R') if any(b > 127 for b in open(f,'rb').read())]"`
 
 ## Pull Requests
 
