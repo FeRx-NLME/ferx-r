@@ -118,6 +118,15 @@
 #'   Applies to all outer optimizers: NLopt FOCE/FOCEI (BOBYQA, SLSQP,
 #'   L-BFGS, MMA), the hand-rolled BFGS, Gauss-Newton / BHHH, and the SAEM
 #'   M-step.
+#' @param max_unconverged_frac Numeric scalar in \[0, 1\] or \code{NULL}
+#'   (default). When non-\code{NULL}, the fit is flagged as converged even if
+#'   up to this fraction of subjects failed their inner EBE loop, instead of
+#'   raising an error. Useful for large datasets with a handful of difficult
+#'   subjects.
+#' @param min_obs_for_convergence_check Integer or \code{NULL} (default).
+#'   Minimum number of observations a subject must have before its inner-loop
+#'   convergence is included in the \code{max_unconverged_frac} check. Subjects
+#'   with fewer observations are excluded from the check.
 #' @param settings Optional named list of estimation-method-specific options
 #'   forwarded to the Rust \code{FitOptions}. Use this to tune knobs that do
 #'   not have a dedicated \code{ferx_fit()} argument, without needing a new
