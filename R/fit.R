@@ -656,6 +656,11 @@
 #' fit_sde$uses_sde                  # TRUE
 #' fit_sde$theta["DIFF_CENTRAL"]     # fitted diffusion variance
 #' ferx_estimates(fit_sde)           # DIFF_CENTRAL appears in theta block
+#'
+#' # -- Multi-start (avoid local minima) ----------------------------------------
+#' ex <- ferx_example("warfarin")
+#' fit_ms <- ferx_fit(ex$model, ex$data, settings = list(n_starts = 4L))
+#' fit_ms$ofv
 #' }
 #'
 #' @param ... Arguments passed to \code{ferx_fit.default} (e.g.
