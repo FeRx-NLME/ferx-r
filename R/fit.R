@@ -1294,7 +1294,18 @@ print.ferx_fit <- function(x, ...) {
   cat(strrep("-", 52), "\n", sep = "")
   theta_names <- names(x$theta)
   if (is.null(theta_names)) theta_names <- paste0("THETA", seq_along(x$theta))
+  # Logical mask of NN-weight thetas to skip — they appear in the compact
+  # NEURAL NETWORKS block below (Option E). 1-based indices to match `seq_along`.
+  nn_skip <- logical(length(x$theta))
+  if (!is.null(x$neural_networks)) {
+    for (nn in x$neural_networks) {
+      if (!is.null(nn$weights_offset) && !is.null(nn$n_weights) && nn$n_weights > 0) {
+        nn_skip[seq(nn$weights_offset + 1L, nn$weights_offset + nn$n_weights)] <- TRUE
+      }
+    }
+  }
   for (i in seq_along(x$theta)) {
+    if (nn_skip[i]) next
     est       <- x$theta[i]
     transform <- if (!is.null(x$theta_transforms) && length(x$theta_transforms) >= i) x$theta_transforms[i] else "identity"
     if (!is.null(x$se_theta) && length(x$se_theta) >= i) {
@@ -1327,6 +1338,31 @@ print.ferx_fit <- function(x, ...) {
         sprintf("95%% CI: [%.4f, %.4f]", .ferx_inv_logit(est - 1.96 * se_val), .ferx_inv_logit(est + 1.96 * se_val))
       } else ""
       cat(sprintf("  %-14s %12.4f                    %s\n", "(typical)", tv, ci_str))
+    }
+  }
+
+  # NEURAL NETWORKS
+  # Compact summary block when `[covariate_nn]` blocks are present (only
+  # populated when ferx-r was built with `--features nn` and the model
+  # declares NN blocks). The per-weight thetas (W_NN_*, B_NN_*) are still
+  # in `x$theta`; this block exists so users get a readable overview
+  # without scrolling past 100+ rows.
+  if (!is.null(x$neural_networks) && length(x$neural_networks) > 0) {
+    cat("\n--- NEURAL NETWORKS ---\n")
+    for (nn in x$neural_networks) {
+      shape_str <- paste(nn$shape, collapse = ", ")
+      cat(sprintf(
+        "%s  shape=[%s]  activation=%s/%s  n_weights=%d\n",
+        nn$name, shape_str, nn$hidden_activation, nn$output_activation, nn$n_weights
+      ))
+      cat(sprintf("  inputs:  [%s]\n", paste(nn$input_names, collapse = ", ")))
+      cat(sprintf("  outputs: [%s]\n", paste(nn$output_names, collapse = ", ")))
+      if (length(nn$weights) > 0) {
+        cat(sprintf(
+          "  weights: min %.4f  max %.4f  mean %.4f  std %.4f\n",
+          min(nn$weights), max(nn$weights), mean(nn$weights), stats::sd(nn$weights)
+        ))
+      }
     }
   }
 

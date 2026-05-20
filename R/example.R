@@ -30,10 +30,12 @@
 #'     (analytical; THETA_F specified directly on the (0,1) scale)}
 #'   \item{bioavailability_ode}{ODE equivalent of \code{bioavailability} — same model
 #'     and data via explicit depot/central ODEs; useful for comparing analytical vs ODE paths}
-#'   \item{warfarin_dcm}{Two-compartment oral with a deep compartment model (DCM): a small
-#'     MLP (\code{[covariate_nn]} block) replaces the analytical covariate model, mapping
-#'     WT and CRCL directly to typical CL, V1, Q, V2, KA. Requires the \code{nn} feature.
-#'     Compare with \code{two_cpt_oral_cov} for the analytical equivalent.}
+#'   \item{warfarin_dcm}{Two-compartment oral with a Deep Compartment Model
+#'     covariate model: a small neural network (\code{[covariate_nn TYPICAL_PK]})
+#'     reads WT + CRCL and outputs a multiplicative modulator on the baseline
+#'     TVCL/TVV1/TVQ/TVV2/TVKA thetas (i.e. \code{CL = TVCL * TYPICAL_PK.CL *
+#'     exp(ETA_CL)}), with lognormal IIV on top. Requires ferx-r built with the
+#'     \code{nn} cargo feature. See \code{inst/examples/ex_warfarin_dcm.R}.}
 #' }
 #' Call \code{ferx_example()} with no arguments to list all available names.
 #'

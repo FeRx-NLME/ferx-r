@@ -887,6 +887,8 @@ fn default_fit_result(
         omega_init_as_sd: Vec::new(),
         sigma_init_as_sd: Vec::new(),
         kappa_init_as_sd: Vec::new(),
+        #[cfg(feature = "nn")]
+        neural_networks: Vec::new(),
     }
 }
 
@@ -1281,8 +1283,54 @@ fn fit_result_to_list(
         // annotate estimates with "[initial specified as SD]".
         omega_init_as_sd = result.omega_init_as_sd.clone(),
         sigma_init_as_sd = result.sigma_init_as_sd.clone(),
-        kappa_init_as_sd = result.kappa_init_as_sd.clone()
+        kappa_init_as_sd = result.kappa_init_as_sd.clone(),
+        // `[covariate_nn]` blocks from the model file (Phase A M1 of ferx-core's
+        // DCM plan). One R sub-list per NN; empty list when the `nn` feature is
+        // off or no NN blocks are declared. Inspectable in R as
+        // `fit$neural_networks[[1]]$shape`, etc.
+        neural_networks = neural_networks_list(result)
     )
+}
+
+/// Build the R-side `neural_networks` list from `result.neural_networks`.
+/// Empty list when the `nn` feature is off (each NN's info doesn't exist
+/// on FitResult in that build). Each sub-list mirrors `NeuralNetworkInfo`
+/// plus a `weights` vector of the trained values for downstream rendering
+/// (e.g. a `print()` method or a heatmap).
+#[cfg(feature = "nn")]
+fn neural_networks_list(result: &FitResult) -> Robj {
+    let mut out: Vec<Robj> = Vec::with_capacity(result.neural_networks.len());
+    let mut names: Vec<String> = Vec::with_capacity(result.neural_networks.len());
+    for nn in &result.neural_networks {
+        let weights: Vec<f64> = result.theta
+            [nn.weights_offset..nn.weights_offset + nn.n_weights]
+            .to_vec();
+        let entry = list!(
+            name = nn.name.clone(),
+            shape = nn.shape.iter().map(|s| *s as i32).collect::<Vec<i32>>(),
+            hidden_activation = nn.hidden_activation.clone(),
+            output_activation = nn.output_activation.clone(),
+            n_weights = nn.n_weights as i32,
+            weights_offset = nn.weights_offset as i32,
+            input_names = nn.input_names.clone(),
+            output_names = nn.output_names.clone(),
+            weights = weights,
+        );
+        names.push(nn.name.clone());
+        out.push(entry.into());
+    }
+    let mut list = List::from_values(out);
+    let _ = list.set_names(&names);
+    list.into()
+}
+
+/// Empty list when the `nn` feature isn't built. Keeps the R-side schema
+/// stable (callers always see `fit$neural_networks` as a list) so they can
+/// `length(fit$neural_networks)` without branching on build features.
+#[cfg(not(feature = "nn"))]
+fn neural_networks_list(_result: &FitResult) -> Robj {
+    let v: Vec<Robj> = Vec::new();
+    List::from_values(v).into()
 }
 
 // -- Helper: build per-subject EBE eta data frame --
@@ -1679,6 +1727,8 @@ fn ferx_rust_sir(
         omega_init_as_sd: Vec::new(),
         sigma_init_as_sd: Vec::new(),
         kappa_init_as_sd: Vec::new(),
+        #[cfg(feature = "nn")]
+        neural_networks: Vec::new(),
     };
 
     let mut opts = FitOptions::default();
