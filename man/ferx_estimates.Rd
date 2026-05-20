@@ -23,7 +23,7 @@ theta rows.
 \description{
 Extracts all estimated parameters (theta, omega diagonal, sigma) into a
 single tidy data frame, adding percent relative standard error (\\%RSE),
-95\\% confidence intervals, and—for log/logit-transformed thetas—natural-scale
+95\\% confidence intervals, and-for log/logit-transformed thetas-natural-scale
 back-transformed estimates and CIs.
 }
 \details{

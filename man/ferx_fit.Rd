@@ -38,7 +38,7 @@ on \code{CENS=1} rows); \code{"drop"} disables M3.}
 \item{threads}{Number of worker threads for the per-subject parallel loops
 in the Rust backend (inner EBE search, SAEM, SIR). \code{NULL} (default)
 leaves the backend's thread pool at its default of one worker per logical
-CPU. Pass an integer to cap the pool — useful on shared machines, in CI,
+CPU. Pass an integer to cap the pool - useful on shared machines, in CI,
 or to avoid SMT-induced contention (try
 \code{parallel::detectCores(logical = FALSE)}). The setting is per-call,
 so successive fits in the same R session can use different values.}
@@ -123,7 +123,7 @@ the optimizer works in a near-unit-magnitude space. The scale is
 computed once from the initial point and held fixed for the entire run.
 
 \strong{When to set \code{FALSE}.} Mathematically the scaling is
-transparent — the OFV, estimates, standard errors, and diagnostics
+transparent - the OFV, estimates, standard errors, and diagnostics
 should match the unscaled fit to numerical tolerance. Set
 \code{scale_params = FALSE} to:
 \itemize{
@@ -147,7 +147,7 @@ wrapper release for each option. Recognized keys include SAEM
 (\code{n_exploration}, \code{n_convergence}, \code{n_mh_steps},
 \code{adapt_interval}, \code{seed}), SIR tuning (\code{sir_samples},
 \code{sir_resamples}, \code{sir_seed}), Gauss-Newton (\code{gn_lambda}),
-optimizer selection (\code{optimizer} — one of \code{"bobyqa"} (default),
+optimizer selection (\code{optimizer} - one of \code{"bobyqa"} (default),
 \code{"slsqp"}, \code{"lbfgs"}, \code{"nlopt_lbfgs"}, \code{"mma"},
 \code{"bfgs"}, \code{"trust_region"}; also \code{global_search},
 \code{global_maxeval}), the outer optimizer iteration cap
@@ -156,7 +156,7 @@ optimizer selection (\code{optimizer} — one of \code{"bobyqa"} (default),
 for \code{optimizer = "trust_region"} (\code{steihaug_max_iters}).
 Values that duplicate a dedicated argument
 (\code{method}, \code{covariance}, \code{verbose},
-\code{bloq_method}, \code{threads}, \code{sir}) are rejected — pass
+\code{bloq_method}, \code{threads}, \code{sir}) are rejected - pass
 them via the dedicated argument. Unknown keys and malformed values
 also raise an error.
 \strong{Precedence}: dedicated \code{ferx_fit()} arguments win over
@@ -257,7 +257,7 @@ no name.}
 path with its extension stripped.}
 \item{gradient}{The inner-loop gradient method as requested by the
 caller (one of \code{"auto"}, \code{"ad"}, \code{"fd"}). The
-\emph{resolved} method may differ — see \code{gradient_used} and the
+\emph{resolved} method may differ - see \code{gradient_used} and the
 \code{gradient} argument.}
 \item{gradient_used}{The inner-loop gradient method the engine actually
 used: \code{"ad"}, \code{"fd"}, or \code{"N/A"} (derivative-free /
@@ -341,7 +341,7 @@ appears in both sources with a different value.}
 \code{[diffusion]} block and the fit used the Extended Kalman Filter
 (EKF) likelihood. \code{FALSE} for standard ODE/analytical models.
 When \code{TRUE}, one or more \code{DIFF_*} entries appear in
-\code{theta} and \code{theta_names} — these are diffusion
+\code{theta} and \code{theta_names} - these are diffusion
 \emph{variances} (not standard deviations) for the named state
 compartments.}
 \item{omega_init_as_sd}{Logical vector, one entry per BSV eta. \code{TRUE}
@@ -371,8 +371,8 @@ powered by automatic differentiation (Enzyme).
 
 ODE-based PK/PD models occasionally produce autocorrelated IWRES when the
 structural model is misspecified (missing compartment, unmodelled feedback).
-Adding continuous within-subject process noise via an SDE framework — solved
-by an Extended Kalman Filter (EKF) — absorbs this drift and yields a
+Adding continuous within-subject process noise via an SDE framework - solved
+by an Extended Kalman Filter (EKF) - absorbs this drift and yields a
 better-calibrated likelihood.
 
 Add a \code{[diffusion]} block to the \code{.ferx} model file to enable SDE
@@ -391,7 +391,7 @@ standard deviations. A value of 0.5 means \eqn{\sigma^2 = 0.5}, not
 \code{DIFF_<STATE>} (e.g. \code{DIFF_CENTRAL}). Standard errors and
 \code{ferx_estimates()} treat them as regular thetas.
 \item Autodifferentiation (Enzyme AD) is incompatible with the EKF
-covariance propagation — the engine automatically falls back to
+covariance propagation - the engine automatically falls back to
 finite differences and emits a warning.
 \item SAEM is not supported with SDE models; a hard error is raised.
 \item \code{fit$uses_sde} is \code{TRUE} whenever a \code{[diffusion]}
@@ -425,7 +425,7 @@ explicitly to \code{ferx_fit()}.
 \section{Controlling estimation}{
 
 
-\strong{Estimation method} — pass a single method or a vector to chain
+\strong{Estimation method} - pass a single method or a vector to chain
 methods in sequence (each stage seeds the next with its converged
 parameters):
 \preformatted{
@@ -433,13 +433,13 @@ ferx_fit(m, d, method = "focei")
 ferx_fit(m, d, method = c("saem", "focei"))  # SAEM warm-start, FOCEI polish
 }
 
-\strong{Standard errors} — the covariance step is on by default:
+\strong{Standard errors} - the covariance step is on by default:
 \preformatted{
 ferx_fit(m, d, covariance = TRUE)   # default: produces SE / %RSE
 ferx_fit(m, d, covariance = FALSE)  # skip for speed during development
 }
 
-\strong{Parallelism} — cap the Rust thread pool:
+\strong{Parallelism} - cap the Rust thread pool:
 \preformatted{
 ferx_fit(m, d, threads = parallel::detectCores(logical = FALSE))
 }
@@ -457,7 +457,7 @@ ferx_fit(m, d, gradient = "ad")    # force automatic differentiation
 ferx_fit(m, d, gradient = "fd")    # force finite differences
 }
 
-\strong{Optimizer trace} — write a per-iteration CSV for convergence
+\strong{Optimizer trace} - write a per-iteration CSV for convergence
 diagnostics:
 \preformatted{
 fit <- ferx_fit(m, d, optimizer_trace = TRUE)
@@ -471,7 +471,7 @@ ferx_plot_trace(fit)
 The \code{settings} argument forwards a named list of low-level options to
 the Rust backend without requiring a new wrapper release. Arguments with
 dedicated parameters (e.g. \code{method}, \code{covariance}) cannot be
-duplicated in \code{settings} — pass them via the named argument.
+duplicated in \code{settings} - pass them via the named argument.
 
 \strong{Outer optimizer selection:}
 \preformatted{
@@ -567,7 +567,7 @@ fit |> ferx_model_inspect() # model structure auto-derived by the engine
 fit |> ferx_plot_trace()    # convergence trace (needs optimizer_trace = TRUE)
 }
 
-Diagnostics data frame (PRED, IPRED, CWRES, ETAs, …) lives in
+Diagnostics data frame (PRED, IPRED, CWRES, ETAs, ...) lives in
 \code{fit$sdtab} and can be used directly:
 \preformatted{
 fit$sdtab

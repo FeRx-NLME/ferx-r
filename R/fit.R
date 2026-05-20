@@ -22,7 +22,7 @@
 #' @param threads Number of worker threads for the per-subject parallel loops
 #'   in the Rust backend (inner EBE search, SAEM, SIR). \code{NULL} (default)
 #'   leaves the backend's thread pool at its default of one worker per logical
-#'   CPU. Pass an integer to cap the pool — useful on shared machines, in CI,
+#'   CPU. Pass an integer to cap the pool - useful on shared machines, in CI,
 #'   or to avoid SMT-induced contention (try
 #'   \code{parallel::detectCores(logical = FALSE)}). The setting is per-call,
 #'   so successive fits in the same R session can use different values.
@@ -102,7 +102,7 @@
 #'   computed once from the initial point and held fixed for the entire run.
 #'
 #'   \strong{When to set \code{FALSE}.} Mathematically the scaling is
-#'   transparent — the OFV, estimates, standard errors, and diagnostics
+#'   transparent - the OFV, estimates, standard errors, and diagnostics
 #'   should match the unscaled fit to numerical tolerance. Set
 #'   \code{scale_params = FALSE} to:
 #'   \itemize{
@@ -125,7 +125,7 @@
 #'   (\code{n_exploration}, \code{n_convergence}, \code{n_mh_steps},
 #'   \code{adapt_interval}, \code{seed}), SIR tuning (\code{sir_samples},
 #'   \code{sir_resamples}, \code{sir_seed}), Gauss-Newton (\code{gn_lambda}),
-#'   optimizer selection (\code{optimizer} — one of \code{"bobyqa"} (default),
+#'   optimizer selection (\code{optimizer} - one of \code{"bobyqa"} (default),
 #'   \code{"slsqp"}, \code{"lbfgs"}, \code{"nlopt_lbfgs"}, \code{"mma"},
 #'   \code{"bfgs"}, \code{"trust_region"}; also \code{global_search},
 #'   \code{global_maxeval}), the outer optimizer iteration cap
@@ -134,7 +134,7 @@
 #'   for \code{optimizer = "trust_region"} (\code{steihaug_max_iters}).
 #'   Values that duplicate a dedicated argument
 #'   (\code{method}, \code{covariance}, \code{verbose},
-#'   \code{bloq_method}, \code{threads}, \code{sir}) are rejected — pass
+#'   \code{bloq_method}, \code{threads}, \code{sir}) are rejected - pass
 #'   them via the dedicated argument. Unknown keys and malformed values
 #'   also raise an error.
 #'   \strong{Precedence}: dedicated \code{ferx_fit()} arguments win over
@@ -232,7 +232,7 @@
 #'     path with its extension stripped.}
 #'   \item{gradient}{The inner-loop gradient method as requested by the
 #'     caller (one of \code{"auto"}, \code{"ad"}, \code{"fd"}). The
-#'     \emph{resolved} method may differ — see \code{gradient_used} and the
+#'     \emph{resolved} method may differ - see \code{gradient_used} and the
 #'     \code{gradient} argument.}
 #'   \item{gradient_used}{The inner-loop gradient method the engine actually
 #'     used: \code{"ad"}, \code{"fd"}, or \code{"N/A"} (derivative-free /
@@ -316,7 +316,7 @@
 #'     \code{[diffusion]} block and the fit used the Extended Kalman Filter
 #'     (EKF) likelihood. \code{FALSE} for standard ODE/analytical models.
 #'     When \code{TRUE}, one or more \code{DIFF_*} entries appear in
-#'     \code{theta} and \code{theta_names} — these are diffusion
+#'     \code{theta} and \code{theta_names} - these are diffusion
 #'     \emph{variances} (not standard deviations) for the named state
 #'     compartments.}
 #'   \item{omega_init_as_sd}{Logical vector, one entry per BSV eta. \code{TRUE}
@@ -341,8 +341,8 @@
 #'
 #' ODE-based PK/PD models occasionally produce autocorrelated IWRES when the
 #' structural model is misspecified (missing compartment, unmodelled feedback).
-#' Adding continuous within-subject process noise via an SDE framework — solved
-#' by an Extended Kalman Filter (EKF) — absorbs this drift and yields a
+#' Adding continuous within-subject process noise via an SDE framework - solved
+#' by an Extended Kalman Filter (EKF) - absorbs this drift and yields a
 #' better-calibrated likelihood.
 #'
 #' Add a \code{[diffusion]} block to the \code{.ferx} model file to enable SDE
@@ -361,7 +361,7 @@
 #'         \code{DIFF_<STATE>} (e.g. \code{DIFF_CENTRAL}). Standard errors and
 #'         \code{ferx_estimates()} treat them as regular thetas.
 #'   \item Autodifferentiation (Enzyme AD) is incompatible with the EKF
-#'         covariance propagation — the engine automatically falls back to
+#'         covariance propagation - the engine automatically falls back to
 #'         finite differences and emits a warning.
 #'   \item SAEM is not supported with SDE models; a hard error is raised.
 #'   \item \code{fit$uses_sde} is \code{TRUE} whenever a \code{[diffusion]}
@@ -391,7 +391,7 @@
 #'
 #' @section Controlling estimation:
 #'
-#' \strong{Estimation method} — pass a single method or a vector to chain
+#' \strong{Estimation method} - pass a single method or a vector to chain
 #' methods in sequence (each stage seeds the next with its converged
 #' parameters):
 #' \preformatted{
@@ -399,13 +399,13 @@
 #' ferx_fit(m, d, method = c("saem", "focei"))  # SAEM warm-start, FOCEI polish
 #' }
 #'
-#' \strong{Standard errors} — the covariance step is on by default:
+#' \strong{Standard errors} - the covariance step is on by default:
 #' \preformatted{
 #' ferx_fit(m, d, covariance = TRUE)   # default: produces SE / %RSE
 #' ferx_fit(m, d, covariance = FALSE)  # skip for speed during development
 #' }
 #'
-#' \strong{Parallelism} — cap the Rust thread pool:
+#' \strong{Parallelism} - cap the Rust thread pool:
 #' \preformatted{
 #' ferx_fit(m, d, threads = parallel::detectCores(logical = FALSE))
 #' }
@@ -423,7 +423,7 @@
 #' ferx_fit(m, d, gradient = "fd")    # force finite differences
 #' }
 #'
-#' \strong{Optimizer trace} — write a per-iteration CSV for convergence
+#' \strong{Optimizer trace} - write a per-iteration CSV for convergence
 #' diagnostics:
 #' \preformatted{
 #' fit <- ferx_fit(m, d, optimizer_trace = TRUE)
@@ -435,7 +435,7 @@
 #' The \code{settings} argument forwards a named list of low-level options to
 #' the Rust backend without requiring a new wrapper release. Arguments with
 #' dedicated parameters (e.g. \code{method}, \code{covariance}) cannot be
-#' duplicated in \code{settings} — pass them via the named argument.
+#' duplicated in \code{settings} - pass them via the named argument.
 #'
 #' \strong{Outer optimizer selection:}
 #' \preformatted{
@@ -529,7 +529,7 @@
 #' fit |> ferx_plot_trace()    # convergence trace (needs optimizer_trace = TRUE)
 #' }
 #'
-#' Diagnostics data frame (PRED, IPRED, CWRES, ETAs, …) lives in
+#' Diagnostics data frame (PRED, IPRED, CWRES, ETAs, ...) lives in
 #' \code{fit$sdtab} and can be used directly:
 #' \preformatted{
 #' fit$sdtab
@@ -746,11 +746,11 @@ ferx_fit.default <- function(model, data,
   # Merge optimizer_trace into settings so apply_fit_option handles it on the
   # Rust side (it's already in framework_keys()).  User-supplied settings take
   # precedence if somehow duplicated, which Rust will reject as a duplicate key
-  # — but we forbid that below via the RESERVED list.
+  # - but we forbid that below via the RESERVED list.
   if (isTRUE(optimizer_trace)) {
     settings <- c(list(optimizer_trace = TRUE), settings)
   }
-  # Only inject scale_params when FALSE — the Rust default is true, so omitting
+  # Only inject scale_params when FALSE - the Rust default is true, so omitting
   # it preserves the behaviour callers expect when they don't pass the argument.
   if (isFALSE(scale_params)) {
     settings <- c(list(scale_params = FALSE), settings)
@@ -786,7 +786,7 @@ ferx_fit.default <- function(model, data,
   # Read [fit_options] from the model file and detect conflicts with R call-time
   # arguments. Precedence: dedicated R args > settings list > model file. We
   # warn (not error) so the user is informed which value actually runs. Only
-  # args the caller *explicitly* passed are flagged — accepting a default is
+  # args the caller *explicitly* passed are flagged - accepting a default is
   # not an override of the model file.
   model_file_opts <- .ferx_parse_model_fit_options(model)
   explicit_args <- names(match.call())[-1L]
@@ -940,7 +940,7 @@ ferx_fit.default <- function(model, data,
 
   result <- .ferx_apply_cov_sentinels(result)
 
-  # ETA normality (Shapiro-Wilk) — computed in R from per-subject EBEs
+  # ETA normality (Shapiro-Wilk) - computed in R from per-subject EBEs
   result$eta_normality <- .ferx_compute_eta_normality(result$ebe_etas)
   # Push normality warnings into the warnings vector
   if (!is.null(result$eta_normality)) {
@@ -1031,7 +1031,7 @@ ferx_fit.default <- function(model, data,
     result$eta_log_transformed <- NULL
   }
 
-  # Parameter transform metadata — fall back gracefully for older ferx-core binaries
+  # Parameter transform metadata - fall back gracefully for older ferx-core binaries
   # that don't populate these vectors (empty character() from FFI ? treat as absent).
   n_eta_fit   <- if (!is.null(result$omega)) nrow(result$omega) else 0L
   n_theta_fit <- length(result$theta)
@@ -1068,7 +1068,7 @@ ferx_fit.default <- function(model, data,
   result$data_name <- tools::file_path_sans_ext(basename(data))
 
   # Fall back to the model file's basename when the .ferx file declares no name.
-  # ferx-core returns "Unnamed" (not NULL/"") when no [model_name] is declared —
+  # ferx-core returns "Unnamed" (not NULL/"") when no [model_name] is declared -
   # treat it the same as absent. See fit_result_to_list() in src/rust/src/lib.rs.
   # Long-term fix: engine should return "" so this sentinel check can be removed.
   if (is.null(result$model_name) || !nzchar(result$model_name) || identical(result$model_name, "Unnamed")) {
@@ -1313,7 +1313,7 @@ print.ferx_fit <- function(x, ...) {
   cat(strrep("-", 52), "\n", sep = "")
   theta_names <- names(x$theta)
   if (is.null(theta_names)) theta_names <- paste0("THETA", seq_along(x$theta))
-  # Logical mask of NN-weight thetas to skip — they appear in the compact
+  # Logical mask of NN-weight thetas to skip - they appear in the compact
   # NEURAL NETWORKS block below (Option E). 1-based indices to match `seq_along`.
   nn_skip <- logical(length(x$theta))
   if (!is.null(x$neural_networks)) {
@@ -1534,7 +1534,7 @@ print.ferx_fit <- function(x, ...) {
     }
   }
 
-  # SIGMA — sigma is on the SD scale (see ferx-core `docs/src/model-file/error-model.md`).
+  # SIGMA - sigma is on the SD scale (see ferx-core `docs/src/model-file/error-model.md`).
   # For proportional components CV% = sigma * 100; for additive components the
   # value is in observation units and no CV% applies. Variance = sigma^2 in
   # both cases, mirroring the YAML output (ferx-core#57).

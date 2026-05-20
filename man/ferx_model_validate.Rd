@@ -16,7 +16,7 @@ errors, not validation failures).}
 sections present and the Rust parser accepts it), \code{FALSE} otherwise,
 invisibly. The function always prints a report to the console. Note that
 a missing file or non-\code{.ferx} extension raises an error rather than
-returning \code{FALSE} — pass an existing \code{.ferx} path.
+returning \code{FALSE} - pass an existing \code{.ferx} path.
 }
 \description{
 Parses a \code{.ferx} model file using the Rust engine and checks for

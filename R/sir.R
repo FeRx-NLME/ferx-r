@@ -1,7 +1,7 @@
 #' Run SIR against an existing fit
 #'
 #' Run a Sampling Importance Resampling (SIR) uncertainty step against a
-#' fit that was produced earlier — useful when the original fit was
+#' fit that was produced earlier - useful when the original fit was
 #' expensive and you want to add SIR without re-estimating, or when working
 #' with a fit loaded from a `.fitrx` bundle.
 #'
@@ -25,8 +25,8 @@
 #' Edge case: if hashing failed at fit time (e.g. permission flip between
 #' parse and hash) the corresponding `fit$*_hash` is `NA` and the
 #' integrity check silently passes on that side. This is rare in
-#' practice — hashing would have to fail while the parse just
-#' succeeded — but if you require integrity verification, check
+#' practice - hashing would have to fail while the parse just
+#' succeeded - but if you require integrity verification, check
 #' `!is.na(fit$model_hash) && !is.na(fit$data_hash)` before relying on
 #' the protection.
 #'
@@ -151,7 +151,7 @@ ferx_sir <- function(fit,
       "ferx_sir: fit$ebe_etas has ", length(eta_cols), " ETA columns (",
       paste(eta_cols, collapse = ", "),
       ") but fit$omega is ", n_eta, "x", n_eta, ". ",
-      "The EBE table and the omega matrix must agree on n_eta — was ",
+      "The EBE table and the omega matrix must agree on n_eta - was ",
       "this fit object hand-edited or assembled from incompatible parts?"
     )
   }
@@ -230,7 +230,7 @@ ferx_sir <- function(fit,
     warning(
       "ferx_sir: effective sample size is not finite (got ", raw$sir_ess,
       "). The proposal distribution may be a poor match for the true ",
-      "uncertainty — increase `sir_samples`, or reconsider the underlying fit."
+      "uncertainty - increase `sir_samples`, or reconsider the underlying fit."
     )
     fit$sir_ess <- NULL
   } else {

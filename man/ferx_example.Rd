@@ -42,7 +42,7 @@ starting values intentionally far from truth to demonstrate multi-start
 (\code{n_starts}, \code{start_sigma}, \code{multi_start_seed} in \code{settings})}
 \item{bioavailability}{One-compartment oral with logit-normal bioavailability F
 (analytical; THETA_F specified directly on the (0,1) scale)}
-\item{bioavailability_ode}{ODE equivalent of \code{bioavailability} — same model
+\item{bioavailability_ode}{ODE equivalent of \code{bioavailability} - same model
 and data via explicit depot/central ODEs; useful for comparing analytical vs ODE paths}
 \item{warfarin_dcm}{Two-compartment oral with a Deep Compartment Model
 covariate model: a small neural network (\code{[covariate_nn TYPICAL_PK]})

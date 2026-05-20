@@ -11,7 +11,7 @@
 #'       \code{lag1_r}, \code{flag} (character interpretation of the DW value).
 #'       \code{NULL} when no IWRES autocorrelation data is available.}
 #'     \item{shrinkage}{Data frame with columns \code{param}, \code{type}
-#'       (\code{"eta"} or \code{"eps"}), \code{shrinkage} (proportion 0–1),
+#'       (\code{"eta"} or \code{"eps"}), \code{shrinkage} (proportion 0-1),
 #'       \code{shrinkage_pct} (percentage). \code{NULL} when no shrinkage data
 #'       is available.}
 #'   }
@@ -155,7 +155,7 @@ ferx_eta_cov <- function(fit, data) {
   }
 
   # ebe_etas is purpose-built: ID + one column per BSV eta. Treat every
-  # non-ID column as an eta — a "^ETA" prefix filter would silently drop
+  # non-ID column as an eta - a "^ETA" prefix filter would silently drop
   # columns from models that don't follow the conventional naming.
   ebe_id  <- if ("ID" %in% names(fit$ebe_etas)) "ID" else names(fit$ebe_etas)[1L]
   data_id <- if ("ID" %in% names(data))         "ID" else names(data)[1L]
@@ -243,7 +243,7 @@ ferx_eta_cov <- function(fit, data) {
 #'
 #' Extracts all estimated parameters (theta, omega diagonal, sigma) into a
 #' single tidy data frame, adding percent relative standard error (\%RSE),
-#' 95\% confidence intervals, and—for log/logit-transformed thetas—natural-scale
+#' 95\% confidence intervals, and-for log/logit-transformed thetas-natural-scale
 #' back-transformed estimates and CIs.
 #'
 #' Omega is reported on the variance scale (matching the \code{.ferx} model
