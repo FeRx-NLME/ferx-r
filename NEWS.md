@@ -1,5 +1,16 @@
 # ferx (development)
 
+## New features
+
+- New `stagnation_guard` key recognized by `ferx_fit(settings = ...)`.
+  Pass `settings = list(stagnation_guard = FALSE)` to disable the NLopt
+  outer-loop stagnation guard so SLSQP / L-BFGS run to their own xtol /
+  ftol or to `maxiter` instead of short-circuiting on a numerically-flat
+  OFV plateau. Useful for debugging or for problems with very slow but
+  real OFV improvements below the guard's 1e-3 threshold. Consumed by
+  FOCE / FOCEI / GN-hybrid only. Requires ferx-core with PR
+  FeRx-NLME/ferx-core#62 merged.
+
 ## Bug fixes
 
 - All output functions now display the declared variable name (`ETA_CL`,
