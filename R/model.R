@@ -24,8 +24,8 @@
 #' argument falls into the \code{model} slot.
 #'
 #' All fit options (\code{method}, \code{covariance}, \code{threads},
-#' \code{settings}, …) can still be passed directly to \code{ferx_fit()} in
-#' the pipe — the \code{ferx_model} object only carries the file paths. See
+#' \code{settings}, \u2026) can still be passed directly to \code{ferx_fit()} in
+#' the pipe \u2014 the \code{ferx_model} object only carries the file paths. See
 #' \code{\link{ferx_fit}} for the full list of options and post-fit outputs.
 #'
 #' @param data Optional path to a NONMEM-format CSV data file. Can be omitted
@@ -38,22 +38,22 @@
 #' @examples
 #' ex <- ferx_example("warfarin")
 #'
-#' # Inspect the object — prints model path, data path, and structure summary
+#' # Inspect the object \u2014 prints model path, data path, and structure summary
 #' m <- ferx_model(ex$data, ex$model)
 #' print(m)
 #'
-#' # Without data — supply at fit time via ferx_fit(data = ...)
+#' # Without data \u2014 supply at fit time via ferx_fit(data = ...)
 #' m <- ferx_model(model = ex$model)
 #'
 #' \dontrun{
-#' # ── Minimal pipe ────────────────────────────────────────────────────────
+#' # ?? Minimal pipe ????????????????????????????????????????????????????????
 #' # ferx_fit() picks up $data automatically from the ferx_model object.
 #' fit <- ex$data |>
 #'   ferx_model(ex$model) |>
 #'   ferx_fit(method = "focei", covariance = TRUE) |>
 #'   summary()
 #'
-#' # ── Override fit options before fitting ─────────────────────────────────
+#' # ?? Override fit options before fitting ?????????????????????????????????
 #' # ferx_set_section() rewrites [fit_options] on disk and passes the
 #' # ferx_model through so the pipe continues. When the model file lives
 #' # inside the installed package (as for ferx_example()), the file is
@@ -72,28 +72,28 @@
 #' ferx_cor_matrix(fit)      # parameter correlation matrix
 #' ferx_plot_trace(fit)      # OFV + gradient norm over iterations
 #'
-#' # ── Peek at a section mid-pipe without breaking the chain ────────────────
+#' # ?? Peek at a section mid-pipe without breaking the chain ????????????????
 #' fit <- ex$data |>
 #'   ferx_model(ex$model) |>
 #'   ferx_get_section("parameters") |>   # prints [parameters], passes through
 #'   ferx_fit(method = "focei")
 #'
-#' # ── Validate initialisation before a long run ────────────────────────────
+#' # ?? Validate initialisation before a long run ????????????????????????????
 #' # ferx_check_init() runs 5 iterations and returns trace + diagnostics.
 #' chk <- ferx_check_init(ex$model, ex$data, method = "focei")
-#' chk$summary   # ofv_start, ofv_end, ofv_drop — confirm OFV is dropping
+#' chk$summary   # ofv_start, ofv_end, ofv_drop \u2014 confirm OFV is dropping
 #' ferx_plot_trace(chk$fit)  # visual check of first few iterations
 #'
-#' # ── Multi-stage chain: SAEM → FOCEI ─────────────────────────────────────
+#' # ?? Multi-stage chain: SAEM ? FOCEI ?????????????????????????????????????
 #' fit <- ex$data |>
 #'   ferx_model(ex$model) |>
 #'   ferx_fit(method = c("saem", "focei"), covariance = TRUE)
 #'
-#' # ── Simulate and predict from fitted parameters ──────────────────────────
+#' # ?? Simulate and predict from fitted parameters ??????????????????????????
 #' sim  <- ferx_simulate(ex$model, ex$data, n_sim = 100, seed = 42, fit = fit)
 #' pred <- ferx_predict(ex$model, ex$data, fit = fit)
 #'
-#' # ── Data can be overridden at fit time ───────────────────────────────────
+#' # ?? Data can be overridden at fit time ???????????????????????????????????
 #' # (substitute the path to your own dataset for "other_cohort.csv")
 #' ferx_model(ex$data, ex$model) |>
 #'   ferx_fit(data = "other_cohort.csv")
@@ -112,7 +112,7 @@ ferx_model <- function(data = NULL, model) {
 
   if (data_is_ferx) {
     if (missing(model)) {
-      # `ferx_model("pk.ferx")` → treat as `ferx_model(model = "pk.ferx")`.
+      # `ferx_model("pk.ferx")` ? treat as `ferx_model(model = "pk.ferx")`.
       warning(
         "ferx_model() argument order changed: data is now the first ",
         "argument and model is the second. Call has been auto-corrected ",
@@ -124,7 +124,7 @@ ferx_model <- function(data = NULL, model) {
       data  <- NULL
     } else if (is.character(model) && length(model) == 1L &&
                tolower(tools::file_ext(model)) != "ferx") {
-      # `ferx_model("pk.ferx", "data.csv")` → swap arguments.
+      # `ferx_model("pk.ferx", "data.csv")` ? swap arguments.
       warning(
         "ferx_model() argument order changed: data is now the first ",
         "argument and model is the second. Positional call has been ",
@@ -254,7 +254,7 @@ ferx_set_section <- function(x, section, lines) {
 #' @examples
 #' ex <- ferx_example("warfarin")
 #'
-#' # Inspect [parameters] and continue piping — ferx_get_section() prints
+#' # Inspect [parameters] and continue piping \u2014 ferx_get_section() prints
 #' # the section and passes the ferx_model object through unchanged.
 #' ferx_model(ex$data, ex$model) |>
 #'   ferx_get_section("parameters")
@@ -308,7 +308,7 @@ ferx_model_show <- function(path) {
 #' is written to \code{dest} first and that copy is opened instead.
 #'
 #' After the editor closes, an optional \code{save_as} step lets you copy the
-#' edited file to a new path — useful when iterating on a model to keep
+#' edited file to a new path \u2014 useful when iterating on a model to keep
 #' versioned copies.
 #'
 #' @param path Path to a \code{.ferx} model file.
@@ -320,11 +320,11 @@ ferx_model_show <- function(path) {
 #'   the destination file already exists, an error is raised.
 #' @param save_as Controls post-edit save-as behaviour:
 #'   \itemize{
-#'     \item \code{NULL} or \code{FALSE} (default) — no extra action after
+#'     \item \code{NULL} or \code{FALSE} (default) \u2014 no extra action after
 #'       editing. Accepting \code{FALSE} lets you pass expressions like
 #'       \code{save_as = interactive()}.
-#'     \item \code{TRUE} — interactively prompt the user for a destination path.
-#'     \item A character string — silently copy the edited file to that path.
+#'     \item \code{TRUE} \u2014 interactively prompt the user for a destination path.
+#'     \item A character string \u2014 silently copy the edited file to that path.
 #'   }
 #'   When a copy is made the \emph{copy} path is returned; otherwise the edited
 #'   file path is returned.
@@ -360,7 +360,7 @@ ferx_model_edit <- function(path, dest = ".", overwrite = FALSE, save_as = NULL,
                             .editor = utils::file.edit) {
   if (!file.exists(path)) stop("File not found: ", path)
 
-  # Validate save_as up front so invalid input fails fast — before opening an
+  # Validate save_as up front so invalid input fails fast \u2014 before opening an
   # editor or copying any files. FALSE collapses to NULL so callers can pass
   # `save_as = interactive()` and have it no-op in non-interactive sessions.
   if (isFALSE(save_as)) save_as <- NULL
@@ -533,7 +533,7 @@ ferx_model_set_section <- function(path, section, lines) {
 #' Writes a new \code{.ferx} file pre-filled with a skeleton for the chosen
 #' model type, then opens it in an editor. Pass \code{print = TRUE} instead of
 #' supplying a \code{path} to print the skeleton to the console without writing
-#' any file — useful for copy-pasting or piping in a scripted workflow.
+#' any file \u2014 useful for copy-pasting or piping in a scripted workflow.
 #'
 #' @param path Path for the new \code{.ferx} file. Must not already exist
 #'   unless \code{overwrite = TRUE}. Ignored when \code{print = TRUE}.
@@ -761,7 +761,7 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
 }
 
 # Extract all named [section] blocks from a .ferx file.
-# Returns a named list: section name → character vector of (comment-stripped, trimmed) lines.
+# Returns a named list: section name ? character vector of (comment-stripped, trimmed) lines.
 .ferx_extract_blocks <- function(path) {
   raw <- readLines(path, warn = FALSE)
   blocks  <- list()
@@ -940,15 +940,15 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
 #'   sections present and the Rust parser accepts it), \code{FALSE} otherwise,
 #'   invisibly. The function always prints a report to the console. Note that
 #'   a missing file or non-\code{.ferx} extension raises an error rather than
-#'   returning \code{FALSE} — pass an existing \code{.ferx} path.
+#'   returning \code{FALSE} \u2014 pass an existing \code{.ferx} path.
 #'
 #' @examples
-#' # Valid model — all required sections present
+#' # Valid model \u2014 all required sections present
 #' ex <- ferx_example("warfarin")
 #' ferx_model_validate(ex$model)
 #'
 #' \dontrun{
-#' # Invalid model — missing required sections
+#' # Invalid model \u2014 missing required sections
 #' bad <- tempfile(fileext = ".ferx")
 #' writeLines(c(
 #'   "[parameters]",

@@ -14,6 +14,9 @@ ferx_fit(model, data = NULL, ...)
 
 \item{data}{Path to a NONMEM-format CSV file (ID, TIME, DV, EVID, AMT, CMT, ...)}
 
+\item{...}{Arguments passed to \code{ferx_fit.default} (e.g.
+\code{method}, \code{covariance}, \code{verbose}, \code{settings}).}
+
 \item{method}{Estimation method(s). Either a single string or a character
 vector of methods to run in sequence. Each stage is seeded with the
 previous stage's converged parameters, and only the final stage produces
@@ -100,7 +103,7 @@ produce non-parametric parameter uncertainty intervals. Requires
 
 \item{optimizer_trace}{Logical. If \code{TRUE}, write a per-iteration CSV
 trace to a temporary file and store its path in \code{fit$trace_path}.
-Pass the result to \code{\link{ferx_read_trace}} or
+Pass the result to \code{\link{ferx_trace}} or
 \code{\link{ferx_plot_trace}} to inspect optimizer progress. Default
 \code{FALSE}.}
 
@@ -223,7 +226,7 @@ under the model's covariate effects. For inter-occasion variation see
 \item{sir_ci_theta, sir_ci_omega, sir_ci_sigma}{SIR 95\\% CI matrices
 with columns \code{lower} and \code{upper} (NULL if SIR not run)}
 \item{trace_path}{Path to the optimizer trace CSV, or \code{NULL} when
-\code{optimizer_trace = FALSE}. Pass to \code{\link{ferx_read_trace}}
+\code{optimizer_trace = FALSE}. Pass to \code{\link{ferx_trace}}
 or \code{\link{ferx_plot_trace}}.}
 \item{ebe_convergence_warnings}{Number of outer iterations in which too
 many EBEs were unconverged (step was rejected by the guard).}
