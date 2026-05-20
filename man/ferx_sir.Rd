@@ -74,11 +74,33 @@ the protection.
 }
 \examples{
 \dontrun{
-ex <- ferx_example("warfarin")
+ex  <- ferx_example("warfarin")
 fit <- ferx_fit(ex$model, ex$data, covariance = TRUE)
+
+# Run SIR post-hoc (equivalent to sir = TRUE at fit time)
 fit <- ferx_sir(fit, sir_samples = 2000, sir_resamples = 500, sir_seed = 42)
+
+# Effective sample size - closer to sir_resamples means good coverage
 fit$sir_ess
+
+# 95\% CI for fixed-effect thetas
 fit$sir_ci_theta
+
+# 95\% CI for IIV omega diagonal
+fit$sir_ci_omega
+
+# 95\% CI for residual error sigma
+fit$sir_ci_sigma
+
+# Retain resamples for downstream uncertainty simulation
+fit2 <- ferx_sir(fit, sir_samples = 2000, sir_resamples = 500,
+                 sir_keep_samples = TRUE)
+sims <- ferx_simulate_with_uncertainty(
+  ex$model, ex$data, fit2,
+  n_uncertainty_draws = 200, n_sim_per_draw = 5,
+  method = "sir"
+)
+head(sims)
 }
 
 }
