@@ -81,6 +81,15 @@
 ## Checklist
 - [ ] `DESCRIPTION` version bumped if warranted
 - [ ] `DESCRIPTION` ferx-core git dep points to merged engine commit (not a branch)
+- [ ] `src/rust/Cargo.lock` updated to pin ferx-core to the correct commit
+  <!-- Run from src/rust/ with the local [patch] override removed:
+       cp .cargo/config.toml .cargo/config.toml.bak
+       printf '[build]\n' > .cargo/config.toml
+       cargo fetch
+       cp .cargo/config.toml.bak .cargo/config.toml
+       Then commit Cargo.lock. Verify with:
+       grep -A2 'name = "ferx-core"' Cargo.lock | grep source -->
+- [ ] Not applicable (no ferx-core dependency change in this PR)
 
 ## Docs & examples
 
