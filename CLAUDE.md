@@ -89,6 +89,12 @@ This applies to: `print.ferx_fit`, `ferx_estimates()`, `ferx_cor_matrix()` (via 
 - Use `.fitrx_named_omega()` in `persist.R` when deserialising the omega matrix so dimnames survive a `ferx_save`/`ferx_load` round-trip.
 - Update `roxygen2` `@return` docs when adding new output fields.
 
+## Roxygen / Documentation
+
+Always run `roxygen2::roxygenize()` and commit the updated `man/` files before opening or updating a PR — the `.Rd` files are checked into the repo and must stay in sync with the `#'` comments in `R/`.
+
+Never use `\uXXXX` escape sequences in roxygen `#'` comments. They get written literally into `.Rd` files, and `R CMD check --as-cran` on older R versions does not support `\uXXXX` in Rd, producing warnings. Use the actual UTF-8 characters directly (e.g. `—` not `—`, `…` not `…`).
+
 ## Pull Requests
 
 When creating a PR in this repo, always read `.github/PULL_REQUEST_TEMPLATE.md` and fill every section before calling `gh pr create`.
