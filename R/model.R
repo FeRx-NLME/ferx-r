@@ -38,11 +38,11 @@
 #' @examples
 #' ex <- ferx_example("warfarin")
 #'
-#' # Inspect the object — prints model path, data path, and structure summary
+#' # Inspect the object (prints model path, data path, and structure summary)
 #' m <- ferx_model(ex$data, ex$model)
 #' print(m)
 #'
-#' # Without data — supply at fit time via ferx_fit(data = ...)
+#' # Without data: supply at fit time via ferx_fit(data = ...)
 #' m <- ferx_model(model = ex$model)
 #'
 #' \dontrun{
@@ -254,7 +254,7 @@ ferx_set_section <- function(x, section, lines) {
 #' @examples
 #' ex <- ferx_example("warfarin")
 #'
-#' # Inspect [parameters] and continue piping — ferx_get_section() prints
+#' # Inspect [parameters] and continue piping: ferx_get_section() prints
 #' # the section and passes the ferx_model object through unchanged.
 #' ferx_model(ex$data, ex$model) |>
 #'   ferx_get_section("parameters")
@@ -943,12 +943,12 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
 #'   returning \code{FALSE} — pass an existing \code{.ferx} path.
 #'
 #' @examples
-#' # Valid model — all required sections present
+#' # Valid model (all required sections present)
 #' ex <- ferx_example("warfarin")
 #' ferx_model_validate(ex$model)
 #'
 #' \dontrun{
-#' # Invalid model — missing required sections
+#' # Invalid model (missing required sections)
 #' bad <- tempfile(fileext = ".ferx")
 #' writeLines(c(
 #'   "[parameters]",

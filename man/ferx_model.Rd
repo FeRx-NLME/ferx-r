@@ -49,11 +49,11 @@ the pipe — the \code{ferx_model} object only carries the file paths. See
 \examples{
 ex <- ferx_example("warfarin")
 
-# Inspect the object — prints model path, data path, and structure summary
+# Inspect the object (prints model path, data path, and structure summary)
 m <- ferx_model(ex$data, ex$model)
 print(m)
 
-# Without data — supply at fit time via ferx_fit(data = ...)
+# Without data: supply at fit time via ferx_fit(data = ...)
 m <- ferx_model(model = ex$model)
 
 \dontrun{

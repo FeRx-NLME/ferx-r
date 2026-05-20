@@ -25,12 +25,12 @@ syntax errors and missing sections before committing to a long estimation
 run.
 }
 \examples{
-# Valid model — all required sections present
+# Valid model (all required sections present)
 ex <- ferx_example("warfarin")
 ferx_model_validate(ex$model)
 
 \dontrun{
-# Invalid model — missing required sections
+# Invalid model (missing required sections)
 bad <- tempfile(fileext = ".ferx")
 writeLines(c(
   "[parameters]",

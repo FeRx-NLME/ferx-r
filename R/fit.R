@@ -548,10 +548,10 @@
 #'
 #' # ?? Classic style (path strings) ?????????????????????????????????????????
 #'
-#' # Minimal call — FOCEI with default optimizer, covariance step on
+#' # Minimal call: FOCEI with default optimizer, covariance step on
 #' fit <- ferx_fit(ex$model, ex$data)
 #'
-#' # Named arguments — fully equivalent
+#' # Named arguments (fully equivalent)
 #' fit <- ferx_fit(model = ex$model, data = ex$data, method = "focei")
 #'
 #' # All common options at once
@@ -590,7 +590,7 @@
 #'
 #' # ?? Pipe style (ferx_model object) ???????????????????????????????????????
 #'
-#' # Basic pipe — data flows into ferx_model() which bundles the model path
+#' # Basic pipe: data flows into ferx_model() which bundles the model path
 #' ex$data |>
 #'   ferx_model(ex$model) |>
 #'   ferx_fit(method = "focei", covariance = TRUE)
@@ -635,7 +635,7 @@
 #' ferx_model_inspect(fit)   # model structure auto-derived by the engine
 #' ferx_plot_trace(fit)      # convergence plot (optimizer_trace = TRUE required)
 #'
-#' fit$sdtab                 # per-observation diagnostics (PRED, IPRED, CWRES, …)
+#' fit$sdtab                 # per-observation diagnostics (PRED, IPRED, CWRES, etc.)
 #' fit$ebe_etas              # per-subject empirical Bayes ETAs
 #' fit$individual_estimates  # per-subject individual PK parameters
 #' fit$eigenvalues           # sorted eigenvalues of parameter correlation matrix
@@ -1711,7 +1711,7 @@ print.ferx_fit <- function(x, ...) {
 #' fit_chain <- ferx_fit(ex$model, ex$data, method = c("saem", "focei"))
 #' summary(fit_chain)
 #'
-#' # With custom settings — shown in the Settings block
+#' # With custom settings (shown in the Settings block)
 #' fit_custom <- ferx_fit(ex$model, ex$data,
 #'   settings = list(optimizer = "slsqp", max_iter = 200L))
 #' summary(fit_custom)
