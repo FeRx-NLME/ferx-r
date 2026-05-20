@@ -44,7 +44,7 @@ summary(fit)
 fit_chain <- ferx_fit(ex$model, ex$data, method = c("saem", "focei"))
 summary(fit_chain)
 
-# With custom settings \u2014 shown in the Settings block
+# With custom settings — shown in the Settings block
 fit_custom <- ferx_fit(ex$model, ex$data,
   settings = list(optimizer = "slsqp", max_iter = 200L))
 summary(fit_custom)

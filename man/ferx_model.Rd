@@ -42,18 +42,18 @@ because R matches \code{data =} by name first and the remaining positional
 argument falls into the \code{model} slot.
 
 All fit options (\code{method}, \code{covariance}, \code{threads},
-\code{settings}, \u2026) can still be passed directly to \code{ferx_fit()} in
-the pipe \u2014 the \code{ferx_model} object only carries the file paths. See
+\code{settings}, …) can still be passed directly to \code{ferx_fit()} in
+the pipe — the \code{ferx_model} object only carries the file paths. See
 \code{\link{ferx_fit}} for the full list of options and post-fit outputs.
 }
 \examples{
 ex <- ferx_example("warfarin")
 
-# Inspect the object \u2014 prints model path, data path, and structure summary
+# Inspect the object — prints model path, data path, and structure summary
 m <- ferx_model(ex$data, ex$model)
 print(m)
 
-# Without data \u2014 supply at fit time via ferx_fit(data = ...)
+# Without data — supply at fit time via ferx_fit(data = ...)
 m <- ferx_model(model = ex$model)
 
 \dontrun{
@@ -92,7 +92,7 @@ fit <- ex$data |>
 # ?? Validate initialisation before a long run ????????????????????????????
 # ferx_check_init() runs 5 iterations and returns trace + diagnostics.
 chk <- ferx_check_init(ex$model, ex$data, method = "focei")
-chk$summary   # ofv_start, ofv_end, ofv_drop \u2014 confirm OFV is dropping
+chk$summary   # ofv_start, ofv_end, ofv_drop — confirm OFV is dropping
 ferx_plot_trace(chk$fit)  # visual check of first few iterations
 
 # ?? Multi-stage chain: SAEM ? FOCEI ?????????????????????????????????????

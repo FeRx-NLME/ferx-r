@@ -16,7 +16,7 @@ A named list with elements:
 \code{lag1_r}, \code{flag} (character interpretation of the DW value).
 \code{NULL} when no IWRES autocorrelation data is available.}
 \item{shrinkage}{Data frame with columns \code{param}, \code{type}
-(\code{"eta"} or \code{"eps"}), \code{shrinkage} (proportion 0\u20131),
+(\code{"eta"} or \code{"eps"}), \code{shrinkage} (proportion 0–1),
 \code{shrinkage_pct} (percentage). \code{NULL} when no shrinkage data
 is available.}
 }

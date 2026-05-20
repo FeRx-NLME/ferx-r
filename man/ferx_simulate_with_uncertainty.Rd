@@ -39,7 +39,7 @@ Row count: \code{n_uncertainty_draws * n_sim_per_draw * n_obs}.
 For each parameter set drawn from the uncertainty distribution, the
 per-subject random-effect / residual-error simulator runs
 \code{n_sim_per_draw} times. The result includes both individual
-variability (etas, epsilons) and parameter uncertainty \u2014 useful for
+variability (etas, epsilons) and parameter uncertainty — useful for
 uncertainty-aware VPCs, dose-recommendation intervals, and any analysis
 where treating the ML estimates as fixed would understate variability.
 }

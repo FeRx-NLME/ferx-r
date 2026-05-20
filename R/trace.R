@@ -219,7 +219,7 @@ ferx_plot_trace <- function(fit, log_ofv = FALSE) {
 #' ferx_plot_trace(chk$fit)
 #' chk$summary
 #'
-#' # Pipe from a ferx_model \u2014 data is picked up from the object
+#' # Pipe from a ferx_model — data is picked up from the object
 #' ex <- ferx_example("warfarin")
 #' ex$data |>
 #'   ferx_model(ex$model) |>
