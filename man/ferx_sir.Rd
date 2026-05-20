@@ -42,7 +42,7 @@ The input \code{fit}, augmented with \code{sir_ess}, \code{sir_ci_theta},
 }
 \description{
 Run a Sampling Importance Resampling (SIR) uncertainty step against a
-fit that was produced earlier — useful when the original fit was
+fit that was produced earlier - useful when the original fit was
 expensive and you want to add SIR without re-estimating, or when working
 with a fit loaded from a \code{.fitrx} bundle.
 }
@@ -66,19 +66,41 @@ modified model or dataset.
 Edge case: if hashing failed at fit time (e.g. permission flip between
 parse and hash) the corresponding \verb{fit$*_hash} is \code{NA} and the
 integrity check silently passes on that side. This is rare in
-practice — hashing would have to fail while the parse just
-succeeded — but if you require integrity verification, check
+practice - hashing would have to fail while the parse just
+succeeded - but if you require integrity verification, check
 \code{!is.na(fit$model_hash) && !is.na(fit$data_hash)} before relying on
 the protection.
 }
 }
 \examples{
 \dontrun{
-ex <- ferx_example("warfarin")
+ex  <- ferx_example("warfarin")
 fit <- ferx_fit(ex$model, ex$data, covariance = TRUE)
+
+# Run SIR post-hoc (equivalent to sir = TRUE at fit time)
 fit <- ferx_sir(fit, sir_samples = 2000, sir_resamples = 500, sir_seed = 42)
+
+# Effective sample size - closer to sir_resamples means good coverage
 fit$sir_ess
+
+# 95\% CI for fixed-effect thetas
 fit$sir_ci_theta
+
+# 95\% CI for IIV omega diagonal
+fit$sir_ci_omega
+
+# 95\% CI for residual error sigma
+fit$sir_ci_sigma
+
+# Retain resamples for downstream uncertainty simulation
+fit2 <- ferx_sir(fit, sir_samples = 2000, sir_resamples = 500,
+                 sir_keep_samples = TRUE)
+sims <- ferx_simulate_with_uncertainty(
+  ex$model, ex$data, fit2,
+  n_uncertainty_draws = 200, n_sim_per_draw = 5,
+  method = "sir"
+)
+head(sims)
 }
 
 }

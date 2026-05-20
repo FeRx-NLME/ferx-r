@@ -70,7 +70,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   .fitrx_write_ebes_csv(fit, file.path(staging, "ebes.csv"))
   entries <- c(entries, "ebes.csv")
 
-  # ebes_kappa.csv — present only when the model uses IOV
+  # ebes_kappa.csv - present only when the model uses IOV
   if (.fitrx_has_kappa(fit)) {
     .fitrx_write_ebes_kappa_csv(fit, file.path(staging, "ebes_kappa.csv"))
     entries <- c(entries, "ebes_kappa.csv")
@@ -83,7 +83,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   # model.ferx
   #
   # Prefer `file.copy(fit$model_path, ...)` so the bundled bytes match
-  # the original file exactly — including line endings, BOM, and the
+  # the original file exactly - including line endings, BOM, and the
   # presence/absence of a trailing newline. `fit$model_source` was
   # produced by `readLines + paste(collapse = "\n")` and writing it back
   # via `writeLines` loses that fidelity, which causes
@@ -94,7 +94,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   # (CRLF endings, missing trailing newline, etc.).
   #
   # Fall back to `writeLines(fit$model_source)` only when no `model_path`
-  # is available (e.g. a hand-constructed fit) — in that case the bundle
+  # is available (e.g. a hand-constructed fit) - in that case the bundle
   # carries the best representation we have.
   model_src_path <- fit$model_path
   if (!is.null(model_src_path) && !is.na(model_src_path) &&
@@ -121,7 +121,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
     entries <- c(entries, "data.csv")
   }
 
-  # manifest.json — last so it can list every entry
+  # manifest.json - last so it can list every entry
   manifest <- list(
     format_version = FITRX_FORMAT_VERSION,
     ferx_version = fit$ferx_version %||% "",
@@ -194,7 +194,7 @@ ferx_load_fit <- function(path) {
   on.exit(unlink(staging, recursive = TRUE), add = TRUE)
 
   # `junkpaths = TRUE` flattens every entry into `staging` using only its
-  # basename. The .fitrx layout is intentionally flat — no subdirectories —
+  # basename. The .fitrx layout is intentionally flat - no subdirectories -
   # so this is a no-op for well-formed archives and a defence against Zip
   # Slip (entries with `../` or absolute paths) for malformed ones.
   files <- tryCatch(
@@ -244,7 +244,7 @@ ferx_load_fit <- function(path) {
   # *override* the wire-provided `model_path` / `data_path` with the
   # local copy. That way `ferx_sir(fit)` and `ferx_predict(fit)` work on
   # the loading machine even if the original-machine paths don't exist
-  # — and the stored `model_hash` / `data_hash` still match, because
+  # - and the stored `model_hash` / `data_hash` still match, because
   # the bundle is a verbatim copy of the source bytes.
   model_staging <- file.path(staging, "model.ferx")
   if (file.exists(model_staging)) {
@@ -272,10 +272,10 @@ ferx_load_fit <- function(path) {
     result$data_path <- NA_character_
   }
   # If the wire carried model_path / data_path and neither was bundled
-  # but the path resolves locally, leave it as-is — `ferx_sir()` will
+  # but the path resolves locally, leave it as-is - `ferx_sir()` will
   # use it directly (and the hash check still applies).
 
-  # Warnings — fit.json is the source of truth, warnings.txt is a mirror.
+  # Warnings - fit.json is the source of truth, warnings.txt is a mirror.
   if (is.null(result$warnings)) result$warnings <- character()
 
   class(result) <- "ferx_fit"
@@ -427,6 +427,7 @@ ferx_load_fit <- function(path) {
     omega_param_corr = .fitrx_matrix_from_wire(w$omega$param_corr),
     shrinkage_eta = as.numeric(unlist(w$omega$shrinkage %||% list(), use.names = FALSE)),
     se_omega = .fitrx_unwrap_opt_num_vec(w$omega$se),
+    omega_init_as_sd = as.logical(unlist(w$omega$init_as_sd %||% list(), use.names = FALSE)),
 
     sigma_names = unlist(w$sigma$names, use.names = FALSE),
     sigma = stats::setNames(
@@ -439,6 +440,7 @@ ferx_load_fit <- function(path) {
       unlist(w$sigma$names, use.names = FALSE)
     ),
     se_sigma = .fitrx_unwrap_opt_num_vec(w$sigma$se),
+    sigma_init_as_sd = as.logical(unlist(w$sigma$init_as_sd %||% list(), use.names = FALSE)),
 
     shrinkage_eps = as.numeric(w$shrinkage_eps),
     dw_statistic = .fitrx_unwrap_opt_num(w$dw_statistic),
@@ -456,7 +458,7 @@ ferx_load_fit <- function(path) {
     data_hash = .fitrx_unwrap_opt_chr(w$data_hash)
   )
 
-  # eta_param_info → parallel R vectors
+  # eta_param_info ? parallel R vectors
   epi <- w$eta_param_info
   if (!is.null(epi) && length(epi) > 0L) {
     out$eta_param_types <- vapply(epi, function(x) as.character(x$param_type %||% ""), character(1L))
@@ -482,6 +484,7 @@ ferx_load_fit <- function(path) {
     out$se_kappa <- .fitrx_unwrap_opt_num_vec(w$iov$se_kappa)
     out$shrinkage_kappa <- as.numeric(unlist(w$iov$shrinkage_kappa %||% list(), use.names = FALSE))
     out$omega_iov_param_corr <- .fitrx_matrix_from_wire(w$iov$omega_iov_param_corr)
+    out$kappa_init_as_sd <- as.logical(unlist(w$iov$kappa_init_as_sd %||% list(), use.names = FALSE))
   } else {
     out$kappa_names <- character()
     out$kappa_fixed <- logical()
@@ -489,6 +492,7 @@ ferx_load_fit <- function(path) {
     out$shrinkage_kappa <- numeric()
     out$omega_iov <- NULL
     out$omega_iov_param_corr <- NULL
+    out$kappa_init_as_sd <- logical()
   }
 
   # R extras
@@ -509,7 +513,7 @@ ferx_load_fit <- function(path) {
     return(invisible())
   }
   # Pull ofv_contribution / n_obs out of sdtab (one row per subject) when not
-  # already present on ebes — the Rust shim doesn't expose them on ebe_etas.
+  # already present on ebes - the Rust shim doesn't expose them on ebe_etas.
   if (!all(c("ofv_contribution", "n_obs") %in% names(ebes))) {
     per_subj <- .fitrx_per_subject_ofv_nobs(fit)
     if (!is.null(per_subj)) {
@@ -550,7 +554,7 @@ ferx_load_fit <- function(path) {
   # index; translate to the string IDs stored on ebe_etas so a cross-language
   # reader can join with data.csv. When sdtab$ID is already character (e.g.
   # because the fit was previously loaded from a .fitrx, where predictions.csv
-  # stores string IDs), leave it untouched — the remap would be a no-op and
+  # stores string IDs), leave it untouched - the remap would be a no-op and
   # `max(sdtab$ID, ...)` would error on character input.
   if (is.numeric(sdtab$ID)) {
     string_ids <- .fitrx_subject_string_ids(fit)

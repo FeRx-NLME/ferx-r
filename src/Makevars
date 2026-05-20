@@ -37,8 +37,10 @@ CARGO_FEATURES =
 # Cargo.toml at build time.
 CARGO_PROFILE_RELEASE_LTO = fat
 ifeq ($(FERX_NO_AUTODIFF),1)
-  CARGO_FEATURES = --no-default-features --features ci
+  CARGO_FEATURES = --no-default-features --features ci,nn
   CARGO_PROFILE_RELEASE_LTO = thin
+else
+  CARGO_FEATURES = --features nn
 endif
 
 # Ensure cargo driver host arch matches R's arch (avoids mismatch when the

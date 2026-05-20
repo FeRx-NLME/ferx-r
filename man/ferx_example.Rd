@@ -35,13 +35,54 @@ Available bundled examples:
 \item{two_cpt_oral_cov}{Two-compartment oral with continuous covariates (WT, CRCL)}
 \item{three_cpt_iv}{Three-compartment IV bolus}
 \item{mm_oral}{One-compartment oral with Michaelis-Menten elimination (ODE)}
+\item{warfarin_sde}{One-compartment oral as ODE with SDE process noise
+(\code{[diffusion]} block, EKF likelihood; \code{DIFF_CENTRAL} in theta)}
+\item{mm_multistart}{One-compartment oral with Michaelis-Menten elimination (ODE);
+starting values intentionally far from truth to demonstrate multi-start
+(\code{n_starts}, \code{start_sigma}, \code{multi_start_seed} in \code{settings})}
+\item{bioavailability}{One-compartment oral with logit-normal bioavailability F
+(analytical; THETA_F specified directly on the (0,1) scale)}
+\item{bioavailability_ode}{ODE equivalent of \code{bioavailability} - same model
+and data via explicit depot/central ODEs; useful for comparing analytical vs ODE paths}
+\item{warfarin_dcm}{Two-compartment oral with a Deep Compartment Model
+covariate model: a small neural network (\code{[covariate_nn TYPICAL_PK]})
+reads WT + CRCL and outputs a multiplicative modulator on the baseline
+TVCL/TVV1/TVQ/TVV2/TVKA thetas (i.e. \code{CL = TVCL * TYPICAL_PK.CL *
+    exp(ETA_CL)}), with lognormal IIV on top. Requires ferx-r built with the
+\code{nn} cargo feature.}
 }
 Call \code{ferx_example()} with no arguments to list all available names.
+
+Each example has a matching end-to-end R script installed with the package.
+List all scripts with:
+\preformatted{
+list.files(system.file("examples", package = "ferx"), pattern = "\\.R$")
+}
+Open any script directly in RStudio with \code{file.show()} or
+\code{file.edit()}, for example:
+\preformatted{
+file.edit(system.file("examples", "ex1_warfarin.R",     package = "ferx"))
+file.edit(system.file("examples", "ex_warfarin_dcm.R",  package = "ferx"))
+}
 }
 \examples{
-ferx_example()
+ferx_example()                        # list all available example names
 ex <- ferx_example("warfarin")
 ex$model
 ex$data
+
+# List all bundled example scripts:
+list.files(system.file("examples", package = "ferx"), pattern = "\\\\.R$")
+
+\dontrun{
+# Open a script in RStudio to read or run it:
+file.edit(system.file("examples", "ex1_warfarin.R", package = "ferx"))
+
+# Deep Compartment Model (requires nn cargo feature):
+dcm <- ferx_example("warfarin_dcm")
+fit <- ferx_fit(dcm$model, dcm$data, method = "focei")
+fit$neural_networks[[1]]$shape   # NN layer dimensions
+file.edit(system.file("examples", "ex_warfarin_dcm.R", package = "ferx"))
+}
 
 }

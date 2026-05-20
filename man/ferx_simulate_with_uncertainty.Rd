@@ -39,7 +39,7 @@ Row count: \code{n_uncertainty_draws * n_sim_per_draw * n_obs}.
 For each parameter set drawn from the uncertainty distribution, the
 per-subject random-effect / residual-error simulator runs
 \code{n_sim_per_draw} times. The result includes both individual
-variability (etas, epsilons) and parameter uncertainty — useful for
+variability (etas, epsilons) and parameter uncertainty - useful for
 uncertainty-aware VPCs, dose-recommendation intervals, and any analysis
 where treating the ML estimates as fixed would understate variability.
 }
@@ -61,13 +61,15 @@ to come from a \code{ferx_fit()} call with \code{covariance = TRUE}.}
 ex  <- ferx_example("warfarin")
 fit <- ferx_fit(ex$model, ex$data, covariance = TRUE)
 
-# Asymptotic (default): fast, MVN around the ML estimate
+# Asymptotic (default): fast, MVN draws around the ML estimate
 sims <- ferx_simulate_with_uncertainty(
   ex$model, ex$data, fit,
   n_uncertainty_draws = 200, n_sim_per_draw = 10
 )
+head(sims)         # SIM, ID, TIME, IPRED, DV_SIM
+range(sims$DV_SIM) # sanity check on simulated range
 
-# SIR: requires sir = TRUE + sir_keep_samples = TRUE at fit time
+# SIR method: requires sir = TRUE + sir_keep_samples = TRUE at fit time
 fit_sir <- ferx_fit(ex$model, ex$data,
                     covariance = TRUE, sir = TRUE,
                     settings = list(sir_keep_samples = TRUE))
@@ -76,6 +78,10 @@ sims_sir <- ferx_simulate_with_uncertainty(
   n_uncertainty_draws = 200, n_sim_per_draw = 10,
   method = "sir"
 )
+
+# Summarise: 90\% prediction interval per time point
+pi90 <- aggregate(DV_SIM ~ TIME, data = sims,
+                  FUN = function(x) quantile(x, c(0.05, 0.5, 0.95)))
 }
 
 }

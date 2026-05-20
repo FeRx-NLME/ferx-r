@@ -2,7 +2,7 @@
 #'
 #' Simulates observations from a parsed model with between-subject variability
 #' and residual error. When a \code{fit} is supplied, the fitted theta, omega,
-#' and sigma replace the model file's initial values — which is the usual flow
+#' and sigma replace the model file's initial values - which is the usual flow
 #' after \code{\link{ferx_fit}} (e.g. for posterior-predictive checks or VPCs).
 #'
 #' @param model Path to a .ferx model file
@@ -111,7 +111,7 @@ validate_fit_for_params <- function(fit) {
 #' For each parameter set drawn from the uncertainty distribution, the
 #' per-subject random-effect / residual-error simulator runs
 #' \code{n_sim_per_draw} times. The result includes both individual
-#' variability (etas, epsilons) and parameter uncertainty — useful for
+#' variability (etas, epsilons) and parameter uncertainty - useful for
 #' uncertainty-aware VPCs, dose-recommendation intervals, and any analysis
 #' where treating the ML estimates as fixed would understate variability.
 #'
@@ -145,13 +145,15 @@ validate_fit_for_params <- function(fit) {
 #' ex  <- ferx_example("warfarin")
 #' fit <- ferx_fit(ex$model, ex$data, covariance = TRUE)
 #'
-#' # Asymptotic (default): fast, MVN around the ML estimate
+#' # Asymptotic (default): fast, MVN draws around the ML estimate
 #' sims <- ferx_simulate_with_uncertainty(
 #'   ex$model, ex$data, fit,
 #'   n_uncertainty_draws = 200, n_sim_per_draw = 10
 #' )
+#' head(sims)         # SIM, ID, TIME, IPRED, DV_SIM
+#' range(sims$DV_SIM) # sanity check on simulated range
 #'
-#' # SIR: requires sir = TRUE + sir_keep_samples = TRUE at fit time
+#' # SIR method: requires sir = TRUE + sir_keep_samples = TRUE at fit time
 #' fit_sir <- ferx_fit(ex$model, ex$data,
 #'                     covariance = TRUE, sir = TRUE,
 #'                     settings = list(sir_keep_samples = TRUE))
@@ -160,6 +162,10 @@ validate_fit_for_params <- function(fit) {
 #'   n_uncertainty_draws = 200, n_sim_per_draw = 10,
 #'   method = "sir"
 #' )
+#'
+#' # Summarise: 90% prediction interval per time point
+#' pi90 <- aggregate(DV_SIM ~ TIME, data = sims,
+#'                   FUN = function(x) quantile(x, c(0.05, 0.5, 0.95)))
 #' }
 #'
 #' @export
@@ -205,18 +211,18 @@ ferx_simulate_with_uncertainty <- function(model, data, fit,
 
 # Internal: pull the uncertainty payload out of a ferx_fit result, validate it
 # matches the requested method, and return flat representations for FFI. The
-# empty branches give the Rust side something to ignore — it switches on
+# empty branches give the Rust side something to ignore - it switches on
 # `method` and only inspects the relevant arrays.
 validate_fit_for_uncertainty <- function(fit, method) {
   if (method == "asymptotic") {
     cov <- fit$cov_matrix
     if (is.null(cov) || length(cov) == 0L) {
-      stop("`fit$cov_matrix` is empty — re-fit with `covariance = TRUE` for ",
+      stop("`fit$cov_matrix` is empty - re-fit with `covariance = TRUE` for ",
            "asymptotic uncertainty.")
     }
     # `cov` is a square R matrix after `process_fit_result()`. Flatten
     # row-major to match the engine's `DMatrix::from_row_slice` reader on
-    # the Rust side — same convention used for `omega` above. The
+    # the Rust side - same convention used for `omega` above. The
     # transpose is mathematically a no-op for any well-formed covariance
     # (which must be symmetric), but the explicit `t()` keeps the FFI
     # contract uniform with `omega_flat` and prevents a future footgun
@@ -237,7 +243,7 @@ validate_fit_for_uncertainty <- function(fit, method) {
     d <- fit$sir_resamples_dim
     if (is.null(resamples) || length(resamples) == 0L ||
         is.null(n) || n == 0L || is.null(d) || d == 0L) {
-      stop("`fit$sir_resamples` is empty — re-fit with `sir = TRUE` and ",
+      stop("`fit$sir_resamples` is empty - re-fit with `sir = TRUE` and ",
            "`sir_keep_samples = TRUE` in `settings` for SIR uncertainty.")
     }
     list(

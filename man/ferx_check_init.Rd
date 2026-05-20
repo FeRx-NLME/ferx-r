@@ -41,13 +41,18 @@ structural model issues.
 }
 \examples{
 \dontrun{
-# Plain paths
-chk <- ferx_check_init("warfarin.ferx", "warfarin.csv")
-ferx_plot_trace(chk$fit)
-chk$summary
+ex  <- ferx_example("warfarin")
 
-# Pipe from a ferx_model — data is picked up from the object
-ex <- ferx_example("warfarin")
+# Check initial values before committing to a full FOCEI fit
+chk <- ferx_check_init(ex$model, ex$data)
+
+# OFV drop confirms the gradient is pointing in the right direction
+chk$summary   # ofv_start, ofv_end, ofv_drop
+
+# Inspect per-iteration trace to spot early divergence or slow descent
+ferx_plot_trace(chk$fit)
+
+# Pipe style: data flows in from the ferx_model object
 ex$data |>
   ferx_model(ex$model) |>
   ferx_check_init(method = "focei")

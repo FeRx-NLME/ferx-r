@@ -25,7 +25,7 @@
   omega ETA_VMAX ~ 0.25
   omega ETA_V    ~ 0.20
 
-  sigma PROP_ERR ~ 0.04
+  sigma PROP_ERR ~ 0.04 (sd)
 
 [individual_parameters]
   VMAX = TVVMAX * exp(ETA_VMAX)

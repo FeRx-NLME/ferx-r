@@ -169,3 +169,96 @@ test_that("print.ferx_fit uses exact log-normal CV% for OMEGA_IOV when kappa_par
   expect_false(grepl("44\\.7", kappa_line[1]))  # old approximate value
   expect_true(grepl("47\\.1", kappa_line[1]))   # exact log-normal CV%
 })
+
+# NN-aware output (Option E, ferx-core#52): per-weight thetas are hidden from
+# the THETA table and a compact NEURAL NETWORKS block summarises them.
+
+test_that("print.ferx_fit skips NN-weight thetas and emits NEURAL NETWORKS block", {
+  # 2 baseline thetas (TVCL, TVV1) + 4 NN weights at offset=2.
+  theta <- c(TVCL = 4.0, TVV1 = 40.0, W1 = 0.1, W2 = -0.2, W3 = 0.3, W4 = 0.0)
+  nn <- list(list(
+    name              = "TYPICAL_PK",
+    shape             = c(2L, 2L, 2L),
+    hidden_activation = "tanh",
+    output_activation = "exp",
+    n_weights         = 4L,
+    weights_offset    = 2L,
+    input_names       = c("WT", "CRCL"),
+    output_names      = c("CL", "V1"),
+    weights           = c(0.1, -0.2, 0.3, 0.0)
+  ))
+  fit <- make_fake_fit(
+    omega           = matrix(0.10, 1, 1),
+    theta           = theta,
+    neural_networks = nn
+  )
+  out <- capture.output(print(fit))
+
+  # Baseline thetas appear in the THETA table.
+  expect_true(any(grepl("^TVCL\\s", out)))
+  expect_true(any(grepl("^TVV1\\s", out)))
+  # NN-weight thetas are skipped from the THETA table (no `W1`/`W2`/... rows).
+  theta_block <- out[seq(
+    which(grepl("--- THETA Estimates ---", out)),
+    which(grepl("--- NEURAL NETWORKS ---", out)) - 1L
+  )]
+  expect_false(any(grepl("^W[1-4]\\s", theta_block)))
+
+  # NEURAL NETWORKS block contains the network metadata and weight summary.
+  expect_true(any(grepl("--- NEURAL NETWORKS ---", out)))
+  expect_true(any(grepl("TYPICAL_PK.*shape=\\[2, 2, 2\\].*activation=tanh/exp.*n_weights=4", out)))
+  expect_true(any(grepl("inputs:\\s+\\[WT, CRCL\\]", out)))
+  expect_true(any(grepl("outputs:\\s+\\[CL, V1\\]", out)))
+  expect_true(any(grepl("weights: min -0\\.2000\\s+max 0\\.3000", out)))
+})
+
+test_that("print.ferx_fit omits NEURAL NETWORKS block when neural_networks is empty/NULL", {
+  fit <- make_fake_fit(omega = matrix(0.10, 1, 1))
+  out <- capture.output(print(fit))
+  expect_false(any(grepl("--- NEURAL NETWORKS ---", out)))
+})
+
+# --- init_as_sd annotation tests ---
+
+test_that("print.ferx_fit annotates omega with [initial specified as SD] when flag is TRUE", {
+  fit <- make_fake_fit(
+    omega           = matrix(0.09, 1, 1),
+    eta_names       = "ETA_CL",
+    omega_init_as_sd = TRUE
+  )
+  out <- capture.output(print(fit))
+  omega_line <- out[grepl("ETA_CL", out)]
+  expect_true(length(omega_line) > 0L)
+  expect_true(any(grepl("\\[initial specified as SD\\]", omega_line)))
+})
+
+test_that("print.ferx_fit does NOT annotate omega when flag is FALSE", {
+  fit <- make_fake_fit(
+    omega           = matrix(0.09, 1, 1),
+    eta_names       = "ETA_CL",
+    omega_init_as_sd = FALSE
+  )
+  out <- capture.output(print(fit))
+  expect_false(any(grepl("\\[initial specified as SD\\]", out)))
+})
+
+test_that("print.ferx_fit annotates sigma with [initial specified as SD] when flag is TRUE", {
+  fit <- make_fake_fit(
+    omega            = matrix(0.09, 1, 1),
+    sigma            = c(PROP_ERR = 0.01),
+    sigma_names      = "PROP_ERR",
+    sigma_types      = "proportional",
+    sigma_init_as_sd = TRUE
+  )
+  out <- capture.output(print(fit))
+  sigma_line <- out[grepl("PROP_ERR", out)]
+  expect_true(length(sigma_line) > 0L)
+  expect_true(any(grepl("\\[initial specified as SD\\]", sigma_line)))
+})
+
+test_that("print.ferx_fit handles missing omega_init_as_sd gracefully (old fit object)", {
+  fit <- make_fake_fit(omega = matrix(0.09, 1, 1), eta_names = "ETA_CL")
+  # omega_init_as_sd not set at all — should not error, no annotation
+  out <- capture.output(print(fit))
+  expect_false(any(grepl("\\[initial specified as SD\\]", out)))
+})

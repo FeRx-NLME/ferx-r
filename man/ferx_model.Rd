@@ -42,29 +42,29 @@ because R matches \code{data =} by name first and the remaining positional
 argument falls into the \code{model} slot.
 
 All fit options (\code{method}, \code{covariance}, \code{threads},
-\code{settings}, …) can still be passed directly to \code{ferx_fit()} in
-the pipe — the \code{ferx_model} object only carries the file paths. See
+\code{settings}, ...) can still be passed directly to \code{ferx_fit()} in
+the pipe - the \code{ferx_model} object only carries the file paths. See
 \code{\link{ferx_fit}} for the full list of options and post-fit outputs.
 }
 \examples{
 ex <- ferx_example("warfarin")
 
-# Inspect the object — prints model path, data path, and structure summary
+# Inspect the object (prints model path, data path, and structure summary)
 m <- ferx_model(ex$data, ex$model)
 print(m)
 
-# Without data — supply at fit time via ferx_fit(data = ...)
+# Without data: supply at fit time via ferx_fit(data = ...)
 m <- ferx_model(model = ex$model)
 
 \dontrun{
-# ── Minimal pipe ────────────────────────────────────────────────────────
+# ?? Minimal pipe ????????????????????????????????????????????????????????
 # ferx_fit() picks up $data automatically from the ferx_model object.
 fit <- ex$data |>
   ferx_model(ex$model) |>
   ferx_fit(method = "focei", covariance = TRUE) |>
   summary()
 
-# ── Override fit options before fitting ─────────────────────────────────
+# ?? Override fit options before fitting ?????????????????????????????????
 # ferx_set_section() rewrites [fit_options] on disk and passes the
 # ferx_model through so the pipe continues. When the model file lives
 # inside the installed package (as for ferx_example()), the file is
@@ -83,28 +83,28 @@ ferx_model_inspect(fit)   # structure (no path needed post-fit)
 ferx_cor_matrix(fit)      # parameter correlation matrix
 ferx_plot_trace(fit)      # OFV + gradient norm over iterations
 
-# ── Peek at a section mid-pipe without breaking the chain ────────────────
+# ?? Peek at a section mid-pipe without breaking the chain ????????????????
 fit <- ex$data |>
   ferx_model(ex$model) |>
   ferx_get_section("parameters") |>   # prints [parameters], passes through
   ferx_fit(method = "focei")
 
-# ── Validate initialisation before a long run ────────────────────────────
+# ?? Validate initialisation before a long run ????????????????????????????
 # ferx_check_init() runs 5 iterations and returns trace + diagnostics.
 chk <- ferx_check_init(ex$model, ex$data, method = "focei")
-chk$summary   # ofv_start, ofv_end, ofv_drop — confirm OFV is dropping
+chk$summary   # ofv_start, ofv_end, ofv_drop - confirm OFV is dropping
 ferx_plot_trace(chk$fit)  # visual check of first few iterations
 
-# ── Multi-stage chain: SAEM → FOCEI ─────────────────────────────────────
+# ?? Multi-stage chain: SAEM ? FOCEI ?????????????????????????????????????
 fit <- ex$data |>
   ferx_model(ex$model) |>
   ferx_fit(method = c("saem", "focei"), covariance = TRUE)
 
-# ── Simulate and predict from fitted parameters ──────────────────────────
+# ?? Simulate and predict from fitted parameters ??????????????????????????
 sim  <- ferx_simulate(ex$model, ex$data, n_sim = 100, seed = 42, fit = fit)
 pred <- ferx_predict(ex$model, ex$data, fit = fit)
 
-# ── Data can be overridden at fit time ───────────────────────────────────
+# ?? Data can be overridden at fit time ???????????????????????????????????
 # (substitute the path to your own dataset for "other_cohort.csv")
 ferx_model(ex$data, ex$model) |>
   ferx_fit(data = "other_cohort.csv")

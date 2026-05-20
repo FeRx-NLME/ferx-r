@@ -23,7 +23,8 @@ A \code{ferx_summary} list (invisibly). Fields include: \code{model_name},
 (see \code{\link{ferx_fit}} for definitions), \code{wall_time_secs},
 \code{ferx_version}, \code{call_settings}, \code{model_file_settings},
 \code{sir_ess}, \code{warnings}, \code{ebe_convergence_warnings},
-\code{max_unconverged_subjects}, \code{total_ebe_fallbacks}.
+\code{max_unconverged_subjects}, \code{total_ebe_fallbacks},
+\code{dw_statistic}, \code{iwres_lag1_r}.
 }
 \description{
 Returns a compact list with the most-used diagnostic fields: model name,
@@ -43,7 +44,7 @@ summary(fit)
 fit_chain <- ferx_fit(ex$model, ex$data, method = c("saem", "focei"))
 summary(fit_chain)
 
-# With custom settings — shown in the Settings block
+# With custom settings (shown in the Settings block)
 fit_custom <- ferx_fit(ex$model, ex$data,
   settings = list(optimizer = "slsqp", max_iter = 200L))
 summary(fit_custom)
