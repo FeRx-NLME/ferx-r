@@ -35,9 +35,21 @@
 #'     reads WT + CRCL and outputs a multiplicative modulator on the baseline
 #'     TVCL/TVV1/TVQ/TVV2/TVKA thetas (i.e. \code{CL = TVCL * TYPICAL_PK.CL *
 #'     exp(ETA_CL)}), with lognormal IIV on top. Requires ferx-r built with the
-#'     \code{nn} cargo feature. See \code{inst/examples/ex_warfarin_dcm.R}.}
+#'     \code{nn} cargo feature.}
 #' }
 #' Call \code{ferx_example()} with no arguments to list all available names.
+#'
+#' Each example has a matching end-to-end R script installed with the package.
+#' List all scripts with:
+#' \preformatted{
+#' list.files(system.file("examples", package = "ferx"), pattern = "\\.R$")
+#' }
+#' Open any script directly in RStudio with \code{file.show()} or
+#' \code{file.edit()}, for example:
+#' \preformatted{
+#' file.edit(system.file("examples", "ex1_warfarin.R",     package = "ferx"))
+#' file.edit(system.file("examples", "ex_warfarin_dcm.R",  package = "ferx"))
+#' }
 #'
 #' @return If \code{name} is NULL, a character vector of available examples.
 #'   Otherwise, a list with components:
@@ -50,13 +62,18 @@
 #' ex$model
 #' ex$data
 #'
+#' # List all bundled example scripts:
+#' list.files(system.file("examples", package = "ferx"), pattern = "\\.R$")
+#'
 #' \dontrun{
+#' # Open a script in RStudio to read or run it:
+#' file.edit(system.file("examples", "ex1_warfarin.R", package = "ferx"))
+#'
 #' # Deep Compartment Model (requires nn cargo feature):
 #' dcm <- ferx_example("warfarin_dcm")
 #' fit <- ferx_fit(dcm$model, dcm$data, method = "focei")
 #' fit$neural_networks[[1]]$shape   # NN layer dimensions
-#' # Full worked example:
-#' # file.show(system.file("examples", "ex_warfarin_dcm.R", package = "ferx"))
+#' file.edit(system.file("examples", "ex_warfarin_dcm.R", package = "ferx"))
 #' }
 #'
 #' @export
