@@ -39,6 +39,7 @@ reference:
       - ferx_cor_matrix
       - ferx_plot_trace
       - ferx_trace
+      - check_diagnostics
 
   - title: "Utilities"
     desc: "Helper functions for exploring bundled examples and checking model initialisation."
