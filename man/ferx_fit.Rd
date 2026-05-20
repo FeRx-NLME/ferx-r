@@ -38,7 +38,7 @@ on \code{CENS=1} rows); \code{"drop"} disables M3.}
 \item{threads}{Number of worker threads for the per-subject parallel loops
 in the Rust backend (inner EBE search, SAEM, SIR). \code{NULL} (default)
 leaves the backend's thread pool at its default of one worker per logical
-CPU. Pass an integer to cap the pool — useful on shared machines, in CI,
+CPU. Pass an integer to cap the pool \u2014 useful on shared machines, in CI,
 or to avoid SMT-induced contention (try
 \code{parallel::detectCores(logical = FALSE)}). The setting is per-call,
 so successive fits in the same R session can use different values.}
@@ -114,8 +114,8 @@ that every transformed parameter the outer optimizer sees is O(1).
 \strong{Why it helps.} Population PK parameters often differ by orders
 of magnitude on the natural scale (e.g. \code{CL = 0.0015}, \code{V =
   200}, \code{Ka = 0.8}). Even after the log transform, the packed
-optimizer vector mixes large negatives (\code{log(0.0015) ≈ -6.5}) with
-large positives (\code{log(200) ≈ 5.3}), which leaves the Hessian
+optimizer vector mixes large negatives (\code{log(0.0015) ? -6.5}) with
+large positives (\code{log(200) ? 5.3}), which leaves the Hessian
 poorly conditioned and slows down NLopt / BFGS / Gauss-Newton. With
 \code{scale_params = TRUE} each coordinate is divided by
 \code{|x0[i]|} (when \code{|x0[i]| > 0.1}, otherwise by \code{1.0}), so
@@ -123,7 +123,7 @@ the optimizer works in a near-unit-magnitude space. The scale is
 computed once from the initial point and held fixed for the entire run.
 
 \strong{When to set \code{FALSE}.} Mathematically the scaling is
-transparent — the OFV, estimates, standard errors, and diagnostics
+transparent \u2014 the OFV, estimates, standard errors, and diagnostics
 should match the unscaled fit to numerical tolerance. Set
 \code{scale_params = FALSE} to:
 \itemize{
@@ -147,7 +147,7 @@ wrapper release for each option. Recognized keys include SAEM
 (\code{n_exploration}, \code{n_convergence}, \code{n_mh_steps},
 \code{adapt_interval}, \code{seed}), SIR tuning (\code{sir_samples},
 \code{sir_resamples}, \code{sir_seed}), Gauss-Newton (\code{gn_lambda}),
-optimizer selection (\code{optimizer} — one of \code{"bobyqa"} (default),
+optimizer selection (\code{optimizer} \u2014 one of \code{"bobyqa"} (default),
 \code{"slsqp"}, \code{"lbfgs"}, \code{"nlopt_lbfgs"}, \code{"mma"},
 \code{"bfgs"}, \code{"trust_region"}; also \code{global_search},
 \code{global_maxeval}), the outer optimizer iteration cap
@@ -156,7 +156,7 @@ optimizer selection (\code{optimizer} — one of \code{"bobyqa"} (default),
 for \code{optimizer = "trust_region"} (\code{steihaug_max_iters}).
 Values that duplicate a dedicated argument
 (\code{method}, \code{covariance}, \code{verbose},
-\code{bloq_method}, \code{threads}, \code{sir}) are rejected — pass
+\code{bloq_method}, \code{threads}, \code{sir}) are rejected \u2014 pass
 them via the dedicated argument. Unknown keys and malformed values
 also raise an error.
 \strong{Precedence}: dedicated \code{ferx_fit()} arguments win over
@@ -241,6 +241,14 @@ all subjects and iterations.}
 \code{omega_kk = 0} or fewer than 2 subjects.}
 \item{shrinkage_eps}{EPS shrinkage: \code{1 - SD(IWRES)}. \code{NA} when
 fewer than 2 valid residuals.}
+\item{dw_statistic}{Pooled Durbin-Watson statistic for IWRES within
+subjects. 2.0 = no autocorrelation; < 1.5 = positive autocorrelation
+(possible missing dynamics); > 2.5 = negative autocorrelation (possible
+over-parameterisation). \code{NA} when no subject has \eqn{\ge 2} valid
+IWRES values.}
+\item{iwres_lag1_r}{Pooled lag-1 Pearson correlation of IWRES within
+subjects. Positive values indicate under-fitting, negative values
+indicate over-fitting. \code{NA} when insufficient observations.}
 \item{wall_time_secs}{Total wall-clock time for the fit in seconds.}
 \item{model_name}{Model name from the \code{.ferx} file. Falls back to
 the model file's basename (without extension) when the file declares
@@ -249,7 +257,7 @@ no name.}
 path with its extension stripped.}
 \item{gradient}{The inner-loop gradient method as requested by the
 caller (one of \code{"auto"}, \code{"ad"}, \code{"fd"}). The
-\emph{resolved} method may differ — see \code{gradient_used} and the
+\emph{resolved} method may differ \u2014 see \code{gradient_used} and the
 \code{gradient} argument.}
 \item{gradient_used}{The inner-loop gradient method the engine actually
 used: \code{"ad"}, \code{"fd"}, or \code{"N/A"} (derivative-free /
@@ -264,7 +272,7 @@ engine binaries that did not populate this field.}
 optimizer's gradient ("Enzyme AD", "finite differences", or "N/A").}
 \item{ferx_version}{ferx-core library version string.}
 \item{cov_matrix}{Full parameter covariance matrix as a named numeric
-matrix (params × params). Row/column names use declared variable names
+matrix (params ? params). Row/column names use declared variable names
 (\code{"TVCL"}, \code{"ETA_CL"}, \code{"EPS_PROP"}); fallback is
 \code{"OMEGA(1,1)"} / \code{"SIGMA(1)"}. \code{NULL} when covariance
 step was not run or failed. Use \code{\link{ferx_cor_matrix}} to
@@ -329,11 +337,68 @@ block is present. Use this alongside \code{call_settings} to audit which
 values the model file requested and which were overridden at the R call
 site. A \code{warning()} is issued automatically for each key that
 appears in both sources with a different value.}
+\item{uses_sde}{Logical; \code{TRUE} when the model file contained a
+\code{[diffusion]} block and the fit used the Extended Kalman Filter
+(EKF) likelihood. \code{FALSE} for standard ODE/analytical models.
+When \code{TRUE}, one or more \code{DIFF_*} entries appear in
+\code{theta} and \code{theta_names} \u2014 these are diffusion
+\emph{variances} (not standard deviations) for the named state
+compartments.}
+\item{omega_init_as_sd}{Logical vector, one entry per BSV eta. \code{TRUE}
+when the corresponding \code{omega} line in the model file was annotated
+with \code{(sd)}, meaning the initial value was specified as a standard
+deviation rather than a variance. \code{print.ferx_fit()} appends
+\code{[initial specified as SD]} to those rows.}
+\item{sigma_init_as_sd}{Logical vector, one entry per sigma component.
+Same semantics as \code{omega_init_as_sd} for residual-error parameters.}
+\item{kappa_init_as_sd}{Logical vector, one entry per IOV kappa parameter.
+Same semantics as \code{omega_init_as_sd} for inter-occasion variability.}
+\item{neural_networks}{Named list of sub-lists, one per \code{[covariate_nn]}
+block declared in the model file. Empty list when the \code{nn} cargo
+feature is off or no NN blocks are present. Each sub-list contains:
+\code{name} (block name), \code{shape} (integer vector of layer widths),
+\code{hidden_activation}, \code{output_activation}, \code{n_weights}
+(total weight + bias count), \code{weights_offset} (0-based start index
+into \code{fit$theta}), \code{input_names}, \code{output_names}, and
+\code{weights} (numeric vector of trained values).}
 }
 \description{
 Fits a NLME model using FOCE or FOCEI estimation with a Rust backend
 powered by automatic differentiation (Enzyme).
 }
+\section{Process noise (SDE / diffusion)}{
+
+
+ODE-based PK/PD models occasionally produce autocorrelated IWRES when the
+structural model is misspecified (missing compartment, unmodelled feedback).
+Adding continuous within-subject process noise via an SDE framework \u2014 solved
+by an Extended Kalman Filter (EKF) \u2014 absorbs this drift and yields a
+better-calibrated likelihood.
+
+Add a \code{[diffusion]} block to the \code{.ferx} model file to enable SDE
+mode. Each line declares the diffusion variance for one ODE state:
+\preformatted{
+[diffusion]
+  central ~ 0.5   # initial estimate for DIFF_CENTRAL (variance units)
+}
+
+\strong{Key points:}
+\itemize{
+\item The declared value and the fitted estimate are \emph{variances}, not
+standard deviations. A value of 0.5 means \eqn{\sigma^2 = 0.5}, not
+\eqn{\sigma = 0.5}.
+\item Each diffusion parameter appears in \code{fit$theta} as
+\code{DIFF_<STATE>} (e.g. \code{DIFF_CENTRAL}). Standard errors and
+\code{ferx_estimates()} treat them as regular thetas.
+\item Autodifferentiation (Enzyme AD) is incompatible with the EKF
+covariance propagation \u2014 the engine automatically falls back to
+finite differences and emits a warning.
+\item SAEM is not supported with SDE models; a hard error is raised.
+\item \code{fit$uses_sde} is \code{TRUE} whenever a \code{[diffusion]}
+block was present.
+}
+}
+
 \section{Specifying model and data}{
 
 
@@ -360,7 +425,7 @@ explicitly to \code{ferx_fit()}.
 \section{Controlling estimation}{
 
 
-\strong{Estimation method} — pass a single method or a vector to chain
+\strong{Estimation method} \u2014 pass a single method or a vector to chain
 methods in sequence (each stage seeds the next with its converged
 parameters):
 \preformatted{
@@ -368,13 +433,13 @@ ferx_fit(m, d, method = "focei")
 ferx_fit(m, d, method = c("saem", "focei"))  # SAEM warm-start, FOCEI polish
 }
 
-\strong{Standard errors} — the covariance step is on by default:
+\strong{Standard errors} \u2014 the covariance step is on by default:
 \preformatted{
-ferx_fit(m, d, covariance = TRUE)   # default — produces SE / %RSE
+ferx_fit(m, d, covariance = TRUE)   # default \u2014 produces SE / %RSE
 ferx_fit(m, d, covariance = FALSE)  # skip for speed during development
 }
 
-\strong{Parallelism} — cap the Rust thread pool:
+\strong{Parallelism} \u2014 cap the Rust thread pool:
 \preformatted{
 ferx_fit(m, d, threads = parallel::detectCores(logical = FALSE))
 }
@@ -392,7 +457,7 @@ ferx_fit(m, d, gradient = "ad")    # force automatic differentiation
 ferx_fit(m, d, gradient = "fd")    # force finite differences
 }
 
-\strong{Optimizer trace} — write a per-iteration CSV for convergence
+\strong{Optimizer trace} \u2014 write a per-iteration CSV for convergence
 diagnostics:
 \preformatted{
 fit <- ferx_fit(m, d, optimizer_trace = TRUE)
@@ -406,7 +471,7 @@ ferx_plot_trace(fit)
 The \code{settings} argument forwards a named list of low-level options to
 the Rust backend without requiring a new wrapper release. Arguments with
 dedicated parameters (e.g. \code{method}, \code{covariance}) cannot be
-duplicated in \code{settings} — pass them via the named argument.
+duplicated in \code{settings} \u2014 pass them via the named argument.
 
 \strong{Outer optimizer selection:}
 \preformatted{
@@ -461,6 +526,30 @@ ferx_fit(m, d, settings = list(
   steihaug_max_iters = 100L
 ))
 }
+
+\strong{Multi-start optimization:}
+
+Runs \code{n_starts} independent fits from perturbed initial values in
+parallel (via rayon) and returns the converged result with the lowest OFV.
+Default \code{n_starts = 1} disables multi-start (single run, no overhead).
+Useful for models prone to local minima: Michaelis-Menten elimination,
+full-block omega, or many covariate parameters. On an 8-core machine
+\code{n_starts = 8} costs approximately the same wall-clock time as a single run.
+
+Start 0 always uses the exact initial values from the model file.
+Starts 1..n apply a log-space perturbation of size \code{start_sigma}
+(default 0.3) to each theta.
+
+\preformatted{
+# 8 parallel starts \u2014 approximately the same wall time as one run on 8 cores
+ferx_fit(m, d, settings = list(n_starts = 8L))
+
+# Wider perturbation for ridge-shaped surfaces (e.g. Michaelis-Menten):
+ferx_fit(m, d, settings = list(n_starts = 8L, start_sigma = 0.5))
+
+# Pin the perturbation RNG seed for reproducibility (independent of the SAEM seed):
+ferx_fit(m, d, settings = list(n_starts = 8L, multi_start_seed = 123L))
+}
 }
 
 \section{Post-fit outputs and pipe extensions}{
@@ -478,7 +567,7 @@ fit |> ferx_model_inspect() # model structure auto-derived by the engine
 fit |> ferx_plot_trace()    # convergence trace (needs optimizer_trace = TRUE)
 }
 
-Diagnostics data frame (PRED, IPRED, CWRES, ETAs, …) lives in
+Diagnostics data frame (PRED, IPRED, CWRES, ETAs, \u2026) lives in
 \code{fit$sdtab} and can be used directly:
 \preformatted{
 fit$sdtab
@@ -496,12 +585,12 @@ fit$ofv
 \dontrun{
 ex <- ferx_example("warfarin")
 
-# ── Classic style (path strings) ─────────────────────────────────────────
+# ?? Classic style (path strings) ?????????????????????????????????????????
 
-# Minimal call — FOCEI with default optimizer, covariance step on
+# Minimal call \u2014 FOCEI with default optimizer, covariance step on
 fit <- ferx_fit(ex$model, ex$data)
 
-# Named arguments — fully equivalent
+# Named arguments \u2014 fully equivalent
 fit <- ferx_fit(model = ex$model, data = ex$data, method = "focei")
 
 # All common options at once
@@ -538,9 +627,9 @@ fit <- ferx_fit(ex$model, ex$data,
   settings = list(sir_samples = 2000L, sir_resamples = 500L)
 )
 
-# ── Pipe style (ferx_model object) ───────────────────────────────────────
+# ?? Pipe style (ferx_model object) ???????????????????????????????????????
 
-# Basic pipe — data flows into ferx_model() which bundles the model path
+# Basic pipe \u2014 data flows into ferx_model() which bundles the model path
 ex$data |>
   ferx_model(ex$model) |>
   ferx_fit(method = "focei", covariance = TRUE)
@@ -575,7 +664,7 @@ ex$data |>
 m <- ferx_model(ex$data, ex$model)
 ferx_fit(m, data = "other_cohort.csv", method = "focei")
 
-# ── Post-fit outputs ─────────────────────────────────────────────────────
+# ?? Post-fit outputs ?????????????????????????????????????????????????????
 
 fit <- ferx_fit(ex$model, ex$data, covariance = TRUE, optimizer_trace = TRUE)
 
@@ -585,7 +674,7 @@ ferx_cor_matrix(fit)      # parameter correlation matrix
 ferx_model_inspect(fit)   # model structure auto-derived by the engine
 ferx_plot_trace(fit)      # convergence plot (optimizer_trace = TRUE required)
 
-fit$sdtab                 # per-observation diagnostics (PRED, IPRED, CWRES, …)
+fit$sdtab                 # per-observation diagnostics (PRED, IPRED, CWRES, \u2026)
 fit$ebe_etas              # per-subject empirical Bayes ETAs
 fit$individual_estimates  # per-subject individual PK parameters
 fit$eigenvalues           # sorted eigenvalues of parameter correlation matrix
@@ -593,6 +682,17 @@ fit$condition_number      # > 1000 flags potential ill-conditioning
 
 # Covariance diagnostics in a pipe
 ferx_fit(ex$model, ex$data, covariance = TRUE) |> ferx_cor_matrix()
+
+# ?? SDE model (Extended Kalman Filter) ???????????????????????????????????
+
+# The [diffusion] block in the .ferx file enables SDE mode.
+# DIFF_CENTRAL is a within-subject process-noise variance on the central
+# compartment.  Autodiff is forced to finite differences automatically.
+sde <- ferx_example("warfarin_sde")
+fit_sde <- ferx_fit(sde$model, sde$data)
+fit_sde$uses_sde                  # TRUE
+fit_sde$theta["DIFF_CENTRAL"]     # fitted diffusion variance
+ferx_estimates(fit_sde)           # DIFF_CENTRAL appears in theta block
 }
 
 }

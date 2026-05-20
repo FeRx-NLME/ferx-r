@@ -42,7 +42,7 @@ The input \code{fit}, augmented with \code{sir_ess}, \code{sir_ci_theta},
 }
 \description{
 Run a Sampling Importance Resampling (SIR) uncertainty step against a
-fit that was produced earlier — useful when the original fit was
+fit that was produced earlier \u2014 useful when the original fit was
 expensive and you want to add SIR without re-estimating, or when working
 with a fit loaded from a \code{.fitrx} bundle.
 }
@@ -66,8 +66,8 @@ modified model or dataset.
 Edge case: if hashing failed at fit time (e.g. permission flip between
 parse and hash) the corresponding \verb{fit$*_hash} is \code{NA} and the
 integrity check silently passes on that side. This is rare in
-practice — hashing would have to fail while the parse just
-succeeded — but if you require integrity verification, check
+practice \u2014 hashing would have to fail while the parse just
+succeeded \u2014 but if you require integrity verification, check
 \code{!is.na(fit$model_hash) && !is.na(fit$data_hash)} before relying on
 the protection.
 }

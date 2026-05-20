@@ -25,11 +25,11 @@ the destination file already exists, an error is raised.}
 
 \item{save_as}{Controls post-edit save-as behaviour:
 \itemize{
-\item \code{NULL} or \code{FALSE} (default) — no extra action after
+\item \code{NULL} or \code{FALSE} (default) \u2014 no extra action after
 editing. Accepting \code{FALSE} lets you pass expressions like
 \code{save_as = interactive()}.
-\item \code{TRUE} — interactively prompt the user for a destination path.
-\item A character string — silently copy the edited file to that path.
+\item \code{TRUE} \u2014 interactively prompt the user for a destination path.
+\item A character string \u2014 silently copy the edited file to that path.
 }
 When a copy is made the \emph{copy} path is returned; otherwise the edited
 file path is returned.}
@@ -50,7 +50,7 @@ is written to \code{dest} first and that copy is opened instead.
 }
 \details{
 After the editor closes, an optional \code{save_as} step lets you copy the
-edited file to a new path — useful when iterating on a model to keep
+edited file to a new path \u2014 useful when iterating on a model to keep
 versioned copies.
 }
 \examples{

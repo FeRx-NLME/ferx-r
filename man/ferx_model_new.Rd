@@ -37,7 +37,7 @@ Defaults to \code{FALSE}.}
 Writes a new \code{.ferx} file pre-filled with a skeleton for the chosen
 model type, then opens it in an editor. Pass \code{print = TRUE} instead of
 supplying a \code{path} to print the skeleton to the console without writing
-any file — useful for copy-pasting or piping in a scripted workflow.
+any file \u2014 useful for copy-pasting or piping in a scripted workflow.
 }
 \examples{
 # Print a skeleton to the console (no file written, no editor opened)

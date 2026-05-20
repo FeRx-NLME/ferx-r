@@ -18,7 +18,11 @@ to fit the model is embedded verbatim inside the archive (as
 path captured at fit time (\code{fit$data_path}). Default \code{FALSE}.}
 }
 \value{
-Invisibly returns \code{output}.
+Invisibly returns \code{fit}, so the function can be used inside a
+pipe without breaking the chain:
+\preformatted{
+  fit |> ferx_save_fit("run1.fitrx") |> ferx_estimates()
+  }
 }
 \description{
 Writes a single, self-describing zip archive that any language with stdlib
@@ -33,7 +37,7 @@ The schema is shared with the ferx-core Rust crate; see its
 \examples{
 ex  <- ferx_example("warfarin")
 fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
-tmp <- tempfile(fileext = ".rds")
+tmp <- tempfile(fileext = ".fitrx")
 ferx_save_fit(fit, tmp)
 fit2 <- ferx_load_fit(tmp)
 identical(fit$theta, fit2$theta)

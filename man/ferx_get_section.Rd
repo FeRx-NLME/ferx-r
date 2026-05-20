@@ -26,7 +26,7 @@ to \code{\link{ferx_model_section}(x, section)}.
 \examples{
 ex <- ferx_example("warfarin")
 
-# Inspect [parameters] and continue piping — ferx_get_section() prints
+# Inspect [parameters] and continue piping \u2014 ferx_get_section() prints
 # the section and passes the ferx_model object through unchanged.
 ferx_model(ex$data, ex$model) |>
   ferx_get_section("parameters")

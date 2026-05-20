@@ -13,13 +13,17 @@ ferx_estimates(fit)
 A data frame with columns \code{param}, \code{transform},
 \code{estimate}, \code{se}, \code{rse_pct}, \code{lower_95},
 \code{upper_95}, \code{estimate_natural}, \code{lower_95_natural},
-\code{upper_95_natural}. SE-derived and natural-scale columns are
-\code{NA} when not applicable or when the covariance step was not run.
+\code{upper_95_natural}, \code{init_as_sd}. SE-derived and
+natural-scale columns are \code{NA} when not applicable or when the
+covariance step was not run. \code{init_as_sd} is \code{TRUE} for
+omega, sigma, or kappa rows where the user annotated the initial
+value with \code{(sd)} in the model file; always \code{FALSE} for
+theta rows.
 }
 \description{
 Extracts all estimated parameters (theta, omega diagonal, sigma) into a
 single tidy data frame, adding percent relative standard error (\\%RSE),
-95\\% confidence intervals, and—for log/logit-transformed thetas—natural-scale
+95\\% confidence intervals, and\u2014for log/logit-transformed thetas\u2014natural-scale
 back-transformed estimates and CIs.
 }
 \details{

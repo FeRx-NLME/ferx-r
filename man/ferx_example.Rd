@@ -35,6 +35,21 @@ Available bundled examples:
 \item{two_cpt_oral_cov}{Two-compartment oral with continuous covariates (WT, CRCL)}
 \item{three_cpt_iv}{Three-compartment IV bolus}
 \item{mm_oral}{One-compartment oral with Michaelis-Menten elimination (ODE)}
+\item{warfarin_sde}{One-compartment oral as ODE with SDE process noise
+(\code{[diffusion]} block, EKF likelihood; \code{DIFF_CENTRAL} in theta)}
+\item{mm_multistart}{One-compartment oral with Michaelis-Menten elimination (ODE);
+starting values intentionally far from truth to demonstrate multi-start
+(\code{n_starts}, \code{start_sigma}, \code{multi_start_seed} in \code{settings})}
+\item{bioavailability}{One-compartment oral with logit-normal bioavailability F
+(analytical; THETA_F specified directly on the (0,1) scale)}
+\item{bioavailability_ode}{ODE equivalent of \code{bioavailability} \u2014 same model
+and data via explicit depot/central ODEs; useful for comparing analytical vs ODE paths}
+\item{warfarin_dcm}{Two-compartment oral with a Deep Compartment Model
+covariate model: a small neural network (\code{[covariate_nn TYPICAL_PK]})
+reads WT + CRCL and outputs a multiplicative modulator on the baseline
+TVCL/TVV1/TVQ/TVV2/TVKA thetas (i.e. \code{CL = TVCL * TYPICAL_PK.CL *
+    exp(ETA_CL)}), with lognormal IIV on top. Requires ferx-r built with the
+\code{nn} cargo feature. See \code{inst/examples/ex_warfarin_dcm.R}.}
 }
 Call \code{ferx_example()} with no arguments to list all available names.
 }

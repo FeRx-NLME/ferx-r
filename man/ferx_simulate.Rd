@@ -25,7 +25,7 @@ A data.frame with columns: SIM, ID, TIME, IPRED, DV_SIM
 \description{
 Simulates observations from a parsed model with between-subject variability
 and residual error. When a \code{fit} is supplied, the fitted theta, omega,
-and sigma replace the model file's initial values — which is the usual flow
+and sigma replace the model file's initial values \u2014 which is the usual flow
 after \code{\link{ferx_fit}} (e.g. for posterior-predictive checks or VPCs).
 }
 \examples{
