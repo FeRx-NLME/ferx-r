@@ -401,7 +401,7 @@
 #'
 #' \strong{Standard errors} — the covariance step is on by default:
 #' \preformatted{
-#' ferx_fit(m, d, covariance = TRUE)   # default — produces SE / %RSE
+#' ferx_fit(m, d, covariance = TRUE)   # default: produces SE / %RSE
 #' ferx_fit(m, d, covariance = FALSE)  # skip for speed during development
 #' }
 #'
@@ -505,7 +505,7 @@
 #' (default 0.3) to each theta.
 #'
 #' \preformatted{
-#' # 8 parallel starts — approximately the same wall time as one run on 8 cores
+#' # 8 parallel starts (approx. same wall time as one run on 8 cores)
 #' ferx_fit(m, d, settings = list(n_starts = 8L))
 #'
 #' # Wider perturbation for ridge-shaped surfaces (e.g. Michaelis-Menten):
