@@ -1294,19 +1294,18 @@ print.ferx_fit <- function(x, ...) {
   cat(strrep("-", 52), "\n", sep = "")
   theta_names <- names(x$theta)
   if (is.null(theta_names)) theta_names <- paste0("THETA", seq_along(x$theta))
-  # Collect index ranges of NN-weight thetas so we can skip them — they
-  # appear in the compact NEURAL NETWORKS block below (Option E). 1-based
-  # indices to match R's `seq_along`.
-  nn_skip <- integer(0)
+  # Logical mask of NN-weight thetas to skip — they appear in the compact
+  # NEURAL NETWORKS block below (Option E). 1-based indices to match `seq_along`.
+  nn_skip <- logical(length(x$theta))
   if (!is.null(x$neural_networks)) {
     for (nn in x$neural_networks) {
       if (!is.null(nn$weights_offset) && !is.null(nn$n_weights) && nn$n_weights > 0) {
-        nn_skip <- c(nn_skip, seq(nn$weights_offset + 1L, nn$weights_offset + nn$n_weights))
+        nn_skip[seq(nn$weights_offset + 1L, nn$weights_offset + nn$n_weights)] <- TRUE
       }
     }
   }
   for (i in seq_along(x$theta)) {
-    if (i %in% nn_skip) next
+    if (nn_skip[i]) next
     est       <- x$theta[i]
     transform <- if (!is.null(x$theta_transforms) && length(x$theta_transforms) >= i) x$theta_transforms[i] else "identity"
     if (!is.null(x$se_theta) && length(x$se_theta) >= i) {

@@ -21,7 +21,7 @@
 # misfit. Keeping a baseline + multiplicative NN modulator side-steps
 # that.
 #
-# Compare with `examples/two_cpt_oral_cov.ferx` — same data, same eta /
+# Compare with `ferx_example("two_cpt_oral_cov")` — same data, same eta /
 # omega / sigma structure, same baseline thetas. The only difference is
 # that the analytical model multiplies by `(WT/70)^THETA_WT * (CRCL/100)^THETA_CRCL`
 # while this one multiplies by `TYPICAL_PK.CL` (the NN output).

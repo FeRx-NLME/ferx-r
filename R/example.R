@@ -32,9 +32,10 @@
 #'     and data via explicit depot/central ODEs; useful for comparing analytical vs ODE paths}
 #'   \item{warfarin_dcm}{Two-compartment oral with a Deep Compartment Model
 #'     covariate model: a small neural network (\code{[covariate_nn TYPICAL_PK]})
-#'     maps WT + CRCL directly to typical CL/V1/Q/V2/KA values, with lognormal
-#'     IIV on the final PK params. Requires ferx-r built with the \code{nn}
-#'     cargo feature. See \code{inst/examples/ex_warfarin_dcm.R}.}
+#'     reads WT + CRCL and outputs a multiplicative modulator on the baseline
+#'     TVCL/TVV1/TVQ/TVV2/TVKA thetas (i.e. \code{CL = TVCL * TYPICAL_PK.CL *
+#'     exp(ETA_CL)}), with lognormal IIV on top. Requires ferx-r built with the
+#'     \code{nn} cargo feature. See \code{inst/examples/ex_warfarin_dcm.R}.}
 #' }
 #' Call \code{ferx_example()} with no arguments to list all available names.
 #'

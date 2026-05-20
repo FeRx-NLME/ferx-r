@@ -75,7 +75,9 @@ obs_mask <- orig$EVID == 0 & orig$MDV == 0
 key_orig <- paste(orig$ID[obs_mask], orig$TIME[obs_mask])
 key_sim  <- paste(sim$ID,            sim$TIME)
 orig$DV  <- as.character(orig$DV)   # original CSV uses "." for dose rows
-orig$DV[obs_mask] <- sprintf("%.4f", sim$DV_SIM[match(key_orig, key_sim)])
+matched  <- match(key_orig, key_sim)
+stopifnot("simulated DVs missing for some observation rows" = !anyNA(matched))
+orig$DV[obs_mask] <- sprintf("%.4f", sim$DV_SIM[matched])
 
 dataset_path <- tempfile(fileext = ".csv")
 write.csv(orig, dataset_path, row.names = FALSE, quote = FALSE)
