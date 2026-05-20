@@ -186,6 +186,11 @@ optimizer selection (\code{optimizer} - one of \code{"bobyqa"} (default),
 (\code{maxiter}), the inner (per-subject EBE) loop
 (\code{inner_maxiter}, \code{inner_tol}), the Steihaug CG budget
 for \code{optimizer = "trust_region"} (\code{steihaug_max_iters}),
+the NLopt outer-loop stagnation guard
+(\code{stagnation_guard} - logical, default \code{TRUE}; set
+\code{FALSE} to let SLSQP / L-BFGS run to their own xtol/ftol or to
+\code{maxiter} instead of short-circuiting on a numerically-flat
+OFV plateau; only consumed by FOCE / FOCEI / GN-hybrid),
 and multi-start optimization (\code{n_starts}, \code{start_sigma},
 \code{multi_start_seed}).
 Values that duplicate a dedicated argument

@@ -267,7 +267,8 @@ test_that("call_settings stores typed values after settings are serialised", {
   parts <- ferx:::.ferx_settings_to_strings(list(
     optimizer = "slsqp",
     max_iter = 200L,
-    scale_params = TRUE
+    scale_params = TRUE,
+    stagnation_guard = FALSE
   ))
   typed <- setNames(
     lapply(parts$values, ferx:::.ferx_parse_setting_value),
@@ -277,4 +278,5 @@ test_that("call_settings stores typed values after settings are serialised", {
   expect_identical(typed$optimizer, "slsqp")
   expect_equal(typed$max_iter, 200)
   expect_identical(typed$scale_params, TRUE)
+  expect_identical(typed$stagnation_guard, FALSE)
 })
