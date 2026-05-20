@@ -54,9 +54,18 @@ TVCL/TVV1/TVQ/TVV2/TVKA thetas (i.e. \code{CL = TVCL * TYPICAL_PK.CL *
 Call \code{ferx_example()} with no arguments to list all available names.
 }
 \examples{
-ferx_example()
+ferx_example()                        # list all available example names
 ex <- ferx_example("warfarin")
 ex$model
 ex$data
+
+\dontrun{
+# Deep Compartment Model (requires nn cargo feature):
+dcm <- ferx_example("warfarin_dcm")
+fit <- ferx_fit(dcm$model, dcm$data, method = "focei")
+fit$neural_networks[[1]]$shape   # NN layer dimensions
+# Full worked example:
+# file.show(system.file("examples", "ex_warfarin_dcm.R", package = "ferx"))
+}
 
 }

@@ -45,10 +45,19 @@
 #'   \item{data}{Path to the NONMEM-format CSV data file}
 #'
 #' @examples
-#' ferx_example()
+#' ferx_example()                        # list all available example names
 #' ex <- ferx_example("warfarin")
 #' ex$model
 #' ex$data
+#'
+#' \dontrun{
+#' # Deep Compartment Model (requires nn cargo feature):
+#' dcm <- ferx_example("warfarin_dcm")
+#' fit <- ferx_fit(dcm$model, dcm$data, method = "focei")
+#' fit$neural_networks[[1]]$shape   # NN layer dimensions
+#' # Full worked example:
+#' # file.show(system.file("examples", "ex_warfarin_dcm.R", package = "ferx"))
+#' }
 #'
 #' @export
 ferx_example <- function(name = NULL) {

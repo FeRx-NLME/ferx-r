@@ -161,6 +161,17 @@ Applies to all outer optimizers: NLopt FOCE/FOCEI (BOBYQA, SLSQP,
 L-BFGS, MMA), the hand-rolled BFGS, Gauss-Newton / BHHH, and the SAEM
 M-step.}
 
+\item{max_unconverged_frac}{Numeric scalar in [0, 1] or \code{NULL}
+(default). When non-\code{NULL}, the fit is flagged as converged even if
+up to this fraction of subjects failed their inner EBE loop, instead of
+raising an error. Useful for large datasets with a handful of difficult
+subjects.}
+
+\item{min_obs_for_convergence_check}{Integer or \code{NULL} (default).
+Minimum number of observations a subject must have before its inner-loop
+convergence is included in the \code{max_unconverged_frac} check. Subjects
+with fewer observations are excluded from the check.}
+
 \item{settings}{Optional named list of estimation-method-specific options
 forwarded to the Rust \code{FitOptions}. Use this to tune knobs that do
 not have a dedicated \code{ferx_fit()} argument, without needing a new
@@ -721,6 +732,28 @@ ferx_estimates(fit_sde)           # DIFF_CENTRAL appears in theta block
 ex <- ferx_example("warfarin")
 fit_ms <- ferx_fit(ex$model, ex$data, settings = list(n_starts = 4L))
 fit_ms$ofv
+
+# -- Deep Compartment Model (covariate neural network) -----------------------
+# Requires ferx-r built with the `nn` cargo feature.
+# The [covariate_nn TYPICAL_PK] block replaces analytical covariate functions
+# with a small MLP: WT + CRCL -> multiplicative modulator on TVCL/TVV1/etc.
+# ferx_fit() call is identical to any other model.
+dcm <- ferx_example("warfarin_dcm")
+fit_dcm <- ferx_fit(dcm$model, dcm$data, method = "focei")
+
+# NN metadata is in fit$neural_networks (one sub-list per [covariate_nn] block)
+fit_dcm$neural_networks[[1]]$name          # "TYPICAL_PK"
+fit_dcm$neural_networks[[1]]$shape         # e.g. c(2, 8, 8, 5)
+fit_dcm$neural_networks[[1]]$n_weights     # total weight + bias count
+fit_dcm$neural_networks[[1]]$input_names   # c("WT", "CRCL")
+fit_dcm$neural_networks[[1]]$output_names  # c("CL", "V1", "Q", "V2", "KA")
+
+# NN weight thetas are suppressed from the THETA table in print();
+# a NEURAL NETWORKS summary block is shown instead.
+print(fit_dcm)
+
+# See inst/examples/ex_warfarin_dcm.R for a full worked example including
+# interpretability heuristics and comparison against a no-covariate baseline.
 }
 
 }
