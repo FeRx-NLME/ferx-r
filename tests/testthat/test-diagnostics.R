@@ -98,3 +98,52 @@ test_that("positive DW < 1.5 emits message; negative DW > 2.5 emits message; no 
   fit$dw_statistic <- 2.0
   expect_silent(ferx:::.ferx_emit_dw_message(fit))
 })
+
+# --- ferx_estimates() init_as_sd column ---
+
+test_that("ferx_estimates returns init_as_sd column, TRUE for annotated omega/sigma", {
+  fit <- structure(list(
+    theta         = c(TVCL = 1.0),
+    theta_names   = "TVCL",
+    se_theta      = NULL,
+    theta_transforms = "log",
+    omega         = matrix(0.09, 1L, 1L),
+    eta_names     = "ETA_CL",
+    se_omega      = NULL,
+    omega_init_as_sd = TRUE,
+    sigma         = c(PROP_ERR = 0.01),
+    sigma_names   = "PROP_ERR",
+    se_sigma      = NULL,
+    sigma_types   = "proportional",
+    sigma_init_as_sd = FALSE,
+    omega_iov     = NULL
+  ), class = "ferx_fit")
+
+  est <- ferx_estimates(fit)
+  expect_true("init_as_sd" %in% names(est))
+  expect_false(est[est$param == "TVCL", "init_as_sd"])
+  expect_true(est[est$param == "ETA_CL", "init_as_sd"])
+  expect_false(est[est$param == "PROP_ERR", "init_as_sd"])
+})
+
+test_that("ferx_estimates init_as_sd is FALSE for all rows when flags absent (old fit)", {
+  fit <- structure(list(
+    theta         = c(TVCL = 1.0),
+    theta_names   = "TVCL",
+    se_theta      = NULL,
+    theta_transforms = "identity",
+    omega         = matrix(0.09, 1L, 1L),
+    eta_names     = "ETA_CL",
+    se_omega      = NULL,
+    sigma         = c(PROP_ERR = 0.01),
+    sigma_names   = "PROP_ERR",
+    se_sigma      = NULL,
+    sigma_types   = "proportional",
+    omega_iov     = NULL
+    # omega_init_as_sd, sigma_init_as_sd intentionally absent
+  ), class = "ferx_fit")
+
+  est <- ferx_estimates(fit)
+  expect_true("init_as_sd" %in% names(est))
+  expect_true(all(!est$init_as_sd))
+})

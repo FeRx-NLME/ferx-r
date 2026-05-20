@@ -319,6 +319,23 @@
 #'     \code{theta} and \code{theta_names} — these are diffusion
 #'     \emph{variances} (not standard deviations) for the named state
 #'     compartments.}
+#'   \item{omega_init_as_sd}{Logical vector, one entry per BSV eta. \code{TRUE}
+#'     when the corresponding \code{omega} line in the model file was annotated
+#'     with \code{(sd)}, meaning the initial value was specified as a standard
+#'     deviation rather than a variance. \code{print.ferx_fit()} appends
+#'     \code{[initial specified as SD]} to those rows.}
+#'   \item{sigma_init_as_sd}{Logical vector, one entry per sigma component.
+#'     Same semantics as \code{omega_init_as_sd} for residual-error parameters.}
+#'   \item{kappa_init_as_sd}{Logical vector, one entry per IOV kappa parameter.
+#'     Same semantics as \code{omega_init_as_sd} for inter-occasion variability.}
+#'   \item{neural_networks}{Named list of sub-lists, one per \code{[covariate_nn]}
+#'     block declared in the model file. Empty list when the \code{nn} cargo
+#'     feature is off or no NN blocks are present. Each sub-list contains:
+#'     \code{name} (block name), \code{shape} (integer vector of layer widths),
+#'     \code{hidden_activation}, \code{output_activation}, \code{n_weights}
+#'     (total weight + bias count), \code{weights_offset} (0-based start index
+#'     into \code{fit$theta}), \code{input_names}, \code{output_names}, and
+#'     \code{weights} (numeric vector of trained values).}
 #'
 #' @section Process noise (SDE / diffusion):
 #'
@@ -1417,7 +1434,7 @@ print.ferx_fit <- function(x, ...) {
       ""
     )
     eta_label <- if (!is.null(x$eta_names) && length(x$eta_names) >= i && nzchar(x$eta_names[i])) x$eta_names[i] else sprintf("OMEGA(%d,%d)", i, i)
-    sd_note <- if (isTRUE(x$omega_init_as_sd[i])) "  [initial specified as SD]" else ""
+    sd_note <- if (!is.null(x$omega_init_as_sd) && length(x$omega_init_as_sd) >= i && isTRUE(x$omega_init_as_sd[i])) "  [initial specified as SD]" else ""
     cat(sprintf(
       "  %-24s %-13s = %.6f  %s  SE = %s%s\n",
       eta_label, type_tag, var_ii, extra, se_str, sd_note
@@ -1539,7 +1556,7 @@ print.ferx_fit <- function(x, ...) {
       additive     = "[additive]",
       ""
     )
-    sd_note <- if (isTRUE(x$sigma_init_as_sd[i])) "  [initial specified as SD]" else ""
+    sd_note <- if (!is.null(x$sigma_init_as_sd) && length(x$sigma_init_as_sd) >= i && isTRUE(x$sigma_init_as_sd[i])) "  [initial specified as SD]" else ""
     if (identical(typ, "proportional")) {
       cat(sprintf("  %-16s %-14s = %.6f  (%s, CV%% = %.1f)  SE = %s%s\n",
                   nm, type_tag, s, var_str, s * 100, se_str, sd_note))

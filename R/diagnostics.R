@@ -253,8 +253,12 @@ ferx_eta_cov <- function(fit, data) {
 #' @return A data frame with columns \code{param}, \code{transform},
 #'   \code{estimate}, \code{se}, \code{rse_pct}, \code{lower_95},
 #'   \code{upper_95}, \code{estimate_natural}, \code{lower_95_natural},
-#'   \code{upper_95_natural}. SE-derived and natural-scale columns are
-#'   \code{NA} when not applicable or when the covariance step was not run.
+#'   \code{upper_95_natural}, \code{init_as_sd}. SE-derived and
+#'   natural-scale columns are \code{NA} when not applicable or when the
+#'   covariance step was not run. \code{init_as_sd} is \code{TRUE} for
+#'   omega, sigma, or kappa rows where the user annotated the initial
+#'   value with \code{(sd)} in the model file; always \code{FALSE} for
+#'   theta rows.
 #' @seealso \code{\link{ferx_cor_matrix}} for parameter correlations.
 #' @examples
 #' ex  <- ferx_example("warfarin")
@@ -280,7 +284,7 @@ ferx_estimates <- function(fit) {
   for (i in seq_len(n_eta)) {
     pname    <- if (!is.null(fit$eta_names) && length(fit$eta_names) >= i && nzchar(fit$eta_names[i])) fit$eta_names[i] else sprintf("OMEGA(%d,%d)", i, i)
     se       <- if (!is.null(fit$se_omega) && length(fit$se_omega) >= i) fit$se_omega[i] else NA_real_
-    init_sd  <- isTRUE(fit$omega_init_as_sd[i])
+    init_sd  <- !is.null(fit$omega_init_as_sd) && length(fit$omega_init_as_sd) >= i && isTRUE(fit$omega_init_as_sd[i])
     rows[[length(rows) + 1L]] <- .ferx_est_row(pname, om[i, i], se, "variance", init_sd)
   }
 
@@ -289,7 +293,7 @@ ferx_estimates <- function(fit) {
     pname         <- if (!is.null(fit$sigma_names) && length(fit$sigma_names) >= i && nzchar(fit$sigma_names[i])) fit$sigma_names[i] else sprintf("SIGMA(%d)", i)
     se            <- if (!is.null(fit$se_sigma) && length(fit$se_sigma) >= i) fit$se_sigma[i] else NA_real_
     sig_transform <- if (!is.null(fit$sigma_types) && length(fit$sigma_types) >= i) fit$sigma_types[i] else "proportional"
-    init_sd       <- isTRUE(fit$sigma_init_as_sd[i])
+    init_sd       <- !is.null(fit$sigma_init_as_sd) && length(fit$sigma_init_as_sd) >= i && isTRUE(fit$sigma_init_as_sd[i])
     rows[[length(rows) + 1L]] <- .ferx_est_row(pname, fit$sigma[i], se, sig_transform, init_sd)
   }
 
@@ -307,7 +311,7 @@ ferx_estimates <- function(fit) {
       se_idx  <- if (is_block_se) diag_se_idx(i) else i
       se      <- if (n_se >= se_idx) fit$se_kappa[se_idx] else NA_real_
       kap_type <- if (!is.null(fit$kappa_param_types) && length(fit$kappa_param_types) >= i) fit$kappa_param_types[i] else "variance"
-      init_sd  <- isTRUE(fit$kappa_init_as_sd[i])
+      init_sd  <- !is.null(fit$kappa_init_as_sd) && length(fit$kappa_init_as_sd) >= i && isTRUE(fit$kappa_init_as_sd[i])
       rows[[length(rows) + 1L]] <- .ferx_est_row(kap_names[i], m_iov[i, i], se, kap_type, init_sd)
     }
   }

@@ -210,3 +210,59 @@ test_that(".fitrx_write_predictions_csv handles character sdtab$ID", {
   expect_equal(as.character(loaded$sdtab$ID), c("PT001", "PT001", "PT002"))
   expect_equal(loaded$n_subjects, 2L)
 })
+
+test_that("init_as_sd flags survive ferx_save_fit / ferx_load_fit round-trip", {
+  skip_if_not(nzchar(Sys.getenv("FERX_RUN_REAL_FIT", "")),
+              "Set FERX_RUN_REAL_FIT=1 to run real-fit persist tests")
+  fit <- warfarin_fit()
+  # Inject flags so we can round-trip them without a real (sd)-annotated fit
+  fit$omega_init_as_sd <- c(TRUE, FALSE)
+  fit$sigma_init_as_sd <- TRUE
+  fit$kappa_init_as_sd <- logical(0L)
+
+  path <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(path), add = TRUE)
+  ferx_save_fit(fit, path)
+  loaded <- ferx_load_fit(path)
+
+  expect_equal(loaded$omega_init_as_sd, c(TRUE, FALSE))
+  expect_equal(loaded$sigma_init_as_sd, TRUE)
+  expect_equal(loaded$kappa_init_as_sd, logical(0L))
+})
+
+test_that("ferx_load_fit on old .fitrx without init_as_sd produces empty logicals", {
+  # Build a fake wire list that omits init_as_sd (pre-PR#57 bundle)
+  wire_omega <- list(
+    names = list("ETA_CL"),
+    matrix = list(list(0.09)),
+    fixed = list(FALSE),
+    log_transformed = list(TRUE),
+    shrinkage = list(0.1),
+    se = NULL,
+    param_corr = NULL
+    # init_as_sd intentionally absent
+  )
+  wire_sigma <- list(
+    names = list("PROP_ERR"),
+    estimates = list(0.01),
+    fixed = list(FALSE),
+    types = list("proportional"),
+    se = NULL
+    # init_as_sd intentionally absent
+  )
+  wire <- list(
+    method = "focei", method_chain = list("focei"),
+    converged = TRUE, ofv = -100, aic = -90, bic = -80,
+    n_obs = 10L, n_subjects = 2L, n_parameters = 2L, n_iterations = 5L,
+    interaction = TRUE, wall_time_secs = 1.0,
+    gradient_method_inner = "", gradient_method_outer = "",
+    covariance_status = "not_requested",
+    omega = wire_omega, sigma = wire_sigma,
+    theta = list(names = list("TVCL"), estimates = list(1.0),
+                 fixed = list(FALSE), transform = list("log"), se = NULL)
+  )
+  result <- ferx:::.fitrx_wire_to_fit(wire)
+  expect_equal(result$omega_init_as_sd, logical(0L))
+  expect_equal(result$sigma_init_as_sd, logical(0L))
+  expect_equal(result$kappa_init_as_sd, logical(0L))
+})
