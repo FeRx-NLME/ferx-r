@@ -93,7 +93,7 @@ This applies to: `print.ferx_fit`, `ferx_estimates()`, `ferx_cor_matrix()` (via 
 
 Always run `roxygen2::roxygenize()` and commit the updated `man/` files before opening or updating a PR — the `.Rd` files are checked into the repo and must stay in sync with the `#'` comments in `R/`.
 
-Never use `\uXXXX` escape sequences in roxygen `#'` comments. They get written literally into `.Rd` files, and `R CMD check --as-cran` on older R versions does not support `\uXXXX` in Rd, producing warnings. Use the actual UTF-8 characters directly (e.g. `—` not `—`, `…` not `…`).
+Never use `\uXXXX` escape sequences in roxygen `#'` comments. Also never use non-ASCII characters (em-dashes, ellipses, etc.) inside `\preformatted{}` blocks — RStudio's Rd renderer silently truncates the help page at the first non-ASCII character inside a preformatted block, hiding everything that follows. They get written literally into `.Rd` files, and `R CMD check --as-cran` on older R versions does not support `\uXXXX` in Rd, producing warnings. Use the actual UTF-8 characters directly (e.g. `—` not `—`, `…` not `…`).
 
 ## Pull Requests
 
