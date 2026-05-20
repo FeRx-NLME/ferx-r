@@ -30,7 +30,7 @@
   omega ETA_CL ~ 0.09              # BSV on CL (log-normal)
   omega ETA_F  ~ 0.10              # BSV on F  (logit-normal)
 
-  sigma PROP_ERR ~ 0.15
+  sigma PROP_ERR ~ 0.15 (sd)
 
 [individual_parameters]
   CL = TVCL * exp(ETA_CL)

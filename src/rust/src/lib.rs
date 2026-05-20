@@ -884,6 +884,9 @@ fn default_fit_result(
         dw_statistic: f64::NAN,
         iwres_lag1_r: f64::NAN,
         uses_sde: false,
+        omega_init_as_sd: Vec::new(),
+        sigma_init_as_sd: Vec::new(),
+        kappa_init_as_sd: Vec::new(),
     }
 }
 
@@ -1272,7 +1275,13 @@ fn fit_result_to_list(
         data_hash = result.data_hash.clone().unwrap_or_default(),
         uses_sde = result.uses_sde,
         dw_statistic = result.dw_statistic,
-        iwres_lag1_r = result.iwres_lag1_r
+        iwres_lag1_r = result.iwres_lag1_r,
+        // Per-parameter flag: true when the user wrote `(sd)` in the model
+        // file for that omega/sigma/kappa line. R printers can use these to
+        // annotate estimates with "[initial specified as SD]".
+        omega_init_as_sd = result.omega_init_as_sd.clone(),
+        sigma_init_as_sd = result.sigma_init_as_sd.clone(),
+        kappa_init_as_sd = result.kappa_init_as_sd.clone()
     )
 }
 
@@ -1667,6 +1676,9 @@ fn ferx_rust_sir(
         dw_statistic: f64::NAN,
         iwres_lag1_r: f64::NAN,
         uses_sde: false,
+        omega_init_as_sd: Vec::new(),
+        sigma_init_as_sd: Vec::new(),
+        kappa_init_as_sd: Vec::new(),
     };
 
     let mut opts = FitOptions::default();

@@ -270,7 +270,7 @@ ferx_estimates <- function(fit) {
   for (i in seq_along(fit$theta)) {
     se        <- if (!is.null(fit$se_theta) && length(fit$se_theta) >= i) fit$se_theta[i] else NA_real_
     transform <- if (!is.null(fit$theta_transforms) && length(fit$theta_transforms) >= i) fit$theta_transforms[i] else "identity"
-    rows[[length(rows) + 1L]] <- .ferx_est_row(theta_names[i], fit$theta[i], se, transform)
+    rows[[length(rows) + 1L]] <- .ferx_est_row(theta_names[i], fit$theta[i], se, transform, FALSE)
   }
 
   # Omega diagonal (variance scale)
@@ -278,17 +278,19 @@ ferx_estimates <- function(fit) {
   if (is.null(dim(om))) om <- matrix(om, 1L, 1L)
   n_eta <- nrow(om)
   for (i in seq_len(n_eta)) {
-    pname <- if (!is.null(fit$eta_names) && length(fit$eta_names) >= i && nzchar(fit$eta_names[i])) fit$eta_names[i] else sprintf("OMEGA(%d,%d)", i, i)
-    se    <- if (!is.null(fit$se_omega) && length(fit$se_omega) >= i) fit$se_omega[i] else NA_real_
-    rows[[length(rows) + 1L]] <- .ferx_est_row(pname, om[i, i], se, "variance")
+    pname    <- if (!is.null(fit$eta_names) && length(fit$eta_names) >= i && nzchar(fit$eta_names[i])) fit$eta_names[i] else sprintf("OMEGA(%d,%d)", i, i)
+    se       <- if (!is.null(fit$se_omega) && length(fit$se_omega) >= i) fit$se_omega[i] else NA_real_
+    init_sd  <- isTRUE(fit$omega_init_as_sd[i])
+    rows[[length(rows) + 1L]] <- .ferx_est_row(pname, om[i, i], se, "variance", init_sd)
   }
 
   # Sigma
   for (i in seq_along(fit$sigma)) {
-    pname     <- if (!is.null(fit$sigma_names) && length(fit$sigma_names) >= i && nzchar(fit$sigma_names[i])) fit$sigma_names[i] else sprintf("SIGMA(%d)", i)
-    se        <- if (!is.null(fit$se_sigma) && length(fit$se_sigma) >= i) fit$se_sigma[i] else NA_real_
+    pname         <- if (!is.null(fit$sigma_names) && length(fit$sigma_names) >= i && nzchar(fit$sigma_names[i])) fit$sigma_names[i] else sprintf("SIGMA(%d)", i)
+    se            <- if (!is.null(fit$se_sigma) && length(fit$se_sigma) >= i) fit$se_sigma[i] else NA_real_
     sig_transform <- if (!is.null(fit$sigma_types) && length(fit$sigma_types) >= i) fit$sigma_types[i] else "proportional"
-    rows[[length(rows) + 1L]] <- .ferx_est_row(pname, fit$sigma[i], se, sig_transform)
+    init_sd       <- isTRUE(fit$sigma_init_as_sd[i])
+    rows[[length(rows) + 1L]] <- .ferx_est_row(pname, fit$sigma[i], se, sig_transform, init_sd)
   }
 
   # Kappa (IOV diagonal)
@@ -302,10 +304,11 @@ ferx_estimates <- function(fit) {
     is_block_se <- (n_se == n_tri && n_kap > 1L)
     diag_se_idx <- function(j) j * n_kap - j * (j - 1L) / 2L - (n_kap - j)
     for (i in seq_len(n_kap)) {
-      se_idx <- if (is_block_se) diag_se_idx(i) else i
-      se     <- if (n_se >= se_idx) fit$se_kappa[se_idx] else NA_real_
+      se_idx  <- if (is_block_se) diag_se_idx(i) else i
+      se      <- if (n_se >= se_idx) fit$se_kappa[se_idx] else NA_real_
       kap_type <- if (!is.null(fit$kappa_param_types) && length(fit$kappa_param_types) >= i) fit$kappa_param_types[i] else "variance"
-      rows[[length(rows) + 1L]] <- .ferx_est_row(kap_names[i], m_iov[i, i], se, kap_type)
+      init_sd  <- isTRUE(fit$kappa_init_as_sd[i])
+      rows[[length(rows) + 1L]] <- .ferx_est_row(kap_names[i], m_iov[i, i], se, kap_type, init_sd)
     }
   }
 
@@ -316,7 +319,7 @@ ferx_estimates <- function(fit) {
 
 .ferx_inv_logit <- function(x) 1 / (1 + exp(-x))
 
-.ferx_est_row <- function(param, estimate, se, transform = "identity") {
+.ferx_est_row <- function(param, estimate, se, transform = "identity", init_as_sd = FALSE) {
   rse_pct  <- if (!is.na(se) && abs(estimate) > 1e-12) abs(se / estimate) * 100 else NA_real_
 
   # Asymmetric CI and natural-scale back-transform per theta type
@@ -357,5 +360,6 @@ ferx_estimates <- function(fit) {
              estimate_natural = estimate_natural,
              lower_95_natural = lower_95_natural,
              upper_95_natural = upper_95_natural,
+             init_as_sd       = init_as_sd,
              stringsAsFactors = FALSE)
 }

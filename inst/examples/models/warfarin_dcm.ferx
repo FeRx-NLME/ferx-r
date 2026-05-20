@@ -1,0 +1,81 @@
+# Two-compartment oral PK, deep compartment model (DCM) variant.
+#
+# Replaces the analytical covariate model with a neural network: a small
+# MLP `TYPICAL_PK` maps subject covariates (WT, CRCL) directly to typical
+# values of CL, V1, Q, V2, KA. Etas attach to the *final* PK parameters
+# (not the NN weights), giving lognormal IIV in the standard mu-ref form.
+#
+# Compare with `examples/two_cpt_oral_cov.ferx` — same data, same eta /
+# omega / sigma structure, the only difference is that the analytical
+# covariate model `(WT/70)^THETA_WT * (CRCL/100)^THETA_CRCL` is replaced
+# by an MLP. Janssen et al. 2022 (DOI 10.1002/psp4.12808) introduced this
+# class of model.
+#
+# Run with:
+#   RUSTFLAGS="-Z autodiff=Enable" cargo run --release --features nn \
+#     -- examples/warfarin_dcm.ferx --data data/two_cpt_oral_cov.csv
+#
+# Requires the `nn` cargo feature. The `[covariate_nn]` block syntax is
+# documented at docs/src/model-file/covariate-nn.md.
+
+[parameters]
+  # No theta-on-covariate (THETA_WT, THETA_CRCL) needed — the NN learns those.
+  omega ETA_CL ~ 0.15
+  omega ETA_V1 ~ 0.15
+  omega ETA_Q  ~ 0.08
+  omega ETA_V2 ~ 0.08
+  omega ETA_KA ~ 0.20
+
+  sigma PROP_ERR ~ 0.04 (sd)
+
+[covariate_nn TYPICAL_PK]
+  # Inputs: subject-static covariates from the NONMEM CSV.
+  inputs     = [WT, CRCL]
+  # Outputs: PK parameter names. They're routed by name into PkParams
+  # slots via `name_to_index` (`cl`, `v` | `v1`, `q` | `q2`, `v2`, `ka`,
+  # `f`, `q3`, `v3`, `lagtime` | `alag`).
+  outputs    = [CL, V1, Q, V2, KA]
+  # MLP shape: 2 → 8 → 8 → 5. Total weights:
+  #   2*8 + 8 + 8*8 + 8 + 8*5 + 5 = 141.
+  layers     = [8, 8]
+  # Hidden activation: tanh keeps hidden units in a smooth bounded regime.
+  # Output activation: softplus guarantees positive PK parameters without
+  # exponential blow-up. See docs/src/model-file/covariate-nn.md for the
+  # tradeoffs.
+  activation = tanh
+  output     = softplus
+
+[individual_parameters]
+  # Mu-ref composition: `TYPICAL_PK.X` is the NN output for output X (in
+  # the declared `outputs` order). Combine with `exp(ETA_X)` for the
+  # standard lognormal IIV form. The parser recognises this as a
+  # lognormal mu-ref and reports it as such in `mu_refs` / `eta_param_info`.
+  CL = TYPICAL_PK.CL * exp(ETA_CL)
+  V1 = TYPICAL_PK.V1 * exp(ETA_V1)
+  Q  = TYPICAL_PK.Q  * exp(ETA_Q)
+  V2 = TYPICAL_PK.V2 * exp(ETA_V2)
+  KA = TYPICAL_PK.KA * exp(ETA_KA)
+
+[structural_model]
+  pk two_cpt_oral(cl=CL, v1=V1, q=Q, v2=V2, ka=KA)
+
+[error_model]
+  DV ~ proportional(PROP_ERR)
+
+[fit_options]
+  # FOCEI runs end-to-end on NN-bearing models today. The optimizer
+  # treats the auto-generated NN weight thetas (`W_TYPICAL_PK_*`,
+  # `B_TYPICAL_PK_*`) as ordinary parameters and minimises the FOCEI
+  # OFV through gradient steps that include them.
+  #
+  # Convergence on a real fit will be slow (the NN weight space is much
+  # larger than a classical model's). For exploration, start with the
+  # `maxiter` here and monitor OFV between iterations; bump to 500–1000
+  # once a model is showing sensible behavior.
+  method = focei
+  maxiter = 200
+  # Covariance is left enabled by default; NN-weight standard errors are
+  # expected to be poorly conditioned but omega/sigma SEs remain
+  # meaningful. Set to `false` to skip if the post-fit covariance step
+  # is taking too long on large NN models.
+  covariance = true

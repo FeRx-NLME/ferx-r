@@ -427,6 +427,7 @@ ferx_load_fit <- function(path) {
     omega_param_corr = .fitrx_matrix_from_wire(w$omega$param_corr),
     shrinkage_eta = as.numeric(unlist(w$omega$shrinkage %||% list(), use.names = FALSE)),
     se_omega = .fitrx_unwrap_opt_num_vec(w$omega$se),
+    omega_init_as_sd = as.logical(unlist(w$omega$init_as_sd %||% list(), use.names = FALSE)),
 
     sigma_names = unlist(w$sigma$names, use.names = FALSE),
     sigma = stats::setNames(
@@ -439,6 +440,7 @@ ferx_load_fit <- function(path) {
       unlist(w$sigma$names, use.names = FALSE)
     ),
     se_sigma = .fitrx_unwrap_opt_num_vec(w$sigma$se),
+    sigma_init_as_sd = as.logical(unlist(w$sigma$init_as_sd %||% list(), use.names = FALSE)),
 
     shrinkage_eps = as.numeric(w$shrinkage_eps),
     dw_statistic = .fitrx_unwrap_opt_num(w$dw_statistic),
@@ -482,6 +484,7 @@ ferx_load_fit <- function(path) {
     out$se_kappa <- .fitrx_unwrap_opt_num_vec(w$iov$se_kappa)
     out$shrinkage_kappa <- as.numeric(unlist(w$iov$shrinkage_kappa %||% list(), use.names = FALSE))
     out$omega_iov_param_corr <- .fitrx_matrix_from_wire(w$iov$omega_iov_param_corr)
+    out$kappa_init_as_sd <- as.logical(unlist(w$iov$kappa_init_as_sd %||% list(), use.names = FALSE))
   } else {
     out$kappa_names <- character()
     out$kappa_fixed <- logical()
@@ -489,6 +492,7 @@ ferx_load_fit <- function(path) {
     out$shrinkage_kappa <- numeric()
     out$omega_iov <- NULL
     out$omega_iov_param_corr <- NULL
+    out$kappa_init_as_sd <- logical()
   }
 
   # R extras

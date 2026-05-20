@@ -20,7 +20,7 @@
   omega ETA_V2 ~ 0.08
   omega ETA_KA ~ 0.20
 
-  sigma PROP_ERR ~ 0.04
+  sigma PROP_ERR ~ 0.04 (sd)
 
 [individual_parameters]
   if (WT > 70) {

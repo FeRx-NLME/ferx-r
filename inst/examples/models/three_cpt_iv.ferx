@@ -15,7 +15,7 @@
   omega ETA_Q3 ~ 0.04
   omega ETA_V3 ~ 0.04
 
-  sigma PROP_ERR ~ 0.04
+  sigma PROP_ERR ~ 0.04 (sd)
 
 [individual_parameters]
   CL = TVCL * exp(ETA_CL)

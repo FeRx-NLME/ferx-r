@@ -1381,9 +1381,10 @@ print.ferx_fit <- function(x, ...) {
       ""
     )
     eta_label <- if (!is.null(x$eta_names) && length(x$eta_names) >= i && nzchar(x$eta_names[i])) x$eta_names[i] else sprintf("OMEGA(%d,%d)", i, i)
+    sd_note <- if (isTRUE(x$omega_init_as_sd[i])) "  [initial specified as SD]" else ""
     cat(sprintf(
-      "  %-24s %-13s = %.6f  %s  SE = %s\n",
-      eta_label, type_tag, var_ii, extra, se_str
+      "  %-24s %-13s = %.6f  %s  SE = %s%s\n",
+      eta_label, type_tag, var_ii, extra, se_str, sd_note
     ))
     for (j in seq_len(i - 1L)) {
       if (abs(om[i, j]) > 1e-15) has_offdiag <- TRUE
@@ -1502,15 +1503,16 @@ print.ferx_fit <- function(x, ...) {
       additive     = "[additive]",
       ""
     )
+    sd_note <- if (isTRUE(x$sigma_init_as_sd[i])) "  [initial specified as SD]" else ""
     if (identical(typ, "proportional")) {
-      cat(sprintf("  %-16s %-14s = %.6f  (%s, CV%% = %.1f)  SE = %s\n",
-                  nm, type_tag, s, var_str, s * 100, se_str))
+      cat(sprintf("  %-16s %-14s = %.6f  (%s, CV%% = %.1f)  SE = %s%s\n",
+                  nm, type_tag, s, var_str, s * 100, se_str, sd_note))
     } else if (identical(typ, "additive")) {
-      cat(sprintf("  %-16s %-14s = %.6f  (SD = %.4f, %s)  SE = %s\n",
-                  nm, type_tag, s, s, var_str, se_str))
+      cat(sprintf("  %-16s %-14s = %.6f  (SD = %.4f, %s)  SE = %s%s\n",
+                  nm, type_tag, s, s, var_str, se_str, sd_note))
     } else {
-      cat(sprintf("  %-16s = %.6f  (%s)  SE = %s\n",
-                  nm, s, var_str, se_str))
+      cat(sprintf("  %-16s = %.6f  (%s)  SE = %s%s\n",
+                  nm, s, var_str, se_str, sd_note))
     }
   }
 

@@ -22,7 +22,7 @@
   omega ETA_V    ~ 0.02              # BSV on V  (log-normal)
   omega ETA_TLAG ~ 0.04              # BSV on TLAG (additive, variance in h^2)
 
-  sigma PROP_ERR ~ 0.01
+  sigma PROP_ERR ~ 0.01 (sd)
 
 [individual_parameters]
   CL   = TVCL  * exp(ETA_CL)
