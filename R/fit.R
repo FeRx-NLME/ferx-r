@@ -682,6 +682,7 @@ ferx_fit.ferx_model <- function(model, data = model$data, ...) {
 }
 
 #' @export
+#' @rdname ferx_fit
 ferx_fit.default <- function(model, data,
                      method = "focei",
                      covariance = TRUE,

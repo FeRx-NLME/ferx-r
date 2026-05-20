@@ -3,11 +3,32 @@
 \name{ferx_fit}
 \alias{ferx_fit}
 \alias{ferx_fit.ferx_model}
+\alias{ferx_fit.default}
 \title{Fit a nonlinear mixed effects model}
 \usage{
 ferx_fit(model, data = NULL, ...)
 
 \method{ferx_fit}{ferx_model}(model, data = model$data, ...)
+
+\method{ferx_fit}{default}(
+  model,
+  data,
+  method = "focei",
+  covariance = TRUE,
+  verbose = TRUE,
+  bloq_method = NULL,
+  threads = NULL,
+  mu_referencing = TRUE,
+  sir = FALSE,
+  gradient = c("auto", "ad", "fd"),
+  optimizer_trace = FALSE,
+  scale_params = TRUE,
+  max_unconverged_frac = NULL,
+  min_obs_for_convergence_check = NULL,
+  settings = NULL,
+  output = NULL,
+  include_data = FALSE
+)
 }
 \arguments{
 \item{model}{Path to a \code{.ferx} model file, or a \code{\link{ferx_model}} object.}
@@ -53,6 +74,12 @@ silently to zero-centred ETA initialisation with no error. No changes
 to the \code{.ferx} model file are needed. Check \code{fit$warnings}
 to see which ETAs were detected.}
 
+\item{sir}{Logical; run Sampling Importance Resampling after the fit to
+produce non-parametric parameter uncertainty intervals. Requires
+\code{covariance = TRUE}. Tuning knobs (\code{sir_samples},
+\code{sir_resamples}, \code{sir_seed}) still flow through
+\code{settings}. Default \code{FALSE}.}
+
 \item{gradient}{Inner-loop (per-subject EBE) gradient method.
 One of \code{"auto"} (default), \code{"ad"}, or \code{"fd"}.
 
@@ -94,12 +121,6 @@ well-conditioned problems.
 Set \code{FERX_TIME_GRADIENTS=1} in the environment to print
 per-gradient-call timings at the end of a fit, which is the easiest
 way to check which method is faster on your specific model/data.}
-
-\item{sir}{Logical; run Sampling Importance Resampling after the fit to
-produce non-parametric parameter uncertainty intervals. Requires
-\code{covariance = TRUE}. Tuning knobs (\code{sir_samples},
-\code{sir_resamples}, \code{sir_seed}) still flow through
-\code{settings}. Default \code{FALSE}.}
 
 \item{optimizer_trace}{Logical. If \code{TRUE}, write a per-iteration CSV
 trace to a temporary file and store its path in \code{fit$trace_path}.
