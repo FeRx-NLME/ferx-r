@@ -1,3 +1,9 @@
+.dw_label <- function(dw) {
+  if (dw < 1.5) "positive autocorrelation"
+  else if (dw > 2.5) "negative autocorrelation"
+  else "no autocorrelation"
+}
+
 #' Structured diagnostic flags from a fit result
 #'
 #' Returns a named list of diagnostic data frames covering IWRES autocorrelation
@@ -20,27 +26,9 @@
 #' ex  <- ferx_example("warfarin")
 #' fit <- ferx_fit(ex$model, ex$data)
 #' diag <- check_diagnostics(fit)
-#'
-#' # Inspect autocorrelation
 #' diag$autocorrelation
-#'
-#' # Plot IWRES vs time coloured by subject, with DW annotation
-#' if (!is.null(diag$autocorrelation)) {
-#'   sd <- fit$sdtab
-#'   plot(sd$TIME, sd$IWRES, col = as.factor(sd$ID),
-#'        main = sprintf("IWRES vs Time  |  DW = %.2f  lag-1 r = %.3f",
-#'                       diag$autocorrelation$dw_statistic,
-#'                       diag$autocorrelation$lag1_r),
-#'        xlab = "TIME", ylab = "IWRES", pch = 16, cex = 0.7)
-#'   abline(h = 0, lty = 2)
+#' diag$shrinkage
 #' }
-#' }
-.dw_label <- function(dw) {
-  if (dw < 1.5) "positive autocorrelation"
-  else if (dw > 2.5) "negative autocorrelation"
-  else "no autocorrelation"
-}
-
 #' @export
 check_diagnostics <- function(fit) {
   # Autocorrelation

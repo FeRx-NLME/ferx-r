@@ -21,7 +21,7 @@ Vignettes:
 
 Authors:
 \itemize{
-  \item Teun Post \email{teunpost at gmail.com}
+  \item Teun Post \email{teunpost@gmail.com}
 }
 
 }

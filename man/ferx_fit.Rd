@@ -152,8 +152,10 @@ optimizer selection (\code{optimizer} - one of \code{"bobyqa"} (default),
 \code{"bfgs"}, \code{"trust_region"}; also \code{global_search},
 \code{global_maxeval}), the outer optimizer iteration cap
 (\code{maxiter}), the inner (per-subject EBE) loop
-(\code{inner_maxiter}, \code{inner_tol}), and the Steihaug CG budget
-for \code{optimizer = "trust_region"} (\code{steihaug_max_iters}).
+(\code{inner_maxiter}, \code{inner_tol}), the Steihaug CG budget
+for \code{optimizer = "trust_region"} (\code{steihaug_max_iters}),
+and multi-start optimization (\code{n_starts}, \code{start_sigma},
+\code{multi_start_seed}).
 Values that duplicate a dedicated argument
 (\code{method}, \code{covariance}, \code{verbose},
 \code{bloq_method}, \code{threads}, \code{sir}) are rejected - pass
