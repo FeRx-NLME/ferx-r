@@ -507,6 +507,18 @@
 #' ))
 #' }
 #'
+#' \strong{Stagnation guard (SLSQP / L-BFGS / MMA):}
+#'
+#' NLopt-based outer optimizers short-circuit by default once recent evaluations
+#' show no OFV improvement above 1e-3 over a rolling window, letting them
+#' terminate quickly instead of burning through \code{maxiter} at full
+#' inner-loop cost. Set \code{stagnation_guard = FALSE} to disable this and
+#' let the optimizer run to its natural termination criterion — useful when
+#' debugging or for problems with genuinely slow-but-real OFV improvements.
+#' \preformatted{
+#' ferx_fit(m, d, settings = list(stagnation_guard = FALSE))
+#' }
+#'
 #' \strong{Multi-start optimization:}
 #'
 #' Runs \code{n_starts} independent fits from perturbed initial values in
