@@ -1061,7 +1061,10 @@ fn fit_result_to_list(
             list!(
                 minus2_log_likelihood = is.minus2_log_likelihood,
                 mc_standard_error = is.mc_standard_error,
-                n_samples = is.n_samples as i32,
+                // n_samples is usize in ferx-core; cast to f64 (rather than
+                // i32) so a user-set `is_samples > i32::MAX` can't silently
+                // wrap to a negative number when bridged to R.
+                n_samples = is.n_samples as f64,
                 proposal_df = is.proposal_df,
                 ess_min = is.ess_min,
                 ess_median = is.ess_median,

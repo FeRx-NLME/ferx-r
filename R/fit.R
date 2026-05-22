@@ -11,10 +11,12 @@
 #'   the reported covariance/diagnostics. Supported methods: \code{"foce"},
 #'   \code{"focei"}, \code{"saem"}, \code{"gn"} (Gauss-Newton / BHHH),
 #'   \code{"gn_hybrid"} (Gauss-Newton followed by a FOCEI polish step), or
-#'   \code{"imp"} (importance-sampling marginal log-likelihood; a
-#'   diagnostic terminal stage that does not update parameters and must
-#'   follow another method, e.g. \code{c("focei", "imp")} or
-#'   \code{c("saem", "imp")}). Example chain: \code{c("saem", "focei")}.
+#'   \code{"imp"} (also accepted as \code{"importance_sampling"} or
+#'   \code{"importance-sampling"}; importance-sampling marginal
+#'   log-likelihood). The \code{"imp"} stage is a diagnostic terminal
+#'   stage that does not update parameters and must be the *last* entry
+#'   of the chain, e.g. \code{c("focei", "imp")} or
+#'   \code{c("saem", "imp")}. Example chain: \code{c("saem", "focei")}.
 #' @param covariance Logical; compute the covariance step for standard errors
 #' @param verbose Logical; print progress during estimation
 #' @param bloq_method Handling of observations below the lower limit of
@@ -778,14 +780,50 @@ ferx_fit.default <- function(model, data,
   method <- vapply(
     method,
     function(m) {
+      # `tolower` *before* the `[^a-z0-9]` strip — otherwise uppercase letters
+      # get smashed to underscores ("IMP" -> "___") before tolower runs on
+      # them, and the canonicalisation silently drops the case-insensitive
+      # entry points the docs advertise.
+      normalised <- gsub("[^a-z0-9]", "_", tolower(m))
+      # Fold IMP aliases before `match.arg` — partial matching won't see
+      # `importance_sampling` as a prefix of `imp`, so the documented
+      # `c("focei", "importance_sampling")` form has to be mapped explicitly.
+      if (normalised %in% c("importance_sampling", "importancesampling")) {
+        normalised <- "imp"
+      }
       match.arg(
-        tolower(gsub("[^a-z0-9]", "_", m)),
+        normalised,
         c("foce", "focei", "saem", "gn", "gn_hybrid", "imp")
       )
     },
     character(1L),
     USE.NAMES = FALSE
   )
+  # `imp` is a diagnostic terminal stage — engine rejects malformed chains too,
+  # but surfacing the error R-side avoids a round-trip and gives a clearer
+  # message anchored to the R argument.
+  imp_positions <- which(method == "imp")
+  if (length(imp_positions) > 0L) {
+    if (length(imp_positions) > 1L) {
+      stop(
+        "`method` may include \"imp\" at most once; got ",
+        length(imp_positions), " occurrences"
+      )
+    }
+    if (length(method) == 1L) {
+      stop(
+        "`method = \"imp\"` is invalid: importance sampling is a diagnostic ",
+        "terminal stage and must follow another method, e.g. ",
+        "`c(\"focei\", \"imp\")` or `c(\"saem\", \"imp\")`"
+      )
+    }
+    if (imp_positions != length(method)) {
+      stop(
+        "`\"imp\"` must be the final stage of the method chain; got ",
+        "method = c(\"", paste(method, collapse = "\", \""), "\")"
+      )
+    }
+  }
   if (is.null(bloq_method)) {
     bloq_arg <- ""
   } else {

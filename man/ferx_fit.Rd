@@ -44,10 +44,12 @@ previous stage's converged parameters, and only the final stage produces
 the reported covariance/diagnostics. Supported methods: \code{"foce"},
 \code{"focei"}, \code{"saem"}, \code{"gn"} (Gauss-Newton / BHHH),
 \code{"gn_hybrid"} (Gauss-Newton followed by a FOCEI polish step), or
-\code{"imp"} (importance-sampling marginal log-likelihood; a
-diagnostic terminal stage that does not update parameters and must
-follow another method, e.g. \code{c("focei", "imp")} or
-\code{c("saem", "imp")}). Example chain: \code{c("saem", "focei")}.}
+\code{"imp"} (also accepted as \code{"importance_sampling"} or
+\code{"importance-sampling"}; importance-sampling marginal
+log-likelihood). The \code{"imp"} stage is a diagnostic terminal
+stage that does not update parameters and must be the \emph{last} entry
+of the chain, e.g. \code{c("focei", "imp")} or
+\code{c("saem", "imp")}. Example chain: \code{c("saem", "focei")}.}
 
 \item{covariance}{Logical; compute the covariance step for standard errors}
 
