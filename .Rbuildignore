@@ -12,3 +12,5 @@
 ^\.Rproj\.user$
 ^.*\.Rproj$
 ^\.positai$
+^_pkgdown\.yml$
+^plans$
