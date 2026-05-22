@@ -1,5 +1,8 @@
 #' @keywords internal
 #' @useDynLib ferx, .registration = TRUE
+#' @importFrom graphics abline mtext par plot.new
+#' @importFrom stats cor.test shapiro.test setNames
+#' @importFrom utils read.csv
 #'
 #' @seealso
 #' Vignettes:

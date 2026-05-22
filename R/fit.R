@@ -754,7 +754,7 @@ ferx_fit.ferx_model <- function(model, data = model$data, ...) {
 
 #' @export
 #' @rdname ferx_fit
-ferx_fit.default <- function(model, data,
+ferx_fit.default <- function(model, data, ...,
                      method = "focei",
                      covariance = TRUE,
                      verbose = TRUE,
@@ -770,6 +770,10 @@ ferx_fit.default <- function(model, data,
                      settings = NULL,
                      output = NULL,
                      include_data = FALSE) {
+  # `...` is positioned before the named args so the S3 method signature is
+  # consistent with the `ferx_fit(model, data, ...)` generic (otherwise R CMD
+  # check fires `checking S3 generic/method consistency`). All call sites
+  # pass `method`, `settings`, etc. by name, so the change is source-compatible.
   gradient <- match.arg(gradient)
   if (is.null(data)) {
     stop("`data` is required. Pass a path to a NONMEM CSV file.")

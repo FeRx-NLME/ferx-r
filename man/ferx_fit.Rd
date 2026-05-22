@@ -13,6 +13,7 @@ ferx_fit(model, data = NULL, ...)
 \method{ferx_fit}{default}(
   model,
   data,
+  ...,
   method = "focei",
   covariance = TRUE,
   verbose = TRUE,
@@ -586,6 +587,19 @@ ferx_fit(m, d, settings = list(
   optimizer          = "trust_region",
   steihaug_max_iters = 100L
 ))
+}
+
+\strong{Stagnation guard (NLopt-based optimizers):}
+
+NLopt-based outer optimizers (BOBYQA, SLSQP, L-BFGS, MMA) short-circuit by
+default once recent evaluations show no OFV improvement above 1e-3 over a
+rolling window, letting them terminate quickly instead of burning through
+\code{maxiter} at full inner-loop cost. Set \code{stagnation_guard = FALSE}
+to disable this and let the optimizer run to its natural termination
+criterion — useful when debugging or for problems with genuinely
+slow-but-real OFV improvements.
+\preformatted{
+ferx_fit(m, d, settings = list(stagnation_guard = FALSE))
 }
 
 \strong{Multi-start optimization:}
