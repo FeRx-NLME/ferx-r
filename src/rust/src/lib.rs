@@ -177,8 +177,17 @@ fn ferx_rust_fit(
         }
     };
     let final_method = *chain.last().unwrap();
+    // The reported `interaction` flag must reflect the last *estimating* stage
+    // — IMP is a diagnostic terminal stage that does not update parameters, so
+    // a chain like `c("focei", "imp")` should still report `interaction = TRUE`.
+    let last_estimator = chain
+        .iter()
+        .rev()
+        .find(|m| **m != EstimationMethod::Imp)
+        .copied()
+        .unwrap_or(final_method);
     opts.method = final_method;
-    opts.interaction = final_method == EstimationMethod::FoceI;
+    opts.interaction = last_estimator == EstimationMethod::FoceI;
     opts.methods = if chain.len() > 1 { chain } else { Vec::new() };
     opts.run_covariance_step = covariance;
     opts.verbose = verbose;
@@ -619,9 +628,11 @@ fn parse_method(token: &str) -> std::result::Result<EstimationMethod, String> {
         Ok(EstimationMethod::FoceI)
     } else if m == "foce" {
         Ok(EstimationMethod::Foce)
+    } else if m == "imp" || m == "importance_sampling" || m == "importance-sampling" {
+        Ok(EstimationMethod::Imp)
     } else {
         Err(format!(
-            "Unknown estimation method '{}' — expected one of: foce, focei, saem, gn, gn_hybrid",
+            "Unknown estimation method '{}' — expected one of: foce, focei, saem, gn, gn_hybrid, imp",
             token.trim()
         ))
     }
@@ -846,6 +857,7 @@ fn default_fit_result(
         sir_ci_sigma: None,
         sir_ess: None,
         sir_resamples_packed,
+        importance_sampling: None,
         omega_iov: None,
         kappa_names: model.kappa_names.clone(),
         kappa_fixed: template.kappa_fixed.clone(),
@@ -1030,6 +1042,40 @@ fn fit_result_to_list(
             }
             _ => (Vec::new(), 0i32, 0i32),
         };
+
+    // Importance Sampling (IMP) diagnostics. Surfaced as a nested named list
+    // when the chain ended with an `imp` stage; NULL otherwise. The flat
+    // `(ids, ess_frac)` pair lets the R side rebuild a data frame without
+    // hitting extendr's data-frame-in-list limitations.
+    let importance_sampling: Robj = match &result.importance_sampling {
+        Some(is) => {
+            let kappa_treatment_str: &'static str = match is.kappa_treatment {
+                KappaTreatment::NotApplicable => "not_applicable",
+                KappaTreatment::FixedAtMode => "fixed_at_mode",
+                KappaTreatment::Marginalized => "marginalized",
+            };
+            let low_ess_ids: Vec<String> =
+                is.low_ess_subjects.iter().map(|(id, _)| id.clone()).collect();
+            let low_ess_frac: Vec<f64> =
+                is.low_ess_subjects.iter().map(|(_, f)| *f).collect();
+            list!(
+                minus2_log_likelihood = is.minus2_log_likelihood,
+                mc_standard_error = is.mc_standard_error,
+                // n_samples is usize in ferx-core; cast to f64 (rather than
+                // i32) so a user-set `is_samples > i32::MAX` can't silently
+                // wrap to a negative number when bridged to R.
+                n_samples = is.n_samples as f64,
+                proposal_df = is.proposal_df,
+                ess_min = is.ess_min,
+                ess_median = is.ess_median,
+                kappa_treatment = kappa_treatment_str,
+                low_ess_subject_ids = low_ess_ids,
+                low_ess_subject_frac = low_ess_frac,
+            )
+            .into()
+        }
+        None => ().into(),
+    };
 
     let trace_path: Robj = match &result.trace_path {
         Some(p) => p.clone().into(),
@@ -1229,6 +1275,7 @@ fn fit_result_to_list(
         sir_resamples = sir_resamples_flat,
         sir_resamples_n = sir_resamples_n,
         sir_resamples_dim = sir_resamples_dim,
+        importance_sampling = importance_sampling,
         trace_path = trace_path,
         ebe_convergence_warnings = result.ebe_convergence_warnings as i32,
         max_unconverged_subjects = result.max_unconverged_subjects as i32,
@@ -1678,6 +1725,7 @@ fn ferx_rust_sir(
         sir_ci_sigma: None,
         sir_ess: None,
         sir_resamples_packed: None,
+        importance_sampling: None,
         omega_iov: None,
         kappa_names: model.kappa_names.clone(),
         kappa_fixed: template.kappa_fixed.clone(),

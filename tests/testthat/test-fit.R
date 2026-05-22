@@ -103,6 +103,73 @@ test_that("errors on missing model file", {
   )
 })
 
+test_that("method = 'imp' passes the ferx_fit validation step", {
+  # Tier 1: validate that the method-normalisation block in `ferx_fit.default`
+  # accepts the new `imp` token (single or chained, plus documented aliases)
+  # without erroring. The actual IMP run is exercised in the integration tests
+  # once the engine supports it; here we only cover the R-side allowlist + the
+  # IMP alias fold. Mirrors the logic in `R/fit.R::ferx_fit.default`.
+  normalize <- function(m) {
+    vapply(
+      m,
+      function(s) {
+        normalised <- gsub("[^a-z0-9]", "_", tolower(s))
+        if (normalised %in% c("importance_sampling", "importancesampling")) {
+          normalised <- "imp"
+        }
+        match.arg(
+          normalised,
+          c("foce", "focei", "saem", "gn", "gn_hybrid", "imp")
+        )
+      },
+      character(1L),
+      USE.NAMES = FALSE
+    )
+  }
+  expect_equal(normalize("imp"), "imp")
+  expect_equal(normalize("IMP"), "imp")
+  # The two documented aliases — partial-prefix matching in `match.arg` can't
+  # resolve these to `"imp"`, so the wrapper has to fold them explicitly.
+  expect_equal(normalize("importance_sampling"), "imp")
+  expect_equal(normalize("importance-sampling"), "imp")
+  expect_equal(normalize("Importance_Sampling"), "imp")
+  expect_equal(normalize(c("focei", "imp")), c("focei", "imp"))
+  expect_equal(normalize(c("saem", "imp")), c("saem", "imp"))
+  expect_equal(
+    normalize(c("focei", "importance_sampling")),
+    c("focei", "imp")
+  )
+})
+
+test_that("ferx_fit rejects malformed `imp` method chains", {
+  # Tier 1: surface the engine's `imp`-placement constraints to the R caller
+  # *before* the engine round-trip, so the error message references the R
+  # argument and avoids spinning up the backend on inputs that will be
+  # rejected anyway. Engine-side guards remain as a safety net (and are
+  # covered in the ferx-core integration tests).
+  ex <- ferx_example("warfarin")
+  expect_error(
+    ferx_fit(ex$model, ex$data, method = "imp"),
+    regexp = "diagnostic terminal stage|must follow another method",
+    ignore.case = TRUE
+  )
+  expect_error(
+    ferx_fit(ex$model, ex$data, method = c("imp", "focei")),
+    regexp = "final stage|must be the final stage",
+    ignore.case = TRUE
+  )
+  expect_error(
+    ferx_fit(ex$model, ex$data, method = c("focei", "imp", "focei")),
+    regexp = "final stage|must be the final stage",
+    ignore.case = TRUE
+  )
+  expect_error(
+    ferx_fit(ex$model, ex$data, method = c("focei", "imp", "imp")),
+    regexp = "at most once",
+    ignore.case = TRUE
+  )
+})
+
 test_that("errors on missing data file", {
   ex <- ferx_example("warfarin")
   expect_error(

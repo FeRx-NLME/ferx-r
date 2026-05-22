@@ -2,6 +2,19 @@
 
 ## New features
 
+- `ferx_fit()` accepts `"imp"` as a chained method
+  (e.g. `method = c("focei", "imp")` or `method = c("saem", "imp")`).
+  The terminal IMP stage runs an importance-sampling estimate of the
+  marginal `-2 log L`, exposed on `fit$importance_sampling` (a list with
+  `minus2_log_likelihood`, `mc_standard_error`, `n_samples`,
+  `proposal_df`, `ess_min`/`ess_median`, `kappa_treatment`, and
+  parallel `low_ess_subject_ids`/`low_ess_subject_frac` vectors).
+  `print(fit)` and `summary(fit)` render the new block. New
+  IMP-specific settings keys are recognized by `ferx_fit(settings = ...)`:
+  `is_samples`, `is_proposal_df`, `is_seed`, `is_low_ess_threshold`.
+  Requires ferx-core with importance-sampling support merged
+  (FeRx-NLME/ferx-core IMP PR).
+
 - New `stagnation_guard` key recognized by `ferx_fit(settings = ...)`.
   Pass `settings = list(stagnation_guard = FALSE)` to disable the NLopt
   outer-loop stagnation guard so SLSQP / L-BFGS run to their own xtol /

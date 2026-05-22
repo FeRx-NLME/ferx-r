@@ -42,9 +42,14 @@ ferx_fit(model, data = NULL, ...)
 vector of methods to run in sequence. Each stage is seeded with the
 previous stage's converged parameters, and only the final stage produces
 the reported covariance/diagnostics. Supported methods: \code{"foce"},
-\code{"focei"}, \code{"saem"}, \code{"gn"} (Gauss-Newton / BHHH), or
-\code{"gn_hybrid"} (Gauss-Newton followed by a FOCEI polish step).
-Example chain: \code{c("saem", "focei")}.}
+\code{"focei"}, \code{"saem"}, \code{"gn"} (Gauss-Newton / BHHH),
+\code{"gn_hybrid"} (Gauss-Newton followed by a FOCEI polish step), or
+\code{"imp"} (also accepted as \code{"importance_sampling"} or
+\code{"importance-sampling"}; importance-sampling marginal
+log-likelihood). The \code{"imp"} stage is a diagnostic terminal
+stage that does not update parameters and must be the \emph{last} entry
+of the chain, e.g. \code{c("focei", "imp")} or
+\code{c("saem", "imp")}. Example chain: \code{c("saem", "focei")}.}
 
 \item{covariance}{Logical; compute the covariance step for standard errors}
 
@@ -178,7 +183,10 @@ not have a dedicated \code{ferx_fit()} argument, without needing a new
 wrapper release for each option. Recognized keys include SAEM
 (\code{n_exploration}, \code{n_convergence}, \code{n_mh_steps},
 \code{adapt_interval}, \code{seed}), SIR tuning (\code{sir_samples},
-\code{sir_resamples}, \code{sir_seed}), Gauss-Newton (\code{gn_lambda}),
+\code{sir_resamples}, \code{sir_seed}), Importance Sampling
+(\code{is_samples}, \code{is_proposal_df}, \code{is_seed},
+\code{is_low_ess_threshold}; used only when an \code{"imp"} stage is
+in the method chain), Gauss-Newton (\code{gn_lambda}),
 optimizer selection (\code{optimizer} - one of \code{"bobyqa"} (default),
 \code{"slsqp"}, \code{"lbfgs"}, \code{"nlopt_lbfgs"}, \code{"mma"},
 \code{"bfgs"}, \code{"trust_region"}; also \code{global_search},
@@ -264,6 +272,20 @@ under the model's covariate effects. For inter-occasion variation see
 \item{sir_ess}{SIR effective sample size (NULL if SIR not run)}
 \item{sir_ci_theta, sir_ci_omega, sir_ci_sigma}{SIR 95\\% CI matrices
 with columns \code{lower} and \code{upper} (NULL if SIR not run)}
+\item{importance_sampling}{Importance-sampling marginal log-likelihood
+diagnostics, populated only when the method chain ends with an
+\code{"imp"} stage (\code{NULL} otherwise). A list with
+\code{minus2_log_likelihood} (the IS estimate of \eqn{-2 \log L},
+comparable across models in the same nesting family),
+\code{mc_standard_error} (Monte-Carlo SE; scales as
+\eqn{1/\sqrt{is\_samples}}), \code{n_samples},
+\code{proposal_df}, \code{ess_min} and \code{ess_median}
+(per-subject effective sample size as a fraction of
+\code{is_samples}), \code{kappa_treatment}
+(\code{"not_applicable"}, \code{"fixed_at_mode"} for partial-marginal
+IOV fits, or \code{"marginalized"}), and parallel vectors
+\code{low_ess_subject_ids} / \code{low_ess_subject_frac} flagging
+subjects whose ESS fraction fell below \code{is_low_ess_threshold}.}
 \item{trace_path}{Path to the optimizer trace CSV, or \code{NULL} when
 \code{optimizer_trace = FALSE}. Pass to \code{\link{ferx_trace}}
 or \code{\link{ferx_plot_trace}}.}
