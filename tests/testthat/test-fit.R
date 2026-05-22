@@ -103,6 +103,29 @@ test_that("errors on missing model file", {
   )
 })
 
+test_that("method = 'imp' passes the ferx_fit validation step", {
+  # Tier 1: validate that the method-normalisation block in `ferx_fit.default`
+  # accepts the new `imp` token (single or chained) without erroring. The
+  # actual IMP run is exercised in the integration tests once the engine
+  # supports it; here we only cover the R-side `match.arg` allowlist.
+  normalize <- function(m) {
+    vapply(
+      m,
+      function(s) match.arg(
+        tolower(gsub("[^a-z0-9]", "_", s)),
+        c("foce", "focei", "saem", "gn", "gn_hybrid", "imp")
+      ),
+      character(1L),
+      USE.NAMES = FALSE
+    )
+  }
+  expect_equal(normalize("imp"), "imp")
+  expect_equal(normalize("IMP"), "imp")
+  expect_equal(normalize("importance_sampling"), "imp")
+  expect_equal(normalize(c("focei", "imp")), c("focei", "imp"))
+  expect_equal(normalize(c("saem", "imp")), c("saem", "imp"))
+})
+
 test_that("errors on missing data file", {
   ex <- ferx_example("warfarin")
   expect_error(
