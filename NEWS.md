@@ -13,6 +13,13 @@
 
 ## Bug fixes
 
+- SIR confidence intervals now work correctly for models with `FIX`-ed
+  parameters. Previously, any fixed parameter caused the proposal covariance
+  to be singular, and SIR returned "All SIR samples had invalid weights".
+  Sampling is now restricted to the free-parameter subspace and fixed
+  parameters are held at their estimated values throughout. Requires
+  ferx-core >= 0.1.0 (commit 47b48b5, ferx-core#64).
+
 - All output functions now display the declared variable name (`ETA_CL`,
   `EPS_PROP`) rather than wrapping it in `OMEGA()`/`SIGMA()`. Affected
   surfaces: `print(fit)` OMEGA section and shrinkage, `ferx_estimates()`,
