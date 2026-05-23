@@ -2,6 +2,35 @@
 
 ## New features
 
+- `[scaling]` block in `.ferx` model files for unit conversion. Form A
+  (`obs_scale = <number>`) divides every model prediction by a scalar before
+  residuals are computed and is safe with automatic differentiation. Form B
+  (`obs_scale = <expression>`) and Form C (`y = <expr>` for ODE readout)
+  support parameter and state-variable expressions but require
+  `gradient = fd` in `[fit_options]`. Per-compartment variants
+  (`obs_scale[CMT=N] = ...`, `y[CMT=N] = ...`) are also supported.
+  New bundled example: `ferx_example("warfarin_scaled")`.
+
+- Steady-state dosing via `SS` and `II` columns in the NONMEM CSV. Set
+  `SS = 1` on a dose row and supply the dosing interval `II` (same time
+  units as TIME). The engine resolves steady-state initial conditions
+  analytically for 1/2/3-cpt models and via pulse expansion for ODE models.
+  `SS = 2` adds the steady-state concentration to the current compartment
+  state (superposition). No model-file changes are required.
+  New bundled example: `ferx_example("warfarin_ss")`.
+
+- SAEM HMC proposals: pass `settings = list(n_leapfrog = <int>)` to
+  `ferx_fit()` to use Hamiltonian Monte Carlo proposals in the SAEM E-step
+  (requires the Enzyme AD build). New output field `fit$saem_n_subjects_hmc`
+  reports the number of subjects that used HMC proposals; `NULL` for MH-only
+  or non-SAEM fits.
+
+- SAEM fully supports inter-occasion variability (IOV / kappa) models.
+  New bundled example: `ferx_example("warfarin_iov_saem")`.
+
+- New bundled example `ferx_example("transit_2cpt")`: two-compartment ODE
+  model with 3-transit-compartment absorption and allometric scaling.
+
 - `ferx_fit()` accepts `"imp"` as a chained method
   (e.g. `method = c("focei", "imp")` or `method = c("saem", "imp")`).
   The terminal IMP stage runs an importance-sampling estimate of the

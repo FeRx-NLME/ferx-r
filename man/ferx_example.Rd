@@ -50,6 +50,23 @@ reads WT + CRCL and outputs a multiplicative modulator on the baseline
 TVCL/TVV1/TVQ/TVV2/TVKA thetas (i.e. \code{CL = TVCL * TYPICAL_PK.CL *
     exp(ETA_CL)}), with lognormal IIV on top. Requires ferx-r built with the
 \code{nn} cargo feature.}
+\item{warfarin_scaled}{One-compartment oral (warfarin) demonstrating the
+\code{[scaling]} block (Form A). The dataset records AMT in micrograms
+(100 mg = 100,000 ug) while DV is in mg/L; \code{obs_scale = 1000}
+divides model predictions by 1000 so residuals are on the mg/L scale.
+Estimates should match the standard \code{warfarin} example.}
+\item{warfarin_iov_saem}{One-compartment oral (warfarin) with
+inter-occasion variability estimated by SAEM. Identical model to
+\code{warfarin_iov} but uses \code{method = saem}; demonstrates that
+SAEM fully supports IOV kappa parameters.}
+\item{warfarin_ss}{One-compartment oral (warfarin) demonstrating
+steady-state dosing. The dose row in the dataset has \code{SS = 1}
+and \code{II = 24} (once-daily interval). The engine resolves
+steady-state initial conditions automatically; no model changes are
+needed.}
+\item{transit_2cpt}{Two-compartment ODE model with 3-transit-compartment
+absorption, allometric scaling on CL/V1/V2 (reference WT = 70 kg), and
+a lag time on the first transit compartment.}
 }
 Call \code{ferx_example()} with no arguments to list all available names.
 
