@@ -55,7 +55,7 @@ R API (R/*.R)
 
 ## Model DSL
 
-Models are defined in `.ferx` text files with sections: `[parameters]`, `[individual_parameters]`, `[structural_model]`, `[odes]`, `[error_model]`, `[initial_values]`, `[fit_options]`. See `inst/examples/models/` for references. Data uses NONMEM CSV format (ID, TIME, DV, EVID, AMT, CMT, etc.). Use `ferx_example("warfarin")` to get paths to bundled examples.
+Models are defined in `.ferx` text files with sections: `[parameters]`, `[individual_parameters]`, `[structural_model]`, `[odes]`, `[error_model]`, `[initial_values]`, `[fit_options]`, and the optional `[scaling]` block (unit conversion / observation readout). See `inst/examples/models/` for references. Data uses NONMEM CSV format (ID, TIME, DV, EVID, AMT, CMT, etc.); optional columns: RATE, MDV, II, SS, CENS, OCC. Use `ferx_example("warfarin")` to get paths to bundled examples.
 
 ## Key Return Structures
 

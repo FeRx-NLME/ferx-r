@@ -865,6 +865,7 @@ fn default_fit_result(
         shrinkage_kappa: Vec::new(),
         ebe_kappas: Vec::new(),
         saem_mu_ref_m_step_evals_saved: None,
+        saem_n_subjects_hmc: None,
         gradient_method_inner: String::new(),
         gradient_method_outer: String::new(),
         uses_ode_solver: model.is_ode_based(),
@@ -1323,6 +1324,7 @@ fn fit_result_to_list(
         model_hash = result.model_hash.clone().unwrap_or_default(),
         data_hash = result.data_hash.clone().unwrap_or_default(),
         uses_sde = result.uses_sde,
+        saem_n_subjects_hmc = result.saem_n_subjects_hmc.map(|n| n as i32),
         dw_statistic = result.dw_statistic,
         iwres_lag1_r = result.iwres_lag1_r,
         // Per-parameter flag: true when the user wrote `(sd)` in the model
@@ -1733,6 +1735,7 @@ fn ferx_rust_sir(
         shrinkage_kappa: Vec::new(),
         ebe_kappas: Vec::new(),
         saem_mu_ref_m_step_evals_saved: None,
+        saem_n_subjects_hmc: None,
         gradient_method_inner: String::new(),
         gradient_method_outer: String::new(),
         uses_ode_solver: model.is_ode_based(),

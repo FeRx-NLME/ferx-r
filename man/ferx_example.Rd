@@ -50,6 +50,11 @@ reads WT + CRCL and outputs a multiplicative modulator on the baseline
 TVCL/TVV1/TVQ/TVV2/TVKA thetas (i.e. \code{CL = TVCL * TYPICAL_PK.CL *
     exp(ETA_CL)}), with lognormal IIV on top. Requires ferx-r built with the
 \code{nn} cargo feature.}
+\item{warfarin_scaled}{One-compartment oral (warfarin) demonstrating the
+\code{[scaling]} block (Form A). The dataset records AMT in micrograms
+(100 mg = 100,000 ug) while DV is in mg/L; \code{obs_scale = 1000}
+divides model predictions by 1000 so residuals are on the mg/L scale.
+Estimates should match the standard \code{warfarin} example.}
 }
 Call \code{ferx_example()} with no arguments to list all available names.
 
