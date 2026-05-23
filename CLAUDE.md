@@ -36,6 +36,21 @@ Rscript -e 'roxygen2::roxygenize()'
 
 The build process (in `src/Makevars`) auto-creates `.cargo/config.toml` with `-Z autodiff=Enable` and `rust-toolchain.toml` with `channel = "enzyme"` since R CMD INSTALL strips hidden directories.
 
+### No-autodiff build path — never silently break this
+
+The build auto-probes for Enzyme and falls back to finite-difference gradients when it is absent (`FERX_NO_AUTODIFF=1` is set automatically). Users without the Enzyme toolchain (standard Rust on Mac/Linux, Windows, CI) rely on this path to install and run ferx.
+
+**Rule:** if a change would break or degrade the no-autodiff / FD path, **stop and warn** — do not silently update it. This applies to:
+- `src/Makevars` (autodiff detection logic, cargo feature flags)
+- `R/zzz.R` (startup message)
+- `src/rust/src/lib.rs` or `Cargo.toml` changes that require Enzyme features with no FD fallback
+- Any CI or build system changes that assume the Enzyme toolchain is present
+
+The small build for local dev:
+```bash
+FERX_NO_AUTODIFF=1 R CMD INSTALL --no-lock .
+```
+
 ## Architecture
 
 ```
