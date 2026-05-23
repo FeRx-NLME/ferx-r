@@ -31,11 +31,15 @@ Or from a local clone:
 R CMD INSTALL .
 ```
 
-### Quick install: Mac/Linux without Enzyme (finite-difference gradients)
+### Mac/Linux without Enzyme (finite-difference gradients)
 
-If you have a standard [Rust](https://www.rust-lang.org/tools/install) install but not the Enzyme toolchain, you can still install ferx using finite-difference gradients. All estimation methods work; only AD-specific features are limited (see startup message for details).
+No Enzyme toolchain? No problem. The build auto-detects whether Enzyme is present; if it is not, it falls back to finite-difference gradients automatically. Just install normally:
 
-In R:
+```r
+devtools::install_github("FeRx-NLME/ferx-r")
+```
+
+To skip the probe and force the FD path explicitly (e.g. in scripts or CI):
 
 ```r
 Sys.setenv(FERX_NO_AUTODIFF = "1")
@@ -44,11 +48,11 @@ devtools::install_github("FeRx-NLME/ferx-r")
 
 First install takes ~1-2 hours (Rust compilation from scratch). Subsequent installs are fast.
 
-When ferx loads it will print a one-time message listing the specific limitations of the no-autodiff build.
+All estimation methods (FOCE/FOCEI/SAEM/IMP) work. When ferx loads it prints a startup message listing the specific AD-only features that are limited.
 
 ### Windows (native, without Enzyme autodiff)
 
-Native Windows installs are supported, but **without** the Enzyme autodiff backend — gradients fall back to finite differences, which is slower and less accurate. For full-fidelity autodiff on Windows, use the Docker image below.
+Native Windows installs are supported. The build automatically uses finite-difference gradients on Windows (no `FERX_NO_AUTODIFF=1` needed). For full Enzyme autodiff on Windows, use the Docker image below.
 
 Prerequisites:
 
@@ -66,6 +70,8 @@ Then install in R:
 ```r
 devtools::install_github("FeRx-NLME/ferx-r")
 ```
+
+When ferx loads it prints a startup message listing the specific AD-only features that are limited on Windows.
 
 ### Docker
 
