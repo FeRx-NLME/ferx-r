@@ -31,6 +31,21 @@ Or from a local clone:
 R CMD INSTALL .
 ```
 
+### Quick install: Mac/Linux without Enzyme (finite-difference gradients)
+
+If you have a standard [Rust](https://www.rust-lang.org/tools/install) install but not the Enzyme toolchain, you can still install ferx using finite-difference gradients. All estimation methods work; only AD-specific features are limited (see startup message for details).
+
+In R:
+
+```r
+Sys.setenv(FERX_NO_AUTODIFF = "1")
+devtools::install_github("FeRx-NLME/ferx-r")
+```
+
+First install takes ~1-2 hours (Rust compilation from scratch). Subsequent installs are fast.
+
+When ferx loads it will print a one-time message listing the specific limitations of the no-autodiff build.
+
 ### Windows (native, without Enzyme autodiff)
 
 Native Windows installs are supported, but **without** the Enzyme autodiff backend — gradients fall back to finite differences, which is slower and less accurate. For full-fidelity autodiff on Windows, use the Docker image below.
