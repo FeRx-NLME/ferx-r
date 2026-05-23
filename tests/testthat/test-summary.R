@@ -31,6 +31,7 @@ make_fake_fit <- function(...) {
     total_ebe_fallbacks = 0L,
     call_settings = list(),
     sir_ess = NULL,
+    saem_n_subjects_hmc = NULL,
     warnings = character(0)
   )
   structure(modifyList(defaults, list(...)), class = "ferx_fit")
@@ -54,7 +55,7 @@ test_that("summary.ferx_fit returns a ferx_summary with expected fields", {
     "ebe_convergence_warnings", "max_unconverged_subjects",
     "total_ebe_fallbacks", "model_structure", "call_settings",
     "model_file_settings", "sir_ess", "importance_sampling", "warnings",
-    "uses_sde", "dw_statistic", "iwres_lag1_r"
+    "uses_sde", "dw_statistic", "iwres_lag1_r", "saem_n_subjects_hmc"
   ), ignore.order = TRUE)
 })
 
