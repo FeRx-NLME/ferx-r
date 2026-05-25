@@ -13,7 +13,7 @@
   ```
 
   Both endpoints contribute to one joint FOCEI/GN likelihood. ODE models only;
-  supported with FOCE/FOCEI and Gauss-Newton (not `method = saem`).
+  supported with FOCE/FOCEI, Gauss-Newton, and SAEM.
   `ferx_model_inspect()` reports the per-CMT residual structure. New bundled
   example: `ferx_example("emax_pkpd")`.
 
