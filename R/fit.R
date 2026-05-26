@@ -134,6 +134,14 @@
 #'   Minimum number of observations a subject must have before its inner-loop
 #'   convergence is included in the \code{max_unconverged_frac} check. Subjects
 #'   with fewer observations are excluded from the check.
+#' @param inits_from_nca Derive NCA-based starting values from the data before
+#'   the optimizer runs, overriding the model file's defaults. Either a logical
+#'   (\code{FALSE}, the default, disables it; \code{TRUE} is an alias for
+#'   \code{"nca_sweep"}) or one of \code{"nca"}, \code{"nca_sweep"},
+#'   \code{"nca_ebe"} to pick a strategy explicitly. Most useful with
+#'   \code{settings = list(optimizer = "trust_region")} or \code{method = "gn"},
+#'   where bad starting values can stall the optimizer. See
+#'   \code{\link{ferx_inits_from_nca}} to inspect the values without fitting.
 #' @param settings Optional named list of estimation-method-specific options
 #'   forwarded to the Rust \code{FitOptions}. Use this to tune knobs that do
 #'   not have a dedicated \code{ferx_fit()} argument, without needing a new
@@ -859,6 +867,7 @@ ferx_fit.default <- function(model, data, ...,
                      scale_params = FALSE,
                      max_unconverged_frac = NULL,
                      min_obs_for_convergence_check = NULL,
+                     inits_from_nca = FALSE,
                      settings = NULL,
                      output = NULL,
                      include_data = FALSE) {
@@ -987,6 +996,30 @@ ferx_fit.default <- function(model, data, ...,
       settings
     )
   }
+  # inits_from_nca: TRUE/FALSE or one of "nca", "nca_sweep", "nca_ebe". TRUE is
+  # an alias for "nca_sweep"; FALSE disables (the default). Merged into settings
+  # so apply_fit_option handles it on the Rust side (it's in framework_keys()).
+  # The dedicated arg always wins over a `settings` duplicate - including
+  # FALSE, which strips any settings value rather than silently letting it
+  # through.
+  inits_from_nca_explicit <- "inits_from_nca" %in% names(match.call())[-1L]
+  inits_value <- NULL
+  if (is.logical(inits_from_nca)) {
+    if (length(inits_from_nca) != 1L || is.na(inits_from_nca)) {
+      stop("`inits_from_nca` must be TRUE/FALSE or one of \"nca\", \"nca_sweep\", \"nca_ebe\"")
+    }
+    if (isTRUE(inits_from_nca)) inits_value <- "nca_sweep"
+  } else if (is.character(inits_from_nca) && length(inits_from_nca) == 1L && !is.na(inits_from_nca)) {
+    inits_value <- match.arg(tolower(inits_from_nca), c("nca", "nca_sweep", "nca_ebe"))
+  } else {
+    stop("`inits_from_nca` must be TRUE/FALSE or one of \"nca\", \"nca_sweep\", \"nca_ebe\"")
+  }
+  if (inits_from_nca_explicit) {
+    settings[["inits_from_nca"]] <- NULL
+  }
+  if (!is.null(inits_value)) {
+    settings <- c(list(inits_from_nca = inits_value), settings)
+  }
   settings_parts <- .ferx_settings_to_strings(settings)
   # Effective settings as sent to Rust, with merged defaults, for summary display.
   settings_used <- if (length(settings_parts$keys) > 0L) {
@@ -1009,7 +1042,8 @@ ferx_fit.default <- function(model, data, ...,
     threads        = if ("threads"        %in% explicit_args && !is.null(threads)) as.character(threads),
     mu_referencing = if ("mu_referencing" %in% explicit_args) tolower(as.character(mu_referencing)),
     sir            = if ("sir"            %in% explicit_args) tolower(as.character(sir)),
-    gradient       = if ("gradient"       %in% explicit_args) gradient
+    gradient       = if ("gradient"       %in% explicit_args) gradient,
+    inits_from_nca = if ("inits_from_nca" %in% explicit_args) (if (is.null(inits_value)) "off" else inits_value)
   )
   .ferx_warn_fit_option_conflicts(model_file_opts, dedicated_explicit, settings_parts)
 
@@ -2165,7 +2199,8 @@ print.ferx_summary <- function(x, ...) {
     threads        = "threads",
     mu_referencing = "mu_referencing",
     sir            = "sir",
-    gradient       = c("gradient", "gradient_method")
+    gradient       = c("gradient", "gradient_method"),
+    inits_from_nca = "inits_from_nca"
   )
   mf_names <- names(model_file_opts)
   for (arg in names(dedicated_explicit)) {
