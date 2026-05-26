@@ -812,9 +812,24 @@
 #' fit_ms$ofv
 #'
 #' # -- NCA-based starting values (inits_from_nca) ------------------------------
-#' # When the model file's starting values are far from the truth, gradient-based
-#' # optimizers (trust_region, gn) can stall. `inits_from_nca` derives them
-#' # directly from the data before the optimizer runs.
+#' # `inits_from_nca` is designed to mitigate stalling and local-minimum traps
+#' # in **gradient-based estimation methods**, which navigate the likelihood
+#' # surface using a local Jacobian / Hessian and so are sensitive to where the
+#' # starting thetas sit. In ferx those are:
+#' #   - method = "gn"         (FOCE Gauss-Newton)
+#' #   - method = "gn_hybrid"  (FOCE-GN with SLSQP polish)
+#' #   - method = "foce" / "focei" run with settings = list(optimizer =
+#' #     "trust_region") (the default optimizer "slsqp" is also gradient-based
+#' #     but tolerates poor starts better)
+#' # For these, NCA-derived starts often turn a non-converging or stagnating
+#' # fit into a clean convergence.
+#' #
+#' # Stochastic / sampling-based methods ("saem", "imp") explore the space
+#' # globally and are far less sensitive to starting values, so `inits_from_nca`
+#' # gives a smaller benefit. The better tool for them is multi-start (run
+#' # several fits from perturbed starts and keep the lowest OFV) - see the
+#' # Multi-start section above (`settings = list(n_starts = 4L)`), or chain
+#' # SAEM into FOCEI: `method = c("saem", "focei")`.
 #'
 #' # TRUE = default strategy ("nca_sweep"); rescues a trust_region fit that
 #' # would otherwise stall on poor defaults.
@@ -834,6 +849,14 @@
 #' # Same flag from the model file's [fit_options] (the call-time arg wins
 #' # and warns on conflict). Inspect what NCA produces without fitting via
 #' # `ferx_inits_from_nca()` -- see ?ferx_inits_from_nca.
+#' #
+#' # Combine with multi-start when even good inits aren't enough - good starts
+#' # PLUS a small perturbed ensemble is often the most robust setup.
+#' fit <- ferx_fit(ex$model, ex$data,
+#'   method         = "gn",
+#'   inits_from_nca = "nca_sweep",
+#'   settings       = list(n_starts = 4L)
+#' )
 #'
 #' # -- Deep Compartment Model (covariate neural network) -----------------------
 #' # Requires ferx-r built with the `nn` cargo feature.
