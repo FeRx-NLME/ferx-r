@@ -962,6 +962,25 @@ fn error_model_to_string(em: ErrorModel) -> &'static str {
     }
 }
 
+// Residual-error label for `model_structure`. Single-endpoint models report
+// the bare error type ("proportional"); multi-endpoint (per-CMT) models report
+// each compartment's error type, e.g. "per-CMT (CMT2=proportional,
+// CMT3=additive)".
+fn residual_label(model: &CompiledModel) -> String {
+    match &model.error_spec {
+        ErrorSpec::Single(em) => error_model_to_string(*em).to_string(),
+        ErrorSpec::PerCmt(map) => {
+            let mut cmts: Vec<usize> = map.keys().copied().collect();
+            cmts.sort_unstable();
+            let parts: Vec<String> = cmts
+                .iter()
+                .map(|c| format!("CMT{}={}", c, error_model_to_string(map[c].error_model)))
+                .collect();
+            format!("per-CMT ({})", parts.join(", "))
+        }
+    }
+}
+
 // -- Helper: build the model_structure sub-list from the parsed/compiled
 //    model. Mirrors the shape that the R layer historically derived by
 //    re-parsing the .ferx file (theta_names, model_type, iiv, iov, residual)
@@ -972,7 +991,7 @@ fn model_structure_list(model: &CompiledModel) -> Robj {
         model_type = pk_model_type_label(model).to_string(),
         iiv = model.eta_names.clone(),
         iov = model.kappa_names.clone(),
-        residual = error_model_to_string(model.error_model).to_string()
+        residual = residual_label(model)
     )
     .into()
 }

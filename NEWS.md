@@ -2,6 +2,21 @@
 
 ## New features
 
+- Multi-endpoint (per-CMT) residual error models for simultaneous PK/PD
+  fitting. A single `[error_model]` block can now assign a distinct error
+  model to each observed compartment, dispatched by the dataset `CMT` column:
+
+  ```
+  [error_model]
+    CMT=2: DV ~ proportional(PROP_ERR_PK)
+    CMT=3: DV ~ additive(ADD_ERR_PD)
+  ```
+
+  Both endpoints contribute to one joint FOCEI/GN likelihood. ODE models only;
+  supported with FOCE/FOCEI, Gauss-Newton, and SAEM.
+  `ferx_model_inspect()` reports the per-CMT residual structure. New bundled
+  example: `ferx_example("emax_pkpd")`.
+
 - `[scaling]` block in `.ferx` model files for unit conversion. Form A
   (`obs_scale = <number>`) divides every model prediction by a scalar before
   residuals are computed and is safe with automatic differentiation. Form B

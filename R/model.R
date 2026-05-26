@@ -900,20 +900,55 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
   else
     character(0)
 
-  # Residual error type from [error_model]
-  err_line <- (b[["error_model"]] %||% character(0))[1L]
-  residual <- if (is.na(err_line) || !nzchar(err_line %||% "")) {
+  # Residual error type from [error_model]. Multi-endpoint blocks use a
+  # `CMT=N:` prefix per line; report them as "per-CMT (CMT2=proportional,
+  # CMT3=additive)" to match the label the Rust engine attaches post-fit.
+  err_lines <- b[["error_model"]] %||% character(0)
+  err_lines <- err_lines[nzchar(trimws(err_lines)) & !grepl("^\\s*#", err_lines)]
+  err_type <- function(line) {
+    if (grepl("proportional", line, ignore.case = TRUE)) {
+      "proportional"
+    } else if (grepl("additive", line, ignore.case = TRUE)) {
+      "additive"
+    } else if (grepl("combined", line, ignore.case = TRUE)) {
+      "combined"
+    } else {
+      NA_character_
+    }
+  }
+  cmt_lines <- grep("^\\s*CMT\\s*=", err_lines, value = TRUE)
+  residual <- if (length(err_lines) == 0L) {
     "unknown"
-  } else if (grepl("proportional", err_line, ignore.case = TRUE)) {
-    "proportional"
-  } else if (grepl("additive",     err_line, ignore.case = TRUE)) {
-    "additive"
-  } else if (grepl("combined",     err_line, ignore.case = TRUE)) {
-    "combined"
+  } else if (length(cmt_lines) > 0L) {
+    cmts  <- suppressWarnings(as.integer(sub("^\\s*CMT\\s*=\\s*([0-9]+).*", "\\1", cmt_lines)))
+    types <- vapply(cmt_lines, err_type, character(1L))
+    if (anyNA(cmts) || anyNA(types)) {
+      # An unparseable CMT index or unrecognised error type would otherwise
+      # render as "CMTNA=..." / "CMT2=NA". Warn and fall back, mirroring the
+      # single-endpoint path, so the residual label never contains NA.
+      warning(
+        "Unrecognised per-CMT residual error specification; reporting as ",
+        "\"unknown\". Lines: ", paste(cmt_lines, collapse = " | "),
+        call. = FALSE
+      )
+      "unknown"
+    } else {
+      ord <- order(cmts)
+      paste0(
+        "per-CMT (",
+        paste(sprintf("CMT%d=%s", cmts[ord], types[ord]), collapse = ", "),
+        ")"
+      )
+    }
   } else {
-    warning("Unrecognised residual error type; reporting as \"unknown\". Line: ",
-            err_line, call. = FALSE)
-    "unknown"
+    t1 <- err_type(err_lines[1L])
+    if (is.na(t1)) {
+      warning("Unrecognised residual error type; reporting as \"unknown\". Line: ",
+              err_lines[1L], call. = FALSE)
+      "unknown"
+    } else {
+      t1
+    }
   }
 
   list(

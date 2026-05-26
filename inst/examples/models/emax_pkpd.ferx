@@ -1,0 +1,61 @@
+# Simultaneous PK/PD: oral 1-cpt PK + effect-compartment Emax PD, fit
+# jointly with a SEPARATE residual error model per endpoint.
+#
+# Plasma concentration (CMT=2) carries a proportional error; the PD effect
+# read out of the biophase compartment (CMT=3) carries an additive error.
+# The per-CMT `[error_model]` block (`CMT=N: DV ~ ...`) dispatches the right
+# residual variance to each observation by its data `CMT` column, so both
+# endpoints contribute to one joint FOCEI likelihood — the gold-standard
+# alternative to the sequential (PK-then-PD) workaround.
+#
+# Per-CMT error models are ODE-only (the residual dispatch lives in the
+# FD-differenced likelihood path). `gradient = fd` is required here because
+# the PD readout uses a Form C `y[CMT=N] = <expr>` readout.
+
+[parameters]
+  theta TVCL(5.0,  0.1,  50.0)
+  theta TVV(50.0,  5.0, 500.0)
+  theta TVKA(1.0,  0.05, 20.0)
+  theta TVKE0(0.3, 0.01,  5.0)        # biophase equilibration rate
+  theta TVE0(2.0,    0.0,  50.0)      # baseline effect
+  theta TVEMAX(40.0, 1.0, 200.0)      # maximal effect
+  theta TVEC50(5.0,  0.1, 100.0)      # biophase conc at half-maximal effect
+  theta TVGAMMA(1.0, 0.1,   5.0)      # Hill coefficient
+
+  omega ETA_CL ~ 0.09
+  omega ETA_V  ~ 0.09
+
+  sigma PROP_ERR_PK ~ 0.10 (sd)       # plasma concentration: proportional
+  sigma ADD_ERR_PD  ~ 1.00 (sd)       # PD effect: additive
+
+[individual_parameters]
+  CL    = TVCL * exp(ETA_CL)
+  V     = TVV  * exp(ETA_V)
+  KA    = TVKA
+  KE0   = TVKE0
+  E0    = TVE0
+  EMAX  = TVEMAX
+  EC50  = TVEC50
+  GAMMA = TVGAMMA
+
+[structural_model]
+  ode(states=[depot, central, effect])   # no single obs_cmt — per-CMT below
+
+[odes]
+  d/dt(depot)   = -KA * depot
+  d/dt(central) =  KA * depot - CL/V * central
+  d/dt(effect)  =  KE0 * (central/V - effect)
+
+[scaling]
+  y[CMT=2] = central / V                                  # plasma conc (mg/L)
+  y[CMT=3] = E0 + EMAX * effect^GAMMA / (EC50^GAMMA + effect^GAMMA)  # Emax PD
+
+[error_model]
+  CMT=2: DV ~ proportional(PROP_ERR_PK)   # central compartment (PK)
+  CMT=3: DV ~ additive(ADD_ERR_PD)        # effect compartment (PD)
+
+[fit_options]
+  method     = focei
+  maxiter    = 500
+  covariance = true
+  gradient   = fd                         # required: per-CMT / Form C readout

@@ -53,6 +53,12 @@
 #'   \item{transit_2cpt}{Two-compartment ODE model with 3-transit-compartment
 #'     absorption, allometric scaling on CL/V1/V2 (reference WT = 70 kg), and
 #'     a lag time on the first transit compartment.}
+#'   \item{emax_pkpd}{Simultaneous PK/PD: oral 1-compartment PK plus an
+#'     effect-compartment Emax PD readout, fit jointly with a SEPARATE
+#'     residual error model per endpoint via a per-CMT \code{[error_model]}
+#'     block (\code{CMT=2: DV ~ proportional(...)} for plasma,
+#'     \code{CMT=3: DV ~ additive(...)} for the PD effect). Demonstrates
+#'     multi-endpoint fitting; requires \code{gradient = fd}.}
 #' }
 #' Call \code{ferx_example()} with no arguments to list all available names.
 #'
