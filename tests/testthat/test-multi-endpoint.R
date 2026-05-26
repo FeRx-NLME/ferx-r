@@ -1,4 +1,4 @@
-# Multi-endpoint (per-CMT) residual error models — ferx-core #14.
+# Multi-endpoint (per-CMT) residual error models - ferx-core #14.
 #
 # The emax_pkpd example declares a per-CMT [error_model] (proportional on the
 # plasma endpoint CMT=2, additive on the PD endpoint CMT=3). These tests pin
