@@ -24,3 +24,31 @@ test_that("single-endpoint models still report a bare residual type", {
   s <- ferx_model_inspect(ex$model)
   expect_equal(s$residual, "proportional")
 })
+
+test_that("unrecognised per-CMT error type warns and reports 'unknown' (no NA label)", {
+  # Pre-fit reparser path: an unknown error type on a CMT= line must warn and
+  # fall back to "unknown" rather than emitting a label like "CMT2=NA".
+  f <- tempfile(fileext = ".ferx")
+  writeLines(c(
+    "[parameters]",
+    "  theta TVCL(1.0)",
+    "  omega ETA_CL ~ 0.1",
+    "  sigma S1 ~ 0.1",
+    "  sigma S2 ~ 0.1",
+    "[individual_parameters]",
+    "  CL = TVCL",
+    "[structural_model]",
+    "  ode(states=[central, effect])",
+    "[error_model]",
+    "  CMT=2: DV ~ bogus(S1)",
+    "  CMT=3: DV ~ additive(S2)"
+  ), f)
+  on.exit(unlink(f), add = TRUE)
+
+  expect_warning(
+    s <- suppressMessages(ferx_model_inspect(f)),
+    "Unrecognised per-CMT"
+  )
+  expect_equal(s$residual, "unknown")
+  expect_false(grepl("NA", s$residual, fixed = TRUE))
+})

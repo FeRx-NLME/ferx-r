@@ -920,14 +920,26 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
   residual <- if (length(err_lines) == 0L) {
     "unknown"
   } else if (length(cmt_lines) > 0L) {
-    cmts  <- as.integer(sub("^\\s*CMT\\s*=\\s*([0-9]+).*", "\\1", cmt_lines))
+    cmts  <- suppressWarnings(as.integer(sub("^\\s*CMT\\s*=\\s*([0-9]+).*", "\\1", cmt_lines)))
     types <- vapply(cmt_lines, err_type, character(1L))
-    ord   <- order(cmts)
-    paste0(
-      "per-CMT (",
-      paste(sprintf("CMT%d=%s", cmts[ord], types[ord]), collapse = ", "),
-      ")"
-    )
+    if (anyNA(cmts) || anyNA(types)) {
+      # An unparseable CMT index or unrecognised error type would otherwise
+      # render as "CMTNA=..." / "CMT2=NA". Warn and fall back, mirroring the
+      # single-endpoint path, so the residual label never contains NA.
+      warning(
+        "Unrecognised per-CMT residual error specification; reporting as ",
+        "\"unknown\". Lines: ", paste(cmt_lines, collapse = " | "),
+        call. = FALSE
+      )
+      "unknown"
+    } else {
+      ord <- order(cmts)
+      paste0(
+        "per-CMT (",
+        paste(sprintf("CMT%d=%s", cmts[ord], types[ord]), collapse = ", "),
+        ")"
+      )
+    }
   } else {
     t1 <- err_type(err_lines[1L])
     if (is.na(t1)) {
