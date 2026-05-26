@@ -1557,6 +1557,78 @@ fn ferx_rust_validate_model(model_path: &str) -> List {
     }
 }
 
+/// Derive NCA-based starting values from the data without running a fit.
+///
+/// @param model_path Path to .ferx model file
+/// @param data_path Path to NONMEM-format CSV
+/// @param method One of "nca", "nca_sweep", "nca_ebe"
+/// @return Named list with `theta_names`, `theta`, `theta_fixed`, `eta_names`,
+///   `omega` (row-major flattened matrix), `omega_dim`, `method`, and
+///   `warnings`. Returns an empty list on a parse/read error.
+/// @export
+#[extendr]
+fn ferx_rust_inits_from_nca(model_path: &str, data_path: &str, method: &str) -> List {
+    let parsed = match ferx_core::parser::model_parser::parse_full_model_file(Path::new(model_path))
+    {
+        Ok(p) => p,
+        Err(e) => {
+            rprintln!("Error parsing model: {}", e);
+            return List::new(0);
+        }
+    };
+
+    let iov_col = parsed.fit_options.iov_column.clone();
+    let population =
+        match ferx_core::read_nonmem_csv(Path::new(data_path), None, iov_col.as_deref()) {
+            Ok(p) => p,
+            Err(e) => {
+                rprintln!("Error reading data: {}", e);
+                return List::new(0);
+            }
+        };
+
+    let nca_method = match method.trim().to_lowercase().as_str() {
+        "nca" => ferx_core::NcaInit::Nca,
+        "" | "true" | "sweep" | "nca_sweep" => ferx_core::NcaInit::Sweep,
+        "ebe" | "nca_ebe" => ferx_core::NcaInit::Ebe,
+        other => {
+            rprintln!(
+                "Unknown inits_from_nca method '{}' — expected 'nca', 'nca_sweep', or 'nca_ebe'",
+                other
+            );
+            return List::new(0);
+        }
+    };
+    let method_label = match nca_method {
+        ferx_core::NcaInit::Nca => "nca",
+        ferx_core::NcaInit::Sweep => "nca_sweep",
+        ferx_core::NcaInit::Ebe => "nca_ebe",
+    };
+
+    let suggested = ferx_core::inits_from_nca(&parsed.model, &population, nca_method);
+    let params = &suggested.params;
+
+    // Omega as a row-major flattened matrix (same convention as fit_result_to_list).
+    let n_eta = params.omega.dim();
+    let mut omega_flat: Vec<f64> = Vec::with_capacity(n_eta * n_eta);
+    for i in 0..n_eta {
+        for j in 0..n_eta {
+            omega_flat.push(params.omega.matrix[(i, j)]);
+        }
+    }
+
+    list!(
+        theta_names = params.theta_names.clone(),
+        theta = params.theta.clone(),
+        theta_fixed = params.theta_fixed.clone(),
+        eta_names = params.omega.eta_names.clone(),
+        omega = omega_flat,
+        omega_dim = n_eta as i32,
+        method = method_label,
+        warnings = suggested.warnings.clone()
+    )
+}
+
 /// Standalone SIR — run Sampling Importance Resampling against an existing fit.
 ///
 /// The R wrapper `ferx_sir()` flattens the fit list into the primitives this
@@ -1864,4 +1936,5 @@ extendr_module! {
     fn ferx_rust_sir;
     fn ferx_rust_autodiff_enabled;
     fn ferx_rust_validate_model;
+    fn ferx_rust_inits_from_nca;
 }

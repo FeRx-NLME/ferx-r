@@ -134,6 +134,14 @@
 #'   Minimum number of observations a subject must have before its inner-loop
 #'   convergence is included in the \code{max_unconverged_frac} check. Subjects
 #'   with fewer observations are excluded from the check.
+#' @param inits_from_nca Derive NCA-based starting values from the data before
+#'   the optimizer runs, overriding the model file's defaults. Either a logical
+#'   (\code{FALSE}, the default, disables it; \code{TRUE} is an alias for
+#'   \code{"nca_sweep"}) or one of \code{"nca"}, \code{"nca_sweep"},
+#'   \code{"nca_ebe"} to pick a strategy explicitly. Most useful with
+#'   \code{settings = list(optimizer = "trust_region")} or \code{method = "gn"},
+#'   where bad starting values can stall the optimizer. See
+#'   \code{\link{ferx_inits_from_nca}} to inspect the values without fitting.
 #' @param settings Optional named list of estimation-method-specific options
 #'   forwarded to the Rust \code{FitOptions}. Use this to tune knobs that do
 #'   not have a dedicated \code{ferx_fit()} argument, without needing a new
@@ -859,6 +867,7 @@ ferx_fit.default <- function(model, data, ...,
                      scale_params = FALSE,
                      max_unconverged_frac = NULL,
                      min_obs_for_convergence_check = NULL,
+                     inits_from_nca = FALSE,
                      settings = NULL,
                      output = NULL,
                      include_data = FALSE) {
@@ -986,6 +995,25 @@ ferx_fit.default <- function(model, data, ...,
       list(min_obs_for_convergence_check = as.integer(min_obs_for_convergence_check)),
       settings
     )
+  }
+  # inits_from_nca: TRUE/FALSE or one of "nca", "nca_sweep", "nca_ebe". TRUE is
+  # an alias for "nca_sweep"; FALSE disables (the default). Merged into settings
+  # so apply_fit_option handles it on the Rust side (it's in framework_keys()).
+  # The dedicated arg wins over any duplicate in `settings`.
+  inits_value <- NULL
+  if (is.logical(inits_from_nca)) {
+    if (length(inits_from_nca) != 1L || is.na(inits_from_nca)) {
+      stop("`inits_from_nca` must be TRUE/FALSE or one of \"nca\", \"nca_sweep\", \"nca_ebe\"")
+    }
+    if (isTRUE(inits_from_nca)) inits_value <- "nca_sweep"
+  } else if (is.character(inits_from_nca) && length(inits_from_nca) == 1L && !is.na(inits_from_nca)) {
+    inits_value <- match.arg(tolower(inits_from_nca), c("nca", "nca_sweep", "nca_ebe"))
+  } else {
+    stop("`inits_from_nca` must be TRUE/FALSE or one of \"nca\", \"nca_sweep\", \"nca_ebe\"")
+  }
+  if (!is.null(inits_value)) {
+    settings[["inits_from_nca"]] <- NULL # dedicated arg wins over settings duplicate
+    settings <- c(list(inits_from_nca = inits_value), settings)
   }
   settings_parts <- .ferx_settings_to_strings(settings)
   # Effective settings as sent to Rust, with merged defaults, for summary display.
