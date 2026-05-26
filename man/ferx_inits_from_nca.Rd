@@ -67,11 +67,37 @@ explicitly via \code{method}.
 \examples{
 \donttest{
 ex <- ferx_example("warfarin")
+
+# -- Classic style (path strings) ------------------------------------------
 inits <- ferx_inits_from_nca(ex$model, ex$data)
 inits$theta
+inits$omega
 
 # Pick a specific strategy
+ferx_inits_from_nca(ex$model, ex$data, method = "nca")
 ferx_inits_from_nca(ex$model, ex$data, method = "nca_ebe")
+
+# -- Pipe style (ferx_model object) ----------------------------------------
+
+# data |> ferx_model(model) bundles the paths into a ferx_model, which
+# ferx_inits_from_nca() unpacks automatically (the second arg can stay NULL).
+ex$data |>
+  ferx_model(ex$model) |>
+  ferx_inits_from_nca()
+
+# Inspect first, then fit using the same strategy in one chain.
+ex$data |>
+  ferx_model(ex$model) |>
+  ferx_inits_from_nca(method = "nca_ebe") |>
+  print()
+
+ferx_fit(ex$model, ex$data, inits_from_nca = "nca_ebe")
+
+# Peek at the suggested CL/V before committing to a fit.
+ex$data |>
+  ferx_model(ex$model) |>
+  ferx_inits_from_nca() |>
+  (\(x) x$theta[c("TVCL", "TVV")])()
 }
 
 }

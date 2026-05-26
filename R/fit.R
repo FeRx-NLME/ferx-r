@@ -811,6 +811,30 @@
 #' fit_ms <- ferx_fit(ex$model, ex$data, settings = list(n_starts = 4L))
 #' fit_ms$ofv
 #'
+#' # -- NCA-based starting values (inits_from_nca) ------------------------------
+#' # When the model file's starting values are far from the truth, gradient-based
+#' # optimizers (trust_region, gn) can stall. `inits_from_nca` derives them
+#' # directly from the data before the optimizer runs.
+#'
+#' # TRUE = default strategy ("nca_sweep"); rescues a trust_region fit that
+#' # would otherwise stall on poor defaults.
+#' fit <- ferx_fit(ex$model, ex$data,
+#'   settings       = list(optimizer = "trust_region"),
+#'   inits_from_nca = TRUE
+#' )
+#'
+#' # Pick a strategy explicitly. "nca_ebe" handles large between-subject
+#' # variability better than "nca_sweep" but falls back to it for ODE models.
+#' fit <- ferx_fit(ex$model, ex$data, method = "gn",
+#'                 inits_from_nca = "nca_ebe")
+#'
+#' # Fastest variant: NCA arithmetic only, no grid sweep.
+#' fit <- ferx_fit(ex$model, ex$data, inits_from_nca = "nca")
+#'
+#' # Same flag from the model file's [fit_options] (the call-time arg wins
+#' # and warns on conflict). Inspect what NCA produces without fitting via
+#' # `ferx_inits_from_nca()` -- see ?ferx_inits_from_nca.
+#'
 #' # -- Deep Compartment Model (covariate neural network) -----------------------
 #' # Requires ferx-r built with the `nn` cargo feature.
 #' # The [covariate_nn TYPICAL_PK] block replaces analytical covariate functions
