@@ -15,8 +15,8 @@
 #'     parameters NCA cannot reach (peripheral \code{Q}/\code{V2}, all ODE/PD
 #'     thetas) at the model default.}
 #'   \item{\code{"nca_sweep"}}{NCA, then a log-space rRMSE grid sweep (population
-#'     predictions, etas = 0) over the remaining non-fixed thetas. Model-agnostic
-#'     — also covers ODE/PD models. This is the default.}
+#'     predictions, etas = 0) over the remaining non-fixed thetas. Model-agnostic:
+#'     also covers ODE/PD models. This is the default.}
 #'   \item{\code{"nca_ebe"}}{Like \code{"nca_sweep"} but evaluates the grid with
 #'     empirical Bayes estimates (etas != 0); more accurate under large
 #'     between-subject variability. Falls back to \code{"nca_sweep"} for ODE
@@ -45,9 +45,14 @@
 #' @seealso \code{\link{ferx_fit}}, whose \code{inits_from_nca} argument applies
 #'   these values automatically before the optimizer runs.
 #'
+#' @note The \code{method} argument always wins: a \code{[fit_options]
+#'   inits_from_nca} key in the model file is \emph{not} consulted by this
+#'   function. To preview the strategy a model file declares, pass that value
+#'   explicitly via \code{method}.
+#'
 #' @examples
-#' \dontrun{
-#' ex <- ferx_example("one_cpt_iv")
+#' \donttest{
+#' ex <- ferx_example("warfarin")
 #' inits <- ferx_inits_from_nca(ex$model, ex$data)
 #' inits$theta
 #'
@@ -77,7 +82,7 @@ ferx_inits_from_nca <- function(model, data = NULL,
     method
   )
   if (length(res) == 0L) {
-    stop("`ferx_inits_from_nca()` failed — see the messages above for details.")
+    stop("`ferx_inits_from_nca()` failed - see the messages above for details.")
   }
 
   theta <- as.numeric(res$theta)
