@@ -98,38 +98,33 @@
 #'   Pass the result to \code{\link{ferx_trace}} or
 #'   \code{\link{ferx_plot_trace}} to inspect optimizer progress. Default
 #'   \code{FALSE}.
-#' @param scale_params Logical. If \code{TRUE} (default), apply a per-coordinate
-#'   scaling layer on top of the existing log/Cholesky parameterization so
-#'   that every transformed parameter the outer optimizer sees is O(1).
+#' @param scale_params Logical. If \code{TRUE}, apply a per-coordinate scaling
+#'   layer on top of the existing log/Cholesky parameterization, dividing each
+#'   transformed coordinate by \code{|x0[i]|} (when \code{|x0[i]| > 0.1},
+#'   otherwise by \code{1.0}) so the outer optimizer works in a
+#'   near-unit-magnitude space. Default \code{FALSE}.
 #'
-#'   \strong{Why it helps.} Population PK parameters often differ by orders
-#'   of magnitude on the natural scale (e.g. \code{CL = 0.0015}, \code{V =
-#'   200}, \code{Ka = 0.8}). Even after the log transform, the packed
-#'   optimizer vector mixes large negatives (\code{log(0.0015) ? -6.5}) with
-#'   large positives (\code{log(200) ? 5.3}), which leaves the Hessian
-#'   poorly conditioned and slows down NLopt / BFGS / Gauss-Newton. With
-#'   \code{scale_params = TRUE} each coordinate is divided by
-#'   \code{|x0[i]|} (when \code{|x0[i]| > 0.1}, otherwise by \code{1.0}), so
-#'   the optimizer works in a near-unit-magnitude space. The scale is
-#'   computed once from the initial point and held fixed for the entire run.
+#'   \strong{Why it defaults to \code{FALSE}.} The scaling is \emph{not}
+#'   trajectory-transparent. Although it leaves the OFV value unchanged at any
+#'   fixed point, it rescales the gradient the optimizer sees, and that
+#'   gradient feeds the SLSQP overshoot cap, the quasi-Newton Hessian estimate,
+#'   and the xtol/ftol termination - all of which act in the scaled coordinate
+#'   system. The scaling layer only ever runs on log/Cholesky-packed
+#'   coordinates (it auto-disables when any identity-packed theta is present),
+#'   and for those, dividing by \code{|log value|} is counterproductive: a
+#'   coordinate like \code{log(V) = log(20) ~ 3} gets scale 3, so the
+#'   optimizer's unit step becomes a 3-unit move in log space - an
+#'   \code{e^3 ~ 20x} multiplicative jump in V. That large step both overshoots
+#'   and, through the uniform gradient cap, starves the step in every other
+#'   dimension (notably OMEGA), so the fit can halt well short of the minimum.
+#'   See ferx-core issue #99. The \code{FALSE} default reproduces the
+#'   well-tested pre-scaling-layer behaviour.
 #'
-#'   \strong{When to set \code{FALSE}.} Mathematically the scaling is
-#'   transparent - the OFV, estimates, standard errors, and diagnostics
-#'   should match the unscaled fit to numerical tolerance. Set
-#'   \code{scale_params = FALSE} to:
-#'   \itemize{
-#'     \item reproduce the bit-exact iteration trajectory of a pre-scaling
-#'       fit (e.g. when comparing against a baseline produced by an older
-#'       \code{ferx} build),
-#'     \item debug suspected scaling-related issues by toggling the layer
-#'       off without changing anything else,
-#'     \item validate that scaled and unscaled fits land on the same
-#'       optimum on a new model.
-#'   }
-#'
-#'   Applies to all outer optimizers: NLopt FOCE/FOCEI (BOBYQA, SLSQP,
-#'   L-BFGS, MMA), the hand-rolled BFGS, Gauss-Newton / BHHH, and the SAEM
-#'   M-step.
+#'   \strong{When to set \code{TRUE}.} Left as an opt-in for experimentation -
+#'   e.g. to A/B the scaled vs unscaled trajectory on a specific model. When
+#'   enabled it applies to all outer optimizers: NLopt FOCE/FOCEI (BOBYQA,
+#'   SLSQP, L-BFGS, MMA), the hand-rolled BFGS, Gauss-Newton / BHHH, and the
+#'   SAEM M-step.
 #' @param max_unconverged_frac Numeric scalar in \[0, 1\] or \code{NULL}
 #'   (default). When non-\code{NULL}, the fit is flagged as converged even if
 #'   up to this fraction of subjects failed their inner EBE loop, instead of
@@ -709,7 +704,7 @@
 #'   threads     = 4L,
 #'   gradient    = "auto",
 #'   verbose     = TRUE,
-#'   scale_params = TRUE
+#'   scale_params = FALSE
 #' )
 #'
 #' # SAEM warm-start, then FOCEI polish
@@ -861,7 +856,7 @@ ferx_fit.default <- function(model, data, ...,
                      sir = FALSE,
                      gradient = c("auto", "ad", "fd"),
                      optimizer_trace = FALSE,
-                     scale_params = TRUE,
+                     scale_params = FALSE,
                      max_unconverged_frac = NULL,
                      min_obs_for_convergence_check = NULL,
                      settings = NULL,
@@ -966,10 +961,11 @@ ferx_fit.default <- function(model, data, ...,
   if (isTRUE(optimizer_trace)) {
     settings <- c(list(optimizer_trace = TRUE), settings)
   }
-  # Only inject scale_params when FALSE - the Rust default is true, so omitting
-  # it preserves the behaviour callers expect when they don't pass the argument.
-  if (isFALSE(scale_params)) {
-    settings <- c(list(scale_params = FALSE), settings)
+  # Only inject scale_params when TRUE - the Rust default is FALSE (off, since
+  # ferx-core issue #99), so omitting it preserves the behaviour callers expect
+  # when they don't pass the argument.
+  if (isTRUE(scale_params)) {
+    settings <- c(list(scale_params = TRUE), settings)
   }
   if (!is.null(max_unconverged_frac)) {
     if (!is.numeric(max_unconverged_frac) || length(max_unconverged_frac) != 1L ||
