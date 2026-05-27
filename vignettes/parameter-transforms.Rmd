@@ -131,23 +131,28 @@ fit_logit
 symmetrically on the logit scale and then back-transformed through `inv_logit`,
 giving an asymmetric interval on the (0, 1) scale:
 
+The `transform` value the backend reports for a logit-scaled theta is
+`"logit_probability"` (not `"logit"`):
+
 ```{r logit-estimates, eval = FALSE}
 est <- ferx_estimates(fit_logit)
 est[est$param == "THETA_F", ]
-#   param    transform  estimate    se  rse_pct  lower_95  upper_95  estimate_natural  lower_95_natural  upper_95_natural
-#   THETA_F  logit        0.847  0.143     16.9     0.567     1.127             0.700             0.638             0.755
-# estimate         — logit scale (what the optimiser works with)
-# estimate_natural — inv_logit(estimate) = probability on (0, 1) scale
-# lower/upper_95_natural — asymmetric CI back-transformed to (0, 1)
+#   param           transform   estimate     se  rse_pct  lower_95  upper_95  estimate_natural  lower_95_natural  upper_95_natural
+#   THETA_F  logit_probability   0.80197 0.00652   0.8136   0.78918   0.81476           0.69040           0.68766           0.69312
+# estimate         - logit scale (what the optimiser works with)
+# estimate_natural - inv_logit(estimate) = probability on (0, 1) scale
+# lower/upper_95_natural - asymmetric CI back-transformed to (0, 1)
+# (values captured from a real warfarin_logit_f fit)
 ```
 
 The omega for `ETA_F` has `transform = "variance"` (variance on the logit
-scale, symmetric CI — same label as all omega rows):
+scale, symmetric CI - same label as all omega rows; the bare ETA name is the
+parameter label):
 
 ```{r logit-omega, eval = FALSE}
-est[est$param == "OMEGA(ETA_F)", ]
-#   param         transform  estimate     se  rse_pct
-#   OMEGA(ETA_F)  variance     0.0631  0.028     44.4
+est[est$param == "ETA_F", ]
+#   param  transform  estimate      se  rse_pct  lower_95  upper_95  init_as_sd
+#   ETA_F   variance    0.1000  0.0633    63.3   -0.0240    0.2240       FALSE
 ```
 
 ---
@@ -185,10 +190,12 @@ units (hours²), and the CI is symmetric — no back-transform is applied:
 
 ```{r add-estimates, eval = FALSE}
 ferx_estimates(fit_add)
-#   param              transform  estimate     se  rse_pct  lower_95  upper_95
-#   OMEGA(ETA_TLAG)    variance     0.312   0.098     31.4     0.120     0.504
-# SD in original units = sqrt(0.312) ≈ 0.56 h
+#     param  transform  estimate  se  rse_pct  lower_95  upper_95  init_as_sd
+#  ETA_TLAG   variance   0.04003  NA       NA        NA        NA       FALSE
+# SD in original units = sqrt(0.04003) ~ 0.2001 h
 # estimate_natural / lower_95_natural / upper_95_natural are NA (not applicable)
+# (values captured from a real warfarin_additive_eta fit with covariance = FALSE,
+# so SE columns are NA; the bare ETA name is the parameter label - no OMEGA() wrap.)
 ```
 
 ---
