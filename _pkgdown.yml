@@ -55,3 +55,6 @@ articles:
       - model-workflow
       - model-editing
       - parameter-transforms
+      - simulation
+      - special-features
+      - uncertainty-sir
