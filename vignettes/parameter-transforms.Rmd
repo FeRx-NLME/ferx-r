@@ -45,12 +45,13 @@ ferx_model_inspect(ex$model)
 After fitting, `print()` reports omega as `[log-normal]` with a CV%:
 
 ```{r logn-fit, eval = FALSE}
-fit <- ferx_fit(ex$model, ex$data)
+fit <- ferx_fit(ex$model, ex$data, method = "focei", covariance = TRUE)
 fit
-# Omega (between-subject variability):
-#   ETA_CL  [log-normal]  var = 0.0423   CV% = 21.1
-#   ETA_V   [log-normal]  var = 0.0198   CV% = 14.2
-#   ETA_KA  [log-normal]  var = 0.157    CV% = 40.9
+# --- OMEGA Estimates ---
+#   ETA_CL    [log-normal]  = 0.027888  CV% = 16.8  SE = N/A
+#   ETA_V     [log-normal]  = 0.009489  CV%  = 9.8  SE = N/A
+#   ETA_KA    [log-normal]  = 0.356897  CV% = 65.5  SE = N/A
+# (values from a real warfarin fit; covariance failed in this run, so SE is N/A)
 ```
 
 The CV% is derived from the log-scale variance as
