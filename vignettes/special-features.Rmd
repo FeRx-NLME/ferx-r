@@ -67,7 +67,22 @@ After fitting, `fit$omega_iov` is a square matrix on the kappa diagonal, and
 ```{r iov-fit, eval = FALSE}
 fit_iov <- ferx_fit(ex_iov$model, ex_iov$data, method = "focei")
 fit_iov$omega_iov
+#>            KAPPA_CL
+#> KAPPA_CL 0.04679037
+
 ferx_estimates(fit_iov)
+#>     param    transform   estimate ... init_as_sd
+#>      TVCL     identity 0.17003443 ...      FALSE
+#>       TVV     identity 8.62276910 ...      FALSE
+#>      TVKA     identity 1.16618408 ...      FALSE
+#>    ETA_CL     variance 0.03849065 ...      FALSE
+#>     ETA_V     variance 0.01227511 ...      FALSE
+#>    ETA_KA     variance 0.06600358 ...      FALSE
+#>  PROP_ERR proportional 0.17643369 ...       TRUE
+#>  KAPPA_CL     variance 0.04679037 ...      FALSE
+# Output captured from a real focei fit (covariance = FALSE, hence the
+# NA SE/CI columns elided here). KAPPA_CL is the IOV omega element on
+# the kappa diagonal.
 ```
 
 The IOV print labels follow the bare-name convention: `KAPPA_CL` is the
@@ -219,9 +234,9 @@ fit_scaled$theta
 
 ## Combining features
 
-These four features can be combined in the same model. A study with
-once-daily steady-state dosing, BLOQ observations, occasion-level CL
-variability, and concentration units derived via a volume-scaled readout
+These four features are independent and can be combined in the same model. A
+study with once-daily steady-state dosing, BLOQ observations, occasion-level
+CL variability, and concentration units derived via a volume-scaled readout
 would carry all of:
 
 - a `kappa KAPPA_CL ~ 0.04` declaration and an `iov_column = OCC` setting,
@@ -229,6 +244,10 @@ would carry all of:
 - `SS = 1` and `II = 24` columns on the dosing rows,
 - a `[scaling]` block with `obs_scale = V` (Form B) and an explicit
   `gradient = fd` in `[fit_options]`.
+
+No bundled `.ferx` exercises all four at once; build one by concatenating the
+relevant sections from the per-feature examples above. Validate the result
+with `ferx_model_validate()` before fitting.
 
 Each feature is documented in `?ferx_fit` along with its data-side
 requirements; this vignette is the narrative tour.
