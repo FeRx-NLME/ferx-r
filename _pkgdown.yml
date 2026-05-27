@@ -46,6 +46,7 @@ reference:
     contents:
       - ferx_example
       - ferx_check_init
+      - ferx_inits_from_nca
       - ferx_save_fit
       - ferx_load_fit
 
