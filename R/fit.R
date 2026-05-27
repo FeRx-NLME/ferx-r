@@ -125,15 +125,6 @@
 #'   enabled it applies to all outer optimizers: NLopt FOCE/FOCEI (BOBYQA,
 #'   SLSQP, L-BFGS, MMA), the hand-rolled BFGS, Gauss-Newton / BHHH, and the
 #'   SAEM M-step.
-#' @param max_unconverged_frac Numeric scalar in \[0, 1\] or \code{NULL}
-#'   (default). When non-\code{NULL}, the fit is flagged as converged even if
-#'   up to this fraction of subjects failed their inner EBE loop, instead of
-#'   raising an error. Useful for large datasets with a handful of difficult
-#'   subjects.
-#' @param min_obs_for_convergence_check Integer or \code{NULL} (default).
-#'   Minimum number of observations a subject must have before its inner-loop
-#'   convergence is included in the \code{max_unconverged_frac} check. Subjects
-#'   with fewer observations are excluded from the check.
 #' @param inits_from_nca Derive NCA-based starting values from the data before
 #'   the optimizer runs, overriding the model file's defaults. Either a logical
 #'   (\code{FALSE}, the default, disables it; \code{TRUE} is an alias for
@@ -629,6 +620,21 @@
 #' ))
 #' }
 #'
+#' \strong{Convergence tolerance for difficult subjects:}
+#'
+#' \code{max_unconverged_frac} (numeric in \[0, 1\]) flags the fit as converged
+#' even if up to this fraction of subjects failed their inner EBE loop, instead
+#' of raising an error - useful for large datasets with a handful of difficult
+#' subjects. \code{min_obs_for_convergence_check} (non-negative integer) is the
+#' minimum number of observations a subject must have before its inner-loop
+#' convergence counts toward that fraction; sparser subjects are excluded.
+#' \preformatted{
+#' ferx_fit(m, d, settings = list(
+#'   max_unconverged_frac          = 0.1,
+#'   min_obs_for_convergence_check = 2L
+#' ))
+#' }
+#'
 #' \strong{Stagnation guard (NLopt-based optimizers):}
 #'
 #' NLopt-based outer optimizers (BOBYQA, SLSQP, L-BFGS, MMA) short-circuit by
@@ -881,28 +887,10 @@
 #' # interpretability heuristics and comparison against a no-covariate baseline.
 #' }
 #'
-#' @param ... Arguments passed to \code{ferx_fit.default} (e.g.
-#'   \code{method}, \code{covariance}, \code{verbose}, \code{settings}).
+#' @param ... Reserved for future use. Unrecognised arguments raise an error.
 #' @family fitting
 #' @export
-#' @rdname ferx_fit
-ferx_fit <- function(model, data = NULL, ...) UseMethod("ferx_fit")
-
-#' @export
-#' @rdname ferx_fit
-ferx_fit.ferx_model <- function(model, data = model$data, ...) {
-  if (is.null(data)) {
-    stop(
-      "No data path supplied. Either pass `data` to ferx_fit() ",
-      "or include it in ferx_model()."
-    )
-  }
-  ferx_fit.default(model$model, data, ...)
-}
-
-#' @export
-#' @rdname ferx_fit
-ferx_fit.default <- function(model, data, ...,
+ferx_fit <- function(model, data = NULL,
                      method = "focei",
                      covariance = TRUE,
                      verbose = TRUE,
@@ -913,16 +901,43 @@ ferx_fit.default <- function(model, data, ...,
                      gradient = c("auto", "ad", "fd"),
                      optimizer_trace = FALSE,
                      scale_params = FALSE,
-                     max_unconverged_frac = NULL,
-                     min_obs_for_convergence_check = NULL,
                      inits_from_nca = FALSE,
                      settings = NULL,
                      output = NULL,
-                     include_data = FALSE) {
-  # `...` is positioned before the named args so the S3 method signature is
-  # consistent with the `ferx_fit(model, data, ...)` generic (otherwise R CMD
-  # check fires `checking S3 generic/method consistency`). All call sites
-  # pass `method`, `settings`, etc. by name, so the change is source-compatible.
+                     include_data = FALSE,
+                     ...) {
+  # `ferx_fit()` is a plain function (not an S3 generic) so that IDE argument
+  # completion and inline help surface every argument - an S3 generic only
+  # exposes `model`, `data`, and `...`, hiding the real options from the user
+  # (see issue #52). Dispatch on the `model` type is handled inline below:
+  # `model` may be a path to a `.ferx` file or a `ferx_model` object produced
+  # by `ferx_model()` (the pipe style, where `data` defaults to the path stored
+  # in the object).
+  if (inherits(model, "ferx_model")) {
+    if (is.null(data)) data <- model$data
+    if (is.null(data)) {
+      stop(
+        "No data path supplied. Either pass `data` to ferx_fit() ",
+        "or include it in ferx_model()."
+      )
+    }
+    model <- model$model
+  }
+  # Guard against silently swallowed typos: any leftover `...` argument is an
+  # unrecognised name, not a value forwarded anywhere. Use `...length()` /
+  # `...names()` rather than `list(...)` so the promises are never forced -
+  # forcing them could trigger side effects or surface an evaluation error
+  # before this clearer "unused argument(s)" message (both base R >= 4.1.0,
+  # which the package already assumes via its use of the `|>` pipe).
+  if (...length() > 0L) {
+    nms <- ...names()
+    nms <- if (is.null(nms)) rep("", ...length()) else nms
+    labels <- ifelse(nzchar(nms), nms, "<unnamed>")
+    stop(
+      "unused argument(s) passed to ferx_fit(): ",
+      paste(labels, collapse = ", ")
+    )
+  }
   gradient <- match.arg(gradient)
   if (is.null(data)) {
     stop("`data` is required. Pass a path to a NONMEM CSV file.")
@@ -1023,26 +1038,6 @@ ferx_fit.default <- function(model, data, ...,
   # when they don't pass the argument.
   if (isTRUE(scale_params)) {
     settings <- c(list(scale_params = TRUE), settings)
-  }
-  if (!is.null(max_unconverged_frac)) {
-    if (!is.numeric(max_unconverged_frac) || length(max_unconverged_frac) != 1L ||
-      !is.finite(max_unconverged_frac) || max_unconverged_frac < 0 || max_unconverged_frac > 1) {
-      stop("`max_unconverged_frac` must be a numeric scalar between 0 and 1")
-    }
-    settings <- c(list(max_unconverged_frac = max_unconverged_frac), settings)
-  }
-  if (!is.null(min_obs_for_convergence_check)) {
-    if (!is.numeric(min_obs_for_convergence_check) ||
-      length(min_obs_for_convergence_check) != 1L ||
-      !is.finite(min_obs_for_convergence_check) ||
-      min_obs_for_convergence_check != as.integer(min_obs_for_convergence_check) ||
-      min_obs_for_convergence_check < 0L) {
-      stop("`min_obs_for_convergence_check` must be a non-negative integer scalar")
-    }
-    settings <- c(
-      list(min_obs_for_convergence_check = as.integer(min_obs_for_convergence_check)),
-      settings
-    )
   }
   # inits_from_nca: TRUE/FALSE or one of "nca", "nca_sweep", "nca_ebe". TRUE is
   # an alias for "nca_sweep"; FALSE disables (the default). Merged into settings

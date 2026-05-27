@@ -2,18 +2,11 @@
 % Please edit documentation in R/fit.R
 \name{ferx_fit}
 \alias{ferx_fit}
-\alias{ferx_fit.ferx_model}
-\alias{ferx_fit.default}
 \title{Fit a nonlinear mixed effects model}
 \usage{
-ferx_fit(model, data = NULL, ...)
-
-\method{ferx_fit}{ferx_model}(model, data = model$data, ...)
-
-\method{ferx_fit}{default}(
+ferx_fit(
   model,
-  data,
-  ...,
+  data = NULL,
   method = "focei",
   covariance = TRUE,
   verbose = TRUE,
@@ -24,12 +17,11 @@ ferx_fit(model, data = NULL, ...)
   gradient = c("auto", "ad", "fd"),
   optimizer_trace = FALSE,
   scale_params = FALSE,
-  max_unconverged_frac = NULL,
-  min_obs_for_convergence_check = NULL,
   inits_from_nca = FALSE,
   settings = NULL,
   output = NULL,
-  include_data = FALSE
+  include_data = FALSE,
+  ...
 )
 }
 \arguments{
@@ -42,9 +34,6 @@ SS > 0), SS (steady-state flag: 1 = pre-dose at steady state, 2 = add SS
 concentration to current state), CENS (BLOQ flag for M3 method), OCC
 (occasion index for IOV), and any covariate columns referenced in the
 model. See the steady-state section below for SS/II details.}
-
-\item{...}{Arguments passed to \code{ferx_fit.default} (e.g.
-\code{method}, \code{covariance}, \code{verbose}, \code{settings}).}
 
 \item{method}{Estimation method(s). Either a single string or a character
 vector of methods to run in sequence. Each stage is seeded with the
@@ -170,17 +159,6 @@ enabled it applies to all outer optimizers: NLopt FOCE/FOCEI (BOBYQA,
 SLSQP, L-BFGS, MMA), the hand-rolled BFGS, Gauss-Newton / BHHH, and the
 SAEM M-step.}
 
-\item{max_unconverged_frac}{Numeric scalar in [0, 1] or \code{NULL}
-(default). When non-\code{NULL}, the fit is flagged as converged even if
-up to this fraction of subjects failed their inner EBE loop, instead of
-raising an error. Useful for large datasets with a handful of difficult
-subjects.}
-
-\item{min_obs_for_convergence_check}{Integer or \code{NULL} (default).
-Minimum number of observations a subject must have before its inner-loop
-convergence is included in the \code{max_unconverged_frac} check. Subjects
-with fewer observations are excluded from the check.}
-
 \item{inits_from_nca}{Derive NCA-based starting values from the data before
 the optimizer runs, overriding the model file's defaults. Either a logical
 (\code{FALSE}, the default, disables it; \code{TRUE} is an alias for
@@ -241,6 +219,8 @@ reference in the ferx-core docs for the on-disk schema.}
 \code{TRUE}, embeds the input \code{data} CSV verbatim inside the
 \code{.fitrx} bundle so the file is self-contained. Default
 \code{FALSE}.}
+
+\item{...}{Reserved for future use. Unrecognised arguments raise an error.}
 }
 \value{
 A list with components:
@@ -692,6 +672,21 @@ ferx_fit(m, d, settings = list(
 ferx_fit(m, d, settings = list(
   optimizer          = "trust_region",
   steihaug_max_iters = 100L
+))
+}
+
+\strong{Convergence tolerance for difficult subjects:}
+
+\code{max_unconverged_frac} (numeric in [0, 1]) flags the fit as converged
+even if up to this fraction of subjects failed their inner EBE loop, instead
+of raising an error - useful for large datasets with a handful of difficult
+subjects. \code{min_obs_for_convergence_check} (non-negative integer) is the
+minimum number of observations a subject must have before its inner-loop
+convergence counts toward that fraction; sparser subjects are excluded.
+\preformatted{
+ferx_fit(m, d, settings = list(
+  max_unconverged_frac          = 0.1,
+  min_obs_for_convergence_check = 2L
 ))
 }
 
