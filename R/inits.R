@@ -45,6 +45,20 @@
 #' @seealso \code{\link{ferx_fit}}, whose \code{inits_from_nca} argument applies
 #'   these values automatically before the optimizer runs.
 #'
+#' @references
+#' The \code{"nca"} and \code{"nca_sweep"} strategies were inspired by the
+#' automated initial-estimate pipeline described in:
+#'
+#' Huang Z., Fidler M., Lan M., Cheng I.L., Kloprogge F., Standing J.F. (2025).
+#' An automated pipeline to generate initial estimates for population
+#' Pharmacokinetic base models. \emph{Journal of Pharmacokinetics and
+#' Pharmacodynamics}, 52(6), 60. \doi{10.1007/s10928-025-10000-z}. Reference
+#' implementation: \url{https://github.com/ucl-pharmacometrics/nlmixr2autoinit}.
+#'
+#' The \code{"nca_ebe"} method is a ferx-specific extension that evaluates the
+#' rRMSE grid using empirical Bayes estimates rather than population
+#' predictions.
+#'
 #' @note The \code{method} argument always wins: a \code{[fit_options]
 #'   inits_from_nca} key in the model file is \emph{not} consulted by this
 #'   function. To preview the strategy a model file declares, pass that value
