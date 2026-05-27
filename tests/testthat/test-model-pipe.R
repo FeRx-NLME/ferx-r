@@ -400,6 +400,17 @@ test_that("ferx_fit() rejects unrecognised arguments instead of silently ignorin
   )
 })
 
+test_that("ferx_fit() reports an unrecognised arg without evaluating its value", {
+  # The `...` guard must inspect names via ...names()/...length(), never force
+  # the promises with list(...): forcing a side-effecting / erroring value would
+  # mask the clear "unused argument(s)" message. Regression for the #67 review.
+  ex <- ferx_example("warfarin")
+  expect_error(
+    ferx_fit(ex$model, ex$data, bogus = stop("must not be evaluated")),
+    regexp = "unused argument\\(s\\) passed to ferx_fit\\(\\): bogus"
+  )
+})
+
 # ---------------------------------------------------------------------------
 # Block 7 — ferx_set_section() copy-on-write for package files (#80)
 # ---------------------------------------------------------------------------

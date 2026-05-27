@@ -923,11 +923,14 @@ ferx_fit <- function(model, data = NULL,
     model <- model$model
   }
   # Guard against silently swallowed typos: any leftover `...` argument is an
-  # unrecognised name, not a value forwarded anywhere.
-  extra <- list(...)
-  if (length(extra) > 0L) {
-    nms <- names(extra)
-    nms <- if (is.null(nms)) rep("", length(extra)) else nms
+  # unrecognised name, not a value forwarded anywhere. Use `...length()` /
+  # `...names()` rather than `list(...)` so the promises are never forced -
+  # forcing them could trigger side effects or surface an evaluation error
+  # before this clearer "unused argument(s)" message (both base R >= 4.1.0,
+  # which the package already assumes via its use of the `|>` pipe).
+  if (...length() > 0L) {
+    nms <- ...names()
+    nms <- if (is.null(nms)) rep("", ...length()) else nms
     labels <- ifelse(nzchar(nms), nms, "<unnamed>")
     stop(
       "unused argument(s) passed to ferx_fit(): ",
