@@ -1,0 +1,210 @@
+---
+title: "SIR uncertainty quantification"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{SIR uncertainty quantification}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+library(ferx)
+```
+
+## Overview
+
+Sampling Importance Resampling (SIR) refines the uncertainty estimate from a
+fitted model without requiring a new optimisation run. It draws candidate
+parameter vectors from the asymptotic proposal (the fit's covariance matrix),
+re-weights each candidate by the likelihood ratio against the proposal, and
+keeps a resample drawn in proportion to those weights.
+
+In ferx, SIR is the alternative to the asymptotic (Wald) confidence intervals.
+Use it when:
+
+- the asymptotic CI may be a poor approximation (skewed likelihood, parameter
+  near a boundary, small sample size);
+- you want to propagate parameter uncertainty into downstream simulation via
+  `ferx_simulate_with_uncertainty(method = "sir")`.
+
+Two entry points produce the same output structure:
+
+| Entry point | When to use |
+|---|---|
+| `ferx_fit(..., sir = TRUE)` | Inline at fit time. Convenient when SIR is part of the routine workflow. |
+| `ferx_sir(fit, ...)` | Post-hoc against an existing fit (including one loaded via `ferx_load_fit()`). The fit must have been computed with `covariance = TRUE`. |
+
+`ferx_sir()` re-reads the model and data files recorded on the fit, hashes
+them, and **hard-errors** if either has changed since fitting - SIR against a
+modified model or dataset is meaningless. The integrity check is documented
+in `?ferx_sir`.
+
+---
+
+## Running SIR post-hoc
+
+```{r run-sir, eval = FALSE}
+ex  <- ferx_example("warfarin")
+fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = TRUE)
+
+fit <- ferx_sir(fit,
+                sir_samples   = 1000,
+                sir_resamples = 250,
+                sir_seed      = 42)
+```
+
+The function returns the same `fit` object augmented with SIR fields. No new
+optimisation occurs; only proposal draws, importance weighting, and resampling.
+
+### Tuning knobs
+
+| Argument | Default | Meaning |
+|---|---|---|
+| `sir_samples` | 1000 | Number of candidate draws from the asymptotic proposal. Higher = tighter weights at proportional cost. |
+| `sir_resamples` | 250 | Number of resampled vectors retained. Must be `<= sir_samples`. |
+| `sir_seed` | `NULL` | Integer seed for reproducibility. `NULL` uses the engine's built-in seed. |
+| `sir_keep_samples` | `FALSE` | Retain the resampled packed parameter vectors on the fit. Required for downstream `ferx_simulate_with_uncertainty(method = "sir")`. |
+
+---
+
+## Reading the output
+
+`ferx_sir()` (or `ferx_fit(..., sir = TRUE)`) populates five fields:
+
+```{r sir-fields, eval = FALSE}
+fit$sir_ess          # effective sample size
+fit$sir_ci_theta     # 95% CI for each theta
+fit$sir_ci_omega     # 95% CI for the omega diagonal
+fit$sir_ci_sigma     # 95% CI for sigma
+# When sir_keep_samples = TRUE:
+fit$sir_resamples      # flat numeric vector of resampled packed parameters
+fit$sir_resamples_n    # number of resamples
+fit$sir_resamples_dim  # length of each packed parameter vector
+```
+
+The `sir_ci_*` matrices have `lower` and `upper` columns and use the bare
+declared parameter names as row labels (`ETA_CL`, `PROP_ERR`, etc.), falling
+back to `OMEGA(i,i)` / `SIGMA(i)` for unnamed elements - the same convention
+as the rest of the package output.
+
+### Worked output
+
+Captured from a real `gn` fit of the bundled warfarin example with
+`sir_samples = 1000, sir_resamples = 250, sir_seed = 42`:
+
+```{r sir-output, eval = FALSE}
+fit$sir_ess
+#> [1] 4.71
+
+fit$sir_ci_theta
+#>           lower     upper
+#> TVCL  0.1201408 0.1476027
+#> TVV   7.3308524 8.1238270
+#> TVKA  0.5709285 0.8822086
+
+fit$sir_ci_omega
+#>              lower      upper
+#> ETA_CL 0.015943626 0.07997176
+#> ETA_V  0.005861108 0.02324717
+#> ETA_KA 0.191731831 0.75244194
+
+fit$sir_ci_sigma
+#>                lower     upper
+#> PROP_ERR 0.009124243 0.0123905
+```
+
+### Interpreting ESS
+
+The effective sample size is the most important diagnostic to look at first.
+It summarises how well the asymptotic proposal matches the true likelihood
+surface. ESS is bounded above by `sir_resamples`.
+
+- **ESS close to `sir_resamples`** - the asymptotic proposal is a good match;
+  the SIR CIs will be close to the asymptotic CIs and most of the resamples
+  are distinct.
+- **ESS much smaller than `sir_resamples`** - the proposal is a poor match.
+  A few high-weight proposals dominate the resample, the SIR CIs are based
+  on relatively few effective draws, and the resamples are heavily duplicated.
+
+In the captured output above, `sir_ess = 4.71` against `sir_resamples = 250` is
+extremely low - a sign that the warfarin asymptotic covariance does not
+faithfully represent the true uncertainty (the dataset is small and at least
+one parameter is poorly constrained). For real analyses, increase
+`sir_samples`, refit with better initial values, or treat the SIR CI with
+caution if ESS stays low.
+
+---
+
+## Inline SIR at fit time
+
+When SIR is part of the standard workflow, set `sir = TRUE` in `ferx_fit()`
+directly. The SIR tuning knobs flow through `settings`:
+
+```{r inline-sir, eval = FALSE}
+fit <- ferx_fit(
+  ex$model, ex$data,
+  method      = "focei",
+  covariance  = TRUE,
+  sir         = TRUE,
+  settings    = list(
+    sir_samples       = 2000L,
+    sir_resamples     = 500L,
+    sir_keep_samples  = TRUE
+  )
+)
+
+fit$sir_ess
+fit$sir_ci_theta
+```
+
+The output structure is identical to the `ferx_sir()` flow above.
+
+---
+
+## Feeding SIR into uncertainty-aware simulation
+
+To propagate the SIR resamples into a simulation, retain them with
+`sir_keep_samples = TRUE` and pass the fit to
+`ferx_simulate_with_uncertainty()` with `method = "sir"`:
+
+```{r sir-simulate, eval = FALSE}
+fit <- ferx_sir(fit,
+                sir_samples      = 2000,
+                sir_resamples    = 500,
+                sir_keep_samples = TRUE)
+
+sims <- ferx_simulate_with_uncertainty(
+  ex$model, ex$data, fit,
+  n_uncertainty_draws = 200,
+  n_sim_per_draw      = 5,
+  method              = "sir"
+)
+head(sims)
+#>   DRAW SIM ID TIME IPRED DV_SIM
+#> 1    1   1  1  0.5  ...   ...
+```
+
+Each parameter draw is now a resample from the SIR posterior rather than an
+MVN draw around the ML estimate. The downstream aggregation patterns
+(quantile per `TIME`, ribbon plots, etc.) from `vignette("simulation")` apply
+unchanged - replace `aggregate(DV_SIM ~ TIME, ...)` with the SIR-based
+simulation output.
+
+---
+
+## When to prefer SIR over asymptotic
+
+| Situation | Recommended method |
+|---|---|
+| Quick uncertainty for a well-behaved fit | asymptotic (`covariance = TRUE` only) |
+| Parameters near a boundary, skewed likelihood, small N | SIR |
+| Reporting CIs for decision-relevant quantities | SIR (or both, and compare) |
+| Need uncertainty-aware simulation | both work; SIR via `sir_keep_samples = TRUE`, asymptotic via the covariance matrix |
+
+The cost is SIR draws plus likelihood evaluations - typically cheaper than a
+full refit but not free. Start with `sir_samples = 1000` and increase if ESS
+is low.
