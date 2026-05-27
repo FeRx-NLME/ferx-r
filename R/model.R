@@ -103,7 +103,7 @@
 #'   \code{\link{ferx_fit}}, \code{\link{ferx_check_init}}
 #' @family model-editing
 #' @export
-ferx_model<- function(data = NULL, model) {
+ferx_model <- function(data = NULL, model) {
   # Backwards-compat shim: in earlier versions the signature was
   # `ferx_model(model, data = NULL)`. Detect old-style positional calls by
   # the .ferx extension on what is now `data` and silently rewrite them
