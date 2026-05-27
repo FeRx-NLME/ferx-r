@@ -66,7 +66,7 @@ optimisation occurs; only proposal draws, importance weighting, and resampling.
 |---|---|---|
 | `sir_samples` | 1000 | Number of candidate draws from the asymptotic proposal. Higher = tighter weights at proportional cost. |
 | `sir_resamples` | 250 | Number of resampled vectors retained. Must be `<= sir_samples`. |
-| `sir_seed` | `NULL` | Integer seed for reproducibility. `NULL` uses the engine's built-in seed. |
+| `sir_seed` | `NULL` | Integer seed for reproducibility. `NULL` uses the engine's default seeding behaviour. |
 | `sir_keep_samples` | `FALSE` | Retain the resampled packed parameter vectors on the fit. Required for downstream `ferx_simulate_with_uncertainty(method = "sir")`. |
 
 ---
@@ -121,11 +121,12 @@ fit$sir_ci_sigma
 
 The effective sample size is the most important diagnostic to look at first.
 It summarises how well the asymptotic proposal matches the true likelihood
-surface. ESS is bounded above by `sir_resamples`.
+surface. A high ESS relative to `sir_resamples` indicates good coverage; a
+low one indicates the proposal does not match the target.
 
-- **ESS close to `sir_resamples`** - the asymptotic proposal is a good match;
-  the SIR CIs will be close to the asymptotic CIs and most of the resamples
-  are distinct.
+- **ESS in the same order of magnitude as `sir_resamples`** - the asymptotic
+  proposal is a good match; the SIR CIs will be close to the asymptotic CIs
+  and most of the resamples are distinct.
 - **ESS much smaller than `sir_resamples`** - the proposal is a poor match.
   A few high-weight proposals dominate the resample, the SIR CIs are based
   on relatively few effective draws, and the resamples are heavily duplicated.
@@ -169,7 +170,9 @@ The output structure is identical to the `ferx_sir()` flow above.
 
 To propagate the SIR resamples into a simulation, retain them with
 `sir_keep_samples = TRUE` and pass the fit to
-`ferx_simulate_with_uncertainty()` with `method = "sir"`:
+`ferx_simulate_with_uncertainty()` with `method = "sir"`. Calling
+`ferx_sir()` a second time overwrites the previous SIR fields with fresh
+resampling - it does not accumulate across calls:
 
 ```{r sir-simulate, eval = FALSE}
 fit <- ferx_sir(fit,
