@@ -74,4 +74,16 @@ ferx_model_edit("run1.ferx", save_as = TRUE)
 \seealso{
 \code{\link{ferx_model_show}}, \code{\link{ferx_model_new}},
 \code{\link{ferx_example}}
+
+Other model-editing: 
+\code{\link{ferx_get_section}()},
+\code{\link{ferx_model}()},
+\code{\link{ferx_model_inspect}()},
+\code{\link{ferx_model_new}()},
+\code{\link{ferx_model_section}()},
+\code{\link{ferx_model_set_section}()},
+\code{\link{ferx_model_show}()},
+\code{\link{ferx_model_validate}()},
+\code{\link{ferx_set_section}()}
 }
+\concept{model-editing}

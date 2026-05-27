@@ -38,6 +38,7 @@
 #' tr  <- ferx_trace(fit)
 #' head(tr)
 #'
+#' @family diagnostics
 #' @export
 ferx_trace <- function(fit) {
   if (missing(fit) || is.null(fit)) {
@@ -112,6 +113,7 @@ ferx_trace <- function(fit) {
 #' tr  <- ferx_trace(fit)
 #' head(tr)
 #'
+#' @family diagnostics
 #' @export
 ferx_plot_trace <- function(fit, log_ofv = FALSE) {
   tr <- ferx_trace(fit)
@@ -231,6 +233,7 @@ ferx_plot_trace <- function(fit, log_ofv = FALSE) {
 #'   ferx_check_init(method = "focei")
 #' }
 #'
+#' @family fitting
 #' @export
 ferx_check_init <- function(model, data = NULL, method = "focei", maxiter = NULL, ...) {
   if (inherits(model, "ferx_model")) {

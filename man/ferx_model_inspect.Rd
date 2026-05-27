@@ -15,7 +15,10 @@ A named list (invisibly) with fields: \code{theta_names}
 (character vector of population parameter names), \code{model_type}
 (short label such as \code{"1-cpt oral"} or \code{NULL} when not
 unambiguously detectable), \code{iiv} (omega names), \code{iov}
-(kappa names), and \code{residual} (error type).
+(kappa names), and \code{residual} (error type). For multi-endpoint
+(per-CMT) error models, \code{residual} is reported as a string of
+the form \code{"per-CMT (CMT2=proportional, CMT3=additive)"}; for
+combined error models it is \code{c("proportional", "additive")}.
 }
 \description{
 Parses a \code{.ferx} file without fitting and prints a compact summary of
@@ -29,6 +32,18 @@ Alternatively, pass a \code{ferx_fit} object to display the structure that
 was auto-derived during fitting (reads \code{fit$model_structure} directly,
 so no file path is needed post-fit).
 }
+\section{Model DSL features detected}{
+
+\code{ferx_model_inspect()} reflects the parser's view of a
+\code{.ferx} file. Recently added DSL features that surface here
+include multi-endpoint residual error (per-CMT \code{[error_model]}),
+the \code{[scaling]} block for unit conversion / ODE readout (see
+\code{NEWS.md} for Form A/B/C details), and inter-occasion variability
+via \code{kappa_*} declarations. Steady-state dosing (\code{SS}/\code{II}
+columns) is a data-side feature and is documented under
+\code{\link{ferx_fit}}.
+}
+
 \examples{
 ex <- ferx_example("warfarin")
 ferx_model_inspect(ex$model)
@@ -44,4 +59,16 @@ s$residual     # "proportional"
 \seealso{
 \code{\link{ferx_model_show}}, \code{\link{ferx_model_edit}},
 \code{\link{ferx_fit}}
+
+Other model-editing: 
+\code{\link{ferx_get_section}()},
+\code{\link{ferx_model}()},
+\code{\link{ferx_model_edit}()},
+\code{\link{ferx_model_new}()},
+\code{\link{ferx_model_section}()},
+\code{\link{ferx_model_set_section}()},
+\code{\link{ferx_model_show}()},
+\code{\link{ferx_model_validate}()},
+\code{\link{ferx_set_section}()}
 }
+\concept{model-editing}

@@ -29,3 +29,13 @@ fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
 obs <- read.csv(ex$data)
 ferx_eta_cov(fit, obs)
 }
+\seealso{
+Other diagnostics: 
+\code{\link{check_diagnostics}()},
+\code{\link{ferx_cor_matrix}()},
+\code{\link{ferx_estimates}()},
+\code{\link{ferx_plot_trace}()},
+\code{\link{ferx_trace}()},
+\code{\link{summary.ferx_fit}()}
+}
+\concept{diagnostics}

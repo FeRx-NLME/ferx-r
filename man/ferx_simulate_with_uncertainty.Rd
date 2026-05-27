@@ -85,3 +85,9 @@ pi90 <- aggregate(DV_SIM ~ TIME, data = sims,
 }
 
 }
+\seealso{
+Other simulation: 
+\code{\link{ferx_predict}()},
+\code{\link{ferx_simulate}()}
+}
+\concept{simulation}

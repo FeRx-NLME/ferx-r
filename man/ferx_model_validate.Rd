@@ -22,7 +22,8 @@ returning \code{FALSE} - pass an existing \code{.ferx} path.
 Parses a \code{.ferx} model file using the Rust engine and checks for
 required sections, without running the optimizer. Useful for catching
 syntax errors and missing sections before committing to a long estimation
-run.
+run. This is the in-R counterpart to the \code{ferx check} CLI shipped
+with ferx-core and shares the same parser and structural diagnostics.
 }
 \examples{
 # Valid model (all required sections present)
@@ -55,4 +56,16 @@ ferx_model_validate(bad)
 }
 \seealso{
 \code{\link{ferx_model_inspect}}, \code{\link{ferx_model_show}}
+
+Other model-editing: 
+\code{\link{ferx_get_section}()},
+\code{\link{ferx_model}()},
+\code{\link{ferx_model_edit}()},
+\code{\link{ferx_model_inspect}()},
+\code{\link{ferx_model_new}()},
+\code{\link{ferx_model_section}()},
+\code{\link{ferx_model_set_section}()},
+\code{\link{ferx_model_show}()},
+\code{\link{ferx_set_section}()}
 }
+\concept{model-editing}

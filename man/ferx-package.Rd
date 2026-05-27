@@ -4,18 +4,57 @@
 \name{ferx-package}
 \alias{ferx}
 \alias{ferx-package}
-\title{ferx: Nonlinear Mixed Effects Modeling with Rust Backend}
+\title{ferx: Nonlinear Mixed Effects Modeling with a Rust Backend}
 \description{
-Fast NLME estimation using FOCE/FOCEI with automatic differentiation. Powered by a Rust engine with Enzyme autodiff for exact gradients. Supports analytical PK models (1/2-compartment) and ODE-based models.
+ferx provides a user-facing R API for population PK / NLME modeling
+that delegates to a high-performance Rust engine (ferx-core) with
+Enzyme automatic differentiation for exact gradients. Models are
+written in a compact .ferx DSL (parameters, individual_parameters,
+structural_model, odes, error_model, initial_values, fit_options,
+optional scaling).
 }
-\seealso{
-Vignettes:
+\section{Where to start}{
+
+\tabular{ll}{
+\strong{Goal}                                      \tab \strong{Function} \cr
+Get a worked example                               \tab \code{\link{ferx_example}} \cr
+Create a model from a template                     \tab \code{\link{ferx_model_new}} \cr
+Inspect / edit an existing model                   \tab \code{\link{ferx_model_show}}, \code{\link{ferx_model_edit}}, \code{\link{ferx_model_validate}}, \code{\link{ferx_model_inspect}} \cr
+Sanity-check starting values                       \tab \code{\link{ferx_check_init}}, \code{\link{ferx_inits_from_nca}} \cr
+Fit a model (FOCE / FOCEI / GN / SAEM / IMP)       \tab \code{\link{ferx_fit}} \cr
+Inspect a fit                                      \tab \code{\link{summary.ferx_fit}}, \code{\link{ferx_estimates}}, \code{\link{ferx_cor_matrix}}, \code{\link{check_diagnostics}} \cr
+Optimizer trace                                    \tab \code{\link{ferx_trace}}, \code{\link{ferx_plot_trace}} \cr
+Covariate screen on EBE ETAs                       \tab \code{\link{ferx_eta_cov}} \cr
+Uncertainty (SIR)                                  \tab \code{\link{ferx_sir}} \cr
+Population / individual predictions                \tab \code{\link{ferx_predict}} \cr
+Simulate (with or without parameter uncertainty)   \tab \code{\link{ferx_simulate}}, \code{\link{ferx_simulate_with_uncertainty}} \cr
+Save / restore a fit                               \tab \code{\link{ferx_save_fit}}, \code{\link{ferx_load_fit}}
+}
+
+Functions are grouped on the reference index under \emph{fitting},
+\emph{simulation}, \emph{model-editing}, \emph{diagnostics}, and
+\emph{utilities}; each function's help page links to its siblings
+via \code{See Also}.
+}
+
+\section{Vignettes}{
+
 \itemize{
 \item \code{vignette("model-workflow", package = "ferx")} - inspect, edit, and fit models
 \item \code{vignette("parameter-transforms", package = "ferx")} - log, logit, and additive ETAs
 \item \code{vignette("model-editing", package = "ferx")} - editing model sections
 }
 }
+
+\section{Build modes}{
+
+ferx works with or without the Enzyme autodiff toolchain. Without
+Enzyme, gradients fall back to finite differences; fits remain
+correct but are slower and \code{gradient = "ad"} is unavailable.
+See \code{ferx_rust_autodiff_enabled()} (internal) and the startup
+message for the active mode.
+}
+
 \author{
 \strong{Maintainer}: Ron Keizer \email{ron@insightrx.com}
 

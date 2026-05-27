@@ -35,3 +35,9 @@ sim <- ferx_simulate(ex$model, ex$data, n_sim = 10L, seed = 1L, fit = fit)
 head(sim)
 
 }
+\seealso{
+Other simulation: 
+\code{\link{ferx_predict}()},
+\code{\link{ferx_simulate_with_uncertainty}()}
+}
+\concept{simulation}

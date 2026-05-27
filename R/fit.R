@@ -883,6 +883,7 @@
 #'
 #' @param ... Arguments passed to \code{ferx_fit.default} (e.g.
 #'   \code{method}, \code{covariance}, \code{verbose}, \code{settings}).
+#' @family fitting
 #' @export
 #' @rdname ferx_fit
 ferx_fit <- function(model, data = NULL, ...) UseMethod("ferx_fit")
@@ -2037,6 +2038,7 @@ print.ferx_fit <- function(x, ...) {
 #'   settings = list(optimizer = "slsqp", max_iter = 200L))
 #' summary(fit_custom)
 #' }
+#' @family diagnostics
 #' @export
 summary.ferx_fit <- function(object, ...) {
   x <- object

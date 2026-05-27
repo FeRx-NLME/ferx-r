@@ -86,6 +86,7 @@
 #'   (\(x) x$theta[c("TVCL", "TVV")])()
 #' }
 #'
+#' @family fitting
 #' @export
 ferx_inits_from_nca <- function(model, data = NULL,
                                 method = c("nca_sweep", "nca", "nca_ebe")) {

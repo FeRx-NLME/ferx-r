@@ -34,6 +34,7 @@ FITRX_FORMAT_VERSION <- "1"
 #'   \preformatted{
 #'   fit |> ferx_save_fit("run1.fitrx") |> ferx_estimates()
 #'   }
+#' @family utilities
 #' @export
 #' @seealso \code{\link{ferx_load_fit}}, \code{\link{ferx_fit}} (and its
 #'   \code{output} argument for save-during-fit).
@@ -179,6 +180,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
 #' ferx_save_fit(fit, tmp)
 #' fit2 <- ferx_load_fit(tmp)
 #' identical(fit$theta, fit2$theta)
+#' @family utilities
 #' @export
 #' @seealso \code{\link{ferx_save_fit}}.
 ferx_load_fit <- function(path) {
