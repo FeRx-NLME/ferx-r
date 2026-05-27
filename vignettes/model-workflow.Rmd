@@ -159,15 +159,16 @@ fit <- ferx_model(ex$data, ex$model) |>
 ### Override fit options before fitting
 
 `ferx_set_section()` rewrites a section on disk and returns the `ferx_model`
-unchanged.
-**Important:** it edits the file in place — copy first if you do not want to
-modify the original.
+unchanged so the pipe can continue.
+
+**Copy-on-write for bundled examples:** when the model is inside the installed
+ferx package directory (i.e. came from `ferx_example()`), `ferx_set_section()`
+transparently copies it to `tempdir()` first and edits the copy; the bundled
+file is never modified. For user-owned files it edits in place. Copy the file
+yourself if you want a stable user-controlled path.
 
 ```{r set-section, eval = FALSE}
-model_copy <- file.path(tempdir(), "warfarin.ferx")
-file.copy(ex$model, model_copy)
-
-fit <- ferx_model(ex$data, model_copy) |>
+fit <- ferx_model(ex$data, ex$model) |>
   ferx_set_section("fit_options", c(
     "  method     = focei",
     "  maxiter    = 500",
@@ -227,23 +228,37 @@ head(fit$individual_estimates) # individual PK parameters (CL, V, KA, ...)
 fit$eta_normality              # Shapiro-Wilk normality test per ETA
 ```
 
-`ferx_estimates()` collects all estimated parameters (theta, omega, sigma) into
-a tidy data frame with SEs, %RSE, and 95 % CIs. Run it after any fit that used
-`covariance = TRUE`. The `transform` column reflects the parameterisation
-reported by the backend (`"identity"`, `"log"`, `"logit"`, or `"variance"` for
-omega rows):
+`ferx_estimates()` collects all estimated parameters (theta, omega diagonal,
+sigma, kappa diagonal if IOV is present) into a tidy data frame. Run it after
+any fit that used `covariance = TRUE` to populate the `se`, `rse_pct`,
+`lower_95`, and `upper_95` columns; without the covariance step those columns
+are `NA`. The `transform` column reflects how the parameter is reported by the
+backend - `"identity"`, `"log"`, `"logit"`, or `"proportional"`/`"additive"`
+for sigma rows. Omega rows always use `transform = "variance"` regardless of
+the ETA parameterisation (the interpretation is conveyed by `print.ferx_fit()`,
+not by the tidy table). The `init_as_sd` column is `TRUE` for omega/sigma/kappa
+rows where the initial value was annotated as a standard deviation in the
+`.ferx` file.
+
+The parameter labels are the bare declared names (`ETA_CL`, `PROP_ERR`);
+unnamed elements fall back to `OMEGA(i,i)` / `SIGMA(i)` / `KAPPA{i}`.
 
 ```{r estimates, eval = FALSE}
 ferx_estimates(fit)
-#   param           transform  estimate     se  rse_pct  lower_95  upper_95  ...
-#   TVCL            identity     0.134  0.0108     8.1     0.113     0.155
-#   TVV             identity     7.94   0.420      5.3     7.12      8.76
-#   TVKA            identity     1.07   0.160     14.9     0.756     1.38
-#   OMEGA(ETA_CL)   variance     0.042  0.012     28.6    0.019     0.066
-#   OMEGA(ETA_V)    variance     0.020  0.009     44.9    0.002     0.037
-#   OMEGA(ETA_KA)   variance     0.157  0.048     30.6    0.063     0.251
-#   PROP_ERR        proportional 0.011  0.001      9.1    0.009     0.013
+#     param    transform   estimate         se  rse_pct  lower_95  upper_95  init_as_sd
+#      TVCL     identity 0.13273892 0.01446172  10.8949  0.104394  0.161084       FALSE
+#       TVV     identity 7.69480857 0.29200479   3.7948  7.122479  8.267138       FALSE
+#      TVKA     identity 0.75856259 0.03505402   4.6211  0.689857  0.827268       FALSE
+#    ETA_CL     variance 0.02854340 0.00637992  22.3516  0.016039  0.041048       FALSE
+#     ETA_V     variance 0.00961159 0.00216463  22.5210  0.005369  0.013854       FALSE
+#    ETA_KA     variance 0.34236514 0.07687305  22.4535  0.191694  0.493036       FALSE
+#  PROP_ERR proportional 0.01063348 0.00078565   7.3884  0.009094  0.012173        TRUE
+# estimate_natural / lower_95_natural / upper_95_natural columns are present
+# but only populated for log- or logit-transformed thetas.
 ```
+
+The output above is captured from a real `gn` fit of the bundled warfarin
+example with `covariance = TRUE`.
 
 `ferx_cor_matrix()` converts the parameter covariance matrix to correlations.
 A value near ±1 between two parameters signals a structural identifiability
@@ -293,17 +308,23 @@ column that is constant within a subject and not a standard NONMEM column
 (TIME, DV, AMT, EVID, MDV, CMT, RATE) is treated as a covariate:
 
 ```{r eta-cov, eval = FALSE}
-# The warfarin dataset has no covariate columns. The following example uses
-# two_cpt_oral_cov, which has body weight (WT) and creatinine clearance (CRCL).
-ex_cov <- ferx_example("two_cpt_oral_cov")
-fit_cov <- ferx_fit(ex_cov$model, ex_cov$data)
+# The warfarin dataset has no covariate columns. The example below uses
+# two_cpt_oral_cov, which carries body weight (WT) and creatinine clearance
+# (CRCL). Rows are sorted by descending |r|; the `flag` column is set to
+# "[!]" whenever |r| >= 0.3 to highlight pairs worth formal testing.
+ex_cov   <- ferx_example("two_cpt_oral_cov")
+fit_cov  <- ferx_fit(ex_cov$model, ex_cov$data, method = "gn", covariance = FALSE)
 data_cov <- read.csv(ex_cov$data)
 ferx_eta_cov(fit_cov, data_cov)
-#   eta      covariate    r   p_val  flag
-#   ETA_CL   WT        0.38  0.008   [!]
-#   ETA_CL   CRCL      0.41  0.003   [!]
-#   ETA_V1   WT        0.29  0.047
-# [!] flags |r| >= 0.3; flag covariates worth formal testing
+#       eta covariate      r  p_val flag
+#    ETA_KA        WT  0.144 0.4472
+#    ETA_CL      CRCL -0.117 0.5386
+#     ETA_Q        WT  0.105 0.5802
+#    ETA_V1        WT -0.093 0.6251
+#    ETA_V2      CRCL  0.081 0.6699
+#    ...
+# None reach |r| >= 0.3 in this dataset, so no rows are flagged. A real
+# covariate signal would show up at the top of the table with [!] in `flag`.
 ```
 
 ---
@@ -380,11 +401,9 @@ ferx_model(ex$data, ex$model) |>
   ferx_fit(method = "focei", covariance = TRUE) |>
   summary()
 
-# Edit options then fit (copy model file first)
-model_copy <- file.path(tempdir(), "warfarin.ferx")
-file.copy(ex$model, model_copy)
-
-ferx_model(model_copy, data = ex$data) |>
+# Edit options then fit. ferx_set_section() auto-copies bundled examples to
+# tempdir() before editing, so the package file stays pristine.
+ferx_model(ex$data, ex$model) |>
   ferx_set_section("fit_options", c(
     "  method     = focei",
     "  maxiter    = 500",
