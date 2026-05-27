@@ -153,6 +153,20 @@
 
 ## Breaking changes
 
+- `ferx_fit()` no longer has dedicated `max_unconverged_frac` and
+  `min_obs_for_convergence_check` arguments. These are estimation knobs and
+  now flow through `settings`, like the other low-level fit options
+  (#51):
+
+  ```r
+  # before
+  ferx_fit(m, d, max_unconverged_frac = 0.1, min_obs_for_convergence_check = 2L)
+  # after
+  ferx_fit(m, d, settings = list(
+    max_unconverged_frac = 0.1, min_obs_for_convergence_check = 2L
+  ))
+  ```
+
 - `ferx_model()` argument order is now `ferx_model(data, model)` (data
   first). This enables the natural data-first pipe entry point
   `ex$data |> ferx_model(ex$model) |> ferx_fit()` (#81).

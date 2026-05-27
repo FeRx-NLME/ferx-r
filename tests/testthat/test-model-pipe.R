@@ -382,9 +382,11 @@ test_that("ferx_fit() exposes all estimation arguments in its formals (#52)", {
   expect_true(all(c(
     "model", "data", "method", "covariance", "verbose", "bloq_method",
     "threads", "mu_referencing", "sir", "gradient", "optimizer_trace",
-    "scale_params", "max_unconverged_frac", "min_obs_for_convergence_check",
-    "inits_from_nca", "settings", "output", "include_data"
+    "scale_params", "inits_from_nca", "settings", "output", "include_data"
   ) %in% fmls))
+  # Convergence-tolerance knobs flow through `settings`, not the signature (#51).
+  expect_false("max_unconverged_frac" %in% fmls)
+  expect_false("min_obs_for_convergence_check" %in% fmls)
   # No longer an S3 generic: the .default / .ferx_model methods are gone.
   expect_false(exists("ferx_fit.default"))
   expect_false(exists("ferx_fit.ferx_model"))

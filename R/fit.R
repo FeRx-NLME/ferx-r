@@ -125,15 +125,6 @@
 #'   enabled it applies to all outer optimizers: NLopt FOCE/FOCEI (BOBYQA,
 #'   SLSQP, L-BFGS, MMA), the hand-rolled BFGS, Gauss-Newton / BHHH, and the
 #'   SAEM M-step.
-#' @param max_unconverged_frac Numeric scalar in \[0, 1\] or \code{NULL}
-#'   (default). When non-\code{NULL}, the fit is flagged as converged even if
-#'   up to this fraction of subjects failed their inner EBE loop, instead of
-#'   raising an error. Useful for large datasets with a handful of difficult
-#'   subjects.
-#' @param min_obs_for_convergence_check Integer or \code{NULL} (default).
-#'   Minimum number of observations a subject must have before its inner-loop
-#'   convergence is included in the \code{max_unconverged_frac} check. Subjects
-#'   with fewer observations are excluded from the check.
 #' @param inits_from_nca Derive NCA-based starting values from the data before
 #'   the optimizer runs, overriding the model file's defaults. Either a logical
 #'   (\code{FALSE}, the default, disables it; \code{TRUE} is an alias for
@@ -629,6 +620,21 @@
 #' ))
 #' }
 #'
+#' \strong{Convergence tolerance for difficult subjects:}
+#'
+#' \code{max_unconverged_frac} (numeric in \[0, 1\]) flags the fit as converged
+#' even if up to this fraction of subjects failed their inner EBE loop, instead
+#' of raising an error - useful for large datasets with a handful of difficult
+#' subjects. \code{min_obs_for_convergence_check} (non-negative integer) is the
+#' minimum number of observations a subject must have before its inner-loop
+#' convergence counts toward that fraction; sparser subjects are excluded.
+#' \preformatted{
+#' ferx_fit(m, d, settings = list(
+#'   max_unconverged_frac          = 0.1,
+#'   min_obs_for_convergence_check = 2L
+#' ))
+#' }
+#'
 #' \strong{Stagnation guard (NLopt-based optimizers):}
 #'
 #' NLopt-based outer optimizers (BOBYQA, SLSQP, L-BFGS, MMA) short-circuit by
@@ -894,8 +900,6 @@ ferx_fit <- function(model, data = NULL,
                      gradient = c("auto", "ad", "fd"),
                      optimizer_trace = FALSE,
                      scale_params = FALSE,
-                     max_unconverged_frac = NULL,
-                     min_obs_for_convergence_check = NULL,
                      inits_from_nca = FALSE,
                      settings = NULL,
                      output = NULL,
@@ -1030,26 +1034,6 @@ ferx_fit <- function(model, data = NULL,
   # when they don't pass the argument.
   if (isTRUE(scale_params)) {
     settings <- c(list(scale_params = TRUE), settings)
-  }
-  if (!is.null(max_unconverged_frac)) {
-    if (!is.numeric(max_unconverged_frac) || length(max_unconverged_frac) != 1L ||
-      !is.finite(max_unconverged_frac) || max_unconverged_frac < 0 || max_unconverged_frac > 1) {
-      stop("`max_unconverged_frac` must be a numeric scalar between 0 and 1")
-    }
-    settings <- c(list(max_unconverged_frac = max_unconverged_frac), settings)
-  }
-  if (!is.null(min_obs_for_convergence_check)) {
-    if (!is.numeric(min_obs_for_convergence_check) ||
-      length(min_obs_for_convergence_check) != 1L ||
-      !is.finite(min_obs_for_convergence_check) ||
-      min_obs_for_convergence_check != as.integer(min_obs_for_convergence_check) ||
-      min_obs_for_convergence_check < 0L) {
-      stop("`min_obs_for_convergence_check` must be a non-negative integer scalar")
-    }
-    settings <- c(
-      list(min_obs_for_convergence_check = as.integer(min_obs_for_convergence_check)),
-      settings
-    )
   }
   # inits_from_nca: TRUE/FALSE or one of "nca", "nca_sweep", "nca_ebe". TRUE is
   # an alias for "nca_sweep"; FALSE disables (the default). Merged into settings
