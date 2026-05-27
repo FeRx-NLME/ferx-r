@@ -29,13 +29,6 @@
 #' \emph{utilities}; each function's help page links to its siblings
 #' via \code{See Also}.
 #'
-#' @section Vignettes:
-#' \itemize{
-#'   \item \code{vignette("model-workflow", package = "ferx")} - inspect, edit, and fit models
-#'   \item \code{vignette("parameter-transforms", package = "ferx")} - log, logit, and additive ETAs
-#'   \item \code{vignette("model-editing", package = "ferx")} - editing model sections
-#' }
-#'
 #' @section Build modes:
 #' ferx works with or without the Enzyme autodiff toolchain. Without
 #' Enzyme, gradients fall back to finite differences; fits remain
