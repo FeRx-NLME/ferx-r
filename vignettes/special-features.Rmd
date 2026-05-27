@@ -1,0 +1,255 @@
+---
+title: "Special features: IOV, BLOQ, steady state, and unit scaling"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Special features: IOV, BLOQ, steady state, and unit scaling}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+library(ferx)
+```
+
+## Overview
+
+This vignette is a tour of four `.ferx` features that go beyond the standard
+single-dose oral PK example. Each section uses a bundled example model so you
+can reproduce it without writing a model file from scratch.
+
+| Feature | Bundled example | Key DSL/data element |
+|---|---|---|
+| Inter-occasion variability (IOV) | `warfarin_iov` | `kappa` declaration + `iov_column = OCC` |
+| Below lower limit of quantification (BLOQ) | `warfarin_bloq` | `CENS` data column + `bloq_method = "m3"` |
+| Steady-state dosing | `warfarin_ss` | `SS` and `II` data columns |
+| Unit conversion / observation scaling | `warfarin_scaled` | `[scaling]` block with `obs_scale` |
+
+All four are independent of one another - mix and match as needed.
+
+---
+
+## Inter-occasion variability
+
+IOV captures variability that recurs within a single subject across distinct
+occasions (visits, treatment cycles, ...). The bundled `warfarin_iov` model
+declares an IOV term on clearance using the `kappa` keyword:
+
+```{r iov-inspect}
+ex_iov <- ferx_example("warfarin_iov")
+ferx_model_inspect(ex_iov$model)
+```
+
+Three pieces have to line up:
+
+1. **`[parameters]`** declares one or more `kappa` parameters with their
+   omega-IOV variance, e.g. `kappa KAPPA_CL ~ 0.04`.
+2. **`[individual_parameters]`** uses the kappa additively on the log scale,
+   alongside the usual IIV ETA:
+   ```
+   CL = TVCL * exp(ETA_CL + KAPPA_CL)
+   ```
+3. **`[fit_options]`** points the engine at the occasion column:
+   ```
+   iov_column = OCC
+   ```
+4. **The data** carries an integer `OCC` column. Each value within a subject
+   identifies an occasion; the engine draws one kappa per occasion per
+   subject.
+
+After fitting, `fit$omega_iov` is a square matrix on the kappa diagonal, and
+`ferx_estimates()` reports each kappa as a row with `transform = "variance"`
+(same convention as omega rows):
+
+```{r iov-fit, eval = FALSE}
+fit_iov <- ferx_fit(ex_iov$model, ex_iov$data, method = "focei")
+fit_iov$omega_iov
+#>            KAPPA_CL
+#> KAPPA_CL 0.04679037
+
+ferx_estimates(fit_iov)
+#>     param    transform   estimate se rse_pct lower_95 upper_95 estimate_natural lower_95_natural upper_95_natural init_as_sd
+#>      TVCL     identity 0.17003443 NA      NA       NA       NA               NA               NA               NA      FALSE
+#>       TVV     identity 8.62276910 NA      NA       NA       NA               NA               NA               NA      FALSE
+#>      TVKA     identity 1.16618408 NA      NA       NA       NA               NA               NA               NA      FALSE
+#>    ETA_CL     variance 0.03849065 NA      NA       NA       NA               NA               NA               NA      FALSE
+#>     ETA_V     variance 0.01227511 NA      NA       NA       NA               NA               NA               NA      FALSE
+#>    ETA_KA     variance 0.06600358 NA      NA       NA       NA               NA               NA               NA      FALSE
+#>  PROP_ERR proportional 0.17643369 NA      NA       NA       NA               NA               NA               NA       TRUE
+#>  KAPPA_CL     variance 0.04679037 NA      NA       NA       NA               NA               NA               NA      FALSE
+# Output captured from a real focei fit with covariance = FALSE, hence
+# the NA SE/CI columns. KAPPA_CL appears as the last row, alongside
+# the other variance-scale entries. Kept eval = FALSE because the
+# focei fit takes ~38 s on this example - too slow for the vignette
+# build.
+```
+
+The IOV print labels follow the bare-name convention: `KAPPA_CL` is the
+declared name; an unnamed declaration would fall back to `KAPPA1`,
+`KAPPA2`, etc.
+
+---
+
+## Below lower limit of quantification (BLOQ)
+
+When some observations sit below the assay's lower limit, the standard
+Gaussian likelihood is biased. ferx implements Beal's M3 likelihood, which
+treats each BLOQ observation as a left-censored draw and integrates over the
+unobserved range.
+
+Two pieces are needed:
+
+1. **A `CENS` column in the data**: `1` for BLOQ rows, `0` otherwise. The `DV`
+   cell on a BLOQ row should carry the LLOQ value itself.
+2. **Tell the engine to use M3**: either pass `bloq_method = "m3"` to
+   `ferx_fit()`, or set `bloq_method = m3` in `[fit_options]`. The other
+   choice is `bloq_method = "drop"`, which discards BLOQ rows entirely (rarely
+   what you want).
+
+```{r bloq-inspect}
+ex_bloq <- ferx_example("warfarin_bloq")
+ferx_model_inspect(ex_bloq$model)
+```
+
+The bundled `warfarin_bloq` model already sets `bloq_method = m3` in
+`[fit_options]`. Inspect the data to see the `CENS` column:
+
+```{r bloq-data}
+data_bloq <- read.csv(ex_bloq$data)
+head(data_bloq[data_bloq$CENS == 1, ], 3)
+```
+
+Running the fit produces the standard `ferx_fit` result; the M3 likelihood
+contribution from BLOQ rows is folded into the OFV:
+
+```{r bloq-fit, eval = FALSE}
+fit_bloq <- ferx_fit(ex_bloq$model, ex_bloq$data, method = "focei")
+```
+
+The call-time argument overrides the model-file setting if both are present.
+Pass `bloq_method = "m3"` explicitly when you want the choice to be visible
+in the script.
+
+---
+
+## Steady-state dosing
+
+Steady state lets you specify a maintenance dosing regimen without listing
+every single dose in the data. The engine analytically computes the
+steady-state initial condition for the dosing compartment given the dose, the
+interval, and the current individual parameters - no model changes are
+required.
+
+The bundled `warfarin_ss` example dosing record carries:
+
+```{r ss-data}
+ex_ss <- ferx_example("warfarin_ss")
+data_ss <- read.csv(ex_ss$data)
+head(data_ss[data_ss$EVID == 1, ], 3)
+```
+
+Two extra columns make the row a steady-state dose:
+
+| Column | Meaning |
+|---|---|
+| `SS = 1`  | Treat this row as a steady-state dose record |
+| `II = 24` | Inter-dose interval (here 24 h, i.e. once-daily dosing) |
+
+Subsequent observations are evaluated against the steady-state initial
+condition. The model file itself is unchanged from the single-dose warfarin
+example - steady state is entirely a data-side feature:
+
+```{r ss-inspect}
+ferx_model_inspect(ex_ss$model)
+```
+
+For the bundled steady-state warfarin example (tau = 24 h, half-life
+~ 42 h - i.e. ke = CL/V ~ 0.0165/h), accumulation is about three-fold, so the
+`DV` values sit in the 20-35 mg/L range vs. 5-14 mg/L for the single-dose
+version.
+
+```{r ss-fit, eval = FALSE}
+fit_ss <- ferx_fit(ex_ss$model, ex_ss$data, method = "focei")
+```
+
+`SS` and `II` interact correctly with covariates and IIV: each subject's
+steady-state initial condition is computed from their own individual
+parameters.
+
+---
+
+## Unit conversion and observation scaling
+
+The `[scaling]` block converts model predictions before they are compared to
+`DV`. Use it when the model is parameterised in one unit but the data are
+recorded in another - for example, dose in micrograms but observations in
+mg/L, or a central-compartment ODE in amounts but observations in
+concentrations.
+
+The bundled `warfarin_scaled` example records dose in micrograms
+(`AMT = 100000` ug vs the usual `100` mg) and observations in mg/L. The
+model adds a single line:
+
+```
+[scaling]
+  obs_scale = 1000
+```
+
+This divides every prediction by 1000 before the residual is computed, so the
+sigma is expressed on the mg/L scale.
+
+```{r scaled-inspect}
+ex_scaled <- ferx_example("warfarin_scaled")
+ferx_model_inspect(ex_scaled$model)
+```
+
+Three forms of `obs_scale` are supported (see `?ferx_fit` for the full
+section on the `[scaling]` block):
+
+| Form | Syntax | Use case |
+|---|---|---|
+| Constant divisor | `obs_scale = 1000` | Pure unit conversion |
+| Expression | `obs_scale = V` | Volume-of-distribution scaling (concentration = amount / V), referencing thetas / etas / individual parameters |
+| Per-compartment | `obs_scale[CMT=1] = 1000` | Multi-endpoint models with different units per observation compartment |
+
+A more general Form C lets you write the readout expression directly
+(`y = central / V`), useful for non-trivial transformations.
+
+Because forms B (expressions) and Form C are evaluated through the ODE
+machinery, they force finite-difference gradients. Add `gradient = fd`
+explicitly in `[fit_options]` to make that choice visible (or `gradient = ad`
+to opt back into autodiff for Form A, which is compatible).
+
+`[scaling]` is not yet supported on SDE (`[diffusion]`) models.
+
+```{r scaled-fit, eval = FALSE}
+fit_scaled <- ferx_fit(ex_scaled$model, ex_scaled$data, method = "focei")
+fit_scaled$theta
+# Should converge to the same parameter values as the standard warfarin
+# fit because only the units differ.
+```
+
+---
+
+## Combining features
+
+These four features are independent and can be combined in the same model. A
+study with once-daily steady-state dosing, BLOQ observations, occasion-level
+CL variability, and concentration units derived via a volume-scaled readout
+would carry all of:
+
+- a `kappa KAPPA_CL ~ 0.04` declaration and an `iov_column = OCC` setting,
+- a `CENS` column and `bloq_method = m3` setting,
+- `SS = 1` and `II = 24` columns on the dosing rows,
+- a `[scaling]` block with `obs_scale = V` (Form B) and an explicit
+  `gradient = fd` in `[fit_options]`.
+
+No bundled `.ferx` exercises all four at once; build one by concatenating the
+relevant sections from the per-feature examples above. Validate the result
+with `ferx_model_validate()` before fitting.
+
+Each feature is documented in `?ferx_fit` along with its data-side
+requirements; this vignette is the narrative tour.
