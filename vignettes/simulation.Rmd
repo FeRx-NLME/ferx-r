@@ -134,6 +134,9 @@ pi_df <- data.frame(TIME = pi$TIME, q)
 
 obs <- read.csv(ex$data)
 obs <- obs[obs$EVID == 0 & obs$MDV == 0, ]
+# DV is character in read.csv because dose rows use "." as a placeholder.
+# Coerce after filtering observation rows so the ribbon plot gets a numeric axis.
+obs$DV <- as.numeric(obs$DV)
 
 ggplot() +
   geom_ribbon(data = pi_df, aes(TIME, ymin = lo, ymax = hi),
