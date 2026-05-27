@@ -162,6 +162,17 @@
 #'   \code{FALSE} to let SLSQP / L-BFGS run to their own xtol/ftol or to
 #'   \code{maxiter} instead of short-circuiting on a numerically-flat
 #'   OFV plateau; only consumed by FOCE / FOCEI / GN-hybrid),
+#'   the reconverged-gradient schedule
+#'   (\code{reconverge_gradient_interval} - integer, default \code{0}; how
+#'   often to re-solve each subject's inner EBE loop during the population
+#'   gradient instead of holding it fixed. \code{0} never reconverges (the
+#'   cheap fixed-EBE gradient); \code{1} reconverges every gradient
+#'   evaluation; \code{N} reconverges every \code{N}-th. The fixed-EBE
+#'   gradient can stall \code{slsqp} above the derivative-free
+#'   (\code{bobyqa}) optimum on ill-conditioned non-IOV fits; reconverging
+#'   recovers the full surface at ~5-6x the per-gradient cost. IOV models
+#'   always reconverge and ignore this; only consumed by FOCE / FOCEI /
+#'   GN-hybrid),
 #'   and multi-start optimization (\code{n_starts}, \code{start_sigma},
 #'   \code{multi_start_seed}).
 #'   Values that duplicate a dedicated argument

@@ -269,7 +269,8 @@ test_that("call_settings stores typed values after settings are serialised", {
     optimizer = "slsqp",
     max_iter = 200L,
     scale_params = TRUE,
-    stagnation_guard = FALSE
+    stagnation_guard = FALSE,
+    reconverge_gradient_interval = 5L
   ))
   typed <- setNames(
     lapply(parts$values, ferx:::.ferx_parse_setting_value),
@@ -280,4 +281,17 @@ test_that("call_settings stores typed values after settings are serialised", {
   expect_equal(typed$max_iter, 200)
   expect_identical(typed$scale_params, TRUE)
   expect_identical(typed$stagnation_guard, FALSE)
+  expect_equal(typed$reconverge_gradient_interval, 5)
+})
+
+test_that("reconverge_gradient_interval serialises as a plain integer string", {
+  # Integer-valued settings must not pick up scientific notation or decimals
+  # when forwarded to the Rust fit-option parser (which expects a usize).
+  parts <- ferx:::.ferx_settings_to_strings(list(reconverge_gradient_interval = 10L))
+  expect_identical(parts$keys, "reconverge_gradient_interval")
+  expect_identical(parts$values, "10")
+
+  # 0 is the documented "off" value and must round-trip, not become "" or NA.
+  parts0 <- ferx:::.ferx_settings_to_strings(list(reconverge_gradient_interval = 0L))
+  expect_identical(parts0$values, "0")
 })

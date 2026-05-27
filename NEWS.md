@@ -2,6 +2,15 @@
 
 ## New features
 
+- `settings = list(reconverge_gradient_interval = N)` controls how often the
+  FOCE/FOCEI population gradient re-solves each subject's inner EBE loop instead
+  of holding it fixed. `0` (default) keeps the cheap fixed-EBE gradient; `1`
+  reconverges every gradient evaluation; `N` reconverges every `N`-th. The
+  fixed-EBE gradient can stall `slsqp` above the derivative-free (`bobyqa`)
+  optimum on ill-conditioned non-IOV fits; reconverging recovers the full
+  surface at ~5-6x the per-gradient cost. IOV models always reconverge and
+  ignore the setting. Requires a ferx-core build that includes the option.
+
 - Multi-endpoint (per-CMT) residual error models for simultaneous PK/PD
   fitting. A single `[error_model]` block can now assign a distinct error
   model to each observed compartment, dispatched by the dataset `CMT` column:
