@@ -72,11 +72,12 @@
 
 - SAEM no longer collapses the random-effect variances (Omega) on sparsely
   sampled data. Previously, with few observations per subject, the
-  between-subject variability could shrink toward zero on the first iterations
-  while the residual error absorbed it (tiny `omega`, inflated additive
-  `sigma`). A burn-in now holds Omega fixed while the MH sampler warms up,
-  tunable via `settings = list(omega_burnin = <n>)` (default 20; `0` restores
-  the previous behaviour). Requires the matching ferx-core update that adds
+  between-subject variability could shrink toward zero during the first
+  iterations while the residual error absorbed it (tiny `omega`, inflated
+  additive `sigma`). A burn-in now holds Omega fixed while the MH sampler warms
+  up, tunable via `settings = list(omega_burnin = <int>)` (default 20; `0`
+  restores the previous behaviour). Requires the matching ferx-core update that
+  adds
   the SAEM Omega burn-in.
 
 - SIR confidence intervals now work correctly for models with `FIX`-ed
