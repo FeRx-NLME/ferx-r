@@ -50,3 +50,13 @@ fit_custom <- ferx_fit(ex$model, ex$data,
 summary(fit_custom)
 }
 }
+\seealso{
+Other diagnostics: 
+\code{\link{check_diagnostics}()},
+\code{\link{ferx_cor_matrix}()},
+\code{\link{ferx_estimates}()},
+\code{\link{ferx_eta_cov}()},
+\code{\link{ferx_plot_trace}()},
+\code{\link{ferx_trace}()}
+}
+\concept{diagnostics}

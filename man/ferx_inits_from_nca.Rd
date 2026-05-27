@@ -104,4 +104,10 @@ ex$data |>
 \seealso{
 \code{\link{ferx_fit}}, whose \code{inits_from_nca} argument applies
 these values automatically before the optimizer runs.
+
+Other fitting: 
+\code{\link{ferx_check_init}()},
+\code{\link{ferx_fit}()},
+\code{\link{ferx_sir}()}
 }
+\concept{fitting}

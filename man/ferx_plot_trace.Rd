@@ -33,3 +33,13 @@ tr  <- ferx_trace(fit)
 head(tr)
 
 }
+\seealso{
+Other diagnostics: 
+\code{\link{check_diagnostics}()},
+\code{\link{ferx_cor_matrix}()},
+\code{\link{ferx_estimates}()},
+\code{\link{ferx_eta_cov}()},
+\code{\link{ferx_trace}()},
+\code{\link{summary.ferx_fit}()}
+}
+\concept{diagnostics}

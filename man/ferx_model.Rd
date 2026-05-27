@@ -114,4 +114,16 @@ ferx_model(ex$data, ex$model) |>
 \seealso{
 \code{\link{ferx_set_section}}, \code{\link{ferx_get_section}},
 \code{\link{ferx_fit}}, \code{\link{ferx_check_init}}
+
+Other model-editing: 
+\code{\link{ferx_get_section}()},
+\code{\link{ferx_model_edit}()},
+\code{\link{ferx_model_inspect}()},
+\code{\link{ferx_model_new}()},
+\code{\link{ferx_model_section}()},
+\code{\link{ferx_model_set_section}()},
+\code{\link{ferx_model_show}()},
+\code{\link{ferx_model_validate}()},
+\code{\link{ferx_set_section}()}
 }
+\concept{model-editing}

@@ -84,6 +84,7 @@
 #' @seealso [ferx_fit()] for the inline SIR option (`sir = TRUE`),
 #'   [ferx_simulate_with_uncertainty()] for downstream consumption of the
 #'   retained resamples.
+#' @family fitting
 #' @export
 ferx_sir <- function(fit,
                      sir_samples = 1000L,

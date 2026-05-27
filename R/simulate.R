@@ -21,6 +21,7 @@
 #' sim <- ferx_simulate(ex$model, ex$data, n_sim = 10L, seed = 1L, fit = fit)
 #' head(sim)
 #'
+#' @family simulation
 #' @export
 ferx_simulate <- function(model, data, n_sim = 1L, seed = 42L, fit = NULL) {
   stopifnot(file.exists(model), file.exists(data))
@@ -64,6 +65,7 @@ ferx_simulate <- function(model, data, n_sim = 1L, seed = 42L, fit = NULL) {
 #' preds <- ferx_predict(ex$model, ex$data, fit = fit)
 #' head(preds)
 #'
+#' @family simulation
 #' @export
 ferx_predict <- function(model, data, fit = NULL) {
   stopifnot(file.exists(model), file.exists(data))
@@ -168,6 +170,7 @@ validate_fit_for_params <- function(fit) {
 #'                   FUN = function(x) quantile(x, c(0.05, 0.5, 0.95)))
 #' }
 #'
+#' @family simulation
 #' @export
 ferx_simulate_with_uncertainty <- function(model, data, fit,
                                            n_uncertainty_draws = 100L,

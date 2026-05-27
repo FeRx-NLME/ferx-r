@@ -25,4 +25,13 @@ if (!is.null(fit$cov_matrix)) ferx_cor_matrix(fit)
 }
 \seealso{
 \code{\link{ferx_estimates}} for SEs and \\%RSE.
+
+Other diagnostics: 
+\code{\link{check_diagnostics}()},
+\code{\link{ferx_estimates}()},
+\code{\link{ferx_eta_cov}()},
+\code{\link{ferx_plot_trace}()},
+\code{\link{ferx_trace}()},
+\code{\link{summary.ferx_fit}()}
 }
+\concept{diagnostics}

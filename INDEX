@@ -1,0 +1,38 @@
+ferx                            Nonlinear Mixed Effects Modeling with Rust Backend
+
+-- Fitting --
+ferx_fit                        Fit an NLME model (FOCE/FOCEI/GN/SAEM/IMP)
+ferx_check_init                 Diagnose initial parameter values before a fit
+ferx_inits_from_nca             Suggest starting values from NCA pooling
+ferx_sir                        Sampling Importance Resampling for parameter uncertainty
+
+-- Simulation and prediction --
+ferx_simulate                   Simulate observations from a model (and optional fit)
+ferx_predict                    Population/individual predictions on a dataset
+ferx_simulate_with_uncertainty  Simulate with parameter uncertainty (cov matrix or SIR)
+
+-- Model editing --
+ferx_model                      Construct a ferx_model object from model + data
+ferx_model_new                  Create a new model file from a bundled template
+ferx_model_show                 Pretty-print a .ferx model file
+ferx_model_edit                 Copy a model file for editing
+ferx_model_section              Read a section from a .ferx file
+ferx_model_set_section          Replace a section in a .ferx file on disk
+ferx_get_section                Read a section from a ferx_model object
+ferx_set_section                Replace a section in a ferx_model object
+ferx_model_validate             Validate a .ferx model file (parser + structural checks)
+ferx_model_inspect              Inspect a compiled model (parameters, ETAs, error model)
+
+-- Diagnostics and output --
+summary.ferx_fit                Summary of a ferx_fit
+ferx_estimates                  Tidy data frame of parameter estimates and uncertainties
+ferx_cor_matrix                 Correlation matrix from the fit covariance
+ferx_eta_cov                    Test ETAs against covariates
+check_diagnostics               Residual / ETA diagnostic checks
+ferx_trace                      Iteration-by-iteration optimizer trace
+ferx_plot_trace                 Quick base-R plot of the optimizer trace
+
+-- Utilities --
+ferx_example                    Paths to bundled example models and data
+ferx_save_fit                   Save a ferx_fit to a .fitrx archive
+ferx_load_fit                   Load a ferx_fit from a .fitrx archive

@@ -888,6 +888,7 @@
 #' }
 #'
 #' @param ... Reserved for future use. Unrecognised arguments raise an error.
+#' @family fitting
 #' @export
 ferx_fit <- function(model, data = NULL,
                      method = "focei",
@@ -2032,6 +2033,7 @@ print.ferx_fit <- function(x, ...) {
 #'   settings = list(optimizer = "slsqp", max_iter = 200L))
 #' summary(fit_custom)
 #' }
+#' @family diagnostics
 #' @export
 summary.ferx_fit <- function(object, ...) {
   x <- object

@@ -42,4 +42,16 @@ ferx_model_set_section("my_model.ferx", "parameters", lines)
 \seealso{
 \code{\link{ferx_model_section}}, \code{\link{ferx_model_show}},
 \code{\link{ferx_model_new}}
+
+Other model-editing: 
+\code{\link{ferx_get_section}()},
+\code{\link{ferx_model}()},
+\code{\link{ferx_model_edit}()},
+\code{\link{ferx_model_inspect}()},
+\code{\link{ferx_model_new}()},
+\code{\link{ferx_model_section}()},
+\code{\link{ferx_model_show}()},
+\code{\link{ferx_model_validate}()},
+\code{\link{ferx_set_section}()}
 }
+\concept{model-editing}

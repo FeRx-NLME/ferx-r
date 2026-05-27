@@ -27,3 +27,9 @@ preds <- ferx_predict(ex$model, ex$data, fit = fit)
 head(preds)
 
 }
+\seealso{
+Other simulation: 
+\code{\link{ferx_simulate}()},
+\code{\link{ferx_simulate_with_uncertainty}()}
+}
+\concept{simulation}

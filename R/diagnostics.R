@@ -29,6 +29,7 @@
 #' diag$autocorrelation
 #' diag$shrinkage
 #' }
+#' @family diagnostics
 #' @export
 check_diagnostics <- function(fit) {
   # Autocorrelation
@@ -92,6 +93,7 @@ check_diagnostics <- function(fit) {
 #' ex  <- ferx_example("warfarin")
 #' fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = TRUE)
 #' if (!is.null(fit$cov_matrix)) ferx_cor_matrix(fit)
+#' @family diagnostics
 #' @export
 ferx_cor_matrix <- function(fit) {
   if (is.null(fit$cov_matrix)) {
@@ -133,6 +135,7 @@ ferx_cor_matrix <- function(fit) {
 #' fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
 #' obs <- read.csv(ex$data)
 #' ferx_eta_cov(fit, obs)
+#' @family diagnostics
 #' @export
 ferx_eta_cov <- function(fit, data) {
   if (is.null(fit$ebe_etas) || !is.data.frame(fit$ebe_etas)) {
@@ -252,6 +255,7 @@ ferx_eta_cov <- function(fit, data) {
 #' ex  <- ferx_example("warfarin")
 #' fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
 #' ferx_estimates(fit)
+#' @family diagnostics
 #' @export
 ferx_estimates <- function(fit) {
   rows <- list()

@@ -37,4 +37,13 @@ ferx_estimates(fit)
 }
 \seealso{
 \code{\link{ferx_cor_matrix}} for parameter correlations.
+
+Other diagnostics: 
+\code{\link{check_diagnostics}()},
+\code{\link{ferx_cor_matrix}()},
+\code{\link{ferx_eta_cov}()},
+\code{\link{ferx_plot_trace}()},
+\code{\link{ferx_trace}()},
+\code{\link{summary.ferx_fit}()}
 }
+\concept{diagnostics}

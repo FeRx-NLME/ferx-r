@@ -101,6 +101,7 @@
 #'
 #' @seealso \code{\link{ferx_set_section}}, \code{\link{ferx_get_section}},
 #'   \code{\link{ferx_fit}}, \code{\link{ferx_check_init}}
+#' @family model-editing
 #' @export
 ferx_model <- function(data = NULL, model) {
   # Backwards-compat shim: in earlier versions the signature was
@@ -204,6 +205,7 @@ print.ferx_model <- function(x, ...) {
 #' }
 #'
 #' @seealso \code{\link{ferx_model_set_section}}, \code{\link{ferx_get_section}}
+#' @family model-editing
 #' @export
 ferx_set_section <- function(x, section, lines) {
   if (inherits(x, "ferx_model")) {
@@ -267,6 +269,7 @@ ferx_set_section <- function(x, section, lines) {
 #' }
 #'
 #' @seealso \code{\link{ferx_model_section}}, \code{\link{ferx_set_section}}
+#' @family model-editing
 #' @export
 ferx_get_section <- function(x, section) {
   if (inherits(x, "ferx_model")) {
@@ -290,6 +293,7 @@ ferx_get_section <- function(x, section) {
 #' ferx_model_show(ex$model)
 #'
 #' @seealso \code{\link{ferx_model_edit}}, \code{\link{ferx_example}}
+#' @family model-editing
 #' @export
 ferx_model_show <- function(path) {
   if (!file.exists(path)) stop("File not found: ", path)
@@ -355,6 +359,7 @@ ferx_model_show <- function(path) {
 #'
 #' @seealso \code{\link{ferx_model_show}}, \code{\link{ferx_model_new}},
 #'   \code{\link{ferx_example}}
+#' @family model-editing
 #' @export
 ferx_model_edit <- function(path, dest = ".", overwrite = FALSE, save_as = NULL,
                             .editor = utils::file.edit) {
@@ -446,6 +451,7 @@ ferx_section_headers <- function(lines) {
 #'
 #' @seealso \code{\link{ferx_model_show}}, \code{\link{ferx_model_edit}},
 #'   \code{\link{ferx_model_set_section}}
+#' @family model-editing
 #' @export
 ferx_model_section <- function(path, section, strip = FALSE) {
   if (!file.exists(path)) stop("File not found: ", path)
@@ -504,6 +510,7 @@ ferx_model_section <- function(path, section, strip = FALSE) {
 #'
 #' @seealso \code{\link{ferx_model_section}}, \code{\link{ferx_model_show}},
 #'   \code{\link{ferx_model_new}}
+#' @family model-editing
 #' @export
 ferx_model_set_section <- function(path, section, lines) {
   if (!file.exists(path)) stop("File not found: ", path)
@@ -569,6 +576,7 @@ ferx_model_set_section <- function(path, section, lines) {
 #'
 #' @seealso \code{\link{ferx_model_edit}}, \code{\link{ferx_model_show}},
 #'   \code{\link{ferx_model_set_section}}
+#' @family model-editing
 #' @export
 ferx_model_new <- function(path = NULL, template = "1cpt_oral",
                             overwrite = FALSE, edit = TRUE, print = FALSE) {
@@ -965,7 +973,8 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
 #' Parses a \code{.ferx} model file using the Rust engine and checks for
 #' required sections, without running the optimizer. Useful for catching
 #' syntax errors and missing sections before committing to a long estimation
-#' run.
+#' run. This is the in-R counterpart to the \code{ferx check} CLI shipped
+#' with ferx-core and shares the same parser and structural diagnostics.
 #'
 #' @param path Path to a \code{.ferx} model file. The file must exist and have
 #'   a \code{.ferx} extension; otherwise an error is raised (these are caller
@@ -1006,6 +1015,7 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
 #' }
 #'
 #' @seealso \code{\link{ferx_model_inspect}}, \code{\link{ferx_model_show}}
+#' @family model-editing
 #' @export
 ferx_model_validate <- function(path) {
   if (!file.exists(path)) stop("File not found: ", path)
@@ -1078,7 +1088,20 @@ ferx_model_validate <- function(path) {
 #'   (character vector of population parameter names), \code{model_type}
 #'   (short label such as \code{"1-cpt oral"} or \code{NULL} when not
 #'   unambiguously detectable), \code{iiv} (omega names), \code{iov}
-#'   (kappa names), and \code{residual} (error type).
+#'   (kappa names), and \code{residual} (error type). For multi-endpoint
+#'   (per-CMT) error models, \code{residual} is reported as a string of
+#'   the form \code{"per-CMT (CMT2=proportional, CMT3=additive)"}; for
+#'   combined error models it is \code{c("proportional", "additive")}.
+#'
+#' @section Model DSL features detected:
+#' \code{ferx_model_inspect()} reflects the parser's view of a
+#' \code{.ferx} file. Recently added DSL features that surface here
+#' include multi-endpoint residual error (per-CMT \code{[error_model]}),
+#' the \code{[scaling]} block for unit conversion / ODE readout (see
+#' \code{NEWS.md} for Form A/B/C details), and inter-occasion variability
+#' via \code{kappa_*} declarations. Steady-state dosing (\code{SS}/\code{II}
+#' columns) is a data-side feature and is documented under
+#' \code{\link{ferx_fit}}.
 #'
 #' @examples
 #' ex <- ferx_example("warfarin")
@@ -1093,6 +1116,7 @@ ferx_model_validate <- function(path) {
 #'
 #' @seealso \code{\link{ferx_model_show}}, \code{\link{ferx_model_edit}},
 #'   \code{\link{ferx_fit}}
+#' @family model-editing
 #' @export
 ferx_model_inspect <- function(path) {
   if (inherits(path, "ferx_fit")) {

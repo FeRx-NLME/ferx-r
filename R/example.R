@@ -99,6 +99,7 @@
 #' file.edit(system.file("examples", "ex_warfarin_dcm.R", package = "ferx"))
 #' }
 #'
+#' @family utilities
 #' @export
 ferx_example <- function(name = NULL) {
   models_dir <- system.file("examples", "models", package = "ferx")
