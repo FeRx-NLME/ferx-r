@@ -45,6 +45,12 @@ fit <- ferx_fit(ex$model, ex$data,
 The examples below run live against this fit, so the numeric outputs stay in
 sync with the package and the bundled warfarin dataset.
 
+This chunk uses `message = FALSE, warning = FALSE` to keep the rendered
+output tidy. The same fit run interactively prints a model-file
+method-override warning (the bundled model file specifies `method = foce`
+while the call overrides to `gn`) and a few diagnostic notes; both are
+expected.
+
 ---
 
 ## Population prediction
@@ -91,19 +97,12 @@ unique(sim$SIM)
 A common diagnostic is a per-time prediction interval over the simulated
 replicates. With `n_sim = 100` and base aggregation:
 
-```{r vpc, eval = FALSE}
+```{r vpc}
 sim <- ferx_simulate(ex$model, ex$data, n_sim = 100L, seed = 1L, fit = fit)
 
 pi <- aggregate(DV_SIM ~ TIME, data = sim,
                 FUN = function(x) quantile(x, c(0.05, 0.5, 0.95)))
 head(pi)
-#>   TIME DV_SIM.5% DV_SIM.50% DV_SIM.95%
-#> 1  0.5  1.722816   4.035638   8.355966
-#> 2  1.0  3.183157   6.773509  11.451650
-#> 3  2.0  5.555958   9.734206  13.054238
-#> 4  4.0  8.371048  11.408090  13.834516
-#> 5  8.0  9.616953  11.337663  13.268086
-#> 6 12.0  9.221792  10.715382  12.470054
 ```
 
 To draw a visual predictive check with ggplot2 you would unpack the matrix
@@ -159,7 +158,7 @@ Two uncertainty sources are supported:
 The return value has the same column set as `ferx_simulate()`, but `DRAW` now
 ranges over 1..`n_uncertainty_draws`:
 
-```{r sim-unc, eval = FALSE}
+```{r sim-unc}
 sims <- ferx_simulate_with_uncertainty(
   ex$model, ex$data, fit,
   n_uncertainty_draws = 5L,
@@ -167,22 +166,13 @@ sims <- ferx_simulate_with_uncertainty(
   seed                = 1L
 )
 head(sims)
-#>   DRAW SIM ID TIME     IPRED    DV_SIM
-#> 1    1   1  1  0.5  4.304992  4.259951
-#> 2    1   1  1  1.0  7.313132  7.408912
-#> 3    1   1  1  2.0 10.827313 10.718364
-#> 4    1   1  1  4.0 13.042761 13.197373
-#> 5    1   1  1  8.0 12.568896 12.410489
-#> 6    1   1  1 12.0 11.337537 11.548863
-
-nrow(sims)
-#> [1] 1100   # 5 draws * 2 sims/draw * 110 obs
+nrow(sims)            # n_uncertainty_draws * n_sim_per_draw * n_obs
 ```
 
 The row count is `n_uncertainty_draws * n_sim_per_draw * n_obs`. For an
 uncertainty-aware prediction interval, aggregate over all rows at each `TIME`:
 
-```{r sim-unc-pi, eval = FALSE}
+```{r sim-unc-pi}
 pi_unc <- aggregate(DV_SIM ~ TIME, data = sims,
                     FUN = function(x) quantile(x, c(0.05, 0.5, 0.95)))
 head(pi_unc)
