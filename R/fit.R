@@ -138,7 +138,10 @@
 #'   not have a dedicated \code{ferx_fit()} argument, without needing a new
 #'   wrapper release for each option. Recognized keys include SAEM
 #'   (\code{n_exploration}, \code{n_convergence}, \code{n_mh_steps},
-#'   \code{adapt_interval}, \code{seed}; and \code{n_leapfrog} /
+#'   \code{adapt_interval}, \code{omega_burnin}: initial iterations during
+#'   which Omega is held fixed while the sampler warms up (default 20,
+#'   guards against Omega collapse on sparse data); \code{seed}; and
+#'   \code{n_leapfrog} /
 #'   \code{saem_n_leapfrog}: integer leapfrog steps for HMC proposals,
 #'   default 0 = Metropolis-Hastings; positive value uses one HMC proposal
 #'   per subject per iteration, requires AD build, see examples below),
@@ -588,6 +591,7 @@
 #'   n_exploration = 200,
 #'   n_convergence = 400,
 #'   n_mh_steps    = 3,
+#'   omega_burnin  = 20L,
 #'   seed          = 42L
 #' ))
 #'
