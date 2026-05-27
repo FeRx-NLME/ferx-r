@@ -17,8 +17,6 @@ ferx_fit(
   gradient = c("auto", "ad", "fd"),
   optimizer_trace = FALSE,
   scale_params = FALSE,
-  max_unconverged_frac = NULL,
-  min_obs_for_convergence_check = NULL,
   inits_from_nca = FALSE,
   settings = NULL,
   output = NULL,
@@ -160,17 +158,6 @@ e.g. to A/B the scaled vs unscaled trajectory on a specific model. When
 enabled it applies to all outer optimizers: NLopt FOCE/FOCEI (BOBYQA,
 SLSQP, L-BFGS, MMA), the hand-rolled BFGS, Gauss-Newton / BHHH, and the
 SAEM M-step.}
-
-\item{max_unconverged_frac}{Numeric scalar in [0, 1] or \code{NULL}
-(default). When non-\code{NULL}, the fit is flagged as converged even if
-up to this fraction of subjects failed their inner EBE loop, instead of
-raising an error. Useful for large datasets with a handful of difficult
-subjects.}
-
-\item{min_obs_for_convergence_check}{Integer or \code{NULL} (default).
-Minimum number of observations a subject must have before its inner-loop
-convergence is included in the \code{max_unconverged_frac} check. Subjects
-with fewer observations are excluded from the check.}
 
 \item{inits_from_nca}{Derive NCA-based starting values from the data before
 the optimizer runs, overriding the model file's defaults. Either a logical
@@ -685,6 +672,21 @@ ferx_fit(m, d, settings = list(
 ferx_fit(m, d, settings = list(
   optimizer          = "trust_region",
   steihaug_max_iters = 100L
+))
+}
+
+\strong{Convergence tolerance for difficult subjects:}
+
+\code{max_unconverged_frac} (numeric in [0, 1]) flags the fit as converged
+even if up to this fraction of subjects failed their inner EBE loop, instead
+of raising an error - useful for large datasets with a handful of difficult
+subjects. \code{min_obs_for_convergence_check} (non-negative integer) is the
+minimum number of observations a subject must have before its inner-loop
+convergence counts toward that fraction; sparser subjects are excluded.
+\preformatted{
+ferx_fit(m, d, settings = list(
+  max_unconverged_frac          = 0.1,
+  min_obs_for_convergence_check = 2L
 ))
 }
 
