@@ -36,12 +36,14 @@ model before fitting, but the post-fit case is the common one.
 
 ## Setup
 
-```{r setup-fit, eval = FALSE}
+```{r setup-fit, message = FALSE, warning = FALSE}
 ex  <- ferx_example("warfarin")
-fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = TRUE)
+fit <- ferx_fit(ex$model, ex$data,
+                method = "gn", covariance = TRUE, verbose = FALSE)
 ```
 
-The examples below assume `ex` and `fit` are in scope.
+The examples below run live against this fit, so the numeric outputs stay in
+sync with the package and the bundled warfarin dataset.
 
 ---
 
@@ -51,16 +53,9 @@ The examples below assume `ex` and `fit` are in scope.
 typical-value prediction (eta = 0) for each subject's covariates and dosing
 record:
 
-```{r predict, eval = FALSE}
+```{r predict}
 pred <- ferx_predict(ex$model, ex$data, fit = fit)
 head(pred)
-#>   ID TIME      PRED
-#> 1  1  0.5  4.083326
-#> 2  1  1.0  6.842694
-#> 3  1  2.0  9.930368
-#> 4  1  4.0 11.771746
-#> 5  1  8.0 11.553212
-#> 6  1 12.0 10.810149
 ```
 
 Without `fit =`, the `[parameters]` block's initial estimates are used. The
@@ -82,21 +77,11 @@ observations for each replicate. Each row carries:
 | `IPRED` | Individual prediction (using the drawn eta) |
 | `DV_SIM`| Simulated observation (IPRED plus residual error) |
 
-```{r simulate, eval = FALSE}
+```{r simulate}
 sim <- ferx_simulate(ex$model, ex$data, n_sim = 3L, seed = 1L, fit = fit)
 head(sim)
-#>   DRAW SIM ID TIME     IPRED    DV_SIM
-#> 1    1   1  1  0.5  3.566685  3.543429
-#> 2    1   1  1  1.0  6.037146  5.978719
-#> 3    1   1  1  2.0  8.895675  9.077145
-#> 4    1   1  1  4.0 10.700945 10.683510
-#> 5    1   1  1  8.0 10.468944 10.517356
-#> 6    1   1  1 12.0  9.654178  9.659524
-
 nrow(sim)            # n_sim * n_obs
-#> [1] 330
 unique(sim$SIM)
-#> [1] 1 2 3
 ```
 
 `seed` makes the draws reproducible across runs.
@@ -168,8 +153,8 @@ Two uncertainty sources are supported:
 
 | `method` | Requires | Sampling |
 |---|---|---|
-| `"asymptotic"` (default) | `fit$cov_matrix` (i.e. `ferx_fit(..., covariance = TRUE)`) | MVN draws in the engine's packed (log-theta, Cholesky-omega, log-sigma) space |
-| `"sir"` | `fit$sir_resamples` (i.e. `ferx_fit(..., sir = TRUE, settings = list(sir_keep_samples = TRUE))`) | Resampling with replacement from the stored SIR resamples |
+| `"asymptotic"` (default) | `fit$cov_matrix` (i.e. `ferx_fit(..., covariance = TRUE)`) | Multivariate-normal draws around the ML estimate, using the fit's covariance matrix as the proposal. Internally the engine works in a packed (log-theta, Cholesky-omega, log-sigma) parameterisation so the draws respect positivity and PSD constraints. |
+| `"sir"` | `fit$sir_resamples` (i.e. `ferx_fit(..., sir = TRUE, settings = list(sir_keep_samples = TRUE))`) | Resampling with replacement from the stored SIR resamples - importance-weighted draws that better reflect the true likelihood when the asymptotic approximation is poor. |
 
 The return value has the same column set as `ferx_simulate()`, but `DRAW` now
 ranges over 1..`n_uncertainty_draws`:
