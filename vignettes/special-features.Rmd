@@ -71,18 +71,20 @@ fit_iov$omega_iov
 #> KAPPA_CL 0.04679037
 
 ferx_estimates(fit_iov)
-#>     param    transform   estimate ... init_as_sd
-#>      TVCL     identity 0.17003443 ...      FALSE
-#>       TVV     identity 8.62276910 ...      FALSE
-#>      TVKA     identity 1.16618408 ...      FALSE
-#>    ETA_CL     variance 0.03849065 ...      FALSE
-#>     ETA_V     variance 0.01227511 ...      FALSE
-#>    ETA_KA     variance 0.06600358 ...      FALSE
-#>  PROP_ERR proportional 0.17643369 ...       TRUE
-#>  KAPPA_CL     variance 0.04679037 ...      FALSE
-# Output captured from a real focei fit (covariance = FALSE, hence the
-# NA SE/CI columns elided here). KAPPA_CL is the IOV omega element on
-# the kappa diagonal.
+#>     param    transform   estimate se rse_pct lower_95 upper_95 estimate_natural lower_95_natural upper_95_natural init_as_sd
+#>      TVCL     identity 0.17003443 NA      NA       NA       NA               NA               NA               NA      FALSE
+#>       TVV     identity 8.62276910 NA      NA       NA       NA               NA               NA               NA      FALSE
+#>      TVKA     identity 1.16618408 NA      NA       NA       NA               NA               NA               NA      FALSE
+#>    ETA_CL     variance 0.03849065 NA      NA       NA       NA               NA               NA               NA      FALSE
+#>     ETA_V     variance 0.01227511 NA      NA       NA       NA               NA               NA               NA      FALSE
+#>    ETA_KA     variance 0.06600358 NA      NA       NA       NA               NA               NA               NA      FALSE
+#>  PROP_ERR proportional 0.17643369 NA      NA       NA       NA               NA               NA               NA       TRUE
+#>  KAPPA_CL     variance 0.04679037 NA      NA       NA       NA               NA               NA               NA      FALSE
+# Output captured from a real focei fit with covariance = FALSE, hence
+# the NA SE/CI columns. KAPPA_CL appears as the last row, alongside
+# the other variance-scale entries. Kept eval = FALSE because the
+# focei fit takes ~38 s on this example - too slow for the vignette
+# build.
 ```
 
 The IOV print labels follow the bare-name convention: `KAPPA_CL` is the
