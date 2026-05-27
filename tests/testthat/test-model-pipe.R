@@ -3,7 +3,7 @@
 #   print.ferx_model() — console summary
 #   ferx_set_section() — pipe-friendly section replacement
 #   ferx_get_section() — pipe-friendly section display
-#   ferx_fit()         — ferx_fit.ferx_model dispatch
+#   ferx_fit()         — ferx_model dispatch (inline, see #52)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -316,7 +316,7 @@ test_that("pipe chain: ferx_model() |> ferx_get_section() |> ferx_set_section() 
 })
 
 # ---------------------------------------------------------------------------
-# Block 6 — ferx_fit.ferx_model dispatch
+# Block 6 — ferx_fit() dispatch on a ferx_model object
 #
 # Both call forms must produce identical results:
 #   ferx_fit("my_model.ferx", data = "data.csv")          # path style
@@ -371,6 +371,30 @@ test_that("ferx_fit() errors with clear message when ferx_model has no data and 
   expect_error(
     ferx_model(model = path) |> ferx_fit(verbose = FALSE),
     regexp = "data"
+  )
+})
+
+test_that("ferx_fit() exposes all estimation arguments in its formals (#52)", {
+  # The whole point of dropping the S3 generic: IDE argument completion and
+  # inline help introspect formals(ferx_fit), which previously showed only
+  # model/data/... and hid every real option from the user.
+  fmls <- names(formals(ferx_fit))
+  expect_true(all(c(
+    "model", "data", "method", "covariance", "verbose", "bloq_method",
+    "threads", "mu_referencing", "sir", "gradient", "optimizer_trace",
+    "scale_params", "max_unconverged_frac", "min_obs_for_convergence_check",
+    "inits_from_nca", "settings", "output", "include_data"
+  ) %in% fmls))
+  # No longer an S3 generic: the .default / .ferx_model methods are gone.
+  expect_false(exists("ferx_fit.default"))
+  expect_false(exists("ferx_fit.ferx_model"))
+})
+
+test_that("ferx_fit() rejects unrecognised arguments instead of silently ignoring them", {
+  ex <- ferx_example("warfarin")
+  expect_error(
+    ferx_fit(ex$model, ex$data, methdo = "focei"),
+    regexp = "unused argument"
   )
 })
 

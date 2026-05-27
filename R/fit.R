@@ -881,27 +881,9 @@
 #' # interpretability heuristics and comparison against a no-covariate baseline.
 #' }
 #'
-#' @param ... Arguments passed to \code{ferx_fit.default} (e.g.
-#'   \code{method}, \code{covariance}, \code{verbose}, \code{settings}).
+#' @param ... Reserved for future use. Unrecognised arguments raise an error.
 #' @export
-#' @rdname ferx_fit
-ferx_fit <- function(model, data = NULL, ...) UseMethod("ferx_fit")
-
-#' @export
-#' @rdname ferx_fit
-ferx_fit.ferx_model <- function(model, data = model$data, ...) {
-  if (is.null(data)) {
-    stop(
-      "No data path supplied. Either pass `data` to ferx_fit() ",
-      "or include it in ferx_model()."
-    )
-  }
-  ferx_fit.default(model$model, data, ...)
-}
-
-#' @export
-#' @rdname ferx_fit
-ferx_fit.default <- function(model, data, ...,
+ferx_fit <- function(model, data = NULL,
                      method = "focei",
                      covariance = TRUE,
                      verbose = TRUE,
@@ -917,11 +899,37 @@ ferx_fit.default <- function(model, data, ...,
                      inits_from_nca = FALSE,
                      settings = NULL,
                      output = NULL,
-                     include_data = FALSE) {
-  # `...` is positioned before the named args so the S3 method signature is
-  # consistent with the `ferx_fit(model, data, ...)` generic (otherwise R CMD
-  # check fires `checking S3 generic/method consistency`). All call sites
-  # pass `method`, `settings`, etc. by name, so the change is source-compatible.
+                     include_data = FALSE,
+                     ...) {
+  # `ferx_fit()` is a plain function (not an S3 generic) so that IDE argument
+  # completion and inline help surface every argument - an S3 generic only
+  # exposes `model`, `data`, and `...`, hiding the real options from the user
+  # (see issue #52). Dispatch on the `model` type is handled inline below:
+  # `model` may be a path to a `.ferx` file or a `ferx_model` object produced
+  # by `ferx_model()` (the pipe style, where `data` defaults to the path stored
+  # in the object).
+  if (inherits(model, "ferx_model")) {
+    if (is.null(data)) data <- model$data
+    if (is.null(data)) {
+      stop(
+        "No data path supplied. Either pass `data` to ferx_fit() ",
+        "or include it in ferx_model()."
+      )
+    }
+    model <- model$model
+  }
+  # Guard against silently swallowed typos: any leftover `...` argument is an
+  # unrecognised name, not a value forwarded anywhere.
+  extra <- list(...)
+  if (length(extra) > 0L) {
+    nms <- names(extra)
+    nms <- if (is.null(nms)) rep("", length(extra)) else nms
+    labels <- ifelse(nzchar(nms), nms, "<unnamed>")
+    stop(
+      "unused argument(s) passed to ferx_fit(): ",
+      paste(labels, collapse = ", ")
+    )
+  }
   gradient <- match.arg(gradient)
   if (is.null(data)) {
     stop("`data` is required. Pass a path to a NONMEM CSV file.")

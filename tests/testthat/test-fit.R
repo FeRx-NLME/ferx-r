@@ -104,11 +104,11 @@ test_that("errors on missing model file", {
 })
 
 test_that("method = 'imp' passes the ferx_fit validation step", {
-  # Tier 1: validate that the method-normalisation block in `ferx_fit.default`
+  # Tier 1: validate that the method-normalisation block in `ferx_fit()`
   # accepts the new `imp` token (single or chained, plus documented aliases)
   # without erroring. The actual IMP run is exercised in the integration tests
   # once the engine supports it; here we only cover the R-side allowlist + the
-  # IMP alias fold. Mirrors the logic in `R/fit.R::ferx_fit.default`.
+  # IMP alias fold. Mirrors the logic in `R/fit.R::ferx_fit()`.
   normalize <- function(m) {
     vapply(
       m,

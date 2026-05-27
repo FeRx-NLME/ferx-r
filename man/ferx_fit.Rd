@@ -2,18 +2,11 @@
 % Please edit documentation in R/fit.R
 \name{ferx_fit}
 \alias{ferx_fit}
-\alias{ferx_fit.ferx_model}
-\alias{ferx_fit.default}
 \title{Fit a nonlinear mixed effects model}
 \usage{
-ferx_fit(model, data = NULL, ...)
-
-\method{ferx_fit}{ferx_model}(model, data = model$data, ...)
-
-\method{ferx_fit}{default}(
+ferx_fit(
   model,
-  data,
-  ...,
+  data = NULL,
   method = "focei",
   covariance = TRUE,
   verbose = TRUE,
@@ -29,7 +22,8 @@ ferx_fit(model, data = NULL, ...)
   inits_from_nca = FALSE,
   settings = NULL,
   output = NULL,
-  include_data = FALSE
+  include_data = FALSE,
+  ...
 )
 }
 \arguments{
@@ -42,9 +36,6 @@ SS > 0), SS (steady-state flag: 1 = pre-dose at steady state, 2 = add SS
 concentration to current state), CENS (BLOQ flag for M3 method), OCC
 (occasion index for IOV), and any covariate columns referenced in the
 model. See the steady-state section below for SS/II details.}
-
-\item{...}{Arguments passed to \code{ferx_fit.default} (e.g.
-\code{method}, \code{covariance}, \code{verbose}, \code{settings}).}
 
 \item{method}{Estimation method(s). Either a single string or a character
 vector of methods to run in sequence. Each stage is seeded with the
@@ -241,6 +232,8 @@ reference in the ferx-core docs for the on-disk schema.}
 \code{TRUE}, embeds the input \code{data} CSV verbatim inside the
 \code{.fitrx} bundle so the file is self-contained. Default
 \code{FALSE}.}
+
+\item{...}{Reserved for future use. Unrecognised arguments raise an error.}
 }
 \value{
 A list with components:
