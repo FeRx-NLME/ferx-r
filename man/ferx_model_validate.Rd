@@ -4,19 +4,28 @@
 \alias{ferx_model_validate}
 \title{Validate a ferx model file for syntax and structural errors}
 \usage{
-ferx_model_validate(path)
+ferx_model_validate(path, data = NULL)
 }
 \arguments{
 \item{path}{Path to a \code{.ferx} model file. The file must exist and have
 a \code{.ferx} extension; otherwise an error is raised (these are caller
 errors, not validation failures).}
+
+\item{data}{Optional path to a NONMEM-format CSV. When supplied, the engine
+additionally runs data-dependent checks (covariate columns present,
+per-CMT scaling/error-model coverage, steady-state II sanity, lagtime
+signs). \code{NULL} runs the model-only checks.}
 }
 \value{
-\code{TRUE} if the model file is structurally valid (all required
-sections present and the Rust parser accepts it), \code{FALSE} otherwise,
-invisibly. The function always prints a report to the console. Note that
-a missing file or non-\code{.ferx} extension raises an error rather than
-returning \code{FALSE} - pass an existing \code{.ferx} path.
+Invisibly returns a list with \code{ok} (logical), \code{model},
+\code{data}, and a \code{diagnostics} data frame with one row per finding
+(\code{severity}, \code{code}, \code{message}, \code{block}, \code{line},
+\code{suggestion}). The function always prints a report to the console.
+Codes are stable identifiers (\code{E_*} for errors, \code{W_*} for
+warnings) suitable for programmatic handling - the registry lives in
+ferx-core's \code{docs/src/file-formats/check-report.md}. A missing file
+or non-\code{.ferx} extension raises an error rather than returning a
+failed diagnostic.
 }
 \description{
 Parses a \code{.ferx} model file using the Rust engine and checks for
@@ -26,9 +35,17 @@ run. This is the in-R counterpart to the \code{ferx check} CLI shipped
 with ferx-core and shares the same parser and structural diagnostics.
 }
 \examples{
-# Valid model (all required sections present)
+# Valid model
 ex <- ferx_example("warfarin")
 ferx_model_validate(ex$model)
+
+# With data-dependent checks
+ferx_model_validate(ex$model, data = ex$data)
+
+# Inspect findings programmatically
+res <- ferx_model_validate(ex$model)
+res$ok
+res$diagnostics
 
 \dontrun{
 # Invalid model (missing required sections)

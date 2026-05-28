@@ -4,7 +4,7 @@
 \alias{ferx_rust_validate_model}
 \title{Internal Rust backend binding}
 \usage{
-ferx_rust_validate_model(model_path)
+ferx_rust_validate_model(model_path, data_path)
 }
 \description{
 Internal Rust backend binding

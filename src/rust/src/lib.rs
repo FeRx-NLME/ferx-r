@@ -1553,17 +1553,58 @@ fn ferx_rust_autodiff_enabled() -> bool {
     cfg!(feature = "autodiff")
 }
 
-/// Validate a .ferx model file by parsing it without fitting.
+/// Validate a .ferx model file (and optionally its dataset) without fitting.
+///
+/// Runs the parser plus every data-independent check, and — when `data_path`
+/// is non-empty — the data-dependent checks too (covariates, per-CMT
+/// scaling/error-model, steady-state, lagtime). Returns the full
+/// `CheckReport` flattened to R-friendly parallel vectors.
 ///
 /// @param model_path Path to .ferx model file
-/// @return Named list with `ok` (logical), `errors` (character vector)
+/// @param data_path  Path to NONMEM CSV, or `""` to skip data-dependent checks
+/// @return Named list with
+///   * `ok` (logical) — true when no error-severity diagnostics
+///   * `model` (chr) — model file stem
+///   * `data` (chr) — data path used, or `""`
+///   * `severity` / `code` / `message` / `block` / `line` / `suggestion`
+///     — parallel vectors, one entry per diagnostic
 /// @export
 #[extendr]
-fn ferx_rust_validate_model(model_path: &str) -> List {
-    match ferx_core::parser::model_parser::parse_full_model_file(Path::new(model_path)) {
-        Ok(_) => list!(ok = true, errors = Vec::<String>::new()),
-        Err(e) => list!(ok = false, errors = vec![e.to_string()]),
+fn ferx_rust_validate_model(model_path: &str, data_path: &str) -> List {
+    let data_opt: Option<&str> = if data_path.is_empty() { None } else { Some(data_path) };
+    let report = ferx_core::validate_model_file(model_path, data_opt);
+
+    let n = report.diagnostics.len();
+    let mut severity: Vec<String> = Vec::with_capacity(n);
+    let mut code:     Vec<String> = Vec::with_capacity(n);
+    let mut message:  Vec<String> = Vec::with_capacity(n);
+    let mut block:    Vec<String> = Vec::with_capacity(n);
+    let mut line:     Vec<i32>    = Vec::with_capacity(n);
+    let mut suggestion: Vec<String> = Vec::with_capacity(n);
+    for d in &report.diagnostics {
+        severity.push(match d.severity {
+            ferx_core::Severity::Error => "error".to_string(),
+            ferx_core::Severity::Warning => "warning".to_string(),
+        });
+        code.push(d.code.clone());
+        message.push(d.message.clone());
+        block.push(d.block.clone().unwrap_or_default());
+        // 0 sentinel for "no line" — R side maps to NA_integer_.
+        line.push(d.line.map(|l| l as i32).unwrap_or(0));
+        suggestion.push(d.suggestion.clone().unwrap_or_default());
     }
+
+    list!(
+        ok = report.valid,
+        model = report.model,
+        data = report.data.unwrap_or_default(),
+        severity = severity,
+        code = code,
+        message = message,
+        block = block,
+        line = line,
+        suggestion = suggestion,
+    )
 }
 
 /// Derive NCA-based starting values from the data without running a fit.

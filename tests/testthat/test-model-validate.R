@@ -27,10 +27,13 @@ test_that("valid warfarin model prints 'Validating:' header and returns invisibl
   expect_false(res$visible)
 })
 
-test_that("valid model returns TRUE", {
+test_that("valid model returns ok = TRUE", {
   ex  <- ferx_example("warfarin")
   res <- ferx_model_validate(ex$model)
-  expect_true(isTRUE(res))
+  expect_true(isTRUE(res$ok))
+  expect_s3_class(res$diagnostics, "data.frame")
+  expect_named(res$diagnostics,
+               c("severity", "code", "message", "block", "line", "suggestion"))
 })
 
 test_that("valid model: $missing_sections is empty (no missing sections reported)", {
@@ -52,7 +55,7 @@ test_that("model missing a required section returns FALSE", {
                           value = TRUE, invert = TRUE))
   on.exit(unlink(path))
   res <- ferx_model_validate(path)
-  expect_false(isTRUE(res))
+  expect_false(isTRUE(res$ok))
 })
 
 test_that("model missing a required section reports the missing section name", {
@@ -88,7 +91,60 @@ test_that("syntax error in model body returns FALSE and prints errors", {
   path <- write_ferx(lines)
   on.exit(unlink(path))
   res <- ferx_model_validate(path)
-  expect_false(isTRUE(res))
+  expect_false(isTRUE(res$ok))
+})
+
+test_that("data-dependent checks fire only when data is supplied", {
+  # Reference a covariate that is not in the warfarin dataset.
+  lines <- c(
+    "[parameters]",
+    "  theta TVCL(0.134, 0.001, 10.0)",
+    "  omega ETA_CL ~ 0.07",
+    "  sigma PROP_ERR ~ 0.01",
+    "",
+    "[individual_parameters]",
+    "  CL = TVCL * exp(ETA_CL) * (NOT_A_COL / 70)",
+    "",
+    "[structural_model]",
+    "  pk one_cpt_oral(cl=CL, v=10.0, ka=1.0)",
+    "",
+    "[error_model]",
+    "  DV ~ proportional(PROP_ERR)"
+  )
+  path <- write_ferx(lines)
+  on.exit(unlink(path))
+  ex <- ferx_example("warfarin")
+
+  # Without data: the missing-covariate check cannot fire.
+  res_no_data <- ferx_model_validate(path)
+  expect_false(
+    "E_MISSING_COVARIATE" %in% res_no_data$diagnostics$code
+  )
+
+  # With data: the check fires with a stable error code.
+  res_with_data <- ferx_model_validate(path, data = ex$data)
+  expect_false(isTRUE(res_with_data$ok))
+  expect_true("E_MISSING_COVARIATE" %in% res_with_data$diagnostics$code)
+})
+
+test_that("diagnostics carry stable codes and severity labels", {
+  lines <- c(
+    "[parameters]",
+    "  theta !!!BAD!!!",
+    "[individual_parameters]",
+    "  CL = 1.0",
+    "[structural_model]",
+    "  pk one_cpt_oral(cl=CL, v=10.0, ka=1.0)",
+    "[error_model]",
+    "  DV ~ proportional(0.01)"
+  )
+  path <- write_ferx(lines)
+  on.exit(unlink(path))
+  res <- ferx_model_validate(path)
+  expect_false(isTRUE(res$ok))
+  expect_gt(nrow(res$diagnostics), 0L)
+  expect_true(all(res$diagnostics$severity %in% c("error", "warning")))
+  expect_true(all(grepl("^[EW]_", res$diagnostics$code)))
 })
 
 test_that("ferx_model_validate errors on missing file", {
