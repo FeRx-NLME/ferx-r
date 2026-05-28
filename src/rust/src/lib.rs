@@ -965,8 +965,17 @@ fn error_model_to_string(em: ErrorModel) -> &'static str {
 // Residual-error label for `model_structure`. Single-endpoint models report
 // the bare error type ("proportional"); multi-endpoint (per-CMT) models report
 // each compartment's error type, e.g. "per-CMT (CMT2=proportional,
-// CMT3=additive)".
+// CMT3=additive)". Log-transform-both-sides (LTBS) models report
+// "additive (log-transformed)", matching the R-side `.ferx_parse_structure`
+// label so the fit object's `model_structure$residual` survives a `.fitrx`
+// round-trip with the LTBS distinction intact.
 fn residual_label(model: &CompiledModel) -> String {
+    if model.log_transform {
+        // LTBS (`log(DV) ~ additive` / `DV ~ log_additive`): additive error on
+        // the log scale. The engine rejects LTBS with per-CMT, so this is always
+        // the single-endpoint additive case.
+        return "additive (log-transformed)".to_string();
+    }
     match &model.error_spec {
         ErrorSpec::Single(em) => error_model_to_string(*em).to_string(),
         ErrorSpec::PerCmt(map) => {
