@@ -63,8 +63,8 @@ ferx_rust_autodiff_enabled <- function() {
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_validate_model <- function(model_path) {
-  .Call("wrap__ferx_rust_validate_model", model_path)
+ferx_rust_validate_model <- function(model_path, data_path) {
+  .Call("wrap__ferx_rust_validate_model", model_path, data_path)
 }
 
 #' @title Internal Rust backend binding
