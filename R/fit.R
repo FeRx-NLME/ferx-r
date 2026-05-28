@@ -1970,7 +1970,8 @@ print.ferx_fit <- function(x, ...) {
     cat(sprintf("  Wall time:  %.1fs\n", x$wall_time_secs))
   }
   if (!is.null(x$ferx_version)) {
-    cat("  ferx v", x$ferx_version, "\n", sep = "")
+    cat("  ferx v", as.character(utils::packageVersion("ferx")),
+        " (core v", x$ferx_version, ")\n", sep = "")
   }
 
   mfs <- x$model_file_settings %||% list()
@@ -2124,7 +2125,9 @@ print.ferx_summary <- function(x, ...) {
     cat(sprintf("Gradient:  %s (requested) -> %s (used)\n",
                 x$gradient %||% "?", used))
   }
-  cat(sprintf("ferx v%s\n", x$ferx_version %||% "?"))
+  cat(sprintf("ferx v%s (core v%s)\n",
+              as.character(utils::packageVersion("ferx")),
+              x$ferx_version %||% "?"))
 
   if (length(x$model_file_settings) > 0L || length(x$call_settings) > 0L) {
     cat("\nSettings (model file / call-time override):\n")
