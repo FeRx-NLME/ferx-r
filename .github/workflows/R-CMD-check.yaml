@@ -30,6 +30,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Guard against an accidentally-unpinned ferx-core dependency.
+      # src/rust/.cargo/config.toml carries a [patch] that redirects ferx-core
+      # to a sibling ../ferx-core when present (local-dev). If someone bumps
+      # the lock with that patch active, cargo strips the `source = "git+..."`
+      # line — silently unpinning ferx-core for everyone who builds without
+      # the sibling. tools/update-ferx-core-lock.sh exists to do the bump
+      # safely; this guard ensures nobody bypasses it.
+      - name: Verify ferx-core is pinned in Cargo.lock
+        run: |
+          if ! grep -q '^source = "git+https://github.com/FeRx-NLME/ferx-core' src/rust/Cargo.lock; then
+            echo "::error file=src/rust/Cargo.lock::ferx-core lacks a git source pin."
+            echo "Run tools/update-ferx-core-lock.sh to bump it correctly."
+            exit 1
+          fi
+
       - uses: r-lib/actions/setup-r@v2
         with:
           r-version: ${{ matrix.config.r }}
