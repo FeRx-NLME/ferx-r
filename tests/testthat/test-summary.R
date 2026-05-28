@@ -180,6 +180,29 @@ test_that("print.ferx_summary shows SIR ESS when sir_ess is present", {
   expect_true(any(grepl("SIR ESS.*512\\.3", out)))
 })
 
+test_that("print.ferx_summary shows R package version with core version in parens", {
+  s <- summary(make_fake_fit(ferx_version = "0.1.0"))
+  out <- capture.output(print(s))
+  pkg_v <- as.character(utils::packageVersion("ferx"))
+  expect_true(any(grepl(
+    paste0("ferx v", pkg_v, " \\(core v0\\.1\\.0\\)"), out, fixed = FALSE
+  )))
+})
+
+test_that("print.ferx_fit shows R package version with core version in parens", {
+  om <- matrix(0.04, 1, 1, dimnames = list("ETA_CL", "ETA_CL"))
+  fit <- make_fake_fit(
+    ferx_version = "0.1.0",
+    omega = om,
+    sigma = 0.01
+  )
+  out <- capture.output(suppressWarnings(print(fit)))
+  pkg_v <- as.character(utils::packageVersion("ferx"))
+  expect_true(any(grepl(
+    paste0("ferx v", pkg_v, " \\(core v0\\.1\\.0\\)"), out, fixed = FALSE
+  )))
+})
+
 test_that("print.ferx_summary wraps output in dashed borders", {
   s <- summary(make_fake_fit())
   out <- capture.output(print(s))
