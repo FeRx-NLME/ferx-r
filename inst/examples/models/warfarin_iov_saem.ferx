@@ -29,10 +29,12 @@
   DV ~ proportional(PROP_ERR)
 
 [fit_options]
-  method        = saem
-  iov_column    = OCC
-  n_exploration = 150
-  n_convergence = 250
-  n_mh_steps    = 3
-  seed          = 12345
-  covariance    = false
+  method          = saem
+  iov_column      = OCC
+  n_exploration   = 150
+  n_convergence   = 250
+  n_mh_steps      = 3
+  omega_burnin    = 20    # iterations to hold Omega fixed while the sampler warms up
+  adapt_interval  = 10    # MH proposal-scale adaptation cadence
+  seed            = 12345
+  covariance      = false

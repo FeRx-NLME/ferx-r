@@ -11,7 +11,11 @@ fit <- ferx_fit(
   ex$model,
   ex$data,
   method   = "saem",
-  settings = list(n_leapfrog = 3L)
+  settings = list(
+    n_leapfrog     = 3L,
+    omega_burnin   = 30L,  # hold Omega fixed for the first 30 iterations
+    adapt_interval = 10L   # adapt MH/HMC proposal scale every 10 iterations
+  )
 )
 print(fit)
 

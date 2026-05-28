@@ -1,0 +1,35 @@
+# One-compartment oral PK (warfarin) with log-transform-both-sides (LTBS)
+# residual error. Writing `log(DV) ~ additive(SIGMA_LOG)` tells the engine to
+# log-transform observations and predictions and fit additive (normal) error
+# on the log scale. The sigma estimate is on the log scale; under LTBS
+# `sigma` approximates the CV on the natural scale.
+#
+# Equivalent alternative form: `DV ~ log_additive(SIGMA_LOG)` (when DV is
+# already supplied as log-transformed).
+
+[parameters]
+  theta TVCL(0.134, 0.001, 10.0)
+  theta TVV(8.1, 0.1, 500.0)
+  theta TVKA(1.0, 0.01, 50.0)
+
+  omega ETA_CL ~ 0.07
+  omega ETA_V  ~ 0.02
+  omega ETA_KA ~ 0.40
+
+  sigma SIGMA_LOG ~ 0.1 (sd)
+
+[individual_parameters]
+  CL = TVCL * exp(ETA_CL)
+  V  = TVV  * exp(ETA_V)
+  KA = TVKA * exp(ETA_KA)
+
+[structural_model]
+  pk one_cpt_oral(cl=CL, v=V, ka=KA)
+
+[error_model]
+  log(DV) ~ additive(SIGMA_LOG)
+
+[fit_options]
+  method     = focei
+  maxiter    = 300
+  covariance = true

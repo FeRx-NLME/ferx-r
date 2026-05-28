@@ -45,6 +45,12 @@
 #'     inter-occasion variability estimated by SAEM. Identical model to
 #'     \code{warfarin_iov} but uses \code{method = saem}; demonstrates that
 #'     SAEM fully supports IOV kappa parameters.}
+#'   \item{warfarin_ltbs}{One-compartment oral (warfarin) with
+#'     log-transform-both-sides (LTBS) residual error written as
+#'     \code{log(DV) ~ additive(SIGMA_LOG)}. The engine log-transforms
+#'     observations and predictions and fits additive (normal) error on
+#'     the log scale; the residual is reported as
+#'     \code{"additive (log-transformed)"}.}
 #'   \item{warfarin_ss}{One-compartment oral (warfarin) demonstrating
 #'     steady-state dosing. The dose row in the dataset has \code{SS = 1}
 #'     and \code{II = 24} (once-daily interval). The engine resolves
