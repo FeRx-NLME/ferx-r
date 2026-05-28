@@ -1095,10 +1095,13 @@ ferx_model_validate <- function(path) {
 #'   (character vector of population parameter names), \code{model_type}
 #'   (short label such as \code{"1-cpt oral"} or \code{NULL} when not
 #'   unambiguously detectable), \code{iiv} (omega names), \code{iov}
-#'   (kappa names), and \code{residual} (error type). For multi-endpoint
-#'   (per-CMT) error models, \code{residual} is reported as a string of
-#'   the form \code{"per-CMT (CMT2=proportional, CMT3=additive)"}; for
-#'   combined error models it is \code{c("proportional", "additive")}.
+#'   (kappa names), and \code{residual} (error type — one of
+#'   \code{"proportional"}, \code{"additive"}, \code{"combined"}, or
+#'   \code{"additive (log-transformed)"} for log-transform-both-sides
+#'   models written as \code{log(DV) ~ additive(...)} or
+#'   \code{DV ~ log_additive(...)}). For multi-endpoint (per-CMT) error
+#'   models, \code{residual} is reported as a string of the form
+#'   \code{"per-CMT (CMT2=proportional, CMT3=additive)"}.
 #'
 #' @section Model DSL features detected:
 #' \code{ferx_model_inspect()} reflects the parser's view of a
