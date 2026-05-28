@@ -2,6 +2,20 @@
 
 ## New features
 
+- Log-transform-both-sides (LTBS) residual error: fit on the log scale with
+  additive error, the equivalent of NONMEM's `Y = LOG(F) + EPS(1)`. Write the
+  `[error_model]` block as either form:
+
+  ```
+  log(DV) ~ additive(ADD_LOG)   # DV on the natural scale; engine logs it
+  DV ~ log_additive(ADD_LOG)    # DV already log-transformed in the data
+  ```
+
+  Under LTBS the fit output (`IPRED`, `PRED`, `CWRES`, `IWRES` in `sdtab`, and
+  `DV_SIM` from `ferx_simulate()`) is on the log scale. `ferx_model_inspect()`
+  reports the residual type as `additive (log-transformed)`. Requires a
+  ferx-core build that includes the feature.
+
 - `settings = list(reconverge_gradient_interval = N)` controls how often the
   FOCE/FOCEI population gradient re-solves each subject's inner EBE loop instead
   of holding it fixed. `0` (default) keeps the cheap fixed-EBE gradient; `1`

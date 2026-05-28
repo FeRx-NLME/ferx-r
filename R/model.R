@@ -914,7 +914,14 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
   err_lines <- b[["error_model"]] %||% character(0)
   err_lines <- err_lines[nzchar(trimws(err_lines)) & !grepl("^\\s*#", err_lines)]
   err_type <- function(line) {
-    if (grepl("proportional", line, ignore.case = TRUE)) {
+    # Log-transform-both-sides (LTBS): `log(DV) ~ additive(...)` (engine logs DV)
+    # or `DV ~ log_additive(...)` (DV already log). Both are additive error on
+    # the log scale — detect them BEFORE the plain `additive` branch, since both
+    # forms contain the substring "additive".
+    if (grepl("log_additive", line, ignore.case = TRUE) ||
+        grepl("log\\s*\\(\\s*DV\\s*\\)", line, ignore.case = TRUE)) {
+      "additive (log-transformed)"
+    } else if (grepl("proportional", line, ignore.case = TRUE)) {
       "proportional"
     } else if (grepl("additive", line, ignore.case = TRUE)) {
       "additive"

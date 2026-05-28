@@ -160,6 +160,39 @@ test_that(".ferx_parse_structure detects combined error", {
   expect_equal(s$residual, "combined")
 })
 
+test_that(".ferx_parse_structure detects LTBS via log(DV) ~ additive (case 2)", {
+  path <- write_ferx(c(
+    "[parameters]",
+    "  theta TVCL(0.2)",
+    "  sigma ADD_LOG ~ 0.1",
+    "[structural_model]",
+    "  pk one_cpt_oral(cl=CL, v=V, ka=KA)",
+    "[error_model]",
+    "  log(DV) ~ additive(ADD_LOG)"
+  ))
+  on.exit(unlink(path))
+
+  s <- ferx:::.ferx_parse_structure(path)
+  expect_equal(s$residual, "additive (log-transformed)")
+})
+
+test_that(".ferx_parse_structure detects LTBS via DV ~ log_additive (case 1)", {
+  path <- write_ferx(c(
+    "[parameters]",
+    "  theta TVCL(0.2)",
+    "  sigma ADD_LOG ~ 0.1",
+    "[structural_model]",
+    "  pk one_cpt_oral(cl=CL, v=V, ka=KA)",
+    "[error_model]",
+    "  DV ~ log_additive(ADD_LOG)"
+  ))
+  on.exit(unlink(path))
+
+  s <- ferx:::.ferx_parse_structure(path)
+  # `log_additive` must not be misread as plain `additive`.
+  expect_equal(s$residual, "additive (log-transformed)")
+})
+
 test_that(".ferx_parse_structure warns and returns 'unknown' for unrecognised error type", {
   path <- write_ferx(c(
     "[parameters]",
