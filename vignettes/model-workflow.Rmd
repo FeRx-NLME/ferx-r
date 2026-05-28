@@ -72,7 +72,16 @@ The printed summary has four lines:
 | **Structural** | Detected PK model type and population parameter (theta) names |
 | **IIV** | Inter-individual variability (omega) parameter names |
 | **IOV** | Inter-occasion variability (kappa) parameter names, or `none` |
-| **Residual** | Error model type (`proportional`, `additive`, or `combined`) |
+| **Residual** | Error model type (`proportional`, `additive`, `combined`, or `additive (log-transformed)` for log-transform-both-sides) |
+
+> **Log-transform-both-sides (LTBS).** Writing the error model as
+> `log(DV) ~ additive(SIG)` (DV on the natural scale; the engine log-transforms
+> it) or `DV ~ log_additive(SIG)` (DV already log-transformed in the data) fits
+> on the log scale with additive error — the equivalent of NONMEM's
+> `Y = LOG(F) + EPS(1)`. Under LTBS the fit output is reported on the **log
+> scale**: `IPRED`, `PRED`, `CWRES`, `IWRES` (in `sdtab`) and `DV_SIM` (from
+> `ferx_simulate()`) are all log-scale, so apply `exp()` before plotting on the
+> original concentration scale.
 
 `ferx_model_inspect()` returns the structure as a named list (invisibly), which
 is useful for programmatic checks:

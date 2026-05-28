@@ -266,3 +266,51 @@ test_that("ferx_load_fit on old .fitrx without init_as_sd produces empty logical
   expect_equal(result$sigma_init_as_sd, logical(0L))
   expect_equal(result$kappa_init_as_sd, logical(0L))
 })
+
+test_that("LTBS residual label survives a .fitrx round-trip", {
+  skip_on_cran()
+  # A fit of a log-transform-both-sides model must report its residual as
+  # "additive (log-transformed)" (set by the Rust glue's residual_label from
+  # CompiledModel.log_transform), and that label must survive save/load via the
+  # r_extras-persisted model_structure.
+  md <- tempfile(fileext = ".ferx")
+  writeLines(c(
+    "[parameters]",
+    "  theta TVCL(0.2, 0.001, 10.0)",
+    "  theta TVV(10.0, 0.1, 500.0)",
+    "  theta TVKA(1.5, 0.01, 50.0)",
+    "  omega ETA_CL ~ 0.09",
+    "  sigma ADD_LOG ~ 0.15 (sd)",
+    "[individual_parameters]",
+    "  CL = TVCL * exp(ETA_CL)",
+    "  V  = TVV",
+    "  KA = TVKA",
+    "[structural_model]",
+    "  pk one_cpt_oral(cl=CL, v=V, ka=KA)",
+    "[error_model]",
+    "  log(DV) ~ additive(ADD_LOG)"
+  ), md)
+  dd <- tempfile(fileext = ".csv")
+  writeLines(c(
+    "ID,TIME,DV,EVID,AMT,CMT,RATE,MDV",
+    "1,0,.,1,100,1,0,1",
+    "1,1,8.5,0,.,1,0,0",
+    "1,4,5.1,0,.,1,0,0",
+    "1,12,1.9,0,.,1,0,0",
+    "2,0,.,1,120,1,0,1",
+    "2,1,9.8,0,.,1,0,0",
+    "2,4,6.0,0,.,1,0,0",
+    "2,12,2.2,0,.,1,0,0"
+  ), dd)
+  on.exit(unlink(c(md, dd)), add = TRUE)
+
+  fit <- ferx_fit(md, data = dd, verbose = FALSE,
+                  settings = list(maxiter = 30L))
+  expect_equal(fit$model_structure$residual, "additive (log-transformed)")
+
+  path <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(path), add = TRUE)
+  ferx_save_fit(fit, path)
+  loaded <- ferx_load_fit(path)
+  expect_equal(loaded$model_structure$residual, "additive (log-transformed)")
+})

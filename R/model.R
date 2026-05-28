@@ -914,7 +914,14 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
   err_lines <- b[["error_model"]] %||% character(0)
   err_lines <- err_lines[nzchar(trimws(err_lines)) & !grepl("^\\s*#", err_lines)]
   err_type <- function(line) {
-    if (grepl("proportional", line, ignore.case = TRUE)) {
+    # Log-transform-both-sides (LTBS): `log(DV) ~ additive(...)` (engine logs DV)
+    # or `DV ~ log_additive(...)` (DV already log). Both are additive error on
+    # the log scale — detect them BEFORE the plain `additive` branch, since both
+    # forms contain the substring "additive".
+    if (grepl("log_additive", line, ignore.case = TRUE) ||
+        grepl("log\\s*\\(\\s*DV\\s*\\)", line, ignore.case = TRUE)) {
+      "additive (log-transformed)"
+    } else if (grepl("proportional", line, ignore.case = TRUE)) {
       "proportional"
     } else if (grepl("additive", line, ignore.case = TRUE)) {
       "additive"
@@ -1088,10 +1095,13 @@ ferx_model_validate <- function(path) {
 #'   (character vector of population parameter names), \code{model_type}
 #'   (short label such as \code{"1-cpt oral"} or \code{NULL} when not
 #'   unambiguously detectable), \code{iiv} (omega names), \code{iov}
-#'   (kappa names), and \code{residual} (error type). For multi-endpoint
-#'   (per-CMT) error models, \code{residual} is reported as a string of
-#'   the form \code{"per-CMT (CMT2=proportional, CMT3=additive)"}; for
-#'   combined error models it is \code{c("proportional", "additive")}.
+#'   (kappa names), and \code{residual} (error type — one of
+#'   \code{"proportional"}, \code{"additive"}, \code{"combined"}, or
+#'   \code{"additive (log-transformed)"} for log-transform-both-sides
+#'   models written as \code{log(DV) ~ additive(...)} or
+#'   \code{DV ~ log_additive(...)}). For multi-endpoint (per-CMT) error
+#'   models, \code{residual} is reported as a string of the form
+#'   \code{"per-CMT (CMT2=proportional, CMT3=additive)"}.
 #'
 #' @section Model DSL features detected:
 #' \code{ferx_model_inspect()} reflects the parser's view of a
