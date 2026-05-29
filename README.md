@@ -15,17 +15,20 @@ Fast nonlinear mixed effects (NLME) modeling in R, powered by a Rust backend wit
 
 ## Installation
 
-A Rust installation with the Enzyme AutoDifferentiation engine is required for FeRx to compute gradients. Most likely
-you will need to build Rust from source, which may take an hour or so.
+A Rust installation with the Enzyme AutoDifferentiation engine is required for FeRx to compute gradients. Most likely you will need to build Rust from source. Expect a few hours end-to-end the first time: ~45-60 min to build the Enzyme toolchain, plus ~1-2 hours for the first ferx-r compile.
 
-See [documentation](https://ferx-nlme.github.io/ferx-core/installation.html) for installation instructions. 
+See [documentation](https://ferx-nlme.github.io/ferx-core/installation.html) for installation instructions.
+
+> **Heads-up - two gotchas that bite people building the toolchain from source:**
+> - If the autodiff verification step makes `rustc` *hang* (one core busy, memory flat, never returns), you have an LLVM/Enzyme mismatch. Rebuild with `--set llvm.download-ci-llvm=false`.
+> - The toolchain is initially linked into `/tmp`, which macOS/Linux purge - relocate it to a permanent path (e.g. `~/.local/share/enzyme-toolchain`) and re-link, or it will silently break later. See the install docs for the exact steps.
 
 ### Install the package
 
 After installing Rust, in R run:
 
 ```r
-devtools::install_github("FeRx-NLME/ferx-r")
+pak::pak("FeRx-NLME/ferx-r")
 ```
 
 Or from a local clone:
@@ -38,23 +41,23 @@ R CMD INSTALL .
 No Enzyme toolchain? No problem. The build auto-detects whether Enzyme is present; if it is not, it falls back to finite-difference gradients automatically. Just install normally:
 
 ```r
-devtools::install_github("FeRx-NLME/ferx-r")
+pak::pak("FeRx-NLME/ferx-r")
 ```
 
 To skip the probe and force the FD path explicitly (e.g. in scripts or CI):
 
 ```r
 Sys.setenv(FERX_NO_AUTODIFF = "1")
-devtools::install_github("FeRx-NLME/ferx-r")
+pak::pak("FeRx-NLME/ferx-r")
 ```
 
 First install takes ~1-2 hours (Rust compilation from scratch). Subsequent installs are fast.
 
 All estimation methods (FOCE/FOCEI/SAEM/IMP) work. When ferx loads it prints a startup message listing the specific AD-only features that are limited.
 
-### Windows (native, without Enzyme autodiff)
+### Windows (supported with finite-difference gradients)
 
-Native Windows installs are supported. The build automatically uses finite-difference gradients on Windows (no `FERX_NO_AUTODIFF=1` needed). For full Enzyme autodiff on Windows, use the Docker image below.
+Native Windows installs are supported. The build automatically uses finite-difference gradients on Windows (no `FERX_NO_AUTODIFF=1` needed) - all estimation methods work, but AD-only features are limited. Native Enzyme autodiff is **not** available on Windows; for that, use the Docker image below (or WSL2).
 
 Prerequisites:
 
@@ -70,7 +73,7 @@ You do **not** need to `rustup default` it — the package's build pins this too
 Then install in R:
 
 ```r
-devtools::install_github("FeRx-NLME/ferx-r")
+pak::pak("FeRx-NLME/ferx-r")
 ```
 
 When ferx loads it prints a startup message listing the specific AD-only features that are limited on Windows.
