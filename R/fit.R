@@ -2340,3 +2340,174 @@ print.ferx_summary <- function(x, ...) {
   )
   list(keys = nms, values = values)
 }
+
+#' Fit a model asynchronously with live progress
+#'
+#' Runs \code{\link{ferx_fit}} in a background R process so the interactive R
+#' session (RStudio, the R console) stays responsive while the fit is running.
+#' The console tail-prints the last \code{tail_n} optimizer iterations from
+#' the per-iteration trace CSV, updated every \code{poll_interval} seconds,
+#' so you can watch the optimizer's progress without freezing the UI.
+#'
+#' The function forces \code{optimizer_trace = TRUE} internally so it has a
+#' parseable progress channel for every estimation method. When you did not
+#' explicitly request the trace, the temp CSV is deleted after the fit
+#' completes; pass \code{optimizer_trace = TRUE} explicitly to keep it.
+#'
+#' Pressing \code{Ctrl+C} (or the RStudio "stop" button) sends an interrupt
+#' to the background process; the fit is killed and \code{NULL} is returned.
+#'
+#' @param model,data,... Forwarded to \code{\link{ferx_fit}}. See its
+#'   documentation for the full argument list.
+#' @param tail_n Integer. Number of recent trace rows to keep visible while
+#'   the fit is running. Default 6.
+#' @param poll_interval Numeric. Seconds between polls of the trace CSV.
+#'   Default 0.5.
+#'
+#' @return The \code{ferx_fit} object returned by the background process
+#'   (identical to what a synchronous \code{ferx_fit()} would return).
+#'   Returns \code{NULL} if the user interrupts.
+#'
+#' @section Non-interactive use:
+#' When called in a non-interactive session (\code{Rscript}, knitr,
+#' batch mode), \code{ferx_fit_async()} silently falls back to
+#' \code{\link{ferx_fit}} since the async progress display only adds value
+#' in an interactive console.
+#'
+#' @examples
+#' \dontrun{
+#' ex <- ferx_example("warfarin")
+#' fit <- ferx_fit_async(ex$model, ex$data, method = "focei")
+#' # R prompt is free during the fit; last 6 iterations refresh in place.
+#' summary(fit)
+#' }
+#'
+#' @family fitting
+#' @export
+ferx_fit_async <- function(model, data = NULL, ...,
+                           tail_n = 6L,
+                           poll_interval = 0.5) {
+  if (!interactive()) {
+    return(ferx_fit(model, data, ...))
+  }
+  if (!requireNamespace("callr", quietly = TRUE)) {
+    stop(
+      "ferx_fit_async() requires the `callr` package. ",
+      "Install with: install.packages(\"callr\")"
+    )
+  }
+  if (!is.numeric(tail_n) || length(tail_n) != 1L || tail_n < 1L) {
+    stop("`tail_n` must be a positive integer scalar")
+  }
+  if (!is.numeric(poll_interval) || length(poll_interval) != 1L ||
+        poll_interval <= 0) {
+    stop("`poll_interval` must be a positive numeric scalar")
+  }
+  tail_n <- as.integer(tail_n)
+
+  dots <- list(...)
+  user_wanted_trace <- isTRUE(dots$optimizer_trace)
+
+  bg <- callr::r_bg(
+    func = function(model, data, dots) {
+      dots$optimizer_trace <- TRUE
+      args <- c(list(model = model, data = data), dots)
+      do.call(ferx::ferx_fit, args)
+    },
+    args = list(model = model, data = data, dots = dots),
+    package = TRUE,
+    supervise = TRUE
+  )
+
+  model_label <- if (is.character(model)) basename(model) else "model"
+  cat(sprintf("Fitting %s in background ... (Ctrl+C to interrupt)\n",
+              model_label))
+
+  trace_path <- NULL
+  state <- list(last_iter = -1L, lines_printed = 0L)
+  result <- tryCatch({
+    while (bg$is_alive()) {
+      if (is.null(trace_path)) {
+        trace_path <- .ferx_find_trace_from_bg(bg)
+      }
+      if (!is.null(trace_path) && file.exists(trace_path)) {
+        state <- .ferx_print_trace_tail(trace_path, tail_n, state)
+      }
+      Sys.sleep(poll_interval)
+    }
+    bg$get_result()
+  }, interrupt = function(e) {
+    if (bg$is_alive()) bg$kill()
+    message("\nFit interrupted by user.")
+    NULL
+  })
+
+  if (is.null(result)) return(invisible(NULL))
+
+  if (!user_wanted_trace && !is.null(result$trace_path) &&
+        file.exists(result$trace_path)) {
+    unlink(result$trace_path)
+    result$trace_path <- NULL
+  }
+  result
+}
+
+# Look for the optimizer trace path on the background process's output.
+# ferx-core emits a "[ferx] optimizer trace -> /path/to/file.csv" line on
+# stderr (eprintln!) when optimizer_trace = TRUE; we scan both streams to
+# discover the tempfile name so the parent can tail it.
+.ferx_find_trace_from_bg <- function(bg) {
+  stdout_lines <- tryCatch(bg$read_output_lines(), error = function(e) character(0))
+  stderr_lines <- tryCatch(bg$read_error_lines(), error = function(e) character(0))
+  lines <- c(stdout_lines, stderr_lines)
+  if (length(lines) == 0L) return(NULL)
+  # Try the explicit "optimizer trace -> /path" message first.
+  m <- regmatches(
+    lines,
+    regexpr("optimizer trace[^/]*(/[^ ]+\\.csv)", lines, perl = TRUE)
+  )
+  m <- m[nzchar(m)]
+  if (length(m) > 0L) {
+    return(sub(".*?(/[^ ]+\\.csv).*", "\\1", m[[length(m)]], perl = TRUE))
+  }
+  # Fallback: any *.csv path on a "trace" line.
+  cand <- grep("trace", lines, value = TRUE, ignore.case = TRUE)
+  if (length(cand) == 0L) return(NULL)
+  csvs <- regmatches(cand, regexpr("/[^ ]+\\.csv", cand))
+  csvs <- csvs[nzchar(csvs)]
+  if (length(csvs) == 0L) NULL else trimws(csvs[[length(csvs)]])
+}
+
+# Tail the trace CSV in place: each poll reads the file, prints any new rows
+# beyond `state$last_iter`, and updates the state. Append-only display so it
+# works across terminals without relying on ANSI cursor movement.
+.ferx_print_trace_tail <- function(path, tail_n, state) {
+  tr <- tryCatch(
+    utils::read.csv(path, stringsAsFactors = FALSE, check.names = FALSE),
+    error = function(e) NULL,
+    warning = function(w) NULL
+  )
+  if (is.null(tr) || nrow(tr) == 0L) return(state)
+  last <- tr$iter[nrow(tr)]
+  if (is.null(last) || !is.finite(last) || last <= state$last_iter) return(state)
+
+  if (state$last_iter < 0L) {
+    cat(sprintf("  %5s  %12s  %12s  %12s\n",
+                "iter", "OFV", "grad_norm", "optimizer"))
+  }
+  new_rows <- tr[tr$iter > state$last_iter, , drop = FALSE]
+  if (nrow(new_rows) > tail_n) {
+    new_rows <- utils::tail(new_rows, tail_n)
+  }
+  for (i in seq_len(nrow(new_rows))) {
+    row <- new_rows[i, ]
+    gn <- row$grad_norm
+    gn_str <- if (is.null(gn) || is.na(gn)) "         -  " else sprintf("%12.4g", gn)
+    opt_str <- row$optimizer %||% ""
+    cat(sprintf("  %5d  %12.4f  %s  %12s\n",
+                as.integer(row$iter), row$ofv, gn_str, opt_str))
+  }
+  state$last_iter <- last
+  state$lines_printed <- state$lines_printed + nrow(new_rows)
+  state
+}
