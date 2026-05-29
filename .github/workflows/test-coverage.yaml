@@ -16,6 +16,7 @@ jobs:
       # Build without Enzyme; covr recompiles the package and the autodiff
       # toolchain is not available on stock GitHub runners.
       FERX_NO_AUTODIFF: '1'
+      NOT_CRAN: 'true'
 
     steps:
       - uses: actions/checkout@v4
