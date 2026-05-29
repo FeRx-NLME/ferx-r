@@ -88,15 +88,23 @@ test_that("check_diagnostics uses EPS1/EPS2 fallback when sigma_names absent for
   expect_equal(d$shrinkage$param, c("EPS1", "EPS2"))
 })
 
-test_that("positive DW < 1.5 emits message; negative DW > 2.5 emits message; no message otherwise", {
-  fit <- list(dw_statistic = 1.2, iwres_lag1_r = 0.4, uses_sde = FALSE)
-  expect_message(ferx:::.ferx_emit_dw_message(fit), "Positive IWRES autocorrelation")
-
-  fit$dw_statistic <- 2.8
-  expect_message(ferx:::.ferx_emit_dw_message(fit), "Negative IWRES autocorrelation")
-
-  fit$dw_statistic <- 2.0
-  expect_silent(ferx:::.ferx_emit_dw_message(fit))
+test_that("DW autocorrelation warnings flow through as structured entries", {
+  # Durbin-Watson warnings are now classified by ferx-core and surfaced via
+  # the structured warnings vectors; the R assembler passes them through
+  # unchanged (no more standalone console message()).
+  fake <- structure(
+    list(model_name = "m", condition_number = NULL, eta_normality = NULL),
+    class = "ferx_fit"
+  )
+  raw <- list(
+    warnings_severity = "warning",
+    warnings_category = "dw_autocorrelation",
+    warnings_message  = "Positive IWRES autocorrelation detected (Durbin-Watson = 1.20)."
+  )
+  df <- ferx:::.ferx_assemble_structured_warnings(raw, fake)
+  expect_equal(nrow(df), 1L)
+  expect_equal(df$category, "dw_autocorrelation")
+  expect_equal(df$severity, "warning")
 })
 
 # --- ferx_estimates() init_as_sd column ---

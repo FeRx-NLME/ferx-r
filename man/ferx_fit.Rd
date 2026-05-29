@@ -280,6 +280,13 @@ fixed at zero, so the result reflects each subject's typical value
 under the model's covariate effects. For inter-occasion variation see
 \code{ebe_kappas}.}
 \item{warnings}{Character vector of warnings}
+\item{warnings_structured}{Data frame with columns \code{severity}
+(\code{"critical"}, \code{"warning"}, or \code{"info"}),
+\code{category} (a fixed vocabulary such as \code{"convergence"},
+\code{"covariance_step"}, \code{"dw_autocorrelation"}), and
+\code{message}. Severity/category are assigned by the engine for its
+own warnings and by the R diagnostics layer for the condition-number
+and ETA-normality checks. Inspect with \code{\link{ferx_warnings}}.}
 \item{sir_ess}{SIR effective sample size (NULL if SIR not run)}
 \item{sir_ci_theta, sir_ci_omega, sir_ci_sigma}{SIR 95\\% CI matrices
 with columns \code{lower} and \code{upper} (NULL if SIR not run)}

@@ -359,3 +359,141 @@ ferx_estimates <- function(fit) {
              init_as_sd       = init_as_sd,
              stringsAsFactors = FALSE)
 }
+
+# Apply an ANSI style to text, but only when the session is an interactive
+# colour-capable terminal and the optional `cli` package is installed.
+# Falls back to the plain string everywhere else (files, pipes, R CMD check,
+# non-cli installs), so output is never polluted with escape codes.
+.ferx_style <- function(text, style) {
+  if (!requireNamespace("cli", quietly = TRUE) ||
+        cli::num_ansi_colors() <= 1L ||
+        !isatty(stdout())) {
+    return(text)
+  }
+  switch(style,
+    bold   = cli::style_bold(text),
+    green  = cli::col_green(cli::style_bold(text)),
+    red    = cli::col_red(cli::style_bold(text)),
+    yellow = cli::col_yellow(text),
+    dim    = cli::col_grey(text),
+    text
+  )
+}
+
+# One-line remediation guidance keyed by the fixed category vocabulary that
+# ferx-core (and the R-side additions) emit. Extend this table - never parse
+# the message string - when core grows a new category.
+.ferx_warning_guidance <- function(category) {
+  switch(category,
+    convergence        = "Optimizer did not reach convergence. Try different initial values, method = c(\"saem\", \"focei\"), or settings = list(n_starts = 4L).",
+    covariance_step    = "Standard errors unavailable. Check identifiability; try a simpler omega/sigma structure or covariance = FALSE for development.",
+    condition_number   = "Parameters are correlated/ill-scaled. Consider fixing or removing a parameter, or reparameterising.",
+    optimizer_health   = "Optimizer struggled (trust region / Hessian). Inspect the trace and consider better starting values.",
+    dw_autocorrelation = "IWRES autocorrelation suggests structural misspecification. Consider transit absorption, an extra compartment, IOV, or (ODE) SDE process noise.",
+    eta_normality      = "ETA distribution may be non-normal. High shrinkage or sparse data can cause this; prefer QQ-plots for diagnosis.",
+    bloq_method        = "BLOQ handling note. Set method = \"focei\" explicitly to silence, or review the M3 setup.",
+    sir                = "SIR uncertainty step issue. Ensure covariance = TRUE and inspect SIR tuning (sir_samples / sir_resamples).",
+    importance_sampling = "Importance-sampling ESS collapsed for some subjects. Raise is_samples / is_proposal_df or check EBE quality.",
+    data_quality       = "Data issue detected. Review the flagged observations in the dataset.",
+    omega_structure    = "Mixed parameterisation in a block omega. Check the [individual_parameters] forms for the correlated etas.",
+    ebe_convergence    = "Some subjects' inner EBE search did not converge. Inspect those subjects or relax inner_tol / max_unconverged_frac.",
+    gradient_fallback  = "Gradient method fell back (e.g. AD -> FD or HMC -> MH). The fit is valid; expect a longer runtime.",
+    mu_referencing     = "Mu-referencing was auto-detected for the listed parameters (informational).",
+    optimizer_config   = "Optimizer configuration note (informational).",
+    multi_start        = "Multi-start information (informational).",
+    threads            = "Thread-pool sizing note. Consider matching threads to the subject count.",
+    cancelled          = "The fit was cancelled before completion.",
+    "(no specific guidance for this category)"
+  )
+}
+
+#' Structured warnings from a ferx fit
+#'
+#' Returns or prints the warnings produced by a fit, classified by severity
+#' (\code{critical}, \code{warning}, \code{info}) and category. Severity and
+#' category are assigned by the ferx-core engine (for engine warnings) or by
+#' the R diagnostics layer (for condition number and ETA normality); the R
+#' side never re-parses message text to guess severity.
+#'
+#' @param fit A \code{ferx_fit} object returned by \code{\link{ferx_fit}}.
+#' @param as_df Logical. When \code{TRUE}, returns the raw data frame
+#'   (\code{severity}, \code{category}, \code{message}) instead of
+#'   pretty-printing. Default \code{FALSE}.
+#' @return When \code{as_df = TRUE}, a data frame. Otherwise the same data
+#'   frame invisibly, after printing a grouped, colour-coded summary
+#'   (critical first, then warning, then info).
+#' @examples
+#' ex  <- ferx_example("warfarin")
+#' fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
+#' ferx_warnings(fit)
+#' ferx_warnings(fit, as_df = TRUE)
+#' @family diagnostics
+#' @export
+ferx_warnings <- function(fit, as_df = FALSE) {
+  if (!inherits(fit, "ferx_fit")) {
+    stop("`fit` must be a ferx_fit object")
+  }
+  df <- fit$warnings_structured
+  if (is.null(df) || !is.data.frame(df)) {
+    # Backward-compat fallback for fits saved before structured warnings:
+    # surface the flat character vector as undifferentiated warnings.
+    msgs <- fit$warnings %||% character(0)
+    df <- data.frame(
+      severity = rep("warning", length(msgs)),
+      category = rep("general", length(msgs)),
+      message  = as.character(msgs),
+      stringsAsFactors = FALSE
+    )
+  }
+  if (isTRUE(as_df)) {
+    return(df)
+  }
+
+  model_lbl <- fit$model_name %||% "fit"
+  cat(sprintf("ferx fit warnings  (%s)\n", model_lbl))
+  cat(strrep("-", 49), "\n", sep = "")
+
+  if (nrow(df) == 0L) {
+    cat("  No warnings.\n")
+    cat(strrep("-", 49), "\n", sep = "")
+    return(invisible(df))
+  }
+
+  order_lvl <- c(critical = 1L, warning = 2L, info = 3L)
+  sev_key <- order_lvl[df$severity]
+  sev_key[is.na(sev_key)] <- 99L
+  df_ord <- df[order(sev_key), , drop = FALSE]
+
+  label_for <- function(sev) {
+    switch(sev,
+      critical = .ferx_style("[CRITICAL]", "red"),
+      warning  = .ferx_style("[WARNING] ", "yellow"),
+      info     = .ferx_style("[INFO]    ", "dim"),
+      sprintf("[%s]", toupper(sev))
+    )
+  }
+  wrap_indent <- function(text, indent = "            ", width = 70L) {
+    parts <- strwrap(text, width = width)
+    paste0(indent, parts, collapse = "\n")
+  }
+
+  for (i in seq_len(nrow(df_ord))) {
+    row <- df_ord[i, ]
+    cat(sprintf("%s %s\n", label_for(row$severity), row$category))
+    cat(wrap_indent(row$message), "\n", sep = "")
+    guide <- .ferx_warning_guidance(row$category)
+    cat(.ferx_style(wrap_indent(guide), "dim"), "\n", sep = "")
+    cat("\n")
+  }
+
+  n_crit <- sum(df$severity == "critical")
+  n_warn <- sum(df$severity == "warning")
+  n_info <- sum(df$severity == "info")
+  cat(strrep("-", 49), "\n", sep = "")
+  cat(sprintf("%s   %s   %s\n",
+    .ferx_style(sprintf("%d CRITICAL", n_crit), if (n_crit > 0) "red" else "dim"),
+    .ferx_style(sprintf("%d WARNING", n_warn), if (n_warn > 0) "yellow" else "dim"),
+    .ferx_style(sprintf("%d INFO", n_info), "dim")
+  ))
+  invisible(df)
+}
