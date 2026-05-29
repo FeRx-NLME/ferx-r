@@ -1605,44 +1605,61 @@ ferx_fit <- function(model, data = NULL,
 print.ferx_fit <- function(x, ...) {
   bar <- strrep("=", 60)
   cat(bar, "\n", sep = "")
-  cat("NONLINEAR MIXED EFFECTS MODEL ESTIMATION\n")
-  cat(bar, "\n\n", sep = "")
+  cat(" NONLINEAR MIXED EFFECTS MODEL ESTIMATION\n")
+  cat(bar, "\n", sep = "")
 
-  if (!is.null(x$model_name) && nzchar(x$model_name)) {
-    cat("Model:     ", x$model_name, "\n", sep = "")
+  # Compact identification line: model and dataset on one line when both
+  # present (a common case), else fall back to single-field lines.
+  model_lbl <- if (!is.null(x$model_name) && nzchar(x$model_name)) x$model_name else NULL
+  data_lbl  <- if (!is.null(x$data_name)  && nzchar(x$data_name))  x$data_name  else NULL
+  if (!is.null(model_lbl) || !is.null(data_lbl)) {
+    cat(sprintf(" Model: %-24s Dataset: %s\n",
+                model_lbl %||% "(unnamed)",
+                data_lbl %||% "(unnamed)"))
   }
-  if (!is.null(x$data_name) && nzchar(x$data_name)) {
-    cat("Dataset:   ", x$data_name, "\n", sep = "")
+
+  # Method | Gradient | Subjects | Obs - one pipe-separated line so the run's
+  # shape fits in a single glance.
+  sde_tag <- if (isTRUE(x$uses_sde)) " + SDE (EKF)" else ""
+  method_str <- if (!is.null(x$method_chain) && length(x$method_chain) > 1) {
+    paste(toupper(x$method_chain), collapse = " -> ")
+  } else {
+    toupper(x$method %||% "?")
   }
+  method_str <- paste0(method_str, sde_tag)
+  grad_str <- if (!is.null(x$gradient_used) && !is.na(x$gradient_used) &&
+                    nzchar(x$gradient_used)) {
+    toupper(x$gradient_used)
+  } else {
+    "?"
+  }
+  cat(sprintf(" Method: %s | Gradient: %s | Subjects: %s | Obs: %s\n",
+              method_str, grad_str,
+              format(x$n_subjects %||% NA),
+              format(x$n_obs %||% NA)))
+
+  # STATUS line - the most important diagnostic; colour green/red so the
+  # eye locks on it immediately.
+  status_lbl <- if (isTRUE(x$converged)) "CONVERGED" else "NOT CONVERGED"
+  status_style <- if (isTRUE(x$converged)) "green" else "red"
+  status_tail <- character(0)
+  if (!is.null(x$n_iterations)) status_tail <- c(status_tail, sprintf("%d iterations", x$n_iterations))
+  if (!is.null(x$wall_time_secs)) status_tail <- c(status_tail, sprintf("%.1fs", x$wall_time_secs))
+  status_tail_str <- if (length(status_tail) > 0L) paste0("   ", paste(status_tail, collapse = "   ")) else ""
+  cat("\n STATUS: ", .ferx_style(status_lbl, status_style), status_tail_str, "\n", sep = "")
+
+  # OFV / AIC / BIC on a single line.
+  cat(sprintf(" OFV: %.4f    AIC: %.4f    BIC: %.4f\n", x$ofv, x$aic, x$bic))
+
   if (!is.null(x$model_structure)) {
-    cat("\n--- Model Structure (auto-derived) ---\n")
+    cat("\n", .ferx_style("MODEL STRUCTURE (auto-derived)", "bold"), "\n", sep = "")
+    cat(strrep("-", 60), "\n", sep = "")
     .ferx_print_structure(x$model_structure)
   }
-  cat("Converged: ", if (isTRUE(x$converged)) "YES" else "NO", "\n", sep = "")
-  sde_tag <- if (isTRUE(x$uses_sde)) " + SDE (EKF)" else ""
-  if (!is.null(x$method_chain) && length(x$method_chain) > 1) {
-    cat("Estimation chain:  ", paste(toupper(x$method_chain), collapse = " -> "), sde_tag, "\n", sep = "")
-  } else {
-    cat("Estimation method: ", toupper(x$method %||% "?"), sde_tag, "\n", sep = "")
-  }
-  if (!is.null(x$n_iterations)) {
-    cat("Iterations: ", x$n_iterations, "\n", sep = "")
-  }
-
-  cat("\n--- Objective Function ---\n")
-  cat(sprintf("OFV:  %.4f\n", x$ofv))
-  cat(sprintf("AIC:  %.4f\n", x$aic))
-  cat(sprintf("BIC:  %.4f\n", x$bic))
-
-  n_par <- if (is.null(x$n_parameters)) NA_integer_ else x$n_parameters
-  cat(sprintf(
-    "\nSubjects: %d  Observations: %d  Parameters: %s\n",
-    x$n_subjects, x$n_obs,
-    if (is.na(n_par)) "?" else format(n_par)
-  ))
 
   # THETA
-  cat("\n--- THETA Estimates ---\n")
+  cat("\n", .ferx_style("THETA", "bold"), "\n", sep = "")
+  cat(strrep("-", 60), "\n", sep = "")
   cat(sprintf("%-16s %12s %12s %10s\n", "Parameter", "Estimate", "SE", "%RSE"))
   cat(strrep("-", 52), "\n", sep = "")
   theta_names <- names(x$theta)
@@ -1665,7 +1682,10 @@ print.ferx_fit <- function(x, ...) {
       se_val  <- x$se_theta[i]
       rse     <- if (abs(est) > 1e-12) abs(se_val / est) * 100 else NaN
       se_str  <- sprintf("%.6f", se_val)
-      rse_str <- sprintf("%.1f", rse)
+      # Highlight high-uncertainty estimates (%RSE > 50) - same convention
+      # used by the [!] shrinkage flag and by ferx_warnings() severity colours.
+      rse_raw <- sprintf("%.1f", rse)
+      rse_str <- if (!is.nan(rse) && rse > 50) .ferx_style(rse_raw, "yellow") else rse_raw
     } else {
       se_val  <- NA_real_
       se_str  <- "N/A"
@@ -1701,7 +1721,8 @@ print.ferx_fit <- function(x, ...) {
   # in `x$theta`; this block exists so users get a readable overview
   # without scrolling past 100+ rows.
   if (!is.null(x$neural_networks) && length(x$neural_networks) > 0) {
-    cat("\n--- NEURAL NETWORKS ---\n")
+    cat("\n", .ferx_style("NEURAL NETWORKS", "bold"), "\n", sep = "")
+    cat(strrep("-", 60), "\n", sep = "")
     for (nn in x$neural_networks) {
       shape_str <- paste(nn$shape, collapse = ", ")
       cat(sprintf(
@@ -1720,7 +1741,8 @@ print.ferx_fit <- function(x, ...) {
   }
 
   # OMEGA
-  cat("\n--- OMEGA Estimates ---\n")
+  cat("\n", .ferx_style("OMEGA  (between-subject variability)", "bold"), "\n", sep = "")
+  cat(strrep("-", 60), "\n", sep = "")
   om <- x$omega
   if (is.null(dim(om))) om <- matrix(om, 1, 1)
   n_eta <- nrow(om)
@@ -1812,7 +1834,8 @@ print.ferx_fit <- function(x, ...) {
 
   # OMEGA_IOV (Inter-Occasion Variability)
   if (!is.null(x$omega_iov)) {
-    cat("\n--- OMEGA_IOV Estimates (Inter-Occasion Variability) ---\n")
+    cat("\n", .ferx_style("OMEGA_IOV  (inter-occasion variability)", "bold"), "\n", sep = "")
+    cat(strrep("-", 60), "\n", sep = "")
     m_iov <- x$omega_iov
     if (is.null(dim(m_iov))) m_iov <- matrix(m_iov, 1, 1)
     n_kap <- nrow(m_iov)
@@ -1872,7 +1895,8 @@ print.ferx_fit <- function(x, ...) {
   # For proportional components CV% = sigma * 100; for additive components the
   # value is in observation units and no CV% applies. Variance = sigma^2 in
   # both cases, mirroring the YAML output (ferx-core#57).
-  cat("\n--- SIGMA Estimates ---\n")
+  cat("\n", .ferx_style("SIGMA  (residual error)", "bold"), "\n", sep = "")
+  cat(strrep("-", 60), "\n", sep = "")
   for (i in seq_along(x$sigma)) {
     s   <- x$sigma[i]
     nm  <- if (length(x$sigma_names) >= i && nzchar(x$sigma_names[i])) {
@@ -1907,7 +1931,8 @@ print.ferx_fit <- function(x, ...) {
 
   # SIR uncertainty
   if (!is.null(x$sir_ess)) {
-    cat("\n--- SIR Uncertainty (95% CI) ---\n")
+    cat("\n", .ferx_style("SIR  (95% CI from sampling importance resampling)", "bold"), "\n", sep = "")
+    cat(strrep("-", 60), "\n", sep = "")
     cat(sprintf("Effective sample size: %.1f\n", x$sir_ess))
     print_ci <- function(m) {
       if (is.null(m)) {
@@ -1925,7 +1950,8 @@ print.ferx_fit <- function(x, ...) {
   # Importance Sampling marginal log-likelihood (IMP terminal stage)
   if (!is.null(x$importance_sampling)) {
     is_r <- x$importance_sampling
-    cat("\n--- Importance Sampling (marginal log-likelihood) ---\n")
+    cat("\n", .ferx_style("IMPORTANCE SAMPLING  (marginal log-likelihood)", "bold"), "\n", sep = "")
+    cat(strrep("-", 60), "\n", sep = "")
     cat(sprintf(
       "  -2 log L (IS): %.4f  (MC SE = %.4f, K = %d, df = %g)\n",
       is_r$minus2_log_likelihood,
@@ -1950,64 +1976,76 @@ print.ferx_fit <- function(x, ...) {
     }
   }
 
-  # Shrinkage
+  # SHRINKAGE - compact single-line layout: ETA_CL: 8.2%  ETA_V: 12.1%  ETA_KA: 34.7% [!]
+  # The [!] flag (yellow when colour available) highlights values above 30%,
+  # consistent with the %RSE highlighter in the THETA table.
   has_shrinkage <- (!is.null(x$shrinkage_eta) && any(!is.na(x$shrinkage_eta))) ||
     (!is.null(x$shrinkage_eps) && !is.na(x$shrinkage_eps))
   if (has_shrinkage) {
-    cat("\n--- Shrinkage ---\n")
+    cat("\n", .ferx_style("SHRINKAGE", "bold"), "\n", sep = "")
+    cat(strrep("-", 60), "\n", sep = "")
+    parts <- character(0)
     if (!is.null(x$shrinkage_eta)) {
       for (k in seq_along(x$shrinkage_eta)) {
         sh  <- x$shrinkage_eta[k]
+        if (is.na(sh)) next
         lbl <- if (!is.null(x$eta_names) && length(x$eta_names) >= k && nzchar(x$eta_names[k])) x$eta_names[k] else sprintf("ETA%d", k)
-        if (!is.na(sh)) cat(sprintf("  %s shrinkage: %.1f%%\n", lbl, sh * 100))
+        val <- sprintf("%.1f%%", sh * 100)
+        flag <- if (sh * 100 > 30) paste0(" ", .ferx_style("[!]", "yellow")) else ""
+        parts <- c(parts, sprintf("%s: %s%s", lbl, val, flag))
       }
     }
     if (!is.null(x$shrinkage_eps) && !is.na(x$shrinkage_eps)) {
-      cat(sprintf("  EPS shrinkage:  %.1f%%\n", x$shrinkage_eps * 100))
+      val <- sprintf("%.1f%%", x$shrinkage_eps * 100)
+      flag <- if (x$shrinkage_eps * 100 > 30) paste0(" ", .ferx_style("[!]", "yellow")) else ""
+      parts <- c(parts, sprintf("EPS: %s%s", val, flag))
     }
+    if (length(parts) > 0L) cat(" ", paste(parts, collapse = "   "), "\n", sep = "")
   }
 
-  # Diagnostics (DW autocorrelation)
-  dw <- x$dw_statistic
-  if (!is.null(dw) && !is.na(dw)) {
-    cat("\n--- Diagnostics ---\n")
-    cat(sprintf("  Durbin-Watson:  %.2f  [%s]\n", dw, .dw_label(dw)))
-    if (!is.null(x$iwres_lag1_r) && !is.na(x$iwres_lag1_r)) {
-      cat(sprintf("  IWRES lag-1 r:  %.3f\n", x$iwres_lag1_r))
-    }
-  }
-
-  # Run info
+  # DIAGNOSTICS - compact: Covariance + condition number + DW on one line where possible.
   cov_status <- if (!is.null(x$covariance_status)) x$covariance_status else "unknown"
   cov_str <- switch(cov_status,
     computed      = "computed",
-    failed        = "FAILED",
+    failed        = .ferx_style("FAILED", "red"),
     not_requested = "not requested",
     cov_status
   )
-  cat("\n--- Run Info ---\n")
-  cond_str <- if (!is.null(x$condition_number)) {
-    if (is.infinite(x$condition_number)) " (cond: Inf)" else sprintf(" (cond: %.1f)", x$condition_number)
-  } else ""
-  cat(sprintf("  Covariance: %s%s\n", cov_str, cond_str))
+  cond_part <- if (!is.null(x$condition_number)) {
+    if (is.infinite(x$condition_number)) "Cond: Inf" else sprintf("Cond: %.1f", x$condition_number)
+  } else NULL
+  dw <- x$dw_statistic
+  dw_part <- if (!is.null(dw) && !is.na(dw)) {
+    sprintf("DW: %.2f [%s]", dw, .dw_label(dw))
+  } else NULL
+  iwres_part <- if (!is.null(x$iwres_lag1_r) && !is.na(x$iwres_lag1_r)) {
+    sprintf("IWRES lag-1 r: %.3f", x$iwres_lag1_r)
+  } else NULL
+  diag_parts <- c(sprintf("Covariance: %s", cov_str), cond_part, dw_part, iwres_part)
+  cat("\n", .ferx_style("DIAGNOSTICS", "bold"), "\n", sep = "")
+  cat(strrep("-", 60), "\n", sep = "")
+  cat(" ", paste(diag_parts, collapse = "   "), "\n", sep = "")
+
+  # Run info - tighter; only show fields with useful content.
+  cat("\n", .ferx_style("RUN INFO", "bold"), "\n", sep = "")
+  cat(strrep("-", 60), "\n", sep = "")
   if (!is.null(x$gradient)) {
-    cat("  Gradient (requested): ", x$gradient, "\n", sep = "")
-  }
-  if (!is.null(x$gradient_used) && !is.na(x$gradient_used)) {
-    cat("  Gradient (used):      ", x$gradient_used, "\n", sep = "")
-  }
-  if (!is.null(x$wall_time_secs)) {
-    cat(sprintf("  Wall time:  %.1fs\n", x$wall_time_secs))
+    cat(sprintf(" Gradient (requested): %s", x$gradient))
+    if (!is.null(x$gradient_used) && !is.na(x$gradient_used)) {
+      cat(sprintf("   (used: %s)", x$gradient_used))
+    }
+    cat("\n")
   }
   if (!is.null(x$ferx_version)) {
-    cat("  ferx v", as.character(utils::packageVersion("ferx")),
+    cat(" ferx v", as.character(utils::packageVersion("ferx")),
         " (core v", x$ferx_version, ")\n", sep = "")
   }
 
   mfs <- x$model_file_settings %||% list()
   cs  <- x$call_settings %||% list()
   if (length(mfs) > 0L || length(cs) > 0L) {
-    cat("\n--- Settings (model file / call-time override) ---\n")
+    cat("\n", .ferx_style("SETTINGS  (model file / call-time override)", "bold"), "\n", sep = "")
+    cat(strrep("-", 60), "\n", sep = "")
     all_keys <- union(names(mfs), names(cs))
     for (nm in all_keys) {
       mval <- mfs[[nm]]
@@ -2031,9 +2069,25 @@ print.ferx_fit <- function(x, ...) {
     }
   }
 
-  if (length(x$warnings) > 0) {
-    cat("\n--- Warnings ---\n")
-    for (w in x$warnings) cat("  *", w, "\n")
+  # Warning summary - a compact tally and a call-to-action rather than a wall
+  # of message strings. Severity comes from fit$warnings_structured (PR 2);
+  # the legacy flat fit$warnings vector is used only as a count fallback.
+  ws <- x$warnings_structured
+  if (!is.null(ws) && is.data.frame(ws) && nrow(ws) > 0L) {
+    n_crit <- sum(ws$severity == "critical")
+    n_warn <- sum(ws$severity == "warning")
+    n_info <- sum(ws$severity == "info")
+    cat("\n", strrep("-", 60), "\n", sep = "")
+    parts <- character(0)
+    if (n_crit > 0) parts <- c(parts, .ferx_style(sprintf("%d critical", n_crit), "red"))
+    if (n_warn > 0) parts <- c(parts, .ferx_style(sprintf("%d warning", n_warn), "yellow"))
+    if (n_info > 0) parts <- c(parts, .ferx_style(sprintf("%d info", n_info), "dim"))
+    cat(" ", paste(parts, collapse = "   "),
+        "  --  call ", .ferx_style("ferx_warnings(fit)", "bold"),
+        " for details\n", sep = "")
+  } else if (length(x$warnings) > 0L) {
+    cat("\n", strrep("-", 60), "\n", sep = "")
+    cat(" ", length(x$warnings), " warning(s)  --  inspect fit$warnings\n", sep = "")
   }
 
   cat(bar, "\n", sep = "")
