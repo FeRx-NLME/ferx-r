@@ -840,8 +840,10 @@
 #' #   - method = "gn"         (FOCE Gauss-Newton)
 #' #   - method = "gn_hybrid"  (FOCE-GN with SLSQP polish)
 #' #   - method = "foce" / "focei" run with settings = list(optimizer =
-#' #     "trust_region") (the default optimizer "slsqp" is also gradient-based
-#' #     but tolerates poor starts better)
+#' #     "trust_region") or settings = list(optimizer = "slsqp") (the
+#' #     default optimizer "bobyqa" is derivative-free and tolerates poor
+#' #     starts the best of the three; switch to slsqp / trust_region for
+#' #     gradient-based behaviour, then NCA-derived starts help most)
 #' # For these, NCA-derived starts often turn a non-converging or stagnating
 #' # fit into a clean convergence.
 #' #
