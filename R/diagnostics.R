@@ -433,6 +433,7 @@ ferx_estimates <- function(fit) {
     multi_start        = "Multi-start information (informational).",
     threads            = "Thread-pool sizing note. Consider matching threads to the subject count.",
     cancelled          = "The fit was cancelled before completion.",
+    unused_parameter   = "A declared parameter is never referenced in [individual_parameters] or [error_model]. Remove it from [parameters] or complete the expression that uses it.",
     NULL
   )
 }

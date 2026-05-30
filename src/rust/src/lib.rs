@@ -838,6 +838,7 @@ fn default_fit_result(
         kappa_fixed: template.kappa_fixed.clone(),
         se_kappa: None,
         shrinkage_kappa: Vec::new(),
+        shrinkage_kappa_by_occ: Vec::new(),
         ebe_kappas: Vec::new(),
         saem_mu_ref_m_step_evals_saved: None,
         saem_n_subjects_hmc: None,
@@ -1183,6 +1184,36 @@ fn fit_result_to_list(
     let se_kappa: Vec<f64> = result.se_kappa.clone().unwrap_or_default();
     let shrinkage_kappa: Vec<f64> = result.shrinkage_kappa.clone();
 
+    // Per-occasion kappa shrinkage (ferx-core PR #167). Empty when no IOV or
+    // when the design is unbalanced and per-occasion values are unreliable.
+    // Returned as a data frame: occ (1-based) + one column per kappa name.
+    let shrinkage_kappa_by_occ_df: Robj = {
+        let by_occ = &result.shrinkage_kappa_by_occ;
+        if by_occ.is_empty() || kappa_names.is_empty() {
+            ().into()
+        } else {
+            let n_occ = by_occ.len();
+            let n_kappa = kappa_names.len();
+            let occ_col: Vec<i32> = (1..=n_occ as i32).collect();
+            let mut kappa_cols: Vec<Vec<f64>> = vec![Vec::with_capacity(n_occ); n_kappa];
+            for occ_sh in by_occ {
+                for k in 0..n_kappa {
+                    kappa_cols[k].push(if k < occ_sh.len() { occ_sh[k] } else { f64::NAN });
+                }
+            }
+            let mut pairs: Vec<(&str, Robj)> = Vec::with_capacity(1 + n_kappa);
+            pairs.push(("occ", occ_col.into()));
+            for (k, name) in kappa_names.iter().enumerate() {
+                pairs.push((name.as_str(), kappa_cols[k].clone().into()));
+            }
+            let mut df = List::from_pairs(pairs);
+            df.set_class(&["data.frame"]).unwrap();
+            let row_names: Vec<i32> = (1..=n_occ as i32).collect();
+            df.set_attrib("row.names", row_names).unwrap();
+            df.into()
+        }
+    };
+
     // Parameter transform metadata (added in ferx-core PR #54; empty vecs for
     // older binaries that don't populate these fields).
     let eta_param_types: Vec<String> = result.eta_param_info.iter().map(|info| {
@@ -1329,6 +1360,7 @@ fn fit_result_to_list(
         kappa_names = kappa_names,
         se_kappa = se_kappa,
         shrinkage_kappa = shrinkage_kappa,
+        shrinkage_kappa_by_occ = shrinkage_kappa_by_occ_df,
         ebe_kappas = ebe_kappas_df,
         ebe_etas = ebe_etas_df,
         individual_estimates = individual_estimates_df,
@@ -1370,7 +1402,19 @@ fn fit_result_to_list(
         // DCM plan). One R sub-list per NN; empty list when the `nn` feature is
         // off or no NN blocks are declared. Inspectable in R as
         // `fit$neural_networks[[1]]$shape`, etc.
-        neural_networks = neural_networks_list(result)
+        neural_networks = neural_networks_list(result),
+        // Engine diagnostics (Step 3 — ferx-core feature-parity).
+        // saem_mu_ref_m_step_evals_saved: M-step OFV evaluations avoided by
+        //   mu-referencing; NULL (NA) for non-SAEM fits.
+        // covariance_n_evals_estimated: estimated OFV calls needed for the
+        //   covariance step on large models; NULL when not computed.
+        // n_threads_used: actual thread count the engine used.
+        // nlopt_missing_algorithms: NLopt algorithm names not available on
+        //   this platform (empty on most builds).
+        saem_mu_ref_m_step_evals_saved = result.saem_mu_ref_m_step_evals_saved.map(|x| x as f64),
+        covariance_n_evals_estimated   = result.covariance_n_evals_estimated.map(|x| x as f64),
+        n_threads_used                 = result.n_threads_used as i32,
+        nlopt_missing_algorithms       = result.nlopt_missing_algorithms.clone()
     )
 }
 
@@ -1879,6 +1923,7 @@ fn ferx_rust_sir(
         kappa_fixed: template.kappa_fixed.clone(),
         se_kappa: None,
         shrinkage_kappa: Vec::new(),
+        shrinkage_kappa_by_occ: Vec::new(),
         ebe_kappas: Vec::new(),
         saem_mu_ref_m_step_evals_saved: None,
         saem_n_subjects_hmc: None,

@@ -62,3 +62,30 @@ test_that("structured warnings include R-side condition number flag", {
   expect_true(any(df$category == "condition_number"))
   expect_equal(df$severity[df$category == "condition_number"], "critical")
 })
+
+test_that("ferx_warnings() shows guidance for unused_parameter category", {
+  fake <- structure(
+    list(
+      model_name = "m",
+      warnings_structured = data.frame(
+        severity      = "warning",
+        category      = "unused_parameter",
+        message       = "TVCL is declared but never referenced",
+        source_method = "",
+        stringsAsFactors = FALSE
+      ),
+      warnings = "TVCL is declared but never referenced",
+      condition_number = NULL,
+      eta_normality = NULL,
+      uses_sde = FALSE
+    ),
+    class = "ferx_fit"
+  )
+  out <- capture.output(ferx_warnings(fake))
+  # Guidance for unused_parameter must appear in the output
+  expect_true(
+    any(grepl("Remove it from", out, fixed = TRUE)),
+    info = paste("Expected guidance text not found in output:\n",
+                 paste(out, collapse = "\n"))
+  )
+})
