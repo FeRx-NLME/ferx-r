@@ -2785,6 +2785,9 @@ print.ferx_job <- function(x, ...) {
 # than refusing any whitespace inside the match. Greedy capture from the
 # first "/" through the trailing ".csv" on the announcement line, with a
 # trailing "\r" stripped to tolerate Windows line endings.
+# NOTE: "/.+\.csv$" assumes the path is the last token on the line. If
+# ferx-core ever appends text after the path (e.g. "(appended)"), this
+# match will fail silently and fall through to the fallback.
 .ferx_find_trace_from_lines <- function(lines) {
   if (length(lines) == 0L) return(NULL)
   parse_one <- function(line) {

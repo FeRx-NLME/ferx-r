@@ -131,6 +131,18 @@ test_that(".ferx_find_trace_from_lines picks the announcement line over noise", 
   )
 })
 
+test_that(".ferx_find_trace_from_lines tolerates spaces via fallback path", {
+  # No "optimizer trace" keyword, so the fallback branch runs.
+  lines <- c(
+    "Starting optimizer",
+    "trace output -> /Users/Some User/tmp/ferx_trace_5.csv"
+  )
+  expect_equal(
+    ferx:::.ferx_find_trace_from_lines(lines),
+    "/Users/Some User/tmp/ferx_trace_5.csv"
+  )
+})
+
 test_that("ferx_fit_async rejects invalid tail_n / poll_interval", {
   fn <- ferx::ferx_fit_async
   mockery::stub(fn, "interactive", function() TRUE)
