@@ -243,8 +243,10 @@
 #'   \item{warnings_structured}{Data frame with columns \code{severity}
 #'     (\code{"critical"}, \code{"warning"}, or \code{"info"}),
 #'     \code{category} (a fixed vocabulary such as \code{"convergence"},
-#'     \code{"covariance_step"}, \code{"dw_autocorrelation"}), and
-#'     \code{message}. Severity/category are assigned by the engine for its
+#'     \code{"covariance_step"}, \code{"dw_autocorrelation"}),
+#'     \code{message}, and \code{source_method} (the estimation stage that
+#'     emitted the warning, e.g. \code{"FOCEI"}; empty string when not
+#'     applicable). Severity/category are assigned by the engine for its
 #'     own warnings and by the R diagnostics layer for the condition-number
 #'     and ETA-normality checks. Inspect with \code{\link{ferx_warnings}}.}
 #'   \item{sir_ess}{SIR effective sample size (NULL if SIR not run)}
@@ -1467,9 +1469,10 @@ ferx_fit <- function(model, data = NULL,
 # message - always a data frame (zero rows when there are no warnings).
 .ferx_assemble_structured_warnings <- function(raw, result) {
   df <- data.frame(
-    severity = as.character(raw$warnings_severity %||% character(0)),
-    category = as.character(raw$warnings_category %||% character(0)),
-    message  = as.character(raw$warnings_message  %||% character(0)),
+    severity      = as.character(raw$warnings_severity      %||% character(0)),
+    category      = as.character(raw$warnings_category      %||% character(0)),
+    message       = as.character(raw$warnings_message       %||% character(0)),
+    source_method = as.character(raw$warnings_source_method %||% character(0)),
     stringsAsFactors = FALSE
   )
   extra <- list()
@@ -1477,12 +1480,13 @@ ferx_fit <- function(model, data = NULL,
   if (!is.null(result$condition_number) && is.finite(result$condition_number) &&
         result$condition_number > 1000) {
     extra[[length(extra) + 1L]] <- data.frame(
-      severity = "critical",
-      category = "condition_number",
-      message  = sprintf(
+      severity      = "critical",
+      category      = "condition_number",
+      message       = sprintf(
         "High condition number (%.1f) -- parameter space may be ill-conditioned",
         result$condition_number
       ),
+      source_method = "",
       stringsAsFactors = FALSE
     )
   }
@@ -1490,14 +1494,15 @@ ferx_fit <- function(model, data = NULL,
   if (!is.null(result$eta_normality)) {
     for (i in seq_len(nrow(result$eta_normality))) {
       row <- result$eta_normality[i, ]
-      if (nzchar(row$flag) && !is.na(row$p_val)) {
+      if (!is.na(row$flag) && nzchar(row$flag) && !is.na(row$p_val)) {
         extra[[length(extra) + 1L]] <- data.frame(
-          severity = "warning",
-          category = "eta_normality",
-          message  = sprintf(
+          severity      = "warning",
+          category      = "eta_normality",
+          message       = sprintf(
             "%s Shapiro-Wilk p=%.4f - distribution may be non-normal",
             row$eta, row$p_val
           ),
+          source_method = "",
           stringsAsFactors = FALSE
         )
       }

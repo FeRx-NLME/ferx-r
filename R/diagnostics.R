@@ -360,16 +360,20 @@ ferx_estimates <- function(fit) {
              stringsAsFactors = FALSE)
 }
 
-# Apply an ANSI style to text, but only when the session is an interactive
-# colour-capable terminal and the optional `cli` package is installed.
-# Falls back to the plain string everywhere else (files, pipes, R CMD check,
-# non-cli installs), so output is never polluted with escape codes.
-.ferx_style <- function(text, style) {
-  if (!requireNamespace("cli", quietly = TRUE) ||
-        cli::num_ansi_colors() <= 1L ||
-        !isatty(stdout())) {
-    return(text)
-  }
+# Resolve once whether cli colour output is available.  Called at the top of
+# ferx_warnings() so that requireNamespace() and isatty() are not repeated
+# inside the per-row print loop.
+.ferx_use_cli <- function() {
+  requireNamespace("cli", quietly = TRUE) &&
+    cli::num_ansi_colors() > 1L &&
+    isatty(stdout())
+}
+
+# Apply an ANSI style to text.  use_cli must be pre-computed by .ferx_use_cli()
+# and passed in so the capability check is not repeated on every call.
+# Falls back to the plain string when use_cli is FALSE.
+.ferx_style <- function(text, style, use_cli = .ferx_use_cli()) {
+  if (!use_cli) return(text)
   switch(style,
     bold   = cli::style_bold(text),
     green  = cli::col_green(cli::style_bold(text)),
@@ -381,15 +385,32 @@ ferx_estimates <- function(fit) {
 }
 
 # One-line remediation guidance keyed by the fixed category vocabulary that
-# ferx-core (and the R-side additions) emit. Extend this table - never parse
-# the message string - when core grows a new category.
-.ferx_warning_guidance <- function(category) {
+# ferx-core (and the R-side additions) emit. Extend this table when core grows
+# a new category. Returns NULL for unknown categories so callers can skip
+# printing rather than showing a generic placeholder.
+#
+# message and uses_sde are used only for dw_autocorrelation: the message text
+# distinguishes positive vs negative DW (stable wording from ferx-core), and
+# uses_sde suppresses the SDE suggestion when the model already has a diffusion
+# block.
+.ferx_warning_guidance <- function(category, message = "", uses_sde = FALSE) {
+  if (category == "dw_autocorrelation") {
+    if (grepl("egative", message, ignore.case = TRUE)) {
+      return("Negative IWRES autocorrelation suggests over-parameterisation or a misspecified error model. Consider removing a parameter or simplifying the residual model.")
+    }
+    sde_hint <- if (isTRUE(uses_sde)) "" else
+      " For ODE models, also consider SDE process noise ([diffusion] block)."
+    return(paste0(
+      "Positive IWRES autocorrelation suggests missing structural dynamics.",
+      " Consider transit absorption, an extra compartment, or IOV on ka/F.",
+      sde_hint
+    ))
+  }
   switch(category,
     convergence        = "Optimizer did not reach convergence. Try different initial values, method = c(\"saem\", \"focei\"), or settings = list(n_starts = 4L).",
     covariance_step    = "Standard errors unavailable. Check identifiability; try a simpler omega/sigma structure or covariance = FALSE for development.",
     condition_number   = "Parameters are correlated/ill-scaled. Consider fixing or removing a parameter, or reparameterising.",
     optimizer_health   = "Optimizer struggled (trust region / Hessian). Inspect the trace and consider better starting values.",
-    dw_autocorrelation = "IWRES autocorrelation suggests structural misspecification. Consider transit absorption, an extra compartment, IOV, or (ODE) SDE process noise.",
     eta_normality      = "ETA distribution may be non-normal. High shrinkage or sparse data can cause this; prefer QQ-plots for diagnosis.",
     bloq_method        = "BLOQ handling note. Set method = \"focei\" explicitly to silence, or review the M3 setup.",
     sir                = "SIR uncertainty step issue. Ensure covariance = TRUE and inspect SIR tuning (sir_samples / sir_resamples).",
@@ -403,7 +424,7 @@ ferx_estimates <- function(fit) {
     multi_start        = "Multi-start information (informational).",
     threads            = "Thread-pool sizing note. Consider matching threads to the subject count.",
     cancelled          = "The fit was cancelled before completion.",
-    "(no specific guidance for this category)"
+    NULL
   )
 }
 
@@ -417,8 +438,8 @@ ferx_estimates <- function(fit) {
 #'
 #' @param fit A \code{ferx_fit} object returned by \code{\link{ferx_fit}}.
 #' @param as_df Logical. When \code{TRUE}, returns the raw data frame
-#'   (\code{severity}, \code{category}, \code{message}) instead of
-#'   pretty-printing. Default \code{FALSE}.
+#'   (\code{severity}, \code{category}, \code{message}, \code{source_method})
+#'   instead of pretty-printing. Default \code{FALSE}.
 #' @return When \code{as_df = TRUE}, a data frame. Otherwise the same data
 #'   frame invisibly, after printing a grouped, colour-coded summary
 #'   (critical first, then warning, then info).
@@ -439,9 +460,10 @@ ferx_warnings <- function(fit, as_df = FALSE) {
     # surface the flat character vector as undifferentiated warnings.
     msgs <- fit$warnings %||% character(0)
     df <- data.frame(
-      severity = rep("warning", length(msgs)),
-      category = rep("general", length(msgs)),
-      message  = as.character(msgs),
+      severity      = rep("warning", length(msgs)),
+      category      = rep("general", length(msgs)),
+      message       = as.character(msgs),
+      source_method = rep("", length(msgs)),
       stringsAsFactors = FALSE
     )
   }
@@ -449,6 +471,8 @@ ferx_warnings <- function(fit, as_df = FALSE) {
     return(df)
   }
 
+  use_cli   <- .ferx_use_cli()
+  uses_sde  <- isTRUE(fit$uses_sde)
   model_lbl <- fit$model_name %||% "fit"
   cat(sprintf("ferx fit warnings  (%s)\n", model_lbl))
   cat(strrep("-", 49), "\n", sep = "")
@@ -466,9 +490,9 @@ ferx_warnings <- function(fit, as_df = FALSE) {
 
   label_for <- function(sev) {
     switch(sev,
-      critical = .ferx_style("[CRITICAL]", "red"),
-      warning  = .ferx_style("[WARNING] ", "yellow"),
-      info     = .ferx_style("[INFO]    ", "dim"),
+      critical = .ferx_style("[CRITICAL]", "red",    use_cli),
+      warning  = .ferx_style("[WARNING] ", "yellow", use_cli),
+      info     = .ferx_style("[INFO]    ", "dim",    use_cli),
       sprintf("[%s]", toupper(sev))
     )
   }
@@ -481,8 +505,12 @@ ferx_warnings <- function(fit, as_df = FALSE) {
     row <- df_ord[i, ]
     cat(sprintf("%s %s\n", label_for(row$severity), row$category))
     cat(wrap_indent(row$message), "\n", sep = "")
-    guide <- .ferx_warning_guidance(row$category)
-    cat(.ferx_style(wrap_indent(guide), "dim"), "\n", sep = "")
+    guide <- .ferx_warning_guidance(row$category,
+                                    message  = row$message,
+                                    uses_sde = uses_sde)
+    if (!is.null(guide)) {
+      cat(.ferx_style(wrap_indent(guide), "dim", use_cli), "\n", sep = "")
+    }
     cat("\n")
   }
 
@@ -491,9 +519,9 @@ ferx_warnings <- function(fit, as_df = FALSE) {
   n_info <- sum(df$severity == "info")
   cat(strrep("-", 49), "\n", sep = "")
   cat(sprintf("%s   %s   %s\n",
-    .ferx_style(sprintf("%d CRITICAL", n_crit), if (n_crit > 0) "red" else "dim"),
-    .ferx_style(sprintf("%d WARNING", n_warn), if (n_warn > 0) "yellow" else "dim"),
-    .ferx_style(sprintf("%d INFO", n_info), "dim")
+    .ferx_style(sprintf("%d CRITICAL", n_crit), if (n_crit > 0) "red" else "dim", use_cli),
+    .ferx_style(sprintf("%d WARNING",  n_warn), if (n_warn > 0) "yellow" else "dim", use_cli),
+    .ferx_style(sprintf("%d INFO",     n_info), "dim", use_cli)
   ))
   invisible(df)
 }

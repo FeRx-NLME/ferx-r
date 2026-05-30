@@ -10,8 +10,8 @@ ferx_warnings(fit, as_df = FALSE)
 \item{fit}{A \code{ferx_fit} object returned by \code{\link{ferx_fit}}.}
 
 \item{as_df}{Logical. When \code{TRUE}, returns the raw data frame
-(\code{severity}, \code{category}, \code{message}) instead of
-pretty-printing. Default \code{FALSE}.}
+(\code{severity}, \code{category}, \code{message}, \code{source_method})
+instead of pretty-printing. Default \code{FALSE}.}
 }
 \value{
 When \code{as_df = TRUE}, a data frame. Otherwise the same data

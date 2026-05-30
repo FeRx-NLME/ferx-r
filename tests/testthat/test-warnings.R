@@ -1,7 +1,7 @@
 test_that("fit carries a structured warnings data frame", {
   fit <- warfarin_fit_cov()
   expect_true(is.data.frame(fit$warnings_structured))
-  expect_named(fit$warnings_structured, c("severity", "category", "message"))
+  expect_named(fit$warnings_structured, c("severity", "category", "message", "source_method"))
   # Severity values are always from the fixed vocabulary
   if (nrow(fit$warnings_structured) > 0L) {
     expect_true(all(fit$warnings_structured$severity %in%
