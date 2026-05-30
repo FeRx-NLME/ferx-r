@@ -183,12 +183,18 @@ call-time value overrides a different value from \code{[fit_options]}.
 Inspect \code{fit$model_file_settings} and \code{fit$call_settings} to
 audit the full picture.
 
-\strong{Shared options (all methods)}
+\strong{Shared options (FOCE / FOCEI / GN / GN-hybrid / SAEM)}
 \describe{
-\item{\code{maxiter}}{Maximum outer-optimizer iterations (default 500).}
 \item{\code{inner_maxiter}}{Per-subject EBE iteration cap (default 200).}
 \item{\code{inner_tol}}{Convergence tolerance for the inner EBE loop
 (default \code{1e-4}).}
+}
+
+\strong{FOCE / FOCEI / GN / GN-hybrid: iteration cap}
+\describe{
+\item{\code{maxiter}}{Maximum outer-optimizer iterations (default 500).
+Not applicable to SAEM, which controls iterations via
+\code{n_exploration} and \code{n_convergence}.}
 }
 
 \strong{FOCE / FOCEI / GN-hybrid: outer optimizer}
@@ -202,15 +208,18 @@ NLopt, gradient-based),
 \code{"bfgs"} (hand-rolled BFGS, gradient-based), or
 \code{"trust_region"} (trust-region Newton, gradient-based).
 Gradient-based optimizers use the inner gradient method set by the
-\code{gradient} argument; \code{"bobyqa"} does not.}
+\code{gradient} argument; \code{"bobyqa"} does not.
+Not accepted by pure \code{"gn"}.}
 \item{\code{global_search}}{Logical. When \code{TRUE}, run a global
-search phase before local refinement (default \code{FALSE}).}
+search phase before local refinement (default \code{FALSE}).
+Not accepted by pure \code{"gn"}.}
 \item{\code{global_maxeval}}{Function evaluations budget for the global
-search phase (default \code{0}, i.e. disabled).}
+search phase (default \code{0}, i.e. disabled when
+\code{global_search = FALSE}). Not accepted by pure \code{"gn"}.}
 \item{\code{stagnation_guard}}{Logical (default \code{TRUE}). Terminates
 the NLopt outer loop early when the OFV plateau is numerically flat.
 Set \code{FALSE} to let SLSQP / L-BFGS run to their own xtol/ftol or
-\code{maxiter}. Only consumed by FOCE / FOCEI / GN-hybrid.}
+\code{maxiter}. Not accepted by pure \code{"gn"}.}
 \item{\code{reconverge_gradient_interval}}{Integer (default \code{0}).
 How often to re-solve each subject's inner EBE during the population
 gradient, instead of holding it fixed. \code{0} = never (cheap
@@ -218,11 +227,17 @@ fixed-EBE gradient); \code{1} = every gradient evaluation; \code{N}
 = every \code{N}-th. Reconverging recovers the full gradient surface
 at roughly 5-6x the per-call cost and can help gradient-based
 optimizers (e.g. \code{slsqp}) past ill-conditioned non-IOV plateaus.
-IOV models always reconverge and ignore this setting. Only consumed by
-FOCE / FOCEI / GN-hybrid.}
-\item{\code{steihaug_max_iters}}{CG iteration budget for the
-trust-region subproblem (default chosen by the engine). Only used
-when \code{optimizer = "trust_region"}.}
+IOV models always reconverge and ignore this setting. Not accepted by
+pure \code{"gn"}.}
+}
+
+\strong{Trust-region optimizer (\code{optimizer = "trust_region"})}
+\describe{
+\item{\code{steihaug_max_iters}}{Conjugate-gradient iteration budget for
+the trust-region subproblem (default chosen by the engine). Only
+consumed when \code{optimizer = "trust_region"} is set under FOCE /
+FOCEI / GN-hybrid. Increase if the subproblem solver exits too early
+on ill-conditioned problems.}
 }
 
 \strong{SAEM}
@@ -250,7 +265,8 @@ Requires an AD build; see examples below.}
 \strong{Gauss-Newton (\code{"gn"} / \code{"gn_hybrid"})}
 \describe{
 \item{\code{gn_lambda}}{Levenberg-Marquardt damping factor (default
-\code{0.01}). Larger values make steps more conservative.}
+\code{0.01}). Larger values make steps more conservative. Accepted
+by both \code{"gn"} and \code{"gn_hybrid"}.}
 }
 
 \strong{Importance Sampling (\code{"imp"} stage)}

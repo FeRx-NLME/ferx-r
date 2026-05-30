@@ -1,5 +1,12 @@
 # ferx (development)
 
+## Documentation
+
+- `?ferx_fit`: the `settings` parameter block is restructured into labelled
+  sections, one per estimation method (Shared, FOCE/FOCEI/GN-hybrid, Trust-region,
+  SAEM, Gauss-Newton, Importance Sampling, SIR, Multi-start). Each key now lists
+  its default value and which methods accept it.
+
 ## New features
 
 - `ferx_fit_async(model, data, ...)` now returns a `ferx_job` handle
