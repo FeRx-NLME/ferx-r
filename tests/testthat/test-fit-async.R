@@ -89,7 +89,7 @@ test_that(".ferx_find_trace_from_bg delegates to .ferx_find_trace_from_lines", {
   fake_bg <- structure(list(), class = "fake_bg")
   fake_bg$read_output_lines <- function() character(0)
   fake_bg$read_error_lines  <- function() {
-    c("[ferx] optimizer trace -> /tmp/ferx_trace_99.csv")
+    "[ferx] optimizer trace -> /tmp/ferx_trace_99.csv"
   }
   path <- ferx:::.ferx_find_trace_from_bg(fake_bg)
   expect_equal(path, "/tmp/ferx_trace_99.csv")
