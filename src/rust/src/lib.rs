@@ -901,6 +901,7 @@ fn default_fit_result(
         omega_init_as_sd: Vec::new(),
         sigma_init_as_sd: Vec::new(),
         kappa_init_as_sd: Vec::new(),
+        warnings_structured: Vec::new(),
         #[cfg(feature = "nn")]
         neural_networks: Vec::new(),
     }
@@ -1950,6 +1951,7 @@ fn ferx_rust_sir(
         omega_init_as_sd: Vec::new(),
         sigma_init_as_sd: Vec::new(),
         kappa_init_as_sd: Vec::new(),
+        warnings_structured: Vec::new(),
         #[cfg(feature = "nn")]
         neural_networks: Vec::new(),
     };

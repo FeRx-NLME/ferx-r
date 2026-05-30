@@ -16,6 +16,7 @@ RoxygenNote: 7.3.3
 SystemRequirements: Cargo (Rust's package manager), rustc (>= 1.70); optionally Enzyme toolchain for autodiff
 Config/rextendr/version: 0.5.0
 Imports:
+    callr,
     jsonlite,
     utils
 Suggests:
@@ -23,6 +24,7 @@ Suggests:
     mockery,
     knitr,
     rmarkdown,
+    rstudioapi,
     testthat (>= 3.0.0)
 VignetteBuilder: knitr
 Config/testthat/edition: 3
