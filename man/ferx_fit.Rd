@@ -279,7 +279,7 @@ proposal distribution (default \code{5}).}
 engine).}
 \item{\code{is_low_ess_threshold}}{ESS fraction below which a subject is
 flagged in \code{fit$importance_sampling$low_ess_subject_ids} (default
-\code{0.1}, i.e. 10\\% of \code{is_samples}).}
+\code{0.1}, i.e. \code{10\%} of \code{is_samples}).}
 }
 
 \strong{SIR (Sampling Importance Resampling)}
@@ -298,7 +298,7 @@ i.e. single start). When \code{> 1}, starts 2..n are initialized from
 log-space perturbations of the model's initial values; the best OFV
 wins.}
 \item{\code{start_sigma}}{Perturbation spread in log-space (default
-\code{0.3}, approx. 30\\% CV). Log-packed thetas are multiplied by
+\code{0.3}, approx. \code{30\%} CV). Log-packed thetas are multiplied by
 \code{exp(N(0, start_sigma))}; identity-packed thetas are shifted by
 \code{start_sigma * N(0,1)}.}
 \item{\code{multi_start_seed}}{RNG seed for the start-point perturbation
@@ -373,7 +373,7 @@ applicable). Severity/category are assigned by the engine for its
 own warnings and by the R diagnostics layer for the condition-number
 and ETA-normality checks. Inspect with \code{\link{ferx_warnings}}.}
 \item{sir_ess}{SIR effective sample size (NULL if SIR not run)}
-\item{sir_ci_theta, sir_ci_omega, sir_ci_sigma}{SIR 95\\% CI matrices
+\item{sir_ci_theta, sir_ci_omega, sir_ci_sigma}{SIR \code{95\%} CI matrices
 with columns \code{lower} and \code{upper} (NULL if SIR not run)}
 \item{importance_sampling}{Importance-sampling marginal log-likelihood
 diagnostics, populated only when the method chain ends with an
