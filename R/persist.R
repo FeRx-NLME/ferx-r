@@ -725,6 +725,15 @@ ferx_load_fit <- function(path) {
     kappa_fixed = as.logical(fit$kappa_fixed %||% rep(FALSE, length(fit$kappa_names))),
     se_kappa = .fitrx_opt_num_vec(fit$se_kappa),
     shrinkage_kappa = as.numeric(fit$shrinkage_kappa %||% numeric()),
+    shrinkage_kappa_by_occ = if (is.data.frame(fit$shrinkage_kappa_by_occ) &&
+                                   nrow(fit$shrinkage_kappa_by_occ) > 0L) {
+      kap_cols <- setdiff(colnames(fit$shrinkage_kappa_by_occ), "occ")
+      lapply(seq_len(nrow(fit$shrinkage_kappa_by_occ)), function(i) {
+        as.numeric(fit$shrinkage_kappa_by_occ[i, kap_cols])
+      })
+    } else {
+      list()
+    },
     omega_iov = .fitrx_matrix_to_wire(fit$omega_iov),
     omega_iov_param_corr = .fitrx_matrix_to_wire(fit$omega_iov_param_corr)
   )
