@@ -394,9 +394,7 @@ has no IOV.}
 \item{shrinkage_kappa_by_occ}{Data frame with column \code{occ} (1-based
 occasion index) and one numeric column per kappa parameter giving the
 shrinkage at each occasion. Use this for per-occasion IOV diagnostics.
-\code{NULL} when the model has no IOV, or when the design is too
-unbalanced for per-occasion estimates (use \code{shrinkage_kappa}
-instead in that case).}
+\code{NULL} when the model has no IOV.}
 \item{ebe_kappas}{Data frame with columns \code{ID}, \code{OCC}, and one
 column per kappa parameter containing per-subject per-occasion kappa
 EBEs. \code{ID} carries the original subject identifier (matching

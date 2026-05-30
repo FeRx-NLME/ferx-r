@@ -354,9 +354,7 @@
 #'   \item{shrinkage_kappa_by_occ}{Data frame with column \code{occ} (1-based
 #'     occasion index) and one numeric column per kappa parameter giving the
 #'     shrinkage at each occasion. Use this for per-occasion IOV diagnostics.
-#'     \code{NULL} when the model has no IOV, or when the design is too
-#'     unbalanced for per-occasion estimates (use \code{shrinkage_kappa}
-#'     instead in that case).}
+#'     \code{NULL} when the model has no IOV.}
 #'   \item{ebe_kappas}{Data frame with columns \code{ID}, \code{OCC}, and one
 #'     column per kappa parameter containing per-subject per-occasion kappa
 #'     EBEs. \code{ID} carries the original subject identifier (matching
@@ -1969,18 +1967,15 @@ print.ferx_fit <- function(x, ...) {
         }
       }
     }
-    # Per-occasion shrinkage breakdown (ferx-core PR #167).
-    # Only shown when 2+ occasions are present; single-occasion fits already
-    # show the pooled value on the kappa line above.
     if (!is.null(x$shrinkage_kappa_by_occ) &&
         is.data.frame(x$shrinkage_kappa_by_occ) &&
-        nrow(x$shrinkage_kappa_by_occ) >= 2L) {
+        nrow(x$shrinkage_kappa_by_occ) >= 1L) {
       cat("  --- Shrinkage by occasion ---\n")
       df_occ <- x$shrinkage_kappa_by_occ
       kap_cols <- setdiff(colnames(df_occ), "occ")
       for (row_i in seq_len(nrow(df_occ))) {
         parts <- vapply(kap_cols, function(cn) {
-          sprintf("%s %.1f%%", cn, df_occ[row_i, cn] * 100)
+          sprintf("%s %.1f%%", cn, df_occ[[cn]][row_i] * 100)
         }, character(1L))
         cat(sprintf("  Occasion %d: %s\n", df_occ$occ[row_i], paste(parts, collapse = "  ")))
       }
