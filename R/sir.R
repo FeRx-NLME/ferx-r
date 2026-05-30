@@ -283,5 +283,18 @@ ferx_sir <- function(fit,
     fit$sir_resamples_dim <- as.integer(raw$sir_resamples_dim)
   }
 
+  # Append any SIR-step warnings to the structured warnings table. The engine
+  # can emit warnings during the SIR run (e.g. ESS collapse, proposal issues);
+  # they would otherwise be silently dropped since only ferx_fit() calls the
+  # assembler. We append rather than replace so pre-SIR warnings are preserved.
+  sir_warnings_df <- .ferx_assemble_structured_warnings(raw, fit)
+  if (nrow(sir_warnings_df) > 0L) {
+    existing <- fit$warnings_structured
+    fit$warnings_structured <- if (is.data.frame(existing) && nrow(existing) > 0L)
+      rbind(existing, sir_warnings_df)
+    else
+      sir_warnings_df
+  }
+
   fit
 }

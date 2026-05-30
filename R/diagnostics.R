@@ -364,9 +364,12 @@ ferx_estimates <- function(fit) {
 # ferx_warnings() so that requireNamespace() and isatty() are not repeated
 # inside the per-row print loop.
 .ferx_use_cli <- function() {
-  requireNamespace("cli", quietly = TRUE) &&
-    cli::num_ansi_colors() > 1L &&
-    isatty(stdout())
+  tryCatch(
+    requireNamespace("cli", quietly = TRUE) &&
+      cli::num_ansi_colors() > 1L &&
+      isatty(stdout()),
+    error = function(e) FALSE
+  )
 }
 
 # Apply an ANSI style to text.  use_cli must be pre-computed by .ferx_use_cli()

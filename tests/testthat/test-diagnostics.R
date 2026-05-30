@@ -97,9 +97,10 @@ test_that("DW autocorrelation warnings flow through as structured entries", {
     class = "ferx_fit"
   )
   raw <- list(
-    warnings_severity = "warning",
-    warnings_category = "dw_autocorrelation",
-    warnings_message  = "Positive IWRES autocorrelation detected (Durbin-Watson = 1.20)."
+    warnings_severity      = "warning",
+    warnings_category      = "dw_autocorrelation",
+    warnings_message       = "Positive IWRES autocorrelation detected (Durbin-Watson = 1.20).",
+    warnings_source_method = ""
   )
   df <- ferx:::.ferx_assemble_structured_warnings(raw, fake)
   expect_equal(nrow(df), 1L)

@@ -283,8 +283,10 @@ under the model's covariate effects. For inter-occasion variation see
 \item{warnings_structured}{Data frame with columns \code{severity}
 (\code{"critical"}, \code{"warning"}, or \code{"info"}),
 \code{category} (a fixed vocabulary such as \code{"convergence"},
-\code{"covariance_step"}, \code{"dw_autocorrelation"}), and
-\code{message}. Severity/category are assigned by the engine for its
+\code{"covariance_step"}, \code{"dw_autocorrelation"}),
+\code{message}, and \code{source_method} (the estimation stage that
+emitted the warning, e.g. \code{"FOCEI"}; empty string when not
+applicable). Severity/category are assigned by the engine for its
 own warnings and by the R diagnostics layer for the condition-number
 and ETA-normality checks. Inspect with \code{\link{ferx_warnings}}.}
 \item{sir_ess}{SIR effective sample size (NULL if SIR not run)}
