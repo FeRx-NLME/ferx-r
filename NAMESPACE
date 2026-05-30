@@ -2,11 +2,13 @@
 
 S3method(print,ferx_fit)
 S3method(print,ferx_inits)
+S3method(print,ferx_job)
 S3method(print,ferx_model)
 S3method(print,ferx_summary)
 S3method(summary,ferx_fit)
 export(check_diagnostics)
 export(ferx_check_init)
+export(ferx_collect)
 export(ferx_cor_matrix)
 export(ferx_estimates)
 export(ferx_eta_cov)

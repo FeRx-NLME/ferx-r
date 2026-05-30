@@ -2,7 +2,7 @@
 % Please edit documentation in R/fit.R
 \name{ferx_fit_async}
 \alias{ferx_fit_async}
-\title{Fit a model asynchronously with live progress}
+\title{Fit a model asynchronously}
 \usage{
 ferx_fit_async(model, data = NULL, ..., tail_n = 6L, poll_interval = 0.5)
 }
@@ -10,46 +10,50 @@ ferx_fit_async(model, data = NULL, ..., tail_n = 6L, poll_interval = 0.5)
 \item{model, data, ...}{Forwarded to \code{\link{ferx_fit}}. See its
 documentation for the full argument list.}
 
-\item{tail_n}{Integer. Number of recent trace rows to keep visible while
-the fit is running. Default 6.}
+\item{tail_n}{Integer. Number of recent trace rows to keep visible per
+poll in \code{\link{ferx_collect}}. Default 6.}
 
-\item{poll_interval}{Numeric. Seconds between polls of the trace CSV.
-Default 0.5.}
+\item{poll_interval}{Numeric. Seconds between polls in
+\code{\link{ferx_collect}}. Default 0.5.}
 }
 \value{
-The \code{ferx_fit} object returned by the background process
-(identical to what a synchronous \code{ferx_fit()} would return).
-Returns \code{NULL} if the user interrupts.
+A \code{ferx_job} handle. Pass it to \code{\link{ferx_collect}}
+to retrieve the \code{ferx_fit} result. In non-interactive sessions
+(\code{Rscript}, knitr, batch mode) the function falls back to a
+synchronous \code{\link{ferx_fit}} call and returns the result directly.
 }
 \description{
-Runs \code{\link{ferx_fit}} in a background R process so the interactive R
-session (RStudio, the R console) stays responsive while the fit is running.
-The console tail-prints the last \code{tail_n} optimizer iterations from
-the per-iteration trace CSV, updated every \code{poll_interval} seconds,
-so you can watch the optimizer's progress without freezing the UI.
+Submits \code{\link{ferx_fit}} to a background process and returns
+immediately, leaving the R session free. Call \code{\link{ferx_collect}}
+on the returned handle to block-wait for the result and see live trace
+progress.
 }
 \details{
-The function forces \code{optimizer_trace = TRUE} internally so it has a
-parseable progress channel for every estimation method. When you did not
-explicitly request the trace, the temp CSV is deleted after the fit
-completes; pass \code{optimizer_trace = TRUE} explicitly to keep it.
+In RStudio the fit is submitted via \code{rstudioapi::jobRunScript()} and
+appears in the Jobs pane. In Positron, plain R, or any other interactive
+session it uses \code{callr::r_bg()}. Both backends return the same
+\code{ferx_job} handle and the same \code{ferx_collect()} call retrieves
+the result.
 
-Pressing \code{Ctrl+C} (or the RStudio "stop" button) sends an interrupt
-to the background process; the fit is killed and \code{NULL} is returned.
+The function forces \code{optimizer_trace = TRUE} internally so it has a
+parseable progress channel. When you did not explicitly request the trace,
+the temp CSV is deleted after \code{ferx_collect()} returns; pass
+\code{optimizer_trace = TRUE} explicitly to keep it.
 }
 \section{Non-interactive use}{
 
-When called in a non-interactive session (\code{Rscript}, knitr,
-batch mode), \code{ferx_fit_async()} silently falls back to
-\code{\link{ferx_fit}} since the async progress display only adds value
+When called in a non-interactive session, \code{ferx_fit_async()} silently
+falls back to \code{\link{ferx_fit}} since background jobs only add value
 in an interactive console.
 }
 
 \examples{
 \dontrun{
 ex <- ferx_example("warfarin")
-fit <- ferx_fit_async(ex$model, ex$data, method = "focei")
-# R prompt is free during the fit; last 6 iterations refresh in place.
+handle <- ferx_fit_async(ex$model, ex$data, method = "focei")
+# R prompt is free immediately
+print(handle)
+fit <- ferx_collect(handle)
 summary(fit)
 }
 
@@ -57,6 +61,7 @@ summary(fit)
 \seealso{
 Other fitting: 
 \code{\link{ferx_check_init}()},
+\code{\link{ferx_collect}()},
 \code{\link{ferx_fit}()},
 \code{\link{ferx_inits_from_nca}()},
 \code{\link{ferx_sir}()}

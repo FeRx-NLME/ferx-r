@@ -121,6 +121,7 @@ these values automatically before the optimizer runs.
 
 Other fitting: 
 \code{\link{ferx_check_init}()},
+\code{\link{ferx_collect}()},
 \code{\link{ferx_fit}()},
 \code{\link{ferx_fit_async}()},
 \code{\link{ferx_sir}()}

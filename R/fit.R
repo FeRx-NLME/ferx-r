@@ -2341,44 +2341,48 @@ print.ferx_summary <- function(x, ...) {
   list(keys = nms, values = values)
 }
 
-#' Fit a model asynchronously with live progress
+#' Fit a model asynchronously
 #'
-#' Runs \code{\link{ferx_fit}} in a background R process so the interactive R
-#' session (RStudio, the R console) stays responsive while the fit is running.
-#' The console tail-prints the last \code{tail_n} optimizer iterations from
-#' the per-iteration trace CSV, updated every \code{poll_interval} seconds,
-#' so you can watch the optimizer's progress without freezing the UI.
+#' Submits \code{\link{ferx_fit}} to a background process and returns
+#' immediately, leaving the R session free. Call \code{\link{ferx_collect}}
+#' on the returned handle to block-wait for the result and see live trace
+#' progress.
+#'
+#' In RStudio the fit is submitted via \code{rstudioapi::jobRunScript()} and
+#' appears in the Jobs pane. In Positron, plain R, or any other interactive
+#' session it uses \code{callr::r_bg()}. Both backends return the same
+#' \code{ferx_job} handle and the same \code{ferx_collect()} call retrieves
+#' the result.
 #'
 #' The function forces \code{optimizer_trace = TRUE} internally so it has a
-#' parseable progress channel for every estimation method. When you did not
-#' explicitly request the trace, the temp CSV is deleted after the fit
-#' completes; pass \code{optimizer_trace = TRUE} explicitly to keep it.
-#'
-#' Pressing \code{Ctrl+C} (or the RStudio "stop" button) sends an interrupt
-#' to the background process; the fit is killed and \code{NULL} is returned.
+#' parseable progress channel. When you did not explicitly request the trace,
+#' the temp CSV is deleted after \code{ferx_collect()} returns; pass
+#' \code{optimizer_trace = TRUE} explicitly to keep it.
 #'
 #' @param model,data,... Forwarded to \code{\link{ferx_fit}}. See its
 #'   documentation for the full argument list.
-#' @param tail_n Integer. Number of recent trace rows to keep visible while
-#'   the fit is running. Default 6.
-#' @param poll_interval Numeric. Seconds between polls of the trace CSV.
-#'   Default 0.5.
+#' @param tail_n Integer. Number of recent trace rows to keep visible per
+#'   poll in \code{\link{ferx_collect}}. Default 6.
+#' @param poll_interval Numeric. Seconds between polls in
+#'   \code{\link{ferx_collect}}. Default 0.5.
 #'
-#' @return The \code{ferx_fit} object returned by the background process
-#'   (identical to what a synchronous \code{ferx_fit()} would return).
-#'   Returns \code{NULL} if the user interrupts.
+#' @return A \code{ferx_job} handle. Pass it to \code{\link{ferx_collect}}
+#'   to retrieve the \code{ferx_fit} result. In non-interactive sessions
+#'   (\code{Rscript}, knitr, batch mode) the function falls back to a
+#'   synchronous \code{\link{ferx_fit}} call and returns the result directly.
 #'
 #' @section Non-interactive use:
-#' When called in a non-interactive session (\code{Rscript}, knitr,
-#' batch mode), \code{ferx_fit_async()} silently falls back to
-#' \code{\link{ferx_fit}} since the async progress display only adds value
+#' When called in a non-interactive session, \code{ferx_fit_async()} silently
+#' falls back to \code{\link{ferx_fit}} since background jobs only add value
 #' in an interactive console.
 #'
 #' @examples
 #' \dontrun{
 #' ex <- ferx_example("warfarin")
-#' fit <- ferx_fit_async(ex$model, ex$data, method = "focei")
-#' # R prompt is free during the fit; last 6 iterations refresh in place.
+#' handle <- ferx_fit_async(ex$model, ex$data, method = "focei")
+#' # R prompt is free immediately
+#' print(handle)
+#' fit <- ferx_collect(handle)
 #' summary(fit)
 #' }
 #'
@@ -2390,12 +2394,6 @@ ferx_fit_async <- function(model, data = NULL, ...,
   if (!interactive()) {
     return(ferx_fit(model, data, ...))
   }
-  if (!requireNamespace("callr", quietly = TRUE)) {
-    stop(
-      "ferx_fit_async() requires the `callr` package. ",
-      "Install with: install.packages(\"callr\")"
-    )
-  }
   if (!is.numeric(tail_n) || length(tail_n) != 1L || tail_n < 1L) {
     stop("`tail_n` must be a positive integer scalar")
   }
@@ -2404,33 +2402,206 @@ ferx_fit_async <- function(model, data = NULL, ...,
     stop("`poll_interval` must be a positive numeric scalar")
   }
   tail_n <- as.integer(tail_n)
-
   dots <- list(...)
   user_wanted_trace <- isTRUE(dots$optimizer_trace)
+  model_label <- if (is.character(model)) basename(model) else "model"
 
+  use_rstudio <- requireNamespace("rstudioapi", quietly = TRUE) &&
+    rstudioapi::isAvailable() &&
+    rstudioapi::hasFun("jobRunScript")
+
+  if (use_rstudio) {
+    handle <- .ferx_async_rstudio(model, data, dots, model_label,
+                                   tail_n, poll_interval, user_wanted_trace)
+  } else {
+    if (!requireNamespace("callr", quietly = TRUE)) {
+      stop(
+        "ferx_fit_async() requires the `callr` package. ",
+        "Install with: install.packages(\"callr\")"
+      )
+    }
+    handle <- .ferx_async_callr(model, data, dots, model_label,
+                                 tail_n, poll_interval, user_wanted_trace)
+  }
+
+  cat(sprintf(
+    "Fitting %s in background [%s]. Call ferx_collect(handle) when ready.\n",
+    model_label, handle$backend
+  ))
+  invisible(handle)
+}
+
+.ferx_async_callr <- function(model, data, dots, model_label,
+                               tail_n, poll_interval, user_wanted_trace) {
   bg <- callr::r_bg(
     func = function(model, data, dots) {
       dots$optimizer_trace <- TRUE
-      args <- c(list(model = model, data = data), dots)
-      do.call(ferx::ferx_fit, args)
+      do.call(ferx::ferx_fit, c(list(model = model, data = data), dots))
     },
     args = list(model = model, data = data, dots = dots),
     package = TRUE,
     supervise = TRUE
   )
+  structure(
+    list(
+      backend          = "callr",
+      model_label      = model_label,
+      bg               = bg,
+      tail_n           = tail_n,
+      poll_interval    = poll_interval,
+      user_wanted_trace = user_wanted_trace
+    ),
+    class = "ferx_job"
+  )
+}
 
-  model_label <- if (is.character(model)) basename(model) else "model"
-  cat(sprintf("Fitting %s in background ... (Ctrl+C to interrupt)\n",
-              model_label))
+.ferx_async_rstudio <- function(model, data, dots, model_label,
+                                 tail_n, poll_interval, user_wanted_trace) {
+  rds_path     <- tempfile("ferx_result_", fileext = ".rds")
+  sidecar_path <- tempfile("ferx_trace_loc_", fileext = ".txt")
 
-  trace_path <- NULL
-  state <- list(last_iter = -1L, lines_printed = 0L)
-  result <- tryCatch({
+  script_path <- tempfile("ferx_job_", fileext = ".R")
+  args_path   <- tempfile("ferx_args_", fileext = ".rds")
+  saveRDS(list(model = model, data = data, dots = dots), args_path)
+
+  # The job script deletes args_path itself immediately after readRDS so the
+  # file is gone before callr::r_bg() is called — no race between cleanup and
+  # the inner bg process starting up.
+  writeLines(
+    c(
+      "local({",
+      sprintf("  saved <- readRDS(%s)", deparse(args_path)),
+      sprintf("  unlink(%s)", deparse(args_path)),
+      "  model        <- saved$model",
+      "  data         <- saved$data",
+      "  dots         <- saved$dots",
+      sprintf("  rds_path     <- %s", deparse(rds_path)),
+      sprintf("  sidecar_path <- %s", deparse(sidecar_path)),
+      "  dots$optimizer_trace <- TRUE",
+      "  bg <- callr::r_bg(",
+      "    func = function(model, data, dots) {",
+      "      do.call(ferx::ferx_fit, c(list(model = model, data = data), dots))",
+      "    },",
+      "    args = list(model = model, data = data, dots = dots),",
+      "    package = TRUE, supervise = TRUE",
+      "  )",
+      "  trace_written <- FALSE",
+      "  while (bg$is_alive()) {",
+      "    if (!trace_written) {",
+      "      lines <- c(",
+      "        tryCatch(bg$read_output_lines(), error = function(e) character(0)),",
+      "        tryCatch(bg$read_error_lines(),  error = function(e) character(0))",
+      "      )",
+      "      path <- ferx:::.ferx_find_trace_from_lines(lines)",
+      "      if (!is.null(path)) {",
+      "        writeLines(path, sidecar_path)",
+      "        trace_written <- TRUE",
+      "      }",
+      "    }",
+      "    Sys.sleep(0.2)",
+      "  }",
+      "  result <- bg$get_result()",
+      "  saveRDS(result, rds_path)",
+      "})"
+    ),
+    script_path
+  )
+
+  # If jobRunScript() throws, clean up both temp files before propagating.
+  job_id <- tryCatch(
+    rstudioapi::jobRunScript(
+      path       = script_path,
+      name       = model_label,
+      workingDir = getwd()
+    ),
+    error = function(e) {
+      unlink(c(script_path, args_path))
+      stop(e)
+    }
+  )
+
+  structure(
+    list(
+      backend           = "rstudio",
+      model_label       = model_label,
+      job_id            = job_id,
+      rds_path          = rds_path,
+      sidecar_path      = sidecar_path,
+      script_path       = script_path,
+      tail_n            = tail_n,
+      poll_interval     = poll_interval,
+      user_wanted_trace = user_wanted_trace
+    ),
+    class = "ferx_job"
+  )
+}
+
+#' Retrieve the result of a background fit
+#'
+#' Blocks until the background fit started by \code{\link{ferx_fit_async}}
+#' completes, optionally printing live optimizer trace progress to the console.
+#' Pressing \code{Ctrl+C} cancels the wait and kills the background process;
+#' \code{NULL} is returned.
+#'
+#' @param handle A \code{ferx_job} handle returned by
+#'   \code{\link{ferx_fit_async}}.
+#' @param verbose Logical. Whether to print optimizer trace progress while
+#'   waiting. Default \code{TRUE}.
+#'
+#' @return The \code{ferx_fit} object produced by the background fit.
+#'   Returns \code{NULL} if the user interrupts.
+#'
+#' @section Errors:
+#' If the background fit itself errors (e.g. bad model file, engine failure),
+#' \code{ferx_collect()} re-throws the error in the calling session.
+#'
+#' @examples
+#' \dontrun{
+#' ex <- ferx_example("warfarin")
+#' handle <- ferx_fit_async(ex$model, ex$data, method = "focei")
+#' fit <- ferx_collect(handle)
+#' summary(fit)
+#' }
+#'
+#' @family fitting
+#' @export
+ferx_collect <- function(handle, verbose = TRUE) {
+  if (!inherits(handle, "ferx_job")) {
+    stop("`handle` must be a ferx_job object returned by ferx_fit_async()")
+  }
+  if (handle$backend == "callr") {
+    result <- .ferx_collect_callr(handle, verbose)
+  } else {
+    result <- .ferx_collect_rstudio(handle, verbose)
+  }
+  if (is.null(result)) return(invisible(NULL))
+  if (!handle$user_wanted_trace && !is.null(result$trace_path) &&
+        file.exists(result$trace_path)) {
+    unlink(result$trace_path)
+    result$trace_path <- NULL
+  }
+  result
+}
+
+.ferx_collect_callr <- function(handle, verbose) {
+  bg            <- handle$bg
+  tail_n        <- handle$tail_n
+  poll_interval <- handle$poll_interval
+  trace_path    <- NULL
+  state         <- list(last_iter = -1L, lines_printed = 0L)
+
+  tryCatch({
     while (bg$is_alive()) {
-      if (is.null(trace_path)) {
-        trace_path <- .ferx_find_trace_from_bg(bg)
+      # Always drain both streams to prevent the bg process from blocking
+      # on a full OS pipe buffer, regardless of whether we display output.
+      lines <- c(
+        tryCatch(bg$read_output_lines(), error = function(e) character(0)),
+        tryCatch(bg$read_error_lines(),  error = function(e) character(0))
+      )
+      if (verbose && is.null(trace_path)) {
+        trace_path <- .ferx_find_trace_from_lines(lines)
       }
-      if (!is.null(trace_path) && file.exists(trace_path)) {
+      if (verbose && !is.null(trace_path) && file.exists(trace_path)) {
         state <- .ferx_print_trace_tail(trace_path, tail_n, state)
       }
       Sys.sleep(poll_interval)
@@ -2441,41 +2612,106 @@ ferx_fit_async <- function(model, data = NULL, ...,
     message("\nFit interrupted by user.")
     NULL
   })
-
-  if (is.null(result)) return(invisible(NULL))
-
-  if (!user_wanted_trace && !is.null(result$trace_path) &&
-        file.exists(result$trace_path)) {
-    unlink(result$trace_path)
-    result$trace_path <- NULL
-  }
-  result
 }
 
-# Look for the optimizer trace path on the background process's output.
-# ferx-core emits a "[ferx] optimizer trace -> /path/to/file.csv" line on
-# stderr (eprintln!) when optimizer_trace = TRUE; we scan both streams to
-# discover the tempfile name so the parent can tail it.
-.ferx_find_trace_from_bg <- function(bg) {
-  stdout_lines <- tryCatch(bg$read_output_lines(), error = function(e) character(0))
-  stderr_lines <- tryCatch(bg$read_error_lines(), error = function(e) character(0))
-  lines <- c(stdout_lines, stderr_lines)
+.ferx_collect_rstudio <- function(handle, verbose) {
+  job_id        <- handle$job_id
+  rds_path      <- handle$rds_path
+  sidecar_path  <- handle$sidecar_path
+  tail_n        <- handle$tail_n
+  poll_interval <- handle$poll_interval
+  trace_path    <- NULL
+  state         <- list(last_iter = -1L, lines_printed = 0L)
+
+  on_done <- function() {
+    if (!is.null(handle$script_path) && file.exists(handle$script_path))
+      unlink(handle$script_path)
+  }
+
+  # Declare outside the repeat so it's always in scope after the loop,
+  # including when the loop body runs zero times (job already done).
+  job_state <- "unknown"
+
+  tryCatch({
+    repeat {
+      job_state <- tryCatch(
+        rstudioapi::jobGetState(job_id),
+        error = function(e) "unknown"
+      )
+      if (job_state %in% c("succeeded", "failed")) break
+
+      if (verbose) {
+        if (is.null(trace_path) && file.exists(sidecar_path)) {
+          trace_path <- trimws(readLines(sidecar_path, warn = FALSE)[1])
+          if (!nzchar(trace_path)) trace_path <- NULL
+        }
+        if (!is.null(trace_path) && file.exists(trace_path)) {
+          state <- .ferx_print_trace_tail(trace_path, tail_n, state)
+        }
+      }
+      Sys.sleep(poll_interval)
+    }
+    on_done()
+    if (job_state == "failed" || !file.exists(rds_path)) {
+      stop("Background fit failed. Check the Jobs pane for details.")
+    }
+    result <- readRDS(rds_path)
+    unlink(rds_path)
+    if (file.exists(sidecar_path)) unlink(sidecar_path)
+    result
+  }, interrupt = function(e) {
+    tryCatch(rstudioapi::jobRemove(job_id), error = function(e) NULL)
+    on_done()
+    if (file.exists(sidecar_path)) unlink(sidecar_path)
+    message("\nFit interrupted by user.")
+    NULL
+  })
+}
+
+#' @export
+print.ferx_job <- function(x, ...) {
+  status <- if (x$backend == "callr") {
+    if (tryCatch(x$bg$is_alive(), error = function(e) FALSE)) "running" else "done"
+  } else {
+    tryCatch(rstudioapi::jobGetState(x$job_id), error = function(e) "unknown")
+  }
+  backend_note <- if (x$backend == "rstudio") {
+    "rstudio (visible in Jobs pane)"
+  } else {
+    "callr"
+  }
+  cat(sprintf("<ferx_job> [%s] %s\n", status, x$model_label))
+  cat(sprintf("Backend : %s\n", backend_note))
+  cat("Call ferx_collect(handle) to retrieve the result.\n")
+  invisible(x)
+}
+
+# Parse a trace CSV path from a character vector of stdout/stderr lines.
+# ferx-core emits "[ferx] optimizer trace -> /path/to/file.csv" on stderr.
+.ferx_find_trace_from_lines <- function(lines) {
   if (length(lines) == 0L) return(NULL)
-  # Try the explicit "optimizer trace -> /path" message first.
   m <- regmatches(
     lines,
-    regexpr("optimizer trace[^/]*(/[^ ]+\\.csv)", lines, perl = TRUE)
+    regexpr("optimizer trace[^/]*(/\\S+\\.csv)", lines, perl = TRUE)
   )
   m <- m[nzchar(m)]
   if (length(m) > 0L) {
-    return(sub(".*?(/[^ ]+\\.csv).*", "\\1", m[[length(m)]], perl = TRUE))
+    return(sub(".*?(/\\S+\\.csv).*", "\\1", m[[length(m)]], perl = TRUE))
   }
-  # Fallback: any *.csv path on a "trace" line.
   cand <- grep("trace", lines, value = TRUE, ignore.case = TRUE)
   if (length(cand) == 0L) return(NULL)
-  csvs <- regmatches(cand, regexpr("/[^ ]+\\.csv", cand))
+  csvs <- regmatches(cand, regexpr("/\\S+\\.csv", cand))
   csvs <- csvs[nzchar(csvs)]
   if (length(csvs) == 0L) NULL else trimws(csvs[[length(csvs)]])
+}
+
+# Keep the old name as an internal alias so existing tests that mock the
+# bg-object interface still work; .ferx_find_trace_from_bg() now delegates
+# to the lines-based helper.
+.ferx_find_trace_from_bg <- function(bg) {
+  stdout_lines <- tryCatch(bg$read_output_lines(), error = function(e) character(0))
+  stderr_lines <- tryCatch(bg$read_error_lines(), error = function(e) character(0))
+  .ferx_find_trace_from_lines(c(stdout_lines, stderr_lines))
 }
 
 # Tail the trace CSV in place: each poll reads the file, prints any new rows
