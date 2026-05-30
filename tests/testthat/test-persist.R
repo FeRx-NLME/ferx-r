@@ -315,6 +315,20 @@ test_that("LTBS residual label survives a .fitrx round-trip", {
   expect_equal(loaded$model_structure$residual, "additive (log-transformed)")
 })
 
+test_that(".fitrx_build_iov_wire uses empty list when shrinkage_kappa_by_occ is absent", {
+  fake_iov_fit <- list(
+    omega_iov              = matrix(0.09, 1, 1),
+    kappa_names            = "KAPPA_CL",
+    kappa_fixed            = FALSE,
+    se_kappa               = NULL,
+    shrinkage_kappa        = 0.15,
+    shrinkage_kappa_by_occ = NULL,
+    omega_iov_param_corr   = NULL
+  )
+  wire <- ferx:::.fitrx_build_iov_wire(fake_iov_fit)
+  expect_equal(wire$shrinkage_kappa_by_occ, list())
+})
+
 test_that("shrinkage_kappa_by_occ survives a ferx_save/ferx_load round-trip", {
   skip_on_cran()
   ex  <- ferx_example("warfarin_iov")

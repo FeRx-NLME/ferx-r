@@ -318,3 +318,14 @@ test_that("shrinkage_kappa_by_occ is NULL for non-IOV fit", {
   fit <- warfarin_fit()
   expect_null(fit$shrinkage_kappa_by_occ)
 })
+
+test_that("print.ferx_fit shows per-occasion shrinkage table for IOV fit", {
+  skip_on_cran()
+  ex  <- ferx_example("warfarin_iov")
+  fit <- ferx_fit(ex$model, ex$data, covariance = FALSE, verbose = FALSE)
+  skip_if(is.null(fit$shrinkage_kappa_by_occ),
+          "IOV fit did not produce shrinkage_kappa_by_occ")
+  out <- capture.output(suppressWarnings(print(fit)))
+  expect_true(any(grepl("Shrinkage by occasion", out, fixed = TRUE)))
+  expect_true(any(grepl("Occasion", out, fixed = TRUE)))
+})
