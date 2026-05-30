@@ -12,6 +12,15 @@
   previously blocked and returned the fit directly; it now returns a handle
   that must be passed to `ferx_collect()`.
 
+- `print(fit)` has a new compact layout: a prominent `STATUS: CONVERGED` /
+  `NOT CONVERGED` line with iteration count and wall time immediately after the
+  header; OFV / AIC / BIC on one line; bold section headers with thin rules
+  instead of `--- THETA Estimates ---` banners; shrinkage as a single line with
+  inline `[!]` for values > 30%; a diagnostics line consolidating covariance
+  status, condition number, and Durbin-Watson; and a colour-coded warning-count
+  footer pointing at `ferx_warnings(fit)`. Programmatic access (`fit$theta`,
+  `ferx_estimates()`, `summary()`) is unchanged.
+
 - `ferx_warnings(fit)` pretty-prints fit warnings grouped by severity
   (critical / warning / info) with per-category remediation guidance.
   `ferx_warnings(fit, as_df = TRUE)` returns the underlying
