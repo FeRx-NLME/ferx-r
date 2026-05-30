@@ -6,7 +6,7 @@
 test_that("print.ferx_fit shows '+ SDE (EKF)' when uses_sde is TRUE", {
   fit <- make_fake_fit(uses_sde = TRUE, omega = matrix(0.09, 1, 1))
   out <- capture.output(print(fit))
-  method_line <- out[grepl("Estimation method", out)]
+  method_line <- out[grepl("Method:", out)]
   expect_length(method_line, 1L)
   expect_match(method_line, "SDE \\(EKF\\)")
 })
@@ -31,7 +31,7 @@ test_that("print.ferx_fit shows SDE tag after method chain when uses_sde TRUE", 
     omega        = matrix(0.09, 1, 1)
   )
   out <- capture.output(print(fit))
-  chain_line <- out[grepl("Estimation chain", out)]
+  chain_line <- out[grepl("Method:", out)]
   expect_length(chain_line, 1L)
   expect_match(chain_line, "SDE \\(EKF\\)")
 })
