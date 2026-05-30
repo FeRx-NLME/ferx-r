@@ -2,6 +2,14 @@
 
 ## New features
 
+- `ferx_warnings(fit)` pretty-prints fit warnings grouped by severity
+  (critical / warning / info) with per-category remediation guidance.
+  `ferx_warnings(fit, as_df = TRUE)` returns the underlying
+  `fit$warnings_structured` data frame (columns: `severity`, `category`,
+  `message`, `source_method`). Durbin-Watson autocorrelation guidance is
+  direction-aware (positive vs negative DW) and suppresses the SDE hint
+  when the model already uses a `[diffusion]` block.
+
 - Log-transform-both-sides (LTBS) residual error: fit on the log scale with
   additive error, the equivalent of NONMEM's `Y = LOG(F) + EPS(1)`. Write the
   `[error_model]` block as either form:
