@@ -188,7 +188,7 @@ test_that("ferx_set_section() on ferx_model returns the same object (same $model
   path <- write_pipe_test_model()
   on.exit(unlink(path))
   m      <- ferx_model(model = path)
-  result <- ferx_set_section(m, "fit_options", c("  method = focei"))
+  result <- ferx_set_section(m, "fit_options", "  method = focei")
   expect_equal(result$model, m$model)
 })
 
@@ -207,7 +207,7 @@ test_that("ferx_set_section() returns ferx_model invisibly", {
   path <- write_pipe_test_model()
   on.exit(unlink(path))
   result <- withVisible(
-    ferx_set_section(ferx_model(model = path), "fit_options", c("  method = foce"))
+    ferx_set_section(ferx_model(model = path), "fit_options", "  method = foce")
   )
   expect_s3_class(result$value, "ferx_model")
   expect_false(result$visible)
@@ -227,7 +227,7 @@ test_that("pipe chain: double ferx_set_section() applies both changes", {
 
   ferx_model(model = path) |>
     ferx_set_section("fit_options",  c("  method = focei", "  maxiter = 999")) |>
-    ferx_set_section("error_model",  c("  DV ~ additive(ADD_ERR)"))
+    ferx_set_section("error_model",  "  DV ~ additive(ADD_ERR)")
 
   expect_true(any(grepl("maxiter = 999", ferx_model_section(path, "fit_options"))))
   expect_true(any(grepl("additive",      ferx_model_section(path, "error_model"))))
@@ -267,7 +267,7 @@ test_that("pipe chain: ferx_model() |> ferx_get_section() |> ferx_set_section() 
 
   ferx_model(model = path) |>
     ferx_get_section("parameters") |>
-    ferx_set_section("fit_options", c("  method = foce"))
+    ferx_set_section("fit_options", "  method = foce")
 
   expect_true(any(grepl("method = foce", ferx_model_section(path, "fit_options"))))
 })
@@ -457,7 +457,7 @@ test_that("ferx_set_section() emits a copy-on-write message for package files", 
   expect_message(
     ferx_set_section(
       ferx_model(ex$model, data = ex$data),
-      "fit_options", c("  method = focei")
+      "fit_options", "  method = focei"
     ),
     regexp = "copying read-only package model"
   )

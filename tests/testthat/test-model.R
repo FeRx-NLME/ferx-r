@@ -29,7 +29,7 @@ null_editor <- function(...) invisible(NULL)
 test_that("ferx_model_section() returns body lines of a named section", {
   path <- write_test_model(list(
     parameters  = c("  theta TVCL(1.0, 0.001, 100.0)", "  omega ETA_CL ~ 0.09"),
-    fit_options = c("  method = foce")
+    fit_options = "  method = foce"
   ))
   on.exit(unlink(path))
 
@@ -39,7 +39,7 @@ test_that("ferx_model_section() returns body lines of a named section", {
 
 test_that("ferx_model_section() returns the last section correctly", {
   path <- write_test_model(list(
-    parameters  = c("  theta TVCL(1.0, 0.001, 100.0)"),
+    parameters  = "  theta TVCL(1.0, 0.001, 100.0)",
     fit_options = c("  method = focei", "  maxiter = 300")
   ))
   on.exit(unlink(path))
@@ -51,7 +51,7 @@ test_that("ferx_model_section() returns the last section correctly", {
 test_that("ferx_model_section() returns character(0) for an empty section", {
   path <- write_test_model(list(
     parameters  = character(0),
-    fit_options = c("  method = foce")
+    fit_options = "  method = foce"
   ))
   on.exit(unlink(path))
 
@@ -61,8 +61,8 @@ test_that("ferx_model_section() returns character(0) for an empty section", {
 
 test_that("ferx_model_section() errors with available names when section is missing", {
   path <- write_test_model(list(
-    parameters  = c("  theta TVCL(1.0, 0.001, 100.0)"),
-    fit_options = c("  method = foce")
+    parameters  = "  theta TVCL(1.0, 0.001, 100.0)",
+    fit_options = "  method = foce"
   ))
   on.exit(unlink(path))
 
@@ -124,23 +124,23 @@ test_that("ferx_model_section(strip = TRUE) trims only leading whitespace", {
 
 test_that("ferx_model_set_section() replaces a middle section and leaves others intact", {
   path <- write_test_model(list(
-    parameters  = c("  theta TVCL(1.0, 0.001, 100.0)"),
-    fit_options = c("  method = foce"),
-    error_model = c("  DV ~ proportional(PROP_ERR)")
+    parameters  = "  theta TVCL(1.0, 0.001, 100.0)",
+    fit_options = "  method = foce",
+    error_model = "  DV ~ proportional(PROP_ERR)"
   ))
   on.exit(unlink(path))
 
   ferx_model_set_section(path, "fit_options", c("  method = focei", "  maxiter = 500"))
 
-  expect_equal(ferx_model_section(path, "parameters"), c("  theta TVCL(1.0, 0.001, 100.0)"))
+  expect_equal(ferx_model_section(path, "parameters"), "  theta TVCL(1.0, 0.001, 100.0)")
   expect_equal(ferx_model_section(path, "fit_options"), c("  method = focei", "  maxiter = 500"))
-  expect_equal(ferx_model_section(path, "error_model"), c("  DV ~ proportional(PROP_ERR)"))
+  expect_equal(ferx_model_section(path, "error_model"), "  DV ~ proportional(PROP_ERR)")
 })
 
 test_that("ferx_model_set_section() replaces the last section without appending garbage", {
   path <- write_test_model(list(
-    parameters  = c("  theta TVCL(1.0, 0.001, 100.0)"),
-    fit_options = c("  method = foce")
+    parameters  = "  theta TVCL(1.0, 0.001, 100.0)",
+    fit_options = "  method = foce"
   ))
   on.exit(unlink(path))
 
@@ -159,8 +159,8 @@ test_that("ferx_model_set_section() replaces the last section without appending 
 
 test_that("ferx_model_set_section() replaces a section with empty lines", {
   path <- write_test_model(list(
-    parameters  = c("  theta TVCL(1.0, 0.001, 100.0)"),
-    fit_options = c("  method = foce")
+    parameters  = "  theta TVCL(1.0, 0.001, 100.0)",
+    fit_options = "  method = foce"
   ))
   on.exit(unlink(path))
 
@@ -169,13 +169,13 @@ test_that("ferx_model_set_section() replaces a section with empty lines", {
   result <- ferx_model_section(path, "fit_options")
   expect_equal(result, character(0))
   # parameters section must be unaffected
-  expect_equal(ferx_model_section(path, "parameters"), c("  theta TVCL(1.0, 0.001, 100.0)"))
+  expect_equal(ferx_model_section(path, "parameters"), "  theta TVCL(1.0, 0.001, 100.0)")
 })
 
 test_that("ferx_model_set_section() round-trips a section via ferx_model_section()", {
   path <- write_test_model(list(
-    parameters  = c("  theta TVCL(1.0, 0.001, 100.0)"),
-    fit_options = c("  method = foce")
+    parameters  = "  theta TVCL(1.0, 0.001, 100.0)",
+    fit_options = "  method = foce"
   ))
   on.exit(unlink(path))
 
@@ -187,23 +187,23 @@ test_that("ferx_model_set_section() round-trips a section via ferx_model_section
 })
 
 test_that("ferx_model_set_section() returns path invisibly", {
-  path <- write_test_model(list(fit_options = c("  method = foce")))
+  path <- write_test_model(list(fit_options = "  method = foce"))
   on.exit(unlink(path))
 
-  result <- withVisible(ferx_model_set_section(path, "fit_options", c("  method = focei")))
+  result <- withVisible(ferx_model_set_section(path, "fit_options", "  method = focei"))
   expect_equal(result$value, path)
   expect_false(result$visible)
 })
 
 test_that("ferx_model_set_section() errors with available names when section is missing", {
   path <- write_test_model(list(
-    parameters  = c("  theta TVCL(1.0, 0.001, 100.0)"),
-    fit_options = c("  method = foce")
+    parameters  = "  theta TVCL(1.0, 0.001, 100.0)",
+    fit_options = "  method = foce"
   ))
   on.exit(unlink(path))
 
   expect_error(
-    ferx_model_set_section(path, "odes", c("  d/dt(central) = 0")),
+    ferx_model_set_section(path, "odes", "  d/dt(central) = 0"),
     regexp = "parameters, fit_options"
   )
 })
@@ -302,7 +302,7 @@ test_that("ferx_model_edit() rejects malformed save_as before opening the editor
   # Use a user-owned (non-package) file so we exercise the save_as validation
   # path without triggering the in-package copy step. The error must fire
   # before utils::file.edit() is reached.
-  path <- write_test_model(list(parameters = c("  theta TVCL(1.0, 0.001, 100.0)")))
+  path <- write_test_model(list(parameters = "  theta TVCL(1.0, 0.001, 100.0)"))
   on.exit(unlink(path))
 
   expect_error(
@@ -324,7 +324,7 @@ test_that("ferx_model_edit() rejects malformed save_as before opening the editor
 # ---------------------------------------------------------------------------
 
 test_that("ferx_model_show() prints '# model: <filename>' header", {
-  path <- write_test_model(list(parameters = c("  theta TVCL(1.0, 0.001, 100.0)")))
+  path <- write_test_model(list(parameters = "  theta TVCL(1.0, 0.001, 100.0)"))
   on.exit(unlink(path))
 
   out <- capture.output(ferx_model_show(path))
@@ -333,7 +333,7 @@ test_that("ferx_model_show() prints '# model: <filename>' header", {
 
 test_that("ferx_model_show() prints all file lines", {
   path <- write_test_model(list(
-    parameters  = c("  theta TVCL(1.0, 0.001, 100.0)"),
+    parameters  = "  theta TVCL(1.0, 0.001, 100.0)",
     fit_options = c("  method = foce", "  maxiter = 300")
   ))
   on.exit(unlink(path))
@@ -347,7 +347,7 @@ test_that("ferx_model_show() prints all file lines", {
 })
 
 test_that("ferx_model_show() returns path invisibly", {
-  path <- write_test_model(list(parameters = c("  theta TVCL(1.0, 0.001, 100.0)")))
+  path <- write_test_model(list(parameters = "  theta TVCL(1.0, 0.001, 100.0)"))
   on.exit(unlink(path))
 
   result <- withVisible(ferx_model_show(path))
@@ -401,7 +401,7 @@ test_that("ferx_model_show() pipes: ferx_model_new() |> ferx_model_show()", {
 # ---------------------------------------------------------------------------
 
 test_that("ferx_model_section() prints '# [section]' header to console", {
-  path <- write_test_model(list(parameters = c("  theta TVCL(1.0, 0.001, 100.0)")))
+  path <- write_test_model(list(parameters = "  theta TVCL(1.0, 0.001, 100.0)"))
   on.exit(unlink(path))
 
   out <- capture.output(ferx_model_section(path, "parameters"))
@@ -409,7 +409,7 @@ test_that("ferx_model_section() prints '# [section]' header to console", {
 })
 
 test_that("ferx_model_section() returns body invisibly", {
-  path <- write_test_model(list(parameters = c("  theta TVCL(1.0, 0.001, 100.0)")))
+  path <- write_test_model(list(parameters = "  theta TVCL(1.0, 0.001, 100.0)"))
   on.exit(unlink(path))
 
   result <- withVisible(suppressMessages(ferx_model_section(path, "parameters")))
@@ -432,13 +432,13 @@ test_that("ferx_model_section() parses header with surrounding whitespace", {
   on.exit(unlink(path))
 
   result <- ferx_model_section(path, "parameters")
-  expect_equal(result, c("  theta TVCL(1.0, 0.001, 100.0)"))
+  expect_equal(result, "  theta TVCL(1.0, 0.001, 100.0)")
 })
 
 test_that("ferx_model_section(strip = TRUE) on empty section returns character(0)", {
   path <- write_test_model(list(
     parameters  = character(0),
-    fit_options = c("  method = foce")
+    fit_options = "  method = foce"
   ))
   on.exit(unlink(path))
 
@@ -470,7 +470,7 @@ test_that("ferx_model_set_section() preserves blank separator lines between sect
   writeLines(c("[parameters]", "  theta TVCL(1.0, 0.001, 100.0)", "", "[fit_options]", "  method = foce"), path)
   on.exit(unlink(path))
 
-  ferx_model_set_section(path, "fit_options", c("  method = focei"))
+  ferx_model_set_section(path, "fit_options", "  method = focei")
 
   all_lines <- readLines(path)
   expect_true("" %in% all_lines)
@@ -481,25 +481,25 @@ test_that("ferx_model_set_section() preserves comment lines in other sections", 
   writeLines(c("[parameters]", "# a comment", "  theta TVCL(1.0, 0.001, 100.0)", "[fit_options]", "  method = foce"), path)
   on.exit(unlink(path))
 
-  ferx_model_set_section(path, "fit_options", c("  method = focei"))
+  ferx_model_set_section(path, "fit_options", "  method = focei")
 
   all_lines <- readLines(path)
   expect_true("# a comment" %in% all_lines)
 })
 
 test_that("ferx_model_set_section() leaves file unchanged when section not found", {
-  path <- write_test_model(list(parameters = c("  theta TVCL(1.0, 0.001, 100.0)")))
+  path <- write_test_model(list(parameters = "  theta TVCL(1.0, 0.001, 100.0)"))
   on.exit(unlink(path))
 
   before <- readLines(path)
-  expect_error(ferx_model_set_section(path, "odes", c("  d/dt(central) = 0")))
+  expect_error(ferx_model_set_section(path, "odes", "  d/dt(central) = 0"))
   expect_equal(readLines(path), before)
 })
 
 test_that("ferx_model_set_section() correctly replaces 1 line with 3 lines", {
   path <- write_test_model(list(
-    parameters  = c("  theta TVCL(1.0, 0.001, 100.0)"),
-    fit_options = c("  method = foce")
+    parameters  = "  theta TVCL(1.0, 0.001, 100.0)",
+    fit_options = "  method = foce"
   ))
   on.exit(unlink(path))
 
@@ -511,17 +511,17 @@ test_that("ferx_model_set_section() correctly replaces 1 line with 3 lines", {
 
 test_that("ferx_model_set_section() pipe chain: two sequential set_section calls", {
   path <- write_test_model(list(
-    parameters  = c("  theta TVCL(1.0, 0.001, 100.0)"),
-    fit_options = c("  method = foce")
+    parameters  = "  theta TVCL(1.0, 0.001, 100.0)",
+    fit_options = "  method = foce"
   ))
   on.exit(unlink(path))
 
   path |>
-    ferx_model_set_section("parameters", c("  theta TVCL(2.0, 0.001, 100.0)")) |>
-    ferx_model_set_section("fit_options", c("  method = focei"))
+    ferx_model_set_section("parameters", "  theta TVCL(2.0, 0.001, 100.0)") |>
+    ferx_model_set_section("fit_options", "  method = focei")
 
-  expect_equal(ferx_model_section(path, "parameters"), c("  theta TVCL(2.0, 0.001, 100.0)"))
-  expect_equal(ferx_model_section(path, "fit_options"), c("  method = focei"))
+  expect_equal(ferx_model_section(path, "parameters"), "  theta TVCL(2.0, 0.001, 100.0)")
+  expect_equal(ferx_model_section(path, "fit_options"), "  method = focei")
 })
 
 test_that("ferx_model_set_section() pipe chain: new |> set_section |> show", {
@@ -657,8 +657,8 @@ test_that("ferx_model_inspect() returns residual = 'proportional' for warfarin",
 test_that("ferx_model_inspect() returns residual = 'additive'", {
   path <- write_test_model(list(
     parameters    = c("  theta TVCL(1.0, 0.001, 100.0)", "  sigma ADD_ERR ~ 0.01"),
-    structural_model = c("  pk one_cpt_oral(cl=1, v=10, ka=1)"),
-    error_model   = c("  DV ~ additive(ADD_ERR)")
+    structural_model = "  pk one_cpt_oral(cl=1, v=10, ka=1)",
+    error_model   = "  DV ~ additive(ADD_ERR)"
   ))
   on.exit(unlink(path))
 
@@ -669,8 +669,8 @@ test_that("ferx_model_inspect() returns residual = 'additive'", {
 test_that("ferx_model_inspect() returns residual = 'combined'", {
   path <- write_test_model(list(
     parameters    = c("  theta TVCL(1.0, 0.001, 100.0)", "  sigma ERR ~ 0.01"),
-    structural_model = c("  pk one_cpt_oral(cl=1, v=10, ka=1)"),
-    error_model   = c("  DV ~ combined(ERR)")
+    structural_model = "  pk one_cpt_oral(cl=1, v=10, ka=1)",
+    error_model   = "  DV ~ combined(ERR)"
   ))
   on.exit(unlink(path))
 
@@ -680,9 +680,9 @@ test_that("ferx_model_inspect() returns residual = 'combined'", {
 
 test_that("ferx_model_inspect() returns residual = 'unknown' and warns for unrecognised type", {
   path <- write_test_model(list(
-    parameters    = c("  theta TVCL(1.0, 0.001, 100.0)"),
-    structural_model = c("  pk one_cpt_oral(cl=1, v=10, ka=1)"),
-    error_model   = c("  DV ~ custom_error(ERR)")
+    parameters    = "  theta TVCL(1.0, 0.001, 100.0)",
+    structural_model = "  pk one_cpt_oral(cl=1, v=10, ka=1)",
+    error_model   = "  DV ~ custom_error(ERR)"
   ))
   on.exit(unlink(path))
 
@@ -742,9 +742,9 @@ test_that("ferx_model_inspect() errors on ferx_fit with NULL model_structure", {
 
 test_that("ferx_model_inspect() detects ODE model type", {
   path <- write_test_model(list(
-    parameters       = c("  theta TVPARAM(1.0, 0.001, 100.0)"),
-    structural_model = c("  ode(obs_cmt=central, states=[depot, central])"),
-    error_model      = c("  DV ~ proportional(PROP_ERR)")
+    parameters       = "  theta TVPARAM(1.0, 0.001, 100.0)",
+    structural_model = "  ode(obs_cmt=central, states=[depot, central])",
+    error_model      = "  DV ~ proportional(PROP_ERR)"
   ))
   on.exit(unlink(path))
 
@@ -754,9 +754,9 @@ test_that("ferx_model_inspect() detects ODE model type", {
 
 test_that("ferx_model_inspect() detects 2-cpt IV bolus model type", {
   path <- write_test_model(list(
-    parameters       = c("  theta TVCL(5.0, 0.1, 100.0)"),
-    structural_model = c("  pk two_cpt_iv_bolus(cl=CL, v1=V1, q=Q, v2=V2)"),
-    error_model      = c("  DV ~ proportional(PROP_ERR)")
+    parameters       = "  theta TVCL(5.0, 0.1, 100.0)",
+    structural_model = "  pk two_cpt_iv_bolus(cl=CL, v1=V1, q=Q, v2=V2)",
+    error_model      = "  DV ~ proportional(PROP_ERR)"
   ))
   on.exit(unlink(path))
 
@@ -769,7 +769,7 @@ test_that("ferx_model_inspect() detects 2-cpt IV bolus model type", {
 # ---------------------------------------------------------------------------
 
 test_that("ferx_model_edit() save_as = FALSE collapses to NULL (no copy, returns path)", {
-  path <- write_test_model(list(parameters = c("  theta TVCL(1.0, 0.001, 100.0)")))
+  path <- write_test_model(list(parameters = "  theta TVCL(1.0, 0.001, 100.0)"))
   on.exit(unlink(path))
 
   result <- withVisible(ferx_model_edit(path, save_as = FALSE, .editor = null_editor))
@@ -778,7 +778,7 @@ test_that("ferx_model_edit() save_as = FALSE collapses to NULL (no copy, returns
 })
 
 test_that("ferx_model_edit() save_as = NULL returns path invisibly", {
-  path <- write_test_model(list(parameters = c("  theta TVCL(1.0, 0.001, 100.0)")))
+  path <- write_test_model(list(parameters = "  theta TVCL(1.0, 0.001, 100.0)"))
   on.exit(unlink(path))
 
   result <- withVisible(ferx_model_edit(path, save_as = NULL, .editor = null_editor))
@@ -787,7 +787,7 @@ test_that("ferx_model_edit() save_as = NULL returns path invisibly", {
 })
 
 test_that("ferx_model_edit() save_as = 'dest' copies file to that path", {
-  path <- write_test_model(list(parameters = c("  theta TVCL(1.0, 0.001, 100.0)")))
+  path <- write_test_model(list(parameters = "  theta TVCL(1.0, 0.001, 100.0)"))
   dest <- tempfile(fileext = ".ferx")
   on.exit({ unlink(path); unlink(dest) })
 
@@ -798,7 +798,7 @@ test_that("ferx_model_edit() save_as = 'dest' copies file to that path", {
 })
 
 test_that("ferx_model_edit() save_as returns the dest path invisibly", {
-  path <- write_test_model(list(parameters = c("  theta TVCL(1.0, 0.001, 100.0)")))
+  path <- write_test_model(list(parameters = "  theta TVCL(1.0, 0.001, 100.0)"))
   dest <- tempfile(fileext = ".ferx")
   on.exit({ unlink(path); unlink(dest) })
 
@@ -808,7 +808,7 @@ test_that("ferx_model_edit() save_as returns the dest path invisibly", {
 })
 
 test_that("ferx_model_edit() save_as + overwrite = FALSE errors when dest exists", {
-  path <- write_test_model(list(parameters = c("  theta TVCL(1.0, 0.001, 100.0)")))
+  path <- write_test_model(list(parameters = "  theta TVCL(1.0, 0.001, 100.0)"))
   dest <- tempfile(fileext = ".ferx")
   writeLines("existing", dest)
   on.exit({ unlink(path); unlink(dest) })
@@ -820,7 +820,7 @@ test_that("ferx_model_edit() save_as + overwrite = FALSE errors when dest exists
 })
 
 test_that("ferx_model_edit() save_as + overwrite = TRUE silently overwrites existing dest", {
-  path <- write_test_model(list(parameters = c("  theta TVCL(1.0, 0.001, 100.0)")))
+  path <- write_test_model(list(parameters = "  theta TVCL(1.0, 0.001, 100.0)"))
   dest <- tempfile(fileext = ".ferx")
   writeLines("old content", dest)
   on.exit({ unlink(path); unlink(dest) })
@@ -845,7 +845,7 @@ test_that("ferx_model_edit() copies pkg file to dest before editing", {
 })
 
 test_that("ferx_model_edit() post-edit copy: .editor can modify the file before save_as", {
-  path <- write_test_model(list(parameters = c("  theta TVCL(1.0, 0.001, 100.0)")))
+  path <- write_test_model(list(parameters = "  theta TVCL(1.0, 0.001, 100.0)"))
   dest <- tempfile(fileext = ".ferx")
   on.exit({ unlink(path); unlink(dest) })
 
