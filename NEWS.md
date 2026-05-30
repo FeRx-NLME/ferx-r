@@ -4,13 +4,13 @@
 
 - `ferx_fit_async(model, data, ...)` now returns a `ferx_job` handle
   immediately so the R session stays free. Call `ferx_collect(handle)` to
-  block-wait with live optimizer-trace progress. In RStudio the fit appears in
-  the Jobs pane; elsewhere a `callr::r_bg()` background process is used.
-  `ferx_collect(handle, verbose = FALSE)` suppresses the trace display and just
-  blocks until the result is ready. The returned `ferx_fit` object is identical
-  to what `ferx_fit()` produces.
-
-- `ferx_collect(handle)` new companion function for `ferx_fit_async()`.
+  block-wait with live optimizer-trace progress; pass `verbose = FALSE` to
+  suppress the display and just block until the result is ready. In RStudio
+  the fit appears in the Jobs pane; elsewhere a `callr::r_bg()` background
+  process is used. The returned `ferx_fit` object is identical to what
+  `ferx_fit()` produces. **Breaking change from #91**: `ferx_fit_async()`
+  previously blocked and returned the fit directly; it now returns a handle
+  that must be passed to `ferx_collect()`.
 
 - `ferx_warnings(fit)` pretty-prints fit warnings grouped by severity
   (critical / warning / info) with per-category remediation guidance.
