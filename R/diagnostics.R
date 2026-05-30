@@ -360,14 +360,20 @@ ferx_estimates <- function(fit) {
              stringsAsFactors = FALSE)
 }
 
-# Resolve once whether cli colour output is available.  Called at the top of
-# ferx_warnings() so that requireNamespace() and isatty() are not repeated
-# inside the per-row print loop.
+# Resolve once whether cli colour output is available. Called at the top of
+# ferx_warnings() and from print.ferx_fit() so the capability check is not
+# repeated inside per-row loops.
+#
+# We deliberately do NOT gate on `isatty(stdout())`. Inside RStudio's console
+# `stdout()` is a pipe (so isatty() returns FALSE), yet RStudio renders ANSI
+# escape codes correctly - and RStudio is the primary interactive audience
+# for ferx. `cli::num_ansi_colors()` already performs its own RStudio /
+# terminal / R.app detection and returns > 1 only when colour will render,
+# so it is sufficient by itself.
 .ferx_use_cli <- function() {
   tryCatch(
     requireNamespace("cli", quietly = TRUE) &&
-      cli::num_ansi_colors() > 1L &&
-      isatty(stdout()),
+      cli::num_ansi_colors() > 1L,
     error = function(e) FALSE
   )
 }
