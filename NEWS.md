@@ -2,6 +2,26 @@
 
 ## New features
 
+- `ferx_warnings(fit)` pretty-prints fit warnings grouped by severity
+  (critical / warning / info) with per-category remediation guidance.
+  `ferx_warnings(fit, as_df = TRUE)` returns the underlying
+  `fit$warnings_structured` data frame (columns: `severity`, `category`,
+  `message`, `source_method`). Durbin-Watson autocorrelation guidance is
+  direction-aware (positive vs negative DW) and suppresses the SDE hint
+  when the model already uses a `[diffusion]` block.
+
+- Default outer optimizer for FOCE / FOCEI changed from `slsqp` to `bobyqa`.
+  BOBYQA is derivative-free (a quadratic trust-region) and re-evaluates the
+  per-subject EBEs at every trial point, so it avoids the fixed-EBE FD gradient
+  bias that drives SLSQP to local minima hundreds of OFV units above the true
+  optimum on ODE / PD models, sparse data, and Emax-Hill identifiability
+  problems. The default also flows to the FOCEI polish stage of
+  `method = "gn_hybrid"` and to the polish stage of any
+  `method = c(..., "focei")` chain. Pure SAEM and pure `gn` continue to ignore
+  the optimizer setting. To restore the previous behaviour, pass
+  `settings = list(optimizer = "slsqp")`. Requires a ferx-core build that
+  includes the change.
+
 - Log-transform-both-sides (LTBS) residual error: fit on the log scale with
   additive error, the equivalent of NONMEM's `Y = LOG(F) + EPS(1)`. Write the
   `[error_model]` block as either form:

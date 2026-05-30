@@ -100,10 +100,11 @@
   DV ~ proportional(PROP_ERR)
 
 [fit_options]
-  # FOCEI works on NN-bearing models today, with a caveat: the default
-  # SLSQP outer optimizer currently silently no-ops on mu-ref-active
-  # models (see ferx-core#55). Use `optimizer = "lbfgs"` at call time
-  # via ferx_fit's `settings` argument, or set it here.
+  # FOCEI works on NN-bearing models today, with a caveat: the SLSQP
+  # outer optimizer currently silently no-ops on mu-ref-active models
+  # (see ferx-core#55). The default optimizer is `bobyqa`, which is
+  # fine on this model; we pin `lbfgs` here only to keep this example
+  # exercising the gradient-based path that the caveat applies to.
   method = focei
   maxiter = 200
   optimizer = lbfgs
