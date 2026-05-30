@@ -92,19 +92,13 @@ fn ferx_rust_fit(
     let mut parsed =
         match ferx_core::parser::model_parser::parse_full_model_file(Path::new(model_path)) {
             Ok(p) => p,
-            Err(e) => {
-                rprintln!("Error parsing model: {}", e);
-                return List::new(0);
-            }
+            Err(e) => throw_r_error(format!("Error parsing model: {e}")),
         };
 
     let iov_col = parsed.fit_options.iov_column.clone();
     let population = match ferx_core::read_nonmem_csv(Path::new(data_path), None, iov_col.as_deref()) {
         Ok(p) => p,
-        Err(e) => {
-            rprintln!("Error reading data: {}", e);
-            return List::new(0);
-        }
+        Err(e) => throw_r_error(format!("Error reading data: {e}")),
     };
 
     // Build fit options
@@ -115,12 +109,11 @@ fn ferx_rust_fit(
     // win. Reserved keys (those with a dedicated R argument) are rejected so
     // the precedence rule is explicit rather than silently clobbered.
     if settings_keys.len() != settings_values.len() {
-        rprintln!(
+        throw_r_error(format!(
             "Error: settings keys/values length mismatch ({} vs {})",
             settings_keys.len(),
             settings_values.len()
-        );
-        return List::new(0);
+        ));
     }
     // Reserved keys: these have dedicated ferx_fit() arguments. Keeping them
     // out of `settings` means there is one source of truth per value.
@@ -146,35 +139,23 @@ fn ferx_rust_fit(
             .iter()
             .any(|r| r.eq_ignore_ascii_case(key))
         {
-            rprintln!(
-                "Error: setting `{}` conflicts with a dedicated ferx_fit() argument — pass it via that argument instead",
-                key
-            );
-            return List::new(0);
+            throw_r_error(format!(
+                "Error: setting `{key}` conflicts with a dedicated ferx_fit() argument — pass it via that argument instead"
+            ));
         }
         match ferx_core::parser::model_parser::apply_fit_option(&mut opts, key, v) {
             Ok(true) => {}
-            Ok(false) => {
-                rprintln!("Error: unknown fit setting `{}`", key);
-                return List::new(0);
-            }
-            Err(e) => {
-                rprintln!("Error: {}", e);
-                return List::new(0);
-            }
+            Ok(false) => throw_r_error(format!("Error: unknown fit setting `{key}`")),
+            Err(e) => throw_r_error(format!("Error: {e}")),
         }
     }
 
     if method.is_empty() {
-        rprintln!("Error: `method` must contain at least one estimation method");
-        return List::new(0);
+        throw_r_error("Error: `method` must contain at least one estimation method");
     }
     let chain: Vec<EstimationMethod> = match method.iter().map(|m| parse_method(m)).collect() {
         Ok(v) => v,
-        Err(e) => {
-            rprintln!("{}", e);
-            return List::new(0);
-        }
+        Err(e) => throw_r_error(format!("{e}")),
     };
     let final_method = *chain.last().unwrap();
     // The reported `interaction` flag must reflect the last *estimating* stage
@@ -267,14 +248,8 @@ fn ferx_rust_fit(
             // worth of cancelled fits won't add up to anything meaningful.
             throw_r_error("ferx_fit: cancelled by user");
         }
-        Ok(Err(e)) => {
-            rprintln!("Fit error: {}", e);
-            return List::new(0);
-        }
-        Err(_) => {
-            rprintln!("Fit error: worker thread panicked");
-            return List::new(0);
-        }
+        Ok(Err(e)) => throw_r_error(format!("Fit error: {e}")),
+        Err(_) => throw_r_error("Fit error: worker thread panicked"),
     };
 
     // Record source-file provenance on the result so `ferx_sir(fit)` can
