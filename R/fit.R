@@ -2465,7 +2465,7 @@ ferx_fit_async <- function(model, data = NULL, ...,
   saveRDS(list(model = model, data = data, dots = dots), args_path)
 
   # The job script deletes args_path itself immediately after readRDS so the
-  # file is gone before callr::r_bg() is called — no race between cleanup and
+  # file is gone before callr::r_bg() is called - no race between cleanup and
   # the inner bg process starting up.
   writeLines(
     c(
