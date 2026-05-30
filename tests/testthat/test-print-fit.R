@@ -321,3 +321,21 @@ test_that("print.ferx_fit STATUS has no inline category when there are no critic
   # No parenthesised category snippet because nothing is critical.
   expect_false(grepl("\\(mu_referencing\\)|\\(convergence\\)", status_line))
 })
+
+test_that("print.ferx_fit STATUS has no inline category when non-converged fit has only info warnings", {
+  fit <- make_fake_fit(
+    omega     = matrix(0.10, 1, 1),
+    converged = FALSE,
+    warnings_structured = data.frame(
+      severity = "info",
+      category = "mu_referencing",
+      message  = "mu-ref: CL",
+      source_method = "",
+      stringsAsFactors = FALSE
+    )
+  )
+  out <- capture.output(print(fit))
+  status_line <- out[grepl("STATUS", out)]
+  expect_true(grepl("NOT CONVERGED", status_line))
+  expect_false(grepl("\\(", status_line))
+})

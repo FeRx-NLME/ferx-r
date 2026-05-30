@@ -1650,13 +1650,9 @@ print.ferx_fit <- function(x, ...) {
   status_lbl <- if (isTRUE(x$converged)) "CONVERGED" else "NOT CONVERGED"
   status_style <- if (isTRUE(x$converged)) "green" else "red"
   status_tail <- character(0)
-  # When the fit did NOT converge (or there is any critical warning), surface
-  # the first critical category inline so the user does not have to scroll
-  # down to the footer or call ferx_warnings(fit) to learn why. Categories
-  # come from the engine-side classification, so this stays in sync with
-  # ferx-core without any string parsing in R.
+  # Categories come from the engine; no R-side string parsing needed.
   ws <- x$warnings_structured
-  if (!is.null(ws) && is.data.frame(ws) && "severity" %in% names(ws)) {
+  if (!is.null(ws) && is.data.frame(ws) && all(c("severity", "category") %in% names(ws))) {
     crit_rows <- ws[ws$severity == "critical", , drop = FALSE]
     if (nrow(crit_rows) > 0L) {
       cats <- unique(crit_rows$category)
