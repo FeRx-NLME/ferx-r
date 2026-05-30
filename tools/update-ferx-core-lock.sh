@@ -3,14 +3,17 @@
 #
 # Why this script exists: src/rust/.cargo/config.toml carries a [patch] that
 # redirects ferx-core to a sibling ../ferx-core checkout when present. If you
-# run `cargo update -p ferx-core` (or any `cargo` command that rewrites the
-# lock) while that patch is active, cargo writes a *path*-style lock entry
-# with no `source = "git+..."` line — which silently unpins ferx-core for
-# everyone who builds without the sibling (CI, downstream users). That
-# happened once (commit 1ce7f59), hence this guard.
+# run any `cargo` command that rewrites the lock while that patch is active,
+# cargo writes a *path*-style lock entry with no `source = "git+..."` line —
+# which silently unpins ferx-core for everyone who builds without the sibling
+# (CI, downstream users). That happened twice (commits 1ce7f59, b96c867).
 #
-# This script temporarily disables the patch, bumps the lock, and restores
-# the config. Run it from the repo root.
+# This script temporarily removes the patch so cargo resolves ferx-core from
+# GitHub and writes the correct git+https pin. `cargo update -p ferx-core`
+# does NOT work here because with the patch absent the package spec is the
+# full git URL, not a bare name; plain `cargo update` is used instead.
+#
+# Run from the repo root.
 
 set -euo pipefail
 
@@ -24,10 +27,11 @@ if [[ ! -f "$CONFIG" ]]; then
 fi
 
 BACKUP="$CONFIG.bumplock.bak"
-mv "$CONFIG" "$BACKUP"
+cp "$CONFIG" "$BACKUP"
 trap 'mv "$BACKUP" "$CONFIG"' EXIT
+rm "$CONFIG"
 
-( cd "$RUST_DIR" && cargo update -p ferx-core )
+( cd "$RUST_DIR" && cargo update )
 
 # Verify the lock still pins ferx-core via a git source line.
 if ! grep -q '^source = "git+https://github.com/FeRx-NLME/ferx-core' "$RUST_DIR/Cargo.lock"; then
