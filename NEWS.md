@@ -2,6 +2,14 @@
 
 ## New features
 
+- `ferx_warnings(fit)` pretty-prints fit warnings grouped by severity
+  (critical / warning / info) with per-category remediation guidance.
+  `ferx_warnings(fit, as_df = TRUE)` returns the underlying
+  `fit$warnings_structured` data frame (columns: `severity`, `category`,
+  `message`, `source_method`). Durbin-Watson autocorrelation guidance is
+  direction-aware (positive vs negative DW) and suppresses the SDE hint
+  when the model already uses a `[diffusion]` block.
+
 - Default outer optimizer for FOCE / FOCEI changed from `slsqp` to `bobyqa`.
   BOBYQA is derivative-free (a quadratic trust-region) and re-evaluates the
   per-subject EBEs at every trial point, so it avoids the fixed-EBE FD gradient

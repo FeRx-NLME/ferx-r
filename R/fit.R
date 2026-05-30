@@ -240,6 +240,15 @@
 #'     under the model's covariate effects. For inter-occasion variation see
 #'     \code{ebe_kappas}.}
 #'   \item{warnings}{Character vector of warnings}
+#'   \item{warnings_structured}{Data frame with columns \code{severity}
+#'     (\code{"critical"}, \code{"warning"}, or \code{"info"}),
+#'     \code{category} (a fixed vocabulary such as \code{"convergence"},
+#'     \code{"covariance_step"}, \code{"dw_autocorrelation"}),
+#'     \code{message}, and \code{source_method} (the estimation stage that
+#'     emitted the warning, e.g. \code{"FOCEI"}; empty string when not
+#'     applicable). Severity/category are assigned by the engine for its
+#'     own warnings and by the R diagnostics layer for the condition-number
+#'     and ETA-normality checks. Inspect with \code{\link{ferx_warnings}}.}
 #'   \item{sir_ess}{SIR effective sample size (NULL if SIR not run)}
 #'   \item{sir_ci_theta, sir_ci_omega, sir_ci_sigma}{SIR 95\% CI matrices
 #'     with columns \code{lower} and \code{upper} (NULL if SIR not run)}
@@ -1436,7 +1445,11 @@ ferx_fit <- function(model, data = NULL,
   result$model_hash <- empty_to_null(result$model_hash) %||% NA_character_
   result$data_hash <- empty_to_null(result$data_hash) %||% NA_character_
 
-  .ferx_emit_dw_message(result)
+  # Assemble the structured-warning table. Core supplies severity/category for
+  # every warning it emitted (including Durbin-Watson autocorrelation); the R
+  # side appends only the diagnostics it computes itself (condition number,
+  # ETA normality). No string re-parsing of core messages happens here.
+  result$warnings_structured <- .ferx_assemble_structured_warnings(raw, result)
 
   class(result) <- "ferx_fit"
 
@@ -1450,33 +1463,55 @@ ferx_fit <- function(model, data = NULL,
   result
 }
 
-.ferx_emit_dw_message <- function(result) {
-  dw <- result$dw_statistic
-  if (is.null(dw) || is.na(dw)) return(invisible(NULL))
-  r <- result$iwres_lag1_r %||% NA_real_
-  if (dw < 1.5) {
-    sde_hint <- if (isTRUE(result$uses_sde)) "" else
-      "\n  4. For ODE models: consider SDE process noise ([diffusion] block)"
-    message(sprintf(
-      paste0(
-        "Positive IWRES autocorrelation detected (Durbin-Watson = %.2f, lag-1 r = %.2f).\n",
-        "Structural model may be missing dynamics. Consider in order:\n",
-        "  1. Check observation time ordering within each subject\n",
-        "  2. Transit absorption model or additional compartment\n",
-        "  3. IOV on ka or F%s"
+# Assemble the structured-warning data frame for a fit result. Core supplies
+# the severity/category/message triples it classified (parallel vectors on the
+# raw FFI list); the R side appends only diagnostics it computes itself and
+# that core never sees: the condition-number flag and the per-ETA Shapiro-Wilk
+# normality flags. Returns a data frame with columns severity, category,
+# message - always a data frame (zero rows when there are no warnings).
+.ferx_assemble_structured_warnings <- function(raw, result) {
+  df <- data.frame(
+    severity      = as.character(raw$warnings_severity      %||% character(0)),
+    category      = as.character(raw$warnings_category      %||% character(0)),
+    message       = as.character(raw$warnings_message       %||% character(0)),
+    source_method = as.character(raw$warnings_source_method %||% character(0)),
+    stringsAsFactors = FALSE
+  )
+  extra <- list()
+  # Condition number (NONMEM convention: > 1000 flags ill-conditioning).
+  if (!is.null(result$condition_number) && is.finite(result$condition_number) &&
+        result$condition_number > 1000) {
+    extra[[length(extra) + 1L]] <- data.frame(
+      severity      = "critical",
+      category      = "condition_number",
+      message       = sprintf(
+        "High condition number (%.1f) -- parameter space may be ill-conditioned",
+        result$condition_number
       ),
-      dw, r, sde_hint
-    ))
-  } else if (dw > 2.5) {
-    message(sprintf(
-      paste0(
-        "Negative IWRES autocorrelation detected (Durbin-Watson = %.2f, lag-1 r = %.2f).\n",
-        "Possible over-parameterisation or misspecified residual error model."
-      ),
-      dw, r
-    ))
+      source_method = "",
+      stringsAsFactors = FALSE
+    )
   }
-  invisible(NULL)
+  # Per-ETA Shapiro-Wilk normality flags (computed R-side from the EBEs).
+  if (!is.null(result$eta_normality)) {
+    for (i in seq_len(nrow(result$eta_normality))) {
+      row <- result$eta_normality[i, ]
+      if (!is.na(row$flag) && nzchar(row$flag) && !is.na(row$p_val)) {
+        extra[[length(extra) + 1L]] <- data.frame(
+          severity      = "warning",
+          category      = "eta_normality",
+          message       = sprintf(
+            "%s Shapiro-Wilk p=%.4f - distribution may be non-normal",
+            row$eta, row$p_val
+          ),
+          source_method = "",
+          stringsAsFactors = FALSE
+        )
+      }
+    }
+  }
+  if (length(extra) > 0L) df <- rbind(df, do.call(rbind, extra))
+  df
 }
 
 # Map the engine's gradient-kind label to the short tokens used by the

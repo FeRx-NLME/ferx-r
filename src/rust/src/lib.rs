@@ -1037,6 +1037,31 @@ fn fit_result_to_list(
 
     // Warnings
     let warnings: Vec<String> = result.warnings.clone();
+    // Structured warnings as four parallel vectors (severity / category /
+    // message / source_method), following the same parallel-array convention
+    // as sigma / sigma_names / sigma_types. Severity is lowercased so the R
+    // side can match on "critical" / "warning" / "info" directly.
+    // source_method is empty string when None (no chain prefix was stripped).
+    let warnings_severity: Vec<String> = result
+        .warnings_structured
+        .iter()
+        .map(|w| format!("{:?}", w.severity).to_lowercase())
+        .collect();
+    let warnings_category: Vec<String> = result
+        .warnings_structured
+        .iter()
+        .map(|w| w.category.clone())
+        .collect();
+    let warnings_message: Vec<String> = result
+        .warnings_structured
+        .iter()
+        .map(|w| w.message.clone())
+        .collect();
+    let warnings_source_method: Vec<String> = result
+        .warnings_structured
+        .iter()
+        .map(|w| w.source_method.clone().unwrap_or_default())
+        .collect();
 
     let method_label = result.method.label();
     let method_chain: Vec<String> = result
@@ -1298,6 +1323,10 @@ fn fit_result_to_list(
         se_sigma = se_sigma,
         sdtab = sdtab,
         warnings = warnings,
+        warnings_severity = warnings_severity,
+        warnings_category = warnings_category,
+        warnings_message = warnings_message,
+        warnings_source_method = warnings_source_method,
         sir_ess = sir_ess,
         sir_ci_theta = sir_ci_theta,
         sir_ci_omega = sir_ci_omega,

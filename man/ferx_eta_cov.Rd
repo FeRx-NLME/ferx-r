@@ -36,6 +36,7 @@ Other diagnostics:
 \code{\link{ferx_estimates}()},
 \code{\link{ferx_plot_trace}()},
 \code{\link{ferx_trace}()},
+\code{\link{ferx_warnings}()},
 \code{\link{summary.ferx_fit}()}
 }
 \concept{diagnostics}
