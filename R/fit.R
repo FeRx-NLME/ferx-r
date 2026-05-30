@@ -348,7 +348,13 @@
 #'     (omega names), \code{iov} (kappa names), \code{residual} (error type
 #'     string). Use \code{\link{ferx_model_inspect}} to view this before or
 #'     after fitting.}
-#'   \item{shrinkage_kappa}{Shrinkage values for kappa EBEs (\code{NULL} if no IOV).}
+#'   \item{shrinkage_kappa}{Named numeric vector of pooled shrinkage values for
+#'     kappa EBEs (one entry per kappa parameter). \code{NULL} when the model
+#'     has no IOV.}
+#'   \item{shrinkage_kappa_by_occ}{Data frame with column \code{occ} (1-based
+#'     occasion index) and one numeric column per kappa parameter giving the
+#'     shrinkage at each occasion. Use this for per-occasion IOV diagnostics.
+#'     \code{NULL} when the model has no IOV.}
 #'   \item{ebe_kappas}{Data frame with columns \code{ID}, \code{OCC}, and one
 #'     column per kappa parameter containing per-subject per-occasion kappa
 #'     EBEs. \code{ID} carries the original subject identifier (matching
@@ -399,6 +405,20 @@
 #'     build is active). Subjects that fell back to MH (e.g. ODE models) are
 #'     not counted. \code{NA_integer_} when the method is not SAEM, when
 #'     \code{n_leapfrog = 0} (MH only), or when AD is unavailable.}
+#'   \item{saem_mu_ref_m_step_evals_saved}{Number of OFV evaluations saved by
+#'     mu-referencing in the SAEM M-step. Only populated for SAEM fits with
+#'     \code{mu_referencing = TRUE}; \code{NULL} otherwise. A diagnostic for
+#'     understanding SAEM efficiency.}
+#'   \item{covariance_n_evals_estimated}{Estimated number of OFV calls required
+#'     for the covariance step, computed before the step runs on large models.
+#'     \code{NULL} when the model is small (exact count used instead) or when
+#'     \code{covariance = FALSE}.}
+#'   \item{n_threads_used}{Integer. Actual number of parallel threads used by
+#'     the engine during fitting. May be lower than the requested \code{threads}
+#'     argument when fewer subjects are available.}
+#'   \item{nlopt_missing_algorithms}{Character vector of NLopt algorithm names
+#'     that are not available in the current build (empty on most platforms).
+#'     Informational; the engine falls back automatically.}
 #'   \item{neural_networks}{Named list of sub-lists, one per \code{[covariate_nn]}
 #'     block declared in the model file. Empty list when the \code{nn} cargo
 #'     feature is off or no NN blocks are present. Each sub-list contains:
@@ -493,6 +513,34 @@
 #'         \code{gradient = fd} to \code{[fit_options]} explicitly, or the
 #'         engine raises an informative error.
 #' }
+#'
+#' @section Parameter declaration syntax (\code{[parameters]} block):
+#'
+#' \strong{Theta (fixed effects):}
+#' \preformatted{
+#'   theta CL(0.134, 0.001, 10.0)          # (initial, lower, upper)
+#'   theta CL(0.1, 0.001)                  # lower-bound only (no upper bound)
+#'   theta CL(0.134, 0.001, 10.0) (FIX)    # FIX at end (traditional)
+#'   theta CL (FIX) (0.134, 0.001, 10.0)   # FIX anywhere (flexible placement)
+#' }
+#'
+#' \strong{Omega (inter-individual variability):}
+#' \preformatted{
+#'   omega ETA_CL ~ 0.07           # variance parameterisation (default)
+#'   omega ETA_CL ~ 0.07 (FIX)    # fixed omega, FIX at end
+#'   omega ETA_CL (FIX) ~ 0.07    # fixed omega, FIX before the tilde
+#' }
+#'
+#' The same flexible \code{(FIX)} placement applies to \code{sigma} and
+#' \code{kappa} (IOV) declarations.
+#'
+#' \strong{Unused-parameter warning:} a \code{warning} severity message with
+#' category \code{"unused_parameter"} is emitted by the parser when a
+#' parameter is declared in \code{[parameters]} but never referenced in
+#' \code{[individual_parameters]} or \code{[error_model]}. This usually
+#' indicates a commented-out expression or a typo in the parameter name.
+#' Inspect \code{ferx_warnings(fit)} or check \code{ferx_model_validate()}
+#' before fitting.
 #'
 #' @section Steady-state dosing (\code{SS} and \code{II} columns):
 #'
@@ -1304,10 +1352,24 @@ ferx_fit <- function(model, data = NULL,
         names(result$se_kappa) <- tri_names
       }
     }
+    # Per-occasion shrinkage: set column names from kappa_names; NULL when
+    # the Rust glue returned an empty/NULL frame (no IOV or unbalanced design).
+    if (is.data.frame(result$shrinkage_kappa_by_occ) &&
+        nrow(result$shrinkage_kappa_by_occ) > 0L) {
+      kn <- result$kappa_names
+      # Columns are: occ, <kappa1>, <kappa2>, ... already named by Rust glue
+      # but guard against older binaries that may omit kappa column names.
+      if (!is.null(kn) && length(kn) == ncol(result$shrinkage_kappa_by_occ) - 1L) {
+        colnames(result$shrinkage_kappa_by_occ) <- c("occ", kn)
+      }
+    } else {
+      result$shrinkage_kappa_by_occ <- NULL
+    }
   } else {
     result$omega_iov <- NULL
     result$se_kappa <- NULL
     result$shrinkage_kappa <- NULL
+    result$shrinkage_kappa_by_occ <- NULL
     result$kappa_names <- NULL
     result$ebe_kappas <- NULL
   }
@@ -1903,6 +1965,19 @@ print.ferx_fit <- function(x, ...) {
             kap_names[i], kap_names[j], cov_ij, corr_label, param_corr
           ))
         }
+      }
+    }
+    if (!is.null(x$shrinkage_kappa_by_occ) &&
+        is.data.frame(x$shrinkage_kappa_by_occ) &&
+        nrow(x$shrinkage_kappa_by_occ) >= 1L) {
+      cat("  --- Shrinkage by occasion ---\n")
+      df_occ <- x$shrinkage_kappa_by_occ
+      kap_cols <- setdiff(colnames(df_occ), "occ")
+      for (row_i in seq_len(nrow(df_occ))) {
+        parts <- vapply(kap_cols, function(cn) {
+          sprintf("%s %.1f%%", cn, df_occ[[cn]][row_i] * 100)
+        }, character(1L))
+        cat(sprintf("  Occasion %d: %s\n", df_occ$occ[row_i], paste(parts, collapse = "  ")))
       }
     }
   }

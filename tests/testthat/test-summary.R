@@ -203,6 +203,7 @@ test_that("print.ferx_fit shows R package version with core version in parens", 
   )))
 })
 
+
 test_that("print.ferx_summary wraps output in dashed borders", {
   s <- summary(make_fake_fit())
   out <- capture.output(print(s))

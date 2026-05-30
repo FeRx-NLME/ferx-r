@@ -263,3 +263,69 @@ test_that("autodiff OFV gradient matches finite-difference gradient within toler
   )
   skip("Gradient inspection API not yet exposed from ferx-core — implement once available")
 })
+
+# -- Diagnostic fields (Step 3 feature-parity) --------------------------------
+
+test_that("$n_threads_used is a positive integer", {
+  fit <- warfarin_fit()
+  expect_true(is.integer(fit$n_threads_used) || is.numeric(fit$n_threads_used))
+  expect_true(fit$n_threads_used >= 1L)
+})
+
+test_that("$nlopt_missing_algorithms is a character vector", {
+  fit <- warfarin_fit()
+  expect_true(is.character(fit$nlopt_missing_algorithms))
+})
+
+test_that("$saem_mu_ref_m_step_evals_saved is NULL or numeric for non-SAEM fit", {
+  fit <- warfarin_fit()
+  val <- fit$saem_mu_ref_m_step_evals_saved
+  expect_true(is.null(val) || (is.numeric(val) && length(val) == 1L))
+})
+
+test_that("$covariance_n_evals_estimated is NULL or numeric", {
+  fit <- warfarin_fit()
+  val <- fit$covariance_n_evals_estimated
+  expect_true(is.null(val) || (is.numeric(val) && length(val) == 1L))
+})
+
+# -- IOV: shrinkage_kappa_by_occ (Step 1 feature-parity) ---------------------
+
+test_that("shrinkage_kappa_by_occ is a data frame with correct structure for IOV fit", {
+  skip_on_cran()
+  ex  <- ferx_example("warfarin_iov")
+  fit <- ferx_fit(ex$model, ex$data, covariance = FALSE, verbose = FALSE)
+  df  <- fit$shrinkage_kappa_by_occ
+  # Non-NULL: IOV model should always produce per-occasion shrinkage
+  expect_false(is.null(df), info = "shrinkage_kappa_by_occ should not be NULL for IOV fit")
+  expect_s3_class(df, "data.frame")
+  # Must contain an 'occ' column
+  expect_true("occ" %in% colnames(df), info = "data frame must have occ column")
+  # One kappa column per kappa parameter
+  kap_cols <- setdiff(colnames(df), "occ")
+  expect_equal(length(kap_cols), length(fit$kappa_names))
+  if (length(fit$kappa_names) > 0L) {
+    expect_equal(sort(kap_cols), sort(fit$kappa_names))
+  }
+  # Shrinkage values must be finite (can exceed 1 in underdetermined models)
+  for (cn in kap_cols) {
+    expect_true(all(is.finite(df[[cn]])),
+                info = sprintf("shrinkage values for %s must be finite", cn))
+  }
+})
+
+test_that("shrinkage_kappa_by_occ is NULL for non-IOV fit", {
+  fit <- warfarin_fit()
+  expect_null(fit$shrinkage_kappa_by_occ)
+})
+
+test_that("print.ferx_fit shows per-occasion shrinkage table for IOV fit", {
+  skip_on_cran()
+  ex  <- ferx_example("warfarin_iov")
+  fit <- ferx_fit(ex$model, ex$data, covariance = FALSE, verbose = FALSE)
+  skip_if(is.null(fit$shrinkage_kappa_by_occ),
+          "IOV fit did not produce shrinkage_kappa_by_occ")
+  out <- capture.output(suppressWarnings(print(fit)))
+  expect_true(any(grepl("Shrinkage by occasion", out, fixed = TRUE)))
+  expect_true(any(grepl("Occasion", out, fixed = TRUE)))
+})

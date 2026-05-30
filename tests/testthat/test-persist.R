@@ -314,3 +314,36 @@ test_that("LTBS residual label survives a .fitrx round-trip", {
   loaded <- ferx_load_fit(path)
   expect_equal(loaded$model_structure$residual, "additive (log-transformed)")
 })
+
+test_that(".fitrx_build_iov_wire uses empty list when shrinkage_kappa_by_occ is absent", {
+  fake_iov_fit <- list(
+    omega_iov              = matrix(0.09, 1, 1),
+    kappa_names            = "KAPPA_CL",
+    kappa_fixed            = FALSE,
+    se_kappa               = NULL,
+    shrinkage_kappa        = 0.15,
+    shrinkage_kappa_by_occ = NULL,
+    omega_iov_param_corr   = NULL
+  )
+  wire <- ferx:::.fitrx_build_iov_wire(fake_iov_fit)
+  expect_equal(wire$shrinkage_kappa_by_occ, list())
+})
+
+test_that("shrinkage_kappa_by_occ survives a ferx_save/ferx_load round-trip", {
+  skip_on_cran()
+  ex  <- ferx_example("warfarin_iov")
+  fit <- ferx_fit(ex$model, ex$data, covariance = FALSE, verbose = FALSE)
+  skip_if(is.null(fit$shrinkage_kappa_by_occ),
+          "IOV fit did not produce shrinkage_kappa_by_occ - skip round-trip")
+  path <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(path), add = TRUE)
+  ferx_save_fit(fit, path)
+  loaded <- ferx_load_fit(path)
+  expect_equal(colnames(loaded$shrinkage_kappa_by_occ),
+               colnames(fit$shrinkage_kappa_by_occ))
+  expect_equal(nrow(loaded$shrinkage_kappa_by_occ),
+               nrow(fit$shrinkage_kappa_by_occ))
+  expect_equal(loaded$shrinkage_kappa_by_occ$occ,
+               fit$shrinkage_kappa_by_occ$occ)
+})
+

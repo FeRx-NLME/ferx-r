@@ -313,13 +313,13 @@ ferx_load_fit <- function(path) {
     gradient_method_outer = as.character(fit$gradient_method_outer %||% ""),
     nlopt_missing_algorithms = as.character(fit$nlopt_missing_algorithms %||% character()),
     covariance_status = .fitrx_covariance_status_to_token(fit$covariance_status),
-    covariance_n_evals_estimated = .fitrx_opt_int(fit$covariance_n_evals_estimated),
+    covariance_n_evals_estimated = .fitrx_opt_num(fit$covariance_n_evals_estimated),
     trace_path = .fitrx_opt_chr(fit$trace_path),
     ebe_convergence_warnings = as.integer(fit$ebe_convergence_warnings %||% 0L),
     max_unconverged_subjects = as.integer(fit$max_unconverged_subjects %||% 0L),
     total_ebe_fallbacks = as.integer(fit$total_ebe_fallbacks %||% 0L),
     warnings = as.character(fit$warnings %||% character()),
-    saem_mu_ref_m_step_evals_saved = .fitrx_opt_int(fit$saem_mu_ref_m_step_evals_saved),
+    saem_mu_ref_m_step_evals_saved = .fitrx_opt_num(fit$saem_mu_ref_m_step_evals_saved),
 
     theta = list(
       names = as.character(names(fit$theta) %||% character()),
@@ -403,13 +403,13 @@ ferx_load_fit <- function(path) {
     gradient_method_outer = as.character(w$gradient_method_outer %||% ""),
     nlopt_missing_algorithms = unlist(w$nlopt_missing_algorithms %||% list(), use.names = FALSE),
     covariance_status = .fitrx_covariance_status_label(w$covariance_status),
-    covariance_n_evals_estimated = .fitrx_unwrap_opt_int(w$covariance_n_evals_estimated),
+    covariance_n_evals_estimated = .fitrx_unwrap_opt_num(w$covariance_n_evals_estimated),
     trace_path = .fitrx_unwrap_opt_chr(w$trace_path),
     ebe_convergence_warnings = as.integer(w$ebe_convergence_warnings %||% 0L),
     max_unconverged_subjects = as.integer(w$max_unconverged_subjects %||% 0L),
     total_ebe_fallbacks = as.integer(w$total_ebe_fallbacks %||% 0L),
     warnings = unlist(w$warnings %||% list(), use.names = FALSE),
-    saem_mu_ref_m_step_evals_saved = .fitrx_unwrap_opt_int(w$saem_mu_ref_m_step_evals_saved),
+    saem_mu_ref_m_step_evals_saved = .fitrx_unwrap_opt_num(w$saem_mu_ref_m_step_evals_saved),
 
     theta = stats::setNames(
       as.numeric(unlist(w$theta$estimates, use.names = FALSE)),
@@ -485,6 +485,17 @@ ferx_load_fit <- function(path) {
     out$kappa_fixed <- as.logical(unlist(w$iov$kappa_fixed %||% list(), use.names = FALSE))
     out$se_kappa <- .fitrx_unwrap_opt_num_vec(w$iov$se_kappa)
     out$shrinkage_kappa <- as.numeric(unlist(w$iov$shrinkage_kappa %||% list(), use.names = FALSE))
+    raw_by_occ <- w$iov$shrinkage_kappa_by_occ
+    if (!is.null(raw_by_occ) && length(raw_by_occ) > 0L) {
+      kn <- out$kappa_names
+      occ_col <- seq_along(raw_by_occ)
+      kappa_mat <- do.call(rbind, lapply(raw_by_occ, as.numeric))
+      df_by_occ <- as.data.frame(cbind(occ = occ_col, kappa_mat))
+      colnames(df_by_occ) <- c("occ", kn)
+      out$shrinkage_kappa_by_occ <- df_by_occ
+    } else {
+      out$shrinkage_kappa_by_occ <- NULL
+    }
     out$omega_iov_param_corr <- .fitrx_matrix_from_wire(w$iov$omega_iov_param_corr)
     out$kappa_init_as_sd <- as.logical(unlist(w$iov$kappa_init_as_sd %||% list(), use.names = FALSE))
   } else {
@@ -492,6 +503,7 @@ ferx_load_fit <- function(path) {
     out$kappa_fixed <- logical()
     out$se_kappa <- NULL
     out$shrinkage_kappa <- numeric()
+    out$shrinkage_kappa_by_occ <- NULL
     out$omega_iov <- NULL
     out$omega_iov_param_corr <- NULL
     out$kappa_init_as_sd <- logical()
@@ -713,6 +725,15 @@ ferx_load_fit <- function(path) {
     kappa_fixed = as.logical(fit$kappa_fixed %||% rep(FALSE, length(fit$kappa_names))),
     se_kappa = .fitrx_opt_num_vec(fit$se_kappa),
     shrinkage_kappa = as.numeric(fit$shrinkage_kappa %||% numeric()),
+    shrinkage_kappa_by_occ = if (is.data.frame(fit$shrinkage_kappa_by_occ) &&
+                                   nrow(fit$shrinkage_kappa_by_occ) > 0L) {
+      kap_cols <- setdiff(colnames(fit$shrinkage_kappa_by_occ), "occ")
+      lapply(seq_len(nrow(fit$shrinkage_kappa_by_occ)), function(i) {
+        as.numeric(fit$shrinkage_kappa_by_occ[i, kap_cols])
+      })
+    } else {
+      list()
+    },
     omega_iov = .fitrx_matrix_to_wire(fit$omega_iov),
     omega_iov_param_corr = .fitrx_matrix_to_wire(fit$omega_iov_param_corr)
   )
