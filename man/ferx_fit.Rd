@@ -168,59 +168,142 @@ the optimizer runs, overriding the model file's defaults. Either a logical
 where bad starting values can stall the optimizer. See
 \code{\link{ferx_inits_from_nca}} to inspect the values without fitting.}
 
-\item{settings}{Optional named list of estimation-method-specific options
-forwarded to the Rust \code{FitOptions}. Use this to tune knobs that do
-not have a dedicated \code{ferx_fit()} argument, without needing a new
-wrapper release for each option. Recognized keys include SAEM
-(\code{n_exploration}, \code{n_convergence}, \code{n_mh_steps},
-\code{adapt_interval}, \code{omega_burnin}: initial iterations during
-which Omega is held fixed while the sampler warms up (default 20,
-guards against Omega collapse on sparse data); \code{seed}; and
-\code{n_leapfrog} /
-\code{saem_n_leapfrog}: integer leapfrog steps for HMC proposals,
-default 0 = Metropolis-Hastings; positive value uses one HMC proposal
-per subject per iteration, requires AD build, see examples below),
-SIR tuning (\code{sir_samples},
-\code{sir_resamples}, \code{sir_seed}), Importance Sampling
-(\code{is_samples}, \code{is_proposal_df}, \code{is_seed},
-\code{is_low_ess_threshold}; used only when an \code{"imp"} stage is
-in the method chain), Gauss-Newton (\code{gn_lambda}),
-optimizer selection (\code{optimizer} - one of \code{"bobyqa"} (default),
-\code{"slsqp"}, \code{"lbfgs"}, \code{"nlopt_lbfgs"}, \code{"mma"},
-\code{"bfgs"}, \code{"trust_region"}; also \code{global_search},
-\code{global_maxeval}), the outer optimizer iteration cap
-(\code{maxiter}), the inner (per-subject EBE) loop
-(\code{inner_maxiter}, \code{inner_tol}), the Steihaug CG budget
-for \code{optimizer = "trust_region"} (\code{steihaug_max_iters}),
-the NLopt outer-loop stagnation guard
-(\code{stagnation_guard} - logical, default \code{TRUE}; set
-\code{FALSE} to let SLSQP / L-BFGS run to their own xtol/ftol or to
-\code{maxiter} instead of short-circuiting on a numerically-flat
-OFV plateau; only consumed by FOCE / FOCEI / GN-hybrid),
-the reconverged-gradient schedule
-(\code{reconverge_gradient_interval} - integer, default \code{0}; how
-often to re-solve each subject's inner EBE loop during the population
-gradient instead of holding it fixed. \code{0} never reconverges (the
-cheap fixed-EBE gradient); \code{1} reconverges every gradient
-evaluation; \code{N} reconverges every \code{N}-th. The fixed-EBE
-gradient can stall \code{slsqp} above the derivative-free
-(\code{bobyqa}) optimum on ill-conditioned non-IOV fits; reconverging
-recovers the full surface at ~5-6x the per-gradient cost. IOV models
-always reconverge and ignore this; only consumed by FOCE / FOCEI /
-GN-hybrid),
-and multi-start optimization (\code{n_starts}, \code{start_sigma},
-\code{multi_start_seed}).
-Values that duplicate a dedicated argument
-(\code{method}, \code{covariance}, \code{verbose},
-\code{bloq_method}, \code{threads}, \code{sir}) are rejected - pass
-them via the dedicated argument. Unknown keys and malformed values
-also raise an error.
+\item{settings}{Optional named list of fine-grained options forwarded to the
+Rust \code{FitOptions}. Use this to tune knobs that do not have a
+dedicated \code{ferx_fit()} argument. Keys are validated: values that
+duplicate a dedicated argument (\code{method}, \code{covariance},
+\code{verbose}, \code{bloq_method}, \code{threads}, \code{sir}) are
+rejected -- pass them via the dedicated argument. Unknown keys and
+malformed values also raise an error.
+
 \strong{Precedence}: dedicated \code{ferx_fit()} arguments win over
 \code{settings}, which in turn win over the model file's
 \code{[fit_options]} block. A \code{warning()} is issued whenever a
 call-time value overrides a different value from \code{[fit_options]}.
 Inspect \code{fit$model_file_settings} and \code{fit$call_settings} to
-audit the full picture.}
+audit the full picture.
+
+\strong{Shared options (FOCE / FOCEI / GN / GN-hybrid / SAEM)}
+\describe{
+\item{\code{inner_maxiter}}{Per-subject EBE iteration cap (default 200).}
+\item{\code{inner_tol}}{Convergence tolerance for the inner EBE loop
+(default \code{1e-4}).}
+}
+
+\strong{FOCE / FOCEI / GN / GN-hybrid: iteration cap}
+\describe{
+\item{\code{maxiter}}{Maximum outer-optimizer iterations (default 500).
+Not applicable to SAEM, which controls iterations via
+\code{n_exploration} and \code{n_convergence}.}
+}
+
+\strong{FOCE / FOCEI / GN-hybrid: outer optimizer}
+\describe{
+\item{\code{optimizer}}{Population-level optimizer. One of
+\code{"bobyqa"} (default, derivative-free, robust),
+\code{"slsqp"} (sequential quadratic programming, gradient-based),
+\code{"lbfgs"} / \code{"nlopt_lbfgs"} (limited-memory BFGS via
+NLopt, gradient-based),
+\code{"mma"} (method of moving asymptotes, gradient-based),
+\code{"bfgs"} (hand-rolled BFGS, gradient-based), or
+\code{"trust_region"} (trust-region Newton, gradient-based).
+Gradient-based optimizers use the inner gradient method set by the
+\code{gradient} argument; \code{"bobyqa"} does not.
+Not accepted by pure \code{"gn"}.}
+\item{\code{global_search}}{Logical. When \code{TRUE}, run a global
+search phase before local refinement (default \code{FALSE}).
+Not accepted by pure \code{"gn"}.}
+\item{\code{global_maxeval}}{Function evaluations budget for the global
+search phase (default \code{0}, i.e. disabled when
+\code{global_search = FALSE}). Not accepted by pure \code{"gn"}.}
+\item{\code{stagnation_guard}}{Logical (default \code{TRUE}). Terminates
+the NLopt outer loop early when the OFV plateau is numerically flat.
+Set \code{FALSE} to let SLSQP / L-BFGS run to their own xtol/ftol or
+\code{maxiter}. Not accepted by pure \code{"gn"}.}
+\item{\code{reconverge_gradient_interval}}{Integer (default \code{0}).
+How often to re-solve each subject's inner EBE during the population
+gradient, instead of holding it fixed. \code{0} = never (cheap
+fixed-EBE gradient); \code{1} = every gradient evaluation; \code{N}
+= every \code{N}-th. Reconverging recovers the full gradient surface
+at roughly 5-6x the per-call cost and can help gradient-based
+optimizers (e.g. \code{slsqp}) past ill-conditioned non-IOV plateaus.
+IOV models always reconverge and ignore this setting. Not accepted by
+pure \code{"gn"}.}
+}
+
+\strong{Trust-region optimizer (\code{optimizer = "trust_region"})}
+\describe{
+\item{\code{steihaug_max_iters}}{Conjugate-gradient iteration budget for
+the trust-region subproblem (default chosen by the engine). Only
+consumed when \code{optimizer = "trust_region"} is set under FOCE /
+FOCEI / GN-hybrid. Increase if the subproblem solver exits too early
+on ill-conditioned problems.}
+}
+
+\strong{SAEM}
+\describe{
+\item{\code{n_exploration}}{Stochastic exploration phase iterations
+(default 150).}
+\item{\code{n_convergence}}{Averaging / convergence phase iterations
+(default 250).}
+\item{\code{n_mh_steps}}{Metropolis-Hastings steps per subject per
+iteration (default 10).}
+\item{\code{adapt_interval}}{How often (in iterations) the MH proposal
+covariance is adapted (default 50).}
+\item{\code{omega_burnin}}{Initial iterations during which Omega is held
+fixed while the sampler warms up (default 20). Guards against Omega
+collapse on sparse data. Set to \code{0} to disable.}
+\item{\code{seed} / \code{saem_seed}}{RNG seed for the SAEM
+Metropolis-Hastings sampler (default 12345). Independent of
+\code{multi_start_seed}.}
+\item{\code{n_leapfrog} / \code{saem_n_leapfrog}}{Leapfrog steps for
+HMC proposals (default \code{0} = Metropolis-Hastings). A positive
+value replaces MH with one HMC proposal per subject per iteration.
+Requires an AD build; see examples below.}
+}
+
+\strong{Gauss-Newton (\code{"gn"} / \code{"gn_hybrid"})}
+\describe{
+\item{\code{gn_lambda}}{Levenberg-Marquardt damping factor (default
+\code{0.01}). Larger values make steps more conservative. Accepted
+by both \code{"gn"} and \code{"gn_hybrid"}.}
+}
+
+\strong{Importance Sampling (\code{"imp"} stage)}
+\describe{
+\item{\code{is_samples}}{Importance samples drawn per subject (default
+1000). Halving the Monte-Carlo SE requires quadrupling this value.}
+\item{\code{is_proposal_df}}{Degrees of freedom for the Student-t
+proposal distribution (default \code{5}).}
+\item{\code{is_seed}}{RNG seed for the IS step (default chosen by the
+engine).}
+\item{\code{is_low_ess_threshold}}{ESS fraction below which a subject is
+flagged in \code{fit$importance_sampling$low_ess_subject_ids} (default
+\code{0.1}, i.e. 10\\% of \code{is_samples}).}
+}
+
+\strong{SIR (Sampling Importance Resampling)}
+\describe{
+\item{\code{sir_samples}}{Candidate draws for SIR (default 1000).}
+\item{\code{sir_resamples}}{Resampled draws retained for CI computation
+(default 250).}
+\item{\code{sir_seed}}{RNG seed for the SIR step (default chosen by the
+engine). Independent of \code{seed} / \code{saem_seed}.}
+}
+
+\strong{Multi-start optimization}
+\describe{
+\item{\code{n_starts}}{Number of optimizer starts (default \code{1},
+i.e. single start). When \code{> 1}, starts 2..n are initialized from
+log-space perturbations of the model's initial values; the best OFV
+wins.}
+\item{\code{start_sigma}}{Perturbation spread in log-space (default
+\code{0.3}, approx. 30\\% CV). Log-packed thetas are multiplied by
+\code{exp(N(0, start_sigma))}; identity-packed thetas are shifted by
+\code{start_sigma * N(0,1)}.}
+\item{\code{multi_start_seed}}{RNG seed for the start-point perturbation
+(default \code{42}). Independent of \code{seed} / \code{saem_seed}.}
+}}
 
 \item{output}{Optional path to a \code{.fitrx} file. When non-\code{NULL},
 \code{\link{ferx_save_fit}} is invoked on the result so the fit is
