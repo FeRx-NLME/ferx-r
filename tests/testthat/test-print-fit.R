@@ -199,13 +199,13 @@ test_that("print.ferx_fit skips NN-weight thetas and emits NEURAL NETWORKS block
   expect_true(any(grepl("^TVV1\\s", out)))
   # NN-weight thetas are skipped from the THETA table (no `W1`/`W2`/... rows).
   theta_block <- out[seq(
-    which(grepl("--- THETA Estimates ---", out)),
-    which(grepl("--- NEURAL NETWORKS ---", out)) - 1L
+    which(grepl("^\\s*THETA\\s*$|--- THETA", out))[1L],
+    (which(grepl("NEURAL NETWORKS", out)) - 1L)[1L]
   )]
   expect_false(any(grepl("^W[1-4]\\s", theta_block)))
 
   # NEURAL NETWORKS block contains the network metadata and weight summary.
-  expect_true(any(grepl("--- NEURAL NETWORKS ---", out)))
+  expect_true(any(grepl("NEURAL NETWORKS", out)))
   expect_true(any(grepl("TYPICAL_PK.*shape=\\[2, 2, 2\\].*activation=tanh/exp.*n_weights=4", out)))
   expect_true(any(grepl("inputs:\\s+\\[WT, CRCL\\]", out)))
   expect_true(any(grepl("outputs:\\s+\\[CL, V1\\]", out)))
@@ -215,7 +215,7 @@ test_that("print.ferx_fit skips NN-weight thetas and emits NEURAL NETWORKS block
 test_that("print.ferx_fit omits NEURAL NETWORKS block when neural_networks is empty/NULL", {
   fit <- make_fake_fit(omega = matrix(0.10, 1, 1))
   out <- capture.output(print(fit))
-  expect_false(any(grepl("--- NEURAL NETWORKS ---", out)))
+  expect_false(any(grepl("NEURAL NETWORKS", out)))
 })
 
 # --- init_as_sd annotation tests ---
