@@ -95,6 +95,42 @@ test_that(".ferx_find_trace_from_bg delegates to .ferx_find_trace_from_lines", {
   expect_equal(path, "/tmp/ferx_trace_99.csv")
 })
 
+test_that(".ferx_find_trace_from_lines tolerates spaces in the path", {
+  lines <- c(
+    "Some other line",
+    "[ferx] optimizer trace -> /Users/Some User/tmp/ferx_trace_1.csv"
+  )
+  expect_equal(
+    ferx:::.ferx_find_trace_from_lines(lines),
+    "/Users/Some User/tmp/ferx_trace_1.csv"
+  )
+})
+
+test_that(".ferx_find_trace_from_lines strips trailing CR (Windows line endings)", {
+  lines <- c(
+    "[ferx] optimizer trace -> /tmp/ferx_trace_42.csv\r",
+    "next line\r"
+  )
+  expect_equal(
+    ferx:::.ferx_find_trace_from_lines(lines),
+    "/tmp/ferx_trace_42.csv"
+  )
+})
+
+test_that(".ferx_find_trace_from_lines picks the announcement line over noise", {
+  # Earlier line mentions "trace" but doesn't end in .csv; later line is the
+  # real announcement.
+  lines <- c(
+    "WARNING: trace optimizer setting changed",
+    "[ferx] optimizer trace -> /var/folders/xx/zz/T/ferx_trace_7.csv",
+    "post-fit chatter"
+  )
+  expect_equal(
+    ferx:::.ferx_find_trace_from_lines(lines),
+    "/var/folders/xx/zz/T/ferx_trace_7.csv"
+  )
+})
+
 test_that("ferx_fit_async rejects invalid tail_n / poll_interval", {
   fn <- ferx::ferx_fit_async
   mockery::stub(fn, "interactive", function() TRUE)

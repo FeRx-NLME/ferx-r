@@ -2779,21 +2779,33 @@ print.ferx_job <- function(x, ...) {
 
 # Parse a trace CSV path from a character vector of stdout/stderr lines.
 # ferx-core emits "[ferx] optimizer trace -> /path/to/file.csv" on stderr.
+#
+# The path may contain spaces (e.g. when TMPDIR resolves under
+# "/Users/Some User/...") so we anchor on ".csv" at end-of-line rather
+# than refusing any whitespace inside the match. Greedy capture from the
+# first "/" through the trailing ".csv" on the announcement line, with a
+# trailing "\r" stripped to tolerate Windows line endings.
 .ferx_find_trace_from_lines <- function(lines) {
   if (length(lines) == 0L) return(NULL)
-  m <- regmatches(
-    lines,
-    regexpr("optimizer trace[^/]*(/\\S+\\.csv)", lines, perl = TRUE)
-  )
-  m <- m[nzchar(m)]
-  if (length(m) > 0L) {
-    return(sub(".*?(/\\S+\\.csv).*", "\\1", m[[length(m)]], perl = TRUE))
+  parse_one <- function(line) {
+    line <- sub("\r$", "", line)
+    m <- regexpr("/.+\\.csv$", line, perl = TRUE)
+    if (m == -1L) return(NA_character_)
+    regmatches(line, m)
   }
-  cand <- grep("trace", lines, value = TRUE, ignore.case = TRUE)
-  if (length(cand) == 0L) return(NULL)
-  csvs <- regmatches(cand, regexpr("/\\S+\\.csv", cand))
-  csvs <- csvs[nzchar(csvs)]
-  if (length(csvs) == 0L) NULL else trimws(csvs[[length(csvs)]])
+  # Primary: lines that look like the trace announcement.
+  cand <- grep("optimizer trace", lines, value = TRUE, fixed = TRUE)
+  if (length(cand) > 0L) {
+    parsed <- vapply(cand, parse_one, character(1L), USE.NAMES = FALSE)
+    parsed <- parsed[!is.na(parsed)]
+    if (length(parsed) > 0L) return(parsed[[length(parsed)]])
+  }
+  # Fallback: any line that mentions "trace" and ends in ".csv".
+  cand2 <- grep("trace", lines, value = TRUE, ignore.case = TRUE)
+  if (length(cand2) == 0L) return(NULL)
+  parsed <- vapply(cand2, parse_one, character(1L), USE.NAMES = FALSE)
+  parsed <- parsed[!is.na(parsed)]
+  if (length(parsed) == 0L) NULL else parsed[[length(parsed)]]
 }
 
 # Keep the old name as an internal alias so existing tests that mock the
