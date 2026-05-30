@@ -2,6 +2,7 @@
 
 [![R-CMD-check](https://github.com/FeRx-NLME/ferx-r/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/FeRx-NLME/ferx-r/actions/workflows/R-CMD-check.yaml)
 [![codecov](https://codecov.io/gh/FeRx-NLME/ferx-r/branch/main/graph/badge.svg)](https://codecov.io/gh/FeRx-NLME/ferx-r)
+[![CodeFactor](https://www.codefactor.io/repository/github/ferx-nlme/ferx-r/badge)](https://www.codefactor.io/repository/github/ferx-nlme/ferx-r)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Dependencies](https://img.shields.io/badge/dependencies-2-brightgreen.svg)](DESCRIPTION)
 
