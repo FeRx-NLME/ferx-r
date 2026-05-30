@@ -262,3 +262,62 @@ test_that("print.ferx_fit handles missing omega_init_as_sd gracefully (old fit o
   out <- capture.output(print(fit))
   expect_false(any(grepl("\\[initial specified as SD\\]", out)))
 })
+
+# STATUS line surfaces failing critical category --------------------------
+
+test_that("print.ferx_fit appends critical category to STATUS when fit did not converge", {
+  fit <- make_fake_fit(
+    omega     = matrix(0.10, 1, 1),
+    converged = FALSE,
+    warnings_structured = data.frame(
+      severity = c("critical", "info"),
+      category = c("convergence", "mu_referencing"),
+      message  = c("Outer optimization did not converge",
+                   "mu-ref: CL, V"),
+      source_method = c("", ""),
+      stringsAsFactors = FALSE
+    )
+  )
+  out <- capture.output(print(fit))
+  status_line <- out[grepl("STATUS", out)]
+  expect_length(status_line, 1L)
+  expect_true(grepl("NOT CONVERGED", status_line))
+  # Inline category appears between the label and the iteration/time tail.
+  expect_true(grepl("\\(convergence\\)", status_line))
+})
+
+test_that("print.ferx_fit deduplicates and joins multiple critical categories", {
+  fit <- make_fake_fit(
+    omega     = matrix(0.10, 1, 1),
+    converged = FALSE,
+    warnings_structured = data.frame(
+      severity = c("critical", "critical", "critical"),
+      category = c("convergence", "covariance_step", "convergence"),
+      message  = c("a", "b", "c"),
+      source_method = c("", "", ""),
+      stringsAsFactors = FALSE
+    )
+  )
+  out <- capture.output(print(fit))
+  status_line <- out[grepl("STATUS", out)]
+  expect_true(grepl("\\(convergence, covariance_step\\)", status_line))
+})
+
+test_that("print.ferx_fit STATUS has no inline category when there are no critical warnings", {
+  fit <- make_fake_fit(
+    omega     = matrix(0.10, 1, 1),
+    converged = TRUE,
+    warnings_structured = data.frame(
+      severity = "info",
+      category = "mu_referencing",
+      message  = "mu-ref: CL",
+      source_method = "",
+      stringsAsFactors = FALSE
+    )
+  )
+  out <- capture.output(print(fit))
+  status_line <- out[grepl("STATUS", out)]
+  expect_true(grepl("CONVERGED", status_line))
+  # No parenthesised category snippet because nothing is critical.
+  expect_false(grepl("\\(mu_referencing\\)|\\(convergence\\)", status_line))
+})
