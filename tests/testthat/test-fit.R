@@ -329,3 +329,65 @@ test_that("print.ferx_fit shows per-occasion shrinkage table for IOV fit", {
   expect_true(any(grepl("Shrinkage by occasion", out, fixed = TRUE)))
   expect_true(any(grepl("Occasion", out, fixed = TRUE)))
 })
+
+# SAEM HMC proposals — [ENZYME ONLY]
+#
+# HMC proposals in the SAEM E-step are gated on the Enzyme autodiff build
+# (`hmc_step` is `#[cfg(feature = "autodiff")]` in ferx-core). On a stable /
+# FERX_NO_AUTODIFF=1 build, `n_leapfrog > 0` is silently ignored and the
+# sampler uses Metropolis-Hastings, so `saem_n_subjects_hmc` is NA. The
+# guard below makes this test inert on Tier 1 machines; CI with the Enzyme
+# toolchain exercises the behavioural assertions.
+
+test_that("SAEM with n_leapfrog > 0 uses HMC proposals on the AD build", {
+  skip_if(
+    !isTRUE(ferx:::ferx_rust_autodiff_enabled()),
+    "Enzyme autodiff not available — skipping SAEM HMC behavioural test"
+  )
+
+  ex  <- ferx_example("warfarin_saem")
+  fit <- ferx_fit(
+    ex$model, ex$data,
+    method   = "saem",
+    verbose  = FALSE,
+    settings = list(
+      n_leapfrog    = 3L,
+      n_exploration = 50L,
+      n_convergence = 50L,
+      omega_burnin  = 20L,
+      seed          = 42L
+    )
+  )
+
+  expect_s3_class(fit, "ferx_fit")
+  # The count must be a non-NA integer, and at least one subject must have
+  # used an HMC proposal (warfarin_saem is an analytical model, so no ODE
+  # fall-back to MH).
+  expect_false(is.na(fit$saem_n_subjects_hmc))
+  expect_type(fit$saem_n_subjects_hmc, "integer")
+  expect_gt(fit$saem_n_subjects_hmc, 0L)
+  expect_lte(fit$saem_n_subjects_hmc, fit$n_subjects)
+})
+
+test_that("SAEM with n_leapfrog = 0 uses MH (no HMC subjects)", {
+  skip_if(
+    !isTRUE(ferx:::ferx_rust_autodiff_enabled()),
+    "Enzyme autodiff not available — skipping SAEM HMC behavioural test"
+  )
+
+  ex  <- ferx_example("warfarin_saem")
+  fit <- ferx_fit(
+    ex$model, ex$data,
+    method   = "saem",
+    verbose  = FALSE,
+    settings = list(
+      n_leapfrog    = 0L,
+      n_exploration = 50L,
+      n_convergence = 50L,
+      seed          = 42L
+    )
+  )
+
+  # n_leapfrog = 0 is pure Metropolis-Hastings: no subject uses HMC.
+  expect_true(is.na(fit$saem_n_subjects_hmc) || fit$saem_n_subjects_hmc == 0L)
+})

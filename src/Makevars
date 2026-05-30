@@ -33,14 +33,22 @@ CARGO_FEATURES =
 # Cargo.toml declares lto="fat" because it's required for cross-crate Enzyme
 # autodiff. When building without Enzyme we drop back to thin LTO for faster
 # link times (and to avoid the fat-LTO memory overhead on machines that don't
-# need autodiff correctness). Override via env var so we don't have to edit
-# Cargo.toml at build time.
-CARGO_PROFILE_RELEASE_LTO = fat
+# need autodiff correctness). We pass this to cargo as an env var so we don't
+# have to edit Cargo.toml at build time.
+#
+# IMPORTANT: use `override` for the LTO selection. R CMD INSTALL runs make in a
+# mode where environment variables can override makefile assignments (make -e
+# semantics), and a stale CARGO_PROFILE_RELEASE_LTO=thin in the environment
+# would otherwise win on the autodiff path — silently building autodiff with
+# thin LTO, which keeps the differentiated ferx-core functions in a separate
+# module from their callers and breaks Enzyme. `override` makes the makefile's
+# value authoritative regardless of the environment.
 ifeq ($(FERX_NO_AUTODIFF),1)
   CARGO_FEATURES = --no-default-features --features ci,nn
-  CARGO_PROFILE_RELEASE_LTO = thin
+  override CARGO_PROFILE_RELEASE_LTO := thin
 else
   CARGO_FEATURES = --features nn
+  override CARGO_PROFILE_RELEASE_LTO := fat
 endif
 
 # Ensure cargo driver host arch matches R's arch (avoids mismatch when the
@@ -126,6 +134,20 @@ else
 	@echo "ferx: building WITHOUT autodiff (FERX_NO_AUTODIFF=1, toolchain: $(HOST_TOOLCHAIN_CHANNEL))"
 endif
 else
+	@# Preflight: the autodiff branch is only reached without the enzyme
+	@# toolchain when the user forced it (FERX_NO_AUTODIFF=0); the auto-detect
+	@# (unset) path would already have flipped to the FD fallback above. Fail
+	@# fast with an actionable message instead of letting cargo emit a cryptic
+	@# "toolchain 'enzyme' is not installed" error.
+	@rustup toolchain list 2>/dev/null | grep -q '^enzyme' || { \
+	  echo "ferx: FERX_NO_AUTODIFF=0 requires the Enzyme Rust toolchain, but no"; \
+	  echo "      'enzyme' rustup toolchain was found."; \
+	  echo "  - To build WITH autodiff: install the Enzyme toolchain (see"; \
+	  echo "    https://ferx-nlme.github.io/ferx-core/installation.html), then reinstall."; \
+	  echo "  - To build WITHOUT autodiff (finite-difference gradients): unset"; \
+	  echo "    FERX_NO_AUTODIFF (auto-detect + fall back) or set FERX_NO_AUTODIFF=1."; \
+	  exit 1; \
+	}
 	@echo 'rustflags = ["-Z", "autodiff=Enable"]' >> rust/.cargo/config.toml
 	@echo '[toolchain]' > rust/rust-toolchain.toml
 	@echo 'channel = "enzyme"' >> rust/rust-toolchain.toml
