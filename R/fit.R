@@ -717,6 +717,10 @@
 #' dedicated parameters (e.g. \code{method}, \code{covariance}) cannot be
 #' duplicated in \code{settings} - pass them via the named argument.
 #'
+#' For the complete settings reference — including which options apply to which
+#' method, valid combinations, and a convergence troubleshooting guide — see
+#' \href{https://ferx-nlme.github.io/model-dsl/fit-options.html}{ferx-nlme.github.io/model-dsl/fit-options}.
+#'
 #' \strong{Outer optimizer selection:}
 #' \preformatted{
 #' ferx_fit(m, d, settings = list(optimizer = "bobyqa"))      # default
@@ -1045,6 +1049,21 @@
 #' }
 #'
 #' @param ... Reserved for future use. Unrecognised arguments raise an error.
+#' @seealso
+#'   \itemize{
+#'     \item \href{https://ferx-nlme.github.io/model-dsl/fit-options.html}{Fit
+#'       options reference} — full documentation of every \code{[fit_options]}
+#'       key and \code{settings} knob, organised by method with a
+#'       convergence-troubleshooting guide and a method × option compatibility
+#'       table.
+#'     \item \code{\link{ferx_fit_async}} — non-blocking version for long runs.
+#'     \item \code{\link{ferx_check_init}} — 5-iteration pilot to validate
+#'       starting values before a full run.
+#'     \item \code{\link{ferx_inits_from_nca}} — NCA-derived starting values.
+#'     \item \code{\link{ferx_warnings}} — structured warnings from the fit.
+#'     \item \code{\link{ferx_estimates}} — tidy parameter table with SE / \%RSE.
+#'     \item \code{\link{ferx_plot_trace}} — convergence trace plot.
+#'   }
 #' @family fitting
 #' @export
 ferx_fit <- function(model, data = NULL,
