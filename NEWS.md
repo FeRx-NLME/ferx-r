@@ -1,4 +1,4 @@
-# ferx (development)
+# ferx 0.1.5
 
 ## Documentation
 

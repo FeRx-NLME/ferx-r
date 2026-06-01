@@ -299,7 +299,7 @@ checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
 
 [[package]]
 name = "ferx"
-version = "0.1.0"
+version = "0.1.5"
 dependencies = [
  "extendr-api",
  "ferx-core",
@@ -308,8 +308,8 @@ dependencies = [
 
 [[package]]
 name = "ferx-core"
-version = "0.1.0"
-source = "git+https://github.com/FeRx-NLME/ferx-core?branch=main#890aa9624db26b121c44bdd986cf4e126da8d7ed"
+version = "0.1.5"
+source = "git+https://github.com/FeRx-NLME/ferx-core?branch=main#606702a6477c9956bb138f46b5cd797ebe9b48d9"
 dependencies = [
  "argmin",
  "argmin-math",
