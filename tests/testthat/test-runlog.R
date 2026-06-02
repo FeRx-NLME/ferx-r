@@ -155,6 +155,62 @@ test_that("ferx_runlog covariance section absent when no cov data", {
   expect_no_match(out, "COVARIANCE STEP", fixed = TRUE)
 })
 
+# -- Tier 2: estimation settings ----------------------------------------------
+
+test_that("ferx_runlog estimation settings section present when optimizer_label available", {
+  fit <- warfarin_fit()
+  fit$optimizer_label  <- "LBFGS"
+  fit$bloq_method_label <- "drop"
+  fit$outer_maxiter    <- 200L
+  fit$outer_gtol       <- 1e-4
+  fit$inits_from_nca   <- FALSE
+  out <- ferx_runlog(fit, verbose = FALSE)
+  expect_match(out, "ESTIMATION SETTINGS", fixed = TRUE)
+  expect_match(out, "LBFGS",              fixed = TRUE)
+  expect_match(out, "Max iterations:",    fixed = TRUE)
+  expect_match(out, "Gradient tol:",      fixed = TRUE)
+  expect_match(out, "BLOQ method:",       fixed = TRUE)
+})
+
+test_that("ferx_runlog estimation settings shows NCA warm-start flag", {
+  fit <- warfarin_fit()
+  fit$optimizer_label <- "LBFGS"
+  fit$inits_from_nca  <- TRUE
+  out <- ferx_runlog(fit, verbose = FALSE)
+  expect_match(out, "NCA-derived warm start", fixed = TRUE)
+})
+
+test_that("ferx_runlog estimation settings shows multi-start count", {
+  fit <- warfarin_fit()
+  fit$optimizer_label  <- "LBFGS"
+  fit$n_starts         <- 5L
+  fit$multi_start_seed <- 42
+  out <- ferx_runlog(fit, verbose = FALSE)
+  expect_match(out, "multi-start n=5", fixed = TRUE)
+  expect_match(out, "Seeds:",          fixed = TRUE)
+  expect_match(out, "multi_start=42",  fixed = TRUE)
+})
+
+test_that("ferx_runlog estimation settings shows covariate names", {
+  fit <- warfarin_fit()
+  fit$optimizer_label  <- "LBFGS"
+  fit$covariate_names  <- c("WT", "AGE", "SEX")
+  out <- ferx_runlog(fit, verbose = FALSE)
+  expect_match(out, "Covariates:", fixed = TRUE)
+  expect_match(out, "WT",         fixed = TRUE)
+  expect_match(out, "AGE",        fixed = TRUE)
+})
+
+test_that("ferx_runlog estimation settings section absent when no settings fields", {
+  fit <- warfarin_fit()
+  fit$optimizer_label   <- NULL
+  fit$bloq_method_label <- NULL
+  fit$inits_from_nca    <- NULL
+  fit$covariate_names   <- NULL
+  out <- ferx_runlog(fit, verbose = FALSE)
+  expect_no_match(out, "ESTIMATION SETTINGS", fixed = TRUE)
+})
+
 # -- Tier 2: diagnostics ------------------------------------------------------
 
 test_that("ferx_runlog diagnostics section present when shrinkage available", {

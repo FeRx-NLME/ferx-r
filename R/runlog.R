@@ -235,6 +235,45 @@ ferx_runlog <- function(fit, gradient_tol = 0.01, verbose = TRUE) {
   }
   lines <- c(lines, .blank())
 
+  # -- Estimation settings ----------------------------------------------------
+  has_settings <- !is.null(fit$optimizer_label) || !is.null(fit$bloq_method_label) ||
+                  isTRUE(fit$inits_from_nca)    ||
+                  (!is.null(fit$covariate_names) && length(fit$covariate_names) > 0L)
+  if (has_settings) {
+    lines <- c(lines, .sec("Estimation settings"))
+    if (!is.null(fit$optimizer_label) && nzchar(fit$optimizer_label)) {
+      n_st <- fit$n_starts %||% 1L
+      start_str <- if (n_st > 1L) sprintf("  Optimizer:      %s  (multi-start n=%d)", fit$optimizer_label, n_st) else
+                   sprintf("  Optimizer:      %s", fit$optimizer_label)
+      lines <- c(lines, start_str)
+    }
+    if (!is.null(fit$outer_maxiter) && fit$outer_maxiter > 0L) {
+      lines <- c(lines, sprintf("  Max iterations: %d", as.integer(fit$outer_maxiter)))
+    }
+    if (!is.null(fit$outer_gtol) && is.finite(fit$outer_gtol)) {
+      lines <- c(lines, sprintf("  Gradient tol:   %.4g", fit$outer_gtol))
+    }
+    if (!is.null(fit$bloq_method_label) && nzchar(fit$bloq_method_label)) {
+      lines <- c(lines, sprintf("  BLOQ method:    %s", fit$bloq_method_label))
+    }
+    if (isTRUE(fit$inits_from_nca)) {
+      lines <- c(lines, "  Initial values: NCA-derived warm start")
+    }
+    # Seeds -- only print when non-NULL
+    seed_parts <- character(0)
+    if (!is.null(fit$multi_start_seed)) seed_parts <- c(seed_parts, sprintf("multi_start=%g", fit$multi_start_seed))
+    if (!is.null(fit$saem_seed))        seed_parts <- c(seed_parts, sprintf("saem=%g",        fit$saem_seed))
+    if (!is.null(fit$sir_seed_used))    seed_parts <- c(seed_parts, sprintf("sir=%g",         fit$sir_seed_used))
+    if (!is.null(fit$is_seed))          seed_parts <- c(seed_parts, sprintf("is=%g",          fit$is_seed))
+    if (length(seed_parts)) {
+      lines <- c(lines, sprintf("  Seeds:          %s", paste(seed_parts, collapse = "  ")))
+    }
+    if (!is.null(fit$covariate_names) && length(fit$covariate_names) > 0L) {
+      lines <- c(lines, sprintf("  Covariates:     %s", paste(fit$covariate_names, collapse = ", ")))
+    }
+    lines <- c(lines, .blank())
+  }
+
   # -- OFV / AIC / BIC -------------------------------------------------------
   lines <- c(lines, .sec("Objective function"))
   lines <- c(lines,

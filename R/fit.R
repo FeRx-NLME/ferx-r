@@ -417,6 +417,33 @@
 #'     log-theta, Cholesky-omega, log-sigma). \code{NULL} for derivative-free
 #'     optimizers (BOBYQA), built-in BFGS, Gauss-Newton, and SAEM. Use
 #'     \code{\link{ferx_runlog}} to interpret with a convergence threshold.}
+#'   \item{optimizer_label}{Human-readable label for the outer optimizer used
+#'     (e.g. \code{"LBFGS"}, \code{"BOBYQA"}). Mirrors the \code{optimizer}
+#'     enum value from ferx-core. Used by \code{\link{ferx_runlog}}.}
+#'   \item{n_starts}{Integer. Number of multi-start runs attempted. 1 for
+#'     single-start fits.}
+#'   \item{multi_start_seed}{Numeric scalar (or \code{NULL}) giving the random
+#'     seed used for multi-start parameter perturbation.}
+#'   \item{saem_seed}{Numeric scalar (or \code{NULL}) giving the SAEM
+#'     stochastic seed. \code{NULL} for non-SAEM methods.}
+#'   \item{sir_seed_used}{Numeric scalar (or \code{NULL}) giving the SIR
+#'     resampling seed. \code{NULL} when SIR was not run.}
+#'   \item{is_seed}{Numeric scalar (or \code{NULL}) giving the importance
+#'     sampling seed. \code{NULL} when IS was not run.}
+#'   \item{bloq_method_label}{Character string describing the below-LLOQ
+#'     handling method used (\code{"m3"}, \code{"drop"}, etc.).}
+#'   \item{outer_maxiter}{Integer. Maximum number of outer-loop iterations
+#'     passed to the optimizer.}
+#'   \item{outer_gtol}{Numeric. Gradient tolerance passed to the outer
+#'     optimizer. \code{NA} for derivative-free optimizers.}
+#'   \item{inits_from_nca}{Logical. \code{TRUE} when NCA-derived starting
+#'     values were used to warm-start the optimizer.}
+#'   \item{covariate_names}{Character vector of non-standard column names
+#'     present in the dataset (beyond \code{ID}, \code{TIME}, \code{DV},
+#'     \code{EVID}, \code{AMT}, \code{CMT}, \code{RATE}, \code{MDV},
+#'     \code{II}, \code{SS}, \code{CENS}, \code{OCC}). Empty when no
+#'     covariates are present. Used by \code{\link{ferx_runlog}} to echo
+#'     the dataset column list.}
 #'   \item{cov_matrix}{Full parameter covariance matrix as a named numeric
 #'     matrix (params ? params). Row/column names use declared variable names
 #'     (\code{"TVCL"}, \code{"ETA_CL"}, \code{"EPS_PROP"}); fallback is

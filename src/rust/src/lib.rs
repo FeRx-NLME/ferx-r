@@ -883,6 +883,17 @@ fn default_fit_result(
         sigma_init: Vec::new(),
         obs_time_range: None,
         final_gradient: None,
+        optimizer: ferx_core::types::Optimizer::default(),
+        n_starts: 1,
+        multi_start_seed: None,
+        saem_seed: None,
+        sir_seed: None,
+        is_seed: None,
+        bloq_method: ferx_core::types::BloqMethod::default(),
+        outer_maxiter: 0,
+        outer_gtol: f64::NAN,
+        inits_from_nca: false,
+        covariate_names: Vec::new(),
         #[cfg(feature = "nn")]
         neural_networks: Vec::new(),
     }
@@ -1447,7 +1458,33 @@ fn fit_result_to_list(
         final_gradient = match &result.final_gradient {
             Some(g) => g.clone().into(),
             None => ().into(),
-        }
+        },
+        // ── run-settings fields (ferx-core#172 Step 7) ────────────────────
+        // optimizer: human-readable label string.
+        optimizer_label = result.optimizer.label(),
+        n_starts        = result.n_starts as i32,
+        multi_start_seed = match result.multi_start_seed {
+            Some(s) => (s as f64).into(),
+            None => ().into(),
+        },
+        saem_seed = match result.saem_seed {
+            Some(s) => (s as f64).into(),
+            None => ().into(),
+        },
+        sir_seed_used = match result.sir_seed {
+            Some(s) => (s as f64).into(),
+            None => ().into(),
+        },
+        is_seed = match result.is_seed {
+            Some(s) => (s as f64).into(),
+            None => ().into(),
+        },
+        bloq_method_label = result.bloq_method.label(),
+        outer_maxiter     = result.outer_maxiter as i32,
+        outer_gtol        = result.outer_gtol,
+        inits_from_nca    = result.inits_from_nca,
+        // covariate_names: character vector of non-standard data columns.
+        covariate_names   = result.covariate_names.clone()
     )
 }
 
@@ -2009,6 +2046,17 @@ fn ferx_rust_sir(
         sigma_init: Vec::new(),
         obs_time_range: None,
         final_gradient: None,
+        optimizer: ferx_core::types::Optimizer::default(),
+        n_starts: 1,
+        multi_start_seed: None,
+        saem_seed: None,
+        sir_seed: None,
+        is_seed: None,
+        bloq_method: ferx_core::types::BloqMethod::default(),
+        outer_maxiter: 0,
+        outer_gtol: f64::NAN,
+        inits_from_nca: false,
+        covariate_names: Vec::new(),
         #[cfg(feature = "nn")]
         neural_networks: Vec::new(),
     };
