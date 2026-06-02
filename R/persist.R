@@ -564,8 +564,7 @@ ferx_load_fit <- function(path) {
     cat("ID,TIME,DV,PRED,IPRED,CWRES,IWRES,EBE_OFV,N_OBS\n", file = path)
     return(invisible())
   }
-  # sdtab$ID is the subject's original numeric ID from the NONMEM CSV
-  # (ferx-core PR #172 fixed the prior 1-based-index bug). No remapping needed.
+  # sdtab$ID is the original numeric subject ID from the NONMEM CSV.
   utils::write.table(
     sdtab, path,
     row.names = FALSE, quote = FALSE, sep = ",", na = ""

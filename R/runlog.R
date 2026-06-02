@@ -10,18 +10,18 @@
 #' @param gradient_tol Numeric scalar.  Components of \code{final_gradient}
 #'   whose absolute value exceeds this threshold trigger a convergence warning.
 #'   Default \code{0.01} (matches typical NONMEM practice).
-#' @param print Logical.  When \code{TRUE} (the default) the output is printed
-#'   to the console.  When \code{FALSE} it is returned invisibly as a single
-#'   character string.
+#' @param verbose Logical.  When \code{TRUE} (the default) the output is
+#'   printed to the console.  When \code{FALSE} it is returned invisibly as a
+#'   single character string.
 #'
 #' @return A single character string containing the full log (invisibly when
-#'   \code{print = TRUE}).
+#'   \code{verbose = TRUE}).
 #'
 #' @details
-#' Sections that depend on fields introduced in ferx-core PR \strong{#172}
+#' Sections that depend on fields introduced in engine version 0.1.6
 #' (\code{model_text}, \code{theta_init}, \code{omega_init}, \code{sigma_init},
 #' \code{obs_time_range}, \code{final_gradient}) are silently omitted when
-#' those fields are absent or \code{NULL} — so the function works against
+#' those fields are absent or \code{NULL} -- so the function works against
 #' older \code{.fitrx} bundles or in-memory fits that do not carry file
 #' provenance.
 #'
@@ -33,7 +33,7 @@
 #' }
 #'
 #' @export
-ferx_runlog <- function(fit, gradient_tol = 0.01, print = TRUE) {
+ferx_runlog <- function(fit, gradient_tol = 0.01, verbose = TRUE) {
   lines <- character(0)
 
   .sec <- function(title) {
@@ -41,13 +41,13 @@ ferx_runlog <- function(fit, gradient_tol = 0.01, print = TRUE) {
   }
   .blank <- function() ""
 
-  # ── Model file ─────────────────────────────────────────────────────────────
+  # -- Model file -------------------------------------------------------------
   model_text <- fit$model_text
   if (!is.null(model_text) && nzchar(model_text)) {
     lines <- c(lines, .sec("Model file"), model_text, .blank())
   }
 
-  # ── Data summary ────────────────────────────────────────────────────────────
+  # -- Data summary -----------------------------------------------------------
   lines <- c(lines, .sec("Data summary"))
   n_subj <- fit$n_subjects %||% 0L
   n_obs  <- fit$n_obs      %||% 0L
@@ -63,12 +63,11 @@ ferx_runlog <- function(fit, gradient_tol = 0.01, print = TRUE) {
   }
   lines <- c(lines, .blank())
 
-  # ── Parameter table: INITIAL vs FINAL ───────────────────────────────────────
+  # -- Parameter table: INITIAL vs FINAL -------------------------------------
   has_inits <- !is.null(fit$theta_init) && length(fit$theta_init) > 0L
 
   lines <- c(lines, .sec("Parameter estimates"))
 
-  # Column header
   if (has_inits) {
     lines <- c(lines, sprintf("  %-28s  %14s  %14s", "PARAMETER", "INITIAL", "FINAL"))
   } else {
@@ -77,10 +76,10 @@ ferx_runlog <- function(fit, gradient_tol = 0.01, print = TRUE) {
   lines <- c(lines, sprintf("  %s", strrep("-", if (has_inits) 60 else 46)))
 
   # Theta rows
-  thetas     <- fit$theta      %||% numeric(0)
-  th_names   <- fit$theta_names %||% paste0("THETA(", seq_along(thetas), ")")
-  th_init    <- if (has_inits) fit$theta_init else NULL
-  th_fixed   <- fit$theta_fixed %||% rep(FALSE, length(thetas))
+  thetas   <- fit$theta       %||% numeric(0)
+  th_names <- fit$theta_names %||% paste0("THETA(", seq_along(thetas), ")")
+  th_init  <- if (has_inits) fit$theta_init else NULL
+  th_fixed <- fit$theta_fixed %||% rep(FALSE, length(thetas))
 
   for (i in seq_along(thetas)) {
     nm    <- if (i <= length(th_names)) th_names[i] else sprintf("THETA(%d)", i)
@@ -94,7 +93,7 @@ ferx_runlog <- function(fit, gradient_tol = 0.01, print = TRUE) {
     }
   }
 
-  # Omega rows
+  # Omega rows: bare declared name (e.g. ETA_CL); fallback OMEGA(i,i)
   om      <- fit$omega
   if (is.null(dim(om))) om <- matrix(om, 1L, 1L)
   n_eta   <- nrow(om)
@@ -104,11 +103,10 @@ ferx_runlog <- function(fit, gradient_tol = 0.01, print = TRUE) {
   }
   has_om_init <- !is.null(om_init) && all(dim(om_init) == n_eta)
   om_fixed <- fit$omega_fixed %||% rep(FALSE, n_eta)
-  eta_nms  <- fit$eta_names   %||% paste0("OMEGA(", seq_len(n_eta), ")", seq_len(n_eta), ")")
+  eta_nms  <- fit$eta_names   %||% paste0("OMEGA(", seq_len(n_eta), ",", seq_len(n_eta), ")")
 
   for (i in seq_len(n_eta)) {
     nm    <- if (i <= length(eta_nms)) eta_nms[i] else sprintf("OMEGA(%d,%d)", i, i)
-    nm    <- sprintf("OMEGA(%s)", nm)
     fixed <- isTRUE(om_fixed[i])
     final_str <- if (fixed) sprintf("%14s", "FIXED") else sprintf("%14.6g", om[i, i])
     if (has_inits && has_om_init) {
@@ -121,15 +119,15 @@ ferx_runlog <- function(fit, gradient_tol = 0.01, print = TRUE) {
     }
   }
 
-  # Sigma rows
-  sigmas   <- fit$sigma       %||% numeric(0)
-  sig_nms  <- fit$sigma_names %||% paste0("SIGMA(", seq_along(sigmas), ")")
-  sig_init <- if (has_inits && !is.null(fit$sigma_init) && length(fit$sigma_init) > 0L) fit$sigma_init else NULL
+  # Sigma rows: bare declared name (e.g. EPS_PROP); fallback SIGMA(i)
+  sigmas    <- fit$sigma       %||% numeric(0)
+  sig_nms   <- fit$sigma_names %||% paste0("SIGMA(", seq_along(sigmas), ")")
+  sig_init  <- if (has_inits && !is.null(fit$sigma_init) &&
+                   length(fit$sigma_init) > 0L) fit$sigma_init else NULL
   sig_fixed <- fit$sigma_fixed %||% rep(FALSE, length(sigmas))
 
   for (i in seq_along(sigmas)) {
     nm    <- if (i <= length(sig_nms)) sig_nms[i] else sprintf("SIGMA(%d)", i)
-    nm    <- sprintf("SIGMA(%s)", nm)
     fixed <- isTRUE(sig_fixed[i])
     final_str <- if (fixed) sprintf("%14s", "FIXED") else sprintf("%14.6g", sigmas[i])
     if (has_inits && !is.null(sig_init)) {
@@ -143,7 +141,7 @@ ferx_runlog <- function(fit, gradient_tol = 0.01, print = TRUE) {
   }
   lines <- c(lines, .blank())
 
-  # ── OFV / AIC / BIC ─────────────────────────────────────────────────────────
+  # -- OFV / AIC / BIC -------------------------------------------------------
   lines <- c(lines, .sec("Objective function"))
   lines <- c(lines,
     sprintf("  OFV   = %.6g", fit$ofv %||% NA_real_),
@@ -153,14 +151,14 @@ ferx_runlog <- function(fit, gradient_tol = 0.01, print = TRUE) {
   )
   lines <- c(lines, .blank())
 
-  # ── Final gradient ──────────────────────────────────────────────────────────
+  # -- Final gradient ---------------------------------------------------------
   grad <- fit$final_gradient
   if (!is.null(grad) && length(grad) > 0L) {
     lines <- c(lines, .sec("Final gradient"))
     large <- abs(grad) > gradient_tol
     if (any(large)) {
       lines <- c(lines, sprintf(
-        "  WARNING: %d component(s) exceed |gradient| > %.4g — possible non-convergence.",
+        "  WARNING: %d component(s) exceed |gradient| > %.4g -- possible non-convergence.",
         sum(large), gradient_tol
       ))
     } else {
@@ -169,11 +167,12 @@ ferx_runlog <- function(fit, gradient_tol = 0.01, print = TRUE) {
         length(grad), gradient_tol
       ))
     }
-    grad_str <- paste(sprintf("%.4g", grad), collapse = "  ")
-    lines <- c(lines, sprintf("  [ %s ]", grad_str))
-    lines <- c(lines, sprintf(
-      "  max|gradient| = %.4g", max(abs(grad))
-    ))
+    # Wrap gradient components at 8 per line
+    chunks <- split(grad, ceiling(seq_along(grad) / 8))
+    for (chunk in chunks) {
+      lines <- c(lines, sprintf("  [ %s ]", paste(sprintf("%.4g", chunk), collapse = "  ")))
+    }
+    lines <- c(lines, sprintf("  max|gradient| = %.4g", max(abs(grad))))
     lines <- c(lines, .blank())
   } else {
     lines <- c(lines, .sec("Final gradient"))
@@ -182,13 +181,13 @@ ferx_runlog <- function(fit, gradient_tol = 0.01, print = TRUE) {
                 identical(optimizer, "")) {
       "  Gradient not available for this optimizer (BOBYQA / BFGS / GN / SAEM)."
     } else {
-      "  No gradient recorded (fit may predate ferx-core PR #172)."
+      "  No gradient recorded (fit produced by an older engine version)."
     }
     lines <- c(lines, msg, .blank())
   }
 
-  # ── Assemble and return ──────────────────────────────────────────────────────
+  # -- Assemble and return ----------------------------------------------------
   out <- paste(lines, collapse = "\n")
-  if (isTRUE(print)) cat(out, "\n")
+  if (isTRUE(verbose)) cat(out, "\n")
   invisible(out)
 }
