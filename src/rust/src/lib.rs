@@ -877,6 +877,12 @@ fn default_fit_result(
         sigma_init_as_sd: Vec::new(),
         kappa_init_as_sd: Vec::new(),
         warnings_structured: Vec::new(),
+        model_text: None,
+        theta_init: Vec::new(),
+        omega_init: nalgebra::DMatrix::zeros(0, 0),
+        sigma_init: Vec::new(),
+        obs_time_range: None,
+        final_gradient: None,
         #[cfg(feature = "nn")]
         neural_networks: Vec::new(),
     }
@@ -1414,7 +1420,34 @@ fn fit_result_to_list(
         saem_mu_ref_m_step_evals_saved = result.saem_mu_ref_m_step_evals_saved.map(|x| x as f64),
         covariance_n_evals_estimated   = result.covariance_n_evals_estimated.map(|x| x as f64),
         n_threads_used                 = result.n_threads_used as i32,
-        nlopt_missing_algorithms       = result.nlopt_missing_algorithms.clone()
+        nlopt_missing_algorithms       = result.nlopt_missing_algorithms.clone(),
+        // ── runlog fields (ferx-core#172) ──────────────────────────────────
+        // model_text: verbatim .ferx source; NULL for in-memory fits.
+        model_text = match &result.model_text {
+            Some(s) => s.clone().into(),
+            None => ().into(),
+        },
+        // theta_init / omega_init / sigma_init: initial estimates before optimisation.
+        theta_init = result.theta_init.clone(),
+        omega_init = {
+            let m = &result.omega_init;
+            let n = m.nrows();
+            let mut v = Vec::with_capacity(n * n);
+            for i in 0..n { for j in 0..n { v.push(m[(i, j)]); } }
+            v
+        },
+        omega_init_dim = result.omega_init.nrows() as i32,
+        sigma_init = result.sigma_init.clone(),
+        // obs_time_range: c(min_time, max_time) or NULL.
+        obs_time_range = match result.obs_time_range {
+            Some((lo, hi)) => vec![lo, hi].into(),
+            None => ().into(),
+        },
+        // final_gradient: gradient at best-OFV point; NULL for BOBYQA/BFGS/GN/SAEM.
+        final_gradient = match &result.final_gradient {
+            Some(g) => g.clone().into(),
+            None => ().into(),
+        }
     )
 }
 
@@ -1970,6 +2003,12 @@ fn ferx_rust_sir(
         sigma_init_as_sd: Vec::new(),
         kappa_init_as_sd: Vec::new(),
         warnings_structured: Vec::new(),
+        model_text: None,
+        theta_init: Vec::new(),
+        omega_init: nalgebra::DMatrix::zeros(0, 0),
+        sigma_init: Vec::new(),
+        obs_time_range: None,
+        final_gradient: None,
         #[cfg(feature = "nn")]
         neural_networks: Vec::new(),
     };
