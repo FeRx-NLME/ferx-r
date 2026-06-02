@@ -236,9 +236,10 @@ ferx_runlog <- function(fit, gradient_tol = 0.01, verbose = TRUE) {
   lines <- c(lines, .blank())
 
   # -- Estimation settings ----------------------------------------------------
-  has_settings <- !is.null(fit$optimizer_label) || !is.null(fit$bloq_method_label) ||
-                  isTRUE(fit$inits_from_nca)    ||
-                  (!is.null(fit$covariate_names) && length(fit$covariate_names) > 0L)
+  has_settings <- (!is.null(fit$optimizer_label)   && nzchar(fit$optimizer_label)) ||
+                  (!is.null(fit$bloq_method_label) && nzchar(fit$bloq_method_label)) ||
+                  (!is.null(fit$inits_from_nca)    && nzchar(fit$inits_from_nca)) ||
+                  (!is.null(fit$covariate_names)   && length(fit$covariate_names) > 0L)
   if (has_settings) {
     lines <- c(lines, .sec("Estimation settings"))
     if (!is.null(fit$optimizer_label) && nzchar(fit$optimizer_label)) {
@@ -256,8 +257,8 @@ ferx_runlog <- function(fit, gradient_tol = 0.01, verbose = TRUE) {
     if (!is.null(fit$bloq_method_label) && nzchar(fit$bloq_method_label)) {
       lines <- c(lines, sprintf("  BLOQ method:    %s", fit$bloq_method_label))
     }
-    if (isTRUE(fit$inits_from_nca)) {
-      lines <- c(lines, "  Initial values: NCA-derived warm start")
+    if (!is.null(fit$inits_from_nca) && nzchar(fit$inits_from_nca)) {
+      lines <- c(lines, sprintf("  Initial values: NCA-derived (%s)", fit$inits_from_nca))
     }
     # Seeds -- only print when non-NULL
     seed_parts <- character(0)

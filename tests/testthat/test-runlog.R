@@ -172,12 +172,13 @@ test_that("ferx_runlog estimation settings section present when optimizer_label 
   expect_match(out, "BLOQ method:",       fixed = TRUE)
 })
 
-test_that("ferx_runlog estimation settings shows NCA warm-start flag", {
+test_that("ferx_runlog estimation settings shows NCA warm-start method", {
   fit <- warfarin_fit()
-  fit$optimizer_label <- "LBFGS"
-  fit$inits_from_nca  <- TRUE
+  fit$optimizer_label <- "lbfgs"
+  fit$inits_from_nca  <- "nca_sweep"
   out <- ferx_runlog(fit, verbose = FALSE)
-  expect_match(out, "NCA-derived warm start", fixed = TRUE)
+  expect_match(out, "NCA-derived", fixed = TRUE)
+  expect_match(out, "nca_sweep",   fixed = TRUE)
 })
 
 test_that("ferx_runlog estimation settings shows multi-start count", {

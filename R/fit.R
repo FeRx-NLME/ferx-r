@@ -436,8 +436,9 @@
 #'     passed to the optimizer.}
 #'   \item{outer_gtol}{Numeric. Gradient tolerance passed to the outer
 #'     optimizer. \code{NA} for derivative-free optimizers.}
-#'   \item{inits_from_nca}{Logical. \code{TRUE} when NCA-derived starting
-#'     values were used to warm-start the optimizer.}
+#'   \item{inits_from_nca}{Character string giving the NCA initialisation
+#'     method used (\code{"nca"}, \code{"nca_sweep"}, or \code{"nca_ebe"}),
+#'     or \code{NULL} when model-file initial values were used directly.}
 #'   \item{covariate_names}{Character vector of non-standard column names
 #'     present in the dataset (beyond \code{ID}, \code{TIME}, \code{DV},
 #'     \code{EVID}, \code{AMT}, \code{CMT}, \code{RATE}, \code{MDV},
