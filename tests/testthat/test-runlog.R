@@ -351,10 +351,8 @@ test_that("ferx_runlog works on a minimal fit with almost all fields NULL", {
 test_that("ferx_runlog is pure ASCII in its output", {
   fit <- warfarin_fit()
   out <- ferx_runlog(fit, verbose = FALSE)
-  raw_bytes <- as.integer(chartr(
-    rawToChar(as.raw(128:255)),
-    strrep("x", 128),
-    out
-  ) != out)
-  expect_equal(sum(raw_bytes), 0L)
+  # Check for non-ASCII bytes by comparing byte length vs character length.
+  # Each non-ASCII code point in UTF-8 consumes > 1 byte, so a mismatch flags it.
+  non_ascii <- nchar(out, type = "bytes") != nchar(out, type = "chars")
+  expect_false(non_ascii, info = paste("Non-ASCII bytes found in ferx_runlog output"))
 })
