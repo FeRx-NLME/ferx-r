@@ -159,11 +159,12 @@ test_that("ferx_runlog covariance section absent when no cov data", {
 
 test_that("ferx_runlog estimation settings section present when optimizer_label available", {
   fit <- warfarin_fit()
-  fit$optimizer_label  <- "LBFGS"
-  fit$bloq_method_label <- "drop"
-  fit$outer_maxiter    <- 200L
-  fit$outer_gtol       <- 1e-4
-  fit$inits_from_nca   <- FALSE
+  fit$optimizer_label       <- "LBFGS"
+  fit$bloq_method_label     <- "drop"
+  fit$outer_maxiter         <- 200L
+  fit$outer_gtol            <- 1e-4
+  fit$inits_from_nca        <- FALSE
+  fit$gradient_method_outer <- "finite differences"  # gradient-based optimizer
   out <- ferx_runlog(fit, verbose = FALSE)
   expect_match(out, "ESTIMATION SETTINGS", fixed = TRUE)
   expect_match(out, "LBFGS",              fixed = TRUE)

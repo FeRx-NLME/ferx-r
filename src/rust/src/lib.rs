@@ -262,6 +262,7 @@ fn ferx_rust_fit(
     result.data_path = Some(data_path.to_string());
     result.model_hash = ferx_core::io::hash::sha256_file(Path::new(model_path)).ok();
     result.data_hash = ferx_core::io::hash::sha256_file(Path::new(data_path)).ok();
+    result.model_text = std::fs::read_to_string(model_path).ok();
 
     // Convert to R list
     fit_result_to_list(&result, &population, &parsed.model)
