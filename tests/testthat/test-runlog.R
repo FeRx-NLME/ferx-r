@@ -282,7 +282,7 @@ test_that("ferx_runlog reports all-good when gradient within tolerance", {
 
 test_that("ferx_runlog gradient_tol argument is respected", {
   fit <- warfarin_fit()
-  fit$final_gradient <- c(0.005)
+  fit$final_gradient <- 0.005
   out_strict <- ferx_runlog(fit, gradient_tol = 0.001, verbose = FALSE)
   out_lax    <- ferx_runlog(fit, gradient_tol = 0.01,  verbose = FALSE)
   expect_match(out_strict, "WARNING", fixed = TRUE)
