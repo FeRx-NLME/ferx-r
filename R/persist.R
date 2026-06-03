@@ -564,19 +564,7 @@ ferx_load_fit <- function(path) {
     cat("ID,TIME,DV,PRED,IPRED,CWRES,IWRES,EBE_OFV,N_OBS\n", file = path)
     return(invisible())
   }
-  # sdtab$ID coming straight from the Rust shim is a 1-based numeric subject
-  # index; translate to the string IDs stored on ebe_etas so a cross-language
-  # reader can join with data.csv. When sdtab$ID is already character (e.g.
-  # because the fit was previously loaded from a .fitrx, where predictions.csv
-  # stores string IDs), leave it untouched - the remap would be a no-op and
-  # `max(sdtab$ID, ...)` would error on character input.
-  if (is.numeric(sdtab$ID)) {
-    string_ids <- .fitrx_subject_string_ids(fit)
-    if (!is.null(string_ids) &&
-        length(string_ids) >= max(sdtab$ID, 0L, na.rm = TRUE)) {
-      sdtab$ID <- string_ids[as.integer(sdtab$ID)]
-    }
-  }
+  # sdtab$ID is the original numeric subject ID from the NONMEM CSV.
   utils::write.table(
     sdtab, path,
     row.names = FALSE, quote = FALSE, sep = ",", na = ""
