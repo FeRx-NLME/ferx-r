@@ -1310,6 +1310,17 @@ fn fit_result_to_list(
     // model's covariate effects. Per-occasion variation lives in `ebe_kappas`.
     let individual_estimates_df: Robj = build_individual_estimates(result, population, model);
 
+    // Pre-compute Option<Vec<f64>> fields as Robj (list! macro can't infer
+    // From<Option<Vec<f64>>> because Vec<f64> has multiple ToVectorValue impls).
+    let obs_time_range_robj: Robj = match result.obs_time_range {
+        Some((lo, hi)) => vec![lo, hi].into(),
+        None => ().into(),
+    };
+    let final_gradient_robj: Robj = match &result.final_gradient {
+        Some(g) => g.clone().into(),
+        None => ().into(),
+    };
+
     list!(
         converged = result.converged,
         method = method_label,
@@ -1434,10 +1445,7 @@ fn fit_result_to_list(
         nlopt_missing_algorithms       = result.nlopt_missing_algorithms.clone(),
         // ── runlog fields (ferx-core#172) ──────────────────────────────────
         // model_text: verbatim .ferx source; NULL for in-memory fits.
-        model_text = match &result.model_text {
-            Some(s) => s.clone().into(),
-            None => ().into(),
-        },
+        model_text = result.model_text.clone(),
         // theta_init / omega_init / sigma_init: initial estimates before optimisation.
         theta_init = result.theta_init.clone(),
         omega_init = {
@@ -1450,42 +1458,21 @@ fn fit_result_to_list(
         omega_init_dim = result.omega_init.nrows() as i32,
         sigma_init = result.sigma_init.clone(),
         // obs_time_range: c(min_time, max_time) or NULL.
-        obs_time_range = match result.obs_time_range {
-            Some((lo, hi)) => vec![lo, hi].into(),
-            None => ().into(),
-        },
+        obs_time_range = obs_time_range_robj,
         // final_gradient: gradient at best-OFV point; NULL for BOBYQA/BFGS/GN/SAEM.
-        final_gradient = match &result.final_gradient {
-            Some(g) => g.clone().into(),
-            None => ().into(),
-        },
+        final_gradient = final_gradient_robj,
         // ── run-settings fields (ferx-core#172 Step 7) ────────────────────
         // optimizer: human-readable label string.
-        optimizer_label = result.optimizer.clone(),
-        n_starts        = result.n_starts as i32,
-        multi_start_seed = match result.multi_start_seed {
-            Some(s) => (s as f64).into(),
-            None => ().into(),
-        },
-        saem_seed = match result.saem_seed {
-            Some(s) => (s as f64).into(),
-            None => ().into(),
-        },
-        sir_seed_used = match result.sir_seed {
-            Some(s) => (s as f64).into(),
-            None => ().into(),
-        },
-        is_seed = match result.is_seed {
-            Some(s) => (s as f64).into(),
-            None => ().into(),
-        },
+        optimizer_label   = result.optimizer.clone(),
+        n_starts          = result.n_starts as i32,
+        multi_start_seed  = result.multi_start_seed.map(|s| s as f64),
+        saem_seed         = result.saem_seed.map(|s| s as f64),
+        sir_seed_used     = result.sir_seed.map(|s| s as f64),
+        is_seed           = result.is_seed.map(|s| s as f64),
         bloq_method_label = result.bloq_method.clone(),
         outer_maxiter     = result.outer_maxiter as i32,
         outer_gtol        = result.outer_gtol,
-        inits_from_nca    = match &result.inits_from_nca {
-            Some(m) => m.clone().into(),
-            None    => ().into(),
-        },
+        inits_from_nca    = result.inits_from_nca.clone(),
         // covariate_names: character vector of non-standard data columns.
         covariate_names   = result.covariate_names.clone()
     )
