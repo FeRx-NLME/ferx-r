@@ -36,6 +36,7 @@ reference:
   - title: "Diagnostics & output"
     desc: "Extract and visualise parameter estimates, ETAs, and optimizer traces."
     contents:
+      - ferx_runlog
       - ferx_estimates
       - ferx_warnings
       - ferx_eta_cov
