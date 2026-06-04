@@ -115,7 +115,8 @@ ferx_runlog <- function(fit, gradient_tol = 0.01, verbose = TRUE) {
 
   # Theta rows
   thetas   <- fit$theta       %||% numeric(0)
-  th_names <- fit$theta_names %||% fit$model_structure$theta_names %||%
+  th_names <- names(fit$theta) %||% fit$theta_names %||%
+              fit$model_structure$theta_names %||%
               paste0("THETA(", seq_along(thetas), ")")
   th_init  <- if (has_inits) fit$theta_init else NULL
   th_fixed <- fit$theta_fixed %||% rep(FALSE, length(thetas))
