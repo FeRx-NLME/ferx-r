@@ -26,5 +26,6 @@ Suggests:
     rmarkdown,
     rstudioapi,
     testthat (>= 3.0.0)
+URL: https://ferx-nlme.github.io/reference/
 VignetteBuilder: knitr
 Config/testthat/edition: 3
