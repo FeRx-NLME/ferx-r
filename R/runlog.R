@@ -62,7 +62,7 @@ ferx_runlog <- function(fit, gradient_tol = 0.01, verbose = TRUE) {
 
   # -- Model file -------------------------------------------------------------
   model_text <- fit$model_text
-  if (!is.null(model_text) && nzchar(model_text)) {
+  if (!is.null(model_text) && !is.na(model_text) && nzchar(model_text)) {
     lines <- c(lines, .sec("Model file"), model_text, .blank())
   }
 
@@ -115,7 +115,9 @@ ferx_runlog <- function(fit, gradient_tol = 0.01, verbose = TRUE) {
 
   # Theta rows
   thetas   <- fit$theta       %||% numeric(0)
-  th_names <- fit$theta_names %||% paste0("THETA(", seq_along(thetas), ")")
+  th_names <- names(fit$theta) %||% fit$theta_names %||%
+              fit$model_structure$theta_names %||%
+              paste0("THETA(", seq_along(thetas), ")")
   th_init  <- if (has_inits) fit$theta_init else NULL
   th_fixed <- fit$theta_fixed %||% rep(FALSE, length(thetas))
   se_th    <- if (has_se) fit$se_theta else NULL
@@ -240,9 +242,9 @@ ferx_runlog <- function(fit, gradient_tol = 0.01, verbose = TRUE) {
   lines <- c(lines, .blank())
 
   # -- Estimation settings ----------------------------------------------------
-  has_settings <- (!is.null(fit$optimizer_label)   && nzchar(fit$optimizer_label)) ||
-                  (!is.null(fit$bloq_method_label) && nzchar(fit$bloq_method_label)) ||
-                  (!is.null(fit$inits_from_nca)    && nzchar(fit$inits_from_nca)) ||
+  has_settings <- (!is.null(fit$optimizer_label)   && !is.na(fit$optimizer_label)   && nzchar(fit$optimizer_label)) ||
+                  (!is.null(fit$bloq_method_label) && !is.na(fit$bloq_method_label) && nzchar(fit$bloq_method_label)) ||
+                  (!is.null(fit$inits_from_nca)    && !is.na(fit$inits_from_nca)    && nzchar(fit$inits_from_nca)) ||
                   (!is.null(fit$covariate_names)   && length(fit$covariate_names) > 0L)
   if (has_settings) {
     lines <- c(lines, .sec("Estimation settings"))
@@ -255,21 +257,23 @@ ferx_runlog <- function(fit, gradient_tol = 0.01, verbose = TRUE) {
     if (!is.null(fit$outer_maxiter) && fit$outer_maxiter > 0L) {
       lines <- c(lines, sprintf("  Max iterations: %d", as.integer(fit$outer_maxiter)))
     }
-    if (!is.null(fit$outer_gtol) && is.finite(fit$outer_gtol)) {
+    has_gradient_optimizer <- !is.null(fit$gradient_method_outer) &&
+                              !grepl("N/A|not_applicable", fit$gradient_method_outer %||% "", ignore.case = TRUE)
+    if (has_gradient_optimizer && !is.null(fit$outer_gtol) && is.finite(fit$outer_gtol)) {
       lines <- c(lines, sprintf("  Gradient tol:   %.4g", fit$outer_gtol))
     }
     if (!is.null(fit$bloq_method_label) && !is.na(fit$bloq_method_label) && nzchar(fit$bloq_method_label)) {
       lines <- c(lines, sprintf("  BLOQ method:    %s", fit$bloq_method_label))
     }
-    if (!is.null(fit$inits_from_nca) && nzchar(fit$inits_from_nca)) {
+    if (!is.null(fit$inits_from_nca) && !is.na(fit$inits_from_nca) && nzchar(fit$inits_from_nca)) {
       lines <- c(lines, sprintf("  Initial values: NCA-derived (%s)", fit$inits_from_nca))
     }
-    # Seeds -- only print when non-NULL
+    # Seeds -- only print when non-NULL and non-NA
     seed_parts <- character(0)
-    if (!is.null(fit$multi_start_seed)) seed_parts <- c(seed_parts, sprintf("multi_start=%g", fit$multi_start_seed))
-    if (!is.null(fit$saem_seed))        seed_parts <- c(seed_parts, sprintf("saem=%g",        fit$saem_seed))
-    if (!is.null(fit$sir_seed_used))    seed_parts <- c(seed_parts, sprintf("sir=%g",         fit$sir_seed_used))
-    if (!is.null(fit$is_seed))          seed_parts <- c(seed_parts, sprintf("is=%g",          fit$is_seed))
+    if (!is.null(fit$multi_start_seed) && !is.na(fit$multi_start_seed)) seed_parts <- c(seed_parts, sprintf("multi_start=%g", fit$multi_start_seed))
+    if (!is.null(fit$saem_seed)        && !is.na(fit$saem_seed))        seed_parts <- c(seed_parts, sprintf("saem=%g",        fit$saem_seed))
+    if (!is.null(fit$sir_seed_used)    && !is.na(fit$sir_seed_used))    seed_parts <- c(seed_parts, sprintf("sir=%g",         fit$sir_seed_used))
+    if (!is.null(fit$is_seed)          && !is.na(fit$is_seed))          seed_parts <- c(seed_parts, sprintf("is=%g",          fit$is_seed))
     if (length(seed_parts)) {
       lines <- c(lines, sprintf("  Seeds:          %s", paste(seed_parts, collapse = "  ")))
     }

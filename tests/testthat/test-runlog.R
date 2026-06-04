@@ -159,11 +159,12 @@ test_that("ferx_runlog covariance section absent when no cov data", {
 
 test_that("ferx_runlog estimation settings section present when optimizer_label available", {
   fit <- warfarin_fit()
-  fit$optimizer_label  <- "LBFGS"
-  fit$bloq_method_label <- "drop"
-  fit$outer_maxiter    <- 200L
-  fit$outer_gtol       <- 1e-4
-  fit$inits_from_nca   <- FALSE
+  fit$optimizer_label       <- "LBFGS"
+  fit$bloq_method_label     <- "drop"
+  fit$outer_maxiter         <- 200L
+  fit$outer_gtol            <- 1e-4
+  fit$inits_from_nca        <- FALSE
+  fit$gradient_method_outer <- "finite differences"  # gradient-based optimizer
   out <- ferx_runlog(fit, verbose = FALSE)
   expect_match(out, "ESTIMATION SETTINGS", fixed = TRUE)
   expect_match(out, "LBFGS",              fixed = TRUE)
@@ -366,7 +367,7 @@ test_that("ferx_runlog is pure ASCII in its output", {
 test_that("ferx_runlog does not emit 'Optimizer: NA' when optimizer_label is NA", {
   fit <- warfarin_fit()
   fit$optimizer_label  <- NA_character_
-  fit$covariate_names  <- c("WT")   # triggers has_settings = TRUE via covariate arm
+  fit$covariate_names  <- "WT"   # triggers has_settings = TRUE via covariate arm
   out <- ferx_runlog(fit, verbose = FALSE)
   expect_no_match(out, "Optimizer:      NA", fixed = TRUE)
   expect_match(out, "Covariates:", fixed = TRUE)  # settings section still present
@@ -375,7 +376,7 @@ test_that("ferx_runlog does not emit 'Optimizer: NA' when optimizer_label is NA"
 test_that("ferx_runlog does not emit 'BLOQ method: NA' when bloq_method_label is NA", {
   fit <- warfarin_fit()
   fit$bloq_method_label <- NA_character_
-  fit$covariate_names   <- c("WT")
+  fit$covariate_names   <- "WT"
   out <- ferx_runlog(fit, verbose = FALSE)
   expect_no_match(out, "BLOQ method:    NA", fixed = TRUE)
 })
