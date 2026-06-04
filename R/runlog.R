@@ -72,6 +72,10 @@ ferx_runlog <- function(fit, gradient_tol = 0.01, verbose = TRUE) {
   n_obs  <- fit$n_obs
   tr     <- fit$obs_time_range
 
+  data_name <- fit$data_name %||% NULL
+  if (!is.null(data_name) && nzchar(data_name)) {
+    lines <- c(lines, sprintf("  Dataset:        %s", data_name))
+  }
   if (!is.null(n_subj) && !is.null(n_obs)) {
     lines <- c(lines, sprintf("  Subjects:       %d", as.integer(n_subj)))
     lines <- c(lines, sprintf("  Observations:   %d", as.integer(n_obs)))
@@ -242,7 +246,7 @@ ferx_runlog <- function(fit, gradient_tol = 0.01, verbose = TRUE) {
                   (!is.null(fit$covariate_names)   && length(fit$covariate_names) > 0L)
   if (has_settings) {
     lines <- c(lines, .sec("Estimation settings"))
-    if (!is.null(fit$optimizer_label) && nzchar(fit$optimizer_label)) {
+    if (!is.null(fit$optimizer_label) && !is.na(fit$optimizer_label) && nzchar(fit$optimizer_label)) {
       n_st <- fit$n_starts %||% 1L
       start_str <- if (n_st > 1L) sprintf("  Optimizer:      %s  (multi-start n=%d)", fit$optimizer_label, n_st) else
                    sprintf("  Optimizer:      %s", fit$optimizer_label)
@@ -254,7 +258,7 @@ ferx_runlog <- function(fit, gradient_tol = 0.01, verbose = TRUE) {
     if (!is.null(fit$outer_gtol) && is.finite(fit$outer_gtol)) {
       lines <- c(lines, sprintf("  Gradient tol:   %.4g", fit$outer_gtol))
     }
-    if (!is.null(fit$bloq_method_label) && nzchar(fit$bloq_method_label)) {
+    if (!is.null(fit$bloq_method_label) && !is.na(fit$bloq_method_label) && nzchar(fit$bloq_method_label)) {
       lines <- c(lines, sprintf("  BLOQ method:    %s", fit$bloq_method_label))
     }
     if (!is.null(fit$inits_from_nca) && nzchar(fit$inits_from_nca)) {
