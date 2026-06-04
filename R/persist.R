@@ -251,6 +251,7 @@ ferx_load_fit <- function(path) {
   model_staging <- file.path(staging, "model.ferx")
   if (file.exists(model_staging)) {
     result$model_source <- paste(readLines(model_staging, warn = FALSE), collapse = "\n")
+    result$model_text   <- result$model_source  # ferx_runlog() reads model_text
     persisted_model <- tempfile("fitrx_model_", fileext = ".ferx")
     file.copy(model_staging, persisted_model, overwrite = TRUE)
     result$model_path <- persisted_model

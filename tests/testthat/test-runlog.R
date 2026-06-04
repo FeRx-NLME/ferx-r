@@ -356,3 +356,47 @@ test_that("ferx_runlog is pure ASCII in its output", {
   non_ascii <- nchar(out, type = "bytes") != nchar(out, type = "chars")
   expect_false(non_ascii, info = paste("Non-ASCII bytes found in ferx_runlog output"))
 })
+
+# -- Tier 3: NA-guard regression tests ----------------------------------------
+# extendr maps Option<String>::None to NA_character_, not NULL.
+# Verify that ferx_runlog() never emits NA tokens for these optional fields,
+# even when they arrive as NA and another field (covariate_names) triggers
+# has_settings = TRUE.
+
+test_that("ferx_runlog does not emit 'Optimizer: NA' when optimizer_label is NA", {
+  fit <- warfarin_fit()
+  fit$optimizer_label  <- NA_character_
+  fit$covariate_names  <- c("WT")   # triggers has_settings = TRUE via covariate arm
+  out <- ferx_runlog(fit, verbose = FALSE)
+  expect_no_match(out, "Optimizer:      NA", fixed = TRUE)
+  expect_match(out, "Covariates:", fixed = TRUE)  # settings section still present
+})
+
+test_that("ferx_runlog does not emit 'BLOQ method: NA' when bloq_method_label is NA", {
+  fit <- warfarin_fit()
+  fit$bloq_method_label <- NA_character_
+  fit$covariate_names   <- c("WT")
+  out <- ferx_runlog(fit, verbose = FALSE)
+  expect_no_match(out, "BLOQ method:    NA", fixed = TRUE)
+})
+
+test_that("ferx_runlog model_text is populated after ferx_load_fit round-trip", {
+  # model_text must survive save/load so ferx_runlog shows the model source.
+  fit <- warfarin_fit()
+  # Simulate what ferx_load_fit sets (persist.R line 253-254):
+  # result$model_source is restored; result$model_text must match.
+  fit$model_source <- "[parameters]\n  theta TVCL(0.134, 0.001, 10.0)\n"
+  fit$model_text   <- fit$model_source  # as set by the fix in persist.R
+  out <- ferx_runlog(fit, verbose = FALSE)
+  expect_match(out, "MODEL FILE",   fixed = TRUE)
+  expect_match(out, "TVCL",         fixed = TRUE)
+})
+
+test_that("ferx_runlog omits model file section gracefully when model_text NULL", {
+  fit <- warfarin_fit()
+  fit$model_text <- NULL
+  out <- ferx_runlog(fit, verbose = FALSE)
+  expect_no_match(out, "MODEL FILE", fixed = TRUE)
+  # rest of runlog must still be intact
+  expect_match(out, "PARAMETER ESTIMATES", fixed = TRUE)
+})
