@@ -4,15 +4,15 @@
 \alias{ferx_runlog}
 \title{NONMEM-style run log for a ferx fit}
 \usage{
-ferx_runlog(fit, gradient_tol = 0.01, verbose = TRUE)
+ferx_runlog(fit, gradient_tol = 0.1, verbose = TRUE)
 }
 \arguments{
 \item{fit}{A \code{ferx_fit} object returned by \code{\link{ferx_fit}} or
 \code{\link{ferx_load_fit}}.}
 
-\item{gradient_tol}{Numeric scalar.  Components of \code{final_gradient}
-whose absolute value exceeds this threshold trigger a convergence warning.
-Default \code{0.01} (matches typical NONMEM practice).}
+\item{gradient_tol}{Numeric scalar.  Threshold for the relative gradient
+(\code{|grad[i] * param[i]|}); components exceeding this trigger a
+convergence warning.  Default \code{0.1}.}
 
 \item{verbose}{Logical.  When \code{TRUE} (the default) the output is
 printed to the console.  When \code{FALSE} it is returned invisibly as a

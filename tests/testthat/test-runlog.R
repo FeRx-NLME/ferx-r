@@ -267,7 +267,7 @@ test_that("ferx_runlog normality section flags p < 0.05", {
 
 test_that("ferx_runlog warns when gradient components exceed tolerance", {
   fit <- warfarin_fit()
-  fit$final_gradient <- c(0.001, 0.05, 0.002)
+  fit$final_gradient <- c(0.001, 0.5, 0.002)
   out <- ferx_runlog(fit, verbose = FALSE)
   expect_match(out, "WARNING", fixed = TRUE)
   expect_match(out, "possible non-convergence", fixed = TRUE)
@@ -277,7 +277,7 @@ test_that("ferx_runlog reports all-good when gradient within tolerance", {
   fit <- warfarin_fit()
   fit$final_gradient <- c(0.001, 0.002, 0.003)
   out <- ferx_runlog(fit, verbose = FALSE)
-  expect_match(out, "satisfy |gradient|", fixed = TRUE)
+  expect_match(out, "satisfy |grad", fixed = TRUE)
   expect_no_match(out, "WARNING", fixed = TRUE)
 })
 

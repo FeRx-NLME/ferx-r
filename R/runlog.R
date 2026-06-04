@@ -364,7 +364,7 @@ ferx_runlog <- function(fit, gradient_tol = 0.1, verbose = TRUE) {
   if (!is.null(grad) && length(grad) > 0L) {
     lines <- c(lines, .sec("Final gradient"))
 
-    # Relative gradient: grad[i] * |param[i]| — scale-free, same units across
+    # Relative gradient: grad[i] * |param[i]| - scale-free, same units across
     # all parameter types. Packed order: thetas, omega diagonal, sigma.
     th_vals  <- abs(fit$theta  %||% numeric(0))
     om_diag  <- if (!is.null(fit$omega) && length(fit$omega) > 0L) abs(diag(fit$omega)) else numeric(0)
@@ -387,18 +387,18 @@ ferx_runlog <- function(fit, gradient_tol = 0.1, verbose = TRUE) {
       ))
     } else {
       lines <- c(lines, sprintf(
-        "  All %d relative gradient components satisfy |grad × param| <= %.4g.",
+        "  All %d relative gradient components satisfy |grad * param| <= %.4g.",
         length(grad_rel), gradient_tol
       ))
     }
 
-    label <- if (use_rel) "  Relative gradient (grad × |param|):" else "  Gradient (raw — parameter count mismatch):"
+    label <- if (use_rel) "  Relative gradient (grad * |param|):" else "  Gradient (raw - parameter count mismatch):"
     lines <- c(lines, label)
     chunks <- split(grad_rel, ceiling(seq_along(grad_rel) / 8))
     for (chunk in chunks) {
       lines <- c(lines, sprintf("  [ %s ]", paste(sprintf("%.4g", chunk), collapse = "  ")))
     }
-    lines <- c(lines, sprintf("  max|grad × param| = %.4g", max(abs(grad_rel))))
+    lines <- c(lines, sprintf("  max|grad * param| = %.4g", max(abs(grad_rel))))
     lines <- c(lines, .blank())
   } else {
     lines <- c(lines, .sec("Final gradient"))
