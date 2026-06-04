@@ -8,9 +8,9 @@
 #'
 #' @param fit A \code{ferx_fit} object returned by \code{\link{ferx_fit}} or
 #'   \code{\link{ferx_load_fit}}.
-#' @param gradient_tol Numeric scalar.  Components of \code{final_gradient}
-#'   whose absolute value exceeds this threshold trigger a convergence warning.
-#'   Default \code{0.01} (matches typical NONMEM practice).
+#' @param gradient_tol Numeric scalar.  Threshold for the relative gradient
+#'   (\code{|grad[i] * param[i]|}); components exceeding this trigger a
+#'   convergence warning.  Default \code{0.1}.
 #' @param verbose Logical.  When \code{TRUE} (the default) the output is
 #'   printed to the console.  When \code{FALSE} it is returned invisibly as a
 #'   single character string.
@@ -40,7 +40,7 @@
 #' }
 #'
 #' @export
-ferx_runlog <- function(fit, gradient_tol = 0.01, verbose = TRUE) {
+ferx_runlog <- function(fit, gradient_tol = 0.1, verbose = TRUE) {
   lines <- character(0)
 
   .sec <- function(title) {
@@ -363,24 +363,42 @@ ferx_runlog <- function(fit, gradient_tol = 0.01, verbose = TRUE) {
   grad <- fit$final_gradient
   if (!is.null(grad) && length(grad) > 0L) {
     lines <- c(lines, .sec("Final gradient"))
-    large <- abs(grad) > gradient_tol
+
+    # Relative gradient: grad[i] * |param[i]| — scale-free, same units across
+    # all parameter types. Packed order: thetas, omega diagonal, sigma.
+    th_vals  <- abs(fit$theta  %||% numeric(0))
+    om_diag  <- if (!is.null(fit$omega) && length(fit$omega) > 0L) abs(diag(fit$omega)) else numeric(0)
+    sig_vals <- abs(fit$sigma  %||% numeric(0))
+    param_scale <- c(th_vals, om_diag, sig_vals)
+
+    if (length(param_scale) == length(grad)) {
+      grad_rel <- grad * param_scale
+      use_rel  <- TRUE
+    } else {
+      grad_rel <- grad
+      use_rel  <- FALSE
+    }
+
+    large <- abs(grad_rel) > gradient_tol
     if (any(large)) {
       lines <- c(lines, sprintf(
-        "  WARNING: %d component(s) exceed |gradient| > %.4g -- possible non-convergence.",
+        "  WARNING: %d component(s) exceed |relative gradient| > %.4g -- possible non-convergence.",
         sum(large), gradient_tol
       ))
     } else {
       lines <- c(lines, sprintf(
-        "  All %d gradient components satisfy |gradient| <= %.4g.",
-        length(grad), gradient_tol
+        "  All %d relative gradient components satisfy |grad × param| <= %.4g.",
+        length(grad_rel), gradient_tol
       ))
     }
-    # Wrap at 8 components per line
-    chunks <- split(grad, ceiling(seq_along(grad) / 8))
+
+    label <- if (use_rel) "  Relative gradient (grad × |param|):" else "  Gradient (raw — parameter count mismatch):"
+    lines <- c(lines, label)
+    chunks <- split(grad_rel, ceiling(seq_along(grad_rel) / 8))
     for (chunk in chunks) {
       lines <- c(lines, sprintf("  [ %s ]", paste(sprintf("%.4g", chunk), collapse = "  ")))
     }
-    lines <- c(lines, sprintf("  max|gradient| = %.4g", max(abs(grad))))
+    lines <- c(lines, sprintf("  max|grad × param| = %.4g", max(abs(grad_rel))))
     lines <- c(lines, .blank())
   } else {
     lines <- c(lines, .sec("Final gradient"))
