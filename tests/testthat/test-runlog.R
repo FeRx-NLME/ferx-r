@@ -367,7 +367,7 @@ test_that("ferx_runlog is pure ASCII in its output", {
 test_that("ferx_runlog does not emit 'Optimizer: NA' when optimizer_label is NA", {
   fit <- warfarin_fit()
   fit$optimizer_label  <- NA_character_
-  fit$covariate_names  <- c("WT")   # triggers has_settings = TRUE via covariate arm
+  fit$covariate_names  <- "WT"   # triggers has_settings = TRUE via covariate arm
   out <- ferx_runlog(fit, verbose = FALSE)
   expect_no_match(out, "Optimizer:      NA", fixed = TRUE)
   expect_match(out, "Covariates:", fixed = TRUE)  # settings section still present
@@ -376,7 +376,7 @@ test_that("ferx_runlog does not emit 'Optimizer: NA' when optimizer_label is NA"
 test_that("ferx_runlog does not emit 'BLOQ method: NA' when bloq_method_label is NA", {
   fit <- warfarin_fit()
   fit$bloq_method_label <- NA_character_
-  fit$covariate_names   <- c("WT")
+  fit$covariate_names   <- "WT"
   out <- ferx_runlog(fit, verbose = FALSE)
   expect_no_match(out, "BLOQ method:    NA", fixed = TRUE)
 })
