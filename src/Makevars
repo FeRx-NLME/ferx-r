@@ -56,7 +56,7 @@ ifeq ($(UNAME_S),Darwin)
     HOST_TOOLCHAIN_CHANNEL = stable-x86_64-apple-darwin
   endif
 endif
-# On Windows, R/Rtools44 uses the MinGW (GNU) ABI. The rustup default host on
+# On Windows, R/Rtools uses the MinGW (GNU) ABI. The rustup default host on
 # Windows is MSVC, which produces .lib archives whose CRT/SEH symbols
 # (__chkstk, __security_cookie, __GSHandlerCheck, __imp_*) MinGW's ld cannot
 # resolve. Pin the GNU toolchain so the staticlib (and any cmake-built C deps
