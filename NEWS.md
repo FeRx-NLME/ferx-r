@@ -49,6 +49,20 @@
   because the R binding's provenance block set `model_path` / `model_hash` but
   did not set `model_text`. Fixed by reading the model file in the same block.
 
+## Build
+
+- `src/Makevars`: the autodiff build now forces fat LTO with `override`. R CMD
+  INSTALL runs make with `-e` semantics, so a stale
+  `CARGO_PROFILE_RELEASE_LTO=thin` in the environment could previously leak past
+  the makefile and silently build autodiff with thin LTO — which keeps the
+  differentiated ferx-core functions in a separate module from their callers and
+  breaks cross-crate Enzyme. `override` makes the makefile value authoritative
+  regardless of the environment.
+- `src/Makevars`: building with `FERX_NO_AUTODIFF=0` now preflights for the
+  `enzyme` rustup toolchain and fails fast with an actionable message (how to
+  install the toolchain, or how to fall back to finite-difference gradients)
+  instead of a cryptic `toolchain 'enzyme' is not installed` error from cargo.
+
 # ferx 0.1.5
 
 ## Documentation

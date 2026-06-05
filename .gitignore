@@ -10,3 +10,9 @@ src/rust/rust-toolchain.toml
 .Rproj.user
 .positai
 ROADMAP.md
+
+# R CMD check / build artifacts
+*.Rcheck/
+..Rcheck/
+tests/testthat/Rplots.pdf
+Rplots.pdf

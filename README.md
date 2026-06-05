@@ -19,7 +19,18 @@ Fast nonlinear mixed effects (NLME) modeling in R, powered by a Rust backend wit
 
 ## Installation
 
-A Rust installation with the Enzyme AutoDifferentiation engine is required for FeRx to compute gradients. Most likely you will need to build Rust from source. Expect a few hours end-to-end the first time: ~45-60 min to build the Enzyme toolchain, plus ~1-2 hours for the first ferx-r compile.
+A Rust installation with the Enzyme AutoDifferentiation engine is required for FeRx to compute gradients with automatic differentiation. Most likely you will need to build Rust from source.
+
+There are **two separate one-time costs**, which are often conflated:
+
+| One-time cost | What it is | Rough time |
+|---|---|---|
+| Build the Enzyme toolchain | Compile the Enzyme-enabled Rust toolchain from source (once per machine) | ~45-60 min |
+| First ferx-r compile | Compile ferx-core (Rust) and link the R package. The autodiff path uses **fat LTO** — a single-threaded final link | CPU-dependent: ~15-30 min on a fast CPU, up to ~1-2 h on an older laptop |
+
+Both are paid once. Subsequent installs reuse the toolchain and the ~1.9 GB dependency cache, so they are fast — unless you change the build configuration (autodiff on/off, thin/fat LTO), which invalidates the final crates.
+
+> **The first fat-LTO compile looks like a hang but isn't.** The autodiff final link is single-threaded fat LTO plus Enzyme passes, so wall-clock tracks single-core speed and extra cores don't help. One core stays busy while `rustc`'s CPU time keeps climbing — confirm with `ps aux | grep 'rustc --crate-name ferx'`. Fat LTO also spikes memory at the very end, so on a 16 GB machine free RAM first or `rustc` can be OOM-killed.
 
 See [documentation](https://ferx-nlme.github.io/ferx-core/installation.html) for installation instructions.
 
