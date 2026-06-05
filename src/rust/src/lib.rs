@@ -262,6 +262,7 @@ fn ferx_rust_fit(
     result.data_path = Some(data_path.to_string());
     result.model_hash = ferx_core::io::hash::sha256_file(Path::new(model_path)).ok();
     result.data_hash = ferx_core::io::hash::sha256_file(Path::new(data_path)).ok();
+    result.model_text = std::fs::read_to_string(model_path).ok();
 
     // Convert to R list
     fit_result_to_list(&result, &population, &parsed.model)
@@ -877,6 +878,23 @@ fn default_fit_result(
         sigma_init_as_sd: Vec::new(),
         kappa_init_as_sd: Vec::new(),
         warnings_structured: Vec::new(),
+        model_text: None,
+        theta_init: Vec::new(),
+        omega_init: nalgebra::DMatrix::zeros(0, 0),
+        sigma_init: Vec::new(),
+        obs_time_range: None,
+        final_gradient: None,
+        optimizer: "bobyqa".to_string(),
+        n_starts: 1,
+        multi_start_seed: None,
+        saem_seed: None,
+        sir_seed: None,
+        is_seed: None,
+        bloq_method: "drop".to_string(),
+        outer_maxiter: 0,
+        outer_gtol: 0.0,
+        inits_from_nca: None,
+        covariate_names: Vec::new(),
         #[cfg(feature = "nn")]
         neural_networks: Vec::new(),
     }
@@ -1293,6 +1311,17 @@ fn fit_result_to_list(
     // model's covariate effects. Per-occasion variation lives in `ebe_kappas`.
     let individual_estimates_df: Robj = build_individual_estimates(result, population, model);
 
+    // Pre-compute Option<Vec<f64>> fields as Robj (list! macro can't infer
+    // From<Option<Vec<f64>>> because Vec<f64> has multiple ToVectorValue impls).
+    let obs_time_range_robj: Robj = match result.obs_time_range {
+        Some((lo, hi)) => vec![lo, hi].into(),
+        None => ().into(),
+    };
+    let final_gradient_robj: Robj = match &result.final_gradient {
+        Some(g) => g.clone().into(),
+        None => ().into(),
+    };
+
     list!(
         converged = result.converged,
         method = method_label,
@@ -1414,7 +1443,39 @@ fn fit_result_to_list(
         saem_mu_ref_m_step_evals_saved = result.saem_mu_ref_m_step_evals_saved.map(|x| x as f64),
         covariance_n_evals_estimated   = result.covariance_n_evals_estimated.map(|x| x as f64),
         n_threads_used                 = result.n_threads_used as i32,
-        nlopt_missing_algorithms       = result.nlopt_missing_algorithms.clone()
+        nlopt_missing_algorithms       = result.nlopt_missing_algorithms.clone(),
+        // ── runlog fields (ferx-core#172) ──────────────────────────────────
+        // model_text: verbatim .ferx source; NULL for in-memory fits.
+        model_text = result.model_text.clone(),
+        // theta_init / omega_init / sigma_init: initial estimates before optimisation.
+        theta_init = result.theta_init.clone(),
+        omega_init = {
+            let m = &result.omega_init;
+            let n = m.nrows();
+            let mut v = Vec::with_capacity(n * n);
+            for i in 0..n { for j in 0..n { v.push(m[(i, j)]); } }
+            v
+        },
+        omega_init_dim = result.omega_init.nrows() as i32,
+        sigma_init = result.sigma_init.clone(),
+        // obs_time_range: c(min_time, max_time) or NULL.
+        obs_time_range = obs_time_range_robj,
+        // final_gradient: gradient at best-OFV point; NULL for BOBYQA/BFGS/GN/SAEM.
+        final_gradient = final_gradient_robj,
+        // ── run-settings fields (ferx-core#172 Step 7) ────────────────────
+        // optimizer: human-readable label string.
+        optimizer_label   = result.optimizer.clone(),
+        n_starts          = result.n_starts as i32,
+        multi_start_seed  = result.multi_start_seed.map(|s| s as f64),
+        saem_seed         = result.saem_seed.map(|s| s as f64),
+        sir_seed_used     = result.sir_seed.map(|s| s as f64),
+        is_seed           = result.is_seed.map(|s| s as f64),
+        bloq_method_label = result.bloq_method.clone(),
+        outer_maxiter     = result.outer_maxiter as i32,
+        outer_gtol        = result.outer_gtol,
+        inits_from_nca    = result.inits_from_nca.clone(),
+        // covariate_names: character vector of non-standard data columns.
+        covariate_names   = result.covariate_names.clone()
     )
 }
 
@@ -1970,6 +2031,23 @@ fn ferx_rust_sir(
         sigma_init_as_sd: Vec::new(),
         kappa_init_as_sd: Vec::new(),
         warnings_structured: Vec::new(),
+        model_text: None,
+        theta_init: Vec::new(),
+        omega_init: nalgebra::DMatrix::zeros(0, 0),
+        sigma_init: Vec::new(),
+        obs_time_range: None,
+        final_gradient: None,
+        optimizer: "bobyqa".to_string(),
+        n_starts: 1,
+        multi_start_seed: None,
+        saem_seed: None,
+        sir_seed: None,
+        is_seed: None,
+        bloq_method: "drop".to_string(),
+        outer_maxiter: 0,
+        outer_gtol: 0.0,
+        inits_from_nca: None,
+        covariate_names: Vec::new(),
         #[cfg(feature = "nn")]
         neural_networks: Vec::new(),
     };

@@ -7,6 +7,8 @@ reference:
     desc: "Fit NLME models and inspect results."
     contents:
       - ferx_fit
+      - ferx_fit_async
+      - ferx_collect
       - ferx_sir
       - summary.ferx_fit
 
@@ -34,7 +36,9 @@ reference:
   - title: "Diagnostics & output"
     desc: "Extract and visualise parameter estimates, ETAs, and optimizer traces."
     contents:
+      - ferx_runlog
       - ferx_estimates
+      - ferx_warnings
       - ferx_eta_cov
       - ferx_cor_matrix
       - ferx_plot_trace

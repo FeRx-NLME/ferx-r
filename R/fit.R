@@ -307,8 +307,9 @@
 #'     \code{sigma} itself)}
 #'   \item{sdtab}{Data frame with ID, TIME, DV, PRED, IPRED, CWRES, IWRES,
 #'     EBE_OFV, N_OBS; OCC if any subject carries an occasion column; CENS
-#'     if any rows are below LLOQ. Per-subject ETAs live in
-#'     \code{ebe_etas}; per-subject parameter values in
+#'     if any rows are below LLOQ; CMT if the dataset has more than one
+#'     endpoint (any observation with \code{CMT != 1}).  Per-subject ETAs
+#'     live in \code{ebe_etas}; per-subject parameter values in
 #'     \code{individual_estimates}.}
 #'   \item{ebe_etas}{Data frame with one row per subject containing the BSV
 #'     empirical Bayes estimates: \code{ID} plus one column per eta named
@@ -395,6 +396,55 @@
 #'   \item{gradient_method_outer}{Engine label for the population-level
 #'     optimizer's gradient ("Enzyme AD", "finite differences", or "N/A").}
 #'   \item{ferx_version}{ferx-core library version string.}
+#'   \item{model_text}{Verbatim content of the \code{.ferx} model file as a
+#'     character string. \code{NULL} for in-memory fits that were never
+#'     associated with a file, or for fits produced by older engine versions.
+#'     Used by \code{\link{ferx_runlog}}.}
+#'   \item{theta_init}{Numeric vector of initial theta values as supplied to
+#'     the optimizer, parallel to \code{theta} and \code{theta_names}.
+#'     Empty for in-memory fits and older \code{.fitrx} bundles.}
+#'   \item{omega_init}{Initial omega variance matrix, same layout as
+#'     \code{omega}. A zero matrix for in-memory fits and older bundles.}
+#'   \item{omega_init_dim}{Number of rows/columns of \code{omega_init}.}
+#'   \item{sigma_init}{Numeric vector of initial sigma values, parallel to
+#'     \code{sigma} and \code{sigma_names}.}
+#'   \item{obs_time_range}{Length-2 numeric vector \code{c(min_time, max_time)}
+#'     across all observation records, or \code{NULL} when there are no
+#'     observations. Used by \code{\link{ferx_runlog}} for the data-summary
+#'     header.}
+#'   \item{final_gradient}{Numeric vector containing the gradient of the
+#'     objective function at the best-OFV parameter point (packed space:
+#'     log-theta, Cholesky-omega, log-sigma). \code{NULL} for derivative-free
+#'     optimizers (BOBYQA), built-in BFGS, Gauss-Newton, and SAEM. Use
+#'     \code{\link{ferx_runlog}} to interpret with a convergence threshold.}
+#'   \item{optimizer_label}{Human-readable label for the outer optimizer used
+#'     (e.g. \code{"LBFGS"}, \code{"BOBYQA"}). Mirrors the \code{optimizer}
+#'     enum value from ferx-core. Used by \code{\link{ferx_runlog}}.}
+#'   \item{n_starts}{Integer. Number of multi-start runs attempted. 1 for
+#'     single-start fits.}
+#'   \item{multi_start_seed}{Numeric scalar (or \code{NULL}) giving the random
+#'     seed used for multi-start parameter perturbation.}
+#'   \item{saem_seed}{Numeric scalar (or \code{NULL}) giving the SAEM
+#'     stochastic seed. \code{NULL} for non-SAEM methods.}
+#'   \item{sir_seed_used}{Numeric scalar (or \code{NULL}) giving the SIR
+#'     resampling seed. \code{NULL} when SIR was not run.}
+#'   \item{is_seed}{Numeric scalar (or \code{NULL}) giving the importance
+#'     sampling seed. \code{NULL} when IS was not run.}
+#'   \item{bloq_method_label}{Character string describing the below-LLOQ
+#'     handling method used (\code{"m3"}, \code{"drop"}, etc.).}
+#'   \item{outer_maxiter}{Integer. Maximum number of outer-loop iterations
+#'     passed to the optimizer.}
+#'   \item{outer_gtol}{Numeric. Gradient tolerance passed to the outer
+#'     optimizer. \code{NA} for derivative-free optimizers.}
+#'   \item{inits_from_nca}{Character string giving the NCA initialisation
+#'     method used (\code{"nca"}, \code{"nca_sweep"}, or \code{"nca_ebe"}),
+#'     or \code{NULL} when model-file initial values were used directly.}
+#'   \item{covariate_names}{Character vector of non-standard column names
+#'     present in the dataset (beyond \code{ID}, \code{TIME}, \code{DV},
+#'     \code{EVID}, \code{AMT}, \code{CMT}, \code{RATE}, \code{MDV},
+#'     \code{II}, \code{SS}, \code{CENS}, \code{OCC}). Empty when no
+#'     covariates are present. Used by \code{\link{ferx_runlog}} to echo
+#'     the dataset column list.}
 #'   \item{cov_matrix}{Full parameter covariance matrix as a named numeric
 #'     matrix (params ? params). Row/column names use declared variable names
 #'     (\code{"TVCL"}, \code{"ETA_CL"}, \code{"EPS_PROP"}); fallback is
@@ -716,6 +766,10 @@
 #' the Rust backend without requiring a new wrapper release. Arguments with
 #' dedicated parameters (e.g. \code{method}, \code{covariance}) cannot be
 #' duplicated in \code{settings} - pass them via the named argument.
+#'
+#' For the complete settings reference — including which options apply to which
+#' method, valid combinations, and a convergence troubleshooting guide — see
+#' \href{https://ferx-nlme.github.io/model-dsl/fit-options.html}{ferx-nlme.github.io/model-dsl/fit-options}.
 #'
 #' \strong{Outer optimizer selection:}
 #' \preformatted{
@@ -1045,6 +1099,21 @@
 #' }
 #'
 #' @param ... Reserved for future use. Unrecognised arguments raise an error.
+#' @seealso
+#'   \itemize{
+#'     \item \href{https://ferx-nlme.github.io/model-dsl/fit-options.html}{Fit
+#'       options reference} — full documentation of every \code{[fit_options]}
+#'       key and \code{settings} knob, organised by method with a
+#'       convergence-troubleshooting guide and a method × option compatibility
+#'       table.
+#'     \item \code{\link{ferx_fit_async}} — non-blocking version for long runs.
+#'     \item \code{\link{ferx_check_init}} — 5-iteration pilot to validate
+#'       starting values before a full run.
+#'     \item \code{\link{ferx_inits_from_nca}} — NCA-derived starting values.
+#'     \item \code{\link{ferx_warnings}} — structured warnings from the fit.
+#'     \item \code{\link{ferx_estimates}} — tidy parameter table with SE / \%RSE.
+#'     \item \code{\link{ferx_plot_trace}} — convergence trace plot.
+#'   }
 #' @family fitting
 #' @export
 ferx_fit <- function(model, data = NULL,

@@ -1,5 +1,54 @@
 # ferx (development)
 
+## New features
+
+- `ferx_runlog(fit)` produces a NONMEM-style `.lst` run summary: model file
+  content, data summary (subject / observation counts, time range), INITIAL vs
+  FINAL parameter table with SE and %RSE for every theta/omega/sigma, estimation
+  settings (optimizer, max iterations, BLOQ method, NCA warm-start, random
+  seeds, covariate columns present in the data), OFV / AIC / BIC with
+  convergence flag, covariance-step condition number and eigenvalues, ETA/EPS
+  shrinkage, Durbin-Watson autocorrelation, Shapiro-Wilk ETA normality, and
+  final gradient with a convergence threshold check. Pass `verbose = FALSE` to
+  capture the output as a character string.
+
+- `fit$sdtab` gains a `CMT` column for multi-endpoint models (present whenever
+  any observation row has `CMT != 1`). Use this column to split GOF plots by
+  endpoint without rejoining the original dataset.
+
+- `fit$sdtab` now carries the actual subject ID from the data (parsed as
+  numeric where possible). Previously the ID column was a 1-based loop index
+  that broke downstream joins when IDs were non-consecutive or non-numeric.
+  Non-numeric IDs now trigger a `warning`-severity message.
+
+- `ferx_fit` objects from file-based fits now carry `fit$model_text` (verbatim
+  `.ferx` source), `fit$theta_init` / `fit$omega_init` / `fit$sigma_init`
+  (optimizer starting values), `fit$obs_time_range`, `fit$final_gradient`,
+  `fit$optimizer_label`, `fit$bloq_method_label`, `fit$n_starts`,
+  `fit$inits_from_nca`, `fit$covariate_names`, and several reproducibility
+  seed fields. These fields power `ferx_runlog()` and are preserved in
+  `.fitrx` bundles.
+
+## Bug fixes
+
+- `ferx_runlog()`: theta names now resolve via `names(fit$theta)` (where
+  `R/fit.R` stores them) instead of `fit$theta_names` (which is `NULL` by
+  design after the R post-processing step). Fall-back chain:
+  `names(fit$theta)` → `fit$theta_names` → `fit$model_structure$theta_names`
+  → `THETA(i)`.
+
+- `ferx_runlog()`: `model_text`, `inits_from_nca`, and seed fields
+  (`multi_start_seed`, `saem_seed`, `sir_seed_used`, `is_seed`) now guard
+  against `NA_character_` / `NA_real_` values that extendr emits for Rust
+  `Option<T>::None`, preventing spurious "NA" entries in the run log.
+
+- `ferx_runlog()`: gradient-tolerance line suppressed for derivative-free
+  optimizers (BOBYQA, GN, SAEM) where a gradient tolerance is not applicable.
+
+- `ferx_rust_fit()` (internal): `fit$model_text` was `NA` for file-based fits
+  because the R binding's provenance block set `model_path` / `model_hash` but
+  did not set `model_text`. Fixed by reading the model file in the same block.
+
 ## Build
 
 - `src/Makevars`: the autodiff build now forces fat LTO with `override`. R CMD
@@ -13,6 +62,8 @@
   `enzyme` rustup toolchain and fails fast with an actionable message (how to
   install the toolchain, or how to fall back to finite-difference gradients)
   instead of a cryptic `toolchain 'enzyme' is not installed` error from cargo.
+
+# ferx 0.1.5
 
 ## Documentation
 

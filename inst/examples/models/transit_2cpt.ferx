@@ -4,7 +4,7 @@
 # KTR = (n+1)/MTT = 4/MTT (n = 3 transit comps)
 #
 # Allometric scaling on CL, V1, V2 (reference WT = 70 kg).
-# Lagtime of ~15 min (0.25 h) on the first transit compartment.
+# Absorption delay is provided by the transit chain via MTT.
 #
 # States (CMT numbers):
 #   1  transit1   -- oral dose lands here (amount, mg)
@@ -22,7 +22,6 @@
   theta TVQ(10.0,    0.1,  200.0)   # typical intercompartmental CL (L/h)
   theta TVV2(100.0,  5.0, 1000.0)   # typical peripheral volume (L)
   theta TVMTT(1.0,   0.1,   10.0)   # mean transit time (h); KTR = 4/MTT
-  theta TVLAG(0.25,  0.01,   2.0)   # absorption lagtime (h), fixed near 15 min
 
   omega ETA_CL ~ 0.09               # IIV on CL (~30% CV)
   omega ETA_V1 ~ 0.09               # IIV on V1 (~30% CV)
@@ -37,7 +36,6 @@
   V2     = TVV2 * (WT / 70)^1.00
   KTR    = 4.0 / TVMTT              # transit rate constant
   KA     = KTR * exp(ETA_KA)        # KA equals KTR at typical, IIV shifts individual rate
-  LAGTIME = TVLAG
 
 [structural_model]
   ode(obs_cmt=central, states=[transit1, transit2, transit3, central, peripheral])
