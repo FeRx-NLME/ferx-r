@@ -65,7 +65,7 @@ Native Windows installs are supported. The build automatically uses finite-diffe
 
 Prerequisites:
 
-- [R](https://cran.r-project.org/bin/windows/base/) and [Rtools44](https://cran.r-project.org/bin/windows/Rtools/) (Rtools44 ships the MinGW gcc that R uses to link the package)
+- [R](https://cran.r-project.org/bin/windows/base/) and the matching [Rtools](https://cran.r-project.org/bin/windows/Rtools/) for your R version — Rtools45 for R 4.5, Rtools44 for R 4.4. (Rtools ships the MinGW gcc that R uses to link the package.)
 - [rustup](https://www.rust-lang.org/tools/install) with the GNU-ABI toolchain:
 
 ```powershell
