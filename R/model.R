@@ -620,7 +620,7 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
       "  covariance = true"
     ),
     `1cpt_iv` = c(
-      "# One-compartment IV bolus PK model",
+      "# One-compartment IV PK model (RATE column drives bolus vs infusion)",
       "",
       "[parameters]",
       "  theta TVCL(5.0, 0.1, 100.0)",
@@ -636,7 +636,7 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
       "  V  = TVV  * exp(ETA_V)",
       "",
       "[structural_model]",
-      "  pk one_cpt_iv_bolus(cl=CL, v=V)",
+      "  pk one_cpt_iv(cl=CL, v=V)",
       "",
       "[error_model]",
       "  DV ~ proportional(PROP_ERR)",
@@ -683,7 +683,7 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
       "  covariance = true"
     ),
     `2cpt_iv` = c(
-      "# Two-compartment IV bolus PK model",
+      "# Two-compartment IV PK model (RATE column drives bolus vs infusion)",
       "",
       "[parameters]",
       "  theta TVCL(5.0, 0.1, 100.0)",
@@ -705,7 +705,7 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
       "  V2 = TVV2 * exp(ETA_V2)",
       "",
       "[structural_model]",
-      "  pk two_cpt_iv_bolus(cl=CL, v1=V1, q=Q, v2=V2)",
+      "  pk two_cpt_iv(cl=CL, v1=V1, q=Q, v2=V2)",
       "",
       "[error_model]",
       "  DV ~ proportional(PROP_ERR)",
@@ -795,7 +795,14 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
 # pre-fit `ferx_model_inspect(path)` reports the same string the engine would
 # attach to a fitted result.
 # Format a pk function name (snake_case) into a readable label.
-# e.g. "one_cpt_oral" -> "1-cpt oral", "two_cpt_iv_bolus" -> "2-cpt IV bolus"
+# e.g. "one_cpt_oral" -> "1-cpt oral", "two_cpt_iv" -> "2-cpt IV".
+#
+# ferx-core #176 retired the split `*_iv_bolus` / `*_infusion` names —
+# the bolus-vs-infusion choice is now per dose from RATE, so `*_iv`
+# covers both. Retired names are passed through here so pre-fit
+# `ferx_model_inspect()` on a stale `.ferx` file can still produce a
+# best-effort label; the engine itself will then reject the parse with
+# a migration error.
 .ferx_fmt_pk_name <- function(fn) {
   label <- fn
   label <- sub("^one_",   "1_",   label)
@@ -805,8 +812,11 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
   label <- sub("_cpt$",   "-cpt", label)
   label <- gsub("_", " ", label, fixed = TRUE)
   label <- gsub("(?<![a-z])iv(?![a-z])", "IV", label, perl = TRUE)
-  # Rust label for `*_infusion` is "X-cpt IV infusion"; the bare function name
-  # has no `iv` token, so inject "IV " here to keep the R/Rust labels aligned.
+  # `*_iv_bolus` (retired) — the lone "IV" is already capitalised above;
+  # nothing extra to inject here.
+  # `*_infusion` (retired) — the bare function name has no `iv` token,
+  # so inject "IV " to keep the R-side label intelligible. The Rust
+  # label for these retired forms is unreachable (parser errors first).
   label <- sub("\\binfusion\\b", "IV infusion", label, perl = TRUE)
   label
 }

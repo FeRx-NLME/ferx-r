@@ -752,16 +752,16 @@ test_that("ferx_model_inspect() detects ODE model type", {
   expect_equal(result$model_type, "ODE")
 })
 
-test_that("ferx_model_inspect() detects 2-cpt IV bolus model type", {
+test_that("ferx_model_inspect() detects 2-cpt IV model type", {
   path <- write_test_model(list(
     parameters       = "  theta TVCL(5.0, 0.1, 100.0)",
-    structural_model = "  pk two_cpt_iv_bolus(cl=CL, v1=V1, q=Q, v2=V2)",
+    structural_model = "  pk two_cpt_iv(cl=CL, v1=V1, q=Q, v2=V2)",
     error_model      = "  DV ~ proportional(PROP_ERR)"
   ))
   on.exit(unlink(path))
 
   result <- ferx_model_inspect(path)
-  expect_equal(result$model_type, "2-cpt IV bolus")
+  expect_equal(result$model_type, "2-cpt IV")
 })
 
 # ---------------------------------------------------------------------------
