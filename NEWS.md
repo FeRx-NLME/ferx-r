@@ -31,6 +31,11 @@
 
 ## Bug fixes
 
+- Shapiro-Wilk ETA-normality flags now fold into a single warning that lists
+  every flagged ETA (with its p-value) instead of firing one warning per ETA.
+  Both `fit$warnings` and the structured `eta_normality` warning shown by
+  `ferx_warnings()` are affected (ferx-core#163).
+
 - `ferx_runlog()`: theta names now resolve via `names(fit$theta)` (where
   `R/fit.R` stores them) instead of `fit$theta_names` (which is `NULL` by
   design after the R post-processing step). Fall-back chain:

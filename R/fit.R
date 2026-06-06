@@ -1462,19 +1462,13 @@ ferx_fit <- function(model, data = NULL,
 
   result <- .ferx_apply_cov_sentinels(result)
 
-  # ETA normality (Shapiro-Wilk) - computed in R from per-subject EBEs
+  # ETA normality (Shapiro-Wilk) - computed in R from per-subject EBEs.
+  # Fold every flagged ETA into a single warning rather than one per ETA
+  # (ferx-core#163).
   result$eta_normality <- .ferx_compute_eta_normality(result$ebe_etas)
-  # Push normality warnings into the warnings vector
-  if (!is.null(result$eta_normality)) {
-    for (i in seq_len(nrow(result$eta_normality))) {
-      row <- result$eta_normality[i, ]
-      if (nzchar(row$flag) && !is.na(row$p_val)) {
-        result$warnings <- c(
-          result$warnings,
-          sprintf("%s Shapiro-Wilk p=%.4f - distribution may be non-normal", row$eta, row$p_val)
-        )
-      }
-    }
+  nn_msg <- .ferx_eta_normality_warning(result$eta_normality)
+  if (!is.null(nn_msg)) {
+    result$warnings <- c(result$warnings, nn_msg)
   }
 
   # Reshape omega_iov into a named matrix (NULL when no IOV)
@@ -1713,23 +1707,17 @@ ferx_fit <- function(model, data = NULL,
       stringsAsFactors = FALSE
     )
   }
-  # Per-ETA Shapiro-Wilk normality flags (computed R-side from the EBEs).
-  if (!is.null(result$eta_normality)) {
-    for (i in seq_len(nrow(result$eta_normality))) {
-      row <- result$eta_normality[i, ]
-      if (!is.na(row$flag) && nzchar(row$flag) && !is.na(row$p_val)) {
-        extra[[length(extra) + 1L]] <- data.frame(
-          severity      = "warning",
-          category      = "eta_normality",
-          message       = sprintf(
-            "%s Shapiro-Wilk p=%.4f - distribution may be non-normal",
-            row$eta, row$p_val
-          ),
-          source_method = "",
-          stringsAsFactors = FALSE
-        )
-      }
-    }
+  # Per-ETA Shapiro-Wilk normality flags (computed R-side from the EBEs),
+  # folded into a single warning that lists every flagged ETA (ferx-core#163).
+  nn_msg <- .ferx_eta_normality_warning(result$eta_normality)
+  if (!is.null(nn_msg)) {
+    extra[[length(extra) + 1L]] <- data.frame(
+      severity      = "warning",
+      category      = "eta_normality",
+      message       = nn_msg,
+      source_method = "",
+      stringsAsFactors = FALSE
+    )
   }
   if (length(extra) > 0L) df <- rbind(df, do.call(rbind, extra))
   df
@@ -1771,6 +1759,32 @@ ferx_fit <- function(model, data = NULL,
     )
   }
   result
+}
+
+# Fold the per-ETA Shapiro-Wilk flags into a single warning message that lists
+# every ETA flagged as possibly non-normal, with its p-value. Returns NULL when
+# the normality frame is missing/empty or no ETA is flagged. Firing once instead
+# of once per ETA keeps the warnings panel readable (ferx-core#163). The
+# explanatory hint (high shrinkage / sparse data, prefer QQ-plots) is attached
+# by the eta_normality category guidance in ferx_warnings().
+.ferx_eta_normality_warning <- function(eta_normality) {
+  if (is.null(eta_normality) || !is.data.frame(eta_normality) ||
+        nrow(eta_normality) == 0L) {
+    return(NULL)
+  }
+  flagged <- eta_normality[
+    !is.na(eta_normality$flag) & nzchar(eta_normality$flag) &
+      !is.na(eta_normality$p_val), ,
+    drop = FALSE
+  ]
+  if (nrow(flagged) == 0L) {
+    return(NULL)
+  }
+  parts <- sprintf("%s (p=%.4f)", flagged$eta, flagged$p_val)
+  sprintf(
+    "Shapiro-Wilk flags possible non-normal distribution for %d ETA(s): %s",
+    nrow(flagged), paste(parts, collapse = ", ")
+  )
 }
 
 # `shapiro.test()` is hard-capped at 5000 observations; for larger N each

@@ -63,6 +63,42 @@ test_that("structured warnings include R-side condition number flag", {
   expect_equal(df$severity[df$category == "condition_number"], "critical")
 })
 
+test_that("multiple non-normal ETAs fold into one structured warning (#163)", {
+  eta_norm <- data.frame(
+    eta   = c("ETA_CL", "ETA_V", "ETA_KA"),
+    W     = c(0.90, 0.80, 0.99),
+    p_val = c(0.0001, 0.0000, 0.6000),
+    flag  = c("[!]", "[!]", ""),
+    stringsAsFactors = FALSE
+  )
+  fake <- structure(
+    list(model_name = "m", condition_number = NULL, eta_normality = eta_norm),
+    class = "ferx_fit"
+  )
+  raw <- list(
+    warnings_severity = character(0),
+    warnings_category = character(0),
+    warnings_message  = character(0)
+  )
+  df <- ferx:::.ferx_assemble_structured_warnings(raw, fake)
+  norm_rows <- df[df$category == "eta_normality", , drop = FALSE]
+  # Exactly one eta_normality warning, regardless of how many ETAs were flagged
+  expect_equal(nrow(norm_rows), 1L)
+  # The single message lists every flagged ETA but not the normal one
+  expect_match(norm_rows$message, "ETA_CL")
+  expect_match(norm_rows$message, "ETA_V")
+  expect_false(grepl("ETA_KA", norm_rows$message))
+})
+
+test_that(".ferx_eta_normality_warning returns NULL when nothing is flagged", {
+  expect_null(ferx:::.ferx_eta_normality_warning(NULL))
+  all_ok <- data.frame(
+    eta = c("ETA_CL", "ETA_V"), W = c(0.99, 0.98),
+    p_val = c(0.7, 0.6), flag = c("", ""), stringsAsFactors = FALSE
+  )
+  expect_null(ferx:::.ferx_eta_normality_warning(all_ok))
+})
+
 test_that("ferx_warnings() shows guidance for unused_parameter category", {
   fake <- structure(
     list(
