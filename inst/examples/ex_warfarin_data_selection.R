@@ -26,6 +26,5 @@ fit$exclusions$n_obs_excluded      # observations excluded by the filter
 fit$exclusions$fired_ignore        # which ignore conditions fired
 
 # The same filter can be applied via the R API instead of the model file:
-fit2 <- ferx_fit(ferx_selection(ex$data, ignore = "DV < 1.0"),
-                 model = ex$model)
+fit2 <- ferx_fit(ex$model, ferx_selection(ex$data, ignore = "DV < 1.0"))
 isTRUE(abs(fit$ofv - fit2$ofv) < 1e-4)
