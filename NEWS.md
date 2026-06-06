@@ -62,6 +62,18 @@
   `enzyme` rustup toolchain and fails fast with an actionable message (how to
   install the toolchain, or how to fall back to finite-difference gradients)
   instead of a cryptic `toolchain 'enzyme' is not installed` error from cargo.
+- `src/ad-preflight.sh` (new): the autodiff build now runs an *AD self-test*
+  before the long fat-LTO link. Registering an `enzyme` toolchain is not enough
+  — a standalone Enzyme plugin copied into a prebuilt nightly's sysroot passes
+  the name check but then hangs forever in `llvm::Constant::getNullValue` the
+  first time it differentiates anything. The self-test compiles and runs a real
+  `#[autodiff_forward]` function under a portable timeout (no `timeout`/
+  `gtimeout` dependency); a hang is turned into a clean failure that aborts the
+  build with a pointer to the toolchain rebuild instructions, instead of leaving
+  the user staring at a wedged `rustc`. The result is cached per toolchain
+  fingerprint, so identical reinstalls skip it. Set `FERX_AD_PREFLIGHT_SKIP=1`
+  to bypass, or `FERX_AD_PREFLIGHT_TIMEOUT=<seconds>` to adjust the budget.
+  (ferx-r#111)
 
 # ferx 0.1.5
 

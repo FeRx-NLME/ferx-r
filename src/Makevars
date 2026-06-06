@@ -148,6 +148,23 @@ else
 	  echo "    FERX_NO_AUTODIFF (auto-detect + fall back) or set FERX_NO_AUTODIFF=1."; \
 	  exit 1; \
 	}
+	@# Deep preflight: the check above only proves an `enzyme` toolchain is
+	@# registered, not that it actually differentiates. A standalone Enzyme
+	@# plugin copied into a prebuilt nightly's sysroot passes the name check
+	@# but hangs forever in llvm::Constant::getNullValue on first use. Compile
+	@# and run a real autodiff function (timeout-guarded) to catch that here,
+	@# before committing to the ~15-30 min fat-LTO build. Honors
+	@# FERX_AD_PREFLIGHT_SKIP=1 for users who have already verified the
+	@# toolchain. $(CURDIR) is the package src/ dir, where the script ships.
+	@sh "$(CURDIR)/ad-preflight.sh" || { \
+	  echo "ferx: aborting autodiff build — the 'enzyme' toolchain failed the AD"; \
+	  echo "      self-test (see message above)."; \
+	  echo "  - To build WITHOUT autodiff (finite-difference gradients): set"; \
+	  echo "    FERX_NO_AUTODIFF=1 and reinstall."; \
+	  echo "  - To fix the toolchain: rebuild from source per the install docs,"; \
+	  echo "    then reinstall (or set FERX_AD_PREFLIGHT_SKIP=1 to bypass once)."; \
+	  exit 1; \
+	}
 	@echo 'rustflags = ["-Z", "autodiff=Enable"]' >> rust/.cargo/config.toml
 	@echo '[toolchain]' > rust/rust-toolchain.toml
 	@echo 'channel = "enzyme"' >> rust/rust-toolchain.toml
