@@ -64,6 +64,21 @@ ifeq ($(UNAME_S),Darwin)
     HOST_TOOLCHAIN_CHANNEL = stable-x86_64-apple-darwin
   endif
 endif
+
+# macOS: pin one deployment target for the whole build so the C objects the
+# nlopt crate compiles via cmake carry the same `minos` as R's final .so link.
+# Without this they disagree harmlessly but noisily: the cmake crate stamps the
+# full host OS version (e.g. 26.5) onto nlopt's C objects, while clang's bare
+# link default — which R's link step uses — is <major>.0 (e.g. 26.0). ld then
+# warns "object file was built for newer 'macOS' version than being linked".
+# Exporting a single value (<major>.0, matching clang's bare default) makes the
+# cmake compile and R's link agree, silencing the warning. Respect a value the
+# user already set.
+ifeq ($(UNAME_S),Darwin)
+  ifeq ($(origin MACOSX_DEPLOYMENT_TARGET), undefined)
+    export MACOSX_DEPLOYMENT_TARGET := $(shell sw_vers -productVersion | cut -d. -f1).0
+  endif
+endif
 # On Windows, R/Rtools uses the MinGW (GNU) ABI. The rustup default host on
 # Windows is MSVC, which produces .lib archives whose CRT/SEH symbols
 # (__chkstk, __security_cookie, __GSHandlerCheck, __imp_*) MinGW's ld cannot
