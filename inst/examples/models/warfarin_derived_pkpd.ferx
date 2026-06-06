@@ -4,9 +4,9 @@
   theta TVCL(0.2, 0.001, 10.0)
   theta TVV(10.0, 0.1, 500.0)
   theta TVKA(1.5, 0.01, 50.0)
-  theta MEC(0.5, 0.01, 5.0)
-  theta EMAX(80.0, 10.0, 100.0)
-  theta EC50(3.0,  0.1,  20.0)
+  theta MEC(0.5)    fix
+  theta EMAX(80.0)  fix
+  theta EC50(3.0)   fix
 
   omega ETA_CL ~ 0.09
   omega ETA_V  ~ 0.04
@@ -42,7 +42,7 @@
   TAM_D1  = integral(1.0, IPRED > MEC, from=0, to=24, step=0.1)
 
 [output]
-  CL V KA EMAX EC50
+  CL V KA
 
 [fit_options]
   method  = foce
