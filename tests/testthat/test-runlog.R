@@ -466,11 +466,14 @@ test_that("ferx_runlog iteration section absent when trace file deleted", {
   expect_no_match(out, "ITERATION HISTORY", fixed = TRUE)
 })
 
+# Local alias avoids the ::: operator which lintr flags.
+.iter_table <- getFromNamespace(".runlog_iter_table", "ferx")
+
 test_that(".runlog_iter_table: FOCE/FOCEI header has GRAD_NORM and STEP_NORM", {
   path <- write_fake_trace(n = 5, method = "focei")
   on.exit(unlink(path))
   tr  <- read.csv(path, stringsAsFactors = FALSE)
-  tbl <- ferx:::.runlog_iter_table(tr, truncate = FALSE)
+  tbl <- .iter_table(tr, truncate = FALSE)
   expect_match(tbl[1], "GRAD_NORM", fixed = TRUE)
   expect_match(tbl[1], "STEP_NORM", fixed = TRUE)
   expect_no_match(tbl[1], "LM_LAMBDA",  fixed = TRUE)
@@ -487,7 +490,7 @@ test_that(".runlog_iter_table: GN header has LM_LAMBDA and ACC, not GRAD_NORM", 
   tr$step_accepted <- c(NA_integer_, 1L, 1L, 1L, 0L)
   tr$grad_norm     <- NA_real_
   tr$step_norm     <- NA_real_
-  tbl <- ferx:::.runlog_iter_table(tr, truncate = FALSE)
+  tbl <- .iter_table(tr, truncate = FALSE)
   expect_match(tbl[1], "LM_LAMBDA", fixed = TRUE)
   expect_match(tbl[1], "ACC",       fixed = TRUE)
   expect_no_match(tbl[1], "GRAD_NORM", fixed = TRUE)
@@ -505,7 +508,7 @@ test_that(".runlog_iter_table: SAEM header uses COND_NLL and dCOND_NLL", {
   tr$gamma          <- seq(1.0, by = -0.1, length.out = 6)
   tr$mh_accept_rate <- rep(0.35, 6)
   tr$cond_nll       <- tr$ofv
-  tbl <- ferx:::.runlog_iter_table(tr, truncate = FALSE)
+  tbl <- .iter_table(tr, truncate = FALSE)
   expect_match(tbl[1], "COND_NLL",  fixed = TRUE)
   expect_match(tbl[1], "dCOND_NLL", fixed = TRUE)
   expect_match(tbl[1], "MH_ACCEPT", fixed = TRUE)
@@ -516,7 +519,7 @@ test_that(".runlog_iter_table truncates long traces correctly", {
   path <- write_fake_trace(n = 40)
   on.exit(unlink(path))
   tr  <- read.csv(path, stringsAsFactors = FALSE)
-  tbl <- ferx:::.runlog_iter_table(tr, truncate = TRUE,
+  tbl <- .iter_table(tr, truncate = TRUE,
                                    trunc_total = 30L, trunc_head = 10L,
                                    trunc_tail  = 10L)
   expect_true(any(grepl("rows not shown", tbl, fixed = TRUE)))
@@ -529,7 +532,7 @@ test_that(".runlog_iter_table shows all rows when truncate = FALSE", {
   path <- write_fake_trace(n = 40)
   on.exit(unlink(path))
   tr  <- read.csv(path, stringsAsFactors = FALSE)
-  tbl <- ferx:::.runlog_iter_table(tr, truncate = FALSE)
+  tbl <- .iter_table(tr, truncate = FALSE)
   expect_false(any(grepl("rows not shown", tbl, fixed = TRUE)))
   # 40 data rows + 1 header + 1 bar = 42 elements
   expect_equal(length(tbl), 42L)
@@ -539,7 +542,7 @@ test_that(".runlog_iter_table output is pure ASCII", {
   path <- write_fake_trace(n = 5)
   on.exit(unlink(path))
   tr  <- read.csv(path, stringsAsFactors = FALSE)
-  tbl <- ferx:::.runlog_iter_table(tr, truncate = FALSE)
+  tbl <- .iter_table(tr, truncate = FALSE)
   out <- paste(tbl, collapse = "\n")
   expect_false(nchar(out, type = "bytes") != nchar(out, type = "chars"))
 })
