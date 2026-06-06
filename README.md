@@ -35,7 +35,7 @@ Both are paid once. Subsequent installs reuse the toolchain and the ~1.9 GB depe
 See [documentation](https://ferx-nlme.github.io/ferx-core/installation.html) for installation instructions.
 
 > **Heads-up - two gotchas that bite people building the toolchain from source:**
-> - If the autodiff verification step makes `rustc` *hang* (one core busy, memory flat, never returns), you have an LLVM/Enzyme mismatch. Rebuild with `--set llvm.download-ci-llvm=false`.
+> - If the autodiff verification step makes `rustc` *hang* (one core busy, memory flat, never returns), you have an LLVM/Enzyme mismatch. Rebuild with `--set llvm.download-ci-llvm=false`. The package install now runs this check automatically (a quick AD self-test) and aborts with this pointer instead of wedging, so you no longer have to run it by hand. Set `FERX_AD_PREFLIGHT_SKIP=1` to bypass it once the toolchain is verified.
 > - The toolchain is initially linked into `/tmp`, which macOS/Linux purge - relocate it to a permanent path (e.g. `~/.local/share/enzyme-toolchain`) and re-link, or it will silently break later. See the install docs for the exact steps.
 
 ### Install the package
