@@ -1,0 +1,7 @@
+linters: linters_with_defaults(
+  # Tests reach non-exported helpers (`.ferx_*`) via `pkg:::fn`, which is the
+  # only way to exercise internal functions and is the established convention
+  # across the test suite (90+ call sites). Disable the linter that objects to
+  # `:::` so CodeFactor stops flagging an accepted, unavoidable pattern.
+  undesirable_operator_linter = NULL
+)
