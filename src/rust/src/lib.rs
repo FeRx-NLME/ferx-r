@@ -895,6 +895,7 @@ fn default_fit_result(
         outer_gtol: 0.0,
         inits_from_nca: None,
         covariate_names: Vec::new(),
+        input_columns: Vec::new(),
         #[cfg(feature = "nn")]
         neural_networks: Vec::new(),
     }
@@ -1477,7 +1478,9 @@ fn fit_result_to_list(
         outer_gtol        = result.outer_gtol,
         inits_from_nca    = result.inits_from_nca.clone(),
         // covariate_names: character vector of non-standard data columns.
-        covariate_names   = result.covariate_names.clone()
+        covariate_names   = result.covariate_names.clone(),
+        // input_columns: all CSV header names in file order (analogous to NONMEM $INPUT).
+        input_columns     = result.input_columns.clone()
     )
 }
 
@@ -2050,6 +2053,7 @@ fn ferx_rust_sir(
         outer_gtol: 0.0,
         inits_from_nca: None,
         covariate_names: Vec::new(),
+        input_columns: Vec::new(),
         #[cfg(feature = "nn")]
         neural_networks: Vec::new(),
     };

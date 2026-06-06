@@ -445,6 +445,11 @@
 #'     \code{II}, \code{SS}, \code{CENS}, \code{OCC}). Empty when no
 #'     covariates are present. Used by \code{\link{ferx_runlog}} to echo
 #'     the dataset column list.}
+#'   \item{input_columns}{Character vector of all column headers from the
+#'     data CSV in file order — analogous to NONMEM \code{$INPUT}. Includes
+#'     both standard columns (\code{ID}, \code{TIME}, \code{DV}, etc.) and
+#'     any covariate columns. Empty for in-memory fits that never read a file.
+#'     Used by \code{\link{ferx_runlog}} to echo the full dataset column list.}
 #'   \item{cov_matrix}{Full parameter covariance matrix as a named numeric
 #'     matrix (params ? params). Row/column names use declared variable names
 #'     (\code{"TVCL"}, \code{"ETA_CL"}, \code{"EPS_PROP"}); fallback is
