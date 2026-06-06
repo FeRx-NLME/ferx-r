@@ -92,7 +92,7 @@ test_that("multiple non-normal ETAs fold into one structured warning (#163)", {
   expect_match(norm_rows$message, "2 ETAs:")
 })
 
-test_that(".ferx_eta_normality_warning uses singular noun for one flagged ETA", {
+test_that(".ferx_eta_normality_warning uses singular noun for 1 ETA", {
   one <- data.frame(
     eta = "ETA_CL", W = 0.9, p_val = 0.0001, flag = "[!]",
     stringsAsFactors = FALSE
