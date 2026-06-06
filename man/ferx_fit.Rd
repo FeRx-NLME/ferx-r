@@ -351,6 +351,13 @@ if any rows are below LLOQ; CMT if the dataset has more than one
 endpoint (any observation with \code{CMT != 1}).  Per-subject ETAs
 live in \code{ebe_etas}; per-subject parameter values in
 \code{individual_estimates}.}
+\item{covtab}{Data frame echoing the declared covariate columns, present
+only when the model has a \code{[covariates]} block. Columns: \code{ID},
+\code{TIME}, \code{EVID}, then one column per declared covariate (in
+declaration order). Unlike \code{sdtab} (observation rows only), it has
+one row per input dataset record, including dose and other-event rows;
+missing covariate values are \code{NA}. \code{NULL} when no
+\code{[covariates]} block is declared.}
 \item{ebe_etas}{Data frame with one row per subject containing the BSV
 empirical Bayes estimates: \code{ID} plus one column per eta named
 after the model's eta declarations (e.g. \code{ETA_CL}, \code{ETA_V}).
