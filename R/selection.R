@@ -176,10 +176,11 @@ print.ferx_data <- function(x, n = 6L, ...) {
   cat("\n")
 
   if (!is.null(ex)) {
+    strip_pfx <- function(x) sub("^(ignore|accept): ", "", x)
     for (cond in ex$fired_ignore)
-      cat(sprintf("  Fired ignore: %s\n", cond))
+      cat(sprintf("  Fired ignore: %s\n", strip_pfx(cond)))
     for (cond in ex$fired_accept)
-      cat(sprintf("  Fired accept: %s\n", cond))
+      cat(sprintf("  Fired accept: %s\n", strip_pfx(cond)))
     if (length(ex$excluded_subject_ids) > 0L)
       cat(sprintf("  Subjects excluded: %s\n",
                   paste(ex$excluded_subject_ids, collapse = ", ")))
@@ -222,18 +223,24 @@ ferx_selection_excluded.ferx_fit <- function(x, ...) {
     message("Data path not available on fit object; cannot retrieve excluded records.")
     return(invisible(NULL))
   }
-  full <- utils::read.csv(dp, stringsAsFactors = FALSE, check.names = FALSE)
-  n_incl <- x$n_obs + x$n_subjects
   n_excl <- ex$n_obs_excluded + ex$n_dose_excluded + ex$n_other_excluded
-  if (n_excl == 0L) {
+  if (n_excl == 0L && length(ex$excluded_subject_ids) == 0L) {
     message("No records were excluded by data-selection rules.")
     return(invisible(data.frame()))
   }
-  id_col <- .get_col_sel(full, "id")
-  if (!is.null(id_col) && length(ex$excluded_subject_ids) > 0L) {
-    full$.from_excluded_subject <- as.character(id_col) %in% ex$excluded_subject_ids
-  }
-  invisible(full)
+  # Replay the fired conditions through the R-side preview filter to obtain the
+  # actual excluded rows with their .exclude_reason column.
+  # fired_ignore / fired_accept carry a "ignore: " / "accept: " prefix (matching
+  # the Rust ExclusionSummary format); strip it to recover bare expressions for
+  # ferx_selection(ignore=...).
+  strip_prefix <- function(x) sub("^(ignore|accept): ", "", x)
+  sel <- ferx_selection(
+    dp,
+    ignore     = strip_prefix(ex$fired_ignore),
+    accept     = strip_prefix(ex$fired_accept),
+    ignore_ids = ex$excluded_subject_ids
+  )
+  ferx_selection_excluded(sel)
 }
 
 .get_col_sel <- function(df, name) {

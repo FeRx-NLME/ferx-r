@@ -102,10 +102,11 @@ ferx_runlog <- function(fit, gradient_tol = 0.1, show_iterations = TRUE, verbose
       as.integer(ex$n_other_excluded %||% 0L),
       as.integer(ex$n_records_total %||% 0L)
     ))
+    strip_pfx <- function(x) sub("^(ignore|accept): ", "", x)
     for (cond in ex$fired_ignore)
-      lines <- c(lines, sprintf("    Fired ignore:  \"%s\"", cond))
+      lines <- c(lines, sprintf("    Fired ignore:  \"%s\"", strip_pfx(cond)))
     for (cond in ex$fired_accept)
-      lines <- c(lines, sprintf("    Fired accept:  \"%s\"", cond))
+      lines <- c(lines, sprintf("    Fired accept:  \"%s\"", strip_pfx(cond)))
     if (length(ex$excluded_subject_ids) > 0L)
       lines <- c(lines, sprintf("    Excl. subjs:   [%s]",
                                 paste(ex$excluded_subject_ids, collapse = ", ")))

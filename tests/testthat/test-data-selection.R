@@ -272,3 +272,91 @@ test_that("ferx_selection_excluded.ferx_data returns a data.frame with .exclude_
   expect_true(nrow(excl) > 0L)
   expect_true(".exclude_reason" %in% names(excl))
 })
+
+# ---------------------------------------------------------------------------
+# 11. accept= and ignore_ids= coverage for ferx_selection()
+# ---------------------------------------------------------------------------
+test_that("ferx_selection() accept= excludes records failing the condition", {
+  skip_on_cran()
+  ex  <- ferx_example("warfarin")
+  df  <- utils::read.csv(ex$data, stringsAsFactors = FALSE, check.names = FALSE)
+  # keep only obs with DV > 5; MDV=1 / dose rows (DV=0) also fail this accept
+  sel <- ferx_selection(ex$data, accept = "DV > 5")
+  excl <- ferx_selection_excluded(sel)
+  expect_s3_class(excl, "data.frame")
+  expect_true(nrow(excl) > 0L)
+  # retained rows all satisfy DV > 5 (for non-dose rows)
+  fired <- .sel_attr(sel, "exclusions")$fired_accept
+  expect_true(any(grepl("DV > 5", fired, fixed = TRUE)))  # accept: DV > 5
+  # round-trip: retained + excluded == original
+  expect_equal(nrow(sel) + nrow(excl), nrow(df))
+})
+
+test_that("ferx_selection() ignore_ids= excludes entire subject", {
+  skip_on_cran()
+  ex  <- ferx_example("warfarin")
+  df  <- utils::read.csv(ex$data, stringsAsFactors = FALSE, check.names = FALSE)
+  sel <- ferx_selection(ex$data, ignore_ids = 1L)
+  excl <- ferx_selection_excluded(sel)
+
+  # subject 1 rows are all excluded
+  expect_true(all(excl$ID == 1L))
+  # subject 1 is in excluded_subject_ids
+  expect_true("1" %in% .sel_attr(sel, "exclusions")$excluded_subject_ids)
+  # retained data has no subject 1
+  expect_false(1L %in% sel$ID)
+  # total count preserved
+  expect_equal(nrow(sel) + nrow(excl), nrow(df))
+})
+
+test_that("ferx_selection() fired_ignore format matches fit$exclusions format", {
+  skip_on_cran()
+  ex    <- ferx_example("warfarin_data_selection")
+  sel   <- ferx_selection(ex$data, ignore = "DV < 1.0")
+  fired <- .sel_attr(sel, "exclusions")$fired_ignore
+  fit   <- warfarin_sel_fit()
+
+  # Both R preview and Rust engine use "ignore: <expr>" format consistently.
+  expect_true("ignore: DV < 1.0" %in% fired)
+  expect_true("ignore: DV < 1.0" %in% fit$exclusions$fired_ignore)
+  expect_equal(fired, fit$exclusions$fired_ignore)
+})
+
+# ---------------------------------------------------------------------------
+# 12. ferx_selection() data.frame input
+# ---------------------------------------------------------------------------
+test_that("ferx_selection() accepts a data.frame and sets source_path to NULL", {
+  skip_on_cran()
+  ex  <- ferx_example("warfarin")
+  df  <- utils::read.csv(ex$data, stringsAsFactors = FALSE, check.names = FALSE)
+  sel <- ferx_selection(df, ignore = "DV < 1.0")
+  expect_s3_class(sel, "ferx_data")
+  expect_null(.sel_attr(sel, "source_path"))
+  expect_equal(.sel_attr(sel, "exclusions")$n_obs_excluded, 2L)
+})
+
+test_that("ferx_fit errors clearly when ferx_data has no source_path", {
+  skip_on_cran()
+  ex  <- ferx_example("warfarin_data_selection")
+  df  <- utils::read.csv(ex$data, stringsAsFactors = FALSE, check.names = FALSE)
+  sel <- ferx_selection(df, ignore = "DV < 1.0")
+  expect_error(
+    ferx_fit(ex$model, sel),
+    regexp = "no source file path"
+  )
+})
+
+# ---------------------------------------------------------------------------
+# 13. ferx_selection_excluded.ferx_fit replays fired conditions
+# ---------------------------------------------------------------------------
+test_that("ferx_selection_excluded.ferx_fit returns excluded rows with .exclude_reason", {
+  skip_on_cran()
+  fit  <- warfarin_sel_fit()
+  excl <- ferx_selection_excluded(fit)
+  expect_s3_class(excl, "data.frame")
+  expect_true(nrow(excl) > 0L)
+  expect_true(".exclude_reason" %in% names(excl))
+  # row count matches fit$exclusions count
+  expect_equal(nrow(excl), fit$exclusions$n_obs_excluded +
+                 fit$exclusions$n_dose_excluded + fit$exclusions$n_other_excluded)
+})

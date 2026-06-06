@@ -1211,6 +1211,15 @@ ferx_fit <- function(model, data = NULL,
   if (inherits(data, "ferx_data")) {
     fd <- data
     data <- attr(fd, "source_path")
+    if (is.null(data)) {
+      stop(
+        "`data` is a ferx_data object built from a data.frame (no source file path). ",
+        "The Rust engine requires a CSV file path. ",
+        "Pass the original CSV file path to ferx_selection() instead:\n",
+        "  sel <- ferx_selection(\"path/to/data.csv\", ignore = ...)\n",
+        "  fit <- ferx_fit(model, sel)"
+      )
+    }
     ignore      <- unique(c(attr(fd, "ignore"),    ignore))
     accept      <- unique(c(attr(fd, "accept"),    accept))
     ignore_ids  <- unique(c(attr(fd, "ignore_ids"), ignore_ids))
@@ -1994,10 +2003,11 @@ print.ferx_fit <- function(x, ...) {
     if (length(ex$excluded_subject_ids) > 0L)
       cat(sprintf("  Subjects excluded: %s\n",
                   paste(ex$excluded_subject_ids, collapse = ", ")))
+    strip_pfx <- function(x) sub("^(ignore|accept): ", "", x)
     for (cond in ex$fired_ignore)
-      cat(sprintf("  Fired ignore: %s\n", cond))
+      cat(sprintf("  Fired ignore: %s\n", strip_pfx(cond)))
     for (cond in ex$fired_accept)
-      cat(sprintf("  Fired accept: %s\n", cond))
+      cat(sprintf("  Fired accept: %s\n", strip_pfx(cond)))
   }
 
   if (!is.null(x$model_structure)) {
