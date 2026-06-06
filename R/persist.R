@@ -369,7 +369,8 @@ ferx_load_fit <- function(path) {
     model_hash = .fitrx_opt_chr(fit$model_hash),
     data_hash = .fitrx_opt_chr(fit$data_hash),
 
-    input_columns = as.character(fit$input_columns %||% character()),
+    input_columns    = as.character(fit$input_columns    %||% character()),
+    covariate_names  = as.character(fit$covariate_names  %||% character()),
 
     r_extras = .fitrx_collect_r_extras(fit)
   )
@@ -462,7 +463,8 @@ ferx_load_fit <- function(path) {
     model_hash = .fitrx_unwrap_opt_chr(w$model_hash),
     data_hash = .fitrx_unwrap_opt_chr(w$data_hash),
 
-    input_columns = as.character(unlist(w$input_columns %||% list(), use.names = FALSE))
+    input_columns   = as.character(unlist(w$input_columns   %||% list(), use.names = FALSE)),
+    covariate_names = as.character(unlist(w$covariate_names %||% list(), use.names = FALSE))
   )
 
   # eta_param_info ? parallel R vectors

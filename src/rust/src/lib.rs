@@ -896,6 +896,7 @@ fn default_fit_result(
         inits_from_nca: None,
         covariate_names: Vec::new(),
         input_columns: Vec::new(),
+        covariate_table: None,
         #[cfg(feature = "nn")]
         neural_networks: Vec::new(),
     }
@@ -1937,6 +1938,8 @@ fn ferx_rust_sir(
             ofv_contribution: 0.0,
             cens: Vec::new(),
             n_obs: 0,
+            extra_columns: Vec::new(),
+            per_obs_tad: Vec::new(),
         });
     }
 
@@ -2054,6 +2057,7 @@ fn ferx_rust_sir(
         inits_from_nca: None,
         covariate_names: Vec::new(),
         input_columns: Vec::new(),
+        covariate_table: None,
         #[cfg(feature = "nn")]
         neural_networks: Vec::new(),
     };

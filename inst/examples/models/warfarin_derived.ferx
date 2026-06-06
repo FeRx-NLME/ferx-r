@@ -1,0 +1,58 @@
+# One-compartment oral PK model (warfarin) -- [derived] and [output] demo
+
+[parameters]
+  theta TVCL(0.2, 0.001, 10.0)
+  theta TVV(10.0, 0.1, 500.0)
+  theta TVKA(1.5, 0.01, 50.0)
+
+  omega ETA_CL ~ 0.09
+  omega ETA_V  ~ 0.04
+  omega ETA_KA ~ 0.30
+
+  sigma PROP_ERR ~ 0.02 (sd)
+
+[individual_parameters]
+  CL = TVCL * exp(ETA_CL)
+  V  = TVV  * exp(ETA_V)
+  KA = TVKA * exp(ETA_KA)
+
+[structural_model]
+  pk one_cpt_oral(cl=CL, v=V, ka=KA)
+
+[error_model]
+  DV ~ proportional(PROP_ERR)
+
+[derived]
+  # Per-row: elimination rate and half-life
+  KE     = CL / V
+  T_HALF = 0.6931472 / KE
+
+  # Which dosing day (tau = 24 h)
+  DAY      = floor(TAFD / 24) + 1
+  TAU_TIME = TAFD mod 24
+
+  # Subject-level aggregates (one scalar per subject, repeated across rows)
+  CMAX       = max(IPRED)
+  TMAX       = tmax(IPRED)
+  # 1e-10 absorbs floating-point residuals when TAD is mathematically 0
+  CTROUGH    = min(IPRED, TAD < 1e-10)
+  CMAX_D1    = max(IPRED, TAFD < 24)
+  CMAX_D14   = max(IPRED, TAFD >= 312 && TAFD < 336)
+
+  # AUC over first 72 h (fine internal grid, 500 steps)
+  AUC_0_72   = integral(IPRED, from=0, to=72)
+
+  # Periodic AUC: one value per 24-h dosing window
+  AUC_TAU    = integral(IPRED, window=24, anchor=0, step=0.1)
+
+  # DV-based AUC (observation times only -- no interpolation)
+  AUC_DV_72  = integral(DV, from=0, to=72)
+
+[output]
+  # Echo individual PK parameters (ETAs already automatic)
+  CL V KA
+
+[fit_options]
+  method     = foce
+  maxiter    = 300
+  covariance = true

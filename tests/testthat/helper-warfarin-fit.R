@@ -37,3 +37,21 @@ warfarin_fit <- local({
     fit
   }
 })
+
+# Cached FOCEI fit on the warfarin_derived example (tests [derived] / [output]).
+warfarin_derived_fit <- local({
+  fit <- NULL
+  function() {
+    if (is.null(fit)) {
+      ex  <- ferx_example("warfarin_derived")
+      fit <<- ferx_fit(
+        ex$model, ex$data,
+        method = "focei",
+        verbose = FALSE,
+        covariance = FALSE,
+        settings = list(maxiter = 30L)
+      )
+    }
+    fit
+  }
+})

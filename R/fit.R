@@ -308,9 +308,17 @@
 #'   \item{sdtab}{Data frame with ID, TIME, DV, PRED, IPRED, CWRES, IWRES,
 #'     EBE_OFV, N_OBS; OCC if any subject carries an occasion column; CENS
 #'     if any rows are below LLOQ; CMT if the dataset has more than one
-#'     endpoint (any observation with \code{CMT != 1}).  Per-subject ETAs
-#'     live in \code{ebe_etas}; per-subject parameter values in
-#'     \code{individual_estimates}.}
+#'     endpoint (any observation with \code{CMT != 1}).  TAFD (time after
+#'     first dose) and TAD (time after last dose, SS-aware) are included
+#'     automatically.  Columns declared in \code{[derived]} (per-row
+#'     expressions, aggregates, integrals) and \code{[output]} (individual
+#'     PK parameters or covariates echoed by name) appear at the end of the
+#'     data frame in declaration order.
+#'     Note: per-subject ETA (EBE) values are in \code{fit$ebe_etas} (one
+#'     row per subject, no row duplication); per-subject individual parameter
+#'     values are in \code{fit$individual_estimates}.  ETAs are available as
+#'     read-only context variables inside \code{[derived]} expressions but
+#'     are not written as sdtab columns.}
 #'   \item{ebe_etas}{Data frame with one row per subject containing the BSV
 #'     empirical Bayes estimates: \code{ID} plus one column per eta named
 #'     after the model's eta declarations (e.g. \code{ETA_CL}, \code{ETA_V}).
@@ -2800,16 +2808,22 @@ ferx_fit_async <- function(model, data = NULL, ...,
       )
       trace_written <- FALSE
       while (inner$is_alive()) {
-        lines <- c(
-          tryCatch(inner$read_output_lines(), error = function(e) character(0)),
-          tryCatch(inner$read_error_lines(),  error = function(e) character(0))
-        )
         if (!trace_written) {
+          # Drain and scan for the trace announcement.
+          lines <- c(
+            tryCatch(inner$read_output_lines(), error = function(e) character(0)),
+            tryCatch(inner$read_error_lines(),  error = function(e) character(0))
+          )
           path <- .find_trace(lines)
           if (!is.null(path)) {
             writeLines(path, sidecar_path)
             trace_written <- TRUE
           }
+        } else {
+          # Trace found; keep draining to prevent the inner process from
+          # blocking on a full OS pipe buffer (typically 64 KB on Linux/macOS).
+          tryCatch(inner$read_output_lines(), error = function(e) NULL)
+          tryCatch(inner$read_error_lines(),  error = function(e) NULL)
         }
         Sys.sleep(0.2)
       }
@@ -2823,7 +2837,13 @@ ferx_fit_async <- function(model, data = NULL, ...,
         path <- .find_trace(lines)
         if (!is.null(path)) writeLines(path, sidecar_path)
       }
-      inner$get_result()
+      # Re-signal inner failures as plain conditions so the caller does not
+      # see a double-nested "callr subprocess failed: callr subprocess failed"
+      # message.  The original error message is preserved.
+      tryCatch(
+        inner$get_result(),
+        error = function(e) stop(conditionMessage(e), call. = FALSE)
+      )
     }, # nocov end
     args = list(model = model, data = data, dots = dots,
                 sidecar_path = sidecar_path),
@@ -2888,6 +2908,16 @@ ferx_fit_async <- function(model, data = NULL, ...,
       "      }",
       "    }",
       "    Sys.sleep(0.2)",
+      "  }",
+      "  # Drain remaining output after the process exits (fast fits may finish",
+      "  # before the first poll fires, leaving buffered stderr unread).",
+      "  if (!trace_written) {",
+      "    lines <- c(",
+      "      tryCatch(bg$read_output_lines(), error = function(e) character(0)),",
+      "      tryCatch(bg$read_error_lines(),  error = function(e) character(0))",
+      "    )",
+      "    path <- .find_trace(lines)",
+      "    if (!is.null(path)) writeLines(path, sidecar_path)",
       "  }",
       "  result <- bg$get_result()",
       "  saveRDS(result, rds_path)",
@@ -2987,11 +3017,8 @@ ferx_collect <- function(handle, verbose = TRUE) {
       # the trace path comes from the sidecar file, not these streams.
       tryCatch(bg$read_output_lines(), error = function(e) NULL)
       tryCatch(bg$read_error_lines(),  error = function(e) NULL)
-      if (verbose && is.null(trace_path) &&
-          !is.null(sidecar_path) && file.exists(sidecar_path)) {
-        sp <- trimws(readLines(sidecar_path, warn = FALSE)[1L])
-        if (nzchar(sp) && file.exists(sp)) trace_path <- sp
-      }
+      if (verbose && is.null(trace_path))
+        trace_path <- .ferx_read_sidecar(sidecar_path)
       if (verbose && !is.null(trace_path) && file.exists(trace_path)) {
         state <- .ferx_print_trace_tail(trace_path, tail_n, state)
       }
@@ -3037,10 +3064,8 @@ ferx_collect <- function(handle, verbose = TRUE) {
       if (job_state %in% c("succeeded", "failed")) break
 
       if (verbose) {
-        if (is.null(trace_path) && file.exists(sidecar_path)) {
-          trace_path <- trimws(readLines(sidecar_path, warn = FALSE)[1])
-          if (!nzchar(trace_path)) trace_path <- NULL
-        }
+        if (is.null(trace_path))
+          trace_path <- .ferx_read_sidecar(sidecar_path)
         if (!is.null(trace_path) && file.exists(trace_path)) {
           state <- .ferx_print_trace_tail(trace_path, tail_n, state)
         }
@@ -3083,13 +3108,7 @@ print.ferx_job <- function(x, ...) {
   # Show current trace progress when available.
   # Both backends write a sidecar file with the trace CSV path once the
   # first iteration is recorded; read it non-destructively here.
-  trace_path <- NULL
-  if (!is.null(x$sidecar_path) &&
-      file.exists(x$sidecar_path)) {
-    sp <- tryCatch(trimws(readLines(x$sidecar_path, warn = FALSE)[1L]),
-                   error = function(e) "")
-    if (nzchar(sp) && file.exists(sp)) trace_path <- sp
-  }
+  trace_path <- .ferx_read_sidecar(x$sidecar_path)
   if (!is.null(trace_path)) {
     tr <- tryCatch(ferx_trace(trace_path), error = function(e) NULL)
     if (!is.null(tr) && nrow(tr) > 0L) {
@@ -3113,6 +3132,20 @@ print.ferx_job <- function(x, ...) {
 # "/Users/Some User/...") so we anchor on ".csv" at end-of-line rather
 # than refusing any whitespace inside the match. Greedy capture from the
 # first "/" through the trailing ".csv" on the announcement line, with a
+# Read the trace-CSV path from a sidecar file.
+# Returns the path string when the sidecar exists and contains a valid
+# path to an existing file; returns NULL in every other case (missing
+# sidecar, empty/blank content, or the referenced trace CSV not yet on
+# disk).  Wraps readLines in tryCatch so a race between file.exists() and
+# readLines() (sidecar deleted by the background process at collect time)
+# cannot propagate as an unhandled error.
+.ferx_read_sidecar <- function(sidecar_path) {
+  if (is.null(sidecar_path) || !file.exists(sidecar_path)) return(NULL)
+  sp <- tryCatch(trimws(readLines(sidecar_path, warn = FALSE)[1L]),
+                 error = function(e) "")
+  if (nzchar(sp) && file.exists(sp)) sp else NULL
+}
+
 # trailing "\r" stripped to tolerate Windows line endings.
 # NOTE: "/.+\.csv$" assumes the path is the last token on the line. If
 # ferx-core ever appends text after the path (e.g. "(appended)"), this

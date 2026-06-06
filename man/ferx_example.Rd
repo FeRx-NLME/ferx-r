@@ -79,6 +79,29 @@ residual error model per endpoint via a per-CMT \code{[error_model]}
 block (\code{CMT=2: DV ~ proportional(...)} for plasma,
 \code{CMT=3: DV ~ additive(...)} for the PD effect). Demonstrates
 multi-endpoint fitting; requires \code{gradient = fd}.}
+\item{warfarin_derived}{One-compartment oral (warfarin) with a
+\code{[derived]} block demonstrating per-row expressions (KE, T_HALF),
+aggregates (CMAX, TMAX, CMAX_D1), numeric integration (AUC_0_72,
+AUC_TAU, AUC_DV_72), and an \code{[output]} block echoing CL, V, KA.
+Uses TAFD and TAD as built-in context variables.}
+\item{warfarin_derived_pkpd}{One-compartment oral (warfarin) with PD
+effect and time-above-MEC derived quantities. Demonstrates TAD-gated
+Cmax and \code{integral(1.0, IPRED > MEC, window=24)} for time above
+minimum effective concentration.}
+\item{two_cpt_oral_derived}{Two-compartment oral PK with micro-rate
+constants and day-specific Cmax computed in \code{[derived]}.
+Demonstrates \code{integral(IPRED, from=0, to=168)} and periodic AUC.}
+\item{warfarin_addl}{One-compartment oral (warfarin) with ADDL-column
+dosing. A single EVID=1 row with ADDL=6, II=24 is expanded to seven
+daily doses at read time; TAD resets at each expanded dose automatically.
+Demonstrates CMIN_TAU using \code{1e-10} tolerance for floating-point
+boundary comparisons. Note: a matching ADDL-format dataset
+(\code{warfarin_addl.csv}) is not yet bundled; supply your own
+ADDL-format data file when using this model.}
+\item{warfarin_ode_time}{One-compartment oral (warfarin) as an ODE model
+demonstrating \code{TIME}, \code{T}, \code{TAFD}, and \code{TAD} inside
+\code{[odes]} RHS expressions; accumulator compartments for AUC and
+time-above-threshold.}
 }
 Call \code{ferx_example()} with no arguments to list all available names.
 

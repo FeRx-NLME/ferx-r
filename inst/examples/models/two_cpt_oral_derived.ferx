@@ -1,0 +1,43 @@
+# Two-compartment oral PK with [derived] output
+
+[parameters]
+  theta TVCL(5.0,  0.1,  50.0)
+  theta TVV1(30.0, 3.0, 300.0)
+  theta TVQ( 2.0,  0.1,  20.0)
+  theta TVV2(50.0, 5.0, 500.0)
+  theta TVKA(1.0,  0.05, 20.0)
+
+  omega ETA_CL ~ 0.09
+  omega ETA_V1 ~ 0.09
+
+  sigma PROP_ERR ~ 0.02 (sd)
+
+[individual_parameters]
+  CL = TVCL * exp(ETA_CL)
+  V1 = TVV1 * exp(ETA_V1)
+  Q  = TVQ
+  V2 = TVV2
+  KA = TVKA
+
+[structural_model]
+  pk two_cpt_oral(cl=CL, v=V1, q=Q, v2=V2, ka=KA)
+
+[error_model]
+  DV ~ proportional(PROP_ERR)
+
+[derived]
+  K10 = CL / V1
+  K12 = Q  / V1
+  K21 = Q  / V2
+
+  CMAX       = max(IPRED)
+  TMAX       = tmax(IPRED)
+  AUC_0_168  = integral(IPRED, from=0, to=168, step=0.2)
+  AUC_TAU    = integral(IPRED, window=24, anchor=0, step=0.2)
+
+[output]
+  CL V1 Q V2 KA
+
+[fit_options]
+  method  = focei
+  maxiter = 500

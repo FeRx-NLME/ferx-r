@@ -34,3 +34,22 @@ test_that("no-arg call returns character vector of available names", {
 test_that("unknown name errors with available names in message", {
   expect_error(ferx_example("not_a_real_example"), regexp = "warfarin")
 })
+
+test_that("$data path exists on disk for all examples that have a data alias", {
+  # Examples with a data alias resolve to an existing dataset.
+  # warfarin_addl is intentionally excluded (no bundled dataset yet).
+  aliased <- c("warfarin_derived", "warfarin_derived_pkpd",
+                "warfarin_ode_time", "two_cpt_oral_derived")
+  for (nm in aliased) {
+    ex <- ferx_example(nm)
+    expect_true(
+      file.exists(ex$data),
+      label = paste0("$data for '", nm, "' must exist on disk")
+    )
+  }
+})
+
+test_that("warfarin_derived $data points to warfarin.csv (alias check)", {
+  ex <- ferx_example("warfarin_derived")
+  expect_true(grepl("warfarin\\.csv$", ex$data))
+})

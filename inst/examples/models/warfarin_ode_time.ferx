@@ -1,0 +1,48 @@
+# Warfarin ODE -- demonstrates TIME/T/TAFD/TAD in [odes] RHS expressions
+
+[parameters]
+  theta TVCL(0.2, 0.001, 10.0)
+  theta TVV(10.0, 0.1, 500.0)
+  theta TVKA(1.5, 0.01, 50.0)
+
+  omega ETA_CL ~ 0.09
+  omega ETA_V  ~ 0.04
+  omega ETA_KA ~ 0.30
+
+  sigma PROP_ERR ~ 0.02 (sd)
+
+[individual_parameters]
+  CL = TVCL * exp(ETA_CL)
+  V  = TVV  * exp(ETA_V)
+  KA = TVKA * exp(ETA_KA)
+
+[structural_model]
+  ode(obs_cmt=2)
+
+[odes]
+  d/dt(depot)   = -KA * depot
+  d/dt(central) =  KA * depot - CL/V * central
+
+  # TIME and T are synonymous -- both are the ODE solver time axis.
+  # TAFD and TAD are available with the same SS-aware semantics as [derived].
+  d/dt(AUC_D1)  = if (TIME < 24) central/V else 0.0
+  d/dt(TAM_INT) = if (central/V > 0.5 && TAD < 24) 1.0 else 0.0
+
+[scaling]
+  obs_scale = V
+
+[error_model]
+  DV ~ proportional(PROP_ERR)
+
+[derived]
+  KE     = CL / V
+  T_HALF = 0.6931472 / KE
+  CMAX   = max(IPRED)
+  AUC_72 = integral(IPRED, from=0, to=72, step=0.2)
+
+[output]
+  CL V KA
+
+[fit_options]
+  method  = foce
+  maxiter = 300
