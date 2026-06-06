@@ -2774,6 +2774,7 @@ ferx_fit_async <- function(model, data = NULL, ...,
   # can read it non-destructively at any time.
   bg <- callr::r_bg(
     func = function(model, data, dots, sidecar_path) {
+      .find_trace <- getFromNamespace(".ferx_find_trace_from_lines", "ferx")
       dots$optimizer_trace <- TRUE
       inner <- callr::r_bg(
         func = function(model, data, dots) {
@@ -2789,7 +2790,7 @@ ferx_fit_async <- function(model, data = NULL, ...,
           tryCatch(inner$read_error_lines(),  error = function(e) character(0))
         )
         if (!trace_written) {
-          path <- ferx:::.ferx_find_trace_from_lines(lines)
+          path <- .find_trace(lines)
           if (!is.null(path)) {
             writeLines(path, sidecar_path)
             trace_written <- TRUE
@@ -2804,7 +2805,7 @@ ferx_fit_async <- function(model, data = NULL, ...,
           tryCatch(inner$read_output_lines(), error = function(e) character(0)),
           tryCatch(inner$read_error_lines(),  error = function(e) character(0))
         )
-        path <- ferx:::.ferx_find_trace_from_lines(lines)
+        path <- .find_trace(lines)
         if (!is.null(path)) writeLines(path, sidecar_path)
       }
       inner$get_result()
@@ -2865,7 +2866,7 @@ ferx_fit_async <- function(model, data = NULL, ...,
       "        tryCatch(bg$read_output_lines(), error = function(e) character(0)),",
       "        tryCatch(bg$read_error_lines(),  error = function(e) character(0))",
       "      )",
-      "      path <- ferx:::.ferx_find_trace_from_lines(lines)",
+      "      path <- .find_trace(lines)",
       "      if (!is.null(path)) {",
       "        writeLines(path, sidecar_path)",
       "        trace_written <- TRUE",
