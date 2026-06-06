@@ -2773,7 +2773,7 @@ ferx_fit_async <- function(model, data = NULL, ...,
   # extract the trace path, and writes it to sidecar_path so print.ferx_job
   # can read it non-destructively at any time.
   bg <- callr::r_bg(
-    func = function(model, data, dots, sidecar_path) {
+    func = function(model, data, dots, sidecar_path) { # nocov start
       .find_trace <- getFromNamespace(".ferx_find_trace_from_lines", "ferx")
       dots$optimizer_trace <- TRUE
       inner <- callr::r_bg(
@@ -2809,7 +2809,7 @@ ferx_fit_async <- function(model, data = NULL, ...,
         if (!is.null(path)) writeLines(path, sidecar_path)
       }
       inner$get_result()
-    },
+    }, # nocov end
     args = list(model = model, data = data, dots = dots,
                 sidecar_path = sidecar_path),
     package = TRUE,
@@ -2986,13 +2986,13 @@ ferx_collect <- function(handle, verbose = TRUE) {
     if (!is.null(sidecar_path) && file.exists(sidecar_path))
       unlink(sidecar_path)
     result
-  }, interrupt = function(e) {
+  }, interrupt = function(e) { # nocov start
     if (bg$is_alive()) bg$kill()
     if (!is.null(sidecar_path) && file.exists(sidecar_path))
       unlink(sidecar_path)
     message("\nFit interrupted by user.")
     NULL
-  })
+  }) # nocov end
 }
 
 .ferx_collect_rstudio <- function(handle, verbose) {

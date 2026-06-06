@@ -244,3 +244,17 @@ test_that("callr sidecar is removed after ferx_collect", {
   expect_s3_class(fit, "ferx_fit")
   expect_false(file.exists(h$sidecar_path), label = "sidecar should be removed after collect")
 })
+
+test_that(".ferx_collect_callr polling loop runs when bg is alive at collect time", {
+  skip_if_not_installed("callr")
+  ex <- ferx::ferx_example("warfarin")
+  # Use a longer fit so the outer wrapper is still alive when collect starts.
+  h  <- .async_callr(ex$model, ex$data,
+                     list(settings = list(maxiter = 200L)),
+                     "warfarin", 6L, 0.5, FALSE)
+  # Call collect immediately -- the outer wrapper should still be alive for
+  # at least one poll iteration, exercising the while-loop body.
+  fit <- .collect_callr(h, verbose = TRUE)
+  expect_s3_class(fit, "ferx_fit")
+  expect_false(file.exists(h$sidecar_path))
+})
