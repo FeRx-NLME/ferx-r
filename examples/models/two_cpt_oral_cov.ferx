@@ -15,7 +15,7 @@
   omega ETA_V2 ~ 0.05
   omega ETA_KA ~ 0.15
 
-  sigma PROP_ERR ~ 0.02
+  sigma PROP_ERR ~ 0.02 (sd)
 
 [individual_parameters]
   CL = TVCL * (WT / 70)^THETA_WT * (CRCL / 100)^THETA_CRCL * exp(ETA_CL)
@@ -27,13 +27,15 @@
 [structural_model]
   pk two_cpt_oral(cl=CL, v1=V1, q=Q, v2=V2, ka=KA)
 
+# Declare the dataset covariate columns and their type. Optional; when present,
+# declared columns are validated (must exist + be numerically coded) and echoed
+# in the fit's covariate table (`fit$covtab`).
+[covariates]
+  WT   continuous
+  CRCL continuous
+
 [error_model]
   DV ~ proportional(PROP_ERR)
-
-[initial_values]
-  theta = [4.0, 40.0, 8.0, 80.0, 1.0, 0.6, 0.3]
-  omega = [0.15, 0.15, 0.08, 0.08, 0.20]
-  sigma = [0.04]
 
 [fit_options]
   method     = focei

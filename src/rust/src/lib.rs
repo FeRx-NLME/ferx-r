@@ -96,9 +96,34 @@ fn ferx_rust_fit(
         };
 
     let iov_col = parsed.fit_options.iov_column.clone();
-    let population = match ferx_core::read_nonmem_csv(Path::new(data_path), None, iov_col.as_deref()) {
-        Ok(p) => p,
-        Err(e) => throw_r_error(format!("Error reading data: {e}")),
+    // When the model declares a `[covariates]` block, read through the strict,
+    // covariate-aware path so declared columns are validated (present + numeric)
+    // and a per-input-row covariate table is produced. Referenced-but-undeclared
+    // covariates are passed as `extra` so they're still read (leniently — the
+    // parser already warned). Otherwise fall back to the legacy auto-detect read.
+    let (population, covariate_table) = match &parsed.covariate_decls {
+        Some(decls) => {
+            let extra: Vec<String> = parsed
+                .model
+                .referenced_covariates
+                .iter()
+                .filter(|c| !decls.iter().any(|d| &d.name == *c))
+                .cloned()
+                .collect();
+            match ferx_core::read_nonmem_csv_with_covariates(
+                Path::new(data_path),
+                decls,
+                &extra,
+                iov_col.as_deref(),
+            ) {
+                Ok((p, t)) => (p, Some(t)),
+                Err(e) => throw_r_error(format!("Error reading data: {e}")),
+            }
+        }
+        None => match ferx_core::read_nonmem_csv(Path::new(data_path), None, iov_col.as_deref()) {
+            Ok(p) => (p, None),
+            Err(e) => throw_r_error(format!("Error reading data: {e}")),
+        },
     };
 
     // Build fit options
@@ -263,6 +288,9 @@ fn ferx_rust_fit(
     result.model_hash = ferx_core::io::hash::sha256_file(Path::new(model_path)).ok();
     result.data_hash = ferx_core::io::hash::sha256_file(Path::new(data_path)).ok();
     result.model_text = std::fs::read_to_string(model_path).ok();
+    // Attach the covariate table built during the strict read above (None when
+    // the model has no `[covariates]` block). `fit()` itself leaves this None.
+    result.covariate_table = covariate_table;
 
     // Convert to R list
     fit_result_to_list(&result, &population, &parsed.model)
@@ -1033,6 +1061,13 @@ fn fit_result_to_list(
     let sdtab_cols = ferx_core::io::output::sdtab(result, population);
     let sdtab = sdtab_to_dataframe(&sdtab_cols);
 
+    // Covariate table (NULL unless the model declared a `[covariates]` block).
+    let covtab = covtab_to_dataframe(result.covariate_table.as_ref());
+    // Per-covariate type tag ("continuous"/"categorical") as a named character
+    // vector; NULL when no `[covariates]` block. Lets R treat categoricals as
+    // factors etc. (the value carried by the typed declaration).
+    let covariate_types = covariate_types_robj(result.covariate_table.as_ref());
+
     // Warnings
     let warnings: Vec<String> = result.warnings.clone();
     // Structured warnings as four parallel vectors (severity / category /
@@ -1481,7 +1516,12 @@ fn fit_result_to_list(
         // covariate_names: character vector of non-standard data columns.
         covariate_names   = result.covariate_names.clone(),
         // input_columns: all CSV header names in file order (analogous to NONMEM $INPUT).
-        input_columns     = result.input_columns.clone()
+        input_columns     = result.input_columns.clone(),
+        // covtab: per-input-row covariate table (ID, TIME, EVID + declared
+        // covariate columns); NULL unless the model declares a [covariates] block.
+        covtab            = covtab,
+        // covariate_types: named char vector covariate -> "continuous"/"categorical".
+        covariate_types   = covariate_types
     )
 }
 
@@ -1660,6 +1700,66 @@ fn sdtab_to_dataframe(cols: &[(String, Vec<f64>)]) -> Robj {
     df.set_attrib("row.names", row_names).unwrap();
 
     df.into()
+}
+
+/// Convert a ferx-core `CovariateTable` into an R data.frame, or `NULL` when the
+/// model declared no `[covariates]` block. Columns: `ID` (character), `TIME`
+/// (numeric), `EVID` (integer), then one numeric column per declared covariate.
+/// One row per input dataset record (including dose / EVID rows). Missing
+/// covariate values are returned as `NA`.
+fn covtab_to_dataframe(table: Option<&ferx_core::CovariateTable>) -> Robj {
+    let Some(table) = table else {
+        return ().into();
+    };
+
+    let n_rows = table.rows.len();
+    let ids: Vec<String> = table.rows.iter().map(|r| r.id.clone()).collect();
+    let times: Vec<f64> = table.rows.iter().map(|r| r.time).collect();
+    let evids: Vec<i32> = table.rows.iter().map(|r| r.evid as i32).collect();
+
+    let mut pairs: Vec<(&str, Robj)> = vec![
+        ("ID", ids.into()),
+        ("TIME", times.into()),
+        ("EVID", evids.into()),
+    ];
+    // One column per declared covariate, in declaration order (parallel to
+    // each row's `values`). Checked indexing (`get`) so a hypothetical short
+    // row can't panic across the FFI boundary, and missing values (`NaN`) map
+    // to R's `NA_real_` rather than surfacing as `NaN`.
+    for (ci, name) in table.names.iter().enumerate() {
+        let col: Doubles = table
+            .rows
+            .iter()
+            .map(|r| match r.values.get(ci).copied() {
+                Some(v) if !v.is_nan() => Rfloat::from(v),
+                _ => Rfloat::na(),
+            })
+            .collect();
+        pairs.push((name.as_str(), col.into()));
+    }
+
+    let mut df = List::from_pairs(pairs);
+    df.set_class(&["data.frame"]).unwrap();
+    let row_names: Vec<i32> = (1..=n_rows as i32).collect();
+    df.set_attrib("row.names", row_names).unwrap();
+
+    df.into()
+}
+
+/// Per-covariate type tag as a named R character vector (covariate name ->
+/// "continuous"/"categorical"), or `NULL` when the model declared no
+/// `[covariates]` block. Carries the typed declaration through to R (e.g. so a
+/// categorical covariate can be treated as a factor downstream) — the value the
+/// numeric `covtab` columns alone don't convey.
+fn covariate_types_robj(table: Option<&ferx_core::CovariateTable>) -> Robj {
+    let Some(table) = table else {
+        return ().into();
+    };
+    let labels: Vec<String> = table.kinds.iter().map(|k| k.label().to_string()).collect();
+    let names: Vec<&str> = table.names.iter().map(|s| s.as_str()).collect();
+    let mut robj: Robj = labels.into();
+    robj.set_attrib("names", names).unwrap();
+    robj
 }
 
 /// Returns TRUE if the Rust library was compiled with the `autodiff` feature

@@ -27,6 +27,13 @@
 [structural_model]
   pk two_cpt_oral(cl=CL, v1=V1, q=Q, v2=V2, ka=KA)
 
+# Declare the dataset covariate columns and their type. Optional; when present,
+# declared columns are validated (must exist + be numerically coded) and echoed
+# in the fit's covariate table (`fit$covtab`).
+[covariates]
+  WT   continuous
+  CRCL continuous
+
 [error_model]
   DV ~ proportional(PROP_ERR)
 
