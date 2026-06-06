@@ -30,7 +30,7 @@ The resulting columns appear at the end of `fit$sdtab` in declaration order.
 
 ### Columns included automatically
 
-Even without a `[derived]` or `[output]` block, the sdtab now includes:
+Even without a `[derived]` or `[output]` block, the sdtab includes:
 
 - **ETA columns** - one per random effect (e.g. `ETA_CL`, `ETA_V`).
 - **TAFD** - time after first dose for each observation record.
@@ -302,7 +302,7 @@ print(pk_summary)
 
 ## Using ETAs from sdtab
 
-ETA columns are now included automatically in sdtab, so you can use them
+ETA columns are included automatically in sdtab, so you can use them
 directly without reaching into `fit$ebe_etas`:
 
 ```{r eta-example, eval = FALSE}
