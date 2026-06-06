@@ -1781,9 +1781,10 @@ ferx_fit <- function(model, data = NULL,
     return(NULL)
   }
   parts <- sprintf("%s (p=%.4f)", flagged$eta, flagged$p_val)
+  noun <- if (nrow(flagged) == 1L) "ETA" else "ETAs"
   sprintf(
-    "Shapiro-Wilk flags possible non-normal distribution for %d ETA(s): %s",
-    nrow(flagged), paste(parts, collapse = ", ")
+    "Shapiro-Wilk flags possible non-normal distribution for %d %s: %s",
+    nrow(flagged), noun, paste(parts, collapse = ", ")
   )
 }
 
