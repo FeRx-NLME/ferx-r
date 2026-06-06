@@ -102,6 +102,12 @@ ADDL-format data file when using this model.}
 demonstrating \code{TIME}, \code{T}, \code{TAFD}, and \code{TAD} inside
 \code{[odes]} RHS expressions; accumulator compartments for AUC and
 time-above-threshold.}
+\item{warfarin_data_selection}{One-compartment oral (warfarin) demonstrating
+the \code{[data_selection]} block. Observations below a surrogate LLOQ
+(\code{DV < 0.05}) are excluded at read time without modifying the CSV,
+equivalent to NONMEM \code{$DATA IGNORE=}. Exclusion counts are reported
+in \code{fit$exclusions} and echoed by \code{print.ferx_fit()} and
+\code{ferx_runlog()}.}
 }
 Call \code{ferx_example()} with no arguments to list all available names.
 

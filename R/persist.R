@@ -372,6 +372,21 @@ ferx_load_fit <- function(path) {
     input_columns    = as.character(fit$input_columns    %||% character()),
     covariate_names  = as.character(fit$covariate_names  %||% character()),
 
+    exclusions = if (!is.null(fit$exclusions)) {
+      ex <- fit$exclusions
+      list(
+        n_records_total      = as.integer(ex$n_records_total  %||% 0L),
+        n_obs_excluded       = as.integer(ex$n_obs_excluded   %||% 0L),
+        n_dose_excluded      = as.integer(ex$n_dose_excluded  %||% 0L),
+        n_other_excluded     = as.integer(ex$n_other_excluded %||% 0L),
+        excluded_subject_ids = as.character(ex$excluded_subject_ids %||% character()),
+        fired_ignore         = as.character(ex$fired_ignore          %||% character()),
+        fired_accept         = as.character(ex$fired_accept          %||% character())
+      )
+    } else {
+      NULL
+    },
+
     r_extras = .fitrx_collect_r_extras(fit)
   )
 
@@ -466,6 +481,22 @@ ferx_load_fit <- function(path) {
     input_columns   = as.character(unlist(w$input_columns   %||% list(), use.names = FALSE)),
     covariate_names = as.character(unlist(w$covariate_names %||% list(), use.names = FALSE))
   )
+
+  # Data-selection exclusion summary (NULL for older .fitrx files without the field).
+  if (!is.null(w$exclusions)) {
+    we <- w$exclusions
+    out$exclusions <- list(
+      n_records_total      = as.integer(we$n_records_total  %||% 0L),
+      n_obs_excluded       = as.integer(we$n_obs_excluded   %||% 0L),
+      n_dose_excluded      = as.integer(we$n_dose_excluded  %||% 0L),
+      n_other_excluded     = as.integer(we$n_other_excluded %||% 0L),
+      excluded_subject_ids = as.character(unlist(we$excluded_subject_ids %||% list(), use.names = FALSE)),
+      fired_ignore         = as.character(unlist(we$fired_ignore          %||% list(), use.names = FALSE)),
+      fired_accept         = as.character(unlist(we$fired_accept          %||% list(), use.names = FALSE))
+    )
+  } else {
+    out$exclusions <- NULL
+  }
 
   # eta_param_info ? parallel R vectors
   epi <- w$eta_param_info

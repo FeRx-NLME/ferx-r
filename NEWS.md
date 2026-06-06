@@ -2,6 +2,33 @@
 
 ## New features
 
+- **Data-selection filtering** (`[data_selection]` block, `ferx_fit(ignore=)`,
+  `ferx_selection()`): records can now be excluded from the analysis dataset at
+  read time without modifying the CSV -- equivalent to NONMEM `$DATA IGNORE=` /
+  `ACCEPT=`. Three entry points:
+
+  - `[data_selection]` block in `.ferx` model files (keys `ignore`, `accept`,
+    `ignore_subjects`).
+  - `ferx_fit(model, data, ignore = "DV < 0.05", accept = ..., ignore_ids = ...)`
+    passes conditions directly from R; conditions from both the model file and
+    the R call are merged and deduplicated.
+  - `ferx_selection(data, ignore = ..., accept = ..., ignore_ids = ...)` is a
+    pure-R preview that returns a `ferx_data` S3 object you can inspect before
+    fitting, or pass directly to `ferx_fit()` as the `data` argument.
+
+  Exclusion counts are exposed on `fit$exclusions` (a list with
+  `n_records_total`, `n_obs_excluded`, `n_dose_excluded`, `n_other_excluded`,
+  `excluded_subject_ids`, `fired_ignore`, `fired_accept`).
+  `print.ferx_fit()` shows a **DATA SELECTION** block when rules fired.
+  `ferx_runlog()` includes an exclusion count line in the data summary.
+  Exclusions survive `ferx_save_fit()` / `ferx_load_fit()` round-trips.
+  The bundled `warfarin_data_selection` example demonstrates the feature.
+
+- `ferx_selection_excluded(x)` is a new generic: called on a `ferx_data`
+  object it returns the excluded rows (with a `.exclude_reason` column);
+  called on a `ferx_fit` it re-reads the data file and marks records from
+  excluded subjects.
+
 - `ferx_columns(data)` prints the column headers of a NONMEM CSV dataset,
   grouped into required NONMEM columns (`ID`, `TIME`, `DV`, `EVID`, `AMT`,
   `CMT`), optional NONMEM columns (`RATE`, `MDV`, `II`, `SS`, `CENS`, `OCC`),

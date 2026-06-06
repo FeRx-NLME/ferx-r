@@ -269,6 +269,22 @@
 #'     \item{\code{multi_start_seed}}{RNG seed for the start-point perturbation
 #'       (default \code{42}). Independent of \code{seed} / \code{saem_seed}.}
 #'   }
+#' @param ignore Character vector of filter expressions that exclude a record
+#'   when the expression evaluates to true (NONMEM \code{$DATA IGNORE=}
+#'   equivalent). Expressions use standard comparison operators
+#'   (\code{==}, \code{!=}, \code{<}, \code{<=}, \code{>}, \code{>=}) on
+#'   column names. Use \code{&&} within one expression for AND; for OR use
+#'   multiple elements. These conditions are merged with any
+#'   \code{[data_selection] ignore} rules in the model file.
+#'   Example: \code{ignore = c("DV < 0.001", "EVID != 0 && MDV == 1")}.
+#' @param accept Character vector of filter expressions. A record is kept
+#'   only when all conditions pass; excluded if any fail (NONMEM
+#'   \code{$DATA ACCEPT=} equivalent). Merged with model-file \code{accept}
+#'   rules.
+#' @param ignore_ids Numeric or character vector of subject IDs to exclude
+#'   entirely. Sugar for \code{ignore = "ID == <id>"} applied per-subject.
+#'   Merged with \code{[data_selection] ignore_subjects} from the model file.
+#'
 #' @param output Optional path to a \code{.fitrx} file. When non-\code{NULL},
 #'   \code{\link{ferx_save_fit}} is invoked on the result so the fit is
 #'   persisted to disk in a portable, cross-language bundle (zip of JSON +
@@ -575,6 +591,13 @@
 #'     (total weight + bias count), \code{weights_offset} (0-based start index
 #'     into \code{fit$theta}), \code{input_names}, \code{output_names}, and
 #'     \code{weights} (numeric vector of trained values).}
+#'   \item{exclusions}{Named list summarising records excluded by
+#'     \code{[data_selection]} rules (model file and/or \code{ignore}/
+#'     \code{accept}/\code{ignore_ids} arguments). Fields:
+#'     \code{n_records_total}, \code{n_obs_excluded}, \code{n_dose_excluded},
+#'     \code{n_other_excluded}, \code{excluded_subject_ids} (character),
+#'     \code{fired_ignore} (character), \code{fired_accept} (character).
+#'     \code{NULL} when no data-selection rules were active.}
 #'
 #' @section Process noise (SDE / diffusion):
 #'
@@ -1143,6 +1166,9 @@ ferx_fit <- function(model, data = NULL,
                      optimizer_trace = FALSE,
                      scale_params = FALSE,
                      inits_from_nca = FALSE,
+                     ignore = NULL,
+                     accept = NULL,
+                     ignore_ids = NULL,
                      settings = NULL,
                      output = NULL,
                      include_data = FALSE,
@@ -1179,9 +1205,19 @@ ferx_fit <- function(model, data = NULL,
       paste(labels, collapse = ", ")
     )
   }
+  # ferx_data support: when data is a ferx_data object produced by
+  # ferx_selection(), extract the source path and merge any stored conditions
+  # with the explicit ignore/accept/ignore_ids args.
+  if (inherits(data, "ferx_data")) {
+    fd <- data
+    data <- attr(fd, "source_path")
+    ignore      <- unique(c(attr(fd, "ignore"),    ignore))
+    accept      <- unique(c(attr(fd, "accept"),    accept))
+    ignore_ids  <- unique(c(attr(fd, "ignore_ids"), ignore_ids))
+  }
   gradient <- match.arg(gradient)
   if (is.null(data)) {
-    stop("`data` is required. Pass a path to a NONMEM CSV file.")
+    stop("`data` is required. Pass a path to a NONMEM CSV file or a ferx_data object.")
   }
   stopifnot(file.exists(model), file.exists(data))
   if (!is.logical(covariance) || length(covariance) != 1L || is.na(covariance)) {
@@ -1304,7 +1340,39 @@ ferx_fit <- function(model, data = NULL,
   if (!is.null(inits_value)) {
     settings <- c(list(inits_from_nca = inits_value), settings)
   }
+  # Validate and normalise data-selection args.
+  if (!is.null(ignore)) {
+    if (!is.character(ignore)) stop("`ignore` must be a character vector of filter expressions")
+    ignore <- as.character(ignore)
+  }
+  if (!is.null(accept)) {
+    if (!is.character(accept)) stop("`accept` must be a character vector of filter expressions")
+    accept <- as.character(accept)
+  }
+  if (!is.null(ignore_ids)) {
+    if (!is.numeric(ignore_ids) && !is.character(ignore_ids))
+      stop("`ignore_ids` must be a numeric or character vector of subject IDs")
+    ignore_ids <- as.character(ignore_ids)
+  }
+
   settings_parts <- .ferx_settings_to_strings(settings)
+  # Append data-selection conditions after the helper (which enforces unique
+  # names - selection keys are repeatable so we add them directly as parallel
+  # vectors). Each element of `ignore` / `accept` becomes its own key entry;
+  # Rust's apply_fit_option deduplicates exact-string repeats against any
+  # conditions already declared in the [data_selection] model block.
+  if (length(ignore) > 0L) {
+    settings_parts$keys   <- c(settings_parts$keys,   rep("ignore", length(ignore)))
+    settings_parts$values <- c(settings_parts$values, ignore)
+  }
+  if (length(accept) > 0L) {
+    settings_parts$keys   <- c(settings_parts$keys,   rep("accept", length(accept)))
+    settings_parts$values <- c(settings_parts$values, accept)
+  }
+  if (length(ignore_ids) > 0L) {
+    settings_parts$keys   <- c(settings_parts$keys,   rep("ignore_subjects", length(ignore_ids)))
+    settings_parts$values <- c(settings_parts$values, ignore_ids)
+  }
   # Effective settings as sent to Rust, with merged defaults, for summary display.
   settings_used <- if (length(settings_parts$keys) > 0L) {
     setNames(lapply(settings_parts$values, .ferx_parse_setting_value), settings_parts$keys)
@@ -1910,6 +1978,27 @@ print.ferx_fit <- function(x, ...) {
 
   # OFV / AIC / BIC on a single line.
   cat(sprintf(" OFV: %.4f    AIC: %.4f    BIC: %.4f\n", x$ofv, x$aic, x$bic))
+
+  # DATA SELECTION block (only when [data_selection] rules were active).
+  ex <- x$exclusions
+  if (!is.null(ex)) {
+    cat("\n", .ferx_style("DATA SELECTION", "bold"), "\n", sep = "")
+    cat(strrep("-", 60), "\n", sep = "")
+    cat(sprintf(
+      "  Records read: %d    Obs excl.: %d    Doses excl.: %d    Other excl.: %d\n",
+      ex$n_records_total %||% 0L,
+      ex$n_obs_excluded  %||% 0L,
+      ex$n_dose_excluded %||% 0L,
+      ex$n_other_excluded %||% 0L
+    ))
+    if (length(ex$excluded_subject_ids) > 0L)
+      cat(sprintf("  Subjects excluded: %s\n",
+                  paste(ex$excluded_subject_ids, collapse = ", ")))
+    for (cond in ex$fired_ignore)
+      cat(sprintf("  Fired ignore: %s\n", cond))
+    for (cond in ex$fired_accept)
+      cat(sprintf("  Fired accept: %s\n", cond))
+  }
 
   if (!is.null(x$model_structure)) {
     cat("\n", .ferx_style("MODEL STRUCTURE (auto-derived)", "bold"), "\n", sep = "")

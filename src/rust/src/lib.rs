@@ -96,10 +96,6 @@ fn ferx_rust_fit(
         };
 
     let iov_col = parsed.fit_options.iov_column.clone();
-    let population = match ferx_core::read_nonmem_csv(Path::new(data_path), None, iov_col.as_deref()) {
-        Ok(p) => p,
-        Err(e) => throw_r_error(format!("Error reading data: {e}")),
-    };
 
     // Build fit options
     let mut opts = parsed.fit_options.clone();
@@ -108,6 +104,12 @@ fn ferx_rust_fit(
     // dedicated args are the single source of truth for their keys and always
     // win. Reserved keys (those with a dedicated R argument) are rejected so
     // the precedence rule is explicit rather than silently clobbered.
+    //
+    // Data-selection keys (`ignore`, `accept`, `ignore_subjects`) are NOT
+    // reserved — they flow through `apply_fit_option` which populates
+    // opts.ignore_exprs / opts.accept_exprs / opts.ignore_subjects. Data
+    // reading happens AFTER this loop so the SelectionFilter sees the merged
+    // model-file + R-call conditions.
     if settings_keys.len() != settings_values.len() {
         throw_r_error(format!(
             "Error: settings keys/values length mismatch ({} vs {})",
@@ -149,6 +151,34 @@ fn ferx_rust_fit(
             Err(e) => throw_r_error(format!("Error: {e}")),
         }
     }
+
+    // Read data, applying any [data_selection] filter. opts.ignore_exprs /
+    // accept_exprs / ignore_subjects now contain both model-file conditions
+    // (from parse_full_model_file) and any R-call conditions (from the
+    // settings loop above). fit() propagates population.exclusions onto
+    // FitResult.exclusions automatically.
+    let population = {
+        use ferx_core::io::datareader::{read_nonmem_csv_filtered, SelectionFilter};
+        let filter = match SelectionFilter::from_opts(
+            &opts.ignore_exprs,
+            &opts.accept_exprs,
+            &opts.ignore_subjects,
+        ) {
+            Ok(f) => f,
+            Err(e) => throw_r_error(format!("Error in [data_selection]: {e}")),
+        };
+        if filter.is_empty() {
+            match ferx_core::read_nonmem_csv(Path::new(data_path), None, iov_col.as_deref()) {
+                Ok(p) => p,
+                Err(e) => throw_r_error(format!("Error reading data: {e}")),
+            }
+        } else {
+            match read_nonmem_csv_filtered(Path::new(data_path), None, iov_col.as_deref(), &filter) {
+                Ok(p) => p,
+                Err(e) => throw_r_error(format!("Error reading data: {e}")),
+            }
+        }
+    };
 
     if method.is_empty() {
         throw_r_error("Error: `method` must contain at least one estimation method");
@@ -897,6 +927,7 @@ fn default_fit_result(
         covariate_names: Vec::new(),
         input_columns: Vec::new(),
         covariate_table: None,
+        exclusions: None,
         #[cfg(feature = "nn")]
         neural_networks: Vec::new(),
     }
@@ -1326,6 +1357,20 @@ fn fit_result_to_list(
         None => ().into(),
     };
 
+    // Data-selection exclusion summary (None → NULL; Some → named list).
+    let exclusions_robj: Robj = match &result.exclusions {
+        Some(ex) => list!(
+            n_records_total      = ex.n_records_total as i32,
+            n_obs_excluded       = ex.n_obs_excluded as i32,
+            n_dose_excluded      = ex.n_dose_excluded as i32,
+            n_other_excluded     = ex.n_other_excluded as i32,
+            excluded_subject_ids = ex.excluded_subject_ids.clone(),
+            fired_ignore         = ex.fired_ignore.clone(),
+            fired_accept         = ex.fired_accept.clone(),
+        ).into(),
+        None => ().into(),
+    };
+
     list!(
         converged = result.converged,
         method = method_label,
@@ -1481,7 +1526,10 @@ fn fit_result_to_list(
         // covariate_names: character vector of non-standard data columns.
         covariate_names   = result.covariate_names.clone(),
         // input_columns: all CSV header names in file order (analogous to NONMEM $INPUT).
-        input_columns     = result.input_columns.clone()
+        input_columns     = result.input_columns.clone(),
+        // exclusions: NULL when no [data_selection] filter was active; otherwise a named
+        // list with counts and fired-condition strings (mirrors ExclusionSummary).
+        exclusions        = exclusions_robj
     )
 }
 
@@ -2058,6 +2106,7 @@ fn ferx_rust_sir(
         covariate_names: Vec::new(),
         input_columns: Vec::new(),
         covariate_table: None,
+        exclusions: None,
         #[cfg(feature = "nn")]
         neural_networks: Vec::new(),
     };
