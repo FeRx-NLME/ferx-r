@@ -65,6 +65,24 @@ test_that("covtab and covariate_types survive a .fitrx save/load round-trip", {
   expect_identical(fit2$covariate_types, fit$covariate_types)
 })
 
+test_that("a missing covariate cell surfaces as NA (not NaN) in covtab", {
+  ex <- ferx_example("two_cpt_oral_cov")
+  # Blank the WT value on the first record, write to a temp dataset, and fit.
+  d <- utils::read.csv(ex$data, check.names = FALSE, colClasses = "character")
+  d$WT[1] <- ""
+  tmp_data <- tempfile(fileext = ".csv")
+  on.exit(unlink(tmp_data), add = TRUE)
+  utils::write.csv(d, tmp_data, row.names = FALSE, quote = FALSE)
+
+  fit <- ferx_fit(
+    ex$model, tmp_data,
+    method = "focei", verbose = FALSE,
+    covariance = FALSE, settings = list(maxiter = 2L)
+  )
+  expect_true(is.na(fit$covtab$WT[1]))
+  expect_false(is.nan(fit$covtab$WT[1])) # specifically NA_real_, not NaN
+})
+
 test_that("covtab and covariate_types are NULL when the model declares no [covariates] block", {
   fit <- warfarin_fit() # warfarin example has no [covariates] block
   expect_null(fit$covtab)

@@ -1705,8 +1705,8 @@ fn sdtab_to_dataframe(cols: &[(String, Vec<f64>)]) -> Robj {
 /// Convert a ferx-core `CovariateTable` into an R data.frame, or `NULL` when the
 /// model declared no `[covariates]` block. Columns: `ID` (character), `TIME`
 /// (numeric), `EVID` (integer), then one numeric column per declared covariate.
-/// One row per input dataset record (including dose / EVID rows). Missing values
-/// are carried as `NaN`, which R reads as `NA`.
+/// One row per input dataset record (including dose / EVID rows). Missing
+/// covariate values are returned as `NA`.
 fn covtab_to_dataframe(table: Option<&ferx_core::CovariateTable>) -> Robj {
     let Some(table) = table else {
         return ().into();
@@ -1723,9 +1723,18 @@ fn covtab_to_dataframe(table: Option<&ferx_core::CovariateTable>) -> Robj {
         ("EVID", evids.into()),
     ];
     // One column per declared covariate, in declaration order (parallel to
-    // each row's `values`).
+    // each row's `values`). Checked indexing (`get`) so a hypothetical short
+    // row can't panic across the FFI boundary, and missing values (`NaN`) map
+    // to R's `NA_real_` rather than surfacing as `NaN`.
     for (ci, name) in table.names.iter().enumerate() {
-        let col: Vec<f64> = table.rows.iter().map(|r| r.values[ci]).collect();
+        let col: Doubles = table
+            .rows
+            .iter()
+            .map(|r| match r.values.get(ci).copied() {
+                Some(v) if !v.is_nan() => Rfloat::from(v),
+                _ => Rfloat::na(),
+            })
+            .collect();
         pairs.push((name.as_str(), col.into()));
     }
 
