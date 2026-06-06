@@ -9,7 +9,7 @@
 
   - `[data_selection]` block in `.ferx` model files (keys `ignore`, `accept`,
     `ignore_subjects`).
-  - `ferx_fit(model, data, ignore = "DV < 0.05", accept = ..., ignore_ids = ...)`
+  - `ferx_fit(model, data, ignore = "DV < 1.0", accept = ..., ignore_ids = ...)`
     passes conditions directly from R; conditions from both the model file and
     the R call are merged and deduplicated.
   - `ferx_selection(data, ignore = ..., accept = ..., ignore_ids = ...)` is a

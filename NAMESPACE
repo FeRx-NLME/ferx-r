@@ -2,6 +2,7 @@
 
 S3method(ferx_selection_excluded,ferx_data)
 S3method(ferx_selection_excluded,ferx_fit)
+S3method(print,ferx_data)
 S3method(print,ferx_fit)
 S3method(print,ferx_inits)
 S3method(print,ferx_job)

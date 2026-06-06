@@ -95,8 +95,6 @@ ferx_runlog <- function(fit, gradient_tol = 0.1, show_iterations = TRUE, verbose
   }
   ex <- fit$exclusions
   if (!is.null(ex)) {
-    n_excl <- (ex$n_obs_excluded %||% 0L) + (ex$n_dose_excluded %||% 0L) +
-              (ex$n_other_excluded %||% 0L)
     lines <- c(lines, sprintf(
       "  Data selection: %d obs, %d doses, %d other excluded (of %d records)",
       as.integer(ex$n_obs_excluded  %||% 0L),

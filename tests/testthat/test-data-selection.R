@@ -238,7 +238,30 @@ test_that("ferx_save/ferx_load preserves NULL exclusions", {
 })
 
 # ---------------------------------------------------------------------------
-# 9. ferx_selection_excluded() helpers
+# 9. print.ferx_data
+# ---------------------------------------------------------------------------
+test_that("print.ferx_data shows retention summary header", {
+  skip_on_cran()
+  ex  <- ferx_example("warfarin")
+  sel <- ferx_selection(ex$data, ignore = "DV < 1.0")
+  out <- capture.output(print(sel))
+  expect_true(any(grepl("ferx_data", out, fixed = TRUE)))
+  expect_true(any(grepl("retained", out, fixed = TRUE)))
+  expect_true(any(grepl("excluded", out, fixed = TRUE)))
+  expect_true(any(grepl("Fired ignore", out, fixed = TRUE)))
+})
+
+test_that("print.ferx_data shows no excluded message when filter does not fire", {
+  skip_on_cran()
+  ex  <- ferx_example("warfarin")
+  sel <- ferx_selection(ex$data, ignore = "DV < 0.05")
+  out <- capture.output(print(sel))
+  expect_true(any(grepl("ferx_data", out, fixed = TRUE)))
+  expect_false(any(grepl("ferx_selection_excluded", out, fixed = TRUE)))
+})
+
+# ---------------------------------------------------------------------------
+# 10. ferx_selection_excluded() helpers
 # ---------------------------------------------------------------------------
 test_that("ferx_selection_excluded.ferx_data returns a data.frame with .exclude_reason", {
   skip_on_cran()

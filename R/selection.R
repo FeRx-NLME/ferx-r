@@ -64,8 +64,6 @@ ferx_selection <- function(data, ignore = NULL, accept = NULL, ignore_ids = NULL
   accept     <- as.character(accept)
   ignore_ids <- as.character(ignore_ids)
 
-  col_names_lc <- tolower(names(df))
-
   .get_col <- function(df, name) {
     idx <- match(name, tolower(names(df)))
     if (is.na(idx)) NULL else df[[idx]]
@@ -151,6 +149,50 @@ ferx_selection <- function(data, ignore = NULL, accept = NULL, ignore_ids = NULL
     excluded_rows = excluded_df,
     exclusions   = exclusions
   )
+}
+
+#' Print a ferx_data object
+#'
+#' Shows a compact exclusion summary (records retained, excluded counts, fired
+#' rules) followed by the first rows of the retained data.
+#'
+#' @param x A \code{ferx_data} object.
+#' @param n Number of data rows to display. Default 6.
+#' @param ... Passed to \code{print.data.frame}.
+#' @export
+print.ferx_data <- function(x, n = 6L, ...) {
+  ex      <- attr(x, "exclusions", exact = TRUE)
+  n_total <- if (!is.null(ex)) ex$n_records_total else nrow(x)
+  n_ret   <- nrow(x)
+  n_excl  <- if (!is.null(ex))
+    (ex$n_obs_excluded %||% 0L) + (ex$n_dose_excluded %||% 0L) +
+      (ex$n_other_excluded %||% 0L)
+  else 0L
+
+  cat(sprintf("<ferx_data>  %d of %d records retained", n_ret, n_total))
+  if (n_excl > 0L)
+    cat(sprintf("  (%d obs, %d doses, %d other excluded)",
+                ex$n_obs_excluded, ex$n_dose_excluded, ex$n_other_excluded))
+  cat("\n")
+
+  if (!is.null(ex)) {
+    for (cond in ex$fired_ignore)
+      cat(sprintf("  Fired ignore: %s\n", cond))
+    for (cond in ex$fired_accept)
+      cat(sprintf("  Fired accept: %s\n", cond))
+    if (length(ex$excluded_subject_ids) > 0L)
+      cat(sprintf("  Subjects excluded: %s\n",
+                  paste(ex$excluded_subject_ids, collapse = ", ")))
+  }
+  if (n_excl > 0L)
+    cat("  Use ferx_selection_excluded(x) to inspect excluded records.\n")
+  cat("\n")
+
+  print(utils::head(as.data.frame(x), n = n), ...)
+  if (n_ret > n)
+    cat(sprintf("  ... %d more rows\n", n_ret - n))
+
+  invisible(x)
 }
 
 #' Retrieve excluded records from a ferx_data or ferx_fit object
