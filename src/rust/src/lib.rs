@@ -936,15 +936,17 @@ fn pk_model_type_label(model: &CompiledModel) -> &'static str {
     if model.is_ode_based() {
         return "ODE";
     }
+    // ferx-core #176 collapsed the split `*_iv_bolus` / `*_infusion`
+    // variants into a single `*_iv` per compartment count — the bolus
+    // vs infusion route is now read per dose from the RATE column.
+    // The model declaration alone no longer pins one or the other, so
+    // the label drops the bolus/infusion suffix.
     match model.pk_model {
-        PkModel::OneCptIvBolus => "1-cpt IV bolus",
-        PkModel::OneCptInfusion => "1-cpt IV infusion",
+        PkModel::OneCptIv => "1-cpt IV",
         PkModel::OneCptOral => "1-cpt oral",
-        PkModel::TwoCptIvBolus => "2-cpt IV bolus",
-        PkModel::TwoCptInfusion => "2-cpt IV infusion",
+        PkModel::TwoCptIv => "2-cpt IV",
         PkModel::TwoCptOral => "2-cpt oral",
-        PkModel::ThreeCptIvBolus => "3-cpt IV bolus",
-        PkModel::ThreeCptInfusion => "3-cpt IV infusion",
+        PkModel::ThreeCptIv => "3-cpt IV",
         PkModel::ThreeCptOral => "3-cpt oral",
     }
 }
