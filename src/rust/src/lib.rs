@@ -1063,6 +1063,10 @@ fn fit_result_to_list(
 
     // Covariate table (NULL unless the model declared a `[covariates]` block).
     let covtab = covtab_to_dataframe(result.covariate_table.as_ref());
+    // Per-covariate type tag ("continuous"/"categorical") as a named character
+    // vector; NULL when no `[covariates]` block. Lets R treat categoricals as
+    // factors etc. (the value carried by the typed declaration).
+    let covariate_types = covariate_types_robj(result.covariate_table.as_ref());
 
     // Warnings
     let warnings: Vec<String> = result.warnings.clone();
@@ -1515,7 +1519,9 @@ fn fit_result_to_list(
         input_columns     = result.input_columns.clone(),
         // covtab: per-input-row covariate table (ID, TIME, EVID + declared
         // covariate columns); NULL unless the model declares a [covariates] block.
-        covtab            = covtab
+        covtab            = covtab,
+        // covariate_types: named char vector covariate -> "continuous"/"categorical".
+        covariate_types   = covariate_types
     )
 }
 
@@ -1729,6 +1735,22 @@ fn covtab_to_dataframe(table: Option<&ferx_core::CovariateTable>) -> Robj {
     df.set_attrib("row.names", row_names).unwrap();
 
     df.into()
+}
+
+/// Per-covariate type tag as a named R character vector (covariate name ->
+/// "continuous"/"categorical"), or `NULL` when the model declared no
+/// `[covariates]` block. Carries the typed declaration through to R (e.g. so a
+/// categorical covariate can be treated as a factor downstream) — the value the
+/// numeric `covtab` columns alone don't convey.
+fn covariate_types_robj(table: Option<&ferx_core::CovariateTable>) -> Robj {
+    let Some(table) = table else {
+        return ().into();
+    };
+    let labels: Vec<String> = table.kinds.iter().map(|k| k.label().to_string()).collect();
+    let names: Vec<&str> = table.names.iter().map(|s| s.as_str()).collect();
+    let mut robj: Robj = labels.into();
+    robj.set_attrib("names", names).unwrap();
+    robj
 }
 
 /// Returns TRUE if the Rust library was compiled with the `autodiff` feature

@@ -358,6 +358,11 @@ declaration order). Unlike \code{sdtab} (observation rows only), it has
 one row per input dataset record, including dose and other-event rows;
 missing covariate values are \code{NA}. \code{NULL} when no
 \code{[covariates]} block is declared.}
+\item{covariate_types}{Named character vector mapping each declared
+covariate to its type, \code{"continuous"} or \code{"categorical"} (the
+type from the \code{[covariates]} block). Parallel to the covariate
+columns of \code{covtab}. \code{NULL} when no \code{[covariates]} block
+is declared.}
 \item{ebe_etas}{Data frame with one row per subject containing the BSV
 empirical Bayes estimates: \code{ID} plus one column per eta named
 after the model's eta declarations (e.g. \code{ETA_CL}, \code{ETA_V}).
