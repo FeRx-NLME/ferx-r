@@ -5,6 +5,13 @@
 # would just call ferx_fit()); the unit tests below cover the helper logic,
 # and the smoke test confirms a real async run returns a valid ferx_fit object.
 
+# Local aliases avoid the ::: operator (undesirable_operator_linter).
+.print_trace_tail    <- getFromNamespace(".ferx_print_trace_tail",    "ferx")
+.find_trace_lines    <- getFromNamespace(".ferx_find_trace_from_lines", "ferx")
+.find_trace_bg       <- getFromNamespace(".ferx_find_trace_from_bg",  "ferx")
+.async_callr         <- getFromNamespace(".ferx_async_callr",         "ferx")
+.collect_callr       <- getFromNamespace(".ferx_collect_callr",       "ferx")
+
 test_that(".ferx_print_trace_tail prints header and rows on first call", {
   tmp <- tempfile(fileext = ".csv")
   on.exit(unlink(tmp), add = TRUE)
@@ -20,7 +27,7 @@ test_that(".ferx_print_trace_tail prints header and rows on first call", {
     tmp, row.names = FALSE
   )
   state <- list(last_iter = -1L, lines_printed = 0L)
-  out <- capture.output(state <- ferx:::.ferx_print_trace_tail(tmp, 6L, state))
+  out <- capture.output(state <- .print_trace_tail(tmp, 6L, state))
   expect_true(any(grepl("iter", out)))
   expect_true(any(grepl("^\\s*1\\s", out)))
   expect_true(any(grepl("^\\s*3\\s", out)))
@@ -42,7 +49,7 @@ test_that(".ferx_print_trace_tail only prints new rows on subsequent calls", {
     tmp, row.names = FALSE
   )
   state <- list(last_iter = 3L, lines_printed = 3L)
-  out <- capture.output(state <- ferx:::.ferx_print_trace_tail(tmp, 6L, state))
+  out <- capture.output(state <- .print_trace_tail(tmp, 6L, state))
   expect_equal(state$last_iter, 3L)
   expect_length(out, 0L)
 })
@@ -64,7 +71,7 @@ test_that(".ferx_print_trace_tail caps output at tail_n rows per call", {
     tmp, row.names = FALSE
   )
   state <- list(last_iter = -1L, lines_printed = 0L)
-  out <- capture.output(state <- ferx:::.ferx_print_trace_tail(tmp, 6L, state))
+  out <- capture.output(state <- .print_trace_tail(tmp, 6L, state))
   iter_lines <- out[grepl("^\\s+\\d+\\s", out)]
   expect_lte(length(iter_lines), 6L)
   expect_equal(state$last_iter, n)
@@ -76,13 +83,13 @@ test_that(".ferx_find_trace_from_lines parses ferx-core's trace path message", {
     "[ferx] optimizer trace -> /tmp/ferx_trace_42_1700000000.csv",
     "another line"
   )
-  path <- ferx:::.ferx_find_trace_from_lines(lines)
+  path <- .find_trace_lines(lines)
   expect_equal(path, "/tmp/ferx_trace_42_1700000000.csv")
 })
 
 test_that(".ferx_find_trace_from_lines returns NULL when no trace line present", {
-  expect_null(ferx:::.ferx_find_trace_from_lines(c("foo", "bar")))
-  expect_null(ferx:::.ferx_find_trace_from_lines(character(0)))
+  expect_null(.find_trace_lines(c("foo", "bar")))
+  expect_null(.find_trace_lines(character(0)))
 })
 
 test_that(".ferx_find_trace_from_bg delegates to .ferx_find_trace_from_lines", {
@@ -91,7 +98,7 @@ test_that(".ferx_find_trace_from_bg delegates to .ferx_find_trace_from_lines", {
   fake_bg$read_error_lines  <- function() {
     "[ferx] optimizer trace -> /tmp/ferx_trace_99.csv"
   }
-  path <- ferx:::.ferx_find_trace_from_bg(fake_bg)
+  path <- .find_trace_bg(fake_bg)
   expect_equal(path, "/tmp/ferx_trace_99.csv")
 })
 
@@ -101,7 +108,7 @@ test_that(".ferx_find_trace_from_lines tolerates spaces in the path", {
     "[ferx] optimizer trace -> /Users/Some User/tmp/ferx_trace_1.csv"
   )
   expect_equal(
-    ferx:::.ferx_find_trace_from_lines(lines),
+    .find_trace_lines(lines),
     "/Users/Some User/tmp/ferx_trace_1.csv"
   )
 })
@@ -112,7 +119,7 @@ test_that(".ferx_find_trace_from_lines strips trailing CR (Windows line endings)
     "next line\r"
   )
   expect_equal(
-    ferx:::.ferx_find_trace_from_lines(lines),
+    .find_trace_lines(lines),
     "/tmp/ferx_trace_42.csv"
   )
 })
@@ -126,7 +133,7 @@ test_that(".ferx_find_trace_from_lines picks the announcement line over noise", 
     "post-fit chatter"
   )
   expect_equal(
-    ferx:::.ferx_find_trace_from_lines(lines),
+    .find_trace_lines(lines),
     "/var/folders/xx/zz/T/ferx_trace_7.csv"
   )
 })
@@ -138,7 +145,7 @@ test_that(".ferx_find_trace_from_lines tolerates spaces via fallback path", {
     "trace output -> /Users/Some User/tmp/ferx_trace_5.csv"
   )
   expect_equal(
-    ferx:::.ferx_find_trace_from_lines(lines),
+    .find_trace_lines(lines),
     "/Users/Some User/tmp/ferx_trace_5.csv"
   )
 })
@@ -182,4 +189,58 @@ test_that("ferx_fit_async returns ferx_job handle and ferx_collect retrieves res
 test_that("ferx_collect rejects non-ferx_job input", {
   expect_error(ferx::ferx_collect(list()), "ferx_job")
   expect_error(ferx::ferx_collect("not a handle"), "ferx_job")
+})
+
+# -- callr sidecar tests ------------------------------------------------------
+
+test_that(".ferx_async_callr sets sidecar_path on handle", {
+  skip_if_not_installed("callr")
+  ex <- ferx::ferx_example("warfarin")
+  h  <- .async_callr(ex$model, ex$data,
+                     list(settings = list(maxiter = 5L)),
+                     "warfarin", 6L, 0.5, FALSE)
+  on.exit({
+    if (h$bg$is_alive()) h$bg$kill()
+    if (file.exists(h$sidecar_path)) unlink(h$sidecar_path)
+  }, add = TRUE)
+  expect_s3_class(h, "ferx_job")
+  expect_equal(h$backend, "callr")
+  expect_type(h$sidecar_path, "character")
+  expect_true(nzchar(h$sidecar_path))
+})
+
+test_that("callr sidecar file is written and contains a valid trace path", {
+  skip_if_not_installed("callr")
+  ex <- ferx::ferx_example("warfarin")
+  h  <- .async_callr(ex$model, ex$data,
+                     list(settings = list(maxiter = 10L)),
+                     "warfarin", 6L, 0.5, FALSE)
+  on.exit({
+    if (h$bg$is_alive()) h$bg$kill()
+    if (file.exists(h$sidecar_path)) unlink(h$sidecar_path)
+  }, add = TRUE)
+
+  # Wait for the outer wrapper to finish (it finishes when the inner fit does).
+  for (i in seq_len(60)) {
+    if (!h$bg$is_alive()) break
+    Sys.sleep(0.5)
+  }
+  expect_false(h$bg$is_alive(), label = "outer process should have finished")
+  expect_true(file.exists(h$sidecar_path), label = "sidecar file should exist")
+
+  trace_path <- trimws(readLines(h$sidecar_path, warn = FALSE)[1L])
+  expect_true(nzchar(trace_path), label = "sidecar should contain a non-empty path")
+  expect_true(file.exists(trace_path), label = "trace CSV should exist on disk")
+})
+
+test_that("callr sidecar is removed after ferx_collect", {
+  skip_if_not_installed("callr")
+  ex <- ferx::ferx_example("warfarin")
+  h  <- .async_callr(ex$model, ex$data,
+                     list(settings = list(maxiter = 10L)),
+                     "warfarin", 6L, 0.5, FALSE)
+
+  fit <- .collect_callr(h, verbose = FALSE)
+  expect_s3_class(fit, "ferx_fit")
+  expect_false(file.exists(h$sidecar_path), label = "sidecar should be removed after collect")
 })
