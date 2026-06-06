@@ -348,9 +348,17 @@ error models report \code{c("proportional", "additive")} in that order.}
 \item{sdtab}{Data frame with ID, TIME, DV, PRED, IPRED, CWRES, IWRES,
 EBE_OFV, N_OBS; OCC if any subject carries an occasion column; CENS
 if any rows are below LLOQ; CMT if the dataset has more than one
-endpoint (any observation with \code{CMT != 1}).  Per-subject ETAs
-live in \code{ebe_etas}; per-subject parameter values in
-\code{individual_estimates}.}
+endpoint (any observation with \code{CMT != 1}).  TAFD (time after
+first dose) and TAD (time after last dose, SS-aware) are included
+automatically.  Columns declared in \code{[derived]} (per-row
+expressions, aggregates, integrals) and \code{[output]} (individual
+PK parameters or covariates echoed by name) appear at the end of the
+data frame in declaration order.
+Note: per-subject ETA (EBE) values are in \code{fit$ebe_etas} (one
+row per subject, no row duplication); per-subject individual parameter
+values are in \code{fit$individual_estimates}.  ETAs are available as
+read-only context variables inside \code{[derived]} expressions but
+are not written as sdtab columns.}
 \item{covtab}{Data frame echoing the declared covariate columns, present
 only when the model has a \code{[covariates]} block. Columns: \code{ID},
 \code{TIME}, \code{EVID}, then one column per declared covariate (in

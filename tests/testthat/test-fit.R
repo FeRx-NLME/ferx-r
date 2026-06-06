@@ -1,3 +1,6 @@
+# Local aliases avoid the ::: operator (undesirable_operator_linter).
+ferx_rust_autodiff_enabled <- getFromNamespace("ferx_rust_autodiff_enabled", "ferx")
+
 # Return structure — Tier 1
 
 test_that("returns class ferx_fit", {
@@ -63,6 +66,28 @@ test_that("$sdtab has required columns", {
   fit <- warfarin_fit()
   required <- c("ID", "TIME", "DV", "PRED", "IPRED", "CWRES", "IWRES")
   expect_true(all(required %in% names(fit$sdtab)))
+})
+
+test_that("$sdtab always includes TAFD and TAD", {
+  fit <- warfarin_fit()
+  expect_true("TAFD" %in% names(fit$sdtab),
+              label = "TAFD must be present even without [derived] block")
+  expect_true("TAD"  %in% names(fit$sdtab),
+              label = "TAD must be present even without [derived] block")
+  expect_true(all(is.finite(fit$sdtab$TAFD)),
+              label = "TAFD must be finite for all rows")
+  expect_true(all(is.finite(fit$sdtab$TAD)),
+              label = "TAD must be finite for all rows")
+})
+
+test_that("$sdtab does not contain ETA columns (ETAs live in ebe_etas)", {
+  # Regression guard against ferx-core#188: ETAs were briefly written into
+  # sdtab, creating duplicate information with ebe_etas and breaking the
+  # per-observation-row contract of sdtab.
+  fit <- warfarin_fit()
+  eta_pattern <- "^ETA_|^ETA[0-9]"
+  eta_cols <- grep(eta_pattern, names(fit$sdtab), value = TRUE)
+  expect_length(eta_cols, 0L)
 })
 
 test_that("$sdtab has one row per observation", {
@@ -253,12 +278,8 @@ test_that("ferx_cor_matrix errors gracefully when covariance was FALSE", {
 #    skip() with a real comparison (e.g. relative error < 1e-4 per element).
 
 test_that("autodiff OFV gradient matches finite-difference gradient within tolerance", {
-  # `ferx_rust_*` bindings are marked `@keywords internal`, so they are not
-  # in the exported namespace that `library(ferx)` makes available to test
-  # code. Access via `:::` so this test loads under `testthat::test_dir()`
-  # rather than failing with "could not find function".
   skip_if(
-    !isTRUE(ferx:::ferx_rust_autodiff_enabled()),
+    !isTRUE(ferx_rust_autodiff_enabled()),
     "Enzyme autodiff not available — skipping gradient-correctness test"
   )
   skip("Gradient inspection API not yet exposed from ferx-core — implement once available")
@@ -341,7 +362,7 @@ test_that("print.ferx_fit shows per-occasion shrinkage table for IOV fit", {
 
 test_that("SAEM with n_leapfrog > 0 uses HMC proposals on the AD build", {
   skip_if(
-    !isTRUE(ferx:::ferx_rust_autodiff_enabled()),
+    !isTRUE(ferx_rust_autodiff_enabled()),
     "Enzyme autodiff not available — skipping SAEM HMC behavioural test"
   )
 
@@ -371,7 +392,7 @@ test_that("SAEM with n_leapfrog > 0 uses HMC proposals on the AD build", {
 
 test_that("SAEM with n_leapfrog = 0 uses MH (no HMC subjects)", {
   skip_if(
-    !isTRUE(ferx:::ferx_rust_autodiff_enabled()),
+    !isTRUE(ferx_rust_autodiff_enabled()),
     "Enzyme autodiff not available — skipping SAEM HMC behavioural test"
   )
 

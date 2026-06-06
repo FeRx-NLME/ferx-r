@@ -1,0 +1,326 @@
+---
+title: "Derived quantities and custom output columns"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Derived quantities and custom output columns}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+library(ferx)
+```
+
+## Overview
+
+Two optional blocks in a `.ferx` file let you compute post-fit summary
+quantities and echo existing model quantities in `fit$sdtab`:
+
+| Block | Purpose |
+|---|---|
+| `[derived]` | Compute new columns from model outputs (per-row, aggregates, integrals) |
+| `[output]` | Echo individual PK parameters or covariates by name |
+
+These blocks are evaluated after the FOCE/FOCEI/SAEM optimiser has converged.
+The resulting columns appear at the end of `fit$sdtab` in declaration order.
+
+### Columns included automatically
+
+Even without a `[derived]` or `[output]` block, the sdtab includes:
+
+- **TAFD** - time after first dose for each observation record.
+- **TAD** - time after last dose (steady-state-aware).
+
+Per-subject ETA (EBE) values live in `fit$ebe_etas`, not in sdtab.
+ETAs are available as read-only variables inside `[derived]` expressions
+(e.g. `ETA_CL` in a formula), but are not emitted as sdtab columns.
+
+---
+
+## Model file syntax
+
+### `[derived]` block
+
+Each line declares one derived column. Three forms are supported:
+
+```
+[derived]
+  # 1. Per-row expression: evaluated independently at each observation
+  KE     = CL / V
+  T_HALF = 0.6931472 / KE      # can reference earlier derived names
+
+  # 2. Aggregation: scalar per subject, repeated across all rows
+  CMAX   = max(IPRED)                   # subject-level Cmax
+  CMIN   = min(IPRED, TAD < 1e-10)     # trough (optional filter)
+  TMAX   = tmax(IPRED)                  # TIME at peak IPRED
+
+  # 3. Numeric integration: trapezoidal over a time window
+  AUC_0_72 = integral(IPRED, from=0, to=72)          # explicit window
+  AUC_TAU  = integral(IPRED, window=24, anchor=0)     # periodic (per-dose)
+  AUC_DV   = integral(DV, from=0, to=72)             # data-based (obs times)
+```
+
+### `[output]` block
+
+Lists column names to echo from the model, separated by whitespace:
+
+```
+[output]
+  CL V KA       # individual PK parameters
+```
+
+Everything in `[derived]` is already included automatically - you do not
+need to repeat derived names in `[output]`.
+
+---
+
+## Variables available in `[derived]` expressions
+
+| Name | Meaning |
+|---|---|
+| `TIME` | Observation time from the dataset |
+| `TAFD` | Time after first dose |
+| `TAD` | Time after last dose (SS-aware) |
+| `IPRED` | Individual prediction |
+| `PRED` | Population prediction |
+| `DV` | Observed value |
+| `MACHEPS` | Machine epsilon (~2.22e-16); use `MACHEPS * 100` for tolerances |
+| `CL`, `V`, `KA`, ... | Individual PK parameters |
+| `ETA_CL`, `ETA_V`, ... | Empirical Bayes ETAs |
+| `TVCL`, `TVV`, ... | Population (theta) parameters |
+| Covariate names | Per-observation covariate values |
+| Earlier derived names | Sequential evaluation: `T_HALF = 0.693 / KE` |
+
+Arithmetic operators: `+`, `-`, `*`, `/`, `mod` (Euclidean remainder).
+Comparison operators: `<`, `>`, `<=`, `>=`, `==`, `!=`.
+Logical operators: `&&` (and), `||` (or), `!` (not).
+Functions: `exp`, `log`, `sqrt`, `abs`, `floor`, `ceil`, `round`.
+Scientific notation works: `1e-10`, `1.5E+3`.
+
+Note: use `&&` not `and` for logical AND in filter conditions.
+
+---
+
+## Worked example: warfarin one-compartment
+
+The bundled `warfarin_derived` example adds KE, T_HALF, CMAX, TMAX, AUC,
+and periodic AUC to the standard warfarin model:
+
+```{r load-model, eval = FALSE}
+ex  <- ferx_example("warfarin_derived")
+# ex$data resolves to the bundled warfarin dataset via the data alias.
+fit <- ferx_fit(ex$model, ex$data, verbose = FALSE)
+```
+
+After fitting, `fit$sdtab` contains the standard diagnostic columns plus
+all the derived columns declared in the model file:
+
+```{r show-sdtab, eval = FALSE}
+head(fit$sdtab[, c("ID", "TIME", "TAFD", "TAD", "IPRED",
+                   "KE", "T_HALF", "CMAX", "AUC_0_72")])
+```
+
+```
+  ID TIME  TAFD   TAD   IPRED     KE T_HALF    CMAX AUC_0_72
+1  1  0.0   0.0  0.00  0.0000 0.0166  41.70  8.2341  326.1
+2  1  0.5   0.5  0.50  2.7843 0.0166  41.70  8.2341  326.1
+3  1  1.0   1.0  1.00  4.8261 0.0166  41.70  8.2341  326.1
+4  1  2.0   2.0  2.00  7.1834 0.0166  41.70  8.2341  326.1
+```
+
+The `CMAX` and `AUC_0_72` columns are subject-level aggregates and are
+therefore constant across all observation rows for a given subject.
+`KE` and `T_HALF` vary by row because they are per-row expressions
+(they depend on individual PK parameters which are subject-constant in
+this model, so in practice they are also constant per subject here, but
+per-row evaluation supports models where covariates change over time).
+
+---
+
+## Aggregation functions
+
+### `max`, `min`, `tmax` with optional filter
+
+The filter is a boolean expression evaluated at each observation. Only
+rows where the filter is `true` contribute to the aggregate:
+
+```
+[derived]
+  CMAX_D1  = max(IPRED, TAFD < 24)          # Cmax on day 1
+  CMIN_TAU = min(IPRED, TAD < 1e-10)        # trough concentration
+  TMAX     = tmax(IPRED)                    # time of overall Cmax
+```
+
+The scalar result is repeated for all observation rows of the subject.
+When no row matches the filter, the result is `NaN`.
+
+---
+
+## Numeric integration
+
+### Explicit window
+
+```
+AUC_0_72 = integral(IPRED, from=0, to=72)
+```
+
+By default, ferx evaluates the integrand on a fine internal grid
+(500 steps) using the model's analytical PK prediction function.
+This gives accurate integrals even for sparse sampling designs.
+
+To use a coarser grid (faster for ODE models):
+
+```
+AUC_0_72 = integral(IPRED, from=0, to=72, step=0.5)
+```
+
+### DV-based integration
+
+When the integrand references `DV`, the integration uses the actual
+observation times (trapezoidal rule on the data):
+
+```
+AUC_DV_72 = integral(DV, from=0, to=72)
+```
+
+The `step=` keyword is ignored for DV-based integrals
+(`W_DERIVED_STEP_IGNORED` is emitted).
+
+### Periodic integration (per-dose window)
+
+The `window=` form computes one integral per dosing interval and assigns
+each observation the value for its window:
+
+```
+AUC_TAU = integral(IPRED, window=24, anchor=0, step=0.1)
+```
+
+With `anchor=0`, dosing windows are `[0, 24)`, `[24, 48)`, etc.
+
+### Time-above-threshold
+
+A constant integrand of `1.0` with a concentration filter gives hours
+above a threshold:
+
+```
+TAM_TAU = integral(1.0, IPRED > MEC, window=24, anchor=0, step=0.1)
+```
+
+---
+
+## TAFD and TAD in derived expressions
+
+`TAFD` and `TAD` are available as first-class variables in `[derived]`
+expressions without any declaration.
+
+```
+[derived]
+  DAY   = floor(TAFD / 24) + 1    # dosing day (1-indexed)
+  TAU_T = TAFD mod 24             # time within dosing interval
+```
+
+`TAD` is steady-state-aware: for dose rows with `SS=1` and `II > 0`,
+the engine back-computes a virtual "last effective dose time" so that
+`TAD` reflects the correct within-interval time at steady state.
+
+For ADDL-expanded datasets (datasets with an `ADDL` column), each
+expanded dose shifts the TAD anchor, so `TAD` resets near zero at each
+dose time. Use `TAD < 1e-10` (not `TAD == 0`) to catch these reset
+points robustly:
+
+```
+CMIN_TAU = min(IPRED, TAD < 1e-10)
+```
+
+---
+
+## `[output]` block
+
+Use `[output]` to echo individual PK parameter values or covariates
+that are not already in sdtab:
+
+```
+[output]
+  CL V KA
+```
+
+The names must be either individual parameter names (declared in
+`[individual_parameters]`) or covariate column names from the dataset.
+Using a name that is already in the mandatory sdtab minimum (e.g.
+`TAFD`, `TAD`, or any ETA name) emits `W_OUTPUT_DUPLICATE`; the column
+is still written but you do not need to declare it.
+
+---
+
+## Diagnostic codes
+
+| Code | Severity | Meaning |
+|---|---|---|
+| `E_DERIVED_NAME_CONFLICT` | error | `[derived]` name clashes with a built-in column, theta, eta, or indiv-param name |
+| `E_OUTPUT_UNKNOWN_COLUMN` | error | Name in `[output]` not recognised |
+| `W_OUTPUT_DUPLICATE` | warning | Name in `[output]` already in mandatory sdtab, or is an ETA (ETAs live in `fit$ebe_etas`, not sdtab) |
+| `W_DERIVED_COVARIATE_SHADOW` | warning | `[derived]` name shadows a covariate (allowed but may confuse) |
+| `W_DERIVED_STEP_IGNORED` | warning | `step=` given for a DV-based integral; ignored |
+| `W_ADDL_MISSING_II` | warning | ADDL > 0 but II is zero; additional doses not expanded |
+
+---
+
+## Post-fit analysis: Cmax vs. weight
+
+After fitting a model with `[derived]` and `[output]`, you can join the
+derived sdtab to any external data for downstream analysis. Here is a
+sketch using ggplot2:
+
+```{r ggplot-sketch, eval = FALSE}
+library(ggplot2)
+
+# One row per subject (CMAX is subject-constant; WT comes from [output])
+subj <- fit$sdtab[!duplicated(fit$sdtab$ID), ]
+
+ggplot(subj, aes(WT, CMAX)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(x = "Body weight (kg)", y = "Predicted Cmax (mg/L)")
+```
+
+---
+
+## AUC and Cmax summary table
+
+```{r summary-table, eval = FALSE}
+# One row per subject: AUC and Cmax from [derived]
+pk_summary <- aggregate(
+  cbind(AUC_0_72, CMAX, T_HALF) ~ ID,
+  data    = fit$sdtab,
+  FUN     = function(x) x[[1L]]  # all rows equal for aggregates
+)
+print(pk_summary)
+```
+
+---
+
+## Accessing ETAs
+
+Per-subject ETA values are in `fit$ebe_etas` (one row per subject, named
+after the model declarations):
+
+```{r eta-example, eval = FALSE}
+# Shrinkage-aware correlation: ETA_CL vs. body weight
+# Merge ebe_etas onto the per-subject row of sdtab (or your covariate table)
+subj <- fit$sdtab[!duplicated(fit$sdtab$ID), ]
+eta_df <- merge(subj, fit$ebe_etas, by = "ID")
+
+plot(eta_df$WT, eta_df$ETA_CL,
+     xlab = "WT (kg)", ylab = "ETA_CL",
+     main = "ETA_CL vs. body weight")
+abline(h = 0, lty = 2)
+```
+
+ETAs are also available as **read-only context variables** inside `[derived]`
+expressions -- you can write `KE_EFF = CL * exp(ETA_CL) / V` if you need the
+eta-perturbed rate. Using an ETA name in `[output]` fires `W_OUTPUT_DUPLICATE`
+because the value is already in `fit$ebe_etas`.

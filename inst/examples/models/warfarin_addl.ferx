@@ -1,0 +1,52 @@
+# Warfarin: multiple-dose design using ADDL column.
+# The dataset has a single EVID=1 row per subject: ADDL=6, II=24
+# (dose on day 1 + 6 additional doses = 7 daily doses).
+# After ADDL expansion, subject.doses contains 7 explicit DoseEvents
+# and TAD resets to 0 at each one automatically.
+
+[parameters]
+  theta TVCL(0.2, 0.001, 10.0)
+  theta TVV(10.0, 0.1, 500.0)
+  theta TVKA(1.5, 0.01, 50.0)
+
+  omega ETA_CL ~ 0.09
+  omega ETA_V  ~ 0.04
+  omega ETA_KA ~ 0.30
+
+  sigma PROP_ERR ~ 0.02 (sd)
+
+[individual_parameters]
+  CL = TVCL * exp(ETA_CL)
+  V  = TVV  * exp(ETA_V)
+  KA = TVKA * exp(ETA_KA)
+
+[structural_model]
+  pk one_cpt_oral(cl=CL, v=V, ka=KA)
+
+[error_model]
+  DV ~ proportional(PROP_ERR)
+
+[derived]
+  KE     = CL / V
+  T_HALF = 0.6931472 / KE
+
+  # TAFD uses the first dose time; TAD resets at each expanded dose
+  DAY    = floor(TAFD / 24) + 1
+
+  CMAX   = max(IPRED)
+
+  # Trough: minimum IPRED at dose time (TAD ~= 0 after ADDL expansion).
+  # 1e-10 absorbs floating-point residuals from modular arithmetic.
+  CMIN_TAU = min(IPRED, TAD < 1e-10)
+
+  # Trough via window: last 4 h of the interval (no precision concern)
+  CMIN_LATE = min(IPRED, TAD > 20)
+
+  AUC_TAU = integral(IPRED, window=24, anchor=0, step=0.1)
+
+[output]
+  CL V KA
+
+[fit_options]
+  method  = foce
+  maxiter = 300

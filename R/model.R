@@ -1065,7 +1065,7 @@ ferx_model_validate <- function(path, data = NULL) {
     "error_model"
   )
   optional_sections <- c("odes", "fit_options", "scaling", "initial_values",
-                         "covariate_nn", "diffusion")
+                         "covariate_nn", "diffusion", "derived", "output")
 
   blocks   <- .ferx_extract_blocks(path)
   present  <- names(blocks)
