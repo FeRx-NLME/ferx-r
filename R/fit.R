@@ -314,7 +314,11 @@
 #'     after last dose, SS-aware) are included automatically.  Columns declared
 #'     in \code{[derived]} (per-row expressions, aggregates, integrals) and
 #'     \code{[output]} (individual PK parameters or covariates echoed by name)
-#'     appear at the end of the data frame in declaration order.}
+#'     appear at the end of the data frame in declaration order.
+#'     Note: ETA values are also available as a dedicated per-subject data
+#'     frame in \code{fit$ebe_etas} (one row per subject, no row duplication);
+#'     per-subject individual parameter values are in
+#'     \code{fit$individual_estimates}.}
 #'   \item{ebe_etas}{Data frame with one row per subject containing the BSV
 #'     empirical Bayes estimates: \code{ID} plus one column per eta named
 #'     after the model's eta declarations (e.g. \code{ETA_CL}, \code{ETA_V}).

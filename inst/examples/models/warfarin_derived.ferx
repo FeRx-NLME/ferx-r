@@ -37,7 +37,7 @@
   # 1e-10 absorbs floating-point residuals when TAD is mathematically 0
   CTROUGH    = min(IPRED, TAD < 1e-10)
   CMAX_D1    = max(IPRED, TAFD < 24)
-  CMAX_D14   = max(IPRED, TAFD >= 312 and TAFD < 336)
+  CMAX_D14   = max(IPRED, TAFD >= 312 && TAFD < 336)
 
   # AUC over first 72 h (fine internal grid, 500 steps)
   AUC_0_72   = integral(IPRED, from=0, to=72)

@@ -81,7 +81,9 @@
 #'     dosing. A single EVID=1 row with ADDL=6, II=24 is expanded to seven
 #'     daily doses at read time; TAD resets at each expanded dose automatically.
 #'     Demonstrates CMIN_TAU using \code{1e-10} tolerance for floating-point
-#'     boundary comparisons.}
+#'     boundary comparisons. Note: a matching ADDL-format dataset
+#'     (\code{warfarin_addl.csv}) is not yet bundled; supply your own
+#'     ADDL-format data file when using this model.}
 #'   \item{warfarin_ode_time}{One-compartment oral (warfarin) as an ODE model
 #'     demonstrating \code{TIME}, \code{T}, \code{TAFD}, and \code{TAD} inside
 #'     \code{[odes]} RHS expressions; accumulator compartments for AUC and
@@ -134,6 +136,17 @@ ferx_example <- function(name = NULL) {
     stop("Example files not found. Is ferx installed?")
   }
 
+  # Some example model files share a dataset with an existing example.
+  # Maps example name -> data file name (without .csv extension).
+  # "warfarin_addl" is intentionally absent: it requires its own ADDL-format
+  # dataset that is not yet bundled.
+  .data_aliases <- list(
+    warfarin_derived      = "warfarin",
+    warfarin_derived_pkpd = "warfarin",
+    warfarin_ode_time     = "warfarin",
+    two_cpt_oral_derived  = "two_cpt_oral_cov"
+  )
+
   available <- tools::file_path_sans_ext(list.files(models_dir, pattern = "\\.ferx$"))
 
   if (is.null(name)) {
@@ -147,9 +160,10 @@ ferx_example <- function(name = NULL) {
     )
   }
 
+  data_name <- .data_aliases[[name]] %||% name
   list(
-    model = system.file("examples", "models", paste0(name, ".ferx"), package = "ferx"),
-    data = system.file("examples", "data", paste0(name, ".csv"), package = "ferx")
+    model = system.file("examples", "models", paste0(name,      ".ferx"), package = "ferx"),
+    data  = system.file("examples", "data",   paste0(data_name, ".csv"),  package = "ferx")
   )
 }
 

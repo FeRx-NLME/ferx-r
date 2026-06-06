@@ -95,7 +95,9 @@ Demonstrates \code{integral(IPRED, from=0, to=168)} and periodic AUC.}
 dosing. A single EVID=1 row with ADDL=6, II=24 is expanded to seven
 daily doses at read time; TAD resets at each expanded dose automatically.
 Demonstrates CMIN_TAU using \code{1e-10} tolerance for floating-point
-boundary comparisons.}
+boundary comparisons. Note: a matching ADDL-format dataset
+(\code{warfarin_addl.csv}) is not yet bundled; supply your own
+ADDL-format data file when using this model.}
 \item{warfarin_ode_time}{One-compartment oral (warfarin) as an ODE model
 demonstrating \code{TIME}, \code{T}, \code{TAFD}, and \code{TAD} inside
 \code{[odes]} RHS expressions; accumulator compartments for AUC and

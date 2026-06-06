@@ -25,8 +25,8 @@
 
   # TIME and T are synonymous -- both are the ODE solver time axis.
   # TAFD and TAD are available with the same SS-aware semantics as [derived].
-  d/dt(AUC_D1)  = if TIME < 24 then central/V else 0.0
-  d/dt(TAM_INT) = if central/V > 0.5 and TAD < 24 then 1.0 else 0.0
+  d/dt(AUC_D1)  = if (TIME < 24) central/V else 0.0
+  d/dt(TAM_INT) = if (central/V > 0.5 && TAD < 24) 1.0 else 0.0
 
 [scaling]
   obs_scale = V

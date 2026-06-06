@@ -165,3 +165,23 @@ test_that("ferx_model_validate errors on wrong extension", {
     ignore.case = TRUE
   )
 })
+
+test_that("[derived] and [output] sections are accepted as optional, not flagged as unknown", {
+  path <- write_ferx(c(
+    VALID_WARFARIN_SECTIONS,
+    "",
+    "[derived]",
+    "  KE = CL / 10",
+    "",
+    "[output]",
+    "  CL"
+  ))
+  on.exit(unlink(path))
+  out <- capture.output(suppressWarnings(ferx_model_validate(path)))
+  expect_false(any(grepl("unknown section", out, fixed = TRUE)),
+               label = "[derived] and [output] must not appear as unknown sections")
+  expect_true(any(grepl("derived", out, ignore.case = TRUE)),
+              label = "[derived] section should be printed as present")
+  expect_true(any(grepl("output", out, ignore.case = TRUE)),
+              label = "[output] section should be printed as present")
+})

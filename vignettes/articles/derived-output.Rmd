@@ -92,9 +92,13 @@ need to repeat derived names in `[output]`.
 | Covariate names | Per-observation covariate values |
 | Earlier derived names | Sequential evaluation: `T_HALF = 0.693 / KE` |
 
-Operators include `+`, `-`, `*`, `/`, `mod` (Euclidean remainder), and
-functions `exp`, `log`, `sqrt`, `abs`, `floor`, `ceil`, `round`.
+Arithmetic operators: `+`, `-`, `*`, `/`, `mod` (Euclidean remainder).
+Comparison operators: `<`, `>`, `<=`, `>=`, `==`, `!=`.
+Logical operators: `&&` (and), `||` (or), `!` (not).
+Functions: `exp`, `log`, `sqrt`, `abs`, `floor`, `ceil`, `round`.
 Scientific notation works: `1e-10`, `1.5E+3`.
+
+Note: use `&&` not `and` for logical AND in filter conditions.
 
 ---
 
@@ -105,6 +109,7 @@ and periodic AUC to the standard warfarin model:
 
 ```{r load-model, eval = FALSE}
 ex  <- ferx_example("warfarin_derived")
+# ex$data resolves to the bundled warfarin dataset via the data alias.
 fit <- ferx_fit(ex$model, ex$data, verbose = FALSE)
 ```
 
