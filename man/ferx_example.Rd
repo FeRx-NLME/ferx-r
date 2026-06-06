@@ -117,6 +117,7 @@ file.edit(system.file("examples", "ex_warfarin_dcm.R", package = "ferx"))
 }
 \seealso{
 Other utilities: 
+\code{\link{ferx_columns}()},
 \code{\link{ferx_load_fit}()},
 \code{\link{ferx_save_fit}()}
 }
