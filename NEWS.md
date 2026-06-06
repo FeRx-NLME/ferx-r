@@ -19,6 +19,20 @@
   final gradient with a convergence threshold check. Pass `verbose = FALSE` to
   capture the output as a character string.
 
+- `ferx_runlog(fit, show_iterations = TRUE)` gains an **Iteration history**
+  section when `optimizer_trace = TRUE` was used: per-iteration OFV, delta-OFV,
+  and method-specific convergence metrics (GRAD_NORM / STEP_NORM for
+  FOCE/FOCEI/BFGS; LM_LAMBDA + ACC for Gauss-Newton; COND_NLL + GAMMA +
+  MH_ACCEPT for SAEM). Runs with more than 30 iterations are truncated to the
+  first 10 and last 10. Set `show_iterations = FALSE` to suppress the section.
+
+- `ferx_runlog_iters(fit)` is a new function that prints the complete
+  untruncated per-iteration table. Accepts a `ferx_fit` object or a path to a
+  trace CSV.
+
+- `print.ferx_job(handle)` now shows a live trace snapshot (last 5 iterations)
+  when the rstudio-backend handle is printed during a running fit.
+
 - `fit$sdtab` gains a `CMT` column for multi-endpoint models (present whenever
   any observation row has `CMT != 1`). Use this column to split GOF plots by
   endpoint without rejoining the original dataset.

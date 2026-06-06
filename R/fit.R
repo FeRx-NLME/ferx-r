@@ -3017,6 +3017,33 @@ print.ferx_job <- function(x, ...) {
   cat(sprintf("<ferx_job> [%s] %s\n", status, x$model_label))
   cat(sprintf("Backend : %s\n", backend_note))
   cat("Call ferx_collect(handle) to retrieve the result.\n")
+
+  # Show current trace progress when available.
+  # For the rstudio backend the sidecar file holds the trace CSV path once
+  # the background process has written its first row.  For the callr backend
+  # reading stderr is destructive and would interfere with ferx_collect(), so
+  # we skip the live trace there.
+  trace_path <- NULL
+  if (identical(x$backend, "rstudio") &&
+      !is.null(x$sidecar_path) &&
+      file.exists(x$sidecar_path)) {
+    sp <- tryCatch(trimws(readLines(x$sidecar_path, warn = FALSE)[1L]),
+                   error = function(e) "")
+    if (nzchar(sp) && file.exists(sp)) trace_path <- sp
+  }
+  if (!is.null(trace_path)) {
+    tr <- tryCatch(ferx_trace(trace_path), error = function(e) NULL)
+    if (!is.null(tr) && nrow(tr) > 0L) {
+      cat("\n")
+      tbl <- .runlog_iter_table(tr, truncate = TRUE,
+                                trunc_total = 20L,
+                                trunc_head  = 5L,
+                                trunc_tail  = 5L)
+      cat(paste(tbl, collapse = "\n"), "\n")
+      cat(sprintf("  %d iteration(s) so far\n", nrow(tr)))
+    }
+  }
+
   invisible(x)
 }
 

@@ -80,3 +80,27 @@ fit_multi <- ferx_fit(
   settings = list(n_starts = 4L, start_sigma = 0.3, multi_start_seed = 123L)
 )
 fit_multi$ofv
+
+# --- Convergence inspection with optimizer_trace ----------------------------
+# Pass optimizer_trace = TRUE to record every iteration to a CSV.
+# ferx_runlog() automatically includes the iteration table when a trace is
+# present; ferx_runlog_iters() gives the full untruncated table.
+fit_trace <- ferx_fit(
+  ex$model, ex$data,
+  method          = "gn",
+  covariance      = FALSE,
+  optimizer_trace = TRUE
+)
+
+# NONMEM-style run log with the iteration history section inline
+ferx_runlog(fit_trace)
+
+# Full untruncated table — useful for long runs that get truncated in runlog
+ferx_runlog_iters(fit_trace)
+
+# Convergence plot: OFV and method-specific metric per iteration
+ferx_plot_trace(fit_trace)
+
+# Raw data frame for custom downstream analysis
+tr <- ferx_trace(fit_trace)
+head(tr)

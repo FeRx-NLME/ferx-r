@@ -4,7 +4,7 @@
 \alias{ferx_runlog}
 \title{NONMEM-style run log for a ferx fit}
 \usage{
-ferx_runlog(fit, gradient_tol = 0.1, verbose = TRUE)
+ferx_runlog(fit, gradient_tol = 0.1, show_iterations = TRUE, verbose = TRUE)
 }
 \arguments{
 \item{fit}{A \code{ferx_fit} object returned by \code{\link{ferx_fit}} or
@@ -13,6 +13,14 @@ ferx_runlog(fit, gradient_tol = 0.1, verbose = TRUE)
 \item{gradient_tol}{Numeric scalar.  Threshold for the relative gradient
 (\code{|grad[i] * param[i]|}); components exceeding this trigger a
 convergence warning.  Default \code{0.1}.}
+
+\item{show_iterations}{Logical.  When \code{TRUE} (the default) and the fit
+was run with \code{optimizer_trace = TRUE}, an "Iteration history" section
+is inserted showing OFV, delta-OFV, and method-specific convergence
+metrics (gradient norm for FOCE/BFGS, LM-lambda for Gauss-Newton,
+MH-accept-rate for SAEM) per iteration.  Runs with more than 30 iterations
+are truncated to the first 10 and last 10 rows.  Set to \code{FALSE} to
+suppress this section.}
 
 \item{verbose}{Logical.  When \code{TRUE} (the default) the output is
 printed to the console.  When \code{FALSE} it is returned invisibly as a

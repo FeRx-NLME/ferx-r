@@ -11,6 +11,13 @@
 #' @param gradient_tol Numeric scalar.  Threshold for the relative gradient
 #'   (\code{|grad[i] * param[i]|}); components exceeding this trigger a
 #'   convergence warning.  Default \code{0.1}.
+#' @param show_iterations Logical.  When \code{TRUE} (the default) and the fit
+#'   was run with \code{optimizer_trace = TRUE}, an "Iteration history" section
+#'   is inserted showing OFV, delta-OFV, and method-specific convergence
+#'   metrics (gradient norm for FOCE/BFGS, LM-lambda for Gauss-Newton,
+#'   MH-accept-rate for SAEM) per iteration.  Runs with more than 30 iterations
+#'   are truncated to the first 10 and last 10 rows.  Set to \code{FALSE} to
+#'   suppress this section.
 #' @param verbose Logical.  When \code{TRUE} (the default) the output is
 #'   printed to the console.  When \code{FALSE} it is returned invisibly as a
 #'   single character string.
@@ -40,7 +47,7 @@
 #' }
 #'
 #' @export
-ferx_runlog <- function(fit, gradient_tol = 0.1, verbose = TRUE) {
+ferx_runlog <- function(fit, gradient_tol = 0.1, show_iterations = TRUE, verbose = TRUE) {
   lines <- character(0)
 
   .sec <- function(title) {
@@ -297,6 +304,22 @@ ferx_runlog <- function(fit, gradient_tol = 0.1, verbose = TRUE) {
   )
   lines <- c(lines, .blank())
 
+  # -- Iteration history (requires optimizer_trace = TRUE) -------------------
+  has_trace <- isTRUE(show_iterations) &&
+               !is.null(fit$trace_path)   &&
+               !is.na(fit$trace_path)     &&
+               nzchar(fit$trace_path)     &&
+               file.exists(fit$trace_path)
+  if (has_trace) {
+    tr <- tryCatch(ferx_trace(fit), error = function(e) NULL)
+    if (!is.null(tr) && nrow(tr) > 0L) {
+      lines <- c(lines, .sec("Iteration history"))
+      lines <- c(lines, .runlog_iter_table(tr))
+      lines <- c(lines, sprintf("  Total: %d iteration(s)", nrow(tr)))
+      lines <- c(lines, .blank())
+    }
+  }
+
   # -- Covariance step --------------------------------------------------------
   has_cov <- !is.null(fit$condition_number) || !is.null(fit$eigenvalues)
   if (has_cov) {
@@ -435,4 +458,185 @@ ferx_runlog <- function(fit, gradient_tol = 0.1, verbose = TRUE) {
   out <- paste(lines, collapse = "\n")
   if (isTRUE(verbose)) cat(out, "\n")
   invisible(out)
+}
+
+#' Print the full optimizer iteration history for a ferx fit
+#'
+#' Displays (or returns) the complete per-iteration table from the optimizer
+#' trace CSV.  Unlike the "Iteration history" section in
+#' \code{\link{ferx_runlog}}, this function never truncates: every iteration
+#' row is shown without omission.
+#'
+#' @param fit A \code{ferx_fit} object returned by \code{\link{ferx_fit}} with
+#'   \code{optimizer_trace = TRUE}, or a path to a trace CSV file.
+#' @param verbose Logical.  When \code{TRUE} (the default) the table is
+#'   printed.  When \code{FALSE} it is returned invisibly as a character string.
+#'
+#' @return A character string (invisibly when \code{verbose = TRUE}).
+#'
+#' @examples
+#' \dontrun{
+#' ex  <- ferx_example("warfarin")
+#' fit <- ferx_fit(ex$model, ex$data, method = "focei",
+#'                 covariance = FALSE, optimizer_trace = TRUE)
+#' ferx_runlog_iters(fit)
+#' }
+#'
+#' @seealso \code{\link{ferx_runlog}}, \code{\link{ferx_trace}},
+#'   \code{\link{ferx_plot_trace}}
+#' @family diagnostics
+#' @export
+ferx_runlog_iters <- function(fit, verbose = TRUE) {
+  tr <- if (is.character(fit)) {
+    ferx_trace(fit)
+  } else if (inherits(fit, "ferx_fit")) {
+    if (is.null(fit$trace_path) || !file.exists(fit$trace_path)) {
+      stop("No trace file found. Re-run with optimizer_trace = TRUE.")
+    }
+    ferx_trace(fit)
+  } else {
+    stop("`fit` must be a ferx_fit object or a path to a trace CSV")
+  }
+
+  hdr  <- c(strrep("=", 60), "ITERATION HISTORY", strrep("-", 60))
+  body <- .runlog_iter_table(tr, truncate = FALSE)
+  foot <- c(sprintf("  Total: %d iteration(s)", nrow(tr)), strrep("=", 60))
+  out  <- paste(c(hdr, body, foot), collapse = "\n")
+  if (isTRUE(verbose)) cat(out, "\n")
+  invisible(out)
+}
+
+# Internal: format a per-iteration trace data frame as a character vector of
+# fixed-width table lines (header + rows).  Called by ferx_runlog (truncated)
+# and ferx_runlog_iters (full).
+.runlog_iter_table <- function(tr, truncate = TRUE,
+                               trunc_total = 30L,
+                               trunc_head  = 10L,
+                               trunc_tail  = 10L) {
+  if (is.null(tr) || nrow(tr) == 0L) return("  (no iterations recorded)")
+  n <- nrow(tr)
+
+  # Detect method category
+  methods  <- unique(tr$method[!is.na(tr$method)])
+  is_saem  <- any(methods == "saem")
+  is_gn    <- !is_saem && any(grepl("^gn", methods))
+
+  # OFV proxy column (for SAEM, tr$ofv already holds cond_nll as proxy)
+  ofv_main <- tr$ofv
+
+  # Delta-OFV: use ofv_delta for GN when populated, else diff()
+  if (is_gn && "ofv_delta" %in% names(tr) && any(!is.na(tr$ofv_delta))) {
+    dofv <- tr$ofv_delta
+  } else {
+    dofv <- c(NA_real_, diff(ofv_main))
+  }
+
+  # Column visibility
+  show_grad  <- !is_saem && "grad_norm"      %in% names(tr) && any(!is.na(tr$grad_norm))
+  show_step  <- !is_saem && "step_norm"      %in% names(tr) && any(!is.na(tr$step_norm))
+  show_lm    <- is_gn    && "lm_lambda"      %in% names(tr) && any(!is.na(tr$lm_lambda))
+  show_acc   <- is_gn    && "step_accepted"  %in% names(tr) && any(!is.na(tr$step_accepted))
+  show_mh    <- is_saem  && "mh_accept_rate" %in% names(tr) && any(!is.na(tr$mh_accept_rate))
+  show_gamma <- is_saem  && "gamma"          %in% names(tr) && any(!is.na(tr$gamma))
+  show_ebe   <- "n_ebe_unconverged" %in% names(tr) &&
+                any(tr$n_ebe_unconverged > 0L, na.rm = TRUE)
+  show_phase <- !is_saem && "phase" %in% names(tr) &&
+                any(nzchar(tr$phase) & !is.na(tr$phase))
+  show_saem_phase <- is_saem && "phase" %in% names(tr) &&
+                     any(nzchar(tr$phase) & !is.na(tr$phase))
+
+  # Header
+  ofv_label  <- if (is_saem) "COND_NLL"  else "OFV"
+  dofv_label <- if (is_saem) "dCOND_NLL" else "dOFV"
+  hdr <- sprintf("  %4s  %13s  %13s", "ITER", ofv_label, dofv_label)
+  bar <- sprintf("  %4s  %13s  %13s", "----", "-------------", "-------------")
+
+  add_col <- function(label, w) {
+    hdr <<- paste0(hdr, sprintf(paste0("  %", w, "s"), label))
+    bar <<- paste0(bar, sprintf(paste0("  %", w, "s"), strrep("-", w)))
+  }
+
+  if (!is_saem) {
+    if (show_grad) add_col("GRAD_NORM", 11)
+    if (show_step) add_col("STEP_NORM", 11)
+    if (show_lm)   add_col("LM_LAMBDA", 11)
+    if (show_acc)  add_col("ACC",        5)
+  } else {
+    if (show_saem_phase) add_col("PHASE",     10)
+    if (show_gamma)      add_col("GAMMA",      9)
+    if (show_mh)         add_col("MH_ACCEPT",  9)
+  }
+  if (show_ebe) add_col("EBE_WARN", 8)
+
+  # Helpers
+  na_w  <- function(w) sprintf(paste0("%", w, "s"), "NA")
+  fmt_f <- function(x, w, d) {
+    if (is.null(x) || is.na(x) || !is.finite(x)) na_w(w)
+    else sprintf(paste0("%", w, ".", d, "g"), x)
+  }
+  fmt_d <- function(x) {
+    if (is.na(x) || !is.finite(x)) sprintf("%13s", "---")
+    else sprintf("%+13.6g", x)
+  }
+
+  make_row <- function(i) {
+    r <- sprintf("  %4d  %13.6g  %s", as.integer(tr$iter[i]), ofv_main[i], fmt_d(dofv[i]))
+    if (!is_saem) {
+      if (show_grad) r <- paste0(r, fmt_f(tr$grad_norm[i],      13, 4))
+      if (show_step) r <- paste0(r, fmt_f(tr$step_norm[i],      13, 4))
+      if (show_lm)   r <- paste0(r, fmt_f(tr$lm_lambda[i],      13, 4))
+      if (show_acc) {
+        v   <- tr$step_accepted[i]
+        r   <- paste0(r, if (is.na(v)) sprintf("  %5s", "NA") else
+                         if (v == 1)   sprintf("  %5s", "YES")  else sprintf("  %5s", "NO"))
+      }
+    } else {
+      if (show_saem_phase) {
+        ph <- tr$phase[i]
+        r  <- paste0(r, sprintf("  %10s", if (is.na(ph) || !nzchar(ph)) "" else ph))
+      }
+      if (show_gamma) r <- paste0(r, fmt_f(tr$gamma[i],           11, 4))
+      if (show_mh)    r <- paste0(r, fmt_f(tr$mh_accept_rate[i],  11, 4))
+    }
+    if (show_ebe) {
+      v <- tr$n_ebe_unconverged[i]
+      r <- paste0(r, if (is.na(v)) sprintf("  %8s", "NA") else sprintf("  %8d", as.integer(v)))
+    }
+    r
+  }
+
+  # Build rows for a set of indices, inserting phase-change separators
+  build_rows <- function(indices) {
+    out      <- character(0)
+    prev_ph  <- NULL
+    for (i in indices) {
+      if (show_phase) {
+        ph <- tr$phase[i]
+        if (is.na(ph)) ph <- ""
+        if (!is.null(prev_ph) && nzchar(ph) && ph != prev_ph) {
+          label <- paste0("-- phase: ", ph, " ")
+          out   <- c(out, sprintf("  %s%s", label, strrep("-", max(0L, 40L - nchar(label)))))
+        }
+        prev_ph <- ph
+      }
+      out <- c(out, make_row(i))
+    }
+    out
+  }
+
+  # Apply truncation
+  if (truncate && n > trunc_total) {
+    idx_head  <- seq_len(trunc_head)
+    idx_tail  <- seq(n - trunc_tail + 1L, n)
+    n_omitted <- n - trunc_head - trunc_tail
+    rows <- c(
+      build_rows(idx_head),
+      sprintf("  ... %d rows not shown (use ferx_runlog_iters() for full table) ...", n_omitted),
+      build_rows(idx_tail)
+    )
+  } else {
+    rows <- build_rows(seq_len(n))
+  }
+
+  c(hdr, bar, rows)
 }
