@@ -5,6 +5,10 @@
 # writer + reader are inverses, and that the `output` argument of
 # ferx_fit() saves a valid bundle.
 
+# Local aliases avoid the ::: operator (undesirable_operator_linter).
+.fitrx_wire_to_fit      <- getFromNamespace(".fitrx_wire_to_fit",      "ferx")
+.fitrx_build_iov_wire   <- getFromNamespace(".fitrx_build_iov_wire",   "ferx")
+
 test_that("ferx_save_fit + ferx_load_fit round-trip a real fit", {
   skip_on_cran()
   fit <- warfarin_fit_cov()
@@ -261,7 +265,7 @@ test_that("ferx_load_fit on old .fitrx without init_as_sd produces empty logical
     theta = list(names = list("TVCL"), estimates = list(1.0),
                  fixed = list(FALSE), transform = list("log"), se = NULL)
   )
-  result <- ferx:::.fitrx_wire_to_fit(wire)
+  result <- .fitrx_wire_to_fit(wire)
   expect_equal(result$omega_init_as_sd, logical(0L))
   expect_equal(result$sigma_init_as_sd, logical(0L))
   expect_equal(result$kappa_init_as_sd, logical(0L))
@@ -325,7 +329,7 @@ test_that(".fitrx_build_iov_wire uses empty list when shrinkage_kappa_by_occ is 
     shrinkage_kappa_by_occ = NULL,
     omega_iov_param_corr   = NULL
   )
-  wire <- ferx:::.fitrx_build_iov_wire(fake_iov_fit)
+  wire <- .fitrx_build_iov_wire(fake_iov_fit)
   expect_equal(wire$shrinkage_kappa_by_occ, list())
 })
 

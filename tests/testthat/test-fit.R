@@ -1,3 +1,6 @@
+# Local aliases avoid the ::: operator (undesirable_operator_linter).
+ferx_rust_autodiff_enabled <- getFromNamespace("ferx_rust_autodiff_enabled", "ferx")
+
 # Return structure — Tier 1
 
 test_that("returns class ferx_fit", {
@@ -275,12 +278,8 @@ test_that("ferx_cor_matrix errors gracefully when covariance was FALSE", {
 #    skip() with a real comparison (e.g. relative error < 1e-4 per element).
 
 test_that("autodiff OFV gradient matches finite-difference gradient within tolerance", {
-  # `ferx_rust_*` bindings are marked `@keywords internal`, so they are not
-  # in the exported namespace that `library(ferx)` makes available to test
-  # code. Access via `:::` so this test loads under `testthat::test_dir()`
-  # rather than failing with "could not find function".
   skip_if(
-    !isTRUE(ferx:::ferx_rust_autodiff_enabled()),
+    !isTRUE(ferx_rust_autodiff_enabled()),
     "Enzyme autodiff not available — skipping gradient-correctness test"
   )
   skip("Gradient inspection API not yet exposed from ferx-core — implement once available")
@@ -363,7 +362,7 @@ test_that("print.ferx_fit shows per-occasion shrinkage table for IOV fit", {
 
 test_that("SAEM with n_leapfrog > 0 uses HMC proposals on the AD build", {
   skip_if(
-    !isTRUE(ferx:::ferx_rust_autodiff_enabled()),
+    !isTRUE(ferx_rust_autodiff_enabled()),
     "Enzyme autodiff not available — skipping SAEM HMC behavioural test"
   )
 
@@ -393,7 +392,7 @@ test_that("SAEM with n_leapfrog > 0 uses HMC proposals on the AD build", {
 
 test_that("SAEM with n_leapfrog = 0 uses MH (no HMC subjects)", {
   skip_if(
-    !isTRUE(ferx:::ferx_rust_autodiff_enabled()),
+    !isTRUE(ferx_rust_autodiff_enabled()),
     "Enzyme autodiff not available — skipping SAEM HMC behavioural test"
   )
 
