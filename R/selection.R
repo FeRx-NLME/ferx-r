@@ -1,11 +1,14 @@
 #' Preview data-selection filtering
 #'
 #' Applies IGNORE/ACCEPT record-level filters to a NONMEM dataset in pure R,
-#' mirroring the semantics of the \code{[data_selection]} model block. This is
-#' a \strong{preview} function: the canonical, engine-validated filtering
-#' happens in Rust at fit time. Use \code{ferx_selection()} to inspect which
-#' records will be excluded before committing to a fit, or to pass pre-built
-#' conditions directly to \code{\link{ferx_fit}}.
+#' approximating the semantics of the \code{[data_selection]} model block.
+#' This is a \strong{preview} function: the canonical, engine-validated
+#' filtering happens in Rust at fit time. The R-side implementation is
+#' intentionally lenient: unparseable expressions and unknown column names are
+#' silently treated as non-matching (no exclusion), whereas Rust will error on
+#' invalid filters. Use \code{ferx_selection()} to inspect which records will
+#' be excluded before committing to a fit, or to pass pre-built conditions
+#' directly to \code{\link{ferx_fit}}.
 #'
 #' @param data Character path to a NONMEM CSV file, or a data.frame already
 #'   read into memory. When a path is supplied it is recorded on the returned

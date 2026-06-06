@@ -18,12 +18,12 @@ ferx_fit(
   optimizer_trace = FALSE,
   scale_params = FALSE,
   inits_from_nca = FALSE,
-  ignore = NULL,
-  accept = NULL,
-  ignore_ids = NULL,
   settings = NULL,
   output = NULL,
   include_data = FALSE,
+  ignore = NULL,
+  accept = NULL,
+  ignore_ids = NULL,
   ...
 )
 }
@@ -170,24 +170,6 @@ the optimizer runs, overriding the model file's defaults. Either a logical
 \code{settings = list(optimizer = "trust_region")} or \code{method = "gn"},
 where bad starting values can stall the optimizer. See
 \code{\link{ferx_inits_from_nca}} to inspect the values without fitting.}
-
-\item{ignore}{Character vector of filter expressions that exclude a record
-when the expression evaluates to true (NONMEM \code{$DATA IGNORE=}
-equivalent). Expressions use standard comparison operators
-(\code{==}, \code{!=}, \code{<}, \code{<=}, \code{>}, \code{>=}) on
-column names. Use \code{&&} within one expression for AND; for OR use
-multiple elements. These conditions are merged with any
-\code{[data_selection] ignore} rules in the model file.
-Example: \code{ignore = c("DV < 0.001", "EVID != 0 && MDV == 1")}.}
-
-\item{accept}{Character vector of filter expressions. A record is kept
-only when all conditions pass; excluded if any fail (NONMEM
-\code{$DATA ACCEPT=} equivalent). Merged with model-file \code{accept}
-rules.}
-
-\item{ignore_ids}{Numeric or character vector of subject IDs to exclude
-entirely. Sugar for \code{ignore = "ID == <id>"} applied per-subject.
-Merged with \code{[data_selection] ignore_subjects} from the model file.}
 
 \item{settings}{Optional named list of fine-grained options forwarded to the
 Rust \code{FitOptions}. Use this to tune knobs that do not have a
@@ -337,6 +319,24 @@ reference in the ferx-core docs for the on-disk schema.}
 \code{TRUE}, embeds the input \code{data} CSV verbatim inside the
 \code{.fitrx} bundle so the file is self-contained. Default
 \code{FALSE}.}
+
+\item{ignore}{Character vector of filter expressions that exclude a record
+when the expression evaluates to true (NONMEM \code{$DATA IGNORE=}
+equivalent). Expressions use standard comparison operators
+(\code{==}, \code{!=}, \code{<}, \code{<=}, \code{>}, \code{>=}) on
+column names. Use \code{&&} within one expression for AND; for OR use
+multiple elements. These conditions are merged with any
+\code{[data_selection] ignore} rules in the model file.
+Example: \code{ignore = c("DV < 0.001", "EVID != 0 && MDV == 1")}.}
+
+\item{accept}{Character vector of filter expressions. A record is kept
+only when all conditions pass; excluded if any fail (NONMEM
+\code{$DATA ACCEPT=} equivalent). Merged with model-file \code{accept}
+rules.}
+
+\item{ignore_ids}{Numeric or character vector of subject IDs to exclude
+entirely. Sugar for \code{ignore = "ID == <id>"} applied per-subject.
+Merged with \code{[data_selection] ignore_subjects} from the model file.}
 
 \item{...}{Reserved for future use. Unrecognised arguments raise an error.}
 }

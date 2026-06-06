@@ -1178,12 +1178,12 @@ ferx_fit <- function(model, data = NULL,
                      optimizer_trace = FALSE,
                      scale_params = FALSE,
                      inits_from_nca = FALSE,
-                     ignore = NULL,
-                     accept = NULL,
-                     ignore_ids = NULL,
                      settings = NULL,
                      output = NULL,
                      include_data = FALSE,
+                     ignore = NULL,
+                     accept = NULL,
+                     ignore_ids = NULL,
                      ...) {
   # `ferx_fit()` is a plain function (not an S3 generic) so that IDE argument
   # completion and inline help surface every argument - an S3 generic only

@@ -95,8 +95,6 @@ fn ferx_rust_fit(
             Err(e) => throw_r_error(format!("Error parsing model: {e}")),
         };
 
-    let iov_col = parsed.fit_options.iov_column.clone();
-
     // Build fit options
     let mut opts = parsed.fit_options.clone();
 
@@ -185,20 +183,20 @@ fn ferx_rust_fit(
                     Path::new(data_path),
                     decls,
                     &extra,
-                    iov_col.as_deref(),
+                    opts.iov_column.as_deref(),
                 ) {
                     Ok((p, t)) => (p, Some(t)),
                     Err(e) => throw_r_error(format!("Error reading data: {e}")),
                 }
             }
             (_, false) => {
-                match read_nonmem_csv_filtered(Path::new(data_path), None, iov_col.as_deref(), &filter) {
+                match read_nonmem_csv_filtered(Path::new(data_path), None, opts.iov_column.as_deref(), &filter) {
                     Ok(p) => (p, None),
                     Err(e) => throw_r_error(format!("Error reading data: {e}")),
                 }
             }
             (None, true) => {
-                match ferx_core::read_nonmem_csv(Path::new(data_path), None, iov_col.as_deref()) {
+                match ferx_core::read_nonmem_csv(Path::new(data_path), None, opts.iov_column.as_deref()) {
                     Ok(p) => (p, None),
                     Err(e) => throw_r_error(format!("Error reading data: {e}")),
                 }
