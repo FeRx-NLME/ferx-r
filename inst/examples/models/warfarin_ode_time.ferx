@@ -17,7 +17,7 @@
   KA = TVKA * exp(ETA_KA)
 
 [structural_model]
-  ode(obs_cmt=2)
+  ode(obs_cmt=central, states=[depot, central, AUC_D1, TAM_INT])
 
 [odes]
   d/dt(depot)   = -KA * depot

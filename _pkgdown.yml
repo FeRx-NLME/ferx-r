@@ -37,6 +37,7 @@ reference:
     desc: "Extract and visualise parameter estimates, ETAs, and optimizer traces."
     contents:
       - ferx_runlog
+      - ferx_runlog_iters
       - ferx_estimates
       - ferx_warnings
       - ferx_eta_cov
@@ -45,10 +46,18 @@ reference:
       - ferx_trace
       - check_diagnostics
 
+  - title: "Data filtering"
+    desc: "Preview and apply record-level data-selection filters before fitting."
+    contents:
+      - ferx_selection
+      - ferx_selection_excluded
+      - print.ferx_data
+
   - title: "Utilities"
     desc: "Helper functions for exploring bundled examples and checking model initialisation."
     contents:
       - ferx_example
+      - ferx_columns
       - ferx_check_init
       - ferx_inits_from_nca
       - ferx_save_fit
@@ -58,8 +67,9 @@ articles:
   - title: "User guides"
     contents:
       - model-workflow
-      - model-editing
-      - parameter-transforms
-      - simulation
-      - special-features
-      - uncertainty-sir
+      - articles/model-editing
+      - articles/parameter-transforms
+      - articles/simulation
+      - articles/special-features
+      - articles/uncertainty-sir
+      - articles/derived-output
