@@ -443,13 +443,15 @@
 #'     present in the dataset (beyond \code{ID}, \code{TIME}, \code{DV},
 #'     \code{EVID}, \code{AMT}, \code{CMT}, \code{RATE}, \code{MDV},
 #'     \code{II}, \code{SS}, \code{CENS}, \code{OCC}). Empty when no
-#'     covariates are present. Used by \code{\link{ferx_runlog}} to echo
-#'     the dataset column list.}
+#'     covariates are present. Contains only non-standard covariate columns;
+#'     see \code{input_columns} for the complete ordered column list.}
 #'   \item{input_columns}{Character vector of all column headers from the
-#'     data CSV in file order — analogous to NONMEM \code{$INPUT}. Includes
+#'     data CSV in file order, analogous to NONMEM \code{$INPUT}. Includes
 #'     both standard columns (\code{ID}, \code{TIME}, \code{DV}, etc.) and
-#'     any covariate columns. Empty for in-memory fits that never read a file.
-#'     Used by \code{\link{ferx_runlog}} to echo the full dataset column list.}
+#'     any covariate columns. Empty for in-memory fits that never read a file
+#'     and absent after a \code{\link{ferx_save_fit}}/\code{\link{ferx_load_fit}}
+#'     round-trip on older bundles. Use this field (not \code{covariate_names})
+#'     when you need the complete ordered column list.}
 #'   \item{cov_matrix}{Full parameter covariance matrix as a named numeric
 #'     matrix (params ? params). Row/column names use declared variable names
 #'     (\code{"TVCL"}, \code{"ETA_CL"}, \code{"EPS_PROP"}); fallback is

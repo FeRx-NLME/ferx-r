@@ -71,11 +71,38 @@ test_that("ferx_runlog shows time range when obs_time_range is present", {
 
 test_that("ferx_runlog data summary falls back gracefully when counts missing", {
   fit <- warfarin_fit()
-  fit$n_subjects    <- NULL
-  fit$n_obs         <- NULL
+  fit$n_subjects     <- NULL
+  fit$n_obs          <- NULL
   fit$obs_time_range <- NULL
+  fit$input_columns  <- NULL
   out <- ferx_runlog(fit, verbose = FALSE)
   expect_match(out, "data summary not available", fixed = TRUE)
+})
+
+test_that("ferx_runlog shows input_columns line when field is present", {
+  fit <- warfarin_fit()
+  fit$input_columns <- c("ID", "TIME", "AMT", "EVID", "DV", "WT")
+  out <- ferx_runlog(fit, verbose = FALSE)
+  expect_match(out, "Input columns:", fixed = TRUE)
+  expect_match(out, "WT",             fixed = TRUE)
+})
+
+test_that("ferx_runlog fallback message absent when only input_columns is present", {
+  fit <- warfarin_fit()
+  fit$n_subjects     <- NULL
+  fit$n_obs          <- NULL
+  fit$obs_time_range <- NULL
+  fit$input_columns  <- c("ID", "TIME", "DV")
+  out <- ferx_runlog(fit, verbose = FALSE)
+  expect_match(out,    "Input columns:",          fixed = TRUE)
+  expect_no_match(out, "data summary not available", fixed = TRUE)
+})
+
+test_that("ferx_runlog omits input_columns line when field is empty", {
+  fit <- warfarin_fit()
+  fit$input_columns <- character(0)
+  out <- ferx_runlog(fit, verbose = FALSE)
+  expect_no_match(out, "Input columns:", fixed = TRUE)
 })
 
 # -- Tier 2: parameter table --------------------------------------------------

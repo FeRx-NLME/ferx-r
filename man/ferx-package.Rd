@@ -46,6 +46,13 @@ See \code{ferx_rust_autodiff_enabled()} (internal) and the startup
 message for the active mode.
 }
 
+\seealso{
+Useful links:
+\itemize{
+  \item \url{https://ferx-nlme.github.io/reference/}
+}
+
+}
 \author{
 \strong{Maintainer}: Ron Keizer \email{ron@insightrx.com}
 

@@ -86,7 +86,8 @@ ferx_runlog <- function(fit, gradient_tol = 0.1, verbose = TRUE) {
   if (!is.null(fit$input_columns) && length(fit$input_columns) > 0L) {
     lines <- c(lines, sprintf("  Input columns:  %s", paste(fit$input_columns, collapse = "  ")))
   }
-  if (is.null(n_subj) && is.null(n_obs) && is.null(tr)) {
+  if (is.null(n_subj) && is.null(n_obs) && is.null(tr) &&
+      (is.null(fit$input_columns) || length(fit$input_columns) == 0L)) {
     lines <- c(lines, "  (data summary not available for this fit)")
   }
   lines <- c(lines, .blank())
