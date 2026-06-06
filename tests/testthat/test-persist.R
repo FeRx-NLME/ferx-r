@@ -347,3 +347,50 @@ test_that("shrinkage_kappa_by_occ survives a ferx_save/ferx_load round-trip", {
                fit$shrinkage_kappa_by_occ$occ)
 })
 
+test_that("covariate_names and input_columns survive ferx_save/ferx_load round-trip", {
+  # Regression guard: covariate_names was not serialised before PR#126, so it
+  # silently vanished after a save/load cycle. ferx_fit() populates both fields
+  # from the engine result; the test injects them into a fake fit so the check
+  # runs fast without a real fit.
+  fake <- structure(
+    list(
+      sdtab = data.frame(
+        ID = 1L, TIME = 1.0, DV = 1.0,
+        PRED = 1.0, IPRED = 1.0,
+        CWRES = 0.0, IWRES = 0.0,
+        EBE_OFV = -1.0, N_OBS = 1L
+      ),
+      ebe_etas      = data.frame(ID = 1L, ETA_CL = 0.0),
+      theta         = c(TVCL = 1.0),
+      omega         = matrix(0.04, 1L, 1L,
+                             dimnames = list("ETA_CL", "ETA_CL")),
+      eta_names     = "ETA_CL",
+      sigma         = c(prop = 0.05),
+      sigma_names   = "prop",
+      sigma_types   = "proportional",
+      ofv = 0, aic = 2, bic = 4,
+      n_obs = 1L, n_subjects = 1L,
+      n_parameters = 1L, n_iterations = 1L,
+      method = "FOCEI", method_chain = "FOCEI",
+      converged = TRUE,
+      warnings = character(),
+      shrinkage_eta = 0, shrinkage_eps = 0,
+      wall_time_secs = 0, model_name = "fake", ferx_version = "0.1.0",
+      gradient_method_inner = "FD", gradient_method_outer = "N/A",
+      covariance_status = "NotRequested",
+      model_source = "model fake\n",
+      data_path = NA_character_,
+      covariate_names = c("WT", "AGE"),
+      input_columns  = c("ID", "TIME", "DV", "EVID", "AMT", "WT", "AGE")
+    ),
+    class = "ferx_fit"
+  )
+  path <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(path), add = TRUE)
+  ferx_save_fit(fake, path)
+  loaded <- ferx_load_fit(path)
+  expect_equal(loaded$covariate_names, c("WT", "AGE"))
+  expect_equal(loaded$input_columns,
+               c("ID", "TIME", "DV", "EVID", "AMT", "WT", "AGE"))
+})
+

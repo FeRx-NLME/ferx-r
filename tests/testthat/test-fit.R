@@ -65,6 +65,28 @@ test_that("$sdtab has required columns", {
   expect_true(all(required %in% names(fit$sdtab)))
 })
 
+test_that("$sdtab always includes TAFD and TAD", {
+  fit <- warfarin_fit()
+  expect_true("TAFD" %in% names(fit$sdtab),
+              label = "TAFD must be present even without [derived] block")
+  expect_true("TAD"  %in% names(fit$sdtab),
+              label = "TAD must be present even without [derived] block")
+  expect_true(all(is.finite(fit$sdtab$TAFD)),
+              label = "TAFD must be finite for all rows")
+  expect_true(all(is.finite(fit$sdtab$TAD)),
+              label = "TAD must be finite for all rows")
+})
+
+test_that("$sdtab does not contain ETA columns (ETAs live in ebe_etas)", {
+  # Regression guard against ferx-core#188: ETAs were briefly written into
+  # sdtab, creating duplicate information with ebe_etas and breaking the
+  # per-observation-row contract of sdtab.
+  fit <- warfarin_fit()
+  eta_pattern <- "^ETA_|^ETA[0-9]"
+  eta_cols <- grep(eta_pattern, names(fit$sdtab), value = TRUE)
+  expect_length(eta_cols, 0L)
+})
+
 test_that("$sdtab has one row per observation", {
   fit <- warfarin_fit()
   ex  <- ferx_example("warfarin")
