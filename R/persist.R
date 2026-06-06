@@ -81,6 +81,12 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   .fitrx_write_predictions_csv(fit, file.path(staging, "predictions.csv"))
   entries <- c(entries, "predictions.csv")
 
+  # covtab.csv - present only when the model declares a [covariates] block
+  if (!is.null(fit$covtab) && nrow(fit$covtab) > 0L) {
+    .fitrx_write_covtab_csv(fit, file.path(staging, "covtab.csv"))
+    entries <- c(entries, "covtab.csv")
+  }
+
   # model.ferx
   #
   # Prefer `file.copy(fit$model_path, ...)` so the bundled bytes match
@@ -231,6 +237,13 @@ ferx_load_fit <- function(path) {
   preds_path <- file.path(staging, "predictions.csv")
   if (file.exists(preds_path)) {
     result$sdtab <- utils::read.csv(preds_path, stringsAsFactors = FALSE, check.names = FALSE)
+  }
+  covtab_path <- file.path(staging, "covtab.csv")
+  if (file.exists(covtab_path)) {
+    result$covtab <- utils::read.csv(covtab_path, stringsAsFactors = FALSE, check.names = FALSE)
+    # Preserve the live-fit type of the ID column (character); read.csv would
+    # otherwise infer integer for numeric-looking IDs.
+    result$covtab$ID <- as.character(result$covtab$ID)
   }
   kappa_path <- file.path(staging, "ebes_kappa.csv")
   if (file.exists(kappa_path)) {
@@ -387,6 +400,14 @@ ferx_load_fit <- function(path) {
       NULL
     },
 
+    # Named covariate -> "continuous"/"categorical" map, as a JSON object.
+    # `as.list` keeps the names; NULL when no [covariates] block was declared.
+    covariate_types = if (length(fit$covariate_types)) {
+      as.list(fit$covariate_types)
+    } else {
+      NULL
+    },
+
     r_extras = .fitrx_collect_r_extras(fit)
   )
 
@@ -498,6 +519,12 @@ ferx_load_fit <- function(path) {
     out$exclusions <- NULL
   }
 
+  # covariate_types: rebuild the named character vector (NULL when absent).
+  ct <- w$covariate_types
+  if (!is.null(ct) && length(ct) > 0L) {
+    out$covariate_types <- unlist(ct, use.names = TRUE)
+  }
+
   # eta_param_info ? parallel R vectors
   epi <- w$eta_param_info
   if (!is.null(epi) && length(epi) > 0L) {
@@ -607,6 +634,16 @@ ferx_load_fit <- function(path) {
     sdtab, path,
     row.names = FALSE, quote = FALSE, sep = ",", na = ""
   )
+}
+
+.fitrx_write_covtab_csv <- function(fit, path) {
+  covtab <- fit$covtab
+  if (is.null(covtab) || nrow(covtab) == 0L) {
+    return(invisible())
+  }
+  # Quote so a free-form character ID containing a comma/quote round-trips
+  # intact; missing covariate values (NA/NaN) are written as empty cells.
+  utils::write.csv(covtab, path, row.names = FALSE, na = "")
 }
 
 .fitrx_subject_string_ids <- function(fit) {
