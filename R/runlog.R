@@ -93,8 +93,27 @@ ferx_runlog <- function(fit, gradient_tol = 0.1, show_iterations = TRUE, verbose
   if (!is.null(fit$input_columns) && length(fit$input_columns) > 0L) {
     lines <- c(lines, sprintf("  Input columns:  %s", paste(fit$input_columns, collapse = "  ")))
   }
+  ex <- fit$exclusions
+  if (!is.null(ex)) {
+    lines <- c(lines, sprintf(
+      "  Data selection: %d obs, %d doses, %d other excluded (of %d records)",
+      as.integer(ex$n_obs_excluded  %||% 0L),
+      as.integer(ex$n_dose_excluded %||% 0L),
+      as.integer(ex$n_other_excluded %||% 0L),
+      as.integer(ex$n_records_total %||% 0L)
+    ))
+    strip_pfx <- function(x) sub("^(ignore|accept): ", "", x)
+    for (cond in ex$fired_ignore)
+      lines <- c(lines, sprintf("    Fired ignore:  \"%s\"", strip_pfx(cond)))
+    for (cond in ex$fired_accept)
+      lines <- c(lines, sprintf("    Fired accept:  \"%s\"", strip_pfx(cond)))
+    if (length(ex$excluded_subject_ids) > 0L)
+      lines <- c(lines, sprintf("    Excl. subjs:   [%s]",
+                                paste(ex$excluded_subject_ids, collapse = ", ")))
+  }
   if (is.null(n_subj) && is.null(n_obs) && is.null(tr) &&
-      (is.null(fit$input_columns) || length(fit$input_columns) == 0L)) {
+      (is.null(fit$input_columns) || length(fit$input_columns) == 0L) &&
+      is.null(ex)) {
     lines <- c(lines, "  (data summary not available for this fit)")
   }
   lines <- c(lines, .blank())
