@@ -2,6 +2,13 @@
 
 ## New features
 
+- `ferx_columns(data)` prints the column headers of a NONMEM CSV dataset,
+  grouped into required NONMEM columns (`ID`, `TIME`, `DV`, `EVID`, `AMT`,
+  `CMT`), optional NONMEM columns (`RATE`, `MDV`, `II`, `SS`, `CENS`, `OCC`),
+  and covariates / user-defined columns. Accepts a file path, a `ferx_fit`
+  object (uses `fit$data_path`), or a `ferx_example()` list. Returns the
+  column name vector invisibly.
+
 - `ferx_runlog(fit)` produces a NONMEM-style `.lst` run summary: model file
   content, data summary (subject / observation counts, time range), INITIAL vs
   FINAL parameter table with SE and %RSE for every theta/omega/sigma, estimation

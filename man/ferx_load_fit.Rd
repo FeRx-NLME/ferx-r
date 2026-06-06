@@ -36,6 +36,7 @@ identical(fit$theta, fit2$theta)
 \code{\link{ferx_save_fit}}.
 
 Other utilities: 
+\code{\link{ferx_columns}()},
 \code{\link{ferx_example}()},
 \code{\link{ferx_save_fit}()}
 }
