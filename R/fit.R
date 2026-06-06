@@ -2782,22 +2782,62 @@ ferx_fit_async <- function(model, data = NULL, ...,
 
 .ferx_async_callr <- function(model, data, dots, model_label,
                                tail_n, poll_interval, user_wanted_trace) {
+  sidecar_path <- tempfile("ferx_trace_loc_", fileext = ".txt")
+
+  # Outer process monitors the inner ferx_fit process, drains its stderr to
+  # extract the trace path, and writes it to sidecar_path so print.ferx_job
+  # can read it non-destructively at any time.
   bg <- callr::r_bg(
-    func = function(model, data, dots) {
+    func = function(model, data, dots, sidecar_path) { # nocov start
+      .find_trace <- getFromNamespace(".ferx_find_trace_from_lines", "ferx")
       dots$optimizer_trace <- TRUE
-      do.call(ferx::ferx_fit, c(list(model = model, data = data), dots))
-    },
-    args = list(model = model, data = data, dots = dots),
+      inner <- callr::r_bg(
+        func = function(model, data, dots) {
+          do.call(ferx::ferx_fit, c(list(model = model, data = data), dots))
+        },
+        args = list(model = model, data = data, dots = dots),
+        package = TRUE, supervise = TRUE
+      )
+      trace_written <- FALSE
+      while (inner$is_alive()) {
+        lines <- c(
+          tryCatch(inner$read_output_lines(), error = function(e) character(0)),
+          tryCatch(inner$read_error_lines(),  error = function(e) character(0))
+        )
+        if (!trace_written) {
+          path <- .find_trace(lines)
+          if (!is.null(path)) {
+            writeLines(path, sidecar_path)
+            trace_written <- TRUE
+          }
+        }
+        Sys.sleep(0.2)
+      }
+      # Drain remaining output after the process exits (fast fits may finish
+      # before the first poll fires, leaving buffered stderr unread).
+      if (!trace_written) {
+        lines <- c(
+          tryCatch(inner$read_output_lines(), error = function(e) character(0)),
+          tryCatch(inner$read_error_lines(),  error = function(e) character(0))
+        )
+        path <- .find_trace(lines)
+        if (!is.null(path)) writeLines(path, sidecar_path)
+      }
+      inner$get_result()
+    }, # nocov end
+    args = list(model = model, data = data, dots = dots,
+                sidecar_path = sidecar_path),
     package = TRUE,
     supervise = TRUE
   )
   structure(
     list(
-      backend          = "callr",
-      model_label      = model_label,
-      bg               = bg,
-      tail_n           = tail_n,
-      poll_interval    = poll_interval,
+      backend           = "callr",
+      model_label       = model_label,
+      bg                = bg,
+      sidecar_path      = sidecar_path,
+      tail_n            = tail_n,
+      poll_interval     = poll_interval,
       user_wanted_trace = user_wanted_trace
     ),
     class = "ferx_job"
@@ -2841,7 +2881,7 @@ ferx_fit_async <- function(model, data = NULL, ...,
       "        tryCatch(bg$read_output_lines(), error = function(e) character(0)),",
       "        tryCatch(bg$read_error_lines(),  error = function(e) character(0))",
       "      )",
-      "      path <- ferx:::.ferx_find_trace_from_lines(lines)",
+      "      path <- .find_trace(lines)",
       "      if (!is.null(path)) {",
       "        writeLines(path, sidecar_path)",
       "        trace_written <- TRUE",
@@ -2934,6 +2974,7 @@ ferx_collect <- function(handle, verbose = TRUE) {
 
 .ferx_collect_callr <- function(handle, verbose) {
   bg            <- handle$bg
+  sidecar_path  <- handle$sidecar_path
   tail_n        <- handle$tail_n
   poll_interval <- handle$poll_interval
   trace_path    <- NULL
@@ -2941,26 +2982,32 @@ ferx_collect <- function(handle, verbose = TRUE) {
 
   tryCatch({
     while (bg$is_alive()) {
-      # Always drain both streams to prevent the bg process from blocking
-      # on a full OS pipe buffer, regardless of whether we display output.
-      lines <- c(
-        tryCatch(bg$read_output_lines(), error = function(e) character(0)),
-        tryCatch(bg$read_error_lines(),  error = function(e) character(0))
-      )
-      if (verbose && is.null(trace_path)) {
-        trace_path <- .ferx_find_trace_from_lines(lines)
+      # Drain the outer wrapper's streams to prevent pipe buffer blocking.
+      # The inner process's stderr was already consumed by the wrapper, so
+      # the trace path comes from the sidecar file, not these streams.
+      tryCatch(bg$read_output_lines(), error = function(e) NULL)
+      tryCatch(bg$read_error_lines(),  error = function(e) NULL)
+      if (verbose && is.null(trace_path) &&
+          !is.null(sidecar_path) && file.exists(sidecar_path)) {
+        sp <- trimws(readLines(sidecar_path, warn = FALSE)[1L])
+        if (nzchar(sp) && file.exists(sp)) trace_path <- sp
       }
       if (verbose && !is.null(trace_path) && file.exists(trace_path)) {
         state <- .ferx_print_trace_tail(trace_path, tail_n, state)
       }
       Sys.sleep(poll_interval)
     }
-    bg$get_result()
-  }, interrupt = function(e) {
+    result <- bg$get_result()
+    if (!is.null(sidecar_path) && file.exists(sidecar_path))
+      unlink(sidecar_path)
+    result
+  }, interrupt = function(e) { # nocov start
     if (bg$is_alive()) bg$kill()
+    if (!is.null(sidecar_path) && file.exists(sidecar_path))
+      unlink(sidecar_path)
     message("\nFit interrupted by user.")
     NULL
-  })
+  }) # nocov end
 }
 
 .ferx_collect_rstudio <- function(handle, verbose) {
@@ -3034,13 +3081,10 @@ print.ferx_job <- function(x, ...) {
   cat("Call ferx_collect(handle) to retrieve the result.\n")
 
   # Show current trace progress when available.
-  # For the rstudio backend the sidecar file holds the trace CSV path once
-  # the background process has written its first row.  For the callr backend
-  # reading stderr is destructive and would interfere with ferx_collect(), so
-  # we skip the live trace there.
+  # Both backends write a sidecar file with the trace CSV path once the
+  # first iteration is recorded; read it non-destructively here.
   trace_path <- NULL
-  if (identical(x$backend, "rstudio") &&
-      !is.null(x$sidecar_path) &&
+  if (!is.null(x$sidecar_path) &&
       file.exists(x$sidecar_path)) {
     sp <- tryCatch(trimws(readLines(x$sidecar_path, warn = FALSE)[1L]),
                    error = function(e) "")
