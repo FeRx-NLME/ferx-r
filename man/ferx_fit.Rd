@@ -348,17 +348,17 @@ error models report \code{c("proportional", "additive")} in that order.}
 \item{sdtab}{Data frame with ID, TIME, DV, PRED, IPRED, CWRES, IWRES,
 EBE_OFV, N_OBS; OCC if any subject carries an occasion column; CENS
 if any rows are below LLOQ; CMT if the dataset has more than one
-endpoint (any observation with \code{CMT != 1}).  ETA columns (one per
-random effect, named after the model declarations, e.g. \code{ETA_CL})
-are included automatically.  TAFD (time after first dose) and TAD (time
-after last dose, SS-aware) are included automatically.  Columns declared
-in \code{[derived]} (per-row expressions, aggregates, integrals) and
-\code{[output]} (individual PK parameters or covariates echoed by name)
-appear at the end of the data frame in declaration order.
-Note: ETA values are also available as a dedicated per-subject data
-frame in \code{fit$ebe_etas} (one row per subject, no row duplication);
-per-subject individual parameter values are in
-\code{fit$individual_estimates}.}
+endpoint (any observation with \code{CMT != 1}).  TAFD (time after
+first dose) and TAD (time after last dose, SS-aware) are included
+automatically.  Columns declared in \code{[derived]} (per-row
+expressions, aggregates, integrals) and \code{[output]} (individual
+PK parameters or covariates echoed by name) appear at the end of the
+data frame in declaration order.
+Note: per-subject ETA (EBE) values are in \code{fit$ebe_etas} (one
+row per subject, no row duplication); per-subject individual parameter
+values are in \code{fit$individual_estimates}.  ETAs are available as
+read-only context variables inside \code{[derived]} expressions but
+are not written as sdtab columns.}
 \item{ebe_etas}{Data frame with one row per subject containing the BSV
 empirical Bayes estimates: \code{ID} plus one column per eta named
 after the model's eta declarations (e.g. \code{ETA_CL}, \code{ETA_V}).

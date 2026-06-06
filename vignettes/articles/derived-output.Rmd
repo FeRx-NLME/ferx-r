@@ -32,9 +32,12 @@ The resulting columns appear at the end of `fit$sdtab` in declaration order.
 
 Even without a `[derived]` or `[output]` block, the sdtab includes:
 
-- **ETA columns** - one per random effect (e.g. `ETA_CL`, `ETA_V`).
 - **TAFD** - time after first dose for each observation record.
 - **TAD** - time after last dose (steady-state-aware).
+
+Per-subject ETA (EBE) values live in `fit$ebe_etas`, not in sdtab.
+ETAs are available as read-only variables inside `[derived]` expressions
+(e.g. `ETA_CL` in a formula), but are not emitted as sdtab columns.
 
 ---
 
@@ -259,7 +262,7 @@ is still written but you do not need to declare it.
 |---|---|---|
 | `E_DERIVED_NAME_CONFLICT` | error | `[derived]` name clashes with a built-in column, theta, eta, or indiv-param name |
 | `E_OUTPUT_UNKNOWN_COLUMN` | error | Name in `[output]` not recognised |
-| `W_OUTPUT_DUPLICATE` | warning | Name in `[output]` already in the mandatory sdtab minimum |
+| `W_OUTPUT_DUPLICATE` | warning | Name in `[output]` already in mandatory sdtab, or is an ETA (ETAs live in `fit$ebe_etas`, not sdtab) |
 | `W_DERIVED_COVARIATE_SHADOW` | warning | `[derived]` name shadows a covariate (allowed but may confuse) |
 | `W_DERIVED_STEP_IGNORED` | warning | `step=` given for a DV-based integral; ignored |
 | `W_ADDL_MISSING_II` | warning | ADDL > 0 but II is zero; additional doses not expanded |
@@ -300,15 +303,24 @@ print(pk_summary)
 
 ---
 
-## Using ETAs from sdtab
+## Accessing ETAs
 
-ETA columns are included automatically in sdtab, so you can use them
-directly without reaching into `fit$ebe_etas`:
+Per-subject ETA values are in `fit$ebe_etas` (one row per subject, named
+after the model declarations):
 
 ```{r eta-example, eval = FALSE}
 # Shrinkage-aware correlation: ETA_CL vs. body weight
-plot(fit$sdtab$WT, fit$sdtab$ETA_CL,
+# Merge ebe_etas onto the per-subject row of sdtab (or your covariate table)
+subj <- fit$sdtab[!duplicated(fit$sdtab$ID), ]
+eta_df <- merge(subj, fit$ebe_etas, by = "ID")
+
+plot(eta_df$WT, eta_df$ETA_CL,
      xlab = "WT (kg)", ylab = "ETA_CL",
      main = "ETA_CL vs. body weight")
 abline(h = 0, lty = 2)
 ```
+
+ETAs are also available as **read-only context variables** inside `[derived]`
+expressions -- you can write `KE_EFF = CL * exp(ETA_CL) / V` if you need the
+eta-perturbed rate. Using an ETA name in `[output]` fires `W_OUTPUT_DUPLICATE`
+because the value is already in `fit$ebe_etas`.
