@@ -3035,10 +3035,10 @@ print.ferx_job <- function(x, ...) {
     tr <- tryCatch(ferx_trace(trace_path), error = function(e) NULL)
     if (!is.null(tr) && nrow(tr) > 0L) {
       cat("\n")
-      tbl <- ferx:::.runlog_iter_table(tr, truncate = TRUE,
-                                       trunc_total = 20L,
-                                       trunc_head  = 5L,
-                                       trunc_tail  = 5L)
+      tbl <- .runlog_iter_table(tr, truncate = TRUE,
+                                trunc_total = 20L,
+                                trunc_head  = 5L,
+                                trunc_tail  = 5L)
       cat(paste(tbl, collapse = "\n"), "\n")
       cat(sprintf("  %d iteration(s) so far\n", nrow(tr)))
     }

@@ -428,3 +428,150 @@ test_that("ferx_runlog omits model file section gracefully when model_text NULL"
   # rest of runlog must still be intact
   expect_match(out, "PARAMETER ESTIMATES", fixed = TRUE)
 })
+
+# -- Tier 2: iteration history -----------------------------------------------
+
+test_that("ferx_runlog iteration section absent when no trace_path", {
+  fit <- warfarin_fit()
+  fit$trace_path <- NULL
+  out <- ferx_runlog(fit, verbose = FALSE)
+  expect_no_match(out, "ITERATION HISTORY", fixed = TRUE)
+})
+
+test_that("ferx_runlog iteration section absent when show_iterations = FALSE", {
+  path <- write_fake_trace()
+  on.exit(unlink(path))
+  fit <- warfarin_fit()
+  fit$trace_path <- path
+  out <- ferx_runlog(fit, show_iterations = FALSE, verbose = FALSE)
+  expect_no_match(out, "ITERATION HISTORY", fixed = TRUE)
+})
+
+test_that("ferx_runlog iteration section present with trace and show_iterations = TRUE", {
+  path <- write_fake_trace()
+  on.exit(unlink(path))
+  fit <- warfarin_fit()
+  fit$trace_path <- path
+  out <- ferx_runlog(fit, verbose = FALSE)
+  expect_match(out, "ITERATION HISTORY", fixed = TRUE)
+  expect_match(out, "GRAD_NORM",         fixed = TRUE)
+  expect_match(out, "STEP_NORM",         fixed = TRUE)
+  expect_match(out, "Total:",            fixed = TRUE)
+})
+
+test_that("ferx_runlog iteration section absent when trace file deleted", {
+  fit <- warfarin_fit()
+  fit$trace_path <- file.path(tempdir(), "nonexistent_trace.csv")
+  out <- ferx_runlog(fit, verbose = FALSE)
+  expect_no_match(out, "ITERATION HISTORY", fixed = TRUE)
+})
+
+test_that(".runlog_iter_table: FOCE/FOCEI header has GRAD_NORM and STEP_NORM", {
+  path <- write_fake_trace(n = 5, method = "focei")
+  on.exit(unlink(path))
+  tr  <- read.csv(path, stringsAsFactors = FALSE)
+  tbl <- ferx:::.runlog_iter_table(tr, truncate = FALSE)
+  expect_match(tbl[1], "GRAD_NORM", fixed = TRUE)
+  expect_match(tbl[1], "STEP_NORM", fixed = TRUE)
+  expect_no_match(tbl[1], "LM_LAMBDA",  fixed = TRUE)
+  expect_no_match(tbl[1], "MH_ACCEPT",  fixed = TRUE)
+  expect_match(tbl[1], "dOFV",      fixed = TRUE)
+})
+
+test_that(".runlog_iter_table: GN header has LM_LAMBDA and ACC, not GRAD_NORM", {
+  path <- write_fake_trace(n = 5, method = "gn")
+  on.exit(unlink(path))
+  tr <- read.csv(path, stringsAsFactors = FALSE)
+  tr$lm_lambda     <- c(1, 2, 4, 8, 16)
+  tr$ofv_delta     <- c(NA, -5, -3, -1, -0.5)
+  tr$step_accepted <- c(NA_integer_, 1L, 1L, 1L, 0L)
+  tr$grad_norm     <- NA_real_
+  tr$step_norm     <- NA_real_
+  tbl <- ferx:::.runlog_iter_table(tr, truncate = FALSE)
+  expect_match(tbl[1], "LM_LAMBDA", fixed = TRUE)
+  expect_match(tbl[1], "ACC",       fixed = TRUE)
+  expect_no_match(tbl[1], "GRAD_NORM", fixed = TRUE)
+  # YES/NO in data rows
+  rows <- tbl[-(1:2)]
+  expect_true(any(grepl("YES", rows, fixed = TRUE)))
+  expect_true(any(grepl("NO",  rows, fixed = TRUE)))
+})
+
+test_that(".runlog_iter_table: SAEM header uses COND_NLL and dCOND_NLL", {
+  path <- write_fake_trace(n = 6, method = "saem")
+  on.exit(unlink(path))
+  tr <- read.csv(path, stringsAsFactors = FALSE)
+  tr$phase          <- c(rep("explore", 3), rep("accumulate", 3))
+  tr$gamma          <- seq(1.0, by = -0.1, length.out = 6)
+  tr$mh_accept_rate <- rep(0.35, 6)
+  tr$cond_nll       <- tr$ofv
+  tbl <- ferx:::.runlog_iter_table(tr, truncate = FALSE)
+  expect_match(tbl[1], "COND_NLL",  fixed = TRUE)
+  expect_match(tbl[1], "dCOND_NLL", fixed = TRUE)
+  expect_match(tbl[1], "MH_ACCEPT", fixed = TRUE)
+  expect_no_match(tbl[1], "dOFV",   fixed = TRUE)
+})
+
+test_that(".runlog_iter_table truncates long traces correctly", {
+  path <- write_fake_trace(n = 40)
+  on.exit(unlink(path))
+  tr  <- read.csv(path, stringsAsFactors = FALSE)
+  tbl <- ferx:::.runlog_iter_table(tr, truncate = TRUE,
+                                   trunc_total = 30L, trunc_head = 10L,
+                                   trunc_tail  = 10L)
+  expect_true(any(grepl("rows not shown", tbl, fixed = TRUE)))
+  # head rows (iter 1-10) and tail rows (iter 31-40) present
+  expect_true(any(grepl("^  +1 ", tbl)))
+  expect_true(any(grepl("^  +40 ", tbl)))
+})
+
+test_that(".runlog_iter_table shows all rows when truncate = FALSE", {
+  path <- write_fake_trace(n = 40)
+  on.exit(unlink(path))
+  tr  <- read.csv(path, stringsAsFactors = FALSE)
+  tbl <- ferx:::.runlog_iter_table(tr, truncate = FALSE)
+  expect_false(any(grepl("rows not shown", tbl, fixed = TRUE)))
+  # 40 data rows + 1 header + 1 bar = 42 elements
+  expect_equal(length(tbl), 42L)
+})
+
+test_that(".runlog_iter_table output is pure ASCII", {
+  path <- write_fake_trace(n = 5)
+  on.exit(unlink(path))
+  tr  <- read.csv(path, stringsAsFactors = FALSE)
+  tbl <- ferx:::.runlog_iter_table(tr, truncate = FALSE)
+  out <- paste(tbl, collapse = "\n")
+  expect_false(nchar(out, type = "bytes") != nchar(out, type = "chars"))
+})
+
+test_that("ferx_runlog_iters returns invisible character string", {
+  path <- write_fake_trace()
+  on.exit(unlink(path))
+  out <- ferx_runlog_iters(path, verbose = FALSE)
+  expect_type(out, "character")
+  expect_length(out, 1L)
+  expect_match(out, "ITERATION HISTORY", fixed = TRUE)
+})
+
+test_that("ferx_runlog_iters verbose=TRUE prints and returns invisibly", {
+  path <- write_fake_trace()
+  on.exit(unlink(path))
+  expect_output(ferx_runlog_iters(path, verbose = TRUE), regexp = "ITERATION HISTORY")
+})
+
+test_that("ferx_runlog_iters errors on fit without trace", {
+  fit <- warfarin_fit()
+  fit$trace_path <- NULL
+  expect_error(ferx_runlog_iters(fit), regexp = "No trace file found")
+})
+
+test_that("ferx_runlog_iters errors on non-ferx_fit non-string input", {
+  expect_error(ferx_runlog_iters(42L), regexp = "ferx_fit object or a path")
+})
+
+test_that("ferx_runlog_iters output is pure ASCII", {
+  path <- write_fake_trace()
+  on.exit(unlink(path))
+  out <- ferx_runlog_iters(path, verbose = FALSE)
+  expect_false(nchar(out, type = "bytes") != nchar(out, type = "chars"))
+})

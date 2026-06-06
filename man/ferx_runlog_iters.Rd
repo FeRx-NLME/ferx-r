@@ -20,8 +20,7 @@ A character string (invisibly when \code{verbose = TRUE}).
 Displays (or returns) the complete per-iteration table from the optimizer
 trace CSV.  Unlike the "Iteration history" section in
 \code{\link{ferx_runlog}}, this function never truncates: every iteration
-row is shown together with all available columns (\code{wall_ms},
-\code{n_ebe_fallback}, etc.).
+row is shown without omission.
 }
 \examples{
 \dontrun{

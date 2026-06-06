@@ -465,8 +465,7 @@ ferx_runlog <- function(fit, gradient_tol = 0.1, show_iterations = TRUE, verbose
 #' Displays (or returns) the complete per-iteration table from the optimizer
 #' trace CSV.  Unlike the "Iteration history" section in
 #' \code{\link{ferx_runlog}}, this function never truncates: every iteration
-#' row is shown together with all available columns (\code{wall_ms},
-#' \code{n_ebe_fallback}, etc.).
+#' row is shown without omission.
 #'
 #' @param fit A \code{ferx_fit} object returned by \code{\link{ferx_fit}} with
 #'   \code{optimizer_trace = TRUE}, or a path to a trace CSV file.
@@ -547,8 +546,9 @@ ferx_runlog_iters <- function(fit, verbose = TRUE) {
                      any(nzchar(tr$phase) & !is.na(tr$phase))
 
   # Header
-  ofv_label <- if (is_saem) "COND_NLL" else "OFV"
-  hdr <- sprintf("  %4s  %13s  %13s", "ITER", ofv_label, "dOFV")
+  ofv_label  <- if (is_saem) "COND_NLL"  else "OFV"
+  dofv_label <- if (is_saem) "dCOND_NLL" else "dOFV"
+  hdr <- sprintf("  %4s  %13s  %13s", "ITER", ofv_label, dofv_label)
   bar <- sprintf("  %4s  %13s  %13s", "----", "-------------", "-------------")
 
   add_col <- function(label, w) {
