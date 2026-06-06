@@ -65,3 +65,39 @@ test_that("ferx_fit with NA data_path errors informatively", {
 test_that("list with invalid $data errors informatively", {
   expect_error(ferx_columns(list(data = 123L)), regexp = "\\$data")
 })
+
+test_that("empty file errors informatively", {
+  tmp <- tempfile(fileext = ".csv")
+  file.create(tmp)
+  on.exit(unlink(tmp))
+  expect_error(ferx_columns(tmp), regexp = "appears to be empty")
+})
+
+test_that("whitespace-only header errors informatively", {
+  tmp <- tempfile(fileext = ".csv")
+  writeLines("   ", tmp)
+  on.exit(unlink(tmp))
+  expect_error(ferx_columns(tmp), regexp = "appears to be empty")
+})
+
+test_that("long column names wrap at narrow console width", {
+  tmp <- tempfile(fileext = ".csv")
+  long_cols <- c("ID", "TIME", "DV", "EVID", "AMT", "CMT",
+                 "COVARIATE_ONE", "COVARIATE_TWO", "COVARIATE_THREE",
+                 "COVARIATE_FOUR", "COVARIATE_FIVE")
+  writeLines(paste(long_cols, collapse = ","), tmp)
+  on.exit(unlink(tmp))
+  old_width <- options(width = 50L)
+  on.exit(options(old_width), add = TRUE)
+  out <- capture.output(cols <- ferx_columns(tmp))
+  expect_identical(cols, long_cols)
+  expect_true(length(out) > 5L)
+})
+
+test_that("single-column file prints 'column' not 'columns'", {
+  tmp <- tempfile(fileext = ".csv")
+  writeLines("ID", tmp)
+  on.exit(unlink(tmp))
+  out <- capture.output(ferx_columns(tmp))
+  expect_true(any(grepl("^1 column$", out)))
+})
