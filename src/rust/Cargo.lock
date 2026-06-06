@@ -309,6 +309,7 @@ dependencies = [
 [[package]]
 name = "ferx-core"
 version = "0.1.5"
+source = "git+https://github.com/FeRx-NLME/ferx-core?branch=main#e572dde4606e83d62c5aa5c3dddecfdfae29c2a2"
 dependencies = [
  "argmin",
  "argmin-math",
