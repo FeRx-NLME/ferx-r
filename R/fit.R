@@ -296,7 +296,18 @@
 #'   \code{.fitrx} bundle so the file is self-contained. Default
 #'   \code{FALSE}.
 #'
-#' @return A list with components:
+#' @return A named list. Where to find commonly-needed quantities:
+#'
+#'   | What you want | Accessor | Shape | When present |
+#'   |---|---|---|---|
+#'   | Residuals, PRED, IPRED, diagnostics | `fit$sdtab` | one row per observation | always |
+#'   | Covariates echoed per observation (via `[output]`) | `fit$sdtab` | one row per observation, LOCF | declared in `[output]` |
+#'   | Raw covariate values for all dataset records | `fit$covtab` | one row per dataset record (doses + obs) | model has `[covariates]` block |
+#'   | ETA / EBE values per observation row | `fit$sdtab` (`ETA_CL`, `ETA_V`, …) | one row per observation, value repeated | always |
+#'   | ETA / EBE values per subject | `fit$ebe_etas` | one row per subject | model declares etas |
+#'   | Individual PK parameters per subject | `fit$individual_estimates` | one row per subject | always |
+#'
+#'   Full slot descriptions:
 #'   \item{converged}{Logical; did the optimizer converge}
 #'   \item{method}{Estimation method used}
 #'   \item{n_iterations}{Number of outer iterations run}
@@ -330,11 +341,11 @@
 #'     expressions, aggregates, integrals) and \code{[output]} (individual
 #'     PK parameters or covariates echoed by name) appear at the end of the
 #'     data frame in declaration order.
-#'     Note: per-subject ETA (EBE) values are in \code{fit$ebe_etas} (one
-#'     row per subject, no row duplication); per-subject individual parameter
-#'     values are in \code{fit$individual_estimates}.  ETAs are available as
-#'     read-only context variables inside \code{[derived]} expressions but
-#'     are not written as sdtab columns.}
+#'     ETA columns (\code{ETA_CL}, \code{ETA_V}, etc.) are included
+#'     automatically — the same EBE value is repeated for every observation
+#'     row of that subject. For a compact per-subject view use
+#'     \code{fit$ebe_etas}; for individual PK parameter values use
+#'     \code{fit$individual_estimates}.}
 #'   \item{covtab}{Data frame echoing the declared covariate columns, present
 #'     only when the model has a \code{[covariates]} block. Columns: \code{ID},
 #'     \code{TIME}, \code{EVID}, then one column per declared covariate (in
