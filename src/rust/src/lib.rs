@@ -968,7 +968,10 @@ fn sim_results_to_df(results: &[ferx_core::api::SimulationResult]) -> Robj {
     let id: Vec<String> = results.iter().map(|r| r.id.clone()).collect();
     let time: Vec<f64> = results.iter().map(|r| r.time).collect();
     let ipred: Vec<f64> = results.iter().map(|r| r.ipred).collect();
-    let dv_sim: Vec<f64> = results.iter().map(|r| r.dv_sim).collect();
+    // `SimulationResult` replaced the flat `dv_sim: f64` with `outcome: SimOutcome`
+    // (Gaussian vs TTE). `continuous_value()` returns the Gaussian value (NAN for
+    // non-Gaussian outcomes), preserving the DV_SIM column for the existing paths.
+    let dv_sim: Vec<f64> = results.iter().map(|r| r.outcome.continuous_value()).collect();
 
     // DRAW is leading because for legacy `simulate*` paths every row is
     // DRAW = 1 and downstream code can ignore the column; for
