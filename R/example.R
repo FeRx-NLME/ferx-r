@@ -80,10 +80,8 @@
 #'   \item{warfarin_addl}{One-compartment oral (warfarin) with ADDL-column
 #'     dosing. A single EVID=1 row with ADDL=6, II=24 is expanded to seven
 #'     daily doses at read time; TAD resets at each expanded dose automatically.
-#'     Demonstrates CMIN_TAU using \code{1e-10} tolerance for floating-point
-#'     boundary comparisons. Note: a matching ADDL-format dataset
-#'     (\code{warfarin_addl.csv}) is not yet bundled; supply your own
-#'     ADDL-format data file when using this model.}
+#'     Demonstrates daily trough accumulation over seven doses and CMIN_TAU
+#'     using \code{TAD < 1e-10} for floating-point-safe trough detection.}
 #'   \item{warfarin_ode_time}{One-compartment oral (warfarin) as an ODE model
 #'     demonstrating \code{TIME}, \code{T}, \code{TAFD}, and \code{TAD} inside
 #'     \code{[odes]} RHS expressions; accumulator compartments for AUC and
@@ -144,8 +142,6 @@ ferx_example <- function(name = NULL) {
 
   # Some example model files share a dataset with an existing example.
   # Maps example name -> data file name (without .csv extension).
-  # "warfarin_addl" is intentionally absent: it requires its own ADDL-format
-  # dataset that is not yet bundled.
   .data_aliases <- list(
     warfarin_derived        = "warfarin",
     warfarin_derived_pkpd   = "warfarin",
