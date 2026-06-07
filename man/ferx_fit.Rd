@@ -392,6 +392,24 @@ covariate to its type, \code{"continuous"} or \code{"categorical"} (the
 type from the \code{[covariates]} block). Parallel to the covariate
 columns of \code{covtab}. \code{NULL} when no \code{[covariates]} block
 is declared.}
+\item{vine_copula}{Fitted vine-copula between-subject-variability structure,
+present only for a vine SAEM fit (\code{method = "saem"} with
+\code{omega_dist = "vine"}); \code{NULL} otherwise. A list of three data
+frames: \code{$marginals} (\code{eta}, \code{mean}, \code{sd} -- the
+fitted marginal Gaussian per random effect), \code{$pairs} (one row per
+pair-copula across all vine tree levels: \code{tree}, \code{pair},
+\code{family}, \code{kendall_tau}, \code{tail_dep_lower},
+\code{tail_dep_upper}), and \code{$params} (long form: \code{tree},
+\code{pair}, \code{parameter}, \code{estimate}, \code{se} -- the copula
+parameters with approximate standard errors). See the ferx-core
+"Vine-Copula SAEM" page for the model and interpretation.}
+\item{vine_corrected_ofv}{Numeric scalar: the FOCE OFV with the Gaussian
+eta prior replaced by the fitted vine (copula) prior at the final EBEs.
+Unlike \code{ofv} (which uses the Gaussian prior for both Gaussian and
+vine fits and so understates the vine's advantage), this value is
+directly comparable to the \code{ofv} of a Gaussian SAEM fit on the same
+data: \code{gaussian_fit$ofv - vine_fit$vine_corrected_ofv} quantifies the
+improvement from the copula. \code{NULL} for non-vine fits.}
 \item{ebe_etas}{Data frame with one row per subject containing the BSV
 empirical Bayes estimates: \code{ID} plus one column per eta named
 after the model's eta declarations (e.g. \code{ETA_CL}, \code{ETA_V}).

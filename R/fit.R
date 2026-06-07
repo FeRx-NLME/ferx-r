@@ -358,6 +358,24 @@
 #'     type from the \code{[covariates]} block). Parallel to the covariate
 #'     columns of \code{covtab}. \code{NULL} when no \code{[covariates]} block
 #'     is declared.}
+#'   \item{vine_copula}{Fitted vine-copula between-subject-variability structure,
+#'     present only for a vine SAEM fit (\code{method = "saem"} with
+#'     \code{omega_dist = "vine"}); \code{NULL} otherwise. A list of three data
+#'     frames: \code{$marginals} (\code{eta}, \code{mean}, \code{sd} -- the
+#'     fitted marginal Gaussian per random effect), \code{$pairs} (one row per
+#'     pair-copula across all vine tree levels: \code{tree}, \code{pair},
+#'     \code{family}, \code{kendall_tau}, \code{tail_dep_lower},
+#'     \code{tail_dep_upper}), and \code{$params} (long form: \code{tree},
+#'     \code{pair}, \code{parameter}, \code{estimate}, \code{se} -- the copula
+#'     parameters with approximate standard errors). See the ferx-core
+#'     "Vine-Copula SAEM" page for the model and interpretation.}
+#'   \item{vine_corrected_ofv}{Numeric scalar: the FOCE OFV with the Gaussian
+#'     eta prior replaced by the fitted vine (copula) prior at the final EBEs.
+#'     Unlike \code{ofv} (which uses the Gaussian prior for both Gaussian and
+#'     vine fits and so understates the vine's advantage), this value is
+#'     directly comparable to the \code{ofv} of a Gaussian SAEM fit on the same
+#'     data: \code{gaussian_fit$ofv - vine_fit$vine_corrected_ofv} quantifies the
+#'     improvement from the copula. \code{NULL} for non-vine fits.}
 #'   \item{ebe_etas}{Data frame with one row per subject containing the BSV
 #'     empirical Bayes estimates: \code{ID} plus one column per eta named
 #'     after the model's eta declarations (e.g. \code{ETA_CL}, \code{ETA_V}).
@@ -1768,6 +1786,13 @@ ferx_fit <- function(model, data = NULL,
   result$model_hash <- empty_to_null(result$model_hash) %||% NA_character_
   result$data_hash <- empty_to_null(result$data_hash) %||% NA_character_
 
+  # Vine-copula BSV summary (omega_dist = vine). The Rust binding returns flat
+  # parallel vectors (or NULL for a Gaussian fit); reshape into the tidy
+  # list-of-data-frames the rest of the package consumes. vine_corrected_ofv is
+  # a scalar passed straight through (NULL for non-vine fits).
+  result$vine_copula <- .ferx_reshape_vine(raw$vine_copula)
+  result$vine_corrected_ofv <- .fitrx_opt_num(raw$vine_corrected_ofv)
+
   # Assemble the structured-warning table. Core supplies severity/category for
   # every warning it emitted (including Durbin-Watson autocorrelation); the R
   # side appends only the diagnostics it computes itself (condition number,
@@ -1950,6 +1975,51 @@ ferx_fit <- function(model, data = NULL,
       p_val = round(sw$p.value, 4), flag = flg, stringsAsFactors = FALSE
     )
   }))
+}
+
+# Reshape the flat parallel vectors returned by the Rust binding's `vine_copula`
+# field into the tidy list-of-data-frames surfaced as `fit$vine_copula`:
+#
+#   $marginals : data.frame(eta, mean, sd)                       -- per ETA
+#   $pairs     : data.frame(tree, pair, family, kendall_tau,     -- per pair
+#                           tail_dep_lower, tail_dep_upper)         copula
+#   $params    : data.frame(tree, pair, parameter, estimate, se) -- long form
+#
+# Returns NULL for a Gaussian fit (the binding sends NULL). Extendr delivers the
+# nested list elements as length-1 lists under some builds, so each vector is
+# coerced explicitly.
+.ferx_reshape_vine <- function(raw_vine) {
+  if (is.null(raw_vine) || length(raw_vine) == 0L) {
+    return(NULL)
+  }
+  num <- function(x) as.numeric(unlist(x, use.names = FALSE))
+  chr <- function(x) as.character(unlist(x, use.names = FALSE))
+  int <- function(x) as.integer(unlist(x, use.names = FALSE))
+
+  marginals <- data.frame(
+    eta  = chr(raw_vine$marginal_eta),
+    mean = num(raw_vine$marginal_mean),
+    sd   = num(raw_vine$marginal_sd),
+    stringsAsFactors = FALSE
+  )
+  pairs <- data.frame(
+    tree           = int(raw_vine$pair_tree),
+    pair           = chr(raw_vine$pair_label),
+    family         = chr(raw_vine$pair_family),
+    kendall_tau    = num(raw_vine$pair_kendall_tau),
+    tail_dep_lower = num(raw_vine$pair_tail_lower),
+    tail_dep_upper = num(raw_vine$pair_tail_upper),
+    stringsAsFactors = FALSE
+  )
+  params <- data.frame(
+    tree      = int(raw_vine$param_tree),
+    pair      = chr(raw_vine$param_label),
+    parameter = chr(raw_vine$param_name),
+    estimate  = num(raw_vine$param_value),
+    se        = num(raw_vine$param_se),
+    stringsAsFactors = FALSE
+  )
+  list(marginals = marginals, pairs = pairs, params = params)
 }
 
 #' @export
@@ -2283,6 +2353,54 @@ print.ferx_fit <- function(x, ...) {
         }, character(1L))
         cat(sprintf("  Occasion %d: %s\n", df_occ$occ[row_i], paste(parts, collapse = "  ")))
       }
+    }
+  }
+
+  # VINE COPULA (non-Gaussian BSV dependence; omega_dist = vine). Replaces the
+  # MVN Omega correlation structure with a fitted D-vine copula, so it is shown
+  # right after the OMEGA block. NULL for Gaussian fits.
+  if (!is.null(x$vine_copula)) {
+    vc <- x$vine_copula
+    cat("\n", .ferx_style("VINE COPULA  (non-Gaussian BSV dependence)", "bold"), "\n", sep = "")
+    cat(strrep("-", 60), "\n", sep = "")
+
+    # Marginals: fitted Gaussian SD per random effect.
+    if (!is.null(vc$marginals) && nrow(vc$marginals) > 0L) {
+      cat("  Marginals (Gaussian):\n")
+      for (i in seq_len(nrow(vc$marginals))) {
+        cat(sprintf(
+          "    %-12s sd = %.4f\n",
+          vc$marginals$eta[i], vc$marginals$sd[i]
+        ))
+      }
+    }
+
+    # Pair-copulas, one line each: family, Kendall's tau, tail dependence.
+    if (!is.null(vc$pairs) && nrow(vc$pairs) > 0L) {
+      cat("  Pair-copulas:\n")
+      for (i in seq_len(nrow(vc$pairs))) {
+        p <- vc$pairs[i, ]
+        tail_bits <- character(0L)
+        if (is.finite(p$tail_dep_lower) && p$tail_dep_lower > 0) {
+          tail_bits <- c(tail_bits, sprintf("lambda_L=%.3f", p$tail_dep_lower))
+        }
+        if (is.finite(p$tail_dep_upper) && p$tail_dep_upper > 0) {
+          tail_bits <- c(tail_bits, sprintf("lambda_U=%.3f", p$tail_dep_upper))
+        }
+        tail_str <- if (length(tail_bits)) paste0("  [", paste(tail_bits, collapse = ", "), "]") else ""
+        cat(sprintf(
+          "    T%d  %-22s %-10s tau = %+.3f%s\n",
+          p$tree, p$pair, p$family, p$kendall_tau, tail_str
+        ))
+      }
+    }
+
+    # Corrected OFV: comparable to a Gaussian fit's OFV on the same data.
+    if (!is.null(x$vine_corrected_ofv) && is.finite(x$vine_corrected_ofv)) {
+      cat(sprintf(
+        "  Vine-corrected OFV: %.3f  (comparable to a Gaussian fit's OFV)\n",
+        x$vine_corrected_ofv
+      ))
     }
   }
 

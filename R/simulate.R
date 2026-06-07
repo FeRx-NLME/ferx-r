@@ -36,6 +36,10 @@ ferx_simulate <- function(model, data, n_sim = 1L, seed = 42L, fit = NULL) {
   }
 
   fit_pieces <- validate_fit_for_params(fit)
+  # When the fit carries a vine copula (omega_dist = "vine"), pass its summary so
+  # the random effects are drawn from the fitted copula rather than N(0, Omega).
+  # Empty vectors for a Gaussian fit -> the Rust side falls back to the normal.
+  vine_flat <- .ferx_vine_flat(fit$vine_copula)
   ferx_rust_simulate_from_fit(
     model_path = normalizePath(model),
     data_path = normalizePath(data),
@@ -44,7 +48,16 @@ ferx_simulate <- function(model, data, n_sim = 1L, seed = 42L, fit = NULL) {
     omega_dim = fit_pieces$omega_dim,
     sigma = fit_pieces$sigma,
     n_sim = as.integer(n_sim),
-    seed = as.integer(seed)
+    seed = as.integer(seed),
+    vine_marg_mean   = vine_flat$marg_mean,
+    vine_marg_sd     = vine_flat$marg_sd,
+    vine_pair_tree   = vine_flat$pair_tree,
+    vine_pair_label  = vine_flat$pair_label,
+    vine_pair_family = vine_flat$pair_family,
+    vine_param_tree  = vine_flat$param_tree,
+    vine_param_label = vine_flat$param_label,
+    vine_param_name  = vine_flat$param_name,
+    vine_param_value = vine_flat$param_value
   )
 }
 
