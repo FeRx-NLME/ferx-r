@@ -152,6 +152,9 @@ ferx_inits_from_nca <- function(model, data = NULL,
   )
 }
 
+#' @rdname ferx_inits_from_nca
+#' @param x A `ferx_inits` object returned by `ferx_inits_from_nca()`.
+#' @param ... Ignored.
 #' @export
 print.ferx_inits <- function(x, ...) {
   cat(sprintf(

@@ -3200,6 +3200,9 @@ ferx_collect <- function(handle, verbose = TRUE) {
   })
 }
 
+#' @rdname ferx_fit_async
+#' @param x A `ferx_job` handle returned by `ferx_fit_async()`.
+#' @param ... Ignored.
 #' @export
 print.ferx_job <- function(x, ...) {
   status <- if (x$backend == "callr") {

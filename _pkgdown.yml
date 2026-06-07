@@ -8,6 +8,7 @@ reference:
     contents:
       - ferx_fit
       - ferx_fit_async
+      - print.ferx_job
       - ferx_collect
       - ferx_sir
       - summary.ferx_fit
@@ -60,6 +61,7 @@ reference:
       - ferx_columns
       - ferx_check_init
       - ferx_inits_from_nca
+      - print.ferx_inits
       - ferx_save_fit
       - ferx_load_fit
 
