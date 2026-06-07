@@ -2,19 +2,26 @@
 % Please edit documentation in R/fit.R
 \name{ferx_fit_async}
 \alias{ferx_fit_async}
+\alias{print.ferx_job}
 \title{Fit a model asynchronously}
 \usage{
 ferx_fit_async(model, data = NULL, ..., tail_n = 6L, poll_interval = 0.5)
+
+\method{print}{ferx_job}(x, ...)
 }
 \arguments{
 \item{model, data, ...}{Forwarded to \code{\link{ferx_fit}}. See its
 documentation for the full argument list.}
+
+\item{...}{Ignored.}
 
 \item{tail_n}{Integer. Number of recent trace rows to keep visible per
 poll in \code{\link{ferx_collect}}. Default 6.}
 
 \item{poll_interval}{Numeric. Seconds between polls in
 \code{\link{ferx_collect}}. Default 0.5.}
+
+\item{x}{A \code{ferx_job} handle returned by \code{ferx_fit_async()}.}
 }
 \value{
 A \code{ferx_job} handle. Pass it to \code{\link{ferx_collect}}

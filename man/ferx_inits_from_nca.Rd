@@ -2,6 +2,7 @@
 % Please edit documentation in R/inits.R
 \name{ferx_inits_from_nca}
 \alias{ferx_inits_from_nca}
+\alias{print.ferx_inits}
 \title{Derive NCA-based starting values without fitting}
 \usage{
 ferx_inits_from_nca(
@@ -9,6 +10,8 @@ ferx_inits_from_nca(
   data = NULL,
   method = c("nca_sweep", "nca", "nca_ebe")
 )
+
+\method{print}{ferx_inits}(x, ...)
 }
 \arguments{
 \item{model}{A path to a \code{.ferx} model file, or a \code{ferx_model}
@@ -20,6 +23,10 @@ object created with \code{\link{ferx_model}}.}
 
 \item{method}{One of \code{"nca_sweep"} (default), \code{"nca"}, or
 \code{"nca_ebe"}. See Details.}
+
+\item{x}{A \code{ferx_inits} object returned by \code{ferx_inits_from_nca()}.}
+
+\item{...}{Ignored.}
 }
 \value{
 An object of class \code{ferx_inits}: a list with elements
