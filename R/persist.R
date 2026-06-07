@@ -87,6 +87,14 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
     entries <- c(entries, "covtab.csv")
   }
 
+  # vine.json - present only for a vine SAEM fit (omega_dist = vine). The vine
+  # summary is three small data frames (marginals / pairs / params); JSON
+  # preserves that nested shape with one artifact (vs. three CSVs).
+  if (!is.null(fit$vine_copula)) {
+    .fitrx_write_vine_json(fit, file.path(staging, "vine.json"))
+    entries <- c(entries, "vine.json")
+  }
+
   # model.ferx
   #
   # Prefer `file.copy(fit$model_path, ...)` so the bundled bytes match
@@ -252,6 +260,13 @@ ferx_load_fit <- function(path) {
     result$ebe_kappas <- NULL
   }
 
+  # vine.json - fitted vine-copula summary (omega_dist = vine). Absent for
+  # Gaussian fits, leaving result$vine_copula NULL (set by .fitrx_wire_to_fit).
+  vine_path <- file.path(staging, "vine.json")
+  if (file.exists(vine_path)) {
+    result$vine_copula <- .fitrx_read_vine_json(vine_path)
+  }
+
   # Model source + optional data CSV.
   #
   # Both files are bundled into the .fitrx archive. Persist each to a
@@ -362,6 +377,9 @@ ferx_load_fit <- function(path) {
     ),
     error_model = .fitrx_error_model_from_sigma_types(fit$sigma_types),
     shrinkage_eps = as.numeric(fit$shrinkage_eps %||% NA_real_),
+    # Vine-corrected OFV (omega_dist = vine); NULL for non-vine fits. The vine
+    # summary tables themselves round-trip via the bundle's vine.json entry.
+    vine_corrected_ofv = .fitrx_opt_num(fit$vine_corrected_ofv),
     dw_statistic = .fitrx_opt_num(fit$dw_statistic),
     iwres_lag1_r = .fitrx_opt_num(fit$iwres_lag1_r),
     covariance_matrix = .fitrx_matrix_to_wire(fit$cov_matrix),
@@ -485,6 +503,10 @@ ferx_load_fit <- function(path) {
     sigma_init_as_sd = as.logical(unlist(w$sigma$init_as_sd %||% list(), use.names = FALSE)),
 
     shrinkage_eps = as.numeric(w$shrinkage_eps),
+    # Vine: scalar from the wire; the summary tables (vine_copula) are restored
+    # from the bundle's vine.json after this list is built, NULL when absent.
+    vine_corrected_ofv = .fitrx_unwrap_opt_num(w$vine_corrected_ofv),
+    vine_copula = NULL,
     dw_statistic = .fitrx_unwrap_opt_num(w$dw_statistic),
     iwres_lag1_r = .fitrx_unwrap_opt_num(w$iwres_lag1_r),
     cov_matrix = .fitrx_matrix_from_wire(w$covariance_matrix),
@@ -644,6 +666,38 @@ ferx_load_fit <- function(path) {
   # Quote so a free-form character ID containing a comma/quote round-trips
   # intact; missing covariate values (NA/NaN) are written as empty cells.
   utils::write.csv(covtab, path, row.names = FALSE, na = "")
+}
+
+# Vine-copula summary (list of marginals / pairs / params data frames) as JSON.
+# jsonlite encodes each data frame as an array of row records; full f64 digits
+# so copula parameters round-trip exactly.
+.fitrx_write_vine_json <- function(fit, path) {
+  vine <- fit$vine_copula
+  if (is.null(vine)) {
+    return(invisible())
+  }
+  jsonlite::write_json(
+    vine, path,
+    auto_unbox = TRUE, pretty = TRUE, digits = NA, na = "null"
+  )
+}
+
+# Inverse of .fitrx_write_vine_json. simplifyDataFrame reconstructs each record
+# array back into a data frame matching the live-fit shape.
+.fitrx_read_vine_json <- function(path) {
+  vine <- jsonlite::read_json(
+    path,
+    simplifyVector = TRUE, simplifyDataFrame = TRUE, simplifyMatrix = FALSE
+  )
+  # Guard against an empty params table (0 copula params): jsonlite returns an
+  # empty list rather than a 0-row data frame; normalise to a typed data frame.
+  if (is.null(vine$params) || !is.data.frame(vine$params)) {
+    vine$params <- data.frame(
+      tree = integer(), pair = character(), parameter = character(),
+      estimate = numeric(), se = numeric(), stringsAsFactors = FALSE
+    )
+  }
+  vine
 }
 
 .fitrx_subject_string_ids <- function(fit) {

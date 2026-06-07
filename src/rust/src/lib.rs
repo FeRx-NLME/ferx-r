@@ -135,10 +135,7 @@ fn ferx_rust_fit(
     ];
     for (k, v) in settings_keys.iter().zip(settings_values.iter()) {
         let key = k.trim();
-        if RESERVED
-            .iter()
-            .any(|r| r.eq_ignore_ascii_case(key))
-        {
+        if RESERVED.iter().any(|r| r.eq_ignore_ascii_case(key)) {
             throw_r_error(format!(
                 "Error: setting `{key}` conflicts with a dedicated ferx_fit() argument — pass it via that argument instead"
             ));
@@ -334,12 +331,7 @@ fn ferx_rust_fit(
 /// @return Data frame with ID, TIME, IPRED, DV_SIM columns
 /// @export
 #[extendr]
-fn ferx_rust_simulate(
-    model_path: &str,
-    data_path: &str,
-    n_sim: i32,
-    seed: i32,
-) -> Robj {
+fn ferx_rust_simulate(model_path: &str, data_path: &str, n_sim: i32, seed: i32) -> Robj {
     // parse_full_model_file (vs parse_model_file) so we can thread iov_column
     // through to read_nonmem_csv — without it, models with kappa declarations
     // panic in pk_param_fn (Eta index >= n_bsv_eta).
@@ -386,6 +378,7 @@ fn ferx_rust_simulate(
 /// @export
 #[extendr]
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 fn ferx_rust_simulate_from_fit(
     model_path: &str,
     data_path: &str,
@@ -395,6 +388,18 @@ fn ferx_rust_simulate_from_fit(
     sigma: Vec<f64>,
     n_sim: i32,
     seed: i32,
+    // Vine-copula BSV summary (flat parallel vectors from `fit$vine_copula`);
+    // empty for a Gaussian fit. When present, random effects are drawn from the
+    // fitted vine instead of N(0, Omega).
+    vine_marg_mean: Vec<f64>,
+    vine_marg_sd: Vec<f64>,
+    vine_pair_tree: Vec<i32>,
+    vine_pair_label: Vec<String>,
+    vine_pair_family: Vec<String>,
+    vine_param_tree: Vec<i32>,
+    vine_param_label: Vec<String>,
+    vine_param_name: Vec<String>,
+    vine_param_value: Vec<f64>,
 ) -> Robj {
     let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
         Ok(p) => p,
@@ -414,13 +419,29 @@ fn ferx_rust_simulate_from_fit(
             }
         };
 
-    let params = match params_from_fit(&parsed.model, &theta, &omega_flat, omega_dim, &sigma) {
+    let mut params = match params_from_fit(&parsed.model, &theta, &omega_flat, omega_dim, &sigma) {
         Ok(p) => p,
         Err(e) => {
             rprintln!("{}", e);
             return ().into();
         }
     };
+
+    // Inject the fitted vine copula so simulate draws ETAs from it (rather than
+    // the Gaussian Omega). No-op when no vine summary was supplied.
+    if let Some(vine) = rebuild_vine(
+        &vine_marg_mean,
+        &vine_marg_sd,
+        &vine_pair_tree,
+        &vine_pair_label,
+        &vine_pair_family,
+        &vine_param_tree,
+        &vine_param_label,
+        &vine_param_name,
+        &vine_param_value,
+    ) {
+        params.vine_dist = Some(std::sync::Arc::new(vine));
+    }
 
     let results = ferx_core::simulate_with_seed(
         &parsed.model,
@@ -505,9 +526,7 @@ fn ferx_rust_simulate_with_uncertainty(
 
     // Decode the method string to the engine enum.
     let uncertainty_method = match method.trim().to_lowercase().as_str() {
-        "asymptotic" | "cov" | "covariance" => {
-            ferx_core::UncertaintyMethod::Asymptotic
-        }
+        "asymptotic" | "cov" | "covariance" => ferx_core::UncertaintyMethod::Asymptotic,
         "sir" => ferx_core::UncertaintyMethod::Sir,
         other => {
             rprintln!(
@@ -518,26 +537,25 @@ fn ferx_rust_simulate_with_uncertainty(
         }
     };
 
-    let fit_result =
-        match build_fit_result_for_uncertainty(
-            &parsed.model,
-            &theta,
-            &omega_flat,
-            omega_dim,
-            &sigma,
-            uncertainty_method,
-            &cov_matrix_flat,
-            cov_matrix_dim,
-            &sir_resamples_flat,
-            sir_resamples_n,
-            sir_resamples_dim,
-        ) {
-            Ok(f) => f,
-            Err(e) => {
-                rprintln!("{}", e);
-                return ().into();
-            }
-        };
+    let fit_result = match build_fit_result_for_uncertainty(
+        &parsed.model,
+        &theta,
+        &omega_flat,
+        omega_dim,
+        &sigma,
+        uncertainty_method,
+        &cov_matrix_flat,
+        cov_matrix_dim,
+        &sir_resamples_flat,
+        sir_resamples_n,
+        sir_resamples_dim,
+    ) {
+        Ok(f) => f,
+        Err(e) => {
+            rprintln!("{}", e);
+            return ().into();
+        }
+    };
 
     let opts = ferx_core::SimulateUncertaintyOptions {
         n_uncertainty_draws: n_uncertainty_draws.max(0) as usize,
@@ -562,10 +580,7 @@ fn ferx_rust_simulate_with_uncertainty(
 /// @return Data frame with ID, TIME, PRED columns
 /// @export
 #[extendr]
-fn ferx_rust_predict(
-    model_path: &str,
-    data_path: &str,
-) -> Robj {
+fn ferx_rust_predict(model_path: &str, data_path: &str) -> Robj {
     let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
         Ok(p) => p,
         Err(e) => {
@@ -737,7 +752,153 @@ fn params_from_fit(
         sigma_fixed: template.sigma_fixed.clone(),
         omega_iov: None,
         kappa_fixed: Vec::new(),
+        vine_dist: None,
     })
+}
+
+/// Rebuild a `VineCopulaOmega` from the flat parallel vectors the R side carries
+/// in `fit$vine_copula` (the same layout `vine_copula_robj` emits). Returns
+/// `None` when no vine is present (empty marginals). Used by both the vine
+/// density grid and vine-aware simulation so the fitted copula — which isn't
+/// serialized across the FFI as a live object — is reconstructed from its
+/// summary on demand.
+fn rebuild_vine(
+    marg_mean: &[f64],
+    marg_sd: &[f64],
+    pair_tree: &[i32],
+    pair_label: &[String],
+    pair_family: &[String],
+    param_tree: &[i32],
+    param_label: &[String],
+    param_name: &[String],
+    param_value: &[f64],
+) -> Option<ferx_core::stats::vine_copula::VineCopulaOmega> {
+    use ferx_core::stats::vine_copula::{
+        PairCopulaSummary, VineCopulaOmega, VineFitParams, VinePairEntry, VineTreeSummary,
+    };
+    let d = marg_mean.len();
+    if d == 0 {
+        return None;
+    }
+    // Marginal names are unused by draw_eta / density; synthesize stable labels.
+    let marginals: Vec<(String, f64, f64)> = (0..d)
+        .map(|i| (format!("ETA_{}", i + 1), marg_mean[i], marg_sd[i]))
+        .collect();
+
+    // Distinct tree levels in ascending order (D-vine tree 1, 2, …).
+    let mut tree_levels: Vec<i32> = pair_tree.to_vec();
+    tree_levels.sort_unstable();
+    tree_levels.dedup();
+
+    let mut trees: Vec<VineTreeSummary> = Vec::new();
+    for &lvl in &tree_levels {
+        let mut pairs: Vec<VinePairEntry> = Vec::new();
+        for p in 0..pair_tree.len() {
+            if pair_tree[p] != lvl {
+                continue;
+            }
+            // This pair's copula parameters, matched by (tree, label).
+            let params: Vec<(String, f64)> = (0..param_tree.len())
+                .filter(|&q| param_tree[q] == lvl && param_label[q] == pair_label[p])
+                .map(|q| (param_name[q].clone(), param_value[q]))
+                .collect();
+            pairs.push(VinePairEntry {
+                label: pair_label[p].clone(),
+                copula: PairCopulaSummary {
+                    family: pair_family[p].clone(),
+                    params,
+                    se: Vec::new(),
+                    kendall_tau: 0.0,
+                    tail_dep_lower: 0.0,
+                    tail_dep_upper: 0.0,
+                },
+            });
+        }
+        trees.push(VineTreeSummary {
+            tree: lvl as usize,
+            pairs,
+        });
+    }
+
+    let summary = VineFitParams { marginals, trees };
+    Some(VineCopulaOmega::from_fit_params(&summary))
+}
+
+/// Evaluate the fitted vine-copula joint density of the random effects over a
+/// grid. The vine is reconstructed (`rebuild_vine`) from the summary the R side
+/// holds in `fit$vine_copula`. `eta_base` is the length-d vector of values held
+/// fixed for the non-varying dimensions; `idx_x` / `idx_y` are the 0-based
+/// dimensions varied over `grid_x` / `grid_y`. Pass `idx_y < 0` with an empty
+/// `grid_y` for a 1-D marginal slice. Returns flat columns `x`, `y` (`NA` in
+/// 1-D), and `density`; `NULL` when no vine is present.
+#[extendr]
+#[allow(clippy::too_many_arguments)]
+fn ferx_rust_vine_density(
+    marg_mean: Vec<f64>,
+    marg_sd: Vec<f64>,
+    pair_tree: Vec<i32>,
+    pair_label: Vec<String>,
+    pair_family: Vec<String>,
+    param_tree: Vec<i32>,
+    param_label: Vec<String>,
+    param_name: Vec<String>,
+    param_value: Vec<f64>,
+    eta_base: Vec<f64>,
+    idx_x: i32,
+    idx_y: i32,
+    grid_x: Vec<f64>,
+    grid_y: Vec<f64>,
+) -> Robj {
+    let vine = match rebuild_vine(
+        &marg_mean,
+        &marg_sd,
+        &pair_tree,
+        &pair_label,
+        &pair_family,
+        &param_tree,
+        &param_label,
+        &param_name,
+        &param_value,
+    ) {
+        Some(v) => v,
+        None => return ().into(),
+    };
+    let d = marg_mean.len();
+    let ix = idx_x as usize;
+    let two_d = idx_y >= 0;
+    let iy = if two_d { idx_y as usize } else { 0 };
+
+    let mut out_x: Vec<f64> = Vec::new();
+    let mut out_y: Vec<Rfloat> = Vec::new();
+    let mut out_dens: Vec<f64> = Vec::new();
+
+    let mut eta = if eta_base.len() == d {
+        eta_base.clone()
+    } else {
+        vec![0.0; d]
+    };
+
+    if two_d {
+        for &gx in &grid_x {
+            for &gy in &grid_y {
+                eta[ix] = gx;
+                eta[iy] = gy;
+                out_x.push(gx);
+                out_y.push(Rfloat::from(gy));
+                out_dens.push(vine.density(&eta));
+            }
+        }
+    } else {
+        for &gx in &grid_x {
+            eta[ix] = gx;
+            out_x.push(gx);
+            out_y.push(Rfloat::na());
+            out_dens.push(vine.density(&eta));
+        }
+    }
+
+    let y_col: Doubles = out_y.into_iter().collect();
+    list!(x = out_x, y = y_col, density = out_dens).into()
 }
 
 // -- Helper: build a minimal FitResult from R-supplied arrays so the
@@ -795,9 +956,11 @@ fn build_fit_result_for_uncertainty(
         ferx_core::UncertaintyMethod::Asymptotic => {
             let cd = cov_matrix_dim as usize;
             if cd == 0 || cov_matrix_flat.is_empty() {
-                return Err("Asymptotic uncertainty requires a covariance matrix on the \
+                return Err(
+                    "Asymptotic uncertainty requires a covariance matrix on the \
                     fit object — re-fit with `covariance = TRUE`."
-                    .to_string());
+                        .to_string(),
+                );
             }
             if cov_matrix_flat.len() != cd * cd {
                 return Err(format!(
@@ -955,6 +1118,9 @@ fn default_fit_result(
         input_columns: Vec::new(),
         covariate_table: None,
         exclusions: None,
+        vine_params: None,
+        vine_corrected_ofv: None,
+        vine_dist: None,
         #[cfg(feature = "nn")]
         neural_networks: Vec::new(),
     }
@@ -1067,11 +1233,7 @@ fn model_structure_list(model: &CompiledModel) -> Robj {
 
 // -- Helper: convert FitResult + Population to R named list --
 
-fn fit_result_to_list(
-    result: &FitResult,
-    population: &Population,
-    model: &CompiledModel,
-) -> List {
+fn fit_result_to_list(result: &FitResult, population: &Population, model: &CompiledModel) -> List {
     // Theta
     let theta_names: Vec<String> = result.theta_names.clone();
     let theta_values: Vec<f64> = result.theta.clone();
@@ -1100,6 +1262,10 @@ fn fit_result_to_list(
     // vector; NULL when no `[covariates]` block. Lets R treat categoricals as
     // factors etc. (the value carried by the typed declaration).
     let covariate_types = covariate_types_robj(result.covariate_table.as_ref());
+
+    // Vine-copula BSV summary (NULL unless `omega_dist = vine` produced a fitted
+    // vine). Flat parallel vectors, reshaped into data frames on the R side.
+    let vine_copula = vine_copula_robj(result);
 
     // Warnings
     let warnings: Vec<String> = result.warnings.clone();
@@ -1175,10 +1341,12 @@ fn fit_result_to_list(
                 KappaTreatment::FixedAtMode => "fixed_at_mode",
                 KappaTreatment::Marginalized => "marginalized",
             };
-            let low_ess_ids: Vec<String> =
-                is.low_ess_subjects.iter().map(|(id, _)| id.clone()).collect();
-            let low_ess_frac: Vec<f64> =
-                is.low_ess_subjects.iter().map(|(_, f)| *f).collect();
+            let low_ess_ids: Vec<String> = is
+                .low_ess_subjects
+                .iter()
+                .map(|(id, _)| id.clone())
+                .collect();
+            let low_ess_frac: Vec<f64> = is.low_ess_subjects.iter().map(|(_, f)| *f).collect();
             list!(
                 minus2_log_likelihood = is.minus2_log_likelihood,
                 mc_standard_error = is.mc_standard_error,
@@ -1204,20 +1372,19 @@ fn fit_result_to_list(
     };
 
     // Full parameter covariance matrix (row-major flat); empty when not computed
-    let (cov_matrix_flat, cov_matrix_dim): (Vec<f64>, i32) =
-        match &result.covariance_matrix {
-            Some(m) => {
-                let n = m.nrows();
-                let mut v = Vec::with_capacity(n * n);
-                for i in 0..n {
-                    for j in 0..n {
-                        v.push(m[(i, j)]);
-                    }
+    let (cov_matrix_flat, cov_matrix_dim): (Vec<f64>, i32) = match &result.covariance_matrix {
+        Some(m) => {
+            let n = m.nrows();
+            let mut v = Vec::with_capacity(n * n);
+            for i in 0..n {
+                for j in 0..n {
+                    v.push(m[(i, j)]);
                 }
-                (v, n as i32)
             }
-            None => (Vec::new(), 0i32),
-        };
+            (v, n as i32)
+        }
+        None => (Vec::new(), 0i32),
+    };
 
     let covariance_status_str = match result.covariance_status {
         CovarianceStatus::Computed => "computed",
@@ -1288,7 +1455,11 @@ fn fit_result_to_list(
             let mut kappa_cols: Vec<Vec<f64>> = vec![Vec::with_capacity(n_occ); n_kappa];
             for occ_sh in by_occ {
                 for k in 0..n_kappa {
-                    kappa_cols[k].push(if k < occ_sh.len() { occ_sh[k] } else { f64::NAN });
+                    kappa_cols[k].push(if k < occ_sh.len() {
+                        occ_sh[k]
+                    } else {
+                        f64::NAN
+                    });
                 }
             }
             let mut pairs: Vec<(&str, Robj)> = Vec::with_capacity(1 + n_kappa);
@@ -1306,27 +1477,39 @@ fn fit_result_to_list(
 
     // Parameter transform metadata (added in ferx-core PR #54; empty vecs for
     // older binaries that don't populate these fields).
-    let eta_param_types: Vec<String> = result.eta_param_info.iter().map(|info| {
-        match info.param_type {
-            ferx_core::types::EtaParamType::LogNormal        => "log_normal",
-            ferx_core::types::EtaParamType::Additive         => "additive",
-            ferx_core::types::EtaParamType::Logit            => "logit",
-            ferx_core::types::EtaParamType::LogitProbability => "logit_probability",
-            ferx_core::types::EtaParamType::Custom           => "custom",
-        }.to_string()
-    }).collect();
+    let eta_param_types: Vec<String> = result
+        .eta_param_info
+        .iter()
+        .map(|info| {
+            match info.param_type {
+                ferx_core::types::EtaParamType::LogNormal => "log_normal",
+                ferx_core::types::EtaParamType::Additive => "additive",
+                ferx_core::types::EtaParamType::Logit => "logit",
+                ferx_core::types::EtaParamType::LogitProbability => "logit_probability",
+                ferx_core::types::EtaParamType::Custom => "custom",
+            }
+            .to_string()
+        })
+        .collect();
     // Linked theta name for each ETA (empty string when not detected).
-    let eta_linked_theta: Vec<String> = result.eta_param_info.iter()
+    let eta_linked_theta: Vec<String> = result
+        .eta_param_info
+        .iter()
         .map(|info| info.linked_theta.clone().unwrap_or_default())
         .collect();
-    let theta_transforms: Vec<String> = result.theta_transform.iter().map(|t| {
-        match t {
-            ferx_core::types::ThetaTransform::Identity         => "identity",
-            ferx_core::types::ThetaTransform::Log              => "log",
-            ferx_core::types::ThetaTransform::Logit            => "logit",
-            ferx_core::types::ThetaTransform::LogitProbability => "logit_probability",
-        }.to_string()
-    }).collect();
+    let theta_transforms: Vec<String> = result
+        .theta_transform
+        .iter()
+        .map(|t| {
+            match t {
+                ferx_core::types::ThetaTransform::Identity => "identity",
+                ferx_core::types::ThetaTransform::Log => "log",
+                ferx_core::types::ThetaTransform::Logit => "logit",
+                ferx_core::types::ThetaTransform::LogitProbability => "logit_probability",
+            }
+            .to_string()
+        })
+        .collect();
     // EBE kappas as a data frame: ID, OCC, KAPPA_1, ...
     // Rows: one per (subject, occasion); empty when no IOV.
     // - ID: original subject identifier (matches sdtab).
@@ -1355,7 +1538,11 @@ fn fit_result_to_list(
                 let occ_label = unique_occs.get(oi).copied().unwrap_or(oi as u32 + 1);
                 occs.push(occ_label as i32);
                 for k in 0..n_kappa {
-                    kappa_cols[k].push(if k < kappa_vec.len() { kappa_vec[k] } else { f64::NAN });
+                    kappa_cols[k].push(if k < kappa_vec.len() {
+                        kappa_vec[k]
+                    } else {
+                        f64::NAN
+                    });
                 }
             }
         }
@@ -1527,9 +1714,9 @@ fn fit_result_to_list(
         // nlopt_missing_algorithms: NLopt algorithm names not available on
         //   this platform (empty on most builds).
         saem_mu_ref_m_step_evals_saved = result.saem_mu_ref_m_step_evals_saved.map(|x| x as f64),
-        covariance_n_evals_estimated   = result.covariance_n_evals_estimated.map(|x| x as f64),
-        n_threads_used                 = result.n_threads_used as i32,
-        nlopt_missing_algorithms       = result.nlopt_missing_algorithms.clone(),
+        covariance_n_evals_estimated = result.covariance_n_evals_estimated.map(|x| x as f64),
+        n_threads_used = result.n_threads_used as i32,
+        nlopt_missing_algorithms = result.nlopt_missing_algorithms.clone(),
         // ── runlog fields (ferx-core#172) ──────────────────────────────────
         // model_text: verbatim .ferx source; NULL for in-memory fits.
         model_text = result.model_text.clone(),
@@ -1539,7 +1726,11 @@ fn fit_result_to_list(
             let m = &result.omega_init;
             let n = m.nrows();
             let mut v = Vec::with_capacity(n * n);
-            for i in 0..n { for j in 0..n { v.push(m[(i, j)]); } }
+            for i in 0..n {
+                for j in 0..n {
+                    v.push(m[(i, j)]);
+                }
+            }
             v
         },
         omega_init_dim = result.omega_init.nrows() as i32,
@@ -1550,18 +1741,18 @@ fn fit_result_to_list(
         final_gradient = final_gradient_robj,
         // ── run-settings fields (ferx-core#172 Step 7) ────────────────────
         // optimizer: human-readable label string.
-        optimizer_label   = result.optimizer.clone(),
-        n_starts          = result.n_starts as i32,
-        multi_start_seed  = result.multi_start_seed.map(|s| s as f64),
-        saem_seed         = result.saem_seed.map(|s| s as f64),
-        sir_seed_used     = result.sir_seed.map(|s| s as f64),
-        is_seed           = result.is_seed.map(|s| s as f64),
+        optimizer_label = result.optimizer.clone(),
+        n_starts = result.n_starts as i32,
+        multi_start_seed = result.multi_start_seed.map(|s| s as f64),
+        saem_seed = result.saem_seed.map(|s| s as f64),
+        sir_seed_used = result.sir_seed.map(|s| s as f64),
+        is_seed = result.is_seed.map(|s| s as f64),
         bloq_method_label = result.bloq_method.clone(),
-        outer_maxiter     = result.outer_maxiter as i32,
-        outer_gtol        = result.outer_gtol,
-        inits_from_nca    = result.inits_from_nca.clone(),
+        outer_maxiter = result.outer_maxiter as i32,
+        outer_gtol = result.outer_gtol,
+        inits_from_nca = result.inits_from_nca.clone(),
         // covariate_names: character vector of non-standard data columns.
-        covariate_names   = result.covariate_names.clone(),
+        covariate_names = result.covariate_names.clone(),
         // input_columns: all CSV header names in file order (analogous to NONMEM $INPUT).
         input_columns     = result.input_columns.clone(),
         // exclusions: NULL when no [data_selection] filter was active; otherwise a named
@@ -1569,9 +1760,17 @@ fn fit_result_to_list(
         exclusions        = exclusions_robj,
         // covtab: per-input-row covariate table (ID, TIME, EVID + declared
         // covariate columns); NULL unless the model declares a [covariates] block.
-        covtab            = covtab,
+        covtab = covtab,
         // covariate_types: named char vector covariate -> "continuous"/"categorical".
-        covariate_types   = covariate_types
+        covariate_types = covariate_types,
+        // vine_copula: flat parallel vectors describing the fitted vine-copula
+        // BSV structure (marginals, pair-copulas, copula params); NULL for
+        // Gaussian fits. Reshaped into data frames by the R post-processing.
+        vine_copula = vine_copula,
+        // vine_corrected_ofv: FOCE OFV with the Gaussian eta prior replaced by
+        // the vine prior at the final EBEs; directly comparable to a Gaussian
+        // FOCE OFV. NULL for non-vine fits or when the correction is non-finite.
+        vine_corrected_ofv = result.vine_corrected_ofv
     )
 }
 
@@ -1585,9 +1784,8 @@ fn neural_networks_list(result: &FitResult) -> Robj {
     let mut out: Vec<Robj> = Vec::with_capacity(result.neural_networks.len());
     let mut names: Vec<String> = Vec::with_capacity(result.neural_networks.len());
     for nn in &result.neural_networks {
-        let weights: Vec<f64> = result.theta
-            [nn.weights_offset..nn.weights_offset + nn.n_weights]
-            .to_vec();
+        let weights: Vec<f64> =
+            result.theta[nn.weights_offset..nn.weights_offset + nn.n_weights].to_vec();
         let entry = list!(
             name = nn.name.clone(),
             shape = nn.shape.iter().map(|s| *s as i32).collect::<Vec<i32>>(),
@@ -1689,8 +1887,7 @@ fn build_individual_estimates(
     }
 
     let mut ids: Vec<String> = Vec::with_capacity(n_subj);
-    let mut param_cols: Vec<Vec<f64>> =
-        (0..n_indiv).map(|_| Vec::with_capacity(n_subj)).collect();
+    let mut param_cols: Vec<Vec<f64>> = (0..n_indiv).map(|_| Vec::with_capacity(n_subj)).collect();
 
     let is_ode = model.is_ode_based();
     let mut eta_buf: Vec<f64> = vec![0.0; n_eta + n_kappa];
@@ -1812,6 +2009,94 @@ fn covariate_types_robj(table: Option<&ferx_core::CovariateTable>) -> Robj {
     robj
 }
 
+/// Build the R-side `vine_copula` summary from a vine SAEM fit, or `NULL` when
+/// the run was not a vine fit (`omega_dist = vine` was not requested, or the run
+/// produced no vine summary). The list carries flat parallel vectors — reshaped
+/// into tidy data frames (`$marginals`, `$pairs`, `$params`) on the R side —
+/// rather than nested data frames, which extendr cannot embed inside a list.
+///
+/// * `marginal_eta` / `marginal_mean` / `marginal_sd`: one entry per ETA
+///   dimension (the fitted marginal Gaussian).
+/// * `pair_tree` / `pair_label` / `pair_family` / `pair_kendall_tau` /
+///   `pair_tail_lower` / `pair_tail_upper`: one entry per pair-copula across all
+///   vine tree levels.
+/// * `param_tree` / `param_label` / `param_name` / `param_value` / `param_se`:
+///   long form, one entry per (pair, copula parameter). `param_se` is `NA` when
+///   the standard error is unavailable or non-finite.
+fn vine_copula_robj(result: &FitResult) -> Robj {
+    let Some(vine) = result.vine_params.as_ref() else {
+        return ().into();
+    };
+
+    // Marginals: (name, mean, sd) per ETA dimension.
+    let marginal_eta: Vec<String> = vine.marginals.iter().map(|(n, _, _)| n.clone()).collect();
+    let marginal_mean: Vec<f64> = vine.marginals.iter().map(|(_, m, _)| *m).collect();
+    let marginal_sd: Vec<f64> = vine.marginals.iter().map(|(_, _, s)| *s).collect();
+
+    // Pairs (one row per pair-copula) and copula parameters (long form).
+    let mut pair_tree: Vec<i32> = Vec::new();
+    let mut pair_label: Vec<String> = Vec::new();
+    let mut pair_family: Vec<String> = Vec::new();
+    let mut pair_kendall_tau: Vec<f64> = Vec::new();
+    let mut pair_tail_lower: Vec<f64> = Vec::new();
+    let mut pair_tail_upper: Vec<f64> = Vec::new();
+
+    let mut param_tree: Vec<i32> = Vec::new();
+    let mut param_label: Vec<String> = Vec::new();
+    let mut param_name: Vec<String> = Vec::new();
+    let mut param_value: Vec<f64> = Vec::new();
+    let mut param_se: Vec<Rfloat> = Vec::new();
+
+    for tree in &vine.trees {
+        for pair in &tree.pairs {
+            pair_tree.push(tree.tree as i32);
+            pair_label.push(pair.label.clone());
+            pair_family.push(pair.copula.family.clone());
+            pair_kendall_tau.push(pair.copula.kendall_tau);
+            pair_tail_lower.push(pair.copula.tail_dep_lower);
+            pair_tail_upper.push(pair.copula.tail_dep_upper);
+
+            for (pname, pval) in &pair.copula.params {
+                param_tree.push(tree.tree as i32);
+                param_label.push(pair.label.clone());
+                param_name.push(pname.clone());
+                param_value.push(*pval);
+                // Match the SE by parameter name; NA when absent/non-finite.
+                let se = pair
+                    .copula
+                    .se
+                    .iter()
+                    .find(|(sn, _)| sn == pname)
+                    .map(|(_, sv)| *sv);
+                param_se.push(match se {
+                    Some(v) if v.is_finite() => Rfloat::from(v),
+                    _ => Rfloat::na(),
+                });
+            }
+        }
+    }
+
+    let param_se: Doubles = param_se.into_iter().collect();
+
+    list!(
+        marginal_eta = marginal_eta,
+        marginal_mean = marginal_mean,
+        marginal_sd = marginal_sd,
+        pair_tree = pair_tree,
+        pair_label = pair_label,
+        pair_family = pair_family,
+        pair_kendall_tau = pair_kendall_tau,
+        pair_tail_lower = pair_tail_lower,
+        pair_tail_upper = pair_tail_upper,
+        param_tree = param_tree,
+        param_label = param_label,
+        param_name = param_name,
+        param_value = param_value,
+        param_se = param_se
+    )
+    .into()
+}
+
 /// Returns TRUE if the Rust library was compiled with the `autodiff` feature
 /// (Enzyme toolchain), FALSE otherwise.
 #[extendr]
@@ -1837,15 +2122,19 @@ fn ferx_rust_autodiff_enabled() -> bool {
 /// @export
 #[extendr]
 fn ferx_rust_validate_model(model_path: &str, data_path: &str) -> List {
-    let data_opt: Option<&str> = if data_path.is_empty() { None } else { Some(data_path) };
+    let data_opt: Option<&str> = if data_path.is_empty() {
+        None
+    } else {
+        Some(data_path)
+    };
     let report = ferx_core::validate_model_file(model_path, data_opt);
 
     let n = report.diagnostics.len();
     let mut severity: Vec<String> = Vec::with_capacity(n);
-    let mut code:     Vec<String> = Vec::with_capacity(n);
-    let mut message:  Vec<String> = Vec::with_capacity(n);
-    let mut block:    Vec<String> = Vec::with_capacity(n);
-    let mut line:     Vec<i32>    = Vec::with_capacity(n);
+    let mut code: Vec<String> = Vec::with_capacity(n);
+    let mut message: Vec<String> = Vec::with_capacity(n);
+    let mut block: Vec<String> = Vec::with_capacity(n);
+    let mut line: Vec<i32> = Vec::with_capacity(n);
     let mut suggestion: Vec<String> = Vec::with_capacity(n);
     for d in &report.diagnostics {
         severity.push(match d.severity {
@@ -2209,6 +2498,9 @@ fn ferx_rust_sir(
         input_columns: Vec::new(),
         covariate_table: None,
         exclusions: None,
+        vine_params: None,
+        vine_corrected_ofv: None,
+        vine_dist: None,
         #[cfg(feature = "nn")]
         neural_networks: Vec::new(),
     };
@@ -2270,6 +2562,7 @@ extendr_module! {
     fn ferx_rust_fit;
     fn ferx_rust_simulate;
     fn ferx_rust_simulate_from_fit;
+    fn ferx_rust_vine_density;
     fn ferx_rust_simulate_with_uncertainty;
     fn ferx_rust_predict;
     fn ferx_rust_predict_from_fit;

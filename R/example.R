@@ -154,8 +154,8 @@ ferx_example <- function(name = NULL) {
     warfarin_derived        = "warfarin",
     warfarin_derived_pkpd   = "warfarin",
     warfarin_ode_time       = "warfarin",
-
     warfarin_data_selection = "warfarin",
+    warfarin_vine           = "warfarin",
     two_cpt_oral_derived    = "two_cpt_oral_cov"
   )
 

@@ -27,8 +27,14 @@ ferx_rust_simulate <- function(model_path, data_path, n_sim, seed) {
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_simulate_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, n_sim, seed) {
-  .Call("wrap__ferx_rust_simulate_from_fit", model_path, data_path, theta, omega_flat, omega_dim, sigma, n_sim, seed)
+ferx_rust_simulate_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, n_sim, seed, vine_marg_mean, vine_marg_sd, vine_pair_tree, vine_pair_label, vine_pair_family, vine_param_tree, vine_param_label, vine_param_name, vine_param_value) {
+  .Call("wrap__ferx_rust_simulate_from_fit", model_path, data_path, theta, omega_flat, omega_dim, sigma, n_sim, seed, vine_marg_mean, vine_marg_sd, vine_pair_tree, vine_pair_label, vine_pair_family, vine_param_tree, vine_param_label, vine_param_name, vine_param_value)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_vine_density <- function(marg_mean, marg_sd, pair_tree, pair_label, pair_family, param_tree, param_label, param_name, param_value, eta_base, idx_x, idx_y, grid_x, grid_y) {
+  .Call("wrap__ferx_rust_vine_density", marg_mean, marg_sd, pair_tree, pair_label, pair_family, param_tree, param_label, param_name, param_value, eta_base, idx_x, idx_y, grid_x, grid_y)
 }
 
 #' @title Internal Rust backend binding

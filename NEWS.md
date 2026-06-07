@@ -29,6 +29,39 @@
   called on a `ferx_fit` it re-reads the data file and marks records from
   excluded subjects.
 
+- Vine-copula SAEM (ferx-core `omega_dist = vine`) is now surfaced in R. Fit a
+  model with `method = "saem"` and `omega_dist = "vine"` (in the `.ferx`
+  `[fit_options]` block or via `settings = list(omega_dist = "vine")`) to model
+  the between-subject random effects with a D-vine copula instead of a
+  multivariate-normal Omega, capturing non-Gaussian dependence and tail
+  dependence the MVN cannot represent. The result carries:
+  - `fit$vine_copula` — a list of three data frames: `$marginals`
+    (`eta`, `mean`, `sd`), `$pairs` (one row per pair-copula across vine tree
+    levels: `tree`, `pair`, `family`, `kendall_tau`, `tail_dep_lower`,
+    `tail_dep_upper`), and `$params` (long form: `tree`, `pair`, `parameter`,
+    `estimate`, `se`). `NULL` for Gaussian fits.
+  - `fit$vine_corrected_ofv` — the FOCE OFV with the Gaussian eta prior replaced
+    by the fitted vine prior at the final EBEs, directly comparable to a
+    Gaussian SAEM fit's `ofv` on the same data (`gaussian$ofv -
+    vine$vine_corrected_ofv` quantifies the copula's advantage). `NULL` for
+    non-vine fits.
+  `print.ferx_fit()` gains a **VINE COPULA** section, the vine summary
+  round-trips through `.fitrx` bundles, and `ferx_example("warfarin_vine")`
+  provides a runnable example.
+
+- `ferx_vine_density(fit)` evaluates the fitted vine-copula joint density of the
+  random effects (the copula-distribution of IIV) over a grid and returns it as
+  a tidy data frame (columns named after the etas, plus `density`) ready for
+  contour/heat-map plotting. Two etas give the full bivariate density; with more
+  than two, a chosen pair (`etas =`) is varied while the rest are held at their
+  marginal means.
+
+- `ferx_simulate(fit = <vine fit>)` now draws the between-subject random effects
+  from the fitted vine copula instead of the multivariate normal, so simulations
+  (VPCs, posterior-predictive checks) reflect the fitted non-Gaussian dependence
+  and tail dependence. Gaussian fits are unaffected. (Backed by new
+  reconstruction/density entry points in ferx-core's vine module.)
+
 - `ferx_columns(data)` prints the column headers of a NONMEM CSV dataset,
   grouped into required NONMEM columns (`ID`, `TIME`, `DV`, `EVID`, `AMT`,
   `CMT`), optional NONMEM columns (`RATE`, `MDV`, `II`, `SS`, `CENS`, `OCC`),
