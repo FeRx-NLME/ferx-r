@@ -19,6 +19,12 @@ When the sibling `../ferx-core` checkout exists, cargo automatically uses it (ve
 
 This means: develop against a feature branch in `../ferx-core` freely, but never commit Cargo.toml changes that flip the dep to a path. Reviewers and CI run against the GitHub `main`, so a path dep in Cargo.toml would break their builds.
 
+### Bumping the pinned ferx-core commit (`src/rust/Cargo.lock`)
+
+Although `Cargo.toml` tracks `branch = "main"`, **CI builds from the commit pinned in `src/rust/Cargo.lock`** — *not* the latest `main`. The patch above only redirects local builds (which have the sibling), so a new ferx-core commit is invisible to CI until the lock is bumped. Symptom: a ferx-r PR that uses a freshly-`pub`'d ferx-core API fails CI with `error[E0603]: ... is private`, because the lock still points at a commit predating the change.
+
+To bump: run `tools/update-ferx-core-lock.sh` from the repo root (it advances the pin to ferx-core `main` HEAD and verifies the `source = "git+..."` line survives), then commit `src/rust/Cargo.lock`. **Do not** run a bare `cargo update -p ferx-core` with the sibling present — the `[patch]` makes cargo strip the git pin and write a local path, silently unpinning ferx-core for CI and everyone else. The `R-CMD-check` workflow has a guard that fails if the lock loses its git source.
+
 ## Build & Install
 
 Requires the **Enzyme** Rust toolchain (a custom Rust fork with automatic differentiation support).
