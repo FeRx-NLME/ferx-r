@@ -2,6 +2,16 @@
 
 ## New features
 
+- **Covariate screen** (`ferx_cov_screen()`): a quick, informal screen that
+  correlates each declared covariate (from `fit$covtab`) with every
+  parameter that has IIV -- against both the subject's individual parameter
+  estimate and its ETA. Covariates are aggregated to one value per subject
+  first (median for continuous, most-frequent level for categorical), and
+  associations are reported as a signed Pearson correlation (continuous) or a
+  correlation ratio (categorical), keeping only pairs above a threshold
+  (default `|r| >= 0.2`). Intended to flag what is worth a formal covariate
+  search, not as a covariate test itself.
+
 - **Data-selection filtering** (`[data_selection]` block, `ferx_fit(ignore=)`,
   `ferx_selection()`): records can now be excluded from the analysis dataset at
   read time without modifying the CSV -- equivalent to NONMEM `$DATA IGNORE=` /

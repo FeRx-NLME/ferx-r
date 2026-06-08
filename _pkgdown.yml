@@ -42,6 +42,7 @@ reference:
       - ferx_estimates
       - ferx_warnings
       - ferx_eta_cov
+      - ferx_cov_screen
       - ferx_cor_matrix
       - ferx_plot_trace
       - ferx_trace
