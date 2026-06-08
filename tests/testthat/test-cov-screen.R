@@ -120,3 +120,70 @@ test_that("falls back to inferring covariate types when covariate_types is absen
   expect_identical(unique(res$type[res$covariate == "WT"]), "continuous")
   expect_identical(unique(res$type[res$covariate == "SEX"]), "categorical")
 })
+
+# ---- edge / guard paths -------------------------------------------------
+
+test_that("returns NULL when declared covariates are absent from covtab", {
+  fit <- make_fit()
+  fit$covtab <- fit$covtab[, c("ID", "TIME", "EVID")]  # drop covariate columns
+  expect_message(out <- ferx_cov_screen(fit), "No declared covariates")
+  expect_null(out)
+})
+
+test_that("returns NULL when ebe_etas has no ETA columns", {
+  fit <- make_fit()
+  fit$ebe_etas <- data.frame(ID = fit$ebe_etas$ID)  # ID only, no etas
+  expect_message(out <- ferx_cov_screen(fit), "No ETA columns")
+  expect_null(out)
+})
+
+test_that("works without individual_estimates: ebe is NA, labels fall back to ETA names", {
+  fit <- make_fit()
+  fit$individual_estimates <- NULL
+  res <- ferx_cov_screen(fit)
+  expect_s3_class(res, "data.frame")
+  expect_true(all(is.na(res$ebe)))                 # no EBE source -> NA column
+  expect_true(all(res$parameter %in% c("CL", "V1", "KA")))  # stripped ETA names
+  expect_true(any(!is.na(res$eta)))                # ETA correlations still run
+})
+
+test_that("fewer than 3 subjects yields NA associations (empty screen)", {
+  fit <- make_fit(n = 2L)
+  expect_message(out <- ferx_cov_screen(fit), "No covariate correlations")
+  expect_equal(nrow(out), 0L)
+})
+
+test_that("categorical association is dropped when the parameter response is constant", {
+  set.seed(1)
+  n <- 6L
+  ids <- as.character(seq_len(n))
+  sex <- rep(c("M", "F"), length.out = n)
+  fit <- list(
+    covtab = data.frame(ID = rep(ids, each = 2L), TIME = rep(c(0, 1), n),
+                        EVID = 0L, SEX = rep(sex, each = 2L),
+                        stringsAsFactors = FALSE),
+    covariate_types = c(SEX = "categorical"),
+    ebe_etas = data.frame(ID = ids, ETA_CL = rnorm(n), ETA_V = rep(0.1, n)),
+    individual_estimates = data.frame(ID = ids, CL = rnorm(n), V = rep(50, n))
+  )
+  res <- ferx_cov_screen(fit, threshold = 0)
+  expect_false("V" %in% res$parameter)  # constant V -> correlation ratio undefined
+  expect_true("CL" %in% res$parameter)  # varying CL is still screened
+})
+
+test_that("a subject whose categorical covariate is entirely missing aggregates to NA", {
+  n <- 6L
+  ids <- as.character(seq_len(n))
+  sex <- rep(c("M", "F"), length.out = n)
+  covtab <- data.frame(ID = rep(ids, each = 2L), TIME = rep(c(0, 1), n),
+                       EVID = 0L, SEX = rep(sex, each = 2L),
+                       stringsAsFactors = FALSE)
+  covtab$SEX[covtab$ID == "1"] <- NA  # subject 1 fully missing -> mode_fn -> NA
+  fit <- list(
+    covtab = covtab,
+    covariate_types = c(SEX = "categorical"),
+    ebe_etas = data.frame(ID = ids, ETA_CL = as.numeric(seq_len(n))),
+    individual_estimates = data.frame(ID = ids, CL = as.numeric(seq_len(n)))
+  )
+  expect_s3_class(ferx_cov_screen(fit, threshold = 0), "data.frame")
+})
