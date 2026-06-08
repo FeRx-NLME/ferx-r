@@ -150,18 +150,16 @@ fn ferx_rust_fit(
         }
     }
 
-    // Read data after the settings loop so SelectionFilter sees the merged
-    // model-file + R-call conditions (opts.ignore_exprs / accept_exprs /
-    // ignore_subjects). When a [covariates] block is declared, the strict
-    // covariate-aware reader validates declared columns and builds the per-row
-    // covariate table. The two features are combined where possible:
-    //   - covariates only   → read_nonmem_csv_with_covariates
-    //   - filter only       → read_nonmem_csv_filtered
-    //   - both              → filtered read (covariate table unavailable;
-    //                         combined reader not yet implemented in ferx-core)
-    //   - neither           → read_nonmem_csv (legacy)
+    // Read data via read_population_for, which handles [covariates] validation,
+    // [data_selection] filters, and TTE endpoint routing in one call.
+    // This replaces the previous 4-way dispatch that could not pass tte_cmts to
+    // the reader (causing TTE rows to land in the Gaussian vectors instead of
+    // subject.obs_records). It also fixes the pre-existing gap where the combined
+    // covariates + filter case fell through to the filter-only path, losing the
+    // covariate table.
     let (population, covariate_table) = {
-        use ferx_core::io::datareader::{read_nonmem_csv_filtered, SelectionFilter};
+        use ferx_core::api::read_population_for;
+        use ferx_core::io::datareader::SelectionFilter;
         let filter = match SelectionFilter::from_opts(
             &opts.ignore_exprs,
             &opts.accept_exprs,
@@ -170,37 +168,17 @@ fn ferx_rust_fit(
             Ok(f) => f,
             Err(e) => throw_r_error(format!("Error in [data_selection]: {e}")),
         };
-        match (&parsed.covariate_decls, filter.is_empty()) {
-            (Some(decls), true) => {
-                let extra: Vec<String> = parsed
-                    .model
-                    .referenced_covariates
-                    .iter()
-                    .filter(|c| !decls.iter().any(|d| &d.name == *c))
-                    .cloned()
-                    .collect();
-                match ferx_core::read_nonmem_csv_with_covariates(
-                    Path::new(data_path),
-                    decls,
-                    &extra,
-                    opts.iov_column.as_deref(),
-                ) {
-                    Ok((p, t)) => (p, Some(t)),
-                    Err(e) => throw_r_error(format!("Error reading data: {e}")),
-                }
-            }
-            (_, false) => {
-                match read_nonmem_csv_filtered(Path::new(data_path), None, opts.iov_column.as_deref(), &filter) {
-                    Ok(p) => (p, None),
-                    Err(e) => throw_r_error(format!("Error reading data: {e}")),
-                }
-            }
-            (None, true) => {
-                match ferx_core::read_nonmem_csv(Path::new(data_path), None, opts.iov_column.as_deref()) {
-                    Ok(p) => (p, None),
-                    Err(e) => throw_r_error(format!("Error reading data: {e}")),
-                }
-            }
+        let filter_opt = if filter.is_empty() { None } else { Some(&filter) };
+        match read_population_for(
+            &parsed.model,
+            &parsed.covariate_decls,
+            data_path,
+            None,
+            opts.iov_column.as_deref(),
+            filter_opt,
+        ) {
+            Ok(result) => result,
+            Err(e) => throw_r_error(format!("Error reading data: {e}")),
         }
     };
 
@@ -340,9 +318,9 @@ fn ferx_rust_simulate(
     n_sim: i32,
     seed: i32,
 ) -> Robj {
-    // parse_full_model_file (vs parse_model_file) so we can thread iov_column
-    // through to read_nonmem_csv — without it, models with kappa declarations
-    // panic in pk_param_fn (Eta index >= n_bsv_eta).
+    // parse_full_model_file (vs parse_model_file) so iov_column is available
+    // for the reader; without it, models with kappa declarations panic in
+    // pk_param_fn (Eta index >= n_bsv_eta).
     let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
         Ok(p) => p,
         Err(e) => {
@@ -352,9 +330,16 @@ fn ferx_rust_simulate(
     };
     let iov_col = parsed.fit_options.iov_column.clone();
 
-    let population =
-        match ferx_core::read_nonmem_csv(Path::new(data_path), None, iov_col.as_deref()) {
-            Ok(p) => p,
+    let (population, _) =
+        match ferx_core::api::read_population_for(
+            &parsed.model,
+            &parsed.covariate_decls,
+            data_path,
+            None,
+            iov_col.as_deref(),
+            None,
+        ) {
+            Ok(r) => r,
             Err(e) => {
                 rprintln!("Error reading data: {}", e);
                 return ().into();
@@ -405,9 +390,16 @@ fn ferx_rust_simulate_from_fit(
     };
     let iov_col = parsed.fit_options.iov_column.clone();
 
-    let population =
-        match ferx_core::read_nonmem_csv(Path::new(data_path), None, iov_col.as_deref()) {
-            Ok(p) => p,
+    let (population, _) =
+        match ferx_core::api::read_population_for(
+            &parsed.model,
+            &parsed.covariate_decls,
+            data_path,
+            None,
+            iov_col.as_deref(),
+            None,
+        ) {
+            Ok(r) => r,
             Err(e) => {
                 rprintln!("Error reading data: {}", e);
                 return ().into();
@@ -494,9 +486,16 @@ fn ferx_rust_simulate_with_uncertainty(
         }
     };
     let iov_col = parsed.fit_options.iov_column.clone();
-    let population =
-        match ferx_core::read_nonmem_csv(Path::new(data_path), None, iov_col.as_deref()) {
-            Ok(p) => p,
+    let (population, _) =
+        match ferx_core::api::read_population_for(
+            &parsed.model,
+            &parsed.covariate_decls,
+            data_path,
+            None,
+            iov_col.as_deref(),
+            None,
+        ) {
+            Ok(r) => r,
             Err(e) => {
                 rprintln!("Error reading data: {}", e);
                 return ().into();
@@ -575,9 +574,16 @@ fn ferx_rust_predict(
     };
     let iov_col = parsed.fit_options.iov_column.clone();
 
-    let population =
-        match ferx_core::read_nonmem_csv(Path::new(data_path), None, iov_col.as_deref()) {
-            Ok(p) => p,
+    let (population, _) =
+        match ferx_core::api::read_population_for(
+            &parsed.model,
+            &parsed.covariate_decls,
+            data_path,
+            None,
+            iov_col.as_deref(),
+            None,
+        ) {
+            Ok(r) => r,
             Err(e) => {
                 rprintln!("Error reading data: {}", e);
                 return ().into();
@@ -621,9 +627,16 @@ fn ferx_rust_predict_from_fit(
     };
     let iov_col = parsed.fit_options.iov_column.clone();
 
-    let population =
-        match ferx_core::read_nonmem_csv(Path::new(data_path), None, iov_col.as_deref()) {
-            Ok(p) => p,
+    let (population, _) =
+        match ferx_core::api::read_population_for(
+            &parsed.model,
+            &parsed.covariate_decls,
+            data_path,
+            None,
+            iov_col.as_deref(),
+            None,
+        ) {
+            Ok(r) => r,
             Err(e) => {
                 rprintln!("Error reading data: {}", e);
                 return ().into();
