@@ -88,3 +88,22 @@ test_that("covtab and covariate_types are NULL when the model declares no [covar
   expect_null(fit$covtab)
   expect_null(fit$covariate_types)
 })
+
+test_that("ferx_cov_screen runs on a real covariate fit and returns the screen table", {
+  # End-to-end check on the cached two_cpt_oral_cov fit; the deterministic
+  # correlation/aggregation logic is unit-tested in test-cov-screen.R.
+  fit <- cov_fit()
+  res <- ferx_cov_screen(fit, threshold = 0)  # 0 => report every pairing
+
+  expect_s3_class(res, "data.frame")
+  expect_identical(names(res), c("parameter", "covariate", "type", "ebe", "eta"))
+  # Only the declared covariates (WT, CRCL) appear, both continuous.
+  expect_setequal(unique(res$covariate), c("WT", "CRCL"))
+  expect_true(all(res$type == "continuous"))
+  # Parameters are individual-estimate names (CL/V1/...), not ETA_* labels.
+  expect_true(all(res$parameter %in% names(fit$individual_estimates)))
+  expect_false(any(grepl("^ETA", res$parameter)))
+  # Correlations are valid Pearson r in [-1, 1].
+  expect_true(all(res$eta >= -1 & res$eta <= 1, na.rm = TRUE))
+  expect_true(all(res$ebe >= -1 & res$ebe <= 1, na.rm = TRUE))
+})

@@ -41,6 +41,7 @@ ferx_estimates(fit)
 Other diagnostics: 
 \code{\link{check_diagnostics}()},
 \code{\link{ferx_cor_matrix}()},
+\code{\link{ferx_cov_screen}()},
 \code{\link{ferx_eta_cov}()},
 \code{\link{ferx_plot_trace}()},
 \code{\link{ferx_runlog_iters}()},
