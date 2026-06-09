@@ -136,7 +136,8 @@ test_that(".ferx_warning_guidance dispatches covariance_step by message content"
     "convergence (min eigenvalue = 1.2e-10; eigenvalues: [0.5000, 1.2e-10]). ",
     "SE estimates not available."
   )
-  expect_match(g(msg_omega), "omega|diagonal", ignore.case = TRUE, perl = TRUE)
+  expect_match(g(msg_omega), "near-singular", ignore.case = TRUE)
+  expect_false(grepl("eigenvalue list", g(msg_omega), ignore.case = TRUE))
 
   # Non-finite OFV.
   msg_ofv <- paste0(

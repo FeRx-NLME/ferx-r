@@ -608,9 +608,18 @@ ferx_estimates <- function(fit) {
     ))
   }
   if (category == "covariance_step") {
-    msg_lc <- tolower(message)
+    # Omega non-PD -- checked before general non-PD because omega messages also
+    # contain "not positive definite" and "eigenvalue".
+    if (grepl("omega matrix is not positive definite", message, ignore.case = TRUE)) {
+      return(paste0(
+        "Omega is near-singular at convergence. Consider a diagonal omega ",
+        "structure, fixing a small variance to a small positive constant, or ",
+        "removing the corresponding ETA from the model."
+      ))
+    }
     # NonPdHessian path: eigenvalue list is present in the message.
-    if (grepl("not positive definite", msg_lc) && grepl("eigenvalue", msg_lc)) {
+    if (grepl("not positive definite", message, ignore.case = TRUE) &&
+        grepl("eigenvalue", message, ignore.case = TRUE)) {
       return(paste0(
         "Inspect the eigenvalue list in the warning: a near-zero minimum ",
         "(e.g. 1e-6) suggests a near-unidentifiable parameter; a clearly ",
@@ -620,7 +629,7 @@ ferx_estimates <- function(fit) {
       ))
     }
     # Non-finite or zero Hessian diagonal: parameter name(s) listed in message.
-    if (grepl("ill-conditioned entries", msg_lc)) {
+    if (grepl("ill-conditioned entries", message, ignore.case = TRUE)) {
       return(paste0(
         "The named parameter(s) have a flat or non-finite Hessian diagonal, ",
         "meaning the parameter is not informed by the data or the objective ",
@@ -629,16 +638,8 @@ ferx_estimates <- function(fit) {
         "settings = list(fd_hessian_step = 0.05))."
       ))
     }
-    # Omega non-PD at convergence.
-    if (grepl("omega matrix is not positive definite", msg_lc)) {
-      return(paste0(
-        "Omega is near-singular at convergence. Consider a diagonal omega ",
-        "structure, fixing a small variance to a small positive constant, or ",
-        "removing the corresponding ETA from the model."
-      ))
-    }
     # Model evaluation overflow/underflow.
-    if (grepl("base ofv is non-finite", msg_lc)) {
+    if (grepl("base ofv is non-finite", message, ignore.case = TRUE)) {
       return(paste0(
         "Model evaluation overflowed or underflowed at convergence. Check for ",
         "extreme parameter values, verify that all DV values are positive for ",
@@ -647,22 +648,23 @@ ferx_estimates <- function(fit) {
       ))
     }
     # Regularisation path -- severity is embedded in the message.
-    if (grepl("covariance step regularized", msg_lc)) {
-      if (grepl("severity: severe", msg_lc)) {
+    if (grepl("covariance step regularized", message, ignore.case = TRUE)) {
+      if (grepl("severity: severe", message, ignore.case = TRUE)) {
         return(paste0(
           "Severe Hessian regularisation: standard errors are likely unreliable. ",
           "Run ferx_sir() to obtain non-parametric confidence intervals, or ",
           "simplify the model structure."
         ))
       }
-      if (grepl("severity: moderate", msg_lc)) {
+      if (grepl("severity: moderate", message, ignore.case = TRUE)) {
         return(paste0(
           "Moderate Hessian regularisation: standard errors should be interpreted ",
           "with caution. Run ferx_sir() to obtain non-parametric confidence ",
           "intervals as a cross-check."
         ))
       }
-      # minor -- benign
+      # severity: minor (or any unrecognised tier from future core versions) --
+      # treat as benign; minor is the only tier ferx-core emits below moderate.
       return(paste0(
         "Minor Hessian regularisation: standard errors are likely reliable. A ",
         "small eigenvalue floor was applied; this is common on smooth OFV ",
