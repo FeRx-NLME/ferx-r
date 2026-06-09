@@ -191,6 +191,13 @@ audit the full picture.
 \item{\code{inner_maxiter}}{Per-subject EBE iteration cap (default 200).}
 \item{\code{inner_tol}}{Convergence tolerance for the inner EBE loop
 (default \code{1e-4}).}
+\item{\code{fd_hessian_step}}{Relative step size for the finite-difference
+Hessian used in the covariance step (default \code{1e-2}). The actual
+perturbation for parameter \emph{i} is
+\code{fd_hessian_step * (1 + |x_hat[i]|)}. Increase (e.g. \code{0.05})
+when the fit warns about non-finite Hessian entries; decrease (e.g.
+\code{1e-3}) on smooth OFV surfaces where FD noise is the primary
+concern. Has no effect when \code{covariance = FALSE}.}
 }
 
 \strong{FOCE / FOCEI / GN / GN-hybrid: iteration cap}
@@ -341,7 +348,18 @@ Merged with \code{[data_selection] ignore_subjects} from the model file.}
 \item{...}{Reserved for future use. Unrecognised arguments raise an error.}
 }
 \value{
-A list with components:
+A named list. Where to find commonly-needed quantities:\tabular{llll}{
+   What you want \tab Accessor \tab Shape \tab When present \cr
+   Residuals, PRED, IPRED, diagnostics \tab \code{fit$sdtab} \tab one row per observation \tab always \cr
+   Covariates echoed per observation (via \verb{[output]}) \tab \code{fit$sdtab} \tab one row per observation, LOCF \tab declared in \verb{[output]} \cr
+   Raw covariate values for all dataset records \tab \code{fit$covtab} \tab one row per dataset record (doses + obs) \tab model has \verb{[covariates]} block \cr
+   ETA / EBE values per observation row \tab \code{fit$sdtab} (\code{ETA_CL}, \code{ETA_V}, …) \tab one row per observation, value repeated \tab always \cr
+   ETA / EBE values per subject \tab \code{fit$ebe_etas} \tab one row per subject \tab model declares etas \cr
+   Individual PK parameters per subject \tab \code{fit$individual_estimates} \tab one row per subject \tab always \cr
+}
+
+
+Full slot descriptions:
 \item{converged}{Logical; did the optimizer converge}
 \item{method}{Estimation method used}
 \item{n_iterations}{Number of outer iterations run}
@@ -375,11 +393,11 @@ automatically.  Columns declared in \code{[derived]} (per-row
 expressions, aggregates, integrals) and \code{[output]} (individual
 PK parameters or covariates echoed by name) appear at the end of the
 data frame in declaration order.
-Note: per-subject ETA (EBE) values are in \code{fit$ebe_etas} (one
-row per subject, no row duplication); per-subject individual parameter
-values are in \code{fit$individual_estimates}.  ETAs are available as
-read-only context variables inside \code{[derived]} expressions but
-are not written as sdtab columns.}
+ETA columns (\code{ETA_CL}, \code{ETA_V}, etc.) are included
+automatically — the same EBE value is repeated for every observation
+row of that subject. For a compact per-subject view use
+\code{fit$ebe_etas}; for individual PK parameter values use
+\code{fit$individual_estimates}.}
 \item{covtab}{Data frame echoing the declared covariate columns, present
 only when the model has a \code{[covariates]} block. Columns: \code{ID},
 \code{TIME}, \code{EVID}, then one column per declared covariate (in

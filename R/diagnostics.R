@@ -586,15 +586,14 @@ ferx_estimates <- function(fit) {
   )
 }
 
-# One-line remediation guidance keyed by the fixed category vocabulary that
-# ferx-core (and the R-side additions) emit. Extend this table when core grows
-# a new category. Returns NULL for unknown categories so callers can skip
-# printing rather than showing a generic placeholder.
+# Remediation guidance keyed by the fixed category vocabulary that ferx-core
+# (and the R-side additions) emit. Extend this table when core grows a new
+# category. Returns NULL for unknown categories so callers can skip printing
+# rather than showing a generic placeholder.
 #
-# message and uses_sde are used only for dw_autocorrelation: the message text
-# distinguishes positive vs negative DW (stable wording from ferx-core), and
-# uses_sde suppresses the SDE suggestion when the model already has a diffusion
-# block.
+# message and uses_sde are used for dw_autocorrelation (positive vs negative
+# DW; SDE hint suppressed when already in use) and for covariance_step (the
+# specific failure mode embedded in the message text selects targeted advice).
 .ferx_warning_guidance <- function(category, message = "", uses_sde = FALSE) {
   if (category == "dw_autocorrelation") {
     if (grepl("egative", message, ignore.case = TRUE)) {
@@ -608,9 +607,76 @@ ferx_estimates <- function(fit) {
       sde_hint
     ))
   }
+  if (category == "covariance_step") {
+    msg_lc <- tolower(message)
+    # NonPdHessian path: eigenvalue list is present in the message.
+    if (grepl("not positive definite", msg_lc) && grepl("eigenvalue", msg_lc)) {
+      return(paste0(
+        "Inspect the eigenvalue list in the warning: a near-zero minimum ",
+        "(e.g. 1e-6) suggests a near-unidentifiable parameter; a clearly ",
+        "negative minimum indicates structural non-identifiability. Consider ",
+        "fixing the most collinear parameter, removing it, or switching to a ",
+        "diagonal omega structure."
+      ))
+    }
+    # Non-finite or zero Hessian diagonal: parameter name(s) listed in message.
+    if (grepl("ill-conditioned entries", msg_lc)) {
+      return(paste0(
+        "The named parameter(s) have a flat or non-finite Hessian diagonal, ",
+        "meaning the parameter is not informed by the data or the objective ",
+        "function overflows near convergence. Consider fixing the parameter, ",
+        "tightening its bounds, or increasing fd_hessian_step (e.g. ",
+        "settings = list(fd_hessian_step = 0.05))."
+      ))
+    }
+    # Omega non-PD at convergence.
+    if (grepl("omega matrix is not positive definite", msg_lc)) {
+      return(paste0(
+        "Omega is near-singular at convergence. Consider a diagonal omega ",
+        "structure, fixing a small variance to a small positive constant, or ",
+        "removing the corresponding ETA from the model."
+      ))
+    }
+    # Model evaluation overflow/underflow.
+    if (grepl("base ofv is non-finite", msg_lc)) {
+      return(paste0(
+        "Model evaluation overflowed or underflowed at convergence. Check for ",
+        "extreme parameter values, verify that all DV values are positive for ",
+        "proportional error, and consider constraining thetas to physiologically ",
+        "plausible ranges."
+      ))
+    }
+    # Regularisation path -- severity is embedded in the message.
+    if (grepl("covariance step regularized", msg_lc)) {
+      if (grepl("severity: severe", msg_lc)) {
+        return(paste0(
+          "Severe Hessian regularisation: standard errors are likely unreliable. ",
+          "Run ferx_sir() to obtain non-parametric confidence intervals, or ",
+          "simplify the model structure."
+        ))
+      }
+      if (grepl("severity: moderate", msg_lc)) {
+        return(paste0(
+          "Moderate Hessian regularisation: standard errors should be interpreted ",
+          "with caution. Run ferx_sir() to obtain non-parametric confidence ",
+          "intervals as a cross-check."
+        ))
+      }
+      # minor -- benign
+      return(paste0(
+        "Minor Hessian regularisation: standard errors are likely reliable. A ",
+        "small eigenvalue floor was applied; this is common on smooth OFV ",
+        "surfaces and is usually benign."
+      ))
+    }
+    # Generic fallback for older or unrecognised covariance_step messages.
+    return(paste0(
+      "Standard errors unavailable. Check identifiability; try a simpler ",
+      "omega/sigma structure or covariance = FALSE for development."
+    ))
+  }
   switch(category,
     convergence        = "Optimizer did not reach convergence. Try different initial values, method = c(\"saem\", \"focei\"), or settings = list(n_starts = 4L).",
-    covariance_step    = "Standard errors unavailable. Check identifiability; try a simpler omega/sigma structure or covariance = FALSE for development.",
     condition_number   = "Parameters are correlated/ill-scaled. Consider fixing or removing a parameter, or reparameterising.",
     optimizer_health   = "Optimizer struggled (trust region / Hessian). Inspect the trace and consider better starting values.",
     eta_normality      = "ETA distribution may be non-normal. High shrinkage or sparse data can cause this; prefer QQ-plots for diagnosis.",
