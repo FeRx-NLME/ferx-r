@@ -6,6 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ferx is an R package for nonlinear mixed effects (NLME) modeling. It provides a user-facing R API that delegates to a high-performance Rust backend via extendr FFI. The core computation engine lives in the sibling **ferx-core** crate at `../ferx-core` (sibling directory).
 
+## Worktree isolation
+
+When working on a feature branch or any branch other than `main`, always use `EnterWorktree` at the start of the session. This prevents uncommitted WIP from one session contaminating another session on a different branch (a real problem when two chats share the same checkout directory).
+
 ## ferx-core dependency: do NOT edit `src/rust/Cargo.toml`
 
 `src/rust/Cargo.toml` declares `ferx-core` as a **git dependency** pinned to `main`. Don't change it to a path dep when working locally — the local-vs-GitHub swap is already handled by `src/rust/.cargo/config.toml`:
