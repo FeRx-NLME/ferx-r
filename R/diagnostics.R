@@ -102,7 +102,6 @@ ferx_cor_matrix <- function(fit) {
       "Run ferx_fit() with covariance = TRUE and check fit$covariance_status."
     )
   }
-  d  <- nrow(fit$cov_matrix)
   se <- sqrt(diag(fit$cov_matrix))
   if (any(se <= 0, na.rm = TRUE)) {
     warning("One or more diagonal elements are non-positive; ",

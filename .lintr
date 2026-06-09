@@ -4,7 +4,8 @@ linters: linters_with_defaults(
   # predates them and uses long lines, its own indentation, and its own naming;
   # reformatting hundreds of style-only sites is not worthwhile. Disable the
   # style linters so CodeFactor reports only substantive issues. Every other
-  # default linter stays enabled, so new non-style problems are still caught.
+  # default linter stays enabled - including object_usage_linter, which catches
+  # real unused/undefined symbols.
   line_length_linter          = NULL,
   trailing_whitespace_linter  = NULL,
   trailing_blank_lines_linter = NULL,
@@ -14,8 +15,15 @@ linters: linters_with_defaults(
   commented_code_linter       = NULL,
   brace_linter                = NULL,
   semicolon_linter            = NULL,
-  object_usage_linter         = NULL,
   # Tests reach non-exported helpers via `pkg:::fn` (90+ call sites) - the
   # established way to exercise internal functions. Keep `:::` from flagging.
   undesirable_operator_linter = NULL
+  )
+exclusions: list(
+  # Standalone deSolve simulation script: object_usage_linter cannot resolve
+  # the symbols bound inside `with(as.list(c(state, parms)), { ... })` (nor the
+  # deSolve namespace when it is not installed in the lint environment), so it
+  # false-positives on derivative variables that are in fact returned. Scope
+  # just that linter out of this one file; all other linters still apply.
+  "inst/examples/transit_2cpt/simulate_dataset.R" = list(object_usage_linter = Inf)
   )

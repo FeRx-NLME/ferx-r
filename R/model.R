@@ -527,7 +527,6 @@ ferx_model_set_section <- function(path, section, lines) {
     )
   }
 
-  start      <- hdr$positions[idx] + 1L
   end        <- if (idx < length(hdr$positions)) hdr$positions[idx + 1L] - 1L else length(file_lines)
   tail_lines <- if (end < length(file_lines)) file_lines[seq.int(end + 1L, length(file_lines))] else character(0)
 
