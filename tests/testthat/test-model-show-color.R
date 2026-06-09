@@ -46,6 +46,14 @@ test_that("ferx_model_show prints plain, unchanged text when colour is off", {
   expect_true(all(raw %in% out))                    # every source line present verbatim
 })
 
+test_that("ferx_model_show validates its input", {
+  expect_error(ferx_model_show(tempfile(fileext = ".ferx")), "File not found")
+  f <- tempfile(fileext = ".txt")
+  file.create(f)
+  on.exit(unlink(f), add = TRUE)
+  expect_error(ferx_model_show(f), "must be a .ferx file")
+})
+
 test_that("ferx_model_show emits ANSI when colour is on, same content when stripped", {
   skip_if_not_installed("cli")
   ex  <- ferx_example("warfarin")
