@@ -4,4 +4,4 @@ linters: linters_with_defaults(
   # across the test suite (90+ call sites). Disable the linter that objects to
   # `:::` so CodeFactor stops flagging an accepted, unavoidable pattern.
   undesirable_operator_linter = NULL
-)
+  )
