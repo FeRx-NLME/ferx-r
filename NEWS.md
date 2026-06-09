@@ -2,6 +2,12 @@
 
 ## New features
 
+- `ferx_model_show()` now **syntax-highlights** `.ferx` files in colour-capable
+  consoles: section headers (`[parameters]`, ...) in bold yellow, declaration
+  keywords (`theta`, `omega`, `sigma`, `kappa`, ...) in cyan, and comments
+  dimmed -- via the optional `cli` package. Non-colour contexts (files, pipes,
+  `NO_COLOR`, or no `cli` installed) print the raw text unchanged. (#4)
+
 - **Covariate screen** (`ferx_cov_screen()`): a quick, informal screen that
   correlates each declared covariate (from `fit$covtab`) with every
   parameter that has IIV -- against both the subject's individual parameter
