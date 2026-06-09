@@ -13,7 +13,13 @@ ferx_model_show(path)
 \code{path}, invisibly.
 }
 \description{
-Prints the contents of a \code{.ferx} model file to the console.
+Prints the contents of a \code{.ferx} model file to the console. When the
+console supports ANSI colour (and the \pkg{cli} package is installed), the
+output is syntax-highlighted: section headers (\code{[parameters]}, ...) are
+bold yellow, declaration keywords (\code{theta}, \code{omega}, \code{sigma},
+\code{kappa}, ...) are cyan, and comments are dimmed. In a non-colour context
+(file, pipe, \code{NO_COLOR}, or no \pkg{cli}) the raw text is printed
+unchanged.
 }
 \examples{
 ex <- ferx_example("warfarin")
