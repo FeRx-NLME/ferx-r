@@ -1,7 +1,21 @@
 linters: linters_with_defaults(
-  # Tests reach non-exported helpers (`.ferx_*`) via `pkg:::fn`, which is the
-  # only way to exercise internal functions and is the established convention
-  # across the test suite (90+ call sites). Disable the linter that objects to
-  # `:::` so CodeFactor stops flagging an accepted, unavoidable pattern.
+  # This project does not enforce lintr's cosmetic/style defaults. The codebase
+  # (package `R/`, the bundled `inst/examples` scripts, and the test suite)
+  # predates them and uses long lines, its own indentation, and its own naming;
+  # reformatting hundreds of style-only sites is not worthwhile. Disable the
+  # style linters so CodeFactor reports only substantive issues. Every other
+  # default linter stays enabled, so new non-style problems are still caught.
+  line_length_linter          = NULL,
+  trailing_whitespace_linter  = NULL,
+  trailing_blank_lines_linter = NULL,
+  indentation_linter          = NULL,
+  object_name_linter          = NULL,
+  object_length_linter        = NULL,
+  commented_code_linter       = NULL,
+  brace_linter                = NULL,
+  semicolon_linter            = NULL,
+  object_usage_linter         = NULL,
+  # Tests reach non-exported helpers via `pkg:::fn` (90+ call sites) - the
+  # established way to exercise internal functions. Keep `:::` from flagging.
   undesirable_operator_linter = NULL
   )
