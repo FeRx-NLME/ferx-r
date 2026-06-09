@@ -2919,7 +2919,7 @@ ferx_fit_async <- function(model, data = NULL, ...,
   # can read it non-destructively at any time.
   bg <- callr::r_bg(
     func = function(model, data, dots, sidecar_path) { # nocov start
-      .find_trace <- getFromNamespace(".ferx_find_trace_from_lines", "ferx")
+      .find_trace <- utils::getFromNamespace(".ferx_find_trace_from_lines", "ferx")
       dots$optimizer_trace <- TRUE
       inner <- callr::r_bg(
         func = function(model, data, dots) {
@@ -3213,7 +3213,6 @@ ferx_collect <- function(handle, verbose = TRUE) {
 
 #' @rdname ferx_fit_async
 #' @param x A `ferx_job` handle returned by `ferx_fit_async()`.
-#' @param ... Ignored.
 #' @export
 print.ferx_job <- function(x, ...) {
   status <- if (x$backend == "callr") {

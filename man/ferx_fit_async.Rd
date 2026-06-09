@@ -13,8 +13,6 @@ ferx_fit_async(model, data = NULL, ..., tail_n = 6L, poll_interval = 0.5)
 \item{model, data, ...}{Forwarded to \code{\link{ferx_fit}}. See its
 documentation for the full argument list.}
 
-\item{...}{Ignored.}
-
 \item{tail_n}{Integer. Number of recent trace rows to keep visible per
 poll in \code{\link{ferx_collect}}. Default 6.}
 
