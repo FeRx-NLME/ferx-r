@@ -14,3 +14,6 @@
 ^\.positai$
 ^_pkgdown\.yml$
 ^plans$
+^\.lintr$
+^\.covrignore$
+^codecov\.yml$
