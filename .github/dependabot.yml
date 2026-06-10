@@ -1,0 +1,34 @@
+version: 2
+
+# Dependabot has no R/CRAN ecosystem, so the R package's own dependencies are
+# not covered here — this watches the Rust glue's crate deps and the GitHub
+# Actions used in CI.
+updates:
+  # GitHub Actions pinned in .github/workflows/*.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(ci)"
+
+  # Rust crate deps of the extendr glue (src/rust).
+  #
+  # IMPORTANT: ferx-core is pinned deliberately in src/rust/Cargo.lock and bumped
+  # only via tools/update-ferx-core-lock.sh. It is ignored here so Dependabot
+  # never tries to advance the pin itself — that would fight the manual git-commit
+  # pin and trip the R-CMD-check lock guard.
+  - package-ecosystem: cargo
+    directory: "/src/rust"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    ignore:
+      - dependency-name: "ferx-core"
+    groups:
+      # Batch low-risk minor/patch bumps into one PR; majors stay individual.
+      cargo-minor-patch:
+        update-types: ["minor", "patch"]
