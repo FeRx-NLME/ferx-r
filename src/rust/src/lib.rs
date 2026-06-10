@@ -2103,6 +2103,8 @@ fn ferx_rust_sir(
             n_obs: 0,
             extra_columns: Vec::new(),
             per_obs_tad: Vec::new(),
+            // PR #207 (ferx-core) added this field; the SIR path never reads it.
+            compartment_states: Vec::new(),
         });
     }
 
