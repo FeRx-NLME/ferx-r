@@ -351,14 +351,16 @@ ferx_load_fit <- function(path) {
         fit$eta_log_transformed %||% rep(TRUE, NROW(fit$omega))
       ),
       param_corr = .fitrx_matrix_to_wire(fit$omega_param_corr),
-      shrinkage = as.numeric(fit$shrinkage_eta %||% numeric())
+      shrinkage = as.numeric(fit$shrinkage_eta %||% numeric()),
+      init_as_sd = as.logical(fit$omega_init_as_sd %||% rep(FALSE, NROW(fit$omega)))
     ),
     sigma = list(
       names = as.character(fit$sigma_names %||% character()),
       estimates = as.numeric(fit$sigma %||% numeric()),
       se = .fitrx_opt_num_vec(fit$se_sigma),
       fixed = as.logical(fit$sigma_fixed %||% rep(FALSE, length(fit$sigma %||% numeric()))),
-      types = as.character(fit$sigma_types %||% rep("proportional", length(fit$sigma %||% numeric())))
+      types = as.character(fit$sigma_types %||% rep("proportional", length(fit$sigma %||% numeric()))),
+      init_as_sd = as.logical(fit$sigma_init_as_sd %||% rep(FALSE, length(fit$sigma %||% numeric())))
     ),
     error_model = .fitrx_error_model_from_sigma_types(fit$sigma_types),
     shrinkage_eps = as.numeric(fit$shrinkage_eps %||% NA_real_),
@@ -798,7 +800,8 @@ ferx_load_fit <- function(path) {
       list()
     },
     omega_iov = .fitrx_matrix_to_wire(fit$omega_iov),
-    omega_iov_param_corr = .fitrx_matrix_to_wire(fit$omega_iov_param_corr)
+    omega_iov_param_corr = .fitrx_matrix_to_wire(fit$omega_iov_param_corr),
+    kappa_init_as_sd = as.logical(fit$kappa_init_as_sd %||% rep(FALSE, length(fit$kappa_names)))
   )
 }
 

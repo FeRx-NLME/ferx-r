@@ -215,6 +215,55 @@ test_that(".fitrx_write_predictions_csv handles character sdtab$ID", {
   expect_equal(loaded$n_subjects, 2L)
 })
 
+test_that("init_as_sd flags survive a ferx_save_fit / ferx_load_fit round-trip (synthetic)", {
+  # CI-runnable regression for the .fitrx writer dropping the SD-init flags.
+  # The flags were read on load (omega/sigma/iov wire blocks) but never
+  # written on save, so they silently vanished on round-trip. A synthetic
+  # fit (no real estimation) keeps this in the default CI test pass; the
+  # gated test below additionally exercises the path on a real fit.
+  fake <- structure(
+    list(
+      theta = c(TVCL = 1.0, TVV = 10.0),
+      omega = matrix(c(0.04, 0, 0, 0.09), 2L, 2L,
+                     dimnames = list(c("ETA_CL", "ETA_V"), c("ETA_CL", "ETA_V"))),
+      eta_names = c("ETA_CL", "ETA_V"),
+      omega_init_as_sd = c(TRUE, FALSE),
+      sigma = c(prop = 0.05),
+      sigma_names = "prop",
+      sigma_types = "proportional",
+      sigma_init_as_sd = TRUE,
+      # Minimal IOV so the iov wire (and kappa_init_as_sd) is written.
+      omega_iov = matrix(0.02, 1L, 1L,
+                         dimnames = list("KAPPA_CL", "KAPPA_CL")),
+      kappa_names = "KAPPA_CL",
+      kappa_fixed = FALSE,
+      kappa_init_as_sd = TRUE,
+      ofv = 0, aic = 2, bic = 4,
+      n_obs = 3L, n_subjects = 2L, n_parameters = 2L, n_iterations = 1L,
+      method = "FOCEI", method_chain = "FOCEI",
+      converged = TRUE,
+      warnings = character(),
+      shrinkage_eta = c(0, 0), shrinkage_eps = 0,
+      wall_time_secs = 0, model_name = "fake", ferx_version = "0.1.0",
+      gradient_method_inner = "Enzyme AD",
+      gradient_method_outer = "N/A",
+      covariance_status = "NotRequested",
+      model_source = "model fake\n",
+      data_path = NA_character_
+    ),
+    class = "ferx_fit"
+  )
+  path <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(path), add = TRUE)
+
+  ferx_save_fit(fake, path)
+  loaded <- ferx_load_fit(path)
+
+  expect_equal(loaded$omega_init_as_sd, c(TRUE, FALSE))
+  expect_equal(loaded$sigma_init_as_sd, TRUE)
+  expect_equal(loaded$kappa_init_as_sd, TRUE)
+})
+
 test_that("init_as_sd flags survive ferx_save_fit / ferx_load_fit round-trip", {
   skip_if_not(nzchar(Sys.getenv("FERX_RUN_REAL_FIT", "")),
               "Set FERX_RUN_REAL_FIT=1 to run real-fit persist tests")
