@@ -634,8 +634,8 @@ ferx_estimates <- function(fit) {
         "The named parameter(s) have a flat or non-finite Hessian diagonal, ",
         "meaning the parameter is not informed by the data or the objective ",
         "function overflows near convergence. Consider fixing the parameter, ",
-        "tightening its bounds, or increasing fd_hessian_step (e.g. ",
-        "settings = list(fd_hessian_step = 0.05))."
+        "tightening its bounds, or increasing fd_hessian_step ",
+        "(e.g. ferx_fit(..., fd_hessian_step = 0.05))."
       ))
     }
     # Model evaluation overflow/underflow.
