@@ -160,6 +160,8 @@
 #'     \item{\code{inner_maxiter}}{Per-subject EBE iteration cap (default 200).}
 #'     \item{\code{inner_tol}}{Convergence tolerance for the inner EBE loop
 #'       (default \code{1e-4}).}
+#'     \item{\code{fd_hessian_step}}{Also available as the dedicated
+#'       \code{fd_hessian_step} argument above.}
 #'   }
 #'
 #'   \strong{FOCE / FOCEI / GN / GN-hybrid: iteration cap}
@@ -801,6 +803,10 @@
 #' \preformatted{
 #' ferx_fit(m, d, covariance = TRUE)   # default: produces SE / %RSE
 #' ferx_fit(m, d, covariance = FALSE)  # skip for speed during development
+#'
+#' # Tune the FD step for the Hessian (default 0.01):
+#' ferx_fit(m, d, fd_hessian_step = 0.1)    # increase when Hessian is ill-conditioned
+#' ferx_fit(m, d, fd_hessian_step = 1e-3)   # decrease for very smooth surfaces
 #' }
 #'
 #' \strong{Parallelism} - cap the Rust thread pool:
@@ -1381,17 +1387,12 @@ ferx_fit <- function(model, data = NULL,
     settings <- c(list(inits_from_nca = inits_value), settings)
   }
   # fd_hessian_step: dedicated arg wins over any `settings` duplicate.
-  fd_hessian_step_explicit <- "fd_hessian_step" %in% names(match.call())[-1L]
   if (!is.null(fd_hessian_step)) {
     if (!is.numeric(fd_hessian_step) || length(fd_hessian_step) != 1L ||
         !is.finite(fd_hessian_step) || fd_hessian_step <= 0) {
       stop("`fd_hessian_step` must be a positive finite numeric scalar (e.g. 0.01)")
     }
-  }
-  if (fd_hessian_step_explicit) {
     settings[["fd_hessian_step"]] <- NULL
-  }
-  if (!is.null(fd_hessian_step)) {
     settings <- c(list(fd_hessian_step = fd_hessian_step), settings)
   }
   # Validate and normalise data-selection args.

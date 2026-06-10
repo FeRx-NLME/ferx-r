@@ -204,6 +204,63 @@ test_that("errors on missing data file", {
   )
 })
 
+# fd_hessian_step argument — Tier 1 (R-side validation, no Rust call)
+
+test_that("fd_hessian_step = 0 is rejected", {
+  ex <- ferx_example("warfarin")
+  expect_error(
+    ferx_fit(ex$model, ex$data, fd_hessian_step = 0),
+    regexp = "positive finite",
+    ignore.case = TRUE
+  )
+})
+
+test_that("fd_hessian_step < 0 is rejected", {
+  ex <- ferx_example("warfarin")
+  expect_error(
+    ferx_fit(ex$model, ex$data, fd_hessian_step = -0.01),
+    regexp = "positive finite",
+    ignore.case = TRUE
+  )
+})
+
+test_that("fd_hessian_step = Inf is rejected", {
+  ex <- ferx_example("warfarin")
+  expect_error(
+    ferx_fit(ex$model, ex$data, fd_hessian_step = Inf),
+    regexp = "positive finite",
+    ignore.case = TRUE
+  )
+})
+
+test_that("fd_hessian_step as character is rejected", {
+  ex <- ferx_example("warfarin")
+  expect_error(
+    ferx_fit(ex$model, ex$data, fd_hessian_step = "0.05"),
+    regexp = "positive finite",
+    ignore.case = TRUE
+  )
+})
+
+test_that("fd_hessian_step and settings duplicate does not cause duplicate-key error", {
+  ex <- ferx_example("warfarin")
+  expect_no_error(
+    ferx_fit(ex$model, ex$data,
+             fd_hessian_step = 0.05,
+             settings = list(fd_hessian_step = 0.1),
+             covariance = FALSE, verbose = FALSE)
+  )
+})
+
+test_that("fd_hessian_step via settings still works when dedicated arg is absent", {
+  ex <- ferx_example("warfarin")
+  expect_no_error(
+    ferx_fit(ex$model, ex$data,
+             settings = list(fd_hessian_step = 0.05),
+             covariance = FALSE, verbose = FALSE)
+  )
+})
+
 # ferx_check_init — Tier 1
 
 test_that("ferx_check_init returns without error on valid inputs", {
