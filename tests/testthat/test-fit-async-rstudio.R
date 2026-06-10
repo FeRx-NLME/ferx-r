@@ -32,6 +32,7 @@ test_that(".ferx_async_rstudio writes a runnable job script and returns a handle
   if (!is.na(args_line) && !identical(args_path, args_line)) on.exit(unlink(args_path), add = TRUE)
   expect_true(any(grepl("ferx::ferx_fit", script, fixed = TRUE)))
   expect_true(any(grepl("optimizer_trace <- TRUE", script, fixed = TRUE)))
+})
 
 test_that(".ferx_async_rstudio cleans up and rethrows when jobRunScript fails", {
   skip_if_not_installed("mockery")
