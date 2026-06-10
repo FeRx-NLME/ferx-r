@@ -303,7 +303,7 @@ version = "0.1.5"
 dependencies = [
  "extendr-api",
  "ferx-core",
- "nalgebra 0.33.3",
+ "nalgebra 0.34.2",
 ]
 
 [[package]]
