@@ -55,7 +55,8 @@ RUN set -eux; \
 # ===========================================================================
 # Stage 2: Final image based on rocker/tidyverse.
 # ===========================================================================
-FROM rocker/tidyverse:latest
+# Pinned to a specific R release tag for reproducible builds (avoid :latest drift).
+FROM rocker/tidyverse:4.6.0
 
 # ---------------------------------------------------------------------------
 # 1. System build + runtime deps.
