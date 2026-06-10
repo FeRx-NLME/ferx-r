@@ -2278,6 +2278,82 @@ fn ferx_rust_sir(
     .into()
 }
 
+/// Prepare a FREM (Full Random Effects Model) dataset and model file.
+///
+/// Transforms a base model + dataset into a FREM model that treats covariates
+/// as additional dependent variables. The covariance structure of an extended
+/// omega matrix captures covariate-parameter relationships implicitly.
+///
+/// @param model_path Path to base .ferx model file
+/// @param data_path Path to NONMEM-format CSV
+/// @param covariates Character vector of covariate column names
+/// @param categorical_covariates Character vector of categorical covariate
+///   names (subset of `covariates`). These are binarized (one-hot encoded)
+///   before FREM transformation. Pass an empty vector if none.
+/// @param output_model_path Optional path for the output .ferx model file.
+///   If empty, defaults to `<model_dir>/<model_stem>_frem.ferx`.
+/// @param output_data_path Optional path for the output CSV file.
+///   If empty, defaults to `<model_dir>/<model_stem>_frem_data.csv`.
+/// @return Named list with model_path, data_path, covariate_means,
+///   covariate_variances, fremtype_map, n_total_etas
+/// @export
+#[extendr]
+fn ferx_rust_prepare_frem(
+    model_path: &str,
+    data_path: &str,
+    covariates: Vec<String>,
+    categorical_covariates: Vec<String>,
+    output_model_path: &str,
+    output_data_path: &str,
+) -> List {
+    let cat_opt: Option<Vec<String>> = if categorical_covariates.is_empty() {
+        None
+    } else {
+        Some(categorical_covariates)
+    };
+    let out_model: Option<&Path> = if output_model_path.is_empty() {
+        None
+    } else {
+        Some(Path::new(output_model_path))
+    };
+    let out_data: Option<&Path> = if output_data_path.is_empty() {
+        None
+    } else {
+        Some(Path::new(output_data_path))
+    };
+
+    let result = match ferx_core::prepare_frem(
+        Path::new(model_path),
+        Path::new(data_path),
+        &covariates,
+        cat_opt.as_deref(),
+        out_model,
+        out_data,
+    ) {
+        Ok(r) => r,
+        Err(e) => throw_r_error(format!("Error in prepare_frem: {e}")),
+    };
+
+    let mean_names: Vec<String> = result.covariate_means.iter().map(|(n, _)| n.clone()).collect();
+    let mean_vals: Vec<f64> = result.covariate_means.iter().map(|(_, v)| *v).collect();
+    let var_names: Vec<String> = result.covariate_variances.iter().map(|(n, _)| n.clone()).collect();
+    let var_vals: Vec<f64> = result.covariate_variances.iter().map(|(_, v)| *v).collect();
+    let ft_names: Vec<String> = result.fremtype_map.iter().map(|(n, _)| n.clone()).collect();
+    let ft_vals: Vec<i32> = result.fremtype_map.iter().map(|(_, v)| *v as i32).collect();
+
+    list!(
+        model_path = result.model_path.to_string_lossy().to_string(),
+        data_path = result.data_path.to_string_lossy().to_string(),
+        covariate_mean_names = mean_names,
+        covariate_mean_values = mean_vals,
+        covariate_var_names = var_names,
+        covariate_var_values = var_vals,
+        fremtype_names = ft_names,
+        fremtype_values = ft_vals,
+        n_total_etas = result.n_total_etas as i32
+    )
+}
+
 extendr_module! {
     mod ferx;
     fn ferx_rust_fit;
@@ -2290,4 +2366,5 @@ extendr_module! {
     fn ferx_rust_autodiff_enabled;
     fn ferx_rust_validate_model;
     fn ferx_rust_inits_from_nca;
+    fn ferx_rust_prepare_frem;
 }
