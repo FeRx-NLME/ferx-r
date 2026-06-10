@@ -27,9 +27,11 @@ test_that(".ferx_async_rstudio writes a runnable job script and returns a handle
 
   # The generated script must drive a real ferx_fit in a background process.
   script <- readLines(h$script_path)
+  args_line <- script[grepl("saved <- readRDS", script, fixed = TRUE)][1L]
+  args_path <- sub('.*readRDS\\("([^"]+)"\\).*', "\\1", args_line)
+  if (!is.na(args_line) && !identical(args_path, args_line)) on.exit(unlink(args_path), add = TRUE)
   expect_true(any(grepl("ferx::ferx_fit", script, fixed = TRUE)))
   expect_true(any(grepl("optimizer_trace <- TRUE", script, fixed = TRUE)))
-})
 
 test_that(".ferx_async_rstudio cleans up and rethrows when jobRunScript fails", {
   skip_if_not_installed("mockery")

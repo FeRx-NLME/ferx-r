@@ -31,7 +31,9 @@ test_that("ferx_plot_trace draws the SAEM accept-rate panel and phase lines", {
                        phase = rep(c("burn-in", "stochastic"), length.out = 5L),
                        mh = seq(0.2, 0.6, length.out = 5L))
   on.exit(unlink(p), add = TRUE)
-  expect_invisible(tr <- ferx_plot_trace(p))
+  res <- withVisible(ferx_plot_trace(p))
+  expect_false(res$visible)
+  tr <- res$value
   expect_s3_class(tr, "data.frame")
 })
 
