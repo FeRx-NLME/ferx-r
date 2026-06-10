@@ -18,6 +18,7 @@ ferx_fit(
   optimizer_trace = FALSE,
   scale_params = FALSE,
   inits_from_nca = FALSE,
+  fd_hessian_step = NULL,
   settings = NULL,
   output = NULL,
   include_data = FALSE,
@@ -171,6 +172,14 @@ the optimizer runs, overriding the model file's defaults. Either a logical
 where bad starting values can stall the optimizer. See
 \code{\link{ferx_inits_from_nca}} to inspect the values without fitting.}
 
+\item{fd_hessian_step}{Positive finite numeric. Relative step size for the
+finite-difference Hessian used in the covariance step (default \code{0.01}).
+The actual perturbation for parameter \emph{i} is
+\code{fd_hessian_step * (1 + |x_hat[i]|)}.
+Increase (e.g. \code{0.1}) when the fit warns about ill-conditioned Hessian
+entries; decrease (e.g. \code{1e-3}) on smooth OFV surfaces where FD noise
+is the primary concern. Has no effect when \code{covariance = FALSE}.}
+
 \item{settings}{Optional named list of fine-grained options forwarded to the
 Rust \code{FitOptions}. Use this to tune knobs that do not have a
 dedicated \code{ferx_fit()} argument. Keys are validated: values that
@@ -191,13 +200,8 @@ audit the full picture.
 \item{\code{inner_maxiter}}{Per-subject EBE iteration cap (default 200).}
 \item{\code{inner_tol}}{Convergence tolerance for the inner EBE loop
 (default \code{1e-4}).}
-\item{\code{fd_hessian_step}}{Relative step size for the finite-difference
-Hessian used in the covariance step (default \code{1e-2}). The actual
-perturbation for parameter \emph{i} is
-\code{fd_hessian_step * (1 + |x_hat[i]|)}. Increase (e.g. \code{0.05})
-when the fit warns about non-finite Hessian entries; decrease (e.g.
-\code{1e-3}) on smooth OFV surfaces where FD noise is the primary
-concern. Has no effect when \code{covariance = FALSE}.}
+\item{\code{fd_hessian_step}}{Also available as the dedicated
+\code{fd_hessian_step} argument above.}
 }
 
 \strong{FOCE / FOCEI / GN / GN-hybrid: iteration cap}
@@ -861,6 +865,10 @@ ferx_fit(m, d, method = c("saem", "focei"))  # SAEM warm-start, FOCEI polish
 \preformatted{
 ferx_fit(m, d, covariance = TRUE)   # default: produces SE / %RSE
 ferx_fit(m, d, covariance = FALSE)  # skip for speed during development
+
+# Tune the FD step for the Hessian (default 0.01):
+ferx_fit(m, d, fd_hessian_step = 0.1)    # increase when Hessian is ill-conditioned
+ferx_fit(m, d, fd_hessian_step = 1e-3)   # decrease for very smooth surfaces
 }
 
 \strong{Parallelism} - cap the Rust thread pool:
