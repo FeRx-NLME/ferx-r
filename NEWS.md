@@ -2,6 +2,14 @@
 
 ## New features
 
+- **FREM covariate analysis** (`ferx_to_frem()`): transforms a base model and
+  dataset into a Full Random Effects Model (FREM) that treats covariates as
+  additional dependent variables. The extended omega block captures
+  covariate-parameter relationships in a single fit, avoiding stepwise search.
+  Returns the generated model/data paths plus covariate means, variances, and
+  FREMTYPE mapping. Fit the result with `ferx_fit(result$model_path,
+  result$data_path)`. (#194)
+
 - `ferx_model_show()` now **syntax-highlights** `.ferx` files in colour-capable
   consoles: section headers (`[parameters]`, ...) in bold yellow, declaration
   keywords (`theta`, `omega`, `sigma`, `kappa`, ...) in cyan, and comments
