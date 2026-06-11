@@ -133,6 +133,13 @@
 #'   \code{settings = list(optimizer = "trust_region")} or \code{method = "gn"},
 #'   where bad starting values can stall the optimizer. See
 #'   \code{\link{ferx_inits_from_nca}} to inspect the values without fitting.
+#' @param fd_hessian_step Positive finite numeric. Relative step size for the
+#'   finite-difference Hessian used in the covariance step (default \code{0.01}).
+#'   The actual perturbation for parameter \emph{i} is
+#'   \code{fd_hessian_step * (1 + |x_hat[i]|)}.
+#'   Increase (e.g. \code{0.1}) when the fit warns about ill-conditioned Hessian
+#'   entries; decrease (e.g. \code{1e-3}) on smooth OFV surfaces where FD noise
+#'   is the primary concern. Has no effect when \code{covariance = FALSE}.
 #' @param settings Optional named list of fine-grained options forwarded to the
 #'   Rust \code{FitOptions}. Use this to tune knobs that do not have a
 #'   dedicated \code{ferx_fit()} argument. Keys are validated: values that
@@ -153,6 +160,8 @@
 #'     \item{\code{inner_maxiter}}{Per-subject EBE iteration cap (default 200).}
 #'     \item{\code{inner_tol}}{Convergence tolerance for the inner EBE loop
 #'       (default \code{1e-4}).}
+#'     \item{\code{fd_hessian_step}}{Also available as the dedicated
+#'       \code{fd_hessian_step} argument above.}
 #'   }
 #'
 #'   \strong{FOCE / FOCEI / GN / GN-hybrid: iteration cap}
@@ -794,6 +803,10 @@
 #' \preformatted{
 #' ferx_fit(m, d, covariance = TRUE)   # default: produces SE / %RSE
 #' ferx_fit(m, d, covariance = FALSE)  # skip for speed during development
+#'
+#' # Tune the FD step for the Hessian (default 0.01):
+#' ferx_fit(m, d, fd_hessian_step = 0.1)    # increase when Hessian is ill-conditioned
+#' ferx_fit(m, d, fd_hessian_step = 1e-3)   # decrease for very smooth surfaces
 #' }
 #'
 #' \strong{Parallelism} - cap the Rust thread pool:
@@ -1189,6 +1202,7 @@ ferx_fit <- function(model, data = NULL,
                      optimizer_trace = FALSE,
                      scale_params = FALSE,
                      inits_from_nca = FALSE,
+                     fd_hessian_step = NULL,
                      settings = NULL,
                      output = NULL,
                      include_data = FALSE,
@@ -1372,6 +1386,15 @@ ferx_fit <- function(model, data = NULL,
   if (!is.null(inits_value)) {
     settings <- c(list(inits_from_nca = inits_value), settings)
   }
+  # fd_hessian_step: dedicated arg wins over any `settings` duplicate.
+  if (!is.null(fd_hessian_step)) {
+    if (!is.numeric(fd_hessian_step) || length(fd_hessian_step) != 1L ||
+        !is.finite(fd_hessian_step) || fd_hessian_step <= 0) {
+      stop("`fd_hessian_step` must be a positive finite numeric scalar (e.g. 0.01)")
+    }
+    settings[["fd_hessian_step"]] <- NULL
+    settings <- c(list(fd_hessian_step = fd_hessian_step), settings)
+  }
   # Validate and normalise data-selection args.
   if (!is.null(ignore)) {
     if (!is.character(ignore)) stop("`ignore` must be a character vector of filter expressions")
@@ -1427,7 +1450,9 @@ ferx_fit <- function(model, data = NULL,
     mu_referencing = if ("mu_referencing" %in% explicit_args) tolower(as.character(mu_referencing)),
     sir            = if ("sir"            %in% explicit_args) tolower(as.character(sir)),
     gradient       = if ("gradient"       %in% explicit_args) gradient,
-    inits_from_nca = if ("inits_from_nca" %in% explicit_args) (if (is.null(inits_value)) "off" else inits_value)
+    inits_from_nca  = if ("inits_from_nca"  %in% explicit_args) (if (is.null(inits_value)) "off" else inits_value),
+    fd_hessian_step = if ("fd_hessian_step" %in% explicit_args && !is.null(fd_hessian_step))
+      format(fd_hessian_step, scientific = FALSE, trim = TRUE, digits = 17)
   )
   .ferx_warn_fit_option_conflicts(model_file_opts, dedicated_explicit, settings_parts)
 

@@ -71,8 +71,16 @@ and \code{II = 24} (once-daily interval). The engine resolves
 steady-state initial conditions automatically; no model changes are
 needed.}
 \item{transit_2cpt}{Two-compartment ODE model with 3-transit-compartment
-absorption, allometric scaling on CL/V1/V2 (reference WT = 70 kg), and
-a lag time on the first transit compartment.}
+absorption, allometric scaling on CL/V1/V2 (reference WT = 70 kg).
+Transit compartments provide the absorption delay without a hard lag time.}
+\item{warfarin_ode_lagtime}{One-compartment oral (warfarin) as an ODE model
+demonstrating the \code{LAGTIME} keyword in \code{[individual_parameters]}.
+Assigning to the reserved name \code{LAGTIME} delays every dose event for
+that subject by the individual lag time; no change to the ODE equations is
+needed. IIV on \code{LAGTIME} is log-normal; individual lag times are
+recovered in \code{fit$individual_estimates}. Contrast with the
+\code{lagtime=} argument used in analytical PK solvers
+(\code{warfarin_additive_eta}).}
 \item{emax_pkpd}{Simultaneous PK/PD: oral 1-compartment PK plus an
 effect-compartment Emax PD readout, fit jointly with a SEPARATE
 residual error model per endpoint via a per-CMT \code{[error_model]}

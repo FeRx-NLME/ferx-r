@@ -111,6 +111,58 @@ test_that(".ferx_eta_normality_warning returns NULL when nothing is flagged", {
   expect_null(ferx:::.ferx_eta_normality_warning(all_ok))
 })
 
+test_that(".ferx_warning_guidance dispatches covariance_step by message content", {
+  g <- function(msg) ferx:::.ferx_warning_guidance("covariance_step", message = msg)
+
+  # NonPdHessian path: eigenvalue list in message.
+  msg_npd <- paste0(
+    "Covariance step: Hessian is not positive definite. ",
+    "Eigenvalues: [8.4000, 2.1000, -0.0100]. SE estimates not available."
+  )
+  expect_match(g(msg_npd), "eigenvalue", ignore.case = TRUE)
+  expect_match(g(msg_npd), "near-zero|negative", ignore.case = TRUE, perl = TRUE)
+
+  # Ill-conditioned Hessian entries: names a parameter.
+  msg_ic <- paste0(
+    "Covariance step failed: Hessian has ill-conditioned entries for the ",
+    "following parameter(s) -- theta[CL] (non-finite diagonal). ",
+    "SE estimates not available."
+  )
+  expect_match(g(msg_ic), "fd_hessian_step", ignore.case = TRUE)
+
+  # Omega non-PD.
+  msg_omega <- paste0(
+    "Covariance step failed: Omega matrix is not positive definite at ",
+    "convergence (min eigenvalue = 1.2e-10; eigenvalues: [0.5000, 1.2e-10]). ",
+    "SE estimates not available."
+  )
+  expect_match(g(msg_omega), "near-singular", ignore.case = TRUE)
+  expect_false(grepl("eigenvalue list", g(msg_omega), ignore.case = TRUE))
+
+  # Non-finite OFV.
+  msg_ofv <- paste0(
+    "Covariance step failed: base OFV is non-finite at convergence ",
+    "(likely numerical overflow or underflow in model evaluation). ",
+    "SE estimates not available."
+  )
+  expect_match(g(msg_ofv), "overflow|underflow", ignore.case = TRUE, perl = TRUE)
+
+  # Regularisation: minor, moderate, severe.
+  base_reg <- function(sev) paste0(
+    "Covariance step regularized: eigenvalue floor applied to FD Hessian ",
+    "(1 of 3 free-block eigenvalues clipped; min eig = 1.2e-6, floor = 8.4e-14; ",
+    "severity: ", sev, "). Standard errors are likely reliable."
+  )
+  expect_match(g(base_reg("minor")),    "benign|reliable",   ignore.case = TRUE, perl = TRUE)
+  expect_match(g(base_reg("moderate")), "ferx_sir|caution",  ignore.case = TRUE, perl = TRUE)
+  expect_match(g(base_reg("severe")),   "ferx_sir|unreliable", ignore.case = TRUE, perl = TRUE)
+  # Minor guidance should not suggest SIR.
+  expect_false(grepl("ferx_sir", g(base_reg("minor")), ignore.case = TRUE))
+
+  # Generic fallback for unrecognised message.
+  expect_match(g("Covariance step failed"), "identifiability", ignore.case = TRUE)
+})
+
 test_that("ferx_warnings() shows guidance for unused_parameter category", {
   fake <- structure(
     list(

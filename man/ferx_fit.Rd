@@ -18,6 +18,7 @@ ferx_fit(
   optimizer_trace = FALSE,
   scale_params = FALSE,
   inits_from_nca = FALSE,
+  fd_hessian_step = NULL,
   settings = NULL,
   output = NULL,
   include_data = FALSE,
@@ -171,6 +172,14 @@ the optimizer runs, overriding the model file's defaults. Either a logical
 where bad starting values can stall the optimizer. See
 \code{\link{ferx_inits_from_nca}} to inspect the values without fitting.}
 
+\item{fd_hessian_step}{Positive finite numeric. Relative step size for the
+finite-difference Hessian used in the covariance step (default \code{0.01}).
+The actual perturbation for parameter \emph{i} is
+\code{fd_hessian_step * (1 + |x_hat[i]|)}.
+Increase (e.g. \code{0.1}) when the fit warns about ill-conditioned Hessian
+entries; decrease (e.g. \code{1e-3}) on smooth OFV surfaces where FD noise
+is the primary concern. Has no effect when \code{covariance = FALSE}.}
+
 \item{settings}{Optional named list of fine-grained options forwarded to the
 Rust \code{FitOptions}. Use this to tune knobs that do not have a
 dedicated \code{ferx_fit()} argument. Keys are validated: values that
@@ -191,6 +200,8 @@ audit the full picture.
 \item{\code{inner_maxiter}}{Per-subject EBE iteration cap (default 200).}
 \item{\code{inner_tol}}{Convergence tolerance for the inner EBE loop
 (default \code{1e-4}).}
+\item{\code{fd_hessian_step}}{Also available as the dedicated
+\code{fd_hessian_step} argument above.}
 }
 
 \strong{FOCE / FOCEI / GN / GN-hybrid: iteration cap}
@@ -341,7 +352,18 @@ Merged with \code{[data_selection] ignore_subjects} from the model file.}
 \item{...}{Reserved for future use. Unrecognised arguments raise an error.}
 }
 \value{
-A list with components:
+A named list. Where to find commonly-needed quantities:\tabular{llll}{
+   What you want \tab Accessor \tab Shape \tab When present \cr
+   Residuals, PRED, IPRED, diagnostics \tab \code{fit$sdtab} \tab one row per observation \tab always \cr
+   Covariates echoed per observation (via \verb{[output]}) \tab \code{fit$sdtab} \tab one row per observation, LOCF \tab declared in \verb{[output]} \cr
+   Raw covariate values for all dataset records \tab \code{fit$covtab} \tab one row per dataset record (doses + obs) \tab model has \verb{[covariates]} block \cr
+   ETA / EBE values per observation row \tab \code{fit$sdtab} (\code{ETA_CL}, \code{ETA_V}, …) \tab one row per observation, value repeated \tab always \cr
+   ETA / EBE values per subject \tab \code{fit$ebe_etas} \tab one row per subject \tab model declares etas \cr
+   Individual PK parameters per subject \tab \code{fit$individual_estimates} \tab one row per subject \tab always \cr
+}
+
+
+Full slot descriptions:
 \item{converged}{Logical; did the optimizer converge}
 \item{method}{Estimation method used}
 \item{n_iterations}{Number of outer iterations run}
@@ -375,11 +397,11 @@ automatically.  Columns declared in \code{[derived]} (per-row
 expressions, aggregates, integrals) and \code{[output]} (individual
 PK parameters or covariates echoed by name) appear at the end of the
 data frame in declaration order.
-Note: per-subject ETA (EBE) values are in \code{fit$ebe_etas} (one
-row per subject, no row duplication); per-subject individual parameter
-values are in \code{fit$individual_estimates}.  ETAs are available as
-read-only context variables inside \code{[derived]} expressions but
-are not written as sdtab columns.}
+ETA columns (\code{ETA_CL}, \code{ETA_V}, etc.) are included
+automatically — the same EBE value is repeated for every observation
+row of that subject. For a compact per-subject view use
+\code{fit$ebe_etas}; for individual PK parameter values use
+\code{fit$individual_estimates}.}
 \item{covtab}{Data frame echoing the declared covariate columns, present
 only when the model has a \code{[covariates]} block. Columns: \code{ID},
 \code{TIME}, \code{EVID}, then one column per declared covariate (in
@@ -843,6 +865,10 @@ ferx_fit(m, d, method = c("saem", "focei"))  # SAEM warm-start, FOCEI polish
 \preformatted{
 ferx_fit(m, d, covariance = TRUE)   # default: produces SE / %RSE
 ferx_fit(m, d, covariance = FALSE)  # skip for speed during development
+
+# Tune the FD step for the Hessian (default 0.01):
+ferx_fit(m, d, fd_hessian_step = 0.1)    # increase when Hessian is ill-conditioned
+ferx_fit(m, d, fd_hessian_step = 1e-3)   # decrease for very smooth surfaces
 }
 
 \strong{Parallelism} - cap the Rust thread pool:
