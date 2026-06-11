@@ -162,6 +162,17 @@
 #'       (default \code{1e-4}).}
 #'     \item{\code{fd_hessian_step}}{Also available as the dedicated
 #'       \code{fd_hessian_step} argument above.}
+#'     \item{\code{covariance_method}}{Covariance estimator, mirroring NONMEM
+#'       \code{$COV MATRIX=}: \code{"r"} (inverse Hessian, the default),
+#'       \code{"s"} (score cross-product), or \code{"rsr"} (the Huber-White
+#'       sandwich, robust to model misspecification). Validated for FOCEI;
+#'       \code{"s"} and \code{"rsr"} are rejected under non-interaction FOCE.
+#'       No effect when \code{covariance = FALSE}.}
+#'     \item{\code{covariance_fallback}}{\code{"none"} (default) or \code{"sir"}.
+#'       When the finite-difference Hessian is not positive definite, \code{"sir"}
+#'       runs SIR with an absolute-eigenvalue-rectified proposal instead of
+#'       leaving the covariance step failed; \code{covariance_status} is then
+#'       \code{"sir_fallback"} and SIR-based credible intervals are reported.}
 #'   }
 #'
 #'   \strong{FOCE / FOCEI / GN / GN-hybrid: iteration cap}
@@ -415,8 +426,10 @@
 #'     in a single outer iteration.}
 #'   \item{total_ebe_fallbacks}{Total Nelder-Mead fallback invocations across
 #'     all subjects and iterations.}
-#'   \item{covariance_status}{String: \code{"computed"}, \code{"failed"}, or
-#'     \code{"not_requested"}.}
+#'   \item{covariance_status}{String: \code{"computed"}, \code{"failed"},
+#'     \code{"not_requested"}, or \code{"sir_fallback"} (the finite-difference
+#'     Hessian was not positive definite and \code{covariance_fallback = "sir"}
+#'     produced SIR-based intervals).}
 #'   \item{shrinkage_eta}{Numeric vector of ETA shrinkage per random effect
 #'     (\code{1 - SD(eta_hat_k) / sqrt(omega_kk)}). \code{NA} when
 #'     \code{omega_kk = 0} or fewer than 2 subjects.}

@@ -705,6 +705,7 @@ ferx_load_fit <- function(path) {
     "failed" = "failed",
     "not_requested" = "not_requested",
     "notrequested" = "not_requested",
+    "sir_fallback" = "sir_fallback",
     tolower(s)
   )
 }
@@ -715,6 +716,7 @@ ferx_load_fit <- function(path) {
     "computed" = "Computed",
     "failed" = "Failed",
     "not_requested" = "NotRequested",
+    "sir_fallback" = "SirFallback",
     as.character(token)
   )
 }
