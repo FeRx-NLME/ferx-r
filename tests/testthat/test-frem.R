@@ -142,7 +142,7 @@ test_that("ferx_to_frem() errors when the covariates filter names an undeclared 
 # End-to-end FREM transformation
 # ---------------------------------------------------------------------------
 
-test_that("ferx_to_frem() returns ferx_frem with correct metadata", {
+test_that("ferx_to_frem() returns a ferx_model referencing the generated files", {
   tmp <- tempfile("frem_")
   dir.create(tmp)
   on.exit(unlink(tmp, recursive = TRUE))
@@ -157,28 +157,10 @@ test_that("ferx_to_frem() returns ferx_frem with correct metadata", {
     output_dir = tmp
   )
 
-  # Class.
-  expect_s3_class(result, "ferx_frem")
-
-  # Output files exist.
-  expect_true(file.exists(result$model_path))
-  expect_true(file.exists(result$data_path))
-
-  # Total etas: 3 PK + 2 covariate = 5.
-  expect_equal(result$n_total_etas, 5L)
-
-  # FREMTYPE map.
-  expect_equal(length(result$fremtype_map), 2L)
-  expect_equal(as.integer(result$fremtype_map[["WT"]]),  100L)
-  expect_equal(as.integer(result$fremtype_map[["AGE"]]), 200L)
-
-  # Covariate means: WT = 72.0, AGE = 37.6.
-  expect_equal(unname(result$covariate_means[["WT"]]),  72.0, tolerance = 0.01)
-  expect_equal(unname(result$covariate_means[["AGE"]]), 37.6, tolerance = 0.01)
-
-  # Covariate variances: WT ≈ 111.56, AGE ≈ 99.38.
-  expect_equal(unname(result$covariate_variances[["WT"]]),  111.56, tolerance = 0.5)
-  expect_equal(unname(result$covariate_variances[["AGE"]]),  99.38, tolerance = 0.5)
+  # It is a regular ferx_model pointing at the generated model + data files.
+  expect_s3_class(result, "ferx_model")
+  expect_true(file.exists(result$model))
+  expect_true(file.exists(result$data))
 })
 
 test_that("ferx_to_frem() uses all declared covariates when `covariates` omitted", {
@@ -192,10 +174,9 @@ test_that("ferx_to_frem() uses all declared covariates when `covariates` omitted
   # `covariates` omitted → all covariates from the model's [covariates] block.
   result <- ferx_to_frem(model = model_path, data = data_path, output_dir = tmp)
 
-  expect_s3_class(result, "ferx_frem")
-  # WT + AGE from the block → 3 PK + 2 covariate etas = 5.
-  expect_equal(result$n_total_etas, 5L)
-  expect_equal(sort(names(result$fremtype_map)), c("AGE", "WT"))
+  # Both WT (FREMTYPE 100) and AGE (FREMTYPE 200) pseudo-obs are emitted.
+  frem_data <- read.csv(result$data)
+  expect_equal(sort(unique(frem_data$FREMTYPE)), c(0, 100, 200))
 })
 
 test_that("ferx_to_frem() `covariates` filters to a subset of the block", {
@@ -214,9 +195,9 @@ test_that("ferx_to_frem() `covariates` filters to a subset of the block", {
     output_dir = tmp
   )
 
-  expect_equal(names(result$fremtype_map), "WT")
-  # 3 PK + 1 covariate eta = 4.
-  expect_equal(result$n_total_etas, 4L)
+  # Only WT (FREMTYPE 100) pseudo-obs; AGE (200) is excluded.
+  frem_data <- read.csv(result$data)
+  expect_equal(sort(unique(frem_data$FREMTYPE)), c(0, 100))
 })
 
 test_that("FREM dataset has correct row count", {
@@ -234,7 +215,7 @@ test_that("FREM dataset has correct row count", {
     output_dir = tmp
   )
 
-  frem_data <- read.csv(result$data_path)
+  frem_data <- read.csv(result$data)
 
   # Original: 10 subjects x (1 dose + 11 obs) = 120 rows.
   # FREM adds: 10 subjects x 2 covariates = 20 pseudo-obs.
@@ -262,9 +243,9 @@ test_that("FREM model can be fitted", {
     output_dir = tmp
   )
 
+  # Pass the ferx_model returned by ferx_to_frem() straight to ferx_fit().
   fit <- ferx_fit(
-    result$model_path,
-    result$data_path,
+    result,
     method     = "focei",
     verbose    = FALSE,
     covariance = FALSE,

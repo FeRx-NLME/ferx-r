@@ -8,9 +8,9 @@
   covariate-parameter relationships in a single fit, avoiding stepwise search.
   Covariates (and their continuous/categorical kind) are taken from the model's
   `[covariates]` block; the `covariates` argument is an optional subset filter
-  to FREM only some of them. Returns the generated model/data paths plus
-  covariate means, variances, and FREMTYPE mapping. Fit the result with
-  `ferx_fit(result$model_path, result$data_path)`. (#194)
+  to FREM only some of them. Returns a `ferx_model` referencing the generated
+  model and data files, so it composes directly: `ferx_fit(ferx_to_frem(...))`.
+  (#194)
 
 - `ferx_model_show()` now **syntax-highlights** `.ferx` files in colour-capable
   consoles: section headers (`[parameters]`, ...) in bold yellow, declaration

@@ -42,15 +42,12 @@ file. When \code{NULL} (default), the file is written to
 \code{<output_dir>/<stem>_frem_data.csv}.}
 }
 \value{
-A list with class \code{"ferx_frem"} containing:
-\describe{
-\item{model_path}{Path to the generated FREM \code{.ferx} model file.}
-\item{data_path}{Path to the generated FREM dataset (CSV).}
-\item{covariate_means}{Named numeric vector of population covariate means.}
-\item{covariate_variances}{Named numeric vector of population covariate variances.}
-\item{fremtype_map}{Named integer vector mapping covariate names to FREMTYPE values.}
-\item{n_total_etas}{Total number of etas in the FREM model (base + covariate).}
-}
+A \code{\link{ferx_model}} object pointing at the generated FREM
+model and dataset, so it composes directly with \code{\link{ferx_fit}} and
+the other model helpers. The fixed covariate thetas, covariate omega
+initial values, and FREMTYPE mapping are written into the generated model
+and data files (and the fit's omega is labelled by eta name), so no
+separate metadata object is returned.
 }
 \description{
 Transforms a base model and dataset into a FREM model that treats covariates
@@ -71,9 +68,9 @@ with \code{DV} set to the covariate value and a \code{FREMTYPE} column
 distinguishing covariate rows from PK observations.
 \item Generates a new \code{.ferx} model file with an extended omega block
 that covers both the original random effects and covariate random effects.
-\item Returns metadata needed to interpret the FREM fit.
+\item Returns a \code{ferx_model} referencing the generated files.
 }
 
-After calling \code{ferx_to_frem()}, fit the returned model with
-\code{\link{ferx_fit}(result$model_path, result$data_path)}.
+After calling \code{ferx_to_frem()}, fit the returned model directly:
+\code{\link{ferx_fit}(frem)}.
 }

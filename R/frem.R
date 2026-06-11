@@ -31,15 +31,12 @@
 #'   \code{NULL} (default), the file is written to
 #'   \code{<output_dir>/<stem>_frem_data.csv}.
 #'
-#' @return A list with class \code{"ferx_frem"} containing:
-#'   \describe{
-#'     \item{model_path}{Path to the generated FREM \code{.ferx} model file.}
-#'     \item{data_path}{Path to the generated FREM dataset (CSV).}
-#'     \item{covariate_means}{Named numeric vector of population covariate means.}
-#'     \item{covariate_variances}{Named numeric vector of population covariate variances.}
-#'     \item{fremtype_map}{Named integer vector mapping covariate names to FREMTYPE values.}
-#'     \item{n_total_etas}{Total number of etas in the FREM model (base + covariate).}
-#'   }
+#' @return A \code{\link{ferx_model}} object pointing at the generated FREM
+#'   model and dataset, so it composes directly with \code{\link{ferx_fit}} and
+#'   the other model helpers. The fixed covariate thetas, covariate omega
+#'   initial values, and FREMTYPE mapping are written into the generated model
+#'   and data files (and the fit's omega is labelled by eta name), so no
+#'   separate metadata object is returned.
 #'
 #' @details
 #' The function:
@@ -50,11 +47,11 @@
 #'     distinguishing covariate rows from PK observations.
 #'   \item Generates a new \code{.ferx} model file with an extended omega block
 #'     that covers both the original random effects and covariate random effects.
-#'   \item Returns metadata needed to interpret the FREM fit.
+#'   \item Returns a \code{ferx_model} referencing the generated files.
 #' }
 #'
-#' After calling \code{ferx_to_frem()}, fit the returned model with
-#' \code{\link{ferx_fit}(result$model_path, result$data_path)}.
+#' After calling \code{ferx_to_frem()}, fit the returned model directly:
+#' \code{\link{ferx_fit}(frem)}.
 #'
 #' @export
 ferx_to_frem <- function(model,
@@ -67,7 +64,7 @@ ferx_to_frem <- function(model,
   # --- resolve model path ---
   if (inherits(model, "ferx_model")) {
     if (is.null(data)) data <- model$data
-    model_path <- model$path
+    model_path <- model$model
   } else {
     model_path <- model
   }
@@ -126,20 +123,9 @@ ferx_to_frem <- function(model,
     output_data_path  = out_data_path
   )
 
-  # --- assemble result ---
-  cov_means <- stats::setNames(raw$covariate_mean_values, raw$covariate_mean_names)
-  cov_vars  <- stats::setNames(raw$covariate_var_values, raw$covariate_var_names)
-  ft_map    <- stats::setNames(raw$fremtype_values, raw$fremtype_names)
-
-  structure(
-    list(
-      model_path          = raw$model_path,
-      data_path           = raw$data_path,
-      covariate_means     = cov_means,
-      covariate_variances = cov_vars,
-      fremtype_map        = ft_map,
-      n_total_etas        = raw$n_total_etas
-    ),
-    class = "ferx_frem"
-  )
+  # Return a plain ferx_model referencing the generated FREM files, so the
+  # result composes with ferx_fit() and the other model helpers. The covariate
+  # statistics / FREMTYPE mapping the backend also computes are baked into the
+  # generated model and data files, so they aren't surfaced as a separate object.
+  ferx_model(data = raw$data_path, model = raw$model_path)
 }
