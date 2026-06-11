@@ -5,15 +5,23 @@
 #' covariate-parameter relationships implicitly, enabling covariate screening
 #' without stepwise search.
 #'
+#' The covariates folded into the FREM model — and whether each is continuous or
+#' categorical — come from the model's \code{[covariates]} block, which is the
+#' single source of truth (and is required).
+#'
 #' @param model Path to a \code{.ferx} model file, or a \code{\link{ferx_model}}
-#'   object.
+#'   object. The model must declare its covariates in a \code{[covariates]}
+#'   block, each tagged continuous or categorical.
 #' @param data Path to a NONMEM-format CSV file containing the covariate
-#'   columns listed in \code{covariates}.
-#' @param covariates Character vector of covariate column names to include in
-#'   the FREM transformation.
-#' @param categorical Character vector of categorical covariate names (must be
-#'   a subset of \code{covariates}). These are binarized (one-hot encoded)
-#'   before the FREM transformation. Default \code{NULL} (no categoricals).
+#'   columns.
+#' @param covariates Optional character vector used as a \emph{subset filter}
+#'   over the covariates declared in the model's \code{[covariates]} block. When
+#'   \code{NULL} (the default), \strong{all} declared covariates are included.
+#'   When supplied, only the named covariates are included — useful when you do
+#'   not want every declared covariate in the FREM model. Each name must be
+#'   declared in the block; an undeclared name is an error. This argument cannot
+#'   introduce covariates the model has not declared, nor change their
+#'   continuous/categorical kind.
 #' @param output_dir Directory for the output model and data files. Defaults to
 #'   the directory containing \code{model}.
 #' @param output_model Optional explicit path for the output \code{.ferx} model
@@ -51,8 +59,7 @@
 #' @export
 ferx_to_frem <- function(model,
                          data = NULL,
-                         covariates,
-                         categorical = NULL,
+                         covariates = NULL,
                          output_dir = NULL,
                          output_model = NULL,
                          output_data = NULL) {
@@ -78,20 +85,11 @@ ferx_to_frem <- function(model,
   if (!file.exists(data)) {
     stop("Data file not found: ", data)
   }
-  if (!is.character(covariates) || length(covariates) < 1L) {
-    stop("`covariates` must be a character vector with at least one covariate name.")
-  }
-  if (!is.null(categorical)) {
-    if (!is.character(categorical)) {
-      stop("`categorical` must be a character vector or NULL.")
-    }
-    unknown <- setdiff(categorical, covariates)
-    if (length(unknown) > 0L) {
-      stop(
-        "`categorical` contains names not in `covariates`: ",
-        paste(unknown, collapse = ", ")
-      )
-    }
+  # `covariates` is an optional subset filter over the model's [covariates]
+  # block. NULL (or empty) means "use every declared covariate"; the backend
+  # validates that any names given are actually declared.
+  if (!is.null(covariates) && !is.character(covariates)) {
+    stop("`covariates` must be a character vector (a subset of the model's [covariates] block) or NULL.")
   }
 
   # --- resolve output paths ---
@@ -120,8 +118,10 @@ ferx_to_frem <- function(model,
   raw <- ferx_rust_prepare_frem(
     model_path  = model_path,
     data_path   = data,
-    covariates  = covariates,
-    categorical_covariates = if (!is.null(categorical)) categorical else character(0),
+    covariates  = if (!is.null(covariates)) covariates else character(0),
+    # Kinds (continuous/categorical) come from the model's [covariates] block;
+    # the low-level override is intentionally left empty here.
+    categorical_covariates = character(0),
     output_model_path = out_model_path,
     output_data_path  = out_data_path
   )

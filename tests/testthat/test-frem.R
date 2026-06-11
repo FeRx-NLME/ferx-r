@@ -19,9 +19,47 @@ write_warfarin_with_covariates <- function(dir) {
   path
 }
 
-# Write the base warfarin model.
+# Write the base warfarin model. FREM takes its covariates from the model's
+# [covariates] block, so the base model declares WT and AGE there.
 write_warfarin_model <- function(dir) {
   path <- file.path(dir, "warfarin.ferx")
+  writeLines(c(
+    "[parameters]",
+    "  theta TVCL(0.2, 0.001, 10.0)",
+    "  theta TVV(10.0, 0.1, 500.0)",
+    "  theta TVKA(1.5, 0.01, 50.0)",
+    "",
+    "  omega ETA_CL ~ 0.09",
+    "  omega ETA_V  ~ 0.04",
+    "  omega ETA_KA ~ 0.30",
+    "",
+    "  sigma PROP_ERR ~ 0.02",
+    "",
+    "[covariates]",
+    "  WT  continuous",
+    "  AGE continuous",
+    "",
+    "[individual_parameters]",
+    "  CL = TVCL * exp(ETA_CL)",
+    "  V  = TVV  * exp(ETA_V)",
+    "  KA = TVKA * exp(ETA_KA)",
+    "",
+    "[structural_model]",
+    "  pk one_cpt_oral(cl=CL, v=V, ka=KA)",
+    "",
+    "[error_model]",
+    "  DV ~ proportional(PROP_ERR)",
+    "",
+    "[fit_options]",
+    "  method = focei"
+  ), path)
+  path
+}
+
+# Same model with no [covariates] block — FREM has nothing to transform and
+# should error.
+write_warfarin_model_no_cov_block <- function(dir) {
+  path <- file.path(dir, "warfarin_nocov.ferx")
   writeLines(c(
     "[parameters]",
     "  theta TVCL(0.2, 0.001, 10.0)",
@@ -76,28 +114,27 @@ test_that("ferx_to_frem() errors on missing data argument", {
                "data")
 })
 
-test_that("ferx_to_frem() errors on empty covariates", {
+test_that("ferx_to_frem() errors when the model has no [covariates] block", {
   tmp <- tempdir()
-  model_path <- write_warfarin_model(tmp)
-  data_path  <- write_warfarin_with_covariates(tmp)
-  on.exit(unlink(c(model_path, data_path)))
-
-  expect_error(ferx_to_frem(model = model_path, data = data_path,
-                            covariates = character(0)),
-               "covariates")
-})
-
-test_that("ferx_to_frem() errors when categorical is not subset of covariates", {
-  tmp <- tempdir()
-  model_path <- write_warfarin_model(tmp)
+  model_path <- write_warfarin_model_no_cov_block(tmp)
   data_path  <- write_warfarin_with_covariates(tmp)
   on.exit(unlink(c(model_path, data_path)))
 
   expect_error(
-    ferx_to_frem(model = model_path, data = data_path,
-                 covariates = c("WT", "AGE"),
-                 categorical = "SEX"),
-    "not in `covariates`"
+    ferx_to_frem(model = model_path, data = data_path),
+    "\\[covariates\\] block"
+  )
+})
+
+test_that("ferx_to_frem() errors when the covariates filter names an undeclared covariate", {
+  tmp <- tempdir()
+  model_path <- write_warfarin_model(tmp)        # declares WT, AGE
+  data_path  <- write_warfarin_with_covariates(tmp)
+  on.exit(unlink(c(model_path, data_path)))
+
+  expect_error(
+    ferx_to_frem(model = model_path, data = data_path, covariates = "SEX"),
+    "not declared"
   )
 })
 
@@ -142,6 +179,44 @@ test_that("ferx_to_frem() returns ferx_frem with correct metadata", {
   # Covariate variances: WT ≈ 111.56, AGE ≈ 99.38.
   expect_equal(unname(result$covariate_variances[["WT"]]),  111.56, tolerance = 0.5)
   expect_equal(unname(result$covariate_variances[["AGE"]]),  99.38, tolerance = 0.5)
+})
+
+test_that("ferx_to_frem() uses all declared covariates when `covariates` omitted", {
+  tmp <- tempfile("frem_")
+  dir.create(tmp)
+  on.exit(unlink(tmp, recursive = TRUE))
+
+  model_path <- write_warfarin_model(tmp)   # declares WT, AGE
+  data_path  <- write_warfarin_with_covariates(tmp)
+
+  # `covariates` omitted → all covariates from the model's [covariates] block.
+  result <- ferx_to_frem(model = model_path, data = data_path, output_dir = tmp)
+
+  expect_s3_class(result, "ferx_frem")
+  # WT + AGE from the block → 3 PK + 2 covariate etas = 5.
+  expect_equal(result$n_total_etas, 5L)
+  expect_equal(sort(names(result$fremtype_map)), c("AGE", "WT"))
+})
+
+test_that("ferx_to_frem() `covariates` filters to a subset of the block", {
+  tmp <- tempfile("frem_")
+  dir.create(tmp)
+  on.exit(unlink(tmp, recursive = TRUE))
+
+  model_path <- write_warfarin_model(tmp)   # declares WT, AGE
+  data_path  <- write_warfarin_with_covariates(tmp)
+
+  # Filter to WT only — AGE is declared but excluded from the FREM model.
+  result <- ferx_to_frem(
+    model      = model_path,
+    data       = data_path,
+    covariates = "WT",
+    output_dir = tmp
+  )
+
+  expect_equal(names(result$fremtype_map), "WT")
+  # 3 PK + 1 covariate eta = 4.
+  expect_equal(result$n_total_etas, 4L)
 })
 
 test_that("FREM dataset has correct row count", {
@@ -190,9 +265,10 @@ test_that("FREM model can be fitted", {
   fit <- ferx_fit(
     result$model_path,
     result$data_path,
-    method   = "focei",
-    verbose  = FALSE,
-    settings = list(maxiter = 3L, covariance = FALSE)
+    method     = "focei",
+    verbose    = FALSE,
+    covariance = FALSE,
+    settings   = list(maxiter = 3L)
   )
 
   expect_s3_class(fit, "ferx_fit")
