@@ -706,6 +706,7 @@ ferx_load_fit <- function(path) {
     "not_requested" = "not_requested",
     "notrequested" = "not_requested",
     "sir_fallback" = "sir_fallback",
+    "sirfallback" = "sir_fallback",
     tolower(s)
   )
 }
