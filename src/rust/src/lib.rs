@@ -1236,6 +1236,7 @@ fn fit_result_to_list(
         CovarianceStatus::Computed => "computed",
         CovarianceStatus::Failed => "failed",
         CovarianceStatus::NotRequested => "not_requested",
+        CovarianceStatus::SirFallback => "sir_fallback",
     };
 
     // Parameter-level correlation for block omega (row-major flat); empty when diagonal or absent
