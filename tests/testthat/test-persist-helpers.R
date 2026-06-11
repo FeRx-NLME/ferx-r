@@ -43,6 +43,8 @@ test_that(".fitrx_covariance_status_to_token normalises and defaults", {
   expect_identical(ferx:::.fitrx_covariance_status_to_token("Computed"), "computed")
   expect_identical(ferx:::.fitrx_covariance_status_to_token("FAILED"), "failed")
   expect_identical(ferx:::.fitrx_covariance_status_to_token("NotRequested"), "not_requested")
+  expect_identical(ferx:::.fitrx_covariance_status_to_token("sir_fallback"), "sir_fallback")
+  expect_identical(ferx:::.fitrx_covariance_status_to_token("SirFallback"), "sir_fallback")
   expect_identical(ferx:::.fitrx_covariance_status_to_token("weird"), "weird")
 })
 
@@ -51,6 +53,7 @@ test_that(".fitrx_covariance_status_label maps tokens back to display form", {
   expect_identical(ferx:::.fitrx_covariance_status_label("computed"), "Computed")
   expect_identical(ferx:::.fitrx_covariance_status_label("failed"), "Failed")
   expect_identical(ferx:::.fitrx_covariance_status_label("not_requested"), "NotRequested")
+  expect_identical(ferx:::.fitrx_covariance_status_label("sir_fallback"), "SirFallback")
   expect_identical(ferx:::.fitrx_covariance_status_label("other"), "other")
 })
 

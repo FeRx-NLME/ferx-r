@@ -2,6 +2,15 @@
 
 ## New features
 
+- **Covariance estimator & non-PD fallback options**, forwarded via `settings`:
+  `covariance_method` (`"r"` inverse-Hessian / `"s"` score cross-product /
+  `"rsr"` Huber-White sandwich standard errors) and `covariance_fallback`
+  (`"sir"` runs SIR with an absolute-eigenvalue-rectified proposal when the
+  finite-difference Hessian is not positive definite). `fit$covariance_status`
+  can now be `"sir_fallback"`, which is documented and labelled. Needs a
+  ferx-core that provides these options (separate `Cargo.lock` bump).
+  (ferx-core #245, #248)
+
 - `ferx_model_show()` now **syntax-highlights** `.ferx` files in colour-capable
   consoles: section headers (`[parameters]`, ...) in bold yellow, declaration
   keywords (`theta`, `omega`, `sigma`, `kappa`, ...) in cyan, and comments
