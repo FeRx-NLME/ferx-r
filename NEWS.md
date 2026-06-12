@@ -111,6 +111,14 @@
 
 ## Bug fixes
 
+- IOV models: the `sdtab` diagnostic table (`fit$sdtab`) now reports each
+  observation's **occasion** individual parameters -- `CL`, `V`, `KA`, any
+  `[derived]`/`[output]` column, and `TAD` -- instead of silently using
+  `kappa = 0` for every row, so a parameter with inter-occasion variability no
+  longer looks identical across occasions. `TAD` additionally shifts each dose
+  by its own occasion (and covariate) absorption lag. Delivered by bumping the
+  ferx-core pin; no wrapper change (ferx-core#238).
+
 - Shapiro-Wilk ETA-normality flags now fold into a single warning that lists
   every flagged ETA (with its p-value) instead of firing one warning per ETA.
   Both `fit$warnings` and the structured `eta_normality` warning shown by
