@@ -12,6 +12,16 @@
 #' @param fit Optional \code{ferx_fit} result. When provided, simulation uses
 #'   \code{fit$theta}, \code{fit$omega}, and \code{fit$sigma} instead of the
 #'   model file's initial values.
+#' @param match Logical (default \code{FALSE}). When \code{TRUE}, each
+#'   replicate's drawn etas are reassigned to subjects by \strong{propensity-score
+#'   matching} against the subjects' fitted (posthoc) etas - optimal Mahalanobis
+#'   matching under the model omega. This pairs each subject's observed
+#'   dosing/sampling design with a similar drawn eta, correcting VPC bias from
+#'   treatment adaptation in real-world data (e.g. longer dosing intervals for
+#'   high-clearance patients). Requires \code{data} to be real observed data
+#'   (every subject must have observations, so its posthoc eta can be computed).
+#'   The posthoc etas are computed at the fitted parameters when \code{fit} is
+#'   supplied, otherwise at the model file's initial values.
 #'
 #' @return A data.frame with columns: SIM, ID, TIME, IPRED, DV_SIM
 #'
@@ -21,17 +31,24 @@
 #' sim <- ferx_simulate(ex$model, ex$data, n_sim = 10L, seed = 1L, fit = fit)
 #' head(sim)
 #'
+#' # Propensity-score-matched simulation for a real-world-data VPC:
+#' sim_pm <- ferx_simulate(ex$model, ex$data, n_sim = 10L, seed = 1L,
+#'                         fit = fit, match = TRUE)
+#'
 #' @family simulation
 #' @export
-ferx_simulate <- function(model, data, n_sim = 1L, seed = 42L, fit = NULL) {
+ferx_simulate <- function(model, data, n_sim = 1L, seed = 42L, fit = NULL,
+                          match = FALSE) {
   stopifnot(file.exists(model), file.exists(data))
+  propensity_match <- isTRUE(as.logical(match))
 
   if (is.null(fit)) {
     return(ferx_rust_simulate(
       model_path = normalizePath(model),
       data_path = normalizePath(data),
       n_sim = as.integer(n_sim),
-      seed = as.integer(seed)
+      seed = as.integer(seed),
+      propensity_match = propensity_match
     ))
   }
 
@@ -44,7 +61,8 @@ ferx_simulate <- function(model, data, n_sim = 1L, seed = 42L, fit = NULL) {
     omega_dim = fit_pieces$omega_dim,
     sigma = fit_pieces$sigma,
     n_sim = as.integer(n_sim),
-    seed = as.integer(seed)
+    seed = as.integer(seed),
+    propensity_match = propensity_match
   )
 }
 
