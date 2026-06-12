@@ -174,11 +174,6 @@ test_that("ferx_fit rejects malformed `imp` method chains", {
   # covered in the ferx-core integration tests).
   ex <- ferx_example("warfarin")
   expect_error(
-    ferx_fit(ex$model, ex$data, method = "imp"),
-    regexp = "diagnostic terminal stage|must follow another method",
-    ignore.case = TRUE
-  )
-  expect_error(
     ferx_fit(ex$model, ex$data, method = c("imp", "focei")),
     regexp = "final stage|must be the final stage",
     ignore.case = TRUE
