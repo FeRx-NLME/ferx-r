@@ -19,10 +19,11 @@
 #'   \code{"gn_hybrid"} (Gauss-Newton followed by a FOCEI polish step), or
 #'   \code{"imp"} (also accepted as \code{"importance_sampling"} or
 #'   \code{"importance-sampling"}; importance-sampling marginal
-#'   log-likelihood). The \code{"imp"} stage is a diagnostic terminal
-#'   stage that does not update parameters and must be the *last* entry
-#'   of the chain, e.g. \code{c("focei", "imp")} or
-#'   \code{c("saem", "imp")}. Example chain: \code{c("saem", "focei")}.
+#'   log-likelihood). The \code{"imp"} stage is a terminal stage that does
+#'   not update parameters and must be the *last* entry of the chain, e.g.
+#'   \code{c("focei", "imp")} or \code{c("saem", "imp")}. It may also run
+#'   standalone (\code{method = "imp"}), scoring the model's initial
+#'   parameters. Example chain: \code{c("saem", "focei")}.
 #'   SAEM fully supports inter-occasion variability (IOV / kappa) models.
 #' @param covariance Logical; compute the covariance step for standard errors
 #' @param verbose Logical; print progress during estimation
@@ -162,6 +163,17 @@
 #'       (default \code{1e-4}).}
 #'     \item{\code{fd_hessian_step}}{Also available as the dedicated
 #'       \code{fd_hessian_step} argument above.}
+#'     \item{\code{covariance_method}}{Covariance estimator, mirroring NONMEM
+#'       \code{$COV MATRIX=}: \code{"r"} (inverse Hessian, the default),
+#'       \code{"s"} (score cross-product), or \code{"rsr"} (the Huber-White
+#'       sandwich, robust to model misspecification). Validated for FOCEI;
+#'       \code{"s"} and \code{"rsr"} are rejected under non-interaction FOCE.
+#'       No effect when \code{covariance = FALSE}.}
+#'     \item{\code{covariance_fallback}}{\code{"none"} (default) or \code{"sir"}.
+#'       When the finite-difference Hessian is not positive definite, \code{"sir"}
+#'       runs SIR with an absolute-eigenvalue-rectified proposal instead of
+#'       leaving the covariance step failed; \code{covariance_status} is then
+#'       \code{"sir_fallback"} and SIR-based credible intervals are reported.}
 #'   }
 #'
 #'   \strong{FOCE / FOCEI / GN / GN-hybrid: iteration cap}
@@ -415,8 +427,10 @@
 #'     in a single outer iteration.}
 #'   \item{total_ebe_fallbacks}{Total Nelder-Mead fallback invocations across
 #'     all subjects and iterations.}
-#'   \item{covariance_status}{String: \code{"computed"}, \code{"failed"}, or
-#'     \code{"not_requested"}.}
+#'   \item{covariance_status}{String: \code{"computed"}, \code{"failed"},
+#'     \code{"not_requested"}, or \code{"sir_fallback"} (the finite-difference
+#'     Hessian was not positive definite and \code{covariance_fallback = "sir"}
+#'     produced SIR-based intervals).}
 #'   \item{shrinkage_eta}{Numeric vector of ETA shrinkage per random effect
 #'     (\code{1 - SD(eta_hat_k) / sqrt(omega_kk)}). \code{NA} when
 #'     \code{omega_kk = 0} or fewer than 2 subjects.}
@@ -1303,22 +1317,16 @@ ferx_fit <- function(model, data = NULL,
     character(1L),
     USE.NAMES = FALSE
   )
-  # `imp` is a diagnostic terminal stage - engine rejects malformed chains too,
-  # but surfacing the error R-side avoids a round-trip and gives a clearer
-  # message anchored to the R argument.
+  # `imp` is a terminal stage - engine rejects malformed chains too, but
+  # surfacing the error R-side avoids a round-trip and gives a clearer message
+  # anchored to the R argument. It may run standalone (`method = "imp"`), in
+  # which case it scores the initial parameters, or follow another estimator.
   imp_positions <- which(method == "imp")
   if (length(imp_positions) > 0L) {
     if (length(imp_positions) > 1L) {
       stop(
         "`method` may include \"imp\" at most once; got ",
         length(imp_positions), " occurrences"
-      )
-    }
-    if (length(method) == 1L) {
-      stop(
-        "`method = \"imp\"` is invalid: importance sampling is a diagnostic ",
-        "terminal stage and must follow another method, e.g. ",
-        "`c(\"focei\", \"imp\")` or `c(\"saem\", \"imp\")`"
       )
     }
     if (imp_positions != length(method)) {

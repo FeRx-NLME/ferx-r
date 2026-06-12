@@ -1236,6 +1236,9 @@ fn fit_result_to_list(
         CovarianceStatus::Computed => "computed",
         CovarianceStatus::Failed => "failed",
         CovarianceStatus::NotRequested => "not_requested",
+        // SirFallback: FD Hessian was non-PD and `covariance_fallback = sir`
+        // produced SIR-based intervals (ferx-core #245). The R side maps this
+        // token to the "SirFallback" label (see persist.R).
         CovarianceStatus::SirFallback => "sir_fallback",
     };
 

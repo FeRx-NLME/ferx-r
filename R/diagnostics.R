@@ -112,6 +112,12 @@ ferx_cor_matrix <- function(fit) {
   # Clip to [-1, 1] for numerical noise on the diagonal
   cor_mat[cor_mat >  1] <-  1
   cor_mat[cor_mat < -1] <- -1
+  # A correlation matrix has an exactly-unit diagonal by definition. Force it:
+  # cov[i,i] / sqrt(cov[i,i])^2 can drift to 0.9999999999999999, which the `> 1`
+  # clip above does not catch. Leave NA where a non-positive variance was
+  # flagged above (those rows/cols are already NA and warned).
+  ok <- !is.na(diag(cor_mat))
+  diag(cor_mat)[ok] <- 1
   print(round(cor_mat, 3))
   invisible(cor_mat)
 }

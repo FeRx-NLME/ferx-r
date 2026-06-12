@@ -12,6 +12,22 @@
   model and data files, so it composes directly: `ferx_fit(ferx_to_frem(...))`.
   (#194)
 
+- **Standalone importance sampling**: `ferx_fit(..., method = "imp")` now runs
+  without a preceding estimator, scoring the model's initial parameters
+  (`fit$importance_sampling` is populated, `fit$method_chain` is `"IMP"`). The
+  R-side guard that rejected a lone `"imp"` has been removed; the at-most-once
+  and must-be-terminal checks remain. Needs a ferx-core that allows standalone
+  IMP (separate `Cargo.lock` bump). (ferx-core #269)
+
+- **Covariance estimator & non-PD fallback options**, forwarded via `settings`:
+  `covariance_method` (`"r"` inverse-Hessian / `"s"` score cross-product /
+  `"rsr"` Huber-White sandwich standard errors) and `covariance_fallback`
+  (`"sir"` runs SIR with an absolute-eigenvalue-rectified proposal when the
+  finite-difference Hessian is not positive definite). `fit$covariance_status`
+  can now be `"sir_fallback"`, which is documented and labelled. Needs a
+  ferx-core that provides these options (separate `Cargo.lock` bump).
+  (ferx-core #245, #248)
+
 - `ferx_model_show()` now **syntax-highlights** `.ferx` files in colour-capable
   consoles: section headers (`[parameters]`, ...) in bold yellow, declaration
   keywords (`theta`, `omega`, `sigma`, `kappa`, ...) in cyan, and comments
