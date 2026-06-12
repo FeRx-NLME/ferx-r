@@ -16,14 +16,21 @@
 #'   previous stage's converged parameters, and only the final stage produces
 #'   the reported covariance/diagnostics. Supported methods: \code{"foce"},
 #'   \code{"focei"}, \code{"saem"}, \code{"gn"} (Gauss-Newton / BHHH),
-#'   \code{"gn_hybrid"} (Gauss-Newton followed by a FOCEI polish step), or
+#'   \code{"gn_hybrid"} (Gauss-Newton followed by a FOCEI polish step),
 #'   \code{"imp"} (also accepted as \code{"importance_sampling"} or
 #'   \code{"importance-sampling"}; importance-sampling marginal
-#'   log-likelihood). The \code{"imp"} stage is a terminal stage that does
+#'   log-likelihood), or
+#'   \code{"impmap"} (also accepted as \code{"importance_sampling_map"};
+#'   importance-sampling assisted by MAP estimation — iterative Monte-Carlo
+#'   EM that updates parameters each iteration).
+#'   The \code{"imp"} stage is a terminal stage that does
 #'   not update parameters and must be the *last* entry of the chain, e.g.
 #'   \code{c("focei", "imp")} or \code{c("saem", "imp")}. It may also run
 #'   standalone (\code{method = "imp"}), scoring the model's initial
-#'   parameters. Example chain: \code{c("saem", "focei")}.
+#'   parameters. \code{"impmap"} is a full estimation method that can run
+#'   standalone or in any position in a chain, e.g.
+#'   \code{c("focei", "impmap")} or just \code{method = "impmap"}.
+#'   Example chain: \code{c("saem", "focei")}.
 #'   SAEM fully supports inter-occasion variability (IOV / kappa) models.
 #' @param covariance Logical; compute the covariance step for standard errors
 #' @param verbose Logical; print progress during estimation
@@ -266,6 +273,20 @@
 #'     \item{\code{is_low_ess_threshold}}{ESS fraction below which a subject is
 #'       flagged in \code{fit$importance_sampling$low_ess_subject_ids} (default
 #'       \code{0.1}, i.e. \code{10\%} of \code{is_samples}).}
+#'   }
+#'
+#'   \strong{IMPMAP (\code{"impmap"} method)}
+#'   \describe{
+#'     \item{\code{impmap_iterations}}{Maximum EM iterations (default 50).}
+#'     \item{\code{impmap_samples}}{Importance samples per subject per
+#'       iteration (default 300).}
+#'     \item{\code{impmap_averaging}}{Number of final iterations to average
+#'       for parameter estimates (default 10).}
+#'     \item{\code{impmap_seed}}{RNG seed for the IMPMAP sampler (default
+#'       chosen by the engine).}
+#'     \item{\code{impmap_trace}}{Logical; when \code{TRUE}, collect
+#'       per-iteration parameter values into \code{fit$impmap_trace}
+#'       (analogous to NONMEM \code{.ext} output).  Default \code{FALSE}.}
 #'   }
 #'
 #'   \strong{SIR (Sampling Importance Resampling)}
@@ -1309,9 +1330,12 @@ ferx_fit <- function(model, data = NULL,
       if (normalised %in% c("importance_sampling", "importancesampling")) {
         normalised <- "imp"
       }
+      if (normalised %in% c("impmap", "importance_sampling_map", "importancesamplingmap")) {
+        normalised <- "impmap"
+      }
       match.arg(
         normalised,
-        c("foce", "focei", "saem", "gn", "gn_hybrid", "imp")
+        c("foce", "focei", "saem", "gn", "gn_hybrid", "imp", "impmap")
       )
     },
     character(1L),
@@ -1806,6 +1830,15 @@ ferx_fit <- function(model, data = NULL,
   # side appends only the diagnostics it computes itself (condition number,
   # ETA normality). No string re-parsing of core messages happens here.
   result$warnings_structured <- .ferx_assemble_structured_warnings(raw, result)
+
+  # Reconstruct the per-iteration IMPMAP parameter trace as a data.frame.
+  # The Rust side passes flat vectors + metadata; NULL when not collected.
+  if (!is.null(result$impmap_trace)) {
+    tr <- result$impmap_trace
+    mat <- matrix(tr$flat, nrow = tr$n_rows, ncol = tr$n_cols, byrow = FALSE)
+    result$impmap_trace <- as.data.frame(mat)
+    colnames(result$impmap_trace) <- tr$col_names
+  }
 
   class(result) <- "ferx_fit"
 

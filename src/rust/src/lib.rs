@@ -676,9 +676,11 @@ fn parse_method(token: &str) -> std::result::Result<EstimationMethod, String> {
         Ok(EstimationMethod::Foce)
     } else if m == "imp" || m == "importance_sampling" || m == "importance-sampling" {
         Ok(EstimationMethod::Imp)
+    } else if m == "impmap" || m == "importance_sampling_map" {
+        Ok(EstimationMethod::Impmap)
     } else {
         Err(format!(
-            "Unknown estimation method '{}' — expected one of: foce, focei, saem, gn, gn_hybrid, imp",
+            "Unknown estimation method '{}' — expected one of: foce, focei, saem, gn, gn_hybrid, imp, impmap",
             token.trim()
         ))
     }
@@ -904,6 +906,7 @@ fn default_fit_result(
         sir_ess: None,
         sir_resamples_packed,
         importance_sampling: None,
+        impmap_trace: None,
         omega_iov: None,
         kappa_names: model.kappa_names.clone(),
         kappa_fixed: template.kappa_fixed.clone(),
@@ -1211,6 +1214,85 @@ fn fit_result_to_list(
         None => ().into(),
     };
 
+    // IMPMAP per-iteration parameter trace — flat vectors that the R side
+    // reassembles into a data.frame.  NULL when `impmap_trace = false` or a
+    // non-IMPMAP method was used.
+    let impmap_trace: Robj = match &result.impmap_trace {
+        Some(trace) => {
+            let n = trace.rows.len();
+            let iterations: Vec<f64> = trace.rows.iter().map(|r| r.iteration as f64).collect();
+            let ofvs: Vec<f64> = trace.rows.iter().map(|r| r.ofv).collect();
+
+            // Per-theta columns.
+            let n_theta = if n > 0 { trace.rows[0].theta.len() } else { 0 };
+            let mut theta_cols: Vec<Vec<f64>> = vec![Vec::with_capacity(n); n_theta];
+            for row in &trace.rows {
+                for (j, v) in row.theta.iter().enumerate() {
+                    if j < n_theta {
+                        theta_cols[j].push(*v);
+                    }
+                }
+            }
+
+            // Per-omega-LT columns.
+            let n_omega = if n > 0 { trace.rows[0].omega_lower_tri.len() } else { 0 };
+            let mut omega_cols: Vec<Vec<f64>> = vec![Vec::with_capacity(n); n_omega];
+            for row in &trace.rows {
+                for (j, v) in row.omega_lower_tri.iter().enumerate() {
+                    if j < n_omega {
+                        omega_cols[j].push(*v);
+                    }
+                }
+            }
+
+            // Per-sigma columns.
+            let n_sigma = if n > 0 { trace.rows[0].sigma.len() } else { 0 };
+            let mut sigma_cols: Vec<Vec<f64>> = vec![Vec::with_capacity(n); n_sigma];
+            for row in &trace.rows {
+                for (j, v) in row.sigma.iter().enumerate() {
+                    if j < n_sigma {
+                        sigma_cols[j].push(*v);
+                    }
+                }
+            }
+
+            // Flatten column data + names for the R side to unpack.
+            let mut col_data: Vec<Vec<f64>> = Vec::new();
+            let mut col_names: Vec<String> = Vec::new();
+            col_names.push("ITERATION".to_string());
+            col_data.push(iterations);
+            for (j, col) in theta_cols.into_iter().enumerate() {
+                col_names.push(trace.theta_names.get(j).cloned().unwrap_or_else(|| format!("THETA{}", j + 1)));
+                col_data.push(col);
+            }
+            for (j, col) in omega_cols.into_iter().enumerate() {
+                col_names.push(trace.omega_names.get(j).cloned().unwrap_or_else(|| format!("OMEGA{}", j + 1)));
+                col_data.push(col);
+            }
+            for (j, col) in sigma_cols.into_iter().enumerate() {
+                col_names.push(trace.sigma_names.get(j).cloned().unwrap_or_else(|| format!("SIGMA{}", j + 1)));
+                col_data.push(col);
+            }
+            col_names.push("OBJ".to_string());
+            col_data.push(ofvs);
+
+            // Flatten all columns into one Vec<f64> + dimension metadata so the
+            // R side can matrix(flat, nrow=n, ncol=n_cols, byrow=FALSE).
+            let n_cols = col_data.len() as i32;
+            let n_rows = n as i32;
+            let flat: Vec<f64> = col_data.into_iter().flatten().collect();
+
+            list!(
+                flat = flat,
+                n_rows = n_rows,
+                n_cols = n_cols,
+                col_names = col_names,
+            )
+            .into()
+        }
+        None => ().into(),
+    };
+
     let trace_path: Robj = match &result.trace_path {
         Some(p) => p.clone().into(),
         None => ().into(),
@@ -1473,6 +1555,7 @@ fn fit_result_to_list(
         sir_resamples_n = sir_resamples_n,
         sir_resamples_dim = sir_resamples_dim,
         importance_sampling = importance_sampling,
+        impmap_trace = impmap_trace,
         trace_path = trace_path,
         ebe_convergence_warnings = result.ebe_convergence_warnings as i32,
         max_unconverged_subjects = result.max_unconverged_subjects as i32,
@@ -2156,6 +2239,7 @@ fn ferx_rust_sir(
         sir_ess: None,
         sir_resamples_packed: None,
         importance_sampling: None,
+        impmap_trace: None,
         omega_iov: None,
         kappa_names: model.kappa_names.clone(),
         kappa_fixed: template.kappa_fixed.clone(),
