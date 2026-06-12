@@ -142,9 +142,12 @@ test_that("method = 'imp' passes the ferx_fit validation step", {
         if (normalised %in% c("importance_sampling", "importancesampling")) {
           normalised <- "imp"
         }
+        if (normalised %in% c("importance_sampling_map", "importancesamplingmap")) {
+          normalised <- "impmap"
+        }
         match.arg(
           normalised,
-          c("foce", "focei", "saem", "gn", "gn_hybrid", "imp")
+          c("foce", "focei", "saem", "gn", "gn_hybrid", "imp", "impmap")
         )
       },
       character(1L),
@@ -164,6 +167,13 @@ test_that("method = 'imp' passes the ferx_fit validation step", {
     normalize(c("focei", "importance_sampling")),
     c("focei", "imp")
   )
+  # IMPMAP: exact token, the long alias, and case-insensitivity. Exact-match
+  # semantics keep "imp" and "impmap" unambiguous despite the shared prefix.
+  expect_equal(normalize("impmap"), "impmap")
+  expect_equal(normalize("IMPMAP"), "impmap")
+  expect_equal(normalize("importance_sampling_map"), "impmap")
+  expect_equal(normalize("importance-sampling-map"), "impmap")
+  expect_equal(normalize(c("focei", "impmap")), c("focei", "impmap"))
 })
 
 test_that("ferx_fit rejects malformed `imp` method chains", {
