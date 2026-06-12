@@ -19,10 +19,11 @@
 #'   \code{"gn_hybrid"} (Gauss-Newton followed by a FOCEI polish step), or
 #'   \code{"imp"} (also accepted as \code{"importance_sampling"} or
 #'   \code{"importance-sampling"}; importance-sampling marginal
-#'   log-likelihood). The \code{"imp"} stage is a diagnostic terminal
-#'   stage that does not update parameters and must be the *last* entry
-#'   of the chain, e.g. \code{c("focei", "imp")} or
-#'   \code{c("saem", "imp")}. Example chain: \code{c("saem", "focei")}.
+#'   log-likelihood). The \code{"imp"} stage is a terminal stage that does
+#'   not update parameters and must be the *last* entry of the chain, e.g.
+#'   \code{c("focei", "imp")} or \code{c("saem", "imp")}. It may also run
+#'   standalone (\code{method = "imp"}), scoring the model's initial
+#'   parameters. Example chain: \code{c("saem", "focei")}.
 #'   SAEM fully supports inter-occasion variability (IOV / kappa) models.
 #' @param covariance Logical; compute the covariance step for standard errors
 #' @param verbose Logical; print progress during estimation
@@ -1316,22 +1317,16 @@ ferx_fit <- function(model, data = NULL,
     character(1L),
     USE.NAMES = FALSE
   )
-  # `imp` is a diagnostic terminal stage - engine rejects malformed chains too,
-  # but surfacing the error R-side avoids a round-trip and gives a clearer
-  # message anchored to the R argument.
+  # `imp` is a terminal stage - engine rejects malformed chains too, but
+  # surfacing the error R-side avoids a round-trip and gives a clearer message
+  # anchored to the R argument. It may run standalone (`method = "imp"`), in
+  # which case it scores the initial parameters, or follow another estimator.
   imp_positions <- which(method == "imp")
   if (length(imp_positions) > 0L) {
     if (length(imp_positions) > 1L) {
       stop(
         "`method` may include \"imp\" at most once; got ",
         length(imp_positions), " occurrences"
-      )
-    }
-    if (length(method) == 1L) {
-      stop(
-        "`method = \"imp\"` is invalid: importance sampling is a diagnostic ",
-        "terminal stage and must follow another method, e.g. ",
-        "`c(\"focei\", \"imp\")` or `c(\"saem\", \"imp\")`"
       )
     }
     if (imp_positions != length(method)) {

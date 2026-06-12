@@ -2,6 +2,13 @@
 
 ## New features
 
+- **Standalone importance sampling**: `ferx_fit(..., method = "imp")` now runs
+  without a preceding estimator, scoring the model's initial parameters
+  (`fit$importance_sampling` is populated, `fit$method_chain` is `"IMP"`). The
+  R-side guard that rejected a lone `"imp"` has been removed; the at-most-once
+  and must-be-terminal checks remain. Needs a ferx-core that allows standalone
+  IMP (separate `Cargo.lock` bump). (ferx-core #269)
+
 - **Covariance estimator & non-PD fallback options**, forwarded via `settings`:
   `covariance_method` (`"r"` inverse-Hessian / `"s"` score cross-product /
   `"rsr"` Huber-White sandwich standard errors) and `covariance_fallback`

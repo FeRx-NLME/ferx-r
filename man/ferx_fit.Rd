@@ -47,10 +47,11 @@ the reported covariance/diagnostics. Supported methods: \code{"foce"},
 \code{"gn_hybrid"} (Gauss-Newton followed by a FOCEI polish step), or
 \code{"imp"} (also accepted as \code{"importance_sampling"} or
 \code{"importance-sampling"}; importance-sampling marginal
-log-likelihood). The \code{"imp"} stage is a diagnostic terminal
-stage that does not update parameters and must be the \emph{last} entry
-of the chain, e.g. \code{c("focei", "imp")} or
-\code{c("saem", "imp")}. Example chain: \code{c("saem", "focei")}.
+log-likelihood). The \code{"imp"} stage is a terminal stage that does
+not update parameters and must be the \emph{last} entry of the chain, e.g.
+\code{c("focei", "imp")} or \code{c("saem", "imp")}. It may also run
+standalone (\code{method = "imp"}), scoring the model's initial
+parameters. Example chain: \code{c("saem", "focei")}.
 SAEM fully supports inter-occasion variability (IOV / kappa) models.}
 
 \item{covariance}{Logical; compute the covariance step for standard errors}
