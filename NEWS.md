@@ -2,6 +2,16 @@
 
 ## New features
 
+- **IMPMAP estimator**: `ferx_fit(..., method = "impmap")` (alias
+  `"importance_sampling_map"`) runs the NONMEM `METHOD=IMPMAP` Monte-Carlo EM
+  estimator — importance sampling assisted by mode-a-posteriori re-centering.
+  Runs standalone or as a chain stage (`c("focei", "impmap")`). Tuned via
+  `settings` keys `impmap_iterations`, `impmap_samples`, `impmap_proposal_df`
+  (`"normal"` for the MVN proposal, or a Student-t DoF), `impmap_averaging`,
+  `impmap_seed`, `impmap_low_ess_threshold`. Requires a mu-referenced
+  parameterization; IOV is not yet supported. Needs a ferx-core that provides
+  the `impmap` method (separate `Cargo.lock` bump). (ferx-core #270)
+
 - **Standalone importance sampling**: `ferx_fit(..., method = "imp")` now runs
   without a preceding estimator, scoring the model's initial parameters
   (`fit$importance_sampling` is populated, `fit$method_chain` is `"IMP"`). The

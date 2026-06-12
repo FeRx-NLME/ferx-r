@@ -674,11 +674,13 @@ fn parse_method(token: &str) -> std::result::Result<EstimationMethod, String> {
         Ok(EstimationMethod::FoceI)
     } else if m == "foce" {
         Ok(EstimationMethod::Foce)
+    } else if m == "impmap" || m == "importance_sampling_map" || m == "importance-sampling-map" {
+        Ok(EstimationMethod::Impmap)
     } else if m == "imp" || m == "importance_sampling" || m == "importance-sampling" {
         Ok(EstimationMethod::Imp)
     } else {
         Err(format!(
-            "Unknown estimation method '{}' — expected one of: foce, focei, saem, gn, gn_hybrid, imp",
+            "Unknown estimation method '{}' — expected one of: foce, focei, saem, gn, gn_hybrid, imp, impmap",
             token.trim()
         ))
     }

@@ -47,11 +47,17 @@ the reported covariance/diagnostics. Supported methods: \code{"foce"},
 \code{"gn_hybrid"} (Gauss-Newton followed by a FOCEI polish step), or
 \code{"imp"} (also accepted as \code{"importance_sampling"} or
 \code{"importance-sampling"}; importance-sampling marginal
-log-likelihood). The \code{"imp"} stage is a terminal stage that does
+log-likelihood), or \code{"impmap"} (also accepted as
+\code{"importance_sampling_map"}; Importance Sampling assisted by Mode A
+Posteriori, the NONMEM \code{METHOD=IMPMAP} Monte-Carlo EM estimator).
+The \code{"imp"} stage is a terminal stage that does
 not update parameters and must be the \emph{last} entry of the chain, e.g.
 \code{c("focei", "imp")} or \code{c("saem", "imp")}. It may also run
 standalone (\code{method = "imp"}), scoring the model's initial
-parameters. Example chain: \code{c("saem", "focei")}.
+parameters. \code{"impmap"} is a full estimator: it may run standalone
+(\code{method = "impmap"}) or as a chain stage (\code{c("focei", "impmap")}),
+requires a mu-referenced parameterization, and does not yet support IOV.
+Example chain: \code{c("saem", "focei")}.
 SAEM fully supports inter-occasion variability (IOV / kappa) models.}
 
 \item{covariance}{Logical; compute the covariance step for standard errors}
@@ -306,6 +312,24 @@ engine).}
 \item{\code{is_low_ess_threshold}}{ESS fraction below which a subject is
 flagged in \code{fit$importance_sampling$low_ess_subject_ids} (default
 \code{0.1}, i.e. \code{10\%} of \code{is_samples}).}
+}
+
+\strong{IMPMAP (\code{"impmap"} estimator)}
+\describe{
+\item{\code{impmap_iterations}}{Number of Monte-Carlo EM iterations
+(default 200).}
+\item{\code{impmap_samples}}{Importance samples drawn per subject per
+iteration (default 300).}
+\item{\code{impmap_proposal_df}}{Proposal degrees of freedom. The string
+\code{"normal"} (default) selects a multivariate-normal proposal (the
+NONMEM default); a number \code{>= 1} selects a heavier-tailed
+Student-t.}
+\item{\code{impmap_averaging}}{Number of final iterations whose parameters
+are averaged into the reported estimate (default 50).}
+\item{\code{impmap_seed}}{RNG seed for the IMPMAP sampling (default chosen
+by the engine).}
+\item{\code{impmap_low_ess_threshold}}{ESS fraction below which a subject
+is flagged as poorly sampled (default \code{0.1}).}
 }
 
 \strong{SIR (Sampling Importance Resampling)}
