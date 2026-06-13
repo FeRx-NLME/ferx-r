@@ -121,6 +121,14 @@
 
 ## Bug fixes
 
+- A `[structural_model]` PK parameter that maps to a name not defined in
+  `[individual_parameters]` (e.g. `pk one_cpt_oral(cl=CL, ...)` with no `CL`)
+  is now a clear parse error instead of silently fitting a structurally broken
+  model (every prediction floored, 100% shrinkage). An unrecognized PK-parameter
+  key (a typo such as `clx=`) is likewise rejected, and a numeric-literal value
+  (e.g. `ka=1.0`) is honored as a constant rather than silently zeroed. Delivered
+  by bumping the ferx-core pin; no wrapper change (ferx-core#261).
+
 - Datasets without an `EVID` column no longer silently fit a dose-free model.
   ferx now infers a dose from a nonzero `AMT` when `EVID` is absent (matching
   NONMEM), so a NONMEM dataset that marks doses only by `AMT`/`MDV=1` administers
