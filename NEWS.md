@@ -10,7 +10,7 @@
   (e.g. longer dosing intervals for high-clearance patients). Requires observed
   data; the posthoc etas use the fitted parameters when a `fit` is supplied.
   Needs a ferx-core that provides `simulate_with_options` (separate `Cargo.lock`
-  bump). (ferx-core #NN)
+  bump). (ferx-core #288)
 
 - **Standalone importance sampling**: `ferx_fit(..., method = "imp")` now runs
   without a preceding estimator, scoring the model's initial parameters
