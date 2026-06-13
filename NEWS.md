@@ -121,6 +121,14 @@
 
 ## Bug fixes
 
+- Datasets without an `EVID` column no longer silently fit a dose-free model.
+  ferx now infers a dose from a nonzero `AMT` when `EVID` is absent (matching
+  NONMEM), so a NONMEM dataset that marks doses only by `AMT`/`MDV=1` administers
+  correctly instead of dropping every dose. The reader also warns when `AMT != 0`
+  rows are not treated as doses, or when a population parses zero doses despite
+  having observations. Delivered by bumping the ferx-core pin; no wrapper change
+  (ferx-core#262).
+
 - IOV models: the `sdtab` diagnostic table (`fit$sdtab`) now reports each
   observation's **occasion** individual parameters -- `CL`, `V`, `KA`, any
   `[derived]`/`[output]` column, and `TAD` -- instead of silently using
