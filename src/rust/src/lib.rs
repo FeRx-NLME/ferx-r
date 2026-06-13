@@ -309,6 +309,8 @@ fn ferx_rust_fit(
 /// @param data_path Path to NONMEM-format CSV (for population structure)
 /// @param n_sim Number of simulations
 /// @param seed Random seed
+/// @param propensity_match Reassign drawn etas to subjects by propensity-score
+///   matching against posthoc etas (requires observed DV)
 /// @return Data frame with ID, TIME, IPRED, DV_SIM columns
 /// @export
 #[extendr]
@@ -317,6 +319,7 @@ fn ferx_rust_simulate(
     data_path: &str,
     n_sim: i32,
     seed: i32,
+    propensity_match: bool,
 ) -> Robj {
     // parse_full_model_file (vs parse_model_file) so iov_column is available
     // for the reader; without it, models with kappa declarations panic in
@@ -346,13 +349,23 @@ fn ferx_rust_simulate(
             }
         };
 
-    let results = ferx_core::simulate_with_seed(
+    let opts = ferx_core::SimulateOptions {
+        seed: Some(seed as u64),
+        propensity_match,
+    };
+    let results = match ferx_core::simulate_with_options(
         &parsed.model,
         &population,
         &parsed.model.default_params,
         n_sim as usize,
-        seed as u64,
-    );
+        &opts,
+    ) {
+        Ok(r) => r,
+        Err(e) => {
+            rprintln!("Error simulating: {}", e);
+            return ().into();
+        }
+    };
 
     sim_results_to_df(&results)
 }
@@ -367,6 +380,8 @@ fn ferx_rust_simulate(
 /// @param sigma Fitted sigma vector
 /// @param n_sim Number of simulations
 /// @param seed Random seed
+/// @param propensity_match Reassign drawn etas to subjects by propensity-score
+///   matching against posthoc etas (requires observed DV)
 /// @return Data frame with SIM, ID, TIME, IPRED, DV_SIM columns
 /// @export
 #[extendr]
@@ -380,6 +395,7 @@ fn ferx_rust_simulate_from_fit(
     sigma: Vec<f64>,
     n_sim: i32,
     seed: i32,
+    propensity_match: bool,
 ) -> Robj {
     let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
         Ok(p) => p,
@@ -414,13 +430,23 @@ fn ferx_rust_simulate_from_fit(
         }
     };
 
-    let results = ferx_core::simulate_with_seed(
+    let opts = ferx_core::SimulateOptions {
+        seed: Some(seed as u64),
+        propensity_match,
+    };
+    let results = match ferx_core::simulate_with_options(
         &parsed.model,
         &population,
         &params,
         n_sim as usize,
-        seed as u64,
-    );
+        &opts,
+    ) {
+        Ok(r) => r,
+        Err(e) => {
+            rprintln!("Error simulating: {}", e);
+            return ().into();
+        }
+    };
     sim_results_to_df(&results)
 }
 

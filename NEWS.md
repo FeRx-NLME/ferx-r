@@ -2,6 +2,16 @@
 
 ## New features
 
+- **Propensity-score-matched simulation**: `ferx_simulate(..., match = TRUE)`
+  reassigns each replicate's drawn etas to subjects by optimal Mahalanobis
+  matching (under the model omega) against the subjects' fitted (posthoc) etas,
+  so a subject's observed dosing/sampling design is paired with a similar drawn
+  eta. This corrects VPC bias from treatment adaptation in real-world data
+  (e.g. longer dosing intervals for high-clearance patients). Requires observed
+  data; the posthoc etas use the fitted parameters when a `fit` is supplied.
+  Needs a ferx-core that provides `simulate_with_options` (separate `Cargo.lock`
+  bump). (ferx-core #288)
+
 - **Standalone importance sampling**: `ferx_fit(..., method = "imp")` now runs
   without a preceding estimator, scoring the model's initial parameters
   (`fit$importance_sampling` is populated, `fit$method_chain` is `"IMP"`). The
