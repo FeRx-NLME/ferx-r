@@ -150,6 +150,13 @@ fn ferx_rust_fit(
         }
     }
 
+    // Re-apply the (now settings-merged) ODE solver tolerances onto the model's
+    // OdeSpec so call-time `ode_reltol` / `ode_abstol` / `ode_max_steps`
+    // overrides take effect. The parser already baked the [fit_options] values;
+    // this lets a `ferx_fit(settings = ...)` override win. No-op for analytical
+    // models.
+    parsed.model.sync_ode_solver_opts(&opts);
+
     // Read data via read_population_for, which handles [covariates] validation,
     // [data_selection] filters, and TTE endpoint routing in one call.
     // This replaces the previous 4-way dispatch that could not pass tte_cmts to
