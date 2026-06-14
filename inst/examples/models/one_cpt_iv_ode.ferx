@@ -36,4 +36,9 @@
 [fit_options]
   method     = foce
   maxiter    = 300
+  # tight ODE solver tolerance so the ODE-form OFV matches the analytical
+  # closed form (the FOCE objective amplifies the default 1e-4 solver error);
+  # see tests/testthat/test-ode-analytical-equivalence.R.
+  ode_reltol = 1e-10
+  ode_abstol = 1e-12
   covariance = true

@@ -176,6 +176,23 @@
 #'       \code{"sir_fallback"} and SIR-based credible intervals are reported.}
 #'   }
 #'
+#'   \strong{ODE models: RK45 solver tolerance}
+#'   \describe{
+#'     \item{\code{ode_reltol}}{RK45 relative tolerance for ODE models
+#'       (default \code{1e-4}; ignored for analytical PK). The default
+#'       reproduces analytical closed forms in PRED to about \code{1e-4}, but
+#'       the FOCE objective amplifies solver error, so an ODE-form model's OFV
+#'       can differ from its analytical equivalent by several units. Set tighter
+#'       (e.g. \code{1e-10}) when the ODE-form OFV must match an analytical
+#'       reference; expect slower fits. Can also be set in the model file's
+#'       \code{[fit_options]} block.}
+#'     \item{\code{ode_abstol}}{RK45 absolute tolerance for ODE models
+#'       (default \code{1e-6}).}
+#'     \item{\code{ode_max_steps}}{Maximum RK45 steps per integration segment
+#'       (default \code{10000}). Raise if a tight \code{ode_reltol} exhausts the
+#'       step budget on stiff multi-compartment systems.}
+#'   }
+#'
 #'   \strong{FOCE / FOCEI / GN / GN-hybrid: iteration cap}
 #'   \describe{
 #'     \item{\code{maxiter}}{Maximum outer-optimizer iterations (default 500).

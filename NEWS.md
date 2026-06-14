@@ -2,6 +2,18 @@
 
 ## New features
 
+- **Configurable ODE solver tolerance**: ODE models accept `ode_reltol`
+  (default `1e-4`), `ode_abstol` (default `1e-6`), and `ode_max_steps`
+  (default `10000`) in the model file's `[fit_options]` block or via
+  `ferx_fit(settings = list(ode_reltol = ...))`. Defaults are unchanged, so
+  existing fits are unaffected. PRED reproduces the analytical closed form to
+  about `1e-4`, but the FOCE objective amplifies solver error, so the OFV of an
+  ODE-form model could differ from its analytical equivalent by several units;
+  a tighter `ode_reltol` lets the two agree. The shipped `*_ode` examples now
+  set `ode_reltol = 1e-10`, and `test-ode-analytical-equivalence.R` checks the
+  OFV agrees within a tolerance band in addition to PRED. (Requires ferx-core
+  with FeRx-NLME/ferx-core#334.)
+
 - **Standard PK models in ODE form**: every standard analytical model
   (`one_cpt_iv`, one-compartment oral = `warfarin`, `two_cpt_iv`,
   `two_cpt_oral_cov`, `three_cpt_iv`, `three_cpt_oral`) now ships an ODE-form
