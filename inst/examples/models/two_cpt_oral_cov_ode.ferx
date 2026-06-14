@@ -1,0 +1,57 @@
+# Two-compartment oral PK model with covariates -- ODE form of
+# two_cpt_oral_cov.ferx.
+#
+# ODE transcription of the analytical `two_cpt_oral` closed form, including the
+# WT/CRCL covariate model. Same data (two_cpt_oral_cov.csv) and parameters as
+# two_cpt_oral_cov.ferx; the two must yield identical predictions
+# (see tests/testthat/test-ode-analytical-equivalence.R).
+#
+# Convention: states are AMOUNTS (the oral dose adds amount to depot); observed
+# concentration is central / V1.
+
+[parameters]
+  theta TVCL(5.0, 0.1, 100.0)
+  theta TVV1(50.0, 1.0, 500.0)
+  theta TVQ(10.0, 0.1, 100.0)
+  theta TVV2(100.0, 1.0, 500.0)
+  theta TVKA(1.2, 0.01, 10.0)
+  theta THETA_WT(0.75, 0.01, 5.0)
+  theta THETA_CRCL(0.50, 0.01, 5.0)
+
+  omega ETA_CL ~ 0.10
+  omega ETA_V1 ~ 0.10
+  omega ETA_Q  ~ 0.05
+  omega ETA_V2 ~ 0.05
+  omega ETA_KA ~ 0.15
+
+  sigma PROP_ERR ~ 0.02 (sd)
+
+[individual_parameters]
+  CL = TVCL * (WT / 70)^THETA_WT * (CRCL / 100)^THETA_CRCL * exp(ETA_CL)
+  V1 = TVV1 * (WT / 70)^THETA_WT * exp(ETA_V1)
+  Q  = TVQ  * exp(ETA_Q)
+  V2 = TVV2 * exp(ETA_V2)
+  KA = TVKA * exp(ETA_KA)
+
+[structural_model]
+  ode(obs_cmt=central, states=[depot, central, periph])
+
+[odes]
+  d/dt(depot)   = -KA * depot
+  d/dt(central) =  KA * depot - (CL/V1 + Q/V1) * central + (Q/V2) * periph
+  d/dt(periph)  =  (Q/V1) * central - (Q/V2) * periph
+
+[scaling]
+  obs_scale = V1
+
+[covariates]
+  WT   continuous
+  CRCL continuous
+
+[error_model]
+  DV ~ proportional(PROP_ERR)
+
+[fit_options]
+  method     = focei
+  maxiter    = 500
+  covariance = true

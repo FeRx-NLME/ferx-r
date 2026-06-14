@@ -35,15 +35,16 @@ test_that("unknown name errors with available names in message", {
   expect_error(ferx_example("not_a_real_example"), regexp = "warfarin")
 })
 
-test_that("$data path exists on disk for all examples that have a data alias", {
-  # Examples with a data alias resolve to an existing dataset.
-  # warfarin_addl is intentionally excluded (no bundled dataset yet).
-  aliased <- c("warfarin_derived", "warfarin_derived_pkpd",
-                "warfarin_ode_time", "two_cpt_oral_derived")
-  for (nm in aliased) {
+test_that("$data path exists on disk for every bundled example", {
+  # Every example -- whether it ships its own dataset or resolves to one via the
+  # .data_aliases map in ferx_example() -- must point at a CSV that exists.
+  # Driven off ferx_example() rather than a hand-maintained list so newly added
+  # examples and aliases are covered automatically (a previous hardcoded list
+  # silently missed every alias added after it was written).
+  for (nm in ferx_example()) {
     ex <- ferx_example(nm)
     expect_true(
-      file.exists(ex$data),
+      is.character(ex$data) && nzchar(ex$data) && file.exists(ex$data),
       label = paste0("$data for '", nm, "' must exist on disk")
     )
   }
