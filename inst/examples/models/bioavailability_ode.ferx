@@ -7,7 +7,10 @@
 # F is the oral bioavailability, constrained to (0,1) via logit transform.
 #
 # ── ODE unit convention ────────────────────────────────────────────────────
-# ferx adds dose.amt directly to the state: u[cmt-1] += dose.amt.
+# ferx loads the dose into the state with bioavailability applied by the
+# engine: u[cmt-1] += F * dose.amt (an `F` individual parameter is recognised
+# automatically). F must therefore NOT also appear in the [odes] RHS, or it
+# would be counted twice.
 # Oral doses (CMT=1, AMT=100 mg) go to the depot (amount) compartment.
 # The central state is in concentration (mg/L): C = amount / V.
 #
@@ -44,8 +47,10 @@
 [odes]
   # depot  : oral-dose compartment (mg)
   # central: concentration compartment (mg/L)
+  # F is applied by the engine at the dose (see unit-convention note above),
+  # so the absorption flux is plain KA * depot / V -- no F here.
   d/dt(depot)   = -KA * depot
-  d/dt(central) = F * KA * depot / V - CL/V * central
+  d/dt(central) = KA * depot / V - CL/V * central
 
 [error_model]
   DV ~ proportional(PROP_ERR)

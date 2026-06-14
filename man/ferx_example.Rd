@@ -31,9 +31,20 @@ Available bundled examples:
 \item{warfarin_additive_eta}{One-compartment oral with additive ETA on lag time}
 \item{warfarin_logit_f}{One-compartment oral with logit-normal bioavailability}
 \item{warfarin_if}{Two-compartment oral with conditional if/else covariate (WT)}
+\item{one_cpt_iv}{One-compartment IV (analytical \code{one_cpt_iv})}
 \item{two_cpt_iv}{Two-compartment IV bolus}
 \item{two_cpt_oral_cov}{Two-compartment oral with continuous covariates (WT, CRCL)}
 \item{three_cpt_iv}{Three-compartment IV bolus}
+\item{three_cpt_oral}{Three-compartment oral (analytical \code{three_cpt_oral})}
+\item{one_cpt_iv_ode, warfarin_ode, two_cpt_iv_ode, two_cpt_oral_cov_ode,
+three_cpt_iv_ode, three_cpt_oral_ode}{ODE-form transcriptions of the
+standard analytical models (\code{one_cpt_iv}, \code{warfarin} =
+one-cpt oral, \code{two_cpt_iv}, \code{two_cpt_oral_cov},
+\code{three_cpt_iv}, \code{three_cpt_oral}). Each shares its analytical
+counterpart's dataset and parameters; states are amounts and the
+observed concentration is read out with \code{[scaling] obs_scale = V}
+(or \code{V1}). The two forms give identical predictions - verified by
+\code{test-ode-analytical-equivalence.R}.}
 \item{mm_oral}{One-compartment oral with Michaelis-Menten elimination (ODE)}
 \item{warfarin_sde}{One-compartment oral as ODE with SDE process noise
 (\code{[diffusion]} block, EKF likelihood; \code{DIFF_CENTRAL} in theta)}

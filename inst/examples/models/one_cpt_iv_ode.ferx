@@ -1,0 +1,39 @@
+# One-compartment IV PK model -- ODE form of one_cpt_iv.ferx.
+#
+# ODE transcription of the analytical `one_cpt_iv` closed form. Same data and
+# parameters as one_cpt_iv.ferx; the two must yield identical predictions
+# (see tests/testthat/test-ode-analytical-equivalence.R).
+#
+# Convention: the `central` state is an AMOUNT (the IV dose adds amount
+# directly); the observed concentration is amount / V, declared via
+# `[scaling] obs_scale = V` (NONMEM's S2 = V).
+
+[parameters]
+  theta TVCL(4.0, 0.01, 100.0)
+  theta TVV(30.0, 1.0, 500.0)
+
+  omega ETA_CL ~ 0.09
+  omega ETA_V  ~ 0.04
+
+  sigma PROP_ERR ~ 0.04 (sd)
+
+[individual_parameters]
+  CL = TVCL * exp(ETA_CL)
+  V  = TVV  * exp(ETA_V)
+
+[structural_model]
+  ode(obs_cmt=central, states=[central])
+
+[odes]
+  d/dt(central) = -(CL/V) * central
+
+[scaling]
+  obs_scale = V
+
+[error_model]
+  DV ~ proportional(PROP_ERR)
+
+[fit_options]
+  method     = foce
+  maxiter    = 300
+  covariance = true

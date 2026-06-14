@@ -1,0 +1,43 @@
+# One-compartment oral PK model (warfarin) -- ODE form of warfarin.ferx.
+#
+# ODE transcription of the analytical `one_cpt_oral` closed form. Same data
+# (warfarin.csv) and parameters as warfarin.ferx; the two must yield identical
+# predictions (see tests/testthat/test-ode-analytical-equivalence.R).
+#
+# Convention: `depot` and `central` are AMOUNTS (the oral dose adds amount to
+# depot); the observed concentration is central / V, declared via
+# `[scaling] obs_scale = V`.
+
+[parameters]
+  theta TVCL(0.134, 0.001, 10.0)
+  theta TVV(8.1, 0.1, 500.0)
+  theta TVKA(1.0, 0.01, 50.0)
+
+  omega ETA_CL ~ 0.07
+  omega ETA_V  ~ 0.02
+  omega ETA_KA ~ 0.40
+
+  sigma PROP_ERR ~ 0.01 (sd)
+
+[individual_parameters]
+  CL = TVCL * exp(ETA_CL)
+  V  = TVV  * exp(ETA_V)
+  KA = TVKA * exp(ETA_KA)
+
+[structural_model]
+  ode(obs_cmt=central, states=[depot, central])
+
+[odes]
+  d/dt(depot)   = -KA * depot
+  d/dt(central) =  KA * depot - (CL/V) * central
+
+[scaling]
+  obs_scale = V
+
+[error_model]
+  DV ~ proportional(PROP_ERR)
+
+[fit_options]
+  method     = foce
+  maxiter    = 300
+  covariance = true

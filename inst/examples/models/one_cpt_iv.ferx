@@ -1,0 +1,27 @@
+# One-compartment IV PK model (analytical) -- RATE column drives bolus vs
+# infusion per dose. Pairs with one_cpt_iv_ode.ferx (same data, same params),
+# which is the ODE transcription used to verify analytical == ODE.
+
+[parameters]
+  theta TVCL(4.0, 0.01, 100.0)
+  theta TVV(30.0, 1.0, 500.0)
+
+  omega ETA_CL ~ 0.09
+  omega ETA_V  ~ 0.04
+
+  sigma PROP_ERR ~ 0.04 (sd)
+
+[individual_parameters]
+  CL = TVCL * exp(ETA_CL)
+  V  = TVV  * exp(ETA_V)
+
+[structural_model]
+  pk one_cpt_iv(cl=CL, v=V)
+
+[error_model]
+  DV ~ proportional(PROP_ERR)
+
+[fit_options]
+  method     = foce
+  maxiter    = 300
+  covariance = true

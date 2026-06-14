@@ -1,0 +1,54 @@
+# Three-compartment oral PK model -- ODE form of three_cpt_oral.ferx.
+#
+# ODE transcription of the analytical `three_cpt_oral` closed form. Same data
+# (three_cpt_oral.csv) and parameters as three_cpt_oral.ferx; the two must
+# yield identical predictions (see
+# tests/testthat/test-ode-analytical-equivalence.R).
+#
+# Convention: states are AMOUNTS (the oral dose adds amount to depot); observed
+# concentration is central / V1. Micro-constants: k12 = Q2/V1, k21 = Q2/V2,
+# k13 = Q3/V1, k31 = Q3/V3, k10 = CL/V1.
+
+[parameters]
+  theta TVCL(5.0, 0.1, 100.0)
+  theta TVV1(10.0, 0.1, 500.0)
+  theta TVQ2(2.0, 0.01, 50.0)
+  theta TVV2(20.0, 0.1, 1000.0)
+  theta TVQ3(1.5, 0.01, 50.0)
+  theta TVV3(30.0, 0.1, 1000.0)
+  theta TVKA(1.1, 0.01, 50.0)
+
+  omega ETA_CL ~ 0.09
+  omega ETA_V1 ~ 0.04
+  omega ETA_KA ~ 0.20
+
+  sigma PROP_ERR ~ 0.04 (sd)
+
+[individual_parameters]
+  CL = TVCL * exp(ETA_CL)
+  V1 = TVV1 * exp(ETA_V1)
+  Q2 = TVQ2
+  V2 = TVV2
+  Q3 = TVQ3
+  V3 = TVV3
+  KA = TVKA * exp(ETA_KA)
+
+[structural_model]
+  ode(obs_cmt=central, states=[depot, central, periph1, periph2])
+
+[odes]
+  d/dt(depot)    = -KA * depot
+  d/dt(central)  =  KA * depot - (CL/V1 + Q2/V1 + Q3/V1) * central + (Q2/V2) * periph1 + (Q3/V3) * periph2
+  d/dt(periph1)  =  (Q2/V1) * central - (Q2/V2) * periph1
+  d/dt(periph2)  =  (Q3/V1) * central - (Q3/V3) * periph2
+
+[scaling]
+  obs_scale = V1
+
+[error_model]
+  DV ~ proportional(PROP_ERR)
+
+[fit_options]
+  method     = foce
+  maxiter    = 300
+  covariance = true

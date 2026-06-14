@@ -2,6 +2,22 @@
 
 ## New features
 
+- **Standard PK models in ODE form**: every standard analytical model
+  (`one_cpt_iv`, one-compartment oral = `warfarin`, `two_cpt_iv`,
+  `two_cpt_oral_cov`, `three_cpt_iv`, `three_cpt_oral`) now ships an ODE-form
+  example alongside its analytical counterpart (`*_ode`, plus new analytical
+  `one_cpt_iv` / `three_cpt_oral` examples and datasets). The ODE forms use an
+  amount-based convention (states are amounts; observed concentration via
+  `[scaling] obs_scale = V`/`V1`), with bioavailability `F` and lag time
+  applied by the engine at the dose rather than baked into the `[odes]` RHS.
+  A new test (`test-ode-analytical-equivalence.R`) asserts each shipped pair
+  gives identical predictions; the exhaustive cross-check across all dosing
+  modes (bolus, infusion, multi-dose, steady state, lag, F) lives in
+  ferx-core (`tests/analytical_ode_equivalence.rs`). Also fixes
+  `bioavailability_ode`, which double-counted `F` (it was both declared as an
+  individual parameter -- applied at the dose by the engine -- and baked into
+  the absorption flux). (#127)
+
 - **Propensity-score-matched simulation**: `ferx_simulate(..., match = TRUE)`
   reassigns each replicate's drawn etas to subjects by optimal Mahalanobis
   matching (under the model omega) against the subjects' fitted (posthoc) etas,
