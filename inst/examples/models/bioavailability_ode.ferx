@@ -11,17 +11,19 @@
 # engine: u[cmt-1] += F * dose.amt (an `F` individual parameter is recognised
 # automatically). F must therefore NOT also appear in the [odes] RHS, or it
 # would be counted twice.
-# Oral doses (CMT=1, AMT=100 mg) go to the depot (amount) compartment.
-# The central state is in concentration (mg/L): C = amount / V.
+# Oral doses (CMT=1, AMT=100 mg) go to the depot (amount) compartment; states
+# are AMOUNTS and the observed concentration is central / V, read out via
+# `[scaling] obs_scale = V` (the same amount + obs_scale convention used by the
+# other ODE examples, e.g. warfarin_ode).
 #
 # States:
-#   CMT=1  depot     — oral dose in mg, amount compartment
-#   CMT=2  central   — concentration compartment (mg/L = depot-derived / V)
+#   CMT=1  depot     — oral dose amount (mg)
+#   CMT=2  central   — central amount (mg); concentration = central / V
 #
 # Dataset: data/bioavailability_ode.csv (oral-only, 20 subjects × 7 obs)
 #
 # True simulation parameters:
-#   TVCL=5, TVV=50, TVKA=1.5, F=0.70 (THETA_F ≈ 0.847), omega_CL=0.09,
+#   TVCL=5, TVV=50, TVKA=1.5, F=0.70, omega_CL=0.09,
 #   omega_F=0.10, sigma_prop=0.15
 
 [parameters]
@@ -45,12 +47,15 @@
   ode(obs_cmt=central, states=[depot, central])
 
 [odes]
-  # depot  : oral-dose compartment (mg)
-  # central: concentration compartment (mg/L)
+  # depot  : oral-dose amount (mg)
+  # central: central amount (mg); concentration = central / V via [scaling]
   # F is applied by the engine at the dose (see unit-convention note above),
-  # so the absorption flux is plain KA * depot / V -- no F here.
+  # so the absorption flux is plain KA * depot -- no F here.
   d/dt(depot)   = -KA * depot
-  d/dt(central) = KA * depot / V - CL/V * central
+  d/dt(central) =  KA * depot - (CL/V) * central
+
+[scaling]
+  obs_scale = V
 
 [error_model]
   DV ~ proportional(PROP_ERR)
