@@ -28,6 +28,14 @@ ode_pairs <- list(
   list(an = "two_cpt_iv",       ode = "two_cpt_iv_ode",       method = "foce",  ofv_band = 0.5),
   list(an = "two_cpt_oral_cov", ode = "two_cpt_oral_cov_ode", method = "focei", ofv_band = 0.5),
   list(an = "three_cpt_iv",     ode = "three_cpt_iv_ode",     method = "foce",  ofv_band = 1.0),
+  # three_cpt_oral needs a far wider band than its siblings (0.5-1.0). It is the
+  # highest-dimensional model here (depot + central + 2 peripherals, plus KA)
+  # fit under FOCE, so its inner-EBE conditional modes differ most between the
+  # analytical and ODE forms under finite-difference gradients. PRED still
+  # matches to 1e-3 at eta=0 (above), so this is FD inner-EBE residual, not a
+  # structural mismatch; it is expected to shrink toward ~1.0 on an autodiff
+  # build. 8.0 still catches the ~10-15 OFV-unit regression that broken
+  # ode_reltol plumbing would reintroduce. Revisit once autodiff/optimiser land.
   list(an = "three_cpt_oral",   ode = "three_cpt_oral_ode",   method = "foce",  ofv_band = 8.0),
   list(an = "bioavailability",  ode = "bioavailability_ode",  method = "focei", ofv_band = 0.5)
 )
@@ -57,10 +65,11 @@ for (pair in ode_pairs) {
 }
 
 # OFV equivalence (tolerance band). Evaluated at the shared initial parameters
-# (settings = list(maxiter = 0)) so this is a deterministic, fit-free check of
-# the likelihood surface; the ODE side uses the tight `ode_reltol` baked into
-# its [fit_options]. Slower than the PRED check (the tight ODE solve runs the
-# inner EBE optimisation), so it is gated behind a normal run.
+# (settings = list(maxiter = 0)): no outer optimisation runs, so it is a
+# deterministic check of the likelihood surface at theta0 -- though the FOCE OFV
+# still solves the inner EBE modes per subject. That inner solve (at the tight
+# `ode_reltol` baked into the ODE side's [fit_options]) is why it is slower than
+# the PRED check and why the comparison is a band rather than exact equality.
 ofv_at_init <- function(model_path, data_path, method) {
   # covariance = FALSE and maxiter = 0 intentionally override the model file's
   # [fit_options]; suppress the resulting (expected) override warnings.
