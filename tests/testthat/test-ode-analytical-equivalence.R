@@ -97,6 +97,19 @@ for (pair in ode_pairs) {
     an_ofv  <- ofv_at_init(an_ex$model,  data, method)
     ode_ofv <- ofv_at_init(ode_ex$model, data, method)
 
+    # Measurement scaffold: set FERX_OFV_MEASURE=1 to print the actual residual
+    # per pair without failing. Use this after a ferx-core pin bump (e.g. the
+    # inner-EBE accuracy work in ferx-core #337/#289/#354) to see how far each
+    # band can be tightened, then set `ofv_band` just above the observed values.
+    # Lines are tagged "[OFV-MEASURE]" so they are easy to grep out of test logs.
+    if (nzchar(Sys.getenv("FERX_OFV_MEASURE"))) {
+      message(sprintf(
+        "[OFV-MEASURE] %-18s an=%.6f ode=%.6f |diff|=%.6f band=%.2g headroom=%.6f",
+        ode, an_ofv, ode_ofv, abs(ode_ofv - an_ofv), band,
+        band - abs(ode_ofv - an_ofv)
+      ))
+    }
+
     expect_true(is.finite(an_ofv) && is.finite(ode_ofv))
     expect_lt(abs(ode_ofv - an_ofv), band)
   })
