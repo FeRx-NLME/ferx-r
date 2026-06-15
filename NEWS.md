@@ -10,7 +10,10 @@
   (`backend = "xpose4"`). Continuous vs categorical covariates are split using
   the model's `[covariates]` types, overridable via the `continuous` /
   `categorical` arguments. `RES`/`IRES` are derived and `WRES` is `NA` (ferx
-  does not compute the FO-weighted residual). (ferx-r #165)
+  does not compute the FO-weighted residual). The estimation-iteration trace is
+  not populated, so `xpose::prm_vs_iteration()` / `grd_vs_iteration()` are not
+  supported (pending an engine change); use `ferx_plot_trace()` for OFV over
+  iterations. (ferx-r #165)
 
 - **Configurable ODE solver tolerance**: ODE models accept `ode_reltol`
   (default `1e-4`), `ode_abstol` (default `1e-6`), and `ode_max_steps`

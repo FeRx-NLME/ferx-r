@@ -50,6 +50,17 @@ and \code{categorical} arguments). Covariate values are taken from \code{fit$sdt
 when echoed there, otherwise carried forward (LOCF) from \code{fit$covtab}.
 }
 }
+\section{Limitations}{
+
+Only the table data is populated, not the estimation-iteration trace. Xpose
+functions that read the NONMEM \code{.ext} / \code{.grd} files — notably
+\code{\link[xpose:prm_vs_iteration]{xpose::prm_vs_iteration()}} and \code{\link[xpose:grd_vs_iteration]{xpose::grd_vs_iteration()}} — therefore do
+not work on the returned object: ferx records only a scalar OFV and gradient
+norm per iteration, not the per-parameter value/gradient trajectory those
+plots need. For an OFV-over-iterations view use \code{\link[=ferx_plot_trace]{ferx_plot_trace()}} (requires
+\code{optimizer_trace = TRUE} at fit time).
+}
+
 \examples{
 \dontrun{
 fit  <- ferx_fit("warfarin.ferx", data = "warfarin.csv")

@@ -36,6 +36,15 @@
 #'     when echoed there, otherwise carried forward (LOCF) from `fit$covtab`.
 #' }
 #'
+#' @section Limitations:
+#' Only the table data is populated, not the estimation-iteration trace. Xpose
+#' functions that read the NONMEM `.ext` / `.grd` files — notably
+#' [xpose::prm_vs_iteration()] and [xpose::grd_vs_iteration()] — therefore do
+#' not work on the returned object: ferx records only a scalar OFV and gradient
+#' norm per iteration, not the per-parameter value/gradient trajectory those
+#' plots need. For an OFV-over-iterations view use [ferx_plot_trace()] (requires
+#' `optimizer_trace = TRUE` at fit time).
+#'
 #' @param fit A `ferx_fit` object returned by [ferx_fit()].
 #' @param backend Which Xpose package to target: `"xpose"` (the modern
 #'   tidyverse package, the default) or `"xpose4"` (the classic S4 package).
