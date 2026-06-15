@@ -139,7 +139,18 @@ ferx_xpose <- function(fit,
   cont_cols <- intersect(cov_split$continuous, names(df))
   cat_cols  <- intersect(cov_split$categorical, names(df))
 
-  present <- function(x) x[x %in% names(df)]
+  # Warn at build time (not deep inside a plot call) when an sdtab is missing a
+  # column the standard GOF templates need.
+  for (need in c("PRED", "IPRED", "CWRES", "IWRES")) {
+    if (!need %in% names(df)) {
+      warning(sprintf(
+        "sdtab has no %s column; Xpose plots that use it will not work.", need),
+        call. = FALSE)
+    }
+  }
+
+  nm <- names(df)
+  present <- function(x) x[x %in% nm]
   roles <- list(
     id      = "ID",
     idv     = "TIME",
@@ -175,12 +186,22 @@ ferx_xpose <- function(fit,
     return(list(data = df, added = character(0)))
   }
   add_cols <- setdiff(names(src), "ID")
-  # Avoid clobbering an existing column (e.g. a param already echoed in sdtab).
-  add_cols <- setdiff(add_cols, names(df))
   if (length(add_cols) == 0L) {
     return(list(data = df, added = character(0)))
   }
-  idx <- match(df[["ID"]], src[["ID"]])
+  # A param/eta may already be echoed into sdtab (per-observation grain, e.g. a
+  # covariate-driven CL via [output]). The per-subject value is the canonical
+  # one for the param/eta role, so prefer it (overwrite) and flag the collision.
+  collide <- intersect(add_cols, names(df))
+  if (length(collide) > 0L) {
+    warning(sprintf(
+      "`fit$%s` column(s) also present in sdtab; using the per-subject value: %s",
+      what, paste(collide, collapse = ", ")), call. = FALSE)
+  }
+  # sdtab IDs are numeric (Rust writes them as f64) while ebe_etas /
+  # individual_estimates IDs are character; match in character space so the
+  # join works for non-numeric or zero-padded IDs (cf. diagnostics.R).
+  idx <- match(as.character(df[["ID"]]), as.character(src[["ID"]]))
   for (col in add_cols) {
     df[[col]] <- src[[col]][idx]
   }
@@ -196,15 +217,28 @@ ferx_xpose <- function(fit,
   cat  <- character(0)
   if (!is.null(types) && length(types) > 0L) {
     nms <- names(types)
-    cont <- nms[types == "continuous"]
-    cat  <- nms[types == "categorical"]
+    # Normalise the type labels; an NA or unexpected value must not silently
+    # drop a covariate from both sets — warn and treat it as unclassified.
+    tt  <- tolower(trimws(as.character(types)))
+    cont <- nms[!is.na(tt) & tt == "continuous"]
+    cat  <- nms[!is.na(tt) & tt == "categorical"]
+    bad_type <- nms[is.na(tt) | !(tt %in% c("continuous", "categorical"))]
+    bad_type <- bad_type[!is.na(bad_type)]
+    if (length(bad_type) > 0L) {
+      warning(sprintf(
+        "covariate(s) with unrecognized type (not continuous/categorical), omitted: %s",
+        paste(bad_type, collapse = ", ")), call. = FALSE)
+    }
   }
 
-  known <- names(fit$covariate_types)
+  # Empty character vector (not NULL) when the fit declares no covariates, so an
+  # override that names an undeclared covariate is always warned about and
+  # dropped — not silently leaked into the tables.
+  known <- names(fit$covariate_types) %||% character(0)
   warn_unknown <- function(x, kind) {
     if (is.null(x)) return(invisible())
     bad <- setdiff(x, known)
-    if (length(bad) > 0L && !is.null(known)) {
+    if (length(bad) > 0L) {
       warning(sprintf("%s covariate(s) not declared in the model, ignored: %s",
                       kind, paste(bad, collapse = ", ")), call. = FALSE)
     }
@@ -212,19 +246,16 @@ ferx_xpose <- function(fit,
   warn_unknown(continuous, "continuous")
   warn_unknown(categorical, "categorical")
 
-  # Keep only overrides that name a declared covariate; unknown names were
-  # warned about above and are dropped here so they don't leak into the tables.
-  if (!is.null(known)) {
-    continuous  <- intersect(continuous, known)
-    categorical <- intersect(categorical, known)
-  }
+  # Keep only overrides that name a declared covariate.
+  continuous  <- intersect(continuous, known)
+  categorical <- intersect(categorical, known)
 
-  if (!is.null(continuous)) {
-    cont <- union(setdiff(cont, categorical %||% character(0)), continuous)
+  if (length(continuous) > 0L) {
+    cont <- union(setdiff(cont, categorical), continuous)
     cat  <- setdiff(cat, continuous)
   }
-  if (!is.null(categorical)) {
-    cat  <- union(setdiff(cat, continuous %||% character(0)), categorical)
+  if (length(categorical) > 0L) {
+    cat  <- union(setdiff(cat, continuous), categorical)
     cont <- setdiff(cont, categorical)
   }
 
@@ -264,17 +295,25 @@ ferx_xpose <- function(fit,
 
 # Last-observation-carried-forward join: for each (id, t) in the target, pick
 # the source value at the latest source record with the same ID and time <= t.
+# When several source records tie at that latest time, the last one in source
+# order wins (true LOCF). Observations before any source record for that ID fall
+# back to the earliest record. Vectorised per ID group (no per-row scan).
 .ferx_locf_join <- function(id, t, src_id, src_t, src_val) {
+  id     <- as.character(id)       # sdtab IDs are numeric, covtab IDs character
+  src_id <- as.character(src_id)
   out <- rep(NA_real_, length(id))
-  for (i in seq_along(id)) {
-    sel <- which(src_id == id[i] & src_t <= t[i])
-    if (length(sel) > 0L) {
-      out[i] <- src_val[[sel[which.max(src_t[sel])]]]
-    } else {
-      # No prior record: fall back to the earliest record for that ID.
-      first <- which(src_id == id[i])
-      if (length(first) > 0L) out[i] <- src_val[[first[which.min(src_t[first])]]]
-    }
+  src_by_id <- split(seq_along(src_id), src_id)
+  for (g in unique(id)) {
+    rows <- which(id == g)
+    sidx <- src_by_id[[g]]
+    if (is.null(sidx) || length(sidx) == 0L) next
+    # Stable order by time, ties broken by original position so the last tied
+    # record sorts to the right; findInterval then returns it for an equal time.
+    ord <- sidx[order(src_t[sidx], sidx)]
+    st  <- src_t[ord]
+    j   <- findInterval(t[rows], st)   # largest index with st <= t; 0 if before all
+    j[j == 0L] <- 1L                   # fallback to earliest record for that ID
+    out[rows] <- src_val[ord][j]
   }
   out
 }
@@ -356,7 +395,8 @@ ferx_xpose <- function(fit,
   }
   do.call(rbind, list(
     rows("software", "nonmem"),
-    rows("runno", runno),
+    # xpose's title-template engine looks up the key "run" (not "runno").
+    rows("run", runno),
     rows("ofv", if (!is.null(fit$ofv)) fit$ofv else NA),
     rows("nobs", nrow(fit$sdtab)),
     rows("nind", length(unique(fit$sdtab$ID)))

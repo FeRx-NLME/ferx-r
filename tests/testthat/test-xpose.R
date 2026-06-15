@@ -18,12 +18,14 @@ fake_fit <- function(with_covtab = TRUE, echo_wt = FALSE) {
   )
   if (echo_wt) sdtab$WT <- c(70, 70, 80, 80)
 
+  # Mirror production typing: sdtab IDs are numeric (Rust f64), but the
+  # per-subject / covtab tables carry character IDs.
   fit <- list(
     sdtab = sdtab,
-    individual_estimates = data.frame(ID = c(1, 2), CL = c(1.1, 1.4),
-                                      V = c(30, 35)),
-    ebe_etas = data.frame(ID = c(1, 2), ETA_CL = c(0.05, -0.03),
-                          ETA_V = c(-0.1, 0.2)),
+    individual_estimates = data.frame(ID = c("1", "2"), CL = c(1.1, 1.4),
+                                      V = c(30, 35), stringsAsFactors = FALSE),
+    ebe_etas = data.frame(ID = c("1", "2"), ETA_CL = c(0.05, -0.03),
+                          ETA_V = c(-0.1, 0.2), stringsAsFactors = FALSE),
     covariate_types = c(WT = "continuous", SEX = "categorical"),
     ofv = 123.45,
     theta = c(CL = 1.0, V = 32),
@@ -31,11 +33,12 @@ fake_fit <- function(with_covtab = TRUE, echo_wt = FALSE) {
   )
   if (with_covtab) {
     fit$covtab <- data.frame(
-      ID   = c(1, 1, 2, 2),
+      ID   = c("1", "1", "2", "2"),
       TIME = c(0, 1, 0, 1),
       EVID = c(1, 0, 1, 0),
       WT   = c(70, 70, 80, 80),
-      SEX  = c(0, 0, 1, 1)
+      SEX  = c(0, 0, 1, 1),
+      stringsAsFactors = FALSE
     )
   }
   class(fit) <- "ferx_fit"
@@ -105,6 +108,68 @@ test_that("LOCF join carries the latest record at or before each obs time", {
   st  <- c(0, 3, 5)
   sv  <- c(10, 20, 30)
   expect_equal(.ferx_locf_join(id, t, sid, st, sv), c(10, 30))
+})
+
+test_that("LOCF tie-break carries the LAST source record at the latest time", {
+  # two source records tied at t=3 with different values; true LOCF -> 99
+  expect_equal(.ferx_locf_join(1, 5, c(1, 1, 1), c(0, 3, 3), c(10, 20, 99)), 99)
+})
+
+test_that("LOCF join matches across numeric vs character ID types", {
+  # target IDs numeric (sdtab), source IDs character (covtab)
+  out <- .ferx_locf_join(c(1, 2), c(5, 5),
+                         c("1", "2"), c(0, 0), c(70, 80))
+  expect_equal(out, c(70, 80))
+})
+
+test_that("ID join works when sdtab ID is numeric and ebe/ind ID is character", {
+  tbl <- .ferx_xpose_frame(fake_fit())  # fixture now uses mismatched ID types
+  df <- tbl$data
+  expect_false(anyNA(df$ETA_CL))
+  expect_false(anyNA(df$CL))
+  expect_equal(df$CL[df$ID == 2], c(1.4, 1.4))
+})
+
+test_that("override naming an undeclared covariate (no covariate_types) is dropped + warned", {
+  ff <- fake_fit()
+  ff$covariate_types <- NULL
+  ff$covtab <- NULL
+  expect_warning(
+    tbl <- .ferx_xpose_frame(ff, continuous = "WT"),
+    "not declared"
+  )
+  expect_false("WT" %in% tbl$cont)
+})
+
+test_that("unrecognized covariate_types value is omitted with a warning", {
+  ff <- fake_fit()
+  ff$covariate_types <- c(WT = "continuous", SEX = NA, AGE = "Continuous")
+  expect_warning(split <- .ferx_xpose_covariates(ff, NULL, NULL),
+                 "unrecognized type")
+  expect_false("SEX" %in% c(split$continuous, split$categorical))  # NA omitted
+  expect_setequal(split$continuous, c("WT", "AGE"))                # case-insensitive
+})
+
+test_that("missing GOF column in sdtab warns at build time", {
+  ff <- fake_fit()
+  ff$sdtab$IPRED <- NULL
+  expect_warning(.ferx_xpose_frame(ff), "no IPRED")
+})
+
+test_that("param/eta echoed into sdtab prefers the per-subject value, with a warning", {
+  ff <- fake_fit()
+  ff$sdtab$CL <- c(9, 9, 9, 9)   # stale per-observation CL echoed into sdtab
+  expect_warning(tbl <- .ferx_xpose_frame(ff), "per-subject value")
+  # per-subject value from individual_estimates wins (1.1 for ID 1, 1.4 for ID 2)
+  expect_equal(tbl$data$CL[tbl$data$ID == 1], c(1.1, 1.1))
+  expect_true("CL" %in% tbl$params)
+})
+
+test_that("new-xpose summary uses the 'run' key xpose reads (not 'runno')", {
+  skip_if_not_installed("xpose")
+  xpdb <- ferx_xpose(fake_fit(), backend = "xpose", runno = 7)
+  expect_true("run" %in% xpdb$summary$label)
+  expect_false("runno" %in% xpdb$summary$label)
 })
 
 test_that("roles map points at the expected columns", {
