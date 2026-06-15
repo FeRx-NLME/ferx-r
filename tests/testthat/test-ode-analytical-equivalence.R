@@ -101,3 +101,25 @@ for (pair in ode_pairs) {
     expect_lt(abs(ode_ofv - an_ofv), band)
   })
 }
+
+# `ode_template NAME(...)` generates the standard disposition ODE from the named
+# model (ferx-core #346). The generated form must predict identically to BOTH
+# the analytical `pk two_cpt_oral` and the hand-written ODE sibling
+# `two_cpt_oral_cov_ode` -- it desugars to exactly the latter. This guards the
+# shipped `*_ode_template` example; the exhaustive per-dosing-mode check lives
+# in ferx-core's tests/ode_template_equivalence.rs.
+test_that("ode_template form matches analytical and hand-ODE (PRED)", {
+  an_ex   <- ferx_example("two_cpt_oral_cov")
+  ode_ex  <- ferx_example("two_cpt_oral_cov_ode")
+  tmpl_ex <- ferx_example("two_cpt_oral_cov_ode_template")
+  data    <- an_ex$data
+
+  an_pred   <- ferx_predict(an_ex$model,   data)
+  ode_pred  <- ferx_predict(ode_ex$model,  data)
+  tmpl_pred <- ferx_predict(tmpl_ex$model, data)
+
+  expect_equal(nrow(tmpl_pred), nrow(an_pred))
+  expect_true(all(is.finite(tmpl_pred$PRED)))
+  expect_equal(tmpl_pred$PRED, an_pred$PRED,  tolerance = 1e-3)
+  expect_equal(tmpl_pred$PRED, ode_pred$PRED, tolerance = 1e-3)
+})
