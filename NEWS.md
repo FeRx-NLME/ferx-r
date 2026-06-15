@@ -14,7 +14,7 @@
   now a clear error pointing at `ode_template`, never a silent conversion. New
   example `two_cpt_oral_cov_ode_template` (verified identical to its analytical
   and hand-ODE siblings in `test-ode-analytical-equivalence.R`). (Requires
-  ferx-core with FeRx-NLME/ferx-core#346.)
+  ferx-core with FeRx-NLME/ferx-core#363.)
 
 - **Xpose interoperability**: `ferx_xpose(fit)` turns a fit into a ready-to-use
   Xpose object in memory (no NONMEM table files written to disk), so all

@@ -93,7 +93,7 @@ hand-writing it. Identical predictions to the analytical
 forms. Re-declaring a \code{d/dt(X)} in \code{[odes]} overrides only that
 compartment -- the standard way to attach a built-in absorption input
 such as \code{transit(...)}. (Requires ferx-core with
-FeRx-NLME/ferx-core#346.)}
+FeRx-NLME/ferx-core#363.)}
 \item{warfarin_ode_lagtime}{One-compartment oral (warfarin) as an ODE model
 demonstrating the \code{LAGTIME} keyword in \code{[individual_parameters]}.
 Assigning to the reserved name \code{LAGTIME} delays every dose event for

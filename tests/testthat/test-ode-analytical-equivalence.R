@@ -103,7 +103,7 @@ for (pair in ode_pairs) {
 }
 
 # `ode_template NAME(...)` generates the standard disposition ODE from the named
-# model (ferx-core #346). The generated form must predict identically to BOTH
+# model (ferx-core #363). The generated form must predict identically to BOTH
 # the analytical `pk two_cpt_oral` and the hand-written ODE sibling
 # `two_cpt_oral_cov_ode` -- it desugars to exactly the latter. This guards the
 # shipped `*_ode_template` example; the exhaustive per-dosing-mode check lives
