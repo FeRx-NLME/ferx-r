@@ -18,6 +18,7 @@ Config/rextendr/version: 0.5.0
 Imports:
     callr,
     jsonlite,
+    methods,
     utils
 Suggests:
     cli,
@@ -25,7 +26,9 @@ Suggests:
     knitr,
     rmarkdown,
     rstudioapi,
-    testthat (>= 3.0.0)
+    testthat (>= 3.0.0),
+    xpose,
+    xpose4
 URL: https://ferx-nlme.github.io/reference/
 VignetteBuilder: knitr
 Config/testthat/edition: 3

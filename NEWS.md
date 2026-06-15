@@ -2,6 +2,16 @@
 
 ## New features
 
+- **Xpose interoperability**: `ferx_xpose(fit)` turns a fit into a ready-to-use
+  Xpose object in memory (no NONMEM table files written to disk), so all
+  downstream Xpose goodness-of-fit, covariate, and parameter diagnostics work
+  out-of-the-box. Supports both the modern tidyverse `xpose` package
+  (`backend = "xpose"`, default) and the classic S4 `xpose4`
+  (`backend = "xpose4"`). Continuous vs categorical covariates are split using
+  the model's `[covariates]` types, overridable via the `continuous` /
+  `categorical` arguments. `RES`/`IRES` are derived and `WRES` is `NA` (ferx
+  does not compute the FO-weighted residual). (ferx-r #165)
+
 - **Configurable ODE solver tolerance**: ODE models accept `ode_reltol`
   (default `1e-4`), `ode_abstol` (default `1e-6`), and `ode_max_steps`
   (default `10000`) in the model file's `[fit_options]` block or via
