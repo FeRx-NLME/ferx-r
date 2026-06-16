@@ -154,10 +154,15 @@ ferx_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = NULL)
   if (length(nsim) != 1L || is.na(nsim) || nsim <= 0L) {
     stop("`nsim` must be a single positive integer.")
   }
-  # -1 is the FFI sentinel for "use the engine default seed".
+  # -1 is the FFI sentinel for "use the engine default seed". Reject negative
+  # user seeds: the engine maps any negative value to the default, so they would
+  # silently collide rather than seed distinct draws.
   seed_int <- if (is.null(seed)) -1L else as.integer(seed)
   if (length(seed_int) != 1L || is.na(seed_int)) {
     stop("`seed` must be a single integer or NULL.")
+  }
+  if (!is.null(seed) && seed_int < 0L) {
+    stop("`seed` must be a non-negative integer (or NULL for the engine default).")
   }
 
   model <- model %||% fit$model_path
@@ -179,33 +184,44 @@ ferx_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = NULL)
     nsim       = nsim,
     seed       = seed_int
   )
+  # The engine prints its error and returns NULL on failure (bad params, unreadable
+  # data, ...). Surface that as a clean R error instead of letting the alignment
+  # step fail cryptically on a NULL table.
+  if (is.null(npde_tbl) || !is.data.frame(npde_tbl)) {
+    stop("ferx_npde: the engine returned no NPDE table (see the message above).",
+         call. = FALSE)
+  }
 
   fit$sdtab <- .ferx_attach_npde(fit$sdtab, npde_tbl)
   fit
 }
 
-# Internal: splice NPDE/NPD onto an sdtab. The engine emits the NPDE table in
-# the same subject/observation order as the sdtab (both iterate the freshly
-# read population), so when the row counts and IDs line up positionally that is
-# the exact alignment - and it is robust to repeated (ID, TIME) keys (e.g.
-# multiple endpoints at one time). Otherwise fall back to an (ID, TIME) join.
+# Internal: splice NPDE/NPD onto an sdtab by position.
+#
+# The engine emits the NPDE table in exactly the same subject/observation order
+# as `fit$sdtab` (both iterate the same freshly read population) and emits ID and
+# TIME the same way `io::output::sdtab` does, so a row-for-row positional copy is
+# the correct alignment. We *assert* that invariant (equal row count, matching
+# per-row ID and TIME) rather than silently re-joining: a mismatch means the
+# `data`/`model` differ from the fit, or the model has non-Gaussian (e.g. TTE)
+# rows that sdtab and the NPDE table count differently - both cases should be a
+# clear error, not a quietly wrong or NA-filled column.
 .ferx_attach_npde <- function(sdtab, npde_tbl) {
-  aligned <- nrow(sdtab) == nrow(npde_tbl) &&
-    all(as.character(sdtab$ID) == as.character(npde_tbl$ID))
-  if (aligned) {
-    sdtab$NPDE <- npde_tbl$NPDE
-    sdtab$NPD  <- npde_tbl$NPD
-    return(sdtab)
+  if (nrow(sdtab) != nrow(npde_tbl)) {
+    stop(sprintf(paste0(
+      "ferx_npde: the NPDE table has %d row(s) but fit$sdtab has %d; cannot align. ",
+      "This happens when `model`/`data` differ from the fit, or for non-Gaussian ",
+      "(e.g. TTE) endpoints, which are not yet supported."),
+      nrow(npde_tbl), nrow(sdtab)), call. = FALSE)
   }
-  key <- function(id, t) paste0(as.character(id), "@", sprintf("%.12g", t))
-  idx <- match(key(sdtab$ID, sdtab$TIME), key(npde_tbl$ID, npde_tbl$TIME))
-  if (anyNA(idx)) {
-    warning("ferx_npde: ", sum(is.na(idx)),
-            " sdtab row(s) had no matching NPDE row; their NPDE/NPD are NA.",
-            call. = FALSE)
+  id_ok   <- isTRUE(all.equal(as.numeric(sdtab$ID),   as.numeric(npde_tbl$ID)))
+  time_ok <- isTRUE(all.equal(as.numeric(sdtab$TIME), as.numeric(npde_tbl$TIME)))
+  if (!id_ok || !time_ok) {
+    stop("ferx_npde: NPDE rows do not line up with fit$sdtab by ID/TIME; ",
+         "refusing to attach possibly-misaligned diagnostics.", call. = FALSE)
   }
-  sdtab$NPDE <- npde_tbl$NPDE[idx]
-  sdtab$NPD  <- npde_tbl$NPD[idx]
+  sdtab$NPDE <- npde_tbl$NPDE
+  sdtab$NPD  <- npde_tbl$NPD
   sdtab
 }
 

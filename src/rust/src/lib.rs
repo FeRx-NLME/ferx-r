@@ -735,13 +735,32 @@ fn ferx_rust_npde_from_fit(
     };
     let iov_col = parsed.fit_options.iov_column.clone();
 
+    // Re-apply the model file's `[data_selection]` ignore/accept/ignore_subjects
+    // so the population matches the one the fit was computed on. Without this the
+    // NPDE decorrelation would run over a different per-subject observation set
+    // than the fit, silently disagreeing with a fit-time `npde_nsim` run. (Only
+    // the model-file selection is visible here; selection applied via R-side
+    // `ferx_fit(settings=)` is not carried on the fit object.)
+    let filter = match ferx_core::io::datareader::SelectionFilter::from_opts(
+        &parsed.fit_options.ignore_exprs,
+        &parsed.fit_options.accept_exprs,
+        &parsed.fit_options.ignore_subjects,
+    ) {
+        Ok(f) => f,
+        Err(e) => {
+            rprintln!("Error in [data_selection]: {}", e);
+            return ().into();
+        }
+    };
+    let filter_opt = if filter.is_empty() { None } else { Some(&filter) };
+
     let (population, _) = match ferx_core::api::read_population_for(
         &parsed.model,
         &parsed.covariate_decls,
         data_path,
         None,
         iov_col.as_deref(),
-        None,
+        filter_opt,
     ) {
         Ok(r) => r,
         Err(e) => {
@@ -767,16 +786,19 @@ fn ferx_rust_npde_from_fit(
         seed_opt,
     );
 
-    // Flatten per-subject NPDE/NPD back to one row per observation, carrying the
-    // raw data TIME (so the table joins back to sdtab / the input CSV) and the
-    // string ID (matching `ferx_rust_predict_from_fit`).
-    let mut id: Vec<String> = Vec::new();
+    // Flatten per-subject NPDE/NPD back to one row per observation. ID and TIME
+    // are emitted exactly as `io::output::sdtab` builds them — numeric ID
+    // (`id.parse::<f64>()`, falling back to the 1-based subject index) and the
+    // raw data TIME — so the R side can align this table to `fit$sdtab`
+    // positionally and assert per-row ID/TIME agreement rather than re-joining.
+    let mut id: Vec<f64> = Vec::new();
     let mut time: Vec<f64> = Vec::new();
     let mut npde: Vec<f64> = Vec::new();
     let mut npd: Vec<f64> = Vec::new();
-    for (subj, sn) in population.subjects.iter().zip(per_subject.iter()) {
+    for (si, (subj, sn)) in population.subjects.iter().zip(per_subject.iter()).enumerate() {
+        let id_num = subj.id.parse::<f64>().unwrap_or(si as f64 + 1.0);
         for j in 0..subj.observations.len() {
-            id.push(subj.id.clone());
+            id.push(id_num);
             time.push(
                 subj.obs_raw_times
                     .get(j)

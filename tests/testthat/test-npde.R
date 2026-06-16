@@ -29,6 +29,10 @@ test_that("ferx_npde rejects a non-integer / NA seed", {
   expect_error(ferx_npde(.stub_fit(), seed = NA_integer_), "single integer or NULL")
 })
 
+test_that("ferx_npde rejects a negative seed (would silently become the default)", {
+  expect_error(ferx_npde(.stub_fit(), seed = -5L), "non-negative integer")
+})
+
 test_that("ferx_npde errors when no model/data path is available", {
   expect_error(ferx_npde(.stub_fit()), "model file")
   expect_error(ferx_npde(.stub_fit(), model = "no_such.ferx"), "model file")
@@ -38,29 +42,26 @@ test_that("ferx_npde errors when no model/data path is available", {
 
 .attach <- getFromNamespace(".ferx_attach_npde", "ferx")
 
-test_that(".ferx_attach_npde aligns positionally when IDs/rows line up", {
+test_that(".ferx_attach_npde copies NPDE/NPD positionally and keeps existing cols", {
   sd <- data.frame(ID = c(1, 1, 2), TIME = c(1, 2, 1), DV = c(5, 6, 7))
-  np <- data.frame(ID = c("1", "1", "2"), TIME = c(1, 2, 1),
+  np <- data.frame(ID = c(1, 1, 2), TIME = c(1, 2, 1),
                    NPDE = c(0.1, 0.2, 0.3), NPD = c(0.4, 0.5, 0.6))
   out <- .attach(sd, np)
   expect_equal(out$NPDE, c(0.1, 0.2, 0.3))
   expect_equal(out$NPD,  c(0.4, 0.5, 0.6))
-  expect_true(all(c("DV", "NPDE", "NPD") %in% names(out)))  # keeps existing cols
+  expect_true(all(c("DV", "NPDE", "NPD") %in% names(out)))
 })
 
-test_that(".ferx_attach_npde falls back to an (ID, TIME) join when order differs", {
-  sd <- data.frame(ID = c(2, 1), TIME = c(1, 2))
-  np <- data.frame(ID = c("1", "2"), TIME = c(2, 1),
-                   NPDE = c(0.9, 0.1), NPD = c(0.8, 0.2))
-  out <- .attach(sd, np)
-  expect_equal(out$NPDE, c(0.1, 0.9))  # row1=(ID2,T1)->0.1, row2=(ID1,T2)->0.9
-})
-
-test_that(".ferx_attach_npde warns on an unmatched row", {
+test_that(".ferx_attach_npde errors (not silently joins) when row counts differ", {
   sd <- data.frame(ID = c(1, 9), TIME = c(1, 9))
-  np <- data.frame(ID = "1", TIME = 1, NPDE = 0.1, NPD = 0.2)
-  expect_warning(out <- .attach(sd, np), "no matching NPDE")
-  expect_true(is.na(out$NPDE[2]))
+  np <- data.frame(ID = 1, TIME = 1, NPDE = 0.1, NPD = 0.2)
+  expect_error(.attach(sd, np), "cannot align")
+})
+
+test_that(".ferx_attach_npde errors when rows do not line up by ID/TIME", {
+  sd <- data.frame(ID = c(2, 1), TIME = c(1, 2))
+  np <- data.frame(ID = c(1, 2), TIME = c(2, 1), NPDE = c(0.9, 0.1), NPD = c(0.8, 0.2))
+  expect_error(.attach(sd, np), "do not line up")
 })
 
 # --- end-to-end against the real engine --------------------------------------
@@ -106,4 +107,16 @@ test_that("ferx_npde errors when the fit carries no sdtab", {
   bad <- list(theta = c(1, 2), omega = matrix(c(0.1, 0, 0, 0.1), 2, 2),
               sigma = 0.05)  # no sdtab
   expect_error(ferx_npde(bad), "sdtab` is empty")
+})
+
+test_that("ferx_npde surfaces a clean error when the engine returns NULL", {
+  # The FFI prints its own message and returns NULL on failure; ferx_npde must
+  # turn that into a clear R error rather than crash in the alignment step.
+  fit <- list(theta = c(1, 2), omega = matrix(c(0.1, 0, 0, 0.1), 2, 2),
+              sigma = 0.05, sdtab = data.frame(ID = 1, TIME = 1, DV = 5),
+              model_path = tempfile(fileext = ".ferx"),
+              data_path  = tempfile(fileext = ".csv"))
+  file.create(fit$model_path, fit$data_path)
+  testthat::local_mocked_bindings(ferx_rust_npde_from_fit = function(...) NULL)
+  expect_error(ferx_npde(fit), "engine returned no NPDE table")
 })
