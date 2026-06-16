@@ -13,7 +13,10 @@
   does not compute the FO-weighted residual). The estimation-iteration trace is
   not populated, so `xpose::prm_vs_iteration()` / `grd_vs_iteration()` are not
   supported (pending an engine change); use `ferx_plot_trace()` for OFV over
-  iterations. (ferx-r #165)
+  iterations. When the fit carries simulation-based `NPDE`/`NPD` columns (from
+  `[fit_options] npde_nsim > 0`), they are mapped to the Xpose residual role, so
+  residual diagnostics (e.g. `xpose::res_vs_idv(xpdb, res = "NPDE")`) work on
+  them out-of-the-box. (ferx-r #165)
 
 - **Configurable ODE solver tolerance**: ODE models accept `ode_reltol`
   (default `1e-4`), `ode_abstol` (default `1e-6`), and `ode_max_steps`
