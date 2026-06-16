@@ -1375,6 +1375,16 @@ ferx_fit <- function(model, data = NULL,
       )
     }
   }
+  # `bayes` is a standalone MCMC estimator — it does not warm-start from or feed
+  # another stage, and chaining it would run the (expensive) sampler and then
+  # silently discard its posterior (the final stage's result wins). Reject
+  # chains R-side rather than waste the run.
+  if (any(method == "bayes") && length(method) > 1L) {
+    stop(
+      "`\"bayes\"` must be the only method (it runs standalone); got ",
+      "method = c(\"", paste(method, collapse = "\", \""), "\")"
+    )
+  }
   if (is.null(bloq_method)) {
     bloq_arg <- ""
   } else {
@@ -2024,6 +2034,21 @@ ferx_fit <- function(model, data = NULL,
   }))
 }
 
+# Split-R-hat above this flags a Bayes fit as not-yet-converged. Single source
+# of truth for the [!] marker shown by print.ferx_fit and print.ferx_summary.
+.FERX_BAYES_RHAT_THRESHOLD <- 1.01
+
+# Styled "[!]" marker (yellow where colour is available, matching the shrinkage
+# flag) when `max_rhat` exceeds the threshold; "" otherwise. Leading spaces
+# separate it from the preceding text.
+.ferx_bayes_rhat_flag <- function(max_rhat) {
+  if (is.finite(max_rhat) && max_rhat > .FERX_BAYES_RHAT_THRESHOLD) {
+    paste0("  ", .ferx_style("[!]", "yellow"))
+  } else {
+    ""
+  }
+}
+
 #' @export
 print.ferx_fit <- function(x, ...) {
   bar <- strrep("=", 60)
@@ -2448,7 +2473,7 @@ print.ferx_fit <- function(x, ...) {
     b <- x$bayes
     cat("\n", .ferx_style("BAYES  (posterior summary)", "bold"), "\n", sep = "")
     cat(strrep("-", 60), "\n", sep = "")
-    flag <- if (is.finite(b$max_rhat) && b$max_rhat > 1.01) "  [!]" else ""
+    flag <- .ferx_bayes_rhat_flag(b$max_rhat)
     cat(sprintf(
       "  Chains: %d   Warmup: %d   Draws/chain: %d   Divergent: %d   Max R-hat: %.4f%s\n",
       as.integer(b$n_chains), as.integer(b$n_warmup),
@@ -2456,15 +2481,23 @@ print.ferx_fit <- function(x, ...) {
       b$max_rhat, flag
     ))
     if (!is.null(b$param_names) && length(b$param_names) > 0L) {
+      # Assemble the parallel posterior vectors into one table so the column
+      # set is declared in a single place.
+      tbl <- data.frame(
+        param = b$param_names,
+        mean = b$mean, sd = b$sd, q025 = b$q025, q975 = b$q975,
+        rhat = b$rhat, ess = b$ess_bulk,
+        stringsAsFactors = FALSE
+      )
       cat(sprintf(
         "  %-14s %11s %10s %11s %11s %7s %8s\n",
         "Parameter", "Mean", "SD", "2.5%", "97.5%", "R-hat", "ESS"
       ))
-      for (i in seq_along(b$param_names)) {
+      for (i in seq_len(nrow(tbl))) {
         cat(sprintf(
           "  %-14s %11.4g %10.4g %11.4g %11.4g %7.3f %8.0f\n",
-          b$param_names[i], b$mean[i], b$sd[i],
-          b$q025[i], b$q975[i], b$rhat[i], b$ess_bulk[i]
+          tbl$param[i], tbl$mean[i], tbl$sd[i],
+          tbl$q025[i], tbl$q975[i], tbl$rhat[i], tbl$ess[i]
         ))
       }
     }
@@ -2713,7 +2746,7 @@ print.ferx_summary <- function(x, ...) {
     cat(sprintf(
       "Bayes:     %d chains, %d draws/chain, max R-hat = %.4f%s\n",
       as.integer(b$n_chains), as.integer(b$n_draws_per_chain), b$max_rhat,
-      if (is.finite(b$max_rhat) && b$max_rhat > 1.01) " [!]" else ""
+      .ferx_bayes_rhat_flag(b$max_rhat)
     ))
   }
 

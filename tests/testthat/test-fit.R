@@ -196,6 +196,22 @@ test_that("method = 'bayes' passes the ferx_fit validation step", {
   expect_equal(normalize("mcmc"), "bayes")
 })
 
+test_that("ferx_fit rejects 'bayes' in a method chain (standalone only)", {
+  # Tier 1: chaining bayes would run the MCMC then discard its posterior (the
+  # final stage wins), so the wrapper rejects non-standalone bayes R-side.
+  ex <- ferx_example("warfarin")
+  expect_error(
+    ferx_fit(ex$model, ex$data, method = c("focei", "bayes")),
+    regexp = "standalone|only method",
+    ignore.case = TRUE
+  )
+  expect_error(
+    ferx_fit(ex$model, ex$data, method = c("bayes", "focei")),
+    regexp = "standalone|only method",
+    ignore.case = TRUE
+  )
+})
+
 test_that("method = 'bayes' produces a posterior summary on $bayes", {
   # Tier 2/3: a real (short) MCMC run via the engine. Asserts the posterior
   # structure is surfaced and the means settle near the warfarin estimate.
