@@ -6,9 +6,10 @@
   Prediction Distribution Errors, decorrelated within subject) and NPD
   (Normalized Prediction Discrepancies) post-hoc from an existing fit, without
   re-running `ferx_fit()`. Useful when a model was fitted without
-  `[fit_options] npde_nsim`. Returns a `data.frame` with `ID`, `TIME`, `NPDE`,
-  `NPD` (one row per observation), joinable to `fit$sdtab`; model/data default to
-  the paths recorded on the fit. (ferx-r #172, requires ferx-core #377)
+  `[fit_options] npde_nsim`. Returns the `fit` with `NPDE`/`NPD` columns added
+  to `fit$sdtab`, so `ferx_xpose()` and goodness-of-fit plots pick them up
+  automatically; model/data default to the paths recorded on the fit.
+  (ferx-r #172, requires ferx-core #377)
 
 - **Xpose interoperability**: `ferx_xpose(fit)` turns a fit into a ready-to-use
   Xpose object in memory (no NONMEM table files written to disk), so all

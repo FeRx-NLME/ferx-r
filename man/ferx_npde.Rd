@@ -25,9 +25,11 @@ full-rank simulated covariance; subjects that fail this get \code{NA} NPDE
 \item{data}{Path to the NONMEM-format CSV. Defaults to \code{fit$data_path}.}
 }
 \value{
-A data.frame with columns \code{ID}, \code{TIME}, \code{NPDE},
-\code{NPD} (one row per observation), joinable to \code{fit$sdtab} on
-\code{ID}/\code{TIME}.
+The input \code{fit}, with \code{NPDE} and \code{NPD} columns added
+to its \code{sdtab} data frame (replacing any existing ones). Because the
+diagnostics live in \code{fit$sdtab}, downstream consumers such as
+\code{\link{ferx_xpose}} and goodness-of-fit plots pick them up
+automatically.
 }
 \description{
 Computes Normalized Prediction Distribution Errors (\code{NPDE}, decorrelated
@@ -42,8 +44,8 @@ correctly specified model.
 \examples{
 ex  <- ferx_example("warfarin")
 fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
-npde <- ferx_npde(fit, nsim = 1000L, seed = 12345L)
-head(npde)
+fit <- ferx_npde(fit, nsim = 1000L, seed = 12345L)
+head(fit$sdtab[, c("ID", "TIME", "NPDE", "NPD")])
 
 }
 \seealso{

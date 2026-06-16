@@ -130,20 +130,25 @@ ferx_predict <- function(model, data, fit = NULL) {
 #'   \code{fit$model_path}.
 #' @param data Path to the NONMEM-format CSV. Defaults to \code{fit$data_path}.
 #'
-#' @return A data.frame with columns \code{ID}, \code{TIME}, \code{NPDE},
-#'   \code{NPD} (one row per observation), joinable to \code{fit$sdtab} on
-#'   \code{ID}/\code{TIME}.
+#' @return The input \code{fit}, with \code{NPDE} and \code{NPD} columns added
+#'   to its \code{sdtab} data frame (replacing any existing ones). Because the
+#'   diagnostics live in \code{fit$sdtab}, downstream consumers such as
+#'   \code{\link{ferx_xpose}} and goodness-of-fit plots pick them up
+#'   automatically.
 #'
 #' @examples
 #' ex  <- ferx_example("warfarin")
 #' fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
-#' npde <- ferx_npde(fit, nsim = 1000L, seed = 12345L)
-#' head(npde)
+#' fit <- ferx_npde(fit, nsim = 1000L, seed = 12345L)
+#' head(fit$sdtab[, c("ID", "TIME", "NPDE", "NPD")])
 #'
 #' @family simulation
 #' @export
 ferx_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = NULL) {
   fit_pieces <- validate_fit_for_params(fit)
+  if (is.null(fit$sdtab) || !is.data.frame(fit$sdtab) || nrow(fit$sdtab) == 0L) {
+    stop("`fit$sdtab` is empty; cannot attach NPDE/NPD. Refit so the fit carries an sdtab.")
+  }
 
   nsim <- as.integer(nsim)
   if (length(nsim) != 1L || is.na(nsim) || nsim <= 0L) {
@@ -164,7 +169,7 @@ ferx_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = NULL)
     stop("No usable data file: pass `data=` or refit so `fit$data_path` is set.")
   }
 
-  ferx_rust_npde_from_fit(
+  npde_tbl <- ferx_rust_npde_from_fit(
     model_path = normalizePath(model),
     data_path  = normalizePath(data),
     theta      = fit_pieces$theta,
@@ -174,6 +179,34 @@ ferx_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = NULL)
     nsim       = nsim,
     seed       = seed_int
   )
+
+  fit$sdtab <- .ferx_attach_npde(fit$sdtab, npde_tbl)
+  fit
+}
+
+# Internal: splice NPDE/NPD onto an sdtab. The engine emits the NPDE table in
+# the same subject/observation order as the sdtab (both iterate the freshly
+# read population), so when the row counts and IDs line up positionally that is
+# the exact alignment - and it is robust to repeated (ID, TIME) keys (e.g.
+# multiple endpoints at one time). Otherwise fall back to an (ID, TIME) join.
+.ferx_attach_npde <- function(sdtab, npde_tbl) {
+  aligned <- nrow(sdtab) == nrow(npde_tbl) &&
+    all(as.character(sdtab$ID) == as.character(npde_tbl$ID))
+  if (aligned) {
+    sdtab$NPDE <- npde_tbl$NPDE
+    sdtab$NPD  <- npde_tbl$NPD
+    return(sdtab)
+  }
+  key <- function(id, t) paste0(as.character(id), "@", sprintf("%.12g", t))
+  idx <- match(key(sdtab$ID, sdtab$TIME), key(npde_tbl$ID, npde_tbl$TIME))
+  if (anyNA(idx)) {
+    warning("ferx_npde: ", sum(is.na(idx)),
+            " sdtab row(s) had no matching NPDE row; their NPDE/NPD are NA.",
+            call. = FALSE)
+  }
+  sdtab$NPDE <- npde_tbl$NPDE[idx]
+  sdtab$NPD  <- npde_tbl$NPD[idx]
+  sdtab
 }
 
 # Internal: pull theta/omega/sigma out of a ferx_fit result for FFI.
