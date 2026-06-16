@@ -162,6 +162,13 @@
 
 ## Bug fixes
 
+- Oral models with a depot-bypassing infusion (`RATE > 0` into the central
+  compartment) now return correct concentrations for subjects fit through the
+  event-driven analytical path (those with time-varying covariates, reset
+  records, or IOV); the infusion input was previously dropped, giving ~0
+  predictions for those subjects while no-covariate subjects were unaffected.
+  Delivered by bumping the ferx-core pin; no wrapper change (ferx-core#351).
+
 - A `[structural_model]` PK parameter that maps to a name not defined in
   `[individual_parameters]` (e.g. `pk one_cpt_oral(cl=CL, ...)` with no `CL`)
   is now a clear parse error instead of silently fitting a structurally broken
