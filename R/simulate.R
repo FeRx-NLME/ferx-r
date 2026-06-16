@@ -106,6 +106,76 @@ ferx_predict <- function(model, data, fit = NULL) {
   )
 }
 
+#' Simulation-based NPDE / NPD diagnostics from a fit
+#'
+#' Computes Normalized Prediction Distribution Errors (\code{NPDE}, decorrelated
+#' within subject) and Normalized Prediction Discrepancies (\code{NPD}) post-hoc
+#' by Monte-Carlo simulation under the fitted model (Brendel et al. 2006; Comets
+#' et al. 2008). Use this when a model was fitted without
+#' \code{[fit_options] npde_nsim} and you want the diagnostics without re-running
+#' \code{\link{ferx_fit}}. Unlike CWRES, NPDE/NPD are robust to model
+#' nonlinearity and non-Gaussian random effects, and follow N(0, 1) under a
+#' correctly specified model.
+#'
+#' @param fit A \code{ferx_fit} result, carrying \code{theta}, \code{omega},
+#'   \code{sigma}, and (unless overridden) the \code{model_path} / \code{data_path}
+#'   captured at fit time.
+#' @param nsim Number of Monte-Carlo replicates per subject (default \code{1000}).
+#'   NPDE needs \code{nsim} greater than each subject's observation count for a
+#'   full-rank simulated covariance; subjects that fail this get \code{NA} NPDE
+#'   (NPD is still computed).
+#' @param seed Optional integer RNG seed for reproducibility. \code{NULL}
+#'   (default) uses the engine's built-in default seed.
+#' @param model Path to the \code{.ferx} model file. Defaults to
+#'   \code{fit$model_path}.
+#' @param data Path to the NONMEM-format CSV. Defaults to \code{fit$data_path}.
+#'
+#' @return A data.frame with columns \code{ID}, \code{TIME}, \code{NPDE},
+#'   \code{NPD} (one row per observation), joinable to \code{fit$sdtab} on
+#'   \code{ID}/\code{TIME}.
+#'
+#' @examples
+#' ex  <- ferx_example("warfarin")
+#' fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
+#' npde <- ferx_npde(fit, nsim = 1000L, seed = 12345L)
+#' head(npde)
+#'
+#' @family simulation
+#' @export
+ferx_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = NULL) {
+  fit_pieces <- validate_fit_for_params(fit)
+
+  nsim <- as.integer(nsim)
+  if (length(nsim) != 1L || is.na(nsim) || nsim <= 0L) {
+    stop("`nsim` must be a single positive integer.")
+  }
+  # -1 is the FFI sentinel for "use the engine default seed".
+  seed_int <- if (is.null(seed)) -1L else as.integer(seed)
+  if (length(seed_int) != 1L || is.na(seed_int)) {
+    stop("`seed` must be a single integer or NULL.")
+  }
+
+  model <- model %||% fit$model_path
+  data  <- data  %||% fit$data_path
+  if (is.null(model) || is.na(model) || !file.exists(model)) {
+    stop("No usable model file: pass `model=` or refit so `fit$model_path` is set.")
+  }
+  if (is.null(data) || is.na(data) || !file.exists(data)) {
+    stop("No usable data file: pass `data=` or refit so `fit$data_path` is set.")
+  }
+
+  ferx_rust_npde_from_fit(
+    model_path = normalizePath(model),
+    data_path  = normalizePath(data),
+    theta      = fit_pieces$theta,
+    omega_flat = fit_pieces$omega_flat,
+    omega_dim  = fit_pieces$omega_dim,
+    sigma      = fit_pieces$sigma,
+    nsim       = nsim,
+    seed       = seed_int
+  )
+}
+
 # Internal: pull theta/omega/sigma out of a ferx_fit result for FFI.
 # Flattens omega row-major for the Rust side.
 validate_fit_for_params <- function(fit) {

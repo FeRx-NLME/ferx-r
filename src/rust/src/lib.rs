@@ -693,6 +693,104 @@ fn ferx_rust_predict_from_fit(
     data_frame!(ID = id, TIME = time, PRED = pred).into()
 }
 
+/// Simulation-based NPDE / NPD diagnostics from fitted parameters.
+///
+/// Recomputes the Normalized Prediction Distribution Errors (NPDE, decorrelated
+/// within subject) and Normalized Prediction Discrepancies (NPD) post-hoc, so a
+/// fit produced without `npde_nsim` can still get them without re-fitting.
+///
+/// @param model_path Path to .ferx model file
+/// @param data_path Path to NONMEM-format CSV
+/// @param theta Fitted theta vector
+/// @param omega_flat Row-major flattened omega matrix
+/// @param omega_dim Side length of the omega matrix
+/// @param sigma Fitted sigma vector
+/// @param nsim Number of Monte-Carlo replicates per subject
+/// @param seed RNG seed; pass -1 for the engine default
+/// @return Data frame with ID, TIME, NPDE, NPD columns
+/// @export
+#[extendr]
+#[allow(clippy::too_many_arguments)]
+fn ferx_rust_npde_from_fit(
+    model_path: &str,
+    data_path: &str,
+    theta: Vec<f64>,
+    omega_flat: Vec<f64>,
+    omega_dim: i32,
+    sigma: Vec<f64>,
+    nsim: i32,
+    seed: i32,
+) -> Robj {
+    if nsim <= 0 {
+        rprintln!("npde error: nsim must be a positive integer");
+        return ().into();
+    }
+
+    let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
+        Ok(p) => p,
+        Err(e) => {
+            rprintln!("Error parsing model: {}", e);
+            return ().into();
+        }
+    };
+    let iov_col = parsed.fit_options.iov_column.clone();
+
+    let (population, _) = match ferx_core::api::read_population_for(
+        &parsed.model,
+        &parsed.covariate_decls,
+        data_path,
+        None,
+        iov_col.as_deref(),
+        None,
+    ) {
+        Ok(r) => r,
+        Err(e) => {
+            rprintln!("Error reading data: {}", e);
+            return ().into();
+        }
+    };
+
+    let params = match params_from_fit(&parsed.model, &theta, &omega_flat, omega_dim, &sigma) {
+        Ok(p) => p,
+        Err(e) => {
+            rprintln!("{}", e);
+            return ().into();
+        }
+    };
+
+    let seed_opt = if seed < 0 { None } else { Some(seed as u64) };
+    let per_subject = ferx_core::stats::npde::compute_npde_npd(
+        &parsed.model,
+        &population,
+        &params,
+        nsim as usize,
+        seed_opt,
+    );
+
+    // Flatten per-subject NPDE/NPD back to one row per observation, carrying the
+    // raw data TIME (so the table joins back to sdtab / the input CSV) and the
+    // string ID (matching `ferx_rust_predict_from_fit`).
+    let mut id: Vec<String> = Vec::new();
+    let mut time: Vec<f64> = Vec::new();
+    let mut npde: Vec<f64> = Vec::new();
+    let mut npd: Vec<f64> = Vec::new();
+    for (subj, sn) in population.subjects.iter().zip(per_subject.iter()) {
+        for j in 0..subj.observations.len() {
+            id.push(subj.id.clone());
+            time.push(
+                subj.obs_raw_times
+                    .get(j)
+                    .copied()
+                    .unwrap_or(subj.obs_times[j]),
+            );
+            npde.push(sn.npde.get(j).copied().unwrap_or(f64::NAN));
+            npd.push(sn.npd.get(j).copied().unwrap_or(f64::NAN));
+        }
+    }
+
+    data_frame!(ID = id, TIME = time, NPDE = npde, NPD = npd).into()
+}
+
 // -- Helper: parse a single R-side method token into EstimationMethod --
 
 fn parse_method(token: &str) -> std::result::Result<EstimationMethod, String> {
@@ -993,6 +1091,7 @@ fn default_fit_result(
         saem_seed: None,
         sir_seed: None,
         is_seed: None,
+        npde_seed: None,
         bloq_method: "drop".to_string(),
         outer_maxiter: 0,
         outer_gtol: 0.0,
@@ -2142,6 +2241,9 @@ fn ferx_rust_sir(
             per_obs_tad: Vec::new(),
             // PR #207 (ferx-core) added this field; the SIR path never reads it.
             compartment_states: Vec::new(),
+            // PR #377 (ferx-core) added NPDE/NPD; the SIR path never reads them.
+            npde: Vec::new(),
+            npd: Vec::new(),
         });
     }
 
@@ -2253,6 +2355,7 @@ fn ferx_rust_sir(
         saem_seed: None,
         sir_seed: None,
         is_seed: None,
+        npde_seed: None,
         bloq_method: "drop".to_string(),
         outer_maxiter: 0,
         outer_gtol: 0.0,
@@ -2325,6 +2428,7 @@ extendr_module! {
     fn ferx_rust_simulate_with_uncertainty;
     fn ferx_rust_predict;
     fn ferx_rust_predict_from_fit;
+    fn ferx_rust_npde_from_fit;
     fn ferx_rust_sir;
     fn ferx_rust_autodiff_enabled;
     fn ferx_rust_validate_model;
