@@ -13,6 +13,14 @@
 
 ## New features
 
+- **`ferx_npde(fit, nsim, seed)`**: compute simulation-based NPDE (Normalized
+  Prediction Distribution Errors, decorrelated within subject) and NPD
+  (Normalized Prediction Discrepancies) post-hoc from an existing fit, without
+  re-running `ferx_fit()`. Useful when a model was fitted without
+  `[fit_options] npde_nsim`. Returns the `fit` with `NPDE`/`NPD` columns added
+  to `fit$sdtab`, so `ferx_xpose()` and goodness-of-fit plots pick them up
+  automatically; model/data default to the paths recorded on the fit.
+  (ferx-r #172, requires ferx-core #377)
 - **Bayesian estimation (`method = "bayes"`)**: full MCMC posterior sampling
   (Gibbs-within-HMC, NONMEM `METHOD=BAYES` parity). Returns posterior means
   with 95% credible intervals and convergence diagnostics (split-R-hat, ESS) on
