@@ -264,15 +264,42 @@ fn ferx_rust_fit(
     // without cloning them. The worker exits cooperatively when `cancel` is
     // set — there is a small (poll-interval bounded) tail where the worker
     // drains its last iteration before returning Err("cancelled by user").
+    //
+    // The worker signals completion on a channel so the main thread wakes the
+    // instant the fit finishes. `POLL_MS` therefore bounds only interrupt
+    // latency, not the wall time of a fast fit — a previous `is_finished()` +
+    // `sleep(POLL_MS)` loop imposed a ~POLL_MS floor on every call, which
+    // dominated short fits (e.g. fixed-parameter MAP, where the fit is sub-ms).
     let result = std::thread::scope(|s| {
-        let handle = s.spawn(|| ferx_core::fit(&parsed.model, &population, &init_params, &opts));
+        let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+        // Bind borrows explicitly so the `move` closure captures these Copy
+        // references (and `done_tx` by value) rather than moving `parsed` /
+        // `population`, which are still needed after the fit returns.
+        let model_ref = &parsed.model;
+        let pop_ref = &population;
+        let init_ref = &init_params;
+        let opts_ref = &opts;
+        let handle = s.spawn(move || {
+            let r = ferx_core::fit(model_ref, pop_ref, init_ref, opts_ref);
+            // Ignore send errors: the receiver is only dropped once we stop
+            // waiting, which happens after the worker has already finished.
+            let _ = done_tx.send(());
+            r
+        });
 
-        while !handle.is_finished() {
-            if pending_interrupt() {
-                cancel.cancel();
-                break;
+        loop {
+            match done_rx.recv_timeout(std::time::Duration::from_millis(POLL_MS)) {
+                // Worker finished (or its sender was dropped on panic) — join
+                // below collects the real result / propagates the panic.
+                Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    // Still running: service R interrupts, then keep waiting
+                    // for the worker to drain and report (cancelled or not).
+                    if pending_interrupt() {
+                        cancel.cancel();
+                    }
+                }
             }
-            std::thread::sleep(std::time::Duration::from_millis(POLL_MS));
         }
 
         handle.join()
