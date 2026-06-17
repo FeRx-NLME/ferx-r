@@ -28,7 +28,9 @@
 #'   full MCMC Bayesian estimation (Gibbs-within-HMC, NONMEM \code{METHOD=BAYES}
 #'   parity): it returns posterior means with credible intervals and
 #'   convergence diagnostics on \code{$bayes} rather than a point estimate, and
-#'   runs standalone. Between-subject-variability models only (no IOV).
+#'   runs standalone. Supports BSV and zero-mean inter-occasion variability
+#'   (per-occasion \code{kappa}); the IOV variance posterior appears as
+#'   \code{OMEGA_IOV(...)} in \code{$bayes}.
 #'   SAEM fully supports inter-occasion variability (IOV / kappa) models.
 #' @param covariance Logical; compute the covariance step for standard errors
 #' @param verbose Logical; print progress during estimation
