@@ -12,7 +12,8 @@ ferx_rust_simulate_from_fit(
   omega_dim,
   sigma,
   n_sim,
-  seed
+  seed,
+  propensity_match
 )
 }
 \description{

@@ -6,7 +6,9 @@
 #' @param model Path to a \code{.ferx} model file, or a \code{\link{ferx_model}} object.
 #' @param data Path to a NONMEM-format CSV file. Required columns: ID, TIME,
 #'   DV, EVID, AMT, CMT. Optional columns recognised by the engine: RATE
-#'   (infusion rate), MDV (missing-DV flag), II (dosing interval, required when
+#'   (infusion rate; `RATE = -2` infuses `AMT` over a modeled duration given by
+#'   a per-subject parameter `D{n}` on dose compartment `n`, for ODE models),
+#'   MDV (missing-DV flag), II (dosing interval, required when
 #'   SS > 0), SS (steady-state flag: 1 = pre-dose at steady state, 2 = add SS
 #'   concentration to current state), CENS (BLOQ flag for M3 method), OCC
 #'   (occasion index for IOV), and any covariate columns referenced in the
@@ -386,7 +388,7 @@
 #'   | Residuals, PRED, IPRED, diagnostics | `fit$sdtab` | one row per observation | always |
 #'   | Covariates echoed per observation (via `[output]`) | `fit$sdtab` | one row per observation, LOCF | declared in `[output]` |
 #'   | Raw covariate values for all dataset records | `fit$covtab` | one row per dataset record (doses + obs) | model has `[covariates]` block |
-#'   | ETA / EBE values per observation row | `fit$sdtab` (`ETA_CL`, `ETA_V`, …) | one row per observation, value repeated | always |
+#'   | ETA / EBE values per observation row | `fit$sdtab` (`ETA_CL`, `ETA_V`, ...) | one row per observation, value repeated | always |
 #'   | ETA / EBE values per subject | `fit$ebe_etas` | one row per subject | model declares etas |
 #'   | Individual PK parameters per subject | `fit$individual_estimates` | one row per subject | always |
 #'
@@ -425,7 +427,7 @@
 #'     PK parameters or covariates echoed by name) appear at the end of the
 #'     data frame in declaration order.
 #'     ETA columns (\code{ETA_CL}, \code{ETA_V}, etc.) are included
-#'     automatically — the same EBE value is repeated for every observation
+#'     automatically - the same EBE value is repeated for every observation
 #'     row of that subject. For a compact per-subject view use
 #'     \code{fit$ebe_etas}; for individual PK parameter values use
 #'     \code{fit$individual_estimates}.}
@@ -917,8 +919,8 @@
 #' dedicated parameters (e.g. \code{method}, \code{covariance}) cannot be
 #' duplicated in \code{settings} - pass them via the named argument.
 #'
-#' For the complete settings reference — including which options apply to which
-#' method, valid combinations, and a convergence troubleshooting guide — see
+#' For the complete settings reference - including which options apply to which
+#' method, valid combinations, and a convergence troubleshooting guide - see
 #' \href{https://ferx-nlme.github.io/model-dsl/fit-options.html}{ferx-nlme.github.io/model-dsl/fit-options}.
 #'
 #' \strong{Outer optimizer selection:}
@@ -1252,17 +1254,17 @@
 #' @seealso
 #'   \itemize{
 #'     \item \href{https://ferx-nlme.github.io/model-dsl/fit-options.html}{Fit
-#'       options reference} — full documentation of every \code{[fit_options]}
+#'       options reference} - full documentation of every \code{[fit_options]}
 #'       key and \code{settings} knob, organised by method with a
-#'       convergence-troubleshooting guide and a method × option compatibility
+#'       convergence-troubleshooting guide and a method x option compatibility
 #'       table.
-#'     \item \code{\link{ferx_fit_async}} — non-blocking version for long runs.
-#'     \item \code{\link{ferx_check_init}} — 5-iteration pilot to validate
+#'     \item \code{\link{ferx_fit_async}} - non-blocking version for long runs.
+#'     \item \code{\link{ferx_check_init}} - 5-iteration pilot to validate
 #'       starting values before a full run.
-#'     \item \code{\link{ferx_inits_from_nca}} — NCA-derived starting values.
-#'     \item \code{\link{ferx_warnings}} — structured warnings from the fit.
-#'     \item \code{\link{ferx_estimates}} — tidy parameter table with SE / \%RSE.
-#'     \item \code{\link{ferx_plot_trace}} — convergence trace plot.
+#'     \item \code{\link{ferx_inits_from_nca}} - NCA-derived starting values.
+#'     \item \code{\link{ferx_warnings}} - structured warnings from the fit.
+#'     \item \code{\link{ferx_estimates}} - tidy parameter table with SE / \%RSE.
+#'     \item \code{\link{ferx_plot_trace}} - convergence trace plot.
 #'   }
 #' @family fitting
 #' @export
