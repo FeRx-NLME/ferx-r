@@ -1,5 +1,16 @@
 # ferx (development)
 
+## Performance
+
+- **`ferx_fit()` no longer pays a ~100 ms per-call latency floor.** The R-interrupt
+  poll loop in the Rust binding slept a fixed 100 ms between checks, so any fit
+  that finished in between (single-subject MAP/posthoc, small datasets, quick
+  refits) still took ~0.1 s of wall time regardless of the engine's actual
+  runtime. The worker now signals completion on a channel, so the call returns
+  the instant the fit finishes; `POLL_MS` bounds only Ctrl-C latency. A
+  single-subject fixed-parameter MAP fit drops from ~0.118 s to ~0.005–0.009 s
+  (~13–24×); estimates and interrupt behaviour are unchanged. (#178)
+
 ## New features
 
 - **Bayesian estimation (`method = "bayes"`)**: full MCMC posterior sampling
