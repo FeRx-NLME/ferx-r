@@ -1,0 +1,98 @@
+# syntax=docker/dockerfile:1.7
+#
+# ferx (finite-difference build) -- R package + Rust (ferx-core) engine + RStudio.
+#
+# This is the REPRODUCIBLE, autodiff-free image. It does NOT build the Enzyme
+# Rust toolchain; instead it builds ferx-core and the R staticlib with the
+# finite-difference gradient path (`--features ci`, FERX_NO_AUTODIFF=1) -- the
+# exact configuration ferx-core's own CI uses on stable Rust.
+#
+#   * Builds on any host/arch, no 45-60 min LLVM+Enzyme compile.
+#   * Fully reproducible (stock stable toolchain, no unpinned `rust HEAD` clone).
+#   * Runtime trade-off: gradients are finite-difference (slower, less exact)
+#     than the autodiff image (see Dockerfile).
+#
+# Build (from this directory):
+#   docker build -f Dockerfile.fd -t ferx:fd .
+#
+# Run RStudio Server:
+#   docker run --rm -p 8787:8787 -e PASSWORD=ferx ferx:fd
+#   -> http://localhost:8787   user: rstudio   password: ferx
+#
+# Run the ferx CLI directly:
+#   docker run --rm -v "$PWD:/work" -w /work ferx:fd ferx model.ferx --data data.csv
+
+# ===========================================================================
+# Final image based on rocker/tidyverse (pinned R release for reproducibility).
+# ===========================================================================
+FROM rocker/tidyverse:4.6.0
+
+# ---------------------------------------------------------------------------
+# 1. System build + runtime deps. (cmake/ninja for the nlopt crate; no LLVM
+#    or Enzyme deps -- this image never builds the autodiff toolchain.)
+# ---------------------------------------------------------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        cmake ninja-build lld libssl-dev pkg-config \
+        python3 build-essential curl git ca-certificates \
+        libzstd-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# ---------------------------------------------------------------------------
+# 2. rustup + stable toolchain under /opt so the `rstudio` user can use it too.
+#    Stable is sufficient: the FD path (`--features ci`) uses no nightly-only
+#    code -- this matches ferx-core's CI (`rustup toolchain install stable`).
+# ---------------------------------------------------------------------------
+ENV CARGO_HOME=/opt/cargo \
+    RUSTUP_HOME=/opt/rustup \
+    PATH=/opt/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+        | sh -s -- -y --default-toolchain stable --profile minimal \
+    && chmod -R a+rX /opt/cargo /opt/rustup
+
+# Force the stable toolchain everywhere. This overrides the `channel = "enzyme"`
+# pin in /opt/ferx-core/rust-toolchain.toml (RUSTUP_TOOLCHAIN beats the file),
+# so the CLI build below uses stable instead of demanding a missing toolchain.
+ENV RUSTUP_TOOLCHAIN=stable
+
+# Build the R staticlib (step 5) without autodiff. src/Makevars probes for an
+# `enzyme` toolchain when this is unset; we force the FD path explicitly so the
+# build is deterministic and never errors out looking for Enzyme.
+ENV FERX_NO_AUTODIFF=1
+
+# ---------------------------------------------------------------------------
+# 3. Clone ferx-core, build the `ferx` CLI with the finite-difference feature
+#    set (autodiff OFF), keep the source tree at /opt/ferx-core (the R
+#    package's Cargo.toml has a relative path dep). Drop artifacts + caches.
+# ---------------------------------------------------------------------------
+RUN set -eux; \
+    git clone --depth 1 https://github.com/FeRx-NLME/ferx-core /opt/ferx-core; \
+    cd /opt/ferx-core; \
+    cargo build --release --no-default-features --features ci; \
+    install -m 0755 target/release/ferx /usr/local/bin/ferx; \
+    rm -rf target .git; \
+    rm -rf /opt/cargo/registry/cache /opt/cargo/registry/src /opt/cargo/git
+
+# ---------------------------------------------------------------------------
+# 4. Copy the R package source, install it (rebuilds the Rust staticlib against
+#    the retained /opt/ferx-core via the relative path dep, FD path), then
+#    clean all build/caching state.
+# ---------------------------------------------------------------------------
+COPY . /opt/ferx
+RUN set -eux; \
+    R -e "if (!requireNamespace('remotes', quietly=TRUE)) install.packages('remotes')"; \
+    R -e "remotes::install_deps('/opt/ferx', dependencies=TRUE, upgrade='never')"; \
+    R CMD INSTALL --no-multiarch /opt/ferx; \
+    rm -rf /opt/ferx/src/rust/target \
+           /opt/cargo/registry/cache /opt/cargo/registry/src /opt/cargo/git \
+           /tmp/Rtmp* /tmp/downloaded_packages
+
+# ---------------------------------------------------------------------------
+# 5. Make the toolchain visible to interactive R sessions inside RStudio.
+# ---------------------------------------------------------------------------
+RUN printf 'PATH=/opt/cargo/bin:${PATH}\nRUSTUP_TOOLCHAIN=stable\nFERX_NO_AUTODIFF=1\n' \
+        > /home/rstudio/.Renviron \
+    && chown rstudio:rstudio /home/rstudio/.Renviron
+
+# RStudio Server entrypoint, port 8787, default user `rstudio` are all
+# inherited from rocker/tidyverse -- nothing more to do here.

@@ -95,16 +95,37 @@ When ferx loads it prints a startup message listing the specific AD-only feature
 
 ### Docker
 
-A Docker image is available that bundles the Enzyme toolchain (built from source), ferx CLI, the ferx R package, and RStudio Server — no local Rust/Enzyme setup required. On Windows, this is the recommended path if you need Enzyme autodiff.
+Both images bundle the ferx CLI, the ferx R package, and RStudio Server — no
+local Rust setup required. They differ only in how gradients are computed.
+Pick one:
+
+| Image | Dockerfile | Gradients | Build time | Use when |
+|---|---|---|---|---|
+| **autodiff** | `Dockerfile` | Enzyme automatic differentiation (exact, fast) | ~45-60 min (builds Rust+LLVM+Enzyme from source) | You need the fastest/most-exact fits or AD-only features. On Windows, the recommended path for Enzyme autodiff. |
+| **finite-difference** | `Dockerfile.fd` | Finite difference (FD) | Minutes (stock stable Rust, no LLVM build) | You want a quick, fully reproducible image and can accept slower / less-exact gradients. Builds on any host/arch. |
 
 ```bash
-# Build (first build takes ~45-60 min; cached after that)
+# --- autodiff image ---
+# First build takes ~45-60 min (builds Rust+LLVM+Enzyme); cached after that.
 docker build -t ferx:latest .
 
-# Run RStudio Server
+# --- finite-difference image (fast, reproducible) ---
+docker build -f Dockerfile.fd -t ferx:fd .
+
+# Run RStudio Server (either image)
 docker run --rm -p 8787:8787 -e PASSWORD=ferx ferx:latest
 # -> http://localhost:8787   user: rstudio   password: ferx
 ```
+
+**autodiff image notes.** The Enzyme toolchain is built from a *pinned*
+`rust-lang/rust` commit (`RUST_GIT_REF` build-arg) for reproducibility — a bare
+HEAD clone tracked whatever nightly was current and broke whenever upstream
+Enzyme regressed. The build also passes `-Z autodiff=Enable,LooseTypes`;
+`LooseTypes` works around an Enzyme TypeAnalysis crash
+(`Illegal updateAnalysis prev:{Pointer} new:{Integer}`) by letting Enzyme treat
+unprovable types as best-effort. That is an escape hatch — verify a fit against
+the FD image before trusting it. To move to a newer toolchain:
+`docker build --build-arg RUST_GIT_REF=<commit> -t ferx:latest .`
 
 ## Quick Start
 
