@@ -2419,6 +2419,7 @@ fn ferx_rust_prepare_frem(
         cat_opt.as_deref(),
         out_model,
         out_data,
+        None, // missing value indicator (default: -99)
     ) {
         Ok(r) => r,
         Err(e) => throw_r_error(format!("Error in prepare_frem: {e}")),
