@@ -24,9 +24,11 @@
 #' The mapping from `fit` to the standard NONMEM table columns is:
 #' \itemize{
 #'   \item \strong{sdtab} from `fit$sdtab`: `ID`, `TIME`, `DV`, `PRED`,
-#'     `IPRED`, `CWRES`, `IWRES`, and (when present) `CMT`, `OCC`, `CENS`,
-#'     `TAFD`, `TAD`. `RES = DV - PRED` and `IRES = DV - IPRED` are derived;
-#'     `WRES` is set to `NA` (ferx does not compute the FO-weighted residual).
+#'     `IPRED`, `CWRES`, `IWRES`, and (when present) `NPDE`, `NPD`, `CMT`, `OCC`,
+#'     `CENS`, `TAFD`, `TAD`. `RES = DV - PRED` and `IRES = DV - IPRED` are
+#'     derived; `WRES` is set to `NA` (ferx does not compute the FO-weighted
+#'     residual). `NPDE`/`NPD` (present when the fit ran with `npde_nsim > 0`)
+#'     are mapped to the residual role, so Xpose residual plots can use them.
 #'   \item \strong{patab}: individual parameter values (`fit$individual_estimates`)
 #'     and empirical-Bayes etas (`fit$ebe_etas`), repeated for every observation
 #'     row of each subject.
@@ -156,7 +158,7 @@ ferx_xpose <- function(fit,
     idv     = "TIME",
     dv      = present("DV"),
     pred    = present(c("PRED", "IPRED")),
-    res     = present(c("RES", "IRES", "WRES", "CWRES", "IWRES")),
+    res     = present(c("RES", "IRES", "WRES", "CWRES", "IWRES", "NPDE", "NPD")),
     occ     = present("OCC"),
     param   = param_cols,
     eta     = eta_cols,

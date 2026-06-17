@@ -1,5 +1,16 @@
 # ferx (development)
 
+## Performance
+
+- **`ferx_fit()` no longer pays a ~100 ms per-call latency floor.** The R-interrupt
+  poll loop in the Rust binding slept a fixed 100 ms between checks, so any fit
+  that finished in between (single-subject MAP/posthoc, small datasets, quick
+  refits) still took ~0.1 s of wall time regardless of the engine's actual
+  runtime. The worker now signals completion on a channel, so the call returns
+  the instant the fit finishes; `POLL_MS` bounds only Ctrl-C latency. A
+  single-subject fixed-parameter MAP fit drops from ~0.118 s to ~0.005–0.009 s
+  (~13–24×); estimates and interrupt behaviour are unchanged. (#178)
+
 ## New features
 
 - **`ferx_npde(fit, nsim, seed)`**: compute simulation-based NPDE (Normalized
@@ -10,6 +21,15 @@
   to `fit$sdtab`, so `ferx_xpose()` and goodness-of-fit plots pick them up
   automatically; model/data default to the paths recorded on the fit.
   (ferx-r #172, requires ferx-core #377)
+- **Bayesian estimation (`method = "bayes"`)**: full MCMC posterior sampling
+  (Gibbs-within-HMC, NONMEM `METHOD=BAYES` parity). Returns posterior means
+  with 95% credible intervals and convergence diagnostics (split-R-hat, ESS) on
+  `fit$bayes` instead of a point estimate; `print()` shows a posterior-summary
+  table. Tuning via `settings = list(bayes_warmup=, bayes_iters=, bayes_chains=,
+  bayes_thin=, bayes_seed=)`. Supports BSV and zero-mean inter-occasion
+  variability (per-occasion `kappa`; the IOV variance posterior appears as
+  `OMEGA_IOV(...)`). Validated against FOCEI and NONMEM `METHOD=BAYES` on
+  warfarin (ferx-core #380).
 
 - **`ode_template` — generate the disposition ODE**: `ode_template NAME(...)`
   in `[structural_model]` writes the standard disposition ODE for a named model
@@ -36,7 +56,10 @@
   does not compute the FO-weighted residual). The estimation-iteration trace is
   not populated, so `xpose::prm_vs_iteration()` / `grd_vs_iteration()` are not
   supported (pending an engine change); use `ferx_plot_trace()` for OFV over
-  iterations. (ferx-r #165)
+  iterations. When the fit carries simulation-based `NPDE`/`NPD` columns (from
+  `[fit_options] npde_nsim > 0`), they are mapped to the Xpose residual role, so
+  residual diagnostics (e.g. `xpose::res_vs_idv(xpdb, res = "NPDE")`) work on
+  them out-of-the-box. (ferx-r #165)
 
 - **Configurable ODE solver tolerance**: ODE models accept `ode_reltol`
   (default `1e-4`), `ode_abstol` (default `1e-6`), and `ode_max_steps`
