@@ -2,6 +2,17 @@
 
 ## New features
 
+- **Inverse-Gaussian (Freijer & Post) absorption — `igd(mat, cv2)`**: a new
+  built-in absorption input rate for `[odes]` models, alongside `transit(...)`.
+  It adds an inverse-Gaussian absorption-time distribution — mean absorption time
+  `MAT`, relative dispersion `CV2` (= Var/mean²) — fed straight into the central
+  compartment, modelling the entire absorption delay in one term (no first-order
+  `ka`). The dose feeds the density over time (∫ R_in dt = F·Dose), not as a
+  bolus, exactly like `transit(...)`. New example `igd_inverse_gaussian`. Anchored
+  against a NONMEM `$DES` inverse-Gaussian run. (Requires ferx-core with
+  FeRx-NLME/ferx-core#347; the biphasic Freijer sum-of-two is a planned follow-up,
+  FeRx-NLME/ferx-core#388.)
+
 - **`ode_template` — generate the disposition ODE**: `ode_template NAME(...)`
   in `[structural_model]` writes the standard disposition ODE for a named model
   (`one`/`two`/`three_cpt` `iv`/`oral`) for you — the same states, micro-constant

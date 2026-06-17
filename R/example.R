@@ -70,6 +70,10 @@
 #'   \item{transit_2cpt}{Two-compartment ODE model with 3-transit-compartment
 #'     absorption, allometric scaling on CL/V1/V2 (reference WT = 70 kg).
 #'     Transit compartments provide the absorption delay without a hard lag time.}
+#'   \item{igd_inverse_gaussian}{One-compartment ODE model with Freijer & Post
+#'     inverse-Gaussian absorption via the built-in \code{igd(mat, cv2)} input
+#'     rate fed straight into central (the entire absorption delay in one term,
+#'     no first-order \code{ka}). Paired with the NONMEM igd anchor dataset.}
 #'   \item{two_cpt_oral_cov_ode_template}{Two-compartment oral PK with covariates
 #'     written with \code{ode_template two_cpt_oral(...)} in
 #'     \code{[structural_model]}: ferx generates the standard disposition ODE
@@ -191,7 +195,11 @@ ferx_example <- function(name = NULL) {
 
     # `ode_template`-generated disposition; shares the analytical dataset so it
     # can be verified identical to both the analytical and hand-ODE forms.
-    two_cpt_oral_cov_ode_template = "two_cpt_oral_cov"
+    two_cpt_oral_cov_ode_template = "two_cpt_oral_cov",
+
+    # Built-in inverse-Gaussian absorption (igd); paired with the ferx-core
+    # NONMEM igd anchor dataset.
+    igd_inverse_gaussian = "igd_oral"
   )
 
   available <- tools::file_path_sans_ext(list.files(models_dir, pattern = "\\.ferx$"))
