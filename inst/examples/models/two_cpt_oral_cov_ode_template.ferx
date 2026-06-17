@@ -1,0 +1,64 @@
+# Two-compartment oral PK model with covariates -- `ode_template` form of
+# two_cpt_oral_cov.ferx.
+#
+# `ode_template two_cpt_oral(...)` tells ferx to GENERATE the standard
+# two-compartment oral disposition ODE (states depot, central, periph; the
+# micro-constant RHS; and obs_scale = V1) instead of hand-writing it. This is
+# exactly the disposition spelled out by hand in two_cpt_oral_cov_ode.ferx, so
+# all three forms -- analytical `pk two_cpt_oral`, the hand ODE, and this
+# `ode_template` -- give identical predictions
+# (see tests/testthat/test-ode-analytical-equivalence.R).
+#
+# `ode_template` takes the same parameters as the analytical `pk two_cpt_oral`,
+# including `ka` (the generated `central` equation needs the depot->central
+# transfer constant). To add a custom absorption input, re-declare the depot in
+# an [odes] block -- a `d/dt(depot)` you write OVERRIDES the generated one while
+# central/periph keep theirs, e.g.
+#   [odes]
+#     d/dt(depot) = transit(n=NTR, mtt=MTT) - KA*depot
+# (see ferx-core examples/transit_ode_template.ferx for the transit override).
+
+[parameters]
+  theta TVCL(5.0, 0.1, 100.0)
+  theta TVV1(50.0, 1.0, 500.0)
+  theta TVQ(10.0, 0.1, 100.0)
+  theta TVV2(100.0, 1.0, 500.0)
+  theta TVKA(1.2, 0.01, 10.0)
+  theta THETA_WT(0.75, 0.01, 5.0)
+  theta THETA_CRCL(0.50, 0.01, 5.0)
+
+  omega ETA_CL ~ 0.10
+  omega ETA_V1 ~ 0.10
+  omega ETA_Q  ~ 0.05
+  omega ETA_V2 ~ 0.05
+  omega ETA_KA ~ 0.15
+
+  sigma PROP_ERR ~ 0.02 (sd)
+
+[individual_parameters]
+  CL = TVCL * (WT / 70)^THETA_WT * (CRCL / 100)^THETA_CRCL * exp(ETA_CL)
+  V1 = TVV1 * (WT / 70)^THETA_WT * exp(ETA_V1)
+  Q  = TVQ  * exp(ETA_Q)
+  V2 = TVV2 * exp(ETA_V2)
+  KA = TVKA * exp(ETA_KA)
+
+[structural_model]
+  # ferx generates the depot/central/periph disposition ODE + obs_scale = V1.
+  ode_template two_cpt_oral(cl=CL, v1=V1, q=Q, v2=V2, ka=KA)
+
+[covariates]
+  WT   continuous
+  CRCL continuous
+
+[error_model]
+  DV ~ proportional(PROP_ERR)
+
+[fit_options]
+  method     = focei
+  maxiter    = 500
+  # tight ODE solver tolerance so the ODE-form OFV matches the analytical
+  # closed form (the FOCE objective amplifies the default 1e-4 solver error);
+  # see tests/testthat/test-ode-analytical-equivalence.R.
+  ode_reltol = 1e-10
+  ode_abstol = 1e-12
+  covariance = true

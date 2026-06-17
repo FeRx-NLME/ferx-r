@@ -70,6 +70,16 @@
 #'   \item{transit_2cpt}{Two-compartment ODE model with 3-transit-compartment
 #'     absorption, allometric scaling on CL/V1/V2 (reference WT = 70 kg).
 #'     Transit compartments provide the absorption delay without a hard lag time.}
+#'   \item{two_cpt_oral_cov_ode_template}{Two-compartment oral PK with covariates
+#'     written with \code{ode_template two_cpt_oral(...)} in
+#'     \code{[structural_model]}: ferx generates the standard disposition ODE
+#'     (states, micro-constant RHS, and \code{obs_scale = V1}) instead of you
+#'     hand-writing it. Identical predictions to the analytical
+#'     \code{two_cpt_oral_cov} and the hand-ODE \code{two_cpt_oral_cov_ode}
+#'     forms. Re-declaring a \code{d/dt(X)} in \code{[odes]} overrides only that
+#'     compartment -- the standard way to attach a built-in absorption input
+#'     such as \code{transit(...)}. (Requires ferx-core with
+#'     FeRx-NLME/ferx-core#363.)}
 #'   \item{warfarin_ode_lagtime}{One-compartment oral (warfarin) as an ODE model
 #'     demonstrating the \code{LAGTIME} keyword in \code{[individual_parameters]}.
 #'     Assigning to the reserved name \code{LAGTIME} delays every dose event for
@@ -177,7 +187,11 @@ ferx_example <- function(name = NULL) {
     two_cpt_iv_ode          = "two_cpt_iv",
     two_cpt_oral_cov_ode    = "two_cpt_oral_cov",
     three_cpt_iv_ode        = "three_cpt_iv",
-    three_cpt_oral_ode      = "three_cpt_oral"
+    three_cpt_oral_ode      = "three_cpt_oral",
+
+    # `ode_template`-generated disposition; shares the analytical dataset so it
+    # can be verified identical to both the analytical and hand-ODE forms.
+    two_cpt_oral_cov_ode_template = "two_cpt_oral_cov"
   )
 
   available <- tools::file_path_sans_ext(list.files(models_dir, pattern = "\\.ferx$"))

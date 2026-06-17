@@ -11,6 +11,20 @@
   automatically; model/data default to the paths recorded on the fit.
   (ferx-r #172, requires ferx-core #377)
 
+- **`ode_template` — generate the disposition ODE**: `ode_template NAME(...)`
+  in `[structural_model]` writes the standard disposition ODE for a named model
+  (`one`/`two`/`three_cpt` `iv`/`oral`) for you — the same states, micro-constant
+  RHS, and `obs_scale` the analytical `pk NAME(...)` uses, but as an explicit ODE
+  you can extend. It takes the same parameters as `pk NAME(...)` (including `ka`
+  for oral routes). Re-declaring a `d/dt(X)` in `[odes]` **overrides** the
+  generated equation for compartment `X` (undeclared compartments keep theirs) —
+  the standard way to attach a built-in absorption input such as `transit(...)`.
+  Combining an ODE-only absorption function with an analytical `pk NAME(...)` is
+  now a clear error pointing at `ode_template`, never a silent conversion. New
+  example `two_cpt_oral_cov_ode_template` (verified identical to its analytical
+  and hand-ODE siblings in `test-ode-analytical-equivalence.R`). (Requires
+  ferx-core with FeRx-NLME/ferx-core#363.)
+
 - **Xpose interoperability**: `ferx_xpose(fit)` turns a fit into a ready-to-use
   Xpose object in memory (no NONMEM table files written to disk), so all
   downstream Xpose goodness-of-fit, covariate, and parameter diagnostics work
@@ -170,6 +184,13 @@
   `.fitrx` bundles.
 
 ## Bug fixes
+
+- Oral models with a depot-bypassing infusion (`RATE > 0` into the central
+  compartment) now return correct concentrations for subjects fit through the
+  event-driven analytical path (those with time-varying covariates, reset
+  records, or IOV); the infusion input was previously dropped, giving ~0
+  predictions for those subjects while no-covariate subjects were unaffected.
+  Delivered by bumping the ferx-core pin; no wrapper change (ferx-core#351).
 
 - A `[structural_model]` PK parameter that maps to a name not defined in
   `[individual_parameters]` (e.g. `pk one_cpt_oral(cl=CL, ...)` with no `CL`)
