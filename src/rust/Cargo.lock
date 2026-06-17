@@ -315,6 +315,7 @@ dependencies = [
 [[package]]
 name = "ferx-core"
 version = "0.1.6"
+source = "git+https://github.com/JordanBrooks33/ferx-core?branch=add-frem#95d7a60287276d7a12ecd57c3e6d2894ab86b65e"
 dependencies = [
  "argmin",
  "argmin-math",
