@@ -33,7 +33,9 @@ ferx_fit(
 
 \item{data}{Path to a NONMEM-format CSV file. Required columns: ID, TIME,
 DV, EVID, AMT, CMT. Optional columns recognised by the engine: RATE
-(infusion rate), MDV (missing-DV flag), II (dosing interval, required when
+(infusion rate; \code{RATE = -2} infuses \code{AMT} over a modeled duration given by
+a per-subject parameter \verb{D\{n\}} on dose compartment \code{n}, for ODE models),
+MDV (missing-DV flag), II (dosing interval, required when
 SS > 0), SS (steady-state flag: 1 = pre-dose at steady state, 2 = add SS
 concentration to current state), CENS (BLOQ flag for M3 method), OCC
 (occasion index for IOV), and any covariate columns referenced in the

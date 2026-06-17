@@ -6,7 +6,9 @@
 #' @param model Path to a \code{.ferx} model file, or a \code{\link{ferx_model}} object.
 #' @param data Path to a NONMEM-format CSV file. Required columns: ID, TIME,
 #'   DV, EVID, AMT, CMT. Optional columns recognised by the engine: RATE
-#'   (infusion rate), MDV (missing-DV flag), II (dosing interval, required when
+#'   (infusion rate; `RATE = -2` infuses `AMT` over a modeled duration given by
+#'   a per-subject parameter `D{n}` on dose compartment `n`, for ODE models),
+#'   MDV (missing-DV flag), II (dosing interval, required when
 #'   SS > 0), SS (steady-state flag: 1 = pre-dose at steady state, 2 = add SS
 #'   concentration to current state), CENS (BLOQ flag for M3 method), OCC
 #'   (occasion index for IOV), and any covariate columns referenced in the
