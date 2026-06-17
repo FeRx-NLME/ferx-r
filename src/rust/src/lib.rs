@@ -150,6 +150,13 @@ fn ferx_rust_fit(
         }
     }
 
+    // Re-apply the (now settings-merged) ODE solver tolerances onto the model's
+    // OdeSpec so call-time `ode_reltol` / `ode_abstol` / `ode_max_steps`
+    // overrides take effect. The parser already baked the [fit_options] values;
+    // this lets a `ferx_fit(settings = ...)` override win. No-op for analytical
+    // models.
+    parsed.model.sync_ode_solver_opts(&opts);
+
     // Read data via read_population_for, which handles [covariates] validation,
     // [data_selection] filters, and TTE endpoint routing in one call.
     // This replaces the previous 4-way dispatch that could not pass tte_cmts to
@@ -257,15 +264,42 @@ fn ferx_rust_fit(
     // without cloning them. The worker exits cooperatively when `cancel` is
     // set — there is a small (poll-interval bounded) tail where the worker
     // drains its last iteration before returning Err("cancelled by user").
+    //
+    // The worker signals completion on a channel so the main thread wakes the
+    // instant the fit finishes. `POLL_MS` therefore bounds only interrupt
+    // latency, not the wall time of a fast fit — a previous `is_finished()` +
+    // `sleep(POLL_MS)` loop imposed a ~POLL_MS floor on every call, which
+    // dominated short fits (e.g. fixed-parameter MAP, where the fit is sub-ms).
     let result = std::thread::scope(|s| {
-        let handle = s.spawn(|| ferx_core::fit(&parsed.model, &population, &init_params, &opts));
+        let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+        // Bind borrows explicitly so the `move` closure captures these Copy
+        // references (and `done_tx` by value) rather than moving `parsed` /
+        // `population`, which are still needed after the fit returns.
+        let model_ref = &parsed.model;
+        let pop_ref = &population;
+        let init_ref = &init_params;
+        let opts_ref = &opts;
+        let handle = s.spawn(move || {
+            let r = ferx_core::fit(model_ref, pop_ref, init_ref, opts_ref);
+            // Ignore send errors: the receiver is only dropped once we stop
+            // waiting, which happens after the worker has already finished.
+            let _ = done_tx.send(());
+            r
+        });
 
-        while !handle.is_finished() {
-            if pending_interrupt() {
-                cancel.cancel();
-                break;
+        loop {
+            match done_rx.recv_timeout(std::time::Duration::from_millis(POLL_MS)) {
+                // Worker finished (or its sender was dropped on panic) — join
+                // below collects the real result / propagates the panic.
+                Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    // Still running: service R interrupts, then keep waiting
+                    // for the worker to drain and report (cancelled or not).
+                    if pending_interrupt() {
+                        cancel.cancel();
+                    }
+                }
             }
-            std::thread::sleep(std::time::Duration::from_millis(POLL_MS));
         }
 
         handle.join()
@@ -309,6 +343,8 @@ fn ferx_rust_fit(
 /// @param data_path Path to NONMEM-format CSV (for population structure)
 /// @param n_sim Number of simulations
 /// @param seed Random seed
+/// @param propensity_match Reassign drawn etas to subjects by propensity-score
+///   matching against posthoc etas (requires observed DV)
 /// @return Data frame with ID, TIME, IPRED, DV_SIM columns
 /// @export
 #[extendr]
@@ -317,6 +353,7 @@ fn ferx_rust_simulate(
     data_path: &str,
     n_sim: i32,
     seed: i32,
+    propensity_match: bool,
 ) -> Robj {
     // parse_full_model_file (vs parse_model_file) so iov_column is available
     // for the reader; without it, models with kappa declarations panic in
@@ -346,13 +383,23 @@ fn ferx_rust_simulate(
             }
         };
 
-    let results = ferx_core::simulate_with_seed(
+    let opts = ferx_core::SimulateOptions {
+        seed: Some(seed as u64),
+        propensity_match,
+    };
+    let results = match ferx_core::simulate_with_options(
         &parsed.model,
         &population,
         &parsed.model.default_params,
         n_sim as usize,
-        seed as u64,
-    );
+        &opts,
+    ) {
+        Ok(r) => r,
+        Err(e) => {
+            rprintln!("Error simulating: {}", e);
+            return ().into();
+        }
+    };
 
     sim_results_to_df(&results)
 }
@@ -367,6 +414,8 @@ fn ferx_rust_simulate(
 /// @param sigma Fitted sigma vector
 /// @param n_sim Number of simulations
 /// @param seed Random seed
+/// @param propensity_match Reassign drawn etas to subjects by propensity-score
+///   matching against posthoc etas (requires observed DV)
 /// @return Data frame with SIM, ID, TIME, IPRED, DV_SIM columns
 /// @export
 #[extendr]
@@ -380,6 +429,7 @@ fn ferx_rust_simulate_from_fit(
     sigma: Vec<f64>,
     n_sim: i32,
     seed: i32,
+    propensity_match: bool,
 ) -> Robj {
     let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
         Ok(p) => p,
@@ -414,13 +464,23 @@ fn ferx_rust_simulate_from_fit(
         }
     };
 
-    let results = ferx_core::simulate_with_seed(
+    let opts = ferx_core::SimulateOptions {
+        seed: Some(seed as u64),
+        propensity_match,
+    };
+    let results = match ferx_core::simulate_with_options(
         &parsed.model,
         &population,
         &params,
         n_sim as usize,
-        seed as u64,
-    );
+        &opts,
+    ) {
+        Ok(r) => r,
+        Err(e) => {
+            rprintln!("Error simulating: {}", e);
+            return ().into();
+        }
+    };
     sim_results_to_df(&results)
 }
 
@@ -678,9 +738,11 @@ fn parse_method(token: &str) -> std::result::Result<EstimationMethod, String> {
         Ok(EstimationMethod::Imp)
     } else if m == "impmap" || m == "importance_sampling_map" {
         Ok(EstimationMethod::Impmap)
+    } else if m == "bayes" || m == "bayesian" || m == "mcmc" {
+        Ok(EstimationMethod::Bayes)
     } else {
         Err(format!(
-            "Unknown estimation method '{}' — expected one of: foce, focei, saem, gn, gn_hybrid, imp, impmap",
+            "Unknown estimation method '{}' — expected one of: foce, focei, saem, gn, gn_hybrid, imp, impmap, bayes",
             token.trim()
         ))
     }
@@ -875,6 +937,8 @@ fn default_fit_result(
     FitResult {
         method: EstimationMethod::FoceI,
         method_chain: vec![EstimationMethod::FoceI],
+        bayes: None,
+        npde_seed: None,
         converged: true,
         ofv: 0.0,
         aic: 0.0,
@@ -1293,6 +1357,43 @@ fn fit_result_to_list(
         None => ().into(),
     };
 
+    // Bayes posterior summary (`method = bayes`). Per-parameter summaries are
+    // packed as parallel vectors so the R side can build a data frame without
+    // hitting extendr's list-of-records limitations.
+    let bayes: Robj = match &result.bayes {
+        Some(b) => {
+            let names: Vec<String> = b.summaries.iter().map(|s| s.name.clone()).collect();
+            let mean: Vec<f64> = b.summaries.iter().map(|s| s.mean).collect();
+            let sd: Vec<f64> = b.summaries.iter().map(|s| s.sd).collect();
+            let q025: Vec<f64> = b.summaries.iter().map(|s| s.q025).collect();
+            let median: Vec<f64> = b.summaries.iter().map(|s| s.median).collect();
+            let q975: Vec<f64> = b.summaries.iter().map(|s| s.q975).collect();
+            let rhat: Vec<f64> = b.summaries.iter().map(|s| s.rhat).collect();
+            let ess_bulk: Vec<f64> = b.summaries.iter().map(|s| s.ess_bulk).collect();
+            let ess_tail: Vec<f64> = b.summaries.iter().map(|s| s.ess_tail).collect();
+            let mcse: Vec<f64> = b.summaries.iter().map(|s| s.mcse).collect();
+            list!(
+                n_chains = b.n_chains as f64,
+                n_warmup = b.n_warmup as f64,
+                n_draws_per_chain = b.n_draws_per_chain as f64,
+                n_divergent = b.n_divergent as f64,
+                max_rhat = b.max_rhat,
+                param_names = names,
+                mean = mean,
+                sd = sd,
+                q025 = q025,
+                median = median,
+                q975 = q975,
+                rhat = rhat,
+                ess_bulk = ess_bulk,
+                ess_tail = ess_tail,
+                mcse = mcse,
+            )
+            .into()
+        }
+        None => ().into(),
+    };
+
     let trace_path: Robj = match &result.trace_path {
         Some(p) => p.clone().into(),
         None => ().into(),
@@ -1556,6 +1657,7 @@ fn fit_result_to_list(
         sir_resamples_dim = sir_resamples_dim,
         importance_sampling = importance_sampling,
         impmap_trace = impmap_trace,
+        bayes = bayes,
         trace_path = trace_path,
         ebe_convergence_warnings = result.ebe_convergence_warnings as i32,
         max_unconverged_subjects = result.max_unconverged_subjects as i32,
@@ -2192,6 +2294,9 @@ fn ferx_rust_sir(
             per_obs_tad: Vec::new(),
             // PR #207 (ferx-core) added this field; the SIR path never reads it.
             compartment_states: Vec::new(),
+            // NPDE/NPD columns (ferx-core); not computed on the SIR path.
+            npde: Vec::new(),
+            npd: Vec::new(),
         });
     }
 
@@ -2208,6 +2313,8 @@ fn ferx_rust_sir(
         } else {
             EstimationMethod::Foce
         }],
+        bayes: None,
+        npde_seed: None,
         converged: true,
         ofv,
         aic: 0.0,

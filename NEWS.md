@@ -1,5 +1,16 @@
 # ferx (development)
 
+## Performance
+
+- **`ferx_fit()` no longer pays a ~100 ms per-call latency floor.** The R-interrupt
+  poll loop in the Rust binding slept a fixed 100 ms between checks, so any fit
+  that finished in between (single-subject MAP/posthoc, small datasets, quick
+  refits) still took ~0.1 s of wall time regardless of the engine's actual
+  runtime. The worker now signals completion on a channel, so the call returns
+  the instant the fit finishes; `POLL_MS` bounds only Ctrl-C latency. A
+  single-subject fixed-parameter MAP fit drops from ~0.118 s to ~0.005–0.009 s
+  (~13–24×); estimates and interrupt behaviour are unchanged. (#178)
+
 ## New features
 
 - **FREM covariate analysis** (`ferx_to_frem()`): transforms a base model and
@@ -11,6 +22,84 @@
   to FREM only some of them. Returns a `ferx_model` referencing the generated
   model and data files, so it composes directly: `ferx_fit(ferx_to_frem(...))`.
   (#194)
+
+- **Bayesian estimation (`method = "bayes"`)**: full MCMC posterior sampling
+  (Gibbs-within-HMC, NONMEM `METHOD=BAYES` parity). Returns posterior means
+  with 95% credible intervals and convergence diagnostics (split-R-hat, ESS) on
+  `fit$bayes` instead of a point estimate; `print()` shows a posterior-summary
+  table. Tuning via `settings = list(bayes_warmup=, bayes_iters=, bayes_chains=,
+  bayes_thin=, bayes_seed=)`. Supports BSV and zero-mean inter-occasion
+  variability (per-occasion `kappa`; the IOV variance posterior appears as
+  `OMEGA_IOV(...)`). Validated against FOCEI and NONMEM `METHOD=BAYES` on
+  warfarin (ferx-core #380).
+
+- **`ode_template` — generate the disposition ODE**: `ode_template NAME(...)`
+  in `[structural_model]` writes the standard disposition ODE for a named model
+  (`one`/`two`/`three_cpt` `iv`/`oral`) for you — the same states, micro-constant
+  RHS, and `obs_scale` the analytical `pk NAME(...)` uses, but as an explicit ODE
+  you can extend. It takes the same parameters as `pk NAME(...)` (including `ka`
+  for oral routes). Re-declaring a `d/dt(X)` in `[odes]` **overrides** the
+  generated equation for compartment `X` (undeclared compartments keep theirs) —
+  the standard way to attach a built-in absorption input such as `transit(...)`.
+  Combining an ODE-only absorption function with an analytical `pk NAME(...)` is
+  now a clear error pointing at `ode_template`, never a silent conversion. New
+  example `two_cpt_oral_cov_ode_template` (verified identical to its analytical
+  and hand-ODE siblings in `test-ode-analytical-equivalence.R`). (Requires
+  ferx-core with FeRx-NLME/ferx-core#363.)
+
+- **Xpose interoperability**: `ferx_xpose(fit)` turns a fit into a ready-to-use
+  Xpose object in memory (no NONMEM table files written to disk), so all
+  downstream Xpose goodness-of-fit, covariate, and parameter diagnostics work
+  out-of-the-box. Supports both the modern tidyverse `xpose` package
+  (`backend = "xpose"`, default) and the classic S4 `xpose4`
+  (`backend = "xpose4"`). Continuous vs categorical covariates are split using
+  the model's `[covariates]` types, overridable via the `continuous` /
+  `categorical` arguments. `RES`/`IRES` are derived and `WRES` is `NA` (ferx
+  does not compute the FO-weighted residual). The estimation-iteration trace is
+  not populated, so `xpose::prm_vs_iteration()` / `grd_vs_iteration()` are not
+  supported (pending an engine change); use `ferx_plot_trace()` for OFV over
+  iterations. When the fit carries simulation-based `NPDE`/`NPD` columns (from
+  `[fit_options] npde_nsim > 0`), they are mapped to the Xpose residual role, so
+  residual diagnostics (e.g. `xpose::res_vs_idv(xpdb, res = "NPDE")`) work on
+  them out-of-the-box. (ferx-r #165)
+
+- **Configurable ODE solver tolerance**: ODE models accept `ode_reltol`
+  (default `1e-4`), `ode_abstol` (default `1e-6`), and `ode_max_steps`
+  (default `10000`) in the model file's `[fit_options]` block or via
+  `ferx_fit(settings = list(ode_reltol = ...))`. Defaults are unchanged, so
+  existing fits are unaffected. PRED reproduces the analytical closed form to
+  about `1e-4`, but the FOCE objective amplifies solver error, so the OFV of an
+  ODE-form model could differ from its analytical equivalent by several units;
+  a tighter `ode_reltol` lets the two agree. The shipped `*_ode` examples now
+  set `ode_reltol = 1e-10`, and `test-ode-analytical-equivalence.R` checks the
+  OFV agrees within a tolerance band in addition to PRED. (Requires ferx-core
+  with FeRx-NLME/ferx-core#334.)
+
+- **Standard PK models in ODE form**: every standard analytical model
+  (`one_cpt_iv`, one-compartment oral = `warfarin`, `two_cpt_iv`,
+  `two_cpt_oral_cov`, `three_cpt_iv`, `three_cpt_oral`) now ships an ODE-form
+  example alongside its analytical counterpart (`*_ode`, plus new analytical
+  `one_cpt_iv` / `three_cpt_oral` examples and datasets). The ODE forms use an
+  amount-based convention (states are amounts; observed concentration via
+  `[scaling] obs_scale = V`/`V1`), with bioavailability `F` and lag time
+  applied by the engine at the dose rather than baked into the `[odes]` RHS.
+  A new test (`test-ode-analytical-equivalence.R`) asserts each shipped pair
+  gives identical predictions; the exhaustive cross-check across all dosing
+  modes (bolus, infusion, multi-dose, steady state, lag, F) lives in
+  ferx-core (`tests/analytical_ode_equivalence.rs`). Also fixes
+  `bioavailability_ode`, which double-counted `F` (it was both declared as an
+  individual parameter -- applied at the dose by the engine -- and baked into
+  the absorption flux). (#127)
+
+- **Propensity-score-matched simulation**: `ferx_simulate(..., match = TRUE)`
+  reassigns each replicate's drawn etas to subjects by optimal Mahalanobis
+  matching (under the model omega) against the subjects' fitted (posthoc) etas,
+  so a subject's observed dosing/sampling design is paired with a similar drawn
+  eta. This corrects VPC bias from treatment adaptation in real-world data
+  (e.g. longer dosing intervals for high-clearance patients). Requires observed
+  data; the posthoc etas use the fitted parameters when a `fit` is supplied.
+  Needs a ferx-core that provides `simulate_with_options` (separate `Cargo.lock`
+  bump). (ferx-core #288)
 
 - **Standalone importance sampling**: `ferx_fit(..., method = "imp")` now runs
   without a preceding estimator, scoring the model's initial parameters
@@ -120,6 +209,37 @@
   `.fitrx` bundles.
 
 ## Bug fixes
+
+- Oral models with a depot-bypassing infusion (`RATE > 0` into the central
+  compartment) now return correct concentrations for subjects fit through the
+  event-driven analytical path (those with time-varying covariates, reset
+  records, or IOV); the infusion input was previously dropped, giving ~0
+  predictions for those subjects while no-covariate subjects were unaffected.
+  Delivered by bumping the ferx-core pin; no wrapper change (ferx-core#351).
+
+- A `[structural_model]` PK parameter that maps to a name not defined in
+  `[individual_parameters]` (e.g. `pk one_cpt_oral(cl=CL, ...)` with no `CL`)
+  is now a clear parse error instead of silently fitting a structurally broken
+  model (every prediction floored, 100% shrinkage). An unrecognized PK-parameter
+  key (a typo such as `clx=`) is likewise rejected, and a numeric-literal value
+  (e.g. `ka=1.0`) is honored as a constant rather than silently zeroed. Delivered
+  by bumping the ferx-core pin; no wrapper change (ferx-core#261).
+
+- Datasets without an `EVID` column no longer silently fit a dose-free model.
+  ferx now infers a dose from a nonzero `AMT` when `EVID` is absent (matching
+  NONMEM), so a NONMEM dataset that marks doses only by `AMT`/`MDV=1` administers
+  correctly instead of dropping every dose. The reader also warns when `AMT != 0`
+  rows are not treated as doses, or when a population parses zero doses despite
+  having observations. Delivered by bumping the ferx-core pin; no wrapper change
+  (ferx-core#262).
+
+- IOV models: the `sdtab` diagnostic table (`fit$sdtab`) now reports each
+  observation's **occasion** individual parameters -- `CL`, `V`, `KA`, any
+  `[derived]`/`[output]` column, and `TAD` -- instead of silently using
+  `kappa = 0` for every row, so a parameter with inter-occasion variability no
+  longer looks identical across occasions. `TAD` additionally shifts each dose
+  by its own occasion (and covariate) absorption lag. Delivered by bumping the
+  ferx-core pin; no wrapper change (ferx-core#238).
 
 - Shapiro-Wilk ETA-normality flags now fold into a single warning that lists
   every flagged ETA (with its p-value) instead of firing one warning per ETA.
