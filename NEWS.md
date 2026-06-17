@@ -2,6 +2,17 @@
 
 ## New features
 
+- **Modeled infusion duration (`RATE = -2`)** for ODE models: a NONMEM
+  `RATE = -2` dose now infuses `AMT` over a *modeled* duration — declare an
+  individual parameter `D{n}` for the dose compartment `n` and ferx infuses at
+  rate `AMT / D{n}`, resolved per iteration and occasion (so it carries
+  covariate and IOV effects). Composes with `F{n}` and `ALAG{n}`, steady state,
+  multi-dose, and system resets. A `RATE = -2` dose with no matching `D{n}`
+  parameter — or on an analytical model — is a clear error rather than a silent
+  bolus, and a `D{n}` that is non-positive at the initial estimate is flagged.
+  Handled entirely in the data reader and model parser, so no R-side change is
+  needed. (Requires ferx-core with FeRx-NLME/ferx-core#384.)
+
 - **`ode_template` — generate the disposition ODE**: `ode_template NAME(...)`
   in `[structural_model]` writes the standard disposition ODE for a named model
   (`one`/`two`/`three_cpt` `iv`/`oral`) for you — the same states, micro-constant
