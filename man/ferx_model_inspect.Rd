@@ -15,7 +15,7 @@ A named list (invisibly) with fields: \code{theta_names}
 (character vector of population parameter names), \code{model_type}
 (short label such as \code{"1-cpt oral"} or \code{NULL} when not
 unambiguously detectable), \code{iiv} (omega names), \code{iov}
-(kappa names), and \code{residual} (error type — one of
+(kappa names), and \code{residual} (error type - one of
 \code{"proportional"}, \code{"additive"}, \code{"combined"}, or
 \code{"additive (log-transformed)"} for log-transform-both-sides
 models written as \code{log(DV) ~ additive(...)} or
