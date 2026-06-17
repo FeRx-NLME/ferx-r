@@ -21,7 +21,8 @@ nn = ["ferx-core/nn"]
 
 [dependencies]
 extendr-api = "0.9"
-ferx-core = { git = "https://github.com/FeRx-NLME/ferx-core", branch = "main", default-features = false }
+# TEMP: track the add-frem branch on the fork until it merges to main.
+ferx-core = { git = "https://github.com/JordanBrooks33/ferx-core", branch = "add-frem", default-features = false }
 nalgebra = "0.34"
 
 [profile.release]

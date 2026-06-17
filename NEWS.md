@@ -42,7 +42,7 @@
   bolus, and a `D{n}` that is non-positive at the initial estimate is flagged.
   Handled entirely in the data reader and model parser, so no R-side change is
   needed. (Requires ferx-core with FeRx-NLME/ferx-core#384.)
-  
+
 - **`ferx_npde(fit, nsim, seed)`**: compute simulation-based NPDE (Normalized
   Prediction Distribution Errors, decorrelated within subject) and NPD
   (Normalized Prediction Discrepancies) post-hoc from an existing fit, without

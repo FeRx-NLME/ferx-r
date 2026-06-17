@@ -46,9 +46,9 @@ identical(fit$theta, fit2$theta)
 \code{\link{ferx_load_fit}}, \code{\link{ferx_fit}} (and its
 \code{output} argument for save-during-fit).
 
-Other utilities: 
-\code{\link{ferx_columns}()},
-\code{\link{ferx_example}()},
-\code{\link{ferx_load_fit}()}
+Other utilities:
+\code{\link[=ferx_columns]{ferx_columns()}},
+\code{\link[=ferx_example]{ferx_example()}},
+\code{\link[=ferx_load_fit]{ferx_load_fit()}}
 }
 \concept{utilities}

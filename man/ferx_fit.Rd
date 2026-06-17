@@ -46,7 +46,7 @@ vector of methods to run in sequence. Each stage is seeded with the
 previous stage's converged parameters, and only the final stage produces
 the reported covariance/diagnostics. Supported methods: \code{"foce"},
 \code{"focei"}, \code{"saem"}, \code{"gn"} (Gauss-Newton / BHHH),
-\code{"gn_hybrid"} (Gauss-Newton followed by a FOCEI polish step), or
+\code{"gn_hybrid"} (Gauss-Newton followed by a FOCEI polish step),
 \code{"imp"} (also accepted as \code{"importance_sampling"} or
 \code{"importance-sampling"}; importance-sampling marginal
 log-likelihood), or \code{"impmap"} (also accepted as
@@ -370,6 +370,9 @@ are averaged into the reported estimate (default 50).}
 by the engine).}
 \item{\code{impmap_low_ess_threshold}}{ESS fraction below which a subject
 is flagged as poorly sampled (default \code{0.1}).}
+\item{\code{impmap_trace}}{Logical; when \code{TRUE}, collect
+per-iteration parameter values into \code{fit$impmap_trace}
+(analogous to NONMEM \code{.ext} output). Default \code{FALSE}.}
 }
 
 \strong{SIR (Sampling Importance Resampling)}
@@ -461,7 +464,10 @@ observation units. Variance is \code{sigma^2} for either type.}
 \code{sigma}: \code{"proportional"} or \code{"additive"}. Combined
 error models report \code{c("proportional", "additive")} in that order.}
 \item{se_theta}{Standard errors for theta (NULL if covariance step failed)}
-\item{se_omega}{Standard errors for omega diagonal}
+\item{se_omega}{Standard errors for omega elements. For diagonal omega,
+a vector of length n_eta (one per variance). For block omega, a vector
+of length n_eta*(n_eta+1)/2 (full lower triangle, column-major) including
+off-diagonal covariance SEs.}
 \item{se_sigma}{Standard errors for sigma (on the SD scale, like
 \code{sigma} itself)}
 \item{sdtab}{Data frame with ID, TIME, DV, PRED, IPRED, CWRES, IWRES,

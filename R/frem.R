@@ -5,8 +5,8 @@
 #' covariate-parameter relationships implicitly, enabling covariate screening
 #' without stepwise search.
 #'
-#' The covariates folded into the FREM model — and whether each is continuous or
-#' categorical — come from the model's \code{[covariates]} block, which is the
+#' The covariates folded into the FREM model - and whether each is continuous or
+#' categorical - come from the model's \code{[covariates]} block, which is the
 #' single source of truth (and is required).
 #'
 #' @param model Path to a \code{.ferx} model file, or a \code{\link{ferx_model}}
@@ -17,7 +17,7 @@
 #' @param covariates Optional character vector used as a \emph{subset filter}
 #'   over the covariates declared in the model's \code{[covariates]} block. When
 #'   \code{NULL} (the default), \strong{all} declared covariates are included.
-#'   When supplied, only the named covariates are included — useful when you do
+#'   When supplied, only the named covariates are included - useful when you do
 #'   not want every declared covariate in the FREM model. Each name must be
 #'   declared in the block; an undeclared name is an error. This argument cannot
 #'   introduce covariates the model has not declared, nor change their

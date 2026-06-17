@@ -199,8 +199,8 @@ ferx_runlog <- function(fit, gradient_tol = 0.1, show_iterations = TRUE, verbose
     final_str <- if (fixed) sprintf("%14s", "FIXED") else sprintf("%14.6g", om[i, i])
     se_str  <- ""
     rse_str <- ""
-    if (has_se && !is.null(se_om) && i <= length(se_om) && !fixed) {
-      se_val  <- se_om[i]
+    if (has_se && !is.null(se_om) && !fixed) {
+      se_val  <- .omega_se_at(se_om, n_eta, i, i)
       se_str  <- if (is.finite(se_val)) sprintf("%8.4g", se_val) else sprintf("%8s", "N/A")
       rse_val <- if (is.finite(se_val) && om[i, i] != 0) abs(se_val / om[i, i]) * 100 else NA
       rse_str <- if (is.finite(rse_val)) sprintf("%6.1f%%", rse_val) else sprintf("%7s", "N/A")

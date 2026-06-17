@@ -29,8 +29,8 @@ head(preds)
 }
 \seealso{
 Other simulation:
-\code{\link{ferx_npde}()},
-\code{\link{ferx_simulate}()},
-\code{\link{ferx_simulate_with_uncertainty}()}
+\code{\link[=ferx_npde]{ferx_npde()}},
+\code{\link[=ferx_simulate]{ferx_simulate()}},
+\code{\link[=ferx_simulate_with_uncertainty]{ferx_simulate_with_uncertainty()}}
 }
 \concept{simulation}

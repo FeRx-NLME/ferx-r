@@ -24,7 +24,7 @@ columns.}
 \item{covariates}{Optional character vector used as a \emph{subset filter}
 over the covariates declared in the model's \code{[covariates]} block. When
 \code{NULL} (the default), \strong{all} declared covariates are included.
-When supplied, only the named covariates are included -- useful when you do
+When supplied, only the named covariates are included - useful when you do
 not want every declared covariate in the FREM model. Each name must be
 declared in the block; an undeclared name is an error. This argument cannot
 introduce covariates the model has not declared, nor change their
@@ -54,12 +54,12 @@ Transforms a base model and dataset into a FREM model that treats covariates
 as additional dependent variables. The extended omega matrix captures
 covariate-parameter relationships implicitly, enabling covariate screening
 without stepwise search.
-
-The covariates folded into the FREM model -- and whether each is continuous or
-categorical -- come from the model's \code{[covariates]} block, which is the
-single source of truth (and is required).
 }
 \details{
+The covariates folded into the FREM model - and whether each is continuous or
+categorical - come from the model's \code{[covariates]} block, which is the
+single source of truth (and is required).
+
 The function:
 \enumerate{
 \item Reads the base model and dataset.

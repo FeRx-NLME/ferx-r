@@ -58,7 +58,7 @@ directly to \code{\link{ferx_fit}}.
 \code{\link{ferx_fit}} which accepts a \code{ferx_data} object as
 \code{data}.
 
-Other data selection: 
-\code{\link{ferx_selection_excluded}()}
+Other data selection:
+\code{\link[=ferx_selection_excluded]{ferx_selection_excluded()}}
 }
 \concept{data selection}

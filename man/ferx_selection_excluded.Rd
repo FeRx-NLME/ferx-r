@@ -21,7 +21,7 @@ excluded each record.
 Retrieve excluded records from a ferx_data or ferx_fit object
 }
 \seealso{
-Other data selection: 
-\code{\link{ferx_selection}()}
+Other data selection:
+\code{\link[=ferx_selection]{ferx_selection()}}
 }
 \concept{data selection}

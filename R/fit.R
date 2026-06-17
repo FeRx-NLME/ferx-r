@@ -18,7 +18,7 @@
 #'   previous stage's converged parameters, and only the final stage produces
 #'   the reported covariance/diagnostics. Supported methods: \code{"foce"},
 #'   \code{"focei"}, \code{"saem"}, \code{"gn"} (Gauss-Newton / BHHH),
-#'   \code{"gn_hybrid"} (Gauss-Newton followed by a FOCEI polish step), or
+#'   \code{"gn_hybrid"} (Gauss-Newton followed by a FOCEI polish step),
 #'   \code{"imp"} (also accepted as \code{"importance_sampling"} or
 #'   \code{"importance-sampling"}; importance-sampling marginal
 #'   log-likelihood), or \code{"impmap"} (also accepted as
@@ -330,6 +330,9 @@
 #'       by the engine).}
 #'     \item{\code{impmap_low_ess_threshold}}{ESS fraction below which a subject
 #'       is flagged as poorly sampled (default \code{0.1}).}
+#'     \item{\code{impmap_trace}}{Logical; when \code{TRUE}, collect
+#'       per-iteration parameter values into \code{fit$impmap_trace}
+#'       (analogous to NONMEM \code{.ext} output). Default \code{FALSE}.}
 #'   }
 #'
 #'   \strong{SIR (Sampling Importance Resampling)}
@@ -414,7 +417,10 @@
 #'     \code{sigma}: \code{"proportional"} or \code{"additive"}. Combined
 #'     error models report \code{c("proportional", "additive")} in that order.}
 #'   \item{se_theta}{Standard errors for theta (NULL if covariance step failed)}
-#'   \item{se_omega}{Standard errors for omega diagonal}
+#'   \item{se_omega}{Standard errors for omega elements. For diagonal omega,
+#'     a vector of length n_eta (one per variance). For block omega, a vector
+#'     of length n_eta*(n_eta+1)/2 (full lower triangle, column-major) including
+#'     off-diagonal covariance SEs.}
 #'   \item{se_sigma}{Standard errors for sigma (on the SD scale, like
 #'     \code{sigma} itself)}
 #'   \item{sdtab}{Data frame with ID, TIME, DV, PRED, IPRED, CWRES, IWRES,
@@ -1411,7 +1417,7 @@ ferx_fit <- function(model, data = NULL,
       )
     }
   }
-  # `bayes` is a standalone MCMC estimator — it does not warm-start from or feed
+  # `bayes` is a standalone MCMC estimator - it does not warm-start from or feed
   # another stage, and chaining it would run the (expensive) sampler and then
   # silently discard its posterior (the final stage's result wins). Reject
   # chains R-side rather than waste the run.
@@ -1892,6 +1898,15 @@ ferx_fit <- function(model, data = NULL,
   # ETA normality). No string re-parsing of core messages happens here.
   result$warnings_structured <- .ferx_assemble_structured_warnings(raw, result)
 
+  # Reconstruct the per-iteration IMPMAP parameter trace as a data.frame.
+  # The Rust side passes flat vectors + metadata; NULL when not collected.
+  if (!is.null(result$impmap_trace)) {
+    tr <- result$impmap_trace
+    mat <- matrix(tr$flat, nrow = tr$n_rows, ncol = tr$n_cols, byrow = FALSE)
+    result$impmap_trace <- as.data.frame(mat)
+    colnames(result$impmap_trace) <- tr$col_names
+  }
+
   class(result) <- "ferx_fit"
 
   if (!is.null(output)) {
@@ -2068,6 +2083,25 @@ ferx_fit <- function(model, data = NULL,
       p_val = round(sw$p.value, 4), flag = flg, stringsAsFactors = FALSE
     )
   }))
+}
+
+# Internal: look up SE for omega element (i, j) from se_omega vector.
+# se_omega may be diagonal-only (length n_eta) or full lower-triangle
+# (length n_eta*(n_eta+1)/2, column-major).
+.omega_se_at <- function(se_omega, n_eta, i, j) {
+  if (is.null(se_omega)) return(NA_real_)
+  # Ensure r >= c (symmetric)
+  r <- max(i, j); c <- min(i, j)
+  n_lt <- n_eta * (n_eta + 1L) / 2L
+  if (length(se_omega) == n_lt && n_lt != n_eta) {
+    # Full lower-triangle (block omega)
+    col_offset <- if (c == 1L) 0L else (c - 1L) * n_eta - (c - 1L) * (c - 2L) / 2L
+    idx <- col_offset + (r - c) + 1L  # 1-based
+    if (idx >= 1L && idx <= length(se_omega)) se_omega[idx] else NA_real_
+  } else {
+    # Diagonal-only
+    if (r == c && r <= length(se_omega)) se_omega[r] else NA_real_
+  }
 }
 
 # Split-R-hat above this flags a Bayes fit as not-yet-converged. Single source
@@ -2266,11 +2300,8 @@ print.ferx_fit <- function(x, ...) {
     var_ii   <- om[i, i]
     eta_type <- if (!is.null(x$eta_param_types) && length(x$eta_param_types) >= i) x$eta_param_types[i] else "log_normal"
     linked_theta_name <- if (!is.null(x$eta_linked_theta) && length(x$eta_linked_theta) >= i) x$eta_linked_theta[i] else ""
-    se_str <- if (!is.null(x$se_omega) && length(x$se_omega) >= i) {
-      sprintf("%.6f", x$se_omega[i])
-    } else {
-      "N/A"
-    }
+    se_val <- .omega_se_at(x$se_omega, n_eta, i, i)
+    se_str <- if (!is.na(se_val)) sprintf("%.6f", se_val) else "N/A"
 
     extra <- if (eta_type == "log_normal") {
       cv <- if (var_ii > 0) sqrt(exp(var_ii) - 1) * 100 else 0
@@ -2329,18 +2360,20 @@ print.ferx_fit <- function(x, ...) {
           if (var_i > 0 && var_j > 0) cov_ij / (sqrt(var_i) * sqrt(var_j)) else 0
         }
         corr_label <- if (!is.null(x$omega_param_corr)) "param corr" else "corr"
+        se_ij <- .omega_se_at(x$se_omega, n_eta, i, j)
+        se_part <- if (!is.na(se_ij)) sprintf("  SE = %.6f", se_ij) else ""
         has_nms <- !is.null(x$eta_names) && length(x$eta_names) >= i
         if (has_nms) {
           lbl_i <- if (nzchar(x$eta_names[i])) x$eta_names[i] else sprintf("OMEGA(%d,%d)", i, i)
           lbl_j <- if (nzchar(x$eta_names[j])) x$eta_names[j] else sprintf("OMEGA(%d,%d)", j, j)
           cat(sprintf(
-            "  %s ~ %s : cov = %.6f  (%s = %.4f)\n",
-            lbl_i, lbl_j, cov_ij, corr_label, param_corr
+            "  %s ~ %s : cov = %.6f  (%s = %.4f)%s\n",
+            lbl_i, lbl_j, cov_ij, corr_label, param_corr, se_part
           ))
         } else {
           cat(sprintf(
-            "  OMEGA(%d,%d) : cov = %.6f  (%s = %.4f)\n",
-            i, j, cov_ij, corr_label, param_corr
+            "  OMEGA(%d,%d) : cov = %.6f  (%s = %.4f)%s\n",
+            i, j, cov_ij, corr_label, param_corr, se_part
           ))
         }
       }
