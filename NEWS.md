@@ -2,6 +2,16 @@
 
 ## New features
 
+- **Bayesian estimation (`method = "bayes"`)**: full MCMC posterior sampling
+  (Gibbs-within-HMC, NONMEM `METHOD=BAYES` parity). Returns posterior means
+  with 95% credible intervals and convergence diagnostics (split-R-hat, ESS) on
+  `fit$bayes` instead of a point estimate; `print()` shows a posterior-summary
+  table. Tuning via `settings = list(bayes_warmup=, bayes_iters=, bayes_chains=,
+  bayes_thin=, bayes_seed=)`. Supports BSV and zero-mean inter-occasion
+  variability (per-occasion `kappa`; the IOV variance posterior appears as
+  `OMEGA_IOV(...)`). Validated against FOCEI and NONMEM `METHOD=BAYES` on
+  warfarin (ferx-core #380).
+
 - **`ode_template` — generate the disposition ODE**: `ode_template NAME(...)`
   in `[structural_model]` writes the standard disposition ODE for a named model
   (`one`/`two`/`three_cpt` `iv`/`oral`) for you — the same states, micro-constant

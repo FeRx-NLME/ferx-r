@@ -709,9 +709,11 @@ fn parse_method(token: &str) -> std::result::Result<EstimationMethod, String> {
         Ok(EstimationMethod::Foce)
     } else if m == "imp" || m == "importance_sampling" || m == "importance-sampling" {
         Ok(EstimationMethod::Imp)
+    } else if m == "bayes" || m == "bayesian" || m == "mcmc" {
+        Ok(EstimationMethod::Bayes)
     } else {
         Err(format!(
-            "Unknown estimation method '{}' — expected one of: foce, focei, saem, gn, gn_hybrid, imp",
+            "Unknown estimation method '{}' — expected one of: foce, focei, saem, gn, gn_hybrid, imp, bayes",
             token.trim()
         ))
     }
@@ -906,6 +908,8 @@ fn default_fit_result(
     FitResult {
         method: EstimationMethod::FoceI,
         method_chain: vec![EstimationMethod::FoceI],
+        bayes: None,
+        npde_seed: None,
         converged: true,
         ofv: 0.0,
         aic: 0.0,
@@ -1244,6 +1248,43 @@ fn fit_result_to_list(
         None => ().into(),
     };
 
+    // Bayes posterior summary (`method = bayes`). Per-parameter summaries are
+    // packed as parallel vectors so the R side can build a data frame without
+    // hitting extendr's list-of-records limitations.
+    let bayes: Robj = match &result.bayes {
+        Some(b) => {
+            let names: Vec<String> = b.summaries.iter().map(|s| s.name.clone()).collect();
+            let mean: Vec<f64> = b.summaries.iter().map(|s| s.mean).collect();
+            let sd: Vec<f64> = b.summaries.iter().map(|s| s.sd).collect();
+            let q025: Vec<f64> = b.summaries.iter().map(|s| s.q025).collect();
+            let median: Vec<f64> = b.summaries.iter().map(|s| s.median).collect();
+            let q975: Vec<f64> = b.summaries.iter().map(|s| s.q975).collect();
+            let rhat: Vec<f64> = b.summaries.iter().map(|s| s.rhat).collect();
+            let ess_bulk: Vec<f64> = b.summaries.iter().map(|s| s.ess_bulk).collect();
+            let ess_tail: Vec<f64> = b.summaries.iter().map(|s| s.ess_tail).collect();
+            let mcse: Vec<f64> = b.summaries.iter().map(|s| s.mcse).collect();
+            list!(
+                n_chains = b.n_chains as f64,
+                n_warmup = b.n_warmup as f64,
+                n_draws_per_chain = b.n_draws_per_chain as f64,
+                n_divergent = b.n_divergent as f64,
+                max_rhat = b.max_rhat,
+                param_names = names,
+                mean = mean,
+                sd = sd,
+                q025 = q025,
+                median = median,
+                q975 = q975,
+                rhat = rhat,
+                ess_bulk = ess_bulk,
+                ess_tail = ess_tail,
+                mcse = mcse,
+            )
+            .into()
+        }
+        None => ().into(),
+    };
+
     let trace_path: Robj = match &result.trace_path {
         Some(p) => p.clone().into(),
         None => ().into(),
@@ -1506,6 +1547,7 @@ fn fit_result_to_list(
         sir_resamples_n = sir_resamples_n,
         sir_resamples_dim = sir_resamples_dim,
         importance_sampling = importance_sampling,
+        bayes = bayes,
         trace_path = trace_path,
         ebe_convergence_warnings = result.ebe_convergence_warnings as i32,
         max_unconverged_subjects = result.max_unconverged_subjects as i32,
@@ -2142,6 +2184,9 @@ fn ferx_rust_sir(
             per_obs_tad: Vec::new(),
             // PR #207 (ferx-core) added this field; the SIR path never reads it.
             compartment_states: Vec::new(),
+            // NPDE/NPD columns (ferx-core); not computed on the SIR path.
+            npde: Vec::new(),
+            npd: Vec::new(),
         });
     }
 
@@ -2158,6 +2203,8 @@ fn ferx_rust_sir(
         } else {
             EstimationMethod::Foce
         }],
+        bayes: None,
+        npde_seed: None,
         converged: true,
         ofv,
         aic: 0.0,

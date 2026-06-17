@@ -52,6 +52,13 @@ not update parameters and must be the \emph{last} entry of the chain, e.g.
 \code{c("focei", "imp")} or \code{c("saem", "imp")}. It may also run
 standalone (\code{method = "imp"}), scoring the model's initial
 parameters. Example chain: \code{c("saem", "focei")}.
+\code{"bayes"} (also accepted as \code{"bayesian"} or \code{"mcmc"}) runs
+full MCMC Bayesian estimation (Gibbs-within-HMC, NONMEM \code{METHOD=BAYES}
+parity): it returns posterior means with credible intervals and
+convergence diagnostics on \code{$bayes} rather than a point estimate, and
+runs standalone. Supports BSV and zero-mean inter-occasion variability
+(per-occasion \code{kappa}); the IOV variance posterior appears as
+\code{OMEGA_IOV(...)} in \code{$bayes}.
 SAEM fully supports inter-occasion variability (IOV / kappa) models.}
 
 \item{covariance}{Logical; compute the covariance step for standard errors}
@@ -303,6 +310,20 @@ Metropolis-Hastings sampler (default 12345). Independent of
 HMC proposals (default \code{0} = Metropolis-Hastings). A positive
 value replaces MH with one HMC proposal per subject per iteration.
 Requires an AD build; see examples below.}
+}
+
+\strong{Bayes (\code{"bayes"})}
+\describe{
+\item{\code{bayes_warmup}}{Warmup (burn-in + adaptation) sweeps per chain,
+discarded from the posterior (default \code{1000}).}
+\item{\code{bayes_iters}}{Retained sampling sweeps per chain, before
+thinning (default \code{1000}).}
+\item{\code{bayes_chains}}{Number of independent chains (default
+\code{4}); used for split-R-hat.}
+\item{\code{bayes_thin}}{Keep every \code{bayes_thin}-th sampling draw
+(default \code{1}).}
+\item{\code{bayes_seed}}{Base RNG seed for the Bayes sampler. Independent
+of \code{seed} / \code{saem_seed}.}
 }
 
 \strong{Gauss-Newton (\code{"gn"} / \code{"gn_hybrid"})}
@@ -1287,11 +1308,11 @@ starting values before a full run.
 \item \code{\link{ferx_plot_trace}} — convergence trace plot.
 }
 
-Other fitting: 
-\code{\link{ferx_check_init}()},
-\code{\link{ferx_collect}()},
-\code{\link{ferx_fit_async}()},
-\code{\link{ferx_inits_from_nca}()},
-\code{\link{ferx_sir}()}
+Other fitting:
+\code{\link[=ferx_check_init]{ferx_check_init()}},
+\code{\link[=ferx_collect]{ferx_collect()}},
+\code{\link[=ferx_fit_async]{ferx_fit_async()}},
+\code{\link[=ferx_inits_from_nca]{ferx_inits_from_nca()}},
+\code{\link[=ferx_sir]{ferx_sir()}}
 }
 \concept{fitting}
