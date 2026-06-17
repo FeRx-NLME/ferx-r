@@ -836,7 +836,7 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
 # Format a pk function name (snake_case) into a readable label.
 # e.g. "one_cpt_oral" -> "1-cpt oral", "two_cpt_iv" -> "2-cpt IV".
 #
-# ferx-core #176 retired the split `*_iv_bolus` / `*_infusion` names —
+# ferx-core #176 retired the split `*_iv_bolus` / `*_infusion` names -
 # the bolus-vs-infusion choice is now per dose from RATE, so `*_iv`
 # covers both. Retired names are passed through here so pre-fit
 # `ferx_model_inspect()` on a stale `.ferx` file can still produce a
@@ -851,9 +851,9 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
   label <- sub("_cpt$",   "-cpt", label)
   label <- gsub("_", " ", label, fixed = TRUE)
   label <- gsub("(?<![a-z])iv(?![a-z])", "IV", label, perl = TRUE)
-  # `*_iv_bolus` (retired) — the lone "IV" is already capitalised above;
+  # `*_iv_bolus` (retired) - the lone "IV" is already capitalised above;
   # nothing extra to inject here.
-  # `*_infusion` (retired) — the bare function name has no `iv` token,
+  # `*_infusion` (retired) - the bare function name has no `iv` token,
   # so inject "IV " to keep the R-side label intelligible. The Rust
   # label for these retired forms is unreachable (parser errors first).
   label <- sub("\\binfusion\\b", "IV infusion", label, perl = TRUE)
@@ -965,7 +965,7 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
   err_type <- function(line) {
     # Log-transform-both-sides (LTBS): `log(DV) ~ additive(...)` (engine logs DV)
     # or `DV ~ log_additive(...)` (DV already log). Both are additive error on
-    # the log scale — detect them BEFORE the plain `additive` branch, since both
+    # the log scale - detect them BEFORE the plain `additive` branch, since both
     # forms contain the substring "additive".
     if (grepl("log_additive", line, ignore.case = TRUE) ||
         grepl("log\\s*\\(\\s*DV\\s*\\)", line, ignore.case = TRUE)) {
@@ -1192,7 +1192,7 @@ ferx_model_validate <- function(path, data = NULL) {
 #'   (character vector of population parameter names), \code{model_type}
 #'   (short label such as \code{"1-cpt oral"} or \code{NULL} when not
 #'   unambiguously detectable), \code{iiv} (omega names), \code{iov}
-#'   (kappa names), and \code{residual} (error type — one of
+#'   (kappa names), and \code{residual} (error type - one of
 #'   \code{"proportional"}, \code{"additive"}, \code{"combined"}, or
 #'   \code{"additive (log-transformed)"} for log-transform-both-sides
 #'   models written as \code{log(DV) ~ additive(...)} or

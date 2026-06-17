@@ -13,6 +13,17 @@
 
 ## New features
 
+- **Modeled infusion duration (`RATE = -2`)** for ODE models: a NONMEM
+  `RATE = -2` dose now infuses `AMT` over a *modeled* duration — declare an
+  individual parameter `D{n}` for the dose compartment `n` and ferx infuses at
+  rate `AMT / D{n}`, resolved per iteration and occasion (so it carries
+  covariate and IOV effects). Composes with `F{n}` and `ALAG{n}`, steady state,
+  multi-dose, and system resets. A `RATE = -2` dose with no matching `D{n}`
+  parameter — or on an analytical model — is a clear error rather than a silent
+  bolus, and a `D{n}` that is non-positive at the initial estimate is flagged.
+  Handled entirely in the data reader and model parser, so no R-side change is
+  needed. (Requires ferx-core with FeRx-NLME/ferx-core#384.)
+  
 - **`ferx_npde(fit, nsim, seed)`**: compute simulation-based NPDE (Normalized
   Prediction Distribution Errors, decorrelated within subject) and NPD
   (Normalized Prediction Discrepancies) post-hoc from an existing fit, without
@@ -21,6 +32,7 @@
   to `fit$sdtab`, so `ferx_xpose()` and goodness-of-fit plots pick them up
   automatically; model/data default to the paths recorded on the fit.
   (ferx-r #172, requires ferx-core #377)
+  
 - **Bayesian estimation (`method = "bayes"`)**: full MCMC posterior sampling
   (Gibbs-within-HMC, NONMEM `METHOD=BAYES` parity). Returns posterior means
   with 95% credible intervals and convergence diagnostics (split-R-hat, ESS) on
@@ -30,7 +42,7 @@
   variability (per-occasion `kappa`; the IOV variance posterior appears as
   `OMEGA_IOV(...)`). Validated against FOCEI and NONMEM `METHOD=BAYES` on
   warfarin (ferx-core #380).
-
+  
 - **`ode_template` — generate the disposition ODE**: `ode_template NAME(...)`
   in `[structural_model]` writes the standard disposition ODE for a named model
   (`one`/`two`/`three_cpt` `iv`/`oral`) for you — the same states, micro-constant
