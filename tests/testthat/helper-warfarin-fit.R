@@ -38,6 +38,27 @@ warfarin_fit <- local({
   }
 })
 
+# Cached Bayes (MCMC) fit on the bundled warfarin example. Short chains — tests
+# check output shape + that the posterior settles near the known estimate, not
+# fine-grained convergence.
+warfarin_bayes_fit <- local({
+  fit <- NULL
+  function() {
+    if (is.null(fit)) {
+      ex <- ferx_example("warfarin")
+      fit <<- ferx_fit(
+        ex$model, ex$data,
+        method = "bayes", verbose = FALSE,
+        settings = list(
+          bayes_warmup = 300L, bayes_iters = 600L,
+          bayes_chains = 2L, bayes_seed = 1L, n_mh_steps = 8L
+        )
+      )
+    }
+    fit
+  }
+})
+
 # Cached FOCEI fit on the warfarin_derived example (tests [derived] / [output]).
 warfarin_derived_fit <- local({
   fit <- NULL

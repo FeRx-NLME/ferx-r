@@ -13,6 +13,8 @@ fake_fit <- function(with_covtab = TRUE, echo_wt = FALSE) {
     IPRED = c(10.5, 7.5, 12.5, 8.5),
     CWRES = c(0.1, -0.2, 0.3, -0.1),
     IWRES = c(0.2, -0.1, 0.2, -0.2),
+    NPDE  = c(0.3, -0.4, 0.1, -0.2),
+    NPD   = c(0.25, -0.35, 0.15, -0.15),
     TAD   = c(1, 4, 1, 4),
     stringsAsFactors = FALSE
   )
@@ -178,7 +180,8 @@ test_that("roles map points at the expected columns", {
   expect_equal(roles$idv, "TIME")
   expect_equal(roles$dv, "DV")
   expect_setequal(roles$pred, c("PRED", "IPRED"))
-  expect_setequal(roles$res, c("RES", "IRES", "WRES", "CWRES", "IWRES"))
+  expect_setequal(roles$res,
+                  c("RES", "IRES", "WRES", "CWRES", "IWRES", "NPDE", "NPD"))
   expect_setequal(roles$contcov, "WT")
   expect_setequal(roles$catcov, "SEX")
 })
@@ -207,6 +210,8 @@ test_that("backend 'xpose' builds an xpose_data with correct column roles", {
   expect_equal(role("PRED"), "pred")
   expect_equal(role("IPRED"), "ipred")   # distinct from pred in xpose
   expect_equal(role("CWRES"), "res")
+  expect_equal(role("NPDE"), "res")
+  expect_equal(role("NPD"), "res")
   expect_equal(role("CL"), "param")
   expect_equal(role("ETA_CL"), "eta")
   expect_equal(role("WT"), "contcov")
