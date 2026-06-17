@@ -58,6 +58,13 @@ parameters. \code{"impmap"} is a full estimator: it may run standalone
 (\code{method = "impmap"}) or as a chain stage (\code{c("focei", "impmap")}),
 requires a mu-referenced parameterization, and does not yet support IOV.
 Example chain: \code{c("saem", "focei")}.
+\code{"bayes"} (also accepted as \code{"bayesian"} or \code{"mcmc"}) runs
+full MCMC Bayesian estimation (Gibbs-within-HMC, NONMEM \code{METHOD=BAYES}
+parity): it returns posterior means with credible intervals and
+convergence diagnostics on \code{$bayes} rather than a point estimate, and
+runs standalone. Supports BSV and zero-mean inter-occasion variability
+(per-occasion \code{kappa}); the IOV variance posterior appears as
+\code{OMEGA_IOV(...)} in \code{$bayes}.
 SAEM fully supports inter-occasion variability (IOV / kappa) models.}
 
 \item{covariance}{Logical; compute the covariance step for standard errors}
@@ -222,6 +229,23 @@ leaving the covariance step failed; \code{covariance_status} is then
 \code{"sir_fallback"} and SIR-based credible intervals are reported.}
 }
 
+\strong{ODE models: RK45 solver tolerance}
+\describe{
+\item{\code{ode_reltol}}{RK45 relative tolerance for ODE models
+(default \code{1e-4}; ignored for analytical PK). The default
+reproduces analytical closed forms in PRED to about \code{1e-4}, but
+the FOCE objective amplifies solver error, so an ODE-form model's OFV
+can differ from its analytical equivalent by several units. Set tighter
+(e.g. \code{1e-10}) when the ODE-form OFV must match an analytical
+reference; expect slower fits. Can also be set in the model file's
+\code{[fit_options]} block.}
+\item{\code{ode_abstol}}{RK45 absolute tolerance for ODE models
+(default \code{1e-6}).}
+\item{\code{ode_max_steps}}{Maximum RK45 steps per integration segment
+(default \code{10000}). Raise if a tight \code{ode_reltol} exhausts the
+step budget on stiff multi-compartment systems.}
+}
+
 \strong{FOCE / FOCEI / GN / GN-hybrid: iteration cap}
 \describe{
 \item{\code{maxiter}}{Maximum outer-optimizer iterations (default 500).
@@ -292,6 +316,20 @@ Metropolis-Hastings sampler (default 12345). Independent of
 HMC proposals (default \code{0} = Metropolis-Hastings). A positive
 value replaces MH with one HMC proposal per subject per iteration.
 Requires an AD build; see examples below.}
+}
+
+\strong{Bayes (\code{"bayes"})}
+\describe{
+\item{\code{bayes_warmup}}{Warmup (burn-in + adaptation) sweeps per chain,
+discarded from the posterior (default \code{1000}).}
+\item{\code{bayes_iters}}{Retained sampling sweeps per chain, before
+thinning (default \code{1000}).}
+\item{\code{bayes_chains}}{Number of independent chains (default
+\code{4}); used for split-R-hat.}
+\item{\code{bayes_thin}}{Keep every \code{bayes_thin}-th sampling draw
+(default \code{1}).}
+\item{\code{bayes_seed}}{Base RNG seed for the Bayes sampler. Independent
+of \code{seed} / \code{saem_seed}.}
 }
 
 \strong{Gauss-Newton (\code{"gn"} / \code{"gn_hybrid"})}
@@ -1294,11 +1332,11 @@ starting values before a full run.
 \item \code{\link{ferx_plot_trace}} — convergence trace plot.
 }
 
-Other fitting: 
-\code{\link{ferx_check_init}()},
-\code{\link{ferx_collect}()},
-\code{\link{ferx_fit_async}()},
-\code{\link{ferx_inits_from_nca}()},
-\code{\link{ferx_sir}()}
+Other fitting:
+\code{\link[=ferx_check_init]{ferx_check_init()}},
+\code{\link[=ferx_collect]{ferx_collect()}},
+\code{\link[=ferx_fit_async]{ferx_fit_async()}},
+\code{\link[=ferx_inits_from_nca]{ferx_inits_from_nca()}},
+\code{\link[=ferx_sir]{ferx_sir()}}
 }
 \concept{fitting}

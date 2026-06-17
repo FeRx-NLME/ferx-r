@@ -30,6 +30,13 @@
 #'   (\code{method = "impmap"}) or as a chain stage (\code{c("focei", "impmap")}),
 #'   requires a mu-referenced parameterization, and does not yet support IOV.
 #'   Example chain: \code{c("saem", "focei")}.
+#'   \code{"bayes"} (also accepted as \code{"bayesian"} or \code{"mcmc"}) runs
+#'   full MCMC Bayesian estimation (Gibbs-within-HMC, NONMEM \code{METHOD=BAYES}
+#'   parity): it returns posterior means with credible intervals and
+#'   convergence diagnostics on \code{$bayes} rather than a point estimate, and
+#'   runs standalone. Supports BSV and zero-mean inter-occasion variability
+#'   (per-occasion \code{kappa}); the IOV variance posterior appears as
+#'   \code{OMEGA_IOV(...)} in \code{$bayes}.
 #'   SAEM fully supports inter-occasion variability (IOV / kappa) models.
 #' @param covariance Logical; compute the covariance step for standard errors
 #' @param verbose Logical; print progress during estimation
@@ -182,6 +189,23 @@
 #'       \code{"sir_fallback"} and SIR-based credible intervals are reported.}
 #'   }
 #'
+#'   \strong{ODE models: RK45 solver tolerance}
+#'   \describe{
+#'     \item{\code{ode_reltol}}{RK45 relative tolerance for ODE models
+#'       (default \code{1e-4}; ignored for analytical PK). The default
+#'       reproduces analytical closed forms in PRED to about \code{1e-4}, but
+#'       the FOCE objective amplifies solver error, so an ODE-form model's OFV
+#'       can differ from its analytical equivalent by several units. Set tighter
+#'       (e.g. \code{1e-10}) when the ODE-form OFV must match an analytical
+#'       reference; expect slower fits. Can also be set in the model file's
+#'       \code{[fit_options]} block.}
+#'     \item{\code{ode_abstol}}{RK45 absolute tolerance for ODE models
+#'       (default \code{1e-6}).}
+#'     \item{\code{ode_max_steps}}{Maximum RK45 steps per integration segment
+#'       (default \code{10000}). Raise if a tight \code{ode_reltol} exhausts the
+#'       step budget on stiff multi-compartment systems.}
+#'   }
+#'
 #'   \strong{FOCE / FOCEI / GN / GN-hybrid: iteration cap}
 #'   \describe{
 #'     \item{\code{maxiter}}{Maximum outer-optimizer iterations (default 500).
@@ -252,6 +276,20 @@
 #'       HMC proposals (default \code{0} = Metropolis-Hastings). A positive
 #'       value replaces MH with one HMC proposal per subject per iteration.
 #'       Requires an AD build; see examples below.}
+#'   }
+#'
+#'   \strong{Bayes (\code{"bayes"})}
+#'   \describe{
+#'     \item{\code{bayes_warmup}}{Warmup (burn-in + adaptation) sweeps per chain,
+#'       discarded from the posterior (default \code{1000}).}
+#'     \item{\code{bayes_iters}}{Retained sampling sweeps per chain, before
+#'       thinning (default \code{1000}).}
+#'     \item{\code{bayes_chains}}{Number of independent chains (default
+#'       \code{4}); used for split-R-hat.}
+#'     \item{\code{bayes_thin}}{Keep every \code{bayes_thin}-th sampling draw
+#'       (default \code{1}).}
+#'     \item{\code{bayes_seed}}{Base RNG seed for the Bayes sampler. Independent
+#'       of \code{seed} / \code{saem_seed}.}
 #'   }
 #'
 #'   \strong{Gauss-Newton (\code{"gn"} / \code{"gn_hybrid"})}
@@ -1339,11 +1377,14 @@ ferx_fit <- function(model, data = NULL,
       if (normalised %in% c("importance_sampling_map", "importancesamplingmap")) {
         normalised <- "impmap"
       }
+      if (normalised %in% c("bayesian", "mcmc")) {
+        normalised <- "bayes"
+      }
       # `match.arg` uses exact-match-first semantics, so listing both "imp" and
       # "impmap" is unambiguous (each exact token wins over the other's prefix).
       match.arg(
         normalised,
-        c("foce", "focei", "saem", "gn", "gn_hybrid", "imp", "impmap")
+        c("foce", "focei", "saem", "gn", "gn_hybrid", "imp", "impmap", "bayes")
       )
     },
     character(1L),
@@ -1367,6 +1408,16 @@ ferx_fit <- function(model, data = NULL,
         "method = c(\"", paste(method, collapse = "\", \""), "\")"
       )
     }
+  }
+  # `bayes` is a standalone MCMC estimator — it does not warm-start from or feed
+  # another stage, and chaining it would run the (expensive) sampler and then
+  # silently discard its posterior (the final stage's result wins). Reject
+  # chains R-side rather than waste the run.
+  if (any(method == "bayes") && length(method) > 1L) {
+    stop(
+      "`\"bayes\"` must be the only method (it runs standalone); got ",
+      "method = c(\"", paste(method, collapse = "\", \""), "\")"
+    )
   }
   if (is.null(bloq_method)) {
     bloq_arg <- ""
@@ -2017,6 +2068,21 @@ ferx_fit <- function(model, data = NULL,
   }))
 }
 
+# Split-R-hat above this flags a Bayes fit as not-yet-converged. Single source
+# of truth for the [!] marker shown by print.ferx_fit and print.ferx_summary.
+.FERX_BAYES_RHAT_THRESHOLD <- 1.01
+
+# Styled "[!]" marker (yellow where colour is available, matching the shrinkage
+# flag) when `max_rhat` exceeds the threshold; "" otherwise. Leading spaces
+# separate it from the preceding text.
+.ferx_bayes_rhat_flag <- function(max_rhat) {
+  if (is.finite(max_rhat) && max_rhat > .FERX_BAYES_RHAT_THRESHOLD) {
+    paste0("  ", .ferx_style("[!]", "yellow"))
+  } else {
+    ""
+  }
+}
+
 #' @export
 print.ferx_fit <- function(x, ...) {
   bar <- strrep("=", 60)
@@ -2436,6 +2502,41 @@ print.ferx_fit <- function(x, ...) {
     }
   }
 
+  # BAYES posterior summary (method = "bayes", terminal stage)
+  if (!is.null(x$bayes)) {
+    b <- x$bayes
+    cat("\n", .ferx_style("BAYES  (posterior summary)", "bold"), "\n", sep = "")
+    cat(strrep("-", 60), "\n", sep = "")
+    flag <- .ferx_bayes_rhat_flag(b$max_rhat)
+    cat(sprintf(
+      "  Chains: %d   Warmup: %d   Draws/chain: %d   Divergent: %d   Max R-hat: %.4f%s\n",
+      as.integer(b$n_chains), as.integer(b$n_warmup),
+      as.integer(b$n_draws_per_chain), as.integer(b$n_divergent),
+      b$max_rhat, flag
+    ))
+    if (!is.null(b$param_names) && length(b$param_names) > 0L) {
+      # Assemble the parallel posterior vectors into one table so the column
+      # set is declared in a single place.
+      tbl <- data.frame(
+        param = b$param_names,
+        mean = b$mean, sd = b$sd, q025 = b$q025, q975 = b$q975,
+        rhat = b$rhat, ess = b$ess_bulk,
+        stringsAsFactors = FALSE
+      )
+      cat(sprintf(
+        "  %-14s %11s %10s %11s %11s %7s %8s\n",
+        "Parameter", "Mean", "SD", "2.5%", "97.5%", "R-hat", "ESS"
+      ))
+      for (i in seq_len(nrow(tbl))) {
+        cat(sprintf(
+          "  %-14s %11.4g %10.4g %11.4g %11.4g %7.3f %8.0f\n",
+          tbl$param[i], tbl$mean[i], tbl$sd[i],
+          tbl$q025[i], tbl$q975[i], tbl$rhat[i], tbl$ess[i]
+        ))
+      }
+    }
+  }
+
   # SHRINKAGE - compact single-line layout: ETA_CL: 8.2%  ETA_V: 12.1%  ETA_KA: 34.7% [!]
   # The [!] flag (yellow when colour available) highlights values above 30%,
   # consistent with the %RSE highlighter in the THETA table.
@@ -2633,6 +2734,7 @@ summary.ferx_fit <- function(object, ...) {
     model_file_settings = x$model_file_settings %||% list(),
     sir_ess = x$sir_ess,
     importance_sampling = x$importance_sampling,
+    bayes = x$bayes,
     warnings = x$warnings,
     uses_sde = isTRUE(x$uses_sde),
     dw_statistic = x$dw_statistic,
@@ -2672,6 +2774,15 @@ print.ferx_summary <- function(x, ...) {
   cat(sprintf("ferx v%s (core v%s)\n",
               as.character(utils::packageVersion("ferx")),
               x$ferx_version %||% "?"))
+
+  if (!is.null(x$bayes)) {
+    b <- x$bayes
+    cat(sprintf(
+      "Bayes:     %d chains, %d draws/chain, max R-hat = %.4f%s\n",
+      as.integer(b$n_chains), as.integer(b$n_draws_per_chain), b$max_rhat,
+      .ferx_bayes_rhat_flag(b$max_rhat)
+    ))
+  }
 
   if (length(x$model_file_settings) > 0L || length(x$call_settings) > 0L) {
     cat("\nSettings (model file / call-time override):\n")

@@ -176,6 +176,71 @@ test_that("method = 'imp' passes the ferx_fit validation step", {
   expect_equal(normalize(c("focei", "impmap")), c("focei", "impmap"))
 })
 
+test_that("method = 'bayes' passes the ferx_fit validation step", {
+  # Tier 1: R-side allowlist + alias fold for the Bayesian estimator. Mirrors
+  # the normalisation block in `R/fit.R::ferx_fit()`. The actual MCMC run is
+  # exercised in the integration tests.
+  normalize <- function(m) {
+    vapply(
+      m,
+      function(s) {
+        normalised <- gsub("[^a-z0-9]", "_", tolower(s))
+        if (normalised %in% c("importance_sampling", "importancesampling")) {
+          normalised <- "imp"
+        }
+        if (normalised %in% c("bayesian", "mcmc")) {
+          normalised <- "bayes"
+        }
+        match.arg(
+          normalised,
+          c("foce", "focei", "saem", "gn", "gn_hybrid", "imp", "bayes")
+        )
+      },
+      character(1L),
+      USE.NAMES = FALSE
+    )
+  }
+  expect_equal(normalize("bayes"), "bayes")
+  expect_equal(normalize("BAYES"), "bayes")
+  expect_equal(normalize("bayesian"), "bayes")
+  expect_equal(normalize("mcmc"), "bayes")
+})
+
+test_that("ferx_fit rejects 'bayes' in a method chain (standalone only)", {
+  # Tier 1: chaining bayes would run the MCMC then discard its posterior (the
+  # final stage wins), so the wrapper rejects non-standalone bayes R-side.
+  ex <- ferx_example("warfarin")
+  expect_error(
+    ferx_fit(ex$model, ex$data, method = c("focei", "bayes")),
+    regexp = "standalone|only method",
+    ignore.case = TRUE
+  )
+  expect_error(
+    ferx_fit(ex$model, ex$data, method = c("bayes", "focei")),
+    regexp = "standalone|only method",
+    ignore.case = TRUE
+  )
+})
+
+test_that("method = 'bayes' produces a posterior summary on $bayes", {
+  # Tier 2/3: a real (short) MCMC run via the engine. Asserts the posterior
+  # structure is surfaced and the means settle near the warfarin estimate.
+  fit <- warfarin_bayes_fit()
+  expect_false(is.null(fit$bayes))
+  b <- fit$bayes
+  expect_equal(b$n_chains, 2)
+  expect_true(is.finite(b$max_rhat))
+  expect_gte(length(b$param_names), 4L)
+  expect_true(all(b$q025 <= b$median & b$median <= b$q975))
+  # Posterior mean of TVCL near the FOCEI / NONMEM-BAYES value (~0.133).
+  i_cl <- match("TVCL", b$param_names)
+  expect_false(is.na(i_cl))
+  expect_gt(b$mean[i_cl], 0.11)
+  expect_lt(b$mean[i_cl], 0.16)
+  # Bayes reports credible intervals, not a Hessian covariance.
+  expect_identical(fit$covariance_status, "not_requested")
+})
+
 test_that("ferx_fit rejects malformed `imp` method chains", {
   # Tier 1: surface the engine's `imp`-placement constraints to the R caller
   # *before* the engine round-trip, so the error message references the R

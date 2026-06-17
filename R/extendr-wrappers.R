@@ -21,14 +21,14 @@ ferx_rust_fit <- function(model_path, data_path, method, covariance, verbose, bl
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_simulate <- function(model_path, data_path, n_sim, seed) {
-  .Call("wrap__ferx_rust_simulate", model_path, data_path, n_sim, seed)
+ferx_rust_simulate <- function(model_path, data_path, n_sim, seed, propensity_match) {
+  .Call("wrap__ferx_rust_simulate", model_path, data_path, n_sim, seed, propensity_match)
 }
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_simulate_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, n_sim, seed) {
-  .Call("wrap__ferx_rust_simulate_from_fit", model_path, data_path, theta, omega_flat, omega_dim, sigma, n_sim, seed)
+ferx_rust_simulate_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, n_sim, seed, propensity_match) {
+  .Call("wrap__ferx_rust_simulate_from_fit", model_path, data_path, theta, omega_flat, omega_dim, sigma, n_sim, seed, propensity_match)
 }
 
 #' @title Internal Rust backend binding
@@ -47,6 +47,12 @@ ferx_rust_predict <- function(model_path, data_path) {
 #' @keywords internal
 ferx_rust_predict_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma) {
   .Call("wrap__ferx_rust_predict_from_fit", model_path, data_path, theta, omega_flat, omega_dim, sigma)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_npde_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, nsim, seed) {
+  .Call("wrap__ferx_rust_npde_from_fit", model_path, data_path, theta, omega_flat, as.integer(omega_dim), sigma, as.integer(nsim), as.integer(seed))
 }
 
 #' @title Internal Rust backend binding
