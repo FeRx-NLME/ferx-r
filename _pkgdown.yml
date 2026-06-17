@@ -46,6 +46,8 @@ reference:
       - ferx_cor_matrix
       - ferx_plot_trace
       - ferx_trace
+      - ferx_npde
+      - ferx_xpose
       - check_diagnostics
 
   - title: "Data filtering"
