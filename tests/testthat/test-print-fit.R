@@ -395,7 +395,9 @@ test_that("print.ferx_fit shows off-diagonal SE with named etas (block omega)", 
     eta_param_types = c("log_normal", "log_normal")
   )
   out <- capture.output(print(fit))
-  cov_line <- out[grepl("ETA_CL ~ ETA_V : cov =", out)]
+  # Loop emits the higher-index eta first (i outer, j < i), so the (2,1)
+  # pair prints as "ETA_V ~ ETA_CL".
+  cov_line <- out[grepl("ETA_V ~ ETA_CL : cov =", out)]
   expect_length(cov_line, 1L)
   expect_true(grepl("SE = 0\\.022000", cov_line))
 })
