@@ -101,15 +101,18 @@
   individual parameter -- applied at the dose by the engine -- and baked into
   the absorption flux). (#127)
 
-- **Propensity-score-matched simulation**: `ferx_simulate(..., match = TRUE)`
-  reassigns each replicate's drawn etas to subjects by optimal Mahalanobis
-  matching (under the model omega) against the subjects' fitted (posthoc) etas,
-  so a subject's observed dosing/sampling design is paired with a similar drawn
-  eta. This corrects VPC bias from treatment adaptation in real-world data
-  (e.g. longer dosing intervals for high-clearance patients). Requires observed
-  data; the posthoc etas use the fitted parameters when a `fit` is supplied.
-  Needs a ferx-core that provides `simulate_with_options` (separate `Cargo.lock`
-  bump). (ferx-core #288)
+- **Propensity-score-matched simulation**: `ferx_simulate(..., match = ...)`
+  reassigns each replicate's drawn etas to subjects by Mahalanobis matching
+  (under the model omega) against the subjects' fitted (posthoc) etas, so a
+  subject's observed dosing/sampling design is paired with a similar drawn eta.
+  This corrects VPC bias from treatment adaptation in real-world data (e.g.
+  longer dosing intervals for high-clearance patients). `match` accepts
+  `FALSE`/`"none"` (off), `"optimal"` (or `TRUE`; global linear-assignment
+  minimum, best on average and recommended), `"nearest"` (greedy
+  nearest-neighbour), or `"rank"` (pair by Mahalanobis-norm rank). Requires
+  observed data; the posthoc etas use the fitted parameters when a `fit` is
+  supplied. Needs a ferx-core that provides `simulate_with_options` with the
+  `match_method` option (separate `Cargo.lock` bump). (ferx-core #288, #396)
 
 - **Standalone importance sampling**: `ferx_fit(..., method = "imp")` now runs
   without a preceding estimator, scoring the model's initial parameters

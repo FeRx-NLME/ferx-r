@@ -65,31 +65,53 @@ test_that("simulate-from-fit produces different IPRED than population simulation
   expect_false(identical(sim_pop$IPRED, sim_ind$IPRED))
 })
 
-test_that("match = TRUE returns the same shape as the unmatched simulation", {
-  ex   <- ferx_example("warfarin")
-  sim  <- ferx_simulate(ex$model, ex$data, n_sim = 2L, seed = 1L)
-  simm <- ferx_simulate(ex$model, ex$data, n_sim = 2L, seed = 1L, match = TRUE)
-  expect_s3_class(simm, "data.frame")
-  expect_true(all(c("SIM", "ID", "TIME", "IPRED", "DV_SIM") %in% names(simm)))
-  expect_equal(nrow(simm), nrow(sim))
-  expect_true(all(is.finite(simm$DV_SIM)))
+test_that("each match method returns the same shape as the unmatched simulation", {
+  ex  <- ferx_example("warfarin")
+  sim <- ferx_simulate(ex$model, ex$data, n_sim = 2L, seed = 1L)
+  for (m in list(TRUE, "optimal", "nearest", "rank")) {
+    simm <- ferx_simulate(ex$model, ex$data, n_sim = 2L, seed = 1L, match = m)
+    expect_s3_class(simm, "data.frame")
+    expect_true(all(c("SIM", "ID", "TIME", "IPRED", "DV_SIM") %in% names(simm)),
+                info = paste("method", m))
+    expect_equal(nrow(simm), nrow(sim), info = paste("method", m))
+    expect_true(all(is.finite(simm$DV_SIM)), info = paste("method", m))
+  }
 })
 
-test_that("match = TRUE is reproducible and differs from the unmatched path", {
-  ex <- ferx_example("warfarin")
-  a  <- ferx_simulate(ex$model, ex$data, n_sim = 2L, seed = 7L, match = TRUE)
-  b  <- ferx_simulate(ex$model, ex$data, n_sim = 2L, seed = 7L, match = TRUE)
-  expect_equal(a, b)
+test_that("each match method is reproducible and differs from the unmatched path", {
+  ex        <- ferx_example("warfarin")
   unmatched <- ferx_simulate(ex$model, ex$data, n_sim = 2L, seed = 7L, match = FALSE)
-  expect_false(identical(a$DV_SIM, unmatched$DV_SIM))
+  for (m in c("optimal", "nearest", "rank")) {
+    a <- ferx_simulate(ex$model, ex$data, n_sim = 2L, seed = 7L, match = m)
+    b <- ferx_simulate(ex$model, ex$data, n_sim = 2L, seed = 7L, match = m)
+    expect_equal(a, b, info = paste("method", m))
+    expect_false(identical(a$DV_SIM, unmatched$DV_SIM), info = paste("method", m))
+  }
 })
 
-test_that("match = TRUE works with a fit", {
-  ex   <- ferx_example("warfarin")
-  simm <- ferx_simulate(ex$model, ex$data, n_sim = 1L, seed = 1L,
-                        fit = warfarin_fit(), match = TRUE)
-  expect_s3_class(simm, "data.frame")
-  expect_true(all(is.finite(simm$DV_SIM)))
+test_that("match = TRUE is equivalent to match = \"optimal\"", {
+  ex <- ferx_example("warfarin")
+  a  <- ferx_simulate(ex$model, ex$data, n_sim = 2L, seed = 3L, match = TRUE)
+  b  <- ferx_simulate(ex$model, ex$data, n_sim = 2L, seed = 3L, match = "optimal")
+  expect_equal(a, b)
+})
+
+test_that("match methods work with a fit", {
+  ex <- ferx_example("warfarin")
+  for (m in c("optimal", "nearest", "rank")) {
+    simm <- ferx_simulate(ex$model, ex$data, n_sim = 1L, seed = 1L,
+                          fit = warfarin_fit(), match = m)
+    expect_s3_class(simm, "data.frame")
+    expect_true(all(is.finite(simm$DV_SIM)), info = paste("method", m))
+  }
+})
+
+test_that("ferx_simulate rejects an unknown match method", {
+  ex <- ferx_example("warfarin")
+  expect_error(
+    ferx_simulate(ex$model, ex$data, n_sim = 1L, seed = 1L, match = "bogus"),
+    "match"
+  )
 })
 
 test_that("ferx_simulate errors on missing model file", {

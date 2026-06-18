@@ -12,16 +12,26 @@
 #' @param fit Optional \code{ferx_fit} result. When provided, simulation uses
 #'   \code{fit$theta}, \code{fit$omega}, and \code{fit$sigma} instead of the
 #'   model file's initial values.
-#' @param match Logical (default \code{FALSE}). When \code{TRUE}, each
-#'   replicate's drawn etas are reassigned to subjects by \strong{propensity-score
-#'   matching} against the subjects' fitted (posthoc) etas - optimal Mahalanobis
-#'   matching under the model omega. This pairs each subject's observed
-#'   dosing/sampling design with a similar drawn eta, correcting VPC bias from
-#'   treatment adaptation in real-world data (e.g. longer dosing intervals for
-#'   high-clearance patients). Requires \code{data} to be real observed data
-#'   (every subject must have observations, so its posthoc eta can be computed).
-#'   The posthoc etas are computed at the fitted parameters when \code{fit} is
-#'   supplied, otherwise at the model file's initial values.
+#' @param match Propensity-score matching method (default \code{FALSE}). When
+#'   enabled, each replicate's drawn etas are reassigned to subjects by
+#'   \strong{propensity-score matching} against the subjects' fitted (posthoc)
+#'   etas - Mahalanobis matching under the model omega. This pairs each subject's
+#'   observed dosing/sampling design with a similar drawn eta, correcting VPC
+#'   bias from treatment adaptation in real-world data (e.g. longer dosing
+#'   intervals for high-clearance patients). Accepts:
+#'   \describe{
+#'     \item{\code{FALSE} / \code{"none"}}{No matching (default).}
+#'     \item{\code{TRUE} / \code{"optimal"}}{Global linear-assignment minimum
+#'       Mahalanobis distance (\code{MatchIt(method = "optimal")}); best on
+#'       average in simulation, the recommended method.}
+#'     \item{\code{"nearest"}}{Greedy nearest-neighbour
+#'       (\code{MatchIt(method = "nearest", distance = "mahalanobis")}).}
+#'     \item{\code{"rank"}}{Pair by the rank of each eta's Mahalanobis norm.}
+#'   }
+#'   Requires \code{data} to be real observed data (every subject must have
+#'   observations, so its posthoc eta can be computed). The posthoc etas are
+#'   computed at the fitted parameters when \code{fit} is supplied, otherwise at
+#'   the model file's initial values.
 #'
 #' @return A data.frame with columns: SIM, ID, TIME, IPRED, DV_SIM
 #'
@@ -33,14 +43,14 @@
 #'
 #' # Propensity-score-matched simulation for a real-world-data VPC:
 #' sim_pm <- ferx_simulate(ex$model, ex$data, n_sim = 10L, seed = 1L,
-#'                         fit = fit, match = TRUE)
+#'                         fit = fit, match = "optimal")
 #'
 #' @family simulation
 #' @export
 ferx_simulate <- function(model, data, n_sim = 1L, seed = 42L, fit = NULL,
                           match = FALSE) {
   stopifnot(file.exists(model), file.exists(data))
-  propensity_match <- isTRUE(as.logical(match))
+  match_method <- normalize_match_method(match)
 
   if (is.null(fit)) {
     return(ferx_rust_simulate(
@@ -48,7 +58,7 @@ ferx_simulate <- function(model, data, n_sim = 1L, seed = 42L, fit = NULL,
       data_path = normalizePath(data),
       n_sim = as.integer(n_sim),
       seed = as.integer(seed),
-      propensity_match = propensity_match
+      match_method = match_method
     ))
   }
 
@@ -62,8 +72,29 @@ ferx_simulate <- function(model, data, n_sim = 1L, seed = 42L, fit = NULL,
     sigma = fit_pieces$sigma,
     n_sim = as.integer(n_sim),
     seed = as.integer(seed),
-    propensity_match = propensity_match
+    match_method = match_method
   )
+}
+
+# Internal: normalize the user-facing `match` argument to the string token the
+# Rust side expects ("none" | "optimal" | "nearest" | "rank"). Accepts a logical
+# (FALSE -> "none", TRUE -> "optimal" for backward compatibility) or one of the
+# method strings (case-insensitive).
+normalize_match_method <- function(match) {
+  if (length(match) != 1L || is.na(match)) {
+    stop("`match` must be a single value: FALSE/TRUE or one of ",
+         "\"none\", \"optimal\", \"nearest\", \"rank\".", call. = FALSE)
+  }
+  if (is.logical(match)) {
+    return(if (isTRUE(match)) "optimal" else "none")
+  }
+  method <- tolower(as.character(match))
+  valid <- c("none", "optimal", "nearest", "rank")
+  if (!method %in% valid) {
+    stop("`match` must be FALSE/TRUE or one of ",
+         paste0("\"", valid, "\"", collapse = ", "), ".", call. = FALSE)
+  }
+  method
 }
 
 #' Population predictions from a NLME model
