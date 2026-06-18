@@ -1,4 +1,4 @@
-# ferx
+# ferx R package
 
 [![R-CMD-check](https://github.com/FeRx-NLME/ferx-r/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/FeRx-NLME/ferx-r/actions/workflows/R-CMD-check.yaml)
 [![codecov](https://codecov.io/gh/FeRx-NLME/ferx-r/branch/main/graph/badge.svg)](https://codecov.io/gh/FeRx-NLME/ferx-r)
@@ -6,11 +6,11 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Dependencies](https://img.shields.io/badge/dependencies-2-brightgreen.svg)](DESCRIPTION)
 
-Fast nonlinear mixed effects (NLME) modeling in R, powered by a Rust backend with [Enzyme](https://enzyme.mit.edu/) automatic differentiation for exact gradients.
+Fast nonlinear mixed effects (NLME) modeling in R, powered by a Rust backend.
 
 ## Features
 
-- **FOCE/FOCEI estimation** with automatic differentiation
+- **FOCE/FOCEI estimation** 
 - **Analytical PK models**: 1- and 2-compartment (oral/IV)
 - **ODE-based models**: Dormand-Prince RK45 solver for general ODEs
 - **NONMEM-compatible**: reads standard NONMEM CSV datasets
