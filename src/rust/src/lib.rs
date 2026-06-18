@@ -343,8 +343,8 @@ fn ferx_rust_fit(
 /// @param data_path Path to NONMEM-format CSV (for population structure)
 /// @param n_sim Number of simulations
 /// @param seed Random seed
-/// @param propensity_match Reassign drawn etas to subjects by propensity-score
-///   matching against posthoc etas (requires observed DV)
+/// @param match_method Propensity-score matching method: "none" (off),
+///   "optimal", "nearest", or "rank" (requires observed DV)
 /// @return Data frame with ID, TIME, IPRED, DV_SIM columns
 /// @export
 #[extendr]
@@ -353,8 +353,15 @@ fn ferx_rust_simulate(
     data_path: &str,
     n_sim: i32,
     seed: i32,
-    propensity_match: bool,
+    match_method: &str,
 ) -> Robj {
+    let match_method = match parse_match_method(match_method) {
+        Ok(m) => m,
+        Err(e) => {
+            rprintln!("{}", e);
+            return ().into();
+        }
+    };
     // parse_full_model_file (vs parse_model_file) so iov_column is available
     // for the reader; without it, models with kappa declarations panic in
     // pk_param_fn (Eta index >= n_bsv_eta).
@@ -385,7 +392,7 @@ fn ferx_rust_simulate(
 
     let opts = ferx_core::SimulateOptions {
         seed: Some(seed as u64),
-        propensity_match,
+        match_method,
     };
     let results = match ferx_core::simulate_with_options(
         &parsed.model,
@@ -414,8 +421,8 @@ fn ferx_rust_simulate(
 /// @param sigma Fitted sigma vector
 /// @param n_sim Number of simulations
 /// @param seed Random seed
-/// @param propensity_match Reassign drawn etas to subjects by propensity-score
-///   matching against posthoc etas (requires observed DV)
+/// @param match_method Propensity-score matching method: "none" (off),
+///   "optimal", "nearest", or "rank" (requires observed DV)
 /// @return Data frame with SIM, ID, TIME, IPRED, DV_SIM columns
 /// @export
 #[extendr]
@@ -429,8 +436,15 @@ fn ferx_rust_simulate_from_fit(
     sigma: Vec<f64>,
     n_sim: i32,
     seed: i32,
-    propensity_match: bool,
+    match_method: &str,
 ) -> Robj {
+    let match_method = match parse_match_method(match_method) {
+        Ok(m) => m,
+        Err(e) => {
+            rprintln!("{}", e);
+            return ().into();
+        }
+    };
     let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
         Ok(p) => p,
         Err(e) => {
@@ -466,7 +480,7 @@ fn ferx_rust_simulate_from_fit(
 
     let opts = ferx_core::SimulateOptions {
         seed: Some(seed as u64),
-        propensity_match,
+        match_method,
     };
     let results = match ferx_core::simulate_with_options(
         &parsed.model,
@@ -838,6 +852,24 @@ fn ferx_rust_npde_from_fit(
     }
 
     data_frame!(ID = id, TIME = time, NPDE = npde, NPD = npd).into()
+}
+
+// -- Helper: parse a single R-side propensity-matching token into an
+//    Option<MatchMethod> ("none" → None disables matching). --
+
+fn parse_match_method(
+    token: &str,
+) -> std::result::Result<Option<ferx_core::MatchMethod>, String> {
+    match token.trim().to_lowercase().as_str() {
+        "none" | "false" | "" => Ok(None),
+        "optimal" | "true" => Ok(Some(ferx_core::MatchMethod::Optimal)),
+        "nearest" => Ok(Some(ferx_core::MatchMethod::Nearest)),
+        "rank" => Ok(Some(ferx_core::MatchMethod::Rank)),
+        other => Err(format!(
+            "Unknown match method '{}' — expected one of: none, optimal, nearest, rank",
+            other
+        )),
+    }
 }
 
 // -- Helper: parse a single R-side method token into EstimationMethod --
