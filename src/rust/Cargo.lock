@@ -315,7 +315,7 @@ dependencies = [
 [[package]]
 name = "ferx-core"
 version = "0.1.6"
-source = "git+https://github.com/JordanBrooks33/ferx-core?branch=add-frem#95d7a60287276d7a12ecd57c3e6d2894ab86b65e"
+source = "git+https://github.com/FeRx-NLME/ferx-core?branch=main#71c969e8a4e042ee3e7828ba2a4f8e142b2a904d"
 dependencies = [
  "argmin",
  "argmin-math",
@@ -1483,7 +1483,3 @@ dependencies = [
  "log",
  "simd-adler32",
 ]
-
-[[patch.unused]]
-name = "ferx-core"
-version = "0.1.6"
