@@ -36,9 +36,9 @@ ferx_columns(fit)       # inspect the data used for a fit
 
 }
 \seealso{
-Other utilities:
-\code{\link[=ferx_example]{ferx_example()}},
-\code{\link[=ferx_load_fit]{ferx_load_fit()}},
-\code{\link[=ferx_save_fit]{ferx_save_fit()}}
+Other utilities: 
+\code{\link{ferx_example}()},
+\code{\link{ferx_load_fit}()},
+\code{\link{ferx_save_fit}()}
 }
 \concept{utilities}

@@ -60,11 +60,11 @@ ex$data |>
 
 }
 \seealso{
-Other fitting:
-\code{\link[=ferx_collect]{ferx_collect()}},
-\code{\link[=ferx_fit]{ferx_fit()}},
-\code{\link[=ferx_fit_async]{ferx_fit_async()}},
-\code{\link[=ferx_inits_from_nca]{ferx_inits_from_nca()}},
-\code{\link[=ferx_sir]{ferx_sir()}}
+Other fitting: 
+\code{\link{ferx_collect}()},
+\code{\link{ferx_fit}()},
+\code{\link{ferx_fit_async}()},
+\code{\link{ferx_inits_from_nca}()},
+\code{\link{ferx_sir}()}
 }
 \concept{fitting}
