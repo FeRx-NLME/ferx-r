@@ -134,23 +134,10 @@ test_that("method = 'imp' passes the ferx_fit validation step", {
   # without erroring. The actual IMP run is exercised in the integration tests
   # once the engine supports it; here we only cover the R-side allowlist + the
   # IMP alias fold. Mirrors the logic in `R/fit.R::ferx_fit()`.
-  normalize <- function(m) {
-    vapply(
-      m,
-      function(s) {
-        normalised <- gsub("[^a-z0-9]", "_", tolower(s))
-        if (normalised %in% c("importance_sampling", "importancesampling")) {
-          normalised <- "imp"
-        }
-        match.arg(
-          normalised,
-          c("foce", "focei", "saem", "gn", "gn_hybrid", "imp")
-        )
-      },
-      character(1L),
-      USE.NAMES = FALSE
-    )
-  }
+  # Exercises the real `.normalize_method_token` used by `ferx_fit()` so the
+  # allowlist and alias folds register coverage instead of a test-local copy.
+  normalize_token <- getFromNamespace(".normalize_method_token", "ferx")
+  normalize <- function(m) vapply(m, normalize_token, character(1L), USE.NAMES = FALSE)
   expect_equal(normalize("imp"), "imp")
   expect_equal(normalize("IMP"), "imp")
   # The two documented aliases — partial-prefix matching in `match.arg` can't
@@ -164,6 +151,13 @@ test_that("method = 'imp' passes the ferx_fit validation step", {
     normalize(c("focei", "importance_sampling")),
     c("focei", "imp")
   )
+  # IMPMAP: exact token, the long alias, and case-insensitivity. Exact-match
+  # semantics keep "imp" and "impmap" unambiguous despite the shared prefix.
+  expect_equal(normalize("impmap"), "impmap")
+  expect_equal(normalize("IMPMAP"), "impmap")
+  expect_equal(normalize("importance_sampling_map"), "impmap")
+  expect_equal(normalize("importance-sampling-map"), "impmap")
+  expect_equal(normalize(c("focei", "impmap")), c("focei", "impmap"))
 })
 
 test_that("method = 'bayes' passes the ferx_fit validation step", {

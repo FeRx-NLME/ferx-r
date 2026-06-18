@@ -13,6 +13,25 @@
 
 ## New features
 
+- **FREM covariate analysis** (`ferx_to_frem()`): transforms a base model and
+  dataset into a Full Random Effects Model (FREM) that treats covariates as
+  additional dependent variables. The extended omega block captures
+  covariate-parameter relationships in a single fit, avoiding stepwise search.
+  Covariates (and their continuous/categorical kind) are taken from the model's
+  `[covariates]` block; the `covariates` argument is an optional subset filter
+  to FREM only some of them. Returns a `ferx_model` referencing the generated
+  model and data files, so it composes directly: `ferx_fit(ferx_to_frem(...))`.
+  (#194)
+
+- **IMPMAP estimator**: `ferx_fit(..., method = "impmap")` (alias
+  `"importance_sampling_map"`) runs the NONMEM `METHOD=IMPMAP` Monte-Carlo EM
+  estimator — importance sampling assisted by mode-a-posteriori re-centering.
+  Runs standalone or as a chain stage (`c("focei", "impmap")`). Tuned via
+  `settings` keys `impmap_iterations`, `impmap_samples`, `impmap_proposal_df`
+  (`"normal"` for the MVN proposal, or a Student-t DoF), `impmap_averaging`,
+  `impmap_seed`, `impmap_low_ess_threshold`. Requires a mu-referenced
+  parameterization; IOV is not yet supported. Needs a ferx-core that provides
+  the `impmap` method (separate `Cargo.lock` bump). (ferx-core #270)
 - **Modeled infusion duration (`RATE = -2`)** for ODE models: a NONMEM
   `RATE = -2` dose now infuses `AMT` over a *modeled* duration — declare an
   individual parameter `D{n}` for the dose compartment `n` and ferx infuses at
@@ -23,7 +42,7 @@
   bolus, and a `D{n}` that is non-positive at the initial estimate is flagged.
   Handled entirely in the data reader and model parser, so no R-side change is
   needed. (Requires ferx-core with FeRx-NLME/ferx-core#384.)
-  
+
 - **`ferx_npde(fit, nsim, seed)`**: compute simulation-based NPDE (Normalized
   Prediction Distribution Errors, decorrelated within subject) and NPD
   (Normalized Prediction Discrepancies) post-hoc from an existing fit, without

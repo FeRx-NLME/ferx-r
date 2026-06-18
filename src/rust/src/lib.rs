@@ -886,13 +886,17 @@ fn parse_method(token: &str) -> std::result::Result<EstimationMethod, String> {
         Ok(EstimationMethod::FoceI)
     } else if m == "foce" {
         Ok(EstimationMethod::Foce)
+    } else if m == "impmap" || m == "importance_sampling_map" || m == "importance-sampling-map" {
+        Ok(EstimationMethod::Impmap)
     } else if m == "imp" || m == "importance_sampling" || m == "importance-sampling" {
         Ok(EstimationMethod::Imp)
+    } else if m == "impmap" || m == "importance_sampling_map" {
+        Ok(EstimationMethod::Impmap)
     } else if m == "bayes" || m == "bayesian" || m == "mcmc" {
         Ok(EstimationMethod::Bayes)
     } else {
         Err(format!(
-            "Unknown estimation method '{}' — expected one of: foce, focei, saem, gn, gn_hybrid, imp, bayes",
+            "Unknown estimation method '{}' — expected one of: foce, focei, saem, gn, gn_hybrid, imp, impmap, bayes",
             token.trim()
         ))
     }
@@ -1119,6 +1123,7 @@ fn default_fit_result(
         sir_ess: None,
         sir_resamples_packed,
         importance_sampling: None,
+        impmap_trace: None,
         omega_iov: None,
         kappa_names: model.kappa_names.clone(),
         kappa_fixed: template.kappa_fixed.clone(),
@@ -1427,6 +1432,85 @@ fn fit_result_to_list(
         None => ().into(),
     };
 
+    // IMPMAP per-iteration parameter trace — flat vectors that the R side
+    // reassembles into a data.frame.  NULL when `impmap_trace = false` or a
+    // non-IMPMAP method was used.
+    let impmap_trace: Robj = match &result.impmap_trace {
+        Some(trace) => {
+            let n = trace.rows.len();
+            let iterations: Vec<f64> = trace.rows.iter().map(|r| r.iteration as f64).collect();
+            let ofvs: Vec<f64> = trace.rows.iter().map(|r| r.ofv).collect();
+
+            // Per-theta columns.
+            let n_theta = if n > 0 { trace.rows[0].theta.len() } else { 0 };
+            let mut theta_cols: Vec<Vec<f64>> = vec![Vec::with_capacity(n); n_theta];
+            for row in &trace.rows {
+                for (j, v) in row.theta.iter().enumerate() {
+                    if j < n_theta {
+                        theta_cols[j].push(*v);
+                    }
+                }
+            }
+
+            // Per-omega-LT columns.
+            let n_omega = if n > 0 { trace.rows[0].omega_lower_tri.len() } else { 0 };
+            let mut omega_cols: Vec<Vec<f64>> = vec![Vec::with_capacity(n); n_omega];
+            for row in &trace.rows {
+                for (j, v) in row.omega_lower_tri.iter().enumerate() {
+                    if j < n_omega {
+                        omega_cols[j].push(*v);
+                    }
+                }
+            }
+
+            // Per-sigma columns.
+            let n_sigma = if n > 0 { trace.rows[0].sigma.len() } else { 0 };
+            let mut sigma_cols: Vec<Vec<f64>> = vec![Vec::with_capacity(n); n_sigma];
+            for row in &trace.rows {
+                for (j, v) in row.sigma.iter().enumerate() {
+                    if j < n_sigma {
+                        sigma_cols[j].push(*v);
+                    }
+                }
+            }
+
+            // Flatten column data + names for the R side to unpack.
+            let mut col_data: Vec<Vec<f64>> = Vec::new();
+            let mut col_names: Vec<String> = Vec::new();
+            col_names.push("ITERATION".to_string());
+            col_data.push(iterations);
+            for (j, col) in theta_cols.into_iter().enumerate() {
+                col_names.push(trace.theta_names.get(j).cloned().unwrap_or_else(|| format!("THETA{}", j + 1)));
+                col_data.push(col);
+            }
+            for (j, col) in omega_cols.into_iter().enumerate() {
+                col_names.push(trace.omega_names.get(j).cloned().unwrap_or_else(|| format!("OMEGA{}", j + 1)));
+                col_data.push(col);
+            }
+            for (j, col) in sigma_cols.into_iter().enumerate() {
+                col_names.push(trace.sigma_names.get(j).cloned().unwrap_or_else(|| format!("SIGMA{}", j + 1)));
+                col_data.push(col);
+            }
+            col_names.push("OBJ".to_string());
+            col_data.push(ofvs);
+
+            // Flatten all columns into one Vec<f64> + dimension metadata so the
+            // R side can matrix(flat, nrow=n, ncol=n_cols, byrow=FALSE).
+            let n_cols = col_data.len() as i32;
+            let n_rows = n as i32;
+            let flat: Vec<f64> = col_data.into_iter().flatten().collect();
+
+            list!(
+                flat = flat,
+                n_rows = n_rows,
+                n_cols = n_cols,
+                col_names = col_names,
+            )
+            .into()
+        }
+        None => ().into(),
+    };
+
     // Bayes posterior summary (`method = bayes`). Per-parameter summaries are
     // packed as parallel vectors so the R side can build a data frame without
     // hitting extendr's list-of-records limitations.
@@ -1726,6 +1810,7 @@ fn fit_result_to_list(
         sir_resamples_n = sir_resamples_n,
         sir_resamples_dim = sir_resamples_dim,
         importance_sampling = importance_sampling,
+        impmap_trace = impmap_trace,
         bayes = bayes,
         trace_path = trace_path,
         ebe_convergence_warnings = result.ebe_convergence_warnings as i32,
@@ -2414,6 +2499,7 @@ fn ferx_rust_sir(
         sir_ess: None,
         sir_resamples_packed: None,
         importance_sampling: None,
+        impmap_trace: None,
         omega_iov: None,
         kappa_names: model.kappa_names.clone(),
         kappa_fixed: template.kappa_fixed.clone(),
@@ -2543,6 +2629,83 @@ fn ferx_rust_sir(
     .into()
 }
 
+/// Prepare a FREM (Full Random Effects Model) dataset and model file.
+///
+/// Transforms a base model + dataset into a FREM model that treats covariates
+/// as additional dependent variables. The covariance structure of an extended
+/// omega matrix captures covariate-parameter relationships implicitly.
+///
+/// @param model_path Path to base .ferx model file
+/// @param data_path Path to NONMEM-format CSV
+/// @param covariates Character vector of covariate column names
+/// @param categorical_covariates Character vector of categorical covariate
+///   names (subset of `covariates`). These are binarized (one-hot encoded)
+///   before FREM transformation. Pass an empty vector if none.
+/// @param output_model_path Optional path for the output .ferx model file.
+///   If empty, defaults to `<model_dir>/<model_stem>_frem.ferx`.
+/// @param output_data_path Optional path for the output CSV file.
+///   If empty, defaults to `<model_dir>/<model_stem>_frem_data.csv`.
+/// @return Named list with model_path, data_path, covariate_means,
+///   covariate_variances, fremtype_map, n_total_etas
+/// @export
+#[extendr]
+fn ferx_rust_prepare_frem(
+    model_path: &str,
+    data_path: &str,
+    covariates: Vec<String>,
+    categorical_covariates: Vec<String>,
+    output_model_path: &str,
+    output_data_path: &str,
+) -> List {
+    let cat_opt: Option<Vec<String>> = if categorical_covariates.is_empty() {
+        None
+    } else {
+        Some(categorical_covariates)
+    };
+    let out_model: Option<&Path> = if output_model_path.is_empty() {
+        None
+    } else {
+        Some(Path::new(output_model_path))
+    };
+    let out_data: Option<&Path> = if output_data_path.is_empty() {
+        None
+    } else {
+        Some(Path::new(output_data_path))
+    };
+
+    let result = match ferx_core::prepare_frem(
+        Path::new(model_path),
+        Path::new(data_path),
+        &covariates,
+        cat_opt.as_deref(),
+        out_model,
+        out_data,
+        None, // missing value indicator (default: -99)
+    ) {
+        Ok(r) => r,
+        Err(e) => throw_r_error(format!("Error in prepare_frem: {e}")),
+    };
+
+    let mean_names: Vec<String> = result.covariate_means.iter().map(|(n, _)| n.clone()).collect();
+    let mean_vals: Vec<f64> = result.covariate_means.iter().map(|(_, v)| *v).collect();
+    let var_names: Vec<String> = result.covariate_variances.iter().map(|(n, _)| n.clone()).collect();
+    let var_vals: Vec<f64> = result.covariate_variances.iter().map(|(_, v)| *v).collect();
+    let ft_names: Vec<String> = result.fremtype_map.iter().map(|(n, _)| n.clone()).collect();
+    let ft_vals: Vec<i32> = result.fremtype_map.iter().map(|(_, v)| *v as i32).collect();
+
+    list!(
+        model_path = result.model_path.to_string_lossy().to_string(),
+        data_path = result.data_path.to_string_lossy().to_string(),
+        covariate_mean_names = mean_names,
+        covariate_mean_values = mean_vals,
+        covariate_var_names = var_names,
+        covariate_var_values = var_vals,
+        fremtype_names = ft_names,
+        fremtype_values = ft_vals,
+        n_total_etas = result.n_total_etas as i32
+    )
+}
+
 extendr_module! {
     mod ferx;
     fn ferx_rust_fit;
@@ -2556,4 +2719,5 @@ extendr_module! {
     fn ferx_rust_autodiff_enabled;
     fn ferx_rust_validate_model;
     fn ferx_rust_inits_from_nca;
+    fn ferx_rust_prepare_frem;
 }

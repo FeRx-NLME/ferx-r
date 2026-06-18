@@ -18,14 +18,20 @@
 #'   previous stage's converged parameters, and only the final stage produces
 #'   the reported covariance/diagnostics. Supported methods: \code{"foce"},
 #'   \code{"focei"}, \code{"saem"}, \code{"gn"} (Gauss-Newton / BHHH),
-#'   \code{"gn_hybrid"} (Gauss-Newton followed by a FOCEI polish step), or
+#'   \code{"gn_hybrid"} (Gauss-Newton followed by a FOCEI polish step),
 #'   \code{"imp"} (also accepted as \code{"importance_sampling"} or
 #'   \code{"importance-sampling"}; importance-sampling marginal
-#'   log-likelihood). The \code{"imp"} stage is a terminal stage that does
+#'   log-likelihood), or \code{"impmap"} (also accepted as
+#'   \code{"importance_sampling_map"}; Importance Sampling assisted by Mode A
+#'   Posteriori, the NONMEM \code{METHOD=IMPMAP} Monte-Carlo EM estimator).
+#'   The \code{"imp"} stage is a terminal stage that does
 #'   not update parameters and must be the *last* entry of the chain, e.g.
 #'   \code{c("focei", "imp")} or \code{c("saem", "imp")}. It may also run
 #'   standalone (\code{method = "imp"}), scoring the model's initial
-#'   parameters. Example chain: \code{c("saem", "focei")}.
+#'   parameters. \code{"impmap"} is a full estimator: it may run standalone
+#'   (\code{method = "impmap"}) or as a chain stage (\code{c("focei", "impmap")}),
+#'   requires a mu-referenced parameterization, and does not yet support IOV.
+#'   Example chain: \code{c("saem", "focei")}.
 #'   \code{"bayes"} (also accepted as \code{"bayesian"} or \code{"mcmc"}) runs
 #'   full MCMC Bayesian estimation (Gibbs-within-HMC, NONMEM \code{METHOD=BAYES}
 #'   parity): it returns posterior means with credible intervals and
@@ -308,6 +314,27 @@
 #'       \code{0.1}, i.e. \code{10\%} of \code{is_samples}).}
 #'   }
 #'
+#'   \strong{IMPMAP (\code{"impmap"} estimator)}
+#'   \describe{
+#'     \item{\code{impmap_iterations}}{Number of Monte-Carlo EM iterations
+#'       (default 200).}
+#'     \item{\code{impmap_samples}}{Importance samples drawn per subject per
+#'       iteration (default 300).}
+#'     \item{\code{impmap_proposal_df}}{Proposal degrees of freedom. The string
+#'       \code{"normal"} (default) selects a multivariate-normal proposal (the
+#'       NONMEM default); a number \code{>= 1} selects a heavier-tailed
+#'       Student-t.}
+#'     \item{\code{impmap_averaging}}{Number of final iterations whose parameters
+#'       are averaged into the reported estimate (default 50).}
+#'     \item{\code{impmap_seed}}{RNG seed for the IMPMAP sampling (default chosen
+#'       by the engine).}
+#'     \item{\code{impmap_low_ess_threshold}}{ESS fraction below which a subject
+#'       is flagged as poorly sampled (default \code{0.1}).}
+#'     \item{\code{impmap_trace}}{Logical; when \code{TRUE}, collect
+#'       per-iteration parameter values into \code{fit$impmap_trace}
+#'       (analogous to NONMEM \code{.ext} output). Default \code{FALSE}.}
+#'   }
+#'
 #'   \strong{SIR (Sampling Importance Resampling)}
 #'   \describe{
 #'     \item{\code{sir_samples}}{Candidate draws for SIR (default 1000).}
@@ -390,7 +417,10 @@
 #'     \code{sigma}: \code{"proportional"} or \code{"additive"}. Combined
 #'     error models report \code{c("proportional", "additive")} in that order.}
 #'   \item{se_theta}{Standard errors for theta (NULL if covariance step failed)}
-#'   \item{se_omega}{Standard errors for omega diagonal}
+#'   \item{se_omega}{Standard errors for omega elements. For diagonal omega,
+#'     a vector of length n_eta (one per variance). For block omega, a vector
+#'     of length n_eta*(n_eta+1)/2 (full lower triangle, column-major) including
+#'     off-diagonal covariance SEs.}
 #'   \item{se_sigma}{Standard errors for sigma (on the SD scale, like
 #'     \code{sigma} itself)}
 #'   \item{sdtab}{Data frame with ID, TIME, DV, PRED, IPRED, CWRES, IWRES,
@@ -1335,31 +1365,7 @@ ferx_fit <- function(model, data = NULL,
   if (!is.character(method) || length(method) == 0L) {
     stop("`method` must be a non-empty character vector")
   }
-  method <- vapply(
-    method,
-    function(m) {
-      # `tolower` *before* the `[^a-z0-9]` strip - otherwise uppercase letters
-      # get smashed to underscores ("IMP" -> "___") before tolower runs on
-      # them, and the canonicalisation silently drops the case-insensitive
-      # entry points the docs advertise.
-      normalised <- gsub("[^a-z0-9]", "_", tolower(m))
-      # Fold IMP aliases before `match.arg` - partial matching won't see
-      # `importance_sampling` as a prefix of `imp`, so the documented
-      # `c("focei", "importance_sampling")` form has to be mapped explicitly.
-      if (normalised %in% c("importance_sampling", "importancesampling")) {
-        normalised <- "imp"
-      }
-      if (normalised %in% c("bayesian", "mcmc")) {
-        normalised <- "bayes"
-      }
-      match.arg(
-        normalised,
-        c("foce", "focei", "saem", "gn", "gn_hybrid", "imp", "bayes")
-      )
-    },
-    character(1L),
-    USE.NAMES = FALSE
-  )
+  method <- vapply(method, .normalize_method_token, character(1L), USE.NAMES = FALSE)
   # `imp` is a terminal stage - engine rejects malformed chains too, but
   # surfacing the error R-side avoids a round-trip and gives a clearer message
   # anchored to the R argument. It may run standalone (`method = "imp"`), in
@@ -1379,7 +1385,7 @@ ferx_fit <- function(model, data = NULL,
       )
     }
   }
-  # `bayes` is a standalone MCMC estimator — it does not warm-start from or feed
+  # `bayes` is a standalone MCMC estimator - it does not warm-start from or feed
   # another stage, and chaining it would run the (expensive) sampler and then
   # silently discard its posterior (the final stage's result wins). Reject
   # chains R-side rather than waste the run.
@@ -1860,6 +1866,12 @@ ferx_fit <- function(model, data = NULL,
   # ETA normality). No string re-parsing of core messages happens here.
   result$warnings_structured <- .ferx_assemble_structured_warnings(raw, result)
 
+  # Reconstruct the per-iteration IMPMAP parameter trace as a data.frame.
+  # The Rust side passes flat vectors + metadata; NULL when not collected.
+  if (!is.null(result$impmap_trace)) {
+    result$impmap_trace <- .reconstruct_impmap_trace(result$impmap_trace)
+  }
+
   class(result) <- "ferx_fit"
 
   if (!is.null(output)) {
@@ -2036,6 +2048,66 @@ ferx_fit <- function(model, data = NULL,
       p_val = round(sw$p.value, 4), flag = flg, stringsAsFactors = FALSE
     )
   }))
+}
+
+# Internal: canonicalise a single `method` token to its engine name, folding
+# the documented case-insensitive aliases before `match.arg`.
+.normalize_method_token <- function(m) {
+  # `tolower` *before* the `[^a-z0-9]` strip - otherwise uppercase letters
+  # get smashed to underscores ("IMP" -> "___") before tolower runs on
+  # them, and the canonicalisation silently drops the case-insensitive
+  # entry points the docs advertise.
+  normalised <- gsub("[^a-z0-9]", "_", tolower(m))
+  # Fold IMP aliases before `match.arg` - partial matching won't see
+  # `importance_sampling` as a prefix of `imp`, so the documented
+  # `c("focei", "importance_sampling")` form has to be mapped explicitly.
+  if (normalised %in% c("importance_sampling", "importancesampling")) {
+    normalised <- "imp"
+  }
+  # IMPMAP aliases. Fold before the IMP set would never match these (they
+  # carry the `_map` suffix), so order is irrelevant; kept explicit for
+  # the documented `"importance_sampling_map"` long form.
+  if (normalised %in% c("importance_sampling_map", "importancesamplingmap")) {
+    normalised <- "impmap"
+  }
+  if (normalised %in% c("bayesian", "mcmc")) {
+    normalised <- "bayes"
+  }
+  # `match.arg` uses exact-match-first semantics, so listing both "imp" and
+  # "impmap" is unambiguous (each exact token wins over the other's prefix).
+  match.arg(
+    normalised,
+    c("foce", "focei", "saem", "gn", "gn_hybrid", "imp", "impmap", "bayes")
+  )
+}
+
+# Internal: rebuild the IMPMAP per-iteration parameter trace from the flat
+# representation the Rust side returns (flat values + n_rows/n_cols/col_names)
+# into a data.frame with one row per Monte-Carlo EM iteration.
+.reconstruct_impmap_trace <- function(tr) {
+  mat <- matrix(tr$flat, nrow = tr$n_rows, ncol = tr$n_cols, byrow = FALSE)
+  df <- as.data.frame(mat)
+  colnames(df) <- tr$col_names
+  df
+}
+
+# Internal: look up SE for omega element (i, j) from se_omega vector.
+# se_omega may be diagonal-only (length n_eta) or full lower-triangle
+# (length n_eta*(n_eta+1)/2, column-major).
+.omega_se_at <- function(se_omega, n_eta, i, j) {
+  if (is.null(se_omega)) return(NA_real_)
+  # Ensure r >= c (symmetric)
+  r <- max(i, j); c <- min(i, j)
+  n_lt <- n_eta * (n_eta + 1L) / 2L
+  if (length(se_omega) == n_lt && n_lt != n_eta) {
+    # Full lower-triangle (block omega)
+    col_offset <- if (c == 1L) 0L else (c - 1L) * n_eta - (c - 1L) * (c - 2L) / 2L
+    idx <- col_offset + (r - c) + 1L  # 1-based
+    if (idx >= 1L && idx <= length(se_omega)) se_omega[idx] else NA_real_
+  } else {
+    # Diagonal-only
+    if (r == c && r <= length(se_omega)) se_omega[r] else NA_real_
+  }
 }
 
 # Split-R-hat above this flags a Bayes fit as not-yet-converged. Single source
@@ -2234,11 +2306,8 @@ print.ferx_fit <- function(x, ...) {
     var_ii   <- om[i, i]
     eta_type <- if (!is.null(x$eta_param_types) && length(x$eta_param_types) >= i) x$eta_param_types[i] else "log_normal"
     linked_theta_name <- if (!is.null(x$eta_linked_theta) && length(x$eta_linked_theta) >= i) x$eta_linked_theta[i] else ""
-    se_str <- if (!is.null(x$se_omega) && length(x$se_omega) >= i) {
-      sprintf("%.6f", x$se_omega[i])
-    } else {
-      "N/A"
-    }
+    se_val <- .omega_se_at(x$se_omega, n_eta, i, i)
+    se_str <- if (!is.na(se_val)) sprintf("%.6f", se_val) else "N/A"
 
     extra <- if (eta_type == "log_normal") {
       cv <- if (var_ii > 0) sqrt(exp(var_ii) - 1) * 100 else 0
@@ -2297,18 +2366,20 @@ print.ferx_fit <- function(x, ...) {
           if (var_i > 0 && var_j > 0) cov_ij / (sqrt(var_i) * sqrt(var_j)) else 0
         }
         corr_label <- if (!is.null(x$omega_param_corr)) "param corr" else "corr"
+        se_ij <- .omega_se_at(x$se_omega, n_eta, i, j)
+        se_part <- if (!is.na(se_ij)) sprintf("  SE = %.6f", se_ij) else ""
         has_nms <- !is.null(x$eta_names) && length(x$eta_names) >= i
         if (has_nms) {
           lbl_i <- if (nzchar(x$eta_names[i])) x$eta_names[i] else sprintf("OMEGA(%d,%d)", i, i)
           lbl_j <- if (nzchar(x$eta_names[j])) x$eta_names[j] else sprintf("OMEGA(%d,%d)", j, j)
           cat(sprintf(
-            "  %s ~ %s : cov = %.6f  (%s = %.4f)\n",
-            lbl_i, lbl_j, cov_ij, corr_label, param_corr
+            "  %s ~ %s : cov = %.6f  (%s = %.4f)%s\n",
+            lbl_i, lbl_j, cov_ij, corr_label, param_corr, se_part
           ))
         } else {
           cat(sprintf(
-            "  OMEGA(%d,%d) : cov = %.6f  (%s = %.4f)\n",
-            i, j, cov_ij, corr_label, param_corr
+            "  OMEGA(%d,%d) : cov = %.6f  (%s = %.4f)%s\n",
+            i, j, cov_ij, corr_label, param_corr, se_part
           ))
         }
       }
