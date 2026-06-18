@@ -12,7 +12,7 @@
   accepts `"normal"`/`"mvn"`. The estimating `"imp"` may lead or sit mid-chain;
   the evaluation-only `"imp"` must still be terminal. Plain `"imp"` is fragile on
   rich data (warm-start with `c("focei", "imp")`, or use `"impmap"`). Requires
-  ferx-core with the `METHOD=IMP` estimator (FeRx-NLME/ferx-core#402). (#NNN)
+  ferx-core with the `METHOD=IMP` estimator (FeRx-NLME/ferx-core#402). (#181)
 
 ## Performance
 
