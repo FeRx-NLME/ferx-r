@@ -225,26 +225,32 @@ test_that("method = 'bayes' produces a posterior summary on $bayes", {
   expect_identical(fit$covariance_status, "not_requested")
 })
 
-test_that("ferx_fit rejects malformed `imp` method chains", {
+test_that("ferx_fit enforces `imp` method-chain rules", {
   # Tier 1: surface the engine's `imp`-placement constraints to the R caller
   # *before* the engine round-trip, so the error message references the R
   # argument and avoids spinning up the backend on inputs that will be
   # rejected anyway. Engine-side guards remain as a safety net (and are
   # covered in the ferx-core integration tests).
   ex <- ferx_example("warfarin")
-  expect_error(
-    ferx_fit(ex$model, ex$data, method = c("imp", "focei")),
-    regexp = "final stage|must be the final stage",
-    ignore.case = TRUE
-  )
-  expect_error(
-    ferx_fit(ex$model, ex$data, method = c("focei", "imp", "focei")),
-    regexp = "final stage|must be the final stage",
-    ignore.case = TRUE
-  )
+  # `imp` may appear at most once, regardless of mode.
   expect_error(
     ferx_fit(ex$model, ex$data, method = c("focei", "imp", "imp")),
     regexp = "at most once",
+    ignore.case = TRUE
+  )
+  # An evaluation-only `imp` (`is_eval_only = TRUE`, NONMEM EONLY=1) must be the
+  # terminal stage; the default estimating `imp` may sit anywhere, so the same
+  # chains are accepted without the flag.
+  expect_error(
+    ferx_fit(ex$model, ex$data, method = c("imp", "focei"),
+      settings = list(is_eval_only = TRUE)),
+    regexp = "final stage|must be the final stage",
+    ignore.case = TRUE
+  )
+  expect_error(
+    ferx_fit(ex$model, ex$data, method = c("focei", "imp", "focei"),
+      settings = list(is_eval_only = TRUE)),
+    regexp = "final stage|must be the final stage",
     ignore.case = TRUE
   )
 })
