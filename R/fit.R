@@ -1365,39 +1365,7 @@ ferx_fit <- function(model, data = NULL,
   if (!is.character(method) || length(method) == 0L) {
     stop("`method` must be a non-empty character vector")
   }
-  method <- vapply(
-    method,
-    function(m) {
-      # `tolower` *before* the `[^a-z0-9]` strip - otherwise uppercase letters
-      # get smashed to underscores ("IMP" -> "___") before tolower runs on
-      # them, and the canonicalisation silently drops the case-insensitive
-      # entry points the docs advertise.
-      normalised <- gsub("[^a-z0-9]", "_", tolower(m))
-      # Fold IMP aliases before `match.arg` - partial matching won't see
-      # `importance_sampling` as a prefix of `imp`, so the documented
-      # `c("focei", "importance_sampling")` form has to be mapped explicitly.
-      if (normalised %in% c("importance_sampling", "importancesampling")) {
-        normalised <- "imp"
-      }
-      # IMPMAP aliases. Fold before the IMP set would never match these (they
-      # carry the `_map` suffix), so order is irrelevant; kept explicit for
-      # the documented `"importance_sampling_map"` long form.
-      if (normalised %in% c("importance_sampling_map", "importancesamplingmap")) {
-        normalised <- "impmap"
-      }
-      if (normalised %in% c("bayesian", "mcmc")) {
-        normalised <- "bayes"
-      }
-      # `match.arg` uses exact-match-first semantics, so listing both "imp" and
-      # "impmap" is unambiguous (each exact token wins over the other's prefix).
-      match.arg(
-        normalised,
-        c("foce", "focei", "saem", "gn", "gn_hybrid", "imp", "impmap", "bayes")
-      )
-    },
-    character(1L),
-    USE.NAMES = FALSE
-  )
+  method <- vapply(method, .normalize_method_token, character(1L), USE.NAMES = FALSE)
   # `imp` is a terminal stage - engine rejects malformed chains too, but
   # surfacing the error R-side avoids a round-trip and gives a clearer message
   # anchored to the R argument. It may run standalone (`method = "imp"`), in
@@ -1901,10 +1869,7 @@ ferx_fit <- function(model, data = NULL,
   # Reconstruct the per-iteration IMPMAP parameter trace as a data.frame.
   # The Rust side passes flat vectors + metadata; NULL when not collected.
   if (!is.null(result$impmap_trace)) {
-    tr <- result$impmap_trace
-    mat <- matrix(tr$flat, nrow = tr$n_rows, ncol = tr$n_cols, byrow = FALSE)
-    result$impmap_trace <- as.data.frame(mat)
-    colnames(result$impmap_trace) <- tr$col_names
+    result$impmap_trace <- .reconstruct_impmap_trace(result$impmap_trace)
   }
 
   class(result) <- "ferx_fit"
@@ -2083,6 +2048,47 @@ ferx_fit <- function(model, data = NULL,
       p_val = round(sw$p.value, 4), flag = flg, stringsAsFactors = FALSE
     )
   }))
+}
+
+# Internal: canonicalise a single `method` token to its engine name, folding
+# the documented case-insensitive aliases before `match.arg`.
+.normalize_method_token <- function(m) {
+  # `tolower` *before* the `[^a-z0-9]` strip - otherwise uppercase letters
+  # get smashed to underscores ("IMP" -> "___") before tolower runs on
+  # them, and the canonicalisation silently drops the case-insensitive
+  # entry points the docs advertise.
+  normalised <- gsub("[^a-z0-9]", "_", tolower(m))
+  # Fold IMP aliases before `match.arg` - partial matching won't see
+  # `importance_sampling` as a prefix of `imp`, so the documented
+  # `c("focei", "importance_sampling")` form has to be mapped explicitly.
+  if (normalised %in% c("importance_sampling", "importancesampling")) {
+    normalised <- "imp"
+  }
+  # IMPMAP aliases. Fold before the IMP set would never match these (they
+  # carry the `_map` suffix), so order is irrelevant; kept explicit for
+  # the documented `"importance_sampling_map"` long form.
+  if (normalised %in% c("importance_sampling_map", "importancesamplingmap")) {
+    normalised <- "impmap"
+  }
+  if (normalised %in% c("bayesian", "mcmc")) {
+    normalised <- "bayes"
+  }
+  # `match.arg` uses exact-match-first semantics, so listing both "imp" and
+  # "impmap" is unambiguous (each exact token wins over the other's prefix).
+  match.arg(
+    normalised,
+    c("foce", "focei", "saem", "gn", "gn_hybrid", "imp", "impmap", "bayes")
+  )
+}
+
+# Internal: rebuild the IMPMAP per-iteration parameter trace from the flat
+# representation the Rust side returns (flat values + n_rows/n_cols/col_names)
+# into a data.frame with one row per Monte-Carlo EM iteration.
+.reconstruct_impmap_trace <- function(tr) {
+  mat <- matrix(tr$flat, nrow = tr$n_rows, ncol = tr$n_cols, byrow = FALSE)
+  df <- as.data.frame(mat)
+  colnames(df) <- tr$col_names
+  df
 }
 
 # Internal: look up SE for omega element (i, j) from se_omega vector.

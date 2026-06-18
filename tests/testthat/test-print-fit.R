@@ -339,3 +339,63 @@ test_that("print.ferx_fit STATUS has no inline category when non-converged fit h
   expect_true(grepl("NOT CONVERGED", status_line))
   expect_false(grepl("\\(", status_line))
 })
+
+# se_omega display (#143): print() shows "SE = ..." for omega diagonal and
+# block off-diagonal elements, reading via .omega_se_at(). Block omega carries
+# a full lower-triangle se_omega; diagonal omega carries one SE per variance.
+
+test_that("print.ferx_fit shows SE for omega diagonal when se_omega is present", {
+  fit <- make_fake_fit(
+    omega    = matrix(0.40, 1, 1),
+    se_omega = 0.05
+  )
+  out <- capture.output(print(fit))
+  omega_line <- out[grepl("OMEGA\\(1,1\\)", out)]
+  expect_length(omega_line, 1L)
+  expect_true(grepl("SE = 0\\.050000", omega_line))
+})
+
+test_that("print.ferx_fit shows off-diagonal SE for block omega (full lower-triangle se_omega)", {
+  om <- matrix(c(0.10, 0.025, 0.025, 0.10), 2, 2)
+  # Full lower-triangle, column-major: [(1,1), (2,1), (2,2)]
+  fit <- make_fake_fit(
+    omega    = om,
+    se_omega = c(0.011, 0.022, 0.033),
+    eta_param_types = c("log_normal", "log_normal")
+  )
+  out <- capture.output(print(fit))
+  # Diagonal SE on the OMEGA(1,1) line.
+  diag_line <- out[grepl("OMEGA\\(1,1\\)", out)]
+  expect_true(grepl("SE = 0\\.011000", diag_line))
+  # Off-diagonal covariance line carries the (2,1) SE.
+  cov_line <- out[grepl("OMEGA\\(2,1\\) : cov =", out)]
+  expect_length(cov_line, 1L)
+  expect_true(grepl("SE = 0\\.022000", cov_line))
+})
+
+test_that("print.ferx_fit omits off-diagonal SE when se_omega is diagonal-only", {
+  om <- matrix(c(0.10, 0.025, 0.025, 0.10), 2, 2)
+  fit <- make_fake_fit(
+    omega    = om,
+    se_omega = c(0.011, 0.033),  # length n_eta -> diagonal-only, no cov SE
+    eta_param_types = c("log_normal", "log_normal")
+  )
+  out <- capture.output(print(fit))
+  cov_line <- out[grepl("OMEGA\\(2,1\\) : cov =", out)]
+  expect_length(cov_line, 1L)
+  expect_false(grepl("SE =", cov_line))
+})
+
+test_that("print.ferx_fit shows off-diagonal SE with named etas (block omega)", {
+  om <- matrix(c(0.10, 0.025, 0.025, 0.10), 2, 2)
+  fit <- make_fake_fit(
+    omega     = om,
+    se_omega  = c(0.011, 0.022, 0.033),
+    eta_names = c("ETA_CL", "ETA_V"),
+    eta_param_types = c("log_normal", "log_normal")
+  )
+  out <- capture.output(print(fit))
+  cov_line <- out[grepl("ETA_CL ~ ETA_V : cov =", out)]
+  expect_length(cov_line, 1L)
+  expect_true(grepl("SE = 0\\.022000", cov_line))
+})
