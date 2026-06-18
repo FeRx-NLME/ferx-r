@@ -2693,6 +2693,8 @@ fn ferx_rust_prepare_frem(
     let ft_names: Vec<String> = result.fremtype_map.iter().map(|(n, _)| n.clone()).collect();
     let ft_vals: Vec<i32> = result.fremtype_map.iter().map(|(_, v)| *v as i32).collect();
 
+    let warnings: Vec<String> = result.warnings.clone();
+
     list!(
         model_path = result.model_path.to_string_lossy().to_string(),
         data_path = result.data_path.to_string_lossy().to_string(),
@@ -2702,7 +2704,8 @@ fn ferx_rust_prepare_frem(
         covariate_var_values = var_vals,
         fremtype_names = ft_names,
         fremtype_values = ft_vals,
-        n_total_etas = result.n_total_etas as i32
+        n_total_etas = result.n_total_etas as i32,
+        warnings = warnings
     )
 }
 

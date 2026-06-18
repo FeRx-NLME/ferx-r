@@ -123,6 +123,12 @@ ferx_to_frem <- function(model,
     output_data_path  = out_data_path
   )
 
+  # Surface conversion-time advisories (e.g. estimated parameters without a
+  # random effect, which IMP/IMPMAP estimate poorly — add an ETA before fitting).
+  for (w in raw$warnings) {
+    warning(w, call. = FALSE)
+  }
+
   # Return a plain ferx_model referencing the generated FREM files, so the
   # result composes with ferx_fit() and the other model helpers. The covariate
   # statistics / FREMTYPE mapping the backend also computes are baked into the
