@@ -688,7 +688,7 @@ ferx_estimates <- function(fit) {
     condition_number   = "Parameters are correlated/ill-scaled. Consider fixing or removing a parameter, or reparameterising.",
     optimizer_health   = "Optimizer struggled (trust region / Hessian). Inspect the trace and consider better starting values.",
     eta_normality      = "ETA distribution may be non-normal. High shrinkage or sparse data can cause this; prefer QQ-plots for diagnosis.",
-    bloq_method        = "BLOQ handling note. Set method = \"focei\" explicitly to silence, or review the M3 setup.",
+    bloq_method        = "LOQ censoring note. Set method = \"focei\" explicitly to silence, or review the M3 setup.",
     sir                = "SIR uncertainty step issue. Ensure covariance = TRUE and inspect SIR tuning (sir_samples / sir_resamples).",
     importance_sampling = "Importance-sampling ESS collapsed for some subjects. Raise is_samples / is_proposal_df or check EBE quality.",
     data_quality       = "Data issue detected. Review the flagged observations in the dataset.",

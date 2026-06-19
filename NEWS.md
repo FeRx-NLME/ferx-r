@@ -13,6 +13,12 @@
 
 ## New features
 
+- **M3 LOQ censoring supports upper limits**: datasets may now use
+  `CENS = -1` to mark observations censored above an upper limit of
+  quantification, with `DV` carrying the ULOQ value. Existing `CENS = 1`
+  lower-limit handling is unchanged. Requires ferx-core with
+  FeRx-NLME/ferx-core#416.
+
 - **FREM covariate analysis** (`ferx_to_frem()`): transforms a base model and
   dataset into a Full Random Effects Model (FREM) that treats covariates as
   additional dependent variables. The extended omega block captures

@@ -293,7 +293,7 @@ ferx_runlog <- function(fit, gradient_tol = 0.1, show_iterations = TRUE, verbose
       lines <- c(lines, sprintf("  Gradient tol:   %.4g", fit$outer_gtol))
     }
     if (!is.null(fit$bloq_method_label) && !is.na(fit$bloq_method_label) && nzchar(fit$bloq_method_label)) {
-      lines <- c(lines, sprintf("  BLOQ method:    %s", fit$bloq_method_label))
+      lines <- c(lines, sprintf("  Censoring:      %s", fit$bloq_method_label))
     }
     if (!is.null(fit$inits_from_nca) && !is.na(fit$inits_from_nca) && nzchar(fit$inits_from_nca)) {
       lines <- c(lines, sprintf("  Initial values: NCA-derived (%s)", fit$inits_from_nca))

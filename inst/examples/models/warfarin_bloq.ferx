@@ -1,6 +1,6 @@
-# One-compartment oral PK model (warfarin) with M3 BLOQ likelihood.
-# Observations below LLOQ=2.0 are flagged via the CENS column in the dataset
-# (data/warfarin-bloq.csv); their DV cell carries the LLOQ value.
+# One-compartment oral PK model (warfarin) with M3 LOQ-censoring likelihood.
+# CENS=1 marks DV as an LLOQ and CENS=-1 marks DV as a ULOQ. This example
+# uses observations below LLOQ=2.0, so their DV cells carry the LLOQ value.
 
 [parameters]
   theta TVCL(0.134, 0.001, 10.0)
