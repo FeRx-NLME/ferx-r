@@ -185,3 +185,14 @@ test_that("[derived] and [output] sections are accepted as optional, not flagged
   expect_true(any(grepl("output", out, ignore.case = TRUE)),
               label = "[output] section should be printed as present")
 })
+
+test_that("bundled igd_inverse_gaussian example validates (igd() parses against the engine)", {
+  # Guards that the bundled inverse-Gaussian example stays parseable by the
+  # pinned ferx-core: validation runs the model through the Rust engine, so a
+  # valid result confirms the built-in `igd(mat, cv2)` input rate is understood
+  # (the data/alias are covered by test-example.R; a full fit is skipped — the
+  # anchor data is mis-specified for IG, so it stalls rather than converges).
+  ex  <- ferx_example("igd_inverse_gaussian")
+  res <- ferx_model_validate(ex$model)
+  expect_true(isTRUE(res$ok))
+})
