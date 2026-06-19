@@ -474,7 +474,7 @@ ferx_estimates <- function(fit) {
   n_eta <- nrow(om)
   for (i in seq_len(n_eta)) {
     pname    <- if (!is.null(fit$eta_names) && length(fit$eta_names) >= i && nzchar(fit$eta_names[i])) fit$eta_names[i] else sprintf("OMEGA(%d,%d)", i, i)
-    se       <- if (!is.null(fit$se_omega) && length(fit$se_omega) >= i) fit$se_omega[i] else NA_real_
+    se       <- .omega_se_at(fit$se_omega, n_eta, i, i)
     init_sd  <- !is.null(fit$omega_init_as_sd) && length(fit$omega_init_as_sd) >= i && isTRUE(fit$omega_init_as_sd[i])
     rows[[length(rows) + 1L]] <- .ferx_est_row(pname, om[i, i], se, "variance", init_sd)
   }

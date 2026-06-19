@@ -21,14 +21,14 @@ ferx_rust_fit <- function(model_path, data_path, method, covariance, verbose, bl
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_simulate <- function(model_path, data_path, n_sim, seed, propensity_match) {
-  .Call("wrap__ferx_rust_simulate", model_path, data_path, n_sim, seed, propensity_match)
+ferx_rust_simulate <- function(model_path, data_path, n_sim, seed, match_method) {
+  .Call("wrap__ferx_rust_simulate", model_path, data_path, n_sim, seed, match_method)
 }
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_simulate_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, n_sim, seed, propensity_match) {
-  .Call("wrap__ferx_rust_simulate_from_fit", model_path, data_path, theta, omega_flat, omega_dim, sigma, n_sim, seed, propensity_match)
+ferx_rust_simulate_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, n_sim, seed, match_method) {
+  .Call("wrap__ferx_rust_simulate_from_fit", model_path, data_path, theta, omega_flat, omega_dim, sigma, n_sim, seed, match_method)
 }
 
 #' @title Internal Rust backend binding
@@ -47,6 +47,12 @@ ferx_rust_predict <- function(model_path, data_path) {
 #' @keywords internal
 ferx_rust_predict_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma) {
   .Call("wrap__ferx_rust_predict_from_fit", model_path, data_path, theta, omega_flat, omega_dim, sigma)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_npde_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, nsim, seed) {
+  .Call("wrap__ferx_rust_npde_from_fit", model_path, data_path, theta, omega_flat, as.integer(omega_dim), sigma, as.integer(nsim), as.integer(seed))
 }
 
 #' @title Internal Rust backend binding
@@ -71,6 +77,12 @@ ferx_rust_validate_model <- function(model_path, data_path) {
 #' @keywords internal
 ferx_rust_inits_from_nca <- function(model_path, data_path, method) {
   .Call("wrap__ferx_rust_inits_from_nca", model_path, data_path, method)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_prepare_frem <- function(model_path, data_path, covariates, categorical_covariates, output_model_path, output_data_path) {
+  .Call("wrap__ferx_rust_prepare_frem", model_path, data_path, as.character(covariates), as.character(categorical_covariates), output_model_path, output_data_path)
 }
 
 # nolint end

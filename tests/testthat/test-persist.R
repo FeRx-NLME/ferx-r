@@ -52,6 +52,29 @@ test_that("covariance step results survive round-trip", {
   expect_equal(unname(loaded$se_theta), unname(fit$se_theta), tolerance = 1e-12)
 })
 
+test_that("bayes posterior summary survives round-trip", {
+  skip_on_cran()
+  fit <- warfarin_bayes_fit()
+  skip_if(is.null(fit$bayes), "no bayes result in this fit")
+
+  path <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(path), add = TRUE)
+  ferx_save_fit(fit, path)
+  loaded <- ferx_load_fit(path)
+
+  expect_false(is.null(loaded$bayes))
+  b0 <- fit$bayes
+  b1 <- loaded$bayes
+  expect_equal(b1$n_chains, b0$n_chains)
+  expect_equal(b1$n_warmup, b0$n_warmup)
+  expect_equal(b1$n_draws_per_chain, b0$n_draws_per_chain)
+  expect_equal(b1$max_rhat, b0$max_rhat, tolerance = 1e-12)
+  expect_equal(b1$param_names, b0$param_names)
+  expect_equal(b1$mean, b0$mean, tolerance = 1e-12)
+  expect_equal(b1$q975, b0$q975, tolerance = 1e-12)
+  expect_equal(b1$ess_bulk, b0$ess_bulk, tolerance = 1e-9)
+})
+
 test_that("predictions survive round-trip (per-row equality)", {
   skip_on_cran()
   fit <- warfarin_fit_cov()

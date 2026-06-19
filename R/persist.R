@@ -371,6 +371,7 @@ ferx_load_fit <- function(path) {
     cov_condition_number = .fitrx_opt_num(fit$cov_condition_number),
 
     sir = .fitrx_build_sir_wire(fit),
+    bayes = .fitrx_build_bayes_wire(fit),
     iov = .fitrx_build_iov_wire(fit),
 
     eta_param_info = .fitrx_build_eta_param_info(fit),
@@ -543,6 +544,28 @@ ferx_load_fit <- function(path) {
     out$sir_ci_theta <- .fitrx_unwrap_ci(w$sir$ci_theta)
     out$sir_ci_omega <- .fitrx_unwrap_ci(w$sir$ci_omega)
     out$sir_ci_sigma <- .fitrx_unwrap_ci(w$sir$ci_sigma)
+  }
+
+  # Bayes posterior summary
+  if (!is.null(w$bayes)) {
+    wb <- w$bayes
+    out$bayes <- list(
+      n_chains = .fitrx_unwrap_opt_num(wb$n_chains),
+      n_warmup = .fitrx_unwrap_opt_num(wb$n_warmup),
+      n_draws_per_chain = .fitrx_unwrap_opt_num(wb$n_draws_per_chain),
+      n_divergent = .fitrx_unwrap_opt_num(wb$n_divergent),
+      max_rhat = .fitrx_unwrap_opt_num(wb$max_rhat),
+      param_names = as.character(unlist(wb$param_names %||% list(), use.names = FALSE)),
+      mean = .fitrx_unwrap_opt_num_vec(wb$mean),
+      sd = .fitrx_unwrap_opt_num_vec(wb$sd),
+      q025 = .fitrx_unwrap_opt_num_vec(wb$q025),
+      median = .fitrx_unwrap_opt_num_vec(wb$median),
+      q975 = .fitrx_unwrap_opt_num_vec(wb$q975),
+      rhat = .fitrx_unwrap_opt_num_vec(wb$rhat),
+      ess_bulk = .fitrx_unwrap_opt_num_vec(wb$ess_bulk),
+      ess_tail = .fitrx_unwrap_opt_num_vec(wb$ess_tail),
+      mcse = .fitrx_unwrap_opt_num_vec(wb$mcse)
+    )
   }
 
   # IOV
@@ -762,6 +785,32 @@ ferx_load_fit <- function(path) {
     ci_sigma = .fitrx_ci_to_wire(fit$sir_ci_sigma),
     ess = .fitrx_opt_num(fit$sir_ess),
     resamples_packed = NULL
+  )
+}
+
+# Bayes posterior summary (method = "bayes"). Stored as scalar metadata plus
+# parallel per-parameter vectors, mirroring the in-memory `$bayes` list so the
+# posterior survives a save/load round-trip (the engine's binary .fitrx does
+# not carry it). NULL for non-Bayes fits.
+.fitrx_build_bayes_wire <- function(fit) {
+  b <- fit$bayes
+  if (is.null(b)) return(NULL)
+  list(
+    n_chains = .fitrx_opt_num(b$n_chains),
+    n_warmup = .fitrx_opt_num(b$n_warmup),
+    n_draws_per_chain = .fitrx_opt_num(b$n_draws_per_chain),
+    n_divergent = .fitrx_opt_num(b$n_divergent),
+    max_rhat = .fitrx_opt_num(b$max_rhat),
+    param_names = as.list(as.character(b$param_names %||% character())),
+    mean = .fitrx_opt_num_vec(b$mean),
+    sd = .fitrx_opt_num_vec(b$sd),
+    q025 = .fitrx_opt_num_vec(b$q025),
+    median = .fitrx_opt_num_vec(b$median),
+    q975 = .fitrx_opt_num_vec(b$q975),
+    rhat = .fitrx_opt_num_vec(b$rhat),
+    ess_bulk = .fitrx_opt_num_vec(b$ess_bulk),
+    ess_tail = .fitrx_opt_num_vec(b$ess_tail),
+    mcse = .fitrx_opt_num_vec(b$mcse)
   )
 }
 

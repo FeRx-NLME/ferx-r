@@ -24,9 +24,11 @@
 #' The mapping from `fit` to the standard NONMEM table columns is:
 #' \itemize{
 #'   \item \strong{sdtab} from `fit$sdtab`: `ID`, `TIME`, `DV`, `PRED`,
-#'     `IPRED`, `CWRES`, `IWRES`, and (when present) `CMT`, `OCC`, `CENS`,
-#'     `TAFD`, `TAD`. `RES = DV - PRED` and `IRES = DV - IPRED` are derived;
-#'     `WRES` is set to `NA` (ferx does not compute the FO-weighted residual).
+#'     `IPRED`, `CWRES`, `IWRES`, and (when present) `NPDE`, `NPD`, `CMT`, `OCC`,
+#'     `CENS`, `TAFD`, `TAD`. `RES = DV - PRED` and `IRES = DV - IPRED` are
+#'     derived; `WRES` is set to `NA` (ferx does not compute the FO-weighted
+#'     residual). `NPDE`/`NPD` (present when the fit ran with `npde_nsim > 0`)
+#'     are mapped to the residual role, so Xpose residual plots can use them.
 #'   \item \strong{patab}: individual parameter values (`fit$individual_estimates`)
 #'     and empirical-Bayes etas (`fit$ebe_etas`), repeated for every observation
 #'     row of each subject.
@@ -38,8 +40,8 @@
 #'
 #' @section Limitations:
 #' Only the table data is populated, not the estimation-iteration trace. Xpose
-#' functions that read the NONMEM `.ext` / `.grd` files — notably
-#' [xpose::prm_vs_iteration()] and [xpose::grd_vs_iteration()] — therefore do
+#' functions that read the NONMEM `.ext` / `.grd` files - notably
+#' [xpose::prm_vs_iteration()] and [xpose::grd_vs_iteration()] - therefore do
 #' not work on the returned object: ferx records only a scalar OFV and gradient
 #' norm per iteration, not the per-parameter value/gradient trajectory those
 #' plots need. For an OFV-over-iterations view use [ferx_plot_trace()] (requires
@@ -156,7 +158,7 @@ ferx_xpose <- function(fit,
     idv     = "TIME",
     dv      = present("DV"),
     pred    = present(c("PRED", "IPRED")),
-    res     = present(c("RES", "IRES", "WRES", "CWRES", "IWRES")),
+    res     = present(c("RES", "IRES", "WRES", "CWRES", "IWRES", "NPDE", "NPD")),
     occ     = present("OCC"),
     param   = param_cols,
     eta     = eta_cols,
@@ -218,7 +220,7 @@ ferx_xpose <- function(fit,
   if (!is.null(types) && length(types) > 0L) {
     nms <- names(types)
     # Normalise the type labels; an NA or unexpected value must not silently
-    # drop a covariate from both sets — warn and treat it as unclassified.
+    # drop a covariate from both sets - warn and treat it as unclassified.
     tt  <- tolower(trimws(as.character(types)))
     cont <- nms[!is.na(tt) & tt == "continuous"]
     cat  <- nms[!is.na(tt) & tt == "categorical"]
@@ -233,7 +235,7 @@ ferx_xpose <- function(fit,
 
   # Empty character vector (not NULL) when the fit declares no covariates, so an
   # override that names an undeclared covariate is always warned about and
-  # dropped — not silently leaked into the tables.
+  # dropped - not silently leaked into the tables.
   known <- names(fit$covariate_types) %||% character(0)
   warn_unknown <- function(x, kind) {
     if (is.null(x)) return(invisible())

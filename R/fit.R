@@ -6,7 +6,9 @@
 #' @param model Path to a \code{.ferx} model file, or a \code{\link{ferx_model}} object.
 #' @param data Path to a NONMEM-format CSV file. Required columns: ID, TIME,
 #'   DV, EVID, AMT, CMT. Optional columns recognised by the engine: RATE
-#'   (infusion rate), MDV (missing-DV flag), II (dosing interval, required when
+#'   (infusion rate; `RATE = -2` infuses `AMT` over a modeled duration given by
+#'   a per-subject parameter `D{n}` on dose compartment `n`, for ODE models),
+#'   MDV (missing-DV flag), II (dosing interval, required when
 #'   SS > 0), SS (steady-state flag: 1 = pre-dose at steady state, 2 = add SS
 #'   concentration to current state), CENS (BLOQ flag for M3 method), OCC
 #'   (occasion index for IOV), and any covariate columns referenced in the
@@ -16,14 +18,27 @@
 #'   previous stage's converged parameters, and only the final stage produces
 #'   the reported covariance/diagnostics. Supported methods: \code{"foce"},
 #'   \code{"focei"}, \code{"saem"}, \code{"gn"} (Gauss-Newton / BHHH),
-#'   \code{"gn_hybrid"} (Gauss-Newton followed by a FOCEI polish step), or
+#'   \code{"gn_hybrid"} (Gauss-Newton followed by a FOCEI polish step),
 #'   \code{"imp"} (also accepted as \code{"importance_sampling"} or
 #'   \code{"importance-sampling"}; importance-sampling marginal
-#'   log-likelihood). The \code{"imp"} stage is a terminal stage that does
+#'   log-likelihood), or \code{"impmap"} (also accepted as
+#'   \code{"importance_sampling_map"}; Importance Sampling assisted by Mode A
+#'   Posteriori, the NONMEM \code{METHOD=IMPMAP} Monte-Carlo EM estimator).
+#'   The \code{"imp"} stage is a terminal stage that does
 #'   not update parameters and must be the *last* entry of the chain, e.g.
 #'   \code{c("focei", "imp")} or \code{c("saem", "imp")}. It may also run
 #'   standalone (\code{method = "imp"}), scoring the model's initial
-#'   parameters. Example chain: \code{c("saem", "focei")}.
+#'   parameters. \code{"impmap"} is a full estimator: it may run standalone
+#'   (\code{method = "impmap"}) or as a chain stage (\code{c("focei", "impmap")}),
+#'   requires a mu-referenced parameterization, and does not yet support IOV.
+#'   Example chain: \code{c("saem", "focei")}.
+#'   \code{"bayes"} (also accepted as \code{"bayesian"} or \code{"mcmc"}) runs
+#'   full MCMC Bayesian estimation (Gibbs-within-HMC, NONMEM \code{METHOD=BAYES}
+#'   parity): it returns posterior means with credible intervals and
+#'   convergence diagnostics on \code{$bayes} rather than a point estimate, and
+#'   runs standalone. Supports BSV and zero-mean inter-occasion variability
+#'   (per-occasion \code{kappa}); the IOV variance posterior appears as
+#'   \code{OMEGA_IOV(...)} in \code{$bayes}.
 #'   SAEM fully supports inter-occasion variability (IOV / kappa) models.
 #' @param covariance Logical; compute the covariance step for standard errors
 #' @param verbose Logical; print progress during estimation
@@ -265,6 +280,20 @@
 #'       Requires an AD build; see examples below.}
 #'   }
 #'
+#'   \strong{Bayes (\code{"bayes"})}
+#'   \describe{
+#'     \item{\code{bayes_warmup}}{Warmup (burn-in + adaptation) sweeps per chain,
+#'       discarded from the posterior (default \code{1000}).}
+#'     \item{\code{bayes_iters}}{Retained sampling sweeps per chain, before
+#'       thinning (default \code{1000}).}
+#'     \item{\code{bayes_chains}}{Number of independent chains (default
+#'       \code{4}); used for split-R-hat.}
+#'     \item{\code{bayes_thin}}{Keep every \code{bayes_thin}-th sampling draw
+#'       (default \code{1}).}
+#'     \item{\code{bayes_seed}}{Base RNG seed for the Bayes sampler. Independent
+#'       of \code{seed} / \code{saem_seed}.}
+#'   }
+#'
 #'   \strong{Gauss-Newton (\code{"gn"} / \code{"gn_hybrid"})}
 #'   \describe{
 #'     \item{\code{gn_lambda}}{Levenberg-Marquardt damping factor (default
@@ -283,6 +312,27 @@
 #'     \item{\code{is_low_ess_threshold}}{ESS fraction below which a subject is
 #'       flagged in \code{fit$importance_sampling$low_ess_subject_ids} (default
 #'       \code{0.1}, i.e. \code{10\%} of \code{is_samples}).}
+#'   }
+#'
+#'   \strong{IMPMAP (\code{"impmap"} estimator)}
+#'   \describe{
+#'     \item{\code{impmap_iterations}}{Number of Monte-Carlo EM iterations
+#'       (default 200).}
+#'     \item{\code{impmap_samples}}{Importance samples drawn per subject per
+#'       iteration (default 300).}
+#'     \item{\code{impmap_proposal_df}}{Proposal degrees of freedom. The string
+#'       \code{"normal"} (default) selects a multivariate-normal proposal (the
+#'       NONMEM default); a number \code{>= 1} selects a heavier-tailed
+#'       Student-t.}
+#'     \item{\code{impmap_averaging}}{Number of final iterations whose parameters
+#'       are averaged into the reported estimate (default 50).}
+#'     \item{\code{impmap_seed}}{RNG seed for the IMPMAP sampling (default chosen
+#'       by the engine).}
+#'     \item{\code{impmap_low_ess_threshold}}{ESS fraction below which a subject
+#'       is flagged as poorly sampled (default \code{0.1}).}
+#'     \item{\code{impmap_trace}}{Logical; when \code{TRUE}, collect
+#'       per-iteration parameter values into \code{fit$impmap_trace}
+#'       (analogous to NONMEM \code{.ext} output). Default \code{FALSE}.}
 #'   }
 #'
 #'   \strong{SIR (Sampling Importance Resampling)}
@@ -341,7 +391,7 @@
 #'   | Residuals, PRED, IPRED, diagnostics | `fit$sdtab` | one row per observation | always |
 #'   | Covariates echoed per observation (via `[output]`) | `fit$sdtab` | one row per observation, LOCF | declared in `[output]` |
 #'   | Raw covariate values for all dataset records | `fit$covtab` | one row per dataset record (doses + obs) | model has `[covariates]` block |
-#'   | ETA / EBE values per observation row | `fit$sdtab` (`ETA_CL`, `ETA_V`, …) | one row per observation, value repeated | always |
+#'   | ETA / EBE values per observation row | `fit$sdtab` (`ETA_CL`, `ETA_V`, ...) | one row per observation, value repeated | always |
 #'   | ETA / EBE values per subject | `fit$ebe_etas` | one row per subject | model declares etas |
 #'   | Individual PK parameters per subject | `fit$individual_estimates` | one row per subject | always |
 #'
@@ -367,7 +417,10 @@
 #'     \code{sigma}: \code{"proportional"} or \code{"additive"}. Combined
 #'     error models report \code{c("proportional", "additive")} in that order.}
 #'   \item{se_theta}{Standard errors for theta (NULL if covariance step failed)}
-#'   \item{se_omega}{Standard errors for omega diagonal}
+#'   \item{se_omega}{Standard errors for omega elements. For diagonal omega,
+#'     a vector of length n_eta (one per variance). For block omega, a vector
+#'     of length n_eta*(n_eta+1)/2 (full lower triangle, column-major) including
+#'     off-diagonal covariance SEs.}
 #'   \item{se_sigma}{Standard errors for sigma (on the SD scale, like
 #'     \code{sigma} itself)}
 #'   \item{sdtab}{Data frame with ID, TIME, DV, PRED, IPRED, CWRES, IWRES,
@@ -380,7 +433,7 @@
 #'     PK parameters or covariates echoed by name) appear at the end of the
 #'     data frame in declaration order.
 #'     ETA columns (\code{ETA_CL}, \code{ETA_V}, etc.) are included
-#'     automatically — the same EBE value is repeated for every observation
+#'     automatically - the same EBE value is repeated for every observation
 #'     row of that subject. For a compact per-subject view use
 #'     \code{fit$ebe_etas}; for individual PK parameter values use
 #'     \code{fit$individual_estimates}.}
@@ -872,8 +925,8 @@
 #' dedicated parameters (e.g. \code{method}, \code{covariance}) cannot be
 #' duplicated in \code{settings} - pass them via the named argument.
 #'
-#' For the complete settings reference — including which options apply to which
-#' method, valid combinations, and a convergence troubleshooting guide — see
+#' For the complete settings reference - including which options apply to which
+#' method, valid combinations, and a convergence troubleshooting guide - see
 #' \href{https://ferx-nlme.github.io/model-dsl/fit-options.html}{ferx-nlme.github.io/model-dsl/fit-options}.
 #'
 #' \strong{Outer optimizer selection:}
@@ -1207,17 +1260,17 @@
 #' @seealso
 #'   \itemize{
 #'     \item \href{https://ferx-nlme.github.io/model-dsl/fit-options.html}{Fit
-#'       options reference} — full documentation of every \code{[fit_options]}
+#'       options reference} - full documentation of every \code{[fit_options]}
 #'       key and \code{settings} knob, organised by method with a
-#'       convergence-troubleshooting guide and a method × option compatibility
+#'       convergence-troubleshooting guide and a method x option compatibility
 #'       table.
-#'     \item \code{\link{ferx_fit_async}} — non-blocking version for long runs.
-#'     \item \code{\link{ferx_check_init}} — 5-iteration pilot to validate
+#'     \item \code{\link{ferx_fit_async}} - non-blocking version for long runs.
+#'     \item \code{\link{ferx_check_init}} - 5-iteration pilot to validate
 #'       starting values before a full run.
-#'     \item \code{\link{ferx_inits_from_nca}} — NCA-derived starting values.
-#'     \item \code{\link{ferx_warnings}} — structured warnings from the fit.
-#'     \item \code{\link{ferx_estimates}} — tidy parameter table with SE / \%RSE.
-#'     \item \code{\link{ferx_plot_trace}} — convergence trace plot.
+#'     \item \code{\link{ferx_inits_from_nca}} - NCA-derived starting values.
+#'     \item \code{\link{ferx_warnings}} - structured warnings from the fit.
+#'     \item \code{\link{ferx_estimates}} - tidy parameter table with SE / \%RSE.
+#'     \item \code{\link{ferx_plot_trace}} - convergence trace plot.
 #'   }
 #' @family fitting
 #' @export
@@ -1312,28 +1365,7 @@ ferx_fit <- function(model, data = NULL,
   if (!is.character(method) || length(method) == 0L) {
     stop("`method` must be a non-empty character vector")
   }
-  method <- vapply(
-    method,
-    function(m) {
-      # `tolower` *before* the `[^a-z0-9]` strip - otherwise uppercase letters
-      # get smashed to underscores ("IMP" -> "___") before tolower runs on
-      # them, and the canonicalisation silently drops the case-insensitive
-      # entry points the docs advertise.
-      normalised <- gsub("[^a-z0-9]", "_", tolower(m))
-      # Fold IMP aliases before `match.arg` - partial matching won't see
-      # `importance_sampling` as a prefix of `imp`, so the documented
-      # `c("focei", "importance_sampling")` form has to be mapped explicitly.
-      if (normalised %in% c("importance_sampling", "importancesampling")) {
-        normalised <- "imp"
-      }
-      match.arg(
-        normalised,
-        c("foce", "focei", "saem", "gn", "gn_hybrid", "imp")
-      )
-    },
-    character(1L),
-    USE.NAMES = FALSE
-  )
+  method <- vapply(method, .normalize_method_token, character(1L), USE.NAMES = FALSE)
   # `imp` is a terminal stage - engine rejects malformed chains too, but
   # surfacing the error R-side avoids a round-trip and gives a clearer message
   # anchored to the R argument. It may run standalone (`method = "imp"`), in
@@ -1352,6 +1384,16 @@ ferx_fit <- function(model, data = NULL,
         "method = c(\"", paste(method, collapse = "\", \""), "\")"
       )
     }
+  }
+  # `bayes` is a standalone MCMC estimator - it does not warm-start from or feed
+  # another stage, and chaining it would run the (expensive) sampler and then
+  # silently discard its posterior (the final stage's result wins). Reject
+  # chains R-side rather than waste the run.
+  if (any(method == "bayes") && length(method) > 1L) {
+    stop(
+      "`\"bayes\"` must be the only method (it runs standalone); got ",
+      "method = c(\"", paste(method, collapse = "\", \""), "\")"
+    )
   }
   if (is.null(bloq_method)) {
     bloq_arg <- ""
@@ -1824,6 +1866,12 @@ ferx_fit <- function(model, data = NULL,
   # ETA normality). No string re-parsing of core messages happens here.
   result$warnings_structured <- .ferx_assemble_structured_warnings(raw, result)
 
+  # Reconstruct the per-iteration IMPMAP parameter trace as a data.frame.
+  # The Rust side passes flat vectors + metadata; NULL when not collected.
+  if (!is.null(result$impmap_trace)) {
+    result$impmap_trace <- .reconstruct_impmap_trace(result$impmap_trace)
+  }
+
   class(result) <- "ferx_fit"
 
   if (!is.null(output)) {
@@ -2000,6 +2048,81 @@ ferx_fit <- function(model, data = NULL,
       p_val = round(sw$p.value, 4), flag = flg, stringsAsFactors = FALSE
     )
   }))
+}
+
+# Internal: canonicalise a single `method` token to its engine name, folding
+# the documented case-insensitive aliases before `match.arg`.
+.normalize_method_token <- function(m) {
+  # `tolower` *before* the `[^a-z0-9]` strip - otherwise uppercase letters
+  # get smashed to underscores ("IMP" -> "___") before tolower runs on
+  # them, and the canonicalisation silently drops the case-insensitive
+  # entry points the docs advertise.
+  normalised <- gsub("[^a-z0-9]", "_", tolower(m))
+  # Fold IMP aliases before `match.arg` - partial matching won't see
+  # `importance_sampling` as a prefix of `imp`, so the documented
+  # `c("focei", "importance_sampling")` form has to be mapped explicitly.
+  if (normalised %in% c("importance_sampling", "importancesampling")) {
+    normalised <- "imp"
+  }
+  # IMPMAP aliases. Fold before the IMP set would never match these (they
+  # carry the `_map` suffix), so order is irrelevant; kept explicit for
+  # the documented `"importance_sampling_map"` long form.
+  if (normalised %in% c("importance_sampling_map", "importancesamplingmap")) {
+    normalised <- "impmap"
+  }
+  if (normalised %in% c("bayesian", "mcmc")) {
+    normalised <- "bayes"
+  }
+  # `match.arg` uses exact-match-first semantics, so listing both "imp" and
+  # "impmap" is unambiguous (each exact token wins over the other's prefix).
+  match.arg(
+    normalised,
+    c("foce", "focei", "saem", "gn", "gn_hybrid", "imp", "impmap", "bayes")
+  )
+}
+
+# Internal: rebuild the IMPMAP per-iteration parameter trace from the flat
+# representation the Rust side returns (flat values + n_rows/n_cols/col_names)
+# into a data.frame with one row per Monte-Carlo EM iteration.
+.reconstruct_impmap_trace <- function(tr) {
+  mat <- matrix(tr$flat, nrow = tr$n_rows, ncol = tr$n_cols, byrow = FALSE)
+  df <- as.data.frame(mat)
+  colnames(df) <- tr$col_names
+  df
+}
+
+# Internal: look up SE for omega element (i, j) from se_omega vector.
+# se_omega may be diagonal-only (length n_eta) or full lower-triangle
+# (length n_eta*(n_eta+1)/2, column-major).
+.omega_se_at <- function(se_omega, n_eta, i, j) {
+  if (is.null(se_omega)) return(NA_real_)
+  # Ensure r >= c (symmetric)
+  r <- max(i, j); c <- min(i, j)
+  n_lt <- n_eta * (n_eta + 1L) / 2L
+  if (length(se_omega) == n_lt && n_lt != n_eta) {
+    # Full lower-triangle (block omega)
+    col_offset <- if (c == 1L) 0L else (c - 1L) * n_eta - (c - 1L) * (c - 2L) / 2L
+    idx <- col_offset + (r - c) + 1L  # 1-based
+    if (idx >= 1L && idx <= length(se_omega)) se_omega[idx] else NA_real_
+  } else {
+    # Diagonal-only
+    if (r == c && r <= length(se_omega)) se_omega[r] else NA_real_
+  }
+}
+
+# Split-R-hat above this flags a Bayes fit as not-yet-converged. Single source
+# of truth for the [!] marker shown by print.ferx_fit and print.ferx_summary.
+.FERX_BAYES_RHAT_THRESHOLD <- 1.01
+
+# Styled "[!]" marker (yellow where colour is available, matching the shrinkage
+# flag) when `max_rhat` exceeds the threshold; "" otherwise. Leading spaces
+# separate it from the preceding text.
+.ferx_bayes_rhat_flag <- function(max_rhat) {
+  if (is.finite(max_rhat) && max_rhat > .FERX_BAYES_RHAT_THRESHOLD) {
+    paste0("  ", .ferx_style("[!]", "yellow"))
+  } else {
+    ""
+  }
 }
 
 #' @export
@@ -2183,11 +2306,8 @@ print.ferx_fit <- function(x, ...) {
     var_ii   <- om[i, i]
     eta_type <- if (!is.null(x$eta_param_types) && length(x$eta_param_types) >= i) x$eta_param_types[i] else "log_normal"
     linked_theta_name <- if (!is.null(x$eta_linked_theta) && length(x$eta_linked_theta) >= i) x$eta_linked_theta[i] else ""
-    se_str <- if (!is.null(x$se_omega) && length(x$se_omega) >= i) {
-      sprintf("%.6f", x$se_omega[i])
-    } else {
-      "N/A"
-    }
+    se_val <- .omega_se_at(x$se_omega, n_eta, i, i)
+    se_str <- if (!is.na(se_val)) sprintf("%.6f", se_val) else "N/A"
 
     extra <- if (eta_type == "log_normal") {
       cv <- if (var_ii > 0) sqrt(exp(var_ii) - 1) * 100 else 0
@@ -2246,18 +2366,20 @@ print.ferx_fit <- function(x, ...) {
           if (var_i > 0 && var_j > 0) cov_ij / (sqrt(var_i) * sqrt(var_j)) else 0
         }
         corr_label <- if (!is.null(x$omega_param_corr)) "param corr" else "corr"
+        se_ij <- .omega_se_at(x$se_omega, n_eta, i, j)
+        se_part <- if (!is.na(se_ij)) sprintf("  SE = %.6f", se_ij) else ""
         has_nms <- !is.null(x$eta_names) && length(x$eta_names) >= i
         if (has_nms) {
           lbl_i <- if (nzchar(x$eta_names[i])) x$eta_names[i] else sprintf("OMEGA(%d,%d)", i, i)
           lbl_j <- if (nzchar(x$eta_names[j])) x$eta_names[j] else sprintf("OMEGA(%d,%d)", j, j)
           cat(sprintf(
-            "  %s ~ %s : cov = %.6f  (%s = %.4f)\n",
-            lbl_i, lbl_j, cov_ij, corr_label, param_corr
+            "  %s ~ %s : cov = %.6f  (%s = %.4f)%s\n",
+            lbl_i, lbl_j, cov_ij, corr_label, param_corr, se_part
           ))
         } else {
           cat(sprintf(
-            "  OMEGA(%d,%d) : cov = %.6f  (%s = %.4f)\n",
-            i, j, cov_ij, corr_label, param_corr
+            "  OMEGA(%d,%d) : cov = %.6f  (%s = %.4f)%s\n",
+            i, j, cov_ij, corr_label, param_corr, se_part
           ))
         }
       }
@@ -2418,6 +2540,41 @@ print.ferx_fit <- function(x, ...) {
         "  Low-ESS subjects (ESS/K below threshold): %d\n",
         length(low_ids)
       ))
+    }
+  }
+
+  # BAYES posterior summary (method = "bayes", terminal stage)
+  if (!is.null(x$bayes)) {
+    b <- x$bayes
+    cat("\n", .ferx_style("BAYES  (posterior summary)", "bold"), "\n", sep = "")
+    cat(strrep("-", 60), "\n", sep = "")
+    flag <- .ferx_bayes_rhat_flag(b$max_rhat)
+    cat(sprintf(
+      "  Chains: %d   Warmup: %d   Draws/chain: %d   Divergent: %d   Max R-hat: %.4f%s\n",
+      as.integer(b$n_chains), as.integer(b$n_warmup),
+      as.integer(b$n_draws_per_chain), as.integer(b$n_divergent),
+      b$max_rhat, flag
+    ))
+    if (!is.null(b$param_names) && length(b$param_names) > 0L) {
+      # Assemble the parallel posterior vectors into one table so the column
+      # set is declared in a single place.
+      tbl <- data.frame(
+        param = b$param_names,
+        mean = b$mean, sd = b$sd, q025 = b$q025, q975 = b$q975,
+        rhat = b$rhat, ess = b$ess_bulk,
+        stringsAsFactors = FALSE
+      )
+      cat(sprintf(
+        "  %-14s %11s %10s %11s %11s %7s %8s\n",
+        "Parameter", "Mean", "SD", "2.5%", "97.5%", "R-hat", "ESS"
+      ))
+      for (i in seq_len(nrow(tbl))) {
+        cat(sprintf(
+          "  %-14s %11.4g %10.4g %11.4g %11.4g %7.3f %8.0f\n",
+          tbl$param[i], tbl$mean[i], tbl$sd[i],
+          tbl$q025[i], tbl$q975[i], tbl$rhat[i], tbl$ess[i]
+        ))
+      }
     }
   }
 
@@ -2618,6 +2775,7 @@ summary.ferx_fit <- function(object, ...) {
     model_file_settings = x$model_file_settings %||% list(),
     sir_ess = x$sir_ess,
     importance_sampling = x$importance_sampling,
+    bayes = x$bayes,
     warnings = x$warnings,
     uses_sde = isTRUE(x$uses_sde),
     dw_statistic = x$dw_statistic,
@@ -2657,6 +2815,15 @@ print.ferx_summary <- function(x, ...) {
   cat(sprintf("ferx v%s (core v%s)\n",
               as.character(utils::packageVersion("ferx")),
               x$ferx_version %||% "?"))
+
+  if (!is.null(x$bayes)) {
+    b <- x$bayes
+    cat(sprintf(
+      "Bayes:     %d chains, %d draws/chain, max R-hat = %.4f%s\n",
+      as.integer(b$n_chains), as.integer(b$n_draws_per_chain), b$max_rhat,
+      .ferx_bayes_rhat_flag(b$max_rhat)
+    ))
+  }
 
   if (length(x$model_file_settings) > 0L || length(x$call_settings) > 0L) {
     cat("\nSettings (model file / call-time override):\n")

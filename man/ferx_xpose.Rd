@@ -38,9 +38,11 @@ Produces an in-memory Xpose object so that all downstream Xpose diagnostics
 The mapping from \code{fit} to the standard NONMEM table columns is:
 \itemize{
 \item \strong{sdtab} from \code{fit$sdtab}: \code{ID}, \code{TIME}, \code{DV}, \code{PRED},
-\code{IPRED}, \code{CWRES}, \code{IWRES}, and (when present) \code{CMT}, \code{OCC}, \code{CENS},
-\code{TAFD}, \code{TAD}. \code{RES = DV - PRED} and \code{IRES = DV - IPRED} are derived;
-\code{WRES} is set to \code{NA} (ferx does not compute the FO-weighted residual).
+\code{IPRED}, \code{CWRES}, \code{IWRES}, and (when present) \code{NPDE}, \code{NPD}, \code{CMT}, \code{OCC},
+\code{CENS}, \code{TAFD}, \code{TAD}. \code{RES = DV - PRED} and \code{IRES = DV - IPRED} are
+derived; \code{WRES} is set to \code{NA} (ferx does not compute the FO-weighted
+residual). \code{NPDE}/\code{NPD} (present when the fit ran with \code{npde_nsim > 0})
+are mapped to the residual role, so Xpose residual plots can use them.
 \item \strong{patab}: individual parameter values (\code{fit$individual_estimates})
 and empirical-Bayes etas (\code{fit$ebe_etas}), repeated for every observation
 row of each subject.
@@ -53,8 +55,8 @@ when echoed there, otherwise carried forward (LOCF) from \code{fit$covtab}.
 \section{Limitations}{
 
 Only the table data is populated, not the estimation-iteration trace. Xpose
-functions that read the NONMEM \code{.ext} / \code{.grd} files — notably
-\code{\link[xpose:prm_vs_iteration]{xpose::prm_vs_iteration()}} and \code{\link[xpose:grd_vs_iteration]{xpose::grd_vs_iteration()}} — therefore do
+functions that read the NONMEM \code{.ext} / \code{.grd} files - notably
+\code{\link[xpose:prm_vs_iteration]{xpose::prm_vs_iteration()}} and \code{\link[xpose:grd_vs_iteration]{xpose::grd_vs_iteration()}} - therefore do
 not work on the returned object: ferx records only a scalar OFV and gradient
 norm per iteration, not the per-parameter value/gradient trajectory those
 plots need. For an OFV-over-iterations view use \code{\link[=ferx_plot_trace]{ferx_plot_trace()}} (requires

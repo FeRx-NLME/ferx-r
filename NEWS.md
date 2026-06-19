@@ -1,5 +1,16 @@
 # ferx (development)
 
+## Performance
+
+- **`ferx_fit()` no longer pays a ~100 ms per-call latency floor.** The R-interrupt
+  poll loop in the Rust binding slept a fixed 100 ms between checks, so any fit
+  that finished in between (single-subject MAP/posthoc, small datasets, quick
+  refits) still took ~0.1 s of wall time regardless of the engine's actual
+  runtime. The worker now signals completion on a channel, so the call returns
+  the instant the fit finishes; `POLL_MS` bounds only Ctrl-C latency. A
+  single-subject fixed-parameter MAP fit drops from ~0.118 s to ~0.005–0.009 s
+  (~13–24×); estimates and interrupt behaviour are unchanged. (#178)
+
 ## New features
 
 - **Inverse-Gaussian (Freijer & Post) absorption — `igd(mat, cv2)`**: a new
@@ -12,6 +23,55 @@
   against a NONMEM `$DES` inverse-Gaussian run. (Requires ferx-core with
   FeRx-NLME/ferx-core#347; the biphasic Freijer sum-of-two is a planned follow-up,
   FeRx-NLME/ferx-core#388.)
+
+- **FREM covariate analysis** (`ferx_to_frem()`): transforms a base model and
+  dataset into a Full Random Effects Model (FREM) that treats covariates as
+  additional dependent variables. The extended omega block captures
+  covariate-parameter relationships in a single fit, avoiding stepwise search.
+  Covariates (and their continuous/categorical kind) are taken from the model's
+  `[covariates]` block; the `covariates` argument is an optional subset filter
+  to FREM only some of them. Returns a `ferx_model` referencing the generated
+  model and data files, so it composes directly: `ferx_fit(ferx_to_frem(...))`.
+  (#194)
+
+- **IMPMAP estimator**: `ferx_fit(..., method = "impmap")` (alias
+  `"importance_sampling_map"`) runs the NONMEM `METHOD=IMPMAP` Monte-Carlo EM
+  estimator — importance sampling assisted by mode-a-posteriori re-centering.
+  Runs standalone or as a chain stage (`c("focei", "impmap")`). Tuned via
+  `settings` keys `impmap_iterations`, `impmap_samples`, `impmap_proposal_df`
+  (`"normal"` for the MVN proposal, or a Student-t DoF), `impmap_averaging`,
+  `impmap_seed`, `impmap_low_ess_threshold`. Requires a mu-referenced
+  parameterization; IOV is not yet supported. Needs a ferx-core that provides
+  the `impmap` method (separate `Cargo.lock` bump). (ferx-core #270)
+- **Modeled infusion duration (`RATE = -2`)** for ODE models: a NONMEM
+  `RATE = -2` dose now infuses `AMT` over a *modeled* duration — declare an
+  individual parameter `D{n}` for the dose compartment `n` and ferx infuses at
+  rate `AMT / D{n}`, resolved per iteration and occasion (so it carries
+  covariate and IOV effects). Composes with `F{n}` and `ALAG{n}`, steady state,
+  multi-dose, and system resets. A `RATE = -2` dose with no matching `D{n}`
+  parameter — or on an analytical model — is a clear error rather than a silent
+  bolus, and a `D{n}` that is non-positive at the initial estimate is flagged.
+  Handled entirely in the data reader and model parser, so no R-side change is
+  needed. (Requires ferx-core with FeRx-NLME/ferx-core#384.)
+
+- **`ferx_npde(fit, nsim, seed)`**: compute simulation-based NPDE (Normalized
+  Prediction Distribution Errors, decorrelated within subject) and NPD
+  (Normalized Prediction Discrepancies) post-hoc from an existing fit, without
+  re-running `ferx_fit()`. Useful when a model was fitted without
+  `[fit_options] npde_nsim`. Returns the `fit` with `NPDE`/`NPD` columns added
+  to `fit$sdtab`, so `ferx_xpose()` and goodness-of-fit plots pick them up
+  automatically; model/data default to the paths recorded on the fit.
+  (ferx-r #172, requires ferx-core #377)
+  
+- **Bayesian estimation (`method = "bayes"`)**: full MCMC posterior sampling
+  (Gibbs-within-HMC, NONMEM `METHOD=BAYES` parity). Returns posterior means
+  with 95% credible intervals and convergence diagnostics (split-R-hat, ESS) on
+  `fit$bayes` instead of a point estimate; `print()` shows a posterior-summary
+  table. Tuning via `settings = list(bayes_warmup=, bayes_iters=, bayes_chains=,
+  bayes_thin=, bayes_seed=)`. Supports BSV and zero-mean inter-occasion
+  variability (per-occasion `kappa`; the IOV variance posterior appears as
+  `OMEGA_IOV(...)`). Validated against FOCEI and NONMEM `METHOD=BAYES` on
+  warfarin (ferx-core #380).
 
 - **`ode_template` — generate the disposition ODE**: `ode_template NAME(...)`
   in `[structural_model]` writes the standard disposition ODE for a named model
@@ -38,7 +98,10 @@
   does not compute the FO-weighted residual). The estimation-iteration trace is
   not populated, so `xpose::prm_vs_iteration()` / `grd_vs_iteration()` are not
   supported (pending an engine change); use `ferx_plot_trace()` for OFV over
-  iterations. (ferx-r #165)
+  iterations. When the fit carries simulation-based `NPDE`/`NPD` columns (from
+  `[fit_options] npde_nsim > 0`), they are mapped to the Xpose residual role, so
+  residual diagnostics (e.g. `xpose::res_vs_idv(xpdb, res = "NPDE")`) work on
+  them out-of-the-box. (ferx-r #165)
 
 - **Configurable ODE solver tolerance**: ODE models accept `ode_reltol`
   (default `1e-4`), `ode_abstol` (default `1e-6`), and `ode_max_steps`
@@ -68,15 +131,18 @@
   individual parameter -- applied at the dose by the engine -- and baked into
   the absorption flux). (#127)
 
-- **Propensity-score-matched simulation**: `ferx_simulate(..., match = TRUE)`
-  reassigns each replicate's drawn etas to subjects by optimal Mahalanobis
-  matching (under the model omega) against the subjects' fitted (posthoc) etas,
-  so a subject's observed dosing/sampling design is paired with a similar drawn
-  eta. This corrects VPC bias from treatment adaptation in real-world data
-  (e.g. longer dosing intervals for high-clearance patients). Requires observed
-  data; the posthoc etas use the fitted parameters when a `fit` is supplied.
-  Needs a ferx-core that provides `simulate_with_options` (separate `Cargo.lock`
-  bump). (ferx-core #288)
+- **Propensity-score-matched simulation**: `ferx_simulate(..., match = ...)`
+  reassigns each replicate's drawn etas to subjects by Mahalanobis matching
+  (under the model omega) against the subjects' fitted (posthoc) etas, so a
+  subject's observed dosing/sampling design is paired with a similar drawn eta.
+  This corrects VPC bias from treatment adaptation in real-world data (e.g.
+  longer dosing intervals for high-clearance patients). `match` accepts
+  `FALSE`/`"none"` (off), `"optimal"` (or `TRUE`; global linear-assignment
+  minimum, best on average and recommended), `"nearest"` (greedy
+  nearest-neighbour), or `"rank"` (pair by Mahalanobis-norm rank). Requires
+  observed data; the posthoc etas use the fitted parameters when a `fit` is
+  supplied. Needs a ferx-core that provides `simulate_with_options` with the
+  `match_method` option (separate `Cargo.lock` bump). (ferx-core #288, #396)
 
 - **Standalone importance sampling**: `ferx_fit(..., method = "imp")` now runs
   without a preceding estimator, scoring the model's initial parameters
