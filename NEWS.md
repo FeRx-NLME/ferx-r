@@ -1,13 +1,18 @@
-# ferx (development)
+# ferx 0.1.6
 
 ## Breaking changes
 
-- **Importance-sampling settings renamed `is_*` to `imp_*`** to match the
-  ferx-core rename (FeRx-NLME/ferx-core#422). The `method = "imp"` tuning keys
-  are now `imp_samples`, `imp_proposal_df`, `imp_seed`, and
-  `imp_low_ess_threshold`; the fit result field `fit$is_seed` is now
-  `fit$imp_seed`. The engine no longer accepts the legacy `is_*` keys, so update
-  any `ferx_fit(settings = list(is_... = ))` calls.
+- **`fit$is_seed` is now `fit$imp_seed`** in the fit result (not aliased),
+  matching the ferx-core importance-sampling option rename
+  (FeRx-NLME/ferx-core#422).
+
+## Deprecations
+
+- **Importance-sampling `settings` keys `is_*` are deprecated** in favour of
+  `imp_*` (`imp_samples`, `imp_proposal_df`, `imp_seed`, `imp_low_ess_threshold`).
+  The legacy `is_*` spellings are still accepted - `ferx_fit()` translates them
+  to `imp_*` and warns - but the underlying engine only understands `imp_*`, so
+  migrate when convenient.
 
 ## Performance
 

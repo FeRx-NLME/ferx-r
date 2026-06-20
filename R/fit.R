@@ -315,6 +315,11 @@
 #'       \code{0.1}, i.e. \code{10\%} of \code{imp_samples}).}
 #'   }
 #'
+#'   The legacy importance-sampling key spellings \code{is_samples},
+#'   \code{is_proposal_df}, \code{is_seed}, and \code{is_low_ess_threshold} are
+#'   still accepted (translated to the \code{imp_*} names above, with a
+#'   deprecation warning); new code should use \code{imp_*}.
+#'
 #'   \strong{IMPMAP (\code{"impmap"} estimator)}
 #'   \describe{
 #'     \item{\code{impmap_iterations}}{Number of Monte-Carlo EM iterations
@@ -2991,6 +2996,45 @@ print.ferx_summary <- function(x, ...) {
   v
 }
 
+# Back-compat shim for ferx-core #422, which renamed the importance-sampling fit
+# options is_* -> imp_* and made the engine reject the legacy is_* keys. Accept
+# the old spellings here, translate them to imp_*, and warn (deprecated). If both
+# the legacy and modern spelling are supplied, the modern one wins.
+.ferx_migrate_legacy_is_settings <- function(settings) {
+  nms <- names(settings)
+  if (is.null(nms)) {
+    return(settings)
+  }
+  legacy <- c(
+    is_samples           = "imp_samples",
+    is_proposal_df       = "imp_proposal_df",
+    is_seed              = "imp_seed",
+    is_low_ess_threshold = "imp_low_ess_threshold"
+  )
+  hit <- intersect(nms, names(legacy))
+  if (length(hit) == 0L) {
+    return(settings)
+  }
+  new <- unname(legacy[hit])
+  warning(
+    "Importance-sampling settings ",
+    paste0("`", hit, "`", collapse = ", "),
+    " are deprecated (renamed in ferx-core #422); use ",
+    paste0("`", new, "`", collapse = ", "),
+    " instead. The legacy name(s) were translated automatically.",
+    call. = FALSE
+  )
+  for (i in seq_along(hit)) {
+    if (new[i] %in% names(settings)) {
+      # modern spelling also supplied - it wins; drop the legacy duplicate
+      settings[[hit[i]]] <- NULL
+    } else {
+      names(settings)[match(hit[i], names(settings))] <- new[i]
+    }
+  }
+  settings
+}
+
 # Convert a named-list of settings into two parallel character vectors for the
 # Rust FFI. Each value is stringified in a Rust-parser-friendly form (logicals
 # ? "true"/"false", numerics with full precision, NULL/NA ? "null"). Strict
@@ -3005,6 +3049,7 @@ print.ferx_summary <- function(x, ...) {
   if (length(settings) == 0L) {
     return(list(keys = character(0), values = character(0)))
   }
+  settings <- .ferx_migrate_legacy_is_settings(settings)
   nms <- names(settings)
   if (is.null(nms) || any(!nzchar(nms)) || anyDuplicated(nms) != 0L) {
     stop("`settings` must be a uniquely-named list (all entries must have a non-empty name)")
