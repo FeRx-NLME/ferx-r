@@ -45,3 +45,12 @@ test_that("the shim runs end-to-end through .ferx_settings_to_strings", {
   expect_identical(parts$keys, "imp_seed")
   expect_identical(parts$values, "7")
 })
+
+test_that("a duplicated legacy key is rejected by the uniqueness check, not leaked", {
+  # Migration runs after the uniqueness check, so a duplicated legacy key is a
+  # clean "uniquely-named" error rather than a half-renamed key reaching Rust.
+  expect_error(
+    suppressWarnings(to_strings(list(is_samples = 1L, is_samples = 2L))),
+    "uniquely-named"
+  )
+})

@@ -3049,11 +3049,14 @@ print.ferx_summary <- function(x, ...) {
   if (length(settings) == 0L) {
     return(list(keys = character(0), values = character(0)))
   }
-  settings <- .ferx_migrate_legacy_is_settings(settings)
   nms <- names(settings)
   if (is.null(nms) || any(!nzchar(nms)) || anyDuplicated(nms) != 0L) {
     stop("`settings` must be a uniquely-named list (all entries must have a non-empty name)")
   }
+  # Translate legacy is_* keys only after the input is known well-formed, so a
+  # duplicated legacy key can't be partially renamed past the check above.
+  settings <- .ferx_migrate_legacy_is_settings(settings)
+  nms <- names(settings)
   stringify <- function(key, v) {
     if (is.null(v) || (length(v) == 1L && is.na(v))) {
       return("null")
