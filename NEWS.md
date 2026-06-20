@@ -1,4 +1,12 @@
-# ferx (development)
+# ferx 0.1.6
+
+## Breaking changes
+
+- **Importance-sampling result/settings names use the `imp_*` prefix.**
+  `fit$is_seed` is now `fit$imp_seed`, and IMP settings now use
+  `imp_samples`, `imp_proposal_df`, `imp_seed`, and
+  `imp_low_ess_threshold`. The short-lived `is_*` names are no longer accepted,
+  matching ferx-core (FeRx-NLME/ferx-core#422).
 
 ## Performance
 
@@ -18,6 +26,16 @@
   quantification, with `DV` carrying the ULOQ value. Existing `CENS = 1`
   lower-limit handling is unchanged. Requires ferx-core with
   FeRx-NLME/ferx-core#416.
+- **Inverse-Gaussian (Freijer & Post) absorption — `igd(mat, cv2)`**: a new
+  built-in absorption input rate for `[odes]` models, alongside `transit(...)`.
+  It adds an inverse-Gaussian absorption-time distribution — mean absorption time
+  `MAT`, relative dispersion `CV2` (= Var/mean²) — fed straight into the central
+  compartment, modelling the entire absorption delay in one term (no first-order
+  `ka`). The dose feeds the density over time (∫ R_in dt = F·Dose), not as a
+  bolus, exactly like `transit(...)`. New example `igd_inverse_gaussian`. Anchored
+  against a NONMEM `$DES` inverse-Gaussian run. (Requires ferx-core with
+  FeRx-NLME/ferx-core#347; the biphasic Freijer sum-of-two is a planned follow-up,
+  FeRx-NLME/ferx-core#388.)
 
 - **FREM covariate analysis** (`ferx_to_frem()`): transforms a base model and
   dataset into a Full Random Effects Model (FREM) that treats covariates as
@@ -38,16 +56,29 @@
   `impmap_seed`, `impmap_low_ess_threshold`. Requires a mu-referenced
   parameterization; IOV is not yet supported. Needs a ferx-core that provides
   the `impmap` method (separate `Cargo.lock` bump). (ferx-core #270)
-- **Modeled infusion duration (`RATE = -2`)** for ODE models: a NONMEM
+- **Modeled infusion duration (`RATE = -2`)**: a NONMEM
   `RATE = -2` dose now infuses `AMT` over a *modeled* duration — declare an
   individual parameter `D{n}` for the dose compartment `n` and ferx infuses at
   rate `AMT / D{n}`, resolved per iteration and occasion (so it carries
-  covariate and IOV effects). Composes with `F{n}` and `ALAG{n}`, steady state,
+  covariate and IOV effects), on **both** the analytical `pk(...)` engine and
+  `ode(...)` models. Composes with `F{n}` and `ALAG{n}`, steady state,
   multi-dose, and system resets. A `RATE = -2` dose with no matching `D{n}`
-  parameter — or on an analytical model — is a clear error rather than a silent
+  parameter is a clear error rather than a silent
   bolus, and a `D{n}` that is non-positive at the initial estimate is flagged.
   Handled entirely in the data reader and model parser, so no R-side change is
   needed. (Requires ferx-core with FeRx-NLME/ferx-core#384.)
+
+- **Modeled infusion rate (`RATE = -1`)**: a NONMEM `RATE = -1` dose now infuses
+  `AMT` at a *modeled* rate — declare an individual parameter `R{n}` for the dose
+  compartment `n` and ferx infuses at rate `R{n}` (duration `AMT / R{n}`),
+  resolved per iteration and occasion (so it carries covariate and IOV effects).
+  The mirror of the modeled-duration `RATE = -2`, supported on **both** the
+  analytical `pk(...)` engine and `ode(...)` models. Composes with `F{n}` and
+  `ALAG{n}`, steady state, multi-dose, and system resets. A `RATE = -1` dose with
+  no matching `R{n}` parameter is a clear error rather than a silent bolus, and an
+  `R{n}` that is non-positive at the initial estimate is flagged. Handled entirely
+  in the data reader and model parser, so no R-side change is needed. (Requires
+  ferx-core with FeRx-NLME/ferx-core#418.)
 
 - **`ferx_npde(fit, nsim, seed)`**: compute simulation-based NPDE (Normalized
   Prediction Distribution Errors, decorrelated within subject) and NPD
@@ -67,7 +98,7 @@
   variability (per-occasion `kappa`; the IOV variance posterior appears as
   `OMEGA_IOV(...)`). Validated against FOCEI and NONMEM `METHOD=BAYES` on
   warfarin (ferx-core #380).
-  
+
 - **`ode_template` — generate the disposition ODE**: `ode_template NAME(...)`
   in `[structural_model]` writes the standard disposition ODE for a named model
   (`one`/`two`/`three_cpt` `iv`/`oral`) for you — the same states, micro-constant
@@ -291,7 +322,7 @@
   → `THETA(i)`.
 
 - `ferx_runlog()`: `model_text`, `inits_from_nca`, and seed fields
-  (`multi_start_seed`, `saem_seed`, `sir_seed_used`, `is_seed`) now guard
+  (`multi_start_seed`, `saem_seed`, `sir_seed_used`, `imp_seed`) now guard
   against `NA_character_` / `NA_real_` values that extendr emits for Rust
   `Option<T>::None`, preventing spurious "NA" entries in the run log.
 
@@ -454,7 +485,7 @@
   parallel `low_ess_subject_ids`/`low_ess_subject_frac` vectors).
   `print(fit)` and `summary(fit)` render the new block. New
   IMP-specific settings keys are recognized by `ferx_fit(settings = ...)`:
-  `is_samples`, `is_proposal_df`, `is_seed`, `is_low_ess_threshold`.
+  `imp_samples`, `imp_proposal_df`, `imp_seed`, `imp_low_ess_threshold`.
   Requires ferx-core with importance-sampling support merged
   (FeRx-NLME/ferx-core IMP PR).
 

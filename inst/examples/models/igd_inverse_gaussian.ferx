@@ -1,0 +1,50 @@
+# Inverse-Gaussian (Freijer & Post) absorption -- built-in `igd()` input rate.
+#
+# One-compartment model with an inverse-Gaussian absorption-time distribution fed
+# straight into the central compartment (no first-order `ka` -- igd() models the
+# entire absorption delay):
+#
+#   R_in(tad) = F*Dose * sqrt(MAT/(2*pi*CV2*tad^3)) * exp(-(tad-MAT)^2/(2*CV2*MAT*tad))
+#
+# the inverse-Gaussian density with mean absorption time MAT and relative
+# dispersion CV2 (= Var/mean^2). The dose feeds the density over time
+# (integral R_in dt = F*Dose) and is NOT also added as a bolus. `central` is an
+# AMOUNT; concentration = amount / V via [scaling].
+#
+# Paired with igd_oral.csv -- the ferx-core NONMEM igd anchor dataset (20 subjects,
+# single oral dose). NOTE: that data was simulated from a transit model, so the IG
+# fit is mildly mis-specified (a syntax / implementation demo, not a parameter-
+# recovery demo). See ferx-core `nonmem_anchor/freijer_ig.ctl`.
+
+[parameters]
+  theta TVCL(5.0,   0.1, 100.0)   # clearance (L/h)
+  theta TVV(50.0,   5.0, 500.0)   # central volume (L)
+  theta TVMAT(2.0, 0.05,  24.0)   # mean absorption time (h)
+  theta TVCV2(0.3, 0.001, 10.0)   # relative dispersion of absorption time (Var/mean^2)
+
+  omega ETA_CL ~ 0.09
+  omega ETA_V  ~ 0.09
+
+  sigma PROP_ERR ~ 0.15 (sd)
+
+[individual_parameters]
+  CL  = TVCL  * exp(ETA_CL)
+  V   = TVV   * exp(ETA_V)
+  MAT = TVMAT
+  CV2 = TVCV2
+
+[structural_model]
+  ode(states=[central])
+
+[odes]
+  d/dt(central) = igd(mat=MAT, cv2=CV2) - CL/V*central
+
+[scaling]
+  y = central / V
+
+[error_model]
+  DV ~ proportional(PROP_ERR)
+
+[fit_options]
+  method  = focei
+  maxiter = 500

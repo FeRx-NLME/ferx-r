@@ -1,6 +1,6 @@
 Package: ferx
 Title: Nonlinear Mixed Effects Modeling with Rust Backend
-Version: 0.1.5
+Version: 0.1.6
 Authors@R: c(
     person("Ron Keizer", role = c("aut", "cre"), email = "ron@insightrx.com"),
     person("Teun Post", role = "aut", email = "teunpost@gmail.com"))
