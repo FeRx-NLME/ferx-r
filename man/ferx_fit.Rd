@@ -33,8 +33,9 @@ ferx_fit(
 
 \item{data}{Path to a NONMEM-format CSV file. Required columns: ID, TIME,
 DV, EVID, AMT, CMT. Optional columns recognised by the engine: RATE
-(infusion rate; \code{RATE = -2} infuses \code{AMT} over a modeled duration given by
-a per-subject parameter \verb{D\{n\}} on dose compartment \code{n}, for ODE models),
+(infusion rate; \code{RATE = -1} infuses \code{AMT} at a modeled rate given by a
+per-subject parameter \verb{R\{n\}}, and \code{RATE = -2} over a modeled duration given
+by \verb{D\{n\}}, on dose compartment \code{n}),
 MDV (missing-DV flag), II (dosing interval, required when
 SS > 0), SS (steady-state flag: 1 = pre-dose at steady state, 2 = add SS
 concentration to current state), CENS (BLOQ flag for M3 method), OCC
@@ -343,15 +344,15 @@ by both \code{"gn"} and \code{"gn_hybrid"}.}
 
 \strong{Importance Sampling (\code{"imp"} stage)}
 \describe{
-\item{\code{is_samples}}{Importance samples drawn per subject (default
+\item{\code{imp_samples}}{Importance samples drawn per subject (default
 1000). Halving the Monte-Carlo SE requires quadrupling this value.}
-\item{\code{is_proposal_df}}{Degrees of freedom for the Student-t
+\item{\code{imp_proposal_df}}{Degrees of freedom for the Student-t
 proposal distribution (default \code{5}).}
-\item{\code{is_seed}}{RNG seed for the IS step (default chosen by the
+\item{\code{imp_seed}}{RNG seed for the IS step (default chosen by the
 engine).}
-\item{\code{is_low_ess_threshold}}{ESS fraction below which a subject is
+\item{\code{imp_low_ess_threshold}}{ESS fraction below which a subject is
 flagged in \code{fit$importance_sampling$low_ess_subject_ids} (default
-\code{0.1}, i.e. \code{10\%} of \code{is_samples}).}
+\code{0.1}, i.e. \code{10\%} of \code{imp_samples}).}
 }
 
 \strong{IMPMAP (\code{"impmap"} estimator)}
@@ -527,14 +528,14 @@ diagnostics, populated only when the method chain ends with an
 \code{minus2_log_likelihood} (the IS estimate of \eqn{-2 \log L},
 comparable across models in the same nesting family),
 \code{mc_standard_error} (Monte-Carlo SE; scales as
-\eqn{1/\sqrt{is\_samples}}), \code{n_samples},
+\eqn{1/\sqrt{imp\_samples}}), \code{n_samples},
 \code{proposal_df}, \code{ess_min} and \code{ess_median}
 (per-subject effective sample size as a fraction of
-\code{is_samples}), \code{kappa_treatment}
+\code{imp_samples}), \code{kappa_treatment}
 (\code{"not_applicable"}, \code{"fixed_at_mode"} for partial-marginal
 IOV fits, or \code{"marginalized"}), and parallel vectors
 \code{low_ess_subject_ids} / \code{low_ess_subject_frac} flagging
-subjects whose ESS fraction fell below \code{is_low_ess_threshold}.}
+subjects whose ESS fraction fell below \code{imp_low_ess_threshold}.}
 \item{trace_path}{Path to the optimizer trace CSV, or \code{NULL} when
 \code{optimizer_trace = FALSE}. Pass to \code{\link{ferx_trace}}
 or \code{\link{ferx_plot_trace}}.}
@@ -615,7 +616,7 @@ seed used for multi-start parameter perturbation.}
 stochastic seed. \code{NULL} for non-SAEM methods.}
 \item{sir_seed_used}{Numeric scalar (or \code{NULL}) giving the SIR
 resampling seed. \code{NULL} when SIR was not run.}
-\item{is_seed}{Numeric scalar (or \code{NULL}) giving the importance
+\item{imp_seed}{Numeric scalar (or \code{NULL}) giving the importance
 sampling seed. \code{NULL} when IS was not run.}
 \item{bloq_method_label}{Character string describing the below-LLOQ
 handling method used (\code{"m3"}, \code{"drop"}, etc.).}
