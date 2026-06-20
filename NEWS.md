@@ -21,6 +21,11 @@
 
 ## New features
 
+- **M3 LOQ censoring supports upper limits**: datasets may now use
+  `CENS = -1` to mark observations censored above an upper limit of
+  quantification, with `DV` carrying the ULOQ value. Existing `CENS = 1`
+  lower-limit handling is unchanged. Requires ferx-core with
+  FeRx-NLME/ferx-core#416.
 - **Inverse-Gaussian (Freijer & Post) absorption — `igd(mat, cv2)`**: a new
   built-in absorption input rate for `[odes]` models, alongside `transit(...)`.
   It adds an inverse-Gaussian absorption-time distribution — mean absorption time
