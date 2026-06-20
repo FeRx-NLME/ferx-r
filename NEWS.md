@@ -8,6 +8,20 @@
   `imp_low_ess_threshold`. The short-lived `is_*` names are no longer accepted,
   matching ferx-core (FeRx-NLME/ferx-core#422).
 
+## Fixed
+
+- **`ferx_to_frem()` now warns about estimated parameters with no random effect**
+  and carries the base model's scaling over to the FREM model. A non-fixed
+  parameter without an `ETA` is estimated poorly by IMP/IMPMAP (the
+  importance-weighted M-step is biased for weakly-identified fixed effects), so
+  `ferx_to_frem()` now emits a warning at conversion time recommending an `ETA` be
+  added (ferx mu-references automatically), the parameter be held fixed, or FOCEI
+  be used. The base model's `[scaling]`/`[odes]` blocks (e.g. `obs_scale`) are also
+  now transferred to the generated FREM model instead of being dropped — dropping
+  `obs_scale` rescaled every prediction and collapsed a PK typical value during
+  FREM fits. Requires ferx-core with these fixes
+  (FeRx-NLME/ferx-core#406, #407).
+  
 ## Changed
 
 - **`method = "imp"` is now an estimator by default** (NONMEM `METHOD=IMP`): it
