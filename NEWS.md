@@ -8,6 +8,20 @@
   `imp_low_ess_threshold`. The short-lived `is_*` names are no longer accepted,
   matching ferx-core (FeRx-NLME/ferx-core#422).
 
+## Changed
+
+- **`method = "imp"` is now an estimator by default** (NONMEM `METHOD=IMP`): it
+  updates the population parameters by importance-sampling Monte-Carlo EM instead
+  of only evaluating the marginal `-2 log L` at fixed parameters. **Breaking:**
+  calls that used `method = "imp"` (or `c("focei", "imp")`) purely to *score* a
+  fit now re-estimate — pass `settings = list(imp_eval_only = TRUE)` (NONMEM
+  `EONLY=1`) to recover the old evaluation-only behaviour. New `settings`:
+  `imp_iterations`, `imp_averaging`, `imp_eval_only`; `imp_proposal_df` now also
+  accepts `"normal"`/`"mvn"`. The estimating `"imp"` may lead or sit mid-chain;
+  the evaluation-only `"imp"` must still be terminal. Plain `"imp"` is fragile on
+  rich data (warm-start with `c("focei", "imp")`, or use `"impmap"`). Requires
+  ferx-core with the `METHOD=IMP` estimator (FeRx-NLME/ferx-core#402). (#181)
+
 ## Performance
 
 - **`ferx_fit()` no longer pays a ~100 ms per-call latency floor.** The R-interrupt
