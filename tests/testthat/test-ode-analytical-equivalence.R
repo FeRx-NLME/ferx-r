@@ -26,7 +26,15 @@ ode_pairs <- list(
   list(an = "one_cpt_iv",       ode = "one_cpt_iv_ode",       method = "foce",  ofv_band = 0.5),
   list(an = "warfarin",         ode = "warfarin_ode",         method = "foce",  ofv_band = 0.5),
   list(an = "two_cpt_iv",       ode = "two_cpt_iv_ode",       method = "foce",  ofv_band = 0.5),
-  list(an = "two_cpt_oral_cov", ode = "two_cpt_oral_cov_ode", method = "focei", ofv_band = 0.5),
+  # two_cpt_oral_cov's FOCEI init-point OFV gap widened 0.5 -> ~0.91 (Linux-release
+  # CI) when the ferx-core pin moved onto the analytic FOCE/FOCEI gradient
+  # (FeRx-NLME/ferx-core#367/#381, which also retired Enzyme AD). The *analytical*
+  # PK path now conditions its inner-EBE modes with exact analytic sensitivities
+  # while the ODE sibling still uses the FD/solver path, so the two forms' inner
+  # solves diverge slightly more than before. PRED still matches to 1e-3 at eta=0
+  # (above), so this is inner-EBE residual, not a structural break; 1.0 still
+  # catches the ~10-15 OFV-unit regression that broken ode_reltol plumbing causes.
+  list(an = "two_cpt_oral_cov", ode = "two_cpt_oral_cov_ode", method = "focei", ofv_band = 1.0),
   # three_cpt_iv's FOCE *marginal* OFV (inner EBE eta-hat solve + Laplace log|H|)
   # diverged from its analytical sibling after the ferx-core #330 FOCE-objective
   # change (residual variance at f(eta=0) + tighter inner_tol + log|H| term):
