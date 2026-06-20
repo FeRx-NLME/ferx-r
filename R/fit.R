@@ -6,8 +6,9 @@
 #' @param model Path to a \code{.ferx} model file, or a \code{\link{ferx_model}} object.
 #' @param data Path to a NONMEM-format CSV file. Required columns: ID, TIME,
 #'   DV, EVID, AMT, CMT. Optional columns recognised by the engine: RATE
-#'   (infusion rate; `RATE = -2` infuses `AMT` over a modeled duration given by
-#'   a per-subject parameter `D{n}` on dose compartment `n`, for ODE models),
+#'   (infusion rate; `RATE = -1` infuses `AMT` at a modeled rate given by a
+#'   per-subject parameter `R{n}`, and `RATE = -2` over a modeled duration given
+#'   by `D{n}`, on dose compartment `n`),
 #'   MDV (missing-DV flag), II (dosing interval, required when
 #'   SS > 0), SS (steady-state flag: 1 = pre-dose at steady state, 2 = add SS
 #'   concentration to current state), CENS (BLOQ flag for M3 method), OCC
@@ -27,7 +28,7 @@
 #'   estimator).
 #'   \code{"imp"} is an estimator by default (it updates parameters) and may run
 #'   standalone (\code{method = "imp"}), lead, or sit mid-chain. Set
-#'   \code{settings = list(is_eval_only = TRUE)} (NONMEM \code{EONLY=1}) to make
+#'   \code{settings = list(imp_eval_only = TRUE)} (NONMEM \code{EONLY=1}) to make
 #'   it instead *evaluate* the marginal \code{-2 log L} at the fixed input
 #'   parameters; in that mode it must be the *last* entry of the chain, e.g.
 #'   \code{c("focei", "imp")}. Plain \code{"imp"} re-centers its proposal from
@@ -309,28 +310,33 @@
 #'   \strong{Importance Sampling (\code{"imp"})}
 #'
 #'   By default \code{"imp"} is a Monte-Carlo EM estimator (NONMEM
-#'   \code{METHOD=IMP}); set \code{is_eval_only = TRUE} to evaluate the marginal
+#'   \code{METHOD=IMP}); set \code{imp_eval_only = TRUE} to evaluate the marginal
 #'   \code{-2 log L} at fixed parameters instead (NONMEM \code{EONLY=1}).
 #'   \describe{
-#'     \item{\code{is_eval_only}}{Logical; \code{TRUE} evaluates \code{-2 log L}
+#'     \item{\code{imp_eval_only}}{Logical; \code{TRUE} evaluates \code{-2 log L}
 #'       at the fixed input parameters without estimating (NONMEM \code{EONLY=1};
 #'       must be the terminal chain stage). \code{FALSE} (default) estimates.}
-#'     \item{\code{is_iterations}}{Number of Monte-Carlo EM iterations, ignored
-#'       when \code{is_eval_only} (default 200).}
-#'     \item{\code{is_averaging}}{Number of final iterations whose parameters are
-#'       averaged into the reported estimate, ignored when \code{is_eval_only}
+#'     \item{\code{imp_iterations}}{Number of Monte-Carlo EM iterations, ignored
+#'       when \code{imp_eval_only} (default 200).}
+#'     \item{\code{imp_averaging}}{Number of final iterations whose parameters are
+#'       averaged into the reported estimate, ignored when \code{imp_eval_only}
 #'       (default 50).}
-#'     \item{\code{is_samples}}{Importance samples drawn per subject (default
+#'     \item{\code{imp_samples}}{Importance samples drawn per subject (default
 #'       1000). Halving the Monte-Carlo SE requires quadrupling this value.}
-#'     \item{\code{is_proposal_df}}{Degrees of freedom for the Student-t
+#'     \item{\code{imp_proposal_df}}{Degrees of freedom for the Student-t
 #'       proposal distribution (default \code{5}); the string \code{"normal"}
 #'       (or \code{"mvn"}) selects a multivariate-normal proposal.}
-#'     \item{\code{is_seed}}{RNG seed for the IS step (default chosen by the
+#'     \item{\code{imp_seed}}{RNG seed for the IS step (default chosen by the
 #'       engine).}
-#'     \item{\code{is_low_ess_threshold}}{ESS fraction below which a subject is
+#'     \item{\code{imp_low_ess_threshold}}{ESS fraction below which a subject is
 #'       flagged in \code{fit$importance_sampling$low_ess_subject_ids} (default
-#'       \code{0.1}, i.e. \code{10\%} of \code{is_samples}).}
+#'       \code{0.1}, i.e. \code{10\%} of \code{imp_samples}).}
 #'   }
+#'
+#'   The legacy importance-sampling key spellings \code{is_samples},
+#'   \code{is_proposal_df}, \code{is_seed}, and \code{is_low_ess_threshold} are
+#'   still accepted (translated to the \code{imp_*} names above, with a
+#'   deprecation warning); new code should use \code{imp_*}.
 #'
 #'   \strong{IMPMAP (\code{"impmap"} estimator)}
 #'   \describe{
@@ -498,14 +504,14 @@
 #'     \code{minus2_log_likelihood} (the IS estimate of \eqn{-2 \log L},
 #'     comparable across models in the same nesting family),
 #'     \code{mc_standard_error} (Monte-Carlo SE; scales as
-#'     \eqn{1/\sqrt{is\_samples}}), \code{n_samples},
+#'     \eqn{1/\sqrt{imp\_samples}}), \code{n_samples},
 #'     \code{proposal_df}, \code{ess_min} and \code{ess_median}
 #'     (per-subject effective sample size as a fraction of
-#'     \code{is_samples}), \code{kappa_treatment}
+#'     \code{imp_samples}), \code{kappa_treatment}
 #'     (\code{"not_applicable"}, \code{"fixed_at_mode"} for partial-marginal
 #'     IOV fits, or \code{"marginalized"}), and parallel vectors
 #'     \code{low_ess_subject_ids} / \code{low_ess_subject_frac} flagging
-#'     subjects whose ESS fraction fell below \code{is_low_ess_threshold}.}
+#'     subjects whose ESS fraction fell below \code{imp_low_ess_threshold}.}
 #'   \item{trace_path}{Path to the optimizer trace CSV, or \code{NULL} when
 #'     \code{optimizer_trace = FALSE}. Pass to \code{\link{ferx_trace}}
 #'     or \code{\link{ferx_plot_trace}}.}
@@ -586,7 +592,7 @@
 #'     stochastic seed. \code{NULL} for non-SAEM methods.}
 #'   \item{sir_seed_used}{Numeric scalar (or \code{NULL}) giving the SIR
 #'     resampling seed. \code{NULL} when SIR was not run.}
-#'   \item{is_seed}{Numeric scalar (or \code{NULL}) giving the importance
+#'   \item{imp_seed}{Numeric scalar (or \code{NULL}) giving the importance
 #'     sampling seed. \code{NULL} when IS was not run.}
 #'   \item{bloq_method_label}{Character string describing the below-LLOQ
 #'     handling method used (\code{"m3"}, \code{"drop"}, etc.).}
@@ -1385,10 +1391,10 @@ ferx_fit <- function(model, data = NULL,
   }
   method <- vapply(method, .normalize_method_token, character(1L), USE.NAMES = FALSE)
   # `imp` may appear at most once. By default it is an estimator (NONMEM
-  # METHOD=IMP) and may sit anywhere in the chain; with `is_eval_only = TRUE`
+  # METHOD=IMP) and may sit anywhere in the chain; with `imp_eval_only = TRUE`
   # (NONMEM EONLY=1) it only evaluates the marginal -2 log L and must be the
   # terminal stage. The engine rejects malformed chains too, but surfacing the
-  # error R-side avoids a round-trip and gives a clearer message. (`is_eval_only`
+  # error R-side avoids a round-trip and gives a clearer message. (`imp_eval_only`
   # set via the model file's [fit_options] rather than `settings` is enforced
   # engine-side.)
   imp_positions <- which(method == "imp")
@@ -1399,13 +1405,13 @@ ferx_fit <- function(model, data = NULL,
         length(imp_positions), " occurrences"
       )
     }
-    imp_eval_only <- isTRUE(settings[["is_eval_only"]])
+    imp_eval_only <- isTRUE(settings[["imp_eval_only"]])
     if (imp_eval_only && imp_positions != length(method)) {
       stop(
-        "`\"imp\"` with `is_eval_only = TRUE` must be the final stage of the ",
+        "`\"imp\"` with `imp_eval_only = TRUE` must be the final stage of the ",
         "method chain; got method = c(\"",
         paste(method, collapse = "\", \""), "\"). ",
-        "Drop `is_eval_only` to run it as an estimator anywhere in the chain."
+        "Drop `imp_eval_only` to run it as an estimator anywhere in the chain."
       )
     }
   }
@@ -3014,6 +3020,45 @@ print.ferx_summary <- function(x, ...) {
   v
 }
 
+# Back-compat shim for ferx-core #422, which renamed the importance-sampling fit
+# options is_* -> imp_* and made the engine reject the legacy is_* keys. Accept
+# the old spellings here, translate them to imp_*, and warn (deprecated). If both
+# the legacy and modern spelling are supplied, the modern one wins.
+.ferx_migrate_legacy_is_settings <- function(settings) {
+  nms <- names(settings)
+  if (is.null(nms)) {
+    return(settings)
+  }
+  legacy <- c(
+    is_samples           = "imp_samples",
+    is_proposal_df       = "imp_proposal_df",
+    is_seed              = "imp_seed",
+    is_low_ess_threshold = "imp_low_ess_threshold"
+  )
+  hit <- intersect(nms, names(legacy))
+  if (length(hit) == 0L) {
+    return(settings)
+  }
+  new <- unname(legacy[hit])
+  warning(
+    "Importance-sampling settings ",
+    paste0("`", hit, "`", collapse = ", "),
+    " are deprecated (renamed in ferx-core #422); use ",
+    paste0("`", new, "`", collapse = ", "),
+    " instead. The legacy name(s) were translated automatically.",
+    call. = FALSE
+  )
+  for (i in seq_along(hit)) {
+    if (new[i] %in% names(settings)) {
+      # modern spelling also supplied - it wins; drop the legacy duplicate
+      settings[[hit[i]]] <- NULL
+    } else {
+      names(settings)[match(hit[i], names(settings))] <- new[i]
+    }
+  }
+  settings
+}
+
 # Convert a named-list of settings into two parallel character vectors for the
 # Rust FFI. Each value is stringified in a Rust-parser-friendly form (logicals
 # ? "true"/"false", numerics with full precision, NULL/NA ? "null"). Strict
@@ -3032,6 +3077,10 @@ print.ferx_summary <- function(x, ...) {
   if (is.null(nms) || any(!nzchar(nms)) || anyDuplicated(nms) != 0L) {
     stop("`settings` must be a uniquely-named list (all entries must have a non-empty name)")
   }
+  # Translate legacy is_* keys only after the input is known well-formed, so a
+  # duplicated legacy key can't be partially renamed past the check above.
+  settings <- .ferx_migrate_legacy_is_settings(settings)
+  nms <- names(settings)
   stringify <- function(key, v) {
     if (is.null(v) || (length(v) == 1L && is.na(v))) {
       return("null")

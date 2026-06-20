@@ -238,18 +238,18 @@ test_that("ferx_fit enforces `imp` method-chain rules", {
     regexp = "at most once",
     ignore.case = TRUE
   )
-  # An evaluation-only `imp` (`is_eval_only = TRUE`, NONMEM EONLY=1) must be the
+  # An evaluation-only `imp` (`imp_eval_only = TRUE`, NONMEM EONLY=1) must be the
   # terminal stage; the default estimating `imp` may sit anywhere, so the same
   # chains are accepted without the flag.
   expect_error(
     ferx_fit(ex$model, ex$data, method = c("imp", "focei"),
-      settings = list(is_eval_only = TRUE)),
+      settings = list(imp_eval_only = TRUE)),
     regexp = "final stage|must be the final stage",
     ignore.case = TRUE
   )
   expect_error(
     ferx_fit(ex$model, ex$data, method = c("focei", "imp", "focei"),
-      settings = list(is_eval_only = TRUE)),
+      settings = list(imp_eval_only = TRUE)),
     regexp = "final stage|must be the final stage",
     ignore.case = TRUE
   )
