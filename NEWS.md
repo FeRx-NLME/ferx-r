@@ -54,6 +54,18 @@
   Handled entirely in the data reader and model parser, so no R-side change is
   needed. (Requires ferx-core with FeRx-NLME/ferx-core#384.)
 
+- **Modeled infusion rate (`RATE = -1`)**: a NONMEM `RATE = -1` dose now infuses
+  `AMT` at a *modeled* rate — declare an individual parameter `R{n}` for the dose
+  compartment `n` and ferx infuses at rate `R{n}` (duration `AMT / R{n}`),
+  resolved per iteration and occasion (so it carries covariate and IOV effects).
+  The mirror of the modeled-duration `RATE = -2`, supported on **both** the
+  analytical `pk(...)` engine and `ode(...)` models. Composes with `F{n}` and
+  `ALAG{n}`, steady state, multi-dose, and system resets. A `RATE = -1` dose with
+  no matching `R{n}` parameter is a clear error rather than a silent bolus, and an
+  `R{n}` that is non-positive at the initial estimate is flagged. Handled entirely
+  in the data reader and model parser, so no R-side change is needed. (Requires
+  ferx-core with FeRx-NLME/ferx-core#418.)
+
 - **`ferx_npde(fit, nsim, seed)`**: compute simulation-based NPDE (Normalized
   Prediction Distribution Errors, decorrelated within subject) and NPD
   (Normalized Prediction Discrepancies) post-hoc from an existing fit, without
