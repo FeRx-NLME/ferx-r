@@ -22,11 +22,6 @@ jobs:
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
       R_KEEP_PKG_SOURCE: yes
-      # Build without Enzyme: the autodiff-enabled toolchain takes ~45 min to
-      # compile from source, so CI uses the stable-Rust path that the package
-      # supports via the `ci` cargo feature. Tests still exercise FOCE/FOCEI
-      # using finite-difference gradients.
-      FERX_NO_AUTODIFF: '1'
 
     steps:
       - uses: actions/checkout@v6

@@ -9,8 +9,10 @@ authors = ["Ron Keizer", "Teun Post"]
 crate-type = ["staticlib"]
 
 [features]
-default = ["autodiff"]
-autodiff = ["ferx-core/autodiff"]
+default = []
+# Enzyme autodiff was retired in ferx-core (FeRx-NLME/ferx-core#381) in favour
+# of hand-rolled analytic sensitivities, so there is no longer an `autodiff`
+# feature to forward.
 ci = ["ferx-core/ci"]
 # Deep Compartment Models (DCM) and low-dim neural ODEs — Phase A from
 # ferx-core's plans/dcm-and-low-dim-node.md. Off by default. Opt in via
@@ -22,11 +24,10 @@ nn = ["ferx-core/nn"]
 [dependencies]
 extendr-api = "0.9"
 ferx-core = { git = "https://github.com/FeRx-NLME/ferx-core", branch = "main", default-features = false }
-nalgebra = "0.34"
+nalgebra = "0.35"
 
 [profile.release]
-# fat LTO is required for cross-crate Enzyme autodiff (functions differentiated
-# in this crate live in ferx-core; thin LTO keeps modules separate and Enzyme
-# can fail to find their bodies). The Makevars no-autodiff branch overrides
-# this to "thin" via CARGO_PROFILE_RELEASE_LTO when building without Enzyme.
-lto = "fat"
+# thin LTO keeps cross-crate inlining without the fat-LTO link-time/memory cost.
+# (fat LTO was previously required for cross-crate Enzyme autodiff; that path
+# was retired in ferx-core, so the stable build no longer needs it.)
+lto = "thin"

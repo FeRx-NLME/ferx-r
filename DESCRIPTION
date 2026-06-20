@@ -6,14 +6,15 @@ Authors@R: c(
     person("Teun Post", role = "aut", email = "teunpost@gmail.com"))
 Author: Ron Keizer [aut, cre], Teun Post [aut]
 Maintainer: Ron Keizer <ron@insightrx.com>
-Description: Fast NLME estimation using FOCE/FOCEI with automatic differentiation.
-    Powered by a Rust engine with Enzyme autodiff for exact gradients.
-    Supports analytical PK models (1/2-compartment) and ODE-based models.
+Description: Fast NLME estimation using FOCE/FOCEI with analytic gradients.
+    Powered by a Rust engine with hand-rolled analytic sensitivities for exact
+    gradients. Supports analytical PK models (1/2-compartment) and ODE-based
+    models.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.3
-SystemRequirements: GNU make, Cargo (Rust's package manager), rustc (>= 1.70); optionally Enzyme toolchain for autodiff
+SystemRequirements: GNU make, Cargo (Rust's package manager), rustc (>= 1.70)
 Config/rextendr/version: 0.5.0
 Imports:
     callr,

@@ -24,6 +24,15 @@
   
 ## Changed
 
+- **Enzyme autodiff is retired; no special toolchain is needed to build.** ferx-core
+  replaced the Enzyme autodiff gradient path with hand-rolled analytic
+  sensitivities (FeRx-NLME/ferx-core#381), so the package now always builds with
+  the stable Rust toolchain — no `enzyme` rustup toolchain, no fat-LTO autodiff
+  link, and the `FERX_NO_AUTODIFF` / `FERX_AD_PREFLIGHT_SKIP` build switches and
+  the AD self-test preflight are gone. `ferx_rust_autodiff_enabled()` is retained
+  but now always returns `FALSE`. Gradients are unchanged (exact analytic
+  sensitivities). Also bumps the bundled `nalgebra` to 0.35 to match ferx-core.
+
 - **`method = "imp"` is now an estimator by default** (NONMEM `METHOD=IMP`): it
   updates the population parameters by importance-sampling Monte-Carlo EM instead
   of only evaluating the marginal `-2 log L` at fixed parameters. **Breaking:**

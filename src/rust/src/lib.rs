@@ -2168,11 +2168,15 @@ fn covariate_types_robj(table: Option<&ferx_core::CovariateTable>) -> Robj {
     robj
 }
 
-/// Returns TRUE if the Rust library was compiled with the `autodiff` feature
-/// (Enzyme toolchain), FALSE otherwise.
+/// Returns TRUE if the Rust library was compiled with Enzyme autodiff support.
+///
+/// The Enzyme autodiff path was retired in ferx-core
+/// (FeRx-NLME/ferx-core#381) in favour of hand-rolled analytic sensitivities,
+/// so this is always FALSE. Retained for backwards compatibility with callers
+/// that probe it.
 #[extendr]
 fn ferx_rust_autodiff_enabled() -> bool {
-    cfg!(feature = "autodiff")
+    false
 }
 
 /// Validate a .ferx model file (and optionally its dataset) without fitting.
