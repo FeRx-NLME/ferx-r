@@ -2,17 +2,11 @@
 
 ## Breaking changes
 
-- **`fit$is_seed` is now `fit$imp_seed`** in the fit result (not aliased),
-  matching the ferx-core importance-sampling option rename
-  (FeRx-NLME/ferx-core#422).
-
-## Deprecations
-
-- **Importance-sampling `settings` keys `is_*` are deprecated** in favour of
-  `imp_*` (`imp_samples`, `imp_proposal_df`, `imp_seed`, `imp_low_ess_threshold`).
-  The legacy `is_*` spellings are still accepted - `ferx_fit()` translates them
-  to `imp_*` and warns - but the underlying engine only understands `imp_*`, so
-  migrate when convenient.
+- **Importance-sampling result/settings names use the `imp_*` prefix.**
+  `fit$is_seed` is now `fit$imp_seed`, and IMP settings now use
+  `imp_samples`, `imp_proposal_df`, `imp_seed`, and
+  `imp_low_ess_threshold`. The short-lived `is_*` names are no longer accepted,
+  matching ferx-core (FeRx-NLME/ferx-core#422).
 
 ## Performance
 
@@ -486,7 +480,7 @@
   parallel `low_ess_subject_ids`/`low_ess_subject_frac` vectors).
   `print(fit)` and `summary(fit)` render the new block. New
   IMP-specific settings keys are recognized by `ferx_fit(settings = ...)`:
-  `is_samples`, `is_proposal_df`, `is_seed`, `is_low_ess_threshold`.
+  `imp_samples`, `imp_proposal_df`, `imp_seed`, `imp_low_ess_threshold`.
   Requires ferx-core with importance-sampling support merged
   (FeRx-NLME/ferx-core IMP PR).
 

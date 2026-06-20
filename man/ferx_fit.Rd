@@ -355,11 +355,6 @@ flagged in \code{fit$importance_sampling$low_ess_subject_ids} (default
 \code{0.1}, i.e. \code{10\%} of \code{imp_samples}).}
 }
 
-The legacy importance-sampling key spellings \code{is_samples},
-\code{is_proposal_df}, \code{is_seed}, and \code{is_low_ess_threshold} are
-still accepted (translated to the \code{imp_*} names above, with a
-deprecation warning); new code should use \code{imp_*}.
-
 \strong{IMPMAP (\code{"impmap"} estimator)}
 \describe{
 \item{\code{impmap_iterations}}{Number of Monte-Carlo EM iterations
