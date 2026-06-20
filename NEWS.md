@@ -21,6 +21,12 @@
 
 ## New features
 
+- **IIV on residual error** (`iiv_on_ruv`): a `.ferx` model can now place a random
+  effect on the residual error, matching NONMEM `Y = IPRED + EPS*EXP(ETA)`. Declare
+  an `omega` and reference it from `[error_model]` with `iiv_on_ruv = NAME`; each
+  subject then gets a log-normally scaled residual SD. Supported under FOCEI, IMP,
+  IMPMAP, and SAEM. Validated against NONMEM 7.5.1 (ΔOFV 0.017). Requires ferx-core
+  with this feature (FeRx-NLME/ferx-core#409).
 - **M3 LOQ censoring supports upper limits**: datasets may now use
   `CENS = -1` to mark observations censored above an upper limit of
   quantification, with `DV` carrying the ULOQ value. Existing `CENS = 1`
