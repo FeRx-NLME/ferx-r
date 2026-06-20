@@ -1,5 +1,14 @@
 # ferx (development)
 
+## Breaking changes
+
+- **Importance-sampling settings renamed `is_*` to `imp_*`** to match the
+  ferx-core rename (FeRx-NLME/ferx-core#422). The `method = "imp"` tuning keys
+  are now `imp_samples`, `imp_proposal_df`, `imp_seed`, and
+  `imp_low_ess_threshold`; the fit result field `fit$is_seed` is now
+  `fit$imp_seed`. The engine no longer accepts the legacy `is_*` keys, so update
+  any `ferx_fit(settings = list(is_... = ))` calls.
+
 ## Performance
 
 - **`ferx_fit()` no longer pays a ~100 ms per-call latency floor.** The R-interrupt
@@ -43,13 +52,14 @@
   `impmap_seed`, `impmap_low_ess_threshold`. Requires a mu-referenced
   parameterization; IOV is not yet supported. Needs a ferx-core that provides
   the `impmap` method (separate `Cargo.lock` bump). (ferx-core #270)
-- **Modeled infusion duration (`RATE = -2`)** for ODE models: a NONMEM
+- **Modeled infusion duration (`RATE = -2`)**: a NONMEM
   `RATE = -2` dose now infuses `AMT` over a *modeled* duration — declare an
   individual parameter `D{n}` for the dose compartment `n` and ferx infuses at
   rate `AMT / D{n}`, resolved per iteration and occasion (so it carries
-  covariate and IOV effects). Composes with `F{n}` and `ALAG{n}`, steady state,
+  covariate and IOV effects), on **both** the analytical `pk(...)` engine and
+  `ode(...)` models. Composes with `F{n}` and `ALAG{n}`, steady state,
   multi-dose, and system resets. A `RATE = -2` dose with no matching `D{n}`
-  parameter — or on an analytical model — is a clear error rather than a silent
+  parameter is a clear error rather than a silent
   bolus, and a `D{n}` that is non-positive at the initial estimate is flagged.
   Handled entirely in the data reader and model parser, so no R-side change is
   needed. (Requires ferx-core with FeRx-NLME/ferx-core#384.)
@@ -308,7 +318,7 @@
   → `THETA(i)`.
 
 - `ferx_runlog()`: `model_text`, `inits_from_nca`, and seed fields
-  (`multi_start_seed`, `saem_seed`, `sir_seed_used`, `is_seed`) now guard
+  (`multi_start_seed`, `saem_seed`, `sir_seed_used`, `imp_seed`) now guard
   against `NA_character_` / `NA_real_` values that extendr emits for Rust
   `Option<T>::None`, preventing spurious "NA" entries in the run log.
 
