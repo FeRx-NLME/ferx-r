@@ -6,13 +6,15 @@
 #' @param model Path to a \code{.ferx} model file, or a \code{\link{ferx_model}} object.
 #' @param data Path to a NONMEM-format CSV file. Required columns: ID, TIME,
 #'   DV, EVID, AMT, CMT. Optional columns recognised by the engine: RATE
-#'   (infusion rate; `RATE = -2` infuses `AMT` over a modeled duration given by
-#'   a per-subject parameter `D{n}` on dose compartment `n`, for ODE models),
+#'   (infusion rate; `RATE = -1` infuses `AMT` at a modeled rate given by a
+#'   per-subject parameter `R{n}`, and `RATE = -2` over a modeled duration given
+#'   by `D{n}`, on dose compartment `n`),
 #'   MDV (missing-DV flag), II (dosing interval, required when
 #'   SS > 0), SS (steady-state flag: 1 = pre-dose at steady state, 2 = add SS
-#'   concentration to current state), CENS (BLOQ flag for M3 method), OCC
-#'   (occasion index for IOV), and any covariate columns referenced in the
-#'   model. See the steady-state section below for SS/II details.
+#'   concentration to current state), CENS (LOQ censoring flag for M3 method:
+#'   \code{1} below LLOQ, \code{-1} above ULOQ), OCC (occasion index for IOV),
+#'   and any covariate columns referenced in the model. See the steady-state
+#'   section below for SS/II details.
 #' @param method Estimation method(s). Either a single string or a character
 #'   vector of methods to run in sequence. Each stage is seeded with the
 #'   previous stage's converged parameters, and only the final stage produces
@@ -42,11 +44,12 @@
 #'   SAEM fully supports inter-occasion variability (IOV / kappa) models.
 #' @param covariance Logical; compute the covariance step for standard errors
 #' @param verbose Logical; print progress during estimation
-#' @param bloq_method Handling of observations below the lower limit of
-#'   quantification. \code{NULL} (default) keeps whatever the model file
-#'   specified; \code{"m3"} enables Beal's M3 likelihood (requires a
-#'   \code{CENS} column in the data, with \code{DV} carrying the LLOQ value
-#'   on \code{CENS=1} rows); \code{"drop"} disables M3.
+#' @param bloq_method Handling of observations outside quantification limits.
+#'   \code{NULL} (default) keeps whatever the model file specified;
+#'   \code{"m3"} enables Beal's M3 likelihood (requires a \code{CENS} column
+#'   in the data, with \code{DV} carrying the limit value: LLOQ on
+#'   \code{CENS=1} rows and ULOQ on \code{CENS=-1} rows); \code{"drop"}
+#'   disables M3 and treats censored rows as ordinary observations.
 #' @param threads Number of worker threads for the per-subject parallel loops
 #'   in the Rust backend (inner EBE search, SAEM, SIR). \code{NULL} (default)
 #'   leaves the backend's thread pool at its default of one worker per logical
@@ -303,15 +306,15 @@
 #'
 #'   \strong{Importance Sampling (\code{"imp"} stage)}
 #'   \describe{
-#'     \item{\code{is_samples}}{Importance samples drawn per subject (default
+#'     \item{\code{imp_samples}}{Importance samples drawn per subject (default
 #'       1000). Halving the Monte-Carlo SE requires quadrupling this value.}
-#'     \item{\code{is_proposal_df}}{Degrees of freedom for the Student-t
+#'     \item{\code{imp_proposal_df}}{Degrees of freedom for the Student-t
 #'       proposal distribution (default \code{5}).}
-#'     \item{\code{is_seed}}{RNG seed for the IS step (default chosen by the
+#'     \item{\code{imp_seed}}{RNG seed for the IS step (default chosen by the
 #'       engine).}
-#'     \item{\code{is_low_ess_threshold}}{ESS fraction below which a subject is
+#'     \item{\code{imp_low_ess_threshold}}{ESS fraction below which a subject is
 #'       flagged in \code{fit$importance_sampling$low_ess_subject_ids} (default
-#'       \code{0.1}, i.e. \code{10\%} of \code{is_samples}).}
+#'       \code{0.1}, i.e. \code{10\%} of \code{imp_samples}).}
 #'   }
 #'
 #'   \strong{IMPMAP (\code{"impmap"} estimator)}
@@ -425,7 +428,7 @@
 #'     \code{sigma} itself)}
 #'   \item{sdtab}{Data frame with ID, TIME, DV, PRED, IPRED, CWRES, IWRES,
 #'     EBE_OFV, N_OBS; OCC if any subject carries an occasion column; CENS
-#'     if any rows are below LLOQ; CMT if the dataset has more than one
+#'     if any rows are LOQ-censored; CMT if the dataset has more than one
 #'     endpoint (any observation with \code{CMT != 1}).  TAFD (time after
 #'     first dose) and TAD (time after last dose, SS-aware) are included
 #'     automatically.  Columns declared in \code{[derived]} (per-row
@@ -480,14 +483,14 @@
 #'     \code{minus2_log_likelihood} (the IS estimate of \eqn{-2 \log L},
 #'     comparable across models in the same nesting family),
 #'     \code{mc_standard_error} (Monte-Carlo SE; scales as
-#'     \eqn{1/\sqrt{is\_samples}}), \code{n_samples},
+#'     \eqn{1/\sqrt{imp\_samples}}), \code{n_samples},
 #'     \code{proposal_df}, \code{ess_min} and \code{ess_median}
 #'     (per-subject effective sample size as a fraction of
-#'     \code{is_samples}), \code{kappa_treatment}
+#'     \code{imp_samples}), \code{kappa_treatment}
 #'     (\code{"not_applicable"}, \code{"fixed_at_mode"} for partial-marginal
 #'     IOV fits, or \code{"marginalized"}), and parallel vectors
 #'     \code{low_ess_subject_ids} / \code{low_ess_subject_frac} flagging
-#'     subjects whose ESS fraction fell below \code{is_low_ess_threshold}.}
+#'     subjects whose ESS fraction fell below \code{imp_low_ess_threshold}.}
 #'   \item{trace_path}{Path to the optimizer trace CSV, or \code{NULL} when
 #'     \code{optimizer_trace = FALSE}. Pass to \code{\link{ferx_trace}}
 #'     or \code{\link{ferx_plot_trace}}.}
@@ -568,9 +571,9 @@
 #'     stochastic seed. \code{NULL} for non-SAEM methods.}
 #'   \item{sir_seed_used}{Numeric scalar (or \code{NULL}) giving the SIR
 #'     resampling seed. \code{NULL} when SIR was not run.}
-#'   \item{is_seed}{Numeric scalar (or \code{NULL}) giving the importance
+#'   \item{imp_seed}{Numeric scalar (or \code{NULL}) giving the importance
 #'     sampling seed. \code{NULL} when IS was not run.}
-#'   \item{bloq_method_label}{Character string describing the below-LLOQ
+#'   \item{bloq_method_label}{Character string describing the LOQ-censoring
 #'     handling method used (\code{"m3"}, \code{"drop"}, etc.).}
 #'   \item{outer_maxiter}{Integer. Maximum number of outer-loop iterations
 #'     passed to the optimizer.}
@@ -898,10 +901,10 @@
 #' ferx_fit(m, d, threads = parallel::detectCores(logical = FALSE))
 #' }
 #'
-#' \strong{BLOQ handling}:
+#' \strong{LOQ censoring}:
 #' \preformatted{
-#' ferx_fit(m, d, bloq_method = "m3")    # Beal M3 likelihood (needs CENS column)
-#' ferx_fit(m, d, bloq_method = "drop")  # discard BLOQ rows
+#' ferx_fit(m, d, bloq_method = "m3")    # M3 likelihood (CENS: 1=LLOQ, -1=ULOQ)
+#' ferx_fit(m, d, bloq_method = "drop")  # disable M3; use rows as observed
 #' }
 #'
 #' \strong{Gradient method} for the inner EBE loop:
@@ -1102,7 +1105,7 @@
 #'   )
 #' )
 #'
-#' # BLOQ (M3 method)
+#' # LOQ-censored observations (M3 method)
 #' bloq <- ferx_example("warfarin_bloq")
 #' fit  <- ferx_fit(bloq$model, bloq$data, method = "focei", bloq_method = "m3")
 #'

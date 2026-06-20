@@ -1417,7 +1417,7 @@ fn fit_result_to_list(
                 minus2_log_likelihood = is.minus2_log_likelihood,
                 mc_standard_error = is.mc_standard_error,
                 // n_samples is usize in ferx-core; cast to f64 (rather than
-                // i32) so a user-set `is_samples > i32::MAX` can't silently
+                // i32) so a user-set `imp_samples > i32::MAX` can't silently
                 // wrap to a negative number when bridged to R.
                 n_samples = is.n_samples as f64,
                 proposal_df = is.proposal_df,
@@ -1911,7 +1911,7 @@ fn fit_result_to_list(
         multi_start_seed  = result.multi_start_seed.map(|s| s as f64),
         saem_seed         = result.saem_seed.map(|s| s as f64),
         sir_seed_used     = result.sir_seed.map(|s| s as f64),
-        is_seed           = result.imp_seed.map(|s| s as f64),
+        imp_seed          = result.imp_seed.map(|s| s as f64),
         bloq_method_label = result.bloq_method.clone(),
         outer_maxiter     = result.outer_maxiter as i32,
         outer_gtol        = result.outer_gtol,

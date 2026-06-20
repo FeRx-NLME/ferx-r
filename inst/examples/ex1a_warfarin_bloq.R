@@ -7,9 +7,11 @@ library(ggplot2)
 
 ex <- ferx_example("warfarin_bloq")
 
-## Fit — bloq_method="m3" enables Beal's M3 likelihood for observations
-## flagged with CENS=1 in the dataset. The model file also sets this,
-## so the argument below is optional; we pass it explicitly for clarity.
+## Fit: bloq_method="m3" enables Beal's M3 likelihood for observations
+## flagged in the dataset. CENS=1 means DV is an LLOQ; CENS=-1 means DV
+## is a ULOQ. This example uses lower-limit censoring. The model file also
+## sets this, so the argument below is optional; we pass it explicitly for
+## clarity.
 result <- ferx_fit(
   model = ex$model,
   data = ex$data,
@@ -41,7 +43,7 @@ vpc(
   sim_cols = list(dv = "DV_SIM")
 )
 
-## VPC for BLOQ censoring
+## VPC for lower-limit censoring
 vpc_cens(
   obs = obs |>
     mutate(DV = as.numeric(DV)),
