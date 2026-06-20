@@ -22,15 +22,20 @@
 #'   \code{"focei"}, \code{"saem"}, \code{"gn"} (Gauss-Newton / BHHH),
 #'   \code{"gn_hybrid"} (Gauss-Newton followed by a FOCEI polish step),
 #'   \code{"imp"} (also accepted as \code{"importance_sampling"} or
-#'   \code{"importance-sampling"}; importance-sampling marginal
-#'   log-likelihood), or \code{"impmap"} (also accepted as
-#'   \code{"importance_sampling_map"}; Importance Sampling assisted by Mode A
-#'   Posteriori, the NONMEM \code{METHOD=IMPMAP} Monte-Carlo EM estimator).
-#'   The \code{"imp"} stage is a terminal stage that does
-#'   not update parameters and must be the *last* entry of the chain, e.g.
-#'   \code{c("focei", "imp")} or \code{c("saem", "imp")}. It may also run
-#'   standalone (\code{method = "imp"}), scoring the model's initial
-#'   parameters. \code{"impmap"} is a full estimator: it may run standalone
+#'   \code{"importance-sampling"}; the NONMEM \code{METHOD=IMP}
+#'   importance-sampling Monte-Carlo EM estimator), or \code{"impmap"} (also
+#'   accepted as \code{"importance_sampling_map"}; Importance Sampling assisted
+#'   by Mode A Posteriori, the NONMEM \code{METHOD=IMPMAP} Monte-Carlo EM
+#'   estimator).
+#'   \code{"imp"} is an estimator by default (it updates parameters) and may run
+#'   standalone (\code{method = "imp"}), lead, or sit mid-chain. Set
+#'   \code{settings = list(imp_eval_only = TRUE)} (NONMEM \code{EONLY=1}) to make
+#'   it instead *evaluate* the marginal \code{-2 log L} at the fixed input
+#'   parameters; in that mode it must be the *last* entry of the chain, e.g.
+#'   \code{c("focei", "imp")}. Plain \code{"imp"} re-centers its proposal from
+#'   the previous iteration's samples and so is fragile on rich data; prefer
+#'   \code{"impmap"} or warm-start with \code{c("focei", "imp")} there.
+#'   \code{"impmap"} is a full estimator: it may run standalone
 #'   (\code{method = "impmap"}) or as a chain stage (\code{c("focei", "impmap")}),
 #'   requires a mu-referenced parameterization, and does not yet support IOV.
 #'   Example chain: \code{c("saem", "focei")}.
@@ -304,12 +309,25 @@
 #'       by both \code{"gn"} and \code{"gn_hybrid"}.}
 #'   }
 #'
-#'   \strong{Importance Sampling (\code{"imp"} stage)}
+#'   \strong{Importance Sampling (\code{"imp"})}
+#'
+#'   By default \code{"imp"} is a Monte-Carlo EM estimator (NONMEM
+#'   \code{METHOD=IMP}); set \code{imp_eval_only = TRUE} to evaluate the marginal
+#'   \code{-2 log L} at fixed parameters instead (NONMEM \code{EONLY=1}).
 #'   \describe{
+#'     \item{\code{imp_eval_only}}{Logical; \code{TRUE} evaluates \code{-2 log L}
+#'       at the fixed input parameters without estimating (NONMEM \code{EONLY=1};
+#'       must be the terminal chain stage). \code{FALSE} (default) estimates.}
+#'     \item{\code{imp_iterations}}{Number of Monte-Carlo EM iterations, ignored
+#'       when \code{imp_eval_only} (default 200).}
+#'     \item{\code{imp_averaging}}{Number of final iterations whose parameters are
+#'       averaged into the reported estimate, ignored when \code{imp_eval_only}
+#'       (default 50).}
 #'     \item{\code{imp_samples}}{Importance samples drawn per subject (default
 #'       1000). Halving the Monte-Carlo SE requires quadrupling this value.}
 #'     \item{\code{imp_proposal_df}}{Degrees of freedom for the Student-t
-#'       proposal distribution (default \code{5}).}
+#'       proposal distribution (default \code{5}); the string \code{"normal"}
+#'       (or \code{"mvn"}) selects a multivariate-normal proposal.}
 #'     \item{\code{imp_seed}}{RNG seed for the IS step (default chosen by the
 #'       engine).}
 #'     \item{\code{imp_low_ess_threshold}}{ESS fraction below which a subject is
@@ -1369,10 +1387,13 @@ ferx_fit <- function(model, data = NULL,
     stop("`method` must be a non-empty character vector")
   }
   method <- vapply(method, .normalize_method_token, character(1L), USE.NAMES = FALSE)
-  # `imp` is a terminal stage - engine rejects malformed chains too, but
-  # surfacing the error R-side avoids a round-trip and gives a clearer message
-  # anchored to the R argument. It may run standalone (`method = "imp"`), in
-  # which case it scores the initial parameters, or follow another estimator.
+  # `imp` may appear at most once. By default it is an estimator (NONMEM
+  # METHOD=IMP) and may sit anywhere in the chain; with `imp_eval_only = TRUE`
+  # (NONMEM EONLY=1) it only evaluates the marginal -2 log L and must be the
+  # terminal stage. The engine rejects malformed chains too, but surfacing the
+  # error R-side avoids a round-trip and gives a clearer message. (`imp_eval_only`
+  # set via the model file's [fit_options] rather than `settings` is enforced
+  # engine-side.)
   imp_positions <- which(method == "imp")
   if (length(imp_positions) > 0L) {
     if (length(imp_positions) > 1L) {
@@ -1381,10 +1402,13 @@ ferx_fit <- function(model, data = NULL,
         length(imp_positions), " occurrences"
       )
     }
-    if (imp_positions != length(method)) {
+    imp_eval_only <- isTRUE(settings[["imp_eval_only"]])
+    if (imp_eval_only && imp_positions != length(method)) {
       stop(
-        "`\"imp\"` must be the final stage of the method chain; got ",
-        "method = c(\"", paste(method, collapse = "\", \""), "\")"
+        "`\"imp\"` with `imp_eval_only = TRUE` must be the final stage of the ",
+        "method chain; got method = c(\"",
+        paste(method, collapse = "\", \""), "\"). ",
+        "Drop `imp_eval_only` to run it as an estimator anywhere in the chain."
       )
     }
   }
