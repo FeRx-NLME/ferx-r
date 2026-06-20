@@ -197,7 +197,7 @@ test_that("ferx_runlog estimation settings section present when optimizer_label 
   expect_match(out, "LBFGS",              fixed = TRUE)
   expect_match(out, "Max iterations:",    fixed = TRUE)
   expect_match(out, "Gradient tol:",      fixed = TRUE)
-  expect_match(out, "BLOQ method:",       fixed = TRUE)
+  expect_match(out, "Censoring:",         fixed = TRUE)
 })
 
 test_that("ferx_runlog estimation settings shows NCA warm-start method", {
@@ -400,12 +400,12 @@ test_that("ferx_runlog does not emit 'Optimizer: NA' when optimizer_label is NA"
   expect_match(out, "Covariates:", fixed = TRUE)  # settings section still present
 })
 
-test_that("ferx_runlog does not emit 'BLOQ method: NA' when bloq_method_label is NA", {
+test_that("ferx_runlog does not emit 'Censoring: NA' when bloq_method_label is NA", {
   fit <- warfarin_fit()
   fit$bloq_method_label <- NA_character_
   fit$covariate_names   <- "WT"
   out <- ferx_runlog(fit, verbose = FALSE)
-  expect_no_match(out, "BLOQ method:    NA", fixed = TRUE)
+  expect_no_match(out, "Censoring:      NA", fixed = TRUE)
 })
 
 test_that("ferx_runlog model_text is populated after ferx_load_fit round-trip", {

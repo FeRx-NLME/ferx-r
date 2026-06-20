@@ -293,7 +293,7 @@ ferx_runlog <- function(fit, gradient_tol = 0.1, show_iterations = TRUE, verbose
       lines <- c(lines, sprintf("  Gradient tol:   %.4g", fit$outer_gtol))
     }
     if (!is.null(fit$bloq_method_label) && !is.na(fit$bloq_method_label) && nzchar(fit$bloq_method_label)) {
-      lines <- c(lines, sprintf("  BLOQ method:    %s", fit$bloq_method_label))
+      lines <- c(lines, sprintf("  Censoring:      %s", fit$bloq_method_label))
     }
     if (!is.null(fit$inits_from_nca) && !is.na(fit$inits_from_nca) && nzchar(fit$inits_from_nca)) {
       lines <- c(lines, sprintf("  Initial values: NCA-derived (%s)", fit$inits_from_nca))
@@ -303,7 +303,7 @@ ferx_runlog <- function(fit, gradient_tol = 0.1, show_iterations = TRUE, verbose
     if (!is.null(fit$multi_start_seed) && !is.na(fit$multi_start_seed)) seed_parts <- c(seed_parts, sprintf("multi_start=%g", fit$multi_start_seed))
     if (!is.null(fit$saem_seed)        && !is.na(fit$saem_seed))        seed_parts <- c(seed_parts, sprintf("saem=%g",        fit$saem_seed))
     if (!is.null(fit$sir_seed_used)    && !is.na(fit$sir_seed_used))    seed_parts <- c(seed_parts, sprintf("sir=%g",         fit$sir_seed_used))
-    if (!is.null(fit$is_seed)          && !is.na(fit$is_seed))          seed_parts <- c(seed_parts, sprintf("is=%g",          fit$is_seed))
+    if (!is.null(fit$imp_seed)         && !is.na(fit$imp_seed))         seed_parts <- c(seed_parts, sprintf("imp=%g",         fit$imp_seed))
     if (length(seed_parts)) {
       lines <- c(lines, sprintf("  Seeds:          %s", paste(seed_parts, collapse = "  ")))
     }
