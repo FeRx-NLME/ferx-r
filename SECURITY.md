@@ -32,8 +32,7 @@ FFI). Its main security surface is:
 
 - **Native / FFI code** — the Rust glue (`src/rust/`) and the extendr boundary;
   a memory-safety bug there can crash the host R session.
-- **Dependencies** — Rust crates (monitored by Dependabot) and the Enzyme
-  toolchain used for autodiff builds.
+- **Dependencies** — Rust crates monitored by Dependabot.
 - **Untrusted input** — parsing `.ferx` model files and NONMEM-format CSV data.
 
 The core engine has its own policy in

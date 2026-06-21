@@ -13,5 +13,5 @@ fit <- ferx_fit(ex$model, ex$data)
 print(fit)
 
 # SAEM-specific diagnostic: how many subjects used HMC proposals.
-# NULL for plain MH (no AD build or n_leapfrog = 0).
+# NULL for plain MH (for example, n_leapfrog = 0).
 fit$saem_n_subjects_hmc

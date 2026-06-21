@@ -220,8 +220,7 @@ A more general Form C lets you write the readout expression directly
 
 Because forms B (expressions) and Form C are evaluated through the ODE
 machinery, they force finite-difference gradients. Add `gradient = fd`
-explicitly in `[fit_options]` to make that choice visible (or `gradient = ad`
-to opt back into autodiff for Form A, which is compatible).
+explicitly in `[fit_options]` to make that choice visible.
 
 `[scaling]` is not yet supported on SDE (`[diffusion]`) models.
 

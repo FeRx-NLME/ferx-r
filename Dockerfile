@@ -12,9 +12,8 @@
 # Run the ferx CLI directly:
 #   docker run --rm -v "$PWD:/work" -w /work ferx:latest ferx model.ferx --data data.csv
 #
-# ferx-core's gradients are pure stable Rust (the Enzyme autodiff path was
-# retired in FeRx-NLME/ferx-core#381), so the image builds against the stock
-# stable toolchain - no custom rustc/LLVM build is needed.
+# ferx-core's gradients are pure stable Rust, so the image builds against the
+# stock stable toolchain - no custom rustc/LLVM build is needed.
 
 # ===========================================================================
 # Final image based on rocker/tidyverse.
