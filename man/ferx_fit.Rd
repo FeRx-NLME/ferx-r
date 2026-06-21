@@ -112,42 +112,22 @@ produce non-parametric parameter uncertainty intervals. Requires
 \code{settings}. Default \code{FALSE}.}
 
 \item{gradient}{Inner-loop (per-subject EBE) gradient method.
-One of \code{"auto"} (default), \code{"ad"}, or \code{"fd"}.
+One of \code{"auto"} (default) or \code{"fd"}. The legacy
+\code{"ad"} token is accepted by older model files but should not be
+used for new code.
 
 The inner optimizer is BFGS; what differs is how the gradient of the
 individual NLL w.r.t. ETA is computed:
 \itemize{
-\item \code{"ad"}: reverse-mode automatic differentiation via
-Enzyme. One forward + one reverse pass per gradient call,
-regardless of the number of etas. Requires the package to have
-been compiled with autodiff support (see
-\code{ferx_rust_autodiff_enabled()}) and the model to have an
-analytical PK path. ODE-based models currently have no AD
-implementation and will silently fall back to FD even if
-\code{"ad"} is requested.
 \item \code{"fd"}: central finite differences, \code{2 * n_eta}
 forward evaluations per gradient call. Always available.
-\item \code{"auto"} (default): use AD whenever the package was
-compiled with it and the model has an analytical PK path,
-otherwise FD. This is the right choice for almost all uses.
+\item \code{"auto"} (default): let the engine choose the best
+available gradient path for the model. This is the right choice
+for almost all uses.
 }
 
-\strong{When AD wins.} AD's per-gradient cost is roughly independent
-of the number of etas, while FD scales linearly. For typical
-analytical PK fits we have measured AD ~5x faster per gradient call
-on 1-cpt oral (\code{n_eta = 3}) and ~1.5-1.8x faster per call on 2-
-and 3-cpt infusion. The advantage grows with more random effects,
-more observations per subject, and (when implemented) ODE forward
-models. On small problems the \emph{wall-clock} gap is often small
-because non-gradient work (NLopt steps, population likelihood
-reductions, parallel scheduling) dominates the total fit time.
-
 \strong{When to set \code{"fd"} explicitly.} Mainly for validation
-(cross-check that AD and FD converge to the same OFV on a new model),
-for reproducibility against a known FD baseline, or to sidestep an
-Enzyme codegen pathology on an unusual model structure. Both methods
-converge to the same optimum within line-search tolerance on
-well-conditioned problems.
+or for reproducibility against a known finite-difference baseline.
 
 Set \code{FERX_TIME_GRADIENTS=1} in the environment to print
 per-gradient-call timings at the end of a fit, which is the easiest
@@ -324,8 +304,7 @@ Metropolis-Hastings sampler (default 12345). Independent of
 \code{multi_start_seed}.}
 \item{\code{n_leapfrog} / \code{saem_n_leapfrog}}{Leapfrog steps for
 HMC proposals (default \code{0} = Metropolis-Hastings). A positive
-value replaces MH with one HMC proposal per subject per iteration.
-Requires an AD build; see examples below.}
+value replaces MH with one HMC proposal per subject per iteration.}
 }
 
 \strong{Bayes (\code{"bayes"})}
@@ -589,20 +568,18 @@ no name.}
 \item{data_name}{Dataset name, derived as the basename of the \code{data}
 path with its extension stripped.}
 \item{gradient}{The inner-loop gradient method as requested by the
-caller (one of \code{"auto"}, \code{"ad"}, \code{"fd"}). The
+caller (usually \code{"auto"} or \code{"fd"}). The
 \emph{resolved} method may differ - see \code{gradient_used} and the
 \code{gradient} argument.}
 \item{gradient_used}{The inner-loop gradient method the engine actually
 used: \code{"ad"}, \code{"fd"}, or \code{"N/A"} (derivative-free /
 sampling step). When \code{gradient = "auto"} this records which
-branch resolved at fit time; for ODE models with \code{gradient = "ad"}
-this shows the silent fallback to \code{"fd"}. \code{NA} on older
-engine binaries that did not populate this field.}
+branch resolved at fit time. \code{NA} on older engine binaries that
+did not populate this field.}
 \item{gradient_method_inner}{Engine label for the inner-loop gradient
-("Enzyme AD", "finite differences", or "N/A"). Prefer
-\code{gradient_used} for display.}
+method. Prefer \code{gradient_used} for display.}
 \item{gradient_method_outer}{Engine label for the population-level
-optimizer's gradient ("Enzyme AD", "finite differences", or "N/A").}
+optimizer's gradient method.}
 \item{ferx_version}{ferx-core library version string.}
 \item{model_text}{Verbatim content of the \code{.ferx} model file as a
 character string. \code{NULL} for in-memory fits that were never
@@ -784,8 +761,7 @@ into \code{fit$theta}), \code{input_names}, \code{output_names}, and
 \code{NULL} when no data-selection rules were active.}
 }
 \description{
-Fits a NLME model using FOCE or FOCEI estimation with a Rust backend
-powered by automatic differentiation (Enzyme).
+Fits a NLME model using FOCE or FOCEI estimation with a Rust backend.
 }
 \section{Process noise (SDE / diffusion)}{
 
@@ -811,9 +787,8 @@ standard deviations. A value of 0.5 means \eqn{\sigma^2 = 0.5}, not
 \item Each diffusion parameter appears in \code{fit$theta} as
 \code{DIFF_<STATE>} (e.g. \code{DIFF_CENTRAL}). Standard errors and
 \code{ferx_estimates()} treat them as regular thetas.
-\item Autodifferentiation (Enzyme AD) is incompatible with the EKF
-covariance propagation - the engine automatically falls back to
-finite differences and emits a warning.
+\item SDE models use finite differences for the EKF covariance
+propagation.
 \item SAEM is not supported with SDE models; a hard error is raised.
 \item \code{fit$uses_sde} is \code{TRUE} whenever a \code{[diffusion]}
 block was present.
@@ -989,8 +964,7 @@ ferx_fit(m, d, bloq_method = "drop")  # disable M3; use rows as observed
 
 \strong{Gradient method} for the inner EBE loop:
 \preformatted{
-ferx_fit(m, d, gradient = "auto")  # default: AD when available, else FD
-ferx_fit(m, d, gradient = "ad")    # force automatic differentiation
+ferx_fit(m, d, gradient = "auto")  # default: engine-selected
 ferx_fit(m, d, gradient = "fd")    # force finite differences
 }
 
@@ -1043,7 +1017,7 @@ ferx_fit(m, d, method = "saem", settings = list(
   seed          = 42L
 ))
 
-# HMC proposals (requires AD build; falls back to MH otherwise):
+# HMC proposals:
 ferx_fit(m, d, method = "saem", settings = list(n_leapfrog = 3L))
 }
 
@@ -1260,7 +1234,7 @@ ferx_fit(ex$model, ex$data, covariance = TRUE) |> ferx_cor_matrix()
 
 # The [diffusion] block in the .ferx file enables SDE mode.
 # DIFF_CENTRAL is a within-subject process-noise variance on the central
-# compartment.  Autodiff is forced to finite differences automatically.
+# compartment.  SDE models use finite differences for this step.
 sde <- ferx_example("warfarin_sde")
 fit_sde <- ferx_fit(sde$model, sde$data)
 fit_sde$uses_sde                  # TRUE

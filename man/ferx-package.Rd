@@ -7,8 +7,7 @@
 \title{ferx: Nonlinear Mixed Effects Modeling with a Rust Backend}
 \description{
 ferx provides a user-facing R API for population PK / NLME modeling
-that delegates to a high-performance Rust engine (ferx-core) with
-Enzyme automatic differentiation for exact gradients. Models are
+that delegates to a high-performance Rust engine (ferx-core). Models are
 written in a compact .ferx DSL (parameters, individual_parameters,
 structural_model, odes, error_model, initial_values, fit_options,
 optional scaling).
@@ -36,15 +35,6 @@ Functions are grouped on the reference index under \emph{fitting},
 \emph{simulation}, \emph{model-editing}, \emph{diagnostics}, and
 \emph{utilities}; each function's help page links to its siblings
 via \code{See Also}.
-}
-
-\section{Build modes}{
-
-ferx works with or without the Enzyme autodiff toolchain. Without
-Enzyme, gradients fall back to finite differences; fits remain
-correct but are slower and \code{gradient = "ad"} is unavailable.
-See \code{ferx_rust_autodiff_enabled()} (internal) and the startup
-message for the active mode.
 }
 
 \seealso{
