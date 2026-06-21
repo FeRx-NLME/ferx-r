@@ -51,6 +51,18 @@ ferx_rust_predict_from_fit <- function(model_path, data_path, theta, omega_flat,
 
 #' @title Internal Rust backend binding
 #' @keywords internal
+ferx_rust_predict_survival <- function(model_path, data_path, times) {
+  .Call("wrap__ferx_rust_predict_survival", model_path, data_path, times)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_predict_survival_from_fit <- function(model_path, data_path, times, theta, omega_flat, omega_dim, sigma) {
+  .Call("wrap__ferx_rust_predict_survival_from_fit", model_path, data_path, times, theta, omega_flat, omega_dim, sigma)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
 ferx_rust_npde_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, nsim, seed) {
   .Call("wrap__ferx_rust_npde_from_fit", model_path, data_path, theta, omega_flat, as.integer(omega_dim), sigma, as.integer(nsim), as.integer(seed))
 }

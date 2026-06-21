@@ -44,7 +44,9 @@ CARGO_FEATURES =
 # module from their callers and breaks Enzyme. `override` makes the makefile's
 # value authoritative regardless of the environment.
 ifeq ($(FERX_NO_AUTODIFF),1)
-  CARGO_FEATURES = --no-default-features --features ci,nn
+  # `--no-default-features` drops `survival` (a default), so add it back explicitly
+  # alongside ci,nn — TTE support must ship in this build too.
+  CARGO_FEATURES = --no-default-features --features ci,nn,survival
   override CARGO_PROFILE_RELEASE_LTO := thin
 else
   CARGO_FEATURES = --features nn

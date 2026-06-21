@@ -9,8 +9,13 @@ authors = ["Ron Keizer", "Teun Post"]
 crate-type = ["staticlib"]
 
 [features]
-default = ["autodiff"]
-autodiff = ["ferx-core/autodiff"]
+# `survival` is on by default so ferx-r ships time-to-event support: the TTE
+# datareader routing (`read_population_for`) and `predict_survival` in ferx-core
+# are both behind its `survival` feature, so without this they are no-ops / absent.
+default = ["survival"]
+# Time-to-event / survival modelling (parametric TTE, `[event_model]` blocks,
+# `predict_survival`). See ferx-core's plans/tte-survival-markov.md.
+survival = ["ferx-core/survival"]
 ci = ["ferx-core/ci"]
 # Deep Compartment Models (DCM) and low-dim neural ODEs — Phase A from
 # ferx-core's plans/dcm-and-low-dim-node.md. Off by default. Opt in via
@@ -22,7 +27,7 @@ nn = ["ferx-core/nn"]
 [dependencies]
 extendr-api = "0.9"
 ferx-core = { git = "https://github.com/FeRx-NLME/ferx-core", branch = "main", default-features = false }
-nalgebra = "0.34"
+nalgebra = "0.35"
 
 [profile.release]
 # fat LTO is required for cross-crate Enzyme autodiff (functions differentiated

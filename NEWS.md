@@ -1,5 +1,16 @@
 # ferx 0.1.6
 
+## Added
+
+- **`ferx_predict_survival()`** — survival-function predictions (`S(t)`, `H(t)`,
+  `h(t)`, plus median and mean survival) on a user-supplied time grid for
+  `[event_model]` (time-to-event) endpoints, for every subject and TTE CMT.
+  Mirrors `ferx_predict()`; optionally uses a `fit`'s estimated `theta`.
+- **Time-to-event support is now compiled into the package.** The Rust backend
+  enables ferx-core's `survival` feature by default, so `[event_model]` blocks
+  and the TTE datareader routing are active in shipped builds (previously the
+  feature was off, making that routing a no-op).
+
 ## Breaking changes
 
 - **Importance-sampling result/settings names use the `imp_*` prefix.**
