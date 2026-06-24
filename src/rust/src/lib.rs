@@ -1092,6 +1092,7 @@ fn default_fit_result(
         method: EstimationMethod::FoceI,
         method_chain: vec![EstimationMethod::FoceI],
         bayes: None,
+        cond_dist: None,
         converged: true,
         ofv: 0.0,
         aic: 0.0,
@@ -2472,6 +2473,7 @@ fn ferx_rust_sir(
             EstimationMethod::Foce
         }],
         bayes: None,
+        cond_dist: None,
         converged: true,
         ofv,
         aic: 0.0,
