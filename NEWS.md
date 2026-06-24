@@ -24,6 +24,13 @@
   
 ## Changed
 
+- **`optimizer` now defaults to `"auto"`** (FeRx-NLME/ferx-core#490). The new
+  `"auto"` choice picks the population optimizer per model: `"nlopt_lbfgs"` when
+  the exact analytic FOCE/FOCEI gradient is available, and `"bobyqa"` when only
+  finite differences are. Pass `settings = list(optimizer = "auto")` (or omit it)
+  to get the automatic choice; the fit reports the resolved optimizer as
+  `"auto (<resolved>)"`. Set `optimizer = "bobyqa"` for the previous fixed
+  default.
 - **No special Rust toolchain is needed to build.** ferx-core now uses
   hand-rolled analytic sensitivities (FeRx-NLME/ferx-core#381), so the package
   builds with the stable Rust toolchain. The former custom-toolchain build
