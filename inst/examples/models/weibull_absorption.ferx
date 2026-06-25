@@ -1,0 +1,52 @@
+# Weibull absorption -- built-in `weibull(td, beta)` input rate.
+#
+# One-compartment model with a Weibull absorption-time distribution fed straight
+# into the central compartment (no first-order `ka` -- weibull() models the entire
+# absorption delay, like igd()):
+#
+#   R_in(tad) = F*Dose * (beta/Td) * (tad/Td)^(beta-1) * exp(-(tad/Td)^beta)
+#
+# the Weibull density with scale Td and shape beta. The shape selects the profile:
+# beta > 1 a delayed interior peak, beta = 1 first-order absorption (ka = 1/Td),
+# beta < 1 fast early uptake. The dose feeds the density over time
+# (integral R_in dt = F*Dose) and is NOT also added as a bolus. `central` is an
+# AMOUNT; concentration = amount / V via [scaling].
+#
+# Paired with igd_oral.csv -- the ferx-core NONMEM absorption anchor dataset
+# (20 subjects, single oral dose). NOTE: that data was simulated from a transit
+# model, so the Weibull fit is mildly mis-specified (a syntax / implementation
+# demo, not a parameter-recovery demo). See ferx-core
+# nonmem_anchor/weibull_absorption.ctl for the NONMEM cross-check.
+
+[parameters]
+  theta TVCL(5.0,   0.1, 100.0)   # clearance (L/h)
+  theta TVV(50.0,   5.0, 500.0)   # central volume (L)
+  theta TVTD(2.0,  0.05,  24.0)   # Weibull scale (h)
+  theta TVBETA(1.5, 0.1,  10.0)   # Weibull shape (dimensionless)
+
+  omega ETA_CL ~ 0.09
+  omega ETA_V  ~ 0.09
+
+  sigma PROP_ERR ~ 0.15 (sd)
+
+[individual_parameters]
+  CL   = TVCL  * exp(ETA_CL)
+  V    = TVV   * exp(ETA_V)
+  TD   = TVTD
+  BETA = TVBETA
+
+[structural_model]
+  ode(states=[central])
+
+[odes]
+  d/dt(central) = weibull(td=TD, beta=BETA) - CL/V*central
+
+[scaling]
+  y = central / V
+
+[error_model]
+  DV ~ proportional(PROP_ERR)
+
+[fit_options]
+  method  = focei
+  maxiter = 500
