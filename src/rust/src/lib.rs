@@ -393,6 +393,9 @@ fn ferx_rust_simulate(
     let opts = ferx_core::SimulateOptions {
         seed: Some(seed as u64),
         match_method,
+        // No TTE administrative horizon from the R wrapper yet (ferx-core #522);
+        // `..Default` fills `horizon: None` and any future fields.
+        ..Default::default()
     };
     let results = match ferx_core::simulate_with_options(
         &parsed.model,
@@ -481,6 +484,9 @@ fn ferx_rust_simulate_from_fit(
     let opts = ferx_core::SimulateOptions {
         seed: Some(seed as u64),
         match_method,
+        // No TTE administrative horizon from the R wrapper yet (ferx-core #522);
+        // `..Default` fills `horizon: None` and any future fields.
+        ..Default::default()
     };
     let results = match ferx_core::simulate_with_options(
         &parsed.model,
