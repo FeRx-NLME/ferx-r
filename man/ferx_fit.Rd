@@ -246,7 +246,11 @@ Not applicable to SAEM, which controls iterations via
 \strong{FOCE / FOCEI / GN-hybrid: outer optimizer}
 \describe{
 \item{\code{optimizer}}{Population-level optimizer. One of
-\code{"bobyqa"} (default, derivative-free, robust),
+\code{"auto"} (default; picks \code{"nlopt_lbfgs"} when the exact
+analytic FOCE/FOCEI gradient is available and \code{"bobyqa"} when
+only finite differences are -- the fit reports the resolved pick as
+\code{"auto (<resolved>)"}),
+\code{"bobyqa"} (derivative-free, robust),
 \code{"slsqp"} (sequential quadratic programming, gradient-based),
 \code{"lbfgs"} / \code{"nlopt_lbfgs"} (limited-memory BFGS via
 NLopt, gradient-based),
@@ -990,7 +994,8 @@ method, valid combinations, and a convergence troubleshooting guide - see
 
 \strong{Outer optimizer selection:}
 \preformatted{
-ferx_fit(m, d, settings = list(optimizer = "bobyqa"))      # default
+ferx_fit(m, d, settings = list(optimizer = "auto"))        # default
+ferx_fit(m, d, settings = list(optimizer = "bobyqa"))      # derivative-free
 ferx_fit(m, d, settings = list(optimizer = "slsqp"))       # gradient-based
 ferx_fit(m, d, settings = list(optimizer = "lbfgs"))
 ferx_fit(m, d, settings = list(optimizer = "bfgs"))
@@ -1255,9 +1260,10 @@ fit_ms$ofv
 #   - method = "gn_hybrid"  (FOCE-GN with SLSQP polish)
 #   - method = "foce" / "focei" run with settings = list(optimizer =
 #     "trust_region") or settings = list(optimizer = "slsqp") (the
-#     default optimizer "bobyqa" is derivative-free and tolerates poor
-#     starts the best of the three; switch to slsqp / trust_region for
-#     gradient-based behaviour, then NCA-derived starts help most)
+#     default "auto" resolves to derivative-free "bobyqa" on these
+#     poorly-started ODE/PD fits, which tolerates poor starts the best;
+#     switch to slsqp / trust_region for gradient-based behaviour, then
+#     NCA-derived starts help most)
 # For these, NCA-derived starts often turn a non-converging or stagnating
 # fit into a clean convergence.
 #
