@@ -7,11 +7,9 @@
 ## the predicted P[central], giving a better-calibrated likelihood when
 ## IWRES shows autocorrelation.
 ##
-## Performance note: SDE models use finite differences (FD) for gradients —
-## Enzyme autodiff is not compatible with the EKF covariance propagation.
+## Performance note: SDE models use finite differences (FD) for gradients.
 ## This makes each function evaluation significantly slower than a comparable
-## analytical PK model.  The Enzyme toolchain (channel = "enzyme") is strongly
-## recommended for fitting SDE models in practice.
+## analytical PK model.
 ##
 ## Key output differences vs. the standard warfarin fit:
 ##   fit$uses_sde               # TRUE

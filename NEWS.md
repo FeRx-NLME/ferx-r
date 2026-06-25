@@ -19,7 +19,35 @@
   `imp_low_ess_threshold`. The short-lived `is_*` names are no longer accepted,
   matching ferx-core (FeRx-NLME/ferx-core#422).
 
+## Fixed
+
+- **`ferx_to_frem()` now warns about estimated parameters with no random effect**
+  and carries the base model's scaling over to the FREM model. A non-fixed
+  parameter without an `ETA` is estimated poorly by IMP/IMPMAP (the
+  importance-weighted M-step is biased for weakly-identified fixed effects), so
+  `ferx_to_frem()` now emits a warning at conversion time recommending an `ETA` be
+  added (ferx mu-references automatically), the parameter be held fixed, or FOCEI
+  be used. The base model's `[scaling]`/`[odes]` blocks (e.g. `obs_scale`) are also
+  now transferred to the generated FREM model instead of being dropped — dropping
+  `obs_scale` rescaled every prediction and collapsed a PK typical value during
+  FREM fits. Requires ferx-core with these fixes
+  (FeRx-NLME/ferx-core#406, #407).
+  
 ## Changed
+
+- **`optimizer` now defaults to `"auto"`** (FeRx-NLME/ferx-core#490). The new
+  `"auto"` choice picks the population optimizer per model: `"nlopt_lbfgs"` when
+  the exact analytic FOCE/FOCEI gradient is available, and `"bobyqa"` when only
+  finite differences are. Pass `settings = list(optimizer = "auto")` (or omit it)
+  to get the automatic choice; the fit reports the resolved optimizer as
+  `"auto (<resolved>)"`. Set `optimizer = "bobyqa"` for the previous fixed
+  default.
+- **No special Rust toolchain is needed to build.** ferx-core now uses
+  hand-rolled analytic sensitivities (FeRx-NLME/ferx-core#381), so the package
+  builds with the stable Rust toolchain. The former custom-toolchain build
+  switches and preflight check are gone. The legacy build-mode probe is retained
+  but now always returns `FALSE`. Gradients are unchanged (exact analytic
+  sensitivities). Also bumps the bundled `nalgebra` to 0.35 to match ferx-core.
 
 - **`method = "imp"` is now an estimator by default** (NONMEM `METHOD=IMP`): it
   updates the population parameters by importance-sampling Monte-Carlo EM instead
@@ -46,6 +74,17 @@
 
 ## New features
 
+- **Weibull absorption — `weibull(td, beta)`**: a new built-in absorption input
+  rate for `[odes]` models, alongside `transit(...)` and `igd(...)`. It adds a
+  Weibull absorption-time distribution — scale `Td`, shape `beta` — fed straight
+  into the central compartment, modelling the entire absorption delay in one term
+  (no first-order `ka`). The shape selects the profile: `beta > 1` a delayed
+  interior peak, `beta = 1` first-order absorption (`ka = 1/Td`), `beta < 1` fast
+  early uptake. The dose feeds the density over time (∫ R_in dt = F·Dose), not as a
+  bolus, exactly like `transit(...)`/`igd(...)`, and drives exact analytic
+  FOCE/FOCEI/Bayes gradients. New example `weibull_absorption`. Anchored against a
+  NONMEM `$DES` Weibull run (ferx FOCEI matches NONMEM `#OBJV` to ~1e-6). Requires
+  ferx-core with FeRx-NLME/ferx-core#497.
 - **IIV on residual error** (`iiv_on_ruv`): a `.ferx` model can now place a random
   effect on the residual error, matching NONMEM `Y = IPRED + EPS*EXP(ETA)`. Declare
   an `omega` and reference it from `[error_model]` with `iiv_on_ruv = NAME`; each
@@ -364,32 +403,6 @@
   because the R binding's provenance block set `model_path` / `model_hash` but
   did not set `model_text`. Fixed by reading the model file in the same block.
 
-## Build
-
-- `src/Makevars`: the autodiff build now forces fat LTO with `override`. R CMD
-  INSTALL runs make with `-e` semantics, so a stale
-  `CARGO_PROFILE_RELEASE_LTO=thin` in the environment could previously leak past
-  the makefile and silently build autodiff with thin LTO — which keeps the
-  differentiated ferx-core functions in a separate module from their callers and
-  breaks cross-crate Enzyme. `override` makes the makefile value authoritative
-  regardless of the environment.
-- `src/Makevars`: building with `FERX_NO_AUTODIFF=0` now preflights for the
-  `enzyme` rustup toolchain and fails fast with an actionable message (how to
-  install the toolchain, or how to fall back to finite-difference gradients)
-  instead of a cryptic `toolchain 'enzyme' is not installed` error from cargo.
-- `src/ad-preflight.sh` (new): the autodiff build now runs an *AD self-test*
-  before the long fat-LTO link. Registering an `enzyme` toolchain is not enough
-  — a standalone Enzyme plugin copied into a prebuilt nightly's sysroot passes
-  the name check but then hangs forever in `llvm::Constant::getNullValue` the
-  first time it differentiates anything. The self-test compiles and runs a real
-  `#[autodiff_forward]` function under a portable timeout (no `timeout`/
-  `gtimeout` dependency); a hang is turned into a clean failure that aborts the
-  build with a pointer to the toolchain rebuild instructions, instead of leaving
-  the user staring at a wedged `rustc`. The result is cached per toolchain
-  fingerprint, so identical reinstalls skip it. Set `FERX_AD_PREFLIGHT_SKIP=1`
-  to bypass, or `FERX_AD_PREFLIGHT_TIMEOUT=<seconds>` to adjust the budget.
-  (ferx-r#111)
-
 # ferx 0.1.5
 
 ## Documentation
@@ -480,7 +493,7 @@
 
 - `[scaling]` block in `.ferx` model files for unit conversion. Form A
   (`obs_scale = <number>`) divides every model prediction by a scalar before
-  residuals are computed and is safe with automatic differentiation. Form B
+  residuals are computed. Form B
   (`obs_scale = <expression>`) and Form C (`y = <expr>` for ODE readout)
   support parameter and state-variable expressions but require
   `gradient = fd` in `[fit_options]`. Per-compartment variants
@@ -496,10 +509,9 @@
   New bundled example: `ferx_example("warfarin_ss")`.
 
 - SAEM HMC proposals: pass `settings = list(n_leapfrog = <int>)` to
-  `ferx_fit()` to use Hamiltonian Monte Carlo proposals in the SAEM E-step
-  (requires the Enzyme AD build). New output field `fit$saem_n_subjects_hmc`
-  reports the number of subjects that used HMC proposals; `NULL` for MH-only
-  or non-SAEM fits.
+  `ferx_fit()` to use Hamiltonian Monte Carlo proposals in the SAEM E-step.
+  New output field `fit$saem_n_subjects_hmc` reports the number of subjects
+  that used HMC proposals; `NULL` for MH-only or non-SAEM fits.
 
 - SAEM fully supports inter-occasion variability (IOV / kappa) models.
   New bundled example: `ferx_example("warfarin_iov_saem")`.
@@ -614,10 +626,8 @@
 
 - `ferx_fit()` now returns `$gradient_used` — the inner-loop gradient
   method the engine actually used (`"ad"`, `"fd"`, or `"N/A"`). When
-  `gradient = "auto"` it shows which branch resolved at fit time; ODE
-  models silently fall back from AD to FD even when `gradient = "ad"`
-  was requested, and this field surfaces that fallback without needing
-  to read warnings. The raw engine labels are also exposed as
+  `gradient = "auto"` it shows which branch resolved at fit time. The raw
+  engine labels are also exposed as
   `$gradient_method_inner` / `$gradient_method_outer`. `print()` shows
   both requested and used; `summary()` formats them as `auto
   (requested) -> ad (used)` (ferx-core#1).

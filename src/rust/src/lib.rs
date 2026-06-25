@@ -1296,7 +1296,7 @@ fn default_fit_result(
         sigma_init: Vec::new(),
         obs_time_range: None,
         final_gradient: None,
-        optimizer: "bobyqa".to_string(),
+        optimizer: "auto".to_string(),
         n_starts: 1,
         multi_start_seed: None,
         saem_seed: None,
@@ -2290,10 +2290,12 @@ fn covariate_types_robj(table: Option<&ferx_core::CovariateTable>) -> Robj {
     robj
 }
 
-/// Returns TRUE if the Rust library was compiled with the `autodiff` feature
-/// (Enzyme toolchain). Always FALSE now: the Enzyme autodiff path was retired in
-/// ferx-core (gradients come from hand-rolled `Dual2` analytic sensitivities), so
-/// the `autodiff` feature no longer exists. Kept for R-side API compatibility.
+/// Returns TRUE if the Rust library was compiled with Enzyme autodiff support.
+///
+/// The Enzyme autodiff path was retired in ferx-core
+/// (FeRx-NLME/ferx-core#381) in favour of hand-rolled analytic sensitivities,
+/// so this is always FALSE. Retained for backwards compatibility with callers
+/// that probe it.
 #[extendr]
 fn ferx_rust_autodiff_enabled() -> bool {
     false
@@ -2683,7 +2685,7 @@ fn ferx_rust_sir(
         sigma_init: Vec::new(),
         obs_time_range: None,
         final_gradient: None,
-        optimizer: "bobyqa".to_string(),
+        optimizer: "auto".to_string(),
         n_starts: 1,
         multi_start_seed: None,
         saem_seed: None,
@@ -2818,6 +2820,8 @@ fn ferx_rust_prepare_frem(
     let ft_names: Vec<String> = result.fremtype_map.iter().map(|(n, _)| n.clone()).collect();
     let ft_vals: Vec<i32> = result.fremtype_map.iter().map(|(_, v)| *v as i32).collect();
 
+    let warnings: Vec<String> = result.warnings.clone();
+
     list!(
         model_path = result.model_path.to_string_lossy().to_string(),
         data_path = result.data_path.to_string_lossy().to_string(),
@@ -2827,7 +2831,8 @@ fn ferx_rust_prepare_frem(
         covariate_var_values = var_vals,
         fremtype_names = ft_names,
         fremtype_values = ft_vals,
-        n_total_etas = result.n_total_etas as i32
+        n_total_etas = result.n_total_etas as i32,
+        warnings = warnings
     )
 }
 

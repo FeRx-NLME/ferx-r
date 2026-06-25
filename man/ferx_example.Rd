@@ -88,6 +88,11 @@ Transit compartments provide the absorption delay without a hard lag time.}
 inverse-Gaussian absorption via the built-in \code{igd(mat, cv2)} input
 rate fed straight into central (the entire absorption delay in one term,
 no first-order \code{ka}). Paired with the NONMEM igd anchor dataset.}
+\item{weibull_absorption}{One-compartment ODE model with Weibull absorption
+via the built-in \code{weibull(td, beta)} input rate fed straight into
+central (the entire absorption delay in one term, no first-order
+\code{ka}); the shape \code{beta} selects the profile. Shares the NONMEM
+absorption anchor dataset.}
 \item{two_cpt_oral_cov_ode_template}{Two-compartment oral PK with covariates
 written with \code{ode_template two_cpt_oral(...)} in
 \code{[structural_model]}: ferx generates the standard disposition ODE

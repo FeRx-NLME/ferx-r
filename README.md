@@ -19,28 +19,11 @@ Fast nonlinear mixed effects (NLME) modeling in R, powered by a Rust backend.
 
 ## Installation
 
-A Rust installation with the Enzyme AutoDifferentiation engine is required for FeRx to compute gradients with automatic differentiation. Most likely you will need to build Rust from source.
-
-There are **two separate one-time costs**, which are often conflated:
-
-| One-time cost | What it is | Rough time |
-|---|---|---|
-| Build the Enzyme toolchain | Compile the Enzyme-enabled Rust toolchain from source (once per machine) | ~45-60 min |
-| First ferx-r compile | Compile ferx-core (Rust) and link the R package. The autodiff path uses **fat LTO** — a single-threaded final link | CPU-dependent: ~15-30 min on a fast CPU, up to ~1-2 h on an older laptop |
-
-Both are paid once. Subsequent installs reuse the toolchain and the ~1.9 GB dependency cache, so they are fast — unless you change the build configuration (autodiff on/off, thin/fat LTO), which invalidates the final crates.
-
-> **The first fat-LTO compile looks like a hang but isn't.** The autodiff final link is single-threaded fat LTO plus Enzyme passes, so wall-clock tracks single-core speed and extra cores don't help. One core stays busy while `rustc`'s CPU time keeps climbing — confirm with `ps aux | grep 'rustc --crate-name ferx'`. Fat LTO also spikes memory at the very end, so on a 16 GB machine free RAM first or `rustc` can be OOM-killed.
-
-See [documentation](https://ferx-nlme.github.io/ferx-core/installation.html) for installation instructions.
-
-> **Heads-up - two gotchas that bite people building the toolchain from source:**
-> - If the autodiff verification step makes `rustc` *hang* (one core busy, memory flat, never returns), you have an LLVM/Enzyme mismatch. Rebuild with `--set llvm.download-ci-llvm=false`. The package install now runs this check automatically (a quick AD self-test) and aborts with this pointer instead of wedging, so you no longer have to run it by hand. Set `FERX_AD_PREFLIGHT_SKIP=1` to bypass it once the toolchain is verified.
-> - The toolchain is initially linked into `/tmp`, which macOS/Linux purge - relocate it to a permanent path (e.g. `~/.local/share/enzyme-toolchain`) and re-link, or it will silently break later. See the install docs for the exact steps.
+Install a standard stable Rust toolchain with [rustup](https://www.rust-lang.org/tools/install), then install the R package. No custom Rust toolchain is required.
 
 ### Install the package
 
-After installing Rust, in R run:
+In R, run:
 
 ```r
 pak::pak("FeRx-NLME/ferx-r")
@@ -51,28 +34,13 @@ Or from a local clone:
 R CMD INSTALL .
 ```
 
-### Mac/Linux without Enzyme (finite-difference gradients)
-
-No Enzyme toolchain? No problem. The build auto-detects whether Enzyme is present; if it is not, it falls back to finite-difference gradients automatically. Just install normally:
-
-```r
-pak::pak("FeRx-NLME/ferx-r")
-```
-
-To skip the probe and force the FD path explicitly (e.g. in scripts or CI):
-
-```r
-Sys.setenv(FERX_NO_AUTODIFF = "1")
-pak::pak("FeRx-NLME/ferx-r")
-```
-
 First install takes ~1-2 hours (Rust compilation from scratch). Subsequent installs are fast.
 
-All estimation methods (FOCE/FOCEI/SAEM/IMP) work. When ferx loads it prints a startup message listing the specific AD-only features that are limited.
+All estimation methods (FOCE/FOCEI/SAEM/IMP) work with the standard build.
 
-### Windows (supported with finite-difference gradients)
+### Windows
 
-Native Windows installs are supported. The build automatically uses finite-difference gradients on Windows (no `FERX_NO_AUTODIFF=1` needed) - all estimation methods work, but AD-only features are limited. Native Enzyme autodiff is **not** available on Windows; for that, use the Docker image below (or WSL2).
+Native Windows installs are supported.
 
 Prerequisites:
 
@@ -91,14 +59,12 @@ Then install in R:
 pak::pak("FeRx-NLME/ferx-r")
 ```
 
-When ferx loads it prints a startup message listing the specific AD-only features that are limited on Windows.
-
 ### Docker
 
-A Docker image is available that bundles the Enzyme toolchain (built from source), ferx CLI, the ferx R package, and RStudio Server — no local Rust/Enzyme setup required. On Windows, this is the recommended path if you need Enzyme autodiff.
+A Docker image is available that bundles ferx CLI, the ferx R package, and RStudio Server.
 
 ```bash
-# Build (first build takes ~45-60 min; cached after that)
+# Build
 docker build -t ferx:latest .
 
 # Run RStudio Server

@@ -11,7 +11,7 @@ library(ferx)
 # Requires covariance = TRUE; SIR is enabled via sir = TRUE.
 #
 # We use the warfarin_iov example here because its FOCE covariance step
-# converges cleanly on the small no-autodiff (FD-gradient) build. The same
+# converges cleanly on this small finite-difference-gradient fit. The same
 # pattern works on any model where the covariance step succeeds.
 ex <- ferx_example("warfarin_iov")
 

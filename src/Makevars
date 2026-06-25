@@ -13,45 +13,18 @@ ifeq ($(OS),Windows_NT)
   PKG_LIBS += -lntdll -lbcrypt -ladvapi32 -luserenv -lws2_32 -lkernel32 -lpsapi
 endif
 
-# Autodiff mode. If FERX_NO_AUTODIFF is not explicitly set, probe for the
-# `enzyme` rustup toolchain; if it's missing, silently fall back to the
-# stable-Rust path so an install on a machine without Enzyme still works.
-# Set FERX_NO_AUTODIFF=1 to force the stable path, or FERX_NO_AUTODIFF=0 to
-# force autodiff (and error out if enzyme isn't present).
-ifeq ($(origin FERX_NO_AUTODIFF), undefined)
-  # `grep -q` with `&& echo yes`: prints "yes" iff the enzyme toolchain is
-  # installed. Using -q (not -c) avoids the "grep returns 1 on no match"
-  # exit-code trap that would otherwise double-print output and break the
-  # ifeq comparison below.
-  HAVE_ENZYME := $(shell rustup toolchain list 2>/dev/null | grep -q '^enzyme' && echo yes)
-  ifneq ($(HAVE_ENZYME),yes)
-    FERX_NO_AUTODIFF := 1
-    AUTODIFF_FALLBACK := 1
-  endif
-endif
-CARGO_FEATURES =
-# Cargo.toml declares lto="fat" because it's required for cross-crate Enzyme
-# autodiff. When building without Enzyme we drop back to thin LTO for faster
-# link times (and to avoid the fat-LTO memory overhead on machines that don't
-# need autodiff correctness). We pass this to cargo as an env var so we don't
-# have to edit Cargo.toml at build time.
-#
-# IMPORTANT: use `override` for the LTO selection. R CMD INSTALL runs make in a
-# mode where environment variables can override makefile assignments (make -e
-# semantics), and a stale CARGO_PROFILE_RELEASE_LTO=thin in the environment
-# would otherwise win on the autodiff path — silently building autodiff with
-# thin LTO, which keeps the differentiated ferx-core functions in a separate
-# module from their callers and breaks Enzyme. `override` makes the makefile's
-# value authoritative regardless of the environment.
-ifeq ($(FERX_NO_AUTODIFF),1)
-  # `--no-default-features` drops `survival` (a default), so add it back explicitly
-  # alongside ci,nn — TTE support must ship in this build too.
-  CARGO_FEATURES = --no-default-features --features ci,nn,survival
-  override CARGO_PROFILE_RELEASE_LTO := thin
-else
-  CARGO_FEATURES = --features nn
-  override CARGO_PROFILE_RELEASE_LTO := fat
-endif
+# ferx-core's gradients are pure stable Rust — the Enzyme autodiff path was
+# retired (FeRx-NLME/ferx-core#381) in favour of hand-rolled analytic
+# sensitivities — so the build needs no special toolchain and always uses the
+# stable host channel selected below. `survival` is added back explicitly because
+# `--no-default-features` drops it: TTE support (the datareader routing and
+# `predict_survival`, both behind ferx-core's `survival` feature) must ship here.
+CARGO_FEATURES = --no-default-features --features ci,nn,survival
+# Thin LTO keeps cross-crate inlining without the fat-LTO link-time/memory cost.
+# `override` makes the makefile's value authoritative even under R CMD INSTALL's
+# make -e semantics, where a stale CARGO_PROFILE_RELEASE_LTO in the environment
+# would otherwise win.
+override CARGO_PROFILE_RELEASE_LTO := thin
 
 # Ensure cargo driver host arch matches R's arch (avoids mismatch when the
 # user's active rustup toolchain is x86_64 Rosetta but R is arm64).
@@ -142,51 +115,9 @@ ifneq ($(LOCAL_FERX_CORE),)
 	@echo "ferx: using local ../ferx-core checkout ([patch] override)"
 endif
 	@echo '[build]' >> rust/.cargo/config.toml
-ifeq ($(FERX_NO_AUTODIFF),1)
 	@echo '[toolchain]' > rust/rust-toolchain.toml
 	@echo 'channel = "$(HOST_TOOLCHAIN_CHANNEL)"' >> rust/rust-toolchain.toml
-ifeq ($(AUTODIFF_FALLBACK),1)
-	@echo "ferx: enzyme toolchain not found — building WITHOUT autodiff (toolchain: $(HOST_TOOLCHAIN_CHANNEL)). Install the enzyme rust fork and rerun to enable AD."
-else
-	@echo "ferx: building WITHOUT autodiff (FERX_NO_AUTODIFF=1, toolchain: $(HOST_TOOLCHAIN_CHANNEL))"
-endif
-else
-	@# Preflight: the autodiff branch is only reached without the enzyme
-	@# toolchain when the user forced it (FERX_NO_AUTODIFF=0); the auto-detect
-	@# (unset) path would already have flipped to the FD fallback above. Fail
-	@# fast with an actionable message instead of letting cargo emit a cryptic
-	@# "toolchain 'enzyme' is not installed" error.
-	@rustup toolchain list 2>/dev/null | grep -q '^enzyme' || { \
-	  echo "ferx: FERX_NO_AUTODIFF=0 requires the Enzyme Rust toolchain, but no"; \
-	  echo "      'enzyme' rustup toolchain was found."; \
-	  echo "  - To build WITH autodiff: install the Enzyme toolchain (see"; \
-	  echo "    https://ferx-nlme.github.io/ferx-core/installation.html), then reinstall."; \
-	  echo "  - To build WITHOUT autodiff (finite-difference gradients): unset"; \
-	  echo "    FERX_NO_AUTODIFF (auto-detect + fall back) or set FERX_NO_AUTODIFF=1."; \
-	  exit 1; \
-	}
-	@# Deep preflight: the check above only proves an `enzyme` toolchain is
-	@# registered, not that it actually differentiates. A standalone Enzyme
-	@# plugin copied into a prebuilt nightly's sysroot passes the name check
-	@# but hangs forever in llvm::Constant::getNullValue on first use. Compile
-	@# and run a real autodiff function (timeout-guarded) to catch that here,
-	@# before committing to the ~15-30 min fat-LTO build. Honors
-	@# FERX_AD_PREFLIGHT_SKIP=1 for users who have already verified the
-	@# toolchain. $(CURDIR) is the package src/ dir, where the script ships.
-	@sh "$(CURDIR)/ad-preflight.sh" || { \
-	  echo "ferx: aborting autodiff build — the 'enzyme' toolchain failed the AD"; \
-	  echo "      self-test (see message above)."; \
-	  echo "  - To build WITHOUT autodiff (finite-difference gradients): set"; \
-	  echo "    FERX_NO_AUTODIFF=1 and reinstall."; \
-	  echo "  - To fix the toolchain: rebuild from source per the install docs,"; \
-	  echo "    then reinstall (or set FERX_AD_PREFLIGHT_SKIP=1 to bypass once)."; \
-	  exit 1; \
-	}
-	@echo 'rustflags = ["-Z", "autodiff=Enable"]' >> rust/.cargo/config.toml
-	@echo '[toolchain]' > rust/rust-toolchain.toml
-	@echo 'channel = "enzyme"' >> rust/rust-toolchain.toml
-	@echo "ferx: building WITH autodiff (Enzyme toolchain)"
-endif
+	@echo "ferx: building with the $(HOST_TOOLCHAIN_CHANNEL) toolchain"
 	@# Print rustc version so R CMD check's `checking Rust compilation` step
 	@# can record it (CRAN's Rust-package policy requires the rustc version
 	@# to be reported before compilation begins). Failure here is benign —

@@ -12,6 +12,8 @@ crate-type = ["staticlib"]
 # `survival` is on by default so ferx-r ships time-to-event support: the TTE
 # datareader routing (`read_population_for`) and `predict_survival` in ferx-core
 # are both behind its `survival` feature, so without this they are no-ops / absent.
+# (Enzyme autodiff was retired in ferx-core (FeRx-NLME/ferx-core#381) in favour of
+# hand-rolled analytic sensitivities, so there is no longer an `autodiff` feature.)
 default = ["survival"]
 # Time-to-event / survival modelling (parametric TTE, `[event_model]` blocks,
 # `predict_survival`). See ferx-core's plans/tte-survival-markov.md.
@@ -30,8 +32,7 @@ ferx-core = { git = "https://github.com/FeRx-NLME/ferx-core", branch = "main", d
 nalgebra = "0.35"
 
 [profile.release]
-# fat LTO is required for cross-crate Enzyme autodiff (functions differentiated
-# in this crate live in ferx-core; thin LTO keeps modules separate and Enzyme
-# can fail to find their bodies). The Makevars no-autodiff branch overrides
-# this to "thin" via CARGO_PROFILE_RELEASE_LTO when building without Enzyme.
-lto = "fat"
+# thin LTO keeps cross-crate inlining without the fat-LTO link-time/memory cost.
+# (fat LTO was previously required for cross-crate Enzyme autodiff; that path
+# was retired in ferx-core, so the stable build no longer needs it.)
+lto = "thin"

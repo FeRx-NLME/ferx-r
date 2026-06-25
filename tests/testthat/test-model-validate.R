@@ -196,3 +196,13 @@ test_that("bundled igd_inverse_gaussian example validates (igd() parses against 
   res <- ferx_model_validate(ex$model)
   expect_true(isTRUE(res$ok))
 })
+
+test_that("bundled weibull_absorption example validates (weibull() parses against the engine)", {
+  # Guards that the bundled Weibull example stays parseable by the pinned
+  # ferx-core: a valid result confirms the built-in `weibull(td, beta)` input
+  # rate is understood by the engine (data/alias covered by test-example.R; a
+  # full fit is exercised by the ferx-core NONMEM anchor, not here).
+  ex  <- ferx_example("weibull_absorption")
+  res <- ferx_model_validate(ex$model)
+  expect_true(isTRUE(res$ok))
+})
