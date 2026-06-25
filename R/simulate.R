@@ -175,7 +175,8 @@ ferx_predict_survival <- function(model, data, times, fit = NULL) {
     file.exists(model),
     file.exists(data),
     is.numeric(times),
-    length(times) > 0
+    length(times) > 0,
+    all(is.finite(times))
   )
   times <- as.numeric(times)
 
