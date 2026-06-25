@@ -20,8 +20,8 @@ ferx_predict_survival(model, data, times, fit = NULL)
 }
 \value{
 A data.frame with columns: ID, CMT, TIME, survival, cum_hazard,
-hazard, median_survival, mean_survival (one row per subject \eqn{\times} TTE
-CMT \eqn{\times} time).
+hazard, cif, survival_all, median_survival, mean_survival (one row per
+subject \eqn{\times} TTE CMT \eqn{\times} time).
 }
 \description{
 For a model with one or more \code{[event_model]} (TTE) endpoints, evaluates
@@ -30,6 +30,13 @@ the survival function \eqn{S(t)}, cumulative hazard \eqn{H(t)} and hazard
 Population-level (\eqn{\eta = 0}) unless a \code{fit} is supplied, in which
 case its fitted \code{theta} is used. Each subject also carries its median and
 mean survival time (analytic where available).
+
+For a model with multiple TTE CMTs (competing risks), each row also carries the
+cause-specific cumulative incidence \code{cif} (\eqn{F_k(t)}) and the all-cause
+survival \code{survival_all} (\eqn{S_\mathrm{all}(t)}), with
+\eqn{\sum_k F_k(t) + S_\mathrm{all}(t) = 1}. For a single endpoint
+\code{cif} \eqn{= 1 -} \code{survival} and \code{survival_all} \eqn{=}
+\code{survival}.
 }
 \examples{
 \dontrun{

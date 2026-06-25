@@ -743,6 +743,11 @@ fn survival_results_to_df(results: &[ferx_core::SurvivalPredictionResult]) -> Ro
     let survival: Vec<f64> = results.iter().map(|r| r.survival).collect();
     let cum_hazard: Vec<f64> = results.iter().map(|r| r.cum_hazard).collect();
     let hazard: Vec<f64> = results.iter().map(|r| r.hazard).collect();
+    // Competing-risks quantities (ferx-core #501): cause-specific cumulative
+    // incidence and all-cause survival. For a single TTE endpoint cif == 1 -
+    // survival and survival_all == survival; across causes Σ cif + survival_all = 1.
+    let cif: Vec<f64> = results.iter().map(|r| r.cif).collect();
+    let survival_all: Vec<f64> = results.iter().map(|r| r.survival_all).collect();
     let median_survival: Vec<f64> = results.iter().map(|r| r.median_survival).collect();
     let mean_survival: Vec<f64> = results.iter().map(|r| r.mean_survival).collect();
     data_frame!(
@@ -752,6 +757,8 @@ fn survival_results_to_df(results: &[ferx_core::SurvivalPredictionResult]) -> Ro
         survival = survival,
         cum_hazard = cum_hazard,
         hazard = hazard,
+        cif = cif,
+        survival_all = survival_all,
         median_survival = median_survival,
         mean_survival = mean_survival
     )
@@ -763,8 +770,8 @@ fn survival_results_to_df(results: &[ferx_core::SurvivalPredictionResult]) -> Ro
 /// @param model_path Path to .ferx model file
 /// @param data_path Path to NONMEM-format CSV
 /// @param times Time grid at which S(t), H(t), h(t) are evaluated
-/// @return Data frame with ID, CMT, TIME, survival, cum_hazard, hazard,
-///   median_survival, mean_survival
+/// @return Data frame with ID, CMT, TIME, survival, cum_hazard, hazard, cif,
+///   survival_all, median_survival, mean_survival
 /// @export
 #[extendr]
 fn ferx_rust_predict_survival(model_path: &str, data_path: &str, times: Vec<f64>) -> Robj {
@@ -806,8 +813,8 @@ fn ferx_rust_predict_survival(model_path: &str, data_path: &str, times: Vec<f64>
 /// @param omega_flat Row-major flattened omega matrix
 /// @param omega_dim Side length of the omega matrix
 /// @param sigma Fitted sigma vector
-/// @return Data frame with ID, CMT, TIME, survival, cum_hazard, hazard,
-///   median_survival, mean_survival
+/// @return Data frame with ID, CMT, TIME, survival, cum_hazard, hazard, cif,
+///   survival_all, median_survival, mean_survival
 /// @export
 #[extendr]
 fn ferx_rust_predict_survival_from_fit(
