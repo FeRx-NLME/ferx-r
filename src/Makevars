@@ -16,8 +16,10 @@ endif
 # ferx-core's gradients are pure stable Rust — the Enzyme autodiff path was
 # retired (FeRx-NLME/ferx-core#381) in favour of hand-rolled analytic
 # sensitivities — so the build needs no special toolchain and always uses the
-# stable host channel selected below.
-CARGO_FEATURES = --no-default-features --features ci,nn
+# stable host channel selected below. `survival` is added back explicitly because
+# `--no-default-features` drops it: TTE support (the datareader routing and
+# `predict_survival`, both behind ferx-core's `survival` feature) must ship here.
+CARGO_FEATURES = --no-default-features --features ci,nn,survival
 # Thin LTO keeps cross-crate inlining without the fat-LTO link-time/memory cost.
 # `override` makes the makefile's value authoritative even under R CMD INSTALL's
 # make -e semantics, where a stale CARGO_PROFILE_RELEASE_LTO in the environment

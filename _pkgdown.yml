@@ -19,6 +19,7 @@ reference:
       - ferx_simulate
       - ferx_simulate_with_uncertainty
       - ferx_predict
+      - ferx_predict_survival
 
   - title: "Model editing"
     desc: "Create, inspect, and programmatically edit .ferx model files."
