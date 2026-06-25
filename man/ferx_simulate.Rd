@@ -54,6 +54,7 @@ sim_pm <- ferx_simulate(ex$model, ex$data, n_sim = 10L, seed = 1L,
 Other simulation:
 \code{\link{ferx_npde}()},
 \code{\link{ferx_predict}()},
+\code{\link{ferx_predict_survival}()},
 \code{\link{ferx_simulate_with_uncertainty}()}
 }
 \concept{simulation}
