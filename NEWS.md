@@ -63,6 +63,17 @@
 
 ## New features
 
+- **Weibull absorption — `weibull(td, beta)`**: a new built-in absorption input
+  rate for `[odes]` models, alongside `transit(...)` and `igd(...)`. It adds a
+  Weibull absorption-time distribution — scale `Td`, shape `beta` — fed straight
+  into the central compartment, modelling the entire absorption delay in one term
+  (no first-order `ka`). The shape selects the profile: `beta > 1` a delayed
+  interior peak, `beta = 1` first-order absorption (`ka = 1/Td`), `beta < 1` fast
+  early uptake. The dose feeds the density over time (∫ R_in dt = F·Dose), not as a
+  bolus, exactly like `transit(...)`/`igd(...)`, and drives exact analytic
+  FOCE/FOCEI/Bayes gradients. New example `weibull_absorption`. Anchored against a
+  NONMEM `$DES` Weibull run (ferx FOCEI matches NONMEM `#OBJV` to ~1e-6). Requires
+  ferx-core with FeRx-NLME/ferx-core#497.
 - **IIV on residual error** (`iiv_on_ruv`): a `.ferx` model can now place a random
   effect on the residual error, matching NONMEM `Y = IPRED + EPS*EXP(ETA)`. Declare
   an `omega` and reference it from `[error_model]` with `iiv_on_ruv = NAME`; each
