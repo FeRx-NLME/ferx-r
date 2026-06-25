@@ -25,7 +25,7 @@ test_that("ferx_predict_survival returns a survival data.frame for a TTE model",
   expect_true(all(
     c(
       "ID", "CMT", "TIME", "survival", "cum_hazard", "hazard",
-      "median_survival", "mean_survival"
+      "cif", "survival_all", "median_survival", "mean_survival"
     ) %in% names(preds)
   ))
   expect_equal(unique(preds$CMT), 2L)
@@ -36,6 +36,10 @@ test_that("ferx_predict_survival returns a survival data.frame for a TTE model",
   expect_true(all(abs(s0 - 1) < 1e-9))
   s_subj1 <- preds$survival[preds$ID == "1"][order(preds$TIME[preds$ID == "1"])]
   expect_true(all(diff(s_subj1) <= 1e-9))
+
+  # Single endpoint: cif reduces to 1 - survival and survival_all == survival.
+  expect_true(all(abs(preds$cif - (1 - preds$survival)) < 1e-9))
+  expect_true(all(abs(preds$survival_all - preds$survival) < 1e-9))
 
   # Exponential population median = log(2) / lambda = log(2) / 0.1 ~= 6.93.
   expect_equal(
@@ -108,4 +112,55 @@ test_that("ferx_predict_survival returns an empty frame for a model with no TTE 
 
   expect_s3_class(preds, "data.frame")
   expect_equal(nrow(preds), 0L)
+})
+
+test_that("ferx_predict_survival reports competing-risks CIF with sum(cif) + survival_all = 1", {
+  # Two cause-specific exponential hazards (CMT 2, CMT 3) sharing a frailty.
+  model <- tempfile(fileext = ".ferx")
+  data  <- tempfile(fileext = ".csv")
+  writeLines(c(
+    "[parameters]",
+    "  theta TVLAMBDA_A(0.10, 0.001, 10.0)",
+    "  theta TVLAMBDA_B(0.06, 0.001, 10.0)",
+    "  omega ETA_F ~ 0.09",
+    "",
+    "[event_model cause_a]",
+    "  cmt    = 2",
+    "  family = exponential",
+    "  scale  = TVLAMBDA_A * exp(ETA_F)",
+    "",
+    "[event_model cause_b]",
+    "  cmt    = 3",
+    "  family = exponential",
+    "  scale  = TVLAMBDA_B * exp(ETA_F)"
+  ), model)
+  # Cause-specific layout: one row per cause CMT per subject (DV=1 the observed
+  # cause, DV=0 the other censored at the same time).
+  writeLines(c(
+    "ID,TIME,DV,EVID,CMT,MDV",
+    "1,5.0,1,0,2,0",
+    "1,5.0,0,0,3,0",
+    "2,8.0,0,0,2,0",
+    "2,8.0,1,0,3,0",
+    "3,14.0,0,0,2,0",
+    "3,14.0,0,0,3,0"
+  ), data)
+
+  times <- c(0, 4, 10, 20)
+  preds <- ferx_predict_survival(model, data, times = times)
+
+  expect_s3_class(preds, "data.frame")
+  expect_true(all(c("cif", "survival_all") %in% names(preds)))
+  # Both cause CMTs are predicted.
+  expect_setequal(unique(preds$CMT), c(2L, 3L))
+  # CIF in [0, 1] and the all-cause survival is no greater than any cause-specific
+  # survival (Σ_j H_j >= H_k).
+  expect_true(all(preds$cif >= -1e-9 & preds$cif <= 1 + 1e-9))
+  expect_true(all(preds$survival_all <= preds$survival + 1e-9))
+
+  # Partition invariant: at each (ID, TIME), Σ_k cif_k + survival_all = 1.
+  cif_sum <- aggregate(cif ~ ID + TIME, data = preds, FUN = sum)
+  s_all   <- unique(preds[, c("ID", "TIME", "survival_all")])
+  merged  <- merge(cif_sum, s_all, by = c("ID", "TIME"))
+  expect_true(all(abs(merged$cif + merged$survival_all - 1) < 1e-9))
 })
