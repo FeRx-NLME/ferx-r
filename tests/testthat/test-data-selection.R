@@ -526,8 +526,10 @@ test_that("ferx_selection() handles && (AND) multi-part expression", {
 
 test_that("ferx_selection() ignores unparseable expression (returns nothing excluded)", {
   skip_on_cran()
-  # No operator -> .parse_filter_expr returns NULL -> .eval_expr returns FALSE -> no exclusion
-  sel <- ferx_selection(.sel_test_df(), ignore = "UNPARSEABLE_EXPR")
+  # No operator AND not a lone identifier (a bare token like `C` is now the valid
+  # IGNORE=C shorthand) -> .parse_filter_expr returns NULL -> .eval_expr returns
+  # FALSE -> no exclusion.
+  sel <- ferx_selection(.sel_test_df(), ignore = "UNPARSEABLE EXPR HERE")
   expect_equal(nrow(ferx_selection_excluded(sel)), 0L)
   expect_equal(length(.sel_attr(sel, "exclusions")$fired_ignore), 0L)
 })

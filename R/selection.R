@@ -267,12 +267,19 @@ ferx_selection_excluded.ferx_fit <- function(x, ...) {
       rhs <- if (grepl('^["\'].*["\']$', rhs_raw)) {
         substr(rhs_raw, 2L, nchar(rhs_raw) - 1L)
       } else if (suppressWarnings(is.finite(as.numeric(rhs_raw)))) {
-        # Only a finite literal is numeric. Non-finite spellings (NaN, Inf) are
-        # treated as label strings, matching ferx-core's filter_expr parser.
+        # Only a finite literal is numeric. Inf/-Inf (and NaN, which the previous
+        # is.na() test already rejected) fall through to the string branch and are
+        # treated as label text, matching ferx-core's filter_expr parser.
         as.numeric(rhs_raw)
       } else {
         rhs_raw
       }
+      # Ordered comparisons require a numeric RHS. ferx-core rejects an ordered
+      # op against a non-numeric value (e.g. `BW < abc`) at parse time; mirror
+      # that here by treating the whole clause as unparseable (the lenient
+      # preview then excludes nothing) rather than silently doing a lexical
+      # string comparison the Rust fit never performs.
+      if (!is.numeric(rhs) && op %in% c(">=", "<=", ">", "<")) return(NULL)
       result[[i]] <- list(col = tolower(lhs), op = op, rhs = rhs)
       found <- TRUE
       break
