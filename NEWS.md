@@ -24,6 +24,14 @@
 
 ## Fixed
 
+- **`ferx_selection()` preview recognizes the bare `ignore = C` shorthand**
+  (NONMEM `IGNORE=C`). The pure-R preview parser previously returned no match for
+  an operator-less clause, so the preview reported zero exclusions while the Rust
+  fit dropped the flagged comment rows. A lone column name now expands to
+  `C == C` (case preserved on the value to match the raw cell), and non-finite
+  numeric spellings (`NaN`, `Inf`) are treated as label strings, matching
+  ferx-core (FeRx-NLME/ferx-core#536).
+
 - **`ferx_to_frem()` now warns about estimated parameters with no random effect**
   and carries the base model's scaling over to the FREM model. A non-fixed
   parameter without an `ETA` is estimated poorly by IMP/IMPMAP (the

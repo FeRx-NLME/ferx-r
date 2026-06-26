@@ -266,7 +266,9 @@ ferx_selection_excluded.ferx_fit <- function(x, ...) {
       if (!nzchar(lhs) || !nzchar(rhs_raw)) next
       rhs <- if (grepl('^["\'].*["\']$', rhs_raw)) {
         substr(rhs_raw, 2L, nchar(rhs_raw) - 1L)
-      } else if (suppressWarnings(!is.na(as.numeric(rhs_raw)))) {
+      } else if (suppressWarnings(is.finite(as.numeric(rhs_raw)))) {
+        # Only a finite literal is numeric. Non-finite spellings (NaN, Inf) are
+        # treated as label strings, matching ferx-core's filter_expr parser.
         as.numeric(rhs_raw)
       } else {
         rhs_raw
@@ -275,7 +277,19 @@ ferx_selection_excluded.ferx_fit <- function(x, ...) {
       found <- TRUE
       break
     }
-    if (!found) return(NULL)
+    if (!found) {
+      # No operator. Accept a lone column name as the NONMEM `IGNORE=C`
+      # shorthand: a bare identifier `C` expands to `C == C` (drop rows whose
+      # `C` column holds the literal label "C"). Mirrors ferx-core's parser
+      # (src/io/filter_expr.rs); without this the preview returns no exclusions
+      # while the Rust fit drops the flagged rows. Case is preserved on the RHS
+      # so it matches the raw cell, with the column name lowercased for lookup.
+      if (grepl("^[A-Za-z_][A-Za-z0-9_]*$", part)) {
+        result[[i]] <- list(col = tolower(part), op = "==", rhs = part)
+      } else {
+        return(NULL)
+      }
+    }
   }
   result
 }

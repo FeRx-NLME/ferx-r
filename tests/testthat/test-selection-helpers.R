@@ -33,6 +33,29 @@ test_that(".parse_filter_expr returns NULL on malformed clauses", {
   expect_null(ferx:::.parse_filter_expr("== 5"))       # empty lhs
 })
 
+test_that(".parse_filter_expr expands a bare identifier to COL == COL (IGNORE=C)", {
+  # NONMEM `IGNORE=C` shorthand: a lone column name drops rows whose column
+  # holds the literal label. Mirrors ferx-core; without it the preview would
+  # report zero exclusions while the Rust fit drops the flagged rows.
+  res <- ferx:::.parse_filter_expr("C")
+  expect_length(res, 1L)
+  expect_identical(res[[1L]]$col, "c")     # column lowercased for lookup
+  expect_identical(res[[1L]]$op, "==")
+  expect_identical(res[[1L]]$rhs, "C")     # RHS case preserved to match raw cell
+})
+
+test_that(".parse_filter_expr treats non-finite numeric spellings as label strings", {
+  # `NaN` / `Inf` parse as doubles but could never match numerically, so they
+  # are label strings (matching ferx-core's filter_expr parser).
+  res_nan <- ferx:::.parse_filter_expr("FLAG == NaN")
+  expect_identical(res_nan[[1L]]$rhs, "NaN")
+  res_inf <- ferx:::.parse_filter_expr("FLAG == Inf")
+  expect_identical(res_inf[[1L]]$rhs, "Inf")
+  # A finite literal is still numeric.
+  res_num <- ferx:::.parse_filter_expr("FLAG == 70")
+  expect_identical(res_num[[1L]]$rhs, 70)
+})
+
 # ---------------------------------------------------------------------------
 # .cmp
 # ---------------------------------------------------------------------------
