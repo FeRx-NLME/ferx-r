@@ -33,6 +33,54 @@ test_that(".parse_filter_expr returns NULL on malformed clauses", {
   expect_null(ferx:::.parse_filter_expr("== 5"))       # empty lhs
 })
 
+test_that(".parse_filter_expr expands a bare identifier to COL == COL (IGNORE=C)", {
+  # NONMEM `IGNORE=C` shorthand: a lone column name drops rows whose column
+  # holds the literal label. Mirrors ferx-core; without it the preview would
+  # report zero exclusions while the Rust fit drops the flagged rows.
+  res <- ferx:::.parse_filter_expr("C")
+  expect_length(res, 1L)
+  expect_identical(res[[1L]]$col, "c")     # column lowercased for lookup
+  expect_identical(res[[1L]]$op, "==")
+  expect_identical(res[[1L]]$rhs, "C")     # RHS case preserved to match raw cell
+})
+
+test_that(".parse_filter_expr treats non-finite numeric spellings as label strings", {
+  # `NaN` / `Inf` parse as doubles but could never match numerically, so they
+  # are label strings (matching ferx-core's filter_expr parser).
+  res_nan <- ferx:::.parse_filter_expr("FLAG == NaN")
+  expect_identical(res_nan[[1L]]$rhs, "NaN")
+  res_inf <- ferx:::.parse_filter_expr("FLAG == Inf")
+  expect_identical(res_inf[[1L]]$rhs, "Inf")
+  # A finite literal is still numeric.
+  res_num <- ferx:::.parse_filter_expr("FLAG == 70")
+  expect_identical(res_num[[1L]]$rhs, 70)
+})
+
+test_that(".parse_filter_expr rejects an ordered comparison against a non-numeric RHS", {
+  # ferx-core errors on `BW < abc` (ordered op needs a numeric value); the lenient
+  # R preview mirrors that by returning NULL (no exclusion) instead of a silent
+  # lexical string comparison that the Rust fit never performs.
+  expect_null(ferx:::.parse_filter_expr("BW < abc"))
+  expect_null(ferx:::.parse_filter_expr("BW >= abc"))
+  expect_null(ferx:::.parse_filter_expr("BW < 'abc'"))   # quoted is no different
+  # A whole && clause is dropped if any ordered sub-expression is non-numeric.
+  expect_null(ferx:::.parse_filter_expr("EVID == 0 && BW < abc"))
+  # Ordered comparison against a numeric RHS is still parsed.
+  res <- ferx:::.parse_filter_expr("BW < 48")
+  expect_identical(res[[1L]]$op, "<")
+  expect_identical(res[[1L]]$rhs, 48)
+})
+
+test_that(".parse_filter_expr expands a bare identifier regardless of ignore/accept context", {
+  # The parser is context-free: ferx-core routes both ignore and accept clauses
+  # through the same FilterClause::parse, so a bare token expands to COL == COL in
+  # either. ferx_selection() applies it on both paths; this locks that intent.
+  res <- ferx:::.parse_filter_expr("STUDY")
+  expect_identical(res[[1L]]$col, "study")
+  expect_identical(res[[1L]]$op, "==")
+  expect_identical(res[[1L]]$rhs, "STUDY")
+})
+
 # ---------------------------------------------------------------------------
 # .cmp
 # ---------------------------------------------------------------------------
