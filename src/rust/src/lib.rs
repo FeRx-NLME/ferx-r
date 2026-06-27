@@ -226,13 +226,16 @@ fn ferx_rust_fit(
     // `parsed.fit_options`), "true"/"false" override it. This prevents an
     // accepted R-side default from silently overruling the model file (#558).
     let apply_flag = |slot: &mut bool, raw: &str, name: &str| {
+        // The only caller (`.flag_arg` in fit.R) emits exactly "", "true", or
+        // "false"; the catch-all guards against a malformed value rather than
+        // accepting tokens the R side never sends.
         match raw.trim().to_lowercase().as_str() {
             "" => {}
-            "true" | "t" | "1" => *slot = true,
-            "false" | "f" | "0" => *slot = false,
+            "true" => *slot = true,
+            "false" => *slot = false,
             other => {
                 rprintln!(
-                    "Unknown {name} value '{}' — expected TRUE or FALSE (keeping model default)",
+                    "Unknown {name} value '{}' - expected TRUE or FALSE (keeping model default)",
                     other
                 );
             }

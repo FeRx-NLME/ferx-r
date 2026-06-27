@@ -16,7 +16,7 @@
 #' @title Internal Rust backend binding
 #' @keywords internal
 ferx_rust_fit <- function(model_path, data_path, method, covariance, verbose, bloq_method, threads, mu_referencing, sir, gradient, settings_keys, settings_values) {
-  .Call("wrap__ferx_rust_fit", model_path, data_path, as.character(method), as.character(covariance), as.character(verbose), bloq_method, threads, as.character(mu_referencing), as.character(sir), gradient, as.character(settings_keys), as.character(settings_values))
+  .Call("wrap__ferx_rust_fit", model_path, data_path, as.character(method), covariance, verbose, bloq_method, threads, mu_referencing, sir, gradient, as.character(settings_keys), as.character(settings_values))
 }
 
 #' @title Internal Rust backend binding

@@ -1380,7 +1380,7 @@ ferx_fit <- function(model, data = NULL,
   # "use the model file's [fit_options] value" (falling back to the engine
   # default when the model file is silent). They are forwarded to the engine as
   # sentinel strings: "" keeps the model-file value, "true"/"false" override it.
-  # This stops an accepted R default from silently overruling the model file —
+  # This stops an accepted R default from silently overruling the model file -
   # the same fix as `method` (#558). Pass the argument explicitly to override.
   .flag_arg <- function(x, nm) {
     if (is.null(x)) {
@@ -1395,11 +1395,28 @@ ferx_fit <- function(model, data = NULL,
   verbose_arg        <- .flag_arg(verbose, "verbose")
   mu_referencing_arg <- .flag_arg(mu_referencing, "mu_referencing")
   sir_arg            <- .flag_arg(sir, "sir")
-  # Only an explicit `sir = TRUE` against an explicit `covariance = FALSE` is a
-  # definite conflict; otherwise defer to the model file / engine, which enforces
-  # the same requirement.
-  if (isTRUE(sir) && identical(covariance, FALSE)) {
-    stop("`sir = TRUE` requires `covariance = TRUE`")
+  # Read the model file's [fit_options] once, up front: it informs both the SIR
+  # precondition below and the conflict warnings further down.
+  model_file_opts <- .ferx_parse_model_fit_options(model)
+  # `sir = TRUE` needs covariance estimation. Resolve the effective covariance
+  # setting with the usual precedence (explicit R arg > model file > engine
+  # default, which is on) and reject the request when covariance is actually
+  # disabled - whether by the `covariance` argument or by the model file - rather
+  # than letting the engine silently skip SIR with only a buried warning.
+  cov_effective <- if (!is.null(covariance)) {
+    isTRUE(covariance)
+  } else if ("covariance" %in% names(model_file_opts)) {
+    !identical(tolower(as.character(model_file_opts[["covariance"]])), "false")
+  } else {
+    TRUE
+  }
+  if (isTRUE(sir) && !cov_effective) {
+    stop(
+      "`sir = TRUE` requires covariance estimation, but covariance is disabled ",
+      if (!is.null(covariance)) "via the `covariance` argument." else
+        "in the model file [fit_options].",
+      " Set covariance = TRUE."
+    )
   }
   # `method = NULL` (the default) means "use whatever the model file's
   # [fit_options] selected, falling back to FOCEI" rather than forcing FOCEI from
@@ -1561,17 +1578,16 @@ ferx_fit <- function(model, data = NULL,
   # arguments. Precedence: dedicated R args > settings list > model file. We
   # warn (not error) so the user is informed which value actually runs. Only
   # args the caller *explicitly* passed are flagged - accepting a default is
-  # not an override of the model file.
-  model_file_opts <- .ferx_parse_model_fit_options(model)
+  # not an override of the model file. (`model_file_opts` was parsed above.)
   explicit_args <- names(match.call())[-1L]
   dedicated_explicit <- list(
     method         = if ("method"         %in% explicit_args) paste(method, collapse = ", "),
-    covariance     = if ("covariance"     %in% explicit_args) tolower(as.character(covariance)),
+    covariance     = if ("covariance"     %in% explicit_args && nzchar(covariance_arg)) covariance_arg,
     bloq_method    = if ("bloq_method"    %in% explicit_args && !is.null(bloq_method)) bloq_arg,
     threads        = if ("threads"        %in% explicit_args && !is.null(threads)) as.character(threads),
-    mu_referencing = if ("mu_referencing" %in% explicit_args) tolower(as.character(mu_referencing)),
-    sir            = if ("sir"            %in% explicit_args) tolower(as.character(sir)),
-    gradient       = if ("gradient"       %in% explicit_args) gradient_arg,
+    mu_referencing = if ("mu_referencing" %in% explicit_args && nzchar(mu_referencing_arg)) mu_referencing_arg,
+    sir            = if ("sir"            %in% explicit_args && nzchar(sir_arg)) sir_arg,
+    gradient       = if ("gradient"       %in% explicit_args && nzchar(gradient_arg)) gradient_arg,
     inits_from_nca  = if ("inits_from_nca"  %in% explicit_args) (if (is.null(inits_value)) "off" else inits_value),
     fd_hessian_step = if ("fd_hessian_step" %in% explicit_args && !is.null(fd_hessian_step))
       format(fd_hessian_step, scientific = FALSE, trim = TRUE, digits = 17)
@@ -1871,7 +1887,22 @@ ferx_fit <- function(model, data = NULL,
   # by the `gradient` argument so the two values can be compared directly
   # (e.g. requested "auto" -> used "ad"). When the engine omitted the field
   # (older binaries return ""), `gradient_used` is NA.
-  result$gradient <- gradient
+  # `gradient` defaults to NULL ("defer to the model file / engine default").
+  # Assigning that raw NULL would drop the field entirely (and with it the
+  # RUN INFO line), so resolve it to the requested token: the explicit arg when
+  # given, otherwise the model-file value, otherwise the engine default "auto".
+  result$gradient <- if (nzchar(gradient_arg)) {
+    gradient_arg
+  } else {
+    mf_grad <- if ("gradient" %in% names(model_file_opts)) {
+      model_file_opts[["gradient"]]
+    } else if ("gradient_method" %in% names(model_file_opts)) {
+      model_file_opts[["gradient_method"]]
+    } else {
+      NULL
+    }
+    if (!is.null(mf_grad)) tolower(as.character(mf_grad)) else "auto"
+  }
   result$gradient_used <- .ferx_short_gradient_label(result$gradient_method_inner)
 
   # Store effective settings (already serialised from settings_parts above)

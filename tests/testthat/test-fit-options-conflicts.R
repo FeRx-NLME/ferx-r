@@ -304,3 +304,73 @@ test_that("ferx_fit() covariance argument overrides the model file (#558)", {
   )))
   expect_true(fit$covariance_status %in% c("computed", "failed", "sir_fallback"))
 })
+
+test_that("ferx_fit() does not warn when a flag arg is passed explicitly as NULL (#558)", {
+  # Regression: naming covariance / sir / mu_referencing / gradient = NULL marks
+  # them "explicit" in match.call(), but NULL means "keep the model file value".
+  # The empty sentinel must not leak into the conflict comparison and emit a
+  # garbled override warning.
+  fx <- make_fast_warfarin_no_cov()  # model file: covariance = false, method = foce
+  on.exit(unlink(fx$dir, recursive = TRUE))
+
+  expect_no_warning(
+    suppressMessages(ferx_fit(
+      fx$model, fx$data,
+      covariance     = NULL,
+      sir            = NULL,
+      mu_referencing = NULL,
+      gradient       = NULL,
+      verbose        = FALSE,
+      settings = list(max_unconverged_frac = 1.0)
+    ))
+  )
+})
+
+test_that("ferx_fit() records the requested gradient token on a default fit (#558)", {
+  # Regression: `gradient` defaults to NULL; assigning that raw NULL to
+  # result$gradient dropped the field entirely (and the RUN INFO line). The
+  # field must survive as a token.
+  fx <- make_fast_warfarin()
+  on.exit(unlink(fx$dir, recursive = TRUE))
+
+  fit <- suppressWarnings(suppressMessages(ferx_fit(
+    fx$model, fx$data,
+    verbose = FALSE,
+    settings = list(max_unconverged_frac = 1.0)
+  )))
+  expect_false(is.null(fit$gradient))
+  expect_true(is.character(fit$gradient) && length(fit$gradient) == 1L)
+  expect_true(fit$gradient %in% c("auto", "ad", "fd"))
+})
+
+test_that("ferx_fit() errors when sir = TRUE but the model file disables covariance (#558)", {
+  # The model file sets covariance = false. Requesting SIR without an explicit
+  # covariance arg must error R-side rather than silently skipping SIR.
+  fx <- make_fast_warfarin_no_cov()
+  on.exit(unlink(fx$dir, recursive = TRUE))
+
+  expect_error(
+    ferx_fit(
+      fx$model, fx$data,
+      sir = TRUE,
+      verbose = FALSE,
+      settings = list(max_unconverged_frac = 1.0)
+    ),
+    "requires covariance"
+  )
+})
+
+test_that("ferx_fit() errors when sir = TRUE and covariance = FALSE explicitly", {
+  fx <- make_fast_warfarin()
+  on.exit(unlink(fx$dir, recursive = TRUE))
+
+  expect_error(
+    ferx_fit(
+      fx$model, fx$data,
+      sir = TRUE,
+      covariance = FALSE,
+      verbose = FALSE
+    ),
+    "requires covariance"
+  )
+})
