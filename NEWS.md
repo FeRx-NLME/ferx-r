@@ -25,6 +25,12 @@
   (standalone `[event_model]` TTE, paired with `ferx_predict_survival()`), plus
   `transit_savic` (Savic transit-compartment absorption via the built-in
   `transit(n, mtt)` input rate).
+- **New `outer_xtol` / `outer_ftol` fit settings** — expose the derivative-free
+  `bobyqa` outer optimizer's step / objective stop tolerances (NLopt
+  `xtol_rel` / `ftol_rel`), settable via `ferx_fit(settings = list(...))` or the
+  model file's `[fit_options]`. `outer_ftol` defaults to an automatic per-model
+  value (tighter for time-to-event, where the objective is exact). See
+  `?ferx_fit` (ferx-core #469).
 
 ## Breaking changes
 
@@ -36,6 +42,13 @@
 
 ## Fixed
 
+- **Time-to-event frailty variance now matches NONMEM / nlmixr2.** A
+  weakly-identified `omega^2` on a *nonlinear* hazard parameter (e.g. a Weibull
+  shape frailty) previously read high because the derivative-free outer optimizer
+  stopped short on the near-flat objective ridge. It now converges onto the
+  NONMEM LAPLACIAN / nlmixr2 FOCEI consensus (the reference Weibull dataset moves
+  `omega^2` 0.204 → 0.176). Automatic for `[event_model]` fits — no model change
+  needed (ferx-core #469).
 - **`ferx_fit()` no longer overrides model-file `[fit_options]` with accepted
   defaults.** `covariance`, `verbose`, `mu_referencing`, `sir`, and `gradient`
   now default to `NULL`, meaning "use the model file's value" (falling back to
