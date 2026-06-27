@@ -265,3 +265,42 @@ test_that("ferx_fit() method argument overrides the model file's method (#558)",
   )))
   expect_equal(fit$method, "FOCEI")
 })
+
+# Helper: like make_fast_warfarin(), but force `covariance = false` in the model
+# file so we can test that the R-side `covariance` default no longer overrides it.
+make_fast_warfarin_no_cov <- function() {
+  fx <- make_fast_warfarin()
+  src <- readLines(fx$model)
+  src <- src[!grepl("^\\s*covariance\\s*=", src)]
+  src <- sub("(\\[fit_options\\])", "\\1\n  covariance = false", src)
+  writeLines(src, fx$model)
+  fx
+}
+
+test_that("ferx_fit() honours the model file's `covariance = false` when none is passed (#558)", {
+  # Before extending #558, the R default `covariance = TRUE` ran the covariance
+  # step even though the model file disabled it. Passing no `covariance` must now
+  # keep the model file's setting.
+  fx <- make_fast_warfarin_no_cov()
+  on.exit(unlink(fx$dir, recursive = TRUE))
+
+  fit <- suppressMessages(ferx_fit(
+    fx$model, fx$data,
+    verbose = FALSE,
+    settings = list(max_unconverged_frac = 1.0)
+  ))
+  expect_equal(fit$covariance_status, "not_requested")
+})
+
+test_that("ferx_fit() covariance argument overrides the model file (#558)", {
+  fx <- make_fast_warfarin_no_cov()  # model file: covariance = false
+  on.exit(unlink(fx$dir, recursive = TRUE))
+
+  fit <- suppressWarnings(suppressMessages(ferx_fit(
+    fx$model, fx$data,
+    covariance = TRUE,
+    verbose = FALSE,
+    settings = list(max_unconverged_frac = 1.0)
+  )))
+  expect_true(fit$covariance_status %in% c("computed", "failed", "sir_fallback"))
+})
