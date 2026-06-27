@@ -50,8 +50,14 @@
 #'   (per-occasion \code{kappa}); the IOV variance posterior appears as
 #'   \code{OMEGA_IOV(...)} in \code{$bayes}.
 #'   SAEM fully supports inter-occasion variability (IOV / kappa) models.
-#' @param covariance Logical; compute the covariance step for standard errors
-#' @param verbose Logical; print progress during estimation
+#' @param covariance Logical, or \code{NULL} (the default). Whether to compute
+#'   the covariance step for standard errors. \code{NULL} uses the model file's
+#'   \code{[fit_options] covariance} (engine default \code{TRUE} when unset); a
+#'   logical overrides the model file. Previously defaulted to \code{TRUE} and
+#'   silently overrode a model file that set \code{covariance = false} (#558).
+#' @param verbose Logical, or \code{NULL} (the default). Print progress during
+#'   estimation. \code{NULL} uses the model file's \code{[fit_options] verbose}
+#'   (engine default \code{TRUE} when unset); a logical overrides it.
 #' @param bloq_method Handling of observations outside quantification limits.
 #'   \code{NULL} (default) keeps whatever the model file specified;
 #'   \code{"m3"} enables Beal's M3 likelihood (requires a \code{CENS} column
@@ -65,9 +71,12 @@
 #'   or to avoid SMT-induced contention (try
 #'   \code{parallel::detectCores(logical = FALSE)}). The setting is per-call,
 #'   so successive fits in the same R session can use different values.
-#' @param mu_referencing Logical. If \code{TRUE} (default), automatically
+#' @param mu_referencing Logical, or \code{NULL} (the default). When \code{TRUE},
+#'   automatically
 #'   detects mu-referencing from the model structure for faster and more
-#'   accurate convergence. Applies to all estimation methods. Set to
+#'   accurate convergence. \code{NULL} uses the model file's
+#'   \code{[fit_options] mu_referencing} (engine default \code{TRUE} when unset).
+#'   Applies to all estimation methods. Set to
 #'   \code{FALSE} to disable for comparison purposes. Detection works
 #'   automatically for standard parameterizations such as
 #'   \code{PARAM = THETA * exp(ETA)}; unusual parameterizations fall back
@@ -75,7 +84,9 @@
 #'   to the \code{.ferx} model file are needed. Check \code{fit$warnings}
 #'   to see which ETAs were detected.
 #' @param gradient Inner-loop (per-subject EBE) gradient method.
-#'   One of \code{"auto"} (default) or \code{"fd"}. The legacy
+#'   One of \code{"auto"} or \code{"fd"}, or \code{NULL} (the default) to use the
+#'   model file's \code{[fit_options] gradient} (engine default \code{"auto"}
+#'   when unset). The legacy
 #'   \code{"ad"} token is accepted by older model files but should not be
 #'   used for new code.
 #'
@@ -95,11 +106,14 @@
 #'   Set \code{FERX_TIME_GRADIENTS=1} in the environment to print
 #'   per-gradient-call timings at the end of a fit, which is the easiest
 #'   way to check which method is faster on your specific model/data.
-#' @param sir Logical; run Sampling Importance Resampling after the fit to
+#' @param sir Logical, or \code{NULL} (the default); run Sampling Importance
+#'   Resampling after the fit to
 #'   produce non-parametric parameter uncertainty intervals. Requires
-#'   \code{covariance = TRUE}. Tuning knobs (\code{sir_samples},
+#'   \code{covariance = TRUE}. \code{NULL} uses the model file's
+#'   \code{[fit_options] sir} (engine default \code{FALSE} when unset). Tuning
+#'   knobs (\code{sir_samples},
 #'   \code{sir_resamples}, \code{sir_seed}) still flow through
-#'   \code{settings}. Default \code{FALSE}.
+#'   \code{settings}.
 #' @param optimizer_trace Logical. If \code{TRUE}, write a per-iteration CSV
 #'   trace to a temporary file and store its path in \code{fit$trace_path}.
 #'   Pass the result to \code{\link{ferx_trace}} or
@@ -1281,13 +1295,13 @@
 #' @export
 ferx_fit <- function(model, data = NULL,
                      method = NULL,
-                     covariance = TRUE,
-                     verbose = TRUE,
+                     covariance = NULL,
+                     verbose = NULL,
                      bloq_method = NULL,
                      threads = NULL,
-                     mu_referencing = TRUE,
-                     sir = FALSE,
-                     gradient = c("auto", "ad", "fd"),
+                     mu_referencing = NULL,
+                     sir = NULL,
+                     gradient = NULL,
                      optimizer_trace = FALSE,
                      scale_params = FALSE,
                      inits_from_nca = FALSE,
@@ -1350,22 +1364,59 @@ ferx_fit <- function(model, data = NULL,
     accept      <- unique(c(attr(fd, "accept"),    accept))
     ignore_ids  <- unique(c(attr(fd, "ignore_ids"), ignore_ids))
   }
-  gradient <- match.arg(gradient)
+  # `gradient = NULL` (the default) defers to the model file's
+  # `[fit_options] gradient`; an explicit value overrides it. The engine reads
+  # "" as "keep the model-file value" (#558).
+  if (is.null(gradient)) {
+    gradient_arg <- ""
+  } else {
+    gradient_arg <- match.arg(gradient, c("auto", "ad", "fd"))
+  }
   if (is.null(data)) {
     stop("`data` is required. Pass a path to a NONMEM CSV file or a ferx_data object.")
   }
   stopifnot(file.exists(model), file.exists(data))
-  if (!is.logical(covariance) || length(covariance) != 1L || is.na(covariance)) {
-    stop("`covariance` must be TRUE or FALSE")
+  # `covariance` / `verbose` / `mu_referencing` / `sir` default to NULL, meaning
+  # "use the model file's [fit_options] value" (falling back to the engine
+  # default when the model file is silent). They are forwarded to the engine as
+  # sentinel strings: "" keeps the model-file value, "true"/"false" override it.
+  # This stops an accepted R default from silently overruling the model file -
+  # the same fix as `method` (#558). Pass the argument explicitly to override.
+  .flag_arg <- function(x, nm) {
+    if (is.null(x)) {
+      return("")
+    }
+    if (!is.logical(x) || length(x) != 1L || is.na(x)) {
+      stop(sprintf("`%s` must be TRUE or FALSE", nm))
+    }
+    if (x) "true" else "false"
   }
-  if (!is.logical(mu_referencing) || length(mu_referencing) != 1L || is.na(mu_referencing)) {
-    stop("`mu_referencing` must be TRUE or FALSE")
+  covariance_arg     <- .flag_arg(covariance, "covariance")
+  verbose_arg        <- .flag_arg(verbose, "verbose")
+  mu_referencing_arg <- .flag_arg(mu_referencing, "mu_referencing")
+  sir_arg            <- .flag_arg(sir, "sir")
+  # Read the model file's [fit_options] once, up front: it informs both the SIR
+  # precondition below and the conflict warnings further down.
+  model_file_opts <- .ferx_parse_model_fit_options(model)
+  # `sir = TRUE` needs covariance estimation. Resolve the effective covariance
+  # setting with the usual precedence (explicit R arg > model file > engine
+  # default, which is on) and reject the request when covariance is actually
+  # disabled - whether by the `covariance` argument or by the model file - rather
+  # than letting the engine silently skip SIR with only a buried warning.
+  cov_effective <- if (!is.null(covariance)) {
+    isTRUE(covariance)
+  } else if ("covariance" %in% names(model_file_opts)) {
+    !identical(tolower(as.character(model_file_opts[["covariance"]])), "false")
+  } else {
+    TRUE
   }
-  if (!is.logical(sir) || length(sir) != 1L || is.na(sir)) {
-    stop("`sir` must be TRUE or FALSE")
-  }
-  if (sir && !covariance) {
-    stop("`sir = TRUE` requires `covariance = TRUE`")
+  if (isTRUE(sir) && !cov_effective) {
+    stop(
+      "`sir = TRUE` requires covariance estimation, but covariance is disabled ",
+      if (!is.null(covariance)) "via the `covariance` argument." else
+        "in the model file [fit_options].",
+      " Set covariance = TRUE."
+    )
   }
   # `method = NULL` (the default) means "use whatever the model file's
   # [fit_options] selected, falling back to FOCEI" rather than forcing FOCEI from
@@ -1527,17 +1578,16 @@ ferx_fit <- function(model, data = NULL,
   # arguments. Precedence: dedicated R args > settings list > model file. We
   # warn (not error) so the user is informed which value actually runs. Only
   # args the caller *explicitly* passed are flagged - accepting a default is
-  # not an override of the model file.
-  model_file_opts <- .ferx_parse_model_fit_options(model)
+  # not an override of the model file. (`model_file_opts` was parsed above.)
   explicit_args <- names(match.call())[-1L]
   dedicated_explicit <- list(
     method         = if ("method"         %in% explicit_args) paste(method, collapse = ", "),
-    covariance     = if ("covariance"     %in% explicit_args) tolower(as.character(covariance)),
+    covariance     = if ("covariance"     %in% explicit_args && nzchar(covariance_arg)) covariance_arg,
     bloq_method    = if ("bloq_method"    %in% explicit_args && !is.null(bloq_method)) bloq_arg,
     threads        = if ("threads"        %in% explicit_args && !is.null(threads)) as.character(threads),
-    mu_referencing = if ("mu_referencing" %in% explicit_args) tolower(as.character(mu_referencing)),
-    sir            = if ("sir"            %in% explicit_args) tolower(as.character(sir)),
-    gradient       = if ("gradient"       %in% explicit_args) gradient,
+    mu_referencing = if ("mu_referencing" %in% explicit_args && nzchar(mu_referencing_arg)) mu_referencing_arg,
+    sir            = if ("sir"            %in% explicit_args && nzchar(sir_arg)) sir_arg,
+    gradient       = if ("gradient"       %in% explicit_args && nzchar(gradient_arg)) gradient_arg,
     inits_from_nca  = if ("inits_from_nca"  %in% explicit_args) (if (is.null(inits_value)) "off" else inits_value),
     fd_hessian_step = if ("fd_hessian_step" %in% explicit_args && !is.null(fd_hessian_step))
       format(fd_hessian_step, scientific = FALSE, trim = TRUE, digits = 17)
@@ -1549,13 +1599,13 @@ ferx_fit <- function(model, data = NULL,
     model_path = normalizePath(model),
     data_path = normalizePath(data),
     method = method,
-    covariance = covariance,
-    verbose = verbose,
+    covariance = covariance_arg,
+    verbose = verbose_arg,
     bloq_method = bloq_arg,
     threads = threads_arg,
-    mu_referencing = mu_referencing,
-    sir = sir,
-    gradient = gradient,
+    mu_referencing = mu_referencing_arg,
+    sir = sir_arg,
+    gradient = gradient_arg,
     settings_keys = settings_parts$keys,
     settings_values = settings_parts$values
   )
@@ -1837,7 +1887,22 @@ ferx_fit <- function(model, data = NULL,
   # by the `gradient` argument so the two values can be compared directly
   # (e.g. requested "auto" -> used "ad"). When the engine omitted the field
   # (older binaries return ""), `gradient_used` is NA.
-  result$gradient <- gradient
+  # `gradient` defaults to NULL ("defer to the model file / engine default").
+  # Assigning that raw NULL would drop the field entirely (and with it the
+  # RUN INFO line), so resolve it to the requested token: the explicit arg when
+  # given, otherwise the model-file value, otherwise the engine default "auto".
+  result$gradient <- if (nzchar(gradient_arg)) {
+    gradient_arg
+  } else {
+    mf_grad <- if ("gradient" %in% names(model_file_opts)) {
+      model_file_opts[["gradient"]]
+    } else if ("gradient_method" %in% names(model_file_opts)) {
+      model_file_opts[["gradient_method"]]
+    } else {
+      NULL
+    }
+    if (!is.null(mf_grad)) tolower(as.character(mf_grad)) else "auto"
+  }
   result$gradient_used <- .ferx_short_gradient_label(result$gradient_method_inner)
 
   # Store effective settings (already serialised from settings_parts above)

@@ -52,15 +52,18 @@ const POLL_MS: u64 = 100;
 ///   one stage (e.g. "focei"); multiple elements chain stages, each seeded with
 ///   the previous stage's converged parameters (e.g. c("saem", "focei")). An
 ///   empty vector keeps the model file's [fit_options] method (#558).
-/// @param covariance Run covariance step (TRUE/FALSE)
-/// @param verbose Print progress (TRUE/FALSE)
+/// @param covariance Run covariance step: "true"/"false", or "" to keep the
+///   model file's [fit_options] value
+/// @param verbose Print progress: "true"/"false", or "" to keep the model default
 /// @param bloq_method BLOQ handling: "drop", "m3", or "" to use the model default
 /// @param threads Number of rayon worker threads for the per-subject parallel
 ///   loops. Pass `0` (or any value `<= 0`) to leave rayon's global pool alone
 ///   (one worker per logical CPU). Positive values run this fit inside a
 ///   scoped local pool of that size.
-/// @param mu_referencing Use mu-referencing for ETA initialisation (TRUE/FALSE)
-/// @param sir Run SIR uncertainty estimation as a post-fit step (TRUE/FALSE).
+/// @param mu_referencing Use mu-referencing for ETA initialisation:
+///   "true"/"false", or "" to keep the model default
+/// @param sir Run SIR uncertainty estimation as a post-fit step: "true"/"false",
+///   or "" to keep the model default.
 ///   Tuning knobs (`sir_samples`, `sir_resamples`, `sir_seed`) still flow
 ///   through `settings`; only the on/off toggle is top-level.
 /// @param settings_keys Parallel vector of setting names (pre-stringified).
@@ -80,12 +83,12 @@ fn ferx_rust_fit(
     model_path: &str,
     data_path: &str,
     method: Vec<String>,
-    covariance: bool,
-    verbose: bool,
+    covariance: &str,
+    verbose: &str,
     bloq_method: &str,
     threads: i32,
-    mu_referencing: bool,
-    sir: bool,
+    mu_referencing: &str,
+    sir: &str,
     gradient: &str,
     settings_keys: Vec<String>,
     settings_values: Vec<String>,
@@ -218,10 +221,30 @@ fn ferx_rust_fit(
             opts.user_set_keys.push("method".to_string());
         }
     }
-    opts.run_covariance_step = covariance;
-    opts.verbose = verbose;
-    opts.mu_referencing = mu_referencing;
-    opts.sir = sir;
+    // Boolean fit options forwarded from R as sentinel strings: "" keeps the
+    // model file's [fit_options] value (already in `opts` from
+    // `parsed.fit_options`), "true"/"false" override it. This prevents an
+    // accepted R-side default from silently overruling the model file (#558).
+    let apply_flag = |slot: &mut bool, raw: &str, name: &str| {
+        // The only caller (`.flag_arg` in fit.R) emits exactly "", "true", or
+        // "false"; the catch-all guards against a malformed value rather than
+        // accepting tokens the R side never sends.
+        match raw.trim().to_lowercase().as_str() {
+            "" => {}
+            "true" => *slot = true,
+            "false" => *slot = false,
+            other => {
+                rprintln!(
+                    "Unknown {name} value '{}' - expected TRUE or FALSE (keeping model default)",
+                    other
+                );
+            }
+        }
+    };
+    apply_flag(&mut opts.run_covariance_step, covariance, "covariance");
+    apply_flag(&mut opts.verbose, verbose, "verbose");
+    apply_flag(&mut opts.mu_referencing, mu_referencing, "mu_referencing");
+    apply_flag(&mut opts.sir, sir, "sir");
     opts.threads = if threads > 0 {
         Some(threads as usize)
     } else {
@@ -244,9 +267,11 @@ fn ferx_rust_fit(
     // Mirror onto the compiled model so likelihood functions pick it up.
     parsed.model.bloq_method = opts.bloq_method;
 
-    // Gradient method override. Empty string → keep model/option default.
+    // Gradient method override. Empty string → keep the model file's value
+    // (#558) instead of forcing Auto; an explicit token overrides it.
     match gradient.trim().to_lowercase().as_str() {
-        "" | "auto" => opts.gradient_method = ferx_core::GradientMethod::Auto,
+        "" => {}
+        "auto" => opts.gradient_method = ferx_core::GradientMethod::Auto,
         "ad" | "autodiff" => opts.gradient_method = ferx_core::GradientMethod::Ad,
         "fd" | "finite" | "finite_difference" => {
             opts.gradient_method = ferx_core::GradientMethod::Fd

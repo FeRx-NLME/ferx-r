@@ -24,6 +24,14 @@
 
 ## Fixed
 
+- **`ferx_fit()` no longer overrides model-file `[fit_options]` with accepted
+  defaults.** `covariance`, `verbose`, `mu_referencing`, `sir`, and `gradient`
+  now default to `NULL`, meaning "use the model file's value" (falling back to
+  the engine default when the model file is silent). Previously their non-`NULL`
+  R defaults (e.g. `covariance = TRUE`) silently overrode a model file that set
+  the opposite — so a model with `covariance = false` still ran the covariance
+  step. Pass the argument explicitly to override the model file
+  (FeRx-NLME/ferx-core#558).
 - **`ferx_fit()` no longer overrides the model file's estimation method.**
   `method` now defaults to `NULL`, meaning "use the `[fit_options] method` from
   the model file" (falling back to FOCEI only when the model file sets none).
