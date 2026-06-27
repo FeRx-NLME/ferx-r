@@ -79,6 +79,15 @@
 #'     central (the entire absorption delay in one term, no first-order
 #'     \code{ka}); the shape \code{beta} selects the profile. Shares the NONMEM
 #'     absorption anchor dataset.}
+#'   \item{zero_order_absorption}{One-compartment ODE model with zero-order
+#'     (constant-rate) absorption via the built-in \code{zero_order(dur)} input
+#'     rate -- a modeled-duration infusion (NONMEM \code{RATE=-2}/\code{D1}) fed
+#'     straight into central. Shares the NONMEM absorption anchor dataset.}
+#'   \item{sequential_absorption}{Sequential (zero-order then first-order)
+#'     absorption: \code{zero_order(dur)} fills a depot, which empties to central
+#'     by first-order \code{ka} (no dedicated keyword -- a composition). Paired
+#'     with its own simulated dataset (\code{sequential_absorption/simulate_dataset.R}),
+#'     dosing the depot (CMT 1) and observing central (CMT 2).}
 #'   \item{two_cpt_oral_cov_ode_template}{Two-compartment oral PK with covariates
 #'     written with \code{ode_template two_cpt_oral(...)} in
 #'     \code{[structural_model]}: ferx generates the standard disposition ODE
@@ -208,7 +217,11 @@ ferx_example <- function(name = NULL) {
 
     # Built-in Weibull absorption (weibull); shares the same ferx-core NONMEM
     # absorption anchor dataset.
-    weibull_absorption = "igd_oral"
+    weibull_absorption = "igd_oral",
+
+    # Built-in zero-order absorption (zero_order); shares the same ferx-core
+    # NONMEM absorption anchor dataset (sequential_absorption has its own data).
+    zero_order_absorption = "igd_oral"
   )
 
   available <- tools::file_path_sans_ext(list.files(models_dir, pattern = "\\.ferx$"))
