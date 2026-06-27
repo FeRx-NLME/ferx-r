@@ -102,6 +102,38 @@ absorption: \code{zero_order(dur)} fills a depot, which empties to central
 by first-order \code{ka} (no dedicated keyword -- a composition). Paired
 with its own simulated dataset (\code{sequential_absorption/simulate_dataset.R}),
 dosing the depot (CMT 1) and observing central (CMT 2).}
+\item{transit_savic}{One-compartment oral ODE model with Savic
+transit-compartment absorption via the built-in \code{transit(n, mtt)}
+input rate. The number of transit compartments \code{n} is a single
+continuous (estimable) parameter, in contrast to \code{transit_2cpt}'s
+hand-coded chain of fixed integer compartments. Paired with the ferx-core
+transit anchor dataset (correct-specification parameter recovery).}
+\item{tte_exponential}{Standalone time-to-event (TTE) model with an
+exponential hazard via the \code{[event_model]} block. Event times on
+CMT 2 follow \code{Exp(LAMBDA)} with \code{LAMBDA = TVLAMBDA *
+    exp(ETA_LAMBDA)}; DV codes the censoring status (0 = right-censored,
+1 = exact event). Paired with the ferx-core TTE anchor dataset
+(administrative censoring at t = 30 h; recovers TVLAMBDA = 0.05).}
+\item{tte_weibull}{Standalone TTE model with a Weibull hazard via the
+\code{[event_model]} block, written in the compact TTE-only form (no
+\code{[structural_model]} / \code{[error_model]} / \code{[individual_parameters]}
+blocks). Event times on CMT 2 follow \code{Weibull(scale, shape)} with
+\code{scale = TVSCALE * exp(ETA_SCALE)} and \code{shape = TVSHAPE}. Paired
+with the ferx-core TTE anchor dataset (censoring at t = 60 h; recovers
+TVSCALE = 20, TVSHAPE = 1.5). The compact TTE-only syntax requires a recent
+ferx-r; older builds need placeholder PK blocks (cf. \code{tte_exponential}).}
+\item{tte_gompertz}{Standalone TTE model with a Gompertz hazard
+(\code{h(t) = alpha * exp(gamma * t)}) via the \code{[event_model]} block,
+compact TTE-only form. BSV is on the growth rate \code{gamma} (not the
+intercept \code{alpha}, which is collinear with it). Paired with the
+ferx-core TTE anchor dataset (recovers TVALPHA = 0.002, TVGAMMA = 0.05).}
+\item{tte_competing_risks}{Competing-risks TTE with two cause-specific
+exponential hazards on separate compartments (CMT 2 / CMT 3) linked by a
+shared frailty \code{ETA_F}, via two named \code{[event_model]} blocks. The
+observed event is whichever cause occurs first.
+\code{ferx_predict_survival()} reports per-cause cumulative incidence
+(\code{cif}) alongside all-cause survival (\code{survival_all}). Recovers
+the cause-specific rates TVLAMBDA_A = 0.10, TVLAMBDA_B = 0.06.}
 \item{two_cpt_oral_cov_ode_template}{Two-compartment oral PK with covariates
 written with \code{ode_template two_cpt_oral(...)} in
 \code{[structural_model]}: ferx generates the standard disposition ODE
