@@ -19,6 +19,12 @@
   enables ferx-core's `survival` feature by default, so `[event_model]` blocks
   and the TTE datareader routing are active in shipped builds (previously the
   feature was off, making that routing a no-op).
+- **Bundled examples for time-to-event and Savic transit absorption.** New
+  `ferx_example()` models, each with a runnable `inst/examples/ex_*.R` script:
+  `tte_exponential`, `tte_weibull`, `tte_gompertz`, and `tte_competing_risks`
+  (standalone `[event_model]` TTE, paired with `ferx_predict_survival()`), plus
+  `transit_savic` (Savic transit-compartment absorption via the built-in
+  `transit(n, mtt)` input rate).
 
 ## Breaking changes
 

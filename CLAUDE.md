@@ -65,6 +65,24 @@ R API (R/*.R)
 
 Models are defined in `.ferx` text files with sections: `[parameters]`, `[individual_parameters]`, `[structural_model]`, `[odes]`, `[error_model]`, `[initial_values]`, `[fit_options]`, and the optional `[scaling]` block (unit conversion / observation readout). See `inst/examples/models/` for references. Data uses NONMEM CSV format (ID, TIME, DV, EVID, AMT, CMT, etc.); optional columns: RATE, MDV, II, SS, CENS, OCC. Use `ferx_example("warfarin")` to get paths to bundled examples.
 
+## Bundled examples (`inst/examples/`)
+
+`ferx_example()` discovers examples by scanning `inst/examples/models/*.ferx`, and `?ferx_example` documents each one. A bundled example is **complete only when all of these are committed together** - shipping a subset is a recurring drift source that leaves an installed package advertising examples it cannot load:
+
+- `inst/examples/models/<name>.ferx` - the model
+- its data: `inst/examples/data/<name>.csv`, **or** a `.data_aliases` entry in `R/example.R` pointing at an existing CSV
+- `inst/examples/ex_<name>.R` - a runnable end-to-end script
+- the `\item{<name>}{...}` entry in `ferx_example()`'s `@details` (in `R/example.R`)
+- the regenerated `man/ferx_example.Rd` (run `roxygen2::roxygenize()`)
+- a `NEWS.md` entry
+
+Before treating example work as done:
+
+- `git status` must show **no untracked** `inst/examples/` files - the assets have to ship, not sit as local files. (The TTE / `transit_savic` examples were authored but left untracked, so the survival feature shipped without them.)
+- **Run the `ex_<name>.R` script end-to-end** against a fresh `FERX_NO_AUTODIFF=1 R CMD INSTALL .`. Parse-only checks miss API-signature drift - e.g. an example calling `ferx_predict_survival(fit)` when the signature is `ferx_predict_survival(model, data, times, fit = NULL)`.
+
+`tests/testthat/test-example.R` already asserts every `ferx_example()` data path exists on disk, but nothing runs the scripts - so the script-execution check above is manual.
+
 ## Key Return Structures
 
 `ferx_fit()` returns an S3 "ferx_fit" list: converged, method, ofv/aic/bic, theta (named), omega (matrix), sigma, standard errors, sdtab (diagnostic data frame with PRED/IPRED/CWRES/IWRES/ETAs), and warnings.
