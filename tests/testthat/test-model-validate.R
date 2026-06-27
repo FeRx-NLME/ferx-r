@@ -206,3 +206,23 @@ test_that("bundled weibull_absorption example validates (weibull() parses agains
   res <- ferx_model_validate(ex$model)
   expect_true(isTRUE(res$ok))
 })
+
+test_that("bundled zero_order_absorption example validates (zero_order() parses against the engine)", {
+  # Guards that the bundled zero-order example stays parseable by the pinned
+  # ferx-core: a valid result confirms the built-in `zero_order(dur)` input rate
+  # is understood by the engine (data/alias covered by test-example.R; the value
+  # path is anchored against a NONMEM ADVAN1 modeled-duration run in ferx-core).
+  ex  <- ferx_example("zero_order_absorption")
+  res <- ferx_model_validate(ex$model)
+  expect_true(isTRUE(res$ok))
+})
+
+test_that("bundled sequential_absorption example validates (zero_order + first-order compose)", {
+  # Guards the sequential (zero-order depot fill -> first-order ka) composition:
+  # a valid result confirms zero_order(dur) into a depot plus a hand-written
+  # `- KA*depot` transfer parses against the engine (its own simulated dataset is
+  # covered by test-example.R; a full fit recovers the simulation truth offline).
+  ex  <- ferx_example("sequential_absorption")
+  res <- ferx_model_validate(ex$model)
+  expect_true(isTRUE(res$ok))
+})

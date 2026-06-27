@@ -2,6 +2,12 @@
 
 ## Added
 
+- **Zero-order absorption is now available in model files** — the built-in
+  `zero_order(dur)` `[odes]` input rate (a constant-rate / modeled-duration input,
+  NONMEM `RATE=-2`/`D1`), via the ferx-core update (ferx-core #504). Two new
+  bundled examples: `ferx_example("zero_order_absorption")` (constant-rate input
+  into central) and `ferx_example("sequential_absorption")` (zero-order fill of a
+  depot, then first-order `ka` to central).
 - **`ferx_predict_survival()`** — survival-function predictions (`S(t)`, `H(t)`,
   `h(t)`, plus median and mean survival) on a user-supplied time grid for
   `[event_model]` (time-to-event) endpoints, for every subject and TTE CMT.

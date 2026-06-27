@@ -1,0 +1,48 @@
+# Zero-order absorption -- built-in `zero_order(dur)` input rate.
+#
+# One-compartment model with a constant-rate (zero-order) input fed straight into
+# the central compartment over a modeled duration `dur` -- a zero-order infusion
+# whose duration is an estimated parameter (NONMEM's `RATE=-2`/`D1` case):
+#
+#   R_in(tad) = F*Dose / dur   for 0 < tad <= dur,   0 otherwise
+#
+# The dose feeds the input over time (integral R_in dt = F*Dose) and is NOT also
+# added as a bolus. `central` is an AMOUNT; concentration = amount / V via
+# [scaling]. The hard cutoff at tad = dur is delivered exactly (see ferx-core #504).
+#
+# Paired with igd_oral.csv -- the ferx-core NONMEM absorption anchor dataset
+# (20 subjects, single oral dose). NOTE: that data was simulated from a transit
+# model, so the zero-order fit is mildly mis-specified (a syntax / implementation
+# demo, not a parameter-recovery demo). `zero_order` is validated against a NONMEM
+# ADVAN1 modeled-duration run in ferx-core (tests/nonmem/modeled_duration.ctl).
+
+[parameters]
+  theta TVCL(5.0,   0.1, 100.0)   # clearance (L/h)
+  theta TVV(50.0,   5.0, 500.0)   # central volume (L)
+  theta TVDUR(2.0, 0.05,  24.0)   # zero-order input duration (h)
+
+  omega ETA_CL ~ 0.09
+  omega ETA_V  ~ 0.09
+
+  sigma PROP_ERR ~ 0.15 (sd)
+
+[individual_parameters]
+  CL  = TVCL * exp(ETA_CL)
+  V   = TVV  * exp(ETA_V)
+  DUR = TVDUR
+
+[structural_model]
+  ode(states=[central])
+
+[odes]
+  d/dt(central) = zero_order(dur=DUR) - CL/V*central
+
+[scaling]
+  y = central / V
+
+[error_model]
+  DV ~ proportional(PROP_ERR)
+
+[fit_options]
+  method  = focei
+  maxiter = 500
