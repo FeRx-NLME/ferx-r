@@ -7,7 +7,7 @@
 ferx_fit(
   model,
   data = NULL,
-  method = "focei",
+  method = NULL,
   covariance = TRUE,
   verbose = TRUE,
   bloq_method = NULL,
@@ -43,7 +43,11 @@ concentration to current state), CENS (LOQ censoring flag for M3 method:
 and any covariate columns referenced in the model. See the steady-state
 section below for SS/II details.}
 
-\item{method}{Estimation method(s). Either a single string or a character
+\item{method}{Estimation method(s). \code{NULL} (the default) uses whatever
+the model file's \code{[fit_options] method} specifies, falling back to
+\code{"focei"} if the model file sets none (the engine warns when it
+defaults). Pass a value here to override the model file: either a single
+string or a character
 vector of methods to run in sequence. Each stage is seeded with the
 previous stage's converged parameters, and only the final stage produces
 the reported covariance/diagnostics. Supported methods: \code{"foce"},

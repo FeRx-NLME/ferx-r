@@ -238,3 +238,30 @@ test_that("ferx_fit() warns when an explicit dedicated arg overrides the model f
     "method = foce.*overrides it with `focei`"
   )
 })
+
+test_that("ferx_fit() runs the model file's method when none is passed (#558)", {
+  # The model file sets `method = foce`. Before #558 the R-side default
+  # method = "focei" silently overrode it; now passing no method keeps FOCE.
+  fx <- make_fast_warfarin()
+  on.exit(unlink(fx$dir, recursive = TRUE))
+
+  fit <- suppressMessages(ferx_fit(
+    fx$model, fx$data,
+    verbose = FALSE,
+    settings = list(max_unconverged_frac = 1.0)
+  ))
+  expect_equal(fit$method, "FOCE")
+})
+
+test_that("ferx_fit() method argument overrides the model file's method (#558)", {
+  fx <- make_fast_warfarin()  # model file: method = foce
+  on.exit(unlink(fx$dir, recursive = TRUE))
+
+  fit <- suppressWarnings(suppressMessages(ferx_fit(
+    fx$model, fx$data,
+    method = "focei",
+    verbose = FALSE,
+    settings = list(max_unconverged_frac = 1.0)
+  )))
+  expect_equal(fit$method, "FOCEI")
+})

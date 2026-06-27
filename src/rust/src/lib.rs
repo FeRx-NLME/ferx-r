@@ -50,7 +50,8 @@ const POLL_MS: u64 = 100;
 /// @param data_path Path to NONMEM-format CSV
 /// @param method Character vector of estimation methods. A single element runs
 ///   one stage (e.g. "focei"); multiple elements chain stages, each seeded with
-///   the previous stage's converged parameters (e.g. c("saem", "focei")).
+///   the previous stage's converged parameters (e.g. c("saem", "focei")). An
+///   empty vector keeps the model file's [fit_options] method (#558).
 /// @param covariance Run covariance step (TRUE/FALSE)
 /// @param verbose Print progress (TRUE/FALSE)
 /// @param bloq_method BLOQ handling: "drop", "m3", or "" to use the model default
@@ -189,26 +190,34 @@ fn ferx_rust_fit(
         }
     };
 
-    if method.is_empty() {
-        throw_r_error("Error: `method` must contain at least one estimation method");
+    // An empty `method` vector means the R caller did not pass `method=` — keep
+    // whatever the model file's [fit_options] selected (already in `opts` from
+    // `parsed.fit_options`). Only an explicit R-side method overrides it, so a
+    // model-file `method = saem` is no longer clobbered by R's default (#558).
+    if !method.is_empty() {
+        let chain: Vec<EstimationMethod> = match method.iter().map(|m| parse_method(m)).collect() {
+            Ok(v) => v,
+            Err(e) => throw_r_error(format!("{e}")),
+        };
+        let final_method = *chain.last().unwrap();
+        // The reported `interaction` flag must reflect the last *estimating* stage
+        // — IMP is a diagnostic terminal stage that does not update parameters, so
+        // a chain like `c("focei", "imp")` should still report `interaction = TRUE`.
+        let last_estimator = chain
+            .iter()
+            .rev()
+            .find(|m| **m != EstimationMethod::Imp)
+            .copied()
+            .unwrap_or(final_method);
+        opts.method = final_method;
+        opts.interaction = last_estimator == EstimationMethod::FoceI;
+        opts.methods = if chain.len() > 1 { chain } else { Vec::new() };
+        // Mark the method as explicitly chosen so the engine does not warn that
+        // it defaulted (ferx-core's method_default_warning keys off this).
+        if !opts.user_set_keys.iter().any(|k| k == "method") {
+            opts.user_set_keys.push("method".to_string());
+        }
     }
-    let chain: Vec<EstimationMethod> = match method.iter().map(|m| parse_method(m)).collect() {
-        Ok(v) => v,
-        Err(e) => throw_r_error(format!("{e}")),
-    };
-    let final_method = *chain.last().unwrap();
-    // The reported `interaction` flag must reflect the last *estimating* stage
-    // — IMP is a diagnostic terminal stage that does not update parameters, so
-    // a chain like `c("focei", "imp")` should still report `interaction = TRUE`.
-    let last_estimator = chain
-        .iter()
-        .rev()
-        .find(|m| **m != EstimationMethod::Imp)
-        .copied()
-        .unwrap_or(final_method);
-    opts.method = final_method;
-    opts.interaction = last_estimator == EstimationMethod::FoceI;
-    opts.methods = if chain.len() > 1 { chain } else { Vec::new() };
     opts.run_covariance_step = covariance;
     opts.verbose = verbose;
     opts.mu_referencing = mu_referencing;

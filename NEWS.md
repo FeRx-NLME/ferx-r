@@ -24,6 +24,12 @@
 
 ## Fixed
 
+- **`ferx_fit()` no longer overrides the model file's estimation method.**
+  `method` now defaults to `NULL`, meaning "use the `[fit_options] method` from
+  the model file" (falling back to FOCEI only when the model file sets none).
+  Previously the R-side default `method = "focei"` silently overrode a model
+  file that specified e.g. `method = saem`. Pass `method` explicitly to override
+  the model file as before (FeRx-NLME/ferx-core#558).
 - **`ferx_selection()` preview recognizes the bare `ignore = C` shorthand**
   (NONMEM `IGNORE=C`). The pure-R preview parser previously returned no match for
   an operator-less clause, so the preview reported zero exclusions while the Rust

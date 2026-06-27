@@ -14,7 +14,11 @@
 #'   \code{1} below LLOQ, \code{-1} above ULOQ), OCC (occasion index for IOV),
 #'   and any covariate columns referenced in the model. See the steady-state
 #'   section below for SS/II details.
-#' @param method Estimation method(s). Either a single string or a character
+#' @param method Estimation method(s). \code{NULL} (the default) uses whatever
+#'   the model file's \code{[fit_options] method} specifies, falling back to
+#'   \code{"focei"} if the model file sets none (the engine warns when it
+#'   defaults). Pass a value here to override the model file: either a single
+#'   string or a character
 #'   vector of methods to run in sequence. Each stage is seeded with the
 #'   previous stage's converged parameters, and only the final stage produces
 #'   the reported covariance/diagnostics. Supported methods: \code{"foce"},
@@ -1276,7 +1280,7 @@
 #' @family fitting
 #' @export
 ferx_fit <- function(model, data = NULL,
-                     method = "focei",
+                     method = NULL,
                      covariance = TRUE,
                      verbose = TRUE,
                      bloq_method = NULL,
@@ -1363,10 +1367,20 @@ ferx_fit <- function(model, data = NULL,
   if (sir && !covariance) {
     stop("`sir = TRUE` requires `covariance = TRUE`")
   }
-  if (!is.character(method) || length(method) == 0L) {
-    stop("`method` must be a non-empty character vector")
+  # `method = NULL` (the default) means "use whatever the model file's
+  # [fit_options] selected, falling back to FOCEI" rather than forcing FOCEI from
+  # the R side. We send an empty character vector to the engine; the Rust glue
+  # then keeps the model-file method instead of overriding it (#558). A
+  # user-supplied `method` always wins. The downstream `imp` / `bayes` chain
+  # guards below no-op cleanly on `character(0)`.
+  if (is.null(method)) {
+    method <- character(0L)
+  } else {
+    if (!is.character(method) || length(method) == 0L) {
+      stop("`method` must be a non-empty character vector")
+    }
+    method <- vapply(method, .normalize_method_token, character(1L), USE.NAMES = FALSE)
   }
-  method <- vapply(method, .normalize_method_token, character(1L), USE.NAMES = FALSE)
   # `imp` may appear at most once. By default it is an estimator (NONMEM
   # METHOD=IMP) and may sit anywhere in the chain; with `imp_eval_only = TRUE`
   # (NONMEM EONLY=1) it only evaluates the marginal -2 log L and must be the
