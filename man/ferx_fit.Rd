@@ -7,14 +7,14 @@
 ferx_fit(
   model,
   data = NULL,
-  method = "focei",
-  covariance = TRUE,
-  verbose = TRUE,
+  method = NULL,
+  covariance = NULL,
+  verbose = NULL,
   bloq_method = NULL,
   threads = NULL,
-  mu_referencing = TRUE,
-  sir = FALSE,
-  gradient = c("auto", "ad", "fd"),
+  mu_referencing = NULL,
+  sir = NULL,
+  gradient = NULL,
   optimizer_trace = FALSE,
   scale_params = FALSE,
   inits_from_nca = FALSE,
@@ -43,7 +43,11 @@ concentration to current state), CENS (LOQ censoring flag for M3 method:
 and any covariate columns referenced in the model. See the steady-state
 section below for SS/II details.}
 
-\item{method}{Estimation method(s). Either a single string or a character
+\item{method}{Estimation method(s). \code{NULL} (the default) uses whatever
+the model file's \code{[fit_options] method} specifies, falling back to
+\code{"focei"} if the model file sets none (the engine warns when it
+defaults). Pass a value here to override the model file: either a single
+string or a character
 vector of methods to run in sequence. Each stage is seeded with the
 previous stage's converged parameters, and only the final stage produces
 the reported covariance/diagnostics. Supported methods: \code{"foce"},
@@ -76,9 +80,15 @@ runs standalone. Supports BSV and zero-mean inter-occasion variability
 \code{OMEGA_IOV(...)} in \code{$bayes}.
 SAEM fully supports inter-occasion variability (IOV / kappa) models.}
 
-\item{covariance}{Logical; compute the covariance step for standard errors}
+\item{covariance}{Logical, or \code{NULL} (the default). Whether to compute
+the covariance step for standard errors. \code{NULL} uses the model file's
+\code{[fit_options] covariance} (engine default \code{TRUE} when unset); a
+logical overrides the model file. Previously defaulted to \code{TRUE} and
+silently overrode a model file that set \code{covariance = false} (#558).}
 
-\item{verbose}{Logical; print progress during estimation}
+\item{verbose}{Logical, or \code{NULL} (the default). Print progress during
+estimation. \code{NULL} uses the model file's \code{[fit_options] verbose}
+(engine default \code{TRUE} when unset); a logical overrides it.}
 
 \item{bloq_method}{Handling of observations outside quantification limits.
 \code{NULL} (default) keeps whatever the model file specified;
@@ -95,9 +105,12 @@ or to avoid SMT-induced contention (try
 \code{parallel::detectCores(logical = FALSE)}). The setting is per-call,
 so successive fits in the same R session can use different values.}
 
-\item{mu_referencing}{Logical. If \code{TRUE} (default), automatically
+\item{mu_referencing}{Logical, or \code{NULL} (the default). When \code{TRUE},
+automatically
 detects mu-referencing from the model structure for faster and more
-accurate convergence. Applies to all estimation methods. Set to
+accurate convergence. \code{NULL} uses the model file's
+\code{[fit_options] mu_referencing} (engine default \code{TRUE} when unset).
+Applies to all estimation methods. Set to
 \code{FALSE} to disable for comparison purposes. Detection works
 automatically for standard parameterizations such as
 \code{PARAM = THETA * exp(ETA)}; unusual parameterizations fall back
@@ -105,14 +118,19 @@ silently to zero-centred ETA initialisation with no error. No changes
 to the \code{.ferx} model file are needed. Check \code{fit$warnings}
 to see which ETAs were detected.}
 
-\item{sir}{Logical; run Sampling Importance Resampling after the fit to
+\item{sir}{Logical, or \code{NULL} (the default); run Sampling Importance
+Resampling after the fit to
 produce non-parametric parameter uncertainty intervals. Requires
-\code{covariance = TRUE}. Tuning knobs (\code{sir_samples},
+\code{covariance = TRUE}. \code{NULL} uses the model file's
+\code{[fit_options] sir} (engine default \code{FALSE} when unset). Tuning
+knobs (\code{sir_samples},
 \code{sir_resamples}, \code{sir_seed}) still flow through
-\code{settings}. Default \code{FALSE}.}
+\code{settings}.}
 
 \item{gradient}{Inner-loop (per-subject EBE) gradient method.
-One of \code{"auto"} (default) or \code{"fd"}. The legacy
+One of \code{"auto"} or \code{"fd"}, or \code{NULL} (the default) to use the
+model file's \code{[fit_options] gradient} (engine default \code{"auto"}
+when unset). The legacy
 \code{"ad"} token is accepted by older model files but should not be
 used for new code.
 

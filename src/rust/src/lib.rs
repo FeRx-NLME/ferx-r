@@ -50,16 +50,20 @@ const POLL_MS: u64 = 100;
 /// @param data_path Path to NONMEM-format CSV
 /// @param method Character vector of estimation methods. A single element runs
 ///   one stage (e.g. "focei"); multiple elements chain stages, each seeded with
-///   the previous stage's converged parameters (e.g. c("saem", "focei")).
-/// @param covariance Run covariance step (TRUE/FALSE)
-/// @param verbose Print progress (TRUE/FALSE)
+///   the previous stage's converged parameters (e.g. c("saem", "focei")). An
+///   empty vector keeps the model file's [fit_options] method (#558).
+/// @param covariance Run covariance step: "true"/"false", or "" to keep the
+///   model file's [fit_options] value
+/// @param verbose Print progress: "true"/"false", or "" to keep the model default
 /// @param bloq_method BLOQ handling: "drop", "m3", or "" to use the model default
 /// @param threads Number of rayon worker threads for the per-subject parallel
 ///   loops. Pass `0` (or any value `<= 0`) to leave rayon's global pool alone
 ///   (one worker per logical CPU). Positive values run this fit inside a
 ///   scoped local pool of that size.
-/// @param mu_referencing Use mu-referencing for ETA initialisation (TRUE/FALSE)
-/// @param sir Run SIR uncertainty estimation as a post-fit step (TRUE/FALSE).
+/// @param mu_referencing Use mu-referencing for ETA initialisation:
+///   "true"/"false", or "" to keep the model default
+/// @param sir Run SIR uncertainty estimation as a post-fit step: "true"/"false",
+///   or "" to keep the model default.
 ///   Tuning knobs (`sir_samples`, `sir_resamples`, `sir_seed`) still flow
 ///   through `settings`; only the on/off toggle is top-level.
 /// @param settings_keys Parallel vector of setting names (pre-stringified).
@@ -79,12 +83,12 @@ fn ferx_rust_fit(
     model_path: &str,
     data_path: &str,
     method: Vec<String>,
-    covariance: bool,
-    verbose: bool,
+    covariance: &str,
+    verbose: &str,
     bloq_method: &str,
     threads: i32,
-    mu_referencing: bool,
-    sir: bool,
+    mu_referencing: &str,
+    sir: &str,
     gradient: &str,
     settings_keys: Vec<String>,
     settings_values: Vec<String>,
@@ -189,30 +193,58 @@ fn ferx_rust_fit(
         }
     };
 
-    if method.is_empty() {
-        throw_r_error("Error: `method` must contain at least one estimation method");
+    // An empty `method` vector means the R caller did not pass `method=` — keep
+    // whatever the model file's [fit_options] selected (already in `opts` from
+    // `parsed.fit_options`). Only an explicit R-side method overrides it, so a
+    // model-file `method = saem` is no longer clobbered by R's default (#558).
+    if !method.is_empty() {
+        let chain: Vec<EstimationMethod> = match method.iter().map(|m| parse_method(m)).collect() {
+            Ok(v) => v,
+            Err(e) => throw_r_error(format!("{e}")),
+        };
+        let final_method = *chain.last().unwrap();
+        // The reported `interaction` flag must reflect the last *estimating* stage
+        // — IMP is a diagnostic terminal stage that does not update parameters, so
+        // a chain like `c("focei", "imp")` should still report `interaction = TRUE`.
+        let last_estimator = chain
+            .iter()
+            .rev()
+            .find(|m| **m != EstimationMethod::Imp)
+            .copied()
+            .unwrap_or(final_method);
+        opts.method = final_method;
+        opts.interaction = last_estimator == EstimationMethod::FoceI;
+        opts.methods = if chain.len() > 1 { chain } else { Vec::new() };
+        // Mark the method as explicitly chosen so the engine does not warn that
+        // it defaulted (ferx-core's method_default_warning keys off this).
+        if !opts.user_set_keys.iter().any(|k| k == "method") {
+            opts.user_set_keys.push("method".to_string());
+        }
     }
-    let chain: Vec<EstimationMethod> = match method.iter().map(|m| parse_method(m)).collect() {
-        Ok(v) => v,
-        Err(e) => throw_r_error(format!("{e}")),
+    // Boolean fit options forwarded from R as sentinel strings: "" keeps the
+    // model file's [fit_options] value (already in `opts` from
+    // `parsed.fit_options`), "true"/"false" override it. This prevents an
+    // accepted R-side default from silently overruling the model file (#558).
+    let apply_flag = |slot: &mut bool, raw: &str, name: &str| {
+        // The only caller (`.flag_arg` in fit.R) emits exactly "", "true", or
+        // "false"; the catch-all guards against a malformed value rather than
+        // accepting tokens the R side never sends.
+        match raw.trim().to_lowercase().as_str() {
+            "" => {}
+            "true" => *slot = true,
+            "false" => *slot = false,
+            other => {
+                rprintln!(
+                    "Unknown {name} value '{}' - expected TRUE or FALSE (keeping model default)",
+                    other
+                );
+            }
+        }
     };
-    let final_method = *chain.last().unwrap();
-    // The reported `interaction` flag must reflect the last *estimating* stage
-    // — IMP is a diagnostic terminal stage that does not update parameters, so
-    // a chain like `c("focei", "imp")` should still report `interaction = TRUE`.
-    let last_estimator = chain
-        .iter()
-        .rev()
-        .find(|m| **m != EstimationMethod::Imp)
-        .copied()
-        .unwrap_or(final_method);
-    opts.method = final_method;
-    opts.interaction = last_estimator == EstimationMethod::FoceI;
-    opts.methods = if chain.len() > 1 { chain } else { Vec::new() };
-    opts.run_covariance_step = covariance;
-    opts.verbose = verbose;
-    opts.mu_referencing = mu_referencing;
-    opts.sir = sir;
+    apply_flag(&mut opts.run_covariance_step, covariance, "covariance");
+    apply_flag(&mut opts.verbose, verbose, "verbose");
+    apply_flag(&mut opts.mu_referencing, mu_referencing, "mu_referencing");
+    apply_flag(&mut opts.sir, sir, "sir");
     opts.threads = if threads > 0 {
         Some(threads as usize)
     } else {
@@ -235,9 +267,11 @@ fn ferx_rust_fit(
     // Mirror onto the compiled model so likelihood functions pick it up.
     parsed.model.bloq_method = opts.bloq_method;
 
-    // Gradient method override. Empty string → keep model/option default.
+    // Gradient method override. Empty string → keep the model file's value
+    // (#558) instead of forcing Auto; an explicit token overrides it.
     match gradient.trim().to_lowercase().as_str() {
-        "" | "auto" => opts.gradient_method = ferx_core::GradientMethod::Auto,
+        "" => {}
+        "auto" => opts.gradient_method = ferx_core::GradientMethod::Auto,
         "ad" | "autodiff" => opts.gradient_method = ferx_core::GradientMethod::Ad,
         "fd" | "finite" | "finite_difference" => {
             opts.gradient_method = ferx_core::GradientMethod::Fd
