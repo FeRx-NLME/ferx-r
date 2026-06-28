@@ -8,6 +8,8 @@
   compartment and estimated jointly with the PK by FOCEI/SAEM, with shared random
   effects (via ferx-core #564). Mutually exclusive with the analytic `family`
   hazard; requires an ODE model. Validated three-way (ferx vs NONMEM vs nlmixr2).
+  New bundled example `ferx_example("pktte_joint")` with a runnable
+  `inst/examples/ex_pktte_joint.R` (`ferx_fit()` + `ferx_predict_survival()`).
 - **Zero-order absorption is now available in model files** — the built-in
   `zero_order(dur)` `[odes]` input rate (a constant-rate / modeled-duration input,
   NONMEM `RATE=-2`/`D1`), via the ferx-core update (ferx-core #504). Two new
