@@ -300,7 +300,7 @@ dependencies = [
 [[package]]
 name = "ferx-core"
 version = "0.1.6"
-source = "git+https://github.com/FeRx-NLME/ferx-core?branch=main#9a8bfe2542ae3690b1e8ce454d0013418463128f"
+source = "git+https://github.com/FeRx-NLME/ferx-core?branch=main#39c85724ffa86ff8d72cd2f6629799eec4ac8ba6"
 dependencies = [
  "argmin",
  "argmin-math",
@@ -404,9 +404,9 @@ checksum = "f70749695b063ecbf6b62949ccccde2e733ec3ecbbd71d467dca4e5c6c97cca0"
 
 [[package]]
 name = "glam"
-version = "0.33.1"
+version = "0.33.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "898f5a568a84989b6c0f8caa50a93074b97dbdc58fc6d9543157bb4562758933"
+checksum = "7f22fb22f065b308be0d8724e3706c7fa3fc2a6c7d6899df4cad7860e7a75436"
 
 [[package]]
 name = "hashbrown"
@@ -416,9 +416,9 @@ checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 
 [[package]]
 name = "hybrid-array"
-version = "0.4.12"
+version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9155a582abd142abc056962c29e3ce5ff2ad5469f4246b537ed42c5deba857da"
+checksum = "818356c5132c1fede50f837ca96afbe78ff42413047f4abb886217845e1b6c8c"
 dependencies = [
  "typenum",
 ]
@@ -536,7 +536,7 @@ dependencies = [
  "glam 0.30.10",
  "glam 0.31.1",
  "glam 0.32.1",
- "glam 0.33.1",
+ "glam 0.33.2",
  "matrixmultiply",
  "nalgebra-macros",
  "num-complex",
