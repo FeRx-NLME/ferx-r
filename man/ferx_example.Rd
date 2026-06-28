@@ -88,6 +88,12 @@ Transit compartments provide the absorption delay without a hard lag time.}
 inverse-Gaussian absorption via the built-in \code{igd(mat, cv2)} input
 rate fed straight into central (the entire absorption delay in one term,
 no first-order \code{ka}). Paired with the NONMEM igd anchor dataset.}
+\item{biphasic_igd_absorption}{One-compartment ODE model with \emph{biphasic}
+inverse-Gaussian (Freijer & Post) absorption: two \code{igd(...)} pathways
+(a fast and a slow one) feeding central, split by a declared pathway fraction
+(\code{FR1*igd(...) + FR2*igd(...)}, \code{FR2 = 1 - FR1}). Demonstrates the
+shared input-rate fraction multiplier (ferx-core #388). Shares the NONMEM
+absorption anchor dataset (syntax demo, mildly mis-specified).}
 \item{weibull_absorption}{One-compartment ODE model with Weibull absorption
 via the built-in \code{weibull(td, beta)} input rate fed straight into
 central (the entire absorption delay in one term, no first-order
