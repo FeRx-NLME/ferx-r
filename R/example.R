@@ -89,6 +89,19 @@
 #'     (constant-rate) absorption via the built-in \code{zero_order(dur)} input
 #'     rate -- a modeled-duration infusion (NONMEM \code{RATE=-2}/\code{D1}) fed
 #'     straight into central. Shares the NONMEM absorption anchor dataset.}
+#'   \item{parallel_absorption}{One-compartment ODE model with \emph{parallel}
+#'     (dual first-order) absorption: two \code{first_order(ka)} pathways (a fast
+#'     and a slow one) feeding central, split by a declared pathway fraction
+#'     (\code{FR1*first_order(...) + FR2*first_order(...)}, \code{FR2 = 1 - FR1}).
+#'     \code{first_order(ka)} exposes the classic first-order (Bateman) absorption
+#'     as a composable input rate (ferx-core #505). Shares the NONMEM absorption
+#'     anchor dataset (syntax demo, mildly mis-specified).}
+#'   \item{mixed_absorption}{One-compartment ODE model with \emph{mixed}
+#'     (zero-order + first-order) absorption: a \code{zero_order(dur)} input plus a
+#'     \code{first_order(ka)} input feeding central, split by a declared pathway
+#'     fraction (\code{FZO1*first_order(...) + FZO*zero_order(...)},
+#'     \code{FZO1 = 1 - FZO}) (ferx-core #505). Shares the NONMEM absorption anchor
+#'     dataset (syntax demo, mildly mis-specified).}
 #'   \item{sequential_absorption}{Sequential (zero-order then first-order)
 #'     absorption: \code{zero_order(dur)} fills a depot, which empties to central
 #'     by first-order \code{ka} (no dedicated keyword -- a composition). Paired
@@ -273,6 +286,12 @@ ferx_example <- function(name = NULL) {
     # Built-in zero-order absorption (zero_order); shares the same ferx-core
     # NONMEM absorption anchor dataset (sequential_absorption has its own data).
     zero_order_absorption = "igd_oral",
+
+    # Parallel (dual first-order) and mixed (zero-order + first-order) absorption
+    # via first_order() composition (ferx-core #505); share the absorption anchor
+    # dataset (syntax demo, mildly mis-specified).
+    parallel_absorption = "igd_oral",
+    mixed_absorption    = "igd_oral",
 
     # Built-in Savic transit-compartment absorption (transit()); paired with the
     # ferx-core transit anchor dataset.
