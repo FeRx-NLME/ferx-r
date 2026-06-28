@@ -321,6 +321,31 @@ test_that("fd_hessian_step via settings still works when dedicated arg is absent
   )
 })
 
+test_that("outer_ftol / outer_xtol BOBYQA settings are accepted by ferx_fit (ferx-core #469)", {
+  # The two derivative-free outer-optimizer stop tolerances flow through the
+  # engine's apply_fit_option passthrough (no dedicated arg). This checks the R
+  # wrapper forwards them; the numerical effect (TTE frailty omega^2 onto the
+  # NONMEM/nlmixr2 minimum) is validated engine-side in tte_convergence_weibull_mixed.
+  # Until the ferx-core pin carries #469 these are unknown keys, so skip gracefully;
+  # after the pin bump the fit runs end to end.
+  ex <- ferx_example("warfarin")
+  ran <- tryCatch(
+    {
+      ferx_fit(ex$model, ex$data,
+               settings = list(outer_ftol = 1e-8, outer_xtol = 1e-4),
+               covariance = FALSE, verbose = FALSE)
+      TRUE
+    },
+    error = function(e) {
+      if (grepl("unknown fit setting", conditionMessage(e), ignore.case = TRUE)) {
+        skip("ferx-core pin predates #469 (outer_ftol/outer_xtol) — bump the engine pin")
+      }
+      stop(e)
+    }
+  )
+  expect_true(ran)
+})
+
 # ferx_check_init — Tier 1
 
 test_that("ferx_check_init returns without error on valid inputs", {

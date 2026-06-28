@@ -237,6 +237,18 @@
 #'       Gradient-based optimizers use the inner gradient method set by the
 #'       \code{gradient} argument; \code{"bobyqa"} does not.
 #'       Not accepted by pure \code{"gn"}.}
+#'     \item{\code{outer_xtol}}{Relative step tolerance for the derivative-free
+#'       \code{"bobyqa"} outer optimizer (NLopt \code{xtol_rel}; default
+#'       \code{1e-4}). Gradient-based optimizers use their own fixed internal
+#'       tolerances. Can also be set in the model file's \code{[fit_options]}.}
+#'     \item{\code{outer_ftol}}{Relative objective tolerance for the derivative-free
+#'       \code{"bobyqa"} outer optimizer (NLopt \code{ftol_rel}). Unset = auto:
+#'       \code{1e-8} for a pure time-to-event model (its hazard objective is
+#'       evaluated exactly) and \code{1e-6} otherwise. The TTE tightening lands the
+#'       frailty variance on the NONMEM/nlmixr2 minimum across a near-flat
+#'       omega-squared ridge (ferx-core #469); the \code{1e-6} floor elsewhere
+#'       avoids grinding on noisy ODE / FD-inner objectives, where \code{1e-8} is
+#'       unreachable. Set an explicit value to pin it for every model.}
 #'     \item{\code{global_search}}{Logical. When \code{TRUE}, run a global
 #'       search phase before local refinement (default \code{FALSE}).
 #'       Not accepted by pure \code{"gn"}.}
