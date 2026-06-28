@@ -228,6 +228,27 @@ test_that("bundled zero_order_absorption example validates (zero_order() parses 
   expect_true(isTRUE(res$ok))
 })
 
+test_that("bundled parallel_absorption example validates (FR1*first_order + FR2*first_order parses)", {
+  # Guards parallel dual-first-order absorption (ferx-core #505): a valid result
+  # confirms the engine accepts the built-in `first_order(ka)` input rate composed
+  # as two fraction-weighted pathways on one compartment, and that the fit-init
+  # fraction checks (0 < FR <= 1, sum FR ~ 1) pass for FR1 / FR2 = 1 - FR1. The
+  # matched, recovering fit is exercised by the ferx-core NONMEM anchor, not here.
+  ex  <- ferx_example("parallel_absorption")
+  res <- ferx_model_validate(ex$model)
+  expect_true(isTRUE(res$ok))
+})
+
+test_that("bundled mixed_absorption example validates (zero_order + first_order compose with fractions)", {
+  # Guards mixed zero-order + first-order absorption (ferx-core #505): a valid
+  # result confirms a fraction-weighted `zero_order(dur)` and `first_order(ka)` on
+  # one compartment parse against the pinned engine -- the per-segment zero-order
+  # channel now carries the pathway fraction (anchored to NONMEM in ferx-core).
+  ex  <- ferx_example("mixed_absorption")
+  res <- ferx_model_validate(ex$model)
+  expect_true(isTRUE(res$ok))
+})
+
 test_that("bundled sequential_absorption example validates (zero_order + first-order compose)", {
   # Guards the sequential (zero-order depot fill -> first-order ka) composition:
   # a valid result confirms zero_order(dur) into a depot plus a hand-written

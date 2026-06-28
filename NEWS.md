@@ -22,6 +22,15 @@
   is `d/dt(central) = FR1*igd(...) + FR2*igd(...)` (via ferx-core #388). New bundled
   example `ferx_example("biphasic_igd_absorption")`. Validated against a NONMEM
   `$DES` biphasic run (ferx FOCEI objective vs `#OBJV` to ~1e-5).
+- **Parallel / mixed dual-pathway absorption in model files** — the new built-in
+  `first_order(ka)` `[odes]` input rate (classic first-order / Bateman absorption,
+  exposed as a composable input rate) plus a pathway fraction on `zero_order(...)`
+  let two absorption pathways be split by a dose fraction: `parallel`
+  (`FR1*first_order(ka=KA1) + FR2*first_order(ka=KA2)`) and `mixed`
+  (`FZO1*first_order(ka=KA) + FZO*zero_order(dur=DUR)`) (via ferx-core #505). Two
+  new bundled examples: `ferx_example("parallel_absorption")` and
+  `ferx_example("mixed_absorption")`. Validated against NONMEM `$DES` runs (ferx
+  FOCEI objective vs `#OBJV` to ~1e-5 parallel / ~1e-4 mixed).
 - **`ferx_predict_survival()`** — survival-function predictions (`S(t)`, `H(t)`,
   `h(t)`, plus median and mean survival) on a user-supplied time grid for
   `[event_model]` (time-to-event) endpoints, for every subject and TTE CMT.
