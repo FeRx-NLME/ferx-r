@@ -8,6 +8,12 @@
   bundled examples: `ferx_example("zero_order_absorption")` (constant-rate input
   into central) and `ferx_example("sequential_absorption")` (zero-order fill of a
   depot, then first-order `ka` to central).
+- **Biphasic / parallel absorption in model files** — an `[odes]` input-rate term
+  can now be scaled by a declared pathway fraction (`FR*igd(...)`) and more than one
+  term can feed a compartment, so the Freijer & Post biphasic inverse-Gaussian model
+  is `d/dt(central) = FR1*igd(...) + FR2*igd(...)` (via ferx-core #388). New bundled
+  example `ferx_example("biphasic_igd_absorption")`. Validated against a NONMEM
+  `$DES` biphasic run (ferx FOCEI objective vs `#OBJV` to ~1e-5).
 - **`ferx_predict_survival()`** — survival-function predictions (`S(t)`, `H(t)`,
   `h(t)`, plus median and mean survival) on a user-supplied time grid for
   `[event_model]` (time-to-event) endpoints, for every subject and TTE CMT.

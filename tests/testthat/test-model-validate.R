@@ -197,6 +197,17 @@ test_that("bundled igd_inverse_gaussian example validates (igd() parses against 
   expect_true(isTRUE(res$ok))
 })
 
+test_that("bundled biphasic_igd_absorption example validates (FR1*igd + FR2*igd parses)", {
+  # Guards the shared pathway-fraction multiplier (ferx-core #388): a valid result
+  # confirms the engine accepts a declared-parameter fraction (`FR*igd(...)`) and
+  # two input-rate terms on one compartment, and that the fit-init fraction checks
+  # (0 < FR <= 1, Σ FR ≈ 1) pass for FR1 / FR2 = 1 - FR1. The matched, recovering
+  # fit is exercised by the ferx-core NONMEM anchor (freijer_biphasic_ig), not here.
+  ex  <- ferx_example("biphasic_igd_absorption")
+  res <- ferx_model_validate(ex$model)
+  expect_true(isTRUE(res$ok))
+})
+
 test_that("bundled weibull_absorption example validates (weibull() parses against the engine)", {
   # Guards that the bundled Weibull example stays parseable by the pinned
   # ferx-core: a valid result confirms the built-in `weibull(td, beta)` input
