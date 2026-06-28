@@ -126,6 +126,15 @@
 #'     \code{ferx_predict_survival()} reports per-cause cumulative incidence
 #'     (\code{cif}) alongside all-cause survival (\code{survival_all}). Recovers
 #'     the cause-specific rates TVLAMBDA_A = 0.10, TVLAMBDA_B = 0.06.}
+#'   \item{pktte_joint}{Joint PK-TTE: a time-to-event endpoint whose hazard
+#'     depends on the drug concentration, fit jointly with the PK. The
+#'     \code{[event_model]} block's \code{hazard = H0 * exp(BETA * (central / V))}
+#'     references the ODE PK state; ferx appends it as a cumulative-hazard ODE
+#'     state (\code{d/dt(__chz) = hazard}) and estimates PK + TTE together by
+#'     FOCEI, sharing the CL random effect (ferx-core #564). Oral dose on CMT 1,
+#'     PK observed on CMT 2, event on CMT 3. \code{ferx_fit()} and
+#'     \code{ferx_predict_survival()} are supported; simulating an ODE-accumulated
+#'     hazard is not yet (a later slice adds the event-time root-finder).}
 #'   \item{two_cpt_oral_cov_ode_template}{Two-compartment oral PK with covariates
 #'     written with \code{ode_template two_cpt_oral(...)} in
 #'     \code{[structural_model]}: ferx generates the standard disposition ODE

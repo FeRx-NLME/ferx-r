@@ -164,3 +164,29 @@ test_that("ferx_predict_survival reports competing-risks CIF with sum(cif) + sur
   merged  <- merge(cif_sum, s_all, by = c("ID", "TIME"))
   expect_true(all(abs(merged$cif + merged$survival_all - 1) < 1e-9))
 })
+
+test_that("joint PK-TTE: bundled pktte_joint fits and predicts an ODE-accumulated hazard", {
+  # Drug-driven hazard h = H0 * exp(BETA * Cc) carried as a cumulative-hazard ODE
+  # state and estimated jointly with the PK (ferx-core #564). Exercises both the
+  # joint fit and the ODE-hazard read in ferx_predict_survival through the wrapper.
+  ex  <- ferx_example("pktte_joint")
+  fit <- ferx_fit(ex$model, ex$data, method = "focei")
+  expect_s3_class(fit, "ferx_fit")
+  expect_true(is.finite(fit$ofv))
+
+  surv <- ferx_predict_survival(ex$model, ex$data, times = c(0, 6, 12, 24), fit = fit)
+  expect_s3_class(surv, "data.frame")
+  expect_true(all(
+    c("ID", "CMT", "TIME", "survival", "cum_hazard", "hazard") %in% names(surv)
+  ))
+  # Event endpoint is on CMT 3 (PK is on CMT 2).
+  expect_equal(unique(surv$CMT), 3L)
+  # Valid survival function: S in [0, 1], S(0) = 1, monotone non-increasing; the
+  # drug-driven hazard is strictly positive.
+  expect_true(all(surv$survival >= 0 & surv$survival <= 1 + 1e-9))
+  expect_true(all(abs(surv$survival[surv$TIME == 0] - 1) < 1e-9))
+  expect_true(all(surv$hazard >= 0))
+  id1 <- surv$ID[1]
+  s1  <- surv$survival[surv$ID == id1][order(surv$TIME[surv$ID == id1])]
+  expect_true(all(diff(s1) <= 1e-9))
+})
