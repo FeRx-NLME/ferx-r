@@ -571,21 +571,16 @@ fn ferx_rust_simulate_adaptive(
 ) -> Robj {
     let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
         Ok(p) => p,
-        Err(e) => {
-            rprintln!("Error parsing model: {}", e);
-            return ().into();
-        }
+        Err(e) => throw_r_error(format!("ferx_simulate_adaptive: error parsing model: {e}")),
     };
     // The reactive controller is the model file's `[adaptive_dosing]` block; a
     // model without one cannot be simulated this way (use `ferx_simulate`).
     let spec = match parsed.adaptive_dosing.as_ref() {
         Some(s) => s,
-        None => {
-            rprintln!(
-                "Error: model has no [adaptive_dosing] block; ferx_simulate_adaptive() requires one"
-            );
-            return ().into();
-        }
+        None => throw_r_error(
+            "ferx_simulate_adaptive: model has no [adaptive_dosing] block (this entry point \
+             requires one; use ferx_simulate for a fixed regimen)",
+        ),
     };
     let iov_col = parsed.fit_options.iov_column.clone();
     let (population, _) = match ferx_core::api::read_population_for(
@@ -597,10 +592,7 @@ fn ferx_rust_simulate_adaptive(
         None,
     ) {
         Ok(r) => r,
-        Err(e) => {
-            rprintln!("Error reading data: {}", e);
-            return ().into();
-        }
+        Err(e) => throw_r_error(format!("ferx_simulate_adaptive: error reading data: {e}")),
     };
 
     // The spec owns the decision schedule (`at`) and the monitored signal
@@ -615,6 +607,11 @@ fn ferx_rust_simulate_adaptive(
         opts.max_decisions = max_decisions as usize;
     }
 
+    // A failure here (analytical model, non-dose-free subject, or a verify
+    // divergence that taints the result) is raised as an R error rather than
+    // returned as NULL: the adaptive path has more — and more consequential —
+    // failure modes than a plain simulate, and a verify divergence in particular
+    // must not be silently missable.
     match ferx_core::simulate_adaptive_from_spec(
         &parsed.model,
         &population,
@@ -624,10 +621,7 @@ fn ferx_rust_simulate_adaptive(
         &opts,
     ) {
         Ok(result) => adaptive_result_to_list(&result),
-        Err(e) => {
-            rprintln!("Error in adaptive simulation: {}", e);
-            ().into()
-        }
+        Err(e) => throw_r_error(format!("ferx_simulate_adaptive: {e}")),
     }
 }
 
@@ -643,6 +637,7 @@ fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult) -> Robj
     let l = &result.ledger;
     let first_signal = |sigs: &[ferx_core::ObservedSignal]| sigs.first().map(|s| s.value).unwrap_or(f64::NAN);
     let doses = data_frame!(
+        DRAW = l.iter().map(|e| e.draw as i32).collect::<Vec<i32>>(),
         SIM = l.iter().map(|e| e.sim as i32).collect::<Vec<i32>>(),
         ID = l.iter().map(|e| e.subject.clone()).collect::<Vec<String>>(),
         TIME = l.iter().map(|e| e.time).collect::<Vec<f64>>(),
@@ -671,6 +666,7 @@ fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult) -> Robj
         }
     };
     let decisions = data_frame!(
+        DRAW = d.iter().map(|e| e.draw as i32).collect::<Vec<i32>>(),
         SIM = d.iter().map(|e| e.sim as i32).collect::<Vec<i32>>(),
         ID = d.iter().map(|e| e.subject.clone()).collect::<Vec<String>>(),
         DECISION = d.iter().map(|e| e.decision_idx as i32).collect::<Vec<i32>>(),

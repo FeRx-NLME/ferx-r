@@ -127,11 +127,12 @@ normalize_match_method <- function(match) {
 #'   \describe{
 #'     \item{\code{trajectories}}{DRAW, SIM, ID, TIME, IPRED, DV_SIM - the
 #'       per-observation predictions, as in \code{\link{ferx_simulate}}.}
-#'     \item{\code{doses}}{The realized dose ledger: SIM, ID, TIME, AMT, CMT,
-#'       RATE, DECISION, SIGNAL (the value the controller titrated on - assay-
-#'       noised when \code{with_assay_error}), RULE (the rule that fired).}
-#'     \item{\code{decisions}}{One row per decision including holds: SIM, ID,
-#'       DECISION, TIME, SIGNAL, OUTCOME ("dosed" / "hold" / "stop"), N_DOSED.}
+#'     \item{\code{doses}}{The realized dose ledger: DRAW, SIM, ID, TIME, AMT,
+#'       CMT, RATE, DECISION, SIGNAL (the value the controller titrated on -
+#'       assay-noised when \code{with_assay_error}), RULE (the rule that fired).}
+#'     \item{\code{decisions}}{One row per decision including holds: DRAW, SIM,
+#'       ID, DECISION, TIME, SIGNAL, OUTCOME ("dosed" / "hold" / "stop"),
+#'       N_DOSED.}
 #'   }
 #'
 #' @examples
@@ -150,10 +151,16 @@ ferx_simulate_adaptive <- function(model, data, n_sim = 1L, seed = 42L,
   if (length(verify) != 1L || is.na(verify) || !is.logical(verify)) {
     stop("`verify` must be a single TRUE or FALSE.", call. = FALSE)
   }
+  # Validate `n_sim` here: the Rust side casts it to an unsigned count, so a
+  # negative value would wrap to an enormous number of replicates.
+  n_sim <- as.integer(n_sim)
+  if (length(n_sim) != 1L || is.na(n_sim) || n_sim < 1L) {
+    stop("`n_sim` must be a single positive integer.", call. = FALSE)
+  }
   ferx_rust_simulate_adaptive(
     model_path = normalizePath(model),
     data_path = normalizePath(data),
-    n_sim = as.integer(n_sim),
+    n_sim = n_sim,
     seed = as.integer(seed),
     verify = if (isTRUE(verify)) "true" else "false",
     max_decisions = as.integer(max_decisions)

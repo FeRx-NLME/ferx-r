@@ -16,16 +16,21 @@ test_that("the result tables carry the documented columns", {
   res <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 1L, seed = 1L)
   expect_true(all(c("DRAW", "SIM", "ID", "TIME", "IPRED", "DV_SIM") %in%
     names(res$trajectories)))
-  expect_true(all(c("SIM", "ID", "TIME", "AMT", "CMT", "RATE", "DECISION",
+  expect_true(all(c("DRAW", "SIM", "ID", "TIME", "AMT", "CMT", "RATE", "DECISION",
     "SIGNAL", "RULE") %in% names(res$doses)))
-  expect_true(all(c("SIM", "ID", "DECISION", "TIME", "SIGNAL", "OUTCOME",
+  expect_true(all(c("DRAW", "SIM", "ID", "DECISION", "TIME", "SIGNAL", "OUTCOME",
     "N_DOSED") %in% names(res$decisions)))
 })
 
-test_that("n_sim = 3 produces three replicates", {
+test_that("n_sim = 3 produces three replicates across all three tables", {
   ex  <- ferx_example("adaptive_tdm")
   res <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 3L, seed = 1L)
-  expect_equal(length(unique(res$trajectories$SIM)), 3L)
+  expect_equal(sort(unique(res$trajectories$SIM)), 1:3)
+  # The ledger and decision log must carry the per-replicate SIM too - the
+  # single-subject driver emits SIM = 0 and the orchestrator stamps the real
+  # replicate index. Every subject doses here, so all three replicates appear.
+  expect_equal(sort(unique(res$doses$SIM)), 1:3)
+  expect_equal(sort(unique(res$decisions$SIM)), 1:3)
 })
 
 test_that("same seed is deterministic", {
@@ -50,10 +55,18 @@ test_that("the controller titrates: a sub-therapeutic trough escalates the dose"
 
 test_that("a model without an [adaptive_dosing] block is rejected", {
   ex <- ferx_example("warfarin")
-  # The engine prints an error and returns NULL when the model has no
-  # [adaptive_dosing] block (this entry point requires one).
-  res <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 1L, seed = 1L)
-  expect_null(res)
+  # The engine raises an R error (not a NULL return) when the model has no
+  # [adaptive_dosing] block - this entry point requires one.
+  expect_error(
+    ferx_simulate_adaptive(ex$model, ex$data, n_sim = 1L, seed = 1L),
+    "adaptive_dosing"
+  )
+})
+
+test_that("a non-positive n_sim is rejected", {
+  ex <- ferx_example("adaptive_tdm")
+  expect_error(ferx_simulate_adaptive(ex$model, ex$data, n_sim = 0L), "n_sim")
+  expect_error(ferx_simulate_adaptive(ex$model, ex$data, n_sim = -1L), "n_sim")
 })
 
 test_that("verify = FALSE skips the replay verifier and still returns results", {

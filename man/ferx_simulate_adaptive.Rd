@@ -37,11 +37,12 @@ A list of three data frames:
 \describe{
 \item{\code{trajectories}}{DRAW, SIM, ID, TIME, IPRED, DV_SIM - the
 per-observation predictions, as in \code{\link{ferx_simulate}}.}
-\item{\code{doses}}{The realized dose ledger: SIM, ID, TIME, AMT, CMT,
-RATE, DECISION, SIGNAL (the value the controller titrated on - assay-
-noised when \code{with_assay_error}), RULE (the rule that fired).}
-\item{\code{decisions}}{One row per decision including holds: SIM, ID,
-DECISION, TIME, SIGNAL, OUTCOME ("dosed" / "hold" / "stop"), N_DOSED.}
+\item{\code{doses}}{The realized dose ledger: DRAW, SIM, ID, TIME, AMT,
+CMT, RATE, DECISION, SIGNAL (the value the controller titrated on -
+assay-noised when \code{with_assay_error}), RULE (the rule that fired).}
+\item{\code{decisions}}{One row per decision including holds: DRAW, SIM,
+ID, DECISION, TIME, SIGNAL, OUTCOME ("dosed" / "hold" / "stop"),
+N_DOSED.}
 }
 }
 \description{
