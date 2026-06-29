@@ -538,6 +538,147 @@ fn ferx_rust_simulate_from_fit(
     sim_results_to_df(&results)
 }
 
+/// Simulate state-reactive ("adaptive" / feedback) dosing from a model's
+/// `[adaptive_dosing]` block.
+///
+/// The dosing regimen is not in the data — it is decided at run time by the
+/// declarative controller in the model file's `[adaptive_dosing]` block, which
+/// reads the simulated (optionally assay-noised) state at each decision time and
+/// titrates the next dose. The base subjects must therefore be **dose-free**
+/// (the controller supplies every dose); the data provides only the observation
+/// grid and any covariates.
+///
+/// @param model_path Path to .ferx model file containing an `[adaptive_dosing]` block
+/// @param data_path Path to NONMEM-format CSV (dose-free base subjects + obs times)
+/// @param n_sim Number of replicates
+/// @param seed Random seed
+/// @param verify "true"/"false" — run the frozen-schedule replay verifier after
+///   every (subject, replicate); a divergence is a hard error, not a warning
+/// @param max_decisions Per-run decision cap (runaway / closed-loop guard);
+///   `<= 0` keeps the engine default
+/// @return Named list of three data frames: `trajectories` (DRAW, SIM, ID, TIME,
+///   IPRED, DV_SIM), `doses` (the realized dose ledger), and `decisions` (one row
+///   per decision, including holds)
+/// @export
+#[extendr]
+fn ferx_rust_simulate_adaptive(
+    model_path: &str,
+    data_path: &str,
+    n_sim: i32,
+    seed: i32,
+    verify: &str,
+    max_decisions: i32,
+) -> Robj {
+    let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
+        Ok(p) => p,
+        Err(e) => throw_r_error(format!("ferx_simulate_adaptive: error parsing model: {e}")),
+    };
+    // The reactive controller is the model file's `[adaptive_dosing]` block; a
+    // model without one cannot be simulated this way (use `ferx_simulate`).
+    let spec = match parsed.adaptive_dosing.as_ref() {
+        Some(s) => s,
+        None => throw_r_error(
+            "ferx_simulate_adaptive: model has no [adaptive_dosing] block (this entry point \
+             requires one; use ferx_simulate for a fixed regimen)",
+        ),
+    };
+    let iov_col = parsed.fit_options.iov_column.clone();
+    let (population, _) = match ferx_core::api::read_population_for(
+        &parsed.model,
+        &parsed.covariate_decls,
+        data_path,
+        None,
+        iov_col.as_deref(),
+        None,
+    ) {
+        Ok(r) => r,
+        Err(e) => throw_r_error(format!("ferx_simulate_adaptive: error reading data: {e}")),
+    };
+
+    // The spec owns the decision schedule (`at`) and the monitored signal
+    // (`observe` / `with_assay_error`), so `decision_times` and `monitors` stay
+    // empty here — ferx-core errors if they are set alongside a spec.
+    // `AdaptiveSimulateOptions` is `#[non_exhaustive]`, so build it from
+    // `default()` and set fields rather than with a struct literal.
+    let mut opts = ferx_core::AdaptiveSimulateOptions::default();
+    opts.seed = Some(seed as u64);
+    opts.verify = matches!(verify.trim().to_lowercase().as_str(), "true" | "t" | "1");
+    if max_decisions > 0 {
+        opts.max_decisions = max_decisions as usize;
+    }
+
+    // A failure here (analytical model, non-dose-free subject, or a verify
+    // divergence that taints the result) is raised as an R error rather than
+    // returned as NULL: the adaptive path has more — and more consequential —
+    // failure modes than a plain simulate, and a verify divergence in particular
+    // must not be silently missable.
+    match ferx_core::simulate_adaptive_from_spec(
+        &parsed.model,
+        &population,
+        &parsed.model.default_params,
+        n_sim as usize,
+        spec,
+        &opts,
+    ) {
+        Ok(result) => adaptive_result_to_list(&result),
+        Err(e) => throw_r_error(format!("ferx_simulate_adaptive: {e}")),
+    }
+}
+
+/// Convert an [`AdaptiveSimulationResult`] into a named R list of three data
+/// frames: `trajectories` (reusing the standard simulation converter), `doses`
+/// (the realized-dose ledger), and `decisions` (one row per decision). The
+/// single declarative signal is surfaced as the `SIGNAL` column (the value the
+/// controller actually observed — assay-noised when `with_assay_error`).
+fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult) -> Robj {
+    let trajectories = sim_results_to_df(&result.trajectories);
+
+    // -- doses: one row per realized dose --
+    let l = &result.ledger;
+    let first_signal = |sigs: &[ferx_core::ObservedSignal]| sigs.first().map(|s| s.value).unwrap_or(f64::NAN);
+    let doses = data_frame!(
+        DRAW = l.iter().map(|e| e.draw as i32).collect::<Vec<i32>>(),
+        SIM = l.iter().map(|e| e.sim as i32).collect::<Vec<i32>>(),
+        ID = l.iter().map(|e| e.subject.clone()).collect::<Vec<String>>(),
+        TIME = l.iter().map(|e| e.time).collect::<Vec<f64>>(),
+        AMT = l.iter().map(|e| e.amt).collect::<Vec<f64>>(),
+        CMT = l.iter().map(|e| e.cmt as i32).collect::<Vec<i32>>(),
+        RATE = l.iter().map(|e| e.rate).collect::<Vec<f64>>(),
+        DECISION = l.iter().map(|e| e.decision_idx as i32).collect::<Vec<i32>>(),
+        SIGNAL = l.iter().map(|e| first_signal(&e.observed_signals)).collect::<Vec<f64>>(),
+        RULE = l.iter().map(|e| e.rule_fired.clone()).collect::<Vec<String>>()
+    );
+
+    // -- decisions: one row per decision time, including holds --
+    let d = &result.decisions;
+    let outcome_label = |o: &ferx_core::DecisionOutcome| -> String {
+        match o {
+            ferx_core::DecisionOutcome::Dosed { .. } => "dosed".to_string(),
+            ferx_core::DecisionOutcome::Hold => "hold".to_string(),
+            ferx_core::DecisionOutcome::Stop { .. } => "stop".to_string(),
+        }
+    };
+    let outcome_n = |o: &ferx_core::DecisionOutcome| -> i32 {
+        match o {
+            ferx_core::DecisionOutcome::Dosed { n } => *n as i32,
+            ferx_core::DecisionOutcome::Hold => 0,
+            ferx_core::DecisionOutcome::Stop { dosed } => *dosed as i32,
+        }
+    };
+    let decisions = data_frame!(
+        DRAW = d.iter().map(|e| e.draw as i32).collect::<Vec<i32>>(),
+        SIM = d.iter().map(|e| e.sim as i32).collect::<Vec<i32>>(),
+        ID = d.iter().map(|e| e.subject.clone()).collect::<Vec<String>>(),
+        DECISION = d.iter().map(|e| e.decision_idx as i32).collect::<Vec<i32>>(),
+        TIME = d.iter().map(|e| e.time).collect::<Vec<f64>>(),
+        SIGNAL = d.iter().map(|e| first_signal(&e.observed_signals)).collect::<Vec<f64>>(),
+        OUTCOME = d.iter().map(|e| outcome_label(&e.outcome)).collect::<Vec<String>>(),
+        N_DOSED = d.iter().map(|e| outcome_n(&e.outcome)).collect::<Vec<i32>>()
+    );
+
+    list!(trajectories = trajectories, doses = doses, decisions = decisions).into()
+}
+
 /// Simulate with parameter uncertainty propagation.
 ///
 /// For each parameter set drawn from the uncertainty distribution
@@ -2888,6 +3029,7 @@ extendr_module! {
     fn ferx_rust_fit;
     fn ferx_rust_simulate;
     fn ferx_rust_simulate_from_fit;
+    fn ferx_rust_simulate_adaptive;
     fn ferx_rust_simulate_with_uncertainty;
     fn ferx_rust_predict;
     fn ferx_rust_predict_from_fit;

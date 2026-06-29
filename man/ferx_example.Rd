@@ -213,6 +213,14 @@ the \code{[data_selection]} block. Observations below a surrogate LLOQ
 CSV, equivalent to NONMEM \code{$DATA IGNORE=}. Exclusion counts are reported
 in \code{fit$exclusions} and echoed by \code{print.ferx_fit()} and
 \code{ferx_runlog()}.}
+\item{adaptive_tdm}{State-reactive (adaptive / feedback) dosing: a
+vancomycin-style TDM trough titration. The dose is not in the data -- the
+model's \code{[adaptive_dosing]} block titrates the next q12h dose to drive
+the measured (assay-noised) pre-dose trough into a 10-20 mg/L window. Run
+with \code{\link{ferx_simulate_adaptive}} (not \code{ferx_fit}); the base
+subjects are dose-free, so the controller supplies every dose. Returns the
+concentration trajectories, the realized dose ledger, and the per-decision
+log (ferx-core epic #391).}
 }
 Call \code{ferx_example()} with no arguments to list all available names.
 

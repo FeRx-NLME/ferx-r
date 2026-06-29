@@ -17,6 +17,7 @@ reference:
     desc: "Simulate observations or compute population predictions from a fitted model."
     contents:
       - ferx_simulate
+      - ferx_simulate_adaptive
       - ferx_simulate_with_uncertainty
       - ferx_predict
       - ferx_predict_survival

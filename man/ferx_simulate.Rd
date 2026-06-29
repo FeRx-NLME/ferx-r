@@ -19,16 +19,26 @@ ferx_simulate(model, data, n_sim = 1L, seed = 42L, fit = NULL, match = FALSE)
 \code{fit$theta}, \code{fit$omega}, and \code{fit$sigma} instead of the
 model file's initial values.}
 
-\item{match}{Logical (default \code{FALSE}). When \code{TRUE}, each
-replicate's drawn etas are reassigned to subjects by \strong{propensity-score
-matching} against the subjects' fitted (posthoc) etas - optimal Mahalanobis
-matching under the model omega. This pairs each subject's observed
-dosing/sampling design with a similar drawn eta, correcting VPC bias from
-treatment adaptation in real-world data (e.g. longer dosing intervals for
-high-clearance patients). Requires \code{data} to be real observed data
-(every subject must have observations, so its posthoc eta can be computed).
-The posthoc etas are computed at the fitted parameters when \code{fit} is
-supplied, otherwise at the model file's initial values.}
+\item{match}{Propensity-score matching method (default \code{FALSE}). When
+enabled, each replicate's drawn etas are reassigned to subjects by
+\strong{propensity-score matching} against the subjects' fitted (posthoc)
+etas - Mahalanobis matching under the model omega. This pairs each subject's
+observed dosing/sampling design with a similar drawn eta, correcting VPC
+bias from treatment adaptation in real-world data (e.g. longer dosing
+intervals for high-clearance patients). Accepts:
+\describe{
+\item{\code{FALSE} / \code{"none"}}{No matching (default).}
+\item{\code{TRUE} / \code{"optimal"}}{Global linear-assignment minimum
+Mahalanobis distance (\code{MatchIt(method = "optimal")}); best on
+average in simulation, the recommended method.}
+\item{\code{"nearest"}}{Greedy nearest-neighbour
+(\code{MatchIt(method = "nearest", distance = "mahalanobis")}).}
+\item{\code{"rank"}}{Pair by the rank of each eta's Mahalanobis norm.}
+}
+Requires \code{data} to be real observed data (every subject must have
+observations, so its posthoc eta can be computed). The posthoc etas are
+computed at the fitted parameters when \code{fit} is supplied, otherwise at
+the model file's initial values.}
 }
 \value{
 A data.frame with columns: SIM, ID, TIME, IPRED, DV_SIM
@@ -47,14 +57,15 @@ head(sim)
 
 # Propensity-score-matched simulation for a real-world-data VPC:
 sim_pm <- ferx_simulate(ex$model, ex$data, n_sim = 10L, seed = 1L,
-                        fit = fit, match = TRUE)
+                        fit = fit, match = "optimal")
 
 }
 \seealso{
-Other simulation:
+Other simulation: 
 \code{\link{ferx_npde}()},
 \code{\link{ferx_predict}()},
 \code{\link{ferx_predict_survival}()},
+\code{\link{ferx_simulate_adaptive}()},
 \code{\link{ferx_simulate_with_uncertainty}()}
 }
 \concept{simulation}
