@@ -562,7 +562,7 @@ fn ferx_rust_simulate_from_fit(
 /// @param max_decisions Per-run decision cap (runaway / closed-loop guard);
 ///   `<= 0` keeps the engine default
 /// @return Named list of four data frames: `trajectories` (DRAW, SIM, ID, TIME,
-///   IPRED, DV_SIM), `doses` (the realized dose ledger), `decisions` (one row
+///   CMT, IPRED, DV_SIM, OBSERVED), `doses` (the realized dose ledger), `decisions` (one row
 ///   per decision, including holds), and `metrics` (one row per realized run —
 ///   the per-subject outcome summary: cumulative dose, dose-change counts, holds,
 ///   discontinuation, observed-signal summary, and `% time in window` when the
