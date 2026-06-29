@@ -33,18 +33,27 @@ trajectory, so the result is not trustworthy.}
 runaway / closed-loop guard). \code{0} (default) keeps the engine default.}
 }
 \value{
-A list of three data frames:
+A list of four data frames:
 \describe{
-\item{\code{trajectories}}{DRAW, SIM, ID, TIME, CMT, IPRED, DV_SIM, OBSERVED -
-the per-observation predictions, as in \code{\link{ferx_simulate}}
-(\code{OBSERVED} is \code{NA} here: the adaptive path has no time-to-event
-endpoint).}
+\item{\code{trajectories}}{DRAW, SIM, ID, TIME, CMT, IPRED, DV_SIM,
+OBSERVED - the per-observation predictions, as in
+\code{\link{ferx_simulate}} (\code{OBSERVED} is \code{NA} here: the
+adaptive path has no time-to-event endpoint).}
 \item{\code{doses}}{The realized dose ledger: DRAW, SIM, ID, TIME, AMT,
 CMT, RATE, DECISION, SIGNAL (the value the controller titrated on -
 assay-noised when \code{with_assay_error}), RULE (the rule that fired).}
 \item{\code{decisions}}{One row per decision including holds: DRAW, SIM,
 ID, DECISION, TIME, SIGNAL, OUTCOME ("dosed" / "hold" / "stop"),
 N_DOSED.}
+\item{\code{metrics}}{One row per realized run (subject x draw x
+replicate) - the per-subject outcome summary: DRAW, SIM, ID, CUM_DOSE
+(sum of realized doses), N_DOSES, N_INCREASES / N_DECREASES (realized
+dose-change counts, by dose delta), N_HOLDS, DISCONTINUED,
+TIME_TO_DISCONT, SIGNAL_MIN / SIGNAL_MAX / SIGNAL_MEAN (over the
+decisions that recorded a signal), and PCT_TIME_IN_WINDOW - the fraction
+of signal-bearing decisions whose observed value fell inside the model's
+\code{[adaptive_dosing]} \code{target_window} (NA when no
+\code{target_window} is declared).}
 }
 }
 \description{

@@ -43,6 +43,7 @@
   start_dose       = 1000                  # initial dose (mg)
   route            = infuse(cmt=1, over=1) # 1-hour IV infusion
   dose_bounds      = [250, 2000]           # never below 250 or above 2000 mg
+  target_window    = [10, 20]              # reported attainment band (mg/L); feeds the PCT_TIME_IN_WINDOW metric only, never dosing
   confirm          = 1                     # act on the first breach
   when signal < 10 : increase 25%          # sub-therapeutic trough -> escalate
   when signal > 20 : decrease 25%          # supra-therapeutic trough -> de-escalate
