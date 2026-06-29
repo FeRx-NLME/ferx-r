@@ -21,14 +21,14 @@ ferx_rust_fit <- function(model_path, data_path, method, covariance, verbose, bl
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_simulate <- function(model_path, data_path, n_sim, seed, match_method) {
-  .Call("wrap__ferx_rust_simulate", model_path, data_path, n_sim, seed, match_method)
+ferx_rust_simulate <- function(model_path, data_path, n_sim, seed, match_method, horizon) {
+  .Call("wrap__ferx_rust_simulate", model_path, data_path, n_sim, seed, match_method, horizon)
 }
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_simulate_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, n_sim, seed, match_method) {
-  .Call("wrap__ferx_rust_simulate_from_fit", model_path, data_path, theta, omega_flat, omega_dim, sigma, n_sim, seed, match_method)
+ferx_rust_simulate_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, n_sim, seed, match_method, horizon) {
+  .Call("wrap__ferx_rust_simulate_from_fit", model_path, data_path, theta, omega_flat, omega_dim, sigma, n_sim, seed, match_method, horizon)
 }
 
 #' @title Internal Rust backend binding

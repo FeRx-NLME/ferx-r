@@ -388,6 +388,7 @@ fn ferx_rust_simulate(
     n_sim: i32,
     seed: i32,
     match_method: &str,
+    horizon: f64,
 ) -> Robj {
     let match_method = match parse_match_method(match_method) {
         Ok(m) => m,
@@ -427,8 +428,11 @@ fn ferx_rust_simulate(
     let opts = ferx_core::SimulateOptions {
         seed: Some(seed as u64),
         match_method,
-        // No TTE administrative horizon from the R wrapper yet (ferx-core #522);
-        // `..Default` fills `horizon: None` and any future fields.
+        // TTE administrative horizon for ODE-accumulated (joint PK-TTE) endpoints
+        // (ferx-core #522/#564). A finite, positive value enables drug-driven
+        // event-time sampling; a non-finite / non-positive value (the R wrapper's
+        // `horizon = NULL` sentinel) means "unset", i.e. Gaussian-only as before.
+        horizon: (horizon.is_finite() && horizon > 0.0).then_some(horizon),
         ..Default::default()
     };
     let results = match ferx_core::simulate_with_options(
@@ -474,6 +478,7 @@ fn ferx_rust_simulate_from_fit(
     n_sim: i32,
     seed: i32,
     match_method: &str,
+    horizon: f64,
 ) -> Robj {
     let match_method = match parse_match_method(match_method) {
         Ok(m) => m,
@@ -518,8 +523,8 @@ fn ferx_rust_simulate_from_fit(
     let opts = ferx_core::SimulateOptions {
         seed: Some(seed as u64),
         match_method,
-        // No TTE administrative horizon from the R wrapper yet (ferx-core #522);
-        // `..Default` fills `horizon: None` and any future fields.
+        // TTE administrative horizon (ferx-core #522/#564); see `ferx_rust_simulate`.
+        horizon: (horizon.is_finite() && horizon > 0.0).then_some(horizon),
         ..Default::default()
     };
     let results = match ferx_core::simulate_with_options(
@@ -1511,11 +1516,33 @@ fn sim_results_to_df(results: &[ferx_core::api::SimulationResult]) -> Robj {
     let sim: Vec<i32> = results.iter().map(|r| r.sim as i32).collect();
     let id: Vec<String> = results.iter().map(|r| r.id.clone()).collect();
     let time: Vec<f64> = results.iter().map(|r| r.time).collect();
+    // CMT column value: the data-file CMT for Gaussian rows, the `[event_model] cmt`
+    // for drug-driven TTE rows, so a joint PK-TTE simulation's PK and event rows are
+    // distinguishable in one long-format frame.
+    let cmt: Vec<i32> = results.iter().map(|r| r.cmt as i32).collect();
     let ipred: Vec<f64> = results.iter().map(|r| r.ipred).collect();
     // `SimulationResult` replaced the flat `dv_sim: f64` with `outcome: SimOutcome`
     // (Gaussian vs TTE). `continuous_value()` returns the Gaussian value (NAN for
     // non-Gaussian outcomes), preserving the DV_SIM column for the existing paths.
     let dv_sim: Vec<f64> = results.iter().map(|r| r.outcome.continuous_value()).collect();
+    // OBSERVED: a drug-driven TTE row (`SimOutcome::Event`) carries its event time in
+    // TIME and the observed/censored flag here -- 1 = event fired before the horizon,
+    // 0 = administratively right-censored at the horizon. Gaussian rows are NaN -> R
+    // `NA`, so `is.na(OBSERVED)` separates continuous rows from event rows (and the
+    // event rows' DV_SIM / IPRED are NaN, since there is no Gaussian prediction).
+    let observed: Vec<f64> = results
+        .iter()
+        .map(|r| match r.outcome {
+            ferx_core::SimOutcome::Event { observed, .. } => {
+                if observed {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
+            _ => f64::NAN,
+        })
+        .collect();
 
     // DRAW is leading because for legacy `simulate*` paths every row is
     // DRAW = 1 and downstream code can ignore the column; for
@@ -1526,8 +1553,10 @@ fn sim_results_to_df(results: &[ferx_core::api::SimulationResult]) -> Robj {
         SIM = sim,
         ID = id,
         TIME = time,
+        CMT = cmt,
         IPRED = ipred,
-        DV_SIM = dv_sim
+        DV_SIM = dv_sim,
+        OBSERVED = observed
     )
     .into()
 }

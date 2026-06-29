@@ -20,6 +20,13 @@
   hazard; requires an ODE model. Validated three-way (ferx vs NONMEM vs nlmixr2).
   New bundled example `ferx_example("pktte_joint")` with a runnable
   `inst/examples/ex_pktte_joint.R` (`ferx_fit()` + `ferx_predict_survival()`).
+- **Joint PK-TTE event-time simulation** — `ferx_simulate()` gains a `horizon`
+  argument and now samples drug-driven (ODE-accumulated) time-to-event endpoints
+  (via ferx-core #564, Slice 2.2). With a finite `horizon`, a joint PK-TTE model
+  yields, per subject, its continuous PK rows plus a TTE row on the event CMT
+  carrying the sampled event/censor `TIME` and an `OBSERVED` flag (1 = event
+  before the horizon, 0 = right-censored at it; `NA` for continuous rows). The
+  simulation output gains `CMT` and `OBSERVED` columns.
 - **Zero-order absorption is now available in model files** — the built-in
   `zero_order(dur)` `[odes]` input rate (a constant-rate / modeled-duration input,
   NONMEM `RATE=-2`/`D1`), via the ferx-core update (ferx-core #504). Two new
