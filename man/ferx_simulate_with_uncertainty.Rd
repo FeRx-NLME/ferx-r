@@ -32,8 +32,10 @@ uncertainty distribution}
 \item{seed}{Random seed for reproducibility}
 }
 \value{
-A data.frame with columns: DRAW, SIM, ID, TIME, IPRED, DV_SIM.
-Row count: \code{n_uncertainty_draws * n_sim_per_draw * n_obs}.
+A data.frame with columns: DRAW, SIM, ID, TIME, CMT, IPRED, DV_SIM, OBSERVED.
+\code{CMT} is the observation compartment; \code{OBSERVED} is \code{NA}
+throughout (this path is Gaussian-only - a drug-driven ODE-TTE endpoint is not
+supported here). Row count: \code{n_uncertainty_draws * n_sim_per_draw * n_obs}.
 }
 \description{
 For each parameter set drawn from the uncertainty distribution, the

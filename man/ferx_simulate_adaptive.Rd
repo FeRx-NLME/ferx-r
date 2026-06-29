@@ -35,8 +35,10 @@ runaway / closed-loop guard). \code{0} (default) keeps the engine default.}
 \value{
 A list of three data frames:
 \describe{
-\item{\code{trajectories}}{DRAW, SIM, ID, TIME, IPRED, DV_SIM - the
-per-observation predictions, as in \code{\link{ferx_simulate}}.}
+\item{\code{trajectories}}{DRAW, SIM, ID, TIME, CMT, IPRED, DV_SIM, OBSERVED -
+the per-observation predictions, as in \code{\link{ferx_simulate}}
+(\code{OBSERVED} is \code{NA} here: the adaptive path has no time-to-event
+endpoint).}
 \item{\code{doses}}{The realized dose ledger: DRAW, SIM, ID, TIME, AMT,
 CMT, RATE, DECISION, SIGNAL (the value the controller titrated on -
 assay-noised when \code{with_assay_error}), RULE (the rule that fired).}

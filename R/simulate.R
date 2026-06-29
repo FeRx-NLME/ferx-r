@@ -33,7 +33,18 @@
 #'   computed at the fitted parameters when \code{fit} is supplied, otherwise at
 #'   the model file's initial values.
 #'
-#' @return A data.frame with columns: SIM, ID, TIME, IPRED, DV_SIM
+#' @param horizon Optional administrative censoring time for time-to-event (TTE)
+#'   endpoints. A finite, positive \code{horizon} is \strong{required} to simulate
+#'   a drug-driven (joint PK-TTE) model: the augmented hazard ODE is integrated
+#'   until the cumulative hazard reaches \code{-log U}, censoring at
+#'   \code{horizon} if no event fires (ferx-core #564). Purely-Gaussian models
+#'   ignore it. \code{NULL} (default) leaves it unset.
+#' @return A data.frame. Gaussian rows carry DRAW, SIM, ID, TIME, CMT, IPRED,
+#'   DV_SIM (with \code{OBSERVED = NA}). For a joint PK-TTE model each subject
+#'   also yields a TTE row on the event CMT, where TIME is the sampled
+#'   event/censor time and \code{OBSERVED} is 1 (event before \code{horizon}) or
+#'   0 (right-censored at it); its IPRED and DV_SIM are \code{NA}. Use
+#'   \code{is.na(OBSERVED)} to separate continuous rows from event rows.
 #'
 #' @examples
 #' ex <- ferx_example("warfarin")
@@ -48,9 +59,20 @@
 #' @family simulation
 #' @export
 ferx_simulate <- function(model, data, n_sim = 1L, seed = 42L, fit = NULL,
-                          match = FALSE) {
+                          match = FALSE, horizon = NULL) {
   stopifnot(file.exists(model), file.exists(data))
   match_method <- normalize_match_method(match)
+  # A finite, positive `horizon` is required to sample drug-driven (joint PK-TTE)
+  # event times (ferx-core #564); it is ignored by purely-Gaussian models.
+  # `NULL` maps to the sentinel -1, which the Rust side reads as "unset".
+  if (!is.null(horizon)) {
+    if (length(horizon) != 1L || !is.numeric(horizon) || !is.finite(horizon) ||
+        horizon <= 0) {
+      stop("`horizon` must be a single finite positive number (or NULL).",
+           call. = FALSE)
+    }
+  }
+  horizon_arg <- if (is.null(horizon)) -1 else as.numeric(horizon)
 
   if (is.null(fit)) {
     return(ferx_rust_simulate(
@@ -58,7 +80,8 @@ ferx_simulate <- function(model, data, n_sim = 1L, seed = 42L, fit = NULL,
       data_path = normalizePath(data),
       n_sim = as.integer(n_sim),
       seed = as.integer(seed),
-      match_method = match_method
+      match_method = match_method,
+      horizon = horizon_arg
     ))
   }
 
@@ -72,7 +95,8 @@ ferx_simulate <- function(model, data, n_sim = 1L, seed = 42L, fit = NULL,
     sigma = fit_pieces$sigma,
     n_sim = as.integer(n_sim),
     seed = as.integer(seed),
-    match_method = match_method
+    match_method = match_method,
+    horizon = horizon_arg
   )
 }
 
@@ -125,8 +149,10 @@ normalize_match_method <- function(match) {
 #'
 #' @return A list of three data frames:
 #'   \describe{
-#'     \item{\code{trajectories}}{DRAW, SIM, ID, TIME, IPRED, DV_SIM - the
-#'       per-observation predictions, as in \code{\link{ferx_simulate}}.}
+#'     \item{\code{trajectories}}{DRAW, SIM, ID, TIME, CMT, IPRED, DV_SIM,
+#'       OBSERVED - the per-observation predictions, as in
+#'       \code{\link{ferx_simulate}} (\code{OBSERVED} is \code{NA} here: the
+#'       adaptive path has no time-to-event endpoint).}
 #'     \item{\code{doses}}{The realized dose ledger: DRAW, SIM, ID, TIME, AMT,
 #'       CMT, RATE, DECISION, SIGNAL (the value the controller titrated on -
 #'       assay-noised when \code{with_assay_error}), RULE (the rule that fired).}
@@ -447,8 +473,11 @@ validate_fit_for_params <- function(fit) {
 #' @param method Either \code{"asymptotic"} (default) or \code{"sir"}
 #' @param seed Random seed for reproducibility
 #'
-#' @return A data.frame with columns: DRAW, SIM, ID, TIME, IPRED, DV_SIM.
-#'   Row count: \code{n_uncertainty_draws * n_sim_per_draw * n_obs}.
+#' @return A data.frame with columns: DRAW, SIM, ID, TIME, CMT, IPRED, DV_SIM,
+#'   OBSERVED. \code{CMT} is the observation compartment; \code{OBSERVED} is
+#'   \code{NA} throughout (this path is Gaussian-only - a drug-driven ODE-TTE
+#'   endpoint is not supported here). Row count:
+#'   \code{n_uncertainty_draws * n_sim_per_draw * n_obs}.
 #'
 #' @examples
 #' \dontrun{

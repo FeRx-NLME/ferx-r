@@ -4,7 +4,15 @@
 \alias{ferx_simulate}
 \title{Simulate from a NLME model}
 \usage{
-ferx_simulate(model, data, n_sim = 1L, seed = 42L, fit = NULL, match = FALSE)
+ferx_simulate(
+  model,
+  data,
+  n_sim = 1L,
+  seed = 42L,
+  fit = NULL,
+  match = FALSE,
+  horizon = NULL
+)
 }
 \arguments{
 \item{model}{Path to a .ferx model file}
@@ -39,9 +47,21 @@ Requires \code{data} to be real observed data (every subject must have
 observations, so its posthoc eta can be computed). The posthoc etas are
 computed at the fitted parameters when \code{fit} is supplied, otherwise at
 the model file's initial values.}
+
+\item{horizon}{Optional administrative censoring time for time-to-event (TTE)
+endpoints. A finite, positive \code{horizon} is \strong{required} to simulate
+a drug-driven (joint PK-TTE) model: the augmented hazard ODE is integrated
+until the cumulative hazard reaches \code{-log U}, censoring at
+\code{horizon} if no event fires (ferx-core #564). Purely-Gaussian models
+ignore it. \code{NULL} (default) leaves it unset.}
 }
 \value{
-A data.frame with columns: SIM, ID, TIME, IPRED, DV_SIM
+A data.frame. Gaussian rows carry DRAW, SIM, ID, TIME, CMT, IPRED, DV_SIM
+(with \code{OBSERVED = NA}). For a joint PK-TTE model each subject also yields
+a TTE row on the event CMT, where TIME is the sampled event/censor time and
+\code{OBSERVED} is 1 (event before \code{horizon}) or 0 (right-censored at it);
+its IPRED and DV_SIM are \code{NA}. Use \code{is.na(OBSERVED)} to separate
+continuous rows from event rows.
 }
 \description{
 Simulates observations from a parsed model with between-subject variability
