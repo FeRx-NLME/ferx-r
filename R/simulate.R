@@ -147,7 +147,7 @@ normalize_match_method <- function(match) {
 #' @param max_decisions Per-run cap on the number of decision points (the
 #'   runaway / closed-loop guard). \code{0} (default) keeps the engine default.
 #'
-#' @return A list of three data frames:
+#' @return A list of four data frames:
 #'   \describe{
 #'     \item{\code{trajectories}}{DRAW, SIM, ID, TIME, CMT, IPRED, DV_SIM,
 #'       OBSERVED - the per-observation predictions, as in
@@ -159,6 +159,15 @@ normalize_match_method <- function(match) {
 #'     \item{\code{decisions}}{One row per decision including holds: DRAW, SIM,
 #'       ID, DECISION, TIME, SIGNAL, OUTCOME ("dosed" / "hold" / "stop"),
 #'       N_DOSED.}
+#'     \item{\code{metrics}}{One row per realized run (subject x draw x
+#'       replicate) - the per-subject outcome summary: DRAW, SIM, ID, CUM_DOSE
+#'       (sum of realized doses), N_DOSES, N_INCREASES / N_DECREASES (realized
+#'       dose-change counts, by dose delta), N_HOLDS, DISCONTINUED,
+#'       TIME_TO_DISCONT, SIGNAL_MIN / SIGNAL_MAX / SIGNAL_MEAN (over the
+#'       decisions that recorded a signal), and PCT_TIME_IN_WINDOW - the fraction
+#'       of signal-bearing decisions whose observed value fell inside the model's
+#'       \code{[adaptive_dosing]} \code{target_window} (NA when no
+#'       \code{target_window} is declared).}
 #'   }
 #'
 #' @examples

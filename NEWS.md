@@ -8,10 +8,14 @@
   controller that titrates the next dose from the simulated (optionally
   assay-noised) trough at each decision time (via ferx-core #585, epic #391). The
   base subjects are dose-free — the controller supplies every dose. Returns the
-  concentration trajectories, the realized dose ledger, and the per-decision log
-  (including holds); the frozen-schedule replay verifier runs on every replicate.
-  New bundled example `ferx_example("adaptive_tdm")` (a vancomycin-style TDM
-  trough titration) with a runnable `inst/examples/ex_adaptive_tdm.R`.
+  concentration trajectories, the realized dose ledger, the per-decision log
+  (including holds), and per-subject outcome metrics — cumulative dose,
+  realized dose-change counts, holds, discontinuation, the observed-signal
+  summary, and the fraction of monitored values inside the model's
+  `target_window` when one is declared (metrics via ferx-core #605); the
+  frozen-schedule replay verifier runs on every replicate. New bundled example
+  `ferx_example("adaptive_tdm")` (a vancomycin-style TDM trough titration) with a
+  runnable `inst/examples/ex_adaptive_tdm.R`.
 - **Joint PK-TTE (drug-driven hazard) is now available in model files** — an
   `[event_model] hazard = <expr>` that references the ODE PK state (e.g.
   `H0 * exp(BETA * (central / V))`) is accumulated as a cumulative-hazard ODE

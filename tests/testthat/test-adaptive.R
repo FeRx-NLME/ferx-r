@@ -1,14 +1,15 @@
 # Tests for ferx_simulate_adaptive() - the declarative [adaptive_dosing] /
 # feedback-dosing simulation path (ferx-core #585, epic #391).
 
-test_that("ferx_simulate_adaptive returns three named data frames", {
+test_that("ferx_simulate_adaptive returns four named data frames", {
   ex  <- ferx_example("adaptive_tdm")
   res <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 2L, seed = 1L)
   expect_type(res, "list")
-  expect_named(res, c("trajectories", "doses", "decisions"))
+  expect_named(res, c("trajectories", "doses", "decisions", "metrics"))
   expect_s3_class(res$trajectories, "data.frame")
   expect_s3_class(res$doses, "data.frame")
   expect_s3_class(res$decisions, "data.frame")
+  expect_s3_class(res$metrics, "data.frame")
 })
 
 test_that("the result tables carry the documented columns", {
@@ -20,6 +21,9 @@ test_that("the result tables carry the documented columns", {
     "SIGNAL", "RULE") %in% names(res$doses)))
   expect_true(all(c("DRAW", "SIM", "ID", "DECISION", "TIME", "SIGNAL", "OUTCOME",
     "N_DOSED") %in% names(res$decisions)))
+  expect_true(all(c("DRAW", "SIM", "ID", "CUM_DOSE", "N_DOSES", "N_INCREASES",
+    "N_DECREASES", "N_HOLDS", "DISCONTINUED", "TIME_TO_DISCONT", "SIGNAL_MIN",
+    "SIGNAL_MAX", "SIGNAL_MEAN", "PCT_TIME_IN_WINDOW") %in% names(res$metrics)))
 })
 
 test_that("n_sim = 3 produces three replicates across all three tables", {
@@ -73,7 +77,7 @@ test_that("verify = FALSE skips the replay verifier and still returns results", 
   ex  <- ferx_example("adaptive_tdm")
   res <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 1L, seed = 1L,
                                 verify = FALSE)
-  expect_named(res, c("trajectories", "doses", "decisions"))
+  expect_named(res, c("trajectories", "doses", "decisions", "metrics"))
   expect_gt(nrow(res$doses), 0L)
 })
 
@@ -94,6 +98,40 @@ test_that("decisions tag every realized dose with a valid outcome (Dosed path)",
   expect_true(all(res$decisions$N_DOSED >= 1L))
   # Every ledger dose joins back to a logged decision.
   expect_true(all(res$doses$DECISION %in% res$decisions$DECISION))
+})
+
+test_that("metrics: one row per (subject, draw, replicate), a faithful ledger reduction", {
+  ex  <- ferx_example("adaptive_tdm")
+  res <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 3L, seed = 1L)
+  # Exactly one metrics row per realized (DRAW, SIM, ID) - the same key as the
+  # other artifacts.
+  key <- res$metrics[, c("DRAW", "SIM", "ID")]
+  expect_false(any(duplicated(key)))
+  expect_equal(nrow(res$metrics),
+    nrow(unique(res$decisions[, c("DRAW", "SIM", "ID")])))
+  # CUM_DOSE is the summed ledger AMT and N_DOSES the ledger row count for that
+  # key - the metrics summarise the ledger rather than re-deriving anything.
+  for (i in seq_len(nrow(res$metrics))) {
+    r    <- res$metrics[i, ]
+    rows <- res$doses$DRAW == r$DRAW & res$doses$SIM == r$SIM &
+      res$doses$ID == r$ID
+    expect_equal(r$CUM_DOSE, sum(res$doses$AMT[rows]))
+    expect_equal(r$N_DOSES, sum(rows))
+  }
+})
+
+test_that("metrics: target_window populates PCT_TIME_IN_WINDOW in [0, 1]", {
+  # The bundled adaptive_tdm model declares target_window = [10, 20], so the
+  # attainment metric is reported (not NA) and is a valid fraction.
+  ex  <- ferx_example("adaptive_tdm")
+  res <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 5L, seed = 1L)
+  expect_false(any(is.na(res$metrics$PCT_TIME_IN_WINDOW)))
+  expect_true(all(res$metrics$PCT_TIME_IN_WINDOW >= 0 &
+    res$metrics$PCT_TIME_IN_WINDOW <= 1))
+  # This example only titrates (no hold/stop rule): nothing discontinues, so the
+  # discontinuation time is NA throughout.
+  expect_true(all(!res$metrics$DISCONTINUED))
+  expect_true(all(is.na(res$metrics$TIME_TO_DISCONT)))
 })
 
 # Write a minimal 1-cpt IV adaptive model with a custom [adaptive_dosing] rule,
@@ -138,6 +176,14 @@ test_that("a hold rule yields hold decisions and an empty dose ledger", {
   expect_equal(nrow(res$doses), 0L)
   expect_true(all(res$decisions$OUTCOME == "hold"))
   expect_true(all(res$decisions$N_DOSED == 0L))
+  # Metrics reflect the all-hold run: no doses or dose changes, every decision a
+  # hold, no discontinuation. This model declares no target_window, so the
+  # attainment metric is NA.
+  expect_true(all(res$metrics$N_DOSES == 0L))
+  expect_true(all(res$metrics$N_INCREASES == 0L & res$metrics$N_DECREASES == 0L))
+  expect_true(all(res$metrics$N_HOLDS > 0L))
+  expect_true(all(!res$metrics$DISCONTINUED))
+  expect_true(all(is.na(res$metrics$PCT_TIME_IN_WINDOW)))
 })
 
 test_that("a stop rule discontinues after the first decision", {
@@ -150,4 +196,9 @@ test_that("a stop rule discontinues after the first decision", {
   expect_equal(nrow(res$doses), 0L)
   # Exactly one decision per subject, then silence.
   expect_equal(nrow(res$decisions), length(unique(res$decisions$ID)))
+  # Metrics flag the discontinuation: DISCONTINUED is TRUE and TIME_TO_DISCONT is
+  # the stop time - the first decision, t = 0 here - with no dose ever given.
+  expect_true(all(res$metrics$DISCONTINUED))
+  expect_true(all(res$metrics$TIME_TO_DISCONT == 0))
+  expect_true(all(res$metrics$N_DOSES == 0L))
 })

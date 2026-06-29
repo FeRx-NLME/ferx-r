@@ -561,9 +561,12 @@ fn ferx_rust_simulate_from_fit(
 ///   every (subject, replicate); a divergence is a hard error, not a warning
 /// @param max_decisions Per-run decision cap (runaway / closed-loop guard);
 ///   `<= 0` keeps the engine default
-/// @return Named list of three data frames: `trajectories` (DRAW, SIM, ID, TIME,
-///   IPRED, DV_SIM), `doses` (the realized dose ledger), and `decisions` (one row
-///   per decision, including holds)
+/// @return Named list of four data frames: `trajectories` (DRAW, SIM, ID, TIME,
+///   IPRED, DV_SIM), `doses` (the realized dose ledger), `decisions` (one row
+///   per decision, including holds), and `metrics` (one row per realized run —
+///   the per-subject outcome summary: cumulative dose, dose-change counts, holds,
+///   discontinuation, observed-signal summary, and `% time in window` when the
+///   model declares a `target_window`)
 /// @export
 #[extendr]
 fn ferx_rust_simulate_adaptive(
@@ -630,10 +633,11 @@ fn ferx_rust_simulate_adaptive(
     }
 }
 
-/// Convert an [`AdaptiveSimulationResult`] into a named R list of three data
+/// Convert an [`AdaptiveSimulationResult`] into a named R list of four data
 /// frames: `trajectories` (reusing the standard simulation converter), `doses`
-/// (the realized-dose ledger), and `decisions` (one row per decision). The
-/// single declarative signal is surfaced as the `SIGNAL` column (the value the
+/// (the realized-dose ledger), `decisions` (one row per decision), and `metrics`
+/// (one row per realized run — the per-subject outcome summary). The single
+/// declarative signal is surfaced as the `SIGNAL` column (the value the
 /// controller actually observed — assay-noised when `with_assay_error`).
 fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult) -> Robj {
     let trajectories = sim_results_to_df(&result.trajectories);
@@ -681,7 +685,40 @@ fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult) -> Robj
         N_DOSED = d.iter().map(|e| outcome_n(&e.outcome)).collect::<Vec<i32>>()
     );
 
-    list!(trajectories = trajectories, doses = doses, decisions = decisions).into()
+    // -- metrics: one row per realized run (subject, draw, sim) --
+    // `Option<f64>` fields (no signal recorded, never discontinued, no
+    // `target_window` declared) map to R `NA_real_`; `discontinued` is a logical.
+    let m = &result.metrics;
+    let metrics = data_frame!(
+        DRAW = m.iter().map(|e| e.draw as i32).collect::<Vec<i32>>(),
+        SIM = m.iter().map(|e| e.sim as i32).collect::<Vec<i32>>(),
+        ID = m.iter().map(|e| e.subject.clone()).collect::<Vec<String>>(),
+        CUM_DOSE = m.iter().map(|e| e.cumulative_dose).collect::<Vec<f64>>(),
+        N_DOSES = m.iter().map(|e| e.n_doses as i32).collect::<Vec<i32>>(),
+        N_INCREASES = m.iter().map(|e| e.n_increases as i32).collect::<Vec<i32>>(),
+        N_DECREASES = m.iter().map(|e| e.n_decreases as i32).collect::<Vec<i32>>(),
+        N_HOLDS = m.iter().map(|e| e.n_holds as i32).collect::<Vec<i32>>(),
+        DISCONTINUED = m.iter().map(|e| e.discontinued).collect::<Vec<bool>>(),
+        TIME_TO_DISCONT = m
+            .iter()
+            .map(|e| e.time_to_discontinuation)
+            .collect::<Vec<Option<f64>>>(),
+        SIGNAL_MIN = m.iter().map(|e| e.signal_min).collect::<Vec<Option<f64>>>(),
+        SIGNAL_MAX = m.iter().map(|e| e.signal_max).collect::<Vec<Option<f64>>>(),
+        SIGNAL_MEAN = m.iter().map(|e| e.signal_mean).collect::<Vec<Option<f64>>>(),
+        PCT_TIME_IN_WINDOW = m
+            .iter()
+            .map(|e| e.pct_time_in_window)
+            .collect::<Vec<Option<f64>>>()
+    );
+
+    list!(
+        trajectories = trajectories,
+        doses = doses,
+        decisions = decisions,
+        metrics = metrics
+    )
+    .into()
 }
 
 /// Simulate with parameter uncertainty propagation.
