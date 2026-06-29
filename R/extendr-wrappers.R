@@ -33,6 +33,12 @@ ferx_rust_simulate_from_fit <- function(model_path, data_path, theta, omega_flat
 
 #' @title Internal Rust backend binding
 #' @keywords internal
+ferx_rust_simulate_adaptive <- function(model_path, data_path, n_sim, seed, verify, max_decisions) {
+  .Call("wrap__ferx_rust_simulate_adaptive", model_path, data_path, as.integer(n_sim), as.integer(seed), verify, as.integer(max_decisions))
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
 ferx_rust_simulate_with_uncertainty <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, method, cov_matrix_flat, cov_matrix_dim, sir_resamples_flat, sir_resamples_n, sir_resamples_dim, n_uncertainty_draws, n_sim_per_draw, seed) {
   .Call("wrap__ferx_rust_simulate_with_uncertainty", model_path, data_path, theta, omega_flat, omega_dim, sigma, method, cov_matrix_flat, as.integer(cov_matrix_dim), sir_resamples_flat, as.integer(sir_resamples_n), as.integer(sir_resamples_dim), as.integer(n_uncertainty_draws), as.integer(n_sim_per_draw), as.integer(seed))
 }

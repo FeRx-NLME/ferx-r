@@ -30,7 +30,8 @@ the survival function \eqn{S(t)}, cumulative hazard \eqn{H(t)} and hazard
 Population-level (\eqn{\eta = 0}) unless a \code{fit} is supplied, in which
 case its fitted \code{theta} is used. Each subject also carries its median and
 mean survival time (analytic where available).
-
+}
+\details{
 For a model with multiple TTE CMTs (competing risks), each row also carries the
 cause-specific cumulative incidence \code{cif} (\eqn{F_k(t)}) and the all-cause
 survival \code{survival_all} (\eqn{S_\mathrm{all}(t)}), with
@@ -50,10 +51,11 @@ head(preds)
 
 }
 \seealso{
-Other simulation:
+Other simulation: 
 \code{\link{ferx_npde}()},
 \code{\link{ferx_predict}()},
 \code{\link{ferx_simulate}()},
+\code{\link{ferx_simulate_adaptive}()},
 \code{\link{ferx_simulate_with_uncertainty}()}
 }
 \concept{simulation}

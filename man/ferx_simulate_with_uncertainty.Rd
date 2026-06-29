@@ -86,10 +86,11 @@ pi90 <- aggregate(DV_SIM ~ TIME, data = sims,
 
 }
 \seealso{
-Other simulation:
+Other simulation: 
 \code{\link{ferx_npde}()},
 \code{\link{ferx_predict}()},
 \code{\link{ferx_predict_survival}()},
-\code{\link{ferx_simulate}()}
+\code{\link{ferx_simulate}()},
+\code{\link{ferx_simulate_adaptive}()}
 }
 \concept{simulation}
