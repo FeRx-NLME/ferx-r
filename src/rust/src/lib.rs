@@ -2437,7 +2437,7 @@ fn build_individual_estimates(
         for k in 0..n_kappa {
             eta_buf[n_eta + k] = 0.0;
         }
-        let pk = (model.pk_param_fn)(&result.theta, &eta_buf, &subj.covariates);
+        let pk = (model.pk_param_fn)(&result.theta, &eta_buf, &subj.covariates, 0.0);
         for i in 0..n_indiv {
             // Analytical models route via pk_indices; ODE models write
             // sequentially into slots 0..n_indiv.
