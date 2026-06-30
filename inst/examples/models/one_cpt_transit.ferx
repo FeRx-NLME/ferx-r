@@ -1,0 +1,57 @@
+# Analytic Savic transit-compartment absorption -- `pk one_cpt_transit`.
+#
+# Savic et al. (2007) transit-chain absorption delivered DIRECTLY into a
+# one-compartment disposition, as a fast analytical `pk` model (no ODE solve).
+# The dose's absorption time is Gamma(shape = N+1, rate = KTR), KTR = (N+1)/MTT,
+# so the central concentration is the exponential-tilting closed form
+#
+#   C(t) = (F*Dose/V) * M(ke) * exp(-ke*t) * P(N+1, (KTR-ke)*t),   ke = CL/V
+#
+# (M = the Gamma MGF, P = the regularized lower incomplete gamma). It is evaluated
+# with exact Dual2 sensitivities -- the same gradients FOCE/FOCEI use -- with no
+# finite differences and no ODE solver. With N = 0 it reduces exactly to
+# first-order (Bateman) oral absorption with ka = 1/MTT.
+#
+# Contrast `transit_savic.ferx`, which models the same Savic transit chain on the
+# numerical ODE path AND adds an explicit first-order `ka` step after the chain;
+# here there is no `ka` -- the Gamma absorption time IS the entire delay, and the
+# whole model is closed form (ferx-core #611 / #386).
+#
+#   CMT=1  depot    -- oral dose lands here (amount, mg); absorbed via the chain
+#   CMT=2  central  -- concentration (mg/L); C = amount / V
+#
+# Paired with transit_oral.csv -- the ferx-core transit anchor dataset. Because
+# that data is generated from a transit + first-order-`ka` model (see
+# transit_savic.ferx), fitting this `ka`-free analytic model is mildly
+# mis-specified: CL and V recover, while the Gamma absorption shape (MTT, N)
+# absorbs the omitted `ka` step. A syntax / workflow demo, not a parameter-recovery
+# demo. The canonical copy lives in ferx-core (examples/one_cpt_transit.ferx);
+# keep the two in sync.
+
+[parameters]
+  theta TVCL(5.0,   0.1, 100.0)   # typical clearance (L/h)
+  theta TVV(50.0,   5.0, 500.0)   # typical central volume (L)
+  theta TVMTT(1.0, 0.05,  24.0)   # mean transit time (h); KTR = (N+1)/MTT
+  theta TVN(3.0,    0.0,  30.0)   # number of transit compartments (continuous)
+
+  omega ETA_CL ~ 0.09             # IIV on CL (~30% CV)
+  omega ETA_V  ~ 0.09             # IIV on V  (~30% CV)
+
+  sigma PROP_ERR ~ 0.15 (sd)      # proportional residual error (~15% CV)
+
+[individual_parameters]
+  CL  = TVCL * exp(ETA_CL)
+  V   = TVV  * exp(ETA_V)
+  MTT = TVMTT
+  NTR = TVN
+
+[structural_model]
+  pk one_cpt_transit(cl=CL, v=V, n=NTR, mtt=MTT)
+
+[error_model]
+  DV ~ proportional(PROP_ERR)
+
+[fit_options]
+  method     = focei
+  maxiter    = 500
+  covariance = true
