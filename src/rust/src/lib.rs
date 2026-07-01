@@ -1617,6 +1617,7 @@ fn pk_model_type_label(model: &CompiledModel) -> &'static str {
     match model.pk_model {
         PkModel::OneCptIv => "1-cpt IV",
         PkModel::OneCptOral => "1-cpt oral",
+        PkModel::OneCptTransit => "1-cpt transit",
         PkModel::TwoCptIv => "2-cpt IV",
         PkModel::TwoCptOral => "2-cpt oral",
         PkModel::ThreeCptIv => "3-cpt IV",
