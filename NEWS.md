@@ -27,6 +27,27 @@ excl <- ferx_apply_selection(data, ignore = "DV < 1", excluded = TRUE)
 excl <- ferx_apply_selection(fit, excluded = TRUE)
 ```
 
+`ferx_model_new()` is removed (#231). Scaffolding a new model from a template
+is now a mode of the `ferx_model()` constructor, selected by passing
+`template =` (or `print = TRUE` to preview a skeleton without writing a file).
+Unlike the old function, which returned the file path, scaffold mode returns a
+`ferx_model` object, so it pipes straight into `ferx_fit()`. The output path
+moves from the first positional argument to the named `path =` argument:
+
+```r
+# before
+ferx_model_new("m.ferx", template = "1cpt_oral", edit = FALSE)
+ferx_model_new(print = TRUE)
+
+# after
+ferx_model(template = "1cpt_oral", path = "m.ferx", edit = FALSE)
+ferx_model(print = TRUE)
+
+# scaffold + fit in one pipe
+ferx_model(template = "1cpt_oral", path = "m.ferx", edit = FALSE) |>
+  ferx_fit(data)
+```
+
 # ferx 0.1.6
 
 ## Added

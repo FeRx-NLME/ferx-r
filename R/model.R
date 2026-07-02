@@ -28,12 +28,34 @@
 #' the pipe - the \code{ferx_model} object only carries the file paths. See
 #' \code{\link{ferx_fit}} for the full list of options and post-fit outputs.
 #'
+#' \strong{Scaffold mode.} Passing \code{template =} (or \code{print = TRUE})
+#' switches to scaffold mode: a new \code{.ferx} file is written to \code{path}
+#' from a built-in skeleton and wrapped in a \code{ferx_model} object, so the
+#' result pipes straight into \code{\link{ferx_fit}}. \code{print = TRUE} prints
+#' the skeleton to the console and writes nothing (returns \code{NULL}). This
+#' replaces the former \code{ferx_model_new()}.
+#'
 #' @param data Optional path to a NONMEM-format CSV data file. Can be omitted
 #'   here and supplied later to \code{\link{ferx_fit}}.
-#' @param model Path to a \code{.ferx} model file. The file must exist.
+#' @param model Path to an existing \code{.ferx} model file (wrap mode). The
+#'   file must exist. Leave \code{NULL} in scaffold mode.
+#' @param template Scaffold mode. One of \code{"1cpt_oral"} (default),
+#'   \code{"1cpt_iv"}, \code{"2cpt_oral"}, \code{"2cpt_iv"}, or \code{"ode"}.
+#'   Supplying it (or \code{print = TRUE}) triggers scaffold mode.
+#' @param path Scaffold mode. Path for the new \code{.ferx} file. Required
+#'   unless \code{print = TRUE}. Must not already exist unless
+#'   \code{overwrite = TRUE}.
+#' @param overwrite Scaffold mode. Logical. Overwrite \code{path} if it already
+#'   exists? Defaults to \code{FALSE}.
+#' @param edit Scaffold mode. Logical. Open the new file in an editor after
+#'   writing? Defaults to \code{TRUE}.
+#' @param print Scaffold mode. Logical. If \code{TRUE}, print the skeleton to
+#'   the console instead of writing a file (no file created, no editor opened).
+#'   Defaults to \code{FALSE}.
 #'
 #' @return An object of class \code{ferx_model} with fields \code{$model} and
-#'   \code{$data}.
+#'   \code{$data}. In scaffold mode with \code{print = TRUE}, \code{NULL}
+#'   invisibly.
 #'
 #' @examples
 #' ex <- ferx_example("warfarin")
@@ -44,6 +66,14 @@
 #'
 #' # Without data: supply at fit time via ferx_fit(data = ...)
 #' m <- ferx_model(model = ex$model)
+#'
+#' # Scaffold a new model from a template (writes the file, returns a ferx_model)
+#' tmp <- tempfile(fileext = ".ferx")
+#' m <- ferx_model(template = "1cpt_oral", path = tmp, edit = FALSE)
+#' print(m)
+#'
+#' # Peek at a skeleton without writing anything
+#' ferx_model(template = "2cpt_iv", print = TRUE)
 #'
 #' \dontrun{
 #' # ?? Minimal pipe ????????????????????????????????????????????????????????
@@ -103,16 +133,42 @@
 #'   \code{\link{ferx_fit}}, \code{\link{ferx_check_init}}
 #' @family model-editing
 #' @export
-ferx_model <- function(data = NULL, model) {
+ferx_model <- function(data = NULL, model = NULL, template = NULL,
+                       path = NULL, overwrite = FALSE, edit = TRUE,
+                       print = FALSE) {
+  # ---- scaffold mode ------------------------------------------------------
+  # Create a new .ferx file from a skeleton template, then wrap it in a
+  # ferx_model object so the result pipes straight into ferx_fit(). Triggered
+  # by `template =` (or `print = TRUE` to peek at a skeleton without writing).
+  if (!is.null(template) || isTRUE(print)) {
+    skeleton <- .ferx_model_skeleton(if (is.null(template)) "1cpt_oral" else template)
+    if (isTRUE(print)) {
+      cat(skeleton, sep = "\n")
+      cat("\n")
+      return(invisible(NULL))
+    }
+    if (is.null(path)) stop("'path' is required when print = FALSE")
+    if (tools::file_ext(path) != "ferx") stop("'path' must end in .ferx")
+    if (file.exists(path) && !overwrite) {
+      stop(path, " already exists. Use overwrite = TRUE to replace it.")
+    }
+    writeLines(skeleton, path)
+    message("Created ", path)
+    if (isTRUE(edit)) utils::file.edit(path)
+    if (!is.null(data) && !file.exists(data)) stop("Data file not found: ", data)
+    return(structure(list(model = path, data = data), class = "ferx_model"))
+  }
+
+  # ---- wrap mode ----------------------------------------------------------
   # Backwards-compat shim: in earlier versions the signature was
   # `ferx_model(model, data = NULL)`. Detect old-style positional calls by
   # the .ferx extension on what is now `data` and silently rewrite them
   # with a deprecation warning.
-  data_is_ferx <- !missing(data) && !is.null(data) && is.character(data) &&
+  data_is_ferx <- !is.null(data) && is.character(data) &&
     length(data) == 1L && tolower(tools::file_ext(data)) == "ferx"
 
   if (data_is_ferx) {
-    if (missing(model)) {
+    if (is.null(model)) {
       # `ferx_model("pk.ferx")` ? treat as `ferx_model(model = "pk.ferx")`.
       warning(
         "ferx_model() argument order changed: data is now the first ",
@@ -140,7 +196,7 @@ ferx_model <- function(data = NULL, model) {
     }
   }
 
-  if (missing(model)) {
+  if (is.null(model)) {
     stop("'model' is required. Pass a path to a .ferx file.")
   }
   if (!file.exists(model)) stop("File not found: ", model)
@@ -397,7 +453,7 @@ ferx_model_show <- function(path) {
 #' ferx_model_edit("run1.ferx", save_as = TRUE)
 #' }
 #'
-#' @seealso \code{\link{ferx_model_show}}, \code{\link{ferx_model_new}},
+#' @seealso \code{\link{ferx_model_show}}, \code{\link{ferx_model}},
 #'   \code{\link{ferx_example}}
 #' @family model-editing
 #' @export
@@ -549,7 +605,7 @@ ferx_model_section <- function(path, section, strip = FALSE) {
 #' }
 #'
 #' @seealso \code{\link{ferx_model_section}}, \code{\link{ferx_model_show}},
-#'   \code{\link{ferx_model_new}}
+#'   \code{\link{ferx_model}}
 #' @family model-editing
 #' @export
 ferx_model_set_section <- function(path, section, lines) {
@@ -574,59 +630,10 @@ ferx_model_set_section <- function(path, section, lines) {
   invisible(path)
 }
 
-#' Create a new ferx model file from a skeleton template
-#'
-#' Writes a new \code{.ferx} file pre-filled with a skeleton for the chosen
-#' model type, then opens it in an editor. Pass \code{print = TRUE} instead of
-#' supplying a \code{path} to print the skeleton to the console without writing
-#' any file - useful for copy-pasting or piping in a scripted workflow.
-#'
-#' @param path Path for the new \code{.ferx} file. Must not already exist
-#'   unless \code{overwrite = TRUE}. Ignored when \code{print = TRUE}.
-#' @param template One of \code{"1cpt_oral"} (default), \code{"1cpt_iv"},
-#'   \code{"2cpt_oral"}, \code{"2cpt_iv"}, or \code{"ode"}.
-#' @param overwrite Logical. Overwrite \code{path} if it already exists?
-#'   Defaults to \code{FALSE}.
-#' @param edit Logical. Open the file in an editor after writing? Defaults to
-#'   \code{TRUE}. Ignored when \code{print = TRUE}.
-#' @param print Logical. If \code{TRUE}, print the skeleton to the console
-#'   instead of writing a file. No file is created and no editor is opened.
-#'   Defaults to \code{FALSE}.
-#'
-#' @return \code{path} invisibly, or \code{NULL} invisibly when
-#'   \code{print = TRUE}.
-#'
-#' @examples
-#' # Print a skeleton to the console (no file written, no editor opened)
-#' ferx_model_new(print = TRUE)
-#' ferx_model_new(template = "2cpt_iv", print = TRUE)
-#'
-#' # Write a skeleton to a temp file and show it
-#' tmp <- ferx_model_new(tempfile(fileext = ".ferx"), edit = FALSE)
-#' ferx_model_show(tmp)
-#'
-#' \dontrun{
-#' # Write a file and open it for editing
-#' ferx_model_new("my_model.ferx")
-#'
-#' # Write a file without opening an editor
-#' ferx_model_new("my_model.ferx", edit = FALSE)
-#' }
-#'
-#' @seealso \code{\link{ferx_model_edit}}, \code{\link{ferx_model_show}},
-#'   \code{\link{ferx_model_set_section}}
-#' @family model-editing
-#' @export
-ferx_model_new <- function(path = NULL, template = "1cpt_oral",
-                            overwrite = FALSE, edit = TRUE, print = FALSE) {
-  if (!print) {
-    if (is.null(path)) stop("'path' is required when print = FALSE")
-    if (tools::file_ext(path) != "ferx") stop("'path' must end in .ferx")
-    if (file.exists(path) && !overwrite) {
-      stop(path, " already exists. Use overwrite = TRUE to replace it.")
-    }
-  }
-
+# Return the skeleton lines for a built-in model template.
+# Templates: "1cpt_oral" (default), "1cpt_iv", "2cpt_oral", "2cpt_iv", "ode".
+# Errors on an unknown template name. Used by ferx_model()'s scaffold mode.
+.ferx_model_skeleton <- function(template = "1cpt_oral") {
   templates <- list(
     `1cpt_oral` = c(
       "# One-compartment oral PK model",
@@ -792,19 +799,7 @@ ferx_model_new <- function(path = NULL, template = "1cpt_oral",
     )
   }
 
-  skeleton <- templates[[template]]
-
-  if (print) {
-    cat(skeleton, sep = "\n")
-    cat("\n")
-    return(invisible(NULL))
-  }
-
-  writeLines(skeleton, path)
-  message("Created ", path)
-
-  if (edit) utils::file.edit(path)
-  invisible(path)
+  templates[[template]]
 }
 
 # Extract all named [section] blocks from a .ferx file.

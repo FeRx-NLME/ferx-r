@@ -1,38 +1,53 @@
-ferx                            Nonlinear Mixed Effects Modeling with Rust Backend
-
--- Fitting --
-ferx_fit                        Fit an NLME model (FOCE/FOCEI/GN/SAEM/IMP)
-ferx_check_init                 Diagnose initial parameter values before a fit
-ferx_inits_from_nca             Suggest starting values from NCA pooling
-ferx_sir                        Sampling Importance Resampling for parameter uncertainty
-
--- Simulation and prediction --
-ferx_simulate                   Simulate observations from a model (and optional fit)
-ferx_predict                    Population/individual predictions on a dataset
-ferx_simulate_with_uncertainty  Simulate with parameter uncertainty (cov matrix or SIR)
-
--- Model editing --
-ferx_model                      Construct a ferx_model object from model + data
-ferx_model_new                  Create a new model file from a bundled template
-ferx_model_show                 Pretty-print a .ferx model file
-ferx_model_edit                 Copy a model file for editing
-ferx_model_section              Read a section from a .ferx file
-ferx_model_set_section          Replace a section in a .ferx file on disk
-ferx_get_section                Read a section from a ferx_model object
-ferx_set_section                Replace a section in a ferx_model object
-ferx_model_validate             Validate a .ferx model file (parser + structural checks)
-ferx_model_inspect              Inspect a compiled model (parameters, ETAs, error model)
-
--- Diagnostics and output --
-summary.ferx_fit                Summary of a ferx_fit
-ferx_estimates                  Tidy data frame of parameter estimates and uncertainties
-ferx_cor_matrix                 Correlation matrix from the fit covariance
-ferx_eta_cov                    Test ETAs against covariates
-check_diagnostics               Residual / ETA diagnostic checks
-ferx_trace                      Iteration-by-iteration optimizer trace
-ferx_plot_trace                 Quick base-R plot of the optimizer trace
-
--- Utilities --
-ferx_example                    Paths to bundled example models and data
-ferx_save_fit                   Save a ferx_fit to a .fitrx archive
-ferx_load_fit                   Load a ferx_fit from a .fitrx archive
+check_diagnostics       Structured diagnostic flags from a fit result
+ferx_apply_selection    Preview data-selection filtering
+ferx_calc_npde          Simulation-based NPDE / NPD diagnostics from a
+                        fit
+ferx_check_init         Quick convergence check with an optimizer trace
+ferx_collect            Retrieve the result of a background fit
+ferx_cor_matrix         Correlation matrix of estimated parameters
+ferx_cov_screen         Quick covariate screen against individual
+                        parameters and ETAs
+ferx_estimates          Tidy parameter estimates table
+ferx_eta_cov            ETA-covariate correlation table
+ferx_example            Get paths to example model and data files
+ferx_fit                Fit a nonlinear mixed effects model
+ferx_fit_async          Fit a model asynchronously
+ferx_get_columns        Inspect column headers of a NONMEM data file
+ferx_get_section        Inspect a section of a ferx model
+                        (pipe-friendly)
+ferx_get_warnings       Structured warnings from a ferx fit
+ferx_inits_from_nca     Derive NCA-based starting values without
+                        fitting
+ferx_load_fit           Load a fit from a '.fitrx' bundle
+ferx_model              Create a ferx_model object
+ferx_model_edit         Open a ferx model file in an editor
+ferx_model_inspect      Inspect the structure of a ferx model file
+ferx_model_section      Extract a section from a ferx model file
+ferx_model_set_section
+                        Replace a section in a ferx model file
+ferx_model_show         Display a ferx model file in the console
+ferx_model_to_frem      Prepare a FREM (Full Random Effects Model)
+                        dataset and model
+ferx_model_validate     Validate a ferx model file for syntax and
+                        structural errors
+ferx_plot_trace         Plot optimizer trace from a ferx fit
+ferx_predict            Population predictions from a NLME model
+ferx_predict_survival   Survival-function predictions for time-to-event
+                        endpoints
+ferx_runlog             NONMEM-style run log for a ferx fit
+ferx_runlog_iters       Print the full optimizer iteration history for
+                        a ferx fit
+ferx_save_fit           Save a ferx fit to a portable '.fitrx' bundle
+ferx_set_section        Replace a section in a ferx model
+                        (pipe-friendly)
+ferx_simulate           Simulate from a NLME model
+ferx_simulate_adaptive
+                        Simulate state-reactive (adaptive / feedback)
+                        dosing
+ferx_simulate_with_uncertainty
+                        Simulate with parameter-uncertainty propagation
+ferx_sir                Run SIR against an existing fit
+ferx_trace              Read the optimizer trace from a ferx fit
+ferx_xpose              Build an Xpose object from a ferx fit
+print.ferx_data         Print a ferx_data object
+summary.ferx_fit        Summarize a ferx fit result
