@@ -50,11 +50,11 @@
 #'   \item Returns a \code{ferx_model} referencing the generated files.
 #' }
 #'
-#' After calling \code{ferx_to_frem()}, fit the returned model directly:
+#' After calling \code{ferx_model_to_frem()}, fit the returned model directly:
 #' \code{\link{ferx_fit}(frem)}.
 #'
 #' @export
-ferx_to_frem <- function(model,
+ferx_model_to_frem <- function(model,
                          data = NULL,
                          covariates = NULL,
                          output_dir = NULL,
@@ -124,7 +124,7 @@ ferx_to_frem <- function(model,
   )
 
   # Surface conversion-time advisories (e.g. estimated parameters without a
-  # random effect, which IMP/IMPMAP estimate poorly — add an ETA before fitting).
+  # random effect, which IMP/IMPMAP estimate poorly - add an ETA before fitting).
   for (w in raw$warnings) {
     warning(w, call. = FALSE)
   }

@@ -560,7 +560,7 @@ ferx_estimates <- function(fit) {
 }
 
 # Resolve once whether cli colour output is available. Called at the top of
-# ferx_warnings() and from print.ferx_fit() so the capability check is not
+# ferx_get_warnings() and from print.ferx_fit() so the capability check is not
 # repeated inside per-row loops.
 #
 # We deliberately do NOT gate on `isatty(stdout())`. Inside RStudio's console
@@ -723,11 +723,11 @@ ferx_estimates <- function(fit) {
 #' @examples
 #' ex  <- ferx_example("warfarin")
 #' fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
-#' ferx_warnings(fit)
-#' ferx_warnings(fit, as_df = TRUE)
+#' ferx_get_warnings(fit)
+#' ferx_get_warnings(fit, as_df = TRUE)
 #' @family diagnostics
 #' @export
-ferx_warnings <- function(fit, as_df = FALSE) {
+ferx_get_warnings <- function(fit, as_df = FALSE) {
   if (!inherits(fit, "ferx_fit")) {
     stop("`fit` must be a ferx_fit object")
   }

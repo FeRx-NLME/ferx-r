@@ -56,12 +56,12 @@ until the cumulative hazard reaches \code{-log U}, censoring at
 ignore it. \code{NULL} (default) leaves it unset.}
 }
 \value{
-A data.frame. Gaussian rows carry DRAW, SIM, ID, TIME, CMT, IPRED, DV_SIM
-(with \code{OBSERVED = NA}). For a joint PK-TTE model each subject also yields
-a TTE row on the event CMT, where TIME is the sampled event/censor time and
-\code{OBSERVED} is 1 (event before \code{horizon}) or 0 (right-censored at it);
-its IPRED and DV_SIM are \code{NA}. Use \code{is.na(OBSERVED)} to separate
-continuous rows from event rows.
+A data.frame. Gaussian rows carry DRAW, SIM, ID, TIME, CMT, IPRED,
+DV_SIM (with \code{OBSERVED = NA}). For a joint PK-TTE model each subject
+also yields a TTE row on the event CMT, where TIME is the sampled
+event/censor time and \code{OBSERVED} is 1 (event before \code{horizon}) or
+0 (right-censored at it); its IPRED and DV_SIM are \code{NA}. Use
+\code{is.na(OBSERVED)} to separate continuous rows from event rows.
 }
 \description{
 Simulates observations from a parsed model with between-subject variability
@@ -82,7 +82,7 @@ sim_pm <- ferx_simulate(ex$model, ex$data, n_sim = 10L, seed = 1L,
 }
 \seealso{
 Other simulation: 
-\code{\link{ferx_npde}()},
+\code{\link{ferx_calc_npde}()},
 \code{\link{ferx_predict}()},
 \code{\link{ferx_predict_survival}()},
 \code{\link{ferx_simulate_adaptive}()},

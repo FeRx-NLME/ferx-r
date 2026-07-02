@@ -4,7 +4,7 @@
 \alias{ferx_rust_simulate}
 \title{Internal Rust backend binding}
 \usage{
-ferx_rust_simulate(model_path, data_path, n_sim, seed, match_method)
+ferx_rust_simulate(model_path, data_path, n_sim, seed, match_method, horizon)
 }
 \description{
 Internal Rust backend binding

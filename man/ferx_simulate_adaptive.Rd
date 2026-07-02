@@ -80,7 +80,7 @@ head(res$trajectories)  # the resulting concentration-time profiles
 }
 \seealso{
 Other simulation: 
-\code{\link{ferx_npde}()},
+\code{\link{ferx_calc_npde}()},
 \code{\link{ferx_predict}()},
 \code{\link{ferx_predict_survival}()},
 \code{\link{ferx_simulate}()},

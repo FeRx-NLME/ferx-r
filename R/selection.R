@@ -6,7 +6,7 @@
 #' filtering happens in Rust at fit time. The R-side implementation is
 #' intentionally lenient: unparseable expressions and unknown column names are
 #' silently treated as non-matching (no exclusion), whereas Rust will error on
-#' invalid filters. Use \code{ferx_selection()} to inspect which records will
+#' invalid filters. Use \code{ferx_apply_selection()} to inspect which records will
 #' be excluded before committing to a fit, or to pass pre-built conditions
 #' directly to \code{\link{ferx_fit}}.
 #'
@@ -46,7 +46,7 @@
 #'   \code{data}.
 #' @family data selection
 #' @export
-ferx_selection <- function(data, ignore = NULL, accept = NULL, ignore_ids = NULL) {
+ferx_apply_selection <- function(data, ignore = NULL, accept = NULL, ignore_ids = NULL) {
   source_path <- NULL
   if (is.character(data) && length(data) == 1L) {
     source_path <- data
@@ -201,7 +201,7 @@ print.ferx_data <- function(x, n = 6L, ...) {
 
 #' Retrieve excluded records from a ferx_data or ferx_fit object
 #'
-#' @param x A \code{ferx_data} object returned by \code{\link{ferx_selection}},
+#' @param x A \code{ferx_data} object returned by \code{\link{ferx_apply_selection}},
 #'   or a \code{ferx_fit} object.
 #' @param ... Ignored.
 #' @return A data.frame of excluded records. For \code{ferx_data} objects the
@@ -235,9 +235,9 @@ ferx_selection_excluded.ferx_fit <- function(x, ...) {
   # actual excluded rows with their .exclude_reason column.
   # fired_ignore / fired_accept carry a "ignore: " / "accept: " prefix (matching
   # the Rust ExclusionSummary format); strip it to recover bare expressions for
-  # ferx_selection(ignore=...).
+  # ferx_apply_selection(ignore=...).
   strip_prefix <- function(x) sub("^(ignore|accept): ", "", x)
-  sel <- ferx_selection(
+  sel <- ferx_apply_selection(
     dp,
     ignore     = strip_prefix(ex$fired_ignore),
     accept     = strip_prefix(ex$fired_accept),

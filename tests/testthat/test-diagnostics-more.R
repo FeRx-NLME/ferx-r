@@ -1,7 +1,7 @@
 # Tests for diagnostic functions that operate on a fit's fields and can be
 # driven with crafted inputs (no live model fit needed):
 #   ferx_estimates(), .ferx_est_row(), ferx_eta_cov(), ferx_cor_matrix(),
-#   ferx_warnings(), and .ferx_compute_eta_normality().
+#   ferx_get_warnings(), and .ferx_compute_eta_normality().
 # make_fake_fit() comes from helper-trace.R.
 
 .est_row       <- getFromNamespace(".ferx_est_row",            "ferx")
@@ -104,18 +104,18 @@ test_that("ferx_cor_matrix errors when no covariance matrix is present", {
 })
 
 # ---------------------------------------------------------------------------
-# ferx_warnings — no-warnings branch and per-severity labels
+# ferx_get_warnings — no-warnings branch and per-severity labels
 # ---------------------------------------------------------------------------
-test_that("ferx_warnings prints 'No warnings.' for an empty structured table", {
+test_that("ferx_get_warnings prints 'No warnings.' for an empty structured table", {
   empty <- data.frame(severity = character(0), category = character(0),
                       message = character(0), source_method = character(0),
                       stringsAsFactors = FALSE)
   fit <- make_fake_fit(warnings_structured = empty)
-  out <- capture.output(ferx_warnings(fit))
+  out <- capture.output(ferx_get_warnings(fit))
   expect_true(any(grepl("No warnings", out)))
 })
 
-test_that("ferx_warnings labels each severity level", {
+test_that("ferx_get_warnings labels each severity level", {
   df <- data.frame(
     severity      = c("critical", "warning", "info"),
     category      = c("convergence", "condition_number", "mu_referencing"),
@@ -124,7 +124,7 @@ test_that("ferx_warnings labels each severity level", {
     stringsAsFactors = FALSE
   )
   fit <- make_fake_fit(warnings_structured = df)
-  out <- capture.output(ferx_warnings(fit))
+  out <- capture.output(ferx_get_warnings(fit))
   expect_true(any(grepl("CRITICAL", out)))
   expect_true(any(grepl("WARNING", out)))
   expect_true(any(grepl("INFO", out)))

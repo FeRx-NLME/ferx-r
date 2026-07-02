@@ -7,7 +7,7 @@
 ferx_selection_excluded(x, ...)
 }
 \arguments{
-\item{x}{A \code{ferx_data} object returned by \code{\link{ferx_selection}},
+\item{x}{A \code{ferx_data} object returned by \code{\link{ferx_apply_selection}},
 or a \code{ferx_fit} object.}
 
 \item{...}{Ignored.}
@@ -22,6 +22,6 @@ Retrieve excluded records from a ferx_data or ferx_fit object
 }
 \seealso{
 Other data selection: 
-\code{\link{ferx_selection}()}
+\code{\link{ferx_apply_selection}()}
 }
 \concept{data selection}

@@ -1,3 +1,16 @@
+# ferx 0.2.0
+
+## Breaking changes
+
+Public functions renamed for verb-clarity and naming consistency (part of the
+API cleanup in #223; naming rule + hard-break policy decided in #224). Old
+names are removed - no deprecation shims. Update calls as follows:
+
+- `ferx_npde()` -> `ferx_calc_npde()`
+- `ferx_selection()` -> `ferx_apply_selection()`
+- `ferx_to_frem()` -> `ferx_model_to_frem()` (moves into the `ferx_model_*` family)
+- `ferx_warnings()` -> `ferx_get_warnings()`
+
 # ferx 0.1.6
 
 ## Added

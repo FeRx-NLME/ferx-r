@@ -503,7 +503,7 @@
 #'     emitted the warning, e.g. \code{"FOCEI"}; empty string when not
 #'     applicable). Severity/category are assigned by the engine for its
 #'     own warnings and by the R diagnostics layer for the condition-number
-#'     and ETA-normality checks. Inspect with \code{\link{ferx_warnings}}.}
+#'     and ETA-normality checks. Inspect with \code{\link{ferx_get_warnings}}.}
 #'   \item{sir_ess}{SIR effective sample size (NULL if SIR not run)}
 #'   \item{sir_ci_theta, sir_ci_omega, sir_ci_sigma}{SIR \code{95\%} CI matrices
 #'     with columns \code{lower} and \code{upper} (NULL if SIR not run)}
@@ -856,7 +856,7 @@
 #' parameter is declared in \code{[parameters]} but never referenced in
 #' \code{[individual_parameters]} or \code{[error_model]}. This usually
 #' indicates a commented-out expression or a typo in the parameter name.
-#' Inspect \code{ferx_warnings(fit)} or check \code{ferx_model_validate()}
+#' Inspect \code{ferx_get_warnings(fit)} or check \code{ferx_model_validate()}
 #' before fitting.
 #'
 #' @section Steady-state dosing (\code{SS} and \code{II} columns):
@@ -1299,7 +1299,7 @@
 #'     \item \code{\link{ferx_check_init}} - 5-iteration pilot to validate
 #'       starting values before a full run.
 #'     \item \code{\link{ferx_inits_from_nca}} - NCA-derived starting values.
-#'     \item \code{\link{ferx_warnings}} - structured warnings from the fit.
+#'     \item \code{\link{ferx_get_warnings}} - structured warnings from the fit.
 #'     \item \code{\link{ferx_estimates}} - tidy parameter table with SE / \%RSE.
 #'     \item \code{\link{ferx_plot_trace}} - convergence trace plot.
 #'   }
@@ -1358,7 +1358,7 @@ ferx_fit <- function(model, data = NULL,
     )
   }
   # ferx_data support: when data is a ferx_data object produced by
-  # ferx_selection(), extract the source path and merge any stored conditions
+  # ferx_apply_selection(), extract the source path and merge any stored conditions
   # with the explicit ignore/accept/ignore_ids args.
   if (inherits(data, "ferx_data")) {
     fd <- data
@@ -1367,8 +1367,8 @@ ferx_fit <- function(model, data = NULL,
       stop(
         "`data` is a ferx_data object built from a data.frame (no source file path). ",
         "The Rust engine requires a CSV file path. ",
-        "Pass the original CSV file path to ferx_selection() instead:\n",
-        "  sel <- ferx_selection(\"path/to/data.csv\", ignore = ...)\n",
+        "Pass the original CSV file path to ferx_apply_selection() instead:\n",
+        "  sel <- ferx_apply_selection(\"path/to/data.csv\", ignore = ...)\n",
         "  fit <- ferx_fit(model, sel)"
       )
     }
@@ -2070,7 +2070,7 @@ ferx_fit <- function(model, data = NULL,
 # the normality frame is missing/empty or no ETA is flagged. Firing once instead
 # of once per ETA keeps the warnings panel readable (ferx-core#163). The
 # explanatory hint (high shrinkage / sparse data, prefer QQ-plots) is attached
-# by the eta_normality category guidance in ferx_warnings().
+# by the eta_normality category guidance in ferx_get_warnings().
 .ferx_eta_normality_warning <- function(eta_normality) {
   if (is.null(eta_normality) || !is.data.frame(eta_normality) ||
         nrow(eta_normality) == 0L) {
@@ -2336,7 +2336,7 @@ print.ferx_fit <- function(x, ...) {
       rse     <- if (abs(est) > 1e-12) abs(se_val / est) * 100 else NaN
       se_str  <- sprintf("%.6f", se_val)
       # Highlight high-uncertainty estimates (%RSE > 50) - same convention
-      # used by the [!] shrinkage flag and by ferx_warnings() severity colours.
+      # used by the [!] shrinkage flag and by ferx_get_warnings() severity colours.
       rse_raw <- sprintf("%.1f", rse)
       rse_str <- if (!is.nan(rse) && rse > 50) .ferx_style(rse_raw, "yellow") else rse_raw
     } else {
@@ -2783,7 +2783,7 @@ print.ferx_fit <- function(x, ...) {
     if (n_warn > 0) parts <- c(parts, .ferx_style(sprintf("%d warning", n_warn), "yellow"))
     if (n_info > 0) parts <- c(parts, .ferx_style(sprintf("%d info", n_info), "dim"))
     cat(" ", paste(parts, collapse = "   "),
-        "  --  call ", .ferx_style("ferx_warnings(fit)", "bold"),
+        "  --  call ", .ferx_style("ferx_get_warnings(fit)", "bold"),
         " for details\n", sep = "")
   } else if (length(x$warnings) > 0L) {
     cat("\n", strrep("-", 60), "\n", sep = "")
