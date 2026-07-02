@@ -99,8 +99,8 @@ ferx_rust_inits_from_nca <- function(model_path, data_path, method) {
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_prepare_frem <- function(model_path, data_path, covariates, categorical_covariates, output_model_path, output_data_path) {
-  .Call("wrap__ferx_rust_prepare_frem", model_path, data_path, as.character(covariates), as.character(categorical_covariates), output_model_path, output_data_path)
+ferx_rust_prepare_frem <- function(model_path, data_path, covariates, categorical_covariates, output_model_path, output_data_path, fit_theta_names, fit_theta_values, fit_eta_names, fit_omega_flat, fit_omega_dim) {
+  .Call("wrap__ferx_rust_prepare_frem", model_path, data_path, as.character(covariates), as.character(categorical_covariates), output_model_path, output_data_path, as.character(fit_theta_names), fit_theta_values, as.character(fit_eta_names), fit_omega_flat, as.integer(fit_omega_dim))
 }
 
 # nolint end

@@ -3050,6 +3050,15 @@ fn ferx_rust_sir(
 ///   If empty, defaults to `<model_dir>/<model_stem>_frem.ferx`.
 /// @param output_data_path Optional path for the output CSV file.
 ///   If empty, defaults to `<model_dir>/<model_stem>_frem_data.csv`.
+/// @param fit_theta_names Theta names from a prior fit of the base model, used
+///   to seed the generated FREM model's theta inits (issue #239). Empty vector
+///   when no fit was supplied.
+/// @param fit_theta_values Theta values, parallel to `fit_theta_names`.
+/// @param fit_eta_names Eta names from a prior fit, parallel to the rows/cols
+///   of `fit_omega_flat`. Empty vector when no fit was supplied.
+/// @param fit_omega_flat Fitted omega matrix, row-major flattened.
+/// @param fit_omega_dim Number of rows/cols of the fitted omega matrix (0 when
+///   no fit was supplied).
 /// @return Named list with model_path, data_path, covariate_means,
 ///   covariate_variances, fremtype_map, n_total_etas
 /// @export
@@ -3061,6 +3070,11 @@ fn ferx_rust_prepare_frem(
     categorical_covariates: Vec<String>,
     output_model_path: &str,
     output_data_path: &str,
+    fit_theta_names: Vec<String>,
+    fit_theta_values: Vec<f64>,
+    fit_eta_names: Vec<String>,
+    fit_omega_flat: Vec<f64>,
+    fit_omega_dim: i32,
 ) -> List {
     let cat_opt: Option<Vec<String>> = if categorical_covariates.is_empty() {
         None
@@ -3078,6 +3092,22 @@ fn ferx_rust_prepare_frem(
         Some(Path::new(output_data_path))
     };
 
+    // Seed values from a prior fit of the base model (issue #239). Absent
+    // when the R caller passed `fit = NULL`, in which case both name vectors
+    // are empty and the generated model keeps the base model's declared inits.
+    let fit_init: Option<ferx_core::FremFitInit> =
+        if fit_theta_names.is_empty() && fit_eta_names.is_empty() {
+            None
+        } else {
+            let dim = fit_omega_dim.max(0) as usize;
+            let omega = DMatrix::from_row_slice(dim, dim, &fit_omega_flat);
+            Some(ferx_core::FremFitInit {
+                theta: fit_theta_names.into_iter().zip(fit_theta_values).collect(),
+                eta_names: fit_eta_names,
+                omega,
+            })
+        };
+
     let result = match ferx_core::prepare_frem(
         Path::new(model_path),
         Path::new(data_path),
@@ -3086,6 +3116,7 @@ fn ferx_rust_prepare_frem(
         out_model,
         out_data,
         None, // missing value indicator (default: -99)
+        fit_init.as_ref(),
     ) {
         Ok(r) => r,
         Err(e) => throw_r_error(format!("Error in prepare_frem: {e}")),
