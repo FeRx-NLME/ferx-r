@@ -27,6 +27,12 @@ excl <- ferx_apply_selection(data, ignore = "DV < 1", excluded = TRUE)
 excl <- ferx_apply_selection(fit, excluded = TRUE)
 ```
 
+## Added
+
+- `ferx_model_inspect()` now reports covariate-selected residual error models as
+  `covariate-selected (...)` in `model_structure$residual`, matching the new
+  `[error_model]` `if/else` selector in ferx-core
+  ([ferx-core #658](https://github.com/FeRx-NLME/ferx-core/issues/658)).
 `ferx_model_new()` is removed (#231). Scaffolding a new model from a template
 is now a mode of the `ferx_model()` constructor, selected by passing
 `template =` (or `print = TRUE` to preview a skeleton without writing a file).
@@ -47,6 +53,16 @@ ferx_model(print = TRUE)
 ferx_model(template = "1cpt_oral", path = "m.ferx", edit = FALSE) |>
   ferx_fit(data)
 ```
+<<<<<<< HEAD
+
+## Added
+
+- `ferx_model_inspect()` now reports covariate-selected residual error models as
+  `covariate-selected (...)` in `model_structure$residual`, matching the new
+  `[error_model]` `if/else` selector in ferx-core
+  ([ferx-core #658](https://github.com/FeRx-NLME/ferx-core/issues/658)).
+=======
+>>>>>>> refs/remotes/origin/feat/658-selected-error-label
 
 # ferx 0.1.6
 

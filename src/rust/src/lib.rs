@@ -1659,6 +1659,28 @@ fn residual_label(model: &CompiledModel) -> String {
                 .collect();
             format!("per-CMT ({})", parts.join(", "))
         }
+        // Covariate-selected residual error (ferx-core #658): an `if/else` on a
+        // covariate picks the endpoint per observation. Label each branch by its
+        // source-order selector label ("branch0", ..., "else") and error model.
+        ErrorSpec::Selected {
+            selector,
+            endpoints,
+        } => {
+            let mut keys: Vec<usize> = endpoints.keys().copied().collect();
+            keys.sort_unstable();
+            let parts: Vec<String> = keys
+                .iter()
+                .map(|k| {
+                    let label = selector
+                        .branch_labels
+                        .get(*k)
+                        .map(String::as_str)
+                        .unwrap_or("?");
+                    format!("{}={}", label, error_model_to_string(endpoints[k].error_model))
+                })
+                .collect();
+            format!("covariate-selected ({})", parts.join(", "))
+        }
     }
 }
 
