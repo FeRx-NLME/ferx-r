@@ -52,7 +52,7 @@ head(preds)
 }
 \seealso{
 Other simulation: 
-\code{\link{ferx_npde}()},
+\code{\link{ferx_calc_npde}()},
 \code{\link{ferx_predict}()},
 \code{\link{ferx_simulate}()},
 \code{\link{ferx_simulate_adaptive}()},

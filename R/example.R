@@ -113,6 +113,16 @@
 #'     continuous (estimable) parameter, in contrast to \code{transit_2cpt}'s
 #'     hand-coded chain of fixed integer compartments. Paired with the ferx-core
 #'     transit anchor dataset (correct-specification parameter recovery).}
+#'   \item{one_cpt_transit}{One-compartment model with Savic transit-compartment
+#'     absorption as a fast \emph{analytic} closed form -- \code{pk
+#'     one_cpt_transit(cl, v, n, mtt)} (ferx-core #611). The Gamma(N+1, KTR)
+#'     absorption time feeds central directly (no first-order \code{ka}, no ODE
+#'     solve), with exact FOCE/FOCEI sensitivities and a continuous, estimable
+#'     \code{N}; the closed-form counterpart to \code{transit_savic}'s ODE
+#'     \code{transit()} input rate. With \code{N = 0} it reduces to first-order
+#'     oral. Shares the transit anchor dataset; because that data adds a
+#'     first-order \code{ka} this \code{ka}-free fit is mildly mis-specified
+#'     (syntax / workflow demo).}
 #'   \item{tte_exponential}{Standalone time-to-event (TTE) model with an
 #'     exponential hazard via the \code{[event_model]} block. Event times on
 #'     CMT 2 follow \code{Exp(LAMBDA)} with \code{LAMBDA = TVLAMBDA *
@@ -303,7 +313,12 @@ ferx_example <- function(name = NULL) {
 
     # Built-in Savic transit-compartment absorption (transit()); paired with the
     # ferx-core transit anchor dataset.
-    transit_savic = "transit_oral"
+    transit_savic = "transit_oral",
+
+    # Analytic Savic transit absorption fed straight into central (no first-order
+    # ka), the fast closed-form `pk one_cpt_transit` (ferx-core #611). Shares the
+    # transit anchor dataset; mildly mis-specified vs the transit+ka generator.
+    one_cpt_transit = "transit_oral"
   )
 
   available <- tools::file_path_sans_ext(list.files(models_dir, pattern = "\\.ferx$"))
@@ -345,17 +360,17 @@ ferx_example <- function(name = NULL) {
 #'
 #' @examples
 #' ex <- ferx_example("warfarin")
-#' ferx_columns(ex)        # pass the ferx_example() list directly
-#' ferx_columns(ex$data)   # or pass the path
+#' ferx_get_columns(ex)        # pass the ferx_example() list directly
+#' ferx_get_columns(ex$data)   # or pass the path
 #'
 #' \dontrun{
 #' fit <- ferx_fit(ex$model, ex$data)
-#' ferx_columns(fit)       # inspect the data used for a fit
+#' ferx_get_columns(fit)       # inspect the data used for a fit
 #' }
 #'
 #' @family utilities
 #' @export
-ferx_columns <- function(data) {
+ferx_get_columns <- function(data) {
   path <- .ferx_resolve_data_path(data)
 
   if (!file.exists(path)) {

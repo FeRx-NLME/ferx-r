@@ -8,13 +8,13 @@ ex <- ferx_example("warfarin_data_selection")
 ferx_model_show(ex$model)
 
 # --- R-side preview before fitting ----------------------------------------
-# ferx_selection() applies the same ignore/accept logic in pure R so you
+# ferx_apply_selection() applies the same ignore/accept logic in pure R so you
 # can inspect which records will be excluded before committing to a fit.
-sel <- ferx_selection(ex$data, ignore = "DV < 1.0")
-cat("Retained:", nrow(sel), "  Excluded:", nrow(ferx_selection_excluded(sel)), "\n")
+sel <- ferx_apply_selection(ex$data, ignore = "DV < 1.0")
+cat("Retained:", nrow(sel), "  Excluded:", nrow(ferx_apply_selection(sel, excluded = TRUE)), "\n")
 
 # Inspect the excluded rows and the reason they were dropped:
-ferx_selection_excluded(sel)[, c("ID", "TIME", "DV", ".exclude_reason")]
+ferx_apply_selection(sel, excluded = TRUE)[, c("ID", "TIME", "DV", ".exclude_reason")]
 
 # --- Fit with model-file data_selection -----------------------------------
 fit <- ferx_fit(ex$model, ex$data)
@@ -26,5 +26,5 @@ fit$exclusions$n_obs_excluded      # observations excluded by the filter
 fit$exclusions$fired_ignore        # which ignore conditions fired
 
 # The same filter can be applied via the R API instead of the model file:
-fit2 <- ferx_fit(ex$model, ferx_selection(ex$data, ignore = "DV < 1.0"))
+fit2 <- ferx_fit(ex$model, ferx_apply_selection(ex$data, ignore = "DV < 1.0"))
 isTRUE(abs(fit$ofv - fit2$ofv) < 1e-4)

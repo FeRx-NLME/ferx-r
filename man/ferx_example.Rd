@@ -127,6 +127,16 @@ input rate. The number of transit compartments \code{n} is a single
 continuous (estimable) parameter, in contrast to \code{transit_2cpt}'s
 hand-coded chain of fixed integer compartments. Paired with the ferx-core
 transit anchor dataset (correct-specification parameter recovery).}
+\item{one_cpt_transit}{One-compartment model with Savic transit-compartment
+absorption as a fast \emph{analytic} closed form -- \code{pk
+    one_cpt_transit(cl, v, n, mtt)} (ferx-core #611). The Gamma(N+1, KTR)
+absorption time feeds central directly (no first-order \code{ka}, no ODE
+solve), with exact FOCE/FOCEI sensitivities and a continuous, estimable
+\code{N}; the closed-form counterpart to \code{transit_savic}'s ODE
+\code{transit()} input rate. With \code{N = 0} it reduces to first-order
+oral. Shares the transit anchor dataset; because that data adds a
+first-order \code{ka} this \code{ka}-free fit is mildly mis-specified
+(syntax / workflow demo).}
 \item{tte_exponential}{Standalone time-to-event (TTE) model with an
 exponential hazard via the \code{[event_model]} block. Event times on
 CMT 2 follow \code{Exp(LAMBDA)} with \code{LAMBDA = TVLAMBDA *
@@ -259,7 +269,7 @@ file.edit(system.file("examples", "ex_warfarin_dcm.R", package = "ferx"))
 }
 \seealso{
 Other utilities: 
-\code{\link{ferx_columns}()},
+\code{\link{ferx_get_columns}()},
 \code{\link{ferx_load_fit}()},
 \code{\link{ferx_save_fit}()}
 }

@@ -551,7 +551,7 @@ under the model's covariate effects. For inter-occasion variation see
 emitted the warning, e.g. \code{"FOCEI"}; empty string when not
 applicable). Severity/category are assigned by the engine for its
 own warnings and by the R diagnostics layer for the condition-number
-and ETA-normality checks. Inspect with \code{\link{ferx_warnings}}.}
+and ETA-normality checks. Inspect with \code{\link{ferx_get_warnings}}.}
 \item{sir_ess}{SIR effective sample size (NULL if SIR not run)}
 \item{sir_ci_theta, sir_ci_omega, sir_ci_sigma}{SIR \code{95\%} CI matrices
 with columns \code{lower} and \code{upper} (NULL if SIR not run)}
@@ -912,7 +912,7 @@ category \code{"unused_parameter"} is emitted by the parser when a
 parameter is declared in \code{[parameters]} but never referenced in
 \code{[individual_parameters]} or \code{[error_model]}. This usually
 indicates a commented-out expression or a typo in the parameter name.
-Inspect \code{ferx_warnings(fit)} or check \code{ferx_model_validate()}
+Inspect \code{ferx_get_warnings(fit)} or check \code{ferx_model_validate()}
 before fitting.
 }
 
@@ -1366,7 +1366,7 @@ table.
 \item \code{\link{ferx_check_init}} - 5-iteration pilot to validate
 starting values before a full run.
 \item \code{\link{ferx_inits_from_nca}} - NCA-derived starting values.
-\item \code{\link{ferx_warnings}} - structured warnings from the fit.
+\item \code{\link{ferx_get_warnings}} - structured warnings from the fit.
 \item \code{\link{ferx_estimates}} - tidy parameter table with SE / \\%RSE.
 \item \code{\link{ferx_plot_trace}} - convergence trace plot.
 }

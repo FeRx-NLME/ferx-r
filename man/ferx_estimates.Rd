@@ -43,10 +43,10 @@ Other diagnostics:
 \code{\link{ferx_cor_matrix}()},
 \code{\link{ferx_cov_screen}()},
 \code{\link{ferx_eta_cov}()},
+\code{\link{ferx_get_warnings}()},
 \code{\link{ferx_plot_trace}()},
 \code{\link{ferx_runlog_iters}()},
 \code{\link{ferx_trace}()},
-\code{\link{ferx_warnings}()},
 \code{\link{summary.ferx_fit}()}
 }
 \concept{diagnostics}

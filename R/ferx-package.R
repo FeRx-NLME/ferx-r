@@ -10,8 +10,8 @@
 #' \tabular{ll}{
 #'   \strong{Goal}                                      \tab \strong{Function} \cr
 #'   Get a worked example                               \tab \code{\link{ferx_example}} \cr
-#'   Inspect dataset columns                            \tab \code{\link{ferx_columns}} \cr
-#'   Create a model from a template                     \tab \code{\link{ferx_model_new}} \cr
+#'   Inspect dataset columns                            \tab \code{\link{ferx_get_columns}} \cr
+#'   Create a model from a template                     \tab \code{\link{ferx_model}(template = ...)} \cr
 #'   Inspect / edit an existing model                   \tab \code{\link{ferx_model_show}}, \code{\link{ferx_model_edit}}, \code{\link{ferx_model_validate}}, \code{\link{ferx_model_inspect}} \cr
 #'   Sanity-check starting values                       \tab \code{\link{ferx_check_init}}, \code{\link{ferx_inits_from_nca}} \cr
 #'   Fit a model (FOCE / FOCEI / GN / SAEM / IMP)       \tab \code{\link{ferx_fit}} \cr

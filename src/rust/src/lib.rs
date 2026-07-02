@@ -1617,10 +1617,12 @@ fn pk_model_type_label(model: &CompiledModel) -> &'static str {
     match model.pk_model {
         PkModel::OneCptIv => "1-cpt IV",
         PkModel::OneCptOral => "1-cpt oral",
+        PkModel::OneCptTransit => "1-cpt transit",
         PkModel::TwoCptIv => "2-cpt IV",
         PkModel::TwoCptOral => "2-cpt oral",
         PkModel::ThreeCptIv => "3-cpt IV",
         PkModel::ThreeCptOral => "3-cpt oral",
+        PkModel::OneCptTransit => "1-cpt transit",
     }
 }
 
@@ -1656,6 +1658,28 @@ fn residual_label(model: &CompiledModel) -> String {
                 .map(|c| format!("CMT{}={}", c, error_model_to_string(map[c].error_model)))
                 .collect();
             format!("per-CMT ({})", parts.join(", "))
+        }
+        // Covariate-selected residual error (ferx-core #658): an `if/else` on a
+        // covariate picks the endpoint per observation. Label each branch by its
+        // source-order selector label ("branch0", ..., "else") and error model.
+        ErrorSpec::Selected {
+            selector,
+            endpoints,
+        } => {
+            let mut keys: Vec<usize> = endpoints.keys().copied().collect();
+            keys.sort_unstable();
+            let parts: Vec<String> = keys
+                .iter()
+                .map(|k| {
+                    let label = selector
+                        .branch_labels
+                        .get(*k)
+                        .map(String::as_str)
+                        .unwrap_or("?");
+                    format!("{}={}", label, error_model_to_string(endpoints[k].error_model))
+                })
+                .collect();
+            format!("covariate-selected ({})", parts.join(", "))
         }
     }
 }

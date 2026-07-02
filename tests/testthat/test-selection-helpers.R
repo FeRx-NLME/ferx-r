@@ -74,7 +74,7 @@ test_that(".parse_filter_expr rejects an ordered comparison against a non-numeri
 test_that(".parse_filter_expr expands a bare identifier regardless of ignore/accept context", {
   # The parser is context-free: ferx-core routes both ignore and accept clauses
   # through the same FilterClause::parse, so a bare token expands to COL == COL in
-  # either. ferx_selection() applies it on both paths; this locks that intent.
+  # either. ferx_apply_selection() applies it on both paths; this locks that intent.
   res <- ferx:::.parse_filter_expr("STUDY")
   expect_identical(res[[1L]]$col, "study")
   expect_identical(res[[1L]]$op, "==")
