@@ -1,0 +1,39 @@
+#' Population predictions from a NLME model
+#'
+#' Computes population-level predictions (eta = 0) for all subjects.
+#'
+#' @param model Path to a .ferx model file
+#' @param data Path to a NONMEM-format CSV
+#' @param fit Optional \code{ferx_fit} result. When provided, predictions use
+#'   \code{fit$theta} instead of the model file's initial estimate for theta.
+#'
+#' @return A data.frame with columns: ID, TIME, PRED
+#'
+#' @examples
+#' ex <- ferx_example("warfarin")
+#' fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
+#' preds <- ferx_predict(ex$model, ex$data, fit = fit)
+#' head(preds)
+#'
+#' @family simulation
+#' @export
+ferx_predict <- function(model, data, fit = NULL) {
+  stopifnot(file.exists(model), file.exists(data))
+
+  if (is.null(fit)) {
+    return(ferx_rust_predict(
+      model_path = normalizePath(model),
+      data_path = normalizePath(data)
+    ))
+  }
+
+  fit_pieces <- validate_fit_for_params(fit)
+  ferx_rust_predict_from_fit(
+    model_path = normalizePath(model),
+    data_path = normalizePath(data),
+    theta = fit_pieces$theta,
+    omega_flat = fit_pieces$omega_flat,
+    omega_dim = fit_pieces$omega_dim,
+    sigma = fit_pieces$sigma
+  )
+}
