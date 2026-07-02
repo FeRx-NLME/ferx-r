@@ -14,31 +14,32 @@ library(ferx)
 
 ferx model files (`.ferx`) are plain text, so you can create and modify them
 entirely from R without opening an editor. This vignette covers the three
-functions that support that workflow: `ferx_model_new()`,
+functions that support that workflow: `ferx_model()` (scaffold mode),
 `ferx_model_section()`, and `ferx_model_set_section()`.
 
 ## Starting from scratch
 
-`ferx_model_new()` writes a skeleton `.ferx` file for one of five built-in
-templates: `"1cpt_oral"` (default), `"1cpt_iv"`, `"2cpt_oral"`, `"2cpt_iv"`,
-and `"ode"`.
+`ferx_model(template = ...)` writes a skeleton `.ferx` file for one of five
+built-in templates - `"1cpt_oral"` (default), `"1cpt_iv"`, `"2cpt_oral"`,
+`"2cpt_iv"`, `"ode"` - and returns a `ferx_model` object that pipes straight
+into `ferx_fit()`.
 
 Pass `print = TRUE` to preview a template in the console without writing any
 file — useful when you are exploring or copy-pasting a starting point:
 
 ```{r new-print}
-ferx_model_new(print = TRUE)
+ferx_model(print = TRUE)
 ```
 
 ```{r new-print-2cpt, eval = FALSE}
-ferx_model_new(template = "2cpt_iv", print = TRUE)
+ferx_model(template = "2cpt_iv", print = TRUE)
 ```
 
-To write a file, supply a path. By default the file is also opened in your
+To write a file, supply a `path`. By default the file is also opened in your
 editor (`edit = TRUE`); pass `edit = FALSE` to skip that:
 
 ```{r new-write, eval = FALSE}
-ferx_model_new("my_model.ferx", edit = FALSE)
+ferx_model(template = "1cpt_oral", path = "my_model.ferx", edit = FALSE)
 ```
 
 ## Inspecting a section
@@ -96,7 +97,7 @@ estimation method to FOCEI, and run `ferx_fit()`:
 model_path <- file.path(tempdir(), "run1.ferx")
 
 # 1. Write a skeleton
-ferx_model_new(model_path, template = "1cpt_oral", edit = FALSE)
+ferx_model(template = "1cpt_oral", path = model_path, edit = FALSE)
 
 # 2. Switch method to focei
 ferx_model_set_section(model_path, "fit_options", c(
@@ -154,14 +155,14 @@ ferx_model_validate(bad)
 
 ## Overwrite guards
 
-By default `ferx_model_new()` refuses to overwrite an existing file:
+By default `ferx_model(template = ...)` refuses to overwrite an existing file:
 
 ```{r overwrite-error}
 model_path <- tempfile(fileext = ".ferx")
-ferx_model_new(model_path, edit = FALSE)            # creates the file
+ferx_model(template = "1cpt_oral", path = model_path, edit = FALSE)  # creates it
 
 tryCatch(
-  ferx_model_new(model_path, edit = FALSE),          # would overwrite — error
+  ferx_model(template = "1cpt_oral", path = model_path, edit = FALSE), # would overwrite - error
   error = function(e) message(conditionMessage(e))
 )
 ```
@@ -169,6 +170,6 @@ tryCatch(
 Opt in explicitly with `overwrite = TRUE`:
 
 ```{r overwrite-ok}
-ferx_model_new(model_path, template = "1cpt_iv", overwrite = TRUE, edit = FALSE)
+ferx_model(template = "1cpt_iv", path = model_path, overwrite = TRUE, edit = FALSE)
 ferx_model_section(model_path, "structural_model")
 ```
