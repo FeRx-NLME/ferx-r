@@ -209,26 +209,26 @@ test_that("ferx_model_set_section() errors with available names when section is 
 })
 
 # ---------------------------------------------------------------------------
-# ferx_model_new
+# ferx_model() scaffold mode (template = ...)
 # ---------------------------------------------------------------------------
 
-test_that("ferx_model_new(print = TRUE) prints to console and returns NULL invisibly", {
-  result <- withVisible(ferx_model_new(print = TRUE))
+test_that("ferx_model(print = TRUE) prints to console and returns NULL invisibly", {
+  result <- withVisible(ferx_model(print = TRUE))
   expect_null(result$value)
   expect_false(result$visible)
 })
 
-test_that("ferx_model_new(print = TRUE) works for each template", {
+test_that("ferx_model(print = TRUE) works for each template", {
   for (tmpl in c("1cpt_oral", "1cpt_iv", "2cpt_oral", "2cpt_iv", "ode")) {
-    expect_no_error(ferx_model_new(template = tmpl, print = TRUE))
+    expect_no_error(ferx_model(template = tmpl, print = TRUE))
   }
 })
 
-test_that("ferx_model_new() creates a file containing the required sections", {
+test_that("ferx_model(template=) creates a file containing the required sections", {
   path <- tempfile(fileext = ".ferx")
   on.exit(unlink(path))
 
-  ferx_model_new(path, edit = FALSE)
+  ferx_model(template = "1cpt_oral", path = path, edit = FALSE)
 
   expect_true(file.exists(path))
   content <- readLines(path)
@@ -236,48 +236,58 @@ test_that("ferx_model_new() creates a file containing the required sections", {
   expect_true(any(grepl("^\\[fit_options\\]", content)))
 })
 
-test_that("ferx_model_new() errors when file exists and overwrite = FALSE", {
+test_that("ferx_model(template=) errors when file exists and overwrite = FALSE", {
   path <- tempfile(fileext = ".ferx")
   writeLines("existing", path)
   on.exit(unlink(path))
 
-  expect_error(ferx_model_new(path, edit = FALSE), regexp = "already exists")
+  expect_error(
+    ferx_model(template = "1cpt_oral", path = path, edit = FALSE),
+    regexp = "already exists"
+  )
 })
 
-test_that("ferx_model_new() overwrites when overwrite = TRUE", {
+test_that("ferx_model(template=) overwrites when overwrite = TRUE", {
   path <- tempfile(fileext = ".ferx")
   writeLines("old content", path)
   on.exit(unlink(path))
 
-  expect_no_error(ferx_model_new(path, overwrite = TRUE, edit = FALSE))
+  expect_no_error(
+    ferx_model(template = "1cpt_oral", path = path, overwrite = TRUE, edit = FALSE)
+  )
   expect_true(any(grepl("\\[parameters\\]", readLines(path))))
 })
 
-test_that("ferx_model_new() errors on unknown template", {
+test_that("ferx_model(template=) errors on unknown template", {
   expect_error(
-    ferx_model_new(print = TRUE, template = "3cpt_magical"),
+    ferx_model(print = TRUE, template = "3cpt_magical"),
     regexp = "Unknown template"
   )
 })
 
-test_that("ferx_model_new() errors when path is NULL and print = FALSE", {
-  expect_error(ferx_model_new(print = FALSE), regexp = "'path' is required")
+test_that("ferx_model(template=) errors when path is NULL and print = FALSE", {
+  expect_error(
+    ferx_model(template = "1cpt_oral", print = FALSE),
+    regexp = "'path' is required"
+  )
 })
 
-test_that("ferx_model_new() errors when path has wrong extension", {
+test_that("ferx_model(template=) errors when path has wrong extension", {
   expect_error(
-    ferx_model_new(tempfile(fileext = ".txt"), edit = FALSE),
+    ferx_model(template = "1cpt_oral", path = tempfile(fileext = ".txt"),
+               edit = FALSE),
     regexp = "\\.ferx"
   )
 })
 
-test_that("ferx_model_new() returns path invisibly", {
+test_that("ferx_model(template=) returns a ferx_model object pointing at the file", {
   path <- tempfile(fileext = ".ferx")
   on.exit(unlink(path))
 
-  result <- withVisible(ferx_model_new(path, edit = FALSE))
-  expect_equal(result$value, path)
-  expect_false(result$visible)
+  m <- ferx_model(template = "1cpt_oral", path = path, edit = FALSE)
+  expect_s3_class(m, "ferx_model")
+  expect_equal(m$model, path)
+  expect_null(m$data)
 })
 
 # ---------------------------------------------------------------------------
@@ -388,11 +398,12 @@ test_that("ferx_model_show() handles a file containing only comment lines", {
   expect_true(any(grepl("# this is a comment", out, fixed = TRUE)))
 })
 
-test_that("ferx_model_show() pipes: ferx_model_new() |> ferx_model_show()", {
+test_that("ferx_model_show() pipes: ferx_model(template=)$model |> ferx_model_show()", {
   path <- tempfile(fileext = ".ferx")
   on.exit(unlink(path))
 
-  result <- ferx_model_new(path, edit = FALSE) |> ferx_model_show()
+  result <- ferx_model(template = "1cpt_oral", path = path, edit = FALSE)$model |>
+    ferx_model_show()
   expect_equal(result, path)
 })
 
@@ -529,7 +540,7 @@ test_that("ferx_model_set_section() pipe chain: new |> set_section |> show", {
   on.exit(unlink(path))
 
   out <- capture.output(
-    ferx_model_new(path, edit = FALSE) |>
+    ferx_model(template = "1cpt_oral", path = path, edit = FALSE)$model |>
       ferx_model_set_section("fit_options", c("  method = focei", "  maxiter = 999")) |>
       ferx_model_show()
   )
@@ -538,16 +549,16 @@ test_that("ferx_model_set_section() pipe chain: new |> set_section |> show", {
 })
 
 # ---------------------------------------------------------------------------
-# ferx_model_new — additional coverage
+# ferx_model() scaffold mode — additional coverage
 # ---------------------------------------------------------------------------
 
-test_that("ferx_model_new() each template contains all required sections", {
+test_that("ferx_model(template=) each template contains all required sections", {
   required <- c("parameters", "individual_parameters", "structural_model",
                 "error_model", "fit_options")
   for (tmpl in c("1cpt_oral", "1cpt_iv", "2cpt_oral", "2cpt_iv", "ode")) {
     path <- tempfile(fileext = ".ferx")
     on.exit(unlink(path), add = TRUE)
-    ferx_model_new(path, template = tmpl, edit = FALSE)
+    ferx_model(template = tmpl, path = path, edit = FALSE)
     content <- readLines(path)
     for (sec in required) {
       expect_true(
@@ -558,14 +569,14 @@ test_that("ferx_model_new() each template contains all required sections", {
   }
 })
 
-test_that("ferx_model_new() templates do not emit the deprecated [initial_values] block", {
+test_that("ferx_model(template=) templates do not emit the deprecated [initial_values] block", {
   # Initial values now live inline in [parameters] — re-emitting them in a
   # separate block would be redundant boilerplate that the parser silently
   # ignores. Guards against regressing the issue-16 fix.
   for (tmpl in c("1cpt_oral", "1cpt_iv", "2cpt_oral", "2cpt_iv", "ode")) {
     path <- tempfile(fileext = ".ferx")
     on.exit(unlink(path), add = TRUE)
-    ferx_model_new(path, template = tmpl, edit = FALSE)
+    ferx_model(template = tmpl, path = path, edit = FALSE)
     content <- readLines(path)
     expect_false(
       any(grepl("^\\[initial_values\\]", content)),
@@ -574,14 +585,14 @@ test_that("ferx_model_new() templates do not emit the deprecated [initial_values
   }
 })
 
-test_that("ferx_model_new() print=TRUE output matches what would be written to file", {
+test_that("ferx_model(template=) print=TRUE output matches what would be written to file", {
   for (tmpl in c("1cpt_oral", "1cpt_iv", "2cpt_oral", "2cpt_iv", "ode")) {
     path <- tempfile(fileext = ".ferx")
     on.exit(unlink(path), add = TRUE)
-    ferx_model_new(path, template = tmpl, edit = FALSE)
+    ferx_model(template = tmpl, path = path, edit = FALSE)
     file_lines <- readLines(path)
 
-    printed <- capture.output(ferx_model_new(template = tmpl, print = TRUE))
+    printed <- capture.output(ferx_model(template = tmpl, print = TRUE))
     # capture.output adds a trailing "" for the final cat("\n"); drop it
     printed <- printed[nchar(printed) > 0 | seq_along(printed) < length(printed)]
 
@@ -590,31 +601,30 @@ test_that("ferx_model_new() print=TRUE output matches what would be written to f
   }
 })
 
-test_that("ferx_model_new() created file is readable by ferx_model_section()", {
+test_that("ferx_model(template=) created file is readable by ferx_model_section()", {
   path <- tempfile(fileext = ".ferx")
   on.exit(unlink(path))
 
-  ferx_model_new(path, edit = FALSE)
+  ferx_model(template = "1cpt_oral", path = path, edit = FALSE)
   expect_no_error(ferx_model_section(path, "parameters"))
 })
 
-test_that("ferx_model_new() created file is parseable by ferx_model_inspect()", {
+test_that("ferx_model(template=) created file is parseable by ferx_model_inspect()", {
   for (tmpl in c("1cpt_oral", "1cpt_iv", "2cpt_oral", "2cpt_iv")) {
     path <- tempfile(fileext = ".ferx")
     on.exit(unlink(path), add = TRUE)
-    ferx_model_new(path, template = tmpl, edit = FALSE)
+    ferx_model(template = tmpl, path = path, edit = FALSE)
     result <- ferx_model_inspect(path)
     expect_false(is.null(result$model_type),
                  info = paste("template", tmpl, "model_type is NULL"))
   }
 })
 
-test_that("ferx_model_new() pipe chain: new |> set_section", {
+test_that("ferx_model(template=) pipe chain: scaffold |> set_section", {
   path <- tempfile(fileext = ".ferx")
   on.exit(unlink(path))
 
-  path |>
-    ferx_model_new(edit = FALSE) |>
+  ferx_model(template = "1cpt_oral", path = path, edit = FALSE)$model |>
     ferx_model_set_section("fit_options", c("  method = focei", "  maxiter = 999"))
 
   expect_equal(ferx_model_section(path, "fit_options"), c("  method = focei", "  maxiter = 999"))

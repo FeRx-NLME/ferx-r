@@ -4,17 +4,45 @@
 \alias{ferx_model}
 \title{Create a ferx_model object}
 \usage{
-ferx_model(data = NULL, model)
+ferx_model(
+  data = NULL,
+  model = NULL,
+  template = NULL,
+  path = NULL,
+  overwrite = FALSE,
+  edit = TRUE,
+  print = FALSE
+)
 }
 \arguments{
 \item{data}{Optional path to a NONMEM-format CSV data file. Can be omitted
 here and supplied later to \code{\link{ferx_fit}}.}
 
-\item{model}{Path to a \code{.ferx} model file. The file must exist.}
+\item{model}{Path to an existing \code{.ferx} model file (wrap mode). The
+file must exist. Leave \code{NULL} in scaffold mode.}
+
+\item{template}{Scaffold mode. One of \code{"1cpt_oral"} (default),
+\code{"1cpt_iv"}, \code{"2cpt_oral"}, \code{"2cpt_iv"}, or \code{"ode"}.
+Supplying it (or \code{print = TRUE}) triggers scaffold mode.}
+
+\item{path}{Scaffold mode. Path for the new \code{.ferx} file. Required
+unless \code{print = TRUE}. Must not already exist unless
+\code{overwrite = TRUE}.}
+
+\item{overwrite}{Scaffold mode. Logical. Overwrite \code{path} if it already
+exists? Defaults to \code{FALSE}.}
+
+\item{edit}{Scaffold mode. Logical. Open the new file in an editor after
+writing? Defaults to \code{TRUE}.}
+
+\item{print}{Scaffold mode. Logical. If \code{TRUE}, print the skeleton to
+the console instead of writing a file (no file created, no editor opened).
+Defaults to \code{FALSE}.}
 }
 \value{
 An object of class \code{ferx_model} with fields \code{$model} and
-\code{$data}.
+\code{$data}. In scaffold mode with \code{print = TRUE}, \code{NULL}
+invisibly.
 }
 \description{
 Constructs a \code{ferx_model} S3 object that bundles a \code{.ferx} model
@@ -45,6 +73,13 @@ All fit options (\code{method}, \code{covariance}, \code{threads},
 \code{settings}, ...) can still be passed directly to \code{ferx_fit()} in
 the pipe - the \code{ferx_model} object only carries the file paths. See
 \code{\link{ferx_fit}} for the full list of options and post-fit outputs.
+
+\strong{Scaffold mode.} Passing \code{template =} (or \code{print = TRUE})
+switches to scaffold mode: a new \code{.ferx} file is written to \code{path}
+from a built-in skeleton and wrapped in a \code{ferx_model} object, so the
+result pipes straight into \code{\link{ferx_fit}}. \code{print = TRUE} prints
+the skeleton to the console and writes nothing (returns \code{NULL}). This
+replaces the former \code{ferx_model_new()}.
 }
 \examples{
 ex <- ferx_example("warfarin")
@@ -55,6 +90,14 @@ print(m)
 
 # Without data: supply at fit time via ferx_fit(data = ...)
 m <- ferx_model(model = ex$model)
+
+# Scaffold a new model from a template (writes the file, returns a ferx_model)
+tmp <- tempfile(fileext = ".ferx")
+m <- ferx_model(template = "1cpt_oral", path = tmp, edit = FALSE)
+print(m)
+
+# Peek at a skeleton without writing anything
+ferx_model(template = "2cpt_iv", print = TRUE)
 
 \dontrun{
 # ?? Minimal pipe ????????????????????????????????????????????????????????
@@ -119,7 +162,6 @@ Other model-editing:
 \code{\link{ferx_get_section}()},
 \code{\link{ferx_model_edit}()},
 \code{\link{ferx_model_inspect}()},
-\code{\link{ferx_model_new}()},
 \code{\link{ferx_model_section}()},
 \code{\link{ferx_model_set_section}()},
 \code{\link{ferx_model_show}()},
