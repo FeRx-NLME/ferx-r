@@ -33,10 +33,41 @@ excl <- ferx_apply_selection(fit, excluded = TRUE)
   `covariate-selected (...)` in `model_structure$residual`, matching the new
   `[error_model]` `if/else` selector in ferx-core
   ([ferx-core #658](https://github.com/FeRx-NLME/ferx-core/issues/658)).
+`ferx_model_new()` is removed (#231). Scaffolding a new model from a template
+is now a mode of the `ferx_model()` constructor, selected by passing
+`template =` (or `print = TRUE` to preview a skeleton without writing a file).
+Unlike the old function, which returned the file path, scaffold mode returns a
+`ferx_model` object, so it pipes straight into `ferx_fit()`. The output path
+moves from the first positional argument to the named `path =` argument:
+
+```r
+# before
+ferx_model_new("m.ferx", template = "1cpt_oral", edit = FALSE)
+ferx_model_new(print = TRUE)
+
+# after
+ferx_model(template = "1cpt_oral", path = "m.ferx", edit = FALSE)
+ferx_model(print = TRUE)
+
+# scaffold + fit in one pipe
+ferx_model(template = "1cpt_oral", path = "m.ferx", edit = FALSE) |>
+  ferx_fit(data)
+```
 
 # ferx 0.1.6
 
 ## Added
+
+- **Analytic Savic transit absorption is now available in model files** — a
+  `pk one_cpt_transit(cl, v, n, mtt)` structural model: Savic transit-compartment
+  absorption fed straight into a one-compartment disposition as a fast analytical
+  closed form (exponential tilting; no ODE solve), with exact FOCE/FOCEI
+  sensitivities and a continuous, estimable number of transit compartments `N`
+  (via ferx-core #611 / #386). It is the closed-form counterpart to the ODE
+  `transit(n, mtt)` input rate (`ferx_example("transit_savic")`) and is much
+  faster; with `N = 0` it reduces to first-order oral absorption. New bundled
+  example `ferx_example("one_cpt_transit")` with a runnable
+  `inst/examples/ex_one_cpt_transit.R`.
 
 - **State-reactive (adaptive / feedback) dosing simulation** — `ferx_simulate_adaptive()`
   runs a forward simulation whose dosing regimen is decided at run time by the

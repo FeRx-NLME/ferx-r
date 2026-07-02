@@ -11,7 +11,7 @@
 
 write_pipe_test_model <- function() {
   path <- tempfile(fileext = ".ferx")
-  ferx_model_new(path, edit = FALSE)
+  ferx_model(template = "1cpt_oral", path = path, edit = FALSE)
   path
 }
 
@@ -276,11 +276,11 @@ test_that("pipe chain: ferx_model() |> ferx_get_section() |> ferx_set_section() 
 # Block 5 — Full pipe chains (golden paths)
 # ---------------------------------------------------------------------------
 
-test_that("pipe chain: ferx_model_new() |> ferx_model_set_section() |> ferx_model_inspect()", {
+test_that("pipe chain: ferx_model(template=) |> ferx_model_set_section() |> ferx_model_inspect()", {
   path <- tempfile(fileext = ".ferx")
   on.exit(unlink(path))
 
-  result <- ferx_model_new(path, edit = FALSE) |>
+  result <- ferx_model(template = "1cpt_oral", path = path, edit = FALSE)$model |>
     ferx_model_set_section("fit_options", c("  method = focei", "  maxiter = 999")) |>
     ferx_model_inspect()
 
