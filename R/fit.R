@@ -1870,10 +1870,8 @@ ferx_fit <- function(model, data = NULL,
   result$omega_dim <- NULL
   result$omega_iov_dim <- NULL
 
-  # Print mu-referencing detections as informational messages
-  mu_ref_warnings <- grep("mu-ref", result$warnings, value = TRUE)
-  for (w in mu_ref_warnings) {
-    eta_names <- sub("^mu-ref:\\s*", "", w)
+  # Print mu-referencing detections as informational messages.
+  for (eta_names in .ferx_mu_ref_detection_names(result$warnings)) {
     message("Mu-referencing detected for: ", eta_names)
   }
 
@@ -1980,6 +1978,17 @@ ferx_fit <- function(model, data = NULL,
   }
 
   result
+}
+
+# Extract legacy mu-reference detection entries from the warnings vector.
+# This intentionally ignores warnings such as "not mu-referenced".
+.ferx_mu_ref_detection_names <- function(warnings) {
+  mu_ref_warnings <- grep(
+    "^(\\[[^]]+\\]\\s*)?mu-ref:",
+    warnings %||% character(0),
+    value = TRUE
+  )
+  sub("^(\\[[^]]+\\]\\s*)?mu-ref:\\s*", "", mu_ref_warnings)
 }
 
 # Assemble the structured-warning data frame for a fit result. Core supplies

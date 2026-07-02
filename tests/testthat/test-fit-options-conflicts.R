@@ -224,6 +224,20 @@ test_that("ferx_fit() does not warn when defaults are accepted (regression for #
   expect_equal(fit$model_file_settings$method, "foce")
 })
 
+test_that("mu-reference detection messages ignore non-mu-reference warnings", {
+  warnings <- c(
+    "mu-ref: ETA_CL, ETA_V",
+    "SAEM: individual parameter(s) not mu-referenced: CL. This can strongly affect convergence.",
+    "[SAEM] individual parameter(s) not mu-referenced: V",
+    "[FOCEI] mu-ref: ETA_KA"
+  )
+
+  expect_equal(
+    .ferx_mu_ref_detection_names(warnings),
+    c("ETA_CL, ETA_V", "ETA_KA")
+  )
+})
+
 test_that("ferx_fit() warns when an explicit dedicated arg overrides the model file", {
   fx <- make_fast_warfarin()  # model file: method = foce
   on.exit(unlink(fx$dir, recursive = TRUE))
