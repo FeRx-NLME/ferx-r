@@ -11,6 +11,21 @@ names are removed - no deprecation shims. Update calls as follows:
 - `ferx_to_frem()` -> `ferx_model_to_frem()` (moves into the `ferx_model_*` family)
 - `ferx_warnings()` -> `ferx_get_warnings()`
 
+`ferx_selection_excluded()` is removed. To retrieve excluded records, pass
+`excluded = TRUE` to `ferx_apply_selection()`, which now also accepts a
+`ferx_data` or `ferx_fit` object as its `data` argument:
+
+```r
+# before
+sel  <- ferx_selection(data, ignore = "DV < 1")
+excl <- ferx_selection_excluded(sel)
+excl <- ferx_selection_excluded(fit)
+
+# after
+excl <- ferx_apply_selection(data, ignore = "DV < 1", excluded = TRUE)
+excl <- ferx_apply_selection(fit, excluded = TRUE)
+```
+
 # ferx 0.1.6
 
 ## Added

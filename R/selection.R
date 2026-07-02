@@ -10,10 +10,18 @@
 #' be excluded before committing to a fit, or to pass pre-built conditions
 #' directly to \code{\link{ferx_fit}}.
 #'
-#' @param data Character path to a NONMEM CSV file, or a data.frame already
-#'   read into memory. When a path is supplied it is recorded on the returned
-#'   object so \code{\link{ferx_fit}(data = <result>)} can pass it through
-#'   to Rust without writing a temporary file.
+#' @param data One of:
+#'   \itemize{
+#'     \item a character path to a NONMEM CSV file (recorded on the returned
+#'       object so \code{\link{ferx_fit}(data = <result>)} can pass it through
+#'       to Rust without writing a temporary file),
+#'     \item a data.frame already read into memory,
+#'     \item a \code{ferx_data} object returned by an earlier call (its cached
+#'       selection is reused; combine with \code{excluded = TRUE} to pull the
+#'       excluded records back out), or
+#'     \item a \code{ferx_fit} object, whose fired data-selection rules are
+#'       replayed against the original dataset.
+#'   }
 #' @param ignore Character vector of filter expressions. A record is
 #'   \strong{excluded} when any expression evaluates to \code{TRUE}.
 #'   Expressions use column names with standard comparison operators
@@ -24,10 +32,16 @@
 #'   \strong{kept} only when all conditions pass; excluded if any fail.
 #' @param ignore_ids Numeric or character vector of subject IDs to exclude
 #'   entirely.
+#' @param excluded Logical. When \code{FALSE} (default) the retained records are
+#'   returned as a \code{ferx_data} object. When \code{TRUE} the function returns
+#'   a plain data.frame of the \strong{excluded} records instead, with an extra
+#'   \code{.exclude_reason} column naming the first rule that dropped each record
+#'   (this replaces the former \code{ferx_selection_excluded()} accessor).
 #'
-#' @return An object of class \code{"ferx_data"} (also a \code{data.frame})
-#'   containing the \strong{retained} records. The following attributes carry
-#'   metadata:
+#' @return When \code{excluded = FALSE}, an object of class \code{"ferx_data"}
+#'   (also a \code{data.frame}) containing the \strong{retained} records. When
+#'   \code{excluded = TRUE}, a plain data.frame of the excluded records. The
+#'   \code{ferx_data} object carries these attributes:
 #'   \describe{
 #'     \item{\code{source_path}}{Character path supplied as \code{data}, or
 #'       \code{NULL} when \code{data} was a data.frame.}
@@ -41,12 +55,24 @@
 #'       \code{fired_ignore}, \code{fired_accept}.}
 #'   }
 #'
-#' @seealso \code{\link{ferx_selection_excluded}} to retrieve excluded rows;
-#'   \code{\link{ferx_fit}} which accepts a \code{ferx_data} object as
-#'   \code{data}.
+#' @seealso \code{\link{ferx_fit}} which accepts a \code{ferx_data} object as
+#'   \code{data}. Pass \code{excluded = TRUE} to retrieve the excluded rows.
 #' @family data selection
 #' @export
-ferx_apply_selection <- function(data, ignore = NULL, accept = NULL, ignore_ids = NULL) {
+ferx_apply_selection <- function(data, ignore = NULL, accept = NULL,
+                                 ignore_ids = NULL, excluded = FALSE) {
+  # An already-selected object caches its excluded rows on an attribute; a
+  # fitted object carries its fired conditions. Handle both before the raw
+  # path/data.frame compute so callers can recover the selection - or, with
+  # excluded = TRUE, the excluded rows - straight from those objects.
+  if (inherits(data, "ferx_data")) {
+    if (isTRUE(excluded)) return(attr(data, "excluded_rows"))
+    return(data)
+  }
+  if (inherits(data, "ferx_fit")) {
+    return(.ferx_selection_from_fit(data, excluded = excluded))
+  }
+
   source_path <- NULL
   if (is.character(data) && length(data) == 1L) {
     source_path <- data
@@ -54,7 +80,7 @@ ferx_apply_selection <- function(data, ignore = NULL, accept = NULL, ignore_ids 
   } else if (is.data.frame(data)) {
     df <- data
   } else {
-    stop("`data` must be a file path or a data.frame")
+    stop("`data` must be a file path, a data.frame, a ferx_data, or a ferx_fit object")
   }
   if (!is.null(ignore) && !is.character(ignore))
     stop("`ignore` must be a character vector")
@@ -142,6 +168,8 @@ ferx_apply_selection <- function(data, ignore = NULL, accept = NULL, ignore_ids 
     fired_accept         = fired_accept
   )
 
+  if (isTRUE(excluded)) return(excluded_df)
+
   structure(
     retained,
     class        = c("ferx_data", "data.frame"),
@@ -189,7 +217,7 @@ print.ferx_data <- function(x, n = 6L, ...) {
                   paste(ex$excluded_subject_ids, collapse = ", ")))
   }
   if (n_excl > 0L)
-    cat("  Use ferx_selection_excluded(x) to inspect excluded records.\n")
+    cat("  Pass excluded = TRUE to ferx_apply_selection() to inspect excluded records.\n")
   cat("\n")
 
   print(utils::head(as.data.frame(x), n = n), ...)
@@ -199,51 +227,35 @@ print.ferx_data <- function(x, n = 6L, ...) {
   invisible(x)
 }
 
-#' Retrieve excluded records from a ferx_data or ferx_fit object
-#'
-#' @param x A \code{ferx_data} object returned by \code{\link{ferx_apply_selection}},
-#'   or a \code{ferx_fit} object.
-#' @param ... Ignored.
-#' @return A data.frame of excluded records. For \code{ferx_data} objects the
-#'   frame includes a \code{.exclude_reason} column naming the first rule that
-#'   excluded each record.
-#' @family data selection
-#' @export
-ferx_selection_excluded <- function(x, ...) UseMethod("ferx_selection_excluded")
-
-#' @export
-ferx_selection_excluded.ferx_data <- function(x, ...) attr(x, "excluded_rows")
-
-#' @export
-ferx_selection_excluded.ferx_fit <- function(x, ...) {
-  ex <- x$exclusions
+# Replay a fitted object's fired data-selection rules against the original
+# dataset. Backs `ferx_apply_selection(<ferx_fit>, excluded = ...)`: returns the
+# retained ferx_data (excluded = FALSE) or the excluded rows (excluded = TRUE).
+.ferx_selection_from_fit <- function(fit, excluded = FALSE) {
+  ex <- fit$exclusions
   if (is.null(ex)) {
     message("No data-selection rules were active for this fit.")
     return(invisible(NULL))
   }
-  dp <- x$data_path
+  dp <- fit$data_path
   if (is.null(dp) || !nzchar(dp) || !file.exists(dp)) {
     message("Data path not available on fit object; cannot retrieve excluded records.")
     return(invisible(NULL))
   }
   n_excl <- ex$n_obs_excluded + ex$n_dose_excluded + ex$n_other_excluded
-  if (n_excl == 0L && length(ex$excluded_subject_ids) == 0L) {
+  if (isTRUE(excluded) && n_excl == 0L && length(ex$excluded_subject_ids) == 0L) {
     message("No records were excluded by data-selection rules.")
     return(invisible(data.frame()))
   }
-  # Replay the fired conditions through the R-side preview filter to obtain the
-  # actual excluded rows with their .exclude_reason column.
-  # fired_ignore / fired_accept carry a "ignore: " / "accept: " prefix (matching
-  # the Rust ExclusionSummary format); strip it to recover bare expressions for
-  # ferx_apply_selection(ignore=...).
+  # fired_ignore / fired_accept carry an "ignore: " / "accept: " prefix (matching
+  # the Rust ExclusionSummary format); strip it to recover bare expressions.
   strip_prefix <- function(x) sub("^(ignore|accept): ", "", x)
-  sel <- ferx_apply_selection(
+  ferx_apply_selection(
     dp,
     ignore     = strip_prefix(ex$fired_ignore),
     accept     = strip_prefix(ex$fired_accept),
-    ignore_ids = ex$excluded_subject_ids
+    ignore_ids = ex$excluded_subject_ids,
+    excluded   = excluded
   )
-  ferx_selection_excluded(sel)
 }
 
 .get_col_sel <- function(df, name) {

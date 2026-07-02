@@ -4,13 +4,27 @@
 \alias{ferx_apply_selection}
 \title{Preview data-selection filtering}
 \usage{
-ferx_apply_selection(data, ignore = NULL, accept = NULL, ignore_ids = NULL)
+ferx_apply_selection(
+  data,
+  ignore = NULL,
+  accept = NULL,
+  ignore_ids = NULL,
+  excluded = FALSE
+)
 }
 \arguments{
-\item{data}{Character path to a NONMEM CSV file, or a data.frame already
-read into memory. When a path is supplied it is recorded on the returned
+\item{data}{One of:
+\itemize{
+\item a character path to a NONMEM CSV file (recorded on the returned
 object so \code{\link{ferx_fit}(data = <result>)} can pass it through
-to Rust without writing a temporary file.}
+to Rust without writing a temporary file),
+\item a data.frame already read into memory,
+\item a \code{ferx_data} object returned by an earlier call (its cached
+selection is reused; combine with \code{excluded = TRUE} to pull the
+excluded records back out), or
+\item a \code{ferx_fit} object, whose fired data-selection rules are
+replayed against the original dataset.
+}}
 
 \item{ignore}{Character vector of filter expressions. A record is
 \strong{excluded} when any expression evaluates to \code{TRUE}.
@@ -24,11 +38,18 @@ Example: \code{c("DV < 0.001", "EVID != 0")}.}
 
 \item{ignore_ids}{Numeric or character vector of subject IDs to exclude
 entirely.}
+
+\item{excluded}{Logical. When \code{FALSE} (default) the retained records are
+returned as a \code{ferx_data} object. When \code{TRUE} the function returns
+a plain data.frame of the \strong{excluded} records instead, with an extra
+\code{.exclude_reason} column naming the first rule that dropped each record
+(this replaces the former \code{ferx_selection_excluded()} accessor).}
 }
 \value{
-An object of class \code{"ferx_data"} (also a \code{data.frame})
-containing the \strong{retained} records. The following attributes carry
-metadata:
+When \code{excluded = FALSE}, an object of class \code{"ferx_data"}
+(also a \code{data.frame}) containing the \strong{retained} records. When
+\code{excluded = TRUE}, a plain data.frame of the excluded records. The
+\code{ferx_data} object carries these attributes:
 \describe{
 \item{\code{source_path}}{Character path supplied as \code{data}, or
 \code{NULL} when \code{data} was a data.frame.}
@@ -54,11 +75,7 @@ be excluded before committing to a fit, or to pass pre-built conditions
 directly to \code{\link{ferx_fit}}.
 }
 \seealso{
-\code{\link{ferx_selection_excluded}} to retrieve excluded rows;
 \code{\link{ferx_fit}} which accepts a \code{ferx_data} object as
-\code{data}.
-
-Other data selection: 
-\code{\link{ferx_selection_excluded}()}
+\code{data}. Pass \code{excluded = TRUE} to retrieve the excluded rows.
 }
 \concept{data selection}

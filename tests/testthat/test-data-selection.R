@@ -257,17 +257,17 @@ test_that("print.ferx_data shows no excluded message when filter does not fire",
   sel <- ferx_apply_selection(ex$data, ignore = "DV < 0.05")
   out <- capture.output(print(sel))
   expect_true(any(grepl("ferx_data", out, fixed = TRUE)))
-  expect_false(any(grepl("ferx_selection_excluded", out, fixed = TRUE)))
+  expect_false(any(grepl("excluded = TRUE", out, fixed = TRUE)))
 })
 
 # ---------------------------------------------------------------------------
-# 10. ferx_selection_excluded() helpers
+# 10. ferx_apply_selection(excluded = TRUE) on a ferx_data
 # ---------------------------------------------------------------------------
-test_that("ferx_selection_excluded.ferx_data returns a data.frame with .exclude_reason", {
+test_that("ferx_apply_selection(sel, excluded = TRUE) returns a data.frame with .exclude_reason", {
   skip_on_cran()
   ex   <- ferx_example("warfarin")
   sel  <- ferx_apply_selection(ex$data, ignore = "DV < 1.0")
-  excl <- ferx_selection_excluded(sel)
+  excl <- ferx_apply_selection(sel, excluded = TRUE)
   expect_s3_class(excl, "data.frame")
   expect_true(nrow(excl) > 0L)
   expect_true(".exclude_reason" %in% names(excl))
@@ -282,7 +282,7 @@ test_that("ferx_apply_selection() accept= excludes records failing the condition
   df  <- utils::read.csv(ex$data, stringsAsFactors = FALSE, check.names = FALSE)
   # keep only obs with DV > 5; MDV=1 / dose rows (DV=0) also fail this accept
   sel <- ferx_apply_selection(ex$data, accept = "DV > 5")
-  excl <- ferx_selection_excluded(sel)
+  excl <- ferx_apply_selection(sel, excluded = TRUE)
   expect_s3_class(excl, "data.frame")
   expect_true(nrow(excl) > 0L)
   # retained rows all satisfy DV > 5 (for non-dose rows)
@@ -297,7 +297,7 @@ test_that("ferx_apply_selection() ignore_ids= excludes entire subject", {
   ex  <- ferx_example("warfarin")
   df  <- utils::read.csv(ex$data, stringsAsFactors = FALSE, check.names = FALSE)
   sel <- ferx_apply_selection(ex$data, ignore_ids = 1L)
-  excl <- ferx_selection_excluded(sel)
+  excl <- ferx_apply_selection(sel, excluded = TRUE)
 
   # subject 1 rows are all excluded
   expect_true(all(excl$ID == 1L))
@@ -347,12 +347,12 @@ test_that("ferx_fit errors clearly when ferx_data has no source_path", {
 })
 
 # ---------------------------------------------------------------------------
-# 13. ferx_selection_excluded.ferx_fit replays fired conditions
+# 13. ferx_apply_selection(fit, excluded = TRUE) replays fired conditions
 # ---------------------------------------------------------------------------
-test_that("ferx_selection_excluded.ferx_fit returns excluded rows with .exclude_reason", {
+test_that("ferx_apply_selection(fit, excluded = TRUE) returns excluded rows with .exclude_reason", {
   skip_on_cran()
   fit  <- warfarin_sel_fit()
-  excl <- ferx_selection_excluded(fit)
+  excl <- ferx_apply_selection(fit, excluded = TRUE)
   expect_s3_class(excl, "data.frame")
   expect_true(nrow(excl) > 0L)
   expect_true(".exclude_reason" %in% names(excl))
@@ -362,12 +362,12 @@ test_that("ferx_selection_excluded.ferx_fit returns excluded rows with .exclude_
 })
 
 # ---------------------------------------------------------------------------
-# 14. ferx_selection_excluded.ferx_fit NULL exclusions path
+# 14. ferx_apply_selection(fit, excluded = TRUE) NULL exclusions path
 # ---------------------------------------------------------------------------
-test_that("ferx_selection_excluded.ferx_fit messages when no data-selection rules", {
+test_that("ferx_apply_selection(fit, excluded = TRUE) messages when no data-selection rules", {
   skip_on_cran()
   fit <- warfarin_fit()   # plain fit; fit$exclusions is NULL
-  expect_message(ferx_selection_excluded(fit), "No data-selection rules")
+  expect_message(ferx_apply_selection(fit, excluded = TRUE), "No data-selection rules")
 })
 
 # ---------------------------------------------------------------------------
@@ -469,14 +469,14 @@ test_that("ferx_runlog shows fired_accept and excluded_subject_ids when present"
 test_that("ferx_apply_selection() == operator excludes matching row", {
   skip_on_cran()
   sel <- ferx_apply_selection(.sel_test_df(), ignore = "DV == 2.0")
-  expect_equal(nrow(ferx_selection_excluded(sel)), 1L)
-  expect_equal(ferx_selection_excluded(sel)$DV, 2.0)
+  expect_equal(nrow(ferx_apply_selection(sel, excluded = TRUE)), 1L)
+  expect_equal(ferx_apply_selection(sel, excluded = TRUE)$DV, 2.0)
 })
 
 test_that("ferx_apply_selection() != operator excludes non-matching rows", {
   skip_on_cran()
   sel <- ferx_apply_selection(.sel_test_df(), ignore = "DV != 2.0")
-  excl <- ferx_selection_excluded(sel)
+  excl <- ferx_apply_selection(sel, excluded = TRUE)
   expect_true(nrow(excl) > 0L)
   expect_true(all(excl$DV != 2.0))
 })
@@ -484,7 +484,7 @@ test_that("ferx_apply_selection() != operator excludes non-matching rows", {
 test_that("ferx_apply_selection() <= operator excludes rows at or below threshold", {
   skip_on_cran()
   sel  <- ferx_apply_selection(.sel_test_df(), ignore = "DV <= 0.5")
-  excl <- ferx_selection_excluded(sel)
+  excl <- ferx_apply_selection(sel, excluded = TRUE)
   expect_equal(nrow(excl), 1L)
   expect_equal(excl$DV, 0.5)
 })
@@ -492,7 +492,7 @@ test_that("ferx_apply_selection() <= operator excludes rows at or below threshol
 test_that("ferx_apply_selection() >= operator excludes rows at or above threshold", {
   skip_on_cran()
   sel  <- ferx_apply_selection(.sel_test_df(), ignore = "DV >= 5.5")
-  excl <- ferx_selection_excluded(sel)
+  excl <- ferx_apply_selection(sel, excluded = TRUE)
   expect_equal(nrow(excl), 1L)
   expect_equal(excl$DV, 5.5)
 })
@@ -509,7 +509,7 @@ test_that("ferx_apply_selection() handles character rhs (quoted string)", {
     stringsAsFactors = FALSE
   )
   sel  <- ferx_apply_selection(df, ignore = "ID == 'B'")
-  excl <- ferx_selection_excluded(sel)
+  excl <- ferx_apply_selection(sel, excluded = TRUE)
   expect_equal(nrow(excl), 1L)
   expect_equal(excl$ID, "B")
 })
@@ -518,7 +518,7 @@ test_that("ferx_apply_selection() handles && (AND) multi-part expression", {
   skip_on_cran()
   # Only the row where DV >= 3 AND ID == 2 should be excluded.
   sel  <- ferx_apply_selection(.sel_test_df(), ignore = "DV >= 3.0 && ID == 2")
-  excl <- ferx_selection_excluded(sel)
+  excl <- ferx_apply_selection(sel, excluded = TRUE)
   expect_true(nrow(excl) > 0L)
   expect_true(all(excl$ID == 2L))
   expect_true(all(excl$DV >= 3.0))
@@ -530,6 +530,6 @@ test_that("ferx_apply_selection() ignores unparseable expression (returns nothin
   # IGNORE=C shorthand) -> .parse_filter_expr returns NULL -> .eval_expr returns
   # FALSE -> no exclusion.
   sel <- ferx_apply_selection(.sel_test_df(), ignore = "UNPARSEABLE EXPR HERE")
-  expect_equal(nrow(ferx_selection_excluded(sel)), 0L)
+  expect_equal(nrow(ferx_apply_selection(sel, excluded = TRUE)), 0L)
   expect_equal(length(.sel_attr(sel, "exclusions")$fired_ignore), 0L)
 })
