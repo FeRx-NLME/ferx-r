@@ -10,7 +10,8 @@ ferx_model_to_frem(
   covariates = NULL,
   output_dir = NULL,
   output_model = NULL,
-  output_data = NULL
+  output_data = NULL,
+  fit = NULL
 )
 }
 \arguments{
@@ -40,6 +41,15 @@ file. When \code{NULL} (default), the file is written to
 \item{output_data}{Optional explicit path for the output CSV data file. When
 \code{NULL} (default), the file is written to
 \code{<output_dir>/<stem>_frem_data.csv}.}
+
+\item{fit}{Optional \code{\link{ferx_fit}} result from fitting \code{model}
+(the base model, before FREM conversion). When supplied, its theta and
+omega estimates seed the generated FREM model's PK theta inits and PK-PK
+omega block, so a subsequent fit of the FREM model warm-starts from
+converged parameters instead of \code{model}'s declared inits. Matching is
+by name (theta/eta names in \code{fit}); a name not found in \code{model}
+keeps its declared init. \code{NULL} (default) leaves every init at the
+value declared in \code{model}.}
 }
 \value{
 A \code{\link{ferx_model}} object pointing at the generated FREM

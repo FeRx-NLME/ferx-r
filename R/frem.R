@@ -30,6 +30,14 @@
 #' @param output_data Optional explicit path for the output CSV data file. When
 #'   \code{NULL} (default), the file is written to
 #'   \code{<output_dir>/<stem>_frem_data.csv}.
+#' @param fit Optional \code{\link{ferx_fit}} result from fitting \code{model}
+#'   (the base model, before FREM conversion). When supplied, its theta and
+#'   omega estimates seed the generated FREM model's PK theta inits and PK-PK
+#'   omega block, so a subsequent fit of the FREM model warm-starts from
+#'   converged parameters instead of \code{model}'s declared inits. Matching is
+#'   by name (theta/eta names in \code{fit}); a name not found in \code{model}
+#'   keeps its declared init. \code{NULL} (default) leaves every init at the
+#'   value declared in \code{model}.
 #'
 #' @return A \code{\link{ferx_model}} object pointing at the generated FREM
 #'   model and dataset, so it composes directly with \code{\link{ferx_fit}} and
@@ -59,7 +67,8 @@ ferx_model_to_frem <- function(model,
                          covariates = NULL,
                          output_dir = NULL,
                          output_model = NULL,
-                         output_data = NULL) {
+                         output_data = NULL,
+                         fit = NULL) {
 
   # --- resolve model path ---
   if (inherits(model, "ferx_model")) {
@@ -87,6 +96,27 @@ ferx_model_to_frem <- function(model,
   # validates that any names given are actually declared.
   if (!is.null(covariates) && !is.character(covariates)) {
     stop("`covariates` must be a character vector (a subset of the model's [covariates] block) or NULL.")
+  }
+  if (!is.null(fit) && !inherits(fit, "ferx_fit")) {
+    stop("`fit` must be a ferx_fit object (from ferx_fit()) or NULL.")
+  }
+
+  # --- extract prior-fit init values (issue #239) ---
+  # `fit` is optional; when absent every field below stays empty and the
+  # generated FREM model keeps the base model's declared inits.
+  if (!is.null(fit)) {
+    fit_theta_names <- names(fit$theta) %||% character(0)
+    fit_theta_values <- as.numeric(fit$theta)
+    fit_eta_names <- if (!is.null(fit$omega)) rownames(fit$omega) else NULL
+    fit_eta_names <- fit_eta_names %||% character(0)
+    fit_omega_flat <- if (!is.null(fit$omega)) as.numeric(t(fit$omega)) else numeric(0) # row-major
+    fit_omega_dim <- if (!is.null(fit$omega)) nrow(fit$omega) else 0L
+  } else {
+    fit_theta_names <- character(0)
+    fit_theta_values <- numeric(0)
+    fit_eta_names <- character(0)
+    fit_omega_flat <- numeric(0)
+    fit_omega_dim <- 0L
   }
 
   # --- resolve output paths ---
@@ -120,7 +150,12 @@ ferx_model_to_frem <- function(model,
     # the low-level override is intentionally left empty here.
     categorical_covariates = character(0),
     output_model_path = out_model_path,
-    output_data_path  = out_data_path
+    output_data_path  = out_data_path,
+    fit_theta_names   = fit_theta_names,
+    fit_theta_values  = fit_theta_values,
+    fit_eta_names     = fit_eta_names,
+    fit_omega_flat    = fit_omega_flat,
+    fit_omega_dim     = fit_omega_dim
   )
 
   # Surface conversion-time advisories (e.g. estimated parameters without a

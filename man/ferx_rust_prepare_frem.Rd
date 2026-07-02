@@ -10,7 +10,12 @@ ferx_rust_prepare_frem(
   covariates,
   categorical_covariates,
   output_model_path,
-  output_data_path
+  output_data_path,
+  fit_theta_names,
+  fit_theta_values,
+  fit_eta_names,
+  fit_omega_flat,
+  fit_omega_dim
 )
 }
 \description{

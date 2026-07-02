@@ -29,6 +29,12 @@ excl <- ferx_apply_selection(fit, excluded = TRUE)
 
 ## Added
 
+- `ferx_model_to_frem()` gains a `fit` argument (#239). Pass a `ferx_fit`
+  result from fitting the base model and its theta/omega estimates seed the
+  generated FREM model's PK theta inits and PK-PK omega block, so a subsequent
+  fit of the FREM model warm-starts from converged parameters instead of the
+  base model's declared inits. Optional; `NULL` (default) is unchanged
+  behaviour.
 - `ferx_model_inspect()` now reports covariate-selected residual error models as
   `covariate-selected (...)` in `model_structure$residual`, matching the new
   `[error_model]` `if/else` selector in ferx-core
@@ -53,16 +59,6 @@ ferx_model(print = TRUE)
 ferx_model(template = "1cpt_oral", path = "m.ferx", edit = FALSE) |>
   ferx_fit(data)
 ```
-<<<<<<< HEAD
-
-## Added
-
-- `ferx_model_inspect()` now reports covariate-selected residual error models as
-  `covariate-selected (...)` in `model_structure$residual`, matching the new
-  `[error_model]` `if/else` selector in ferx-core
-  ([ferx-core #658](https://github.com/FeRx-NLME/ferx-core/issues/658)).
-=======
->>>>>>> refs/remotes/origin/feat/658-selected-error-label
 
 # ferx 0.1.6
 

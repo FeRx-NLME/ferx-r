@@ -138,6 +138,18 @@ test_that("ferx_model_to_frem() errors when the covariates filter names an undec
   )
 })
 
+test_that("ferx_model_to_frem() errors when `fit` is not a ferx_fit object", {
+  tmp <- tempdir()
+  model_path <- write_warfarin_model(tmp)
+  data_path  <- write_warfarin_with_covariates(tmp)
+  on.exit(unlink(c(model_path, data_path)))
+
+  expect_error(
+    ferx_model_to_frem(model = model_path, data = data_path, fit = list(theta = 1)),
+    "ferx_fit"
+  )
+})
+
 # ---------------------------------------------------------------------------
 # End-to-end FREM transformation
 # ---------------------------------------------------------------------------
@@ -261,4 +273,53 @@ test_that("FREM model can be fitted", {
 
   # All omega diagonals positive.
   expect_true(all(diag(fit$omega) > 0))
+})
+
+test_that("ferx_model_to_frem() `fit` seeds the generated model's PK theta/omega inits (#239)", {
+  tmp <- tempfile("frem_")
+  dir.create(tmp)
+  on.exit(unlink(tmp, recursive = TRUE))
+
+  model_path <- write_warfarin_model(tmp)
+  data_path  <- write_warfarin_with_covariates(tmp)
+
+  base_fit <- ferx_fit(
+    model_path, data_path,
+    method     = "focei",
+    verbose    = FALSE,
+    covariance = FALSE,
+    settings   = list(maxiter = 3L)
+  )
+  expect_s3_class(base_fit, "ferx_fit")
+
+  result <- ferx_model_to_frem(
+    model      = model_path,
+    data       = data_path,
+    covariates = c("WT", "AGE"),
+    output_dir = tmp,
+    fit        = base_fit
+  )
+
+  # The generated FREM model's declared theta inits are the fitted values,
+  # not the base model file's original declared inits (0.2, 10.0, 1.5).
+  frem_lines <- readLines(result$model)
+  init_of <- function(name) {
+    line <- grep(sprintf("^\\s*theta %s\\(", name), frem_lines, value = TRUE)
+    expect_length(line, 1L)
+    as.numeric(sub(sprintf("^\\s*theta %s\\(([^,]+),.*$", name), "\\1", line))
+  }
+  expect_equal(init_of("TVCL"), unname(base_fit$theta[["TVCL"]]))
+  expect_equal(init_of("TVV"),  unname(base_fit$theta[["TVV"]]))
+  expect_equal(init_of("TVKA"), unname(base_fit$theta[["TVKA"]]))
+
+  # It still fits.
+  fit <- ferx_fit(
+    result,
+    method     = "focei",
+    verbose    = FALSE,
+    covariance = FALSE,
+    settings   = list(maxiter = 3L)
+  )
+  expect_s3_class(fit, "ferx_fit")
+  expect_true(is.finite(fit$ofv))
 })
