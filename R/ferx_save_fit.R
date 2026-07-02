@@ -522,34 +522,3 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   }
   out
 }
-
-.fitrx_opt_num <- function(x) {
-  if (is.null(x)) return(NULL)
-  if (length(x) == 0L) return(NULL)
-  v <- as.numeric(x)
-  if (is.na(v)) return(NULL)
-  v
-}
-
-.fitrx_opt_int <- function(x) {
-  if (is.null(x)) return(NULL)
-  if (length(x) == 0L) return(NULL)
-  v <- suppressWarnings(as.integer(x))
-  if (is.na(v)) return(NULL)
-  v
-}
-
-.fitrx_opt_chr <- function(x) {
-  if (is.null(x)) return(NULL)
-  if (length(x) == 0L) return(NULL)
-  v <- as.character(x)
-  if (is.na(v) || !nzchar(v)) return(NULL)
-  v
-}
-
-.fitrx_opt_num_vec <- function(x) {
-  if (is.null(x)) return(NULL)
-  v <- as.numeric(x)
-  if (length(v) == 0L) return(NULL)
-  v
-}

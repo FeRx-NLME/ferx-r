@@ -490,26 +490,7 @@ test_that("ferx_runlog iteration section absent when trace file deleted", {
 # Local alias avoids the ::: operator.
 ferx_rust_autodiff_enabled <- getFromNamespace("ferx_rust_autodiff_enabled", "ferx")
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-# ferx_data objects are data.frame subclasses; attributes are NOT accessible
-# via `$` (which looks at columns). Use attr() for metadata.
-.sel_attr <- function(x, name) attr(x, name, exact = TRUE)
-
-# Cached fit for warfarin_data_selection (FD gradient, no Enzyme required).
-warfarin_sel_fit <- local({
-  fit <- NULL
-  function() {
-    if (is.null(fit)) {
-      ex <- ferx_example("warfarin_data_selection")
-      fit <<- ferx_fit(ex$model, ex$data, verbose = FALSE,
-                       settings = list(maxiter = 30L))
-    }
-    fit
-  }
-})
+# .sel_attr()/warfarin_sel_fit() come from helper-selection.R
 
 # ---------------------------------------------------------------------------
 # 1. Plain warfarin fit has NULL exclusions
@@ -605,18 +586,7 @@ warfarin_sel_fit <- local({
 # 19. .cmp() operator coverage (pure R, via ferx_apply_selection() with inline df)
 # ---------------------------------------------------------------------------
 
-# Tiny inline dataset: 4 obs records, predictable values.
-.sel_test_df <- function() {
-  data.frame(
-    ID   = c(1L, 1L, 2L, 2L),
-    TIME = c(0, 1, 0, 1),
-    DV   = c(0.5, 2.0, 3.0, 5.5),
-    EVID = c(0L, 0L, 0L, 0L),
-    AMT  = c(0, 0, 0, 0),
-    MDV  = c(0L, 0L, 0L, 0L),
-    stringsAsFactors = FALSE
-  )
-}
+# .sel_test_df() comes from helper-selection.R
 
 
 

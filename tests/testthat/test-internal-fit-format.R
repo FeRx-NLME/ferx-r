@@ -30,23 +30,10 @@ test_that(".ferx_format_structural falls back to 'unknown' when nothing is known
 
 # ---- header from test-fit-options-conflicts.R ----
 # Tests for the model-file vs. call-time [fit_options] conflict detection
-# (#31 / PR #66). Covers the parser ferx:::.ferx_parse_model_fit_options() and the
-# warning helper ferx:::.ferx_warn_fit_option_conflicts() in isolation, plus a small
-# end-to-end check via ferx_fit() against the bundled warfarin example.
-
-# ---------------------------------------------------------------------------
-# .ferx_parse_model_fit_options
-# ---------------------------------------------------------------------------
-
-write_fit_options_model <- function(lines) {
-  path <- tempfile(fileext = ".ferx")
-  writeLines(c("[parameters]", "  theta TVCL(1.0, 0.001, 100.0)",
-               "[fit_options]", lines), path)
-  path
-}
-
-
-
+# (#31 / PR #66). Covers the parser ferx:::.ferx_parse_model_fit_options() (now
+# tested alongside its caller in test-ferx_fit.R) and the warning helper
+# ferx:::.ferx_warn_fit_option_conflicts() in isolation, plus a small end-to-end
+# check via ferx_fit() against the bundled warfarin example.
 
 
 
@@ -110,65 +97,6 @@ make_fast_warfarin_no_cov <- function() {
 
 
 
-
-test_that("ferx:::.ferx_parse_model_fit_options() returns named char vec of raw values", {
-  path <- write_fit_options_model(c("  method = focei", "  maxiter = 300"))
-  on.exit(unlink(path))
-
-  opts <- ferx:::.ferx_parse_model_fit_options(path)
-  expect_equal(opts, c(method = "focei", maxiter = "300"))
-})
-test_that("ferx:::.ferx_parse_model_fit_options() lower-cases keys, preserves value case", {
-  path <- write_fit_options_model(c("  Method = FOCE", "  Covariance = TRUE"))
-  on.exit(unlink(path))
-
-  opts <- ferx:::.ferx_parse_model_fit_options(path)
-  expect_equal(names(opts), c("method", "covariance"))
-  expect_equal(unname(opts), c("FOCE", "TRUE"))
-})
-test_that("ferx:::.ferx_parse_model_fit_options() strips comments via .ferx_extract_blocks()", {
-  path <- write_fit_options_model(c(
-    "  method = foce  # the FOCE method",
-    "  # a full-line comment",
-    "  maxiter = 300 // also a comment"
-  ))
-  on.exit(unlink(path))
-
-  opts <- ferx:::.ferx_parse_model_fit_options(path)
-  expect_equal(opts, c(method = "foce", maxiter = "300"))
-})
-test_that("ferx:::.ferx_parse_model_fit_options() preserves embedded `=` in values", {
-  path <- write_fit_options_model("  custom = a=b=c")
-  on.exit(unlink(path))
-
-  opts <- ferx:::.ferx_parse_model_fit_options(path)
-  expect_equal(unname(opts["custom"]), "a=b=c")
-})
-test_that("ferx:::.ferx_parse_model_fit_options() returns empty char vec when block absent", {
-  path <- tempfile(fileext = ".ferx")
-  writeLines(c("[parameters]", "  theta TVCL(1.0, 0.001, 100.0)"), path)
-  on.exit(unlink(path))
-
-  opts <- ferx:::.ferx_parse_model_fit_options(path)
-  expect_length(opts, 0L)
-  expect_type(opts, "character")
-})
-test_that("ferx:::.ferx_parse_model_fit_options() returns empty char vec when block is empty", {
-  path <- tempfile(fileext = ".ferx")
-  writeLines(c("[parameters]", "  theta TVCL(1.0, 0.001, 100.0)",
-               "[fit_options]"), path)
-  on.exit(unlink(path))
-
-  opts <- ferx:::.ferx_parse_model_fit_options(path)
-  expect_length(opts, 0L)
-})
-test_that("ferx:::.ferx_parse_model_fit_options() ignores malformed lines (no `=`)", {
-  path <- write_fit_options_model(c("  method = foce", "  garbage_no_equals"))
-  on.exit(unlink(path))
-
-  opts <- ferx:::.ferx_parse_model_fit_options(path)
-  expect_equal(opts, c(method = "foce"))
-})
 
 # ---- header from test-omega-se.R ----
 # Unit tests for internal omega-SE lookup and IMPMAP trace reconstruction.

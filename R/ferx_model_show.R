@@ -33,9 +33,11 @@ ferx_model_show <- function(path) {
 }
 
 # TRUE when the console can render ANSI colour and cli is available. Honours
-# NO_COLOR, non-tty output, etc. via cli::num_ansi_colors().
+# NO_COLOR, non-tty output, etc. via cli::num_ansi_colors(). Delegates to
+# .ferx_use_cli() (internal-fit-format.R) so the detection logic - including
+# its tryCatch guard - has one implementation.
 .ferx_use_color <- function() {
-  requireNamespace("cli", quietly = TRUE) && cli::num_ansi_colors() > 1L
+  .ferx_use_cli()
 }
 
 # Syntax-highlight one line of a .ferx model file. Only called when colour is

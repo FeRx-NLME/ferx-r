@@ -356,34 +356,6 @@ ferx_load_fit <- function(path) {
   mat
 }
 
-.fitrx_unwrap_opt_num <- function(x) {
-  if (is.null(x)) return(NULL)
-  v <- suppressWarnings(as.numeric(x))
-  if (length(v) == 0L || is.na(v)) return(NULL)
-  v
-}
-
-.fitrx_unwrap_opt_int <- function(x) {
-  if (is.null(x)) return(NULL)
-  v <- suppressWarnings(as.integer(x))
-  if (length(v) == 0L || is.na(v)) return(NULL)
-  v
-}
-
-.fitrx_unwrap_opt_chr <- function(x) {
-  if (is.null(x)) return(NULL)
-  v <- as.character(x)
-  if (length(v) == 0L || is.na(v) || !nzchar(v)) return(NULL)
-  v
-}
-
-.fitrx_unwrap_opt_num_vec <- function(x) {
-  if (is.null(x)) return(NULL)
-  v <- as.numeric(unlist(x, use.names = FALSE))
-  if (length(v) == 0L) return(NULL)
-  v
-}
-
 .fitrx_named_omega <- function(omega_wire) {
   om <- .fitrx_matrix_from_wire(omega_wire$matrix)
   if (is.null(om)) return(om)

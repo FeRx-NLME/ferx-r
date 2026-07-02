@@ -1,26 +1,5 @@
 
-# ---- header from test-model-pipe.R ----
-# Tests for the ferx_model S3 pipe object and pipe-friendly wrappers added in #47:
-#   ferx_model()       — constructor
-#   print.ferx_model() — console summary
-#   ferx_set_section() — pipe-friendly section replacement
-#   ferx_get_section() — pipe-friendly section display
-#   ferx_fit()         — ferx_model dispatch (inline, see #52)
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-write_pipe_test_model <- function() {
-  path <- tempfile(fileext = ".ferx")
-  ferx_model(template = "1cpt_oral", path = path, edit = FALSE)
-  path
-}
-
-modifying_editor <- function(p, ...) {
-  lines <- readLines(p)
-  writeLines(c(lines, "  theta TVV(10.0, 0.1, 1000.0)"), p)
-}
+# write_pipe_test_model()/modifying_editor() come from helper-model-pipe.R
 
 # ---------------------------------------------------------------------------
 # Block 1 — ferx_model() constructor

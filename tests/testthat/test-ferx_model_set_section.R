@@ -1,30 +1,3 @@
-
-# ---- header from test-model.R ----
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-# Write a minimal .ferx file from a named list of section -> lines.
-write_test_model <- function(sections) {
-  path  <- tempfile(fileext = ".ferx")
-  lines <- character(0)
-  for (nm in names(sections)) {
-    lines <- c(lines, paste0("[", nm, "]"), sections[[nm]])
-  }
-  writeLines(lines, path)
-  path
-}
-
-# Build a minimal ferx_fit stub for ferx_model_inspect() dispatch tests.
-make_ferx_fit_stub <- function(model_structure = NULL, model_name = "test_model") {
-  obj <- list(model_structure = model_structure, model_name = model_name)
-  class(obj) <- "ferx_fit"
-  obj
-}
-
-null_editor <- function(...) invisible(NULL)
-
-# ---------------------------------------------------------------------------
 # ferx_model_section
 # ---------------------------------------------------------------------------
 
@@ -190,28 +163,7 @@ test_that("ferx_model_set_section() pipe chain: new |> set_section |> show", {
   expect_true(any(grepl("maxiter = 999", out, fixed = TRUE)))
 })
 
-# ---- header from test-model-pipe.R ----
-# Tests for the ferx_model S3 pipe object and pipe-friendly wrappers added in #47:
-#   ferx_model()       — constructor
-#   print.ferx_model() — console summary
-#   ferx_set_section() — pipe-friendly section replacement
-#   ferx_get_section() — pipe-friendly section display
-#   ferx_fit()         — ferx_model dispatch (inline, see #52)
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-write_pipe_test_model <- function() {
-  path <- tempfile(fileext = ".ferx")
-  ferx_model(template = "1cpt_oral", path = path, edit = FALSE)
-  path
-}
-
-modifying_editor <- function(p, ...) {
-  lines <- readLines(p)
-  writeLines(c(lines, "  theta TVV(10.0, 0.1, 1000.0)"), p)
-}
+# write_pipe_test_model()/modifying_editor() come from helper-model-pipe.R
 
 # ---------------------------------------------------------------------------
 # Block 1 — ferx_model() constructor
