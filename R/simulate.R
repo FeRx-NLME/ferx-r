@@ -345,12 +345,12 @@ ferx_predict_survival <- function(model, data, times, fit = NULL) {
 #' @examples
 #' ex  <- ferx_example("warfarin")
 #' fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
-#' fit <- ferx_npde(fit, nsim = 1000L, seed = 12345L)
+#' fit <- ferx_calc_npde(fit, nsim = 1000L, seed = 12345L)
 #' head(fit$sdtab[, c("ID", "TIME", "NPDE", "NPD")])
 #'
 #' @family simulation
 #' @export
-ferx_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = NULL) {
+ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = NULL) {
   fit_pieces <- validate_fit_for_params(fit)
   if (is.null(fit$sdtab) || !is.data.frame(fit$sdtab) || nrow(fit$sdtab) == 0L) {
     stop("`fit$sdtab` is empty; cannot attach NPDE/NPD. Refit so the fit carries an sdtab.")
@@ -394,7 +394,7 @@ ferx_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = NULL)
   # data, ...). Surface that as a clean R error instead of letting the alignment
   # step fail cryptically on a NULL table.
   if (is.null(npde_tbl) || !is.data.frame(npde_tbl)) {
-    stop("ferx_npde: the engine returned no NPDE table (see the message above).",
+    stop("ferx_calc_npde: the engine returned no NPDE table (see the message above).",
          call. = FALSE)
   }
 
@@ -415,7 +415,7 @@ ferx_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = NULL)
 .ferx_attach_npde <- function(sdtab, npde_tbl) {
   if (nrow(sdtab) != nrow(npde_tbl)) {
     stop(sprintf(paste0(
-      "ferx_npde: the NPDE table has %d row(s) but fit$sdtab has %d; cannot align. ",
+      "ferx_calc_npde: the NPDE table has %d row(s) but fit$sdtab has %d; cannot align. ",
       "This happens when `model`/`data` differ from the fit, or for non-Gaussian ",
       "(e.g. TTE) endpoints, which are not yet supported."),
       nrow(npde_tbl), nrow(sdtab)), call. = FALSE)
@@ -423,7 +423,7 @@ ferx_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = NULL)
   id_ok   <- isTRUE(all.equal(as.numeric(sdtab$ID),   as.numeric(npde_tbl$ID)))
   time_ok <- isTRUE(all.equal(as.numeric(sdtab$TIME), as.numeric(npde_tbl$TIME)))
   if (!id_ok || !time_ok) {
-    stop("ferx_npde: NPDE rows do not line up with fit$sdtab by ID/TIME; ",
+    stop("ferx_calc_npde: NPDE rows do not line up with fit$sdtab by ID/TIME; ",
          "refusing to attach possibly-misaligned diagnostics.", call. = FALSE)
   }
   sdtab$NPDE <- npde_tbl$NPDE

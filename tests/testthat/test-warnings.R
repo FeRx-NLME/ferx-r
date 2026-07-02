@@ -9,15 +9,15 @@ test_that("fit carries a structured warnings data frame", {
   }
 })
 
-test_that("ferx_warnings(as_df = TRUE) returns the underlying data frame", {
+test_that("ferx_get_warnings(as_df = TRUE) returns the underlying data frame", {
   fit <- warfarin_fit_cov()
-  df <- ferx_warnings(fit, as_df = TRUE)
+  df <- ferx_get_warnings(fit, as_df = TRUE)
   expect_identical(df, fit$warnings_structured)
 })
 
-test_that("ferx_warnings() prints a grouped summary", {
+test_that("ferx_get_warnings() prints a grouped summary", {
   fit <- warfarin_fit_cov()
-  out <- capture.output(ferx_warnings(fit))
+  out <- capture.output(ferx_get_warnings(fit))
   expect_true(any(grepl("ferx fit warnings", out)))
   # Footer tallies are always present
   expect_true(any(grepl("CRITICAL", out)))
@@ -25,11 +25,11 @@ test_that("ferx_warnings() prints a grouped summary", {
   expect_true(any(grepl("INFO", out)))
 })
 
-test_that("ferx_warnings() rejects non-fit input", {
-  expect_error(ferx_warnings(list()), "ferx_fit")
+test_that("ferx_get_warnings() rejects non-fit input", {
+  expect_error(ferx_get_warnings(list()), "ferx_fit")
 })
 
-test_that("ferx_warnings() falls back to flat warnings when structured is absent", {
+test_that("ferx_get_warnings() falls back to flat warnings when structured is absent", {
   fake <- structure(
     list(
       model_name = "legacy",
@@ -38,7 +38,7 @@ test_that("ferx_warnings() falls back to flat warnings when structured is absent
     ),
     class = "ferx_fit"
   )
-  df <- ferx_warnings(fake, as_df = TRUE)
+  df <- ferx_get_warnings(fake, as_df = TRUE)
   expect_equal(nrow(df), 2L)
   expect_true(all(df$severity == "warning"))
   expect_true(all(df$category == "general"))
@@ -163,7 +163,7 @@ test_that(".ferx_warning_guidance dispatches covariance_step by message content"
   expect_match(g("Covariance step failed"), "identifiability", ignore.case = TRUE)
 })
 
-test_that("ferx_warnings() shows guidance for unused_parameter category", {
+test_that("ferx_get_warnings() shows guidance for unused_parameter category", {
   fake <- structure(
     list(
       model_name = "m",
@@ -181,7 +181,7 @@ test_that("ferx_warnings() shows guidance for unused_parameter category", {
     ),
     class = "ferx_fit"
   )
-  out <- capture.output(ferx_warnings(fake))
+  out <- capture.output(ferx_get_warnings(fake))
   # Guidance for unused_parameter must appear in the output
   expect_true(
     any(grepl("Remove it from", out, fixed = TRUE)),

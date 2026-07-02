@@ -1,3 +1,31 @@
+# ferx 0.2.0
+
+## Breaking changes
+
+Public functions renamed for verb-clarity and naming consistency (part of the
+API cleanup in #223; naming rule + hard-break policy decided in #224). Old
+names are removed - no deprecation shims. Update calls as follows:
+
+- `ferx_npde()` -> `ferx_calc_npde()`
+- `ferx_selection()` -> `ferx_apply_selection()`
+- `ferx_to_frem()` -> `ferx_model_to_frem()` (moves into the `ferx_model_*` family)
+- `ferx_warnings()` -> `ferx_get_warnings()`
+
+`ferx_selection_excluded()` is removed. To retrieve excluded records, pass
+`excluded = TRUE` to `ferx_apply_selection()`, which now also accepts a
+`ferx_data` or `ferx_fit` object as its `data` argument:
+
+```r
+# before
+sel  <- ferx_selection(data, ignore = "DV < 1")
+excl <- ferx_selection_excluded(sel)
+excl <- ferx_selection_excluded(fit)
+
+# after
+excl <- ferx_apply_selection(data, ignore = "DV < 1", excluded = TRUE)
+excl <- ferx_apply_selection(fit, excluded = TRUE)
+```
+
 # ferx 0.1.6
 
 ## Added
