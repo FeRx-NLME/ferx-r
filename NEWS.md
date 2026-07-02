@@ -27,6 +27,13 @@ excl <- ferx_apply_selection(data, ignore = "DV < 1", excluded = TRUE)
 excl <- ferx_apply_selection(fit, excluded = TRUE)
 ```
 
+## Added
+
+- `ferx_model_inspect()` now reports covariate-selected residual error models as
+  `covariate-selected (...)` in `model_structure$residual`, matching the new
+  `[error_model]` `if/else` selector in ferx-core
+  ([ferx-core #658](https://github.com/FeRx-NLME/ferx-core/issues/658)).
+
 # ferx 0.1.6
 
 ## Added
