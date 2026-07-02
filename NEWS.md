@@ -52,6 +52,17 @@ ferx_model(template = "1cpt_oral", path = "m.ferx", edit = FALSE) |>
 
 ## Added
 
+- **Analytic Savic transit absorption is now available in model files** — a
+  `pk one_cpt_transit(cl, v, n, mtt)` structural model: Savic transit-compartment
+  absorption fed straight into a one-compartment disposition as a fast analytical
+  closed form (exponential tilting; no ODE solve), with exact FOCE/FOCEI
+  sensitivities and a continuous, estimable number of transit compartments `N`
+  (via ferx-core #611 / #386). It is the closed-form counterpart to the ODE
+  `transit(n, mtt)` input rate (`ferx_example("transit_savic")`) and is much
+  faster; with `N = 0` it reduces to first-order oral absorption. New bundled
+  example `ferx_example("one_cpt_transit")` with a runnable
+  `inst/examples/ex_one_cpt_transit.R`.
+
 - **State-reactive (adaptive / feedback) dosing simulation** — `ferx_simulate_adaptive()`
   runs a forward simulation whose dosing regimen is decided at run time by the
   model file's `[adaptive_dosing]` block: a declarative first-matching-rule
