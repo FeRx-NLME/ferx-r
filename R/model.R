@@ -152,10 +152,12 @@ ferx_model <- function(data = NULL, model = NULL, template = NULL,
     if (file.exists(path) && !overwrite) {
       stop(path, " already exists. Use overwrite = TRUE to replace it.")
     }
+    # Validate data before any side effect so a bad path doesn't leave a
+    # written file / spawned editor behind (matches wrap mode's ordering).
+    if (!is.null(data) && !file.exists(data)) stop("Data file not found: ", data)
     writeLines(skeleton, path)
     message("Created ", path)
     if (isTRUE(edit)) utils::file.edit(path)
-    if (!is.null(data) && !file.exists(data)) stop("Data file not found: ", data)
     return(structure(list(model = path, data = data), class = "ferx_model"))
   }
 
