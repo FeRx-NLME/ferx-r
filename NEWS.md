@@ -10,6 +10,7 @@ names are removed - no deprecation shims. Update calls as follows:
 - `ferx_selection()` -> `ferx_apply_selection()`
 - `ferx_to_frem()` -> `ferx_model_to_frem()` (moves into the `ferx_model_*` family)
 - `ferx_warnings()` -> `ferx_get_warnings()`
+- `ferx_columns()` -> `ferx_get_columns()`
 
 `ferx_selection_excluded()` is removed. To retrieve excluded records, pass
 `excluded = TRUE` to `ferx_apply_selection()`, which now also accepts a

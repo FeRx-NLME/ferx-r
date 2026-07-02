@@ -345,17 +345,17 @@ ferx_example <- function(name = NULL) {
 #'
 #' @examples
 #' ex <- ferx_example("warfarin")
-#' ferx_columns(ex)        # pass the ferx_example() list directly
-#' ferx_columns(ex$data)   # or pass the path
+#' ferx_get_columns(ex)        # pass the ferx_example() list directly
+#' ferx_get_columns(ex$data)   # or pass the path
 #'
 #' \dontrun{
 #' fit <- ferx_fit(ex$model, ex$data)
-#' ferx_columns(fit)       # inspect the data used for a fit
+#' ferx_get_columns(fit)       # inspect the data used for a fit
 #' }
 #'
 #' @family utilities
 #' @export
-ferx_columns <- function(data) {
+ferx_get_columns <- function(data) {
   path <- .ferx_resolve_data_path(data)
 
   if (!file.exists(path)) {
