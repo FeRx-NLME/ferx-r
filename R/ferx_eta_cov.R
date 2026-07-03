@@ -1,57 +1,43 @@
-#' ETA-covariate correlation table
-#'
-#' Computes Pearson correlations between empirical Bayes estimates (ETAs) and
-#' covariates in the original dataset. Identifies which covariates are most
-#' worth testing in a formal covariate search. Only columns that are constant
-#' within each subject are treated as covariates.
-#'
-#' @param fit A \code{ferx_fit} object returned by \code{\link{ferx_fit}}.
-#' @param data The original dataset (data frame) passed to
-#'   \code{\link{ferx_fit}}.
-#' @return Data frame with columns \code{eta}, \code{covariate}, \code{r},
-#'   \code{p_val}, \code{flag}, sorted by descending \code{|r|}. Returned
-#'   invisibly; the full table is printed to the console.
-#' @examples
-#' ex  <- ferx_example("warfarin")
-#' fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
-#' obs <- read.csv(ex$data)
-#' ferx_eta_cov(fit, obs)
-#' @family diagnostics
-#' @export
-ferx_eta_cov <- function(fit, data) {
-  if (is.null(fit$ebe_etas) || !is.data.frame(fit$ebe_etas)) {
-    stop("`fit$ebe_etas` is not available.")
-  }
-  if (is.null(data) || !is.data.frame(data)) {
-    stop("`data` must be a data.frame - pass the dataset used in ferx_fit().")
-  }
+# ETA-covariate correlation table: Pearson correlations between empirical
+# Bayes estimates (ETAs) and covariates in the original dataset, identifying
+# which covariates are most worth testing in a formal covariate search. Only
+# columns that are constant within each subject are treated as covariates.
+# Stored on the fit object as `fit$eta_cov`; NULL when the model declares no
+# etas, the dataset has no usable numeric covariates, or the data file can no
+# longer be read. (Formerly the exported ferx_eta_cov(fit, data), which took
+# the dataset explicitly; see issue #226.)
+#
+# `ebe_etas` is purpose-built: ID + one column per BSV eta. `data_path` is
+# re-read from disk here (rather than reusing an in-memory data.frame) since
+# ferx_fit() only ever holds the CSV path, not a loaded copy of the dataset.
+.ferx_compute_eta_cov <- function(ebe_etas, data_path) {
+  if (is.null(ebe_etas) || !is.data.frame(ebe_etas)) return(NULL)
+  data <- tryCatch(
+    suppressWarnings(utils::read.csv(data_path)),
+    error = function(e) NULL
+  )
+  if (is.null(data) || !is.data.frame(data)) return(NULL)
 
-  # ebe_etas is purpose-built: ID + one column per BSV eta. Treat every
-  # non-ID column as an eta - a "^ETA" prefix filter would silently drop
-  # columns from models that don't follow the conventional naming.
-  ebe_id  <- if ("ID" %in% names(fit$ebe_etas)) "ID" else names(fit$ebe_etas)[1L]
-  data_id <- if ("ID" %in% names(data))         "ID" else names(data)[1L]
-  eta_cols <- setdiff(names(fit$ebe_etas), ebe_id)
-  if (length(eta_cols) == 0L) {
-    message("No ETA columns found in fit$ebe_etas.")
-    return(invisible(NULL))
-  }
+  # Treat every non-ID column as an eta - a "^ETA" prefix filter would
+  # silently drop columns from models that don't follow the conventional
+  # naming.
+  ebe_id  <- if ("ID" %in% names(ebe_etas)) "ID" else names(ebe_etas)[1L]
+  data_id <- if ("ID" %in% names(data))     "ID" else names(data)[1L]
+  eta_cols <- setdiff(names(ebe_etas), ebe_id)
+  if (length(eta_cols) == 0L) return(NULL)
 
   # Time-varying or non-covariate columns to skip
   SKIP <- c("TIME", "DV", "AMT", "EVID", "MDV", "CMT", "RATE",
             "II", "SS", "CENS", "LLOQ", "BLQ")
 
   # One row per subject already in ebe_etas
-  etas <- fit$ebe_etas[, c(ebe_id, eta_cols), drop = FALSE]
+  etas <- ebe_etas[, c(ebe_id, eta_cols), drop = FALSE]
 
   # Numeric columns in data that could be covariates
   num_cols <- names(data)[vapply(data, is.numeric, logical(1L))]
   num_cols <- setdiff(num_cols, c(data_id, SKIP))
 
-  if (length(num_cols) == 0L) {
-    message("No numeric covariate columns found in data.")
-    return(invisible(NULL))
-  }
+  if (length(num_cols) == 0L) return(NULL)
 
   # Keep only columns that are constant per subject (heuristic)
   data_sub <- do.call(rbind, lapply(
@@ -72,10 +58,7 @@ ferx_eta_cov <- function(fit, data) {
            logical(1L))
   ]
 
-  if (length(cov_cols) == 0L) {
-    message("No constant-per-subject numeric covariates found in data.")
-    return(invisible(NULL))
-  }
+  if (length(cov_cols) == 0L) return(NULL)
 
   merged <- merge(etas, data_sub[, c(data_id, cov_cols), drop = FALSE],
                   by.x = ebe_id, by.y = data_id)
@@ -107,6 +90,5 @@ ferx_eta_cov <- function(fit, data) {
   result <- do.call(rbind, rows)
   result <- result[order(-abs(result$r), na.last = TRUE), ]
   rownames(result) <- NULL
-  print(result)
-  invisible(result)
+  result
 }

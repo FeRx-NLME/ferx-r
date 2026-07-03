@@ -20,6 +20,10 @@ ferx_rust_autodiff_enabled <- getFromNamespace("ferx_rust_autodiff_enabled", "fe
 
 
 
+
+
+
+
 # These tests require the covariance step to have succeeded. With maxiter = 30L
 # the outer optimisation may not converge on all machines, so we skip rather
 # than fail — a skip here means "covariance step needs more iterations", not
@@ -47,7 +51,7 @@ ferx_rust_autodiff_enabled <- getFromNamespace("ferx_rust_autodiff_enabled", "fe
 
 
 
-# ferx_cor_matrix — Tier 1, requires covariance = TRUE
+# fit$cor_matrix — Tier 1, requires covariance = TRUE
 
 
 
@@ -74,7 +78,6 @@ ferx_rust_autodiff_enabled <- getFromNamespace("ferx_rust_autodiff_enabled", "fe
 
 
 
-
 # -- IOV: shrinkage_kappa_by_occ (Step 1 feature-parity) ---------------------
 
 
@@ -92,60 +95,60 @@ ferx_rust_autodiff_enabled <- getFromNamespace("ferx_rust_autodiff_enabled", "fe
 
 
 
-test_that("ferx_cor_matrix returns a matrix with same dimnames as $cov_matrix", {
+test_that("fit$cor_matrix has same dimnames as $cov_matrix", {
   fit <- warfarin_fit_cov()
   skip_if(is.null(fit$cov_matrix), "covariance step did not converge — skipping")
-  cor <- ferx_cor_matrix(fit)
-  expect_true(is.matrix(cor))
-  expect_equal(dimnames(cor), dimnames(fit$cov_matrix))
+  expect_true(is.matrix(fit$cor_matrix))
+  expect_equal(dimnames(fit$cor_matrix), dimnames(fit$cov_matrix))
 })
-test_that("ferx_cor_matrix diagonal is all 1s", {
+test_that("fit$cor_matrix diagonal is all 1s", {
   fit <- warfarin_fit_cov()
   skip_if(is.null(fit$cov_matrix), "covariance step did not converge — skipping")
-  cor <- ferx_cor_matrix(fit)
-  expect_true(all(diag(cor) == 1))
+  expect_true(all(diag(fit$cor_matrix) == 1))
 })
-test_that("ferx_cor_matrix off-diagonal values are in [-1, 1]", {
+test_that("fit$cor_matrix off-diagonal values are in [-1, 1]", {
   fit <- warfarin_fit_cov()
   skip_if(is.null(fit$cov_matrix), "covariance step did not converge — skipping")
-  cor <- ferx_cor_matrix(fit)
+  cor <- fit$cor_matrix
   d <- nrow(cor)
   if (d > 1L) {
     off <- cor[row(cor) != col(cor)]
     expect_true(all(abs(off) <= 1))
   }
 })
-test_that("ferx_cor_matrix errors gracefully when covariance was FALSE", {
+test_that("fit$cor_matrix is NULL when covariance was FALSE", {
   fit <- warfarin_fit()
-  expect_error(ferx_cor_matrix(fit))
+  expect_null(fit$cor_matrix)
 })
 
 # ---- header from test-diagnostics-more.R ----
 # Tests for diagnostic functions that operate on a fit's fields and can be
 # driven with crafted inputs (no live model fit needed):
-#   ferx_estimates(), .ferx_est_row(), ferx_eta_cov(), ferx_cor_matrix(),
-#   ferx_get_warnings(), and .ferx_compute_eta_normality().
+#   .ferx_compute_estimates(), .ferx_est_row(), .ferx_compute_eta_cov(),
+#   .ferx_compute_cor_matrix(), ferx_get_warnings(), and
+#   .ferx_compute_eta_normality().
 # make_fake_fit() comes from helper-trace.R.
 
-.est_row       <- getFromNamespace(".ferx_est_row",            "ferx")
-.compute_norm  <- getFromNamespace(".ferx_compute_eta_normality", "ferx")
+.est_row           <- getFromNamespace(".ferx_est_row",            "ferx")
+.compute_norm      <- getFromNamespace(".ferx_compute_eta_normality", "ferx")
+.compute_cor_matrix <- getFromNamespace(".ferx_compute_cor_matrix", "ferx")
 
 # ---------------------------------------------------------------------------
-# ferx_estimates — theta (unnamed), scalar omega, sigma, and IOV kappa rows
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# ferx_eta_cov — message branches plus the correlation path
+# .ferx_compute_estimates — theta (unnamed), scalar omega, sigma, and IOV kappa rows
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# .ferx_compute_eta_cov — message branches plus the correlation path
+# ---------------------------------------------------------------------------
+
+
 
 
 
 
 # ---------------------------------------------------------------------------
-# ferx_cor_matrix — non-positive diagonal warning
+# .ferx_compute_cor_matrix — non-positive diagonal warning
 # ---------------------------------------------------------------------------
 
 
@@ -161,13 +164,14 @@ test_that("ferx_cor_matrix errors gracefully when covariance was FALSE", {
 
 
 
-test_that("ferx_cor_matrix warns on a non-positive variance diagonal", {
+test_that(".ferx_compute_cor_matrix warns on a non-positive variance diagonal", {
   # A zero on the diagonal gives sqrt() == 0, hitting the `se <= 0` branch
   # (a negative diagonal would instead yield NaN and slip past the guard).
-  fit <- make_fake_fit(cov_matrix = matrix(c(0, 0, 0, 4), 2, 2))
-  expect_warning(out <- capture.output(cm <- ferx_cor_matrix(fit)), "non-positive")
+  expect_warning(
+    cm <- .compute_cor_matrix(matrix(c(0, 0, 0, 4), 2, 2)),
+    "non-positive"
+  )
 })
-test_that("ferx_cor_matrix errors when no covariance matrix is present", {
-  expect_error(ferx_cor_matrix(make_fake_fit(cov_matrix = NULL)),
-               "Covariance matrix not available")
+test_that(".ferx_compute_cor_matrix returns NULL when no covariance matrix is present", {
+  expect_null(.compute_cor_matrix(NULL))
 })

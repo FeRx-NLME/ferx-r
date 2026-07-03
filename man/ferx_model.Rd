@@ -123,7 +123,7 @@ fit <- ex$data |>
 
 summary(fit)
 ferx_model_inspect(fit)   # structure (no path needed post-fit)
-ferx_cor_matrix(fit)      # parameter correlation matrix
+fit$cor_matrix            # parameter correlation matrix
 ferx_plot_trace(fit)      # OFV + gradient norm over iterations
 
 # ?? Peek at a section mid-pipe without breaking the chain ????????????????

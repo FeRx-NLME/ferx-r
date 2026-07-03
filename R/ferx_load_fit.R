@@ -129,6 +129,15 @@ ferx_load_fit <- function(path) {
   # Warnings - fit.json is the source of truth, warnings.txt is a mirror.
   if (is.null(result$warnings)) result$warnings <- character()
 
+  # Derived fields computed at fit-time by ferx_fit() are not part of the
+  # cross-language .fitrx schema; recompute them here so a loaded fit is
+  # indistinguishable from a freshly-fitted one. eta_cov additionally
+  # requires the dataset to still be readable from data_path (bundled via
+  # `include_data`, or resolving locally).
+  result$cor_matrix <- .ferx_compute_cor_matrix(result$cov_matrix)
+  result$estimates  <- .ferx_compute_estimates(result)
+  result$eta_cov    <- .ferx_compute_eta_cov(result$ebe_etas, result$data_path)
+
   class(result) <- "ferx_fit"
   result
 }

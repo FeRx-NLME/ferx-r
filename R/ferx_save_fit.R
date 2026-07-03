@@ -22,7 +22,7 @@ FITRX_FORMAT_VERSION <- "1"
 #' @return Invisibly returns \code{fit}, so the function can be used inside a
 #'   pipe without breaking the chain:
 #'   \preformatted{
-#'   fit |> ferx_save_fit("run1.fitrx") |> ferx_estimates()
+#'   fit |> ferx_save_fit("run1.fitrx") |> (\(f) f$estimates)()
 #'   }
 #' @family utilities
 #' @export

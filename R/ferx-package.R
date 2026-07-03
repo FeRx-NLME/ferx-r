@@ -15,9 +15,9 @@
 #'   Inspect / edit an existing model                   \tab \code{\link{ferx_model_show}}, \code{\link{ferx_model_edit}}, \code{\link{ferx_model_validate}}, \code{\link{ferx_model_inspect}} \cr
 #'   Sanity-check starting values                       \tab \code{\link{ferx_check_init}}, \code{\link{ferx_inits_from_nca}} \cr
 #'   Fit a model (FOCE / FOCEI / GN / SAEM / IMP)       \tab \code{\link{ferx_fit}} \cr
-#'   Inspect a fit                                      \tab \code{\link{summary.ferx_fit}}, \code{\link{ferx_estimates}}, \code{\link{ferx_cor_matrix}}, \code{\link{check_diagnostics}} \cr
+#'   Inspect a fit                                      \tab \code{\link{summary.ferx_fit}}, \code{fit$estimates}, \code{fit$cor_matrix}, \code{\link{check_diagnostics}} \cr
 #'   Optimizer trace                                    \tab \code{\link{ferx_trace}}, \code{\link{ferx_plot_trace}} \cr
-#'   Covariate screen on EBE ETAs                       \tab \code{\link{ferx_eta_cov}} \cr
+#'   Covariate screen on EBE ETAs                       \tab \code{fit$eta_cov} \cr
 #'   Uncertainty (SIR)                                  \tab \code{\link{ferx_sir}} \cr
 #'   Population / individual predictions                \tab \code{\link{ferx_predict}} \cr
 #'   Simulate (with or without parameter uncertainty)   \tab \code{\link{ferx_simulate}}, \code{\link{ferx_simulate_with_uncertainty}} \cr
