@@ -59,6 +59,14 @@ ferx_trace <- function(fit) {
   } else if (is.character(fit)) {
     path <- fit
   } else if (inherits(fit, "ferx_fit")) {
+    # Prefer the trace already stored on the fit object - it survives a
+    # save/load round-trip and doesn't depend on a temp file still existing.
+    # Exact-match access (`[[`, not `$`) - a fake/manual fit object with
+    # only `trace_path` set would otherwise silently partial-match `$trace`
+    # to `trace_path` (a string, not a data frame).
+    if (!is.null(fit[["trace"]])) {
+      return(fit[["trace"]])
+    }
     path <- fit$trace_path
     if (is.null(path)) {
       stop("No trace path found in fit object. ",
@@ -72,6 +80,13 @@ ferx_trace <- function(fit) {
     stop("Trace file not found: ", path)
   }
 
+  .ferx_read_trace_csv(path)
+}
+
+# Internal: read + normalize a trace CSV. Shared between ferx_trace() (reading
+# from a live trace_path) and ferx_fit() (populating fit$trace right after
+# the fit completes, while the temp file still exists).
+.ferx_read_trace_csv <- function(path) {
   tr <- read.csv(path, stringsAsFactors = FALSE, check.names = FALSE)
 
   na_cols <- c("grad_norm", "step_norm", "inner_iter_count",

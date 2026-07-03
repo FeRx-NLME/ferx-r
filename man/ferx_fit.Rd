@@ -152,10 +152,10 @@ per-gradient-call timings at the end of a fit, which is the easiest
 way to check which method is faster on your specific model/data.}
 
 \item{optimizer_trace}{Logical. If \code{TRUE}, write a per-iteration CSV
-trace to a temporary file and store its path in \code{fit$trace_path}.
-Pass the result to \code{\link{ferx_trace}} or
-\code{\link{plot.ferx_fit}} to inspect optimizer progress. Default
-\code{FALSE}.}
+trace to a temporary file, store its path in \code{fit$trace_path}, and
+read it into \code{fit$trace} as a data frame. Pass the result to
+\code{\link{ferx_trace}} or \code{\link{plot.ferx_fit}} to inspect
+optimizer progress. Default \code{FALSE}.}
 
 \item{scale_params}{Logical. If \code{TRUE}, apply a per-coordinate scaling
 layer on top of the existing log/Cholesky parameterization, dividing each
@@ -572,6 +572,10 @@ subjects whose ESS fraction fell below \code{imp_low_ess_threshold}.}
 \item{trace_path}{Path to the optimizer trace CSV, or \code{NULL} when
 \code{optimizer_trace = FALSE}. Pass to \code{\link{ferx_trace}}
 or \code{\link{plot.ferx_fit}}.}
+\item{trace}{The optimizer trace as a data frame (same columns as
+\code{\link{ferx_trace}}), or \code{NULL} when
+\code{optimizer_trace = FALSE}. Survives \code{\link{ferx_save_fit}} /
+\code{\link{ferx_load_fit}}, unlike \code{trace_path}.}
 \item{ebe_convergence_warnings}{Number of outer iterations in which too
 many EBEs were unconverged (step was rejected by the guard).}
 \item{max_unconverged_subjects}{Worst-case number of unconverged subjects

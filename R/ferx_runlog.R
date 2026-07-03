@@ -325,10 +325,9 @@ ferx_runlog <- function(fit, gradient_tol = 0.1, show_iterations = TRUE, verbose
 
   # -- Iteration history (requires optimizer_trace = TRUE) -------------------
   has_trace <- isTRUE(show_iterations) &&
-               !is.null(fit$trace_path)   &&
-               !is.na(fit$trace_path)     &&
-               nzchar(fit$trace_path)     &&
-               file.exists(fit$trace_path)
+               ((!is.null(fit[["trace"]]) && nrow(fit[["trace"]]) > 0L) ||
+                (!is.null(fit$trace_path) && !is.na(fit$trace_path) &&
+                   nzchar(fit$trace_path) && file.exists(fit$trace_path)))
   if (has_trace) {
     tr <- tryCatch(ferx_trace(fit), error = function(e) NULL)
     if (!is.null(tr) && nrow(tr) > 0L) {

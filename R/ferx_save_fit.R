@@ -77,6 +77,15 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
     entries <- c(entries, "covtab.csv")
   }
 
+  # trace.csv - present only when optimizer_trace = TRUE was used. Bundled so
+  # fit$trace survives the round-trip even though fit$trace_path (a temp
+  # file) usually won't. Bundle on `is.data.frame()`, not `nrow() > 0L`, so a
+  # valid header-only (zero-iteration) trace still round-trips.
+  if (is.data.frame(fit[["trace"]])) {
+    utils::write.csv(fit[["trace"]], file.path(staging, "trace.csv"), row.names = FALSE, na = "")
+    entries <- c(entries, "trace.csv")
+  }
+
   # model.ferx
   #
   # Prefer `file.copy(fit$model_path, ...)` so the bundled bytes match

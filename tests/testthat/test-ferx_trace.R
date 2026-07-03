@@ -32,6 +32,27 @@ test_that("ferx_trace(fit) reads the path stored on a ferx_fit object", {
   tr <- ferx_trace(fit)
   expect_equal(nrow(tr), 5L)
 })
+test_that("ferx_trace(fit) prefers fit$trace over re-reading trace_path", {
+  path <- write_fake_trace(n = 5)
+  on.exit(unlink(path))
+  stored <- write_fake_trace(n = 2) # deliberately different from trace_path's file
+  on.exit(unlink(stored), add = TRUE)
+  fit <- structure(
+    list(trace_path = path, trace = ferx_trace(stored)),
+    class = "ferx_fit"
+  )
+
+  tr <- ferx_trace(fit)
+  expect_equal(nrow(tr), 2L) # came from fit$trace, not the 5-row trace_path file
+})
+test_that("ferx_trace(fit) falls back to trace_path when fit$trace is NULL", {
+  path <- write_fake_trace(n = 4)
+  on.exit(unlink(path))
+  fit <- structure(list(trace_path = path, trace = NULL), class = "ferx_fit")
+
+  tr <- ferx_trace(fit)
+  expect_equal(nrow(tr), 4L)
+})
 test_that("ferx_trace() with no argument reads the last-run trace", {
   reset_ferx_state()
   on.exit(reset_ferx_state(), add = TRUE)
