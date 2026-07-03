@@ -29,6 +29,9 @@ excl <- ferx_apply_selection(fit, excluded = TRUE)
 
 ## Added
 
+- `ferx_stop()` terminates a background fit started by `ferx_fit_async()`
+  without waiting for it to finish (#235). Previously the only way to stop a
+  running job was to send a kill signal manually.
 - `ferx_model_to_frem()` gains a `fit` argument (#239). Pass a `ferx_fit`
   result from fitting the base model and its theta/omega estimates seed the
   generated FREM model's PK theta inits and PK-PK omega block, so a subsequent
