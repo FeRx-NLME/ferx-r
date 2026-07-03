@@ -59,6 +59,7 @@ plot(fit)
 \seealso{
 Other diagnostics: 
 \code{\link{check_diagnostics}()},
+\code{\link{ferx_conddist}()},
 \code{\link{ferx_cov_screen}()},
 \code{\link{ferx_get_warnings}()},
 \code{\link{ferx_runlog_iters}()},

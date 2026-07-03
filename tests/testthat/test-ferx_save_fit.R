@@ -158,6 +158,175 @@ test_that("bayes posterior summary survives round-trip", {
   expect_equal(b1$q975, b0$q975, tolerance = 1e-12)
   expect_equal(b1$ess_bulk, b0$ess_bulk, tolerance = 1e-9)
 })
+test_that("SAEM conditional-distribution results survive round-trip (real fit)", {
+  skip_on_cran()
+  fit <- warfarin_saem_conddist_fit()
+  skip_if(is.null(fit$cond_dist), "no cond_dist result in this fit")
+
+  path <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(path), add = TRUE)
+  ferx_save_fit(fit, path)
+  loaded <- ferx_load_fit(path)
+
+  expect_false(is.null(loaded$cond_dist))
+  expect_equal(loaded$cond_dist$data$ID, fit$cond_dist$data$ID)
+  expect_equal(loaded$cond_dist$data$ETA, fit$cond_dist$data$ETA)
+  expect_equal(loaded$cond_dist$data$COND_MEAN, fit$cond_dist$data$COND_MEAN,
+               tolerance = 1e-9)
+  expect_equal(loaded$cond_dist$data$COND_SD, fit$cond_dist$data$COND_SD,
+               tolerance = 1e-9)
+  expect_equal(loaded$cond_dist$data$COND_MODE, fit$cond_dist$data$COND_MODE,
+               tolerance = 1e-9)
+})
+test_that(".fitrx_has_cond_dist / .fitrx_write_conddist_csv (synthetic)", {
+  no_cd <- structure(list(cond_dist = NULL), class = "ferx_fit")
+  expect_false(ferx:::.fitrx_has_cond_dist(no_cd))
+
+  cd_data <- data.frame(
+    ID = c("1", "1", "2", "2"),
+    ETA = c("ETA_CL", "ETA_V", "ETA_CL", "ETA_V"),
+    COND_MEAN = c(0.05, -0.02, -0.03, 0.01),
+    COND_SD = c(0.12, 0.15, 0.11, 0.14),
+    COND_MODE = c(0.04, -0.01, -0.02, 0.02),
+    stringsAsFactors = FALSE
+  )
+  with_cd <- structure(
+    list(cond_dist = list(data = cd_data, shrinkage = c(0.1, 0.05),
+                           nsamp = 20L, burnin = 5L)),
+    class = "ferx_fit"
+  )
+  expect_true(ferx:::.fitrx_has_cond_dist(with_cd))
+
+  path <- tempfile(fileext = ".csv")
+  on.exit(unlink(path), add = TRUE)
+  ferx:::.fitrx_write_conddist_csv(with_cd, path)
+  written <- utils::read.csv(path, stringsAsFactors = FALSE, check.names = FALSE)
+  expect_equal(written$ID, c(1L, 1L, 2L, 2L))
+  expect_equal(written$ETA, cd_data$ETA)
+  expect_equal(written$COND_MEAN, cd_data$COND_MEAN, tolerance = 1e-12)
+})
+test_that("conddist.csv survives a ferx_save_fit / ferx_load_fit round-trip (synthetic)", {
+  cd_data <- data.frame(
+    ID = c("1", "1", "2", "2"),
+    ETA = c("ETA_CL", "ETA_V", "ETA_CL", "ETA_V"),
+    COND_MEAN = c(0.05, -0.02, -0.03, 0.01),
+    COND_SD = c(0.12, 0.15, 0.11, 0.14),
+    COND_MODE = c(0.04, -0.01, -0.02, 0.02),
+    stringsAsFactors = FALSE
+  )
+  fake <- structure(
+    list(
+      theta = c(TVCL = 1.0, TVV = 10.0),
+      omega = matrix(c(0.04, 0, 0, 0.09), 2L, 2L,
+                     dimnames = list(c("ETA_CL", "ETA_V"), c("ETA_CL", "ETA_V"))),
+      eta_names = c("ETA_CL", "ETA_V"),
+      sigma = c(prop = 0.05),
+      sigma_names = "prop",
+      sigma_types = "proportional",
+      cond_dist = list(data = cd_data, shrinkage = c(0.1, 0.05),
+                        nsamp = 20L, burnin = 5L),
+      # Numeric-looking IDs: ebe_etas$ID and cond_dist$data$ID must come back
+      # the same type after a round-trip (#248 review).
+      ebe_etas = data.frame(ID = c("1", "2"), ETA_CL = c(0.04, -0.02),
+                             ETA_V = c(-0.01, 0.02), stringsAsFactors = FALSE),
+      ofv = 0, aic = 2, bic = 4,
+      n_obs = 3L, n_subjects = 2L, n_parameters = 2L, n_iterations = 1L,
+      method = "SAEM", method_chain = "SAEM",
+      converged = TRUE,
+      warnings = character(),
+      shrinkage_eta = c(0, 0), shrinkage_eps = 0,
+      wall_time_secs = 0, model_name = "fake", ferx_version = "0.1.0",
+      gradient_method_inner = "Enzyme AD",
+      gradient_method_outer = "N/A",
+      covariance_status = "NotRequested",
+      model_source = "model fake\n",
+      data_path = NA_character_
+    ),
+    class = "ferx_fit"
+  )
+  path <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(path), add = TRUE)
+
+  ferx_save_fit(fake, path)
+  entries <- utils::unzip(path, list = TRUE)$Name
+  expect_true("conddist.csv" %in% entries)
+
+  loaded <- ferx_load_fit(path)
+  expect_equal(loaded$cond_dist$data$ID, cd_data$ID)
+  expect_equal(loaded$cond_dist$data$ETA, cd_data$ETA)
+  expect_equal(loaded$cond_dist$data$COND_MEAN, cd_data$COND_MEAN, tolerance = 1e-12)
+  # nsamp/burnin aren't recoverable from conddist.csv alone (#244); NA (not
+  # 0L) so "unknown after reload" isn't confused with "zero draws retained".
+  expect_equal(loaded$cond_dist$nsamp, NA_integer_)
+  expect_equal(loaded$cond_dist$burnin, NA_integer_)
+  # Shrinkage is recomputed from cond_mean + omega, matching ferx-core's own
+  # conddist.csv reader formula.
+  expect_equal(
+    unname(loaded$cond_dist$shrinkage),
+    c(
+      1 - stats::sd(cd_data$COND_MEAN[cd_data$ETA == "ETA_CL"]) / sqrt(0.04),
+      1 - stats::sd(cd_data$COND_MEAN[cd_data$ETA == "ETA_V"]) / sqrt(0.09)
+    ),
+    tolerance = 1e-9
+  )
+  # ebe_etas$ID and cond_dist$data$ID must have the same type after a
+  # round-trip, so joins between the two tables don't silently break for
+  # numeric-looking subject IDs (#248 review).
+  expect_type(loaded$ebe_etas$ID, "character")
+  expect_type(loaded$cond_dist$data$ID, "character")
+})
+test_that("recomputed shrinkage matches ferx-core's near-singular-omega floor (synthetic)", {
+  # ferx-core's own conddist.csv reader (src/io/fitrx.rs) treats
+  # Omega_jj < SAEM_OMEGA_DIAG_FLOOR (1e-6) as NaN, not just Omega_jj <= 0;
+  # the R reimplementation must match or shrinkage silently diverges for a
+  # near-singular (but positive) omega diagonal.
+  cd_data <- data.frame(
+    ID = c("1", "2", "3"),
+    ETA = c("ETA_CL", "ETA_CL", "ETA_CL"),
+    COND_MEAN = c(0.05, -0.03, 0.01),
+    COND_SD = c(0.12, 0.11, 0.10),
+    COND_MODE = c(0.04, -0.02, 0.02),
+    stringsAsFactors = FALSE
+  )
+  omega <- matrix(1e-8, 1L, 1L, dimnames = list("ETA_CL", "ETA_CL"))
+  shrink <- ferx:::.fitrx_cond_dist_shrinkage(cd_data, omega, "ETA_CL")
+  expect_true(is.na(shrink))
+})
+test_that("a fit with no cond_dist has no conddist.csv entry and loads NULL", {
+  fake <- structure(
+    list(
+      theta = c(TVCL = 1.0),
+      omega = matrix(0.04, 1L, 1L, dimnames = list("ETA_CL", "ETA_CL")),
+      eta_names = "ETA_CL",
+      sigma = c(prop = 0.05),
+      sigma_names = "prop",
+      sigma_types = "proportional",
+      cond_dist = NULL,
+      ofv = 0, aic = 2, bic = 4,
+      n_obs = 3L, n_subjects = 2L, n_parameters = 1L, n_iterations = 1L,
+      method = "FOCEI", method_chain = "FOCEI",
+      converged = TRUE,
+      warnings = character(),
+      shrinkage_eta = 0, shrinkage_eps = 0,
+      wall_time_secs = 0, model_name = "fake", ferx_version = "0.1.0",
+      gradient_method_inner = "Enzyme AD",
+      gradient_method_outer = "N/A",
+      covariance_status = "NotRequested",
+      model_source = "model fake\n",
+      data_path = NA_character_
+    ),
+    class = "ferx_fit"
+  )
+  path <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(path), add = TRUE)
+
+  ferx_save_fit(fake, path)
+  entries <- utils::unzip(path, list = TRUE)$Name
+  expect_false("conddist.csv" %in% entries)
+
+  loaded <- ferx_load_fit(path)
+  expect_null(loaded$cond_dist)
+})
 test_that("predictions survive round-trip (per-row equality)", {
   skip_on_cran()
   fit <- warfarin_fit_cov()

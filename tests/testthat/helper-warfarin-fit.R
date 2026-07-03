@@ -59,6 +59,29 @@ warfarin_bayes_fit <- local({
   }
 })
 
+# Cached SAEM fit with the conditional-distribution pass enabled (settings =
+# list(conddist = TRUE)), on the bundled warfarin_saem example. Small
+# nsamp/burnin and exploration/convergence sweeps -- tests check output shape
+# (fit$cond_dist / ferx_conddist()), not fine-grained convergence quality.
+warfarin_saem_conddist_fit <- local({
+  fit <- NULL
+  function() {
+    if (is.null(fit)) {
+      ex <- ferx_example("warfarin_saem")
+      fit <<- ferx_fit(
+        ex$model, ex$data,
+        method = "saem", verbose = FALSE,
+        settings = list(
+          n_exploration = 20L, n_convergence = 20L,
+          conddist = TRUE, conddist_nsamp = 20L, conddist_burnin = 5L,
+          seed = 42L
+        )
+      )
+    }
+    fit
+  }
+})
+
 # Cached FOCEI fit on the warfarin_derived example (tests [derived] / [output]).
 warfarin_derived_fit <- local({
   fit <- NULL

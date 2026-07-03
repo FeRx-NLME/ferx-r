@@ -57,6 +57,12 @@ fit$eta_cov
 
 ## Added
 
+- New `ferx_conddist(fit)` exposes the SAEM conditional-distribution results
+  (`settings = list(conddist = TRUE)`) to R (#244): per-subject/per-eta
+  conditional mean, SD, and mode (`fit$cond_dist`), with distribution-based
+  eta-shrinkage as an attribute. Previously `cond_dist` was computed by
+  ferx-core but never reached R, for either in-process fits or `.fitrx`
+  bundles; it now survives `ferx_save_fit()` / `ferx_load_fit()` too.
 - `ferx_fit(..., optimizer_trace = TRUE)` now stores the per-iteration trace
   on the fit object itself as `fit$trace` (a data frame), not just its temp
   file path (`fit$trace_path`) (#228). `fit$trace` survives

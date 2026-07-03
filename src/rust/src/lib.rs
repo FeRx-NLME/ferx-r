@@ -1948,6 +1948,21 @@ fn fit_result_to_list(
         None => ().into(),
     };
 
+    // SAEM conditional-distribution summary (`conddist = true`, ferx-core #257).
+    // `data` is a long-format data frame (one row per subject x eta) mirroring
+    // the `conddist.csv` layout used by ferx-core's own .fitrx bundling
+    // (#675); `shrinkage` is parallel to top-level `eta_names`.
+    let cond_dist: Robj = match &result.cond_dist {
+        Some(cd) => list!(
+            data = build_cond_dist_df(result, population, cd),
+            shrinkage = cd.shrinkage.clone(),
+            nsamp = cd.nsamp as i32,
+            burnin = cd.burnin as i32,
+        )
+        .into(),
+        None => ().into(),
+    };
+
     let trace_path: Robj = match &result.trace_path {
         Some(p) => p.clone().into(),
         None => ().into(),
@@ -2212,6 +2227,7 @@ fn fit_result_to_list(
         importance_sampling = importance_sampling,
         impmap_trace = impmap_trace,
         bayes = bayes,
+        cond_dist = cond_dist,
         trace_path = trace_path,
         ebe_convergence_warnings = result.ebe_convergence_warnings as i32,
         max_unconverged_subjects = result.max_unconverged_subjects as i32,
@@ -2372,6 +2388,27 @@ fn neural_networks_list(_result: &FitResult) -> Robj {
     List::from_values(v).into()
 }
 
+// -- Helper: resolve eta column names, falling back to ETA1..ETAn when
+// `result.eta_names` doesn't match the model's actual eta count. Shared by
+// every per-subject/per-eta data frame builder below.
+fn resolve_eta_names(result: &FitResult, n_eta: usize) -> Vec<String> {
+    if result.eta_names.len() == n_eta {
+        result.eta_names.clone()
+    } else {
+        (0..n_eta).map(|i| format!("ETA{}", i + 1)).collect()
+    }
+}
+
+// -- Helper: assemble a data.frame Robj from named columns, setting the
+// class and row.names attributes every builder below needs.
+fn finish_df(pairs: Vec<(&str, Robj)>, nrow: usize) -> Robj {
+    let mut df = List::from_pairs(pairs);
+    df.set_class(&["data.frame"]).unwrap();
+    let row_names: Vec<i32> = (1..=nrow as i32).collect();
+    df.set_attrib("row.names", row_names).unwrap();
+    df.into()
+}
+
 // -- Helper: build per-subject EBE eta data frame --
 //
 // Returns a data.frame with one row per subject and columns ID + one column
@@ -2382,20 +2419,12 @@ fn build_ebe_etas(result: &FitResult, population: &Population) -> Robj {
     if n_subj == 0 {
         return ().into();
     }
-    let n_eta = if result.subjects.is_empty() {
-        0
-    } else {
-        result.subjects[0].eta.len()
-    };
+    let n_eta = result.subjects[0].eta.len();
     if n_eta == 0 {
         return ().into();
     }
 
-    let eta_names: Vec<String> = if result.eta_names.len() == n_eta {
-        result.eta_names.clone()
-    } else {
-        (0..n_eta).map(|i| format!("ETA{}", i + 1)).collect()
-    };
+    let eta_names = resolve_eta_names(result, n_eta);
 
     let mut ids: Vec<String> = Vec::with_capacity(n_subj);
     let mut eta_cols: Vec<Vec<f64>> = (0..n_eta).map(|_| Vec::with_capacity(n_subj)).collect();
@@ -2413,11 +2442,51 @@ fn build_ebe_etas(result: &FitResult, population: &Population) -> Robj {
     for k in 0..n_eta {
         pairs.push((eta_names[k].as_str(), eta_cols[k].clone().into()));
     }
-    let mut df = List::from_pairs(pairs);
-    df.set_class(&["data.frame"]).unwrap();
-    let row_names: Vec<i32> = (1..=n_subj as i32).collect();
-    df.set_attrib("row.names", row_names).unwrap();
-    df.into()
+    finish_df(pairs, n_subj)
+}
+
+// -- Helper: build long-format SAEM conditional-distribution data frame --
+//
+// One row per subject x eta: ID, ETA, COND_MEAN, COND_SD, COND_MODE (mode is
+// the existing EBE on `SubjectResult.eta`, mirroring ferx-core's own
+// `conddist.csv` .fitrx layout, #675). Returns NULL when there are no
+// subjects or the model declares no etas.
+fn build_cond_dist_df(result: &FitResult, population: &Population, cd: &CondDist) -> Robj {
+    let n_subj = result.subjects.len();
+    if n_subj == 0 {
+        return ().into();
+    }
+    let n_eta = result.subjects[0].eta.len();
+    if n_eta == 0 {
+        return ().into();
+    }
+
+    let eta_names = resolve_eta_names(result, n_eta);
+
+    let mut ids: Vec<String> = Vec::with_capacity(n_subj * n_eta);
+    let mut etas: Vec<String> = Vec::with_capacity(n_subj * n_eta);
+    let mut cond_mean: Vec<f64> = Vec::with_capacity(n_subj * n_eta);
+    let mut cond_sd: Vec<f64> = Vec::with_capacity(n_subj * n_eta);
+    let mut cond_mode: Vec<f64> = Vec::with_capacity(n_subj * n_eta);
+
+    for (si, sr) in result.subjects.iter().enumerate() {
+        let subj = &population.subjects[si];
+        for k in 0..n_eta {
+            ids.push(subj.id.clone());
+            etas.push(eta_names[k].clone());
+            cond_mean.push(cd.cond_mean.get(si).and_then(|v| v.get(k)).copied().unwrap_or(f64::NAN));
+            cond_sd.push(cd.cond_sd.get(si).and_then(|v| v.get(k)).copied().unwrap_or(f64::NAN));
+            cond_mode.push(sr.eta.get(k).copied().unwrap_or(f64::NAN));
+        }
+    }
+
+    let mut pairs: Vec<(&str, Robj)> = Vec::new();
+    pairs.push(("ID", ids.into()));
+    pairs.push(("ETA", etas.into()));
+    pairs.push(("COND_MEAN", cond_mean.into()));
+    pairs.push(("COND_SD", cond_sd.into()));
+    pairs.push(("COND_MODE", cond_mode.into()));
+    finish_df(pairs, n_subj * n_eta)
 }
 
 // -- Helper: build per-subject individual parameter data frame --
