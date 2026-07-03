@@ -37,7 +37,7 @@
 #' chk$summary   # ofv_start, ofv_end, ofv_drop
 #'
 #' # Inspect per-iteration trace to spot early divergence or slow descent
-#' ferx_plot_trace(chk$fit)
+#' plot(chk$fit)
 #'
 #' # Pipe style: data flows in from the ferx_model object
 #' ex$data |>

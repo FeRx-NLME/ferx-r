@@ -21,7 +21,7 @@
 #' }
 #'
 #' @seealso \code{\link{ferx_runlog}}, \code{\link{ferx_trace}},
-#'   \code{\link{ferx_plot_trace}}
+#'   \code{\link{plot.ferx_fit}}
 #' @family diagnostics
 #' @export
 ferx_runlog_iters <- function(fit, verbose = TRUE) {

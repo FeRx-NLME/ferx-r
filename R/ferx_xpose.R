@@ -44,7 +44,7 @@
 #' [xpose::prm_vs_iteration()] and [xpose::grd_vs_iteration()] - therefore do
 #' not work on the returned object: ferx records only a scalar OFV and gradient
 #' norm per iteration, not the per-parameter value/gradient trajectory those
-#' plots need. For an OFV-over-iterations view use [ferx_plot_trace()] (requires
+#' plots need. For an OFV-over-iterations view use [plot.ferx_fit()] (requires
 #' `optimizer_trace = TRUE` at fit time).
 #'
 #' @param fit A `ferx_fit` object returned by [ferx_fit()].

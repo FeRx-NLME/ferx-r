@@ -11,6 +11,13 @@ names are removed - no deprecation shims. Update calls as follows:
 - `ferx_to_frem()` -> `ferx_model_to_frem()` (moves into the `ferx_model_*` family)
 - `ferx_warnings()` -> `ferx_get_warnings()`
 - `ferx_columns()` -> `ferx_get_columns()`
+- `ferx_plot_trace(fit)` -> `plot(fit)` (#229). New S3 methods `plot.ferx_fit()`
+  and `plot.ferx_job()` replace it; `plot.ferx_job()` plots the trace
+  accumulated so far by an in-progress `ferx_fit_async()` job, not just a
+  completed fit. FOCE/FOCEI traces now show the running-minimum OFV by
+  default (`monotonic = TRUE`), since the raw per-evaluation trace includes
+  rejected line-search trial steps that can transiently increase OFV; pass
+  `monotonic = FALSE` for the raw trace.
 
 `ferx_selection_excluded()` is removed. To retrieve excluded records, pass
 `excluded = TRUE` to `ferx_apply_selection()`, which now also accepts a

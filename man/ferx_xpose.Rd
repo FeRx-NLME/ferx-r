@@ -59,7 +59,7 @@ functions that read the NONMEM \code{.ext} / \code{.grd} files - notably
 \code{\link[xpose:minimization_plots]{xpose::prm_vs_iteration()}} and \code{\link[xpose:minimization_plots]{xpose::grd_vs_iteration()}} - therefore do
 not work on the returned object: ferx records only a scalar OFV and gradient
 norm per iteration, not the per-parameter value/gradient trajectory those
-plots need. For an OFV-over-iterations view use \code{\link[=ferx_plot_trace]{ferx_plot_trace()}} (requires
+plots need. For an OFV-over-iterations view use \code{\link[=plot.ferx_fit]{plot.ferx_fit()}} (requires
 \code{optimizer_trace = TRUE} at fit time).
 }
 

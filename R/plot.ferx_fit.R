@@ -1,4 +1,4 @@
-#' Plot optimizer trace from a ferx fit
+#' Plot the optimizer trace from a ferx fit or running job
 #'
 #' Produces a two-panel diagnostic plot from the per-iteration trace written
 #' when \code{optimizer_trace = TRUE} was passed to \code{\link{ferx_fit}}.
@@ -7,37 +7,70 @@
 #' methods, MH accept rate for SAEM, LM lambda for Gauss-Newton). Phase
 #' boundaries are drawn as vertical dashed lines.
 #'
-#' @param fit A \code{ferx_fit} object or path to a trace CSV file (see
-#'   \code{\link{ferx_trace}}).
+#' \code{plot.ferx_job} dispatches on the handle returned by
+#' \code{\link{ferx_fit_async}} and plots the trace accumulated so far,
+#' before the job has completed. If no iterations have been written yet, a
+#' placeholder panel is shown instead of an error.
+#'
+#' @param x A \code{ferx_fit} object (from \code{\link{ferx_fit}}) or a
+#'   \code{ferx_job} handle (from \code{\link{ferx_fit_async}}).
 #' @param log_ofv Logical; plot OFV on a log scale relative to the final value
 #'   (\eqn{OFV - OFV_{final}}). Default \code{FALSE}.
+#' @param monotonic Logical; when \code{TRUE} (the default) and the trace
+#'   includes FOCE/FOCEI iterations, the OFV panel shows the running minimum
+#'   (\code{cummin}) rather than the raw per-evaluation OFV, since FOCE/FOCEI
+#'   traces include rejected line-search trial steps that can transiently
+#'   increase OFV. Has no effect on Gauss-Newton or SAEM traces.
+#' @param ... Ignored.
 #'
 #' @return Invisibly returns the trace data frame (from
-#'   \code{\link{ferx_trace}}).
+#'   \code{\link{ferx_trace}}), or \code{NULL} when no trace data is
+#'   available yet (job case).
 #'
 #' @examples
 #' ex  <- ferx_example("warfarin")
 #' fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE,
 #'                 optimizer_trace = TRUE)
-#' tr  <- ferx_trace(fit)
-#' head(tr)
+#' plot(fit)
 #'
 #' @family diagnostics
 #' @export
-ferx_plot_trace <- function(fit, log_ofv = FALSE) {
-  tr <- ferx_trace(fit)
+plot.ferx_fit <- function(x, log_ofv = FALSE, monotonic = TRUE, ...) {
+  tr <- ferx_trace(x)
+  .ferx_plot_trace_core(tr, log_ofv = log_ofv, monotonic = monotonic)
+}
 
+#' @rdname plot.ferx_fit
+#' @export
+plot.ferx_job <- function(x, log_ofv = FALSE, monotonic = TRUE, ...) {
+  trace_path <- .ferx_read_sidecar(x$sidecar_path)
+  if (is.null(trace_path) || !file.exists(trace_path)) {
+    plot.new()
+    mtext(sprintf("<ferx_job> %s - no trace data yet", x$model_label %||% ""),
+          side = 3)
+    return(invisible(NULL))
+  }
+  tr <- ferx_trace(trace_path)
+  .ferx_plot_trace_core(tr, log_ofv = log_ofv, monotonic = monotonic)
+}
+
+# Internal: shared two-panel trace plot, used by plot.ferx_fit / plot.ferx_job.
+.ferx_plot_trace_core <- function(tr, log_ofv = FALSE, monotonic = TRUE) {
   old_par <- par(no.readonly = TRUE)
   on.exit(par(old_par))
   par(mfrow = c(2L, 1L), mar = c(3, 4, 2, 1))
 
   methods_present <- unique(tr$method)
-  is_saem   <- any(methods_present == "saem")
-  is_gn     <- any(grepl("^gn", methods_present))
+  is_saem  <- any(methods_present == "saem")
+  is_gn    <- any(grepl("^gn", methods_present))
+  is_foce  <- any(grepl("^foce", methods_present))
 
   # --- panel 1: OFV ---
   ofv_vals <- tr$ofv
-  y_label  <- "OFV"
+  if (isTRUE(monotonic) && is_foce) {
+    ofv_vals <- cummin(ofv_vals)
+  }
+  y_label <- "OFV"
   if (isTRUE(log_ofv)) {
     ofv_vals <- ofv_vals - min(ofv_vals, na.rm = TRUE)
     y_label  <- "OFV - min(OFV)"

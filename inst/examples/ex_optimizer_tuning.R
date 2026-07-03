@@ -99,7 +99,7 @@ ferx_runlog(fit_trace)
 ferx_runlog_iters(fit_trace)
 
 # Convergence plot: OFV and method-specific metric per iteration
-ferx_plot_trace(fit_trace)
+plot(fit_trace)
 
 # Raw data frame for custom downstream analysis
 tr <- ferx_trace(fit_trace)
