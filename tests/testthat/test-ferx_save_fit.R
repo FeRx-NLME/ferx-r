@@ -354,6 +354,87 @@ test_that("init_as_sd flags survive a ferx_save_fit / ferx_load_fit round-trip (
   expect_equal(loaded$sigma_init_as_sd, TRUE)
   expect_equal(loaded$kappa_init_as_sd, TRUE)
 })
+test_that("fit$trace survives a ferx_save_fit / ferx_load_fit round-trip (synthetic)", {
+  # fit$trace_path is a temp file and typically won't exist on reload; the
+  # bundled trace.csv is what actually needs to round-trip (see #228).
+  trace_path <- write_fake_trace(n = 3L, method = "gn")
+  on.exit(unlink(trace_path), add = TRUE)
+  fake <- structure(
+    list(
+      theta = c(TVCL = 1.0),
+      omega = matrix(0.04, 1L, 1L, dimnames = list("ETA_CL", "ETA_CL")),
+      eta_names = "ETA_CL",
+      sigma = c(prop = 0.05),
+      sigma_names = "prop",
+      sigma_types = "proportional",
+      ofv = 0, aic = 2, bic = 4,
+      n_obs = 3L, n_subjects = 2L, n_parameters = 1L, n_iterations = 1L,
+      method = "GN", method_chain = "GN",
+      converged = TRUE,
+      warnings = character(),
+      shrinkage_eta = 0, shrinkage_eps = 0,
+      wall_time_secs = 0, model_name = "fake", ferx_version = "0.1.0",
+      gradient_method_inner = "Enzyme AD",
+      gradient_method_outer = "N/A",
+      covariance_status = "NotRequested",
+      model_source = "model fake\n",
+      data_path = NA_character_,
+      trace_path = trace_path,
+      trace = ferx_trace(trace_path)
+    ),
+    class = "ferx_fit"
+  )
+  path <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(path), add = TRUE)
+
+  ferx_save_fit(fake, path)
+  loaded <- ferx_load_fit(path)
+
+  expect_s3_class(loaded$trace, "data.frame")
+  expect_equal(nrow(loaded$trace), 3L)
+  expect_equal(loaded$trace$iter, fake$trace$iter)
+  expect_equal(loaded$trace$ofv, fake$trace$ofv, tolerance = 1e-12)
+  # grad_norm/step_norm are set by write_fake_trace(); lm_lambda etc. are NA
+  # in a "gn" trace's non-applicable columns and must stay NA (not NaN or 0)
+  # after the JSON-free CSV round-trip.
+  expect_equal(loaded$trace$grad_norm, fake$trace$grad_norm, tolerance = 1e-12)
+  expect_true(all(is.na(loaded$trace$lm_lambda)))
+})
+test_that("fit$trace is absent from the bundle (and NULL on load) when no trace was collected", {
+  fake <- structure(
+    list(
+      theta = c(TVCL = 1.0),
+      omega = matrix(0.04, 1L, 1L, dimnames = list("ETA_CL", "ETA_CL")),
+      eta_names = "ETA_CL",
+      sigma = c(prop = 0.05),
+      sigma_names = "prop",
+      sigma_types = "proportional",
+      ofv = 0, aic = 2, bic = 4,
+      n_obs = 3L, n_subjects = 2L, n_parameters = 1L, n_iterations = 1L,
+      method = "FOCEI", method_chain = "FOCEI",
+      converged = TRUE,
+      warnings = character(),
+      shrinkage_eta = 0, shrinkage_eps = 0,
+      wall_time_secs = 0, model_name = "fake", ferx_version = "0.1.0",
+      gradient_method_inner = "Enzyme AD",
+      gradient_method_outer = "N/A",
+      covariance_status = "NotRequested",
+      model_source = "model fake\n",
+      data_path = NA_character_
+    ),
+    class = "ferx_fit"
+  )
+  path <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(path), add = TRUE)
+
+  ferx_save_fit(fake, path)
+  expect_setequal(unzip(path, list = TRUE)$Name, c(
+    "manifest.json", "fit.json", "ebes.csv", "predictions.csv",
+    "model.ferx", "warnings.txt"
+  ))
+  loaded <- ferx_load_fit(path)
+  expect_null(loaded$trace)
+})
 test_that("init_as_sd flags survive ferx_save_fit / ferx_load_fit round-trip", {
   skip_if_not(nzchar(Sys.getenv("FERX_RUN_REAL_FIT", "")),
               "Set FERX_RUN_REAL_FIT=1 to run real-fit persist tests")

@@ -115,10 +115,10 @@
 #'   \code{sir_resamples}, \code{sir_seed}) still flow through
 #'   \code{settings}.
 #' @param optimizer_trace Logical. If \code{TRUE}, write a per-iteration CSV
-#'   trace to a temporary file and store its path in \code{fit$trace_path}.
-#'   Pass the result to \code{\link{ferx_trace}} or
-#'   \code{\link{ferx_plot_trace}} to inspect optimizer progress. Default
-#'   \code{FALSE}.
+#'   trace to a temporary file, store its path in \code{fit$trace_path}, and
+#'   read it into \code{fit$trace} as a data frame. Pass the result to
+#'   \code{\link{ferx_trace}} or \code{\link{ferx_plot_trace}} to inspect
+#'   optimizer progress. Default \code{FALSE}.
 #' @param scale_params Logical. If \code{TRUE}, apply a per-coordinate scaling
 #'   layer on top of the existing log/Cholesky parameterization, dividing each
 #'   transformed coordinate by \code{|x0[i]|} (when \code{|x0[i]| > 0.1},
@@ -524,6 +524,10 @@
 #'   \item{trace_path}{Path to the optimizer trace CSV, or \code{NULL} when
 #'     \code{optimizer_trace = FALSE}. Pass to \code{\link{ferx_trace}}
 #'     or \code{\link{ferx_plot_trace}}.}
+#'   \item{trace}{The optimizer trace as a data frame (same columns as
+#'     \code{\link{ferx_trace}}), or \code{NULL} when
+#'     \code{optimizer_trace = FALSE}. Survives \code{\link{ferx_save_fit}} /
+#'     \code{\link{ferx_load_fit}}, unlike \code{trace_path}.}
 #'   \item{ebe_convergence_warnings}{Number of outer iterations in which too
 #'     many EBEs were unconverged (step was rejected by the guard).}
 #'   \item{max_unconverged_subjects}{Worst-case number of unconverged subjects
@@ -1680,10 +1684,16 @@ ferx_fit <- function(model, data = NULL,
   tp <- result$trace_path
   if (is.null(tp) || length(tp) == 0L || !nzchar(tp[[1L]])) {
     result$trace_path <- NULL
+    result$trace <- NULL
   } else {
     .ferx_state$last_trace_path <- result$trace_path
     .ferx_state$last_trace_time <- fit_started_at
     .ferx_state$last_trace_model <- model
+    # Read the trace CSV into the fit object itself, not just its path, so
+    # it survives a save/load round-trip and callers don't need to re-read
+    # a temp file that may since have been deleted (see ferx_trace()).
+    result$trace <- tryCatch(.ferx_read_trace_csv(result$trace_path),
+                              error = function(e) NULL)
   }
 
   # Normalize shrinkage: NaN ? NA (consistent with other optional numerics)
@@ -1964,8 +1974,18 @@ ferx_fit <- function(model, data = NULL,
 
   # Reconstruct the per-iteration IMPMAP parameter trace as a data.frame.
   # The Rust side passes flat vectors + metadata; NULL when not collected.
+  # Belt-and-suspenders: only keep it when the caller actually asked for it
+  # (settings= arg or [fit_options] in the model file) - guards against the
+  # trace leaking onto the fit object from an intermediate stage of a method
+  # chain (e.g. c("impmap", "focei")) even when impmap_trace was never
+  # requested for that chain.
+  impmap_requested <- .ferx_impmap_trace_requested(settings_used, model_file_opts)
   if (!is.null(result$impmap_trace)) {
-    result$impmap_trace <- .reconstruct_impmap_trace(result$impmap_trace)
+    result$impmap_trace <- if (impmap_requested) {
+      .reconstruct_impmap_trace(result$impmap_trace)
+    } else {
+      NULL
+    }
   }
 
   class(result) <- "ferx_fit"
@@ -2124,6 +2144,20 @@ ferx_fit <- function(model, data = NULL,
   df <- as.data.frame(mat)
   colnames(df) <- tr$col_names
   df
+}
+
+# Internal: was `impmap_trace = TRUE` actually requested by the caller, via
+# either the `settings=` argument (already parsed into `settings_used`) or a
+# `[fit_options] impmap_trace = true` line in the model file
+# (`model_file_opts`, raw strings from the parser)?
+.ferx_impmap_trace_requested <- function(settings_used, model_file_opts) {
+  mf_val <- if ("impmap_trace" %in% names(model_file_opts)) {
+    model_file_opts[["impmap_trace"]]
+  } else {
+    ""
+  }
+  isTRUE(settings_used$impmap_trace) ||
+    identical(tolower(as.character(mf_val)), "true")
 }
 
 .FERX_BAYES_RHAT_THRESHOLD <- 1.01

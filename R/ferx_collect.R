@@ -37,10 +37,15 @@ ferx_collect <- function(handle, verbose = TRUE) {
     result <- .ferx_collect_rstudio(handle, verbose)
   }
   if (is.null(result)) return(invisible(NULL))
-  if (!handle$user_wanted_trace && !is.null(result$trace_path) &&
-        file.exists(result$trace_path)) {
-    unlink(result$trace_path)
+  if (!handle$user_wanted_trace) {
+    # optimizer_trace = TRUE was forced internally only to give ferx_collect()
+    # a progress channel; drop both the temp file and the in-memory trace so
+    # a job the caller didn't ask to trace doesn't silently carry one.
+    if (!is.null(result$trace_path) && file.exists(result$trace_path)) {
+      unlink(result$trace_path)
+    }
     result$trace_path <- NULL
+    result$trace <- NULL
   }
   result
 }
@@ -61,7 +66,7 @@ ferx_collect <- function(handle, verbose = TRUE) {
       tryCatch(bg$read_output_lines(), error = function(e) NULL)
       tryCatch(bg$read_error_lines(),  error = function(e) NULL)
       if (verbose && is.null(trace_path))
-        trace_path <- .ferx_read_sidecar(sidecar_path)
+        trace_path <- handle$trace_path
       if (verbose && !is.null(trace_path) && file.exists(trace_path)) {
         state <- .ferx_print_trace_tail(trace_path, tail_n, state)
       }
@@ -108,7 +113,7 @@ ferx_collect <- function(handle, verbose = TRUE) {
 
       if (verbose) {
         if (is.null(trace_path))
-          trace_path <- .ferx_read_sidecar(sidecar_path)
+          trace_path <- handle$trace_path
         if (!is.null(trace_path) && file.exists(trace_path)) {
           state <- .ferx_print_trace_tail(trace_path, tail_n, state)
         }
@@ -153,7 +158,7 @@ print.ferx_job <- function(x, ...) {
   # Show current trace progress when available.
   # Both backends write a sidecar file with the trace CSV path once the
   # first iteration is recorded; read it non-destructively here.
-  trace_path <- .ferx_read_sidecar(x$sidecar_path)
+  trace_path <- x$trace_path
   if (!is.null(trace_path)) {
     tr <- tryCatch(ferx_trace(trace_path), error = function(e) NULL)
     if (!is.null(tr) && nrow(tr) > 0L) {
@@ -189,6 +194,20 @@ print.ferx_job <- function(x, ...) {
   sp <- tryCatch(trimws(readLines(sidecar_path, warn = FALSE)[1L]),
                  error = function(e) "")
   if (nzchar(sp) && file.exists(sp)) sp else NULL
+}
+
+# `ferx_job` handles only ever store `sidecar_path` (the location of a small
+# file the background process writes the *real* trace CSV path into once
+# discovered). Expose `trace_path` as a computed field so callers can read
+# `handle$trace_path` directly instead of every call site re-implementing
+# the sidecar indirection; falls through to plain list access (`.subset2`)
+# for every other field.
+#' @export
+`$.ferx_job` <- function(x, name) {
+  if (identical(name, "trace_path")) {
+    return(.ferx_read_sidecar(.subset2(x, "sidecar_path")))
+  }
+  .subset2(x, name)
 }
 
 # Keep the old name as an internal alias so existing tests that mock the

@@ -28,8 +28,10 @@ ferx_runlog_iters <- function(fit, verbose = TRUE) {
   tr <- if (is.character(fit)) {
     ferx_trace(fit)
   } else if (inherits(fit, "ferx_fit")) {
-    if (is.null(fit$trace_path) || is.na(fit$trace_path) ||
-        !nzchar(fit$trace_path) || !file.exists(fit$trace_path)) {
+    has_trace <- (!is.null(fit[["trace"]]) && nrow(fit[["trace"]]) > 0L) ||
+      (!is.null(fit$trace_path) && !is.na(fit$trace_path) &&
+         nzchar(fit$trace_path) && file.exists(fit$trace_path))
+    if (!has_trace) {
       stop("No trace file found. Re-run with optimizer_trace = TRUE.")
     }
     ferx_trace(fit)

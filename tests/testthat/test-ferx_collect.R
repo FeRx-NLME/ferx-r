@@ -100,6 +100,49 @@ test_that("ferx_collect rejects non-ferx_job input", {
   expect_error(ferx::ferx_collect(list()), "ferx_job")
   expect_error(ferx::ferx_collect("not a handle"), "ferx_job")
 })
+test_that("ferx_job$trace_path resolves the sidecar-pointed trace CSV", {
+  sidecar <- tempfile(fileext = ".txt")
+  on.exit(unlink(sidecar))
+  trace_csv <- write_fake_trace(n = 2L)
+  on.exit(unlink(trace_csv), add = TRUE)
+  writeLines(trace_csv, sidecar)
+
+  handle <- structure(list(sidecar_path = sidecar), class = "ferx_job")
+  expect_identical(handle$trace_path, trace_csv)
+})
+test_that("ferx_job$trace_path is NULL when the sidecar is missing or empty", {
+  handle <- structure(
+    list(sidecar_path = tempfile(fileext = ".txt")), # never written
+    class = "ferx_job"
+  )
+  expect_null(handle$trace_path)
+})
+test_that("ferx_job$other_field still falls through to plain list access", {
+  handle <- structure(
+    list(sidecar_path = NULL, backend = "callr", model_label = "m.ferx"),
+    class = "ferx_job"
+  )
+  expect_identical(handle$backend, "callr")
+  expect_identical(handle$model_label, "m.ferx")
+  expect_null(handle$not_a_field)
+})
+test_that("ferx_collect drops fit$trace (not just trace_path) when trace wasn't requested", {
+  skip_if_not_installed("mockery")
+  fn_collect <- ferx::ferx_collect
+  fake_trace_path <- write_fake_trace(n = 2L)
+  on.exit(unlink(fake_trace_path))
+  mockery::stub(
+    fn_collect, ".ferx_collect_rstudio",
+    function(handle, verbose) {
+      make_fake_fit(trace_path = fake_trace_path, trace = ferx_trace(fake_trace_path))
+    }
+  )
+  handle <- structure(list(backend = "rstudio", user_wanted_trace = FALSE),
+                      class = "ferx_job")
+  fit <- fn_collect(handle)
+  expect_null(fit$trace_path)
+  expect_null(fit$trace)
+})
 test_that("callr sidecar is removed after ferx_collect", {
   skip_if_not_installed("callr")
   ex <- ferx::ferx_example("warfarin")

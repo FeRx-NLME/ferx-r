@@ -86,6 +86,12 @@ ferx_load_fit <- function(path) {
   } else {
     result$ebe_kappas <- NULL
   }
+  trace_csv_path <- file.path(staging, "trace.csv")
+  result$trace <- if (file.exists(trace_csv_path)) {
+    .ferx_read_trace_csv(trace_csv_path)
+  } else {
+    NULL
+  }
 
   # Model source + optional data CSV.
   #

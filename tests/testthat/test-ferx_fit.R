@@ -1048,6 +1048,7 @@ test_that("duplicated settings are rejected before serialization", {
 # Local aliases avoid the ::: operator (undesirable_operator_linter).
 omega_se_at <- getFromNamespace(".omega_se_at", "ferx")
 reconstruct_impmap_trace <- getFromNamespace(".reconstruct_impmap_trace", "ferx")
+impmap_trace_requested <- getFromNamespace(".ferx_impmap_trace_requested", "ferx")
 
 
 
@@ -1071,6 +1072,21 @@ test_that(".reconstruct_impmap_trace rebuilds a data.frame column-major", {
   expect_identical(colnames(df), c("CL", "V"))
   expect_equal(df$CL, c(1, 2, 3))
   expect_equal(df$V, c(4, 5, 6))
+})
+
+test_that(".ferx_impmap_trace_requested is FALSE when neither source asked for it", {
+  expect_false(impmap_trace_requested(list(), list()))
+  expect_false(impmap_trace_requested(list(impmap_trace = FALSE), list()))
+  expect_false(impmap_trace_requested(list(), list(impmap_trace = "false")))
+})
+
+test_that(".ferx_impmap_trace_requested is TRUE via settings=", {
+  expect_true(impmap_trace_requested(list(impmap_trace = TRUE), list()))
+})
+
+test_that(".ferx_impmap_trace_requested is TRUE via [fit_options] in the model file", {
+  expect_true(impmap_trace_requested(list(), list(impmap_trace = "true")))
+  expect_true(impmap_trace_requested(list(), list(impmap_trace = "TRUE")))
 })
 
 # ---- header from test-summary.R ----

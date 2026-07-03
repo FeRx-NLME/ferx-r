@@ -29,6 +29,17 @@ excl <- ferx_apply_selection(fit, excluded = TRUE)
 
 ## Added
 
+- `ferx_fit(..., optimizer_trace = TRUE)` now stores the per-iteration trace
+  on the fit object itself as `fit$trace` (a data frame), not just its temp
+  file path (`fit$trace_path`) (#228). `fit$trace` survives
+  `ferx_save_fit()` / `ferx_load_fit()`, and `ferx_trace()`,
+  `ferx_runlog()`, `ferx_runlog_iters()` all read it directly when present
+  instead of re-reading a temp file that may have since been deleted.
+  `fit$impmap_trace` is now only ever populated when `impmap_trace = TRUE`
+  was actually requested (via `settings =` or `[fit_options]`), guarding
+  against it leaking from an intermediate stage of a method chain.
+  `ferx_job` handles (from `ferx_fit_async()`) gain a computed
+  `trace_path` field alongside the existing `sidecar_path`.
 - `ferx_model_to_frem()` gains a `fit` argument (#239). Pass a `ferx_fit`
   result from fitting the base model and its theta/omega estimates seed the
   generated FREM model's PK theta inits and PK-PK omega block, so a subsequent

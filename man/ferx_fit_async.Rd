@@ -23,9 +23,12 @@ poll in \code{\link{ferx_collect}}. Default 6.}
 }
 \value{
 A \code{ferx_job} handle. Pass it to \code{\link{ferx_collect}}
-to retrieve the \code{ferx_fit} result. In non-interactive sessions
-(\code{Rscript}, knitr, batch mode) the function falls back to a
-synchronous \code{\link{ferx_fit}} call and returns the result directly.
+to retrieve the \code{ferx_fit} result. \code{handle$trace_path} reads
+the discovered trace CSV path on demand (\code{NULL} until the
+background fit has written its first trace row). In non-interactive
+sessions (\code{Rscript}, knitr, batch mode) the function falls back to
+a synchronous \code{\link{ferx_fit}} call and returns the result
+directly.
 }
 \description{
 Submits \code{\link{ferx_fit}} to a background process and returns
