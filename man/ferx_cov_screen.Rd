@@ -52,9 +52,9 @@ ferx_cov_screen(fit)
 Other diagnostics: 
 \code{\link{check_diagnostics}()},
 \code{\link{ferx_get_warnings}()},
-\code{\link{ferx_plot_trace}()},
 \code{\link{ferx_runlog_iters}()},
 \code{\link{ferx_trace}()},
+\code{\link{plot.ferx_fit}()},
 \code{\link{summary.ferx_fit}()}
 }
 \concept{diagnostics}

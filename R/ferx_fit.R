@@ -117,7 +117,7 @@
 #' @param optimizer_trace Logical. If \code{TRUE}, write a per-iteration CSV
 #'   trace to a temporary file and store its path in \code{fit$trace_path}.
 #'   Pass the result to \code{\link{ferx_trace}} or
-#'   \code{\link{ferx_plot_trace}} to inspect optimizer progress. Default
+#'   \code{\link{plot.ferx_fit}} to inspect optimizer progress. Default
 #'   \code{FALSE}.
 #' @param scale_params Logical. If \code{TRUE}, apply a per-coordinate scaling
 #'   layer on top of the existing log/Cholesky parameterization, dividing each
@@ -523,7 +523,7 @@
 #'     subjects whose ESS fraction fell below \code{imp_low_ess_threshold}.}
 #'   \item{trace_path}{Path to the optimizer trace CSV, or \code{NULL} when
 #'     \code{optimizer_trace = FALSE}. Pass to \code{\link{ferx_trace}}
-#'     or \code{\link{ferx_plot_trace}}.}
+#'     or \code{\link{plot.ferx_fit}}.}
 #'   \item{ebe_convergence_warnings}{Number of outer iterations in which too
 #'     many EBEs were unconverged (step was rejected by the guard).}
 #'   \item{max_unconverged_subjects}{Worst-case number of unconverged subjects
@@ -962,7 +962,7 @@
 #' diagnostics:
 #' \preformatted{
 #' fit <- ferx_fit(m, d, optimizer_trace = TRUE)
-#' ferx_plot_trace(fit)
+#' plot(fit)
 #' }
 #'
 #' @section Fine-tuning with \code{settings}:
@@ -1096,7 +1096,7 @@
 #' fit |> print()              # full parameter table
 #' fit |> summary()            # compact diagnostic summary
 #' fit |> ferx_model_inspect() # model structure auto-derived by the engine
-#' fit |> ferx_plot_trace()    # convergence trace (needs optimizer_trace = TRUE)
+#' fit |> plot()               # convergence trace (needs optimizer_trace = TRUE)
 #' }
 #'
 #' Diagnostics data frame (PRED, IPRED, CWRES, ETAs, ...) lives in
@@ -1205,7 +1205,7 @@
 #'
 #' summary(fit)              # compact diagnostic table
 #' ferx_model_inspect(fit)   # model structure auto-derived by the engine
-#' ferx_plot_trace(fit)      # convergence plot (optimizer_trace = TRUE required)
+#' plot(fit)                 # convergence plot (optimizer_trace = TRUE required)
 #'
 #' fit$sdtab                 # per-observation diagnostics (PRED, IPRED, CWRES, etc.)
 #' fit$ebe_etas              # per-subject empirical Bayes ETAs
@@ -1319,7 +1319,7 @@
 #'     \item \code{\link{ferx_inits_from_nca}} - NCA-derived starting values.
 #'     \item \code{\link{ferx_get_warnings}} - structured warnings from the fit.
 #'     \item \code{fit$estimates} - tidy parameter table with SE / \%RSE.
-#'     \item \code{\link{ferx_plot_trace}} - convergence trace plot.
+#'     \item \code{\link{plot.ferx_fit}} - convergence trace plot.
 #'   }
 #' @family fitting
 #' @export

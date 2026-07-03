@@ -100,7 +100,7 @@
 #' summary(fit)
 #' ferx_model_inspect(fit)   # structure (no path needed post-fit)
 #' fit$cor_matrix            # parameter correlation matrix
-#' ferx_plot_trace(fit)      # OFV + gradient norm over iterations
+#' plot(fit)                 # OFV + gradient norm over iterations
 #'
 #' # ?? Peek at a section mid-pipe without breaking the chain ????????????????
 #' fit <- ex$data |>
@@ -112,7 +112,7 @@
 #' # ferx_check_init() runs 5 iterations and returns trace + diagnostics.
 #' chk <- ferx_check_init(ex$model, ex$data, method = "focei")
 #' chk$summary   # ofv_start, ofv_end, ofv_drop - confirm OFV is dropping
-#' ferx_plot_trace(chk$fit)  # visual check of first few iterations
+#' plot(chk$fit)             # visual check of first few iterations
 #'
 #' # ?? Multi-stage chain: SAEM ? FOCEI ?????????????????????????????????????
 #' fit <- ex$data |>
