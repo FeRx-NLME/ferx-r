@@ -400,6 +400,46 @@ test_that("fit$trace survives a ferx_save_fit / ferx_load_fit round-trip (synthe
   expect_equal(loaded$trace$grad_norm, fake$trace$grad_norm, tolerance = 1e-12)
   expect_true(all(is.na(loaded$trace$lm_lambda)))
 })
+test_that("fit$trace bundles even as a header-only (zero-row) data.frame", {
+  # A valid zero-iteration trace must still round-trip -- gating on
+  # `nrow() > 0L` would silently drop it (see PR #246 review).
+  trace_path <- write_fake_trace(n = 3L, method = "gn")
+  on.exit(unlink(trace_path), add = TRUE)
+  empty_trace <- ferx_trace(trace_path)[0, , drop = FALSE]
+  fake <- structure(
+    list(
+      theta = c(TVCL = 1.0),
+      omega = matrix(0.04, 1L, 1L, dimnames = list("ETA_CL", "ETA_CL")),
+      eta_names = "ETA_CL",
+      sigma = c(prop = 0.05),
+      sigma_names = "prop",
+      sigma_types = "proportional",
+      ofv = 0, aic = 2, bic = 4,
+      n_obs = 3L, n_subjects = 2L, n_parameters = 1L, n_iterations = 1L,
+      method = "GN", method_chain = "GN",
+      converged = TRUE,
+      warnings = character(),
+      shrinkage_eta = 0, shrinkage_eps = 0,
+      wall_time_secs = 0, model_name = "fake", ferx_version = "0.1.0",
+      gradient_method_inner = "Enzyme AD",
+      gradient_method_outer = "N/A",
+      covariance_status = "NotRequested",
+      model_source = "model fake\n",
+      data_path = NA_character_,
+      trace_path = trace_path,
+      trace = empty_trace
+    ),
+    class = "ferx_fit"
+  )
+  path <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(path), add = TRUE)
+
+  ferx_save_fit(fake, path)
+  expect_true("trace.csv" %in% unzip(path, list = TRUE)$Name)
+  loaded <- ferx_load_fit(path)
+  expect_s3_class(loaded$trace, "data.frame")
+  expect_equal(nrow(loaded$trace), 0L)
+})
 test_that("fit$trace is absent from the bundle (and NULL on load) when no trace was collected", {
   fake <- structure(
     list(

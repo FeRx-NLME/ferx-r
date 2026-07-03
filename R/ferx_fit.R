@@ -2181,7 +2181,7 @@ ferx_fit <- function(model, data = NULL,
   } else {
     ""
   }
-  isTRUE(settings_used$impmap_trace) ||
+  isTRUE(settings_used[["impmap_trace"]]) ||
     identical(tolower(as.character(mf_val)), "true")
 }
 

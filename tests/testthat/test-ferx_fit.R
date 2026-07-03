@@ -1089,6 +1089,13 @@ test_that(".ferx_impmap_trace_requested is TRUE via [fit_options] in the model f
   expect_true(impmap_trace_requested(list(), list(impmap_trace = "TRUE")))
 })
 
+test_that(".ferx_impmap_trace_requested does not partial-match a longer settings= name", {
+  # List `$` access silently partial-matches; "impmap_trace" is an
+  # unambiguous prefix of "impmap_traceX", so `settings_used$impmap_trace`
+  # would wrongly resolve to it under `$`. Must use exact `[[` access.
+  expect_false(impmap_trace_requested(list(impmap_traceX = TRUE), list()))
+})
+
 # ---- header from test-summary.R ----
 # Helpers ---------------------------------------------------------------
 

@@ -37,7 +37,7 @@ ferx_collect <- function(handle, verbose = TRUE) {
     result <- .ferx_collect_rstudio(handle, verbose)
   }
   if (is.null(result)) return(invisible(NULL))
-  if (!handle$user_wanted_trace) {
+  if (!isTRUE(handle$user_wanted_trace)) {
     # optimizer_trace = TRUE was forced internally only to give ferx_collect()
     # a progress channel; drop both the temp file and the in-memory trace so
     # a job the caller didn't ask to trace doesn't silently carry one.

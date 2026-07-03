@@ -143,6 +143,24 @@ test_that("ferx_collect drops fit$trace (not just trace_path) when trace wasn't 
   expect_null(fit$trace_path)
   expect_null(fit$trace)
 })
+test_that("ferx_collect treats a NULL user_wanted_trace as FALSE (hand-built handle)", {
+  skip_if_not_installed("mockery")
+  fn_collect <- ferx::ferx_collect
+  fake_trace_path <- write_fake_trace(n = 2L)
+  on.exit(unlink(fake_trace_path))
+  mockery::stub(
+    fn_collect, ".ferx_collect_rstudio",
+    function(handle, verbose) {
+      make_fake_fit(trace_path = fake_trace_path, trace = ferx_trace(fake_trace_path))
+    }
+  )
+  # No user_wanted_trace field at all -- `handle$user_wanted_trace` is NULL,
+  # and `if (!NULL)` errors with "argument is of length zero".
+  handle <- structure(list(backend = "rstudio"), class = "ferx_job")
+  fit <- expect_silent(fn_collect(handle))
+  expect_null(fit$trace_path)
+  expect_null(fit$trace)
+})
 test_that("callr sidecar is removed after ferx_collect", {
   skip_if_not_installed("callr")
   ex <- ferx::ferx_example("warfarin")
