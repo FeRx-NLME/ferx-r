@@ -10,6 +10,7 @@ reference:
       - ferx_fit_async
       - print.ferx_job
       - ferx_collect
+      - ferx_stop
       - ferx_sir
       - summary.ferx_fit
 

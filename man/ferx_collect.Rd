@@ -44,6 +44,7 @@ Other fitting:
 \code{\link{ferx_fit}()},
 \code{\link{ferx_inits_from_nca}()},
 \code{\link{ferx_sir}()},
+\code{\link{ferx_stop}()},
 \code{\link{print.ferx_job}()}
 }
 \concept{fitting}
