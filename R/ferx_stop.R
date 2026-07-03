@@ -54,12 +54,15 @@ ferx_stop <- function(handle) {
 }
 
 .ferx_stop_rstudio <- function(handle) {
-  state <- tryCatch(rstudioapi::jobGetState(handle$job_id),
-                     error = function(e) "unknown")
-  running <- !identical(state, "succeeded") && !identical(state, "failed")
-  if (running) {
-    tryCatch(rstudioapi::jobRemove(handle$job_id), error = function(e) NULL)
-  }
+  state <- tryCatch(
+    rstudioapi::jobGetState(handle$job_id),
+    error = function(e) stop(
+      "Failed to query RStudio job state: ", conditionMessage(e),
+      call. = FALSE
+    )
+  )
+  running <- !(state %in% c("succeeded", "failed"))
+  if (running) rstudioapi::jobRemove(handle$job_id)
   if (!is.null(handle$script_path) && file.exists(handle$script_path)) {
     unlink(handle$script_path)
   }
