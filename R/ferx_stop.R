@@ -2,9 +2,9 @@
 #'
 #' Terminates a background job started by \code{\link{ferx_fit_async}}
 #' without waiting for it to finish. Unlike pressing \code{Ctrl+C} during
-#' \code{\link{ferx_collect}} (which only cancels an active wait),
-#' \code{ferx_stop()} kills the job directly and works whether or not
-#' \code{ferx_collect()} is currently running against the handle.
+#' \code{\link{ferx_collect}} (which cancels an active wait and kills the
+#' background process), \code{ferx_stop()} can be called at any time to
+#' terminate the job directly.
 #'
 #' @param handle A \code{ferx_job} handle returned by
 #'   \code{\link{ferx_fit_async}}.
