@@ -30,13 +30,11 @@ ferx_model_show(ex$model)
 \code{\link{ferx_model_edit}}, \code{\link{ferx_example}}
 
 Other model-editing: 
-\code{\link{ferx_get_section}()},
 \code{\link{ferx_model}()},
 \code{\link{ferx_model_edit}()},
+\code{\link{ferx_model_get_section}()},
 \code{\link{ferx_model_inspect}()},
-\code{\link{ferx_model_section}()},
 \code{\link{ferx_model_set_section}()},
-\code{\link{ferx_model_validate}()},
-\code{\link{ferx_set_section}()}
+\code{\link{ferx_model_validate}()}
 }
 \concept{model-editing}

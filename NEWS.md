@@ -43,6 +43,33 @@ recomputed by `ferx_load_fit()`), part of the fit-accessor cleanup in #226:
 - `ferx_eta_cov(fit, data)` -> `fit$eta_cov` (no longer takes a `data` argument;
   it is computed from the dataset used to fit the model)
 
+The four section-editing functions collapse into one get/set pair, part of
+the API cleanup in #223 (#233; decision recorded on #227). Both accept
+either a `ferx_model` object or a plain path:
+
+- `ferx_model_section()`, `ferx_get_section()` -> `ferx_model_get_section()`
+  (returns the section's lines; always a data-return, not a pipe passthrough)
+- `ferx_set_section()` -> `ferx_model_set_section()` (unchanged behaviour:
+  returns `x` for piping, with copy-on-write for bundled package models)
+
+The `ferx_get_section()` mid-pipe peek (printing a section and passing the
+`ferx_model` object through unchanged) is gone - there is no replacement that
+both prints and continues the pipe. Call `ferx_model_get_section()` on its
+own line before the pipe, or use `ferx_model_show()` to peek at the whole
+file:
+
+```r
+# before
+fit <- ferx_model(ex$data, ex$model) |>
+  ferx_get_section("parameters") |>
+  ferx_fit()
+
+# after
+ferx_model_get_section(ex$model, "parameters")
+fit <- ferx_model(ex$data, ex$model) |>
+  ferx_fit()
+```
+
 ```r
 # before
 ferx_cor_matrix(fit)

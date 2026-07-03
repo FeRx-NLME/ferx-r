@@ -108,13 +108,13 @@ fit <- ex$data |>
   summary()
 
 # ?? Override fit options before fitting ?????????????????????????????????
-# ferx_set_section() rewrites [fit_options] on disk and passes the
+# ferx_model_set_section() rewrites [fit_options] on disk and passes the
 # ferx_model through so the pipe continues. When the model file lives
 # inside the installed package (as for ferx_example()), the file is
 # copied to tempdir() first so the bundled example is never mutated.
 fit <- ex$data |>
   ferx_model(ex$model) |>
-  ferx_set_section("fit_options", c(
+  ferx_model_set_section("fit_options", c(
     "  method     = focei",
     "  maxiter    = 500",
     "  covariance = true"
@@ -126,10 +126,10 @@ ferx_model_inspect(fit)   # structure (no path needed post-fit)
 fit$cor_matrix            # parameter correlation matrix
 plot(fit)                 # OFV + gradient norm over iterations
 
-# ?? Peek at a section mid-pipe without breaking the chain ????????????????
+# ?? Read a section before fitting ?????????????????????????????????????????
+lines <- ferx_model_get_section(ex$model, "parameters")
 fit <- ex$data |>
   ferx_model(ex$model) |>
-  ferx_get_section("parameters") |>   # prints [parameters], passes through
   ferx_fit(method = "focei")
 
 # ?? Validate initialisation before a long run ????????????????????????????
@@ -155,17 +155,15 @@ ferx_model(ex$data, ex$model) |>
 
 }
 \seealso{
-\code{\link{ferx_set_section}}, \code{\link{ferx_get_section}},
+\code{\link{ferx_model_set_section}}, \code{\link{ferx_model_get_section}},
 \code{\link{ferx_fit}}, \code{\link{ferx_check_init}}
 
 Other model-editing: 
-\code{\link{ferx_get_section}()},
 \code{\link{ferx_model_edit}()},
+\code{\link{ferx_model_get_section}()},
 \code{\link{ferx_model_inspect}()},
-\code{\link{ferx_model_section}()},
 \code{\link{ferx_model_set_section}()},
 \code{\link{ferx_model_show}()},
-\code{\link{ferx_model_validate}()},
-\code{\link{ferx_set_section}()}
+\code{\link{ferx_model_validate}()}
 }
 \concept{model-editing}

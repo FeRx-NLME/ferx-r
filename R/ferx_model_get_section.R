@@ -1,10 +1,10 @@
-#' Extract a section from a ferx model file
+#' Get a section from a ferx model
 #'
-#' Returns the lines belonging to a named section of a \code{.ferx} model file,
+#' Returns the lines belonging to a named section of a \code{.ferx} model,
 #' excluding the section header itself. Prints the lines to the console and
 #' returns them invisibly.
 #'
-#' @param path Path to a \code{.ferx} model file.
+#' @param x A \code{ferx_model} object or a path to a \code{.ferx} file.
 #' @param section Name of the section to extract, without brackets (e.g.
 #'   \code{"parameters"}).
 #' @param strip Logical. If \code{TRUE}, leading whitespace is trimmed from each
@@ -16,14 +16,30 @@
 #'
 #' @examples
 #' ex <- ferx_example("warfarin")
-#' ferx_model_section(ex$model, "parameters")
-#' ferx_model_section(ex$model, "parameters", strip = TRUE)
+#' ferx_model_get_section(ex$model, "parameters")
+#' ferx_model_get_section(ex$model, "parameters", strip = TRUE)
+#'
+#' m <- ferx_model(ex$data, ex$model)
+#' ferx_model_get_section(m, "parameters")
 #'
 #' @seealso \code{\link{ferx_model_show}}, \code{\link{ferx_model_edit}},
 #'   \code{\link{ferx_model_set_section}}
 #' @family model-editing
 #' @export
-ferx_model_section <- function(path, section, strip = FALSE) {
+ferx_model_get_section <- function(x, section, strip = FALSE) {
+  path <- if (inherits(x, "ferx_model")) x$model else x
+  body <- .ferx_read_section(path, section, strip = strip)
+
+  cat("# [", section, "]\n", sep = "")
+  cat(body, sep = "\n")
+  cat("\n")
+  invisible(body)
+}
+
+# Low-level section reader shared by ferx_model_get_section() and
+# ferx_model_set_section()'s round-trip callers. Assumes `path` is already
+# resolved from a ferx_model object if needed.
+.ferx_read_section <- function(path, section, strip = FALSE) {
   if (!file.exists(path)) stop("File not found: ", path)
   if (tolower(tools::file_ext(path)) != "ferx") stop("'path' must be a .ferx file")
 
@@ -42,9 +58,5 @@ ferx_model_section <- function(path, section, strip = FALSE) {
   end   <- if (idx < length(hdr$positions)) hdr$positions[idx + 1L] - 1L else length(file_lines)
   body  <- if (start <= end) file_lines[start:end] else character(0)
   if (strip) body <- trimws(body, which = "left")
-
-  cat("# [", section, "]\n", sep = "")
-  cat(body, sep = "\n")
-  cat("\n")
-  invisible(body)
+  body
 }

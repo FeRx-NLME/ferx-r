@@ -2,55 +2,73 @@
 % Please edit documentation in R/ferx_model_set_section.R
 \name{ferx_model_set_section}
 \alias{ferx_model_set_section}
-\title{Replace a section in a ferx model file}
+\title{Set a section in a ferx model}
 \usage{
-ferx_model_set_section(path, section, lines)
+ferx_model_set_section(x, section, lines)
 }
 \arguments{
-\item{path}{Path to a \code{.ferx} model file.}
+\item{x}{A \code{ferx_model} object or a path to a \code{.ferx} file.}
 
 \item{section}{Name of the section to replace, without brackets (e.g.
 \code{"fit_options"}).}
 
-\item{lines}{Character vector of replacement lines. These become the new
-body of the section (do not include the \code{[section]} header line).}
+\item{lines}{Character vector of replacement lines (do not include the
+\code{[section]} header line).}
 }
 \value{
-\code{path}, invisibly.
+\code{x}, invisibly. For a \code{ferx_model} pointing at a
+bundled package file, the returned object's \code{$model} field will
+point at the temp-directory copy that was actually edited.
 }
 \description{
-Overwrites the body of a named section in a \code{.ferx} file with new
-lines, leaving all other sections untouched. Use this to modify a model
-programmatically without opening an editor.
+Replaces the body of a named section in a \code{.ferx} model with new
+lines, leaving all other sections untouched, and returns \code{x} so
+calls can be chained with \code{|>} or \code{\%>\%}.
+}
+\details{
+When \code{x} is a \code{ferx_model} object the section is written to
+\code{x$model}. \strong{Copy-on-write for bundled examples}: if
+\code{x$model} points to a file inside the installed \code{ferx} package
+directory (typically the result of \code{\link{ferx_example}()}), the
+file is first copied to \code{tempdir()} and \code{x$model} is updated to
+that copy before the edit. This prevents accidental modification of
+read-only package examples. When \code{x} is a plain path string the file
+is edited in place.
 }
 \examples{
 \dontrun{
-# Switch estimation method without opening an editor
-ferx_model_set_section("my_model.ferx", "fit_options", c(
+ex <- ferx_example("warfarin")
+
+# Plain path: edited in place
+ferx_model_set_section(ex$model, "fit_options", c(
   "  method     = focei",
   "  maxiter    = 500",
-  "  covariance = false"
+  "  covariance = true"
 ))
 
-# Read-modify-write a section
-lines <- ferx_model_section("my_model.ferx", "parameters")
-lines <- sub("TVCL\\\\(.*\\\\)", "TVCL(0.5, 0.001, 10.0)", lines)
-ferx_model_set_section("my_model.ferx", "parameters", lines)
+# ferx_model: safe by default. Editing a bundled example transparently
+# copies the file to tempdir() and edits the copy; ex$model on disk is
+# untouched.
+fit <- ferx_model(ex$data, ex$model) |>
+  ferx_model_set_section("fit_options", c(
+    "  method     = focei",
+    "  maxiter    = 500",
+    "  covariance = true"
+  )) |>
+  ferx_fit() |>
+  summary()
 }
 
 }
 \seealso{
-\code{\link{ferx_model_section}}, \code{\link{ferx_model_show}},
-\code{\link{ferx_model}}
+\code{\link{ferx_model_get_section}}
 
 Other model-editing: 
-\code{\link{ferx_get_section}()},
 \code{\link{ferx_model}()},
 \code{\link{ferx_model_edit}()},
+\code{\link{ferx_model_get_section}()},
 \code{\link{ferx_model_inspect}()},
-\code{\link{ferx_model_section}()},
 \code{\link{ferx_model_show}()},
-\code{\link{ferx_model_validate}()},
-\code{\link{ferx_set_section}()}
+\code{\link{ferx_model_validate}()}
 }
 \concept{model-editing}
