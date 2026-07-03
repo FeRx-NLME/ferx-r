@@ -76,7 +76,15 @@ test_that(".ferx_compute_eta_cov yields NA stats when fewer than 3 pairs are usa
 })
 test_that(".ferx_compute_eta_cov returns NULL for missing ebe_etas or an unreadable data path", {
   expect_null(.compute_eta_cov(NULL, .write_csv_path(data.frame(x = 1))))
-  expect_null(.compute_eta_cov(data.frame(ID = 1), file.path(tempdir(), "does-not-exist.csv")))
+  expect_warning(
+    res <- .compute_eta_cov(data.frame(ID = 1), file.path(tempdir(), "does-not-exist.csv")),
+    "could not read data"
+  )
+  expect_null(res)
+})
+test_that(".ferx_compute_eta_cov stays silent when data_path is NA (no data bundled)", {
+  expect_no_warning(res <- .compute_eta_cov(data.frame(ID = 1), NA_character_))
+  expect_null(res)
 })
 
 # ---- header from test-map-estimates.R ----

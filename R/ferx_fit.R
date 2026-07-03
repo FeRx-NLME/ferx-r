@@ -1986,18 +1986,12 @@ ferx_fit <- function(model, data = NULL,
     result$impmap_trace <- .reconstruct_impmap_trace(result$impmap_trace)
   }
 
-  # Correlation matrix of estimated parameters (NULL when the covariance step
-  # was not run or failed). Was previously the exported ferx_cor_matrix().
-  result$cor_matrix <- .ferx_compute_cor_matrix(result$cov_matrix)
-
-  # Tidy parameter estimates table. Was previously the exported
-  # ferx_estimates().
-  result$estimates <- .ferx_compute_estimates(result)
-
-  # ETA-covariate correlation table (NULL when the model has no etas, the
-  # dataset has no usable numeric covariates, or the data file can no longer
-  # be read). Was previously the exported ferx_eta_cov(fit, data).
-  result$eta_cov <- .ferx_compute_eta_cov(result$ebe_etas, data)
+  # Derived fields (cor_matrix, estimates, eta_cov) - shared with
+  # ferx_load_fit() via .ferx_populate_derived_fields() so the two
+  # construction paths can't diverge. Uses result$data_path (normalised
+  # above), not the raw `data` argument, so a fresh fit and a loaded fit of
+  # the same model resolve the dataset identically.
+  result <- .ferx_populate_derived_fields(result)
 
   class(result) <- "ferx_fit"
 

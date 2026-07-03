@@ -13,10 +13,22 @@
 .ferx_compute_eta_cov <- function(ebe_etas, data_path) {
   if (is.null(ebe_etas) || !is.data.frame(ebe_etas)) return(NULL)
   data <- tryCatch(
-    suppressWarnings(utils::read.csv(data_path)),
+    suppressWarnings(utils::read.csv(data_path, stringsAsFactors = FALSE,
+                                      check.names = FALSE)),
     error = function(e) NULL
   )
-  if (is.null(data) || !is.data.frame(data)) return(NULL)
+  if (is.null(data) || !is.data.frame(data)) {
+    # Only warn when a path was actually recorded but couldn't be read -
+    # data_path being NA (no data bundled/resolvable) is the legitimate
+    # "eta_cov not computable" case and shouldn't be noisy.
+    if (!is.null(data_path) && length(data_path) == 1L && !is.na(data_path) &&
+        nzchar(data_path)) {
+      warning("fit$eta_cov: could not read data from '", data_path,
+               "'; eta-covariate correlations were not computed.",
+               call. = FALSE)
+    }
+    return(NULL)
+  }
 
   # Treat every non-ID column as an eta - a "^ETA" prefix filter would
   # silently drop columns from models that don't follow the conventional
