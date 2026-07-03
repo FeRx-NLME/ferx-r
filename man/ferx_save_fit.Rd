@@ -21,7 +21,7 @@ path captured at fit time (\code{fit$data_path}). Default \code{FALSE}.}
 Invisibly returns \code{fit}, so the function can be used inside a
 pipe without breaking the chain:
 \preformatted{
-  fit |> ferx_save_fit("run1.fitrx") |> ferx_estimates()
+  fit |> ferx_save_fit("run1.fitrx") |> (\(f) f$estimates)()
   }
 }
 \description{

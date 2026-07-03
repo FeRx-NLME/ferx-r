@@ -14,7 +14,7 @@ fit <- ferx_fit(ex$model, ex$data)
 print(fit)
 
 # PK-only parameters are estimated; PD thetas are fixed (SE = 0):
-ferx_estimates(fit)
+fit$estimates
 
 # PD derived quantities are in sdtab:
 names(fit$sdtab)

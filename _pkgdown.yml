@@ -10,6 +10,7 @@ reference:
       - ferx_fit_async
       - print.ferx_job
       - ferx_collect
+      - ferx_stop
       - ferx_sir
       - summary.ferx_fit
 
@@ -41,11 +42,8 @@ reference:
     contents:
       - ferx_runlog
       - ferx_runlog_iters
-      - ferx_estimates
       - ferx_warnings
-      - ferx_eta_cov
       - ferx_cov_screen
-      - ferx_cor_matrix
       - ferx_plot_trace
       - ferx_trace
       - ferx_npde

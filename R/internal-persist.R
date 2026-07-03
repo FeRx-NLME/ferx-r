@@ -66,3 +66,15 @@
   if (length(v) == 0L) return(NULL)
   v
 }
+
+# Fields derived from other fields already present on `result` (correlation
+# matrix, tidy estimates table, eta-covariate correlations). Shared between
+# ferx_fit() and ferx_load_fit() - the two fit-construction entry points -
+# so they can't drift on how a derived field is computed. Requires
+# `result$data_path` to already be set (normalised, in ferx_fit()'s case).
+.ferx_populate_derived_fields <- function(result) {
+  result$cor_matrix <- .ferx_compute_cor_matrix(result$cov_matrix)
+  result$estimates  <- .ferx_compute_estimates(result)
+  result$eta_cov    <- .ferx_compute_eta_cov(result$ebe_etas, result$data_path)
+  result
+}

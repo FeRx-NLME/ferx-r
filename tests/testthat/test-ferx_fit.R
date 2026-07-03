@@ -1619,13 +1619,14 @@ test_that("DIFF_* theta parameters appear in print.ferx_fit theta table", {
   out <- capture.output(print(fit))
   expect_true(any(grepl("DIFF_CENTRAL", out)))
 })
-test_that("ferx_estimates() includes DIFF_* theta rows", {
+test_that(".ferx_compute_estimates() includes DIFF_* theta rows", {
+  .compute_estimates <- getFromNamespace(".ferx_compute_estimates", "ferx")
   fit <- make_fake_fit(
     uses_sde = TRUE,
     theta    = c(TVCL = 5.0, TVV = 50.0, DIFF_CENTRAL = 0.5),
     omega    = matrix(0.09, 1, 1)
   )
-  est <- ferx_estimates(fit)
+  est <- .compute_estimates(fit)
   expect_true(any(est$param == "DIFF_CENTRAL"))
   diff_row <- est[est$param == "DIFF_CENTRAL", ]
   expect_equal(diff_row$estimate, 0.5)

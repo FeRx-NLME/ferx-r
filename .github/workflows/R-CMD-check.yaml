@@ -24,7 +24,7 @@ jobs:
       R_KEEP_PKG_SOURCE: yes
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # Guard against an accidentally-unpinned ferx-core dependency.
       # src/rust/.cargo/config.toml carries a [patch] that redirects ferx-core
@@ -49,7 +49,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo registry and target
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry

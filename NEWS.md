@@ -27,6 +27,27 @@ excl <- ferx_apply_selection(data, ignore = "DV < 1", excluded = TRUE)
 excl <- ferx_apply_selection(fit, excluded = TRUE)
 ```
 
+`ferx_cor_matrix()`, `ferx_estimates()`, and `ferx_eta_cov()` are removed and
+replaced with fields computed automatically at the end of `ferx_fit()` (and
+recomputed by `ferx_load_fit()`), part of the fit-accessor cleanup in #226:
+
+- `ferx_cor_matrix(fit)` -> `fit$cor_matrix`
+- `ferx_estimates(fit)` -> `fit$estimates`
+- `ferx_eta_cov(fit, data)` -> `fit$eta_cov` (no longer takes a `data` argument;
+  it is computed from the dataset used to fit the model)
+
+```r
+# before
+ferx_cor_matrix(fit)
+ferx_estimates(fit)
+ferx_eta_cov(fit, read.csv(ex$data))
+
+# after
+fit$cor_matrix
+fit$estimates
+fit$eta_cov
+```
+
 ## Added
 
 - `ferx_fit(..., optimizer_trace = TRUE)` now stores the per-iteration trace
@@ -40,6 +61,9 @@ excl <- ferx_apply_selection(fit, excluded = TRUE)
   against it leaking from an intermediate stage of a method chain.
   `ferx_job` handles (from `ferx_fit_async()`) gain a computed
   `trace_path` field alongside the existing `sidecar_path`.
+- `ferx_stop()` terminates a background fit started by `ferx_fit_async()`
+  without waiting for it to finish (#235). Previously the only way to stop a
+  running job was to send a kill signal manually.
 - `ferx_model_to_frem()` gains a `fit` argument (#239). Pass a `ferx_fit`
   result from fitting the base model and its theta/omega estimates seed the
   generated FREM model's PK theta inits and PK-PK omega block, so a subsequent

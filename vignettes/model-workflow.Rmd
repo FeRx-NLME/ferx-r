@@ -187,7 +187,7 @@ fit <- ferx_model(ex$data, ex$model) |>
 
 summary(fit)
 ferx_model_inspect(fit)    # no path needed after fitting
-ferx_cor_matrix(fit)       # parameter correlation matrix
+fit$cor_matrix             # parameter correlation matrix
 ferx_plot_trace(fit)       # OFV + gradient norm convergence plot
 ```
 
@@ -237,12 +237,13 @@ head(fit$individual_estimates) # individual PK parameters (CL, V, KA, ...)
 fit$eta_normality              # Shapiro-Wilk normality test per ETA
 ```
 
-`ferx_estimates()` collects all estimated parameters (theta, omega diagonal,
-sigma, kappa diagonal if IOV is present) into a tidy data frame. Run it after
-any fit that used `covariance = TRUE` to populate the `se`, `rse_pct`,
-`lower_95`, and `upper_95` columns; without the covariance step those columns
-are `NA`. The `transform` column reflects how the parameter is reported by the
-backend - `"identity"`, `"log"`, `"logit"`, or `"proportional"`/`"additive"`
+`fit$estimates` collects all estimated parameters (theta, omega diagonal,
+sigma, kappa diagonal if IOV is present) into a tidy data frame, populated
+automatically at the end of every `ferx_fit()` call. When the fit used
+`covariance = TRUE` the `se`, `rse_pct`, `lower_95`, and `upper_95` columns are
+populated; without the covariance step those columns are `NA`. The `transform`
+column reflects how the parameter is reported by the backend -
+`"identity"`, `"log"`, `"logit"`, or `"proportional"`/`"additive"`
 for sigma rows. Omega rows always use `transform = "variance"` regardless of
 the ETA parameterisation (the interpretation is conveyed by `print.ferx_fit()`,
 not by the tidy table). The `init_as_sd` column is `TRUE` for omega/sigma/kappa
@@ -253,7 +254,7 @@ The parameter labels are the bare declared names (`ETA_CL`, `PROP_ERR`);
 unnamed elements fall back to `OMEGA(i,i)` / `SIGMA(i)` / `KAPPA{i}`.
 
 ```{r estimates, eval = FALSE}
-ferx_estimates(fit)
+fit$estimates
 #     param    transform   estimate         se  rse_pct  lower_95  upper_95  init_as_sd
 #      TVCL     identity 0.13273892 0.01446172  10.8949  0.104394  0.161084       FALSE
 #       TVV     identity 7.69480857 0.29200479   3.7948  7.122479  8.267138       FALSE
@@ -269,12 +270,12 @@ ferx_estimates(fit)
 The output above is captured from a real `gn` fit of the bundled warfarin
 example with `covariance = TRUE`.
 
-`ferx_cor_matrix()` converts the parameter covariance matrix to correlations.
+`fit$cor_matrix` converts the parameter covariance matrix to correlations.
 A value near ±1 between two parameters signals a structural identifiability
 problem worth investigating:
 
 ```{r cor-matrix, eval = FALSE}
-ferx_cor_matrix(fit)
+fit$cor_matrix
 ```
 
 **Goodness-of-fit plots** from `fit$sdtab` with ggplot2:
@@ -311,20 +312,20 @@ ggplot(sdtab, aes(PRED, CWRES)) +
   labs(title = "CWRES vs PRED")
 ```
 
-ETA-covariate correlations — identifies covariates worth testing in a formal
-covariate search. Pass the original data frame (not the path); any numeric
-column that is constant within a subject and not a standard NONMEM column
-(TIME, DV, AMT, EVID, MDV, CMT, RATE) is treated as a covariate:
+ETA-covariate correlations — `fit$eta_cov` identifies covariates worth testing
+in a formal covariate search. It is computed automatically from the dataset
+used to fit the model; any numeric column that is constant within a subject
+and not a standard NONMEM column (TIME, DV, AMT, EVID, MDV, CMT, RATE) is
+treated as a covariate:
 
 ```{r eta-cov, eval = FALSE}
 # The warfarin dataset has no covariate columns. The example below uses
 # two_cpt_oral_cov, which carries body weight (WT) and creatinine clearance
 # (CRCL). Rows are sorted by descending |r|; the `flag` column is set to
 # "[!]" whenever |r| >= 0.3 to highlight pairs worth formal testing.
-ex_cov   <- ferx_example("two_cpt_oral_cov")
-fit_cov  <- ferx_fit(ex_cov$model, ex_cov$data, method = "gn", covariance = FALSE)
-data_cov <- read.csv(ex_cov$data)
-ferx_eta_cov(fit_cov, data_cov)
+ex_cov  <- ferx_example("two_cpt_oral_cov")
+fit_cov <- ferx_fit(ex_cov$model, ex_cov$data, method = "gn", covariance = FALSE)
+fit_cov$eta_cov
 #       eta covariate      r  p_val flag
 #    ETA_KA        WT  0.144 0.4472
 #    ETA_CL      CRCL -0.117 0.5386
@@ -341,7 +342,7 @@ ferx_eta_cov(fit_cov, data_cov)
 ## Parameter transforms
 
 ferx supports log and logit transforms for both thetas and ETAs directly in the
-model DSL. When a transform is in use, `print()` and `ferx_estimates()` display
+model DSL. When a transform is in use, `print()` and `fit$estimates` display
 results on the natural scale alongside the estimation-scale values.
 
 ```r
@@ -371,12 +372,12 @@ ferx_save_fit(fit, "warfarin_focei.rds")
 # Later — restore and continue working
 fit2 <- ferx_load_fit("warfarin_focei.rds")
 identical(fit$theta, fit2$theta)   # TRUE
-ferx_estimates(fit2)
+fit2$estimates
 ```
 
 The loaded object is indistinguishable from the original: all downstream
-functions (`ferx_estimates()`, `ferx_cor_matrix()`, `ferx_plot_trace()`,
-`ferx_simulate()`, etc.) work without modification.
+fields (`estimates`, `cor_matrix`, `eta_cov`) and functions
+(`ferx_plot_trace()`, `ferx_simulate()`, etc.) work without modification.
 
 **Tip:** save immediately after fitting so a crash or session restart does not
 lose results. Use a naming convention that records the run number, method, and

@@ -631,8 +631,26 @@
 #'     matrix (params ? params). Row/column names use declared variable names
 #'     (\code{"TVCL"}, \code{"ETA_CL"}, \code{"EPS_PROP"}); fallback is
 #'     \code{"OMEGA(1,1)"} / \code{"SIGMA(1)"}. \code{NULL} when covariance
-#'     step was not run or failed. Use \code{\link{ferx_cor_matrix}} to
-#'     inspect correlations.}
+#'     step was not run or failed. See \code{cor_matrix} for the derived
+#'     correlation matrix.}
+#'   \item{cor_matrix}{Correlation matrix derived from \code{cov_matrix}, same
+#'     dimnames. A correlation close to \eqn{\pm 1} between two parameters
+#'     flags a structural identifiability problem in the model. \code{NULL}
+#'     when \code{cov_matrix} is \code{NULL}.}
+#'   \item{estimates}{Tidy data frame of all estimated parameters (theta,
+#'     omega diagonal, sigma, and - for IOV models - kappa diagonal), with
+#'     columns \code{param}, \code{transform}, \code{estimate}, \code{se},
+#'     \code{rse_pct}, \code{lower_95}, \code{upper_95},
+#'     \code{estimate_natural}, \code{lower_95_natural},
+#'     \code{upper_95_natural}, \code{init_as_sd}. SE-derived and
+#'     natural-scale columns are \code{NA} when not applicable or when the
+#'     covariance step was not run.}
+#'   \item{eta_cov}{Data frame of Pearson correlations between each ETA and
+#'     each constant-per-subject numeric covariate in the dataset, with
+#'     columns \code{eta}, \code{covariate}, \code{r}, \code{p_val},
+#'     \code{flag}, sorted by descending \code{|r|}. \code{NULL} when the
+#'     model declares no etas, the dataset has no usable numeric covariates,
+#'     or the data file can no longer be read from \code{data_path}.}
 #'   \item{eigenvalues}{Numeric vector of eigenvalues of the correlation matrix
 #'     of estimated (non-fixed) parameters, sorted descending. Computed by the
 #'     Rust backend. \code{NULL} when the covariance step was not run, failed,
@@ -683,7 +701,7 @@
 #'     IOV kappa block. \code{NULL} when kappa is diagonal or absent.}
 #'   \item{eta_names}{Character vector of ETA parameter names as declared in the
 #'     model file (e.g. \code{"ETA_CL"}, \code{"ETA_V"}). Used to label OMEGA
-#'     rows in \code{ferx_estimates()} and \code{print.ferx_fit()}.}
+#'     rows in \code{fit$estimates} and \code{print.ferx_fit()}.}
 #'   \item{eta_log_transformed}{Logical vector of length \code{n_eta}; \code{TRUE}
 #'     when the eta is lognormally parameterised (\code{THETA * exp(ETA)}),
 #'     \code{FALSE} for additive or unknown parameterisations. \code{NULL} when
@@ -772,7 +790,7 @@
 #'         \eqn{\sigma = 0.5}.
 #'   \item Each diffusion parameter appears in \code{fit$theta} as
 #'         \code{DIFF_<STATE>} (e.g. \code{DIFF_CENTRAL}). Standard errors and
-#'         \code{ferx_estimates()} treat them as regular thetas.
+#'         \code{fit$estimates} treat them as regular thetas.
 #'   \item SDE models use finite differences for the EKF covariance
 #'         propagation.
 #'   \item SAEM is not supported with SDE models; a hard error is raised.
@@ -1081,18 +1099,20 @@
 #' \preformatted{
 #' fit |> print()              # full parameter table
 #' fit |> summary()            # compact diagnostic summary
-#' fit |> ferx_estimates()     # tidy data frame: theta / omega / sigma + SE / %RSE
-#' fit |> ferx_cor_matrix()    # parameter correlation matrix (needs covariance = TRUE)
 #' fit |> ferx_model_inspect() # model structure auto-derived by the engine
 #' fit |> ferx_plot_trace()    # convergence trace (needs optimizer_trace = TRUE)
 #' }
 #'
 #' Diagnostics data frame (PRED, IPRED, CWRES, ETAs, ...) lives in
-#' \code{fit$sdtab} and can be used directly:
+#' \code{fit$sdtab}; tidy estimates, correlations, and ETA-covariate
+#' correlations are plain fields (no accessor call needed):
 #' \preformatted{
 #' fit$sdtab
 #' fit$ebe_etas
 #' fit$individual_estimates
+#' fit$estimates    # tidy data frame: theta / omega / sigma + SE / %RSE
+#' fit$cor_matrix   # parameter correlation matrix (needs covariance = TRUE)
+#' fit$eta_cov      # ETA-covariate correlation table
 #' }
 #'
 #' @examples
@@ -1176,7 +1196,7 @@
 #'   ferx_model(ex$model) |>
 #'   ferx_get_section("parameters") |>
 #'   ferx_fit() |>
-#'   ferx_estimates()
+#'   (\(fit) fit$estimates)()
 #'
 #' # Override data stored in ferx_model at fit time
 #' # (substitute the path to your own dataset for "other_cohort.csv")
@@ -1188,19 +1208,17 @@
 #' fit <- ferx_fit(ex$model, ex$data, covariance = TRUE, optimizer_trace = TRUE)
 #'
 #' summary(fit)              # compact diagnostic table
-#' ferx_estimates(fit)       # tidy data frame with SE and %RSE
-#' ferx_cor_matrix(fit)      # parameter correlation matrix
 #' ferx_model_inspect(fit)   # model structure auto-derived by the engine
 #' ferx_plot_trace(fit)      # convergence plot (optimizer_trace = TRUE required)
 #'
 #' fit$sdtab                 # per-observation diagnostics (PRED, IPRED, CWRES, etc.)
 #' fit$ebe_etas              # per-subject empirical Bayes ETAs
 #' fit$individual_estimates  # per-subject individual PK parameters
+#' fit$estimates             # tidy data frame with SE and %RSE
+#' fit$cor_matrix            # parameter correlation matrix
+#' fit$eta_cov               # ETA-covariate correlation table
 #' fit$eigenvalues           # sorted eigenvalues of parameter correlation matrix
 #' fit$condition_number      # > 1000 flags potential ill-conditioning
-#'
-#' # Covariance diagnostics in a pipe
-#' ferx_fit(ex$model, ex$data, covariance = TRUE) |> ferx_cor_matrix()
 #'
 #' # -- SDE model (Extended Kalman Filter) -------------------------------------
 #'
@@ -1211,7 +1229,7 @@
 #' fit_sde <- ferx_fit(sde$model, sde$data)
 #' fit_sde$uses_sde                  # TRUE
 #' fit_sde$theta["DIFF_CENTRAL"]     # fitted diffusion variance
-#' ferx_estimates(fit_sde)           # DIFF_CENTRAL appears in theta block
+#' fit_sde$estimates                 # DIFF_CENTRAL appears in theta block
 #'
 #' # -- Multi-start (avoid local minima) ----------------------------------------
 #' ex <- ferx_example("warfarin")
@@ -1304,7 +1322,7 @@
 #'       starting values before a full run.
 #'     \item \code{\link{ferx_inits_from_nca}} - NCA-derived starting values.
 #'     \item \code{\link{ferx_get_warnings}} - structured warnings from the fit.
-#'     \item \code{\link{ferx_estimates}} - tidy parameter table with SE / \%RSE.
+#'     \item \code{fit$estimates} - tidy parameter table with SE / \%RSE.
 #'     \item \code{\link{ferx_plot_trace}} - convergence trace plot.
 #'   }
 #' @family fitting
@@ -1987,6 +2005,13 @@ ferx_fit <- function(model, data = NULL,
       NULL
     }
   }
+
+  # Derived fields (cor_matrix, estimates, eta_cov) - shared with
+  # ferx_load_fit() via .ferx_populate_derived_fields() so the two
+  # construction paths can't diverge. Uses result$data_path (normalised
+  # above), not the raw `data` argument, so a fresh fit and a loaded fit of
+  # the same model resolve the dataset identically.
+  result <- .ferx_populate_derived_fields(result)
 
   class(result) <- "ferx_fit"
 

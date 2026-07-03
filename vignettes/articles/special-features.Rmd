@@ -61,7 +61,7 @@ Three pieces have to line up:
    subject.
 
 After fitting, `fit$omega_iov` is a square matrix on the kappa diagonal, and
-`ferx_estimates()` reports each kappa as a row with `transform = "variance"`
+`fit$estimates` reports each kappa as a row with `transform = "variance"`
 (same convention as omega rows):
 
 ```{r iov-fit, eval = FALSE}
@@ -70,7 +70,7 @@ fit_iov$omega_iov
 #>            KAPPA_CL
 #> KAPPA_CL 0.04679037
 
-ferx_estimates(fit_iov)
+fit_iov$estimates
 #>     param    transform   estimate se rse_pct lower_95 upper_95 estimate_natural lower_95_natural upper_95_natural init_as_sd
 #>      TVCL     identity 0.17003443 NA      NA       NA       NA               NA               NA               NA      FALSE
 #>       TVV     identity 8.62276910 NA      NA       NA       NA               NA               NA               NA      FALSE
