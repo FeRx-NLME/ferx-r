@@ -290,7 +290,7 @@ checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
 
 [[package]]
 name = "ferx"
-version = "0.1.5"
+version = "0.2.0"
 dependencies = [
  "extendr-api",
  "ferx-core",
@@ -299,8 +299,8 @@ dependencies = [
 
 [[package]]
 name = "ferx-core"
-version = "0.1.6"
-source = "git+https://github.com/FeRx-NLME/ferx-core?branch=main#2846f13fcbdfc681880d4060b081c453d21c7ffc"
+version = "0.2.0"
+source = "git+https://github.com/FeRx-NLME/ferx-core?branch=main#314e7e44c388c743fb231ba97b989ad05a92f337"
 dependencies = [
  "argmin",
  "argmin-math",
@@ -568,9 +568,9 @@ dependencies = [
 
 [[package]]
 name = "num-bigint"
-version = "0.4.6"
+version = "0.4.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5e44f723f1133c9deac646763579fdb3ac745e418f2a7af9cd0c431da1f20b9"
+checksum = "c863e9ab5e7bf9c99ba75e1050f1e4d624ae87ed3532d6238ffbdc7b585dbbe6"
 dependencies = [
  "num-integer",
  "num-traits",
