@@ -86,6 +86,23 @@ ferx_load_fit <- function(path) {
   } else {
     result$ebe_kappas <- NULL
   }
+  conddist_path <- file.path(staging, "conddist.csv")
+  if (file.exists(conddist_path)) {
+    cd_df <- utils::read.csv(conddist_path, stringsAsFactors = FALSE, check.names = FALSE)
+    cd_df$ID <- as.character(cd_df$ID)
+    result$cond_dist <- list(
+      data      = cd_df,
+      # `conddist.csv` carries no distribution-based shrinkage / provenance
+      # fields, so recompute shrinkage from the loaded mean and omega (same
+      # formula as ferx-core's own conddist.csv reader, ferx-core #675);
+      # nsamp/burnin aren't recoverable from the CSV alone.
+      shrinkage = .fitrx_cond_dist_shrinkage(cd_df, result$omega, result$eta_names),
+      nsamp     = 0L,
+      burnin    = 0L
+    )
+  } else {
+    result$cond_dist <- NULL
+  }
   trace_csv_path <- file.path(staging, "trace.csv")
   result$trace <- if (file.exists(trace_csv_path)) {
     .ferx_read_trace_csv(trace_csv_path)
@@ -378,6 +395,21 @@ ferx_load_fit <- function(path) {
   nms <- if (!is.null(en) && length(en) == d) en else paste0("OMEGA(", seq_len(d), ",", seq_len(d), ")")
   rownames(om) <- colnames(om) <- nms
   om
+}
+
+# Distribution-based eta-shrinkage recomputed from a loaded conddist.csv:
+# `1 - SD_over_subjects(cond_mean[., j]) / sqrt(Omega_jj)`, parallel to
+# `eta_names` (same formula as ferx-core's own conddist.csv reader,
+# ferx-core #675/src/io/fitrx.rs). NA when fewer than two subjects or Omega_jj
+# isn't available.
+.fitrx_cond_dist_shrinkage <- function(cd_df, omega, eta_names) {
+  if (is.null(eta_names) || length(eta_names) == 0L) return(numeric(0))
+  vapply(eta_names, function(nm) {
+    vals <- cd_df$COND_MEAN[cd_df$ETA == nm]
+    omega_jj <- if (!is.null(omega) && nm %in% rownames(omega)) omega[nm, nm] else NA_real_
+    if (length(vals) < 2L || is.na(omega_jj) || omega_jj <= 0) return(NA_real_)
+    1 - stats::sd(vals) / sqrt(omega_jj)
+  }, numeric(1), USE.NAMES = FALSE)
 }
 
 .fitrx_unwrap_named_se <- function(se_wire, names_wire) {

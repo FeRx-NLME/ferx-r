@@ -67,6 +67,16 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
     entries <- c(entries, "ebes_kappa.csv")
   }
 
+  # conddist.csv - present only when the SAEM conditional-distribution pass
+  # ran (`conddist = TRUE`, ferx-core #257). Long format (ID, ETA, COND_MEAN,
+  # COND_SD, COND_MODE), mirroring ferx-core's own `conddist.csv` .fitrx entry
+  # (ferx-core #675) so bundles are interoperable, but this reimplementation
+  # doesn't call into ferx-core's Rust bundle writer at all - see #244.
+  if (.fitrx_has_cond_dist(fit)) {
+    .fitrx_write_conddist_csv(fit, file.path(staging, "conddist.csv"))
+    entries <- c(entries, "conddist.csv")
+  }
+
   # predictions.csv
   .fitrx_write_predictions_csv(fit, file.path(staging, "predictions.csv"))
   entries <- c(entries, "predictions.csv")
@@ -326,6 +336,18 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
     k, path,
     row.names = FALSE, quote = FALSE, sep = ",", na = ""
   )
+}
+
+.fitrx_write_conddist_csv <- function(fit, path) {
+  utils::write.table(
+    fit$cond_dist$data, path,
+    row.names = FALSE, quote = FALSE, sep = ",", na = ""
+  )
+}
+
+.fitrx_has_cond_dist <- function(fit) {
+  cd <- fit$cond_dist
+  !is.null(cd) && is.data.frame(cd$data) && nrow(cd$data) > 0L
 }
 
 .fitrx_write_predictions_csv <- function(fit, path) {
