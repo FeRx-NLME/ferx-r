@@ -281,3 +281,21 @@ test_that("ferx_model_set_section() emits a copy-on-write message for package fi
     regexp = "copying read-only package model"
   )
 })
+test_that("ferx_model_set_section() copy-on-write does not collide across independent ferx_model objects", {
+  ex <- ferx_example("warfarin")
+  m1 <- suppressMessages(
+    ferx_model_set_section(
+      ferx_model(ex$model, data = ex$data),
+      "fit_options", c("  method = focei", "  maxiter = 111")
+    )
+  )
+  m2 <- suppressMessages(
+    ferx_model_set_section(
+      ferx_model(ex$model, data = ex$data),
+      "fit_options", c("  method = focei", "  maxiter = 222")
+    )
+  )
+  expect_false(identical(m1$model, m2$model))
+  expect_true(any(grepl("maxiter = 111", ferx_model_get_section(m1$model, "fit_options"))))
+  expect_true(any(grepl("maxiter = 222", ferx_model_get_section(m2$model, "fit_options"))))
+})

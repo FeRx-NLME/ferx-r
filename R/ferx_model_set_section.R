@@ -65,19 +65,11 @@ ferx_model_set_section <- function(x, section, lines) {
 # branches. Assumes `path` is already resolved (and copy-on-write applied,
 # if applicable) from a ferx_model object if needed.
 .ferx_write_section <- function(path, section, lines) {
-  if (!file.exists(path)) stop("File not found: ", path)
-  if (tolower(tools::file_ext(path)) != "ferx") stop("'path' must be a .ferx file")
+  .ferx_validate_ferx_path(path)
 
   file_lines <- readLines(path, warn = FALSE)
   hdr        <- ferx_section_headers(file_lines)
-
-  idx <- which(hdr$names == section)
-  if (length(idx) == 0L) {
-    stop(
-      "Section '", section, "' not found. ",
-      "Available sections: ", paste(hdr$names, collapse = ", ")
-    )
-  }
+  idx        <- .ferx_section_index(hdr, section)
 
   end        <- if (idx < length(hdr$positions)) hdr$positions[idx + 1L] - 1L else length(file_lines)
   tail_lines <- if (end < length(file_lines)) file_lines[seq.int(end + 1L, length(file_lines))] else character(0)
@@ -97,7 +89,13 @@ ferx_model_set_section <- function(x, section, lines) {
   path_norm <- normalizePath(path,    mustWork = FALSE)
   if (!startsWith(path_norm, pkg_norm)) return(path)
 
-  dest <- file.path(tempdir(), basename(path))
+  # A fresh tempfile() per call (rather than a fixed file.path(tempdir(),
+  # basename(path))) avoids two independent ferx_model objects wrapping the
+  # same bundled file silently clobbering each other's copy.
+  dest <- tempfile(
+    pattern = paste0(tools::file_path_sans_ext(basename(path)), "_"),
+    fileext = paste0(".", tools::file_ext(path))
+  )
   if (!isTRUE(file.copy(path, dest, overwrite = TRUE))) {
     stop("Failed to copy ", path, " to ", dest)
   }

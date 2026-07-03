@@ -4,33 +4,27 @@ ferx_calc_npde          Simulation-based NPDE / NPD diagnostics from a
                         fit
 ferx_check_init         Quick convergence check with an optimizer trace
 ferx_collect            Retrieve the result of a background fit
-ferx_cor_matrix         Correlation matrix of estimated parameters
 ferx_cov_screen         Quick covariate screen against individual
                         parameters and ETAs
-ferx_estimates          Tidy parameter estimates table
-ferx_eta_cov            ETA-covariate correlation table
 ferx_example            Get paths to example model and data files
 ferx_fit                Fit a nonlinear mixed effects model
-ferx_fit_async          Fit a model asynchronously
 ferx_get_columns        Inspect column headers of a NONMEM data file
-ferx_get_section        Inspect a section of a ferx model
-                        (pipe-friendly)
 ferx_get_warnings       Structured warnings from a ferx fit
 ferx_inits_from_nca     Derive NCA-based starting values without
                         fitting
 ferx_load_fit           Load a fit from a '.fitrx' bundle
 ferx_model              Create a ferx_model object
 ferx_model_edit         Open a ferx model file in an editor
+ferx_model_get_section
+                        Get a section from a ferx model
 ferx_model_inspect      Inspect the structure of a ferx model file
-ferx_model_section      Extract a section from a ferx model file
 ferx_model_set_section
-                        Replace a section in a ferx model file
+                        Set a section in a ferx model
 ferx_model_show         Display a ferx model file in the console
 ferx_model_to_frem      Prepare a FREM (Full Random Effects Model)
                         dataset and model
 ferx_model_validate     Validate a ferx model file for syntax and
                         structural errors
-ferx_plot_trace         Plot optimizer trace from a ferx fit
 ferx_predict            Population predictions from a NLME model
 ferx_predict_survival   Survival-function predictions for time-to-event
                         endpoints
@@ -38,8 +32,6 @@ ferx_runlog             NONMEM-style run log for a ferx fit
 ferx_runlog_iters       Print the full optimizer iteration history for
                         a ferx fit
 ferx_save_fit           Save a ferx fit to a portable '.fitrx' bundle
-ferx_set_section        Replace a section in a ferx model
-                        (pipe-friendly)
 ferx_simulate           Simulate from a NLME model
 ferx_simulate_adaptive
                         Simulate state-reactive (adaptive / feedback)
@@ -47,7 +39,11 @@ ferx_simulate_adaptive
 ferx_simulate_with_uncertainty
                         Simulate with parameter-uncertainty propagation
 ferx_sir                Run SIR against an existing fit
+ferx_stop               Stop a background fit
 ferx_trace              Read the optimizer trace from a ferx fit
 ferx_xpose              Build an Xpose object from a ferx fit
+plot.ferx_fit           Plot the optimizer trace from a ferx fit or
+                        running job
 print.ferx_data         Print a ferx_data object
+print.ferx_job          Fit a model asynchronously
 summary.ferx_fit        Summarize a ferx fit result
