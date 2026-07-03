@@ -1,4 +1,4 @@
-# ferx_model_section
+# ferx_model_set_section
 # ---------------------------------------------------------------------------
 
 
@@ -13,9 +13,9 @@ test_that("ferx_model_set_section() replaces a middle section and leaves others 
 
   ferx_model_set_section(path, "fit_options", c("  method = focei", "  maxiter = 500"))
 
-  expect_equal(ferx_model_section(path, "parameters"), "  theta TVCL(1.0, 0.001, 100.0)")
-  expect_equal(ferx_model_section(path, "fit_options"), c("  method = focei", "  maxiter = 500"))
-  expect_equal(ferx_model_section(path, "error_model"), "  DV ~ proportional(PROP_ERR)")
+  expect_equal(ferx_model_get_section(path, "parameters"), "  theta TVCL(1.0, 0.001, 100.0)")
+  expect_equal(ferx_model_get_section(path, "fit_options"), c("  method = focei", "  maxiter = 500"))
+  expect_equal(ferx_model_get_section(path, "error_model"), "  DV ~ proportional(PROP_ERR)")
 })
 test_that("ferx_model_set_section() replaces the last section without appending garbage", {
   path <- write_test_model(list(
@@ -26,7 +26,7 @@ test_that("ferx_model_set_section() replaces the last section without appending 
 
   ferx_model_set_section(path, "fit_options", c("  method = focei", "  maxiter = 500"))
 
-  result <- ferx_model_section(path, "fit_options")
+  result <- ferx_model_get_section(path, "fit_options")
   expect_equal(result, c("  method = focei", "  maxiter = 500"))
 
   # No extra content beyond the last section
@@ -45,25 +45,25 @@ test_that("ferx_model_set_section() replaces a section with empty lines", {
 
   ferx_model_set_section(path, "fit_options", character(0))
 
-  result <- ferx_model_section(path, "fit_options")
+  result <- ferx_model_get_section(path, "fit_options")
   expect_equal(result, character(0))
   # parameters section must be unaffected
-  expect_equal(ferx_model_section(path, "parameters"), "  theta TVCL(1.0, 0.001, 100.0)")
+  expect_equal(ferx_model_get_section(path, "parameters"), "  theta TVCL(1.0, 0.001, 100.0)")
 })
-test_that("ferx_model_set_section() round-trips a section via ferx_model_section()", {
+test_that("ferx_model_set_section() round-trips a section via ferx_model_get_section()", {
   path <- write_test_model(list(
     parameters  = "  theta TVCL(1.0, 0.001, 100.0)",
     fit_options = "  method = foce"
   ))
   on.exit(unlink(path))
 
-  original <- ferx_model_section(path, "parameters")
+  original <- ferx_model_get_section(path, "parameters")
   modified <- sub("TVCL\\(.*\\)", "TVCL(0.5, 0.001, 10.0)", original)
   ferx_model_set_section(path, "parameters", modified)
 
-  expect_equal(ferx_model_section(path, "parameters"), modified)
+  expect_equal(ferx_model_get_section(path, "parameters"), modified)
 })
-test_that("ferx_model_set_section() returns path invisibly", {
+test_that("ferx_model_set_section() on a plain path returns the path invisibly", {
   path <- write_test_model(list(fit_options = "  method = foce"))
   on.exit(unlink(path))
 
@@ -134,7 +134,7 @@ test_that("ferx_model_set_section() correctly replaces 1 line with 3 lines", {
   new_lines <- c("  method = focei", "  maxiter = 500", "  covariance = false")
   ferx_model_set_section(path, "fit_options", new_lines)
 
-  expect_equal(ferx_model_section(path, "fit_options"), new_lines)
+  expect_equal(ferx_model_get_section(path, "fit_options"), new_lines)
 })
 test_that("ferx_model_set_section() pipe chain: two sequential set_section calls", {
   path <- write_test_model(list(
@@ -147,8 +147,8 @@ test_that("ferx_model_set_section() pipe chain: two sequential set_section calls
     ferx_model_set_section("parameters", "  theta TVCL(2.0, 0.001, 100.0)") |>
     ferx_model_set_section("fit_options", "  method = focei")
 
-  expect_equal(ferx_model_section(path, "parameters"), "  theta TVCL(2.0, 0.001, 100.0)")
-  expect_equal(ferx_model_section(path, "fit_options"), "  method = focei")
+  expect_equal(ferx_model_get_section(path, "parameters"), "  theta TVCL(2.0, 0.001, 100.0)")
+  expect_equal(ferx_model_get_section(path, "fit_options"), "  method = focei")
 })
 test_that("ferx_model_set_section() pipe chain: new |> set_section |> show", {
   path <- tempfile(fileext = ".ferx")
@@ -162,22 +162,6 @@ test_that("ferx_model_set_section() pipe chain: new |> set_section |> show", {
 
   expect_true(any(grepl("maxiter = 999", out, fixed = TRUE)))
 })
-
-# write_pipe_test_model()/modifying_editor() come from helper-model-pipe.R
-
-# ---------------------------------------------------------------------------
-# Block 1 — ferx_model() constructor
-# ---------------------------------------------------------------------------
-
-
-
-test_that("ferx_set_section() on a plain path delegates to ferx_model_set_section()", {
-  path <- write_pipe_test_model()
-  on.exit(unlink(path))
-  ferx_set_section(path, "fit_options", c("  method = focei", "  maxiter = 42"))
-  opts <- ferx_model_section(path, "fit_options")
-  expect_true(any(grepl("maxiter = 42", opts)))
-})
 test_that("pipe chain: ferx_model(template=) |> ferx_model_set_section() |> ferx_model_inspect()", {
   path <- tempfile(fileext = ".ferx")
   on.exit(unlink(path))
@@ -187,4 +171,131 @@ test_that("pipe chain: ferx_model(template=) |> ferx_model_set_section() |> ferx
     ferx_model_inspect()
 
   expect_equal(result$model_type, "1-cpt oral")
+})
+
+# ---------------------------------------------------------------------------
+# ferx_model object input (pipe + copy-on-write)
+# ---------------------------------------------------------------------------
+
+test_that("ferx_model_set_section() on ferx_model returns a ferx_model", {
+  path <- write_pipe_test_model()
+  on.exit(unlink(path))
+  result <- ferx_model_set_section(
+    ferx_model(model = path), "fit_options",
+    c("  method = focei", "  maxiter = 999")
+  )
+  expect_s3_class(result, "ferx_model")
+})
+test_that("ferx_model_set_section() on ferx_model returns the same object (same $model path)", {
+  path <- write_pipe_test_model()
+  on.exit(unlink(path))
+  m      <- ferx_model(model = path)
+  result <- ferx_model_set_section(m, "fit_options", "  method = focei")
+  expect_equal(result$model, m$model)
+})
+test_that("ferx_model_set_section() on ferx_model writes the change to disk", {
+  path <- write_pipe_test_model()
+  on.exit(unlink(path))
+  ferx_model_set_section(
+    ferx_model(model = path), "fit_options",
+    c("  method = focei", "  maxiter = 999")
+  )
+  opts <- ferx_model_get_section(path, "fit_options")
+  expect_true(any(grepl("maxiter = 999", opts)))
+})
+test_that("ferx_model_set_section() returns ferx_model invisibly", {
+  path <- write_pipe_test_model()
+  on.exit(unlink(path))
+  result <- withVisible(
+    ferx_model_set_section(ferx_model(model = path), "fit_options", "  method = foce")
+  )
+  expect_s3_class(result$value, "ferx_model")
+  expect_false(result$visible)
+})
+test_that("pipe chain: double ferx_model_set_section() applies both changes", {
+  path <- write_pipe_test_model()
+  on.exit(unlink(path))
+
+  ferx_model(model = path) |>
+    ferx_model_set_section("fit_options",  c("  method = focei", "  maxiter = 999")) |>
+    ferx_model_set_section("error_model",  "  DV ~ additive(ADD_ERR)")
+
+  expect_true(any(grepl("maxiter = 999", ferx_model_get_section(path, "fit_options"))))
+  expect_true(any(grepl("additive",      ferx_model_get_section(path, "error_model"))))
+})
+test_that("pipe chain: ferx_model() |> ferx_model_set_section() |> print() shows changed content", {
+  path <- write_pipe_test_model()
+  on.exit(unlink(path))
+
+  out <- capture.output(
+    ferx_model(model = path) |>
+      ferx_model_set_section("fit_options", c("  method = focei", "  maxiter = 123")) |>
+      print()
+  )
+  # print.ferx_model shows structural summary, not raw file lines,
+  # so verify the object identity by checking the file on disk instead
+  opts <- ferx_model_get_section(path, "fit_options")
+  expect_true(any(grepl("maxiter = 123", opts)))
+})
+test_that("ferx_model_set_section() on a ferx_model pointing at a package file does NOT modify the bundled file", {
+  ex <- ferx_example("warfarin")
+  before <- readLines(ex$model, warn = FALSE)
+  suppressMessages(
+    ferx_model(ex$model, data = ex$data) |>
+      ferx_model_set_section("fit_options", c("  method = focei", "  maxiter = 7"))
+  )
+  after <- readLines(ex$model, warn = FALSE)
+  expect_identical(before, after)
+})
+test_that("ferx_model_set_section() on a ferx_model pointing at a package file redirects $model to tempdir", {
+  ex <- ferx_example("warfarin")
+  m  <- suppressMessages(
+    ferx_model_set_section(
+      ferx_model(ex$model, data = ex$data),
+      "fit_options", c("  method = focei", "  maxiter = 7")
+    )
+  )
+  expect_true(startsWith(normalizePath(m$model), normalizePath(tempdir())))
+  expect_true(file.exists(m$model))
+  opts <- ferx_model_get_section(m$model, "fit_options")
+  expect_true(any(grepl("maxiter = 7", opts)))
+})
+test_that("ferx_model_set_section() on a user-owned ferx_model edits in place (no copy)", {
+  path <- write_pipe_test_model()
+  on.exit(unlink(path))
+  m <- ferx_model_set_section(
+    ferx_model(model = path), "fit_options",
+    c("  method = focei", "  maxiter = 12")
+  )
+  expect_equal(m$model, path)
+  opts <- ferx_model_get_section(path, "fit_options")
+  expect_true(any(grepl("maxiter = 12", opts)))
+})
+test_that("ferx_model_set_section() emits a copy-on-write message for package files", {
+  ex <- ferx_example("warfarin")
+  expect_message(
+    ferx_model_set_section(
+      ferx_model(ex$model, data = ex$data),
+      "fit_options", "  method = focei"
+    ),
+    regexp = "copying read-only package model"
+  )
+})
+test_that("ferx_model_set_section() copy-on-write does not collide across independent ferx_model objects", {
+  ex <- ferx_example("warfarin")
+  m1 <- suppressMessages(
+    ferx_model_set_section(
+      ferx_model(ex$model, data = ex$data),
+      "fit_options", c("  method = focei", "  maxiter = 111")
+    )
+  )
+  m2 <- suppressMessages(
+    ferx_model_set_section(
+      ferx_model(ex$model, data = ex$data),
+      "fit_options", c("  method = focei", "  maxiter = 222")
+    )
+  )
+  expect_false(identical(m1$model, m2$model))
+  expect_true(any(grepl("maxiter = 111", ferx_model_get_section(m1$model, "fit_options"))))
+  expect_true(any(grepl("maxiter = 222", ferx_model_get_section(m2$model, "fit_options"))))
 })

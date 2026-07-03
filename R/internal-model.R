@@ -6,6 +6,30 @@ ferx_section_headers <- function(lines) {
   list(positions = pos, names = names)
 }
 
+# Shared validation for ferx_model_get_section()/ferx_model_set_section():
+# `path` must exist and have a .ferx extension. Used by both so the two
+# functions can't drift on what counts as a valid model file.
+.ferx_validate_ferx_path <- function(path) {
+  if (!file.exists(path)) stop("File not found: ", path)
+  if (tolower(tools::file_ext(path)) != "ferx") stop("'path' must be a .ferx file")
+}
+
+# Locate a named section's header index within already-parsed `hdr`
+# (from ferx_section_headers()). Errors with the available section names
+# when `section` isn't present. Shared by ferx_model_get_section() and
+# ferx_model_set_section() so the "not found" message can't drift between
+# the two.
+.ferx_section_index <- function(hdr, section) {
+  idx <- which(hdr$names == section)
+  if (length(idx) == 0L) {
+    stop(
+      "Section '", section, "' not found. ",
+      "Available sections: ", paste(hdr$names, collapse = ", ")
+    )
+  }
+  idx
+}
+
 
 # Extract all named [section] blocks from a .ferx file.
 # Returns a named list: section name ? character vector of (comment-stripped, trimmed) lines.

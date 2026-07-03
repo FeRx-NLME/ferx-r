@@ -31,9 +31,7 @@ reference:
       - ferx_model_show
       - ferx_model_inspect
       - ferx_model_validate
-      - ferx_model_section
-      - ferx_get_section
-      - ferx_set_section
+      - ferx_model_get_section
       - ferx_model_set_section
       - ferx_to_frem
 

@@ -1,4 +1,4 @@
-# ferx_model_section
+# ferx_model_get_section
 # ---------------------------------------------------------------------------
 
 
@@ -125,7 +125,7 @@ test_that("ferx_model(template=) pipe chain: scaffold |> set_section", {
   ferx_model(template = "1cpt_oral", path = path, edit = FALSE)$model |>
     ferx_model_set_section("fit_options", c("  method = focei", "  maxiter = 999"))
 
-  expect_equal(ferx_model_section(path, "fit_options"), c("  method = focei", "  maxiter = 999"))
+  expect_equal(ferx_model_get_section(path, "fit_options"), c("  method = focei", "  maxiter = 999"))
 })
 
 # write_pipe_test_model()/modifying_editor() come from helper-model-pipe.R

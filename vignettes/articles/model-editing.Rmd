@@ -15,7 +15,7 @@ library(ferx)
 ferx model files (`.ferx`) are plain text, so you can create and modify them
 entirely from R without opening an editor. This vignette covers the three
 functions that support that workflow: `ferx_model()` (scaffold mode),
-`ferx_model_section()`, and `ferx_model_set_section()`.
+`ferx_model_get_section()`, and `ferx_model_set_section()`.
 
 ## Starting from scratch
 
@@ -44,19 +44,19 @@ ferx_model(template = "1cpt_oral", path = "my_model.ferx", edit = FALSE)
 
 ## Inspecting a section
 
-`ferx_model_section()` extracts the body of a named section and prints it.
+`ferx_model_get_section()` extracts the body of a named section and prints it.
 Start with the bundled warfarin example:
 
 ```{r section}
 ex <- ferx_example("warfarin")
-ferx_model_section(ex$model, "parameters")
+ferx_model_get_section(ex$model, "parameters")
 ```
 
 The return value is the character vector of lines, returned invisibly, so you
 can capture it:
 
 ```{r section-capture}
-params <- ferx_model_section(ex$model, "parameters")
+params <- ferx_model_get_section(ex$model, "parameters")
 params
 ```
 
@@ -72,7 +72,7 @@ model_path <- tempfile(fileext = ".ferx")
 stopifnot(file.copy(ex$model, model_path))
 
 # read the section
-lines <- ferx_model_section(model_path, "parameters")
+lines <- ferx_model_get_section(model_path, "parameters")
 
 # modify: change the TVCL initial value from 0.134 to 0.5
 lines <- sub("TVCL\\([^,]+,", "TVCL(0.5,", lines)
@@ -81,7 +81,7 @@ lines <- sub("TVCL\\([^,]+,", "TVCL(0.5,", lines)
 ferx_model_set_section(model_path, "parameters", lines)
 
 # verify
-ferx_model_section(model_path, "parameters")
+ferx_model_get_section(model_path, "parameters")
 ```
 
 `ferx_model_set_section()` replaces only the targeted section; all other
@@ -171,5 +171,5 @@ Opt in explicitly with `overwrite = TRUE`:
 
 ```{r overwrite-ok}
 ferx_model(template = "1cpt_iv", path = model_path, overwrite = TRUE, edit = FALSE)
-ferx_model_section(model_path, "structural_model")
+ferx_model_get_section(model_path, "structural_model")
 ```

@@ -980,8 +980,8 @@ ferx_fit(model = "pk.ferx", data = "data.csv")
 }
 
 Both dispatch to the same Rust backend. The \code{ferx_model} form is
-convenient when combined with \code{\link{ferx_set_section}} to modify model
-options in the same chain (see Examples). The data path stored in the
+convenient when combined with \code{\link{ferx_model_set_section}} to modify
+model options in the same chain (see Examples). The data path stored in the
 \code{ferx_model} object can always be overridden by supplying \code{data}
 explicitly to \code{ferx_fit()}.
 }
@@ -1243,7 +1243,7 @@ ex$data |>
 # Modify a model section, then fit
 ex$data |>
   ferx_model(ex$model) |>
-  ferx_set_section("fit_options", c(
+  ferx_model_set_section("fit_options", c(
     "  method     = focei",
     "  maxiter    = 500",
     "  covariance = true"
@@ -1253,15 +1253,15 @@ ex$data |>
 # Full pipeline including post-fit outputs
 ex$data |>
   ferx_model(ex$model) |>
-  ferx_set_section("fit_options", c("  method = focei")) |>
+  ferx_model_set_section("fit_options", c("  method = focei")) |>
   ferx_fit(covariance = TRUE, threads = 4L,
            settings = list(optimizer = "slsqp")) |>
   summary()
 
-# Inspect then continue (ferx_get_section returns the ferx_model invisibly)
+# Inspect a section, then fit
+ferx_model_get_section(ex$model, "parameters")
 ex$data |>
   ferx_model(ex$model) |>
-  ferx_get_section("parameters") |>
   ferx_fit() |>
   (\(fit) fit$estimates)()
 
