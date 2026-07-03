@@ -188,7 +188,7 @@ fit <- ferx_model(ex$data, ex$model) |>
 summary(fit)
 ferx_model_inspect(fit)    # no path needed after fitting
 fit$cor_matrix             # parameter correlation matrix
-ferx_plot_trace(fit)       # OFV + gradient norm convergence plot
+plot(fit)                  # OFV + gradient norm convergence plot
 ```
 
 ### Validate before a long run
@@ -200,7 +200,7 @@ estimation:
 ```{r check-init, eval = FALSE}
 chk <- ferx_check_init(ex$model, ex$data, method = "focei")
 chk$summary      # ofv_start, ofv_end, ofv_drop — is OFV decreasing?
-ferx_plot_trace(chk$fit)   # visual check: first few iterations
+plot(chk$fit)              # visual check: first few iterations
 ```
 
 If `ofv_drop` is small or negative, the initial values are likely poor — adjust
@@ -377,7 +377,7 @@ fit2$estimates
 
 The loaded object is indistinguishable from the original: all downstream
 fields (`estimates`, `cor_matrix`, `eta_cov`) and functions
-(`ferx_plot_trace()`, `ferx_simulate()`, etc.) work without modification.
+(`plot()`, `ferx_simulate()`, etc.) work without modification.
 
 **Tip:** save immediately after fitting so a crash or session restart does not
 lose results. Use a naming convention that records the run number, method, and

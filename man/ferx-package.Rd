@@ -23,7 +23,7 @@ Inspect / edit an existing model                   \tab \code{\link{ferx_model_s
 Sanity-check starting values                       \tab \code{\link{ferx_check_init}}, \code{\link{ferx_inits_from_nca}} \cr
 Fit a model (FOCE / FOCEI / GN / SAEM / IMP)       \tab \code{\link{ferx_fit}} \cr
 Inspect a fit                                      \tab \code{\link{summary.ferx_fit}}, \code{fit$estimates}, \code{fit$cor_matrix}, \code{\link{check_diagnostics}} \cr
-Optimizer trace                                    \tab \code{\link{ferx_trace}}, \code{\link{ferx_plot_trace}} \cr
+Optimizer trace                                    \tab \code{\link{ferx_trace}}, \code{\link{plot.ferx_fit}} \cr
 Covariate screen on EBE ETAs                       \tab \code{fit$eta_cov} \cr
 Uncertainty (SIR)                                  \tab \code{\link{ferx_sir}} \cr
 Population / individual predictions                \tab \code{\link{ferx_predict}} \cr

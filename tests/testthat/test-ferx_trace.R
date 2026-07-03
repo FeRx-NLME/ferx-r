@@ -8,7 +8,7 @@
 
 
 
-# ferx_plot_trace — Tier 1, no Rust needed
+# plot.ferx_fit — Tier 1, no Rust needed
 
 
 

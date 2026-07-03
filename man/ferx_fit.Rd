@@ -154,7 +154,7 @@ way to check which method is faster on your specific model/data.}
 \item{optimizer_trace}{Logical. If \code{TRUE}, write a per-iteration CSV
 trace to a temporary file, store its path in \code{fit$trace_path}, and
 read it into \code{fit$trace} as a data frame. Pass the result to
-\code{\link{ferx_trace}} or \code{\link{ferx_plot_trace}} to inspect
+\code{\link{ferx_trace}} or \code{\link{plot.ferx_fit}} to inspect
 optimizer progress. Default \code{FALSE}.}
 
 \item{scale_params}{Logical. If \code{TRUE}, apply a per-coordinate scaling
@@ -571,7 +571,7 @@ IOV fits, or \code{"marginalized"}), and parallel vectors
 subjects whose ESS fraction fell below \code{imp_low_ess_threshold}.}
 \item{trace_path}{Path to the optimizer trace CSV, or \code{NULL} when
 \code{optimizer_trace = FALSE}. Pass to \code{\link{ferx_trace}}
-or \code{\link{ferx_plot_trace}}.}
+or \code{\link{plot.ferx_fit}}.}
 \item{trace}{The optimizer trace as a data frame (same columns as
 \code{\link{ferx_trace}}), or \code{NULL} when
 \code{optimizer_trace = FALSE}. Survives \code{\link{ferx_save_fit}} /
@@ -1028,7 +1028,7 @@ ferx_fit(m, d, gradient = "fd")    # force finite differences
 diagnostics:
 \preformatted{
 fit <- ferx_fit(m, d, optimizer_trace = TRUE)
-ferx_plot_trace(fit)
+plot(fit)
 }
 }
 
@@ -1166,7 +1166,7 @@ work both as standalone calls and as the tail of a \code{|>} pipe:
 fit |> print()              # full parameter table
 fit |> summary()            # compact diagnostic summary
 fit |> ferx_model_inspect() # model structure auto-derived by the engine
-fit |> ferx_plot_trace()    # convergence trace (needs optimizer_trace = TRUE)
+fit |> plot()               # convergence trace (needs optimizer_trace = TRUE)
 }
 
 Diagnostics data frame (PRED, IPRED, CWRES, ETAs, ...) lives in
@@ -1276,7 +1276,7 @@ fit <- ferx_fit(ex$model, ex$data, covariance = TRUE, optimizer_trace = TRUE)
 
 summary(fit)              # compact diagnostic table
 ferx_model_inspect(fit)   # model structure auto-derived by the engine
-ferx_plot_trace(fit)      # convergence plot (optimizer_trace = TRUE required)
+plot(fit)                 # convergence plot (optimizer_trace = TRUE required)
 
 fit$sdtab                 # per-observation diagnostics (PRED, IPRED, CWRES, etc.)
 fit$ebe_etas              # per-subject empirical Bayes ETAs
@@ -1390,7 +1390,7 @@ starting values before a full run.
 \item \code{\link{ferx_inits_from_nca}} - NCA-derived starting values.
 \item \code{\link{ferx_get_warnings}} - structured warnings from the fit.
 \item \code{fit$estimates} - tidy parameter table with SE / \\%RSE.
-\item \code{\link{ferx_plot_trace}} - convergence trace plot.
+\item \code{\link{plot.ferx_fit}} - convergence trace plot.
 }
 
 Other fitting: 
