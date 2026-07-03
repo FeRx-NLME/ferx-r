@@ -2388,6 +2388,27 @@ fn neural_networks_list(_result: &FitResult) -> Robj {
     List::from_values(v).into()
 }
 
+// -- Helper: resolve eta column names, falling back to ETA1..ETAn when
+// `result.eta_names` doesn't match the model's actual eta count. Shared by
+// every per-subject/per-eta data frame builder below.
+fn resolve_eta_names(result: &FitResult, n_eta: usize) -> Vec<String> {
+    if result.eta_names.len() == n_eta {
+        result.eta_names.clone()
+    } else {
+        (0..n_eta).map(|i| format!("ETA{}", i + 1)).collect()
+    }
+}
+
+// -- Helper: assemble a data.frame Robj from named columns, setting the
+// class and row.names attributes every builder below needs.
+fn finish_df(pairs: Vec<(&str, Robj)>, nrow: usize) -> Robj {
+    let mut df = List::from_pairs(pairs);
+    df.set_class(&["data.frame"]).unwrap();
+    let row_names: Vec<i32> = (1..=nrow as i32).collect();
+    df.set_attrib("row.names", row_names).unwrap();
+    df.into()
+}
+
 // -- Helper: build per-subject EBE eta data frame --
 //
 // Returns a data.frame with one row per subject and columns ID + one column
@@ -2398,20 +2419,12 @@ fn build_ebe_etas(result: &FitResult, population: &Population) -> Robj {
     if n_subj == 0 {
         return ().into();
     }
-    let n_eta = if result.subjects.is_empty() {
-        0
-    } else {
-        result.subjects[0].eta.len()
-    };
+    let n_eta = result.subjects[0].eta.len();
     if n_eta == 0 {
         return ().into();
     }
 
-    let eta_names: Vec<String> = if result.eta_names.len() == n_eta {
-        result.eta_names.clone()
-    } else {
-        (0..n_eta).map(|i| format!("ETA{}", i + 1)).collect()
-    };
+    let eta_names = resolve_eta_names(result, n_eta);
 
     let mut ids: Vec<String> = Vec::with_capacity(n_subj);
     let mut eta_cols: Vec<Vec<f64>> = (0..n_eta).map(|_| Vec::with_capacity(n_subj)).collect();
@@ -2429,11 +2442,7 @@ fn build_ebe_etas(result: &FitResult, population: &Population) -> Robj {
     for k in 0..n_eta {
         pairs.push((eta_names[k].as_str(), eta_cols[k].clone().into()));
     }
-    let mut df = List::from_pairs(pairs);
-    df.set_class(&["data.frame"]).unwrap();
-    let row_names: Vec<i32> = (1..=n_subj as i32).collect();
-    df.set_attrib("row.names", row_names).unwrap();
-    df.into()
+    finish_df(pairs, n_subj)
 }
 
 // -- Helper: build long-format SAEM conditional-distribution data frame --
@@ -2452,11 +2461,7 @@ fn build_cond_dist_df(result: &FitResult, population: &Population, cd: &CondDist
         return ().into();
     }
 
-    let eta_names: Vec<String> = if result.eta_names.len() == n_eta {
-        result.eta_names.clone()
-    } else {
-        (0..n_eta).map(|i| format!("ETA{}", i + 1)).collect()
-    };
+    let eta_names = resolve_eta_names(result, n_eta);
 
     let mut ids: Vec<String> = Vec::with_capacity(n_subj * n_eta);
     let mut etas: Vec<String> = Vec::with_capacity(n_subj * n_eta);
@@ -2481,11 +2486,7 @@ fn build_cond_dist_df(result: &FitResult, population: &Population, cd: &CondDist
     pairs.push(("COND_MEAN", cond_mean.into()));
     pairs.push(("COND_SD", cond_sd.into()));
     pairs.push(("COND_MODE", cond_mode.into()));
-    let mut df = List::from_pairs(pairs);
-    df.set_class(&["data.frame"]).unwrap();
-    let row_names: Vec<i32> = (1..=(n_subj * n_eta) as i32).collect();
-    df.set_attrib("row.names", row_names).unwrap();
-    df.into()
+    finish_df(pairs, n_subj * n_eta)
 }
 
 // -- Helper: build per-subject individual parameter data frame --

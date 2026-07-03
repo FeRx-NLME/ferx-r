@@ -225,6 +225,10 @@ test_that("conddist.csv survives a ferx_save_fit / ferx_load_fit round-trip (syn
       sigma_types = "proportional",
       cond_dist = list(data = cd_data, shrinkage = c(0.1, 0.05),
                         nsamp = 20L, burnin = 5L),
+      # Numeric-looking IDs: ebe_etas$ID and cond_dist$data$ID must come back
+      # the same type after a round-trip (#248 review).
+      ebe_etas = data.frame(ID = c("1", "2"), ETA_CL = c(0.04, -0.02),
+                             ETA_V = c(-0.01, 0.02), stringsAsFactors = FALSE),
       ofv = 0, aic = 2, bic = 4,
       n_obs = 3L, n_subjects = 2L, n_parameters = 2L, n_iterations = 1L,
       method = "SAEM", method_chain = "SAEM",
@@ -251,9 +255,10 @@ test_that("conddist.csv survives a ferx_save_fit / ferx_load_fit round-trip (syn
   expect_equal(loaded$cond_dist$data$ID, cd_data$ID)
   expect_equal(loaded$cond_dist$data$ETA, cd_data$ETA)
   expect_equal(loaded$cond_dist$data$COND_MEAN, cd_data$COND_MEAN, tolerance = 1e-12)
-  # nsamp/burnin aren't recoverable from conddist.csv alone (#244).
-  expect_equal(loaded$cond_dist$nsamp, 0L)
-  expect_equal(loaded$cond_dist$burnin, 0L)
+  # nsamp/burnin aren't recoverable from conddist.csv alone (#244); NA (not
+  # 0L) so "unknown after reload" isn't confused with "zero draws retained".
+  expect_equal(loaded$cond_dist$nsamp, NA_integer_)
+  expect_equal(loaded$cond_dist$burnin, NA_integer_)
   # Shrinkage is recomputed from cond_mean + omega, matching ferx-core's own
   # conddist.csv reader formula.
   expect_equal(
@@ -264,6 +269,28 @@ test_that("conddist.csv survives a ferx_save_fit / ferx_load_fit round-trip (syn
     ),
     tolerance = 1e-9
   )
+  # ebe_etas$ID and cond_dist$data$ID must have the same type after a
+  # round-trip, so joins between the two tables don't silently break for
+  # numeric-looking subject IDs (#248 review).
+  expect_type(loaded$ebe_etas$ID, "character")
+  expect_type(loaded$cond_dist$data$ID, "character")
+})
+test_that("recomputed shrinkage matches ferx-core's near-singular-omega floor (synthetic)", {
+  # ferx-core's own conddist.csv reader (src/io/fitrx.rs) treats
+  # Omega_jj < SAEM_OMEGA_DIAG_FLOOR (1e-6) as NaN, not just Omega_jj <= 0;
+  # the R reimplementation must match or shrinkage silently diverges for a
+  # near-singular (but positive) omega diagonal.
+  cd_data <- data.frame(
+    ID = c("1", "2", "3"),
+    ETA = c("ETA_CL", "ETA_CL", "ETA_CL"),
+    COND_MEAN = c(0.05, -0.03, 0.01),
+    COND_SD = c(0.12, 0.11, 0.10),
+    COND_MODE = c(0.04, -0.02, 0.02),
+    stringsAsFactors = FALSE
+  )
+  omega <- matrix(1e-8, 1L, 1L, dimnames = list("ETA_CL", "ETA_CL"))
+  shrink <- ferx:::.fitrx_cond_dist_shrinkage(cd_data, omega, "ETA_CL")
+  expect_true(is.na(shrink))
 })
 test_that("a fit with no cond_dist has no conddist.csv entry and loads NULL", {
   fake <- structure(

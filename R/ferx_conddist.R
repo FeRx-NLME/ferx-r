@@ -43,7 +43,11 @@ ferx_conddist <- function(fit) {
   }
 
   out <- cd$data
-  attr(out, "shrinkage") <- stats::setNames(cd$shrinkage, fit$eta_names)
+  attr(out, "shrinkage") <- if (length(cd$shrinkage) == length(fit$eta_names)) {
+    stats::setNames(cd$shrinkage, fit$eta_names)
+  } else {
+    cd$shrinkage
+  }
   attr(out, "nsamp")  <- cd$nsamp
   attr(out, "burnin") <- cd$burnin
   class(out) <- c("ferx_conddist", class(out))
@@ -52,10 +56,14 @@ ferx_conddist <- function(fit) {
 
 #' @export
 print.ferx_conddist <- function(x, ...) {
-  cat(sprintf(
-    "SAEM conditional distribution  (%d draws retained, %d burn-in)\n",
-    attr(x, "nsamp"), attr(x, "burnin")
-  ))
+  nsamp  <- attr(x, "nsamp")
+  burnin <- attr(x, "burnin")
+  provenance <- if (is.na(nsamp) || is.na(burnin)) {
+    "draws retained/burn-in unknown (loaded from a .fitrx bundle)"
+  } else {
+    sprintf("%d draws retained, %d burn-in", nsamp, burnin)
+  }
+  cat(sprintf("SAEM conditional distribution  (%s)\n", provenance))
   shrink <- attr(x, "shrinkage")
   if (!is.null(shrink) && length(shrink) > 0L) {
     cat("Distribution-based eta-shrinkage:\n")

@@ -52,6 +52,31 @@ test_that("print.ferx_conddist shows shrinkage and the data frame", {
   expect_true(any(grepl("COND_MEAN", out)))
 })
 
+test_that("ferx_conddist falls back to an unnamed shrinkage vector on a length mismatch", {
+  # eta_names/shrinkage length disagreement shouldn't happen via ferx_fit()/
+  # ferx_load_fit(), but a hand-built fit object (as this file's own
+  # make_fake_fit() calls construct) shouldn't hit setNames()'s raw error
+  # either (#248 review).
+  cd <- fake_cond_dist()
+  cd$shrinkage <- 0.1
+  fit <- make_fake_fit(cond_dist = cd, eta_names = c("ETA_CL", "ETA_V"))
+
+  out <- ferx_conddist(fit)
+  expect_equal(unname(attr(out, "shrinkage")), 0.1)
+  expect_null(names(attr(out, "shrinkage")))
+})
+
+test_that("print.ferx_conddist reports unknown provenance when nsamp/burnin are NA (loaded fit)", {
+  cd <- fake_cond_dist()
+  cd$nsamp <- NA_integer_
+  cd$burnin <- NA_integer_
+  fit <- make_fake_fit(cond_dist = cd, eta_names = c("ETA_CL", "ETA_V"))
+
+  out <- capture.output(print(ferx_conddist(fit)))
+  expect_true(any(grepl("unknown", out)))
+  expect_false(any(grepl("NA draws", out)))
+})
+
 test_that("ferx_conddist survives a real SAEM conddist fit end-to-end", {
   skip_on_cran()
   fit <- warfarin_saem_conddist_fit()

@@ -68,6 +68,10 @@ ferx_load_fit <- function(path) {
   ebes_path <- file.path(staging, "ebes.csv")
   if (file.exists(ebes_path)) {
     result$ebe_etas <- utils::read.csv(ebes_path, stringsAsFactors = FALSE, check.names = FALSE)
+    # Preserve the live-fit type of the ID column (character); read.csv would
+    # otherwise infer integer for numeric-looking IDs, diverging from
+    # cond_dist$data$ID (and covtab$ID) below.
+    result$ebe_etas$ID <- as.character(result$ebe_etas$ID)
   }
   preds_path <- file.path(staging, "predictions.csv")
   if (file.exists(preds_path)) {
@@ -94,11 +98,12 @@ ferx_load_fit <- function(path) {
       data      = cd_df,
       # `conddist.csv` carries no distribution-based shrinkage / provenance
       # fields, so recompute shrinkage from the loaded mean and omega (same
-      # formula as ferx-core's own conddist.csv reader, ferx-core #675);
-      # nsamp/burnin aren't recoverable from the CSV alone.
+      # formula as ferx-core's own conddist.csv reader, ferx-core #675).
+      # nsamp/burnin aren't recoverable from the CSV alone; NA (not 0L) so
+      # "unknown after reload" isn't confused with "zero draws retained".
       shrinkage = .fitrx_cond_dist_shrinkage(cd_df, result$omega, result$eta_names),
-      nsamp     = 0L,
-      burnin    = 0L
+      nsamp     = NA_integer_,
+      burnin    = NA_integer_
     )
   } else {
     result$cond_dist <- NULL
@@ -401,13 +406,20 @@ ferx_load_fit <- function(path) {
 # `1 - SD_over_subjects(cond_mean[., j]) / sqrt(Omega_jj)`, parallel to
 # `eta_names` (same formula as ferx-core's own conddist.csv reader,
 # ferx-core #675/src/io/fitrx.rs). NA when fewer than two subjects or Omega_jj
-# isn't available.
+# is at/below ferx-core's own near-singular floor (`SAEM_OMEGA_DIAG_FLOOR`,
+# ferx-core/src/estimation/saem.rs) -- matched here so a near-singular omega
+# doesn't silently produce a finite value on this path when ferx-core's own
+# reader would report NaN.
+.FITRX_SAEM_OMEGA_DIAG_FLOOR <- 1e-6
 .fitrx_cond_dist_shrinkage <- function(cd_df, omega, eta_names) {
   if (is.null(eta_names) || length(eta_names) == 0L) return(numeric(0))
   vapply(eta_names, function(nm) {
     vals <- cd_df$COND_MEAN[cd_df$ETA == nm]
     omega_jj <- if (!is.null(omega) && nm %in% rownames(omega)) omega[nm, nm] else NA_real_
-    if (length(vals) < 2L || is.na(omega_jj) || omega_jj <= 0) return(NA_real_)
+    if (length(vals) < 2L || is.na(omega_jj) ||
+        omega_jj < .FITRX_SAEM_OMEGA_DIAG_FLOOR) {
+      return(NA_real_)
+    }
     1 - stats::sd(vals) / sqrt(omega_jj)
   }, numeric(1), USE.NAMES = FALSE)
 }
