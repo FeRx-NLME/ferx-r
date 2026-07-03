@@ -5,4 +5,4 @@ fit <- ferx_fit(ex$model, ex$data)
 fit
 
 # Show off-diagonal correlations
-ferx_cor_matrix(fit)
+fit$cor_matrix

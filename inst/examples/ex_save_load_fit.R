@@ -31,4 +31,4 @@ identical(dimnames(fit$omega), dimnames(fit_loaded$omega))
 
 # Use the loaded fit anywhere the original would have worked:
 print(fit_loaded)
-ferx_estimates(fit_loaded)
+fit_loaded$estimates

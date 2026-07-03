@@ -27,7 +27,7 @@ print(fit$uses_sde)
 print(fit$theta["DIFF_CENTRAL"])
 
 ## Full parameter table (DIFF_CENTRAL appears alongside structural thetas)
-print(ferx_estimates(fit))
+print(fit$estimates)
 
 ## Standard diagnostics — IWRES and CWRES remain available
 print(head(fit$sdtab[, c("ID", "TIME", "DV", "IPRED", "CWRES", "IWRES")]))

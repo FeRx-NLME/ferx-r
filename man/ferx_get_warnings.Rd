@@ -34,10 +34,7 @@ ferx_get_warnings(fit, as_df = TRUE)
 \seealso{
 Other diagnostics: 
 \code{\link{check_diagnostics}()},
-\code{\link{ferx_cor_matrix}()},
 \code{\link{ferx_cov_screen}()},
-\code{\link{ferx_estimates}()},
-\code{\link{ferx_eta_cov}()},
 \code{\link{ferx_plot_trace}()},
 \code{\link{ferx_runlog_iters}()},
 \code{\link{ferx_trace}()},

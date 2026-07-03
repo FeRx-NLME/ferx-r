@@ -27,6 +27,27 @@ excl <- ferx_apply_selection(data, ignore = "DV < 1", excluded = TRUE)
 excl <- ferx_apply_selection(fit, excluded = TRUE)
 ```
 
+`ferx_cor_matrix()`, `ferx_estimates()`, and `ferx_eta_cov()` are removed and
+replaced with fields computed automatically at the end of `ferx_fit()` (and
+recomputed by `ferx_load_fit()`), part of the fit-accessor cleanup in #226:
+
+- `ferx_cor_matrix(fit)` -> `fit$cor_matrix`
+- `ferx_estimates(fit)` -> `fit$estimates`
+- `ferx_eta_cov(fit, data)` -> `fit$eta_cov` (no longer takes a `data` argument;
+  it is computed from the dataset used to fit the model)
+
+```r
+# before
+ferx_cor_matrix(fit)
+ferx_estimates(fit)
+ferx_eta_cov(fit, read.csv(ex$data))
+
+# after
+fit$cor_matrix
+fit$estimates
+fit$eta_cov
+```
+
 ## Added
 
 - `ferx_model_to_frem()` gains a `fit` argument (#239). Pass a `ferx_fit`

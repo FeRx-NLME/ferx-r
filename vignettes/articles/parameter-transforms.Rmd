@@ -58,14 +58,14 @@ The CV% is derived from the log-scale variance as
 `CV% = 100 * sqrt(exp(omega_var) - 1)`. For small variances this is
 approximately `100 * sqrt(omega_var)`, but the exact formula is always used.
 
-`ferx_estimates()` returns the omega variance on the log scale in `estimate`,
+`fit$estimates` returns the omega variance on the log scale in `estimate`,
 with `transform = "variance"` (omega rows always use this label regardless of
 the ETA parameterisation style — the log-normal interpretation is conveyed by
 `print.ferx_fit()`, not by the tidy table). SE and 95 % CI columns are on the
 same log-variance scale:
 
 ```{r logn-estimates, eval = FALSE}
-ferx_estimates(fit)
+fit$estimates
 #   param              transform  estimate      se  rse_pct  lower_95  upper_95
 #   OMEGA(ETA_CL)      variance     0.0423  0.0121     28.6    0.0186    0.0660
 #   OMEGA(ETA_V)       variance     0.0198  0.0089     44.9    0.0024    0.0372
@@ -126,7 +126,7 @@ fit_logit <- ferx_fit(ex_logit$model, ex_logit$data)
 fit_logit
 ```
 
-`ferx_estimates()` populates `estimate_natural`, `lower_95_natural`, and
+`fit$estimates` populates `estimate_natural`, `lower_95_natural`, and
 `upper_95_natural` for logit-transformed thetas. The CI is computed
 symmetrically on the logit scale and then back-transformed through `inv_logit`,
 giving an asymmetric interval on the (0, 1) scale:
@@ -135,7 +135,7 @@ The `transform` value the backend reports for a logit-scaled theta is
 `"logit_probability"` (not `"logit"`):
 
 ```{r logit-estimates, eval = FALSE}
-est <- ferx_estimates(fit_logit)
+est <- fit_logit$estimates
 est[est$param == "THETA_F", ]
 #   param           transform   estimate     se  rse_pct  lower_95  upper_95  estimate_natural  lower_95_natural  upper_95_natural
 #   THETA_F  logit_probability   0.80197 0.00652   0.8136   0.78918   0.81476           0.69040           0.68766           0.69312
@@ -186,12 +186,12 @@ fit_add <- ferx_fit(ex_add$model, ex_add$data)
 fit_add
 ```
 
-`ferx_estimates()` returns `transform = "variance"` for that omega element
+`fit$estimates` returns `transform = "variance"` for that omega element
 (all omega rows use this label). The `estimate` is the variance in the original
 units (hours²), and the CI is symmetric — no back-transform is applied:
 
 ```{r add-estimates, eval = FALSE}
-ferx_estimates(fit_add)
+fit_add$estimates
 #     param  transform  estimate  se  rse_pct  lower_95  upper_95  init_as_sd
 #  ETA_TLAG   variance   0.04003  NA       NA        NA        NA       FALSE
 # SD in original units = sqrt(0.04003) ~ 0.2001 h
@@ -243,7 +243,7 @@ expressions and applies the correct transform automatically.
 
 ## Summary table
 
-| Transform | Omega interpretation | Print label | `ferx_estimates()` columns |
+| Transform | Omega interpretation | Print label | `fit$estimates` columns |
 |---|---|---|---|
 | Log-normal | variance on log scale | `[log-normal]` + CV% | `transform = "variance"`, symmetric CI on log-var scale |
 | Logit-normal | variance on logit scale | `[logit]` + SD_logit + ±1 SD interval | `transform = "variance"`; logit theta gets `estimate_natural` etc. |
