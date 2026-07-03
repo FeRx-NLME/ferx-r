@@ -65,8 +65,10 @@ test_that("plot.ferx_fit honours log_ofv", {
   expect_invisible(plot(fit, log_ofv = TRUE))
 })
 test_that("plot.ferx_fit(fit) returns invisibly without error", {
+  grDevices::pdf(NULL)
+  on.exit(grDevices::dev.off(), add = TRUE)
   path <- write_fake_trace()
-  on.exit(unlink(path))
+  on.exit(unlink(path), add = TRUE)
   fit <- structure(list(trace_path = path), class = "ferx_fit")
   expect_no_error({
     res <- withVisible(plot(fit))
@@ -107,6 +109,36 @@ test_that("plot.ferx_fit leaves GN/SAEM OFV untouched regardless of monotonic=",
   fit <- structure(list(trace_path = path), class = "ferx_fit")
   expect_invisible(plot(fit, monotonic = TRUE))
   expect_invisible(plot(fit, monotonic = FALSE))
+})
+test_that(".ferx_monotonic_ofv only applies cummin to FOCE/FOCEI rows in a chained trace", {
+  monotonic_ofv <- getFromNamespace(".ferx_monotonic_ofv", "ferx")
+  # SAEM segment dips-rises-dips, then a FOCEI segment does the same.
+  method <- c("saem", "saem", "saem", "focei", "focei", "focei")
+  ofv    <- c(200,     180,    185,    160,     155,     158)
+
+  out <- monotonic_ofv(ofv, method, monotonic = TRUE)
+  expect_equal(out[method == "saem"], ofv[method == "saem"])       # untouched
+  expect_equal(out[method == "focei"], cummin(ofv[method == "focei"]))
+})
+test_that(".ferx_monotonic_ofv is a no-op when monotonic = FALSE or no FOCE rows exist", {
+  monotonic_ofv <- getFromNamespace(".ferx_monotonic_ofv", "ferx")
+  ofv <- c(200, 180, 185, 160, 155, 158)
+  expect_equal(monotonic_ofv(ofv, rep("focei", 6L), monotonic = FALSE), ofv)
+  expect_equal(monotonic_ofv(ofv, rep("gn", 6L),    monotonic = TRUE),  ofv)
+})
+test_that("plot.ferx_fit(y = ...) errors instead of silently mis-binding to log_ofv", {
+  path <- write_fake_trace()
+  on.exit(unlink(path))
+  fit <- structure(list(trace_path = path), class = "ferx_fit")
+  expect_error(plot(fit, y = 1), "does not use `y`")
+})
+test_that("plot.ferx_job(y = ...) errors instead of silently mis-binding to log_ofv", {
+  handle <- structure(
+    list(backend = "callr", model_label = "m.ferx",
+         sidecar_path = tempfile(fileext = ".txt")),
+    class = "ferx_job"
+  )
+  expect_error(plot(handle, y = 1), "does not use `y`")
 })
 
 test_that("plot.ferx_job plots the trace accumulated so far", {

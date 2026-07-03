@@ -5,22 +5,28 @@
 \alias{plot.ferx_job}
 \title{Plot the optimizer trace from a ferx fit or running job}
 \usage{
-\method{plot}{ferx_fit}(x, log_ofv = FALSE, monotonic = TRUE, ...)
+\method{plot}{ferx_fit}(x, y = NULL, log_ofv = FALSE, monotonic = TRUE, ...)
 
-\method{plot}{ferx_job}(x, log_ofv = FALSE, monotonic = TRUE, ...)
+\method{plot}{ferx_job}(x, y = NULL, log_ofv = FALSE, monotonic = TRUE, ...)
 }
 \arguments{
 \item{x}{A \code{ferx_fit} object (from \code{\link{ferx_fit}}) or a
 \code{ferx_job} handle (from \code{\link{ferx_fit_async}}).}
 
-\item{log_ofv}{Logical; plot OFV on a log scale relative to the final value
-(\eqn{OFV - OFV_{final}}). Default \code{FALSE}.}
+\item{y}{Ignored. Present only for consistency with the \code{plot(x, y,
+...)} generic; must be \code{NULL} if supplied.}
 
-\item{monotonic}{Logical; when \code{TRUE} (the default) and the trace
-includes FOCE/FOCEI iterations, the OFV panel shows the running minimum
-(\code{cummin}) rather than the raw per-evaluation OFV, since FOCE/FOCEI
-traces include rejected line-search trial steps that can transiently
-increase OFV. Has no effect on Gauss-Newton or SAEM traces.}
+\item{log_ofv}{Logical; when \code{TRUE}, shift the OFV panel down by its
+minimum value (\eqn{OFV - min(OFV)}) instead of plotting the raw OFV.
+Despite the name this is a shift, not a log transform. Default
+\code{FALSE}.}
+
+\item{monotonic}{Logical; when \code{TRUE} (the default), the OFV panel
+shows the running minimum (\code{cummin}) over FOCE/FOCEI iterations
+only, rather than their raw per-evaluation OFV, since FOCE/FOCEI traces
+include rejected line-search trial steps that can transiently increase
+OFV. Gauss-Newton and SAEM iterations (including a chained method's
+SAEM/GN segment preceding a FOCE/FOCEI segment) are always left as-is.}
 
 \item{...}{Ignored.}
 }
