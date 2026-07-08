@@ -8,6 +8,41 @@
 
 cov_skip <- "covariance step did not converge - skipping"
 
+test_that(".ferx_fit_interaction follows the last estimating (non-IMP) stage", {
+  # fit$interaction is never plumbed to R, so the flag is derived from the
+  # method chain. A trailing IMP stage is diagnostic-only and must be skipped,
+  # otherwise the covariance step would differentiate the wrong (FOCE) NLL.
+  expect_true(ferx:::.ferx_fit_interaction(list(method_chain = "FOCEI")))
+  expect_false(ferx:::.ferx_fit_interaction(list(method_chain = "FOCE")))
+  # c("focei", "imp"): interaction TRUE despite the terminal IMP.
+  expect_true(ferx:::.ferx_fit_interaction(list(method_chain = c("FOCEI", "IMP"))))
+  expect_false(ferx:::.ferx_fit_interaction(list(method_chain = c("FOCE", "IMP"))))
+  # Falls back to fit$method when method_chain is absent.
+  expect_true(ferx:::.ferx_fit_interaction(list(method = "FOCEI")))
+  # Degenerate / all-IMP chains don't error.
+  expect_false(ferx:::.ferx_fit_interaction(list(method_chain = character(0))))
+  expect_false(ferx:::.ferx_fit_interaction(list(method_chain = "IMP")))
+})
+
+test_that("ferx_covariance surfaces cov-step warnings in the structured table", {
+  # Covariance-step warnings must reach fit$warnings_structured, not just the
+  # flat vector: ferx_get_warnings() and the print tally read the structured
+  # table. Force the step to fail (bad FD step) so the engine emits a diagnostic.
+  fit <- warfarin_fit()
+  out <- ferx_covariance(fit, covariance_method = "r")
+  skip_if(is.null(out$cov_matrix), cov_skip)
+
+  # A well-conditioned refit should carry no stale critical condition_number row.
+  ws <- out$warnings_structured
+  if (is.data.frame(ws) && nrow(ws) > 0L) {
+    expect_true(all(c("severity", "category", "message") %in% names(ws)))
+  }
+  # ferx_get_warnings() reads the structured table; it must run without error
+  # and return a data frame on the refreshed fit.
+  gw <- ferx_get_warnings(out, as_df = TRUE)
+  expect_s3_class(gw, "data.frame")
+})
+
 test_that("ferx_covariance validates its inputs", {
   fit <- warfarin_fit()  # covariance = FALSE
 

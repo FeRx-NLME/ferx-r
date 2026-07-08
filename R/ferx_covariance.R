@@ -145,17 +145,10 @@ ferx_covariance <- function(fit,
 
   # Hash plumbing, identical to ferx_sir(): non-empty hex string forwards and
   # Rust enforces equality; NULL (older binary) or NA (hashing failed at fit
-  # time) both coerce to "" so Rust skips the check on that side. NA at the FFI
-  # boundary would stringify to "NA" and spuriously mismatch every real digest.
-  empty_if_missing <- function(x) {
-    if (is.null(x) || length(x) == 0L || (length(x) == 1L && is.na(x[[1L]]))) {
-      ""
-    } else {
-      as.character(x)
-    }
-  }
-  model_hash_arg <- empty_if_missing(fit$model_hash)
-  data_hash_arg <- empty_if_missing(fit$data_hash)
+  # time) both coerce to "" so Rust skips the check on that side. See
+  # `.ferx_hash_arg()` in zzz.R.
+  model_hash_arg <- .ferx_hash_arg(fit$model_hash)
+  data_hash_arg <- .ferx_hash_arg(fit$data_hash)
   if (!nzchar(model_hash_arg) || !nzchar(data_hash_arg)) {
     warning(
       "ferx_covariance: one or more file hashes are missing on the fit; ",
@@ -165,13 +158,9 @@ ferx_covariance <- function(fit,
   }
 
   # FOCEI (interaction) vs FOCE controls the inner-loop NLL the covariance step
-  # differentiates, so it must match the original fit. `fit$interaction` is not
-  # plumbed to R; derive it from the estimation method, mirroring the engine's
-  # rule that the interaction flag follows the *last* estimator in a chain
-  # (e.g. c("saem", "focei") -> interaction).
-  mchain <- fit$method_chain %||% fit$method
-  last_method <- if (length(mchain) > 0L) toupper(as.character(mchain[[length(mchain)]])) else ""
-  interaction <- identical(last_method, "FOCEI")
+  # differentiates, so it must match the original fit. Derived from the method
+  # chain because `fit$interaction` is not plumbed to R - see .ferx_fit_interaction().
+  interaction <- .ferx_fit_interaction(fit)
 
   omega_flat <- as.numeric(t(fit$omega))
 
@@ -300,27 +289,49 @@ ferx_covariance <- function(fit,
     fit$se_kappa <- se_kappa
   }
 
-  # Eigenvalues / condition number: empty vec -> NULL, NaN -> NULL. Append the
-  # high-condition-number warning exactly as ferx_fit() does.
-  fit$eigenvalues <- if (length(raw$cov_eigenvalues) == 0L) NULL else raw$cov_eigenvalues
-  fit$condition_number <- if (is.nan(raw$cov_condition_number)) NULL else raw$cov_condition_number
+  # Eigenvalues / condition number. Stage the raw FFI values on the wire-named
+  # fields and let the shared .ferx_apply_cov_sentinels() do the conversion:
+  # it sets fit$eigenvalues / fit$condition_number, clears the (now stale) wire
+  # fields, and appends the flat high-condition-number warning - exactly what
+  # ferx_fit() does, so the two paths can't drift and a loaded fit's old
+  # cov_eigenvalues / cov_condition_number don't survive alongside a new matrix.
+  fit$cov_eigenvalues <- if (length(raw$cov_eigenvalues) == 0L) NULL else raw$cov_eigenvalues
+  fit$cov_condition_number <- raw$cov_condition_number
+  fit <- .ferx_apply_cov_sentinels(fit)
 
-  # Append any covariance-step warnings the engine emitted (e.g. eigenvalue
-  # clipping, FD instability, or the "failed" diagnostic). Deduplicate against
-  # existing warnings so re-running the step doesn't stack copies.
+  # Covariance-step warnings must reach the STRUCTURED table, not just the flat
+  # vector: ferx_get_warnings() and the print/summary tally read
+  # fit$warnings_structured and only fall back to fit$warnings when it is
+  # absent (never, on a real fit). Mirror ferx_sir()'s handling.
   if (length(raw$warnings) > 0L) {
     fit$warnings <- unique(c(fit$warnings, raw$warnings))
   }
-  if (!is.null(fit$condition_number) && is.finite(fit$condition_number) &&
-        fit$condition_number > 1000) {
-    fit$warnings <- unique(c(
-      fit$warnings,
-      sprintf(
-        "High condition number (%.1f) -- parameter space may be ill-conditioned",
-        fit$condition_number
-      )
-    ))
+  ws <- fit$warnings_structured
+  if (!is.data.frame(ws)) ws <- NULL
+  # Drop any stale condition_number row so a re-run that is now well-conditioned
+  # (or has a different condition number) doesn't leave a contradictory flag;
+  # .ferx_assemble_structured_warnings() re-adds the current one below.
+  if (!is.null(ws) && nrow(ws) > 0L) {
+    ws <- ws[ws$category != "condition_number", , drop = FALSE]
   }
+  # Assembled rows: the current condition_number flag + ETA-normality (both
+  # derived from the fit). The engine's covariance-step warnings arrive as flat
+  # strings (the binding returns no severity/category), so fold them in as
+  # covariance-category rows.
+  assembled <- .ferx_assemble_structured_warnings(raw, fit)
+  cov_rows <- if (length(raw$warnings) > 0L) {
+    data.frame(
+      severity      = "warning",
+      category      = "covariance",
+      message       = as.character(raw$warnings),
+      source_method = "",
+      stringsAsFactors = FALSE
+    )
+  } else {
+    assembled[0, , drop = FALSE]
+  }
+  merged <- rbind(ws %||% assembled[0, , drop = FALSE], assembled, cov_rows)
+  fit$warnings_structured <- if (nrow(merged) > 0L) unique(merged) else NULL
 
   # Refresh derived fields (cor_matrix, estimates table) from the new cov_matrix
   # so they can't drift from the fitting path.
