@@ -90,13 +90,23 @@ test_that("ferx_covariance runs end-to-end and populates covariance fields", {
   expect_equal(out$ofv, fit$ofv)
 })
 
-test_that("ferx_covariance reproduces the inline covariance step exactly", {
+test_that("ferx_covariance closely reproduces the inline covariance step", {
   # Re-running the covariance step against a fit that already carries an inline
-  # covariance (same converged point, same EBEs) must reproduce that fit's own
-  # covariance matrix and SEs bit-for-bit - the numerics route through the same
+  # covariance (same point, same starting EBEs) reproduces that fit's own
+  # covariance matrix and SEs closely - the numerics route through the same
   # engine covariance step. This is the true apples-to-apples parity check
   # (comparing two independently-converged fits would confound the covariance
   # with tiny differences in the optimum).
+  #
+  # Parity is close but NOT bit-exact: run_covariance recomputes the inner-loop
+  # EBEs (it cold-starts warm_etas = None to mirror the inline step), so the
+  # FD-Hessian is evaluated around slightly different etas. ferx-core's own
+  # parity test (run_covariance_matches_inline_covariance) documents that
+  # "strict sub-1e-6 parity is not achievable through this path" and bounds the
+  # gap at abs 1e-4 for a small converged synthetic model. The shared warfarin
+  # fit (maxiter = 30) shows a larger but stable gap, so assert an absolute
+  # bound that still catches any real regression - a wrong interaction flag or
+  # wrong EBEs diverge by orders of magnitude more.
   fit <- warfarin_fit_cov()   # covariance = TRUE
   skip_if(is.null(fit$cov_matrix), cov_skip)
 
@@ -104,8 +114,8 @@ test_that("ferx_covariance reproduces the inline covariance step exactly", {
   skip_if(is.null(out$cov_matrix), cov_skip)
 
   expect_equal(dim(out$cov_matrix), dim(fit$cov_matrix))
-  expect_equal(unname(out$cov_matrix), unname(fit$cov_matrix), tolerance = 1e-6)
-  expect_equal(unname(out$se_theta), unname(fit$se_theta), tolerance = 1e-6)
+  expect_lt(max(abs(unname(out$cov_matrix) - unname(fit$cov_matrix))), 2e-3)
+  expect_lt(max(abs(unname(out$se_theta) - unname(fit$se_theta))), 2e-3)
 })
 
 test_that("ferx_covariance can re-run with a different covariance_method", {

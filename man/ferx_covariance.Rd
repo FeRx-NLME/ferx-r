@@ -42,10 +42,12 @@ loaded from a \code{.fitrx} bundle.
 }
 \details{
 \code{ferx_covariance()} reconstructs the fitted parameters from the fit,
-re-runs the inner loop (warm-started from the per-subject empirical Bayes
-ETAs) to rebuild the covariance-step inputs, and calls the same covariance
-step \code{\link[=ferx_fit]{ferx_fit()}} runs inline. The result is numerically identical to
-fitting with \code{covariance = TRUE}. The returned fit is the input with
+re-runs the inner loop (seeded from the per-subject empirical Bayes ETAs) to
+rebuild the covariance-step inputs, and calls the same covariance
+step \code{\link[=ferx_fit]{ferx_fit()}} runs inline. The result closely matches fitting with
+\code{covariance = TRUE} (the same engine step; agreement is close but not
+bit-exact, since the standalone re-reads the data and cold-starts the inner
+EBE loop). The returned fit is the input with
 \code{cov_matrix}, \code{cor_matrix}, \code{se_theta} / \code{se_omega} / \code{se_sigma} /
 \code{se_kappa}, \code{covariance_status}, \code{eigenvalues}, and \code{condition_number}
 refreshed.

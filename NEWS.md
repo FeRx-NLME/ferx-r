@@ -92,9 +92,11 @@ fit$eta_cov
   It re-reads the model/data from the fit's recorded paths with SHA-256
   integrity checks (refusing stale inputs) and refreshes `cov_matrix`,
   `cor_matrix`, `se_theta`/`se_omega`/`se_sigma`/`se_kappa`,
-  `covariance_status`, `eigenvalues`, and `condition_number`. The numerics are
-  identical to `ferx_fit()`'s inline covariance step; a step that runs but
-  fails (non-PD / unusable Hessian) is non-fatal, reporting
+  `covariance_status`, `eigenvalues`, and `condition_number`. The numerics
+  closely match `ferx_fit()`'s inline covariance step (the same engine step; the
+  standalone re-reads the data and cold-starts the inner EBE loop, so agreement
+  is close but not bit-exact); a step that runs but fails
+  (non-PD / unusable Hessian) is non-fatal, reporting
   `covariance_status = "failed"` with a diagnostic warning.
 - Model files may now declare a `[data]` block (`path = ...`, resolved relative
   to the model file's directory). When `data` is omitted, `ferx_fit()`,
