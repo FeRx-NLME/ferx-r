@@ -205,10 +205,13 @@ ferx_model <- function(data = NULL, model = NULL, template = NULL,
   }
   if (!file.exists(model)) stop("File not found: ", model)
   if (tolower(tools::file_ext(model)) != "ferx") stop("'model' must be a .ferx file")
-  if (!is.null(data) && !file.exists(data)) stop("Data file not found: ", data)
   # When no data path is supplied, fall back to the dataset declared in the
   # model file's `[data]` block (#254) so print() and downstream pipes see it.
+  # Resolve before the existence check so a bad declared path fails the same
+  # way an explicit `data` argument would, instead of silently constructing a
+  # ferx_model that carries a non-existent dataset.
   if (is.null(data)) data <- .ferx_model_data_path(model)
+  if (!is.null(data) && !file.exists(data)) stop("Data file not found: ", data)
   structure(list(model = model, data = data), class = "ferx_model")
 }
 
