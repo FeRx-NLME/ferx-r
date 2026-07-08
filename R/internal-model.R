@@ -198,3 +198,20 @@ ferx_section_headers <- function(lines) {
     residual    = residual
   )
 }
+
+# Resolve the dataset path declared in a model file's `[data]` block (#254).
+# Returns the resolved path (character(1)) or NULL when the model file declares
+# no `[data] path`. Relative paths are resolved by the engine relative to the
+# model file's directory. `model_path` must be a path to a .ferx file.
+.ferx_model_data_path <- function(model_path) {
+  if (is.null(model_path) || !is.character(model_path) ||
+      length(model_path) != 1L || !file.exists(model_path)) {
+    return(NULL)
+  }
+  p <- tryCatch(
+    ferx_rust_model_data_path(normalizePath(model_path)),
+    error = function(e) ""
+  )
+  if (length(p) != 1L || is.na(p) || !nzchar(p)) return(NULL)
+  p
+}

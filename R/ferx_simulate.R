@@ -6,7 +6,9 @@
 #' after \code{\link{ferx_fit}} (e.g. for posterior-predictive checks or VPCs).
 #'
 #' @param model Path to a .ferx model file
-#' @param data Path to a NONMEM-format CSV (provides population structure: doses, obs times)
+#' @param data Path to a NONMEM-format CSV (provides population structure: doses,
+#'   obs times). When omitted, the model file's \code{[data]} block (\code{path
+#'   = ...}) is used.
 #' @param n_sim Number of simulation replicates
 #' @param seed Random seed for reproducibility
 #' @param fit Optional \code{ferx_fit} result. When provided, simulation uses
@@ -58,8 +60,15 @@
 #'
 #' @family simulation
 #' @export
-ferx_simulate <- function(model, data, n_sim = 1L, seed = 42L, fit = NULL,
+ferx_simulate <- function(model, data = NULL, n_sim = 1L, seed = 42L, fit = NULL,
                           match = FALSE, horizon = NULL) {
+  if (is.null(data)) data <- .ferx_model_data_path(model)
+  if (is.null(data)) {
+    stop(
+      "No data supplied. Pass `data`, or add a `[data]` block ",
+      "(`path = ...`) to the model file."
+    )
+  }
   stopifnot(file.exists(model), file.exists(data))
   match_method <- normalize_match_method(match)
   # A finite, positive `horizon` is required to sample drug-driven (joint PK-TTE)

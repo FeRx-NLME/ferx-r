@@ -11,7 +11,8 @@
 #'   passed and \code{data} is not supplied, the data path on the object is
 #'   used.
 #' @param data  Path to a NONMEM-format CSV file. Optional when \code{model}
-#'   is a \code{ferx_model} that already carries a data path.
+#'   is a \code{ferx_model} that already carries a data path, or when the model
+#'   file declares a \code{[data]} block (\code{path = ...}).
 #' @param method Estimation method string, passed to \code{\link{ferx_fit}}.
 #'   Default \code{"focei"}.
 #' @param maxiter Maximum iterations for the pilot fit. Default: 5 for
@@ -52,10 +53,11 @@ ferx_check_init <- function(model, data = NULL, method = "focei", maxiter = NULL
     if (is.null(data)) data <- model$data
     model <- model$model
   }
+  if (is.null(data)) data <- .ferx_model_data_path(model)
   if (is.null(data)) {
     stop(
-      "No data path supplied. Either pass `data` to ferx_check_init() ",
-      "or include it in ferx_model()."
+      "No data supplied. Pass `data`, or add a `[data]` block ",
+      "(`path = ...`) to the model file."
     )
   }
   if (is.null(maxiter)) {

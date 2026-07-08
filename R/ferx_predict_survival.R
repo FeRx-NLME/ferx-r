@@ -16,7 +16,8 @@
 #'
 #' @param model Path to a .ferx model file containing at least one
 #'   \code{[event_model]} block.
-#' @param data Path to a NONMEM-format CSV.
+#' @param data Path to a NONMEM-format CSV. When omitted, the model file's
+#'   \code{[data]} block (\code{path = ...}) is used.
 #' @param times Numeric vector of times at which to evaluate \eqn{S(t)},
 #'   \eqn{H(t)}, \eqn{h(t)}.
 #' @param fit Optional \code{ferx_fit} result. When provided, predictions use
@@ -38,7 +39,14 @@
 #'
 #' @family simulation
 #' @export
-ferx_predict_survival <- function(model, data, times, fit = NULL) {
+ferx_predict_survival <- function(model, data = NULL, times, fit = NULL) {
+  if (is.null(data)) data <- .ferx_model_data_path(model)
+  if (is.null(data)) {
+    stop(
+      "No data supplied. Pass `data`, or add a `[data]` block ",
+      "(`path = ...`) to the model file."
+    )
+  }
   stopifnot(
     file.exists(model),
     file.exists(data),

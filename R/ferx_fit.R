@@ -3,7 +3,10 @@
 #' Fits a NLME model using FOCE or FOCEI estimation with a Rust backend.
 #'
 #' @param model Path to a \code{.ferx} model file, or a \code{\link{ferx_model}} object.
-#' @param data Path to a NONMEM-format CSV file. Required columns: ID, TIME,
+#' @param data Path to a NONMEM-format CSV file. When omitted, it defaults to
+#'   the dataset declared in the model file's \code{[data]} block
+#'   (\code{path = ...}); passing \code{data} here overrides that. Required
+#'   columns: ID, TIME,
 #'   DV, EVID, AMT, CMT. Optional columns recognised by the engine: RATE
 #'   (infusion rate; `RATE = -1` infuses `AMT` at a modeled rate given by a
 #'   per-subject parameter `R{n}`, and `RATE = -2` over a modeled duration given
@@ -925,6 +928,12 @@
 #' \code{ferx_model} object can always be overridden by supplying \code{data}
 #' explicitly to \code{ferx_fit()}.
 #'
+#' \strong{3. Data declared in the model file:} a \code{.ferx} file may carry a
+#' \code{[data]} block with \code{path = <csv>} (resolved relative to the model
+#' file's directory). When \code{data} is omitted, \code{ferx_fit()} falls back
+#' to that path, so \code{ferx_fit("pk.ferx")} fits against the declared dataset.
+#' An explicit \code{data} argument always wins.
+#'
 #' @section Controlling estimation:
 #'
 #' \strong{Estimation method} - pass a single method or a vector to chain
@@ -1356,10 +1365,11 @@ ferx_fit <- function(model, data = NULL,
   # in the object).
   if (inherits(model, "ferx_model")) {
     if (is.null(data)) data <- model$data
+    if (is.null(data)) data <- .ferx_model_data_path(model$model)
     if (is.null(data)) {
       stop(
-        "No data path supplied. Either pass `data` to ferx_fit() ",
-        "or include it in ferx_model()."
+        "No data supplied. Pass `data`, or add a `[data]` block ",
+        "(`path = ...`) to the model file."
       )
     }
     model <- model$model
@@ -1406,8 +1416,12 @@ ferx_fit <- function(model, data = NULL,
   } else {
     gradient_arg <- match.arg(gradient, c("auto", "ad", "fd"))
   }
+  if (is.null(data)) data <- .ferx_model_data_path(model)
   if (is.null(data)) {
-    stop("`data` is required. Pass a path to a NONMEM CSV file or a ferx_data object.")
+    stop(
+      "No data supplied. Pass `data`, or add a `[data]` block ",
+      "(`path = ...`) to the model file."
+    )
   }
   stopifnot(file.exists(model), file.exists(data))
   # `covariance` / `verbose` / `mu_referencing` / `sir` default to NULL, meaning

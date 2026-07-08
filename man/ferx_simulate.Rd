@@ -6,7 +6,7 @@
 \usage{
 ferx_simulate(
   model,
-  data,
+  data = NULL,
   n_sim = 1L,
   seed = 42L,
   fit = NULL,
@@ -17,7 +17,9 @@ ferx_simulate(
 \arguments{
 \item{model}{Path to a .ferx model file}
 
-\item{data}{Path to a NONMEM-format CSV (provides population structure: doses, obs times)}
+\item{data}{Path to a NONMEM-format CSV (provides population structure: doses,
+obs times). When omitted, the model file's \code{[data]} block (\code{path
+  = ...}) is used.}
 
 \item{n_sim}{Number of simulation replicates}
 
