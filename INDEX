@@ -6,6 +6,7 @@ ferx_check_init         Quick convergence check with an optimizer trace
 ferx_collect            Retrieve the result of a background fit
 ferx_cov_screen         Quick covariate screen against individual
                         parameters and ETAs
+ferx_covariance         Run the covariance step against an existing fit
 ferx_example            Get paths to example model and data files
 ferx_fit                Fit a nonlinear mixed effects model
 ferx_get_columns        Inspect column headers of a NONMEM data file

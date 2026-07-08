@@ -84,6 +84,18 @@ fit$eta_cov
 
 ## Added
 
+- New `ferx_covariance(fit)` runs the finite-difference-Hessian covariance step
+  against an existing fit without re-estimating (#738), the covariance-step
+  analogue of `ferx_sir()`. Add standard errors to a fit produced with
+  `covariance = FALSE`, or re-run the step with a different `covariance_method`
+  (e.g. the `"rsr"` sandwich), including on a fit loaded from a `.fitrx` bundle.
+  It re-reads the model/data from the fit's recorded paths with SHA-256
+  integrity checks (refusing stale inputs) and refreshes `cov_matrix`,
+  `cor_matrix`, `se_theta`/`se_omega`/`se_sigma`/`se_kappa`,
+  `covariance_status`, `eigenvalues`, and `condition_number`. The numerics are
+  identical to `ferx_fit()`'s inline covariance step; a step that runs but
+  fails (non-PD / unusable Hessian) is non-fatal, reporting
+  `covariance_status = "failed"` with a diagnostic warning.
 - New `ferx_conddist(fit)` exposes the SAEM conditional-distribution results
   (`settings = list(conddist = TRUE)`) to R (#244): per-subject/per-eta
   conditional mean, SD, and mode (`fit$cond_dist`), with distribution-based
