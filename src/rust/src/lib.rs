@@ -187,6 +187,7 @@ fn ferx_rust_fit(
             None,
             opts.iov_column.as_deref(),
             filter_opt,
+            &parsed.column_map,
         ) {
             Ok(result) => result,
             Err(e) => throw_r_error(format!("Error reading data: {e}")),
@@ -417,6 +418,7 @@ fn ferx_rust_simulate(
             None,
             iov_col.as_deref(),
             None,
+            &parsed.column_map,
         ) {
             Ok(r) => r,
             Err(e) => {
@@ -504,6 +506,7 @@ fn ferx_rust_simulate_from_fit(
             None,
             iov_col.as_deref(),
             None,
+            &parsed.column_map,
         ) {
             Ok(r) => r,
             Err(e) => {
@@ -598,6 +601,7 @@ fn ferx_rust_simulate_adaptive(
         None,
         iov_col.as_deref(),
         None,
+        &parsed.column_map,
     ) {
         Ok(r) => r,
         Err(e) => throw_r_error(format!("ferx_simulate_adaptive: error reading data: {e}")),
@@ -791,6 +795,7 @@ fn ferx_rust_simulate_with_uncertainty(
             None,
             iov_col.as_deref(),
             None,
+            &parsed.column_map,
         ) {
             Ok(r) => r,
             Err(e) => {
@@ -879,6 +884,7 @@ fn ferx_rust_predict(
             None,
             iov_col.as_deref(),
             None,
+            &parsed.column_map,
         ) {
             Ok(r) => r,
             Err(e) => {
@@ -932,6 +938,7 @@ fn ferx_rust_predict_from_fit(
             None,
             iov_col.as_deref(),
             None,
+            &parsed.column_map,
         ) {
             Ok(r) => r,
             Err(e) => {
@@ -1014,6 +1021,7 @@ fn ferx_rust_predict_survival(model_path: &str, data_path: &str, times: Vec<f64>
         None,
         iov_col.as_deref(),
         None,
+        &parsed.column_map,
     ) {
         Ok(r) => r,
         Err(e) => {
@@ -1065,6 +1073,7 @@ fn ferx_rust_predict_survival_from_fit(
         None,
         iov_col.as_deref(),
         None,
+        &parsed.column_map,
     ) {
         Ok(r) => r,
         Err(e) => {
@@ -1153,6 +1162,7 @@ fn ferx_rust_npde_from_fit(
         None,
         iov_col.as_deref(),
         filter_opt,
+        &parsed.column_map,
     ) {
         Ok(r) => r,
         Err(e) => {
@@ -1499,6 +1509,9 @@ fn default_fit_result(
         shrinkage_eta: Vec::new(),
         shrinkage_eps: f64::NAN,
         wall_time_secs: 0.0,
+        method_wall_times_secs: Vec::new(),
+        covariance_wall_time_secs: 0.0,
+        environment: Default::default(),
         model_name: model.name.clone(),
         ferx_version: String::new(),
         eta_param_info: Vec::new(),
@@ -2702,6 +2715,24 @@ fn ferx_rust_validate_model(model_path: &str, data_path: &str) -> List {
     )
 }
 
+/// Return the dataset path declared in a model file's `[data]` block (#254).
+///
+/// Parses `model_path` and returns the `[data] path = ...` value, already
+/// resolved relative to the model file's directory (ferx-core #690). Returns
+/// `""` when the model declares no `[data]` block, so the R side can map the
+/// empty string to `NULL`.
+///
+/// @param model_path Path to .ferx model file
+/// @return Character scalar: the resolved data path, or `""` if none declared
+/// @export
+#[extendr]
+fn ferx_rust_model_data_path(model_path: &str) -> String {
+    match ferx_core::parser::model_parser::parse_full_model_file(Path::new(model_path)) {
+        Ok(p) => p.data_path.unwrap_or_default(),
+        Err(e) => throw_r_error(format!("Error parsing model: {e}")),
+    }
+}
+
 /// Derive NCA-based starting values from the data without running a fit.
 ///
 /// @param model_path Path to .ferx model file
@@ -2997,6 +3028,9 @@ fn ferx_rust_sir(
         shrinkage_eta: Vec::new(),
         shrinkage_eps: f64::NAN,
         wall_time_secs: 0.0,
+        method_wall_times_secs: Vec::new(),
+        covariance_wall_time_secs: 0.0,
+        environment: Default::default(),
         model_name: model.name.clone(),
         ferx_version: String::new(),
         eta_param_info: Vec::new(),
@@ -3229,6 +3263,7 @@ extendr_module! {
     fn ferx_rust_sir;
     fn ferx_rust_autodiff_enabled;
     fn ferx_rust_validate_model;
+    fn ferx_rust_model_data_path;
     fn ferx_rust_inits_from_nca;
     fn ferx_rust_prepare_frem;
 }

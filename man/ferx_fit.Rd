@@ -31,7 +31,10 @@ ferx_fit(
 \arguments{
 \item{model}{Path to a \code{.ferx} model file, or a \code{\link{ferx_model}} object.}
 
-\item{data}{Path to a NONMEM-format CSV file. Required columns: ID, TIME,
+\item{data}{Path to a NONMEM-format CSV file. When omitted, it defaults to
+the dataset declared in the model file's \code{[data]} block
+(\code{path = ...}); passing \code{data} here overrides that. Required
+columns: ID, TIME,
 DV, EVID, AMT, CMT. Optional columns recognised by the engine: RATE
 (infusion rate; \code{RATE = -1} infuses \code{AMT} at a modeled rate given by a
 per-subject parameter \verb{R\{n\}}, and \code{RATE = -2} over a modeled duration given
@@ -984,6 +987,12 @@ convenient when combined with \code{\link{ferx_model_set_section}} to modify
 model options in the same chain (see Examples). The data path stored in the
 \code{ferx_model} object can always be overridden by supplying \code{data}
 explicitly to \code{ferx_fit()}.
+
+\strong{3. Data declared in the model file:} a \code{.ferx} file may carry a
+\code{[data]} block with \code{path = <csv>} (resolved relative to the model
+file's directory). When \code{data} is omitted, \code{ferx_fit()} falls back
+to that path, so \code{ferx_fit("pk.ferx")} fits against the declared dataset.
+An explicit \code{data} argument always wins.
 }
 
 \section{Controlling estimation}{

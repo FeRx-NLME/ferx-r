@@ -4,13 +4,14 @@
 \alias{ferx_predict_survival}
 \title{Survival-function predictions for time-to-event endpoints}
 \usage{
-ferx_predict_survival(model, data, times, fit = NULL)
+ferx_predict_survival(model, data = NULL, times, fit = NULL)
 }
 \arguments{
 \item{model}{Path to a .ferx model file containing at least one
 \code{[event_model]} block.}
 
-\item{data}{Path to a NONMEM-format CSV.}
+\item{data}{Path to a NONMEM-format CSV. When omitted, the model file's
+\code{[data]} block (\code{path = ...}) is used.}
 
 \item{times}{Numeric vector of times at which to evaluate \eqn{S(t)},
 \eqn{H(t)}, \eqn{h(t)}.}

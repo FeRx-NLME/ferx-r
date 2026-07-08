@@ -36,7 +36,9 @@
 #' replaces the former \code{ferx_model_new()}.
 #'
 #' @param data Optional path to a NONMEM-format CSV data file. Can be omitted
-#'   here and supplied later to \code{\link{ferx_fit}}.
+#'   here and supplied later to \code{\link{ferx_fit}}. When omitted, it defaults
+#'   to the dataset declared in the model file's \code{[data]} block
+#'   (\code{path = ...}) if the model file has one.
 #' @param model Path to an existing \code{.ferx} model file (wrap mode). The
 #'   file must exist. Leave \code{NULL} in scaffold mode.
 #' @param template Scaffold mode. One of \code{"1cpt_oral"} (default),
@@ -203,6 +205,12 @@ ferx_model <- function(data = NULL, model = NULL, template = NULL,
   }
   if (!file.exists(model)) stop("File not found: ", model)
   if (tolower(tools::file_ext(model)) != "ferx") stop("'model' must be a .ferx file")
+  # When no data path is supplied, fall back to the dataset declared in the
+  # model file's `[data]` block (#254) so print() and downstream pipes see it.
+  # Resolve before the existence check so a bad declared path fails the same
+  # way an explicit `data` argument would, instead of silently constructing a
+  # ferx_model that carries a non-existent dataset.
+  if (is.null(data)) data <- .ferx_model_data_path(model)
   if (!is.null(data) && !file.exists(data)) stop("Data file not found: ", data)
   structure(list(model = model, data = data), class = "ferx_model")
 }

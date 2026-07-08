@@ -13,7 +13,8 @@ passed and \code{data} is not supplied, the data path on the object is
 used.}
 
 \item{data}{Path to a NONMEM-format CSV file. Optional when \code{model}
-is a \code{ferx_model} that already carries a data path.}
+is a \code{ferx_model} that already carries a data path, or when the model
+file declares a \code{[data]} block (\code{path = ...}).}
 
 \item{method}{Estimation method string, passed to \code{\link{ferx_fit}}.
 Default \code{"focei"}.}

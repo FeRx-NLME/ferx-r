@@ -16,7 +16,9 @@ ferx_model(
 }
 \arguments{
 \item{data}{Optional path to a NONMEM-format CSV data file. Can be omitted
-here and supplied later to \code{\link{ferx_fit}}.}
+here and supplied later to \code{\link{ferx_fit}}. When omitted, it defaults
+to the dataset declared in the model file's \code{[data]} block
+(\code{path = ...}) if the model file has one.}
 
 \item{model}{Path to an existing \code{.ferx} model file (wrap mode). The
 file must exist. Leave \code{NULL} in scaffold mode.}
