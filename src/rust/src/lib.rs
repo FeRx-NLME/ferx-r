@@ -1509,9 +1509,6 @@ fn default_fit_result(
         shrinkage_eta: Vec::new(),
         shrinkage_eps: f64::NAN,
         wall_time_secs: 0.0,
-        method_wall_times_secs: Vec::new(),
-        covariance_wall_time_secs: 0.0,
-        environment: Default::default(),
         model_name: model.name.clone(),
         ferx_version: String::new(),
         eta_param_info: Vec::new(),
@@ -1554,6 +1551,9 @@ fn default_fit_result(
         input_columns: Vec::new(),
         covariate_table: None,
         exclusions: None,
+        method_wall_times_secs: Vec::new(),
+        covariance_wall_time_secs: 0.0,
+        environment: ferx_core::environment::EnvironmentInfo::default(),
         #[cfg(feature = "nn")]
         neural_networks: Vec::new(),
     }
@@ -3028,9 +3028,6 @@ fn ferx_rust_sir(
         shrinkage_eta: Vec::new(),
         shrinkage_eps: f64::NAN,
         wall_time_secs: 0.0,
-        method_wall_times_secs: Vec::new(),
-        covariance_wall_time_secs: 0.0,
-        environment: Default::default(),
         model_name: model.name.clone(),
         ferx_version: String::new(),
         eta_param_info: Vec::new(),
@@ -3081,6 +3078,9 @@ fn ferx_rust_sir(
         input_columns: Vec::new(),
         covariate_table: None,
         exclusions: None,
+        method_wall_times_secs: Vec::new(),
+        covariance_wall_time_secs: 0.0,
+        environment: ferx_core::environment::EnvironmentInfo::default(),
         #[cfg(feature = "nn")]
         neural_networks: Vec::new(),
     };
@@ -3133,6 +3133,347 @@ fn ferx_rust_sir(
         sir_resamples = sir_resamples_flat,
         sir_resamples_n = sir_resamples_n,
         sir_resamples_dim = sir_resamples_dim
+    )
+    .into()
+}
+
+/// Run the FD-Hessian covariance step against an existing fit.
+///
+/// The covariance-step analogue of `ferx_rust_sir`. The R wrapper
+/// `ferx_covariance()` flattens the fit list into the primitives this binding
+/// expects: parameter estimates, per-subject EBE etas, the original fit's OFV,
+/// and the source paths + hashes captured at fit time. We rebuild a minimal
+/// `FitResult` Rust-side (only the fields `ferx_core::run_covariance` reads),
+/// then call the standalone wrapper which re-parses model + data from the
+/// paths, verifies hashes, reconstructs the covariance-step inputs, and runs
+/// the same FD-Hessian covariance step `fit()` runs inline.
+///
+/// Unlike SIR there is no proposal covariance to pass in — the whole point of
+/// this step is to *compute* the covariance matrix.
+///
+/// @param model_path Path to the `.ferx` model file as recorded on the fit.
+/// @param data_path Path to the NONMEM CSV as recorded on the fit.
+/// @param model_hash Expected SHA-256 of the model file; empty string disables the check.
+/// @param data_hash Expected SHA-256 of the data file; empty string disables the check.
+/// @param ofv Original fit's OFV (= 2 * nll).
+/// @param interaction TRUE for a FOCEI fit, FALSE for FOCE. Controls the inner-loop NLL.
+/// @param theta Vector of theta point estimates.
+/// @param omega_flat Row-major flattened omega matrix.
+/// @param omega_dim Dimension of the omega matrix.
+/// @param sigma Vector of sigma point estimates.
+/// @param omega_iov_flat Row-major flattened IOV kappa omega matrix; empty when no IOV.
+/// @param omega_iov_dim Dimension of the IOV omega matrix; 0 when no IOV.
+/// @param eta_hats_flat Row-major flattened per-subject EBE etas (n_subjects × n_eta).
+/// @param n_subjects Number of subjects.
+/// @param covariance_method Covariance estimator: "r"/"hessian", "s"/"cross_product", or "rsr"/"sandwich".
+/// @param mu_referencing TRUE to use mu-referencing for the inner-loop warm restart.
+/// @param verbose When TRUE, the engine prints progress to stderr.
+/// @return Named list with `cov_matrix`, `cov_matrix_dim`, `se_theta`, `se_omega`,
+///   `se_sigma`, `se_kappa`, `covariance_status`, `cov_eigenvalues`,
+///   `cov_condition_number`, and `warnings`.
+#[extendr]
+#[allow(clippy::too_many_arguments)]
+fn ferx_rust_covariance(
+    model_path: &str,
+    data_path: &str,
+    model_hash: &str,
+    data_hash: &str,
+    ofv: f64,
+    interaction: bool,
+    theta: Vec<f64>,
+    omega_flat: Vec<f64>,
+    omega_dim: i32,
+    sigma: Vec<f64>,
+    omega_iov_flat: Vec<f64>,
+    omega_iov_dim: i32,
+    eta_hats_flat: Vec<f64>,
+    n_subjects: i32,
+    covariance_method: &str,
+    mu_referencing: bool,
+    verbose: bool,
+) -> Robj {
+    // All error paths in this binding throw an R condition (via
+    // `throw_r_error`), mirroring `ferx_rust_sir`, so the engine message
+    // (e.g. "hash mismatch") propagates into the R condition rather than
+    // being lost to stderr.
+    let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
+        Ok(p) => p,
+        Err(e) => throw_r_error(&format!(
+            "ferx_covariance: error parsing model at {}: {}",
+            model_path, e
+        )),
+    };
+    let model = &parsed.model;
+    let template = &model.default_params;
+
+    let n_theta = theta.len();
+    let n_sigma = sigma.len();
+    let n_eta = omega_dim as usize;
+    let n_subj = n_subjects.max(0) as usize;
+
+    if n_theta != template.theta.len() {
+        throw_r_error(&format!(
+            "ferx_covariance: theta length {} does not match model ({} expected)",
+            n_theta,
+            template.theta.len()
+        ));
+    }
+    if n_sigma != template.sigma.values.len() {
+        throw_r_error(&format!(
+            "ferx_covariance: sigma length {} does not match model ({} expected)",
+            n_sigma,
+            template.sigma.values.len()
+        ));
+    }
+    if n_eta != template.omega.dim() {
+        throw_r_error(&format!(
+            "ferx_covariance: omega dim {} does not match model ({} expected)",
+            n_eta,
+            template.omega.dim()
+        ));
+    }
+    if omega_flat.len() != n_eta * n_eta {
+        throw_r_error(&format!(
+            "ferx_covariance: omega_flat length {} does not match dim^2 = {}",
+            omega_flat.len(),
+            n_eta * n_eta
+        ));
+    }
+    if eta_hats_flat.len() != n_subj * n_eta {
+        throw_r_error(&format!(
+            "ferx_covariance: eta_hats_flat length {} does not match n_subjects * n_eta = {}",
+            eta_hats_flat.len(),
+            n_subj * n_eta
+        ));
+    }
+
+    let covariance_method_enum = match covariance_method.to_lowercase().as_str() {
+        "r" | "hessian" => CovarianceMethod::Hessian,
+        "s" | "cross_product" => CovarianceMethod::CrossProduct,
+        "rsr" | "sandwich" => CovarianceMethod::Sandwich,
+        other => throw_r_error(&format!(
+            "ferx_covariance: unknown covariance_method `{}` — expected r/s/rsr",
+            other
+        )),
+    };
+
+    let omega_mat = DMatrix::from_row_slice(n_eta, n_eta, &omega_flat);
+
+    // Reconstruct the fitted IOV omega matrix when the fit carries one.
+    // `fitted_params_from_result` reads this off the FitResult (falling back to
+    // the model-file init when None); passing the fitted matrix keeps IOV
+    // kappa standard errors on the estimated scale.
+    let n_iov = omega_iov_dim.max(0) as usize;
+    let omega_iov: Option<DMatrix<f64>> = if n_iov > 0 && omega_iov_flat.len() == n_iov * n_iov {
+        Some(DMatrix::from_row_slice(n_iov, n_iov, &omega_iov_flat))
+    } else {
+        None
+    };
+
+    // Build SubjectResult vec with only `eta` populated — the warm-start the
+    // covariance step reconverges from. IDs are synthesised (unused here).
+    let mut subjects: Vec<SubjectResult> = Vec::with_capacity(n_subj);
+    for i in 0..n_subj {
+        let mut eta = nalgebra::DVector::<f64>::zeros(n_eta);
+        for k in 0..n_eta {
+            eta[k] = eta_hats_flat[i * n_eta + k];
+        }
+        subjects.push(SubjectResult {
+            id: format!("{}", i + 1),
+            eta,
+            ipred: Vec::new(),
+            pred: Vec::new(),
+            iwres: Vec::new(),
+            cwres: Vec::new(),
+            ofv_contribution: 0.0,
+            cens: Vec::new(),
+            n_obs: 0,
+            extra_columns: Vec::new(),
+            per_obs_tad: Vec::new(),
+            compartment_states: Vec::new(),
+            npde: Vec::new(),
+            npd: Vec::new(),
+        });
+    }
+
+    // Skeleton FitResult — only the fields ferx_core::run_covariance actually
+    // reads (via fitted_params_from_result + the inner loop) are populated;
+    // everything else gets a neutral default. `bayes = None` so the returned
+    // covariance_status resolves to Computed/Failed rather than NotRequested.
+    let fit = FitResult {
+        method: if interaction {
+            EstimationMethod::FoceI
+        } else {
+            EstimationMethod::Foce
+        },
+        method_chain: vec![if interaction {
+            EstimationMethod::FoceI
+        } else {
+            EstimationMethod::Foce
+        }],
+        bayes: None,
+        cond_dist: None,
+        converged: true,
+        ofv,
+        aic: 0.0,
+        bic: 0.0,
+        theta: theta.clone(),
+        theta_names: template.theta_names.clone(),
+        eta_names: template.omega.eta_names.clone(),
+        omega: omega_mat,
+        sigma: sigma.clone(),
+        sigma_names: template.sigma.names.clone(),
+        error_model: model.error_model,
+        covariance_matrix: None,
+        se_theta: None,
+        se_omega: None,
+        se_sigma: None,
+        theta_fixed: template.theta_fixed.clone(),
+        omega_fixed: template.omega_fixed.clone(),
+        sigma_fixed: template.sigma_fixed.clone(),
+        subjects,
+        n_obs: 0,
+        n_subjects: n_subj,
+        n_parameters: 0,
+        n_iterations: 0,
+        interaction,
+        warnings: Vec::new(),
+        sir_ci_theta: None,
+        sir_ci_omega: None,
+        sir_ci_sigma: None,
+        sir_ess: None,
+        sir_resamples_packed: None,
+        importance_sampling: None,
+        impmap_trace: None,
+        omega_iov,
+        kappa_names: model.kappa_names.clone(),
+        kappa_fixed: template.kappa_fixed.clone(),
+        se_kappa: None,
+        shrinkage_kappa: Vec::new(),
+        shrinkage_kappa_by_occ: Vec::new(),
+        ebe_kappas: Vec::new(),
+        saem_mu_ref_m_step_evals_saved: None,
+        saem_n_subjects_hmc: None,
+        gradient_method_inner: String::new(),
+        gradient_method_outer: String::new(),
+        uses_ode_solver: model.is_ode_based(),
+        n_threads_used: 1,
+        nlopt_missing_algorithms: Vec::new(),
+        covariance_n_evals_estimated: None,
+        trace_path: None,
+        ebe_convergence_warnings: 0,
+        max_unconverged_subjects: 0,
+        total_ebe_fallbacks: 0,
+        covariance_status: CovarianceStatus::NotRequested,
+        shrinkage_eta: Vec::new(),
+        shrinkage_eps: f64::NAN,
+        wall_time_secs: 0.0,
+        model_name: model.name.clone(),
+        ferx_version: String::new(),
+        eta_param_info: Vec::new(),
+        theta_transform: Vec::new(),
+        sigma_types: Vec::new(),
+        cov_eigenvalues: None,
+        cov_condition_number: None,
+        eta_log_transformed: Vec::new(),
+        omega_param_corr: None,
+        omega_iov_param_corr: None,
+        model_path: Some(model_path.to_string()),
+        data_path: Some(data_path.to_string()),
+        model_hash: if model_hash.is_empty() {
+            None
+        } else {
+            Some(model_hash.to_string())
+        },
+        data_hash: if data_hash.is_empty() {
+            None
+        } else {
+            Some(data_hash.to_string())
+        },
+        dw_statistic: f64::NAN,
+        iwres_lag1_r: f64::NAN,
+        uses_sde: false,
+        omega_init_as_sd: Vec::new(),
+        sigma_init_as_sd: Vec::new(),
+        kappa_init_as_sd: Vec::new(),
+        warnings_structured: Vec::new(),
+        model_text: None,
+        theta_init: Vec::new(),
+        omega_init: nalgebra::DMatrix::zeros(0, 0),
+        sigma_init: Vec::new(),
+        obs_time_range: None,
+        final_gradient: None,
+        optimizer: "auto".to_string(),
+        n_starts: 1,
+        multi_start_seed: None,
+        saem_seed: None,
+        sir_seed: None,
+        imp_seed: None,
+        npde_seed: None,
+        bloq_method: "drop".to_string(),
+        outer_maxiter: 0,
+        outer_gtol: 0.0,
+        inits_from_nca: None,
+        covariate_names: Vec::new(),
+        input_columns: Vec::new(),
+        covariate_table: None,
+        exclusions: None,
+        method_wall_times_secs: Vec::new(),
+        covariance_wall_time_secs: 0.0,
+        environment: ferx_core::environment::EnvironmentInfo::default(),
+        #[cfg(feature = "nn")]
+        neural_networks: Vec::new(),
+    };
+
+    let mut opts = FitOptions::default();
+    // run_covariance_step is ignored by run_covariance (calling it *is* the
+    // request); set it anyway for clarity.
+    opts.run_covariance_step = true;
+    opts.covariance_method = covariance_method_enum;
+    opts.mu_referencing = mu_referencing;
+    opts.interaction = interaction;
+    opts.verbose = verbose;
+
+    // Pass None for model/population so run_covariance re-parses model + data
+    // from the recorded paths and fires the SHA-256 integrity check — the
+    // whole point of forwarding the hashes here.
+    let new_fit = match ferx_core::run_covariance(&fit, None, None, &opts) {
+        Ok(f) => f,
+        Err(e) => throw_r_error(&format!("ferx_covariance: {}", e)),
+    };
+
+    let (cov_matrix_flat, cov_matrix_dim): (Vec<f64>, i32) = match &new_fit.covariance_matrix {
+        Some(m) => {
+            let d = m.nrows();
+            let mut v = Vec::with_capacity(d * d);
+            for i in 0..d {
+                for j in 0..d {
+                    v.push(m[(i, j)]);
+                }
+            }
+            (v, d as i32)
+        }
+        None => (Vec::new(), 0i32),
+    };
+
+    let covariance_status_str = match new_fit.covariance_status {
+        CovarianceStatus::Computed => "computed",
+        CovarianceStatus::Failed => "failed",
+        CovarianceStatus::NotRequested => "not_requested",
+        CovarianceStatus::SirFallback => "sir_fallback",
+    };
+
+    list!(
+        cov_matrix = cov_matrix_flat,
+        cov_matrix_dim = cov_matrix_dim,
+        se_theta = new_fit.se_theta.clone().unwrap_or_default(),
+        se_omega = new_fit.se_omega.clone().unwrap_or_default(),
+        se_sigma = new_fit.se_sigma.clone().unwrap_or_default(),
+        se_kappa = new_fit.se_kappa.clone().unwrap_or_default(),
+        covariance_status = covariance_status_str,
+        cov_eigenvalues = new_fit.cov_eigenvalues.clone().unwrap_or_default(),
+        cov_condition_number = new_fit.cov_condition_number.unwrap_or(f64::NAN),
+        warnings = new_fit.warnings.clone()
     )
     .into()
 }
@@ -3261,6 +3602,7 @@ extendr_module! {
     fn ferx_rust_predict_survival_from_fit;
     fn ferx_rust_npde_from_fit;
     fn ferx_rust_sir;
+    fn ferx_rust_covariance;
     fn ferx_rust_autodiff_enabled;
     fn ferx_rust_validate_model;
     fn ferx_rust_model_data_path;

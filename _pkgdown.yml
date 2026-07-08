@@ -12,6 +12,7 @@ reference:
       - ferx_collect
       - ferx_stop
       - ferx_sir
+      - ferx_covariance
       - summary.ferx_fit
 
   - title: "Simulation & Prediction"

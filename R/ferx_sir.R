@@ -196,15 +196,9 @@ ferx_sir <- function(fit,
   #      NULL, and NA at the FFI boundary stringifies to "NA", which
   #      compares unequal to any real digest and would trigger a
   #      spurious "hash mismatch" error.
-  empty_if_missing <- function(x) {
-    if (is.null(x) || length(x) == 0L || (length(x) == 1L && is.na(x[[1L]]))) {
-      ""
-    } else {
-      as.character(x)
-    }
-  }
-  model_hash_arg <- empty_if_missing(fit$model_hash)
-  data_hash_arg <- empty_if_missing(fit$data_hash)
+  # (`.ferx_hash_arg()` in zzz.R implements the NULL/NA -> "" coercion.)
+  model_hash_arg <- .ferx_hash_arg(fit$model_hash)
+  data_hash_arg <- .ferx_hash_arg(fit$data_hash)
   if (!nzchar(model_hash_arg) || !nzchar(data_hash_arg)) {
     warning(
       "ferx_sir: one or more file hashes are missing on the fit; ",

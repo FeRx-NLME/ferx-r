@@ -84,6 +84,20 @@ fit$eta_cov
 
 ## Added
 
+- New `ferx_covariance(fit)` runs the finite-difference-Hessian covariance step
+  against an existing fit without re-estimating (#738), the covariance-step
+  analogue of `ferx_sir()`. Add standard errors to a fit produced with
+  `covariance = FALSE`, or re-run the step with a different `covariance_method`
+  (e.g. the `"rsr"` sandwich), including on a fit loaded from a `.fitrx` bundle.
+  It re-reads the model/data from the fit's recorded paths with SHA-256
+  integrity checks (refusing stale inputs) and refreshes `cov_matrix`,
+  `cor_matrix`, `se_theta`/`se_omega`/`se_sigma`/`se_kappa`,
+  `covariance_status`, `eigenvalues`, and `condition_number`. The numerics
+  closely match `ferx_fit()`'s inline covariance step (the same engine step; the
+  standalone re-reads the data and cold-starts the inner EBE loop, so agreement
+  is close but not bit-exact); a step that runs but fails
+  (non-PD / unusable Hessian) is non-fatal, reporting
+  `covariance_status = "failed"` with a diagnostic warning.
 - Model files may now declare a `[data]` block (`path = ...`, resolved relative
   to the model file's directory). When `data` is omitted, `ferx_fit()`,
   `ferx_model()`, `ferx_simulate()`, `ferx_predict()`,

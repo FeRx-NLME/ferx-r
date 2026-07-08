@@ -81,6 +81,12 @@ ferx_rust_sir <- function(model_path, data_path, model_hash, data_hash, ofv, int
 
 #' @title Internal Rust backend binding
 #' @keywords internal
+ferx_rust_covariance <- function(model_path, data_path, model_hash, data_hash, ofv, interaction, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, eta_hats_flat, n_subjects, covariance_method, mu_referencing, verbose) {
+  .Call("wrap__ferx_rust_covariance", model_path, data_path, model_hash, data_hash, ofv, interaction, theta, omega_flat, as.integer(omega_dim), sigma, omega_iov_flat, as.integer(omega_iov_dim), eta_hats_flat, as.integer(n_subjects), covariance_method, mu_referencing, verbose)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
 ferx_rust_autodiff_enabled <- function() {
   .Call("wrap__ferx_rust_autodiff_enabled")
 }
