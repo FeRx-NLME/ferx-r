@@ -99,6 +99,12 @@ ferx_rust_validate_model <- function(model_path, data_path) {
 
 #' @title Internal Rust backend binding
 #' @keywords internal
+ferx_rust_model_data_path <- function(model_path) {
+  .Call("wrap__ferx_rust_model_data_path", model_path)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
 ferx_rust_inits_from_nca <- function(model_path, data_path, method) {
   .Call("wrap__ferx_rust_inits_from_nca", model_path, data_path, method)
 }

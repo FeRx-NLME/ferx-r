@@ -4,12 +4,13 @@
 \alias{ferx_predict}
 \title{Population predictions from a NLME model}
 \usage{
-ferx_predict(model, data, fit = NULL)
+ferx_predict(model, data = NULL, fit = NULL)
 }
 \arguments{
 \item{model}{Path to a .ferx model file}
 
-\item{data}{Path to a NONMEM-format CSV}
+\item{data}{Path to a NONMEM-format CSV. When omitted, the model file's
+\code{[data]} block (\code{path = ...}) is used.}
 
 \item{fit}{Optional \code{ferx_fit} result. When provided, predictions use
 \code{fit$theta} instead of the model file's initial estimate for theta.}

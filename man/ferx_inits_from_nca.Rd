@@ -18,7 +18,8 @@ ferx_inits_from_nca(
 object created with \code{\link{ferx_model}}.}
 
 \item{data}{Path to a NONMEM-format CSV file. When \code{model} is a
-\code{ferx_model} object that already carries a data path, this may be left
+\code{ferx_model} object that already carries a data path, or when the model
+file declares a \code{[data]} block (\code{path = ...}), this may be left
 \code{NULL}.}
 
 \item{method}{One of \code{"nca_sweep"} (default), \code{"nca"}, or

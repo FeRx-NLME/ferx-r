@@ -6,7 +6,7 @@
 \usage{
 ferx_simulate_adaptive(
   model,
-  data,
+  data = NULL,
   n_sim = 1L,
   seed = 42L,
   verify = TRUE,
@@ -18,7 +18,8 @@ ferx_simulate_adaptive(
 block}
 
 \item{data}{Path to a NONMEM-format CSV (dose-free base subjects + observation
-times)}
+times). When omitted, the model file's \code{[data]} block (\code{path =
+  ...}) is used.}
 
 \item{n_sim}{Number of simulation replicates}
 

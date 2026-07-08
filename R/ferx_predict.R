@@ -3,7 +3,8 @@
 #' Computes population-level predictions (eta = 0) for all subjects.
 #'
 #' @param model Path to a .ferx model file
-#' @param data Path to a NONMEM-format CSV
+#' @param data Path to a NONMEM-format CSV. When omitted, the model file's
+#'   \code{[data]} block (\code{path = ...}) is used.
 #' @param fit Optional \code{ferx_fit} result. When provided, predictions use
 #'   \code{fit$theta} instead of the model file's initial estimate for theta.
 #'
@@ -17,7 +18,14 @@
 #'
 #' @family simulation
 #' @export
-ferx_predict <- function(model, data, fit = NULL) {
+ferx_predict <- function(model, data = NULL, fit = NULL) {
+  if (is.null(data)) data <- .ferx_model_data_path(model)
+  if (is.null(data)) {
+    stop(
+      "No data supplied. Pass `data`, or add a `[data]` block ",
+      "(`path = ...`) to the model file."
+    )
+  }
   stopifnot(file.exists(model), file.exists(data))
 
   if (is.null(fit)) {

@@ -96,6 +96,12 @@ fit$eta_cov
   identical to `ferx_fit()`'s inline covariance step; a step that runs but
   fails (non-PD / unusable Hessian) is non-fatal, reporting
   `covariance_status = "failed"` with a diagnostic warning.
+- Model files may now declare a `[data]` block (`path = ...`, resolved relative
+  to the model file's directory). When `data` is omitted, `ferx_fit()`,
+  `ferx_model()`, `ferx_simulate()`, `ferx_predict()`,
+  `ferx_predict_survival()`, `ferx_simulate_adaptive()`, `ferx_check_init()`,
+  and `ferx_inits_from_nca()` fall back to the declared dataset; an explicit
+  `data` argument still overrides it (#254).
 - New `ferx_conddist(fit)` exposes the SAEM conditional-distribution results
   (`settings = list(conddist = TRUE)`) to R (#244): per-subject/per-eta
   conditional mean, SD, and mode (`fit$cond_dist`), with distribution-based

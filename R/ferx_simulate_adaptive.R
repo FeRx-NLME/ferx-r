@@ -14,7 +14,8 @@
 #' @param model Path to a .ferx model file containing an \code{[adaptive_dosing]}
 #'   block
 #' @param data Path to a NONMEM-format CSV (dose-free base subjects + observation
-#'   times)
+#'   times). When omitted, the model file's \code{[data]} block (\code{path =
+#'   ...}) is used.
 #' @param n_sim Number of simulation replicates
 #' @param seed Random seed for reproducibility
 #' @param verify Run the frozen-schedule replay verifier after every
@@ -57,8 +58,15 @@
 #'
 #' @family simulation
 #' @export
-ferx_simulate_adaptive <- function(model, data, n_sim = 1L, seed = 42L,
+ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
                                    verify = TRUE, max_decisions = 0L) {
+  if (is.null(data)) data <- .ferx_model_data_path(model)
+  if (is.null(data)) {
+    stop(
+      "No data supplied. Pass `data`, or add a `[data]` block ",
+      "(`path = ...`) to the model file."
+    )
+  }
   stopifnot(file.exists(model), file.exists(data))
   if (length(verify) != 1L || is.na(verify) || !is.logical(verify)) {
     stop("`verify` must be a single TRUE or FALSE.", call. = FALSE)
