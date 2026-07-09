@@ -200,10 +200,22 @@ ferx_xpose <- function(fit,
       "`fit$%s` column(s) also present in sdtab; using the per-subject value: %s",
       what, paste(collide, collapse = ", ")), call. = FALSE)
   }
+  # `src` holds one row per subject in subject order; `df` (sdtab) holds each
+  # subject's observations contiguously in that same order. Assign an ordinal
+  # subject index and join on it, so two subjects that share a textual ID (a
+  # reused ID in a non-contiguous data block) each pick up their own row rather
+  # than both matching the first via ID. Fall back to a character-space ID match
+  # when the counts don't line up (e.g. a hand-built src covering a subset) -
   # sdtab IDs are numeric (Rust writes them as f64) while ebe_etas /
-  # individual_estimates IDs are character; match in character space so the
-  # join works for non-numeric or zero-padded IDs (cf. diagnostics.R).
-  idx <- match(as.character(df[["ID"]]), as.character(src[["ID"]]))
+  # individual_estimates IDs are character, so match in character space
+  # (cf. diagnostics.R).
+  subj <- .ferx_subject_index(df[["ID"]])
+  n_subj <- if (length(subj)) max(subj) else 0L
+  if (nrow(src) == n_subj) {
+    idx <- subj
+  } else {
+    idx <- match(as.character(df[["ID"]]), as.character(src[["ID"]]))
+  }
   for (col in add_cols) {
     df[[col]] <- src[[col]][idx]
   }

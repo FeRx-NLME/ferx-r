@@ -141,6 +141,20 @@ ferx_model(template = "1cpt_oral", path = "m.ferx", edit = FALSE) |>
   ferx_fit(data)
 ```
 
+## Fixed
+
+- Datasets that reuse a subject ID in a non-contiguous block (e.g. a second
+  cohort reusing IDs 12/13/14) are now handled correctly by the per-subject
+  joins in `ferx_xpose()`, `ferx_save_fit()`, `fit$eta_cov`, and
+  `ferx_cov_screen()`. ferx-core (like NONMEM) processes records sequentially,
+  so each block is a distinct subject even when two share a textual ID; these
+  functions previously keyed their joins on the raw ID, which silently gave the
+  second block the first subject's ETAs/parameters (xpose), dropped it and wrote
+  an `ebes.csv` that disagreed with `predictions.csv` so the loader rejected the
+  bundle (save_fit), or double-weighted the shared covariate row (eta_cov /
+  cov_screen). Joins now key on subject order instead (#252, alongside
+  ferx-core #743).
+
 # ferx 0.1.6
 
 ## Added

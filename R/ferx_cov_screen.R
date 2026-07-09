@@ -73,7 +73,13 @@ ferx_cov_screen <- function(fit, threshold = 0.2) {
 
   # Aggregate each covariate to one value per subject: median (continuous) or
   # the most frequent level (categorical).
-  ids <- unique(covtab[[id_col]])
+  # Aggregate on the ordinal subject index, not the raw ID: a dataset that
+  # reuses a subject ID in a non-contiguous block has two distinct subjects
+  # sharing that ID, and keying on ID would collapse them into one row (and
+  # later double-weight that row against both subjects' ETAs).
+  subj <- .ferx_subject_index(covtab[[id_col]])
+  ids  <- covtab[[id_col]][!duplicated(subj)]  # one ID per subject, subject order
+  keys <- as.character(seq_along(ids))
   mode_fn <- function(v) {
     v <- v[!is.na(v)]
     if (!length(v)) return(NA)
@@ -85,12 +91,12 @@ ferx_cov_screen <- function(fit, threshold = 0.2) {
   )
   for (cov in cov_names) {
     if (identical(types[[cov]], "categorical")) {
-      agg <- tapply(covtab[[cov]], covtab[[id_col]], mode_fn)
+      agg <- tapply(covtab[[cov]], subj, mode_fn)
     } else {
-      agg <- tapply(covtab[[cov]], covtab[[id_col]],
+      agg <- tapply(covtab[[cov]], subj,
                     function(v) stats::median(v, na.rm = TRUE))
     }
-    percov[[cov]] <- agg[as.character(ids)]
+    percov[[cov]] <- agg[keys]
   }
 
   # Subject-level ETAs and individual parameter estimates.
@@ -145,11 +151,24 @@ ferx_cov_screen <- function(fit, threshold = 0.2) {
     }
   }
 
-  merged   <- merge(percov, etas, by.x = id_col, by.y = eta_id)
-  ipar_idx <- if (has_ipar) {
-    match(merged[[id_col]], as.character(ipar[[ipar_id]]))
+  # `percov`, `etas` and `ipar` are each one row per subject in subject order,
+  # so bind/index positionally - an ID merge would cross-join two subjects that
+  # share a reused ID. Fall back to an ID match when the counts disagree.
+  if (nrow(percov) == nrow(etas)) {
+    merged   <- cbind(percov, etas[, eta_cols, drop = FALSE])
+    ipar_idx <- if (has_ipar) {
+      if (nrow(ipar) == nrow(percov)) seq_len(nrow(percov))
+      else match(merged[[id_col]], as.character(ipar[[ipar_id]]))
+    } else {
+      NULL
+    }
   } else {
-    NULL
+    merged   <- merge(percov, etas, by.x = id_col, by.y = eta_id)
+    ipar_idx <- if (has_ipar) {
+      match(merged[[id_col]], as.character(ipar[[ipar_id]]))
+    } else {
+      NULL
+    }
   }
 
   rows <- vector("list", length(eta_cols) * length(cov_names))
