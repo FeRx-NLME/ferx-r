@@ -188,3 +188,40 @@ test_that("ferx_simulate errors on missing data file", {
   ex <- ferx_example("warfarin")
   expect_error(ferx_simulate(ex$model, "no_such_data.csv"))
 })
+
+# ---- Simulation diagnostics channel (ferx-core #762/#763) ------------------
+# ferx-core surfaces per-subject simulation diagnostics (a degenerate or
+# pathological hazard that would otherwise censor a subject with no signal)
+# via simulate_with_options_diag; the Rust glue attaches them as a
+# `simulation_warnings` attribute and ferx_simulate emits them as an R warning.
+
+test_that("ferx_simulate attaches a (clean-run empty) simulation_warnings attribute", {
+  ex <- ferx_example("pktte_joint")
+  sim <- ferx_simulate(ex$model, ex$data, n_sim = 1L, seed = 1L, horizon = 24)
+  # The channel is always present so downstream code can rely on it; a clean run
+  # yields a zero-length character vector, not NULL.
+  w <- attr(sim, "simulation_warnings", exact = TRUE)
+  expect_false(is.null(w))
+  expect_type(w, "character")
+  expect_length(w, 0)
+})
+
+test_that(".ferx_surface_sim_warnings emits attached diagnostics as one warning, returns object", {
+  fake <- structure(
+    data.frame(ID = 1L, TIME = 0),
+    simulation_warnings = c(
+      "W_TTE_DEGENERATE_HAZARD: subject 3 (CMT 2)",
+      "W_RTTE_DEGENERATE: subject 7"
+    )
+  )
+  expect_warning(out <- .ferx_surface_sim_warnings(fake), "2 simulation diagnostics")
+  # Returned unchanged, attribute preserved for programmatic access.
+  expect_identical(out, fake)
+  expect_length(attr(out, "simulation_warnings"), 2L)
+})
+
+test_that(".ferx_surface_sim_warnings is silent with no diagnostics (empty or NULL)", {
+  clean <- structure(data.frame(ID = 1L), simulation_warnings = character(0))
+  expect_no_warning(.ferx_surface_sim_warnings(clean))
+  expect_no_warning(.ferx_surface_sim_warnings(NULL))
+})

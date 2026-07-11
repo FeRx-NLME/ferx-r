@@ -48,6 +48,11 @@
 #'   0 (right-censored at it); its IPRED and DV_SIM are \code{NA}. Use
 #'   \code{is.na(OBSERVED)} to separate continuous rows from event rows.
 #'
+#'   The returned frame carries a \code{simulation_warnings} attribute (a
+#'   character vector, empty for a clean run) listing any per-subject simulation
+#'   diagnostics from ferx-core (e.g. a degenerate or pathological hazard that
+#'   censored a subject with no event); these are also raised as an R warning.
+#'
 #' @examples
 #' ex <- ferx_example("warfarin")
 #' fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
@@ -83,30 +88,53 @@ ferx_simulate <- function(model, data = NULL, n_sim = 1L, seed = 42L, fit = NULL
   }
   horizon_arg <- if (is.null(horizon)) -1 else as.numeric(horizon)
 
-  if (is.null(fit)) {
-    return(ferx_rust_simulate(
+  res <- if (is.null(fit)) {
+    ferx_rust_simulate(
       model_path = normalizePath(model),
       data_path = normalizePath(data),
       n_sim = as.integer(n_sim),
       seed = as.integer(seed),
       match_method = match_method,
       horizon = horizon_arg
-    ))
+    )
+  } else {
+    fit_pieces <- validate_fit_for_params(fit)
+    ferx_rust_simulate_from_fit(
+      model_path = normalizePath(model),
+      data_path = normalizePath(data),
+      theta = fit_pieces$theta,
+      omega_flat = fit_pieces$omega_flat,
+      omega_dim = fit_pieces$omega_dim,
+      sigma = fit_pieces$sigma,
+      n_sim = as.integer(n_sim),
+      seed = as.integer(seed),
+      match_method = match_method,
+      horizon = horizon_arg
+    )
   }
 
-  fit_pieces <- validate_fit_for_params(fit)
-  ferx_rust_simulate_from_fit(
-    model_path = normalizePath(model),
-    data_path = normalizePath(data),
-    theta = fit_pieces$theta,
-    omega_flat = fit_pieces$omega_flat,
-    omega_dim = fit_pieces$omega_dim,
-    sigma = fit_pieces$sigma,
-    n_sim = as.integer(n_sim),
-    seed = as.integer(seed),
-    match_method = match_method,
-    horizon = horizon_arg
-  )
+  # Surface per-subject simulation diagnostics from ferx-core (#762/#763): a
+  # degenerate or pathological hazard that would otherwise censor a subject with
+  # no signal is attached by the Rust glue as a `simulation_warnings` attribute.
+  .ferx_surface_sim_warnings(res)
+}
+
+# Emit ferx-core's per-subject simulation diagnostics (#762/#763), attached by the
+# Rust glue as a `simulation_warnings` character-vector attribute, as a single R
+# warning so they are not silently lost; return `res` unchanged (the attribute is
+# left in place for programmatic access). `res` may be NULL when the Rust side
+# errored, in which case there is nothing to surface.
+.ferx_surface_sim_warnings <- function(res) {
+  w <- attr(res, "simulation_warnings", exact = TRUE)
+  if (length(w) > 0L) {
+    warning(
+      "ferx_simulate produced ", length(w), " simulation diagnostic",
+      if (length(w) > 1L) "s" else "", ":\n  ",
+      paste(w, collapse = "\n  "),
+      call. = FALSE
+    )
+  }
+  res
 }
 
 # Internal: normalize the user-facing `match` argument to the string token the
