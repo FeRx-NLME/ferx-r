@@ -84,6 +84,18 @@ fit$eta_cov
 
 ## Added
 
+- **Analytic inverse-Gaussian (IG) absorption is now available in model files** -
+  `pk one_cpt_ig(cl, v, mat, cv2)` and `pk two_cpt_ig(cl, v1, q, v2, mat, cv2)`
+  structural models: Freijer & Post inverse-Gaussian absorption fed straight into
+  a one- or two-compartment disposition as an analytic closed form (ferx-core
+  #790), with exact FOCE/FOCEI sensitivities that do not depend on any ODE-solver
+  tolerance and a uniform pk-line interface matching the analytic transit models.
+  It is the closed-form counterpart to the ODE `igd()` input rate
+  (`ferx_example("igd_inverse_gaussian")`); `f` and `lagtime` are supported, and a
+  flip-flop model (elimination slower than absorption) transparently reroutes to
+  its ODE `igd()` twin. New bundled examples `ferx_example("one_cpt_ig")` and
+  `ferx_example("two_cpt_ig")` with runnable `inst/examples/ex_one_cpt_ig.R` /
+  `ex_two_cpt_ig.R`.
 - New `ferx_covariance(fit)` runs the finite-difference-Hessian covariance step
   against an existing fit without re-estimating (#738), the covariance-step
   analogue of `ferx_sir()`. Add standard errors to a fit produced with

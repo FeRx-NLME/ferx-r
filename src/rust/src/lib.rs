@@ -1636,6 +1636,8 @@ fn pk_model_type_label(model: &CompiledModel) -> &'static str {
         PkModel::ThreeCptIv => "3-cpt IV",
         PkModel::ThreeCptOral => "3-cpt oral",
         PkModel::TwoCptTransit => "2-cpt transit",
+        PkModel::OneCptIg => "1-cpt IG",
+        PkModel::TwoCptIg => "2-cpt IG",
     }
 }
 
@@ -1763,7 +1765,7 @@ fn fit_result_to_list(
     let warnings_category: Vec<String> = result
         .warnings_structured
         .iter()
-        .map(|w| w.category.clone())
+        .map(|w| w.category.as_str().to_string())
         .collect();
     let warnings_message: Vec<String> = result
         .warnings_structured
