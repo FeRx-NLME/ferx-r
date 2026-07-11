@@ -64,6 +64,11 @@ also yields a TTE row on the event CMT, where TIME is the sampled
 event/censor time and \code{OBSERVED} is 1 (event before \code{horizon}) or
 0 (right-censored at it); its IPRED and DV_SIM are \code{NA}. Use
 \code{is.na(OBSERVED)} to separate continuous rows from event rows.
+
+The returned frame carries a \code{simulation_warnings} attribute (a
+character vector, empty for a clean run) listing any per-subject simulation
+diagnostics from ferx-core (e.g. a degenerate or pathological hazard that
+censored a subject with no event); these are also raised as an R warning.
 }
 \description{
 Simulates observations from a parsed model with between-subject variability
