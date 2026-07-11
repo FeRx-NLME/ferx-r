@@ -1,0 +1,47 @@
+# Inverse-Gaussian (Freijer & Post) absorption -- ANALYTIC closed form.
+#
+# One-compartment oral model with an inverse-Gaussian absorption-time
+# distribution, via the analytic `pk one_cpt_ig(...)` closed form (ferx-core
+# #790). This is the exponential-tilting closed form of the same igd(mat, cv2)
+# density the ODE model uses (see igd_inverse_gaussian) -- it gives exact
+# FOCE/FOCEI gradients that are independent of ODE-solver tolerance, and a
+# uniform `pk`-line interface matching the analytic transit models. The whole
+# dose is absorbed through the IG process into central (no first-order `ka`);
+# concentration = central / V is applied automatically.
+#
+# Domain: the closed form converges when elimination is slower than the
+# absorption rate, ke = CL/V < 1 / (2*MAT*CV2) (here 0.1 < 0.83). Outside that
+# flip-flop regime a plain model transparently reroutes to its ODE igd() twin.
+#
+# Paired with one_cpt_ig.csv -- an in-domain IG-truth dataset (20 subjects,
+# single oral dose; ferx-core `data/ig_indomain_oral.csv`, simulated from and
+# fit against an IG model and anchored to NONMEM $DES: ferx -1303.528 vs
+# NONMEM -1303.639). Unlike igd_oral (transit-simulated), this is a genuine
+# IG parameter-recovery dataset.
+
+[parameters]
+  theta TVCL(5.0,   0.1, 100.0)   # clearance (L/h)
+  theta TVV(50.0,   5.0, 500.0)   # central volume (L)
+  theta TVMAT(2.0, 0.05,  24.0)   # mean absorption time (h)
+  theta TVCV2(0.3, 0.001, 10.0)   # relative dispersion of absorption time (Var/mean^2)
+
+  omega ETA_CL ~ 0.09
+  omega ETA_V  ~ 0.09
+
+  sigma PROP_ERR ~ 0.15 (sd)
+
+[individual_parameters]
+  CL  = TVCL  * exp(ETA_CL)
+  V   = TVV   * exp(ETA_V)
+  MAT = TVMAT
+  CV2 = TVCV2
+
+[structural_model]
+  pk one_cpt_ig(cl=CL, v=V, mat=MAT, cv2=CV2)
+
+[error_model]
+  DV ~ proportional(PROP_ERR)
+
+[fit_options]
+  method  = focei
+  maxiter = 500

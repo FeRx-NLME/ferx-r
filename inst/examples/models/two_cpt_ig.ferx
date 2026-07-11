@@ -1,0 +1,48 @@
+# Inverse-Gaussian (Freijer & Post) absorption -- ANALYTIC closed form, 2-cpt.
+#
+# Two-compartment oral model with an inverse-Gaussian absorption-time
+# distribution, via the analytic `pk two_cpt_ig(...)` closed form (ferx-core
+# #790). Same exponential-tilting closed form as one_cpt_ig, convolved onto a
+# two-compartment disposition (central + peripheral). The whole dose is absorbed
+# through the IG process into central (no first-order `ka`); concentration =
+# central / V1 is applied automatically.
+#
+# Domain: the closed form converges when every disposition rate is slower than
+# the absorption rate (fastest eigenvalue < 1 / (2*MAT*CV2) = 0.83; here the
+# fast macro-rate alpha is about 0.5). Outside that regime a plain model
+# transparently reroutes to its ODE igd() twin.
+#
+# Paired with two_cpt_ig.csv -- a 2-cpt IG-truth dataset simulated from this
+# model at the [parameters] values via ferx_simulate(seed = 20250710), reusing
+# the one_cpt_ig design (20 subjects, single 100 mg oral dose).
+
+[parameters]
+  theta TVCL(5.0,   0.1, 100.0)   # clearance (L/h)
+  theta TVV1(40.0,  5.0, 500.0)   # central volume (L)
+  theta TVQ(10.0,   0.1, 100.0)   # inter-compartmental clearance (L/h)
+  theta TVV2(60.0,  5.0, 500.0)   # peripheral volume (L)
+  theta TVMAT(2.0, 0.05,  24.0)   # mean absorption time (h)
+  theta TVCV2(0.3, 0.001, 10.0)   # relative dispersion of absorption time (Var/mean^2)
+
+  omega ETA_CL ~ 0.09
+  omega ETA_V1 ~ 0.09
+
+  sigma PROP_ERR ~ 0.15 (sd)
+
+[individual_parameters]
+  CL  = TVCL  * exp(ETA_CL)
+  V1  = TVV1  * exp(ETA_V1)
+  Q   = TVQ
+  V2  = TVV2
+  MAT = TVMAT
+  CV2 = TVCV2
+
+[structural_model]
+  pk two_cpt_ig(cl=CL, v1=V1, q=Q, v2=V2, mat=MAT, cv2=CV2)
+
+[error_model]
+  DV ~ proportional(PROP_ERR)
+
+[fit_options]
+  method  = focei
+  maxiter = 500

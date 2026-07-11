@@ -1646,6 +1646,8 @@ fn pk_model_type_label(model: &CompiledModel) -> &'static str {
         PkModel::ThreeCptIv => "3-cpt IV",
         PkModel::ThreeCptOral => "3-cpt oral",
         PkModel::TwoCptTransit => "2-cpt transit",
+        PkModel::OneCptIg => "1-cpt IG",
+        PkModel::TwoCptIg => "2-cpt IG",
     }
 }
 

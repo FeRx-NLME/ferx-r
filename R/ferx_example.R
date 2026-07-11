@@ -123,6 +123,20 @@
 #'     oral. Shares the transit anchor dataset; because that data adds a
 #'     first-order \code{ka} this \code{ka}-free fit is mildly mis-specified
 #'     (syntax / workflow demo).}
+#'   \item{one_cpt_ig}{One-compartment oral model with inverse-Gaussian
+#'     (Freijer & Post) absorption as an \emph{analytic} closed form -- \code{pk
+#'     one_cpt_ig(cl, v, mat, cv2)} (ferx-core #790). The exponential-tilting
+#'     closed form of the same IG absorption-time density that
+#'     \code{igd_inverse_gaussian} reaches through the ODE \code{igd()}, with
+#'     exact FOCE/FOCEI sensitivities independent of any ODE-solver tolerance and
+#'     a uniform pk-line interface. Paired with an in-domain IG-truth dataset
+#'     (NONMEM \code{$DES} anchored) - a genuine parameter-recovery example, in
+#'     contrast to \code{igd_inverse_gaussian}'s transit-simulated data.}
+#'   \item{two_cpt_ig}{Two-compartment oral model with analytic inverse-Gaussian
+#'     absorption -- \code{pk two_cpt_ig(cl, v1, q, v2, mat, cv2)} (ferx-core
+#'     #790). The same IG closed form as \code{one_cpt_ig} convolved onto a
+#'     two-compartment disposition. Paired with a 2-cpt IG-truth dataset
+#'     simulated from the model.}
 #'   \item{tte_exponential}{Standalone time-to-event (TTE) model with an
 #'     exponential hazard via the \code{[event_model]} block. Event times on
 #'     CMT 2 follow \code{Exp(LAMBDA)} with \code{LAMBDA = TVLAMBDA *
