@@ -7,6 +7,11 @@ library(ferx)
 ex <- ferx_example("two_cpt_ig")
 
 fit <- ferx_fit(ex$model, ex$data)
+
+# Note: this fit prints STATUS: NOT CONVERGED, yet the estimates sit at the
+# optimum -- they recover the six simulation truths (CL 5, V1 40, Q 10, V2 60,
+# MAT 2, CV2 0.3) with tight standard errors. The flag is a known artifact of the
+# default outer optimizer (ferx-core #751), not an IG-specific issue.
 print(fit)
 
 # Inspect the model structure ferx parsed.

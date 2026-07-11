@@ -91,9 +91,10 @@ fit$eta_cov
   #790), with exact FOCE/FOCEI sensitivities that do not depend on any ODE-solver
   tolerance and a uniform pk-line interface matching the analytic transit models.
   It is the closed-form counterpart to the ODE `igd()` input rate
-  (`ferx_example("igd_inverse_gaussian")`); `f` and `lagtime` are supported, and a
-  flip-flop model (elimination slower than absorption) transparently reroutes to
-  its ODE `igd()` twin. New bundled examples `ferx_example("one_cpt_ig")` and
+  (`ferx_example("igd_inverse_gaussian")`); `f` and `lagtime` are supported. Outside
+  the closed form's convergence domain a plain model transparently reroutes to its
+  ODE `igd()` twin (a model that also maps `f`/`lagtime` has no twin and is
+  rejected, rather than rerouted). New bundled examples `ferx_example("one_cpt_ig")` and
   `ferx_example("two_cpt_ig")` with runnable `inst/examples/ex_one_cpt_ig.R` /
   `ex_two_cpt_ig.R`.
 - `ferx_simulate()` now surfaces per-subject simulation diagnostics from
@@ -102,6 +103,7 @@ fit$eta_cov
   attached to the returned data frame as a `simulation_warnings` attribute
   (a character vector, empty for a clean run). Requires the bumped ferx-core
   (`simulate_with_options_diag`).
+
 - New `ferx_covariance(fit)` runs the finite-difference-Hessian covariance step
   against an existing fit without re-estimating (#738), the covariance-step
   analogue of `ferx_sir()`. Add standard errors to a fit produced with
