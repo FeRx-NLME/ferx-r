@@ -96,6 +96,12 @@ fit$eta_cov
   its ODE `igd()` twin. New bundled examples `ferx_example("one_cpt_ig")` and
   `ferx_example("two_cpt_ig")` with runnable `inst/examples/ex_one_cpt_ig.R` /
   `ex_two_cpt_ig.R`.
+- `ferx_simulate()` now surfaces per-subject simulation diagnostics from
+  ferx-core (#762 / #763): a degenerate or pathological hazard that would
+  otherwise censor a subject with no event is raised as an R warning and
+  attached to the returned data frame as a `simulation_warnings` attribute
+  (a character vector, empty for a clean run). Requires the bumped ferx-core
+  (`simulate_with_options_diag`).
 - New `ferx_covariance(fit)` runs the finite-difference-Hessian covariance step
   against an existing fit without re-estimating (#738), the covariance-step
   analogue of `ferx_sir()`. Add standard errors to a fit produced with

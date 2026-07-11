@@ -437,21 +437,21 @@ fn ferx_rust_simulate(
         horizon: (horizon.is_finite() && horizon > 0.0).then_some(horizon),
         ..Default::default()
     };
-    let results = match ferx_core::simulate_with_options(
+    let output = match ferx_core::simulate_with_options_diag(
         &parsed.model,
         &population,
         &parsed.model.default_params,
         n_sim as usize,
         &opts,
     ) {
-        Ok(r) => r,
+        Ok(o) => o,
         Err(e) => {
             rprintln!("Error simulating: {}", e);
             return ().into();
         }
     };
 
-    sim_results_to_df(&results)
+    attach_sim_warnings(sim_results_to_df(&output.results), output.warnings)
 }
 
 /// Simulate using fitted parameters.
@@ -530,20 +530,20 @@ fn ferx_rust_simulate_from_fit(
         horizon: (horizon.is_finite() && horizon > 0.0).then_some(horizon),
         ..Default::default()
     };
-    let results = match ferx_core::simulate_with_options(
+    let output = match ferx_core::simulate_with_options_diag(
         &parsed.model,
         &population,
         &params,
         n_sim as usize,
         &opts,
     ) {
-        Ok(r) => r,
+        Ok(o) => o,
         Err(e) => {
             rprintln!("Error simulating: {}", e);
             return ().into();
         }
     };
-    sim_results_to_df(&results)
+    attach_sim_warnings(sim_results_to_df(&output.results), output.warnings)
 }
 
 /// Simulate state-reactive ("adaptive" / feedback) dosing from a model's
@@ -1561,6 +1561,16 @@ fn default_fit_result(
 
 // -- Helper: SimulationResult slice → R data frame --
 
+/// Attach ferx-core #762/#763 per-subject simulation diagnostics as a
+/// `simulation_warnings` character-vector attribute on the returned data frame,
+/// so `ferx_simulate()` can surface them without changing the data-frame contract
+/// (an empty vector when the run was clean). Mirrors how the fit path exposes
+/// `FitResult.warnings`, but as an attribute since simulate returns a bare frame.
+fn attach_sim_warnings(mut df: Robj, warnings: Vec<String>) -> Robj {
+    df.set_attrib("simulation_warnings", warnings).unwrap();
+    df
+}
+
 fn sim_results_to_df(results: &[ferx_core::api::SimulationResult]) -> Robj {
     let draw: Vec<i32> = results.iter().map(|r| r.draw as i32).collect();
     let sim: Vec<i32> = results.iter().map(|r| r.sim as i32).collect();
@@ -1765,6 +1775,8 @@ fn fit_result_to_list(
     let warnings_category: Vec<String> = result
         .warnings_structured
         .iter()
+        // ferx-core #780 made `category` a typed `WarningCode`; `as_str()` yields the
+        // canonical snake_case token the R side matches on (was a bare String before).
         .map(|w| w.category.as_str().to_string())
         .collect();
     let warnings_message: Vec<String> = result
