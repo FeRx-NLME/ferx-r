@@ -97,6 +97,15 @@ fit$eta_cov
   rejected, rather than rerouted). New bundled examples `ferx_example("one_cpt_ig")` and
   `ferx_example("two_cpt_ig")` with runnable `inst/examples/ex_one_cpt_ig.R` /
   `ex_two_cpt_ig.R`.
+- **Bundled analytic two-compartment transit example** - a new
+  `ferx_example("two_cpt_transit")` for the
+  `pk two_cpt_transit(cl, v1, q, v2, n, mtt)` closed form (ferx-core #634): Savic
+  transit-compartment absorption superposed bi-exponentially onto a
+  two-compartment disposition, the 2-cpt analytic counterpart to
+  `one_cpt_transit` and the closed-form counterpart to the ODE `transit_2cpt`.
+  Paired with a model-simulated 2-cpt transit-truth dataset (a genuine
+  parameter-recovery example, unlike `one_cpt_transit`'s shared anchor) and a
+  runnable `inst/examples/ex_two_cpt_transit.R` (closes #251).
 - `ferx_simulate()` now surfaces per-subject simulation diagnostics from
   ferx-core (#762 / #763): a degenerate or pathological hazard that would
   otherwise censor a subject with no event is raised as an R warning and

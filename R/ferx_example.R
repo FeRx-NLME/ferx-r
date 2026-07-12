@@ -123,6 +123,16 @@
 #'     oral. Shares the transit anchor dataset; because that data adds a
 #'     first-order \code{ka} this \code{ka}-free fit is mildly mis-specified
 #'     (syntax / workflow demo).}
+#'   \item{two_cpt_transit}{Two-compartment analytic Savic transit-compartment
+#'     absorption -- \code{pk two_cpt_transit(cl, v1, q, v2, n, mtt)} (ferx-core
+#'     #634). The same Gamma(N+1, KTR) transit closed form as
+#'     \code{one_cpt_transit}, superposed bi-exponentially onto a two-compartment
+#'     disposition, with exact FOCE/FOCEI sensitivities and a continuous,
+#'     estimable \code{N} (no ODE solve); the analytic counterpart to
+#'     \code{transit_2cpt}'s hand-coded ODE transit chain. With \code{N = 0} it
+#'     reduces to 2-cpt first-order oral. Paired with a 2-cpt transit-truth
+#'     dataset simulated from the model - a genuine parameter-recovery example, in
+#'     contrast to \code{one_cpt_transit}'s transit+\code{ka}-simulated anchor.}
 #'   \item{one_cpt_ig}{One-compartment oral model with inverse-Gaussian
 #'     (Freijer & Post) absorption as an \emph{analytic} closed form -- \code{pk
 #'     one_cpt_ig(cl, v, mat, cv2)} (ferx-core #790). The exponential-tilting

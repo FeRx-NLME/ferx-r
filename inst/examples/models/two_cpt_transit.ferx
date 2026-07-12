@@ -1,0 +1,72 @@
+# Analytic Savic transit-compartment absorption -- `pk two_cpt_transit`, 2-cpt.
+#
+# Savic et al. (2007) transit-chain absorption delivered DIRECTLY into a
+# two-compartment disposition, as a fast analytical `pk` model (no ODE solve).
+# The dose's absorption time is Gamma(shape = N+1, rate = KTR), KTR = (N+1)/MTT;
+# the central concentration is the exponential-tilting closed form evaluated at
+# BOTH macro-rate constants alpha, beta of the 2-cpt disposition -- the same
+# one_cpt_transit tilting kernel superposed bi-exponentially:
+#
+#   C(t) = (F*Dose/V1) * [ ca*M(alpha)*exp(-alpha*t)*P(N+1,(KTR-alpha)*t)
+#                        + cb*M(beta )*exp(-beta *t)*P(N+1,(KTR-beta )*t) ],
+#   ca = (alpha-k21)/(alpha-beta),  cb = (k21-beta)/(alpha-beta)   (ca + cb = 1).
+#
+# (M = the Gamma MGF, P = the regularized lower incomplete gamma.) It is evaluated
+# with exact Dual2 sensitivities -- the same gradients FOCE/FOCEI use -- with no
+# finite differences and no ODE solver. With N = 0 it reduces exactly to 2-cpt
+# first-order (Bateman) oral absorption with ka = 1/MTT.
+#
+# Contrast `transit_2cpt.ferx` (a hand-coded chain of explicit ODE transit states)
+# and `one_cpt_transit.ferx` (the 1-cpt analytic case); this is the 2-cpt analytic
+# counterpart -- continuous (estimable) N, closed form, fast (ferx-core #634 / #386).
+#
+#   CMT=1  depot       -- oral dose lands here (amount, mg); absorbed via the chain
+#   CMT=2  central     -- concentration (mg/L); C = amount / V1
+#   CMT=3  peripheral
+#
+# Domain: the closed form needs both disposition macro-rates below the transit
+# rate KTR = (N+1)/MTT (the absorption-rate-limited regime; since alpha >= beta,
+# alpha < KTR suffices). At the [parameters] values the fast macro-rate alpha is
+# about 0.37 and KTR = 4. Steady-state doses, IOV, time-varying covariates, and
+# infusion doses are not supported by this analytic model -- use an ODE transit
+# model (transit_2cpt.ferx) for those (it errors with an actionable message).
+#
+# Paired with two_cpt_transit.csv -- a 2-cpt transit-truth dataset simulated from
+# this model at the [parameters] values via ferx_simulate(seed = 20250712),
+# reusing the two_cpt_ig design (20 subjects, single 100 mg oral dose). Because
+# the data is generated from this same model, it is a genuine parameter-recovery
+# example (correct specification), unlike one_cpt_transit's transit+ka-simulated
+# anchor. The canonical copy lives in ferx-core (examples/two_cpt_transit.ferx);
+# keep the two in sync.
+
+[parameters]
+  theta TVCL(5.0,    0.1,  100.0)   # typical clearance (L/h)
+  theta TVV1(50.0,   5.0,  500.0)   # typical central volume (L)
+  theta TVQ(10.0,    0.5,  200.0)   # typical intercompartmental clearance (L/h)
+  theta TVV2(100.0,  5.0, 1000.0)   # typical peripheral volume (L)
+  theta TVMTT(1.0,  0.05,   24.0)   # mean transit time (h); KTR = (N+1)/MTT
+  theta TVN(3.0,     0.0,   30.0)   # number of transit compartments (continuous)
+
+  omega ETA_CL ~ 0.09               # IIV on CL  (~30% CV)
+  omega ETA_V1 ~ 0.09               # IIV on V1  (~30% CV)
+
+  sigma PROP_ERR ~ 0.15 (sd)        # proportional residual error (~15% CV)
+
+[individual_parameters]
+  CL  = TVCL * exp(ETA_CL)
+  V1  = TVV1 * exp(ETA_V1)
+  Q   = TVQ
+  V2  = TVV2
+  MTT = TVMTT
+  NTR = TVN
+
+[structural_model]
+  pk two_cpt_transit(cl=CL, v1=V1, q=Q, v2=V2, n=NTR, mtt=MTT)
+
+[error_model]
+  DV ~ proportional(PROP_ERR)
+
+[fit_options]
+  method     = focei
+  maxiter    = 500
+  covariance = true
