@@ -49,6 +49,38 @@ fake_fit <- function(with_covtab = TRUE, echo_wt = FALSE) {
   fit
 }
 
+# A widened optimizer trace (issue #168): the fixed scalar columns the Rust
+# backend writes, plus one `val:<param>` and one `grad:<param>` column per
+# optimized coordinate (declared names, as ferx-core emits them).
+fake_widened_trace <- function(n = 6L, method = "gn", grad = TRUE,
+                               params = c("TVCL", "TVV", "ETA_CL", "PROP_ERR")) {
+  tr <- data.frame(
+    iter      = seq_len(n),
+    method    = method,
+    phase     = "",
+    ofv       = seq(100, by = -1, length.out = n),
+    wall_ms   = seq(10, by = 10, length.out = n),
+    grad_norm = if (grad) seq(1, by = -0.1, length.out = n) else NA_real_,
+    check.names = FALSE, stringsAsFactors = FALSE
+  )
+  for (i in seq_along(params)) {
+    tr[[paste0("val:", params[i])]] <- seq(i, by = 0.1, length.out = n)
+  }
+  for (i in seq_along(params)) {
+    tr[[paste0("grad:", params[i])]] <-
+      if (grad) seq(0.5 * i, by = -0.01, length.out = n) else NA_real_
+  }
+  tr
+}
+
+# A fake fit carrying a widened trace (via fit$trace, which ferx_trace() reads).
+fake_fit_trace <- function(...) {
+  fit <- fake_fit()
+  fit$converged <- TRUE
+  fit$trace <- fake_widened_trace(...)
+  fit
+}
+
 
 
 
@@ -247,4 +279,76 @@ test_that("backend 'xpose4' default plot renders", {
   expect_no_error(suppressWarnings(print(
     xpose4::xpose.plot.default("PRED", "DV", xpdb)
   )))
+})
+
+# --- estimation-iteration trace -> .ext / .grd files (issue #168) ------------
+
+test_that("iteration files: ext + grd tables built from a widened trace", {
+  files <- .ferx_xpose_iteration_files(fake_fit_trace())
+  expect_s3_class(files, "data.frame")
+  expect_setequal(files$extension, c("ext", "grd"))
+  expect_setequal(names(files),
+                  c("name", "extension", "problem", "subprob", "method",
+                    "data", "modified"))
+
+  ext <- files$data[[which(files$extension == "ext")]]
+  # ITERATION, one column per declared parameter name, then OBJ.
+  expect_equal(names(ext),
+               c("ITERATION", "TVCL", "TVV", "ETA_CL", "PROP_ERR", "OBJ"))
+  expect_equal(ext$ITERATION, 1:6)
+  expect_equal(ext$OBJ, seq(100, by = -1, length.out = 6))
+
+  grd <- files$data[[which(files$extension == "grd")]]
+  # ITERATION + one GRD(n) column per parameter (NONMEM-style numeric names,
+  # which grd_vs_iteration() keys its facet on).
+  expect_equal(names(grd),
+               c("ITERATION", "GRD(1)", "GRD(2)", "GRD(3)", "GRD(4)"))
+})
+
+test_that("iteration files: grd omitted when no gradients were recorded", {
+  files <- .ferx_xpose_iteration_files(fake_fit_trace(grad = FALSE))
+  expect_equal(files$extension, "ext")   # ext only, no grd table
+})
+
+test_that("iteration files: method label is the last non-empty trace method", {
+  fit <- fake_fit_trace()
+  fit$trace$method <- rep(c("gn", "focei"), each = 3L)
+  files <- .ferx_xpose_iteration_files(fit)
+  expect_true(all(files$method == "focei"))
+})
+
+test_that("iteration files: NULL when the fit has no trace", {
+  expect_null(.ferx_xpose_iteration_files(fake_fit()))
+})
+
+test_that("iteration files: NULL for a scalar-only (pre-widening) trace", {
+  fit <- fake_fit()
+  fit$trace <- data.frame(iter = 1:3, method = "gn", ofv = c(3, 2, 1),
+                          grad_norm = c(1, 0.5, 0.1), stringsAsFactors = FALSE)
+  expect_null(.ferx_xpose_iteration_files(fit))
+})
+
+test_that("ferx_xpose validates the iterations flag", {
+  expect_error(ferx_xpose(fake_fit(), iterations = NA), "iterations")
+  expect_error(ferx_xpose(fake_fit(), iterations = "yes"), "iterations")
+})
+
+test_that("ferx_xpose populates / skips the files slot per iterations + trace", {
+  skip_if_not_installed("xpose")
+  # trace present + iterations = TRUE -> ext + grd populated
+  xpdb <- ferx_xpose(fake_fit_trace(), iterations = TRUE)
+  expect_false(is.null(xpdb$files))
+  expect_setequal(xpdb$files$extension, c("ext", "grd"))
+  # iterations = FALSE -> slot left empty
+  expect_null(ferx_xpose(fake_fit_trace(), iterations = FALSE)$files)
+  # no trace -> slot left empty even when iterations = TRUE (graceful no-op)
+  expect_null(ferx_xpose(fake_fit(), iterations = TRUE)$files)
+})
+
+test_that("prm_vs_iteration / grd_vs_iteration render on a ferx_xpose trace", {
+  skip_if_not_installed("xpose")
+  xpdb <- ferx_xpose(fake_fit_trace())
+  grDevices::pdf(NULL); on.exit(grDevices::dev.off())
+  expect_no_error(suppressWarnings(print(xpose::prm_vs_iteration(xpdb))))
+  expect_no_error(suppressWarnings(print(xpose::grd_vs_iteration(xpdb))))
 })
