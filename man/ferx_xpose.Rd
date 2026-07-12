@@ -9,8 +9,8 @@ ferx_xpose(
   backend = c("xpose", "xpose4"),
   continuous = NULL,
   categorical = NULL,
-  iterations = TRUE,
-  runno = 1L
+  runno = 1L,
+  iterations = TRUE
 )
 }
 \arguments{
@@ -24,13 +24,13 @@ treat as continuous / categorical, overriding the \code{fit$covariate_types}
 classification. Names not present among the fit's covariates are ignored
 with a warning.}
 
+\item{runno}{Run number recorded on the resulting Xpose object (cosmetic).}
+
 \item{iterations}{Logical; when \code{TRUE} (the default) and the fit carries a
 per-parameter optimizer trace (from \code{optimizer_trace = TRUE}), populate the
 \verb{$files} slot so \code{\link[xpose:minimization_plots]{xpose::prm_vs_iteration()}} and
 \code{\link[xpose:minimization_plots]{xpose::grd_vs_iteration()}} work. Ignored by the \code{"xpose4"} backend and a
 no-op when no trace is present.}
-
-\item{runno}{Run number recorded on the resulting Xpose object (cosmetic).}
 }
 \value{
 For \code{backend = "xpose"}, an \code{xpose_data} object (with a populated

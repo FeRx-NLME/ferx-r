@@ -63,12 +63,12 @@
 #'   treat as continuous / categorical, overriding the `fit$covariate_types`
 #'   classification. Names not present among the fit's covariates are ignored
 #'   with a warning.
+#' @param runno Run number recorded on the resulting Xpose object (cosmetic).
 #' @param iterations Logical; when `TRUE` (the default) and the fit carries a
 #'   per-parameter optimizer trace (from `optimizer_trace = TRUE`), populate the
 #'   `$files` slot so [xpose::prm_vs_iteration()] and
 #'   [xpose::grd_vs_iteration()] work. Ignored by the `"xpose4"` backend and a
 #'   no-op when no trace is present.
-#' @param runno Run number recorded on the resulting Xpose object (cosmetic).
 #'
 #' @return For `backend = "xpose"`, an `xpose_data` object (with a populated
 #'   `$files` slot when an optimizer trace is present, see the
@@ -92,8 +92,8 @@ ferx_xpose <- function(fit,
                        backend = c("xpose", "xpose4"),
                        continuous = NULL,
                        categorical = NULL,
-                       iterations = TRUE,
-                       runno = 1L) {
+                       runno = 1L,
+                       iterations = TRUE) {
   if (!inherits(fit, "ferx_fit")) {
     stop("`fit` must be a ferx_fit object (from ferx_fit()).", call. = FALSE)
   }
@@ -522,9 +522,10 @@ ferx_xpose <- function(fit,
 
 # Format the fit's wall-clock runtime (max `wall_ms` in the trace) as
 # "HH:MM:SS" for the iteration-plot subtitle. "na" when unavailable, mirroring
-# xpose's own placeholder.
+# xpose's own placeholder. Reads via ferx_trace() (not fit$trace directly) so a
+# fit carrying only a trace_path - not an in-memory trace - is still covered.
 .ferx_trace_runtime_string <- function(fit) {
-  tr <- fit[["trace"]]
+  tr <- tryCatch(ferx_trace(fit), error = function(e) NULL)
   ms <- if (is.data.frame(tr)) suppressWarnings(as.numeric(tr[["wall_ms"]])) else NULL
   ms <- ms[is.finite(ms)]
   if (length(ms) == 0L) return("na")
