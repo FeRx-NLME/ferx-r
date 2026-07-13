@@ -119,6 +119,21 @@ fit$eta_cov
   Paired with a model-simulated 2-cpt transit-truth dataset (a genuine
   parameter-recovery example, unlike `one_cpt_transit`'s shared anchor) and a
   runnable `inst/examples/ex_two_cpt_transit.R` (closes #251).
+- **Inter-occasion variability (IOV) now composes with the analytic absorption
+  closed forms** - `pk one_cpt_transit` / `two_cpt_transit` / `one_cpt_ig` /
+  `two_cpt_ig` previously rejected a `kappa` random effect at parse time. A
+  subject carrying IOV is now transparently rerouted, per subject, to the model's
+  exact `transit()` / `igd()` ODE twin, which integrates the cross-occasion dose
+  carryover the closed-form superposition cannot express - no switch to a
+  hand-written ODE model is needed, just the same `pk ...` line plus a `kappa`
+  random effect and `iov_column` (via ferx-core #719). New bundled example
+  `ferx_example("one_cpt_transit_iov")` - analytic `one_cpt_transit` with IOV on
+  CL, paired with an 8-subject subset of the ferx-core transit+IOV NONMEM anchor
+  dataset (simulated from the model, so the fit recovers the data-generating
+  parameters) and a runnable `inst/examples/ex_one_cpt_transit_iov.R`. Steady-state
+  dosing and infusions
+  under IOV on the analytic path remain unsupported (ferx-core #719). Requires the
+  bumped ferx-core.
 - `ferx_simulate()` now surfaces per-subject simulation diagnostics from
   ferx-core (#762 / #763): a degenerate or pathological hazard that would
   otherwise censor a subject with no event is raised as an R warning and
