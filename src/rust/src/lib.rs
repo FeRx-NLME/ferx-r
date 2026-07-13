@@ -876,7 +876,7 @@ fn default_fit_result(
         // The exact packed optimizer vector at the converged point. ferx-core carries it so a
         // standalone covariance step reproduces the inline one bit-for-bit; this synthetic
         // FitResult has no optimizer behind it, so there is none to carry.
-        packed_estimates: None,
+        packed_estimate: None,
         converged: true,
         ofv: 0.0,
         aic: 0.0,
@@ -2121,7 +2121,7 @@ fn ferx_rust_sir(
             EstimationMethod::Foce
         },
         // Skeleton: `run_sir` does not read the packed optimizer vector.
-        packed_estimates: None,
+        packed_estimate: None,
         method_chain: vec![if interaction {
             EstimationMethod::FoceI
         } else {
