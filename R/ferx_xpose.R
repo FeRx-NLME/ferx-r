@@ -38,14 +38,23 @@
 #'     when echoed there, otherwise carried forward (LOCF) from `fit$covtab`.
 #' }
 #'
-#' @section Limitations:
-#' Only the table data is populated, not the estimation-iteration trace. Xpose
-#' functions that read the NONMEM `.ext` / `.grd` files - notably
-#' [xpose::prm_vs_iteration()] and [xpose::grd_vs_iteration()] - therefore do
-#' not work on the returned object: ferx records only a scalar OFV and gradient
-#' norm per iteration, not the per-parameter value/gradient trajectory those
-#' plots need. For an OFV-over-iterations view use [plot.ferx_fit()] (requires
-#' `optimizer_trace = TRUE` at fit time).
+#' @section Estimation-iteration trace:
+#' When the fit was run with `optimizer_trace = TRUE` and `iterations = TRUE`
+#' (the default), the per-iteration parameter and gradient trajectories are
+#' populated into the `$files` slot of the returned `"xpose"` object as
+#' synthetic NONMEM `.ext` / `.grd` tables, so
+#' [xpose::prm_vs_iteration()] (parameter value vs iteration) and
+#' [xpose::grd_vs_iteration()] (gradient vs iteration) work out-of-the-box. The
+#' `.ext` table carries one column per parameter (using the fit's declared
+#' parameter names, e.g. `TVCL`, `ETA_CL`) plus `OBJ`; the `.grd` table carries
+#' one `GRD(n)` column per parameter and is only emitted for gradient-based
+#' methods (a derivative-free trace has no gradient to plot). When no
+#' per-parameter trace is present - the fit was run without
+#' `optimizer_trace = TRUE`, or predates ferx recording per-parameter values -
+#' the slot is left empty: the iteration plots then raise xpose's usual
+#' "no files" message, while the table (goodness-of-fit / covariate) plots are
+#' unaffected. For an OFV-over-iterations view use [plot.ferx_fit()]. Only the
+#' `"xpose"` backend populates this slot; `"xpose4"` ignores `iterations`.
 #'
 #' @param fit A `ferx_fit` object returned by [ferx_fit()].
 #' @param backend Which Xpose package to target: `"xpose"` (the modern
@@ -55,15 +64,25 @@
 #'   classification. Names not present among the fit's covariates are ignored
 #'   with a warning.
 #' @param runno Run number recorded on the resulting Xpose object (cosmetic).
+#' @param iterations Logical; when `TRUE` (the default) and the fit carries a
+#'   per-parameter optimizer trace (from `optimizer_trace = TRUE`), populate the
+#'   `$files` slot so [xpose::prm_vs_iteration()] and
+#'   [xpose::grd_vs_iteration()] work. Ignored by the `"xpose4"` backend and a
+#'   no-op when no trace is present.
 #'
-#' @return For `backend = "xpose"`, an `xpose_data` object. For
-#'   `backend = "xpose4"`, an `xpose.data` (S4) object.
+#' @return For `backend = "xpose"`, an `xpose_data` object (with a populated
+#'   `$files` slot when an optimizer trace is present, see the
+#'   "Estimation-iteration trace" section). For `backend = "xpose4"`, an
+#'   `xpose.data` (S4) object.
 #'
 #' @examples
 #' \dontrun{
-#' fit  <- ferx_fit("warfarin.ferx", data = "warfarin.csv")
+#' fit  <- ferx_fit("warfarin.ferx", data = "warfarin.csv",
+#'                  optimizer_trace = TRUE)
 #' xpdb <- ferx_xpose(fit)
 #' xpose::dv_vs_ipred(xpdb)
+#' xpose::prm_vs_iteration(xpdb)   # parameter trajectories (needs the trace)
+#' xpose::grd_vs_iteration(xpdb)   # gradient trajectories (gradient methods)
 #'
 #' xpdb4 <- ferx_xpose(fit, backend = "xpose4")
 #' xpose4::basic.gof(xpdb4)
@@ -73,9 +92,13 @@ ferx_xpose <- function(fit,
                        backend = c("xpose", "xpose4"),
                        continuous = NULL,
                        categorical = NULL,
-                       runno = 1L) {
+                       runno = 1L,
+                       iterations = TRUE) {
   if (!inherits(fit, "ferx_fit")) {
     stop("`fit` must be a ferx_fit object (from ferx_fit()).", call. = FALSE)
+  }
+  if (!is.logical(iterations) || length(iterations) != 1L || is.na(iterations)) {
+    stop("`iterations` must be TRUE or FALSE.", call. = FALSE)
   }
   backend <- match.arg(backend)
 
@@ -83,7 +106,7 @@ ferx_xpose <- function(fit,
 
   switch(
     backend,
-    xpose  = .ferx_xpose_new(tbl, fit, runno = runno),
+    xpose  = .ferx_xpose_new(tbl, fit, runno = runno, iterations = iterations),
     xpose4 = .ferx_xpose_xpose4(tbl, fit, runno = runno)
   )
 }
@@ -322,12 +345,17 @@ ferx_xpose <- function(fit,
 
 # --- backend: modern xpose ---------------------------------------------------
 
-.ferx_xpose_new <- function(tbl, fit, runno = 1L) {
+.ferx_xpose_new <- function(tbl, fit, runno = 1L, iterations = TRUE) {
   if (!requireNamespace("xpose", quietly = TRUE)) {
     stop("Package 'xpose' is required for backend = \"xpose\". ",
          "Install it or use backend = \"xpose4\".", call. = FALSE)
   }
   df <- tbl$data
+
+  # Estimation-iteration trace -> synthetic .ext / .grd tables (NULL when the
+  # fit carries no per-parameter trace, leaving the files slot empty so the
+  # iteration plots raise xpose's own "no files" message).
+  files <- if (isTRUE(iterations)) .ferx_xpose_iteration_files(fit) else NULL
 
   # Per-column role index expected by xpose. Column `type` drives which plot
   # templates pick up which variable.
@@ -350,14 +378,14 @@ ferx_xpose <- function(fit,
   data_tbl$data     <- list(df)
   data_tbl$modified <- FALSE
 
-  summary <- .ferx_xpose_new_summary(fit, runno)
+  summary <- .ferx_xpose_new_summary(fit, runno, files = files)
 
   structure(
     list(
       code     = NULL,
       summary  = summary,
       data     = data_tbl,
-      files    = NULL,
+      files    = files,
       gg_theme = xpose::theme_readable(),
       xp_theme = xpose::theme_xp_default(),
       options  = list(dir = NULL, quiet = TRUE, manual_import = NULL),
@@ -389,20 +417,120 @@ ferx_xpose <- function(fit,
   type
 }
 
-.ferx_xpose_new_summary <- function(fit, runno) {
+.ferx_xpose_new_summary <- function(fit, runno, files = NULL) {
   rows <- function(label, value, ...) {
     data.frame(problem = 1L, subprob = 0L, descr = label,
                label = label, value = as.character(value),
                stringsAsFactors = FALSE)
   }
-  do.call(rbind, list(
+  out <- list(
     rows("software", "nonmem"),
     # xpose's title-template engine looks up the key "run" (not "runno").
     rows("run", runno),
     rows("ofv", if (!is.null(fit$ofv)) fit$ofv else NA),
     rows("nobs", nrow(fit$sdtab)),
     rows("nind", length(unique(fit$sdtab$ID)))
-  ))
+  )
+  # The iteration plots' title/subtitle/caption templates reference the
+  # `method`, `runtime`, `term` and `dir` keys; supply them (only when a trace
+  # is present) so prm_vs_iteration() / grd_vs_iteration() render without
+  # xpose's "not part of the available keywords" warnings.
+  if (!is.null(files)) {
+    method <- files$method[files$extension == "ext"][1]
+    out <- c(out, list(
+      rows("method", method %||% NA),
+      rows("runtime", .ferx_trace_runtime_string(fit)),
+      rows("term", if (isTRUE(fit$converged))
+        "OPTIMIZATION COMPLETED" else "OPTIMIZATION NOT COMPLETED"),
+      rows("dir", "")
+    ))
+  }
+  do.call(rbind, out)
+}
+
+# --- estimation-iteration trace -> synthetic .ext / .grd file tables ---------
+
+# Build the xpose `$files` tibble (an `.ext` table and, for gradient-based
+# methods, a `.grd` table) from a fit's per-parameter optimizer trace. Returns
+# NULL - so the caller leaves the files slot empty - when there is no trace, or
+# the trace predates ferx recording per-parameter values (only scalar
+# ofv/grad_norm, no `val:*` columns).
+.ferx_xpose_iteration_files <- function(fit) {
+  tr <- tryCatch(ferx_trace(fit), error = function(e) NULL)
+  if (is.null(tr) || !is.data.frame(tr) || nrow(tr) == 0L) return(NULL)
+
+  val_cols <- grep("^val:", names(tr), value = TRUE)
+  if (length(val_cols) == 0L) return(NULL)
+
+  iter   <- suppressWarnings(as.numeric(tr[["iter"]]))
+  method <- .ferx_trace_method_label(tr)
+
+  # .ext table: ITERATION, one column per parameter (declared name, e.g. TVCL /
+  # ETA_CL), then OBJ. prm_vs_iteration() drops parameters non-varying across
+  # ITERATION, tidies, and facets by variable.
+  ext <- data.frame(ITERATION = iter, check.names = FALSE,
+                    stringsAsFactors = FALSE)
+  for (col in val_cols) {
+    ext[[sub("^val:", "", col)]] <- suppressWarnings(as.numeric(tr[[col]]))
+  }
+  ext[["OBJ"]] <- suppressWarnings(as.numeric(tr[["ofv"]]))
+
+  data_list <- list(ext)
+  name_v    <- "ferx.ext"
+  ext_v     <- "ext"
+
+  # .grd table: ITERATION + one GRD(n) column per parameter. Emitted only when
+  # at least one gradient is finite - a derivative-free trace (e.g. SAEM, or a
+  # BOBYQA eval) writes every grad:* column NA and has no gradient to plot.
+  # grd_vs_iteration() keys the facet on the digits in each column name, so the
+  # NONMEM-style GRD(n) naming (not the parameter name) is required.
+  grad_cols <- grep("^grad:", names(tr), value = TRUE)
+  grad_num  <- lapply(grad_cols, function(col) suppressWarnings(as.numeric(tr[[col]])))
+  has_grad  <- length(grad_cols) > 0L &&
+    any(vapply(grad_num, function(x) any(is.finite(x)), logical(1)))
+  if (has_grad) {
+    grd <- data.frame(ITERATION = iter, check.names = FALSE,
+                      stringsAsFactors = FALSE)
+    for (i in seq_along(grad_cols)) {
+      grd[[sprintf("GRD(%d)", i)]] <- grad_num[[i]]
+    }
+    data_list <- c(data_list, list(grd))
+    name_v    <- c(name_v, "ferx.grd")
+    ext_v     <- c(ext_v, "grd")
+  }
+
+  files <- data.frame(name = name_v, extension = ext_v, problem = 1L,
+                      subprob = 1L, method = method %||% NA_character_,
+                      modified = FALSE, stringsAsFactors = FALSE)
+  # `data` is a list-column holding one table per row; assign after the frame
+  # is built so it is not recycled column-wise.
+  files$data <- data_list
+  files[c("name", "extension", "problem", "subprob", "method", "data",
+          "modified")]
+}
+
+# The estimation-method label recorded in the files tibble and the plot
+# subtitle: the last non-empty method the trace visited (e.g. "focei" for the
+# polish phase of a gn_hybrid fit). NA when the trace has no method column.
+.ferx_trace_method_label <- function(tr) {
+  m <- tr[["method"]]
+  if (is.null(m)) return(NA_character_)
+  m <- m[!is.na(m) & nzchar(as.character(m))]
+  if (length(m) == 0L) return(NA_character_)
+  as.character(m[length(m)])
+}
+
+# Format the fit's wall-clock runtime (max `wall_ms` in the trace) as
+# "HH:MM:SS" for the iteration-plot subtitle. "na" when unavailable, mirroring
+# xpose's own placeholder. Reads via ferx_trace() (not fit$trace directly) so a
+# fit carrying only a trace_path - not an in-memory trace - is still covered.
+.ferx_trace_runtime_string <- function(fit) {
+  tr <- tryCatch(ferx_trace(fit), error = function(e) NULL)
+  ms <- if (is.data.frame(tr)) suppressWarnings(as.numeric(tr[["wall_ms"]])) else NULL
+  ms <- ms[is.finite(ms)]
+  if (length(ms) == 0L) return("na")
+  secs <- as.integer(max(ms) %/% 1000)
+  sprintf("%02d:%02d:%02d", secs %/% 3600L, (secs %% 3600L) %/% 60L, secs %% 60L)
 }
 
 # --- backend: classic xpose4 -------------------------------------------------

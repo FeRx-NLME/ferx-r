@@ -84,6 +84,19 @@ fit$eta_cov
 
 ## Added
 
+- **`ferx_xpose()` now populates the estimation-iteration trace**, so
+  `xpose::prm_vs_iteration()` (parameter value vs iteration) and
+  `xpose::grd_vs_iteration()` (gradient vs iteration) work on the returned
+  object (#168). When the fit was run with `optimizer_trace = TRUE`, the
+  per-parameter value and gradient trajectories are written into the xpose
+  `$files` slot as synthetic NONMEM `.ext` / `.grd` tables. A new
+  `iterations` argument (default `TRUE`) gates this; the `.grd` table is only
+  emitted for gradient-based methods, and when no trace is present the slot is
+  left empty (the iteration plots then raise xpose's usual "no files" message
+  while the goodness-of-fit / covariate plots are unaffected). Only the
+  `"xpose"` backend is affected. Builds on the ferx-core optimizer trace now
+  carrying per-parameter estimates and gradients per iteration (ferx-core #640).
+
 - **Analytic inverse-Gaussian (IG) absorption is now available in model files** -
   `pk one_cpt_ig(cl, v, mat, cv2)` and `pk two_cpt_ig(cl, v1, q, v2, mat, cv2)`
   structural models: Freijer & Post inverse-Gaussian absorption fed straight into

@@ -9,7 +9,8 @@ ferx_xpose(
   backend = c("xpose", "xpose4"),
   continuous = NULL,
   categorical = NULL,
-  runno = 1L
+  runno = 1L,
+  iterations = TRUE
 )
 }
 \arguments{
@@ -24,10 +25,18 @@ classification. Names not present among the fit's covariates are ignored
 with a warning.}
 
 \item{runno}{Run number recorded on the resulting Xpose object (cosmetic).}
+
+\item{iterations}{Logical; when \code{TRUE} (the default) and the fit carries a
+per-parameter optimizer trace (from \code{optimizer_trace = TRUE}), populate the
+\verb{$files} slot so \code{\link[xpose:minimization_plots]{xpose::prm_vs_iteration()}} and
+\code{\link[xpose:minimization_plots]{xpose::grd_vs_iteration()}} work. Ignored by the \code{"xpose4"} backend and a
+no-op when no trace is present.}
 }
 \value{
-For \code{backend = "xpose"}, an \code{xpose_data} object. For
-\code{backend = "xpose4"}, an \code{xpose.data} (S4) object.
+For \code{backend = "xpose"}, an \code{xpose_data} object (with a populated
+\verb{$files} slot when an optimizer trace is present, see the
+"Estimation-iteration trace" section). For \code{backend = "xpose4"}, an
+\code{xpose.data} (S4) object.
 }
 \description{
 Produces an in-memory Xpose object so that all downstream Xpose diagnostics
@@ -52,22 +61,34 @@ and \code{categorical} arguments). Covariate values are taken from \code{fit$sdt
 when echoed there, otherwise carried forward (LOCF) from \code{fit$covtab}.
 }
 }
-\section{Limitations}{
+\section{Estimation-iteration trace}{
 
-Only the table data is populated, not the estimation-iteration trace. Xpose
-functions that read the NONMEM \code{.ext} / \code{.grd} files - notably
-\code{\link[xpose:minimization_plots]{xpose::prm_vs_iteration()}} and \code{\link[xpose:minimization_plots]{xpose::grd_vs_iteration()}} - therefore do
-not work on the returned object: ferx records only a scalar OFV and gradient
-norm per iteration, not the per-parameter value/gradient trajectory those
-plots need. For an OFV-over-iterations view use \code{\link[=plot.ferx_fit]{plot.ferx_fit()}} (requires
-\code{optimizer_trace = TRUE} at fit time).
+When the fit was run with \code{optimizer_trace = TRUE} and \code{iterations = TRUE}
+(the default), the per-iteration parameter and gradient trajectories are
+populated into the \verb{$files} slot of the returned \code{"xpose"} object as
+synthetic NONMEM \code{.ext} / \code{.grd} tables, so
+\code{\link[xpose:minimization_plots]{xpose::prm_vs_iteration()}} (parameter value vs iteration) and
+\code{\link[xpose:minimization_plots]{xpose::grd_vs_iteration()}} (gradient vs iteration) work out-of-the-box. The
+\code{.ext} table carries one column per parameter (using the fit's declared
+parameter names, e.g. \code{TVCL}, \code{ETA_CL}) plus \code{OBJ}; the \code{.grd} table carries
+one \code{GRD(n)} column per parameter and is only emitted for gradient-based
+methods (a derivative-free trace has no gradient to plot). When no
+per-parameter trace is present - the fit was run without
+\code{optimizer_trace = TRUE}, or predates ferx recording per-parameter values -
+the slot is left empty: the iteration plots then raise xpose's usual
+"no files" message, while the table (goodness-of-fit / covariate) plots are
+unaffected. For an OFV-over-iterations view use \code{\link[=plot.ferx_fit]{plot.ferx_fit()}}. Only the
+\code{"xpose"} backend populates this slot; \code{"xpose4"} ignores \code{iterations}.
 }
 
 \examples{
 \dontrun{
-fit  <- ferx_fit("warfarin.ferx", data = "warfarin.csv")
+fit  <- ferx_fit("warfarin.ferx", data = "warfarin.csv",
+                 optimizer_trace = TRUE)
 xpdb <- ferx_xpose(fit)
 xpose::dv_vs_ipred(xpdb)
+xpose::prm_vs_iteration(xpdb)   # parameter trajectories (needs the trace)
+xpose::grd_vs_iteration(xpdb)   # gradient trajectories (gradient methods)
 
 xpdb4 <- ferx_xpose(fit, backend = "xpose4")
 xpose4::basic.gof(xpdb4)
