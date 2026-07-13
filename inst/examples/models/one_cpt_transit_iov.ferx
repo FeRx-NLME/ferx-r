@@ -1,0 +1,73 @@
+# Analytic Savic transit absorption WITH inter-occasion variability (IOV)
+# -- `pk one_cpt_transit` + a `kappa` random effect (ferx-core #719).
+#
+# This is the fast analytic closed-form transit model (`one_cpt_transit`, see
+# `one_cpt_transit.ferx`) carrying IOV on clearance. The analytic absorption
+# closed forms USED to reject IOV at parse time, because a per-dose closed-form
+# superposition cannot carry a dose's drug across an occasion boundary where the
+# disposition (here CL) changes. As of ferx-core #719 a subject that carries IOV
+# is instead transparently rerouted, per subject, to the model's exact
+# `transit()` ODE twin
+#
+#   d/dt(central) = transit(n, mtt) - (CL / V) * central
+#
+# which integrates that cross-occasion carryover exactly. So
+# `pk one_cpt_transit(...)` + `kappa KAPPA_CL` now Just Works -- no model rewrite,
+# no manual switch to an ODE model. The reroute is automatic (the same mechanism
+# used for time-varying covariates); the typical-value, no-IOV subjects still use
+# the closed form.
+#
+# IOV structure (Option A, diagonal Omega_IOV): each occasion k (the OCC column)
+# draws its own KAPPA_CL ~ N(0, omega_iov), so the individual clearance on
+# occasion k is
+#   CL_ik = TVCL * exp(KAPPA_CL_ik).
+# Here CL carries IOV only and V carries BSV only -- this isolates
+# occasion-to-occasion CL variability, matching how the bundled dataset was
+# built (three doses per subject, 48 h apart, near-complete washout between).
+#
+# Unit convention (single disposition compartment -- the transit() twin):
+#   CMT=1  central  -- the oral dose lands here and is absorbed through the
+#                      transit chain into this same compartment; the observation
+#                      is the central concentration C = amount / V.
+# (Contrast `one_cpt_transit.ferx`, whose no-IOV closed-form path uses a separate
+# CMT=1 depot / CMT=2 central layout; the IOV twin folds absorption into a single
+# central compartment, so both the dose and the observation are on CMT=1.)
+#
+# Paired with one_cpt_transit_iov.csv -- an 8-subject subset of the ferx-core
+# transit+IOV NONMEM anchor dataset (nonmem_anchor/transit_iov.csv), simulated
+# from THIS model (true TVCL=9, TVV=30, TVMTT=1, TVN=3, omega_V=0.09,
+# kappa_CL=0.04, sigma=0.1), so the fit recovers the data-generating parameters.
+# The compact 8-subject cut keeps the fit quick -- each IOV subject integrates an
+# ODE twin, so a larger dataset is markedly slower (ferx-core #812). The dataset
+# must carry an OCC column, and `iov_column = OCC` tells ferx which column indexes
+# the occasions.
+
+[parameters]
+  theta TVCL(9.0,  0.1, 100.0)   # typical clearance (L/h)
+  theta TVV(30.0,  1.0, 500.0)   # typical central volume (L)
+  theta TVMTT(1.0, 0.05, 24.0)   # mean transit time (h); KTR = (N+1)/MTT
+  theta TVN(3.0,   0.1,  30.0)   # number of transit compartments (continuous)
+
+  omega ETA_V  ~ 0.09            # IIV (between-subject) on V (~30% CV)
+  kappa KAPPA_CL ~ 0.04          # IOV (between-occasion) on CL (~20% CV / occasion)
+
+  sigma PROP_ERR ~ 0.1 (sd)      # proportional residual error (~10% CV)
+
+[individual_parameters]
+  CL  = TVCL * exp(KAPPA_CL)
+  V   = TVV  * exp(ETA_V)
+  MTT = TVMTT
+  NTR = TVN
+
+[structural_model]
+  pk one_cpt_transit(cl=CL, v=V, n=NTR, mtt=MTT)
+
+[error_model]
+  DV ~ proportional(PROP_ERR)
+
+[fit_options]
+  method     = focei
+  iov_column = OCC
+  covariance = false   # each IOV subject integrates its transit() ODE twin, so
+                       # the covariance step is costly; left off to keep the
+                       # example quick (set to true for standard errors)
