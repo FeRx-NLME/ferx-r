@@ -212,6 +212,18 @@ ferx_model(template = "1cpt_oral", path = "m.ferx", edit = FALSE) |>
   ferx_fit(data)
 ```
 
+## Fixed
+
+- **Closed-form transit / inverse-Gaussian absorption under IOV, time-varying
+  covariates, or a `TIME` switch now honors a call-time ODE tolerance and
+  converges its per-subject estimates correctly** (via ferx-core #814, a #719
+  follow-up). These models serve such subjects on an internally generated ODE
+  "twin"; before this a `ferx_fit(settings = list(ode_reltol = ...))` (or
+  `ode_abstol` / `ode_max_steps`) override was silently dropped on the twin path,
+  and an estimate that fell back to the finite-difference inner gradient could
+  stop short of convergence. The `one_cpt_transit_iov` example above is the main
+  beneficiary. Requires the bumped ferx-core.
+
 # ferx 0.1.6
 
 ## Added
