@@ -1516,6 +1516,10 @@ fn default_fit_result(
         nlopt_missing_algorithms: Vec::new(),
         covariance_n_evals_estimated: None,
         trace_path: None,
+        // In-process optimisation for a `run_covariance` called straight after a fit;
+        // `#[serde(skip)]` upstream, so a reconstructed result legitimately carries `None`
+        // and `run_covariance` re-packs from `omega`. No `.fitrx` / R format change.
+        packed_estimate: None,
         ebe_convergence_warnings: 0,
         max_unconverged_subjects: 0,
         total_ebe_fallbacks: 0,
@@ -3049,6 +3053,10 @@ fn ferx_rust_sir(
         nlopt_missing_algorithms: Vec::new(),
         covariance_n_evals_estimated: None,
         trace_path: None,
+        // In-process optimisation for a `run_covariance` called straight after a fit;
+        // `#[serde(skip)]` upstream, so a reconstructed result legitimately carries `None`
+        // and `run_covariance` re-packs from `omega`. No `.fitrx` / R format change.
+        packed_estimate: None,
         ebe_convergence_warnings: 0,
         max_unconverged_subjects: 0,
         total_ebe_fallbacks: 0,
@@ -3389,6 +3397,10 @@ fn ferx_rust_covariance(
         nlopt_missing_algorithms: Vec::new(),
         covariance_n_evals_estimated: None,
         trace_path: None,
+        // In-process optimisation for a `run_covariance` called straight after a fit;
+        // `#[serde(skip)]` upstream, so a reconstructed result legitimately carries `None`
+        // and `run_covariance` re-packs from `omega`. No `.fitrx` / R format change.
+        packed_estimate: None,
         ebe_convergence_warnings: 0,
         max_unconverged_subjects: 0,
         total_ebe_fallbacks: 0,
