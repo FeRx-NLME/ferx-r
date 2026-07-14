@@ -407,6 +407,34 @@ ferx_model(template = "1cpt_oral", path = "m.ferx", edit = FALSE) |>
 
 ## New features
 
+- **Laplace estimator (`method = "laplace"`)**: alias `"laplacian"`. The Laplace
+  approximation with the **exact** Hessian — NONMEM `$EST METHOD=1 LAPLACIAN`,
+  which it reproduces to six significant figures. This is *not* the same estimator
+  as `"focei"`, which builds its Gaussian from the Gauss-Newton Hessian and reports
+  a different OFV. Internally it is `"agq"` with the node count pinned to 1 (a
+  bit-identical OFV), making it the cheapest member of that family — on warfarin it
+  converges *faster than FOCEI*. It supports IOV at any occasion count.
+  (ferx-core #251)
+- **AGQ and `laplace` now support inter-occasion variability (`[iov]`)**: the
+  integral runs over the stacked `(eta, kappa_1..kappa_K)` vector. AGQ's grid grows
+  with the occasion count (`n_agq^(n_eta + K*n_kappa)`) and is capped; `laplace` is a
+  single node regardless, so it is always tractable under IOV. (ferx-core #251)
+- **Adaptive Gaussian quadrature (`method = "agq"`)**: `ferx_fit(..., method =
+  "agq")` (aliases `"aghq"`, `"gauss_hermite"`) selects the new AGQ estimator,
+  with `settings = list(n_agq = 3)` setting the Gauss-Hermite nodes per random
+  effect. AGQ generalises Laplace — instead of a single Gaussian at each
+  subject's empirical-Bayes mode it evaluates the *exact* conditional likelihood
+  on a Gauss-Hermite grid around that mode, so `n_agq = 1` reproduces Laplace
+  identically and more nodes refine the marginal. Because it makes no
+  Gaussian-residual assumption it covers non-Gaussian endpoints (time-to-event,
+  categorical) that FOCE/FOCEI structurally cannot, and unlike SAEM/IMP its
+  objective is deterministic (the OFV is bit-identical run to run). It carries an
+  exact analytic outer gradient, so a converged warfarin fit is *faster* than
+  FOCEI. Validated against NONMEM `$EST METHOD=1 LAPLACIAN`, which `n_agq = 1`
+  reproduces to six significant figures. Cost is `n_agq^n_eta` per subject per
+  iteration, so it suits models with few random effects. IOV is supported (see
+  above).
+  (ferx-core #251)
 - **Weibull absorption — `weibull(td, beta)`**: a new built-in absorption input
   rate for `[odes]` models, alongside `transit(...)` and `igd(...)`. It adds a
   Weibull absorption-time distribution — scale `Td`, shape `beta` — fed straight

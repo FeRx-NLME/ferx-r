@@ -1241,6 +1241,20 @@ fn parse_method(token: &str) -> std::result::Result<EstimationMethod, String> {
         Ok(EstimationMethod::Saem)
     } else if m.contains("hybrid") {
         Ok(EstimationMethod::FoceGnHybrid)
+    } else if m == "laplace" || m == "laplacian" {
+        // NONMEM `$EST METHOD=1 LAPLACIAN` — the AGQ objective with one node.
+        Ok(EstimationMethod::Laplace)
+    } else if m == "agq"
+        || m == "aghq"
+        || m == "gauss_hermite"
+        || m == "gauss-hermite"
+        || m == "adaptive_gaussian_quadrature"
+        || m == "adaptive-gaussian-quadrature"
+    {
+        // MUST stay above the `contains("gauss")` arm below, which would otherwise
+        // swallow `gauss_hermite` into Gauss-*Newton*. Mirrors ferx-core's
+        // `parse_method_token`.
+        Ok(EstimationMethod::Agq)
     } else if m == "gn" || m.contains("gauss") {
         Ok(EstimationMethod::FoceGn)
     } else if m == "focei" || m == "foce-i" || m == "foce_i" || m.contains("interaction") {
@@ -1257,7 +1271,7 @@ fn parse_method(token: &str) -> std::result::Result<EstimationMethod, String> {
         Ok(EstimationMethod::Bayes)
     } else {
         Err(format!(
-            "Unknown estimation method '{}' — expected one of: foce, focei, saem, gn, gn_hybrid, imp, impmap, bayes",
+            "Unknown estimation method '{}' — expected one of: foce, focei, laplace, agq, saem, gn, gn_hybrid, imp, impmap, bayes",
             token.trim()
         ))
     }
@@ -1502,6 +1516,10 @@ fn default_fit_result(
         nlopt_missing_algorithms: Vec::new(),
         covariance_n_evals_estimated: None,
         trace_path: None,
+        // In-process optimisation for a `run_covariance` called straight after a fit;
+        // `#[serde(skip)]` upstream, so a reconstructed result legitimately carries `None`
+        // and `run_covariance` re-packs from `omega`. No `.fitrx` / R format change.
+        packed_estimate: None,
         ebe_convergence_warnings: 0,
         max_unconverged_subjects: 0,
         total_ebe_fallbacks: 0,
@@ -3035,6 +3053,10 @@ fn ferx_rust_sir(
         nlopt_missing_algorithms: Vec::new(),
         covariance_n_evals_estimated: None,
         trace_path: None,
+        // In-process optimisation for a `run_covariance` called straight after a fit;
+        // `#[serde(skip)]` upstream, so a reconstructed result legitimately carries `None`
+        // and `run_covariance` re-packs from `omega`. No `.fitrx` / R format change.
+        packed_estimate: None,
         ebe_convergence_warnings: 0,
         max_unconverged_subjects: 0,
         total_ebe_fallbacks: 0,
@@ -3375,6 +3397,10 @@ fn ferx_rust_covariance(
         nlopt_missing_algorithms: Vec::new(),
         covariance_n_evals_estimated: None,
         trace_path: None,
+        // In-process optimisation for a `run_covariance` called straight after a fit;
+        // `#[serde(skip)]` upstream, so a reconstructed result legitimately carries `None`
+        // and `run_covariance` re-packs from `omega`. No `.fitrx` / R format change.
+        packed_estimate: None,
         ebe_convergence_warnings: 0,
         max_unconverged_subjects: 0,
         total_ebe_fallbacks: 0,

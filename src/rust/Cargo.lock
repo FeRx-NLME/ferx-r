@@ -300,7 +300,7 @@ dependencies = [
 [[package]]
 name = "ferx-core"
 version = "0.2.0"
-source = "git+https://github.com/FeRx-NLME/ferx-core?branch=main#b2d0bc71686fb688c9c5a150c3c52b100e925c09"
+source = "git+https://github.com/FeRx-NLME/ferx-core?branch=main#601416a7471a1bd9543ce393260f48d0c8174ae0"
 dependencies = [
  "argmin",
  "argmin-math",
@@ -1137,9 +1137,9 @@ checksum = "b142a20ec14a91d5bc708c1dc21b080c550113d8aa77afa29635673a65dd02c5"
 
 [[package]]
 name = "zmij"
-version = "1.0.22"
+version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd2f034a4bebf216c9e4b7083603e024cf930873fd67830cfb083c9fa33129d9"
+checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
 
 [[package]]
 name = "zopfli"
@@ -1152,3 +1152,7 @@ dependencies = [
  "log",
  "simd-adler32",
 ]
+
+[[patch.unused]]
+name = "ferx-core"
+version = "0.1.6"

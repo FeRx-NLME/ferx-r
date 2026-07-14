@@ -25,7 +25,25 @@
 #'   vector of methods to run in sequence. Each stage is seeded with the
 #'   previous stage's converged parameters, and only the final stage produces
 #'   the reported covariance/diagnostics. Supported methods: \code{"foce"},
-#'   \code{"focei"}, \code{"saem"}, \code{"gn"} (Gauss-Newton / BHHH),
+#'   \code{"focei"},
+#'   \code{"laplace"} (alias \code{"laplacian"}; the Laplace approximation with the
+#'   \emph{exact} Hessian — NONMEM \code{$EST METHOD=1 LAPLACIAN}. This is not the
+#'   same estimator as \code{"focei"}, which builds its Gaussian from the
+#'   Gauss-Newton Hessian and reports a different OFV. Internally it is
+#'   \code{"agq"} with one node, so it is the cheapest member of that family and
+#'   supports IOV at any occasion count),
+#'   \code{"agq"} (adaptive Gaussian quadrature; also accepted as
+#'   \code{"aghq"} or \code{"gauss_hermite"}. Generalises Laplace: instead of one
+#'   Gaussian at each subject's empirical-Bayes mode, it evaluates the exact
+#'   conditional likelihood on a Gauss-Hermite grid around that mode. Set the
+#'   nodes per random effect with \code{settings = list(n_agq = 3)};
+#'   \code{n_agq = 1} is the Laplace approximation exactly. Makes no
+#'   Gaussian-residual assumption, so it handles non-Gaussian endpoints
+#'   (time-to-event, categorical), and its objective is deterministic. Cost is
+#'   \code{n_agq^n_eta} per subject per iteration, so it suits models with few
+#'   random effects. Supports IOV: the integral then runs over the stacked
+#'   (eta, kappa) vector, so the grid grows with the occasion count),
+#'   \code{"saem"}, \code{"gn"} (Gauss-Newton / BHHH),
 #'   \code{"gn_hybrid"} (Gauss-Newton followed by a FOCEI polish step),
 #'   \code{"imp"} (also accepted as \code{"importance_sampling"} or
 #'   \code{"importance-sampling"}; the NONMEM \code{METHOD=IMP}
@@ -2167,11 +2185,27 @@ ferx_fit <- function(model, data = NULL,
   if (normalised %in% c("bayesian", "mcmc")) {
     normalised <- "bayes"
   }
+  # AGQ aliases. `gauss_hermite` in particular *must* be folded here rather than
+  # left to `match.arg` (which would not partial-match it) - and, were it ever to
+  # reach the engine's `contains("gauss")` arm unfolded, it would land on
+  # Gauss-*Newton*. Mirrors ferx-core's `parse_method_token`.
+  if (normalised %in% c(
+    "aghq", "gauss_hermite", "adaptive_gaussian_quadrature"
+  )) {
+    normalised <- "agq"
+  }
+  # `laplacian` is NONMEM's spelling; fold it onto the canonical `laplace`.
+  if (normalised == "laplacian") {
+    normalised <- "laplace"
+  }
   # `match.arg` uses exact-match-first semantics, so listing both "imp" and
   # "impmap" is unambiguous (each exact token wins over the other's prefix).
   match.arg(
     normalised,
-    c("foce", "focei", "saem", "gn", "gn_hybrid", "imp", "impmap", "bayes")
+    c(
+      "foce", "focei", "laplace", "agq", "saem", "gn", "gn_hybrid",
+      "imp", "impmap", "bayes"
+    )
   )
 }
 
