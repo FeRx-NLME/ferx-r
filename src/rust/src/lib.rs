@@ -1241,6 +1241,17 @@ fn parse_method(token: &str) -> std::result::Result<EstimationMethod, String> {
         Ok(EstimationMethod::Saem)
     } else if m.contains("hybrid") {
         Ok(EstimationMethod::FoceGnHybrid)
+    } else if m == "agq"
+        || m == "aghq"
+        || m == "gauss_hermite"
+        || m == "gauss-hermite"
+        || m == "adaptive_gaussian_quadrature"
+        || m == "adaptive-gaussian-quadrature"
+    {
+        // MUST stay above the `contains("gauss")` arm below, which would otherwise
+        // swallow `gauss_hermite` into Gauss-*Newton*. Mirrors ferx-core's
+        // `parse_method_token`.
+        Ok(EstimationMethod::Agq)
     } else if m == "gn" || m.contains("gauss") {
         Ok(EstimationMethod::FoceGn)
     } else if m == "focei" || m == "foce-i" || m == "foce_i" || m.contains("interaction") {
@@ -1257,7 +1268,7 @@ fn parse_method(token: &str) -> std::result::Result<EstimationMethod, String> {
         Ok(EstimationMethod::Bayes)
     } else {
         Err(format!(
-            "Unknown estimation method '{}' — expected one of: foce, focei, saem, gn, gn_hybrid, imp, impmap, bayes",
+            "Unknown estimation method '{}' — expected one of: foce, focei, agq, saem, gn, gn_hybrid, imp, impmap, bayes",
             token.trim()
         ))
     }

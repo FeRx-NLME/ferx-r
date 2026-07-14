@@ -407,6 +407,21 @@ ferx_model(template = "1cpt_oral", path = "m.ferx", edit = FALSE) |>
 
 ## New features
 
+- **Adaptive Gaussian quadrature (`method = "agq"`)**: `ferx_fit(..., method =
+  "agq")` (aliases `"aghq"`, `"gauss_hermite"`) selects the new AGQ estimator,
+  with `settings = list(n_agq = 3)` setting the Gauss-Hermite nodes per random
+  effect. AGQ generalises Laplace — instead of a single Gaussian at each
+  subject's empirical-Bayes mode it evaluates the *exact* conditional likelihood
+  on a Gauss-Hermite grid around that mode, so `n_agq = 1` reproduces Laplace
+  identically and more nodes refine the marginal. Because it makes no
+  Gaussian-residual assumption it covers non-Gaussian endpoints (time-to-event,
+  categorical) that FOCE/FOCEI structurally cannot, and unlike SAEM/IMP its
+  objective is deterministic (the OFV is bit-identical run to run). It carries an
+  exact analytic outer gradient, so a converged warfarin fit is *faster* than
+  FOCEI. Validated against NONMEM `$EST METHOD=1 LAPLACIAN`, which `n_agq = 1`
+  reproduces to six significant figures. Cost is `n_agq^n_eta` per subject per
+  iteration, so it suits models with few random effects; IOV is not supported.
+  (ferx-core #251)
 - **Weibull absorption — `weibull(td, beta)`**: a new built-in absorption input
   rate for `[odes]` models, alongside `transit(...)` and `igd(...)`. It adds a
   Weibull absorption-time distribution — scale `Td`, shape `beta` — fed straight
