@@ -128,13 +128,23 @@ test_that("ferx_load_fit on old .fitrx without init_as_sd produces empty logical
 
 
 test_that(".fitrx_method_label is the inverse for every known token", {
+  # One entry per token ferx-core's `method_to_str()` can write into a .fitrx. The test
+  # name has always claimed "every known token" but the list had drifted: imp, impmap and
+  # bayes were missing and fell through the `as.character()` passthrough, so a reloaded IMP
+  # fit reported its method as lowercase "imp" instead of "IMP". Keep this exhaustive — a
+  # missing entry does not error, it silently reports the wrong label.
   expect_identical(ferx:::.fitrx_method_label(NULL), "FOCEI")
   expect_identical(ferx:::.fitrx_method_label(""), "FOCEI")
   expect_identical(ferx:::.fitrx_method_label("foce"), "FOCE")
   expect_identical(ferx:::.fitrx_method_label("focei"), "FOCEI")
+  expect_identical(ferx:::.fitrx_method_label("laplace"), "LAPLACE")
+  expect_identical(ferx:::.fitrx_method_label("agq"), "AGQ")
   expect_identical(ferx:::.fitrx_method_label("foce_gn"), "FOCE-GN")
   expect_identical(ferx:::.fitrx_method_label("foce_gn_hybrid"), "FOCE-GN-Hybrid")
   expect_identical(ferx:::.fitrx_method_label("saem"), "SAEM")
+  expect_identical(ferx:::.fitrx_method_label("imp"), "IMP")
+  expect_identical(ferx:::.fitrx_method_label("impmap"), "IMPMAP")
+  expect_identical(ferx:::.fitrx_method_label("bayes"), "BAYES")
   expect_identical(ferx:::.fitrx_method_label("other"), "other") # unknown passthrough
 })
 test_that(".fitrx_covariance_status_label maps tokens back to display form", {
