@@ -313,6 +313,31 @@ test_that("method = 'imp' passes the ferx_fit validation step", {
   expect_equal(normalize("importance-sampling-map"), "impmap")
   expect_equal(normalize(c("focei", "impmap")), c("focei", "impmap"))
 })
+
+test_that("method = 'agq' and its aliases pass the ferx_fit validation step", {
+  # Tier 1: R-side allowlist + alias fold for adaptive Gaussian quadrature
+  # (ferx-core #251). Exercises the real `.normalize_method_token` so the
+  # allowlist and folds register coverage, not a test-local copy.
+  normalize_token <- getFromNamespace(".normalize_method_token", "ferx")
+  normalize <- function(m) vapply(m, normalize_token, character(1L), USE.NAMES = FALSE)
+
+  expect_equal(normalize("agq"), "agq")
+  expect_equal(normalize("AGQ"), "agq")
+  expect_equal(normalize("aghq"), "agq")
+  # `match.arg` cannot partial-match these to "agq", so they are folded
+  # explicitly — same reason the `importance_sampling` -> `imp` fold exists.
+  expect_equal(normalize("gauss_hermite"), "agq")
+  expect_equal(normalize("gauss-hermite"), "agq")
+  expect_equal(normalize("adaptive_gaussian_quadrature"), "agq")
+  expect_equal(normalize(c("saem", "agq")), c("saem", "agq"))
+
+  # THE TRAP: `gauss_hermite` must NOT land on Gauss-*Newton*. The engine's
+  # method parser matches Gauss-Newton on `contains("gauss")`, so an unfolded
+  # alias reaching it would silently select the wrong estimator. Guard both
+  # directions — the AGQ fold must not swallow the Gauss-Newton tokens either.
+  expect_equal(normalize("gn"), "gn")
+  expect_equal(normalize("gn_hybrid"), "gn_hybrid")
+})
 test_that("method = 'bayes' passes the ferx_fit validation step", {
   # Tier 1: R-side allowlist + alias fold for the Bayesian estimator. Mirrors
   # the normalisation block in `R/fit.R::ferx_fit()`. The actual MCMC run is
