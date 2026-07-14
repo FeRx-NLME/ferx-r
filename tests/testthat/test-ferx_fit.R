@@ -338,6 +338,26 @@ test_that("method = 'agq' and its aliases pass the ferx_fit validation step", {
   expect_equal(normalize("gn"), "gn")
   expect_equal(normalize("gn_hybrid"), "gn_hybrid")
 })
+
+test_that("method = 'laplace' and its alias pass the ferx_fit validation step", {
+  # Tier 1: R-side allowlist for the Laplace estimator (ferx-core #251) — the
+  # exact-Hessian Laplace approximation, i.e. NONMEM `$EST METHOD=1 LAPLACIAN`.
+  # Engine-side it is AGQ with the node count pinned to 1, but it is a distinct
+  # method token and must survive normalisation as one.
+  normalize_token <- getFromNamespace(".normalize_method_token", "ferx")
+  normalize <- function(m) vapply(m, normalize_token, character(1L), USE.NAMES = FALSE)
+
+  expect_equal(normalize("laplace"), "laplace")
+  expect_equal(normalize("LAPLACE"), "laplace")
+  # NONMEM's spelling, folded before `match.arg` (which would not partial-match it
+  # against "laplace" — "laplacian" is longer, not a prefix).
+  expect_equal(normalize("laplacian"), "laplace")
+  expect_equal(normalize(c("saem", "laplace")), c("saem", "laplace"))
+
+  # `laplace` and `agq` are distinct tokens: neither collapses onto the other,
+  # even though the engine routes `laplace` through the AGQ objective.
+  expect_equal(normalize("agq"), "agq")
+})
 test_that("method = 'bayes' passes the ferx_fit validation step", {
   # Tier 1: R-side allowlist + alias fold for the Bayesian estimator. Mirrors
   # the normalisation block in `R/fit.R::ferx_fit()`. The actual MCMC run is

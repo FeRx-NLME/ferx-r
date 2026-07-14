@@ -1241,6 +1241,9 @@ fn parse_method(token: &str) -> std::result::Result<EstimationMethod, String> {
         Ok(EstimationMethod::Saem)
     } else if m.contains("hybrid") {
         Ok(EstimationMethod::FoceGnHybrid)
+    } else if m == "laplace" || m == "laplacian" {
+        // NONMEM `$EST METHOD=1 LAPLACIAN` — the AGQ objective with one node.
+        Ok(EstimationMethod::Laplace)
     } else if m == "agq"
         || m == "aghq"
         || m == "gauss_hermite"
@@ -1268,7 +1271,7 @@ fn parse_method(token: &str) -> std::result::Result<EstimationMethod, String> {
         Ok(EstimationMethod::Bayes)
     } else {
         Err(format!(
-            "Unknown estimation method '{}' — expected one of: foce, focei, agq, saem, gn, gn_hybrid, imp, impmap, bayes",
+            "Unknown estimation method '{}' — expected one of: foce, focei, laplace, agq, saem, gn, gn_hybrid, imp, impmap, bayes",
             token.trim()
         ))
     }
