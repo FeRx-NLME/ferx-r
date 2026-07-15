@@ -2,6 +2,15 @@
 
 ## Breaking changes
 
+- `method = "agq"` has been removed (ferx-core #251). Adaptive Gauss-Hermite
+  quadrature is not a separate estimator — it is the single-point method with more
+  nodes, so the node count is now an argument and the method name selects the
+  Hessian anchor: `ferx_fit(..., method = "laplace", settings = list(n_agq = N))`
+  is the exact-anchor quadrature (`n_agq = 1` is Laplace), and
+  `method = "focei"` with `n_agq > 1` is the new Gauss-Newton-anchored quadrature.
+  The old `"agq"` / `"gauss_hermite"` tokens now error with a pointer to the
+  replacement.
+
 Public functions renamed for verb-clarity and naming consistency (part of the
 API cleanup in #223; naming rule + hard-break policy decided in #224). Old
 names are removed - no deprecation shims. Update calls as follows:

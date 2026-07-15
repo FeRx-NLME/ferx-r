@@ -1242,7 +1242,8 @@ fn parse_method(token: &str) -> std::result::Result<EstimationMethod, String> {
     } else if m.contains("hybrid") {
         Ok(EstimationMethod::FoceGnHybrid)
     } else if m == "laplace" || m == "laplacian" {
-        // NONMEM `$EST METHOD=1 LAPLACIAN` — the AGQ objective with one node.
+        // NONMEM `$EST METHOD=1 LAPLACIAN` — the exact-anchor quadrature (n_agq = 1 is
+        // Laplace, n_agq > 1 is adaptive Gauss–Hermite quadrature).
         Ok(EstimationMethod::Laplace)
     } else if m == "agq"
         || m == "aghq"
@@ -1251,10 +1252,17 @@ fn parse_method(token: &str) -> std::result::Result<EstimationMethod, String> {
         || m == "adaptive_gaussian_quadrature"
         || m == "adaptive-gaussian-quadrature"
     {
-        // MUST stay above the `contains("gauss")` arm below, which would otherwise
-        // swallow `gauss_hermite` into Gauss-*Newton*. Mirrors ferx-core's
-        // `parse_method_token`.
-        Ok(EstimationMethod::Agq)
+        // `method = "agq"` was removed (ferx-core #251): adaptive quadrature is
+        // `method = "laplace"` with `settings = list(n_agq = N)`. MUST stay above the
+        // `contains("gauss")` arm below, which would otherwise route `gauss_hermite` into
+        // Gauss-*Newton*. Mirrors ferx-core's `parse_method_token`.
+        Err(
+            "method = \"agq\" has been removed: use method = \"laplace\" with n_agq = N \
+             (n_agq = 1 is the Laplace approximation, n_agq > 1 is adaptive Gauss–Hermite \
+             quadrature). For the Gauss-Newton-anchored quadrature use method = \"focei\" with \
+             n_agq > 1."
+                .to_string(),
+        )
     } else if m == "gn" || m.contains("gauss") {
         Ok(EstimationMethod::FoceGn)
     } else if m == "focei" || m == "foce-i" || m == "foce_i" || m.contains("interaction") {
@@ -1271,7 +1279,7 @@ fn parse_method(token: &str) -> std::result::Result<EstimationMethod, String> {
         Ok(EstimationMethod::Bayes)
     } else {
         Err(format!(
-            "Unknown estimation method '{}' — expected one of: foce, focei, laplace, agq, saem, gn, gn_hybrid, imp, impmap, bayes",
+            "Unknown estimation method '{}' — expected one of: foce, focei, laplace, saem, gn, gn_hybrid, imp, impmap, bayes",
             token.trim()
         ))
     }
