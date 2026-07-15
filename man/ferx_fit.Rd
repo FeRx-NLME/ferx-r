@@ -54,7 +54,22 @@ string or a character
 vector of methods to run in sequence. Each stage is seeded with the
 previous stage's converged parameters, and only the final stage produces
 the reported covariance/diagnostics. Supported methods: \code{"foce"},
-\code{"focei"}, \code{"saem"}, \code{"gn"} (Gauss-Newton / BHHH),
+\code{"focei"},
+\code{"laplace"} (alias \code{"laplacian"}; the Laplace approximation with the
+\emph{exact} Hessian — NONMEM \code{$EST METHOD=1 LAPLACIAN}. This is not the
+same estimator as \code{"focei"}, which builds its Gaussian from the
+Gauss-Newton Hessian and reports a different OFV. At the default
+\code{n_agq = 1} it is a single node; \code{settings = list(n_agq = N)} with
+\code{N > 1} turns it into adaptive Gauss-Hermite quadrature — the exact
+conditional likelihood evaluated on a Gauss-Hermite grid around each subject's
+empirical-Bayes mode, which makes no Gaussian-residual assumption and so
+handles non-Gaussian endpoints (time-to-event, categorical). Cost is
+\code{n_agq^n_eta} per subject per iteration, so higher node counts suit
+models with few random effects. Supports IOV at any occasion count. There is
+no separate \code{"agq"} method — adaptive quadrature is this method with
+\code{n_agq > 1}; \code{"focei"} likewise accepts \code{n_agq > 1} for the
+Gauss-Newton-anchored quadrature),
+\code{"saem"}, \code{"gn"} (Gauss-Newton / BHHH),
 \code{"gn_hybrid"} (Gauss-Newton followed by a FOCEI polish step),
 \code{"imp"} (also accepted as \code{"importance_sampling"} or
 \code{"importance-sampling"}; the NONMEM \code{METHOD=IMP}

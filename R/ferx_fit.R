@@ -29,20 +29,17 @@
 #'   \code{"laplace"} (alias \code{"laplacian"}; the Laplace approximation with the
 #'   \emph{exact} Hessian — NONMEM \code{$EST METHOD=1 LAPLACIAN}. This is not the
 #'   same estimator as \code{"focei"}, which builds its Gaussian from the
-#'   Gauss-Newton Hessian and reports a different OFV. Internally it is
-#'   \code{"agq"} with one node, so it is the cheapest member of that family and
-#'   supports IOV at any occasion count),
-#'   \code{"agq"} (adaptive Gaussian quadrature; also accepted as
-#'   \code{"aghq"} or \code{"gauss_hermite"}. Generalises Laplace: instead of one
-#'   Gaussian at each subject's empirical-Bayes mode, it evaluates the exact
-#'   conditional likelihood on a Gauss-Hermite grid around that mode. Set the
-#'   nodes per random effect with \code{settings = list(n_agq = 3)};
-#'   \code{n_agq = 1} is the Laplace approximation exactly. Makes no
-#'   Gaussian-residual assumption, so it handles non-Gaussian endpoints
-#'   (time-to-event, categorical), and its objective is deterministic. Cost is
-#'   \code{n_agq^n_eta} per subject per iteration, so it suits models with few
-#'   random effects. Supports IOV: the integral then runs over the stacked
-#'   (eta, kappa) vector, so the grid grows with the occasion count),
+#'   Gauss-Newton Hessian and reports a different OFV. At the default
+#'   \code{n_agq = 1} it is a single node; \code{settings = list(n_agq = N)} with
+#'   \code{N > 1} turns it into adaptive Gauss-Hermite quadrature — the exact
+#'   conditional likelihood evaluated on a Gauss-Hermite grid around each subject's
+#'   empirical-Bayes mode, which makes no Gaussian-residual assumption and so
+#'   handles non-Gaussian endpoints (time-to-event, categorical). Cost is
+#'   \code{n_agq^n_eta} per subject per iteration, so higher node counts suit
+#'   models with few random effects. Supports IOV at any occasion count. There is
+#'   no separate \code{"agq"} method — adaptive quadrature is this method with
+#'   \code{n_agq > 1}; \code{"focei"} likewise accepts \code{n_agq > 1} for the
+#'   Gauss-Newton-anchored quadrature),
 #'   \code{"saem"}, \code{"gn"} (Gauss-Newton / BHHH),
 #'   \code{"gn_hybrid"} (Gauss-Newton followed by a FOCEI polish step),
 #'   \code{"imp"} (also accepted as \code{"importance_sampling"} or
@@ -2185,14 +2182,22 @@ ferx_fit <- function(model, data = NULL,
   if (normalised %in% c("bayesian", "mcmc")) {
     normalised <- "bayes"
   }
-  # AGQ aliases. `gauss_hermite` in particular *must* be folded here rather than
-  # left to `match.arg` (which would not partial-match it) - and, were it ever to
-  # reach the engine's `contains("gauss")` arm unfolded, it would land on
-  # Gauss-*Newton*. Mirrors ferx-core's `parse_method_token`.
+  # `method = "agq"` was removed (ferx-core #251): adaptive quadrature is now
+  # `method = "laplace"` with `settings = list(n_agq = N)` (exact Hessian anchor),
+  # or `method = "focei"` with `n_agq > 1` (Gauss-Newton anchor). Reject the old
+  # tokens with a pointer rather than routing them to a method that no longer
+  # exists. These `contains("gauss")` near-misses must be caught here before the
+  # Gauss-Newton fold below. Mirrors ferx-core's `parse_method_token`.
   if (normalised %in% c(
-    "aghq", "gauss_hermite", "adaptive_gaussian_quadrature"
+    "agq", "aghq", "gauss_hermite", "adaptive_gaussian_quadrature"
   )) {
-    normalised <- "agq"
+    stop(
+      "method = \"agq\" has been removed: use method = \"laplace\" with ",
+      "settings = list(n_agq = N) (n_agq = 1 is the Laplace approximation, ",
+      "n_agq > 1 is adaptive Gauss-Hermite quadrature). For the ",
+      "Gauss-Newton-anchored quadrature use method = \"focei\" with n_agq > 1.",
+      call. = FALSE
+    )
   }
   # `laplacian` is NONMEM's spelling; fold it onto the canonical `laplace`.
   if (normalised == "laplacian") {
@@ -2203,7 +2208,7 @@ ferx_fit <- function(model, data = NULL,
   match.arg(
     normalised,
     c(
-      "foce", "focei", "laplace", "agq", "saem", "gn", "gn_hybrid",
+      "foce", "focei", "laplace", "saem", "gn", "gn_hybrid",
       "imp", "impmap", "bayes"
     )
   )
