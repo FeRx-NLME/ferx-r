@@ -234,6 +234,16 @@ test_that("bundled mixed_absorption example validates (zero_order + first_order 
   res <- ferx_model_validate(ex$model)
   expect_true(isTRUE(res$ok))
 })
+test_that("bundled per_route_lag_absorption example validates (per-route lag= parses on a parallel route)", {
+  # Guards per-route absorption lag (ferx-core #856): a valid result confirms the
+  # pinned engine accepts the optional `lag=` argument on a fraction-weighted
+  # `first_order(ka, lag=LAG2)` pathway (IR + delayed-release), a strict superset of
+  # the parallel first_order composition. The matched, recovering fit is the
+  # ferx-core NONMEM $DES anchor (per_route_lag.ctl), not exercised here.
+  ex  <- ferx_example("per_route_lag_absorption")
+  res <- ferx_model_validate(ex$model)
+  expect_true(isTRUE(res$ok))
+})
 test_that("bundled sequential_absorption example validates (zero_order + first-order compose)", {
   # Guards the sequential (zero-order depot fill -> first-order ka) composition:
   # a valid result confirms zero_order(dur) into a depot plus a hand-written

@@ -1,0 +1,62 @@
+# Per-route absorption lag -- immediate-release + delayed-release via per-route
+# lag= (ferx-core #856). Two parallel first-order pathways feed the central
+# compartment, split by a declared dose fraction, where the SECOND (delayed-release)
+# pathway carries its OWN absorption lag through the optional lag= argument:
+#
+#   R_in(tad) = FR1*first_order(ka=KA1)                # IR: starts at once
+#             + FR2*first_order(ka=KA2, lag=LAG2)      # DR: onset delayed by LAG2
+#
+# lag= is a universal optional argument on every input-rate function (first_order,
+# zero_order, transit, igd, weibull); it delays that pathway's onset on top of any
+# compartment lagtime (dose + lag_cmt + lag_route), so parallel / mixed routes can
+# switch on at different times -- the classic modified-release picture that a single
+# per-dose lagtime cannot express (a bare lagtime would shift BOTH routes together).
+# The multiplier (FR*) and lag= must each be a single declared individual parameter,
+# so the complementary fraction is declared explicitly (FR2 = 1 - FR1). A model
+# carrying a per-route lag is fit over finite differences (predictions are exact);
+# the analytic per-route onset saltation is a ferx-core follow-up (#859).
+#
+# Paired with the ferx-core NONMEM absorption anchor data (igd_oral.csv), which was
+# simulated from a transit model -- so this fit is mildly mis-specified: a syntax /
+# workflow demo, not parameter recovery. Because the IR pathway (no lag) keeps the
+# prediction non-zero throughout, a plain proportional error model is well behaved.
+# The matched, recovering anchor is ferx-core nonmem_anchor/per_route_lag.ctl
+# (ferx FOCEI objective vs NONMEM #OBJV = -882.357 to ~1e-6).
+
+[parameters]
+  theta TVCL(5.0,     0.1, 100.0)
+  theta TVV(50.0,     5.0, 500.0)
+  theta TVFR1(0.6,   0.05,  0.95)   # fraction of dose through the immediate-release pathway
+  theta TVKA1(1.5,   0.05,  24.0)   # absorption rate, IR pathway (1/h)
+  theta TVKA2(0.5,   0.05,  24.0)   # absorption rate, DR pathway (1/h)
+  theta TVLAG2(1.0, 0.001,  12.0)   # delayed-release onset lag (h) -- the per-route lag
+
+  omega ETA_CL ~ 0.09
+  omega ETA_V  ~ 0.09
+
+  sigma PROP_ERR ~ 0.15 (sd)
+
+[individual_parameters]
+  CL   = TVCL * exp(ETA_CL)
+  V    = TVV  * exp(ETA_V)
+  FR1  = TVFR1                       # IR-pathway fraction (no lag)
+  FR2  = 1 - TVFR1                   # declared complement (FR1 + FR2 = 1)
+  KA1  = TVKA1
+  KA2  = TVKA2
+  LAG2 = TVLAG2                      # DR-route lag; IR route has no lag
+
+[structural_model]
+  ode(states=[central])             # central holds drug AMOUNT; concentration = A/V
+
+[odes]
+  d/dt(central) = FR1*first_order(ka=KA1) + FR2*first_order(ka=KA2, lag=LAG2) - CL/V*central
+
+[scaling]
+  y = central / V                   # observable = concentration (mg/L)
+
+[error_model]
+  DV ~ proportional(PROP_ERR)
+
+[fit_options]
+  method  = focei
+  maxiter = 500

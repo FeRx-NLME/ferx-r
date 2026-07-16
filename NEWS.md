@@ -93,6 +93,14 @@ fit$eta_cov
 
 ## Added
 
+- **Per-route absorption lag in model files** — every built-in input-rate function
+  now takes an optional `lag=` argument (`first_order(ka=KA, lag=L)`,
+  `zero_order(dur=DUR, lag=L)`, `transit`, `igd`, `weibull`), giving each parallel /
+  mixed pathway its own onset delay on top of any compartment lagtime — the classic
+  immediate-release + delayed-release picture that a single per-dose lagtime cannot
+  express (ferx-core #856). New bundled example
+  `ferx_example("per_route_lag_absorption")` with a runnable
+  `inst/examples/ex_per_route_lag_absorption.R`. Delivered via the ferx-core pin bump.
 - **`ferx_xpose()` now populates the estimation-iteration trace**, so
   `xpose::prm_vs_iteration()` (parameter value vs iteration) and
   `xpose::grd_vs_iteration()` (gradient vs iteration) work on the returned

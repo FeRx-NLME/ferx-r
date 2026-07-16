@@ -102,6 +102,15 @@
 #'     fraction (\code{FZO1*first_order(...) + FZO*zero_order(...)},
 #'     \code{FZO1 = 1 - FZO}) (ferx-core #505). Shares the NONMEM absorption anchor
 #'     dataset (syntax demo, mildly mis-specified).}
+#'   \item{per_route_lag_absorption}{One-compartment ODE model with
+#'     immediate-release + delayed-release absorption via the optional per-route
+#'     \code{lag=} argument: two \code{first_order(ka)} pathways feeding central,
+#'     split by a declared fraction, where the delayed-release pathway carries its
+#'     own onset lag (\code{FR1*first_order(ka=KA1) + FR2*first_order(ka=KA2, lag=LAG2)}).
+#'     \code{lag=} is a universal optional input-rate argument, additive on top of any
+#'     compartment lagtime, so parallel / mixed routes can switch on at different times
+#'     (ferx-core #856). Shares the NONMEM absorption anchor dataset (syntax demo,
+#'     mildly mis-specified).}
 #'   \item{sequential_absorption}{Sequential (zero-order then first-order)
 #'     absorption: \code{zero_order(dur)} fills a depot, which empties to central
 #'     by first-order \code{ka} (no dedicated keyword -- a composition). Paired
@@ -347,6 +356,10 @@ ferx_example <- function(name = NULL) {
     # dataset (syntax demo, mildly mis-specified).
     parallel_absorption = "igd_oral",
     mixed_absorption    = "igd_oral",
+
+    # Per-route absorption lag (IR + delayed-release via per-route lag=); shares the
+    # absorption anchor dataset (syntax demo, mildly mis-specified) (ferx-core #856).
+    per_route_lag_absorption = "igd_oral",
 
     # Built-in Savic transit-compartment absorption (transit()); paired with the
     # ferx-core transit anchor dataset.
