@@ -120,6 +120,33 @@ test_that("ferx_save_fit + ferx_load_fit round-trip a real fit", {
   expect_equal(loaded$model_name, fit$model_name)
   expect_equal(loaded$ferx_version, fit$ferx_version)
 })
+test_that("bare (extension-less) output path defaults to .fitrx and round-trips (#268)", {
+  skip_on_cran()
+  fit <- warfarin_fit_cov()
+  dir <- tempfile("fitrx_ext_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+
+  bare <- file.path(dir, "run1_base_diag")
+  ferx_save_fit(fit, bare)
+
+  # The archive is written with the conventional `.fitrx` extension, not a
+  # bare name and not Info-ZIP's `.zip`.
+  expect_true(file.exists(paste0(bare, ".fitrx")))
+  expect_false(file.exists(bare))
+  expect_false(file.exists(paste0(bare, ".zip")))
+
+  # ... and loads back from the same bare path the caller saved to.
+  loaded <- ferx_load_fit(bare)
+  expect_s3_class(loaded, "ferx_fit")
+  expect_equal(unname(loaded$theta), unname(fit$theta), tolerance = 1e-12)
+
+  # An explicit extension is honoured verbatim (not forced to .fitrx).
+  custom <- file.path(dir, "run1.bundle")
+  ferx_save_fit(fit, custom)
+  expect_true(file.exists(custom))
+  expect_s3_class(ferx_load_fit(custom), "ferx_fit")
+})
 test_that("covariance step results survive round-trip", {
   skip_on_cran()
   fit <- warfarin_fit_cov()

@@ -13,8 +13,11 @@ FITRX_FORMAT_VERSION <- "1"
 #' \code{docs/src/file-formats/fitrx.md} for the full field reference.
 #'
 #' @param fit A \code{ferx_fit} object returned by \code{\link{ferx_fit}}.
-#' @param output Path to write. By convention the file extension is
-#'   \code{.fitrx}; the function does not enforce this.
+#' @param output Path to write. When the path has no file extension, the
+#'   conventional \code{.fitrx} extension is appended automatically (so
+#'   \code{"results/run1"} is written as \code{"results/run1.fitrx"});
+#'   \code{\link{ferx_load_fit}} accepts either the bare or the extended
+#'   path. An explicit extension is honoured as given.
 #' @param include_data Logical. When \code{TRUE}, the input NONMEM CSV used
 #'   to fit the model is embedded verbatim inside the archive (as
 #'   \code{data.csv}). Requires that the file is still accessible at the
@@ -44,6 +47,15 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   }
   if (!is.logical(include_data) || length(include_data) != 1L || is.na(include_data)) {
     stop("`include_data` must be TRUE or FALSE.")
+  }
+
+  # Default the archive extension to `.fitrx` when the caller passes a bare
+  # path with no extension, so `ferx_save_fit(fit, "results/run1")` lands at
+  # "results/run1.fitrx" - the documented convention - rather than at a
+  # bare "results/run1" or (via Info-ZIP's own habit) "results/run1.zip".
+  # `ferx_load_fit()` mirrors this by falling back to `<path>.fitrx`.
+  if (!nzchar(tools::file_ext(output))) {
+    output <- paste0(output, ".fitrx")
   }
 
   staging <- tempfile("fitrx_")
@@ -159,15 +171,29 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   out_abs <- file.path(out_abs, basename(output))
 
   files_to_zip <- c("manifest.json", entries)
+  # Info-ZIP appends `.zip` when the archive name has no extension, so a
+  # bare `output` like "results/run1" would silently land at "results/run1.zip"
+  # and `ferx_load_fit("results/run1")` would then fail with "File does not
+  # exist". Zip into a temp `.zip` (extension present -> no rename by zip) and
+  # move it onto the exact requested path afterwards.
+  zip_tmp <- tempfile("fitrx_zip_", fileext = ".zip")
   old_wd <- getwd()
   setwd(staging)
   zip_status <- tryCatch(
-    utils::zip(out_abs, files_to_zip, flags = "-q9X"),
+    utils::zip(zip_tmp, files_to_zip, flags = "-q9X"),
     finally = setwd(old_wd)
   )
   if (!is.null(zip_status) && is.numeric(zip_status) && zip_status != 0L) {
     stop(sprintf("zip command failed with status %d while writing %s", zip_status, output))
   }
+  if (!file.exists(zip_tmp)) {
+    stop(sprintf("zip command did not produce an archive while writing %s", output))
+  }
+  if (!file.copy(zip_tmp, out_abs, overwrite = TRUE)) {
+    unlink(zip_tmp)
+    stop(sprintf("failed to move zip archive into place at %s", out_abs))
+  }
+  unlink(zip_tmp)
 
   invisible(fit)
 }

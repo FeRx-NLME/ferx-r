@@ -82,6 +82,19 @@ fit$estimates
 fit$eta_cov
 ```
 
+## Fixed
+
+- **`ferx_save_fit()` / `ferx_load_fit()` round-trip on extension-less paths**
+  (#268). Saving to a path with no file extension (e.g.
+  `ferx_save_fit(fit, "results/run1_base_diag")`) previously landed at
+  `results/run1_base_diag.zip` - because Info-ZIP appends `.zip` to a
+  suffix-less archive name - so the mirroring
+  `ferx_load_fit("results/run1_base_diag")` failed with "File does not exist".
+  `ferx_save_fit()` now appends the conventional `.fitrx` extension when the
+  output path has none, and `ferx_load_fit()` falls back to `<path>.fitrx`, so
+  the bare-path round-trip works. Explicit extensions are still honoured as
+  given.
+
 ## Added
 
 - **`ferx_xpose()` now populates the estimation-iteration trace**, so
