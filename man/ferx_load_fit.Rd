@@ -7,7 +7,10 @@
 ferx_load_fit(path)
 }
 \arguments{
-\item{path}{Path to a \code{.fitrx} file.}
+\item{path}{Path to a \code{.fitrx} file. If the given path does not exist
+and has no extension, a \code{.fitrx} extension is tried, mirroring
+\code{\link{ferx_save_fit}}'s default (so a fit saved to
+\code{"results/run1"} loads back from the same bare path).}
 }
 \value{
 A \code{ferx_fit}-classed list.

@@ -12,7 +12,10 @@
 #' To call \code{\link{ferx_predict}} on a loaded fit, the embedded model
 #' source can be re-parsed through the existing pipeline.
 #'
-#' @param path Path to a \code{.fitrx} file.
+#' @param path Path to a \code{.fitrx} file. If the given path does not exist
+#'   and has no extension, a \code{.fitrx} extension is tried, mirroring
+#'   \code{\link{ferx_save_fit}}'s default (so a fit saved to
+#'   \code{"results/run1"} loads back from the same bare path).
 #' @return A \code{ferx_fit}-classed list.
 #' @examples
 #' ex  <- ferx_example("warfarin")
@@ -29,7 +32,15 @@ ferx_load_fit <- function(path) {
     stop("`path` must be a single character path to a .fitrx file.")
   }
   if (!file.exists(path)) {
-    stop("File does not exist: ", path)
+    # Mirror ferx_save_fit()'s `.fitrx` default: a caller who saved to a bare
+    # "results/run1" (stored as "results/run1.fitrx") can load it back with
+    # the same bare path.
+    alt <- paste0(path, ".fitrx")
+    if (!nzchar(tools::file_ext(path)) && file.exists(alt)) {
+      path <- alt
+    } else {
+      stop("File does not exist: ", path)
+    }
   }
 
   staging <- tempfile("fitrx_load_")

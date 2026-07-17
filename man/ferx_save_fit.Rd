@@ -9,8 +9,11 @@ ferx_save_fit(fit, output, include_data = FALSE)
 \arguments{
 \item{fit}{A \code{ferx_fit} object returned by \code{\link{ferx_fit}}.}
 
-\item{output}{Path to write. By convention the file extension is
-\code{.fitrx}; the function does not enforce this.}
+\item{output}{Path to write. When the path has no file extension, the
+conventional \code{.fitrx} extension is appended automatically (so
+\code{"results/run1"} is written as \code{"results/run1.fitrx"});
+\code{\link{ferx_load_fit}} accepts either the bare or the extended
+path. An explicit extension is honoured as given.}
 
 \item{include_data}{Logical. When \code{TRUE}, the input NONMEM CSV used
 to fit the model is embedded verbatim inside the archive (as
