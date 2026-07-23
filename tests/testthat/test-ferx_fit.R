@@ -2866,3 +2866,23 @@ test_that("ferx:::.ferx_parse_model_fit_options() ignores malformed lines (no `=
   opts <- ferx:::.ferx_parse_model_fit_options(path)
   expect_equal(opts, c(method = "foce"))
 })
+
+
+# ---------------------------------------------------------------------------
+# n_eta = 0 models (no random effects) - e.g. a fixed-effects [binary_model]
+# logistic. An eta-less fit returns an empty omega; the R post-processing must
+# keep it a 0x0 matrix rather than a bare numeric(0), else nrow(omega) is NULL
+# and the eta-metadata guards fail with "missing value where TRUE/FALSE needed"
+# (ferx-r #271).
+# ---------------------------------------------------------------------------
+test_that("ferx_fit() on an n_eta = 0 model (binary logistic) returns cleanly", {
+  ex  <- ferx_example("binary_logistic")
+  fit <- suppressWarnings(
+    ferx_fit(ex$model, ex$data, verbose = FALSE, settings = list(maxiter = 30L))
+  )
+  expect_s3_class(fit, "ferx_fit")
+  # omega is an empty matrix, not a bare numeric(0): nrow() must be 0L, not NULL.
+  expect_true(is.matrix(fit$omega))
+  expect_identical(nrow(fit$omega), 0L)
+  expect_length(fit$theta, 3L)   # TH0, THX, THT; no etas, no sigmas
+})

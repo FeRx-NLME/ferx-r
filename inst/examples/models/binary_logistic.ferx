@@ -1,0 +1,33 @@
+# Binary / logistic endpoint ([binary_model], ferx-core #760 Track C).
+#
+# Fixed-effects (n_eta = 0) logistic regression: DV in {0, 1} on CMT 3, with a
+# subject covariate X and the per-record TIME builtin in the log-odds. This is
+# the no-random-effects special case - the exact analogue of base-R
+# glm(DV ~ X + TIME, family = binomial):
+#
+#   logit P(DV = 1) = TH0 + THX * X + THT * TIME
+#
+# Data: binary_logistic.csv (60 subjects x 3 times; data-generating
+# TH0 = -0.4, THX = 0.9, THT = 0.5). Reference glm fit:
+#   (Intercept) = -0.7752, X = 0.8701, TIME = 0.8270  (deviance 213.60).
+#
+# ferx_simulate() draws a fresh 0/1 outcome per record (Bernoulli at the fitted
+# probability) and returns it in DV_SIM on CMT 3 (ferx-r #271).
+#
+# Use ferx_example("binary_logistic") to get file paths.
+
+[parameters]
+  theta TH0(0.0, -10.0, 10.0)
+  theta THX(0.0, -10.0, 10.0)
+  theta THT(0.0, -10.0, 10.0)
+
+[covariates]
+  X continuous
+
+[binary_model]
+  cmt   = 3
+  logit = TH0 + THX * X + THT * TIME
+
+[fit_options]
+  method  = focei
+  maxiter = 300

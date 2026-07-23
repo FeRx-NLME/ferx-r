@@ -367,7 +367,7 @@ ferx_load_fit <- function(path) {
 .fitrx_method_label <- function(token) {
   # Mirrors ferx-core's `EstimationMethod::label()`, keyed by the tokens its
   # `method_to_str()` writes into the .fitrx. A token missing here falls through to
-  # `as.character()` and surfaces lowercase (e.g. "agq" instead of "AGQ") — so this
+  # `as.character()` and surfaces lowercase (e.g. "agq" instead of "AGQ") - so this
   # list has to grow whenever the engine gains a method.
   if (is.null(token) || !nzchar(token)) return("FOCEI")
   switch(token,

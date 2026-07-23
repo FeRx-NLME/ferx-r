@@ -380,7 +380,9 @@ fn ferx_rust_fit(
 /// @param seed Random seed
 /// @param match_method Propensity-score matching method: "none" (off),
 ///   "optimal", "nearest", or "rank" (requires observed DV)
-/// @return Data frame with ID, TIME, IPRED, DV_SIM columns
+/// @return Data frame with DRAW, SIM, ID, TIME, CMT, IPRED, DV_SIM, OBSERVED
+///   columns. DV_SIM carries the simulated 0/1 outcome for a `[binary_model]`
+///   endpoint row; OBSERVED is set only for TTE rows (NA otherwise).
 /// @export
 #[extendr]
 fn ferx_rust_simulate(
@@ -466,7 +468,9 @@ fn ferx_rust_simulate(
 /// @param seed Random seed
 /// @param match_method Propensity-score matching method: "none" (off),
 ///   "optimal", "nearest", or "rank" (requires observed DV)
-/// @return Data frame with SIM, ID, TIME, IPRED, DV_SIM columns
+/// @return Data frame with DRAW, SIM, ID, TIME, CMT, IPRED, DV_SIM, OBSERVED
+///   columns. DV_SIM carries the simulated 0/1 outcome for a `[binary_model]`
+///   endpoint row; OBSERVED is set only for TTE rows (NA otherwise).
 /// @export
 #[extendr]
 #[allow(clippy::too_many_arguments)]
@@ -758,7 +762,9 @@ fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult) -> Robj
 ///   uncertainty distribution
 /// @param n_sim_per_draw Number of eta/eps replicates per parameter draw
 /// @param seed Random seed for reproducibility
-/// @return Data frame with DRAW, SIM, ID, TIME, IPRED, DV_SIM columns
+/// @return Data frame with DRAW, SIM, ID, TIME, CMT, IPRED, DV_SIM, OBSERVED
+///   columns. DV_SIM carries the simulated 0/1 outcome for a `[binary_model]`
+///   endpoint row; OBSERVED is set only for TTE rows (NA otherwise).
 /// @export
 #[extendr]
 #[allow(clippy::too_many_arguments)]
@@ -1472,6 +1478,9 @@ fn default_fit_result(
 ) -> FitResult {
     let template = &model.default_params;
     FitResult {
+        // ferx-core main added a checkpoint-restore flag; a defaulted FitResult is
+        // never a restored one.
+        restored_from_checkpoint: false,
         method: EstimationMethod::FoceI,
         method_chain: vec![EstimationMethod::FoceI],
         bayes: None,
@@ -1603,14 +1612,30 @@ fn sim_results_to_df(results: &[ferx_core::api::SimulationResult]) -> Robj {
     let id: Vec<String> = results.iter().map(|r| r.id.clone()).collect();
     let time: Vec<f64> = results.iter().map(|r| r.time).collect();
     // CMT column value: the data-file CMT for Gaussian rows, the `[event_model] cmt`
-    // for drug-driven TTE rows, so a joint PK-TTE simulation's PK and event rows are
-    // distinguishable in one long-format frame.
+    // for drug-driven TTE rows, the `[binary_model] cmt` for categorical rows -- so a
+    // joint PK / event / binary simulation's rows stay distinguishable in one
+    // long-format frame (without it, a binary draw was indistinguishable from a PK row
+    // that failed to predict -- ferx-r #271).
     let cmt: Vec<i32> = results.iter().map(|r| r.cmt as i32).collect();
     let ipred: Vec<f64> = results.iter().map(|r| r.ipred).collect();
-    // `SimulationResult` replaced the flat `dv_sim: f64` with `outcome: SimOutcome`
-    // (Gaussian vs TTE). `continuous_value()` returns the Gaussian value (NAN for
-    // non-Gaussian outcomes), preserving the DV_SIM column for the existing paths.
-    let dv_sim: Vec<f64> = results.iter().map(|r| r.outcome.continuous_value()).collect();
+    // DV_SIM per outcome kind. The old code called `outcome.continuous_value()`
+    // unconditionally, whose non-Gaussian arms return `f64::NAN` behind a
+    // `debug_assert!(false)` misuse guard (compiled out in ferx-r's --release
+    // build). So every binary draw came back as `NA` (ferx-r #271). Match on the
+    // outcome instead: fold a categorical/count draw into DV_SIM as its numeric
+    // outcome (0/1 for a `[binary_model]` endpoint), matching how the input CSV
+    // codes DV and how NONMEM records it. TTE `Event` rows stay `NA` here -- their
+    // payload is the sampled event time, already carried in the TIME column.
+    let dv_sim: Vec<f64> = results
+        .iter()
+        .map(|r| match &r.outcome {
+            SimOutcome::Continuous { value } => *value,
+            SimOutcome::Category { state } => *state as f64,
+            SimOutcome::Count { count } => *count as f64,
+            #[cfg(feature = "survival")]
+            SimOutcome::Event { .. } => f64::NAN,
+        })
+        .collect();
     // OBSERVED: a drug-driven TTE row (`SimOutcome::Event`) carries its event time in
     // TIME and the observed/censored flag here -- 1 = event fired before the horizon,
     // 0 = administratively right-censored at the horizon. Gaussian rows are NaN -> R
@@ -2995,12 +3020,16 @@ fn ferx_rust_sir(
             // PR #377 (ferx-core) added NPDE/NPD; the SIR path never reads them.
             npde: Vec::new(),
             npd: Vec::new(),
+            // ferx-core #900 added categorical sdtab rows; the SIR path never reads them.
+            discrete_rows: Vec::new(),
         });
     }
 
     // Skeleton FitResult — only the fields ferx_core::run_sir actually
     // reads are populated; everything else gets a neutral default.
     let fit = FitResult {
+        // ferx-core main added a checkpoint-restore flag; the SIR path never reads it.
+        restored_from_checkpoint: false,
         method: if interaction {
             EstimationMethod::FoceI
         } else {
@@ -3337,6 +3366,8 @@ fn ferx_rust_covariance(
             compartment_states: Vec::new(),
             npde: Vec::new(),
             npd: Vec::new(),
+            // ferx-core #900 added categorical sdtab rows; the covariance path never reads them.
+            discrete_rows: Vec::new(),
         });
     }
 
@@ -3345,6 +3376,8 @@ fn ferx_rust_covariance(
     // everything else gets a neutral default. `bayes = None` so the returned
     // covariance_status resolves to Computed/Failed rather than NotRequested.
     let fit = FitResult {
+        // ferx-core main added a checkpoint-restore flag; the covariance path never reads it.
+        restored_from_checkpoint: false,
         method: if interaction {
             EstimationMethod::FoceI
         } else {

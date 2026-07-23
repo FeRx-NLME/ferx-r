@@ -204,6 +204,13 @@
 #'     PK observed on CMT 2, event on CMT 3. \code{ferx_fit()} and
 #'     \code{ferx_predict_survival()} are supported; simulating an ODE-accumulated
 #'     hazard is not yet (a later slice adds the event-time root-finder).}
+#'   \item{binary_logistic}{Binary / logistic endpoint (\code{[binary_model]},
+#'     ferx-core #760). A fixed-effects (\code{n_eta = 0}) logistic regression: the
+#'     0/1 outcome DV on CMT 3 is Bernoulli with
+#'     \code{logit P(DV = 1) = TH0 + THX * X + THT * TIME} - the exact analogue of
+#'     base-R \code{glm(DV ~ X + TIME, family = binomial)} (reference intercept
+#'     -0.775, X 0.870, TIME 0.827). \code{ferx_simulate()} draws a fresh 0/1
+#'     outcome per record and returns it in \code{DV_SIM} on CMT 3 (ferx-r #271).}
 #'   \item{two_cpt_oral_cov_ode_template}{Two-compartment oral PK with covariates
 #'     written with \code{ode_template two_cpt_oral(...)} in
 #'     \code{[structural_model]}: ferx generates the standard disposition ODE

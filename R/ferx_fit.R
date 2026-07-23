@@ -27,17 +27,17 @@
 #'   the reported covariance/diagnostics. Supported methods: \code{"foce"},
 #'   \code{"focei"},
 #'   \code{"laplace"} (alias \code{"laplacian"}; the Laplace approximation with the
-#'   \emph{exact} Hessian — NONMEM \code{$EST METHOD=1 LAPLACIAN}. This is not the
+#'   \emph{exact} Hessian - NONMEM \code{$EST METHOD=1 LAPLACIAN}. This is not the
 #'   same estimator as \code{"focei"}, which builds its Gaussian from the
 #'   Gauss-Newton Hessian and reports a different OFV. At the default
 #'   \code{n_agq = 1} it is a single node; \code{settings = list(n_agq = N)} with
-#'   \code{N > 1} turns it into adaptive Gauss-Hermite quadrature — the exact
+#'   \code{N > 1} turns it into adaptive Gauss-Hermite quadrature - the exact
 #'   conditional likelihood evaluated on a Gauss-Hermite grid around each subject's
 #'   empirical-Bayes mode, which makes no Gaussian-residual assumption and so
 #'   handles non-Gaussian endpoints (time-to-event, categorical). Cost is
 #'   \code{n_agq^n_eta} per subject per iteration, so higher node counts suit
 #'   models with few random effects. Supports IOV at any occasion count. There is
-#'   no separate \code{"agq"} method — adaptive quadrature is this method with
+#'   no separate \code{"agq"} method - adaptive quadrature is this method with
 #'   \code{n_agq > 1}; \code{"focei"} likewise accepts \code{n_agq > 1} for the
 #'   Gauss-Newton-anchored quadrature),
 #'   \code{"saem"}, \code{"gn"} (Gauss-Newton / BHHH),
@@ -1685,13 +1685,18 @@ ferx_fit <- function(model, data = NULL,
     names(result$theta) <- result$theta_names
   }
 
-  # Reshape omega into a matrix
+  # Reshape omega into a matrix. A model with no random effects (n_eta = 0 - e.g.
+  # a fixed-effects `[binary_model]`) returns an empty omega; keep it a 0x0 matrix
+  # rather than a bare numeric(0), so downstream `nrow(result$omega)` is 0, not
+  # NULL (the latter poisons the eta-metadata guards below with NA - #271).
   if (length(result$omega) > 0 && !is.null(result$omega_dim)) {
     d <- result$omega_dim
     result$omega <- matrix(result$omega, nrow = d, ncol = d)
     eta_nms_om <- result$eta_names
     omega_dim_nms <- if (!is.null(eta_nms_om) && length(eta_nms_om) == d) eta_nms_om else paste0("OMEGA(", seq_len(d), ",", seq_len(d), ")")
     rownames(result$omega) <- colnames(result$omega) <- omega_dim_nms
+  } else {
+    result$omega <- matrix(numeric(0), nrow = 0L, ncol = 0L)
   }
 
   # Name SE vectors

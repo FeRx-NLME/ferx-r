@@ -93,6 +93,23 @@ fit$eta_cov
 
 ## Fixed
 
+- **Simulated binary / categorical outcomes are no longer `NA`** (#271). With a
+  `[binary_model]` endpoint (ferx-core #900), `ferx_simulate()` mapped every
+  simulated row through `continuous_value()`, whose categorical arm returns `NaN`,
+  so each binary draw came back as `DV_SIM = NA` and was indistinguishable from a
+  PK row that failed to predict. The simulate frame now folds a categorical draw
+  into `DV_SIM` as its numeric 0/1 outcome (matching how the input CSV codes DV);
+  combined with the existing `CMT` column, simulated binary outcomes are now
+  usable from R. (TTE `Event` rows are unchanged: `DV_SIM = NA`, event time in
+  `TIME`, `OBSERVED` flag set.)
+
+- **`ferx_fit()` on a model with no random effects (`n_eta = 0`)** - e.g. a
+  fixed-effects `[binary_model]` logistic regression - no longer errors with
+  "missing value where TRUE/FALSE needed" (#271). An eta-less fit returns an empty
+  omega; the R post-processing left it as a bare `numeric(0)` instead of a 0x0
+  matrix, so `nrow(omega)` was `NULL` and poisoned the eta-metadata guards with
+  `NA`. `omega` is now always a matrix, so `n_eta = 0` models fit cleanly.
+
 - **`ferx_save_fit()` / `ferx_load_fit()` round-trip on extension-less paths**
   (#268). Saving to a path with no file extension (e.g.
   `ferx_save_fit(fit, "results/run1_base_diag")`) previously landed at
@@ -106,6 +123,13 @@ fit$eta_cov
 
 ## Added
 
+- **New bundled example `ferx_example("binary_logistic")`** — a fixed-effects
+  `[binary_model]` (logistic) endpoint: the 0/1 outcome on CMT 3 is Bernoulli with
+  `logit P(DV = 1) = TH0 + THX * X + THT * TIME`, the exact analogue of base-R
+  `glm(DV ~ X + TIME, family = binomial)`. Ships with a runnable
+  `inst/examples/ex_binary_logistic.R` that fits it and shows `ferx_simulate()`
+  returning 0/1 `DV_SIM` on the binary CMT (#271). Delivered via the ferx-core pin
+  bump (#900).
 - **Per-route absorption lag in model files** — every built-in input-rate function
   now takes an optional `lag=` argument (`first_order(ka=KA, lag=L)`,
   `zero_order(dur=DUR, lag=L)`, `transit`, `igd`, `weibull`), giving each parallel /

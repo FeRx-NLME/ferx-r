@@ -225,3 +225,28 @@ test_that(".ferx_surface_sim_warnings is silent with no diagnostics (empty or NU
   expect_no_warning(.ferx_surface_sim_warnings(clean))
   expect_no_warning(.ferx_surface_sim_warnings(NULL))
 })
+
+
+# ---- Binary / categorical outcomes (ferx-r #271, ferx-core #900) ----
+# A `[binary_model]` endpoint makes simulate() emit `SimOutcome::Category` rows.
+# The glue used to map every row through `continuous_value()` (NaN for a
+# categorical draw), so binary outcomes came back as `DV_SIM = NA`. They must now
+# arrive as numeric 0/1 in DV_SIM on the binary CMT.
+
+test_that("ferx_simulate returns 0/1 DV_SIM (not NA) for a [binary_model] endpoint", {
+  ex <- ferx_example("binary_logistic")
+  sim <- ferx_simulate(ex$model, ex$data, n_sim = 20L, seed = 1L)
+
+  expect_s3_class(sim, "data.frame")
+  expect_true(all(c("CMT", "TIME", "DV_SIM") %in% names(sim)))
+
+  # Every row is a binary draw on CMT 3 (this model has no Gaussian endpoint).
+  bin <- sim[sim$CMT == 3L, ]
+  expect_gt(nrow(bin), 0)
+  expect_false(anyNA(bin$DV_SIM))          # the #271 regression: was all-NA
+  expect_true(all(bin$DV_SIM %in% c(0, 1))) # Bernoulli outcomes, not continuous
+
+  # Different seeds give different draws (the outcomes are actually sampled).
+  sim2 <- ferx_simulate(ex$model, ex$data, n_sim = 20L, seed = 2L)
+  expect_false(identical(sim$DV_SIM, sim2$DV_SIM[seq_len(nrow(sim))]))
+})
