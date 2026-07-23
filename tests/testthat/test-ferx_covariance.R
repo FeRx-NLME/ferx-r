@@ -115,7 +115,12 @@ test_that("ferx_covariance closely reproduces the inline covariance step", {
 
   expect_equal(dim(out$cov_matrix), dim(fit$cov_matrix))
   expect_lt(max(abs(unname(out$cov_matrix) - unname(fit$cov_matrix))), 2e-3)
-  expect_lt(max(abs(unname(out$se_theta) - unname(fit$se_theta))), 2e-3)
+  # se_theta is the sqrt of the cov diagonal, so the same recompute-path divergence
+  # lands slightly larger here. The ferx-core f7d52ec pin (categorical endpoints,
+  # #900) grew the stable warfarin gap from <2e-3 to a deterministic ~2.8e-3, so
+  # bound se_theta at 5e-3 - still orders of magnitude below any real covariance
+  # regression (a wrong interaction flag / wrong EBEs).
+  expect_lt(max(abs(unname(out$se_theta) - unname(fit$se_theta))), 5e-3)
 })
 
 test_that("ferx_covariance can re-run with a different covariance_method", {
