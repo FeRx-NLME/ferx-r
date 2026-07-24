@@ -93,6 +93,15 @@ fit$eta_cov
 
 ## Fixed
 
+- **ODE-form models fit with `method = "foce"` now match their analytical
+  closed-form equivalent's marginal objective** (via ferx-core #378). When a
+  subject's per-subject (inner EBE) objective was multimodal, the analytical and
+  ODE forms could condition on different modes, so their FOCE marginal OFV
+  diverged - by up to ~18 units on some models/platforms (most visibly the
+  3-compartment IV `three_cpt_iv` example on Linux). ferx-core now keeps the
+  better inner estimate on the analytical path, matching the ODE path, so the two
+  forms agree to solver round-off. Delivered via the ferx-core pin bump.
+
 - **Simulated binary / categorical outcomes are no longer `NA`** (#271). With a
   `[binary_model]` endpoint (ferx-core #900), `ferx_simulate()` mapped every
   simulated row through `continuous_value()`, whose categorical arm returns `NaN`,
