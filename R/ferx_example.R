@@ -89,6 +89,22 @@
 #'     (constant-rate) absorption via the built-in \code{zero_order(dur)} input
 #'     rate -- a modeled-duration infusion (NONMEM \code{RATE=-2}/\code{D1}) fed
 #'     straight into central. Shares the NONMEM absorption anchor dataset.}
+#'   \item{ss_absorption}{One-compartment ODE model demonstrating \emph{steady-state
+#'     dosing} (\code{SS=1}, \code{II}) into a built-in absorption compartment
+#'     (\code{first_order(ka)} forcing central) -- ferx-core #719 (gap 1). The
+#'     engine equilibrates the periodic dosing \emph{through} the absorption
+#'     kernel, so no explicit run-in of dose records is needed; this combination
+#'     was previously rejected at parse time. Anchored to NONMEM 7.6.0 (ADVAN2
+#'     TRANS2): the dataset's \code{DV} is the NONMEM population prediction and
+#'     \code{\link{ferx_predict}} reproduces it to < 1e-4.}
+#'   \item{infusion_absorption}{One-compartment ODE model demonstrating an
+#'     \emph{infusion} (\code{RATE>0}) into a built-in absorption compartment
+#'     (\code{first_order(ka)} forcing central) -- ferx-core #719 (gap 2). The
+#'     infusion becomes the zero-order source feeding the kernel (a convolution
+#'     of the infusion window with the absorption density), not a plain injection;
+#'     this combination was previously rejected at parse time. Anchored to NONMEM
+#'     7.6.0 (ADVAN2 TRANS2): the dataset's \code{DV} is the NONMEM population
+#'     prediction and \code{\link{ferx_predict}} reproduces it to < 1e-4.}
 #'   \item{parallel_absorption}{One-compartment ODE model with \emph{parallel}
 #'     (dual first-order) absorption: two \code{first_order(ka)} pathways (a fast
 #'     and a slow one) feeding central, split by a declared pathway fraction
