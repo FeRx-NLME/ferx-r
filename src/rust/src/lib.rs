@@ -553,15 +553,17 @@ fn ferx_rust_simulate_from_fit(
 /// Simulate state-reactive ("adaptive" / feedback) dosing from a model's
 /// `[adaptive_dosing]` block.
 ///
-/// The dosing regimen is not in the data — it is decided at run time by the
-/// declarative controller in the model file's `[adaptive_dosing]` block, which
+/// A declarative controller in the model file's `[adaptive_dosing]` block
 /// reads the simulated (optionally assay-noised) state at each decision time and
-/// titrates the next dose. The base subjects must therefore be **dose-free**
-/// (the controller supplies every dose); the data provides only the observation
-/// grid and any covariates.
+/// titrates the next dose. The data may carry a **pre-scheduled base regimen**
+/// (ordinary `EVID=1/4` dose rows - a loading / maintenance dose); the controller
+/// then augments it. A dose-free base subject (observation grid only) is equally
+/// valid. Base doses are honored in the trajectories and the `auc_target` metric
+/// but are **not** written to the dose ledger, which holds controller doses only.
 ///
 /// @param model_path Path to .ferx model file containing an `[adaptive_dosing]` block
-/// @param data_path Path to NONMEM-format CSV (dose-free base subjects + obs times)
+/// @param data_path Path to NONMEM-format CSV (observation grid, covariates, and
+///   optionally a pre-scheduled base regimen)
 /// @param n_sim Number of replicates
 /// @param seed Random seed
 /// @param verify "true"/"false" — run the frozen-schedule replay verifier after
@@ -623,8 +625,9 @@ fn ferx_rust_simulate_adaptive(
         opts.max_decisions = max_decisions as usize;
     }
 
-    // A failure here (analytical model, non-dose-free subject, or a verify
-    // divergence that taints the result) is raised as an R error rather than
+    // A failure here (analytical model, an unsupported dosing/covariate
+    // combination, or a verify divergence that taints the result) is raised as an
+    // R error rather than
     // returned as NULL: the adaptive path has more — and more consequential —
     // failure modes than a plain simulate, and a verify divergence in particular
     // must not be silently missable.

@@ -17,9 +17,9 @@ ferx_simulate_adaptive(
 \item{model}{Path to a .ferx model file containing an \code{[adaptive_dosing]}
 block}
 
-\item{data}{Path to a NONMEM-format CSV (dose-free base subjects + observation
-times). When omitted, the model file's \code{[data]} block (\code{path =
-  ...}) is used.}
+\item{data}{Path to a NONMEM-format CSV: an observation grid, any covariates,
+and optionally a pre-scheduled base regimen (dose rows). When omitted, the
+model file's \code{[data]} block (\code{path = ...}) is used.}
 
 \item{n_sim}{Number of simulation replicates}
 
@@ -40,15 +40,17 @@ A list of four data frames:
 OBSERVED - the per-observation predictions, as in
 \code{\link{ferx_simulate}} (\code{OBSERVED} is \code{NA} here: the
 adaptive path has no time-to-event endpoint).}
-\item{\code{doses}}{The realized dose ledger: DRAW, SIM, ID, TIME, AMT,
-CMT, RATE, DECISION, SIGNAL (the value the controller titrated on -
+\item{\code{doses}}{The realized dose ledger, \strong{controller-issued
+doses only} (pre-scheduled base doses are excluded): DRAW, SIM, ID, TIME,
+AMT, CMT, RATE, DECISION, SIGNAL (the value the controller titrated on -
 assay-noised when \code{with_assay_error}), RULE (the rule that fired).}
 \item{\code{decisions}}{One row per decision including holds: DRAW, SIM,
 ID, DECISION, TIME, SIGNAL, OUTCOME ("dosed" / "hold" / "stop"),
 N_DOSED.}
 \item{\code{metrics}}{One row per realized run (subject x draw x
 replicate) - the per-subject outcome summary: DRAW, SIM, ID, CUM_DOSE
-(sum of realized doses), N_DOSES, N_INCREASES / N_DECREASES (realized
+(sum of controller-issued doses; excludes the base regimen), N_DOSES
+(controller doses only), N_INCREASES / N_DECREASES (realized
 dose-change counts, by dose delta), N_HOLDS, DISCONTINUED,
 TIME_TO_DISCONT, SIGNAL_MIN / SIGNAL_MAX / SIGNAL_MEAN (over the
 decisions that recorded a signal), and PCT_TIME_IN_WINDOW - the fraction
@@ -66,9 +68,33 @@ the file-driven therapeutic-drug-monitoring / feedback-dosing path; the plain
 \code{\link{ferx_simulate}} replays a fixed regimen from the data instead.
 }
 \details{
-The base subjects must be \strong{dose-free}: the controller supplies every
-dose, so the data provides only the observation grid and any covariates. A
-model without an \code{[adaptive_dosing]} block is an error.
+The data may carry a \strong{pre-scheduled base regimen} - ordinary dose rows
+(\code{EVID = 1} or \code{4}, with \code{AMT}, and optionally \code{RATE},
+\code{SS}, \code{II}) such as a loading or maintenance dose. The controller
+then \emph{augments} that standing prescription: at each decision time it
+reads the simulated (optionally assay-noised) state and appends its own dose.
+A dose-free base subject (observation grid only) is equally valid - the
+controller simply supplies the entire regimen. A model without an
+\code{[adaptive_dosing]} block is an error.
+
+\strong{The dose ledger (\code{$doses}) holds controller-issued doses only.}
+Pre-scheduled base doses never appear in it, so \code{$metrics$CUM_DOSE} and
+\code{$metrics$N_DOSES} \emph{exclude} the base regimen (e.g. a 1500 mg
+loading dose is not counted). The full realized regimen is the union of
+\code{$doses} with the input CSV's \code{EVID = 1/4} rows. In contrast
+\code{$trajectories}, \code{$decisions}, \code{PCT_TIME_IN_WINDOW}, and the
+\code{auc_target} attainment metric \emph{do} reflect the base regimen. A base
+dose scheduled exactly at a decision time is read \strong{pre-dose} (the
+trough), and a base dose scheduled after a \code{stop} still lands - a
+\code{stop} ends controller augmentation, not the standing prescription.
+
+\strong{System resets.} An \code{EVID = 3} row zeroes the compartments (and
+re-seeds any \code{init(state) = expr}) at its time; \code{EVID = 4} does the
+same and then doses. Ordering at a shared time is reset, then dose, then
+observation. Some combinations remain rejected with a typed error rather than
+silently mis-integrated: a base regimen combined with a reset \emph{under} a
+time-varying covariate or IOV; and an \code{auc_target} metric combined with a
+time-varying covariate, a \code{TIME}-dependent PK parameter, IOV, or a reset.
 }
 \examples{
 \dontrun{

@@ -132,6 +132,20 @@ fit$eta_cov
 
 ## Added
 
+- **Adaptive dosing now accepts a pre-scheduled base regimen (loading /
+  maintenance dose)** — `ferx_simulate_adaptive()` no longer requires dose-free
+  base subjects. Ordinary dose rows in the data (`EVID = 1/4`, with `AMT`, and
+  optionally `RATE`, `SS`, `II`) are integrated as a standing prescription and the
+  `[adaptive_dosing]` controller augments them, the real therapeutic-drug-monitoring
+  / model-informed-precision-dosing workflow. System resets (`EVID = 3/4`) are also
+  honored. Note the returned dose ledger and `metrics$CUM_DOSE` count
+  controller-issued doses only, so a pre-scheduled base dose is excluded from them
+  (it is still reflected in the trajectories, `PCT_TIME_IN_WINDOW`, and the
+  `auc_target` metric). New bundled example
+  `ferx_example("adaptive_vanco_loading")` — a vancomycin loading-dose +
+  maintenance titration — with a runnable `inst/examples/ex_adaptive_vanco_loading.R`.
+  Delivered via the ferx-core pin bump (#276; ferx-core #702 / #716 / #929 and
+  follow-ups).
 - **New bundled example `ferx_example("binary_logistic")`** — a fixed-effects
   `[binary_model]` (logistic) endpoint: the 0/1 outcome on CMT 3 is Bernoulli with
   `logit P(DV = 1) = TH0 + THX * X + THT * TIME`, the exact analogue of base-R
