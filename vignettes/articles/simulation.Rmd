@@ -203,8 +203,8 @@ therapeutic-drug-monitoring / model-informed-precision-dosing path.
 The data may still carry a **pre-scheduled base regimen** - ordinary dose rows,
 such as a loading dose - and the controller *augments* it. The bundled
 `adaptive_vanco_loading` example does exactly this: a 1500 mg vancomycin loading
-dose rides on the data, and the controller titrates the daily maintenance dose to
-hold the trough in a 10-15 mg/L window.
+dose rides on the data, and the controller titrates the daily maintenance dose
+toward a 10-15 mg/L trough target window.
 
 ```{r adaptive-run, message = FALSE, warning = FALSE}
 ex  <- ferx_example("adaptive_vanco_loading")
@@ -214,16 +214,19 @@ str(res, max.level = 1)
 
 `ferx_simulate_adaptive()` returns four data frames rather than one: the
 per-observation `trajectories`, the realized dose `ledger` (`doses`), the
-per-decision log (`decisions`, including holds and stops), and per-subject outcome
-`metrics`. The controller's day-by-day view - the trough it observed and the rule
-it fired - is in `decisions`:
+per-decision log (`decisions`, which also records holds and stops - none fire in
+this run), and per-subject outcome `metrics`. The controller's day-by-day view -
+the trough it observed and the rule it fired - is in `decisions`:
 
 ```{r adaptive-decisions}
 res$decisions[res$decisions$SIM == 1, c("DECISION", "TIME", "SIGNAL", "OUTCOME")]
 ```
 
 The trough starts sub-therapeutic (the decayed loading dose, ~5.6 mg/L on day 1)
-and climbs into the target window as the maintenance dose is titrated up.
+and climbs as the maintenance dose is titrated up - over this short 6-day run it
+reaches the 10-15 mg/L window only at the final decision (so
+`metrics$PCT_TIME_IN_WINDOW` is modest here; a longer horizon would settle it
+in-window).
 
 One caveat worth stating explicitly: the dose **ledger holds controller-issued
 doses only**. A pre-scheduled base dose - here the 1500 mg loading dose - never
@@ -234,9 +237,9 @@ add the base doses from the input data back in:
 ```{r adaptive-ledger}
 loading_dose   <- 1500
 cum_controller <- res$metrics$CUM_DOSE[res$metrics$SIM == 1]
-c(controller_only = cum_controller,
-  full_realized   = cum_controller + loading_dose,
-  loading_in_ledger = any(res$doses$AMT == loading_dose))
+list(controller_only   = cum_controller,
+     full_realized     = cum_controller + loading_dose,
+     loading_in_ledger = any(res$doses$AMT == loading_dose))
 ```
 
 ---
