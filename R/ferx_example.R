@@ -279,13 +279,23 @@
 #'     in \code{fit$exclusions} and echoed by \code{print.ferx_fit()} and
 #'     \code{ferx_runlog()}.}
 #'   \item{adaptive_tdm}{State-reactive (adaptive / feedback) dosing: a
-#'     vancomycin-style TDM trough titration. The dose is not in the data -- the
-#'     model's \code{[adaptive_dosing]} block titrates the next q12h dose to drive
-#'     the measured (assay-noised) pre-dose trough into a 10-20 mg/L window. Run
-#'     with \code{\link{ferx_simulate_adaptive}} (not \code{ferx_fit}); the base
-#'     subjects are dose-free, so the controller supplies every dose. Returns the
+#'     vancomycin-style TDM trough titration. The dose is decided at run time --
+#'     the model's \code{[adaptive_dosing]} block titrates the next q12h dose to
+#'     drive the measured (assay-noised) pre-dose trough into a 10-20 mg/L window.
+#'     Run with \code{\link{ferx_simulate_adaptive}} (not \code{ferx_fit}); here
+#'     the base subjects are dose-free, so the controller supplies every dose (see
+#'     \code{adaptive_vanco_loading} for a pre-scheduled loading dose). Returns the
 #'     concentration trajectories, the realized dose ledger, and the per-decision
 #'     log (ferx-core epic #391).}
+#'   \item{adaptive_vanco_loading}{State-reactive dosing with a \strong{pre-scheduled
+#'     loading dose}: a vancomycin AUC/trough titration where the data carries a
+#'     1500 mg loading dose (an \code{EVID = 1} row) and the
+#'     \code{[adaptive_dosing]} controller augments it, titrating the q24h
+#'     maintenance dose to a 10-15 mg/L window. Demonstrates that base subjects
+#'     need not be dose-free. Note the loading dose is a base dose, so it is absent
+#'     from the returned dose ledger and from \code{metrics$CUM_DOSE} (which counts
+#'     controller doses only). Run with \code{\link{ferx_simulate_adaptive}}
+#'     (ferx-core #702 / #929).}
 #' }
 #' Call \code{ferx_example()} with no arguments to list all available names.
 #'

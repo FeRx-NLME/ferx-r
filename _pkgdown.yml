@@ -34,33 +34,33 @@ reference:
       - ferx_model_validate
       - ferx_model_get_section
       - ferx_model_set_section
-      - ferx_to_frem
+      - ferx_model_to_frem
 
   - title: "Diagnostics & output"
     desc: "Extract and visualise parameter estimates, ETAs, and optimizer traces."
     contents:
       - ferx_runlog
       - ferx_runlog_iters
-      - ferx_warnings
+      - ferx_get_warnings
       - ferx_cov_screen
-      - ferx_plot_trace
+      - plot.ferx_fit
       - ferx_trace
-      - ferx_npde
+      - ferx_calc_npde
+      - ferx_conddist
       - ferx_xpose
       - check_diagnostics
 
   - title: "Data filtering"
     desc: "Preview and apply record-level data-selection filters before fitting."
     contents:
-      - ferx_selection
-      - ferx_selection_excluded
+      - ferx_apply_selection
       - print.ferx_data
 
   - title: "Utilities"
     desc: "Helper functions for exploring bundled examples and checking model initialisation."
     contents:
       - ferx_example
-      - ferx_columns
+      - ferx_get_columns
       - ferx_check_init
       - ferx_inits_from_nca
       - print.ferx_inits
