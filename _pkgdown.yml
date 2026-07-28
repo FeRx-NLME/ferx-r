@@ -46,6 +46,7 @@ reference:
       - plot.ferx_fit
       - ferx_trace
       - ferx_calc_npde
+      - ferx_conddist
       - ferx_xpose
       - check_diagnostics
 
