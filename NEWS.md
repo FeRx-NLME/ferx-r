@@ -146,6 +146,16 @@ fit$eta_cov
   maintenance titration — with a runnable `inst/examples/ex_adaptive_vanco_loading.R`.
   Delivered via the ferx-core pin bump (#276; ferx-core #702 / #716 / #929 and
   follow-ups).
+- **New bundled examples `ferx_example("ss_absorption")` and
+  `ferx_example("infusion_absorption")`** — steady-state dosing (`SS=1`, `II`) and
+  infusion (`RATE>0`) into a built-in absorption compartment (`first_order(ka)`
+  forcing central), the two dosing routes that ferx-core #719 (gaps 1 and 2)
+  added for the pointwise density absorption kernels. Both were previously
+  rejected at parse time. Each ships a runnable `inst/examples/ex_*.R` and is
+  anchored to NONMEM 7.6.0 (ADVAN2 TRANS2): the dataset `DV` is the NONMEM
+  population prediction and `ferx_predict()` reproduces it to < 1e-4. Steady-state
+  equilibrates the periodic dosing through the absorption kernel; the infusion
+  becomes the zero-order source feeding the kernel.
 - **New bundled example `ferx_example("binary_logistic")`** — a fixed-effects
   `[binary_model]` (logistic) endpoint: the 0/1 outcome on CMT 3 is Bernoulli with
   `logit P(DV = 1) = TH0 + THX * X + THT * TIME`, the exact analogue of base-R

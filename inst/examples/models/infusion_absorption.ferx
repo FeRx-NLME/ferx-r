@@ -1,0 +1,50 @@
+# Infusion (RATE>0) into a built-in absorption compartment (ferx-core #719, gap 2)
+#
+# A one-compartment oral model whose absorption is the built-in first-order
+# input-rate kernel first_order(ka=KA) forcing the central compartment. The dose
+# is given as a zero-order INFUSION (RATE>0, here AMT=100, RATE=25 -> a 4 h
+# infusion) into that absorption compartment: the infusion becomes the zero-order
+# source feeding the kernel (R_in is the convolution of the infusion window with
+# the absorption density), not a plain +rate injection. Infusing into a built-in
+# absorption compartment used to be rejected at parse time; ferx-core #719
+# (gap 2) lifted that for the pointwise density kernels.
+#
+# Anchored to NONMEM 7.6.0 (ADVAN2 TRANS2, S2 = V): the DV column of
+# infusion_absorption.csv carries the NONMEM population prediction, and
+# ferx_predict() reproduces it to < 1e-4 (see ex_infusion_absorption.R). A fit
+# works identically (raise the omega and add subjects).
+
+[parameters]
+  theta TVCL(1.0,  0.01, 50.0)    # clearance (L/h)
+  theta TVV(20.0,  0.5, 200.0)    # central volume (L); C = central / V
+  theta TVKA(0.6,  0.005, 20.0)   # first-order absorption rate (1/h)
+
+  omega ETA_CL ~ 0.0              # no IIV: a single typical-value subject (this is a
+                                  # prediction cross-check; raise omega + add subjects to fit)
+
+  sigma PROP_ERR ~ 0.01 (sd)      # proportional residual error
+
+[individual_parameters]
+  CL = TVCL * exp(ETA_CL)
+  V  = TVV
+  KA = TVKA
+
+[structural_model]
+  ode(obs_cmt=central, states=[central])
+
+[odes]
+  # first_order(ka) is the ADVAN2 depot->central appearance rate, applied as the
+  # input-rate forcing on central; y = central / V matches NONMEM S2 = V.
+  d/dt(central) = first_order(ka=KA) - CL/V*central
+
+[scaling]
+  y = central / V
+
+[error_model]
+  DV ~ proportional(PROP_ERR)
+
+[fit_options]
+  # Tight ODE tolerances so the infusion-into-kernel convolution matches the
+  # NONMEM anchor to < 1e-4; ferx_predict() does not use `method`.
+  ode_reltol = 1e-10
+  ode_abstol = 1e-10
