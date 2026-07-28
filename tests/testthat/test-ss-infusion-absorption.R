@@ -21,7 +21,9 @@ test_that("ss_absorption: ferx_predict matches the NONMEM anchor (< 1e-4)", {
   cmp  <- merge(obs, pred[, c("TIME", "PRED")], by = "TIME")
   expect_equal(nrow(cmp), nrow(obs))
   # DV on the observation rows is the NONMEM PRED; ferx must match to < 1e-4.
-  expect_equal(cmp$PRED, cmp$DV, tolerance = 1e-4)
+  # Assert the per-point MAX relative error (matches the documented claim; a
+  # mean-based tolerance could hide a single diluted outlier).
+  expect_lt(max(abs(cmp$PRED - cmp$DV) / cmp$DV), 1e-4)
 })
 
 test_that("infusion_absorption: infusion into a built-in absorption compartment predicts", {
@@ -40,7 +42,7 @@ test_that("infusion_absorption: ferx_predict matches the NONMEM anchor (< 1e-4)"
   pred <- ferx_predict(ex$model, ex$data)
   cmp  <- merge(obs, pred[, c("TIME", "PRED")], by = "TIME")
   expect_equal(nrow(cmp), nrow(obs))
-  expect_equal(cmp$PRED, cmp$DV, tolerance = 1e-4)
+  expect_lt(max(abs(cmp$PRED - cmp$DV) / cmp$DV), 1e-4)
 })
 
 test_that("both new absorption examples are discovered with data on disk", {

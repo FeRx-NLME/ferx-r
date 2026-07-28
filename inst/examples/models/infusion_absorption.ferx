@@ -19,7 +19,8 @@
   theta TVV(20.0,  0.5, 200.0)    # central volume (L); C = central / V
   theta TVKA(0.6,  0.005, 20.0)   # first-order absorption rate (1/h)
 
-  omega ETA_CL ~ 0.05             # between-subject variability on CL (log-normal)
+  omega ETA_CL ~ 0.0              # no IIV: a single typical-value subject (this is a
+                                  # prediction cross-check; raise omega + add subjects to fit)
 
   sigma PROP_ERR ~ 0.01 (sd)      # proportional residual error
 
@@ -43,6 +44,7 @@
   DV ~ proportional(PROP_ERR)
 
 [fit_options]
-  method     = focei
+  # Tight ODE tolerances so the infusion-into-kernel convolution matches the
+  # NONMEM anchor to < 1e-4; ferx_predict() does not use `method`.
   ode_reltol = 1e-10
   ode_abstol = 1e-10
