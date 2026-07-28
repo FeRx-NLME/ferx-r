@@ -93,8 +93,11 @@ re-seeds any \code{init(state) = expr}) at its time; \code{EVID = 4} does the
 same and then doses. Ordering at a shared time is reset, then dose, then
 observation. Some combinations remain rejected with a typed error rather than
 silently mis-integrated: a base regimen combined with a reset \emph{under} a
-time-varying covariate or IOV; and an \code{auc_target} metric combined with a
-time-varying covariate, a \code{TIME}-dependent PK parameter, IOV, or a reset.
+time-varying covariate or IOV; a steady-state, lag-timed, or modeled-rate
+(\code{RATE}) base dose \emph{under} a time-varying covariate or IOV (these
+are supported on the constant-covariate path); and an \code{auc_target} metric
+combined with a time-varying covariate, a \code{TIME}-dependent PK parameter,
+IOV, or a reset.
 }
 \examples{
 \dontrun{
