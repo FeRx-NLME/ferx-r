@@ -26,7 +26,13 @@ post-estimation workflow:
 | `ferx_simulate()` | replicates of `IPRED` and `DV_SIM` | between-subject variability + residual error |
 | `ferx_simulate_with_uncertainty()` | same + parameter draws | also propagates parameter uncertainty |
 
-All three take the same `(model, data)` pair as `ferx_fit()` and accept an
+A fourth function, `ferx_simulate_adaptive()`, is covered at the end: it is not
+a post-estimation summary but a forward simulation whose *dosing regimen is
+decided at run time* by a controller in the model file - the feedback / dose-
+titration path.
+
+The three summary functions above all take the same `(model, data)` pair as
+`ferx_fit()` and accept an
 optional `fit =` argument that substitutes the fitted parameter values for the
 model file's initial estimates. When `fit` is omitted, the initial values from
 the `.ferx` file are used - which is occasionally useful for sanity-checking a
@@ -185,7 +191,57 @@ at fit time is acceptable.
 
 ---
 
-## Choosing between the three
+## State-reactive (adaptive) dosing
+
+The three functions above replay a *fixed* regimen: the doses come from the
+data and never change in response to the simulated state. `ferx_simulate_adaptive()`
+is different - the regimen is decided at run time by a declarative controller in
+the model file's `[adaptive_dosing]` block, which reads the simulated (optionally
+assay-noised) state at each decision time and titrates the next dose. This is the
+therapeutic-drug-monitoring / model-informed-precision-dosing path.
+
+The data may still carry a **pre-scheduled base regimen** - ordinary dose rows,
+such as a loading dose - and the controller *augments* it. The bundled
+`adaptive_vanco_loading` example does exactly this: a 1500 mg vancomycin loading
+dose rides on the data, and the controller titrates the daily maintenance dose to
+hold the trough in a 10-15 mg/L window.
+
+```{r adaptive-run, message = FALSE, warning = FALSE}
+ex  <- ferx_example("adaptive_vanco_loading")
+res <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 10L, seed = 1L)
+str(res, max.level = 1)
+```
+
+`ferx_simulate_adaptive()` returns four data frames rather than one: the
+per-observation `trajectories`, the realized dose `ledger` (`doses`), the
+per-decision log (`decisions`, including holds and stops), and per-subject outcome
+`metrics`. The controller's day-by-day view - the trough it observed and the rule
+it fired - is in `decisions`:
+
+```{r adaptive-decisions}
+res$decisions[res$decisions$SIM == 1, c("DECISION", "TIME", "SIGNAL", "OUTCOME")]
+```
+
+The trough starts sub-therapeutic (the decayed loading dose, ~5.6 mg/L on day 1)
+and climbs into the target window as the maintenance dose is titrated up.
+
+One caveat worth stating explicitly: the dose **ledger holds controller-issued
+doses only**. A pre-scheduled base dose - here the 1500 mg loading dose - never
+appears in `doses`, and is excluded from `metrics$CUM_DOSE`. It *is* reflected in
+the trajectories and the attainment metric. To recover the full realized regimen,
+add the base doses from the input data back in:
+
+```{r adaptive-ledger}
+loading_dose   <- 1500
+cum_controller <- res$metrics$CUM_DOSE[res$metrics$SIM == 1]
+c(controller_only = cum_controller,
+  full_realized   = cum_controller + loading_dose,
+  loading_in_ledger = any(res$doses$AMT == loading_dose))
+```
+
+---
+
+## Choosing between the four
 
 - **`ferx_predict()`** when you only need the typical-value trajectory - for a
   PRED-vs-time overlay, or for forecasting under a new dosing schedule.
@@ -196,3 +252,6 @@ at fit time is acceptable.
   in the parameter values themselves: dose-recommendation intervals, model
   comparison via predictive performance, or any decision-relevant interval
   that would understate spread if parameter uncertainty were ignored.
+- **`ferx_simulate_adaptive()`** when the regimen is not fixed but decided by
+  feedback - dose titration to a target trough or AUC, with the rules living in
+  the model file's `[adaptive_dosing]` block rather than in the data.
