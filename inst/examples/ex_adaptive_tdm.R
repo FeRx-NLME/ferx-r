@@ -1,11 +1,11 @@
 library(ferx)
 
 # Adaptive (feedback) dosing -- a vancomycin-style TDM trough titration (epic
-# #391). The dosing regimen is NOT in the data: the model file's
-# [adaptive_dosing] block titrates the next dose every 12 h to drive the measured
-# (assay-noised) pre-dose trough into a 10-20 mg/L window. The base subjects are
-# dose-free; the controller supplies every dose at run time. See
-# ?ferx_simulate_adaptive.
+# #391). The model file's [adaptive_dosing] block titrates the next dose every
+# 12 h to drive the measured (assay-noised) pre-dose trough into a 10-20 mg/L
+# window. Here the base subjects are dose-free, so the controller supplies every
+# dose at run time; see ferx_example("adaptive_vanco_loading") for the variant
+# where the data carries a pre-scheduled loading dose. See ?ferx_simulate_adaptive.
 ex <- ferx_example("adaptive_tdm")
 
 res <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 20L, seed = 1L)
