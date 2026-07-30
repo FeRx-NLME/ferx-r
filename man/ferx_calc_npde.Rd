@@ -49,11 +49,11 @@ head(fit$sdtab[, c("ID", "TIME", "NPDE", "NPD")])
 
 }
 \seealso{
-Other simulation: 
-\code{\link{ferx_predict}()},
-\code{\link{ferx_predict_survival}()},
-\code{\link{ferx_simulate}()},
-\code{\link{ferx_simulate_adaptive}()},
-\code{\link{ferx_simulate_with_uncertainty}()}
+Other simulation:
+\code{\link[=ferx_predict]{ferx_predict()}},
+\code{\link[=ferx_predict_survival]{ferx_predict_survival()}},
+\code{\link[=ferx_simulate]{ferx_simulate()}},
+\code{\link[=ferx_simulate_adaptive]{ferx_simulate_adaptive()}},
+\code{\link[=ferx_simulate_with_uncertainty]{ferx_simulate_with_uncertainty()}}
 }
 \concept{simulation}

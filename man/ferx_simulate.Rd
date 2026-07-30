@@ -19,7 +19,7 @@ ferx_simulate(
 
 \item{data}{Path to a NONMEM-format CSV (provides population structure: doses,
 obs times). When omitted, the model file's \code{[data]} block (\code{path
-  = ...}) is used.}
+= ...}) is used.}
 
 \item{n_sim}{Number of simulation replicates}
 
@@ -91,11 +91,11 @@ sim_pm <- ferx_simulate(ex$model, ex$data, n_sim = 10L, seed = 1L,
 
 }
 \seealso{
-Other simulation: 
-\code{\link{ferx_calc_npde}()},
-\code{\link{ferx_predict}()},
-\code{\link{ferx_predict_survival}()},
-\code{\link{ferx_simulate_adaptive}()},
-\code{\link{ferx_simulate_with_uncertainty}()}
+Other simulation:
+\code{\link[=ferx_calc_npde]{ferx_calc_npde()}},
+\code{\link[=ferx_predict]{ferx_predict()}},
+\code{\link[=ferx_predict_survival]{ferx_predict_survival()}},
+\code{\link[=ferx_simulate_adaptive]{ferx_simulate_adaptive()}},
+\code{\link[=ferx_simulate_with_uncertainty]{ferx_simulate_with_uncertainty()}}
 }
 \concept{simulation}
