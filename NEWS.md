@@ -132,6 +132,34 @@ fit$eta_cov
 
 ## Added
 
+- **Stiff and high-order ODE solvers via `settings = list(ode_method = ...)`** —
+  `"rk45"` (default), `"vern7"`, `"rosenbrock23"`, `"rodas4"` and `"rodas5p"`.
+  These cover two independent problems that want opposite fixes: a
+  *stability*-limited (stiff) model — fast reversible binding / TMDD,
+  Michaelis-Menten with `KM` far below observed concentrations, long transit
+  chains — takes tiny steps whatever `ode_reltol` asks for, and wants one of the
+  linearly implicit Rosenbrock methods; an *accuracy*-limited model accepts
+  nearly every step and only slows down as `ode_reltol` tightens, where a stiff
+  method buys nothing and `vern7`'s higher order is the lever (~2.3× at `1e-9`
+  on ferx-core's transit benchmark, but ~1.4× *slower* at default tolerances).
+  Every method is a full peer — analytic sensitivities, time-to-event and
+  categorical endpoints, simulation and adaptive dosing work with all of them.
+  Also settable in the model file's `[fit_options]` block. Delivered via the
+  ferx-core pin bump (ferx-core #952 / #387).
+- **Exact analytic covariance R-matrix, on by default** — the covariance step now
+  assembles the observed information from third-order sensitivities of the
+  closed-form prediction rather than differencing the objective, for models in
+  scope (plain analytical Gaussian; no IOV, LTBS, `[scaling]`, M3, FREM or
+  non-Gaussian endpoint). This removes the `eps/h^2` differencing noise and the
+  `fd_hessian_step` tuning knob, and costs `2 * (n_theta + n_eta) + 1`
+  sensitivity evaluations per subject instead of roughly `2 * n_free^2` objective
+  evaluations that each re-solve every inner loop. Out-of-scope models keep the
+  finite-difference stencil unchanged. **Standard errors on in-scope models may
+  shift slightly** — they are now exact rather than finite-difference
+  approximations; set `settings = list(analytic_cov_hessian = FALSE)` to
+  reproduce pre-bump values. Note `fd_hessian_step` is inert on in-scope models
+  for the same reason. Delivered via the ferx-core pin bump (ferx-core #953 /
+  #436).
 - **Adaptive dosing now accepts a pre-scheduled base regimen (loading /
   maintenance dose)** — `ferx_simulate_adaptive()` no longer requires dose-free
   base subjects. Ordinary dose rows in the data (`EVID = 1/4`, with `AMT`, and
