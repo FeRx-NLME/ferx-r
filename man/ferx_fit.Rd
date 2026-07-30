@@ -56,7 +56,7 @@ previous stage's converged parameters, and only the final stage produces
 the reported covariance/diagnostics. Supported methods: \code{"foce"},
 \code{"focei"},
 \code{"laplace"} (alias \code{"laplacian"}; the Laplace approximation with the
-\emph{exact} Hessian - NONMEM \code{$EST METHOD=1 LAPLACIAN}. This is not the
+\emph{exact} Hessian - NONMEM \code{$EST METHOD=1 LAPLACIAN INTER}. This is not the
 same estimator as \code{"focei"}, which builds its Gaussian from the
 Gauss-Newton Hessian and reports a different OFV. At the default
 \code{n_agq = 1} it is a single node; \code{settings = list(n_agq = N)} with
@@ -113,14 +113,17 @@ estimation. \code{NULL} uses the model file's \code{[fit_options] verbose}
 \code{"m3"} enables Beal's M3 likelihood (requires a \code{CENS} column
 in the data, with \code{DV} carrying the limit value: LLOQ on
 \code{CENS=1} rows and ULOQ on \code{CENS=-1} rows); \code{"drop"}
-disables M3 and treats censored rows as ordinary observations.}
+disables M3 and treats censored rows as ordinary observations -- it does
+\emph{not} remove them. Each censored row is fitted at the limit value in
+\code{DV} as though it had been measured there, which biases the fit. To
+genuinely exclude them, use \code{ignore = "CENS == 1"}.}
 
 \item{threads}{Number of worker threads for the per-subject parallel loops
 in the Rust backend (inner EBE search, SAEM, SIR). \code{NULL} (default)
-leaves the backend's thread pool at its default of one worker per logical
-CPU. Pass an integer to cap the pool - useful on shared machines, in CI,
-or to avoid SMT-induced contention (try
-\code{parallel::detectCores(logical = FALSE)}). The setting is per-call,
+uses the engine's default: available cores minus one (floored at 1), capped
+at 8 -- most fits gain little from spreading across every core, and not all
+cores are equal on asymmetric platforms (e.g. Apple Silicon E-cores). Pass
+a positive integer to pin the count. The setting is per-call,
 so successive fits in the same R session can use different values.}
 
 \item{mu_referencing}{Logical, or \code{NULL} (the default). When \code{TRUE},
@@ -148,9 +151,11 @@ knobs (\code{sir_samples},
 \item{gradient}{Inner-loop (per-subject EBE) gradient method.
 One of \code{"auto"} or \code{"fd"}, or \code{NULL} (the default) to use the
 model file's \code{[fit_options] gradient} (engine default \code{"auto"}
-when unset). The legacy
-\code{"ad"} token is accepted by older model files but should not be
-used for new code.
+when unset). \code{"ad"} is \strong{no longer supported}: the Enzyme
+automatic-differentiation path was retired in favour of the analytic
+\code{Dual2} sensitivities, so a model file (or call) carrying
+\code{gradient = ad} now fails validation with \code{E_AD_RETIRED} rather
+than being tolerated.
 
 The inner optimizer is BFGS; what differs is how the gradient of the
 individual NLL w.r.t. ETA is computed:
@@ -242,8 +247,15 @@ audit the full picture.
 \strong{Shared options (FOCE / FOCEI / GN / GN-hybrid / SAEM)}
 \describe{
 \item{\code{inner_maxiter}}{Per-subject EBE iteration cap (default 200).}
-\item{\code{inner_tol}}{Convergence tolerance for the inner EBE loop
-(default \code{1e-4}).}
+\item{\code{inner_tol}}{Gradient-norm convergence tolerance for the inner
+(per-subject EBE) loop (default \code{1e-5}). A looser tolerance leaves
+residual noise in each subject's EBE solution, which propagates into the
+marginal objective the outer optimizer sees; the engine moved from
+\code{1e-4} to \code{1e-5} to reach NONMEM's minimum, at roughly 1.5x
+the per-fit cost. Note this changes the converged point, so it is not a
+pure cost knob. Tighter is not uniformly better -- at \code{1e-6} some
+ill-conditioned fits over-converge the inner Hessian and the outer
+optimizer can land in a worse basin.}
 \item{\code{fd_hessian_step}}{Also available as the dedicated
 \code{fd_hessian_step} argument above.}
 \item{\code{analytic_cov_hessian}}{\code{TRUE} (default) or
@@ -264,7 +276,9 @@ plain analytical (closed-form) Gaussian models only: no IOV, LTBS,
 \code{[scaling]}, Form-C readout, \code{[initial_conditions]},
 \code{iiv_on_ruv}, \code{block_sigma} or custom-magnitude residual, M3
 censoring, FREM, non-Gaussian (TTE / categorical / Markov) endpoint, and
-not \code{method = "laplace"} or \code{gradient = "fd"}. Anything
+not \code{method = "laplace"} at any node count, \code{method = "focei"}
+with \code{n_agq > 1}, a covariate-\code{Selected} error spec, or
+\code{gradient = "fd"}. Anything
 outside it -- including a single out-of-scope subject -- silently keeps
 the finite-difference stencil, all-or-nothing across the population.
 Set \code{FALSE} to force finite differences for an in-scope model,
@@ -272,9 +286,13 @@ e.g. to reproduce standard errors from an earlier run.}
 \item{\code{covariance_method}}{Covariance estimator, mirroring NONMEM
 \code{$COV MATRIX=}: \code{"r"} (inverse Hessian, the default),
 \code{"s"} (score cross-product), or \code{"rsr"} (the Huber-White
-sandwich, robust to model misspecification). Validated for FOCEI;
-\code{"s"} and \code{"rsr"} are rejected under non-interaction FOCE.
-No effect when \code{covariance = FALSE}.}
+sandwich, robust to model misspecification). \code{"s"} and \code{"rsr"} are
+supported for FOCEI, FOCE and IOV fits alike, all three anchored against
+NONMEM \code{$COV MATRIX=S}/\code{RSR} within ~10\\%. Note ferx defaults
+to \code{"r"} while NONMEM's \code{$COVARIANCE} default is
+\code{"rsr"} -- set \code{"rsr"} when reconciling against a NONMEM run
+that used the default \code{$COV}. No effect when
+\code{covariance = FALSE}.}
 \item{\code{covariance_fallback}}{\code{"none"} (default) or \code{"sir"}.
 When the finite-difference Hessian is not positive definite, \code{"sir"}
 runs SIR with an absolute-eigenvalue-rectified proposal instead of
@@ -345,7 +363,9 @@ only finite differences are -- the fit reports the resolved pick as
 \code{"lbfgs"} / \code{"nlopt_lbfgs"} (limited-memory BFGS via
 NLopt, gradient-based),
 \code{"mma"} (method of moving asymptotes, gradient-based),
-\code{"bfgs"} (hand-rolled BFGS, gradient-based), or
+\code{"bfgs"} and \code{"lbfgs"} (deprecated aliases that now select
+\code{"nlopt_lbfgs"} -- the hand-rolled built-in BFGS is no longer
+reachable and is slated for removal), or
 \code{"trust_region"} (trust-region Newton, gradient-based).
 Gradient-based optimizers use the inner gradient method set by the
 \code{gradient} argument; \code{"bobyqa"} does not.
@@ -398,7 +418,7 @@ on ill-conditioned problems.}
 (default 150).}
 \item{\code{n_convergence}}{Averaging / convergence phase iterations
 (default 250).}
-\item{\code{n_mh_steps}}{Metropolis-Hastings steps per subject per
+\item{\code{n_mh_steps}}{(default 20) Metropolis-Hastings steps per subject per
 iteration (default 10).}
 \item{\code{adapt_interval}}{How often (in iterations) the MH proposal
 covariance is adapted (default 50).}
@@ -466,10 +486,13 @@ flagged in \code{fit$importance_sampling$low_ess_subject_ids} (default
 (default 200).}
 \item{\code{impmap_samples}}{Importance samples drawn per subject per
 iteration (default 300).}
-\item{\code{impmap_proposal_df}}{Proposal degrees of freedom. The string
-\code{"normal"} (default) selects a multivariate-normal proposal (the
-NONMEM default); a number \code{>= 1} selects a heavier-tailed
-Student-t.}
+\item{\code{impmap_proposal_df}}{Proposal degrees of freedom (default
+\code{4}). A finite value \code{>= 1} gives a heavier-tailed Student-t,
+which is the ferx default; the string \code{"normal"} (or \code{"mvn"})
+gives a multivariate-normal proposal, which is \emph{NONMEM's} default.
+ferx diverges deliberately: a Gaussian's lighter tails under-cover the
+posterior of weakly-identified parameters, so the importance weights blow
+up in the tail and bias the M-step moments.}
 \item{\code{impmap_averaging}}{Number of final iterations whose parameters
 are averaged into the reported estimate (default 50).}
 \item{\code{impmap_seed}}{RNG seed for the IMPMAP sampling (default chosen
@@ -682,7 +705,7 @@ caller (usually \code{"auto"} or \code{"fd"}). The
 \emph{resolved} method may differ - see \code{gradient_used} and the
 \code{gradient} argument.}
 \item{gradient_used}{The inner-loop gradient method the engine actually
-used: \code{"ad"}, \code{"fd"}, or \code{"N/A"} (derivative-free /
+used: \code{"analytic"}, \code{"fd"}, or \code{"N/A"} (derivative-free /
 sampling step). When \code{gradient = "auto"} this records which
 branch resolved at fit time. \code{NA} on older engine binaries that
 did not populate this field.}
@@ -934,20 +957,22 @@ mg) but DV is recorded in another (e.g. concentrations in ng/mL).
 The engine divides each prediction by the scale factor before computing
 residuals, so the fitted sigma is on the DV scale.
 
-\strong{Form A -- scalar divisor (safe with AD):}
+\strong{Form A -- scalar divisor:}
 \preformatted{
 [scaling]
   obs_scale = 1000   # divide every predicted value by 1000
 }
 
-\strong{Form B -- expression divisor (forces \code{gradient = fd}):}
+\strong{Form B -- expression divisor:}
 \preformatted{
 [scaling]
   obs_scale = V      # divide by the individual volume (theta/eta expression)
 }
 Expressions may reference thetas, etas, and \code{[individual_parameters]}
-variables. AD gradients are not supported for Form B; add
-\code{gradient = fd} to \code{[fit_options]} or the engine will error.
+variables. Differentiated \strong{exactly} on the default
+\code{gradient = auto} -- both the outer and inner loops serve an expression
+scale analytically via the eta-quotient rule (ferx-core #486). Do not set
+\code{gradient = fd} for it.
 
 \strong{Per-CMT scaling (Form A or B per compartment):}
 \preformatted{
@@ -956,7 +981,7 @@ variables. AD gradients are not supported for Form B; add
   obs_scale[CMT=2] = 1      # CMT 2 already in correct units
 }
 
-\strong{Form C -- ODE readout expression (forces \code{gradient = fd}):}
+\strong{Form C -- ODE readout expression:}
 
 For ODE models, \code{y = <expr>} defines the observation as a function of
 ODE state variables, thetas, etas, and individual parameters. This replaces
@@ -974,9 +999,11 @@ Per-CMT Form C: \code{y[CMT=1] = central / V1}, \code{y[CMT=2] = central2 / V2}.
 \strong{Constraints:}
 \itemize{
 \item \code{[scaling]} is not yet supported on SDE (\code{[diffusion]}) models.
-\item Forms B, per-CMT, and Form C force finite-difference gradients; add
-\code{gradient = fd} to \code{[fit_options]} explicitly, or the
-engine raises an informative error.
+\item A \emph{uniform} Form B or Form C scale is differentiated exactly
+under the default \code{gradient = auto}. The per-CMT variants
+(\code{obs_scale[CMT=N]}, \code{y[CMT=N]}) fall back to finite
+differences \strong{silently} -- there is no error and no warning, so
+check \code{fit$gradient_used} if it matters.
 }
 }
 
@@ -1183,10 +1210,12 @@ ferx_fit(m, d, settings = list(
 
 \strong{Convergence tolerance for difficult subjects:}
 
-\code{max_unconverged_frac} (numeric in [0, 1]) flags the fit as converged
-even if up to this fraction of subjects failed their inner EBE loop, instead
-of raising an error - useful for large datasets with a handful of difficult
-subjects. \code{min_obs_for_convergence_check} (non-negative integer) is the
+\code{max_unconverged_frac} (numeric in [0, 1], default \code{0.1}) is the
+fraction of subjects allowed to have unconverged EBEs before the outer
+optimizer \emph{rejects the trial step} (scoring it as \code{Inf}). It is an
+in-loop guard on the search, not a post-hoc relaxation of the converged flag,
+and it never raises an error; set it to \code{1.0} to disable the guard
+entirely. \code{min_obs_for_convergence_check} (non-negative integer) is the
 minimum number of observations a subject must have before its inner-loop
 convergence counts toward that fraction; sparser subjects are excluded.
 \preformatted{

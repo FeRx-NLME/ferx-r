@@ -46,7 +46,7 @@ summary(fit_chain)
 
 # With custom settings (shown in the Settings block)
 fit_custom <- ferx_fit(ex$model, ex$data,
-  settings = list(optimizer = "slsqp", max_iter = 200L))
+  settings = list(optimizer = "slsqp", maxiter = 200L))
 summary(fit_custom)
 }
 }

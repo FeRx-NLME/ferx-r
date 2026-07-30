@@ -12,7 +12,7 @@ Fast nonlinear mixed effects (NLME) modeling in R, powered by a Rust backend.
 
 - **FOCE/FOCEI estimation** 
 - **Analytical PK models**: 1- and 2-compartment (oral/IV)
-- **ODE-based models**: Dormand-Prince RK45 solver for general ODEs
+- **ODE-based models**: Five ODE steppers for general `[odes]` models -- Dormand-Prince RK45 (default), high-order Verner 7(6), and three stiff Rosenbrock methods, selected with `settings = list(ode_method = ...)`
 - **NONMEM-compatible**: reads standard NONMEM CSV datasets
 - **BLOQ handling**: Beal's M3 likelihood for observations below the LLOQ
 - **Model DSL**: define models in `.ferx` text files

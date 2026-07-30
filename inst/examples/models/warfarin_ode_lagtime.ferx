@@ -17,7 +17,7 @@
 #   1  depot   — oral dose lands here (amount, mg)
 #   2  central — drug in central compartment (amount, mg)
 #
-# Dataset: data/warfarin.csv (100 mg single oral dose, 32 subjects × 7 obs)
+# Dataset: data/warfarin_ode_lagtime.csv (100 mg single oral dose, 20 subjects × 7 obs)
 #
 # True simulation parameters match warfarin.ferx:
 #   TVCL=0.134, TVV=8.1, TVKA=1.0, TVLAG=0.5
