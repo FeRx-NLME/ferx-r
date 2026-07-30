@@ -213,7 +213,12 @@
 #'       tuning knob and the \code{eps/h^2} differencing noise, and costs
 #'       \code{2 * (n_theta + n_eta) + 1} sensitivity evaluations per subject
 #'       rather than roughly \code{2 * n_free^2} objective evaluations that each
-#'       re-solve every subject's inner loop. Scope is deliberately narrow --
+#'       re-solve every subject's inner loop. Serves \code{method = "focei"} and
+#'       \code{method = "foce"} alike, from two separate assemblies rather than
+#'       one shared formula -- the non-interaction case is built on the
+#'       Sheiner-Beal gradient and carries no \code{log|H~|} term -- so both are
+#'       exact, and \code{interaction} does not silently drop you back onto
+#'       finite differences. Scope is otherwise deliberately narrow --
 #'       plain analytical (closed-form) Gaussian models only: no IOV, LTBS,
 #'       \code{[scaling]}, Form-C readout, \code{[initial_conditions]},
 #'       \code{iiv_on_ruv}, \code{block_sigma} or custom-magnitude residual, M3

@@ -150,7 +150,11 @@ fit$eta_cov
   assembles the observed information from third-order sensitivities of the
   closed-form prediction rather than differencing the objective, for models in
   scope (plain analytical Gaussian; no IOV, LTBS, `[scaling]`, M3, FREM or
-  non-Gaussian endpoint). This removes the `eps/h^2` differencing noise and the
+  non-Gaussian endpoint). Both `method = "focei"` and `method = "foce"` are
+  served, from two separate assemblies — the non-interaction one is built on the
+  Sheiner–Beal gradient and carries no `log|H~|` term — so neither falls back to
+  finite differences (ferx-core #954 pins both end-to-end). This removes the
+  `eps/h^2` differencing noise and the
   `fd_hessian_step` tuning knob, and costs `2 * (n_theta + n_eta) + 1`
   sensitivity evaluations per subject instead of roughly `2 * n_free^2` objective
   evaluations that each re-solve every inner loop. Out-of-scope models keep the
