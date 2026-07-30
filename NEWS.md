@@ -25,6 +25,22 @@ names are removed - no deprecation shims. Update calls as follows:
 
 ## Added
 
+- **`?ferx_fit` now documents every fit option the engine accepts** (99 of 101; the
+  two exceptions are the FREM structural maps that `ferx_model_to_frem()` writes
+  for you, and the help says so). Previously 32 keys were reachable through
+  `settings` but documented nowhere, so the only way to find them was to read the
+  engine source. Newly documented: `inner_restarts`, `inner_optimizer`,
+  `cov_inner_tol`, `parameter_scaling`, `ebe_warm_start`, `checkpoint` /
+  `checkpoint_interval_secs`, `iov_column` / `iov_occasion`, `npde_nsim` /
+  `npde_seed`, `sir_df` / `sir_keep_samples`, `conddist` and its three companions,
+  `imp_auto` / `impmap_auto`, `imp_defensive_alpha`, `iscale_min` / `iscale_max`,
+  `frem_rao_blackwell`, `impmap_mceta` and `impmap_sobol`. Two of these change how
+  an existing documented option behaves and are worth knowing: `imp_auto` /
+  `impmap_auto` default to `TRUE`, which makes `imp_samples` / `impmap_samples` a
+  *starting* count that ramps up rather than a fixed one; and the applicability
+  headings were wrong — `method = "laplace"` accepts the whole outer-optimizer and
+  iteration-cap block, and the inner-loop keys apply to `"imp"`, `"impmap"` and
+  `"bayes"` too.
 - **Stiff and high-order ODE solvers via `settings = list(ode_method = ...)`** —
   `"rk45"` (default), `"vern7"`, `"rosenbrock23"`, `"rodas4"` and `"rodas5p"`.
   These cover two independent problems that want opposite fixes: a

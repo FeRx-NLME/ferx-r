@@ -36,7 +36,9 @@
 #'   empirical-Bayes mode, which makes no Gaussian-residual assumption and so
 #'   handles non-Gaussian endpoints (time-to-event, categorical). Cost is
 #'   \code{n_agq^n_eta} per subject per iteration, so higher node counts suit
-#'   models with few random effects. Supports IOV at any occasion count. There is
+#'   models with few random effects; \code{n_agq} is capped at 21, and a fit whose
+#'   tensor grid would exceed 100000 nodes is rejected at check time. Odd values
+#'   are conventional. Supports IOV at any occasion count. There is
 #'   no separate \code{"agq"} method - adaptive quadrature is this method with
 #'   \code{n_agq > 1}; \code{"focei"} likewise accepts \code{n_agq > 1} for the
 #'   Gauss-Newton-anchored quadrature),
@@ -192,9 +194,15 @@
 #'   Rust \code{FitOptions}. Use this to tune knobs that do not have a
 #'   dedicated \code{ferx_fit()} argument. Keys are validated: values that
 #'   duplicate a dedicated argument (\code{method}, \code{covariance},
-#'   \code{verbose}, \code{bloq_method}, \code{threads}, \code{sir}) are
+#'   \code{verbose}, \code{bloq_method}, \code{bloq}, \code{threads},
+#'   \code{sir}, \code{gradient}, \code{gradient_method}) are
 #'   rejected -- pass them via the dedicated argument. Unknown keys and
 #'   malformed values also raise an error.
+#'
+#'   Every key the engine accepts is listed below, with two deliberate
+#'   exceptions: \code{frem_predictions} and \code{frem_sigma} are structural
+#'   maps written into the generated model file by
+#'   \code{\link{ferx_model_to_frem}} and cannot sensibly be hand-authored.
 #'
 #'   \strong{Precedence}: dedicated \code{ferx_fit()} arguments win over
 #'   \code{settings}, which in turn win over the model file's
@@ -203,9 +211,80 @@
 #'   Inspect \code{fit$model_file_settings} and \code{fit$call_settings} to
 #'   audit the full picture.
 #'
-#'   \strong{Shared options (FOCE / FOCEI / GN / GN-hybrid / SAEM)}
+#'   \strong{Shared options (FOCE / FOCEI / Laplace / GN / GN-hybrid / SAEM /
+#'   IMP / IMPMAP / Bayes)}
+#'
+#'   The engine accepts the two inner-loop keys for every method that runs an
+#'   inner EBE solve, which includes \code{"laplace"}, \code{"imp"},
+#'   \code{"impmap"} and \code{"bayes"} as well as the five above.
 #'   \describe{
 #'     \item{\code{inner_maxiter}}{Per-subject EBE iteration cap (default 200).}
+#'     \item{\code{inner_restarts}}{(default 1) Guarded multi-start count for the
+#'       inner (per-subject EBE) optimizer, to escape a multimodal individual
+#'       objective -- saturable protein binding is the classic case. A subject
+#'       re-solves its EBE from this many Omega-scaled alternate seeds and keeps
+#'       the lowest-objective mode; an alternate seed that reconverges to the same
+#'       mode is not accepted, so unimodal subjects are bit-identical to
+#'       \code{inner_restarts = 0}. The covariance step reconverges with the same
+#'       setting. FOCE / FOCEI / Laplace / GN / GN-hybrid.}
+#'     \item{\code{inner_optimizer}}{\code{"auto"} (default), \code{"bfgs"},
+#'       \code{"lbfgs"} or \code{"nelder_mead"}. Inner-loop algorithm.
+#'       \code{"auto"} uses dense BFGS, switching to limited-memory L-BFGS above
+#'       32 random effects; an explicit value pins one algorithm with no
+#'       switching. All gradient-based variants converge to the same EBE, so this
+#'       trades per-step cost against memory rather than accuracy.}
+#'     \item{\code{cov_inner_tol}}{Inner EBE-reconvergence tolerance used
+#'       \emph{only} by the covariance step, decoupled from \code{inner_tol}
+#'       (default: whatever \code{inner_tol} is; for LTBS models
+#'       \code{min(inner_tol, 1e-8)}). The covariance R-matrix is a
+#'       second-difference of the reconverged objective and so is more sensitive to
+#'       EBE precision than the fit itself -- on a flat surface an EBE converged
+#'       only to \code{inner_tol} can visibly perturb the standard errors. Worth
+#'       reaching for on heavily-censored M3 + IOV models (try \code{1e-11}).
+#'       Note the engine may emit a spurious "not used by method ... will be
+#'       ignored" warning for this key; the value \emph{is} applied.}
+#'     \item{\code{parameter_scaling}}{\code{"auto"} (default), \code{"none"},
+#'       \code{"abs"} or \code{"rescale2"}. Parameter-scaling strategy for the
+#'       outer optimizer; supersedes \code{scale_params} when not \code{"none"}.
+#'       \code{"auto"} applies \code{"rescale2"} to the gradient-based optimizers
+#'       that benefit (\code{nlopt_lbfgs}, \code{slsqp}) and leaves the
+#'       derivative-free \code{bobyqa} unscaled, where it would distort the trust
+#'       region. \code{"rescale2"} is the nlmixr2-style normalisation -- each
+#'       packed coordinate divided by its bound half-range -- which markedly
+#'       improves cold-start convergence. \code{"abs"} is the legacy
+#'       \code{|packed value|} normalisation, equivalent to
+#'       \code{scale_params = TRUE}.}
+#'     \item{\code{ebe_warm_start}}{(default \code{FALSE}) When an inner EBE
+#'       solve fails its BFGS step and falls back to Nelder-Mead, warm-start the
+#'       simplex from the BFGS partial eta-hat rather than cold-starting from
+#'       \code{eta = 0}. Substantially fewer prediction walks on fallback-heavy
+#'       fits (~1.7x on a 2-cpt unidentifiable-V2 benchmark). Opt-in because it
+#'       moves the fallback subjects' EBEs, which perturbs the outer optimizer's
+#'       trajectory -- harmless for the derivative-free default, but it can derail
+#'       a gradient-based outer optimizer into a worse basin. Validate OFV and
+#'       estimates on your own model before enabling.}
+#'     \item{\code{checkpoint}}{(default \code{TRUE}) and
+#'       \code{checkpoint_interval_secs} (default 300). Periodically save a
+#'       resume point so an interrupted run restarts from where it stopped.
+#'       Restart is coarse: the population estimates at the last save become the
+#'       new starting point, so a resumed run may need a few extra iterations to
+#'       re-converge. A change to the model or data invalidates the checkpoint via
+#'       a hash check and the run starts fresh; a run shorter than the interval
+#'       leaves nothing behind.}
+#'     \item{\code{iov_column}}{Name of the occasion column in the dataset (e.g.
+#'       \code{"OCC"}) for inter-occasion variability.}
+#'     \item{\code{iov_occasion}}{Derive the occasion partition from the model
+#'       instead of a data column: \code{"column"} (default, use
+#'       \code{iov_column}), \code{"dose"} to start a new occasion at each
+#'       administration, or \code{"time(24, 48)"} for time-window breakpoints.
+#'       \code{"dose"} and \code{"time(...)"} override \code{iov_column} (with a
+#'       warning). Supported by FOCE, FOCEI, Laplace and SAEM -- not IMP/IMPMAP.}
+#'     \item{\code{npde_nsim}}{(default 0, i.e. disabled) Monte-Carlo replicates
+#'       per subject for the simulation-based NPDE/NPD diagnostics computed after
+#'       the fit; with 0 no NPDE/NPD columns are produced. A typical value is
+#'       1000, and cost scales linearly. \code{npde_seed} makes the simulation
+#'       reproducible. See also \code{\link{ferx_calc_npde}} to add them
+#'       post hoc.}
 #'     \item{\code{inner_tol}}{Gradient-norm convergence tolerance for the inner
 #'       (per-subject EBE) loop (default \code{1e-5}). A looser tolerance leaves
 #'       residual noise in each subject's EBE solution, which propagates into the
@@ -303,14 +382,14 @@
 #'       stiffness rather than accuracy is capping the step.}
 #'   }
 #'
-#'   \strong{FOCE / FOCEI / GN / GN-hybrid: iteration cap}
+#'   \strong{FOCE / FOCEI / Laplace / GN / GN-hybrid: iteration cap}
 #'   \describe{
 #'     \item{\code{maxiter}}{Maximum outer-optimizer iterations (default 500).
 #'       Not applicable to SAEM, which controls iterations via
 #'       \code{n_exploration} and \code{n_convergence}.}
 #'   }
 #'
-#'   \strong{FOCE / FOCEI / GN-hybrid: outer optimizer}
+#'   \strong{FOCE / FOCEI / Laplace / GN-hybrid: outer optimizer}
 #'   \describe{
 #'     \item{\code{optimizer}}{Population-level optimizer. One of
 #'       \code{"auto"} (default; picks \code{"nlopt_lbfgs"} when the exact
@@ -375,10 +454,26 @@
 #'   \describe{
 #'     \item{\code{n_exploration}}{Stochastic exploration phase iterations
 #'       (default 150).}
+#'     \item{\code{conddist}}{(default \code{FALSE}; alias
+#'       \code{saem_conddist}) Run a post-fit conditional-distribution pass that
+#'       estimates each subject's \code{p(eta_i | y_i)} by MCMC, reporting
+#'       per-subject conditional mean and SD plus distribution-based
+#'       eta-shrinkage -- the shrinkage-unbiased basis for eta diagnostics. Read
+#'       it with \code{\link{ferx_conddist}}. The three keys below apply only
+#'       when this is \code{TRUE}.}
+#'     \item{\code{conddist_nsamp}}{Retained draws per subject (default 200;
+#'       production diagnostics usually want thousands).}
+#'     \item{\code{conddist_burnin}}{Draws discarded before accumulation
+#'       (default 20), to forget the EBE-mode warm start.}
+#'     \item{\code{conddist_keep_samples}}{(default \code{FALSE}) Retain the raw
+#'       draws rather than just the summaries.}
 #'     \item{\code{n_convergence}}{Averaging / convergence phase iterations
 #'       (default 250).}
-#'     \item{\code{n_mh_steps}}{(default 20) Metropolis-Hastings steps per subject per
-#'       iteration (default 10).}
+#'     \item{\code{n_mh_steps}}{(default 20) Metropolis-Hastings steps per subject
+#'       per iteration. Also sizes the componentwise decorrelating kernel that
+#'       prevents block-Omega collapse. When \code{n_leapfrog > 0} it applies to
+#'       the subjects that fall back to MH. Consumed by \code{"saem"} and
+#'       \code{"bayes"}.}
 #'     \item{\code{adapt_interval}}{How often (in iterations) the MH proposal
 #'       covariance is adapted (default 50).}
 #'     \item{\code{omega_burnin}}{Initial iterations during which Omega is held
@@ -434,6 +529,34 @@
 #'       (or \code{"mvn"}) selects a multivariate-normal proposal.}
 #'     \item{\code{imp_seed}}{RNG seed for the IS step (default chosen by the
 #'       engine).}
+#'     \item{\code{imp_auto}}{(default \code{TRUE}) Adaptive sample count (NONMEM
+#'       \code{AUTO}). With this on, \code{imp_samples} is the \emph{starting}
+#'       count and is ramped up (doubling per iteration, capped at 10000) while the
+#'       objective's Monte-Carlo SE exceeds 1.0. Strongly recommended for FREM and
+#'       other high-dimensional models, where a fixed count leaves a
+#'       sample-count-dependent bias in the typical-value and Omega estimates.
+#'       Note this makes the "quadruple the samples to halve the MC SE" rule of
+#'       thumb apply only when it is \code{FALSE}.}
+#'     \item{\code{imp_defensive_alpha}}{(default \code{0}, i.e. off; alias
+#'       \code{impmap_defensive_alpha}) Defensive-mixture weight in
+#'       \code{[0, 1)}. Each subject draws this fraction of its samples from the
+#'       prior \code{N(0, Omega)} rather than the mode-centred proposal, and every
+#'       sample is scored under the mixture density. That bounds the importance
+#'       weights, so a weakly-identified subject cannot hijack the weighted M-step
+#'       and walk theta to its bounds. Try \code{0.1}. Enabling it disables Sobol
+#'       QMC and raises the per-subject ESS floor.}
+#'     \item{\code{iscale_min}}{(default \code{0.1}) and \code{iscale_max}
+#'       (default \code{10}). Bounds on the proposal scaling factor for adaptive
+#'       importance sampling (NONMEM \code{ISCALE_MIN} / \code{ISCALE_MAX}): the
+#'       proposal covariance is multiplied by \code{s^2} with \code{s} chosen from
+#'       this interval to maximise per-subject ESS. Set both to \code{1} to
+#'       disable.}
+#'     \item{\code{frem_rao_blackwell}}{(default \code{TRUE}) FREM only:
+#'       Rao-Blackwellise the covariate ETAs -- integrate them analytically and
+#'       importance-sample only the PK ETAs. Strongly recommended, since
+#'       brute-force sampling of the near-singular covariate dimensions has very
+#'       poor ESS. Set \code{FALSE} only to diagnose the Rao-Blackwell path
+#'       against the full-dimensional sampler.}
 #'     \item{\code{imp_low_ess_threshold}}{ESS fraction below which a subject is
 #'       flagged in \code{fit$importance_sampling$low_ess_subject_ids} (default
 #'       \code{0.1}, i.e. \code{10\%} of \code{imp_samples}).}
@@ -456,6 +579,20 @@
 #'       are averaged into the reported estimate (default 50).}
 #'     \item{\code{impmap_seed}}{RNG seed for the IMPMAP sampling (default chosen
 #'       by the engine).}
+#'     \item{\code{impmap_auto}}{(default \code{TRUE}) Adaptive sample count, as
+#'       \code{imp_auto} above -- \code{impmap_samples} is the \emph{starting}
+#'       count.}
+#'     \item{\code{impmap_mceta}}{(default 0) Additional random starting points
+#'       for the per-subject MAP optimization (NONMEM \code{MCETA}). Each start
+#'       draws eta from \code{N(0, Omega)} and the lowest individual NLL wins; 0
+#'       means a single warm start. 3 is a good choice for high-dimensional models
+#'       (e.g. FREM with 5 or more ETAs).}
+#'     \item{\code{impmap_sobol}}{(default \code{FALSE}) Use Sobol quasi-random
+#'       sequences (with Cranley-Patterson randomization) for the importance draws
+#'       instead of pseudo-random, giving more uniform posterior coverage per
+#'       sample. Applies only to multivariate-normal proposals
+#'       (\code{impmap_proposal_df = "normal"}); under the Student-t default it is
+#'       inert.}
 #'     \item{\code{impmap_low_ess_threshold}}{ESS fraction below which a subject
 #'       is flagged as poorly sampled (default \code{0.1}).}
 #'     \item{\code{impmap_trace}}{Logical; when \code{TRUE}, collect
@@ -470,6 +607,12 @@
 #'       (default 250).}
 #'     \item{\code{sir_seed}}{RNG seed for the SIR step (default chosen by the
 #'       engine). Independent of \code{seed} / \code{saem_seed}.}
+#'     \item{\code{sir_df}}{(default 5) Degrees of freedom for the SIR
+#'       multivariate Student-t proposal; higher values approach a normal
+#'       proposal.}
+#'     \item{\code{sir_keep_samples}}{(default \code{FALSE}) Retain the resampled
+#'       parameter vectors, which \code{\link{ferx_simulate_with_uncertainty}}
+#'       requires.}
 #'   }
 #'
 #'   \strong{Multi-start optimization}
