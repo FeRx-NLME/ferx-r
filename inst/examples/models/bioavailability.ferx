@@ -15,7 +15,7 @@
 # variance of F itself; small omega_F still allows large F variability
 # near F=0.5 and smaller variability near F=0 or 1 (the logit squeeze).
 #
-# True simulation parameters used to generate data/bioavailability_oral.csv:
+# True simulation parameters used to generate data/bioavailability.csv:
 #   TVCL=5, TVV=50, TVKA=1.5, F=0.70, omega_CL=0.09, omega_F=0.10,
 #   sigma_prop=0.15 (15% CV)
 #

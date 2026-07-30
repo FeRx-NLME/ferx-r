@@ -102,12 +102,14 @@ unobserved range.
 
 Two pieces are needed:
 
-1. **A `CENS` column in the data**: `1` for BLOQ rows, `0` otherwise. The `DV`
+1. **A `CENS` column in the data**: `1` for BLOQ (below LLOQ) rows, `-1` for rows right-censored above the ULOQ, `0` otherwise. The `DV`
    cell on a BLOQ row should carry the LLOQ value itself.
 2. **Tell the engine to use M3**: either pass `bloq_method = "m3"` to
    `ferx_fit()`, or set `bloq_method = m3` in `[fit_options]`. The other
-   choice is `bloq_method = "drop"`, which discards BLOQ rows entirely (rarely
-   what you want).
+   choice is `bloq_method = "drop"`, which disables M3 but **keeps** the
+   censored rows, fitting each at the limit value in `DV` as though it had been
+   measured there. That biases the fit, and is rarely what the name suggests --
+   to genuinely exclude the rows, pass `ignore = "CENS == 1"` instead.
 
 ```{r bloq-inspect}
 ex_bloq <- ferx_example("warfarin_bloq")
@@ -218,9 +220,13 @@ section on the `[scaling]` block):
 A more general Form C lets you write the readout expression directly
 (`y = central / V`), useful for non-trivial transformations.
 
-Because forms B (expressions) and Form C are evaluated through the ODE
-machinery, they force finite-difference gradients. Add `gradient = fd`
-explicitly in `[fit_options]` to make that choice visible.
+A *uniform* expression divisor (form B) or ODE readout (form C) is
+differentiated **exactly** under the default `gradient = auto` (ferx-core #486),
+so leave the gradient alone -- form B in particular runs on the analytical
+closed-form path, not through the ODE machinery. Only the per-CMT variants
+(`obs_scale[CMT=N]`, `y[CMT=N]`) fall back to finite differences, and they do so
+**silently**: there is no error and no warning, so check `fit$gradient_used` if
+it matters.
 
 `[scaling]` is not yet supported on SDE (`[diffusion]`) models.
 
