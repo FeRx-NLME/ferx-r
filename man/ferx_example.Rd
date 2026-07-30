@@ -347,9 +347,9 @@ file.edit(system.file("examples", "ex_warfarin_dcm.R", package = "ferx"))
 
 }
 \seealso{
-Other utilities: 
-\code{\link{ferx_get_columns}()},
-\code{\link{ferx_load_fit}()},
-\code{\link{ferx_save_fit}()}
+Other utilities:
+\code{\link[=ferx_get_columns]{ferx_get_columns()}},
+\code{\link[=ferx_load_fit]{ferx_load_fit()}},
+\code{\link[=ferx_save_fit]{ferx_save_fit()}}
 }
 \concept{utilities}

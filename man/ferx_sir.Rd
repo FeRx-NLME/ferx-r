@@ -109,13 +109,13 @@ head(sims)
 \code{\link[=ferx_simulate_with_uncertainty]{ferx_simulate_with_uncertainty()}} for downstream consumption of the
 retained resamples.
 
-Other fitting: 
-\code{\link{ferx_check_init}()},
-\code{\link{ferx_collect}()},
-\code{\link{ferx_covariance}()},
-\code{\link{ferx_fit}()},
-\code{\link{ferx_inits_from_nca}()},
-\code{\link{ferx_stop}()},
-\code{\link{print.ferx_job}()}
+Other fitting:
+\code{\link[=ferx_check_init]{ferx_check_init()}},
+\code{\link[=ferx_collect]{ferx_collect()}},
+\code{\link[=ferx_covariance]{ferx_covariance()}},
+\code{\link[=ferx_fit]{ferx_fit()}},
+\code{\link[=ferx_inits_from_nca]{ferx_inits_from_nca()}},
+\code{\link[=ferx_stop]{ferx_stop()}},
+\code{\link[=print.ferx_job]{print.ferx_job()}}
 }
 \concept{fitting}

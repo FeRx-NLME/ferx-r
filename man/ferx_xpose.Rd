@@ -28,8 +28,8 @@ with a warning.}
 
 \item{iterations}{Logical; when \code{TRUE} (the default) and the fit carries a
 per-parameter optimizer trace (from \code{optimizer_trace = TRUE}), populate the
-\verb{$files} slot so \code{\link[xpose:minimization_plots]{xpose::prm_vs_iteration()}} and
-\code{\link[xpose:minimization_plots]{xpose::grd_vs_iteration()}} work. Ignored by the \code{"xpose4"} backend and a
+\verb{$files} slot so \code{\link[xpose:prm_vs_iteration]{xpose::prm_vs_iteration()}} and
+\code{\link[xpose:grd_vs_iteration]{xpose::grd_vs_iteration()}} work. Ignored by the \code{"xpose4"} backend and a
 no-op when no trace is present.}
 }
 \value{
@@ -67,8 +67,8 @@ When the fit was run with \code{optimizer_trace = TRUE} and \code{iterations = T
 (the default), the per-iteration parameter and gradient trajectories are
 populated into the \verb{$files} slot of the returned \code{"xpose"} object as
 synthetic NONMEM \code{.ext} / \code{.grd} tables, so
-\code{\link[xpose:minimization_plots]{xpose::prm_vs_iteration()}} (parameter value vs iteration) and
-\code{\link[xpose:minimization_plots]{xpose::grd_vs_iteration()}} (gradient vs iteration) work out-of-the-box. The
+\code{\link[xpose:prm_vs_iteration]{xpose::prm_vs_iteration()}} (parameter value vs iteration) and
+\code{\link[xpose:grd_vs_iteration]{xpose::grd_vs_iteration()}} (gradient vs iteration) work out-of-the-box. The
 \code{.ext} table carries one column per parameter (using the fit's declared
 parameter names, e.g. \code{TVCL}, \code{ETA_CL}) plus \code{OBJ}; the \code{.grd} table carries
 one \code{GRD(n)} column per parameter and is only emitted for gradient-based

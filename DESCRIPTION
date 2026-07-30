@@ -14,7 +14,6 @@ Description: Fast NLME estimation using FOCE/FOCEI with analytic gradients.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 7.3.3
 SystemRequirements: GNU make, Cargo (Rust's package manager), rustc (>= 1.70)
 Config/rextendr/version: 0.5.0
 Imports:
@@ -34,3 +33,4 @@ Suggests:
 URL: https://ferx-nlme.github.io/reference/
 VignetteBuilder: knitr
 Config/testthat/edition: 3
+Config/roxygen2/version: 8.0.0

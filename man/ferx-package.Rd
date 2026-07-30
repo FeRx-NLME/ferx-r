@@ -49,6 +49,7 @@ Useful links:
 
 Authors:
 \itemize{
+  \item Ron Keizer \email{ron@insightrx.com}
   \item Teun Post \email{teunpost@gmail.com}
   \item Hidde van de Beek \email{hiddevdbeek@icloud.com}
 }

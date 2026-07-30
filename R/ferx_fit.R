@@ -178,7 +178,11 @@
 #'   \code{fd_hessian_step * (1 + |x_hat[i]|)}.
 #'   Increase (e.g. \code{0.1}) when the fit warns about ill-conditioned Hessian
 #'   entries; decrease (e.g. \code{1e-3}) on smooth OFV surfaces where FD noise
-#'   is the primary concern. Has no effect when \code{covariance = FALSE}.
+#'   is the primary concern. Has no effect when \code{covariance = FALSE}, nor
+#'   when the exact analytic R-matrix serves the fit -- which is now the default
+#'   for in-scope models, so on those this argument is inert. See
+#'   \code{settings = list(analytic_cov_hessian = ...)} below for the scope and
+#'   for how to force finite differences back on.
 #' @param settings Optional named list of fine-grained options forwarded to the
 #'   Rust \code{FitOptions}. Use this to tune knobs that do not have a
 #'   dedicated \code{ferx_fit()} argument. Keys are validated: values that
@@ -201,6 +205,29 @@
 #'       (default \code{1e-4}).}
 #'     \item{\code{fd_hessian_step}}{Also available as the dedicated
 #'       \code{fd_hessian_step} argument above.}
+#'     \item{\code{analytic_cov_hessian}}{\code{TRUE} (default) or
+#'       \code{FALSE}. When \code{TRUE} and the model is in scope, the
+#'       covariance step assembles the \strong{exact analytic R-matrix} from
+#'       third-order sensitivities of the closed-form prediction instead of
+#'       differencing the objective. That removes both the \code{fd_hessian_step}
+#'       tuning knob and the \code{eps/h^2} differencing noise, and costs
+#'       \code{2 * (n_theta + n_eta) + 1} sensitivity evaluations per subject
+#'       rather than roughly \code{2 * n_free^2} objective evaluations that each
+#'       re-solve every subject's inner loop. Serves \code{method = "focei"} and
+#'       \code{method = "foce"} alike, from two separate assemblies rather than
+#'       one shared formula -- the non-interaction case is built on the
+#'       Sheiner-Beal gradient and carries no \code{log|H~|} term -- so both are
+#'       exact, and \code{interaction} does not silently drop you back onto
+#'       finite differences. Scope is otherwise deliberately narrow --
+#'       plain analytical (closed-form) Gaussian models only: no IOV, LTBS,
+#'       \code{[scaling]}, Form-C readout, \code{[initial_conditions]},
+#'       \code{iiv_on_ruv}, \code{block_sigma} or custom-magnitude residual, M3
+#'       censoring, FREM, non-Gaussian (TTE / categorical / Markov) endpoint, and
+#'       not \code{method = "laplace"} or \code{gradient = "fd"}. Anything
+#'       outside it -- including a single out-of-scope subject -- silently keeps
+#'       the finite-difference stencil, all-or-nothing across the population.
+#'       Set \code{FALSE} to force finite differences for an in-scope model,
+#'       e.g. to reproduce standard errors from an earlier run.}
 #'     \item{\code{covariance_method}}{Covariance estimator, mirroring NONMEM
 #'       \code{$COV MATRIX=}: \code{"r"} (inverse Hessian, the default),
 #'       \code{"s"} (score cross-product), or \code{"rsr"} (the Huber-White
@@ -214,9 +241,34 @@
 #'       \code{"sir_fallback"} and SIR-based credible intervals are reported.}
 #'   }
 #'
-#'   \strong{ODE models: RK45 solver tolerance}
+#'   \strong{ODE models: solver method and tolerance}
 #'   \describe{
-#'     \item{\code{ode_reltol}}{RK45 relative tolerance for ODE models
+#'     \item{\code{ode_method}}{Which stepper integrates the \code{[odes]}
+#'       block: \code{"rk45"} (default), \code{"vern7"},
+#'       \code{"rosenbrock23"}, \code{"rodas4"} or \code{"rodas5p"}. There are
+#'       two independent reasons a fit's step size is small, and they want
+#'       opposite fixes, so diagnose before switching. If steps stay tiny
+#'       whatever \code{ode_reltol} you ask for, the model is
+#'       \emph{stability}-limited (stiff -- fast reversible binding / TMDD,
+#'       Michaelis-Menten with \code{KM} far below observed concentrations, long
+#'       transit chains, QSP cascades): use one of the linearly implicit
+#'       Rosenbrock methods, \code{"rosenbrock23"} at crude tolerances,
+#'       \code{"rodas4"} at a typical \code{1e-6}--\code{1e-9}, or
+#'       \code{"rodas5p"} at \code{1e-9} and tighter. If instead nearly every
+#'       step is accepted and it is tightening \code{ode_reltol} that drives the
+#'       step count up, the fit is \emph{accuracy}-limited and a stiff method
+#'       buys nothing -- \code{"vern7"} (higher order) is the lever, worth about
+#'       2.3x at \code{1e-9} on ferx-core's transit benchmark but about 1.4x
+#'       \emph{slower} at default tolerances. A stiff step is not free: it costs
+#'       \code{n + 1} extra right-hand-side evaluations for the
+#'       finite-difference Jacobian plus an \code{n x n} factorization, where
+#'       \code{n} is the size of the system actually integrated (for a
+#'       continuous-time Markov endpoint that is the \code{s^2} occupancy
+#'       system, not the \code{[odes]} state count). Every method is a full peer
+#'       -- analytic sensitivities, time-to-event and categorical endpoints,
+#'       simulation and adaptive dosing all work with all of them. Can also be
+#'       set in the model file's \code{[fit_options]} block.}
+#'     \item{\code{ode_reltol}}{Relative tolerance for ODE models
 #'       (default \code{1e-4}; ignored for analytical PK). The default
 #'       reproduces analytical closed forms in PRED to about \code{1e-4}, but
 #'       the FOCE objective amplifies solver error, so an ODE-form model's OFV
@@ -224,11 +276,13 @@
 #'       (e.g. \code{1e-10}) when the ODE-form OFV must match an analytical
 #'       reference; expect slower fits. Can also be set in the model file's
 #'       \code{[fit_options]} block.}
-#'     \item{\code{ode_abstol}}{RK45 absolute tolerance for ODE models
+#'     \item{\code{ode_abstol}}{Absolute tolerance for ODE models
 #'       (default \code{1e-6}).}
-#'     \item{\code{ode_max_steps}}{Maximum RK45 steps per integration segment
+#'     \item{\code{ode_max_steps}}{Maximum solver steps per integration segment
 #'       (default \code{10000}). Raise if a tight \code{ode_reltol} exhausts the
-#'       step budget on stiff multi-compartment systems.}
+#'       step budget on stiff multi-compartment systems -- or switch
+#'       \code{ode_method} to a stiff stepper, which is the actual fix when
+#'       stiffness rather than accuracy is capping the step.}
 #'   }
 #'
 #'   \strong{FOCE / FOCEI / GN / GN-hybrid: iteration cap}

@@ -35,13 +35,13 @@ ferx_runlog_iters(fit)
 \code{\link{ferx_runlog}}, \code{\link{ferx_trace}},
 \code{\link{plot.ferx_fit}}
 
-Other diagnostics: 
-\code{\link{check_diagnostics}()},
-\code{\link{ferx_conddist}()},
-\code{\link{ferx_cov_screen}()},
-\code{\link{ferx_get_warnings}()},
-\code{\link{ferx_trace}()},
-\code{\link{plot.ferx_fit}()},
-\code{\link{summary.ferx_fit}()}
+Other diagnostics:
+\code{\link[=check_diagnostics]{check_diagnostics()}},
+\code{\link[=ferx_conddist]{ferx_conddist()}},
+\code{\link[=ferx_cov_screen]{ferx_cov_screen()}},
+\code{\link[=ferx_get_warnings]{ferx_get_warnings()}},
+\code{\link[=ferx_trace]{ferx_trace()}},
+\code{\link[=plot.ferx_fit]{plot.ferx_fit()}},
+\code{\link[=summary.ferx_fit]{summary.ferx_fit()}}
 }
 \concept{diagnostics}

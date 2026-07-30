@@ -74,12 +74,12 @@ ferx_model_validate(bad)
 \seealso{
 \code{\link{ferx_model_inspect}}, \code{\link{ferx_model_show}}
 
-Other model-editing: 
-\code{\link{ferx_model}()},
-\code{\link{ferx_model_edit}()},
-\code{\link{ferx_model_get_section}()},
-\code{\link{ferx_model_inspect}()},
-\code{\link{ferx_model_set_section}()},
-\code{\link{ferx_model_show}()}
+Other model-editing:
+\code{\link[=ferx_model]{ferx_model()}},
+\code{\link[=ferx_model_edit]{ferx_model_edit()}},
+\code{\link[=ferx_model_get_section]{ferx_model_get_section()}},
+\code{\link[=ferx_model_inspect]{ferx_model_inspect()}},
+\code{\link[=ferx_model_set_section]{ferx_model_set_section()}},
+\code{\link[=ferx_model_show]{ferx_model_show()}}
 }
 \concept{model-editing}
