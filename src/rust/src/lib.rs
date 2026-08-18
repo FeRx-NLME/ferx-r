@@ -412,8 +412,12 @@ fn ferx_rust_simulate(
     };
     let iov_col = parsed.fit_options.iov_column.clone();
 
+    // Simulation reads a missing `DV` as a design point, not as a forgotten
+    // `MDV=1` (ferx-core #957): here the DV is the column being produced, so
+    // `DV = .` at a sampling time means "simulate here". `MDV=1` still excludes
+    // the record, and fitting keeps the skip.
     let (population, _) =
-        match ferx_core::api::read_population_for(
+        match ferx_core::api::read_population_for_simulation(
             &parsed.model,
             &parsed.covariate_decls,
             data_path,
@@ -502,8 +506,12 @@ fn ferx_rust_simulate_from_fit(
     };
     let iov_col = parsed.fit_options.iov_column.clone();
 
+    // Simulation reads a missing `DV` as a design point, not as a forgotten
+    // `MDV=1` (ferx-core #957): here the DV is the column being produced, so
+    // `DV = .` at a sampling time means "simulate here". `MDV=1` still excludes
+    // the record, and fitting keeps the skip.
     let (population, _) =
-        match ferx_core::api::read_population_for(
+        match ferx_core::api::read_population_for_simulation(
             &parsed.model,
             &parsed.covariate_decls,
             data_path,
@@ -600,7 +608,11 @@ fn ferx_rust_simulate_adaptive(
         ),
     };
     let iov_col = parsed.fit_options.iov_column.clone();
-    let (population, _) = match ferx_core::api::read_population_for(
+    // Simulation reads a missing `DV` as a design point, not as a forgotten
+    // `MDV=1` (ferx-core #957): here the DV is the column being produced, so
+    // `DV = .` at a sampling time means "simulate here". `MDV=1` still excludes
+    // the record, and fitting keeps the skip.
+    let (population, _) = match ferx_core::api::read_population_for_simulation(
         &parsed.model,
         &parsed.covariate_decls,
         data_path,
@@ -796,8 +808,12 @@ fn ferx_rust_simulate_with_uncertainty(
         }
     };
     let iov_col = parsed.fit_options.iov_column.clone();
+    // Simulation reads a missing `DV` as a design point, not as a forgotten
+    // `MDV=1` (ferx-core #957): here the DV is the column being produced, so
+    // `DV = .` at a sampling time means "simulate here". `MDV=1` still excludes
+    // the record, and fitting keeps the skip.
     let (population, _) =
-        match ferx_core::api::read_population_for(
+        match ferx_core::api::read_population_for_simulation(
             &parsed.model,
             &parsed.covariate_decls,
             data_path,

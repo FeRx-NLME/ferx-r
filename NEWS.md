@@ -1,5 +1,17 @@
 # ferx 0.3.0.9000 (development version)
 
+- **`ferx_simulate()` now simulates from a design template whose `DV` column is
+  empty** (#286, ferx-core #957). Dosing plus sampling times with `DV = "."` /
+  `NA` — the natural way to write a design, and what NONMEM's `$SIMULATION`
+  accepts — previously returned **zero rows**: every observation record with a
+  missing `DV` was dropped as a forgotten `MDV = 1`, which is the right reading
+  only when the `DV` is an input. Simulation now reads such a record as a
+  sampling time whose value is about to be produced, so no placeholder number is
+  needed in the column that gets overwritten. `MDV = 1` still excludes a record,
+  fitting is unchanged, and this applies to `ferx_simulate()` (both the
+  default-parameter and the `fit = ` path), `ferx_simulate_adaptive()`, and
+  `ferx_simulate_with_uncertainty()`.
+
 # ferx 0.3.0
 
 ## Breaking changes

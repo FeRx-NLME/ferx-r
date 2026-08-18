@@ -9,6 +9,10 @@
 #' @param data Path to a NONMEM-format CSV (provides population structure: doses,
 #'   obs times). When omitted, the model file's \code{[data]} block (\code{path
 #'   = ...}) is used.
+#'   The \code{DV} column may be left empty (\code{.} / \code{NA}) on the
+#'   sampling rows — the DV is what the simulation produces, so an empty cell
+#'   means "simulate here" (a placeholder value is not needed). Rows marked
+#'   \code{MDV = 1} are excluded, as always.
 #' @param n_sim Number of simulation replicates
 #' @param seed Random seed for reproducibility
 #' @param fit Optional \code{ferx_fit} result. When provided, simulation uses
