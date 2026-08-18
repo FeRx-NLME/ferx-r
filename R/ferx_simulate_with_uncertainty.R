@@ -22,7 +22,7 @@
 #' @param model Path to a .ferx model file
 #' @param data Path to a NONMEM-format CSV (provides population structure)
 #'   The \code{DV} column may be left empty (\code{.} / \code{NA}) on the
-#'   sampling rows — the DV is what the simulation produces, so an empty cell
+#'   sampling rows - the DV is what the simulation produces, so an empty cell
 #'   means "simulate here" (a placeholder value is not needed). Rows marked
 #'   \code{MDV = 1} are excluded, as always.
 #' @param fit A \code{ferx_fit} result. Must carry either \code{cov_matrix}
