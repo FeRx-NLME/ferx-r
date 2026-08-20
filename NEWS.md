@@ -15,6 +15,11 @@
   are post-solve reporting and stay silent, as does an analytical model's explicit
   `pk(..., f=F)` mapping.
 
+  **The parse-time rejection covers ODE models only.** On an analytical `pk ...`
+  model the same double use is still accepted silently — do not rely on the engine
+  to catch it there. Tracked as
+  [ferx-core #1004](https://github.com/FeRx-NLME/ferx-core/issues/1004).
+
   **If you have an ODE model that folds `F` into the absorption flux** — the
   pre-dose-entry convention, e.g. `d/dt(central) = F * KA * depot / V - ...` — it
   will now fail to parse instead of quietly computing `F²`. Drop the `F` from the
