@@ -1,5 +1,37 @@
 # ferx 0.3.0.9000 (development version)
 
+## Breaking changes
+
+- **A dose attribute your model also reads is now an error** (ferx-core #993).
+  `F`, `LAGTIME`/`ALAG` and the compartment-indexed `F{n}`/`ALAG{n}`/`LAGTIME{n}`
+  are applied by the engine **at the dose event**. A model that declared one and
+  *also* referenced it in `[odes]` (the right-hand side or an `init(...)` seed),
+  the `[scaling]` readout, or the `[adaptive_dosing] observe` signal was applying
+  it twice — silently, and by exactly that factor. Such a model now fails to parse
+  with `E_DOSE_ATTR_DOUBLE_USE`, naming both readings and the fix. `D{n}`/`R{n}`
+  carry the same reservation but are consulted only for a coded `RATE=-2`/`-1`
+  dose, so that collision is reported against the **dataset** instead and a model
+  whose data never codes `RATE` is untouched. Reads from `[derived]` / `[output]`
+  are post-solve reporting and stay silent, as does an analytical model's explicit
+  `pk(..., f=F)` mapping.
+
+  **The parse-time rejection covers ODE models only.** On an analytical `pk ...`
+  model the same double use is still accepted silently — do not rely on the engine
+  to catch it there. Tracked as
+  [ferx-core #1004](https://github.com/FeRx-NLME/ferx-core/issues/1004).
+
+  **If you have an ODE model that folds `F` into the absorption flux** — the
+  pre-dose-entry convention, e.g. `d/dt(central) = F * KA * depot / V - ...` — it
+  will now fail to parse instead of quietly computing `F²`. Drop the `F` from the
+  right-hand side; if the parameter was never bioavailability, rename it (the name
+  is what routes it).
+
+  Note this makes ferx **stricter than NONMEM**, which permits a `$PK` `F1` in
+  `$DES` and quietly computes `F²` with no diagnostic — measured on NONMEM 7.6.0,
+  see ferx-core's `nonmem_anchor/dose_attr_double_use_*`. A control stream
+  translated literally can therefore fail to parse in ferx even though it ran in
+  NONMEM.
+
 ## New features
 
 - **Models with no random effects - fixed-effects-only (naive-pooled) fits**
@@ -34,6 +66,10 @@
 
 - Bumped the pinned ferx-core commit and updated the extendr glue for the
   `mixture` / `pmix` / `mixest` fields added by ferx-core #977/#985 (#291).
+- Bumped the pinned ferx-core commit to `25b5f473` for ferx-core #993 (the
+  dose-attribute double-use rejection above). No glue change: the new items on
+  the Rust side are additive and unused here, so `src/rust/src/lib.rs` is
+  untouched.
 
 # ferx 0.3.0
 
