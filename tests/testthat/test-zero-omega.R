@@ -23,8 +23,10 @@ pooled_fit <- local({
   function() {
     if (is.null(fit)) {
       ex <- ferx_example("one_cpt_iv_pooled")
+      # No `covariance` argument: the model file already sets `covariance = true`,
+      # and passing FALSE here conflicts with it and emits an override warning.
       fit <<- ferx_fit(ex$model, ex$data, method = "focei", verbose = FALSE,
-                       covariance = FALSE, settings = list(maxiter = 300L))
+                       settings = list(maxiter = 300L))
     }
     fit
   }
@@ -35,11 +37,14 @@ test_that("the bundled pooled example is complete and declares no random effects
   expect_true(file.exists(ex$model))
   expect_true(file.exists(ex$data))
   # The whole point of the example: no `omega` line and no `exp(ETA_*)` term.
-  src <- readLines(ex$model, warn = FALSE)
-  expect_false(any(grepl("^\\s*omega\\s", src)))
-  expect_false(any(grepl("exp\\s*\\(\\s*ETA", src)))
+  # Strip comments first - the header explains what was removed and says
+  # "exp(ETA_*)" in prose, which a naive grep over the raw file matches.
+  src  <- readLines(ex$model, warn = FALSE)
+  code <- sub("#.*$", "", src)
+  expect_false(any(grepl("^\\s*omega\\s", code)))
+  expect_false(any(grepl("exp\\s*\\(\\s*ETA", code)))
   # ...but sigma is still mandatory for a continuous endpoint.
-  expect_true(any(grepl("^\\s*sigma\\s", src)))
+  expect_true(any(grepl("^\\s*sigma\\s", code)))
 })
 
 test_that("a model with no random effects fits and reports a 0x0 Omega", {
@@ -118,7 +123,7 @@ test_that("ferx_sir() accepts a fit with no random effects (#290)", {
   fit <- pooled_fit()
   cov <- ferx_covariance(fit, covariance_method = "r")
   skip_if(is.null(cov$cov_matrix), "covariance step did not converge - skipping")
-  out <- ferx_sir(cov, n_samples = 200L, n_resamples = 50L, seed = 1L)
+  out <- ferx_sir(cov, sir_samples = 200L, sir_resamples = 50L, sir_seed = 1L)
   expect_s3_class(out, "ferx_fit")
 })
 
@@ -133,10 +138,13 @@ test_that("print() omits the OMEGA section entirely at n_eta = 0", {
   expect_true(grepl("SIGMA", txt, fixed = TRUE))
 })
 
-test_that("ferx_estimates() reports theta and sigma but no omega rows", {
+test_that("the estimates table reports theta and sigma but no omega rows", {
+  # There is no exported `ferx_estimates()`; the table is computed internally by
+  # `.ferx_compute_estimates()` and attached to the fit as `$estimates`. Its
+  # column is `param`, not `parameter`.
   fit <- pooled_fit()
-  est <- ferx_estimates(fit)
+  est <- fit$estimates
   expect_true(is.data.frame(est))
-  expect_true(all(c("TVCL", "TVV") %in% est$parameter))
-  expect_length(grep("^(ETA|OMEGA)", est$parameter), 0L)
+  expect_true(all(c("TVCL", "TVV") %in% est$param))
+  expect_length(grep("^(ETA|OMEGA)", est$param), 0L)
 })
