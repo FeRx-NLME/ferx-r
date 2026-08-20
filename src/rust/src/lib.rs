@@ -1360,6 +1360,13 @@ fn params_from_fit(
         sigma_fixed: template.sigma_fixed.clone(),
         omega_iov: None,
         kappa_fixed: Vec::new(),
+        // ferx-core #977/#985 added per-class Omega/Sigma for `[mixture]` models.
+        // Carry the template's value rather than `None`: this function rebuilds
+        // parameters from R-supplied theta/omega/sigma *against* the parsed model,
+        // so dropping the mixture spec here would silently turn a `[mixture]` fit
+        // into a single-population one. Every other structural field on this
+        // initializer is likewise taken from `template`.
+        mixture: template.mixture.clone(),
     })
 }
 
@@ -3025,6 +3032,10 @@ fn ferx_rust_sir(
             npd: Vec::new(),
             // ferx-core #900 added categorical sdtab rows; the SIR path never reads them.
             discrete_rows: Vec::new(),
+            // ferx-core #977 added per-subject mixture posteriors; the SIR path
+            // never reads them, and these scaffolds carry no class assignment.
+            pmix: None,
+            mixest: None,
         });
     }
 
@@ -3371,6 +3382,10 @@ fn ferx_rust_covariance(
             npd: Vec::new(),
             // ferx-core #900 added categorical sdtab rows; the covariance path never reads them.
             discrete_rows: Vec::new(),
+            // ferx-core #977 added per-subject mixture posteriors; the covariance
+            // path never reads them, and these scaffolds carry no class assignment.
+            pmix: None,
+            mixest: None,
         });
     }
 
