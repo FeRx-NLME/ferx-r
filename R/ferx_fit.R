@@ -2653,11 +2653,18 @@ print.ferx_fit <- function(x, ...) {
   }
 
   # OMEGA
-  cat("\n", .ferx_style("OMEGA  (between-subject variability)", "bold"), "\n", sep = "")
-  cat(strrep("-", 60), "\n", sep = "")
   om <- x$omega
   if (is.null(dim(om))) om <- matrix(om, 1, 1)
   n_eta <- nrow(om)
+  # A fixed-effects-only (naive-pooled) fit - ferx-core #989 - has no Omega to
+  # report. Printing the header above an empty body reads as an estimation that
+  # failed rather than one that was never requested; ferx-core's own console
+  # output suppresses the same section. Everything below is already a no-op at
+  # n_eta = 0 (the loops are over seq_len(n_eta), and has_offdiag stays FALSE).
+  if (n_eta > 0L) {
+    cat("\n", .ferx_style("OMEGA  (between-subject variability)", "bold"), "\n", sep = "")
+    cat(strrep("-", 60), "\n", sep = "")
+  }
   has_offdiag <- FALSE
   for (i in seq_len(n_eta)) {
     var_ii   <- om[i, i]

@@ -1,5 +1,40 @@
 # ferx 0.3.0.9000 (development version)
 
+## New features
+
+- **Models with no random effects - fixed-effects-only (naive-pooled) fits**
+  (ferx-core #989). A continuous model may now omit every `omega` declaration.
+  With `n_eta = 0` there is no inner empirical-Bayes problem and no `log|Omega|`
+  term, so FOCE/FOCEI collapse to plain maximum likelihood: every subject shares
+  one set of parameters and `sigma` alone carries the spread. `PRED` equals
+  `IPRED` and `CWRES` equals `IWRES`. An `[error_model]` and its `sigma` are
+  still required - only Omega is optional. New bundled example
+  `ferx_example("one_cpt_iv_pooled")`, anchored against a NONMEM 7.6.0 run of
+  the same model written as `$OMEGA 0 FIX` (OFV -269.6370, TVCL 4.8408,
+  TVV 52.834).
+
+## Bug fixes
+
+- `ferx_covariance()` and `ferx_sir()` no longer reject a fit that has no random
+  effects (#290). Both required a non-empty `fit$ebe_etas`, which a
+  fixed-effects-only fit does not have - there are no EBEs to warm-start from -
+  so both stopped with "fit$ebe_etas is empty; cannot warm-start the inner
+  loop". They now pass an empty warm start through. This matters for
+  naive-pooled models in particular: NONMEM's `$COVARIANCE` default is the RSR
+  sandwich, and `ferx_covariance(fit, covariance_method = "rsr")` is how you
+  reproduce it from R. On such a model the sandwich runs about twice as wide as
+  ferx's default `"r"`, because the model ignores within-subject correlation by
+  construction.
+
+- `print()` on a fit with no random effects no longer prints an empty `OMEGA`
+  section header (#290). An empty header over an empty body reads as an
+  estimation that failed rather than one that was never requested.
+
+## Internal
+
+- Bumped the pinned ferx-core commit and updated the extendr glue for the
+  `mixture` / `pmix` / `mixest` fields added by ferx-core #977/#985 (#291).
+
 # ferx 0.3.0
 
 ## Breaking changes
