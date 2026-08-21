@@ -12,13 +12,20 @@
   carry the same reservation but are consulted only for a coded `RATE=-2`/`-1`
   dose, so that collision is reported against the **dataset** instead and a model
   whose data never codes `RATE` is untouched. Reads from `[derived]` / `[output]`
-  are post-solve reporting and stay silent, as does an analytical model's explicit
-  `pk(..., f=F)` mapping.
+  are post-solve reporting and stay silent.
 
-  **The parse-time rejection covers ODE models only.** On an analytical `pk ...`
-  model the same double use is still accepted silently — do not rely on the engine
-  to catch it there. Tracked as
-  [ferx-core #1004](https://github.com/FeRx-NLME/ferx-core/issues/1004).
+  **This covers both engines** (ferx-core #993 for `ode(...)` models, #1004 for
+  analytical `pk ...` ones). What differs is only what *binds* the parameter to
+  the dose: on an ODE model the name does (a bare `F` routed to the reserved
+  slot), while on an analytical model the explicit `pk(..., f=F)` /
+  `lagtime=`/`alag=` mapping does. So on an analytical model the same double use —
+  the mapped parameter also read in the `[scaling]` readout, an
+  `[initial_conditions] init(...)` amount, or the `[adaptive_dosing] observe`
+  signal — is rejected too, and the message tells you to **drop the mapping**
+  rather than rename the parameter, because renaming does not help there: the
+  mapping follows the parameter. A parameter merely *named* `F` that no `pk(...)`
+  argument maps is an ordinary parameter and stays silent, so the familiar
+  `CL/F`, `V/F` apparent-parameter convention is unaffected.
 
   **If you have an ODE model that folds `F` into the absorption flux** — the
   pre-dose-entry convention, e.g. `d/dt(central) = F * KA * depot / V - ...` — it
@@ -26,11 +33,26 @@
   right-hand side; if the parameter was never bioavailability, rename it (the name
   is what routes it).
 
-  Note this makes ferx **stricter than NONMEM**, which permits a `$PK` `F1` in
-  `$DES` and quietly computes `F²` with no diagnostic — measured on NONMEM 7.6.0,
-  see ferx-core's `nonmem_anchor/dose_attr_double_use_*`. A control stream
-  translated literally can therefore fail to parse in ferx even though it ran in
-  NONMEM.
+  **If you have an analytical model that divides the readout by its own `F`** —
+  e.g. `pk one_cpt_oral(cl=CL, v=V, ka=KA, f=F)` with `obs_scale = V / F` — it will
+  now fail to parse instead of quietly scaling every prediction by `F`. Drop `F`
+  from the readout if it really is bioavailability (a `pk` block already outputs
+  concentration); if it is an ordinary parameter, remove the `f=F` argument from
+  the `pk(...)` call.
+
+  Note this makes ferx **stricter than NONMEM on both engines**, measured on
+  NONMEM 7.6.0 (see ferx-core's `nonmem_anchor/dose_attr_double_use_*` and
+  `nonmem_anchor/analytical_dose_attr_double_use_*`). NONMEM permits a `$PK` `F1`
+  in `$DES` and quietly computes `F²`; it equally permits `ADVAN2` with `F1`
+  defined *and* `S2 = V/F1`, which scales every prediction by exactly `F1` — in
+  both cases the run completes, prints an objective function value, and emits no
+  diagnostic at all. A control stream translated literally can therefore fail to
+  parse in ferx even though it ran in NONMEM.
+
+  (Note `S1 = V/F` *is* the standard apparent-volume convention when `F1` is not
+  separately defined — the `CL/F`, `V/F` parameterisation. That is unaffected:
+  nothing maps `f=` there. It is defining `F1` **and** dividing by it that
+  double-counts, in NONMEM too.)
 
 ## New features
 
