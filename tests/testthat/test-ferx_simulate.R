@@ -250,3 +250,59 @@ test_that("ferx_simulate returns 0/1 DV_SIM (not NA) for a [binary_model] endpoi
   sim2 <- ferx_simulate(ex$model, ex$data, n_sim = 20L, seed = 2L)
   expect_false(identical(sim$DV_SIM, sim2$DV_SIM[seq_len(nrow(sim))]))
 })
+
+# ---- Simulating from a fitted IOV model (ferx-core #1019) ----
+# `params_from_fit()` used to hardcode `omega_iov = None`, so the engine's
+# occasion-aware kappa draw unwrapped a missing IOV covariance and panicked
+# across the FFI boundary. Every VPC / trial simulation from a fitted `kappa`
+# model was blocked. The fitted Omega_IOV is now threaded through.
+
+test_that("ferx_simulate works from a fitted IOV (kappa) model", {
+  ex <- ferx_example("warfarin_iov")
+  # A converged fit is not needed — any valid theta/omega/sigma/omega_iov drives
+  # the per-occasion kappa draw; cap the iterations to keep the test cheap.
+  fit <- ferx_fit(ex$model, ex$data, covariance = FALSE,
+                  settings = list(maxiter = 3L))
+  expect_true(is.matrix(fit$omega_iov))
+
+  sim <- ferx_simulate(ex$model, ex$data, n_sim = 2L, seed = 1L, fit = fit)
+
+  expect_s3_class(sim, "data.frame")          # the #1019 regression: was a panic
+  expect_gt(nrow(sim), 0)
+  expect_true(all(is.finite(sim$DV_SIM)))
+  expect_setequal(unique(sim$SIM), c(1, 2))
+})
+
+test_that("the simulated spread follows the fit's omega_iov, not the model's init", {
+  # Threading the value through is only half the fix — the engine must actually
+  # draw from it. Inflating the fitted IOV variance must widen the simulated
+  # concentrations; if the engine were reading the model file's initial Omega_IOV
+  # (or a zeroed one), both runs would be identical.
+  ex <- ferx_example("warfarin_iov")
+  fit <- ferx_fit(ex$model, ex$data, covariance = FALSE,
+                  settings = list(maxiter = 3L))
+
+  narrow <- fit; narrow$omega_iov[] <- 1e-8
+  wide   <- fit; wide$omega_iov[]   <- 0.5
+
+  sim_narrow <- ferx_simulate(ex$model, ex$data, n_sim = 5L, seed = 3L, fit = narrow)
+  sim_wide   <- ferx_simulate(ex$model, ex$data, n_sim = 5L, seed = 3L, fit = wide)
+
+  expect_false(identical(sim_narrow$IPRED, sim_wide$IPRED))
+  expect_gt(sd(sim_wide$IPRED), sd(sim_narrow$IPRED))
+})
+
+test_that("simulating a kappa model from a fit stripped of omega_iov is an error", {
+  # A hand-built / truncated fit object cannot drive the occasion draw. The glue
+  # must say so rather than silently substituting the model file's initial
+  # Omega_IOV (which would simulate the wrong inter-occasion spread).
+  ex <- ferx_example("warfarin_iov")
+  fit <- ferx_fit(ex$model, ex$data, covariance = FALSE,
+                  settings = list(maxiter = 3L))
+  fit$omega_iov <- NULL
+
+  res <- suppressWarnings(
+    ferx_simulate(ex$model, ex$data, n_sim = 1L, seed = 1L, fit = fit)
+  )
+  expect_null(res)
+})

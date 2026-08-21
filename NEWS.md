@@ -62,6 +62,19 @@
   section header (#290). An empty header over an empty body reads as an
   estimation that failed rather than one that was never requested.
 
+## Bug fixes
+
+- **`ferx_simulate(..., fit = f)` works again for models with inter-occasion
+  variability** (ferx-core #1019). The fitted IOV covariance (`fit$omega_iov`) was
+  never passed to the engine, so any model declaring a `kappa` crashed the R session
+  with `omega_iov is present whenever the model declares kappa (n_kappa > 0)` instead
+  of simulating. `fit$omega_iov` is now threaded through every from-fit entry point
+  (`ferx_simulate()`, `ferx_simulate_with_uncertainty()`, `ferx_calc_npde()`,
+  `ferx_predict()`, `ferx_predict_survival()`). `ferx_calc_npde()` simulates
+  internally and hit the same crash; `ferx_simulate_with_uncertainty()` silently drew
+  around the model file's *initial* IOV variance instead of the fitted one, and now
+  uses the fitted value.
+
 ## Internal
 
 - Bumped the pinned ferx-core commit and updated the extendr glue for the
