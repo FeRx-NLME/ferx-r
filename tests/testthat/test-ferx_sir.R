@@ -185,3 +185,46 @@ test_that("path/hash fields round-trip through .fitrx save/load", {
   )
   expect_true(is.finite(out_sir$sir_ess))
 })
+
+# ferx-core#1021: a covariance direction the data do not identify comes back
+# from the covariance step with a variance of ~1/eigenvalue-floor. SIR used to
+# die on it ("All SIR samples had invalid weights"); it now shrinks the
+# direction to the parameter bounds and says so. The warning is the only signal
+# that the CIs this call just wrote are qualified, so it has to reach the fit —
+# both the flat vector and the structured table.
+test_that("ferx_sir surfaces engine proposal-conditioning warnings", {
+  fit <- warfarin_fit_cov()
+  skip_if(is.null(fit$cov_matrix), sir_cov_skip)
+
+  # Adding to a diagonal keeps the matrix PSD, so this is a covariance a real
+  # (non-identified) fit could produce rather than a malformed input.
+  degenerate <- fit
+  degenerate$cov_matrix[1L, 1L] <- degenerate$cov_matrix[1L, 1L] + 1e8
+
+  out <- ferx_sir(degenerate, sir_samples = 8L, sir_resamples = 4L, sir_seed = 1L)
+
+  expect_true(is.finite(out$sir_ess))
+  expect_true(any(grepl("shrunk", out$warnings, fixed = TRUE)))
+
+  ws <- out$warnings_structured
+  expect_s3_class(ws, "data.frame")
+  sir_rows <- ws[ws$category == "sir", , drop = FALSE]
+  expect_gt(nrow(sir_rows), 0L)
+  expect_true(any(grepl("shrunk", sir_rows$message, fixed = TRUE)))
+  # The parameter behind the shrunk direction is named, which is what makes the
+  # warning actionable.
+  expect_true(any(grepl(names(fit$theta)[1L], sir_rows$message, fixed = TRUE)))
+})
+
+test_that("ferx_sir leaves a healthy fit free of sir warnings", {
+  fit <- warfarin_fit_cov()
+  skip_if(is.null(fit$cov_matrix), sir_cov_skip)
+
+  before <- fit$warnings
+  out <- ferx_sir(fit, sir_samples = 8L, sir_resamples = 4L, sir_seed = 1L)
+
+  expect_false(any(grepl("shrunk", out$warnings, fixed = TRUE)))
+  expect_false(any(grepl("rank-deficient", out$warnings, fixed = TRUE)))
+  # Pre-existing warnings survive the merge.
+  expect_true(all(before %in% out$warnings))
+})

@@ -48,7 +48,14 @@
 #'
 #' @return The input `fit`, augmented with `sir_ess`, `sir_ci_theta`,
 #'   `sir_ci_omega`, `sir_ci_sigma`, and (when requested) `sir_resamples` /
-#'   `sir_resamples_n` / `sir_resamples_dim`.
+#'   `sir_resamples_n` / `sir_resamples_dim`. Any warnings the SIR step emitted
+#'   are appended to `fit$warnings` and to `fit$warnings_structured` under the
+#'   `sir` category - in particular the proposal diagnostics: a covariance that
+#'   is rank-deficient beyond its `FIX`ed parameters, or a proposal direction
+#'   shrunk to keep draws inside the parameter bounds. Both name the parameters
+#'   involved and mean the same thing - those directions are not identified by
+#'   the data, and their SIR intervals understate the uncertainty. See
+#'   [ferx_get_warnings()].
 #'
 #' @examples
 #' \dontrun{
@@ -301,13 +308,36 @@ ferx_sir <- function(fit,
   # can emit warnings during the SIR run (e.g. ESS collapse, proposal issues);
   # they would otherwise be silently dropped since only ferx_fit() calls the
   # assembler. We append rather than replace so pre-SIR warnings are preserved.
-  sir_warnings_df <- .ferx_assemble_structured_warnings(raw, fit)
+  #
+  # Two sources feed the table: rows derived R-side by the assembler, and the
+  # engine's own SIR-step messages, which the binding returns as a flat
+  # character vector with no severity/category (ferx-core#1021 added the
+  # proposal-conditioning diagnostics that make this matter: a rank-deficient
+  # proposal, or one shrunk to keep draws inside the parameter bounds, qualifies
+  # the CIs this very call just wrote onto the fit). Fold them in as
+  # sir-category rows, exactly as ferx_covariance() does for its own.
+  if (length(raw$warnings) > 0L) {
+    fit$warnings <- unique(c(fit$warnings, as.character(raw$warnings)))
+  }
+  assembled <- .ferx_assemble_structured_warnings(raw, fit)
+  engine_rows <- if (length(raw$warnings) > 0L) {
+    data.frame(
+      severity      = "warning",
+      category      = "sir",
+      message       = as.character(raw$warnings),
+      source_method = "",
+      stringsAsFactors = FALSE
+    )
+  } else {
+    assembled[0, , drop = FALSE]
+  }
+  sir_warnings_df <- rbind(assembled, engine_rows)
   if (nrow(sir_warnings_df) > 0L) {
     existing <- fit$warnings_structured
     fit$warnings_structured <- if (is.data.frame(existing) && nrow(existing) > 0L)
-      rbind(existing, sir_warnings_df)
+      unique(rbind(existing, sir_warnings_df))
     else
-      sir_warnings_df
+      unique(sir_warnings_df)
   }
 
   fit
