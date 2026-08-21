@@ -2870,6 +2870,28 @@ fn ferx_rust_autodiff_enabled() -> bool {
     false
 }
 
+/// Every `[block]` name this build of the engine recognises.
+///
+/// The engine's block names are closed-world (ferx-core #1040): a header that
+/// is not in this list is rejected at parse time with `E_UNKNOWN_BLOCK`. The R
+/// side reads the list from here rather than keeping its own copy — the
+/// duplicated vector this replaces had drifted, and reported valid blocks
+/// (`covariates`, `event_model`, `simulation`, ...) as unknown sections.
+///
+/// Feature-gated blocks are included: they are recognised names in every
+/// build, and a binary compiled without the feature reports
+/// `E_BLOCK_FEATURE_DISABLED` rather than pretending not to know them.
+///
+/// @return Character vector of block names, sorted.
+/// @export
+#[extendr]
+fn ferx_rust_known_blocks() -> Vec<String> {
+    ferx_core::known_block_names()
+        .into_iter()
+        .map(String::from)
+        .collect()
+}
+
 /// Validate a .ferx model file (and optionally its dataset) without fitting.
 ///
 /// Runs the parser plus every data-independent check, and — when `data_path`
@@ -3837,6 +3859,7 @@ extendr_module! {
     fn ferx_rust_sir;
     fn ferx_rust_covariance;
     fn ferx_rust_autodiff_enabled;
+    fn ferx_rust_known_blocks;
     fn ferx_rust_validate_model;
     fn ferx_rust_model_data_path;
     fn ferx_rust_inits_from_nca;

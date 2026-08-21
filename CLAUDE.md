@@ -63,7 +63,9 @@ R API (R/*.R)
 
 ## Model DSL
 
-Models are defined in `.ferx` text files with sections: `[parameters]`, `[individual_parameters]`, `[structural_model]`, `[odes]`, `[error_model]`, `[initial_values]`, `[fit_options]`, and the optional `[scaling]` block (unit conversion / observation readout). See `inst/examples/models/` for references. Data uses NONMEM CSV format (ID, TIME, DV, EVID, AMT, CMT, etc.); optional columns: RATE, MDV, II, SS, CENS, OCC. Use `ferx_example("warfarin")` to get paths to bundled examples.
+Models are defined in `.ferx` text files with sections: `[parameters]`, `[individual_parameters]`, `[structural_model]`, `[odes]`, `[error_model]`, `[fit_options]`, and the optional `[scaling]` block (unit conversion / observation readout). See `inst/examples/models/` for references.
+
+Section names are **closed-world** in the engine (ferx-core #1040): a header it does not recognise is a parse error (`E_UNKNOWN_BLOCK`), not a silently ignored block. Never hard-code the valid list in R — `ferx_rust_known_blocks()` returns it from the engine. `[initial_values]` is *not* one of them: it has never been read (inits live inline in `[parameters]`), and a file still carrying one now fails to parse. Data uses NONMEM CSV format (ID, TIME, DV, EVID, AMT, CMT, etc.); optional columns: RATE, MDV, II, SS, CENS, OCC. Use `ferx_example("warfarin")` to get paths to bundled examples.
 
 ## Bundled examples (`inst/examples/`)
 
