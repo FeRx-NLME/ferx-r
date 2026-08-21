@@ -10,9 +10,9 @@ validate_fit_for_params <- function(fit) {
   if (!is.matrix(omega) || nrow(omega) != ncol(omega)) {
     stop("`fit$omega` must be a square matrix.")
   }
-  # Fitted IOV (kappa) covariance. A `kappa` model needs it downstream — the engine
+  # Fitted IOV (kappa) covariance. A `kappa` model needs it downstream: the engine
   # draws (simulate) or conditions on (predict / npde) one kappa vector per occasion
-  # from it — and dropping it panicked ferx-core's simulate path (#1019). NULL for a
+  # from it, and dropping it panicked ferx-core's simulate path (#1019). NULL for a
   # non-IOV fit, which maps to an empty vector + dim 0 ("no IOV") on the Rust side.
   omega_iov <- fit$omega_iov
   if (!is.null(omega_iov) &&

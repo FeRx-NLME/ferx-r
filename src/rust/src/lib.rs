@@ -1366,6 +1366,17 @@ fn omega_iov_from_fit(
     omega_iov_dim: i32,
 ) -> std::result::Result<Option<OmegaMatrix>, String> {
     let d = omega_iov_dim.max(0) as usize;
+    // `dim == 0` is how the R side says "no IOV", and it always sends an empty
+    // vector with it. Values arriving under a zero dim mean the two arguments
+    // disagree - an argument-order slip in the hand-maintained extendr wrappers
+    // would look exactly like this - so refuse rather than silently drop them.
+    if d == 0 && !omega_iov_flat.is_empty() {
+        return Err(format!(
+            "Fit error: omega_iov_dim is 0 but {} omega_iov values were supplied; \
+             the dim and the flattened matrix disagree",
+            omega_iov_flat.len()
+        ));
+    }
     let template = match model.default_params.omega_iov.as_ref() {
         Some(t) => t,
         None => {
