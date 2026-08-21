@@ -114,12 +114,12 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
   }
   if (grepl("shrunk", message, ignore.case = TRUE)) {
     return(paste0(
-      "The proposal was wider than the bounds the named parameters are declared ",
-      "to live in, which means the covariance step floored their curvature: ",
-      "they are effectively non-identified. SIR shrank those directions so the ",
-      "run could proceed, but the CIs along them understate the true ",
-      "uncertainty - treat them as a lower bound, and check the covariance-step ",
-      "warning for the same parameters."
+      "The proposal was an order of magnitude wider than the room the named ",
+      "parameters have between their estimates and their bounds, which means the ",
+      "covariance step floored their curvature: they are effectively ",
+      "non-identified. SIR shrank those directions so the run could proceed, but ",
+      "the CIs along them understate the true uncertainty - treat them as a lower ",
+      "bound, and check the covariance-step warning for the same parameters."
     ))
   }
   paste0(
