@@ -85,8 +85,8 @@ ferx_model_validate <- function(path, data = NULL) {
   # data_selection, adaptive_dosing, mixture, data and simulation - all of them
   # blocks the parser reads and all of them used by bundled examples, so
   # `ferx_model_validate(ferx_example("two_cpt_oral_cov")$model)` reported
-  # `covariates [unknown section]` - and it still listed `initial_values`, a
-  # block the parser has never read. See ferx-core #1040.
+  # `covariates [unknown section]` - and it still listed `initial_values`,
+  # which the engine dropped in ferx-core e5e934d. See ferx-core #1040.
   optional_sections <- setdiff(ferx_rust_known_blocks(), required_sections)
 
   blocks   <- .ferx_extract_blocks(path)

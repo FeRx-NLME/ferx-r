@@ -17,12 +17,13 @@
   engine (`ferx_rust_known_blocks()`) instead of a copy maintained in R — the copy
   had drifted, so `ferx_model_validate(ferx_example("two_cpt_oral_cov")$model)`
   reported `covariates [unknown section]` for a perfectly valid model, and it
-  still advertised `[initial_values]`, a section the parser has never read.
+  still advertised `[initial_values]`, which the engine dropped years ago
+  (ferx-core e5e934d).
 
   **If your model file carries `[initial_values]`, delete it.** It has been dead
   weight since initial estimates moved inline into `[parameters]`, and it now
-  fails the parse. The three files under `examples/models/` that still had one
-  have been fixed.
+  fails the parse with `E_DEPRECATED_BLOCK`, naming the replacement. The three
+  files under `examples/models/` that still had one have been fixed.
 
 - **A dose attribute your model also reads is now an error** (ferx-core #993).
   `F`, `LAGTIME`/`ALAG` and the compartment-indexed `F{n}`/`ALAG{n}`/`LAGTIME{n}`

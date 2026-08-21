@@ -97,8 +97,8 @@ test_that("the engine rejects an unknown section with E_UNKNOWN_BLOCK", {
 test_that("optional sections come from the engine, not a duplicated R list", {
   # The hard-coded vector this replaces had drifted: it omitted `covariates`
   # (and event_model, simulation, ...) so a valid bundled example printed
-  # `covariates [unknown section]`, and it listed `initial_values`, a block the
-  # parser has never read.
+  # `covariates [unknown section]`, and it listed `initial_values`, which the
+  # engine dropped long ago (ferx-core e5e934d).
   known <- ferx:::ferx_rust_known_blocks()
   expect_true(all(c("parameters", "individual_parameters", "structural_model",
                     "error_model", "covariates", "event_model", "simulation",
