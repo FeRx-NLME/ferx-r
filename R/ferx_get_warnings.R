@@ -96,6 +96,38 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
   invisible(df)
 }
 
+# Guidance for the `sir` category. The proposal-conditioning diagnostics
+# (ferx-core#1021) are about the *model*, not about SIR tuning: a direction the
+# covariance step had to floor is a direction the data do not inform, and no
+# amount of extra samples will recover it. Everything else in the category is a
+# SIR-availability or tuning issue, which keeps the original advice.
+.ferx_sir_guidance <- function(message = "") {
+  if (grepl("rank-deficient", message, ignore.case = TRUE)) {
+    return(paste0(
+      "The covariance matrix has a direction with no uncertainty left after ",
+      "FIXed parameters are excluded - the named parameters are not identified ",
+      "by the data (they trade off against each other). SIR holds that ",
+      "combination at its ML values, so its CIs are not explored. Fix or drop ",
+      "one parameter from each named combination, or re-fit a model the data ",
+      "can identify."
+    ))
+  }
+  if (grepl("shrunk", message, ignore.case = TRUE)) {
+    return(paste0(
+      "The proposal was an order of magnitude wider than the room the named ",
+      "parameters have between their estimates and their bounds, which means the ",
+      "covariance step floored their curvature: they are effectively ",
+      "non-identified. SIR shrank those directions so the run could proceed, but ",
+      "the CIs along them understate the true uncertainty - treat them as a lower ",
+      "bound, and check the covariance-step warning for the same parameters."
+    ))
+  }
+  paste0(
+    "SIR uncertainty step issue. Ensure covariance = TRUE and inspect SIR ",
+    "tuning (sir_samples / sir_resamples)."
+  )
+}
+
 # Remediation guidance keyed by the fixed category vocabulary that ferx-core
 # (and the R-side additions) emit. Extend this table when core grows a new
 # category. Returns NULL for unknown categories so callers can skip printing
@@ -193,7 +225,7 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
     optimizer_health   = "Optimizer struggled (trust region / Hessian). Inspect the trace and consider better starting values.",
     eta_normality      = "ETA distribution may be non-normal. High shrinkage or sparse data can cause this; prefer QQ-plots for diagnosis.",
     bloq_method        = "LOQ censoring note. Set method = \"focei\" explicitly to silence, or review the M3 setup.",
-    sir                = "SIR uncertainty step issue. Ensure covariance = TRUE and inspect SIR tuning (sir_samples / sir_resamples).",
+    sir                = .ferx_sir_guidance(message),
     importance_sampling = "Importance-sampling ESS collapsed for some subjects. Raise imp_samples / imp_proposal_df or check EBE quality.",
     data_quality       = "Data issue detected. Review the flagged observations in the dataset.",
     omega_structure    = "Mixed parameterisation in a block omega. Check the [individual_parameters] forms for the correlated etas.",

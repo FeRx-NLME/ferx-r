@@ -3043,7 +3043,7 @@ fn ferx_rust_inits_from_nca(model_path: &str, data_path: &str, method: &str) -> 
 /// @param sir_keep_samples When TRUE, retains the resampled packed parameter vectors.
 /// @param verbose When TRUE, the engine prints progress to stderr.
 /// @return Named list with `sir_ess`, `sir_ci_theta`, `sir_ci_omega`, `sir_ci_sigma`,
-///   `sir_resamples`, `sir_resamples_n`, `sir_resamples_dim`.
+///   `sir_resamples`, `sir_resamples_n`, `sir_resamples_dim`, and `warnings`.
 #[extendr]
 #[allow(clippy::too_many_arguments)]
 fn ferx_rust_sir(
@@ -3346,6 +3346,10 @@ fn ferx_rust_sir(
             _ => (Vec::new(), 0i32, 0i32),
         };
 
+    // SIR-step warnings (ferx-core#1021: a rank-deficient or bound-shrunk
+    // proposal) live on the returned fit's `warnings`. The skeleton FitResult
+    // we passed in carries none, so everything here was produced by this SIR
+    // run — no filtering needed. Mirrors `ferx_rust_covariance`.
     list!(
         sir_ess = new_fit.sir_ess.unwrap_or(f64::NAN),
         sir_ci_theta = flatten_ci(&new_fit.sir_ci_theta),
@@ -3353,7 +3357,8 @@ fn ferx_rust_sir(
         sir_ci_sigma = flatten_ci(&new_fit.sir_ci_sigma),
         sir_resamples = sir_resamples_flat,
         sir_resamples_n = sir_resamples_n,
-        sir_resamples_dim = sir_resamples_dim
+        sir_resamples_dim = sir_resamples_dim,
+        warnings = new_fit.warnings.clone()
     )
     .into()
 }

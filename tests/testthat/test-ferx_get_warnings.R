@@ -214,3 +214,29 @@ test_that("ferx_get_warnings labels each severity level", {
   expect_true(any(grepl("WARNING", out)))
   expect_true(any(grepl("INFO", out)))
 })
+
+# ferx-core#1021: the `sir` category now dispatches on message content. The
+# proposal-conditioning diagnostics are a statement about the model (parameters
+# the data do not identify), not about SIR tuning, so they must not be answered
+# with "raise sir_samples".
+test_that(".ferx_warning_guidance dispatches sir by message content", {
+  g <- function(msg) ferx:::.ferx_warning_guidance("sir", message = msg)
+
+  rank_def <- g(paste0(
+    "SIR: proposal covariance is rank-deficient beyond the FIX-ed parameters: ",
+    "1 direction(s) carry no uncertainty [TVCL +0.71, TVV -0.70]."
+  ))
+  expect_match(rank_def, "not identified", fixed = TRUE)
+  expect_false(grepl("sir_samples", rank_def, fixed = TRUE))
+
+  shrunk <- g(paste0(
+    "SIR: proposal was shrunk in 3 direction(s) so draws stay inside the ",
+    "parameter bounds [TVKA -0.74 (sd 6.15e3 -> 2.89e0)]."
+  ))
+  expect_match(shrunk, "understate", fixed = TRUE)
+  expect_false(grepl("sir_samples", shrunk, fixed = TRUE))
+
+  # Availability / tuning messages keep the original advice.
+  tuning <- g("SIR requested but covariance matrix is not available")
+  expect_match(tuning, "sir_samples", fixed = TRUE)
+})

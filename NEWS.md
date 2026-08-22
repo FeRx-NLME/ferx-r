@@ -47,6 +47,20 @@
 
 ## Bug fixes
 
+- `ferx_sir()` now reports the engine's SIR-step warnings instead of dropping
+  them (ferx-core #1021). The binding returned only the CIs and the ESS, so the
+  proposal diagnostics ferx-core emits - a covariance that is rank-deficient
+  beyond its `FIX`ed parameters, or a proposal direction shrunk to keep draws
+  inside the parameter bounds - never reached the fit. They now land in
+  `fit$warnings` and in `fit$warnings_structured` under the `sir` category, and
+  `ferx_get_warnings()` answers them with guidance about the *model* (the named
+  parameters are not identified by the data, and their SIR intervals understate
+  the uncertainty) rather than the old "raise `sir_samples`" advice, which does
+  not help in that case. The same ferx-core release stops those fits from
+  failing outright with `All SIR samples had invalid weights` - which is what
+  every model-based meta-analysis hit, since fixing the residual variance is the
+  inverse-variance weighting scheme and cannot be dropped.
+
 - `ferx_covariance()` and `ferx_sir()` no longer reject a fit that has no random
   effects (#290). Both required a non-empty `fit$ebe_etas`, which a
   fixed-effects-only fit does not have - there are no EBEs to warm-start from -
