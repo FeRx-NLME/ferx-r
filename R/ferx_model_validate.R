@@ -16,7 +16,9 @@
 #'
 #' @return Invisibly returns a list with \code{ok} (logical - FALSE when the
 #'   engine reports an error, a required section is missing, or the file
-#'   carries a section name the engine does not recognise), \code{model},
+#'   carries a section name this build of the engine does not accept - one it
+#'   never knew, one it has retired, or one behind a disabled feature),
+#'   \code{model},
 #'   \code{data}, and a \code{diagnostics} data frame with one row per finding
 #'   (\code{severity}, \code{code}, \code{message}, \code{block}, \code{line},
 #'   \code{suggestion}). The function always prints a report to the console.
@@ -127,8 +129,26 @@ ferx_model_validate <- function(path, data = NULL) {
   for (s in optional_sections) {
     if (s %in% present) cat(sprintf("  %-30s [ok] (optional)\n", s))
   }
+  # `ferx_rust_known_blocks()` is build-dependent and omits names the engine
+  # still recognises: a retired block (`E_DEPRECATED_BLOCK`) and one gated
+  # behind a cargo feature this binary lacks (`E_BLOCK_FEATURE_DISABLED`) both
+  # land in `unknown`. Printing `[unknown section]` for those contradicts the
+  # engine's own diagnostic two lines further down, which correctly says the
+  # name was retired or needs a feature flag - so take the label from that
+  # diagnostic when the engine has already named the block. `[unknown section]`
+  # is left for a header nothing explains.
   if (length(unknown) > 0L) {
-    for (s in unknown) cat(sprintf("  %-30s [unknown section]\n", s))
+    for (s in unknown) {
+      codes <- diag$code[!is.na(diag$block) & diag$block == s]
+      label <- if ("E_DEPRECATED_BLOCK" %in% codes) {
+        "[retired section]"
+      } else if ("E_BLOCK_FEATURE_DISABLED" %in% codes) {
+        "[feature not enabled]"
+      } else {
+        "[unknown section]"
+      }
+      cat(sprintf("  %-30s %s\n", s, label))
+    }
   }
   cat("\n")
 

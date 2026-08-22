@@ -2878,9 +2878,16 @@ fn ferx_rust_autodiff_enabled() -> bool {
 /// duplicated vector this replaces had drifted, and reported valid blocks
 /// (`covariates`, `event_model`, `simulation`, ...) as unknown sections.
 ///
-/// Feature-gated blocks are included: they are recognised names in every
-/// build, and a binary compiled without the feature reports
-/// `E_BLOCK_FEATURE_DISABLED` rather than pretending not to know them.
+/// The list is build-dependent: the engine filters out a block whose cargo
+/// feature is off, so what this returns depends on how ferx-core was compiled
+/// for this package. `src/Makevars` builds it with `ci,nn,survival`, which
+/// puts `event_model` and `binary_model` in the list and leaves `markov_model`
+/// out. Absence is therefore not the same as "the engine does not know this
+/// name" - a gated-off block is still recognised at parse time and rejected
+/// with `E_BLOCK_FEATURE_DISABLED`, not `E_UNKNOWN_BLOCK`. Callers that map
+/// this list onto a "valid sections" report should take the reason for a
+/// header being absent from the engine's diagnostics rather than assuming it
+/// is unknown.
 ///
 /// @return Character vector of block names, sorted.
 /// @export

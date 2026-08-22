@@ -112,6 +112,36 @@ test_that("a bundled example with a [covariates] block validates clean", {
   expect_true(isTRUE(res$ok))
   expect_false(any(grepl("unknown section", out, fixed = TRUE)))
 })
+test_that("a retired section is labelled retired, not unknown", {
+  # `ferx_rust_known_blocks()` lists only what this build *accepts*, so a
+  # retired name lands in the R-side `unknown` set. Printing `[unknown section]`
+  # for it contradicts the engine's own E_DEPRECATED_BLOCK line right below,
+  # which says the block was retired and should be deleted.
+  lines <- c(VALID_WARFARIN_SECTIONS, "", "[initial_values]", "  TVCL = 0.134")
+  path  <- write_ferx(lines)
+  on.exit(unlink(path))
+  out <- capture.output(res <- ferx_model_validate(path))
+  expect_false(isTRUE(res$ok))
+  expect_true("E_DEPRECATED_BLOCK" %in% res$diagnostics$code)
+  expect_true(any(grepl("initial_values +\\[retired section\\]", out)))
+  expect_false(any(grepl("unknown section", out, fixed = TRUE)))
+})
+test_that("a feature-gated section is labelled disabled, not unknown", {
+  # `markov_model` is a name the engine recognises in every build but only
+  # accepts with `--features markov`, which this package does not enable
+  # (src/Makevars builds ferx-core with ci,nn,survival). It is therefore absent
+  # from `ferx_rust_known_blocks()` while the parser still reports it precisely.
+  skip_if("markov_model" %in% ferx:::ferx_rust_known_blocks(),
+          "this build enables the markov feature")
+  lines <- c(VALID_WARFARIN_SECTIONS, "", "[markov_model]", "  states A, B")
+  path  <- write_ferx(lines)
+  on.exit(unlink(path))
+  out <- capture.output(res <- ferx_model_validate(path))
+  expect_false(isTRUE(res$ok))
+  expect_true("E_BLOCK_FEATURE_DISABLED" %in% res$diagnostics$code)
+  expect_true(any(grepl("markov_model +\\[feature not enabled\\]", out)))
+  expect_false(any(grepl("unknown section", out, fixed = TRUE)))
+})
 test_that("syntax error in model body returns FALSE and prints errors", {
   lines <- c(
     "[parameters]",
