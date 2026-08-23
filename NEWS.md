@@ -255,12 +255,13 @@
 - **Two warning codes that ferx-core gives to opposite messages now answer each
   of them.** `classify_warning` routes both an informational note and a genuine
   problem to the same code in two places, and a single guidance text told half
-  of them something untrue. `mu_referencing` covered auto-detection while also
-  printing under "individual parameter(s) not mu-referenced ... can strongly
-  affect convergence", which it answered with "(informational)".
-  `optimizer_config` did the same to "global_search disabled", where the
-  optimiser ran single-start because global search failed to initialise. Each
-  now branches on the message.
+  of them something untrue. `mu_referencing` reported auto-detected
+  mu-referencing - a message ferx-core does not emit at all - and answered its
+  real advisories, "individual parameter(s) not mu-referenced ... can strongly
+  affect convergence" among them, with "(informational)". `optimizer_config` did
+  the same to "global_search disabled", and to a build note reporting that
+  `global_search = true` cannot run in this NLopt build. Each now branches on the
+  message, and neither describes a message the engine never sends.
 
 - **The ill-conditioned-Hessian guidance answers the cause ferx-core labelled.**
   That message tags each named parameter as either a non-finite finite-difference

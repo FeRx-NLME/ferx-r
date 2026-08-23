@@ -140,16 +140,18 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
   parts <- character(0)
   if (flat) {
     parts <- c(parts, paste0(
-      "For the parameter(s) marked \"zero diagonal -- flat objective\": the ",
-      "objective does not curve in that direction at all, so the data cannot ",
+      "For the parameter(s) ferx-core marks as a zero diagonal (a flat ",
+      "objective): the objective does not curve in that direction at all, so ",
+      "the data cannot ",
       "estimate the parameter. Fix it, remove it, or map it into the model if ",
       "it was meant to be used."
     ))
   }
   if (overflow) {
     parts <- c(parts, paste0(
-      "For the parameter(s) marked \"FD stencil non-finite\": the objective ",
-      "overflowed at the perturbed point. ferx-core's own advice is to tune ",
+      "For the parameter(s) ferx-core marks as a non-finite finite-difference ",
+      "stencil: the objective could not be evaluated at the perturbed point, ",
+      "which it notes may be model overflow. Its own advice is to tune ",
       "fd_hessian_step (its docs suggest 0.1, or 1e-3 when finite-difference ",
       "noise is the concern); constraining the parameter to a plausible range ",
       "also helps."
@@ -172,7 +174,7 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
   if (grepl("severity: severe", message, ignore.case = TRUE)) {
     return(paste0(
       "Severe Hessian regularisation: standard errors are likely unreliable. ",
-      "Run ferx_sir() to obtain non-parametric confidence intervals, or ",
+      "Run ferx_sir() to obtain SIR-based confidence intervals, or ",
       "simplify the model structure."
     ))
   }
@@ -184,9 +186,9 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
     ))
   }
   paste0(
-    "Minor Hessian regularisation: standard errors are likely reliable. A ",
-    "small eigenvalue floor was applied; this is common on smooth OFV ",
-    "surfaces and is usually benign."
+    "Minor Hessian regularisation: ferx-core reports standard errors are likely ",
+    "reliable. The tier reflects what fraction of the free-block eigenvalues had ",
+    "to be clipped, and the message gives the count and the floor."
   )
 }
 
@@ -212,12 +214,11 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
   if (grepl("omega matrix is", message, ignore.case = TRUE)) {
     if (grepl("not positive definite", message, ignore.case = TRUE)) {
       return(paste0(
-        "Omega has a negative eigenvalue at convergence, so it is not a valid ",
-        "covariance matrix -- some combination of the ETAs carries a negative ",
-        "variance. This is usually a block omega whose correlations were driven ",
-        "outside the range a positive-definite matrix allows. Simplify the block ",
-        "structure (or go diagonal), drop one of the correlated ETAs, or re-fit ",
-        "from different starting values."
+        "ferx-core reports the smallest eigenvalue of omega as negative at ",
+        "convergence. The message lists the eigenvalues -- read how far below ",
+        "zero it is. Reducing the random-effect structure (a simpler block, or a ",
+        "diagonal omega), removing an ETA the data cannot support, or re-fitting ",
+        "from different starting values are the usual ways out."
       ))
     }
     return(paste0(
@@ -256,8 +257,9 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
       "plausible ranges."
     ))
   }
-  # Cancelled part-way. ferx-core returns this from three points inside the FD
-  # and score loops (`COV_CANCELLED_MSG`) and it classifies to `general`, so it
+  # Cancelled part-way. ferx-core returns `COV_CANCELLED_MSG` from three points
+  # -- the analytic R-matrix loop, the FD stencil loop and the score
+  # cross-product loop -- and it classifies to `general`, so it
   # only reaches this function because `general` is admitted on the message. It
   # matches nothing below, and the generic fallback would tell a user who
   # cancelled to go and question their model's identifiability -- nothing was
@@ -290,9 +292,10 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
     return(paste0(
       "The fd_hessian_step you passed is not a positive, finite number, so the ",
       "covariance step never ran. Pass a positive value, or drop the argument ",
-      "entirely to use ferx-core's default of 1e-2. (ferx_fit() rejects a ",
-      "non-positive value before the engine sees it, so this message normally ",
-      "reaches you only from a fit produced outside the R API.)"
+      "entirely to use ferx-core's default of 1e-2. (Both R routes reject a ",
+      "non-positive value before the covariance step runs -- ferx_fit()'s own ",
+      "argument in R, and the settings key at parse time -- so this message ",
+      "normally reaches you only from a fit produced outside the R API.)"
     ))
   }
   # Off-diagonal FD stencil non-finite. Core emits this on the *success* path:
@@ -337,12 +340,18 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
   # invariant the message inventory asserts for the messages we do recognise.
   # Bare rather than return()-wrapped: last expression in the function
   # (return_linter).
-  if (category %in% c("covariance_regularized", "covariance_step")) {
+  if (identical(category, "covariance_regularized")) {
     paste0(
       "The covariance step produced a matrix but reported something this ",
-      "version does not have specific advice for. Read the message: standard ",
-      "errors exist, so treat it as a caveat on their precision rather than as ",
-      "a failure, and cross-check with ferx_sir() if it matters."
+      "version does not have specific advice for. ferx-core documents this code ",
+      "as the step having succeeded in a degraded form, so read the message as a ",
+      "caveat on the precision of the standard errors rather than as a failure, ",
+      "and cross-check with ferx_sir() if it matters."
+    )
+  } else if (identical(category, "covariance_step")) {
+    paste0(
+      "An informational note about the covariance step that this version has no ",
+      "specific advice for. Read the message."
     )
   } else {
     paste0(
@@ -423,15 +432,17 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
 # tests/testthat/test-ferx_get_warnings.R cover it, and only one of them is a
 # drift guard:
 #
-#   - "every category in the table returns guidance" walks a hand-written vector
+#   - "every category in the guidance table returns guidance" walks a hand-written vector
 #     of tokens. It cannot notice a code that core added and nobody transcribed,
 #     because the loop never visits a token that is not in the vector.
-#   - "the table matches ferx-core's WarningCode vocabulary" reads
-#     `WarningCode::as_str()` out of a sibling ferx-core checkout and compares
-#     the real token set with this table. That one does fail when core grows a
-#     code. It skips when the sibling is absent (ferx-r CI builds the pinned
-#     crate, not a checkout), so it guards the machine where the drift is
-#     introduced rather than the one that consumes it.
+#   - ".ferx_warning_guidance matches ferx-core's WarningCode vocabulary" reads
+#     `WarningCode::as_str()` at the ferx-core revision pinned in
+#     src/rust/Cargo.lock -- NOT the sibling working tree -- and compares the
+#     real token set with this table. That one does fail when core grows a code.
+#     Reading the pin means it asserts against what ferx-r actually builds, so
+#     it fires once the lock is bumped: on the consuming side, not on the
+#     machine where the new code was written. It skips where the pinned revision
+#     cannot be materialised, which includes ferx-r CI (no ferx-core checkout).
 #
 # `general` is deliberately absent from the table: it is core's bucket for a
 # message it did not recognise, where the message text is the only guidance
@@ -460,11 +471,13 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
   if (.ferx_is_covariance_warning(category, message)) {
     return(.ferx_covariance_guidance(message, category))
   }
-  # ferx-core has no `unused_parameter` code: both of its unused-declaration
-  # messages ("theta 'X' is declared in [parameters] but not referenced in any
-  # model expression", and the [individual_parameters] "computed but never
-  # used" one) fall through `classify_warning` to `general`, so they are routed
-  # here by message, the same way the covariance family is.
+  # ferx-core has no `unused_parameter` code. Its unused-declaration messages
+  # -- one each for an unreferenced theta, omega, kappa and sigma (the sigma one
+  # says "not referenced in [error_model]" rather than "in any model
+  # expression"), plus the [individual_parameters] "computed but never used"
+  # census -- all fall through `classify_warning` to `general`, so they are
+  # routed here by message, the same way the covariance family is. All five
+  # carry one of the two substrings grepped for below.
   #
   # Gating on `general` alone is NOT enough, and the trap is worth naming: the
   # flat-theta message contains the literal phrase "computed but never used",
@@ -488,26 +501,26 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
     omega_structure    = "Mixed parameterisation in a block omega. Check the [individual_parameters] forms for the correlated etas.",
     gradient_fallback  = "SAEM requested HMC sampling but this model is outside HMC's scope, so it fell back to Metropolis-Hastings. The message names which condition applied. The fit is valid; set saem_n_leapfrog = 0 to request MH deliberately and silence the notice.",
     mu_referencing     = if (grepl("not mu-referenced", message, fixed = TRUE)) {
-      "The listed individual parameters are not mu-referenced, which ferx-core reports can strongly affect SAEM convergence. Rewrite them in a mu-referenced form (a THETA entering linearly on the transformed scale, e.g. CL = TVCL * exp(ETA_CL)) so the M-step can update them in closed form."
+      "The message lists parameters that are not mu-referenced, so SAEM's M-step cannot update them in closed form. What to do depends on which kind they are, and the message says: a parameter that can carry an ETA should be written in a mu-referenced form, while one that cannot -- a covariate coefficient, an allometric exponent, a structural constant -- should be held FIX or the fit cross-checked against FOCEI or IMPMAP."
     } else {
-      "Mu-referencing was auto-detected for the listed parameters (informational)."
+      "A mu-referencing advisory. Read the message: it names the parameters affected and what ferx-core recommends for them."
     },
     optimizer_config   = if (grepl("global_search disabled", message, fixed = TRUE)) {
-      "Global search was requested but could not be initialised, so the optimiser ran without it and started from your initial estimates alone. The message carries the underlying reason. Treat the result as a single-start fit: check it against a multi-start run before trusting it as the global optimum."
+      "Global search was requested but could not be initialised, so the optimiser ran without it. The message carries the underlying reason."
     } else {
-      "Optimizer configuration note (informational)."
+      "An optimizer-configuration note. Read the message: some are purely advisory, and some report that a setting you asked for will not take effect (for example an NLopt build without CRS2-LM, where global_search = true cannot run)."
     },
     multi_start        = "Multi-start information (informational).",
     threads            = "Thread-pool sizing note. Consider matching threads to the subject count.",
     cancelled          = "The fit was cancelled before completion.",
     unused_parameter   = "A declared parameter is never referenced in any model expression, or an [individual_parameters] assignment is computed and then never used. It cannot affect predictions and will not be meaningfully estimated: remove it, or complete the expression that was meant to use it. A commented-out line or a misspelt name is the usual cause.",
     eta_shrinkage      = "High ETA shrinkage means the data do not inform that random effect per subject. Individual estimates and any EBE-based diagnostic (ETA plots, covariate screening) are unreliable for it; consider removing the ETA or collecting richer per-subject data.",
-    eps_shrinkage      = "EPS shrinkage is notably negative, meaning mean(IWRES^2) > 1: the residual error model is not absorbing the residuals at the final EBEs, so sigma is under-fit rather than over-fit. Common causes are a SAEM run that stopped at a local optimum (polish with method = c(\"saem\", \"focei\"), or try different starts), model misspecification on a subset of subjects, and sigma sitting at a bound. Inspect the IWRES distribution in the sdtab.",
+    eps_shrinkage      = "EPS shrinkage is notably negative, meaning mean(IWRES^2) > 1: the residual error model is not absorbing the residuals at the final EBEs. ferx-core lists the common causes as a SAEM run that stopped at a local optimum (polish with method = c(\"saem\", \"focei\"), or try different starts), model misspecification on a subset of subjects, and sigma sitting at a bound. Inspect the IWRES distribution in the sdtab.",
     boundary_estimate  = "A THETA came to rest on one of its bounds, so the estimate is where the bound put it rather than where the data did. The message names the parameter and the side: widen that bound if the value is plausible, or reconsider the parameterisation if the parameter is drifting because the data do not identify it.",
-    high_correlation   = "The named parameter pair(s) are nearly collinear at convergence, so their individual estimates are poorly determined even when the fit as a whole looks good. Consider fixing one of each pair, removing it, or reparameterising.",
+    high_correlation   = "The named parameter pair(s) are nearly collinear at convergence, so their individual estimates are poorly determined. Consider fixing one of each pair, removing it, or reparameterising.",
     inflated_rse       = "A relative standard error exceeded ferx-core's reporting threshold of 50%, so the named parameter is imprecisely estimated -- the data barely inform it. Check identifiability before quoting its precision, and consider fixing or removing it.",
     flat_parameter     = "A THETA has no effect on the objective at the initial estimate (unmapped, or dropped from the structural/scaling model). It was frozen at its initial value so the rest of the fit could proceed; map it into the model or remove it. Its reported estimate is just its initial value.",
-    flip_flop          = "A transit / inverse-Gaussian absorption model entered the flip-flop regime (absorption no faster than elimination). If the model carries an ODE twin the affected subjects were rerouted and the fit is sound; if it does not, that subject's likelihood contribution is degenerate. Check the named subject's MTT/CL (transit) or MAT/CV2/CL (IG) estimates.",
+    flip_flop          = "A transit / inverse-Gaussian absorption model entered what ferx-core calls the flip-flop regime: a disposition rate at or above the absorption rate (KTR = (n+1)/mtt for transit, the abscissa 1/(2*MAT*CV^2) for IG) or, for a two-compartment model, coincident disposition eigenvalues. If the model carries an ODE twin the affected subjects were rerouted and the fit is sound; if it does not, that subject's likelihood contribution is degenerate. Check the named subject's MTT/CL (transit) or MAT/CV2/CL (IG) estimates.",
     absorption_twin_declined = "The analytic absorption model kept no ODE fallback, so the fit is a plain closed-form fit but every feature that needs the fallback (time-varying covariates, a TIME-dependent parameter, IOV, steady-state or infusion doses, the flip-flop reroute) is now rejected instead. The message quotes the reason the fallback could not be built -- the set of reasons is open-ended, so read that text rather than guessing. Resolving it restores the fallback and the features above.",
     experimental       = "An experimental feature is in use. For neural-network components ferx-core states that standard errors for the network weights are not reliable; for SDE components it states that standard errors and convergence behaviour are not yet proven. Treat point estimates as provisional and do not quote the precision.",
     simulation         = "A simulated subject was handled specially: a degenerate (non-positive or non-finite) hazard draw, a recurrent-event stream whose expected count exceeded the cap so it was skipped and the subject censored at the horizon, or one truncated at the cap mid-stream. The estimated model is unaffected; inspect the named subject's hazard parameters and covariate values.",
