@@ -214,8 +214,11 @@
   - **a covariance step cancelled part-way**, which produced no standard errors
     but diagnosed nothing about the model. It was being answered with the
     identifiability advice, as though the fit had told the user something.
-  - **an invalid `fd_hessian_step`**, which is a mistake in the argument the
-    user passed, not evidence against the model's identifiability.
+  - **an invalid `fd_hessian_step`**, which is a mistake in the argument rather
+    than evidence against the model's identifiability. `ferx_fit()` rejects a
+    non-positive value before the engine sees it and the model-file parser
+    rejects it at parse time, so from R this arm is defence in depth - it
+    answers a fit produced outside the R API.
   - **a singular score cross-product matrix**, whose remedy is
     `covariance_method = "r"` or `"rsr"` - not mentioned by the generic text.
 
@@ -234,11 +237,20 @@
   reason, and the set of reasons is open-ended, so the guidance points at that
   text rather than guessing a cause).
 
-  `eps_shrinkage` is the one to read if you have seen its guidance before: it
-  described *high* shrinkage, while ferx-core only ever warns when EPS shrinkage
-  is notably **negative** - `mean(IWRES^2) > 1`, sigma under-fitting the
-  residuals rather than absorbing them. The diagnosis and the remedy were both
-  inverted; they now match the engine.
+  Two categories are handled differently on purpose. `simulation` keeps a
+  guidance arm because it is a real ferx-core `WarningCode` and the drift guard
+  requires every one of them to have an answer, but it is not advertised above:
+  the R bindings reach the simulation engine through a path that returns those
+  warnings on the simulation output rather than on a fit, so
+  `ferx_get_warnings()` does not currently see them. `ebe_convergence` had an arm
+  and was removed outright - it is not a core code and nothing in ferx-r emits
+  it either, so unlike `simulation` there is no vocabulary obligation keeping it.
+
+  `eps_shrinkage` is worth calling out because it is easy to assume the opposite:
+  ferx-core warns only when EPS shrinkage is notably **negative** -
+  `mean(IWRES^2) > 1`, sigma under-fitting the residuals rather than absorbing
+  them - so the guidance points at an under-fit residual model, not at
+  shrinkage-flattened diagnostics.
 
 - **The unused-parameter warning gets its guidance back.** ferx-core has no
   `unused_parameter` warning code - both of its unused-declaration messages
