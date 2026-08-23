@@ -294,9 +294,7 @@
   A transit or inverse-Gaussian
   model that cannot build the ODE twin it falls back on now says so at parse time, with its
   own reason, instead of declining silently. It reaches `fit$warnings` and
-  `fit$warnings_structured` like any other engine warning. Note
-  `ferx_get_warnings()` prints the category but has no remediation text for it
-  yet, so it shows without the guidance block other categories get.
+  `fit$warnings_structured` like any other engine warning.
 
 ## Internal
 
