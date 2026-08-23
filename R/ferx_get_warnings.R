@@ -133,9 +133,17 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
 # category. Returns NULL for unknown categories so callers can skip printing
 # rather than showing a generic placeholder.
 #
+# The vocabulary is ferx-core's `WarningCode::as_str()` token set; it is pinned
+# by the "covers ferx-core's warning vocabulary" test in
+# tests/testthat/test-ferx_get_warnings.R, so a core release that adds a code
+# fails there rather than silently printing nothing. `general` is deliberately
+# unhandled: it is core's fallback bucket for an unrecognised message, where the
+# message text is the only guidance there is.
+#
 # message and uses_sde are used for dw_autocorrelation (positive vs negative
-# DW; SDE hint suppressed when already in use) and for covariance_step (the
-# specific failure mode embedded in the message text selects targeted advice).
+# DW; SDE hint suppressed when already in use) and for the covariance family
+# (the specific failure mode embedded in the message text selects targeted
+# advice).
 .ferx_warning_guidance <- function(category, message = "", uses_sde = FALSE) {
   if (category == "dw_autocorrelation") {
     if (grepl("egative", message, ignore.case = TRUE)) {
@@ -149,7 +157,20 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
       sde_hint
     ))
   }
-  if (category == "covariance_step") {
+  # The covariance family. All three of core's covariance codes land here,
+  # because the branch that applies is selected by the *message*, not by the
+  # code: core routes "Covariance step failed: ..." and "Covariance step:
+  # Hessian is not positive definite" to `covariance_failed`, "Covariance step
+  # regularized: ..." to `covariance_regularized`, and only the informational
+  # N^2-OFV cost note to `covariance_step`.
+  #
+  # Gating this block on `covariance_step` alone (as it was until this change)
+  # made every targeted branch below unreachable: the messages they grep for
+  # never arrive under that code. The unit tests did not catch it because they
+  # called this function with the category and the message paired by hand, a
+  # pairing production never produces.
+  if (category %in% c("covariance_failed", "covariance_regularized",
+                      "covariance_step")) {
     # Omega non-PD -- checked before general non-PD because omega messages also
     # contain "not positive definite" and "eigenvalue".
     if (grepl("omega matrix is not positive definite", message, ignore.case = TRUE)) {
@@ -213,7 +234,19 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
         "surfaces and is usually benign."
       ))
     }
-    # Generic fallback for older or unrecognised covariance_step messages.
+    # `covariance_step` is core's Info-level note about the cost of the step
+    # (the N^2 OFV evaluations it will run), not a failure. It reaches none of
+    # the branches above, so without its own arm it would inherit the
+    # "standard errors unavailable" fallback below and tell the user their
+    # covariance step had failed when it had not even started.
+    if (category == "covariance_step") {
+      return(paste0(
+        "Informational: the covariance step cost scales with the square of the ",
+        "parameter count. No action needed; pass covariance = FALSE to skip it ",
+        "during development."
+      ))
+    }
+    # Generic fallback for older or unrecognised covariance failure messages.
     return(paste0(
       "Standard errors unavailable. Check identifiability; try a simpler ",
       "omega/sigma structure or covariance = FALSE for development."
@@ -237,6 +270,16 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
     threads            = "Thread-pool sizing note. Consider matching threads to the subject count.",
     cancelled          = "The fit was cancelled before completion.",
     unused_parameter   = "A declared parameter is never referenced in [individual_parameters] or [error_model]. Remove it from [parameters] or complete the expression that uses it.",
+    eta_shrinkage      = "High ETA shrinkage means the data do not inform that random effect per subject. Individual estimates and any EBE-based diagnostic (ETA plots, covariate screening) are unreliable for it; consider removing the ETA or collecting richer per-subject data.",
+    eps_shrinkage      = "High EPS shrinkage means IWRES is pulled toward zero, so residual-based diagnostics understate misfit. Prefer PRED-based or simulation-based checks (VPC/NPDE) for this fit.",
+    boundary_estimate  = "A parameter converged onto a bound. The estimate is not a true optimum: widen the bound if the value is plausible, or reconsider the parameterisation if it is not.",
+    high_correlation   = "Two parameters are nearly collinear at convergence, so their individual estimates are poorly determined even when the fit looks good. Consider fixing one, removing it, or reparameterising.",
+    inflated_rse       = "A relative standard error is implausibly large, which usually signals a parameter the data barely inform. Check identifiability before quoting its precision.",
+    flat_parameter     = "A THETA has no effect on the objective at the initial estimate (unmapped, or dropped from the structural/scaling model). It was frozen at its initial value so the rest of the fit could proceed; map it into the model or remove it. Its reported estimate is just its initial value.",
+    flip_flop          = "A transit / inverse-Gaussian absorption model entered the flip-flop regime (absorption no faster than elimination). If the model carries an ODE twin the affected subjects were rerouted and the fit is sound; if it does not, that subject's likelihood contribution is degenerate. Check the named subject's MTT/CL (transit) or MAT/CV2/CL (IG) estimates.",
+    absorption_twin_declined = "The analytic absorption model kept no ODE fallback, so the fit is a plain closed-form fit but every feature that needs the fallback (time-varying covariates, a TIME-dependent parameter, IOV, steady-state or infusion doses, the flip-flop reroute) is now rejected instead. Read the reason quoted in the message: it is most often an individual parameter named after one of the twin's own compartments (CENTRAL, PERIPH). Renaming it restores the twin.",
+    experimental       = "An experimental feature is in use (SDE or neural-network components). Results are usable but should be applied with caution.",
+    simulation         = "A simulated subject was handled specially -- a degenerate hazard draw, or an over-large recurrent-event stream that was truncated. The estimated model is unaffected; inspect the named subject's hazard parameters and covariate values.",
     NULL
   )
 }

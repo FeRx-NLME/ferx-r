@@ -29,8 +29,19 @@ test_that("ferx_get_warnings() falls back to flat warnings when structured is ab
   expect_true(all(df$severity == "warning"))
   expect_true(all(df$category == "general"))
 })
-test_that(".ferx_warning_guidance dispatches covariance_step by message content", {
-  g <- function(msg) ferx:::.ferx_warning_guidance("covariance_step", message = msg)
+test_that(".ferx_warning_guidance dispatches the covariance family by message content", {
+  # Each message is paired with the category ferx-core's `classify_warning`
+  # actually assigns it, not with a hand-picked one. Every message below carries
+  # "covariance step failed" or "covariance step" + "not positive definite", so
+  # core codes it `covariance_failed`; the regularisation messages carry
+  # "covariance step regularized", so core codes those `covariance_regularized`.
+  # Neither reaches the code `covariance_step`, which core reserves for its
+  # Info-level cost note -- so pinning these to "covariance_step" (as this test
+  # did until the routing fix) asserted a pairing production never emits, and
+  # every branch under test was dead in the real call path.
+  g <- function(msg, category = "covariance_failed") {
+    ferx:::.ferx_warning_guidance(category, message = msg)
+  }
 
   # NonPdHessian path: eigenvalue list in message.
   msg_npd <- paste0(
@@ -71,14 +82,26 @@ test_that(".ferx_warning_guidance dispatches covariance_step by message content"
     "(1 of 3 free-block eigenvalues clipped; min eig = 1.2e-6, floor = 8.4e-14; ",
     "severity: ", sev, "). Standard errors are likely reliable."
   )
-  expect_match(g(base_reg("minor")),    "benign|reliable",   ignore.case = TRUE, perl = TRUE)
-  expect_match(g(base_reg("moderate")), "ferx_sir|caution",  ignore.case = TRUE, perl = TRUE)
-  expect_match(g(base_reg("severe")),   "ferx_sir|unreliable", ignore.case = TRUE, perl = TRUE)
+  reg <- function(sev) g(base_reg(sev), category = "covariance_regularized")
+  expect_match(reg("minor"),    "benign|reliable",     ignore.case = TRUE, perl = TRUE)
+  expect_match(reg("moderate"), "ferx_sir|caution",    ignore.case = TRUE, perl = TRUE)
+  expect_match(reg("severe"),   "ferx_sir|unreliable", ignore.case = TRUE, perl = TRUE)
   # Minor guidance should not suggest SIR.
-  expect_false(grepl("ferx_sir", g(base_reg("minor")), ignore.case = TRUE))
+  expect_false(grepl("ferx_sir", reg("minor"), ignore.case = TRUE))
 
   # Generic fallback for unrecognised message.
   expect_match(g("Covariance step failed"), "identifiability", ignore.case = TRUE)
+})
+
+test_that("the informational covariance_step note does not read as a failure", {
+  # Core codes only its Info-level cost note `covariance_step`. It matches none
+  # of the targeted branches, so before this arm existed it fell through to the
+  # "standard errors unavailable" fallback and told the user the step had failed
+  # when it had not yet run.
+  msg <- "Covariance step: 132 N^2 OFV evaluations for 12 parameters."
+  g <- ferx:::.ferx_warning_guidance("covariance_step", message = msg)
+  expect_match(g, "Informational", ignore.case = TRUE)
+  expect_false(grepl("unavailable|identifiability", g, ignore.case = TRUE))
 })
 test_that("ferx_get_warnings() shows guidance for unused_parameter category", {
   fake <- structure(
@@ -137,15 +160,35 @@ test_that(".ferx_warning_guidance returns negative-autocorrelation guidance", {
   neg <- ferx:::.ferx_warning_guidance("dw_autocorrelation", "Negative autocorrelation")
   expect_match(neg, "Negative IWRES autocorrelation")
 })
-test_that(".ferx_warning_guidance maps every known category to non-empty text", {
-  cats <- c("convergence", "covariance_step", "condition_number", "optimizer_health",
-            "eta_normality", "bloq_method", "sir", "importance_sampling", "data_quality",
-            "omega_structure", "ebe_convergence", "gradient_fallback", "mu_referencing",
-            "optimizer_config", "multi_start", "threads", "cancelled", "unused_parameter")
-  for (cat in cats) {
+test_that(".ferx_warning_guidance covers ferx-core's warning vocabulary", {
+  # Every token ferx-core's `WarningCode::as_str()` can emit, plus the R-side
+  # additions. This is the drift guard: core adding a code without a guidance
+  # arm here used to mean the R side printed the warning with no remediation
+  # and nothing failed. Update this vector together with the switch in
+  # R/ferx_get_warnings.R when core grows a code.
+  core_cats <- c(
+    "absorption_twin_declined", "bloq_method", "boundary_estimate", "cancelled",
+    "condition_number", "convergence", "covariance_failed",
+    "covariance_regularized", "covariance_step", "data_quality",
+    "dw_autocorrelation", "eps_shrinkage", "eta_normality", "eta_shrinkage",
+    "experimental", "flat_parameter", "flip_flop", "gradient_fallback",
+    "high_correlation", "importance_sampling", "inflated_rse", "mu_referencing",
+    "multi_start", "omega_structure", "optimizer_config", "optimizer_health",
+    "simulation", "sir", "threads"
+  )
+  # R-side categories that no core code maps to.
+  r_cats <- c("ebe_convergence", "unused_parameter")
+  for (cat in c(core_cats, r_cats)) {
     g <- ferx:::.ferx_warning_guidance(cat)
     expect_true(is.character(g) && length(g) == 1L && nzchar(g), info = cat)
   }
+})
+
+test_that(".ferx_warning_guidance leaves core's `general` fallback bucket unhandled", {
+  # `general` is core's bucket for a message its classifier did not recognise,
+  # so there is no category-level remediation to give -- the message text is the
+  # guidance. Asserted so it reads as a decision rather than an omission.
+  expect_null(ferx:::.ferx_warning_guidance("general"))
 })
 test_that(".ferx_warning_guidance returns NULL for an unknown category", {
   expect_null(ferx:::.ferx_warning_guidance("not_a_real_category"))
