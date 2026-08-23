@@ -161,7 +161,8 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
       "message labels the cause for each one; read it before choosing a remedy."
     )
   }
-  return(paste(parts, collapse = " "))
+  # Bare: last expression in the function (return_linter).
+  paste(parts, collapse = " ")
 }
 
 # Regularisation tiers. Split out of `.ferx_covariance_guidance()` so that
