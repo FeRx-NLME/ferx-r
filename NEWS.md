@@ -12,13 +12,38 @@
   carry the same reservation but are consulted only for a coded `RATE=-2`/`-1`
   dose, so that collision is reported against the **dataset** instead and a model
   whose data never codes `RATE` is untouched. Reads from `[derived]` / `[output]`
-  are post-solve reporting and stay silent, as does an analytical model's explicit
-  `pk(..., f=F)` mapping.
+  are post-solve reporting and stay silent.
 
-  **The parse-time rejection covers ODE models only.** On an analytical `pk ...`
-  model the same double use is still accepted silently — do not rely on the engine
-  to catch it there. Tracked as
-  [ferx-core #1004](https://github.com/FeRx-NLME/ferx-core/issues/1004).
+  **Analytical (`pk ...`) models are covered too** (ferx-core #1004). The first
+  pass rejected ODE models only, on the argument that an explicit
+  `pk(..., f=F)` mapping made a second use "stated rather than silent". It did
+  not: nothing in the model file says the value is applied twice, and a
+  `[scaling]` or `[adaptive_dosing] observe` expression that reads a mapped
+  `f=`/`lagtime=` parameter applied it once at the dose and once where it was
+  read — on the **default** engine, with no diagnostic, measured at exactly `F`
+  on the prediction. Both engines now reject it with the same
+  `E_DOSE_ATTR_DOUBLE_USE` code.
+
+  The **remedy differs by engine**, and the message says which applies. On an
+  ODE model the *name* routes the parameter, so renaming it fixes the model. On
+  an analytical model the name is inert and the **mapping** binds it, so the fix
+  is to drop the `f=`/`lagtime=` argument from the `pk(...)` call — renaming
+  changes nothing, because the mapping follows the parameter.
+
+  Two things stay accepted on the analytical engine. A parameter merely *named*
+  `F` that no `pk(...)` argument maps is an ordinary parameter, so the usual
+  `CL/F`, `V/F` apparent-parameter convention is unaffected. And an
+  `[initial_conditions]` read is fine: an initial condition is not an absorbed
+  dose, so the engine seeds the amount with `F = 1` and no lag, and
+  `init(depot) = F * 500` — the bioavailable residue of a pre-study dose —
+  applies `F` exactly once.
+
+  **If you map a dose attribute and also read it** — e.g.
+  `pk one_cpt_oral(cl=CL, v=V, ka=KA, f=F)` together with
+  `[scaling] obs_scale = V / F` — that model now fails to parse. Drop whichever
+  half was not meant. This is again **stricter than NONMEM**: `$PK` defining
+  `F1` *and* `S2 = V/F1` runs clean under `ADVAN2` and returns predictions
+  scaled by exactly `F1`, with no diagnostic.
 
   **If you have an ODE model that folds `F` into the absorption flux** — the
   pre-dose-entry convention, e.g. `d/dt(central) = F * KA * depot / V - ...` — it
