@@ -178,106 +178,42 @@
 - **`ferx_get_warnings()` now answers a failed covariance step with the advice
   it was written to give.** Every targeted branch of the covariance guidance -
   a non-positive-definite Hessian with its eigenvalue list, ill-conditioned
-  Hessian entries naming the parameter, a non-positive-definite omega, a
-  non-finite base OFV, and the minor/moderate/severe regularisation tiers - sat
-  behind `category == "covariance_step"`. ferx-core does not code those messages
-  that way: it codes them `covariance_failed` and `covariance_regularized`, and
-  reserves `covariance_step` for its informational note about the step's cost.
+  Hessian entries naming the parameter, a near-singular omega, a non-finite
+  base OFV, and the minor/moderate/severe regularisation tiers - sat behind
+  `category == "covariance_step"`. ferx-core does not code those messages that
+  way: it codes them `covariance_failed` and `covariance_regularized`, and
+  reserves `covariance_step` for an informational note about the step's cost.
   So the whole block was unreachable and a failed covariance step printed no
   guidance at all, while the one message that did reach it - the benign cost
   note - was answered with "Standard errors unavailable. Check identifiability",
   reporting a failure that had not happened.
 
-  Guidance is now selected by the message rather than by the code, which is what
-  the branches were always keyed on. Four categories reach it: ferx-core's
-  three, plus the `covariance` category `ferx_covariance()` stamps on the same
-  engine messages - so the post-hoc covariance step gets guidance too, not just
-  the one run inside `ferx_fit()`. A covariance message arriving under `general`
-  is answered as well, which covers every fit read back with `ferx_load_fit()`
-  (it does not restore the structured table, so all its warnings arrive under
-  that category). Admission is anchored to messages that *begin* with
-  "Covariance step", so SIR's own diagnostics - which mention the covariance
-  step in passing - keep their SIR guidance instead of being told to re-run with
-  `covariance = FALSE`, which would remove the matrix SIR needs.
+  Guidance is now selected by the message, which is what those branches were
+  always keyed on. Four categories reach it: ferx-core's three, plus the
+  `covariance` category `ferx_covariance()` assigns to the same engine messages,
+  so the post-hoc covariance step gets guidance too. A covariance message
+  arriving under `general` is answered as well, which covers every fit read back
+  with `ferx_load_fit()` - it does not restore the structured table, so all its
+  warnings arrive under that category. Admission is anchored to messages that
+  *begin* with "Covariance step", so SIR's diagnostics, which mention the step
+  in passing, keep their own guidance instead of being told to re-run with
+  `covariance = FALSE` - the one setting that removes the matrix SIR needs.
 
-  Five covariance messages ferx-core emits were being answered wrongly or not at
-  all, and now have their own advice:
-
-  - **an off-diagonal FD stencil that could not be evaluated**, which the engine
-    reports on its *success* path - the standard errors exist and are merely
-    over-optimistic. It was being answered "Standard errors unavailable".
-  - **an omega reported `near-singular`** rather than `not positive definite`.
-    Both descriptors come from the same engine message and mean different
-    things - a negative eigenvalue is an invalid covariance matrix, a tiny
-    positive one is a variance the data cannot support - and they now get
-    different advice instead of one text that renamed half of them.
-  - **a covariance step cancelled part-way**, which produced no standard errors
-    but diagnosed nothing about the model. It was being answered with the
-    identifiability advice, as though the fit had told the user something.
-  - **an invalid `fd_hessian_step`**, which is a mistake in the argument rather
-    than evidence against the model's identifiability. `ferx_fit()` rejects a
-    non-positive value before the engine sees it and the model-file parser
-    rejects it at parse time, so from R this arm is defence in depth - it
-    answers a fit produced outside the R API.
-  - **a singular score cross-product matrix**, whose remedy is
-    `covariance_method = "r"` or `"rsr"` - not mentioned by the generic text.
-
-  The unit tests missed all of this because they called the guidance function
-  with the category and the message paired by hand, a pairing production never
-  produces. They now use ferx-core's message texts verbatim, each paired with
-  the category ferx-core actually assigns it, and assert that guidance never
-  contradicts the message it is printed under.
-
-- **Warning categories that had no remediation guidance now have it**, so
-  `ferx_get_warnings()` stops printing a category with nothing under it:
-  `eta_shrinkage`, `eps_shrinkage`, `boundary_estimate`, `high_correlation`,
-  `inflated_rse`, `flat_parameter`, `flip_flop`, `experimental`,
-  and `absorption_twin_declined` (ferx-core #1008, an analytic transit /
-  inverse-Gaussian model that kept no ODE fallback; the warning quotes the
-  reason, and the set of reasons is open-ended, so the guidance points at that
-  text rather than guessing a cause).
-
-  Two categories are handled differently on purpose. `simulation` keeps a
-  guidance arm because it is a real ferx-core `WarningCode` and the drift guard
-  requires every one of them to have an answer, but it is not advertised above:
-  the R bindings reach the simulation engine through a path that returns those
-  warnings on the simulation output rather than on a fit, so
-  `ferx_get_warnings()` does not currently see them. `ebe_convergence` had an arm
-  and was removed outright - it is not a core code and nothing in ferx-r emits
-  it either, so unlike `simulation` there is no vocabulary obligation keeping it.
-
-  `eps_shrinkage` is worth calling out because it is easy to assume the opposite:
-  ferx-core warns only when EPS shrinkage is notably **negative** -
-  `mean(IWRES^2) > 1`, sigma under-fitting the residuals rather than absorbing
-  them - so the guidance points at an under-fit residual model, not at
-  shrinkage-flattened diagnostics.
-
-- **Two warning codes that ferx-core gives to opposite messages now answer each
-  of them.** `classify_warning` routes both an informational note and a genuine
-  problem to the same code in two places, and a single guidance text told half
-  of them something untrue. `mu_referencing` reported auto-detected
-  mu-referencing - a message ferx-core does not emit at all - and answered its
-  real advisories, "individual parameter(s) not mu-referenced ... can strongly
-  affect convergence" among them, with "(informational)". `optimizer_config` did
-  the same to "global_search disabled", and to a build note reporting that
-  `global_search = true` cannot run in this NLopt build. Each now branches on the
-  message, and neither describes a message the engine never sends.
-
-- **The ill-conditioned-Hessian guidance answers the cause ferx-core labelled.**
-  That message tags each named parameter as either a non-finite finite-difference
-  stencil or a zero diagonal (a flat objective), and the engine offers
-  `fd_hessian_step` for the first only. The guidance offered it for both -
-  including on the analytic R-matrix path, which is the default and differences
-  nothing at all.
+  Three messages that were being answered wrongly now have their own advice: an
+  off-diagonal FD stencil that could not be evaluated, which ferx-core reports
+  on its *success* path (the standard errors exist and are merely
+  over-optimistic, not missing); a covariance step cancelled part-way, which
+  produced no standard errors but diagnosed nothing about the model; and the
+  informational cost note. A near-singular omega now reaches the omega branch
+  too - ferx-core picks that descriptor from the sign of the smallest
+  eigenvalue, and the guidance had matched only the other one.
 
 - **The unused-parameter warning gets its guidance back.** ferx-core has no
-  `unused_parameter` warning code - both of its unused-declaration messages
-  (a `theta` or `omega` declared in `[parameters]` and never referenced, and an
-  `[individual_parameters]` assignment computed and then never used) classify to
-  `general`, so the guidance written for them was unreachable in exactly the way
-  the covariance block was. They are now routed by message. The `ferx_fit()`
-  documentation no longer claims those warnings carry a `"unused_parameter"`
-  category, and describes both messages rather than only the first.
+  `unused_parameter` code - its unused-declaration messages classify to
+  `general` - so the guidance written for them was unreachable in the same way
+  the covariance block was. They are now routed by message. ferx-core's
+  flat-theta warning contains the same "computed but never used" phrase and is
+  excluded explicitly, so it is not answered with the unused-parameter text.
 
 - `ferx_sir()` now reports the engine's SIR-step warnings instead of dropping
   them (ferx-core #1021). The binding returned only the CIs and the ESS, so the
@@ -339,7 +275,9 @@
   A transit or inverse-Gaussian
   model that cannot build the ODE twin it falls back on now says so at parse time, with its
   own reason, instead of declining silently. It reaches `fit$warnings` and
-  `fit$warnings_structured` like any other engine warning.
+  `fit$warnings_structured` like any other engine warning. Note
+  `ferx_get_warnings()` prints the category but has no remediation text for it
+  yet, so it shows without the guidance block other categories get.
 
 ## Internal
 
