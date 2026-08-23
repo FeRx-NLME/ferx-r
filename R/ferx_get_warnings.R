@@ -142,15 +142,27 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
 .ferx_covariance_guidance <- function(message = "") {
   # Omega non-PD or near-singular -- checked before the general non-PD branch
   # because omega messages also contain "not positive definite" and
-  # "eigenvalue". Matched on "omega matrix is" rather than on a descriptor:
-  # ferx-core writes one of two into the same sentence depending on the sign of
-  # the smallest eigenvalue ("not positive definite" / "near-singular"), and
-  # pinning the grep to the first sent the second to the generic fallback.
+  # "eigenvalue". Entered on "omega matrix is" so both descriptors arrive, then
+  # split on which one: ferx-core writes "not positive definite" when the
+  # smallest eigenvalue is negative and "near-singular" when it is a tiny
+  # positive (covariance.rs), a distinction it makes deliberately. Answering
+  # both with one text renamed the failure for half of them.
   if (grepl("omega matrix is", message, ignore.case = TRUE)) {
+    if (grepl("not positive definite", message, ignore.case = TRUE)) {
+      return(paste0(
+        "Omega has a negative eigenvalue at convergence, so it is not a valid ",
+        "covariance matrix -- some combination of the ETAs carries a negative ",
+        "variance. This is usually a block omega whose correlations were driven ",
+        "outside the range a positive-definite matrix allows. Simplify the block ",
+        "structure (or go diagonal), drop one of the correlated ETAs, or re-fit ",
+        "from different starting values."
+      ))
+    }
     return(paste0(
-      "Omega is near-singular at convergence. Consider a diagonal omega ",
-      "structure, fixing a small variance to a small positive constant, or ",
-      "removing the corresponding ETA from the model."
+      "Omega is near-singular at convergence: a variance, or a direction in a ",
+      "block, has collapsed towards zero, so the data do not support that much ",
+      "random-effect structure. Consider a diagonal omega, fixing the small ",
+      "variance to a small positive constant, or removing the corresponding ETA."
     ))
   }
   # NonPdHessian path: eigenvalue list is present in the message.
@@ -213,8 +225,9 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
   if (grepl("fd_hessian_step must be", message, ignore.case = TRUE)) {
     return(paste0(
       "The fd_hessian_step you passed is not a positive, finite number, so the ",
-      "covariance step never ran. Pass a positive value, or omit the argument to ",
-      "use the default (e.g. ferx_fit(..., fd_hessian_step = 0.05))."
+      "covariance step never ran. Pass a positive value ",
+      "(ferx_fit(..., fd_hessian_step = 0.02)), or drop the argument entirely to ",
+      "use ferx-core's default of 1e-2."
     ))
   }
   # Off-diagonal FD stencil non-finite. Core emits this on the *success* path:
@@ -300,7 +313,20 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
                       "covariance_step", "covariance")) {
     return(TRUE)
   }
-  category == "general" && grepl("covariance step", message, ignore.case = TRUE)
+  # Anchored at the start of the message, optionally after a `[METHOD]` chain
+  # prefix, because every covariance warning ferx-core emits begins with
+  # "Covariance step". A bare `grepl("covariance step", ...)` also claimed
+  # messages that merely mention the step in passing -- notably SIR's
+  # "proposal was shrunk ... curvature in the covariance step" and postfit's
+  # "SIR requested but the covariance step did not succeed" -- and answered
+  # them with "Standard errors unavailable ... try covariance = FALSE", which
+  # would remove the matrix SIR needs. Those belong to `sir`.
+  #
+  # This is not only a legacy-fit path: `ferx_load_fit()` does not restore
+  # `warnings_structured`, so every fit read back from disk arrives here with
+  # `general` on every row.
+  category == "general" &&
+    grepl("^(\\[[^]]*\\][[:space:]]*)?Covariance step", message)
 }
 
 
@@ -355,8 +381,17 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
   # used" one) fall through `classify_warning` to `general`. So the arm below
   # was unreachable in exactly the way the covariance block was, and is routed
   # the same way -- by the message.
-  if (grepl("declared in [parameters] but not referenced", message, fixed = TRUE) ||
-      grepl("computed but never used", message, fixed = TRUE)) {
+  #
+  # Gated on `general`, and that gate is load-bearing rather than tidiness:
+  # ferx-core's flat-theta message (outer_optimizer.rs) reads "... it is likely
+  # computed but never used (unmapped, or dropped from the structural / scaling
+  # model). Freezing it at its initial value ...", so an ungated reroute
+  # captured every real `flat_parameter` warning and answered it with the
+  # unused-parameter text -- which never mentions the freeze, the one fact that
+  # arm exists to convey.
+  if (category == "general" &&
+      (grepl("declared in [parameters] but not referenced", message, fixed = TRUE) ||
+       grepl("computed but never used", message, fixed = TRUE))) {
     category <- "unused_parameter"
   }
   switch(category,
@@ -369,7 +404,6 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
     importance_sampling = "Importance-sampling ESS collapsed for some subjects. Raise imp_samples / imp_proposal_df or check EBE quality.",
     data_quality       = "Data issue detected. Review the flagged observations in the dataset.",
     omega_structure    = "Mixed parameterisation in a block omega. Check the [individual_parameters] forms for the correlated etas.",
-    ebe_convergence    = "Some subjects' inner EBE search did not converge. Inspect those subjects or relax inner_tol / max_unconverged_frac.",
     gradient_fallback  = "Gradient method fell back (e.g. AD -> FD or HMC -> MH). The fit is valid; expect a longer runtime.",
     mu_referencing     = "Mu-referencing was auto-detected for the listed parameters (informational).",
     optimizer_config   = "Optimizer configuration note (informational).",
@@ -378,7 +412,7 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
     cancelled          = "The fit was cancelled before completion.",
     unused_parameter   = "A declared parameter is never referenced in any model expression, or an [individual_parameters] assignment is computed and then never used. It cannot affect predictions and will not be meaningfully estimated: remove it, or complete the expression that was meant to use it. A commented-out line or a misspelt name is the usual cause.",
     eta_shrinkage      = "High ETA shrinkage means the data do not inform that random effect per subject. Individual estimates and any EBE-based diagnostic (ETA plots, covariate screening) are unreliable for it; consider removing the ETA or collecting richer per-subject data.",
-    eps_shrinkage      = "High EPS shrinkage means IWRES is pulled toward zero, so residual-based diagnostics understate misfit. Prefer PRED-based or simulation-based checks (VPC/NPDE) for this fit.",
+    eps_shrinkage      = "EPS shrinkage is notably negative, meaning mean(IWRES^2) > 1: the residual error model is not absorbing the residuals at the final EBEs, so sigma is under-fit rather than over-fit. Common causes are a SAEM run that stopped at a local optimum (polish with method = c(\"saem\", \"focei\"), or try different starts), model misspecification on a subset of subjects, and sigma sitting at a bound. Inspect the IWRES distribution in the sdtab.",
     boundary_estimate  = "A parameter converged onto a bound. The estimate is not a true optimum: widen the bound if the value is plausible, or reconsider the parameterisation if it is not.",
     high_correlation   = "Two parameters are nearly collinear at convergence, so their individual estimates are poorly determined even when the fit looks good. Consider fixing one, removing it, or reparameterising.",
     inflated_rse       = "A relative standard error is implausibly large, which usually signals a parameter the data barely inform. Check identifiability before quoting its precision.",

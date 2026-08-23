@@ -60,8 +60,11 @@ test_that(".ferx_warning_guidance dispatches the covariance family by message co
   expect_match(g(msg_ic), "fd_hessian_step", ignore.case = TRUE)
 
   # Omega non-PD.
+  # A tiny POSITIVE minimum eigenvalue: ferx-core writes "near-singular" for
+  # this case, not "not positive definite" (covariance.rs picks the descriptor
+  # from the sign), so the fixture must too.
   msg_omega <- paste0(
-    "Covariance step failed: Omega matrix is not positive definite at ",
+    "Covariance step failed: Omega matrix is near-singular at ",
     "convergence (min eigenvalue = 1.2e-10; eigenvalues: [0.5000, 1.2e-10]). ",
     "SE estimates not available."
   )
@@ -98,7 +101,10 @@ test_that("the informational covariance_step note does not read as a failure", {
   # of the targeted branches, so before this arm existed it fell through to the
   # "standard errors unavailable" fallback and told the user the step had failed
   # when it had not yet run.
-  msg <- "Covariance step: 132 N^2 OFV evaluations for 12 parameters."
+  # ferx-core's primary cost note, verbatim (api/fit.rs).
+  msg <- paste0("Covariance step: 12 parameters \u2192 144 OFV evaluations ",
+                "(finite-difference Hessian). This may take several minutes on ",
+                "complex models.")
   g <- ferx:::.ferx_warning_guidance("covariance_step", message = msg)
   expect_match(g, "Informational", ignore.case = TRUE)
   expect_false(grepl("unavailable|identifiability", g, ignore.case = TRUE))
@@ -149,6 +155,12 @@ test_that("an invalid fd_hessian_step is answered as a bad argument", {
   g <- ferx:::.ferx_warning_guidance("covariance_failed", message = msg)
   expect_match(g, "fd_hessian_step", fixed = TRUE)
   expect_false(grepl("identifiability|omega", g, ignore.case = TRUE))
+  # ferx-core's default is 1e-2 (FitOptions::default, types.rs). Naming a
+  # different number here would send the user somewhere the engine never goes.
+  expect_match(g, "1e-2", fixed = TRUE)
+  # And it must not tell them to drop the argument while showing an example
+  # that supplies it.
+  expect_false(grepl("omit the argument", g, fixed = TRUE))
 })
 
 test_that("ferx_covariance()'s `covariance` category reaches the guidance", {
@@ -176,7 +188,7 @@ test_that("a legacy fit's `general` covariance message still gets guidance", {
     "convergence."
   )
   g <- ferx:::.ferx_warning_guidance("general", message = msg)
-  expect_match(g, "Omega is near-singular", ignore.case = TRUE)
+  expect_match(g, "negative eigenvalue", ignore.case = TRUE)
   # A `general` message that is not about the covariance step stays unhandled.
   expect_null(ferx:::.ferx_warning_guidance("general", message = "Something else"))
 })
@@ -206,9 +218,13 @@ test_that("ferx_get_warnings() shows guidance for an unused declaration", {
     ),
     class = "ferx_fit"
   )
+  # Collapsed and whitespace-normalised before matching: the printer wraps at
+  # 70 columns, so asserting on a phrase in a single output line passes or fails
+  # on where the wrap happens to fall rather than on the behaviour under test.
   out <- capture.output(ferx_get_warnings(fake))
+  flat <- gsub("[[:space:]]+", " ", paste(out, collapse = " "))
   expect_true(
-    any(grepl("cannot affect predictions", out, fixed = TRUE)),
+    grepl("cannot affect predictions", flat, fixed = TRUE),
     info = paste("Expected guidance text not found in output:\n",
                  paste(out, collapse = "\n"))
   )
@@ -266,29 +282,53 @@ test_that(".ferx_warning_guidance returns negative-autocorrelation guidance", {
 #
 #   covariance        - assigned by ferx_covariance() (R/ferx_covariance.R) to
 #                       the engine's flat covariance warnings.
-#   ebe_convergence   - no current emitter. ferx-r surfaces EBE convergence as
-#   unused_parameter    the count field `ebe_convergence_warnings`, not as a
-#                       warning row; core has no `WarningCode` for either, and
-#                       its "computed but never used" parser message classifies
-#                       to `general`. The arms are kept because they cost
-#                       nothing and read as the intended taxonomy, but they are
-#                       unreachable today -- see the note on the roxygen for
-#                       ferx_fit(), which still describes `unused_parameter` as
-#                       parser-emitted.
+#   unused_parameter  - no core `WarningCode`; both of core's unused-declaration
+#                       messages classify to `general` and are rerouted here by
+#                       message, so the arm is reachable (see the test below
+#                       that drives it with core's real message texts).
+#
+# `ebe_convergence` used to sit here too and has been removed: nothing emits it.
+# Core has no such `WarningCode`, and ferx-r reports EBE convergence as the
+# integer field `ebe_convergence_warnings`, never as a warning row. Keeping a
+# guidance arm for it in a change whose premise is that unreachable branches are
+# a defect would have been the same mistake in miniature.
 .extra_warning_cats <- function() {
-  c("covariance", "ebe_convergence", "unused_parameter")
+  c("covariance", "unused_parameter")
 }
 
 test_that("every category in the guidance table returns guidance", {
-  # A completeness walk over the table, NOT a drift guard: the loop only visits
-  # tokens listed above, so a code core added and nobody transcribed is invisible
-  # to it. `.ferx_warning_guidance() matches ferx-core's WarningCode vocabulary`
-  # is the test that catches that.
+  # A completeness walk, and nothing more. Two things it deliberately does NOT
+  # establish, both covered elsewhere:
+  #   - it is not a drift guard. The loop visits only the tokens listed above,
+  #     so a code core added and nobody transcribed is invisible to it; that is
+  #     what `matches ferx-core's WarningCode vocabulary` is for.
+  #   - it says nothing about the covariance family. Called with an empty
+  #     message, all four covariance tokens land on the generic fallback, so
+  #     this would still pass if `.ferx_covariance_guidance()` were reduced to
+  #     its last line. The message inventory below is what pins those branches.
   for (cat in c(.core_warning_cats(), .extra_warning_cats())) {
     g <- ferx:::.ferx_warning_guidance(cat)
     expect_true(is.character(g) && length(g) == 1L && nzchar(g), info = cat)
   }
 })
+
+# Locate a sibling ferx-core checkout. Walks upward rather than using a fixed
+# relative depth: testthat's wd is tests/testthat, so `../../../ferx-core` only
+# resolves for a plain checkout. ferx-r's CLAUDE.md mandates working in a git
+# worktree under <repo>/.claude/worktrees/<name>, where that path points at
+# <repo>/.claude/worktrees/ferx-core and never exists -- so the guards that
+# depend on it silently skipped in exactly the workflow they were written for.
+.find_core_src <- function() {
+  d <- normalizePath(".", mustWork = FALSE)
+  for (i in seq_len(10)) {
+    cand <- file.path(d, "ferx-core", "src")
+    if (dir.exists(cand)) return(cand)
+    parent <- dirname(d)
+    if (identical(parent, d)) break
+    d <- parent
+  }
+  NULL
+}
 
 test_that(".ferx_warning_guidance matches ferx-core's WarningCode vocabulary", {
   # The real drift guard. Reads `WarningCode::as_str()` out of a sibling
@@ -298,14 +338,12 @@ test_that(".ferx_warning_guidance matches ferx-core's WarningCode vocabulary", {
   # Skipped when the sibling is absent: ferx-r CI builds the pinned crate, not a
   # checkout. That is the right trade -- drift is introduced on a developer
   # machine, which per CLAUDE.md always has ../ferx-core, and this fails there.
-  candidates <- c(
-    file.path("..", "..", "..", "ferx-core", "src", "types.rs"),
-    file.path("~", "ferx-core", "src", "types.rs")
-  )
-  types_rs <- Filter(function(f) file.exists(path.expand(f)), candidates)
-  skip_if(length(types_rs) == 0L, "no sibling ferx-core checkout to read")
+  core_src <- .find_core_src()
+  skip_if(is.null(core_src), "no sibling ferx-core checkout to read")
+  types_rs <- file.path(core_src, "types.rs")
+  skip_if(!file.exists(types_rs), "sibling ferx-core has no src/types.rs")
 
-  src <- readLines(path.expand(types_rs[[1]]), warn = FALSE)
+  src <- readLines(types_rs, warn = FALSE)
   hits <- regmatches(src, regexpr('WarningCode::[A-Za-z]+ => "[a-z_]+"', src))
   tokens <- gsub('.*=> "|"$', "", hits)
   expect_gt(length(tokens), 20L)          # the file was found and understood
@@ -364,6 +402,12 @@ test_that("every covariance message ferx-core emits gets non-contradictory guida
   # standing invariant is the `never` column on the two success-path messages:
   # guidance must not tell a user their standard errors are unavailable when the
   # engine produced them.
+  # Each `msg` is ferx-core's own text with its `{}` placeholders filled in --
+  # em dashes, arrows and the superscript are the real characters, not ASCII
+  # stand-ins. `ok` is what the guidance must say; `never` is what it must not.
+  # The standing invariant is the `never` column on the success-path messages:
+  # guidance must not report standard errors unavailable when the engine
+  # produced them.
   cases <- list(
     list(cat = "covariance_failed",
          # covariance.rs format_non_pd_warning
@@ -371,24 +415,24 @@ test_that("every covariance message ferx-core emits gets non-contradictory guida
                       "Eigenvalues: [-1.2e-03, 4.5e-01]. SE estimates not available."),
          ok = "eigenvalue list", never = NULL),
     list(cat = "covariance_failed",
-         # covariance.rs ill-conditioned entries
          msg = paste0("Covariance step failed: Hessian has ill-conditioned entries ",
-                      "for the following parameter(s) -- theta[CL] (non-finite ",
+                      "for the following parameter(s) \u2014 theta[CL] (non-finite ",
                       "diagonal). SE estimates not available."),
          ok = "Hessian diagonal", never = NULL),
     list(cat = "covariance_failed",
-         # covariance.rs omega branch, descriptor = "not positive definite"
+         # Same emit site, descriptor = "not positive definite" (min eig < 0).
+         # An indefinite omega is invalid, not merely ill-determined, so the
+         # guidance must not rename it "near-singular".
          msg = paste0("Covariance step failed: Omega matrix is not positive definite ",
-                      "at convergence (min eigenvalue = -1.0e-09; eigenvalues: ",
-                      "[-1.0e-09, 9.0e-02]). SE estimates not available."),
-         ok = "Omega is near-singular", never = NULL),
+                      "at convergence (min eigenvalue = -1.000e-09; eigenvalues: ",
+                      "[-1.000e-09, 9.000e-02]). SE estimates not available."),
+         ok = "negative eigenvalue", never = "near-singular"),
     list(cat = "covariance_failed",
-         # SAME emit site, descriptor = "near-singular". Pinning the grep to the
-         # other descriptor sent this one to the generic fallback.
+         # Same emit site, descriptor = "near-singular" (0 < min eig <= 1e-8).
          msg = paste0("Covariance step failed: Omega matrix is near-singular at ",
-                      "convergence (min eigenvalue = 1.0e-12; eigenvalues: ",
-                      "[1.0e-12, 9.0e-02]). SE estimates not available."),
-         ok = "Omega is near-singular", never = NULL),
+                      "convergence (min eigenvalue = 1.000e-12; eigenvalues: ",
+                      "[1.000e-12, 9.000e-02]). SE estimates not available."),
+         ok = "collapsed towards zero", never = "negative eigenvalue"),
     list(cat = "covariance_failed",
          msg = paste0("Covariance step failed: base OFV is non-finite at convergence ",
                       "(likely numerical overflow or underflow in model evaluation). ",
@@ -413,8 +457,8 @@ test_that("every covariance message ferx-core emits gets non-contradictory guida
     list(cat = "covariance_regularized",
          msg = paste0("Covariance step regularized: eigenvalue floor applied to FD ",
                       "Hessian (1 of 3 free-block eigenvalues clipped; min eig = ",
-                      "1.2e-06, floor = 8.4e-14; severity: minor). Standard errors ",
-                      "are likely reliable."),
+                      "1.200e-06, floor = 8.400e-14; severity: minor). Standard ",
+                      "errors are likely reliable."),
          ok = "benign", never = "ferx_sir"),
     list(cat = "covariance_regularized",
          # SUCCESS path -- the covariance matrix exists.
@@ -424,8 +468,16 @@ test_that("every covariance message ferx-core emits gets non-contradictory guida
                       "fd_hessian_step."),
          ok = "over-optimistic", never = "unavailable"),
     list(cat = "covariance_step",
-         # Info-level cost note -- the step has not even run.
-         msg = "Covariance step: 35 parameters -> n^2 OFV evaluations",
+         # Info-level cost note, primary form -- the step has not even run.
+         msg = paste0("Covariance step: 12 parameters \u2192 144 OFV evaluations ",
+                      "(finite-difference Hessian). This may take several minutes ",
+                      "on complex models."),
+         ok = "Informational", never = "unavailable"),
+    list(cat = "covariance_step",
+         # Second cost-note form: the evaluation count overflows usize.
+         msg = paste0("Covariance step: 4294967296 parameters \u2192 n\u00b2 OFV ",
+                      "evaluations (finite-difference Hessian). Estimate exceeds ",
+                      "usize range; expect this to be very slow."),
          ok = "Informational", never = "unavailable"),
     list(cat = "general",
          # COV_CANCELLED_MSG. Classifies to `general`, so it reaches the block
@@ -436,7 +488,6 @@ test_that("every covariance message ferx-core emits gets non-contradictory guida
                       "errors not available."),
          ok = "cancelled", never = "identifiability")
   )
-
   for (case in cases) {
     g <- ferx:::.ferx_warning_guidance(case$cat, message = case$msg)
     expect_true(is.character(g) && length(g) == 1L && nzchar(g), info = case$msg)
@@ -449,6 +500,132 @@ test_that("every covariance message ferx-core emits gets non-contradictory guida
                      ferx:::.ferx_warning_guidance(case$cat, message = case$msg),
                      info = case$msg)
   }
+})
+
+test_that("a flat THETA is not answered as an unused parameter", {
+  # ferx-core's flat-theta message contains the phrase "computed but never
+  # used", so an ungated `unused_parameter` reroute captured every real
+  # `flat_parameter` warning. The distinction matters to the reader: the theta
+  # was FROZEN at its initial value and its reported estimate is that initial
+  # value, which the unused-parameter text never says.
+  msg <- paste0("[parameters] `TVCL` has no effect on the objective (gradient ",
+                "\u2248 0 at the initial estimate) \u2014 it is likely computed but ",
+                "never used (unmapped, or dropped from the structural / scaling ",
+                "model). Freezing it at its initial value (1.5) so the remaining ",
+                "parameters can be estimated; map or remove `TVCL` to silence this.")
+  g <- ferx:::.ferx_warning_guidance("flat_parameter", message = msg)
+  expect_match(g, "frozen at its initial value", ignore.case = TRUE)
+  expect_false(identical(g, ferx:::.ferx_warning_guidance("unused_parameter")))
+})
+
+test_that("`general` does not claim messages that only mention the covariance step", {
+  # `ferx_load_fit()` does not restore `warnings_structured`, so EVERY row of a
+  # fit read back from disk arrives under `general`. Admitting any message that
+  # merely contains "covariance step" therefore handed SIR's own diagnostics the
+  # covariance fallback -- which tells the user to pass covariance = FALSE, the
+  # one setting that removes the matrix SIR needs.
+  shrunk <- paste0("SIR: proposal was shrunk in 1 direction(s) [KA +1.00]. Those ",
+                   "directions come from eigenvalue-floored (non-identified) ",
+                   "curvature in the covariance step; the SIR CIs along them ",
+                   "understate the true uncertainty.")
+  requested <- paste0("SIR requested but the covariance step did not succeed and no ",
+                      "usable SIR proposal could be built from it, so SIR could not ",
+                      "run \u2014 see the covariance warnings.")
+  for (msg in c(shrunk, requested)) {
+    expect_null(ferx:::.ferx_warning_guidance("general", message = msg), info = msg)
+  }
+  # ... while a real covariance message under `general` is still answered, with
+  # or without a [METHOD] chain prefix.
+  cancelled <- "Covariance step cancelled before completion; standard errors not available."
+  expect_match(ferx:::.ferx_warning_guidance("general", message = cancelled),
+               "cancelled", ignore.case = TRUE)
+  expect_match(ferx:::.ferx_warning_guidance("general", message = paste0("[FOCEI] ", cancelled)),
+               "cancelled", ignore.case = TRUE)
+})
+
+test_that("eps_shrinkage guidance describes the direction ferx-core actually warns about", {
+  # `eps_shrinkage_warning()` (api/postfit.rs) fires only when shrinkage is
+  # NEGATIVE -- mean(IWRES^2) > 1, sigma under-fitting the residuals. Guidance
+  # written for high (positive) EPS shrinkage was the opposite diagnosis and the
+  # opposite remedy, and was wrong for every message that can carry the code.
+  g <- ferx:::.ferx_warning_guidance("eps_shrinkage")
+  expect_match(g, "negative", ignore.case = TRUE)
+  expect_match(g, "mean(IWRES^2) > 1", fixed = TRUE)
+  expect_false(grepl("pulled toward zero", g, ignore.case = TRUE))
+})
+
+test_that("no covariance message ferx-core emits is missing from the inventory", {
+  # The completeness guard for the inventory test above.
+  #
+  # That test is only as good as the list of messages someone hand-collected for
+  # it, and a hand-collected list cannot notice a message added later. This one
+  # derives the list from ferx-core's source instead: every string literal that
+  # *begins* with "Covariance step" -- which is the shape of every covariance
+  # warning the engine emits -- must be accounted for, either by a case in the
+  # inventory or by an explicit exemption naming why it is not a warning.
+  #
+  # Skipped without a sibling ferx-core checkout, for the same reason as the
+  # WarningCode vocabulary test: ferx-r CI builds the pinned crate rather than a
+  # checkout, and drift is introduced on a developer machine.
+  core_src <- .find_core_src()
+  skip_if(is.null(core_src), "no sibling ferx-core checkout to read")
+
+  files <- list.files(core_src, pattern = "[.]rs$",
+                      recursive = TRUE, full.names = TRUE)
+  # Test-only sources: sibling `*_tests.rs` files and the `src/api/tests/` dir.
+  files <- files[!grepl("_tests[.]rs$|/tests/", files)]
+  lits <- character(0)
+  for (f in files) {
+    ln <- readLines(f, warn = FALSE)
+    # Drop whole-line `//` comments before joining: ferx-core quotes its own
+    # message text inside comments, and those quotes are not emit sites.
+    ln <- ln[!grepl("^[[:space:]]*//", ln)]
+    # Rust continues a string literal with a trailing backslash; rejoin so a
+    # wrapped message is recovered as one literal.
+    joined <- gsub("\\\\\n[[:space:]]*", "", paste(ln, collapse = "\n"))
+    m <- gregexpr('"(?:[^"\\\\]|\\\\.)*"', joined, perl = TRUE)
+    for (s in regmatches(joined, m)[[1]]) {
+      body <- substr(s, 2, nchar(s) - 1)
+      if (grepl("^Covariance step", body)) lits <- c(lits, body)
+    }
+  }
+  lits <- sort(unique(lits))
+  expect_gt(length(lits), 8L)          # the source was found and understood
+
+  # Not warnings, so no guidance is owed. Keyed on a distinctive fragment.
+  exempt <- c(
+    # Inline `#[cfg(test)]` fixture in run_sir.rs (the file itself is not a
+    # test-only source, so the path filter above cannot drop it).
+    "matrix was not positive definite"
+  )
+  # Fragments the inventory test covers, one per case it asserts on.
+  covered <- c(
+    "cancelled before completion",
+    "ill-conditioned entries",
+    "Omega matrix is",
+    "base OFV is non-finite",
+    "could not compute eigenvalues",
+    "fd_hessian_step must be",
+    "score cross-product matrix",
+    "regularized: eigenvalue floor",
+    "Hessian is not positive definite",
+    "off-diagonal FD stencil",
+    "OFV evaluations"
+  )
+  accounted <- function(lit) any(vapply(c(exempt, covered),
+                                        function(k) grepl(k, lit, fixed = TRUE),
+                                        logical(1)))
+  unaccounted <- lits[!vapply(lits, accounted, logical(1))]
+  expect_identical(
+    unaccounted, character(0),
+    info = paste0(
+      "ferx-core emits covariance message(s) with no case in the inventory test ",
+      "and no exemption. Add a case to \"every covariance message ferx-core ",
+      "emits gets non-contradictory guidance\", or exempt it here with the ",
+      "reason it is not a warning:\n  ",
+      paste(unaccounted, collapse = "\n  ")
+    )
+  )
 })
 
 test_that(".ferx_warning_guidance returns NULL for an unknown category", {
