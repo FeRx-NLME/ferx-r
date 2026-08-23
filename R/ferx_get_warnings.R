@@ -128,22 +128,198 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
   )
 }
 
+# Guidance for the covariance family. The branch that applies is selected by the
+# *message*, not by the code: ferx-core routes "Covariance step failed: ..." and
+# "Covariance step: Hessian is not positive definite" to `covariance_failed`,
+# "Covariance step regularized: ..." and the off-diagonal FD stencil note to
+# `covariance_regularized`, and its informational cost note to `covariance_step`.
+# Split out of `.ferx_warning_guidance()` for the same reason as
+# `.ferx_sir_guidance()`: a message-dispatching family reads better as its own
+# function than as a 100-line block inside a lookup table.
+#
+# Every branch keys on the message alone, including the informational one -- the
+# same text deserves the same answer whichever of the four tokens carries it.
+.ferx_covariance_guidance <- function(message = "") {
+  # Omega non-PD or near-singular -- checked before the general non-PD branch
+  # because omega messages also contain "not positive definite" and
+  # "eigenvalue". Matched on "omega matrix is" rather than on a descriptor:
+  # ferx-core writes one of two into the same sentence depending on the sign of
+  # the smallest eigenvalue ("not positive definite" / "near-singular"), and
+  # pinning the grep to the first sent the second to the generic fallback.
+  if (grepl("omega matrix is", message, ignore.case = TRUE)) {
+    return(paste0(
+      "Omega is near-singular at convergence. Consider a diagonal omega ",
+      "structure, fixing a small variance to a small positive constant, or ",
+      "removing the corresponding ETA from the model."
+    ))
+  }
+  # NonPdHessian path: eigenvalue list is present in the message.
+  if (grepl("not positive definite", message, ignore.case = TRUE) &&
+      grepl("eigenvalue", message, ignore.case = TRUE)) {
+    return(paste0(
+      "Inspect the eigenvalue list in the warning: a near-zero minimum ",
+      "(e.g. 1e-6) suggests a near-unidentifiable parameter; a clearly ",
+      "negative minimum indicates structural non-identifiability. Consider ",
+      "fixing the most collinear parameter, removing it, or switching to a ",
+      "diagonal omega structure."
+    ))
+  }
+  # Non-finite or zero Hessian diagonal: parameter name(s) listed in message.
+  if (grepl("ill-conditioned entries", message, ignore.case = TRUE)) {
+    return(paste0(
+      "The named parameter(s) have a flat or non-finite Hessian diagonal, ",
+      "meaning the parameter is not informed by the data or the objective ",
+      "function overflows near convergence. Consider fixing the parameter, ",
+      "tightening its bounds, or increasing fd_hessian_step ",
+      "(e.g. ferx_fit(..., fd_hessian_step = 0.05))."
+    ))
+  }
+  # Model evaluation overflow/underflow.
+  if (grepl("base ofv is non-finite", message, ignore.case = TRUE)) {
+    return(paste0(
+      "Model evaluation overflowed or underflowed at convergence. Check for ",
+      "extreme parameter values, verify that all DV values are positive for ",
+      "proportional error, and consider constraining thetas to physiologically ",
+      "plausible ranges."
+    ))
+  }
+  # Singular / rank-deficient score cross-product. Specific to
+  # covariance_method = "s"; the message names the remedy and the generic
+  # fallback below does not mention covariance_method at all.
+  if (grepl("score cross-product matrix", message, ignore.case = TRUE)) {
+    return(paste0(
+      "The per-subject score cross-product could not be inverted, which usually ",
+      "means fewer subjects than free parameters or collinear per-subject ",
+      "scores. Re-run with covariance_method = \"r\" or \"rsr\", or reduce the ",
+      "number of free parameters."
+    ))
+  }
+  # An invalid `fd_hessian_step` argument. Core reports it as a covariance-step
+  # failure, but the fix is the argument, not the model -- without this arm it
+  # inherits the identifiability fallback below.
+  if (grepl("fd_hessian_step must be", message, ignore.case = TRUE)) {
+    return(paste0(
+      "The fd_hessian_step you passed is not a positive, finite number, so the ",
+      "covariance step never ran. Pass a positive value, or omit the argument to ",
+      "use the default (e.g. ferx_fit(..., fd_hessian_step = 0.05))."
+    ))
+  }
+  # Off-diagonal FD stencil non-finite. Core emits this on the *success* path:
+  # the covariance matrix was produced and the SEs exist, they are just missing
+  # their cross-partial terms. It reaches none of the branches above (it does not
+  # say "regularized"), so without this arm it inherits the "standard errors
+  # unavailable" fallback and contradicts the message it is printed under.
+  if (grepl("off-diagonal FD stencil", message, ignore.case = TRUE)) {
+    return(paste0(
+      "Standard errors were produced. The cross-partial terms for the named ",
+      "parameter(s) could not be evaluated and were set to zero, so their SEs may ",
+      "be over-optimistic -- too narrow rather than missing. Try a different ",
+      "fd_hessian_step (e.g. ferx_fit(..., fd_hessian_step = 0.05)), and ",
+      "cross-check the affected parameters with ferx_sir()."
+    ))
+  }
+  # Regularisation path -- severity is embedded in the message.
+  if (grepl("covariance step regularized", message, ignore.case = TRUE)) {
+    if (grepl("severity: severe", message, ignore.case = TRUE)) {
+      return(paste0(
+        "Severe Hessian regularisation: standard errors are likely unreliable. ",
+        "Run ferx_sir() to obtain non-parametric confidence intervals, or ",
+        "simplify the model structure."
+      ))
+    }
+    if (grepl("severity: moderate", message, ignore.case = TRUE)) {
+      return(paste0(
+        "Moderate Hessian regularisation: standard errors should be interpreted ",
+        "with caution. Run ferx_sir() to obtain non-parametric confidence ",
+        "intervals as a cross-check."
+      ))
+    }
+    # severity: minor (or any unrecognised tier from future core versions) --
+    # treat as benign; minor is the only tier ferx-core emits below moderate.
+    return(paste0(
+      "Minor Hessian regularisation: standard errors are likely reliable. A ",
+      "small eigenvalue floor was applied; this is common on smooth OFV ",
+      "surfaces and is usually benign."
+    ))
+  }
+  # ferx-core's Info-level note about the cost of the step (the n^2 OFV
+  # evaluations it will run), not a failure. Without its own arm it would
+  # inherit the "standard errors unavailable" fallback below and report a
+  # failure that had not happened. Matched on the message, never on the
+  # `covariance_step` code: that code's classification ends in a catch-all
+  # (`"covariance step:"` + `"parameters"`), so a future message carrying it
+  # need not be the cost note -- and answering an unknown one "no action
+  # needed" fails in the dangerous direction. Anything else falls through.
+  if (grepl("OFV evaluations", message, fixed = TRUE)) {
+    return(paste0(
+      "Informational: the covariance step cost scales with the square of the ",
+      "parameter count. No action needed; pass covariance = FALSE to skip it ",
+      "during development."
+    ))
+  }
+  # Generic fallback for older or unrecognised covariance failure messages.
+  # Bare rather than return()-wrapped: it is the last expression in the
+  # function now, matching `.ferx_sir_guidance()` above (return_linter).
+  paste0(
+    "Standard errors unavailable. Check identifiability; try a simpler ",
+    "omega/sigma structure or covariance = FALSE for development."
+  )
+}
+
+# Does this warning belong to the covariance family?
+#
+# Four codes carry covariance-step messages, not one: ferx-core's
+# `covariance_failed` / `covariance_regularized` / `covariance_step`, plus
+# `"covariance"`, which `ferx_covariance()` assigns to the engine's flat
+# covariance warnings when it folds them into the structured table
+# (R/ferx_covariance.R). Gating on `covariance_step` alone (as this did until the
+# routing fix) made every targeted branch unreachable; omitting `"covariance"`
+# left the whole post-hoc `ferx_covariance()` surface unreachable.
+#
+# `general` is admitted on the message text alone. It is the category
+# `ferx_get_warnings()` stamps on every message of a fit saved before structured
+# warnings existed, and core's bucket for a covariance message its classifier did
+# not recognise. Since every branch is message-keyed, a covariance-step message
+# arriving under `general` can be answered exactly as well as one arriving under
+# its own code.
+.ferx_is_covariance_warning <- function(category, message = "") {
+  if (category %in% c("covariance_failed", "covariance_regularized",
+                      "covariance_step", "covariance")) {
+    return(TRUE)
+  }
+  category == "general" && grepl("covariance step", message, ignore.case = TRUE)
+}
+
+
+
 # Remediation guidance keyed by the fixed category vocabulary that ferx-core
 # (and the R-side additions) emit. Extend this table when core grows a new
 # category. Returns NULL for unknown categories so callers can skip printing
 # rather than showing a generic placeholder.
 #
-# The vocabulary is ferx-core's `WarningCode::as_str()` token set; it is pinned
-# by the "covers ferx-core's warning vocabulary" test in
-# tests/testthat/test-ferx_get_warnings.R, so a core release that adds a code
-# fails there rather than silently printing nothing. `general` is deliberately
-# unhandled: it is core's fallback bucket for an unrecognised message, where the
-# message text is the only guidance there is.
+# The vocabulary is ferx-core's `WarningCode::as_str()` token set plus the
+# categories the R layer adds. Two tests in
+# tests/testthat/test-ferx_get_warnings.R cover it, and only one of them is a
+# drift guard:
+#
+#   - "every category in the table returns guidance" walks a hand-written vector
+#     of tokens. It cannot notice a code that core added and nobody transcribed,
+#     because the loop never visits a token that is not in the vector.
+#   - "the table matches ferx-core's WarningCode vocabulary" reads
+#     `WarningCode::as_str()` out of a sibling ferx-core checkout and compares
+#     the real token set with this table. That one does fail when core grows a
+#     code. It skips when the sibling is absent (ferx-r CI builds the pinned
+#     crate, not a checkout), so it guards the machine where the drift is
+#     introduced rather than the one that consumes it.
+#
+# `general` is deliberately absent from the table: it is core's bucket for a
+# message it did not recognise, where the message text is the only guidance
+# there is. It is still routed into the covariance family below when its message
+# is a covariance-step message -- see `.ferx_is_covariance_warning()`.
 #
 # message and uses_sde are used for dw_autocorrelation (positive vs negative
-# DW; SDE hint suppressed when already in use) and for the covariance family
-# (the specific failure mode embedded in the message text selects targeted
-# advice).
+# DW; SDE hint suppressed when already in use). The covariance family branches
+# on the message text too, in `.ferx_covariance_guidance()`.
 .ferx_warning_guidance <- function(category, message = "", uses_sde = FALSE) {
   if (category == "dw_autocorrelation") {
     if (grepl("egative", message, ignore.case = TRUE)) {
@@ -157,100 +333,18 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
       sde_hint
     ))
   }
-  # The covariance family. All three of core's covariance codes land here,
-  # because the branch that applies is selected by the *message*, not by the
-  # code: core routes "Covariance step failed: ..." and "Covariance step:
-  # Hessian is not positive definite" to `covariance_failed`, "Covariance step
-  # regularized: ..." to `covariance_regularized`, and only the informational
-  # N^2-OFV cost note to `covariance_step`.
-  #
-  # Gating this block on `covariance_step` alone (as it was until this change)
-  # made every targeted branch below unreachable: the messages they grep for
-  # never arrive under that code. The unit tests did not catch it because they
-  # called this function with the category and the message paired by hand, a
-  # pairing production never produces.
-  if (category %in% c("covariance_failed", "covariance_regularized",
-                      "covariance_step")) {
-    # Omega non-PD -- checked before general non-PD because omega messages also
-    # contain "not positive definite" and "eigenvalue".
-    if (grepl("omega matrix is not positive definite", message, ignore.case = TRUE)) {
-      return(paste0(
-        "Omega is near-singular at convergence. Consider a diagonal omega ",
-        "structure, fixing a small variance to a small positive constant, or ",
-        "removing the corresponding ETA from the model."
-      ))
-    }
-    # NonPdHessian path: eigenvalue list is present in the message.
-    if (grepl("not positive definite", message, ignore.case = TRUE) &&
-        grepl("eigenvalue", message, ignore.case = TRUE)) {
-      return(paste0(
-        "Inspect the eigenvalue list in the warning: a near-zero minimum ",
-        "(e.g. 1e-6) suggests a near-unidentifiable parameter; a clearly ",
-        "negative minimum indicates structural non-identifiability. Consider ",
-        "fixing the most collinear parameter, removing it, or switching to a ",
-        "diagonal omega structure."
-      ))
-    }
-    # Non-finite or zero Hessian diagonal: parameter name(s) listed in message.
-    if (grepl("ill-conditioned entries", message, ignore.case = TRUE)) {
-      return(paste0(
-        "The named parameter(s) have a flat or non-finite Hessian diagonal, ",
-        "meaning the parameter is not informed by the data or the objective ",
-        "function overflows near convergence. Consider fixing the parameter, ",
-        "tightening its bounds, or increasing fd_hessian_step ",
-        "(e.g. ferx_fit(..., fd_hessian_step = 0.05))."
-      ))
-    }
-    # Model evaluation overflow/underflow.
-    if (grepl("base ofv is non-finite", message, ignore.case = TRUE)) {
-      return(paste0(
-        "Model evaluation overflowed or underflowed at convergence. Check for ",
-        "extreme parameter values, verify that all DV values are positive for ",
-        "proportional error, and consider constraining thetas to physiologically ",
-        "plausible ranges."
-      ))
-    }
-    # Regularisation path -- severity is embedded in the message.
-    if (grepl("covariance step regularized", message, ignore.case = TRUE)) {
-      if (grepl("severity: severe", message, ignore.case = TRUE)) {
-        return(paste0(
-          "Severe Hessian regularisation: standard errors are likely unreliable. ",
-          "Run ferx_sir() to obtain non-parametric confidence intervals, or ",
-          "simplify the model structure."
-        ))
-      }
-      if (grepl("severity: moderate", message, ignore.case = TRUE)) {
-        return(paste0(
-          "Moderate Hessian regularisation: standard errors should be interpreted ",
-          "with caution. Run ferx_sir() to obtain non-parametric confidence ",
-          "intervals as a cross-check."
-        ))
-      }
-      # severity: minor (or any unrecognised tier from future core versions) --
-      # treat as benign; minor is the only tier ferx-core emits below moderate.
-      return(paste0(
-        "Minor Hessian regularisation: standard errors are likely reliable. A ",
-        "small eigenvalue floor was applied; this is common on smooth OFV ",
-        "surfaces and is usually benign."
-      ))
-    }
-    # `covariance_step` is core's Info-level note about the cost of the step
-    # (the N^2 OFV evaluations it will run), not a failure. It reaches none of
-    # the branches above, so without its own arm it would inherit the
-    # "standard errors unavailable" fallback below and tell the user their
-    # covariance step had failed when it had not even started.
-    if (category == "covariance_step") {
-      return(paste0(
-        "Informational: the covariance step cost scales with the square of the ",
-        "parameter count. No action needed; pass covariance = FALSE to skip it ",
-        "during development."
-      ))
-    }
-    # Generic fallback for older or unrecognised covariance failure messages.
-    return(paste0(
-      "Standard errors unavailable. Check identifiability; try a simpler ",
-      "omega/sigma structure or covariance = FALSE for development."
-    ))
+  if (.ferx_is_covariance_warning(category, message)) {
+    return(.ferx_covariance_guidance(message))
+  }
+  # ferx-core has no `unused_parameter` code: both of its unused-declaration
+  # messages ("theta 'X' is declared in [parameters] but not referenced in any
+  # model expression", and the [individual_parameters] "computed but never
+  # used" one) fall through `classify_warning` to `general`. So the arm below
+  # was unreachable in exactly the way the covariance block was, and is routed
+  # the same way -- by the message.
+  if (grepl("declared in [parameters] but not referenced", message, fixed = TRUE) ||
+      grepl("computed but never used", message, fixed = TRUE)) {
+    category <- "unused_parameter"
   }
   switch(category,
     convergence        = "Optimizer did not reach convergence. Try different initial values, method = c(\"saem\", \"focei\"), or settings = list(n_starts = 4L).",
@@ -269,7 +363,7 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
     multi_start        = "Multi-start information (informational).",
     threads            = "Thread-pool sizing note. Consider matching threads to the subject count.",
     cancelled          = "The fit was cancelled before completion.",
-    unused_parameter   = "A declared parameter is never referenced in [individual_parameters] or [error_model]. Remove it from [parameters] or complete the expression that uses it.",
+    unused_parameter   = "A declared parameter is never referenced in any model expression, or an [individual_parameters] assignment is computed and then never used. It cannot affect predictions and will not be meaningfully estimated: remove it, or complete the expression that was meant to use it. A commented-out line or a misspelt name is the usual cause.",
     eta_shrinkage      = "High ETA shrinkage means the data do not inform that random effect per subject. Individual estimates and any EBE-based diagnostic (ETA plots, covariate screening) are unreliable for it; consider removing the ETA or collecting richer per-subject data.",
     eps_shrinkage      = "High EPS shrinkage means IWRES is pulled toward zero, so residual-based diagnostics understate misfit. Prefer PRED-based or simulation-based checks (VPC/NPDE) for this fit.",
     boundary_estimate  = "A parameter converged onto a bound. The estimate is not a true optimum: widen the bound if the value is plausible, or reconsider the parameterisation if it is not.",
@@ -277,7 +371,7 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
     inflated_rse       = "A relative standard error is implausibly large, which usually signals a parameter the data barely inform. Check identifiability before quoting its precision.",
     flat_parameter     = "A THETA has no effect on the objective at the initial estimate (unmapped, or dropped from the structural/scaling model). It was frozen at its initial value so the rest of the fit could proceed; map it into the model or remove it. Its reported estimate is just its initial value.",
     flip_flop          = "A transit / inverse-Gaussian absorption model entered the flip-flop regime (absorption no faster than elimination). If the model carries an ODE twin the affected subjects were rerouted and the fit is sound; if it does not, that subject's likelihood contribution is degenerate. Check the named subject's MTT/CL (transit) or MAT/CV2/CL (IG) estimates.",
-    absorption_twin_declined = "The analytic absorption model kept no ODE fallback, so the fit is a plain closed-form fit but every feature that needs the fallback (time-varying covariates, a TIME-dependent parameter, IOV, steady-state or infusion doses, the flip-flop reroute) is now rejected instead. Read the reason quoted in the message: it is most often an individual parameter named after one of the twin's own compartments (CENTRAL, PERIPH). Renaming it restores the twin.",
+    absorption_twin_declined = "The analytic absorption model kept no ODE fallback, so the fit is a plain closed-form fit but every feature that needs the fallback (time-varying covariates, a TIME-dependent parameter, IOV, steady-state or infusion doses, the flip-flop reroute) is now rejected instead. The message quotes the reason the fallback could not be built -- the set of reasons is open-ended, so read that text rather than guessing. Resolving it restores the fallback and the features above.",
     experimental       = "An experimental feature is in use (SDE or neural-network components). Results are usable but should be applied with caution.",
     simulation         = "A simulated subject was handled specially -- a degenerate hazard draw, or an over-large recurrent-event stream that was truncated. The estimated model is unaffected; inspect the named subject's hazard parameters and covariate values.",
     NULL

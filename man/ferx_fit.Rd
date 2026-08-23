@@ -1171,11 +1171,12 @@ check \code{fit$gradient_used} if it matters.
 The same flexible \code{(FIX)} placement applies to \code{sigma} and
 \code{kappa} (IOV) declarations.
 
-\strong{Unused-parameter warning:} a \code{warning} severity message with
-category \code{"unused_parameter"} is emitted by the parser when a
-parameter is declared in \code{[parameters]} but never referenced in
-\code{[individual_parameters]} or \code{[error_model]}. This usually
-indicates a commented-out expression or a typo in the parameter name.
+\strong{Unused-parameter warning:} a \code{warning} severity message is
+emitted by the parser when a parameter is declared in \code{[parameters]}
+but never referenced in any model expression, and when an
+\code{[individual_parameters]} assignment is computed and then never used.
+This usually indicates a commented-out expression or a typo in the parameter
+name.
 Inspect \code{ferx_get_warnings(fit)} or check \code{ferx_model_validate()}
 before fitting.
 }

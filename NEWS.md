@@ -186,24 +186,53 @@
   So the whole block was unreachable and a failed covariance step printed no
   guidance at all, while the one message that did reach it - the benign cost
   note - was answered with "Standard errors unavailable. Check identifiability",
-  reporting a failure that had not happened. The block now keys on all three
-  codes, and the informational note has its own non-alarming text.
+  reporting a failure that had not happened.
 
-  The unit tests missed this because they called the guidance function with the
-  category and the message paired by hand, a pairing production never produces;
-  they now use the category ferx-core actually assigns each message.
+  Guidance is now selected by the message rather than by the code, which is what
+  the branches were always keyed on. Four categories reach it: ferx-core's
+  three, plus the `covariance` category `ferx_covariance()` stamps on the same
+  engine messages - so the post-hoc covariance step gets guidance too, not just
+  the one run inside `ferx_fit()`. A covariance-step message from a fit saved
+  before structured warnings existed (which arrives under `general`) is answered
+  as well.
+
+  Four covariance messages ferx-core emits were being answered wrongly or not at
+  all, and now have their own advice:
+
+  - **an off-diagonal FD stencil that could not be evaluated**, which the engine
+    reports on its *success* path - the standard errors exist and are merely
+    over-optimistic. It was being answered "Standard errors unavailable".
+  - **an omega reported `near-singular`** rather than `not positive definite`.
+    Both descriptors come from the same engine message; the guidance matched
+    only the second, so the first fell through to the generic advice.
+  - **an invalid `fd_hessian_step`**, which is a mistake in the argument the
+    user passed, not evidence against the model's identifiability.
+  - **a singular score cross-product matrix**, whose remedy is
+    `covariance_method = "r"` or `"rsr"` - not mentioned by the generic text.
+
+  The unit tests missed all of this because they called the guidance function
+  with the category and the message paired by hand, a pairing production never
+  produces. They now use ferx-core's message texts verbatim, each paired with
+  the category ferx-core actually assigns it, and assert that guidance never
+  contradicts the message it is printed under.
 
 - **Warning categories that had no remediation guidance now have it**, so
   `ferx_get_warnings()` stops printing a category with nothing under it:
   `eta_shrinkage`, `eps_shrinkage`, `boundary_estimate`, `high_correlation`,
   `inflated_rse`, `flat_parameter`, `flip_flop`, `experimental`, `simulation`,
   and `absorption_twin_declined` (ferx-core #1008, an analytic transit /
-  inverse-Gaussian model that kept no ODE fallback - usually an individual
-  parameter named after one of the twin's own compartments). A new test pins the
-  guidance table against ferx-core's full `WarningCode` vocabulary, so a future
-  core release that adds a code fails here instead of silently printing nothing.
-  `general` stays deliberately unhandled: it is core's bucket for a message it
-  did not recognise, where the message text is the only guidance there is.
+  inverse-Gaussian model that kept no ODE fallback; the warning quotes the
+  reason, and the set of reasons is open-ended, so the guidance points at that
+  text rather than guessing a cause).
+
+- **The unused-parameter warning gets its guidance back.** ferx-core has no
+  `unused_parameter` warning code - both of its unused-declaration messages
+  (a `theta` or `omega` declared in `[parameters]` and never referenced, and an
+  `[individual_parameters]` assignment computed and then never used) classify to
+  `general`, so the guidance written for them was unreachable in exactly the way
+  the covariance block was. They are now routed by message. The `ferx_fit()`
+  documentation no longer claims those warnings carry a `"unused_parameter"`
+  category, and describes both messages rather than only the first.
 
 - `ferx_sir()` now reports the engine's SIR-step warnings instead of dropping
   them (ferx-core #1021). The binding returned only the CIs and the ESS, so the
