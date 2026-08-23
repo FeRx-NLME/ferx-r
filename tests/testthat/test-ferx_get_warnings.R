@@ -934,8 +934,14 @@ test_that("the engine's own warnings reach the guidance they were routed for", {
   i_cov <- which(ws$category == "covariance_failed")
   expect_length(i_cov, 1L)
   expect_match(ws$message[i_cov], "ill-conditioned entries", fixed = TRUE)
+  # The engine labels TVUNUSED "(zero diagonal -- flat objective)", so the
+  # guidance must answer THAT cause -- not the finite-difference one, which
+  # would be wrong here twice over: the label says the stencil succeeded, and
+  # this fit ran on the analytic R-matrix path where nothing is differenced.
   g_cov <- guide(i_cov)
-  expect_match(g_cov, "Hessian diagonal", fixed = TRUE)
+  expect_match(ws$message[i_cov], "zero diagonal", fixed = TRUE)
+  expect_match(g_cov, "does not curve", fixed = TRUE)
+  expect_false(grepl("fd_hessian_step", g_cov, fixed = TRUE))
   # ... and specifically not the generic fallback, which is where a message the
   # targeted branches failed to recognise would land.
   expect_false(grepl("Check identifiability", g_cov, fixed = TRUE))
