@@ -426,7 +426,15 @@ test_that("every covariance message ferx-core emits gets non-contradictory guida
     list(cat = "covariance_step",
          # Info-level cost note -- the step has not even run.
          msg = "Covariance step: 35 parameters -> n^2 OFV evaluations",
-         ok = "Informational", never = "unavailable")
+         ok = "Informational", never = "unavailable"),
+    list(cat = "general",
+         # COV_CANCELLED_MSG. Classifies to `general`, so it reaches the block
+         # only because `general` is admitted on the message -- which means the
+         # routing that admits it also owes it an answer. "Check identifiability"
+         # is wrong here: the user cancelled, nothing was diagnosed.
+         msg = paste0("Covariance step cancelled before completion; standard ",
+                      "errors not available."),
+         ok = "cancelled", never = "identifiability")
   )
 
   for (case in cases) {

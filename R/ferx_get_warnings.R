@@ -183,6 +183,19 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
       "plausible ranges."
     ))
   }
+  # Cancelled part-way. ferx-core returns this from three points inside the FD
+  # and score loops (`COV_CANCELLED_MSG`) and it classifies to `general`, so it
+  # only reaches this function because `general` is admitted on the message. It
+  # matches nothing below, and the generic fallback would tell a user who
+  # cancelled to go and question their model's identifiability -- nothing was
+  # diagnosed, the step simply did not finish.
+  if (grepl("cancelled before completion", message, ignore.case = TRUE)) {
+    return(paste0(
+      "The covariance step was cancelled before it finished, so no standard ",
+      "errors were produced. Nothing was diagnosed about the model: re-run with ",
+      "covariance = TRUE and let the step complete if you need them."
+    ))
+  }
   # Singular / rank-deficient score cross-product. Specific to
   # covariance_method = "s"; the message names the remedy and the generic
   # fallback below does not mention covariance_method at all.
