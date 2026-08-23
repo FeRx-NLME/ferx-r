@@ -252,6 +252,23 @@
   them - so the guidance points at an under-fit residual model, not at
   shrinkage-flattened diagnostics.
 
+- **Two warning codes that ferx-core gives to opposite messages now answer each
+  of them.** `classify_warning` routes both an informational note and a genuine
+  problem to the same code in two places, and a single guidance text told half
+  of them something untrue. `mu_referencing` covered auto-detection while also
+  printing under "individual parameter(s) not mu-referenced ... can strongly
+  affect convergence", which it answered with "(informational)".
+  `optimizer_config` did the same to "global_search disabled", where the
+  optimiser ran single-start because global search failed to initialise. Each
+  now branches on the message.
+
+- **The ill-conditioned-Hessian guidance answers the cause ferx-core labelled.**
+  That message tags each named parameter as either a non-finite finite-difference
+  stencil or a zero diagonal (a flat objective), and the engine offers
+  `fd_hessian_step` for the first only. The guidance offered it for both -
+  including on the analytic R-matrix path, which is the default and differences
+  nothing at all.
+
 - **The unused-parameter warning gets its guidance back.** ferx-core has no
   `unused_parameter` warning code - both of its unused-declaration messages
   (a `theta` or `omega` declared in `[parameters]` and never referenced, and an
