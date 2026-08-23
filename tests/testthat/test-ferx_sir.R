@@ -267,10 +267,12 @@ test_that("ferx_sir adds no sir rows when the engine reports nothing", {
   expect_identical(out$warnings, fit$warnings)
 })
 
-# End-to-end against the real engine. Requires the ferx-core pinned in
-# src/rust/Cargo.lock to carry ferx-core#1021; on an older engine the call still
-# fails the way the issue describes, and the test skips rather than reporting a
-# defect in this package. Remove the skip once the pin is bumped past #1021.
+# End-to-end against the real engine. The pin in src/rust/Cargo.lock carries
+# ferx-core#1021 as of #304, so this runs for real rather than skipping. It is
+# deliberately NOT wrapped in a tryCatch that downgrades the pre-#1021
+# `All SIR samples had invalid weights` failure to a skip: that is the exact
+# regression this test exists to catch, and turning it into a skip would report
+# it as green.
 test_that("ferx_sir surfaces engine proposal-conditioning warnings end-to-end", {
   fit <- warfarin_fit_cov()
   skip_if(is.null(fit$cov_matrix), sir_cov_skip)
@@ -280,18 +282,7 @@ test_that("ferx_sir surfaces engine proposal-conditioning warnings end-to-end", 
   degenerate <- fit
   degenerate$cov_matrix[1L, 1L] <- degenerate$cov_matrix[1L, 1L] + 1e8
 
-  out <- tryCatch(
-    ferx_sir(degenerate, sir_samples = 8L, sir_resamples = 4L, sir_seed = 1L),
-    error = function(e) {
-      if (grepl("invalid weights", conditionMessage(e), fixed = TRUE)) {
-        skip(paste0(
-          "engine predates ferx-core#1021 (proposal conditioning); ",
-          "bump the ferx-core pin in src/rust/Cargo.lock"
-        ))
-      }
-      stop(e)
-    }
-  )
+  out <- ferx_sir(degenerate, sir_samples = 8L, sir_resamples = 4L, sir_seed = 1L)
 
   expect_true(is.finite(out$sir_ess))
   expect_true(any(grepl("shrunk", out$warnings, fixed = TRUE)))
