@@ -85,8 +85,12 @@
   if (nrow(data_sub) == nrow(etas)) {
     merged <- cbind(etas, data_sub[, cov_cols, drop = FALSE])
   } else {
-    merged <- merge(etas, data_sub[, c(data_id, cov_cols), drop = FALSE],
-                    by.x = ebe_id, by.y = data_id)
+    # `data_sub` can hold two rows for one textual ID (a reused ID), so index
+    # with match() rather than merge(): merge would cross-join those rows and
+    # double-count the subject in every correlation.
+    idx    <- match(as.character(etas[[ebe_id]]), as.character(data_sub[[data_id]]))
+    merged <- cbind(etas, data_sub[idx, cov_cols, drop = FALSE])
+    rownames(merged) <- NULL
   }
 
   rows <- vector("list", length(eta_cols) * length(cov_cols))

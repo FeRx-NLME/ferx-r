@@ -93,3 +93,20 @@ test_that("cov_screen treats a reused ID as two subjects", {
   # ETA and EBE associations both run over the three distinct subjects.
   expect_true(is.finite(out$eta) && is.finite(out$ebe))
 })
+
+test_that("xpose covariate LOCF does not leak across a reused ID's blocks", {
+  # covtab: subject A (ID 12, WT 70), B (ID 5, WT 80), C (ID 12 reused, WT 50).
+  covtab <- data.frame(
+    ID   = c("12", "12", "5", "12"),
+    TIME = c(0, 12, 0, 0),
+    WT   = c(70, 70, 80, 50)
+  )
+  df <- data.frame(
+    ID   = c(12, 12, 12, 5, 5, 12),
+    TIME = c(0, 6, 12, 0, 6, 0)
+  )
+  out <- .ferx_attach_covariates(df, list(covtab = covtab), "WT")
+  # Keying on the raw ID would put both ID-12 blocks in one LOCF group, so
+  # subject A's rows would pick up subject C's WT = 50.
+  expect_identical(out$data$WT, c(70, 70, 70, 80, 80, 50))
+})

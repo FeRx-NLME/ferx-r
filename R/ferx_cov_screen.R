@@ -163,7 +163,13 @@ ferx_cov_screen <- function(fit, threshold = 0.2) {
       NULL
     }
   } else {
-    merged   <- merge(percov, etas, by.x = id_col, by.y = eta_id)
+    # `percov` can hold two rows for one textual ID (a reused ID), so index it
+    # with match() rather than merge(): merge would cross-join those rows and
+    # double-count the subject in every association.
+    pidx     <- match(etas[[eta_id]], percov[[id_col]])
+    merged   <- cbind(percov[pidx, , drop = FALSE],
+                      etas[, eta_cols, drop = FALSE])
+    rownames(merged) <- NULL
     ipar_idx <- if (has_ipar) {
       match(merged[[id_col]], as.character(ipar[[ipar_id]]))
     } else {

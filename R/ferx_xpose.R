@@ -293,14 +293,27 @@ ferx_xpose <- function(fit,
       warning(sprintf("covariate(s) not in sdtab and no usable covtab, dropped: %s",
                       paste(missing, collapse = ", ")), call. = FALSE)
     } else {
+      # Key the LOCF join on the ordinal subject index rather than the raw ID
+      # when sdtab and covtab agree on the subject count: a dataset that reuses
+      # an ID in a non-contiguous block otherwise puts both cohorts' covtab
+      # records in one group, and the first block's later observations then
+      # carry forward the second block's covariate values. Fall back to the raw
+      # ID when the counts disagree (e.g. covtab keeps a subject that has no
+      # observations in sdtab), which preserves the previous behaviour.
+      df_key  <- as.character(df[["ID"]])
+      cov_key <- as.character(covtab[["ID"]])
+      if (.ferx_n_subjects(df_key) == .ferx_n_subjects(cov_key)) {
+        df_key  <- as.character(.ferx_subject_index(df_key))
+        cov_key <- as.character(.ferx_subject_index(cov_key))
+      }
       for (cov in missing) {
         if (!cov %in% names(covtab)) {
           warning(sprintf("covariate '%s' not found in covtab, dropped.", cov),
                   call. = FALSE)
           next
         }
-        df[[cov]] <- .ferx_locf_join(df[["ID"]], df[["TIME"]],
-                                     covtab[["ID"]], covtab[["TIME"]], covtab[[cov]])
+        df[[cov]] <- .ferx_locf_join(df_key, df[["TIME"]],
+                                     cov_key, covtab[["TIME"]], covtab[[cov]])
       }
     }
   }
