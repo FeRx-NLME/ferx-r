@@ -64,13 +64,16 @@
     if (length(ms$iiv) > 0L) paste(ms$iiv, collapse = ", ") else "none"))
   # Annotate a sample-size-weighted kappa (ferx-core #1031) with its weight
   # expression: `KAPPA_EMAX (weight = NARM)`. `iov_weights` is absent (or all
-  # NA) for every model that declares no weight.
-  iov_lbl <- ms$iov
-  wts <- ms$iov_weights
+  # NA) for every model that declares no weight. `model_structure` is persisted
+  # verbatim under r_extras and read back with `simplifyVector = FALSE`, so
+  # after a save/load round-trip both vectors arrive as *lists* whose NA slots
+  # are NULL holes - `is.na()` is FALSE for those and `as.character(NULL)` is
+  # "NULL", which would print `(weight = NULL)`. Flatten first.
+  iov_lbl <- as.character(.fitrx_unwrap_opt_chr_vec(ms$iov) %||% character())
+  wts <- as.character(.fitrx_unwrap_opt_chr_vec(ms$iov_weights) %||% character())
   if (length(iov_lbl) > 0L && length(wts) == length(iov_lbl)) {
-    has_w <- !is.na(wts) & nzchar(as.character(wts))
-    iov_lbl[has_w] <- sprintf("%s (weight = %s)", iov_lbl[has_w],
-                              as.character(wts)[has_w])
+    has_w <- !is.na(wts) & nzchar(wts)
+    iov_lbl[has_w] <- sprintf("%s (weight = %s)", iov_lbl[has_w], wts[has_w])
   }
   cat(sprintf("  IOV:         %s\n",
     if (length(iov_lbl) > 0L) paste(iov_lbl, collapse = ", ") else "none"))

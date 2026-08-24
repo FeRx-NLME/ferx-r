@@ -535,3 +535,33 @@ test_that(".ferx_format_kappa_weight() returns NULL for an unweighted kappa", {
     list(kappa_weights = c(KAPPA_CL = NA_character_, KAPPA_V = "NARM")),
     1L, 0.02, "KAPPA_CL"))
 })
+test_that(".ferx_print_structure() does not print (weight = NULL) after a round-trip", {
+  # Regression: model_structure is persisted verbatim under r_extras and read
+  # back with simplifyVector = FALSE, so iov/iov_weights arrive as lists whose
+  # NA slots are NULL holes. is.na(list(NULL)) is FALSE and as.character(NULL)
+  # is "NULL", which used to print `KAPPA_CL (weight = NULL)`.
+  ms <- list(model_type = "1-cpt", theta_names = "TVCL", iiv = "ETA_CL",
+             iov = c("KAPPA_CL", "KAPPA_V"),
+             iov_weights = c(NA_character_, "NARM"), residual = "proportional")
+  back <- jsonlite::fromJSON(
+    jsonlite::toJSON(ms, auto_unbox = TRUE, na = "null"), simplifyVector = FALSE)
+  out <- utils::capture.output(ferx:::.ferx_print_structure(back))
+  iov <- grep("^  IOV:", out, value = TRUE)
+  expect_match(iov, "KAPPA_CL, KAPPA_V (weight = NARM)", fixed = TRUE)
+  expect_false(grepl("NULL", iov, fixed = TRUE))
+})
+test_that(".ferx_print_structure() annotates a weighted kappa in memory too", {
+  ms <- list(iov = c("KAPPA_CL", "KAPPA_V"),
+             iov_weights = c(NA_character_, "NARM"), residual = "proportional")
+  out <- utils::capture.output(ferx:::.ferx_print_structure(ms))
+  expect_match(grep("^  IOV:", out, value = TRUE),
+               "KAPPA_CL, KAPPA_V (weight = NARM)", fixed = TRUE)
+
+  # No weights declared at all: bare kappa names, no annotation.
+  out <- utils::capture.output(ferx:::.ferx_print_structure(
+    list(iov = c("KAPPA_CL", "KAPPA_V"), iov_weights = character(0),
+         residual = "proportional")))
+  expect_match(grep("^  IOV:", out, value = TRUE), "KAPPA_CL, KAPPA_V",
+               fixed = TRUE)
+  expect_false(any(grepl("weight =", out, fixed = TRUE)))
+})

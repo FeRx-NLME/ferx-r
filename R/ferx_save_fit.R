@@ -540,7 +540,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
 
 .fitrx_build_iov_wire <- function(fit) {
   if (is.null(fit$omega_iov)) return(NULL)
-  list(
+  wire <- list(
     kappa_names = as.character(fit$kappa_names %||% character()),
     kappa_fixed = as.logical(fit$kappa_fixed %||% rep(FALSE, length(fit$kappa_names))),
     se_kappa = .fitrx_opt_num_vec(fit$se_kappa),
@@ -556,21 +556,25 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
     },
     omega_iov = .fitrx_matrix_to_wire(fit$omega_iov),
     omega_iov_param_corr = .fitrx_matrix_to_wire(fit$omega_iov_param_corr),
-    kappa_init_as_sd = as.logical(fit$kappa_init_as_sd %||% rep(FALSE, length(fit$kappa_names))),
-    # Sample-size-weighted IOV (ferx-core #1031). Omitted entirely for an
-    # unweighted model so the bundle is byte-identical to a pre-#1031 one; the
-    # engine reads both fields with `#[serde(default)]`. `as.list()` keeps them
-    # JSON arrays under `auto_unbox = TRUE` (a single weighted kappa is the
-    # common MBMA case), and `na = "null"` maps an unweighted slot to `null`,
-    # which is what `Vec<Option<..>>` expects.
-    kappa_weights = if (is.null(fit$kappa_weights)) NULL else {
-      as.list(as.character(fit$kappa_weights))
-    },
-    kappa_weight_typical = if (is.null(fit$kappa_weights)) NULL else {
-      as.list(as.numeric(fit$kappa_weight_typical %||%
-                           rep(NA_real_, length(fit$kappa_weights))))
-    }
+    kappa_init_as_sd = as.logical(fit$kappa_init_as_sd %||% rep(FALSE, length(fit$kappa_names)))
   )
+  # Sample-size-weighted IOV (ferx-core #1031). The two keys must be *absent*
+  # (not JSON `null`) for an unweighted model: the engine declares them
+  # `#[serde(default)] Vec<Option<..>>`, and `serde(default)` only fires for a
+  # missing key - an explicit `null` fails with "invalid type: null, expected a
+  # sequence". Assigning NULL into a list() literal keeps the name, so the
+  # fields are appended here only when a weight exists. That also keeps the
+  # bundle byte-identical to a pre-#1031 one for every unweighted model.
+  # `as.list()` keeps them JSON arrays under `auto_unbox = TRUE` (a single
+  # weighted kappa is the common MBMA case), and `na = "null"` maps an
+  # unweighted slot to `null`, which is what `Vec<Option<..>>` expects.
+  if (!is.null(fit$kappa_weights)) {
+    wire$kappa_weights <- as.list(as.character(fit$kappa_weights))
+    wire$kappa_weight_typical <- as.list(as.numeric(
+      fit$kappa_weight_typical %||% rep(NA_real_, length(fit$kappa_weights))
+    ))
+  }
+  wire
 }
 
 .fitrx_build_eta_param_info <- function(fit) {

@@ -749,6 +749,44 @@ test_that(".fitrx_build_iov_wire uses empty list when shrinkage_kappa_by_occ is 
   wire <- .fitrx_build_iov_wire(fake_iov_fit)
   expect_equal(wire$shrinkage_kappa_by_occ, list())
 })
+test_that(".fitrx_build_iov_wire omits the #1031 weight keys for an unweighted model", {
+  # Regression: `list(kappa_weights = NULL)` keeps the *name*, so write_json()
+  # emitted `"kappa_weights": null`. ferx-core declares the field as
+  # `#[serde(default)] Vec<Option<String>>`, and serde(default) only fires for
+  # a missing key - an explicit null fails with "invalid type: null, expected
+  # a sequence". The keys must be absent, not null.
+  fake_iov_fit <- list(
+    omega_iov       = matrix(0.09, 1, 1),
+    kappa_names     = "KAPPA_CL",
+    kappa_fixed     = FALSE,
+    shrinkage_kappa = 0.15,
+    kappa_weights   = NULL
+  )
+  wire <- .fitrx_build_iov_wire(fake_iov_fit)
+  expect_false("kappa_weights" %in% names(wire))
+  expect_false("kappa_weight_typical" %in% names(wire))
+  json <- as.character(jsonlite::toJSON(wire, auto_unbox = TRUE,
+                                        null = "null", na = "null"))
+  expect_false(grepl("kappa_weight", json, fixed = TRUE))
+})
+test_that(".fitrx_build_iov_wire writes the #1031 weight keys as null-holed arrays", {
+  fake_iov_fit <- list(
+    omega_iov            = matrix(0.09, 2, 2),
+    kappa_names          = c("KAPPA_CL", "KAPPA_V"),
+    kappa_fixed          = c(FALSE, FALSE),
+    shrinkage_kappa      = c(0.15, 0.2),
+    kappa_weights        = c(NA_character_, "NARM"),
+    kappa_weight_typical = c(NA_real_, 400)
+  )
+  wire <- .fitrx_build_iov_wire(fake_iov_fit)
+  expect_equal(wire$kappa_weights, list(NA_character_, "NARM"))
+  expect_equal(wire$kappa_weight_typical, list(NA_real_, 400))
+  # `na = "null"` is what the writer uses; the holes must survive as JSON null
+  # so `Vec<Option<..>>` keeps every entry lined up with its kappa.
+  expect_equal(as.character(jsonlite::toJSON(wire$kappa_weights,
+                                             auto_unbox = TRUE, na = "null")),
+               '[null,"NARM"]')
+})
 test_that("shrinkage_kappa_by_occ survives a ferx_save/ferx_load round-trip", {
   skip_on_cran()
   ex  <- ferx_example("warfarin_iov")
