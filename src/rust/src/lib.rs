@@ -2870,6 +2870,35 @@ fn ferx_rust_autodiff_enabled() -> bool {
     false
 }
 
+/// Every `[block]` name this build of the engine recognises.
+///
+/// The engine's block names are closed-world (ferx-core #1040): a header that
+/// is not in this list is rejected at parse time with `E_UNKNOWN_BLOCK`. The R
+/// side reads the list from here rather than keeping its own copy — the
+/// duplicated vector this replaces had drifted, and reported valid blocks
+/// (`covariates`, `event_model`, `simulation`, ...) as unknown sections.
+///
+/// The list is build-dependent: the engine filters out a block whose cargo
+/// feature is off, so what this returns depends on how ferx-core was compiled
+/// for this package. `src/Makevars` builds it with `ci,nn,survival`, which
+/// puts `event_model` and `binary_model` in the list and leaves `markov_model`
+/// out. Absence is therefore not the same as "the engine does not know this
+/// name" - a gated-off block is still recognised at parse time and rejected
+/// with `E_BLOCK_FEATURE_DISABLED`, not `E_UNKNOWN_BLOCK`. Callers that map
+/// this list onto a "valid sections" report should take the reason for a
+/// header being absent from the engine's diagnostics rather than assuming it
+/// is unknown.
+///
+/// @return Character vector of block names, sorted.
+/// @export
+#[extendr]
+fn ferx_rust_known_blocks() -> Vec<String> {
+    ferx_core::known_block_names()
+        .into_iter()
+        .map(String::from)
+        .collect()
+}
+
 /// Validate a .ferx model file (and optionally its dataset) without fitting.
 ///
 /// Runs the parser plus every data-independent check, and — when `data_path`
@@ -3842,6 +3871,7 @@ extendr_module! {
     fn ferx_rust_sir;
     fn ferx_rust_covariance;
     fn ferx_rust_autodiff_enabled;
+    fn ferx_rust_known_blocks;
     fn ferx_rust_validate_model;
     fn ferx_rust_model_data_path;
     fn ferx_rust_inits_from_nca;

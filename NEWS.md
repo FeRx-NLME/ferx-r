@@ -2,6 +2,30 @@
 
 ## Breaking changes
 
+- **An unrecognised `[section]` in a `.ferx` file is now an error** (ferx-core #1040).
+  Sections were read by name lookup, so one the engine did not know was never read
+  and never reported: a misspelled `[fit_option]` left the model validating clean
+  while the fit ran with the default method and no covariance step, returning
+  without standard errors. Section names are now closed-world — an unknown header
+  fails the parse with `E_UNKNOWN_BLOCK`, naming the offender, its line, the valid
+  set and a did-you-mean.
+
+  `ferx_model_validate()` follows suit on two counts. An unknown section now
+  counts against the returned `$ok`; it was printed as `[unknown section]` and
+  then left out of the status, so `res$ok` was `TRUE` for a model carrying a
+  section the engine would ignore. And the list of valid sections comes from the
+  engine (`ferx_rust_known_blocks()`) instead of a copy maintained in R — the copy
+  had drifted, so `ferx_model_validate(ferx_example("two_cpt_oral_cov")$model)`
+  reported `covariates [unknown section]` for a perfectly valid model, and it
+  still advertised `[initial_values]`, which the engine dropped years ago
+  (ferx-core e5e934d).
+
+  **If your model file carries `[initial_values]`, delete it.** It has been dead
+  weight since initial estimates moved inline into `[parameters]`, and it now
+  fails the parse with `E_DEPRECATED_BLOCK`, naming the replacement. The three
+  files under `examples/models/` that still had one have been fixed.
+
+- **A dose attribute your model also reads is now an error** (ferx-core #993).
 - **A dose attribute your model also reads is now an error**
   ([ferx-core #993](https://github.com/FeRx-NLME/ferx-core/issues/993),
   [ferx-core #1004](https://github.com/FeRx-NLME/ferx-core/issues/1004)).
