@@ -749,6 +749,44 @@ test_that(".fitrx_build_iov_wire uses empty list when shrinkage_kappa_by_occ is 
   wire <- .fitrx_build_iov_wire(fake_iov_fit)
   expect_equal(wire$shrinkage_kappa_by_occ, list())
 })
+test_that(".fitrx_build_iov_wire omits the #1031 weight keys for an unweighted model", {
+  # Regression: `list(kappa_weights = NULL)` keeps the *name*, so write_json()
+  # emitted `"kappa_weights": null`. ferx-core declares the field as
+  # `#[serde(default)] Vec<Option<String>>`, and serde(default) only fires for
+  # a missing key - an explicit null fails with "invalid type: null, expected
+  # a sequence". The keys must be absent, not null.
+  fake_iov_fit <- list(
+    omega_iov       = matrix(0.09, 1, 1),
+    kappa_names     = "KAPPA_CL",
+    kappa_fixed     = FALSE,
+    shrinkage_kappa = 0.15,
+    kappa_weights   = NULL
+  )
+  wire <- .fitrx_build_iov_wire(fake_iov_fit)
+  expect_false("kappa_weights" %in% names(wire))
+  expect_false("kappa_weight_typical" %in% names(wire))
+  json <- as.character(jsonlite::toJSON(wire, auto_unbox = TRUE,
+                                        null = "null", na = "null"))
+  expect_false(grepl("kappa_weight", json, fixed = TRUE))
+})
+test_that(".fitrx_build_iov_wire writes the #1031 weight keys as null-holed arrays", {
+  fake_iov_fit <- list(
+    omega_iov            = matrix(0.09, 2, 2),
+    kappa_names          = c("KAPPA_CL", "KAPPA_V"),
+    kappa_fixed          = c(FALSE, FALSE),
+    shrinkage_kappa      = c(0.15, 0.2),
+    kappa_weights        = c(NA_character_, "NARM"),
+    kappa_weight_typical = c(NA_real_, 400)
+  )
+  wire <- .fitrx_build_iov_wire(fake_iov_fit)
+  expect_equal(wire$kappa_weights, list(NA_character_, "NARM"))
+  expect_equal(wire$kappa_weight_typical, list(NA_real_, 400))
+  # `na = "null"` is what the writer uses; the holes must survive as JSON null
+  # so `Vec<Option<..>>` keeps every entry lined up with its kappa.
+  expect_equal(as.character(jsonlite::toJSON(wire$kappa_weights,
+                                             auto_unbox = TRUE, na = "null")),
+               '[null,"NARM"]')
+})
 test_that("shrinkage_kappa_by_occ survives a ferx_save/ferx_load round-trip", {
   skip_on_cran()
   ex  <- ferx_example("warfarin_iov")
@@ -1186,4 +1224,91 @@ test_that("ferx_save/ferx_load round-trip preserves exclusions", {
   expect_equal(loaded$exclusions$n_records_total,  fit$exclusions$n_records_total)
   expect_equal(loaded$exclusions$fired_ignore,     fit$exclusions$fired_ignore)
   expect_equal(loaded$exclusions$excluded_subject_ids, fit$exclusions$excluded_subject_ids)
+})
+
+test_that("sample-size-weighted IOV survives a ferx_save_fit / ferx_load_fit round-trip", {
+  # ferx-core #1031: `kappa K ~ g2 weight = NARM`. The .fitrx `iov` block must
+  # carry both the weight source text and the typical (median) arm size, and
+  # both must come back as JSON *arrays* - a single weighted kappa is the
+  # common MBMA case, and auto_unbox would otherwise write a bare scalar that
+  # the engine's Vec<Option<..>> reader rejects.
+  fake <- structure(
+    list(
+      theta = c(TVCL = 1.0),
+      omega = matrix(0.04, 1L, 1L,
+                     dimnames = list("ETA_CL", "ETA_CL")),
+      eta_names = "ETA_CL",
+      sigma = c(prop = 0.05),
+      sigma_names = "prop",
+      sigma_types = "proportional",
+      omega_iov = matrix(2.0, 1L, 1L,
+                         dimnames = list("KAPPA_CL", "KAPPA_CL")),
+      kappa_names = "KAPPA_CL",
+      kappa_fixed = FALSE,
+      kappa_init_as_sd = TRUE,
+      kappa_weights = c(KAPPA_CL = "NARM"),
+      kappa_weight_typical = c(KAPPA_CL = 400),
+      ofv = 0, aic = 2, bic = 4,
+      n_obs = 3L, n_subjects = 2L, n_parameters = 2L, n_iterations = 1L,
+      method = "FOCE", method_chain = "FOCE",
+      converged = TRUE,
+      warnings = character(),
+      shrinkage_eta = 0, shrinkage_eps = 0,
+      wall_time_secs = 0, model_name = "fake", ferx_version = "0.1.0",
+      gradient_method_inner = "analytic",
+      gradient_method_outer = "N/A",
+      covariance_status = "NotRequested",
+      model_source = "model fake\n",
+      data_path = NA_character_
+    ),
+    class = "ferx_fit"
+  )
+  path <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(path), add = TRUE)
+
+  ferx_save_fit(fake, path)
+  loaded <- ferx_load_fit(path)
+
+  expect_equal(loaded$kappa_weights, c(KAPPA_CL = "NARM"))
+  expect_equal(loaded$kappa_weight_typical, c(KAPPA_CL = 400))
+})
+test_that("an unweighted IOV fit writes no kappa weight fields", {
+  # A pre-#1031 bundle carries neither field, and an unweighted model must
+  # keep producing exactly that bundle.
+  fake <- structure(
+    list(
+      theta = c(TVCL = 1.0),
+      omega = matrix(0.04, 1L, 1L, dimnames = list("ETA_CL", "ETA_CL")),
+      eta_names = "ETA_CL",
+      sigma = c(prop = 0.05),
+      sigma_names = "prop",
+      sigma_types = "proportional",
+      omega_iov = matrix(0.02, 1L, 1L,
+                         dimnames = list("KAPPA_CL", "KAPPA_CL")),
+      kappa_names = "KAPPA_CL",
+      kappa_fixed = FALSE,
+      kappa_init_as_sd = FALSE,
+      ofv = 0, aic = 2, bic = 4,
+      n_obs = 3L, n_subjects = 2L, n_parameters = 2L, n_iterations = 1L,
+      method = "FOCE", method_chain = "FOCE",
+      converged = TRUE,
+      warnings = character(),
+      shrinkage_eta = 0, shrinkage_eps = 0,
+      wall_time_secs = 0, model_name = "fake", ferx_version = "0.1.0",
+      gradient_method_inner = "analytic",
+      gradient_method_outer = "N/A",
+      covariance_status = "NotRequested",
+      model_source = "model fake\n",
+      data_path = NA_character_
+    ),
+    class = "ferx_fit"
+  )
+  path <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(path), add = TRUE)
+
+  ferx_save_fit(fake, path)
+  loaded <- ferx_load_fit(path)
+
+  expect_null(loaded$kappa_weights)
+  expect_null(loaded$kappa_weight_typical)
 })

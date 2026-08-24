@@ -132,6 +132,22 @@ ferx_section_headers <- function(lines) {
   else
     character(0)
 
+  # Sample-size-weighted IOV (ferx-core #1031): `kappa K ~ 2.0 (sd) weight = NARM`
+  # declares `kappa_ik ~ N(0, Omega_IOV / N_ik)`. Capture the weight expression
+  # so ferx_model_inspect() shows it pre-fit, mirroring the `iov_weights` the
+  # engine attaches to model_structure post-fit. Left as character(0) when no
+  # kappa is weighted, so an ordinary IOV model's structure list is unchanged.
+  iov_weights <- if (length(kappa_lines) > 0L) {
+    w <- ifelse(
+      grepl("\\bweight\\s*=", kappa_lines),
+      trimws(sub(".*\\bweight\\s*=\\s*", "", kappa_lines)),
+      NA_character_
+    )
+    if (all(is.na(w))) character(0) else w
+  } else {
+    character(0)
+  }
+
   # Residual error type from [error_model]. Multi-endpoint blocks use a
   # `CMT=N:` prefix per line; report them as "per-CMT (CMT2=proportional,
   # CMT3=additive)" to match the label the Rust engine attaches post-fit.
@@ -195,6 +211,7 @@ ferx_section_headers <- function(lines) {
     model_type  = model_type,
     iiv         = iiv,
     iov         = iov,
+    iov_weights = iov_weights,
     residual    = residual
   )
 }

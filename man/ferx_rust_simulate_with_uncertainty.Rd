@@ -11,6 +11,8 @@ ferx_rust_simulate_with_uncertainty(
   omega_flat,
   omega_dim,
   sigma,
+  omega_iov_flat,
+  omega_iov_dim,
   method,
   cov_matrix_flat,
   cov_matrix_dim,

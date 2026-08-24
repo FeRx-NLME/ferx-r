@@ -173,7 +173,7 @@ test_that("ferx_model_inspect prints structure and returns list invisibly", {
 
   out <- capture.output(s <- ferx::ferx_model_inspect(path))
   expect_type(s, "list")
-  expect_named(s, c("theta_names", "model_type", "iiv", "iov", "residual"))
+  expect_named(s, c("theta_names", "model_type", "iiv", "iov", "iov_weights", "residual"))
   expect_true(any(grepl("Structural", out)))
   expect_true(any(grepl("1-cpt oral", out)))
   expect_true(any(grepl("proportional", out)))
@@ -216,7 +216,7 @@ test_that("fit$model_structure has the documented shape", {
   fit <- warfarin_fit()
   ms <- fit$model_structure
   expect_type(ms, "list")
-  expect_named(ms, c("theta_names", "model_type", "iiv", "iov", "residual"))
+  expect_named(ms, c("theta_names", "model_type", "iiv", "iov", "iov_weights", "residual"))
 })
 test_that("fit$model_structure reflects what ferx-core actually parsed (warfarin = 1-cpt oral, proportional)", {
   fit <- warfarin_fit()
@@ -299,4 +299,67 @@ test_that("unrecognised per-CMT error type warns and reports 'unknown' (no NA la
   )
   expect_equal(s$residual, "unknown")
   expect_false(grepl("NA", s$residual, fixed = TRUE))
+})
+
+# Sample-size-weighted IOV (ferx-core #1031) --------------------------------
+
+test_that("ferx_model_inspect() reports a kappa's weight = expression", {
+  path <- write_test_model(list(
+    parameters    = c("  theta TVCL(1.0, 0.001, 100.0)",
+                      "  kappa KAPPA_CL ~ 2.0 (sd) weight = NARM",
+                      "  sigma PROP_ERR ~ 0.01"),
+    structural_model = "  pk one_cpt_oral(cl=1, v=10, ka=1)",
+    error_model   = "  DV ~ proportional(PROP_ERR)"
+  ))
+  on.exit(unlink(path))
+
+  result <- ferx_model_inspect(path)
+  expect_equal(result$iov, "KAPPA_CL")
+  expect_equal(result$iov_weights, "NARM")
+})
+test_that("ferx_model_inspect() annotates the IOV line with the weight", {
+  path <- write_test_model(list(
+    parameters    = c("  theta TVCL(1.0, 0.001, 100.0)",
+                      "  kappa KAPPA_CL ~ 2.0 (sd) weight = NARM",
+                      "  sigma PROP_ERR ~ 0.01"),
+    structural_model = "  pk one_cpt_oral(cl=1, v=10, ka=1)",
+    error_model   = "  DV ~ proportional(PROP_ERR)"
+  ))
+  on.exit(unlink(path))
+
+  out <- capture.output(ferx_model_inspect(path))
+  expect_true(any(grepl("IOV:\\s+KAPPA_CL \\(weight = NARM\\)", out)))
+})
+test_that("ferx_model_inspect() leaves iov_weights empty for an unweighted kappa", {
+  # The `weight =` modifier must not leak onto models that do not declare it -
+  # an all-NA vector here would add a column of noise to every IOV model.
+  path <- write_test_model(list(
+    parameters    = c("  theta TVCL(1.0, 0.001, 100.0)",
+                      "  kappa KAPPA_CL ~ 0.01",
+                      "  sigma PROP_ERR ~ 0.01"),
+    structural_model = "  pk one_cpt_oral(cl=1, v=10, ka=1)",
+    error_model   = "  DV ~ proportional(PROP_ERR)"
+  ))
+  on.exit(unlink(path))
+
+  result <- ferx_model_inspect(path)
+  expect_equal(result$iov, "KAPPA_CL")
+  expect_equal(result$iov_weights, character(0))
+  expect_true(any(grepl("IOV:\\s+KAPPA_CL$",
+                        capture.output(ferx_model_inspect(path)))))
+})
+test_that("ferx_model_inspect() keeps per-kappa weights aligned when only one is weighted", {
+  path <- write_test_model(list(
+    parameters    = c("  theta TVCL(1.0, 0.001, 100.0)",
+                      "  kappa KAPPA_CL ~ 0.01",
+                      "  kappa KAPPA_V ~ 2.0 (sd) weight = NARM",
+                      "  sigma PROP_ERR ~ 0.01"),
+    structural_model = "  pk one_cpt_oral(cl=1, v=10, ka=1)",
+    error_model   = "  DV ~ proportional(PROP_ERR)"
+  ))
+  on.exit(unlink(path))
+
+  result <- ferx_model_inspect(path)
+  expect_equal(result$iov, c("KAPPA_CL", "KAPPA_V"))
+  expect_equal(result$iov_weights, c(NA_character_, "NARM"))
 })
