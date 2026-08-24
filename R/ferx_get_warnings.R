@@ -96,6 +96,64 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
   invisible(df)
 }
 
+# Guidance for the `sir` category. The proposal-conditioning diagnostics
+# (ferx-core#1021) are about the *model*, not about SIR tuning: a direction the
+# covariance step had to floor is a direction the data do not inform, and no
+# amount of extra samples will recover it. Everything else in the category is a
+# SIR-availability or tuning issue, which keeps the original advice.
+.ferx_sir_guidance <- function(message = "") {
+  if (grepl("rank-deficient", message, ignore.case = TRUE)) {
+    return(paste0(
+      "The covariance matrix has a direction with no uncertainty left after ",
+      "FIXed parameters are excluded - the named parameters are not identified ",
+      "by the data (they trade off against each other). SIR holds that ",
+      "combination at its ML values, so its CIs are not explored. Fix or drop ",
+      "one parameter from each named combination, or re-fit a model the data ",
+      "can identify."
+    ))
+  }
+  if (grepl("shrunk", message, ignore.case = TRUE)) {
+    return(paste0(
+      "The proposal was an order of magnitude wider than the room the named ",
+      "parameters have between their estimates and their bounds, which means the ",
+      "covariance step floored their curvature: they are effectively ",
+      "non-identified. SIR shrank those directions so the run could proceed, but ",
+      "the CIs along them understate the true uncertainty - treat them as a lower ",
+      "bound, and check the covariance-step warning for the same parameters."
+    ))
+  }
+  paste0(
+    "SIR uncertainty step issue. Ensure covariance = TRUE and inspect SIR ",
+    "tuning (sir_samples / sir_resamples)."
+  )
+}
+
+# Does this warning belong to the covariance family?
+#
+# Four categories carry covariance-step messages, not one: ferx-core's
+# `covariance_failed` / `covariance_regularized` / `covariance_step`, plus
+# `"covariance"`, which `ferx_covariance()` assigns to the engine's flat
+# covariance warnings (R/ferx_covariance.R). Gating on `covariance_step` alone
+# made every targeted branch below unreachable, and omitting `"covariance"` left
+# the whole post-hoc covariance surface without guidance.
+#
+# `general` is admitted on the message text alone, anchored at the start of the
+# message (optionally after a `[METHOD]` chain prefix) because every covariance
+# warning ferx-core emits begins with "Covariance step". That matters beyond
+# legacy fits: `ferx_load_fit()` does not restore `warnings_structured`, so
+# every row of a fit read back from disk arrives under `general`. Anchoring
+# keeps SIR's diagnostics -- which mention the covariance step in passing -- out
+# of this family, where they would be told to re-run with covariance = FALSE,
+# the one setting that removes the matrix SIR needs.
+.ferx_is_covariance_warning <- function(category, message = "") {
+  if (category %in% c("covariance_failed", "covariance_regularized",
+                      "covariance_step", "covariance")) {
+    return(TRUE)
+  }
+  category == "general" &&
+    grepl("^(\\[[^]]*\\][[:space:]]*)?Covariance step", message)
+}
+
 # Remediation guidance keyed by the fixed category vocabulary that ferx-core
 # (and the R-side additions) emit. Extend this table when core grows a new
 # category. Returns NULL for unknown categories so callers can skip printing
@@ -117,10 +175,18 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
       sde_hint
     ))
   }
-  if (category == "covariance_step") {
+  if (.ferx_is_covariance_warning(category, message)) {
     # Omega non-PD -- checked before general non-PD because omega messages also
     # contain "not positive definite" and "eigenvalue".
-    if (grepl("omega matrix is not positive definite", message, ignore.case = TRUE)) {
+    #
+    # Matched on "omega matrix is" rather than on a descriptor: ferx-core
+    # interpolates one of two into this sentence depending on the sign of the
+    # smallest eigenvalue ("not positive definite" / "near-singular",
+    # covariance.rs), and pinning the grep to the first sent the second to the
+    # generic "standard errors unavailable" fallback instead of here. The text
+    # below is unchanged and still speaks of a near-singular omega; wording that
+    # distinguishes the two cases is a separate change.
+    if (grepl("omega matrix is", message, ignore.case = TRUE)) {
       return(paste0(
         "Omega is near-singular at convergence. Consider a diagonal omega ",
         "structure, fixing a small variance to a small positive constant, or ",
@@ -157,6 +223,29 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
         "plausible ranges."
       ))
     }
+    # Off-diagonal FD stencil non-finite. ferx-core emits this on its *success*
+    # path: the covariance matrix was produced and the standard errors exist,
+    # they are just missing their cross-partial terms. It matches none of the
+    # branches above, so without this arm it inherits the "standard errors
+    # unavailable" fallback and contradicts the message it prints under.
+    if (grepl("off-diagonal FD stencil", message, ignore.case = TRUE)) {
+      return(paste0(
+        "Standard errors were produced. The cross-partial terms for the named ",
+        "parameter(s) could not be evaluated and were set to zero, so their SEs ",
+        "may be over-optimistic. The message suggests tuning fd_hessian_step; ",
+        "cross-check the affected parameters with ferx_sir()."
+      ))
+    }
+    # Cancelled part-way (`COV_CANCELLED_MSG`). No standard errors, but nothing
+    # was diagnosed about the model either, so the identifiability advice in the
+    # fallback would report a finding the engine never made.
+    if (grepl("cancelled before completion", message, ignore.case = TRUE)) {
+      return(paste0(
+        "The covariance step was cancelled before it finished, so no standard ",
+        "errors were produced and nothing was diagnosed about the model. Re-run ",
+        "and let the step complete if you need them."
+      ))
+    }
     # Regularisation path -- severity is embedded in the message.
     if (grepl("covariance step regularized", message, ignore.case = TRUE)) {
       if (grepl("severity: severe", message, ignore.case = TRUE)) {
@@ -181,11 +270,37 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
         "surfaces and is usually benign."
       ))
     }
-    # Generic fallback for older or unrecognised covariance_step messages.
+    # ferx-core's Info-level note about the cost of the step, emitted BEFORE it
+    # runs. Matched on the message, never on the `covariance_step` code alone:
+    # that code's classification ends in a catch-all, so a future message
+    # carrying it need not be the cost note. Without this arm the note inherits
+    # the failure fallback and reports a failure that has not happened.
+    if (grepl("OFV evaluations", message, fixed = TRUE)) {
+      return(paste0(
+        "Informational: the covariance step cost scales with the square of the ",
+        "parameter count. No action needed; pass covariance = FALSE to skip it ",
+        "during development."
+      ))
+    }
+    # Generic fallback for older or unrecognised covariance messages.
     return(paste0(
       "Standard errors unavailable. Check identifiability; try a simpler ",
       "omega/sigma structure or covariance = FALSE for development."
     ))
+  }
+  # ferx-core has no `unused_parameter` code -- its unused-declaration messages
+  # fall through `classify_warning` to `general`, so the arm below was
+  # unreachable in production. Recover it from the message.
+  #
+  # The flat-theta message contains the literal phrase "computed but never
+  # used" too, so it must be excluded explicitly: gating on `general` is NOT
+  # enough, because `ferx_load_fit()` does not restore `warnings_structured`
+  # and every row of a loaded fit arrives under that category.
+  if (identical(category, "general") &&
+      !grepl("has no effect on the objective", message, fixed = TRUE) &&
+      (grepl("declared in [parameters] but not referenced", message, fixed = TRUE) ||
+       grepl("computed but never used", message, fixed = TRUE))) {
+    category <- "unused_parameter"
   }
   switch(category,
     convergence        = "Optimizer did not reach convergence. Try different initial values, method = c(\"saem\", \"focei\"), or settings = list(n_starts = 4L).",
@@ -193,7 +308,7 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
     optimizer_health   = "Optimizer struggled (trust region / Hessian). Inspect the trace and consider better starting values.",
     eta_normality      = "ETA distribution may be non-normal. High shrinkage or sparse data can cause this; prefer QQ-plots for diagnosis.",
     bloq_method        = "LOQ censoring note. Set method = \"focei\" explicitly to silence, or review the M3 setup.",
-    sir                = "SIR uncertainty step issue. Ensure covariance = TRUE and inspect SIR tuning (sir_samples / sir_resamples).",
+    sir                = .ferx_sir_guidance(message),
     importance_sampling = "Importance-sampling ESS collapsed for some subjects. Raise imp_samples / imp_proposal_df or check EBE quality.",
     data_quality       = "Data issue detected. Review the flagged observations in the dataset.",
     omega_structure    = "Mixed parameterisation in a block omega. Check the [individual_parameters] forms for the correlated etas.",

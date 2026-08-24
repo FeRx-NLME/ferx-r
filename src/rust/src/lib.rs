@@ -468,6 +468,9 @@ fn ferx_rust_simulate(
 /// @param omega_flat Row-major flattened omega matrix
 /// @param omega_dim Side length of the omega matrix
 /// @param sigma Fitted sigma vector
+/// @param omega_iov_flat Row-major flattened fitted IOV (kappa) omega matrix;
+///   empty when the model declares no `kappa`.
+/// @param omega_iov_dim Side length of the IOV omega matrix; 0 when no IOV.
 /// @param n_sim Number of simulations
 /// @param seed Random seed
 /// @param match_method Propensity-score matching method: "none" (off),
@@ -485,6 +488,8 @@ fn ferx_rust_simulate_from_fit(
     omega_flat: Vec<f64>,
     omega_dim: i32,
     sigma: Vec<f64>,
+    omega_iov_flat: Vec<f64>,
+    omega_iov_dim: i32,
     n_sim: i32,
     seed: i32,
     match_method: &str,
@@ -527,7 +532,15 @@ fn ferx_rust_simulate_from_fit(
             }
         };
 
-    let params = match params_from_fit(&parsed.model, &theta, &omega_flat, omega_dim, &sigma) {
+    let params = match params_from_fit(
+        &parsed.model,
+        &theta,
+        &omega_flat,
+        omega_dim,
+        &sigma,
+        &omega_iov_flat,
+        omega_iov_dim,
+    ) {
         Ok(p) => p,
         Err(e) => {
             rprintln!("{}", e);
@@ -765,6 +778,9 @@ fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult) -> Robj
 /// @param omega_flat Row-major flattened fitted omega matrix
 /// @param omega_dim Side length of the omega matrix
 /// @param sigma Fitted sigma vector
+/// @param omega_iov_flat Row-major flattened fitted IOV (kappa) omega matrix;
+///   empty when the model declares no `kappa`.
+/// @param omega_iov_dim Side length of the IOV omega matrix; 0 when no IOV.
 /// @param method Uncertainty method: `"asymptotic"` or `"sir"`
 /// @param cov_matrix_flat Row-major flattened packed-space covariance matrix
 ///   (empty when not using asymptotic mode)
@@ -790,6 +806,8 @@ fn ferx_rust_simulate_with_uncertainty(
     omega_flat: Vec<f64>,
     omega_dim: i32,
     sigma: Vec<f64>,
+    omega_iov_flat: Vec<f64>,
+    omega_iov_dim: i32,
     method: &str,
     cov_matrix_flat: Vec<f64>,
     cov_matrix_dim: i32,
@@ -851,6 +869,8 @@ fn ferx_rust_simulate_with_uncertainty(
             &omega_flat,
             omega_dim,
             &sigma,
+            &omega_iov_flat,
+            omega_iov_dim,
             uncertainty_method,
             &cov_matrix_flat,
             cov_matrix_dim,
@@ -935,6 +955,9 @@ fn ferx_rust_predict(
 /// @param omega_flat Row-major flattened omega matrix
 /// @param omega_dim Side length of the omega matrix
 /// @param sigma Fitted sigma vector
+/// @param omega_iov_flat Row-major flattened fitted IOV (kappa) omega matrix;
+///   empty when the model declares no `kappa`.
+/// @param omega_iov_dim Side length of the IOV omega matrix; 0 when no IOV.
 /// @return Data frame with ID, TIME, PRED columns
 /// @export
 #[extendr]
@@ -945,6 +968,8 @@ fn ferx_rust_predict_from_fit(
     omega_flat: Vec<f64>,
     omega_dim: i32,
     sigma: Vec<f64>,
+    omega_iov_flat: Vec<f64>,
+    omega_iov_dim: i32,
 ) -> Robj {
     let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
         Ok(p) => p,
@@ -972,7 +997,15 @@ fn ferx_rust_predict_from_fit(
             }
         };
 
-    let params = match params_from_fit(&parsed.model, &theta, &omega_flat, omega_dim, &sigma) {
+    let params = match params_from_fit(
+        &parsed.model,
+        &theta,
+        &omega_flat,
+        omega_dim,
+        &sigma,
+        &omega_iov_flat,
+        omega_iov_dim,
+    ) {
         Ok(p) => p,
         Err(e) => {
             rprintln!("{}", e);
@@ -1069,10 +1102,14 @@ fn ferx_rust_predict_survival(model_path: &str, data_path: &str, times: Vec<f64>
 /// @param omega_flat Row-major flattened omega matrix
 /// @param omega_dim Side length of the omega matrix
 /// @param sigma Fitted sigma vector
+/// @param omega_iov_flat Row-major flattened fitted IOV (kappa) omega matrix;
+///   empty when the model declares no `kappa`.
+/// @param omega_iov_dim Side length of the IOV omega matrix; 0 when no IOV.
 /// @return Data frame with ID, CMT, TIME, survival, cum_hazard, hazard, cif,
 ///   survival_all, median_survival, mean_survival
 /// @export
 #[extendr]
+#[allow(clippy::too_many_arguments)]
 fn ferx_rust_predict_survival_from_fit(
     model_path: &str,
     data_path: &str,
@@ -1081,6 +1118,8 @@ fn ferx_rust_predict_survival_from_fit(
     omega_flat: Vec<f64>,
     omega_dim: i32,
     sigma: Vec<f64>,
+    omega_iov_flat: Vec<f64>,
+    omega_iov_dim: i32,
 ) -> Robj {
     let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
         Ok(p) => p,
@@ -1107,7 +1146,15 @@ fn ferx_rust_predict_survival_from_fit(
         }
     };
 
-    let params = match params_from_fit(&parsed.model, &theta, &omega_flat, omega_dim, &sigma) {
+    let params = match params_from_fit(
+        &parsed.model,
+        &theta,
+        &omega_flat,
+        omega_dim,
+        &sigma,
+        &omega_iov_flat,
+        omega_iov_dim,
+    ) {
         Ok(p) => p,
         Err(e) => {
             rprintln!("{}", e);
@@ -1131,6 +1178,9 @@ fn ferx_rust_predict_survival_from_fit(
 /// @param omega_flat Row-major flattened omega matrix
 /// @param omega_dim Side length of the omega matrix
 /// @param sigma Fitted sigma vector
+/// @param omega_iov_flat Row-major flattened fitted IOV (kappa) omega matrix;
+///   empty when the model declares no `kappa`.
+/// @param omega_iov_dim Side length of the IOV omega matrix; 0 when no IOV.
 /// @param nsim Number of Monte-Carlo replicates per subject
 /// @param seed RNG seed; pass -1 for the engine default
 /// @return Data frame with ID, TIME, NPDE, NPD columns
@@ -1144,6 +1194,8 @@ fn ferx_rust_npde_from_fit(
     omega_flat: Vec<f64>,
     omega_dim: i32,
     sigma: Vec<f64>,
+    omega_iov_flat: Vec<f64>,
+    omega_iov_dim: i32,
     nsim: i32,
     seed: i32,
 ) -> Robj {
@@ -1196,7 +1248,15 @@ fn ferx_rust_npde_from_fit(
         }
     };
 
-    let params = match params_from_fit(&parsed.model, &theta, &omega_flat, omega_dim, &sigma) {
+    let params = match params_from_fit(
+        &parsed.model,
+        &theta,
+        &omega_flat,
+        omega_dim,
+        &sigma,
+        &omega_iov_flat,
+        omega_iov_dim,
+    ) {
         Ok(p) => p,
         Err(e) => {
             rprintln!("{}", e);
@@ -1310,6 +1370,70 @@ fn parse_method(token: &str) -> std::result::Result<EstimationMethod, String> {
     }
 }
 
+// -- Helper: rebuild the fitted IOV covariance from R-side arrays --
+//
+// A `kappa` model draws / conditions on one kappa vector per occasion from
+// Omega_IOV, so a fit-derived `ModelParameters` must carry it (ferx-core #1019:
+// dropping it panicked `simulate()` deep in the row emitter). `fit$omega_iov` is
+// flattened row-major on the R side; an empty vector means "the fit carried none".
+fn omega_iov_from_fit(
+    model: &CompiledModel,
+    omega_iov_flat: &[f64],
+    omega_iov_dim: i32,
+) -> std::result::Result<Option<OmegaMatrix>, String> {
+    let d = omega_iov_dim.max(0) as usize;
+    // `dim == 0` is how the R side says "no IOV", and it always sends an empty
+    // vector with it. Values arriving under a zero dim mean the two arguments
+    // disagree - an argument-order slip in the hand-maintained extendr wrappers
+    // would look exactly like this - so refuse rather than silently drop them.
+    if d == 0 && !omega_iov_flat.is_empty() {
+        return Err(format!(
+            "Fit error: omega_iov_dim is 0 but {} omega_iov values were supplied; \
+             the dim and the flattened matrix disagree",
+            omega_iov_flat.len()
+        ));
+    }
+    let template = match model.default_params.omega_iov.as_ref() {
+        Some(t) => t,
+        None => {
+            // No `kappa` in the model: an IOV block from the fit object would not
+            // correspond to anything the engine can index, so reject rather than drop.
+            if d > 0 {
+                return Err(format!(
+                    "Fit error: omega_iov of dim {d} supplied but the model declares no kappa"
+                ));
+            }
+            return Ok(None);
+        }
+    };
+    if d == 0 {
+        return Err(format!(
+            "Fit error: model declares {} kappa (IOV) but the fit carries no omega_iov; \
+             pass a fit that was produced by this model (fit$omega_iov must be present)",
+            model.n_kappa
+        ));
+    }
+    if d != template.dim() {
+        return Err(format!(
+            "Fit error: omega_iov dim {} does not match model ({} expected)",
+            d,
+            template.dim()
+        ));
+    }
+    if omega_iov_flat.len() != d * d {
+        return Err(format!(
+            "Fit error: omega_iov length {} does not match dim²={}",
+            omega_iov_flat.len(),
+            d * d
+        ));
+    }
+    Ok(Some(OmegaMatrix::from_matrix(
+        DMatrix::from_row_slice(d, d, omega_iov_flat),
+        template.eta_names.clone(),
+        template.diagonal,
+    )))
+}
+
 // -- Helper: materialize ModelParameters from R-side theta/omega/sigma --
 
 fn params_from_fit(
@@ -1318,6 +1442,8 @@ fn params_from_fit(
     omega_flat: &[f64],
     omega_dim: i32,
     sigma: &[f64],
+    omega_iov_flat: &[f64],
+    omega_iov_dim: i32,
 ) -> std::result::Result<ModelParameters, String> {
     let template = &model.default_params;
 
@@ -1374,8 +1500,15 @@ fn params_from_fit(
             names: template.sigma.names.clone(),
         },
         sigma_fixed: template.sigma_fixed.clone(),
-        omega_iov: None,
-        kappa_fixed: Vec::new(),
+        omega_iov: omega_iov_from_fit(model, omega_iov_flat, omega_iov_dim)?,
+        kappa_fixed: template.kappa_fixed.clone(),
+        // ferx-core #977/#985 added per-class Omega/Sigma for `[mixture]` models.
+        // Carry the template's value rather than `None`: this function rebuilds
+        // parameters from R-supplied theta/omega/sigma *against* the parsed model,
+        // so dropping the mixture spec here would silently turn a `[mixture]` fit
+        // into a single-population one. Every other structural field on this
+        // initializer is likewise taken from `template`.
+        mixture: template.mixture.clone(),
     })
 }
 
@@ -1391,6 +1524,8 @@ fn build_fit_result_for_uncertainty(
     omega_flat: &[f64],
     omega_dim: i32,
     sigma: &[f64],
+    omega_iov_flat: &[f64],
+    omega_iov_dim: i32,
     method: ferx_core::UncertaintyMethod,
     cov_matrix_flat: &[f64],
     cov_matrix_dim: i32,
@@ -1479,6 +1614,7 @@ fn build_fit_result_for_uncertainty(
         theta.to_vec(),
         omega_mat,
         sigma.to_vec(),
+        omega_iov_from_fit(model, omega_iov_flat, omega_iov_dim)?.map(|m| m.matrix),
         covariance_matrix,
         sir_resamples_packed,
     ))
@@ -1487,11 +1623,13 @@ fn build_fit_result_for_uncertainty(
 // Build a defaulted FitResult populated with the fields that
 // fitted_params_from_result / simulate_with_uncertainty actually read. Other
 // fields get neutral defaults — none of them are inspected on this path.
+#[allow(clippy::too_many_arguments)]
 fn default_fit_result(
     model: &CompiledModel,
     theta: Vec<f64>,
     omega: DMatrix<f64>,
     sigma: Vec<f64>,
+    omega_iov: Option<DMatrix<f64>>,
     covariance_matrix: Option<DMatrix<f64>>,
     sir_resamples_packed: Option<Vec<Vec<f64>>>,
 ) -> FitResult {
@@ -1536,7 +1674,10 @@ fn default_fit_result(
         sir_resamples_packed,
         importance_sampling: None,
         impmap_trace: None,
-        omega_iov: None,
+        // The IOV covariance the uncertainty draws are taken around. Dropping it made
+        // ferx-core's `fitted_params_from_result` fall back to the model file's *initial*
+        // Omega_IOV, simulating the wrong inter-occasion spread with no diagnostic (#1019).
+        omega_iov,
         kappa_names: model.kappa_names.clone(),
         kappa_fixed: template.kappa_fixed.clone(),
         se_kappa: None,
@@ -2745,6 +2886,35 @@ fn ferx_rust_autodiff_enabled() -> bool {
     false
 }
 
+/// Every `[block]` name this build of the engine recognises.
+///
+/// The engine's block names are closed-world (ferx-core #1040): a header that
+/// is not in this list is rejected at parse time with `E_UNKNOWN_BLOCK`. The R
+/// side reads the list from here rather than keeping its own copy — the
+/// duplicated vector this replaces had drifted, and reported valid blocks
+/// (`covariates`, `event_model`, `simulation`, ...) as unknown sections.
+///
+/// The list is build-dependent: the engine filters out a block whose cargo
+/// feature is off, so what this returns depends on how ferx-core was compiled
+/// for this package. `src/Makevars` builds it with `ci,nn,survival`, which
+/// puts `event_model` and `binary_model` in the list and leaves `markov_model`
+/// out. Absence is therefore not the same as "the engine does not know this
+/// name" - a gated-off block is still recognised at parse time and rejected
+/// with `E_BLOCK_FEATURE_DISABLED`, not `E_UNKNOWN_BLOCK`. Callers that map
+/// this list onto a "valid sections" report should take the reason for a
+/// header being absent from the engine's diagnostics rather than assuming it
+/// is unknown.
+///
+/// @return Character vector of block names, sorted.
+/// @export
+#[extendr]
+fn ferx_rust_known_blocks() -> Vec<String> {
+    ferx_core::known_block_names()
+        .into_iter()
+        .map(String::from)
+        .collect()
+}
+
 /// Validate a .ferx model file (and optionally its dataset) without fitting.
 ///
 /// Runs the parser plus every data-independent check, and — when `data_path`
@@ -2918,7 +3088,7 @@ fn ferx_rust_inits_from_nca(model_path: &str, data_path: &str, method: &str) -> 
 /// @param sir_keep_samples When TRUE, retains the resampled packed parameter vectors.
 /// @param verbose When TRUE, the engine prints progress to stderr.
 /// @return Named list with `sir_ess`, `sir_ci_theta`, `sir_ci_omega`, `sir_ci_sigma`,
-///   `sir_resamples`, `sir_resamples_n`, `sir_resamples_dim`.
+///   `sir_resamples`, `sir_resamples_n`, `sir_resamples_dim`, and `warnings`.
 #[extendr]
 #[allow(clippy::too_many_arguments)]
 fn ferx_rust_sir(
@@ -3041,6 +3211,10 @@ fn ferx_rust_sir(
             npd: Vec::new(),
             // ferx-core #900 added categorical sdtab rows; the SIR path never reads them.
             discrete_rows: Vec::new(),
+            // ferx-core #977 added per-subject mixture posteriors; the SIR path
+            // never reads them, and these scaffolds carry no class assignment.
+            pmix: None,
+            mixest: None,
         });
     }
 
@@ -3217,6 +3391,10 @@ fn ferx_rust_sir(
             _ => (Vec::new(), 0i32, 0i32),
         };
 
+    // SIR-step warnings (ferx-core#1021: a rank-deficient or bound-shrunk
+    // proposal) live on the returned fit's `warnings`. The skeleton FitResult
+    // we passed in carries none, so everything here was produced by this SIR
+    // run — no filtering needed. Mirrors `ferx_rust_covariance`.
     list!(
         sir_ess = new_fit.sir_ess.unwrap_or(f64::NAN),
         sir_ci_theta = flatten_ci(&new_fit.sir_ci_theta),
@@ -3224,7 +3402,8 @@ fn ferx_rust_sir(
         sir_ci_sigma = flatten_ci(&new_fit.sir_ci_sigma),
         sir_resamples = sir_resamples_flat,
         sir_resamples_n = sir_resamples_n,
-        sir_resamples_dim = sir_resamples_dim
+        sir_resamples_dim = sir_resamples_dim,
+        warnings = new_fit.warnings.clone()
     )
     .into()
 }
@@ -3387,6 +3566,10 @@ fn ferx_rust_covariance(
             npd: Vec::new(),
             // ferx-core #900 added categorical sdtab rows; the covariance path never reads them.
             discrete_rows: Vec::new(),
+            // ferx-core #977 added per-subject mixture posteriors; the covariance
+            // path never reads them, and these scaffolds carry no class assignment.
+            pmix: None,
+            mixest: None,
         });
     }
 
@@ -3704,6 +3887,7 @@ extendr_module! {
     fn ferx_rust_sir;
     fn ferx_rust_covariance;
     fn ferx_rust_autodiff_enabled;
+    fn ferx_rust_known_blocks;
     fn ferx_rust_validate_model;
     fn ferx_rust_model_data_path;
     fn ferx_rust_inits_from_nca;

@@ -17,7 +17,11 @@ per-CMT scaling/error-model coverage, steady-state II sanity, lagtime
 signs). \code{NULL} runs the model-only checks.}
 }
 \value{
-Invisibly returns a list with \code{ok} (logical), \code{model},
+Invisibly returns a list with \code{ok} (logical - FALSE when the
+engine reports an error, a required section is missing, or the file
+carries a section name this build of the engine does not accept - one it
+never knew, one it has retired, or one behind a disabled feature),
+\code{model},
 \code{data}, and a \code{diagnostics} data frame with one row per finding
 (\code{severity}, \code{code}, \code{message}, \code{block}, \code{line},
 \code{suggestion}). The function always prints a report to the console.

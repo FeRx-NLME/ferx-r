@@ -18,6 +18,15 @@
 #'   \item{warfarin_logit_f}{One-compartment oral with logit-normal bioavailability}
 #'   \item{warfarin_if}{Two-compartment oral with conditional if/else covariate (WT)}
 #'   \item{one_cpt_iv}{One-compartment IV (analytical \code{one_cpt_iv})}
+#'   \item{one_cpt_iv_pooled}{One-compartment IV with \emph{no random effects} --
+#'     a fixed-effects-only (naive-pooled) fit (ferx-core #989). Every subject
+#'     shares one CL and one V, and \code{sigma} alone carries the spread. With
+#'     \code{n_eta = 0} there is no inner empirical-Bayes problem and no
+#'     \code{log|Omega|} term, so FOCE/FOCEI collapse to plain maximum
+#'     likelihood; \code{PRED} equals \code{IPRED} and \code{CWRES} equals
+#'     \code{IWRES}. An \code{[error_model]} and its \code{sigma} are still
+#'     required -- only Omega is optional. Anchored against a NONMEM 7.6.0 run
+#'     of the same model written as \code{$OMEGA 0 FIX}}
 #'   \item{two_cpt_iv}{Two-compartment IV bolus}
 #'   \item{two_cpt_oral_cov}{Two-compartment oral with continuous covariates (WT, CRCL)}
 #'   \item{three_cpt_iv}{Three-compartment IV bolus}

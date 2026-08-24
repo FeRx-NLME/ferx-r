@@ -28,11 +28,6 @@
 [error_model]
   DV ~ proportional(PROP_ERR)
 
-[initial_values]
-  theta = [3.5, 5.5, 11.0, 1.3]
-  omega = [0.25, 0.20]
-  sigma = [0.04]
-
 [fit_options]
   method     = focei
   maxiter    = 500
