@@ -19,7 +19,15 @@ block}
 
 \item{data}{Path to a NONMEM-format CSV: an observation grid, any covariates,
 and optionally a pre-scheduled base regimen (dose rows). When omitted, the
-model file's \code{[data]} block (\code{path = ...}) is used.}
+model file's \code{[data]} block (\code{path = ...}) is used.
+The \code{DV} column may be left empty (\code{.} / \code{NA}) on the
+sampling rows - the DV is what the simulation produces, so an empty cell
+means "simulate here" (a placeholder value is not needed). Rows marked
+\code{MDV = 1} are excluded, as always. Kept empty-DV records are counted
+in the \code{simulation_warnings} attribute and re-emitted as an R warning:
+\code{ferx_fit()} skips those same records, so simulated rows at those
+times have no counterpart in a fit's \code{sdtab} (do not overlay the two,
+e.g. in a VPC).}
 
 \item{n_sim}{Number of simulation replicates}
 

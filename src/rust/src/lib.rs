@@ -412,8 +412,12 @@ fn ferx_rust_simulate(
     };
     let iov_col = parsed.fit_options.iov_column.clone();
 
+    // Simulation reads a missing `DV` as a design point, not as a forgotten
+    // `MDV=1` (ferx-core #957): here the DV is the column being produced, so
+    // `DV = .` at a sampling time means "simulate here". `MDV=1` still excludes
+    // the record, and fitting keeps the skip.
     let (population, _) =
-        match ferx_core::api::read_population_for(
+        match ferx_core::api::read_population_for_simulation(
             &parsed.model,
             &parsed.covariate_decls,
             data_path,
@@ -453,7 +457,10 @@ fn ferx_rust_simulate(
         }
     };
 
-    attach_sim_warnings(sim_results_to_df(&output.results), output.warnings)
+    attach_sim_warnings(
+        sim_results_to_df(&output.results),
+        [design_point_warnings(&population), output.warnings].concat(),
+    )
 }
 
 /// Simulate using fitted parameters.
@@ -507,8 +514,12 @@ fn ferx_rust_simulate_from_fit(
     };
     let iov_col = parsed.fit_options.iov_column.clone();
 
+    // Simulation reads a missing `DV` as a design point, not as a forgotten
+    // `MDV=1` (ferx-core #957): here the DV is the column being produced, so
+    // `DV = .` at a sampling time means "simulate here". `MDV=1` still excludes
+    // the record, and fitting keeps the skip.
     let (population, _) =
-        match ferx_core::api::read_population_for(
+        match ferx_core::api::read_population_for_simulation(
             &parsed.model,
             &parsed.covariate_decls,
             data_path,
@@ -560,7 +571,10 @@ fn ferx_rust_simulate_from_fit(
             return ().into();
         }
     };
-    attach_sim_warnings(sim_results_to_df(&output.results), output.warnings)
+    attach_sim_warnings(
+        sim_results_to_df(&output.results),
+        [design_point_warnings(&population), output.warnings].concat(),
+    )
 }
 
 /// Simulate state-reactive ("adaptive" / feedback) dosing from a model's
@@ -613,7 +627,11 @@ fn ferx_rust_simulate_adaptive(
         ),
     };
     let iov_col = parsed.fit_options.iov_column.clone();
-    let (population, _) = match ferx_core::api::read_population_for(
+    // Simulation reads a missing `DV` as a design point, not as a forgotten
+    // `MDV=1` (ferx-core #957): here the DV is the column being produced, so
+    // `DV = .` at a sampling time means "simulate here". `MDV=1` still excludes
+    // the record, and fitting keeps the skip.
+    let (population, _) = match ferx_core::api::read_population_for_simulation(
         &parsed.model,
         &parsed.covariate_decls,
         data_path,
@@ -652,7 +670,13 @@ fn ferx_rust_simulate_adaptive(
         spec,
         &opts,
     ) {
-        Ok(result) => adaptive_result_to_list(&result),
+        // Adaptive returns a list rather than a bare frame, so the design-point
+        // warning rides on the list itself; `ferx_simulate_adaptive()` surfaces
+        // it through the same `simulation_warnings` reader the other paths use.
+        Ok(result) => attach_sim_warnings(
+            adaptive_result_to_list(&result),
+            design_point_warnings(&population),
+        ),
         Err(e) => throw_r_error(format!("ferx_simulate_adaptive: {e}")),
     }
 }
@@ -814,8 +838,12 @@ fn ferx_rust_simulate_with_uncertainty(
         }
     };
     let iov_col = parsed.fit_options.iov_column.clone();
+    // Simulation reads a missing `DV` as a design point, not as a forgotten
+    // `MDV=1` (ferx-core #957): here the DV is the column being produced, so
+    // `DV = .` at a sampling time means "simulate here". `MDV=1` still excludes
+    // the record, and fitting keeps the skip.
     let (population, _) =
-        match ferx_core::api::read_population_for(
+        match ferx_core::api::read_population_for_simulation(
             &parsed.model,
             &parsed.covariate_decls,
             data_path,
@@ -877,7 +905,10 @@ fn ferx_rust_simulate_with_uncertainty(
     };
 
     match ferx_core::simulate_with_uncertainty(&parsed.model, &population, &fit_result, &opts) {
-        Ok(results) => sim_results_to_df(&results),
+        Ok(results) => attach_sim_warnings(
+            sim_results_to_df(&results),
+            design_point_warnings(&population),
+        ),
         Err(e) => {
             rprintln!("simulate_with_uncertainty error: {}", e);
             ().into()
@@ -905,8 +936,12 @@ fn ferx_rust_predict(
     };
     let iov_col = parsed.fit_options.iov_column.clone();
 
+    // `predict()` never reads the DV -- PRED is the column it produces -- so a
+    // design template (`DV = .` at every sampling time) is as valid here as it is
+    // for `simulate()`, and reading it with the fitting policy would return an
+    // empty frame (ferx-core #957, ferx-r #286). `MDV=1` still excludes the record.
     let (population, _) =
-        match ferx_core::api::read_population_for(
+        match ferx_core::api::read_population_for_simulation(
             &parsed.model,
             &parsed.covariate_decls,
             data_path,
@@ -964,8 +999,12 @@ fn ferx_rust_predict_from_fit(
     };
     let iov_col = parsed.fit_options.iov_column.clone();
 
+    // `predict()` never reads the DV -- PRED is the column it produces -- so a
+    // design template (`DV = .` at every sampling time) is as valid here as it is
+    // for `simulate()`, and reading it with the fitting policy would return an
+    // empty frame (ferx-core #957, ferx-r #286). `MDV=1` still excludes the record.
     let (population, _) =
-        match ferx_core::api::read_population_for(
+        match ferx_core::api::read_population_for_simulation(
             &parsed.model,
             &parsed.covariate_decls,
             data_path,
@@ -1745,6 +1784,38 @@ fn default_fit_result(
 /// so `ferx_simulate()` can surface them without changing the data-frame contract
 /// (an empty vector when the run was clean). Mirrors how the fit path exposes
 /// `FitResult.warnings`, but as an attribute since simulate returns a bare frame.
+/// Warn when the simulation reader kept design points, i.e. `EVID=0, MDV=0`
+/// records whose `DV` cell was empty (ferx-core #957).
+///
+/// `read_population_for_simulation` keeps such a record as a sampling time; the
+/// fitting reader (`read_population_for`) skips it as a forgotten `MDV=1`. The
+/// two readings therefore disagree on the same file, and the disagreement is
+/// otherwise silent: a dataset that carries an *accidental* missing DV rather
+/// than a deliberate design gets simulated rows at times `ferx_fit()`'s `sdtab`
+/// has no observation for, which biases a VPC built by overlaying the two.
+/// Surface the count through the existing `simulation_warnings` channel so the
+/// divergence is visible without changing the data-frame contract.
+///
+/// Only Gaussian rows are counted: an integer-coded endpoint's design point
+/// carries a finite state-code placeholder, so it is indistinguishable from a
+/// real observation here.
+fn design_point_warnings(population: &Population) -> Vec<String> {
+    let n: usize = population
+        .subjects
+        .iter()
+        .map(|s| s.observations.iter().filter(|v| !v.is_finite()).count())
+        .sum();
+    if n == 0 {
+        return Vec::new();
+    }
+    vec![format!(
+        "{n} observation record(s) had an empty DV and were simulated as design \
+         points. ferx_fit() skips these same records, so simulated rows at those \
+         times have no counterpart in a fit's sdtab (do not overlay the two, e.g. \
+         in a VPC). Set MDV = 1 to exclude a record from the simulation too."
+    )]
+}
+
 fn attach_sim_warnings(mut df: Robj, warnings: Vec<String>) -> Robj {
     df.set_attrib("simulation_warnings", warnings).unwrap();
     df
