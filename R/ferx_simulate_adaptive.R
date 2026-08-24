@@ -46,7 +46,11 @@
 #'   The \code{DV} column may be left empty (\code{.} / \code{NA}) on the
 #'   sampling rows - the DV is what the simulation produces, so an empty cell
 #'   means "simulate here" (a placeholder value is not needed). Rows marked
-#'   \code{MDV = 1} are excluded, as always.
+#'   \code{MDV = 1} are excluded, as always. Kept empty-DV records are counted
+#'   in the \code{simulation_warnings} attribute and re-emitted as an R warning:
+#'   \code{ferx_fit()} skips those same records, so simulated rows at those
+#'   times have no counterpart in a fit's \code{sdtab} (do not overlay the two,
+#'   e.g. in a VPC).
 #' @param n_sim Number of simulation replicates
 #' @param seed Random seed for reproducibility
 #' @param verify Run the frozen-schedule replay verifier after every
@@ -110,7 +114,7 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
   if (length(n_sim) != 1L || is.na(n_sim) || n_sim < 1L) {
     stop("`n_sim` must be a single positive integer.", call. = FALSE)
   }
-  ferx_rust_simulate_adaptive(
+  res <- ferx_rust_simulate_adaptive(
     model_path = normalizePath(model),
     data_path = normalizePath(data),
     n_sim = n_sim,
@@ -118,4 +122,9 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
     verify = if (isTRUE(verify)) "true" else "false",
     max_decisions = as.integer(max_decisions)
   )
+
+  # Same `simulation_warnings` channel `ferx_simulate()` uses - here it carries
+  # the design-point count (a kept empty-DV record; see the `data` note above),
+  # which otherwise diverges silently from what `ferx_fit()` scored.
+  .ferx_surface_sim_warnings(res, "ferx_simulate_adaptive")
 }

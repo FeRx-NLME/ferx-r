@@ -1,16 +1,5 @@
 # ferx 0.3.0.9000 (development version)
 
-- **`ferx_simulate()` now simulates from a design template whose `DV` column is
-  empty** (#286, ferx-core #957). Dosing plus sampling times with `DV = "."` /
-  `NA` — the natural way to write a design, and what NONMEM's `$SIMULATION`
-  accepts — previously returned **zero rows**: every observation record with a
-  missing `DV` was dropped as a forgotten `MDV = 1`, which is the right reading
-  only when the `DV` is an input. Simulation now reads such a record as a
-  sampling time whose value is about to be produced, so no placeholder number is
-  needed in the column that gets overwritten. `MDV = 1` still excludes a record,
-  fitting is unchanged, and this applies to `ferx_simulate()` (both the
-  default-parameter and the `fit = ` path), `ferx_simulate_adaptive()`, and
-  `ferx_simulate_with_uncertainty()`.
 ## Breaking changes
 
 - **An unrecognised `[section]` in a `.ferx` file is now an error** (ferx-core #1040).
@@ -165,6 +154,26 @@
   (`one_cpt_iv_pooled`, `binary_logistic`) request `focei` and are unaffected.
 
 ## New features
+
+- **`ferx_simulate()` and `ferx_predict()` now accept a design template whose
+  `DV` column is empty** (#286, ferx-core #957). Dosing plus sampling times with
+  `DV = "."` / `NA` - the natural way to write a design, and what NONMEM's
+  `$SIMULATION` accepts - previously returned **zero rows**: every observation
+  record with a missing `DV` was dropped as a forgotten `MDV = 1`, which is the
+  right reading only when the `DV` is an input. Simulation and prediction both
+  *produce* that column, so such a record is now read as a sampling time whose
+  value is about to be generated, and no placeholder number is needed.
+  `MDV = 1` still excludes a record, and fitting is unchanged. Applies to
+  `ferx_simulate()` (both the default-parameter and the `fit = ` path),
+  `ferx_simulate_adaptive()`, `ferx_simulate_with_uncertainty()`, and
+  `ferx_predict()`.
+
+  Because the simulate and fit readers now disagree on the same file, a kept
+  empty-DV record is **counted and reported**: the returned object carries the
+  count in its `simulation_warnings` attribute, and it is re-emitted as an R
+  warning. A dataset with an *accidental* missing `DV` (rather than a deliberate
+  design) would otherwise silently gain simulated rows at times `ferx_fit()`'s
+  `sdtab` has no observation for - biasing a VPC built by overlaying the two.
 
 - **Models with no random effects - fixed-effects-only (naive-pooled) fits**
   (ferx-core #989). A continuous model may now omit every `omega` declaration.

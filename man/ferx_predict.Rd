@@ -10,7 +10,11 @@ ferx_predict(model, data = NULL, fit = NULL)
 \item{model}{Path to a .ferx model file}
 
 \item{data}{Path to a NONMEM-format CSV. When omitted, the model file's
-\code{[data]} block (\code{path = ...}) is used.}
+\code{[data]} block (\code{path = ...}) is used.
+The \code{DV} column may be left empty (\code{.} / \code{NA}) on the
+sampling rows - \code{PRED} is what this function produces and the DV is
+never read, so an empty cell means "predict here". Rows marked
+\code{MDV = 1} are excluded, as always.}
 
 \item{fit}{Optional \code{ferx_fit} result. When provided, predictions use
 \code{fit$theta} instead of the model file's initial estimate for theta.}

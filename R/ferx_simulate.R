@@ -12,7 +12,11 @@
 #'   The \code{DV} column may be left empty (\code{.} / \code{NA}) on the
 #'   sampling rows - the DV is what the simulation produces, so an empty cell
 #'   means "simulate here" (a placeholder value is not needed). Rows marked
-#'   \code{MDV = 1} are excluded, as always.
+#'   \code{MDV = 1} are excluded, as always. Kept empty-DV records are counted
+#'   in the \code{simulation_warnings} attribute and re-emitted as an R warning:
+#'   \code{ferx_fit()} skips those same records, so simulated rows at those
+#'   times have no counterpart in a fit's \code{sdtab} (do not overlay the two,
+#'   e.g. in a VPC).
 #' @param n_sim Number of simulation replicates
 #' @param seed Random seed for reproducibility
 #' @param fit Optional \code{ferx_fit} result. When provided, simulation uses
@@ -133,11 +137,11 @@ ferx_simulate <- function(model, data = NULL, n_sim = 1L, seed = 42L, fit = NULL
 # warning so they are not silently lost; return `res` unchanged (the attribute is
 # left in place for programmatic access). `res` may be NULL when the Rust side
 # errored, in which case there is nothing to surface.
-.ferx_surface_sim_warnings <- function(res) {
+.ferx_surface_sim_warnings <- function(res, fn = "ferx_simulate") {
   w <- attr(res, "simulation_warnings", exact = TRUE)
   if (length(w) > 0L) {
     warning(
-      "ferx_simulate produced ", length(w), " simulation diagnostic",
+      fn, " produced ", length(w), " simulation diagnostic",
       if (length(w) > 1L) "s" else "", ":\n  ",
       paste(w, collapse = "\n  "),
       call. = FALSE

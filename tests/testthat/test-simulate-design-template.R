@@ -31,7 +31,9 @@ write_design_template <- function(dv = ".") {
 
 test_that("ferx_simulate simulates a design template with no DV values", {
   ex <- ferx_example("warfarin")
-  sim <- ferx_simulate(ex$model, write_design_template(), n_sim = 1L, seed = 1L)
+  sim <- suppressWarnings(
+    ferx_simulate(ex$model, write_design_template(), n_sim = 1L, seed = 1L)
+  )
 
   expect_s3_class(sim, "data.frame")
   # Two subjects x three sampling times: the rows that used to vanish.
@@ -46,8 +48,8 @@ test_that("an NA DV template simulates the same as a `.` one", {
   # `.` and `NA` are the same missing cell to the reader; an R user writing the
   # frame with `NA` should not have to know which sentinel gets written.
   ex <- ferx_example("warfarin")
-  dot <- ferx_simulate(ex$model, write_design_template("."), n_sim = 1L, seed = 7L)
-  na <- ferx_simulate(ex$model, write_design_template(NA), n_sim = 1L, seed = 7L)
+  dot <- suppressWarnings(ferx_simulate(ex$model, write_design_template("."), n_sim = 1L, seed = 7L))
+  na <- suppressWarnings(ferx_simulate(ex$model, write_design_template(NA), n_sim = 1L, seed = 7L))
 
   expect_equal(nrow(na), nrow(dot))
   expect_equal(na$DV_SIM, dot$DV_SIM)
@@ -72,7 +74,7 @@ test_that("MDV = 1 still excludes a sampling row from the simulation", {
     na = "."
   )
   ex <- ferx_example("warfarin")
-  sim <- ferx_simulate(ex$model, path, n_sim = 1L, seed = 1L)
+  sim <- suppressWarnings(ferx_simulate(ex$model, path, n_sim = 1L, seed = 1L))
 
   expect_equal(nrow(sim), 2L)
   expect_equal(sort(sim$TIME), c(4, 24))
@@ -85,9 +87,92 @@ test_that("a template with DV values is unaffected", {
   ex <- ferx_example("warfarin")
   placeholder <- ferx_simulate(ex$model, write_design_template("0"),
                                n_sim = 1L, seed = 3L)
-  missing <- ferx_simulate(ex$model, write_design_template("."),
-                           n_sim = 1L, seed = 3L)
+  missing <- suppressWarnings(ferx_simulate(ex$model, write_design_template("."),
+                                            n_sim = 1L, seed = 3L))
 
   expect_equal(nrow(placeholder), 6L)
   expect_equal(placeholder$DV_SIM, missing$DV_SIM)
+})
+
+test_that("a kept design point is reported through simulation_warnings", {
+  # The two readers disagree on the same file: simulation keeps an empty-DV
+  # record, `ferx_fit()` skips it. That divergence must not be silent, or a VPC
+  # built by overlaying simulated rows on a fit's sdtab is quietly biased at
+  # times the fit never scored.
+  ex <- ferx_example("warfarin")
+  expect_warning(
+    sim <- ferx_simulate(ex$model, write_design_template(), n_sim = 1L, seed = 1L),
+    "empty DV"
+  )
+  w <- attr(sim, "simulation_warnings", exact = TRUE)
+  expect_length(w, 1L)
+  expect_match(w, "^6 observation record")
+})
+
+test_that("the `fit =` path simulates a design template too", {
+  # `ferx_simulate(..., fit = fit)` goes through `ferx_rust_simulate_from_fit`,
+  # a different reader call site than the default-parameter path above -- and the
+  # common VPC/PPC entry point.
+  ex <- ferx_example("warfarin")
+  fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
+  sim <- suppressWarnings(
+    ferx_simulate(ex$model, write_design_template(), n_sim = 1L, seed = 1L, fit = fit)
+  )
+
+  expect_equal(nrow(sim), 6L)
+  expect_true(all(is.finite(sim$DV_SIM)))
+})
+
+test_that("ferx_simulate_with_uncertainty simulates a design template", {
+  ex <- ferx_example("warfarin")
+  fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = TRUE)
+  sims <- suppressWarnings(ferx_simulate_with_uncertainty(
+    ex$model, write_design_template(), fit,
+    n_uncertainty_draws = 2L, n_sim_per_draw = 1L, seed = 5L
+  ))
+
+  # 2 draws x 1 replicate x 6 sampling times.
+  expect_equal(nrow(sims), 12L)
+  expect_true(all(is.finite(sims$DV_SIM)))
+})
+
+test_that("ferx_simulate_adaptive simulates a design template", {
+  # The adaptive controller supplies the whole regimen, so a design template
+  # here is just the observation grid -- exactly the case the reader swap is
+  # about. The warning rides on the returned *list*, not a data frame.
+  path <- tempfile(fileext = ".csv")
+  utils::write.csv(
+    data.frame(
+      ID   = 1L,
+      TIME = seq(0, 96, by = 12),
+      DV   = ".",
+      EVID = 0L,
+      AMT  = NA_real_,
+      CMT  = 1L,
+      MDV  = 0L
+    ),
+    path,
+    row.names = FALSE,
+    na = "."
+  )
+  ex <- ferx_example("adaptive_tdm")
+  res <- suppressWarnings(
+    ferx_simulate_adaptive(ex$model, path, n_sim = 1L, seed = 1L)
+  )
+
+  expect_equal(nrow(res$trajectories), 9L)
+  expect_true(all(is.finite(res$trajectories$DV_SIM)))
+  expect_match(attr(res, "simulation_warnings", exact = TRUE), "^9 observation record")
+})
+
+test_that("ferx_predict also accepts a design template", {
+  # PRED is the column `ferx_predict()` produces and it never reads the DV, so
+  # the same template must work there -- otherwise the package supports an empty
+  # DV in `ferx_simulate()` and silently returns an empty frame next door.
+  ex <- ferx_example("warfarin")
+  pred <- ferx_predict(ex$model, write_design_template())
+
+  expect_equal(nrow(pred), 6L)
+  expect_equal(sort(unique(pred$TIME)), c(0.5, 4, 24))
+  expect_true(all(is.finite(pred$PRED)))
 })
