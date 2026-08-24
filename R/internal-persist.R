@@ -23,6 +23,22 @@
   v
 }
 
+# Read back a JSON array that may contain nulls - a Rust `Vec<Option<T>>` such
+# as the per-kappa `weight =` source text and its typical value. `unlist()`
+# would silently *drop* the nulls and shift every later element onto the wrong
+# kappa, so map them to NA element-wise instead. NULL when absent or empty.
+.fitrx_unwrap_nullable_vec <- function(x, na) {
+  if (is.null(x) || length(x) == 0L) return(NULL)
+  if (!is.list(x)) return(c(x, na)[seq_along(x)])
+  vapply(x, function(el) {
+    if (is.null(el) || length(el) == 0L) na else c(el, na)[[1L]]
+  }, na)
+}
+
+.fitrx_unwrap_opt_chr_vec <- function(x) .fitrx_unwrap_nullable_vec(x, NA_character_)
+
+.fitrx_unwrap_nullable_num_vec <- function(x) .fitrx_unwrap_nullable_vec(x, NA_real_)
+
 .fitrx_opt_int <- function(x) {
   if (is.null(x)) return(NULL)
   if (length(x) == 0L) return(NULL)

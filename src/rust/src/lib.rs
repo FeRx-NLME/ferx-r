@@ -1747,6 +1747,11 @@ fn default_fit_result(
         omega_init_as_sd: Vec::new(),
         sigma_init_as_sd: Vec::new(),
         kappa_init_as_sd: Vec::new(),
+        // ferx-core #1031 added the sample-size weight (`kappa K ~ g2 weight = N`)
+        // to `FitResult` for reporting only; these skeleton results are never
+        // printed, so both stay empty.
+        kappa_weights: Vec::new(),
+        kappa_weight_typical: Vec::new(),
         warnings_structured: Vec::new(),
         model_text: None,
         theta_init: Vec::new(),
@@ -1980,11 +1985,24 @@ fn residual_label(model: &CompiledModel) -> String {
 //    re-parsing the .ferx file (theta_names, model_type, iiv, iov, residual)
 //    so it can be a drop-in canonical source for `ferx_model_inspect()`. --
 fn model_structure_list(model: &CompiledModel) -> Robj {
+    // Sample-size-weighted IOV (ferx-core #1031). Parallel to `iov`, with NA
+    // for an unweighted kappa; empty when the model declares no weight at all,
+    // which is what `.ferx_parse_structure()` produces for the pre-fit path.
+    let iov_weights: Vec<Option<String>> = if model.has_weighted_kappa() {
+        model
+            .kappa_weights
+            .iter()
+            .map(|w| w.as_ref().map(|k| k.expr.clone()))
+            .collect()
+    } else {
+        Vec::new()
+    };
     list!(
         theta_names = model.theta_names.clone(),
         model_type = pk_model_type_label(model).to_string(),
         iiv = model.eta_names.clone(),
         iov = model.kappa_names.clone(),
+        iov_weights = iov_weights,
         residual = residual_label(model)
     )
     .into()
@@ -2578,6 +2596,15 @@ fn fit_result_to_list(
         omega_init_as_sd = result.omega_init_as_sd.clone(),
         sigma_init_as_sd = result.sigma_init_as_sd.clone(),
         kappa_init_as_sd = result.kappa_init_as_sd.clone(),
+        // Sample-size-weighted IOV (ferx-core #1031): `kappa K ~ g2 weight = NARM`
+        // means `kappa_ik ~ N(0, Omega_IOV / N_ik)`. `kappa_weights[i]` is the
+        // weight expression as written (NA when kappa i is unweighted) and
+        // `kappa_weight_typical[i]` the median weight over this dataset's
+        // subject-occasions, so R can report the effective SD `g/sqrt(N)` next to
+        // the estimate - which stays the *unweighted* g^2. Both are empty for a
+        // model with no weighted kappa.
+        kappa_weights = result.kappa_weights.clone(),
+        kappa_weight_typical = result.kappa_weight_typical.clone(),
         // `[covariate_nn]` blocks from the model file (Phase A M1 of ferx-core's
         // DCM plan). One R sub-list per NN; empty list when the `nn` feature is
         // off or no NN blocks are declared. Inspectable in R as
@@ -3377,6 +3404,11 @@ fn ferx_rust_sir(
         omega_init_as_sd: Vec::new(),
         sigma_init_as_sd: Vec::new(),
         kappa_init_as_sd: Vec::new(),
+        // ferx-core #1031 added the sample-size weight (`kappa K ~ g2 weight = N`)
+        // to `FitResult` for reporting only; these skeleton results are never
+        // printed, so both stay empty.
+        kappa_weights: Vec::new(),
+        kappa_weight_typical: Vec::new(),
         warnings_structured: Vec::new(),
         model_text: None,
         theta_init: Vec::new(),
@@ -3734,6 +3766,11 @@ fn ferx_rust_covariance(
         omega_init_as_sd: Vec::new(),
         sigma_init_as_sd: Vec::new(),
         kappa_init_as_sd: Vec::new(),
+        // ferx-core #1031 added the sample-size weight (`kappa K ~ g2 weight = N`)
+        // to `FitResult` for reporting only; these skeleton results are never
+        // printed, so both stay empty.
+        kappa_weights: Vec::new(),
+        kappa_weight_typical: Vec::new(),
         warnings_structured: Vec::new(),
         model_text: None,
         theta_init: Vec::new(),

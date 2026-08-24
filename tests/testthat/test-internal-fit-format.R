@@ -488,3 +488,50 @@ test_that(".runlog_iter_table output is pure ASCII", {
   out <- paste(tbl, collapse = "\n")
   expect_false(nchar(out, type = "bytes") != nchar(out, type = "chars"))
 })
+
+# Sample-size-weighted IOV helpers (ferx-core #1031) ------------------------
+
+test_that(".ferx_name_kappa_weights() returns NULL for an unweighted model", {
+  expect_equal(.ferx_name_kappa_weights(character(0), numeric(0), "KAPPA_CL", 1L),
+               list(kappa_weights = NULL, kappa_weight_typical = NULL))
+  expect_equal(.ferx_name_kappa_weights(NULL, NULL, "KAPPA_CL", 1L),
+               list(kappa_weights = NULL, kappa_weight_typical = NULL))
+  # An all-empty vector is how the FFI reports "no kappa carries a weight".
+  expect_equal(.ferx_name_kappa_weights(c("", ""), c(NA, NA),
+                                        c("KAPPA_CL", "KAPPA_V"), 2L),
+               list(kappa_weights = NULL, kappa_weight_typical = NULL))
+})
+test_that(".ferx_name_kappa_weights() names and pads to one entry per kappa", {
+  got <- .ferx_name_kappa_weights(c(NA, "NARM"), c(NA, 400),
+                                  c("KAPPA_CL", "KAPPA_V"), 2L)
+  expect_equal(got$kappa_weights, c(KAPPA_CL = NA_character_, KAPPA_V = "NARM"))
+  expect_equal(got$kappa_weight_typical, c(KAPPA_CL = NA_real_, KAPPA_V = 400))
+
+  # A short `typical` (e.g. an engine that could not evaluate the weight)
+  # must still line up with kappa_names rather than recycling.
+  got <- .ferx_name_kappa_weights("NARM", numeric(0), "KAPPA_CL", 1L)
+  expect_equal(got$kappa_weights, c(KAPPA_CL = "NARM"))
+  expect_equal(got$kappa_weight_typical, c(KAPPA_CL = NA_real_))
+})
+test_that(".ferx_format_kappa_weight() reports the effective SD at the typical weight", {
+  fit <- list(kappa_weights = c(KAPPA_CL = "NARM"),
+              kappa_weight_typical = c(KAPPA_CL = 400))
+  line <- .ferx_format_kappa_weight(fit, 1L, 1.840240, "KAPPA_CL")
+  # gamma / sqrt(W) = sqrt(1.84024) / sqrt(400) = 0.0678
+  expect_match(line, "weight = NARM", fixed = TRUE)
+  expect_match(line, "SD = 0.0678", fixed = TRUE)
+  expect_match(line, "at NARM = 400.0000", fixed = TRUE)
+})
+test_that(".ferx_format_kappa_weight() falls back when no typical weight is known", {
+  fit <- list(kappa_weights = c(KAPPA_CL = "NARM"),
+              kappa_weight_typical = c(KAPPA_CL = NA_real_))
+  line <- .ferx_format_kappa_weight(fit, 1L, 1.84, "KAPPA_CL")
+  expect_match(line, "weight = NARM (kappa ~ N(0, KAPPA_CL/NARM))", fixed = TRUE)
+  expect_false(grepl("SD =", line, fixed = TRUE))
+})
+test_that(".ferx_format_kappa_weight() returns NULL for an unweighted kappa", {
+  expect_null(.ferx_format_kappa_weight(list(), 1L, 0.02, "KAPPA_CL"))
+  expect_null(.ferx_format_kappa_weight(
+    list(kappa_weights = c(KAPPA_CL = NA_character_, KAPPA_V = "NARM")),
+    1L, 0.02, "KAPPA_CL"))
+})

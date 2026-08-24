@@ -556,7 +556,20 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
     },
     omega_iov = .fitrx_matrix_to_wire(fit$omega_iov),
     omega_iov_param_corr = .fitrx_matrix_to_wire(fit$omega_iov_param_corr),
-    kappa_init_as_sd = as.logical(fit$kappa_init_as_sd %||% rep(FALSE, length(fit$kappa_names)))
+    kappa_init_as_sd = as.logical(fit$kappa_init_as_sd %||% rep(FALSE, length(fit$kappa_names))),
+    # Sample-size-weighted IOV (ferx-core #1031). Omitted entirely for an
+    # unweighted model so the bundle is byte-identical to a pre-#1031 one; the
+    # engine reads both fields with `#[serde(default)]`. `as.list()` keeps them
+    # JSON arrays under `auto_unbox = TRUE` (a single weighted kappa is the
+    # common MBMA case), and `na = "null"` maps an unweighted slot to `null`,
+    # which is what `Vec<Option<..>>` expects.
+    kappa_weights = if (is.null(fit$kappa_weights)) NULL else {
+      as.list(as.character(fit$kappa_weights))
+    },
+    kappa_weight_typical = if (is.null(fit$kappa_weights)) NULL else {
+      as.list(as.numeric(fit$kappa_weight_typical %||%
+                           rep(NA_real_, length(fit$kappa_weights))))
+    }
   )
 }
 
