@@ -50,8 +50,9 @@ default) draws as many as the original dataset has - the only case where a
 stratified proportional split is guaranteed to sum back to the request. A
 single number sets one total for the replicate; a \strong{named} numeric vector
 (\code{c("1001" = 12, "1002" = 24)}) sets an explicit count per stratum and is
-only meaningful together with \code{stratify_on}. It is PsN's
-\verb{-sample_size=1001=>12,1002=>24}, spelled the R way.}
+only meaningful together with \code{stratify_on}. Every count must be a whole
+number >= 1. It is PsN's \verb{-sample_size=1001=>12,1002=>24}, spelled the R
+way.}
 
 \item{update_inits}{Start each replicate from the base fit's final estimates
 (PsN default, \code{TRUE}). Requires \code{run_base_model = TRUE}.}

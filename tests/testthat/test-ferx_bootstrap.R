@@ -127,6 +127,21 @@ test_that("ferx_bootstrap_summarize rejects a directory that is not a run", {
                "not found")
 })
 
+test_that("ferx_bootstrap_summarize validates its flags before touching disk", {
+  d <- file.path(tempdir(), "ferx-bs-empty")
+  dir.create(d, showWarnings = FALSE)
+  for (nm in c("skip_minimization_terminated", "skip_estimate_near_boundary",
+               "skip_covariance_step_terminated", "skip_with_covstep_warnings")) {
+    args <- list(d); args[[nm]] <- NA
+    expect_error(do.call(ferx_bootstrap_summarize, args), "TRUE or FALSE")
+    args[[nm]] <- "TRUE"
+    expect_error(do.call(ferx_bootstrap_summarize, args), "TRUE or FALSE")
+  }
+  # A bad flag is reported even when the directory itself is unusable: the
+  # argument error is the one the caller can act on.
+  expect_error(ferx_bootstrap_summarize(d, ci = 100), "confidence level")
+})
+
 test_that("stratified resampling and sample_size reach the engine", {
   ex <- ferx_example("warfarin")
   dat <- read.csv(ex$data)
@@ -200,6 +215,12 @@ test_that("sample_size shapes map onto the engine's spec", {
   )
   expect_error(.ferx_bootstrap_sample_size("12"), "must be a number")
   expect_error(.ferx_bootstrap_sample_size(c(a = 1, 2)), "every element")
+  # 0 reaches the engine as SampleSize::Total(0) - replicates drawing no
+  # subjects at all, which surfaces as a fit error far from its cause.
+  expect_error(.ferx_bootstrap_sample_size(0), "whole numbers >= 1")
+  expect_error(.ferx_bootstrap_sample_size(c("1001" = 12, "1002" = 0)),
+               "whole numbers >= 1")
+  expect_error(.ferx_bootstrap_sample_size(2.5), "whole numbers >= 1")
 })
 
 test_that("keep_covariance adds the per-replicate standard errors", {
@@ -207,6 +228,51 @@ test_that("keep_covariance adds the per-replicate standard errors", {
   bs <- ferx_bootstrap(ex$model, ex$data, samples = 2L, seed = 5, threads = 2L,
                        keep_covariance = TRUE)
   expect_true(all(paste0("se_", bs$parameter_names) %in% names(bs$raw)))
+})
+
+test_that("`$raw` has the same column types from either entry point", {
+  ex <- ferx_example("warfarin")
+  d <- file.path(tempdir(), "ferx-bs-types")
+  unlink(d, recursive = TRUE)
+  bs <- ferx_bootstrap(ex$model, ex$data, samples = 3L, seed = 11, threads = 2L,
+                       directory = d)
+  again <- ferx_bootstrap_summarize(d)
+
+  # raw_results.csv is untyped text: the flags are written 0/1 and `error` is
+  # blank for a replicate that succeeded, so read.csv would hand back integer
+  # flags and - with no replicate errored - a logical NA `error` column.
+  flags <- c("minimization_successful", "estimate_near_boundary",
+             "covariance_step_successful", "covariance_step_warnings")
+  for (nm in flags) {
+    expect_type(bs$raw[[nm]], "logical")
+    expect_type(again$raw[[nm]], "logical")
+    expect_identical(again$raw[[nm]], bs$raw[[nm]])
+  }
+  expect_type(bs$raw$error, "character")
+  expect_type(again$raw$error, "character")
+  expect_identical(is.na(again$raw$error), is.na(bs$raw$error))
+})
+
+test_that("plot survives a parameter with a single finite estimate", {
+  bs <- boot_small()
+  one <- bs
+  # Everything but the first replicate lost its estimate: `breaks = "FD"` needs
+  # a spread to derive a bin width, and hist() aborts without one.
+  p1 <- bs$parameter_names[1]
+  keep <- one$raw$sample > 0L
+  one$raw[[p1]][keep][-1] <- NA_real_
+  one$delta_ofv <- data.frame(sample = 1L, delta_ofv = 3.1)
+  one$chi_square_df <- 1L
+
+  pdf(NULL)
+  on.exit(dev.off(), add = TRUE)
+  expect_identical(plot(one, parameters = p1), p1)
+
+  # And with no finite estimate at all, the panel is a placeholder.
+  none <- one
+  none$raw[[p1]] <- NA_real_
+  none$delta_ofv <- NULL
+  expect_identical(plot(none, parameters = p1), p1)
 })
 
 test_that("print and plot work on a bootstrap result", {

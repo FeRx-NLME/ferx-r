@@ -56,8 +56,9 @@
 #'   stratified proportional split is guaranteed to sum back to the request. A
 #'   single number sets one total for the replicate; a **named** numeric vector
 #'   (`c("1001" = 12, "1002" = 24)`) sets an explicit count per stratum and is
-#'   only meaningful together with `stratify_on`. It is PsN's
-#'   `-sample_size=1001=>12,1002=>24`, spelled the R way.
+#'   only meaningful together with `stratify_on`. Every count must be a whole
+#'   number >= 1. It is PsN's `-sample_size=1001=>12,1002=>24`, spelled the R
+#'   way.
 #' @param update_inits Start each replicate from the base fit's final estimates
 #'   (PsN default, `TRUE`). Requires `run_base_model = TRUE`.
 #' @param run_base_model Fit the original dataset first. Required for
@@ -271,9 +272,12 @@ ferx_bootstrap <- function(model,
 #' @inheritParams ferx_bootstrap
 #'
 #' @return An object of class `ferx_bootstrap` with `$parameters`,
-#'   `$diagnostics` and `$raw` (read back from `raw_results.csv`), plus the run
-#'   metadata. `$delta_ofv` is populated when the original run wrote a
-#'   `delta_ofv.csv`.
+#'   `$diagnostics`, `$raw` (read back from `raw_results.csv`), `$samples`,
+#'   `$n_completed`, `$n_included`, `$confidence_level` and `$directory`.
+#'   `$delta_ofv` is populated when the original run wrote a `delta_ofv.csv`.
+#'   `$model`, `$data` and `$seed` are *not* set: a finished run directory does
+#'   not record the model path, the data path or the seed, so the printed
+#'   header omits those lines.
 #'
 #' @examples
 #' \dontrun{
@@ -298,6 +302,16 @@ ferx_bootstrap_summarize <- function(directory,
   if (!is.character(directory) || length(directory) != 1L || is.na(directory)) {
     stop("`directory` must be a single path to a bootstrap run directory.")
   }
+  if (!is.numeric(ci) || length(ci) != 1L || is.na(ci) || ci <= 0 || ci >= 100) {
+    stop("`ci` must be a confidence level in (0, 100), e.g. 95.")
+  }
+  for (nm in c("skip_minimization_terminated", "skip_estimate_near_boundary",
+               "skip_covariance_step_terminated", "skip_with_covstep_warnings")) {
+    v <- get(nm)
+    if (!is.logical(v) || length(v) != 1L || is.na(v)) {
+      stop("`", nm, "` must be TRUE or FALSE.")
+    }
+  }
   if (!dir.exists(directory)) {
     stop("Bootstrap directory not found: ", directory)
   }
@@ -305,9 +319,6 @@ ferx_bootstrap_summarize <- function(directory,
   if (!file.exists(raw_path)) {
     stop("`", directory, "` is not a finished bootstrap run: no raw_results.csv. ",
          "Re-run ferx_bootstrap() with `directory` set.")
-  }
-  if (!is.numeric(ci) || length(ci) != 1L || is.na(ci) || ci <= 0 || ci >= 100) {
-    stop("`ci` must be a confidence level in (0, 100), e.g. 95.")
   }
 
   dir_abs <- normalizePath(directory)
@@ -328,7 +339,9 @@ ferx_bootstrap_summarize <- function(directory,
   # is a convenience, not a second implementation: nothing is recomputed from
   # it, it is handed over as `$raw`.
   res$raw <- .ferx_blank_error_to_na(
-    read.csv(raw_path, check.names = FALSE, stringsAsFactors = FALSE)
+    .ferx_raw_csv_types(
+      read.csv(raw_path, check.names = FALSE, stringsAsFactors = FALSE)
+    )
   )
   dofv_path <- file.path(dir_abs, "delta_ofv.csv")
   res$delta_ofv <- if (file.exists(dofv_path)) {
@@ -336,6 +349,10 @@ ferx_bootstrap_summarize <- function(directory,
   } else {
     NULL
   }
+  # Everything else a `ferx_bootstrap()` result carries is a fact about the
+  # invocation (model, data, seed) that the run directory does not record;
+  # `samples` is the exception - the engine wrote it to the diagnostics.
+  res$samples <- as.integer(.ferx_diag_value(res$diagnostics, "samples_requested"))
   res$directory <- dir_abs
   class(res) <- c("ferx_bootstrap", "list")
   res
@@ -450,8 +467,8 @@ plot.ferx_bootstrap <- function(x, y = NULL, parameters = NULL,
       title(main = p, sub = "no estimates")
       next
     }
-    hist(vals, breaks = breaks, col = "grey85", border = "white",
-                   main = p, xlab = "estimate")
+    hist(vals, breaks = .ferx_hist_breaks(vals, breaks), col = "grey85",
+         border = "white", main = p, xlab = "estimate")
     if (!is.na(row$original)) {
       abline(v = row$original, lwd = 2)
     }
@@ -468,8 +485,9 @@ plot.ferx_bootstrap <- function(x, y = NULL, parameters = NULL,
       plot.new()
       title(main = "delta OFV", sub = "no values")
     } else {
-      hist(d, breaks = breaks, col = "grey85", border = "white",
-                     freq = FALSE, main = "delta OFV", xlab = "delta OFV")
+      hist(d, breaks = .ferx_hist_breaks(d, breaks), col = "grey85",
+           border = "white", freq = FALSE, main = "delta OFV",
+           xlab = "delta OFV")
       df <- x$chi_square_df
       if (!is.null(df) && !is.na(df) && df > 0) {
         grid <- seq(max(1e-8, min(d)), max(d), length.out = 200)
@@ -494,6 +512,12 @@ plot.ferx_bootstrap <- function(x, y = NULL, parameters = NULL,
     stop("`sample_size` must be a number, or a named numeric vector of ",
          "per-stratum counts, or NULL.")
   }
+  # A stratum count of 0 is accepted all the way down to `SampleSize::Total(0)`,
+  # where it becomes replicates drawing no subjects at all - a fit error far
+  # from its cause.
+  if (any(sample_size != trunc(sample_size)) || any(sample_size < 1)) {
+    stop("`sample_size` counts must be whole numbers >= 1.")
+  }
   nms <- names(sample_size)
   if (is.null(nms)) {
     if (length(sample_size) != 1L) {
@@ -506,6 +530,29 @@ plot.ferx_bootstrap <- function(x, y = NULL, parameters = NULL,
     stop("`sample_size`: either every element is named with its stratum, or none is.")
   }
   list(keys = as.character(nms), values = as.numeric(unname(sample_size)))
+}
+
+# `breaks = "FD"` and the other named rules derive a bin width from the spread
+# of the data: with a single value the IQR is 0, the width comes out NA, and
+# hist() aborts on `if (h > 0)`. One bin is the only honest picture of one
+# estimate anyway.
+.ferx_hist_breaks <- function(vals, breaks) {
+  if (length(vals) < 2L) 1L else breaks
+}
+
+# raw_results.csv is untyped text: the engine writes the four status flags as
+# 0/1 and leaves `error` blank for a replicate that succeeded, so read.csv
+# hands back integer flags - and, when no replicate errored, an all-blank
+# `error` column type-converted to logical NA. The in-memory path builds the
+# same frame with logical flags and a character `error`; make the two agree.
+.ferx_raw_csv_types <- function(raw) {
+  if (is.null(raw)) return(raw)
+  for (nm in c("minimization_successful", "estimate_near_boundary",
+               "covariance_step_successful", "covariance_step_warnings")) {
+    if (nm %in% names(raw)) raw[[nm]] <- as.logical(raw[[nm]])
+  }
+  if ("error" %in% names(raw)) raw$error <- as.character(raw$error)
+  raw
 }
 
 # The engine writes "" for a replicate that did not error, matching

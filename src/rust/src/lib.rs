@@ -4013,10 +4013,13 @@ fn sample_size_from_r(keys: &[String], values: &[f64]) -> std::result::Result<Sa
     if values.is_empty() {
         return Ok(SampleSize::Original);
     }
+    // 0 is not merely degenerate: it reaches the engine as `SampleSize::Total(0)`
+    // and every replicate then draws no subjects, surfacing as a fit failure
+    // rather than as the argument error it is.
     let as_count = |v: f64| -> std::result::Result<usize, String> {
-        if !v.is_finite() || v < 0.0 || v.fract() != 0.0 {
+        if !v.is_finite() || v < 1.0 || v.fract() != 0.0 {
             return Err(format!(
-                "sample_size must be whole non-negative numbers, got {v}"
+                "sample_size must be whole numbers >= 1, got {v}"
             ));
         }
         Ok(v as usize)

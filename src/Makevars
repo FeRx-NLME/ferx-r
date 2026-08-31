@@ -124,7 +124,14 @@ ifneq ($(LOCAL_FERX_TOOLS),)
 	@echo 'ferx-tools = { path = "../../../ferx-core/crates/ferx-tools" }' >> rust/.cargo/config.toml
 	@echo "ferx: using local ../ferx-core checkout ([patch] override: ferx-core + ferx-tools)"
 else
-	@echo "ferx: WARNING ../ferx-core has no crates/ferx-tools - ferx-core comes from your checkout but ferx-tools from GitHub main"
+	@echo "ferx: ERROR the sibling ferx-core checkout has no crates/ferx-tools:" >&2
+	@echo "ferx:     $(abspath $(dir $(LOCAL_FERX_CORE)))" >&2
+	@echo "ferx:   (a checkout predating the ferx-tools workspace split). Patching" >&2
+	@echo "ferx:   ferx-core alone would build that checkout's engine against ferx-tools" >&2
+	@echo "ferx:   from GitHub main - two revisions of one workspace, with no compile" >&2
+	@echo "ferx:   error to say so. Update that checkout, or move it aside to build" >&2
+	@echo "ferx:   wholly from GitHub." >&2
+	@exit 1
 endif
 endif
 	@echo '[build]' >> rust/.cargo/config.toml

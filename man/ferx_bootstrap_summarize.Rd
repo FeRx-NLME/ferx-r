@@ -32,9 +32,12 @@ error rather than a silently dropped filter.}
 }
 \value{
 An object of class \code{ferx_bootstrap} with \verb{$parameters},
-\verb{$diagnostics} and \verb{$raw} (read back from \code{raw_results.csv}), plus the run
-metadata. \verb{$delta_ofv} is populated when the original run wrote a
-\code{delta_ofv.csv}.
+\verb{$diagnostics}, \verb{$raw} (read back from \code{raw_results.csv}), \verb{$samples},
+\verb{$n_completed}, \verb{$n_included}, \verb{$confidence_level} and \verb{$directory}.
+\verb{$delta_ofv} is populated when the original run wrote a \code{delta_ofv.csv}.
+\verb{$model}, \verb{$data} and \verb{$seed} are \emph{not} set: a finished run directory does
+not record the model path, the data path or the seed, so the printed
+header omits those lines.
 }
 \description{
 Recompute the statistics of a bootstrap run from its \code{raw_results.csv} under
