@@ -216,6 +216,19 @@
     tell it from an ordinary kappa and would take `sqrt(estimate)` for the
     between-occasion SD instead of `sqrt(estimate / W)`.
 
+- **`ferx_model_inspect()` no longer depends on the case of a declaration
+  keyword.** The engine's `theta` / `omega` / `sigma` / `kappa` declaration
+  regexes are all case-insensitive, so a model written `THETA TVCL(1.0, 0.001,
+  100.0)` fits exactly like the lowercase spelling - but the R-side reader
+  matched case-sensitively and reported *no* population parameters, no IIV and
+  no IOV for it: an entirely blank structure for a model the engine parses
+  fine.
+
+  As a guard against the next such drift, a `[parameters]` block that has
+  content but not one recognised declaration in it now warns instead of
+  silently returning an empty structure. It is keyword-agnostic, so it fires on
+  whatever the next divergence turns out to be. No bundled example triggers it.
+
 - **`ferx_simulate()` and `ferx_predict()` now accept a design template whose
   `DV` column is empty** (#286, ferx-core #957). Dosing plus sampling times with
   `DV = "."` / `NA` - the natural way to write a design, and what NONMEM's

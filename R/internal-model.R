@@ -162,11 +162,18 @@ ferx_section_headers <- function(lines) {
 .ferx_parse_structure <- function(path) {
   b <- .ferx_extract_blocks(path)
 
-  # Population (theta) parameter names from [parameters]
+  # Population (theta) parameter names from [parameters].
+  #
+  # Every declaration keyword is matched case-insensitively because the
+  # engine's declaration regexes all carry `(?i)` (model_parser.rs: theta_re,
+  # omega_re, sigma_re, kappa_re and the three block_* forms). A model written
+  # `THETA TVCL(1.0, 0.001, 100.0)` fits exactly like the lowercase spelling,
+  # but matching it case-sensitively here reported *no* thetas, no IIV and no
+  # IOV - an entirely blank structure for a model the engine parses fine.
   params      <- b[["parameters"]] %||% character(0)
-  theta_lines <- grep("^theta\\s", params, value = TRUE)
+  theta_lines <- grep("^theta\\s", params, value = TRUE, ignore.case = TRUE)
   thetas <- if (length(theta_lines) > 0L)
-    sub("^theta\\s+(\\w+).*", "\\1", theta_lines)
+    sub("^theta\\s+(\\w+).*", "\\1", theta_lines, ignore.case = TRUE)
   else
     character(0)
 
@@ -175,16 +182,16 @@ ferx_section_headers <- function(lines) {
   model_type   <- if (length(struct_lines) > 0L) .ferx_model_type(struct_lines) else NULL
 
   # IIV: omega lines
-  omega_lines <- grep("^omega\\s", params, value = TRUE)
+  omega_lines <- grep("^omega\\s", params, value = TRUE, ignore.case = TRUE)
   iiv <- if (length(omega_lines) > 0L)
-    sub("^omega\\s+(\\w+).*", "\\1", omega_lines)
+    sub("^omega\\s+(\\w+).*", "\\1", omega_lines, ignore.case = TRUE)
   else
     character(0)
 
   # IOV: kappa lines
-  kappa_lines <- grep("^kappa\\s", params, value = TRUE)
+  kappa_lines <- grep("^kappa\\s", params, value = TRUE, ignore.case = TRUE)
   iov <- if (length(kappa_lines) > 0L)
-    sub("^kappa\\s+(\\w+).*", "\\1", kappa_lines)
+    sub("^kappa\\s+(\\w+).*", "\\1", kappa_lines, ignore.case = TRUE)
   else
     character(0)
 
@@ -199,6 +206,27 @@ ferx_section_headers <- function(lines) {
     if (all(is.na(w))) character(0) else w
   } else {
     character(0)
+  }
+
+  # Safety net for the next time this parser drifts from the engine's. Every
+  # field above is a best-effort regex read of a grammar that lives in Rust,
+  # so a form the engine accepts and these patterns miss is reported as an
+  # absence rather than an error - the failure mode that let a whole
+  # `[parameters]` block read as empty (see the case-insensitivity note
+  # above). A block with content but not one recognised declaration in it is
+  # not a plausible model; say so rather than hand back a blank structure.
+  # Deliberately keyword-agnostic: it fires on whatever the next divergence
+  # turns out to be, not just on the ones already known.
+  decl_re <- "^(block_)?(theta|omega|sigma|kappa)\\s*[[:space:](]"
+  if (length(params) > 0L &&
+        !any(grepl(decl_re, params, ignore.case = TRUE))) {
+    warning(
+      "No parameter declarations recognised in the [parameters] block of '",
+      basename(path), "' (", length(params), " non-empty lines). Reporting an ",
+      "empty model structure; the engine may still parse this file. If it ",
+      "fits, this is a bug in ferx's model inspector - please report it.",
+      call. = FALSE
+    )
   }
 
   # Residual error type from [error_model]. Multi-endpoint blocks use a

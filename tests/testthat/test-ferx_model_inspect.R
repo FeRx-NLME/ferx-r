@@ -434,3 +434,89 @@ test_that("ferx_model_inspect() keeps a weight expression containing == intact",
 
   expect_equal(ferx_model_inspect(path)$iov_weights, "NARM * (FLAG == 1)")
 })
+
+# Declaration keyword case -------------------------------------------------
+# The engine's theta_re / omega_re / sigma_re / kappa_re all carry `(?i)`, so
+# an uppercase-keyword model fits exactly like the lowercase spelling. Matching
+# case-sensitively here reported an entirely blank structure for it.
+
+test_that("ferx_model_inspect() reads declarations whatever the keyword case", {
+  decls <- list(
+    lower = c("  theta TVCL(1.0, 0.001, 100.0)", "  omega ETA_CL ~ 0.09",
+              "  kappa KAPPA_CL ~ 0.01", "  sigma PROP_ERR ~ 0.01"),
+    upper = c("  THETA TVCL(1.0, 0.001, 100.0)", "  OMEGA ETA_CL ~ 0.09",
+              "  KAPPA KAPPA_CL ~ 0.01", "  SIGMA PROP_ERR ~ 0.01"),
+    mixed = c("  Theta TVCL(1.0, 0.001, 100.0)", "  Omega ETA_CL ~ 0.09",
+              "  Kappa KAPPA_CL ~ 0.01", "  Sigma PROP_ERR ~ 0.01")
+  )
+  for (nm in names(decls)) {
+    path <- write_test_model(list(
+      parameters       = decls[[nm]],
+      structural_model = "  pk one_cpt_oral(cl=1, v=10, ka=1)",
+      error_model      = "  DV ~ proportional(PROP_ERR)"
+    ))
+    result <- ferx_model_inspect(path)
+    expect_equal(result$theta_names, "TVCL", info = nm)
+    expect_equal(result$iiv, "ETA_CL", info = nm)
+    expect_equal(result$iov, "KAPPA_CL", info = nm)
+    unlink(path)
+  }
+})
+
+test_that("ferx_model_inspect() reads an uppercase kappa's uppercase WEIGHT", {
+  path <- write_test_model(list(
+    parameters    = c("  THETA TVCL(1.0, 0.001, 100.0)",
+                      "  KAPPA KAPPA_EMAX ~ 2.0 (sd) WEIGHT = NARM",
+                      "  SIGMA PROP_ERR ~ 0.01"),
+    structural_model = "  pk one_cpt_oral(cl=1, v=10, ka=1)",
+    error_model   = "  DV ~ proportional(PROP_ERR)"
+  ))
+  on.exit(unlink(path))
+
+  result <- ferx_model_inspect(path)
+  expect_equal(result$iov, "KAPPA_EMAX")
+  expect_equal(result$iov_weights, "NARM")
+})
+
+test_that("ferx_model_inspect() warns when it recognises no declaration at all", {
+  # The safety net for the next time this parser drifts from the engine's: a
+  # [parameters] block with content but nothing recognisable in it is not a
+  # plausible model, and an empty structure is the wrong thing to report
+  # silently.
+  path <- write_test_model(list(
+    parameters    = c("  thetta TVCL(1.0, 0.001, 100.0)",
+                      "  omgea ETA_CL ~ 0.09"),
+    structural_model = "  pk one_cpt_oral(cl=1, v=10, ka=1)",
+    error_model   = "  DV ~ proportional(PROP_ERR)"
+  ))
+  on.exit(unlink(path))
+
+  expect_warning(result <- ferx:::.ferx_parse_structure(path),
+                 "No parameter declarations recognised")
+  expect_equal(result$theta_names, character(0))
+  expect_equal(result$iiv, character(0))
+})
+
+test_that("ferx_model_inspect() does not warn on models it does parse", {
+  # block_* forms have never been read into $iiv / $iov, so they must still
+  # count as recognised or the net fires on a perfectly ordinary model.
+  path <- write_test_model(list(
+    parameters    = c("  theta TVCL(1.0, 0.001, 100.0)",
+                      "  block_omega(ETA_CL, ETA_V) = [0.09, 0.01, 0.04]",
+                      "  sigma PROP_ERR ~ 0.01"),
+    structural_model = "  pk one_cpt_oral(cl=1, v=10, ka=1)",
+    error_model   = "  DV ~ proportional(PROP_ERR)"
+  ))
+  on.exit(unlink(path))
+  expect_silent(ferx:::.ferx_parse_structure(path))
+
+  # A block of nothing but comments is stripped to zero lines - nothing to
+  # complain about.
+  path2 <- write_test_model(list(
+    parameters    = c("  # nothing here yet", "  # TODO"),
+    structural_model = "  pk one_cpt_oral(cl=1, v=10, ka=1)",
+    error_model   = "  DV ~ proportional(PROP_ERR)"
+  ))
+  on.exit(unlink(path2), add = TRUE)
+  expect_silent(ferx:::.ferx_parse_structure(path2))
+})
