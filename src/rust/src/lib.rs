@@ -1780,6 +1780,9 @@ fn default_fit_result(
         covariate_names: Vec::new(),
         input_columns: Vec::new(),
         covariate_table: None,
+        // ferx-core #1111 added the [covariate_model] relation echo; this
+        // scaffold ran no fit, so it echoes no relations.
+        covariate_relations: Vec::new(),
         exclusions: None,
         method_wall_times_secs: Vec::new(),
         covariance_wall_time_secs: 0.0,
@@ -3444,6 +3447,9 @@ fn ferx_rust_sir(
         covariate_names: Vec::new(),
         input_columns: Vec::new(),
         covariate_table: None,
+        // ferx-core #1111 added the [covariate_model] relation echo; the SIR
+        // path never reads it.
+        covariate_relations: Vec::new(),
         exclusions: None,
         method_wall_times_secs: Vec::new(),
         covariance_wall_time_secs: 0.0,
@@ -3813,6 +3819,9 @@ fn ferx_rust_covariance(
         covariate_names: Vec::new(),
         input_columns: Vec::new(),
         covariate_table: None,
+        // ferx-core #1111 added the [covariate_model] relation echo; the
+        // covariance path never reads it.
+        covariate_relations: Vec::new(),
         exclusions: None,
         method_wall_times_secs: Vec::new(),
         covariance_wall_time_secs: 0.0,
@@ -4086,6 +4095,10 @@ fn bootstrap_options_from_r(
         dofv,
         directory: (!directory.is_empty()).then(|| std::path::PathBuf::from(directory)),
         confidence_level,
+        // ferx-core #1143 added resume / retry_failed. The R entry points do
+        // not expose either yet, so every run from R is a fresh one.
+        resume: false,
+        retry_failed: false,
     })
 }
 
