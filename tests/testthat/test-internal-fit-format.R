@@ -565,3 +565,35 @@ test_that(".ferx_print_structure() annotates a weighted kappa in memory too", {
                fixed = TRUE)
   expect_false(any(grepl("weight =", out, fixed = TRUE)))
 })
+
+test_that("print.ferx_summary() annotates a weighted kappa like print.ferx_fit()", {
+  # The two used to build the IOV line separately, so summary() reported
+  # `IOV: KAPPA_EMAX` for the same fit print() reported as weighted. Both now
+  # go through .ferx_iov_labels().
+  ms <- list(theta_names = "TVCL", model_type = "1-cpt", iiv = "ETA_CL",
+             iov = c("KAPPA_CL", "KAPPA_EMAX"),
+             iov_weights = c(NA_character_, "NARM"),
+             residual = "proportional")
+  s <- structure(
+    list(model_structure = ms, ofv = 1, aic = 2, bic = 3,
+         n_subjects = 10L, n_obs = 100L, n_parameters = 4L, n_iterations = 5L,
+         converged = TRUE, method = "FOCEI"),
+    class = "ferx_summary"
+  )
+  out <- capture.output(print(s))
+  expect_true(any(grepl("IOV: KAPPA_CL, KAPPA_EMAX (weight = NARM)",
+                        out, fixed = TRUE)))
+
+  # And the shared helper agrees with what print.ferx_fit() renders.
+  expect_equal(.ferx_iov_labels(ms),
+               c("KAPPA_CL", "KAPPA_EMAX (weight = NARM)"))
+})
+
+test_that(".ferx_iov_labels() leaves an unweighted model's kappa names bare", {
+  expect_equal(
+    .ferx_iov_labels(list(iov = c("KAPPA_CL", "KAPPA_V"),
+                          iov_weights = character(0))),
+    c("KAPPA_CL", "KAPPA_V")
+  )
+  expect_equal(.ferx_iov_labels(list(iov = NULL)), character(0))
+})

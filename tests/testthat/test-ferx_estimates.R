@@ -60,6 +60,41 @@ test_that(".ferx_compute_estimates() builds a row per theta / omega / sigma / ka
   expect_true(any(grepl("SIGMA", tab$param)))
   expect_true(any(grepl("KAPPA", tab$param)))
 })
+test_that(".ferx_compute_estimates() carries a weighted kappa's weight expression", {
+  # Sample-size-weighted IOV (ferx-core #1031). `estimate` on a weighted kappa
+  # row is the *unweighted* gamma^2; without the weight beside it, a reader of
+  # this table would take sqrt(estimate) for the between-occasion SD.
+  fit <- make_fake_fit(
+    theta       = c(TVCL = 1.0),
+    omega       = 0.09,
+    sigma       = 0.05,
+    sigma_types = "proportional",
+    omega_iov   = diag(c(0.04, 1.84)),
+    kappa_names = c("KAPPA_CL", "KAPPA_EMAX"),
+    kappa_weights = c(KAPPA_CL = NA_character_, KAPPA_EMAX = "NARM")
+  )
+  tab <- .compute_estimates(fit)
+  expect_true("weight" %in% names(tab))
+  expect_equal(tab$weight[tab$param == "KAPPA_EMAX"], "NARM")
+  # Unweighted kappa, and every non-kappa row, stay NA.
+  expect_true(is.na(tab$weight[tab$param == "KAPPA_CL"]))
+  expect_true(all(is.na(tab$weight[!grepl("^KAPPA", tab$param)])))
+})
+
+test_that(".ferx_compute_estimates() leaves weight NA for an unweighted IOV model", {
+  fit <- make_fake_fit(
+    theta       = c(TVCL = 1.0),
+    omega       = 0.09,
+    sigma       = 0.05,
+    sigma_types = "proportional",
+    omega_iov   = 0.04,
+    kappa_names = "KAPPA_CL"
+  )
+  tab <- .compute_estimates(fit)
+  expect_true("weight" %in% names(tab))
+  expect_true(all(is.na(tab$weight)))
+})
+
 test_that(".ferx_est_row back-transforms logit parameters", {
   row <- .est_row("LOGIT_P", estimate = 0.0, se = 0.2, transform = "logit",
                   init_as_sd = FALSE)

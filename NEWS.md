@@ -199,6 +199,23 @@
   Models with no weighted kappa are unaffected in every one of those places:
   both fields are `NULL` and the `.fitrx` bundle is byte-identical to before.
 
+  Three follow-ups closed the gaps where the weight was still invisible:
+
+  - `ferx_model_inspect()` on a **model file** now recognises the modifier by
+    the same rules the engine's parser uses (case-insensitive, whole-word, at
+    bracket depth 0, on a single `=`). A model written `WEIGHT = NARM` fits
+    with the weight applied but was reported pre-fit as unweighted, and a
+    weight expression containing a comparison (`weight = NARM * (FLAG == 1)`)
+    was truncated to `1)`.
+  - `summary()` annotates the weighted kappa on its `IOV:` line, as `print()`
+    and `ferx_model_inspect()` already did. All three now share one helper, so
+    they cannot disagree about whether a model is weighted.
+  - `fit$estimates` gains a `weight` column carrying the weight expression on a
+    weighted kappa row and `NA` everywhere else. The `estimate` on such a row
+    is the unweighted `gamma^2`, so a reader of the table alone had no way to
+    tell it from an ordinary kappa and would take `sqrt(estimate)` for the
+    between-occasion SD instead of `sqrt(estimate / W)`.
+
 - **`ferx_simulate()` and `ferx_predict()` now accept a design template whose
   `DV` column is empty** (#286, ferx-core #957). Dosing plus sampling times with
   `DV = "."` / `NA` - the natural way to write a design, and what NONMEM's

@@ -99,6 +99,62 @@ ferx_section_headers <- function(lines) {
   .ferx_fmt_pk_name(fn)
 }
 
+# Peel an optional trailing `weight = <expr>` modifier off a `[parameters]`
+# kappa declaration (ferx-core #1031), returning the weight expression or
+# NA_character_ when the line carries none.
+#
+# This deliberately mirrors ferx-core's `split_weight_modifier()`
+# (parser/model_parser.rs) rather than approximating it with a regex, because
+# the two are read side by side: this one feeds ferx_model_inspect() pre-fit
+# while the engine's feeds model_structure post-fit, and any divergence shows
+# up as inspect() calling a weighted model unweighted. The engine's matching
+# rules, all reproduced here:
+#   * case-insensitive, so `WEIGHT =` is the modifier;
+#   * whole word, so `WEIGHTED` and `X_weight` are not;
+#   * only at bracket depth 0, so a covariate named `weight` inside a
+#     magnitude expression is not mistaken for the modifier;
+#   * followed by a single `=`, so a `==` comparison is skipped;
+#   * first match wins.
+# The engine rejects an empty right-hand side and a modifier with no statement
+# in front of it; here both report "no weight", since such a file fails to
+# parse at fit time anyway and inspect() must not invent a label for it.
+.ferx_split_weight_modifier <- function(line) {
+  none <- NA_character_
+  ch <- strsplit(line, "", fixed = TRUE)[[1L]]
+  n  <- length(ch)
+  kw <- c("w", "e", "i", "g", "h", "t")
+  k  <- length(kw)
+  if (n < k) return(none)
+  is_ident <- function(c) grepl("^[A-Za-z0-9_]$", c)
+  depth <- 0L
+  for (i in seq_len(n)) {
+    c_i <- ch[i]
+    if (c_i == "(" || c_i == "[") {
+      depth <- depth + 1L
+      next
+    }
+    if (c_i == ")" || c_i == "]") {
+      depth <- depth - 1L
+      next
+    }
+    if (depth != 0L || i + k - 1L > n) next
+    if (!identical(tolower(ch[i:(i + k - 1L)]), kw)) next
+    # Whole-word match on both sides.
+    if (i > 1L && is_ident(ch[i - 1L])) next
+    j <- i + k
+    if (j <= n && is_ident(ch[j])) next
+    # Skip whitespace, then require a single `=` (not `==`).
+    while (j <= n && grepl("^[ \t]$", ch[j])) j <- j + 1L
+    if (j > n || ch[j] != "=") next
+    if (j + 1L <= n && ch[j + 1L] == "=") next
+    expr <- trimws(paste(ch[seq_len(n) > j], collapse = ""))
+    stmt <- trimws(paste(ch[seq_len(i - 1L)], collapse = ""))
+    if (!nzchar(expr) || !nzchar(stmt)) return(none)
+    return(expr)
+  }
+  none
+}
+
 # Parse a .ferx file and return a named list describing model structure.
 # Fields: theta_names (pop param names), model_type (label or NULL),
 #         iiv, iov, residual.
@@ -138,11 +194,8 @@ ferx_section_headers <- function(lines) {
   # engine attaches to model_structure post-fit. Left as character(0) when no
   # kappa is weighted, so an ordinary IOV model's structure list is unchanged.
   iov_weights <- if (length(kappa_lines) > 0L) {
-    w <- ifelse(
-      grepl("\\bweight\\s*=", kappa_lines),
-      trimws(sub(".*\\bweight\\s*=\\s*", "", kappa_lines)),
-      NA_character_
-    )
+    w <- vapply(kappa_lines, .ferx_split_weight_modifier, character(1L),
+                USE.NAMES = FALSE)
     if (all(is.na(w))) character(0) else w
   } else {
     character(0)
