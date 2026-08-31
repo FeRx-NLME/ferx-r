@@ -29,6 +29,7 @@ nn = ["ferx-core/nn"]
 [dependencies]
 extendr-api = "0.9"
 ferx-core = { git = "https://github.com/FeRx-NLME/ferx-core", branch = "main", default-features = false }
+ferx-tools = { git = "https://github.com/FeRx-NLME/ferx-core", branch = "main" }
 nalgebra = "0.35"
 
 [profile.release]

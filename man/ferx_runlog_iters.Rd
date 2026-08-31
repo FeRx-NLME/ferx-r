@@ -41,6 +41,7 @@ Other diagnostics:
 \code{\link[=ferx_cov_screen]{ferx_cov_screen()}},
 \code{\link[=ferx_get_warnings]{ferx_get_warnings()}},
 \code{\link[=ferx_trace]{ferx_trace()}},
+\code{\link[=plot.ferx_bootstrap]{plot.ferx_bootstrap()}},
 \code{\link[=plot.ferx_fit]{plot.ferx_fit()}},
 \code{\link[=summary.ferx_fit]{summary.ferx_fit()}}
 }

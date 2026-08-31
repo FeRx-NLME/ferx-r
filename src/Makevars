@@ -98,6 +98,14 @@ $(SHLIB): $(STATLIB)
 # when the sibling checkout is absent (e.g. fresh installs).
 LOCAL_FERX_CORE := $(wildcard ../../ferx-core/Cargo.toml)
 
+# `ferx-tools` (the bootstrap, and the rest of the model-development tooling)
+# is a second crate in the *same* ferx-core repository, so it needs its own
+# [patch] entry: cargo patches per package name. With only the ferx-core line a
+# local build would take ferx-core from the sibling checkout and ferx-tools
+# from GitHub main - two revisions of a workspace whose halves move together,
+# and no error to say so.
+LOCAL_FERX_TOOLS := $(wildcard ../../ferx-core/crates/ferx-tools/Cargo.toml)
+
 $(STATLIB):
 	@# Ensure .cargo/config.toml and rust-toolchain.toml exist (R CMD INSTALL
 	@# strips hidden directories and these files are needed by cargo).
@@ -112,7 +120,12 @@ ifneq ($(LOCAL_FERX_CORE),)
 	@# root.
 	@echo '[patch."https://github.com/FeRx-NLME/ferx-core"]' >> rust/.cargo/config.toml
 	@echo 'ferx-core = { path = "../../../ferx-core" }' >> rust/.cargo/config.toml
-	@echo "ferx: using local ../ferx-core checkout ([patch] override)"
+ifneq ($(LOCAL_FERX_TOOLS),)
+	@echo 'ferx-tools = { path = "../../../ferx-core/crates/ferx-tools" }' >> rust/.cargo/config.toml
+	@echo "ferx: using local ../ferx-core checkout ([patch] override: ferx-core + ferx-tools)"
+else
+	@echo "ferx: WARNING ../ferx-core has no crates/ferx-tools - ferx-core comes from your checkout but ferx-tools from GitHub main"
+endif
 endif
 	@echo '[build]' >> rust/.cargo/config.toml
 	@echo '[toolchain]' > rust/rust-toolchain.toml

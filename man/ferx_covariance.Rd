@@ -92,6 +92,8 @@ fit_rsr$se_theta
 \code{\link[=ferx_sir]{ferx_sir()}} for the SIR uncertainty step.
 
 Other fitting:
+\code{\link[=ferx_bootstrap]{ferx_bootstrap()}},
+\code{\link[=ferx_bootstrap_summarize]{ferx_bootstrap_summarize()}},
 \code{\link[=ferx_check_init]{ferx_check_init()}},
 \code{\link[=ferx_collect]{ferx_collect()}},
 \code{\link[=ferx_fit]{ferx_fit()}},

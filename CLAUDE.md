@@ -12,14 +12,19 @@ When working on a feature branch or any branch other than `main`, always use `En
 
 ## ferx-core dependency: do NOT edit `src/rust/Cargo.toml`
 
-`src/rust/Cargo.toml` declares `ferx-core` as a **git dependency** pinned to `main`. Don't change it to a path dep when working locally — the local-vs-GitHub swap is already handled by `src/rust/.cargo/config.toml`:
+`src/rust/Cargo.toml` declares **two** git dependencies pinned to `main`, both from the ferx-core repository: `ferx-core` (the engine) and `ferx-tools` (model-development tooling built on it — the bootstrap, and whatever follows). Don't change either to a path dep when working locally — the local-vs-GitHub swap is handled by `src/rust/.cargo/config.toml`:
 
 ```toml
 [patch."https://github.com/FeRx-NLME/ferx-core"]
 ferx-core = { path = "../../../ferx-core" }
+ferx-tools = { path = "../../../ferx-core/crates/ferx-tools" }
 ```
 
-When the sibling `../ferx-core` checkout exists, cargo automatically uses it (verify with `cd src/rust && cargo tree -p ferx-core` — it should show the local path). When the sibling doesn't exist (e.g. CI without a paired checkout), cargo falls back to the GitHub source.
+**That file is generated, not committed** — `src/rust/.cargo/` is gitignored and `src/Makevars` rewrites the file from scratch on every build (`R CMD INSTALL`, `pkgload::load_all(recompile = TRUE)`, ...). So a `[patch]` line you add by hand survives only until the next build: the change belongs in `src/Makevars`.
+
+Cargo patches **per package name**: an entry for `ferx-core` alone leaves `ferx-tools` resolving to GitHub `main` while `ferx-core` comes from your working tree — two revisions of a workspace whose halves move together, with no error to say so. Both entries, or neither.
+
+When the sibling `../ferx-core` checkout exists, cargo uses it (verify with `cd src/rust && cargo tree | grep 'ferx-'` — **both** crates should show a local path). When the sibling doesn't exist (e.g. CI without a paired checkout), cargo falls back to the GitHub source.
 
 This means: develop against a feature branch in `../ferx-core` freely, but never commit Cargo.toml changes that flip the dep to a path. Reviewers and CI run against the GitHub `main`, so a path dep in Cargo.toml would break their builds.
 
@@ -27,7 +32,7 @@ This means: develop against a feature branch in `../ferx-core` freely, but never
 
 Although `Cargo.toml` tracks `branch = "main"`, **CI builds from the commit pinned in `src/rust/Cargo.lock`** — *not* the latest `main`. The patch above only redirects local builds (which have the sibling), so a new ferx-core commit is invisible to CI until the lock is bumped. Symptom: a ferx-r PR that uses a freshly-`pub`'d ferx-core API fails CI with `error[E0603]: ... is private`, because the lock still points at a commit predating the change.
 
-To bump: run `tools/update-ferx-core-lock.sh` from the repo root (it advances the pin to ferx-core `main` HEAD and verifies the `source = "git+..."` line survives), then commit `src/rust/Cargo.lock`. **Do not** run a bare `cargo update -p ferx-core` with the sibling present — the `[patch]` makes cargo strip the git pin and write a local path, silently unpinning ferx-core for CI and everyone else. The `R-CMD-check` workflow has a guard that fails if the lock loses its git source.
+To bump: run `tools/update-ferx-core-lock.sh` from the repo root (it advances both pins to ferx-core `main` HEAD and verifies each `source = "git+..."` line survives, on one shared revision), then commit `src/rust/Cargo.lock`. `ferx-core` and `ferx-tools` come from the same repo and the same rev, so this is one bump and two lock entries — never a second pin to track. **Do not** run a bare `cargo update -p ferx-core` with the sibling present — the `[patch]` makes cargo strip the git pin and write a local path, silently unpinning it for CI and everyone else. The `R-CMD-check` workflow has a guard that fails if either crate loses its git source, or if the two land on different revisions.
 
 ## Build & Install
 

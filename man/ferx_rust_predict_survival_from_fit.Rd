@@ -11,7 +11,9 @@ ferx_rust_predict_survival_from_fit(
   theta,
   omega_flat,
   omega_dim,
-  sigma
+  sigma,
+  omega_iov_flat,
+  omega_iov_dim
 )
 }
 \description{

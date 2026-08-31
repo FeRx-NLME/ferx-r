@@ -30,7 +30,7 @@
 #'
 #' @keywords internal
 #' @useDynLib ferx, .registration = TRUE
-#' @importFrom graphics abline mtext par plot.new
-#' @importFrom stats cor.test shapiro.test setNames
+#' @importFrom graphics abline hist lines mtext par plot.new title
+#' @importFrom stats cor.test dchisq shapiro.test setNames
 #' @importFrom utils read.csv
 "_PACKAGE"

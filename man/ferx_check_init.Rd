@@ -62,6 +62,8 @@ ex$data |>
 }
 \seealso{
 Other fitting:
+\code{\link[=ferx_bootstrap]{ferx_bootstrap()}},
+\code{\link[=ferx_bootstrap_summarize]{ferx_bootstrap_summarize()}},
 \code{\link[=ferx_collect]{ferx_collect()}},
 \code{\link[=ferx_covariance]{ferx_covariance()}},
 \code{\link[=ferx_fit]{ferx_fit()}},

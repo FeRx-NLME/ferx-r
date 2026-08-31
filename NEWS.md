@@ -155,6 +155,38 @@
 
 ## New features
 
+- **`ferx_bootstrap()`: the non-parametric case bootstrap, at PsN's
+  `bootstrap` feature parity** ([ferx-core #1144](https://github.com/FeRx-NLME/ferx-core/issues/1144),
+  engine side ferx-core #1140). Resample whole subjects with replacement, refit
+  the model to each replicate, and get bias, bootstrap standard errors and both
+  intervals - the percentile one (`ci_lower` / `ci_upper`) and the
+  normal-approximation one built from the bootstrap SE (`ci_lower_normal` /
+  `ci_upper_normal`) - side by side, so the disagreement between them is
+  visible. Unlike the covariance step it survives a failed or non-positive-
+  definite `R^-1`, and it does not assume a symmetric interval.
+
+  ```r
+  bs <- ferx_bootstrap(ex$model, ex$data, samples = 200, seed = 12345,
+                       threads = 8)
+  bs$parameters   # one row per parameter
+  bs$raw          # one row per fit, the original dataset first
+  bs$diagnostics  # run counts, exclusion tallies, diagnostic means
+  plot(bs)        # histogram per parameter (+ the dofv panel when dofv = TRUE)
+  ```
+
+  Supports stratified resampling (`stratify_on`), PsN's per-stratum
+  `-sample_size` spelled as an R named vector
+  (`sample_size = c("1001" = 12, "1002" = 24)`), `dofv`, `keep_covariance`, and
+  the four exclusion filters. **`directory` defaults to `NULL`**, where the CLI
+  writes `{model}-bootstrap/`: an R user has the data frames in hand and rarely
+  wants eight CSVs appearing in the working directory. Set it to get the
+  artefacts - and to be able to call `ferx_bootstrap_summarize()` later.
+
+- **`ferx_bootstrap_summarize()`** re-computes a finished run's statistics from
+  its `raw_results.csv` under different exclusion criteria - PsN's
+  `-summarize`. Refits nothing: it is the recovery path for a run where too
+  many replicates were filtered out to resolve a percentile interval.
+
 - **`ferx_simulate()` and `ferx_predict()` now accept a design template whose
   `DV` column is empty** (#286, ferx-core #957). Dosing plus sampling times with
   `DV = "."` / `NA` - the natural way to write a design, and what NONMEM's
@@ -324,6 +356,15 @@
   yet, so it shows without the guidance block other categories get.
 
 ## Internal
+
+- **`ferx-tools` is now a second git dependency**, from the same ferx-core
+  repository and the same revision as `ferx-core` - one extra `Cargo.lock`
+  entry, no second pin to track. `src/Makevars` writes the matching `[patch]`
+  line for it, so a local `../ferx-core` checkout patches *both* crates: with
+  only the `ferx-core` entry a local build silently mixed a working-tree
+  `ferx-core` with a GitHub-`main` `ferx-tools`. The `R-CMD-check` pin guard
+  and `tools/update-ferx-core-lock.sh` now check both crates and that they sit
+  on one revision.
 
 - Bumped the pinned ferx-core commit and updated the extendr glue for the
   `mixture` / `pmix` / `mixest` fields added by ferx-core #977/#985 (#291).
