@@ -40,10 +40,10 @@ The input \code{fit}, augmented with \code{sir_ess}, \code{sir_ci_theta},
 \code{sir_ci_omega}, \code{sir_ci_sigma}, and (when requested) \code{sir_resamples} /
 \code{sir_resamples_n} / \code{sir_resamples_dim}. Any warnings the SIR step emitted
 are appended to \code{fit$warnings} and to \code{fit$warnings_structured} under the
-\code{sir} category -- in particular the proposal diagnostics: a covariance that
+\code{sir} category - in particular the proposal diagnostics: a covariance that
 is rank-deficient beyond its \code{FIX}ed parameters, or a proposal direction
 shrunk to keep draws inside the parameter bounds. Both name the parameters
-involved and mean the same thing -- those directions are not identified by
+involved and mean the same thing - those directions are not identified by
 the data, and their SIR intervals understate the uncertainty. See
 \code{\link[=ferx_get_warnings]{ferx_get_warnings()}}.
 }
@@ -117,6 +117,8 @@ head(sims)
 retained resamples.
 
 Other fitting:
+\code{\link[=ferx_bootstrap]{ferx_bootstrap()}},
+\code{\link[=ferx_bootstrap_summarize]{ferx_bootstrap_summarize()}},
 \code{\link[=ferx_check_init]{ferx_check_init()}},
 \code{\link[=ferx_collect]{ferx_collect()}},
 \code{\link[=ferx_covariance]{ferx_covariance()}},

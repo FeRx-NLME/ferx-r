@@ -121,4 +121,16 @@ ferx_rust_prepare_frem <- function(model_path, data_path, covariates, categorica
   .Call("wrap__ferx_rust_prepare_frem", model_path, data_path, as.character(covariates), as.character(categorical_covariates), output_model_path, output_data_path, as.character(fit_theta_names), fit_theta_values, as.character(fit_eta_names), fit_omega_flat, as.integer(fit_omega_dim))
 }
 
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_bootstrap <- function(model_path, data_path, samples, seed, sample_size_keys, sample_size_values, stratify_on, update_inits, run_base_model, keep_covariance, threads, skip_minimization_terminated, skip_estimate_near_boundary, skip_covariance_step_terminated, skip_with_covstep_warnings, dofv, directory, confidence_level, verbose) {
+  .Call("wrap__ferx_rust_bootstrap", model_path, data_path, as.integer(samples), seed, as.character(sample_size_keys), sample_size_values, stratify_on, update_inits, run_base_model, keep_covariance, as.integer(threads), skip_minimization_terminated, skip_estimate_near_boundary, skip_covariance_step_terminated, skip_with_covstep_warnings, dofv, directory, confidence_level, verbose)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_bootstrap_summarize <- function(directory, skip_minimization_terminated, skip_estimate_near_boundary, skip_covariance_step_terminated, skip_with_covstep_warnings, confidence_level) {
+  .Call("wrap__ferx_rust_bootstrap_summarize", directory, skip_minimization_terminated, skip_estimate_near_boundary, skip_covariance_step_terminated, skip_with_covstep_warnings, confidence_level)
+}
+
 # nolint end

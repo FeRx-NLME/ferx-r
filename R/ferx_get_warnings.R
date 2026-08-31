@@ -175,6 +175,27 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
       sde_hint
     ))
   }
+  # Two emitters share this code and disagree about severity: the `auto` guard's
+  # escalation note is informational - the stiff method coped - while the
+  # post-fit statistics pass is not. ferx-core prefixes its own token to each
+  # message and its classifier matches on that, so match the same thing rather
+  # than on prose that may be reworded.
+  if (category == "ode_solver") {
+    if (grepl("W_ODE_SOLVER_ESCALATION_NOTE", message, fixed = TRUE)) {
+      return(paste0(
+        "ode_method = \"auto\" escalated to a stiff solver and the stiff ",
+        "method coped (informational). Set ode_method explicitly to skip the ",
+        "non-stiff attempt."
+      ))
+    }
+    return(paste0(
+      "Integration under the final estimates was not clean: steps clamped at ",
+      "the minimum step size, a stiff escalation the auto guard discarded, or ",
+      "a segment cut short by ode_stiff_abort_after. The optimizer may still ",
+      "have converged. Set ode_method explicitly, or adjust ode_abstol / ",
+      "ode_reltol / ode_max_steps."
+    ))
+  }
   if (.ferx_is_covariance_warning(category, message)) {
     # Omega non-PD -- checked before general non-PD because omega messages also
     # contain "not positive definite" and "eigenvalue".
@@ -306,6 +327,8 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
     convergence        = "Optimizer did not reach convergence. Try different initial values, method = c(\"saem\", \"focei\"), or settings = list(n_starts = 4L).",
     condition_number   = "Parameters are correlated/ill-scaled. Consider fixing or removing a parameter, or reparameterising.",
     optimizer_health   = "Optimizer struggled (trust region / Hessian). Inspect the trace and consider better starting values.",
+    vi_bad_basin       = "VI's final ELBO check found that the flat objective is a bad basin, not a usable variational approximation. Refit from different initial values, raise settings = list(n_starts = 4L), or use method = \"focei\".",
+    parameter_at_runaway_guard = "A coordinate is pinned to an internal safety limit (an implicit theta cap, or an omega/sigma guard), so this is not an interior optimum. Give the parameter explicit bounds, fix it, or remove the term it belongs to.",
     eta_normality      = "ETA distribution may be non-normal. High shrinkage or sparse data can cause this; prefer QQ-plots for diagnosis.",
     bloq_method        = "LOQ censoring note. Set method = \"focei\" explicitly to silence, or review the M3 setup.",
     sir                = .ferx_sir_guidance(message),

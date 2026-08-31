@@ -1661,6 +1661,13 @@ fn default_fit_result(
         // ferx-core main added a checkpoint-restore flag; a defaulted FitResult is
         // never a restored one.
         restored_from_checkpoint: false,
+        // ferx-core main grew `residual_correlations` and `vi` after the rev
+        // this branch originally pinned. `residual_correlations` is a property
+        // of the compiled model, so it is taken from there; this scaffold
+        // carries no VI run. The two weighted-kappa fields it also grew
+        // (#1031) are set below, beside `kappa_init_as_sd`.
+        residual_correlations: model.residual_correlations.clone(),
+        vi: None,
         method: EstimationMethod::FoceI,
         method_chain: vec![EstimationMethod::FoceI],
         bayes: None,
@@ -3305,6 +3312,13 @@ fn ferx_rust_sir(
     let fit = FitResult {
         // ferx-core main added a checkpoint-restore flag; the SIR path never reads it.
         restored_from_checkpoint: false,
+        // ferx-core main grew `residual_correlations` and `vi` after the rev
+        // this branch originally pinned. `residual_correlations` is a property
+        // of the compiled model, so it is taken from there; this scaffold
+        // carries no VI run. The two weighted-kappa fields it also grew
+        // (#1031) are set below, beside `kappa_init_as_sd`.
+        residual_correlations: model.residual_correlations.clone(),
+        vi: None,
         method: if interaction {
             EstimationMethod::FoceI
         } else {
@@ -3667,6 +3681,13 @@ fn ferx_rust_covariance(
     let fit = FitResult {
         // ferx-core main added a checkpoint-restore flag; the covariance path never reads it.
         restored_from_checkpoint: false,
+        // ferx-core main grew `residual_correlations` and `vi` after the rev
+        // this branch originally pinned. `residual_correlations` is a property
+        // of the compiled model, so it is taken from there; this scaffold
+        // carries no VI run. The two weighted-kappa fields it also grew
+        // (#1031) are set below, beside `kappa_init_as_sd`.
+        residual_correlations: model.residual_correlations.clone(),
+        vi: None,
         method: if interaction {
             EstimationMethod::FoceI
         } else {
@@ -3964,6 +3985,477 @@ fn ferx_rust_prepare_frem(
     )
 }
 
+// ---------------------------------------------------------------------------
+//  Bootstrap (ferx-tools)
+// ---------------------------------------------------------------------------
+//
+// The non-parametric case bootstrap lives in `ferx-tools`, the sibling crate of
+// `ferx-core` in the same workspace (ferx-core #1114 / #1140). This glue is
+// deliberately thin: the percentile estimator, the exclusion filters, the
+// parameter naming and PsN's `-sample_size` syntax are all the tool's, so the R
+// side neither re-derives nor re-parses any of them.
+
+use ferx_tools::bootstrap::{
+    output as bootstrap_output, resummarize, run_bootstrap, BootstrapOptions, BootstrapResult,
+    BootstrapSummary, SampleSize,
+};
+
+/// Turn the `(names, values)` pair the R wrapper sends into a [`SampleSize`].
+///
+/// R has no natural spelling for PsN's `1001=>12,1002=>24`, so `sample_size` is
+/// an R named numeric vector on that side. The string is assembled here and
+/// handed to `SampleSize::parse`, so the tool keeps the one parser (#1144).
+///
+/// * both empty            -> `SampleSize::Original`
+/// * one unnamed value     -> `SampleSize::Total`
+/// * names present         -> `SampleSize::PerStratum`
+fn sample_size_from_r(keys: &[String], values: &[f64]) -> std::result::Result<SampleSize, String> {
+    if values.is_empty() {
+        return Ok(SampleSize::Original);
+    }
+    // 0 is not merely degenerate: it reaches the engine as `SampleSize::Total(0)`
+    // and every replicate then draws no subjects, surfacing as a fit failure
+    // rather than as the argument error it is.
+    let as_count = |v: f64| -> std::result::Result<usize, String> {
+        if !v.is_finite() || v < 1.0 || v.fract() != 0.0 {
+            return Err(format!(
+                "sample_size must be whole numbers >= 1, got {v}"
+            ));
+        }
+        Ok(v as usize)
+    };
+    if keys.is_empty() {
+        if values.len() != 1 {
+            return Err(
+                "sample_size: an unnamed vector must be a single number; use a named vector \
+                 (c(`1001` = 12, `1002` = 24)) for per-stratum counts"
+                    .to_string(),
+            );
+        }
+        return SampleSize::parse(&as_count(values[0])?.to_string());
+    }
+    if keys.len() != values.len() {
+        return Err("sample_size: every element must be named, or none".to_string());
+    }
+    let spec = keys
+        .iter()
+        .zip(values.iter())
+        .map(|(k, v)| Ok(format!("{}=>{}", k.trim(), as_count(*v)?)))
+        .collect::<std::result::Result<Vec<_>, String>>()?
+        .join(",");
+    SampleSize::parse(&spec)
+}
+
+/// Assemble the options both entry points share. `directory` and `stratify_on`
+/// use `""` for "unset" because extendr has no `Option<&str>`.
+#[allow(clippy::too_many_arguments)]
+fn bootstrap_options_from_r(
+    samples: i32,
+    seed: f64,
+    sample_size_keys: Vec<String>,
+    sample_size_values: Vec<f64>,
+    stratify_on: &str,
+    update_inits: bool,
+    run_base_model: bool,
+    keep_covariance: bool,
+    threads: i32,
+    skip_minimization_terminated: bool,
+    skip_estimate_near_boundary: bool,
+    skip_covariance_step_terminated: bool,
+    skip_with_covstep_warnings: bool,
+    dofv: bool,
+    directory: &str,
+    confidence_level: f64,
+) -> std::result::Result<BootstrapOptions, String> {
+    if !(seed.is_finite() && seed >= 0.0) {
+        return Err(format!("seed must be a non-negative whole number, got {seed}"));
+    }
+    Ok(BootstrapOptions {
+        samples: samples.max(0) as usize,
+        seed: seed as u64,
+        sample_size: sample_size_from_r(&sample_size_keys, &sample_size_values)?,
+        stratify_on: (!stratify_on.is_empty()).then(|| stratify_on.to_string()),
+        update_inits,
+        run_base_model,
+        keep_covariance,
+        threads: (threads > 0).then(|| threads as usize),
+        skip_minimization_terminated,
+        skip_estimate_near_boundary,
+        skip_covariance_step_terminated,
+        skip_with_covstep_warnings,
+        dofv,
+        directory: (!directory.is_empty()).then(|| std::path::PathBuf::from(directory)),
+        confidence_level,
+    })
+}
+
+/// `bootstrap_results.csv` as a data frame: one row per parameter.
+///
+/// Both intervals are carried side by side, as `ParameterSummary` reports them
+/// - the percentile interval is the bootstrap's own, `*_normal` is the
+/// normal-approximation one built from the bootstrap standard error, and their
+/// disagreement is the point.
+fn bootstrap_parameters_df(summary: &BootstrapSummary) -> Robj {
+    let n = summary.parameters.len();
+    let names: Vec<String> = summary.parameters.iter().map(|p| p.name.clone()).collect();
+    let opt_col = |f: &dyn Fn(&ferx_tools::bootstrap::ParameterSummary) -> Option<f64>| -> Robj {
+        let col: Doubles = summary
+            .parameters
+            .iter()
+            .map(|p| match f(p) {
+                Some(v) if !v.is_nan() => Rfloat::from(v),
+                _ => Rfloat::na(),
+            })
+            .collect();
+        col.into()
+    };
+    finish_df(
+        vec![
+            ("parameter", names.into()),
+            ("original", opt_col(&|p| p.original)),
+            ("mean", opt_col(&|p| Some(p.mean))),
+            ("bias", opt_col(&|p| p.bias)),
+            ("standard_error", opt_col(&|p| Some(p.standard_error))),
+            ("median", opt_col(&|p| Some(p.median))),
+            ("ci_lower", opt_col(&|p| p.ci_percentile.map(|(lo, _)| lo))),
+            ("ci_upper", opt_col(&|p| p.ci_percentile.map(|(_, hi)| hi))),
+            (
+                "ci_lower_normal",
+                opt_col(&|p| p.ci_standard_error.map(|(lo, _)| lo)),
+            ),
+            (
+                "ci_upper_normal",
+                opt_col(&|p| p.ci_standard_error.map(|(_, hi)| hi)),
+            ),
+        ],
+        n,
+    )
+}
+
+/// `raw_results.csv` as a data frame: one row per fit, the original dataset
+/// first (`sample = 0`).
+///
+/// This is what makes an R-side re-summarisation or a custom filter possible,
+/// so it carries the termination diagnostics the exclusion filters read - not
+/// just the estimates.
+fn bootstrap_raw_df(result: &BootstrapResult, options: &BootstrapOptions) -> Robj {
+    let rows: Vec<&ferx_tools::bootstrap::ReplicateResult> =
+        result.original.iter().chain(result.replicates.iter()).collect();
+    let n = rows.len();
+    let n_params = result.parameter_names.len();
+
+    let num_col = |vals: Vec<Option<f64>>| -> Robj {
+        let col: Doubles = vals
+            .into_iter()
+            .map(|v| match v {
+                Some(v) if !v.is_nan() => Rfloat::from(v),
+                _ => Rfloat::na(),
+            })
+            .collect();
+        col.into()
+    };
+
+    // Column names are owned here so `finish_df`'s `&str` keys stay valid.
+    let se_names: Vec<String> = result
+        .parameter_names
+        .iter()
+        .map(|n| format!("se_{n}"))
+        .collect();
+
+    let mut pairs: Vec<(&str, Robj)> = vec![
+        (
+            "sample",
+            rows.iter().map(|r| r.index as i32).collect::<Vec<i32>>().into(),
+        ),
+        (
+            "minimization_successful",
+            rows.iter().map(|r| r.converged).collect::<Vec<bool>>().into(),
+        ),
+        (
+            "estimate_near_boundary",
+            rows.iter()
+                .map(|r| r.estimate_near_boundary)
+                .collect::<Vec<bool>>()
+                .into(),
+        ),
+        (
+            "covariance_step_successful",
+            rows.iter()
+                .map(|r| r.covariance_step_successful)
+                .collect::<Vec<bool>>()
+                .into(),
+        ),
+        (
+            "covariance_step_warnings",
+            rows.iter()
+                .map(|r| r.covariance_step_warnings)
+                .collect::<Vec<bool>>()
+                .into(),
+        ),
+        ("ofv", num_col(rows.iter().map(|r| Some(r.ofv)).collect())),
+        (
+            "seconds",
+            num_col(rows.iter().map(|r| Some(r.seconds)).collect()),
+        ),
+    ];
+    for j in 0..n_params {
+        pairs.push((
+            result.parameter_names[j].as_str(),
+            num_col(rows.iter().map(|r| r.estimates.get(j).copied()).collect()),
+        ));
+    }
+    if options.keep_covariance {
+        for j in 0..n_params {
+            pairs.push((
+                se_names[j].as_str(),
+                num_col(
+                    rows.iter()
+                        .map(|r| {
+                            r.standard_errors
+                                .as_ref()
+                                .and_then(|s| s.get(j).copied())
+                                .flatten()
+                        })
+                        .collect(),
+                ),
+            ));
+        }
+    }
+    if options.dofv {
+        pairs.push((
+            "delta_ofv",
+            num_col(rows.iter().map(|r| r.delta_ofv).collect()),
+        ));
+    }
+    // Empty string for "no error", as in `raw_results.csv`; the R wrapper turns
+    // it into `NA_character_`.
+    pairs.push((
+        "error",
+        rows.iter()
+            .map(|r| r.error.clone().unwrap_or_default())
+            .collect::<Vec<String>>()
+            .into(),
+    ));
+    finish_df(pairs, n)
+}
+
+/// `bootstrap_diagnostics.csv` as a data frame: the run counts, the exclusion
+/// tallies (`excluded: <reason>`) and PsN's diagnostic means (`mean: <name>`),
+/// in the file's own order.
+fn bootstrap_diagnostics_df(
+    samples_requested: usize,
+    chi_square_df: usize,
+    summary: &BootstrapSummary,
+) -> Robj {
+    let mut stat: Vec<String> = vec![
+        "samples_requested".to_string(),
+        "samples_completed".to_string(),
+        "samples_included".to_string(),
+        "chi_square_df".to_string(),
+    ];
+    let mut value: Vec<f64> = vec![
+        samples_requested as f64,
+        summary.n_completed as f64,
+        summary.n_included as f64,
+        chi_square_df as f64,
+    ];
+    for (reason, n) in &summary.excluded_by {
+        stat.push(format!("excluded: {reason}"));
+        value.push(*n as f64);
+    }
+    for (name, v) in &summary.diagnostic_means {
+        stat.push(format!("mean: {name}"));
+        value.push(*v);
+    }
+    let n = stat.len();
+    finish_df(vec![("statistic", stat.into()), ("value", value.into())], n)
+}
+
+/// Δofv per replicate, or `NULL` when `dofv = FALSE`.
+fn bootstrap_delta_ofv_df(result: &BootstrapResult, options: &BootstrapOptions) -> Robj {
+    if !options.dofv {
+        return ().into();
+    }
+    let n = result.replicates.len();
+    let sample: Vec<i32> = result.replicates.iter().map(|r| r.index as i32).collect();
+    let delta: Doubles = result
+        .replicates
+        .iter()
+        .map(|r| match r.delta_ofv {
+            Some(v) if !v.is_nan() => Rfloat::from(v),
+            _ => Rfloat::na(),
+        })
+        .collect();
+    finish_df(
+        vec![("sample", sample.into()), ("delta_ofv", delta.into())],
+        n,
+    )
+}
+
+/// Run the non-parametric case bootstrap.
+///
+/// `data_path`, `stratify_on` and `directory` use `""` for "unset". `seed`
+/// crosses as a double because R has no 64-bit integer.
+#[extendr]
+#[allow(clippy::too_many_arguments)]
+fn ferx_rust_bootstrap(
+    model_path: &str,
+    data_path: &str,
+    samples: i32,
+    seed: f64,
+    sample_size_keys: Vec<String>,
+    sample_size_values: Vec<f64>,
+    stratify_on: &str,
+    update_inits: bool,
+    run_base_model: bool,
+    keep_covariance: bool,
+    threads: i32,
+    skip_minimization_terminated: bool,
+    skip_estimate_near_boundary: bool,
+    skip_covariance_step_terminated: bool,
+    skip_with_covstep_warnings: bool,
+    dofv: bool,
+    directory: &str,
+    confidence_level: f64,
+    verbose: bool,
+) -> Robj {
+    let options = match bootstrap_options_from_r(
+        samples,
+        seed,
+        sample_size_keys,
+        sample_size_values,
+        stratify_on,
+        update_inits,
+        run_base_model,
+        keep_covariance,
+        threads,
+        skip_minimization_terminated,
+        skip_estimate_near_boundary,
+        skip_covariance_step_terminated,
+        skip_with_covstep_warnings,
+        dofv,
+        directory,
+        confidence_level,
+    ) {
+        Ok(o) => o,
+        Err(e) => throw_r_error(format!("ferx_bootstrap: {e}")),
+    };
+
+    let data = (!data_path.is_empty()).then_some(data_path);
+    let prepared = match ferx_core::prepare_run(model_path, data) {
+        Ok(p) => p,
+        Err(e) => throw_r_error(format!("ferx_bootstrap: {e}")),
+    };
+    if verbose {
+        if let Some(w) = &prepared.data_path_warning {
+            eprintln!("Warning: {w}");
+        }
+        eprintln!(
+            "Bootstrap: {} samples of {} subjects, seed {}",
+            options.samples,
+            prepared.population.subjects.len(),
+            options.seed
+        );
+    }
+
+    let result = match run_bootstrap(&prepared, &options) {
+        Ok(r) => r,
+        Err(e) => throw_r_error(format!("ferx_bootstrap: {e}")),
+    };
+
+    let out = List::from_pairs(vec![
+        ("parameters", bootstrap_parameters_df(&result.summary)),
+        ("raw", bootstrap_raw_df(&result, &options)),
+        (
+            "diagnostics",
+            bootstrap_diagnostics_df(
+                result.replicates.len(),
+                result.n_estimated_parameters,
+                &result.summary,
+            ),
+        ),
+        ("delta_ofv", bootstrap_delta_ofv_df(&result, &options)),
+        (
+            "parameter_names",
+            result.parameter_names.clone().into(),
+        ),
+        ("subject_ids", result.subject_ids.clone().into()),
+        ("n_completed", (result.summary.n_completed as i32).into()),
+        ("n_included", (result.summary.n_included as i32).into()),
+        (
+            "chi_square_df",
+            (result.n_estimated_parameters as i32).into(),
+        ),
+        (
+            "confidence_level",
+            result.summary.confidence_level.into(),
+        ),
+        ("model_name", prepared.parsed.model.name.clone().into()),
+        ("data_path", prepared.data_path.clone().into()),
+    ]);
+    out.into()
+}
+
+/// Re-summarise a finished run from its `raw_results.csv` under different
+/// exclusion criteria - PsN's `-summarize`. Refits nothing, and rewrites
+/// `bootstrap_results.csv` / `bootstrap_diagnostics.csv` in place.
+#[extendr]
+#[allow(clippy::too_many_arguments)]
+fn ferx_rust_bootstrap_summarize(
+    directory: &str,
+    skip_minimization_terminated: bool,
+    skip_estimate_near_boundary: bool,
+    skip_covariance_step_terminated: bool,
+    skip_with_covstep_warnings: bool,
+    confidence_level: f64,
+) -> Robj {
+    // `samples` only has to pass `BootstrapOptions::validate`; nothing is drawn
+    // on this path, the estimates are read back off disk.
+    let options = BootstrapOptions {
+        samples: 1,
+        skip_minimization_terminated,
+        skip_estimate_near_boundary,
+        skip_covariance_step_terminated,
+        skip_with_covstep_warnings,
+        confidence_level,
+        ..BootstrapOptions::default()
+    };
+    let dir = std::path::Path::new(directory);
+    let summary = match resummarize(dir, &options) {
+        Ok(s) => s,
+        Err(e) => throw_r_error(format!("ferx_bootstrap_summarize: {e}")),
+    };
+    // Read back the two run-level facts the summary does not carry, from the
+    // diagnostics file `resummarize` just rewrote.
+    let diag = dir.join("bootstrap_diagnostics.csv");
+    let requested =
+        bootstrap_output::read_diagnostic(&diag, "samples_requested").unwrap_or(0.0) as usize;
+    let chi_df = bootstrap_output::read_diagnostic(&diag, "chi_square_df").unwrap_or(0.0) as usize;
+
+    let out = List::from_pairs(vec![
+        ("parameters", bootstrap_parameters_df(&summary)),
+        (
+            "diagnostics",
+            bootstrap_diagnostics_df(requested, chi_df, &summary),
+        ),
+        (
+            "parameter_names",
+            summary
+                .parameters
+                .iter()
+                .map(|p| p.name.clone())
+                .collect::<Vec<String>>()
+                .into(),
+        ),
+        ("n_completed", (summary.n_completed as i32).into()),
+        ("n_included", (summary.n_included as i32).into()),
+        ("chi_square_df", (chi_df as i32).into()),
+        ("confidence_level", summary.confidence_level.into()),
+        ("directory", directory.to_string().into()),
+    ]);
+    out.into()
+}
+
 extendr_module! {
     mod ferx;
     fn ferx_rust_fit;
@@ -3984,4 +4476,6 @@ extendr_module! {
     fn ferx_rust_model_data_path;
     fn ferx_rust_inits_from_nca;
     fn ferx_rust_prepare_frem;
+    fn ferx_rust_bootstrap;
+    fn ferx_rust_bootstrap_summarize;
 }
