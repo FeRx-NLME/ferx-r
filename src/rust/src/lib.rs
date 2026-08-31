@@ -1661,14 +1661,13 @@ fn default_fit_result(
         // ferx-core main added a checkpoint-restore flag; a defaulted FitResult is
         // never a restored one.
         restored_from_checkpoint: false,
-        // ferx-core main grew four more FitResult fields after the pinned rev.
-        // `residual_correlations` is a property of the compiled model, so it is
-        // taken from there; the other three are report-only and this scaffold
-        // carries no VI run and no weighted-kappa labels.
+        // ferx-core main grew `residual_correlations` and `vi` after the rev
+        // this branch originally pinned. `residual_correlations` is a property
+        // of the compiled model, so it is taken from there; this scaffold
+        // carries no VI run. The two weighted-kappa fields it also grew
+        // (#1031) are set below, beside `kappa_init_as_sd`.
         residual_correlations: model.residual_correlations.clone(),
         vi: None,
-        kappa_weights: Vec::new(),
-        kappa_weight_typical: Vec::new(),
         method: EstimationMethod::FoceI,
         method_chain: vec![EstimationMethod::FoceI],
         bayes: None,
@@ -3313,14 +3312,13 @@ fn ferx_rust_sir(
     let fit = FitResult {
         // ferx-core main added a checkpoint-restore flag; the SIR path never reads it.
         restored_from_checkpoint: false,
-        // ferx-core main grew four more FitResult fields after the pinned rev.
-        // `residual_correlations` is a property of the compiled model, so it is
-        // taken from there; the other three are report-only and this scaffold
-        // carries no VI run and no weighted-kappa labels.
+        // ferx-core main grew `residual_correlations` and `vi` after the rev
+        // this branch originally pinned. `residual_correlations` is a property
+        // of the compiled model, so it is taken from there; this scaffold
+        // carries no VI run. The two weighted-kappa fields it also grew
+        // (#1031) are set below, beside `kappa_init_as_sd`.
         residual_correlations: model.residual_correlations.clone(),
         vi: None,
-        kappa_weights: Vec::new(),
-        kappa_weight_typical: Vec::new(),
         method: if interaction {
             EstimationMethod::FoceI
         } else {
@@ -3683,14 +3681,13 @@ fn ferx_rust_covariance(
     let fit = FitResult {
         // ferx-core main added a checkpoint-restore flag; the covariance path never reads it.
         restored_from_checkpoint: false,
-        // ferx-core main grew four more FitResult fields after the pinned rev.
-        // `residual_correlations` is a property of the compiled model, so it is
-        // taken from there; the other three are report-only and this scaffold
-        // carries no VI run and no weighted-kappa labels.
+        // ferx-core main grew `residual_correlations` and `vi` after the rev
+        // this branch originally pinned. `residual_correlations` is a property
+        // of the compiled model, so it is taken from there; this scaffold
+        // carries no VI run. The two weighted-kappa fields it also grew
+        // (#1031) are set below, beside `kappa_init_as_sd`.
         residual_correlations: model.residual_correlations.clone(),
         vi: None,
-        kappa_weights: Vec::new(),
-        kappa_weight_typical: Vec::new(),
         method: if interaction {
             EstimationMethod::FoceI
         } else {
