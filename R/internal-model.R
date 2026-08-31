@@ -99,6 +99,62 @@ ferx_section_headers <- function(lines) {
   .ferx_fmt_pk_name(fn)
 }
 
+# Peel an optional trailing `weight = <expr>` modifier off a `[parameters]`
+# kappa declaration (ferx-core #1031), returning the weight expression or
+# NA_character_ when the line carries none.
+#
+# This deliberately mirrors ferx-core's `split_weight_modifier()`
+# (parser/model_parser.rs) rather than approximating it with a regex, because
+# the two are read side by side: this one feeds ferx_model_inspect() pre-fit
+# while the engine's feeds model_structure post-fit, and any divergence shows
+# up as inspect() calling a weighted model unweighted. The engine's matching
+# rules, all reproduced here:
+#   * case-insensitive, so `WEIGHT =` is the modifier;
+#   * whole word, so `WEIGHTED` and `X_weight` are not;
+#   * only at bracket depth 0, so a covariate named `weight` inside a
+#     magnitude expression is not mistaken for the modifier;
+#   * followed by a single `=`, so a `==` comparison is skipped;
+#   * first match wins.
+# The engine rejects an empty right-hand side and a modifier with no statement
+# in front of it; here both report "no weight", since such a file fails to
+# parse at fit time anyway and inspect() must not invent a label for it.
+.ferx_split_weight_modifier <- function(line) {
+  none <- NA_character_
+  ch <- strsplit(line, "", fixed = TRUE)[[1L]]
+  n  <- length(ch)
+  kw <- c("w", "e", "i", "g", "h", "t")
+  k  <- length(kw)
+  if (n < k) return(none)
+  is_ident <- function(c) grepl("^[A-Za-z0-9_]$", c)
+  depth <- 0L
+  for (i in seq_len(n)) {
+    c_i <- ch[i]
+    if (c_i == "(" || c_i == "[") {
+      depth <- depth + 1L
+      next
+    }
+    if (c_i == ")" || c_i == "]") {
+      depth <- depth - 1L
+      next
+    }
+    if (depth != 0L || i + k - 1L > n) next
+    if (!identical(tolower(ch[i:(i + k - 1L)]), kw)) next
+    # Whole-word match on both sides.
+    if (i > 1L && is_ident(ch[i - 1L])) next
+    j <- i + k
+    if (j <= n && is_ident(ch[j])) next
+    # Skip whitespace, then require a single `=` (not `==`).
+    while (j <= n && grepl("^[ \t]$", ch[j])) j <- j + 1L
+    if (j > n || ch[j] != "=") next
+    if (j + 1L <= n && ch[j + 1L] == "=") next
+    expr <- trimws(paste(ch[seq_len(n) > j], collapse = ""))
+    stmt <- trimws(paste(ch[seq_len(i - 1L)], collapse = ""))
+    if (!nzchar(expr) || !nzchar(stmt)) return(none)
+    return(expr)
+  }
+  none
+}
+
 # Parse a .ferx file and return a named list describing model structure.
 # Fields: theta_names (pop param names), model_type (label or NULL),
 #         iiv, iov, residual.
@@ -106,11 +162,18 @@ ferx_section_headers <- function(lines) {
 .ferx_parse_structure <- function(path) {
   b <- .ferx_extract_blocks(path)
 
-  # Population (theta) parameter names from [parameters]
+  # Population (theta) parameter names from [parameters].
+  #
+  # Every declaration keyword is matched case-insensitively because the
+  # engine's declaration regexes all carry `(?i)` (model_parser.rs: theta_re,
+  # omega_re, sigma_re, kappa_re and the three block_* forms). A model written
+  # `THETA TVCL(1.0, 0.001, 100.0)` fits exactly like the lowercase spelling,
+  # but matching it case-sensitively here reported *no* thetas, no IIV and no
+  # IOV - an entirely blank structure for a model the engine parses fine.
   params      <- b[["parameters"]] %||% character(0)
-  theta_lines <- grep("^theta\\s", params, value = TRUE)
+  theta_lines <- grep("^theta\\s", params, value = TRUE, ignore.case = TRUE)
   thetas <- if (length(theta_lines) > 0L)
-    sub("^theta\\s+(\\w+).*", "\\1", theta_lines)
+    sub("^theta\\s+(\\w+).*", "\\1", theta_lines, ignore.case = TRUE)
   else
     character(0)
 
@@ -119,16 +182,16 @@ ferx_section_headers <- function(lines) {
   model_type   <- if (length(struct_lines) > 0L) .ferx_model_type(struct_lines) else NULL
 
   # IIV: omega lines
-  omega_lines <- grep("^omega\\s", params, value = TRUE)
+  omega_lines <- grep("^omega\\s", params, value = TRUE, ignore.case = TRUE)
   iiv <- if (length(omega_lines) > 0L)
-    sub("^omega\\s+(\\w+).*", "\\1", omega_lines)
+    sub("^omega\\s+(\\w+).*", "\\1", omega_lines, ignore.case = TRUE)
   else
     character(0)
 
   # IOV: kappa lines
-  kappa_lines <- grep("^kappa\\s", params, value = TRUE)
+  kappa_lines <- grep("^kappa\\s", params, value = TRUE, ignore.case = TRUE)
   iov <- if (length(kappa_lines) > 0L)
-    sub("^kappa\\s+(\\w+).*", "\\1", kappa_lines)
+    sub("^kappa\\s+(\\w+).*", "\\1", kappa_lines, ignore.case = TRUE)
   else
     character(0)
 
@@ -138,14 +201,32 @@ ferx_section_headers <- function(lines) {
   # engine attaches to model_structure post-fit. Left as character(0) when no
   # kappa is weighted, so an ordinary IOV model's structure list is unchanged.
   iov_weights <- if (length(kappa_lines) > 0L) {
-    w <- ifelse(
-      grepl("\\bweight\\s*=", kappa_lines),
-      trimws(sub(".*\\bweight\\s*=\\s*", "", kappa_lines)),
-      NA_character_
-    )
+    w <- vapply(kappa_lines, .ferx_split_weight_modifier, character(1L),
+                USE.NAMES = FALSE)
     if (all(is.na(w))) character(0) else w
   } else {
     character(0)
+  }
+
+  # Safety net for the next time this parser drifts from the engine's. Every
+  # field above is a best-effort regex read of a grammar that lives in Rust,
+  # so a form the engine accepts and these patterns miss is reported as an
+  # absence rather than an error - the failure mode that let a whole
+  # `[parameters]` block read as empty (see the case-insensitivity note
+  # above). A block with content but not one recognised declaration in it is
+  # not a plausible model; say so rather than hand back a blank structure.
+  # Deliberately keyword-agnostic: it fires on whatever the next divergence
+  # turns out to be, not just on the ones already known.
+  decl_re <- "^(block_)?(theta|omega|sigma|kappa)\\s*[[:space:](]"
+  if (length(params) > 0L &&
+        !any(grepl(decl_re, params, ignore.case = TRUE))) {
+    warning(
+      "No parameter declarations recognised in the [parameters] block of '",
+      basename(path), "' (", length(params), " non-empty lines). Reporting an ",
+      "empty model structure; the engine may still parse this file. If it ",
+      "fits, this is a bug in ferx's model inspector - please report it.",
+      call. = FALSE
+    )
   }
 
   # Residual error type from [error_model]. Multi-endpoint blocks use a

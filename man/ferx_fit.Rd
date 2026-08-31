@@ -928,9 +928,13 @@ omega diagonal, sigma, and - for IOV models - kappa diagonal), with
 columns \code{param}, \code{transform}, \code{estimate}, \code{se},
 \code{rse_pct}, \code{lower_95}, \code{upper_95},
 \code{estimate_natural}, \code{lower_95_natural},
-\code{upper_95_natural}, \code{init_as_sd}. SE-derived and
-natural-scale columns are \code{NA} when not applicable or when the
-covariance step was not run.}
+\code{upper_95_natural}, \code{init_as_sd}, \code{weight}. SE-derived
+and natural-scale columns are \code{NA} when not applicable or when the
+covariance step was not run. \code{weight} carries the sample-size
+weight expression of a weighted kappa row (see \code{kappa_weights})
+and is \code{NA} on every other row; on such a row \code{estimate} is
+the \emph{unweighted} variance, so the between-occasion SD at a weight
+\code{W} is \code{sqrt(estimate / W)}, not \code{sqrt(estimate)}.}
 \item{eta_cov}{Data frame of Pearson correlations between each ETA and
 each constant-per-subject numeric covariate in the dataset, with
 columns \code{eta}, \code{covariate}, \code{r}, \code{p_val},

@@ -52,7 +52,20 @@
       se      <- if (n_se >= se_idx) fit$se_kappa[se_idx] else NA_real_
       kap_type <- if (!is.null(fit$kappa_param_types) && length(fit$kappa_param_types) >= i) fit$kappa_param_types[i] else "variance"
       init_sd  <- !is.null(fit$kappa_init_as_sd) && length(fit$kappa_init_as_sd) >= i && isTRUE(fit$kappa_init_as_sd[i])
-      rows[[length(rows) + 1L]] <- .ferx_est_row(kap_names[i], m_iov[i, i], se, kap_type, init_sd)
+      # Sample-size-weighted IOV (ferx-core #1031): `estimate` is the
+      # *unweighted* gamma^2 of `kappa_ik ~ N(0, gamma^2 / W_ik)`. Without the
+      # weight expression alongside it a reader of this table has no way to
+      # tell it apart from an ordinary kappa, and would read the between-
+      # occasion SD as sqrt(gamma^2) instead of sqrt(gamma^2 / W) - the exact
+      # misreading the feature exists to prevent. print() annotates it; so
+      # must the machine-readable surface.
+      wt <- if (!is.null(fit$kappa_weights) && length(fit$kappa_weights) >= i)
+        as.character(fit$kappa_weights[[i]])
+      else
+        NA_character_
+      if (!isTRUE(nzchar(wt))) wt <- NA_character_
+      rows[[length(rows) + 1L]] <- .ferx_est_row(kap_names[i], m_iov[i, i], se, kap_type, init_sd,
+                                                 weight = wt)
     }
   }
 
@@ -61,7 +74,8 @@
   result
 }
 
-.ferx_est_row <- function(param, estimate, se, transform = "identity", init_as_sd = FALSE) {
+.ferx_est_row <- function(param, estimate, se, transform = "identity", init_as_sd = FALSE,
+                          weight = NA_character_) {
   rse_pct  <- if (!is.na(se) && abs(estimate) > 1e-12) abs(se / estimate) * 100 else NA_real_
 
   # Asymmetric CI and natural-scale back-transform per theta type
@@ -103,5 +117,6 @@
              lower_95_natural = lower_95_natural,
              upper_95_natural = upper_95_natural,
              init_as_sd       = init_as_sd,
+             weight           = weight,
              stringsAsFactors = FALSE)
 }
