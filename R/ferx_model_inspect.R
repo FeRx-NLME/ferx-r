@@ -17,7 +17,10 @@
 #'   (character vector of population parameter names), \code{model_type}
 #'   (short label such as \code{"1-cpt oral"} or \code{NULL} when not
 #'   unambiguously detectable), \code{iiv} (omega names), \code{iov}
-#'   (kappa names), and \code{residual} (error type - one of
+#'   (kappa names), \code{iov_weights} (per-kappa sample-size weight
+#'   expressions from \code{kappa K ~ <var> weight = <expr>}, \code{NA} for
+#'   an unweighted kappa and \code{character(0)} when no kappa is weighted),
+#'   and \code{residual} (error type - one of
 #'   \code{"proportional"}, \code{"additive"}, \code{"combined"}, or
 #'   \code{"additive (log-transformed)"} for log-transform-both-sides
 #'   models written as \code{log(DV) ~ additive(...)} or
@@ -34,6 +37,11 @@
 #' via \code{kappa_*} declarations. Steady-state dosing (\code{SS}/\code{II}
 #' columns) is a data-side feature and is documented under
 #' \code{\link{ferx_fit}}.
+#'
+#' A sample-size-weighted kappa - \code{kappa KAPPA_EMAX ~ 2.0 (sd) weight = NARM},
+#' meaning \code{kappa_ik ~ N(0, Omega_IOV / N_ik)} - is annotated on the IOV
+#' line as \code{KAPPA_EMAX (weight = NARM)} and returned in
+#' \code{iov_weights}.
 #'
 #' @examples
 #' ex <- ferx_example("warfarin")

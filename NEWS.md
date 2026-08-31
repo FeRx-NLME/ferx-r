@@ -187,6 +187,50 @@
   `-summarize`. Refits nothing: it is the recovery path for a run where too
   many replicates were filtered out to resolve a percentile interval.
 
+- **Sample-size-weighted inter-occasion variability is now declared on the
+  `kappa` itself** ([ferx-core #1031](https://github.com/FeRx-NLME/ferx-core/issues/1031),
+  [ferx-core #1062](https://github.com/FeRx-NLME/ferx-core/pull/1062)).
+  Between-treatment-arm variability (BTAV) - the arm-level random effect in
+  every published longitudinal MBMA - is distributed
+  `kappa_ik ~ N(0, gamma^2 / N_ik)`: a 400-subject arm's mean wanders a quarter
+  as far as a 25-subject arm's. Until now the only way to express that in ferx
+  was to write the divisor into a structural expression by hand
+  (`... + KAPPA_EMAX / sqrt(NARM)`), where `/ NARM` instead of `/ sqrt(NARM)`
+  produces a plausible wrong answer rather than an error. It is now declared
+  where the rest of the variance structure is:
+
+  ```
+  [parameters]
+    kappa KAPPA_EMAX ~ 2.0 (sd) weight = NARM
+
+  [individual_parameters]
+    LEMAX = LEMAX0 + log(OR_ABATA) * ABATA + ETA_EMAX + KAPPA_EMAX
+  ```
+
+  The engine applies the weight by reparameterisation, so the estimate in
+  `fit$omega_iov` stays the **unweighted** `gamma^2` - the quantity a published
+  analysis reports - and so do the kappa EBEs and their shrinkage. On the R
+  side:
+
+  - `print()` on the fit annotates the weighted kappa with the effective
+    between-arm SD at a typical arm, `gamma / sqrt(W)`:
+
+    ```
+    KAPPA_CL = 1.840240  (CV% = 230.2)  SE = N/A  Shrinkage = 37.4%
+                         weight = NARM  ->  SD = 0.0678 at NARM = 400.0000
+    ```
+
+  - `ferx_model_inspect()` reports the weight both pre-fit (from the model
+    file) and post-fit (from what the engine parsed), as
+    `IOV:  KAPPA_CL (weight = NARM)`, and returns it in `$iov_weights`.
+  - `ferx_fit()` results carry `kappa_weights` (the weight expression per
+    kappa, `NA` where unweighted) and `kappa_weight_typical` (the median
+    weight over the dataset's subject-occasions), and both survive a
+    `ferx_save_fit()` / `ferx_load_fit()` round-trip.
+
+  Models with no weighted kappa are unaffected in every one of those places:
+  both fields are `NULL` and the `.fitrx` bundle is byte-identical to before.
+
 - **`ferx_simulate()` and `ferx_predict()` now accept a design template whose
   `DV` column is empty** (#286, ferx-core #957). Dosing plus sampling times with
   `DV = "."` / `NA` - the natural way to write a design, and what NONMEM's

@@ -488,3 +488,80 @@ test_that(".runlog_iter_table output is pure ASCII", {
   out <- paste(tbl, collapse = "\n")
   expect_false(nchar(out, type = "bytes") != nchar(out, type = "chars"))
 })
+
+# Sample-size-weighted IOV helpers (ferx-core #1031) ------------------------
+
+test_that(".ferx_name_kappa_weights() returns NULL for an unweighted model", {
+  expect_equal(.ferx_name_kappa_weights(character(0), numeric(0), "KAPPA_CL", 1L),
+               list(kappa_weights = NULL, kappa_weight_typical = NULL))
+  expect_equal(.ferx_name_kappa_weights(NULL, NULL, "KAPPA_CL", 1L),
+               list(kappa_weights = NULL, kappa_weight_typical = NULL))
+  # An all-empty vector is how the FFI reports "no kappa carries a weight".
+  expect_equal(.ferx_name_kappa_weights(c("", ""), c(NA, NA),
+                                        c("KAPPA_CL", "KAPPA_V"), 2L),
+               list(kappa_weights = NULL, kappa_weight_typical = NULL))
+})
+test_that(".ferx_name_kappa_weights() names and pads to one entry per kappa", {
+  got <- .ferx_name_kappa_weights(c(NA, "NARM"), c(NA, 400),
+                                  c("KAPPA_CL", "KAPPA_V"), 2L)
+  expect_equal(got$kappa_weights, c(KAPPA_CL = NA_character_, KAPPA_V = "NARM"))
+  expect_equal(got$kappa_weight_typical, c(KAPPA_CL = NA_real_, KAPPA_V = 400))
+
+  # A short `typical` (e.g. an engine that could not evaluate the weight)
+  # must still line up with kappa_names rather than recycling.
+  got <- .ferx_name_kappa_weights("NARM", numeric(0), "KAPPA_CL", 1L)
+  expect_equal(got$kappa_weights, c(KAPPA_CL = "NARM"))
+  expect_equal(got$kappa_weight_typical, c(KAPPA_CL = NA_real_))
+})
+test_that(".ferx_format_kappa_weight() reports the effective SD at the typical weight", {
+  fit <- list(kappa_weights = c(KAPPA_CL = "NARM"),
+              kappa_weight_typical = c(KAPPA_CL = 400))
+  line <- .ferx_format_kappa_weight(fit, 1L, 1.840240, "KAPPA_CL")
+  # gamma / sqrt(W) = sqrt(1.84024) / sqrt(400) = 0.0678
+  expect_match(line, "weight = NARM", fixed = TRUE)
+  expect_match(line, "SD = 0.0678", fixed = TRUE)
+  expect_match(line, "at NARM = 400.0000", fixed = TRUE)
+})
+test_that(".ferx_format_kappa_weight() falls back when no typical weight is known", {
+  fit <- list(kappa_weights = c(KAPPA_CL = "NARM"),
+              kappa_weight_typical = c(KAPPA_CL = NA_real_))
+  line <- .ferx_format_kappa_weight(fit, 1L, 1.84, "KAPPA_CL")
+  expect_match(line, "weight = NARM (kappa ~ N(0, KAPPA_CL/NARM))", fixed = TRUE)
+  expect_false(grepl("SD =", line, fixed = TRUE))
+})
+test_that(".ferx_format_kappa_weight() returns NULL for an unweighted kappa", {
+  expect_null(.ferx_format_kappa_weight(list(), 1L, 0.02, "KAPPA_CL"))
+  expect_null(.ferx_format_kappa_weight(
+    list(kappa_weights = c(KAPPA_CL = NA_character_, KAPPA_V = "NARM")),
+    1L, 0.02, "KAPPA_CL"))
+})
+test_that(".ferx_print_structure() does not print (weight = NULL) after a round-trip", {
+  # Regression: model_structure is persisted verbatim under r_extras and read
+  # back with simplifyVector = FALSE, so iov/iov_weights arrive as lists whose
+  # NA slots are NULL holes. is.na(list(NULL)) is FALSE and as.character(NULL)
+  # is "NULL", which used to print `KAPPA_CL (weight = NULL)`.
+  ms <- list(model_type = "1-cpt", theta_names = "TVCL", iiv = "ETA_CL",
+             iov = c("KAPPA_CL", "KAPPA_V"),
+             iov_weights = c(NA_character_, "NARM"), residual = "proportional")
+  back <- jsonlite::fromJSON(
+    jsonlite::toJSON(ms, auto_unbox = TRUE, na = "null"), simplifyVector = FALSE)
+  out <- utils::capture.output(ferx:::.ferx_print_structure(back))
+  iov <- grep("^  IOV:", out, value = TRUE)
+  expect_match(iov, "KAPPA_CL, KAPPA_V (weight = NARM)", fixed = TRUE)
+  expect_false(grepl("NULL", iov, fixed = TRUE))
+})
+test_that(".ferx_print_structure() annotates a weighted kappa in memory too", {
+  ms <- list(iov = c("KAPPA_CL", "KAPPA_V"),
+             iov_weights = c(NA_character_, "NARM"), residual = "proportional")
+  out <- utils::capture.output(ferx:::.ferx_print_structure(ms))
+  expect_match(grep("^  IOV:", out, value = TRUE),
+               "KAPPA_CL, KAPPA_V (weight = NARM)", fixed = TRUE)
+
+  # No weights declared at all: bare kappa names, no annotation.
+  out <- utils::capture.output(ferx:::.ferx_print_structure(
+    list(iov = c("KAPPA_CL", "KAPPA_V"), iov_weights = character(0),
+         residual = "proportional")))
+  expect_match(grep("^  IOV:", out, value = TRUE), "KAPPA_CL, KAPPA_V",
+               fixed = TRUE)
+  expect_false(any(grepl("weight =", out, fixed = TRUE)))
+})
