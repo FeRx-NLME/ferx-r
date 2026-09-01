@@ -115,4 +115,10 @@ ferx_rust_prepare_frem <- function(model_path, data_path, covariates, categorica
   .Call("wrap__ferx_rust_prepare_frem", model_path, data_path, as.character(covariates), as.character(categorical_covariates), output_model_path, output_data_path, as.character(fit_theta_names), fit_theta_values, as.character(fit_eta_names), fit_omega_flat, as.integer(fit_omega_dim))
 }
 
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_gam_screen <- function(eta_names, eta_flat, n_subjects, shrinkage, cov_names, cov_flat, cov_kinds, spline_df, include_linear, shrinkage_warn) {
+  .Call("wrap__ferx_rust_gam_screen", as.character(eta_names), eta_flat, as.integer(n_subjects), shrinkage, as.character(cov_names), cov_flat, as.character(cov_kinds), as.integer(spline_df), include_linear, shrinkage_warn)
+}
+
 # nolint end

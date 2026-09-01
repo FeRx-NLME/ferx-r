@@ -21,10 +21,12 @@
 #' For categorical covariates: one-hot encoding with the lowest observed level
 #' as the reference.
 #'
+#' All numerical computation (OLS, AIC, spline basis construction) is
+#' performed in Rust via \code{ferx_rust_gam_screen()}. This wrapper handles
+#' input validation, per-subject covariate aggregation, and result formatting.
+#'
 #' The AIC formula used is \code{n * log(RSS/n) + 2*p}, which gives the same
-#' delta_aic as R's \code{AIC(lm())} and Xpose4's \code{gam::gam()}. The
-#' formula is identical to the one used by the Rust implementation in
-#' \code{ferx_tools::gam::gam_screen()}, so results are directly comparable.
+#' delta_aic as R's \code{AIC(lm())} and Xpose4's \code{gam::gam()}.
 #'
 #' @section Shrinkage caveat:
 #' EBE-based covariate screening is only informative when ETA shrinkage is low
@@ -43,8 +45,7 @@
 #'   \code{fit$covariate_types} (or inferred from \code{fit$covtab}).
 #' @param spline_df Integer vector of natural-spline degrees of freedom to
 #'   try for continuous covariates. Default \code{c(2L, 3L)} matches
-#'   Xpose4's defaults (\code{smoother3 = "ns", arg3 = "df=2"} and
-#'   \code{smoother4 = "ns", arg4 = "df=3"}).
+#'   Xpose4's defaults.
 #' @param include_linear Logical. Include the linear form as a candidate.
 #'   Default \code{TRUE}.
 #' @param shrinkage_warn Numeric fraction in \code{[0, 1]}. Warn when an
@@ -74,7 +75,6 @@
 #' ferx_gam_screen(fit)
 #' }
 #' @family diagnostics
-#' @importFrom splines ns
 #' @export
 ferx_gam_screen <- function(fit,
                              etas        = NULL,
@@ -98,9 +98,9 @@ ferx_gam_screen <- function(fit,
   }
 
   # -- ETA columns ------------------------------------------------------------
-  ebe       <- fit$ebe_etas
-  eta_id    <- if ("ID" %in% names(ebe)) "ID" else names(ebe)[1L]
-  all_etas  <- setdiff(names(ebe), eta_id)
+  ebe      <- fit$ebe_etas
+  eta_id   <- if ("ID" %in% names(ebe)) "ID" else names(ebe)[1L]
+  all_etas <- setdiff(names(ebe), eta_id)
   if (!is.null(etas)) {
     all_etas <- intersect(etas, all_etas)
   }
@@ -156,154 +156,77 @@ ferx_gam_screen <- function(fit,
     percov[[cov]] <- agg[as.character(ids)]
   }
 
-  # -- Shrinkage lookup -------------------------------------------------------
+  # -- Merge EBEs + per-subject covariates by ID ------------------------------
+  merged  <- merge(percov, ebe, by.x = cov_id, by.y = eta_id)
+  n_subj  <- nrow(merged)
+
+  # -- Shrinkage vector -------------------------------------------------------
   shrink_vec  <- fit$shrinkage_eta
   eta_names_r <- if (!is.null(names(shrink_vec))) names(shrink_vec) else NULL
-
-  get_shrinkage <- function(eta_name) {
+  shrinkage_v <- vapply(all_etas, function(eta_name) {
     if (is.null(shrink_vec) || !length(shrink_vec)) return(NA_real_)
     if (!is.null(eta_names_r)) {
       idx <- match(eta_name, eta_names_r)
       if (!is.na(idx)) return(shrink_vec[[idx]])
     }
-    # Fall back to positional lookup using all_etas order.
     idx <- match(eta_name, all_etas)
     if (!is.na(idx) && idx <= length(shrink_vec)) shrink_vec[[idx]] else NA_real_
-  }
+  }, numeric(1L))
 
-  # -- OLS AIC helper ---------------------------------------------------------
-  # AIC = n * log(RSS/n) + 2*p. Same formula as the Rust implementation and
-  # equivalent delta-AIC to R's AIC(lm()).
-  ols_aic <- function(y, X) {
-    n   <- length(y)
-    p   <- ncol(X)
-    fit_ols <- lm.fit(X, y)
-    rss <- sum(fit_ols$residuals^2)
-    aic <- n * log(rss / n) + 2 * p
-    sst <- sum((y - mean(y))^2)
-    r2  <- if (sst < 1e-20) 0 else 1 - rss / sst
-    list(aic = aic, r2 = r2)
-  }
+  # -- Build column-major flat arrays for Rust --------------------------------
+  # ETAs: each column is all per-subject values for one ETA.
+  eta_flat <- unlist(lapply(all_etas, function(e) as.numeric(merged[[e]])),
+                     use.names = FALSE)
 
-  # -- Screen -----------------------------------------------------------------
-  merged <- merge(percov, ebe, by.x = cov_id, by.y = eta_id)
-
-  rows <- vector("list", length(all_etas) * length(cov_names))
-  k    <- 0L
-
-  for (eta in all_etas) {
-
-    shrinkage <- get_shrinkage(eta)
-    if (!is.na(shrinkage) && is.finite(shrinkage) &&
-        shrinkage > shrinkage_warn) {
-      warning(sprintf(
-        "%s: shrinkage %.1f%% exceeds the %.0f%% threshold; ",
-        eta, shrinkage * 100, shrinkage_warn * 100
-      ), "EBE-based covariate screening may be unreliable.",
-      call. = FALSE)
+  # Covariates: coerce to numeric. For categorical covariates stored as
+  # character, convert to factor integer codes (1, 2, ...) so Rust receives
+  # a numeric vector with distinct integer levels for one-hot encoding.
+  cov_flat <- unlist(lapply(cov_names, function(cov) {
+    vals <- merged[[cov]]
+    if (identical(types[[cov]], "categorical")) {
+      as.numeric(as.factor(vals))
+    } else {
+      as.numeric(vals)
     }
+  }), use.names = FALSE)
 
-    y_all   <- as.numeric(merged[[eta]])
-    valid_y <- is.finite(y_all)
-    y_sub   <- y_all[valid_y]
-    n_sub   <- length(y_sub)
-    if (n_sub < 3L) next
+  cov_kinds_str <- unname(
+    ifelse(types[cov_names] == "categorical", "categorical", "continuous")
+  )
 
-    # Null AIC on the valid-ETA subset.
-    null_res  <- ols_aic(y_sub, matrix(1, nrow = n_sub, ncol = 1L))
-    aic_null  <- null_res$aic
+  # -- Delegate all computation to Rust ---------------------------------------
+  raw <- ferx_rust_gam_screen(
+    eta_names      = all_etas,
+    eta_flat       = eta_flat,
+    n_subjects     = n_subj,
+    shrinkage      = shrinkage_v,
+    cov_names      = cov_names,
+    cov_flat       = cov_flat,
+    cov_kinds      = cov_kinds_str,
+    spline_df      = as.integer(spline_df),
+    include_linear = isTRUE(include_linear),
+    shrinkage_warn = shrinkage_warn
+  )
 
-    for (cov in cov_names) {
-      k <- k + 1L
-      x_all    <- merged[[cov]]
-      valid    <- valid_y & !is.na(x_all)
-      y        <- y_all[valid]
-      x        <- x_all[valid]
-      n        <- sum(valid)
-      if (n < 3L) {
-        rows[[k]] <- NULL
-        next
-      }
+  # Emit any shrinkage warnings collected by Rust.
+  for (w in raw$warnings) warning(w, call. = FALSE)
 
-      # Per-pair null AIC (same subset as alternative).
-      pn_res   <- ols_aic(y, matrix(1, nrow = n, ncol = 1L))
-      aic_loc  <- pn_res$aic
+  # -- Assemble result data frame ---------------------------------------------
+  result <- data.frame(
+    eta_name  = raw$eta_name,
+    covariate = raw$covariate,
+    delta_aic = raw$delta_aic,
+    best_form = raw$best_form,
+    aic       = raw$aic,
+    aic_null  = raw$aic_null,
+    r_squared = raw$r_squared,
+    shrinkage = raw$shrinkage,
+    stringsAsFactors = FALSE
+  )
 
-      best_aic  <- Inf
-      best_r2   <- 0
-      best_form <- NA_character_
-
-      type <- types[[cov]]
-
-      if (identical(type, "categorical")) {
-        levs <- sort(unique(x))
-        if (length(levs) >= 2L) {
-          dummies <- outer(x, levs[-1L], `==`) * 1.0
-          X_cat   <- cbind(1, dummies)
-          res     <- ols_aic(y, X_cat)
-          if (res$aic < best_aic) {
-            best_aic  <- res$aic
-            best_r2   <- res$r2
-            best_form <- "Categorical"
-          }
-        }
-      } else {
-        x_num <- as.numeric(x)
-        if (include_linear) {
-          res <- ols_aic(y, cbind(1, x_num))
-          if (res$aic < best_aic) {
-            best_aic  <- res$aic
-            best_r2   <- res$r2
-            best_form <- "Linear"
-          }
-        }
-        for (df in spline_df) {
-          if (n <= df + 1L) next
-          basis <- tryCatch(
-            splines::ns(x_num, df = df),
-            error = function(e) NULL
-          )
-          if (is.null(basis)) next
-          X_spl <- cbind(1, basis)
-          res   <- ols_aic(y, X_spl)
-          if (res$aic < best_aic) {
-            best_aic  <- res$aic
-            best_r2   <- res$r2
-            best_form <- sprintf("Spline(df=%d)", df)
-          }
-        }
-      }
-
-      if (is.infinite(best_aic)) {
-        rows[[k]] <- NULL
-        next
-      }
-
-      rows[[k]] <- data.frame(
-        eta_name  = eta,
-        covariate = cov,
-        delta_aic = aic_loc - best_aic,
-        best_form = best_form,
-        aic       = best_aic,
-        aic_null  = aic_loc,
-        r_squared = best_r2,
-        shrinkage = shrinkage,
-        stringsAsFactors = FALSE
-      )
-    }
-  }
-
-  result <- do.call(rbind, Filter(Negate(is.null), rows))
-
-  if (is.null(result) || nrow(result) == 0L) {
+  if (nrow(result) == 0L) {
     message("No covariate pairs could be screened.")
-    return(invisible(data.frame(
-      eta_name = character(), covariate = character(),
-      delta_aic = numeric(), best_form = character(),
-      aic = numeric(), aic_null = numeric(),
-      r_squared = numeric(), shrinkage = numeric(),
-      stringsAsFactors = FALSE
-    )))
+    return(invisible(result))
   }
 
   # Order by ETA (preserving input order), then by delta_aic descending.
