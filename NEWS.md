@@ -1,3 +1,13 @@
+# ferx (development)
+
+## New features
+
+- `ferx_gam_screen()`: GAM-based covariate pre-screening. For each ETA x covariate pair
+  fits `eta ~ f(cov)` and ranks covariates by AIC improvement over the null model
+  (delta_aic = AIC_null - AIC_best). Functional forms tried: linear, natural cubic
+  spline (df = 2 and 3 by default), and one-hot categorical. Warns when ETA shrinkage
+  exceeds 30%. The Rust equivalent is `ferx_tools::gam::gam_screen()`.
+
 # ferx 0.2.0
 
 ## Breaking changes
