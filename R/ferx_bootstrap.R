@@ -56,8 +56,13 @@
 #' replicates from a different point than the ones already on disk.
 #'
 #' The engine refuses to resume from a directory that belongs to a different
-#' run: the model and data hashes, the parameter names and the run settings are
-#' recorded alongside the replicates and are checked before any is reused.
+#' run: the model and data hashes, the parameter names and the settings that
+#' shape the replicates are recorded alongside them and are checked before any
+#' is reused. Those settings are `samples`, `seed`, `sample_size`,
+#' `stratify_on`, `run_base_model`, `update_inits`, `keep_covariance` and
+#' `dofv` - all of them pinned, so a resumed run cannot *extend* an earlier
+#' one. Calling again with a larger `samples` is refused rather than topping
+#' the run up; a bigger bootstrap means a fresh `directory`.
 #'
 #' A replicate whose fit *errored* is carried forward as a failure rather than
 #' refitted, matching PsN - a fit that failed usually fails again.
@@ -118,7 +123,12 @@
 #'   to call [ferx_bootstrap_summarize()] later.
 #' @param resume Continue an interrupted run in `directory` instead of starting
 #'   a fresh one, refitting only the replicates that directory does not already
-#'   hold. Default `FALSE`. Needs `directory`.
+#'   hold. Default `FALSE`. Needs `directory`, and needs the arguments that
+#'   shape the replicates to match the ones the directory was written with -
+#'   `samples`, `seed`, `sample_size`, `stratify_on`, `run_base_model`,
+#'   `update_inits`, `keep_covariance` and `dofv`, plus the model and the data
+#'   themselves. A mismatch is an error, not a fresh run: resuming with a
+#'   larger `samples` does not extend the earlier run.
 #' @param retry_failed Refit the replicates a resumed run finds recorded as
 #'   *failed*, instead of carrying the failure forward. Default `FALSE` (PsN's
 #'   default). Needs `resume = TRUE`.
@@ -237,12 +247,17 @@ ferx_bootstrap <- function(model,
     stop("`update_inits = TRUE` needs `run_base_model = TRUE`: the replicates ",
          "start from the base fit's final estimates.")
   }
-  # The engine checks both of these too, and its messages are good ones - but
-  # they name the CLI flags. Checking here as well means the R user is told
-  # about `directory =` and `resume =` before paying for a model compile.
+  # The engine checks these too, and its messages are good ones - but they name
+  # the CLI flags. Checking here as well means the R user is told about
+  # `directory =` and `resume =` before paying for a model compile.
   if (resume && is.null(directory)) {
     stop("`resume = TRUE` continues a run in a directory, so it needs ",
          "`directory` naming one an earlier run wrote.")
+  }
+  if (resume && !dir.exists(directory)) {
+    stop("`resume = TRUE` needs a directory an earlier run wrote, and there ",
+         "is nothing at `", directory, "`. Drop `resume` to start a fresh run ",
+         "there, or check the path.")
   }
   if (retry_failed && !resume) {
     stop("`retry_failed = TRUE` refits replicates a previous run recorded as ",

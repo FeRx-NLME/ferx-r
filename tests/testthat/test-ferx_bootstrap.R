@@ -466,6 +466,12 @@ test_that("resume and retry_failed are validated on the R side", {
   # Both preconditions are the engine's too, but they are checked here so the
   # message names the R argument and arrives before a model is compiled.
   expect_error(ferx_bootstrap(ex$model, ex$data, resume = TRUE), "`directory`")
+  # A typo'd path is the likeliest resume mistake: caught here rather than by
+  # the engine after it has compiled the model.
+  expect_error(
+    ferx_bootstrap(ex$model, ex$data, directory = tempfile(), resume = TRUE),
+    "nothing at"
+  )
   expect_error(
     ferx_bootstrap(ex$model, ex$data, directory = tempfile(),
                    retry_failed = TRUE),

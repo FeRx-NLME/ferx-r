@@ -98,7 +98,12 @@ to call \code{\link[=ferx_bootstrap_summarize]{ferx_bootstrap_summarize()}} late
 
 \item{resume}{Continue an interrupted run in \code{directory} instead of starting
 a fresh one, refitting only the replicates that directory does not already
-hold. Default \code{FALSE}. Needs \code{directory}.}
+hold. Default \code{FALSE}. Needs \code{directory}, and needs the arguments that
+shape the replicates to match the ones the directory was written with -
+\code{samples}, \code{seed}, \code{sample_size}, \code{stratify_on}, \code{run_base_model},
+\code{update_inits}, \code{keep_covariance} and \code{dofv}, plus the model and the data
+themselves. A mismatch is an error, not a fresh run: resuming with a
+larger \code{samples} does not extend the earlier run.}
 
 \item{retry_failed}{Refit the replicates a resumed run finds recorded as
 \emph{failed}, instead of carrying the failure forward. Default \code{FALSE} (PsN's
@@ -197,8 +202,13 @@ different optimum, and with \code{update_inits = TRUE} that would start the new
 replicates from a different point than the ones already on disk.
 
 The engine refuses to resume from a directory that belongs to a different
-run: the model and data hashes, the parameter names and the run settings are
-recorded alongside the replicates and are checked before any is reused.
+run: the model and data hashes, the parameter names and the settings that
+shape the replicates are recorded alongside them and are checked before any
+is reused. Those settings are \code{samples}, \code{seed}, \code{sample_size},
+\code{stratify_on}, \code{run_base_model}, \code{update_inits}, \code{keep_covariance} and
+\code{dofv} - all of them pinned, so a resumed run cannot \emph{extend} an earlier
+one. Calling again with a larger \code{samples} is refused rather than topping
+the run up; a bigger bootstrap means a fresh \code{directory}.
 
 A replicate whose fit \emph{errored} is carried forward as a failure rather than
 refitted, matching PsN - a fit that failed usually fails again.
