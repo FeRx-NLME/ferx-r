@@ -295,6 +295,8 @@ test_that("print and plot work on a bootstrap result", {
 # -- progress ---------------------------------------------------------------
 
 test_that("a watched run reports its fits and returns the same numbers", {
+  skip_if_not_installed("mockery")
+
   ex <- ferx_example("warfarin")
 
   seen <- list()
@@ -349,6 +351,54 @@ test_that("the progress handler falls back to a text bar without cli", {
     })
   )
   expect_true(any(grepl("50%", out, fixed = TRUE)))
+})
+
+test_that("the handler holds the frame it was made in", {
+  # The bars are drawn long after the factory returns, so the `envir` default
+  # has to be forced while its caller is still on the stack - cli otherwise
+  # ties the bar to the global environment and nothing ever closes it.
+  captured <- NULL
+  make <- function() {
+    captured <<- environment()
+    .ferx_bootstrap_progress_handler()
+  }
+  h <- make()
+  expect_identical(environment(h)$envir, captured)
+})
+
+test_that("a bar opened without a total is reopened once the total arrives", {
+  skip_if_not_installed("mockery")
+
+  # "started" and "base_done" can coalesce into one poll window, leaving the
+  # replicate bar opened against an unknown total. The first counted event has
+  # to correct it, or the run draws no progress at all.
+  mockery::stub(.ferx_bootstrap_progress_handler, "requireNamespace", FALSE)
+  h <- .ferx_bootstrap_progress_handler(environment())
+
+  out <- capture.output(
+    suppressMessages({
+      h("base_done", 0L, 0L, FALSE)
+      h("replicate", 2L, 4L, FALSE)
+      h("finished", 0L, 0L, FALSE)
+    })
+  )
+  expect_true(any(grepl("50%", out, fixed = TRUE)))
+})
+
+test_that("a fully resumed run does not open a zero-width text bar", {
+  skip_if_not_installed("mockery")
+
+  # A `directory` resume holding every replicate reports 0 left to fit, and
+  # txtProgressBar() stops on `max <= min`.
+  mockery::stub(.ferx_bootstrap_progress_handler, "requireNamespace", FALSE)
+  h <- .ferx_bootstrap_progress_handler(environment())
+
+  msgs <- capture_messages({
+    h("started", 4L, 0L, FALSE)
+    h("finished", 0L, 0L, FALSE)
+  })
+  expect_true(any(grepl("Reusing 4 replicates", msgs, fixed = TRUE)))
+  expect_true(any(grepl("Bootstrap replicates", msgs, fixed = TRUE)))
 })
 
 test_that("a handler error cannot take the run down with it", {

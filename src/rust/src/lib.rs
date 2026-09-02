@@ -4032,6 +4032,14 @@ fn bootstrap_draw_progress(callback: &Function, event: BootstrapEvent) {
     // comes back as an `Err` rather than a longjmp out of a frame that still
     // owns a running worker thread. Dropping it is deliberate: a bootstrap that
     // may have taken hours must not be lost to a progress bar.
+    //
+    // `R_tryEval` establishes a top-level context, so it also *consumes* a
+    // pending user interrupt and reports it here as that same dropped `Err`. A
+    // Ctrl-C during a watched run is therefore swallowed, where an unwatched one
+    // would have stayed queued and aborted at the end of `.Call`. That is the
+    // trade this function is making, and it is the same one: an interrupt that
+    // landed on a redraw must not discard the replicates already fitted. The
+    // run stays uninterruptible either way - see the note in `?ferx_bootstrap`.
     let _ = callback.call(pairlist!(
         stage,
         completed as i32,
@@ -4064,6 +4072,9 @@ fn run_bootstrap_reporting(
             *slot = Some(event);
         }
     };
+    // Read without clearing: while a phase is slow the same event is delivered
+    // again on every tick, which is what keeps a `cli` spinner animating through
+    // a long base fit. The R handler is idempotent, so a repeat costs a redraw.
     let take_latest = || latest.lock().ok().and_then(|slot| *slot);
 
     std::thread::scope(|scope| {

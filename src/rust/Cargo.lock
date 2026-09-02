@@ -1161,3 +1161,11 @@ dependencies = [
  "log",
  "simd-adler32",
 ]
+
+[[patch.unused]]
+name = "ferx-core"
+version = "0.3.1"
+
+[[patch.unused]]
+name = "ferx-tools"
+version = "0.3.1"
