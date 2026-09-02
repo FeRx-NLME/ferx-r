@@ -332,6 +332,23 @@
 
 ## Bug fixes
 
+- **An infusion into a built-in absorption compartment is no longer delivered
+  twice** ([ferx-core #1187](https://github.com/FeRx-NLME/ferx-core/issues/1187)).
+  A `RATE > 0` or `RATE = -2` dose into the absorption compartment of an ODE model
+  had its rate applied both through the absorption kernel and, a second time, as a
+  plain input rate straight into the target compartment - so the dose was double
+  counted *and* the second copy bypassed absorption entirely. On a mass-balance
+  readout the excess is exactly `2 * F * amt`; on a concentration readout it is
+  worst early (214x at t = 0.5 on a transit model) and settles near 1.86x once
+  both copies have distributed.
+
+  Six surfaces were affected: ODE `IPRED` and the state columns in `sdtab`, the
+  cumulative hazard and `ferx_simulate()` event times of a joint PK-TTE model,
+  the CTMM likelihood, and `[derived]` grid integrals. The event-driven path
+  returned a correct `IPRED` beside wrong states, so an sdtab row could disagree
+  with itself. Bolus dosing, and any model whose infusion targets a central
+  compartment, were never affected.
+
 - **`ferx_get_warnings()` now answers a failed covariance step with the advice
   it was written to give.** Every targeted branch of the covariance guidance -
   a non-positive-definite Hessian with its eigenvalue list, ill-conditioned
