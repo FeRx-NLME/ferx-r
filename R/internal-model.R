@@ -52,7 +52,8 @@ ferx_section_headers <- function(lines) {
 }
 
 # Detect an unambiguous model-type label from [structural_model] lines.
-# Returns a short string ("1-cpt oral", "ODE", etc.) or NULL when unrecognised.
+# Returns a short string ("1-cpt oral", "ODE", "compartment-free", etc.) or
+# NULL when unrecognised.
 # Labels and the recognised function names are kept in sync with the Rust
 # parser (ferx-core src/parser/model_parser.rs `pk_func_name` match arms) so
 # pre-fit `ferx_model_inspect(path)` reports the same string the engine would
@@ -90,7 +91,16 @@ ferx_section_headers <- function(lines) {
 
   m <- regmatches(s, regexpr("\\bpk\\s+([A-Za-z_][A-Za-z_0-9]*)\\s*\\(",
                              s, perl = TRUE))
-  if (length(m) == 0L) return(NULL)
+  if (length(m) == 0L) {
+    # A compartment-free structural model declares the prediction directly.
+    # The engine requires a y assignment and rejects mixing this form with a
+    # pk/ode declaration, so y is the unambiguous marker on this pre-fit path.
+    y_re <- "^\\s*y(?:\\s*\\[\\s*CMT\\s*=\\s*\\d+\\s*\\])?\\s*="
+    if (any(grepl(y_re, lines, ignore.case = TRUE, perl = TRUE))) {
+      return("compartment-free")
+    }
+    return(NULL)
+  }
   fn <- sub("^pk\\s+([A-Za-z_][A-Za-z_0-9]*)\\s*\\(.*", "\\1", m, perl = TRUE)
 
   # Long `*_compartment_*` aliases collapse to their `*_cpt_*` equivalents.
