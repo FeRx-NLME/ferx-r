@@ -260,6 +260,12 @@
 #'     block (\code{CMT=2: DV ~ proportional(...)} for plasma,
 #'     \code{CMT=3: DV ~ additive(...)} for the PD effect). Demonstrates
 #'     multi-endpoint fitting; requires \code{gradient = fd}.}
+#'   \item{emax_timecourse}{Compartment-free Emax response-time model -- the
+#'     NONMEM \code{$PRED} equivalent. The assignments in
+#'     \code{[structural_model]} calculate \code{y} directly for each
+#'     observation, with no \code{pk}, \code{ode}, compartments, doses, or
+#'     integration. Paired with a fully synthetic 30-subject dataset generated
+#'     from a fixed seed and anchored against the equivalent NONMEM model.}
 #'   \item{warfarin_derived}{One-compartment oral (warfarin) with a
 #'     \code{[derived]} block demonstrating per-row expressions (KE, T_HALF),
 #'     aggregates (CMAX, TMAX, CMAX_D1), numeric integration (AUC_0_72,

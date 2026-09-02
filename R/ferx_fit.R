@@ -918,8 +918,9 @@
 #'     from the parsed \code{CompiledModel} so it reflects exactly what
 #'     ferx-core ran. Fields: \code{theta_names} (character vector of
 #'     population parameter names), \code{model_type} (short label such as
-#'     \code{"1-cpt oral"}, \code{"ODE"}, or \code{NULL} when the structural
-#'     form is not one of the known analytical PK families), \code{iiv}
+#'     \code{"1-cpt oral"}, \code{"ODE"}, or \code{"compartment-free"}, or
+#'     \code{NULL} when the structural form is not one of the known
+#'     analytical PK families), \code{iiv}
 #'     (omega names), \code{iov} (kappa names), \code{iov_weights} (per-kappa
 #'     sample-size weight expressions, present only when some kappa declares
 #'     \code{weight = }), \code{residual} (error type string). Use

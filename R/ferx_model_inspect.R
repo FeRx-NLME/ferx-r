@@ -15,7 +15,8 @@
 #'
 #' @return A named list (invisibly) with fields: \code{theta_names}
 #'   (character vector of population parameter names), \code{model_type}
-#'   (short label such as \code{"1-cpt oral"} or \code{NULL} when not
+#'   (short label such as \code{"1-cpt oral"}, \code{"ODE"}, or
+#'   \code{"compartment-free"}, or \code{NULL} when not
 #'   unambiguously detectable), \code{iiv} (omega names), \code{iov}
 #'   (kappa names), \code{iov_weights} (per-kappa sample-size weight
 #'   expressions from \code{kappa K ~ <var> weight = <expr>}, \code{NA} for

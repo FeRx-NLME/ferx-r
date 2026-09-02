@@ -42,6 +42,22 @@ test_that("$data path exists on disk for every bundled example", {
     )
   }
 })
+test_that("emax_timecourse bundles a compartment-free model and synthetic data", {
+  ex <- ferx_example("emax_timecourse")
+
+  structural <- ferx:::.ferx_extract_blocks(ex$model)$structural_model
+  expect_true(any(grepl("^EFF\\s*=", structural)))
+  expect_true(any(grepl("^y\\s*=", structural)))
+  expect_false(any(grepl("^(pk|ode|ode_template)\\b", structural)))
+  capture.output(s <- ferx_model_inspect(ex$model))
+  expect_equal(s$model_type, "compartment-free")
+
+  dat <- utils::read.csv(ex$data)
+  expect_identical(names(dat), c("ID", "TIME", "DV", "MDV"))
+  expect_equal(nrow(dat), 240L)
+  expect_equal(length(unique(dat$ID)), 30L)
+  expect_false("AMT" %in% names(dat))
+})
 test_that("warfarin_derived $data points to warfarin.csv (alias check)", {
   ex <- ferx_example("warfarin_derived")
   expect_true(grepl("warfarin\\.csv$", ex$data))

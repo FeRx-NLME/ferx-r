@@ -12,6 +12,7 @@ Fast nonlinear mixed effects (NLME) modeling in R, powered by a Rust backend.
 
 - **FOCE/FOCEI estimation** 
 - **Analytical PK models**: 1- and 2-compartment (oral/IV)
+- **Compartment-free models**: direct response equations (`$PRED`-equivalent)
 - **ODE-based models**: Five ODE steppers for general `[odes]` models -- Dormand-Prince RK45 (default), high-order Verner 7(6), and three stiff Rosenbrock methods, selected with `settings = list(ode_method = ...)`
 - **NONMEM-compatible**: reads standard NONMEM CSV datasets
 - **BLOQ handling**: Beal's M3 likelihood for observations below the LLOQ
@@ -141,6 +142,24 @@ Models are defined in `.ferx` files:
 ```
 
 See `ferx_example()` for available bundled examples.
+
+### Compartment-free structural models
+
+Dose-response curves, response time courses, and meta-regression models can
+declare their prediction directly in `[structural_model]`, without a `pk`,
+`ode`, or `ode_template` line:
+
+```
+[structural_model]
+  EFF = EMAX * TIME / (ET50 + TIME)
+  y   = E0 - EFF
+```
+
+Here `EFF` is a named intermediate and `y` is the required prediction. The
+equation is evaluated once per observation, so there are no compartments to
+dose and nothing to integrate; the dataset does not need an `AMT` column. See
+`ferx_example("emax_timecourse")` for a complete synthetic example equivalent
+to a NONMEM `$PRED` model.
 
 ## API Reference
 
