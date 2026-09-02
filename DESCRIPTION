@@ -27,7 +27,7 @@ Suggests:
     knitr,
     rmarkdown,
     rstudioapi,
-    testthat (>= 3.0.0),
+    testthat (>= 3.1.5),
     xpose,
     xpose4
 URL: https://ferx-nlme.github.io/reference/

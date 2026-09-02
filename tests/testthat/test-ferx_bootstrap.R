@@ -189,6 +189,7 @@ test_that("argument validation happens before anything is fitted", {
                               run_base_model = FALSE),
                "run_base_model")
   expect_error(ferx_bootstrap(ex$model, ex$data, dofv = NA), "TRUE or FALSE")
+  expect_error(ferx_bootstrap(ex$model, ex$data, progress = NA), "TRUE or FALSE")
   expect_error(ferx_bootstrap(ex$model, ex$data, stratify_on = NA),
                "single column name")
   expect_error(ferx_bootstrap(ex$model, ex$data, sample_size = c(3, 4)),
@@ -289,4 +290,172 @@ test_that("print and plot work on a bootstrap result", {
                    bs$parameter_names[1])
   expect_error(plot(bs, parameters = "NOPE"), "Unknown parameter")
   expect_error(plot(bs, y = 1), "does not use `y`")
+})
+
+# -- progress ---------------------------------------------------------------
+
+test_that("a watched run reports its fits and returns the same numbers", {
+  skip_if_not_installed("mockery")
+
+  ex <- ferx_example("warfarin")
+
+  seen <- list()
+  handler <- function(stage, completed, total, base_fit) {
+    seen[[length(seen) + 1L]] <<- list(stage = stage, completed = completed,
+                                       total = total, base_fit = base_fit)
+    invisible(NULL)
+  }
+  mockery::stub(ferx_bootstrap, ".ferx_bootstrap_progress_handler",
+                function(...) handler)
+
+  watched <- ferx_bootstrap(ex$model, ex$data, samples = 4L, seed = 42,
+                            threads = 2L, progress = TRUE)
+  quiet <- ferx_bootstrap(ex$model, ex$data, samples = 4L, seed = 42,
+                          threads = 2L, progress = FALSE)
+
+  # The events are drawn on a timer, so which ones arrive is a race - but the
+  # last one always is, and it is the one that clears the bar.
+  expect_gt(length(seen), 0L)
+  expect_identical(seen[[length(seen)]]$stage, "finished")
+  stages <- vapply(seen, function(e) e$stage, character(1))
+  expect_true(all(stages %in% c("started", "base_done", "replicate", "dofv",
+                                "finished")))
+
+  # Watching a run must not change it: same seed, same estimates.
+  expect_equal(watched$parameters, quiet$parameters)
+})
+
+test_that("the progress handler tolerates a coalesced event stream", {
+  # Events are coalesced on the way over, so a stage may arrive without the one
+  # that would normally have opened its bar. Each has to stand on its own.
+  h <- .ferx_bootstrap_progress_handler(environment())
+  expect_no_error(h("replicate", 3L, 10L, FALSE))
+  expect_no_error(h("dofv", 1L, 10L, FALSE))
+  expect_no_error(h("finished", 0L, 0L, FALSE))
+  # And a second "finished" - closing a bar that is already closed is what a
+  # duplicated final event does.
+  expect_no_error(h("finished", 0L, 0L, FALSE))
+})
+
+test_that("the progress handler falls back to a text bar without cli", {
+  skip_if_not_installed("mockery")
+
+  mockery::stub(.ferx_bootstrap_progress_handler, "requireNamespace", FALSE)
+  h <- .ferx_bootstrap_progress_handler(environment())
+
+  out <- capture.output(
+    suppressMessages({
+      h("started", 0L, 4L, FALSE)
+      h("replicate", 2L, 4L, FALSE)
+      h("finished", 0L, 0L, FALSE)
+    })
+  )
+  expect_true(any(grepl("50%", out, fixed = TRUE)))
+})
+
+test_that("the handler holds the frame it was made in", {
+  # The bars are drawn long after the factory returns, so the `envir` default
+  # has to be forced while its caller is still on the stack - cli otherwise
+  # ties the bar to the global environment and nothing ever closes it.
+  captured <- NULL
+  make <- function() {
+    captured <<- environment()
+    .ferx_bootstrap_progress_handler()
+  }
+  h <- make()
+  expect_identical(environment(h)$envir, captured)
+})
+
+test_that("a bar opened without a total is reopened once the total arrives", {
+  skip_if_not_installed("mockery")
+
+  # "started" and "base_done" can coalesce into one poll window, leaving the
+  # replicate bar opened against an unknown total. The first counted event has
+  # to correct it, or the run draws no progress at all.
+  mockery::stub(.ferx_bootstrap_progress_handler, "requireNamespace", FALSE)
+  h <- .ferx_bootstrap_progress_handler(environment())
+
+  out <- capture.output(
+    suppressMessages({
+      h("base_done", 0L, 0L, FALSE)
+      h("replicate", 2L, 4L, FALSE)
+      h("finished", 0L, 0L, FALSE)
+    })
+  )
+  expect_true(any(grepl("50%", out, fixed = TRUE)))
+})
+
+test_that("a fully resumed run does not open a zero-width text bar", {
+  skip_if_not_installed("mockery")
+
+  # A `directory` resume holding every replicate reports 0 left to fit, and
+  # txtProgressBar() stops on `max <= min`.
+  mockery::stub(.ferx_bootstrap_progress_handler, "requireNamespace", FALSE)
+  h <- .ferx_bootstrap_progress_handler(environment())
+
+  msgs <- capture_messages({
+    h("started", 4L, 0L, FALSE)
+    h("finished", 0L, 0L, FALSE)
+  })
+  expect_true(any(grepl("Reusing 4 replicates", msgs, fixed = TRUE)))
+  expect_true(any(grepl("Bootstrap replicates", msgs, fixed = TRUE)))
+})
+
+test_that("a handler error cannot take the run down with it", {
+  # The engine drops what the handler throws, but the handler is ours: it must
+  # not throw in the first place, whatever it is handed.
+  h <- .ferx_bootstrap_progress_handler(environment())
+  expect_no_error(h("nonsense", NA_integer_, NA_integer_, NA))
+})
+
+test_that("an out-of-order count never steps the bar backwards", {
+  skip_if_not_installed("mockery")
+
+  # `completed` comes from a `fetch_add` inside the engine's `par_iter` and is
+  # reported from whichever worker finished, so the count reaching the slot this
+  # session polls is not monotone. The text bar makes the regression visible:
+  # 5/8 followed by 4/8 redrew a shorter bar, and cli's ETA reads the same rate.
+  mockery::stub(.ferx_bootstrap_progress_handler, "requireNamespace", FALSE)
+  h <- .ferx_bootstrap_progress_handler(environment())
+
+  out <- capture.output(
+    suppressMessages({
+      h("started", 0L, 8L, FALSE)
+      h("replicate", 5L, 8L, FALSE)
+      h("replicate", 4L, 8L, FALSE)
+      h("finished", 0L, 0L, FALSE)
+    })
+  )
+  drawn <- unique(regmatches(out, gregexpr("[0-9]+%", out))[[1]])
+  expect_true("62%" %in% drawn)
+  expect_false("50%" %in% drawn)
+})
+
+test_that("the delta-OFV bar survives whichever evaluation reports first", {
+  skip_if_not_installed("mockery")
+
+  # The swap cannot key on `completed == 1`: the evaluation carrying 1 need not
+  # be the one delivered first. And a replicate event arriving after the pass
+  # has started is a late one - it must not put the replicate bar back.
+  mockery::stub(.ferx_bootstrap_progress_handler, "requireNamespace", FALSE)
+  h <- .ferx_bootstrap_progress_handler(environment())
+  st <- environment(h)$state
+
+  suppressMessages({
+    h("started", 0L, 4L, FALSE)
+    h("replicate", 4L, 4L, FALSE)
+    h("dofv", 3L, 6L, FALSE)      # not the first evaluation
+    expect_identical(st$kind, "dofv")
+    expect_identical(st$total, 6L)
+    expect_identical(st$pos, 3L)
+
+    h("replicate", 3L, 4L, FALSE) # a straggler from the finished pass
+    expect_identical(st$kind, "dofv")
+    expect_identical(st$pos, 3L)
+
+    h("dofv", 6L, 6L, FALSE)
+    expect_identical(st$pos, 6L)
+    h("finished", 0L, 0L, FALSE)
+  })
+  expect_null(st$bar)
 })

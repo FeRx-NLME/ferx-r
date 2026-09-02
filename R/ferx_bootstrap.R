@@ -35,8 +35,14 @@
 #'
 #' This is `samples` (+ 1) complete fits. At PsN's rule-of-thumb 200 samples a
 #' model that takes a minute to fit takes over three hours, so `threads` is the
-#' argument that matters most. Note that the run is **not** interruptible with
-#' Ctrl-C once the replicates are underway.
+#' argument that matters most. `progress` (on by default in an interactive
+#' session) draws a bar as the replicates come in, so a long run says where it
+#' is. Note that the run is **not** interruptible with Ctrl-C once the
+#' replicates are underway - the bar advancing is not a Ctrl-C handler, and a
+#' Ctrl-C pressed while the bar is up is consumed rather than queued, so it does
+#' not abort the run when the fits finish either. Stopping a run means killing
+#' the session, so set `directory` before starting a long one: the replicates
+#' written there are reused, and a re-run fits only what is missing.
 #'
 #' @param model Path to a `.ferx` model file, or a `ferx_model` object from
 #'   [ferx_model()].
@@ -89,6 +95,12 @@
 #'   frames in hand and rarely wants eight files appearing in the working
 #'   directory. The CLI defaults the other way. Set it if you want to be able
 #'   to call [ferx_bootstrap_summarize()] later.
+#' @param progress Show a progress bar while the replicates fit. Default
+#'   `interactive()`, so a script or a knitted document prints nothing. Uses
+#'   the cli package when it is installed and [utils::txtProgressBar()]
+#'   otherwise. The bar is drawn by this R session while the fits run in the
+#'   engine, and reports what the run will actually do: a `directory` that
+#'   already holds most of a run counts only the replicates still to fit.
 #' @param verbose Print a one-line run header to stderr. Default `FALSE`.
 #'
 #' @return An object of class `ferx_bootstrap`, a list with:
@@ -152,6 +164,7 @@ ferx_bootstrap <- function(model,
                            skip_with_covstep_warnings = FALSE,
                            ci = 95,
                            directory = NULL,
+                           progress = interactive(),
                            verbose = FALSE) {
   if (inherits(model, "ferx_model")) {
     if (is.null(data)) data <- model$data
@@ -178,7 +191,7 @@ ferx_bootstrap <- function(model,
   for (nm in c("update_inits", "run_base_model", "keep_covariance", "dofv",
                "skip_minimization_terminated", "skip_estimate_near_boundary",
                "skip_covariance_step_terminated", "skip_with_covstep_warnings",
-               "verbose")) {
+               "progress", "verbose")) {
     v <- get(nm)
     if (!is.logical(v) || length(v) != 1L || is.na(v)) {
       stop("`", nm, "` must be TRUE or FALSE.")
@@ -222,7 +235,9 @@ ferx_bootstrap <- function(model,
     dofv,
     dir_arg,
     as.numeric(ci),
-    verbose
+    verbose,
+    # NULL is what tells the engine not to open a reporting thread at all.
+    if (isTRUE(progress)) .ferx_bootstrap_progress_handler() else NULL
   )
   if (length(res) == 0L) {
     stop("ferx_bootstrap: backend returned no result.")
@@ -499,6 +514,148 @@ plot.ferx_bootstrap <- function(x, y = NULL, parameters = NULL,
 }
 
 # -- internals --------------------------------------------------------------
+
+# The progress handler the engine calls while a run proceeds.
+#
+# The engine reports one event per completed fit and this draws it. Events are
+# coalesced on the way over - the engine redraws on a timer, so a fast run can
+# skip straight from "started" to a replicate count - so every stage opens the
+# bar it needs if it is not already open, rather than assuming the previous
+# stage arrived. Nothing here can throw: an error in a progress bar must not
+# lose a run that may have taken hours, and the caller drops it silently, so a
+# broken bar would otherwise fail invisibly and repeatedly.
+#
+# `envir` is the frame the bar belongs to: cli ties a progress bar's lifetime to
+# a calling frame, and the handler's own frame is gone before the next event.
+.ferx_bootstrap_progress_handler <- function(envir = parent.frame()) {
+  # The bars are drawn from the engine's poll loop, long after this factory has
+  # returned, so a lazy `parent.frame()` resolves against a call stack that no
+  # longer holds the fit - cli then falls back to the global environment, whose
+  # bar nothing closes when a run errors out.
+  force(envir)
+  use_cli <- requireNamespace("cli", quietly = TRUE)
+  state <- new.env(parent = emptyenv())
+  state$kind <- NULL      # "base", "replicate" or "dofv"
+  state$bar <- NULL
+  state$total <- NA_integer_
+  state$pos <- 0L
+  state$replicates <- NA_integer_
+  state$announced <- FALSE
+
+  labels <- c(base = "Fitting the base model",
+              replicate = "Bootstrap replicates",
+              dofv = "delta-OFV evaluations")
+
+  close_bar <- function() {
+    if (is.null(state$bar)) return(invisible(NULL))
+    if (use_cli) {
+      cli::cli_progress_done(id = state$bar)
+    } else {
+      close(state$bar)
+    }
+    state$bar <- NULL
+    state$kind <- NULL
+    state$total <- NA_integer_
+    state$pos <- 0L
+  }
+
+  # Open the bar for `kind` unless the one on screen already has that kind and
+  # that total. The total is half the key: a coalesced "started" leaves the
+  # replicate bar opened against NA, and reopening on the first counted event is
+  # what corrects it. `total` is NA for the base fit - a single fit of unknown
+  # length, so cli draws a spinner and the fallback prints one line.
+  open_bar <- function(kind, total) {
+    total <- if (is.null(total)) NA_integer_ else as.integer(total)
+    if (identical(state$kind, kind) && identical(state$total, total)) {
+      return(invisible(NULL))
+    }
+    close_bar()
+    state$kind <- kind
+    state$total <- total
+    state$pos <- 0L
+    state$bar <- if (use_cli) {
+      cli::cli_progress_bar(labels[[kind]], total = total, .envir = envir)
+    } else if (is.na(total) || total <= 0L) {
+      # Nothing to count against: the base fit is one fit of unknown length, and
+      # a fully resumed run has no replicate left to fit. txtProgressBar() stops
+      # on `max <= min`, so say it in a line instead of drawing a bar.
+      message(labels[[kind]], " ...")
+      NULL
+    } else {
+      utils::txtProgressBar(min = 0, max = total, style = 3)
+    }
+    invisible(NULL)
+  }
+
+  # Step the bar for `kind`, if that is the one on screen, and never backwards.
+  # `completed` is handed out by a `fetch_add` inside the engine's `par_iter`
+  # and reported from whichever worker finished the fit, so 5 can reach the slot
+  # this session polls before 4 does. Setting it back skews cli's ETA, which
+  # reads the rate, and in the text bar redraws a shorter bar.
+  advance <- function(kind, completed) {
+    if (is.null(state$bar) || !identical(state$kind, kind)) {
+      return(invisible(NULL))
+    }
+    if (length(completed) != 1L || is.na(completed) || completed <= state$pos) {
+      return(invisible(NULL))
+    }
+    state$pos <- completed
+    if (use_cli) {
+      cli::cli_progress_update(id = state$bar, set = completed, .envir = envir)
+    } else {
+      utils::setTxtProgressBar(state$bar, completed)
+    }
+    invisible(NULL)
+  }
+
+  # Advance a spinner that has no count to set. cli only animates a bar on an
+  # update, and the engine redelivers the latest event on its timer, so the base
+  # fit's repeated "started" is what keeps the spinner moving.
+  tick_bar <- function() {
+    if (is.null(state$bar) || !use_cli) return(invisible(NULL))
+    cli::cli_progress_update(id = state$bar, .envir = envir)
+    invisible(NULL)
+  }
+
+  function(stage, completed, total, base_fit) {
+    tryCatch({
+      if (identical(stage, "started")) {
+        state$replicates <- total
+        # `completed` carries the reused count on this one event: replicates a
+        # `directory` already holds, which this run will not fit again.
+        if (completed > 0L && !state$announced) {
+          state$announced <- TRUE
+          message("Reusing ", completed, " replicates already on disk")
+        }
+        if (isTRUE(base_fit)) {
+          open_bar("base", NA_integer_)
+          tick_bar()
+        } else {
+          open_bar("replicate", total)
+        }
+      } else if (identical(stage, "base_done")) {
+        open_bar("replicate", state$replicates)
+      } else if (identical(stage, "replicate")) {
+        # The delta-OFV pass starts only once every replicate is in, so a
+        # replicate event arriving after it is a late one under the same
+        # out-of-order delivery: step the bar while it is up, never put it back.
+        if (!identical(state$kind, "dofv")) open_bar("replicate", total)
+        advance("replicate", completed)
+      } else if (identical(stage, "dofv")) {
+        # Any delta-OFV event retires the replicate bar, not only the one
+        # carrying 1: which evaluation reports first is not knowable, so keying
+        # the swap on the count would draw the early ones onto the replicate bar
+        # and then restart the delta-OFV bar under them.
+        open_bar("dofv", total)
+        advance("dofv", completed)
+      } else if (identical(stage, "finished")) {
+        close_bar()
+      }
+    }, error = function(e) NULL)
+    invisible(NULL)
+  }
+}
+
 
 # Split an R `sample_size` into the (names, values) pair the Rust glue takes.
 # The PsN `1001=>12,1002=>24` string is assembled and parsed on the Rust side,
