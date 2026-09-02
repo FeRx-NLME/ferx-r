@@ -37,12 +37,17 @@
 #' model that takes a minute to fit takes over three hours, so `threads` is the
 #' argument that matters most. `progress` (on by default in an interactive
 #' session) draws a bar as the replicates come in, so a long run says where it
-#' is. Note that the run is **not** interruptible with Ctrl-C once the
-#' replicates are underway - the bar advancing is not a Ctrl-C handler, and a
-#' Ctrl-C pressed while the bar is up is consumed rather than queued, so it does
-#' not abort the run when the fits finish either. Stopping a run means killing
-#' the session, so set `directory` before starting a long one and re-run with
-#' `resume = TRUE`, which refits only the replicates that directory is missing.
+#' is.
+#'
+#' A run is interruptible: Ctrl-C is checked several times a second, the fits
+#' in flight stop at their next iteration, and the call raises `ferx_bootstrap:
+#' cancelled by user` rather than returning. It raises rather than returning
+#' the partial run because the replicates the interrupt aborted come back as
+#' *failed* fits, so a returned summary would be a normal-looking table
+#' computed over however many replicates happened to finish. The ones that did
+#' finish are not lost if `directory` was set - they are written there as they
+#' land - so set it before starting a long run, then either summarise them with
+#' [ferx_bootstrap_summarize()] or carry on with `resume = TRUE`.
 #'
 #' ## Resuming an interrupted run
 #'
