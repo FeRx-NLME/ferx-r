@@ -155,6 +155,13 @@
 
 ## New features
 
+- `ferx_gam_screen()`: GAM-based covariate pre-screening. For each ETA x covariate pair
+  fits `eta ~ f(cov)` and ranks covariates by AIC improvement over the null model
+  (delta_aic = AIC_null - AIC_best). Functional forms tried: linear, natural cubic
+  spline (df = 2 and 3 by default), and one-hot categorical. Warns when ETA shrinkage
+  exceeds 30%. All numerical work happens in the engine, via
+  `ferx_tools::gam::gam_screen()`.
+
 - **`ferx_bootstrap()`: the non-parametric case bootstrap, at PsN's
   `bootstrap` feature parity** ([ferx-core #1144](https://github.com/FeRx-NLME/ferx-core/issues/1144),
   engine side ferx-core #1140). Resample whole subjects with replacement, refit

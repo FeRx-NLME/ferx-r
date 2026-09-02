@@ -133,4 +133,10 @@ ferx_rust_bootstrap_summarize <- function(directory, skip_minimization_terminate
   .Call("wrap__ferx_rust_bootstrap_summarize", directory, skip_minimization_terminated, skip_estimate_near_boundary, skip_covariance_step_terminated, skip_with_covstep_warnings, confidence_level)
 }
 
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_gam_screen <- function(eta_names, eta_flat, n_subjects, shrinkage, cov_names, cov_flat, cov_kinds, spline_df, include_linear, shrinkage_warn) {
+  .Call("wrap__ferx_rust_gam_screen", as.character(eta_names), eta_flat, as.integer(n_subjects), shrinkage, as.character(cov_names), cov_flat, as.character(cov_kinds), as.integer(spline_df), include_linear, shrinkage_warn)
+}
+
 # nolint end

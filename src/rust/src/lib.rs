@@ -4469,6 +4469,134 @@ fn ferx_rust_bootstrap_summarize(
     out.into()
 }
 
+/// GAM covariate pre-screening (internal Rust computation layer).
+///
+/// All heavy computation (OLS, natural cubic splines, AIC model comparison)
+/// runs in Rust. The R side (`ferx_gam_screen`) handles input validation,
+/// per-subject covariate aggregation, and data-frame formatting.
+///
+/// @param eta_names Character vector, length n\_eta.
+/// @param eta_flat Numeric vector of length n\_subjects × n\_eta, column-major
+///   (all values for ETA 1, then ETA 2, …).  `NA` is treated as missing.
+/// @param n_subjects Integer: number of subjects (= number of rows per column).
+/// @param shrinkage Numeric vector, length n\_eta.  `NA` → unknown shrinkage.
+/// @param cov_names Character vector, length n\_cov.
+/// @param cov_flat Numeric vector of length n\_subjects × n\_cov, column-major.
+///   `NA` → missing for that subject / covariate.
+/// @param cov_kinds Character vector, length n\_cov: `"continuous"` or
+///   `"categorical"`.
+/// @param spline_df Integer vector of spline degrees of freedom to try.
+/// @param include_linear Logical: include the linear form as a candidate.
+/// @param shrinkage_warn Numeric fraction; emits a warning string when an
+///   ETA's shrinkage exceeds this threshold.
+/// @return Named list with parallel vectors (`eta_name`, `covariate`,
+///   `delta_aic`, `best_form`, `aic`, `aic_null`, `r_squared`, `shrinkage`)
+///   ready to be assembled into a `data.frame`, plus a `warnings` character
+///   vector.
+/// @keywords internal
+#[extendr]
+fn ferx_rust_gam_screen(
+    eta_names: Vec<String>,
+    eta_flat: Vec<f64>,
+    n_subjects: i32,
+    shrinkage: Vec<f64>,
+    cov_names: Vec<String>,
+    cov_flat: Vec<f64>,
+    cov_kinds: Vec<String>,
+    spline_df: Vec<i32>,
+    include_linear: bool,
+    shrinkage_warn: f64,
+) -> List {
+    let n = n_subjects as usize;
+    let n_eta = eta_names.len();
+    let n_cov = cov_names.len();
+
+    // Column slices from the flat (column-major) arrays.
+    let eta_cols: Vec<&[f64]> = (0..n_eta)
+        .map(|j| &eta_flat[j * n..(j + 1) * n])
+        .collect();
+    let eta_name_refs: Vec<&str> = eta_names.iter().map(|s| s.as_str()).collect();
+
+    let cov_cols: Vec<&[f64]> = (0..n_cov)
+        .map(|j| &cov_flat[j * n..(j + 1) * n])
+        .collect();
+    let cov_name_refs: Vec<&str> = cov_names.iter().map(|s| s.as_str()).collect();
+
+    let cov_kind_parsed: Vec<ferx_core::types::CovariateKind> = cov_kinds
+        .iter()
+        .map(|s| match s.as_str() {
+            "categorical" => ferx_core::CovariateKind::Categorical,
+            _ => ferx_core::CovariateKind::Continuous,
+        })
+        .collect();
+
+    let spline_df_usize: Vec<usize> = spline_df
+        .iter()
+        .filter(|&&d| d > 0)
+        .map(|&d| d as usize)
+        .collect();
+
+    let opts = ferx_tools::gam::GamOptions {
+        etas: None,
+        covariates: None,
+        spline_df: spline_df_usize,
+        include_linear,
+        shrinkage_warn_threshold: shrinkage_warn,
+    };
+
+    let result = ferx_tools::gam::gam_screen_raw(
+        &eta_name_refs,
+        &eta_cols,
+        &shrinkage,
+        &cov_name_refs,
+        &cov_cols,
+        &cov_kind_parsed,
+        &opts,
+    );
+
+    // Flatten into parallel vectors for the R side.
+    // aic_null per row = score.aic + score.delta_aic (= per-covariate null AIC
+    // computed inside screen_eta_raw, not stored separately but recoverable
+    // since delta_aic = aic_null_local - aic_best).
+    let mut out_eta_name: Vec<String> = Vec::new();
+    let mut out_covariate: Vec<String> = Vec::new();
+    let mut out_delta_aic: Vec<f64> = Vec::new();
+    let mut out_best_form: Vec<String> = Vec::new();
+    let mut out_aic: Vec<f64> = Vec::new();
+    let mut out_aic_null: Vec<f64> = Vec::new();
+    let mut out_r_squared: Vec<f64> = Vec::new();
+    let mut out_shrinkage: Vec<f64> = Vec::new();
+
+    for eta_res in &result.eta_results {
+        for score in &eta_res.covariate_scores {
+            out_eta_name.push(eta_res.eta_name.clone());
+            out_covariate.push(score.covariate.clone());
+            out_delta_aic.push(score.delta_aic);
+            out_best_form.push(match &score.best_form {
+                ferx_tools::gam::CovariateForm::Linear => "Linear".into(),
+                ferx_tools::gam::CovariateForm::Spline { df } => format!("Spline(df={df})"),
+                ferx_tools::gam::CovariateForm::Categorical => "Categorical".into(),
+            });
+            out_aic.push(score.aic);
+            out_aic_null.push(score.aic + score.delta_aic);
+            out_r_squared.push(score.r_squared);
+            out_shrinkage.push(eta_res.shrinkage);
+        }
+    }
+
+    list!(
+        eta_name  = out_eta_name,
+        covariate = out_covariate,
+        delta_aic = out_delta_aic,
+        best_form = out_best_form,
+        aic       = out_aic,
+        aic_null  = out_aic_null,
+        r_squared = out_r_squared,
+        shrinkage = out_shrinkage,
+        warnings  = result.warnings
+    )
+}
+
 extendr_module! {
     mod ferx;
     fn ferx_rust_fit;
@@ -4491,4 +4619,5 @@ extendr_module! {
     fn ferx_rust_prepare_frem;
     fn ferx_rust_bootstrap;
     fn ferx_rust_bootstrap_summarize;
+    fn ferx_rust_gam_screen;
 }
