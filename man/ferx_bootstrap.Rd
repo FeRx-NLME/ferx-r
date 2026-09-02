@@ -167,7 +167,11 @@ model that takes a minute to fit takes over three hours, so \code{threads} is th
 argument that matters most. \code{progress} (on by default in an interactive
 session) draws a bar as the replicates come in, so a long run says where it
 is. Note that the run is \strong{not} interruptible with Ctrl-C once the
-replicates are underway - the bar advancing is not a Ctrl-C handler.
+replicates are underway - the bar advancing is not a Ctrl-C handler, and a
+Ctrl-C pressed while the bar is up is consumed rather than queued, so it does
+not abort the run when the fits finish either. Stopping a run means killing
+the session, so set \code{directory} before starting a long one: the replicates
+written there are reused, and a re-run fits only what is missing.
 }
 }
 \examples{

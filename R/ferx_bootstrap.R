@@ -40,9 +40,9 @@
 #' is. Note that the run is **not** interruptible with Ctrl-C once the
 #' replicates are underway - the bar advancing is not a Ctrl-C handler, and a
 #' Ctrl-C pressed while the bar is up is consumed rather than queued, so it does
-#' not abort the run when the fits finish either. Both ways round, the
-#' replicates already fitted are kept; give `directory` a path to resume a run
-#' rather than killing the session to stop one.
+#' not abort the run when the fits finish either. Stopping a run means killing
+#' the session, so set `directory` before starting a long one: the replicates
+#' written there are reused, and a re-run fits only what is missing.
 #'
 #' @param model Path to a `.ferx` model file, or a `ferx_model` object from
 #'   [ferx_model()].
@@ -538,6 +538,7 @@ plot.ferx_bootstrap <- function(x, y = NULL, parameters = NULL,
   state$kind <- NULL      # "base", "replicate" or "dofv"
   state$bar <- NULL
   state$total <- NA_integer_
+  state$pos <- 0L
   state$replicates <- NA_integer_
   state$announced <- FALSE
 
@@ -555,6 +556,7 @@ plot.ferx_bootstrap <- function(x, y = NULL, parameters = NULL,
     state$bar <- NULL
     state$kind <- NULL
     state$total <- NA_integer_
+    state$pos <- 0L
   }
 
   # Open the bar for `kind` unless the one on screen already has that kind and
@@ -570,6 +572,7 @@ plot.ferx_bootstrap <- function(x, y = NULL, parameters = NULL,
     close_bar()
     state$kind <- kind
     state$total <- total
+    state$pos <- 0L
     state$bar <- if (use_cli) {
       cli::cli_progress_bar(labels[[kind]], total = total, .envir = envir)
     } else if (is.na(total) || total <= 0L) {
@@ -584,8 +587,19 @@ plot.ferx_bootstrap <- function(x, y = NULL, parameters = NULL,
     invisible(NULL)
   }
 
-  update_bar <- function(completed) {
-    if (is.null(state$bar)) return(invisible(NULL))
+  # Step the bar for `kind`, if that is the one on screen, and never backwards.
+  # `completed` is handed out by a `fetch_add` inside the engine's `par_iter`
+  # and reported from whichever worker finished the fit, so 5 can reach the slot
+  # this session polls before 4 does. Setting it back skews cli's ETA, which
+  # reads the rate, and in the text bar redraws a shorter bar.
+  advance <- function(kind, completed) {
+    if (is.null(state$bar) || !identical(state$kind, kind)) {
+      return(invisible(NULL))
+    }
+    if (length(completed) != 1L || is.na(completed) || completed <= state$pos) {
+      return(invisible(NULL))
+    }
+    state$pos <- completed
     if (use_cli) {
       cli::cli_progress_update(id = state$bar, set = completed, .envir = envir)
     } else {
@@ -622,11 +636,18 @@ plot.ferx_bootstrap <- function(x, y = NULL, parameters = NULL,
       } else if (identical(stage, "base_done")) {
         open_bar("replicate", state$replicates)
       } else if (identical(stage, "replicate")) {
-        open_bar("replicate", total)
-        update_bar(completed)
+        # The delta-OFV pass starts only once every replicate is in, so a
+        # replicate event arriving after it is a late one under the same
+        # out-of-order delivery: step the bar while it is up, never put it back.
+        if (!identical(state$kind, "dofv")) open_bar("replicate", total)
+        advance("replicate", completed)
       } else if (identical(stage, "dofv")) {
+        # Any delta-OFV event retires the replicate bar, not only the one
+        # carrying 1: which evaluation reports first is not knowable, so keying
+        # the swap on the count would draw the early ones onto the replicate bar
+        # and then restart the delta-OFV bar under them.
         open_bar("dofv", total)
-        update_bar(completed)
+        advance("dofv", completed)
       } else if (identical(stage, "finished")) {
         close_bar()
       }

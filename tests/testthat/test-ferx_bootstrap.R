@@ -407,3 +407,55 @@ test_that("a handler error cannot take the run down with it", {
   h <- .ferx_bootstrap_progress_handler(environment())
   expect_no_error(h("nonsense", NA_integer_, NA_integer_, NA))
 })
+
+test_that("an out-of-order count never steps the bar backwards", {
+  skip_if_not_installed("mockery")
+
+  # `completed` comes from a `fetch_add` inside the engine's `par_iter` and is
+  # reported from whichever worker finished, so the count reaching the slot this
+  # session polls is not monotone. The text bar makes the regression visible:
+  # 5/8 followed by 4/8 redrew a shorter bar, and cli's ETA reads the same rate.
+  mockery::stub(.ferx_bootstrap_progress_handler, "requireNamespace", FALSE)
+  h <- .ferx_bootstrap_progress_handler(environment())
+
+  out <- capture.output(
+    suppressMessages({
+      h("started", 0L, 8L, FALSE)
+      h("replicate", 5L, 8L, FALSE)
+      h("replicate", 4L, 8L, FALSE)
+      h("finished", 0L, 0L, FALSE)
+    })
+  )
+  drawn <- unique(regmatches(out, gregexpr("[0-9]+%", out))[[1]])
+  expect_true("62%" %in% drawn)
+  expect_false("50%" %in% drawn)
+})
+
+test_that("the delta-OFV bar survives whichever evaluation reports first", {
+  skip_if_not_installed("mockery")
+
+  # The swap cannot key on `completed == 1`: the evaluation carrying 1 need not
+  # be the one delivered first. And a replicate event arriving after the pass
+  # has started is a late one - it must not put the replicate bar back.
+  mockery::stub(.ferx_bootstrap_progress_handler, "requireNamespace", FALSE)
+  h <- .ferx_bootstrap_progress_handler(environment())
+  st <- environment(h)$state
+
+  suppressMessages({
+    h("started", 0L, 4L, FALSE)
+    h("replicate", 4L, 4L, FALSE)
+    h("dofv", 3L, 6L, FALSE)      # not the first evaluation
+    expect_identical(st$kind, "dofv")
+    expect_identical(st$total, 6L)
+    expect_identical(st$pos, 3L)
+
+    h("replicate", 3L, 4L, FALSE) # a straggler from the finished pass
+    expect_identical(st$kind, "dofv")
+    expect_identical(st$pos, 3L)
+
+    h("dofv", 6L, 6L, FALSE)
+    expect_identical(st$pos, 6L)
+    h("finished", 0L, 0L, FALSE)
+  })
+  expect_null(st$bar)
+})
