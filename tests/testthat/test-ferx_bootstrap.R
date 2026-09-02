@@ -459,3 +459,65 @@ test_that("the delta-OFV bar survives whichever evaluation reports first", {
   })
   expect_null(st$bar)
 })
+
+test_that("resume and retry_failed are validated on the R side", {
+  ex <- ferx_example("warfarin")
+
+  # Both preconditions are the engine's too, but they are checked here so the
+  # message names the R argument and arrives before a model is compiled.
+  expect_error(ferx_bootstrap(ex$model, ex$data, resume = TRUE), "`directory`")
+  expect_error(
+    ferx_bootstrap(ex$model, ex$data, directory = tempfile(),
+                   retry_failed = TRUE),
+    "`resume = TRUE`"
+  )
+  expect_error(ferx_bootstrap(ex$model, ex$data, resume = NA), "TRUE or FALSE")
+  expect_error(ferx_bootstrap(ex$model, ex$data, retry_failed = NA),
+               "TRUE or FALSE")
+})
+
+test_that("resume reaches the engine", {
+  ex <- ferx_example("warfarin")
+  d <- file.path(tempdir(), "ferx-bs-resume-empty")
+  unlink(d, recursive = TRUE)
+  dir.create(d, showWarnings = FALSE)
+
+  # A directory with nothing to continue is the engine's error, not R's - and
+  # getting it proves the flag crossed the FFI rather than being dropped.
+  expect_error(
+    ferx_bootstrap(ex$model, ex$data, samples = 2L, directory = d,
+                   resume = TRUE),
+    "raw_results.csv"
+  )
+})
+
+test_that("a resumed run equals the uninterrupted one it continues", {
+  ex <- ferx_example("warfarin")
+  d <- file.path(tempdir(), "ferx-bs-resume")
+  unlink(d, recursive = TRUE)
+
+  full <- ferx_bootstrap(ex$model, ex$data, samples = 4L, seed = 11,
+                         threads = 2L, directory = d)
+
+  # Stand in for an interrupted run: drop the last two replicates from
+  # `raw_results.csv`, leaving the manifest and the first two behind. The lines
+  # are edited as text so the recorded estimates keep every digit - a round
+  # trip through read.csv would round them, and bit-exactness is the property
+  # under test.
+  raw <- file.path(d, "raw_results.csv")
+  lines <- readLines(raw)
+  keep <- c(TRUE, sub(",.*$", "", lines[-1]) %in% c("0", "1", "2"))
+  writeLines(lines[keep], raw)
+
+  resumed <- ferx_bootstrap(ex$model, ex$data, samples = 4L, seed = 11,
+                            threads = 2L, directory = d, resume = TRUE)
+
+  # A reused replicate's draw is a pure function of (seed, index), so the
+  # continued run is the same run - estimates, diagnostics and all. `seconds`
+  # is the one column that legitimately moves: it is how long each fit took,
+  # and two of these were not fitted again.
+  drop_seconds <- function(x) x[, setdiff(names(x), "seconds"), drop = FALSE]
+  expect_identical(drop_seconds(resumed$raw), drop_seconds(full$raw))
+  expect_equal(resumed$parameters, full$parameters, tolerance = 1e-12)
+  expect_identical(resumed$n_completed, full$n_completed)
+})

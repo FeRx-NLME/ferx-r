@@ -22,6 +22,8 @@ ferx_bootstrap(
   skip_with_covstep_warnings = FALSE,
   ci = 95,
   directory = NULL,
+  resume = FALSE,
+  retry_failed = FALSE,
   progress = interactive(),
   verbose = FALSE
 )
@@ -94,12 +96,21 @@ frames in hand and rarely wants eight files appearing in the working
 directory. The CLI defaults the other way. Set it if you want to be able
 to call \code{\link[=ferx_bootstrap_summarize]{ferx_bootstrap_summarize()}} later.}
 
+\item{resume}{Continue an interrupted run in \code{directory} instead of starting
+a fresh one, refitting only the replicates that directory does not already
+hold. Default \code{FALSE}. Needs \code{directory}.}
+
+\item{retry_failed}{Refit the replicates a resumed run finds recorded as
+\emph{failed}, instead of carrying the failure forward. Default \code{FALSE} (PsN's
+default). Needs \code{resume = TRUE}.}
+
 \item{progress}{Show a progress bar while the replicates fit. Default
 \code{interactive()}, so a script or a knitted document prints nothing. Uses
 the cli package when it is installed and \code{\link[utils:txtProgressBar]{utils::txtProgressBar()}}
 otherwise. The bar is drawn by this R session while the fits run in the
-engine, and reports what the run will actually do: a \code{directory} that
-already holds most of a run counts only the replicates still to fit.}
+engine, and reports what the run will actually do: a \code{resume = TRUE} run
+whose \code{directory} already holds most of the replicates counts only the
+ones still to fit.}
 
 \item{verbose}{Print a one-line run header to stderr. Default \code{FALSE}.}
 }
@@ -170,8 +181,30 @@ is. Note that the run is \strong{not} interruptible with Ctrl-C once the
 replicates are underway - the bar advancing is not a Ctrl-C handler, and a
 Ctrl-C pressed while the bar is up is consumed rather than queued, so it does
 not abort the run when the fits finish either. Stopping a run means killing
-the session, so set \code{directory} before starting a long one: the replicates
-written there are reused, and a re-run fits only what is missing.
+the session, so set \code{directory} before starting a long one and re-run with
+\code{resume = TRUE}, which refits only the replicates that directory is missing.
+}
+
+\subsection{Resuming an interrupted run}{
+
+\code{resume = TRUE} continues the run in \code{directory}, refitting only the sample
+indices its \code{raw_results.csv} does not already carry. It is sound because a
+replicate's draw is a pure function of \verb{(seed, index)}: a reused replicate is
+bit-for-bit the one an uninterrupted run would have produced, so a resumed
+run's artefacts are identical to that run's. The base fit is reused too and
+is deliberately \emph{not} refitted - a second fit can land on a slightly
+different optimum, and with \code{update_inits = TRUE} that would start the new
+replicates from a different point than the ones already on disk.
+
+The engine refuses to resume from a directory that belongs to a different
+run: the model and data hashes, the parameter names and the run settings are
+recorded alongside the replicates and are checked before any is reused.
+
+A replicate whose fit \emph{errored} is carried forward as a failure rather than
+refitted, matching PsN - a fit that failed usually fails again.
+\code{retry_failed = TRUE} (which needs \code{resume = TRUE}) refits those instead, and
+is for a failure that was transient - an out-of-memory kill, a full disk -
+rather than one of the model.
 }
 }
 \examples{
@@ -189,6 +222,12 @@ bs <- ferx_bootstrap(ex$model, ex$data, samples = 200,
                      stratify_on = "SEX", directory = "warfarin-bootstrap")
 ferx_bootstrap_summarize("warfarin-bootstrap",
                          skip_estimate_near_boundary = FALSE)
+
+# Continue that run after it was interrupted: only the replicates missing
+# from the directory are fitted again.
+bs <- ferx_bootstrap(ex$model, ex$data, samples = 200,
+                     stratify_on = "SEX", directory = "warfarin-bootstrap",
+                     resume = TRUE)
 }
 
 }
