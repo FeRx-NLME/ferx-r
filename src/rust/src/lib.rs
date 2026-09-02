@@ -4034,18 +4034,70 @@ fn bootstrap_draw_progress(callback: &Function, event: BootstrapEvent) {
     // may have taken hours must not be lost to a progress bar.
     //
     // `R_tryEval` establishes a top-level context, so it also *consumes* a
-    // pending user interrupt and reports it here as that same dropped `Err`. A
-    // Ctrl-C during a watched run is therefore swallowed, where an unwatched one
-    // would have stayed queued and aborted at the end of `.Call`. That is the
-    // trade this function is making, and it is the same one: an interrupt that
-    // landed on a redraw must not discard the replicates already fitted. The
-    // run stays uninterruptible either way - see the note in `?ferx_bootstrap`.
+    // pending user interrupt and reports it here as that same dropped `Err`.
+    // That is why the caller tests for an interrupt at the top of every tick,
+    // *before* drawing: the window in which a Ctrl-C can still be swallowed is
+    // then the handler call itself - microseconds against the redraw interval -
+    // and the next press lands.
     let _ = callback.call(pairlist!(
         stage,
         completed as i32,
         total as i32,
         base_fit
     ));
+}
+
+/// How often the watched path repaints the bar, in milliseconds. It is also the
+/// interval at which that path services R interrupts; a bar repainted at
+/// `POLL_MS` would flicker for no gain, and 150 ms is well inside what reads as
+/// instant for a Ctrl-C.
+const REDRAW_MS: u64 = 150;
+
+/// Run the bootstrap on a worker thread while this thread polls for Ctrl-C.
+///
+/// The unwatched counterpart of [`run_bootstrap_reporting`], and the same shape
+/// as the fit path at the top of this file (#315): nothing services R interrupts
+/// while the main thread is inside `.Call`, so the run moves to a scoped thread
+/// and the R thread waits on a channel with a timeout, flipping `cancel`
+/// whenever an interrupt is pending. The flag reaches every replicate through
+/// the model's `fit_options`, so the in-flight fits unwind on their own.
+///
+/// The worker signals on the channel rather than being polled with
+/// `is_finished()`, so `POLL_MS` bounds interrupt latency and not the wall time
+/// of the call - the same reason it is a channel in `ferx_rust_fit`.
+fn run_bootstrap_cancellable(
+    prepared: &ferx_core::PreparedRun,
+    options: &BootstrapOptions,
+    cancel: &CancelFlag,
+) -> std::result::Result<BootstrapResult, String> {
+    std::thread::scope(|scope| {
+        let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+        let worker = scope.spawn(move || {
+            let r = run_bootstrap(prepared, options);
+            // Ignore send errors: the receiver is only dropped after the worker
+            // has already reported.
+            let _ = done_tx.send(());
+            r
+        });
+
+        loop {
+            match done_rx.recv_timeout(std::time::Duration::from_millis(POLL_MS)) {
+                // Done, or the sender was dropped on a panic - `join` below
+                // says which.
+                Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    if pending_interrupt() {
+                        cancel.cancel();
+                    }
+                }
+            }
+        }
+
+        match worker.join() {
+            Ok(result) => result,
+            Err(_) => Err("the bootstrap panicked".to_string()),
+        }
+    })
 }
 
 /// Run the bootstrap on a worker thread while this thread draws its progress.
@@ -4061,10 +4113,16 @@ fn bootstrap_draw_progress(callback: &Function, event: BootstrapEvent) {
 /// fit, so nothing is missed by coalescing, and calling the handler on a timer
 /// rather than only on change is what lets a `cli` spinner animate through a
 /// long base fit.
+///
+/// The same tick services R interrupts, flipping `cancel` as soon as one is
+/// pending - which is what makes a watched run Ctrl-C-able too (#315). The check
+/// comes *before* the redraw because the redraw consumes a pending interrupt;
+/// see [`bootstrap_draw_progress`].
 fn run_bootstrap_reporting(
     prepared: &ferx_core::PreparedRun,
     options: &BootstrapOptions,
     callback: &Function,
+    cancel: &CancelFlag,
 ) -> std::result::Result<BootstrapResult, String> {
     let latest: std::sync::Mutex<Option<BootstrapEvent>> = std::sync::Mutex::new(None);
     let sink = |event: BootstrapEvent| {
@@ -4080,7 +4138,10 @@ fn run_bootstrap_reporting(
     std::thread::scope(|scope| {
         let worker = scope.spawn(|| run_bootstrap_with_progress(prepared, options, Some(&sink)));
         while !worker.is_finished() {
-            std::thread::sleep(std::time::Duration::from_millis(150));
+            std::thread::sleep(std::time::Duration::from_millis(REDRAW_MS));
+            if pending_interrupt() {
+                cancel.cancel();
+            }
             if let Some(event) = take_latest() {
                 bootstrap_draw_progress(callback, event);
             }
@@ -4446,10 +4507,18 @@ fn ferx_rust_bootstrap(
     };
 
     let data = (!data_path.is_empty()).then_some(data_path);
-    let prepared = match ferx_core::prepare_run(model_path, data) {
+    let mut prepared = match ferx_core::prepare_run(model_path, data) {
         Ok(p) => p,
         Err(e) => throw_r_error(format!("ferx_bootstrap: {e}")),
     };
+
+    // Install a cancellation token so Ctrl-C aborts the run (#315). There is no
+    // `BootstrapOptions::cancel` yet (ferx-core #1161), but there does not need
+    // to be: the flag lives on the model's own `fit_options`, and ferx-tools
+    // clones those into every replicate's options - and into the dofv pass - so
+    // one assignment here reaches the base fit and all of the replicates.
+    let cancel = CancelFlag::new();
+    prepared.parsed.fit_options.cancel = Some(cancel.clone());
     if verbose {
         if let Some(w) = &prepared.data_path_warning {
             eprintln!("Warning: {w}");
@@ -4462,12 +4531,40 @@ fn ferx_rust_bootstrap(
         );
     }
 
-    // A handler makes this the watched path; `NULL` keeps the plain call, so a
-    // run that reports nothing does not pay for a thread or a poll loop.
+    // A handler makes this the watched path; `NULL` keeps the plain one. Both
+    // run the fits on a worker thread - the watched one to draw from the R
+    // thread, the plain one to poll it for interrupts.
     let outcome = match progress.as_function() {
-        Some(callback) => run_bootstrap_reporting(&prepared, &options, &callback),
-        None => run_bootstrap(&prepared, &options),
+        Some(callback) => run_bootstrap_reporting(&prepared, &options, &callback, &cancel),
+        None => run_bootstrap_cancellable(&prepared, &options, &cancel),
     };
+
+    // Cancellation is reported as a condition, as `ferx_fit()` reports it, and
+    // it is checked before the outcome because a cancel does not necessarily
+    // produce an `Err`: it does when it lands on the base fit, but a cancel
+    // during the replicates comes back as `Ok` with the aborted replicates
+    // recorded as *failed* fits. Returning that would be worse than useless - a
+    // legitimate-looking table computed over however many replicates happened
+    // to finish, with nothing on it to say the run was cut short.
+    //
+    // The completed replicates are not lost when the run had a `directory`:
+    // ferx-tools journals each one as it lands, so they are on disk and
+    // `ferx_bootstrap_summarize()` will summarise them.
+    if cancel.is_cancelled() {
+        match &options.directory {
+            Some(dir) => throw_r_error(format!(
+                "ferx_bootstrap: cancelled by user. The replicates that finished are in '{}' - \
+                 ferx_bootstrap_summarize() summarises them.",
+                dir.display()
+            )),
+            None => throw_r_error(
+                "ferx_bootstrap: cancelled by user. No `directory` was set, so the replicates \
+                 that finished were held in memory only and are gone; set `directory` to keep \
+                 the partial results of a run you may want to stop.",
+            ),
+        }
+    }
+
     let result = match outcome {
         Ok(r) => r,
         Err(e) => throw_r_error(format!("ferx_bootstrap: {e}")),

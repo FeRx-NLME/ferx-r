@@ -459,3 +459,54 @@ test_that("the delta-OFV bar survives whichever evaluation reports first", {
   })
   expect_null(st$bar)
 })
+
+# -- cancellation -----------------------------------------------------------
+
+test_that("Ctrl-C stops a run, and what finished stays recoverable", {
+  skip_on_cran()
+  skip_on_os("windows")  # no SIGINT to raise
+
+  # `system(wait = FALSE)` runs its child through a shell that drops the signal
+  # on the way back to this process; `system2` delivers it.
+  sigint_self <- function(after) {
+    system2("sh",
+            c("-c", shQuote(sprintf("sleep %s; kill -INT %d", after, Sys.getpid()))),
+            wait = FALSE)
+  }
+  # A process started as a background job inherits SIG_IGN for SIGINT and R
+  # keeps it, so on some hosts a Ctrl-C cannot be simulated at all.
+  deliverable <- tryCatch({ sigint_self(0.2); Sys.sleep(2); FALSE },
+                          interrupt = function(e) TRUE)
+  skip_if_not(deliverable, "this R process does not receive SIGINT")
+
+  ex <- ferx_example("warfarin")
+  dir <- file.path(tempdir(), "boot-cancel")
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+
+  # Raise the interrupt while the replicates are underway. The flag is polled
+  # from the R thread, so the signal has to land inside the `.Call` - hence a
+  # run (many samples, one thread) that a couple of seconds cannot finish.
+  sigint_self(2)
+
+  cond <- tryCatch(
+    ferx_bootstrap(ex$model, ex$data, samples = 400L, seed = 42, threads = 1L,
+                   directory = dir, progress = FALSE),
+    error = identity, interrupt = identity
+  )
+  # The signal is only ours to convert once the engine call has started; before
+  # that R handles it itself, and the run under test never happened.
+  skip_if(inherits(cond, "interrupt"),
+          "the signal landed outside the engine call")
+
+  expect_s3_class(cond, "error")
+  expect_match(conditionMessage(cond), "cancelled by user")
+  expect_match(conditionMessage(cond), "ferx_bootstrap_summarize")
+
+  # A cancelled run raises rather than returning, so the replicates that did
+  # finish come back through the directory - the documented recovery path.
+  skip_if_not(file.exists(file.path(dir, "raw_results.csv")),
+              "the interrupt landed before the base fit finished")
+  bs <- ferx_bootstrap_summarize(dir)
+  expect_s3_class(bs, "ferx_bootstrap")
+  expect_gt(bs$n_completed, 0L)
+})

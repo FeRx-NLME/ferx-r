@@ -166,12 +166,16 @@ This is \code{samples} (+ 1) complete fits. At PsN's rule-of-thumb 200 samples a
 model that takes a minute to fit takes over three hours, so \code{threads} is the
 argument that matters most. \code{progress} (on by default in an interactive
 session) draws a bar as the replicates come in, so a long run says where it
-is. Note that the run is \strong{not} interruptible with Ctrl-C once the
-replicates are underway - the bar advancing is not a Ctrl-C handler, and a
-Ctrl-C pressed while the bar is up is consumed rather than queued, so it does
-not abort the run when the fits finish either. Stopping a run means killing
-the session, so set \code{directory} before starting a long one: the replicates
-written there are reused, and a re-run fits only what is missing.
+is.
+
+A run is interruptible: Ctrl-C is checked several times a second, the fits
+in flight stop at their next iteration, and the call raises \verb{ferx_bootstrap: cancelled by user} rather than returning. It raises rather than returning
+the partial run because the replicates the interrupt aborted come back as
+\emph{failed} fits, so a returned summary would be a normal-looking table
+computed over however many replicates happened to finish. The ones that did
+finish are not lost if \code{directory} was set - they are written there as they
+land - so set it before starting a long run and recover them with
+\code{\link[=ferx_bootstrap_summarize]{ferx_bootstrap_summarize()}}.
 }
 }
 \examples{

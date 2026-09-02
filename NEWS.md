@@ -155,6 +155,24 @@
 
 ## New features
 
+- **`ferx_bootstrap()` is interruptible with Ctrl-C** (#315). A 200-replicate run
+  held the console until it finished: Ctrl-C did nothing, `ferx_stop()` is
+  process-level and there is no `ferx_bootstrap_async()`, so the only way out of
+  a run started with the wrong `samples` or the wrong model was killing the
+  session. The engine ran on the thread that entered `.Call`, so nothing was free
+  to service R interrupts - the fix is the one `ferx_fit()` already uses: the
+  replicates fit on a worker thread while the R thread polls for an interrupt
+  several times a second and flips the engine's cancellation flag, which the
+  base fit and every replicate see.
+
+  A cancelled run **raises** `ferx_bootstrap: cancelled by user` rather than
+  returning what it had. The replicates the interrupt aborted come back from the
+  engine as *failed* fits, so a returned object would be a normal-looking summary
+  computed over however many happened to finish, with nothing on it to say the
+  run was cut short. What did finish is not lost when `directory` was set - the
+  engine writes each replicate as it lands, and `ferx_bootstrap_summarize(dir)`
+  summarises them - and the raised message says so.
+
 - **`ferx_bootstrap(progress = TRUE)`: a progress bar while the replicates fit.**
   A 200-sample bootstrap is minutes to hours behind one call, and until it
   returned there was nothing to say whether it was working or wedged. The engine
