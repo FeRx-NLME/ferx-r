@@ -23,7 +23,8 @@ ferx_rust_bootstrap(
   dofv,
   directory,
   confidence_level,
-  verbose
+  verbose,
+  progress
 )
 }
 \description{

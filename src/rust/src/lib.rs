@@ -4005,9 +4005,86 @@ fn ferx_rust_prepare_frem(
 // side neither re-derives nor re-parses any of them.
 
 use ferx_tools::bootstrap::{
-    output as bootstrap_output, resummarize, run_bootstrap, BootstrapOptions, BootstrapResult,
-    BootstrapSummary, SampleSize,
+    output as bootstrap_output, resummarize, run_bootstrap, run_bootstrap_with_progress,
+    BootstrapEvent, BootstrapOptions, BootstrapResult, BootstrapSummary, SampleSize,
 };
+
+/// Draw one progress event by calling the R function the wrapper passed in.
+///
+/// The R side sees `progress(stage, completed, total, base_fit)`, with `stage`
+/// one of `"started"`, `"base_done"`, `"replicate"`, `"dofv"` or `"finished"` -
+/// a string rather than an integer code so that the R handler reads as what it
+/// does. `Started` carries the run's size, so it arrives as
+/// `completed = <reused>`, `total = <replicates still to fit>`.
+fn bootstrap_draw_progress(callback: &Function, event: BootstrapEvent) {
+    let (stage, completed, total, base_fit) = match event {
+        BootstrapEvent::Started {
+            replicates,
+            reused,
+            base_fit,
+        } => ("started", reused, replicates, base_fit),
+        BootstrapEvent::BaseFitDone => ("base_done", 0, 0, false),
+        BootstrapEvent::ReplicateDone { completed, total } => ("replicate", completed, total, false),
+        BootstrapEvent::DeltaOfvDone { completed, total } => ("dofv", completed, total, false),
+        BootstrapEvent::Finished => ("finished", 0, 0, false),
+    };
+    // `Function::call` goes through `R_tryEval`, so an error in the handler
+    // comes back as an `Err` rather than a longjmp out of a frame that still
+    // owns a running worker thread. Dropping it is deliberate: a bootstrap that
+    // may have taken hours must not be lost to a progress bar.
+    let _ = callback.call(pairlist!(
+        stage,
+        completed as i32,
+        total as i32,
+        base_fit
+    ));
+}
+
+/// Run the bootstrap on a worker thread while this thread draws its progress.
+///
+/// R is single-threaded and may only be touched from the thread that entered
+/// `.Call`, while the replicates finish on a Rayon pool - so an event cannot be
+/// forwarded from where it is produced. The fit runs on a scoped thread
+/// instead, and the R thread polls the latest event and hands it to the R
+/// handler. The fits never wait on the drawing: the sink only overwrites a
+/// slot, and a coalesced event is one this thread was too slow to draw.
+///
+/// The poll is a redraw timer, not a sampling rate. An event *is* a completed
+/// fit, so nothing is missed by coalescing, and calling the handler on a timer
+/// rather than only on change is what lets a `cli` spinner animate through a
+/// long base fit.
+fn run_bootstrap_reporting(
+    prepared: &ferx_core::PreparedRun,
+    options: &BootstrapOptions,
+    callback: &Function,
+) -> std::result::Result<BootstrapResult, String> {
+    let latest: std::sync::Mutex<Option<BootstrapEvent>> = std::sync::Mutex::new(None);
+    let sink = |event: BootstrapEvent| {
+        if let Ok(mut slot) = latest.lock() {
+            *slot = Some(event);
+        }
+    };
+    let take_latest = || latest.lock().ok().and_then(|slot| *slot);
+
+    std::thread::scope(|scope| {
+        let worker = scope.spawn(|| run_bootstrap_with_progress(prepared, options, Some(&sink)));
+        while !worker.is_finished() {
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            if let Some(event) = take_latest() {
+                bootstrap_draw_progress(callback, event);
+            }
+        }
+        // The last event can land inside the final sleep, and it is the one
+        // that clears the bar.
+        if let Some(event) = take_latest() {
+            bootstrap_draw_progress(callback, event);
+        }
+        match worker.join() {
+            Ok(result) => result,
+            Err(_) => Err("the bootstrap panicked".to_string()),
+        }
+    })
+}
 
 /// Turn the `(names, values)` pair the R wrapper sends into a [`SampleSize`].
 ///
@@ -4308,7 +4385,9 @@ fn bootstrap_delta_ofv_df(result: &BootstrapResult, options: &BootstrapOptions) 
 /// Run the non-parametric case bootstrap.
 ///
 /// `data_path`, `stratify_on` and `directory` use `""` for "unset". `seed`
-/// crosses as a double because R has no 64-bit integer.
+/// crosses as a double because R has no 64-bit integer. `progress` is either an
+/// R function - called as `progress(stage, completed, total, base_fit)` while
+/// the run proceeds - or `NULL` for a run that reports nothing.
 #[extendr]
 #[allow(clippy::too_many_arguments)]
 fn ferx_rust_bootstrap(
@@ -4331,6 +4410,7 @@ fn ferx_rust_bootstrap(
     directory: &str,
     confidence_level: f64,
     verbose: bool,
+    progress: Robj,
 ) -> Robj {
     let options = match bootstrap_options_from_r(
         samples,
@@ -4371,7 +4451,13 @@ fn ferx_rust_bootstrap(
         );
     }
 
-    let result = match run_bootstrap(&prepared, &options) {
+    // A handler makes this the watched path; `NULL` keeps the plain call, so a
+    // run that reports nothing does not pay for a thread or a poll loop.
+    let outcome = match progress.as_function() {
+        Some(callback) => run_bootstrap_reporting(&prepared, &options, &callback),
+        None => run_bootstrap(&prepared, &options),
+    };
+    let result = match outcome {
         Ok(r) => r,
         Err(e) => throw_r_error(format!("ferx_bootstrap: {e}")),
     };

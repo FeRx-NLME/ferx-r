@@ -123,8 +123,8 @@ ferx_rust_prepare_frem <- function(model_path, data_path, covariates, categorica
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_bootstrap <- function(model_path, data_path, samples, seed, sample_size_keys, sample_size_values, stratify_on, update_inits, run_base_model, keep_covariance, threads, skip_minimization_terminated, skip_estimate_near_boundary, skip_covariance_step_terminated, skip_with_covstep_warnings, dofv, directory, confidence_level, verbose) {
-  .Call("wrap__ferx_rust_bootstrap", model_path, data_path, as.integer(samples), seed, as.character(sample_size_keys), sample_size_values, stratify_on, update_inits, run_base_model, keep_covariance, as.integer(threads), skip_minimization_terminated, skip_estimate_near_boundary, skip_covariance_step_terminated, skip_with_covstep_warnings, dofv, directory, confidence_level, verbose)
+ferx_rust_bootstrap <- function(model_path, data_path, samples, seed, sample_size_keys, sample_size_values, stratify_on, update_inits, run_base_model, keep_covariance, threads, skip_minimization_terminated, skip_estimate_near_boundary, skip_covariance_step_terminated, skip_with_covstep_warnings, dofv, directory, confidence_level, verbose, progress) {
+  .Call("wrap__ferx_rust_bootstrap", model_path, data_path, as.integer(samples), seed, as.character(sample_size_keys), sample_size_values, stratify_on, update_inits, run_base_model, keep_covariance, as.integer(threads), skip_minimization_terminated, skip_estimate_near_boundary, skip_covariance_step_terminated, skip_with_covstep_warnings, dofv, directory, confidence_level, verbose, progress)
 }
 
 #' @title Internal Rust backend binding

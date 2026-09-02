@@ -22,6 +22,7 @@ ferx_bootstrap(
   skip_with_covstep_warnings = FALSE,
   ci = 95,
   directory = NULL,
+  progress = interactive(),
   verbose = FALSE
 )
 }
@@ -93,6 +94,13 @@ frames in hand and rarely wants eight files appearing in the working
 directory. The CLI defaults the other way. Set it if you want to be able
 to call \code{\link[=ferx_bootstrap_summarize]{ferx_bootstrap_summarize()}} later.}
 
+\item{progress}{Show a progress bar while the replicates fit. Default
+\code{interactive()}, so a script or a knitted document prints nothing. Uses
+the cli package when it is installed and \code{\link[utils:txtProgressBar]{utils::txtProgressBar()}}
+otherwise. The bar is drawn by this R session while the fits run in the
+engine, and reports what the run will actually do: a \code{directory} that
+already holds most of a run counts only the replicates still to fit.}
+
 \item{verbose}{Print a one-line run header to stderr. Default \code{FALSE}.}
 }
 \value{
@@ -156,8 +164,10 @@ instead of refitting - but that needs \code{directory} to have been set.
 
 This is \code{samples} (+ 1) complete fits. At PsN's rule-of-thumb 200 samples a
 model that takes a minute to fit takes over three hours, so \code{threads} is the
-argument that matters most. Note that the run is \strong{not} interruptible with
-Ctrl-C once the replicates are underway.
+argument that matters most. \code{progress} (on by default in an interactive
+session) draws a bar as the replicates come in, so a long run says where it
+is. Note that the run is \strong{not} interruptible with Ctrl-C once the
+replicates are underway - the bar advancing is not a Ctrl-C handler.
 }
 }
 \examples{

@@ -155,6 +155,27 @@
 
 ## New features
 
+- **`ferx_bootstrap(progress = TRUE)`: a progress bar while the replicates fit.**
+  A 200-sample bootstrap is minutes to hours behind one call, and until it
+  returned there was nothing to say whether it was working or wedged. The engine
+  now reports each fit as it completes and R draws it - a cli progress bar when
+  the cli package is installed, `utils::txtProgressBar()` otherwise. Default
+  `interactive()`, so a script or a knitted document is unaffected.
+
+  The bar reports what the run will actually do: the base model gets a spinner
+  of its own (a bar sitting at 0/200 through a single fit reads as stuck),
+  `dofv = TRUE` gets a second bar for its second pass over the replicates, and a
+  resumed run counts only the replicates still to fit. Fitting happens on a
+  worker thread while this R session draws, so nothing in the run waits on the
+  bar, and a run watched and the same run unwatched produce the same numbers
+  from the same seed. `ferx bootstrap` on the command line grows the same bar
+  (`--no-progress` to suppress it).
+
+  ```r
+  bs <- ferx_bootstrap(ex$model, ex$data, samples = 200, threads = 8)
+  #> Bootstrap replicates [=========>          ]  97/200 | ETA 1m 28s
+  ```
+
 - `ferx_gam_screen()`: GAM-based covariate pre-screening. For each ETA x covariate pair
   fits `eta ~ f(cov)` and ranks covariates by AIC improvement over the null model
   (delta_aic = AIC_null - AIC_best). Functional forms tried: linear, natural cubic
