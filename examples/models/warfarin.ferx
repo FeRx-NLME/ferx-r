@@ -22,11 +22,6 @@
 [error_model]
   DV ~ proportional(PROP_ERR)
 
-[initial_values]
-  theta = [0.2, 10.0, 1.5]
-  omega = [0.09, 0.04, 0.30]
-  sigma = [0.02]
-
 [fit_options]
   method     = foce
   maxiter    = 300

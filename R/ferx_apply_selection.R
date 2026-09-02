@@ -190,6 +190,7 @@ ferx_apply_selection <- function(data, ignore = NULL, accept = NULL,
 #' @param x A \code{ferx_data} object.
 #' @param n Number of data rows to display. Default 6.
 #' @param ... Passed to \code{print.data.frame}.
+#' @return \code{x}, invisibly.
 #' @export
 print.ferx_data <- function(x, n = 6L, ...) {
   ex      <- attr(x, "exclusions", exact = TRUE)

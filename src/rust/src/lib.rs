@@ -380,7 +380,9 @@ fn ferx_rust_fit(
 /// @param seed Random seed
 /// @param match_method Propensity-score matching method: "none" (off),
 ///   "optimal", "nearest", or "rank" (requires observed DV)
-/// @return Data frame with ID, TIME, IPRED, DV_SIM columns
+/// @return Data frame with DRAW, SIM, ID, TIME, CMT, IPRED, DV_SIM, OBSERVED
+///   columns. DV_SIM carries the simulated 0/1 outcome for a `[binary_model]`
+///   endpoint row; OBSERVED is set only for TTE rows (NA otherwise).
 /// @export
 #[extendr]
 fn ferx_rust_simulate(
@@ -410,8 +412,12 @@ fn ferx_rust_simulate(
     };
     let iov_col = parsed.fit_options.iov_column.clone();
 
+    // Simulation reads a missing `DV` as a design point, not as a forgotten
+    // `MDV=1` (ferx-core #957): here the DV is the column being produced, so
+    // `DV = .` at a sampling time means "simulate here". `MDV=1` still excludes
+    // the record, and fitting keeps the skip.
     let (population, _) =
-        match ferx_core::api::read_population_for(
+        match ferx_core::api::read_population_for_simulation(
             &parsed.model,
             &parsed.covariate_decls,
             data_path,
@@ -451,7 +457,10 @@ fn ferx_rust_simulate(
         }
     };
 
-    attach_sim_warnings(sim_results_to_df(&output.results), output.warnings)
+    attach_sim_warnings(
+        sim_results_to_df(&output.results),
+        [design_point_warnings(&population), output.warnings].concat(),
+    )
 }
 
 /// Simulate using fitted parameters.
@@ -462,11 +471,16 @@ fn ferx_rust_simulate(
 /// @param omega_flat Row-major flattened omega matrix
 /// @param omega_dim Side length of the omega matrix
 /// @param sigma Fitted sigma vector
+/// @param omega_iov_flat Row-major flattened fitted IOV (kappa) omega matrix;
+///   empty when the model declares no `kappa`.
+/// @param omega_iov_dim Side length of the IOV omega matrix; 0 when no IOV.
 /// @param n_sim Number of simulations
 /// @param seed Random seed
 /// @param match_method Propensity-score matching method: "none" (off),
 ///   "optimal", "nearest", or "rank" (requires observed DV)
-/// @return Data frame with SIM, ID, TIME, IPRED, DV_SIM columns
+/// @return Data frame with DRAW, SIM, ID, TIME, CMT, IPRED, DV_SIM, OBSERVED
+///   columns. DV_SIM carries the simulated 0/1 outcome for a `[binary_model]`
+///   endpoint row; OBSERVED is set only for TTE rows (NA otherwise).
 /// @export
 #[extendr]
 #[allow(clippy::too_many_arguments)]
@@ -477,6 +491,8 @@ fn ferx_rust_simulate_from_fit(
     omega_flat: Vec<f64>,
     omega_dim: i32,
     sigma: Vec<f64>,
+    omega_iov_flat: Vec<f64>,
+    omega_iov_dim: i32,
     n_sim: i32,
     seed: i32,
     match_method: &str,
@@ -498,8 +514,12 @@ fn ferx_rust_simulate_from_fit(
     };
     let iov_col = parsed.fit_options.iov_column.clone();
 
+    // Simulation reads a missing `DV` as a design point, not as a forgotten
+    // `MDV=1` (ferx-core #957): here the DV is the column being produced, so
+    // `DV = .` at a sampling time means "simulate here". `MDV=1` still excludes
+    // the record, and fitting keeps the skip.
     let (population, _) =
-        match ferx_core::api::read_population_for(
+        match ferx_core::api::read_population_for_simulation(
             &parsed.model,
             &parsed.covariate_decls,
             data_path,
@@ -515,7 +535,15 @@ fn ferx_rust_simulate_from_fit(
             }
         };
 
-    let params = match params_from_fit(&parsed.model, &theta, &omega_flat, omega_dim, &sigma) {
+    let params = match params_from_fit(
+        &parsed.model,
+        &theta,
+        &omega_flat,
+        omega_dim,
+        &sigma,
+        &omega_iov_flat,
+        omega_iov_dim,
+    ) {
         Ok(p) => p,
         Err(e) => {
             rprintln!("{}", e);
@@ -543,21 +571,26 @@ fn ferx_rust_simulate_from_fit(
             return ().into();
         }
     };
-    attach_sim_warnings(sim_results_to_df(&output.results), output.warnings)
+    attach_sim_warnings(
+        sim_results_to_df(&output.results),
+        [design_point_warnings(&population), output.warnings].concat(),
+    )
 }
 
 /// Simulate state-reactive ("adaptive" / feedback) dosing from a model's
 /// `[adaptive_dosing]` block.
 ///
-/// The dosing regimen is not in the data — it is decided at run time by the
-/// declarative controller in the model file's `[adaptive_dosing]` block, which
+/// A declarative controller in the model file's `[adaptive_dosing]` block
 /// reads the simulated (optionally assay-noised) state at each decision time and
-/// titrates the next dose. The base subjects must therefore be **dose-free**
-/// (the controller supplies every dose); the data provides only the observation
-/// grid and any covariates.
+/// titrates the next dose. The data may carry a **pre-scheduled base regimen**
+/// (ordinary `EVID=1/4` dose rows - a loading / maintenance dose); the controller
+/// then augments it. A dose-free base subject (observation grid only) is equally
+/// valid. Base doses are honored in the trajectories and the `auc_target` metric
+/// but are **not** written to the dose ledger, which holds controller doses only.
 ///
 /// @param model_path Path to .ferx model file containing an `[adaptive_dosing]` block
-/// @param data_path Path to NONMEM-format CSV (dose-free base subjects + obs times)
+/// @param data_path Path to NONMEM-format CSV (observation grid, covariates, and
+///   optionally a pre-scheduled base regimen)
 /// @param n_sim Number of replicates
 /// @param seed Random seed
 /// @param verify "true"/"false" — run the frozen-schedule replay verifier after
@@ -594,7 +627,11 @@ fn ferx_rust_simulate_adaptive(
         ),
     };
     let iov_col = parsed.fit_options.iov_column.clone();
-    let (population, _) = match ferx_core::api::read_population_for(
+    // Simulation reads a missing `DV` as a design point, not as a forgotten
+    // `MDV=1` (ferx-core #957): here the DV is the column being produced, so
+    // `DV = .` at a sampling time means "simulate here". `MDV=1` still excludes
+    // the record, and fitting keeps the skip.
+    let (population, _) = match ferx_core::api::read_population_for_simulation(
         &parsed.model,
         &parsed.covariate_decls,
         data_path,
@@ -619,8 +656,9 @@ fn ferx_rust_simulate_adaptive(
         opts.max_decisions = max_decisions as usize;
     }
 
-    // A failure here (analytical model, non-dose-free subject, or a verify
-    // divergence that taints the result) is raised as an R error rather than
+    // A failure here (analytical model, an unsupported dosing/covariate
+    // combination, or a verify divergence that taints the result) is raised as an
+    // R error rather than
     // returned as NULL: the adaptive path has more — and more consequential —
     // failure modes than a plain simulate, and a verify divergence in particular
     // must not be silently missable.
@@ -632,7 +670,13 @@ fn ferx_rust_simulate_adaptive(
         spec,
         &opts,
     ) {
-        Ok(result) => adaptive_result_to_list(&result),
+        // Adaptive returns a list rather than a bare frame, so the design-point
+        // warning rides on the list itself; `ferx_simulate_adaptive()` surfaces
+        // it through the same `simulation_warnings` reader the other paths use.
+        Ok(result) => attach_sim_warnings(
+            adaptive_result_to_list(&result),
+            design_point_warnings(&population),
+        ),
         Err(e) => throw_r_error(format!("ferx_simulate_adaptive: {e}")),
     }
 }
@@ -746,6 +790,9 @@ fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult) -> Robj
 /// @param omega_flat Row-major flattened fitted omega matrix
 /// @param omega_dim Side length of the omega matrix
 /// @param sigma Fitted sigma vector
+/// @param omega_iov_flat Row-major flattened fitted IOV (kappa) omega matrix;
+///   empty when the model declares no `kappa`.
+/// @param omega_iov_dim Side length of the IOV omega matrix; 0 when no IOV.
 /// @param method Uncertainty method: `"asymptotic"` or `"sir"`
 /// @param cov_matrix_flat Row-major flattened packed-space covariance matrix
 ///   (empty when not using asymptotic mode)
@@ -758,7 +805,9 @@ fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult) -> Robj
 ///   uncertainty distribution
 /// @param n_sim_per_draw Number of eta/eps replicates per parameter draw
 /// @param seed Random seed for reproducibility
-/// @return Data frame with DRAW, SIM, ID, TIME, IPRED, DV_SIM columns
+/// @return Data frame with DRAW, SIM, ID, TIME, CMT, IPRED, DV_SIM, OBSERVED
+///   columns. DV_SIM carries the simulated 0/1 outcome for a `[binary_model]`
+///   endpoint row; OBSERVED is set only for TTE rows (NA otherwise).
 /// @export
 #[extendr]
 #[allow(clippy::too_many_arguments)]
@@ -769,6 +818,8 @@ fn ferx_rust_simulate_with_uncertainty(
     omega_flat: Vec<f64>,
     omega_dim: i32,
     sigma: Vec<f64>,
+    omega_iov_flat: Vec<f64>,
+    omega_iov_dim: i32,
     method: &str,
     cov_matrix_flat: Vec<f64>,
     cov_matrix_dim: i32,
@@ -787,8 +838,12 @@ fn ferx_rust_simulate_with_uncertainty(
         }
     };
     let iov_col = parsed.fit_options.iov_column.clone();
+    // Simulation reads a missing `DV` as a design point, not as a forgotten
+    // `MDV=1` (ferx-core #957): here the DV is the column being produced, so
+    // `DV = .` at a sampling time means "simulate here". `MDV=1` still excludes
+    // the record, and fitting keeps the skip.
     let (population, _) =
-        match ferx_core::api::read_population_for(
+        match ferx_core::api::read_population_for_simulation(
             &parsed.model,
             &parsed.covariate_decls,
             data_path,
@@ -826,6 +881,8 @@ fn ferx_rust_simulate_with_uncertainty(
             &omega_flat,
             omega_dim,
             &sigma,
+            &omega_iov_flat,
+            omega_iov_dim,
             uncertainty_method,
             &cov_matrix_flat,
             cov_matrix_dim,
@@ -848,7 +905,10 @@ fn ferx_rust_simulate_with_uncertainty(
     };
 
     match ferx_core::simulate_with_uncertainty(&parsed.model, &population, &fit_result, &opts) {
-        Ok(results) => sim_results_to_df(&results),
+        Ok(results) => attach_sim_warnings(
+            sim_results_to_df(&results),
+            design_point_warnings(&population),
+        ),
         Err(e) => {
             rprintln!("simulate_with_uncertainty error: {}", e);
             ().into()
@@ -876,8 +936,12 @@ fn ferx_rust_predict(
     };
     let iov_col = parsed.fit_options.iov_column.clone();
 
+    // `predict()` never reads the DV -- PRED is the column it produces -- so a
+    // design template (`DV = .` at every sampling time) is as valid here as it is
+    // for `simulate()`, and reading it with the fitting policy would return an
+    // empty frame (ferx-core #957, ferx-r #286). `MDV=1` still excludes the record.
     let (population, _) =
-        match ferx_core::api::read_population_for(
+        match ferx_core::api::read_population_for_simulation(
             &parsed.model,
             &parsed.covariate_decls,
             data_path,
@@ -910,6 +974,9 @@ fn ferx_rust_predict(
 /// @param omega_flat Row-major flattened omega matrix
 /// @param omega_dim Side length of the omega matrix
 /// @param sigma Fitted sigma vector
+/// @param omega_iov_flat Row-major flattened fitted IOV (kappa) omega matrix;
+///   empty when the model declares no `kappa`.
+/// @param omega_iov_dim Side length of the IOV omega matrix; 0 when no IOV.
 /// @return Data frame with ID, TIME, PRED columns
 /// @export
 #[extendr]
@@ -920,6 +987,8 @@ fn ferx_rust_predict_from_fit(
     omega_flat: Vec<f64>,
     omega_dim: i32,
     sigma: Vec<f64>,
+    omega_iov_flat: Vec<f64>,
+    omega_iov_dim: i32,
 ) -> Robj {
     let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
         Ok(p) => p,
@@ -930,8 +999,12 @@ fn ferx_rust_predict_from_fit(
     };
     let iov_col = parsed.fit_options.iov_column.clone();
 
+    // `predict()` never reads the DV -- PRED is the column it produces -- so a
+    // design template (`DV = .` at every sampling time) is as valid here as it is
+    // for `simulate()`, and reading it with the fitting policy would return an
+    // empty frame (ferx-core #957, ferx-r #286). `MDV=1` still excludes the record.
     let (population, _) =
-        match ferx_core::api::read_population_for(
+        match ferx_core::api::read_population_for_simulation(
             &parsed.model,
             &parsed.covariate_decls,
             data_path,
@@ -947,7 +1020,15 @@ fn ferx_rust_predict_from_fit(
             }
         };
 
-    let params = match params_from_fit(&parsed.model, &theta, &omega_flat, omega_dim, &sigma) {
+    let params = match params_from_fit(
+        &parsed.model,
+        &theta,
+        &omega_flat,
+        omega_dim,
+        &sigma,
+        &omega_iov_flat,
+        omega_iov_dim,
+    ) {
         Ok(p) => p,
         Err(e) => {
             rprintln!("{}", e);
@@ -1044,10 +1125,14 @@ fn ferx_rust_predict_survival(model_path: &str, data_path: &str, times: Vec<f64>
 /// @param omega_flat Row-major flattened omega matrix
 /// @param omega_dim Side length of the omega matrix
 /// @param sigma Fitted sigma vector
+/// @param omega_iov_flat Row-major flattened fitted IOV (kappa) omega matrix;
+///   empty when the model declares no `kappa`.
+/// @param omega_iov_dim Side length of the IOV omega matrix; 0 when no IOV.
 /// @return Data frame with ID, CMT, TIME, survival, cum_hazard, hazard, cif,
 ///   survival_all, median_survival, mean_survival
 /// @export
 #[extendr]
+#[allow(clippy::too_many_arguments)]
 fn ferx_rust_predict_survival_from_fit(
     model_path: &str,
     data_path: &str,
@@ -1056,6 +1141,8 @@ fn ferx_rust_predict_survival_from_fit(
     omega_flat: Vec<f64>,
     omega_dim: i32,
     sigma: Vec<f64>,
+    omega_iov_flat: Vec<f64>,
+    omega_iov_dim: i32,
 ) -> Robj {
     let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
         Ok(p) => p,
@@ -1082,7 +1169,15 @@ fn ferx_rust_predict_survival_from_fit(
         }
     };
 
-    let params = match params_from_fit(&parsed.model, &theta, &omega_flat, omega_dim, &sigma) {
+    let params = match params_from_fit(
+        &parsed.model,
+        &theta,
+        &omega_flat,
+        omega_dim,
+        &sigma,
+        &omega_iov_flat,
+        omega_iov_dim,
+    ) {
         Ok(p) => p,
         Err(e) => {
             rprintln!("{}", e);
@@ -1106,6 +1201,9 @@ fn ferx_rust_predict_survival_from_fit(
 /// @param omega_flat Row-major flattened omega matrix
 /// @param omega_dim Side length of the omega matrix
 /// @param sigma Fitted sigma vector
+/// @param omega_iov_flat Row-major flattened fitted IOV (kappa) omega matrix;
+///   empty when the model declares no `kappa`.
+/// @param omega_iov_dim Side length of the IOV omega matrix; 0 when no IOV.
 /// @param nsim Number of Monte-Carlo replicates per subject
 /// @param seed RNG seed; pass -1 for the engine default
 /// @return Data frame with ID, TIME, NPDE, NPD columns
@@ -1119,6 +1217,8 @@ fn ferx_rust_npde_from_fit(
     omega_flat: Vec<f64>,
     omega_dim: i32,
     sigma: Vec<f64>,
+    omega_iov_flat: Vec<f64>,
+    omega_iov_dim: i32,
     nsim: i32,
     seed: i32,
 ) -> Robj {
@@ -1171,7 +1271,15 @@ fn ferx_rust_npde_from_fit(
         }
     };
 
-    let params = match params_from_fit(&parsed.model, &theta, &omega_flat, omega_dim, &sigma) {
+    let params = match params_from_fit(
+        &parsed.model,
+        &theta,
+        &omega_flat,
+        omega_dim,
+        &sigma,
+        &omega_iov_flat,
+        omega_iov_dim,
+    ) {
         Ok(p) => p,
         Err(e) => {
             rprintln!("{}", e);
@@ -1285,6 +1393,70 @@ fn parse_method(token: &str) -> std::result::Result<EstimationMethod, String> {
     }
 }
 
+// -- Helper: rebuild the fitted IOV covariance from R-side arrays --
+//
+// A `kappa` model draws / conditions on one kappa vector per occasion from
+// Omega_IOV, so a fit-derived `ModelParameters` must carry it (ferx-core #1019:
+// dropping it panicked `simulate()` deep in the row emitter). `fit$omega_iov` is
+// flattened row-major on the R side; an empty vector means "the fit carried none".
+fn omega_iov_from_fit(
+    model: &CompiledModel,
+    omega_iov_flat: &[f64],
+    omega_iov_dim: i32,
+) -> std::result::Result<Option<OmegaMatrix>, String> {
+    let d = omega_iov_dim.max(0) as usize;
+    // `dim == 0` is how the R side says "no IOV", and it always sends an empty
+    // vector with it. Values arriving under a zero dim mean the two arguments
+    // disagree - an argument-order slip in the hand-maintained extendr wrappers
+    // would look exactly like this - so refuse rather than silently drop them.
+    if d == 0 && !omega_iov_flat.is_empty() {
+        return Err(format!(
+            "Fit error: omega_iov_dim is 0 but {} omega_iov values were supplied; \
+             the dim and the flattened matrix disagree",
+            omega_iov_flat.len()
+        ));
+    }
+    let template = match model.default_params.omega_iov.as_ref() {
+        Some(t) => t,
+        None => {
+            // No `kappa` in the model: an IOV block from the fit object would not
+            // correspond to anything the engine can index, so reject rather than drop.
+            if d > 0 {
+                return Err(format!(
+                    "Fit error: omega_iov of dim {d} supplied but the model declares no kappa"
+                ));
+            }
+            return Ok(None);
+        }
+    };
+    if d == 0 {
+        return Err(format!(
+            "Fit error: model declares {} kappa (IOV) but the fit carries no omega_iov; \
+             pass a fit that was produced by this model (fit$omega_iov must be present)",
+            model.n_kappa
+        ));
+    }
+    if d != template.dim() {
+        return Err(format!(
+            "Fit error: omega_iov dim {} does not match model ({} expected)",
+            d,
+            template.dim()
+        ));
+    }
+    if omega_iov_flat.len() != d * d {
+        return Err(format!(
+            "Fit error: omega_iov length {} does not match dim²={}",
+            omega_iov_flat.len(),
+            d * d
+        ));
+    }
+    Ok(Some(OmegaMatrix::from_matrix(
+        DMatrix::from_row_slice(d, d, omega_iov_flat),
+        template.eta_names.clone(),
+        template.diagonal,
+    )))
+}
+
 // -- Helper: materialize ModelParameters from R-side theta/omega/sigma --
 
 fn params_from_fit(
@@ -1293,6 +1465,8 @@ fn params_from_fit(
     omega_flat: &[f64],
     omega_dim: i32,
     sigma: &[f64],
+    omega_iov_flat: &[f64],
+    omega_iov_dim: i32,
 ) -> std::result::Result<ModelParameters, String> {
     let template = &model.default_params;
 
@@ -1349,8 +1523,15 @@ fn params_from_fit(
             names: template.sigma.names.clone(),
         },
         sigma_fixed: template.sigma_fixed.clone(),
-        omega_iov: None,
-        kappa_fixed: Vec::new(),
+        omega_iov: omega_iov_from_fit(model, omega_iov_flat, omega_iov_dim)?,
+        kappa_fixed: template.kappa_fixed.clone(),
+        // ferx-core #977/#985 added per-class Omega/Sigma for `[mixture]` models.
+        // Carry the template's value rather than `None`: this function rebuilds
+        // parameters from R-supplied theta/omega/sigma *against* the parsed model,
+        // so dropping the mixture spec here would silently turn a `[mixture]` fit
+        // into a single-population one. Every other structural field on this
+        // initializer is likewise taken from `template`.
+        mixture: template.mixture.clone(),
     })
 }
 
@@ -1366,6 +1547,8 @@ fn build_fit_result_for_uncertainty(
     omega_flat: &[f64],
     omega_dim: i32,
     sigma: &[f64],
+    omega_iov_flat: &[f64],
+    omega_iov_dim: i32,
     method: ferx_core::UncertaintyMethod,
     cov_matrix_flat: &[f64],
     cov_matrix_dim: i32,
@@ -1454,6 +1637,7 @@ fn build_fit_result_for_uncertainty(
         theta.to_vec(),
         omega_mat,
         sigma.to_vec(),
+        omega_iov_from_fit(model, omega_iov_flat, omega_iov_dim)?.map(|m| m.matrix),
         covariance_matrix,
         sir_resamples_packed,
     ))
@@ -1462,16 +1646,28 @@ fn build_fit_result_for_uncertainty(
 // Build a defaulted FitResult populated with the fields that
 // fitted_params_from_result / simulate_with_uncertainty actually read. Other
 // fields get neutral defaults — none of them are inspected on this path.
+#[allow(clippy::too_many_arguments)]
 fn default_fit_result(
     model: &CompiledModel,
     theta: Vec<f64>,
     omega: DMatrix<f64>,
     sigma: Vec<f64>,
+    omega_iov: Option<DMatrix<f64>>,
     covariance_matrix: Option<DMatrix<f64>>,
     sir_resamples_packed: Option<Vec<Vec<f64>>>,
 ) -> FitResult {
     let template = &model.default_params;
     FitResult {
+        // ferx-core main added a checkpoint-restore flag; a defaulted FitResult is
+        // never a restored one.
+        restored_from_checkpoint: false,
+        // ferx-core main grew `residual_correlations` and `vi` after the rev
+        // this branch originally pinned. `residual_correlations` is a property
+        // of the compiled model, so it is taken from there; this scaffold
+        // carries no VI run. The two weighted-kappa fields it also grew
+        // (#1031) are set below, beside `kappa_init_as_sd`.
+        residual_correlations: model.residual_correlations.clone(),
+        vi: None,
         method: EstimationMethod::FoceI,
         method_chain: vec![EstimationMethod::FoceI],
         bayes: None,
@@ -1508,7 +1704,10 @@ fn default_fit_result(
         sir_resamples_packed,
         importance_sampling: None,
         impmap_trace: None,
-        omega_iov: None,
+        // The IOV covariance the uncertainty draws are taken around. Dropping it made
+        // ferx-core's `fitted_params_from_result` fall back to the model file's *initial*
+        // Omega_IOV, simulating the wrong inter-occasion spread with no diagnostic (#1019).
+        omega_iov,
         kappa_names: model.kappa_names.clone(),
         kappa_fixed: template.kappa_fixed.clone(),
         se_kappa: None,
@@ -1555,6 +1754,11 @@ fn default_fit_result(
         omega_init_as_sd: Vec::new(),
         sigma_init_as_sd: Vec::new(),
         kappa_init_as_sd: Vec::new(),
+        // ferx-core #1031 added the sample-size weight (`kappa K ~ g2 weight = N`)
+        // to `FitResult` for reporting only; these skeleton results are never
+        // printed, so both stay empty.
+        kappa_weights: Vec::new(),
+        kappa_weight_typical: Vec::new(),
         warnings_structured: Vec::new(),
         model_text: None,
         theta_init: Vec::new(),
@@ -1576,6 +1780,9 @@ fn default_fit_result(
         covariate_names: Vec::new(),
         input_columns: Vec::new(),
         covariate_table: None,
+        // ferx-core #1111 added the [covariate_model] relation echo; this
+        // scaffold ran no fit, so it echoes no relations.
+        covariate_relations: Vec::new(),
         exclusions: None,
         method_wall_times_secs: Vec::new(),
         covariance_wall_time_secs: 0.0,
@@ -1592,6 +1799,38 @@ fn default_fit_result(
 /// so `ferx_simulate()` can surface them without changing the data-frame contract
 /// (an empty vector when the run was clean). Mirrors how the fit path exposes
 /// `FitResult.warnings`, but as an attribute since simulate returns a bare frame.
+/// Warn when the simulation reader kept design points, i.e. `EVID=0, MDV=0`
+/// records whose `DV` cell was empty (ferx-core #957).
+///
+/// `read_population_for_simulation` keeps such a record as a sampling time; the
+/// fitting reader (`read_population_for`) skips it as a forgotten `MDV=1`. The
+/// two readings therefore disagree on the same file, and the disagreement is
+/// otherwise silent: a dataset that carries an *accidental* missing DV rather
+/// than a deliberate design gets simulated rows at times `ferx_fit()`'s `sdtab`
+/// has no observation for, which biases a VPC built by overlaying the two.
+/// Surface the count through the existing `simulation_warnings` channel so the
+/// divergence is visible without changing the data-frame contract.
+///
+/// Only Gaussian rows are counted: an integer-coded endpoint's design point
+/// carries a finite state-code placeholder, so it is indistinguishable from a
+/// real observation here.
+fn design_point_warnings(population: &Population) -> Vec<String> {
+    let n: usize = population
+        .subjects
+        .iter()
+        .map(|s| s.observations.iter().filter(|v| !v.is_finite()).count())
+        .sum();
+    if n == 0 {
+        return Vec::new();
+    }
+    vec![format!(
+        "{n} observation record(s) had an empty DV and were simulated as design \
+         points. ferx_fit() skips these same records, so simulated rows at those \
+         times have no counterpart in a fit's sdtab (do not overlay the two, e.g. \
+         in a VPC). Set MDV = 1 to exclude a record from the simulation too."
+    )]
+}
+
 fn attach_sim_warnings(mut df: Robj, warnings: Vec<String>) -> Robj {
     df.set_attrib("simulation_warnings", warnings).unwrap();
     df
@@ -1603,14 +1842,30 @@ fn sim_results_to_df(results: &[ferx_core::api::SimulationResult]) -> Robj {
     let id: Vec<String> = results.iter().map(|r| r.id.clone()).collect();
     let time: Vec<f64> = results.iter().map(|r| r.time).collect();
     // CMT column value: the data-file CMT for Gaussian rows, the `[event_model] cmt`
-    // for drug-driven TTE rows, so a joint PK-TTE simulation's PK and event rows are
-    // distinguishable in one long-format frame.
+    // for drug-driven TTE rows, the `[binary_model] cmt` for categorical rows -- so a
+    // joint PK / event / binary simulation's rows stay distinguishable in one
+    // long-format frame (without it, a binary draw was indistinguishable from a PK row
+    // that failed to predict -- ferx-r #271).
     let cmt: Vec<i32> = results.iter().map(|r| r.cmt as i32).collect();
     let ipred: Vec<f64> = results.iter().map(|r| r.ipred).collect();
-    // `SimulationResult` replaced the flat `dv_sim: f64` with `outcome: SimOutcome`
-    // (Gaussian vs TTE). `continuous_value()` returns the Gaussian value (NAN for
-    // non-Gaussian outcomes), preserving the DV_SIM column for the existing paths.
-    let dv_sim: Vec<f64> = results.iter().map(|r| r.outcome.continuous_value()).collect();
+    // DV_SIM per outcome kind. The old code called `outcome.continuous_value()`
+    // unconditionally, whose non-Gaussian arms return `f64::NAN` behind a
+    // `debug_assert!(false)` misuse guard (compiled out in ferx-r's --release
+    // build). So every binary draw came back as `NA` (ferx-r #271). Match on the
+    // outcome instead: fold a categorical/count draw into DV_SIM as its numeric
+    // outcome (0/1 for a `[binary_model]` endpoint), matching how the input CSV
+    // codes DV and how NONMEM records it. TTE `Event` rows stay `NA` here -- their
+    // payload is the sampled event time, already carried in the TIME column.
+    let dv_sim: Vec<f64> = results
+        .iter()
+        .map(|r| match &r.outcome {
+            SimOutcome::Continuous { value } => *value,
+            SimOutcome::Category { state } => *state as f64,
+            SimOutcome::Count { count } => *count as f64,
+            #[cfg(feature = "survival")]
+            SimOutcome::Event { .. } => f64::NAN,
+        })
+        .collect();
     // OBSERVED: a drug-driven TTE row (`SimOutcome::Event`) carries its event time in
     // TIME and the observed/censored flag here -- 1 = event fired before the horizon,
     // 0 = administratively right-censored at the horizon. Gaussian rows are NaN -> R
@@ -1740,11 +1995,24 @@ fn residual_label(model: &CompiledModel) -> String {
 //    re-parsing the .ferx file (theta_names, model_type, iiv, iov, residual)
 //    so it can be a drop-in canonical source for `ferx_model_inspect()`. --
 fn model_structure_list(model: &CompiledModel) -> Robj {
+    // Sample-size-weighted IOV (ferx-core #1031). Parallel to `iov`, with NA
+    // for an unweighted kappa; empty when the model declares no weight at all,
+    // which is what `.ferx_parse_structure()` produces for the pre-fit path.
+    let iov_weights: Vec<Option<String>> = if model.has_weighted_kappa() {
+        model
+            .kappa_weights
+            .iter()
+            .map(|w| w.as_ref().map(|k| k.expr.clone()))
+            .collect()
+    } else {
+        Vec::new()
+    };
     list!(
         theta_names = model.theta_names.clone(),
         model_type = pk_model_type_label(model).to_string(),
         iiv = model.eta_names.clone(),
         iov = model.kappa_names.clone(),
+        iov_weights = iov_weights,
         residual = residual_label(model)
     )
     .into()
@@ -2338,6 +2606,15 @@ fn fit_result_to_list(
         omega_init_as_sd = result.omega_init_as_sd.clone(),
         sigma_init_as_sd = result.sigma_init_as_sd.clone(),
         kappa_init_as_sd = result.kappa_init_as_sd.clone(),
+        // Sample-size-weighted IOV (ferx-core #1031): `kappa K ~ g2 weight = NARM`
+        // means `kappa_ik ~ N(0, Omega_IOV / N_ik)`. `kappa_weights[i]` is the
+        // weight expression as written (NA when kappa i is unweighted) and
+        // `kappa_weight_typical[i]` the median weight over this dataset's
+        // subject-occasions, so R can report the effective SD `g/sqrt(N)` next to
+        // the estimate - which stays the *unweighted* g^2. Both are empty for a
+        // model with no weighted kappa.
+        kappa_weights = result.kappa_weights.clone(),
+        kappa_weight_typical = result.kappa_weight_typical.clone(),
         // `[covariate_nn]` blocks from the model file (Phase A M1 of ferx-core's
         // DCM plan). One R sub-list per NN; empty list when the `nn` feature is
         // off or no NN blocks are declared. Inspectable in R as
@@ -2701,6 +2978,35 @@ fn ferx_rust_autodiff_enabled() -> bool {
     false
 }
 
+/// Every `[block]` name this build of the engine recognises.
+///
+/// The engine's block names are closed-world (ferx-core #1040): a header that
+/// is not in this list is rejected at parse time with `E_UNKNOWN_BLOCK`. The R
+/// side reads the list from here rather than keeping its own copy — the
+/// duplicated vector this replaces had drifted, and reported valid blocks
+/// (`covariates`, `event_model`, `simulation`, ...) as unknown sections.
+///
+/// The list is build-dependent: the engine filters out a block whose cargo
+/// feature is off, so what this returns depends on how ferx-core was compiled
+/// for this package. `src/Makevars` builds it with `ci,nn,survival`, which
+/// puts `event_model` and `binary_model` in the list and leaves `markov_model`
+/// out. Absence is therefore not the same as "the engine does not know this
+/// name" - a gated-off block is still recognised at parse time and rejected
+/// with `E_BLOCK_FEATURE_DISABLED`, not `E_UNKNOWN_BLOCK`. Callers that map
+/// this list onto a "valid sections" report should take the reason for a
+/// header being absent from the engine's diagnostics rather than assuming it
+/// is unknown.
+///
+/// @return Character vector of block names, sorted.
+/// @export
+#[extendr]
+fn ferx_rust_known_blocks() -> Vec<String> {
+    ferx_core::known_block_names()
+        .into_iter()
+        .map(String::from)
+        .collect()
+}
+
 /// Validate a .ferx model file (and optionally its dataset) without fitting.
 ///
 /// Runs the parser plus every data-independent check, and — when `data_path`
@@ -2874,7 +3180,7 @@ fn ferx_rust_inits_from_nca(model_path: &str, data_path: &str, method: &str) -> 
 /// @param sir_keep_samples When TRUE, retains the resampled packed parameter vectors.
 /// @param verbose When TRUE, the engine prints progress to stderr.
 /// @return Named list with `sir_ess`, `sir_ci_theta`, `sir_ci_omega`, `sir_ci_sigma`,
-///   `sir_resamples`, `sir_resamples_n`, `sir_resamples_dim`.
+///   `sir_resamples`, `sir_resamples_n`, `sir_resamples_dim`, and `warnings`.
 #[extendr]
 #[allow(clippy::too_many_arguments)]
 fn ferx_rust_sir(
@@ -2995,12 +3301,27 @@ fn ferx_rust_sir(
             // PR #377 (ferx-core) added NPDE/NPD; the SIR path never reads them.
             npde: Vec::new(),
             npd: Vec::new(),
+            // ferx-core #900 added categorical sdtab rows; the SIR path never reads them.
+            discrete_rows: Vec::new(),
+            // ferx-core #977 added per-subject mixture posteriors; the SIR path
+            // never reads them, and these scaffolds carry no class assignment.
+            pmix: None,
+            mixest: None,
         });
     }
 
     // Skeleton FitResult — only the fields ferx_core::run_sir actually
     // reads are populated; everything else gets a neutral default.
     let fit = FitResult {
+        // ferx-core main added a checkpoint-restore flag; the SIR path never reads it.
+        restored_from_checkpoint: false,
+        // ferx-core main grew `residual_correlations` and `vi` after the rev
+        // this branch originally pinned. `residual_correlations` is a property
+        // of the compiled model, so it is taken from there; this scaffold
+        // carries no VI run. The two weighted-kappa fields it also grew
+        // (#1031) are set below, beside `kappa_init_as_sd`.
+        residual_correlations: model.residual_correlations.clone(),
+        vi: None,
         method: if interaction {
             EstimationMethod::FoceI
         } else {
@@ -3100,6 +3421,11 @@ fn ferx_rust_sir(
         omega_init_as_sd: Vec::new(),
         sigma_init_as_sd: Vec::new(),
         kappa_init_as_sd: Vec::new(),
+        // ferx-core #1031 added the sample-size weight (`kappa K ~ g2 weight = N`)
+        // to `FitResult` for reporting only; these skeleton results are never
+        // printed, so both stay empty.
+        kappa_weights: Vec::new(),
+        kappa_weight_typical: Vec::new(),
         warnings_structured: Vec::new(),
         model_text: None,
         theta_init: Vec::new(),
@@ -3121,6 +3447,9 @@ fn ferx_rust_sir(
         covariate_names: Vec::new(),
         input_columns: Vec::new(),
         covariate_table: None,
+        // ferx-core #1111 added the [covariate_model] relation echo; the SIR
+        // path never reads it.
+        covariate_relations: Vec::new(),
         exclusions: None,
         method_wall_times_secs: Vec::new(),
         covariance_wall_time_secs: 0.0,
@@ -3169,6 +3498,10 @@ fn ferx_rust_sir(
             _ => (Vec::new(), 0i32, 0i32),
         };
 
+    // SIR-step warnings (ferx-core#1021: a rank-deficient or bound-shrunk
+    // proposal) live on the returned fit's `warnings`. The skeleton FitResult
+    // we passed in carries none, so everything here was produced by this SIR
+    // run — no filtering needed. Mirrors `ferx_rust_covariance`.
     list!(
         sir_ess = new_fit.sir_ess.unwrap_or(f64::NAN),
         sir_ci_theta = flatten_ci(&new_fit.sir_ci_theta),
@@ -3176,7 +3509,8 @@ fn ferx_rust_sir(
         sir_ci_sigma = flatten_ci(&new_fit.sir_ci_sigma),
         sir_resamples = sir_resamples_flat,
         sir_resamples_n = sir_resamples_n,
-        sir_resamples_dim = sir_resamples_dim
+        sir_resamples_dim = sir_resamples_dim,
+        warnings = new_fit.warnings.clone()
     )
     .into()
 }
@@ -3337,6 +3671,12 @@ fn ferx_rust_covariance(
             compartment_states: Vec::new(),
             npde: Vec::new(),
             npd: Vec::new(),
+            // ferx-core #900 added categorical sdtab rows; the covariance path never reads them.
+            discrete_rows: Vec::new(),
+            // ferx-core #977 added per-subject mixture posteriors; the covariance
+            // path never reads them, and these scaffolds carry no class assignment.
+            pmix: None,
+            mixest: None,
         });
     }
 
@@ -3345,6 +3685,15 @@ fn ferx_rust_covariance(
     // everything else gets a neutral default. `bayes = None` so the returned
     // covariance_status resolves to Computed/Failed rather than NotRequested.
     let fit = FitResult {
+        // ferx-core main added a checkpoint-restore flag; the covariance path never reads it.
+        restored_from_checkpoint: false,
+        // ferx-core main grew `residual_correlations` and `vi` after the rev
+        // this branch originally pinned. `residual_correlations` is a property
+        // of the compiled model, so it is taken from there; this scaffold
+        // carries no VI run. The two weighted-kappa fields it also grew
+        // (#1031) are set below, beside `kappa_init_as_sd`.
+        residual_correlations: model.residual_correlations.clone(),
+        vi: None,
         method: if interaction {
             EstimationMethod::FoceI
         } else {
@@ -3444,6 +3793,11 @@ fn ferx_rust_covariance(
         omega_init_as_sd: Vec::new(),
         sigma_init_as_sd: Vec::new(),
         kappa_init_as_sd: Vec::new(),
+        // ferx-core #1031 added the sample-size weight (`kappa K ~ g2 weight = N`)
+        // to `FitResult` for reporting only; these skeleton results are never
+        // printed, so both stay empty.
+        kappa_weights: Vec::new(),
+        kappa_weight_typical: Vec::new(),
         warnings_structured: Vec::new(),
         model_text: None,
         theta_init: Vec::new(),
@@ -3465,6 +3819,9 @@ fn ferx_rust_covariance(
         covariate_names: Vec::new(),
         input_columns: Vec::new(),
         covariate_table: None,
+        // ferx-core #1111 added the [covariate_model] relation echo; the
+        // covariance path never reads it.
+        covariate_relations: Vec::new(),
         exclusions: None,
         method_wall_times_secs: Vec::new(),
         covariance_wall_time_secs: 0.0,
@@ -3637,6 +3994,481 @@ fn ferx_rust_prepare_frem(
     )
 }
 
+// ---------------------------------------------------------------------------
+//  Bootstrap (ferx-tools)
+// ---------------------------------------------------------------------------
+//
+// The non-parametric case bootstrap lives in `ferx-tools`, the sibling crate of
+// `ferx-core` in the same workspace (ferx-core #1114 / #1140). This glue is
+// deliberately thin: the percentile estimator, the exclusion filters, the
+// parameter naming and PsN's `-sample_size` syntax are all the tool's, so the R
+// side neither re-derives nor re-parses any of them.
+
+use ferx_tools::bootstrap::{
+    output as bootstrap_output, resummarize, run_bootstrap, BootstrapOptions, BootstrapResult,
+    BootstrapSummary, SampleSize,
+};
+
+/// Turn the `(names, values)` pair the R wrapper sends into a [`SampleSize`].
+///
+/// R has no natural spelling for PsN's `1001=>12,1002=>24`, so `sample_size` is
+/// an R named numeric vector on that side. The string is assembled here and
+/// handed to `SampleSize::parse`, so the tool keeps the one parser (#1144).
+///
+/// * both empty            -> `SampleSize::Original`
+/// * one unnamed value     -> `SampleSize::Total`
+/// * names present         -> `SampleSize::PerStratum`
+fn sample_size_from_r(keys: &[String], values: &[f64]) -> std::result::Result<SampleSize, String> {
+    if values.is_empty() {
+        return Ok(SampleSize::Original);
+    }
+    // 0 is not merely degenerate: it reaches the engine as `SampleSize::Total(0)`
+    // and every replicate then draws no subjects, surfacing as a fit failure
+    // rather than as the argument error it is.
+    let as_count = |v: f64| -> std::result::Result<usize, String> {
+        if !v.is_finite() || v < 1.0 || v.fract() != 0.0 {
+            return Err(format!(
+                "sample_size must be whole numbers >= 1, got {v}"
+            ));
+        }
+        Ok(v as usize)
+    };
+    if keys.is_empty() {
+        if values.len() != 1 {
+            return Err(
+                "sample_size: an unnamed vector must be a single number; use a named vector \
+                 (c(`1001` = 12, `1002` = 24)) for per-stratum counts"
+                    .to_string(),
+            );
+        }
+        return SampleSize::parse(&as_count(values[0])?.to_string());
+    }
+    if keys.len() != values.len() {
+        return Err("sample_size: every element must be named, or none".to_string());
+    }
+    let spec = keys
+        .iter()
+        .zip(values.iter())
+        .map(|(k, v)| Ok(format!("{}=>{}", k.trim(), as_count(*v)?)))
+        .collect::<std::result::Result<Vec<_>, String>>()?
+        .join(",");
+    SampleSize::parse(&spec)
+}
+
+/// Assemble the options both entry points share. `directory` and `stratify_on`
+/// use `""` for "unset" because extendr has no `Option<&str>`.
+#[allow(clippy::too_many_arguments)]
+fn bootstrap_options_from_r(
+    samples: i32,
+    seed: f64,
+    sample_size_keys: Vec<String>,
+    sample_size_values: Vec<f64>,
+    stratify_on: &str,
+    update_inits: bool,
+    run_base_model: bool,
+    keep_covariance: bool,
+    threads: i32,
+    skip_minimization_terminated: bool,
+    skip_estimate_near_boundary: bool,
+    skip_covariance_step_terminated: bool,
+    skip_with_covstep_warnings: bool,
+    dofv: bool,
+    directory: &str,
+    confidence_level: f64,
+) -> std::result::Result<BootstrapOptions, String> {
+    if !(seed.is_finite() && seed >= 0.0) {
+        return Err(format!("seed must be a non-negative whole number, got {seed}"));
+    }
+    Ok(BootstrapOptions {
+        samples: samples.max(0) as usize,
+        seed: seed as u64,
+        sample_size: sample_size_from_r(&sample_size_keys, &sample_size_values)?,
+        stratify_on: (!stratify_on.is_empty()).then(|| stratify_on.to_string()),
+        update_inits,
+        run_base_model,
+        keep_covariance,
+        threads: (threads > 0).then(|| threads as usize),
+        skip_minimization_terminated,
+        skip_estimate_near_boundary,
+        skip_covariance_step_terminated,
+        skip_with_covstep_warnings,
+        dofv,
+        directory: (!directory.is_empty()).then(|| std::path::PathBuf::from(directory)),
+        confidence_level,
+        // ferx-core #1143 added resume / retry_failed. The R entry points do
+        // not expose either yet, so every run from R is a fresh one.
+        resume: false,
+        retry_failed: false,
+    })
+}
+
+/// `bootstrap_results.csv` as a data frame: one row per parameter.
+///
+/// Both intervals are carried side by side, as `ParameterSummary` reports them
+/// - the percentile interval is the bootstrap's own, `*_normal` is the
+/// normal-approximation one built from the bootstrap standard error, and their
+/// disagreement is the point.
+fn bootstrap_parameters_df(summary: &BootstrapSummary) -> Robj {
+    let n = summary.parameters.len();
+    let names: Vec<String> = summary.parameters.iter().map(|p| p.name.clone()).collect();
+    let opt_col = |f: &dyn Fn(&ferx_tools::bootstrap::ParameterSummary) -> Option<f64>| -> Robj {
+        let col: Doubles = summary
+            .parameters
+            .iter()
+            .map(|p| match f(p) {
+                Some(v) if !v.is_nan() => Rfloat::from(v),
+                _ => Rfloat::na(),
+            })
+            .collect();
+        col.into()
+    };
+    finish_df(
+        vec![
+            ("parameter", names.into()),
+            ("original", opt_col(&|p| p.original)),
+            ("mean", opt_col(&|p| Some(p.mean))),
+            ("bias", opt_col(&|p| p.bias)),
+            ("standard_error", opt_col(&|p| Some(p.standard_error))),
+            ("median", opt_col(&|p| Some(p.median))),
+            ("ci_lower", opt_col(&|p| p.ci_percentile.map(|(lo, _)| lo))),
+            ("ci_upper", opt_col(&|p| p.ci_percentile.map(|(_, hi)| hi))),
+            (
+                "ci_lower_normal",
+                opt_col(&|p| p.ci_standard_error.map(|(lo, _)| lo)),
+            ),
+            (
+                "ci_upper_normal",
+                opt_col(&|p| p.ci_standard_error.map(|(_, hi)| hi)),
+            ),
+        ],
+        n,
+    )
+}
+
+/// `raw_results.csv` as a data frame: one row per fit, the original dataset
+/// first (`sample = 0`).
+///
+/// This is what makes an R-side re-summarisation or a custom filter possible,
+/// so it carries the termination diagnostics the exclusion filters read - not
+/// just the estimates.
+fn bootstrap_raw_df(result: &BootstrapResult, options: &BootstrapOptions) -> Robj {
+    let rows: Vec<&ferx_tools::bootstrap::ReplicateResult> =
+        result.original.iter().chain(result.replicates.iter()).collect();
+    let n = rows.len();
+    let n_params = result.parameter_names.len();
+
+    let num_col = |vals: Vec<Option<f64>>| -> Robj {
+        let col: Doubles = vals
+            .into_iter()
+            .map(|v| match v {
+                Some(v) if !v.is_nan() => Rfloat::from(v),
+                _ => Rfloat::na(),
+            })
+            .collect();
+        col.into()
+    };
+
+    // Column names are owned here so `finish_df`'s `&str` keys stay valid.
+    let se_names: Vec<String> = result
+        .parameter_names
+        .iter()
+        .map(|n| format!("se_{n}"))
+        .collect();
+
+    let mut pairs: Vec<(&str, Robj)> = vec![
+        (
+            "sample",
+            rows.iter().map(|r| r.index as i32).collect::<Vec<i32>>().into(),
+        ),
+        (
+            "minimization_successful",
+            rows.iter().map(|r| r.converged).collect::<Vec<bool>>().into(),
+        ),
+        (
+            "estimate_near_boundary",
+            rows.iter()
+                .map(|r| r.estimate_near_boundary)
+                .collect::<Vec<bool>>()
+                .into(),
+        ),
+        (
+            "covariance_step_successful",
+            rows.iter()
+                .map(|r| r.covariance_step_successful)
+                .collect::<Vec<bool>>()
+                .into(),
+        ),
+        (
+            "covariance_step_warnings",
+            rows.iter()
+                .map(|r| r.covariance_step_warnings)
+                .collect::<Vec<bool>>()
+                .into(),
+        ),
+        ("ofv", num_col(rows.iter().map(|r| Some(r.ofv)).collect())),
+        (
+            "seconds",
+            num_col(rows.iter().map(|r| Some(r.seconds)).collect()),
+        ),
+    ];
+    for j in 0..n_params {
+        pairs.push((
+            result.parameter_names[j].as_str(),
+            num_col(rows.iter().map(|r| r.estimates.get(j).copied()).collect()),
+        ));
+    }
+    if options.keep_covariance {
+        for j in 0..n_params {
+            pairs.push((
+                se_names[j].as_str(),
+                num_col(
+                    rows.iter()
+                        .map(|r| {
+                            r.standard_errors
+                                .as_ref()
+                                .and_then(|s| s.get(j).copied())
+                                .flatten()
+                        })
+                        .collect(),
+                ),
+            ));
+        }
+    }
+    if options.dofv {
+        pairs.push((
+            "delta_ofv",
+            num_col(rows.iter().map(|r| r.delta_ofv).collect()),
+        ));
+    }
+    // Empty string for "no error", as in `raw_results.csv`; the R wrapper turns
+    // it into `NA_character_`.
+    pairs.push((
+        "error",
+        rows.iter()
+            .map(|r| r.error.clone().unwrap_or_default())
+            .collect::<Vec<String>>()
+            .into(),
+    ));
+    finish_df(pairs, n)
+}
+
+/// `bootstrap_diagnostics.csv` as a data frame: the run counts, the exclusion
+/// tallies (`excluded: <reason>`) and PsN's diagnostic means (`mean: <name>`),
+/// in the file's own order.
+fn bootstrap_diagnostics_df(
+    samples_requested: usize,
+    chi_square_df: usize,
+    summary: &BootstrapSummary,
+) -> Robj {
+    let mut stat: Vec<String> = vec![
+        "samples_requested".to_string(),
+        "samples_completed".to_string(),
+        "samples_included".to_string(),
+        "chi_square_df".to_string(),
+    ];
+    let mut value: Vec<f64> = vec![
+        samples_requested as f64,
+        summary.n_completed as f64,
+        summary.n_included as f64,
+        chi_square_df as f64,
+    ];
+    for (reason, n) in &summary.excluded_by {
+        stat.push(format!("excluded: {reason}"));
+        value.push(*n as f64);
+    }
+    for (name, v) in &summary.diagnostic_means {
+        stat.push(format!("mean: {name}"));
+        value.push(*v);
+    }
+    let n = stat.len();
+    finish_df(vec![("statistic", stat.into()), ("value", value.into())], n)
+}
+
+/// Δofv per replicate, or `NULL` when `dofv = FALSE`.
+fn bootstrap_delta_ofv_df(result: &BootstrapResult, options: &BootstrapOptions) -> Robj {
+    if !options.dofv {
+        return ().into();
+    }
+    let n = result.replicates.len();
+    let sample: Vec<i32> = result.replicates.iter().map(|r| r.index as i32).collect();
+    let delta: Doubles = result
+        .replicates
+        .iter()
+        .map(|r| match r.delta_ofv {
+            Some(v) if !v.is_nan() => Rfloat::from(v),
+            _ => Rfloat::na(),
+        })
+        .collect();
+    finish_df(
+        vec![("sample", sample.into()), ("delta_ofv", delta.into())],
+        n,
+    )
+}
+
+/// Run the non-parametric case bootstrap.
+///
+/// `data_path`, `stratify_on` and `directory` use `""` for "unset". `seed`
+/// crosses as a double because R has no 64-bit integer.
+#[extendr]
+#[allow(clippy::too_many_arguments)]
+fn ferx_rust_bootstrap(
+    model_path: &str,
+    data_path: &str,
+    samples: i32,
+    seed: f64,
+    sample_size_keys: Vec<String>,
+    sample_size_values: Vec<f64>,
+    stratify_on: &str,
+    update_inits: bool,
+    run_base_model: bool,
+    keep_covariance: bool,
+    threads: i32,
+    skip_minimization_terminated: bool,
+    skip_estimate_near_boundary: bool,
+    skip_covariance_step_terminated: bool,
+    skip_with_covstep_warnings: bool,
+    dofv: bool,
+    directory: &str,
+    confidence_level: f64,
+    verbose: bool,
+) -> Robj {
+    let options = match bootstrap_options_from_r(
+        samples,
+        seed,
+        sample_size_keys,
+        sample_size_values,
+        stratify_on,
+        update_inits,
+        run_base_model,
+        keep_covariance,
+        threads,
+        skip_minimization_terminated,
+        skip_estimate_near_boundary,
+        skip_covariance_step_terminated,
+        skip_with_covstep_warnings,
+        dofv,
+        directory,
+        confidence_level,
+    ) {
+        Ok(o) => o,
+        Err(e) => throw_r_error(format!("ferx_bootstrap: {e}")),
+    };
+
+    let data = (!data_path.is_empty()).then_some(data_path);
+    let prepared = match ferx_core::prepare_run(model_path, data) {
+        Ok(p) => p,
+        Err(e) => throw_r_error(format!("ferx_bootstrap: {e}")),
+    };
+    if verbose {
+        if let Some(w) = &prepared.data_path_warning {
+            eprintln!("Warning: {w}");
+        }
+        eprintln!(
+            "Bootstrap: {} samples of {} subjects, seed {}",
+            options.samples,
+            prepared.population.subjects.len(),
+            options.seed
+        );
+    }
+
+    let result = match run_bootstrap(&prepared, &options) {
+        Ok(r) => r,
+        Err(e) => throw_r_error(format!("ferx_bootstrap: {e}")),
+    };
+
+    let out = List::from_pairs(vec![
+        ("parameters", bootstrap_parameters_df(&result.summary)),
+        ("raw", bootstrap_raw_df(&result, &options)),
+        (
+            "diagnostics",
+            bootstrap_diagnostics_df(
+                result.replicates.len(),
+                result.n_estimated_parameters,
+                &result.summary,
+            ),
+        ),
+        ("delta_ofv", bootstrap_delta_ofv_df(&result, &options)),
+        (
+            "parameter_names",
+            result.parameter_names.clone().into(),
+        ),
+        ("subject_ids", result.subject_ids.clone().into()),
+        ("n_completed", (result.summary.n_completed as i32).into()),
+        ("n_included", (result.summary.n_included as i32).into()),
+        (
+            "chi_square_df",
+            (result.n_estimated_parameters as i32).into(),
+        ),
+        (
+            "confidence_level",
+            result.summary.confidence_level.into(),
+        ),
+        ("model_name", prepared.parsed.model.name.clone().into()),
+        ("data_path", prepared.data_path.clone().into()),
+    ]);
+    out.into()
+}
+
+/// Re-summarise a finished run from its `raw_results.csv` under different
+/// exclusion criteria - PsN's `-summarize`. Refits nothing, and rewrites
+/// `bootstrap_results.csv` / `bootstrap_diagnostics.csv` in place.
+#[extendr]
+#[allow(clippy::too_many_arguments)]
+fn ferx_rust_bootstrap_summarize(
+    directory: &str,
+    skip_minimization_terminated: bool,
+    skip_estimate_near_boundary: bool,
+    skip_covariance_step_terminated: bool,
+    skip_with_covstep_warnings: bool,
+    confidence_level: f64,
+) -> Robj {
+    // `samples` only has to pass `BootstrapOptions::validate`; nothing is drawn
+    // on this path, the estimates are read back off disk.
+    let options = BootstrapOptions {
+        samples: 1,
+        skip_minimization_terminated,
+        skip_estimate_near_boundary,
+        skip_covariance_step_terminated,
+        skip_with_covstep_warnings,
+        confidence_level,
+        ..BootstrapOptions::default()
+    };
+    let dir = std::path::Path::new(directory);
+    let summary = match resummarize(dir, &options) {
+        Ok(s) => s,
+        Err(e) => throw_r_error(format!("ferx_bootstrap_summarize: {e}")),
+    };
+    // Read back the two run-level facts the summary does not carry, from the
+    // diagnostics file `resummarize` just rewrote.
+    let diag = dir.join("bootstrap_diagnostics.csv");
+    let requested =
+        bootstrap_output::read_diagnostic(&diag, "samples_requested").unwrap_or(0.0) as usize;
+    let chi_df = bootstrap_output::read_diagnostic(&diag, "chi_square_df").unwrap_or(0.0) as usize;
+
+    let out = List::from_pairs(vec![
+        ("parameters", bootstrap_parameters_df(&summary)),
+        (
+            "diagnostics",
+            bootstrap_diagnostics_df(requested, chi_df, &summary),
+        ),
+        (
+            "parameter_names",
+            summary
+                .parameters
+                .iter()
+                .map(|p| p.name.clone())
+                .collect::<Vec<String>>()
+                .into(),
+        ),
+        ("n_completed", (summary.n_completed as i32).into()),
+        ("n_included", (summary.n_included as i32).into()),
+        ("chi_square_df", (chi_df as i32).into()),
+        ("confidence_level", summary.confidence_level.into()),
+        ("directory", directory.to_string().into()),
+    ]);
+    out.into()
+}
+
 /// GAM covariate pre-screening (internal Rust computation layer).
 ///
 /// All heavy computation (OLS, natural cubic splines, AIC model comparison)
@@ -3780,9 +4612,12 @@ extendr_module! {
     fn ferx_rust_sir;
     fn ferx_rust_covariance;
     fn ferx_rust_autodiff_enabled;
+    fn ferx_rust_known_blocks;
     fn ferx_rust_validate_model;
     fn ferx_rust_model_data_path;
     fn ferx_rust_inits_from_nca;
     fn ferx_rust_prepare_frem;
+    fn ferx_rust_bootstrap;
+    fn ferx_rust_bootstrap_summarize;
     fn ferx_rust_gam_screen;
 }

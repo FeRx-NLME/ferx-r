@@ -121,29 +121,51 @@ ferx_covariance <- function(fit,
   # and flatten row-major so each subject contributes `n_eta` contiguous
   # values. Identical handling to ferx_sir().
   ebes <- fit$ebe_etas
-  if (is.null(ebes) || nrow(ebes) == 0L) {
-    stop(
-      "ferx_covariance: fit$ebe_etas is empty; cannot warm-start the inner ",
-      "loop. This fit appears to be missing per-subject EBEs."
-    )
-  }
-  eta_cols <- setdiff(names(ebes), c("ID", "ofv_contribution", "n_obs"))
-  if (length(eta_cols) == 0L) {
-    stop("ferx_covariance: fit$ebe_etas has no ETA columns.")
-  }
   n_eta <- nrow(fit$omega)
-  if (length(eta_cols) != n_eta) {
-    stop(
-      "ferx_covariance: fit$ebe_etas has ", length(eta_cols), " ETA columns (",
-      paste(eta_cols, collapse = ", "),
-      ") but fit$omega is ", n_eta, "x", n_eta, ". ",
-      "The EBE table and the omega matrix must agree on n_eta - was ",
-      "this fit object hand-edited or assembled from incompatible parts?"
-    )
+  if (is.null(n_eta)) n_eta <- 0L
+
+  if (n_eta == 0L) {
+    # Fixed-effects-only (naive-pooled) fit - ferx-core #989. There is no inner
+    # empirical-Bayes problem, so there are no EBEs to warm-start from and
+    # `fit$ebe_etas` is NULL rather than an empty data frame. The covariance
+    # step still applies: it is the theta/sigma block that carries the standard
+    # errors, and that block is exactly what a naive-pooled user needs, since
+    # NONMEM's `$COVARIANCE` default (`rsr`) is the estimator that accounts for
+    # the within-subject correlation such a model deliberately ignores.
+    eta_hats_flat <- numeric(0)
+    # `nrow(eta_mat)` is the usual subject count, but there is no eta matrix
+    # here; the engine still needs the count to size its warm-start scaffold.
+    n_subj <- as.integer(fit$n_subjects %||% 0L)
+    if (n_subj <= 0L) {
+      stop(
+        "ferx_covariance: fit has no random effects and no recorded ",
+        "n_subjects, so the subject count cannot be determined. Re-fit via ",
+        "ferx_fit(model, data)."
+      )
+    }
+  } else {
+    if (is.null(ebes) || nrow(ebes) == 0L) {
+      stop(
+        "ferx_covariance: fit$ebe_etas is empty, but fit$omega is ", n_eta, "x",
+        n_eta, " so this fit should carry per-subject EBEs. Cannot warm-start ",
+        "the inner loop."
+      )
+    }
+    eta_cols <- setdiff(names(ebes), c("ID", "ofv_contribution", "n_obs"))
+    if (length(eta_cols) != n_eta) {
+      stop(
+        "ferx_covariance: fit$ebe_etas has ", length(eta_cols), " ETA columns (",
+        paste(eta_cols, collapse = ", "),
+        ") but fit$omega is ", n_eta, "x", n_eta, ". ",
+        "The EBE table and the omega matrix must agree on n_eta - was ",
+        "this fit object hand-edited or assembled from incompatible parts?"
+      )
+    }
+    eta_mat <- as.matrix(ebes[, eta_cols, drop = FALSE])
+    storage.mode(eta_mat) <- "double"
+    eta_hats_flat <- as.numeric(t(eta_mat))  # row-major
+    n_subj <- nrow(eta_mat)
   }
-  eta_mat <- as.matrix(ebes[, eta_cols, drop = FALSE])
-  storage.mode(eta_mat) <- "double"
-  eta_hats_flat <- as.numeric(t(eta_mat))  # row-major
 
   # Hash plumbing, identical to ferx_sir(): non-empty hex string forwards and
   # Rust enforces equality; NULL (older binary) or NA (hashing failed at fit
@@ -191,7 +213,7 @@ ferx_covariance <- function(fit,
     omega_iov_flat = omega_iov_flat,
     omega_iov_dim = as.integer(omega_iov_dim),
     eta_hats_flat = eta_hats_flat,
-    n_subjects = nrow(eta_mat),
+    n_subjects = n_subj,
     covariance_method = cov_method,
     mu_referencing = isTRUE(mu_referencing),
     verbose = isTRUE(verbose)

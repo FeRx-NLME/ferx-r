@@ -343,6 +343,16 @@ ferx_load_fit <- function(path) {
     }
     out$omega_iov_param_corr <- .fitrx_matrix_from_wire(w$iov$omega_iov_param_corr)
     out$kappa_init_as_sd <- as.logical(unlist(w$iov$kappa_init_as_sd %||% list(), use.names = FALSE))
+    # Sample-size-weighted IOV (ferx-core #1031). Absent from every pre-#1031
+    # bundle and from every unweighted model, in which case both stay NULL.
+    kw <- .ferx_name_kappa_weights(
+      .fitrx_unwrap_opt_chr_vec(w$iov$kappa_weights),
+      .fitrx_unwrap_nullable_num_vec(w$iov$kappa_weight_typical),
+      out$kappa_names,
+      length(out$kappa_names)
+    )
+    out$kappa_weights <- kw$kappa_weights
+    out$kappa_weight_typical <- kw$kappa_weight_typical
   } else {
     out$kappa_names <- character()
     out$kappa_fixed <- logical()
@@ -352,6 +362,8 @@ ferx_load_fit <- function(path) {
     out$omega_iov <- NULL
     out$omega_iov_param_corr <- NULL
     out$kappa_init_as_sd <- logical()
+    out$kappa_weights <- NULL
+    out$kappa_weight_typical <- NULL
   }
 
   # R extras
@@ -367,7 +379,7 @@ ferx_load_fit <- function(path) {
 .fitrx_method_label <- function(token) {
   # Mirrors ferx-core's `EstimationMethod::label()`, keyed by the tokens its
   # `method_to_str()` writes into the .fitrx. A token missing here falls through to
-  # `as.character()` and surfaces lowercase (e.g. "agq" instead of "AGQ") — so this
+  # `as.character()` and surfaces lowercase (e.g. "agq" instead of "AGQ") - so this
   # list has to grow whenever the engine gains a method.
   if (is.null(token) || !nzchar(token)) return("FOCEI")
   switch(token,

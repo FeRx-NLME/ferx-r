@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# Bump the ferx-core pin in src/rust/Cargo.lock to current main HEAD.
+# Bump the ferx-core / ferx-tools pin in src/rust/Cargo.lock to current main HEAD.
+#
+# Both crates live in the one ferx-core repository and are patched to the local
+# sibling checkout together, so they are bumped together and must end up on the
+# same revision.
 #
 # Why this script exists: src/rust/.cargo/config.toml carries a [patch] that
 # redirects ferx-core to a sibling ../ferx-core checkout when present. If you
@@ -33,17 +37,33 @@ rm "$CONFIG"
 
 ( cd "$RUST_DIR" && cargo update )
 
-# Verify the lock still pins ferx-core via a git source line.
-if ! grep -q '^source = "git+https://github.com/FeRx-NLME/ferx-core' "$RUST_DIR/Cargo.lock"; then
-  echo "error: Cargo.lock has no git source for ferx-core after update — refusing to commit a broken pin" >&2
+# Verify the lock still pins both crates via a git source line, on one revision.
+source_of() {
+  awk -v pkg="$1" '
+    $0 == "name = \"" pkg "\"" { in_pkg = 1; next }
+    in_pkg && /^source = / { print; exit }
+    in_pkg && /^\[\[package\]\]/ { exit }
+  ' "$RUST_DIR/Cargo.lock"
+}
+
+for pkg in ferx-core ferx-tools; do
+  case "$(source_of "$pkg")" in
+    'source = "git+https://github.com/FeRx-NLME/ferx-core'*) ;;
+    *)
+      echo "error: Cargo.lock has no git source for $pkg after update - refusing to commit a broken pin" >&2
+      exit 2
+      ;;
+  esac
+done
+
+SHA=$(source_of ferx-core | sed -E 's/.*#([0-9a-f]+).*/\1/')
+TOOLS_SHA=$(source_of ferx-tools | sed -E 's/.*#([0-9a-f]+).*/\1/')
+if [[ "$SHA" != "$TOOLS_SHA" ]]; then
+  echo "error: ferx-core ($SHA) and ferx-tools ($TOOLS_SHA) landed on different revisions" >&2
   exit 2
 fi
 
-SHA=$(grep -A2 '^name = "ferx-core"$' "$RUST_DIR/Cargo.lock" \
-      | grep '^source = ' \
-      | sed -E 's/.*#([0-9a-f]+).*/\1/')
-
 echo
-echo "ferx-core now pinned to: $SHA"
+echo "ferx-core and ferx-tools now pinned to: $SHA"
 echo "Commit suggestion:"
 echo "  chore(deps): update Cargo.lock to ferx-core main (${SHA:0:7})"

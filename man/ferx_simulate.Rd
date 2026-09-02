@@ -19,7 +19,15 @@ ferx_simulate(
 
 \item{data}{Path to a NONMEM-format CSV (provides population structure: doses,
 obs times). When omitted, the model file's \code{[data]} block (\code{path
-  = ...}) is used.}
+= ...}) is used.
+The \code{DV} column may be left empty (\code{.} / \code{NA}) on the
+sampling rows - the DV is what the simulation produces, so an empty cell
+means "simulate here" (a placeholder value is not needed). Rows marked
+\code{MDV = 1} are excluded, as always. Kept empty-DV records are counted
+in the \code{simulation_warnings} attribute and re-emitted as an R warning:
+\code{ferx_fit()} skips those same records, so simulated rows at those
+times have no counterpart in a fit's \code{sdtab} (do not overlay the two,
+e.g. in a VPC).}
 
 \item{n_sim}{Number of simulation replicates}
 
@@ -63,7 +71,10 @@ DV_SIM (with \code{OBSERVED = NA}). For a joint PK-TTE model each subject
 also yields a TTE row on the event CMT, where TIME is the sampled
 event/censor time and \code{OBSERVED} is 1 (event before \code{horizon}) or
 0 (right-censored at it); its IPRED and DV_SIM are \code{NA}. Use
-\code{is.na(OBSERVED)} to separate continuous rows from event rows.
+\code{is.na(OBSERVED)} to separate continuous rows from event rows. For a
+\code{[binary_model]} endpoint the categorical row on the binary CMT carries
+the simulated 0/1 outcome in \code{DV_SIM} (coded as the input CSV codes DV),
+with \code{IPRED} and \code{OBSERVED} both \code{NA}; select it by its CMT.
 
 The returned frame carries a \code{simulation_warnings} attribute (a
 character vector, empty for a clean run) listing any per-subject simulation
@@ -88,11 +99,11 @@ sim_pm <- ferx_simulate(ex$model, ex$data, n_sim = 10L, seed = 1L,
 
 }
 \seealso{
-Other simulation: 
-\code{\link{ferx_calc_npde}()},
-\code{\link{ferx_predict}()},
-\code{\link{ferx_predict_survival}()},
-\code{\link{ferx_simulate_adaptive}()},
-\code{\link{ferx_simulate_with_uncertainty}()}
+Other simulation:
+\code{\link[=ferx_calc_npde]{ferx_calc_npde()}},
+\code{\link[=ferx_predict]{ferx_predict()}},
+\code{\link[=ferx_predict_survival]{ferx_predict_survival()}},
+\code{\link[=ferx_simulate_adaptive]{ferx_simulate_adaptive()}},
+\code{\link[=ferx_simulate_with_uncertainty]{ferx_simulate_with_uncertainty()}}
 }
 \concept{simulation}

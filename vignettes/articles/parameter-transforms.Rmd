@@ -88,7 +88,7 @@ data.frame(
 ```
 
 Use the **exact** formula (`log(1 + CV²)`) for omega variances above 30% — the
-approximate formula `CV²/100²` underestimates the required starting value and
+approximate formula `CV²/100²` over-estimates the required starting value and
 can slow convergence.
 
 Quick rule: for CV% ≤ 30%, `omega ≈ (CV/100)²` is fine. For CV% > 30%, use

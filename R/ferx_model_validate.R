@@ -14,7 +14,11 @@
 #'   per-CMT scaling/error-model coverage, steady-state II sanity, lagtime
 #'   signs). \code{NULL} runs the model-only checks.
 #'
-#' @return Invisibly returns a list with \code{ok} (logical), \code{model},
+#' @return Invisibly returns a list with \code{ok} (logical - FALSE when the
+#'   engine reports an error, a required section is missing, or the file
+#'   carries a section name this build of the engine does not accept - one it
+#'   never knew, one it has retired, or one behind a disabled feature),
+#'   \code{model},
 #'   \code{data}, and a \code{diagnostics} data frame with one row per finding
 #'   (\code{severity}, \code{code}, \code{message}, \code{block}, \code{line},
 #'   \code{suggestion}). The function always prints a report to the console.
@@ -77,8 +81,15 @@ ferx_model_validate <- function(path, data = NULL) {
     "parameters", "individual_parameters", "structural_model",
     "error_model"
   )
-  optional_sections <- c("odes", "fit_options", "scaling", "initial_values",
-                         "covariate_nn", "diffusion", "derived", "output")
+  # Optional sections come from the engine (ferx-core's `known_block_names()`),
+  # never a list maintained here. The duplicated vector this replaces had
+  # drifted: it omitted covariates, event_model, binary_model, markov_model,
+  # data_selection, adaptive_dosing, mixture, data and simulation - all of them
+  # blocks the parser reads and all of them used by bundled examples, so
+  # `ferx_model_validate(ferx_example("two_cpt_oral_cov")$model)` reported
+  # `covariates [unknown section]` - and it still listed `initial_values`,
+  # which the engine dropped in ferx-core e5e934d. See ferx-core #1040.
+  optional_sections <- setdiff(ferx_rust_known_blocks(), required_sections)
 
   blocks   <- .ferx_extract_blocks(path)
   present  <- names(blocks)
@@ -98,7 +109,13 @@ ferx_model_validate <- function(path, data = NULL) {
     stringsAsFactors = FALSE
   )
 
-  ok <- isTRUE(rust_result$ok) && length(missing) == 0L
+  # An unrecognised section counts against `ok`. It used to be printed as
+  # `[unknown section]` and then left out of the returned status, so `res$ok`
+  # was TRUE for a model carrying a block the engine would ignore - the exact
+  # silent-drop ferx-core #1040 closes. A current engine already errors on it
+  # (`E_UNKNOWN_BLOCK`), which is what `rust_result$ok` carries; folding it in
+  # here keeps the status honest against an older pinned engine too.
+  ok <- isTRUE(rust_result$ok) && length(missing) == 0L && length(unknown) == 0L
 
   cat("Validating:", basename(path), "\n")
   if (!is.null(data)) cat("       data:", basename(data), "\n")
@@ -112,8 +129,26 @@ ferx_model_validate <- function(path, data = NULL) {
   for (s in optional_sections) {
     if (s %in% present) cat(sprintf("  %-30s [ok] (optional)\n", s))
   }
+  # `ferx_rust_known_blocks()` is build-dependent and omits names the engine
+  # still recognises: a retired block (`E_DEPRECATED_BLOCK`) and one gated
+  # behind a cargo feature this binary lacks (`E_BLOCK_FEATURE_DISABLED`) both
+  # land in `unknown`. Printing `[unknown section]` for those contradicts the
+  # engine's own diagnostic two lines further down, which correctly says the
+  # name was retired or needs a feature flag - so take the label from that
+  # diagnostic when the engine has already named the block. `[unknown section]`
+  # is left for a header nothing explains.
   if (length(unknown) > 0L) {
-    for (s in unknown) cat(sprintf("  %-30s [unknown section]\n", s))
+    for (s in unknown) {
+      codes <- diag$code[!is.na(diag$block) & diag$block == s]
+      label <- if ("E_DEPRECATED_BLOCK" %in% codes) {
+        "[retired section]"
+      } else if ("E_BLOCK_FEATURE_DISABLED" %in% codes) {
+        "[feature not enabled]"
+      } else {
+        "[unknown section]"
+      }
+      cat(sprintf("  %-30s %s\n", s, label))
+    }
   }
   cat("\n")
 

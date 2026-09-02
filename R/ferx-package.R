@@ -3,8 +3,7 @@
 #' ferx provides a user-facing R API for population PK / NLME modeling
 #' that delegates to a high-performance Rust engine (ferx-core). Models are
 #' written in a compact .ferx DSL (parameters, individual_parameters,
-#' structural_model, odes, error_model, initial_values, fit_options,
-#' optional scaling).
+#' structural_model, odes, error_model, fit_options, optional scaling).
 #'
 #' @section Where to start:
 #' \tabular{ll}{
@@ -31,7 +30,7 @@
 #'
 #' @keywords internal
 #' @useDynLib ferx, .registration = TRUE
-#' @importFrom graphics abline mtext par plot.new
-#' @importFrom stats cor.test shapiro.test setNames
+#' @importFrom graphics abline hist lines mtext par plot.new title
+#' @importFrom stats cor.test dchisq shapiro.test setNames
 #' @importFrom utils read.csv
 "_PACKAGE"

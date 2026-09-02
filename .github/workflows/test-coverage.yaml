@@ -6,9 +6,16 @@ on:
   pull_request:
     branches: [main]
 
+# Cancel superseded runs on feature branches; never cancel a run on main
+# (its result gates the branch protection status and the codecov baseline).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   test-coverage:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
 
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}

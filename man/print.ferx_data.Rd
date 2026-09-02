@@ -13,6 +13,9 @@
 
 \item{...}{Passed to \code{print.data.frame}.}
 }
+\value{
+\code{x}, invisibly.
+}
 \description{
 Shows a compact exclusion summary (records retained, excluded counts, fired
 rules) followed by the first rows of the retained data.

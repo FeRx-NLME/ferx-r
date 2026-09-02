@@ -71,6 +71,77 @@ test_that("model with unknown section reports it", {
   out <- capture.output(ferx_model_validate(path))
   expect_true(any(grepl("unknown section|foo", out)))
 })
+test_that("model with unknown section is not ok", {
+  # Regression for ferx-core #1040: `unknown` was printed as `[unknown section]`
+  # but left out of the returned status, so `res$ok` was TRUE for a model
+  # carrying a block the engine ignores.
+  lines <- c(VALID_WARFARIN_SECTIONS, "", "[foo]", "  bar = 1")
+  path  <- write_ferx(lines)
+  on.exit(unlink(path))
+  res <- suppressWarnings(capture.output(r <- ferx_model_validate(path)))
+  expect_false(isTRUE(r$ok))
+})
+test_that("the engine rejects an unknown section with E_UNKNOWN_BLOCK", {
+  # The status above must not rest on the R-side list alone: the engine itself
+  # refuses the header, so `ok` stays FALSE even if the R check were removed.
+  lines <- c(VALID_WARFARIN_SECTIONS, "", "[fit_option]", "  method = focei")
+  path  <- write_ferx(lines)
+  on.exit(unlink(path))
+  invisible(capture.output(res <- ferx_model_validate(path)))
+  expect_false(isTRUE(res$ok))
+  expect_true("E_UNKNOWN_BLOCK" %in% res$diagnostics$code)
+  d <- res$diagnostics[res$diagnostics$code == "E_UNKNOWN_BLOCK", , drop = FALSE]
+  expect_identical(d$block[[1L]], "fit_option")
+  expect_true(grepl("fit_options", d$suggestion[[1L]], fixed = TRUE))
+})
+test_that("optional sections come from the engine, not a duplicated R list", {
+  # The hard-coded vector this replaces had drifted: it omitted `covariates`
+  # (and event_model, simulation, ...) so a valid bundled example printed
+  # `covariates [unknown section]`, and it listed `initial_values`, which the
+  # engine dropped long ago (ferx-core e5e934d).
+  known <- ferx:::ferx_rust_known_blocks()
+  expect_true(all(c("parameters", "individual_parameters", "structural_model",
+                    "error_model", "covariates", "event_model", "simulation",
+                    "adaptive_dosing", "mixture", "data_selection") %in% known))
+  expect_false("initial_values" %in% known)
+  expect_identical(known, sort(known))
+})
+test_that("a bundled example with a [covariates] block validates clean", {
+  ex <- ferx_example("two_cpt_oral_cov")
+  out <- capture.output(res <- ferx_model_validate(ex$model))
+  expect_true(isTRUE(res$ok))
+  expect_false(any(grepl("unknown section", out, fixed = TRUE)))
+})
+test_that("a retired section is labelled retired, not unknown", {
+  # `ferx_rust_known_blocks()` lists only what this build *accepts*, so a
+  # retired name lands in the R-side `unknown` set. Printing `[unknown section]`
+  # for it contradicts the engine's own E_DEPRECATED_BLOCK line right below,
+  # which says the block was retired and should be deleted.
+  lines <- c(VALID_WARFARIN_SECTIONS, "", "[initial_values]", "  TVCL = 0.134")
+  path  <- write_ferx(lines)
+  on.exit(unlink(path))
+  out <- capture.output(res <- ferx_model_validate(path))
+  expect_false(isTRUE(res$ok))
+  expect_true("E_DEPRECATED_BLOCK" %in% res$diagnostics$code)
+  expect_true(any(grepl("initial_values +\\[retired section\\]", out)))
+  expect_false(any(grepl("unknown section", out, fixed = TRUE)))
+})
+test_that("a feature-gated section is labelled disabled, not unknown", {
+  # `markov_model` is a name the engine recognises in every build but only
+  # accepts with `--features markov`, which this package does not enable
+  # (src/Makevars builds ferx-core with ci,nn,survival). It is therefore absent
+  # from `ferx_rust_known_blocks()` while the parser still reports it precisely.
+  skip_if("markov_model" %in% ferx:::ferx_rust_known_blocks(),
+          "this build enables the markov feature")
+  lines <- c(VALID_WARFARIN_SECTIONS, "", "[markov_model]", "  states A, B")
+  path  <- write_ferx(lines)
+  on.exit(unlink(path))
+  out <- capture.output(res <- ferx_model_validate(path))
+  expect_false(isTRUE(res$ok))
+  expect_true("E_BLOCK_FEATURE_DISABLED" %in% res$diagnostics$code)
+  expect_true(any(grepl("markov_model +\\[feature not enabled\\]", out)))
+  expect_false(any(grepl("unknown section", out, fixed = TRUE)))
+})
 test_that("syntax error in model body returns FALSE and prints errors", {
   lines <- c(
     "[parameters]",

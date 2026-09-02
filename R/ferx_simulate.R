@@ -9,6 +9,14 @@
 #' @param data Path to a NONMEM-format CSV (provides population structure: doses,
 #'   obs times). When omitted, the model file's \code{[data]} block (\code{path
 #'   = ...}) is used.
+#'   The \code{DV} column may be left empty (\code{.} / \code{NA}) on the
+#'   sampling rows - the DV is what the simulation produces, so an empty cell
+#'   means "simulate here" (a placeholder value is not needed). Rows marked
+#'   \code{MDV = 1} are excluded, as always. Kept empty-DV records are counted
+#'   in the \code{simulation_warnings} attribute and re-emitted as an R warning:
+#'   \code{ferx_fit()} skips those same records, so simulated rows at those
+#'   times have no counterpart in a fit's \code{sdtab} (do not overlay the two,
+#'   e.g. in a VPC).
 #' @param n_sim Number of simulation replicates
 #' @param seed Random seed for reproducibility
 #' @param fit Optional \code{ferx_fit} result. When provided, simulation uses
@@ -46,7 +54,10 @@
 #'   also yields a TTE row on the event CMT, where TIME is the sampled
 #'   event/censor time and \code{OBSERVED} is 1 (event before \code{horizon}) or
 #'   0 (right-censored at it); its IPRED and DV_SIM are \code{NA}. Use
-#'   \code{is.na(OBSERVED)} to separate continuous rows from event rows.
+#'   \code{is.na(OBSERVED)} to separate continuous rows from event rows. For a
+#'   \code{[binary_model]} endpoint the categorical row on the binary CMT carries
+#'   the simulated 0/1 outcome in \code{DV_SIM} (coded as the input CSV codes DV),
+#'   with \code{IPRED} and \code{OBSERVED} both \code{NA}; select it by its CMT.
 #'
 #'   The returned frame carries a \code{simulation_warnings} attribute (a
 #'   character vector, empty for a clean run) listing any per-subject simulation
@@ -106,6 +117,8 @@ ferx_simulate <- function(model, data = NULL, n_sim = 1L, seed = 42L, fit = NULL
       omega_flat = fit_pieces$omega_flat,
       omega_dim = fit_pieces$omega_dim,
       sigma = fit_pieces$sigma,
+      omega_iov_flat = fit_pieces$omega_iov_flat,
+      omega_iov_dim = fit_pieces$omega_iov_dim,
       n_sim = as.integer(n_sim),
       seed = as.integer(seed),
       match_method = match_method,
@@ -124,11 +137,11 @@ ferx_simulate <- function(model, data = NULL, n_sim = 1L, seed = 42L, fit = NULL
 # warning so they are not silently lost; return `res` unchanged (the attribute is
 # left in place for programmatic access). `res` may be NULL when the Rust side
 # errored, in which case there is nothing to surface.
-.ferx_surface_sim_warnings <- function(res) {
+.ferx_surface_sim_warnings <- function(res, fn = "ferx_simulate") {
   w <- attr(res, "simulation_warnings", exact = TRUE)
   if (length(w) > 0L) {
     warning(
-      "ferx_simulate produced ", length(w), " simulation diagnostic",
+      fn, " produced ", length(w), " simulation diagnostic",
       if (length(w) > 1L) "s" else "", ":\n  ",
       paste(w, collapse = "\n  "),
       call. = FALSE

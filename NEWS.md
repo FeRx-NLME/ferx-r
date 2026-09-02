@@ -1,4 +1,157 @@
-# ferx (development)
+# ferx 0.3.0.9000 (development version)
+
+## Breaking changes
+
+- **An unrecognised `[section]` in a `.ferx` file is now an error** (ferx-core #1040).
+  Sections were read by name lookup, so one the engine did not know was never read
+  and never reported: a misspelled `[fit_option]` left the model validating clean
+  while the fit ran with the default method and no covariance step, returning
+  without standard errors. Section names are now closed-world — an unknown header
+  fails the parse with `E_UNKNOWN_BLOCK`, naming the offender, its line, the valid
+  set and a did-you-mean.
+
+  `ferx_model_validate()` follows suit on two counts. An unknown section now
+  counts against the returned `$ok`; it was printed as `[unknown section]` and
+  then left out of the status, so `res$ok` was `TRUE` for a model carrying a
+  section the engine would ignore. And the list of valid sections comes from the
+  engine (`ferx_rust_known_blocks()`) instead of a copy maintained in R — the copy
+  had drifted, so `ferx_model_validate(ferx_example("two_cpt_oral_cov")$model)`
+  reported `covariates [unknown section]` for a perfectly valid model, and it
+  still advertised `[initial_values]`, which the engine dropped years ago
+  (ferx-core e5e934d).
+
+  **If your model file carries `[initial_values]`, delete it.** It has been dead
+  weight since initial estimates moved inline into `[parameters]`, and it now
+  fails the parse with `E_DEPRECATED_BLOCK`, naming the replacement. The three
+  files under `examples/models/` that still had one have been fixed.
+
+- **A dose attribute your model also reads is now an error** (ferx-core #993).
+- **A dose attribute your model also reads is now an error**
+  ([ferx-core #993](https://github.com/FeRx-NLME/ferx-core/issues/993),
+  [ferx-core #1004](https://github.com/FeRx-NLME/ferx-core/issues/1004)).
+  `F`, `LAGTIME`/`ALAG` and the compartment-indexed `F{n}`/`ALAG{n}`/`LAGTIME{n}`
+  are applied by the engine **at the dose event**. A model that declared one and
+  *also* referenced it in `[odes]` (the right-hand side or an `init(...)` seed),
+  the `[scaling]` readout, or the `[adaptive_dosing] observe` signal was applying
+  it twice — silently, and by exactly that factor. Such a model now fails to parse
+  with `E_DOSE_ATTR_DOUBLE_USE`, naming both readings and the fix. `D{n}`/`R{n}`
+  carry the same reservation but are consulted only for a coded `RATE=-2`/`-1`
+  dose, so that collision is reported against the **dataset** instead and a model
+  whose data never codes `RATE` is untouched. Reads from `[derived]` / `[output]`
+  are post-solve reporting and stay silent.
+
+  **Analytical (`pk ...`) models are covered too** (#1004). The first pass
+  rejected ODE models only, on the argument that an explicit `pk(..., f=F)`
+  mapping made a second use "stated rather than silent". It did not: nothing in
+  the model file says the value is applied twice, and a `[scaling]` or
+  `[adaptive_dosing] observe` expression that reads a mapped
+  `f=`/`lagtime=`/`alag=` parameter applied it once at the dose and once where it
+  was read — on the **default** engine, with no diagnostic, measured at exactly
+  `F` on the prediction. Both engines now reject it with the same
+  `E_DOSE_ATTR_DOUBLE_USE` code.
+
+  The **remedy differs by engine**, and the message says which applies. On an
+  ODE model the *name* routes the parameter, so renaming it fixes the model. On
+  an analytical model the name is inert and the **mapping** binds it, so the fix
+  is to drop the `f=`/`lagtime=`/`alag=` argument from the `pk(...)` call —
+  renaming changes nothing, because the mapping follows the parameter. The
+  message quotes the mapping as you wrote it, `alag=` spelling included.
+
+  **If you map a dose attribute and also read it** — e.g.
+  `pk one_cpt_oral(cl=CL, v=V, ka=KA, f=F)` together with
+  `[scaling] obs_scale = V / F` — that model now fails to parse. Drop whichever
+  half was not meant.
+
+  **If you have an ODE model that folds `F` into the absorption flux** — the
+  pre-dose-entry convention, e.g. `d/dt(central) = F * KA * depot / V - ...` — it
+  will now fail to parse instead of quietly computing `F²`. Drop the `F` from the
+  right-hand side; if the parameter was never bioavailability, rename it (the name
+  is what routes it).
+
+  Two shapes stay accepted. A parameter merely *named* `F` that no `pk(...)`
+  argument maps is an ordinary parameter, so the usual `CL/F`, `V/F`
+  apparent-parameter convention is unaffected. And an **analytical**
+  `[initial_conditions]` read is fine: an initial condition is not an absorbed
+  dose, so the engine seeds the amount with `F = 1` and no lag, and
+  `init(depot) = F * 500` — the bioavailable residue of a pre-study dose —
+  applies `F` exactly once. Note the scope of that second one: the same reasoning
+  has not yet been carried over to the ODE engine, where an `init(...)` seed
+  reading a dose attribute is still rejected
+  ([ferx-core #1046](https://github.com/FeRx-NLME/ferx-core/issues/1046)).
+
+  **One analytical shape still escapes the check.** A parameter assigned only
+  inside an `if` with no `else` is bound by `pk(..., f=F)` but resolves to nothing
+  when `[scaling]` reads it, giving `NaN` predictions on a clean parse — tracked
+  as [ferx-core #1026](https://github.com/FeRx-NLME/ferx-core/issues/1026).
+  Do not read a mapped dose attribute back in
+  `[scaling]` on the assumption that the parser will stop you.
+
+  Both readings make ferx **stricter than NONMEM**, measured on NONMEM 7.6.0:
+  `$PK` defining `F1` *and* `S2 = V/F1` runs clean under `ADVAN2` and returns
+  predictions scaled by exactly `F1`, and a `$PK` `F1` referenced in `$DES` under
+  `ADVAN13` quietly computes `F²` — neither draws a diagnostic (ferx-core's
+  `nonmem_anchor/analytical_dose_attr_double_use_*` and
+  `nonmem_anchor/dose_attr_double_use_*`). A control stream translated literally
+  can therefore fail to parse in ferx even though it ran in NONMEM.
+
+- **An unrecognised `[block]` name is now an error**
+  ([ferx-core #1040](https://github.com/FeRx-NLME/ferx-core/issues/1040)).
+  Blocks were read by name lookup, so a header the parser did not know was never
+  read and never reported: a misspelled `[fit_option]` left the model validating
+  clean while the fit ran with the default method, the default iteration cap and
+  **no covariance step** — returning without standard errors and no indication
+  why. The same went for `[scalings]`, `[outputs]` and friends. Block names are
+  now closed-world, like the keys inside a block already were: an unknown header
+  is `E_UNKNOWN_BLOCK`, listing every offender with its line, the full valid set,
+  and a did-you-mean for a near match. Three neighbouring silent drops go with
+  it — an instance name on a block that takes none (`[fit_options DOSE]`) or
+  missing where one is required (`[covariate_nn]`) is `E_BLOCK_INSTANCE_NAME`; a
+  block whose cargo feature this build lacks (`[event_model]`, `[markov_model]`)
+  is `E_BLOCK_FEATURE_DISABLED`; and `[initial_values]` — ferx's own former
+  spelling for initial estimates, unread since they moved inline into
+  `[parameters]` — is `E_DEPRECATED_BLOCK`. **If a model of yours still carries
+  an `[initial_values]` block, delete it**: it has done nothing for several
+  releases and now stops the parse. No bundled model under `inst/` carries one.
+  One rough edge to know about: `ferx_model_validate()` still prints its own
+  "Sections present" table from a list that predates this change, so on an
+  unusual block that table can disagree with the verdict below it — the engine
+  diagnostics are the authoritative half.
+
+- **`obs_scale = TIME` is now a parse error, and an undefined name in `[scaling]`
+  no longer reads as zero**
+  ([ferx-core #1028](https://github.com/FeRx-NLME/ferx-core/issues/1028)). `obs_scale` is
+  subject-static — evaluated once at `t = 0` — so `obs_scale = TIME` (or `= T`)
+  could only ever have read `0`; the error names the Form C `y = <expr>` readout
+  as the place for a time-dependent term. Separately, `[scaling]` expressions
+  never registered their covariate references as required data columns, and
+  `ferx_predict()` ran no covariate check at all, so an unresolvable identifier
+  reached the predictor as the covariate map's `0.0` default. Both halves now
+  register their references, and **`ferx_predict()` reports
+  `E_MISSING_COVARIATE`** for a missing column just as `ferx_fit()` and
+  `ferx_simulate()` already did — so a `ferx_predict()` call that silently used
+  `0` for a missing column now errors. One more narrow break: a `[scaling]`
+  expression referencing an *undeclared* data column named `T` now reads the
+  model-time built-in instead, matching `[odes]` where that name has always been
+  reserved. Declare `T` in `[covariates]` to keep it a data column; whenever the
+  fold does happen ferx warns and names both escapes, so it is never silent.
+  `TAFD` / `TAD` are unaffected and stay ordinary covariate references.
+
+- **`method = "imp"`, `"impmap"` and `"bayes"` are rejected on a model with no
+  random effects, and pure `"gn"` warns**
+  ([ferx-core #1006](https://github.com/FeRx-NLME/ferx-core/issues/1006),
+  [ferx-core #1007](https://github.com/FeRx-NLME/ferx-core/issues/1007)).
+  All three already refused `n_eta = 0` at run
+  time, so a `method = c("focei", "imp")` chain ran its whole FOCEI stage before
+  failing. `E_METHOD_NO_RANDOM_EFFECTS` now fires up front, anywhere in a chain.
+  One consequence when upgrading: a chain with `imp_eval_only = TRUE` on a
+  fixed-effects-only model previously returned a fit result with the IMP failure
+  downgraded to a warning, and now returns this error instead. Pure Gauss-Newton
+  is start-sensitive at `n_eta = 0` — with no inner EBE loop to absorb a poor
+  `sigma` start the BHHH step can collapse far from the optimum, with only
+  `Converged: NO` as the signal — so it warns (`W_GN_NO_RANDOM_EFFECTS`) and
+  points at `"gn_hybrid"` / `"focei"`. Both are suppressed when a later stage
+  re-optimises the GN result. The bundled fixed-effects-only examples
+  (`one_cpt_iv_pooled`, `binary_logistic`) request `focei` and are unaffected.
 
 ## New features
 
@@ -6,12 +159,317 @@
   fits `eta ~ f(cov)` and ranks covariates by AIC improvement over the null model
   (delta_aic = AIC_null - AIC_best). Functional forms tried: linear, natural cubic
   spline (df = 2 and 3 by default), and one-hot categorical. Warns when ETA shrinkage
-  exceeds 30%. The Rust equivalent is `ferx_tools::gam::gam_screen()`.
+  exceeds 30%. All numerical work happens in the engine, via
+  `ferx_tools::gam::gam_screen()`.
 
-# ferx 0.2.0
+- **`ferx_bootstrap()`: the non-parametric case bootstrap, at PsN's
+  `bootstrap` feature parity** ([ferx-core #1144](https://github.com/FeRx-NLME/ferx-core/issues/1144),
+  engine side ferx-core #1140). Resample whole subjects with replacement, refit
+  the model to each replicate, and get bias, bootstrap standard errors and both
+  intervals - the percentile one (`ci_lower` / `ci_upper`) and the
+  normal-approximation one built from the bootstrap SE (`ci_lower_normal` /
+  `ci_upper_normal`) - side by side, so the disagreement between them is
+  visible. Unlike the covariance step it survives a failed or non-positive-
+  definite `R^-1`, and it does not assume a symmetric interval.
+
+  ```r
+  bs <- ferx_bootstrap(ex$model, ex$data, samples = 200, seed = 12345,
+                       threads = 8)
+  bs$parameters   # one row per parameter
+  bs$raw          # one row per fit, the original dataset first
+  bs$diagnostics  # run counts, exclusion tallies, diagnostic means
+  plot(bs)        # histogram per parameter (+ the dofv panel when dofv = TRUE)
+  ```
+
+  Supports stratified resampling (`stratify_on`), PsN's per-stratum
+  `-sample_size` spelled as an R named vector
+  (`sample_size = c("1001" = 12, "1002" = 24)`), `dofv`, `keep_covariance`, and
+  the four exclusion filters. **`directory` defaults to `NULL`**, where the CLI
+  writes `{model}-bootstrap/`: an R user has the data frames in hand and rarely
+  wants eight CSVs appearing in the working directory. Set it to get the
+  artefacts - and to be able to call `ferx_bootstrap_summarize()` later.
+
+- **`ferx_bootstrap_summarize()`** re-computes a finished run's statistics from
+  its `raw_results.csv` under different exclusion criteria - PsN's
+  `-summarize`. Refits nothing: it is the recovery path for a run where too
+  many replicates were filtered out to resolve a percentile interval.
+
+- **Sample-size-weighted inter-occasion variability is now declared on the
+  `kappa` itself** ([ferx-core #1031](https://github.com/FeRx-NLME/ferx-core/issues/1031),
+  [ferx-core #1062](https://github.com/FeRx-NLME/ferx-core/pull/1062)).
+  Between-treatment-arm variability (BTAV) - the arm-level random effect in
+  every published longitudinal MBMA - is distributed
+  `kappa_ik ~ N(0, gamma^2 / N_ik)`: a 400-subject arm's mean wanders a quarter
+  as far as a 25-subject arm's. Until now the only way to express that in ferx
+  was to write the divisor into a structural expression by hand
+  (`... + KAPPA_EMAX / sqrt(NARM)`), where `/ NARM` instead of `/ sqrt(NARM)`
+  produces a plausible wrong answer rather than an error. It is now declared
+  where the rest of the variance structure is:
+
+  ```
+  [parameters]
+    kappa KAPPA_EMAX ~ 2.0 (sd) weight = NARM
+
+  [individual_parameters]
+    LEMAX = LEMAX0 + log(OR_ABATA) * ABATA + ETA_EMAX + KAPPA_EMAX
+  ```
+
+  The engine applies the weight by reparameterisation, so the estimate in
+  `fit$omega_iov` stays the **unweighted** `gamma^2` - the quantity a published
+  analysis reports - and so do the kappa EBEs and their shrinkage. On the R
+  side:
+
+  - `print()` on the fit annotates the weighted kappa with the effective
+    between-arm SD at a typical arm, `gamma / sqrt(W)`:
+
+    ```
+    KAPPA_CL = 1.840240  (CV% = 230.2)  SE = N/A  Shrinkage = 37.4%
+                         weight = NARM  ->  SD = 0.0678 at NARM = 400.0000
+    ```
+
+  - `ferx_model_inspect()` reports the weight both pre-fit (from the model
+    file) and post-fit (from what the engine parsed), as
+    `IOV:  KAPPA_CL (weight = NARM)`, and returns it in `$iov_weights`.
+  - `ferx_fit()` results carry `kappa_weights` (the weight expression per
+    kappa, `NA` where unweighted) and `kappa_weight_typical` (the median
+    weight over the dataset's subject-occasions), and both survive a
+    `ferx_save_fit()` / `ferx_load_fit()` round-trip.
+
+  Models with no weighted kappa are unaffected in every one of those places:
+  both fields are `NULL` and the `.fitrx` bundle is byte-identical to before.
+
+  Three follow-ups closed the gaps where the weight was still invisible:
+
+  - `ferx_model_inspect()` on a **model file** now recognises the modifier by
+    the same rules the engine's parser uses (case-insensitive, whole-word, at
+    bracket depth 0, on a single `=`). A model written `WEIGHT = NARM` fits
+    with the weight applied but was reported pre-fit as unweighted, and a
+    weight expression containing a comparison (`weight = NARM * (FLAG == 1)`)
+    was truncated to `1)`.
+  - `summary()` annotates the weighted kappa on its `IOV:` line, as `print()`
+    and `ferx_model_inspect()` already did. All three now share one helper, so
+    they cannot disagree about whether a model is weighted.
+  - `fit$estimates` gains a `weight` column carrying the weight expression on a
+    weighted kappa row and `NA` everywhere else. The `estimate` on such a row
+    is the unweighted `gamma^2`, so a reader of the table alone had no way to
+    tell it from an ordinary kappa and would take `sqrt(estimate)` for the
+    between-occasion SD instead of `sqrt(estimate / W)`.
+
+- **`ferx_model_inspect()` no longer depends on the case of a declaration
+  keyword.** The engine's `theta` / `omega` / `sigma` / `kappa` declaration
+  regexes are all case-insensitive, so a model written `THETA TVCL(1.0, 0.001,
+  100.0)` fits exactly like the lowercase spelling - but the R-side reader
+  matched case-sensitively and reported *no* population parameters, no IIV and
+  no IOV for it: an entirely blank structure for a model the engine parses
+  fine.
+
+  As a guard against the next such drift, a `[parameters]` block that has
+  content but not one recognised declaration in it now warns instead of
+  silently returning an empty structure. It is keyword-agnostic, so it fires on
+  whatever the next divergence turns out to be. No bundled example triggers it.
+
+- **`ferx_simulate()` and `ferx_predict()` now accept a design template whose
+  `DV` column is empty** (#286, ferx-core #957). Dosing plus sampling times with
+  `DV = "."` / `NA` - the natural way to write a design, and what NONMEM's
+  `$SIMULATION` accepts - previously returned **zero rows**: every observation
+  record with a missing `DV` was dropped as a forgotten `MDV = 1`, which is the
+  right reading only when the `DV` is an input. Simulation and prediction both
+  *produce* that column, so such a record is now read as a sampling time whose
+  value is about to be generated, and no placeholder number is needed.
+  `MDV = 1` still excludes a record, and fitting is unchanged. Applies to
+  `ferx_simulate()` (both the default-parameter and the `fit = ` path),
+  `ferx_simulate_adaptive()`, `ferx_simulate_with_uncertainty()`, and
+  `ferx_predict()`.
+
+  Because the simulate and fit readers now disagree on the same file, a kept
+  empty-DV record is **counted and reported**: the returned object carries the
+  count in its `simulation_warnings` attribute, and it is re-emitted as an R
+  warning. A dataset with an *accidental* missing `DV` (rather than a deliberate
+  design) would otherwise silently gain simulated rows at times `ferx_fit()`'s
+  `sdtab` has no observation for - biasing a VPC built by overlaying the two.
+
+- **Models with no random effects - fixed-effects-only (naive-pooled) fits**
+  (ferx-core #989). A continuous model may now omit every `omega` declaration.
+  With `n_eta = 0` there is no inner empirical-Bayes problem and no `log|Omega|`
+  term, so FOCE/FOCEI collapse to plain maximum likelihood: every subject shares
+  one set of parameters and `sigma` alone carries the spread. `PRED` equals
+  `IPRED` and `CWRES` equals `IWRES`. An `[error_model]` and its `sigma` are
+  still required - only Omega is optional. New bundled example
+  `ferx_example("one_cpt_iv_pooled")`, anchored against a NONMEM 7.6.0 run of
+  the same model written as `$OMEGA 0 FIX` (OFV -269.6370, TVCL 4.8408,
+  TVV 52.834).
+
+- **`TIME` now works in a `[scaling]` Form C readout**
+  ([ferx-core #1028](https://github.com/FeRx-NLME/ferx-core/issues/1028)).
+  A `y = <expr>` / `y[CMT=N] = <expr>` readout referencing `TIME` parsed fine but
+  was never bound to the observation, so it read `0` at every row and the whole
+  time-dependent term vanished — a response-versus-time readout such as
+  `y[CMT=1] = EMAX * TIME / (TIME + T50)` therefore fit, converged, and reported
+  plausible parameters for a structural model nobody wrote. `TIME` (and the `T`
+  alias) now resolves to each observation's own time on both the ODE and
+  analytical paths, and to each decision's time in `[adaptive_dosing] observe`.
+  The dummy `d/dt(clock) = 1` workaround is no longer needed, and is better
+  dropped: `clock` starts at the subject's first record, not at `t = 0`. The
+  readout's `TIME` is the raw data-file clock — the one sdtab, `ferx_predict()` /
+  `ferx_simulate()` and `[derived]` windows report.
+
+- **New `mstep_damping` setting for SAEM**
+  ([ferx-core #1011](https://github.com/FeRx-NLME/ferx-core/issues/1011)).
+  SAEM's numerical theta/sigma M-step assigned the maximiser outright,
+  re-maximising against a *single* MCMC eta draw each iteration — `argmax` of one
+  draw rather than the stochastic-approximation average — a Monte-Carlo bias that
+  does not decay with iteration count. It bit only a theta left to the numerical
+  M-step without a mu-reference; a log-mu-referenced theta was already exact. The
+  M-step result is now blended in as `theta <- theta + gamma * (theta* - theta)`,
+  with `gamma` capped at `0.03` during exploration. Pass
+  `settings = list(mstep_damping = ...)` to change it; **`1.0` disables the
+  damping entirely** and restores the previous behaviour exactly. A fit whose
+  every estimated theta is mu-referenced, `FIX`ed or pinned out is bit-identical
+  to before — both bundled SAEM examples (`warfarin_saem`, `warfarin_iov_saem`)
+  are log-mu-referenced throughout and are unchanged. SAEM also now warns when an
+  estimated theta carries no ETA at all, which is the shape the bias was measured
+  on; attaching an ETA or holding the parameter `FIX` remains the better fix.
+
+## Bug fixes
+
+- **`ferx_get_warnings()` now answers a failed covariance step with the advice
+  it was written to give.** Every targeted branch of the covariance guidance -
+  a non-positive-definite Hessian with its eigenvalue list, ill-conditioned
+  Hessian entries naming the parameter, a near-singular omega, a non-finite
+  base OFV, and the minor/moderate/severe regularisation tiers - sat behind
+  `category == "covariance_step"`. ferx-core does not code those messages that
+  way: it codes them `covariance_failed` and `covariance_regularized`, and
+  reserves `covariance_step` for an informational note about the step's cost.
+  So the whole block was unreachable and a failed covariance step printed no
+  guidance at all, while the one message that did reach it - the benign cost
+  note - was answered with "Standard errors unavailable. Check identifiability",
+  reporting a failure that had not happened.
+
+  Guidance is now selected by the message, which is what those branches were
+  always keyed on. Four categories reach it: ferx-core's three, plus the
+  `covariance` category `ferx_covariance()` assigns to the same engine messages,
+  so the post-hoc covariance step gets guidance too. A covariance message
+  arriving under `general` is answered as well, which covers every fit read back
+  with `ferx_load_fit()` - it does not restore the structured table, so all its
+  warnings arrive under that category. Admission is anchored to messages that
+  *begin* with "Covariance step", so SIR's diagnostics, which mention the step
+  in passing, keep their own guidance instead of being told to re-run with
+  `covariance = FALSE` - the one setting that removes the matrix SIR needs.
+
+  Three messages that were being answered wrongly now have their own advice: an
+  off-diagonal FD stencil that could not be evaluated, which ferx-core reports
+  on its *success* path (the standard errors exist and are merely
+  over-optimistic, not missing); a covariance step cancelled part-way, which
+  produced no standard errors but diagnosed nothing about the model; and the
+  informational cost note. A near-singular omega now reaches the omega branch
+  too - ferx-core picks that descriptor from the sign of the smallest
+  eigenvalue, and the guidance had matched only the other one.
+
+- **The unused-parameter warning gets its guidance back.** ferx-core has no
+  `unused_parameter` code - its unused-declaration messages classify to
+  `general` - so the guidance written for them was unreachable in the same way
+  the covariance block was. They are now routed by message. ferx-core's
+  flat-theta warning contains the same "computed but never used" phrase and is
+  excluded explicitly, so it is not answered with the unused-parameter text.
+
+- `ferx_sir()` now reports the engine's SIR-step warnings instead of dropping
+  them (ferx-core #1021). The binding returned only the CIs and the ESS, so the
+  proposal diagnostics ferx-core emits - a covariance that is rank-deficient
+  beyond its `FIX`ed parameters, or a proposal direction shrunk to keep draws
+  inside the parameter bounds - never reached the fit. They now land in
+  `fit$warnings` and in `fit$warnings_structured` under the `sir` category, and
+  `ferx_get_warnings()` answers them with guidance about the *model* (the named
+  parameters are not identified by the data, and their SIR intervals understate
+  the uncertainty) rather than the old "raise `sir_samples`" advice, which does
+  not help in that case. The same ferx-core release stops those fits from
+  failing outright with `All SIR samples had invalid weights` - which is what
+  every model-based meta-analysis hit, since fixing the residual variance is the
+  inverse-variance weighting scheme and cannot be dropped.
+
+- `ferx_covariance()` and `ferx_sir()` no longer reject a fit that has no random
+  effects (#290). Both required a non-empty `fit$ebe_etas`, which a
+  fixed-effects-only fit does not have - there are no EBEs to warm-start from -
+  so both stopped with "fit$ebe_etas is empty; cannot warm-start the inner
+  loop". They now pass an empty warm start through. This matters for
+  naive-pooled models in particular: NONMEM's `$COVARIANCE` default is the RSR
+  sandwich, and `ferx_covariance(fit, covariance_method = "rsr")` is how you
+  reproduce it from R. On such a model the sandwich runs about twice as wide as
+  ferx's default `"r"`, because the model ignores within-subject correlation by
+  construction.
+
+- `print()` on a fit with no random effects no longer prints an empty `OMEGA`
+  section header (#290). An empty header over an empty body reads as an
+  estimation that failed rather than one that was never requested.
+
+- **`ferx_simulate(..., fit = f)` works again for models with inter-occasion
+  variability** (ferx-core #1019). The fitted IOV covariance (`fit$omega_iov`) was
+  never passed to the engine, so any model declaring a `kappa` crashed the R session
+  with `omega_iov is present whenever the model declares kappa (n_kappa > 0)` instead
+  of simulating. `fit$omega_iov` is now threaded through every from-fit entry point
+  (`ferx_simulate()`, `ferx_simulate_with_uncertainty()`, `ferx_calc_npde()`,
+  `ferx_predict()`, `ferx_predict_survival()`). `ferx_calc_npde()` simulates
+  internally and hit the same crash; `ferx_simulate_with_uncertainty()` silently drew
+  around the model file's *initial* IOV variance instead of the fitted one, and now
+  uses the fitted value.
+
+- **An adaptive-dosing `dv` monitor no longer floors a negative Form C
+  `[scaling]` readout at zero**
+  ([ferx-core #1039](https://github.com/FeRx-NLME/ferx-core/issues/1039),
+  [ferx-core #1020](https://github.com/FeRx-NLME/ferx-core/issues/1020)). The
+  assay floor ("an assay cannot read below zero") was applied unconditionally
+  after the residual draw. A Form C
+  `y = <expr>` readout is an arbitrary expression — a change from baseline, a
+  difference from a comparator, a z-score — so the *same model* read correctly
+  under `mode = "ipred"` and came back as exactly `0` under `mode = "dv"` for
+  every negative sample, silently: a controller thresholding a
+  change-from-baseline signal saw `0` over precisely the region it was written to
+  react to, and dosed accordingly. The floor is now gated on the same predicate
+  as the prediction path, so it applies only to the bare-state readout and to
+  Forms A/B, which keep it.
+
+- **Engine warnings now carry an `absorption_twin_declined` category**
+  ([ferx-core #1008](https://github.com/FeRx-NLME/ferx-core/issues/1008)).
+  A transit or inverse-Gaussian
+  model that cannot build the ODE twin it falls back on now says so at parse time, with its
+  own reason, instead of declining silently. It reaches `fit$warnings` and
+  `fit$warnings_structured` like any other engine warning. Note
+  `ferx_get_warnings()` prints the category but has no remediation text for it
+  yet, so it shows without the guidance block other categories get.
+
+## Internal
+
+- **`ferx-tools` is now a second git dependency**, from the same ferx-core
+  repository and the same revision as `ferx-core` - one extra `Cargo.lock`
+  entry, no second pin to track. `src/Makevars` writes the matching `[patch]`
+  line for it, so a local `../ferx-core` checkout patches *both* crates: with
+  only the `ferx-core` entry a local build silently mixed a working-tree
+  `ferx-core` with a GitHub-`main` `ferx-tools`. The `R-CMD-check` pin guard
+  and `tools/update-ferx-core-lock.sh` now check both crates and that they sit
+  on one revision.
+
+- Bumped the pinned ferx-core commit and updated the extendr glue for the
+  `mixture` / `pmix` / `mixest` fields added by ferx-core #977/#985 (#291).
+- Bumped the pinned ferx-core commit to `25b5f473` for ferx-core #993 (the
+  dose-attribute double-use rejection above). No glue change: the new items on
+  the Rust side are additive and unused here, so `src/rust/src/lib.rs` is
+  untouched.
+- Bumped the pinned ferx-core commit to `0f571d83` (#304). Beyond ferx-core
+  #1004 above, that range carries #1040, #1028/#1042/#1045, #1039/#1020,
+  #1011/#1012, #1006/#1007, #1008, #1019 and #1021 — every user-visible one
+  is written up in the sections above. No glue change.
+
+# ferx 0.3.0
 
 ## Breaking changes
 
+- **`CMT=0` on an ODE dataset now predicts differently** (ferx-core #899). `CMT=0` is
+  NONMEM's *default dose compartment* and resolves to compartment 1. The ODE engine
+  previously did four different things with it depending on which internal driver a
+  subject took — including dropping the dose silently — so the same dataset could
+  produce different answers, and a fit could differentiate a different dosing history
+  than it predicted. Every site now resolves it to compartment 1, and compartment-indexed
+  dose attributes (`F1`, `ALAG1`) are read correctly. **If you have ODE datasets written
+  with `CMT=0`, earlier results were wrong and should be regenerated.**
 - `method = "agq"` has been removed (ferx-core #251). Adaptive Gauss-Hermite
   quadrature is not a separate estimator — it is the single-point method with more
   nodes, so the node count is now an argument and the method name selects the
@@ -25,11 +483,273 @@ Public functions renamed for verb-clarity and naming consistency (part of the
 API cleanup in #223; naming rule + hard-break policy decided in #224). Old
 names are removed - no deprecation shims. Update calls as follows:
 
+## Added
+
+- **`?ferx_fit` now documents every fit option the engine accepts** (99 of 101; the
+  two exceptions are the FREM structural maps that `ferx_model_to_frem()` writes
+  for you, and the help says so). Previously 32 keys were reachable through
+  `settings` but documented nowhere, so the only way to find them was to read the
+  engine source. Newly documented: `inner_restarts`, `inner_optimizer`,
+  `cov_inner_tol`, `parameter_scaling`, `ebe_warm_start`, `checkpoint` /
+  `checkpoint_interval_secs`, `iov_column` / `iov_occasion`, `npde_nsim` /
+  `npde_seed`, `sir_df` / `sir_keep_samples`, `conddist` and its three companions,
+  `imp_auto` / `impmap_auto`, `imp_defensive_alpha`, `iscale_min` / `iscale_max`,
+  `frem_rao_blackwell`, `impmap_mceta` and `impmap_sobol`. Two of these change how
+  an existing documented option behaves and are worth knowing: `imp_auto` /
+  `impmap_auto` default to `TRUE`, which makes `imp_samples` / `impmap_samples` a
+  *starting* count that ramps up rather than a fixed one; and the applicability
+  headings were wrong — `method = "laplace"` accepts the whole outer-optimizer and
+  iteration-cap block, and the inner-loop keys apply to `"imp"`, `"impmap"` and
+  `"bayes"` too.
+- **Stiff and high-order ODE solvers via `settings = list(ode_method = ...)`** —
+  `"rk45"` (default), `"vern7"`, `"rosenbrock23"`, `"rodas4"` and `"rodas5p"`.
+  These cover two independent problems that want opposite fixes: a
+  *stability*-limited (stiff) model — fast reversible binding / TMDD,
+  Michaelis-Menten with `KM` far below observed concentrations, long transit
+  chains — takes tiny steps whatever `ode_reltol` asks for, and wants one of the
+  linearly implicit Rosenbrock methods; an *accuracy*-limited model accepts
+  nearly every step and only slows down as `ode_reltol` tightens, where a stiff
+  method buys nothing and `vern7`'s higher order is the lever (~2.3× at `1e-9`
+  on ferx-core's transit benchmark, but ~1.4× *slower* at default tolerances).
+  Every method is a full peer — analytic sensitivities, time-to-event and
+  categorical endpoints, simulation and adaptive dosing work with all of them.
+  Also settable in the model file's `[fit_options]` block. Delivered via the
+  ferx-core pin bump (ferx-core #952 / #387).
+
+- **Exact analytic covariance R-matrix, on by default** — the covariance step now
+  assembles the observed information from third-order sensitivities of the
+  closed-form prediction rather than differencing the objective, for models in
+  scope (plain analytical Gaussian; no IOV, LTBS, `[scaling]`, M3, FREM or
+  non-Gaussian endpoint). Both `method = "focei"` and `method = "foce"` are
+  served, from two separate assemblies — the non-interaction one is built on the
+  Sheiner–Beal gradient and carries no `log|H~|` term — so neither falls back to
+  finite differences (ferx-core #954 pins both end-to-end). This removes the
+  `eps/h^2` differencing noise and the
+  `fd_hessian_step` tuning knob, and costs `2 * (n_theta + n_eta) + 1`
+  sensitivity evaluations per subject instead of roughly `2 * n_free^2` objective
+  evaluations that each re-solve every inner loop. Out-of-scope models keep the
+  finite-difference stencil unchanged. **Standard errors on in-scope models may
+  shift slightly** — they are now exact rather than finite-difference
+  approximations; set `settings = list(analytic_cov_hessian = FALSE)` to
+  reproduce pre-bump values. Note `fd_hessian_step` is inert on in-scope models
+  for the same reason. Delivered via the ferx-core pin bump (ferx-core #953 /
+  #436).
+
+- **Adaptive dosing now accepts a pre-scheduled base regimen (loading /
+  maintenance dose)** — `ferx_simulate_adaptive()` no longer requires dose-free
+  base subjects. Ordinary dose rows in the data (`EVID = 1/4`, with `AMT`, and
+  optionally `RATE`, `SS`, `II`) are integrated as a standing prescription and the
+  `[adaptive_dosing]` controller augments them, the real therapeutic-drug-monitoring
+  / model-informed-precision-dosing workflow. System resets (`EVID = 3/4`) are also
+  honored. Note the returned dose ledger and `metrics$CUM_DOSE` count
+  controller-issued doses only, so a pre-scheduled base dose is excluded from them
+  (it is still reflected in the trajectories, `PCT_TIME_IN_WINDOW`, and the
+  `auc_target` metric). New bundled example
+  `ferx_example("adaptive_vanco_loading")` — a vancomycin loading-dose +
+  maintenance titration — with a runnable `inst/examples/ex_adaptive_vanco_loading.R`.
+  Delivered via the ferx-core pin bump (#276; ferx-core #702 / #716 / #929 and
+  follow-ups).
+
+- **New bundled examples `ferx_example("ss_absorption")` and
+  `ferx_example("infusion_absorption")`** — steady-state dosing (`SS=1`, `II`) and
+  infusion (`RATE>0`) into a built-in absorption compartment (`first_order(ka)`
+  forcing central), the two dosing routes that ferx-core #719 (gaps 1 and 2)
+  added for the pointwise density absorption kernels. Both were previously
+  rejected at parse time. Each ships a runnable `inst/examples/ex_*.R` and is
+  anchored to NONMEM 7.6.0 (ADVAN2 TRANS2): the dataset `DV` is the NONMEM
+  population prediction and `ferx_predict()` reproduces it to < 1e-4. Steady-state
+  equilibrates the periodic dosing through the absorption kernel; the infusion
+  becomes the zero-order source feeding the kernel.
+
+- **New bundled example `ferx_example("binary_logistic")`** — a fixed-effects
+  `[binary_model]` (logistic) endpoint: the 0/1 outcome on CMT 3 is Bernoulli with
+  `logit P(DV = 1) = TH0 + THX * X + THT * TIME`, the exact analogue of base-R
+  `glm(DV ~ X + TIME, family = binomial)`. Ships with a runnable
+  `inst/examples/ex_binary_logistic.R` that fits it and shows `ferx_simulate()`
+  returning 0/1 `DV_SIM` on the binary CMT (#271). Delivered via the ferx-core pin
+  bump (#900).
+
+- **Per-route absorption lag in model files** — every built-in input-rate function
+  now takes an optional `lag=` argument (`first_order(ka=KA, lag=L)`,
+  `zero_order(dur=DUR, lag=L)`, `transit`, `igd`, `weibull`), giving each parallel /
+  mixed pathway its own onset delay on top of any compartment lagtime — the classic
+  immediate-release + delayed-release picture that a single per-dose lagtime cannot
+  express (ferx-core #856). New bundled example
+  `ferx_example("per_route_lag_absorption")` with a runnable
+  `inst/examples/ex_per_route_lag_absorption.R`. Delivered via the ferx-core pin bump.
+
+- **`ferx_xpose()` now populates the estimation-iteration trace**, so
+  `xpose::prm_vs_iteration()` (parameter value vs iteration) and
+  `xpose::grd_vs_iteration()` (gradient vs iteration) work on the returned
+  object (#168). When the fit was run with `optimizer_trace = TRUE`, the
+  per-parameter value and gradient trajectories are written into the xpose
+  `$files` slot as synthetic NONMEM `.ext` / `.grd` tables. A new
+  `iterations` argument (default `TRUE`) gates this; the `.grd` table is only
+  emitted for gradient-based methods, and when no trace is present the slot is
+  left empty (the iteration plots then raise xpose's usual "no files" message
+  while the goodness-of-fit / covariate plots are unaffected). Only the
+  `"xpose"` backend is affected. Builds on the ferx-core optimizer trace now
+  carrying per-parameter estimates and gradients per iteration (ferx-core #640).
+
+- **Analytic inverse-Gaussian (IG) absorption is now available in model files** -
+  `pk one_cpt_ig(cl, v, mat, cv2)` and `pk two_cpt_ig(cl, v1, q, v2, mat, cv2)`
+  structural models: Freijer & Post inverse-Gaussian absorption fed straight into
+  a one- or two-compartment disposition as an analytic closed form (ferx-core
+  #790), with exact FOCE/FOCEI sensitivities that do not depend on any ODE-solver
+  tolerance and a uniform pk-line interface matching the analytic transit models.
+  It is the closed-form counterpart to the ODE `igd()` input rate
+  (`ferx_example("igd_inverse_gaussian")`); `f` and `lagtime` are supported. Outside
+  the closed form's convergence domain a plain model transparently reroutes to its
+  ODE `igd()` twin (a model that also maps `f`/`lagtime` has no twin and is
+  rejected, rather than rerouted). New bundled examples `ferx_example("one_cpt_ig")` and
+  `ferx_example("two_cpt_ig")` with runnable `inst/examples/ex_one_cpt_ig.R` /
+  `ex_two_cpt_ig.R`.
+
+- **Bundled analytic two-compartment transit example** - a new
+  `ferx_example("two_cpt_transit")` for the
+  `pk two_cpt_transit(cl, v1, q, v2, n, mtt)` closed form (ferx-core #634): Savic
+  transit-compartment absorption superposed bi-exponentially onto a
+  two-compartment disposition, the 2-cpt analytic counterpart to
+  `one_cpt_transit` and the closed-form counterpart to the ODE `transit_2cpt`.
+  Paired with a model-simulated 2-cpt transit-truth dataset (a genuine
+  parameter-recovery example, unlike `one_cpt_transit`'s shared anchor) and a
+  runnable `inst/examples/ex_two_cpt_transit.R` (closes #251).
+
+- **Inter-occasion variability (IOV) now composes with the analytic absorption
+  closed forms** - `pk one_cpt_transit` / `two_cpt_transit` / `one_cpt_ig` /
+  `two_cpt_ig` previously rejected a `kappa` random effect at parse time. A
+  subject carrying IOV is now transparently rerouted, per subject, to the model's
+  exact `transit()` / `igd()` ODE twin, which integrates the cross-occasion dose
+  carryover the closed-form superposition cannot express - no switch to a
+  hand-written ODE model is needed, just the same `pk ...` line plus a `kappa`
+  random effect and `iov_column` (via ferx-core #719). New bundled example
+  `ferx_example("one_cpt_transit_iov")` - analytic `one_cpt_transit` with IOV on
+  CL, paired with an 8-subject subset of the ferx-core transit+IOV NONMEM anchor
+  dataset (simulated from the model, so the fit recovers the data-generating
+  parameters) and a runnable `inst/examples/ex_one_cpt_transit_iov.R`. Steady-state
+  dosing and infusions
+  under IOV on the analytic path remain unsupported (ferx-core #719). Requires the
+  bumped ferx-core.
+
+- `ferx_simulate()` now surfaces per-subject simulation diagnostics from
+  ferx-core (#762 / #763): a degenerate or pathological hazard that would
+  otherwise censor a subject with no event is raised as an R warning and
+  attached to the returned data frame as a `simulation_warnings` attribute
+  (a character vector, empty for a clean run). Requires the bumped ferx-core
+  (`simulate_with_options_diag`).
+
+- New `ferx_covariance(fit)` runs the finite-difference-Hessian covariance step
+  against an existing fit without re-estimating (#738), the covariance-step
+  analogue of `ferx_sir()`. Add standard errors to a fit produced with
+  `covariance = FALSE`, or re-run the step with a different `covariance_method`
+  (e.g. the `"rsr"` sandwich), including on a fit loaded from a `.fitrx` bundle.
+  It re-reads the model/data from the fit's recorded paths with SHA-256
+  integrity checks (refusing stale inputs) and refreshes `cov_matrix`,
+  `cor_matrix`, `se_theta`/`se_omega`/`se_sigma`/`se_kappa`,
+  `covariance_status`, `eigenvalues`, and `condition_number`. The numerics
+  closely match `ferx_fit()`'s inline covariance step (the same engine step; the
+  standalone re-reads the data and cold-starts the inner EBE loop, so agreement
+  is close but not bit-exact); a step that runs but fails
+  (non-PD / unusable Hessian) is non-fatal, reporting
+  `covariance_status = "failed"` with a diagnostic warning.
+
+- Model files may now declare a `[data]` block (`path = ...`, resolved relative
+  to the model file's directory). When `data` is omitted, `ferx_fit()`,
+  `ferx_model()`, `ferx_simulate()`, `ferx_predict()`,
+  `ferx_predict_survival()`, `ferx_simulate_adaptive()`, `ferx_check_init()`,
+  and `ferx_inits_from_nca()` fall back to the declared dataset; an explicit
+  `data` argument still overrides it (#254).
+
+## Fixed
+
+- **`ferx_example("warfarin_scaled")` could not be fitted at all.** Its model file
+  carried `gradient = ad` in `[fit_options]`; the Enzyme automatic-differentiation
+  path was retired in ferx-core in favour of the analytic `Dual2` sensitivities, so
+  the engine now rejects that token outright (`E_AD_RETIRED`) and the bundled
+  `ex_warfarin_scaled.R` failed immediately. Now `gradient = auto`.
+- **`fit$gradient_used` never reported the analytic gradient.** The internal label
+  map still translated the retired `"Enzyme AD"` string and had no case for the
+  engine's actual `"analytic (Dual2)"`, so the long string fell through unmapped —
+  meaning `fit$gradient_used == "ad"` was permanently `FALSE` and `print()` /
+  `summary()` rendered the raw engine string. It now reports `"analytic"`.
+- **Documentation corrections found by an audit against the engine.** The
+  `[scaling]` help told users that expression (`obs_scale = V`) and Form C
+  (`y = <expr>`) readouts force finite-difference gradients and to set
+  `gradient = fd`. Both are differentiated exactly under the default
+  `gradient = auto` (ferx-core #486), so that advice lost the analytic gradient
+  *and* switched the outer optimizer from L-BFGS to BOBYQA; only the per-CMT
+  variants fall back, and they do so silently. `bloq_method = "drop"` was described
+  as discarding BLOQ rows when it keeps them, fitting each at its limit value.
+  Corrected defaults: `inner_tol` (`1e-4` → `1e-5`), `n_mh_steps` (`10` → `20`),
+  `impmap_proposal_df` (documented as `"normal"`, actually Student-t `4`), and
+  `threads` (documented as one worker per logical CPU, actually cores − 1 capped at
+  8). Also: `max_unconverged_frac` rejects an outer step rather than relaxing the
+  converged flag; `covariance_method = "s"`/`"rsr"` work under FOCE, not FOCEI only;
+  `optimizer = "bfgs"` is a deprecated alias for `nlopt_lbfgs`, not a distinct
+  algorithm; `gradient = "ad"` now errors rather than being tolerated; and
+  `method = "laplace"` corresponds to NONMEM `LAPLACIAN INTER` (plain `LAPLACIAN`
+  differs by ~9 OFV units).
+- **ODE-form models fit with `method = "foce"` now match their analytical
+  closed-form equivalent's marginal objective** (via ferx-core #378). When a
+  subject's per-subject (inner EBE) objective was multimodal, the analytical and
+  ODE forms could condition on different modes, so their FOCE marginal OFV
+  diverged - by up to ~18 units on some models/platforms (most visibly the
+  3-compartment IV `three_cpt_iv` example on Linux). ferx-core now keeps the
+  better inner estimate on the analytical path, matching the ODE path, so the two
+  forms agree to solver round-off. Delivered via the ferx-core pin bump.
+
+- **Simulated binary / categorical outcomes are no longer `NA`** (#271). With a
+  `[binary_model]` endpoint (ferx-core #900), `ferx_simulate()` mapped every
+  simulated row through `continuous_value()`, whose categorical arm returns `NaN`,
+  so each binary draw came back as `DV_SIM = NA` and was indistinguishable from a
+  PK row that failed to predict. The simulate frame now folds a categorical draw
+  into `DV_SIM` as its numeric 0/1 outcome (matching how the input CSV codes DV);
+  combined with the existing `CMT` column, simulated binary outcomes are now
+  usable from R. (TTE `Event` rows are unchanged: `DV_SIM = NA`, event time in
+  `TIME`, `OBSERVED` flag set.)
+
+- **`ferx_fit()` on a model with no random effects (`n_eta = 0`)** - e.g. a
+  fixed-effects `[binary_model]` logistic regression - no longer errors with
+  "missing value where TRUE/FALSE needed" (#271). An eta-less fit returns an empty
+  omega; the R post-processing left it as a bare `numeric(0)` instead of a 0x0
+  matrix, so `nrow(omega)` was `NULL` and poisoned the eta-metadata guards with
+  `NA`. `omega` is now always a matrix, so `n_eta = 0` models fit cleanly.
+
+- **`ferx_save_fit()` / `ferx_load_fit()` round-trip on extension-less paths**
+  (#268). Saving to a path with no file extension (e.g.
+  `ferx_save_fit(fit, "results/run1_base_diag")`) previously landed at
+  `results/run1_base_diag.zip` - because Info-ZIP appends `.zip` to a
+  suffix-less archive name - so the mirroring
+  `ferx_load_fit("results/run1_base_diag")` failed with "File does not exist".
+  `ferx_save_fit()` now appends the conventional `.fitrx` extension when the
+  output path has none, and `ferx_load_fit()` falls back to `<path>.fitrx`, so
+  the bare-path round-trip works. Explicit extensions are still honoured as
+  given.
+
+- **Closed-form transit / inverse-Gaussian absorption under IOV, time-varying
+  covariates, or a `TIME` switch now honors a call-time ODE tolerance and
+  converges its per-subject estimates correctly** (via ferx-core #814, a #719
+  follow-up). These models serve such subjects on an internally generated ODE
+  "twin"; before this a `ferx_fit(settings = list(ode_reltol = ...))` (or
+  `ode_abstol` / `ode_max_steps`) override was silently dropped on the twin path,
+  and an estimate that fell back to the finite-difference inner gradient could
+  stop short of convergence. The `one_cpt_transit_iov` example above is the main
+  beneficiary. Requires the bumped ferx-core.
+
+# ferx 0.2.0
+
+## Breaking changes
+
 - `ferx_npde()` -> `ferx_calc_npde()`
+
 - `ferx_selection()` -> `ferx_apply_selection()`
+
 - `ferx_to_frem()` -> `ferx_model_to_frem()` (moves into the `ferx_model_*` family)
+
 - `ferx_warnings()` -> `ferx_get_warnings()`
+
 - `ferx_columns()` -> `ferx_get_columns()`
+
 - `ferx_plot_trace(fit)` -> `plot(fit)` (#229). New S3 methods `plot.ferx_fit()`
   and `plot.ferx_job()` replace it; `plot.ferx_job()` plots the trace
   accumulated so far by an in-progress `ferx_fit_async()` job, not just a
@@ -58,7 +778,9 @@ replaced with fields computed automatically at the end of `ferx_fit()` (and
 recomputed by `ferx_load_fit()`), part of the fit-accessor cleanup in #226:
 
 - `ferx_cor_matrix(fit)` -> `fit$cor_matrix`
+
 - `ferx_estimates(fit)` -> `fit$estimates`
+
 - `ferx_eta_cov(fit, data)` -> `fit$eta_cov` (no longer takes a `data` argument;
   it is computed from the dataset used to fit the model)
 
@@ -68,6 +790,7 @@ either a `ferx_model` object or a plain path:
 
 - `ferx_model_section()`, `ferx_get_section()` -> `ferx_model_get_section()`
   (returns the section's lines; always a data-return, not a pipe passthrough)
+
 - `ferx_set_section()` -> `ferx_model_set_section()` (unchanged behaviour:
   returns `x` for piping, with copy-on-write for bundled package models)
 
@@ -101,112 +824,15 @@ fit$estimates
 fit$eta_cov
 ```
 
-## Fixed
-
-- **`ferx_save_fit()` / `ferx_load_fit()` round-trip on extension-less paths**
-  (#268). Saving to a path with no file extension (e.g.
-  `ferx_save_fit(fit, "results/run1_base_diag")`) previously landed at
-  `results/run1_base_diag.zip` - because Info-ZIP appends `.zip` to a
-  suffix-less archive name - so the mirroring
-  `ferx_load_fit("results/run1_base_diag")` failed with "File does not exist".
-  `ferx_save_fit()` now appends the conventional `.fitrx` extension when the
-  output path has none, and `ferx_load_fit()` falls back to `<path>.fitrx`, so
-  the bare-path round-trip works. Explicit extensions are still honoured as
-  given.
-
 ## Added
 
-- **Per-route absorption lag in model files** — every built-in input-rate function
-  now takes an optional `lag=` argument (`first_order(ka=KA, lag=L)`,
-  `zero_order(dur=DUR, lag=L)`, `transit`, `igd`, `weibull`), giving each parallel /
-  mixed pathway its own onset delay on top of any compartment lagtime — the classic
-  immediate-release + delayed-release picture that a single per-dose lagtime cannot
-  express (ferx-core #856). New bundled example
-  `ferx_example("per_route_lag_absorption")` with a runnable
-  `inst/examples/ex_per_route_lag_absorption.R`. Delivered via the ferx-core pin bump.
-- **`ferx_xpose()` now populates the estimation-iteration trace**, so
-  `xpose::prm_vs_iteration()` (parameter value vs iteration) and
-  `xpose::grd_vs_iteration()` (gradient vs iteration) work on the returned
-  object (#168). When the fit was run with `optimizer_trace = TRUE`, the
-  per-parameter value and gradient trajectories are written into the xpose
-  `$files` slot as synthetic NONMEM `.ext` / `.grd` tables. A new
-  `iterations` argument (default `TRUE`) gates this; the `.grd` table is only
-  emitted for gradient-based methods, and when no trace is present the slot is
-  left empty (the iteration plots then raise xpose's usual "no files" message
-  while the goodness-of-fit / covariate plots are unaffected). Only the
-  `"xpose"` backend is affected. Builds on the ferx-core optimizer trace now
-  carrying per-parameter estimates and gradients per iteration (ferx-core #640).
-
-- **Analytic inverse-Gaussian (IG) absorption is now available in model files** -
-  `pk one_cpt_ig(cl, v, mat, cv2)` and `pk two_cpt_ig(cl, v1, q, v2, mat, cv2)`
-  structural models: Freijer & Post inverse-Gaussian absorption fed straight into
-  a one- or two-compartment disposition as an analytic closed form (ferx-core
-  #790), with exact FOCE/FOCEI sensitivities that do not depend on any ODE-solver
-  tolerance and a uniform pk-line interface matching the analytic transit models.
-  It is the closed-form counterpart to the ODE `igd()` input rate
-  (`ferx_example("igd_inverse_gaussian")`); `f` and `lagtime` are supported. Outside
-  the closed form's convergence domain a plain model transparently reroutes to its
-  ODE `igd()` twin (a model that also maps `f`/`lagtime` has no twin and is
-  rejected, rather than rerouted). New bundled examples `ferx_example("one_cpt_ig")` and
-  `ferx_example("two_cpt_ig")` with runnable `inst/examples/ex_one_cpt_ig.R` /
-  `ex_two_cpt_ig.R`.
-- **Bundled analytic two-compartment transit example** - a new
-  `ferx_example("two_cpt_transit")` for the
-  `pk two_cpt_transit(cl, v1, q, v2, n, mtt)` closed form (ferx-core #634): Savic
-  transit-compartment absorption superposed bi-exponentially onto a
-  two-compartment disposition, the 2-cpt analytic counterpart to
-  `one_cpt_transit` and the closed-form counterpart to the ODE `transit_2cpt`.
-  Paired with a model-simulated 2-cpt transit-truth dataset (a genuine
-  parameter-recovery example, unlike `one_cpt_transit`'s shared anchor) and a
-  runnable `inst/examples/ex_two_cpt_transit.R` (closes #251).
-- **Inter-occasion variability (IOV) now composes with the analytic absorption
-  closed forms** - `pk one_cpt_transit` / `two_cpt_transit` / `one_cpt_ig` /
-  `two_cpt_ig` previously rejected a `kappa` random effect at parse time. A
-  subject carrying IOV is now transparently rerouted, per subject, to the model's
-  exact `transit()` / `igd()` ODE twin, which integrates the cross-occasion dose
-  carryover the closed-form superposition cannot express - no switch to a
-  hand-written ODE model is needed, just the same `pk ...` line plus a `kappa`
-  random effect and `iov_column` (via ferx-core #719). New bundled example
-  `ferx_example("one_cpt_transit_iov")` - analytic `one_cpt_transit` with IOV on
-  CL, paired with an 8-subject subset of the ferx-core transit+IOV NONMEM anchor
-  dataset (simulated from the model, so the fit recovers the data-generating
-  parameters) and a runnable `inst/examples/ex_one_cpt_transit_iov.R`. Steady-state
-  dosing and infusions
-  under IOV on the analytic path remain unsupported (ferx-core #719). Requires the
-  bumped ferx-core.
-- `ferx_simulate()` now surfaces per-subject simulation diagnostics from
-  ferx-core (#762 / #763): a degenerate or pathological hazard that would
-  otherwise censor a subject with no event is raised as an R warning and
-  attached to the returned data frame as a `simulation_warnings` attribute
-  (a character vector, empty for a clean run). Requires the bumped ferx-core
-  (`simulate_with_options_diag`).
-
-- New `ferx_covariance(fit)` runs the finite-difference-Hessian covariance step
-  against an existing fit without re-estimating (#738), the covariance-step
-  analogue of `ferx_sir()`. Add standard errors to a fit produced with
-  `covariance = FALSE`, or re-run the step with a different `covariance_method`
-  (e.g. the `"rsr"` sandwich), including on a fit loaded from a `.fitrx` bundle.
-  It re-reads the model/data from the fit's recorded paths with SHA-256
-  integrity checks (refusing stale inputs) and refreshes `cov_matrix`,
-  `cor_matrix`, `se_theta`/`se_omega`/`se_sigma`/`se_kappa`,
-  `covariance_status`, `eigenvalues`, and `condition_number`. The numerics
-  closely match `ferx_fit()`'s inline covariance step (the same engine step; the
-  standalone re-reads the data and cold-starts the inner EBE loop, so agreement
-  is close but not bit-exact); a step that runs but fails
-  (non-PD / unusable Hessian) is non-fatal, reporting
-  `covariance_status = "failed"` with a diagnostic warning.
-- Model files may now declare a `[data]` block (`path = ...`, resolved relative
-  to the model file's directory). When `data` is omitted, `ferx_fit()`,
-  `ferx_model()`, `ferx_simulate()`, `ferx_predict()`,
-  `ferx_predict_survival()`, `ferx_simulate_adaptive()`, `ferx_check_init()`,
-  and `ferx_inits_from_nca()` fall back to the declared dataset; an explicit
-  `data` argument still overrides it (#254).
 - New `ferx_conddist(fit)` exposes the SAEM conditional-distribution results
   (`settings = list(conddist = TRUE)`) to R (#244): per-subject/per-eta
   conditional mean, SD, and mode (`fit$cond_dist`), with distribution-based
   eta-shrinkage as an attribute. Previously `cond_dist` was computed by
   ferx-core but never reached R, for either in-process fits or `.fitrx`
   bundles; it now survives `ferx_save_fit()` / `ferx_load_fit()` too.
+
 - `ferx_fit(..., optimizer_trace = TRUE)` now stores the per-iteration trace
   on the fit object itself as `fit$trace` (a data frame), not just its temp
   file path (`fit$trace_path`) (#228). `fit$trace` survives
@@ -218,15 +844,18 @@ fit$eta_cov
   against it leaking from an intermediate stage of a method chain.
   `ferx_job` handles (from `ferx_fit_async()`) gain a computed
   `trace_path` field alongside the existing `sidecar_path`.
+
 - `ferx_stop()` terminates a background fit started by `ferx_fit_async()`
   without waiting for it to finish (#235). Previously the only way to stop a
   running job was to send a kill signal manually.
+
 - `ferx_model_to_frem()` gains a `fit` argument (#239). Pass a `ferx_fit`
   result from fitting the base model and its theta/omega estimates seed the
   generated FREM model's PK theta inits and PK-PK omega block, so a subsequent
   fit of the FREM model warm-starts from converged parameters instead of the
   base model's declared inits. Optional; `NULL` (default) is unchanged
   behaviour.
+
 - `ferx_model_inspect()` now reports covariate-selected residual error models as
   `covariate-selected (...)` in `model_structure$residual`, matching the new
   `[error_model]` `if/else` selector in ferx-core
@@ -254,15 +883,17 @@ ferx_model(template = "1cpt_oral", path = "m.ferx", edit = FALSE) |>
 
 ## Fixed
 
-- **Closed-form transit / inverse-Gaussian absorption under IOV, time-varying
-  covariates, or a `TIME` switch now honors a call-time ODE tolerance and
-  converges its per-subject estimates correctly** (via ferx-core #814, a #719
-  follow-up). These models serve such subjects on an internally generated ODE
-  "twin"; before this a `ferx_fit(settings = list(ode_reltol = ...))` (or
-  `ode_abstol` / `ode_max_steps`) override was silently dropped on the twin path,
-  and an estimate that fell back to the finite-difference inner gradient could
-  stop short of convergence. The `one_cpt_transit_iov` example above is the main
-  beneficiary. Requires the bumped ferx-core.
+- Datasets that reuse a subject ID in a non-contiguous block (e.g. a second
+  cohort reusing IDs 12/13/14) are now handled correctly by the per-subject
+  joins in `ferx_xpose()`, `ferx_save_fit()`, `fit$eta_cov`, and
+  `ferx_cov_screen()`. ferx-core (like NONMEM) processes records sequentially,
+  so each block is a distinct subject even when two share a textual ID; these
+  functions previously keyed their joins on the raw ID, which silently gave the
+  second block the first subject's ETAs/parameters (xpose), dropped it and wrote
+  an `ebes.csv` that disagreed with `predictions.csv` so the loader rejected the
+  bundle (save_fit), or double-weighted the shared covariate row (eta_cov /
+  cov_screen). Joins now key on subject order instead (#252, alongside
+  ferx-core #743).
 
 # ferx 0.1.6
 

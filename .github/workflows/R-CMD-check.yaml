@@ -7,9 +7,16 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Cancel superseded runs on feature branches; never cancel a run on main
+# (its result gates the branch protection status and the codecov baseline).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   R-CMD-check:
     runs-on: ${{ matrix.config.os }}
+    timeout-minutes: 60
 
     name: ${{ matrix.config.os }} (R ${{ matrix.config.r }})
 
@@ -22,22 +29,54 @@ jobs:
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
       R_KEEP_PKG_SOURCE: yes
+      # `R CMD build` installs the whole package - a full ~6 min Rust release
+      # build - purely so it can knit vignettes. That is dead weight on PRs:
+      # `vignettes/model-workflow.Rmd` has every chunk `eval = FALSE`, and
+      # `vignettes/articles` is .Rbuildignore'd, so the knit itself takes ~2s
+      # and exercises no package code. Skipping it on PRs drops one of the two
+      # full Rust builds in this job. Pushes to main still do the real thing,
+      # so a genuinely broken vignette cannot reach the default branch.
+      FERX_BUILD_ARGS: ${{ github.event_name == 'pull_request' && 'c("--no-manual", "--no-build-vignettes")' || 'c("--no-manual")' }}
+      FERX_CHECK_ARGS: ${{ github.event_name == 'pull_request' && 'c("--no-manual", "--as-cran", "--ignore-vignettes")' || 'c("--no-manual", "--as-cran")' }}
 
     steps:
       - uses: actions/checkout@v7
 
-      # Guard against an accidentally-unpinned ferx-core dependency.
-      # src/rust/.cargo/config.toml carries a [patch] that redirects ferx-core
-      # to a sibling ../ferx-core when present (local-dev). If someone bumps
-      # the lock with that patch active, cargo strips the `source = "git+..."`
-      # line — silently unpinning ferx-core for everyone who builds without
-      # the sibling. tools/update-ferx-core-lock.sh exists to do the bump
-      # safely; this guard ensures nobody bypasses it.
-      - name: Verify ferx-core is pinned in Cargo.lock
+      # Guard against an accidentally-unpinned ferx-core / ferx-tools dependency.
+      # src/rust/.cargo/config.toml (written by src/Makevars) carries a [patch]
+      # that redirects both crates to a sibling ../ferx-core when present
+      # (local-dev). If someone bumps the lock with that patch active, cargo
+      # strips the `source = "git+..."` line — silently unpinning them for
+      # everyone who builds without the sibling. tools/update-ferx-core-lock.sh
+      # exists to do the bump safely; this guard ensures nobody bypasses it.
+      #
+      # Both crates come from the one repository, so they must also sit on the
+      # same revision: a lock pinning them apart is two halves of a workspace
+      # that is only ever tested together.
+      - name: Verify ferx-core and ferx-tools are pinned in Cargo.lock
         run: |
-          if ! grep -q '^source = "git+https://github.com/FeRx-NLME/ferx-core' src/rust/Cargo.lock; then
-            echo "::error file=src/rust/Cargo.lock::ferx-core lacks a git source pin."
-            echo "Run tools/update-ferx-core-lock.sh to bump it correctly."
+          source_of() {
+            awk -v pkg="$1" '
+              $0 == "name = \"" pkg "\"" { in_pkg = 1; next }
+              in_pkg && /^source = / { print; exit }
+              in_pkg && /^\[\[package\]\]/ { exit }
+            ' src/rust/Cargo.lock
+          }
+          fail=0
+          for pkg in ferx-core ferx-tools; do
+            case "$(source_of "$pkg")" in
+              'source = "git+https://github.com/FeRx-NLME/ferx-core'*) ;;
+              *) echo "::error file=src/rust/Cargo.lock::$pkg lacks a git source pin."; fail=1 ;;
+            esac
+          done
+          core_rev=$(source_of ferx-core | sed -E 's/.*#([0-9a-f]+).*/\1/')
+          tools_rev=$(source_of ferx-tools | sed -E 's/.*#([0-9a-f]+).*/\1/')
+          if [ "$core_rev" != "$tools_rev" ]; then
+            echo "::error file=src/rust/Cargo.lock::ferx-core ($core_rev) and ferx-tools ($tools_rev) are pinned to different revisions of the same repository."
+            fail=1
+          fi
+          if [ "$fail" -ne 0 ]; then
+            echo "Run tools/update-ferx-core-lock.sh to bump them correctly."
             exit 1
           fi
 
@@ -67,7 +106,12 @@ jobs:
       - uses: r-lib/actions/check-r-package@v2
         with:
           upload-snapshots: true
-          args: 'c("--no-manual", "--as-cran")'
+          # Both set from the job env above so PRs skip the vignette build
+          # (and its matching check) while main keeps it. `--ignore-vignettes`
+          # is required alongside `--no-build-vignettes`: without it check
+          # fails on the inst/doc the build deliberately did not create.
+          build_args: ${{ env.FERX_BUILD_ARGS }}
+          args: ${{ env.FERX_CHECK_ARGS }}
           # Only fail on R CMD check ERRORs. The package currently has
           # pre-existing WARNINGs (Rd cross-refs, undocumented args, GNU make
           # extensions in Makevars, non-ASCII in roxygen comments) that are

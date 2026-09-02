@@ -32,6 +32,15 @@ Available bundled examples:
 \item{warfarin_logit_f}{One-compartment oral with logit-normal bioavailability}
 \item{warfarin_if}{Two-compartment oral with conditional if/else covariate (WT)}
 \item{one_cpt_iv}{One-compartment IV (analytical \code{one_cpt_iv})}
+\item{one_cpt_iv_pooled}{One-compartment IV with \emph{no random effects} --
+a fixed-effects-only (naive-pooled) fit (ferx-core #989). Every subject
+shares one CL and one V, and \code{sigma} alone carries the spread. With
+\code{n_eta = 0} there is no inner empirical-Bayes problem and no
+\code{log|Omega|} term, so FOCE/FOCEI collapse to plain maximum
+likelihood; \code{PRED} equals \code{IPRED} and \code{CWRES} equals
+\code{IWRES}. An \code{[error_model]} and its \code{sigma} are still
+required -- only Omega is optional. Anchored against a NONMEM 7.6.0 run
+of the same model written as \code{$OMEGA 0 FIX}}
 \item{two_cpt_iv}{Two-compartment IV bolus}
 \item{two_cpt_oral_cov}{Two-compartment oral with continuous covariates (WT, CRCL)}
 \item{three_cpt_iv}{Three-compartment IV bolus}
@@ -103,6 +112,22 @@ absorption anchor dataset.}
 (constant-rate) absorption via the built-in \code{zero_order(dur)} input
 rate -- a modeled-duration infusion (NONMEM \code{RATE=-2}/\code{D1}) fed
 straight into central. Shares the NONMEM absorption anchor dataset.}
+\item{ss_absorption}{One-compartment ODE model demonstrating \emph{steady-state
+dosing} (\code{SS=1}, \code{II}) into a built-in absorption compartment
+(\code{first_order(ka)} forcing central) -- ferx-core #719 (gap 1). The
+engine equilibrates the periodic dosing \emph{through} the absorption
+kernel, so no explicit run-in of dose records is needed; this combination
+was previously rejected at parse time. Anchored to NONMEM 7.6.0 (ADVAN2
+TRANS2): the dataset's \code{DV} is the NONMEM population prediction and
+\code{\link{ferx_predict}} reproduces it to < 1e-4.}
+\item{infusion_absorption}{One-compartment ODE model demonstrating an
+\emph{infusion} (\code{RATE>0}) into a built-in absorption compartment
+(\code{first_order(ka)} forcing central) -- ferx-core #719 (gap 2). The
+infusion becomes the zero-order source feeding the kernel (a convolution
+of the infusion window with the absorption density), not a plain injection;
+this combination was previously rejected at parse time. Anchored to NONMEM
+7.6.0 (ADVAN2 TRANS2): the dataset's \code{DV} is the NONMEM population
+prediction and \code{\link{ferx_predict}} reproduces it to < 1e-4.}
 \item{parallel_absorption}{One-compartment ODE model with \emph{parallel}
 (dual first-order) absorption: two \code{first_order(ka)} pathways (a fast
 and a slow one) feeding central, split by a declared pathway fraction
@@ -218,6 +243,13 @@ FOCEI, sharing the CL random effect (ferx-core #564). Oral dose on CMT 1,
 PK observed on CMT 2, event on CMT 3. \code{ferx_fit()} and
 \code{ferx_predict_survival()} are supported; simulating an ODE-accumulated
 hazard is not yet (a later slice adds the event-time root-finder).}
+\item{binary_logistic}{Binary / logistic endpoint (\code{[binary_model]},
+ferx-core #760). A fixed-effects (\code{n_eta = 0}) logistic regression: the
+0/1 outcome DV on CMT 3 is Bernoulli with
+\code{logit P(DV = 1) = TH0 + THX * X + THT * TIME} - the exact analogue of
+base-R \code{glm(DV ~ X + TIME, family = binomial)} (reference intercept
+-0.775, X 0.870, TIME 0.827). \code{ferx_simulate()} draws a fresh 0/1
+outcome per record and returns it in \code{DV_SIM} on CMT 3 (ferx-r #271).}
 \item{two_cpt_oral_cov_ode_template}{Two-compartment oral PK with covariates
 written with \code{ode_template two_cpt_oral(...)} in
 \code{[structural_model]}: ferx generates the standard disposition ODE
@@ -270,13 +302,23 @@ CSV, equivalent to NONMEM \code{$DATA IGNORE=}. Exclusion counts are reported
 in \code{fit$exclusions} and echoed by \code{print.ferx_fit()} and
 \code{ferx_runlog()}.}
 \item{adaptive_tdm}{State-reactive (adaptive / feedback) dosing: a
-vancomycin-style TDM trough titration. The dose is not in the data -- the
-model's \code{[adaptive_dosing]} block titrates the next q12h dose to drive
-the measured (assay-noised) pre-dose trough into a 10-20 mg/L window. Run
-with \code{\link{ferx_simulate_adaptive}} (not \code{ferx_fit}); the base
-subjects are dose-free, so the controller supplies every dose. Returns the
+vancomycin-style TDM trough titration. The dose is decided at run time --
+the model's \code{[adaptive_dosing]} block titrates the next q12h dose to
+drive the measured (assay-noised) pre-dose trough into a 10-20 mg/L window.
+Run with \code{\link{ferx_simulate_adaptive}} (not \code{ferx_fit}); here
+the base subjects are dose-free, so the controller supplies every dose (see
+\code{adaptive_vanco_loading} for a pre-scheduled loading dose). Returns the
 concentration trajectories, the realized dose ledger, and the per-decision
 log (ferx-core epic #391).}
+\item{adaptive_vanco_loading}{State-reactive dosing with a \strong{pre-scheduled
+loading dose}: a vancomycin AUC/trough titration where the data carries a
+1500 mg loading dose (an \code{EVID = 1} row) and the
+\code{[adaptive_dosing]} controller augments it, titrating the q24h
+maintenance dose to a 10-15 mg/L window. Demonstrates that base subjects
+need not be dose-free. Note the loading dose is a base dose, so it is absent
+from the returned dose ledger and from \code{metrics$CUM_DOSE} (which counts
+controller doses only). Run with \code{\link{ferx_simulate_adaptive}}
+(ferx-core #702 / #929).}
 }
 Call \code{ferx_example()} with no arguments to list all available names.
 
@@ -314,9 +356,9 @@ file.edit(system.file("examples", "ex_warfarin_dcm.R", package = "ferx"))
 
 }
 \seealso{
-Other utilities: 
-\code{\link{ferx_get_columns}()},
-\code{\link{ferx_load_fit}()},
-\code{\link{ferx_save_fit}()}
+Other utilities:
+\code{\link[=ferx_get_columns]{ferx_get_columns()}},
+\code{\link[=ferx_load_fit]{ferx_load_fit()}},
+\code{\link[=ferx_save_fit]{ferx_save_fit()}}
 }
 \concept{utilities}

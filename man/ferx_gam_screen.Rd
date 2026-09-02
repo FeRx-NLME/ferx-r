@@ -27,8 +27,7 @@ screens all ETAs present in \code{fit$ebe_etas}.}
 
 \item{spline_df}{Integer vector of natural-spline degrees of freedom to
 try for continuous covariates. Default \code{c(2L, 3L)} matches
-Xpose4's defaults (\code{smoother3 = "ns", arg3 = "df=2"} and
-\code{smoother4 = "ns", arg4 = "df=3"}).}
+Xpose4's defaults.}
 
 \item{include_linear}{Logical. Include the linear form as a candidate.
 Default \code{TRUE}.}
@@ -79,10 +78,12 @@ The functional form candidates for continuous covariates are:
 For categorical covariates: one-hot encoding with the lowest observed level
 as the reference.
 
+All numerical computation (OLS, AIC, spline basis construction) is
+performed in Rust via \code{ferx_rust_gam_screen()}. This wrapper handles
+input validation, per-subject covariate aggregation, and result formatting.
+
 The AIC formula used is \code{n * log(RSS/n) + 2*p}, which gives the same
-delta_aic as R's \code{AIC(lm())} and Xpose4's \code{gam::gam()}. The
-formula is identical to the one used by the Rust implementation in
-\code{ferx_tools::gam::gam_screen()}, so results are directly comparable.
+delta_aic as R's \code{AIC(lm())} and Xpose4's \code{gam::gam()}.
 }
 \section{Shrinkage caveat}{
 
@@ -101,14 +102,15 @@ ferx_gam_screen(fit)
 }
 }
 \seealso{
-Other diagnostics: 
-\code{\link{check_diagnostics}()},
-\code{\link{ferx_conddist}()},
-\code{\link{ferx_cov_screen}()},
-\code{\link{ferx_get_warnings}()},
-\code{\link{ferx_runlog_iters}()},
-\code{\link{ferx_trace}()},
-\code{\link{plot.ferx_fit}()},
-\code{\link{summary.ferx_fit}()}
+Other diagnostics:
+\code{\link[=check_diagnostics]{check_diagnostics()}},
+\code{\link[=ferx_conddist]{ferx_conddist()}},
+\code{\link[=ferx_cov_screen]{ferx_cov_screen()}},
+\code{\link[=ferx_get_warnings]{ferx_get_warnings()}},
+\code{\link[=ferx_runlog_iters]{ferx_runlog_iters()}},
+\code{\link[=ferx_trace]{ferx_trace()}},
+\code{\link[=plot.ferx_bootstrap]{plot.ferx_bootstrap()}},
+\code{\link[=plot.ferx_fit]{plot.ferx_fit()}},
+\code{\link[=summary.ferx_fit]{summary.ferx_fit()}}
 }
 \concept{diagnostics}

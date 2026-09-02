@@ -1391,11 +1391,20 @@ test_that("print.ferx_summary omits Structure line when model_structure is NULL"
   expect_false(any(grepl("^Structure:", out)))
 })
 test_that(".ferx_short_gradient_label maps engine labels to short tokens", {
-  expect_identical(ferx:::.ferx_short_gradient_label("Enzyme AD"), "ad")
+  # The labels are whatever ferx-core's `GradientKind::as_str` emits, and it has
+  # no AD variant: the Enzyme path was retired in favour of the analytic `Dual2`
+  # sensitivities, so "Enzyme AD" can never arrive and "analytic (Dual2)" is what
+  # an analytic-gradient fit actually reports. Mapping the dead string but not the
+  # live one is why `fit$gradient_used == "ad"` was permanently FALSE and the raw
+  # engine string leaked unmapped into print() / summary().
+  expect_identical(ferx:::.ferx_short_gradient_label("analytic (Dual2)"), "analytic")
   expect_identical(ferx:::.ferx_short_gradient_label("finite differences"), "fd")
   expect_identical(ferx:::.ferx_short_gradient_label("N/A"), "N/A")
   expect_identical(ferx:::.ferx_short_gradient_label(""), NA_character_)
   expect_identical(ferx:::.ferx_short_gradient_label(NULL), NA_character_)
+  # An unrecognised label passes through verbatim rather than collapsing to NA, so
+  # a future engine label degrades to "shown but unmapped", not "missing".
+  expect_identical(ferx:::.ferx_short_gradient_label("something new"), "something new")
 })
 test_that("summary.ferx_fit carries gradient_used through", {
   fit <- make_fake_fit(gradient = "auto", gradient_used = "ad")
@@ -2865,4 +2874,24 @@ test_that("ferx:::.ferx_parse_model_fit_options() ignores malformed lines (no `=
 
   opts <- ferx:::.ferx_parse_model_fit_options(path)
   expect_equal(opts, c(method = "foce"))
+})
+
+
+# ---------------------------------------------------------------------------
+# n_eta = 0 models (no random effects) - e.g. a fixed-effects [binary_model]
+# logistic. An eta-less fit returns an empty omega; the R post-processing must
+# keep it a 0x0 matrix rather than a bare numeric(0), else nrow(omega) is NULL
+# and the eta-metadata guards fail with "missing value where TRUE/FALSE needed"
+# (ferx-r #271).
+# ---------------------------------------------------------------------------
+test_that("ferx_fit() on an n_eta = 0 model (binary logistic) returns cleanly", {
+  ex  <- ferx_example("binary_logistic")
+  fit <- suppressWarnings(
+    ferx_fit(ex$model, ex$data, verbose = FALSE, settings = list(maxiter = 30L))
+  )
+  expect_s3_class(fit, "ferx_fit")
+  # omega is an empty matrix, not a bare numeric(0): nrow() must be 0L, not NULL.
+  expect_true(is.matrix(fit$omega))
+  expect_identical(nrow(fit$omega), 0L)
+  expect_length(fit$theta, 3L)   # TH0, THX, THT; no etas, no sigmas
 })

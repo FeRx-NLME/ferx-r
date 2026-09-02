@@ -51,9 +51,15 @@
 
   if (length(num_cols) == 0L) return(NULL)
 
-  # Keep only columns that are constant per subject (heuristic)
+  # Keep only columns that are constant per subject (heuristic). Split on the
+  # ordinal subject index, not the raw ID: a dataset that reuses a subject ID in
+  # a non-contiguous block has two distinct subjects sharing that ID, and
+  # splitting by ID would lump their records together (a covariate that differs
+  # between the two would then be wrongly flagged non-constant, and one covariate
+  # row would later be double-weighted across both subjects' ETAs).
+  subj <- .ferx_subject_index(data[[data_id]])
   data_sub <- do.call(rbind, lapply(
-    split(data[, c(data_id, num_cols), drop = FALSE], data[[data_id]]),
+    split(data[, c(data_id, num_cols), drop = FALSE], subj),
     function(chunk) {
       row <- chunk[1L, , drop = FALSE]
       for (col in num_cols) {
@@ -72,8 +78,20 @@
 
   if (length(cov_cols) == 0L) return(NULL)
 
-  merged <- merge(etas, data_sub[, c(data_id, cov_cols), drop = FALSE],
-                  by.x = ebe_id, by.y = data_id)
+  # `etas` (one row per subject, subject order) and `data_sub` (one row per
+  # subject index, same order) align positionally, so bind them directly - an
+  # ID merge would cross-join the two subjects that share a reused ID. Fall back
+  # to an ID merge only when the subject counts disagree.
+  if (nrow(data_sub) == nrow(etas)) {
+    merged <- cbind(etas, data_sub[, cov_cols, drop = FALSE])
+  } else {
+    # `data_sub` can hold two rows for one textual ID (a reused ID), so index
+    # with match() rather than merge(): merge would cross-join those rows and
+    # double-count the subject in every correlation.
+    idx    <- match(as.character(etas[[ebe_id]]), as.character(data_sub[[data_id]]))
+    merged <- cbind(etas, data_sub[idx, cov_cols, drop = FALSE])
+    rownames(merged) <- NULL
+  }
 
   rows <- vector("list", length(eta_cols) * length(cov_cols))
   k    <- 0L

@@ -20,7 +20,7 @@
   KA = TVKA
 
 [structural_model]
-  pk two_cpt_oral(cl=CL, v=V1, q=Q, v2=V2, ka=KA)
+  pk two_cpt_oral(cl=CL, v1=V1, q=Q, v2=V2, ka=KA)
 
 [error_model]
   DV ~ proportional(PROP_ERR)

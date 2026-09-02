@@ -15,7 +15,10 @@ A named list (invisibly) with fields: \code{theta_names}
 (character vector of population parameter names), \code{model_type}
 (short label such as \code{"1-cpt oral"} or \code{NULL} when not
 unambiguously detectable), \code{iiv} (omega names), \code{iov}
-(kappa names), and \code{residual} (error type - one of
+(kappa names), \code{iov_weights} (per-kappa sample-size weight
+expressions from \code{kappa K ~ <var> weight = <expr>}, \code{NA} for
+an unweighted kappa and \code{character(0)} when no kappa is weighted),
+and \code{residual} (error type - one of
 \code{"proportional"}, \code{"additive"}, \code{"combined"}, or
 \code{"additive (log-transformed)"} for log-transform-both-sides
 models written as \code{log(DV) ~ additive(...)} or
@@ -45,6 +48,11 @@ the \code{[scaling]} block for unit conversion / ODE readout (see
 via \code{kappa_*} declarations. Steady-state dosing (\code{SS}/\code{II}
 columns) is a data-side feature and is documented under
 \code{\link{ferx_fit}}.
+
+A sample-size-weighted kappa - \code{kappa KAPPA_EMAX ~ 2.0 (sd) weight = NARM},
+meaning \code{kappa_ik ~ N(0, Omega_IOV / N_ik)} - is annotated on the IOV
+line as \code{KAPPA_EMAX (weight = NARM)} and returned in
+\code{iov_weights}.
 }
 
 \examples{
@@ -63,12 +71,12 @@ s$residual     # "proportional"
 \code{\link{ferx_model_show}}, \code{\link{ferx_model_edit}},
 \code{\link{ferx_fit}}
 
-Other model-editing: 
-\code{\link{ferx_model}()},
-\code{\link{ferx_model_edit}()},
-\code{\link{ferx_model_get_section}()},
-\code{\link{ferx_model_set_section}()},
-\code{\link{ferx_model_show}()},
-\code{\link{ferx_model_validate}()}
+Other model-editing:
+\code{\link[=ferx_model]{ferx_model()}},
+\code{\link[=ferx_model_edit]{ferx_model_edit()}},
+\code{\link[=ferx_model_get_section]{ferx_model_get_section()}},
+\code{\link[=ferx_model_set_section]{ferx_model_set_section()}},
+\code{\link[=ferx_model_show]{ferx_model_show()}},
+\code{\link[=ferx_model_validate]{ferx_model_validate()}}
 }
 \concept{model-editing}

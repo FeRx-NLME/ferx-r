@@ -185,3 +185,122 @@ test_that("path/hash fields round-trip through .fitrx save/load", {
   )
   expect_true(is.finite(out_sir$sir_ess))
 })
+
+# ferx-core#1021: a covariance direction the data do not identify comes back
+# from the covariance step with a variance of ~1/eigenvalue-floor. SIR used to
+# die on it ("All SIR samples had invalid weights"); it now shrinks the
+# direction and says so. The warning is the only signal that the CIs this call
+# just wrote are qualified, so it has to reach the fit - both the flat vector
+# and the structured table.
+#
+# The merge is tested against a mocked binding rather than a real engine run:
+# the behaviour under test is R-side, and gating it on the engine would make it
+# unrunnable until the ferx-core pin in src/rust/Cargo.lock catches up. The
+# end-to-end test below covers the real engine when it is new enough.
+fake_sir_return <- function(warnings, n_theta, n_eta, n_sigma) {
+  list(
+    sir_ess = 4,
+    sir_ci_theta = rep(c(0.1, 0.2), n_theta),
+    sir_ci_omega = rep(c(0.01, 0.02), n_eta),
+    sir_ci_sigma = rep(c(0.001, 0.002), n_sigma),
+    sir_resamples = numeric(0),
+    sir_resamples_n = 0L,
+    sir_resamples_dim = 0L,
+    warnings = warnings
+  )
+}
+
+test_that("ferx_sir merges engine SIR warnings onto the fit", {
+  fit <- warfarin_fit_cov()
+  skip_if(is.null(fit$cov_matrix), sir_cov_skip)
+
+  shrunk <- paste0(
+    "proposal was shrunk in 1 direction(s) so draws mostly stay inside the ",
+    "parameter bounds [TVCL -0.99 (sd 6.15e3 -> 2.37e0)]. Those directions come ",
+    "from eigenvalue-floored (non-identified) curvature in the covariance step."
+  )
+  testthat::local_mocked_bindings(
+    ferx_rust_sir = function(...) {
+      fake_sir_return(shrunk, length(fit$theta), nrow(fit$omega), length(fit$sigma))
+    },
+    .package = "ferx"
+  )
+
+  out <- ferx_sir(fit, sir_samples = 8L, sir_resamples = 4L, sir_seed = 1L)
+
+  # Flat vector, structured table, and the pre-existing warnings all survive.
+  expect_true(any(grepl("shrunk", out$warnings, fixed = TRUE)))
+  expect_true(all(fit$warnings %in% out$warnings))
+  ws <- out$warnings_structured
+  expect_s3_class(ws, "data.frame")
+  sir_rows <- ws[ws$category == "sir", , drop = FALSE]
+  expect_gt(nrow(sir_rows), 0L)
+  expect_true(any(grepl("shrunk", sir_rows$message, fixed = TRUE)))
+  # The parameter behind the shrunk direction is named, which is what makes the
+  # warning actionable.
+  expect_true(any(grepl("TVCL", sir_rows$message, fixed = TRUE)))
+
+  # A second pass over the same fit must not stack a duplicate of either row.
+  twice <- ferx_sir(out, sir_samples = 8L, sir_resamples = 4L, sir_seed = 1L)
+  expect_equal(sum(grepl("shrunk", twice$warnings, fixed = TRUE)), 1L)
+  expect_equal(
+    sum(grepl("shrunk", twice$warnings_structured$message, fixed = TRUE)),
+    1L
+  )
+})
+
+test_that("ferx_sir adds no sir rows when the engine reports nothing", {
+  fit <- warfarin_fit_cov()
+  skip_if(is.null(fit$cov_matrix), sir_cov_skip)
+
+  testthat::local_mocked_bindings(
+    ferx_rust_sir = function(...) {
+      fake_sir_return(character(0), length(fit$theta), nrow(fit$omega), length(fit$sigma))
+    },
+    .package = "ferx"
+  )
+  out <- ferx_sir(fit, sir_samples = 8L, sir_resamples = 4L, sir_seed = 1L)
+
+  ws <- out$warnings_structured
+  sir_rows <- if (is.data.frame(ws)) ws[ws$category == "sir", , drop = FALSE] else NULL
+  expect_true(is.null(sir_rows) || nrow(sir_rows) == 0L)
+  expect_identical(out$warnings, fit$warnings)
+})
+
+# End-to-end against the real engine. The pin in src/rust/Cargo.lock carries
+# ferx-core#1021 as of #304, so this runs for real rather than skipping. It is
+# deliberately NOT wrapped in a tryCatch that downgrades the pre-#1021
+# `All SIR samples had invalid weights` failure to a skip: that is the exact
+# regression this test exists to catch, and turning it into a skip would report
+# it as green.
+test_that("ferx_sir surfaces engine proposal-conditioning warnings end-to-end", {
+  fit <- warfarin_fit_cov()
+  skip_if(is.null(fit$cov_matrix), sir_cov_skip)
+
+  # Adding to a diagonal keeps the matrix PSD, so this is a covariance a real
+  # (non-identified) fit could produce rather than a malformed input.
+  degenerate <- fit
+  degenerate$cov_matrix[1L, 1L] <- degenerate$cov_matrix[1L, 1L] + 1e8
+
+  out <- ferx_sir(degenerate, sir_samples = 8L, sir_resamples = 4L, sir_seed = 1L)
+
+  expect_true(is.finite(out$sir_ess))
+  expect_true(any(grepl("shrunk", out$warnings, fixed = TRUE)))
+  sir_rows <- out$warnings_structured
+  sir_rows <- sir_rows[sir_rows$category == "sir", , drop = FALSE]
+  expect_true(any(grepl("shrunk", sir_rows$message, fixed = TRUE)))
+  expect_true(any(grepl(names(fit$theta)[1L], sir_rows$message, fixed = TRUE)))
+})
+
+test_that("ferx_sir leaves a healthy fit free of sir warnings", {
+  fit <- warfarin_fit_cov()
+  skip_if(is.null(fit$cov_matrix), sir_cov_skip)
+
+  before <- fit$warnings
+  out <- ferx_sir(fit, sir_samples = 8L, sir_resamples = 4L, sir_seed = 1L)
+
+  expect_false(any(grepl("shrunk", out$warnings, fixed = TRUE)))
+  expect_false(any(grepl("rank-deficient", out$warnings, fixed = TRUE)))
+  # Pre-existing warnings survive the merge.
+  expect_true(all(before %in% out$warnings))
+})

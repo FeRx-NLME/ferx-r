@@ -9,8 +9,7 @@
 ferx provides a user-facing R API for population PK / NLME modeling
 that delegates to a high-performance Rust engine (ferx-core). Models are
 written in a compact .ferx DSL (parameters, individual_parameters,
-structural_model, odes, error_model, initial_values, fit_options,
-optional scaling).
+structural_model, odes, error_model, fit_options, optional scaling).
 }
 \section{Where to start}{
 
@@ -49,6 +48,7 @@ Useful links:
 
 Authors:
 \itemize{
+  \item Ron Keizer \email{ron@insightrx.com}
   \item Teun Post \email{teunpost@gmail.com}
   \item Hidde van de Beek \email{hiddevdbeek@icloud.com}
 }

@@ -5,9 +5,9 @@ library(ferx)
 # warfarin example so estimates are comparable across optimizers.
 #
 # Pick an optimizer based on the model surface:
-#   - bobyqa (default): derivative-free, robust, slowest convergence
+#   - bobyqa: derivative-free, robust, slowest convergence
 #   - slsqp / lbfgs / nlopt_lbfgs / mma: gradient-based NLopt optimizers
-#   - bfgs: hand-rolled quasi-Newton
+#   - bfgs: deprecated alias for nlopt_lbfgs (same algorithm)
 #   - trust_region: Steihaug CG inside a trust region; good for ill-conditioned
 ex <- ferx_example("warfarin")
 

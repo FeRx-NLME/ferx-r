@@ -337,9 +337,19 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   if (!all(c("ofv_contribution", "n_obs") %in% names(ebes))) {
     per_subj <- .fitrx_per_subject_ofv_nobs(fit)
     if (!is.null(per_subj)) {
-      # Match by string ID so character IDs work (PT001 etc.). Falls back to
-      # NA on subjects whose ID isn't represented in sdtab.
-      idx <- match(as.character(ebes$ID), per_subj$id)
+      # ebe_etas and the per-subject sdtab summary are both one row per subject
+      # in subject order, so join positionally: a dataset that reuses a subject
+      # ID in a non-contiguous block has two subjects sharing a textual ID, and
+      # an ID match would collapse them (both ebes rows get the first subject's
+      # n_obs, so ebes.csv disagrees with predictions.csv and the ferx-core
+      # loader rejects the bundle). Fall back to a string-ID match when the row
+      # counts don't line up (character IDs like PT001 still work; unrepresented
+      # subjects fall to NA).
+      idx <- if (length(per_subj$id) == nrow(ebes)) {
+        seq_len(nrow(ebes))
+      } else {
+        match(as.character(ebes$ID), per_subj$id)
+      }
       ebes$ofv_contribution <- per_subj$ofv[idx]
       ebes$n_obs <- per_subj$n_obs[idx]
     } else {
@@ -410,11 +420,15 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   if (is.null(sdtab) || nrow(sdtab) == 0L) return(NULL)
   needed <- c("ID", "EBE_OFV", "N_OBS")
   if (!all(needed %in% names(sdtab))) return(NULL)
-  ord <- !duplicated(sdtab$ID)
+  # First row of each subject block, keyed on the ordinal subject index rather
+  # than on the raw ID - `!duplicated(sdtab$ID)` would drop the second of two
+  # subjects that reuse a textual ID in a non-contiguous block.
+  subj <- .ferx_subject_index(sdtab$ID)
+  first <- !duplicated(subj)
   list(
-    id = as.character(sdtab$ID[ord]),
-    ofv = as.numeric(sdtab$EBE_OFV[ord]),
-    n_obs = as.integer(sdtab$N_OBS[ord])
+    id = as.character(sdtab$ID[first]),
+    ofv = as.numeric(sdtab$EBE_OFV[first]),
+    n_obs = as.integer(sdtab$N_OBS[first])
   )
 }
 
@@ -526,7 +540,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
 
 .fitrx_build_iov_wire <- function(fit) {
   if (is.null(fit$omega_iov)) return(NULL)
-  list(
+  wire <- list(
     kappa_names = as.character(fit$kappa_names %||% character()),
     kappa_fixed = as.logical(fit$kappa_fixed %||% rep(FALSE, length(fit$kappa_names))),
     se_kappa = .fitrx_opt_num_vec(fit$se_kappa),
@@ -544,6 +558,23 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
     omega_iov_param_corr = .fitrx_matrix_to_wire(fit$omega_iov_param_corr),
     kappa_init_as_sd = as.logical(fit$kappa_init_as_sd %||% rep(FALSE, length(fit$kappa_names)))
   )
+  # Sample-size-weighted IOV (ferx-core #1031). The two keys must be *absent*
+  # (not JSON `null`) for an unweighted model: the engine declares them
+  # `#[serde(default)] Vec<Option<..>>`, and `serde(default)` only fires for a
+  # missing key - an explicit `null` fails with "invalid type: null, expected a
+  # sequence". Assigning NULL into a list() literal keeps the name, so the
+  # fields are appended here only when a weight exists. That also keeps the
+  # bundle byte-identical to a pre-#1031 one for every unweighted model.
+  # `as.list()` keeps them JSON arrays under `auto_unbox = TRUE` (a single
+  # weighted kappa is the common MBMA case), and `na = "null"` maps an
+  # unweighted slot to `null`, which is what `Vec<Option<..>>` expects.
+  if (!is.null(fit$kappa_weights)) {
+    wire$kappa_weights <- as.list(as.character(fit$kappa_weights))
+    wire$kappa_weight_typical <- as.list(as.numeric(
+      fit$kappa_weight_typical %||% rep(NA_real_, length(fit$kappa_weights))
+    ))
+  }
+  wire
 }
 
 .fitrx_build_eta_param_info <- function(fit) {

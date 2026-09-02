@@ -15,14 +15,78 @@
     "unknown"
 }
 
+# Normalise the sample-size-weighted IOV vectors (ferx-core #1031) that come
+# off the FFI list or a .fitrx bundle. The engine leaves both empty unless some
+# kappa declares `weight = <expr>`, so an ordinary IOV model keeps NULL here.
+# When present they are padded/truncated to one entry per kappa and named by
+# kappa_names, with NA marking an unweighted kappa in a model where some other
+# kappa is weighted. Returns list(kappa_weights = , kappa_weight_typical = ).
+.ferx_name_kappa_weights <- function(weights, typical, kappa_names, n_kappa) {
+  none <- list(kappa_weights = NULL, kappa_weight_typical = NULL)
+  if (is.null(weights) || length(weights) == 0L || n_kappa < 1L) return(none)
+  w <- as.character(weights)
+  w[!nzchar(w)] <- NA_character_
+  if (all(is.na(w))) return(none)
+  length(w) <- n_kappa
+  tv <- suppressWarnings(as.numeric(typical %||% numeric(0)))
+  length(tv) <- n_kappa
+  if (!is.null(kappa_names) && length(kappa_names) == n_kappa) {
+    names(w) <- kappa_names
+    names(tv) <- kappa_names
+  }
+  list(kappa_weights = w, kappa_weight_typical = tv)
+}
+
+# Format the one-line weight annotation printed under a weighted kappa's
+# estimate. `var` is the *unweighted* gamma^2 the engine reports; the number a
+# reader needs next to it is the effective between-occasion SD at a typical
+# weight, gamma / sqrt(W). Mirrors the ferx-core CLI output. Returns NULL when
+# kappa `i` carries no weight.
+.ferx_format_kappa_weight <- function(fit, i, var, name) {
+  w <- fit$kappa_weights
+  if (is.null(w) || length(w) < i || is.na(w[[i]])) return(NULL)
+  expr <- as.character(w[[i]])
+  tv <- fit$kappa_weight_typical
+  n <- if (!is.null(tv) && length(tv) >= i) tv[[i]] else NA_real_
+  if (!is.na(n) && is.finite(n) && n > 0 && !is.na(var) && var >= 0) {
+    sprintf("%22s weight = %s  ->  SD = %.4f at %s = %.4f (kappa ~ N(0, %s/%s))",
+            "", expr, sqrt(var) / sqrt(n), expr, n, name, expr)
+  } else {
+    sprintf("%22s weight = %s (kappa ~ N(0, %s/%s))", "", expr, name, expr)
+  }
+}
+
+# Kappa labels for a model_structure list, with a sample-size-weighted kappa
+# (ferx-core #1031) annotated by its weight expression: `KAPPA_EMAX (weight =
+# NARM)`. `iov_weights` is absent (or all NA) for every model that declares no
+# weight. `model_structure` is persisted verbatim under r_extras and read back
+# with `simplifyVector = FALSE`, so after a save/load round-trip both vectors
+# arrive as *lists* whose NA slots are NULL holes - `is.na()` is FALSE for
+# those and `as.character(NULL)` is "NULL", which would render
+# `(weight = NULL)`. Flatten first.
+#
+# Every surface that reports IOV must go through this, so print.ferx_fit(),
+# print.ferx_summary() and ferx_model_inspect() cannot disagree about whether
+# a model is weighted. Returns character(0) for a model with no IOV.
+.ferx_iov_labels <- function(ms) {
+  iov_lbl <- as.character(.fitrx_unwrap_opt_chr_vec(ms$iov) %||% character())
+  wts <- as.character(.fitrx_unwrap_opt_chr_vec(ms$iov_weights) %||% character())
+  if (length(iov_lbl) > 0L && length(wts) == length(iov_lbl)) {
+    has_w <- !is.na(wts) & nzchar(wts)
+    iov_lbl[has_w] <- sprintf("%s (weight = %s)", iov_lbl[has_w], wts[has_w])
+  }
+  iov_lbl
+}
+
 # Print the four structural detail lines (Structural / IIV / IOV / Residual).
 # The caller is responsible for any preceding header line.
 .ferx_print_structure <- function(ms) {
   cat(sprintf("  Structural:  %s\n", .ferx_format_structural(ms)))
   cat(sprintf("  IIV:         %s\n",
     if (length(ms$iiv) > 0L) paste(ms$iiv, collapse = ", ") else "none"))
+  iov_lbl <- .ferx_iov_labels(ms)
   cat(sprintf("  IOV:         %s\n",
-    if (length(ms$iov) > 0L) paste(ms$iov, collapse = ", ") else "none"))
+    if (length(iov_lbl) > 0L) paste(iov_lbl, collapse = ", ") else "none"))
   cat(sprintf("  Residual:    %s\n", ms$residual))
   invisible(NULL)
 }
