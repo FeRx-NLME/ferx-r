@@ -46,8 +46,34 @@
 #' *failed* fits, so a returned summary would be a normal-looking table
 #' computed over however many replicates happened to finish. The ones that did
 #' finish are not lost if `directory` was set - they are written there as they
-#' land - so set it before starting a long run and recover them with
-#' [ferx_bootstrap_summarize()].
+#' land - so set it before starting a long run, then either summarise them with
+#' [ferx_bootstrap_summarize()] or carry on with `resume = TRUE`.
+#'
+#' ## Resuming an interrupted run
+#'
+#' `resume = TRUE` continues the run in `directory`, refitting only the sample
+#' indices its `raw_results.csv` does not already carry. It is sound because a
+#' replicate's draw is a pure function of `(seed, index)`: a reused replicate is
+#' bit-for-bit the one an uninterrupted run would have produced, so a resumed
+#' run's artefacts are identical to that run's. The base fit is reused too and
+#' is deliberately *not* refitted - a second fit can land on a slightly
+#' different optimum, and with `update_inits = TRUE` that would start the new
+#' replicates from a different point than the ones already on disk.
+#'
+#' The engine refuses to resume from a directory that belongs to a different
+#' run: the model and data hashes, the parameter names and the settings that
+#' shape the replicates are recorded alongside them and are checked before any
+#' is reused. Those settings are `samples`, `seed`, `sample_size`,
+#' `stratify_on`, `run_base_model`, `update_inits`, `keep_covariance` and
+#' `dofv` - all of them pinned, so a resumed run cannot *extend* an earlier
+#' one. Calling again with a larger `samples` is refused rather than topping
+#' the run up; a bigger bootstrap means a fresh `directory`.
+#'
+#' A replicate whose fit *errored* is carried forward as a failure rather than
+#' refitted, matching PsN - a fit that failed usually fails again.
+#' `retry_failed = TRUE` (which needs `resume = TRUE`) refits those instead, and
+#' is for a failure that was transient - an out-of-memory kill, a full disk -
+#' rather than one of the model.
 #'
 #' @param model Path to a `.ferx` model file, or a `ferx_model` object from
 #'   [ferx_model()].
@@ -100,12 +126,24 @@
 #'   frames in hand and rarely wants eight files appearing in the working
 #'   directory. The CLI defaults the other way. Set it if you want to be able
 #'   to call [ferx_bootstrap_summarize()] later.
+#' @param resume Continue an interrupted run in `directory` instead of starting
+#'   a fresh one, refitting only the replicates that directory does not already
+#'   hold. Default `FALSE`. Needs `directory`, and needs the arguments that
+#'   shape the replicates to match the ones the directory was written with -
+#'   `samples`, `seed`, `sample_size`, `stratify_on`, `run_base_model`,
+#'   `update_inits`, `keep_covariance` and `dofv`, plus the model and the data
+#'   themselves. A mismatch is an error, not a fresh run: resuming with a
+#'   larger `samples` does not extend the earlier run.
+#' @param retry_failed Refit the replicates a resumed run finds recorded as
+#'   *failed*, instead of carrying the failure forward. Default `FALSE` (PsN's
+#'   default). Needs `resume = TRUE`.
 #' @param progress Show a progress bar while the replicates fit. Default
 #'   `interactive()`, so a script or a knitted document prints nothing. Uses
 #'   the cli package when it is installed and [utils::txtProgressBar()]
 #'   otherwise. The bar is drawn by this R session while the fits run in the
-#'   engine, and reports what the run will actually do: a `directory` that
-#'   already holds most of a run counts only the replicates still to fit.
+#'   engine, and reports what the run will actually do: a `resume = TRUE` run
+#'   whose `directory` already holds most of the replicates counts only the
+#'   ones still to fit.
 #' @param verbose Print a one-line run header to stderr. Default `FALSE`.
 #'
 #' @return An object of class `ferx_bootstrap`, a list with:
@@ -145,6 +183,12 @@
 #'                      stratify_on = "SEX", directory = "warfarin-bootstrap")
 #' ferx_bootstrap_summarize("warfarin-bootstrap",
 #'                          skip_estimate_near_boundary = FALSE)
+#'
+#' # Continue that run after it was interrupted: only the replicates missing
+#' # from the directory are fitted again.
+#' bs <- ferx_bootstrap(ex$model, ex$data, samples = 200,
+#'                      stratify_on = "SEX", directory = "warfarin-bootstrap",
+#'                      resume = TRUE)
 #' }
 #'
 #' @seealso [ferx_bootstrap_summarize()] to change the exclusion criteria on a
@@ -169,6 +213,8 @@ ferx_bootstrap <- function(model,
                            skip_with_covstep_warnings = FALSE,
                            ci = 95,
                            directory = NULL,
+                           resume = FALSE,
+                           retry_failed = FALSE,
                            progress = interactive(),
                            verbose = FALSE) {
   if (inherits(model, "ferx_model")) {
@@ -196,7 +242,7 @@ ferx_bootstrap <- function(model,
   for (nm in c("update_inits", "run_base_model", "keep_covariance", "dofv",
                "skip_minimization_terminated", "skip_estimate_near_boundary",
                "skip_covariance_step_terminated", "skip_with_covstep_warnings",
-               "progress", "verbose")) {
+               "resume", "retry_failed", "progress", "verbose")) {
     v <- get(nm)
     if (!is.logical(v) || length(v) != 1L || is.na(v)) {
       stop("`", nm, "` must be TRUE or FALSE.")
@@ -205,6 +251,22 @@ ferx_bootstrap <- function(model,
   if (update_inits && !run_base_model) {
     stop("`update_inits = TRUE` needs `run_base_model = TRUE`: the replicates ",
          "start from the base fit's final estimates.")
+  }
+  # The engine checks these too, and its messages are good ones - but they name
+  # the CLI flags. Checking here as well means the R user is told about
+  # `directory =` and `resume =` before paying for a model compile.
+  if (resume && is.null(directory)) {
+    stop("`resume = TRUE` continues a run in a directory, so it needs ",
+         "`directory` naming one an earlier run wrote.")
+  }
+  if (resume && !dir.exists(directory)) {
+    stop("`resume = TRUE` needs a directory an earlier run wrote, and there ",
+         "is nothing at `", directory, "`. Drop `resume` to start a fresh run ",
+         "there, or check the path.")
+  }
+  if (retry_failed && !resume) {
+    stop("`retry_failed = TRUE` refits replicates a previous run recorded as ",
+         "failed, so it only means anything with `resume = TRUE`.")
   }
   if (!is.null(stratify_on) &&
       (!is.character(stratify_on) || length(stratify_on) != 1L ||
@@ -240,6 +302,8 @@ ferx_bootstrap <- function(model,
     dofv,
     dir_arg,
     as.numeric(ci),
+    resume,
+    retry_failed,
     verbose,
     # NULL is what tells the engine not to open a reporting thread at all.
     if (isTRUE(progress)) .ferx_bootstrap_progress_handler() else NULL

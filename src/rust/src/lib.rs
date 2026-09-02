@@ -4118,6 +4118,12 @@ fn run_bootstrap_cancellable(
 /// pending - which is what makes a watched run Ctrl-C-able too (#315). The check
 /// comes *before* the redraw because the redraw consumes a pending interrupt;
 /// see [`bootstrap_draw_progress`].
+///
+/// The error is flattened to a `String` at both call sites rather than carried
+/// as ferx-core's `BootstrapError`: R gets one condition either way, and
+/// `to_string()` compiles against the pinned ferx-core as well as against the
+/// one that introduced the typed error, so this file does not have to land in
+/// lockstep with a ferx-core bump.
 fn run_bootstrap_reporting(
     prepared: &ferx_core::PreparedRun,
     options: &BootstrapOptions,
@@ -4136,7 +4142,9 @@ fn run_bootstrap_reporting(
     let take_latest = || latest.lock().ok().and_then(|slot| *slot);
 
     std::thread::scope(|scope| {
-        let worker = scope.spawn(|| run_bootstrap_with_progress(prepared, options, Some(&sink)));
+        let worker = scope.spawn(|| {
+            run_bootstrap_with_progress(prepared, options, Some(&sink)).map_err(|e| e.to_string())
+        });
         while !worker.is_finished() {
             std::thread::sleep(std::time::Duration::from_millis(REDRAW_MS));
             if pending_interrupt() {
@@ -4224,6 +4232,8 @@ fn bootstrap_options_from_r(
     dofv: bool,
     directory: &str,
     confidence_level: f64,
+    resume: bool,
+    retry_failed: bool,
 ) -> std::result::Result<BootstrapOptions, String> {
     if !(seed.is_finite() && seed >= 0.0) {
         return Err(format!("seed must be a non-negative whole number, got {seed}"));
@@ -4244,10 +4254,16 @@ fn bootstrap_options_from_r(
         dofv,
         directory: (!directory.is_empty()).then(|| std::path::PathBuf::from(directory)),
         confidence_level,
-        // ferx-core #1143 added resume / retry_failed. The R entry points do
-        // not expose either yet, so every run from R is a fresh one.
-        resume: false,
-        retry_failed: false,
+        // The engine validates both (a resume needs a directory, a retry
+        // needs a resume), and `ferx_bootstrap()` checks them again on the R
+        // side so the message can name the R argument rather than the CLI flag.
+        resume,
+        retry_failed,
+        // Everything else the R entry points do not expose keeps its default -
+        // `cancel` (ferx-core #1161), which needs the fit moved off the R main
+        // thread before R can set it (#315). Spelling the rest with `..` also
+        // keeps a future field from being a compile error here.
+        ..BootstrapOptions::default()
     })
 }
 
@@ -4481,6 +4497,8 @@ fn ferx_rust_bootstrap(
     dofv: bool,
     directory: &str,
     confidence_level: f64,
+    resume: bool,
+    retry_failed: bool,
     verbose: bool,
     progress: Robj,
 ) -> Robj {
@@ -4501,6 +4519,8 @@ fn ferx_rust_bootstrap(
         dofv,
         directory,
         confidence_level,
+        resume,
+        retry_failed,
     ) {
         Ok(o) => o,
         Err(e) => throw_r_error(format!("ferx_bootstrap: {e}")),
