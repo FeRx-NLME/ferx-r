@@ -1902,14 +1902,18 @@ fn sim_results_to_df(results: &[ferx_core::api::SimulationResult]) -> Robj {
     .into()
 }
 
-// -- Helper: short label for the structural model. ODE models always report
-//    "ODE" regardless of the placeholder `pk_model` value the parser stores
-//    for them, so `is_ode_based()` is checked first. The PK match is
+// -- Helper: short label for the structural model. Compartment-free and ODE
+//    models report their own form regardless of the placeholder `pk_model`
+//    value the parser stores for them, so those predicates are checked first.
+//    The PK match is
 //    exhaustive over `PkModel`, so this never needs to fall back to NULL on
 //    the R side; the corresponding R doc still allows `NULL` because the
 //    pre-fit regex parser in `.ferx_model_type()` can fail to recognise the
 //    structural form. --
 fn pk_model_type_label(model: &CompiledModel) -> &'static str {
+    if model.is_algebraic() {
+        return "compartment-free";
+    }
     if model.is_ode_based() {
         return "ODE";
     }

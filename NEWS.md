@@ -155,6 +155,15 @@
 
 ## New features
 
+- **Compartment-free (`$PRED`-equivalent) structural models now have a bundled
+  example.** `ferx_example("emax_timecourse")` fits a synthetic Emax response
+  time course whose `[structural_model]` declares named equations ending in
+  `y = <expr>`, with no `pk`, `ode`, compartments, doses, or integration. The
+  model and its fixed-seed, 30-subject dataset mirror the ferx-core #811
+  NONMEM anchor; the corresponding estimates and standard errors agree to
+  about 1e-4. See `inst/examples/ex_emax_timecourse.R` for the complete R
+  workflow (ferx-r #312).
+
 - **`ferx_bootstrap(progress = TRUE)`: a progress bar while the replicates fit.**
   A 200-sample bootstrap is minutes to hours behind one call, and until it
   returned there was nothing to say whether it was working or wedged. The engine

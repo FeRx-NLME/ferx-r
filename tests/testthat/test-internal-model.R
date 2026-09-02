@@ -79,6 +79,19 @@ test_that(".ferx_model_type detects ODE at any position in lines", {
     "ODE"
   )
 })
+test_that(".ferx_model_type detects compartment-free structural equations", {
+  expect_equal(
+    ferx:::.ferx_model_type(c(
+      "EFF = EMAX * TIME / (ET50 + TIME)",
+      "y = E0 - EFF"
+    )),
+    "compartment-free"
+  )
+  expect_equal(
+    ferx:::.ferx_model_type("y[CMT=2] = E0"),
+    "compartment-free"
+  )
+})
 test_that(".ferx_model_type returns NULL for unrecognised content", {
   expect_null(ferx:::.ferx_model_type("TVCL * exp(ETA_CL)"))
   expect_null(ferx:::.ferx_model_type(character(0)))
