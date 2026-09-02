@@ -23,6 +23,8 @@ ferx_rust_bootstrap(
   dofv,
   directory,
   confidence_level,
+  resume,
+  retry_failed,
   verbose,
   progress
 )

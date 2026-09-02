@@ -163,6 +163,36 @@
   NONMEM anchor; the corresponding estimates and standard errors agree to
   about 1e-4. See `inst/examples/ex_emax_timecourse.R` for the complete R
   workflow (ferx-r #312).
+- **`ferx_bootstrap(resume = TRUE)`: continue an interrupted run**
+  ([#317](https://github.com/FeRx-NLME/ferx-r/issues/317)). A 200-replicate
+  bootstrap that died partway - a killed session, a full disk, a laptop
+  closing - had to be started over from R: the engine has had `resume` since
+  ferx-core #1143 and the CLI has exposed it as `--resume`, but the R entry
+  point did not. It now does. `resume = TRUE` (which needs `directory`) refits
+  only the sample indices that directory's `raw_results.csv` does not already
+  carry, and reuses the base fit rather than refitting it.
+
+  A resumed run is not an approximation of the uninterrupted one, it is the same
+  run: a replicate's draw is a pure function of `(seed, index)`, so a reused
+  replicate is bit-for-bit the one a fresh run would have produced. The engine
+  refuses to resume from a directory belonging to a different run - the model
+  and data hashes, the parameter names and the settings that shape the
+  replicates (`samples`, `seed`, `sample_size`, `stratify_on`,
+  `run_base_model`, `update_inits`, `keep_covariance`, `dofv`) are all recorded
+  next to the replicates and checked first. All of them are pinned, so a resume
+  continues a run rather than extending it: a larger `samples` is an error, not
+  a top-up.
+
+  `retry_failed = TRUE` (needs `resume = TRUE`) refits the replicates a previous
+  run recorded as *failed* instead of carrying the failure forward. Off by
+  default, matching PsN: a fit that failed usually fails again, so this is for a
+  transient failure - an out-of-memory kill, a full disk - not a model one.
+
+  ```r
+  # Interrupted at replicate 137 of 200
+  bs <- ferx_bootstrap(ex$model, ex$data, samples = 200, seed = 1,
+                       directory = "warfarin-bootstrap", resume = TRUE)
+  ```
 
 - **`ferx_bootstrap(progress = TRUE)`: a progress bar while the replicates fit.**
   A 200-sample bootstrap is minutes to hours behind one call, and until it
