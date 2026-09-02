@@ -100,7 +100,11 @@ ferx_gam_screen <- function(fit,
   # -- ETA columns ------------------------------------------------------------
   ebe      <- fit$ebe_etas
   eta_id   <- if ("ID" %in% names(ebe)) "ID" else names(ebe)[1L]
-  all_etas <- setdiff(names(ebe), eta_id)
+  # `eta_cols_all` stays the unfiltered column order: `fit$shrinkage_eta` is
+  # positional against it, so subsetting before the shrinkage lookup would
+  # silently shift every ETA's shrinkage (see below).
+  eta_cols_all <- setdiff(names(ebe), eta_id)
+  all_etas     <- eta_cols_all
   if (!is.null(etas)) {
     all_etas <- intersect(etas, all_etas)
   }
@@ -136,53 +140,89 @@ ferx_gam_screen <- function(fit,
 
   # -- Aggregate covariates to one value per subject --------------------------
   # Median for continuous, most frequent level for categorical.
+  # Aggregate on the ordinal subject index, not the raw ID: a dataset that
+  # reuses a subject ID in a non-contiguous block has two distinct subjects
+  # sharing that ID, and keying on ID would collapse them into one row (and
+  # later double-weight that row against both subjects' ETAs). Same treatment
+  # as `ferx_cov_screen()`.
   mode_fn <- function(v) {
     v <- v[!is.na(v)]
     if (!length(v)) return(NA)
     ux <- unique(v)
     ux[which.max(tabulate(match(v, ux)))]
   }
-  ids <- unique(covtab[[cov_id]])
+  subj <- .ferx_subject_index(covtab[[cov_id]])
+  ids  <- covtab[[cov_id]][!duplicated(subj)]  # one ID per subject, subject order
+  keys <- as.character(seq_along(ids))
   percov <- stats::setNames(
     data.frame(as.character(ids), stringsAsFactors = FALSE), cov_id
   )
   for (cov in cov_names) {
     if (identical(types[[cov]], "categorical")) {
-      agg <- tapply(covtab[[cov]], covtab[[cov_id]], mode_fn)
+      agg <- tapply(covtab[[cov]], subj, mode_fn)
     } else {
-      agg <- tapply(covtab[[cov]], covtab[[cov_id]],
+      agg <- tapply(covtab[[cov]], subj,
                     function(v) stats::median(v, na.rm = TRUE))
     }
-    percov[[cov]] <- agg[as.character(ids)]
+    percov[[cov]] <- agg[keys]
   }
 
-  # -- Merge EBEs + per-subject covariates by ID ------------------------------
-  merged  <- merge(percov, ebe, by.x = cov_id, by.y = eta_id)
-  n_subj  <- nrow(merged)
+  # -- Align EBEs and per-subject covariates ----------------------------------
+  # `percov` and `ebe` are each one row per subject in subject order, so align
+  # positionally - an ID merge would cross-join two subjects that share a
+  # reused ID. Fall back to an ID match when the counts disagree (and index
+  # with match() rather than merge() for the same reason).
+  # The two frames are kept apart rather than cbind()-ed: a covariate that
+  # shares its name with an ETA column would otherwise give the combined frame
+  # two columns of that name, and `[[` would silently return the wrong one.
+  if (nrow(percov) == nrow(ebe)) {
+    cov_rows <- seq_len(nrow(percov))
+    eta_rows <- seq_len(nrow(ebe))
+  } else {
+    pidx     <- match(ebe[[eta_id]], percov[[cov_id]])
+    eta_rows <- which(!is.na(pidx))
+    cov_rows <- pidx[eta_rows]
+  }
+  n_subj <- length(eta_rows)
+
+  if (n_subj == 0L) {
+    message("No subjects in common between `fit$covtab` and `fit$ebe_etas`.")
+    return(invisible(NULL))
+  }
 
   # -- Shrinkage vector -------------------------------------------------------
+  # `fit$shrinkage_eta` is an unnamed numeric vector, one entry per random
+  # effect in declaration order, with the labels carried separately in
+  # `fit$eta_names` (see `print.ferx_fit`). So the name lookup has to consult
+  # `fit$eta_names` too, and the positional fallback has to index the
+  # *unfiltered* ETA column order - indexing `all_etas` would report the first
+  # ETA's shrinkage for whatever ETA `etas` happened to select.
   shrink_vec  <- fit$shrinkage_eta
-  eta_names_r <- if (!is.null(names(shrink_vec))) names(shrink_vec) else NULL
+  eta_names_r <- names(shrink_vec)
+  if (is.null(eta_names_r) &&
+      length(fit$eta_names) == length(shrink_vec)) {
+    eta_names_r <- fit$eta_names
+  }
   shrinkage_v <- vapply(all_etas, function(eta_name) {
     if (is.null(shrink_vec) || !length(shrink_vec)) return(NA_real_)
     if (!is.null(eta_names_r)) {
       idx <- match(eta_name, eta_names_r)
       if (!is.na(idx)) return(shrink_vec[[idx]])
     }
-    idx <- match(eta_name, all_etas)
+    idx <- match(eta_name, eta_cols_all)
     if (!is.na(idx) && idx <= length(shrink_vec)) shrink_vec[[idx]] else NA_real_
   }, numeric(1L))
 
   # -- Build column-major flat arrays for Rust --------------------------------
   # ETAs: each column is all per-subject values for one ETA.
-  eta_flat <- unlist(lapply(all_etas, function(e) as.numeric(merged[[e]])),
+  eta_flat <- unlist(lapply(all_etas, function(e) as.numeric(ebe[[e]][eta_rows])),
                      use.names = FALSE)
 
   # Covariates: coerce to numeric. For categorical covariates stored as
   # character, convert to factor integer codes (1, 2, ...) so Rust receives
   # a numeric vector with distinct integer levels for one-hot encoding.
   cov_flat <- unlist(lapply(cov_names, function(cov) {
-    vals <- merged[[cov]]
+    vals <- percov[[cov]][cov_rows]
     if (identical(types[[cov]], "categorical")) {
       as.numeric(as.factor(vals))
     } else {

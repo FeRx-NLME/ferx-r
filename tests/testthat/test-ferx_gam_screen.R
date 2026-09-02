@@ -136,6 +136,58 @@ test_that("no warning when shrinkage is below the threshold", {
   expect_no_warning(ferx_gam_screen(fit, shrinkage_warn = 0.30))
 })
 
+# A real fit carries an *unnamed* `shrinkage_eta` with the labels in a separate
+# `fit$eta_names`, so the two cases below are the ones that actually occur.
+
+test_that("unnamed shrinkage_eta is labelled through fit$eta_names", {
+  fit <- make_gam_fit()
+  fit$shrinkage_eta <- c(0.50, 0.10)          # unnamed, declaration order
+  fit$eta_names     <- c("ETA_CL", "ETA_V")
+  res <- ferx_gam_screen(fit, shrinkage_warn = 1.1)
+  expect_equal(unique(res$shrinkage[res$eta_name == "ETA_CL"]), 0.50)
+  expect_equal(unique(res$shrinkage[res$eta_name == "ETA_V"]),  0.10)
+})
+
+test_that("subsetting `etas` does not shift the shrinkage lookup", {
+  # Regression: the positional fallback used to index the *filtered* ETA list,
+  # so screening only the second ETA reported the first ETA's shrinkage - and
+  # silently swallowed the high-shrinkage warning the function exists to give.
+  fit <- make_gam_fit()
+  fit$shrinkage_eta <- c(0.10, 0.55)          # unnamed; ETA_V is the shrunk one
+  fit$eta_names     <- NULL                   # force the positional fallback
+  res <- expect_warning(
+    ferx_gam_screen(fit, etas = "ETA_V", shrinkage_warn = 0.30),
+    "ETA_V"
+  )
+  expect_true(all(res$shrinkage == 0.55))
+})
+
+
+# ---- reused, non-contiguous subject IDs -------------------------------------
+
+test_that("two subjects sharing a reused ID are kept apart", {
+  # A dataset that reuses an ID in a non-contiguous block holds two distinct
+  # subjects. Keying the aggregation on the raw ID collapsed them into one row
+  # and then cross-joined that row against both subjects' ETAs, double-weighting
+  # it in every regression.
+  fit <- make_gam_fit(n = 20L)
+  covtab <- fit$covtab
+  ids <- unique(covtab$ID)
+  # Give subject 20 the ID of subject 1, leaving the block non-contiguous.
+  covtab$ID[covtab$ID == ids[20L]] <- ids[1L]
+  fit$covtab <- covtab
+  fit$ebe_etas$ID[20L] <- ids[1L]
+
+  res <- ferx_gam_screen(fit)
+  expect_s3_class(res, "data.frame")
+  expect_equal(nrow(res), 2L * 3L)            # 2 ETAs x 3 covariates
+
+  # Same answer as the equivalent dataset with distinct IDs: the reused ID must
+  # not change the fit, only the labelling.
+  expect_equal(res$delta_aic, ferx_gam_screen(make_gam_fit(n = 20L))$delta_aic,
+               tolerance = 1e-8)
+})
+
 
 # ---- guard paths ------------------------------------------------------------
 
