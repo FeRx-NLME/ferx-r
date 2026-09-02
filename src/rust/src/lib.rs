@@ -4171,6 +4171,8 @@ fn bootstrap_options_from_r(
     dofv: bool,
     directory: &str,
     confidence_level: f64,
+    resume: bool,
+    retry_failed: bool,
 ) -> std::result::Result<BootstrapOptions, String> {
     if !(seed.is_finite() && seed >= 0.0) {
         return Err(format!("seed must be a non-negative whole number, got {seed}"));
@@ -4191,10 +4193,15 @@ fn bootstrap_options_from_r(
         dofv,
         directory: (!directory.is_empty()).then(|| std::path::PathBuf::from(directory)),
         confidence_level,
-        // Everything the R entry points do not expose keeps its default:
-        // `resume` / `retry_failed` (ferx-core #1143), so every run from R is a
-        // fresh one, and `cancel` (#1161), which needs the fit moved off the R
-        // main thread before R can set it (#315).
+        // The engine validates both (a resume needs a directory, a retry
+        // needs a resume), and `ferx_bootstrap()` checks them again on the R
+        // side so the message can name the R argument rather than the CLI flag.
+        resume,
+        retry_failed,
+        // Everything else the R entry points do not expose keeps its default -
+        // `cancel` (ferx-core #1161), which needs the fit moved off the R main
+        // thread before R can set it (#315). Spelling the rest with `..` also
+        // keeps a future field from being a compile error here.
         ..BootstrapOptions::default()
     })
 }
@@ -4429,6 +4436,8 @@ fn ferx_rust_bootstrap(
     dofv: bool,
     directory: &str,
     confidence_level: f64,
+    resume: bool,
+    retry_failed: bool,
     verbose: bool,
     progress: Robj,
 ) -> Robj {
@@ -4449,6 +4458,8 @@ fn ferx_rust_bootstrap(
         dofv,
         directory,
         confidence_level,
+        resume,
+        retry_failed,
     ) {
         Ok(o) => o,
         Err(e) => throw_r_error(format!("ferx_bootstrap: {e}")),
