@@ -4061,6 +4061,12 @@ fn bootstrap_draw_progress(callback: &Function, event: BootstrapEvent) {
 /// fit, so nothing is missed by coalescing, and calling the handler on a timer
 /// rather than only on change is what lets a `cli` spinner animate through a
 /// long base fit.
+/// The error is flattened to a `String` at both call sites rather than carried
+/// as ferx-core's `BootstrapError`: R gets one condition either way, and
+/// `to_string()` compiles against the pinned ferx-core as well as against the
+/// one that introduced the typed error, so this file does not have to land in
+/// lockstep with a ferx-core bump. Distinguishing a cancellation from a failure
+/// is what #315 needs, and it needs the fit off the R main thread first.
 fn run_bootstrap_reporting(
     prepared: &ferx_core::PreparedRun,
     options: &BootstrapOptions,
@@ -4078,7 +4084,9 @@ fn run_bootstrap_reporting(
     let take_latest = || latest.lock().ok().and_then(|slot| *slot);
 
     std::thread::scope(|scope| {
-        let worker = scope.spawn(|| run_bootstrap_with_progress(prepared, options, Some(&sink)));
+        let worker = scope.spawn(|| {
+            run_bootstrap_with_progress(prepared, options, Some(&sink)).map_err(|e| e.to_string())
+        });
         while !worker.is_finished() {
             std::thread::sleep(std::time::Duration::from_millis(150));
             if let Some(event) = take_latest() {
@@ -4185,11 +4193,16 @@ fn bootstrap_options_from_r(
         dofv,
         directory: (!directory.is_empty()).then(|| std::path::PathBuf::from(directory)),
         confidence_level,
-        // The engine validates both (a resume needs a directory, a retry needs
-        // a resume), and `ferx_bootstrap()` checks them again on the R side so
-        // the message can name the R argument rather than the CLI flag.
+        // The engine validates both (a resume needs a directory, a retry
+        // needs a resume), and `ferx_bootstrap()` checks them again on the R
+        // side so the message can name the R argument rather than the CLI flag.
         resume,
         retry_failed,
+        // Everything else the R entry points do not expose keeps its default -
+        // `cancel` (ferx-core #1161), which needs the fit moved off the R main
+        // thread before R can set it (#315). Spelling the rest with `..` also
+        // keeps a future field from being a compile error here.
+        ..BootstrapOptions::default()
     })
 }
 
@@ -4473,7 +4486,7 @@ fn ferx_rust_bootstrap(
     // run that reports nothing does not pay for a thread or a poll loop.
     let outcome = match progress.as_function() {
         Some(callback) => run_bootstrap_reporting(&prepared, &options, &callback),
-        None => run_bootstrap(&prepared, &options),
+        None => run_bootstrap(&prepared, &options).map_err(|e| e.to_string()),
     };
     let result = match outcome {
         Ok(r) => r,
