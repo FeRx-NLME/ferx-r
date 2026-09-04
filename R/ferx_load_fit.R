@@ -201,6 +201,11 @@ ferx_load_fit <- function(path) {
     gradient_method_outer = as.character(w$gradient_method_outer %||% ""),
     nlopt_missing_algorithms = unlist(w$nlopt_missing_algorithms %||% list(), use.names = FALSE),
     covariance_status = .fitrx_covariance_status_label(w$covariance_status),
+    # ferx-core #1177. `bic_inputs` is absent on a bundle written before the
+    # tally existed; ferx_bic() reports NA on that rather than a wrong penalty.
+    # `left_init` is NA when no optimizer recorded an init-escape verdict.
+    bic_inputs = .fitrx_bic_inputs_from_wire(w$bic_inputs),
+    left_init = .fitrx_unwrap_opt_lgl(w$left_init),
     covariance_n_evals_estimated = .fitrx_unwrap_opt_num(w$covariance_n_evals_estimated),
     trace_path = .fitrx_unwrap_opt_chr(w$trace_path),
     ebe_convergence_warnings = as.integer(w$ebe_convergence_warnings %||% 0L),
@@ -394,6 +399,27 @@ ferx_load_fit <- function(path) {
     "impmap" = "IMPMAP",
     "bayes" = "BAYES",
     as.character(token)
+  )
+}
+
+# Read the `bic_inputs` wire object back as a plain list of counts. NULL when
+# the bundle carries none (written before ferx-core #1177), which ferx_bic()
+# reads as "no tally" and answers NA to.
+.fitrx_bic_inputs_from_wire <- function(x) {
+  if (is.null(x) || !length(x)) return(NULL)
+  count <- function(nm) {
+    v <- suppressWarnings(as.integer(unlist(x[[nm]] %||% NA, use.names = FALSE)))
+    if (length(v) != 1L || is.na(v)) NA_integer_ else v
+  }
+  list(
+    n_obs        = count("n_obs"),
+    theta_random = count("theta_random"),
+    theta_fixed  = count("theta_fixed"),
+    omega        = count("omega"),
+    kappa        = count("kappa"),
+    sigma        = count("sigma"),
+    sigma_random = isTRUE(as.logical(unlist(x$sigma_random %||% FALSE,
+                                            use.names = FALSE)))
   )
 }
 

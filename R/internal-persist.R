@@ -54,6 +54,23 @@
   v
 }
 
+# A Rust `Option<bool>`. Both directions treat NA as absent: a tri-state flag
+# reaches R as NA when the engine recorded no verdict, and writing NA back
+# would claim a verdict of "false" to any reader that coerces it.
+.fitrx_opt_lgl <- function(x) {
+  if (is.null(x)) return(NULL)
+  v <- suppressWarnings(as.logical(x))
+  if (length(v) != 1L || is.na(v)) return(NULL)
+  v
+}
+
+.fitrx_unwrap_opt_lgl <- function(x) {
+  if (is.null(x)) return(NA)
+  v <- suppressWarnings(as.logical(unlist(x, use.names = FALSE)))
+  if (length(v) != 1L || is.na(v)) return(NA)
+  v
+}
+
 .fitrx_opt_chr <- function(x) {
   if (is.null(x)) return(NULL)
   if (length(x) == 0L) return(NULL)

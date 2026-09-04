@@ -1532,6 +1532,12 @@ fn params_from_fit(
         // into a single-population one. Every other structural field on this
         // initializer is likewise taken from `template`.
         mixture: template.mixture.clone(),
+        // ferx-core #847 moved the residual correlations (and their FIX flags)
+        // into the parameter set. Same reasoning as `mixture`: they are part of
+        // the parsed model, so rebuilding parameters against that model has to
+        // carry them, or a correlated-residual fit silently loses its rho.
+        residual_correlations: template.residual_correlations.clone(),
+        residual_correlation_fixed: template.residual_correlation_fixed.clone(),
     })
 }
 
@@ -1667,6 +1673,19 @@ fn default_fit_result(
         // carries no VI run. The two weighted-kappa fields it also grew
         // (#1031) are set below, beside `kappa_init_as_sd`.
         residual_correlations: model.residual_correlations.clone(),
+        // Parallel FIX flags and standard errors for those correlations
+        // (ferx-core #847): the declaration is structural and comes from the
+        // template; the SEs would come from a covariance step this scaffold
+        // never runs.
+        residual_correlation_fixed: template.residual_correlation_fixed.clone(),
+        se_residual_correlations: None,
+        // The packed Omega / kappa layout (ferx-core #1177). `fit()` records it
+        // as `Some(params.omega.diagonal)`; the covariance matrix handed in
+        // here was packed with the model's own layout, so report that rather
+        // than `None` - `natural_scale_covariance()` needs it to put a
+        // `block_omega` covariance back on the natural scale.
+        omega_is_diagonal: Some(template.omega.diagonal),
+        kappa_is_diagonal: template.omega_iov.as_ref().map(|m| m.diagonal),
         vi: None,
         method: EstimationMethod::FoceI,
         method_chain: vec![EstimationMethod::FoceI],
@@ -1727,6 +1746,12 @@ fn default_fit_result(
         // `#[serde(skip)]` upstream, so a reconstructed result legitimately carries `None`
         // and `run_covariance` re-packs from `omega`. No `.fitrx` / R format change.
         packed_estimate: None,
+        // No outer optimizer ran in this scaffold, so there is no init-escape
+        // verdict, and no packed tally to classify: `model_selection::bic()`
+        // reports NaN on the default `BicInputs` rather than a wrong penalty
+        // (ferx-core #1177).
+        left_init: None,
+        bic_inputs: BicInputs::default(),
         ebe_convergence_warnings: 0,
         max_unconverged_subjects: 0,
         total_ebe_fallbacks: 0,
@@ -2502,6 +2527,27 @@ fn fit_result_to_list(
         None => ().into(),
     };
 
+    // -- Model-selection surface (ferx-core #1177) --
+    //
+    // The ingredients an automated search needs to rank and gate a candidate,
+    // shipped rather than re-derived in R because each needs engine internals
+    // R does not get: the free-parameter tally by Delattre class (the packed
+    // held mask), the outer optimizer's own init-escape verdict, the boundary
+    // predicate's structured warning categories, and - for a block Omega - the
+    // Cholesky Jacobian that puts the covariance matrix back on the natural
+    // theta / Omega / sigma scale before correlations are read off it.
+    // `ferx_bic()` computes the four BIC variants in R from `bic_inputs`, so a
+    // `.fitrx` bundle written by any writer ranks the same way.
+    let bic_inputs = list!(
+        n_obs = result.bic_inputs.n_obs as i32,
+        theta_random = result.bic_inputs.theta_random as i32,
+        theta_fixed = result.bic_inputs.theta_fixed as i32,
+        omega = result.bic_inputs.omega as i32,
+        kappa = result.bic_inputs.kappa as i32,
+        sigma = result.bic_inputs.sigma as i32,
+        sigma_random = result.bic_inputs.sigma_random
+    );
+
     list!(
         converged = result.converged,
         method = method_label,
@@ -2509,6 +2555,12 @@ fn fit_result_to_list(
         ofv = result.ofv,
         aic = result.aic,
         bic = result.bic,
+        bic_inputs = bic_inputs,
+        left_init = result.left_init,
+        stalled_at_init = ferx_core::model_selection::stalled_at_init(result),
+        estimate_near_boundary = ferx_core::model_selection::estimate_near_boundary(result),
+        max_abs_correlation =
+            ferx_core::model_selection::max_abs_correlation(result).unwrap_or(f64::NAN),
         n_subjects = result.n_subjects as i32,
         n_obs = result.n_obs as i32,
         n_parameters = result.n_parameters as i32,
@@ -3325,6 +3377,19 @@ fn ferx_rust_sir(
         // carries no VI run. The two weighted-kappa fields it also grew
         // (#1031) are set below, beside `kappa_init_as_sd`.
         residual_correlations: model.residual_correlations.clone(),
+        // Parallel FIX flags and standard errors for those correlations
+        // (ferx-core #847): the declaration is structural and comes from the
+        // template; the SEs would come from a covariance step this scaffold
+        // never runs.
+        residual_correlation_fixed: template.residual_correlation_fixed.clone(),
+        se_residual_correlations: None,
+        // The packed Omega / kappa layout (ferx-core #1177). `fit()` records it
+        // as `Some(params.omega.diagonal)`; the covariance matrix handed in
+        // here was packed with the model's own layout, so report that rather
+        // than `None` - `natural_scale_covariance()` needs it to put a
+        // `block_omega` covariance back on the natural scale.
+        omega_is_diagonal: Some(template.omega.diagonal),
+        kappa_is_diagonal: template.omega_iov.as_ref().map(|m| m.diagonal),
         vi: None,
         method: if interaction {
             EstimationMethod::FoceI
@@ -3390,6 +3455,12 @@ fn ferx_rust_sir(
         // `#[serde(skip)]` upstream, so a reconstructed result legitimately carries `None`
         // and `run_covariance` re-packs from `omega`. No `.fitrx` / R format change.
         packed_estimate: None,
+        // No outer optimizer ran in this scaffold, so there is no init-escape
+        // verdict, and no packed tally to classify: `model_selection::bic()`
+        // reports NaN on the default `BicInputs` rather than a wrong penalty
+        // (ferx-core #1177).
+        left_init: None,
+        bic_inputs: BicInputs::default(),
         ebe_convergence_warnings: 0,
         max_unconverged_subjects: 0,
         total_ebe_fallbacks: 0,
@@ -3697,6 +3768,19 @@ fn ferx_rust_covariance(
         // carries no VI run. The two weighted-kappa fields it also grew
         // (#1031) are set below, beside `kappa_init_as_sd`.
         residual_correlations: model.residual_correlations.clone(),
+        // Parallel FIX flags and standard errors for those correlations
+        // (ferx-core #847): the declaration is structural and comes from the
+        // template; the SEs would come from a covariance step this scaffold
+        // never runs.
+        residual_correlation_fixed: template.residual_correlation_fixed.clone(),
+        se_residual_correlations: None,
+        // The packed Omega / kappa layout (ferx-core #1177). `fit()` records it
+        // as `Some(params.omega.diagonal)`; the covariance matrix handed in
+        // here was packed with the model's own layout, so report that rather
+        // than `None` - `natural_scale_covariance()` needs it to put a
+        // `block_omega` covariance back on the natural scale.
+        omega_is_diagonal: Some(template.omega.diagonal),
+        kappa_is_diagonal: template.omega_iov.as_ref().map(|m| m.diagonal),
         vi: None,
         method: if interaction {
             EstimationMethod::FoceI
@@ -3762,6 +3846,12 @@ fn ferx_rust_covariance(
         // `#[serde(skip)]` upstream, so a reconstructed result legitimately carries `None`
         // and `run_covariance` re-packs from `omega`. No `.fitrx` / R format change.
         packed_estimate: None,
+        // No outer optimizer ran in this scaffold, so there is no init-escape
+        // verdict, and no packed tally to classify: `model_selection::bic()`
+        // reports NaN on the default `BicInputs` rather than a wrong penalty
+        // (ferx-core #1177).
+        left_init: None,
+        bic_inputs: BicInputs::default(),
         ebe_convergence_warnings: 0,
         max_unconverged_subjects: 0,
         total_ebe_fallbacks: 0,
@@ -3882,6 +3972,11 @@ fn ferx_rust_covariance(
         covariance_status = covariance_status_str,
         cov_eigenvalues = new_fit.cov_eigenvalues.clone().unwrap_or_default(),
         cov_condition_number = new_fit.cov_condition_number.unwrap_or(f64::NAN),
+        // Refreshed alongside the matrix it is read off, so a fit that gains a
+        // covariance step here also gains the correlation gate that step feeds
+        // (ferx-core #1177) instead of keeping the pre-step NA.
+        max_abs_correlation =
+            ferx_core::model_selection::max_abs_correlation(&new_fit).unwrap_or(f64::NAN),
         warnings = new_fit.warnings.clone()
     )
     .into()
@@ -4098,7 +4193,10 @@ fn run_bootstrap_cancellable(
         }
 
         match worker.join() {
-            Ok(result) => result,
+            // `map_err(to_string)` compiles whether `run_bootstrap` reports a
+            // bare `String` or ferx-core's typed `BootstrapError` (#1161) -
+            // the compat the doc comment above promises.
+            Ok(result) => result.map_err(|e| e.to_string()),
             Err(_) => Err("the bootstrap panicked".to_string()),
         }
     })
@@ -4164,7 +4262,10 @@ fn run_bootstrap_reporting(
             bootstrap_draw_progress(callback, event);
         }
         match worker.join() {
-            Ok(result) => result,
+            // `map_err(to_string)` compiles whether `run_bootstrap` reports a
+            // bare `String` or ferx-core's typed `BootstrapError` (#1161) -
+            // the compat the doc comment above promises.
+            Ok(result) => result.map_err(|e| e.to_string()),
             Err(_) => Err("the bootstrap panicked".to_string()),
         }
     })

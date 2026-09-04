@@ -228,6 +228,15 @@ ferx_covariance <- function(fit,
   # a run_covariance-refreshed fit carry identical shapes.
 
   fit$covariance_status <- raw$covariance_status %||% "not_requested"
+  # The correlation gate check_strictness() applies is read off the matrix this
+  # call just produced, so it is refreshed with it (ferx-core #1177); NaN when
+  # the step still produced no matrix.
+  fit$max_abs_correlation <- if (!is.null(raw$max_abs_correlation) &&
+                                   is.finite(raw$max_abs_correlation)) {
+    as.numeric(raw$max_abs_correlation)
+  } else {
+    NA_real_
+  }
 
   theta_names <- names(fit$theta)
   n_theta <- length(fit$theta)

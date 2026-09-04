@@ -51,6 +51,8 @@ ferx_cov_screen(fit)
 \seealso{
 Other diagnostics:
 \code{\link[=check_diagnostics]{check_diagnostics()}},
+\code{\link[=check_strictness]{check_strictness()}},
+\code{\link[=ferx_bic]{ferx_bic()}},
 \code{\link[=ferx_conddist]{ferx_conddist()}},
 \code{\link[=ferx_gam_screen]{ferx_gam_screen()}},
 \code{\link[=ferx_get_warnings]{ferx_get_warnings()}},

@@ -269,6 +269,15 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
     covariance_matrix = .fitrx_matrix_to_wire(fit$cov_matrix),
     cov_eigenvalues = .fitrx_opt_num_vec(fit$cov_eigenvalues),
     cov_condition_number = .fitrx_opt_num(fit$cov_condition_number),
+    # Free-parameter tally by Delattre class and the optimizer's init-escape
+    # verdict (ferx-core #1177). Written at wire level, not under `r_extras`,
+    # so a bundle this package saves ranks and gates the same way in the
+    # engine's own tooling. `bic_inputs` is a plain (non-Option) field on the
+    # Rust side whose `#[serde(default)]` only covers a *missing* key, so it is
+    # always written in full - an all-zero tally is exactly what that default
+    # is, and `ferx_bic()` reports NA on it rather than a wrong penalty.
+    bic_inputs = .fitrx_bic_inputs_wire(fit),
+    left_init = .fitrx_opt_lgl(fit$left_init),
 
     sir = .fitrx_build_sir_wire(fit),
     bayes = .fitrx_build_bayes_wire(fit),
@@ -596,13 +605,41 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   )
 }
 
+# The `bic_inputs` wire object: the seven counts ferx-core's `BicInputs`
+# carries, always complete. A fit with no tally (loaded from a bundle written
+# before the tally existed) writes the all-zero default rather than dropping
+# the key, so the JSON stays valid against a non-Option Rust field.
+.fitrx_bic_inputs_wire <- function(fit) {
+  raw <- fit$bic_inputs %||% list()
+  count <- function(nm) {
+    v <- suppressWarnings(as.integer(raw[[nm]] %||% 0L))
+    if (length(v) != 1L || is.na(v) || v < 0L) 0L else v
+  }
+  list(
+    n_obs        = count("n_obs"),
+    theta_random = count("theta_random"),
+    theta_fixed  = count("theta_fixed"),
+    omega        = count("omega"),
+    kappa        = count("kappa"),
+    sigma        = count("sigma"),
+    sigma_random = isTRUE(as.logical(raw$sigma_random %||% FALSE))
+  )
+}
+
 # Fields that have no place in the cross-language schema but matter for R
 # users (R-side derived labels, call settings, model file settings, etc.).
 # Stored under fit.json:r_extras so the Rust loader silently ignores them.
 .fitrx_collect_r_extras <- function(fit) {
   r_only_keys <- c(
     "call_settings", "model_file_settings", "model_structure",
-    "data_name", "gradient", "gradient_used", "model_file_path"
+    "data_name", "gradient", "gradient_used", "model_file_path",
+    # Verdicts the engine derives from a live FitResult (ferx-core #1177) and
+    # the cross-language schema has no slot for. Two of them cannot be redone
+    # in R at all - the boundary predicate reads structured warning details the
+    # wire drops, and the correlation needs the natural-scale covariance, a
+    # Cholesky Jacobian away from the packed matrix the wire stores - so they
+    # travel with the bundle rather than being recomputed on load.
+    "stalled_at_init", "estimate_near_boundary", "max_abs_correlation"
   )
   out <- list()
   for (k in r_only_keys) {

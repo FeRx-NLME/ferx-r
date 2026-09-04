@@ -163,6 +163,30 @@ test_that("covariance step results survive round-trip", {
                ignore_attr = "dimnames")
   expect_equal(unname(loaded$se_theta), unname(fit$se_theta), tolerance = 1e-12)
 })
+test_that("the model-selection surface survives round-trip", {
+  skip_on_cran()
+  fit <- warfarin_fit_cov()
+
+  path <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(path), add = TRUE)
+  ferx_save_fit(fit, path)
+  loaded <- ferx_load_fit(path)
+
+  # `bic_inputs` and `left_init` travel at wire level (they are ferx-core
+  # FitWire fields); the three derived verdicts travel under r_extras.
+  expect_equal(loaded$bic_inputs, fit$bic_inputs)
+  expect_equal(loaded$left_init, fit$left_init)
+  expect_equal(loaded$stalled_at_init, fit$stalled_at_init)
+  expect_equal(loaded$estimate_near_boundary, fit$estimate_near_boundary)
+  expect_equal(loaded$max_abs_correlation, fit$max_abs_correlation,
+               tolerance = 1e-12)
+
+  for (ty in c("mixed", "fixed", "iiv", "random")) {
+    expect_equal(ferx_bic(loaded, ty), ferx_bic(fit, ty), tolerance = 1e-12)
+  }
+  expect_equal(check_strictness(loaded)$failures, check_strictness(fit)$failures)
+})
+
 test_that("bayes posterior summary survives round-trip", {
   skip_on_cran()
   fit <- warfarin_bayes_fit()
