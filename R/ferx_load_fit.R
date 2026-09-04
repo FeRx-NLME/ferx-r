@@ -253,6 +253,10 @@ ferx_load_fit <- function(path) {
     ),
     se_sigma = .fitrx_unwrap_opt_num_vec(w$sigma$se),
     sigma_init_as_sd = as.logical(unlist(w$sigma$init_as_sd %||% list(), use.names = FALSE)),
+    # `block_sigma` residual correlations (ferx-core #847), nested under
+    # `sigma` on the wire with 0-based indices; NULL when the model declares
+    # none, matching what ferx_fit() puts on a fit without them.
+    residual_correlations = .fitrx_residual_corr_from_wire(w$sigma),
 
     shrinkage_eps = as.numeric(w$shrinkage_eps),
     dw_statistic = .fitrx_unwrap_opt_num(w$dw_statistic),
@@ -457,6 +461,39 @@ ferx_load_fit <- function(path) {
     "not_requested" = "NotRequested",
     "sir_fallback" = "SirFallback",
     as.character(token)
+  )
+}
+
+# Read the wire's residual correlations back into the tidy frame ferx_fit()
+# builds. Indices come back 1-based; a bundle whose FIX flags predate #847 had
+# every correlation fixed by construction, which is what an empty vector means.
+.fitrx_residual_corr_from_wire <- function(sig) {
+  rc <- sig$residual_correlations
+  if (is.null(rc) || length(rc) == 0L) return(NULL)
+  i <- vapply(rc, function(x) as.integer(x$sigma_i) + 1L, integer(1L))
+  j <- vapply(rc, function(x) as.integer(x$sigma_j) + 1L, integer(1L))
+  rho <- vapply(rc, function(x) as.numeric(x$rho), numeric(1L))
+  n <- length(rho)
+  fixed <- as.logical(unlist(sig$residual_correlation_fixed %||% list(),
+                             use.names = FALSE))
+  if (length(fixed) != n) fixed <- rep(TRUE, n)
+  se <- as.numeric(unlist(sig$se_residual_correlations %||% list(),
+                          use.names = FALSE))
+  if (length(se) != n) se <- rep(NA_real_, n)
+  nms <- as.character(unlist(sig$names %||% list(), use.names = FALSE))
+  label <- function(k) {
+    if (k >= 1L && k <= length(nms) && nzchar(nms[k])) nms[k] else sprintf("SIGMA(%d)", k)
+  }
+  data.frame(
+    sigma_i = i,
+    sigma_j = j,
+    name    = vapply(seq_len(n),
+                     function(k) sprintf("%s ~ %s", label(i[k]), label(j[k])),
+                     character(1L)),
+    rho     = rho,
+    fixed   = fixed,
+    se      = se,
+    stringsAsFactors = FALSE
   )
 }
 

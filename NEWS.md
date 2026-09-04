@@ -197,6 +197,34 @@
   without which a reader takes correlations off the Cholesky scale for a
   `block_omega` model.
 
+- **A fitted `block_sigma` correlation now reaches R** (ferx-core #847). A plain
+  (non-`FIX`) `block_sigma` estimates its off-diagonal, but the R layer never
+  carried it: everything that rebuilds parameters from a finished fit -
+  `ferx_predict()`, `ferx_simulate()`, `ferx_simulate_with_uncertainty()`,
+  `ferx_calc_npde()`, `ferx_sir()`, `ferx_covariance()` - read the correlation
+  back off the *model file*, so a fit whose rho had moved was silently
+  reconstructed at its declared initial value. The fitted correlations now come
+  off the FFI as `fit$residual_correlations` (a data frame of `sigma_i`,
+  `sigma_j`, `name`, `rho`, `fixed`, `se`), travel in the `.fitrx` bundle, and
+  are passed back to the engine on every reconstruction path.
+
+  The covariance matrix labels them too. The engine packs `block_sigma`
+  correlations *last*, after sigma, and `ferx_fit()` counted every
+  non-theta/non-sigma coordinate as omega - so a six-coordinate fit came back
+  named `TVCL, TVV, ETA_CL, "", PROP_ERR, ADD_ERR` for coordinates that are
+  really `..., PROP_ERR, ADD_ERR, rho`, shifting the sigma rows by one.
+  `ferx_covariance()` had the same arithmetic and is fixed with it.
+
+- **`check_strictness()` no longer passes a fit it cannot judge, or a gate it
+  cannot parse.** A missing boundary verdict - `NA` on a bundle written before
+  the predicate existed - was read as "not on a boundary" and quietly passed;
+  it is now reported under `skipped`, like the other gates with no input. And
+  the switches were read with `isTRUE()`, which treats anything that is not a
+  length-1 `TRUE` as "gate off": `reject_on_boundary = "TRUE"` disabled the
+  gate, and `max_condition_number = "typo"` coerced to `NA` and disabled that
+  one. Both now error. An explicit `NA` threshold still disables its gate - a
+  threshold nothing can exceed is not a gate.
+
 - **`ferx_bootstrap()` is interruptible with Ctrl-C** (#315). A 200-replicate run
   held the console until it finished: Ctrl-C did nothing, `ferx_stop()` is
   process-level and there is no `ferx_bootstrap_async()`, so the only way out of

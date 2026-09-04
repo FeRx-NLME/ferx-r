@@ -17,6 +17,7 @@ ferx_rust_covariance(
   sigma,
   omega_iov_flat,
   omega_iov_dim,
+  residual_rho,
   eta_hats_flat,
   n_subjects,
   covariance_method,

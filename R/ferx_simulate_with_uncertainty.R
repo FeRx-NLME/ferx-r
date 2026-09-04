@@ -109,6 +109,7 @@ ferx_simulate_with_uncertainty <- function(model, data, fit,
     sir_resamples_flat   = unc_pieces$sir_resamples_flat,
     sir_resamples_n      = unc_pieces$sir_resamples_n,
     sir_resamples_dim    = unc_pieces$sir_resamples_dim,
+    residual_rho         = fit_pieces$residual_rho,
     n_uncertainty_draws  = as.integer(n_uncertainty_draws),
     n_sim_per_draw       = as.integer(n_sim_per_draw),
     seed                 = as.integer(seed)

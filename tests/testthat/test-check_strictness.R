@@ -130,3 +130,51 @@ test_that("a real fit carries the fields the gates read", {
   expect_type(v$failures, "character")
   expect_type(v$skipped, "character")
 })
+
+test_that("a missing boundary verdict is skipped, not passed", {
+  # A bundle written before the predicate existed carries NA, not FALSE.
+  # Treating that as a pass silently clears the gate for every older fit.
+  for (missing in list(NA, NULL)) {
+    v <- check_strictness(strict_fit(estimate_near_boundary = missing))
+    expect_true(v$passed)
+    expect_length(v$failures, 0L)
+    expect_match(v$skipped, "^boundary: ")
+  }
+
+  # ...and switching the gate off skips nothing.
+  v <- check_strictness(strict_fit(estimate_near_boundary = NA),
+                        reject_on_boundary = FALSE)
+  expect_length(v$skipped, 0L)
+})
+
+test_that("a malformed gate argument errors instead of disabling the gate", {
+  bad <- strict_fit(converged = FALSE, estimate_near_boundary = TRUE,
+                    stalled_at_init = TRUE)
+
+  # `isTRUE("TRUE")` is FALSE, so a string used to switch a gate off silently.
+  for (arg in c("require_converged", "require_covariance",
+                "reject_on_boundary", "reject_init_stall")) {
+    for (value in list("TRUE", 1, NA, c(TRUE, TRUE))) {
+      expect_error(
+        do.call(check_strictness, c(list(bad), stats::setNames(list(value), arg))),
+        sprintf("`%s` must be TRUE or FALSE", arg),
+        fixed = TRUE
+      )
+    }
+  }
+
+  # A threshold that merely coerces to NA is a typo, not "gate off".
+  expect_error(check_strictness(bad, max_condition_number = "typo"),
+               "must be a single number or NULL")
+  expect_error(check_strictness(bad, max_correlation = "0.95x"),
+               "must be a single number or NULL")
+
+  # An explicit NA still disables the gate - a threshold nothing can exceed.
+  v <- check_strictness(strict_fit(condition_number = 1e9),
+                        max_condition_number = NA)
+  expect_length(v$failures, 0L)
+  expect_length(v$skipped, 0L)
+  # ...and a numeric string that does parse is accepted.
+  expect_false(check_strictness(strict_fit(condition_number = 1e9),
+                                max_condition_number = "1000")$passed)
+})

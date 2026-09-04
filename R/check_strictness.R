@@ -83,14 +83,23 @@ check_strictness <- function(fit,
     stop("`fit` must be a ferx_fit object (from ferx_fit() or ferx_load_fit())",
          call. = FALSE)
   }
+  # Validate the switches before reading the fit. `isTRUE()` silently treats
+  # anything that is not a length-1 TRUE as "gate off", so a malformed search
+  # configuration ("TRUE", 1, NA) would disable a gate and rank an ineligible
+  # candidate rather than erroring.
+  require_converged  <- .ferx_gate_flag(require_converged, "require_converged")
+  require_covariance <- .ferx_gate_flag(require_covariance, "require_covariance")
+  reject_on_boundary <- .ferx_gate_flag(reject_on_boundary, "reject_on_boundary")
+  reject_init_stall  <- .ferx_gate_flag(reject_init_stall, "reject_init_stall")
+
   failures <- character(0)
   skipped  <- character(0)
 
-  if (isTRUE(require_converged) && !isTRUE(fit$converged)) {
+  if (require_converged && !isTRUE(fit$converged)) {
     failures <- c(failures, "did not converge (converged = FALSE)")
   }
 
-  if (isTRUE(require_covariance)) {
+  if (require_covariance) {
     reason <- .ferx_covariance_gate(fit)
     if (!is.null(reason)) failures <- c(failures, reason)
   }
@@ -125,12 +134,23 @@ check_strictness <- function(fit,
     }
   }
 
-  if (isTRUE(reject_on_boundary) && isTRUE(fit$estimate_near_boundary)) {
-    failures <- c(failures, sprintf(
-      "estimate pinned to a declared bound: %s", .ferx_boundary_detail(fit)))
+  if (reject_on_boundary) {
+    # Same "no verdict" shape as the init-stall gate below: the predicate reads
+    # structured warning details the .fitrx wire drops, so a bundle written
+    # before the verdict existed carries NA rather than FALSE. Reporting that
+    # as a pass would silently clear the gate for every older bundle.
+    boundary <- fit$estimate_near_boundary
+    if (is.null(boundary) || length(boundary) != 1L || is.na(boundary)) {
+      skipped <- c(skipped, paste(
+        "boundary: fit carries no boundary verdict (saved before the",
+        "predicate existed)"))
+    } else if (isTRUE(as.logical(boundary))) {
+      failures <- c(failures, sprintf(
+        "estimate pinned to a declared bound: %s", .ferx_boundary_detail(fit)))
+    }
   }
 
-  if (isTRUE(reject_init_stall)) {
+  if (reject_init_stall) {
     stalled <- fit$stalled_at_init
     if (is.null(stalled) || length(stalled) != 1L || is.na(stalled)) {
       skipped <- c(skipped, paste(
@@ -156,15 +176,31 @@ check_strictness <- function(fit,
 # collapsed onto a single draw and every credible interval has zero width.
 .ferx_min_sir_fallback_ess <- 2
 
-# A gate threshold, or NULL when the caller disabled the gate. NA disables it
-# too - a threshold nothing can exceed is not a gate.
+# A single logical gate switch. Anything else is an error rather than a silent
+# "gate off" - a search configuration that disables a gate by typo ranks
+# candidates the gate exists to exclude.
+.ferx_gate_flag <- function(x, arg) {
+  if (length(x) != 1L || !is.logical(x) || is.na(x)) {
+    stop(sprintf("`%s` must be TRUE or FALSE", arg), call. = FALSE)
+  }
+  x
+}
+
+# A gate threshold, or NULL when the caller disabled the gate. An explicit NA
+# disables it too - a threshold nothing can exceed is not a gate - but a value
+# that merely *coerces* to NA ("typo") is a malformed argument, not a request
+# to switch the gate off.
 .ferx_gate_threshold <- function(x, arg) {
   if (is.null(x)) return(NULL)
-  v <- suppressWarnings(as.numeric(x))
-  if (length(v) != 1L) {
+  if (length(x) != 1L) {
     stop(sprintf("`%s` must be a single number or NULL", arg), call. = FALSE)
   }
-  if (is.na(v)) return(NULL)
+  if (is.na(x)) return(NULL)
+  v <- suppressWarnings(as.numeric(x))
+  if (is.na(v)) {
+    stop(sprintf("`%s` must be a single number or NULL, not %s",
+                 arg, dQuote(as.character(x), FALSE)), call. = FALSE)
+  }
   v
 }
 

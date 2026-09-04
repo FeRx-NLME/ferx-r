@@ -260,7 +260,15 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
       se = .fitrx_opt_num_vec(fit$se_sigma),
       fixed = as.logical(fit$sigma_fixed %||% rep(FALSE, length(fit$sigma %||% numeric()))),
       types = as.character(fit$sigma_types %||% rep("proportional", length(fit$sigma %||% numeric()))),
-      init_as_sd = as.logical(fit$sigma_init_as_sd %||% rep(FALSE, length(fit$sigma %||% numeric())))
+      init_as_sd = as.logical(fit$sigma_init_as_sd %||% rep(FALSE, length(fit$sigma %||% numeric()))),
+      # `block_sigma` residual correlations (ferx-core #847). A plain block
+      # estimates rho, so the *fitted* value has to travel with the bundle -
+      # a reader that falls back to the model file gets the declared initial
+      # correlation. The wire nests them under `sigma`; `sigma_i` / `sigma_j`
+      # are 0-based there (the R frame carries them 1-based).
+      residual_correlations = .fitrx_residual_corr_wire(fit),
+      residual_correlation_fixed = .fitrx_residual_corr_fixed(fit),
+      se_residual_correlations = .fitrx_residual_corr_se(fit)
     ),
     error_model = .fitrx_error_model_from_sigma_types(fit$sigma_types),
     shrinkage_eps = as.numeric(fit$shrinkage_eps %||% NA_real_),
@@ -499,6 +507,40 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   if (all(t == "proportional")) return("proportional")
   if (all(t == "additive")) return("additive")
   "combined"
+}
+
+# The fitted `block_sigma` correlations in the wire's shape: a list of
+# {sigma_i, sigma_j, rho} objects with 0-based indices. Empty list for a model
+# that declares none, which serialises to `[]` and reads back as no
+# correlations rather than tripping the loader's shape checks.
+.fitrx_residual_corr_wire <- function(fit) {
+  rc <- fit$residual_correlations
+  if (!is.data.frame(rc) || nrow(rc) == 0L) return(list())
+  lapply(seq_len(nrow(rc)), function(k) list(
+    sigma_i = as.integer(rc$sigma_i[k]) - 1L,
+    sigma_j = as.integer(rc$sigma_j[k]) - 1L,
+    rho     = as.numeric(rc$rho[k])
+  ))
+}
+
+# Parallel FIX flags. The engine treats an empty vector on a bundle that *has*
+# correlations as "pre-#847, every correlation fixed", so it is only left empty
+# when there are no correlations at all.
+.fitrx_residual_corr_fixed <- function(fit) {
+  rc <- fit$residual_correlations
+  if (!is.data.frame(rc) || nrow(rc) == 0L) return(logical())
+  as.logical(rc$fixed)
+}
+
+# Parallel standard errors, or NULL when the covariance step produced none -
+# the wire field is an Option, and writing NAs would claim SEs that don't exist.
+.fitrx_residual_corr_se <- function(fit) {
+  rc <- fit$residual_correlations
+  if (!is.data.frame(rc) || nrow(rc) == 0L) return(NULL)
+  se <- as.numeric(rc$se)
+  if (all(is.na(se))) return(NULL)
+  se[is.na(se)] <- 0
+  se
 }
 
 # Rebuild the initial-omega matrix from the flat row-major vector + dimension

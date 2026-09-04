@@ -842,6 +842,14 @@ declared bound - the predicate \code{\link{ferx_bootstrap}} applies as
 matrix in correlation form, on the natural theta / OMEGA / SIGMA scale.
 \code{NA} without a covariance matrix carrying two or more free
 parameters. See \code{\link{check_strictness}}.}
+\item{residual_correlations}{Data frame of the fitted \code{block_sigma}
+residual correlations, or \code{NULL} when the model declares none.
+Columns \code{sigma_i} / \code{sigma_j} (1-based indices into
+\code{sigma}), \code{name} (the \code{EPS_A ~ EPS_B} label used in the
+covariance matrix), \code{rho}, \code{fixed}, and \code{se}
+(\code{NA} without a covariance step, \code{0} for a \code{FIX}ed
+entry). A plain \code{block_sigma} estimates \code{rho}; a
+\code{block_sigma ... FIX} holds it at the declared value.}
 \item{omega_is_diagonal}{\code{TRUE} when the OMEGA block the fit was
 estimated under is diagonal, \code{FALSE} for a \code{block_omega}
 model, \code{NA} when the engine recorded no layout. Says how the
