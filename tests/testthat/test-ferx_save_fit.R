@@ -184,7 +184,54 @@ test_that("the model-selection surface survives round-trip", {
   for (ty in c("mixed", "fixed", "iiv", "random")) {
     expect_equal(ferx_bic(loaded, ty), ferx_bic(fit, ty), tolerance = 1e-12)
   }
-  expect_equal(check_strictness(loaded)$failures, check_strictness(fit)$failures)
+  # The condition number and the packed-Omega layout travel at wire level too.
+  # Reading only the wire spelling on save wrote a null for every bundle this
+  # package writes, so the condition-number gate landed in `skipped` (not
+  # `failures`) on every reload - compare both halves of the verdict.
+  expect_equal(
+    loaded$cov_condition_number %||% loaded$condition_number,
+    fit$condition_number %||% fit$cov_condition_number,
+    tolerance = 1e-8
+  )
+  expect_equal(loaded$omega_is_diagonal, fit$omega_is_diagonal)
+  expect_equal(loaded$kappa_is_diagonal, fit$kappa_is_diagonal)
+
+  # The engine's stalled_at_init() checks init/estimate shapes before reading
+  # `left_init`, so the inits have to survive for the verdict to mean anything.
+  expect_equal(loaded$theta_init, fit$theta_init, tolerance = 1e-12)
+  expect_equal(loaded$sigma_init, fit$sigma_init, tolerance = 1e-12)
+  expect_equal(loaded$omega_init_dim, as.integer(fit$omega_init_dim))
+  expect_equal(loaded$omega_init, as.numeric(fit$omega_init), tolerance = 1e-12)
+
+  strict_loaded <- check_strictness(loaded, max_condition_number = 1e10)
+  strict_fresh  <- check_strictness(fit, max_condition_number = 1e10)
+  expect_equal(strict_loaded$failures, strict_fresh$failures)
+  expect_equal(strict_loaded$skipped, strict_fresh$skipped)
+  expect_equal(strict_loaded$passed, strict_fresh$passed)
+})
+
+test_that("tri-state verdicts stay NA across round-trip when unrecorded", {
+  skip_on_cran()
+  fit <- warfarin_fit_cov()
+
+  # An optimizer that recorded no verdict leaves these NA. NA serialises to
+  # JSON null, and assigning NULL back would drop the key entirely - so
+  # `is.na(loaded$stalled_at_init)` would error on a zero-length vector
+  # instead of reporting "no verdict".
+  fit$stalled_at_init <- NA
+  fit$estimate_near_boundary <- NA
+  fit$max_abs_correlation <- NA_real_
+
+  path <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(path), add = TRUE)
+  ferx_save_fit(fit, path)
+  loaded <- ferx_load_fit(path)
+
+  expect_true(is.na(loaded$stalled_at_init))
+  expect_true(is.na(loaded$estimate_near_boundary))
+  expect_true(is.na(loaded$max_abs_correlation))
+  expect_length(loaded$stalled_at_init, 1L)
+  expect_length(loaded$max_abs_correlation, 1L)
 })
 
 test_that("bayes posterior summary survives round-trip", {

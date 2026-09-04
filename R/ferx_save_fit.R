@@ -267,8 +267,16 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
     dw_statistic = .fitrx_opt_num(fit$dw_statistic),
     iwres_lag1_r = .fitrx_opt_num(fit$iwres_lag1_r),
     covariance_matrix = .fitrx_matrix_to_wire(fit$cov_matrix),
-    cov_eigenvalues = .fitrx_opt_num_vec(fit$cov_eigenvalues),
-    cov_condition_number = .fitrx_opt_num(fit$cov_condition_number),
+    # ferx_fit() and ferx_covariance() rename these to `eigenvalues` /
+    # `condition_number` and clear the wire names (.ferx_apply_cov_sentinels);
+    # ferx_load_fit() leaves the wire names in place. Read whichever spelling
+    # the fit carries - reading only the wire name wrote a null on every
+    # bundle this package saves, which made check_strictness()'s condition
+    # number gate skip (rather than fail) on reload.
+    cov_eigenvalues = .fitrx_opt_num_vec(fit$cov_eigenvalues %||% fit$eigenvalues),
+    cov_condition_number = .fitrx_opt_num(
+      fit$cov_condition_number %||% fit$condition_number
+    ),
     # Free-parameter tally by Delattre class and the optimizer's init-escape
     # verdict (ferx-core #1177). Written at wire level, not under `r_extras`,
     # so a bundle this package saves ranks and gates the same way in the
@@ -278,6 +286,18 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
     # is, and `ferx_bic()` reports NA on it rather than a wrong penalty.
     bic_inputs = .fitrx_bic_inputs_wire(fit),
     left_init = .fitrx_opt_lgl(fit$left_init),
+    # `stalled_at_init()` in the engine returns None unless theta/sigma/omega
+    # inits match the estimates in shape - it checks that *before* consulting
+    # `left_init` - so the inits ship with the verdict or the verdict is inert.
+    theta_init = as.numeric(fit$theta_init %||% numeric()),
+    sigma_init = as.numeric(fit$sigma_init %||% numeric()),
+    omega_init = .fitrx_matrix_to_wire(.fitrx_omega_init_matrix(fit)),
+    # The packed Omega / kappa layout. `natural_scale_covariance()` returns the
+    # covariance matrix as stored when this is absent, so a bundle written
+    # without it makes the engine read correlations off the Cholesky scale for
+    # a `block_omega` model.
+    omega_is_diagonal = .fitrx_opt_lgl(fit$omega_is_diagonal),
+    kappa_is_diagonal = .fitrx_opt_lgl(fit$kappa_is_diagonal),
 
     sir = .fitrx_build_sir_wire(fit),
     bayes = .fitrx_build_bayes_wire(fit),
@@ -479,6 +499,19 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   if (all(t == "proportional")) return("proportional")
   if (all(t == "additive")) return("additive")
   "combined"
+}
+
+# Rebuild the initial-omega matrix from the flat row-major vector + dimension
+# the FFI ships (`omega_init` / `omega_init_dim`). Returns NULL when the fit
+# carries no inits (an in-memory or pre-runlog fit), which writes no
+# `omega_init` key at all.
+.fitrx_omega_init_matrix <- function(fit) {
+  v <- fit$omega_init
+  if (is.null(v) || length(v) == 0L) return(NULL)
+  if (is.matrix(v)) return(v)
+  n <- as.integer(fit$omega_init_dim %||% 0L)
+  if (is.na(n) || n <= 0L || length(v) != n * n) return(NULL)
+  matrix(as.numeric(v), nrow = n, ncol = n, byrow = TRUE)
 }
 
 .fitrx_matrix_to_wire <- function(m) {

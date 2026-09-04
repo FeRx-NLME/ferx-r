@@ -206,6 +206,13 @@ ferx_load_fit <- function(path) {
     # `left_init` is NA when no optimizer recorded an init-escape verdict.
     bic_inputs = .fitrx_bic_inputs_from_wire(w$bic_inputs),
     left_init = .fitrx_unwrap_opt_lgl(w$left_init),
+    # Initial estimates (written alongside `left_init` so the engine's own
+    # stalled_at_init() shape check passes on an R-written bundle) and the
+    # packed Omega / kappa layout the natural-scale covariance needs.
+    theta_init = as.numeric(unlist(w$theta_init %||% list(), use.names = FALSE)),
+    sigma_init = as.numeric(unlist(w$sigma_init %||% list(), use.names = FALSE)),
+    omega_is_diagonal = .fitrx_unwrap_opt_lgl(w$omega_is_diagonal),
+    kappa_is_diagonal = .fitrx_unwrap_opt_lgl(w$kappa_is_diagonal),
     covariance_n_evals_estimated = .fitrx_unwrap_opt_num(w$covariance_n_evals_estimated),
     trace_path = .fitrx_unwrap_opt_chr(w$trace_path),
     ebe_convergence_warnings = as.integer(w$ebe_convergence_warnings %||% 0L),
@@ -371,6 +378,18 @@ ferx_load_fit <- function(path) {
     out$kappa_weight_typical <- NULL
   }
 
+  # `omega_init` travels as a matrix on the wire but as a flat row-major
+  # vector + dimension in the fit list (the shape the FFI ships), so the
+  # runlog and the save path see the same fields either way.
+  omega_init_mat <- .fitrx_matrix_from_wire(w$omega_init)
+  if (!is.null(omega_init_mat)) {
+    out$omega_init <- as.numeric(as.vector(t(omega_init_mat)))
+    out$omega_init_dim <- as.integer(nrow(omega_init_mat))
+  } else {
+    out$omega_init <- numeric()
+    out$omega_init_dim <- 0L
+  }
+
   # R extras
   extras <- w$r_extras
   if (!is.null(extras)) {
@@ -378,6 +397,13 @@ ferx_load_fit <- function(path) {
       out[[key]] <- extras[[key]]
     }
   }
+  # Tri-state verdicts (ferx-core #1177) are NA when the optimizer recorded no
+  # verdict. `NA` serialises to JSON null and assigning NULL back would drop
+  # the key entirely, turning a documented `NA` into `is.na(x)` on a
+  # zero-length vector - an error, not a missing verdict. Restore the NA.
+  if (is.null(out$stalled_at_init)) out$stalled_at_init <- NA
+  if (is.null(out$estimate_near_boundary)) out$estimate_near_boundary <- NA
+  if (is.null(out$max_abs_correlation)) out$max_abs_correlation <- NA_real_
   out
 }
 

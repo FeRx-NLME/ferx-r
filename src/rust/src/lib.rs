@@ -2619,6 +2619,11 @@ fn fit_result_to_list(
         cov_matrix_dim = cov_matrix_dim,
         cov_eigenvalues = result.cov_eigenvalues.clone().unwrap_or_default(),
         cov_condition_number = result.cov_condition_number.unwrap_or(f64::NAN),
+        // Packed Omega / kappa layout (ferx-core #1177). `.fitrx` bundles
+        // carry these so `natural_scale_covariance()` can undo the Cholesky
+        // parameterisation on a reload; NA when the engine didn't record it.
+        omega_is_diagonal = result.omega_is_diagonal,
+        kappa_is_diagonal = result.kappa_is_diagonal,
         omega_iov = omega_iov_flat,
         omega_iov_dim = omega_iov_dim,
         kappa_names = kappa_names,

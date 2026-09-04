@@ -187,6 +187,16 @@
   `ferx_save_fit()` / `ferx_load_fit()` round-trip, and `ferx_covariance()`
   refreshes `max_abs_correlation` alongside the matrix it is read off.
 
+  The bundle also carries what a *reader* needs to reach the same verdicts:
+  the condition number (it was written from the wire field name, which
+  `ferx_fit()` had already renamed and cleared, so every bundle this package
+  wrote stored a null and the condition-number gate came back *skipped* after a
+  reload), the initial estimates the engine's own `stalled_at_init()` checks
+  for shape before it consults `left_init`, and the packed OMEGA / KAPPA layout
+  (`fit$omega_is_diagonal` / `fit$kappa_is_diagonal`, also new on the result)
+  without which a reader takes correlations off the Cholesky scale for a
+  `block_omega` model.
+
 - **`ferx_bootstrap()` is interruptible with Ctrl-C** (#315). A 200-replicate run
   held the console until it finished: Ctrl-C did nothing, `ferx_stop()` is
   process-level and there is no `ferx_bootstrap_async()`, so the only way out of

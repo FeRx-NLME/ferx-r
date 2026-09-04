@@ -51,7 +51,9 @@
 #'
 #' @return The input `fit`, with `cov_matrix`, `cor_matrix`, `se_theta`,
 #'   `se_omega`, `se_sigma`, `se_kappa`, `covariance_status`, `eigenvalues`,
-#'   and `condition_number` refreshed.
+#'   `condition_number`, and `max_abs_correlation` (the largest absolute
+#'   off-diagonal parameter correlation, `NA` when the step produced no
+#'   matrix - the value [check_strictness()] gates on) refreshed.
 #'
 #' @examples
 #' \dontrun{

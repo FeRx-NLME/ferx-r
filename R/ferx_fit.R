@@ -794,6 +794,13 @@
 #'     matrix in correlation form, on the natural theta / OMEGA / SIGMA scale.
 #'     \code{NA} without a covariance matrix carrying two or more free
 #'     parameters. See \code{\link{check_strictness}}.}
+#'   \item{omega_is_diagonal}{\code{TRUE} when the OMEGA block the fit was
+#'     estimated under is diagonal, \code{FALSE} for a \code{block_omega}
+#'     model, \code{NA} when the engine recorded no layout. Says how the
+#'     covariance matrix packs its OMEGA entries, so a reader can undo the
+#'     Cholesky parameterisation before reading correlations off it.}
+#'   \item{kappa_is_diagonal}{The same flag for the IOV (KAPPA) block;
+#'     \code{NA} when the model declares no IOV.}
 #'   \item{shrinkage_eta}{Numeric vector of ETA shrinkage per random effect
 #'     (\code{1 - SD(eta_hat_k) / sqrt(omega_kk)}). \code{NA} when
 #'     \code{omega_kk = 0} or fewer than 2 subjects.}
@@ -2043,6 +2050,11 @@ ferx_fit <- function(model, data = NULL,
   }
   result$left_init <- .fitrx_unwrap_opt_lgl(result$left_init)
   result$stalled_at_init <- .fitrx_unwrap_opt_lgl(result$stalled_at_init)
+  # The packed Omega / kappa layout, same tri-state shape. ferx_save_fit()
+  # writes these so a reader can undo the Cholesky parameterisation before
+  # reading correlations off the covariance matrix.
+  result$omega_is_diagonal <- .fitrx_unwrap_opt_lgl(result$omega_is_diagonal)
+  result$kappa_is_diagonal <- .fitrx_unwrap_opt_lgl(result$kappa_is_diagonal)
 
   # Reshape cov_matrix into a named square matrix (param ? param)
   d <- result$cov_matrix_dim %||% 0L
