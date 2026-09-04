@@ -39,6 +39,8 @@ identical(fit$theta, fit2$theta)
 \code{\link{ferx_save_fit}}.
 
 Other utilities:
+\code{\link[=check_strictness]{check_strictness()}},
+\code{\link[=ferx_bic]{ferx_bic()}},
 \code{\link[=ferx_example]{ferx_example()}},
 \code{\link[=ferx_get_columns]{ferx_get_columns()}},
 \code{\link[=ferx_save_fit]{ferx_save_fit()}}

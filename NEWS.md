@@ -155,6 +155,44 @@
 
 ## New features
 
+- **`ferx_bic()` and `check_strictness()`: rank candidate models, and decide
+  which candidates deserve to be ranked** (#326, [ferx-core
+  #1177](https://github.com/FeRx-NLME/ferx-core/issues/1177)). Comparing two
+  structural models on `fit$bic` compares them on the wrong BIC: it penalises
+  every free parameter on `log(n_obs)`, which for a mixed-effects model
+  over-penalises the population parameters and under-penalises the variance
+  ones. `ferx_bic(fit, type)` gives the four conventions of
+  `pharmpy.modeling.calculate_bic` - `"mixed"` (the Delattre et al. 2014 BIC
+  that Pharmpy's `iivsearch` and `modelsearch` rank on, and the default here),
+  `"iiv"` (free omega elements only, for comparing variability structures),
+  `"random"`, and `"fixed"` (which is `fit$bic`). The variants are on the fit
+  object too, as `bic_mixed` / `bic_iiv` / `bic_random`, next to the
+  free-parameter tally they are computed from (`bic_inputs`), so a stored fit
+  stays rankable without re-parsing its model.
+
+  `check_strictness(fit)` applies the pyDarwin gate set a candidate should
+  pass before its criterion is trusted - converged, optionally an uncertainty
+  step, condition number at most 1000, no parameter correlation above 0.95, no
+  estimate pinned to a bound, and not a run that never left its initial
+  estimates - and returns `passed` plus the named `failures` and `skipped`
+  gates. A gate whose input does not exist (no covariance matrix, so no
+  condition number) is reported as skipped rather than silently passed; pair it
+  with `require_covariance = TRUE` to make it mandatory. `reject_init_stall`
+  assumes a cold start - turn it off for a search that warm-starts candidates
+  from their parent's estimates.
+
+  The fit object also gained the readings behind those gates:
+  `max_abs_correlation` (over the natural-scale covariance, so it is not in
+  general the largest off-diagonal of `cor_matrix`), `near_boundary` with
+  `boundary_estimate_message`, and `left_init` / `stalled_at_init`. All of it,
+  and the BIC tally, round-trips through `ferx_save_fit()` / `ferx_load_fit()`.
+
+- **The pinned ferx-core moved to `ebc13a1e`**, which also fixes `n_parameters`
+  (hence AIC and BIC) for a model mixing `block_omega` with a diagonal `omega`:
+  the cross-block structural zeros were counted as estimated parameters. Such a
+  model's AIC and BIC change by `log(n)` per structural zero. No bundled
+  example is affected.
+
 - **`ferx_bootstrap()` is interruptible with Ctrl-C** (#315). A 200-replicate run
   held the console until it finished: Ctrl-C did nothing, `ferx_stop()` is
   process-level and there is no `ferx_bootstrap_async()`, so the only way out of

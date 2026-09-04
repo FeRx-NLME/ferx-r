@@ -217,6 +217,11 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
     n_obs = as.integer(fit$n_obs),
     n_subjects = as.integer(fit$n_subjects),
     n_parameters = as.integer(fit$n_parameters),
+    # Free-parameter tally by Delattre class (ferx-core #1177) - what makes a
+    # stored fit rankable by ferx_bic() without re-parsing the model. The
+    # engine reads it back with `serde(default)`, so omitting it degrades to an
+    # all-zero tally rather than a load error; write it whenever we have it.
+    bic_inputs = .fitrx_bic_inputs_to_wire(fit$bic_inputs),
     n_iterations = as.integer(fit$n_iterations),
     interaction = isTRUE(fit$interaction),
     wall_time_secs = as.numeric(fit$wall_time_secs %||% NA_real_),
@@ -269,6 +274,10 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
     covariance_matrix = .fitrx_matrix_to_wire(fit$cov_matrix),
     cov_eigenvalues = .fitrx_opt_num_vec(fit$cov_eigenvalues),
     cov_condition_number = .fitrx_opt_num(fit$cov_condition_number),
+    # The outer optimizer's own init-escape verdict (ferx-core #1177), which is
+    # the reading `check_strictness(reject_init_stall = TRUE)` prefers. NULL
+    # when the fit recorded none.
+    left_init = .fitrx_opt_lgl(fit$left_init),
 
     sir = .fitrx_build_sir_wire(fit),
     bayes = .fitrx_build_bayes_wire(fit),
@@ -602,7 +611,14 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
 .fitrx_collect_r_extras <- function(fit) {
   r_only_keys <- c(
     "call_settings", "model_file_settings", "model_structure",
-    "data_name", "gradient", "gradient_used", "model_file_path"
+    "data_name", "gradient", "gradient_used", "model_file_path",
+    # Strictness-gate ingredients (ferx-core #1177). The engine recomputes each
+    # of these from a `FitResult` it holds; R has no `FitResult`, so a loaded
+    # fit has to carry them or `check_strictness()` would silently skip the
+    # correlation, boundary and init-stall gates on it. `bic_inputs` and
+    # `left_init` are proper wire fields and are written above.
+    "max_abs_correlation", "near_boundary", "boundary_estimate_message",
+    "stalled_at_init"
   )
   out <- list()
   for (k in r_only_keys) {

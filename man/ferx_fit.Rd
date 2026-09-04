@@ -720,7 +720,28 @@ Full slot descriptions:
 \item{n_iterations}{Number of outer iterations run}
 \item{ofv}{Objective function value (-2 log-likelihood)}
 \item{aic}{Akaike Information Criterion}
-\item{bic}{Bayesian Information Criterion}
+\item{bic}{Bayesian Information Criterion, every free parameter penalised
+on \code{log(n_obs)}}
+\item{bic_mixed, bic_iiv, bic_random}{The other three conventions of
+\code{pharmpy.modeling.calculate_bic}; see \code{\link{ferx_bic}}.
+\code{bic_mixed} is the Delattre (2014) BIC used for candidate ranking.}
+\item{bic_inputs}{Named list of the free-parameter counts behind those
+penalties: \code{n_obs}, \code{theta_random}, \code{theta_fixed},
+\code{omega}, \code{kappa}, \code{sigma}, \code{sigma_random}. The five
+parameter counts sum to \code{n_parameters}.}
+\item{max_abs_correlation}{Largest absolute parameter correlation over the
+natural-scale covariance matrix (\code{NaN} when the covariance step
+produced none). For a \code{block_omega} model this is not the largest
+off-diagonal of \code{cor_matrix}, which is built from the stored packed
+matrix.}
+\item{near_boundary, boundary_estimate_message}{Whether any theta is
+pinned to a declared optimizer bound, and the engine's warning text for
+it (\code{""} when none).}
+\item{left_init, stalled_at_init}{The outer optimizer's own init-escape
+verdict, and the derived "never left its initial estimates" predicate
+that falls back to comparing estimates against their initial values.
+Both \code{NA} when the fit records neither. See
+\code{\link{check_strictness}}.}
 \item{theta}{Named numeric vector of fixed effect estimates}
 \item{omega}{Between-subject variability covariance matrix. Row and column
 names are the declared ETA names (e.g. \code{"ETA_CL"}); fallback is

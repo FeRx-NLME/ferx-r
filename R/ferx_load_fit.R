@@ -191,6 +191,11 @@ ferx_load_fit <- function(path) {
     n_obs = as.integer(w$n_obs),
     n_subjects = as.integer(w$n_subjects),
     n_parameters = as.integer(w$n_parameters),
+    # Free-parameter tally by Delattre class (ferx-core #1177). Absent on a
+    # bundle written before it existed; `ferx_bic()` then reports NaN for the
+    # three variants that need it rather than a penalty built from nothing.
+    bic_inputs = .fitrx_bic_inputs_from_wire(w$bic_inputs),
+    left_init = .fitrx_unwrap_opt_lgl(w$left_init),
     n_iterations = as.integer(w$n_iterations),
     interaction = isTRUE(w$interaction),
     wall_time_secs = as.numeric(w$wall_time_secs),

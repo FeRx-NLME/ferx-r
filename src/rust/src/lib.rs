@@ -1532,6 +1532,12 @@ fn params_from_fit(
         // into a single-population one. Every other structural field on this
         // initializer is likewise taken from `template`.
         mixture: template.mixture.clone(),
+        // ferx-core #847 added estimable `block_sigma` correlations. Like every
+        // other structural field here they are the model's, not the fit's: R
+        // supplies theta/omega/sigma only, so dropping them would silently turn
+        // a correlated residual model into an uncorrelated one.
+        residual_correlations: template.residual_correlations.clone(),
+        residual_correlation_fixed: template.residual_correlation_fixed.clone(),
     })
 }
 
@@ -1667,6 +1673,23 @@ fn default_fit_result(
         // carries no VI run. The two weighted-kappa fields it also grew
         // (#1031) are set below, beside `kappa_init_as_sd`.
         residual_correlations: model.residual_correlations.clone(),
+        // ferx-core #847 pairs those correlations with their FIX flags and,
+        // once estimated, their standard errors. The flags are a property of
+        // the declaration, so they come from the same template; a scaffold
+        // estimated nothing, so it carries no SE.
+        residual_correlation_fixed: template.residual_correlation_fixed.clone(),
+        se_residual_correlations: None,
+        // The packed layout behind `covariance_matrix`, which ferx-core #1177's
+        // natural-scale correlation map reads rather than guessing it from the
+        // matrix size. Taken from the compiled model, which knows it.
+        omega_is_diagonal: Some(template.omega.diagonal),
+        kappa_is_diagonal: template.omega_iov.as_ref().map(|k| k.diagonal),
+        // No outer optimizer ran on a scaffold, so there is no init-escape
+        // verdict to record; and the BIC tally stays all-zero, for which
+        // `ferx_core::bic` reports NaN rather than a penalty built from counts
+        // nobody filled in.
+        left_init: None,
+        bic_inputs: BicInputs::default(),
         vi: None,
         method: EstimationMethod::FoceI,
         method_chain: vec![EstimationMethod::FoceI],
@@ -2502,6 +2525,41 @@ fn fit_result_to_list(
         None => ().into(),
     };
 
+    // -- model-selection fields (ferx-core #1177) ---------------------------
+    // The free-parameter tally by Delattre class, plus the record count the
+    // observation-level penalty uses. `bic()` needs all of it, and a stored
+    // fit carries it so a candidate stays rankable without re-parsing the
+    // model. All-zero on a `.fitrx` bundle written before #1177, which is
+    // exactly when the BIC variants report NaN.
+    let bi = result.bic_inputs;
+    let bic_inputs_robj: Robj = list!(
+        n_obs        = bi.n_obs as i32,
+        theta_random = bi.theta_random as i32,
+        theta_fixed  = bi.theta_fixed as i32,
+        omega        = bi.omega as i32,
+        kappa        = bi.kappa as i32,
+        sigma        = bi.sigma as i32,
+        sigma_random = bi.sigma_random,
+    )
+    .into();
+
+    // The strictness-gate ingredients that R cannot re-derive from the fit
+    // list. `max_abs_correlation` is taken over the *natural-scale* covariance
+    // (the delta-method map ferx-core applies to `block_omega` segments), so it
+    // is not in general the largest off-diagonal of `fit$cor_matrix`, which is
+    // built from the stored packed matrix. `boundary_estimate_message` is the
+    // engine's own BoundaryEstimate warning text; ferx-core names the pinned
+    // parameters from the warning's structured payload, which does not cross
+    // the FFI, so the message stands in for them here.
+    let max_abs_correlation = ferx_core::max_abs_correlation(result).unwrap_or(f64::NAN);
+    let near_boundary = ferx_core::estimate_near_boundary(result);
+    let boundary_estimate_message: String = result
+        .warnings_structured
+        .iter()
+        .find(|w| w.category == WarningCode::BoundaryEstimate)
+        .map(|w| w.message.clone())
+        .unwrap_or_default();
+
     list!(
         converged = result.converged,
         method = method_label,
@@ -2509,6 +2567,24 @@ fn fit_result_to_list(
         ofv = result.ofv,
         aic = result.aic,
         bic = result.bic,
+        // The three non-`Fixed` conventions of `pharmpy.modeling.calculate_bic`
+        // (ferx-core #1177); `BicType::Fixed` is `bic` above. NaN when the
+        // stored tally cannot support the penalty. `ferx_bic()` recomputes
+        // these from `bic_inputs` for a fit that carries no such field (a
+        // `.fitrx` bundle), so the two paths must agree - see
+        // tests/testthat/test-ferx_bic.R.
+        bic_mixed  = ferx_core::bic(result, ferx_core::BicType::Mixed),
+        bic_iiv    = ferx_core::bic(result, ferx_core::BicType::Iiv),
+        bic_random = ferx_core::bic(result, ferx_core::BicType::Random),
+        bic_inputs = bic_inputs_robj,
+        max_abs_correlation = max_abs_correlation,
+        near_boundary = near_boundary,
+        boundary_estimate_message = boundary_estimate_message,
+        // The outer optimizer's own init-escape verdict (NA when the fit
+        // recorded none), and the derived predicate that falls back to
+        // comparing estimates against their initial values.
+        left_init = result.left_init,
+        stalled_at_init = ferx_core::stalled_at_init(result),
         n_subjects = result.n_subjects as i32,
         n_obs = result.n_obs as i32,
         n_parameters = result.n_parameters as i32,
@@ -3325,6 +3401,23 @@ fn ferx_rust_sir(
         // carries no VI run. The two weighted-kappa fields it also grew
         // (#1031) are set below, beside `kappa_init_as_sd`.
         residual_correlations: model.residual_correlations.clone(),
+        // ferx-core #847 pairs those correlations with their FIX flags and,
+        // once estimated, their standard errors. The flags are a property of
+        // the declaration, so they come from the same template; a scaffold
+        // estimated nothing, so it carries no SE.
+        residual_correlation_fixed: template.residual_correlation_fixed.clone(),
+        se_residual_correlations: None,
+        // The packed layout behind `covariance_matrix`, which ferx-core #1177's
+        // natural-scale correlation map reads rather than guessing it from the
+        // matrix size. Taken from the compiled model, which knows it.
+        omega_is_diagonal: Some(template.omega.diagonal),
+        kappa_is_diagonal: template.omega_iov.as_ref().map(|k| k.diagonal),
+        // No outer optimizer ran on a scaffold, so there is no init-escape
+        // verdict to record; and the BIC tally stays all-zero, for which
+        // `ferx_core::bic` reports NaN rather than a penalty built from counts
+        // nobody filled in.
+        left_init: None,
+        bic_inputs: BicInputs::default(),
         vi: None,
         method: if interaction {
             EstimationMethod::FoceI
@@ -3697,6 +3790,23 @@ fn ferx_rust_covariance(
         // carries no VI run. The two weighted-kappa fields it also grew
         // (#1031) are set below, beside `kappa_init_as_sd`.
         residual_correlations: model.residual_correlations.clone(),
+        // ferx-core #847 pairs those correlations with their FIX flags and,
+        // once estimated, their standard errors. The flags are a property of
+        // the declaration, so they come from the same template; a scaffold
+        // estimated nothing, so it carries no SE.
+        residual_correlation_fixed: template.residual_correlation_fixed.clone(),
+        se_residual_correlations: None,
+        // The packed layout behind `covariance_matrix`, which ferx-core #1177's
+        // natural-scale correlation map reads rather than guessing it from the
+        // matrix size. Taken from the compiled model, which knows it.
+        omega_is_diagonal: Some(template.omega.diagonal),
+        kappa_is_diagonal: template.omega_iov.as_ref().map(|k| k.diagonal),
+        // No outer optimizer ran on a scaffold, so there is no init-escape
+        // verdict to record; and the BIC tally stays all-zero, for which
+        // `ferx_core::bic` reports NaN rather than a penalty built from counts
+        // nobody filled in.
+        left_init: None,
+        bic_inputs: BicInputs::default(),
         vi: None,
         method: if interaction {
             EstimationMethod::FoceI
@@ -4077,7 +4187,10 @@ fn run_bootstrap_cancellable(
     std::thread::scope(|scope| {
         let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
         let worker = scope.spawn(move || {
-            let r = run_bootstrap(prepared, options);
+            // ferx-tools #1161 gave the bootstrap a typed `BootstrapError`;
+            // flatten it to a string here the way the watched path in
+            // `run_bootstrap_reporting` does, so R gets one condition either way.
+            let r = run_bootstrap(prepared, options).map_err(|e| e.to_string());
             // Ignore send errors: the receiver is only dropped after the worker
             // has already reported.
             let _ = done_tx.send(());
