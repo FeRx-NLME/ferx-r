@@ -37,6 +37,8 @@ diag$shrinkage
 }
 \seealso{
 Other diagnostics:
+\code{\link[=check_strictness]{check_strictness()}},
+\code{\link[=ferx_bic]{ferx_bic()}},
 \code{\link[=ferx_conddist]{ferx_conddist()}},
 \code{\link[=ferx_cov_screen]{ferx_cov_screen()}},
 \code{\link[=ferx_gam_screen]{ferx_gam_screen()}},

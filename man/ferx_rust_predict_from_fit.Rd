@@ -12,7 +12,8 @@ ferx_rust_predict_from_fit(
   omega_dim,
   sigma,
   omega_iov_flat,
-  omega_iov_dim
+  omega_iov_dim,
+  residual_rho
 )
 }
 \description{

@@ -48,6 +48,7 @@ ferx_predict <- function(model, data = NULL, fit = NULL) {
     omega_dim = fit_pieces$omega_dim,
     sigma = fit_pieces$sigma,
     omega_iov_flat = fit_pieces$omega_iov_flat,
-    omega_iov_dim = fit_pieces$omega_iov_dim
+    omega_iov_dim = fit_pieces$omega_iov_dim,
+    residual_rho = fit_pieces$residual_rho
   )
 }

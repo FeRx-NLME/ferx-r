@@ -15,6 +15,7 @@ ferx_rust_sir(
   omega_flat,
   omega_dim,
   sigma,
+  residual_rho,
   cov_matrix_flat,
   cov_matrix_dim,
   eta_hats_flat,

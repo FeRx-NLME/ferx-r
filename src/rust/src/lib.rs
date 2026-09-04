@@ -493,6 +493,7 @@ fn ferx_rust_simulate_from_fit(
     sigma: Vec<f64>,
     omega_iov_flat: Vec<f64>,
     omega_iov_dim: i32,
+    residual_rho: Vec<f64>,
     n_sim: i32,
     seed: i32,
     match_method: &str,
@@ -543,6 +544,7 @@ fn ferx_rust_simulate_from_fit(
         &sigma,
         &omega_iov_flat,
         omega_iov_dim,
+        &residual_rho,
     ) {
         Ok(p) => p,
         Err(e) => {
@@ -801,6 +803,8 @@ fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult) -> Robj
 ///   (`n_resamples * n_packed` values; empty when not using SIR mode)
 /// @param sir_resamples_n Number of SIR resamples (rows)
 /// @param sir_resamples_dim Packed-parameter dimension (columns)
+/// @param residual_rho Fitted `block_sigma` residual correlations, in model
+///   declaration order (empty when the model declares none)
 /// @param n_uncertainty_draws Number of parameter sets to draw from the
 ///   uncertainty distribution
 /// @param n_sim_per_draw Number of eta/eps replicates per parameter draw
@@ -826,6 +830,7 @@ fn ferx_rust_simulate_with_uncertainty(
     sir_resamples_flat: Vec<f64>,
     sir_resamples_n: i32,
     sir_resamples_dim: i32,
+    residual_rho: Vec<f64>,
     n_uncertainty_draws: i32,
     n_sim_per_draw: i32,
     seed: i32,
@@ -889,6 +894,7 @@ fn ferx_rust_simulate_with_uncertainty(
             &sir_resamples_flat,
             sir_resamples_n,
             sir_resamples_dim,
+            &residual_rho,
         ) {
             Ok(f) => f,
             Err(e) => {
@@ -989,6 +995,7 @@ fn ferx_rust_predict_from_fit(
     sigma: Vec<f64>,
     omega_iov_flat: Vec<f64>,
     omega_iov_dim: i32,
+    residual_rho: Vec<f64>,
 ) -> Robj {
     let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
         Ok(p) => p,
@@ -1028,6 +1035,7 @@ fn ferx_rust_predict_from_fit(
         &sigma,
         &omega_iov_flat,
         omega_iov_dim,
+        &residual_rho,
     ) {
         Ok(p) => p,
         Err(e) => {
@@ -1143,6 +1151,7 @@ fn ferx_rust_predict_survival_from_fit(
     sigma: Vec<f64>,
     omega_iov_flat: Vec<f64>,
     omega_iov_dim: i32,
+    residual_rho: Vec<f64>,
 ) -> Robj {
     let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
         Ok(p) => p,
@@ -1177,6 +1186,7 @@ fn ferx_rust_predict_survival_from_fit(
         &sigma,
         &omega_iov_flat,
         omega_iov_dim,
+        &residual_rho,
     ) {
         Ok(p) => p,
         Err(e) => {
@@ -1219,6 +1229,7 @@ fn ferx_rust_npde_from_fit(
     sigma: Vec<f64>,
     omega_iov_flat: Vec<f64>,
     omega_iov_dim: i32,
+    residual_rho: Vec<f64>,
     nsim: i32,
     seed: i32,
 ) -> Robj {
@@ -1279,6 +1290,7 @@ fn ferx_rust_npde_from_fit(
         &sigma,
         &omega_iov_flat,
         omega_iov_dim,
+        &residual_rho,
     ) {
         Ok(p) => p,
         Err(e) => {
@@ -1459,6 +1471,35 @@ fn omega_iov_from_fit(
 
 // -- Helper: materialize ModelParameters from R-side theta/omega/sigma --
 
+// Overlay the fitted `block_sigma` correlations (ferx-core #847) onto the
+// pairing the model declares. The (sigma_i, sigma_j) indices are structural
+// and come from the parsed model; the value is fitted, so taking it from the
+// template would reconstruct the fit at its declared *initial* correlation
+// after the optimizer moved it. An empty `rho` means the caller has none to
+// supply - a fit taken before the correlation was estimable - and keeps the
+// declared values.
+fn overlay_residual_rho(
+    mut rc: Vec<ResidualCorrelation>,
+    rho: &[f64],
+) -> std::result::Result<Vec<ResidualCorrelation>, String> {
+    if rho.is_empty() {
+        return Ok(rc);
+    }
+    if rho.len() != rc.len() {
+        return Err(format!(
+            "residual_rho length {} does not match the model's {} residual correlation(s)",
+            rho.len(),
+            rc.len()
+        ));
+    }
+    for (c, &r) in rc.iter_mut().zip(rho.iter()) {
+        c.rho = r;
+    }
+    Ok(rc)
+}
+
+// `residual_rho` carries the fitted `block_sigma` correlations, in the order
+// the model declares them; see `overlay_residual_rho`.
 fn params_from_fit(
     model: &CompiledModel,
     theta: &[f64],
@@ -1467,6 +1508,7 @@ fn params_from_fit(
     sigma: &[f64],
     omega_iov_flat: &[f64],
     omega_iov_dim: i32,
+    residual_rho: &[f64],
 ) -> std::result::Result<ModelParameters, String> {
     let template = &model.default_params;
 
@@ -1532,6 +1574,17 @@ fn params_from_fit(
         // into a single-population one. Every other structural field on this
         // initializer is likewise taken from `template`.
         mixture: template.mixture.clone(),
+        // ferx-core #847 moved the residual correlations (and their FIX flags)
+        // into the parameter set. The *pairing* is structural and comes from the
+        // parsed model, but a plain (non-FIX) `block_sigma` estimates rho, so
+        // taking the value from the template would reconstruct the fit at its
+        // declared initial correlation instead of the fitted one. Take the
+        // indices from the model and the value from the fit.
+        residual_correlations: overlay_residual_rho(
+            template.residual_correlations.clone(),
+            residual_rho,
+        )?,
+        residual_correlation_fixed: template.residual_correlation_fixed.clone(),
     })
 }
 
@@ -1555,6 +1608,7 @@ fn build_fit_result_for_uncertainty(
     sir_resamples_flat: &[f64],
     sir_resamples_n: i32,
     sir_resamples_dim: i32,
+    residual_rho: &[f64],
 ) -> std::result::Result<FitResult, String> {
     let template = &model.default_params;
     if theta.len() != template.theta.len() {
@@ -1640,6 +1694,7 @@ fn build_fit_result_for_uncertainty(
         omega_iov_from_fit(model, omega_iov_flat, omega_iov_dim)?.map(|m| m.matrix),
         covariance_matrix,
         sir_resamples_packed,
+        overlay_residual_rho(model.residual_correlations.clone(), residual_rho)?,
     ))
 }
 
@@ -1655,6 +1710,7 @@ fn default_fit_result(
     omega_iov: Option<DMatrix<f64>>,
     covariance_matrix: Option<DMatrix<f64>>,
     sir_resamples_packed: Option<Vec<Vec<f64>>>,
+    residual_correlations_resolved: Vec<ResidualCorrelation>,
 ) -> FitResult {
     let template = &model.default_params;
     FitResult {
@@ -1662,11 +1718,26 @@ fn default_fit_result(
         // never a restored one.
         restored_from_checkpoint: false,
         // ferx-core main grew `residual_correlations` and `vi` after the rev
-        // this branch originally pinned. `residual_correlations` is a property
-        // of the compiled model, so it is taken from there; this scaffold
-        // carries no VI run. The two weighted-kappa fields it also grew
-        // (#1031) are set below, beside `kappa_init_as_sd`.
-        residual_correlations: model.residual_correlations.clone(),
+        // this branch originally pinned. The *pairing* is a property of the
+        // compiled model and is taken from there, but a plain `block_sigma`
+        // estimates rho, so the fitted value is overlaid on top - reading the
+        // model's own value would reconstruct this fit at its declared initial
+        // correlation. This scaffold carries no VI run. The two weighted-kappa
+        // fields it also grew (#1031) are set below, beside `kappa_init_as_sd`.
+        residual_correlations: residual_correlations_resolved,
+        // Parallel FIX flags and standard errors for those correlations
+        // (ferx-core #847): the declaration is structural and comes from the
+        // template; the SEs would come from a covariance step this scaffold
+        // never runs.
+        residual_correlation_fixed: template.residual_correlation_fixed.clone(),
+        se_residual_correlations: None,
+        // The packed Omega / kappa layout (ferx-core #1177). `fit()` records it
+        // as `Some(params.omega.diagonal)`; the covariance matrix handed in
+        // here was packed with the model's own layout, so report that rather
+        // than `None` - `natural_scale_covariance()` needs it to put a
+        // `block_omega` covariance back on the natural scale.
+        omega_is_diagonal: Some(template.omega.diagonal),
+        kappa_is_diagonal: template.omega_iov.as_ref().map(|m| m.diagonal),
         vi: None,
         method: EstimationMethod::FoceI,
         method_chain: vec![EstimationMethod::FoceI],
@@ -1727,6 +1798,12 @@ fn default_fit_result(
         // `#[serde(skip)]` upstream, so a reconstructed result legitimately carries `None`
         // and `run_covariance` re-packs from `omega`. No `.fitrx` / R format change.
         packed_estimate: None,
+        // No outer optimizer ran in this scaffold, so there is no init-escape
+        // verdict, and no packed tally to classify: `model_selection::bic()`
+        // reports NaN on the default `BicInputs` rather than a wrong penalty
+        // (ferx-core #1177).
+        left_init: None,
+        bic_inputs: BicInputs::default(),
         ebe_convergence_warnings: 0,
         max_unconverged_subjects: 0,
         total_ebe_fallbacks: 0,
@@ -2057,6 +2134,53 @@ fn fit_result_to_list(
     // vector; NULL when no `[covariates]` block. Lets R treat categoricals as
     // factors etc. (the value carried by the typed declaration).
     let covariate_types = covariate_types_robj(result.covariate_table.as_ref());
+
+    // `block_sigma` residual correlations (ferx-core #847). A plain block
+    // estimates rho, so the fitted value has to reach R: everything that
+    // reconstructs parameters from a fit (simulate / predict / NPDE / SIR)
+    // would otherwise fall back to the model file's declared correlation.
+    // Shipped as parallel vectors, the same convention as sigma/sigma_names.
+    let rho_i: Vec<i32> = result
+        .residual_correlations
+        .iter()
+        .map(|c| c.sigma_i as i32 + 1)
+        .collect();
+    let rho_j: Vec<i32> = result
+        .residual_correlations
+        .iter()
+        .map(|c| c.sigma_j as i32 + 1)
+        .collect();
+    let rho_values: Vec<f64> = result.residual_correlations.iter().map(|c| c.rho).collect();
+    // A pre-#847 fit recorded no FIX flags because every correlation was fixed
+    // by construction; that is what an empty vector means, so fill it as such.
+    let rho_fixed: Vec<bool> = if result.residual_correlation_fixed.len()
+        == result.residual_correlations.len()
+    {
+        result.residual_correlation_fixed.clone()
+    } else {
+        vec![true; result.residual_correlations.len()]
+    };
+    let se_rho: Vec<f64> = result
+        .se_residual_correlations
+        .clone()
+        .unwrap_or_default();
+    // Labels follow the off-diagonal convention: the two declared sigma names
+    // joined by `~`, falling back to SIGMA(i) when the model named neither.
+    let rho_names: Vec<String> = result
+        .residual_correlations
+        .iter()
+        .map(|c| {
+            let nm = |k: usize| {
+                result
+                    .sigma_names
+                    .get(k)
+                    .filter(|n| !n.is_empty())
+                    .cloned()
+                    .unwrap_or_else(|| format!("SIGMA({})", k + 1))
+            };
+            format!("{} ~ {}", nm(c.sigma_i), nm(c.sigma_j))
+        })
+        .collect();
 
     // Warnings
     let warnings: Vec<String> = result.warnings.clone();
@@ -2502,6 +2626,27 @@ fn fit_result_to_list(
         None => ().into(),
     };
 
+    // -- Model-selection surface (ferx-core #1177) --
+    //
+    // The ingredients an automated search needs to rank and gate a candidate,
+    // shipped rather than re-derived in R because each needs engine internals
+    // R does not get: the free-parameter tally by Delattre class (the packed
+    // held mask), the outer optimizer's own init-escape verdict, the boundary
+    // predicate's structured warning categories, and - for a block Omega - the
+    // Cholesky Jacobian that puts the covariance matrix back on the natural
+    // theta / Omega / sigma scale before correlations are read off it.
+    // `ferx_bic()` computes the four BIC variants in R from `bic_inputs`, so a
+    // `.fitrx` bundle written by any writer ranks the same way.
+    let bic_inputs = list!(
+        n_obs = result.bic_inputs.n_obs as i32,
+        theta_random = result.bic_inputs.theta_random as i32,
+        theta_fixed = result.bic_inputs.theta_fixed as i32,
+        omega = result.bic_inputs.omega as i32,
+        kappa = result.bic_inputs.kappa as i32,
+        sigma = result.bic_inputs.sigma as i32,
+        sigma_random = result.bic_inputs.sigma_random
+    );
+
     list!(
         converged = result.converged,
         method = method_label,
@@ -2509,6 +2654,12 @@ fn fit_result_to_list(
         ofv = result.ofv,
         aic = result.aic,
         bic = result.bic,
+        bic_inputs = bic_inputs,
+        left_init = result.left_init,
+        stalled_at_init = ferx_core::model_selection::stalled_at_init(result),
+        estimate_near_boundary = ferx_core::model_selection::estimate_near_boundary(result),
+        max_abs_correlation =
+            ferx_core::model_selection::max_abs_correlation(result).unwrap_or(f64::NAN),
         n_subjects = result.n_subjects as i32,
         n_obs = result.n_obs as i32,
         n_parameters = result.n_parameters as i32,
@@ -2567,6 +2718,20 @@ fn fit_result_to_list(
         cov_matrix_dim = cov_matrix_dim,
         cov_eigenvalues = result.cov_eigenvalues.clone().unwrap_or_default(),
         cov_condition_number = result.cov_condition_number.unwrap_or(f64::NAN),
+        // Packed Omega / kappa layout (ferx-core #1177). `.fitrx` bundles
+        // carry these so `natural_scale_covariance()` can undo the Cholesky
+        // parameterisation on a reload; NA when the engine didn't record it.
+        omega_is_diagonal = result.omega_is_diagonal,
+        kappa_is_diagonal = result.kappa_is_diagonal,
+        // Fitted `block_sigma` correlations, parallel vectors (see above).
+        // These are packed *after* sigma in the covariance matrix, so R needs
+        // the count to label its trailing coordinates as well.
+        residual_correlation_i = rho_i,
+        residual_correlation_j = rho_j,
+        residual_correlation_rho = rho_values,
+        residual_correlation_fixed = rho_fixed,
+        residual_correlation_names = rho_names,
+        se_residual_correlation = se_rho,
         omega_iov = omega_iov_flat,
         omega_iov_dim = omega_iov_dim,
         kappa_names = kappa_names,
@@ -3176,6 +3341,8 @@ fn ferx_rust_inits_from_nca(model_path: &str, data_path: &str, method: &str) -> 
 /// @param sigma Vector of sigma point estimates.
 /// @param cov_matrix_flat Row-major flattened parameter covariance matrix.
 /// @param cov_matrix_dim Dimension of the covariance matrix.
+/// @param residual_rho Fitted `block_sigma` residual correlations, in model
+///   declaration order (empty when the model declares none).
 /// @param eta_hats_flat Row-major flattened per-subject EBE etas (n_subjects × n_eta).
 /// @param n_subjects Number of subjects.
 /// @param sir_samples Number of proposal samples (M).
@@ -3198,6 +3365,7 @@ fn ferx_rust_sir(
     omega_flat: Vec<f64>,
     omega_dim: i32,
     sigma: Vec<f64>,
+    residual_rho: Vec<f64>,
     cov_matrix_flat: Vec<f64>,
     cov_matrix_dim: i32,
     eta_hats_flat: Vec<f64>,
@@ -3314,17 +3482,41 @@ fn ferx_rust_sir(
         });
     }
 
+    // The fitted `block_sigma` correlations, overlaid on the model's declared
+    // pairing - SIR resamples the residual covariance, so starting from the
+    // declared rho would resample around the wrong centre.
+    let residual_correlations_resolved =
+        match overlay_residual_rho(model.residual_correlations.clone(), &residual_rho) {
+            Ok(rc) => rc,
+            Err(e) => throw_r_error(&format!("ferx_sir: {}", e)),
+        };
+
     // Skeleton FitResult — only the fields ferx_core::run_sir actually
     // reads are populated; everything else gets a neutral default.
     let fit = FitResult {
         // ferx-core main added a checkpoint-restore flag; the SIR path never reads it.
         restored_from_checkpoint: false,
         // ferx-core main grew `residual_correlations` and `vi` after the rev
-        // this branch originally pinned. `residual_correlations` is a property
-        // of the compiled model, so it is taken from there; this scaffold
-        // carries no VI run. The two weighted-kappa fields it also grew
-        // (#1031) are set below, beside `kappa_init_as_sd`.
-        residual_correlations: model.residual_correlations.clone(),
+        // this branch originally pinned. The *pairing* is a property of the
+        // compiled model and is taken from there, but a plain `block_sigma`
+        // estimates rho, so the fitted value is overlaid on top - reading the
+        // model's own value would reconstruct this fit at its declared initial
+        // correlation. This scaffold carries no VI run. The two weighted-kappa
+        // fields it also grew (#1031) are set below, beside `kappa_init_as_sd`.
+        residual_correlations: residual_correlations_resolved,
+        // Parallel FIX flags and standard errors for those correlations
+        // (ferx-core #847): the declaration is structural and comes from the
+        // template; the SEs would come from a covariance step this scaffold
+        // never runs.
+        residual_correlation_fixed: template.residual_correlation_fixed.clone(),
+        se_residual_correlations: None,
+        // The packed Omega / kappa layout (ferx-core #1177). `fit()` records it
+        // as `Some(params.omega.diagonal)`; the covariance matrix handed in
+        // here was packed with the model's own layout, so report that rather
+        // than `None` - `natural_scale_covariance()` needs it to put a
+        // `block_omega` covariance back on the natural scale.
+        omega_is_diagonal: Some(template.omega.diagonal),
+        kappa_is_diagonal: template.omega_iov.as_ref().map(|m| m.diagonal),
         vi: None,
         method: if interaction {
             EstimationMethod::FoceI
@@ -3390,6 +3582,12 @@ fn ferx_rust_sir(
         // `#[serde(skip)]` upstream, so a reconstructed result legitimately carries `None`
         // and `run_covariance` re-packs from `omega`. No `.fitrx` / R format change.
         packed_estimate: None,
+        // No outer optimizer ran in this scaffold, so there is no init-escape
+        // verdict, and no packed tally to classify: `model_selection::bic()`
+        // reports NaN on the default `BicInputs` rather than a wrong penalty
+        // (ferx-core #1177).
+        left_init: None,
+        bic_inputs: BicInputs::default(),
         ebe_convergence_warnings: 0,
         max_unconverged_subjects: 0,
         total_ebe_fallbacks: 0,
@@ -3545,6 +3743,8 @@ fn ferx_rust_sir(
 /// @param sigma Vector of sigma point estimates.
 /// @param omega_iov_flat Row-major flattened IOV kappa omega matrix; empty when no IOV.
 /// @param omega_iov_dim Dimension of the IOV omega matrix; 0 when no IOV.
+/// @param residual_rho Fitted `block_sigma` residual correlations, in model
+///   declaration order (empty when the model declares none).
 /// @param eta_hats_flat Row-major flattened per-subject EBE etas (n_subjects × n_eta).
 /// @param n_subjects Number of subjects.
 /// @param covariance_method Covariance estimator: "r"/"hessian", "s"/"cross_product", or "rsr"/"sandwich".
@@ -3568,6 +3768,7 @@ fn ferx_rust_covariance(
     sigma: Vec<f64>,
     omega_iov_flat: Vec<f64>,
     omega_iov_dim: i32,
+    residual_rho: Vec<f64>,
     eta_hats_flat: Vec<f64>,
     n_subjects: i32,
     covariance_method: &str,
@@ -3684,6 +3885,15 @@ fn ferx_rust_covariance(
         });
     }
 
+    // The fitted `block_sigma` correlations, overlaid on the model's declared
+    // pairing - the covariance step differentiates around the fitted point, so
+    // the declared rho would centre it on the wrong parameters.
+    let residual_correlations_resolved =
+        match overlay_residual_rho(model.residual_correlations.clone(), &residual_rho) {
+            Ok(rc) => rc,
+            Err(e) => throw_r_error(&format!("ferx_covariance: {}", e)),
+        };
+
     // Skeleton FitResult — only the fields ferx_core::run_covariance actually
     // reads (via fitted_params_from_result + the inner loop) are populated;
     // everything else gets a neutral default. `bayes = None` so the returned
@@ -3692,11 +3902,26 @@ fn ferx_rust_covariance(
         // ferx-core main added a checkpoint-restore flag; the covariance path never reads it.
         restored_from_checkpoint: false,
         // ferx-core main grew `residual_correlations` and `vi` after the rev
-        // this branch originally pinned. `residual_correlations` is a property
-        // of the compiled model, so it is taken from there; this scaffold
-        // carries no VI run. The two weighted-kappa fields it also grew
-        // (#1031) are set below, beside `kappa_init_as_sd`.
-        residual_correlations: model.residual_correlations.clone(),
+        // this branch originally pinned. The *pairing* is a property of the
+        // compiled model and is taken from there, but a plain `block_sigma`
+        // estimates rho, so the fitted value is overlaid on top - reading the
+        // model's own value would reconstruct this fit at its declared initial
+        // correlation. This scaffold carries no VI run. The two weighted-kappa
+        // fields it also grew (#1031) are set below, beside `kappa_init_as_sd`.
+        residual_correlations: residual_correlations_resolved,
+        // Parallel FIX flags and standard errors for those correlations
+        // (ferx-core #847): the declaration is structural and comes from the
+        // template; the SEs would come from a covariance step this scaffold
+        // never runs.
+        residual_correlation_fixed: template.residual_correlation_fixed.clone(),
+        se_residual_correlations: None,
+        // The packed Omega / kappa layout (ferx-core #1177). `fit()` records it
+        // as `Some(params.omega.diagonal)`; the covariance matrix handed in
+        // here was packed with the model's own layout, so report that rather
+        // than `None` - `natural_scale_covariance()` needs it to put a
+        // `block_omega` covariance back on the natural scale.
+        omega_is_diagonal: Some(template.omega.diagonal),
+        kappa_is_diagonal: template.omega_iov.as_ref().map(|m| m.diagonal),
         vi: None,
         method: if interaction {
             EstimationMethod::FoceI
@@ -3762,6 +3987,12 @@ fn ferx_rust_covariance(
         // `#[serde(skip)]` upstream, so a reconstructed result legitimately carries `None`
         // and `run_covariance` re-packs from `omega`. No `.fitrx` / R format change.
         packed_estimate: None,
+        // No outer optimizer ran in this scaffold, so there is no init-escape
+        // verdict, and no packed tally to classify: `model_selection::bic()`
+        // reports NaN on the default `BicInputs` rather than a wrong penalty
+        // (ferx-core #1177).
+        left_init: None,
+        bic_inputs: BicInputs::default(),
         ebe_convergence_warnings: 0,
         max_unconverged_subjects: 0,
         total_ebe_fallbacks: 0,
@@ -3882,6 +4113,16 @@ fn ferx_rust_covariance(
         covariance_status = covariance_status_str,
         cov_eigenvalues = new_fit.cov_eigenvalues.clone().unwrap_or_default(),
         cov_condition_number = new_fit.cov_condition_number.unwrap_or(f64::NAN),
+        // Refreshed alongside the matrix it is read off, so a fit that gains a
+        // covariance step here also gains the correlation gate that step feeds
+        // (ferx-core #1177) instead of keeping the pre-step NA.
+        max_abs_correlation =
+            ferx_core::model_selection::max_abs_correlation(&new_fit).unwrap_or(f64::NAN),
+        // The `block_sigma` correlation SEs come out of the same step.
+        se_residual_correlation = new_fit
+            .se_residual_correlations
+            .clone()
+            .unwrap_or_default(),
         warnings = new_fit.warnings.clone()
     )
     .into()
@@ -4098,7 +4339,10 @@ fn run_bootstrap_cancellable(
         }
 
         match worker.join() {
-            Ok(result) => result,
+            // `map_err(to_string)` compiles whether `run_bootstrap` reports a
+            // bare `String` or ferx-core's typed `BootstrapError` (#1161) -
+            // the compat the doc comment above promises.
+            Ok(result) => result.map_err(|e| e.to_string()),
             Err(_) => Err("the bootstrap panicked".to_string()),
         }
     })
@@ -4164,7 +4408,10 @@ fn run_bootstrap_reporting(
             bootstrap_draw_progress(callback, event);
         }
         match worker.join() {
-            Ok(result) => result,
+            // `map_err(to_string)` compiles whether `run_bootstrap` reports a
+            // bare `String` or ferx-core's typed `BootstrapError` (#1161) -
+            // the compat the doc comment above promises.
+            Ok(result) => result.map_err(|e| e.to_string()),
             Err(_) => Err("the bootstrap panicked".to_string()),
         }
     })

@@ -51,7 +51,10 @@
 #'
 #' @return The input `fit`, with `cov_matrix`, `cor_matrix`, `se_theta`,
 #'   `se_omega`, `se_sigma`, `se_kappa`, `covariance_status`, `eigenvalues`,
-#'   and `condition_number` refreshed.
+#'   `condition_number`, `max_abs_correlation` (the largest absolute
+#'   off-diagonal parameter correlation, `NA` when the step produced no
+#'   matrix - the value [check_strictness()] gates on), and the `se` column of
+#'   `residual_correlations` refreshed.
 #'
 #' @examples
 #' \dontrun{
@@ -212,6 +215,7 @@ ferx_covariance <- function(fit,
     sigma = as.numeric(fit$sigma),
     omega_iov_flat = omega_iov_flat,
     omega_iov_dim = as.integer(omega_iov_dim),
+    residual_rho = .ferx_residual_rho_vec(fit),
     eta_hats_flat = eta_hats_flat,
     n_subjects = n_subj,
     covariance_method = cov_method,
@@ -228,6 +232,15 @@ ferx_covariance <- function(fit,
   # a run_covariance-refreshed fit carry identical shapes.
 
   fit$covariance_status <- raw$covariance_status %||% "not_requested"
+  # The correlation gate check_strictness() applies is read off the matrix this
+  # call just produced, so it is refreshed with it (ferx-core #1177); NaN when
+  # the step still produced no matrix.
+  fit$max_abs_correlation <- if (!is.null(raw$max_abs_correlation) &&
+                                   is.finite(raw$max_abs_correlation)) {
+    as.numeric(raw$max_abs_correlation)
+  } else {
+    NA_real_
+  }
 
   theta_names <- names(fit$theta)
   n_theta <- length(fit$theta)
@@ -243,10 +256,16 @@ ferx_covariance <- function(fit,
     NULL
   }
 
+  # The engine packs the `block_sigma` correlations last, after sigma, so their
+  # coordinates come out of the count before the rest can be read as omega -
+  # otherwise the sigma rows are labelled at the wrong offset.
+  rho_nms <- .ferx_residual_corr_labels(fit)
+  n_rho <- length(rho_nms)
+
   d <- raw$cov_matrix_dim %||% 0L
   if (!is.null(raw$cov_matrix) && length(raw$cov_matrix) > 0L && d > 0L) {
     m <- matrix(raw$cov_matrix, nrow = d, ncol = d, byrow = TRUE)
-    n_omega_packed <- d - n_theta - n_sigma
+    n_omega_packed <- d - n_theta - n_sigma - n_rho
     omega_names <- if (n_omega_packed == n_eta) {
       if (!is.null(eta_nms)) eta_nms else paste0("OMEGA(", seq_len(n_eta), ",", seq_len(n_eta), ")")
     } else {
@@ -264,7 +283,8 @@ ferx_covariance <- function(fit,
     pnames <- c(
       theta_names,
       if (n_omega_packed > 0L) omega_names else character(0L),
-      if (n_sigma > 0L) (if (!is.null(sig_nms)) sig_nms else paste0("SIGMA(", seq_len(n_sigma), ")")) else character(0L)
+      if (n_sigma > 0L) (if (!is.null(sig_nms)) sig_nms else paste0("SIGMA(", seq_len(n_sigma), ")")) else character(0L),
+      rho_nms
     )
     if (length(pnames) == d) rownames(m) <- colnames(m) <- pnames
     fit$cov_matrix <- m
@@ -284,6 +304,14 @@ ferx_covariance <- function(fit,
   }
   fit$se_omega <- if (length(raw$se_omega) > 0L) raw$se_omega else NULL
   fit$se_sigma <- if (length(raw$se_sigma) > 0L) raw$se_sigma else NULL
+  # `block_sigma` correlation SEs come out of the same step; write them back
+  # onto the frame so a refreshed fit carries uncertainty for every estimated
+  # parameter, not just theta/omega/sigma.
+  if (n_rho > 0L && is.data.frame(fit$residual_correlations)) {
+    se_rho <- as.numeric(raw$se_residual_correlation %||% numeric())
+    fit$residual_correlations$se <-
+      if (length(se_rho) == n_rho) se_rho else rep(NA_real_, n_rho)
+  }
 
   # se_kappa: name per the IOV convention (diagonal -> kappa_names, block ->
   # lower-triangle labels). NULL when no IOV or the step produced none.

@@ -824,6 +824,39 @@ all subjects and iterations.}
 \code{"not_requested"}, or \code{"sir_fallback"} (the finite-difference
 Hessian was not positive definite and \code{covariance_fallback = "sir"}
 produced SIR-based intervals).}
+\item{bic_inputs}{Named list of the free-parameter tally by Delattre
+class - \code{n_obs}, \code{theta_random}, \code{theta_fixed},
+\code{omega}, \code{kappa}, \code{sigma}, \code{sigma_random} - which
+\code{\link{ferx_bic}} turns into the mixed / IIV / random BIC variants.
+The five counts sum to \code{n_parameters}.}
+\item{left_init}{The outer optimizer's own verdict on whether it left the
+initial estimates: \code{TRUE}, \code{FALSE}, or \code{NA} when the
+method recorded none.}
+\item{stalled_at_init}{\code{TRUE} when no free parameter moved more than
+1\\% of its initial value, \code{NA} when the fit carries nothing to
+judge by. Prefers \code{left_init} to comparing estimates.}
+\item{estimate_near_boundary}{\code{TRUE} when a theta is pinned to a
+declared bound - the predicate \code{\link{ferx_bootstrap}} applies as
+\code{skip_estimate_near_boundary}.}
+\item{max_abs_correlation}{Largest absolute off-diagonal of the covariance
+matrix in correlation form, on the natural theta / OMEGA / SIGMA scale.
+\code{NA} without a covariance matrix carrying two or more free
+parameters. See \code{\link{check_strictness}}.}
+\item{residual_correlations}{Data frame of the fitted \code{block_sigma}
+residual correlations, or \code{NULL} when the model declares none.
+Columns \code{sigma_i} / \code{sigma_j} (1-based indices into
+\code{sigma}), \code{name} (the \code{EPS_A ~ EPS_B} label used in the
+covariance matrix), \code{rho}, \code{fixed}, and \code{se}
+(\code{NA} without a covariance step, \code{0} for a \code{FIX}ed
+entry). A plain \code{block_sigma} estimates \code{rho}; a
+\code{block_sigma ... FIX} holds it at the declared value.}
+\item{omega_is_diagonal}{\code{TRUE} when the OMEGA block the fit was
+estimated under is diagonal, \code{FALSE} for a \code{block_omega}
+model, \code{NA} when the engine recorded no layout. Says how the
+covariance matrix packs its OMEGA entries, so a reader can undo the
+Cholesky parameterisation before reading correlations off it.}
+\item{kappa_is_diagonal}{The same flag for the IOV (KAPPA) block;
+\code{NA} when the model declares no IOV.}
 \item{shrinkage_eta}{Numeric vector of ETA shrinkage per random effect
 (\code{1 - SD(eta_hat_k) / sqrt(omega_kk)}). \code{NA} when
 \code{omega_kk = 0} or fewer than 2 subjects.}

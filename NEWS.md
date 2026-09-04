@@ -155,6 +155,76 @@
 
 ## New features
 
+- **`ferx_bic()` and `check_strictness()`: ranking and gating a candidate fit**
+  (#326, #327; ferx-core #1177). The two things an automated model search needs
+  from a finished fit, and neither was reachable from R.
+
+  `fit$bic` is the classical `OFV + p * log(n_obs)`. Pharmpy's `modelsearch` and
+  `iivsearch` rank on the Delattre et al. (2014) *mixed* BIC instead, which
+  penalises random-effects parameters on `log(n_subjects)` - ranking IIV
+  structures on the observation count systematically favours the wrong model.
+  `ferx_bic(fit, type)` offers all four of Pharmpy's variants (`"mixed"`,
+  `"iiv"`, `"random"`, `"fixed"`; the last reproduces `fit$bic`). The tally it
+  needs, `fit$bic_inputs`, comes off the same packed parameter mask the engine
+  counts `n_parameters` from, and travels in the `.fitrx` bundle, so a saved fit
+  can be re-ranked without the model or the data in hand.
+
+  `check_strictness(fit, ...)` answers whether a candidate is *eligible* to be
+  ranked at all. `fit$converged` is one flag and does not separate a genuine
+  optimum from a run that never left its initial estimates, a theta pinned to a
+  declared bound, an ill-conditioned covariance step or a near-singular
+  correlation matrix - under automation each of those is a model-selection
+  error. It returns `list(passed, failures, skipped)` with the reasons, on
+  pyDarwin's default posture, and reports a gate whose input is missing as
+  *skipped* rather than failing or silently passing it.
+
+  Four fields feed them and are new on `ferx_fit()`'s result: `left_init` (the
+  outer optimizer's own init-escape verdict), `stalled_at_init`,
+  `estimate_near_boundary`, and `max_abs_correlation` - the largest absolute
+  parameter correlation on the natural theta / OMEGA / SIGMA scale, which for a
+  `block_omega` model is a Cholesky Jacobian away from the packed `cov_matrix`
+  and so could not be computed in R. All four, and `bic_inputs`, survive a
+  `ferx_save_fit()` / `ferx_load_fit()` round-trip, and `ferx_covariance()`
+  refreshes `max_abs_correlation` alongside the matrix it is read off.
+
+  The bundle also carries what a *reader* needs to reach the same verdicts:
+  the condition number (it was written from the wire field name, which
+  `ferx_fit()` had already renamed and cleared, so every bundle this package
+  wrote stored a null and the condition-number gate came back *skipped* after a
+  reload), the initial estimates the engine's own `stalled_at_init()` checks
+  for shape before it consults `left_init`, and the packed OMEGA / KAPPA layout
+  (`fit$omega_is_diagonal` / `fit$kappa_is_diagonal`, also new on the result)
+  without which a reader takes correlations off the Cholesky scale for a
+  `block_omega` model.
+
+- **A fitted `block_sigma` correlation now reaches R** (ferx-core #847). A plain
+  (non-`FIX`) `block_sigma` estimates its off-diagonal, but the R layer never
+  carried it: everything that rebuilds parameters from a finished fit -
+  `ferx_predict()`, `ferx_simulate()`, `ferx_simulate_with_uncertainty()`,
+  `ferx_calc_npde()`, `ferx_sir()`, `ferx_covariance()` - read the correlation
+  back off the *model file*, so a fit whose rho had moved was silently
+  reconstructed at its declared initial value. The fitted correlations now come
+  off the FFI as `fit$residual_correlations` (a data frame of `sigma_i`,
+  `sigma_j`, `name`, `rho`, `fixed`, `se`), travel in the `.fitrx` bundle, and
+  are passed back to the engine on every reconstruction path.
+
+  The covariance matrix labels them too. The engine packs `block_sigma`
+  correlations *last*, after sigma, and `ferx_fit()` counted every
+  non-theta/non-sigma coordinate as omega - so a six-coordinate fit came back
+  named `TVCL, TVV, ETA_CL, "", PROP_ERR, ADD_ERR` for coordinates that are
+  really `..., PROP_ERR, ADD_ERR, rho`, shifting the sigma rows by one.
+  `ferx_covariance()` had the same arithmetic and is fixed with it.
+
+- **`check_strictness()` no longer passes a fit it cannot judge, or a gate it
+  cannot parse.** A missing boundary verdict - `NA` on a bundle written before
+  the predicate existed - was read as "not on a boundary" and quietly passed;
+  it is now reported under `skipped`, like the other gates with no input. And
+  the switches were read with `isTRUE()`, which treats anything that is not a
+  length-1 `TRUE` as "gate off": `reject_on_boundary = "TRUE"` disabled the
+  gate, and `max_condition_number = "typo"` coerced to `NA` and disabled that
+  one. Both now error. An explicit `NA` threshold still disables its gate - a
+  threshold nothing can exceed is not a gate.
+
 - **`ferx_bootstrap()` is interruptible with Ctrl-C** (#315). A 200-replicate run
   held the console until it finished: Ctrl-C did nothing, `ferx_stop()` is
   process-level and there is no `ferx_bootstrap_async()`, so the only way out of

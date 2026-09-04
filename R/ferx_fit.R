@@ -776,6 +776,39 @@
 #'     \code{"not_requested"}, or \code{"sir_fallback"} (the finite-difference
 #'     Hessian was not positive definite and \code{covariance_fallback = "sir"}
 #'     produced SIR-based intervals).}
+#'   \item{bic_inputs}{Named list of the free-parameter tally by Delattre
+#'     class - \code{n_obs}, \code{theta_random}, \code{theta_fixed},
+#'     \code{omega}, \code{kappa}, \code{sigma}, \code{sigma_random} - which
+#'     \code{\link{ferx_bic}} turns into the mixed / IIV / random BIC variants.
+#'     The five counts sum to \code{n_parameters}.}
+#'   \item{left_init}{The outer optimizer's own verdict on whether it left the
+#'     initial estimates: \code{TRUE}, \code{FALSE}, or \code{NA} when the
+#'     method recorded none.}
+#'   \item{stalled_at_init}{\code{TRUE} when no free parameter moved more than
+#'     1\% of its initial value, \code{NA} when the fit carries nothing to
+#'     judge by. Prefers \code{left_init} to comparing estimates.}
+#'   \item{estimate_near_boundary}{\code{TRUE} when a theta is pinned to a
+#'     declared bound - the predicate \code{\link{ferx_bootstrap}} applies as
+#'     \code{skip_estimate_near_boundary}.}
+#'   \item{max_abs_correlation}{Largest absolute off-diagonal of the covariance
+#'     matrix in correlation form, on the natural theta / OMEGA / SIGMA scale.
+#'     \code{NA} without a covariance matrix carrying two or more free
+#'     parameters. See \code{\link{check_strictness}}.}
+#'   \item{residual_correlations}{Data frame of the fitted \code{block_sigma}
+#'     residual correlations, or \code{NULL} when the model declares none.
+#'     Columns \code{sigma_i} / \code{sigma_j} (1-based indices into
+#'     \code{sigma}), \code{name} (the \code{EPS_A ~ EPS_B} label used in the
+#'     covariance matrix), \code{rho}, \code{fixed}, and \code{se}
+#'     (\code{NA} without a covariance step, \code{0} for a \code{FIX}ed
+#'     entry). A plain \code{block_sigma} estimates \code{rho}; a
+#'     \code{block_sigma ... FIX} holds it at the declared value.}
+#'   \item{omega_is_diagonal}{\code{TRUE} when the OMEGA block the fit was
+#'     estimated under is diagonal, \code{FALSE} for a \code{block_omega}
+#'     model, \code{NA} when the engine recorded no layout. Says how the
+#'     covariance matrix packs its OMEGA entries, so a reader can undo the
+#'     Cholesky parameterisation before reading correlations off it.}
+#'   \item{kappa_is_diagonal}{The same flag for the IOV (KAPPA) block;
+#'     \code{NA} when the model declares no IOV.}
 #'   \item{shrinkage_eta}{Numeric vector of ETA shrinkage per random effect
 #'     (\code{1 - SD(eta_hat_k) / sqrt(omega_kk)}). \code{NA} when
 #'     \code{omega_kk = 0} or fewer than 2 subjects.}
@@ -2014,6 +2047,32 @@ ferx_fit <- function(model, data = NULL,
     result$covariance_status <- "not_requested"
   }
 
+  # Model-selection surface (ferx-core #1177). `max_abs_correlation` arrives as
+  # NaN when the fit has no covariance matrix to read one off, and the two
+  # tri-state verdicts arrive absent when the engine recorded none. Normalize
+  # both to NA so check_strictness() meets a single "no input" shape whether
+  # the fit came from here or from ferx_load_fit().
+  if (!is.null(result$max_abs_correlation) &&
+        !is.finite(result$max_abs_correlation)) {
+    result$max_abs_correlation <- NA_real_
+  }
+  result$left_init <- .fitrx_unwrap_opt_lgl(result$left_init)
+  result$stalled_at_init <- .fitrx_unwrap_opt_lgl(result$stalled_at_init)
+  # The packed Omega / kappa layout, same tri-state shape. ferx_save_fit()
+  # writes these so a reader can undo the Cholesky parameterisation before
+  # reading correlations off the covariance matrix.
+  result$omega_is_diagonal <- .fitrx_unwrap_opt_lgl(result$omega_is_diagonal)
+  result$kappa_is_diagonal <- .fitrx_unwrap_opt_lgl(result$kappa_is_diagonal)
+
+  # Fitted `block_sigma` residual correlations as a tidy frame, or NULL when
+  # the model declares none. The FFI ships them as parallel vectors.
+  result$residual_correlations <- .ferx_residual_corr_frame(result)
+  for (k in c("residual_correlation_i", "residual_correlation_j",
+              "residual_correlation_rho", "residual_correlation_fixed",
+              "residual_correlation_names", "se_residual_correlation")) {
+    result[[k]] <- NULL
+  }
+
   # Reshape cov_matrix into a named square matrix (param ? param)
   d <- result$cov_matrix_dim %||% 0L
   if (!is.null(result$cov_matrix) && length(result$cov_matrix) > 0L && d > 0L) {
@@ -2021,7 +2080,13 @@ ferx_fit <- function(model, data = NULL,
     n_theta <- length(result$theta_names)
     n_eta <- result$omega_dim %||% 0L
     n_sigma <- length(result$sigma)
-    n_omega_packed <- d - n_theta - n_sigma
+    # The engine packs the `block_sigma` correlations *last* (after sigma), so
+    # they have to come out of the count before it can be read as omega -
+    # otherwise every trailing coordinate is off by the number of rho's and the
+    # sigma rows carry the wrong labels.
+    rho_nms <- .ferx_residual_corr_labels(result)
+    n_rho <- length(rho_nms)
+    n_omega_packed <- d - n_theta - n_sigma - n_rho
     # Determine parameterisation: diagonal (n_omega_packed == n_eta) or block
     eta_nms <- if (!is.null(result$eta_names) && length(result$eta_names) == n_eta) result$eta_names else NULL
     omega_names <- if (n_omega_packed == n_eta) {
@@ -2043,7 +2108,8 @@ ferx_fit <- function(model, data = NULL,
     pnames <- c(
       result$theta_names,
       if (n_omega_packed > 0L) omega_names else character(0L),
-      if (n_sigma > 0L) (if (!is.null(sig_nms)) sig_nms else paste0("SIGMA(", seq_len(n_sigma), ")")) else character(0L)
+      if (n_sigma > 0L) (if (!is.null(sig_nms)) sig_nms else paste0("SIGMA(", seq_len(n_sigma), ")")) else character(0L),
+      rho_nms
     )
     if (length(pnames) == d) rownames(m) <- colnames(m) <- pnames
     result$cov_matrix <- m
@@ -2345,6 +2411,44 @@ ferx_fit <- function(model, data = NULL,
 # appends a warning when condition_number > 1000 (NONMEM convention).
 # Inf is kept as-is: it signals a non-positive eigenvalue, which the covariance
 # step already warned about (covariance_status != "computed").
+# The fitted `block_sigma` residual correlations as a data frame, or NULL when
+# the model declares none. Columns: sigma_i / sigma_j (1-based indices into
+# `sigma`), name (the `EPS_A ~ EPS_B` label), rho, fixed, se. `se` is NA when
+# the covariance step did not run; the engine reports 0 for a FIXed entry.
+.ferx_residual_corr_frame <- function(result) {
+  rho <- as.numeric(result$residual_correlation_rho %||% numeric())
+  n <- length(rho)
+  if (n == 0L) return(NULL)
+  se <- as.numeric(result$se_residual_correlation %||% numeric())
+  if (length(se) != n) se <- rep(NA_real_, n)
+  data.frame(
+    sigma_i = as.integer(result$residual_correlation_i %||% rep(NA_integer_, n)),
+    sigma_j = as.integer(result$residual_correlation_j %||% rep(NA_integer_, n)),
+    name    = as.character(result$residual_correlation_names %||%
+                             paste0("RHO(", seq_len(n), ")")),
+    rho     = rho,
+    fixed   = as.logical(result$residual_correlation_fixed %||% rep(FALSE, n)),
+    se      = se,
+    stringsAsFactors = FALSE
+  )
+}
+
+# Covariance-matrix labels for the trailing residual-correlation coordinates.
+# Reads either the raw FFI shape (parallel vectors) or a finished fit (the
+# data frame above), so ferx_fit() and ferx_covariance() label alike.
+.ferx_residual_corr_labels <- function(x) {
+  rc <- x$residual_correlations
+  if (is.data.frame(rc)) {
+    if (nrow(rc) == 0L) return(character(0L))
+    return(as.character(rc$name))
+  }
+  nms <- as.character(x$residual_correlation_names %||% character())
+  if (length(nms) > 0L) return(nms)
+  n <- length(x$residual_correlation_rho %||% numeric())
+  if (n == 0L) return(character(0L))
+  paste0("RHO(", seq_len(n), ")")
+}
+
 .ferx_apply_cov_sentinels <- function(result) {
   result$eigenvalues <- if (length(result$cov_eigenvalues) == 0L) NULL else result$cov_eigenvalues
   result$condition_number <- if (is.nan(result$cov_condition_number)) NULL else result$cov_condition_number

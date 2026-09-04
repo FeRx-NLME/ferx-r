@@ -30,7 +30,10 @@ Default \code{FALSE}.}
 \value{
 The input \code{fit}, with \code{cov_matrix}, \code{cor_matrix}, \code{se_theta},
 \code{se_omega}, \code{se_sigma}, \code{se_kappa}, \code{covariance_status}, \code{eigenvalues},
-and \code{condition_number} refreshed.
+\code{condition_number}, \code{max_abs_correlation} (the largest absolute
+off-diagonal parameter correlation, \code{NA} when the step produced no
+matrix - the value \code{\link[=check_strictness]{check_strictness()}} gates on), and the \code{se} column of
+\code{residual_correlations} refreshed.
 }
 \description{
 Run the finite-difference-Hessian covariance step against a fit that was

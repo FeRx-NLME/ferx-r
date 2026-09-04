@@ -260,15 +260,52 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
       se = .fitrx_opt_num_vec(fit$se_sigma),
       fixed = as.logical(fit$sigma_fixed %||% rep(FALSE, length(fit$sigma %||% numeric()))),
       types = as.character(fit$sigma_types %||% rep("proportional", length(fit$sigma %||% numeric()))),
-      init_as_sd = as.logical(fit$sigma_init_as_sd %||% rep(FALSE, length(fit$sigma %||% numeric())))
+      init_as_sd = as.logical(fit$sigma_init_as_sd %||% rep(FALSE, length(fit$sigma %||% numeric()))),
+      # `block_sigma` residual correlations (ferx-core #847). A plain block
+      # estimates rho, so the *fitted* value has to travel with the bundle -
+      # a reader that falls back to the model file gets the declared initial
+      # correlation. The wire nests them under `sigma`; `sigma_i` / `sigma_j`
+      # are 0-based there (the R frame carries them 1-based).
+      residual_correlations = .fitrx_residual_corr_wire(fit),
+      residual_correlation_fixed = .fitrx_residual_corr_fixed(fit),
+      se_residual_correlations = .fitrx_residual_corr_se(fit)
     ),
     error_model = .fitrx_error_model_from_sigma_types(fit$sigma_types),
     shrinkage_eps = as.numeric(fit$shrinkage_eps %||% NA_real_),
     dw_statistic = .fitrx_opt_num(fit$dw_statistic),
     iwres_lag1_r = .fitrx_opt_num(fit$iwres_lag1_r),
     covariance_matrix = .fitrx_matrix_to_wire(fit$cov_matrix),
-    cov_eigenvalues = .fitrx_opt_num_vec(fit$cov_eigenvalues),
-    cov_condition_number = .fitrx_opt_num(fit$cov_condition_number),
+    # ferx_fit() and ferx_covariance() rename these to `eigenvalues` /
+    # `condition_number` and clear the wire names (.ferx_apply_cov_sentinels);
+    # ferx_load_fit() leaves the wire names in place. Read whichever spelling
+    # the fit carries - reading only the wire name wrote a null on every
+    # bundle this package saves, which made check_strictness()'s condition
+    # number gate skip (rather than fail) on reload.
+    cov_eigenvalues = .fitrx_opt_num_vec(fit$cov_eigenvalues %||% fit$eigenvalues),
+    cov_condition_number = .fitrx_opt_num(
+      fit$cov_condition_number %||% fit$condition_number
+    ),
+    # Free-parameter tally by Delattre class and the optimizer's init-escape
+    # verdict (ferx-core #1177). Written at wire level, not under `r_extras`,
+    # so a bundle this package saves ranks and gates the same way in the
+    # engine's own tooling. `bic_inputs` is a plain (non-Option) field on the
+    # Rust side whose `#[serde(default)]` only covers a *missing* key, so it is
+    # always written in full - an all-zero tally is exactly what that default
+    # is, and `ferx_bic()` reports NA on it rather than a wrong penalty.
+    bic_inputs = .fitrx_bic_inputs_wire(fit),
+    left_init = .fitrx_opt_lgl(fit$left_init),
+    # `stalled_at_init()` in the engine returns None unless theta/sigma/omega
+    # inits match the estimates in shape - it checks that *before* consulting
+    # `left_init` - so the inits ship with the verdict or the verdict is inert.
+    theta_init = as.numeric(fit$theta_init %||% numeric()),
+    sigma_init = as.numeric(fit$sigma_init %||% numeric()),
+    omega_init = .fitrx_matrix_to_wire(.fitrx_omega_init_matrix(fit)),
+    # The packed Omega / kappa layout. `natural_scale_covariance()` returns the
+    # covariance matrix as stored when this is absent, so a bundle written
+    # without it makes the engine read correlations off the Cholesky scale for
+    # a `block_omega` model.
+    omega_is_diagonal = .fitrx_opt_lgl(fit$omega_is_diagonal),
+    kappa_is_diagonal = .fitrx_opt_lgl(fit$kappa_is_diagonal),
 
     sir = .fitrx_build_sir_wire(fit),
     bayes = .fitrx_build_bayes_wire(fit),
@@ -472,6 +509,53 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   "combined"
 }
 
+# The fitted `block_sigma` correlations in the wire's shape: a list of
+# {sigma_i, sigma_j, rho} objects with 0-based indices. Empty list for a model
+# that declares none, which serialises to `[]` and reads back as no
+# correlations rather than tripping the loader's shape checks.
+.fitrx_residual_corr_wire <- function(fit) {
+  rc <- fit$residual_correlations
+  if (!is.data.frame(rc) || nrow(rc) == 0L) return(list())
+  lapply(seq_len(nrow(rc)), function(k) list(
+    sigma_i = as.integer(rc$sigma_i[k]) - 1L,
+    sigma_j = as.integer(rc$sigma_j[k]) - 1L,
+    rho     = as.numeric(rc$rho[k])
+  ))
+}
+
+# Parallel FIX flags. The engine treats an empty vector on a bundle that *has*
+# correlations as "pre-#847, every correlation fixed", so it is only left empty
+# when there are no correlations at all.
+.fitrx_residual_corr_fixed <- function(fit) {
+  rc <- fit$residual_correlations
+  if (!is.data.frame(rc) || nrow(rc) == 0L) return(logical())
+  as.logical(rc$fixed)
+}
+
+# Parallel standard errors, or NULL when the covariance step produced none -
+# the wire field is an Option, and writing NAs would claim SEs that don't exist.
+.fitrx_residual_corr_se <- function(fit) {
+  rc <- fit$residual_correlations
+  if (!is.data.frame(rc) || nrow(rc) == 0L) return(NULL)
+  se <- as.numeric(rc$se)
+  if (all(is.na(se))) return(NULL)
+  se[is.na(se)] <- 0
+  se
+}
+
+# Rebuild the initial-omega matrix from the flat row-major vector + dimension
+# the FFI ships (`omega_init` / `omega_init_dim`). Returns NULL when the fit
+# carries no inits (an in-memory or pre-runlog fit), which writes no
+# `omega_init` key at all.
+.fitrx_omega_init_matrix <- function(fit) {
+  v <- fit$omega_init
+  if (is.null(v) || length(v) == 0L) return(NULL)
+  if (is.matrix(v)) return(v)
+  n <- as.integer(fit$omega_init_dim %||% 0L)
+  if (is.na(n) || n <= 0L || length(v) != n * n) return(NULL)
+  matrix(as.numeric(v), nrow = n, ncol = n, byrow = TRUE)
+}
+
 .fitrx_matrix_to_wire <- function(m) {
   if (is.null(m)) return(NULL)
   if (!is.matrix(m)) {
@@ -596,13 +680,41 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   )
 }
 
+# The `bic_inputs` wire object: the seven counts ferx-core's `BicInputs`
+# carries, always complete. A fit with no tally (loaded from a bundle written
+# before the tally existed) writes the all-zero default rather than dropping
+# the key, so the JSON stays valid against a non-Option Rust field.
+.fitrx_bic_inputs_wire <- function(fit) {
+  raw <- fit$bic_inputs %||% list()
+  count <- function(nm) {
+    v <- suppressWarnings(as.integer(raw[[nm]] %||% 0L))
+    if (length(v) != 1L || is.na(v) || v < 0L) 0L else v
+  }
+  list(
+    n_obs        = count("n_obs"),
+    theta_random = count("theta_random"),
+    theta_fixed  = count("theta_fixed"),
+    omega        = count("omega"),
+    kappa        = count("kappa"),
+    sigma        = count("sigma"),
+    sigma_random = isTRUE(as.logical(raw$sigma_random %||% FALSE))
+  )
+}
+
 # Fields that have no place in the cross-language schema but matter for R
 # users (R-side derived labels, call settings, model file settings, etc.).
 # Stored under fit.json:r_extras so the Rust loader silently ignores them.
 .fitrx_collect_r_extras <- function(fit) {
   r_only_keys <- c(
     "call_settings", "model_file_settings", "model_structure",
-    "data_name", "gradient", "gradient_used", "model_file_path"
+    "data_name", "gradient", "gradient_used", "model_file_path",
+    # Verdicts the engine derives from a live FitResult (ferx-core #1177) and
+    # the cross-language schema has no slot for. Two of them cannot be redone
+    # in R at all - the boundary predicate reads structured warning details the
+    # wire drops, and the correlation needs the natural-scale covariance, a
+    # Cholesky Jacobian away from the packed matrix the wire stores - so they
+    # travel with the bundle rather than being recomputed on load.
+    "stalled_at_init", "estimate_near_boundary", "max_abs_correlation"
   )
   out <- list()
   for (k in r_only_keys) {

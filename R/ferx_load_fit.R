@@ -201,6 +201,18 @@ ferx_load_fit <- function(path) {
     gradient_method_outer = as.character(w$gradient_method_outer %||% ""),
     nlopt_missing_algorithms = unlist(w$nlopt_missing_algorithms %||% list(), use.names = FALSE),
     covariance_status = .fitrx_covariance_status_label(w$covariance_status),
+    # ferx-core #1177. `bic_inputs` is absent on a bundle written before the
+    # tally existed; ferx_bic() reports NA on that rather than a wrong penalty.
+    # `left_init` is NA when no optimizer recorded an init-escape verdict.
+    bic_inputs = .fitrx_bic_inputs_from_wire(w$bic_inputs),
+    left_init = .fitrx_unwrap_opt_lgl(w$left_init),
+    # Initial estimates (written alongside `left_init` so the engine's own
+    # stalled_at_init() shape check passes on an R-written bundle) and the
+    # packed Omega / kappa layout the natural-scale covariance needs.
+    theta_init = as.numeric(unlist(w$theta_init %||% list(), use.names = FALSE)),
+    sigma_init = as.numeric(unlist(w$sigma_init %||% list(), use.names = FALSE)),
+    omega_is_diagonal = .fitrx_unwrap_opt_lgl(w$omega_is_diagonal),
+    kappa_is_diagonal = .fitrx_unwrap_opt_lgl(w$kappa_is_diagonal),
     covariance_n_evals_estimated = .fitrx_unwrap_opt_num(w$covariance_n_evals_estimated),
     trace_path = .fitrx_unwrap_opt_chr(w$trace_path),
     ebe_convergence_warnings = as.integer(w$ebe_convergence_warnings %||% 0L),
@@ -241,6 +253,10 @@ ferx_load_fit <- function(path) {
     ),
     se_sigma = .fitrx_unwrap_opt_num_vec(w$sigma$se),
     sigma_init_as_sd = as.logical(unlist(w$sigma$init_as_sd %||% list(), use.names = FALSE)),
+    # `block_sigma` residual correlations (ferx-core #847), nested under
+    # `sigma` on the wire with 0-based indices; NULL when the model declares
+    # none, matching what ferx_fit() puts on a fit without them.
+    residual_correlations = .fitrx_residual_corr_from_wire(w$sigma),
 
     shrinkage_eps = as.numeric(w$shrinkage_eps),
     dw_statistic = .fitrx_unwrap_opt_num(w$dw_statistic),
@@ -366,6 +382,18 @@ ferx_load_fit <- function(path) {
     out$kappa_weight_typical <- NULL
   }
 
+  # `omega_init` travels as a matrix on the wire but as a flat row-major
+  # vector + dimension in the fit list (the shape the FFI ships), so the
+  # runlog and the save path see the same fields either way.
+  omega_init_mat <- .fitrx_matrix_from_wire(w$omega_init)
+  if (!is.null(omega_init_mat)) {
+    out$omega_init <- as.numeric(as.vector(t(omega_init_mat)))
+    out$omega_init_dim <- as.integer(nrow(omega_init_mat))
+  } else {
+    out$omega_init <- numeric()
+    out$omega_init_dim <- 0L
+  }
+
   # R extras
   extras <- w$r_extras
   if (!is.null(extras)) {
@@ -373,6 +401,13 @@ ferx_load_fit <- function(path) {
       out[[key]] <- extras[[key]]
     }
   }
+  # Tri-state verdicts (ferx-core #1177) are NA when the optimizer recorded no
+  # verdict. `NA` serialises to JSON null and assigning NULL back would drop
+  # the key entirely, turning a documented `NA` into `is.na(x)` on a
+  # zero-length vector - an error, not a missing verdict. Restore the NA.
+  if (is.null(out$stalled_at_init)) out$stalled_at_init <- NA
+  if (is.null(out$estimate_near_boundary)) out$estimate_near_boundary <- NA
+  if (is.null(out$max_abs_correlation)) out$max_abs_correlation <- NA_real_
   out
 }
 
@@ -397,6 +432,27 @@ ferx_load_fit <- function(path) {
   )
 }
 
+# Read the `bic_inputs` wire object back as a plain list of counts. NULL when
+# the bundle carries none (written before ferx-core #1177), which ferx_bic()
+# reads as "no tally" and answers NA to.
+.fitrx_bic_inputs_from_wire <- function(x) {
+  if (is.null(x) || !length(x)) return(NULL)
+  count <- function(nm) {
+    v <- suppressWarnings(as.integer(unlist(x[[nm]] %||% NA, use.names = FALSE)))
+    if (length(v) != 1L || is.na(v)) NA_integer_ else v
+  }
+  list(
+    n_obs        = count("n_obs"),
+    theta_random = count("theta_random"),
+    theta_fixed  = count("theta_fixed"),
+    omega        = count("omega"),
+    kappa        = count("kappa"),
+    sigma        = count("sigma"),
+    sigma_random = isTRUE(as.logical(unlist(x$sigma_random %||% FALSE,
+                                            use.names = FALSE)))
+  )
+}
+
 .fitrx_covariance_status_label <- function(token) {
   if (is.null(token)) return("NotRequested")
   switch(as.character(token),
@@ -405,6 +461,39 @@ ferx_load_fit <- function(path) {
     "not_requested" = "NotRequested",
     "sir_fallback" = "SirFallback",
     as.character(token)
+  )
+}
+
+# Read the wire's residual correlations back into the tidy frame ferx_fit()
+# builds. Indices come back 1-based; a bundle whose FIX flags predate #847 had
+# every correlation fixed by construction, which is what an empty vector means.
+.fitrx_residual_corr_from_wire <- function(sig) {
+  rc <- sig$residual_correlations
+  if (is.null(rc) || length(rc) == 0L) return(NULL)
+  i <- vapply(rc, function(x) as.integer(x$sigma_i) + 1L, integer(1L))
+  j <- vapply(rc, function(x) as.integer(x$sigma_j) + 1L, integer(1L))
+  rho <- vapply(rc, function(x) as.numeric(x$rho), numeric(1L))
+  n <- length(rho)
+  fixed <- as.logical(unlist(sig$residual_correlation_fixed %||% list(),
+                             use.names = FALSE))
+  if (length(fixed) != n) fixed <- rep(TRUE, n)
+  se <- as.numeric(unlist(sig$se_residual_correlations %||% list(),
+                          use.names = FALSE))
+  if (length(se) != n) se <- rep(NA_real_, n)
+  nms <- as.character(unlist(sig$names %||% list(), use.names = FALSE))
+  label <- function(k) {
+    if (k >= 1L && k <= length(nms) && nzchar(nms[k])) nms[k] else sprintf("SIGMA(%d)", k)
+  }
+  data.frame(
+    sigma_i = i,
+    sigma_j = j,
+    name    = vapply(seq_len(n),
+                     function(k) sprintf("%s ~ %s", label(i[k]), label(j[k])),
+                     character(1L)),
+    rho     = rho,
+    fixed   = fixed,
+    se      = se,
+    stringsAsFactors = FALSE
   )
 }
 

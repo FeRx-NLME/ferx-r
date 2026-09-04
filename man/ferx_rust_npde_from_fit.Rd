@@ -13,6 +13,7 @@ ferx_rust_npde_from_fit(
   sigma,
   omega_iov_flat,
   omega_iov_dim,
+  residual_rho,
   nsim,
   seed
 )

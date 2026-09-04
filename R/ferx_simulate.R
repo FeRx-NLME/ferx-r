@@ -119,6 +119,7 @@ ferx_simulate <- function(model, data = NULL, n_sim = 1L, seed = 42L, fit = NULL
       sigma = fit_pieces$sigma,
       omega_iov_flat = fit_pieces$omega_iov_flat,
       omega_iov_dim = fit_pieces$omega_iov_dim,
+      residual_rho = fit_pieces$residual_rho,
       n_sim = as.integer(n_sim),
       seed = as.integer(seed),
       match_method = match_method,

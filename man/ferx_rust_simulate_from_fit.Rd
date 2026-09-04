@@ -13,6 +13,7 @@ ferx_rust_simulate_from_fit(
   sigma,
   omega_iov_flat,
   omega_iov_dim,
+  residual_rho,
   n_sim,
   seed,
   match_method,

@@ -75,6 +75,7 @@ ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = 
     sigma      = fit_pieces$sigma,
     omega_iov_flat = fit_pieces$omega_iov_flat,
     omega_iov_dim  = fit_pieces$omega_iov_dim,
+    residual_rho = fit_pieces$residual_rho,
     nsim       = nsim,
     seed       = seed_int
   )
