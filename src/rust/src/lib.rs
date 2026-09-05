@@ -908,6 +908,12 @@ fn ferx_rust_simulate_with_uncertainty(
         n_sim_per_draw: n_sim_per_draw.max(0) as usize,
         method: uncertainty_method,
         seed: Some(seed as u64),
+        // Spread the rest so a field added in ferx-core is additive here rather
+        // than an `error[E0063]: missing field` build break (ferx-core #529).
+        // Every field this entry point exposes stays explicit: the two counts
+        // default to `0`, which would draw nothing, and `method` is a real R
+        // argument decoded above, not something to inherit.
+        ..Default::default()
     };
 
     match ferx_core::simulate_with_uncertainty(&parsed.model, &population, &fit_result, &opts) {
@@ -5002,11 +5008,13 @@ fn ferx_rust_gam_screen(
         .collect();
 
     let opts = ferx_tools::gam::GamOptions {
-        etas: None,
-        covariates: None,
         spline_df: spline_df_usize,
         include_linear,
         shrinkage_warn_threshold: shrinkage_warn,
+        // `etas` / `covariates` keep their default `None` ("screen all"), which
+        // is what this entry point passed explicitly before; spreading the rest
+        // keeps a newly added ferx-tools field additive (ferx-core #529).
+        ..Default::default()
     };
 
     let result = ferx_tools::gam::gam_screen_raw(
