@@ -480,6 +480,22 @@
   estimated theta carries no ETA at all, which is the shape the bias was measured
   on; attaching an ETA or holding the parameter `FIX` remains the better fix.
 
+- **The ODE solver `settings` now warn when the model never integrates**
+  ([ferx-core #518](https://github.com/FeRx-NLME/ferx-core/issues/518)).
+  `ode_reltol` / `ode_abstol` / `ode_max_steps` / `ode_method` /
+  `ode_stiff_abort_after` / `ode_auto_switch` on an analytical PK model with no
+  `[odes]` block and no closed-form absorption ODE twin were dropped in silence;
+  they now come back as an unused-option warning. A model that does integrate —
+  including a transit / inverse-Gaussian model reaching its twin — still never
+  warns on these keys.
+
+- **`nn_l2` and `nn_smooth` regularization for the covariate NN (DCM)**
+  ([ferx-core #1215](https://github.com/FeRx-NLME/ferx-core/issues/1215)).
+  Two new `settings` keys, both defaulting to `0.0` (off, a strict no-op), adding
+  L2 weight decay and a curvature penalty to a `[covariate_nn]` fit. Only
+  available in a build with the `nn` cargo feature enabled, which is off in the
+  default package build.
+
 ## Bug fixes
 
 - **An infusion into a built-in absorption compartment is no longer delivered
@@ -603,6 +619,33 @@
   `ferx_get_warnings()` prints the category but has no remediation text for it
   yet, so it shows without the guidance block other categories get.
 
+- **A dose landing within 1e-12 of a derived break time is no longer applied
+  twice** ([ferx-core #1186](https://github.com/FeRx-NLME/ferx-core/issues/1186)).
+  A per-route absorption onset (`dose.time + ALAG + lag`) or an infusion end
+  (`dose.time + AMT/RATE`) is a multi-term float sum, so it routinely lands an ULP
+  or two from another dose's own break and the dose fired at both: a bolus was
+  doubled, and a colliding infusion ran at double rate for the whole window. The
+  dose / SS-seed / reset match is now one tolerance across every engine — it used
+  to be looser on the sdtab, joint PK-TTE hazard, `[derived]`, Markov and
+  `ferx_simulate()` paths than on the objective, so the same dataset could double
+  a dose in every diagnostic while the reported OFV was correct.
+
+- **A joint PK-TTE subject whose `TENTRY` falls at or before its first record no
+  longer scores the divergence sentinel**
+  ([ferx-core #1223](https://github.com/FeRx-NLME/ferx-core/issues/1223)).
+  Whether such a subject was repelled or scored depended on which internal engine
+  it was admitted to. Both now agree with `ferx_predict_survival()`: `H = 0` and
+  `h = h(u0)` there, so a pre-start entry time contributes nothing.
+
+- **A joint PK-TTE / binary / Markov model fed a population read without the model
+  is now a hard error**
+  ([ferx-core #1199](https://github.com/FeRx-NLME/ferx-core/issues/1199)).
+  An unrouted read carried the endpoint's rows as Gaussian observations and no
+  event records, so the fit ran the Gaussian half only and reported a plausible,
+  finite, wrong objective. `E_ENDPOINT_UNROUTED` now names the CMT instead; the
+  guard also covers `ferx_covariance()` and `ferx_sir()`, which previously
+  computed on the Gaussian half of a joint likelihood.
+
 ## Internal
 
 - **`ferx-tools` is now a second git dependency**, from the same ferx-core
@@ -624,6 +667,23 @@
   #1004 above, that range carries #1040, #1028/#1042/#1045, #1039/#1020,
   #1011/#1012, #1006/#1007, #1008, #1019 and #1021 — every user-visible one
   is written up in the sections above. No glue change.
+
+- **The ferx-core `*Options` structs are now spread-constructed in the glue**
+  ([ferx-core #529](https://github.com/FeRx-NLME/ferx-core/issues/529), #330).
+  `SimulateUncertaintyOptions` and `ferx_tools::gam::GamOptions` were built with
+  exhaustive struct literals, so the next field added to either in the engine
+  breaks this build with `error[E0063]: missing field` — the cross-repo trap
+  `CLAUDE.md`'s sibling-repo note warns about, which already bit us once for
+  `SimulateOptions` (ferx-core #522 / #200). Both now carry
+  `..Default::default()`, and a new `R-CMD-check` step scans `src/rust/src/*.rs`
+  for an options literal without one, so a future entry point cannot reintroduce
+  the shape. Behaviour is unchanged: every field these entry points expose is
+  still passed explicitly.
+
+- Bumped the pinned ferx-core commit to `fdef70be` for the `Default` derives
+  above. That range also carries ferx-core #1186, #1223, #1199 and #518 — all
+  written up in the sections above — plus #1178/#1179 (the `ferx-tools` search
+  runner and MFL parser, not yet wired to R) and CI/docs-only work.
 
 # ferx 0.3.0
 
