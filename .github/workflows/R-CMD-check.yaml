@@ -80,6 +80,48 @@ jobs:
             exit 1
           fi
 
+      # Every ferx-core / ferx-tools `*Options` struct derives `Default`
+      # (ferx-core #529, enforced there by the A4 guard in
+      # tests/public_api_boundary.rs), so the glue must construct them with a
+      # `..Default::default()` spread. An exhaustive literal breaks this build
+      # with `error[E0063]: missing field` the moment the engine adds a field —
+      # the cross-repo trap CLAUDE.md's sibling-repo note warns about, which
+      # already bit us once for `SimulateOptions` (ferx-core #522 -> #200).
+      #
+      # The scan is textual: it opens at a `<Name>Options {` line that is not a
+      # declaration, tracks brace depth to the end of the literal, and requires
+      # a line inside it that *starts* with `..` — so a `0..n` range in a field
+      # value does not count as a spread, and a commented-out literal is not
+      # scanned at all.
+      - name: Verify ferx-core options structs are spread-constructed
+        run: |
+          fail=0
+          for f in src/rust/src/*.rs; do
+            awk -v file="$f" '
+              { line = $0; sub(/^[[:space:]]+/, "", line) }
+              line ~ /^\/\// { next }
+              !in_lit && /[A-Za-z_][A-Za-z0-9_]*Options[[:space:]]*\{[[:space:]]*$/ \
+                      && !/(^|[^A-Za-z0-9_])(struct|impl|fn|trait|enum)([^A-Za-z0-9_]|$)/ {
+                in_lit = 1; start = NR; spread = 0; depth = 0
+                match($0, /[A-Za-z_][A-Za-z0-9_]*Options/); name = substr($0, RSTART, RLENGTH)
+              }
+              in_lit {
+                if (line ~ /^\.\./) spread = 1
+                n = gsub(/\{/, "{"); depth += n
+                n = gsub(/\}/, "}"); depth -= n
+                if (depth <= 0) {
+                  if (!spread) {
+                    printf "::error file=%s,line=%d::%s is built with an exhaustive struct literal. Add `..Default::default()` so a new ferx-core field stays additive (ferx-core #529).\n", file, start, name
+                    bad = 1
+                  }
+                  in_lit = 0
+                }
+              }
+              END { exit (bad ? 1 : 0) }
+            ' "$f" || fail=1
+          done
+          exit $fail
+
       - uses: r-lib/actions/setup-r@v2
         with:
           r-version: ${{ matrix.config.r }}
