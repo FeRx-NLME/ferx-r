@@ -5062,6 +5062,304 @@ fn ferx_rust_gam_screen(
     )
 }
 
+// ---------------------------------------------------------------------------
+//  Model-space search: the shared surface (ferx-r #332 Part 1)
+// ---------------------------------------------------------------------------
+//
+// `ferx_tools::search` owns the `.ferxsearch` loader, the MFL parser, the
+// coverage check and the `@`-symbol resolver. These bindings expose the
+// *validation* half of it, so a search space can be inspected and refused
+// before the first candidate is fitted. None of them runs a fit; the runner
+// (and the tools built on it) arrive with covsearch (ferx-core #1180).
+//
+// The R side never re-implements the grammar: every rendered feature string
+// here comes from `Feature`'s own `Display`, and the candidate-table column
+// list comes from `search::TABLE_COLUMNS`, so an engine change shows up in R
+// rather than drifting from it.
+
+/// Split an MFL program into the parallel vectors the R side assembles into a
+/// feature data frame: the rendered feature, its keyword, and whether it is
+/// exploratory (`COVARIATE?` vs `COVARIATE`).
+fn search_feature_columns(mfl: &ferx_tools::search::Mfl) -> (Vec<String>, Vec<String>, Vec<bool>) {
+    let mut feature = Vec::new();
+    let mut keyword = Vec::new();
+    let mut optional = Vec::new();
+    for f in mfl.features() {
+        feature.push(f.to_string());
+        // `Feature::keyword()` appends `?` for an exploratory statement; the R
+        // table carries that as its own logical column, so strip it here.
+        let kw = f.keyword();
+        optional.push(kw.ends_with('?'));
+        keyword.push(kw.trim_end_matches('?').to_string());
+    }
+    (feature, keyword, optional)
+}
+
+/// The coverage table: one row per feature the engine can express, and one row
+/// per gap for the features it cannot.
+///
+/// `check_coverage` reports gaps for a whole program, so it is run per feature
+/// to keep covered features in the table too - the point of the R-side table
+/// is that an unsupported feature is a *row*, not an aborted run. A gap names
+/// the offending mode (`ELIMINATION(MM)`) rather than the source statement
+/// (`ELIMINATION(*)`), which is the more useful of the two identities.
+fn search_coverage_rows(mfl: &ferx_tools::search::Mfl) -> (Vec<String>, Vec<bool>, Vec<String>) {
+    let mut feature = Vec::new();
+    let mut covered = Vec::new();
+    let mut reason = Vec::new();
+    for f in mfl.features() {
+        let one = ferx_tools::search::Mfl {
+            statements: vec![ferx_tools::search::Statement::Feature(f.clone())],
+        };
+        match ferx_tools::search::check_coverage(&one) {
+            Ok(()) => {
+                feature.push(f.to_string());
+                covered.push(true);
+                reason.push(String::new());
+            }
+            Err(e) => {
+                for gap in e.gaps {
+                    feature.push(gap.feature);
+                    covered.push(false);
+                    reason.push(gap.reason);
+                }
+            }
+        }
+    }
+    (feature, covered, reason)
+}
+
+/// `[rank] type` as its TOML spelling, so the value R reports back is the one
+/// a user would write in the file.
+fn search_rank_label(kind: ferx_tools::search::RankType) -> &'static str {
+    match kind {
+        ferx_tools::search::RankType::Ofv => "ofv",
+        ferx_tools::search::RankType::Aic => "aic",
+        ferx_tools::search::RankType::Bic => "bic",
+        ferx_tools::search::RankType::BicMixed => "bic_mixed",
+        ferx_tools::search::RankType::BicIiv => "bic_iiv",
+        ferx_tools::search::RankType::BicRandom => "bic_random",
+        ferx_tools::search::RankType::BicFixed => "bic_fixed",
+        ferx_tools::search::RankType::Penalized => "penalized",
+    }
+}
+
+/// Load and validate a `.ferxsearch` configuration file.
+///
+/// The engine's loader is the whole validation: an unknown section, an
+/// unparseable `[space] mfl`, an empty space, a coverage gap or an
+/// unimplemented `[rank] type` are all errors here, before any fit.
+///
+/// @param path Path to a `.ferxsearch` file
+/// @return Named list with the resolved `base` / `data` / `dir` paths, the
+///   `[space]` source and its parallel feature vectors (`feature`, `keyword`,
+///   `optional`), the rank settings, the *effective* strictness gate plus the
+///   keys the file set explicitly (`strictness_set`), the `[run]` settings,
+///   and the names of the tool sections the file carries.
+/// @keywords internal
+#[extendr]
+fn ferx_rust_search_config_load(path: &str) -> List {
+    let cfg = match ferx_tools::search::SearchConfig::load(path) {
+        Ok(cfg) => cfg,
+        Err(e) => throw_r_error(e),
+    };
+
+    let (feature, keyword, optional) = search_feature_columns(&cfg.mfl);
+
+    // The effective gate: the file's keys overlaid on ferx-core's defaults, so
+    // R reports what the search would actually enforce. `strictness_set` says
+    // which of them the file stated, for a print method that wants to show the
+    // difference.
+    let gate = cfg.strictness.strictness();
+    let mut strictness_set: Vec<String> = Vec::new();
+    for (set, name) in [
+        (cfg.strictness.require_converged.is_some(), "require_converged"),
+        (cfg.strictness.require_covariance.is_some(), "require_covariance"),
+        (cfg.strictness.max_condition_number.is_some(), "max_condition_number"),
+        (cfg.strictness.max_correlation.is_some(), "max_correlation"),
+        (cfg.strictness.reject_on_boundary.is_some(), "reject_on_boundary"),
+        (cfg.strictness.reject_init_stall.is_some(), "reject_init_stall"),
+    ] {
+        if set {
+            strictness_set.push(name.to_string());
+        }
+    }
+
+    // NaN is the "no value" sentinel for the optional numerics (the R side maps
+    // it to NA); 0 is the sentinel for `[run] threads`, whose absence means
+    // "let the runner choose".
+    let nan_if_none = |v: Option<f64>| v.unwrap_or(f64::NAN);
+
+    list!(
+        base = cfg.base.to_string_lossy().into_owned(),
+        data = cfg
+            .data
+            .as_ref()
+            .map(|d| d.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        dir = cfg.dir.to_string_lossy().into_owned(),
+        mfl = cfg.mfl_source.clone(),
+        feature = feature,
+        keyword = keyword,
+        optional = optional,
+        rank_type = search_rank_label(cfg.rank.kind),
+        rank_cutoff = nan_if_none(cfg.rank.cutoff),
+        require_converged = gate.require_converged,
+        require_covariance = gate.require_covariance,
+        max_condition_number = nan_if_none(gate.max_condition_number),
+        max_correlation = nan_if_none(gate.max_correlation),
+        reject_on_boundary = gate.reject_on_boundary,
+        reject_init_stall = gate.reject_init_stall,
+        strictness_set = strictness_set,
+        threads = cfg.run.threads.unwrap_or(0) as i32,
+        retries = cfg.run.retries as i32,
+        cache_dir = cfg
+            .run
+            .cache_dir
+            .as_ref()
+            .map(|d| cfg.dir.join(d).to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        resume = cfg.run.resume,
+        tools = cfg.tools.keys().cloned().collect::<Vec<String>>(),
+    )
+}
+
+/// Parse an MFL search space, optionally resolving it against a base model.
+///
+/// With no model the space is parsed and returned as written. With one, every
+/// `@`-symbol and wildcard is resolved against the model's individual
+/// parameters, its template line, its `[covariates]` block and the dataset, so
+/// the returned features are the ground space the search would explore.
+///
+/// @param mfl MFL source text
+/// @param model_path Path to a `.ferx` model, or `""` to skip resolution
+/// @param data_path Path to the dataset, or `""` to use the model's `[data]`
+/// @return Named list: the parsed `feature` / `keyword` / `optional` vectors,
+///   a `resolved` flag, the resolved feature vectors (`resolved_*`, empty when
+///   no model was given), the ground covariate effects as parallel vectors
+///   (`effect_parameter`, `effect_covariate`, `effect_form`, `effect_op`,
+///   `effect_optional`), and the resolver's `notes`.
+/// @keywords internal
+#[extendr]
+fn ferx_rust_search_space_parse(mfl: &str, model_path: &str, data_path: &str) -> List {
+    use ferx_tools::search::mfl::Mode as _;
+
+    let parsed = match ferx_tools::search::Mfl::parse(mfl) {
+        Ok(m) => m,
+        Err(e) => throw_r_error(e),
+    };
+    let (feature, keyword, optional) = search_feature_columns(&parsed);
+
+    if model_path.is_empty() {
+        return list!(
+            mfl = mfl.to_string(),
+            feature = feature,
+            keyword = keyword,
+            optional = optional,
+            resolved = false,
+            resolved_feature = Vec::<String>::new(),
+            resolved_keyword = Vec::<String>::new(),
+            resolved_optional = Vec::<bool>::new(),
+            effect_parameter = Vec::<String>::new(),
+            effect_covariate = Vec::<String>::new(),
+            effect_form = Vec::<String>::new(),
+            effect_op = Vec::<String>::new(),
+            effect_optional = Vec::<bool>::new(),
+            notes = Vec::<String>::new(),
+        );
+    }
+
+    let data_opt: Option<&str> = if data_path.is_empty() {
+        None
+    } else {
+        Some(data_path)
+    };
+    let prepared = match ferx_core::prepare_run(model_path, data_opt) {
+        Ok(p) => p,
+        Err(e) => throw_r_error(e),
+    };
+    let source = match std::fs::read_to_string(model_path) {
+        Ok(s) => s,
+        Err(e) => throw_r_error(format!("cannot read {model_path}: {e}")),
+    };
+    let text = match ferx_core::edit::ModelText::parse(&source) {
+        Ok(t) => t,
+        Err(e) => throw_r_error(e),
+    };
+    let ctx = match ferx_tools::search::ModelContext::from_model(
+        &prepared.parsed,
+        &text,
+        &prepared.population,
+    ) {
+        Ok(c) => c,
+        Err(e) => throw_r_error(e),
+    };
+    let resolved = match ferx_tools::search::resolve(&parsed, &ctx) {
+        Ok(r) => r,
+        Err(e) => throw_r_error(e),
+    };
+
+    let (r_feature, r_keyword, r_optional) = search_feature_columns(&resolved.mfl);
+
+    let n = resolved.covariate_effects.len();
+    let mut effect_parameter = Vec::with_capacity(n);
+    let mut effect_covariate = Vec::with_capacity(n);
+    let mut effect_form = Vec::with_capacity(n);
+    let mut effect_op = Vec::with_capacity(n);
+    let mut effect_optional = Vec::with_capacity(n);
+    for spec in &resolved.covariate_effects {
+        effect_parameter.push(spec.parameter.clone());
+        effect_covariate.push(spec.covariate.clone());
+        effect_form.push(spec.effect.label().to_string());
+        effect_op.push(spec.op.label().to_string());
+        effect_optional.push(spec.optional);
+    }
+
+    list!(
+        mfl = mfl.to_string(),
+        feature = feature,
+        keyword = keyword,
+        optional = optional,
+        resolved = true,
+        resolved_feature = r_feature,
+        resolved_keyword = r_keyword,
+        resolved_optional = r_optional,
+        effect_parameter = effect_parameter,
+        effect_covariate = effect_covariate,
+        effect_form = effect_form,
+        effect_op = effect_op,
+        effect_optional = effect_optional,
+        notes = resolved.notes.clone(),
+    )
+}
+
+/// Coverage-check an MFL space without aborting on a gap.
+///
+/// @param mfl MFL source text
+/// @return Named list with parallel `feature`, `covered` and `reason` vectors
+/// @keywords internal
+#[extendr]
+fn ferx_rust_search_coverage(mfl: &str) -> List {
+    let parsed = match ferx_tools::search::Mfl::parse(mfl) {
+        Ok(m) => m,
+        Err(e) => throw_r_error(e),
+    };
+    let (feature, covered, reason) = search_coverage_rows(&parsed);
+    list!(feature = feature, covered = covered, reason = reason)
+}
+
+/// The columns of a search run's `candidates.csv`, in order, from the engine.
+///
+/// @return Character vector of column names
+/// @keywords internal
+#[extendr]
+fn ferx_rust_search_table_columns() -> Vec<String> {
+    ferx_tools::search::TABLE_COLUMNS
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+}
+
 extendr_module! {
     mod ferx;
     fn ferx_rust_fit;
@@ -5085,4 +5383,8 @@ extendr_module! {
     fn ferx_rust_bootstrap;
     fn ferx_rust_bootstrap_summarize;
     fn ferx_rust_gam_screen;
+    fn ferx_rust_search_config_load;
+    fn ferx_rust_search_space_parse;
+    fn ferx_rust_search_coverage;
+    fn ferx_rust_search_table_columns;
 }

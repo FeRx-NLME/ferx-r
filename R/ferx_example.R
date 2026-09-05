@@ -28,7 +28,9 @@
 #'     required -- only Omega is optional. Anchored against a NONMEM 7.6.0 run
 #'     of the same model written as \code{$OMEGA 0 FIX}}
 #'   \item{two_cpt_iv}{Two-compartment IV bolus}
-#'   \item{two_cpt_oral_cov}{Two-compartment oral with continuous covariates (WT, CRCL)}
+#'   \item{two_cpt_oral_cov}{Two-compartment oral with continuous covariates
+#'     (WT, CRCL). Ships a \code{.ferxsearch} covariate search space as
+#'     \code{$search} - see \code{\link{ferx_search_config}}}
 #'   \item{three_cpt_iv}{Three-compartment IV bolus}
 #'   \item{three_cpt_oral}{Three-compartment oral (analytical \code{three_cpt_oral})}
 #'   \item{one_cpt_iv_ode, warfarin_ode, two_cpt_iv_ode, two_cpt_oral_cov_ode,
@@ -330,6 +332,9 @@
 #'   Otherwise, a list with components:
 #'   \item{model}{Path to the .ferx model file}
 #'   \item{data}{Path to the NONMEM-format CSV data file}
+#'   \item{search}{Path to the example's \code{.ferxsearch} search
+#'     configuration, for the examples that ship one. Absent otherwise, so
+#'     \code{ex$search} is \code{NULL} for an example with no search space.}
 #'
 #' @examples
 #' ferx_example()                        # list all available example names
@@ -433,8 +438,15 @@ ferx_example <- function(name = NULL) {
   }
 
   data_name <- .data_aliases[[name]] %||% name
-  list(
+  out <- list(
     model = system.file("examples", "models", paste0(name,      ".ferx"), package = "ferx"),
     data  = system.file("examples", "data",   paste0(data_name, ".csv"),  package = "ferx")
   )
+  # A `.ferxsearch` search space is optional and per example; `system.file()`
+  # returns "" when there is none, which stays out of the returned list rather
+  # than becoming an empty path a caller would pass to ferx_search_config().
+  search <- system.file("examples", "search", paste0(name, ".ferxsearch"),
+                        package = "ferx")
+  if (nzchar(search)) out$search <- search
+  out
 }
