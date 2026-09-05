@@ -115,6 +115,18 @@ test_that("an unsupported feature is a row, not an aborted run", {
   expect_true(all(nzchar(gap$reason)))
 })
 
+test_that("a gap repeated across statements is reported once", {
+  # `check_coverage` deduplicates gaps across a whole program; running it per
+  # feature must not undo that.
+  cov <- ferx_search_coverage("ELIMINATION(MM); ELIMINATION(MM)")
+  expect_equal(sum(!cov$covered), 1L)
+
+  # A wildcard and an explicit list naming the same unsupported mode collapse
+  # to the same single row.
+  cov <- ferx_search_coverage("ELIMINATION(*); ELIMINATION(MM)")
+  expect_equal(sum(cov$feature == "ELIMINATION(MM)"), 1L)
+})
+
 test_that("coverage accepts a space or a configuration", {
   sp <- ferx_search_space("ELIMINATION([FO, MM])")
   expect_equal(ferx_search_coverage(sp),

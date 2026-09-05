@@ -88,6 +88,38 @@ test_that("a file path can be passed directly", {
   expect_false(attr(res, "partial"))
 })
 
+test_that("`partial` still demands its table type when a file is passed", {
+  dir       <- tempfile()
+  complete  <- candidates_csv(dir)
+  partial   <- candidates_csv(dir, "candidates.partial.csv")
+
+  # Asking for one kind and naming the other is an error, not a silently
+  # ignored argument.
+  expect_error(ferx_search_results(complete, partial = TRUE), "complete")
+  expect_error(ferx_search_results(partial, partial = FALSE), "partial")
+
+  expect_false(attr(ferx_search_results(complete, partial = FALSE), "partial"))
+  expect_true(attr(ferx_search_results(partial, partial = TRUE), "partial"))
+})
+
+test_that("a column a newer engine wrote is kept, and typed like the rest", {
+  dir <- tempfile()
+  dir.create(dir)
+  cols <- c(ferx:::ferx_rust_search_table_columns(), "future")
+  writeLines(c(
+    paste(cols, collapse = ","),
+    'c1,,ab12,"COVARIATE(CL,WT,pow)",412.5,400.25,true,true,,,12.5,,,,false,kept',
+    'c2,,cd34,"COVARIATE(V1,WT,pow)",413.5,401.25,true,true,,,12.5,,,,false,'
+  ), file.path(dir, "candidates.csv"))
+
+  res <- ferx_search_results(dir)
+  expect_true("future" %in% names(res))
+  # Engine columns keep their order; the extra one lands after them.
+  expect_equal(names(res)[length(names(res))], "future")
+  # And its empty cell is NA like every other empty cell, not "".
+  expect_equal(res$future, c("kept", NA_character_))
+})
+
 test_that("a missing or wrong-shaped table is an error saying so", {
   dir <- tempfile()
   dir.create(dir)

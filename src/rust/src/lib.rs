@@ -5107,6 +5107,8 @@ fn search_coverage_rows(mfl: &ferx_tools::search::Mfl) -> (Vec<String>, Vec<bool
     let mut feature = Vec::new();
     let mut covered = Vec::new();
     let mut reason = Vec::new();
+    let mut gaps_seen: std::collections::HashSet<(String, String)> =
+        std::collections::HashSet::new();
     for f in mfl.features() {
         let one = ferx_tools::search::Mfl {
             statements: vec![ferx_tools::search::Statement::Feature(f.clone())],
@@ -5119,9 +5121,17 @@ fn search_coverage_rows(mfl: &ferx_tools::search::Mfl) -> (Vec<String>, Vec<bool
             }
             Err(e) => {
                 for gap in e.gaps {
-                    feature.push(gap.feature);
-                    covered.push(false);
-                    reason.push(gap.reason);
+                    // `check_coverage` deduplicates gaps across a whole
+                    // program; running it per feature would otherwise report
+                    // `ELIMINATION(MM); ELIMINATION(MM)` twice. Dedupe on the
+                    // pair the engine dedupes on, and only among gaps - two
+                    // identical covered statements stay two rows, because the
+                    // covered rows are the source features as written.
+                    if gaps_seen.insert((gap.feature.clone(), gap.reason.clone())) {
+                        feature.push(gap.feature);
+                        covered.push(false);
+                        reason.push(gap.reason);
+                    }
                 }
             }
         }
@@ -5172,17 +5182,19 @@ fn ferx_rust_search_config_load(path: &str) -> List {
     // difference.
     let gate = cfg.strictness.strictness();
     let mut strictness_set: Vec<String> = Vec::new();
-    for (set, name) in [
-        (cfg.strictness.require_converged.is_some(), "require_converged"),
-        (cfg.strictness.require_covariance.is_some(), "require_covariance"),
-        (cfg.strictness.max_condition_number.is_some(), "max_condition_number"),
-        (cfg.strictness.max_correlation.is_some(), "max_correlation"),
-        (cfg.strictness.reject_on_boundary.is_some(), "reject_on_boundary"),
-        (cfg.strictness.reject_init_stall.is_some(), "reject_init_stall"),
-    ] {
-        if set {
-            strictness_set.push(name.to_string());
-        }
+    {
+        let s = &cfg.strictness;
+        let mut stated = |set: bool, name: &str| {
+            if set {
+                strictness_set.push(name.to_string());
+            }
+        };
+        stated(s.require_converged.is_some(), "require_converged");
+        stated(s.require_covariance.is_some(), "require_covariance");
+        stated(s.max_condition_number.is_some(), "max_condition_number");
+        stated(s.max_correlation.is_some(), "max_correlation");
+        stated(s.reject_on_boundary.is_some(), "reject_on_boundary");
+        stated(s.reject_init_stall.is_some(), "reject_init_stall");
     }
 
     // NaN is the "no value" sentinel for the optional numerics (the R side maps

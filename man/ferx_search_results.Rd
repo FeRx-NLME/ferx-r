@@ -12,7 +12,9 @@ ferx_search_results(directory, partial = NULL)
 
 \item{partial}{Which table to read: \code{NULL} (the default) prefers the
 complete table and falls back to the partial one, \code{TRUE} demands the
-partial table, \code{FALSE} demands the complete one.}
+partial table, \code{FALSE} demands the complete one. When
+\code{directory} names a file directly, a value that disagrees with the
+file named is an error rather than an ignored argument.}
 }
 \value{
 A data frame with the engine's 15 columns: \code{id},

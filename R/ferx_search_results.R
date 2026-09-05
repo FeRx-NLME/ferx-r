@@ -22,7 +22,9 @@
 #'   \code{candidates.csv} / \code{candidates.partial.csv} file.
 #' @param partial Which table to read: \code{NULL} (the default) prefers the
 #'   complete table and falls back to the partial one, \code{TRUE} demands the
-#'   partial table, \code{FALSE} demands the complete one.
+#'   partial table, \code{FALSE} demands the complete one. When
+#'   \code{directory} names a file directly, a value that disagrees with the
+#'   file named is an error rather than an ignored argument.
 #'
 #' @return A data frame with the engine's 15 columns: \code{id},
 #'   \code{parent}, \code{hash}, \code{features}, \code{criterion} (numeric),
@@ -56,9 +58,15 @@ ferx_search_results <- function(directory, partial = NULL) {
   partial_path  <- file.path(directory, "candidates.partial.csv")
 
   if (!dir.exists(directory) && file.exists(directory)) {
-    # A file was passed directly.
+    # A file was passed directly. `partial` still means what it says: it
+    # demands a table of that kind, so a mismatch is an error rather than a
+    # silently ignored argument.
     path <- directory
     is_partial <- grepl("candidates\\.partial\\.csv$", path)
+    if (!is.null(partial) && partial != is_partial) {
+      stop("`", path, "` is a ", if (is_partial) "partial" else "complete",
+           " candidate table, but partial = ", partial, " was asked for")
+    }
   } else if (isTRUE(partial)) {
     if (!file.exists(partial_path)) {
       stop("No partial candidate table in ", directory,
@@ -101,7 +109,9 @@ ferx_search_results <- function(directory, partial = NULL) {
 
   num <- c("criterion", "ofv", "seconds")
   lgl <- c("converged", "passed", "retryable", "reused")
-  chr <- setdiff(expected, c(num, lgl))
+  # Every remaining column, not only the engine's own: a column a newer engine
+  # wrote is kept above, so its empty cells must become NA like the rest.
+  chr <- setdiff(names(raw), c(num, lgl))
   for (col in num) raw[[col]] <- .ferx_csv_num(raw[[col]])
   for (col in lgl) raw[[col]] <- .ferx_csv_lgl(raw[[col]])
   for (col in chr) raw[[col]] <- .ferx_csv_chr(raw[[col]])
