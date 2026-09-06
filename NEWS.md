@@ -630,6 +630,15 @@
   `ferx_simulate()` paths than on the objective, so the same dataset could double
   a dose in every diagnostic while the reported OFV was correct.
 
+- **A non-finite dose lagtime or bioavailability no longer aborts the fit**
+  ([ferx-core #1189](https://github.com/FeRx-NLME/ferx-core/issues/1189)).
+  A `NaN` or infinite `ALAG` / `LAGTIME` — typically an exponential covariate model
+  on an unscaled covariate — made the subject's integration timeline unorderable and
+  the fit died with `called Option::unwrap() on a None value`. Such a subject now
+  comes back non-finite, which the estimator already handles as a diverged solve, and
+  an `ALAG` or `F` that is non-finite at typical parameter values is rejected before
+  the fit starts with `E_DOSE_ATTR_NONFINITE`, naming the subject.
+
 - **A joint PK-TTE subject whose `TENTRY` falls at or before its first record no
   longer scores the divergence sentinel**
   ([ferx-core #1223](https://github.com/FeRx-NLME/ferx-core/issues/1223)).
@@ -644,7 +653,19 @@
   event records, so the fit ran the Gaussian half only and reported a plausible,
   finite, wrong objective. `E_ENDPOINT_UNROUTED` now names the CMT instead; the
   guard also covers `ferx_covariance()` and `ferx_sir()`, which previously
-  computed on the Gaussian half of a joint likelihood.
+  computed on the Gaussian half of a joint likelihood. `ferx_fit()` also rejects a
+  routed population whose declared endpoint has no rows at all — typically a missing
+  or mis-mapped `CMT` column — with `E_ENDPOINT_NO_RECORDS`; and `ferx_sir()`'s
+  re-read of the fit's data now honours `[data]` column renames
+  ([ferx-core #730](https://github.com/FeRx-NLME/ferx-core/issues/730)), so a model
+  that maps `TIME = TAFD` resolves it the way the fit did instead of failing or
+  reading the wrong column (`ferx_covariance()` already did).
+
+- **`ferx_model_to_frem()` now refuses a model with a non-Gaussian endpoint**
+  ([ferx-core #1199](https://github.com/FeRx-NLME/ferx-core/issues/1199)).
+  A joint PK-TTE / binary / Markov model came back with a FREM dataset built from the
+  Gaussian rows alone; it now errors with `E_FREM_NON_GAUSSIAN_ENDPOINT`. Run the FREM
+  step on the PK model without the endpoint block.
 
 ## Internal
 
@@ -676,14 +697,17 @@
   `CLAUDE.md`'s sibling-repo note warns about, which already bit us once for
   `SimulateOptions` (ferx-core #522 / #200). Both now carry
   `..Default::default()`, and a new `R-CMD-check` step scans `src/rust/src/*.rs`
-  for an options literal without one, so a future entry point cannot reintroduce
-  the shape. Behaviour is unchanged: every field these entry points expose is
+  for an options literal without one — one-line and multi-line forms alike — so a
+  future entry point cannot reintroduce the shape. Behaviour is unchanged: every field these entry points expose is
   still passed explicitly.
 
 - Bumped the pinned ferx-core commit to `fdef70be` for the `Default` derives
-  above. That range also carries ferx-core #1186, #1223, #1199 and #518 — all
-  written up in the sections above — plus #1178/#1179 (the `ferx-tools` search
-  runner and MFL parser, not yet wired to R) and CI/docs-only work.
+  above. That range also carries ferx-core #1186, #1189, #1223, #1199 (with the
+  `E_ENDPOINT_NO_RECORDS`, FREM and `[data]`-rename parts it also fixed) and #518 —
+  all written up in the sections above — plus #1178/#1179 (the `ferx-tools` search
+  runner and MFL parser, not yet wired to R), ferx-core #1196's shared infusion
+  membership rule and #1199's routed `.fitrx` reload (both reachable only from the
+  engine's own entry points, not from R), and CI/docs-only work.
 
 # ferx 0.3.0
 
