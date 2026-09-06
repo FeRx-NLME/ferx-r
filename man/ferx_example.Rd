@@ -15,6 +15,9 @@ If \code{name} is NULL, a character vector of available examples.
 Otherwise, a list with components:
 \item{model}{Path to the .ferx model file}
 \item{data}{Path to the NONMEM-format CSV data file}
+\item{search}{Path to the example's \code{.ferxsearch} search
+configuration, for the examples that ship one. Absent otherwise, so
+\code{ex$search} is \code{NULL} for an example with no search space.}
 }
 \description{
 Returns file paths to bundled example models and datasets.
@@ -42,7 +45,9 @@ likelihood; \code{PRED} equals \code{IPRED} and \code{CWRES} equals
 required -- only Omega is optional. Anchored against a NONMEM 7.6.0 run
 of the same model written as \code{$OMEGA 0 FIX}}
 \item{two_cpt_iv}{Two-compartment IV bolus}
-\item{two_cpt_oral_cov}{Two-compartment oral with continuous covariates (WT, CRCL)}
+\item{two_cpt_oral_cov}{Two-compartment oral with continuous covariates
+(WT, CRCL). Ships a \code{.ferxsearch} covariate search space as
+\code{$search} - see \code{\link{ferx_search_config}}}
 \item{three_cpt_iv}{Three-compartment IV bolus}
 \item{three_cpt_oral}{Three-compartment oral (analytical \code{three_cpt_oral})}
 \item{one_cpt_iv_ode, warfarin_ode, two_cpt_iv_ode, two_cpt_oral_cov_ode,

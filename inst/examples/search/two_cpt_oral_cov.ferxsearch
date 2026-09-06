@@ -1,0 +1,39 @@
+# Covariate search space for the two-compartment oral example.
+#
+# Load and validate it from R with:
+#   cfg <- ferx_search_config(ferx_example("two_cpt_oral_cov")$search)
+#
+# `base` and `data` are relative to this file's own directory, so the
+# configuration travels with the model it searches.
+
+base = "../models/two_cpt_oral_cov.ferx"
+data = "../data/two_cpt_oral_cov.csv"
+
+[space]
+# Every parameter that carries an eta (CL, V1, Q, V2, KA) crossed with every
+# covariate the model declares continuous (WT, CRCL), as a power or a linear
+# effect. The `?` makes each term exploratory: the search decides whether to
+# keep it.
+mfl = "COVARIATE?(@IIV, @CONTINUOUS, [pow, lin])"
+
+[rank]
+# Mixed BIC, Pharmpy's default. `cutoff` is left to the tool.
+type = "bic"
+
+[strictness]
+# A candidate that did not converge, or that stalled at its initial estimates,
+# is not a result worth ranking.
+require_converged = true
+reject_init_stall = true
+
+[run]
+# Perturbed restarts per candidate on top of the fit from the exact initials.
+retries = 2
+resume = false
+
+[covsearch]
+# Read by the covsearch tool (ferx-core #1180); kept verbatim by the loader
+# and reported in `cfg$tools`.
+algorithm = "scm-forward-then-backward"
+p_forward = 0.01
+p_backward = 0.001

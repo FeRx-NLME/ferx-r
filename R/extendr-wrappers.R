@@ -139,4 +139,28 @@ ferx_rust_gam_screen <- function(eta_names, eta_flat, n_subjects, shrinkage, cov
   .Call("wrap__ferx_rust_gam_screen", as.character(eta_names), eta_flat, as.integer(n_subjects), shrinkage, as.character(cov_names), cov_flat, as.character(cov_kinds), as.integer(spline_df), include_linear, shrinkage_warn)
 }
 
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_search_config_load <- function(path) {
+  .Call("wrap__ferx_rust_search_config_load", path)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_search_space_parse <- function(mfl, model_path, data_path) {
+  .Call("wrap__ferx_rust_search_space_parse", mfl, model_path, data_path)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_search_coverage <- function(mfl) {
+  .Call("wrap__ferx_rust_search_coverage", mfl)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_search_table_columns <- function() {
+  .Call("wrap__ferx_rust_search_table_columns")
+}
+
 # nolint end
