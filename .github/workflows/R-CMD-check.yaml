@@ -88,27 +88,34 @@ jobs:
       # the cross-repo trap CLAUDE.md's sibling-repo note warns about, which
       # already bit us once for `SimulateOptions` (ferx-core #522 -> #200).
       #
-      # The scan is textual: it opens at a `<Name>Options {` line that is not a
-      # declaration, tracks brace depth to the end of the literal, and requires
-      # a line inside it that *starts* with `..` — so a `0..n` range in a field
-      # value does not count as a spread, and a commented-out literal is not
-      # scanned at all.
+      # The scan is textual: it opens at any `<Name>Options {` that is not a
+      # declaration — the fields may start on that same line, and the literal may
+      # open and close on it — tracks brace depth to the end of the literal, and
+      # requires a `..` that follows `{` or `,` (or opens a line), so a `0..n`
+      # range in a field value does not count as a spread. A `//` comment is
+      # stripped before both tests, so a commented-out literal is not scanned and
+      # a commented-out spread does not satisfy the guard.
       - name: Verify ferx-core options structs are spread-constructed
         run: |
           fail=0
           for f in src/rust/src/*.rs; do
             awk -v file="$f" '
-              { line = $0; sub(/^[[:space:]]+/, "", line) }
-              line ~ /^\/\// { next }
-              !in_lit && /[A-Za-z_][A-Za-z0-9_]*Options[[:space:]]*\{[[:space:]]*$/ \
-                      && !/(^|[^A-Za-z0-9_])(struct|impl|fn|trait|enum)([^A-Za-z0-9_]|$)/ {
+              {
+                line = $0
+                sub(/^[[:space:]]+/, "", line)
+                code = line
+                sub(/[[:space:]]*\/\/.*$/, "", code)
+              }
+              code == "" { next }
+              !in_lit && code ~ /[A-Za-z_][A-Za-z0-9_]*Options[[:space:]]*\{/ \
+                      && code !~ /(^|[^A-Za-z0-9_])(struct|impl|fn|trait|enum)([^A-Za-z0-9_]|$)/ {
                 in_lit = 1; start = NR; spread = 0; depth = 0
-                match($0, /[A-Za-z_][A-Za-z0-9_]*Options/); name = substr($0, RSTART, RLENGTH)
+                match(code, /[A-Za-z_][A-Za-z0-9_]*Options/); name = substr(code, RSTART, RLENGTH)
               }
               in_lit {
-                if (line ~ /^\.\./) spread = 1
-                n = gsub(/\{/, "{"); depth += n
-                n = gsub(/\}/, "}"); depth -= n
+                if (code ~ /(^|[{,])[[:space:]]*\.\./) spread = 1
+                n = gsub(/\{/, "{", code); depth += n
+                n = gsub(/\}/, "}", code); depth -= n
                 if (depth <= 0) {
                   if (!spread) {
                     printf "::error file=%s,line=%d::%s is built with an exhaustive struct literal. Add `..Default::default()` so a new ferx-core field stays additive (ferx-core #529).\n", file, start, name
