@@ -556,7 +556,22 @@ test_that("every covariance message ferx-core emits gets non-contradictory guida
          # block only because `general` is admitted on the message.
          msg = paste0("Covariance step cancelled before completion; standard ",
                       "errors not available."),
-         ok = "nothing was diagnosed", never = "identifiability")
+         ok = "nothing was diagnosed", never = "identifiability"),
+    list(cat = "covariance_failed",
+         # S-matrix path: one subject's quadrature score could not be
+         # evaluated, and the message names that subject. The guidance has to
+         # point at the subject rather than at the model, because the engine
+         # diagnosed a record, not an identifiability problem.
+         msg = paste0("Covariance step failed: could not obtain a converged, ",
+                      "finite quadrature score for subject 42. SE estimates ",
+                      "not available."),
+         ok = "named subject", never = NULL),
+    list(cat = "covariance_failed",
+         # The same path, one level up: the summed cross-product is non-finite,
+         # so no subject is named and the advice is about the estimates.
+         msg = paste0("Covariance step failed: non-finite score cross-product. ",
+                      "SE estimates not available."),
+         ok = "score cross-product", never = NULL)
   )
   for (case in cases) {
     g <- ferx:::.ferx_warning_guidance(case$cat, message = case$msg)
@@ -696,7 +711,12 @@ test_that("no covariance message ferx-core emits is missing from the inventory",
     "regularized: eigenvalue floor",
     "Hessian is not positive definite",
     "off-diagonal FD stencil",
-    "OFV evaluations"
+    "OFV evaluations",
+    # The two S-matrix failures (ferx-core covariance.rs): one names the
+    # subject whose quadrature score could not be evaluated, the other reports
+    # the summed cross-product coming out non-finite.
+    "quadrature score for subject",
+    "non-finite score cross-product"
   )
   accounted <- function(lit) any(vapply(c(exempt, covered),
                                         function(k) grepl(k, lit, fixed = TRUE),

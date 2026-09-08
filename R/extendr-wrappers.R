@@ -163,4 +163,16 @@ ferx_rust_search_table_columns <- function() {
   .Call("wrap__ferx_rust_search_table_columns")
 }
 
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_covsearch <- function(config_path, model_path, data_path, mfl, algorithm, p_forward, p_backward, max_steps, adaptive, rank, rank_cutoff, threads, retries, resume, directory, progress) {
+  .Call("wrap__ferx_rust_covsearch", config_path, model_path, data_path, mfl, algorithm, p_forward, p_backward, as.integer(max_steps), as.integer(adaptive), rank, rank_cutoff, as.integer(threads), as.integer(retries), resume, directory, progress)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_allometry <- function(config_path, model_path, data_path, covariate, reference, parameters, exponents, fixed, lower, upper, threads, retries, directory, fit) {
+  .Call("wrap__ferx_rust_allometry", config_path, model_path, data_path, covariate, reference, as.character(parameters), exponents, fixed, lower, upper, as.integer(threads), as.integer(retries), directory, fit)
+}
+
 # nolint end

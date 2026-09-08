@@ -1,0 +1,61 @@
+# Two-compartment oral PK model -- the covariate-free base of two_cpt_oral_cov.
+#
+# Same structure, same dataset (two_cpt_oral_cov.csv, which carries WT and
+# CRCL), but no covariate effect on any parameter. It exists to be the *start*
+# of a search: a covariate search whose base model already multiplies CL by
+# (WT/70)^THETA_WT is asking whether to add an effect the model has, and
+# allometric scaling on top of an inline (WT/70) term would count body size
+# twice.
+#
+# Paired tools:
+#   ferx_covsearch()  -- two_cpt_oral_base.ferxsearch searches WT and CRCL on
+#                        every parameter carrying an eta
+#   ferx_allometry()  -- (WT/70)^0.75 on CL and Q, (WT/70)^1.0 on V1 and V2
+#
+# The `[covariates]` block below is what makes `@CONTINUOUS` resolvable: a
+# search space written as `COVARIATE?(@IIV, @CONTINUOUS, [pow, lin])` expands
+# against the declared columns, not against every column in the dataset.
+
+[parameters]
+  theta TVCL(5.0, 0.1, 100.0)
+  theta TVV1(50.0, 1.0, 500.0)
+  theta TVQ(10.0, 0.1, 100.0)
+  theta TVV2(100.0, 1.0, 500.0)
+  theta TVKA(1.2, 0.01, 10.0)
+
+  omega ETA_CL ~ 0.10
+  omega ETA_V1 ~ 0.10
+  omega ETA_Q  ~ 0.05
+  omega ETA_V2 ~ 0.05
+  omega ETA_KA ~ 0.15
+
+  sigma PROP_ERR ~ 0.02 (sd)
+
+[individual_parameters]
+  CL = TVCL * exp(ETA_CL)
+  V1 = TVV1 * exp(ETA_V1)
+  Q  = TVQ  * exp(ETA_Q)
+  V2 = TVV2 * exp(ETA_V2)
+  KA = TVKA * exp(ETA_KA)
+
+[structural_model]
+  pk two_cpt_oral(cl=CL, v1=V1, q=Q, v2=V2, ka=KA)
+
+[covariates]
+  WT   continuous
+  CRCL continuous
+
+[error_model]
+  DV ~ proportional(PROP_ERR)
+
+[fit_options]
+  method     = focei
+  maxiter    = 500
+  covariance = true
+  # Finite differences rather than the default `auto`: on this model and
+  # dataset the analytic-gradient path stalls at the initial estimates (the
+  # optimizer reports `NLopt stopped: Failure` on its first evaluation and no
+  # parameter moves), which a search would then have to reject as an
+  # init-stalled base fit. `fd` converges in a few seconds. The same stall is
+  # visible on two_cpt_oral_cov.ferx, which keeps the default.
+  gradient   = fd

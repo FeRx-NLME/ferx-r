@@ -30,8 +30,9 @@ test_that("a minimal configuration loads with the engine's defaults", {
   expect_equal(cfg$space$keyword, "COVARIATE")
   expect_true(cfg$space$optional)
 
-  # Defaults come from the engine, not from R: mixed BIC, no cutoff.
-  expect_equal(cfg$rank$type, "bic")
+  # Defaults come from the engine, not from R: an unstated rank is left to
+  # whichever tool runs the file, and there is no cutoff.
+  expect_true(is.na(cfg$rank$type))
   expect_true(is.na(cfg$rank$cutoff))
   expect_true(cfg$strictness$require_converged)
   expect_equal(cfg$strictness$max_condition_number, 1000)
@@ -39,6 +40,25 @@ test_that("a minimal configuration loads with the engine's defaults", {
   expect_null(cfg$run$threads)
   expect_false(cfg$run$resume)
   expect_length(cfg$tools, 0L)
+})
+
+test_that("an unstated [rank] type is NA, not a guess at the tool's default", {
+  # `[rank] type` became optional in the engine (covsearch tests rather than
+  # ranks, and refuses a BIC ranking outright), so "the file did not say" has to
+  # survive the trip to R as a missing value rather than as a plausible-looking
+  # "bic".
+  cfg <- ferx_search_config(minimal_cfg())
+  expect_true(is.na(cfg$rank$type))
+  expect_true(is.na(cfg$rank$cutoff))
+  expect_match(paste(capture.output(print(cfg)), collapse = "\n"),
+               "Rank: (tool default)", fixed = TRUE)
+
+  stated <- ferx_search_config(minimal_cfg(
+    "COVARIATE?(CL, WT, [pow, lin])",
+    "[rank]", 'type = "bic"', "cutoff = 3.84"
+  ))
+  expect_equal(stated$rank$type, "bic")
+  expect_equal(stated$rank$cutoff, 3.84)
 })
 
 test_that("base, data and cache_dir resolve against the file's own directory", {

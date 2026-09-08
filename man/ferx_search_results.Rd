@@ -58,6 +58,8 @@ res[!res$passed, c("id", "failures")]
 \code{\link{ferx_search_config}}, \code{\link{check_strictness}}
 
 Other search:
+\code{\link[=ferx_allometry]{ferx_allometry()}},
+\code{\link[=ferx_covsearch]{ferx_covsearch()}},
 \code{\link[=ferx_search_config]{ferx_search_config()}},
 \code{\link[=ferx_search_coverage]{ferx_search_coverage()}},
 \code{\link[=ferx_search_space]{ferx_search_space()}}

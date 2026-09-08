@@ -1,0 +1,51 @@
+# Covariate search space for the covariate-free two-compartment oral base
+# model. This is the file two_cpt_oral_cov.ferxsearch should have been: the
+# base model carries no covariate effect, so every relation the search adds is
+# one it actually decided on.
+#
+# Run it from R with:
+#   res <- ferx_covsearch(config = ferx_example("two_cpt_oral_base")$search,
+#                         directory = "covsearch-run")
+#
+# `base` and `data` are relative to this file's own directory, so the
+# configuration travels with the model it searches.
+
+base = "../models/two_cpt_oral_base.ferx"
+data = "../data/two_cpt_oral_cov.csv"
+
+[space]
+# Every parameter that carries an eta (CL, V1, Q, V2, KA) crossed with every
+# covariate the model declares continuous (WT, CRCL), as a power or a linear
+# effect. The `?` makes each term exploratory: the search decides whether to
+# keep it.
+mfl = "COVARIATE?(@IIV, @CONTINUOUS, [pow, lin])"
+
+# No [rank] section: covsearch selects by the likelihood-ratio test on the OFV
+# at the p_forward / p_backward levels below, and the engine refuses a file
+# that asks it for a BIC ranking instead of quietly ignoring the key. A
+# `[rank] type` belongs in a file for a tool that ranks candidates
+# (modelsearch, iivsearch) rather than testing them.
+
+[strictness]
+# A candidate that did not converge, or that stalled at its initial estimates,
+# is not a result worth ranking - and under automation it would be a selection
+# error, not just a bad fit.
+require_converged = true
+reject_init_stall = true
+
+[run]
+# Perturbed restarts per candidate on top of the fit from the exact initials.
+retries = 2
+resume = false
+
+[covsearch]
+algorithm = "scm-forward-then-backward"
+p_forward = 0.01
+p_backward = 0.001
+
+[allometry]
+# Read by ferx_allometry() when this file is passed to it; the covariate and
+# its reference come from the ALLOMETRY statement a space would carry, so this
+# section only tunes what is left.
+lower = 0.0
+upper = 2.0
