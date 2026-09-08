@@ -155,6 +155,48 @@
 
 ## New features
 
+- **The search surface: `ferx_search_config()`, `ferx_search_space()`,
+  `ferx_search_coverage()` and `ferx_search_results()`** (#332 Part 1;
+  ferx-core #1178, #1179). R had the *judging* half of model-space search
+  (`ferx_bic()`, `check_strictness()`) and none of the *searching* half - the
+  `.ferxsearch` loader, the MFL parser, the coverage check and the
+  `@`-symbol resolver were all reachable only from Rust.
+
+  `ferx_search_config(path)` loads and validates a `.ferxsearch` file with the
+  engine's own loader, so an unknown section, an unparseable `[space] mfl`, an
+  empty space, a feature the engine cannot express or an unimplemented
+  `[rank] type` is an R error naming the offender - *before* the first fit,
+  rather than a run debugged by watching fits fail. It returns the resolved
+  `base` / `data` paths, the space as a feature table, and the rank, strictness
+  and run settings, with the strictness gate reported as the file's keys
+  overlaid on the engine's defaults.
+
+  `ferx_search_space(mfl, model, data)` parses an MFL space and resolves its
+  `@`-symbols and wildcards against a model and its dataset, so
+  `COVARIATE?(@IIV, @CONTINUOUS, [pow, lin])` can be seen as the explicit
+  parameter x covariate x effect set it stands for on *your* model before
+  committing to a run. MFL is Pharmpy's grammar, quoted verbatim, which is what
+  makes a space portable in both directions; the R side never translates
+  arguments into MFL itself.
+
+  `ferx_search_coverage(space)` reports the same coverage information
+  non-fatally, as a data frame - an unsupported feature such as
+  `ELIMINATION(MM)` is a row with the engine's reason, not an aborted run.
+
+  `ferx_search_results(directory)` reads a run's `candidates.csv` (or a
+  cancelled run's `candidates.partial.csv`) back with the columns typed:
+  logical `converged` / `passed` / `reused`, numeric `criterion` / `ofv` /
+  `seconds`, and `NA` for the engine's empty cells rather than `NaN` or `""`.
+  The column list comes from the engine, never a copy maintained in R.
+
+  A `.ferxsearch` search space ships with the `two_cpt_oral_cov` example and is
+  reachable as `ferx_example("two_cpt_oral_cov")$search`;
+  `inst/examples/ex_search_config.R` runs the whole surface end to end.
+
+  The search *tools* - `ferx_covsearch()` and `ferx_allometry()` - wait on
+  ferx-core #1180.
+
+
 - **`ferx_bic()` and `check_strictness()`: ranking and gating a candidate fit**
   (#326, #327; ferx-core #1177). The two things an automated model search needs
   from a finished fit, and neither was reachable from R.
