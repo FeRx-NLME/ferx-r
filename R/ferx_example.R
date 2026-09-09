@@ -31,6 +31,12 @@
 #'   \item{two_cpt_oral_cov}{Two-compartment oral with continuous covariates
 #'     (WT, CRCL). Ships a \code{.ferxsearch} covariate search space as
 #'     \code{$search} - see \code{\link{ferx_search_config}}}
+#'   \item{two_cpt_oral_base}{The same model with \emph{no} covariate effect on
+#'     any parameter, sharing \code{two_cpt_oral_cov}'s dataset. This is the
+#'     model a search starts from: \code{\link{ferx_covsearch}} decides the WT
+#'     and CRCL relations rather than being asked about ones the base already
+#'     carries, and \code{\link{ferx_allometry}} can scale it without counting
+#'     body size twice. Ships its own \code{.ferxsearch} as \code{$search}}
 #'   \item{three_cpt_iv}{Three-compartment IV bolus}
 #'   \item{three_cpt_oral}{Three-compartment oral (analytical \code{three_cpt_oral})}
 #'   \item{one_cpt_iv_ode, warfarin_ode, two_cpt_iv_ode, two_cpt_oral_cov_ode,
@@ -373,6 +379,10 @@ ferx_example <- function(name = NULL) {
 
     warfarin_data_selection = "warfarin",
     two_cpt_oral_derived    = "two_cpt_oral_cov",
+
+    # The covariate-free base of two_cpt_oral_cov: same dataset, so a search
+    # that adds WT / CRCL relations is comparable with the model that has them.
+    two_cpt_oral_base       = "two_cpt_oral_cov",
 
     # ODE-form siblings of the standard analytical models share their
     # analytical counterpart's dataset, so the two can be verified to give

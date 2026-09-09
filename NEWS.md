@@ -155,6 +155,76 @@
 
 ## New features
 
+- **Covariate search and allometric scaling: `ferx_covsearch()` and
+  `ferx_allometry()`** (#332 Parts 2 and 3; ferx-core #1180). The search
+  surface shipped its validation half first; these are the first two tools to
+  run on it, and the first model-space search reachable from R at all.
+
+  `ferx_covsearch()` is stepwise covariate modelling - PsN `scm`, Pharmpy
+  `covsearch` - with `scm-forward` and `scm-forward-then-backward`,
+  `p_forward` / `p_backward`, `max_steps` and adaptive scope reduction. It
+  returns the engine's own step table: one row per candidate of every step,
+  with `converged` and the strictness verdict beside the dOFV. That pairing is
+  the point rather than a detail - a candidate that stalled at its initial
+  estimates carries an OFV that says nothing about the model, so a step table
+  showing only dOFV hides exactly the failure that turns a search into a
+  selection error. A candidate the gate excluded is a row carrying its reason,
+  never an absence. The winning model comes back as a fitted `ferx_fit`, its
+  relation set as a table saying where each relation came from (the base model,
+  a forced `COVARIATE(...)`, or the step that added it), and the runner's full
+  candidate table as `$candidates`.
+
+  `ferx_allometry()` is the convention rather than new machinery:
+  `(WT/70)^0.75` on every clearance the template line binds and `(WT/70)^1.0`
+  on every volume, as `[covariate_model]` relations. `fit = FALSE` makes it a
+  **model transform** - you get the scaled model back and nothing is fitted, so
+  allometry can be one step of a hand-built workflow; `fit = TRUE` fits the base
+  and scaled models side by side and reports both, which is what makes the
+  scaling's cost visible. `estimate = TRUE` estimates the exponents instead of
+  fixing them.
+
+  Both take **either** a `.ferxsearch` file (`config =`, the reproducible
+  artifact) **or** inline arguments. The inline form is rendered into the same
+  configuration and handed to the engine's own loader, so the two cannot
+  disagree, and `search_space` is MFL text quoted verbatim - which is what keeps
+  a space portable to and from Pharmpy. `directory`, `resume`, `threads` and
+  `progress` mean what they mean in `ferx_bootstrap()`, journal the same way,
+  and make a long search resumable; Ctrl-C stops one, in-flight fits included.
+
+  `inst/examples/ex_covsearch.R` and `inst/examples/ex_allometry.R` run both
+  end to end.
+
+  On the bundled `two_cpt_oral_base` example the candidates converge and pass
+  the strictness gate, and selection is decided on the p-value. The WT-only
+  space `ex_covsearch.R` runs inline selects nothing at `p_forward = 0.01` -
+  CL-WT is the best candidate at dOFV 5.4 (p = 0.020), and V1-WT is weaker
+  still - while the wider space in the bundled `.ferxsearch`, which adds CRCL,
+  does select relations and goes on to run a backward step.
+
+  This is a change from what this branch first reported. Every candidate used
+  to stall at its initial estimates, so its dOFV came out ~0.01 and the gate
+  rejected it - a model carrying covariate thetas simply did not optimize on
+  that dataset, whether the effect was written inline or as a
+  `[covariate_model]` relation
+  ([ferx-core #1290](https://github.com/FeRx-NLME/ferx-core/issues/1290), fixed
+  by anchoring the EBE warm start to the best point seen). That was the failure
+  the verdict column exists for: without it the run would have read as "no
+  covariate is worth adding" on data whose covariate effects are real, and the
+  column is what made the difference visible.
+
+- **New bundled example: `two_cpt_oral_base`** - the covariate-free base of
+  `two_cpt_oral_cov`, sharing its dataset, with its own `.ferxsearch` as
+  `$search`. It exists because a search needs a base model that does *not*
+  already carry the answer: `two_cpt_oral_cov` multiplies CL by
+  `(WT/70)^THETA_WT` in `[individual_parameters]`, so a covariate search on it
+  asks whether to add an effect the model has, and allometric scaling on top of
+  it would count body size twice. Its `[fit_options]` set `gradient = fd`,
+  which was needed while ferx-core #1290 was open (the default
+  analytic-gradient path stalled at the initial estimates on this model and
+  dataset, so the search rejected its own base fit). Both paths converge on the
+  pinned engine; the explicit `fd` is kept so the example's numbers do not move
+  with the gradient default.
+
 - **The search surface: `ferx_search_config()`, `ferx_search_space()`,
   `ferx_search_coverage()` and `ferx_search_results()`** (#332 Part 1;
   ferx-core #1178, #1179). R had the *judging* half of model-space search
@@ -539,6 +609,17 @@
   default package build.
 
 ## Bug fixes
+
+- **A model carrying covariate thetas no longer stalls at its initial
+  estimates** ([ferx-core #1290](https://github.com/FeRx-NLME/ferx-core/issues/1290),
+  fixed in the engine by anchoring the EBE warm start to the best point seen).
+  The pinned `ferx-core` / `ferx-tools` revision moves to `19bf7cf` to pick this
+  up. It is what made `ferx_covsearch()` unusable on the bundled example - every
+  candidate was rejected as an init stall - so the search now selects on the
+  statistics rather than on a numerical failure. The same bump brings
+  `ELIMINATION` into the engine's covered feature set
+  ([ferx-core #1257](https://github.com/FeRx-NLME/ferx-core/issues/1257)), which
+  `ferx_search_coverage()` reports.
 
 - **An infusion into a built-in absorption compartment is no longer delivered
   twice** ([ferx-core #1187](https://github.com/FeRx-NLME/ferx-core/issues/1187)).

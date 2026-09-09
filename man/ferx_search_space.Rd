@@ -77,6 +77,8 @@ attr(sp, "covariate_effects")
 \code{\link{ferx_search_config}}
 
 Other search:
+\code{\link[=ferx_allometry]{ferx_allometry()}},
+\code{\link[=ferx_covsearch]{ferx_covsearch()}},
 \code{\link[=ferx_search_config]{ferx_search_config()}},
 \code{\link[=ferx_search_coverage]{ferx_search_coverage()}},
 \code{\link[=ferx_search_results]{ferx_search_results()}}

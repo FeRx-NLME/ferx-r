@@ -76,7 +76,7 @@ ferx_search_config <- function(path) {
       mfl  = as.character(raw$mfl),
       space = .ferx_space_frame(raw$feature, raw$keyword, raw$optional),
       rank = list(
-        type   = as.character(raw$rank_type),
+        type   = .ferx_chr_or_na(raw$rank_type),
         cutoff = .ferx_na_if_nan(raw$rank_cutoff)
       ),
       strictness = list(
@@ -122,7 +122,8 @@ print.ferx_search_config <- function(x, ...) {
   cat("\n")
 
   cutoff <- if (is.na(x$rank$cutoff)) "(tool default)" else format(x$rank$cutoff)
-  cat("Rank: ", x$rank$type, "   cutoff: ", cutoff, "\n", sep = "")
+  type   <- if (is.na(x$rank$type)) "(tool default)" else x$rank$type
+  cat("Rank: ", type, "   cutoff: ", cutoff, "\n", sep = "")
 
   cat("Strictness (* = set by the file):\n")
   for (nm in names(x$strictness)) {
@@ -150,6 +151,14 @@ print.ferx_search_config <- function(x, ...) {
 .ferx_na_if_nan <- function(x) {
   x <- as.numeric(x)
   if (length(x) != 1L || is.nan(x)) NA_real_ else x
+}
+
+# Same sentinel, for a field that stays in a fixed-shape list: an unstated
+# `[rank] type` is NA rather than a dropped element, so `cfg$rank$type` is
+# always there to test.
+.ferx_chr_or_na <- function(x) {
+  x <- as.character(x)
+  if (length(x) != 1L || !nzchar(x)) NA_character_ else x
 }
 
 # "" is the glue's sentinel for an absent path / string.

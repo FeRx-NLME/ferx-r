@@ -5149,7 +5149,13 @@ fn search_coverage_rows(mfl: &ferx_tools::search::Mfl) -> (Vec<String>, Vec<bool
 
 /// `[rank] type` as its TOML spelling, so the value R reports back is the one
 /// a user would write in the file.
-fn search_rank_label(kind: ferx_tools::search::RankType) -> &'static str {
+///
+/// `None` is a file that states no `[rank] type`, which leaves the choice to
+/// whichever tool runs the config (covsearch ranks on OFV, the others on their
+/// own default). It comes back as the empty string and reaches R as `NA`, the
+/// same "not stated" convention `[rank] cutoff` already uses.
+fn search_rank_label(kind: Option<ferx_tools::search::RankType>) -> &'static str {
+    let Some(kind) = kind else { return "" };
     match kind {
         ferx_tools::search::RankType::Ofv => "ofv",
         ferx_tools::search::RankType::Aic => "aic",
@@ -5380,6 +5386,664 @@ fn ferx_rust_search_table_columns() -> Vec<String> {
         .collect()
 }
 
+// ---------------------------------------------------------------------------
+//  Model-space search: the tools (ferx-r #332 Parts 2 and 3)
+// ---------------------------------------------------------------------------
+//
+// covsearch and allometry, over `ferx_tools::covsearch` / `ferx_tools::
+// allometry` (ferx-core #1180). Two rules hold for every tool added here:
+//
+//  1. **One grammar.** The inline entry form does not translate R arguments
+//     into MFL - it renders a `.ferxsearch` file and hands it to the engine's
+//     own loader, so the two entry forms cannot disagree about what a space
+//     means. The R side quotes the user's MFL verbatim and never parses it.
+//  2. **The table is the engine's.** Every column of the step table is built
+//     from `covsearch::StepRow` in the order of `covsearch::STEP_COLUMNS`, so
+//     the R object and the run's own `steps.csv` are the same table.
+
+/// Escape a string for a TOML basic string (`"..."`).
+///
+/// Only the two characters TOML requires escaping in a path or an identifier;
+/// a control character in a file path is a pathology this does not need to
+/// serve.
+fn toml_basic(s: &str) -> String {
+    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+/// Render the `.ferxsearch` text for an inline call.
+///
+/// This is the *whole* of the inline entry form: the arguments become a config
+/// file, and the engine's loader takes it from there. `[space] mfl` is emitted
+/// as a TOML literal string so the MFL reaches the parser exactly as the user
+/// wrote it, with no escaping rules of ours in between.
+#[allow(clippy::too_many_arguments)]
+fn search_config_text(
+    model_path: &str,
+    data_path: &str,
+    mfl: &str,
+    rank: &str,
+    rank_cutoff: f64,
+    threads: i32,
+    retries: i32,
+    resume: bool,
+    tool_section: &str,
+) -> String {
+    let mut out = format!("base = {}\n", toml_basic(model_path));
+    if !data_path.is_empty() {
+        out.push_str(&format!("data = {}\n", toml_basic(data_path)));
+    }
+    if !mfl.is_empty() {
+        out.push_str(&format!("\n[space]\nmfl = '''\n{mfl}\n'''\n"));
+    }
+    if !rank.is_empty() || rank_cutoff.is_finite() {
+        out.push_str("\n[rank]\n");
+        if !rank.is_empty() {
+            out.push_str(&format!("type = {}\n", toml_basic(rank)));
+        }
+        if rank_cutoff.is_finite() {
+            out.push_str(&format!("cutoff = {rank_cutoff}\n"));
+        }
+    }
+    out.push_str("\n[run]\n");
+    if threads > 0 {
+        out.push_str(&format!("threads = {threads}\n"));
+    }
+    if retries >= 0 {
+        out.push_str(&format!("retries = {retries}\n"));
+    }
+    out.push_str(&format!("resume = {resume}\n"));
+    out.push_str(tool_section);
+    out
+}
+
+/// Load the config for a tool call: a `.ferxsearch` file when one was given,
+/// otherwise the file the inline arguments render to.
+///
+/// `run` overrides (`threads`, `retries`, `resume`) apply to both forms, since
+/// they say how to run a search rather than what to search - a user resuming a
+/// file-driven run should not have to edit the file to do it.
+fn search_config_for_tool(
+    config_path: &str,
+    inline_text: &str,
+    inline_dir: &Path,
+    threads: i32,
+    retries: i32,
+    resume: bool,
+) -> std::result::Result<ferx_tools::search::SearchConfig, String> {
+    let mut config = if config_path.is_empty() {
+        ferx_tools::search::SearchConfig::from_str(inline_text, inline_dir)?
+    } else {
+        ferx_tools::search::SearchConfig::load(Path::new(config_path))?
+    };
+    if threads > 0 {
+        config.run.threads = Some(threads as usize);
+    }
+    if retries >= 0 {
+        config.run.retries = retries as usize;
+    }
+    if resume {
+        config.run.resume = true;
+    }
+    Ok(config)
+}
+
+/// Run a search on a worker thread while this thread services Ctrl-C.
+///
+/// The same shape as [`run_bootstrap_cancellable`], and for the same reason
+/// (#315): nothing services R interrupts while the main thread sits inside
+/// `.Call`. The engine's tools take a `CancelFlag` of their own *and* the flag
+/// reaches every candidate fit through the base model's `fit_options`, so an
+/// interrupt stops the in-flight fits as well as the candidate loop.
+fn run_search_cancellable<T, F>(cancel: &CancelFlag, work: F) -> std::result::Result<T, String>
+where
+    T: Send,
+    F: FnOnce() -> std::result::Result<T, String> + Send,
+{
+    std::thread::scope(|scope| {
+        let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+        let worker = scope.spawn(move || {
+            let r = work();
+            let _ = done_tx.send(());
+            r
+        });
+        loop {
+            match done_rx.recv_timeout(std::time::Duration::from_millis(POLL_MS)) {
+                Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    if pending_interrupt() {
+                        cancel.cancel();
+                    }
+                }
+            }
+        }
+        match worker.join() {
+            Ok(result) => result,
+            Err(_) => Err("the search panicked".to_string()),
+        }
+    })
+}
+
+/// A tri-state logical for R: `""` is NA, so a column that has no value for a
+/// row (a candidate that never fitted has no `converged`) stays distinguishable
+/// from `FALSE`.
+fn opt_bool_chr(v: Option<bool>) -> String {
+    v.map(|b| b.to_string()).unwrap_or_default()
+}
+
+/// `None` as `NaN`, the sentinel the R side maps to `NA_real_`.
+fn opt_f64(v: Option<f64>) -> f64 {
+    v.unwrap_or(f64::NAN)
+}
+
+/// The fitted model as an R fit list.
+///
+/// `fit_result_to_list` needs the *candidate's* compiled model, not the base
+/// model's: a winning covariate model carries thetas the base does not, and
+/// the per-subject estimates are built against it. The model text is therefore
+/// written to a temporary file and prepared - a parse and a data read, no fit.
+fn search_final_fit(
+    fit: &FitResult,
+    model_text: &str,
+    data_path: &str,
+) -> std::result::Result<List, String> {
+    // The scratch directory is unique per call and removed on every path out,
+    // including the error ones: `R CMD check` reports anything left behind in
+    // the session temp directory as detritus.
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("ferx-search-{}-{seq}", std::process::id()));
+    std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create `{}`: {e}", dir.display()))?;
+
+    let path = dir.join("final.ferx");
+    let data = (!data_path.is_empty()).then_some(data_path);
+    let out = std::fs::write(&path, model_text)
+        .map_err(|e| format!("cannot write `{}`: {e}", path.display()))
+        .and_then(|()| ferx_core::prepare_run(&path.to_string_lossy(), data))
+        .map(|prepared| fit_result_to_list(fit, &prepared.population, &prepared.parsed.model));
+
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_dir(&dir);
+    out
+}
+
+/// Stepwise covariate modelling - PsN `scm`, Pharmpy `covsearch`.
+///
+/// Takes either a `.ferxsearch` file (`config_path`) or the inline arguments,
+/// which are rendered into one. Returns the step table in the engine's own
+/// `STEP_COLUMNS` order, the final relation set, the final model text and the
+/// winning fit.
+///
+/// @param config_path Path to a `.ferxsearch` file, or `""` for the inline form
+/// @param model_path Base model (inline form only)
+/// @param data_path Dataset, or `""` to use the model's `[data]` block
+/// @param mfl MFL search space, quoted verbatim (inline form only)
+/// @param algorithm `"scm-forward"` or `"scm-forward-then-backward"`; `""`
+///   keeps the engine default
+/// @param p_forward,p_backward Significance levels; `NaN` keeps the default
+/// @param max_steps Step cap; `<= 0` for unlimited
+/// @param adaptive Adaptive scope reduction: `1` on, `0` off, `-1` unset
+/// @param rank `[rank] type`; `""` keeps the tool default
+/// @param rank_cutoff `[rank] cutoff`; `NaN` keeps the default
+/// @param threads Worker threads; `<= 0` lets the runner choose
+/// @param retries Perturbed restarts per candidate; `< 0` keeps the default
+/// @param resume Reuse the fits already journalled in `directory`
+/// @param directory Where journals, `steps.csv` and `final.ferx` go; `""`
+///   keeps the run in memory
+/// @param progress Print the engine's step progress to stderr
+/// @return Named list: the step-table columns, `included_*`, `base_model`,
+///   `final_model`, `final_fit`, `notes` and `cancelled`
+/// @keywords internal
+#[extendr]
+#[allow(clippy::too_many_arguments)]
+fn ferx_rust_covsearch(
+    config_path: &str,
+    model_path: &str,
+    data_path: &str,
+    mfl: &str,
+    algorithm: &str,
+    p_forward: f64,
+    p_backward: f64,
+    max_steps: i32,
+    adaptive: i32,
+    rank: &str,
+    rank_cutoff: f64,
+    threads: i32,
+    retries: i32,
+    resume: bool,
+    directory: &str,
+    progress: bool,
+) -> Robj {
+    let mut section = String::from("\n[covsearch]\n");
+    if !algorithm.is_empty() {
+        section.push_str(&format!("algorithm = {}\n", toml_basic(algorithm)));
+    }
+    if p_forward.is_finite() {
+        section.push_str(&format!("p_forward = {p_forward}\n"));
+    }
+    if p_backward.is_finite() {
+        section.push_str(&format!("p_backward = {p_backward}\n"));
+    }
+    if max_steps > 0 {
+        section.push_str(&format!("max_steps = {max_steps}\n"));
+    }
+    if adaptive >= 0 {
+        section.push_str(&format!("adaptive_scope_reduction = {}\n", adaptive == 1));
+    }
+    let text = search_config_text(
+        model_path,
+        data_path,
+        mfl,
+        rank,
+        rank_cutoff,
+        threads,
+        retries,
+        resume,
+        &section,
+    );
+    let inline_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let config = match search_config_for_tool(
+        config_path,
+        &text,
+        &inline_dir,
+        threads,
+        retries,
+        resume,
+    ) {
+        Ok(c) => c,
+        Err(e) => throw_r_error(format!("ferx_covsearch: {e}")),
+    };
+    // Refuse a space covsearch cannot honour before the dataset is read - a
+    // structural feature here is a file meant for modelsearch.
+    if let Err(e) = ferx_tools::covsearch::CovsearchOptions::from_config(&config) {
+        throw_r_error(format!("ferx_covsearch: {e}"));
+    }
+    let mut base = match config.load_base() {
+        Ok(b) => b,
+        Err(e) => throw_r_error(format!("ferx_covsearch: {e}")),
+    };
+
+    // One flag, two paths into the engine: `CovsearchRun::cancel` stops the
+    // candidate loop, and the copy on `fit_options` unwinds the fits already
+    // in flight (the same wiring `ferx_bootstrap()` uses).
+    let cancel = CancelFlag::new();
+    base.prepared.parsed.fit_options.cancel = Some(cancel.clone());
+
+    let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
+    let report = |event: ferx_tools::covsearch::CovsearchEvent| {
+        use ferx_tools::covsearch::{CovsearchEvent as E, Phase};
+        if !progress {
+            return;
+        }
+        match event {
+            E::BaseStarted => eprintln!("Fitting the base model..."),
+            E::BaseFinished { ofv, n_parameters } => {
+                eprintln!("Base model: OFV {ofv:.3}, {n_parameters} free parameters")
+            }
+            E::StepStarted {
+                step,
+                phase,
+                candidates,
+            } => eprintln!(
+                "Step {step} ({}): fitting {candidates} candidate{}...",
+                phase.label(),
+                if candidates == 1 { "" } else { "s" }
+            ),
+            E::StepFinished {
+                step,
+                phase,
+                selected,
+            } => match selected {
+                Some((effect, ofv)) => eprintln!(
+                    "Step {step} ({}): {} {} (OFV {ofv:.3})",
+                    phase.label(),
+                    if phase == Phase::Backward {
+                        "removed"
+                    } else {
+                        "added"
+                    },
+                    effect.label()
+                ),
+                None => eprintln!("Step {step} ({}): nothing accepted", phase.label()),
+            },
+        }
+    };
+
+    let result = match run_search_cancellable(&cancel, || {
+        ferx_tools::covsearch::run_covsearch(
+            &config,
+            &base,
+            ferx_tools::covsearch::CovsearchRun {
+                dir: dir.clone(),
+                threads: config.run.threads,
+                cancel: Some(cancel.clone()),
+                progress: Some(&report),
+            },
+        )
+    }) {
+        Ok(r) => r,
+        Err(e) => throw_r_error(format!("ferx_covsearch: {e}")),
+    };
+
+    // The step table, column for column as `STEP_COLUMNS` orders it.
+    let n = result.steps.len();
+    let mut step = Vec::with_capacity(n);
+    let mut phase = Vec::with_capacity(n);
+    let mut candidate = Vec::with_capacity(n);
+    let mut parameter = Vec::with_capacity(n);
+    let mut covariate = Vec::with_capacity(n);
+    let mut form = Vec::with_capacity(n);
+    let mut parent_ofv = Vec::with_capacity(n);
+    let mut ofv = Vec::with_capacity(n);
+    let mut dofv = Vec::with_capacity(n);
+    let mut df = Vec::with_capacity(n);
+    let mut p_value = Vec::with_capacity(n);
+    let mut alpha = Vec::with_capacity(n);
+    let mut significant = Vec::with_capacity(n);
+    let mut selected = Vec::with_capacity(n);
+    let mut converged = Vec::with_capacity(n);
+    let mut passed = Vec::with_capacity(n);
+    let mut failures = Vec::with_capacity(n);
+    for r in &result.steps {
+        step.push(r.step as i32);
+        phase.push(r.phase.label().to_string());
+        candidate.push(r.candidate.clone());
+        parameter.push(r.effect.parameter.clone());
+        covariate.push(r.effect.covariate.clone());
+        form.push(r.effect.form_label().to_string());
+        parent_ofv.push(r.parent_ofv);
+        ofv.push(opt_f64(r.ofv));
+        dofv.push(opt_f64(r.lrt.map(|t| t.dofv)));
+        df.push(opt_f64(r.lrt.map(|t| t.df as f64)));
+        p_value.push(opt_f64(r.lrt.map(|t| t.p_value)));
+        alpha.push(opt_f64(r.lrt.map(|t| t.alpha)));
+        significant.push(opt_bool_chr(r.lrt.map(|t| t.significant)));
+        selected.push(r.selected);
+        converged.push(opt_bool_chr(r.converged));
+        passed.push(r.passed);
+        // The engine's own fallback: a candidate with no gate failure but a
+        // reason it could not be compared says so in the same column.
+        failures.push(if r.failures.is_empty() {
+            r.note.clone().unwrap_or_default()
+        } else {
+            r.failures.join("; ")
+        });
+    }
+
+    let included_parameter: Vec<String> =
+        result.included.iter().map(|i| i.effect.parameter.clone()).collect();
+    let included_covariate: Vec<String> =
+        result.included.iter().map(|i| i.effect.covariate.clone()).collect();
+    let included_form: Vec<String> = result
+        .included
+        .iter()
+        .map(|i| i.effect.form_label().to_string())
+        .collect();
+    let included_origin: Vec<String> =
+        result.included.iter().map(|i| i.origin.label()).collect();
+
+    let final_model = result.final_model.render();
+    let final_fit: Robj = match &result.final_fit {
+        Some(fit) => match search_final_fit(fit, &final_model, &base.prepared.data_path) {
+            Ok(l) => l.into(),
+            Err(e) => throw_r_error(format!("ferx_covsearch: {e}")),
+        },
+        None => NULL.into(),
+    };
+
+    list!(
+        step = step,
+        phase = phase,
+        candidate = candidate,
+        parameter = parameter,
+        covariate = covariate,
+        form = form,
+        parent_ofv = parent_ofv,
+        ofv = ofv,
+        dofv = dofv,
+        df = df,
+        p_value = p_value,
+        alpha = alpha,
+        significant = significant,
+        selected = selected,
+        converged = converged,
+        passed = passed,
+        failures = failures,
+        included_parameter = included_parameter,
+        included_covariate = included_covariate,
+        included_form = included_form,
+        included_origin = included_origin,
+        base_model = result.base_model.render(),
+        base_ofv = result.base_ofv,
+        final_model = final_model,
+        final_ofv = result.final_ofv,
+        final_step = result.final_step as i32,
+        final_fit = final_fit,
+        algorithm = ferx_tools::covsearch::CovsearchOptions::from_config(&config)
+            .map(|o| o.algorithm.label().to_string())
+            .unwrap_or_default(),
+        directory = directory.to_string(),
+        // The base model as the config resolved it, so the R object names the
+        // same file in both entry forms.
+        model = config.base.to_string_lossy().into_owned(),
+        data = base.prepared.data_path.clone(),
+        notes = result.notes.clone(),
+        cancelled = result.cancelled,
+    )
+    .into()
+}
+
+/// Allometric scaling - Pharmpy's `allometry`.
+///
+/// With `fit = FALSE` this is a model transform: the scaled model text and the
+/// scalings it applied, with nothing fitted. With `fit = TRUE` the base and the
+/// scaled model are fitted side by side and both outcomes returned.
+///
+/// @param config_path Path to a `.ferxsearch` carrying `ALLOMETRY(WT, 70)`, or
+///   `""` to use the arguments below
+/// @param model_path Base model (when no config file is given)
+/// @param data_path Dataset, or `""` to use the model's `[data]` block
+/// @param covariate The size covariate
+/// @param reference The reference value it is divided by
+/// @param parameters Parameters to scale; empty for the template's clearances
+///   and volumes
+/// @param exponents One exponent per `parameters` entry; empty for the
+///   convention (0.75 for a clearance, 1.0 for a volume)
+/// @param fixed Fix the exponents, or estimate them from those values
+/// @param lower,upper Bounds of an estimated exponent
+/// @param threads Worker threads; `<= 0` lets the runner choose
+/// @param retries Perturbed restarts per fit; `< 0` keeps the default
+/// @param directory Where the two fits are journalled; `""` keeps them in
+///   memory
+/// @param fit Fit the two models, or only build the scaled one
+/// @return Named list: the scalings, the scaled model text, and (when fitted)
+///   both outcomes
+/// @keywords internal
+#[extendr]
+#[allow(clippy::too_many_arguments)]
+fn ferx_rust_allometry(
+    config_path: &str,
+    model_path: &str,
+    data_path: &str,
+    covariate: &str,
+    reference: f64,
+    parameters: Vec<String>,
+    exponents: Vec<f64>,
+    fixed: bool,
+    lower: f64,
+    upper: f64,
+    threads: i32,
+    retries: i32,
+    directory: &str,
+    fit: bool,
+) -> Robj {
+    let (base, mut options, mut run_options) = if config_path.is_empty() {
+        let data = (!data_path.is_empty()).then_some(data_path);
+        let prepared = match ferx_core::prepare_run(model_path, data) {
+            Ok(p) => p,
+            Err(e) => throw_r_error(format!("ferx_allometry: {e}")),
+        };
+        let text = match std::fs::read_to_string(model_path)
+            .map_err(|e| format!("cannot read {model_path}: {e}"))
+            .and_then(|s| ferx_core::edit::ModelText::parse(&s))
+        {
+            Ok(t) => t,
+            Err(e) => throw_r_error(format!("ferx_allometry: {e}")),
+        };
+        (
+            ferx_tools::search::BaseModel { prepared, text },
+            ferx_tools::allometry::AllometryOptions::default(),
+            ferx_tools::search::RunOptions::default(),
+        )
+    } else {
+        let config = match ferx_tools::search::SearchConfig::load(Path::new(config_path)) {
+            Ok(c) => c,
+            Err(e) => throw_r_error(format!("ferx_allometry: {e}")),
+        };
+        let options = match ferx_tools::allometry::AllometryOptions::from_config(&config) {
+            Ok(o) => o,
+            Err(e) => throw_r_error(format!("ferx_allometry: {e}")),
+        };
+        let base = match config.load_base() {
+            Ok(b) => b,
+            Err(e) => throw_r_error(format!("ferx_allometry: {e}")),
+        };
+        let run_options = config.run_options();
+        (base, options, run_options)
+    };
+
+    // The R defaults mirror `AllometryOptions::default()`, so an argument left
+    // alone leaves the engine's own value in place; only a stated one overrides
+    // (and a config file's `[allometry]` section is overridden by nothing).
+    if config_path.is_empty() {
+        if !covariate.is_empty() {
+            options.covariate = covariate.to_string();
+        }
+        if reference.is_finite() {
+            options.reference = reference;
+        }
+        if !parameters.is_empty() {
+            options.parameters = Some(parameters);
+        }
+        if !exponents.is_empty() {
+            options.exponents = Some(exponents);
+        }
+        options.fixed = fixed;
+        if lower.is_finite() {
+            options.lower = lower;
+        }
+        if upper.is_finite() {
+            options.upper = upper;
+        }
+    }
+    if let Err(e) = options.validate() {
+        throw_r_error(format!("ferx_allometry: {e}"));
+    }
+    if retries >= 0 {
+        run_options.n_starts = retries as usize + 1;
+    }
+
+    let scaling_columns = |scalings: &[ferx_tools::allometry::Scaling]| {
+        (
+            scalings.iter().map(|s| s.parameter.clone()).collect::<Vec<String>>(),
+            scalings.iter().map(|s| s.exponent).collect::<Vec<f64>>(),
+            scalings.iter().map(|s| s.fixed).collect::<Vec<bool>>(),
+            scalings
+                .iter()
+                .map(|s| s.theta.clone().unwrap_or_default())
+                .collect::<Vec<String>>(),
+        )
+    };
+
+    if !fit {
+        let built = match ferx_tools::allometry::allometric_model(&base, &options) {
+            Ok(b) => b,
+            Err(e) => throw_r_error(format!("ferx_allometry: {e}")),
+        };
+        let (parameter, exponent, is_fixed, theta) = scaling_columns(&built.scalings);
+        return list!(
+            parameter = parameter,
+            exponent = exponent,
+            fixed = is_fixed,
+            theta = theta,
+            covariate = options.covariate.clone(),
+            reference = options.reference,
+            model = built.model.render(),
+            base_model = base.text.render(),
+            data = base.prepared.data_path.clone(),
+            notes = built.notes,
+            fitted = false,
+        )
+        .into();
+    }
+
+    let cancel = CancelFlag::new();
+    let mut base = base;
+    base.prepared.parsed.fit_options.cancel = Some(cancel.clone());
+    let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
+    let threads = (threads > 0).then_some(threads as usize);
+    let result = match run_search_cancellable(&cancel, || {
+        ferx_tools::allometry::run_allometry(
+            &base,
+            &options,
+            ferx_tools::allometry::AllometryRun {
+                dir: dir.clone(),
+                threads,
+                cancel: Some(cancel.clone()),
+                run_options: run_options.clone(),
+            },
+        )
+    }) {
+        Ok(r) => r,
+        Err(e) => throw_r_error(format!("ferx_allometry: {e}")),
+    };
+
+    let (parameter, exponent, is_fixed, theta) = scaling_columns(&result.scalings);
+    let scaled_model = result.model.render();
+    let scaled_fit: Robj = match &result.scaled.fit {
+        Some(fit) => match search_final_fit(fit, &scaled_model, &base.prepared.data_path) {
+            Ok(l) => l.into(),
+            Err(e) => throw_r_error(format!("ferx_allometry: {e}")),
+        },
+        None => NULL.into(),
+    };
+    let base_text = base.text.render();
+    let base_fit: Robj = match &result.base.fit {
+        Some(fit) => match search_final_fit(fit, &base_text, &base.prepared.data_path) {
+            Ok(l) => l.into(),
+            Err(e) => throw_r_error(format!("ferx_allometry: {e}")),
+        },
+        None => NULL.into(),
+    };
+
+    list!(
+        parameter = parameter,
+        exponent = exponent,
+        fixed = is_fixed,
+        theta = theta,
+        covariate = options.covariate.clone(),
+        reference = options.reference,
+        model = scaled_model,
+        base_model = base_text,
+        data = base.prepared.data_path.clone(),
+        base_ofv = opt_f64(result.base.ofv),
+        scaled_ofv = opt_f64(result.scaled.ofv),
+        dofv = opt_f64(result.dofv()),
+        base_converged = opt_bool_chr(result.base.converged),
+        scaled_converged = opt_bool_chr(result.scaled.converged),
+        base_passed = result.base.verdict.passed,
+        scaled_passed = result.scaled.verdict.passed,
+        base_failures = result.base.verdict.failures.clone(),
+        scaled_failures = result.scaled.verdict.failures.clone(),
+        base_fit = base_fit,
+        scaled_fit = scaled_fit,
+        directory = directory.to_string(),
+        notes = result.notes.clone(),
+        cancelled = result.cancelled,
+        fitted = true,
+    )
+    .into()
+}
+
 extendr_module! {
     mod ferx;
     fn ferx_rust_fit;
@@ -5407,4 +6071,6 @@ extendr_module! {
     fn ferx_rust_search_space_parse;
     fn ferx_rust_search_coverage;
     fn ferx_rust_search_table_columns;
+    fn ferx_rust_covsearch;
+    fn ferx_rust_allometry;
 }

@@ -257,6 +257,32 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
         "cross-check the affected parameters with ferx_sir()."
       ))
     }
+    # The S matrix is the sum of per-subject score outer products, so one
+    # subject whose score cannot be evaluated takes the whole matrix with it -
+    # and the message names that subject, which is the useful half of it.
+    if (grepl("quadrature score for subject", message, ignore.case = TRUE)) {
+      return(paste0(
+        "The score for the named subject could not be evaluated, so the S ",
+        "matrix (and any covariance built on it) is unavailable. Inspect that ",
+        "subject: very few observations, all-BLOQ records or an extreme ",
+        "covariate are the usual causes. The R-matrix covariance does not use ",
+        "per-subject scores - ferx_covariance(fit, covariance_method = \"r\") ",
+        "- and ferx_sir() estimates uncertainty without a covariance step at ",
+        "all."
+      ))
+    }
+    # The sum itself came out non-finite: no single subject is named, so the
+    # advice is about the matrix rather than about a record.
+    if (grepl("non-finite score cross-product", message, ignore.case = TRUE)) {
+      return(paste0(
+        "The score cross-product overflowed or contained a non-finite entry, ",
+        "so the S matrix is unavailable and no standard errors were produced ",
+        "from it. This usually follows extreme parameter values at ",
+        "convergence. Check the estimates against their bounds, then try the ",
+        "R-matrix covariance (ferx_covariance(fit, covariance_method = \"r\")) ",
+        "or ferx_sir()."
+      ))
+    }
     # Cancelled part-way (`COV_CANCELLED_MSG`). No standard errors, but nothing
     # was diagnosed about the model either, so the identifiability advice in the
     # fallback would report a finding the engine never made.
