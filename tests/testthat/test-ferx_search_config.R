@@ -123,12 +123,14 @@ test_that("tool sections are kept for their tool and reported by name", {
 })
 
 test_that("a coverage gap is an error naming the feature, before any fit", {
+  # Needs a feature the engine does not implement yet - see the note in
+  # test-ferx_search_space.R for how to repoint this when SEQ-ZO-FO lands.
   err <- expect_error(
-    ferx_search_config(minimal_cfg("ELIMINATION([FO, MM])")),
-    "MM"
+    ferx_search_config(minimal_cfg("ABSORPTION([INST, SEQ-ZO-FO])")),
+    "SEQ-ZO-FO"
   )
   # The engine explains why, rather than silently narrowing the space.
-  expect_match(conditionMessage(err), "ELIMINATION\\(MM\\)")
+  expect_match(conditionMessage(err), "ABSORPTION\\(SEQ-ZO-FO\\)")
 })
 
 test_that("a misspelt section is an error rather than a silently ignored one", {

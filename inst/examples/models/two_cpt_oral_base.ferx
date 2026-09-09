@@ -52,10 +52,11 @@
   method     = focei
   maxiter    = 500
   covariance = true
-  # Finite differences rather than the default `auto`: on this model and
-  # dataset the analytic-gradient path stalls at the initial estimates (the
-  # optimizer reports `NLopt stopped: Failure` on its first evaluation and no
-  # parameter moves), which a search would then have to reject as an
-  # init-stalled base fit. `fd` converges in a few seconds. The same stall is
-  # visible on two_cpt_oral_cov.ferx, which keeps the default.
+  # Finite differences rather than the default `auto`. This was a workaround
+  # for ferx-core #1290: the analytic-gradient path used to stall at the
+  # initial estimates on this model and dataset (`NLopt stopped: Failure` on
+  # the first evaluation, no parameter moves), which a search then had to
+  # reject as an init-stalled base fit. That is fixed, and both paths now
+  # converge; `fd` is kept explicit so the example's published numbers do not
+  # move with the gradient default.
   gradient   = fd

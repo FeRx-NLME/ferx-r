@@ -194,14 +194,23 @@
   `inst/examples/ex_covsearch.R` and `inst/examples/ex_allometry.R` run both
   end to end.
 
-  On the bundled `two_cpt_oral_base` example the search currently selects
-  nothing, and the step table says why: every candidate stalls at its initial
-  estimates, so its dOFV is ~0.01 and the gate rejects it
-  ([ferx-core #1290](https://github.com/FeRx-NLME/ferx-core/issues/1290) - a
-  model with covariate thetas does not optimize on that dataset, whether the
-  effect is written inline or as a `[covariate_model]` relation). That is the
-  failure the verdict column exists for: without it the run would read as "no
-  covariate is worth adding" on data whose covariate effects are real.
+  On the bundled `two_cpt_oral_base` example the candidates converge and pass
+  the strictness gate, and selection is decided on the p-value. The WT-only
+  space `ex_covsearch.R` runs inline selects nothing at `p_forward = 0.01` -
+  CL-WT is the best candidate at dOFV 5.4 (p = 0.020), and V1-WT is weaker
+  still - while the wider space in the bundled `.ferxsearch`, which adds CRCL,
+  does select relations and goes on to run a backward step.
+
+  This is a change from what this branch first reported. Every candidate used
+  to stall at its initial estimates, so its dOFV came out ~0.01 and the gate
+  rejected it - a model carrying covariate thetas simply did not optimize on
+  that dataset, whether the effect was written inline or as a
+  `[covariate_model]` relation
+  ([ferx-core #1290](https://github.com/FeRx-NLME/ferx-core/issues/1290), fixed
+  by anchoring the EBE warm start to the best point seen). That was the failure
+  the verdict column exists for: without it the run would have read as "no
+  covariate is worth adding" on data whose covariate effects are real, and the
+  column is what made the difference visible.
 
 - **New bundled example: `two_cpt_oral_base`** - the covariate-free base of
   `two_cpt_oral_cov`, sharing its dataset, with its own `.ferxsearch` as
@@ -209,10 +218,12 @@
   already carry the answer: `two_cpt_oral_cov` multiplies CL by
   `(WT/70)^THETA_WT` in `[individual_parameters]`, so a covariate search on it
   asks whether to add an effect the model has, and allometric scaling on top of
-  it would count body size twice. Its `[fit_options]` set `gradient = fd`: on
-  this model and dataset the default analytic-gradient path stalls at the
-  initial estimates (no parameter moves, and the search then rejects the base
-  fit), which `two_cpt_oral_cov` also does.
+  it would count body size twice. Its `[fit_options]` set `gradient = fd`,
+  which was needed while ferx-core #1290 was open (the default
+  analytic-gradient path stalled at the initial estimates on this model and
+  dataset, so the search rejected its own base fit). Both paths converge on the
+  pinned engine; the explicit `fd` is kept so the example's numbers do not move
+  with the gradient default.
 
 - **The search surface: `ferx_search_config()`, `ferx_search_space()`,
   `ferx_search_coverage()` and `ferx_search_results()`** (#332 Part 1;
@@ -582,6 +593,17 @@
   on; attaching an ETA or holding the parameter `FIX` remains the better fix.
 
 ## Bug fixes
+
+- **A model carrying covariate thetas no longer stalls at its initial
+  estimates** ([ferx-core #1290](https://github.com/FeRx-NLME/ferx-core/issues/1290),
+  fixed in the engine by anchoring the EBE warm start to the best point seen).
+  The pinned `ferx-core` / `ferx-tools` revision moves to `19bf7cf` to pick this
+  up. It is what made `ferx_covsearch()` unusable on the bundled example - every
+  candidate was rejected as an init stall - so the search now selects on the
+  statistics rather than on a numerical failure. The same bump brings
+  `ELIMINATION` into the engine's covered feature set
+  ([ferx-core #1257](https://github.com/FeRx-NLME/ferx-core/issues/1257)), which
+  `ferx_search_coverage()` reports.
 
 - **An infusion into a built-in absorption compartment is no longer delivered
   twice** ([ferx-core #1187](https://github.com/FeRx-NLME/ferx-core/issues/1187)).

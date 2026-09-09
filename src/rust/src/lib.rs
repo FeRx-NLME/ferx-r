@@ -5538,16 +5538,24 @@ fn search_final_fit(
     model_text: &str,
     data_path: &str,
 ) -> std::result::Result<List, String> {
-    let dir = std::env::temp_dir().join(format!("ferx-search-{}", std::process::id()));
+    // The scratch directory is unique per call and removed on every path out,
+    // including the error ones: `R CMD check` reports anything left behind in
+    // the session temp directory as detritus.
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("ferx-search-{}-{seq}", std::process::id()));
     std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create `{}`: {e}", dir.display()))?;
+
     let path = dir.join("final.ferx");
-    std::fs::write(&path, model_text)
-        .map_err(|e| format!("cannot write `{}`: {e}", path.display()))?;
     let data = (!data_path.is_empty()).then_some(data_path);
-    let prepared = ferx_core::prepare_run(&path.to_string_lossy(), data)?;
-    let out = fit_result_to_list(fit, &prepared.population, &prepared.parsed.model);
+    let out = std::fs::write(&path, model_text)
+        .map_err(|e| format!("cannot write `{}`: {e}", path.display()))
+        .and_then(|()| ferx_core::prepare_run(&path.to_string_lossy(), data))
+        .map(|prepared| fit_result_to_list(fit, &prepared.population, &prepared.parsed.model));
+
     let _ = std::fs::remove_file(&path);
-    Ok(out)
+    let _ = std::fs::remove_dir(&dir);
+    out
 }
 
 /// Stepwise covariate modelling - PsN `scm`, Pharmpy `covsearch`.

@@ -107,24 +107,28 @@ test_that("a covered space is all TRUE with no reasons", {
   expect_true(all(is.na(cov$reason)))
 })
 
+# The gap tests below need a feature the engine does not implement yet.
+# `SEQ-ZO-FO` is that feature today; `ELIMINATION(MM)` used to be, until
+# ferx-core #1257 covered it. When SEQ-ZO-FO lands, pick the next one from
+# `ferx_search_coverage()` rather than deleting the assertions.
 test_that("an unsupported feature is a row, not an aborted run", {
-  cov <- ferx_search_coverage("ELIMINATION([FO, MM])")
+  cov <- ferx_search_coverage("ABSORPTION([INST, SEQ-ZO-FO])")
   expect_true(any(!cov$covered))
   gap <- cov[!cov$covered, ]
-  expect_match(gap$feature, "MM")
+  expect_match(gap$feature, "SEQ-ZO-FO")
   expect_true(all(nzchar(gap$reason)))
 })
 
 test_that("a gap repeated across statements is reported once", {
   # `check_coverage` deduplicates gaps across a whole program; running it per
   # feature must not undo that.
-  cov <- ferx_search_coverage("ELIMINATION(MM); ELIMINATION(MM)")
+  cov <- ferx_search_coverage("ABSORPTION(SEQ-ZO-FO); ABSORPTION(SEQ-ZO-FO)")
   expect_equal(sum(!cov$covered), 1L)
 
   # A wildcard and an explicit list naming the same unsupported mode collapse
   # to the same single row.
-  cov <- ferx_search_coverage("ELIMINATION(*); ELIMINATION(MM)")
-  expect_equal(sum(cov$feature == "ELIMINATION(MM)"), 1L)
+  cov <- ferx_search_coverage("ABSORPTION(*); ABSORPTION(SEQ-ZO-FO)")
+  expect_equal(sum(cov$feature == "ABSORPTION(SEQ-ZO-FO)"), 1L)
 })
 
 test_that("coverage accepts a space or a configuration", {
