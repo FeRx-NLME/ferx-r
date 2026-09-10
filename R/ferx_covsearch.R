@@ -229,7 +229,15 @@ ferx_covsearch <- function(model = NULL,
     final_ofv        = as.numeric(raw$final_ofv),
     final_step       = as.integer(raw$final_step),
     algorithm        = as.character(raw$algorithm),
-    candidates       = .ferx_search_candidates(dir_arg),
+    # The runner directories this run wrote - `base/` and one per step it
+    # actually took - rather than whatever the directory holds: a shorter run
+    # in a directory an earlier one used would otherwise inherit its candidate
+    # tables (#336 review).
+    candidates       = .ferx_search_candidates(
+      dir_arg,
+      c("base", sprintf("%s-%d", steps$phase[steps$step > 0L],
+                        steps$step[steps$step > 0L]))
+    ),
     model            = as.character(raw$model),
     data             = as.character(raw$data),
     directory        = if (nzchar(dir_arg)) dir_arg else NA_character_,

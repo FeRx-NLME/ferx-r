@@ -33,9 +33,9 @@ Reads a \code{.ferxsearch} file with the engine's own loader and returns
 everything it validated, so a search space is checked before the first
 candidate is fitted rather than while watching fits fail. The loader is
 strict: an unknown section, an unparseable \code{[space] mfl}, an empty
-space, a feature the engine cannot express (a coverage gap) or a
-\code{[rank] type} that is not implemented are all errors here, each naming
-the offender.
+space, a feature the engine cannot express (a coverage gap), an unrecognised
+\code{[rank] type} or an invalid \code{[rank.penalties]} charge are all
+errors here, each naming the offender.
 }
 \details{
 The file format (ferx-core's search tooling) is TOML:
@@ -81,6 +81,7 @@ Other search:
 \code{\link[=ferx_allometry]{ferx_allometry()}},
 \code{\link[=ferx_covsearch]{ferx_covsearch()}},
 \code{\link[=ferx_modelsearch]{ferx_modelsearch()}},
+\code{\link[=ferx_ruvsearch]{ferx_ruvsearch()}},
 \code{\link[=ferx_search_coverage]{ferx_search_coverage()}},
 \code{\link[=ferx_search_results]{ferx_search_results()}},
 \code{\link[=ferx_search_space]{ferx_search_space()}}

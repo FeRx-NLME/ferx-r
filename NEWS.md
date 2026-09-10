@@ -2,6 +2,29 @@
 
 ## Breaking changes
 
+- **A `theta` whose initial estimate lies strictly outside its own declared
+  range is now refused before any fitting**
+  ([ferx-core #1251](https://github.com/FeRx-NLME/ferx-core/issues/1251),
+  [#1309](https://github.com/FeRx-NLME/ferx-core/pull/1309)). The pinned
+  `ferx-core` / `ferx-tools` revision moves to `944cbf1e` to pick this up.
+  `theta TVCL(0.05, 0.1, 10.0)` used to fit quietly from `0.1` — a factor of two
+  away from the number in the file — on every run; it now stops with
+  `E_THETA_INIT_OUTSIDE_BOUNDS` before the first objective evaluation. NM-TRAN
+  refuses the same stream outright (error 24). The comparison is against the
+  **declared** numbers, so `theta TVCL(-5.0, 0.0, 10.0)` is caught even though
+  the start and the declared lower bound both pack onto the engine's internal
+  `1e-10` floor. A start sitting *exactly* on a bound is left alone, and
+  `maxiter = 0` runs are exempt, as for `E_OMEGA_INIT_AT_RAIL`.
+
+  A start outside one of the engine's *internal* rails instead — the implicit
+  theta cap, the `omega` guards, the `sigma` guard — stays a warning
+  (`W_INIT_OUTSIDE_BOUNDS`), and now carries remediation guidance in
+  `ferx_warnings()` (see New features).
+
+  **No bundled example is affected**: `ferx check` was run over all 66 models in
+  `inst/examples/models/` at the new pin and none carries a start outside its
+  declared range.
+
 - **An unrecognised `[section]` in a `.ferx` file is now an error** (ferx-core #1040).
   Sections were read by name lookup, so one the engine did not know was never read
   and never reported: a misspelled `[fit_option]` left the model validating clean
@@ -175,6 +198,85 @@
   handing back a silent `NA`; note that a parameter declared `FIX` is not that
   case - the engine gives it an exact `0`, which both the table and `ferx_se()`
   report as such.
+- **`ferx_warnings()` now explains a clamped initial estimate**
+  ([ferx-core #1251](https://github.com/FeRx-NLME/ferx-core/issues/1251)).
+  `W_INIT_OUTSIDE_BOUNDS` arrives under the new `init_outside_bounds` category,
+  which this package did not know: the warning printed with no remediation
+  guidance at all. It now says that the fit did not start from the value in the
+  model file, and what to change. (The scale is left to the engine's own
+  message, which since #1251 reads `an SD of 1.000e3` for a `sigma`.) The
+  category is deliberately distinct
+  from `boundary_estimate`, which is about where a fit *ended* and which drives
+  `bootstrap`'s `skip_estimate_near_boundary`, `reject_on_boundary` and this
+  package's own strictness gate; a clamped start wearing that category would
+  silently drop bootstrap replicates.
+
+- **Two new `[covariate_model]` forms, both reachable from `.ferx` files and
+  from `.ferxsearch` spaces via `ferx_covsearch()` / `ferx_modelsearch()`.**
+
+  *Additive (`+`) covariate effects*
+  ([ferx-core #1313](https://github.com/FeRx-NLME/ferx-core/issues/1313)).
+  A trailing operator token makes a relation a term added to the parameter
+  instead of a factor on it — `CL ~ WT linear(center = 70) +` becomes
+  `CL = TVCL * exp(ETA_CL) + THETA_CL_WT*(WT - 70)`. `*` stays the default.
+  Mu-referencing switches off for a parameter carrying an additive relation
+  (the typical value is a sum) and the parser warns. This closes the last MFL
+  operator gap, so `COVARIATE(..., +)` is no longer reported by
+  `ferx_search_coverage()`. **Note:** Pharmpy reuses its multiplicative template
+  under `+`, so a model translated from Pharmpy will not reproduce its equations.
+
+  *`categorical2`* ([ferx-core #1312](https://github.com/FeRx-NLME/ferx-core/issues/1312)),
+  Pharmpy MFL's `cat2`. It contributes `theta_k` at each non-reference level
+  where `categorical` contributes `1 + theta_k` — the same degrees of freedom and
+  an exact reparameterisation, so it is a choice of how theta reads, not a
+  cheaper test. The **null moves with the form**: `fix = 1` is "no effect" for
+  `categorical2` where `fix = 0` is for `categorical`.
+
+- **`[rank] type = "penalized"` now works in a `.ferxsearch` configuration**
+  ([ferx-core #1185](https://github.com/FeRx-NLME/ferx-core/issues/1185)).
+  Previously declared but unimplemented, so `ferx_search_config()` refused it;
+  it is now implemented for **every** search tool, which means
+  `ferx_covsearch()` and `ferx_modelsearch()` can rank on pyDarwin's penalized
+  fitness: OFV + 10 per estimated theta / omega / sigma element + 100 for
+  non-convergence, a failed or absent covariance step, a parameter correlation
+  above 0.95, or a condition number above 1000. `[rank.penalties]` overlays any
+  individual charge.
+
+- **SAEM residual SD is less noisy.** For eligible single additive and
+  proportional error models SAEM now averages the residual sufficient statistic
+  instead of taking the final draw
+  ([ferx-core #1321](https://github.com/FeRx-NLME/ferx-core/pull/1321)), which
+  reduces Monte Carlo noise in the reported residual SD.
+
+- **`cov_inner_tol` is now honoured as a framework-level covariance key**
+  ([ferx-core #956](https://github.com/FeRx-NLME/ferx-core/issues/956)), so it no
+  longer reports that it is ignored for estimators whose covariance step applies
+  it. A fit whose last estimating stage is `bayes` runs no covariance step and
+  now says exactly that for all six covariance keys. A non-positive or
+  non-finite value is rejected at parse time; such a value used to parse and then
+  silently make every covariance-step EBE reconvergence exhaust `inner_maxiter`.
+
+- **Performance: `settings = list(n_agq = ...)` with `method = "focei"`.** The
+  Gauss-Newton-anchored quadrature refinement now assembles its grid-response
+  gradient term analytically rather than rebuilding the anchor at `x +/- h` for
+  every free population parameter
+  ([ferx-core #251](https://github.com/FeRx-NLME/ferx-core/issues/251)):
+  30-50% fewer provider calls on warfarin fixtures, and roughly 2x less provider
+  time and ~30% faster wall-clock on an ODE model. **This is on by default and
+  changes the optimizer trajectory**, so converged estimates, OFVs and standard
+  errors may move within the convergence tolerance relative to the previous pin.
+
+- **Performance: `[covariate_nn]` models with a time-varying network input** are
+  now analytic on both the FOCE and FOCEI loops
+  ([ferx-core #1300](https://github.com/FeRx-NLME/ferx-core/issues/1300)).
+  Subjects that fell back to reconverged finite differences (~300x per objective
+  evaluation on the vancomycin DCM) now take the exact gradient; models without a
+  network are numerically unchanged. Requires the `nn` cargo feature, which is
+  off in the default package build.
+
+- **Closed-form steady-state bolus models with estimated lag times** now use
+  analytical event sensitivities instead of falling back to finite differences
+  ([ferx-core #1311](https://github.com/FeRx-NLME/ferx-core/pull/1311)).
 
 - **`data` beside `config` is now an error, and an infinite numeric argument
   is refused** in `ferx_covsearch()`, `ferx_allometry()` and
@@ -187,6 +289,55 @@
   `p_forward = Inf` disappeared on the way to the configuration and the search
   ran as though the argument had never been given. Both now stop with a message
   naming the argument.
+
+- **Residual-error model search: `ferx_ruvsearch()`** (#336, part of the #334
+  search epic; ferx-core #1182). Pharmpy's `ruvsearch` from R: each iteration
+  adds one residual-error feature to the model the last one kept, fits every
+  candidate, and accepts the largest improvement the likelihood-ratio test
+  calls significant at `p_value`. The four families are `IIV_on_RUV` (a
+  per-subject scale on the residual SD, tested only when the estimation method
+  has eta-epsilon interaction), `power`, `combined` and `time_varying`
+  (`groups - 1` candidates, cut at the time-after-dose quantiles); `skip`
+  leaves a family out, and `cwres_prescreen` takes Pharmpy's cheap path of
+  screening on the parent's CWRES and refitting only the winner.
+
+  There is no search space to state, and a file that states one - or a `[rank]`
+  asking for a BIC or a dOFV `cutoff` - is refused by name when it is read:
+  this search selects on the likelihood-ratio test, not on a ranking criterion.
+  The search always starts from a plain proportional error model, fitting one
+  first when the input is not one, and the final comparison checks the accepted
+  stack against the input as well, so a search can return the model it started
+  from.
+
+  The object is the engine's step table - one row per model fitted, with the
+  **p-value**, `converged` and the strictness verdict beside the dOFV, plus the
+  `RuvFeature` label and its `Family`, so "which residual form won, and at what
+  p-value" is a table rather than prose. `print()` shows the iteration table
+  and the selected error model; `summary()` adds every form that was not
+  selected with its reason. Every fitted model's text comes back named by
+  candidate id, and the winner comes back as a fitted `ferx_fit`.
+
+  `$candidates` is scoped to the steps the run actually took, in every search
+  tool. The engine rewrites the steps it executes but removes nothing, so
+  re-using a run directory for a shorter search - two iterations, then one -
+  used to fold the earlier run's leftover candidate tables into the new
+  result, which then contradicted its own step table. `ferx_covsearch()` and
+  `ferx_modelsearch()` carried the same defect and are fixed with it.
+
+  `ferx_search_results()` gained `type = "steps"`, which reads a stepwise run's
+  `steps.csv` back with the engine's own column list. Both `ferx_covsearch()`
+  and `ferx_ruvsearch()` write a file of that name with different columns, so
+  the schema is read off the file's own header and reported as the `tool`
+  attribute - a run produced by `ferx covsearch` or `ferx ruvsearch` on the
+  command line is readable from R either way.
+
+  `inst/examples/ex_ruvsearch.R` runs it end to end, and the `one_cpt_transit`
+  example now ships a residual-error `.ferxsearch` as `$search`. That model is
+  `ka`-free while its anchor dataset was simulated with a transit chain *and* a
+  first-order `ka` step, so the absorption-phase residuals carry the
+  misspecification: at `p = 0.05` a time-varying magnitude below TAD 1.375 is
+  accepted for 6.2 OFV, while at Pharmpy's default `p = 0.001` nothing is and
+  the search correctly hands back the model it was given.
 
 - **Structural model search: `ferx_modelsearch()`** (#335, part of the #334
   search epic; ferx-core #1181). Pharmpy's `modelsearch` from R: a space of
@@ -680,6 +831,42 @@
 
 ## Bug fixes
 
+- **A `.tmp` checkpoint from a deterministic stage now holds the best point, not
+  a throwaway probe** ([ferx-core #1317](https://github.com/FeRx-NLME/ferx-core/issues/1317)).
+  `foce`, `focei`, `laplace`, `gn` and `gn_hybrid` evaluate the objective at every
+  point the optimizer probes, so a checkpoint write landing mid-line-search
+  recorded a rejected trial point: on a `[covariate_nn]` FOCEI fit plateaued at
+  OFV 51786 the checkpoint held OFV 2.76e6. Anything reading the checkpoint as
+  "where the fit is" — a resume, a progress monitor, a scorer — saw a point orders
+  of magnitude off. A `saem` stage is unchanged: it deliberately saves its
+  *latest* state, which is what a correct continuation of the chain resumes from,
+  so a consumer comparing checkpoints must read `method_chain` / `stage_idx` first.
+
+- **A `theta` whose declared range cannot be represented no longer aborts the
+  fit** ([ferx-core #1251](https://github.com/FeRx-NLME/ferx-core/issues/1251)).
+  `theta TVCL(1.0, 5.0, 2.0)` (bounds swapped) and `theta TVCL(1e-12, 1e-13,
+  1e-11)` (a range wholly below the engine's internal packing floor) both produce
+  an empty optimizer box, and the bound clamp used to panic on it. Both now
+  report `E_INIT_BOUNDS_INVERTED`, naming which cause applies, and only the
+  affected coordinate is silenced so `ferx_model_validate()` still reports the
+  rest of the file in the same pass.
+
+- **A `CMT=0` infusion no longer reports a spurious lag-time gradient**
+  ([ferx-core #1077](https://github.com/FeRx-NLME/ferx-core/issues/1077)).
+  `CMT=0` is NONMEM's default *bolus* compartment and has no rate channel, but
+  when such a dose also carried a lag time the analytic sensitivity walk still
+  fired the infusion-end saltation, reporting a finite `d f / d eta_LAG` (+1.89 at
+  the first sample past the window end, against a central-difference reference of
+  exactly `0.0`) for a subject that receives no drug. Reachable only from a
+  hand-built model spec that runs no validation, so no validated fit changes.
+
+- **`W_INIT_OUTSIDE_BOUNDS` for a `sigma` now names the scale its numbers are on**
+  ([ferx-core #1251](https://github.com/FeRx-NLME/ferx-core/issues/1251)). The
+  engine stores sigma as a standard deviation and square-roots a plain
+  `sigma X ~ v` declaration, so the quoted number is an SD that need not appear in
+  the model file: `sigma PROP_ERR ~ 1e6` now reads `an SD of 1.000e3` rather than
+  `a value of 1.000e3`.
+
 - **A model carrying covariate thetas no longer stalls at its initial
   estimates** ([ferx-core #1290](https://github.com/FeRx-NLME/ferx-core/issues/1290),
   fixed in the engine by anchoring the EBE warm start to the best point seen).
@@ -903,6 +1090,36 @@
   lockfile bump when merged.
 
 ## Internal
+
+- **The pinned engine crosses a semver-breaking boundary: `ferx-core` /
+  `ferx-tools` `0.3.1` -> `0.4.0`** (revision `909ad382` -> `944cbf1e`).
+  `ferx_core::types::CovariateForm` gained a `Categorical2` variant and is now
+  `#[non_exhaustive]`, and `CovariateRelation` (and `edit::Relation`) gained an
+  `op: CovariateOp` field
+  ([ferx-core #1312](https://github.com/FeRx-NLME/ferx-core/issues/1312),
+  [#1313](https://github.com/FeRx-NLME/ferx-core/issues/1313)).
+
+  **No R-visible API changes and no change to this package's Rust glue.** The
+  glue matches `ferx_tools::gam::CovariateForm` — a different, unchanged enum
+  used for GAM screening in `ferx_gam_screen()` — and never constructs a
+  `CovariateRelation`; `cargo check --no-default-features --features
+  ci,nn,survival` against the new revision passes untouched. Anyone with their
+  own Rust code matching `ferx_core::CovariateForm` exhaustively must add a `_`
+  arm; from here on a new covariate form is genuinely additive.
+
+  One local-development consequence: while the lock still pinned `0.3.1`, the
+  `[patch]` in `src/rust/.cargo/config.toml` stopped applying, because
+  `ferx-tools 0.3.1` requires `ferx-core ^0.3` and the sibling checkout had moved
+  to `0.4.0` — so a local build silently used GitHub `main` instead of the
+  sibling. Bumping the lock restores it; `src/Makevars` regenerates the file with
+  both `[patch]` entries on every `R CMD INSTALL`.
+
+- **The engine gained `ferx globalsearch`** — global model search by genetic
+  algorithm or exhaustive enumeration, ranked on pyDarwin-style penalized fitness
+  ([ferx-core #1185](https://github.com/FeRx-NLME/ferx-core/issues/1185)).
+  There is no R binding yet; `ferx_covsearch()` and `ferx_modelsearch()` are
+  unaffected. (Unrelated to the existing `settings = list(global_search = TRUE)`
+  option on `ferx_fit()`, which is a global *optimizer* phase within one fit.)
 
 - **`ferx-tools` is now a second git dependency**, from the same ferx-core
   repository and the same revision as `ferx-core` - one extra `Cargo.lock`

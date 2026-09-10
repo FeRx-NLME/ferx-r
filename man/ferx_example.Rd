@@ -186,7 +186,10 @@ solve), with exact FOCE/FOCEI sensitivities and a continuous, estimable
 \code{transit()} input rate. With \code{N = 0} it reduces to first-order
 oral. Shares the transit anchor dataset; because that data adds a
 first-order \code{ka} this \code{ka}-free fit is mildly mis-specified
-(syntax / workflow demo).}
+(syntax / workflow demo). Ships a \code{.ferxsearch}
+\emph{residual-error} search as \code{$search}: that mis-specification
+is what \code{\link{ferx_ruvsearch}} has something to find in the
+absorption-phase residuals}
 \item{two_cpt_transit}{Two-compartment analytic Savic transit-compartment
 absorption -- \code{pk two_cpt_transit(cl, v1, q, v2, n, mtt)} (ferx-core
 #634). The same Gamma(N+1, KTR) transit closed form as

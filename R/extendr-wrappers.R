@@ -187,4 +187,22 @@ ferx_rust_modelsearch_columns <- function() {
   .Call("wrap__ferx_rust_modelsearch_columns")
 }
 
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_ruvsearch <- function(config_path, model_path, data_path, groups, p_value, skip, max_iter, cwres_prescreen, threads, retries, resume, directory, progress) {
+  .Call("wrap__ferx_rust_ruvsearch", config_path, model_path, data_path, as.integer(groups), p_value, skip, as.integer(max_iter), as.integer(cwres_prescreen), as.integer(threads), as.integer(retries), resume, directory, progress)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_ruvsearch_columns <- function() {
+  .Call("wrap__ferx_rust_ruvsearch_columns")
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_covsearch_columns <- function() {
+  .Call("wrap__ferx_rust_covsearch_columns")
+}
+
 # nolint end

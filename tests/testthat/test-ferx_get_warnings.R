@@ -276,7 +276,8 @@ test_that(".ferx_warning_guidance returns negative-autocorrelation guidance", {
     "covariance_regularized", "covariance_step", "data_quality",
     "dw_autocorrelation", "eps_shrinkage", "eta_normality", "eta_shrinkage",
     "experimental", "flat_parameter", "flip_flop", "gradient_fallback",
-    "high_correlation", "importance_sampling", "inflated_rse", "mu_referencing",
+    "high_correlation", "importance_sampling", "inflated_rse",
+    "init_outside_bounds", "mu_referencing",
     "multi_start", "ode_solver", "omega_structure", "optimizer_config",
     "optimizer_health", "parameter_at_runaway_guard", "simulation", "sir",
     "threads", "vi_bad_basin"
@@ -424,6 +425,64 @@ test_that(".ferx_warning_guidance matches ferx-core's WarningCode vocabulary", {
     g <- ferx:::.ferx_warning_guidance(cat)
     expect_true(is.character(g) && length(g) == 1L && nzchar(g), info = cat)
   }
+})
+
+test_that("init_outside_bounds guidance is start-side and distinct from boundary_estimate", {
+  # ferx-core #1251 gave a clamped START its own WarningCode rather than reusing
+  # BoundaryEstimate, because that category drives three default-on rejection
+  # filters (bootstrap's skip_estimate_near_boundary, reject_on_boundary, and
+  # .ferx_boundary_detail() in check_strictness.R) and a start wearing it would
+  # silently drop bootstrap replicates. The guidance must keep the two apart:
+  # this one is about where the fit BEGAN.
+  # Only the phrase anchor lives here. That the arm returns a non-empty string
+  # at all is already covered by the completeness walk above (the token is in
+  # .core_warning_cats()), and that `boundary_estimate` stays unanswered is
+  # already covered by the .unanswered_warning_cats() loop - asserting either
+  # again would just add another place to edit when the vocabulary moves.
+  expect_match(ferx:::.ferx_warning_guidance("init_outside_bounds"),
+               "before the first objective evaluation", fixed = TRUE)
+})
+
+test_that("a real fit produces an init_outside_bounds row that carries guidance", {
+  # The end-to-end path, which the table test above cannot reach: it hands the
+  # category in by hand, so it asserts the entry exists, never that any fit
+  # produces it. This drives the whole chain - engine emits
+  # W_INIT_OUTSIDE_BOUNDS, the glue maps the code to `init_outside_bounds`, the
+  # row survives into fit$warnings_structured, and ferx_get_warnings() prints
+  # the guidance under it.
+  #
+  # An omega over the variance rail is the cheapest trigger, and one of only two
+  # things that can reach this arm at all (the other is a sigma over the SD
+  # rail). A theta past the hidden cap cannot: that is the *error*
+  # E_THETA_INIT_OUTSIDE_BOUNDS, which stops the fit before any warning exists.
+  ex   <- ferx_example("warfarin")
+  path <- tempfile(fileext = ".ferx")
+  writeLines(c(
+    "[parameters]",
+    "  theta TVCL(0.134, 0.001, 10.0)",
+    "  omega ETA_CL ~ 1e6",          # far above the optimizer's variance rail
+    "  sigma PROP_ERR ~ 0.01",
+    "",
+    "[individual_parameters]",
+    "  CL = TVCL * exp(ETA_CL)",
+    "",
+    "[structural_model]",
+    "  pk one_cpt_oral(cl=CL, v=10.0, ka=1.0)",
+    "",
+    "[error_model]",
+    "  DV ~ proportional(PROP_ERR)"
+  ), path)
+  on.exit(unlink(path))
+
+  fit <- ferx_fit(path, ex$data, settings = list(maxiter = 2L),
+                  covariance = FALSE, verbose = FALSE)
+  ws <- ferx_get_warnings(fit, as_df = TRUE)
+  expect_true("init_outside_bounds" %in% ws$category)
+
+  # The guidance must actually print, not merely exist in the table.
+  out <- capture.output(ferx_get_warnings(fit))
+  expect_true(any(grepl("clamped onto one of the optimizer's internal rails",
+                        out, fixed = TRUE)))
 })
 
 test_that(".ferx_warning_guidance gives `general` no category-level guidance", {
