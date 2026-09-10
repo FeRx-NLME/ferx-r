@@ -183,8 +183,9 @@
   `W_INIT_OUTSIDE_BOUNDS` arrives under the new `init_outside_bounds` category,
   which this package did not know: the warning printed with no remediation
   guidance at all. It now says that the fit did not start from the value in the
-  model file, and that a `sigma` is quoted as a standard deviation — which need
-  not be the number written in the file. The category is deliberately distinct
+  model file, and what to change. (The scale is left to the engine's own
+  message, which since #1251 reads `an SD of 1.000e3` for a `sigma`.) The
+  category is deliberately distinct
   from `boundary_estimate`, which is about where a fit *ended* and which drives
   `bootstrap`'s `skip_estimate_near_boundary`, `reject_on_boundary` and this
   package's own strictness gate; a clamped start wearing that category would

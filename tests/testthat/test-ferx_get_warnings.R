@@ -434,12 +434,13 @@ test_that("init_outside_bounds guidance is start-side and distinct from boundary
   # .ferx_boundary_detail() in check_strictness.R) and a start wearing it would
   # silently drop bootstrap replicates. The guidance must keep the two apart:
   # this one is about where the fit BEGAN.
-  g <- ferx:::.ferx_warning_guidance("init_outside_bounds")
-  expect_true(is.character(g) && length(g) == 1L && nzchar(g))
-  expect_match(g, "before the first objective evaluation", fixed = TRUE)
-  # boundary_estimate is deliberately unanswered, so the two cannot be confused
-  # by a caller reading guidance alone.
-  expect_null(ferx:::.ferx_warning_guidance("boundary_estimate"))
+  # Only the phrase anchor lives here. That the arm returns a non-empty string
+  # at all is already covered by the completeness walk above (the token is in
+  # .core_warning_cats()), and that `boundary_estimate` stays unanswered is
+  # already covered by the .unanswered_warning_cats() loop - asserting either
+  # again would just add another place to edit when the vocabulary moves.
+  expect_match(ferx:::.ferx_warning_guidance("init_outside_bounds"),
+               "before the first objective evaluation", fixed = TRUE)
 })
 
 test_that(".ferx_warning_guidance gives `general` no category-level guidance", {
