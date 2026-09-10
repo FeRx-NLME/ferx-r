@@ -75,14 +75,14 @@
 #'   \code{[fit_options] covariance} (engine default \code{TRUE} when unset); a
 #'   logical overrides the model file. Previously defaulted to \code{TRUE} and
 #'   silently overrode a model file that set \code{covariance = false} (#558).
-#'   \code{method = "bayes"} is the exception, in both directions: it reports
-#'   posterior credible intervals instead of Hessian standard errors and runs
-#'   no covariance step whatever this argument says. The five covariance-step
-#'   \code{settings} keys -- \code{covariance_method},
+#'   In ferx-core #956+, \code{method = "bayes"} is the exception, in both
+#'   directions: it reports posterior credible intervals instead of Hessian
+#'   standard errors and runs no covariance step whatever this argument says.
+#'   The five covariance-step \code{settings} keys -- \code{covariance_method},
 #'   \code{covariance_fallback}, \code{analytic_cov_hessian},
 #'   \code{fd_hessian_step} and \code{cov_inner_tol} -- are inert there, and
-#'   the engine warns, for each one passed, that it configures a step this
-#'   fit does not run (ferx-core #956).
+#'   the engine warns for each one passed that it configures a step this fit does
+#'   not run.
 #' @param verbose Logical, or \code{NULL} (the default). Print progress during
 #'   estimation. \code{NULL} uses the model file's \code{[fit_options] verbose}
 #'   (engine default \code{TRUE} when unset); a logical overrides it.
@@ -249,12 +249,15 @@
 #'       EBE precision than the fit itself -- on a flat surface an EBE converged
 #'       only to \code{inner_tol} can visibly perturb the standard errors. Worth
 #'       reaching for on heavily-censored M3 + IOV models (try \code{1e-11}).
-#'       Must be positive and finite: \code{0}, a negative value or a
-#'       non-finite one is rejected outright, rather than reaching the EBE
-#'       convergence test as a target no subject can meet and quietly burning
-#'       the whole \code{inner_maxiter} budget on every covariance-step
-#'       reconvergence (ferx-core #956). Inert under \code{method = "bayes"},
-#'       which runs no covariance step -- see \code{covariance}.}
+#'       In ferx-core #956+, this value is required to be positive and finite:
+#'       \code{0}, negative values, and non-finite values are rejected outright rather
+#'       than reaching the EBE convergence test as a target no subject can meet and
+#'       quietly burning the whole \code{inner_maxiter} budget on every
+#'       covariance-step reconvergence. Under the currently pinned engine (\code{909ad38}),
+#'       non-positive values are still accepted, and this warning has not yet been
+#'       removed. See \link[=NEWS]{NEWS} for the version boundary.
+#'       Inert under \code{method = "bayes"}, which runs no covariance step -- see
+#'       \code{covariance}.}
 #'     \item{\code{parameter_scaling}}{\code{"auto"} (default), \code{"none"},
 #'       \code{"abs"} or \code{"rescale2"}. Parameter-scaling strategy for the
 #'       outer optimizer; supersedes \code{scale_params} when not \code{"none"}.

@@ -792,27 +792,19 @@
 
 ## Documentation
 
-- **`cov_inner_tol` no longer warns that the value it just applied will be
-  ignored**
-  ([ferx-core #956](https://github.com/FeRx-NLME/ferx-core/pull/956)). The key
-  had a working parser arm but appeared in neither list of options the engine
-  advertises, so `ferx_fit(settings = list(cov_inner_tol = 1e-11))` warned that
-  a value it had just applied would be ignored - and `?ferx_fit` documented the
-  contradiction as a known wart. The engine now advertises it alongside the
-  other covariance-step keys, so the warning is gone and the caveat with it.
+- **`cov_inner_tol` / covariance-key docs now distinguish pre- and post-pinned behavior**
+  ([ferx-core #956](https://github.com/FeRx-NLME/ferx-core/pull/956)).
+  In ferx-core `7f15dba`, `cov_inner_tol` moved to the advertised covariance
+  settings set, so the old warning about it being ignored is removed; the key is
+  required to be positive and finite, and the five covariance-step keys are inert
+  under `method = "bayes"` (which reports posterior credible intervals rather than
+  Hessian standard errors). In that mode, each key is rejected as configuring a
+  step that does not run.
 
-  Two behaviours are documented in its place. `cov_inner_tol` must be positive
-  and finite: `0`, a negative value or a non-finite one used to parse, then
-  reach the EBE convergence test as a target no subject can meet, so every
-  covariance-step reconvergence burned the whole `inner_maxiter` budget and the
-  standard errors came out of unconverged modes with nothing said about it.
-  They are now rejected outright. And under `method = "bayes"` the key is
-  inert, along with `covariance_method`, `covariance_fallback`,
-  `analytic_cov_hessian` and `fd_hessian_step`: Bayesian estimation reports
-  posterior credible intervals instead of Hessian standard errors and runs no
-  covariance step at all. The engine now says so for each such key passed,
-  where previously only `cov_inner_tol` drew anything and what it drew was the
-  message a *misspelled* key gets.
+  This documentation update is written against the `7f15dba` behavior and the current
+  ferx-r pin does not yet include it. `src/rust/Cargo.lock` remains at
+  `909ad38` in this branch, so a build against this repository still emits the
+  current pinned warning pattern and allows non-positive `cov_inner_tol` values.
 
 - **Two smaller corrections in the same area.** `covariance_fallback` and
   `ferx_covariance()` both described the matrix they rectify as the "FD
@@ -822,12 +814,9 @@
   `global_maxeval`'s default `0` was described as disabling the global-search
   budget, when it in fact selects an automatic one of `30 * (n_params + 1)`.
 
-  These entries describe the engine as of ferx-core `7f15dba`. The pinned
-  `ferx-core` / `ferx-tools` revision does **not** move here - it stays at
-  `909ad38` - so a build against the current pin still emits the old
-  `cov_inner_tol` warning and still accepts a non-positive value. That bump
-  spans a `0.3.1` -> `0.4.0` engine release and four unrelated feature PRs, so
-  it lands on its own with its own entries.
+  This `7f15dba` change is independent of the existing `0.3.1` -> `0.4.0`
+  release-line work already in this repository, which is why it will need its own
+  lockfile bump when merged.
 
 ## Internal
 
