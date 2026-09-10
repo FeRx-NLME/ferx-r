@@ -104,7 +104,15 @@ SAEM fully supports inter-occasion variability (IOV / kappa) models.}
 the covariance step for standard errors. \code{NULL} uses the model file's
 \code{[fit_options] covariance} (engine default \code{TRUE} when unset); a
 logical overrides the model file. Previously defaulted to \code{TRUE} and
-silently overrode a model file that set \code{covariance = false} (#558).}
+silently overrode a model file that set \code{covariance = false} (#558).
+\code{method = "bayes"} is the exception, in both directions: it reports
+posterior credible intervals instead of Hessian standard errors and runs
+no covariance step whatever this argument says. The five covariance-step
+\code{settings} keys -- \code{covariance_method},
+\code{covariance_fallback}, \code{analytic_cov_hessian},
+\code{fd_hessian_step} and \code{cov_inner_tol} -- are inert there, and
+the engine warns, for each one passed, that it configures a step this
+fit does not run (ferx-core #956).}
 
 \item{verbose}{Logical, or \code{NULL} (the default). Print progress during
 estimation. \code{NULL} uses the model file's \code{[fit_options] verbose}
@@ -282,8 +290,12 @@ second-difference of the reconverged objective and so is more sensitive to
 EBE precision than the fit itself -- on a flat surface an EBE converged
 only to \code{inner_tol} can visibly perturb the standard errors. Worth
 reaching for on heavily-censored M3 + IOV models (try \code{1e-11}).
-Note the engine may emit a spurious "not used by method ... will be
-ignored" warning for this key; the value \emph{is} applied.}
+Must be positive and finite: \code{0}, a negative value or a
+non-finite one is rejected outright, rather than reaching the EBE
+convergence test as a target no subject can meet and quietly burning
+the whole \code{inner_maxiter} budget on every covariance-step
+reconvergence (ferx-core #956). Inert under \code{method = "bayes"},
+which runs no covariance step -- see \code{covariance}.}
 \item{\code{parameter_scaling}}{\code{"auto"} (default), \code{"none"},
 \code{"abs"} or \code{"rescale2"}. Parameter-scaling strategy for the
 outer optimizer; supersedes \code{scale_params} when not \code{"none"}.
@@ -373,7 +385,9 @@ to \code{"r"} while NONMEM's \code{$COVARIANCE} default is
 that used the default \code{$COV}. No effect when
 \code{covariance = FALSE}.}
 \item{\code{covariance_fallback}}{\code{"none"} (default) or \code{"sir"}.
-When the finite-difference Hessian is not positive definite, \code{"sir"}
+When the covariance Hessian is not positive definite -- the analytic
+R-matrix and the finite-difference stencil alike, so this is not
+FD-specific despite the name of \code{fd_hessian_step} -- \code{"sir"}
 runs SIR with an absolute-eigenvalue-rectified proposal instead of
 leaving the covariance step failed; \code{covariance_status} is then
 \code{"sir_fallback"} and SIR-based credible intervals are reported.}
@@ -465,8 +479,11 @@ unreachable. Set an explicit value to pin it for every model.}
 search phase before local refinement (default \code{FALSE}).
 Not accepted by pure \code{"gn"}.}
 \item{\code{global_maxeval}}{Function evaluations budget for the global
-search phase (default \code{0}, i.e. disabled when
-\code{global_search = FALSE}). Not accepted by pure \code{"gn"}.}
+search phase, read only when \code{global_search = TRUE}. The default
+\code{0} does not mean "no budget": it selects an automatic one of
+\code{30 * (n_params + 1)}, empirically enough to escape a bad basin
+on a 10--20 parameter PK model without dominating the local refinement
+that follows. Not accepted by pure \code{"gn"}.}
 \item{\code{stagnation_guard}}{Logical (default \code{TRUE}). Terminates
 the NLopt outer loop early when the OFV plateau is numerically flat.
 Set \code{FALSE} to let SLSQP / L-BFGS run to their own xtol/ftol or

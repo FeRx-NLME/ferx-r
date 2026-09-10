@@ -1,6 +1,6 @@
 #' Run the covariance step against an existing fit
 #'
-#' Run the finite-difference-Hessian covariance step against a fit that was
+#' Run the standard-error covariance step against a fit that was
 #' produced earlier - the covariance-step analogue of [ferx_sir()]. Useful
 #' when the original fit was expensive and you want to add standard errors
 #' without re-estimating, when you want to re-run the step with a different
@@ -19,7 +19,8 @@
 #' refreshed.
 #'
 #' A covariance step that runs but cannot produce a usable matrix (a
-#' non-positive-definite or structurally-unusable FD Hessian) is **not** an
+#' non-positive-definite or structurally-unusable covariance Hessian, from the
+#' analytic R-matrix or the FD stencil alike) is **not** an
 #' error: the returned fit reports `covariance_status = "failed"` with a
 #' diagnostic appended to `warnings`, mirroring [ferx_fit()]. An error is
 #' reserved for input problems (missing / hash-mismatched model or data).
