@@ -211,6 +211,16 @@
   cheaper test. The **null moves with the form**: `fix = 1` is "no effect" for
   `categorical2` where `fix = 0` is for `categorical`.
 
+- **`[rank] type = "penalized"` now works in a `.ferxsearch` configuration**
+  ([ferx-core #1185](https://github.com/FeRx-NLME/ferx-core/issues/1185)).
+  Previously declared but unimplemented, so `ferx_search_config()` refused it;
+  it is now implemented for **every** search tool, which means
+  `ferx_covsearch()` and `ferx_modelsearch()` can rank on pyDarwin's penalized
+  fitness: OFV + 10 per estimated theta / omega / sigma element + 100 for
+  non-convergence, a failed or absent covariance step, a parameter correlation
+  above 0.95, or a condition number above 1000. `[rank.penalties]` overlays any
+  individual charge.
+
 - **SAEM residual SD is less noisy.** For eligible single additive and
   proportional error models SAEM now averages the residual sufficient statistic
   instead of taking the final draw

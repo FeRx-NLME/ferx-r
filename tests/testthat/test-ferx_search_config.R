@@ -149,14 +149,34 @@ test_that("an unparseable or empty space is an error", {
   expect_error(ferx_search_config(minimal_cfg("LET(X, [a, b])")), "empty")
 })
 
-test_that("an unimplemented rank type is refused at load", {
+test_that("the penalized rank type loads and reports itself", {
+  # This test used to assert the opposite - that `penalized` was refused as an
+  # unimplemented rank type. ferx-core #1185 implemented it for *every* search
+  # tool, so the refusal is gone and the assertion had to flip.
+  #
+  # It cannot be repointed at some other unimplemented type the way the
+  # SEQ-ZO-FO coverage-gap test above can: all eight `RankType` variants (ofv,
+  # aic, bic, bic_mixed, bic_iiv, bic_random, bic_fixed, penalized) are now
+  # implemented, so the "declared but unimplemented" category is empty. What
+  # survives is the pair below - the type loads, and an unrecognised one is
+  # still refused.
+  cfg <- ferx_search_config(minimal_cfg(
+    "COVARIATE?(CL, WT, pow)",
+    "[rank]",
+    'type = "penalized"'
+  ))
+  expect_s3_class(cfg, "ferx_search_config")
+  expect_equal(cfg$rank$type, "penalized")
+})
+
+test_that("an unrecognised rank type is refused at load, naming the offender", {
   expect_error(
     ferx_search_config(minimal_cfg(
       "COVARIATE?(CL, WT, pow)",
       "[rank]",
-      'type = "penalized"'
+      'type = "nonsense"'
     )),
-    "penalized"
+    "nonsense"
   )
 })
 
