@@ -7,13 +7,13 @@
 ferx_search_results(
   directory,
   partial = NULL,
-  type = c("candidates", "models")
+  type = c("candidates", "models", "steps")
 )
 }
 \arguments{
 \item{directory}{Path to the run directory, or directly to the
 \code{candidates.csv} / \code{candidates.partial.csv} /
-\code{models.csv} file itself.}
+\code{models.csv} / \code{steps.csv} file itself.}
 
 \item{partial}{Which table to read: \code{NULL} (the default) prefers the
 complete table and falls back to the partial one, \code{TRUE} demands the
@@ -22,12 +22,22 @@ partial table, \code{FALSE} demands the complete one. When
 file named is an error rather than an ignored argument.}
 
 \item{type}{Which table to read: \code{"candidates"} (the default) for the
-runner's own candidate table, written by every tool, or \code{"models"}
-for the model table \code{\link{ferx_modelsearch}} writes. A structural
-run has both: the candidate table is one row per fit the runner was asked
-for, the model table one row per model the search built.}
+runner's own candidate table, written by every tool, \code{"models"} for
+the model table \code{\link{ferx_modelsearch}} writes, or \code{"steps"}
+for the step table \code{\link{ferx_covsearch}} and
+\code{\link{ferx_ruvsearch}} write. A run has more than one: the candidate
+table is one row per fit the runner was asked for, the model or step table
+one row per model the search itself decided on. Both stepwise tools write
+a file called \code{steps.csv}; which of the two schemas a file carries is
+read off its own header, and reported as the \code{tool} attribute.}
 }
 \value{
+For \code{type = "steps"}, a data frame with the engine's 17 step
+columns for whichever stepwise tool wrote the file - covsearch's
+(\code{step}, \code{phase}, \code{candidate}, \code{parameter},
+\code{covariate}, \code{form}, ...) or ruvsearch's (\code{iteration},
+\code{candidate}, \code{feature}, \code{screened}, ...) - typed the same
+way, and carrying a \code{tool} attribute naming the one it matched.
 For \code{type = "models"}, a data frame with the engine's 21
 model-table columns (\code{id}, \code{parent}, \code{layer},
 \code{path}, the four structural columns, \code{criterion},
@@ -42,10 +52,11 @@ and \code{partial} (whether it is a cancelled run's table).
 }
 \description{
 Reads a table a search run writes into its directory - the runner's
-\code{candidates.csv} by default, or a structural search's
-\code{models.csv} with \code{type = "models"} - and returns it typed. The
-column list comes from the engine for either table, never a copy maintained
-here, so the R data frame and the file on disk are the same table.
+\code{candidates.csv} by default, a structural search's \code{models.csv}
+with \code{type = "models"}, or a stepwise search's \code{steps.csv} with
+\code{type = "steps"} - and returns it typed. The column list comes from the
+engine for every table, never a copy maintained here, so the R data frame
+and the file on disk are the same table.
 }
 \details{
 The candidate table is one row per candidate the run was given and
@@ -81,6 +92,7 @@ Other search:
 \code{\link[=ferx_allometry]{ferx_allometry()}},
 \code{\link[=ferx_covsearch]{ferx_covsearch()}},
 \code{\link[=ferx_modelsearch]{ferx_modelsearch()}},
+\code{\link[=ferx_ruvsearch]{ferx_ruvsearch()}},
 \code{\link[=ferx_search_config]{ferx_search_config()}},
 \code{\link[=ferx_search_coverage]{ferx_search_coverage()}},
 \code{\link[=ferx_search_space]{ferx_search_space()}}
