@@ -1,10 +1,11 @@
 #' Read a search run's table
 #'
 #' Reads a table a search run writes into its directory - the runner's
-#' \code{candidates.csv} by default, or a structural search's
-#' \code{models.csv} with \code{type = "models"} - and returns it typed. The
-#' column list comes from the engine for either table, never a copy maintained
-#' here, so the R data frame and the file on disk are the same table.
+#' \code{candidates.csv} by default, a structural search's \code{models.csv}
+#' with \code{type = "models"}, or a stepwise search's \code{steps.csv} with
+#' \code{type = "steps"} - and returns it typed. The column list comes from the
+#' engine for every table, never a copy maintained here, so the R data frame
+#' and the file on disk are the same table.
 #'
 #' The candidate table is one row per candidate the run was given and
 #' in the order it was given them, including the ones that failed. A candidate
@@ -25,19 +26,29 @@
 #'
 #' @param directory Path to the run directory, or directly to the
 #'   \code{candidates.csv} / \code{candidates.partial.csv} /
-#'   \code{models.csv} file itself.
+#'   \code{models.csv} / \code{steps.csv} file itself.
 #' @param type Which table to read: \code{"candidates"} (the default) for the
-#'   runner's own candidate table, written by every tool, or \code{"models"}
-#'   for the model table \code{\link{ferx_modelsearch}} writes. A structural
-#'   run has both: the candidate table is one row per fit the runner was asked
-#'   for, the model table one row per model the search built.
+#'   runner's own candidate table, written by every tool, \code{"models"} for
+#'   the model table \code{\link{ferx_modelsearch}} writes, or \code{"steps"}
+#'   for the step table \code{\link{ferx_covsearch}} and
+#'   \code{\link{ferx_ruvsearch}} write. A run has more than one: the candidate
+#'   table is one row per fit the runner was asked for, the model or step table
+#'   one row per model the search itself decided on. Both stepwise tools write
+#'   a file called \code{steps.csv}; which of the two schemas a file carries is
+#'   read off its own header, and reported as the \code{tool} attribute.
 #' @param partial Which table to read: \code{NULL} (the default) prefers the
 #'   complete table and falls back to the partial one, \code{TRUE} demands the
 #'   partial table, \code{FALSE} demands the complete one. When
 #'   \code{directory} names a file directly, a value that disagrees with the
 #'   file named is an error rather than an ignored argument.
 #'
-#' @return For \code{type = "models"}, a data frame with the engine's 21
+#' @return For \code{type = "steps"}, a data frame with the engine's 17 step
+#'   columns for whichever stepwise tool wrote the file - covsearch's
+#'   (\code{step}, \code{phase}, \code{candidate}, \code{parameter},
+#'   \code{covariate}, \code{form}, ...) or ruvsearch's (\code{iteration},
+#'   \code{candidate}, \code{feature}, \code{screened}, ...) - typed the same
+#'   way, and carrying a \code{tool} attribute naming the one it matched.
+#'   For \code{type = "models"}, a data frame with the engine's 21
 #'   model-table columns (\code{id}, \code{parent}, \code{layer},
 #'   \code{path}, the four structural columns, \code{criterion},
 #'   \code{rank}, ...) typed the same way. Otherwise a data frame with the
@@ -61,7 +72,7 @@
 #' @family search
 #' @export
 ferx_search_results <- function(directory, partial = NULL,
-                               type = c("candidates", "models")) {
+                               type = c("candidates", "models", "steps")) {
   if (!is.character(directory) || length(directory) != 1L || is.na(directory)) {
     stop("'directory' must be a single path")
   }
@@ -74,6 +85,7 @@ ferx_search_results <- function(directory, partial = NULL,
   # The model table has no partial twin: a cancelled structural search still
   # writes one `models.csv`, holding the models it reached.
   if (type == "models") return(.ferx_read_model_table(directory, partial))
+  if (type == "steps") return(.ferx_read_step_table(directory, partial))
 
   complete_path <- file.path(directory, "candidates.csv")
   partial_path  <- file.path(directory, "candidates.partial.csv")
@@ -204,5 +216,63 @@ ferx_search_results <- function(directory, partial = NULL,
 
   attr(raw, "path") <- path
   attr(raw, "partial") <- FALSE
+  raw
+}
+
+# The step table of a stepwise search (`steps.csv`), typed the same way as the
+# tables above and against the engine's own column lists.
+#
+# covsearch and ruvsearch both write a file of that name, 17 columns each and
+# only `candidate` in common - so the file's own header says which tool wrote
+# it, and a file matching neither is named as such rather than typed against
+# the wrong schema. There is no `steps.partial.csv`: a cancelled run writes the
+# one table with the rows it reached, and says so on the object it returns.
+.ferx_read_step_table <- function(directory, partial) {
+  if (isTRUE(partial)) {
+    stop("A stepwise search writes no partial step table; a cancelled run's ",
+         "steps.csv holds the steps it reached")
+  }
+  path <- if (!dir.exists(directory) && file.exists(directory)) {
+    directory
+  } else {
+    file.path(directory, "steps.csv")
+  }
+  if (!file.exists(path)) {
+    stop("No step table in ", directory, " (looked for steps.csv)")
+  }
+
+  raw <- utils::read.csv(path, colClasses = "character", check.names = FALSE)
+  schemas <- list(
+    covsearch = ferx_rust_covsearch_columns(),
+    ruvsearch = ferx_rust_ruvsearch_columns()
+  )
+  hit <- vapply(schemas, function(cols) length(setdiff(cols, names(raw))) == 0L,
+                logical(1))
+  if (!any(hit)) {
+    stop("`", path, "` is not a search step table - it carries neither the ",
+         "covariate columns (", paste(schemas$covsearch, collapse = ", "),
+         ") nor the residual-error columns (",
+         paste(schemas$ruvsearch, collapse = ", "), ")")
+  }
+  tool <- names(schemas)[hit][1L]
+  expected <- schemas[[tool]]
+  # Engine order first, anything the file carries beyond it after - a column a
+  # newer engine wrote is worth keeping, not silently dropping.
+  raw <- raw[, c(expected, setdiff(names(raw), expected)), drop = FALSE]
+
+  int <- intersect(c("step", "iteration", "df"), names(raw))
+  num <- intersect(c("parent_ofv", "ofv", "dofv", "p_value", "alpha",
+                     "cwres_dofv", "seconds"), names(raw))
+  lgl <- intersect(c("significant", "selected", "converged", "passed",
+                     "screened"), names(raw))
+  chr <- setdiff(names(raw), c(int, num, lgl))
+  for (col in int) raw[[col]] <- as.integer(.ferx_csv_num(raw[[col]]))
+  for (col in num) raw[[col]] <- .ferx_csv_num(raw[[col]])
+  for (col in lgl) raw[[col]] <- .ferx_csv_lgl(raw[[col]])
+  for (col in chr) raw[[col]] <- .ferx_csv_chr(raw[[col]])
+
+  attr(raw, "path") <- path
+  attr(raw, "partial") <- FALSE
+  attr(raw, "tool") <- tool
   raw
 }

@@ -270,6 +270,55 @@
   ran as though the argument had never been given. Both now stop with a message
   naming the argument.
 
+- **Residual-error model search: `ferx_ruvsearch()`** (#336, part of the #334
+  search epic; ferx-core #1182). Pharmpy's `ruvsearch` from R: each iteration
+  adds one residual-error feature to the model the last one kept, fits every
+  candidate, and accepts the largest improvement the likelihood-ratio test
+  calls significant at `p_value`. The four families are `IIV_on_RUV` (a
+  per-subject scale on the residual SD, tested only when the estimation method
+  has eta-epsilon interaction), `power`, `combined` and `time_varying`
+  (`groups - 1` candidates, cut at the time-after-dose quantiles); `skip`
+  leaves a family out, and `cwres_prescreen` takes Pharmpy's cheap path of
+  screening on the parent's CWRES and refitting only the winner.
+
+  There is no search space to state, and a file that states one - or a `[rank]`
+  asking for a BIC or a dOFV `cutoff` - is refused by name when it is read:
+  this search selects on the likelihood-ratio test, not on a ranking criterion.
+  The search always starts from a plain proportional error model, fitting one
+  first when the input is not one, and the final comparison checks the accepted
+  stack against the input as well, so a search can return the model it started
+  from.
+
+  The object is the engine's step table - one row per model fitted, with the
+  **p-value**, `converged` and the strictness verdict beside the dOFV, plus the
+  `RuvFeature` label and its `Family`, so "which residual form won, and at what
+  p-value" is a table rather than prose. `print()` shows the iteration table
+  and the selected error model; `summary()` adds every form that was not
+  selected with its reason. Every fitted model's text comes back named by
+  candidate id, and the winner comes back as a fitted `ferx_fit`.
+
+  `$candidates` is scoped to the steps the run actually took, in every search
+  tool. The engine rewrites the steps it executes but removes nothing, so
+  re-using a run directory for a shorter search - two iterations, then one -
+  used to fold the earlier run's leftover candidate tables into the new
+  result, which then contradicted its own step table. `ferx_covsearch()` and
+  `ferx_modelsearch()` carried the same defect and are fixed with it.
+
+  `ferx_search_results()` gained `type = "steps"`, which reads a stepwise run's
+  `steps.csv` back with the engine's own column list. Both `ferx_covsearch()`
+  and `ferx_ruvsearch()` write a file of that name with different columns, so
+  the schema is read off the file's own header and reported as the `tool`
+  attribute - a run produced by `ferx covsearch` or `ferx ruvsearch` on the
+  command line is readable from R either way.
+
+  `inst/examples/ex_ruvsearch.R` runs it end to end, and the `one_cpt_transit`
+  example now ships a residual-error `.ferxsearch` as `$search`. That model is
+  `ka`-free while its anchor dataset was simulated with a transit chain *and* a
+  first-order `ka` step, so the absorption-phase residuals carry the
+  misspecification: at `p = 0.05` a time-varying magnitude below TAD 1.375 is
+  accepted for 6.2 OFV, while at Pharmpy's default `p = 0.001` nothing is and
+  the search correctly hands back the model it was given.
+
 - **Structural model search: `ferx_modelsearch()`** (#335, part of the #334
   search epic; ferx-core #1181). Pharmpy's `modelsearch` from R: a space of
   structural features - `ABSORPTION`, `ELIMINATION`, `PERIPHERALS`,

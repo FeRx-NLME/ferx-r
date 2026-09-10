@@ -1,0 +1,50 @@
+# Residual-error model search over the analytic Savic transit model.
+#
+# Run it from R with:
+#   res <- ferx_ruvsearch(config = ferx_example("one_cpt_transit")$search,
+#                         directory = "ruvsearch-run")
+#
+# There is no [space]: a residual-error search has no space to declare. Its
+# candidates are Pharmpy ruvsearch's four families - IIV on the residual error,
+# a power form, a combined form, and a time-varying magnitude cut at the
+# time-after-dose quantiles - each added to the parent on its own and kept when
+# the likelihood-ratio test says so. `skip` is what narrows them.
+#
+# `base` and `data` are relative to this file's own directory, so the
+# configuration travels with the model it searches.
+
+base = "../models/one_cpt_transit.ferx"
+data = "../data/transit_oral.csv"
+
+[ruvsearch]
+# 3 time-varying candidates, cut at the 25 / 50 / 75% time-after-dose
+# quantiles. `groups = 2` would test the median split alone.
+groups = 4
+# Pharmpy's default level is 0.001. transit_oral.csv is simulated with a plain
+# proportional error, so at that level nothing is accepted and the search
+# correctly returns the model it started from. 0.05 is the level at which this
+# dataset has something to say: the model is `ka`-free while the data was
+# generated with a transit chain *and* a first-order `ka` step, and the
+# absorption-phase residuals carry that misspecification.
+p_value = 0.05
+# Every family is tested. The model fits with `method = focei`, which has the
+# eta-epsilon interaction `iiv_on_ruv` needs; on a `foce` model that family is
+# not tested and the run says so in its notes.
+skip = []
+# Iterations, 1 to 3: each one stacks another feature onto the model the last
+# one kept.
+max_iter = 2
+# `true` screens the candidates on the parent's CWRES first and refits only the
+# winner - Pharmpy's own path, and much cheaper than fitting every candidate.
+cwres_prescreen = false
+
+[strictness]
+# A candidate that did not converge is not a result worth comparing: under
+# automation it would be a selection error, not just a bad fit.
+require_converged = true
+reject_init_stall = true
+
+[run]
+# Perturbed restarts per candidate on top of the fit from the exact initials.
+retries = 1
+resume = false

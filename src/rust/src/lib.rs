@@ -6324,6 +6324,316 @@ fn ferx_rust_modelsearch(
     .into()
 }
 
+/// The columns of a residual-error run's `steps.csv`, in order, from the engine.
+///
+/// @return Character vector of column names
+/// @keywords internal
+#[extendr]
+fn ferx_rust_ruvsearch_columns() -> Vec<String> {
+    ferx_tools::ruvsearch::STEP_COLUMNS
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+}
+
+/// The columns of a covariate run's `steps.csv`, in order, from the engine.
+///
+/// Both stepwise tools write a file called `steps.csv`; the two column lists
+/// are what tells one apart from the other when a directory is read back.
+///
+/// @return Character vector of column names
+/// @keywords internal
+#[extendr]
+fn ferx_rust_covsearch_columns() -> Vec<String> {
+    ferx_tools::covsearch::STEP_COLUMNS
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+}
+
+/// Residual-error model search - Pharmpy's `ruvsearch`.
+///
+/// Takes either a `.ferxsearch` file (`config_path`) or the inline arguments,
+/// which are rendered into one. There is no search space: the candidates are
+/// the four residual-error families, narrowed by `skip`.
+///
+/// @param config_path Path to a `.ferxsearch` file, or `""` for the inline form
+/// @param model_path Base model (inline form only)
+/// @param data_path Dataset, or `""` to use the model's `[data]` block
+/// @param groups Time-after-dose bins; `<= 0` keeps the engine default (4)
+/// @param p_value Likelihood-ratio level; `NaN` keeps the default (0.001)
+/// @param skip Families never tested (`IIV_on_RUV`, `power`, `combined`,
+///   `time_varying`); empty keeps the default (none)
+/// @param max_iter Iterations, 1-3; `<= 0` keeps the default (3)
+/// @param cwres_prescreen Screen on the parent's CWRES first: `1` on, `0` off,
+///   `-1` unset
+/// @param threads Worker threads; `<= 0` lets the runner choose
+/// @param retries Perturbed restarts per candidate; `< 0` keeps the default
+/// @param resume Reuse the fits already journalled in `directory`
+/// @param directory Where journals, `steps.csv`, `models/<id>.ferx` and
+///   `final.ferx` go; `""` keeps the run in memory
+/// @param progress Print the engine's iteration progress to stderr
+/// @return Named list: the step-table columns, `family` and `note` beside
+///   them, every candidate's model text, `final_model`, `final_fit`, the
+///   options as the engine read them, `notes` and `cancelled`
+/// @keywords internal
+#[extendr]
+#[allow(clippy::too_many_arguments)]
+fn ferx_rust_ruvsearch(
+    config_path: &str,
+    model_path: &str,
+    data_path: &str,
+    groups: i32,
+    p_value: f64,
+    skip: Vec<String>,
+    max_iter: i32,
+    cwres_prescreen: i32,
+    threads: i32,
+    retries: i32,
+    resume: bool,
+    directory: &str,
+    progress: bool,
+) -> Robj {
+    let mut section = String::from("\n[ruvsearch]\n");
+    if groups > 0 {
+        section.push_str(&format!("groups = {groups}\n"));
+    }
+    if p_value.is_finite() {
+        section.push_str(&format!("p_value = {p_value}\n"));
+    }
+    if !skip.is_empty() {
+        let items: Vec<String> = skip.iter().map(|s| toml_basic(s)).collect();
+        section.push_str(&format!("skip = [{}]\n", items.join(", ")));
+    }
+    if max_iter > 0 {
+        section.push_str(&format!("max_iter = {max_iter}\n"));
+    }
+    if cwres_prescreen >= 0 {
+        section.push_str(&format!("cwres_prescreen = {}\n", cwres_prescreen == 1));
+    }
+    let text = search_config_text(
+        model_path,
+        data_path,
+        "",
+        "",
+        f64::NAN,
+        threads,
+        retries,
+        resume,
+        &section,
+    );
+    let inline_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let config =
+        match search_config_for_tool(config_path, &text, &inline_dir, threads, retries, resume) {
+            Ok(c) => c,
+            Err(e) => throw_r_error(format!("ferx_ruvsearch: {e}")),
+        };
+    // Before the dataset is read: a file whose keys this tool cannot honour - a
+    // `[space]`, or a `[rank]` asking for a BIC, which ruvsearch does not
+    // select on - is refused by name rather than ignored.
+    let options = match ferx_tools::ruvsearch::RuvsearchOptions::from_config(&config) {
+        Ok(o) => o,
+        Err(e) => throw_r_error(format!("ferx_ruvsearch: {e}")),
+    };
+    let mut base = match config.load_base() {
+        Ok(b) => b,
+        Err(e) => throw_r_error(format!("ferx_ruvsearch: {e}")),
+    };
+
+    // One flag, two paths into the engine: `RuvsearchRun::cancel` stops the
+    // iteration loop, and the copy on `fit_options` unwinds the fits already in
+    // flight (the same wiring `ferx_covsearch()` uses).
+    let cancel = CancelFlag::new();
+    base.prepared.parsed.fit_options.cancel = Some(cancel.clone());
+
+    let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
+    let report = |event: ferx_tools::ruvsearch::RuvsearchEvent| {
+        use ferx_tools::ruvsearch::RuvsearchEvent as E;
+        if !progress {
+            return;
+        }
+        match event {
+            E::InputStarted => eprintln!("Fitting the input model..."),
+            E::InputFinished { ofv } => eprintln!("Input model: OFV {ofv:.3}"),
+            E::BaseStarted => eprintln!("Fitting the proportional base..."),
+            E::BaseFinished { ofv } => eprintln!("Proportional base: OFV {ofv:.3}"),
+            E::IterationStarted {
+                iteration,
+                candidates,
+                screening,
+            } => eprintln!(
+                "Iteration {iteration}: fitting {candidates} {}candidate{}...",
+                if screening { "screening " } else { "" },
+                if candidates == 1 { "" } else { "s" }
+            ),
+            E::Screened { iteration, feature } => match feature {
+                Some(f) => eprintln!("Iteration {iteration}: pre-screen picked {}", f.label()),
+                None => eprintln!("Iteration {iteration}: pre-screen found nothing to refit"),
+            },
+            E::IterationFinished {
+                iteration,
+                selected,
+            } => match selected {
+                Some((f, ofv)) => eprintln!(
+                    "Iteration {iteration}: accepted {} (OFV {ofv:.3})",
+                    f.label()
+                ),
+                None => eprintln!("Iteration {iteration}: nothing accepted"),
+            },
+            E::Reverted { to, ofv } => {
+                eprintln!("Final comparison returned the {to} model (OFV {ofv:.3})")
+            }
+        }
+    };
+
+    let result = match run_search_cancellable(&cancel, || {
+        ferx_tools::ruvsearch::run_ruvsearch(
+            &config,
+            &base,
+            ferx_tools::ruvsearch::RuvsearchRun {
+                dir: dir.clone(),
+                threads: config.run.threads,
+                cancel: Some(cancel.clone()),
+                progress: Some(&report),
+            },
+        )
+    }) {
+        Ok(r) => r,
+        Err(e) => throw_r_error(format!("ferx_ruvsearch: {e}")),
+    };
+
+    // The step table, column for column as `STEP_COLUMNS` orders it, with the
+    // feature's family and the note beside them.
+    let n = result.rows.len();
+    let mut iteration = Vec::with_capacity(n);
+    let mut candidate = Vec::with_capacity(n);
+    let mut feature = Vec::with_capacity(n);
+    let mut family = Vec::with_capacity(n);
+    let mut screened = Vec::with_capacity(n);
+    let mut parent_ofv = Vec::with_capacity(n);
+    let mut ofv = Vec::with_capacity(n);
+    let mut dofv = Vec::with_capacity(n);
+    let mut df = Vec::with_capacity(n);
+    let mut p_value_col = Vec::with_capacity(n);
+    let mut alpha = Vec::with_capacity(n);
+    let mut significant = Vec::with_capacity(n);
+    let mut cwres_dofv = Vec::with_capacity(n);
+    let mut selected = Vec::with_capacity(n);
+    let mut converged = Vec::with_capacity(n);
+    let mut passed = Vec::with_capacity(n);
+    let mut failures = Vec::with_capacity(n);
+    let mut note = Vec::with_capacity(n);
+    let mut seconds = Vec::with_capacity(n);
+    for r in &result.rows {
+        iteration.push(r.iteration as i32);
+        candidate.push(r.candidate.clone());
+        feature.push(r.feature.map(|f| f.label()).unwrap_or_default());
+        family.push(
+            r.feature
+                .map(|f| f.family().label().to_string())
+                .unwrap_or_default(),
+        );
+        screened.push(r.screened);
+        parent_ofv.push(r.parent_ofv);
+        ofv.push(opt_f64(r.ofv));
+        dofv.push(opt_f64(r.lrt.map(|t| t.dofv)));
+        df.push(opt_f64(r.lrt.map(|t| t.df as f64)));
+        p_value_col.push(opt_f64(r.lrt.map(|t| t.p_value)));
+        alpha.push(opt_f64(r.lrt.map(|t| t.alpha)));
+        significant.push(opt_bool_chr(r.lrt.map(|t| t.significant)));
+        cwres_dofv.push(opt_f64(r.cwres_dofv));
+        selected.push(r.selected);
+        converged.push(opt_bool_chr(r.converged));
+        passed.push(r.passed);
+        // The engine's own fallback, so the column reads as `steps.csv` does: a
+        // row with no gate failure but a reason it could not be compared says
+        // so in the same column. `note` carries that reason on its own.
+        failures.push(if r.failures.is_empty() {
+            r.note.clone().unwrap_or_default()
+        } else {
+            r.failures.join("; ")
+        });
+        note.push(r.note.clone().unwrap_or_default());
+        seconds.push(r.seconds);
+    }
+
+    // Every candidate's text, so a form the search rejected can still be read
+    // or refitted without re-running anything.
+    let model_id: Vec<String> = result.models.keys().cloned().collect();
+    let model_text: Vec<String> = result.models.values().map(|m| m.render()).collect();
+
+    let final_model = result.final_model.render();
+    let final_fit: Robj = match &result.final_fit {
+        Some(fit) => match search_final_fit(fit, &final_model, &base.prepared.data_path) {
+            Ok(l) => l.into(),
+            Err(e) => throw_r_error(format!("ferx_ruvsearch: {e}")),
+        },
+        None => NULL.into(),
+    };
+
+    list!(
+        iteration = iteration,
+        candidate = candidate,
+        feature = feature,
+        family = family,
+        screened = screened,
+        parent_ofv = parent_ofv,
+        ofv = ofv,
+        dofv = dofv,
+        df = df,
+        p_value = p_value_col,
+        alpha = alpha,
+        significant = significant,
+        cwres_dofv = cwres_dofv,
+        selected = selected,
+        converged = converged,
+        passed = passed,
+        failures = failures,
+        note = note,
+        seconds = seconds,
+        model_id = model_id,
+        model_text = model_text,
+        input_model = result.input_model.render(),
+        input_ofv = result.input_ofv,
+        base_id = result.base_id.clone(),
+        base_ofv = result.base_ofv,
+        final_id = result.final_id.clone(),
+        final_model = final_model,
+        final_ofv = result.final_ofv,
+        final_fit = final_fit,
+        final_features = result
+            .features
+            .iter()
+            .map(|f| f.label())
+            .collect::<Vec<_>>(),
+        final_families = result
+            .features
+            .iter()
+            .map(|f| f.family().label().to_string())
+            .collect::<Vec<_>>(),
+        n_iterations = result.n_iterations() as i32,
+        opt_groups = options.groups as i32,
+        opt_p_value = options.p_value,
+        opt_skip = options
+            .skip
+            .iter()
+            .map(|f| f.label().to_string())
+            .collect::<Vec<_>>(),
+        opt_max_iter = options.max_iter as i32,
+        opt_cwres_prescreen = options.cwres_prescreen,
+        opt_cutoff = options.cutoff(),
+        summary = ferx_tools::ruvsearch::render_summary(&result),
+        directory = directory.to_string(),
+        // The base model as the config resolved it, so the R object names the
+        // same file in both entry forms.
+        model = config.base.to_string_lossy().into_owned(),
+        data = base.prepared.data_path.clone(),
+        notes = result.notes.clone(),
+        cancelled = result.cancelled,
+    )
+    .into()
+}
+
 extendr_module! {
     mod ferx;
     fn ferx_rust_fit;
@@ -6355,4 +6665,7 @@ extendr_module! {
     fn ferx_rust_allometry;
     fn ferx_rust_modelsearch;
     fn ferx_rust_modelsearch_columns;
+    fn ferx_rust_ruvsearch;
+    fn ferx_rust_ruvsearch_columns;
+    fn ferx_rust_covsearch_columns;
 }
