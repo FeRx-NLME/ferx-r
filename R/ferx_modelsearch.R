@@ -260,7 +260,20 @@ ferx_modelsearch <- function(model = NULL,
     iiv_strategy     = as.character(raw$iiv_strategy),
     n_layers         = as.integer(raw$n_layers),
     summary_text     = as.character(raw$summary),
-    candidates       = .ferx_search_candidates(dir_arg),
+    # The runner directories this run wrote - the root fit, the derived base,
+    # and either the one `candidates/` step an exhaustive search takes or one
+    # per layer - rather than whatever the directory holds: a shorter run in a
+    # directory an earlier one used would otherwise inherit its candidate
+    # tables (#336 review).
+    candidates       = .ferx_search_candidates(
+      dir_arg,
+      c("input", "base",
+        if (identical(as.character(raw$algorithm), "exhaustive")) {
+          "candidates"
+        } else {
+          sprintf("layer-%d", seq_len(as.integer(raw$n_layers)))
+        })
+    ),
     model            = as.character(raw$model),
     data             = as.character(raw$data),
     directory        = if (nzchar(dir_arg)) dir_arg else NA_character_,

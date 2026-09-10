@@ -233,6 +233,30 @@ test_that("ferx_search_results() reads the step table back", {
   expect_error(ferx_search_results(tempdir(), type = "steps"), "No step table")
 })
 
+test_that("a shorter run does not inherit the last run's candidate tables", {
+  skip_on_cran()
+  # #336 review: the engine rewrites the steps it executes but removes nothing,
+  # so a two-iteration run leaves an `iteration-2/` directory that a later
+  # one-iteration run in the same directory would otherwise fold into its
+  # `$candidates` - a result object contradicting its own step table.
+  ex <- ferx_example("one_cpt_transit")
+  dir <- file.path(tempdir(), "ruvsearch-reused-directory")
+  args <- list(model = ex$model, data = ex$data, p_value = 0.05,
+               retries = 0, directory = dir, progress = FALSE)
+
+  long <- do.call(ferx_ruvsearch, c(args, list(max_iter = 2)))
+  skip_if(long$n_iterations < 2L, "the long run did not reach a second iteration")
+  expect_true("iteration-2" %in% unique(long$candidates$run))
+
+  short <- do.call(ferx_ruvsearch, c(args, list(max_iter = 1)))
+  expect_equal(max(short$steps$iteration), 1L)
+  expect_false("iteration-2" %in% unique(short$candidates$run))
+  expect_setequal(unique(short$candidates$run), c("input", "iteration-1"))
+  # The stale directory is still on disk - this is the object refusing to read
+  # it, not the run deleting a previous run's journal.
+  expect_true(dir.exists(file.path(dir, "iteration-2")))
+})
+
 test_that("a table that is neither tool's is refused rather than mistyped", {
   dir <- file.path(tempdir(), "ruvsearch-not-a-step-table")
   dir.create(dir, showWarnings = FALSE)

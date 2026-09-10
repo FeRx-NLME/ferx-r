@@ -194,6 +194,13 @@
   selected with its reason. Every fitted model's text comes back named by
   candidate id, and the winner comes back as a fitted `ferx_fit`.
 
+  `$candidates` is scoped to the steps the run actually took, in every search
+  tool. The engine rewrites the steps it executes but removes nothing, so
+  re-using a run directory for a shorter search - two iterations, then one -
+  used to fold the earlier run's leftover candidate tables into the new
+  result, which then contradicted its own step table. `ferx_covsearch()` and
+  `ferx_modelsearch()` carried the same defect and are fixed with it.
+
   `ferx_search_results()` gained `type = "steps"`, which reads a stepwise run's
   `steps.csv` back with the engine's own column list. Both `ferx_covsearch()`
   and `ferx_ruvsearch()` write a file of that name with different columns, so

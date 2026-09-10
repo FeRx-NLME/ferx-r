@@ -191,7 +191,16 @@
 # run held in memory wrote none, and a cancelled run left a partial table -
 # both are `ferx_search_results()`'s own business, so this only decides which
 # directories to ask about.
-.ferx_search_candidates <- function(directory) {
+#
+# `runs` names those directories, in order, and every tool passes the ones its
+# own result reached. Scanning the directory instead would fold in whatever an
+# earlier, longer run left behind: the engine rewrites the steps it executes
+# but removes nothing, so a second run with fewer steps in the same directory
+# would come back carrying candidate rows for steps it never fitted - a result
+# object contradicting its own step table (#336 review). A directory the
+# current run did not write is simply absent, which is why each one is checked
+# rather than assumed.
+.ferx_search_candidates <- function(directory, runs = NULL) {
   if (!nzchar(directory) || !dir.exists(directory)) return(NULL)
 
   read_one <- function(dir, label) {
@@ -201,8 +210,13 @@
   }
 
   parts <- list(read_one(directory, ""))
-  subs <- list.dirs(directory, recursive = FALSE, full.names = TRUE)
+  subs <- if (is.null(runs)) {
+    list.dirs(directory, recursive = FALSE, full.names = TRUE)
+  } else {
+    file.path(directory, unique(runs))
+  }
   for (s in subs) {
+    if (!dir.exists(s)) next
     parts[[length(parts) + 1L]] <- read_one(s, basename(s))
   }
   parts <- parts[!vapply(parts, is.null, logical(1))]

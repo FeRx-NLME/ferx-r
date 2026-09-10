@@ -265,7 +265,10 @@ ferx_ruvsearch <- function(model = NULL,
     final_families   = as.character(raw$final_families),
     n_iterations     = as.integer(raw$n_iterations),
     summary_text     = as.character(raw$summary),
-    candidates       = .ferx_search_candidates(dir_arg),
+    candidates       = .ferx_search_candidates(
+      dir_arg,
+      .ferx_ruv_step_dirs(steps, as.character(raw$base_id))
+    ),
     model            = as.character(raw$model),
     data             = as.character(raw$data),
     directory        = if (nzchar(dir_arg)) dir_arg else NA_character_,
@@ -275,6 +278,22 @@ ferx_ruvsearch <- function(model = NULL,
   )
   class(result) <- c("ferx_ruvsearch", "ferx_search_result")
   result
+}
+
+# The runner directories this run wrote, in the order the engine wrote them:
+# the input, the proportional base when one had to be derived, and per
+# iteration the CWRES pre-screen (`screen-N`) and the fits to the data
+# (`iteration-N`). Taken from the rows the run itself produced, so a shorter
+# run in a directory an earlier one used cannot inherit its candidate tables.
+.ferx_ruv_step_dirs <- function(steps, base_model_id) {
+  dirs <- "input"
+  if (!identical(base_model_id, "input")) dirs <- c(dirs, "base")
+  for (i in sort(unique(steps$iteration[steps$iteration > 0L]))) {
+    rows <- steps$screened[steps$iteration == i]
+    if (any(rows, na.rm = TRUE)) dirs <- c(dirs, sprintf("screen-%d", i))
+    if (any(!rows, na.rm = TRUE)) dirs <- c(dirs, sprintf("iteration-%d", i))
+  }
+  dirs
 }
 
 # The `skip` families, as the engine spells them. A family is a closed set, so
