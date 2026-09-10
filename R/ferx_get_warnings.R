@@ -362,7 +362,18 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
     # filters (bootstrap's skip_estimate_near_boundary, reject_on_boundary,
     # and .ferx_boundary_detail() in check_strictness.R) - a clamped start
     # wearing that category would silently drop bootstrap replicates.
-    init_outside_bounds = "An initial estimate lies outside one of ferx's internal rails and was clamped onto it before the first objective evaluation, so the fit did not start from the value written in the model file. Start the parameter inside its own range, or declare explicit bounds that contain the start.",
+    #
+    # The advice names omega and sigma specifically because that is the whole
+    # population of this arm, measured at pin 944cbf1e: a theta start past the
+    # hidden 1e9 cap does NOT arrive here, it is the error
+    # E_THETA_INIT_OUTSIDE_BOUNDS ("above its own declared upper bound of 1e9")
+    # and stops the fit. Only the omega variance rail and the sigma SD rail
+    # produce a W_INIT_OUTSIDE_BOUNDS warning row. Neither declaration form
+    # (`omega X ~ v`, `sigma X ~ v`) accepts bounds, so advising the reader to
+    # declare some -- as this arm first did -- is an instruction they cannot
+    # follow, printed directly beneath an engine message that already gives the
+    # right one.
+    init_outside_bounds = "A start value was clamped onto one of the optimizer's internal rails before the first objective evaluation, so the fit did not begin from what the model file declares. This is an omega variance or a sigma SD, neither of which takes explicit bounds: move the start inside the rail quoted above, or FIX the parameter to hold the declared value.",
     eta_normality      = "ETA distribution may be non-normal. High shrinkage or sparse data can cause this; prefer QQ-plots for diagnosis.",
     bloq_method        = "LOQ censoring note. Set method = \"focei\" explicitly to silence, or review the M3 setup.",
     sir                = .ferx_sir_guidance(message),

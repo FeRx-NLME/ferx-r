@@ -443,6 +443,48 @@ test_that("init_outside_bounds guidance is start-side and distinct from boundary
                "before the first objective evaluation", fixed = TRUE)
 })
 
+test_that("a real fit produces an init_outside_bounds row that carries guidance", {
+  # The end-to-end path, which the table test above cannot reach: it hands the
+  # category in by hand, so it asserts the entry exists, never that any fit
+  # produces it. This drives the whole chain - engine emits
+  # W_INIT_OUTSIDE_BOUNDS, the glue maps the code to `init_outside_bounds`, the
+  # row survives into fit$warnings_structured, and ferx_get_warnings() prints
+  # the guidance under it.
+  #
+  # An omega over the variance rail is the cheapest trigger, and one of only two
+  # things that can reach this arm at all (the other is a sigma over the SD
+  # rail). A theta past the hidden cap cannot: that is the *error*
+  # E_THETA_INIT_OUTSIDE_BOUNDS, which stops the fit before any warning exists.
+  ex   <- ferx_example("warfarin")
+  path <- tempfile(fileext = ".ferx")
+  writeLines(c(
+    "[parameters]",
+    "  theta TVCL(0.134, 0.001, 10.0)",
+    "  omega ETA_CL ~ 1e6",          # far above the optimizer's variance rail
+    "  sigma PROP_ERR ~ 0.01",
+    "",
+    "[individual_parameters]",
+    "  CL = TVCL * exp(ETA_CL)",
+    "",
+    "[structural_model]",
+    "  pk one_cpt_oral(cl=CL, v=10.0, ka=1.0)",
+    "",
+    "[error_model]",
+    "  DV ~ proportional(PROP_ERR)"
+  ), path)
+  on.exit(unlink(path))
+
+  fit <- ferx_fit(path, ex$data, settings = list(maxiter = 2L),
+                  covariance = FALSE, verbose = FALSE)
+  ws <- ferx_get_warnings(fit, as_df = TRUE)
+  expect_true("init_outside_bounds" %in% ws$category)
+
+  # The guidance must actually print, not merely exist in the table.
+  out <- capture.output(ferx_get_warnings(fit))
+  expect_true(any(grepl("clamped onto one of the optimizer's internal rails",
+                        out, fixed = TRUE)))
+})
+
 test_that(".ferx_warning_guidance gives `general` no category-level guidance", {
   # `general` is core's bucket for a message its classifier did not recognise,
   # so there is no category-level remediation to give -- the message text is the
