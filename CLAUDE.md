@@ -26,6 +26,19 @@ Cargo patches **per package name**: an entry for `ferx-core` alone leaves `ferx-
 
 When the sibling `../ferx-core` checkout exists, cargo uses it (verify with `cd src/rust && cargo tree | grep 'ferx-'` — **both** crates should show a local path). When the sibling doesn't exist (e.g. CI without a paired checkout), cargo falls back to the GitHub source.
 
+**A patch that does not apply is a warning, not an error.** Cargo prints `warning: patch ... was not used in the crate graph` on stderr and then builds from GitHub `main` — so a `cargo tree` that names `git+https://...` looks perfectly healthy, and a "local build" is silently not local. Two ways to end up there:
+
+- **Version skew across a semver bump.** `ferx-tools` depends on `ferx-core` with a real version requirement (`{ path = "../..", version = "0.4.0" }`). If the lock still pins the pair at `0.3.1` while the sibling has moved to `0.4.0`, the local `ferx-core` no longer satisfies `ferx-tools 0.3.1`'s `^0.3`, so cargo drops the patch entirely. Bumping the lock (below) moves both crates and restores it. Hit for real in #346.
+- **Working inside a worktree.** The paths are relative to cargo's working directory (`src/rust`), so `../../../ferx-core` reaches the sibling of the *repo root*. From `<repo>/.claude/worktrees/<name>/src/rust` it instead resolves to `<repo>/.claude/worktrees/ferx-core`, which never exists — and since worktrees are mandated above, this is the normal case, not the exception. Write absolute paths into the worktree's `config.toml` when invoking cargo directly.
+
+To check that the patch actually took, use something that *fails* rather than reports:
+
+```bash
+cd src/rust && cargo tree -p ferx-core --depth 0 | grep -q '(/' || echo "PATCH INERT - building from GitHub, not the sibling"
+```
+
+(A local path is parenthesised — `ferx-core v0.4.0 (/Users/you/ferx-core)` — where the git source is `ferx-core v0.4.0 (https://github.com/...)`.)
+
 This means: develop against a feature branch in `../ferx-core` freely, but never commit Cargo.toml changes that flip the dep to a path. Reviewers and CI run against the GitHub `main`, so a path dep in Cargo.toml would break their builds.
 
 ### Bumping the pinned ferx-core commit (`src/rust/Cargo.lock`)
