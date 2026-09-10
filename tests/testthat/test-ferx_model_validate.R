@@ -324,3 +324,69 @@ test_that("bundled sequential_absorption example validates (zero_order + first-o
   res <- ferx_model_validate(ex$model)
   expect_true(isTRUE(res$ok))
 })
+
+# -- Start-side bound checks (ferx-core #1251, pinned at 944cbf1e) --
+#
+# These pin the breaking half of the engine bump: a `theta` whose initial
+# estimate is *strictly* outside its own declared range used to be clamped onto
+# the bound and fitted from there, silently and on every run. Nothing in this
+# package asserted the new refusal, so a pin move that reverted or reworded it
+# would leave NEWS.md describing behaviour ferx no longer has, with green CI.
+#
+# `bad_theta()` swaps only the theta line of the known-good model above, so a
+# failure here is about the bound check and not about the rest of the file.
+bad_theta <- function(line) {
+  s <- VALID_WARFARIN_SECTIONS
+  s[grep("^  theta ", s)[1]] <- line
+  write_ferx(s)
+}
+
+test_that("a theta starting outside its declared range is refused, either side", {
+  for (line in c("  theta TVCL(0.05, 0.1, 10.0)",     # below the lower bound
+                 "  theta TVCL(50.0, 0.1, 10.0)")) {  # above the upper bound
+    path <- bad_theta(line)
+    on.exit(unlink(path), add = TRUE)
+    capture.output(res <- ferx_model_validate(path))
+    expect_false(isTRUE(res$ok), info = line)
+    expect_true("E_THETA_INIT_OUTSIDE_BOUNDS" %in% res$diagnostics$code,
+                info = line)
+  }
+})
+
+test_that("a theta starting exactly ON a bound is left alone", {
+  # The geometry that separates the implemented rule from the obvious
+  # alternative: the check is "strictly outside", not "outside or equal". On the
+  # bound the clamp is a no-op, so there is nothing to report and the model is
+  # valid. Without this case a check that also rejected `==` would satisfy the
+  # test above just as well.
+  for (line in c("  theta TVCL(0.1, 0.1, 10.0)",
+                 "  theta TVCL(10.0, 0.1, 10.0)")) {
+    path <- bad_theta(line)
+    on.exit(unlink(path), add = TRUE)
+    capture.output(res <- ferx_model_validate(path))
+    expect_true(isTRUE(res$ok), info = line)
+  }
+})
+
+test_that("a theta whose declared range is empty is reported, not a panic", {
+  # Bounds swapped: an empty optimizer box. This used to panic in the bound
+  # clamp; it is now E_INIT_BOUNDS_INVERTED and, unlike the check above, carries
+  # no `maxiter = 0` exemption.
+  path <- bad_theta("  theta TVCL(1.0, 5.0, 2.0)")
+  on.exit(unlink(path))
+  capture.output(res <- ferx_model_validate(path))
+  expect_false(isTRUE(res$ok))
+  expect_true("E_INIT_BOUNDS_INVERTED" %in% res$diagnostics$code)
+})
+
+test_that("ferx_fit() refuses a theta starting outside its declared range", {
+  # ferx_model_validate() is advisory; this is the assertion that pins the
+  # *breaking* change, because a fit is what a user's script actually runs.
+  ex   <- ferx_example("warfarin")
+  path <- bad_theta("  theta TVCL(0.05, 0.1, 10.0)")
+  on.exit(unlink(path))
+  expect_error(
+    ferx_fit(path, ex$data, covariance = FALSE, verbose = FALSE),
+    "declared lower bound"
+  )
+})
