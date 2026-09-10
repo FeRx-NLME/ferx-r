@@ -361,9 +361,10 @@ test_that(".ferx_compute_estimates() sets row names to the parameter names", {
   expect_identical(est$param, c("TVCL", "TVV", "ETA_CL", "EPS_PROP"))
 })
 
-test_that(".ferx_compute_estimates() disambiguates duplicated parameter names", {
-  # A theta and an eta may collide; a data frame needs unique row names, so the
-  # second gets a suffix rather than every row losing its name.
+test_that(".ferx_compute_estimates() qualifies a name declared in two blocks", {
+  # A theta and an eta may collide. Both get block-qualified, so neither owns
+  # the bare name and both stay addressable - the bare name addressing only the
+  # first is the silent-wrong-coefficient failure #299 is about.
   fit <- make_fake_fit(
     theta     = c(CL = 1.0),
     omega     = 0.09,
@@ -371,6 +372,22 @@ test_that(".ferx_compute_estimates() disambiguates duplicated parameter names", 
     sigma     = NULL
   )
   est <- .compute_estimates(fit)
-  expect_identical(rownames(est), c("CL", "CL.1"))
+  expect_identical(rownames(est), c("CL.theta", "CL.omega"))
   expect_identical(est$param, c("CL", "CL"))
+  expect_equal(est["CL.theta", "estimate"], 1.0)
+  expect_equal(est["CL.omega", "estimate"], 0.09)
+})
+
+test_that(".ferx_compute_estimates() leaves non-colliding names bare", {
+  # The qualification is only for collisions; the ordinary table is untouched.
+  fit <- make_fake_fit(
+    theta       = c(TVCL = 1.0),
+    omega       = 0.09,
+    eta_names   = "ETA_CL",
+    sigma       = 0.05,
+    sigma_names = "EPS_PROP",
+    sigma_types = "proportional"
+  )
+  expect_identical(rownames(.compute_estimates(fit)),
+                   c("TVCL", "ETA_CL", "EPS_PROP"))
 })

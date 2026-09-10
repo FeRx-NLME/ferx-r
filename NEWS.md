@@ -161,14 +161,20 @@
   table identified its rows only through a `param` column, so the first natural
   attempt at reading a coefficient - `fit$estimates["TVCL", "estimate"]` -
   returned `NA` rather than erroring, because that is what `[` does to a data
-  frame with default row names. Row names are now set from `param` (duplicates,
-  which the engine does not rule out across the theta / omega / sigma / kappa
-  blocks, are disambiguated with a suffix; `param` still holds the name as
-  declared). The two accessors are the loud version of the same lookup: an
-  unrecognised name is an error naming the closest available parameters, so a
-  mistyped coefficient can never be read as an unestimated one.
-  `ferx_se()` additionally warns when the fit carries no standard errors at all
-  (no covariance step, or a failed one) instead of handing back a silent `NA`.
+  frame with default row names. Row names are now set from `param`. A name the
+  engine allows in two blocks - a `CL` declared as both a theta and an eta - is
+  qualified by its block on both rows (`CL.theta`, `CL.omega`), so the bare name
+  never addresses one of a colliding pair by position and both stay reachable;
+  non-colliding names, which is the whole table in practice, are untouched, and
+  `param` still holds the name as declared. The two accessors are the loud
+  version of the same lookup: an unrecognised name is an error naming the
+  closest available parameters, and an ambiguous bare name is an error naming
+  the qualified keys, so a mistyped or colliding coefficient can never be read
+  as an unestimated one. `ferx_se()` additionally warns when the fit carries no
+  standard errors at all (no covariance step, or a failed one) instead of
+  handing back a silent `NA`; note that a parameter declared `FIX` is not that
+  case - the engine gives it an exact `0`, which both the table and `ferx_se()`
+  report as such.
 
 - **`data` beside `config` is now an error, and an infinite numeric argument
   is refused** in `ferx_covsearch()`, `ferx_allometry()` and

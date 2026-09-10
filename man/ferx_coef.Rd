@@ -13,18 +13,22 @@ ferx_se(fit, param = NULL)
 \item{fit}{A \code{ferx_fit} object from \code{\link{ferx_fit}} (or
 \code{\link{ferx_load_fit}}).}
 
-\item{param}{Character vector of parameter names, as they appear in
-\code{fit$estimates$param}: theta names (\code{"TVCL"}), eta names for the
-omega diagonal (\code{"ETA_CL"}), sigma names (\code{"EPS_PROP"}) and
+\item{param}{Character vector of parameter names, as they appear in the row
+names of \code{fit$estimates}: theta names (\code{"TVCL"}), eta names for
+the omega diagonal (\code{"ETA_CL"}), sigma names (\code{"EPS_PROP"}) and
 kappa names for an IOV diagonal (\code{"KAPPA_CL"}). Unnamed parameters
 use the fallback labels \code{"THETA1"}, \code{"OMEGA(1,1)"},
-\code{"SIGMA(1)"}, \code{"KAPPA1"}. \code{NULL} (default) returns every
-parameter, in table order.}
+\code{"SIGMA(1)"}, \code{"KAPPA1"}. A name declared in more than one
+block is qualified by that block - a \code{CL} declared as both a theta
+and an eta is addressed as \code{"CL.theta"} and \code{"CL.omega"}, and
+the bare \code{"CL"} is an error rather than one of the two chosen
+silently. \code{NULL} (default) returns every parameter, in table order.}
 }
 \value{
 A named numeric vector, one element per requested name, in the order
-requested. For \code{ferx_se()}, \code{NA} where the parameter has no
-standard error (no covariance step, or a fixed parameter).
+requested. For \code{ferx_se()}, \code{NA} where the covariance step did
+not run or produced no standard error for that parameter; a parameter
+declared \code{FIX} carries the engine's exact \code{0}, not \code{NA}.
 }
 \description{
 Name-based accessors for \code{fit$estimates}. \code{ferx_coef()} returns the

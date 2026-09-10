@@ -83,3 +83,57 @@ test_that("`param` must be character", {
   fit <- fit_with_estimates()
   expect_error(ferx_coef(fit, 1L), "must be a character vector")
 })
+
+
+test_that("a name declared in two blocks is addressable, never silently first", {
+  fit <- fit_with_estimates(
+    theta       = c(CL = 1.0),
+    se_theta    = 0.1,
+    eta_names   = "CL",
+    sigma       = NULL,
+    sigma_names = NULL,
+    sigma_types = NULL,
+    se_sigma    = NULL
+  )
+  # The bare name names no single parameter: error, with the keys that do.
+  expect_error(ferx_coef(fit, "CL"), "more than one block")
+  expect_error(ferx_coef(fit, "CL"), "CL.theta")
+  expect_error(ferx_coef(fit, "CL"), "CL.omega")
+  # Both rows remain reachable, and carry the right values.
+  expect_equal(ferx_coef(fit, "CL.theta"), c(CL.theta = 1.0))
+  expect_equal(ferx_coef(fit, "CL.omega"), c(CL.omega = 0.09))
+  expect_equal(ferx_se(fit, "CL.theta"), c(CL.theta = 0.1))
+  # And the all-parameters call names them apart.
+  expect_identical(names(ferx_coef(fit)), c("CL.theta", "CL.omega"))
+})
+
+# A FIX'd parameter is not NA-SE: the engine carries a zero covariance diagonal
+# and .ferx_compute_estimates() preserves it, so ferx_se() reports an exact 0.
+# The @return docs say so; this pins the behaviour they describe against the
+# engine rather than against a crafted fit (#343 review).
+test_that("a FIX'd parameter reports SE 0, not NA", {
+  skip_on_cran()
+  ex    <- ferx_example("warfarin")
+  model <- readLines(ex$model)
+  # The engine's grammar is a bare trailing `FIX`, not `(FIX)`.
+  model <- sub("^(\\s*theta TVKA\\(.*\\))$", "\\1 FIX", model)
+  model <- sub("^(\\s*omega ETA_KA\\s*~\\s*[0-9.]+)$", "\\1 FIX", model)
+  expect_equal(sum(grepl("\\bFIX\\b", model)), 2L)
+  path <- tempfile(fileext = ".ferx")
+  writeLines(model, path)
+
+  # A fixed parameter puts a zero on the covariance diagonal, so the derived
+  # correlation matrix warns; that is not what this test is about.
+  fit <- suppressWarnings(
+    ferx_fit(path, ex$data, method = "foce", covariance = TRUE, verbose = FALSE)
+  )
+  # Fixed at their declared values, with an exact-zero standard error.
+  expect_equal(ferx_coef(fit, "TVKA"), c(TVKA = 1.0))
+  expect_equal(ferx_coef(fit, "ETA_KA"), c(ETA_KA = 0.4))
+  expect_identical(ferx_se(fit, "TVKA"), c(TVKA = 0))
+  expect_identical(ferx_se(fit, "ETA_KA"), c(ETA_KA = 0))
+  # Zero is not NA: the "no standard errors" warning must not fire for it.
+  expect_silent(ferx_se(fit, c("TVKA", "ETA_KA")))
+  # The estimated parameters alongside them still carry real SEs.
+  expect_true(ferx_se(fit, "TVCL") > 0)
+})

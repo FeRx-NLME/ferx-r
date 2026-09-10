@@ -90,12 +90,22 @@ after \code{\link{ferx_fit}} (e.g. for posterior-predictive checks or VPCs).
 \section{Which predictive distribution you get}{
 
 \code{ferx_simulate()} draws a \strong{fresh set of random effects for every
-ID in \code{data}, in every replicate}, and adds residual error on top. It
-never conditions on a subject's own observations - the observed \code{DV} is
-not read (see the \code{data} argument), so the draw is the \emph{prior}
-predictive under the estimated parameters, not a posterior one.
-(\code{match} is not an exception: it reassigns the \emph{same} drawn etas
-to designs, leaving the marginal distribution of the draw unchanged.)
+ID in \code{data}, in every replicate}, and adds residual error on top. At
+the default \code{match = FALSE} it does not read the observed \code{DV} at
+all (see the \code{data} argument), so each subject's draw is unconditional:
+the \emph{prior} predictive under the estimated parameters, not a posterior
+one.
+
+\code{match} is the exception, on the assignment rather than on the draw.
+The pool of etas per replicate is the same unconditional sample with the same
+marginal distribution, but \emph{which} member of it lands on a given
+subject is chosen by matching against that subject's posthoc eta - computed
+from that subject's observed \code{DV}, which is why matching requires every
+subject to carry observations. So under \code{match} the eta paired with a
+particular observed design \strong{is} informed by that design's data; that
+is the point of it (it restores the design-eta association that adaptive
+dosing puts in real-world data), and it means the per-subject draw is no
+longer the unconditional one described above.
 
 What that distribution is \emph{of} follows from what one ID means in your
 data and what level the etas were estimated at. The two are the same thing in

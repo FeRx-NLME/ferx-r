@@ -6,7 +6,8 @@
 # diagonal variances are included. Stored on the fit object as
 # `fit$estimates`. (Formerly the exported ferx_estimates(fit); see issue #226.)
 .ferx_compute_estimates <- function(fit) {
-  rows <- list()
+  rows   <- list()
+  blocks <- character(0)   # which [parameters] block each row came from
 
   # Theta
   theta_names <- names(fit$theta)
@@ -15,6 +16,7 @@
     se        <- if (!is.null(fit$se_theta) && length(fit$se_theta) >= i) fit$se_theta[i] else NA_real_
     transform <- if (!is.null(fit$theta_transforms) && length(fit$theta_transforms) >= i) fit$theta_transforms[i] else "identity"
     rows[[length(rows) + 1L]] <- .ferx_est_row(theta_names[i], fit$theta[i], se, transform, FALSE)
+    blocks <- c(blocks, "theta")
   }
 
   # Omega diagonal (variance scale)
@@ -26,6 +28,7 @@
     se       <- .omega_se_at(fit$se_omega, n_eta, i, i)
     init_sd  <- !is.null(fit$omega_init_as_sd) && length(fit$omega_init_as_sd) >= i && isTRUE(fit$omega_init_as_sd[i])
     rows[[length(rows) + 1L]] <- .ferx_est_row(pname, om[i, i], se, "variance", init_sd)
+    blocks <- c(blocks, "omega")
   }
 
   # Sigma
@@ -35,6 +38,7 @@
     sig_transform <- if (!is.null(fit$sigma_types) && length(fit$sigma_types) >= i) fit$sigma_types[i] else "proportional"
     init_sd       <- !is.null(fit$sigma_init_as_sd) && length(fit$sigma_init_as_sd) >= i && isTRUE(fit$sigma_init_as_sd[i])
     rows[[length(rows) + 1L]] <- .ferx_est_row(pname, fit$sigma[i], se, sig_transform, init_sd)
+    blocks <- c(blocks, "sigma")
   }
 
   # Kappa (IOV diagonal)
@@ -66,6 +70,7 @@
       if (!isTRUE(nzchar(wt))) wt <- NA_character_
       rows[[length(rows) + 1L]] <- .ferx_est_row(kap_names[i], m_iov[i, i], se, kap_type, init_sd,
                                                  weight = wt)
+      blocks <- c(blocks, "kappa")
     }
   }
 
@@ -73,12 +78,29 @@
   # Row names as well as the `param` column (#299): `est["TVCL", ]` on a frame
   # with the default 1..n row names returns a row of NA rather than erroring,
   # so the first natural attempt at pulling a coefficient fails silently.
-  # Names are engine-supplied and not guaranteed unique across the theta /
-  # omega / sigma / kappa blocks; a data frame requires unique row names, so
-  # disambiguate rather than drop the names for every row (`param` still
-  # carries the name as declared). See also ferx_coef() / ferx_se().
-  if (!is.null(result) && nrow(result) > 0L) rownames(result) <- make.unique(result$param)
+  # `param` keeps the name exactly as declared; the row name is the addressable
+  # key. See also ferx_coef() / ferx_se(), which resolve against these keys.
+  if (!is.null(result) && nrow(result) > 0L) {
+    rownames(result) <- .ferx_estimate_keys(result$param, blocks)
+  }
   result
+}
+
+# Unique addressable key per estimates row. A declared name is not guaranteed
+# unique across the theta / omega / sigma / kappa blocks, and a data frame
+# requires unique row names. Rather than let the bare name silently address
+# only the first of a colliding pair, every member of a collision is qualified
+# by its block - `CL` declared as both a theta and an eta becomes `CL.theta`
+# and `CL.omega`, so both are reachable and neither owns the bare name. Names
+# that do not collide are untouched, which is the whole table in practice.
+.ferx_estimate_keys <- function(param, blocks) {
+  if (length(blocks) != length(param)) blocks <- rep_len("param", length(param))
+  keys <- param
+  dup  <- param %in% param[duplicated(param)]
+  keys[dup] <- paste0(param[dup], ".", blocks[dup])
+  # A name repeated *within* one block (the engine should not emit this) still
+  # needs breaking apart; make.unique is the backstop, not the mechanism.
+  make.unique(keys)
 }
 
 .ferx_est_row <- function(param, estimate, se, transform = "identity", init_as_sd = FALSE,
