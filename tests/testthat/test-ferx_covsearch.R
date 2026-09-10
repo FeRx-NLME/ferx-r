@@ -20,6 +20,9 @@ test_that("the entry forms are mutually exclusive", {
     "search_space"
   )
   expect_error(ferx_covsearch(config = cfg, model = "model.ferx"), "model")
+  # `data` names the dataset the search runs on, so the file states it too and
+  # a second one here would be silently dropped.
+  expect_error(ferx_covsearch(config = cfg, data = "other.csv"), "`data`")
 
   # The run knobs say *how* to run, not *what* to search, so they stay legal
   # beside a file. This one still fails - the file names a base model that does
@@ -57,6 +60,11 @@ test_that("argument validation happens in R, before the engine is called", {
   expect_error(do.call(ferx_covsearch, c(args, list(p_forward = -1))), "positive")
   expect_error(do.call(ferx_covsearch, c(args, list(p_forward = c(0.01, 0.05)))),
                "single number")
+  # An infinite scalar cannot reach the config file - the binding emits a key
+  # only when its value is finite - so it is refused rather than vanishing
+  # into "keep the engine default".
+  expect_error(do.call(ferx_covsearch, c(args, list(p_forward = Inf))), "finite")
+  expect_error(do.call(ferx_covsearch, c(args, list(cutoff = Inf))), "finite")
   expect_error(do.call(ferx_covsearch, c(args, list(max_steps = 2.5))), "whole number")
   expect_error(do.call(ferx_covsearch, c(args, list(retries = -1))), "at least 0")
   expect_error(do.call(ferx_covsearch, c(args, list(resume = NA))), "TRUE or FALSE")

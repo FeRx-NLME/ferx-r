@@ -72,10 +72,20 @@
 
 # A single finite number, or NaN for "not stated" - the sentinel the bindings
 # read as "keep the engine's default".
+#
+# `Inf` has to be refused rather than passed through: the bindings emit a key
+# only when its value is finite, so an infinite argument would be dropped on
+# the way to the config file and the search would run as though it had never
+# been given - the failure mode this sentinel exists to avoid, arriving by the
+# other door. NA is already refused above for the same reason.
 .ferx_search_scalar <- function(x, name, what, positive = FALSE) {
   if (is.null(x)) return(NaN)
   if (!is.numeric(x) || length(x) != 1L || is.na(x)) {
     stop(sprintf("%s: `%s` must be a single number or NULL", what, name))
+  }
+  if (!is.finite(x)) {
+    stop(sprintf("%s: `%s` must be a finite number (got %s); use NULL to keep the engine default",
+                 what, name, format(x)))
   }
   if (positive && x <= 0) {
     stop(sprintf("%s: `%s` must be positive", what, name))
@@ -127,7 +137,7 @@
 # (`threads`, `retries`, `resume`, `directory`, `progress`) say how to run it
 # and stay available to both forms - a user resuming a file-driven run should
 # not have to edit the file to do it.
-.ferx_search_entry_form <- function(config, model, inline, what) {
+.ferx_search_entry_form <- function(config, model, data, inline, what) {
   named <- names(inline)[!vapply(inline, is.null, logical(1))]
   if (!is.null(config)) {
     if (!is.character(config) || length(config) != 1L || is.na(config)) {
@@ -136,12 +146,17 @@
     if (!file.exists(config)) {
       stop(sprintf("%s: config file not found: %s", what, config))
     }
-    if (!is.null(model) || length(named) > 0L) {
+    # `data` belongs with `model`, not with the run knobs: the file's `data =`
+    # key names the dataset the search runs on, so accepting a second one here
+    # would silently search a different dataset than the one asked for.
+    if (!is.null(model) || !is.null(data) || length(named) > 0L) {
       stop(sprintf(
         paste0("%s: `config` states the whole search, so `%s` cannot be given ",
                "beside it. Edit the .ferxsearch file, or drop `config` and pass ",
                "the arguments inline."),
-        what, paste(c(if (!is.null(model)) "model", named), collapse = "`, `")
+        what,
+        paste(c(if (!is.null(model)) "model", if (!is.null(data)) "data", named),
+              collapse = "`, `")
       ))
     }
     return(normalizePath(config))

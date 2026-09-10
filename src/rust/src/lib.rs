@@ -6044,6 +6044,286 @@ fn ferx_rust_allometry(
     .into()
 }
 
+/// The columns of a modelsearch run's `models.csv`, in order, from the engine.
+///
+/// @return Character vector of column names
+/// @keywords internal
+#[extendr]
+fn ferx_rust_modelsearch_columns() -> Vec<String> {
+    ferx_tools::modelsearch::MODEL_COLUMNS
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+}
+
+/// Structural PK model search - Pharmpy's `modelsearch`.
+///
+/// Takes either a `.ferxsearch` file (`config_path`) or the inline arguments,
+/// which are rendered into one. Returns the model table in the engine's own
+/// `MODEL_COLUMNS` order, every candidate's model text, the winning model and
+/// its fit.
+///
+/// @param config_path Path to a `.ferxsearch` file, or `""` for the inline form
+/// @param model_path Base model (inline form only)
+/// @param data_path Dataset, or `""` to use the model's `[data]` block
+/// @param mfl MFL search space, quoted verbatim (inline form only)
+/// @param algorithm `"reduced_stepwise"`, `"exhaustive_stepwise"` or
+///   `"exhaustive"`; `""` keeps the engine default
+/// @param iiv_strategy `"absorption_delay"`, `"add_diagonal"` or `"no_add"`;
+///   `""` keeps the engine default
+/// @param rank `[rank] type`; `""` keeps the tool default (mixed BIC)
+/// @param rank_cutoff `[rank] cutoff`; `NaN` keeps the default
+/// @param threads Worker threads; `<= 0` lets the runner choose
+/// @param retries Perturbed restarts per candidate; `< 0` keeps the default
+/// @param resume Reuse the fits already journalled in `directory`
+/// @param directory Where journals, `models.csv`, `models/<id>.ferx` and
+///   `final.ferx` go; `""` keeps the run in memory
+/// @param progress Print the engine's layer progress to stderr
+/// @return Named list: the model-table columns, `structure` (the engine's own
+///   rendering of each row's structure), the candidate model texts,
+///   `final_model`, `final_fit`, `notes` and `cancelled`
+/// @keywords internal
+#[extendr]
+#[allow(clippy::too_many_arguments)]
+fn ferx_rust_modelsearch(
+    config_path: &str,
+    model_path: &str,
+    data_path: &str,
+    mfl: &str,
+    algorithm: &str,
+    iiv_strategy: &str,
+    rank: &str,
+    rank_cutoff: f64,
+    threads: i32,
+    retries: i32,
+    resume: bool,
+    directory: &str,
+    progress: bool,
+) -> Robj {
+    let mut section = String::from("\n[modelsearch]\n");
+    if !algorithm.is_empty() {
+        section.push_str(&format!("algorithm = {}\n", toml_basic(algorithm)));
+    }
+    if !iiv_strategy.is_empty() {
+        section.push_str(&format!("iiv_strategy = {}\n", toml_basic(iiv_strategy)));
+    }
+    let text = search_config_text(
+        model_path,
+        data_path,
+        mfl,
+        rank,
+        rank_cutoff,
+        threads,
+        retries,
+        resume,
+        &section,
+    );
+    let inline_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let config =
+        match search_config_for_tool(config_path, &text, &inline_dir, threads, retries, resume) {
+            Ok(c) => c,
+            Err(e) => throw_r_error(format!("ferx_modelsearch: {e}")),
+        };
+    // Both refusals happen before the dataset is read: a file whose keys this
+    // tool cannot honour, and a space that is not a structural one - a
+    // covariate file handed to modelsearch would otherwise search nothing and
+    // report the base model as the winner.
+    let options = match ferx_tools::modelsearch::ModelsearchOptions::from_config(&config) {
+        Ok(o) => o,
+        Err(e) => throw_r_error(format!("ferx_modelsearch: {e}")),
+    };
+    if let Err(e) = ferx_tools::modelsearch::ModelsearchOptions::check_space(&config) {
+        throw_r_error(format!("ferx_modelsearch: {e}"));
+    }
+    let mut base = match config.load_base() {
+        Ok(b) => b,
+        Err(e) => throw_r_error(format!("ferx_modelsearch: {e}")),
+    };
+
+    // One flag, two paths into the engine: `ModelsearchRun::cancel` stops the
+    // layer loop, and the copy on `fit_options` unwinds the fits already in
+    // flight (the same wiring `ferx_covsearch()` uses).
+    let cancel = CancelFlag::new();
+    base.prepared.parsed.fit_options.cancel = Some(cancel.clone());
+
+    let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
+    let report = |event: ferx_tools::modelsearch::ModelsearchEvent| {
+        use ferx_tools::modelsearch::ModelsearchEvent as E;
+        if !progress {
+            return;
+        }
+        match event {
+            E::InputStarted => eprintln!("Fitting the input model..."),
+            E::BaseStarted => eprintln!("Fitting the base model..."),
+            E::BaseFinished { ofv, criterion } => {
+                eprintln!("Base model: OFV {ofv:.3}, criterion {criterion:.3}")
+            }
+            E::LayerStarted { layer, candidates } => eprintln!(
+                "Layer {layer}: fitting {candidates} candidate{}...",
+                if candidates == 1 { "" } else { "s" }
+            ),
+            E::LayerFinished { layer, best } => match best {
+                Some((id, criterion)) => {
+                    eprintln!("Layer {layer}: best {id} (criterion {criterion:.3})")
+                }
+                None => eprintln!("Layer {layer}: no candidate passed the gate"),
+            },
+        }
+    };
+
+    let result = match run_search_cancellable(&cancel, || {
+        ferx_tools::modelsearch::run_modelsearch(
+            &config,
+            &base,
+            ferx_tools::modelsearch::ModelsearchRun {
+                dir: dir.clone(),
+                threads: config.run.threads,
+                cancel: Some(cancel.clone()),
+                progress: Some(&report),
+            },
+        )
+    }) {
+        Ok(r) => r,
+        Err(e) => throw_r_error(format!("ferx_modelsearch: {e}")),
+    };
+
+    // The model table, column for column as `MODEL_COLUMNS` orders it.
+    let n = result.rows.len();
+    let mut id = Vec::with_capacity(n);
+    let mut parent = Vec::with_capacity(n);
+    let mut layer = Vec::with_capacity(n);
+    let mut path = Vec::with_capacity(n);
+    let mut absorption = Vec::with_capacity(n);
+    let mut peripherals = Vec::with_capacity(n);
+    let mut transits = Vec::with_capacity(n);
+    let mut lagtime = Vec::with_capacity(n);
+    let mut n_parameters = Vec::with_capacity(n);
+    let mut ofv = Vec::with_capacity(n);
+    let mut criterion = Vec::with_capacity(n);
+    let mut d_criterion = Vec::with_capacity(n);
+    let mut rank_col = Vec::with_capacity(n);
+    let mut converged = Vec::with_capacity(n);
+    let mut passed = Vec::with_capacity(n);
+    let mut failures = Vec::with_capacity(n);
+    let mut error = Vec::with_capacity(n);
+    let mut seconds = Vec::with_capacity(n);
+    let mut selected = Vec::with_capacity(n);
+    let mut continued = Vec::with_capacity(n);
+    let mut reused = Vec::with_capacity(n);
+    let mut structure = Vec::with_capacity(n);
+    for r in &result.rows {
+        id.push(r.id.clone());
+        parent.push(r.parent.clone().unwrap_or_default());
+        layer.push(r.layer as i32);
+        path.push(
+            r.path
+                .iter()
+                .map(|k| k.to_string())
+                .collect::<Vec<_>>()
+                .join(";"),
+        );
+        absorption.push(r.structure.absorption.label().to_string());
+        peripherals.push(r.structure.peripherals as i32);
+        // `0` when the drug is absorbed first-order, `N` for the estimated
+        // count - the same three spellings `models.csv` writes.
+        transits.push(match r.structure.transits {
+            None => "0".to_string(),
+            Some(t) => t.to_string(),
+        });
+        lagtime.push(if r.structure.lagtime { "ON" } else { "OFF" }.to_string());
+        n_parameters.push(opt_f64(r.n_parameters.map(|v| v as f64)));
+        ofv.push(opt_f64(r.ofv));
+        criterion.push(r.criterion);
+        d_criterion.push(opt_f64(r.d_criterion));
+        rank_col.push(opt_f64(r.rank.map(|v| v as f64)));
+        converged.push(opt_bool_chr(r.converged));
+        passed.push(r.passed);
+        failures.push(r.failures.join("; "));
+        error.push(
+            r.error
+                .as_ref()
+                .map(|e| e.message.clone())
+                .unwrap_or_default(),
+        );
+        seconds.push(r.seconds);
+        selected.push(r.selected);
+        continued.push(r.continued);
+        reused.push(r.reused);
+        structure.push(ferx_tools::modelsearch::structure_label(&r.structure));
+    }
+
+    // Every candidate's text, so a user can read or refit the model the table
+    // ranked second without re-running the search.
+    let model_id: Vec<String> = result.models.keys().cloned().collect();
+    let model_text: Vec<String> = result.models.values().map(|m| m.render()).collect();
+
+    let final_model = result.final_model.render();
+    let final_fit: Robj = match &result.final_fit {
+        Some(fit) => match search_final_fit(fit, &final_model, &base.prepared.data_path) {
+            Ok(l) => l.into(),
+            Err(e) => throw_r_error(format!("ferx_modelsearch: {e}")),
+        },
+        None => NULL.into(),
+    };
+    let base_row_ofv = result
+        .row(&result.base_id)
+        .and_then(|r| r.ofv)
+        .unwrap_or(f64::NAN);
+    let base_criterion = result
+        .row(&result.base_id)
+        .map(|r| r.criterion)
+        .unwrap_or(f64::NAN);
+
+    list!(
+        id = id,
+        parent = parent,
+        layer = layer,
+        path = path,
+        absorption = absorption,
+        peripherals = peripherals,
+        transits = transits,
+        lagtime = lagtime,
+        n_parameters = n_parameters,
+        ofv = ofv,
+        criterion = criterion,
+        d_criterion = d_criterion,
+        rank = rank_col,
+        converged = converged,
+        passed = passed,
+        failures = failures,
+        error = error,
+        seconds = seconds,
+        selected = selected,
+        continued = continued,
+        reused = reused,
+        structure = structure,
+        model_id = model_id,
+        model_text = model_text,
+        input_model = result.input_model.render(),
+        base_id = result.base_id.clone(),
+        base_structure = ferx_tools::modelsearch::structure_label(&result.base_structure),
+        base_ofv = base_row_ofv,
+        base_criterion = base_criterion,
+        final_id = result.final_id.clone(),
+        final_model = final_model,
+        final_criterion = result.final_criterion,
+        final_fit = final_fit,
+        n_layers = result.n_layers() as i32,
+        criterion_label = result.criterion.label().to_string(),
+        algorithm = options.algorithm.label().to_string(),
+        iiv_strategy = options.iiv_strategy.label().to_string(),
+        summary = ferx_tools::modelsearch::render_summary(&result),
+        directory = directory.to_string(),
+        // The base model as the config resolved it, so the R object names the
+        // same file in both entry forms.
+        model = config.base.to_string_lossy().into_owned(),
+        data = base.prepared.data_path.clone(),
+        notes = result.notes.clone(),
+        cancelled = result.cancelled,
+    )
+    .into()
+}
+
 extendr_module! {
     mod ferx;
     fn ferx_rust_fit;
@@ -6073,4 +6353,6 @@ extendr_module! {
     fn ferx_rust_search_table_columns;
     fn ferx_rust_covsearch;
     fn ferx_rust_allometry;
+    fn ferx_rust_modelsearch;
+    fn ferx_rust_modelsearch_columns;
 }

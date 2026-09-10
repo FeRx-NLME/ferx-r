@@ -26,7 +26,12 @@ Called without arguments, lists available example names.
 \details{
 Available bundled examples:
 \describe{
-\item{warfarin}{One-compartment oral PK (standard warfarin dataset)}
+\item{warfarin}{One-compartment oral PK (standard warfarin dataset).
+Ships a \code{.ferxsearch} \emph{structural} search space as
+\code{$search}: first-order absorption, no peripheral compartment and
+no lag time is one end of every axis the space names, so
+\code{\link{ferx_modelsearch}} decides them rather than confirming
+them}
 \item{warfarin_bloq}{One-compartment oral with BLOQ observations (M3 method)}
 \item{warfarin_iov}{One-compartment oral with inter-occasion variability (kappa)}
 \item{warfarin_block_omega}{One-compartment oral with correlated random effects}

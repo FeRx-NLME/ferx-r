@@ -181,5 +181,15 @@ test_that("the bundled example configuration loads and prints", {
 })
 
 test_that("an example without a search space has no `search` element", {
-  expect_null(ferx_example("warfarin")$search)
+  # `$search` is per example and optional; two_cpt_iv ships no .ferxsearch.
+  expect_null(ferx_example("two_cpt_iv")$search)
+})
+
+test_that("the warfarin example ships a structural search space", {
+  path <- ferx_example("warfarin")$search
+  expect_true(file.exists(path))
+  cfg <- ferx_search_config(path)
+  expect_equal(basename(cfg$base), "warfarin.ferx")
+  expect_equal(cfg$tools, "modelsearch")
+  expect_output(print(cfg), "PERIPHERALS")
 })

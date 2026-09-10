@@ -155,6 +155,55 @@
 
 ## New features
 
+- **`data` beside `config` is now an error, and an infinite numeric argument
+  is refused** in `ferx_covsearch()`, `ferx_allometry()` and
+  `ferx_modelsearch()` (#335 review). Both were silent drops. `data` was left
+  out of the config-vs-inline mutual exclusion, so
+  `ferx_covsearch(config = "x.ferxsearch", data = "other.csv")` ran the search
+  on the dataset the *file* names and said nothing - a result for a different
+  dataset than the one asked for. And `Inf` passed R's validation while the
+  bindings emit a key only when its value is finite, so `cutoff = Inf` or
+  `p_forward = Inf` disappeared on the way to the configuration and the search
+  ran as though the argument had never been given. Both now stop with a message
+  naming the argument.
+
+- **Structural model search: `ferx_modelsearch()`** (#335, part of the #334
+  search epic; ferx-core #1181). Pharmpy's `modelsearch` from R: a space of
+  structural features - `ABSORPTION`, `ELIMINATION`, `PERIPHERALS`,
+  `TRANSITS`, `LAGTIME` - searched by `reduced_stepwise` (the default),
+  `exhaustive_stepwise` or `exhaustive`, with candidates ranked on the mixed
+  BIC unless `rank` says otherwise. `iiv_strategy` says how a candidate's new
+  parameters get a random effect (`absorption_delay`, `add_diagonal`,
+  `no_add`); Pharmpy's `fullblock` is refused by name, since a block over the
+  new and existing eta is a variability search's move.
+
+  The object is the engine's model table - one row per model built, with
+  `converged`, the strictness verdict and its reason beside the criterion, so
+  a model the gate excluded is a row saying why rather than an absence. Every
+  candidate's model text comes back named by id (`$model_text`), so the model
+  ranked second can be read or refitted without re-running the search, and the
+  winner comes back as a fitted `ferx_fit`. Both entry forms - `config =` a
+  `.ferxsearch` file, or inline arguments - render the same configuration and
+  go through the engine's own loader, exactly as `ferx_covsearch()` does.
+
+  A space that is not a structural one, or a feature the engine cannot build
+  (`ABSORPTION(SEQ-ZO-FO)`), is an error naming the offender before the first
+  fit.
+
+  `ferx_search_results()` gained `type = "models"`, which reads a structural
+  run's `models.csv` back with the engine's own column list - so a run
+  produced by `ferx modelsearch` on the command line is readable from R.
+
+  `inst/examples/ex_modelsearch.R` runs it end to end, and the `warfarin`
+  example now ships a structural `.ferxsearch` as `$search`. On that example
+  the search is a real decision and lands on the base model: adding a lag time
+  buys 2.3 OFV for two parameters and a second compartment 2.1, so the mixed
+  BIC prefers one compartment with first-order absorption and no delay. At
+  `rank = "ofv"` - no penalty for parameters - the lag model wins instead, and
+  the two-compartment candidates are excluded by the strictness gate for being
+  ill-conditioned (`|r| = 1.0` between `TVKA` and `TVV2`) rather than being
+  quietly ranked first.
+
 - **Covariate search and allometric scaling: `ferx_covsearch()` and
   `ferx_allometry()`** (#332 Parts 2 and 3; ferx-core #1180). The search
   surface shipped its validation half first; these are the first two tools to
