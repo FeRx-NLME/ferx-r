@@ -35,8 +35,7 @@ candidate is fitted rather than while watching fits fail. The loader is
 strict: an unknown section, an unparseable \code{[space] mfl}, an empty
 space, a feature the engine cannot express (a coverage gap), an unrecognised
 \code{[rank] type} or an invalid \code{[rank.penalties]} charge are all
-errors here, each naming the offender. Every \code{[rank] type} the engine
-declares is implemented, so a valid spelling always loads.
+errors here, each naming the offender.
 }
 \details{
 The file format (ferx-core's search tooling) is TOML:

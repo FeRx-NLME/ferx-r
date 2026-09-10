@@ -365,6 +365,12 @@ test_that("a theta starting exactly ON a bound is left alone", {
     on.exit(unlink(path), add = TRUE)
     capture.output(res <- ferx_model_validate(path))
     expect_true(isTRUE(res$ok), info = line)
+    # `ok` alone is the baseline model's answer too, so it cannot tell "left
+    # alone" from "reported at a severity that still leaves ok TRUE". #1251
+    # already splits this behaviour across an error and a warning by severity,
+    # so that drift is not hypothetical - assert the silence directly.
+    codes <- if (is.data.frame(res$diagnostics)) res$diagnostics$code else character(0)
+    expect_false(any(grepl("INIT_OUTSIDE_BOUNDS", codes, fixed = TRUE)), info = line)
   }
 })
 
