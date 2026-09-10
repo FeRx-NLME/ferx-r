@@ -28,16 +28,23 @@ When the sibling `../ferx-core` checkout exists, cargo uses it (verify with `cd 
 
 **A patch that does not apply is a warning, not an error.** Cargo prints `warning: patch ... was not used in the crate graph` on stderr and then builds from GitHub `main` — so a `cargo tree` that names `git+https://...` looks perfectly healthy, and a "local build" is silently not local. Two ways to end up there:
 
-- **Version skew across a semver bump.** `ferx-tools` depends on `ferx-core` with a real version requirement (`{ path = "../..", version = "0.4.0" }`). If the lock still pins the pair at `0.3.1` while the sibling has moved to `0.4.0`, the local `ferx-core` no longer satisfies `ferx-tools 0.3.1`'s `^0.3`, so cargo drops the patch entirely. Bumping the lock (below) moves both crates and restores it. Hit for real in #346.
+- **Version skew across a semver bump.** `ferx-tools` does not depend on `ferx-core` by bare path — it carries a real version requirement (`ferx-core = { path = "../..", version = "<x.y.z>", default-features = false }`). A patch must satisfy the requirements of every *dependent*, not just the top-level one. So when the sibling crosses a semver boundary that the lock has not followed yet, the local `ferx-core` stops satisfying the locked `ferx-tools`, and cargo drops the patch for the whole graph — not just for `ferx-tools`. Bumping the lock (below) moves both crates onto one revision and restores it. Hit for real in #346, across `0.3.1` -> `0.4.0`.
 - **Working inside a worktree.** The paths are relative to cargo's working directory (`src/rust`), so `../../../ferx-core` reaches the sibling of the *repo root*. From `<repo>/.claude/worktrees/<name>/src/rust` it instead resolves to `<repo>/.claude/worktrees/ferx-core`, which never exists — and since worktrees are mandated above, this is the normal case, not the exception. Write absolute paths into the worktree's `config.toml` when invoking cargo directly.
 
-To check that the patch actually took, use something that *fails* rather than reports:
+The warning is the direct check, and it prints nothing when every patch applied:
 
 ```bash
-cd src/rust && cargo tree -p ferx-core --depth 0 | grep -q '(/' || echo "PATCH INERT - building from GitHub, not the sibling"
+cd src/rust && cargo tree 2>&1 >/dev/null | grep 'was not used in the crate graph'
 ```
 
-(A local path is parenthesised — `ferx-core v0.4.0 (/Users/you/ferx-core)` — where the git source is `ferx-core v0.4.0 (https://github.com/...)`.)
+To confirm which source a crate actually resolved to (note this cannot tell "no patch was written" from "the patch was ignored" — both build from GitHub):
+
+```bash
+cd src/rust && cargo tree -p ferx-core --depth 0 | grep -q '(/' \
+  || echo "not building from the sibling - either there is no ../ferx-core, or the patch is inert"
+```
+
+Both sources are parenthesised, so it is the first character *inside* the parenthesis that separates them — `(/` for a local path (`ferx-core v0.4.0 (/Users/you/ferx-core)`) against `(h` for the git source (`ferx-core v0.4.0 (https://github.com/...)`). Do not "simplify" that grep to `'('`.
 
 This means: develop against a feature branch in `../ferx-core` freely, but never commit Cargo.toml changes that flip the dep to a path. Reviewers and CI run against the GitHub `main`, so a path dep in Cargo.toml would break their builds.
 
