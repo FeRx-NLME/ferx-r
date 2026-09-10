@@ -126,6 +126,7 @@ res$comparison
 Other search:
 \code{\link[=ferx_covsearch]{ferx_covsearch()}},
 \code{\link[=ferx_modelsearch]{ferx_modelsearch()}},
+\code{\link[=ferx_ruvsearch]{ferx_ruvsearch()}},
 \code{\link[=ferx_search_config]{ferx_search_config()}},
 \code{\link[=ferx_search_coverage]{ferx_search_coverage()}},
 \code{\link[=ferx_search_results]{ferx_search_results()}},
