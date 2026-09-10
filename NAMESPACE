@@ -13,11 +13,13 @@ S3method(print,ferx_fit)
 S3method(print,ferx_inits)
 S3method(print,ferx_job)
 S3method(print,ferx_model)
+S3method(print,ferx_modelsearch)
 S3method(print,ferx_search_config)
 S3method(print,ferx_search_space)
 S3method(print,ferx_summary)
 S3method(summary,ferx_covsearch)
 S3method(summary,ferx_fit)
+S3method(summary,ferx_modelsearch)
 export(check_diagnostics)
 export(check_strictness)
 export(ferx_allometry)
@@ -48,6 +50,7 @@ export(ferx_model_set_section)
 export(ferx_model_show)
 export(ferx_model_to_frem)
 export(ferx_model_validate)
+export(ferx_modelsearch)
 export(ferx_predict)
 export(ferx_predict_survival)
 export(ferx_runlog)
@@ -64,16 +67,20 @@ export(ferx_sir)
 export(ferx_stop)
 export(ferx_trace)
 export(ferx_xpose)
-importFrom(graphics,abline)
-importFrom(graphics,hist)
-importFrom(graphics,lines)
-importFrom(graphics,mtext)
-importFrom(graphics,par)
-importFrom(graphics,plot.new)
-importFrom(graphics,title)
-importFrom(stats,cor.test)
-importFrom(stats,dchisq)
-importFrom(stats,setNames)
-importFrom(stats,shapiro.test)
+importFrom(graphics,
+  abline,
+  hist,
+  lines,
+  mtext,
+  par,
+  plot.new,
+  title
+)
+importFrom(stats,
+  cor.test,
+  dchisq,
+  setNames,
+  shapiro.test
+)
 importFrom(utils,read.csv)
 useDynLib(ferx, .registration = TRUE)

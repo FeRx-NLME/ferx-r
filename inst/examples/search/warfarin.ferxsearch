@@ -1,0 +1,52 @@
+# Structural search space for the one-compartment oral warfarin model.
+#
+# The base model is `pk one_cpt_oral(cl=CL, v=V, ka=KA)`: first-order
+# absorption, no peripheral compartment, no lag time. Every statement below
+# therefore names a structural axis the base sits on one end of, which is what
+# makes the search a decision rather than a confirmation.
+#
+# Run it from R with:
+#   res <- ferx_modelsearch(config = ferx_example("warfarin")$search,
+#                           directory = "modelsearch-run")
+#
+# `base` and `data` are relative to this file's own directory, so the
+# configuration travels with the model it searches.
+
+base = "../models/warfarin.ferx"
+data = "../data/warfarin.csv"
+
+[space]
+# Absorption stays first-order (the dataset has one dose per subject and no
+# early sampling to identify a zero-order duration), so the search is over
+# disposition and absorption delay: a second compartment, and a lag time.
+mfl = "ABSORPTION(FO); PERIPHERALS(0..1); LAGTIME([OFF,ON])"
+
+[rank]
+# Candidates differ in how many parameters they add, so they are ranked on a
+# criterion that charges for them. `bic` is Pharmpy's mixed BIC, which counts
+# the fixed and random effects against their own sample sizes.
+type = "bic"
+
+[strictness]
+# A candidate that did not converge, or that stalled at its initial estimates,
+# is not a result worth ranking - under automation it would be a selection
+# error, not just a bad fit.
+require_converged = true
+reject_init_stall = true
+
+[run]
+# Perturbed restarts per candidate on top of the fit from the exact initials.
+# A structural candidate starts from its parent's estimates, and a new
+# compartment's Q / V2 have no parent value to inherit.
+retries = 2
+resume = false
+
+[modelsearch]
+# Pharmpy's default: extend only the best model of each feature-set group into
+# the next layer. `exhaustive_stepwise` extends all of them, `exhaustive` fits
+# every combination in one layer.
+algorithm = "reduced_stepwise"
+# An eta on a new absorption-delay parameter (the lag time) only. Use
+# `add_diagonal` to give every new PK parameter its own eta, or `no_add` for
+# none.
+iiv_strategy = "absorption_delay"

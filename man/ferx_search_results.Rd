@@ -2,22 +2,37 @@
 % Please edit documentation in R/ferx_search_results.R
 \name{ferx_search_results}
 \alias{ferx_search_results}
-\title{Read a search run's candidate table}
+\title{Read a search run's table}
 \usage{
-ferx_search_results(directory, partial = NULL)
+ferx_search_results(
+  directory,
+  partial = NULL,
+  type = c("candidates", "models")
+)
 }
 \arguments{
-\item{directory}{Path to the run directory, or directly to a
-\code{candidates.csv} / \code{candidates.partial.csv} file.}
+\item{directory}{Path to the run directory, or directly to the
+\code{candidates.csv} / \code{candidates.partial.csv} /
+\code{models.csv} file itself.}
 
 \item{partial}{Which table to read: \code{NULL} (the default) prefers the
 complete table and falls back to the partial one, \code{TRUE} demands the
 partial table, \code{FALSE} demands the complete one. When
 \code{directory} names a file directly, a value that disagrees with the
 file named is an error rather than an ignored argument.}
+
+\item{type}{Which table to read: \code{"candidates"} (the default) for the
+runner's own candidate table, written by every tool, or \code{"models"}
+for the model table \code{\link{ferx_modelsearch}} writes. A structural
+run has both: the candidate table is one row per fit the runner was asked
+for, the model table one row per model the search built.}
 }
 \value{
-A data frame with the engine's 15 columns: \code{id},
+For \code{type = "models"}, a data frame with the engine's 21
+model-table columns (\code{id}, \code{parent}, \code{layer},
+\code{path}, the four structural columns, \code{criterion},
+\code{rank}, ...) typed the same way. Otherwise a data frame with the
+engine's 15 candidate columns: \code{id},
 \code{parent}, \code{hash}, \code{features}, \code{criterion} (numeric),
 \code{ofv} (numeric), \code{converged} (logical), \code{passed}
 (logical), \code{failures}, \code{skipped}, \code{seconds} (numeric),
@@ -26,14 +41,19 @@ A data frame with the engine's 15 columns: \code{id},
 and \code{partial} (whether it is a cancelled run's table).
 }
 \description{
-Reads the \code{candidates.csv} a search run writes into its directory and
-returns it as a typed data frame - one row per candidate the run was given,
+Reads a table a search run writes into its directory - the runner's
+\code{candidates.csv} by default, or a structural search's
+\code{models.csv} with \code{type = "models"} - and returns it typed. The
+column list comes from the engine for either table, never a copy maintained
+here, so the R data frame and the file on disk are the same table.
+}
+\details{
+The candidate table is one row per candidate the run was given and
 in the order it was given them, including the ones that failed. A candidate
 the strictness gate excluded carries \emph{why} in \code{failures} rather
 than being absent, because a candidate missing from a report cannot be told
 apart from one that was never generated.
-}
-\details{
+
 A cancelled run writes \code{candidates.partial.csv} instead, leaving any
 complete table beside it untouched; this function reads the complete table
 when there is one and falls back to the partial table otherwise. The column
@@ -60,6 +80,7 @@ res[!res$passed, c("id", "failures")]
 Other search:
 \code{\link[=ferx_allometry]{ferx_allometry()}},
 \code{\link[=ferx_covsearch]{ferx_covsearch()}},
+\code{\link[=ferx_modelsearch]{ferx_modelsearch()}},
 \code{\link[=ferx_search_config]{ferx_search_config()}},
 \code{\link[=ferx_search_coverage]{ferx_search_coverage()}},
 \code{\link[=ferx_search_space]{ferx_search_space()}}
