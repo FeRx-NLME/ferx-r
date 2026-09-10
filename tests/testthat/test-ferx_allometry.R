@@ -12,6 +12,9 @@ test_that("the entry forms are mutually exclusive", {
 
   expect_error(ferx_allometry(config = cfg, covariate = "WT"), "covariate")
   expect_error(ferx_allometry(config = cfg, model = "model.ferx"), "model")
+  # `data` names the dataset scaled and fitted, so the file states it too and
+  # a second one here would be silently dropped.
+  expect_error(ferx_allometry(config = cfg, data = "other.csv"), "`data`")
   expect_error(ferx_allometry(), "`config`.*or `model`")
 })
 

@@ -27,7 +27,10 @@
 #'
 #' @param model Path to a \code{.ferx} model, or a \code{ferx_model} object.
 #'   Omit when \code{config} is given.
-#' @param data Path to the dataset. Defaults to the model's \code{[data]} block.
+#' @param data Path to the dataset. Defaults to the model's \code{[data]}
+#'   block. Names the dataset the search runs on, so like \code{model} it
+#'   cannot be given beside \code{config} - the file's own \code{data} key
+#'   says which dataset that file searches.
 #' @param search_space MFL text naming the candidate effects, e.g.
 #'   \code{"COVARIATE?(@IIV, @CONTINUOUS, [pow,lin])"}. A \code{COVARIATE(...)}
 #'   statement without \code{?} forces that effect into the base model before
@@ -121,7 +124,7 @@ ferx_covsearch <- function(model = NULL,
                            progress = interactive()) {
   what <- "ferx_covsearch"
   config_path <- .ferx_search_entry_form(
-    config, model,
+    config, model, data,
     list(
       search_space = search_space,
       algorithm = algorithm,

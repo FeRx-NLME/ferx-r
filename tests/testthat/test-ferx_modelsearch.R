@@ -21,6 +21,11 @@ test_that("the entry forms are mutually exclusive", {
   )
   expect_error(ferx_modelsearch(config = cfg, model = "model.ferx"), "model")
   expect_error(ferx_modelsearch(config = cfg, iiv_strategy = "no_add"), "iiv_strategy")
+  # `data` states *which dataset* the search runs on, so it belongs with
+  # `model` rather than with the run knobs: accepted beside `config` it would
+  # be dropped and the file's own `data` key used, searching a different
+  # dataset than the caller asked for, with nothing said.
+  expect_error(ferx_modelsearch(config = cfg, data = "other.csv"), "`data`")
 
   # The run knobs say *how* to run, not *what* to search, so they stay legal
   # beside a file. This one still fails - the file names a base model that does
@@ -61,10 +66,27 @@ test_that("argument validation happens in R, before the engine is called", {
                "should be one of")
   expect_error(do.call(ferx_modelsearch, c(args, list(cutoff = c(1, 2)))),
                "single number")
+  # An infinite cutoff would be dropped on the way to the config file - the
+  # binding emits the key only when it is finite - so the search would run
+  # with no cutoff at all rather than with the one that was asked for.
+  expect_error(do.call(ferx_modelsearch, c(args, list(cutoff = Inf))), "finite")
+  expect_error(do.call(ferx_modelsearch, c(args, list(cutoff = -Inf))), "finite")
   expect_error(do.call(ferx_modelsearch, c(args, list(retries = -1))), "at least 0")
   expect_error(do.call(ferx_modelsearch, c(args, list(threads = 2.5))), "whole number")
   expect_error(do.call(ferx_modelsearch, c(args, list(resume = NA))), "TRUE or FALSE")
   expect_error(do.call(ferx_modelsearch, c(args, list(rank = 1))), "single string")
+})
+
+test_that("a finite but negative cutoff reaches the engine, which names it", {
+  # The other half of the cutoff contract: a finite value is emitted, so the
+  # engine's own validation is what rejects it. R does not duplicate that rule,
+  # it only guarantees the value arrives.
+  ex <- ferx_example("warfarin")
+  expect_error(
+    ferx_modelsearch(model = ex$model, data = ex$data,
+                     search_space = "PERIPHERALS(0..1)", cutoff = -1),
+    "cutoff"
+  )
 })
 
 test_that("a covariate space in a structural search is refused by name", {

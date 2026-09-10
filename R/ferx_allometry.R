@@ -19,7 +19,10 @@
 #'
 #' @param model Path to a \code{.ferx} model, or a \code{ferx_model} object.
 #'   Omit when \code{config} is given.
-#' @param data Path to the dataset. Defaults to the model's \code{[data]} block.
+#' @param data Path to the dataset. Defaults to the model's \code{[data]}
+#'   block. Names the dataset the search runs on, so like \code{model} it
+#'   cannot be given beside \code{config} - the file's own \code{data} key
+#'   says which dataset that file searches.
 #' @param config Path to a \code{.ferxsearch} file carrying an
 #'   \code{ALLOMETRY(WT, 70)} statement and an optional \code{[allometry]}
 #'   section. Mutually exclusive with the arguments that state the scaling.
@@ -89,7 +92,7 @@ ferx_allometry <- function(model = NULL,
                            directory = NULL) {
   what <- "ferx_allometry"
   config_path <- .ferx_search_entry_form(
-    config, model,
+    config, model, data,
     list(
       covariate = covariate,
       reference = reference,

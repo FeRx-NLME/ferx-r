@@ -155,6 +155,18 @@
 
 ## New features
 
+- **`data` beside `config` is now an error, and an infinite numeric argument
+  is refused** in `ferx_covsearch()`, `ferx_allometry()` and
+  `ferx_modelsearch()` (#335 review). Both were silent drops. `data` was left
+  out of the config-vs-inline mutual exclusion, so
+  `ferx_covsearch(config = "x.ferxsearch", data = "other.csv")` ran the search
+  on the dataset the *file* names and said nothing - a result for a different
+  dataset than the one asked for. And `Inf` passed R's validation while the
+  bindings emit a key only when its value is finite, so `cutoff = Inf` or
+  `p_forward = Inf` disappeared on the way to the configuration and the search
+  ran as though the argument had never been given. Both now stop with a message
+  naming the argument.
+
 - **Structural model search: `ferx_modelsearch()`** (#335, part of the #334
   search epic; ferx-core #1181). Pharmpy's `modelsearch` from R: a space of
   structural features - `ABSORPTION`, `ELIMINATION`, `PERIPHERALS`,
