@@ -31,21 +31,39 @@ When the sibling `../ferx-core` checkout exists, cargo uses it for **both** crat
 - **Version skew across a semver bump.** `ferx-tools` does not depend on `ferx-core` by bare path — it carries a real version requirement (`ferx-core = { path = "../..", version = "<x.y.z>", default-features = false }`). A patch must satisfy the requirements of every *dependent*, not just the top-level one. So when the sibling crosses a semver boundary that the lock has not followed yet, the local `ferx-core` stops satisfying the locked `ferx-tools`, and cargo drops the patch for the whole graph — not just for `ferx-tools`. Bumping the lock (below) moves both crates onto one revision and restores it. Hit for real in #346, across `0.3.1` -> `0.4.0`.
 - **Working inside a worktree.** The paths are relative to cargo's working directory (`src/rust`), so `../../../ferx-core` reaches the sibling of the *repo root*. From `<repo>/.claude/worktrees/<name>/src/rust` it instead resolves to `<repo>/.claude/worktrees/ferx-core`, which never exists — and since worktrees are mandated above, this is the normal case, not the exception. Write absolute paths into the worktree's `config.toml` when invoking cargo directly.
 
-**Do not reach for `cargo tree` to check this.** With a patch active, *any* cargo command that resolves rewrites `Cargo.lock` — replacing both `source = "git+..."` lines with local paths, which is the same silent unpinning the bump section below warns about. A bare `cargo tree` here is enough to do it. `--locked` does not help either: with the patch live cargo always wants to rewrite, so it just errors out without answering the question.
+### With the sibling present, every local build unpins `Cargo.lock`
 
-So read it off the build you were running anyway. The warning goes to **stderr** while stdout keeps showing a healthy-looking tree, so it is easy to miss in a scrollback:
+This is the part to internalise, and it is wider than the bump section below suggests — that section warns only about `cargo update`. **Any** cargo command that resolves rewrites the lock while a `[patch]` is active, replacing both `source = "git+..."` lines with local paths. Measured, from a pin of `2`:
+
+| command | `grep -c '^source = "git+...'` afterwards |
+|---|---|
+| `cargo metadata` (a pure read) | `0` |
+| `cargo tree` | `0` |
+| `cargo build --release` (as documented under Build & Install) | `0`, within 25s — at resolve time, long before it finishes compiling |
+
+`R CMD INSTALL .` runs that same `cargo build`, so the normal install path does it too. This is how the lock has been unpinned in the past (commits `1ce7f59`, `b96c867`).
+
+`--locked` does not rescue it: with the patch live cargo always wants to rewrite, so it errors (`cannot update the lock file ... because --locked was passed`) instead of answering. **There is no safe read-only cargo command while the patch is active.**
+
+So never verify the patch with cargo. Read the warning off the build you were running anyway — it goes to **stderr** while stdout keeps showing a healthy-looking tree, so it is easy to miss in a scrollback:
 
 ```
 warning: patch `ferx-core v0.4.0 (/Users/you/ferx-core)` was not used in the crate graph
 ```
 
-And after any local build with the sibling present, confirm the pin survived — this needs no cargo, so it is always safe to run:
+And after **any** local build with the sibling present, confirm the pin survived. This runs no cargo, so it is always safe:
 
 ```bash
 grep -c '^source = "git+https://github.com/FeRx-NLME/ferx-core' src/rust/Cargo.lock   # must print 2
 ```
 
-Anything other than `2` means a local build unpinned the crates for CI and everyone else: restore the file (`git checkout -- src/rust/Cargo.lock`) rather than committing it.
+Anything other than `2` means the build unpinned the crates for CI and everyone else. Restore rather than commit:
+
+```bash
+git checkout -- src/rust/Cargo.lock
+```
+
+Make that grep a reflex before `git add`. `git status` will happily show `Cargo.lock` as a modified file you might think belongs to your change.
 
 This means: develop against a feature branch in `../ferx-core` freely, but never commit Cargo.toml changes that flip the dep to a path. Reviewers and CI run against the GitHub `main`, so a path dep in Cargo.toml would break their builds.
 
@@ -68,6 +86,12 @@ cd src/rust && cargo build --release
 
 # Regenerate roxygen documentation
 Rscript -e 'roxygen2::roxygenize()'
+```
+
+**If you have a sibling `../ferx-core` checkout, both build commands above rewrite `src/rust/Cargo.lock` and strip its git pin** — see the note in the dependency section. Check before staging, every time:
+
+```bash
+grep -c '^source = "git+https://github.com/FeRx-NLME/ferx-core' src/rust/Cargo.lock   # must print 2
 ```
 
 ## Architecture
