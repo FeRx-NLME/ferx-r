@@ -155,6 +155,21 @@
 
 ## New features
 
+- **`ferx_coef(fit, "TVCL")` and `ferx_se(fit, "TVCL")` pull a parameter by
+  name, and `fit$estimates` now carries row names**
+  ([#299](https://github.com/FeRx-NLME/ferx-r/issues/299)). The tidy estimates
+  table identified its rows only through a `param` column, so the first natural
+  attempt at reading a coefficient - `fit$estimates["TVCL", "estimate"]` -
+  returned `NA` rather than erroring, because that is what `[` does to a data
+  frame with default row names. Row names are now set from `param` (duplicates,
+  which the engine does not rule out across the theta / omega / sigma / kappa
+  blocks, are disambiguated with a suffix; `param` still holds the name as
+  declared). The two accessors are the loud version of the same lookup: an
+  unrecognised name is an error naming the closest available parameters, so a
+  mistyped coefficient can never be read as an unestimated one.
+  `ferx_se()` additionally warns when the fit carries no standard errors at all
+  (no covariance step, or a failed one) instead of handing back a silent `NA`.
+
 - **`data` beside `config` is now an error, and an infinite numeric argument
   is refused** in `ferx_covsearch()`, `ferx_allometry()` and
   `ferx_modelsearch()` (#335 review). Both were silent drops. `data` was left
@@ -840,6 +855,20 @@
   step on the PK model without the endpoint block.
 
 ## Documentation
+
+- **`?ferx_simulate` now says which predictive distribution it produces**
+  ([#299](https://github.com/FeRx-NLME/ferx-r/issues/299)). `ferx_simulate()`
+  draws a fresh set of random effects for every ID in the data in every
+  replicate and never conditions on a subject's own observations, so what the
+  spread of `DV_SIM` is a distribution *of* follows from what one ID means in
+  the data and at what level the etas were estimated. In individual-level PK an
+  ID is a patient and the two coincide; in a model-based meta-analysis a row is
+  a trial-arm summary, an ID is a study, the etas are between-study, and each
+  replicate is a set of **new studies** - the predictive distribution of the
+  next trial's readout, not of the next patient. A new section spells that out,
+  separates `IPRED` (drawn random effects, no residual error) from `DV_SIM`
+  (plus residual error), and points at `ferx_predict()` for the typical-value
+  curve and `ferx_simulate_with_uncertainty()` for parameter uncertainty on top.
 
 - **`cov_inner_tol` / covariance-key docs now distinguish pre- and post-pinned behavior**
   ([ferx-core #956](https://github.com/FeRx-NLME/ferx-core/pull/956)).

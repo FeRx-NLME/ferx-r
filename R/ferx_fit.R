@@ -939,7 +939,10 @@
 #'     weight expression of a weighted kappa row (see \code{kappa_weights})
 #'     and is \code{NA} on every other row; on such a row \code{estimate} is
 #'     the \emph{unweighted} variance, so the between-occasion SD at a weight
-#'     \code{W} is \code{sqrt(estimate / W)}, not \code{sqrt(estimate)}.}
+#'     \code{W} is \code{sqrt(estimate / W)}, not \code{sqrt(estimate)}.
+#'     Row names are the parameter names, so \code{fit$estimates["TVCL", ]}
+#'     works; use \code{\link{ferx_coef}} / \code{\link{ferx_se}} to have an
+#'     unknown name error rather than return \code{NA}.}
 #'   \item{eta_cov}{Data frame of Pearson correlations between each ETA and
 #'     each constant-per-subject numeric covariate in the dataset, with
 #'     columns \code{eta}, \code{covariate}, \code{r}, \code{p_val},

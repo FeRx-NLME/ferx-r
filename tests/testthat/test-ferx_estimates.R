@@ -335,3 +335,42 @@ test_that(".compute_estimates() returns NA for SE-derived columns when se_theta 
   expect_true(is.na(theta_row$lower_95))
   expect_true(is.na(theta_row$estimate_natural))
 })
+
+# ---------------------------------------------------------------------------
+# `.ferx_compute_estimates()` - row names (#299)
+# ---------------------------------------------------------------------------
+
+test_that(".ferx_compute_estimates() sets row names to the parameter names", {
+  fit <- make_fake_fit(
+    theta       = c(TVCL = 1.0, TVV = 10.0),
+    se_theta    = c(0.1, 0.5),
+    omega       = 0.09,
+    eta_names   = "ETA_CL",
+    se_omega    = 0.01,
+    sigma       = 0.05,
+    sigma_names = "EPS_PROP",
+    sigma_types = "proportional",
+    se_sigma    = 0.005
+  )
+  est <- .compute_estimates(fit)
+  expect_identical(rownames(est), c("TVCL", "TVV", "ETA_CL", "EPS_PROP"))
+  # The papercut this fixes: name-indexing used to return a row of NA.
+  expect_equal(est["TVCL", "estimate"], 1.0)
+  expect_equal(est["ETA_CL", "estimate"], 0.09)
+  # `param` still carries the name as declared.
+  expect_identical(est$param, c("TVCL", "TVV", "ETA_CL", "EPS_PROP"))
+})
+
+test_that(".ferx_compute_estimates() disambiguates duplicated parameter names", {
+  # A theta and an eta may collide; a data frame needs unique row names, so the
+  # second gets a suffix rather than every row losing its name.
+  fit <- make_fake_fit(
+    theta     = c(CL = 1.0),
+    omega     = 0.09,
+    eta_names = "CL",
+    sigma     = NULL
+  )
+  est <- .compute_estimates(fit)
+  expect_identical(rownames(est), c("CL", "CL.1"))
+  expect_identical(est$param, c("CL", "CL"))
+})

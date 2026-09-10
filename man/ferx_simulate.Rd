@@ -87,6 +87,45 @@ and residual error. When a \code{fit} is supplied, the fitted theta, omega,
 and sigma replace the model file's initial values - which is the usual flow
 after \code{\link{ferx_fit}} (e.g. for posterior-predictive checks or VPCs).
 }
+\section{Which predictive distribution you get}{
+
+\code{ferx_simulate()} draws a \strong{fresh set of random effects for every
+ID in \code{data}, in every replicate}, and adds residual error on top. It
+never conditions on a subject's own observations - the observed \code{DV} is
+not read (see the \code{data} argument), so the draw is the \emph{prior}
+predictive under the estimated parameters, not a posterior one.
+(\code{match} is not an exception: it reassigns the \emph{same} drawn etas
+to designs, leaving the marginal distribution of the draw unchanged.)
+
+What that distribution is \emph{of} follows from what one ID means in your
+data and what level the etas were estimated at. The two are the same thing in
+individual-level PK, where an ID is a patient - but not in a model-based
+meta-analysis, where a row is a trial-arm summary, an ID is a study or an arm
+and the etas are \strong{between-study} random effects. There, each replicate
+is a set of \strong{new studies}, and \code{DV_SIM} is the predictive
+distribution of the \emph{next trial's readout} - not of the next patient. A
+patient-level interval needs a patient-level random effect in the model and
+rows at patient level in the data; ferx will not manufacture one, and quoting
+a between-study interval as a between-patient one is the error this note
+exists to prevent.
+
+Within a run, pick the column that matches the question:
+\describe{
+\item{\code{IPRED}}{the mean response of the newly drawn study/subject -
+random effects, no residual error.}
+\item{\code{DV_SIM}}{that study's/subject's \emph{observed} readout -
+random effects plus residual error. This is the column a VPC and a
+predictive interval are built from.}
+}
+Two neighbouring functions cover the other levels: \code{\link{ferx_predict}}
+gives the typical-value curve (all etas at zero, no residual error), and
+\code{\link{ferx_simulate_with_uncertainty}} adds \strong{parameter}
+uncertainty (a theta/omega/sigma draw per replicate) on top of the random
+effects, which is what a decision interval for a future trial usually wants.
+For the individual etas conditioned on observed data, see
+\code{fit$ebe_etas} and \code{\link{ferx_conddist}}.
+}
+
 \examples{
 ex <- ferx_example("warfarin")
 fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)

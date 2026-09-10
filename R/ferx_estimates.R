@@ -70,7 +70,14 @@
   }
 
   result <- do.call(rbind, rows)
-  rownames(result) <- NULL
+  # Row names as well as the `param` column (#299): `est["TVCL", ]` on a frame
+  # with the default 1..n row names returns a row of NA rather than erroring,
+  # so the first natural attempt at pulling a coefficient fails silently.
+  # Names are engine-supplied and not guaranteed unique across the theta /
+  # omega / sigma / kappa blocks; a data frame requires unique row names, so
+  # disambiguate rather than drop the names for every row (`param` still
+  # carries the name as declared). See also ferx_coef() / ferx_se().
+  if (!is.null(result) && nrow(result) > 0L) rownames(result) <- make.unique(result$param)
   result
 }
 
