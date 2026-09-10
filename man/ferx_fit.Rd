@@ -105,14 +105,14 @@ the covariance step for standard errors. \code{NULL} uses the model file's
 \code{[fit_options] covariance} (engine default \code{TRUE} when unset); a
 logical overrides the model file. Previously defaulted to \code{TRUE} and
 silently overrode a model file that set \code{covariance = false} (#558).
-In ferx-core #956+, \code{method = "bayes"} is the exception, in both directions: it reports
-posterior credible intervals instead of Hessian standard errors and runs
-no covariance step whatever this argument says. The five covariance-step
-\code{settings} keys -- \code{covariance_method},
+In ferx-core #956+, \code{method = "bayes"} is the exception, in both
+directions: it reports posterior credible intervals instead of Hessian
+standard errors and runs no covariance step whatever this argument says.
+The five covariance-step \code{settings} keys -- \code{covariance_method},
 \code{covariance_fallback}, \code{analytic_cov_hessian},
 \code{fd_hessian_step} and \code{cov_inner_tol} -- are inert there, and
-the engine warns, for each one passed, that it configures a step this
-fit does not run (ferx-core #956).}
+the engine warns for each one passed that it configures a step this fit does
+not run.}
 
 \item{verbose}{Logical, or \code{NULL} (the default). Print progress during
 estimation. \code{NULL} uses the model file's \code{[fit_options] verbose}
@@ -292,10 +292,9 @@ only to \code{inner_tol} can visibly perturb the standard errors. Worth
 reaching for on heavily-censored M3 + IOV models (try \code{1e-11}).
 In ferx-core #956+, this value is required to be positive and finite:
 \code{0}, negative values, and non-finite values are rejected outright rather
-than reaching the EBE
-convergence test as a target no subject can meet and quietly burning
-the whole \code{inner_maxiter} budget on every covariance-step
-reconvergence. Under the currently pinned engine (\code{909ad38}),
+than reaching the EBE convergence test as a target no subject can meet and
+quietly burning the whole \code{inner_maxiter} budget on every
+covariance-step reconvergence. Under the currently pinned engine (\code{909ad38}),
 non-positive values are still accepted, and this warning has not yet been
 removed. See \code{NEWS.md} for the version boundary.
 Inert under \code{method = "bayes"}, which runs no covariance step -- see
@@ -988,7 +987,14 @@ covariance step was not run. \code{weight} carries the sample-size
 weight expression of a weighted kappa row (see \code{kappa_weights})
 and is \code{NA} on every other row; on such a row \code{estimate} is
 the \emph{unweighted} variance, so the between-occasion SD at a weight
-\code{W} is \code{sqrt(estimate / W)}, not \code{sqrt(estimate)}.}
+\code{W} is \code{sqrt(estimate / W)}, not \code{sqrt(estimate)}.
+Row names are the parameter names, so \code{fit$estimates["TVCL", ]}
+works; a name declared in more than one block is qualified by that block
+(\code{"CL.theta"} / \code{"CL.omega"}), so no bare name silently
+addresses one of a colliding pair. Use \code{\link{ferx_coef}} /
+\code{\link{ferx_se}} to have an unknown or ambiguous name error rather
+than return \code{NA}. A parameter declared \code{FIX} carries an exact
+\code{0} in \code{se} and \code{rse_pct}, not \code{NA}.}
 \item{eta_cov}{Data frame of Pearson correlations between each ETA and
 each constant-per-subject numeric covariate in the dataset, with
 columns \code{eta}, \code{covariate}, \code{r}, \code{p_val},
@@ -1722,6 +1728,7 @@ Other fitting:
 \code{\link[=ferx_bootstrap]{ferx_bootstrap()}},
 \code{\link[=ferx_bootstrap_summarize]{ferx_bootstrap_summarize()}},
 \code{\link[=ferx_check_init]{ferx_check_init()}},
+\code{\link[=ferx_coef]{ferx_coef()}},
 \code{\link[=ferx_collect]{ferx_collect()}},
 \code{\link[=ferx_covariance]{ferx_covariance()}},
 \code{\link[=ferx_inits_from_nca]{ferx_inits_from_nca()}},

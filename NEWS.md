@@ -178,6 +178,26 @@
 
 ## New features
 
+- **`ferx_coef(fit, "TVCL")` and `ferx_se(fit, "TVCL")` pull a parameter by
+  name, and `fit$estimates` now carries row names**
+  ([#299](https://github.com/FeRx-NLME/ferx-r/issues/299)). The tidy estimates
+  table identified its rows only through a `param` column, so the first natural
+  attempt at reading a coefficient - `fit$estimates["TVCL", "estimate"]` -
+  returned `NA` rather than erroring, because that is what `[` does to a data
+  frame with default row names. Row names are now set from `param`. A name the
+  engine allows in two blocks - a `CL` declared as both a theta and an eta - is
+  qualified by its block on both rows (`CL.theta`, `CL.omega`), so the bare name
+  never addresses one of a colliding pair by position and both stay reachable;
+  non-colliding names, which is the whole table in practice, are untouched, and
+  `param` still holds the name as declared. The two accessors are the loud
+  version of the same lookup: an unrecognised name is an error naming the
+  closest available parameters, and an ambiguous bare name is an error naming
+  the qualified keys, so a mistyped or colliding coefficient can never be read
+  as an unestimated one. `ferx_se()` additionally warns when the fit carries no
+  standard errors at all (no covariance step, or a failed one) instead of
+  handing back a silent `NA`; note that a parameter declared `FIX` is not that
+  case - the engine gives it an exact `0`, which both the table and `ferx_se()`
+  report as such.
 - **`ferx_warnings()` now explains a clamped initial estimate**
   ([ferx-core #1251](https://github.com/FeRx-NLME/ferx-core/issues/1251)).
   `W_INIT_OUTSIDE_BOUNDS` arrives under the new `init_outside_bounds` category,
@@ -1028,6 +1048,20 @@
   step on the PK model without the endpoint block.
 
 ## Documentation
+
+- **`?ferx_simulate` now says which predictive distribution it produces**
+  ([#299](https://github.com/FeRx-NLME/ferx-r/issues/299)). `ferx_simulate()`
+  draws a fresh set of random effects for every ID in the data in every
+  replicate and never conditions on a subject's own observations, so what the
+  spread of `DV_SIM` is a distribution *of* follows from what one ID means in
+  the data and at what level the etas were estimated. In individual-level PK an
+  ID is a patient and the two coincide; in a model-based meta-analysis a row is
+  a trial-arm summary, an ID is a study, the etas are between-study, and each
+  replicate is a set of **new studies** - the predictive distribution of the
+  next trial's readout, not of the next patient. A new section spells that out,
+  separates `IPRED` (drawn random effects, no residual error) from `DV_SIM`
+  (plus residual error), and points at `ferx_predict()` for the typical-value
+  curve and `ferx_simulate_with_uncertainty()` for parameter uncertainty on top.
 
 - **`cov_inner_tol` / covariance-key docs now distinguish pre- and post-pinned behavior**
   ([ferx-core #956](https://github.com/FeRx-NLME/ferx-core/pull/956)).

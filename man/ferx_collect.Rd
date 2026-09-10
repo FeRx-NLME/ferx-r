@@ -43,6 +43,7 @@ Other fitting:
 \code{\link[=ferx_bootstrap]{ferx_bootstrap()}},
 \code{\link[=ferx_bootstrap_summarize]{ferx_bootstrap_summarize()}},
 \code{\link[=ferx_check_init]{ferx_check_init()}},
+\code{\link[=ferx_coef]{ferx_coef()}},
 \code{\link[=ferx_covariance]{ferx_covariance()}},
 \code{\link[=ferx_fit]{ferx_fit()}},
 \code{\link[=ferx_inits_from_nca]{ferx_inits_from_nca()}},

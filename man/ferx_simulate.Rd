@@ -87,6 +87,55 @@ and residual error. When a \code{fit} is supplied, the fitted theta, omega,
 and sigma replace the model file's initial values - which is the usual flow
 after \code{\link{ferx_fit}} (e.g. for posterior-predictive checks or VPCs).
 }
+\section{Which predictive distribution you get}{
+
+\code{ferx_simulate()} draws a \strong{fresh set of random effects for every
+ID in \code{data}, in every replicate}, and adds residual error on top. At
+the default \code{match = FALSE} it does not read the observed \code{DV} at
+all (see the \code{data} argument), so each subject's draw is unconditional:
+the \emph{prior} predictive under the estimated parameters, not a posterior
+one.
+
+\code{match} is the exception, on the assignment rather than on the draw.
+The pool of etas per replicate is the same unconditional sample with the same
+marginal distribution, but \emph{which} member of it lands on a given
+subject is chosen by matching against that subject's posthoc eta - computed
+from that subject's observed \code{DV}, which is why matching requires every
+subject to carry observations. So under \code{match} the eta paired with a
+particular observed design \strong{is} informed by that design's data; that
+is the point of it (it restores the design-eta association that adaptive
+dosing puts in real-world data), and it means the per-subject draw is no
+longer the unconditional one described above.
+
+What that distribution is \emph{of} follows from what one ID means in your
+data and what level the etas were estimated at. The two are the same thing in
+individual-level PK, where an ID is a patient - but not in a model-based
+meta-analysis, where a row is a trial-arm summary, an ID is a study or an arm
+and the etas are \strong{between-study} random effects. There, each replicate
+is a set of \strong{new studies}, and \code{DV_SIM} is the predictive
+distribution of the \emph{next trial's readout} - not of the next patient. A
+patient-level interval needs a patient-level random effect in the model and
+rows at patient level in the data; ferx will not manufacture one, and quoting
+a between-study interval as a between-patient one is the error this note
+exists to prevent.
+
+Within a run, pick the column that matches the question:
+\describe{
+\item{\code{IPRED}}{the mean response of the newly drawn study/subject -
+random effects, no residual error.}
+\item{\code{DV_SIM}}{that study's/subject's \emph{observed} readout -
+random effects plus residual error. This is the column a VPC and a
+predictive interval are built from.}
+}
+Two neighbouring functions cover the other levels: \code{\link{ferx_predict}}
+gives the typical-value curve (all etas at zero, no residual error), and
+\code{\link{ferx_simulate_with_uncertainty}} adds \strong{parameter}
+uncertainty (a theta/omega/sigma draw per replicate) on top of the random
+effects, which is what a decision interval for a future trial usually wants.
+For the individual etas conditioned on observed data, see
+\code{fit$ebe_etas} and \code{\link{ferx_conddist}}.
+}
+
 \examples{
 ex <- ferx_example("warfarin")
 fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
