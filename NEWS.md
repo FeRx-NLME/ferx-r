@@ -798,8 +798,8 @@
   settings set, so the old warning about it being ignored is removed; the key is
   required to be positive and finite, and the five covariance-step keys are inert
   under `method = "bayes"` (which reports posterior credible intervals rather than
-  Hessian standard errors). In that mode, each key is rejected as configuring a
-  step that does not run.
+  Hessian standard errors). In that mode, the engine warns that each key
+  configures a step that does not run and ignores it.
 
   This documentation update is written against the `7f15dba` behavior and the current
   ferx-r pin does not yet include it. `src/rust/Cargo.lock` remains at

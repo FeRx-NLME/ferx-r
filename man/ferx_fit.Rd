@@ -297,7 +297,7 @@ convergence test as a target no subject can meet and quietly burning
 the whole \code{inner_maxiter} budget on every covariance-step
 reconvergence. Under the currently pinned engine (\code{909ad38}),
 non-positive values are still accepted, and this warning has not yet been
-removed. See \link[=NEWS]{NEWS} for the version boundary.
+removed. See \code{NEWS.md} for the version boundary.
 Inert under \code{method = "bayes"}, which runs no covariance step -- see
 \code{covariance}.}
 \item{\code{parameter_scaling}}{\code{"auto"} (default), \code{"none"},
