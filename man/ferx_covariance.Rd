@@ -36,7 +36,7 @@ matrix - the value \code{\link[=check_strictness]{check_strictness()}} gates on)
 \code{residual_correlations} refreshed.
 }
 \description{
-Run the finite-difference-Hessian covariance step against a fit that was
+Run the standard-error covariance step against a fit that was
 produced earlier - the covariance-step analogue of \code{\link[=ferx_sir]{ferx_sir()}}. Useful
 when the original fit was expensive and you want to add standard errors
 without re-estimating, when you want to re-run the step with a different
@@ -56,7 +56,8 @@ EBE loop). The returned fit is the input with
 refreshed.
 
 A covariance step that runs but cannot produce a usable matrix (a
-non-positive-definite or structurally-unusable FD Hessian) is \strong{not} an
+non-positive-definite or structurally-unusable covariance Hessian, from the
+analytic R-matrix or the FD stencil alike) is \strong{not} an
 error: the returned fit reports \code{covariance_status = "failed"} with a
 diagnostic appended to \code{warnings}, mirroring \code{\link[=ferx_fit]{ferx_fit()}}. An error is
 reserved for input problems (missing / hash-mismatched model or data).

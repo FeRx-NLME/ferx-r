@@ -790,6 +790,34 @@
   Gaussian rows alone; it now errors with `E_FREM_NON_GAUSSIAN_ENDPOINT`. Run the FREM
   step on the PK model without the endpoint block.
 
+## Documentation
+
+- **`cov_inner_tol` / covariance-key docs now distinguish pre- and post-pinned behavior**
+  ([ferx-core #956](https://github.com/FeRx-NLME/ferx-core/pull/956)).
+  In ferx-core `7f15dba`, `cov_inner_tol` moved to the advertised covariance
+  settings set, so the old warning about it being ignored is removed; the key is
+  required to be positive and finite, and the five covariance-step keys are inert
+  under `method = "bayes"` (which reports posterior credible intervals rather than
+  Hessian standard errors). In that mode, the engine warns that each key
+  configures a step that does not run and ignores it.
+
+  This documentation update is written against the `7f15dba` behavior and the current
+  ferx-r pin does not yet include it. `src/rust/Cargo.lock` remains at
+  `909ad38` in this branch, so a build against this repository still emits the
+  current pinned warning pattern and allows non-positive `cov_inner_tol` values.
+
+- **Two smaller corrections in the same area.** `covariance_fallback` and
+  `ferx_covariance()` both described the matrix they rectify as the "FD
+  Hessian", which stopped being true of the default path when the analytic
+  R-matrix landed (`analytic_cov_hessian = TRUE`); the fallback handles a
+  non-positive-definite covariance Hessian from either source. And
+  `global_maxeval`'s default `0` was described as disabling the global-search
+  budget, when it in fact selects an automatic one of `30 * (n_params + 1)`.
+
+  This `7f15dba` change is independent of the existing `0.3.1` -> `0.4.0`
+  release-line work already in this repository, which is why it will need its own
+  lockfile bump when merged.
+
 ## Internal
 
 - **`ferx-tools` is now a second git dependency**, from the same ferx-core
