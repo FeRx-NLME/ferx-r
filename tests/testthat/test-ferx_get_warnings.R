@@ -276,7 +276,8 @@ test_that(".ferx_warning_guidance returns negative-autocorrelation guidance", {
     "covariance_regularized", "covariance_step", "data_quality",
     "dw_autocorrelation", "eps_shrinkage", "eta_normality", "eta_shrinkage",
     "experimental", "flat_parameter", "flip_flop", "gradient_fallback",
-    "high_correlation", "importance_sampling", "inflated_rse", "mu_referencing",
+    "high_correlation", "importance_sampling", "inflated_rse",
+    "init_outside_bounds", "mu_referencing",
     "multi_start", "ode_solver", "omega_structure", "optimizer_config",
     "optimizer_health", "parameter_at_runaway_guard", "simulation", "sir",
     "threads", "vi_bad_basin"
@@ -424,6 +425,21 @@ test_that(".ferx_warning_guidance matches ferx-core's WarningCode vocabulary", {
     g <- ferx:::.ferx_warning_guidance(cat)
     expect_true(is.character(g) && length(g) == 1L && nzchar(g), info = cat)
   }
+})
+
+test_that("init_outside_bounds guidance is start-side and distinct from boundary_estimate", {
+  # ferx-core #1251 gave a clamped START its own WarningCode rather than reusing
+  # BoundaryEstimate, because that category drives three default-on rejection
+  # filters (bootstrap's skip_estimate_near_boundary, reject_on_boundary, and
+  # .ferx_boundary_detail() in check_strictness.R) and a start wearing it would
+  # silently drop bootstrap replicates. The guidance must keep the two apart:
+  # this one is about where the fit BEGAN.
+  g <- ferx:::.ferx_warning_guidance("init_outside_bounds")
+  expect_true(is.character(g) && length(g) == 1L && nzchar(g))
+  expect_match(g, "before the first objective evaluation", fixed = TRUE)
+  # boundary_estimate is deliberately unanswered, so the two cannot be confused
+  # by a caller reading guidance alone.
+  expect_null(ferx:::.ferx_warning_guidance("boundary_estimate"))
 })
 
 test_that(".ferx_warning_guidance gives `general` no category-level guidance", {
