@@ -762,6 +762,20 @@
 
 ## Bug fixes
 
+- **An ODE-accumulated hazard that reads `TAD` or `TAFD` no longer evaluates to
+  `NaN`** ([ferx-core #1261](https://github.com/FeRx-NLME/ferx-core/issues/1261),
+  [#1266](https://github.com/FeRx-NLME/ferx-core/issues/1266)). The hazard
+  readout re-evaluated the ODE right-hand side with the bare PK parameter array,
+  which ends at the last PK parameter and omits the two trailing slots the RHS
+  reserves for the dose-time anchors `TAFD` and `TAD`. A model whose ODE system
+  reads either one therefore saw a non-finite hazard, which surfaced much later
+  as a misleading finite objective and could reject valid multi-dose subjects.
+  The readout now passes the same extended parameters the integrator itself
+  uses, and a `debug_assert!` fails a missing injection at the call site in debug
+  and test builds. This reaches `ferx_predict_survival()` and joint PK-TTE fits
+  whose `[event_model]` hazard accumulates on an ODE state. **No bundled example
+  is affected**: no TTE model in `inst/examples/models/` reads `TAD` or `TAFD`.
+
 - **A `.tmp` checkpoint from a deterministic stage now holds the best point, not
   a throwaway probe** ([ferx-core #1317](https://github.com/FeRx-NLME/ferx-core/issues/1317)).
   `foce`, `focei`, `laplace`, `gn` and `gn_hybrid` evaluate the objective at every
@@ -1007,6 +1021,19 @@
   lockfile bump when merged.
 
 ## Internal
+
+- **The pinned engine revision moves `944cbf1e` -> `8694824`**, with `ferx-core`
+  and `ferx-tools` both staying at `0.4.0` (one repository, one revision, two
+  lock entries). The range is three commits, all of the ODE-accumulated-hazard
+  fix above ([ferx-core #1323](https://github.com/FeRx-NLME/ferx-core/pull/1323)).
+  No public Rust API changed in it, so this package's glue is untouched:
+  `ferx-core` and `ferx-tools` build at the new revision under the feature set
+  `src/Makevars` uses (`--no-default-features --features ci,nn,survival`), and
+  the one exhaustive `match` in the glue - on `ferx_tools::gam::CovariateForm`,
+  the GAM-screening enum that the `0.4.0` break did not touch - still
+  type-checks against it. The bare `cargo update` that
+  `tools/update-ferx-core-lock.sh` runs also carries a transitive `toml`
+  `1.1.5` -> `1.1.6` into the lock.
 
 - **The pinned engine crosses a semver-breaking boundary: `ferx-core` /
   `ferx-tools` `0.3.1` -> `0.4.0`** (revision `909ad382` -> `944cbf1e`).
