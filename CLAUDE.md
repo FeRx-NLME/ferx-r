@@ -43,7 +43,7 @@ When a sibling `../ferx-core` checkout exists, `src/Makevars` writes that `[patc
 
 That includes `cargo update` — both past unpinnings (`1ce7f59`, `b96c867`) were lock bumps — and an editor's rust-analyzer, which loads `src/rust` through `cargo metadata`.
 
-**Builds that go through `src/Makevars` keep the pin.** `R CMD INSTALL .`, `roxygen2::roxygenize()`, `pkgload::load_all()` and `devtools::test()` all compile through it, and it snapshots `Cargo.lock` before cargo runs and restores it afterwards — after a failed or interrupted build too; only a `kill -9` gets past it. **Cargo run directly does not keep it**: `cd src/rust && cargo ...` (including the `cargo build` line under Build & Install) and rust-analyzer.
+**Builds that go through `src/Makevars` keep the pin.** `R CMD INSTALL .`, `roxygen2::roxygenize()`, `pkgload::load_all()` and `devtools::test()` all compile through it, and it snapshots `Cargo.lock` before cargo runs and restores it afterwards — after a failed or interrupted build too; only a `kill -9` gets past it. The flip side: it also discards a lock change cargo made for a good reason, such as a dependency newly added to `src/rust/Cargo.toml`. Record that by running cargo in `src/rust` with `.cargo/config.toml` moved aside (what `tools/update-ferx-core-lock.sh` does), then check the pin. **Cargo run directly does not keep it**: `cd src/rust && cargo ...` (including the `cargo build` line under Build & Install) and rust-analyzer.
 
 To ask cargo about the patch without touching the lock, pass `--locked`, which makes cargo refuse to write it:
 
