@@ -24,46 +24,42 @@ ferx-tools = { path = "../../../ferx-core/crates/ferx-tools" }
 
 Cargo patches **per package name**: an entry for `ferx-core` alone leaves `ferx-tools` resolving to GitHub `main` while `ferx-core` comes from your working tree — two revisions of a workspace whose halves move together, with no error to say so. Both entries, or neither.
 
-When the sibling `../ferx-core` checkout exists, cargo uses it for **both** crates. When the sibling doesn't exist (e.g. CI without a paired checkout), cargo falls back to the GitHub source. To check which one you got, read the build output rather than running `cargo tree` — see the note below for why.
+When a sibling `../ferx-core` checkout exists, `src/Makevars` writes that `[patch]`; when it doesn't (e.g. CI without a paired checkout), nothing is patched and cargo builds the revision `Cargo.lock` pins. Writing the patch is not the same as cargo using it, so Makevars reports the outcome once cargo has run: `ferx: the [patch] applied - ...`, or a `ferx: WARNING cargo did NOT use the sibling ../ferx-core checkout` block. Read that line, not the `ferx: [patch]ing ...` line printed before the build starts.
 
-**A patch that does not apply is a warning, not an error.** Cargo prints `warning: patch ... was not used in the crate graph` on stderr and then builds from GitHub `main` — so a `cargo tree` that names `git+https://...` looks perfectly healthy, and a "local build" is silently not local. Two ways to end up there:
+**A patch that does not apply is a warning, not an error.** Cargo prints `warning: patch ... was not used in the crate graph` on stderr, builds the pinned GitHub revision instead, and nothing else in the output looks wrong. Its follow-up hint says to run `cargo update` — don't: with the sibling present that strips the pin (below), and `tools/update-ferx-core-lock.sh` is the safe equivalent. Two ways to get a "local" build that is not local:
 
-- **Version skew across a semver bump.** `ferx-tools` does not depend on `ferx-core` by bare path — it carries a real version requirement (`ferx-core = { path = "../..", version = "<x.y.z>", default-features = false }`). A patch must satisfy the requirements of every *dependent*, not just the top-level one. So when the sibling crosses a semver boundary that the lock has not followed yet, the local `ferx-core` stops satisfying the locked `ferx-tools`, and cargo drops the patch for the whole graph — not just for `ferx-tools`. Bumping the lock (below) moves both crates onto one revision and restores it. Hit for real in #346, across `0.3.1` -> `0.4.0`.
-- **Working inside a worktree.** The paths are relative to cargo's working directory (`src/rust`), so `../../../ferx-core` reaches the sibling of the *repo root*. From `<repo>/.claude/worktrees/<name>/src/rust` it instead resolves to `<repo>/.claude/worktrees/ferx-core`, which never exists — and since worktrees are mandated above, this is the normal case, not the exception. Write absolute paths into the worktree's `config.toml` when invoking cargo directly.
+- **The sibling's version differs from the locked one — by any amount.** Cargo uses a `[patch]` only when the patched crate's version equals the version `Cargo.lock` pins for it. A patch-level difference is enough (`0.4.0` locked, `0.4.1` in the sibling); dependents' version requirements don't enter into it, and the semver boundary #346 crossed (`0.3.1` -> `0.4.0`) was just one instance. Bumping the lock (below) moves the pin to ferx-core `main`, which restores the patch when the sibling is at `main`'s version; otherwise check out a sibling revision at the locked version.
+- **Working inside a `.claude/worktrees/` worktree.** Makevars looks for the sibling at `../../ferx-core` relative to `src/`, which from `<repo>/.claude/worktrees/<name>/src` is `<repo>/.claude/worktrees/ferx-core` — never there. So **no** `[patch]` is written and cargo has nothing to warn about: the build uses the pin, as CI does, and Makevars says `ferx: no sibling checkout at ... (this is a git worktree)`. Since worktrees are mandated above, that is the normal case. To build worktrees against your sibling instead, link it where the lookup lands, once, from the repo root: `ln -s ../../../ferx-core .claude/worktrees/ferx-core`. The link serves every worktree under `.claude/worktrees/`, including branches whose `src/Makevars` predates the lock snapshot described below — their builds will strip the pin. Don't hand-write paths into `src/rust/.cargo/config.toml` instead: Makevars truncates that file on every build.
 
-### With the sibling present, every local build unpins `Cargo.lock`
+### With the `[patch]` in place, cargo rewrites `Cargo.lock`
 
-This is the part to internalise, and it is wider than the bump section below suggests — that section warns only about `cargo update`. **Any** cargo command that resolves rewrites the lock while a `[patch]` is active, replacing both `source = "git+..."` lines with local paths. Measured, from a pin of `2`:
+**Any** cargo command that resolves while the patch is in place rewrites the lock. A patch that applies deletes both `source = "git+..."` lines (cargo records no source for a path package), silently unpinning the crates for CI and everyone else; one that goes unused keeps them but appends `[[patch.unused]]` tables. Measured, from a pin of `2`:
 
-| command | `grep -c '^source = "git+...'` afterwards |
+| command | git `source` lines afterwards |
 |---|---|
-| `cargo metadata` (a pure read) | `0` |
+| `cargo metadata` | `0` |
 | `cargo tree` | `0` |
-| `cargo build --release` (as documented under Build & Install) | `0`, within 25s — at resolve time, long before it finishes compiling |
+| `cargo build --release` | `0`, at resolve time — long before compilation finishes |
 
-`R CMD INSTALL .` runs that same `cargo build`, so the normal install path does it too. This is how the lock has been unpinned in the past (commits `1ce7f59`, `b96c867`).
+That includes `cargo update` — both past unpinnings (`1ce7f59`, `b96c867`) were lock bumps — and an editor's rust-analyzer, which loads `src/rust` through `cargo metadata`.
 
-`--locked` does not rescue it: with the patch live cargo always wants to rewrite, so it errors (`cannot update the lock file ... because --locked was passed`) instead of answering. **There is no safe read-only cargo command while the patch is active.**
+**Builds that go through `src/Makevars` keep the pin.** `R CMD INSTALL .`, `roxygen2::roxygenize()`, `pkgload::load_all()` and `devtools::test()` all compile through it, and it snapshots `Cargo.lock` before cargo runs and restores it afterwards — after a failed or interrupted build too; only a `kill -9` gets past it. **Cargo run directly does not keep it**: `cd src/rust && cargo ...` (including the `cargo build` line under Build & Install) and rust-analyzer.
 
-So never verify the patch with cargo. Read the warning off the build you were running anyway — it goes to **stderr** while stdout keeps showing a healthy-looking tree, so it is easy to miss in a scrollback:
-
-```
-warning: patch `ferx-core v0.4.0 (/Users/you/ferx-core)` was not used in the crate graph
-```
-
-And after **any** local build with the sibling present, confirm the pin survived. This runs no cargo, so it is always safe:
+To ask cargo about the patch without touching the lock, pass `--locked`, which makes cargo refuse to write it:
 
 ```bash
-grep -c '^source = "git+https://github.com/FeRx-NLME/ferx-core' src/rust/Cargo.lock   # must print 2
+cd src/rust && cargo tree --locked 2>&1 | grep 'was not used'
 ```
 
-Anything other than `2` means the build unpinned the crates for CI and everyone else. Restore rather than commit:
+This prints the warning when the patch is unused, and nothing when it applies or there is none. The lock is byte-identical afterwards either way. (With the patch in place cargo then stops with `cannot update the lock file ... because --locked was passed` — expected here, not a failure of the check.)
+
+After running cargo directly, check the lock before staging. This runs no cargo, so it is always safe, and it is exactly what CI runs — both crates pinned to a git source, on one revision, no `[[patch.unused]]` tables:
 
 ```bash
-git checkout -- src/rust/Cargo.lock
+tools/check-ferx-core-pin.sh
 ```
 
-Make that grep a reflex before `git add`. `git status` will happily show `Cargo.lock` as a modified file you might think belongs to your change.
+If it fails, read `git diff src/rust/Cargo.lock` before restoring. If the diff is only the damage, `git checkout -- src/rust/Cargo.lock`. If it also carries a change you meant — an uncommitted pin bump, a new dependency — re-run `tools/update-ferx-core-lock.sh` instead: a checkout would discard that change too. Don't count on `git status` to flag a damaged lock: it shows up as an ordinary modified file.
 
 This means: develop against a feature branch in `../ferx-core` freely, but never commit Cargo.toml changes that flip the dep to a path. Reviewers and CI run against the GitHub `main`, so a path dep in Cargo.toml would break their builds.
 
@@ -71,7 +67,7 @@ This means: develop against a feature branch in `../ferx-core` freely, but never
 
 Although `Cargo.toml` tracks `branch = "main"`, **CI builds from the commit pinned in `src/rust/Cargo.lock`** — *not* the latest `main`. The patch above only redirects local builds (which have the sibling), so a new ferx-core commit is invisible to CI until the lock is bumped. Symptom: a ferx-r PR that uses a freshly-`pub`'d ferx-core API fails CI with `error[E0603]: ... is private`, because the lock still points at a commit predating the change.
 
-To bump: run `tools/update-ferx-core-lock.sh` from the repo root (it advances both pins to ferx-core `main` HEAD and verifies each `source = "git+..."` line survives, on one shared revision), then commit `src/rust/Cargo.lock`. `ferx-core` and `ferx-tools` come from the same repo and the same rev, so this is one bump and two lock entries — never a second pin to track. **Do not** run a bare `cargo update -p ferx-core` with the sibling present — the `[patch]` makes cargo strip the git pin and write a local path, silently unpinning it for CI and everyone else. The `R-CMD-check` workflow has a guard that fails if either crate loses its git source, or if the two land on different revisions.
+To bump: run `tools/update-ferx-core-lock.sh` from the repo root (it advances both pins to ferx-core `main` HEAD and verifies each `source = "git+..."` line survives, on one shared revision), then commit `src/rust/Cargo.lock`. `ferx-core` and `ferx-tools` come from the same repo and the same rev, so this is one bump and two lock entries — never a second pin to track. **Do not** run a bare `cargo update -p ferx-core` with the sibling present — the `[patch]` makes cargo strip the git pin and write a local path, silently unpinning it for CI and everyone else. The `R-CMD-check` workflow runs `tools/check-ferx-core-pin.sh`, which fails if either crate loses its git source, if the two land on different revisions, or if the lock carries `[[patch.unused]]` tables.
 
 ## Build & Install
 
@@ -88,11 +84,7 @@ cd src/rust && cargo build --release
 Rscript -e 'roxygen2::roxygenize()'
 ```
 
-**If you have a sibling `../ferx-core` checkout, both build commands above rewrite `src/rust/Cargo.lock` and strip its git pin** — see the note in the dependency section. Check before staging, every time:
-
-```bash
-grep -c '^source = "git+https://github.com/FeRx-NLME/ferx-core' src/rust/Cargo.lock   # must print 2
-```
+The first and last commands compile through `src/Makevars`, which keeps `src/rust/Cargo.lock` pinned. **The bare `cargo build` does not**: once a Makevars build has written the sibling `[patch]` into `src/rust/.cargo/config.toml`, it rewrites the lock (see the dependency section) — run `tools/check-ferx-core-pin.sh` before staging.
 
 ## Architecture
 

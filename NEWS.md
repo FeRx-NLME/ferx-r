@@ -1008,6 +1008,21 @@
 
 ## Internal
 
+- **A local build next to a `../ferx-core` checkout no longer leaves
+  `src/rust/Cargo.lock` unpinned, and says whether it used that checkout**
+  (#349). With the sibling `[patch]` in place, every cargo resolve rewrites the
+  lock: a patch that applies deletes both `source = "git+..."` pins, one that
+  goes unused appends `[[patch.unused]]` tables. So `R CMD INSTALL .`,
+  `roxygen2::roxygenize()` and `pkgload::load_all()` each left behind a lock that
+  would unpin CI, shown by `git status` as an ordinary modified file.
+  `src/Makevars` now snapshots the lock before cargo runs and restores it on
+  every exit, then reports whether cargo applied the patch; when it did not, it
+  prints both versions, since a `[patch]` applies only at exactly the locked
+  version. In a git worktree with no sibling it says the pinned revision is being
+  built. The `R-CMD-check` pin guard moved into `tools/check-ferx-core-pin.sh`,
+  which also rejects `[[patch.unused]]` tables, so contributors can run what CI
+  runs. Cargo run directly is not covered: see `CLAUDE.md`.
+
 - **The pinned engine crosses a semver-breaking boundary: `ferx-core` /
   `ferx-tools` `0.3.1` -> `0.4.0`** (revision `909ad382` -> `944cbf1e`).
   `ferx_core::types::CovariateForm` gained a `Categorical2` variant and is now
@@ -1025,11 +1040,12 @@
   arm; from here on a new covariate form is genuinely additive.
 
   One local-development consequence: while the lock still pinned `0.3.1`, the
-  `[patch]` in `src/rust/.cargo/config.toml` stopped applying, because
-  `ferx-tools 0.3.1` requires `ferx-core ^0.3` and the sibling checkout had moved
-  to `0.4.0` — so a local build silently used GitHub `main` instead of the
-  sibling. Bumping the lock restores it; `src/Makevars` regenerates the file with
-  both `[patch]` entries on every `R CMD INSTALL`.
+  `[patch]` in `src/rust/.cargo/config.toml` stopped applying, because the
+  sibling checkout had moved to `0.4.0` and cargo uses a `[patch]` only at
+  exactly the version the lock pins — so a local build silently built the pinned
+  GitHub revision instead of the sibling. Bumping the lock restores it;
+  `src/Makevars` regenerates the file with both `[patch]` entries on every
+  `R CMD INSTALL`.
 
 - **The engine gained `ferx globalsearch`** — global model search by genetic
   algorithm or exhaustive enumeration, ranked on pyDarwin-style penalized fitness
