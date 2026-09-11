@@ -3,15 +3,16 @@
 # ferx-core GitHub repository, on one revision, with no [[patch.unused]] tables.
 #
 # Why: src/Makevars patches both crates to a sibling ../ferx-core checkout when
-# one exists, and any cargo command that resolves while that [patch] is active
-# rewrites the lock. An applied patch deletes both `source = "git+..."` lines
-# (unpinning the crates for CI and everyone who builds without the sibling); an
-# unused one appends [[patch.unused]] tables instead. src/Makevars restores the
-# lock around its own cargo build, but cargo run directly - by hand, or by an
-# editor's rust-analyzer - does not.
+# one exists, and any cargo command that resolves while that [patch] is in place
+# rewrites the lock - R CMD INSTALL, roxygenize() and load_all() included, as
+# well as cargo run by hand or by an editor's rust-analyzer. An applied patch
+# deletes both `source = "git+..."` lines (unpinning the crates for CI and
+# everyone who builds without the sibling); an unused one appends
+# [[patch.unused]] tables instead.
 #
 # Runs no cargo, so it is always safe. Used by the R-CMD-check workflow and by
-# tools/update-ferx-core-lock.sh. Exits 0 when the pin is intact, 1 otherwise.
+# tools/update-ferx-core-lock.sh, and exercised by tools/test-check-ferx-core-pin.sh.
+# Exits 0 when the pin is intact, 1 otherwise.
 #
 # Usage: tools/check-ferx-core-pin.sh [path/to/Cargo.lock]
 
@@ -63,12 +64,24 @@ if grep -q '^\[\[patch\.unused\]\]' "$LOCK"; then
 fi
 
 if [[ "$status" -ne 0 ]]; then
-  cat >&2 <<'EOF'
-Look at `git diff src/rust/Cargo.lock` before restoring. If the diff is only the
-damage above, `git checkout -- src/rust/Cargo.lock`. If it also carries a change
-you meant to make (an uncommitted pin bump, a new dependency), re-run
-tools/update-ferx-core-lock.sh instead - a checkout would discard that change too.
+  if [[ "${GITHUB_ACTIONS:-}" == true ]]; then
+    cat <<'EOF'
+The committed Cargo.lock is broken, so there is nothing local to check out. Locally,
+restore it from main (`git checkout origin/main -- src/rust/Cargo.lock`) and redo any
+wanted lock change the way CLAUDE.md's "ferx-core dependency" section describes, or, if
+this PR bumps the pin, re-run tools/update-ferx-core-lock.sh. Then commit the lock.
 EOF
+  else
+    cat >&2 <<'EOF'
+Read `git diff src/rust/Cargo.lock` before restoring:
+- only the damage above: `git checkout -- src/rust/Cargo.lock`.
+- a pin bump you meant: re-run tools/update-ferx-core-lock.sh.
+- any other change you meant (e.g. a new dependency): `git checkout -- src/rust/Cargo.lock`,
+  move src/rust/.cargo/config.toml aside, run cargo in src/rust (e.g. `cargo metadata
+  --format-version 1 >/dev/null`), move config.toml back, and run this check again.
+  Not the bump script: its whole-graph `cargo update` also moves the pin to ferx-core main.
+EOF
+  fi
   exit 1
 fi
 

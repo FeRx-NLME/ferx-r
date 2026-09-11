@@ -45,11 +45,10 @@ jobs:
       # Guard against an accidentally-unpinned ferx-core / ferx-tools dependency.
       # src/rust/.cargo/config.toml (written by src/Makevars) carries a [patch]
       # that redirects both crates to a sibling ../ferx-core when present
-      # (local-dev). Any cargo run that resolves with that patch applied strips
-      # the `source = "git+..."` lines — silently unpinning them for everyone
-      # who builds without the sibling — and one whose patch went unused appends
-      # [[patch.unused]] tables. Makevars restores the lock around its own
-      # build; this guard catches a lock rewritten by cargo run directly.
+      # (local-dev). Any cargo run that resolves with that patch applied - a
+      # local R CMD INSTALL included - strips the `source = "git+..."` lines,
+      # silently unpinning them for everyone who builds without the sibling; one
+      # whose patch went unused appends [[patch.unused]] tables.
       #
       # Both crates come from the one repository, so they must also sit on the
       # same revision: a lock pinning them apart is two halves of a workspace
@@ -57,6 +56,12 @@ jobs:
       # contributors run exactly what CI runs (CLAUDE.md, "ferx-core dependency").
       - name: Verify ferx-core and ferx-tools are pinned in Cargo.lock
         run: bash tools/check-ferx-core-pin.sh
+
+      # The step above only ever sees the committed lock, so nothing there would
+      # fail if one of its checks were deleted. Feed it the damaged locks a local
+      # sibling build leaves behind, and assert each verdict and message.
+      - name: Test the pin check against damaged locks
+        run: bash tools/test-check-ferx-core-pin.sh
 
       # Every ferx-core / ferx-tools `*Options` struct derives `Default`
       # (ferx-core #529, enforced there by the A4 guard in
