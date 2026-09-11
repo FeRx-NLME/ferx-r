@@ -253,9 +253,8 @@
 #'       \code{0}, negative values, and non-finite values are rejected outright rather
 #'       than reaching the EBE convergence test as a target no subject can meet and
 #'       quietly burning the whole \code{inner_maxiter} budget on every
-#'       covariance-step reconvergence. Under the currently pinned engine (\code{909ad38}),
-#'       non-positive values are still accepted, and this warning has not yet been
-#'       removed. See \code{NEWS.md} for the version boundary.
+#'       covariance-step reconvergence. The pinned engine contains that change, so
+#'       this rejection is what a build of this package does today.
 #'       Inert under \code{method = "bayes"}, which runs no covariance step -- see
 #'       \code{covariance}.}
 #'     \item{\code{parameter_scaling}}{\code{"auto"} (default), \code{"none"},
