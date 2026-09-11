@@ -3022,7 +3022,6 @@ fn build_individual_estimates(
     let mut param_cols: Vec<Vec<f64>> =
         (0..n_indiv).map(|_| Vec::with_capacity(n_subj)).collect();
 
-    let is_ode = model.is_ode_based();
     let mut eta_buf: Vec<f64> = vec![0.0; n_eta + n_kappa];
 
     for (si, sr) in result.subjects.iter().enumerate() {
@@ -3037,13 +3036,13 @@ fn build_individual_estimates(
         }
         let pk = (model.pk_param_fn)(&result.theta, &eta_buf, &subj.covariates, 0.0);
         for i in 0..n_indiv {
-            // Analytical models route via pk_indices; ODE models write
-            // sequentially into slots 0..n_indiv.
-            let slot = if is_ode {
-                i
-            } else {
-                model.pk_indices.get(i).copied().unwrap_or(i)
-            };
+            // `pk_indices` is parallel to `indiv_param_names` on both engines.
+            // ODE models do NOT write sequentially: ferx-core's
+            // `ode_param_slots` puts canonical names (CL, V, KA, F, LAGTIME,
+            // ...) at their fixed PK slot and every other name in the lowest
+            // free slot that is not reserved for F/lagtime. Reading slot `i`
+            // returned another parameter's value (or an unwritten 0).
+            let slot = model.pk_indices.get(i).copied().unwrap_or(i);
             let v = pk.values.get(slot).copied().unwrap_or(f64::NAN);
             param_cols[i].push(v);
         }

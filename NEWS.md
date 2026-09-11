@@ -949,6 +949,28 @@
   Pairs with a zero covariance are now skipped, for OMEGA and for OMEGA_IOV,
   with the same threshold the engine's own summary and YAML output use.
 
+- **`fit$individual_estimates` reports the right values for ODE models.** Each
+  column was read from PK slot *i* for the *i*-th `[individual_parameters]`
+  declaration, but the engine does not store ODE parameters in declaration
+  order: canonical names (`CL`, `V`, `KA`, `F`, `LAGTIME`, ...) sit at their
+  fixed slot and every other name takes a free slot that is not reserved for
+  `F` / `LAGTIME`. Columns therefore showed another parameter's value or an
+  unwritten `0` - `KA` and `LAGTIME` were `0` on `warfarin_ode_lagtime`, `KA`
+  was `0` on `warfarin_ode`, and `transit_savic` reported the `TVN` estimate
+  as `KA`, `0` as `MTT` and the `TVKA` estimate as `NTR`. Analytical models were
+  unaffected. The table now reads each parameter through the engine's
+  per-parameter slot map, the same one the ODE right-hand side reads from, so
+  it agrees with an `[output]` echo of the same names in `sdtab`.
+
+  Two consumers read this table and were wrong on ODE models for the same
+  reason; both are corrected by the same change. `ferx_xpose()` joins it into
+  the Xpose data as the parameter columns, and overwrote a correct `[output]`
+  echo of the same name, so echoing parameters did not work around the bug
+  there. `ferx_cov_screen()` computed its `ebe` column from it: the association
+  came out `NA` for a parameter that read as `0` and was computed against
+  another parameter's values otherwise, which could also add or drop rows at
+  the `threshold`. Its `eta` column and parameter labels were unaffected.
+
 - **`ferx_get_warnings()` no longer recommends solver settings for ODE problems
   they cannot fix** ([ferx-core #1234](https://github.com/FeRx-NLME/ferx-core/issues/1234),
   [ferx-core #1204](https://github.com/FeRx-NLME/ferx-core/issues/1204)). The

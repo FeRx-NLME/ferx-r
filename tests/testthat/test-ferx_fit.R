@@ -1896,6 +1896,53 @@ test_that("ebe_etas and individual_estimates align on ID and row count", {
   fit <- warfarin_fit()
   expect_equal(fit$ebe_etas$ID, fit$individual_estimates$ID)
 })
+# ODE models do not store individual parameters in PK slots 0..n in declaration
+# order: ferx-core's `ode_param_slots` puts canonical names (CL, V, KA, F,
+# LAGTIME, ...) at their fixed slot and every other name in a free slot that is
+# not reserved for F/lagtime. `individual_estimates` used to read slot i for
+# parameter i, which reported KA = LAGTIME = 0 on warfarin_ode_lagtime and
+# shifted transit_savic's columns (KA = TVN, NTR = TVKA, MTT = 0). The `[output]`
+# echo in sdtab reads each parameter by name, so it is the reference here.
+# Neither side depends on convergence, so a few iterations are enough.
+test_that("individual_estimates on ODE models match the [output] echo in sdtab", {
+  cases <- list(
+    warfarin_ode_lagtime = c("CL", "V", "KA", "LAGTIME"),
+    transit_savic        = c("CL", "V", "KA", "MTT", "NTR")
+  )
+  for (name in names(cases)) {
+    ex     <- ferx_example(name)
+    mod    <- readLines(ex$model)
+    params <- cases[[name]]
+    tmp <- tempfile(fileext = ".ferx")
+    on.exit(unlink(tmp), add = TRUE)
+    writeLines(c(mod, "", "[output]", paste(" ", paste(params, collapse = " "))),
+               tmp)
+    fit <- ferx_fit(tmp, ex$data, verbose = FALSE, covariance = FALSE,
+                    settings = list(maxiter = 5L))
+
+    ie <- fit$individual_estimates
+    expect_setequal(setdiff(names(ie), "ID"), params)
+    first <- fit$sdtab[!duplicated(fit$sdtab$ID), , drop = FALSE]
+    idx <- match(ie$ID, as.character(first$ID))
+    expect_false(anyNA(idx), info = name)
+    for (p in params) {
+      # Every parameter in both models is strictly positive; an unwritten
+      # slot reads back as 0.
+      expect_true(all(ie[[p]] > 0), info = sprintf("%s: %s", name, p))
+      expect_equal(ie[[p]], first[[p]][idx], tolerance = 1e-8,
+                   info = sprintf("%s: %s", name, p))
+    }
+
+    # ferx_xpose() overwrites an sdtab echo with the individual_estimates value
+    # (warning about the collision), so its parameter columns must still carry
+    # the echoed values.
+    xp <- suppressWarnings(.ferx_xpose_frame(fit))$data
+    for (p in params) {
+      expect_equal(xp[[p]], fit$sdtab[[p]], tolerance = 1e-8,
+                   info = sprintf("%s: xpose %s", name, p))
+    }
+  }
+})
 test_that("sdtab no longer contains ETA columns", {
   fit <- warfarin_fit()
   expect_s3_class(fit$sdtab, "data.frame")
