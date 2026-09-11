@@ -6730,6 +6730,22 @@ fn labelled_family(members: &[String], blocks: &[Vec<String>], labels: &[String]
     parts.join("+")
 }
 
+/// [`labelled_family`] in the spelling `IovStructure::description()` uses.
+///
+/// The two engine renderings of an *empty* family differ: `IivStructure::
+/// description()` writes the empty string, while the `IIV(...);IOV(...)` of an
+/// iovsearch writes `[]` inside the parentheses. The labelled column sits
+/// beside `description` and has to be the same structure in other names, so it
+/// follows whichever of the two it is paired with - a base model carrying no
+/// kappa must read `IOV([])` in both columns, not `IOV([])` in one and `IOV()`
+/// in the other (#351 review).
+fn labelled_iov_family(members: &[String], blocks: &[Vec<String>], labels: &[String]) -> String {
+    if members.is_empty() {
+        return "[]".to_string();
+    }
+    labelled_family(members, blocks, labels)
+}
+
 /// The labels of a block list: `,` within a block, `;` between them - parallel
 /// to the engine's `blocks` / `kappa_blocks` column.
 fn block_labels_of(members: &[String], blocks: &[Vec<String>], labels: &[String]) -> String {
@@ -7397,8 +7413,8 @@ fn ferx_rust_iovsearch(
         ));
         structure.push(format!(
             "IIV({});IOV({})",
-            labelled_family(&r.structure.etas, &r.structure.eta_blocks, &eta_lab),
-            labelled_family(&r.structure.kappas, &r.structure.kappa_blocks, &kappa_lab)
+            labelled_iov_family(&r.structure.etas, &r.structure.eta_blocks, &eta_lab),
+            labelled_iov_family(&r.structure.kappas, &r.structure.kappa_blocks, &kappa_lab)
         ));
     }
 
@@ -7498,12 +7514,12 @@ fn ferx_rust_iovsearch(
         input_description = result.input_structure.description(),
         input_structure = format!(
             "IIV({});IOV({})",
-            labelled_family(
+            labelled_iov_family(
                 &result.input_structure.etas,
                 &result.input_structure.eta_blocks,
                 &input_eta_lab
             ),
-            labelled_family(
+            labelled_iov_family(
                 &result.input_structure.kappas,
                 &result.input_structure.kappa_blocks,
                 &input_kappa_lab
@@ -7516,12 +7532,12 @@ fn ferx_rust_iovsearch(
         final_description = result.final_structure.description(),
         final_structure = format!(
             "IIV({});IOV({})",
-            labelled_family(
+            labelled_iov_family(
                 &result.final_structure.etas,
                 &result.final_structure.eta_blocks,
                 &final_eta_lab
             ),
-            labelled_family(
+            labelled_iov_family(
                 &result.final_structure.kappas,
                 &result.final_structure.kappa_blocks,
                 &final_kappa_lab

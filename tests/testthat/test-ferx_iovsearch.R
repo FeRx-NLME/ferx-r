@@ -198,6 +198,48 @@ test_that("every structure row is labelled with the declared random effects", {
   expect_equal(res$input_description, "IIV([CL]+[KA]+[V]);IOV([CL])")
 })
 
+test_that("a base with no kappa reads IOV([]) in both spellings", {
+  skip_on_cran()
+  # #351 review: an empty family is `[]` inside the parentheses in an
+  # iovsearch description, not the empty string iivsearch uses. A labelled
+  # column that dropped the brackets would be neither the engine's rendering
+  # nor the labelled equivalent of the `description` it sits beside.
+  #
+  # The base model needs an `iov_column` but no kappa of its own - the search
+  # adds them - which is the shape warfarin_iov would have before anyone wrote
+  # its KAPPA_CL.
+  ex <- ferx_example("warfarin_iov")
+  text <- readLines(ex$model)
+  text <- text[!grepl("^\\s*kappa\\s+KAPPA_CL", text)]
+  text <- sub("exp(ETA_CL + KAPPA_CL)", "exp(ETA_CL)", text, fixed = TRUE)
+  model <- tempfile(fileext = ".ferx")
+  writeLines(text, model)
+
+  res <- ferx_iovsearch(
+    model     = model,
+    data      = ex$data,
+    retries   = 0,
+    directory = file.path(tempdir(), "iovsearch-no-kappa"),
+    progress  = FALSE
+  )
+
+  expect_equal(res$input_description, "IIV([CL]+[KA]+[V]);IOV([])")
+  expect_equal(res$input_structure,
+               "IIV([ETA_CL]+[ETA_KA]+[ETA_V]);IOV([])")
+  # The input row is the one with no kappa, and it says so in both columns.
+  input <- res$models[res$models$id == "input", , drop = FALSE]
+  expect_equal(input$description, "IIV([CL]+[KA]+[V]);IOV([])")
+  expect_equal(input$structure, "IIV([ETA_CL]+[ETA_KA]+[ETA_V]);IOV([])")
+  expect_true(is.na(input$kappas))
+  expect_true(is.na(input$kappa_labels))
+
+  # And the invariant that holds for every row: the labelled structure is the
+  # engine's description with the parameters replaced by their random effects.
+  stripped <- gsub("KAPPA_", "", gsub("ETA_", "", res$models$structure,
+                                      fixed = TRUE), fixed = TRUE)
+  expect_equal(stripped, res$models$description)
+})
+
 test_that("the R model table equals the run's own models.csv", {
   skip_on_cran()
   res <- iovsearch_run()
