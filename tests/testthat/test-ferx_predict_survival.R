@@ -185,3 +185,65 @@ test_that("joint PK-TTE: bundled pktte_joint fits and predicts an ODE-accumulate
   s1  <- surv$survival[surv$ID == id1][order(surv$TIME[surv$ID == id1])]
   expect_true(all(diff(s1) <= 1e-9))
 })
+
+test_that("an ODE-accumulated hazard that reads TAD is finite and correct", {
+  # Regression for ferx-core #1261 / #1266, picked up by the Cargo.lock pin.
+  # The hazard readout re-evaluated the ODE right-hand side with the bare PK
+  # parameter array, which omits the trailing TAFD / TAD slots, so `TAD` read as
+  # NaN and the readout returned a non-finite hazard.
+  #
+  # Mirrors ferx-core's `tte_hazard_readout_uses_the_current_tad_anchor`: two
+  # doses (t = 0 and t = 12) so TAD and TAFD cannot alias, giving a closed form
+  # at t = 30 with CL/V = 0.1, H0 = 0.1, KT = 0.01:
+  #   H(30) = 0.1 * [int_0^12 (1 + 0.01 t) dt + int_12^30 (1 + 0.01 (t - 12)) dt]
+  #         = 0.1 * (12.72 + 19.62) = 3.234
+  #   h(30) = 0.1 * (1 + 0.01 * 18)                                    = 0.118
+  model <- tempfile(fileext = ".ferx")
+  data <- tempfile(fileext = ".csv")
+  writeLines(c(
+    "[parameters]",
+    "  theta TVCL(1.0, 0.01, 100.0)",
+    "  theta TVV(10.0, 0.1, 500.0)",
+    "  theta TVH0(0.1, 0.001, 10.0)",
+    "  theta TVKT(0.01, 0.0001, 1.0)",
+    "",
+    "  sigma PROP_ERR ~ 0.02 (sd)",
+    "",
+    "[individual_parameters]",
+    "  CL = TVCL",
+    "  V  = TVV",
+    "  H0 = TVH0",
+    "  KT = TVKT",
+    "",
+    "[structural_model]",
+    "  ode(obs_cmt=central, states=[central])",
+    "",
+    "[odes]",
+    "  d/dt(central) = -CL / V * central",
+    "",
+    "[event_model]",
+    "  cmt    = 3",
+    "  hazard = H0 * (1.0 + KT * TAD)",
+    "",
+    "[error_model]",
+    "  DV ~ proportional(PROP_ERR)"
+  ), model)
+  writeLines(c(
+    "ID,TIME,DV,EVID,AMT,CMT,MDV",
+    "1,0,.,1,100,1,1",
+    "1,12,.,1,100,1,1",
+    "1,24,3.9,0,.,1,0",
+    "1,30,1,0,.,3,0"
+  ), data)
+
+  preds <- ferx_predict_survival(model, data, times = 30)
+  row <- preds[preds$CMT == 3 & preds$TIME == 30, ]
+  expect_equal(nrow(row), 1L)
+
+  # The regression itself: both read NaN before the fix.
+  expect_true(is.finite(row$cum_hazard))
+  expect_true(is.finite(row$hazard))
+
+  expect_equal(row$cum_hazard, 3.234, tolerance = 1e-3)
+  expect_equal(row$hazard, 0.118, tolerance = 1e-3)
+})

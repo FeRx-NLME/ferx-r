@@ -836,14 +836,16 @@
   [#1266](https://github.com/FeRx-NLME/ferx-core/issues/1266)). The hazard
   readout re-evaluated the ODE right-hand side with the bare PK parameter array,
   which ends at the last PK parameter and omits the two trailing slots the RHS
-  reserves for the dose-time anchors `TAFD` and `TAD`. A model whose ODE system
-  reads either one therefore saw a non-finite hazard, which surfaced much later
-  as a misleading finite objective and could reject valid multi-dose subjects.
-  The readout now passes the same extended parameters the integrator itself
-  uses, and a `debug_assert!` fails a missing injection at the call site in debug
-  and test builds. This reaches `ferx_predict_survival()` and joint PK-TTE fits
-  whose `[event_model]` hazard accumulates on an ODE state. **No bundled example
-  is affected**: no TTE model in `inst/examples/models/` reads `TAD` or `TAFD`.
+  reserves for the dose-time anchors `TAFD` and `TAD`. A `hazard =` expression
+  that reads either one - or that depends on a statement which does - therefore
+  saw a non-finite hazard, which surfaced much later as a misleading finite
+  objective and could reject valid multi-dose subjects. Only the hazard is
+  affected: the readout keeps the cumulative-hazard slot alone, so an `[odes]`
+  block reading `TAD` beside a `TAD`-free hazard always evaluated correctly. The
+  readout now passes the same extended parameters the integrator itself uses.
+  This reaches `ferx_predict_survival()` and joint PK-TTE fits whose
+  `[event_model]` hazard accumulates on an ODE state. **No bundled example is
+  affected**: no TTE model in `inst/examples/models/` reads `TAD` or `TAFD`.
 
 - **A `.tmp` checkpoint from a deterministic stage now holds the best point, not
   a throwaway probe** ([ferx-core #1317](https://github.com/FeRx-NLME/ferx-core/issues/1317)).
@@ -1086,10 +1088,10 @@
   Hessian standard errors). In that mode, the engine warns that each key
   configures a step that does not run and ignores it.
 
-  This documentation update is written against the `7f15dba` behavior and the current
-  ferx-r pin does not yet include it. `src/rust/Cargo.lock` remains at
-  `909ad38` in this branch, so a build against this repository still emits the
-  current pinned warning pattern and allows non-positive `cov_inner_tol` values.
+  This documentation update is written against the `7f15dba` behavior, which the
+  pinned engine now includes: `7f15dba` is an ancestor of the pinned revision, so
+  a build against this repository rejects a non-positive or non-finite
+  `cov_inner_tol` outright rather than warning about it.
 
 - **Two smaller corrections in the same area.** `covariance_fallback` and
   `ferx_covariance()` both described the matrix they rectify as the "FD
@@ -1100,8 +1102,8 @@
   budget, when it in fact selects an automatic one of `30 * (n_params + 1)`.
 
   This `7f15dba` change is independent of the existing `0.3.1` -> `0.4.0`
-  release-line work already in this repository, which is why it will need its own
-  lockfile bump when merged.
+  release-line work already in this repository. It needed no lockfile bump of its
+  own: it arrived with the pin move to `944cbf1e`, which already contained it.
 
 ## Internal
 
@@ -1109,14 +1111,9 @@
   and `ferx-tools` both staying at `0.4.0` (one repository, one revision, two
   lock entries). The range is three commits, all of the ODE-accumulated-hazard
   fix above ([ferx-core #1323](https://github.com/FeRx-NLME/ferx-core/pull/1323)).
-  No public Rust API changed in it, so this package's glue is untouched:
-  `ferx-core` and `ferx-tools` build at the new revision under the feature set
-  `src/Makevars` uses (`--no-default-features --features ci,nn,survival`), and
-  the one exhaustive `match` in the glue - on `ferx_tools::gam::CovariateForm`,
-  the GAM-screening enum that the `0.4.0` break did not touch - still
-  type-checks against it. The bare `cargo update` that
-  `tools/update-ferx-core-lock.sh` runs also carries a transitive `toml`
-  `1.1.5` -> `1.1.6` into the lock.
+  No public Rust API changed in the range, so this package's glue is untouched.
+  The bare `cargo update` that `tools/update-ferx-core-lock.sh` runs also carries
+  a transitive `toml` `1.1.5` -> `1.1.6` into the lock.
 
 - **The pinned engine crosses a semver-breaking boundary: `ferx-core` /
   `ferx-tools` `0.3.1` -> `0.4.0`** (revision `909ad382` -> `944cbf1e`).
