@@ -115,14 +115,19 @@ ifneq ($(LOCAL_FERX_CORE),)
 	@# Override the git dep with the local sibling checkout via [patch].
 	@# Cargo's `paths = [...]` override is silently ignored for git deps in
 	@# recent cargo versions, so [patch."<git URL>"] is the reliable
-	@# mechanism. The path is resolved relative to cargo's working directory
-	@# (rust/), so ../../../ferx-core reaches the sibling of the R package
+	@# mechanism. Relative paths in a cargo config file resolve against the
+	@# directory holding its .cargo/ (rust/ here), not cargo's working
+	@# directory, so ../../../ferx-core reaches the sibling of the R package
 	@# root.
 	@echo '[patch."https://github.com/FeRx-NLME/ferx-core"]' >> rust/.cargo/config.toml
 	@echo 'ferx-core = { path = "../../../ferx-core" }' >> rust/.cargo/config.toml
 ifneq ($(LOCAL_FERX_TOOLS),)
 	@echo 'ferx-tools = { path = "../../../ferx-core/crates/ferx-tools" }' >> rust/.cargo/config.toml
-	@echo "ferx: using local ../ferx-core checkout ([patch] override: ferx-core + ferx-tools)"
+	@# Writing the [patch] does not make cargo use it: cargo applies a [patch]
+	@# only when the sibling's crate versions equal the ones Cargo.lock pins, and
+	@# otherwise builds the pinned revision with no more than a "was not used in
+	@# the crate graph" warning. So do not claim here that the sibling is used.
+	@echo "ferx: [patch]ing ferx-core + ferx-tools to the sibling ../ferx-core checkout (cargo uses it only if the sibling's versions equal the ones Cargo.lock pins)"
 else
 	@echo "ferx: ERROR the sibling ferx-core checkout has no crates/ferx-tools:" >&2
 	@echo "ferx:     $(abspath $(dir $(LOCAL_FERX_CORE)))" >&2
@@ -133,6 +138,12 @@ else
 	@echo "ferx:   wholly from GitHub." >&2
 	@exit 1
 endif
+else
+	@# No sibling, so no [patch]: cargo builds the revision Cargo.lock pins and
+	@# prints nothing to say so. Say it inside a git worktree (where .git is a
+	@# file), because there ../../ferx-core is looked for next to the worktree,
+	@# not next to the main checkout - under .claude/worktrees/ it never exists.
+	@if [ -f ../.git ]; then echo "ferx: no sibling checkout at $(abspath ../../ferx-core) (this is a git worktree) - building ferx-core + ferx-tools from the revision pinned in Cargo.lock"; fi
 endif
 	@echo '[build]' >> rust/.cargo/config.toml
 	@echo '[toolchain]' > rust/rust-toolchain.toml
