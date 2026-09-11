@@ -101,3 +101,19 @@ test_that("fit = TRUE fits the base and the scaled model side by side", {
   expect_s3_class(res$base_fit, "ferx_fit")
   expect_equal(unname(res$fit$ofv), res$comparison$ofv[2], tolerance = 1e-8)
 })
+
+test_that("the base arm is the base model fitted, not a second answer", {
+  skip_on_cran()
+  # The degenerate oracle (#332): allometry has no space to collapse, so what
+  # stands in for it is the arm the comparison rests on. If `base` were fitted
+  # any differently from `ferx_fit()` on the same model, every dOFV the tool
+  # reports would be measured against the wrong baseline.
+  ex <- ferx_example("two_cpt_oral_base")
+  res <- ferx_allometry(ex$model, ex$data, retries = 0,
+                        directory = file.path(tempdir(), "allometry-oracle"))
+
+  skip_if(is.null(res$base_fit), "the run recovered no base fit")
+  direct <- ferx_fit(ex$model, ex$data)
+  expect_equal(unname(res$base_fit$ofv), unname(direct$ofv), tolerance = 1e-6)
+  expect_equal(res$comparison$ofv[1], unname(direct$ofv), tolerance = 1e-6)
+})

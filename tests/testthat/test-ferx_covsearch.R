@@ -201,6 +201,72 @@ test_that("both entry forms run the same search", {
   expect_equal(from_file$included, inline$included)
 })
 
+test_that("a space no candidate can clear returns the base model, fitted", {
+  skip_on_cran()
+  # The degenerate oracle (#332). covsearch has no single-point space of its
+  # own - a structural feature is refused outright - so the degenerate case is
+  # a space whose one candidate cannot be selected: at this alpha no dOFV
+  # clears the test, the forward step includes nothing, and the search must
+  # hand back the base model rather than the best loser. Its fit has to agree
+  # with fitting the base model directly.
+  ex <- ferx_example("two_cpt_oral_base")
+  res <- ferx_covsearch(
+    model        = ex$model,
+    data         = ex$data,
+    search_space = "COVARIATE?(CL, WT, pow)",
+    p_forward    = 1e-12,
+    max_steps    = 1,
+    retries      = 0,
+    directory    = file.path(tempdir(), "covsearch-degenerate"),
+    progress     = FALSE
+  )
+
+  # The candidate is a row with its verdict, not a silent drop.
+  expect_gt(nrow(res$steps), 0L)
+  expect_false(any(res$steps$selected))
+  expect_length(res$included$parameter, 0L)
+  expect_equal(res$final_ofv, res$base_ofv, tolerance = 1e-8)
+
+  skip_if(is.null(res$fit), "the run recovered no final fit")
+  direct <- ferx_fit(ex$model, ex$data)
+  expect_equal(unname(res$fit$ofv), unname(direct$ofv), tolerance = 1e-6)
+})
+
+test_that("a config section no R tool runs warns in the tool's own name", {
+  # #347. The warning belongs where it takes effect, not only at
+  # `ferx_search_config()`: a file with `[globalsearch]` handed to a stepwise
+  # tool runs stepwise, and the name in the message is the one the user typed.
+  ex <- ferx_example("two_cpt_oral_base")
+  cfg <- write_cfg(
+    sprintf('base = "%s"', ex$model),
+    sprintf('data = "%s"', ex$data),
+    "[space]",
+    # A structural statement, so covsearch refuses the file straight after the
+    # entry form - the warning is what is under test, not a search run.
+    'mfl = "PERIPHERALS(0..1)"',
+    "[globalsearch]",
+    'algorithm = "exhaustive"'
+  )
+
+  seen <- NULL
+  tryCatch(
+    withCallingHandlers(
+      ferx_covsearch(config = cfg,
+                     directory = file.path(tempdir(), "covsearch-globalsearch"),
+                     progress = FALSE),
+      ferx_search_unconsumed_section = function(cond) {
+        seen <<- cond
+        invokeRestart("muffleWarning")
+      }
+    ),
+    error = function(e) NULL
+  )
+
+  expect_s3_class(seen, "ferx_search_unconsumed_section")
+  expect_match(conditionMessage(seen), "ferx_covsearch")
+  expect_match(conditionMessage(seen), "globalsearch")
+})
+
 test_that("print() shows the step table and the final relations", {
   skip_on_cran()
   res <- covsearch_run()
