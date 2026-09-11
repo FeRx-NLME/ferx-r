@@ -941,6 +941,14 @@
 
 ## Bug fixes
 
+- **`print()` of a fit no longer lists uncorrelated random-effect pairs under
+  "Correlations"** ([ferx-core #1018](https://github.com/FeRx-NLME/ferx-core/issues/1018)).
+  The section opens when any covariance is non-zero, and it then printed every
+  pair, so a `block_omega (ETA_CL, ETA_V)` declared beside a diagonal
+  `omega ETA_KA` also showed `ETA_KA ~ ETA_CL : cov = 0.000000 ... SE = 0.000000`.
+  Pairs with a zero covariance are now skipped, for OMEGA and for OMEGA_IOV,
+  with the same threshold the engine's own summary and YAML output use.
+
 - **`ferx_get_warnings()` no longer recommends solver settings for ODE problems
   they cannot fix** ([ferx-core #1234](https://github.com/FeRx-NLME/ferx-core/issues/1234),
   [ferx-core #1204](https://github.com/FeRx-NLME/ferx-core/issues/1204)). The

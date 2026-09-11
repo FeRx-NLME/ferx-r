@@ -2770,6 +2770,59 @@ test_that("print.ferx_fit shows off-diagonal SE with named etas (block omega)", 
   expect_true(grepl("SE = 0\\.022000", cov_line))
 })
 
+# A `block_omega (ETA_CL, ETA_V)` beside a diagonal `omega ETA_KA` has structural
+# zeros at (KA, CL) and (KA, V) (ferx-core #1018). The in-block covariance opens
+# the correlations section, which used to print every pair in it, so the two
+# structural zeros showed up as "ETA_KA ~ ETA_CL : cov = 0.000000 ... SE =
+# 0.000000". Only the declared pair may print.
+partial_block_omega <- function() {
+  om <- matrix(0, 3, 3)
+  diag(om) <- c(0.07, 0.02, 0.40)
+  om[1, 2] <- om[2, 1] <- 0.02
+  om
+}
+test_that("print.ferx_fit skips structural-zero omega pairs (named etas)", {
+  fit <- make_fake_fit(
+    omega     = partial_block_omega(),
+    # Full column-major lower triangle: (1,1) (2,1) (3,1) (2,2) (3,2) (3,3).
+    se_omega  = c(0.011, 0.004, 0, 0.003, 0, 0.16),
+    eta_names = c("ETA_CL", "ETA_V", "ETA_KA"),
+    eta_param_types = rep("log_normal", 3)
+  )
+  out <- capture.output(print(fit))
+  cov_lines <- out[grepl(" : cov = ", out, fixed = TRUE)]
+  expect_length(cov_lines, 1L)
+  expect_match(cov_lines, "ETA_V ~ ETA_CL : cov = 0.020000", fixed = TRUE)
+  expect_false(any(grepl("ETA_KA ~", out, fixed = TRUE)))
+  # The declared pair still opens the section - the skip is per pair.
+  expect_true(any(grepl("--- Correlations ---", out, fixed = TRUE)))
+})
+test_that("print.ferx_fit skips structural-zero omega pairs (unnamed etas)", {
+  fit <- make_fake_fit(
+    omega           = partial_block_omega(),
+    eta_param_types = rep("log_normal", 3)
+  )
+  out <- capture.output(print(fit))
+  cov_lines <- out[grepl(" : cov = ", out, fixed = TRUE)]
+  expect_length(cov_lines, 1L)
+  expect_match(cov_lines, "OMEGA(2,1) : cov = 0.020000", fixed = TRUE)
+})
+test_that("print.ferx_fit skips structural-zero kappa pairs", {
+  iov <- matrix(0, 3, 3)
+  diag(iov) <- c(0.05, 0.04, 0.03)
+  iov[1, 2] <- iov[2, 1] <- 0.01
+  fit <- make_fake_fit(
+    omega       = matrix(0.10, 1, 1),
+    omega_iov   = iov,
+    kappa_names = c("KAPPA_CL", "KAPPA_V", "KAPPA_KA"),
+    eta_param_types = "log_normal"
+  )
+  out <- capture.output(print(fit))
+  cov_lines <- out[grepl(" : cov = ", out, fixed = TRUE)]
+  expect_length(cov_lines, 1L)
+  expect_match(cov_lines, "KAPPA_V ~ KAPPA_CL : cov = 0.010000", fixed = TRUE)
+})
+
 # ---- header from test-sir.R ----
 # Tests for ferx_sir() and the path/hash provenance plumbing that backs it.
 #

@@ -2482,6 +2482,13 @@ print.ferx_fit <- function(x, ...) {
     for (i in seq_len(n_eta)) {
       for (j in seq_len(i - 1L)) {
         cov_ij <- om[i, j]
+        # A zero covariance is a pair the model does not correlate: a structural
+        # zero of a `block_omega` declared beside a diagonal `omega` (ferx-core
+        # #1018). `has_offdiag` opens this section when *any* pair is non-zero,
+        # so without this skip every other pair printed as well, as
+        # "cov = 0.000000 ... SE = 0.000000". Same 1e-15 threshold as that gate
+        # and as ferx-core's own summary and YAML writers.
+        if (abs(cov_ij) <= 1e-15) next
         param_corr <- if (!is.null(x$omega_param_corr)) {
           x$omega_param_corr[i, j]
         } else {
@@ -2557,6 +2564,8 @@ print.ferx_fit <- function(x, ...) {
       for (i in seq_len(n_kap)) {
         for (j in seq_len(i - 1L)) {
           cov_ij <- m_iov[i, j]
+          # Uncorrelated kappa pair (structural zero): skip, as for OMEGA above.
+          if (abs(cov_ij) <= 1e-15) next
           param_corr <- if (!is.null(x$omega_iov_param_corr)) {
             x$omega_iov_param_corr[i, j]
           } else {
