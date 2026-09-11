@@ -290,6 +290,60 @@
   ran as though the argument had never been given. Both now stop with a message
   naming the argument.
 
+- **Variability-structure search: `ferx_iivsearch()` and `ferx_iovsearch()`**
+  (#337, part of the #334 search epic; ferx-core #1183). Pharmpy's `iivsearch`
+  and `iovsearch` from R. `ferx_iivsearch()` decides which parameters carry an
+  eta and which of those etas are correlated; `ferx_iovsearch()` decides which
+  parameters earn a kappa and whether the etas beside them are still worth
+  keeping. Both take a `.ferxsearch` file or the inline arguments, rendered
+  into the same configuration by the same loader.
+
+  **The two stages stay two stages.** An iivsearch is two searches in sequence
+  - the number of etas (`step_kind = "no_of_etas"`), then the block structure
+  over the winner of that (`"block_structure"`), then a comparison with the
+  input (`"compare_to_input"`) - and an iovsearch is a kappa-removal step
+  followed by an eta-removal step. Every row of `$models` carries the stage it
+  was fitted in, and `$steps` is the engine's own per-stage ranking: the parent
+  each candidate was compared with, its improvement over that parent, and where
+  it placed. Collapsing them into one table would report a search that was
+  never run. `starts` is on every row too, because a candidate whose largest
+  block has more than two etas is fitted from more starting points than a
+  diagonal one (`block_retries` per eta beyond two).
+
+  **Every structure row is labelled with the model's own declared names.** The
+  engine's `description` column is Pharmpy's spelling, in parameter names
+  (`[CL,V]+[KA]`), and is what `models.csv` carries; beside it `structure`,
+  `eta_labels`, `block_labels` (and `kappa_labels` / `kappa_block_labels` for
+  iovsearch) say the same thing in the model's declared random-effect names
+  (`[ETA_CL,ETA_V]+[ETA_KA]`), per the output label convention. The mapping is
+  read off each candidate's *own* text with the engine's `VariabilityText`, so
+  a model that calls its eta something other than `ETA_<P>` is labelled as it
+  is written rather than as R would have guessed; a random effect the model
+  does not name falls back to `OMEGA(i,i)` / `KAPPA<i>`. `print()` names the
+  correlated pairs with the convention's tilde (`ETA_V ~ ETA_CL`), which is the
+  whole point of this search's output.
+
+  `ferx_iovsearch()` reads its occasions from the base model's
+  `[fit_options] iov_column`; a base without one, or a `column` argument that
+  disagrees with it, is refused by name before anything is fitted, as is a
+  `distribution = "explicit"` without `groups`. `ferx_iivsearch()` refuses a
+  structural or covariate space, `algorithm = "skip"` with the block stage also
+  skipped, and `correlation_algorithm` beside `simultaneous_stepwise` (which
+  decides the blocks as it adds each eta and so has no second stage).
+
+  `ferx_search_results(type = "models")` now tells the three tools that write a
+  `models.csv` apart - modelsearch's 21 columns, iivsearch's 18, iovsearch's 19
+  - off the file's own header, and reports which in the `tool` attribute, the
+  way `type = "steps"` already did for the two stepwise tools. A run produced
+  by `ferx iivsearch` or `ferx iovsearch` on the command line is readable from
+  R either way.
+
+  `inst/examples/ex_iivsearch.R` and `ex_iovsearch.R` run them end to end.
+  `warfarin_block_omega` now ships a variability `.ferxsearch` as `$search`
+  (its base already blocks ETA_CL with ETA_V and keeps ETA_KA diagonal, so the
+  search tests those decisions rather than confirming them), and `warfarin_iov`
+  an inter-occasion one.
+
 - **Residual-error model search: `ferx_ruvsearch()`** (#336, part of the #334
   search epic; ferx-core #1182). Pharmpy's `ruvsearch` from R: each iteration
   adds one residual-error feature to the model the last one kept, fits every

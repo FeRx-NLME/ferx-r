@@ -23,13 +23,15 @@ file named is an error rather than an ignored argument.}
 
 \item{type}{Which table to read: \code{"candidates"} (the default) for the
 runner's own candidate table, written by every tool, \code{"models"} for
-the model table \code{\link{ferx_modelsearch}} writes, or \code{"steps"}
-for the step table \code{\link{ferx_covsearch}} and
+the model table \code{\link{ferx_modelsearch}},
+\code{\link{ferx_iivsearch}} and \code{\link{ferx_iovsearch}} write, or
+\code{"steps"} for the step table \code{\link{ferx_covsearch}} and
 \code{\link{ferx_ruvsearch}} write. A run has more than one: the candidate
 table is one row per fit the runner was asked for, the model or step table
-one row per model the search itself decided on. Both stepwise tools write
-a file called \code{steps.csv}; which of the two schemas a file carries is
-read off its own header, and reported as the \code{tool} attribute.}
+one row per model the search itself decided on. Several tools write a file
+called \code{models.csv}, and both stepwise tools one called
+\code{steps.csv}; which schema a file carries is read off its own header,
+and reported as the \code{tool} attribute.}
 }
 \value{
 For \code{type = "steps"}, a data frame with the engine's 17 step
@@ -38,10 +40,14 @@ columns for whichever stepwise tool wrote the file - covsearch's
 \code{covariate}, \code{form}, ...) or ruvsearch's (\code{iteration},
 \code{candidate}, \code{feature}, \code{screened}, ...) - typed the same
 way, and carrying a \code{tool} attribute naming the one it matched.
-For \code{type = "models"}, a data frame with the engine's 21
-model-table columns (\code{id}, \code{parent}, \code{layer},
-\code{path}, the four structural columns, \code{criterion},
-\code{rank}, ...) typed the same way. Otherwise a data frame with the
+For \code{type = "models"}, a data frame with the engine's model-table
+columns for whichever tool wrote the file - modelsearch's 21 (\code{id},
+\code{parent}, \code{layer}, \code{path}, the four structural columns,
+\code{criterion}, \code{rank}, ...), iivsearch's 18 (\code{id},
+\code{parent}, \code{step}, \code{description}, \code{etas},
+\code{blocks}, ...) or iovsearch's 19 (..., \code{kappas},
+\code{kappa_blocks}, ...) - typed the same way and carrying the same
+\code{tool} attribute. Otherwise a data frame with the
 engine's 15 candidate columns: \code{id},
 \code{parent}, \code{hash}, \code{features}, \code{criterion} (numeric),
 \code{ofv} (numeric), \code{converged} (logical), \code{passed}
@@ -91,6 +97,8 @@ res[!res$passed, c("id", "failures")]
 Other search:
 \code{\link[=ferx_allometry]{ferx_allometry()}},
 \code{\link[=ferx_covsearch]{ferx_covsearch()}},
+\code{\link[=ferx_iivsearch]{ferx_iivsearch()}},
+\code{\link[=ferx_iovsearch]{ferx_iovsearch()}},
 \code{\link[=ferx_modelsearch]{ferx_modelsearch()}},
 \code{\link[=ferx_ruvsearch]{ferx_ruvsearch()}},
 \code{\link[=ferx_search_config]{ferx_search_config()}},

@@ -1,0 +1,55 @@
+# Variability-structure search over the correlated-random-effects warfarin
+# model.
+#
+# Run it from R with:
+#   res <- ferx_iivsearch(config = ferx_example("warfarin_block_omega")$search,
+#                         directory = "iivsearch-run")
+#
+# The base model already carries a block over ETA_CL and ETA_V and a diagonal
+# ETA_KA, so every statement below names a decision the model has already made
+# one way - which is what makes the search a test of it rather than a
+# confirmation.
+#
+# `base` and `data` are relative to this file's own directory, so the
+# configuration travels with the model it searches.
+
+base = "../models/warfarin_block_omega.ferx"
+data = "../data/warfarin_block_omega.csv"
+
+[space]
+# `IIV?` makes each PK parameter's eta exploratory: the first stage decides how
+# many of CL, V and KA keep one. `COVARIANCE?(IIV, *)` offers a block over the
+# eta-bearing parameters, and the second stage decides which of them end up
+# correlated. Write `IIV(CL, exp)` instead to keep CL's eta whatever the search
+# finds, or `COVARIANCE(IIV, CL, V)` to force that pair blocked.
+mfl = "IIV?(@PK, exp); COVARIANCE?(IIV, *)"
+
+[rank]
+# Candidates differ in how many random effects they carry, so they are ranked
+# on a criterion that charges for them. `bic` is the BIC(iiv) for this tool -
+# Pharmpy's own choice, which counts the random effects against the number of
+# subjects rather than the number of observations.
+type = "bic"
+
+[strictness]
+# A candidate that did not converge, or that stalled at its initial estimates,
+# is not a result worth ranking - under automation it would be a selection
+# error, not just a bad fit.
+require_converged = true
+reject_init_stall = true
+
+[run]
+# Perturbed restarts per candidate on top of the fit from the exact initials.
+retries = 2
+resume = false
+
+[iivsearch]
+# Pharmpy's default: start from every eta the space allows and remove them one
+# subset at a time. `bottom_up_stepwise` starts from none and adds;
+# `simultaneous_stepwise` decides the block structure as it adds, and so has no
+# second stage.
+algorithm = "top_down_exhaustive"
+# Extra starting points per eta beyond two in a candidate's largest block. A
+# block covariance is the part of an omega most likely to land in a local
+# optimum, so a 3-block is fitted from more starts than a diagonal candidate.
+block_retries = 2

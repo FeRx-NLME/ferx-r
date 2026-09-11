@@ -16,8 +16,16 @@
 #'     \code{\link{ferx_modelsearch}} decides them rather than confirming
 #'     them}
 #'   \item{warfarin_bloq}{One-compartment oral with BLOQ observations (M3 method)}
-#'   \item{warfarin_iov}{One-compartment oral with inter-occasion variability (kappa)}
-#'   \item{warfarin_block_omega}{One-compartment oral with correlated random effects}
+#'   \item{warfarin_iov}{One-compartment oral with inter-occasion variability
+#'     (kappa). Ships a \code{.ferxsearch} \emph{inter-occasion} search space
+#'     as \code{$search}: the model reads its occasions from \code{OCC} and
+#'     carries one kappa, so \code{\link{ferx_iovsearch}} decides which of the
+#'     others earn one}
+#'   \item{warfarin_block_omega}{One-compartment oral with correlated random
+#'     effects. Ships a \code{.ferxsearch} \emph{variability} search space as
+#'     \code{$search}: the model already blocks ETA_CL with ETA_V and keeps
+#'     ETA_KA diagonal, so \code{\link{ferx_iivsearch}} tests those decisions
+#'     rather than confirming them}
 #'   \item{warfarin_saem}{One-compartment oral estimated with SAEM}
 #'   \item{warfarin_additive_eta}{One-compartment oral with additive ETA on lag time}
 #'   \item{warfarin_logit_f}{One-compartment oral with logit-normal bioavailability}

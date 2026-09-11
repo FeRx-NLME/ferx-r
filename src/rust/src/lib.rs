@@ -6634,6 +6634,934 @@ fn ferx_rust_ruvsearch(
     .into()
 }
 
+// ---------------------------------------------------------------------------
+//  Model-space search: the variability-structure tools (ferx-r #337)
+// ---------------------------------------------------------------------------
+//
+// iivsearch and iovsearch, over `ferx_tools::iivsearch` / `ferx_tools::
+// iovsearch` (ferx-core #1183). Both follow the two rules the tools above
+// hold to - one grammar, and the engine's own table - and add a third that is
+// particular to a variability search:
+//
+//  3. **The rows are labelled with the model's own random-effect names.** The
+//     engine's structure is written in *parameter* names (`[CL,V]+[KA]`),
+//     which is Pharmpy's spelling and what `models.csv` carries. ferx's output
+//     convention (CLAUDE.md) is the declared eta / kappa name - `ETA_CL`,
+//     `KAPPA_CL` - so every row carries the labels beside the parameter names,
+//     read off the *candidate's own text*: a model that calls its eta
+//     something other than `ETA_<P>` is labelled as it is written, never as R
+//     would have guessed.
+
+/// The declared eta and kappa of a model, by the parameter carrying them.
+///
+/// Read with the engine's own `VariabilityText`, which is what the search
+/// itself uses to decide where a model stands, so the labels and the edits
+/// cannot disagree about which eta belongs to which parameter. A parameter the
+/// reader cannot resolve is simply absent from the map; the R side renders
+/// those as `OMEGA(i,i)` / `KAPPA<i>`, the fallback the label convention
+/// names.
+fn variability_labels(
+    text: &ferx_core::edit::ModelText,
+) -> (
+    std::collections::BTreeMap<String, String>,
+    std::collections::BTreeMap<String, String>,
+) {
+    let mut etas = std::collections::BTreeMap::new();
+    let mut kappas = std::collections::BTreeMap::new();
+    if let Ok(v) = ferx_core::edit::VariabilityText::read(text) {
+        for p in &v.parameters {
+            if let Some(eta) = &p.eta {
+                etas.insert(p.name.clone(), eta.clone());
+            }
+            if let Some(kappa) = &p.kappa {
+                kappas.insert(p.name.clone(), kappa.clone());
+            }
+        }
+    }
+    (etas, kappas)
+}
+
+/// The `OMEGA(i,i)` fallback of the label convention: what an eta is called
+/// when the model does not name it. `i` is the eta's place in the structure it
+/// belongs to, which is the only ordering an unnamed eta has.
+fn omega_fallback(i: usize) -> String {
+    format!("OMEGA({i},{i})")
+}
+
+/// The `KAPPA<i>` fallback, the kappa half of the same convention.
+fn kappa_fallback(i: usize) -> String {
+    format!("KAPPA{i}")
+}
+
+/// One label per member, in the member list's own order: the model's declared
+/// random-effect name, and the positional fallback only where the model does
+/// not name one.
+fn resolved_labels(
+    members: &[String],
+    labels: &std::collections::BTreeMap<String, String>,
+    fallback: fn(usize) -> String,
+) -> Vec<String> {
+    members
+        .iter()
+        .enumerate()
+        .map(|(i, p)| match labels.get(p) {
+            Some(name) if !name.is_empty() => name.clone(),
+            _ => fallback(i + 1),
+        })
+        .collect()
+}
+
+/// `[ETA_CL,ETA_V]+[ETA_KA]`: the shape the engine's `description()` writes,
+/// with each parameter replaced by the random effect the model declares for it.
+fn labelled_family(members: &[String], blocks: &[Vec<String>], labels: &[String]) -> String {
+    let label = |p: &String| match members.iter().position(|m| m == p) {
+        Some(i) => labels[i].clone(),
+        None => p.clone(),
+    };
+    let mut parts: Vec<String> = blocks
+        .iter()
+        .map(|b| format!("[{}]", b.iter().map(label).collect::<Vec<_>>().join(",")))
+        .collect();
+    for p in members {
+        if !blocks.iter().any(|b| b.contains(p)) {
+            parts.push(format!("[{}]", label(p)));
+        }
+    }
+    parts.join("+")
+}
+
+/// The labels of a block list: `,` within a block, `;` between them - parallel
+/// to the engine's `blocks` / `kappa_blocks` column.
+fn block_labels_of(members: &[String], blocks: &[Vec<String>], labels: &[String]) -> String {
+    blocks
+        .iter()
+        .map(|b| {
+            b.iter()
+                .map(|p| match members.iter().position(|m| m == p) {
+                    Some(i) => labels[i].clone(),
+                    None => p.clone(),
+                })
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .collect::<Vec<_>>()
+        .join(";")
+}
+
+/// The columns of a variability run's `models.csv`, in order, from the engine.
+///
+/// @return Character vector of column names
+/// @keywords internal
+#[extendr]
+fn ferx_rust_iivsearch_columns() -> Vec<String> {
+    ferx_tools::iivsearch::MODEL_COLUMNS
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+}
+
+/// The columns of an inter-occasion run's `models.csv`, in order, from the
+/// engine.
+///
+/// Three tools write a file called `models.csv`; the column lists are what
+/// tells them apart when a directory is read back.
+///
+/// @return Character vector of column names
+/// @keywords internal
+#[extendr]
+fn ferx_rust_iovsearch_columns() -> Vec<String> {
+    ferx_tools::iovsearch::MODEL_COLUMNS
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+}
+
+/// Variability-structure search - Pharmpy's `iivsearch`.
+///
+/// Takes either a `.ferxsearch` file (`config_path`) or the inline arguments,
+/// which are rendered into one. Returns the model table in the engine's own
+/// `MODEL_COLUMNS` order with the declared eta labels beside it, the per-step
+/// rankings (the two stages stay two stages), every candidate's model text,
+/// the winning model and its fit.
+///
+/// @param config_path Path to a `.ferxsearch` file, or `""` for the inline form
+/// @param model_path Base model (inline form only)
+/// @param data_path Dataset, or `""` to use the model's `[data]` block
+/// @param mfl MFL search space (`IIV` / `COVARIANCE` statements), quoted
+///   verbatim (inline form only)
+/// @param algorithm `"top_down_exhaustive"`, `"bottom_up_stepwise"`,
+///   `"simultaneous_stepwise"` or `"skip"`; `""` keeps the engine default
+/// @param correlation_algorithm `"top_down_exhaustive"` or `"skip"`; `""`
+///   keeps the engine's derivation
+/// @param as_fullblock A bottom-up candidate blocks every eta it carries:
+///   `1` on, `0` off, `-1` unset
+/// @param block_retries Extra starts per eta beyond two in the largest block;
+///   `< 0` keeps the engine default
+/// @param rank `[rank] type`; `""` keeps the tool default (the BIC(iiv))
+/// @param rank_cutoff `[rank] cutoff`; `NaN` keeps the default
+/// @param threads Worker threads; `<= 0` lets the runner choose
+/// @param retries Perturbed restarts per candidate; `< 0` keeps the default
+/// @param resume Reuse the fits already journalled in `directory`
+/// @param directory Where journals, `models.csv`, `models/<id>.ferx` and
+///   `final.ferx` go; `""` keeps the run in memory
+/// @param progress Print the engine's step progress to stderr
+/// @return Named list: the model-table columns, the label columns, the
+///   per-step ranking columns, the candidate model texts, `final_model`,
+///   `final_fit`, the options as the engine read them, `notes` and `cancelled`
+/// @keywords internal
+#[extendr]
+#[allow(clippy::too_many_arguments)]
+fn ferx_rust_iivsearch(
+    config_path: &str,
+    model_path: &str,
+    data_path: &str,
+    mfl: &str,
+    algorithm: &str,
+    correlation_algorithm: &str,
+    as_fullblock: i32,
+    block_retries: i32,
+    rank: &str,
+    rank_cutoff: f64,
+    threads: i32,
+    retries: i32,
+    resume: bool,
+    directory: &str,
+    progress: bool,
+) -> Robj {
+    let mut section = String::from("\n[iivsearch]\n");
+    if !algorithm.is_empty() {
+        section.push_str(&format!("algorithm = {}\n", toml_basic(algorithm)));
+    }
+    if !correlation_algorithm.is_empty() {
+        section.push_str(&format!(
+            "correlation_algorithm = {}\n",
+            toml_basic(correlation_algorithm)
+        ));
+    }
+    if as_fullblock >= 0 {
+        section.push_str(&format!("as_fullblock = {}\n", as_fullblock == 1));
+    }
+    if block_retries >= 0 {
+        section.push_str(&format!("block_retries = {block_retries}\n"));
+    }
+    let text = search_config_text(
+        model_path,
+        data_path,
+        mfl,
+        rank,
+        rank_cutoff,
+        threads,
+        retries,
+        resume,
+        &section,
+    );
+    let inline_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let config =
+        match search_config_for_tool(config_path, &text, &inline_dir, threads, retries, resume) {
+            Ok(c) => c,
+            Err(e) => throw_r_error(format!("ferx_iivsearch: {e}")),
+        };
+    // Before the dataset is read: a file whose `[iivsearch]` keys contradict
+    // one another, or that names no variability space at all, is refused by
+    // name rather than searching nothing and reporting the input as the winner.
+    let options = match ferx_tools::iivsearch::IivsearchOptions::from_config(&config) {
+        Ok(o) => o,
+        Err(e) => throw_r_error(format!("ferx_iivsearch: {e}")),
+    };
+    let mut base = match config.load_base() {
+        Ok(b) => b,
+        Err(e) => throw_r_error(format!("ferx_iivsearch: {e}")),
+    };
+
+    // One flag, two paths into the engine: `IivsearchRun::cancel` stops the
+    // step loop, and the copy on `fit_options` unwinds the fits already in
+    // flight (the same wiring `ferx_covsearch()` uses).
+    let cancel = CancelFlag::new();
+    base.prepared.parsed.fit_options.cancel = Some(cancel.clone());
+
+    let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
+    let report = |event: ferx_tools::iivsearch::IivsearchEvent| {
+        use ferx_tools::iivsearch::IivsearchEvent as E;
+        if !progress {
+            return;
+        }
+        match event {
+            E::InputStarted => eprintln!("Fitting the input model..."),
+            E::InputFinished { ofv, criterion } => {
+                eprintln!("Input model: OFV {ofv:.3}, criterion {criterion:.3}")
+            }
+            E::BaseStarted => eprintln!("Fitting the base model..."),
+            E::BaseFinished { ofv, criterion } => {
+                eprintln!("Base model: OFV {ofv:.3}, criterion {criterion:.3}")
+            }
+            E::StepStarted {
+                step,
+                kind,
+                candidates,
+            } => eprintln!(
+                "Step {step} ({}): fitting {candidates} candidate{}...",
+                kind.label(),
+                if candidates == 1 { "" } else { "s" }
+            ),
+            E::StepFinished {
+                step,
+                best,
+                improved,
+            } => eprintln!(
+                "Step {step}: {} {} (criterion {:.3})",
+                if improved { "best" } else { "kept" },
+                best.0,
+                best.1
+            ),
+            E::Reverted { criterion } => {
+                eprintln!("Final comparison returned the input model (criterion {criterion:.3})")
+            }
+        }
+    };
+
+    let result = match run_search_cancellable(&cancel, || {
+        ferx_tools::iivsearch::run_iivsearch(
+            &config,
+            &base,
+            ferx_tools::iivsearch::IivsearchRun {
+                dir: dir.clone(),
+                threads: config.run.threads,
+                cancel: Some(cancel.clone()),
+                progress: Some(&report),
+            },
+        )
+    }) {
+        Ok(r) => r,
+        Err(e) => throw_r_error(format!("ferx_iivsearch: {e}")),
+    };
+
+    // The model table, column for column as `MODEL_COLUMNS` orders it, with
+    // the declared eta labels beside the parameter names.
+    let n = result.rows.len();
+    let mut id = Vec::with_capacity(n);
+    let mut parent = Vec::with_capacity(n);
+    let mut step = Vec::with_capacity(n);
+    let mut description = Vec::with_capacity(n);
+    let mut etas = Vec::with_capacity(n);
+    let mut blocks = Vec::with_capacity(n);
+    let mut n_parameters = Vec::with_capacity(n);
+    let mut ofv = Vec::with_capacity(n);
+    let mut criterion = Vec::with_capacity(n);
+    let mut d_criterion = Vec::with_capacity(n);
+    let mut rank_col = Vec::with_capacity(n);
+    let mut converged = Vec::with_capacity(n);
+    let mut passed = Vec::with_capacity(n);
+    let mut failures = Vec::with_capacity(n);
+    let mut error = Vec::with_capacity(n);
+    let mut starts = Vec::with_capacity(n);
+    let mut seconds = Vec::with_capacity(n);
+    let mut selected = Vec::with_capacity(n);
+    let mut step_kind = Vec::with_capacity(n);
+    let mut eta_labels = Vec::with_capacity(n);
+    let mut block_labels = Vec::with_capacity(n);
+    let mut structure = Vec::with_capacity(n);
+    for r in &result.rows {
+        // The labels come from the row's *own* model, which is the only text
+        // that says what this candidate calls its eta - the base model's would
+        // be silent about an eta this candidate added.
+        let declared = result
+            .models
+            .get(&r.id)
+            .map(|m| variability_labels(m).0)
+            .unwrap_or_default();
+        let labels = resolved_labels(&r.structure.etas, &declared, omega_fallback);
+        id.push(r.id.clone());
+        parent.push(r.parent.clone().unwrap_or_default());
+        step.push(r.step as i32);
+        description.push(r.structure.description());
+        etas.push(r.structure.etas.join(";"));
+        blocks.push(
+            r.structure
+                .blocks
+                .iter()
+                .map(|b| b.join(","))
+                .collect::<Vec<_>>()
+                .join(";"),
+        );
+        n_parameters.push(opt_f64(r.n_parameters.map(|v| v as f64)));
+        ofv.push(opt_f64(r.ofv));
+        criterion.push(r.criterion);
+        d_criterion.push(opt_f64(r.d_criterion));
+        rank_col.push(opt_f64(r.rank.map(|v| v as f64)));
+        converged.push(opt_bool_chr(r.converged));
+        passed.push(r.passed);
+        failures.push(r.failures.join("; "));
+        error.push(
+            r.error
+                .as_ref()
+                .map(|e| e.message.clone())
+                .unwrap_or_default(),
+        );
+        starts.push(r.starts as i32);
+        seconds.push(r.seconds);
+        selected.push(r.selected);
+        // The stage the row belongs to, from the step it was fitted in: the
+        // number of eta and the block structure are two stages, and a table
+        // that lost which is which would report a search it did not run.
+        step_kind.push(
+            result
+                .steps
+                .iter()
+                .find(|s| s.step == r.step)
+                .map(|s| s.kind.label().to_string())
+                .unwrap_or_default(),
+        );
+        eta_labels.push(labels.join(";"));
+        block_labels.push(block_labels_of(
+            &r.structure.etas,
+            &r.structure.blocks,
+            &labels,
+        ));
+        structure.push(labelled_family(
+            &r.structure.etas,
+            &r.structure.blocks,
+            &labels,
+        ));
+    }
+
+    // The per-step rankings, one row per model ranked in a step: the stage,
+    // its parent, and where each model placed within it.
+    let mut s_step = Vec::new();
+    let mut s_kind = Vec::new();
+    let mut s_parent = Vec::new();
+    let mut s_id = Vec::new();
+    let mut s_criterion = Vec::new();
+    let mut s_d_criterion = Vec::new();
+    let mut s_rank = Vec::new();
+    let mut s_best = Vec::new();
+    for summary in &result.steps {
+        for r in &summary.ranked {
+            s_step.push(summary.step as i32);
+            s_kind.push(summary.kind.label().to_string());
+            s_parent.push(summary.parent.clone());
+            s_id.push(r.id.clone());
+            s_criterion.push(r.criterion);
+            s_d_criterion.push(opt_f64(r.d_criterion));
+            s_rank.push(opt_f64(r.rank.map(|v| v as f64)));
+            s_best.push(r.id == summary.best);
+        }
+    }
+
+    // Every candidate's text, so a structure the search rejected can be read
+    // or refitted without re-running it.
+    let model_id: Vec<String> = result.models.keys().cloned().collect();
+    let model_text: Vec<String> = result.models.values().map(|m| m.render()).collect();
+
+    let final_model = result.final_model.render();
+    let final_labels = resolved_labels(
+        &result.final_structure.etas,
+        &variability_labels(&result.final_model).0,
+        omega_fallback,
+    );
+    let input_labels = resolved_labels(
+        &result.input_structure.etas,
+        &variability_labels(&result.input_model).0,
+        omega_fallback,
+    );
+    let final_fit: Robj = match &result.final_fit {
+        Some(fit) => match search_final_fit(fit, &final_model, &base.prepared.data_path) {
+            Ok(l) => l.into(),
+            Err(e) => throw_r_error(format!("ferx_iivsearch: {e}")),
+        },
+        None => NULL.into(),
+    };
+    let base_row_ofv = result
+        .row(&result.base_id)
+        .and_then(|r| r.ofv)
+        .unwrap_or(f64::NAN);
+    let base_criterion = result
+        .row(&result.base_id)
+        .map(|r| r.criterion)
+        .unwrap_or(f64::NAN);
+
+    list!(
+        id = id,
+        parent = parent,
+        step = step,
+        description = description,
+        etas = etas,
+        blocks = blocks,
+        n_parameters = n_parameters,
+        ofv = ofv,
+        criterion = criterion,
+        d_criterion = d_criterion,
+        rank = rank_col,
+        converged = converged,
+        passed = passed,
+        failures = failures,
+        error = error,
+        starts = starts,
+        seconds = seconds,
+        selected = selected,
+        step_kind = step_kind,
+        eta_labels = eta_labels,
+        block_labels = block_labels,
+        structure = structure,
+        s_step = s_step,
+        s_kind = s_kind,
+        s_parent = s_parent,
+        s_id = s_id,
+        s_criterion = s_criterion,
+        s_d_criterion = s_d_criterion,
+        s_rank = s_rank,
+        s_best = s_best,
+        model_id = model_id,
+        model_text = model_text,
+        input_model = result.input_model.render(),
+        input_description = result.input_structure.description(),
+        input_structure = labelled_family(
+            &result.input_structure.etas,
+            &result.input_structure.blocks,
+            &input_labels
+        ),
+        base_id = result.base_id.clone(),
+        base_ofv = base_row_ofv,
+        base_criterion = base_criterion,
+        final_id = result.final_id.clone(),
+        final_model = final_model,
+        final_description = result.final_structure.description(),
+        final_structure = labelled_family(
+            &result.final_structure.etas,
+            &result.final_structure.blocks,
+            &final_labels
+        ),
+        final_etas = final_labels.clone(),
+        final_blocks = block_labels_of(
+            &result.final_structure.etas,
+            &result.final_structure.blocks,
+            &final_labels
+        ),
+        final_criterion = result.final_criterion,
+        final_fit = final_fit,
+        n_steps = result.steps.len() as i32,
+        criterion_label = result.criterion.label().to_string(),
+        algorithm = options.algorithm.label().to_string(),
+        correlation_algorithm = options
+            .correlation_algorithm
+            .map(|c| c.label().to_string())
+            .unwrap_or_default(),
+        block_stage = options.block_stage(),
+        as_fullblock = options.as_fullblock,
+        block_retries = options.block_retries as i32,
+        starts_base = options.starts as i32,
+        opt_cutoff = opt_f64(options.cutoff),
+        summary = ferx_tools::iivsearch::render_summary(&result),
+        directory = directory.to_string(),
+        // The base model as the config resolved it, so the R object names the
+        // same file in both entry forms.
+        model = config.base.to_string_lossy().into_owned(),
+        data = base.prepared.data_path.clone(),
+        notes = result.notes.clone(),
+        cancelled = result.cancelled,
+    )
+    .into()
+}
+
+/// Inter-occasion variability search - Pharmpy's `iovsearch`.
+///
+/// Takes either a `.ferxsearch` file (`config_path`) or the inline arguments,
+/// which are rendered into one. Returns the model table in the engine's own
+/// `MODEL_COLUMNS` order with the declared eta / kappa labels beside it, the
+/// per-step rankings, every candidate's model text, the winning model and its
+/// fit.
+///
+/// @param config_path Path to a `.ferxsearch` file, or `""` for the inline form
+/// @param model_path Base model (inline form only)
+/// @param data_path Dataset, or `""` to use the model's `[data]` block
+/// @param mfl MFL search space (`IOV` statements), quoted verbatim; `""`
+///   searches every parameter carrying a free eta
+/// @param column The occasion column; `""` takes the base model's
+///   `iov_column`
+/// @param distribution `"disjoint"`, `"joint"`, `"same-as-iiv"` or
+///   `"explicit"`; `""` keeps the engine default
+/// @param groups The kappa blocks for `distribution = "explicit"`, one
+///   comma-separated parameter list per block
+/// @param block_retries Extra starts per kappa beyond two in the largest
+///   block; `< 0` keeps the engine default
+/// @param rank `[rank] type`; `""` keeps the tool default (the BIC(random))
+/// @param rank_cutoff `[rank] cutoff`; `NaN` keeps the default
+/// @param threads Worker threads; `<= 0` lets the runner choose
+/// @param retries Perturbed restarts per candidate; `< 0` keeps the default
+/// @param resume Reuse the fits already journalled in `directory`
+/// @param directory Where journals, `models.csv`, `models/<id>.ferx` and
+///   `final.ferx` go; `""` keeps the run in memory
+/// @param progress Print the engine's step progress to stderr
+/// @return Named list: the model-table columns, the label columns, the
+///   per-step ranking columns, the candidate model texts, `final_model`,
+///   `final_fit`, the options as the engine read them, `notes` and `cancelled`
+/// @keywords internal
+#[extendr]
+#[allow(clippy::too_many_arguments)]
+fn ferx_rust_iovsearch(
+    config_path: &str,
+    model_path: &str,
+    data_path: &str,
+    mfl: &str,
+    column: &str,
+    distribution: &str,
+    groups: Vec<String>,
+    block_retries: i32,
+    rank: &str,
+    rank_cutoff: f64,
+    threads: i32,
+    retries: i32,
+    resume: bool,
+    directory: &str,
+    progress: bool,
+) -> Robj {
+    let mut section = String::from("\n[iovsearch]\n");
+    if !column.is_empty() {
+        section.push_str(&format!("column = {}\n", toml_basic(column)));
+    }
+    if !distribution.is_empty() {
+        section.push_str(&format!("distribution = {}\n", toml_basic(distribution)));
+    }
+    if !groups.is_empty() {
+        // One comma-separated parameter list per block on the R side, a TOML
+        // array of arrays here - the shape `[iovsearch] groups` is written in.
+        let rendered: Vec<String> = groups
+            .iter()
+            .map(|g| {
+                let members: Vec<String> = g.split(',').map(|p| toml_basic(p.trim())).collect();
+                format!("[{}]", members.join(", "))
+            })
+            .collect();
+        section.push_str(&format!("groups = [{}]\n", rendered.join(", ")));
+    }
+    if block_retries >= 0 {
+        section.push_str(&format!("block_retries = {block_retries}\n"));
+    }
+    let text = search_config_text(
+        model_path,
+        data_path,
+        mfl,
+        rank,
+        rank_cutoff,
+        threads,
+        retries,
+        resume,
+        &section,
+    );
+    let inline_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let config =
+        match search_config_for_tool(config_path, &text, &inline_dir, threads, retries, resume) {
+            Ok(c) => c,
+            Err(e) => throw_r_error(format!("ferx_iovsearch: {e}")),
+        };
+    let options = match ferx_tools::iovsearch::IovsearchOptions::from_config(&config) {
+        Ok(o) => o,
+        Err(e) => throw_r_error(format!("ferx_iovsearch: {e}")),
+    };
+    let mut base = match config.load_base() {
+        Ok(b) => b,
+        Err(e) => throw_r_error(format!("ferx_iovsearch: {e}")),
+    };
+
+    let cancel = CancelFlag::new();
+    base.prepared.parsed.fit_options.cancel = Some(cancel.clone());
+
+    let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
+    let report = |event: ferx_tools::iovsearch::IovsearchEvent| {
+        use ferx_tools::iovsearch::IovsearchEvent as E;
+        if !progress {
+            return;
+        }
+        match event {
+            E::InputStarted => eprintln!("Fitting the input model..."),
+            E::InputFinished { ofv, criterion } => {
+                eprintln!("Input model: OFV {ofv:.3}, criterion {criterion:.3}")
+            }
+            E::FullIovStarted { parameters } => eprintln!(
+                "Fitting the full-IOV model ({parameters} parameter{})...",
+                if parameters == 1 { "" } else { "s" }
+            ),
+            E::FullIovFinished { ofv, criterion } => {
+                eprintln!("Full-IOV model: OFV {ofv:.3}, criterion {criterion:.3}")
+            }
+            E::StepStarted { step, candidates } => eprintln!(
+                "Step {step}: fitting {candidates} candidate{}...",
+                if candidates == 1 { "" } else { "s" }
+            ),
+            E::StepFinished {
+                step,
+                best,
+                improved,
+            } => eprintln!(
+                "Step {step}: {} {} (criterion {:.3})",
+                if improved { "best" } else { "kept" },
+                best.0,
+                best.1
+            ),
+        }
+    };
+
+    let result = match run_search_cancellable(&cancel, || {
+        ferx_tools::iovsearch::run_iovsearch(
+            &config,
+            &base,
+            ferx_tools::iovsearch::IovsearchRun {
+                dir: dir.clone(),
+                threads: config.run.threads,
+                cancel: Some(cancel.clone()),
+                progress: Some(&report),
+            },
+        )
+    }) {
+        Ok(r) => r,
+        Err(e) => throw_r_error(format!("ferx_iovsearch: {e}")),
+    };
+
+    let n = result.rows.len();
+    let mut id = Vec::with_capacity(n);
+    let mut parent = Vec::with_capacity(n);
+    let mut step = Vec::with_capacity(n);
+    let mut description = Vec::with_capacity(n);
+    let mut etas = Vec::with_capacity(n);
+    let mut kappas = Vec::with_capacity(n);
+    let mut kappa_blocks = Vec::with_capacity(n);
+    let mut n_parameters = Vec::with_capacity(n);
+    let mut ofv = Vec::with_capacity(n);
+    let mut criterion = Vec::with_capacity(n);
+    let mut d_criterion = Vec::with_capacity(n);
+    let mut rank_col = Vec::with_capacity(n);
+    let mut converged = Vec::with_capacity(n);
+    let mut passed = Vec::with_capacity(n);
+    let mut failures = Vec::with_capacity(n);
+    let mut error = Vec::with_capacity(n);
+    let mut starts = Vec::with_capacity(n);
+    let mut seconds = Vec::with_capacity(n);
+    let mut selected = Vec::with_capacity(n);
+    let mut step_kind = Vec::with_capacity(n);
+    let mut eta_labels = Vec::with_capacity(n);
+    let mut kappa_labels = Vec::with_capacity(n);
+    let mut kappa_block_labels = Vec::with_capacity(n);
+    let mut structure = Vec::with_capacity(n);
+    for r in &result.rows {
+        let (eta_map, kappa_map) = result
+            .models
+            .get(&r.id)
+            .map(variability_labels)
+            .unwrap_or_default();
+        let eta_lab = resolved_labels(&r.structure.etas, &eta_map, omega_fallback);
+        let kappa_lab = resolved_labels(&r.structure.kappas, &kappa_map, kappa_fallback);
+        id.push(r.id.clone());
+        parent.push(r.parent.clone().unwrap_or_default());
+        step.push(r.step as i32);
+        description.push(r.structure.description());
+        etas.push(r.structure.etas.join(";"));
+        kappas.push(r.structure.kappas.join(";"));
+        kappa_blocks.push(
+            r.structure
+                .kappa_blocks
+                .iter()
+                .map(|b| b.join(","))
+                .collect::<Vec<_>>()
+                .join(";"),
+        );
+        n_parameters.push(opt_f64(r.n_parameters.map(|v| v as f64)));
+        ofv.push(opt_f64(r.ofv));
+        criterion.push(r.criterion);
+        d_criterion.push(opt_f64(r.d_criterion));
+        rank_col.push(opt_f64(r.rank.map(|v| v as f64)));
+        converged.push(opt_bool_chr(r.converged));
+        passed.push(r.passed);
+        failures.push(r.failures.join("; "));
+        error.push(
+            r.error
+                .as_ref()
+                .map(|e| e.message.clone())
+                .unwrap_or_default(),
+        );
+        starts.push(r.starts as i32);
+        seconds.push(r.seconds);
+        selected.push(r.selected);
+        step_kind.push(
+            result
+                .steps
+                .iter()
+                .find(|s| s.step == r.step)
+                .map(|s| s.kind.label().to_string())
+                .unwrap_or_default(),
+        );
+        eta_labels.push(eta_lab.join(";"));
+        kappa_labels.push(kappa_lab.join(";"));
+        kappa_block_labels.push(block_labels_of(
+            &r.structure.kappas,
+            &r.structure.kappa_blocks,
+            &kappa_lab,
+        ));
+        structure.push(format!(
+            "IIV({});IOV({})",
+            labelled_family(&r.structure.etas, &r.structure.eta_blocks, &eta_lab),
+            labelled_family(&r.structure.kappas, &r.structure.kappa_blocks, &kappa_lab)
+        ));
+    }
+
+    let mut s_step = Vec::new();
+    let mut s_kind = Vec::new();
+    let mut s_parent = Vec::new();
+    let mut s_id = Vec::new();
+    let mut s_criterion = Vec::new();
+    let mut s_d_criterion = Vec::new();
+    let mut s_rank = Vec::new();
+    let mut s_best = Vec::new();
+    for summary in &result.steps {
+        for r in &summary.ranked {
+            s_step.push(summary.step as i32);
+            s_kind.push(summary.kind.label().to_string());
+            s_parent.push(summary.parent.clone());
+            s_id.push(r.id.clone());
+            s_criterion.push(r.criterion);
+            s_d_criterion.push(opt_f64(r.d_criterion));
+            s_rank.push(opt_f64(r.rank.map(|v| v as f64)));
+            s_best.push(r.id == summary.best);
+        }
+    }
+
+    let model_id: Vec<String> = result.models.keys().cloned().collect();
+    let model_text: Vec<String> = result.models.values().map(|m| m.render()).collect();
+
+    let final_model = result.final_model.render();
+    let (final_eta_map, final_kappa_map) = variability_labels(&result.final_model);
+    let (input_eta_map, input_kappa_map) = variability_labels(&result.input_model);
+    let final_eta_lab = resolved_labels(
+        &result.final_structure.etas,
+        &final_eta_map,
+        omega_fallback,
+    );
+    let final_kappa_lab = resolved_labels(
+        &result.final_structure.kappas,
+        &final_kappa_map,
+        kappa_fallback,
+    );
+    let input_eta_lab = resolved_labels(
+        &result.input_structure.etas,
+        &input_eta_map,
+        omega_fallback,
+    );
+    let input_kappa_lab = resolved_labels(
+        &result.input_structure.kappas,
+        &input_kappa_map,
+        kappa_fallback,
+    );
+    let final_fit: Robj = match &result.final_fit {
+        Some(fit) => match search_final_fit(fit, &final_model, &base.prepared.data_path) {
+            Ok(l) => l.into(),
+            Err(e) => throw_r_error(format!("ferx_iovsearch: {e}")),
+        },
+        None => NULL.into(),
+    };
+    let input_row_ofv = result.row("input").and_then(|r| r.ofv).unwrap_or(f64::NAN);
+    let input_criterion = result.row("input").map(|r| r.criterion).unwrap_or(f64::NAN);
+
+    list!(
+        id = id,
+        parent = parent,
+        step = step,
+        description = description,
+        etas = etas,
+        kappas = kappas,
+        kappa_blocks = kappa_blocks,
+        n_parameters = n_parameters,
+        ofv = ofv,
+        criterion = criterion,
+        d_criterion = d_criterion,
+        rank = rank_col,
+        converged = converged,
+        passed = passed,
+        failures = failures,
+        error = error,
+        starts = starts,
+        seconds = seconds,
+        selected = selected,
+        step_kind = step_kind,
+        eta_labels = eta_labels,
+        kappa_labels = kappa_labels,
+        kappa_block_labels = kappa_block_labels,
+        structure = structure,
+        s_step = s_step,
+        s_kind = s_kind,
+        s_parent = s_parent,
+        s_id = s_id,
+        s_criterion = s_criterion,
+        s_d_criterion = s_d_criterion,
+        s_rank = s_rank,
+        s_best = s_best,
+        model_id = model_id,
+        model_text = model_text,
+        input_model = result.input_model.render(),
+        input_description = result.input_structure.description(),
+        input_structure = format!(
+            "IIV({});IOV({})",
+            labelled_family(
+                &result.input_structure.etas,
+                &result.input_structure.eta_blocks,
+                &input_eta_lab
+            ),
+            labelled_family(
+                &result.input_structure.kappas,
+                &result.input_structure.kappa_blocks,
+                &input_kappa_lab
+            )
+        ),
+        input_ofv = input_row_ofv,
+        input_criterion = input_criterion,
+        final_id = result.final_id.clone(),
+        final_model = final_model,
+        final_description = result.final_structure.description(),
+        final_structure = format!(
+            "IIV({});IOV({})",
+            labelled_family(
+                &result.final_structure.etas,
+                &result.final_structure.eta_blocks,
+                &final_eta_lab
+            ),
+            labelled_family(
+                &result.final_structure.kappas,
+                &result.final_structure.kappa_blocks,
+                &final_kappa_lab
+            )
+        ),
+        final_etas = final_eta_lab.clone(),
+        final_kappas = final_kappa_lab.clone(),
+        final_kappa_blocks = block_labels_of(
+            &result.final_structure.kappas,
+            &result.final_structure.kappa_blocks,
+            &final_kappa_lab
+        ),
+        final_criterion = result.final_criterion,
+        final_fit = final_fit,
+        n_steps = result.steps.len() as i32,
+        criterion_label = result.criterion.label().to_string(),
+        distribution = options.distribution.label().to_string(),
+        column = options
+            .column
+            .clone()
+            .or_else(|| base.prepared.parsed.fit_options.iov_column.clone())
+            .unwrap_or_default(),
+        groups = options
+            .groups
+            .iter()
+            .map(|g| g.join(","))
+            .collect::<Vec<_>>(),
+        block_retries = options.block_retries as i32,
+        starts_base = options.starts as i32,
+        opt_cutoff = opt_f64(options.cutoff),
+        summary = ferx_tools::iovsearch::render_summary(&result),
+        directory = directory.to_string(),
+        model = config.base.to_string_lossy().into_owned(),
+        data = base.prepared.data_path.clone(),
+        notes = result.notes.clone(),
+        cancelled = result.cancelled,
+    )
+    .into()
+}
+
 extendr_module! {
     mod ferx;
     fn ferx_rust_fit;
@@ -6668,4 +7596,8 @@ extendr_module! {
     fn ferx_rust_ruvsearch;
     fn ferx_rust_ruvsearch_columns;
     fn ferx_rust_covsearch_columns;
+    fn ferx_rust_iivsearch;
+    fn ferx_rust_iivsearch_columns;
+    fn ferx_rust_iovsearch;
+    fn ferx_rust_iovsearch_columns;
 }
