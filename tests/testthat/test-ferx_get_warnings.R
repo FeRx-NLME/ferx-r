@@ -973,3 +973,244 @@ test_that(".ferx_warning_guidance dispatches sir by message content", {
   tuning <- g("SIR requested but covariance matrix is not available")
   expect_match(tuning, "sir_samples", fixed = TRUE)
 })
+
+# ---------------------------------------------------------------------------
+# ode_solver: which clauses the statistics warning carries
+# ---------------------------------------------------------------------------
+# ferx-core's post-fit `ode_solver` warning, built the way
+# ode_solver_diagnostics_warning() in src/api/postfit.rs builds it at pin
+# 944cbf1e: one clause per non-zero counter, joined by "; ", then a lead-in and
+# trailing advice picked by which counters are non-zero. Only the four counters
+# these tests need are modelled. Clause texts are verbatim, and the drift guard
+# at the end of this block checks the phrases the guidance keys on against the
+# engine source.
+.ode_solver_warning <- function(abandoned = 0L, clamped = 0L, jets = 0L,
+                                aborted = 0L) {
+  parts <- character(0)
+  if (abandoned > 0L) parts <- c(parts, paste0(
+    abandoned, " solver walk(s) were abandoned before integrating because the ",
+    "subject's timeline could not be ordered — a NaN or infinite dose time, ",
+    "lagtime, route lag, or infusion duration at the final estimates — so ",
+    "those subjects' predictions are NaN by construction, and they contributed ",
+    "nothing to any other counter in this payload because nothing was integrated ",
+    "for them. This counts walks, not subjects: one subject reaches more than one ",
+    "engine in this pass (its predictions and its [odes] state readout are ",
+    "separate walks), so it contributes more than one. Check the dose records and ",
+    "any exponential covariate model on ALAG / F / D / R for a value that ",
+    "overflows at typical covariates"
+  ))
+  if (clamped > 0L) parts <- c(parts, paste0(
+    clamped, " step(s) clamped at the minimum step size — the local-error ",
+    "test failed and the step was accepted anyway because dt could not shrink ",
+    "further, so those segments are stability-limited rather than ",
+    "accuracy-limited, and any output times left in a segment the solver could ",
+    "not finish are freeze-padded with the last state (finite, but not ",
+    "integrated)"
+  ))
+  if (jets > 0L) parts <- c(parts, paste0(
+    jets, " segment(s) of the analytic-sensitivity solve were discarded and ",
+    "re-solved with rk45: their predicted values were all finite while their ",
+    "analytic derivatives — the gradients FOCE/FOCEI differentiate — ",
+    "had overflowed to inf/NaN. The stiff method integrated those segments; the ",
+    "trajectory simply reached a magnitude the sensitivities cannot represent, so ",
+    "naming a different ode_method will not help. Check the model's units and ",
+    "scaling (a state in ng rather than mg, an unbounded growth term, a rate ",
+    "constant on the wrong clock) before trusting the estimates. This count comes ",
+    "from the sensitivity sweep and is separate from the escalation counts ",
+    "reported above"
+  ))
+  if (aborted > 0L) parts <- c(parts, paste0(
+    aborted, " segment(s) were abandoned early by ode_stiff_abort_after = 2, ",
+    "which bounds their cost and freeze-pads their tails"
+  ))
+  ran <- clamped > 0L || jets > 0L || aborted > 0L
+  paste0(
+    "W_ODE_SOLVER_DIAGNOSTICS: the ODE solver ",
+    if (ran) "did not integrate cleanly" else "did not produce a usable integration",
+    " at the final estimates (ode_method = auto): ",
+    paste(parts, collapse = "; "),
+    ". Counters are from the post-fit prediction pass over all subjects.",
+    if (ran) paste0(
+      " For the segments that did integrate, consider a different ode_method, a ",
+      "looser ode_reltol / ode_abstol, or checking the parameter estimates that ",
+      "produce these dynamics."
+    ),
+    if (abandoned > 0L) paste0(
+      " The abandoned walk(s) are not an ode_method or tolerance problem — ",
+      "nothing was integrated for them, so no solver setting changes the outcome; ",
+      "fix the record or the parameter that produces the non-finite time."
+    )
+  )
+}
+
+# Every piece of solver-setting advice the guidance gives names ode_abstol, and
+# nothing else it says does.
+.recommends_solver_settings <- function(g) grepl("ode_abstol", g, fixed = TRUE)
+
+test_that("an abandoned ODE timeline is not answered with solver settings", {
+  # ferx-core #1234. The walk never integrated - the subject's timeline could
+  # not be ordered - so the engine's own clause says no solver setting changes
+  # the outcome. The guidance used to tell the user to change them anyway,
+  # directly beneath that clause.
+  g <- ferx:::.ferx_warning_guidance("ode_solver",
+                                     message = .ode_solver_warning(abandoned = 3L))
+  expect_match(g, "Nothing was integrated for some subjects", fixed = TRUE)
+  expect_match(g, "dose records", fixed = TRUE)
+  expect_false(.recommends_solver_settings(g))
+})
+
+test_that("an analytic-sensitivity overflow is not answered with solver settings", {
+  # ferx-core #1204. The stiff method integrated the segment; the derivatives
+  # overflowed. The clause says a different ode_method will not help. The
+  # engine's lead-in still counts this counter as an integration that ran
+  # badly, so its message ends with its general solver-setting sentence
+  # anyway. The guidance follows the clause, not that sentence.
+  g <- ferx:::.ferx_warning_guidance("ode_solver",
+                                     message = .ode_solver_warning(jets = 2L))
+  expect_match(g, "will not help", fixed = TRUE)
+  expect_match(g, "units and scaling", fixed = TRUE)
+  expect_false(.recommends_solver_settings(g))
+})
+
+test_that("solver-setting advice stays with the ode_solver clauses it fits", {
+  g <- function(...) {
+    ferx:::.ferx_warning_guidance("ode_solver", message = .ode_solver_warning(...))
+  }
+  # A plain integration problem keeps the advice it always had.
+  clamps <- g(clamped = 2L)
+  expect_match(clamps, "Integration under the final estimates was not clean",
+               fixed = TRUE)
+  expect_true(.recommends_solver_settings(clamps))
+
+  # ode_stiff_abort_after's clause says "abandoned" too, but that segment did
+  # integrate, and the budget is a solver setting.
+  aborts <- g(aborted = 3L)
+  expect_true(.recommends_solver_settings(aborts))
+  expect_false(grepl("Nothing was integrated", aborts, fixed = TRUE))
+
+  # Several clauses in one warning: each gets its own advice, and the
+  # solver-setting advice is scoped to the segments it can help.
+  walks_and_clamps <- g(abandoned = 3L, clamped = 2L)
+  expect_match(walks_and_clamps, "Nothing was integrated", fixed = TRUE)
+  expect_match(walks_and_clamps, "For the clamped, discarded", fixed = TRUE)
+
+  jets_and_clamps <- g(jets = 2L, clamped = 2L)
+  expect_match(jets_and_clamps, "units and scaling", fixed = TRUE)
+  expect_match(jets_and_clamps, "For the clamped, discarded", fixed = TRUE)
+})
+
+test_that("the ode_solver escalation note keeps its informational guidance", {
+  # Matched on its token before any clause phrase: this note contains "clamped
+  # at the minimum step size" as well ("no step clamped ...").
+  note <- paste0(
+    "W_ODE_SOLVER_ESCALATION_NOTE: ode_method = auto escalated 240 integration ",
+    "segment(s) to a stiff stepper at the final estimates; every other segment ",
+    "used rk45, no escalation was rejected, and no step clamped at the minimum ",
+    "step size. Informational — set ode_method = rk45 to pin the explicit ",
+    "stepper, or name a stiff method to pin the other half."
+  )
+  g <- ferx:::.ferx_warning_guidance("ode_solver", message = note)
+  expect_match(g, "(informational)", fixed = TRUE)
+  expect_false(.recommends_solver_settings(g))
+})
+
+test_that("a real fit over an unorderable ODE timeline prints the timeline guidance", {
+  # End to end, like the init_outside_bounds test above: the engine emits the
+  # abandoned-walk clause (ferx-core #1234), the glue carries it into
+  # fit$warnings_structured under `ode_solver`, and ferx_get_warnings() prints
+  # the guidance under it. Unlike the transcribed fixtures, this message comes
+  # from the pinned engine itself, so it runs in CI as well.
+  #
+  # The fixture is ferx-core's own (a_fit_over_an_unorderable_timeline_says_so):
+  # a two-state ODE model and one subject whose dose TIME is NaN. Nothing
+  # upstream rejects that - the engine's data checks cover dose attributes
+  # (ALAG / F / D / R), not record times. The CSV is written with na = "NaN"
+  # because write.csv() writes NaN as NA by default, which the reader treats as
+  # a missing value, so the timeline never becomes NaN.
+  model <- tempfile(fileext = ".ferx")
+  writeLines(c(
+    "[parameters]",
+    "  theta TVCL(1.0, 0.1, 50.0)",
+    "  theta TVV(10.0, 1.0, 500.0)",
+    "  theta KFAST(1.0, 1e-6, 1e6)",
+    "  omega ETA_CL ~ 0.04",
+    "  sigma PROP ~ 0.04",
+    "[individual_parameters]",
+    "  CL = TVCL * exp(ETA_CL)",
+    "  V  = TVV",
+    "  KF = KFAST",
+    "[structural_model]",
+    "  ode(obs_cmt=central, states=[central, periph])",
+    "[odes]",
+    "  d/dt(central) = -(CL / V) * central - KF * central + KF * periph",
+    "  d/dt(periph)  = KF * central - KF * periph",
+    "[error_model]",
+    "  DV ~ proportional(PROP)"
+  ), model)
+  obs_t <- c(0.5, 2, 8, 24)
+  subject <- function(id, dose_time, scale) {
+    data.frame(ID = id, TIME = c(dose_time, obs_t),
+               DV = c(0, scale * 50 / (1 + obs_t)),
+               EVID = c(1, 0, 0, 0, 0), AMT = c(100, 0, 0, 0, 0),
+               CMT = 1, MDV = c(1, 0, 0, 0, 0))
+  }
+  data <- tempfile(fileext = ".csv")
+  utils::write.csv(rbind(subject(1, NaN, 1.0), subject(2, 0, 1.2)), data,
+                   row.names = FALSE, na = "NaN")
+  on.exit(unlink(c(model, data)))
+
+  fit <- ferx_fit(model, data, method = "focei", settings = list(maxiter = 1L),
+                  covariance = FALSE, verbose = FALSE)
+  ws <- ferx_get_warnings(fit, as_df = TRUE)
+  i <- which(ws$category == "ode_solver")
+  expect_length(i, 1L)
+  expect_match(ws$message[i], "could not be ordered", fixed = TRUE)
+
+  g <- ferx:::.ferx_warning_guidance(ws$category[i], message = ws$message[i])
+  expect_match(g, "Nothing was integrated for some subjects", fixed = TRUE)
+  expect_false(.recommends_solver_settings(g))
+
+  # ... and it actually prints. Whitespace-normalised: the printer wraps at 70.
+  out <- capture.output(ferx_get_warnings(fit))
+  flat <- gsub("[[:space:]]+", " ", paste(out, collapse = " "))
+  expect_true(grepl("Nothing was integrated for some subjects", flat, fixed = TRUE))
+})
+
+test_that("the ode_solver phrases the guidance keys on are still in the engine", {
+  # The fixtures above are transcribed, so on their own they cannot notice
+  # ferx-core rewording a clause. This reads the string literals of the function
+  # that builds the warning, at the pinned revision, and requires every phrase
+  # `.ferx_ode_solver_anchors()` matches on to still be in one of them.
+  #
+  # Skipped without a sibling ferx-core checkout, like the other source guards
+  # in this file: CI builds the pinned crate, and a pin bump happens on a
+  # developer machine, where this runs.
+  core_src <- .core_src_at_pin()
+  skip_if(is.null(core_src), "cannot materialise ferx-core at the pinned revision")
+  postfit <- file.path(core_src, "api", "postfit.rs")
+  skip_if(!file.exists(postfit), "ferx-core at the pin has no src/api/postfit.rs")
+
+  ln <- readLines(postfit, warn = FALSE)
+  start <- grep("fn ode_solver_diagnostics_warning(", ln, fixed = TRUE)
+  expect_length(start, 1L)
+  if (length(start) == 1L) {
+    # A top-level fn closes on a bare `}` in column one.
+    end <- start + which(ln[(start + 1L):length(ln)] == "}")[1]
+    body <- ln[start:end]
+    # Drop `//` comments (they quote the message text too), then rejoin Rust's
+    # backslash-continued literals, as the covariance inventory guard does.
+    body <- body[!grepl("^[[:space:]]*//", body)]
+    joined <- gsub("\\\\\n[[:space:]]*", "", paste(body, collapse = "\n"))
+    lits <- regmatches(joined,
+                       gregexpr('"(?:[^"\\\\]|\\\\.)*"', joined, perl = TRUE))[[1]]
+    expect_gt(length(lits), 5L)            # the function was found and understood
+
+    for (phrase in unlist(ferx:::.ferx_ode_solver_anchors(), use.names = FALSE)) {
+      expect_true(any(grepl(phrase, lits, fixed = TRUE)),
+                  info = paste0("no longer in ode_solver_diagnostics_warning(): ",
+                                phrase))
+    }
+  }
+  # The escalation note's token is a const outside the function.
+  expect_true(any(grepl('"W_ODE_SOLVER_ESCALATION_NOTE"', ln, fixed = TRUE)))
+})

@@ -831,6 +831,26 @@
 
 ## Bug fixes
 
+- **`ferx_get_warnings()` no longer recommends solver settings for ODE problems
+  they cannot fix** ([ferx-core #1234](https://github.com/FeRx-NLME/ferx-core/issues/1234),
+  [ferx-core #1204](https://github.com/FeRx-NLME/ferx-core/issues/1204)). The
+  guidance printed under every `ode_solver` warning said to set `ode_method` or
+  adjust `ode_abstol` / `ode_reltol` / `ode_max_steps`. Two of the problems that
+  warning reports are not solver-setting problems, and the engine's clause for
+  each says so. A subject whose timeline could not be ordered (a `NaN` or
+  infinite dose time, lagtime, route lag or infusion duration) was never
+  integrated. A segment whose analytic sensitivities overflowed was integrated
+  without trouble by the stiff method; its derivatives, not its values, were
+  too large. The guidance now points at the dose records and any covariate
+  model on `ALAG` / `F` / `D` / `R` for the first, and at the model's units and
+  scaling for the second. The solver-setting advice is kept for the clamped,
+  discarded, unfinished or aborted segments it does apply to, including when
+  one warning reports both kinds.
+
+  The engine's structured `details` for this warning (every counter, by name)
+  does not reach R, so the guidance tells the clauses apart by message phrases,
+  each checked against the engine source at the pinned revision.
+
 - **A `.tmp` checkpoint from a deterministic stage now holds the best point, not
   a throwaway probe** ([ferx-core #1317](https://github.com/FeRx-NLME/ferx-core/issues/1317)).
   `foce`, `focei`, `laplace`, `gn` and `gn_hybrid` evaluate the objective at every
