@@ -106,15 +106,6 @@ LOCAL_FERX_CORE := $(wildcard ../../ferx-core/Cargo.toml)
 # and no error to say so.
 LOCAL_FERX_TOOLS := $(wildcard ../../ferx-core/crates/ferx-tools/Cargo.toml)
 
-# For the message printed when cargo leaves that [patch] unused: the ferx-core
-# version Cargo.lock pins (read here, before cargo rewrites the lock) and the
-# sibling's. Cargo uses a [patch] only when the two are equal - any difference,
-# a patch-level one included, makes it build the pinned revision instead.
-ifneq ($(LOCAL_FERX_CORE),)
-LOCKED_FERX_CORE_VERSION := $(shell awk '$$0 == "name = \"ferx-core\"" { p = 1; next } p && /^version = / { gsub(/^version = "|"$$/, ""); print; exit }' rust/Cargo.lock 2>/dev/null)
-SIBLING_FERX_CORE_VERSION := $(shell awk '/^\[/ { p = ($$0 == "[package]") } p && /^version = / { gsub(/^version = "|"$$/, ""); print; exit }' ../../ferx-core/Cargo.toml 2>/dev/null)
-endif
-
 $(STATLIB):
 	@# Ensure .cargo/config.toml and rust-toolchain.toml exist (R CMD INSTALL
 	@# strips hidden directories and these files are needed by cargo).
@@ -132,7 +123,11 @@ ifneq ($(LOCAL_FERX_CORE),)
 	@echo 'ferx-core = { path = "../../../ferx-core" }' >> rust/.cargo/config.toml
 ifneq ($(LOCAL_FERX_TOOLS),)
 	@echo 'ferx-tools = { path = "../../../ferx-core/crates/ferx-tools" }' >> rust/.cargo/config.toml
-	@echo "ferx: [patch]ing ferx-core + ferx-tools to the sibling ../ferx-core checkout (whether cargo used it is reported after the build)"
+	@# Writing the [patch] does not make cargo use it: cargo applies a [patch]
+	@# only when the sibling's crate versions equal the ones Cargo.lock pins, and
+	@# otherwise builds the pinned revision with no more than a "was not used in
+	@# the crate graph" warning. So do not claim here that the sibling is used.
+	@echo "ferx: [patch]ing ferx-core + ferx-tools to the sibling ../ferx-core checkout (cargo uses it only if the sibling's versions equal the ones Cargo.lock pins)"
 else
 	@echo "ferx: ERROR the sibling ferx-core checkout has no crates/ferx-tools:" >&2
 	@echo "ferx:     $(abspath $(dir $(LOCAL_FERX_CORE)))" >&2
@@ -159,38 +154,7 @@ endif
 	@# to be reported before compilation begins). Failure here is benign —
 	@# the cargo invocation below will surface a real toolchain error.
 	@rustc --version || true
-ifneq ($(LOCAL_FERX_CORE),)
-	@# With the [patch] in place, every cargo resolve rewrites Cargo.lock: a
-	@# patch that applies deletes both `source = "git+..."` lines (unpinning
-	@# the crates for CI and everyone without the sibling), one that goes unused
-	@# appends [[patch.unused]] tables. So snapshot the committed lock, build,
-	@# read off the lock cargo wrote whether the patch applied - cargo's own
-	@# "was not used" warning is easy to lose in the build log - and put the
-	@# snapshot back on every exit path, a failed or interrupted build included.
-	@# The snapshot is taken afresh by every build, so a stale one can never be
-	@# restored over a later pin bump. Only a build killed outright (SIGKILL)
-	@# skips the restore; tools/check-ferx-core-pin.sh and CI catch that.
-	@cd rust || exit 1; \
-	  if [ -f Cargo.lock ] && mkdir -p target && cp Cargo.lock target/Cargo.lock.pinned; then \
-	    trap 'mv -f target/Cargo.lock.pinned Cargo.lock' EXIT; trap 'exit 130' HUP INT TERM; \
-	  fi; \
-	  echo "cd rust && CARGO_PROFILE_RELEASE_LTO=$(CARGO_PROFILE_RELEASE_LTO) cargo build --release $(CARGO_FEATURES)"; \
-	  CARGO_PROFILE_RELEASE_LTO=$(CARGO_PROFILE_RELEASE_LTO) cargo build --release $(CARGO_FEATURES); \
-	  rc=$$?; \
-	  if grep -q '^\[\[patch\.unused\]\]' Cargo.lock 2>/dev/null; then \
-	    echo "ferx: WARNING cargo did NOT use the sibling ../ferx-core checkout: the [patch] went" >&2; \
-	    echo "ferx:   unused, so ferx-core + ferx-tools come from the revision pinned in Cargo.lock." >&2; \
-	    echo "ferx:   A [patch] applies only when the sibling's version equals the locked one:" >&2; \
-	    echo "ferx:   Cargo.lock pins ferx-core $(LOCKED_FERX_CORE_VERSION), the sibling is $(SIBLING_FERX_CORE_VERSION)." >&2; \
-	    echo "ferx:   To build the sibling, move the pin with tools/update-ferx-core-lock.sh (not" >&2; \
-	    echo "ferx:   'cargo update', which strips it), or check out a sibling revision at $(LOCKED_FERX_CORE_VERSION)." >&2; \
-	  elif ! grep -q '^source = "git+https://github.com/FeRx-NLME/ferx-core' Cargo.lock 2>/dev/null; then \
-	    echo "ferx: the [patch] applied - ferx-core + ferx-tools come from the sibling ../ferx-core checkout (Cargo.lock restored to its pin)"; \
-	  fi; \
-	  exit $$rc
-else
 	cd rust && CARGO_PROFILE_RELEASE_LTO=$(CARGO_PROFILE_RELEASE_LTO) cargo build --release $(CARGO_FEATURES)
-endif
 ifeq ($(OS),Windows_NT)
 	@# Strip split-DWARF .dwo members from the static lib so R's nm.exe
 	@# doesn't spam "no symbols" warnings during the DLL link step. Cargo

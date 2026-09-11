@@ -1008,20 +1008,21 @@
 
 ## Internal
 
-- **A local build next to a `../ferx-core` checkout no longer leaves
-  `src/rust/Cargo.lock` unpinned, and says whether it used that checkout**
-  (#349). With the sibling `[patch]` in place, every cargo resolve rewrites the
-  lock: a patch that applies deletes both `source = "git+..."` pins, one that
-  goes unused appends `[[patch.unused]]` tables. So `R CMD INSTALL .`,
-  `roxygen2::roxygenize()` and `pkgload::load_all()` each left behind a lock that
-  would unpin CI, shown by `git status` as an ordinary modified file.
-  `src/Makevars` now snapshots the lock before cargo runs and restores it on
-  every exit, then reports whether cargo applied the patch; when it did not, it
-  prints both versions, since a `[patch]` applies only at exactly the locked
-  version. In a git worktree with no sibling it says the pinned revision is being
-  built. The `R-CMD-check` pin guard moved into `tools/check-ferx-core-pin.sh`,
-  which also rejects `[[patch.unused]]` tables, so contributors can run what CI
-  runs. Cargo run directly is not covered: see `CLAUDE.md`.
+- **One `Cargo.lock` pin check, shared by CI and contributors** (#349). With a
+  sibling `../ferx-core` patched in, every cargo resolve rewrites
+  `src/rust/Cargo.lock` - `R CMD INSTALL .`, `roxygen2::roxygenize()` and
+  `pkgload::load_all()` included: a patch that applies deletes both
+  `source = "git+..."` pins, one that goes unused appends `[[patch.unused]]`
+  tables, and `git status` shows either as an ordinary modified file. The
+  `R-CMD-check` pin guard moved into `tools/check-ferx-core-pin.sh`, which also
+  rejects `[[patch.unused]]` tables and says how to repair each case, and a new CI
+  step feeds it damaged locks so a deleted check fails the build.
+  `tools/update-ferx-core-lock.sh` calls the same check and now runs in a fresh
+  clone or worktree without `src/rust/.cargo/config.toml`. `src/Makevars` no
+  longer claims "using local ../ferx-core checkout" before cargo has decided
+  anything - a `[patch]` applies only at exactly the locked version - and in a
+  git worktree with no sibling it says the pinned revision is being built.
+  Keeping the lock pinned during local builds is left to a follow-up.
 
 - **The pinned engine crosses a semver-breaking boundary: `ferx-core` /
   `ferx-tools` `0.3.1` -> `0.4.0`** (revision `909ad382` -> `944cbf1e`).
