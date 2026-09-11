@@ -185,3 +185,87 @@ test_that("joint PK-TTE: bundled pktte_joint fits and predicts an ODE-accumulate
   s1  <- surv$survival[surv$ID == id1][order(surv$TIME[surv$ID == id1])]
   expect_true(all(diff(s1) <= 1e-9))
 })
+
+# ferx-core #1261: an ODE-accumulated hazard that reads a dose-time anchor. The
+# hazard readout re-evaluated the ODE right-hand side with the bare PK parameter
+# array, which has no TAD / TAFD slots, so `hazard` came back NaN and a fit scored
+# the subject at the 2e20 rejection sentinel. The hazard, doses and event follow
+# ferx-core's own regression test: H0 = 0.1, KT = 0.01, doses at t = 0 and
+# t = 12, one exact event at t = 30. After the second dose TAD (time after the
+# last dose) and TAFD (time after the first dose) differ, so the two anchors
+# cannot stand in for each other.
+# `hazard = NULL` writes the PK-only sibling: same [odes], doses and PK rows, no
+# [event_model] and no event row.
+write_tad_hazard_fixture <- function(hazard = "H0 * (1.0 + KT * TAD)") {
+  tte <- !is.null(hazard)
+  model <- tempfile(fileext = ".ferx")
+  data  <- tempfile(fileext = ".csv")
+  writeLines(c(
+    "[parameters]",
+    "  theta TVCL(1.0, 0.01, 100.0)",
+    "  theta TVV(10.0, 0.1, 500.0)",
+    if (tte) c("  theta TVH0(0.1, 0.001, 10.0)", "  theta TVKT(0.01, 0.0001, 1.0)"),
+    "  omega ETA_CL ~ 0.09",
+    "  sigma PROP_ERR ~ 0.1 (sd)",
+    "",
+    "[individual_parameters]",
+    "  CL = TVCL * exp(ETA_CL)",
+    "  V  = TVV",
+    if (tte) c("  H0 = TVH0", "  KT = TVKT"),
+    "",
+    "[structural_model]",
+    "  ode(obs_cmt=central, states=[central])",
+    "",
+    "[odes]",
+    "  d/dt(central) = -CL / V * central",
+    "",
+    if (tte) c("[event_model]", "  cmt    = 3", paste("  hazard =", hazard), ""),
+    "[error_model]",
+    "  DV ~ proportional(PROP_ERR)"
+  ), model)
+  writeLines(c(
+    "ID,TIME,DV,EVID,AMT,CMT,MDV",
+    "1,0,.,1,100,1,1",
+    "1,2,80,0,.,1,0",
+    "1,12,.,1,100,1,1",
+    "1,14,105,0,.,1,0",
+    "1,24,40,0,.,1,0",
+    if (tte) "1,30,1,0,.,3,0"
+  ), data)
+  list(model = model, data = data)
+}
+
+test_that("ferx_predict_survival reads TAD / TAFD in an ODE-accumulated hazard", {
+  # h(t) = H0 * (1 + KT * anchor). At t = 6, 18, 30 TAD is 6, 6, 18 and TAFD is
+  # 6, 18, 30; H(t) integrates h piecewise across the second dose. Measured error
+  # against these closed forms is ~1e-16 for both columns.
+  expected <- list(
+    TAD  = list(hazard = c(0.106, 0.106, 0.118), cum_hazard = c(0.618, 1.890, 3.234)),
+    TAFD = list(hazard = c(0.106, 0.118, 0.130), cum_hazard = c(0.618, 1.962, 3.450))
+  )
+  for (anchor in names(expected)) {
+    fx   <- write_tad_hazard_fixture(paste0("H0 * (1.0 + KT * ", anchor, ")"))
+    surv <- ferx_predict_survival(fx$model, fx$data, times = c(6, 18, 30))
+    surv <- surv[order(surv$TIME), ]
+    expect_equal(surv$hazard, expected[[anchor]]$hazard,
+                 tolerance = 1e-6, label = paste(anchor, "hazard"))
+    expect_equal(surv$cum_hazard, expected[[anchor]]$cum_hazard,
+                 tolerance = 1e-6, label = paste(anchor, "cum_hazard"))
+  }
+})
+
+test_that("ferx_fit scores a joint PK-TTE subject whose ODE-accumulated hazard reads TAD", {
+  # The PK-only sibling shares the Gaussian term, so the difference is the TTE
+  # term alone: the exact event at t = 30 adds H(30) - log h(30) =
+  # 3.234 - log(0.118) to the NLL, twice that to the OFV. The measured gap to that
+  # closed form is 2.8e-4 on the OFV (2.5e-5 with the random effect removed, so
+  # most of it is the inner-loop EBE solve); the relative tolerance below is about
+  # 1e-3 absolute.
+  ofv_at_init <- function(fx) {
+    ferx_fit(fx$model, fx$data, method = "focei", covariance = FALSE,
+             verbose = FALSE, settings = list(maxiter = 0))$ofv
+  }
+  ofv_joint <- ofv_at_init(write_tad_hazard_fixture())
+  ofv_pk    <- ofv_at_init(write_tad_hazard_fixture(hazard = NULL))
+  expect_equal(ofv_joint - ofv_pk, 2 * (3.234 - log(0.118)), tolerance = 1e-4)
+})
