@@ -37,7 +37,9 @@ continuous/categorical kind.}
 it does not exist. Defaults to the directory containing \code{model}. For a
 \code{\link{ferx_example}()} model that directory is inside the installed
 package, so pass a writable directory such as
-\code{file.path(tempdir(), "frem")}.}
+\code{file.path(tempdir(), "frem")}. Read only for a file whose path is not
+given explicitly, so a call that supplies both \code{output_model} and
+\code{output_data} neither reads nor creates it.}
 
 \item{output_model}{Optional explicit path for the output \code{.ferx} model
 file, used instead of \code{output_dir}. When \code{NULL} (default), the
@@ -47,7 +49,9 @@ file is written to \code{<output_dir>/<stem>_frem.ferx}, where
 \item{output_data}{Optional explicit path for the output CSV data file, used
 instead of \code{output_dir}. When \code{NULL} (default), the file is
 written to \code{<output_dir>/<stem>_frem_data.csv} (the same \code{<stem>}
-as above, taken from the model file, not the data file).}
+as above, taken from the model file, not the data file). Both output paths
+are made absolute, so the returned \code{\link{ferx_model}} does not depend
+on the working directory the call was made from.}
 
 \item{fit}{Optional \code{\link{ferx_fit}} result from fitting \code{model}
 (the base model, before FREM conversion). When supplied, its theta and

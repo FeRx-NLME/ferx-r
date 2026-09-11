@@ -948,9 +948,12 @@
   package library, so the call wrote into the library, or failed where the
   library is read-only. The default paths are now built in `output_dir`, as
   `?ferx_model_to_frem` documents. An explicit `output_model` or `output_data`
-  still takes precedence for that file. When `data` is omitted for a model
-  given as a path, it now falls back to the model file's `[data]` block, as in
-  `ferx_fit()`, instead of erroring.
+  still takes precedence for that file, and `output_dir` is neither read nor
+  created when both are given. The generated paths are made absolute, so a
+  relative `output_dir` no longer returns a `ferx_model` that resolves only
+  from the working directory the call was made in. When `data` is omitted, it
+  now falls back to the model file's `[data]` block, as in `ferx_fit()`,
+  instead of erroring.
 
 - **`print()` of a fit no longer lists uncorrelated random-effect pairs under
   "Correlations"** ([ferx-core #1018](https://github.com/FeRx-NLME/ferx-core/issues/1018)).
