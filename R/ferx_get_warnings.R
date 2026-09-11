@@ -128,6 +128,111 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
   )
 }
 
+# Message phrases that say which clauses an `ode_solver` statistics warning
+# carries. ferx-core builds that warning as one message with a clause per
+# non-zero solver counter (ode_solver_diagnostics_warning() in
+# src/api/postfit.rs), and the guidance below depends on which clauses are
+# there.
+#
+# The warning's `details` payload names every counter, but it never reaches R:
+# fit_result_to_list() in src/rust/src/lib.rs passes each warning's severity,
+# category, message and source_method, and drops `details`. So the clauses have
+# to be told apart by their text. Each phrase below is the one that says what
+# its counter measures, and every one except the rejected-escalation phrase is
+# also asserted on by ferx-core's own tests
+# (src/api/tests/ode_solver_diagnostics_tests.rs), so rewording it breaks a
+# core test too. test-ferx_get_warnings.R checks every phrase against the
+# engine source at the pinned revision.
+.ferx_ode_solver_anchors <- function() {
+  list(
+    # Counters no solver setting can fix.
+    #   abandoned_non_finite_timeline (ferx-core #1234)
+    abandoned_timeline = "could not be ordered",
+    #   auto_stiff_rejected_jets (ferx-core #1204)
+    sensitivity_overflow = "analytic-sensitivity solve",
+    # Counters for an integration that ran but not cleanly, where a solver
+    # setting is the remedy: kept_clamped_steps, auto_stiff_rejected,
+    # auto_fallback_failed, kept_unfinished_segments, stiff_aborted_segments.
+    unclean_integration = c(
+      "clamped at the minimum step size",
+      "stiff escalation(s) chosen by",
+      "had both attempts fail",
+      "returned segment(s) stopped",
+      "were abandoned early"
+    )
+  )
+}
+
+# Guidance for the `ode_solver` category.
+#
+# Two emitters share this code and disagree about severity: the `auto` guard's
+# escalation note is informational - the stiff method coped - while the
+# post-fit statistics pass is not. ferx-core prefixes its own token to each
+# message and its classifier matches on that, so the token picks between them.
+#
+# The token cannot tell the statistics warning's clauses apart, and two of them
+# are not solver-setting problems. A walk abandoned because the subject's
+# timeline could not be ordered never integrated at all (ferx-core #1234), and a
+# segment whose analytic sensitivities overflowed was integrated by the stiff
+# method without trouble (ferx-core #1204). The engine's clause says so for
+# each - no solver setting changes an abandoned walk, and a different
+# ode_method will not help an overflow - so advice to change them, printed
+# directly beneath, contradicted it. Those two now get their own advice. The
+# solver-setting advice is kept for the clauses it does apply to. A message
+# carrying neither of the two - including one whose wording is not recognised -
+# gets the solver-setting advice as before.
+.ferx_ode_solver_guidance <- function(message = "") {
+  if (grepl("W_ODE_SOLVER_ESCALATION_NOTE", message, fixed = TRUE)) {
+    return(paste0(
+      "ode_method = \"auto\" escalated to a stiff solver and the stiff ",
+      "method coped (informational). Set ode_method explicitly to skip the ",
+      "non-stiff attempt."
+    ))
+  }
+  anchors <- .ferx_ode_solver_anchors()
+  carries <- function(phrases) {
+    any(vapply(phrases, grepl, logical(1), x = message, fixed = TRUE))
+  }
+  abandoned <- carries(anchors$abandoned_timeline)
+  overflow  <- carries(anchors$sensitivity_overflow)
+  if (!abandoned && !overflow) {
+    return(paste0(
+      "Integration under the final estimates was not clean: steps clamped at ",
+      "the minimum step size, a stiff escalation the auto guard discarded, or ",
+      "a segment cut short by ode_stiff_abort_after. The optimizer may still ",
+      "have converged. Set ode_method explicitly, or adjust ode_abstol / ",
+      "ode_reltol / ode_max_steps."
+    ))
+  }
+  parts <- character(0)
+  if (abandoned) {
+    parts <- c(parts, paste0(
+      "Nothing was integrated for some subjects: their timeline could not be ",
+      "ordered (a NaN or infinite dose time, lagtime, route lag or infusion ",
+      "duration), so their predictions are NaN. No ode_method or tolerance ",
+      "setting changes that. Check those dose records, and any covariate model ",
+      "on ALAG / F / D / R that can overflow."
+    ))
+  }
+  if (overflow) {
+    parts <- c(parts, paste0(
+      "The analytic sensitivities (the gradients FOCE/FOCEI use) overflowed on ",
+      "some segments although the predictions stayed finite. A different ",
+      "ode_method will not help. Check the model's units and scaling (a state ",
+      "in ng rather than mg, an unbounded growth term) before trusting the ",
+      "estimates."
+    ))
+  }
+  if (carries(anchors$unclean_integration)) {
+    parts <- c(parts, paste0(
+      "For the clamped, discarded, unfinished or aborted segments the message ",
+      "also reports, set ode_method explicitly, or adjust ode_abstol / ",
+      "ode_reltol / ode_max_steps."
+    ))
+  }
+  paste(parts, collapse = " ")
+}
+
 # Does this warning belong to the covariance family?
 #
 # Four categories carry covariance-step messages, not one: ferx-core's
@@ -175,26 +280,8 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
       sde_hint
     ))
   }
-  # Two emitters share this code and disagree about severity: the `auto` guard's
-  # escalation note is informational - the stiff method coped - while the
-  # post-fit statistics pass is not. ferx-core prefixes its own token to each
-  # message and its classifier matches on that, so match the same thing rather
-  # than on prose that may be reworded.
   if (category == "ode_solver") {
-    if (grepl("W_ODE_SOLVER_ESCALATION_NOTE", message, fixed = TRUE)) {
-      return(paste0(
-        "ode_method = \"auto\" escalated to a stiff solver and the stiff ",
-        "method coped (informational). Set ode_method explicitly to skip the ",
-        "non-stiff attempt."
-      ))
-    }
-    return(paste0(
-      "Integration under the final estimates was not clean: steps clamped at ",
-      "the minimum step size, a stiff escalation the auto guard discarded, or ",
-      "a segment cut short by ode_stiff_abort_after. The optimizer may still ",
-      "have converged. Set ode_method explicitly, or adjust ode_abstol / ",
-      "ode_reltol / ode_max_steps."
-    ))
+    return(.ferx_ode_solver_guidance(message))
   }
   if (.ferx_is_covariance_warning(category, message)) {
     # Omega non-PD -- checked before general non-PD because omega messages also
