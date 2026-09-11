@@ -3001,6 +3001,15 @@ fn build_cond_dist_df(result: &FitResult, population: &Population, cd: &CondDist
 // is the value produced by evaluating `pk_param_fn` at the subject's EBE
 // eta + zero kappas + covariates. Returns NULL when there are no subjects or
 // the model declares no individual parameters.
+//
+// Parameters the parser synthesizes (`__ferx_ro_*` for a direct theta/eta
+// reference in a Form-C readout, `__ferx_pktime_*` for `pk(...=TIME)`) are
+// internal and left out, as ferx-core's own `build_indiv_map` does for the
+// `[output]` echo. The prefixes mirror its `READOUT_SYNTH_PREFIX` and
+// `PKTIME_SYNTH_PREFIX`, which are not public; the parser rejects user names
+// that carry them.
+const SYNTHETIC_INDIV_PARAM_PREFIXES: [&str; 2] = ["__ferx_ro_", "__ferx_pktime_"];
+
 fn build_individual_estimates(
     result: &FitResult,
     population: &Population,
@@ -3012,17 +3021,26 @@ fn build_individual_estimates(
     }
     let n_eta = model.n_eta;
     let n_kappa = model.n_kappa;
-    let indiv_names = &model.indiv_param_names;
-    let n_indiv = indiv_names.len();
-    if n_indiv == 0 {
+    // (position in `indiv_param_names`, name) for every user-facing parameter.
+    let columns: Vec<(usize, &str)> = model
+        .indiv_param_names
+        .iter()
+        .enumerate()
+        .filter(|(_, name)| {
+            !SYNTHETIC_INDIV_PARAM_PREFIXES
+                .iter()
+                .any(|prefix| name.starts_with(prefix))
+        })
+        .map(|(i, name)| (i, name.as_str()))
+        .collect();
+    if columns.is_empty() {
         return ().into();
     }
 
     let mut ids: Vec<String> = Vec::with_capacity(n_subj);
     let mut param_cols: Vec<Vec<f64>> =
-        (0..n_indiv).map(|_| Vec::with_capacity(n_subj)).collect();
+        (0..columns.len()).map(|_| Vec::with_capacity(n_subj)).collect();
 
-    let is_ode = model.is_ode_based();
     let mut eta_buf: Vec<f64> = vec![0.0; n_eta + n_kappa];
 
     for (si, sr) in result.subjects.iter().enumerate() {
@@ -3036,23 +3054,29 @@ fn build_individual_estimates(
             eta_buf[n_eta + k] = 0.0;
         }
         let pk = (model.pk_param_fn)(&result.theta, &eta_buf, &subj.covariates, 0.0);
-        for i in 0..n_indiv {
-            // Analytical models route via pk_indices; ODE models write
-            // sequentially into slots 0..n_indiv.
-            let slot = if is_ode {
-                i
-            } else {
-                model.pk_indices.get(i).copied().unwrap_or(i)
-            };
+        for (col, &(i, _)) in columns.iter().enumerate() {
+            // `pk_indices` is parallel to `indiv_param_names` on both engines.
+            // ODE models do NOT write sequentially: ferx-core's
+            // `ode_param_slots` puts canonical names (CL, V, KA, F, LAGTIME,
+            // ...) at their fixed PK slot and every other name in the lowest
+            // free slot that is not reserved for F/lagtime. Reading slot `i`
+            // returned another parameter's value (or an unwritten 0).
+            //
+            // Known gap (ferx-core #1356): on an analytical model a top-level
+            // name not bound in `pk(...)` carries a placeholder `pk_indices`
+            // entry of 0, so it reads CL's value. `pk_indices` alone cannot
+            // tell that placeholder from the real CL entry; the fix is a
+            // by-name value API in ferx-core.
+            let slot = model.pk_indices.get(i).copied().unwrap_or(i);
             let v = pk.values.get(slot).copied().unwrap_or(f64::NAN);
-            param_cols[i].push(v);
+            param_cols[col].push(v);
         }
     }
 
     let mut pairs: Vec<(&str, Robj)> = Vec::new();
     pairs.push(("ID", ids.into()));
-    for i in 0..n_indiv {
-        pairs.push((indiv_names[i].as_str(), param_cols[i].clone().into()));
+    for (&(_, name), values) in columns.iter().zip(param_cols) {
+        pairs.push((name, values.into()));
     }
     let mut df = List::from_pairs(pairs);
     df.set_class(&["data.frame"]).unwrap();
