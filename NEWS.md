@@ -941,6 +941,15 @@
 
 ## Bug fixes
 
+- **`print()` of a `ferx_model` and `ferx_model_inspect()` on a model path now
+  list etas declared in a `block_omega`** (#358). The structure summary built
+  before a fit read IIV names only from `omega NAME ~ ...` lines, so
+  `ferx_example("warfarin_block_omega")` printed `IIV: ETA_KA` instead of
+  `ETA_CL, ETA_V, ETA_KA`, and every `ferx_model_to_frem()` result, whose etas all
+  sit in one block, printed `IIV: none`. `block_kappa` names are now read for
+  IOV the same way, with `iov_weights` kept one entry per name. Post-fit output
+  (`fit$model_structure`) was not affected: it comes from the engine.
+
 - **`print()` of a fit no longer lists uncorrelated random-effect pairs under
   "Correlations"** ([ferx-core #1018](https://github.com/FeRx-NLME/ferx-core/issues/1018)).
   The section opens when any covariance is non-zero, and it then printed every

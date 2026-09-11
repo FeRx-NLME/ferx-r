@@ -165,6 +165,28 @@ ferx_section_headers <- function(lines) {
   none
 }
 
+# Names declared on each `[parameters]` line by `<keyword> NAME ~ ...` or
+# `block_<keyword> (NAME1, NAME2, ...) = [...]`: a list parallel to `lines`,
+# character(0) for a line that declares none. Mirrors the engine's
+# omega_re / block_omega_re (and the kappa pair): case-insensitive, and a
+# block's names are its parenthesised, comma-separated list. A multi-line
+# block is read from its header line, which carries the names.
+.ferx_declared_names <- function(lines, keyword) {
+  diag_re  <- sprintf("^%s\\s+(\\w+).*", keyword)
+  block_re <- sprintf("^block_%s\\s*\\(([^)]+)\\).*", keyword)
+  lapply(lines, function(line) {
+    if (grepl(diag_re, line, ignore.case = TRUE)) {
+      sub(diag_re, "\\1", line, ignore.case = TRUE)
+    } else if (grepl(block_re, line, ignore.case = TRUE)) {
+      nm <- trimws(strsplit(sub(block_re, "\\1", line, ignore.case = TRUE),
+                            ",", fixed = TRUE)[[1L]])
+      nm[nzchar(nm)]
+    } else {
+      character(0)
+    }
+  })
+}
+
 # Parse a .ferx file and return a named list describing model structure.
 # Fields: theta_names (pop param names), model_type (label or NULL),
 #         iiv, iov, residual.
@@ -191,28 +213,28 @@ ferx_section_headers <- function(lines) {
   struct_lines <- b[["structural_model"]] %||% character(0)
   model_type   <- if (length(struct_lines) > 0L) .ferx_model_type(struct_lines) else NULL
 
-  # IIV: omega lines
-  omega_lines <- grep("^omega\\s", params, value = TRUE, ignore.case = TRUE)
-  iiv <- if (length(omega_lines) > 0L)
-    sub("^omega\\s+(\\w+).*", "\\1", omega_lines, ignore.case = TRUE)
-  else
-    character(0)
-
-  # IOV: kappa lines
-  kappa_lines <- grep("^kappa\\s", params, value = TRUE, ignore.case = TRUE)
-  iov <- if (length(kappa_lines) > 0L)
-    sub("^kappa\\s+(\\w+).*", "\\1", kappa_lines, ignore.case = TRUE)
-  else
-    character(0)
+  # IIV and IOV names, in declaration order. Both the diagonal form
+  # (`omega NAME ~ ...`) and the block form (`block_omega (A, B) = [...]`)
+  # declare names; reading only the diagonal form reported a model whose etas
+  # all sit in a block - every ferx_model_to_frem() result - as "IIV: none"
+  # (#358).
+  iiv_names   <- .ferx_declared_names(params, "omega")
+  kappa_names <- .ferx_declared_names(params, "kappa")
+  iiv <- as.character(unlist(iiv_names, use.names = FALSE))
+  iov <- as.character(unlist(kappa_names, use.names = FALSE))
 
   # Sample-size-weighted IOV (ferx-core #1031): `kappa K ~ 2.0 (sd) weight = NARM`
   # declares `kappa_ik ~ N(0, Omega_IOV / N_ik)`. Capture the weight expression
   # so ferx_model_inspect() shows it pre-fit, mirroring the `iov_weights` the
-  # engine attaches to model_structure post-fit. Left as character(0) when no
-  # kappa is weighted, so an ordinary IOV model's structure list is unchanged.
-  iov_weights <- if (length(kappa_lines) > 0L) {
-    w <- vapply(kappa_lines, .ferx_split_weight_modifier, character(1L),
-                USE.NAMES = FALSE)
+  # engine attaches to model_structure post-fit. One entry per name in `iov`
+  # (a block_kappa line repeats its line's value for each of its names). Left
+  # as character(0) when no kappa is weighted, so an ordinary IOV model's
+  # structure list is unchanged.
+  iov_weights <- if (length(iov) > 0L) {
+    w <- unlist(Map(function(line, nm) {
+      if (length(nm) == 0L) character(0)
+      else rep(.ferx_split_weight_modifier(line), length(nm))
+    }, params, kappa_names), use.names = FALSE)
     if (all(is.na(w))) character(0) else w
   } else {
     character(0)

@@ -237,6 +237,18 @@ test_that("fit$model_structure reflects what ferx-core actually parsed (warfarin
   # Proportional residual error model.
   expect_equal(ms$residual, "proportional")
 })
+test_that("pre-fit structure lists block_omega etas as the engine does (#358)", {
+  ex <- ferx_example("warfarin_block_omega")
+
+  pre <- ferx_model_inspect(ex$model)
+  expect_equal(pre$iiv, c("ETA_CL", "ETA_V", "ETA_KA"))
+  expect_output(print(ferx_model(ex$data, ex$model)),
+                "IIV:\\s+ETA_CL, ETA_V, ETA_KA")
+
+  fit <- ferx_fit(ex$model, ex$data, method = "focei", verbose = FALSE,
+                  covariance = FALSE, settings = list(maxiter = 0L))
+  expect_equal(pre$iiv, fit$model_structure$iiv)
+})
 test_that("ferx_model_inspect(fit) reads from the Rust-supplied structure post-fit", {
   fit <- warfarin_fit()
   out <- capture.output(s <- ferx_model_inspect(fit))
