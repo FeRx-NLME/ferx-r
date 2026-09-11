@@ -1,0 +1,51 @@
+# One-compartment oral PK model (warfarin) -- the model AMD starts from.
+#
+# Deliberately the plainest thing that fits the data: first-order absorption,
+# one compartment, no lag time, a diagonal omega over CL / V / KA and a
+# proportional residual error. Every one of those is a decision the pipeline
+# re-opens, which is what makes an AMD run over this model a decision rather
+# than a confirmation:
+#
+#   structural  -- ferx_modelsearch(): a second compartment, a lag time
+#   iivsearch   -- ferx_iivsearch():   which parameters keep an eta, and which
+#                                      of them end up correlated
+#   residual    -- ferx_ruvsearch():   the residual-error form
+#   iovsearch   -- skipped: no `iov_column`, so the dataset's occasions were
+#                  never read (warfarin.csv has no occasion column)
+#   allometry   -- skipped: the space carries no ALLOMETRY statement, and
+#                  warfarin.csv has no body-size column to scale on
+#   covariates  -- skipped: same, no COVARIATE statement and no covariates
+#
+# Paired file: warfarin_amd.ferxsearch, the space and the [amd] options.
+# Dataset:     warfarin.csv (shared with the `warfarin` example).
+#
+# `method = focei` rather than `foce` on purpose: ruvsearch's IIV_on_RUV
+# candidate needs an estimation method with eta-epsilon interaction, and on a
+# `foce` model the residual step reports that family as not tested.
+
+[parameters]
+  theta TVCL(0.134, 0.001, 10.0)
+  theta TVV(8.1, 0.1, 500.0)
+  theta TVKA(1.0, 0.01, 50.0)
+
+  omega ETA_CL ~ 0.07
+  omega ETA_V  ~ 0.02
+  omega ETA_KA ~ 0.40
+
+  sigma PROP_ERR ~ 0.01 (sd)
+
+[individual_parameters]
+  CL = TVCL * exp(ETA_CL)
+  V  = TVV  * exp(ETA_V)
+  KA = TVKA * exp(ETA_KA)
+
+[structural_model]
+  pk one_cpt_oral(cl=CL, v=V, ka=KA)
+
+[error_model]
+  DV ~ proportional(PROP_ERR)
+
+[fit_options]
+  method     = focei
+  maxiter    = 300
+  covariance = true

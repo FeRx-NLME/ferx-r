@@ -290,6 +290,53 @@
   ran as though the argument had never been given. Both now stop with a message
   naming the argument.
 
+- **Automatic model development: `ferx_amd()` and `ferx_amd_plan()`** (#338,
+  the last phase of the #334 search epic; ferx-core #1184). Pharmpy's `amd`
+  from R: the whole pipeline over one model and one search space - structural
+  (`modelsearch`), variability (`iivsearch`), residual error (`ruvsearch`),
+  inter-occasion variability (`iovsearch`), allometric scaling (`allometry`)
+  and covariates (`covsearch`) - each step starting from the model the previous
+  one selected, seeded with its estimates. `strategy` reorders them
+  (`"default"`, `"reevaluation"`, `"SIR"`, `"SRI"`, `"RSI"`) and `skip` leaves
+  one out; both entry forms of every other search tool work here too, a
+  `.ferxsearch` file or the inline arguments rendered into the same
+  configuration.
+
+  **One space describes every step.** The engine partitions it by statement
+  kind and hands each tool only the statements it can read, so
+  `ABSORPTION(FO); PERIPHERALS(0..1); IIV?(@PK, exp)` is a structural search
+  and a variability search without either tool being handed the other's
+  statements - both of which would refuse them. A `[rank]` criterion is
+  narrowed the same way: the two steps that select on a likelihood-ratio test
+  keep their own p-values rather than being handed a BIC they would reject.
+
+  **A winner-only view is not what this returns.** The strictness verdict
+  (`passed`, with the gate's own `failures`) and the termination status
+  (`converged`) are columns at both levels - on every candidate of every step
+  in `$candidates`, and on the model each step selected in `$steps` - beside
+  the criterion, the dOFV and the wall clock. A step that was skipped carries
+  the reason in as many words, and a step that ran and failed is a row saying
+  so rather than a missing one: the pipeline carries on from the model that
+  step was handed. `print()` shows the step table, `summary()` adds every
+  step's candidates and everything the gate excluded, and `$summary_text` is
+  the engine's own report as `ferx amd` prints it.
+
+  `ferx_amd_plan()` answers the same question before any fitting: which steps
+  would run, in which order, and why one would not. It is the plan the engine
+  computes before its first fit rather than a second derivation of it, so a
+  space can be checked for a few seconds instead of an afternoon.
+
+  A run writes `steps.csv`, `candidates.csv`, `final.ferx` and one directory
+  per step (each holding that tool's own fuller record) into `directory`;
+  `directory = NULL` runs the pipeline in a temporary directory that is removed
+  on the way out, which keeps the tables on the object but leaves nothing to
+  resume from.
+
+  `inst/examples/ex_amd.R` runs it end to end, and the new `warfarin_amd`
+  example ships the starting model (the plainest thing the warfarin data
+  supports, so the pipeline has something to decide) with a `.ferxsearch`
+  carrying a structural and a variability space plus an `[amd]` section.
+
 - **Variability-structure search: `ferx_iivsearch()` and `ferx_iovsearch()`**
   (#337, part of the #334 search epic; ferx-core #1183). Pharmpy's `iivsearch`
   and `iovsearch` from R. `ferx_iivsearch()` decides which parameters carry an

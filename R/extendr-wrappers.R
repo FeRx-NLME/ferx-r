@@ -229,4 +229,28 @@ ferx_rust_iovsearch_columns <- function() {
   .Call("wrap__ferx_rust_iovsearch_columns")
 }
 
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_amd <- function(config_path, model_path, data_path, mfl, strategy, retries_on, skip, rank, rank_cutoff, threads, retries, resume, directory, progress) {
+  .Call("wrap__ferx_rust_amd", config_path, model_path, data_path, mfl, strategy, retries_on, skip, rank, rank_cutoff, as.integer(threads), as.integer(retries), resume, directory, progress)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_amd_plan <- function(config_path, model_path, data_path, mfl, strategy, retries_on, skip) {
+  .Call("wrap__ferx_rust_amd_plan", config_path, model_path, data_path, mfl, strategy, retries_on, skip)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_amd_step_columns <- function() {
+  .Call("wrap__ferx_rust_amd_step_columns")
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_amd_candidate_columns <- function() {
+  .Call("wrap__ferx_rust_amd_candidate_columns")
+}
+
 # nolint end
