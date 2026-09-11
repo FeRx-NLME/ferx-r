@@ -203,6 +203,155 @@ test_that("ferx_model_to_frem() explicit `output_model` overrides `output_dir` f
   expect_equal(normalizePath(result$model), normalizePath(explicit))
   expect_equal(list.files(out_dir), "warfarin_frem_data.csv")
 })
+test_that("ferx_model_to_frem() explicit `output_data` overrides `output_dir` for the data only", {
+  # The mirror of the test above: the other half of the same branch pair.
+  tmp <- tempfile("frem_")
+  dir.create(tmp)
+  on.exit(unlink(tmp, recursive = TRUE))
+
+  model_path <- write_warfarin_model(tmp)
+  data_path  <- write_warfarin_with_covariates(tmp)
+  out_dir    <- file.path(tmp, "out")
+  explicit   <- file.path(tmp, "custom_data.csv")
+
+  result <- ferx_model_to_frem(model = model_path, data = data_path,
+                               output_dir = out_dir, output_data = explicit)
+
+  expect_equal(normalizePath(result$data), normalizePath(explicit))
+  expect_equal(list.files(out_dir), "warfarin_frem.ferx")
+})
+test_that("ferx_model_to_frem() returns absolute paths for a relative `output_dir`", {
+  # The backend echoes the paths it is handed straight back (and into the
+  # generated model's `# Data:` comment), so a relative one would only resolve
+  # from the working directory the call happened to be made in.
+  tmp <- tempfile("frem_")
+  dir.create(tmp)
+  old <- setwd(tmp)
+  on.exit({
+    setwd(old)
+    unlink(tmp, recursive = TRUE)
+  })
+
+  model_path <- write_warfarin_model(tmp)
+  data_path  <- write_warfarin_with_covariates(tmp)
+
+  result <- ferx_model_to_frem(model = basename(model_path),
+                               data  = basename(data_path),
+                               output_dir = "relout")
+  setwd(old)
+
+  expect_true(file.exists(result$model))
+  expect_true(file.exists(result$data))
+  expect_equal(normalizePath(dirname(result$model)),
+               normalizePath(file.path(tmp, "relout")))
+  expect_false(any(grepl("# Data: relout", readLines(result$model), fixed = TRUE)))
+})
+test_that("ferx_model_to_frem() returns absolute paths for relative explicit output paths", {
+  tmp <- tempfile("frem_")
+  dir.create(tmp)
+  old <- setwd(tmp)
+  on.exit({
+    setwd(old)
+    unlink(tmp, recursive = TRUE)
+  })
+
+  model_path <- write_warfarin_model(tmp)
+  data_path  <- write_warfarin_with_covariates(tmp)
+  dir.create("out")
+
+  result <- ferx_model_to_frem(model = basename(model_path),
+                               data  = basename(data_path),
+                               output_model = file.path("out", "custom.ferx"),
+                               output_data  = file.path("out", "custom_data.csv"))
+  setwd(old)
+
+  expect_true(file.exists(result$model))
+  expect_true(file.exists(result$data))
+  expect_equal(normalizePath(dirname(result$model)),
+               normalizePath(file.path(tmp, "out")))
+})
+test_that("ferx_model_to_frem() leaves `output_dir` alone when both paths are explicit", {
+  tmp <- tempfile("frem_")
+  dir.create(tmp)
+  on.exit(unlink(tmp, recursive = TRUE))
+
+  model_path <- write_warfarin_model(tmp)
+  data_path  <- write_warfarin_with_covariates(tmp)
+  # A file, not a directory: creating `output_dir` here would fail, and must
+  # not be attempted when neither output path needs it.
+  blocker <- file.path(tmp, "blocker")
+  file.create(blocker)
+  out_model <- file.path(tmp, "explicit.ferx")
+  out_data  <- file.path(tmp, "explicit_data.csv")
+
+  result <- ferx_model_to_frem(model = model_path, data = data_path,
+                               output_dir   = blocker,
+                               output_model = out_model,
+                               output_data  = out_data)
+
+  expect_true(file.exists(out_model))
+  expect_true(file.exists(out_data))
+  expect_equal(normalizePath(result$model), normalizePath(out_model))
+  expect_false(dir.exists(blocker))
+})
+test_that("ferx_model_to_frem() errors, without a contradicting warning, when `output_dir` cannot be created", {
+  tmp <- tempfile("frem_")
+  dir.create(tmp)
+  on.exit(unlink(tmp, recursive = TRUE))
+
+  model_path <- write_warfarin_model(tmp)
+  data_path  <- write_warfarin_with_covariates(tmp)
+  blocker <- file.path(tmp, "blocker")
+  file.create(blocker)
+
+  expect_error(
+    ferx_model_to_frem(model = model_path, data = data_path, output_dir = blocker),
+    "Could not create"
+  )
+
+  # dir.create()'s own "already exists" warning would contradict that error.
+  warned <- FALSE
+  withCallingHandlers(
+    try(ferx_model_to_frem(model = model_path, data = data_path,
+                           output_dir = blocker), silent = TRUE),
+    warning = function(w) {
+      warned <<- TRUE
+      invokeRestart("muffleWarning")
+    }
+  )
+  expect_false(warned)
+})
+test_that("ferx_model_to_frem() rejects output path arguments that are not a single path", {
+  tmp <- tempfile("frem_")
+  dir.create(tmp)
+  on.exit(unlink(tmp, recursive = TRUE))
+
+  model_path <- write_warfarin_model(tmp)
+  data_path  <- write_warfarin_with_covariates(tmp)
+
+  expect_error(ferx_model_to_frem(model_path, data_path, output_dir = c("a", "b")),
+               "`output_dir` must be a single")
+  expect_error(ferx_model_to_frem(model_path, data_path, output_model = c("a", "b")),
+               "`output_model` must be a single")
+  expect_error(ferx_model_to_frem(model_path, data_path, output_data = ""),
+               "`output_data` must be a single")
+})
+test_that("ferx_model_to_frem() takes `data` from the [data] block of a ferx_model carrying none", {
+  tmp <- tempfile("frem_")
+  dir.create(tmp)
+  on.exit(unlink(tmp, recursive = TRUE))
+
+  model_path <- write_warfarin_model(tmp)
+  write_warfarin_with_covariates(tmp)
+  cat("\n[data]\n  path = warfarin_cov.csv\n", file = model_path, append = TRUE)
+
+  # ferx_model()'s scaffold mode stores `data` as given, so a ferx_model can
+  # reach here with none even though wrap mode resolves the block itself.
+  m <- structure(list(model = model_path, data = NULL), class = "ferx_model")
+  result <- ferx_model_to_frem(model = m, output_dir = tmp)
+
+  expect_true(file.exists(result$data))
+})
 test_that("ferx_model_to_frem() takes `data` from the model's [data] block when omitted", {
   tmp <- tempfile("frem_")
   dir.create(tmp)
