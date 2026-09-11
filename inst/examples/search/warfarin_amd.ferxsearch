@@ -1,0 +1,88 @@
+# The AMD pipeline over the one-compartment oral warfarin model.
+#
+# Run it from R with:
+#   res <- ferx_amd(config = ferx_example("warfarin_amd")$search,
+#                   directory = "amd-run")
+#
+# One space describes the whole pipeline: the engine partitions it by statement
+# kind and hands each step only the statements its tool can read. A step the
+# space says nothing about is skipped, and the step table says so - which is
+# why the ALLOMETRY and COVARIATE statements are absent rather than commented
+# out as an afterthought: warfarin.csv carries no covariate column, so there is
+# nothing for those two steps to decide.
+#
+# `base` and `data` are relative to this file's own directory, so the
+# configuration travels with the model it searches.
+
+base = "../models/warfarin_amd.ferx"
+data = "../data/warfarin.csv"
+
+[space]
+# Structural (-> modelsearch): absorption stays first-order (one dose per
+# subject, no early sampling to identify a zero-order duration), so the
+# decisions are a second compartment and an absorption lag.
+#
+# Variability (-> iivsearch): `IIV?` makes each PK parameter's eta
+# exploratory, and `COVARIANCE?(IIV, *)` offers a block over whichever of them
+# survive.
+#
+# There is no IOV statement: the model declares no `iov_column`, so that step
+# is skipped whatever the space says.
+mfl = """
+ABSORPTION(FO); PERIPHERALS(0..1); LAGTIME([OFF,ON])
+IIV?(@PK, exp); COVARIANCE?(IIV, *)
+"""
+
+[rank]
+# The criterion the *ranking* steps use. The two steps that select by a
+# likelihood-ratio test - residual (ruvsearch) and covariates (covsearch) -
+# keep their own p-values: the engine narrows [rank] per step exactly as it
+# narrows the space, rather than handing a BIC to a tool that would refuse it.
+type = "bic"
+
+[strictness]
+# A candidate that did not converge is not a result worth ranking - under
+# automation it would be a selection error, not just a bad fit. `[amd]` turns
+# the init-stall gate off per step by itself: every step starts from a model
+# seeded with its own estimates, so "did not move from its initials" says
+# nothing there.
+require_converged = true
+
+[run]
+# Perturbed restarts per candidate on top of the fit from the exact initials.
+# This is also what the `[amd] retries` pass below uses for its extra starts.
+retries = 1
+resume = false
+
+[amd]
+# structural -> iivsearch -> residual -> iovsearch -> allometry -> covariates,
+# Pharmpy's own order. `reevaluation` appends a second IIV and residual pass
+# (both were decided before the model had its covariates); `SIR`, `SRI` and
+# `RSI` run three steps in the order their initials spell.
+strategy = "default"
+# The perturbed-restart pass over a model a step has already selected: refit it
+# from perturbed starts and keep the better fit, so a step's winner is checked
+# against its own optimum rather than only against its siblings. `final` runs
+# that pass on the pipeline's final model alone; `skip` not at all.
+retries = "all_final"
+# Steps to leave out of the order above, e.g. skip = ["residual"]. A step the
+# space says nothing about is skipped anyway.
+skip = []
+
+[ruvsearch]
+# Read by the residual step. The default level is 0.001; 0.01 is where this
+# dataset has something to say about the proportional error the model assumes.
+p_value = 0.01
+max_iter = 2
+
+[iivsearch]
+# Read by the variability step. Pharmpy's default: start from every eta the
+# space allows and remove them one subset at a time.
+algorithm = "top_down_exhaustive"
+block_retries = 1
+
+[modelsearch]
+# Read by the structural step. `reduced_stepwise` extends only the best model
+# of each feature-set group into the next layer.
+algorithm = "reduced_stepwise"
+iiv_strategy = "absorption_delay"
