@@ -1019,6 +1019,20 @@
   an `ALAG` or `F` that is non-finite at typical parameter values is rejected before
   the fit starts with `E_DOSE_ATTR_NONFINITE`, naming the subject.
 
+- **`ferx_fit()` now warns when an ODE subject's timeline cannot be ordered**
+  ([ferx-core #1234](https://github.com/FeRx-NLME/ferx-core/issues/1234)).
+  A `NaN` or infinite dose time, lagtime, route lag or infusion duration makes
+  the engine abandon that subject's integration before the solver starts, so
+  its predictions are `NaN` by construction - but every counter in the
+  `ode_solver` diagnostic read zero, exactly as for a subject with nothing to
+  integrate, so the fit could return `ofv = NaN` with no warning naming the
+  cause. A fit that hits this at the final estimates now emits an `ode_solver`
+  warning counting the abandoned solver walks (walks, not subjects: a subject's
+  predictions and its `[odes]` state readout are separate walks) and pointing
+  at the dose records and any exponential covariate model on `ALAG` / `F` /
+  `D` / `R`. Follows on from ferx-core #1189 above, which stopped such a
+  subject aborting the fit.
+
 - **A joint PK-TTE subject whose `TENTRY` falls at or before its first record no
   longer scores the divergence sentinel**
   ([ferx-core #1223](https://github.com/FeRx-NLME/ferx-core/issues/1223)).
@@ -1090,6 +1104,21 @@
   lockfile bump when merged.
 
 ## Internal
+
+- **Dependabot now ignores `ferx-tools` as well as `ferx-core`.** The two
+  crates share one git source - the ferx-core repository, pinned at a single
+  revision in `src/rust/Cargo.lock` - so a Dependabot update of either one
+  moves the pin for both. Only `ferx-core` was on the ignore list, so
+  Dependabot's `ferx-tools` bumps advanced the engine pin twice outside
+  `tools/update-ferx-core-lock.sh`: #319 (`a861757` -> `eb669c4`) and #340
+  (`19bf7cf` -> `909ad38`), neither with a NEWS entry. The `R-CMD-check` pin
+  guard passed both - each kept the git source and one shared revision - so
+  the ignore list is the only thing that stops this. Of what they imported,
+  ferx-core #1234 is the change users see, now written up under Bug fixes. The
+  rest needs no entry: the engine's `ferx gam` CLI, review fixes to the GAM
+  screen behind `ferx_gam_screen()` (ferx-core #1114; the function is new in
+  this development version), a narrow FOCEI analytic-gradient speed-up
+  (ferx-core #829) and a test-only fix.
 
 - **The pinned engine crosses a semver-breaking boundary: `ferx-core` /
   `ferx-tools` `0.3.1` -> `0.4.0`** (revision `909ad382` -> `944cbf1e`).
