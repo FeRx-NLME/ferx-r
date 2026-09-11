@@ -831,6 +831,22 @@
 
 ## Bug fixes
 
+- **An ODE-accumulated hazard that reads `TAD` or `TAFD` no longer evaluates to
+  `NaN`** ([ferx-core #1261](https://github.com/FeRx-NLME/ferx-core/issues/1261),
+  [#1266](https://github.com/FeRx-NLME/ferx-core/issues/1266)). The hazard
+  readout re-evaluated the ODE right-hand side with the bare PK parameter array,
+  which ends at the last PK parameter and omits the two trailing slots the RHS
+  reserves for the dose-time anchors `TAFD` and `TAD`. A `hazard =` expression
+  that reads either one - or that depends on a statement which does - therefore
+  saw a non-finite hazard, which surfaced much later as a misleading finite
+  objective and could reject valid subjects, single-dose ones included. Only the
+  hazard is affected: the readout keeps the cumulative-hazard slot alone, so an
+  `[odes]` block reading `TAD` beside a `TAD`-free hazard always evaluated
+  correctly. The readout now passes the same extended parameters the integrator
+  itself uses. This reaches `ferx_predict_survival()` and joint PK-TTE fits whose
+  `[event_model]` hazard accumulates on an ODE state. **No bundled example is
+  affected**: no TTE model in `inst/examples/models/` reads `TAD` or `TAFD`.
+
 - **A `.tmp` checkpoint from a deterministic stage now holds the best point, not
   a throwaway probe** ([ferx-core #1317](https://github.com/FeRx-NLME/ferx-core/issues/1317)).
   `foce`, `focei`, `laplace`, `gn` and `gn_hybrid` evaluate the objective at every
@@ -1077,7 +1093,7 @@
   (plus residual error), and points at `ferx_predict()` for the typical-value
   curve and `ferx_simulate_with_uncertainty()` for parameter uncertainty on top.
 
-- **`cov_inner_tol` / covariance-key docs now distinguish pre- and post-pinned behavior**
+- **`cov_inner_tol` / covariance-key docs now match the pinned engine**
   ([ferx-core #956](https://github.com/FeRx-NLME/ferx-core/pull/956)).
   In ferx-core `7f15dba`, `cov_inner_tol` moved to the advertised covariance
   settings set, so the old warning about it being ignored is removed; the key is
@@ -1086,10 +1102,10 @@
   Hessian standard errors). In that mode, the engine warns that each key
   configures a step that does not run and ignores it.
 
-  This documentation update is written against the `7f15dba` behavior and the current
-  ferx-r pin does not yet include it. `src/rust/Cargo.lock` remains at
-  `909ad38` in this branch, so a build against this repository still emits the
-  current pinned warning pattern and allows non-positive `cov_inner_tol` values.
+  This documentation update is written against the `7f15dba` behavior, which the
+  pinned engine now includes: `7f15dba` is an ancestor of the pinned revision, so
+  a build against this repository rejects a non-positive or non-finite
+  `cov_inner_tol` outright rather than warning about it.
 
 - **Two smaller corrections in the same area.** `covariance_fallback` and
   `ferx_covariance()` both described the matrix they rectify as the "FD
@@ -1100,8 +1116,8 @@
   budget, when it in fact selects an automatic one of `30 * (n_params + 1)`.
 
   This `7f15dba` change is independent of the existing `0.3.1` -> `0.4.0`
-  release-line work already in this repository, which is why it will need its own
-  lockfile bump when merged.
+  release-line work already in this repository. It needed no lockfile bump of its
+  own: it arrived with the pin move to `944cbf1e`, which already contained it.
 
 ## Internal
 
@@ -1111,14 +1127,39 @@
   moves the pin for both. Only `ferx-core` was on the ignore list, so
   Dependabot's `ferx-tools` bumps advanced the engine pin twice outside
   `tools/update-ferx-core-lock.sh`: #319 (`a861757` -> `eb669c4`) and #340
-  (`19bf7cf` -> `909ad38`), neither with a NEWS entry. The `R-CMD-check` pin
-  guard passed both - each kept the git source and one shared revision - so
-  the ignore list is the only thing that stops this. Of what they imported,
-  ferx-core #1234 is the change users see, now written up under Bug fixes. The
-  rest needs no entry: the engine's `ferx gam` CLI, review fixes to the GAM
-  screen behind `ferx_gam_screen()` (ferx-core #1114; the function is new in
-  this development version), a narrow FOCEI analytic-gradient speed-up
-  (ferx-core #829) and a test-only fix.
+  (`19bf7cf` -> `909ad38`), neither with a NEWS entry. Both passed the
+  `R-CMD-check` pin guard, and its successor `tools/check-ferx-core-pin.sh`
+  (#349, below) passes such a bump too - each kept the git source and one
+  shared revision - so the ignore list is the only thing that stops this. Of
+  what they imported, ferx-core #1234 is the change users see, now written up
+  under Bug fixes. The rest needs no entry: the engine's `ferx gam` CLI, review
+  fixes to the GAM screen behind `ferx_gam_screen()` (ferx-core #1114; the
+  function is new in this development version), a narrow FOCEI
+  analytic-gradient speed-up (ferx-core #829) and a test-only fix.
+
+- **The pinned engine revision moves `944cbf1e` -> `8694824`**, with `ferx-core`
+  and `ferx-tools` both staying at `0.4.0` (one repository, one revision, two
+  lock entries). The range is three commits, all of the ODE-accumulated-hazard
+  fix above ([ferx-core #1323](https://github.com/FeRx-NLME/ferx-core/pull/1323)).
+  No public Rust API changed in the range, so this package's glue is untouched.
+  The bare `cargo update` that `tools/update-ferx-core-lock.sh` runs also carries
+  a transitive `toml` `1.1.5` -> `1.1.6` into the lock.
+
+- **One `Cargo.lock` pin check, shared by CI and contributors** (#349). With a
+  sibling `../ferx-core` patched in, every cargo resolve rewrites
+  `src/rust/Cargo.lock` - `R CMD INSTALL .`, `roxygen2::roxygenize()` and
+  `pkgload::load_all()` included: a patch that applies deletes both
+  `source = "git+..."` pins, one that goes unused appends `[[patch.unused]]`
+  tables, and `git status` shows either as an ordinary modified file. The
+  `R-CMD-check` pin guard moved into `tools/check-ferx-core-pin.sh`, which also
+  rejects `[[patch.unused]]` tables and says how to repair each case, and a new CI
+  step feeds it damaged locks so a deleted check fails the build.
+  `tools/update-ferx-core-lock.sh` calls the same check and now runs in a fresh
+  clone or worktree without `src/rust/.cargo/config.toml`. `src/Makevars` no
+  longer claims "using local ../ferx-core checkout" before cargo has decided
+  anything - a `[patch]` applies only at exactly the locked version - and in a
+  git worktree with no sibling it says the pinned revision is being built.
+  Keeping the lock pinned during local builds is left to a follow-up.
 
 - **The pinned engine crosses a semver-breaking boundary: `ferx-core` /
   `ferx-tools` `0.3.1` -> `0.4.0`** (revision `909ad382` -> `944cbf1e`).
@@ -1137,11 +1178,12 @@
   arm; from here on a new covariate form is genuinely additive.
 
   One local-development consequence: while the lock still pinned `0.3.1`, the
-  `[patch]` in `src/rust/.cargo/config.toml` stopped applying, because
-  `ferx-tools 0.3.1` requires `ferx-core ^0.3` and the sibling checkout had moved
-  to `0.4.0` — so a local build silently used GitHub `main` instead of the
-  sibling. Bumping the lock restores it; `src/Makevars` regenerates the file with
-  both `[patch]` entries on every `R CMD INSTALL`.
+  `[patch]` in `src/rust/.cargo/config.toml` stopped applying, because the
+  sibling checkout had moved to `0.4.0` and cargo uses a `[patch]` only at
+  exactly the version the lock pins — so a local build silently built the pinned
+  GitHub revision instead of the sibling. Bumping the lock restores it;
+  `src/Makevars` regenerates the file with both `[patch]` entries on every
+  `R CMD INSTALL`.
 
 - **The engine gained `ferx globalsearch`** — global model search by genetic
   algorithm or exhaustive enumeration, ranked on pyDarwin-style penalized fitness
