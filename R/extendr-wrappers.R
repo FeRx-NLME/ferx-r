@@ -205,4 +205,28 @@ ferx_rust_covsearch_columns <- function() {
   .Call("wrap__ferx_rust_covsearch_columns")
 }
 
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_iivsearch <- function(config_path, model_path, data_path, mfl, algorithm, correlation_algorithm, as_fullblock, block_retries, rank, rank_cutoff, threads, retries, resume, directory, progress) {
+  .Call("wrap__ferx_rust_iivsearch", config_path, model_path, data_path, mfl, algorithm, correlation_algorithm, as.integer(as_fullblock), as.integer(block_retries), rank, rank_cutoff, as.integer(threads), as.integer(retries), resume, directory, progress)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_iivsearch_columns <- function() {
+  .Call("wrap__ferx_rust_iivsearch_columns")
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_iovsearch <- function(config_path, model_path, data_path, mfl, column, distribution, groups, block_retries, rank, rank_cutoff, threads, retries, resume, directory, progress) {
+  .Call("wrap__ferx_rust_iovsearch", config_path, model_path, data_path, mfl, column, distribution, groups, as.integer(block_retries), rank, rank_cutoff, as.integer(threads), as.integer(retries), resume, directory, progress)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_iovsearch_columns <- function() {
+  .Call("wrap__ferx_rust_iovsearch_columns")
+}
+
 # nolint end

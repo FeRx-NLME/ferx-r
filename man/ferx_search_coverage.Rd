@@ -42,6 +42,8 @@ ferx_search_coverage("ELIMINATION([FO, MM])")
 Other search:
 \code{\link[=ferx_allometry]{ferx_allometry()}},
 \code{\link[=ferx_covsearch]{ferx_covsearch()}},
+\code{\link[=ferx_iivsearch]{ferx_iivsearch()}},
+\code{\link[=ferx_iovsearch]{ferx_iovsearch()}},
 \code{\link[=ferx_modelsearch]{ferx_modelsearch()}},
 \code{\link[=ferx_ruvsearch]{ferx_ruvsearch()}},
 \code{\link[=ferx_search_config]{ferx_search_config()}},

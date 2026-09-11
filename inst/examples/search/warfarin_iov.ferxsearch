@@ -1,0 +1,45 @@
+# Inter-occasion variability search over the warfarin IOV model.
+#
+# Run it from R with:
+#   res <- ferx_iovsearch(config = ferx_example("warfarin_iov")$search,
+#                         directory = "iovsearch-run")
+#
+# The base model reads its occasions from `iov_column = OCC` and carries one
+# kappa (on CL). The search fits the full-IOV model first - a kappa on every
+# parameter that carries a free eta - then removes the kappas that do not earn
+# their parameters, and finally the etas of the parameters that kept one.
+#
+# `base` and `data` are relative to this file's own directory, so the
+# configuration travels with the model it searches.
+
+base = "../models/warfarin_iov.ferx"
+data = "../data/warfarin_iov.csv"
+
+[space]
+# Every PK parameter that carries a free eta is a kappa candidate. This is
+# also what the tool does with no [space] at all; it is written out here
+# because a file that states its own space is the reproducible artifact.
+mfl = "IOV?(*, exp)"
+
+[rank]
+# `bic` is the BIC(random) for this tool: a kappa is a random effect, and the
+# criterion counts it against the number of occasions it is estimated over
+# rather than the number of observations.
+type = "bic"
+
+[strictness]
+require_converged = true
+reject_init_stall = true
+
+[run]
+# Perturbed restarts per candidate on top of the fit from the exact initials.
+retries = 2
+resume = false
+
+[iovsearch]
+# How the added kappas are declared. `same-as-iiv` - the default - blocks them
+# as their etas are blocked, so a `block_omega` over two etas gives a
+# `block_kappa` over their kappas. `disjoint` gives each its own line, `joint`
+# one block over all of them, and `explicit` takes the blocks from `groups`.
+distribution = "same-as-iiv"
+block_retries = 2

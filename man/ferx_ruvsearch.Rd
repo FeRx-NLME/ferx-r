@@ -90,7 +90,11 @@ own column order: \code{iteration}, \code{candidate},
 followed by \code{family} (the feature's family, which is what
 \code{skip} names and what a selection retires) and \code{note} (why
 a row could not be compared, on its own; \code{failures} carries it
-too when the gate had nothing to say).}
+too when the gate had nothing to say). A row with \code{screened =
+      TRUE} is a CWRES pre-screen fit: its \code{ofv} is on the CWRES scale
+rather than the data's, and \code{cwres_dofv} is its improvement over
+the CWRES base - only the feature the screen picked was refitted to
+the data.}
 \item{fit}{The final model's fit as a \code{ferx_fit}, or \code{NULL}
 when a degraded resume could not recover it.}
 \item{model_text}{Every fitted model's text, named by candidate id, so a
@@ -200,6 +204,8 @@ res2 <- ferx_ruvsearch(config = ex$search, directory = "ruvsearch-run-2")
 Other search:
 \code{\link[=ferx_allometry]{ferx_allometry()}},
 \code{\link[=ferx_covsearch]{ferx_covsearch()}},
+\code{\link[=ferx_iivsearch]{ferx_iivsearch()}},
+\code{\link[=ferx_iovsearch]{ferx_iovsearch()}},
 \code{\link[=ferx_modelsearch]{ferx_modelsearch()}},
 \code{\link[=ferx_search_config]{ferx_search_config()}},
 \code{\link[=ferx_search_coverage]{ferx_search_coverage()}},
