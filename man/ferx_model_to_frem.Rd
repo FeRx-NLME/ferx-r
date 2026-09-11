@@ -20,7 +20,9 @@ object. The model must declare its covariates in a \code{[covariates]}
 block, each tagged continuous or categorical.}
 
 \item{data}{Path to a NONMEM-format CSV file containing the covariate
-columns.}
+columns. Optional when \code{model} is a \code{ferx_model} that already
+carries a data path, or when the model file declares a \code{[data]} block
+(\code{path = ...}); passing \code{data} here overrides either.}
 
 \item{covariates}{Optional character vector used as a \emph{subset filter}
 over the covariates declared in the model's \code{[covariates]} block. When
@@ -31,16 +33,21 @@ declared in the block; an undeclared name is an error. This argument cannot
 introduce covariates the model has not declared, nor change their
 continuous/categorical kind.}
 
-\item{output_dir}{Directory for the output model and data files. Defaults to
-the directory containing \code{model}.}
+\item{output_dir}{Directory for the output model and data files, created if
+it does not exist. Defaults to the directory containing \code{model}. For a
+\code{\link{ferx_example}()} model that directory is inside the installed
+package, so pass a writable directory such as
+\code{file.path(tempdir(), "frem")}.}
 
 \item{output_model}{Optional explicit path for the output \code{.ferx} model
-file. When \code{NULL} (default), the file is written to
-\code{<output_dir>/<stem>_frem.ferx}.}
+file, used instead of \code{output_dir}. When \code{NULL} (default), the
+file is written to \code{<output_dir>/<stem>_frem.ferx}, where
+\code{<stem>} is the model file name without its extension.}
 
-\item{output_data}{Optional explicit path for the output CSV data file. When
-\code{NULL} (default), the file is written to
-\code{<output_dir>/<stem>_frem_data.csv}.}
+\item{output_data}{Optional explicit path for the output CSV data file, used
+instead of \code{output_dir}. When \code{NULL} (default), the file is
+written to \code{<output_dir>/<stem>_frem_data.csv} (the same \code{<stem>}
+as above, taken from the model file, not the data file).}
 
 \item{fit}{Optional \code{\link{ferx_fit}} result from fitting \code{model}
 (the base model, before FREM conversion). When supplied, its theta and

@@ -168,6 +168,55 @@ test_that("ferx_model_to_frem() returns a ferx_model referencing the generated f
   expect_true(file.exists(result$model))
   expect_true(file.exists(result$data))
 })
+test_that("ferx_model_to_frem() writes both files to `output_dir`, not the model directory", {
+  model_dir <- tempfile("frem_model_")
+  out_dir   <- file.path(tempfile("frem_out_"), "nested")  # created on demand
+  dir.create(model_dir)
+  on.exit(unlink(c(model_dir, dirname(out_dir)), recursive = TRUE))
+
+  model_path <- write_warfarin_model(model_dir)
+  data_path  <- write_warfarin_with_covariates(model_dir)
+  before     <- list.files(model_dir)
+
+  result <- ferx_model_to_frem(model = model_path, data = data_path,
+                               output_dir = out_dir)
+
+  expect_setequal(list.files(out_dir),
+                  c("warfarin_frem.ferx", "warfarin_frem_data.csv"))
+  expect_setequal(list.files(model_dir), before)
+  expect_equal(normalizePath(dirname(result$model)), normalizePath(out_dir))
+  expect_equal(normalizePath(dirname(result$data)),  normalizePath(out_dir))
+})
+test_that("ferx_model_to_frem() explicit `output_model` overrides `output_dir` for the model only", {
+  tmp <- tempfile("frem_")
+  dir.create(tmp)
+  on.exit(unlink(tmp, recursive = TRUE))
+
+  model_path <- write_warfarin_model(tmp)
+  data_path  <- write_warfarin_with_covariates(tmp)
+  out_dir    <- file.path(tmp, "out")
+  explicit   <- file.path(tmp, "custom.ferx")
+
+  result <- ferx_model_to_frem(model = model_path, data = data_path,
+                               output_dir = out_dir, output_model = explicit)
+
+  expect_equal(normalizePath(result$model), normalizePath(explicit))
+  expect_equal(list.files(out_dir), "warfarin_frem_data.csv")
+})
+test_that("ferx_model_to_frem() takes `data` from the model's [data] block when omitted", {
+  tmp <- tempfile("frem_")
+  dir.create(tmp)
+  on.exit(unlink(tmp, recursive = TRUE))
+
+  model_path <- write_warfarin_model(tmp)
+  write_warfarin_with_covariates(tmp)
+  cat("\n[data]\n  path = warfarin_cov.csv\n", file = model_path, append = TRUE)
+
+  result <- ferx_model_to_frem(model = model_path, output_dir = tmp)
+
+  expect_true(file.exists(result$data))
+  expect_true("FREMTYPE" %in% names(read.csv(result$data)))
+})
 test_that("ferx_model_to_frem() uses all declared covariates when `covariates` omitted", {
   tmp <- tempfile("frem_")
   dir.create(tmp)

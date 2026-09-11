@@ -885,6 +885,17 @@
 
 ## Bug fixes
 
+- **`ferx_model_to_frem()` now writes its files to `output_dir`.** Unless
+  `output_model` and `output_data` were both given, `output_dir` was created and
+  then ignored: the generated `<stem>_frem.ferx` and `<stem>_frem_data.csv` went
+  next to the model file. For a `ferx_example()` model that is the installed
+  package library, so the call wrote into the library, or failed where the
+  library is read-only. The default paths are now built in `output_dir`, as
+  `?ferx_model_to_frem` documents. An explicit `output_model` or `output_data`
+  still takes precedence for that file. When `data` is omitted for a model
+  given as a path, it now falls back to the model file's `[data]` block, as in
+  `ferx_fit()`, instead of erroring.
+
 - **`ferx_get_warnings()` no longer recommends solver settings for ODE problems
   they cannot fix** ([ferx-core #1234](https://github.com/FeRx-NLME/ferx-core/issues/1234),
   [ferx-core #1204](https://github.com/FeRx-NLME/ferx-core/issues/1204)). The

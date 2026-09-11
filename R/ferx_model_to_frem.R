@@ -13,7 +13,9 @@
 #'   object. The model must declare its covariates in a \code{[covariates]}
 #'   block, each tagged continuous or categorical.
 #' @param data Path to a NONMEM-format CSV file containing the covariate
-#'   columns.
+#'   columns. Optional when \code{model} is a \code{ferx_model} that already
+#'   carries a data path, or when the model file declares a \code{[data]} block
+#'   (\code{path = ...}); passing \code{data} here overrides either.
 #' @param covariates Optional character vector used as a \emph{subset filter}
 #'   over the covariates declared in the model's \code{[covariates]} block. When
 #'   \code{NULL} (the default), \strong{all} declared covariates are included.
@@ -22,14 +24,19 @@
 #'   declared in the block; an undeclared name is an error. This argument cannot
 #'   introduce covariates the model has not declared, nor change their
 #'   continuous/categorical kind.
-#' @param output_dir Directory for the output model and data files. Defaults to
-#'   the directory containing \code{model}.
+#' @param output_dir Directory for the output model and data files, created if
+#'   it does not exist. Defaults to the directory containing \code{model}. For a
+#'   \code{\link{ferx_example}()} model that directory is inside the installed
+#'   package, so pass a writable directory such as
+#'   \code{file.path(tempdir(), "frem")}.
 #' @param output_model Optional explicit path for the output \code{.ferx} model
-#'   file. When \code{NULL} (default), the file is written to
-#'   \code{<output_dir>/<stem>_frem.ferx}.
-#' @param output_data Optional explicit path for the output CSV data file. When
-#'   \code{NULL} (default), the file is written to
-#'   \code{<output_dir>/<stem>_frem_data.csv}.
+#'   file, used instead of \code{output_dir}. When \code{NULL} (default), the
+#'   file is written to \code{<output_dir>/<stem>_frem.ferx}, where
+#'   \code{<stem>} is the model file name without its extension.
+#' @param output_data Optional explicit path for the output CSV data file, used
+#'   instead of \code{output_dir}. When \code{NULL} (default), the file is
+#'   written to \code{<output_dir>/<stem>_frem_data.csv} (the same \code{<stem>}
+#'   as above, taken from the model file, not the data file).
 #' @param fit Optional \code{\link{ferx_fit}} result from fitting \code{model}
 #'   (the base model, before FREM conversion). When supplied, its theta and
 #'   omega estimates seed the generated FREM model's PK theta inits and PK-PK
@@ -76,6 +83,8 @@ ferx_model_to_frem <- function(model,
     model_path <- model$model
   } else {
     model_path <- model
+    # Fall back to the model file's [data] block, as ferx_fit() does.
+    if (is.null(data)) data <- .ferx_model_data_path(model_path)
   }
 
   # --- validate inputs ---
@@ -126,19 +135,24 @@ ferx_model_to_frem <- function(model,
   if (is.null(output_dir)) {
     output_dir <- dirname(model_path)
   }
-  if (!dir.exists(output_dir)) {
-    dir.create(output_dir, recursive = TRUE)
+  if (!dir.exists(output_dir) && !dir.create(output_dir, recursive = TRUE)) {
+    stop("Could not create `output_dir`: ", output_dir)
   }
 
+  # Build the default output paths here rather than leaving them empty: an
+  # empty path makes the backend fall back to the *model's* directory, which
+  # ignores `output_dir` (and for a ferx_example() model is the installed
+  # package library).
+  stem <- tools::file_path_sans_ext(basename(model_path))
   out_model_path <- if (!is.null(output_model)) {
     as.character(output_model)
   } else {
-    ""
+    file.path(output_dir, paste0(stem, "_frem.ferx"))
   }
   out_data_path <- if (!is.null(output_data)) {
     as.character(output_data)
   } else {
-    ""
+    file.path(output_dir, paste0(stem, "_frem_data.csv"))
   }
 
   # --- call Rust backend ---
