@@ -14,9 +14,11 @@
 # (commits 1ce7f59, b96c867).
 #
 # This script temporarily removes the patch so cargo resolves ferx-core from
-# GitHub and writes the correct git+https pin. `cargo update -p ferx-core`
-# does NOT work here because with the patch absent the package spec is the
-# full git URL, not a bare name; plain `cargo update` is used instead.
+# GitHub and writes the correct git+https pin. It runs a whole-graph
+# `cargo update`, which also moves every registry crate to its latest
+# compatible version. With the patch absent, `cargo update -p ferx-core
+# --precise <sha>` also works (measured 2026-09-11) and moves only ferx-core and
+# ferx-tools, which share one git source; use that to pin a specific revision.
 #
 # Run from the repo root.
 
@@ -26,15 +28,14 @@ cd "$(dirname "$0")/.."
 RUST_DIR="src/rust"
 CONFIG="$RUST_DIR/.cargo/config.toml"
 
-if [[ ! -f "$CONFIG" ]]; then
-  echo "error: $CONFIG not found — run from a fresh checkout where Makevars has populated it" >&2
-  exit 1
+# No config.toml (a fresh clone or worktree that has not been built yet) means no
+# [patch] to take out of the way, so there is nothing to back up.
+if [[ -f "$CONFIG" ]]; then
+  BACKUP="$CONFIG.bumplock.bak"
+  cp "$CONFIG" "$BACKUP"
+  trap 'mv "$BACKUP" "$CONFIG"' EXIT
+  rm "$CONFIG"
 fi
-
-BACKUP="$CONFIG.bumplock.bak"
-cp "$CONFIG" "$BACKUP"
-trap 'mv "$BACKUP" "$CONFIG"' EXIT
-rm "$CONFIG"
 
 ( cd "$RUST_DIR" && cargo update )
 
