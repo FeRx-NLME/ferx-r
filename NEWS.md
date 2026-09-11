@@ -957,10 +957,24 @@
   `F` / `LAGTIME`. Columns therefore showed another parameter's value or an
   unwritten `0` - `KA` and `LAGTIME` were `0` on `warfarin_ode_lagtime`, `KA`
   was `0` on `warfarin_ode`, and `transit_savic` reported the `TVN` estimate
-  as `KA`, `0` as `MTT` and the `TVKA` estimate as `NTR`. Analytical models were
-  unaffected. The table now reads each parameter through the engine's
-  per-parameter slot map, the same one the ODE right-hand side reads from, so
-  it agrees with an `[output]` echo of the same names in `sdtab`.
+  as `KA`, `0` as `MTT` and the `TVKA` estimate as `NTR`. The table now reads
+  each parameter through the engine's per-parameter slot map, the same one the
+  ODE right-hand side reads from; on `warfarin_ode_lagtime` and `transit_savic`
+  every value equals the model's own formula evaluated at `fit$theta` and
+  `fit$ebe_etas`.
+
+  The table also no longer carries columns named `__ferx_ro_*` or
+  `__ferx_pktime_*`. The parser adds these internal parameters when a
+  `[scaling]` readout refers to a `theta` or `eta` directly, or when
+  `pk(...)` binds a parameter to `TIME`, and `ferx_xpose()` listed them as
+  parameter columns.
+
+  **Still wrong on analytical models:** a top-level `[individual_parameters]`
+  name that is not bound on the `[structural_model]` line (an intermediate such
+  as `TVCL`, or `LAMBDA` in the bundled `tte_exponential`) reports CL's value.
+  The same wrong value appears in an `[output]` echo of that name. This needs
+  an engine change and is tracked in
+  [ferx-core #1356](https://github.com/FeRx-NLME/ferx-core/issues/1356).
 
   Two consumers read this table and were wrong on ODE models for the same
   reason; both are corrected by the same change. `ferx_xpose()` joins it into
