@@ -1901,47 +1901,101 @@ test_that("ebe_etas and individual_estimates align on ID and row count", {
 # LAGTIME, ...) at their fixed slot and every other name in a free slot that is
 # not reserved for F/lagtime. `individual_estimates` used to read slot i for
 # parameter i, which reported KA = LAGTIME = 0 on warfarin_ode_lagtime and
-# shifted transit_savic's columns (KA = TVN, NTR = TVKA, MTT = 0). The `[output]`
-# echo in sdtab reads each parameter by name, so it is the reference here.
-# Neither side depends on convergence, so a few iterations are enough.
-test_that("individual_estimates on ODE models match the [output] echo in sdtab", {
+# shifted transit_savic's columns (KA = TVN, NTR = TVKA, MTT = 0).
+#
+# The reference is each model's own [individual_parameters] formula evaluated in
+# R from `fit$theta` and `fit$ebe_etas`. It must not come from the engine: the
+# sdtab `[output]` echo reads values through the same `pk_indices` map as
+# `individual_estimates`, so it would agree with a wrong map. Measured max
+# relative difference against this reference: exactly 0 on both models.
+#
+# warfarin_ode_lagtime runs with maxiter = 0 (7 s instead of 23 s at maxiter = 5)
+# because its EBE etas already separate every parameter. transit_savic needs a
+# few iterations: TVKA and TVMTT both start at 1.0, which would make a KA/MTT
+# swap invisible; the non-degeneracy check below guards that.
+test_that("individual_estimates on ODE models match theta and the EBE etas", {
   cases <- list(
-    warfarin_ode_lagtime = c("CL", "V", "KA", "LAGTIME"),
-    transit_savic        = c("CL", "V", "KA", "MTT", "NTR")
+    warfarin_ode_lagtime = list(maxiter = 0L, ref = function(th, eb) data.frame(
+      CL      = th[["TVCL"]]  * exp(eb$ETA_CL),
+      V       = th[["TVV"]]   * exp(eb$ETA_V),
+      KA      = th[["TVKA"]]  * exp(eb$ETA_KA),
+      LAGTIME = th[["TVLAG"]] * exp(eb$ETA_LAG)
+    )),
+    transit_savic = list(maxiter = 5L, ref = function(th, eb) data.frame(
+      CL  = th[["TVCL"]] * exp(eb$ETA_CL),
+      V   = th[["TVV"]]  * exp(eb$ETA_V),
+      KA  = rep(th[["TVKA"]],  nrow(eb)),
+      MTT = rep(th[["TVMTT"]], nrow(eb)),
+      NTR = rep(th[["TVN"]],   nrow(eb))
+    ))
   )
   for (name in names(cases)) {
-    ex     <- ferx_example(name)
-    mod    <- readLines(ex$model)
-    params <- cases[[name]]
-    tmp <- tempfile(fileext = ".ferx")
-    on.exit(unlink(tmp), add = TRUE)
-    writeLines(c(mod, "", "[output]", paste(" ", paste(params, collapse = " "))),
-               tmp)
-    fit <- ferx_fit(tmp, ex$data, verbose = FALSE, covariance = FALSE,
-                    settings = list(maxiter = 5L))
+    ex  <- ferx_example(name)
+    fit <- ferx_fit(ex$model, ex$data, verbose = FALSE, covariance = FALSE,
+                    settings = list(maxiter = cases[[name]]$maxiter))
+    ie  <- fit$individual_estimates
+    ref <- cases[[name]]$ref(fit$theta, fit$ebe_etas)
+    params <- names(ref)
 
-    ie <- fit$individual_estimates
     expect_setequal(setdiff(names(ie), "ID"), params)
-    first <- fit$sdtab[!duplicated(fit$sdtab$ID), , drop = FALSE]
-    idx <- match(ie$ID, as.character(first$ID))
-    expect_false(anyNA(idx), info = name)
+    expect_equal(ie$ID, fit$ebe_etas$ID)
+    # A swap of two parameters is only detectable when their values differ.
+    for (pair in utils::combn(params, 2L, simplify = FALSE)) {
+      expect_false(isTRUE(all.equal(ref[[pair[1]]], ref[[pair[2]]])),
+                   info = sprintf("%s: %s and %s coincide", name, pair[1], pair[2]))
+    }
     for (p in params) {
-      # Every parameter in both models is strictly positive; an unwritten
-      # slot reads back as 0.
-      expect_true(all(ie[[p]] > 0), info = sprintf("%s: %s", name, p))
-      expect_equal(ie[[p]], first[[p]][idx], tolerance = 1e-8,
+      expect_equal(ie[[p]], ref[[p]], tolerance = 1e-10,
                    info = sprintf("%s: %s", name, p))
     }
 
-    # ferx_xpose() overwrites an sdtab echo with the individual_estimates value
-    # (warning about the collision), so its parameter columns must still carry
-    # the echoed values.
-    xp <- suppressWarnings(.ferx_xpose_frame(fit))$data
+    # ferx_xpose() joins the table onto the observation rows as its parameter
+    # columns.
+    xp  <- .ferx_xpose_frame(fit)$data
+    row <- match(as.character(xp$ID), as.character(fit$ebe_etas$ID))
+    expect_false(anyNA(row), info = name)
     for (p in params) {
-      expect_equal(xp[[p]], fit$sdtab[[p]], tolerance = 1e-8,
+      expect_equal(xp[[p]], ref[[p]][row], tolerance = 1e-10,
                    info = sprintf("%s: xpose %s", name, p))
     }
   }
+})
+# A direct theta/eta reference in a Form-C readout makes the parser append
+# internal `__ferx_ro_*` individual parameters. ferx-core hides them from the
+# `[output]` echo; `individual_estimates` must hide them too, or they surface as
+# parameter columns here and in ferx_xpose().
+test_that("individual_estimates omits parser-synthesized readout parameters", {
+  ex <- ferx_example("warfarin_ode")
+  model <- write_test_model(list(
+    parameters = c(
+      "  theta TVCL(0.134, 0.001, 10.0)",
+      "  theta TVV(8.1, 0.1, 500.0)",
+      "  theta TVKA(1.0, 0.01, 50.0)",
+      "  omega ETA_CL ~ 0.07",
+      "  omega ETA_V  ~ 0.02",
+      "  omega ETA_KA ~ 0.40",
+      "  sigma PROP_ERR ~ 0.01 (sd)"
+    ),
+    individual_parameters = c(
+      "  CL = TVCL * exp(ETA_CL)",
+      "  V  = TVV  * exp(ETA_V)",
+      "  KA = TVKA * exp(ETA_KA)"
+    ),
+    structural_model = "  ode(obs_cmt=central, states=[depot, central])",
+    odes = c(
+      "  d/dt(depot)   = -KA * depot",
+      "  d/dt(central) =  KA * depot - CL/V * central"
+    ),
+    scaling = "  y = central / (TVV * exp(ETA_V))",
+    error_model = "  DV ~ proportional(PROP_ERR)"
+  ))
+  on.exit(unlink(model), add = TRUE)
+  fit <- ferx_fit(model, ex$data, verbose = FALSE, covariance = FALSE,
+                  settings = list(maxiter = 0L))
+  ie <- fit$individual_estimates
+  expect_identical(names(ie), c("ID", "CL", "V", "KA"))
+  expect_equal(ie$KA, fit$theta[["TVKA"]] * exp(fit$ebe_etas$ETA_KA),
+               tolerance = 1e-10)
 })
 test_that("sdtab no longer contains ETA columns", {
   fit <- warfarin_fit()
