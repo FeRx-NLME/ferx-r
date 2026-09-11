@@ -978,12 +978,12 @@ test_that(".ferx_warning_guidance dispatches sir by message content", {
 # ode_solver: which clauses the statistics warning carries
 # ---------------------------------------------------------------------------
 # ferx-core's post-fit `ode_solver` warning, built the way
-# ode_solver_diagnostics_warning() in src/api/postfit.rs builds it at pin
-# 944cbf1e: one clause per non-zero counter, joined by "; ", then a lead-in and
-# trailing advice picked by which counters are non-zero. Only the four counters
-# these tests need are modelled. Clause texts are verbatim, and the drift guard
-# at the end of this block checks the phrases the guidance keys on against the
-# engine source.
+# ode_solver_diagnostics_warning() in src/api/postfit.rs builds it: one clause
+# per non-zero counter, joined by "; ", then a lead-in and trailing advice
+# picked by which counters are non-zero. Only the four counters these tests need
+# are modelled. Clause texts are verbatim as of ferx-core 944cbf1e; the drift
+# guard at the end of this block checks the phrases the guidance keys on against
+# the engine source at whatever revision is pinned.
 .ode_solver_warning <- function(abandoned = 0L, clamped = 0L, jets = 0L,
                                 aborted = 0L) {
   parts <- character(0)
