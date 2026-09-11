@@ -45,40 +45,18 @@ jobs:
       # Guard against an accidentally-unpinned ferx-core / ferx-tools dependency.
       # src/rust/.cargo/config.toml (written by src/Makevars) carries a [patch]
       # that redirects both crates to a sibling ../ferx-core when present
-      # (local-dev). If someone bumps the lock with that patch active, cargo
-      # strips the `source = "git+..."` line — silently unpinning them for
-      # everyone who builds without the sibling. tools/update-ferx-core-lock.sh
-      # exists to do the bump safely; this guard ensures nobody bypasses it.
+      # (local-dev). Any cargo run that resolves with that patch applied strips
+      # the `source = "git+..."` lines — silently unpinning them for everyone
+      # who builds without the sibling — and one whose patch went unused appends
+      # [[patch.unused]] tables. Makevars restores the lock around its own
+      # build; this guard catches a lock rewritten by cargo run directly.
       #
       # Both crates come from the one repository, so they must also sit on the
       # same revision: a lock pinning them apart is two halves of a workspace
-      # that is only ever tested together.
+      # that is only ever tested together. The check lives in a script so
+      # contributors run exactly what CI runs (CLAUDE.md, "ferx-core dependency").
       - name: Verify ferx-core and ferx-tools are pinned in Cargo.lock
-        run: |
-          source_of() {
-            awk -v pkg="$1" '
-              $0 == "name = \"" pkg "\"" { in_pkg = 1; next }
-              in_pkg && /^source = / { print; exit }
-              in_pkg && /^\[\[package\]\]/ { exit }
-            ' src/rust/Cargo.lock
-          }
-          fail=0
-          for pkg in ferx-core ferx-tools; do
-            case "$(source_of "$pkg")" in
-              'source = "git+https://github.com/FeRx-NLME/ferx-core'*) ;;
-              *) echo "::error file=src/rust/Cargo.lock::$pkg lacks a git source pin."; fail=1 ;;
-            esac
-          done
-          core_rev=$(source_of ferx-core | sed -E 's/.*#([0-9a-f]+).*/\1/')
-          tools_rev=$(source_of ferx-tools | sed -E 's/.*#([0-9a-f]+).*/\1/')
-          if [ "$core_rev" != "$tools_rev" ]; then
-            echo "::error file=src/rust/Cargo.lock::ferx-core ($core_rev) and ferx-tools ($tools_rev) are pinned to different revisions of the same repository."
-            fail=1
-          fi
-          if [ "$fail" -ne 0 ]; then
-            echo "Run tools/update-ferx-core-lock.sh to bump them correctly."
-            exit 1
-          fi
+        run: bash tools/check-ferx-core-pin.sh
 
       # Every ferx-core / ferx-tools `*Options` struct derives `Default`
       # (ferx-core #529, enforced there by the A4 guard in

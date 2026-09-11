@@ -7,10 +7,11 @@
 #
 # Why this script exists: src/rust/.cargo/config.toml carries a [patch] that
 # redirects ferx-core to a sibling ../ferx-core checkout when present. If you
-# run any `cargo` command that rewrites the lock while that patch is active,
-# cargo writes a *path*-style lock entry with no `source = "git+..."` line —
-# which silently unpins ferx-core for everyone who builds without the sibling
-# (CI, downstream users). That happened twice (commits 1ce7f59, b96c867).
+# run any `cargo` command that resolves while that patch is applied, cargo
+# writes a *path*-style lock entry with no `source = "git+..."` line — which
+# silently unpins ferx-core for everyone who builds without the sibling (CI,
+# downstream users). That happened twice, both times in a lock bump
+# (commits 1ce7f59, b96c867).
 #
 # This script temporarily removes the patch so cargo resolves ferx-core from
 # GitHub and writes the correct git+https pin. `cargo update -p ferx-core`
@@ -37,31 +38,15 @@ rm "$CONFIG"
 
 ( cd "$RUST_DIR" && cargo update )
 
-# Verify the lock still pins both crates via a git source line, on one revision.
-source_of() {
-  awk -v pkg="$1" '
-    $0 == "name = \"" pkg "\"" { in_pkg = 1; next }
-    in_pkg && /^source = / { print; exit }
-    in_pkg && /^\[\[package\]\]/ { exit }
-  ' "$RUST_DIR/Cargo.lock"
-}
-
-for pkg in ferx-core ferx-tools; do
-  case "$(source_of "$pkg")" in
-    'source = "git+https://github.com/FeRx-NLME/ferx-core'*) ;;
-    *)
-      echo "error: Cargo.lock has no git source for $pkg after update - refusing to commit a broken pin" >&2
-      exit 2
-      ;;
-  esac
-done
-
-SHA=$(source_of ferx-core | sed -E 's/.*#([0-9a-f]+).*/\1/')
-TOOLS_SHA=$(source_of ferx-tools | sed -E 's/.*#([0-9a-f]+).*/\1/')
-if [[ "$SHA" != "$TOOLS_SHA" ]]; then
-  echo "error: ferx-core ($SHA) and ferx-tools ($TOOLS_SHA) landed on different revisions" >&2
+# Verify the lock pins both crates via a git source line, on one revision - the
+# same check the R-CMD-check workflow runs.
+if ! bash tools/check-ferx-core-pin.sh "$RUST_DIR/Cargo.lock" >/dev/null; then
+  echo "error: refusing to leave a broken pin after update" >&2
   exit 2
 fi
+
+SHA=$(grep -m1 '^source = "git+https://github.com/FeRx-NLME/ferx-core' "$RUST_DIR/Cargo.lock" \
+  | sed -E 's/.*#([0-9a-f]+).*/\1/')
 
 echo
 echo "ferx-core and ferx-tools now pinned to: $SHA"
