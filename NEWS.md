@@ -191,9 +191,15 @@
   `print()` of a config marks the section under `Tool sections:` as one no R tool
   runs. The warning is classed `ferx_search_unconsumed_section`, so a script that
   knows it is running the stepwise half can muffle that one condition without
-  suppressing the rest. The list of sections this package can run is R's own; the
-  sections a file carries still come from the engine, so a section name ferx-core
-  adds later shows up in the warning until a binding for it exists here.
+  suppressing the rest. What the warning reports is the *complement* of the
+  sections this package has a tool for - not a list of the two known names - so a
+  section a later ferx-core adds to `TOOL_SECTIONS` is reported from the day a
+  file can carry it, and stops being reported on the day a binding for it lands
+  here. Where a section can be run somewhere else the warning says where, by
+  name: `[globalsearch]` points at `ferx globalsearch`, while `[structsearch]`,
+  which is accepted vocabulary with no engine module and no CLI command behind
+  it, is reported without a remediation rather than with one that names a
+  command that does not exist.
 
 - **`ferx_search_config()` reports the `[rank.penalties]` schedule it
   validated** ([#348](https://github.com/FeRx-NLME/ferx-r/issues/348), folded

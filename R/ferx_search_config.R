@@ -36,12 +36,16 @@
 #' and reported in \code{$tools}; any other section name is an error, so a
 #' misspelt \code{[strictnes]} cannot silently leave the gate at its defaults.
 #'
-#' Two of the sections the engine accepts have no R tool to run them:
-#' \code{[globalsearch]} and \code{[structsearch]}. A file carrying one loads
-#' cleanly and then has that section ignored by whichever R tool it is handed
-#' to - a \code{[globalsearch]} space run through \code{\link{ferx_covsearch}}
-#' is a stepwise search, not the global one asked for - so loading such a file
-#' warns, here and in every tool that takes \code{config =}.
+#' The engine accepts a section for every tool \emph{it} knows, which is more
+#' than this package binds - \code{[globalsearch]} and \code{[structsearch]}
+#' today. A file carrying one loads cleanly and then has that section ignored by
+#' whichever R tool it is handed to: a \code{[globalsearch]} space run through
+#' \code{\link{ferx_covsearch}} is a stepwise search, not the global one asked
+#' for. Loading such a file warns, here and in every tool that takes
+#' \code{config =}, naming the section and - where one exists, as it does for
+#' \code{[globalsearch]} - where it can be run instead. The check is the
+#' complement of the sections this package has a tool for, so a section a later
+#' ferx-core adds is reported until a binding for it exists here.
 #'
 #' \code{[rank.penalties]} (the schedule a \code{[rank] type = "penalized"}
 #' charges) comes back in \code{$rank$penalties} as the \emph{effective}
@@ -178,7 +182,7 @@ print.ferx_search_config <- function(x, ...) {
       "\n", sep = "")
   if (length(x$tools)) {
     cat("Tool sections: ", paste(x$tools, collapse = ", "), "\n", sep = "")
-    orphans <- intersect(x$tools, .FERX_SEARCH_SECTIONS_WITHOUT_TOOL)
+    orphans <- setdiff(x$tools, .FERX_SEARCH_SECTIONS_WITH_TOOL)
     if (length(orphans)) {
       cat("  no R tool runs: ", paste(orphans, collapse = ", "), "\n", sep = "")
     }

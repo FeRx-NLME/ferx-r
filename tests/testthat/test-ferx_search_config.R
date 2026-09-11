@@ -255,7 +255,8 @@ test_that("a section no R tool runs warns at load rather than loading silently",
   w <- expect_warning(ferx_search_config(path), "globalsearch")
   expect_s3_class(w, "ferx_search_unconsumed_section")
   expect_match(conditionMessage(w), "ferx_search_config")
-  expect_match(conditionMessage(w), "command-line tool")
+  # `[globalsearch]` is the one section with somewhere else to run it.
+  expect_match(conditionMessage(w), "ferx globalsearch", fixed = TRUE)
 
   cfg <- suppressWarnings(ferx_search_config(path))
   expect_equal(cfg$tools, "globalsearch")
@@ -273,6 +274,50 @@ test_that("a section no R tool runs warns at load rather than loading silently",
   )
   expect_match(conditionMessage(both), "globalsearch")
   expect_match(conditionMessage(both), "have")
+})
+
+test_that("the remediation is per section, not a blanket pointer at the CLI", {
+  # `[structsearch]` is accepted vocabulary and nothing more: the engine has no
+  # structsearch module and the CLI has no structsearch command, so telling the
+  # user to run it there would name a command that does not exist.
+  w <- expect_warning(
+    ferx_search_config(minimal_cfg(
+      "COVARIATE?(CL, WT, pow)",
+      "[structsearch]", "dummy = 1"
+    )),
+    "structsearch"
+  )
+  expect_no_match(conditionMessage(w), "command-line tool")
+  expect_no_match(conditionMessage(w), "ferx globalsearch", fixed = TRUE)
+})
+
+test_that("a section the engine adds later warns without a binding for it", {
+  # The check is the complement of the sections this package has a tool for,
+  # not a list of the two known-bad names - so a `TOOL_SECTIONS` entry added to
+  # a future ferx-core is reported here from the day a file can carry it. The
+  # tools vector is synthetic because the engine of the day refuses the name at
+  # load; that is the point, and the behaviour under test is what happens once
+  # it does not.
+  w <- tryCatch(
+    ferx:::.ferx_search_warn_unconsumed(c("covsearch", "sometoolfrom2027"),
+                                        "ferx_search_config"),
+    warning = function(w) w
+  )
+  expect_s3_class(w, "ferx_search_unconsumed_section")
+  expect_match(conditionMessage(w), "sometoolfrom2027")
+  # The section that does have a tool is not swept up with it.
+  expect_no_match(conditionMessage(w), "covsearch")
+  # And nothing is invented about where to run it instead.
+  expect_no_match(conditionMessage(w), "command-line tool")
+
+  # Every section this package binds stays silent.
+  expect_silent(ferx:::.ferx_search_warn_unconsumed(
+    c("allometry", "amd", "covsearch", "iivsearch", "iovsearch",
+      "modelsearch", "ruvsearch"),
+    "ferx_search_config"
+  ))
+  expect_silent(ferx:::.ferx_search_warn_unconsumed(character(0),
+                                                    "ferx_search_config"))
 })
 
 test_that("a section every R tool does run is not warned about", {
