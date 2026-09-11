@@ -26,6 +26,13 @@
 #'     \code{$search}: the model already blocks ETA_CL with ETA_V and keeps
 #'     ETA_KA diagonal, so \code{\link{ferx_iivsearch}} tests those decisions
 #'     rather than confirming them}
+#'   \item{warfarin_amd}{One-compartment oral, sharing \code{warfarin}'s
+#'     dataset - the plainest model the data supports, kept plain so the
+#'     pipeline has something to decide. Ships a \code{.ferxsearch} carrying a
+#'     structural \emph{and} a variability space plus an \code{[amd]} section,
+#'     so \code{\link{ferx_amd}} runs the whole sequence over it; the
+#'     occasion, allometry and covariate steps are skipped, and the step table
+#'     says why}
 #'   \item{warfarin_saem}{One-compartment oral estimated with SAEM}
 #'   \item{warfarin_additive_eta}{One-compartment oral with additive ETA on lag time}
 #'   \item{warfarin_logit_f}{One-compartment oral with logit-normal bioavailability}
@@ -394,6 +401,11 @@ ferx_example <- function(name = NULL) {
     warfarin_ode_time       = "warfarin",
 
     warfarin_data_selection = "warfarin",
+
+    # The AMD starting model: the same dataset as `warfarin`, so the pipeline's
+    # decisions are comparable with the model that made them by hand.
+    warfarin_amd            = "warfarin",
+
     two_cpt_oral_derived    = "two_cpt_oral_cov",
 
     # The covariate-free base of two_cpt_oral_cov: same dataset, so a search

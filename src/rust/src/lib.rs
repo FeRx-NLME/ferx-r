@@ -7578,6 +7578,500 @@ fn ferx_rust_iovsearch(
     .into()
 }
 
+/// The columns of an AMD run's `steps.csv`, in order, from the engine.
+///
+/// @return Character vector of column names
+/// @keywords internal
+#[extendr]
+fn ferx_rust_amd_step_columns() -> Vec<String> {
+    ferx_tools::amd::STEP_COLUMNS
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+}
+
+/// The columns of an AMD run's `candidates.csv`, in order, from the engine.
+///
+/// @return Character vector of column names
+/// @keywords internal
+#[extendr]
+fn ferx_rust_amd_candidate_columns() -> Vec<String> {
+    ferx_tools::amd::CANDIDATE_COLUMNS
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+}
+
+/// The `[amd]` section an inline call renders.
+fn amd_section(strategy: &str, retries_on: &str, skip: &[String]) -> String {
+    let mut section = String::from("\n[amd]\n");
+    if !strategy.is_empty() {
+        section.push_str(&format!("strategy = {}\n", toml_basic(strategy)));
+    }
+    if !retries_on.is_empty() {
+        section.push_str(&format!("retries = {}\n", toml_basic(retries_on)));
+    }
+    if !skip.is_empty() {
+        let items: Vec<String> = skip.iter().map(|s| toml_basic(s)).collect();
+        section.push_str(&format!("skip = [{}]\n", items.join(", ")));
+    }
+    section
+}
+
+/// The config, the options and the base model an AMD call runs on.
+///
+/// Both AMD entry points need the same three things, and the plan has to be
+/// built from exactly what the run would use - a preview derived some other
+/// way would be a second answer to the question the engine already answers.
+#[allow(clippy::too_many_arguments)]
+fn amd_config_and_base(
+    config_path: &str,
+    model_path: &str,
+    data_path: &str,
+    mfl: &str,
+    strategy: &str,
+    retries_on: &str,
+    skip: &[String],
+    rank: &str,
+    rank_cutoff: f64,
+    threads: i32,
+    retries: i32,
+    resume: bool,
+) -> (
+    ferx_tools::search::SearchConfig,
+    ferx_tools::amd::AmdOptions,
+    ferx_tools::search::BaseModel,
+) {
+    let section = amd_section(strategy, retries_on, skip);
+    let text = search_config_text(
+        model_path,
+        data_path,
+        mfl,
+        rank,
+        rank_cutoff,
+        threads,
+        retries,
+        resume,
+        &section,
+    );
+    let inline_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let config =
+        match search_config_for_tool(config_path, &text, &inline_dir, threads, retries, resume) {
+            Ok(c) => c,
+            Err(e) => throw_r_error(format!("ferx_amd: {e}")),
+        };
+    // Before the dataset is read: a `skip` naming a step this strategy does
+    // not run, or a space carrying a statement no step of the pipeline can
+    // read, is refused by name rather than searched half-silently.
+    let options = match ferx_tools::amd::AmdOptions::from_config(&config) {
+        Ok(o) => o,
+        Err(e) => throw_r_error(format!("ferx_amd: {e}")),
+    };
+    let base = match config.load_base() {
+        Ok(b) => b,
+        Err(e) => throw_r_error(format!("ferx_amd: {e}")),
+    };
+    (config, options, base)
+}
+
+/// The AMD pipeline as planned, without fitting anything.
+///
+/// The plan is what the engine computes before its first fit - which step runs
+/// where, and why one will not - so this is the same list the run itself walks
+/// rather than a second derivation of it.
+///
+/// @param config_path Path to a `.ferxsearch` file, or `""` for the inline form
+/// @param model_path Base model (inline form only)
+/// @param data_path Dataset, or `""` to use the model's `[data]` block
+/// @param mfl MFL search space, quoted verbatim (inline form only)
+/// @param strategy `"default"`, `"reevaluation"`, `"SIR"`, `"SRI"` or
+///   `"RSI"`; `""` keeps the engine default
+/// @param retries_on `"all_final"`, `"final"` or `"skip"`; `""` keeps the
+///   engine default
+/// @param skip Steps left out, by their `[amd] skip` spelling
+/// @return Named list: `index`, `step`, `tool`, `rerun`, `directory`,
+///   `skipped`, and the options as the engine read them
+/// @keywords internal
+#[extendr]
+fn ferx_rust_amd_plan(
+    config_path: &str,
+    model_path: &str,
+    data_path: &str,
+    mfl: &str,
+    strategy: &str,
+    retries_on: &str,
+    skip: Vec<String>,
+) -> Robj {
+    let (config, options, base) = amd_config_and_base(
+        config_path,
+        model_path,
+        data_path,
+        mfl,
+        strategy,
+        retries_on,
+        &skip,
+        "",
+        f64::NAN,
+        0,
+        -1,
+        false,
+    );
+    let ctx = ferx_tools::amd::Context::from_base(&base);
+    let plan = match ferx_tools::amd::plan(&options, &config.mfl, &ctx) {
+        Ok(p) => p,
+        Err(e) => throw_r_error(format!("ferx_amd: {e}")),
+    };
+    list!(
+        index = plan.iter().map(|s| s.index as i32).collect::<Vec<_>>(),
+        step = plan
+            .iter()
+            .map(|s| s.step.label().to_string())
+            .collect::<Vec<_>>(),
+        tool = plan
+            .iter()
+            .map(|s| s.step.tool().to_string())
+            .collect::<Vec<_>>(),
+        rerun = plan.iter().map(|s| s.rerun).collect::<Vec<_>>(),
+        directory = plan.iter().map(|s| s.dir.clone()).collect::<Vec<_>>(),
+        skipped = plan
+            .iter()
+            .map(|s| s.skipped.clone().unwrap_or_default())
+            .collect::<Vec<_>>(),
+        strategy = options.strategy.label().to_string(),
+        retries_on = options.retries.label().to_string(),
+        skip_steps = options
+            .skip
+            .iter()
+            .map(|s| s.label().to_string())
+            .collect::<Vec<_>>(),
+        iov_column = ctx.iov_column.clone().unwrap_or_default(),
+        model = config.base.to_string_lossy().into_owned(),
+        data = base.prepared.data_path.clone(),
+    )
+    .into()
+}
+
+/// The AMD pipeline - Pharmpy's `amd`, run end to end.
+///
+/// Takes either a `.ferxsearch` file (`config_path`) or the inline arguments,
+/// which are rendered into one. Returns the step table and the candidate table
+/// in the engine's own column orders, the final model text and its fit.
+///
+/// `directory` is required, unlike the single-tool bindings: AMD materialises
+/// every step's input model as a file, both because that is what the next tool
+/// reads and because the report - `steps.csv`, `candidates.csv`, one directory
+/// per step - is the product.
+///
+/// @param config_path Path to a `.ferxsearch` file, or `""` for the inline form
+/// @param model_path Base model (inline form only)
+/// @param data_path Dataset, or `""` to use the model's `[data]` block
+/// @param mfl MFL search space, quoted verbatim (inline form only)
+/// @param strategy `"default"`, `"reevaluation"`, `"SIR"`, `"SRI"` or
+///   `"RSI"`; `""` keeps the engine default
+/// @param retries_on Which selected models get the perturbed-restart pass:
+///   `"all_final"`, `"final"` or `"skip"`; `""` keeps the engine default
+/// @param skip Steps left out, by their `[amd] skip` spelling
+/// @param rank `[rank] type`; `""` keeps each tool's default
+/// @param rank_cutoff `[rank] cutoff`; `NaN` keeps the default
+/// @param threads Worker threads; `<= 0` lets the runner choose
+/// @param retries Perturbed restarts per candidate; `< 0` keeps the default
+/// @param resume Reuse the fits already journalled in `directory`
+/// @param directory Where every step's directory, `steps.csv`,
+///   `candidates.csv` and `final.ferx` go
+/// @param progress Print the engine's step progress to stderr
+/// @return Named list: the step-table columns, the candidate-table columns,
+///   `input_model`, `final_model`, `final_fit`, the options as the engine read
+///   them, `notes` and `cancelled`
+/// @keywords internal
+#[extendr]
+#[allow(clippy::too_many_arguments)]
+fn ferx_rust_amd(
+    config_path: &str,
+    model_path: &str,
+    data_path: &str,
+    mfl: &str,
+    strategy: &str,
+    retries_on: &str,
+    skip: Vec<String>,
+    rank: &str,
+    rank_cutoff: f64,
+    threads: i32,
+    retries: i32,
+    resume: bool,
+    directory: &str,
+    progress: bool,
+) -> Robj {
+    if directory.is_empty() {
+        throw_r_error("ferx_amd: a run directory is required");
+    }
+    let (config, options, mut base) = amd_config_and_base(
+        config_path,
+        model_path,
+        data_path,
+        mfl,
+        strategy,
+        retries_on,
+        &skip,
+        rank,
+        rank_cutoff,
+        threads,
+        retries,
+        resume,
+    );
+
+    // One flag, two paths into the engine: `AmdRun::cancel` stops the pipeline
+    // between steps, and the copy on `fit_options` unwinds the fits already in
+    // flight (the same wiring every search tool here uses).
+    let cancel = CancelFlag::new();
+    base.prepared.parsed.fit_options.cancel = Some(cancel.clone());
+
+    let report = |event: ferx_tools::amd::AmdEvent| {
+        use ferx_tools::amd::AmdEvent as E;
+        if !progress {
+            return;
+        }
+        let show = |v: Option<f64>| {
+            v.map(|v| format!("{v:.3}"))
+                .unwrap_or_else(|| "-".to_string())
+        };
+        match event {
+            E::Planned { steps } => {
+                for s in &steps {
+                    match &s.skipped {
+                        Some(reason) => {
+                            eprintln!("  {} {:<12} skipped: {reason}", s.index, s.step.label())
+                        }
+                        None => eprintln!("  {} {:<12} -> {}", s.index, s.step.label(), s.dir),
+                    }
+                }
+            }
+            E::StartStarted => eprintln!("Fitting the starting model..."),
+            E::StartFinished { ofv } => eprintln!("Starting model: OFV {}", show(ofv)),
+            E::StepStarted {
+                position,
+                total,
+                step,
+                rerun,
+                ..
+            } => eprintln!(
+                "Step {position}/{total}: {}{} ({})...",
+                step.label(),
+                if rerun { " (rerun)" } else { "" },
+                step.tool()
+            ),
+            E::StepSkipped { step, reason, .. } => {
+                eprintln!("Skipping {}: {reason}", step.label())
+            }
+            E::StepFailed { step, error, .. } => eprintln!(
+                "Step {} failed: {error}; carrying on from the model it was handed",
+                step.label()
+            ),
+            E::StepFinished {
+                step,
+                criterion,
+                before,
+                after,
+                selected,
+                ..
+            } => eprintln!(
+                "  {} done: {criterion} {} -> {}; selected {}",
+                step.label(),
+                show(before),
+                show(after),
+                if selected.is_empty() {
+                    "nothing".to_string()
+                } else {
+                    selected.join("; ")
+                }
+            ),
+            E::RetriesStarted { starts, .. } => {
+                eprintln!("  retries: refitting the selected model with {starts} starts...")
+            }
+            E::RetriesFinished { improved, ofv } => eprintln!(
+                "  retries: {} (OFV {})",
+                if improved { "improved" } else { "kept" },
+                show(ofv)
+            ),
+        }
+    };
+
+    let dir = std::path::PathBuf::from(directory);
+    let result = match run_search_cancellable(&cancel, || {
+        ferx_tools::amd::run_amd(
+            &config,
+            &base,
+            ferx_tools::amd::AmdRun {
+                dir: dir.clone(),
+                threads: config.run.threads,
+                cancel: Some(cancel.clone()),
+                progress: Some(&report),
+            },
+        )
+    }) {
+        Ok(r) => r,
+        Err(e) => throw_r_error(format!("ferx_amd: {e}")),
+    };
+
+    // The step table, column for column as `STEP_COLUMNS` orders it, with the
+    // pipeline position beside the step's name: a `reevaluation` run carries
+    // two rows called `iivsearch`, and the name alone would not say which.
+    let n = result.steps.len();
+    let mut s_index = Vec::with_capacity(n);
+    let mut s_step = Vec::with_capacity(n);
+    let mut s_tool = Vec::with_capacity(n);
+    let mut s_rerun = Vec::with_capacity(n);
+    let mut s_dir = Vec::with_capacity(n);
+    let mut s_status = Vec::with_capacity(n);
+    let mut s_reason = Vec::with_capacity(n);
+    let mut s_criterion = Vec::with_capacity(n);
+    let mut s_value_before = Vec::with_capacity(n);
+    let mut s_value_after = Vec::with_capacity(n);
+    let mut s_ofv_before = Vec::with_capacity(n);
+    let mut s_ofv_after = Vec::with_capacity(n);
+    let mut s_candidates = Vec::with_capacity(n);
+    let mut s_selected = Vec::with_capacity(n);
+    let mut s_seconds = Vec::with_capacity(n);
+    let mut s_notes = Vec::with_capacity(n);
+    for s in &result.steps {
+        s_index.push(s.index as i32);
+        s_step.push(s.step.label().to_string());
+        s_tool.push(s.step.tool().to_string());
+        s_rerun.push(s.rerun);
+        s_dir.push(s.dir.clone());
+        s_status.push(s.status().to_string());
+        s_reason.push(s.reason().unwrap_or_default().to_string());
+        s_criterion.push(s.criterion.to_string());
+        s_value_before.push(opt_f64(s.value_before));
+        s_value_after.push(opt_f64(s.value_after));
+        s_ofv_before.push(opt_f64(s.ofv_before));
+        s_ofv_after.push(opt_f64(s.ofv_after));
+        s_candidates.push(s.candidates as i32);
+        s_selected.push(s.selected.join("; "));
+        s_seconds.push(s.seconds);
+        s_notes.push(s.notes.join("; "));
+    }
+
+    // Every candidate of every step, as `CANDIDATE_COLUMNS` orders it. The
+    // strictness verdict and its reasons travel with each row: a step's winner
+    // is only as trustworthy as the gate's verdict on the siblings it beat.
+    let m = result.rows.len();
+    let mut c_step = Vec::with_capacity(m);
+    let mut c_tool = Vec::with_capacity(m);
+    let mut c_id = Vec::with_capacity(m);
+    let mut c_parent = Vec::with_capacity(m);
+    let mut c_description = Vec::with_capacity(m);
+    let mut c_criterion = Vec::with_capacity(m);
+    let mut c_value = Vec::with_capacity(m);
+    let mut c_d_value = Vec::with_capacity(m);
+    let mut c_ofv = Vec::with_capacity(m);
+    let mut c_d_ofv = Vec::with_capacity(m);
+    let mut c_rank = Vec::with_capacity(m);
+    let mut c_converged = Vec::with_capacity(m);
+    let mut c_passed = Vec::with_capacity(m);
+    let mut c_failures = Vec::with_capacity(m);
+    let mut c_error = Vec::with_capacity(m);
+    let mut c_note = Vec::with_capacity(m);
+    let mut c_seconds = Vec::with_capacity(m);
+    let mut c_selected = Vec::with_capacity(m);
+    for r in &result.rows {
+        c_step.push(r.step as i32);
+        c_tool.push(r.tool.clone());
+        c_id.push(r.id.clone());
+        c_parent.push(r.parent.clone().unwrap_or_default());
+        c_description.push(r.description.clone());
+        c_criterion.push(r.criterion.to_string());
+        c_value.push(opt_f64(r.value));
+        c_d_value.push(opt_f64(r.d_value));
+        c_ofv.push(opt_f64(r.ofv));
+        c_d_ofv.push(opt_f64(r.d_ofv));
+        c_rank.push(opt_f64(r.rank.map(|v| v as f64)));
+        c_converged.push(opt_bool_chr(r.converged));
+        c_passed.push(r.passed);
+        c_failures.push(r.failures.join("; "));
+        c_error.push(r.error.clone().unwrap_or_default());
+        c_note.push(r.note.clone().unwrap_or_default());
+        c_seconds.push(r.seconds);
+        c_selected.push(r.selected);
+    }
+
+    let final_model = result.final_model.render();
+    let final_fit: Robj = match &result.final_fit {
+        Some(fit) => match search_final_fit(fit, &final_model, &base.prepared.data_path) {
+            Ok(l) => l.into(),
+            Err(e) => throw_r_error(format!("ferx_amd: {e}")),
+        },
+        None => NULL.into(),
+    };
+
+    list!(
+        s_index = s_index,
+        s_step = s_step,
+        s_tool = s_tool,
+        s_rerun = s_rerun,
+        s_dir = s_dir,
+        s_status = s_status,
+        s_reason = s_reason,
+        s_criterion = s_criterion,
+        s_value_before = s_value_before,
+        s_value_after = s_value_after,
+        s_ofv_before = s_ofv_before,
+        s_ofv_after = s_ofv_after,
+        s_candidates = s_candidates,
+        s_selected = s_selected,
+        s_seconds = s_seconds,
+        s_notes = s_notes,
+        c_step = c_step,
+        c_tool = c_tool,
+        c_id = c_id,
+        c_parent = c_parent,
+        c_description = c_description,
+        c_criterion = c_criterion,
+        c_value = c_value,
+        c_d_value = c_d_value,
+        c_ofv = c_ofv,
+        c_d_ofv = c_d_ofv,
+        c_rank = c_rank,
+        c_converged = c_converged,
+        c_passed = c_passed,
+        c_failures = c_failures,
+        c_error = c_error,
+        c_note = c_note,
+        c_seconds = c_seconds,
+        c_selected = c_selected,
+        input_model = result.input_model.render(),
+        input_ofv = opt_f64(result.input_fit.as_ref().map(|f| f.ofv)),
+        final_model = final_model,
+        final_ofv = opt_f64(result.final_fit.as_ref().map(|f| f.ofv)),
+        final_fit = final_fit,
+        d_ofv = opt_f64(result.d_ofv()),
+        strategy = options.strategy.label().to_string(),
+        retries_on = options.retries.label().to_string(),
+        skip_steps = options
+            .skip
+            .iter()
+            .map(|s| s.label().to_string())
+            .collect::<Vec<_>>(),
+        summary = ferx_tools::amd::render_summary(&result),
+        directory = directory.to_string(),
+        steps_csv = ferx_tools::amd::steps_path(&dir)
+            .to_string_lossy()
+            .into_owned(),
+        candidates_csv = ferx_tools::amd::candidates_path(&dir)
+            .to_string_lossy()
+            .into_owned(),
+        final_model_path = ferx_tools::amd::final_model_path(&dir)
+            .to_string_lossy()
+            .into_owned(),
+        // The base model as the config resolved it, so the R object names the
+        // same file in both entry forms.
+        model = config.base.to_string_lossy().into_owned(),
+        data = base.prepared.data_path.clone(),
+        notes = result.notes.clone(),
+        cancelled = result.cancelled,
+    )
+    .into()
+}
+
 extendr_module! {
     mod ferx;
     fn ferx_rust_fit;
@@ -7616,4 +8110,8 @@ extendr_module! {
     fn ferx_rust_iivsearch_columns;
     fn ferx_rust_iovsearch;
     fn ferx_rust_iovsearch_columns;
+    fn ferx_rust_amd;
+    fn ferx_rust_amd_plan;
+    fn ferx_rust_amd_step_columns;
+    fn ferx_rust_amd_candidate_columns;
 }

@@ -180,7 +180,20 @@
   if (!is.character(search_space) || anyNA(search_space)) {
     stop(sprintf("%s: `search_space` must be MFL text", what))
   }
-  paste(search_space, collapse = "\n")
+  text <- paste(search_space, collapse = "\n")
+  # `""`, `character(0)` and a vector of blank lines are the same thing to the
+  # engine as no `[space]` section at all, so a tool that needs a space has to
+  # refuse them here too - `required` would otherwise be a rule about the
+  # argument being absent rather than about the search having a space. For AMD
+  # that mattered most: an empty space plans every step but the residual one as
+  # skipped, which is `ferx_ruvsearch()` wearing six rows (#356 review).
+  if (required && !nzchar(trimws(text))) {
+    stop(sprintf(
+      "%s: `search_space` is empty; the inline form needs MFL text stating what to search",
+      what
+    ))
+  }
+  text
 }
 
 # The candidate tables of a run that wrote any.

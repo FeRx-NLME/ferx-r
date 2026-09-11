@@ -180,6 +180,8 @@ res2 <- ferx_modelsearch(config = ex$search, directory = "modelsearch-run-2")
 
 Other search:
 \code{\link[=ferx_allometry]{ferx_allometry()}},
+\code{\link[=ferx_amd]{ferx_amd()}},
+\code{\link[=ferx_amd_plan]{ferx_amd_plan()}},
 \code{\link[=ferx_covsearch]{ferx_covsearch()}},
 \code{\link[=ferx_iivsearch]{ferx_iivsearch()}},
 \code{\link[=ferx_iovsearch]{ferx_iovsearch()}},

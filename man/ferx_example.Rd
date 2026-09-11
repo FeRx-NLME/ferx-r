@@ -43,6 +43,13 @@ effects. Ships a \code{.ferxsearch} \emph{variability} search space as
 \code{$search}: the model already blocks ETA_CL with ETA_V and keeps
 ETA_KA diagonal, so \code{\link{ferx_iivsearch}} tests those decisions
 rather than confirming them}
+\item{warfarin_amd}{One-compartment oral, sharing \code{warfarin}'s
+dataset - the plainest model the data supports, kept plain so the
+pipeline has something to decide. Ships a \code{.ferxsearch} carrying a
+structural \emph{and} a variability space plus an \code{[amd]} section,
+so \code{\link{ferx_amd}} runs the whole sequence over it; the
+occasion, allometry and covariate steps are skipped, and the step table
+says why}
 \item{warfarin_saem}{One-compartment oral estimated with SAEM}
 \item{warfarin_additive_eta}{One-compartment oral with additive ETA on lag time}
 \item{warfarin_logit_f}{One-compartment oral with logit-normal bioavailability}
