@@ -20,9 +20,10 @@ updates:
   # Both must be ignored, not just ferx-core: they share one git source (the
   # ferx-core repository, one revision for both), so Dependabot bumping either
   # crate moves the pin for both, without the NEWS entries and skip()-gate
-  # cleanup a pin bump carries. The R-CMD-check lock guard does not catch such
-  # a bump: both crates keep their git source and stay on one revision. Any
-  # further crate taken from the ferx-core repository needs an entry here too.
+  # cleanup a pin bump carries. The pin check R-CMD-check runs
+  # (tools/check-ferx-core-pin.sh) does not catch such a bump: both crates keep
+  # their git source and stay on one revision. Any further crate taken from the
+  # ferx-core repository needs an entry here too.
   - package-ecosystem: cargo
     directory: "/src/rust"
     schedule:
