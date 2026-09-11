@@ -839,11 +839,11 @@
   reserves for the dose-time anchors `TAFD` and `TAD`. A `hazard =` expression
   that reads either one - or that depends on a statement which does - therefore
   saw a non-finite hazard, which surfaced much later as a misleading finite
-  objective and could reject valid multi-dose subjects. Only the hazard is
-  affected: the readout keeps the cumulative-hazard slot alone, so an `[odes]`
-  block reading `TAD` beside a `TAD`-free hazard always evaluated correctly. The
-  readout now passes the same extended parameters the integrator itself uses.
-  This reaches `ferx_predict_survival()` and joint PK-TTE fits whose
+  objective and could reject valid subjects, single-dose ones included. Only the
+  hazard is affected: the readout keeps the cumulative-hazard slot alone, so an
+  `[odes]` block reading `TAD` beside a `TAD`-free hazard always evaluated
+  correctly. The readout now passes the same extended parameters the integrator
+  itself uses. This reaches `ferx_predict_survival()` and joint PK-TTE fits whose
   `[event_model]` hazard accumulates on an ODE state. **No bundled example is
   affected**: no TTE model in `inst/examples/models/` reads `TAD` or `TAFD`.
 
@@ -1079,7 +1079,7 @@
   (plus residual error), and points at `ferx_predict()` for the typical-value
   curve and `ferx_simulate_with_uncertainty()` for parameter uncertainty on top.
 
-- **`cov_inner_tol` / covariance-key docs now distinguish pre- and post-pinned behavior**
+- **`cov_inner_tol` / covariance-key docs now match the pinned engine**
   ([ferx-core #956](https://github.com/FeRx-NLME/ferx-core/pull/956)).
   In ferx-core `7f15dba`, `cov_inner_tol` moved to the advertised covariance
   settings set, so the old warning about it being ignored is removed; the key is
