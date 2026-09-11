@@ -15,10 +15,15 @@ updates:
 
   # Rust crate deps of the extendr glue (src/rust).
   #
-  # IMPORTANT: ferx-core is pinned deliberately in src/rust/Cargo.lock and bumped
-  # only via tools/update-ferx-core-lock.sh. It is ignored here so Dependabot
-  # never tries to advance the pin itself — that would fight the manual git-commit
-  # pin and trip the R-CMD-check lock guard.
+  # IMPORTANT: ferx-core and ferx-tools are pinned deliberately in
+  # src/rust/Cargo.lock and bumped only via tools/update-ferx-core-lock.sh.
+  # Both must be ignored, not just ferx-core: they share one git source (the
+  # ferx-core repository, one revision for both), so Dependabot bumping either
+  # crate moves the pin for both, without the NEWS entries and skip()-gate
+  # cleanup a pin bump carries. The pin check R-CMD-check runs
+  # (tools/check-ferx-core-pin.sh) does not catch such a bump: both crates keep
+  # their git source and stay on one revision. Any further crate taken from the
+  # ferx-core repository needs an entry here too.
   - package-ecosystem: cargo
     directory: "/src/rust"
     schedule:
@@ -28,6 +33,7 @@ updates:
       prefix: "chore(deps)"
     ignore:
       - dependency-name: "ferx-core"
+      - dependency-name: "ferx-tools"
     groups:
       # Batch low-risk minor/patch bumps into one PR; majors stay individual.
       cargo-minor-patch:
