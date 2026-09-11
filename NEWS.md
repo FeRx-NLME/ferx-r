@@ -178,6 +178,38 @@
 
 ## New features
 
+- **A `.ferxsearch` section no R tool can run now says so, instead of loading
+  clean and being ignored** ([#347](https://github.com/FeRx-NLME/ferx-r/issues/347),
+  part of the [#334](https://github.com/FeRx-NLME/ferx-r/issues/334) search
+  epic). The engine's `TOOL_SECTIONS` admits `[globalsearch]` and
+  `[structsearch]`; this package binds neither. So a file written from the
+  ferx-core docs loaded without complaint, and whichever R tool it was handed to
+  ignored the section addressed to a different tool - a `[globalsearch]` space
+  run through `ferx_covsearch()` was a stepwise search, silently, with a
+  different answer than the one asked for. `ferx_search_config()` and every tool
+  that takes `config =` now warn, naming the section and the caller, and
+  `print()` of a config marks the section under `Tool sections:` as one no R tool
+  runs. The warning is classed `ferx_search_unconsumed_section`, so a script that
+  knows it is running the stepwise half can muffle that one condition without
+  suppressing the rest. The list of sections this package can run is R's own; the
+  sections a file carries still come from the engine, so a section name ferx-core
+  adds later shows up in the warning until a binding for it exists here.
+
+- **`ferx_search_config()` reports the `[rank.penalties]` schedule it
+  validated** ([#348](https://github.com/FeRx-NLME/ferx-r/issues/348), folded
+  into [#332](https://github.com/FeRx-NLME/ferx-r/issues/332)). `[rank] type =
+  "penalized"` ranks on pyDarwin's penalized fitness and `[rank.penalties]`
+  overlays the individual charges; the loader validated the table - a negative
+  charge and an unknown key are both errors - and then dropped it, so `cfg$rank`
+  held `type` and `cutoff` only and a config with `theta = 5.0` printed
+  byte-identically to one with the defaults. `cfg$rank$penalties` is now a named
+  numeric of the *effective* schedule (the file's keys over the engine's
+  defaults, which is what the run would charge) and `cfg$rank$penalties_set`
+  names the charges the file changed. `print()` shows the schedule, starred like
+  the strictness block, whenever the file ranks on `penalized` or changes a
+  charge, and stays quiet otherwise. Results were never affected: the tools pass
+  the config path to the engine, which reads the table itself.
+
 - **`ferx_coef(fit, "TVCL")` and `ferx_se(fit, "TVCL")` pull a parameter by
   name, and `fit$estimates` now carries row names**
   ([#299](https://github.com/FeRx-NLME/ferx-r/issues/299)). The tidy estimates
@@ -1258,6 +1290,17 @@
   own: it arrived with the pin move to `944cbf1e`, which already contained it.
 
 ## Internal
+
+- **The degenerate oracle from [#332](https://github.com/FeRx-NLME/ferx-r/issues/332)
+  is now covered for `ferx_covsearch()` and `ferx_allometry()`.** The other four
+  search tools each had one; these two shipped without. covsearch has no
+  single-point space of its own - a structural feature is refused outright - so
+  the degenerate case asserted is a space whose one candidate cannot be
+  selected: at an alpha no dOFV can clear, nothing is included, the candidate is
+  still a row with its verdict, and the returned fit matches `ferx_fit()` on the
+  base model. For `ferx_allometry()` the anchor is the arm every dOFV it reports
+  is measured against: `res$base_fit` must be the base model fitted, not a
+  second answer to the same question.
 
 - **Dependabot now ignores `ferx-tools` as well as `ferx-core`.** The two
   crates share one git source - the ferx-core repository, pinned at a single

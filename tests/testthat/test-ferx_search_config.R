@@ -169,6 +169,119 @@ test_that("the penalized rank type loads and reports itself", {
   expect_equal(cfg$rank$type, "penalized")
 })
 
+test_that("[rank.penalties] comes back as the effective schedule", {
+  # The file validated the schedule and then dropped it (#348): `cfg$rank` held
+  # `type` and `cutoff` only, so a config with an overlaid penalty printed
+  # byte-identically to one with the defaults. What comes back now is the
+  # *effective* schedule - the file's keys over pyDarwin's defaults - which is
+  # what the run would charge.
+  defaults <- ferx_search_config(minimal_cfg("COVARIATE?(CL, WT, pow)"))
+  expect_type(defaults$rank$penalties, "double")
+  expect_true(all(c("theta", "omega", "sigma", "convergence", "covariance",
+                    "correlation", "max_correlation", "condition_number",
+                    "max_condition_number", "non_influential", "crash",
+                    "gate") %in% names(defaults$rank$penalties)))
+  # pyDarwin's defaults, from the engine - never a copy kept in R.
+  expect_equal(defaults$rank$penalties[["theta"]], 10)
+  expect_equal(defaults$rank$penalties[["crash"]], 99999999)
+  expect_length(defaults$rank$penalties_set, 0L)
+
+  overlaid <- ferx_search_config(minimal_cfg(
+    "COVARIATE?(CL, WT, pow)",
+    "[rank]", 'type = "penalized"',
+    "[rank.penalties]", "theta = 5.0", "gate = 0.0"
+  ))
+  expect_equal(overlaid$rank$penalties[["theta"]], 5)
+  expect_equal(overlaid$rank$penalties[["gate"]], 0)
+  # Untouched charges keep the engine's default rather than going missing.
+  expect_equal(overlaid$rank$penalties[["omega"]], 10)
+  expect_setequal(overlaid$rank$penalties_set, c("theta", "gate"))
+})
+
+test_that("print() shows the penalty schedule only when it matters", {
+  quiet <- ferx_search_config(minimal_cfg("COVARIATE?(CL, WT, pow)"))
+  expect_false(any(grepl("Penalties", capture.output(print(quiet)))))
+
+  loud <- ferx_search_config(minimal_cfg(
+    "COVARIATE?(CL, WT, pow)",
+    "[rank]", 'type = "penalized"',
+    "[rank.penalties]", "theta = 5.0"
+  ))
+  out <- paste(capture.output(print(loud)), collapse = "\n")
+  expect_match(out, "Penalties")
+  # The overlaid charge is starred, an untouched one is not - the same idiom
+  # the strictness block uses.
+  expect_match(out, "\\* theta +5")
+  expect_match(out, "  omega +10")
+  # The crash charge is the number the user would write, not a rounded 1e+08.
+  expect_match(out, "crash +99999999")
+
+  # A schedule overlaid under a non-penalized type still prints: a global
+  # search charges the search-level penalties whatever the criterion.
+  bic <- ferx_search_config(minimal_cfg(
+    "COVARIATE?(CL, WT, pow)",
+    "[rank]", 'type = "bic"',
+    "[rank.penalties]", "crash = 1000.0"
+  ))
+  expect_match(paste(capture.output(print(bic)), collapse = "\n"), "Penalties")
+})
+
+test_that("an invalid penalty charge is still an error at load", {
+  expect_error(
+    ferx_search_config(minimal_cfg(
+      "COVARIATE?(CL, WT, pow)",
+      "[rank.penalties]", "theta = -1.0"
+    )),
+    "non-negative"
+  )
+  expect_error(
+    ferx_search_config(minimal_cfg(
+      "COVARIATE?(CL, WT, pow)",
+      "[rank.penalties]", "not_a_penalty = 5.0"
+    )),
+    "not_a_penalty"
+  )
+})
+
+test_that("a section no R tool runs warns at load rather than loading silently", {
+  # #347: the engine's `TOOL_SECTIONS` admits `[globalsearch]` and
+  # `[structsearch]`, neither of which has an R binding. The file loads, the
+  # section is ignored by whichever tool gets the file, and the user gets a
+  # stepwise search having asked for a global one. The load says so.
+  path <- minimal_cfg(
+    "COVARIATE?(CL, WT, pow)",
+    "[globalsearch]", 'algorithm = "exhaustive"'
+  )
+  w <- expect_warning(ferx_search_config(path), "globalsearch")
+  expect_s3_class(w, "ferx_search_unconsumed_section")
+  expect_match(conditionMessage(w), "ferx_search_config")
+  expect_match(conditionMessage(w), "command-line tool")
+
+  cfg <- suppressWarnings(ferx_search_config(path))
+  expect_equal(cfg$tools, "globalsearch")
+  expect_match(paste(capture.output(print(cfg)), collapse = "\n"),
+               "no R tool runs: globalsearch")
+
+  # Both orphan sections at once, in one warning.
+  both <- expect_warning(
+    ferx_search_config(minimal_cfg(
+      "COVARIATE?(CL, WT, pow)",
+      "[globalsearch]", 'algorithm = "exhaustive"',
+      "[structsearch]", "dummy = 1"
+    )),
+    "structsearch"
+  )
+  expect_match(conditionMessage(both), "globalsearch")
+  expect_match(conditionMessage(both), "have")
+})
+
+test_that("a section every R tool does run is not warned about", {
+  expect_silent(ferx_search_config(minimal_cfg(
+    "COVARIATE?(CL, WT, pow)",
+    "[covsearch]", "p_forward = 0.01"
+  )))
+})
+
 test_that("an unrecognised rank type is refused at load, naming the offender", {
   expect_error(
     ferx_search_config(minimal_cfg(

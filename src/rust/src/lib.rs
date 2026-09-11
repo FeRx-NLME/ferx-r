@@ -5168,6 +5168,52 @@ fn search_rank_label(kind: Option<ferx_tools::search::RankType>) -> &'static str
     }
 }
 
+/// The `[rank.penalties]` schedule as parallel vectors: every charge the
+/// engine knows, its effective value, and whether the file changed it.
+///
+/// The effective schedule is what a `penalized` criterion would actually
+/// charge - `[rank.penalties]` overlaid on pyDarwin's defaults - so R reports
+/// the numbers the run would use rather than the keys the file happened to
+/// spell. `set` is that difference, computed here against
+/// `Penalties::default()` because only Rust holds the defaults. A file that
+/// restates a default is indistinguishable from one that omits it, which is
+/// the honest reading: the two runs are the same run.
+fn search_penalty_columns(
+    p: &ferx_tools::search::Penalties,
+) -> (Vec<String>, Vec<f64>, Vec<String>) {
+    let d = ferx_tools::search::Penalties::default();
+    let rows: [(&str, f64, f64); 12] = [
+        ("theta", p.theta, d.theta),
+        ("omega", p.omega, d.omega),
+        ("sigma", p.sigma, d.sigma),
+        ("convergence", p.convergence, d.convergence),
+        ("covariance", p.covariance, d.covariance),
+        ("correlation", p.correlation, d.correlation),
+        ("max_correlation", p.max_correlation, d.max_correlation),
+        ("condition_number", p.condition_number, d.condition_number),
+        (
+            "max_condition_number",
+            p.max_condition_number,
+            d.max_condition_number,
+        ),
+        ("non_influential", p.non_influential, d.non_influential),
+        ("crash", p.crash, d.crash),
+        ("gate", p.gate, d.gate),
+    ];
+
+    let mut name = Vec::with_capacity(rows.len());
+    let mut value = Vec::with_capacity(rows.len());
+    let mut set = Vec::new();
+    for (key, v, default) in rows {
+        name.push(key.to_string());
+        value.push(v);
+        if v != default {
+            set.push(key.to_string());
+        }
+    }
+    (name, value, set)
+}
+
 /// Load and validate a `.ferxsearch` configuration file.
 ///
 /// The engine's loader is the whole validation: an unknown section, an
@@ -5177,7 +5223,9 @@ fn search_rank_label(kind: Option<ferx_tools::search::RankType>) -> &'static str
 /// @param path Path to a `.ferxsearch` file
 /// @return Named list with the resolved `base` / `data` / `dir` paths, the
 ///   `[space]` source and its parallel feature vectors (`feature`, `keyword`,
-///   `optional`), the rank settings, the *effective* strictness gate plus the
+///   `optional`), the rank settings including the effective `[rank.penalties]`
+///   schedule (`penalty_name` / `penalty_value`, with `penalty_set` naming the
+///   charges the file changed), the *effective* strictness gate plus the
 ///   keys the file set explicitly (`strictness_set`), the `[run]` settings,
 ///   and the names of the tool sections the file carries.
 /// @keywords internal
@@ -5216,6 +5264,13 @@ fn ferx_rust_search_config_load(path: &str) -> List {
     // "let the runner choose".
     let nan_if_none = |v: Option<f64>| v.unwrap_or(f64::NAN);
 
+    // The effective penalty schedule, on the same "report what would run"
+    // footing as the strictness gate above: `[rank.penalties]` is read whatever
+    // the `[rank] type`, since a global search charges the search-level
+    // penalties under any criterion.
+    let (penalty_name, penalty_value, penalty_set) =
+        search_penalty_columns(&cfg.rank.penalties());
+
     list!(
         base = cfg.base.to_string_lossy().into_owned(),
         data = cfg
@@ -5230,6 +5285,9 @@ fn ferx_rust_search_config_load(path: &str) -> List {
         optional = optional,
         rank_type = search_rank_label(cfg.rank.kind),
         rank_cutoff = nan_if_none(cfg.rank.cutoff),
+        penalty_name = penalty_name,
+        penalty_value = penalty_value,
+        penalty_set = penalty_set,
         require_converged = gate.require_converged,
         require_covariance = gate.require_covariance,
         max_condition_number = nan_if_none(gate.max_condition_number),

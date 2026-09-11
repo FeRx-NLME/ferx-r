@@ -36,6 +36,20 @@
 #' and reported in \code{$tools}; any other section name is an error, so a
 #' misspelt \code{[strictnes]} cannot silently leave the gate at its defaults.
 #'
+#' Two of the sections the engine accepts have no R tool to run them:
+#' \code{[globalsearch]} and \code{[structsearch]}. A file carrying one loads
+#' cleanly and then has that section ignored by whichever R tool it is handed
+#' to - a \code{[globalsearch]} space run through \code{\link{ferx_covsearch}}
+#' is a stepwise search, not the global one asked for - so loading such a file
+#' warns, here and in every tool that takes \code{config =}.
+#'
+#' \code{[rank.penalties]} (the schedule a \code{[rank] type = "penalized"}
+#' charges) comes back in \code{$rank$penalties} as the \emph{effective}
+#' schedule: the file's keys overlaid on the engine's pyDarwin defaults, with
+#' \code{$rank$penalties_set} naming the charges the file changed. A file that
+#' restates a default is not distinguishable from one that omits it, since the
+#' two describe the same run.
+#'
 #' @param path Path to a \code{.ferxsearch} file.
 #'
 #' @return An S3 object of class \code{ferx_search_config}: a list with
@@ -43,7 +57,9 @@
 #'   file defers to the model's \code{[data]} block), \code{mfl} (the space
 #'   source, verbatim), \code{space} (a data frame with one row per feature:
 #'   \code{feature}, \code{keyword}, \code{optional}), \code{rank}
-#'   (\code{type}, \code{cutoff}), \code{strictness} (the \emph{effective}
+#'   (\code{type}, \code{cutoff}, \code{penalties} - a named numeric of the
+#'   effective \code{[rank.penalties]} schedule - and \code{penalties_set},
+#'   the charges the file changed), \code{strictness} (the \emph{effective}
 #'   gate, the file's keys overlaid on the engine's defaults),
 #'   \code{strictness_set} (the keys the file stated explicitly), \code{run}
 #'   (\code{threads}, \code{retries}, \code{cache_dir}, \code{resume}) and
@@ -67,7 +83,7 @@ ferx_search_config <- function(path) {
 
   raw <- ferx_rust_search_config_load(normalizePath(path))
 
-  structure(
+  cfg <- structure(
     list(
       path = normalizePath(path),
       dir  = as.character(raw$dir),
@@ -77,7 +93,13 @@ ferx_search_config <- function(path) {
       space = .ferx_space_frame(raw$feature, raw$keyword, raw$optional),
       rank = list(
         type   = .ferx_chr_or_na(raw$rank_type),
-        cutoff = .ferx_na_if_nan(raw$rank_cutoff)
+        cutoff = .ferx_na_if_nan(raw$rank_cutoff),
+        # The effective schedule, not the file's keys: what a `penalized`
+        # criterion would charge. `penalties_set` is the overlay, computed in
+        # the glue because only the engine holds the defaults.
+        penalties     = stats::setNames(as.numeric(raw$penalty_value),
+                                        as.character(raw$penalty_name)),
+        penalties_set = as.character(raw$penalty_set)
       ),
       strictness = list(
         require_converged    = isTRUE(raw$require_converged),
@@ -99,6 +121,9 @@ ferx_search_config <- function(path) {
     ),
     class = "ferx_search_config"
   )
+
+  .ferx_search_warn_unconsumed(cfg$tools, "ferx_search_config")
+  cfg
 }
 
 #' @param x A \code{ferx_search_config} object.
@@ -124,6 +149,19 @@ print.ferx_search_config <- function(x, ...) {
   cutoff <- if (is.na(x$rank$cutoff)) "(tool default)" else format(x$rank$cutoff)
   type   <- if (is.na(x$rank$type)) "(tool default)" else x$rank$type
   cat("Rank: ", type, "   cutoff: ", cutoff, "\n", sep = "")
+  # The schedule only steers a run that ranks on it, or a global search's
+  # search-level charges - so a file that neither asks for `penalized` nor
+  # changes a charge gets no block, and the common case stays quiet.
+  if (identical(x$rank$type, "penalized") || length(x$rank$penalties_set)) {
+    cat("Penalties (* = set by the file):\n")
+    for (nm in names(x$rank$penalties)) {
+      mark <- if (nm %in% x$rank$penalties_set) "*" else " "
+      # 15 digits, so the crash charge reads 99999999 rather than a rounded
+      # 1e+08 - a penalty a user set is a number they should recognise.
+      cat(sprintf("  %s %-22s %s\n", mark, nm,
+                  format(x$rank$penalties[[nm]], digits = 15, trim = TRUE)))
+    }
+  }
 
   cat("Strictness (* = set by the file):\n")
   for (nm in names(x$strictness)) {
@@ -140,6 +178,10 @@ print.ferx_search_config <- function(x, ...) {
       "\n", sep = "")
   if (length(x$tools)) {
     cat("Tool sections: ", paste(x$tools, collapse = ", "), "\n", sep = "")
+    orphans <- intersect(x$tools, .FERX_SEARCH_SECTIONS_WITHOUT_TOOL)
+    if (length(orphans)) {
+      cat("  no R tool runs: ", paste(orphans, collapse = ", "), "\n", sep = "")
+    }
   }
   invisible(x)
 }

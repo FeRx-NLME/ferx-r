@@ -17,6 +17,62 @@
 #     absent number and `""` for an absent tri-state logical (a candidate that
 #     never fitted has no `converged`, which is not `FALSE`).
 
+# -- Tool sections no R tool consumes ----------------------------------------
+
+# The engine's `.ferxsearch` vocabulary is wider than this package's tool set:
+# `TOOL_SECTIONS` in ferx-core admits `[globalsearch]` and `[structsearch]`, and
+# neither has an R binding. The loader therefore accepts such a file, and the
+# tool it is handed to ignores the section addressed to a different tool - so a
+# user who writes `[globalsearch] algorithm = "exhaustive"` and hands the file
+# to `ferx_covsearch()` gets a stepwise search, which is the right answer to a
+# question they did not ask (ferx-r #347).
+#
+# This list is R's own: it says which sections *this package* can run, so it
+# belongs here rather than in the engine. `$tools` names the sections the file
+# carries and comes from the engine, so the two halves stay honest - a section
+# name the engine adds shows up in `$tools` and, until a tool for it exists
+# here, in this warning.
+.FERX_SEARCH_SECTIONS_WITHOUT_TOOL <- c("globalsearch", "structsearch")
+
+# Warn about a section the R surface cannot run. A warning rather than an error:
+# the file is valid, the engine loaded it, and the rest of it still describes a
+# runnable search - what is not true is that the run will do what that section
+# asks. Classed, so a caller that reports it in its own name can muffle this one
+# warning without swallowing the others.
+.ferx_search_warn_unconsumed <- function(tools, what) {
+  orphans <- intersect(as.character(tools), .FERX_SEARCH_SECTIONS_WITHOUT_TOOL)
+  if (!length(orphans)) return(invisible(NULL))
+  one <- length(orphans) == 1L
+  warning(warningCondition(
+    sprintf(
+      paste0("%s: [%s] %s no R tool in this package, so %s ignored - a search ",
+             "run from this file does what its other sections say. Run that ",
+             "section with the `ferx` command-line tool instead."),
+      what,
+      paste(orphans, collapse = "], ["),
+      if (one) "has" else "have",
+      if (one) "it is" else "they are"
+    ),
+    class = "ferx_search_unconsumed_section"
+  ))
+  invisible(orphans)
+}
+
+# The tool sections a `.ferxsearch` file carries, or NULL when it does not load.
+# A file the engine will reject is left to the engine to reject, in its own
+# words: this is a warning path, not a second validation pass.
+.ferx_search_tools_of <- function(path) {
+  tryCatch(
+    withCallingHandlers(
+      ferx_search_config(path)$tools,
+      # `ferx_search_config()` warns in its own name; the caller re-reports the
+      # same finding in the name the user actually typed.
+      ferx_search_unconsumed_section = function(w) invokeRestart("muffleWarning")
+    ),
+    error = function(e) NULL
+  )
+}
+
 # The glue's tri-state logical: "" is NA, "true"/"false" are themselves.
 .ferx_search_lgl <- function(x) {
   x <- as.character(x)
@@ -159,7 +215,12 @@
               collapse = "`, `")
       ))
     }
-    return(normalizePath(config))
+    config <- normalizePath(config)
+    # Every tool resolves its config through here, so this is the one place a
+    # section no R tool runs can be reported at the moment it would take effect,
+    # not only when the file is loaded by `ferx_search_config()` (#347).
+    .ferx_search_warn_unconsumed(.ferx_search_tools_of(config), what)
+    return(config)
   }
   if (is.null(model)) {
     stop(sprintf("%s: pass either `config` (a .ferxsearch file) or `model`", what))

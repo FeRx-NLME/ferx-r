@@ -22,7 +22,9 @@ An S3 object of class \code{ferx_search_config}: a list with
 file defers to the model's \code{[data]} block), \code{mfl} (the space
 source, verbatim), \code{space} (a data frame with one row per feature:
 \code{feature}, \code{keyword}, \code{optional}), \code{rank}
-(\code{type}, \code{cutoff}), \code{strictness} (the \emph{effective}
+(\code{type}, \code{cutoff}, \code{penalties} - a named numeric of the
+effective \code{[rank.penalties]} schedule - and \code{penalties_set},
+the charges the file changed), \code{strictness} (the \emph{effective}
 gate, the file's keys overlaid on the engine's defaults),
 \code{strictness_set} (the keys the file stated explicitly), \code{run}
 (\code{threads}, \code{retries}, \code{cache_dir}, \code{resume}) and
@@ -65,6 +67,20 @@ A tool section (\code{[covsearch]}, \code{[modelsearch]},
 \code{[structsearch]}, \code{[allometry]}) is kept for the tool that owns it
 and reported in \code{$tools}; any other section name is an error, so a
 misspelt \code{[strictnes]} cannot silently leave the gate at its defaults.
+
+Two of the sections the engine accepts have no R tool to run them:
+\code{[globalsearch]} and \code{[structsearch]}. A file carrying one loads
+cleanly and then has that section ignored by whichever R tool it is handed
+to - a \code{[globalsearch]} space run through \code{\link{ferx_covsearch}}
+is a stepwise search, not the global one asked for - so loading such a file
+warns, here and in every tool that takes \code{config =}.
+
+\code{[rank.penalties]} (the schedule a \code{[rank] type = "penalized"}
+charges) comes back in \code{$rank$penalties} as the \emph{effective}
+schedule: the file's keys overlaid on the engine's pyDarwin defaults, with
+\code{$rank$penalties_set} naming the charges the file changed. A file that
+restates a default is not distinguishable from one that omits it, since the
+two describe the same run.
 }
 \examples{
 cfg <- ferx_search_config(ferx_example("two_cpt_oral_cov")$search)
