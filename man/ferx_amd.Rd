@@ -112,9 +112,23 @@ pre-screen candidate is fitted to the parent's CWRES, so its number is
 on the CWRES scale and must not be compared with a data OFV.
 \code{tool} is \code{"start"} for the pipeline's own first fit and
 \code{"retries"} for a perturbed-restart pass.}
-\item{tools}{One entry per step that ran, named by step and position,
-holding that step's directory, what it selected, and its own slice of
-the candidate table.}
+\item{tools}{One entry per step that ran - a step that failed included,
+carrying its reason and an empty candidate table - named by position
+and step. Each holds what the step decided (\code{status},
+\code{reason}, \code{criterion}, \code{selected}, \code{seconds}) and
+its own slice of \code{candidates}. When the run kept its
+\code{directory}, the tool's own record is nested beside that, read
+back from the step's directory with \code{\link{ferx_search_results}}:
+\code{models} or \code{steps} (whichever table that tool writes),
+\code{input_model_path} and \code{final_model_path}, and
+\code{model_paths} for every candidate model it kept. These are the
+engine's own tables rather than \code{ferx_modelsearch} /
+\code{ferx_iivsearch} objects: the pipeline returns each step's
+candidates adapted to one shape and leaves the tool's fuller record on
+disk, so a classed object would have to be rebuilt in R from those
+files - a second construction path, and still without the fit and the
+options only a direct call returns. Run the tool on its own when you
+want its object.}
 \item{fit}{The final model's fit as a \code{ferx_fit}, or \code{NULL}
 when the pipeline ended with no fit in hand.}
 \item{input_model, input_ofv}{The model the pipeline started from, and

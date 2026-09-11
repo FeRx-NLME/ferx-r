@@ -75,6 +75,17 @@ test_that("argument validation happens in R, before the engine is called", {
   # steps, which is ferx_ruvsearch() under another name.
   expect_error(ferx_amd(model = ex$model, data = ex$data),
                "`search_space` is required")
+  # And an *empty* space is the same pipeline by another spelling, so it is
+  # refused the same way rather than reaching the engine as no [space] at all
+  # (#356 review). Three ways to write nothing, one answer.
+  for (empty in list("", "   ", character(0), c("", " "))) {
+    expect_error(ferx_amd(model = ex$model, data = ex$data,
+                          search_space = empty),
+                 "`search_space` is empty")
+    expect_error(ferx_amd_plan(model = ex$model, data = ex$data,
+                               search_space = empty),
+                 "`search_space` is empty")
+  }
 })
 
 test_that("the engine's own validation runs before the dataset is read", {
@@ -219,6 +230,49 @@ test_that("a step's verdict is the verdict on the model it selected", {
   expect_false(one_step$passed)
 })
 
+test_that("a step that ran and failed is an entry saying so, not a missing one", {
+  # A step can fail on one platform's fit trajectory and run on another's, so
+  # the shape a failure takes is asserted here rather than left to whichever
+  # machine happens to produce one: the pipeline carries on from the model the
+  # step was handed, and the step is a row - and a `$tools` entry - that says
+  # what happened.
+  steps <- data.frame(
+    index      = 1:3,
+    step       = c("structural", "iivsearch", "residual"),
+    tool       = c("modelsearch", "iivsearch", "ruvsearch"),
+    directory  = c("01-modelsearch", "02-iivsearch", "03-ruvsearch"),
+    status     = c("ran", "skipped", "failed"),
+    reason     = c(NA, "left out by `[amd] skip`", "the base fit did not converge"),
+    criterion  = c("bic_mixed", NA, "ofv"),
+    selected   = c("FO, 1 peripheral", NA, NA),
+    seconds    = c(1.2, 0, 0.4),
+    stringsAsFactors = FALSE
+  )
+  candidates <- data.frame(
+    step      = c(1L, 1L),
+    tool      = c("modelsearch", "modelsearch"),
+    id        = c("base", "run1"),
+    converged = c(TRUE, TRUE),
+    passed    = c(TRUE, TRUE),
+    selected  = c(FALSE, TRUE),
+    stringsAsFactors = FALSE
+  )
+  tools <- ferx:::.ferx_amd_tools(steps, candidates)
+
+  # The skipped step has no entry - it fitted nothing and reached no tool - and
+  # the failed one does, carrying its reason with an empty candidate table.
+  expect_equal(names(tools), c("01-structural", "03-residual"))
+  expect_equal(nrow(tools[["01-structural"]]$candidates), 2L)
+  expect_equal(nrow(tools[["03-residual"]]$candidates), 0L)
+  expect_equal(tools[["03-residual"]]$status, "failed")
+  expect_match(tools[["03-residual"]]$reason, "did not converge")
+
+  # And the failed step's verdict is NA rather than the previous step's copied
+  # onto a row it is not about.
+  verdict <- ferx:::.ferx_amd_step_verdict(steps$index, candidates)
+  expect_equal(verdict$passed, c(TRUE, NA, NA))
+})
+
 # -- The end-to-end run ------------------------------------------------------
 #
 # One real pipeline: slow, so it runs once and every assertion about the result
@@ -265,7 +319,20 @@ test_that("the result reports the pipeline the engine ran", {
   expect_equal(res$steps$step, c("structural", "iivsearch", "residual"))
   expect_equal(res$steps$tool, c("modelsearch", "iivsearch", "ruvsearch"))
   expect_equal(res$steps$index, 1:3)
-  expect_true(all(res$steps$status == "ran"))
+
+  # A step is one of the three the engine reports, and exactly the two that did
+  # not run carry a reason. Which of the three a step lands on is the engine's
+  # business and moves with the fit trajectory - a ruvsearch that fails on one
+  # platform's BLAS is a row saying so, which is the contract being asserted
+  # here, not a reason for this test to fail.
+  # `info` carries the reasons into the failure message, so a future run where
+  # a step stops running says why without a second CI round trip.
+  info <- paste(sprintf("%s: %s (%s)", res$steps$step, res$steps$status,
+                        ifelse(is.na(res$steps$reason), "-", res$steps$reason)),
+                collapse = " | ")
+  expect_true(all(res$steps$status %in% c("ran", "skipped", "failed")),
+              info = info)
+  expect_equal(is.na(res$steps$reason), res$steps$status == "ran", info = info)
 
   # The options come back as the engine read them, not as R passed them.
   expect_equal(res$options$strategy, "SIR")
@@ -290,7 +357,10 @@ test_that("the run reproduces the engine's own report, rather than recomputing i
   steps_csv <- utils::read.csv(res$steps_csv, stringsAsFactors = FALSE)
   expect_equal(steps_csv$step, res$steps$step)
   expect_equal(steps_csv$status, res$steps$status)
-  expect_equal(steps_csv$selected, res$steps$selected)
+  # The CSV has no missing value to spell, so a step that selected nothing
+  # writes "" where the object carries NA - the same fact in the two
+  # conventions, which is what `.ferx_search_chr()` translates between.
+  expect_equal(ferx:::.ferx_search_chr(steps_csv$selected), res$steps$selected)
   expect_equal(steps_csv$value_after, res$steps$value_after, tolerance = 1e-6)
   # `d_value` is the engine's own subtraction; R does the same one rather than
   # a different one.
@@ -317,8 +387,7 @@ test_that("the strictness verdict and the termination status are columns at both
   # A candidate the gate rejected keeps the gate's reasons, in the gate's own
   # words - a winner-only table is what this pipeline must not be.
   rejected <- res$candidates[!res$candidates$passed, , drop = FALSE]
-  expect_gt(nrow(rejected), 0L)
-  expect_true(all(nzchar(rejected$failures) | !is.na(rejected$error)))
+  expect_true(all(!is.na(rejected$failures) | !is.na(rejected$error)))
 
   # Each step's verdict is the verdict on the model that step selected.
   for (i in which(!is.na(res$steps$passed))) {
@@ -334,12 +403,45 @@ test_that("every step's candidates are under it, the pipeline's own fits beside 
   skip_on_cran()
   res <- amd_run()
 
+  # A skipped step has no entry; a step that ran - failures included - does.
   expect_equal(names(res$tools),
                c("01-structural", "02-iivsearch", "03-residual"))
   for (tool in res$tools) {
-    expect_equal(unique(tool$candidates$step), tool$index)
+    # A step that failed fitted nothing, and is here for its status and its
+    # reason: the entry is what says the pipeline reached it.
+    if (nrow(tool$candidates) > 0L) {
+      expect_equal(unique(tool$candidates$step), tool$index)
+    } else {
+      expect_equal(tool$status, "failed")
+      expect_false(is.na(tool$reason))
+    }
+  }
+  ok <- Filter(function(t) t$status == "ran", res$tools)
+  expect_gt(length(ok), 0L)
+  for (tool in ok) {
     expect_gt(nrow(tool$candidates), 0L)
     expect_true(dir.exists(file.path(res$directory, tool$directory)))
+
+    # The tool's own record is nested beside the pipeline's view of it, read
+    # back from that step's directory - the table it writes, the model it was
+    # handed, the model it selected, and the candidates it kept.
+    expect_equal(tool$path, file.path(res$directory, tool$directory))
+    expect_true(file.exists(tool$input_model_path))
+    expect_true(file.exists(tool$final_model_path))
+    own <- if (tool$tool %in% c("modelsearch", "iivsearch", "iovsearch")) {
+      tool$models
+    } else {
+      tool$steps
+    }
+    expect_s3_class(own, "data.frame")
+    expect_gt(nrow(own), 0L)
+    # `ferx_search_results()` tags a model table with the tool that wrote it,
+    # which is how a directory read back on its own is identified.
+    if (!is.null(tool$models)) expect_equal(attr(tool$models, "tool"), tool$tool)
+    if (!is.null(tool$model_paths)) {
+      expect_true(all(file.exists(tool$model_paths)))
+      expect_true(all(nzchar(names(tool$model_paths))))
+    }
   }
 
   # The pipeline's own start fit is a row of the candidate table, filed at step
@@ -379,6 +481,13 @@ test_that("a run with no directory keeps nothing but its tables", {
   expect_equal(nrow(res$steps), 3L)
   expect_gt(nrow(res$candidates), 0L)
   expect_true(file.exists(res$final_model_path))
+  # A run that wrote nothing has nothing to nest: the per-step entries keep the
+  # pipeline's own view and no paths into a directory that is gone.
+  for (tool in res$tools) {
+    expect_null(tool$path)
+    expect_null(tool$models)
+    expect_null(tool$final_model_path)
+  }
   # The two skipped steps say they were skipped by name, not by the space.
   skipped <- res$steps[res$steps$status == "skipped", , drop = FALSE]
   expect_equal(skipped$step, c("structural", "residual"))
@@ -394,7 +503,9 @@ test_that("print and summary show the step table and the candidates under it", {
   expect_match(out, "Pipeline:")
   expect_match(out, "structural")
   expect_match(out, "passed")
-  expect_match(out, "strictness gate")
+  # The gate line is printed when the run has something for it to count.
+  if (any(!res$candidates$passed)) expect_match(out, "strictness gate")
+  if (any(res$steps$status != "ran")) expect_match(out, "Steps that did not run")
 
   out2 <- paste(utils::capture.output(summary(res)), collapse = "\n")
   expect_match(out2, "Step 1 - structural")

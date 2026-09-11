@@ -337,6 +337,15 @@
   supports, so the pipeline has something to decide) with a `.ferxsearch`
   carrying a structural and a variability space plus an `[amd]` section.
 
+  **An empty inline `search_space` is now refused by every search tool that
+  requires one** (`ferx_amd()`, `ferx_covsearch()`, `ferx_modelsearch()`,
+  `ferx_iivsearch()`). `search_space = ""`, `character(0)` and a vector of
+  blank lines used to pass R's validation and reach the engine as no `[space]`
+  section at all - a covariate search with nothing to search, and for AMD a
+  pipeline that plans every step but the residual one as skipped, which is
+  `ferx_ruvsearch()` wearing six rows. The rule was about the argument being
+  absent; it is now about the search having a space.
+
 - **Variability-structure search: `ferx_iivsearch()` and `ferx_iovsearch()`**
   (#337, part of the #334 search epic; ferx-core #1183). Pharmpy's `iivsearch`
   and `iovsearch` from R. `ferx_iivsearch()` decides which parameters carry an

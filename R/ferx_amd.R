@@ -132,9 +132,23 @@
 #'       on the CWRES scale and must not be compared with a data OFV.
 #'       \code{tool} is \code{"start"} for the pipeline's own first fit and
 #'       \code{"retries"} for a perturbed-restart pass.}
-#'     \item{tools}{One entry per step that ran, named by step and position,
-#'       holding that step's directory, what it selected, and its own slice of
-#'       the candidate table.}
+#'     \item{tools}{One entry per step that ran - a step that failed included,
+#'       carrying its reason and an empty candidate table - named by position
+#'       and step. Each holds what the step decided (\code{status},
+#'       \code{reason}, \code{criterion}, \code{selected}, \code{seconds}) and
+#'       its own slice of \code{candidates}. When the run kept its
+#'       \code{directory}, the tool's own record is nested beside that, read
+#'       back from the step's directory with \code{\link{ferx_search_results}}:
+#'       \code{models} or \code{steps} (whichever table that tool writes),
+#'       \code{input_model_path} and \code{final_model_path}, and
+#'       \code{model_paths} for every candidate model it kept. These are the
+#'       engine's own tables rather than \code{ferx_modelsearch} /
+#'       \code{ferx_iivsearch} objects: the pipeline returns each step's
+#'       candidates adapted to one shape and leaves the tool's fuller record on
+#'       disk, so a classed object would have to be rebuilt in R from those
+#'       files - a second construction path, and still without the fit and the
+#'       options only a direct call returns. Run the tool on its own when you
+#'       want its object.}
 #'     \item{fit}{The final model's fit as a \code{ferx_fit}, or \code{NULL}
 #'       when the pipeline ended with no fit in hand.}
 #'     \item{input_model, input_ofv}{The model the pipeline started from, and
@@ -314,7 +328,8 @@ ferx_amd <- function(model = NULL,
   result <- list(
     steps            = steps,
     candidates       = candidates,
-    tools            = .ferx_amd_tools(steps, candidates),
+    tools            = .ferx_amd_tools(steps, candidates,
+                                       if (keep) dir_arg else NA_character_),
     fit              = fit,
     options          = list(
       strategy   = as.character(raw$strategy),
@@ -518,16 +533,29 @@ ferx_amd_plan <- function(model = NULL,
   list(converged = converged, passed = passed)
 }
 
-# The per-step view: each step that ran, with its own slice of the candidate
-# table under it. The tools' own fuller records stay in their step directories;
-# this is what the run object can carry without re-reading them.
-.ferx_amd_tools <- function(steps, candidates) {
+# The per-step view: each step that ran, with its slice of the pipeline's
+# candidate table and - when the run kept its directory - the tool's *own*
+# tables, read back from that step's directory with `ferx_search_results()`,
+# the same reader a user would call on it.
+#
+# These are tables rather than `ferx_modelsearch` / `ferx_iivsearch` objects
+# (#356 review). The engine's `AmdResult` carries no per-tool result struct:
+# each step's rows are adapted into the pipeline's own `CandidateRow` shape and
+# the tool's fuller record is left in its directory. Building classed objects
+# here would mean a second construction path for each one, fed from CSVs rather
+# than from the binding that builds them everywhere else - the drift risk the
+# shared search contract exists to avoid - and they would still be missing what
+# only the binding returns (`$fit`, the options as the engine read them, every
+# candidate's model text). So what is nested is what the engine actually wrote:
+# the tool's `models.csv` / `steps.csv`, its `input.ferx` and `final.ferx`, and
+# the models it kept.
+.ferx_amd_tools <- function(steps, candidates, directory = NA_character_) {
   ran <- steps[steps$status != "skipped", , drop = FALSE]
   if (nrow(ran) == 0L) return(list())
   out <- lapply(seq_len(nrow(ran)), function(i) {
     rows <- candidates[candidates$step == ran$index[i], , drop = FALSE]
     rownames(rows) <- NULL
-    list(
+    entry <- list(
       index      = ran$index[i],
       step       = ran$step[i],
       tool       = ran$tool[i],
@@ -539,8 +567,40 @@ ferx_amd_plan <- function(model = NULL,
       seconds    = ran$seconds[i],
       candidates = rows
     )
+    c(entry, .ferx_amd_tool_files(directory, ran$directory[i]))
   })
   names(out) <- sprintf("%02d-%s", ran$index, ran$step)
+  out
+}
+
+# What one step's directory holds, when the run kept one: the tool's own table
+# (`models.csv` for the three tools that rank models, `steps.csv` for the two
+# that test them), the model it was handed, the model it selected, and the text
+# of every model it kept. Absent keys for a run held in memory, which wrote
+# none of them.
+.ferx_amd_tool_files <- function(directory, step_dir) {
+  if (is.na(directory) || !nzchar(directory)) return(list())
+  dir <- file.path(directory, step_dir)
+  if (!dir.exists(dir)) return(list())
+
+  out <- list(path = dir)
+  for (type in c("models", "steps")) {
+    file <- file.path(dir, paste0(type, ".csv"))
+    if (!file.exists(file)) next
+    tab <- tryCatch(ferx_search_results(dir, type = type),
+                    error = function(e) NULL)
+    if (!is.null(tab)) out[[type]] <- tab
+  }
+  for (nm in c("input", "final")) {
+    file <- file.path(dir, paste0(nm, ".ferx"))
+    if (file.exists(file)) out[[paste0(nm, "_model_path")]] <- file
+  }
+  models <- list.files(file.path(dir, "models"), pattern = "\\.ferx$",
+                       full.names = TRUE)
+  if (length(models) > 0L) {
+    out$model_paths <- stats::setNames(models, sub("\\.ferx$", "",
+                                                   basename(models)))
+  }
   out
 }
 
