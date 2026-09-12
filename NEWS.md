@@ -979,6 +979,20 @@
 
 ## Bug fixes
 
+- **`print()` of a `ferx_model` and `ferx_model_inspect()` on a model path now
+  list etas declared in a `block_omega`** (#358). The structure summary built
+  before a fit read IIV names only from `omega NAME ~ ...` lines, so
+  `ferx_example("warfarin_block_omega")` printed `IIV: ETA_KA` instead of
+  `ETA_CL, ETA_V, ETA_KA`, and every `ferx_model_to_frem()` result, whose etas all
+  sit in one block, printed `IIV: none`. `block_kappa` names are now read for
+  IOV the same way, with `iov_weights` kept one entry per name and `NA` for
+  every name of a `block_kappa`, which cannot carry a `weight =` modifier. A
+  block header is read only when it carries the engine's `= [`, so a line the
+  engine parses as valid and ignores no longer contributes etas that the fitted
+  model does not have. `ferx_model_show()` also highlights `block_kappa` and
+  `block_sigma` now. Post-fit output (`fit$model_structure`) was not affected:
+  it comes from the engine.
+
 - **`ferx_model_to_frem()` now writes its files to `output_dir`.** Unless
   `output_model` and `output_data` were both given, `output_dir` was created and
   then ignored: the generated `<stem>_frem.ferx` and `<stem>_frem_data.csv` went

@@ -17,10 +17,15 @@
 #'   (character vector of population parameter names), \code{model_type}
 #'   (short label such as \code{"1-cpt oral"}, \code{"ODE"}, or
 #'   \code{"compartment-free"}, or \code{NULL} when not
-#'   unambiguously detectable), \code{iiv} (omega names), \code{iov}
-#'   (kappa names), \code{iov_weights} (per-kappa sample-size weight
-#'   expressions from \code{kappa K ~ <var> weight = <expr>}, \code{NA} for
-#'   an unweighted kappa and \code{character(0)} when no kappa is weighted),
+#'   unambiguously detectable), \code{iiv} (eta names, from both
+#'   \code{omega NAME ~ ...} and \code{block_omega (NAME1, NAME2, ...)}
+#'   declarations, in declaration order), \code{iov} (kappa names, likewise
+#'   from \code{kappa} and \code{block_kappa}), \code{iov_weights}
+#'   (sample-size weight expressions from
+#'   \code{kappa K ~ <var> weight = <expr>}, one entry per name in
+#'   \code{iov} - \code{NA} for an unweighted kappa and for every name of a
+#'   \code{block_kappa}, which cannot carry a weight - and
+#'   \code{character(0)} when no kappa is weighted),
 #'   and \code{residual} (error type - one of
 #'   \code{"proportional"}, \code{"additive"}, \code{"combined"}, or
 #'   \code{"additive (log-transformed)"} for log-transform-both-sides

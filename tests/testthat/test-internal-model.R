@@ -138,6 +138,112 @@ test_that(".ferx_parse_structure parses an ODE model", {
   expect_equal(s$theta_names, c("TVVMAX", "TVKM"))
   expect_equal(s$iiv,         "ETA_VMAX")
 })
+test_that(".ferx_parse_structure reads block_omega etas in declaration order (#358)", {
+  path <- write_ferx(c(
+    "[parameters]",
+    "  theta TVCL(0.2, 0.001, 10.0)",
+    "  block_omega (ETA_CL, ETA_V) = [0.07, 0.02, 0.02]",
+    "  omega ETA_KA ~ 0.40",
+    "  BLOCK_OMEGA(ETA_WT,ETA_AGE) = [",
+    "    100.0,",
+    "    1.0, 90.0",
+    "  ]",
+    "  sigma PROP_ERR ~ 0.02",
+    "[structural_model]",
+    "  pk one_cpt_oral(cl=CL, v=V, ka=KA)",
+    "[error_model]",
+    "  DV ~ proportional(PROP_ERR)"
+  ))
+  on.exit(unlink(path))
+
+  s <- ferx:::.ferx_parse_structure(path)
+  expect_equal(s$iiv, c("ETA_CL", "ETA_V", "ETA_KA", "ETA_WT", "ETA_AGE"))
+  expect_equal(s$iov, character(0))
+})
+test_that(".ferx_parse_structure reads block_kappa names and keeps iov_weights parallel (#358)", {
+  path <- write_ferx(c(
+    "[parameters]",
+    "  theta TVCL(0.2, 0.001, 10.0)",
+    "  omega ETA_CL ~ 0.09",
+    "  kappa KAPPA_CL ~ 0.05 weight = NARM",
+    "  block_kappa (KAPPA_V, KAPPA_KA) = [0.04, 0.01, 0.03]",
+    "  sigma PROP_ERR ~ 0.02",
+    "[structural_model]",
+    "  pk one_cpt_oral(cl=CL, v=V, ka=KA)",
+    "[error_model]",
+    "  DV ~ proportional(PROP_ERR)"
+  ))
+  on.exit(unlink(path))
+
+  s <- ferx:::.ferx_parse_structure(path)
+  expect_equal(s$iov, c("KAPPA_CL", "KAPPA_V", "KAPPA_KA"))
+  expect_equal(s$iov_weights, c("NARM", NA, NA))
+})
+test_that(".ferx_parse_structure ignores a block header whose values start on the next line", {
+  # The engine's regex requires `= [` on the declaration line, and nothing
+  # rejoins a header that has no `[` of its own: it parses the file as valid
+  # and records no block etas. Reading the names here would report etas the
+  # fitted model does not have.
+  path <- write_ferx(c(
+    "[parameters]",
+    "  theta TVCL(0.2, 0.001, 10.0)",
+    "  block_omega (ETA_A, ETA_B)",
+    "    = [0.07, 0.02, 0.02]",
+    "  omega ETA_CL ~ 0.09",
+    "  sigma PROP_ERR ~ 0.02",
+    "[structural_model]",
+    "  pk one_cpt_oral(cl=CL, v=V, ka=KA)",
+    "[error_model]",
+    "  DV ~ proportional(PROP_ERR)"
+  ))
+  on.exit(unlink(path))
+
+  s <- ferx:::.ferx_parse_structure(path)
+  expect_equal(s$iiv, "ETA_CL")
+})
+test_that(".ferx_parse_structure reports no weight for block_kappa names", {
+  # The engine records no weight for a block's names, and rejects a
+  # `block_kappa` that spells one (E_PARSE). Labelling them weighted here
+  # would describe a file that cannot fit.
+  path <- write_ferx(c(
+    "[parameters]",
+    "  theta TVCL(0.2, 0.001, 10.0)",
+    "  omega ETA_CL ~ 0.09",
+    "  kappa KAPPA_CL ~ 0.05 weight = NARM",
+    "  block_kappa (KAPPA_V, KAPPA_KA) = [0.04, 0.01, 0.03] weight = NARM",
+    "  sigma PROP_ERR ~ 0.02",
+    "[structural_model]",
+    "  pk one_cpt_oral(cl=CL, v=V, ka=KA)",
+    "[error_model]",
+    "  DV ~ proportional(PROP_ERR)"
+  ))
+  on.exit(unlink(path))
+
+  s <- ferx:::.ferx_parse_structure(path)
+  expect_equal(s$iov, c("KAPPA_CL", "KAPPA_V", "KAPPA_KA"))
+  expect_equal(s$iov_weights, c("NARM", NA, NA))
+})
+test_that("print() labels only the weighted kappa, keeping iov_weights parallel", {
+  # .ferx_iov_labels() drops every label when the two vectors differ in
+  # length, so the invariant is asserted where it is consumed, not only on
+  # the structure list.
+  path <- write_ferx(c(
+    "[parameters]",
+    "  theta TVCL(0.2, 0.001, 10.0)",
+    "  omega ETA_CL ~ 0.09",
+    "  kappa KAPPA_CL ~ 0.05 weight = NARM",
+    "  block_kappa (KAPPA_V, KAPPA_KA) = [0.04, 0.01, 0.03]",
+    "  sigma PROP_ERR ~ 0.02",
+    "[structural_model]",
+    "  pk one_cpt_oral(cl=CL, v=V, ka=KA)",
+    "[error_model]",
+    "  DV ~ proportional(PROP_ERR)"
+  ))
+  on.exit(unlink(path))
+
+  expect_output(print(ferx_model(model = path)),
+                "IOV:\\s+KAPPA_CL \\(weight = NARM\\), KAPPA_V, KAPPA_KA")
+})
 test_that(".ferx_parse_structure returns empty vectors when IIV/IOV absent", {
   path <- write_ferx(c(
     "[parameters]",

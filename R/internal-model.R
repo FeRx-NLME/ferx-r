@@ -165,6 +165,56 @@ ferx_section_headers <- function(lines) {
   none
 }
 
+# The declaration keywords a `[parameters]` block may open a line with, as the
+# engine's regexes spell them (model_parser.rs: theta_re, omega_re, sigma_re,
+# kappa_re and the three block_* forms). One definition, so the structure
+# parser's safety net below and ferx_model_show()'s highlighter cannot drift
+# from each other - the highlighter had already lost `block_kappa` and
+# `block_sigma`.
+.ferx_decl_keywords <- function() {
+  c("theta", "omega", "sigma", "kappa",
+    "block_omega", "block_sigma", "block_kappa")
+}
+
+# Is this `[parameters]` line a `block_<keyword>` declaration? Parallel to
+# `lines`. The block form differs from the diagonal one in what it may carry:
+# no `weight =` modifier, which the engine rejects outright on a block.
+.ferx_is_block_decl <- function(lines, keyword) {
+  grepl(sprintf("^block_%s\\s*\\(", keyword), lines, ignore.case = TRUE)
+}
+
+# Names declared on each `[parameters]` line by `<keyword> NAME ~ ...` or
+# `block_<keyword> (NAME1, NAME2, ...) = [...]`: a list parallel to `lines`,
+# character(0) for a line that declares none. Mirrors the engine's
+# omega_re / block_omega_re (and the kappa pair): case-insensitive, and a
+# block's names are its parenthesised, comma-separated list.
+#
+# The `= [` is required, as it is in the engine's regex. Without it, a header
+# line whose values start on the *next* line - which `join_bracketed_lines()`
+# does not rejoin, since that line carries no `[` - would be read here as a
+# declaration the engine ignores, and this function would report etas the
+# fitted model does not have. A genuinely multi-line block keeps `= [` on its
+# header line, which is what makes that line self-describing.
+#
+# An empty name (a trailing comma) is dropped rather than reported. The engine
+# rejects such a file outright - the value count no longer matches the name
+# count - so this only shapes the summary printed for a model that cannot fit.
+.ferx_declared_names <- function(lines, keyword) {
+  diag_re  <- sprintf("^%s\\s+(\\w+).*", keyword)
+  block_re <- sprintf("^block_%s\\s*\\(([^)]+)\\)\\s*=\\s*\\[.*", keyword)
+  lapply(lines, function(line) {
+    if (grepl(diag_re, line, ignore.case = TRUE)) {
+      sub(diag_re, "\\1", line, ignore.case = TRUE)
+    } else if (grepl(block_re, line, ignore.case = TRUE)) {
+      nm <- trimws(strsplit(sub(block_re, "\\1", line, ignore.case = TRUE),
+                            ",", fixed = TRUE)[[1L]])
+      nm[nzchar(nm)]
+    } else {
+      character(0)
+    }
+  })
+}
+
 # Parse a .ferx file and return a named list describing model structure.
 # Fields: theta_names (pop param names), model_type (label or NULL),
 #         iiv, iov, residual.
@@ -191,31 +241,34 @@ ferx_section_headers <- function(lines) {
   struct_lines <- b[["structural_model"]] %||% character(0)
   model_type   <- if (length(struct_lines) > 0L) .ferx_model_type(struct_lines) else NULL
 
-  # IIV: omega lines
-  omega_lines <- grep("^omega\\s", params, value = TRUE, ignore.case = TRUE)
-  iiv <- if (length(omega_lines) > 0L)
-    sub("^omega\\s+(\\w+).*", "\\1", omega_lines, ignore.case = TRUE)
-  else
-    character(0)
-
-  # IOV: kappa lines
-  kappa_lines <- grep("^kappa\\s", params, value = TRUE, ignore.case = TRUE)
-  iov <- if (length(kappa_lines) > 0L)
-    sub("^kappa\\s+(\\w+).*", "\\1", kappa_lines, ignore.case = TRUE)
-  else
-    character(0)
+  # IIV and IOV names, in declaration order. Both the diagonal form
+  # (`omega NAME ~ ...`) and the block form (`block_omega (A, B) = [...]`)
+  # declare names; reading only the diagonal form reported a model whose etas
+  # all sit in a block - every ferx_model_to_frem() result - as "IIV: none"
+  # (#358).
+  iiv_per_line   <- .ferx_declared_names(params, "omega")
+  kappa_per_line <- .ferx_declared_names(params, "kappa")
+  iiv <- unlist(iiv_per_line, use.names = FALSE) %||% character(0)
+  iov <- unlist(kappa_per_line, use.names = FALSE) %||% character(0)
 
   # Sample-size-weighted IOV (ferx-core #1031): `kappa K ~ 2.0 (sd) weight = NARM`
   # declares `kappa_ik ~ N(0, Omega_IOV / N_ik)`. Capture the weight expression
   # so ferx_model_inspect() shows it pre-fit, mirroring the `iov_weights` the
   # engine attaches to model_structure post-fit. Left as character(0) when no
   # kappa is weighted, so an ordinary IOV model's structure list is unchanged.
-  iov_weights <- if (length(kappa_lines) > 0L) {
-    w <- vapply(kappa_lines, .ferx_split_weight_modifier, character(1L),
-                USE.NAMES = FALSE)
-    if (all(is.na(w))) character(0) else w
-  } else {
-    character(0)
+  #
+  # One entry per name in `iov` - `.ferx_iov_labels()` drops every weight
+  # label, silently, when the two vectors differ in length - built by repeating
+  # each line's weight by the number of names that line declares (`times = 0`
+  # for a line that declares none). `vapply()` keeps the type check that
+  # invariant rests on. A `block_kappa` never carries a weight: the engine
+  # records none for its names and rejects a block that spells one.
+  weight_per_line <- vapply(params, .ferx_split_weight_modifier, character(1L),
+                            USE.NAMES = FALSE)
+  weight_per_line[.ferx_is_block_decl(params, "kappa")] <- NA_character_
+  iov_weights <- rep(weight_per_line, lengths(kappa_per_line))
+  if (length(iov_weights) == 0L || all(is.na(iov_weights))) {
+    iov_weights <- character(0)
   }
 
   # Safety net for the next time this parser drifts from the engine's. Every
@@ -227,7 +280,8 @@ ferx_section_headers <- function(lines) {
   # not a plausible model; say so rather than hand back a blank structure.
   # Deliberately keyword-agnostic: it fires on whatever the next divergence
   # turns out to be, not just on the ones already known.
-  decl_re <- "^(block_)?(theta|omega|sigma|kappa)\\s*[[:space:](]"
+  decl_re <- sprintf("^(%s)\\s*[[:space:](]",
+                     paste(.ferx_decl_keywords(), collapse = "|"))
   if (length(params) > 0L &&
         !any(grepl(decl_re, params, ignore.case = TRUE))) {
     warning(

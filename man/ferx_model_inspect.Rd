@@ -15,10 +15,15 @@ A named list (invisibly) with fields: \code{theta_names}
 (character vector of population parameter names), \code{model_type}
 (short label such as \code{"1-cpt oral"}, \code{"ODE"}, or
 \code{"compartment-free"}, or \code{NULL} when not
-unambiguously detectable), \code{iiv} (omega names), \code{iov}
-(kappa names), \code{iov_weights} (per-kappa sample-size weight
-expressions from \code{kappa K ~ <var> weight = <expr>}, \code{NA} for
-an unweighted kappa and \code{character(0)} when no kappa is weighted),
+unambiguously detectable), \code{iiv} (eta names, from both
+\code{omega NAME ~ ...} and \code{block_omega (NAME1, NAME2, ...)}
+declarations, in declaration order), \code{iov} (kappa names, likewise
+from \code{kappa} and \code{block_kappa}), \code{iov_weights}
+(sample-size weight expressions from
+\code{kappa K ~ <var> weight = <expr>}, one entry per name in
+\code{iov} - \code{NA} for an unweighted kappa and for every name of a
+\code{block_kappa}, which cannot carry a weight - and
+\code{character(0)} when no kappa is weighted),
 and \code{residual} (error type - one of
 \code{"proportional"}, \code{"additive"}, \code{"combined"}, or
 \code{"additive (log-transformed)"} for log-transform-both-sides
@@ -72,12 +77,12 @@ s$residual     # "proportional"
 \code{\link{ferx_model_show}}, \code{\link{ferx_model_edit}},
 \code{\link{ferx_fit}}
 
-Other model-editing:
-\code{\link[=ferx_model]{ferx_model()}},
-\code{\link[=ferx_model_edit]{ferx_model_edit()}},
-\code{\link[=ferx_model_get_section]{ferx_model_get_section()}},
-\code{\link[=ferx_model_set_section]{ferx_model_set_section()}},
-\code{\link[=ferx_model_show]{ferx_model_show()}},
-\code{\link[=ferx_model_validate]{ferx_model_validate()}}
+Other model-editing: 
+\code{\link{ferx_model}()},
+\code{\link{ferx_model_edit}()},
+\code{\link{ferx_model_get_section}()},
+\code{\link{ferx_model_set_section}()},
+\code{\link{ferx_model_show}()},
+\code{\link{ferx_model_validate}()}
 }
 \concept{model-editing}
