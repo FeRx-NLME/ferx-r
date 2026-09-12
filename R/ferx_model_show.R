@@ -56,8 +56,7 @@ ferx_model_show <- function(path) {
     line <- substr(line, 1L, hash - 1L)
   }
   # Colour a leading declaration keyword.
-  keywords <- c("theta", "omega", "sigma", "kappa", "block_omega",
-                "pk", "ode", "odes")
+  keywords <- c(.ferx_decl_keywords(), "pk", "ode", "odes")
   g <- regmatches(line, regexec("^(\\s*)(\\S+)(.*)$", line))[[1L]]
   if (length(g) == 4L && g[[3L]] %in% keywords) {
     line <- paste0(g[[2L]], cli::col_cyan(g[[3L]]), g[[4L]])

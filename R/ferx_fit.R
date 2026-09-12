@@ -980,8 +980,10 @@
 #'     \code{"1-cpt oral"}, \code{"ODE"}, or \code{"compartment-free"}, or
 #'     \code{NULL} when the structural form is not one of the known
 #'     analytical PK families), \code{iiv}
-#'     (omega names), \code{iov} (kappa names), \code{iov_weights} (per-kappa
-#'     sample-size weight expressions, present only when some kappa declares
+#'     (eta names, from the \code{omega} and \code{block_omega} declarations
+#'     alike), \code{iov} (kappa names, likewise), \code{iov_weights}
+#'     (sample-size weight expressions, one entry per name in \code{iov} and
+#'     present only when some kappa declares
 #'     \code{weight = }), \code{residual} (error type string). Use
 #'     \code{\link{ferx_model_inspect}} to view this before or after
 #'     fitting.}

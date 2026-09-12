@@ -1028,8 +1028,10 @@ population parameter names), \code{model_type} (short label such as
 \code{"1-cpt oral"}, \code{"ODE"}, or \code{"compartment-free"}, or
 \code{NULL} when the structural form is not one of the known
 analytical PK families), \code{iiv}
-(omega names), \code{iov} (kappa names), \code{iov_weights} (per-kappa
-sample-size weight expressions, present only when some kappa declares
+(eta names, from the \code{omega} and \code{block_omega} declarations
+alike), \code{iov} (kappa names, likewise), \code{iov_weights}
+(sample-size weight expressions, one entry per name in \code{iov} and
+present only when some kappa declares
 \code{weight = }), \code{residual} (error type string). Use
 \code{\link{ferx_model_inspect}} to view this before or after
 fitting.}
@@ -1723,16 +1725,16 @@ starting values before a full run.
 \item \code{\link{plot.ferx_fit}} - convergence trace plot.
 }
 
-Other fitting:
-\code{\link[=ferx_bootstrap]{ferx_bootstrap()}},
-\code{\link[=ferx_bootstrap_summarize]{ferx_bootstrap_summarize()}},
-\code{\link[=ferx_check_init]{ferx_check_init()}},
-\code{\link[=ferx_coef]{ferx_coef()}},
-\code{\link[=ferx_collect]{ferx_collect()}},
-\code{\link[=ferx_covariance]{ferx_covariance()}},
-\code{\link[=ferx_inits_from_nca]{ferx_inits_from_nca()}},
-\code{\link[=ferx_sir]{ferx_sir()}},
-\code{\link[=ferx_stop]{ferx_stop()}},
-\code{\link[=print.ferx_job]{print.ferx_job()}}
+Other fitting: 
+\code{\link{ferx_bootstrap}()},
+\code{\link{ferx_bootstrap_summarize}()},
+\code{\link{ferx_check_init}()},
+\code{\link{ferx_coef}()},
+\code{\link{ferx_collect}()},
+\code{\link{ferx_covariance}()},
+\code{\link{ferx_inits_from_nca}()},
+\code{\link{ferx_sir}()},
+\code{\link{ferx_stop}()},
+\code{\link{print.ferx_job}()}
 }
 \concept{fitting}

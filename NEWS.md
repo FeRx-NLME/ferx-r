@@ -947,8 +947,13 @@
   `ferx_example("warfarin_block_omega")` printed `IIV: ETA_KA` instead of
   `ETA_CL, ETA_V, ETA_KA`, and every `ferx_model_to_frem()` result, whose etas all
   sit in one block, printed `IIV: none`. `block_kappa` names are now read for
-  IOV the same way, with `iov_weights` kept one entry per name. Post-fit output
-  (`fit$model_structure`) was not affected: it comes from the engine.
+  IOV the same way, with `iov_weights` kept one entry per name and `NA` for
+  every name of a `block_kappa`, which cannot carry a `weight =` modifier. A
+  block header is read only when it carries the engine's `= [`, so a line the
+  engine parses as valid and ignores no longer contributes etas that the fitted
+  model does not have. `ferx_model_show()` also highlights `block_kappa` and
+  `block_sigma` now. Post-fit output (`fit$model_structure`) was not affected:
+  it comes from the engine.
 
 - **`print()` of a fit no longer lists uncorrelated random-effect pairs under
   "Correlations"** ([ferx-core #1018](https://github.com/FeRx-NLME/ferx-core/issues/1018)).
