@@ -2,6 +2,64 @@
 
 ## Breaking changes
 
+- **A `block_omega` declared beside a separate diagonal `omega` now fits the
+  model it declares, so estimates, OFV, AIC and BIC of such a fit change**
+  ([ferx-core #1018](https://github.com/FeRx-NLME/ferx-core/issues/1018),
+  [ferx-core #1364](https://github.com/FeRx-NLME/ferx-core/pull/1364)). Every
+  estimator that runs the outer optimizer - `foce`, `focei`, `laplace`, `gn`,
+  `gn_hybrid`, under any `optimizer` - searched the cross-block Cholesky entries
+  anyway, so `block_omega (ETA_CL, ETA_V)` beside `omega ETA_KA` estimated
+  `Cov(ETA_KA, ETA_CL)` and `Cov(ETA_KA, ETA_V)` and returned the full 3x3 block
+  fit, while `n_parameters` counted only the declared block. Those covariances
+  are now held at exactly 0, report a standard error of exactly 0, and are not
+  perturbed by `ferx_sir()` or by asymptotic uncertainty draws - a SIR run on
+  such a model also loses those dimensions from its Student-t proposal, so its
+  weights and effective sample size move. `n_parameters` is unchanged and now
+  matches what was estimated. The same applies to a `block_kappa` beside a
+  separate `kappa`.
+
+  **The bundled `warfarin_block_omega` example is exactly this shape**, and the
+  move was measured at both pins:
+
+  | | OFV | AIC | BIC | n_parameters | Cov(KA,CL) | Cov(KA,V) |
+  |---|---|---|---|---|---|---|
+  | old pin `8694824` | `-283.316670` | `-267.316670` | `-245.712827` | 8 | `-0.031659` | `0.020686` |
+  | new pin `8372248c` | `-280.485777` | `-264.485777` | `-242.881934` | 8 | `0` | `0` |
+
+  Declaring the full block instead - `block_omega (ETA_CL, ETA_V, ETA_KA)` -
+  fits at OFV `-283.316670` with 10 parameters and the same two covariances to
+  every digit, which is what the old mixed declaration was returning: the same
+  answer as a full block, reported as an 8-parameter model, so its AIC and BIC
+  were computed from a parameter count two short of what had been estimated.
+  The remaining four omega entries move by less than 1e-3, and the `se_omega`
+  entries for the two held covariances are now exactly `0`.
+
+  `ferx_iivsearch()` is affected for the same reason: a block-stage candidate
+  with a block beside another eta is now ranked on the model it declares, and
+  the caveat note that said otherwise is gone.
+
+- **A model file that calls a function the engine does not have now fails to
+  parse** ([ferx-core #1332](https://github.com/FeRx-NLME/ferx-core/issues/1332)).
+  `CL = TVCL * tanh(ETA_CL)` used to parse, validate, fit and converge while
+  computing `TVCL * ETA_CL`, because an unknown name evaluated as the identity.
+  This covers every block that parses expressions - `[individual_parameters]`,
+  `[odes]`, `[scaling]`, `[derived]`, `[error_model]` magnitudes - and
+  conditions. Names stay case-insensitive, so `EXP(...)` / `LOG(...)` are
+  unaffected. A file that relied on the no-op was already computing something
+  other than what it reads as, so the new errors are all true positives.
+
+- **A `pk(...)` call that binds both spellings of one PK slot to *different*
+  values is now a parse error**
+  ([ferx-core #1048](https://github.com/FeRx-NLME/ferx-core/issues/1048)).
+  `v=`/`v1=` (central volume), `q=`/`q2=` (inter-compartmental clearance) and
+  `lagtime=`/`alag=` (absorption lag) each name one slot, so
+  `pk one_cpt_iv(cl = CL, v = VA, v1 = VB)` used to parse, fit and return
+  predictions off by the ratio of the two volumes with no warning at all. Both
+  spellings bound to the same value stays legal.
+
+  **No bundled example is affected by either new parse error**: all 67 models in
+  `inst/examples/models/` were parsed at the new pin and none fails.
+
 - **A `theta` whose initial estimate lies strictly outside its own declared
   range is now refused before any fitting**
   ([ferx-core #1251](https://github.com/FeRx-NLME/ferx-core/issues/1251),
@@ -177,6 +235,29 @@
   (`one_cpt_iv_pooled`, `binary_logistic`) request `focei` and are unaffected.
 
 ## New features
+
+- **The engine gained per-parameter priors for penalized ML / MAP estimation**
+  ([ferx-core #254](https://github.com/FeRx-NLME/ferx-core/issues/254)),
+  declared inline in the model file as `prior(value, rse = 25%)` on any `theta`,
+  `omega`, `sigma` or `kappa`. Reachable from R today by writing the declaration
+  into the `.ferx` file: the fit runs, the penalty reaches the standard errors
+  and the SIR intervals, and AIC/BIC stay on the data half of the objective.
+
+  **The three fields the engine added to report it - `ofv_data`, `ofv_prior` and
+  the per-parameter `prior_summary` - are not surfaced on the `ferx_fit` object
+  yet.** `fit$ofv` is the *penalized* objective, and the split is not readable
+  from R: `theta TVCL(0.134, 0.001, 10.0) prior(0.15, rse = 10%)` on the bundled
+  `warfarin` model fits to `fit$ofv = -279.1978` while the console trace reports
+  the data half, `-280.126253`. Surfacing the three fields is a follow-up.
+
+- **`[covariate_nn]` models with IOV now get the exact analytic FOCE/FOCEI outer
+  gradient** ([ferx-core #1339](https://github.com/FeRx-NLME/ferx-core/issues/1339)),
+  so `settings = list(optimizer = "auto")` on such a model resolves to L-BFGS
+  instead of derivative-free BOBYQA over every network weight, and `gradient`
+  reports analytic. This also covers IOV models
+  carrying an `[initial_conditions]` baseline, an `obs_scale` expression or an
+  analytic Form C readout, and drops the old 24-wide cap on an `obs_scale`
+  expression's `(theta, eta)` width.
 
 - **A `.ferxsearch` section no R tool can run now says so, instead of loading
   clean and being ignored** ([#347](https://github.com/FeRx-NLME/ferx-r/issues/347),
@@ -979,6 +1060,43 @@
 
 ## Bug fixes
 
+- **NPDE / NPD now sample the occasion `kappa`**
+  ([ferx-core #734](https://github.com/FeRx-NLME/ferx-core/issues/734)). The
+  post-fit Monte-Carlo reference distribution held every `kappa` at zero, so for
+  an IOV model it carried no between-occasion variability and the scores came
+  back over-dispersed - a well-specified IOV model looked mis-specified. The
+  reference now draws one independent `kappa ~ N(0, Omega_IOV)` per occasion,
+  matching what `ferx_simulate()` already did, anchored row-by-row against
+  NONMEM `$TABLE ... NPDE NPD ESAMPLE=`. Non-IOV models are unchanged.
+
+- **A `kappa` model's reported OFV was often far above the value the optimizer
+  had actually minimised**
+  ([ferx-core #1327](https://github.com/FeRx-NLME/ferx-core/issues/1327)). The
+  IOV inner loop discarded a converged-in-all-but-name BFGS solution for a much
+  worse Nelder-Mead restart from the cold seed, so every cold-started evaluation
+  - the reported final OFV, a `maxiter = 0` re-evaluation, a `.fitrx` reload -
+  scored some subjects thousands of -2LL units too high (9,300 on a
+  `[covariate_nn]` + IOV busulfan fit). Reported objectives for IOV models move.
+
+- **`floor(x)`, `ceil(x)` and `round(x)` now differentiate to `0`** instead of to
+  `x`'s own derivative
+  ([ferx-core #1332](https://github.com/FeRx-NLME/ferx-core/issues/1332)). An
+  `[individual_parameters]` or `[odes]` expression that rounds - a dose-band
+  lookup, an occasion index derived from `TIME` - was feeding a wrong analytic
+  gradient to the estimator while its value path was correct.
+
+- **A `threads` budget is now a real ceiling on how many fits run at once** in
+  `ferx_bootstrap()`, `ferx_modelsearch()`, `ferx_covsearch()`,
+  `ferx_iivsearch()` and `ferx_ruvsearch()`
+  ([ferx-core #1329](https://github.com/FeRx-NLME/ferx-core/issues/1329)). Each
+  replicate or candidate runs its own fit on a nested thread pool, and a worker
+  blocked on that nesting kept taking more work, so a run asked for 4 concurrent
+  fits could hold far more - and that many fits' worth of peak memory. Runs
+  already inside their budget are unaffected; heavily oversubscribed ones should
+  see lower peak memory rather than higher throughput. An unset bootstrap thread
+  budget now preserves the ambient Rayon pool width, including
+  `RAYON_NUM_THREADS` ([ferx-core #1330](https://github.com/FeRx-NLME/ferx-core/pull/1330)).
+
 - **`print()` of a `ferx_model` and `ferx_model_inspect()` on a model path now
   list etas declared in a `block_omega`** (#358). The structure summary built
   before a fit read IIV names only from `omega NAME ~ ...` lines, so
@@ -1360,6 +1478,46 @@
   own: it arrived with the pin move to `944cbf1e`, which already contained it.
 
 ## Internal
+
+- **The pinned engine revision moves `8694824` -> `8372248c`**, with `ferx-core`
+  and `ferx-tools` both staying at `0.4.0` (one repository, one revision, two
+  lock entries). The range is 29 commits; the user-visible ones are written up
+  under Breaking changes, New features and Bug fixes above. The rest are engine
+  performance work with no R-visible contract change: the `laplace` grid-response
+  gradient is assembled analytically by default and no longer rebuilds the
+  conditional Hessian per parameter
+  ([ferx-core #1335](https://github.com/FeRx-NLME/ferx-core/issues/1335)), its
+  `1/2 log|H|` sweep walks only the random-effect axes
+  ([#1342](https://github.com/FeRx-NLME/ferx-core/issues/1342)) and reuses the
+  anchor's sensitivity jet ([#1344](https://github.com/FeRx-NLME/ferx-core/issues/1344)),
+  `focei` with `n_agq > 1` contracts the grid response once per subject
+  ([#1333](https://github.com/FeRx-NLME/ferx-core/issues/1333)), the post-fit
+  diagnostics pass runs in parallel over subjects
+  ([#1329](https://github.com/FeRx-NLME/ferx-core/issues/1329)), and SAEM's
+  per-occasion `kappa` sampling is parallel and bit-identical. **On ODE models
+  the `laplace` optimizer path can change** - the two routes differ at ~1e-10 -
+  so a converged estimate may shift within the convergence tolerance; closed-form
+  models were unaffected and `focei` is untouched.
+
+  `tools/update-ferx-core-lock.sh` moved no registry crate this time: the diff
+  is the two `source = "git+..."` lines and nothing else.
+
+- **The Rust glue gained the three `FitResult` fields ferx-core added for
+  priors** (`ofv_data`, `ofv_prior`, `prior_summary`;
+  [ferx-core #254](https://github.com/FeRx-NLME/ferx-core/issues/254)). This
+  package builds `ferx_core::FitResult` with **exhaustive** struct literals in
+  three places - the scaffold behind `ferx_simulate_with_uncertainty()`, and the
+  skeletons handed to `run_sir()` and `run_covariance()` - so the added fields
+  broke the build with `E0063` until each was filled in. All three carry the
+  unpriored values: the whole objective on the data half, `0.0` prior, empty
+  summary. Neither `run_sir()` nor `run_covariance()` reads the three fields -
+  SIR takes its reference objective as `ofv - ofv_prior` and the covariance step
+  re-derives any prior curvature from `model.priors`, not from the fit.
+
+  `FitResult` derives no `Default`, so these literals cannot be spread the way
+  the `R-CMD-check` workflow requires every `*Options` literal to be
+  (ferx-core #529). Every future ferx-core field addition therefore breaks the
+  build here, with no gate to catch it before the bump.
 
 - **The degenerate oracle from [#332](https://github.com/FeRx-NLME/ferx-r/issues/332)
   is now covered for `ferx_covsearch()` and `ferx_allometry()`.** The other four

@@ -1751,6 +1751,14 @@ fn default_fit_result(
         cond_dist: None,
         converged: true,
         ofv: 0.0,
+        // ferx-core main split the objective into data and prior halves (#254).
+        // This scaffold exists only to carry R-supplied estimates into the
+        // uncertainty path, which reads no objective at all, so both halves stay
+        // 0 beside the `ofv: 0.0` above and the per-parameter prior report is
+        // empty - what an unpriored fit reports.
+        ofv_data: 0.0,
+        ofv_prior: 0.0,
+        prior_summary: Vec::new(),
         aic: 0.0,
         bic: 0.0,
         theta,
@@ -3562,6 +3570,23 @@ fn ferx_rust_sir(
         cond_dist: None,
         converged: true,
         ofv,
+        // ferx-core main split the objective into a data and a prior half
+        // (#254). `run_sir` reads neither field directly: it takes its reference
+        // objective as `data_ofv(fit) = fit.ofv - fit.ofv_prior`, deliberately
+        // not `ofv_data`, which a deserialised legacy fit carries as 0. The
+        // `ofv` handed in here is the whole objective the R fit recorded, so the
+        // data half carries it and the prior half is 0 - what an unpriored fit
+        // reports.
+        //
+        // For a *priored* fit that `ofv` is already penalized, so `data_ofv`
+        // returns the penalized total and `run_sir_core` adds the penalty a
+        // second time. That shifts `ofv_hat` by a constant, which cancels in the
+        // normalized importance weights, so no number moves today - but the
+        // right fix is for `ferx_sir()` to pass the fit's own `ofv_prior`
+        // through rather than to rely on that cancellation (ferx-r #366).
+        ofv_data: ofv,
+        ofv_prior: 0.0,
+        prior_summary: Vec::new(),
         aic: 0.0,
         bic: 0.0,
         theta: theta.clone(),
@@ -3967,6 +3992,14 @@ fn ferx_rust_covariance(
         cond_dist: None,
         converged: true,
         ofv,
+        // ferx-core main split the objective into a data and a prior half
+        // (#254). `run_covariance` reads neither - it re-derives the penalty
+        // from `model.priors` when the model declares one - so the `ofv` handed
+        // in carries the data half and the prior half is 0, as for an unpriored
+        // fit.
+        ofv_data: ofv,
+        ofv_prior: 0.0,
+        prior_summary: Vec::new(),
         aic: 0.0,
         bic: 0.0,
         theta: theta.clone(),
