@@ -100,6 +100,27 @@ test_that(".ferx_highlight_line styles headers, keywords, and comments", {
   expect_identical(cli::ansi_strip(kw), "  theta TVCL(1.0)  # clearance")
   expect_identical(cli::ansi_strip(cmt), "# a comment")
 })
+test_that(".ferx_highlight_line styles every declaration keyword the engine accepts", {
+  skip_if_not_installed("cli")
+  withr::local_options(cli.num_colors = 256)
+
+  # One line per keyword, so a keyword dropped from the shared set fails here
+  # rather than rendering unhighlighted (block_kappa and block_sigma did).
+  lines <- c(
+    "  theta TVCL(1.0)",
+    "  omega ETA_CL ~ 0.09",
+    "  sigma PROP_ERR ~ 0.02",
+    "  kappa KAPPA_CL ~ 0.05",
+    "  block_omega (ETA_CL, ETA_V) = [0.09, 0.01, 0.09]",
+    "  block_sigma (E1, E2) = [0.02, 0.001, 0.02]",
+    "  block_kappa (KAPPA_V, KAPPA_KA) = [0.04, 0.01, 0.03]"
+  )
+  for (line in lines) {
+    styled <- ferx:::.ferx_highlight_line(line)
+    expect_true(cli::ansi_has_any(styled), info = line)
+    expect_identical(cli::ansi_strip(styled), line)
+  }
+})
 test_that(".ferx_highlight_line leaves non-keyword / blank lines untouched", {
   skip_if_not_installed("cli")
   withr::local_options(cli.num_colors = 256)

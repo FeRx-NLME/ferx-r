@@ -249,6 +249,43 @@ test_that("pre-fit structure lists block_omega etas as the engine does (#358)", 
                   covariance = FALSE, settings = list(maxiter = 0L))
   expect_equal(pre$iiv, fit$model_structure$iiv)
 })
+test_that("pre-fit eta order matches the engine with a diagonal between two blocks (#358)", {
+  # warfarin_block_omega is block-then-diagonal, so it pins only that shape.
+  # The engine walks [parameters] line by line, which this interleaving would
+  # expose if it ever grouped the block forms instead.
+  ex <- ferx_example("warfarin")
+  path <- tempfile(fileext = ".ferx")
+  on.exit(unlink(path))
+  writeLines(c(
+    "[parameters]",
+    "  theta TVCL(0.2, 0.001, 10.0)",
+    "  theta TVV1(10.0, 0.1, 500.0)",
+    "  theta TVQ(0.5, 0.001, 50.0)",
+    "  theta TVV2(20.0, 0.1, 500.0)",
+    "  theta TVKA(1.5, 0.01, 50.0)",
+    "  block_omega (ETA_CL, ETA_V1) = [0.09, 0.01, 0.09]",
+    "  omega ETA_Q ~ 0.04",
+    "  block_omega (ETA_V2, ETA_KA) = [0.04, 0.01, 0.09]",
+    "  sigma PROP_ERR ~ 0.02",
+    "[individual_parameters]",
+    "  CL = TVCL * exp(ETA_CL)",
+    "  V1 = TVV1 * exp(ETA_V1)",
+    "  Q  = TVQ  * exp(ETA_Q)",
+    "  V2 = TVV2 * exp(ETA_V2)",
+    "  KA = TVKA * exp(ETA_KA)",
+    "[structural_model]",
+    "  pk two_cpt_oral(cl=CL, v1=V1, q=Q, v2=V2, ka=KA)",
+    "[error_model]",
+    "  DV ~ proportional(PROP_ERR)"
+  ), path)
+
+  pre <- ferx_model_inspect(path)
+  expect_equal(pre$iiv, c("ETA_CL", "ETA_V1", "ETA_Q", "ETA_V2", "ETA_KA"))
+
+  fit <- ferx_fit(path, ex$data, method = "focei", verbose = FALSE,
+                  covariance = FALSE, settings = list(maxiter = 0L))
+  expect_equal(pre$iiv, fit$model_structure$iiv)
+})
 test_that("ferx_model_inspect(fit) reads from the Rust-supplied structure post-fit", {
   fit <- warfarin_fit()
   out <- capture.output(s <- ferx_model_inspect(fit))
