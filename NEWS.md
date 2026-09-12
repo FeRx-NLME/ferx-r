@@ -178,6 +178,44 @@
 
 ## New features
 
+- **A `.ferxsearch` section no R tool can run now says so, instead of loading
+  clean and being ignored** ([#347](https://github.com/FeRx-NLME/ferx-r/issues/347),
+  part of the [#334](https://github.com/FeRx-NLME/ferx-r/issues/334) search
+  epic). The engine's `TOOL_SECTIONS` admits `[globalsearch]` and
+  `[structsearch]`; this package binds neither. So a file written from the
+  ferx-core docs loaded without complaint, and whichever R tool it was handed to
+  ignored the section addressed to a different tool - a `[globalsearch]` space
+  run through `ferx_covsearch()` was a stepwise search, silently, with a
+  different answer than the one asked for. `ferx_search_config()` and every tool
+  that takes `config =` now warn, naming the section and the caller, and
+  `print()` of a config marks the section under `Tool sections:` as one no R tool
+  runs. The warning is classed `ferx_search_unconsumed_section`, so a script that
+  knows it is running the stepwise half can muffle that one condition without
+  suppressing the rest. What the warning reports is the *complement* of the
+  sections this package has a tool for - not a list of the two known names - so a
+  section a later ferx-core adds to `TOOL_SECTIONS` is reported from the day a
+  file can carry it, and stops being reported on the day a binding for it lands
+  here. Where a section can be run somewhere else the warning says where, by
+  name: `[globalsearch]` points at `ferx globalsearch`, while `[structsearch]`,
+  which is accepted vocabulary with no engine module and no CLI command behind
+  it, is reported without a remediation rather than with one that names a
+  command that does not exist.
+
+- **`ferx_search_config()` reports the `[rank.penalties]` schedule it
+  validated** ([#348](https://github.com/FeRx-NLME/ferx-r/issues/348), folded
+  into [#332](https://github.com/FeRx-NLME/ferx-r/issues/332)). `[rank] type =
+  "penalized"` ranks on pyDarwin's penalized fitness and `[rank.penalties]`
+  overlays the individual charges; the loader validated the table - a negative
+  charge and an unknown key are both errors - and then dropped it, so `cfg$rank`
+  held `type` and `cutoff` only and a config with `theta = 5.0` printed
+  byte-identically to one with the defaults. `cfg$rank$penalties` is now a named
+  numeric of the *effective* schedule (the file's keys over the engine's
+  defaults, which is what the run would charge) and `cfg$rank$penalties_set`
+  names the charges the file changed. `print()` shows the schedule, starred like
+  the strictness block, whenever the file ranks on `penalized` or changes a
+  charge, and stays quiet otherwise. Results were never affected: the tools pass
+  the config path to the engine, which reads the table itself.
+
 - **`ferx_coef(fit, "TVCL")` and `ferx_se(fit, "TVCL")` pull a parameter by
   name, and `fit$estimates` now carries row names**
   ([#299](https://github.com/FeRx-NLME/ferx-r/issues/299)). The tidy estimates
@@ -955,6 +993,20 @@
   `block_sigma` now. Post-fit output (`fit$model_structure`) was not affected:
   it comes from the engine.
 
+- **`ferx_model_to_frem()` now writes its files to `output_dir`.** Unless
+  `output_model` and `output_data` were both given, `output_dir` was created and
+  then ignored: the generated `<stem>_frem.ferx` and `<stem>_frem_data.csv` went
+  next to the model file. For a `ferx_example()` model that is the installed
+  package library, so the call wrote into the library, or failed where the
+  library is read-only. The default paths are now built in `output_dir`, as
+  `?ferx_model_to_frem` documents. An explicit `output_model` or `output_data`
+  still takes precedence for that file, and `output_dir` is neither read nor
+  created when both are given. The generated paths are made absolute, so a
+  relative `output_dir` no longer returns a `ferx_model` that resolves only
+  from the working directory the call was made in. When `data` is omitted, it
+  now falls back to the model file's `[data]` block, as in `ferx_fit()`,
+  instead of erroring.
+
 - **`print()` of a fit no longer lists uncorrelated random-effect pairs under
   "Correlations"** ([ferx-core #1018](https://github.com/FeRx-NLME/ferx-core/issues/1018)).
   The section opens when any covariance is non-zero, and it then printed every
@@ -962,6 +1014,42 @@
   `omega ETA_KA` also showed `ETA_KA ~ ETA_CL : cov = 0.000000 ... SE = 0.000000`.
   Pairs with a zero covariance are now skipped, for OMEGA and for OMEGA_IOV,
   with the same threshold the engine's own summary and YAML output use.
+
+- **`fit$individual_estimates` reports the right values for ODE models.** Each
+  column was read from PK slot *i* for the *i*-th `[individual_parameters]`
+  declaration, but the engine does not store ODE parameters in declaration
+  order: canonical names (`CL`, `V`, `KA`, `F`, `LAGTIME`, ...) sit at their
+  fixed slot and every other name takes a free slot that is not reserved for
+  `F` / `LAGTIME`. Columns therefore showed another parameter's value or an
+  unwritten `0` - `KA` and `LAGTIME` were `0` on `warfarin_ode_lagtime`, `KA`
+  was `0` on `warfarin_ode`, and `transit_savic` reported the `TVN` estimate
+  as `KA`, `0` as `MTT` and the `TVKA` estimate as `NTR`. The table now reads
+  each parameter through the engine's per-parameter slot map, the same one the
+  ODE right-hand side reads from; on `warfarin_ode_lagtime` and `transit_savic`
+  every value equals the model's own formula evaluated at `fit$theta` and
+  `fit$ebe_etas`.
+
+  The table also no longer carries columns named `__ferx_ro_*` or
+  `__ferx_pktime_*`. The parser adds these internal parameters when a
+  `[scaling]` readout refers to a `theta` or `eta` directly, or when
+  `pk(...)` binds a parameter to `TIME`, and `ferx_xpose()` listed them as
+  parameter columns.
+
+  **Still wrong on analytical models:** a top-level `[individual_parameters]`
+  name that is not bound on the `[structural_model]` line (an intermediate such
+  as `TVCL`, or `LAMBDA` in the bundled `tte_exponential`) reports CL's value.
+  The same wrong value appears in an `[output]` echo of that name. This needs
+  an engine change and is tracked in
+  [ferx-core #1356](https://github.com/FeRx-NLME/ferx-core/issues/1356).
+
+  Two consumers read this table and were wrong on ODE models for the same
+  reason; both are corrected by the same change. `ferx_xpose()` joins it into
+  the Xpose data as the parameter columns, and overwrote a correct `[output]`
+  echo of the same name, so echoing parameters did not work around the bug
+  there. `ferx_cov_screen()` computed its `ebe` column from it: the association
+  came out `NA` for a parameter that read as `0` and was computed against
+  another parameter's values otherwise, which could also add or drop rows at
+  the `threshold`. Its `eta` column and parameter labels were unaffected.
 
 - **`ferx_get_warnings()` no longer recommends solver settings for ODE problems
   they cannot fix** ([ferx-core #1234](https://github.com/FeRx-NLME/ferx-core/issues/1234),
@@ -1272,6 +1360,17 @@
   own: it arrived with the pin move to `944cbf1e`, which already contained it.
 
 ## Internal
+
+- **The degenerate oracle from [#332](https://github.com/FeRx-NLME/ferx-r/issues/332)
+  is now covered for `ferx_covsearch()` and `ferx_allometry()`.** The other four
+  search tools each had one; these two shipped without. covsearch has no
+  single-point space of its own - a structural feature is refused outright - so
+  the degenerate case asserted is a space whose one candidate cannot be
+  selected: at an alpha no dOFV can clear, nothing is included, the candidate is
+  still a row with its verdict, and the returned fit matches `ferx_fit()` on the
+  base model. For `ferx_allometry()` the anchor is the arm every dOFV it reports
+  is measured against: `res$base_fit` must be the base model fitted, not a
+  second answer to the same question.
 
 - **Dependabot now ignores `ferx-tools` as well as `ferx-core`.** The two
   crates share one git source - the ferx-core repository, pinned at a single

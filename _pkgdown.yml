@@ -50,6 +50,23 @@ reference:
       - ferx_xpose
       - check_diagnostics
 
+  - title: "Model search"
+    desc: "Search a model space from R: validate the space, run one tool, or run the whole AMD pipeline."
+    contents:
+      - ferx_search_config
+      - ferx_search_space
+      - ferx_search_coverage
+      - ferx_search_results
+      - ferx_modelsearch
+      - ferx_iivsearch
+      - ferx_iovsearch
+      - ferx_ruvsearch
+      - ferx_covsearch
+      - ferx_allometry
+      - ferx_amd
+      - ferx_amd_plan
+      - ferx_bic
+
   - title: "Data filtering"
     desc: "Preview and apply record-level data-selection filters before fitting."
     contents:

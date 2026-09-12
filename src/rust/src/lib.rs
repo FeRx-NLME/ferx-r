@@ -3001,6 +3001,15 @@ fn build_cond_dist_df(result: &FitResult, population: &Population, cd: &CondDist
 // is the value produced by evaluating `pk_param_fn` at the subject's EBE
 // eta + zero kappas + covariates. Returns NULL when there are no subjects or
 // the model declares no individual parameters.
+//
+// Parameters the parser synthesizes (`__ferx_ro_*` for a direct theta/eta
+// reference in a Form-C readout, `__ferx_pktime_*` for `pk(...=TIME)`) are
+// internal and left out, as ferx-core's own `build_indiv_map` does for the
+// `[output]` echo. The prefixes mirror its `READOUT_SYNTH_PREFIX` and
+// `PKTIME_SYNTH_PREFIX`, which are not public; the parser rejects user names
+// that carry them.
+const SYNTHETIC_INDIV_PARAM_PREFIXES: [&str; 2] = ["__ferx_ro_", "__ferx_pktime_"];
+
 fn build_individual_estimates(
     result: &FitResult,
     population: &Population,
@@ -3012,17 +3021,26 @@ fn build_individual_estimates(
     }
     let n_eta = model.n_eta;
     let n_kappa = model.n_kappa;
-    let indiv_names = &model.indiv_param_names;
-    let n_indiv = indiv_names.len();
-    if n_indiv == 0 {
+    // (position in `indiv_param_names`, name) for every user-facing parameter.
+    let columns: Vec<(usize, &str)> = model
+        .indiv_param_names
+        .iter()
+        .enumerate()
+        .filter(|(_, name)| {
+            !SYNTHETIC_INDIV_PARAM_PREFIXES
+                .iter()
+                .any(|prefix| name.starts_with(prefix))
+        })
+        .map(|(i, name)| (i, name.as_str()))
+        .collect();
+    if columns.is_empty() {
         return ().into();
     }
 
     let mut ids: Vec<String> = Vec::with_capacity(n_subj);
     let mut param_cols: Vec<Vec<f64>> =
-        (0..n_indiv).map(|_| Vec::with_capacity(n_subj)).collect();
+        (0..columns.len()).map(|_| Vec::with_capacity(n_subj)).collect();
 
-    let is_ode = model.is_ode_based();
     let mut eta_buf: Vec<f64> = vec![0.0; n_eta + n_kappa];
 
     for (si, sr) in result.subjects.iter().enumerate() {
@@ -3036,23 +3054,29 @@ fn build_individual_estimates(
             eta_buf[n_eta + k] = 0.0;
         }
         let pk = (model.pk_param_fn)(&result.theta, &eta_buf, &subj.covariates, 0.0);
-        for i in 0..n_indiv {
-            // Analytical models route via pk_indices; ODE models write
-            // sequentially into slots 0..n_indiv.
-            let slot = if is_ode {
-                i
-            } else {
-                model.pk_indices.get(i).copied().unwrap_or(i)
-            };
+        for (col, &(i, _)) in columns.iter().enumerate() {
+            // `pk_indices` is parallel to `indiv_param_names` on both engines.
+            // ODE models do NOT write sequentially: ferx-core's
+            // `ode_param_slots` puts canonical names (CL, V, KA, F, LAGTIME,
+            // ...) at their fixed PK slot and every other name in the lowest
+            // free slot that is not reserved for F/lagtime. Reading slot `i`
+            // returned another parameter's value (or an unwritten 0).
+            //
+            // Known gap (ferx-core #1356): on an analytical model a top-level
+            // name not bound in `pk(...)` carries a placeholder `pk_indices`
+            // entry of 0, so it reads CL's value. `pk_indices` alone cannot
+            // tell that placeholder from the real CL entry; the fix is a
+            // by-name value API in ferx-core.
+            let slot = model.pk_indices.get(i).copied().unwrap_or(i);
             let v = pk.values.get(slot).copied().unwrap_or(f64::NAN);
-            param_cols[i].push(v);
+            param_cols[col].push(v);
         }
     }
 
     let mut pairs: Vec<(&str, Robj)> = Vec::new();
     pairs.push(("ID", ids.into()));
-    for i in 0..n_indiv {
-        pairs.push((indiv_names[i].as_str(), param_cols[i].clone().into()));
+    for (&(_, name), values) in columns.iter().zip(param_cols) {
+        pairs.push((name, values.into()));
     }
     let mut df = List::from_pairs(pairs);
     df.set_class(&["data.frame"]).unwrap();
@@ -5168,6 +5192,52 @@ fn search_rank_label(kind: Option<ferx_tools::search::RankType>) -> &'static str
     }
 }
 
+/// The `[rank.penalties]` schedule as parallel vectors: every charge the
+/// engine knows, its effective value, and whether the file changed it.
+///
+/// The effective schedule is what a `penalized` criterion would actually
+/// charge - `[rank.penalties]` overlaid on pyDarwin's defaults - so R reports
+/// the numbers the run would use rather than the keys the file happened to
+/// spell. `set` is that difference, computed here against
+/// `Penalties::default()` because only Rust holds the defaults. A file that
+/// restates a default is indistinguishable from one that omits it, which is
+/// the honest reading: the two runs are the same run.
+fn search_penalty_columns(
+    p: &ferx_tools::search::Penalties,
+) -> (Vec<String>, Vec<f64>, Vec<String>) {
+    let d = ferx_tools::search::Penalties::default();
+    let rows: [(&str, f64, f64); 12] = [
+        ("theta", p.theta, d.theta),
+        ("omega", p.omega, d.omega),
+        ("sigma", p.sigma, d.sigma),
+        ("convergence", p.convergence, d.convergence),
+        ("covariance", p.covariance, d.covariance),
+        ("correlation", p.correlation, d.correlation),
+        ("max_correlation", p.max_correlation, d.max_correlation),
+        ("condition_number", p.condition_number, d.condition_number),
+        (
+            "max_condition_number",
+            p.max_condition_number,
+            d.max_condition_number,
+        ),
+        ("non_influential", p.non_influential, d.non_influential),
+        ("crash", p.crash, d.crash),
+        ("gate", p.gate, d.gate),
+    ];
+
+    let mut name = Vec::with_capacity(rows.len());
+    let mut value = Vec::with_capacity(rows.len());
+    let mut set = Vec::new();
+    for (key, v, default) in rows {
+        name.push(key.to_string());
+        value.push(v);
+        if v != default {
+            set.push(key.to_string());
+        }
+    }
+    (name, value, set)
+}
+
 /// Load and validate a `.ferxsearch` configuration file.
 ///
 /// The engine's loader is the whole validation: an unknown section, an
@@ -5177,7 +5247,9 @@ fn search_rank_label(kind: Option<ferx_tools::search::RankType>) -> &'static str
 /// @param path Path to a `.ferxsearch` file
 /// @return Named list with the resolved `base` / `data` / `dir` paths, the
 ///   `[space]` source and its parallel feature vectors (`feature`, `keyword`,
-///   `optional`), the rank settings, the *effective* strictness gate plus the
+///   `optional`), the rank settings including the effective `[rank.penalties]`
+///   schedule (`penalty_name` / `penalty_value`, with `penalty_set` naming the
+///   charges the file changed), the *effective* strictness gate plus the
 ///   keys the file set explicitly (`strictness_set`), the `[run]` settings,
 ///   and the names of the tool sections the file carries.
 /// @keywords internal
@@ -5216,6 +5288,13 @@ fn ferx_rust_search_config_load(path: &str) -> List {
     // "let the runner choose".
     let nan_if_none = |v: Option<f64>| v.unwrap_or(f64::NAN);
 
+    // The effective penalty schedule, on the same "report what would run"
+    // footing as the strictness gate above: `[rank.penalties]` is read whatever
+    // the `[rank] type`, since a global search charges the search-level
+    // penalties under any criterion.
+    let (penalty_name, penalty_value, penalty_set) =
+        search_penalty_columns(&cfg.rank.penalties());
+
     list!(
         base = cfg.base.to_string_lossy().into_owned(),
         data = cfg
@@ -5230,6 +5309,9 @@ fn ferx_rust_search_config_load(path: &str) -> List {
         optional = optional,
         rank_type = search_rank_label(cfg.rank.kind),
         rank_cutoff = nan_if_none(cfg.rank.cutoff),
+        penalty_name = penalty_name,
+        penalty_value = penalty_value,
+        penalty_set = penalty_set,
         require_converged = gate.require_converged,
         require_covariance = gate.require_covariance,
         max_condition_number = nan_if_none(gate.max_condition_number),
