@@ -2871,6 +2871,53 @@ test_that("print.ferx_fit shows off-diagonal SE with named etas (block omega)", 
   expect_true(grepl("SE = 0\\.022000", cov_line))
 })
 
+# The three print tests below run on a fake fit, so none of them can see what the
+# engine estimates. This one fits for real: a `block_omega (ETA_CL, ETA_V)`
+# beside a diagonal `omega ETA_KA` must leave the two cross covariances at
+# exactly 0 (fixed in ferx-core 34799183, ferx-core#1364, pinned here at
+# 8372248c; the outer optimizer used to search them and return the full 3x3
+# block fit).
+#
+# The second half is the straddle that keeps the first from being vacuous: the
+# same data declared as one full block must not land on the same objective. At
+# the old pin both declarations fitted to OFV -283.316670; measured at this pin
+# the mixed declaration fits to -280.485777 and the full block still to
+# -283.316670, a gap of 2.831 OFV units, so a bound of 1.0 has ample headroom.
+# Without the straddle, an engine that simply never moved any omega off-diagonal
+# would pass.
+test_that("a block_omega beside a diagonal omega keeps the cross covariances at 0", {
+  ex  <- ferx_example("warfarin_block_omega")
+  fit <- suppressWarnings(ferx_fit(ex$model, ex$data, verbose = FALSE))
+
+  expect_identical(fit$omega[["ETA_KA", "ETA_CL"]], 0)
+  expect_identical(fit$omega[["ETA_KA", "ETA_V"]], 0)
+  # The declared in-block covariance is estimated, so this is not a fixture in
+  # which every off-diagonal happens to be zero.
+  expect_gt(abs(fit$omega[["ETA_V", "ETA_CL"]]), 1e-4)
+  expect_equal(fit$n_parameters, 8L)
+
+  # Declaring the full block instead is a different model with a different
+  # objective. Build it from the same file so the two differ only in the omega
+  # declaration.
+  src  <- readLines(ex$model)
+  full_src <- sub("block_omega (ETA_CL, ETA_V) = [0.07, 0.02, 0.02]",
+                  "block_omega (ETA_CL, ETA_V, ETA_KA) = [0.07, 0.02, 0.02, 0.0, 0.0, 0.40]",
+                  src, fixed = TRUE)
+  # A `sub()` that matches nothing is silent, and dropping the ETA_KA line on
+  # top of that would build a malformed 2-eta model whose failure names the
+  # wrong thing. Assert both edits landed.
+  expect_false(identical(full_src, src))
+  src <- full_src[!grepl("^\\s*omega ETA_KA ~", full_src)]
+  expect_equal(length(src), length(full_src) - 1L)
+  full_path <- withr::local_tempfile(fileext = ".ferx")
+  writeLines(src, full_path)
+  full <- suppressWarnings(ferx_fit(full_path, ex$data, verbose = FALSE))
+
+  expect_equal(full$n_parameters, 10L)
+  expect_gt(abs(full$omega[["ETA_KA", "ETA_CL"]]), 1e-3)
+  expect_gt(abs(fit$ofv - full$ofv), 1.0)
+})
+
 # A `block_omega (ETA_CL, ETA_V)` beside a diagonal `omega ETA_KA` has structural
 # zeros at (KA, CL) and (KA, V) (ferx-core #1018). The in-block covariance opens
 # the correlations section, which used to print every pair in it, so the two
