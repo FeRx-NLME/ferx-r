@@ -109,17 +109,39 @@
   rse_pct  <- if (!is.na(se) && abs(estimate) > 1e-12) abs(se / estimate) * 100 else NA_real_
 
   # Asymmetric CI and natural-scale back-transform per theta type
-  # `logit_probability` belongs here, not with `logit`: it marks a theta the
-  # engine reports *already* on (0, 1) - that is the point of the
-  # parameterisation - so there is nothing to back-transform. Applying
-  # `inv_logit()` to it transforms a probability a second time.
-  if (transform %in% c("identity", "variance", "proportional", "additive",
-                       "logit_probability")) {
+  if (transform %in% c("identity", "variance", "proportional", "additive")) {
     lower_95          <- if (!is.na(se)) estimate - 1.96 * se else NA_real_
     upper_95          <- if (!is.na(se)) estimate + 1.96 * se else NA_real_
     estimate_natural  <- NA_real_
     lower_95_natural  <- NA_real_
     upper_95_natural  <- NA_real_
+  } else if (transform == "logit_probability") {
+    # The engine reports this theta *already* on (0, 1) - that is the point of
+    # the parameterisation - so `estimate` needs no back-transform and
+    # `estimate_natural` is the same number. It is not `logit`, whose theta is
+    # on the logit scale; applying `inv_logit()` here transforms a probability
+    # a second time.
+    #
+    # The interval is a different matter. `lower_95`/`upper_95` are the
+    # symmetric Wald on the reported scale, as they are for every other
+    # transform, and on a probability that interval can leave (0, 1). The
+    # natural-scale interval is therefore formed where the parameter is
+    # unbounded: the SE is carried to the logit scale by the delta method,
+    # `se_logit = se / (p (1 - p))`, and the symmetric interval there is
+    # brought back through `inv_logit()`. That is the same interval the
+    # identical model declared on a `logit` theta reports.
+    lower_95          <- if (!is.na(se)) estimate - 1.96 * se else NA_real_
+    upper_95          <- if (!is.na(se)) estimate + 1.96 * se else NA_real_
+    lg                <- .ferx_logit(estimate)
+    jacobian          <- estimate * (1 - estimate)
+    # isTRUE() so a zero-length or NA input collapses to FALSE rather than
+    # erroring in `&&`.
+    ok                <- isTRUE(!is.na(se)) && isTRUE(!is.na(lg)) &&
+                         isTRUE(jacobian > 1e-12)
+    se_logit          <- if (ok) se / jacobian else NA_real_
+    estimate_natural  <- estimate
+    lower_95_natural  <- if (ok) .ferx_inv_logit(lg - 1.96 * se_logit) else NA_real_
+    upper_95_natural  <- if (ok) .ferx_inv_logit(lg + 1.96 * se_logit) else NA_real_
   } else if (transform == "log") {
     lower_95          <- if (!is.na(se)) estimate - 1.96 * se else NA_real_
     upper_95          <- if (!is.na(se)) estimate + 1.96 * se else NA_real_
