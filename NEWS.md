@@ -1060,6 +1060,31 @@
 
 ## Bug fixes
 
+- **`fit$individual_estimates` reported `CL`'s value for an unbound analytical
+  parameter, and class-1 values for every subject of a mixture model**
+  ([#368](https://github.com/FeRx-NLME/ferx-r/issues/368),
+  [ferx-core #1356](https://github.com/FeRx-NLME/ferx-core/issues/1356)). The
+  table resolved each parameter's value through the engine's PK-slot map. On an
+  analytical (`pk ...`) model a top-level `[individual_parameters]` name that
+  the `[structural_model]` line does not bind - an intermediate such as
+  `TVCL = THCL * 3`, or a modeled dose `D{n}` / `R{n}` - has no slot of its own
+  and carried a placeholder entry pointing at `CL`'s slot, so its column held
+  `CL`'s value. On the bundled `tte_exponential` example every subject's
+  `LAMBDA` came back as `1` (the FIXed `DUMMY_CL`) instead of
+  `TVLAMBDA * exp(ETA_LAMBDA)`. Under the idiomatic `CL = TVCL * exp(ETA_CL)`
+  an intermediate equals `CL` at eta = 0, so the wrong read returned the right
+  number and the defect rarely showed on inspection. Values now come from
+  ferx-core's by-name API. ODE models were never affected.
+
+  The same evaluation ran with the mixture class left at its default, so on a
+  `[mixture]` model - `CL = if (MIXNUM == 1) TVCL1 else TVCL2` - every row held
+  the class-1 typical value. Each row is now evaluated in that subject's own
+  fitted class (the `MIXEST` column of `sdtab`).
+
+  The table is one row per subject, so a parameter that reads the `TIME`
+  built-in is evaluated at `TIME = 0`; this is now documented in
+  `?ferx_fit`.
+
 - **NPDE / NPD now sample the occasion `kappa`**
   ([ferx-core #734](https://github.com/FeRx-NLME/ferx-core/issues/734)). The
   post-fit Monte-Carlo reference distribution held every `kappa` at zero, so for

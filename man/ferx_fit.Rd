@@ -798,7 +798,13 @@ per parameter declared in the \code{[individual_parameters]} block
 individual-parameter expressions at the subject's EBE eta with kappa
 fixed at zero, so the result reflects each subject's typical value
 under the model's covariate effects. For inter-occasion variation see
-\code{ebe_kappas}.}
+\code{ebe_kappas}. On a \code{[mixture]} model each row is evaluated in
+that subject's own fitted class (the \code{MIXEST} column of
+\code{sdtab}), so a class-2 subject carries the class-2 typical values.
+The table is one row per subject and therefore has no row time: a
+parameter that reads the \code{TIME} built-in is evaluated at
+\code{TIME = 0}, unlike the per-row \code{sdtab} echo of the same
+parameter.}
 \item{warnings}{Character vector of warnings}
 \item{warnings_structured}{Data frame with columns \code{severity}
 (\code{"critical"}, \code{"warning"}, or \code{"info"}),
