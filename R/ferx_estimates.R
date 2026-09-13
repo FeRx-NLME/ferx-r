@@ -1,7 +1,8 @@
 # Tidy parameter estimates table: theta, omega diagonal, sigma, and (for IOV
 # models) kappa diagonal, with percent relative standard error (%RSE), 95%
-# confidence intervals, and (for log/logit-transformed thetas) natural-scale
-# back-transformed estimates and CIs. Omega is reported on the variance scale
+# confidence intervals, and (for `log`- and `logit`-transformed thetas)
+# natural-scale back-transformed estimates and CIs. `logit_probability` is not
+# one of them: that theta is already on (0, 1) when the engine reports it. Omega is reported on the variance scale
 # (matching the .ferx model file convention); for block omega, only the
 # diagonal variances are included. Stored on the fit object as
 # `fit$estimates`. (Formerly the exported ferx_estimates(fit); see issue #226.)
@@ -108,7 +109,12 @@
   rse_pct  <- if (!is.na(se) && abs(estimate) > 1e-12) abs(se / estimate) * 100 else NA_real_
 
   # Asymmetric CI and natural-scale back-transform per theta type
-  if (transform %in% c("identity", "variance", "proportional", "additive")) {
+  # `logit_probability` belongs here, not with `logit`: it marks a theta the
+  # engine reports *already* on (0, 1) - that is the point of the
+  # parameterisation - so there is nothing to back-transform. Applying
+  # `inv_logit()` to it transforms a probability a second time.
+  if (transform %in% c("identity", "variance", "proportional", "additive",
+                       "logit_probability")) {
     lower_95          <- if (!is.na(se)) estimate - 1.96 * se else NA_real_
     upper_95          <- if (!is.na(se)) estimate + 1.96 * se else NA_real_
     estimate_natural  <- NA_real_
@@ -120,7 +126,7 @@
     estimate_natural  <- if (!is.na(se)) exp(estimate) else NA_real_
     lower_95_natural  <- if (!is.na(se)) exp(estimate - 1.96 * se) else NA_real_
     upper_95_natural  <- if (!is.na(se)) exp(estimate + 1.96 * se) else NA_real_
-  } else if (transform %in% c("logit", "logit_probability")) {
+  } else if (transform == "logit") {
     # theta is on the logit scale; CI is symmetric on logit then back-transformed
     lower_95          <- if (!is.na(se)) estimate - 1.96 * se else NA_real_
     upper_95          <- if (!is.na(se)) estimate + 1.96 * se else NA_real_

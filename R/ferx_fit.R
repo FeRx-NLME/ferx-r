@@ -934,7 +934,11 @@
 #'     \code{estimate_natural}, \code{lower_95_natural},
 #'     \code{upper_95_natural}, \code{init_as_sd}, \code{weight}. SE-derived
 #'     and natural-scale columns are \code{NA} when not applicable or when the
-#'     covariance step was not run. \code{weight} carries the sample-size
+#'     covariance step was not run. The natural-scale columns are filled only
+#'     for the transforms that have another scale to come back from,
+#'     \code{"log"} and \code{"logit"}; a \code{"logit_probability"} theta is
+#'     reported by the engine already on \eqn{(0, 1)}, so \code{estimate} is
+#'     the probability and the natural-scale columns stay \code{NA}. \code{weight} carries the sample-size
 #'     weight expression of a weighted kappa row (see \code{kappa_weights})
 #'     and is \code{NA} on every other row; on such a row \code{estimate} is
 #'     the \emph{unweighted} variance, so the between-occasion SD at a weight
@@ -2365,10 +2369,12 @@ print.ferx_fit <- function(x, ...) {
       se_str  <- "N/A"
       rse_str <- "N/A"
     }
+    # `logit_probability` gets no tag and no `(typical)` line: the estimate is
+    # already on (0, 1), so there is no other scale to name and nothing to
+    # back-transform.
     scale_tag <- switch(transform,
       log              = "  [log scale]",
       logit            = "  [logit scale]",
-      logit_probability = "  [logit scale]",
       ""
     )
     cat(sprintf("%-16s %12.6f %12s %10s%s\n", theta_names[i], est, se_str, rse_str, scale_tag))
@@ -2379,7 +2385,7 @@ print.ferx_fit <- function(x, ...) {
         sprintf("95%% CI: [%.4f, %.4f]", exp(est - 1.96 * se_val), exp(est + 1.96 * se_val))
       } else ""
       cat(sprintf("  %-14s %12.4f                    %s\n", "(typical)", tv, ci_str))
-    } else if (transform %in% c("logit", "logit_probability")) {
+    } else if (transform == "logit") {
       tv <- .ferx_inv_logit(est)
       ci_str <- if (!is.na(se_val)) {
         sprintf("95%% CI: [%.4f, %.4f]", .ferx_inv_logit(est - 1.96 * se_val), .ferx_inv_logit(est + 1.96 * se_val))
@@ -2447,9 +2453,15 @@ print.ferx_fit <- function(x, ...) {
       } else ""
       sprintf("SD = %.4f%s", sd_val, cv_part)
     } else if (eta_type %in% c("logit", "logit_probability")) {
-      # Natural-scale +/-1 SD range using linked theta (if known)
+      # Natural-scale +/-1 SD range using linked theta (if known).  The eta is
+      # on the logit scale for both types, but the theta is not: under
+      # `logit_probability` it is already a probability, so put it on the logit
+      # scale before adding the eta SD.
       tv_name <- if (nzchar(linked_theta_name)) linked_theta_name else NULL
       tv_val  <- if (!is.null(tv_name)) x$theta[tv_name] else NA_real_
+      if (!is.null(tv_val) && !is.na(tv_val) && eta_type == "logit_probability") {
+        tv_val <- .ferx_logit(tv_val)
+      }
       if (!is.null(tv_val) && !is.na(tv_val)) {
         sd_logit <- sqrt(max(var_ii, 0))
         lo <- .ferx_inv_logit(tv_val - sd_logit)

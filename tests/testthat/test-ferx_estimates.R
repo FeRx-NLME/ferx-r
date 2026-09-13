@@ -103,6 +103,20 @@ test_that(".ferx_est_row back-transforms logit parameters", {
   expect_true(row$lower_95_natural < row$upper_95_natural)
 })
 
+test_that(".ferx_est_row leaves a logit_probability theta alone (#371)", {
+  # The engine reports a `logit_probability` theta already on (0, 1); a second
+  # inv_logit() would report 0.6225 for a bioavailability of 0.5.
+  row <- .est_row("F1", estimate = 0.5, se = 0.02,
+                  transform = "logit_probability", init_as_sd = FALSE)
+  expect_true(is.na(row$estimate_natural))
+  expect_true(is.na(row$lower_95_natural))
+  expect_true(is.na(row$upper_95_natural))
+  expect_equal(row$lower_95, 0.5 - 1.96 * 0.02)
+  expect_equal(row$upper_95, 0.5 + 1.96 * 0.02)
+  # and specifically not the logit branch's answer
+  expect_false(isTRUE(all.equal(row$estimate_natural, 1 / (1 + exp(-0.5)))))
+})
+
 # ---- header from test-diagnostics.R ----
 # check_diagnostics() — Tier 1
 

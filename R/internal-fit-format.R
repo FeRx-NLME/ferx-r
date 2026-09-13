@@ -223,6 +223,13 @@
 
 .ferx_inv_logit <- function(x) 1 / (1 + exp(-x))
 
+# Inverse of the above.  `NA` outside the open interval, where the logit is not
+# finite, so callers formatting a range get "unknown" rather than `-Inf`.
+.ferx_logit <- function(p) {
+  if (is.na(p) || p <= 0 || p >= 1) return(NA_real_)
+  log(p / (1 - p))
+}
+
 # Internal: format a per-iteration trace data frame as a character vector of
 # fixed-width table lines (header + rows).  Called by ferx_runlog (truncated)
 # and ferx_runlog_iters (full).

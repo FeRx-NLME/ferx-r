@@ -982,7 +982,12 @@ columns \code{param}, \code{transform}, \code{estimate}, \code{se},
 \code{estimate_natural}, \code{lower_95_natural},
 \code{upper_95_natural}, \code{init_as_sd}, \code{weight}. SE-derived
 and natural-scale columns are \code{NA} when not applicable or when the
-covariance step was not run. \code{weight} carries the sample-size
+covariance step was not run. The natural-scale columns are filled only
+for the transforms that have another scale to come back from,
+\code{"log"} and \code{"logit"}; a \code{"logit_probability"} theta is
+reported by the engine already on \eqn{(0, 1)}, so \code{estimate} is
+the probability and the natural-scale columns stay \code{NA}.
+\code{weight} carries the sample-size
 weight expression of a weighted kappa row (see \code{kappa_weights})
 and is \code{NA} on every other row; on such a row \code{estimate} is
 the \emph{unweighted} variance, so the between-occasion SD at a weight

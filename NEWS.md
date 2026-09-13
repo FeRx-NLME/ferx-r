@@ -1060,6 +1060,32 @@
 
 ## Bug fixes
 
+- **A `logit_probability` theta was back-transformed a second time on the way
+  out of the fit** ([#371](https://github.com/FeRx-NLME/ferx-r/issues/371)).
+  `logit_probability` is the one transform label that means "the engine reports
+  this theta *already* on (0, 1)" - that is the point of the parameterisation -
+  but `.ferx_est_row()` handled it in the same branch as `logit` and applied
+  `inv_logit()` to it. The engine was right and correctly labelled throughout;
+  only the reporting was wrong. On the bundled `bioavailability` example the
+  estimated bioavailability is `0.7923592`, and `fit$estimates` reported
+  `estimate_natural` `0.6883377`; the same model written onto a genuine
+  logit-scale theta agreed with the engine, so the two parameterisations of one
+  model disagreed by 0.104 of a probability. `print()` compounded it, tagging
+  the row `[logit scale]` and printing a `(typical)` line of the same
+  double-transformed value - on `warfarin_logit_f`, whose typical `F` is
+  `0.0126`, it read `0.5032` with a 95 % CI of `[0.3339, 0.6717]`.
+
+  Such a theta is now treated as what it is: `estimate` is the probability,
+  `lower_95` / `upper_95` are the Wald interval on that scale, the
+  `*_natural` columns are `NA` as they are for `identity`, and `print()` emits
+  neither the scale tag nor a `(typical)` line. The `+/-1SD` range printed
+  beside a `logit_probability` OMEGA row is fixed with it: the eta is on the
+  logit scale but the linked theta is not, so the theta is now put on the logit
+  scale before the eta SD is added. On `bioavailability` that range moves from
+  `[0.598, 0.766]`, which did not contain the estimate, to `[0.720, 0.850]`,
+  which does. A theta outside the open interval, where the logit is not finite,
+  now prints `SD_logit` alone rather than a range.
+
 - **NPDE / NPD now sample the occasion `kappa`**
   ([ferx-core #734](https://github.com/FeRx-NLME/ferx-core/issues/734)). The
   post-fit Monte-Carlo reference distribution held every `kappa` at zero, so for
