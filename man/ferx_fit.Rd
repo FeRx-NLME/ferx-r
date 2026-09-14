@@ -1272,13 +1272,13 @@ against the engine as it stood before ferx-core #1377 and after it, not one
 of those spellings was an error: each did something silent and wrong.
 
 \itemize{
-  \item \code{theta CL(0.134, 0.001, 10.0) (FIX)}, \code{omega ETA_CL ~
+\item \code{theta CL(0.134, 0.001, 10.0) (FIX)}, \code{omega ETA_CL ~
     0.07 (FIX)}, and the same shape on \code{sigma} and \code{kappa},
-    parsed with the \code{(FIX)} thrown away - so the parameter the user
-    meant to hold fixed was estimated instead.
-  \item \code{theta CL (FIX) (0.134, 0.001, 10.0)} and \code{omega ETA_CL
+parsed with the \code{(FIX)} thrown away - so the parameter the user
+meant to hold fixed was estimated instead.
+\item \code{theta CL (FIX) (0.134, 0.001, 10.0)} and \code{omega ETA_CL
     (FIX) ~ 0.07} were worse still: the line matched no form at all, so it
-    was ignored outright and \strong{no parameter was declared}.
+was ignored outright and \strong{no parameter was declared}.
 }
 
 Up to ferx-core 0.3.x a declaration was matched as a \emph{prefix} of its
@@ -1287,6 +1287,7 @@ the file reported VALID either way. From 0.4.0 a \code{[parameters]} line
 must be consumed end to end by exactly one declaration form, so all six
 spellings are now reported as \code{E_PARSE} with the offending line quoted
 (ferx-core #1377).
+
 \strong{Unused-parameter warning:} a \code{warning} severity message with
 category \code{"unused_parameter"} is emitted by the parser when a
 parameter is declared in \code{[parameters]} but never referenced in
