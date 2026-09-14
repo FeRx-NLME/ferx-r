@@ -934,7 +934,19 @@
 #'     \code{estimate_natural}, \code{lower_95_natural},
 #'     \code{upper_95_natural}, \code{init_as_sd}, \code{weight}. SE-derived
 #'     and natural-scale columns are \code{NA} when not applicable or when the
-#'     covariance step was not run. \code{weight} carries the sample-size
+#'     covariance step was not run. \code{lower_95}/\code{upper_95} are always
+#'     the symmetric Wald interval on the scale \code{estimate} is reported on.
+#'     For \code{"log"} and \code{"logit"} thetas the natural-scale columns
+#'     back-transform that estimate and interval. A
+#'     \code{"logit_probability"} theta is reported already on \eqn{(0, 1)}, so
+#'     \code{estimate_natural} equals \code{estimate}; its natural-scale
+#'     interval is instead formed on the logit scale - the standard error is
+#'     carried there by the delta method, \eqn{se / (p (1 - p))} - and brought
+#'     back through \code{inv_logit}, so it is asymmetric and always inside
+#'     \eqn{(0, 1)}, unlike \code{lower_95}/\code{upper_95}, which on a
+#'     probability need not be. It is the same interval the identical model
+#'     declared on a \code{"logit"} theta reports.
+#'     \code{weight} carries the sample-size
 #'     weight expression of a weighted kappa row (see \code{kappa_weights})
 #'     and is \code{NA} on every other row; on such a row \code{estimate} is
 #'     the \emph{unweighted} variance, so the between-occasion SD at a weight
@@ -2365,10 +2377,11 @@ print.ferx_fit <- function(x, ...) {
       se_str  <- "N/A"
       rse_str <- "N/A"
     }
+    # `logit_probability` gets no tag: the estimate is already on (0, 1), so
+    # there is no other scale to name.
     scale_tag <- switch(transform,
       log              = "  [log scale]",
       logit            = "  [logit scale]",
-      logit_probability = "  [logit scale]",
       ""
     )
     cat(sprintf("%-16s %12.6f %12s %10s%s\n", theta_names[i], est, se_str, rse_str, scale_tag))
@@ -2379,12 +2392,25 @@ print.ferx_fit <- function(x, ...) {
         sprintf("95%% CI: [%.4f, %.4f]", exp(est - 1.96 * se_val), exp(est + 1.96 * se_val))
       } else ""
       cat(sprintf("  %-14s %12.4f                    %s\n", "(typical)", tv, ci_str))
-    } else if (transform %in% c("logit", "logit_probability")) {
+    } else if (transform == "logit") {
       tv <- .ferx_inv_logit(est)
       ci_str <- if (!is.na(se_val)) {
         sprintf("95%% CI: [%.4f, %.4f]", .ferx_inv_logit(est - 1.96 * se_val), .ferx_inv_logit(est + 1.96 * se_val))
       } else ""
       cat(sprintf("  %-14s %12.4f                    %s\n", "(typical)", tv, ci_str))
+    } else if (transform == "logit_probability" && !is.na(se_val)) {
+      # No `(typical)` line - `est` is already the typical probability, printed
+      # on the row above - but the interval is still worth showing, formed on
+      # the logit scale so it stays inside (0, 1). Same interval the identical
+      # model declared on a `logit` theta prints. See `.ferx_est_row()`.
+      lg  <- .ferx_logit(est)
+      jac <- est * (1 - est)
+      if (isTRUE(!is.na(lg)) && isTRUE(jac > 1e-12)) {
+        se_logit <- se_val / jac
+        cat(sprintf("  %-14s %12s                    [%.4f, %.4f]\n", "(95% CI)", "",
+                    .ferx_inv_logit(lg - 1.96 * se_logit),
+                    .ferx_inv_logit(lg + 1.96 * se_logit)))
+      }
     }
   }
 
@@ -2447,9 +2473,35 @@ print.ferx_fit <- function(x, ...) {
       } else ""
       sprintf("SD = %.4f%s", sd_val, cv_part)
     } else if (eta_type %in% c("logit", "logit_probability")) {
-      # Natural-scale +/-1 SD range using linked theta (if known)
+      # Natural-scale +/-1 SD range using linked theta (if known).  The eta is
+      # on the logit scale for both types, but the theta is not: under
+      # `logit_probability` it is already a probability, so put it on the logit
+      # scale before adding the eta SD.  Which of the two applies is decided by
+      # the *theta's* own transform rather than by `eta_type`, because that is
+      # what says which scale `x$theta[tv_name]` is on; `eta_type` only selects
+      # this branch.  The engine keeps the two in step, so this matters only if
+      # they ever drift.
       tv_name <- if (nzchar(linked_theta_name)) linked_theta_name else NULL
       tv_val  <- if (!is.null(tv_name)) x$theta[tv_name] else NA_real_
+      # `theta_transforms` is a *named* character vector, so take the element
+      # with `[[`: `[` keeps the name and no `identical()` against a bare
+      # string would ever match.
+      tv_tf   <- NA_character_
+      if (!is.null(tv_name) && !is.null(x$theta_transforms) && !is.null(names(x$theta))) {
+        idx <- match(tv_name, names(x$theta))
+        if (!is.na(idx) && length(x$theta_transforms) >= idx) {
+          tv_tf <- as.character(x$theta_transforms[[idx]])[1]
+        }
+      }
+      # Fall back to `eta_type` only when the theta's transform is unknown.
+      on_probability_scale <- if (!is.na(tv_tf)) {
+        tv_tf == "logit_probability"
+      } else {
+        identical(eta_type, "logit_probability")
+      }
+      if (!is.null(tv_val) && !is.na(tv_val) && on_probability_scale) {
+        tv_val <- .ferx_logit(tv_val)
+      }
       if (!is.null(tv_val) && !is.na(tv_val)) {
         sd_logit <- sqrt(max(var_ii, 0))
         lo <- .ferx_inv_logit(tv_val - sd_logit)

@@ -2093,6 +2093,69 @@ test_that("print.ferx_fit emits [logit scale] tag for logit-transformed theta", 
   theta_line <- out[grepl("THETA_F", out)]
   expect_true(any(grepl("logit scale", theta_line)))
 })
+test_that("print.ferx_fit leaves a logit_probability theta untagged (#371)", {
+  # The estimate is already on (0, 1): no scale to name, nothing to
+  # back-transform. Tagging it drove a `(typical)` line of inv_logit(0.7).
+  fit <- make_fake_fit(
+    theta            = c(THETA_F = 0.7),
+    se_theta         = c(THETA_F = 0.05),
+    theta_transforms = c(THETA_F = "logit_probability"),
+    omega            = matrix(0.10, 1, 1),
+    sigma            = 0.01
+  )
+  out <- capture.output(print(fit))
+  theta_line <- out[grepl("^THETA_F", out)]
+  # anchor the negatives: on an empty subset `any(grepl(...))` is FALSE and the
+  # assertions below would pass vacuously
+  expect_length(theta_line, 1)
+  expect_match(theta_line, "0.700000")
+  expect_false(any(grepl("logit scale", theta_line)))
+  # `(typical)` would duplicate the estimate; a `(95% CI)` line is expected
+  expect_false(any(grepl("(typical)", out, fixed = TRUE)))
+  expect_true(any(grepl("(95% CI)", out, fixed = TRUE)))
+})
+test_that("print.ferx_fit gives a logit_probability theta an in-range CI (#371)", {
+  # The symmetric Wald on a probability escapes (0, 1) when the SE is large;
+  # the printed interval is formed on the logit scale instead.
+  fit <- make_fake_fit(
+    theta            = c(THETA_F = 0.7923592),
+    se_theta         = c(THETA_F = 0.2485106),
+    theta_transforms = c(THETA_F = "logit_probability"),
+    omega            = matrix(0.10, 1, 1),
+    sigma            = 0.01
+  )
+  out <- capture.output(print(fit))
+  ci_line <- out[grepl("(95% CI)", out, fixed = TRUE)]
+  expect_length(ci_line, 1)
+  p <- 0.7923592; se_logit <- 0.2485106 / (p * (1 - p)); lg <- log(p / (1 - p))
+  inv <- function(x) 1 / (1 + exp(-x))
+  expect_true(grepl(sprintf("[%.4f, %.4f]", inv(lg - 1.96 * se_logit),
+                            inv(lg + 1.96 * se_logit)), ci_line, fixed = TRUE))
+  # the naive interval would have printed an upper bound above 1
+  expect_gt(p + 1.96 * 0.2485106, 1)
+})
+test_that("print.ferx_fit decides the +/-1SD scale from the theta, not the eta label (#371)", {
+  # `eta_param_types` only selects the branch; which scale `x$theta[name]` is on
+  # is what `theta_transforms` says. If the two ever drift, follow the theta.
+  fit <- make_fake_fit(
+    theta            = c(THETA_F = 0.7),
+    theta_transforms = c(THETA_F = "logit_probability"),
+    omega            = matrix(0.10, 1, 1),
+    eta_param_types  = "logit",          # drifted label
+    eta_linked_theta = "THETA_F",
+    sigma            = 0.01
+  )
+  out <- capture.output(print(fit))
+  omega_line <- out[grepl("OMEGA\\(1,1\\)", out)]
+  expect_length(omega_line, 1)
+  sd_logit <- sqrt(0.10)
+  inv <- function(x) 1 / (1 + exp(-x)); lg <- log(0.7 / 0.3)
+  expect_true(grepl(sprintf("[%.3f, %.3f]", inv(lg - sd_logit), inv(lg + sd_logit)),
+                    omega_line, fixed = TRUE))
+  # not the range the drifted eta label alone would have produced
+  expect_false(grepl(sprintf("[%.3f, %.3f]", inv(0.7 - sd_logit), inv(0.7 + sd_logit)),
+                     omega_line, fixed = TRUE))
+})
 test_that("print.ferx_fit shows [log-normal] label and CV% for log_normal ETA", {
   fit <- make_fake_fit(
     theta           = c(CL = 1),
@@ -2134,6 +2197,41 @@ test_that("print.ferx_fit shows [logit] label and +/-1SD range for logit ETA", {
   omega_line <- out[grepl("OMEGA\\(1,1\\)", out)]
   expect_true(any(grepl("logit", omega_line)))
   expect_true(any(grepl("+/-1SD", omega_line, fixed = TRUE)))
+})
+test_that("print.ferx_fit centres the logit_probability +/-1SD on the logit (#371)", {
+  # Same model as the `logit` case above, declared the other way round: the
+  # theta is the probability 0.7 rather than its logit. The eta is on the logit
+  # scale either way, so the printed range must match.
+  fit <- make_fake_fit(
+    theta            = c(THETA_F = 0.7),
+    theta_transforms = c(THETA_F = "logit_probability"),
+    omega            = matrix(0.10, 1, 1),
+    eta_param_types  = "logit_probability",
+    eta_linked_theta = "THETA_F",
+    sigma            = 0.01
+  )
+  out <- capture.output(print(fit))
+  omega_line <- out[grepl("OMEGA\\(1,1\\)", out)]
+  sd_logit <- sqrt(0.10)
+  lo <- 1 / (1 + exp(-(log(0.7 / 0.3) - sd_logit)))
+  hi <- 1 / (1 + exp(-(log(0.7 / 0.3) + sd_logit)))
+  expect_true(any(grepl(sprintf("[%.3f, %.3f]", lo, hi), omega_line, fixed = TRUE)))
+})
+test_that("print.ferx_fit omits the +/-1SD range for an out-of-range logit_probability theta", {
+  # logit(1) is not finite; report the SD alone rather than an [-Inf] range.
+  fit <- make_fake_fit(
+    theta            = c(THETA_F = 1),
+    theta_transforms = c(THETA_F = "logit_probability"),
+    omega            = matrix(0.10, 1, 1),
+    eta_param_types  = "logit_probability",
+    eta_linked_theta = "THETA_F",
+    sigma            = 0.01
+  )
+  out <- capture.output(print(fit))
+  omega_line <- out[grepl("OMEGA\\(1,1\\)", out)]
+  expect_true(any(grepl("SD_logit", omega_line)))
+  expect_false(any(grepl("+/-1SD", omega_line, fixed = TRUE)))
+  expect_false(any(grepl("Inf", omega_line)))
 })
 test_that("print.ferx_fit shows [proportional] label and CV% for proportional sigma", {
   fit <- make_fake_fit(

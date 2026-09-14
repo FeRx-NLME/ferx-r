@@ -103,6 +103,73 @@ test_that(".ferx_est_row back-transforms logit parameters", {
   expect_true(row$lower_95_natural < row$upper_95_natural)
 })
 
+test_that(".ferx_est_row does not back-transform a logit_probability estimate (#371)", {
+  # The engine reports a `logit_probability` theta already on (0, 1); a second
+  # inv_logit() would report 0.6225 for a bioavailability of 0.5.
+  row <- .est_row("F1", estimate = 0.5, se = 0.02,
+                  transform = "logit_probability", init_as_sd = FALSE)
+  expect_equal(row$estimate_natural, 0.5)
+  expect_false(isTRUE(all.equal(row$estimate_natural, 1 / (1 + exp(-0.5)))))
+  # `lower_95`/`upper_95` stay the symmetric Wald on the reported scale, as for
+  # every other transform.
+  expect_equal(row$lower_95, 0.5 - 1.96 * 0.02)
+  expect_equal(row$upper_95, 0.5 + 1.96 * 0.02)
+})
+
+test_that(".ferx_est_row forms the logit_probability natural CI on the logit scale (#371)", {
+  # A symmetric Wald on the probability scale escapes (0, 1) whenever the SE is
+  # large relative to the estimate; the natural-scale interval is formed where
+  # the parameter is unbounded and brought back.
+  p <- 0.7923592; se <- 0.2485106
+  row <- .est_row("F1", estimate = p, se = se,
+                  transform = "logit_probability", init_as_sd = FALSE)
+  se_logit <- se / (p * (1 - p))
+  lg       <- log(p / (1 - p))
+  inv      <- function(x) 1 / (1 + exp(-x))
+  expect_equal(row$lower_95_natural, inv(lg - 1.96 * se_logit))
+  expect_equal(row$upper_95_natural, inv(lg + 1.96 * se_logit))
+  expect_true(row$lower_95_natural > 0 && row$upper_95_natural < 1)
+  # the interval it replaces did not fit inside the parameter's own support
+  expect_gt(row$upper_95, 1)
+})
+
+test_that("the two parameterisations of one probability agree on the natural columns (#371)", {
+  # `logit_probability` reports p; `logit` reports logit(p) with the SE carried
+  # by the delta method. The natural-scale columns must not be able to tell
+  # which way the model was written.
+  p  <- 0.7923592
+  se <- 0.2485106
+  a  <- .est_row("F_prob",  estimate = p,               se = se,
+                 transform = "logit_probability")
+  b  <- .est_row("F_logit", estimate = log(p / (1 - p)), se = se / (p * (1 - p)),
+                 transform = "logit")
+  expect_equal(a$estimate_natural, b$estimate_natural, tolerance = 1e-12)
+  expect_equal(a$lower_95_natural, b$lower_95_natural, tolerance = 1e-12)
+  expect_equal(a$upper_95_natural, b$upper_95_natural, tolerance = 1e-12)
+})
+
+test_that(".ferx_est_row suppresses the logit_probability natural CI when it is undefined", {
+  # logit(1) is not finite and the Jacobian p(1-p) collapses; report no
+  # interval rather than an infinite bound.
+  row <- .est_row("F1", estimate = 1, se = 0.02, transform = "logit_probability")
+  expect_equal(row$estimate_natural, 1)
+  expect_true(is.na(row$lower_95_natural))
+  expect_true(is.na(row$upper_95_natural))
+  # and with no SE at all
+  row2 <- .est_row("F1", estimate = 0.5, se = NA_real_, transform = "logit_probability")
+  expect_true(is.na(row2$lower_95_natural))
+  expect_true(is.na(row2$upper_95_natural))
+})
+
+test_that(".ferx_logit is vectorised and NA outside the open interval", {
+  .logit <- getFromNamespace(".ferx_logit", "ferx")
+  expect_equal(.logit(c(0.5, 0.25)), c(0, log(0.25 / 0.75)))
+  expect_equal(.logit(c(0, 1, -1, 2, NA, NaN, Inf, -Inf)), rep(NA_real_, 8))
+  expect_equal(.logit(numeric(0)), numeric(0))
+  expect_equal(.logit(NULL), numeric(0))
+  expect_equal(.logit(c(F1 = 0.5)), 0)   # names dropped, value kept
+})
+
 # ---- header from test-diagnostics.R ----
 # check_diagnostics() — Tier 1
 

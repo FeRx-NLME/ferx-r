@@ -1,7 +1,8 @@
 # Tidy parameter estimates table: theta, omega diagonal, sigma, and (for IOV
 # models) kappa diagonal, with percent relative standard error (%RSE), 95%
-# confidence intervals, and (for log/logit-transformed thetas) natural-scale
-# back-transformed estimates and CIs. Omega is reported on the variance scale
+# confidence intervals, and (for `log`- and `logit`-transformed thetas)
+# natural-scale back-transformed estimates and CIs. `logit_probability` is not
+# one of them: that theta is already on (0, 1) when the engine reports it. Omega is reported on the variance scale
 # (matching the .ferx model file convention); for block omega, only the
 # diagonal variances are included. Stored on the fit object as
 # `fit$estimates`. (Formerly the exported ferx_estimates(fit); see issue #226.)
@@ -114,13 +115,40 @@
     estimate_natural  <- NA_real_
     lower_95_natural  <- NA_real_
     upper_95_natural  <- NA_real_
+  } else if (transform == "logit_probability") {
+    # The engine reports this theta *already* on (0, 1) - that is the point of
+    # the parameterisation - so `estimate` needs no back-transform and
+    # `estimate_natural` is the same number. It is not `logit`, whose theta is
+    # on the logit scale; applying `inv_logit()` here transforms a probability
+    # a second time.
+    #
+    # The interval is a different matter. `lower_95`/`upper_95` are the
+    # symmetric Wald on the reported scale, as they are for every other
+    # transform, and on a probability that interval can leave (0, 1). The
+    # natural-scale interval is therefore formed where the parameter is
+    # unbounded: the SE is carried to the logit scale by the delta method,
+    # `se_logit = se / (p (1 - p))`, and the symmetric interval there is
+    # brought back through `inv_logit()`. That is the same interval the
+    # identical model declared on a `logit` theta reports.
+    lower_95          <- if (!is.na(se)) estimate - 1.96 * se else NA_real_
+    upper_95          <- if (!is.na(se)) estimate + 1.96 * se else NA_real_
+    lg                <- .ferx_logit(estimate)
+    jacobian          <- estimate * (1 - estimate)
+    # isTRUE() so a zero-length or NA input collapses to FALSE rather than
+    # erroring in `&&`.
+    ok                <- isTRUE(!is.na(se)) && isTRUE(!is.na(lg)) &&
+                         isTRUE(jacobian > 1e-12)
+    se_logit          <- if (ok) se / jacobian else NA_real_
+    estimate_natural  <- estimate
+    lower_95_natural  <- if (ok) .ferx_inv_logit(lg - 1.96 * se_logit) else NA_real_
+    upper_95_natural  <- if (ok) .ferx_inv_logit(lg + 1.96 * se_logit) else NA_real_
   } else if (transform == "log") {
     lower_95          <- if (!is.na(se)) estimate - 1.96 * se else NA_real_
     upper_95          <- if (!is.na(se)) estimate + 1.96 * se else NA_real_
     estimate_natural  <- if (!is.na(se)) exp(estimate) else NA_real_
     lower_95_natural  <- if (!is.na(se)) exp(estimate - 1.96 * se) else NA_real_
     upper_95_natural  <- if (!is.na(se)) exp(estimate + 1.96 * se) else NA_real_
-  } else if (transform %in% c("logit", "logit_probability")) {
+  } else if (transform == "logit") {
     # theta is on the logit scale; CI is symmetric on logit then back-transformed
     lower_95          <- if (!is.na(se)) estimate - 1.96 * se else NA_real_
     upper_95          <- if (!is.na(se)) estimate + 1.96 * se else NA_real_
