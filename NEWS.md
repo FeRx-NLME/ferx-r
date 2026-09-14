@@ -236,6 +236,48 @@
 
 ## New features
 
+- **`ferx_globalsearch()` - global model search from R**
+  ([#364](https://github.com/FeRx-NLME/ferx-r/issues/364), option 3 of
+  [#347](https://github.com/FeRx-NLME/ferx-r/issues/347)). The sixth and last
+  tool of the search family, over ferx-core's `run_globalsearch`. Where
+  `ferx_modelsearch()` decides the structure with the covariate model fixed and
+  `ferx_covsearch()` the covariates with the structure fixed, this lays both
+  out as one grid - every structural category an axis with its values as
+  alleles, every optional `COVARIATE?` pair an axis with `none` and each of its
+  forms - and decides them together, either exhaustively or with pyDarwin's
+  genetic algorithm (`algorithm = "ga"`, the default). It takes the two entry
+  forms every other tool has (`config = "x.ferxsearch"` or inline `model` /
+  `data` / `search_space`), the same `directory` / `resume` / `threads` /
+  `progress` meanings, and a `print()` / `summary()` pair in the same idiom.
+
+  `[rank] type` defaults to `"penalized"` here, where every other tool defaults
+  to a BIC, and the search charges three things the criterion cannot see under
+  *any* criterion: a gene that changed nothing in the rendered model, a
+  candidate that produced no fit, and a fit the strictness gate refused. Those
+  are `charge_non_influential`, `charge_gate` and `charge_crash` on `$models`,
+  beside the `criterion` and the `fitness` they sum to, so a genome that lost
+  to a tie-break penalty does not read as though it lost on OFV; `$penalties`
+  is the effective schedule the run charged. `$axes` and `$space_size` are the
+  grid, `$generations` the genetic algorithm's trajectory, and `$models` the
+  engine's own `models.csv` - which `ferx_search_results(dir, type = "models")`
+  now recognises as a fourth model-table schema, so a run produced by
+  `ferx globalsearch` on the command line reads back the same way.
+
+  Two knobs take a named list validated against the engine's own key list, so
+  an unknown setting is refused by name before a config file is rendered: `ga`
+  for `[globalsearch.ga]` and `penalties` for `[rank.penalties]`. `algorithm`
+  is matched exactly rather than by prefix.
+
+  `[globalsearch]` is therefore no longer reported as a section no R tool runs.
+  Note the name collision this shares with nothing else in the package:
+  `ferx_fit(settings = list(global_search = TRUE))` is a global *optimizer*
+  phase inside the estimation of one model; `ferx_globalsearch()` is a global
+  search over *models*. The name here is the engine's, the `.ferxsearch`
+  file's, the CLI's and Pharmpy/pyDarwin's, so a search stays portable between
+  them. New bundled example `two_cpt_oral_global` (a one-compartment,
+  covariate-free model on the `two_cpt_oral_cov` dataset, with its own
+  `.ferxsearch`) and `inst/examples/ex_globalsearch.R`.
+
 - **The engine gained per-parameter priors for penalized ML / MAP estimation**
   ([ferx-core #254](https://github.com/FeRx-NLME/ferx-core/issues/254)),
   declared inline in the model file as `prior(value, rse = 25%)` on any `theta`,
@@ -277,10 +319,12 @@
   section a later ferx-core adds to `TOOL_SECTIONS` is reported from the day a
   file can carry it, and stops being reported on the day a binding for it lands
   here. Where a section can be run somewhere else the warning says where, by
-  name: `[globalsearch]` points at `ferx globalsearch`, while `[structsearch]`,
+  name: `[globalsearch]` pointed at `ferx globalsearch`, while `[structsearch]`,
   which is accepted vocabulary with no engine module and no CLI command behind
   it, is reported without a remediation rather than with one that names a
-  command that does not exist.
+  command that does not exist. (`ferx_globalsearch()`, above, has since taken
+  `[globalsearch]` off the reported list entirely; `[structsearch]` is the one
+  section left.)
 
 - **`ferx_search_config()` reports the `[rank.penalties]` schedule it
   validated** ([#348](https://github.com/FeRx-NLME/ferx-r/issues/348), folded

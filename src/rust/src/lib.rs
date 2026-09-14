@@ -8191,6 +8191,534 @@ fn ferx_rust_amd(
     .into()
 }
 
+// ---------------------------------------------------------------------------
+//  Global model search (ferx-r #364)
+// ---------------------------------------------------------------------------
+//
+// The sixth search tool, over `ferx_tools::globalsearch` (ferx-core #1185).
+// Where the stepwise tools walk one axis of the model space at a time, this
+// one lays the structural categories and the optional covariate pairs out as
+// a grid and searches it globally - every point (`exhaustive`) or a genetic
+// algorithm over it (`ga`). The two rules the rest of the family follows hold
+// here too: the inline form renders a `.ferxsearch` file for the engine's own
+// loader rather than translating arguments into MFL, and every column of the
+// model table is the engine's, in `globalsearch::MODEL_COLUMNS` order.
+
+/// The `[globalsearch.ga]` knobs of one `GaOptions`, as parallel name /
+/// value / kind vectors.
+///
+/// The same shape as [`search_penalty_columns`], and for the same reason: R
+/// needs the key list to check a `ga = list(...)` argument against, and the
+/// value list to report what the search actually used. `kind` says how R must
+/// format the value for TOML - a count, a probability or a flag - so the
+/// argument's type rules live here beside the field they belong to rather
+/// than in a second table on the R side.
+fn globalsearch_ga_columns(
+    g: &ferx_tools::globalsearch::GaOptions,
+) -> (Vec<String>, Vec<f64>, Vec<String>) {
+    let rows: [(&str, f64, &str); 14] = [
+        ("population_size", g.population_size as f64, "count"),
+        ("generations", g.generations as f64, "count"),
+        ("crossover_rate", g.crossover_rate, "number"),
+        ("mutation_rate", g.mutation_rate, "number"),
+        (
+            "gene_mutation_probability",
+            g.gene_mutation_probability,
+            "number",
+        ),
+        ("elites", g.elites as f64, "count"),
+        ("tournament_size", g.tournament_size as f64, "count"),
+        ("downhill_period", g.downhill_period as f64, "count"),
+        ("niches", g.niches as f64, "count"),
+        ("niche_radius", g.niche_radius as f64, "count"),
+        ("niche_penalty", g.niche_penalty, "number"),
+        ("sharing_alpha", g.sharing_alpha, "number"),
+        (
+            "final_downhill",
+            if g.final_downhill { 1.0 } else { 0.0 },
+            "flag",
+        ),
+        ("seed", g.seed as f64, "count"),
+    ];
+    let mut name = Vec::with_capacity(rows.len());
+    let mut value = Vec::with_capacity(rows.len());
+    let mut kind = Vec::with_capacity(rows.len());
+    for (k, v, t) in rows {
+        name.push(k.to_string());
+        value.push(v);
+        kind.push(t.to_string());
+    }
+    (name, value, kind)
+}
+
+/// The `[globalsearch.ga]` and `[rank.penalties]` keys, with the engine's own
+/// defaults.
+///
+/// What the R argument checker validates a `ga = list(...)` /
+/// `penalties = list(...)` against, so an unknown knob is refused by name on
+/// the R side - before a config file is rendered - rather than surfacing as a
+/// TOML `unknown field` from the loader.
+///
+/// @return Named list: `ga_name`, `ga_value`, `ga_kind`, `penalty_name`,
+///   `penalty_value`
+/// @keywords internal
+#[extendr]
+fn ferx_rust_globalsearch_option_keys() -> Robj {
+    let (ga_name, ga_value, ga_kind) =
+        globalsearch_ga_columns(&ferx_tools::globalsearch::GaOptions::default());
+    let (penalty_name, penalty_value, _) =
+        search_penalty_columns(&ferx_tools::search::Penalties::default());
+    list!(
+        ga_name = ga_name,
+        ga_value = ga_value,
+        ga_kind = ga_kind,
+        penalty_name = penalty_name,
+        penalty_value = penalty_value,
+    )
+    .into()
+}
+
+/// The columns of a global search's `models.csv`, in order, from the engine.
+///
+/// @return Character vector of column names
+/// @keywords internal
+#[extendr]
+fn ferx_rust_globalsearch_columns() -> Vec<String> {
+    ferx_tools::globalsearch::MODEL_COLUMNS
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+}
+
+/// The `[globalsearch]`, `[globalsearch.ga]` and `[rank.penalties]` sections
+/// an inline call renders.
+///
+/// The GA knobs and the penalty charges arrive as parallel key / value
+/// vectors and are emitted verbatim: R has already checked each name against
+/// the engine's own key list and formatted each value for its type, and the
+/// engine's `deny_unknown_fields` is the backstop. Both sub-tables are written
+/// after `[globalsearch]` so the TOML reads in the order the engine parses it.
+fn globalsearch_section(
+    algorithm: &str,
+    iiv_strategy: &str,
+    max_models: i32,
+    ga_keys: &[String],
+    ga_values: &[String],
+    penalty_keys: &[String],
+    penalty_values: &[String],
+) -> String {
+    let mut section = String::from("\n[globalsearch]\n");
+    if !algorithm.is_empty() {
+        section.push_str(&format!("algorithm = {}\n", toml_basic(algorithm)));
+    }
+    if !iiv_strategy.is_empty() {
+        section.push_str(&format!("iiv_strategy = {}\n", toml_basic(iiv_strategy)));
+    }
+    if max_models > 0 {
+        section.push_str(&format!("max_models = {max_models}\n"));
+    }
+    if !ga_keys.is_empty() {
+        section.push_str("\n[globalsearch.ga]\n");
+        for (k, v) in ga_keys.iter().zip(ga_values.iter()) {
+            section.push_str(&format!("{k} = {v}\n"));
+        }
+    }
+    if !penalty_keys.is_empty() {
+        section.push_str("\n[rank.penalties]\n");
+        for (k, v) in penalty_keys.iter().zip(penalty_values.iter()) {
+            section.push_str(&format!("{k} = {v}\n"));
+        }
+    }
+    section
+}
+
+/// Global model search - pyDarwin's genetic algorithm, or exhaustive
+/// enumeration, over one candidate grid.
+///
+/// Takes either a `.ferxsearch` file (`config_path`) or the inline arguments,
+/// which are rendered into one. Returns the model table in the engine's own
+/// `MODEL_COLUMNS` order - with the three search-level charges beside the
+/// fitness they went into - the GA's per-generation trajectory, every
+/// candidate's model text, the winning model and its fit.
+///
+/// @param config_path Path to a `.ferxsearch` file, or `""` for the inline form
+/// @param model_path Base model (inline form only)
+/// @param data_path Dataset, or `""` to use the model's `[data]` block
+/// @param mfl MFL search space, quoted verbatim (inline form only)
+/// @param algorithm `"ga"` or `"exhaustive"`; `""` keeps the engine default
+/// @param iiv_strategy `"absorption_delay"`, `"add_diagonal"` or `"no_add"`;
+///   `""` keeps the engine default
+/// @param max_models Cap on an exhaustive enumeration; `<= 0` keeps the default
+/// @param ga_keys `[globalsearch.ga]` keys, checked against the engine's own
+///   list on the R side
+/// @param ga_values The values for `ga_keys`, formatted as TOML by R
+/// @param penalty_keys `[rank.penalties]` charges to override
+/// @param penalty_values The values for `penalty_keys`, formatted as TOML by R
+/// @param rank `[rank] type`; `""` keeps the tool default (penalized fitness)
+/// @param rank_cutoff `[rank] cutoff`; `NaN` keeps the default
+/// @param threads Worker threads; `<= 0` lets the runner choose
+/// @param retries Perturbed restarts per candidate; `< 0` keeps the default
+/// @param resume Reuse the fits already journalled in `directory`
+/// @param directory Where journals, `models.csv`, `generations.csv`,
+///   `models/<id>.ferx` and `final.ferx` go; `""` keeps the run in memory
+/// @param progress Print the engine's batch progress to stderr
+/// @return Named list: the model-table columns, the per-row charges, the axes,
+///   the GA generations, the candidate model texts, `final_model`,
+///   `final_fit`, the options as the engine read them, `notes` and `cancelled`
+/// @keywords internal
+#[extendr]
+#[allow(clippy::too_many_arguments)]
+fn ferx_rust_globalsearch(
+    config_path: &str,
+    model_path: &str,
+    data_path: &str,
+    mfl: &str,
+    algorithm: &str,
+    iiv_strategy: &str,
+    max_models: i32,
+    ga_keys: Vec<String>,
+    ga_values: Vec<String>,
+    penalty_keys: Vec<String>,
+    penalty_values: Vec<String>,
+    rank: &str,
+    rank_cutoff: f64,
+    threads: i32,
+    retries: i32,
+    resume: bool,
+    directory: &str,
+    progress: bool,
+) -> Robj {
+    let section = globalsearch_section(
+        algorithm,
+        iiv_strategy,
+        max_models,
+        &ga_keys,
+        &ga_values,
+        &penalty_keys,
+        &penalty_values,
+    );
+    let text = search_config_text(
+        model_path,
+        data_path,
+        mfl,
+        rank,
+        rank_cutoff,
+        threads,
+        retries,
+        resume,
+        &section,
+    );
+    let inline_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let config =
+        match search_config_for_tool(config_path, &text, &inline_dir, threads, retries, resume) {
+            Ok(c) => c,
+            Err(e) => throw_r_error(format!("ferx_globalsearch: {e}")),
+        };
+    // Both refusals happen before the dataset is read: a file whose keys this
+    // tool cannot honour, and a space it cannot lay out as a grid - an
+    // ALLOMETRY or variability statement is another tool's axis and is named
+    // rather than quietly dropped from the grid.
+    let options = match ferx_tools::globalsearch::GlobalsearchOptions::from_config(&config) {
+        Ok(o) => o,
+        Err(e) => throw_r_error(format!("ferx_globalsearch: {e}")),
+    };
+    if let Err(e) = ferx_tools::globalsearch::GlobalsearchOptions::check_space(&config) {
+        throw_r_error(format!("ferx_globalsearch: {e}"));
+    }
+    let mut base = match config.load_base() {
+        Ok(b) => b,
+        Err(e) => throw_r_error(format!("ferx_globalsearch: {e}")),
+    };
+
+    // One flag, two paths into the engine: `GlobalsearchRun::cancel` stops the
+    // batch loop, and the copy on `fit_options` unwinds the fits already in
+    // flight (the same wiring every search tool here uses).
+    let cancel = CancelFlag::new();
+    base.prepared.parsed.fit_options.cancel = Some(cancel.clone());
+
+    let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
+    let report = |event: ferx_tools::globalsearch::GlobalsearchEvent| {
+        use ferx_tools::globalsearch::GlobalsearchEvent as E;
+        if !progress {
+            return;
+        }
+        match event {
+            E::InputStarted => eprintln!("Fitting the input model..."),
+            E::InputFinished { ofv, criterion } => {
+                eprintln!("Input model: OFV {ofv:.3}, criterion {criterion:.3}")
+            }
+            E::Space { axes, size } => eprintln!(
+                "Grid: {size} point{} over {axes} ax{}",
+                if size == 1 { "" } else { "s" },
+                if axes == 1 { "is" } else { "es" }
+            ),
+            E::BatchStarted {
+                step,
+                proposed,
+                candidates,
+            } => eprintln!(
+                "{step}: {proposed} genome{} proposed, {candidates} to fit...",
+                if proposed == 1 { "" } else { "s" }
+            ),
+            E::BatchFinished { step, best } => match best {
+                Some((id, fitness)) => eprintln!("{step}: best {id} (fitness {fitness:.3})"),
+                None => eprintln!("{step}: no candidate passed the gate"),
+            },
+        }
+    };
+
+    let result = match run_search_cancellable(&cancel, || {
+        ferx_tools::globalsearch::run_globalsearch(
+            &config,
+            &base,
+            ferx_tools::globalsearch::GlobalsearchRun {
+                dir: dir.clone(),
+                threads: config.run.threads,
+                cancel: Some(cancel.clone()),
+                progress: Some(&report),
+                ..Default::default()
+            },
+        )
+    }) {
+        Ok(r) => r,
+        Err(e) => throw_r_error(format!("ferx_globalsearch: {e}")),
+    };
+
+    // The model table, column for column as `MODEL_COLUMNS` orders it, then
+    // the three charges that separate a row's fitness from its criterion.
+    // Those are not a fourth table: `fitness_of` in the engine is what they
+    // restate, so that a genome which lost to a tie-break penalty does not
+    // read as though it lost on OFV (#364).
+    let penalties = result.options.penalties;
+    let n = result.rows.len();
+    let mut id = Vec::with_capacity(n);
+    let mut parent = Vec::with_capacity(n);
+    let mut step = Vec::with_capacity(n);
+    let mut genome = Vec::with_capacity(n);
+    let mut absorption = Vec::with_capacity(n);
+    let mut elimination = Vec::with_capacity(n);
+    let mut peripherals = Vec::with_capacity(n);
+    let mut transits = Vec::with_capacity(n);
+    let mut lagtime = Vec::with_capacity(n);
+    let mut covariates = Vec::with_capacity(n);
+    let mut n_parameters = Vec::with_capacity(n);
+    let mut ofv = Vec::with_capacity(n);
+    let mut criterion = Vec::with_capacity(n);
+    let mut fitness = Vec::with_capacity(n);
+    let mut rank_col = Vec::with_capacity(n);
+    let mut converged = Vec::with_capacity(n);
+    let mut passed = Vec::with_capacity(n);
+    let mut failures = Vec::with_capacity(n);
+    let mut error = Vec::with_capacity(n);
+    let mut seconds = Vec::with_capacity(n);
+    let mut selected = Vec::with_capacity(n);
+    let mut non_influential = Vec::with_capacity(n);
+    let mut duplicate_of = Vec::with_capacity(n);
+    let mut reused = Vec::with_capacity(n);
+    let mut charge_non_influential = Vec::with_capacity(n);
+    let mut charge_gate = Vec::with_capacity(n);
+    let mut charge_crash = Vec::with_capacity(n);
+    for r in &result.rows {
+        let s = r.structure;
+        id.push(r.id.clone());
+        parent.push(r.parent.clone().unwrap_or_default());
+        step.push(r.step.clone());
+        // Empty for the input row, which is no point of the grid.
+        genome.push(
+            r.genome
+                .as_ref()
+                .map(|_| r.description.clone())
+                .unwrap_or_default(),
+        );
+        absorption.push(
+            s.map(|s| s.absorption.label().to_string())
+                .unwrap_or_default(),
+        );
+        elimination.push(
+            s.map(|s| s.elimination.label().to_string())
+                .unwrap_or_default(),
+        );
+        peripherals.push(s.map(|s| s.peripherals.to_string()).unwrap_or_default());
+        // `0` when the drug is absorbed first-order, `N` for the estimated
+        // count - the same three spellings `models.csv` writes.
+        transits.push(
+            s.map(|s| match s.transits {
+                None => "0".to_string(),
+                Some(t) => t.to_string(),
+            })
+            .unwrap_or_default(),
+        );
+        lagtime.push(
+            s.map(|s| if s.lagtime { "ON" } else { "OFF" }.to_string())
+                .unwrap_or_default(),
+        );
+        covariates.push(
+            r.effects
+                .iter()
+                .map(|e| format!("{}={}", e.pair_key(), e.form_label()))
+                .collect::<Vec<_>>()
+                .join(";"),
+        );
+        n_parameters.push(opt_f64(r.n_parameters.map(|v| v as f64)));
+        ofv.push(opt_f64(r.ofv));
+        criterion.push(r.criterion);
+        fitness.push(r.fitness);
+        rank_col.push(opt_f64(r.rank.map(|v| v as f64)));
+        converged.push(opt_bool_chr(r.converged));
+        passed.push(r.passed);
+        failures.push(r.failures.join("; "));
+        error.push(
+            r.error
+                .as_ref()
+                .map(|e| e.message.clone())
+                .unwrap_or_default(),
+        );
+        seconds.push(r.seconds);
+        selected.push(r.selected);
+        non_influential.push(r.non_influential as i32);
+        duplicate_of.push(r.duplicate_of.clone().unwrap_or_default());
+        reused.push(r.reused);
+        // The decomposition the engine applies: a row with no usable
+        // criterion is charged the crash value outright, anything else is its
+        // criterion plus the non-influential tie-break and, when the gate
+        // refused it, the gate charge. The three always sum to
+        // `fitness - criterion`, or to `fitness` when there is no criterion.
+        let (c_ni, c_gate, c_crash) = if r.error.is_some() || !r.criterion.is_finite() {
+            (0.0, 0.0, penalties.crash)
+        } else {
+            (
+                penalties.non_influential_charge(r.non_influential),
+                if r.passed { 0.0 } else { penalties.gate },
+                0.0,
+            )
+        };
+        charge_non_influential.push(c_ni);
+        charge_gate.push(c_gate);
+        charge_crash.push(c_crash);
+    }
+
+    // The grid, axis by axis, as a named list of allele labels - the engine's
+    // own labels, so the `genome` column and the axes read in one vocabulary.
+    let axis_names: Vec<String> = result.axes.iter().map(|(n, _)| n.clone()).collect();
+    let axis_values: Vec<Robj> = result
+        .axes
+        .iter()
+        .map(|(_, alleles)| alleles.clone().into())
+        .collect();
+    let mut axes = List::from_values(axis_values);
+    let _ = axes.set_names(&axis_names);
+
+    // The GA's trajectory; empty for an exhaustive search.
+    let mut g_index = Vec::with_capacity(result.generations.len());
+    let mut g_best = Vec::with_capacity(result.generations.len());
+    let mut g_best_fitness = Vec::with_capacity(result.generations.len());
+    let mut g_mean_fitness = Vec::with_capacity(result.generations.len());
+    let mut g_polished = Vec::with_capacity(result.generations.len());
+    for g in &result.generations {
+        g_index.push(g.index as i32);
+        g_best.push(
+            result
+                .rows
+                .iter()
+                .find(|r| r.genome.as_ref() == Some(&g.best))
+                .map(|r| r.id.clone())
+                .unwrap_or_default(),
+        );
+        g_best_fitness.push(g.best_fitness);
+        g_mean_fitness.push(g.mean_fitness);
+        g_polished.push(g.polished as i32);
+    }
+
+    // Every candidate's text, so a user can read or refit the model the table
+    // ranked second without re-running the search.
+    let model_id: Vec<String> = result.models.keys().cloned().collect();
+    let model_text: Vec<String> = result.models.values().map(|m| m.render()).collect();
+
+    let final_model = result.final_model.render();
+    let final_fit: Robj = match &result.final_fit {
+        Some(fit) => match search_final_fit(fit, &final_model, &base.prepared.data_path) {
+            Ok(l) => l.into(),
+            Err(e) => throw_r_error(format!("ferx_globalsearch: {e}")),
+        },
+        None => NULL.into(),
+    };
+
+    let (ga_name, ga_value, _) = globalsearch_ga_columns(&result.options.ga);
+    let (penalty_name, penalty_value, _) = search_penalty_columns(&penalties);
+    let input_row = result.row("input");
+
+    list!(
+        id = id,
+        parent = parent,
+        step = step,
+        genome = genome,
+        absorption = absorption,
+        elimination = elimination,
+        peripherals = peripherals,
+        transits = transits,
+        lagtime = lagtime,
+        covariates = covariates,
+        n_parameters = n_parameters,
+        ofv = ofv,
+        criterion = criterion,
+        fitness = fitness,
+        rank = rank_col,
+        converged = converged,
+        passed = passed,
+        failures = failures,
+        error = error,
+        seconds = seconds,
+        selected = selected,
+        non_influential = non_influential,
+        duplicate_of = duplicate_of,
+        reused = reused,
+        charge_non_influential = charge_non_influential,
+        charge_gate = charge_gate,
+        charge_crash = charge_crash,
+        axes = axes,
+        space_size = result.space_size as f64,
+        g_index = g_index,
+        g_best = g_best,
+        g_best_fitness = g_best_fitness,
+        g_mean_fitness = g_mean_fitness,
+        g_polished = g_polished,
+        model_id = model_id,
+        model_text = model_text,
+        input_model = result.input_model.render(),
+        input_ofv = opt_f64(input_row.and_then(|r| r.ofv)),
+        input_criterion = input_row.map(|r| r.criterion).unwrap_or(f64::NAN),
+        input_fitness = input_row.map(|r| r.fitness).unwrap_or(f64::NAN),
+        final_id = result.final_id.clone(),
+        final_model = final_model,
+        final_fitness = result.final_fitness,
+        final_fit = final_fit,
+        n_fitted = result.n_fitted() as i32,
+        criterion_label = result.criterion.label().to_string(),
+        algorithm = result.options.algorithm.label().to_string(),
+        iiv_strategy = result.options.iiv_strategy.label().to_string(),
+        max_models = result.options.max_models as f64,
+        rank_cutoff = options.cutoff.unwrap_or(f64::NAN),
+        // The effective schedule, not the file's keys: what the search
+        // charged, which is the only thing the fitness column can be read
+        // against. Both schedules come from the same helpers the key list
+        // and `ferx_search_config()` use, so a charge cannot be named one
+        // way here and another there.
+        penalty_name = penalty_name,
+        penalty_value = penalty_value,
+        ga_name = ga_name,
+        ga_value = ga_value,
+        summary = ferx_tools::globalsearch::render_summary(&result),
+        directory = directory.to_string(),
+        // The base model as the config resolved it, so the R object names the
+        // same file in both entry forms.
+        model = config.base.to_string_lossy().into_owned(),
+        data = base.prepared.data_path.clone(),
+        notes = result.notes.clone(),
+        cancelled = result.cancelled,
+    )
+    .into()
+}
+
 extendr_module! {
     mod ferx;
     fn ferx_rust_fit;
@@ -8233,4 +8761,7 @@ extendr_module! {
     fn ferx_rust_amd_plan;
     fn ferx_rust_amd_step_columns;
     fn ferx_rust_amd_candidate_columns;
+    fn ferx_rust_globalsearch;
+    fn ferx_rust_globalsearch_columns;
+    fn ferx_rust_globalsearch_option_keys;
 }

@@ -74,6 +74,11 @@ model a search starts from: \code{\link{ferx_covsearch}} decides the WT
 and CRCL relations rather than being asked about ones the base already
 carries, and \code{\link{ferx_allometry}} can scale it without counting
 body size twice. Ships its own \code{.ferxsearch} as \code{$search}}
+\item{two_cpt_oral_global}{A \emph{one}-compartment, covariate-free model
+on the same dataset - under-specified on both axes at once, which is
+what \code{\link{ferx_globalsearch}} decides together rather than one
+at a time. Ships a \code{.ferxsearch} laying the structural and
+covariate statements out as one grid as \code{$search}}
 \item{three_cpt_iv}{Three-compartment IV bolus}
 \item{three_cpt_oral}{Three-compartment oral (analytical \code{three_cpt_oral})}
 \item{one_cpt_iv_ode, warfarin_ode, two_cpt_iv_ode, two_cpt_oral_cov_ode,

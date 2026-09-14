@@ -1,0 +1,87 @@
+# A global search over structure *and* covariates, on one grid.
+#
+# Run it from R with:
+#   res <- ferx_globalsearch(config = ferx_example("two_cpt_oral_global")$search,
+#                            directory = "globalsearch-run")
+#
+# or from the shell with `ferx globalsearch <this file>`. The two run the same
+# search: [globalsearch] is the engine's own section, and ferx_globalsearch()
+# hands this file to the engine's loader unchanged.
+#
+# `base` and `data` are relative to this file's own directory, so the
+# configuration travels with the model it searches.
+
+base = "../models/two_cpt_oral_global.ferx"
+data = "../data/two_cpt_oral_cov.csv"
+
+[space]
+# Four axes, so sixteen grid points:
+#
+#   PERIPHERALS   0 | 1          the distribution phase
+#   LAGTIME       OFF | ON       an absorption delay
+#   CL-WT         none | pow     body size on clearance
+#   CL-CRCL       none | pow     renal function on clearance
+#
+# The structural statements are modelsearch's vocabulary and the `COVARIATE?`
+# statements are covsearch's; laying them out together is the whole point of
+# the tool. `?` makes a covariate term exploratory - `none` becomes one of its
+# alleles rather than the term being forced on every candidate.
+mfl = """
+PERIPHERALS(0..1); LAGTIME([OFF,ON])
+COVARIATE?(CL, WT, pow); COVARIATE?(CL, CRCL, pow)
+"""
+
+[rank]
+# The tool's own default, stated rather than left implicit because it is the
+# one place in the search family where the default is not a BIC: pyDarwin's
+# penalized fitness charges the objective function per estimated parameter and
+# per unhealthy fit. `type = "bic"` here would rank on the mixed BIC instead,
+# and the three search-level charges below would still apply.
+type = "penalized"
+
+[rank.penalties]
+# Only what this file changes; every other charge keeps the engine's pyDarwin
+# default, and `ferx_search_config()$rank$penalties` reports the whole
+# effective schedule.
+#
+# `gate` is the charge for a fit the [strictness] block refused. It is not a
+# selection rule - a gated model can never win - but it steers a genetic
+# algorithm away from the region that produced it. 100 is the default; raising
+# it makes the algorithm avoid that region harder.
+gate = 100.0
+# The tie-break between two genomes that render to the same model: the one
+# with a gene that changed nothing pays this much per idle gene. Tiny on
+# purpose, so it only ever decides a tie.
+non_influential = 0.00001
+
+[strictness]
+# A candidate that did not converge is not a result worth ranking. The global
+# search does not drop it - it is a row with its verdict, its gate charge and
+# its fitness - but it cannot be selected.
+require_converged = true
+
+[run]
+# Perturbed restarts per candidate on top of the fit from the exact initials.
+retries = 1
+resume = false
+
+[globalsearch]
+# `exhaustive` fits every point of the grid; `ga` runs the genetic algorithm
+# and fits a fraction of them. Sixteen points is small enough to enumerate,
+# and enumerating is what makes this file a reference the GA can be checked
+# against - on a grid this size the two must agree on the winner.
+algorithm = "exhaustive"
+# The cap on an exhaustive enumeration. A grid above it is an error naming the
+# size and this key, never a silently truncated search.
+max_models = 64
+# How a structural move's new parameters get a random effect.
+# `absorption_delay` puts an eta on a new lag time or mean transit time only.
+iiv_strategy = "absorption_delay"
+
+[globalsearch.ga]
+# Read only when `algorithm = "ga"`; kept here so the file documents both
+# halves. The seed is what makes a resume reuse its journal: the same seed on
+# the same grid proposes the same genomes.
+population_size = 8
+generations = 3
+seed = 20250914

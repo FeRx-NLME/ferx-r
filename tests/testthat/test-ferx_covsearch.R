@@ -234,8 +234,10 @@ test_that("a space no candidate can clear returns the base model, fitted", {
 
 test_that("a config section no R tool runs warns in the tool's own name", {
   # #347. The warning belongs where it takes effect, not only at
-  # `ferx_search_config()`: a file with `[globalsearch]` handed to a stepwise
-  # tool runs stepwise, and the name in the message is the one the user typed.
+  # `ferx_search_config()`: a file with a section addressed to a tool this
+  # package does not bind runs as though the section were absent, and the
+  # name in the message is the one the user typed. `[structsearch]` is the
+  # last such section - `[globalsearch]` gained a tool in #364.
   ex <- ferx_example("two_cpt_oral_base")
   cfg <- write_cfg(
     sprintf('base = "%s"', ex$model),
@@ -244,15 +246,15 @@ test_that("a config section no R tool runs warns in the tool's own name", {
     # A structural statement, so covsearch refuses the file straight after the
     # entry form - the warning is what is under test, not a search run.
     'mfl = "PERIPHERALS(0..1)"',
-    "[globalsearch]",
-    'algorithm = "exhaustive"'
+    "[structsearch]",
+    "dummy = 1"
   )
 
   seen <- NULL
   tryCatch(
     withCallingHandlers(
       ferx_covsearch(config = cfg,
-                     directory = file.path(tempdir(), "covsearch-globalsearch"),
+                     directory = file.path(tempdir(), "covsearch-structsearch"),
                      progress = FALSE),
       ferx_search_unconsumed_section = function(cond) {
         seen <<- cond
@@ -264,7 +266,7 @@ test_that("a config section no R tool runs warns in the tool's own name", {
 
   expect_s3_class(seen, "ferx_search_unconsumed_section")
   expect_match(conditionMessage(seen), "ferx_covsearch")
-  expect_match(conditionMessage(seen), "globalsearch")
+  expect_match(conditionMessage(seen), "structsearch")
 })
 
 test_that("print() shows the step table and the final relations", {

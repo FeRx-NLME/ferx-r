@@ -244,36 +244,52 @@ test_that("an invalid penalty charge is still an error at load", {
 })
 
 test_that("a section no R tool runs warns at load rather than loading silently", {
-  # #347: the engine's `TOOL_SECTIONS` admits `[globalsearch]` and
-  # `[structsearch]`, neither of which has an R binding. The file loads, the
-  # section is ignored by whichever tool gets the file, and the user gets a
-  # stepwise search having asked for a global one. The load says so.
+  # #347: the engine's `TOOL_SECTIONS` admits sections this package does not
+  # bind. The file loads, the section is ignored by whichever tool gets the
+  # file, and the user gets a search other than the one asked for. The load
+  # says so. `[structsearch]` is the last such section - `[globalsearch]`
+  # stopped being one when `ferx_globalsearch()` landed (#364).
   path <- minimal_cfg(
     "COVARIATE?(CL, WT, pow)",
-    "[globalsearch]", 'algorithm = "exhaustive"'
+    "[structsearch]", "dummy = 1"
   )
-  w <- expect_warning(ferx_search_config(path), "globalsearch")
+  w <- expect_warning(ferx_search_config(path), "structsearch")
   expect_s3_class(w, "ferx_search_unconsumed_section")
   expect_match(conditionMessage(w), "ferx_search_config")
-  # `[globalsearch]` is the one section with somewhere else to run it.
-  expect_match(conditionMessage(w), "ferx globalsearch", fixed = TRUE)
 
   cfg <- suppressWarnings(ferx_search_config(path))
-  expect_equal(cfg$tools, "globalsearch")
+  expect_equal(cfg$tools, "structsearch")
   expect_match(paste(capture.output(print(cfg)), collapse = "\n"),
-               "no R tool runs: globalsearch")
+               "no R tool runs: structsearch")
 
-  # Both orphan sections at once, in one warning.
-  both <- expect_warning(
-    ferx_search_config(minimal_cfg(
-      "COVARIATE?(CL, WT, pow)",
-      "[globalsearch]", 'algorithm = "exhaustive"',
-      "[structsearch]", "dummy = 1"
-    )),
-    "structsearch"
+  # Two orphan sections at once are one warning, worded in the plural. Only
+  # one such section exists today, so the second is synthetic - see the
+  # "engine adds later" test below for why that is the right shape here.
+  both <- tryCatch(
+    ferx:::.ferx_search_warn_unconsumed(c("structsearch", "sometoolfrom2027"),
+                                        "ferx_search_config"),
+    warning = function(w) w
   )
-  expect_match(conditionMessage(both), "globalsearch")
+  expect_match(conditionMessage(both), "structsearch")
+  expect_match(conditionMessage(both), "sometoolfrom2027")
   expect_match(conditionMessage(both), "have")
+})
+
+test_that("a section with a tool in this package is not reported at all", {
+  # `[globalsearch]` used to be the one orphan with somewhere else to run it,
+  # and the warning pointed at `ferx globalsearch`. `ferx_globalsearch()`
+  # (#364) makes it an ordinary tool section: no warning, and no pointer.
+  expect_silent(ferx_search_config(minimal_cfg(
+    "COVARIATE?(CL, WT, pow)",
+    "[globalsearch]", 'algorithm = "exhaustive"'
+  )))
+  expect_equal(
+    suppressWarnings(ferx_search_config(minimal_cfg(
+      "COVARIATE?(CL, WT, pow)",
+      "[globalsearch]", 'algorithm = "exhaustive"'
+    )))$tools,
+    "globalsearch"
+  )
 })
 
 test_that("the remediation is per section, not a blanket pointer at the CLI", {
@@ -312,8 +328,8 @@ test_that("a section the engine adds later warns without a binding for it", {
 
   # Every section this package binds stays silent.
   expect_silent(ferx:::.ferx_search_warn_unconsumed(
-    c("allometry", "amd", "covsearch", "iivsearch", "iovsearch",
-      "modelsearch", "ruvsearch"),
+    c("allometry", "amd", "covsearch", "globalsearch", "iivsearch",
+      "iovsearch", "modelsearch", "ruvsearch"),
     "ferx_search_config"
   ))
   expect_silent(ferx:::.ferx_search_warn_unconsumed(character(0),

@@ -121,6 +121,8 @@ ferx_allometry <- function(model = NULL,
     stop(what, ": `covariate` must be a single covariate name")
   }
 
+  # No `resume` to pass: allometry fits a base and a scaled arm and has no
+  # journal to continue, so it is the one search tool without the argument.
   dir_arg <- .ferx_search_directory(directory, what)
   raw <- ferx_rust_allometry(
     config_path = config_path,
