@@ -467,11 +467,19 @@ test_that("a single-point space returns the input model, fitted", {
   # directly.
   #
   # Not bit-identical, and cannot be: the grid point is the input model
-  # refitted *seeded from the input's own fit*, which is a warm start where
-  # `ferx_fit()` is a cold one. So the search's fit is the better of the two
-  # by construction (-172.196 against -172.049 here, 9e-4 relative) and the
-  # assertion is that it agrees to within a warm start's worth, and never
-  # comes back worse.
+  # refitted, not a transformed one, and the fit handed back is that row's.
+  #
+  # What is deliberately NOT asserted is numeric agreement with a standalone
+  # `ferx_fit()` of the same model. That comparison is not a property of this
+  # package: the cold optimizer trajectory on this model is platform
+  # dependent, and on Linux / R 4.6 the standalone fit lands in a far worse
+  # basin than the one the search reaches (OFV -62.0 against -172.0), while
+  # on macOS the two agree to 9e-4 (-172.049 against -172.196). A tolerance
+  # calibrated on either platform is false on the other - CI on PR #375
+  # failed exactly there. So the oracle is the structural claim below plus
+  # the one numeric direction that means something: the search, which fits
+  # the same model, must not come back *worse* than fitting it directly.
+  # Same lesson as the status-aware AMD assertions in #356.
   ex <- ferx_example("two_cpt_oral_global")
   res <- ferx_globalsearch(
     model        = ex$model,
@@ -487,11 +495,23 @@ test_that("a single-point space returns the input model, fitted", {
   # The input and the one grid point, nothing else.
   expect_equal(nrow(res$models), 2L)
   expect_equal(sum(res$models$selected), 1L)
+
+  # The winner is the grid's one point, and that point is the input model
+  # unchanged - one compartment, no covariate relation, nothing transformed.
+  winner <- res$models[res$models$selected, , drop = FALSE]
+  expect_equal(winner$id, res$final_model_id)
+  expect_equal(winner$genome, "PERIPHERALS=0")
+  expect_equal(winner$peripherals, 0L)
+  expect_true(is.na(winner$covariates))
+
   skip_if(is.null(res$fit), "the run recovered no final fit")
+  # The fit belongs to the row the table selected - that is the whole of
+  # "returns the base fit" that this package is responsible for.
+  expect_s3_class(res$fit, "ferx_fit")
+  expect_equal(unname(res$fit$ofv), winner$ofv, tolerance = 1e-8)
 
   direct <- ferx_fit(ex$model, ex$data)
   expect_lte(unname(res$fit$ofv), unname(direct$ofv) + 1e-6)
-  expect_equal(unname(res$fit$ofv), unname(direct$ofv), tolerance = 2e-3)
 })
 
 test_that("the genetic algorithm reports its trajectory and finds the same winner", {
