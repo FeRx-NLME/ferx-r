@@ -438,7 +438,9 @@
 #'       unreachable. Set an explicit value to pin it for every model.}
 #'     \item{\code{global_search}}{Logical. When \code{TRUE}, run a global
 #'       search phase before local refinement (default \code{FALSE}).
-#'       Not accepted by pure \code{"gn"}.}
+#'       Not accepted by pure \code{"gn"}. This is a wider search for the
+#'       parameter values of \emph{this} model, and is unrelated to
+#'       \code{\link{ferx_globalsearch}}, which searches over \emph{models}.}
 #'     \item{\code{global_maxeval}}{Function evaluations budget for the global
 #'       search phase, read only when \code{global_search = TRUE}. The default
 #'       \code{0} does not mean "no budget": it selects an automatic one of

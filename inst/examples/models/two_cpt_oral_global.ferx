@@ -1,0 +1,63 @@
+# One-compartment oral PK model -- the starting point of a global search.
+#
+# Deliberately under-specified for the dataset it is paired with: the data are
+# two_cpt_oral_cov.csv, which were simulated from a two-compartment model and
+# carry two covariates (WT, CRCL), and this model has one compartment and no
+# covariate effect at all. Every one of those is a decision on the grid.
+#
+# Why a *global* search rather than the two stepwise ones:
+#
+#   ferx_modelsearch()   decides the structure with the covariate model fixed
+#   ferx_covsearch()     decides the covariates with the structure fixed
+#   ferx_globalsearch()  lays both out as one grid and decides them together
+#
+# The difference matters when the two interact - a clearance covariate that
+# only pays off once the distribution phase has a compartment of its own is
+# invisible to a forward step taken on the one-compartment model. It also
+# makes the non-influential charge visible: a genome that puts a covariate on
+# a parameter the structural choice removed renders to the same model as the
+# genome without it, and the search charges the extra gene as a tie-break.
+#
+# Paired file: two_cpt_oral_global.ferxsearch, the grid and the [globalsearch]
+#              options.
+# Dataset:     two_cpt_oral_cov.csv (shared with the `two_cpt_oral_cov`,
+#              `two_cpt_oral_base` and `two_cpt_oral_derived` examples).
+#
+# The [covariates] block is what makes `@CONTINUOUS` resolvable: a space
+# written against covariate classes expands over the declared columns, not
+# over every column in the dataset.
+
+[parameters]
+  theta TVCL(5.0, 0.1, 100.0)
+  theta TVV(50.0, 1.0, 500.0)
+  theta TVKA(1.2, 0.01, 10.0)
+
+  omega ETA_CL ~ 0.10
+  omega ETA_V  ~ 0.10
+  omega ETA_KA ~ 0.15
+
+  sigma PROP_ERR ~ 0.02 (sd)
+
+[individual_parameters]
+  CL = TVCL * exp(ETA_CL)
+  V  = TVV  * exp(ETA_V)
+  KA = TVKA * exp(ETA_KA)
+
+[structural_model]
+  pk one_cpt_oral(cl=CL, v=V, ka=KA)
+
+[covariates]
+  WT   continuous
+  CRCL continuous
+
+[error_model]
+  DV ~ proportional(PROP_ERR)
+
+[fit_options]
+  method     = focei
+  maxiter    = 500
+  covariance = true
+  # Finite differences rather than `auto`, matching two_cpt_oral_base: kept
+  # explicit so the example's published numbers do not move with the gradient
+  # default. See the note in that model.
+  gradient   = fd

@@ -24,7 +24,8 @@ file named is an error rather than an ignored argument.}
 \item{type}{Which table to read: \code{"candidates"} (the default) for the
 runner's own candidate table, written by every tool, \code{"models"} for
 the model table \code{\link{ferx_modelsearch}},
-\code{\link{ferx_iivsearch}} and \code{\link{ferx_iovsearch}} write, or
+\code{\link{ferx_iivsearch}}, \code{\link{ferx_iovsearch}} and
+\code{\link{ferx_globalsearch}} write, or
 \code{"steps"} for the step table \code{\link{ferx_covsearch}} and
 \code{\link{ferx_ruvsearch}} write. A run has more than one: the candidate
 table is one row per fit the runner was asked for, the model or step table
@@ -45,8 +46,10 @@ columns for whichever tool wrote the file - modelsearch's 21 (\code{id},
 \code{parent}, \code{layer}, \code{path}, the four structural columns,
 \code{criterion}, \code{rank}, ...), iivsearch's 18 (\code{id},
 \code{parent}, \code{step}, \code{description}, \code{etas},
-\code{blocks}, ...) or iovsearch's 19 (..., \code{kappas},
-\code{kappa_blocks}, ...) - typed the same way and carrying the same
+\code{blocks}, ...), iovsearch's 19 (..., \code{kappas},
+\code{kappa_blocks}, ...) or globalsearch's 24 (..., \code{genome},
+\code{covariates}, \code{fitness}, \code{non_influential},
+\code{duplicate_of}, ...) - typed the same way and carrying the same
 \code{tool} attribute. Otherwise a data frame with the
 engine's 15 candidate columns: \code{id},
 \code{parent}, \code{hash}, \code{features}, \code{criterion} (numeric),
@@ -99,6 +102,7 @@ Other search:
 \code{\link[=ferx_amd]{ferx_amd()}},
 \code{\link[=ferx_amd_plan]{ferx_amd_plan()}},
 \code{\link[=ferx_covsearch]{ferx_covsearch()}},
+\code{\link[=ferx_globalsearch]{ferx_globalsearch()}},
 \code{\link[=ferx_iivsearch]{ferx_iivsearch()}},
 \code{\link[=ferx_iovsearch]{ferx_iovsearch()}},
 \code{\link[=ferx_modelsearch]{ferx_modelsearch()}},
