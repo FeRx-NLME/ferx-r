@@ -2,6 +2,7 @@ use extendr_api::prelude::*;
 use ferx_core::cancel::CancelFlag;
 use ferx_core::types::*;
 use nalgebra::DMatrix;
+use std::collections::HashMap;
 use std::path::Path;
 
 // ---------------------------------------------------------------------------
@@ -2609,10 +2610,11 @@ fn fit_result_to_list(
     let ebe_etas_df: Robj = build_ebe_etas(result, population);
 
     // Per-subject individual parameter estimates: ID + one column per
-    // [individual_parameters] declaration. Computed by evaluating
-    // `pk_param_fn` at the subject's BSV eta + zero kappas + covariates, so
-    // each value is the subject's typical (kappa-free) parameter under the
-    // model's covariate effects. Per-occasion variation lives in `ebe_kappas`.
+    // [individual_parameters] declaration. Computed by evaluating the block at
+    // the subject's BSV eta + zero kappas + covariates, in the subject's fitted
+    // mixture class, so each value is the subject's typical (kappa-free)
+    // parameter under the model's covariate effects. Per-occasion variation
+    // lives in `ebe_kappas`.
     let individual_estimates_df: Robj = build_individual_estimates(result, population, model);
 
     // Pre-compute Option<Vec<f64>> fields as Robj (list! macro can't infer
@@ -3006,18 +3008,25 @@ fn build_cond_dist_df(result: &FitResult, population: &Population, cd: &CondDist
 //
 // Returns a data.frame with one row per subject and columns ID + one column
 // per `[individual_parameters]` declaration (in declaration order). Each cell
-// is the value produced by evaluating `pk_param_fn` at the subject's EBE
-// eta + zero kappas + covariates. Returns NULL when there are no subjects or
-// the model declares no individual parameters.
+// is the value ferx-core's `indiv_param_value_map` produces for that name at
+// the subject's EBE eta + zero kappas + covariates, in the subject's fitted
+// mixture class. Returns NULL when there are no subjects or the model declares
+// no user-facing individual parameters.
 //
-// Parameters the parser synthesizes (`__ferx_ro_*` for a direct theta/eta
-// reference in a Form-C readout, `__ferx_pktime_*` for `pk(...=TIME)`) are
-// internal and left out, as ferx-core's own `build_indiv_map` does for the
-// `[output]` echo. The prefixes mirror its `READOUT_SYNTH_PREFIX` and
-// `PKTIME_SYNTH_PREFIX`, which are not public; the parser rejects user names
-// that carry them.
-const SYNTHETIC_INDIV_PARAM_PREFIXES: [&str; 2] = ["__ferx_ro_", "__ferx_pktime_"];
-
+// Values come from the by-name API (ferx-core #1356), not from
+// `PkParams.values[pk_indices[i]]`: on an analytical model a top-level name the
+// `[structural_model]` line does not bind carries a placeholder `pk_indices`
+// entry of 0, so the slot read returned CL's value for it (an intermediate such
+// as `TVCL = THCL * 3`, or a modeled dose `D{n}` / `R{n}`).
+//
+// The map also drops the parameters the parser synthesizes (`__ferx_ro_*` for a
+// direct theta/eta reference in a Form-C readout, `__ferx_pktime_*` for
+// `pk(...=TIME)`), which are internal and must not surface as columns - so the
+// column list is `indiv_param_names` restricted to the map's keys.
+//
+// TIME is fixed at 0.0: the table is one row per subject, so there is no row
+// time to evaluate at. A parameter that reads the `TIME` built-in (ferx-core
+// #610) is therefore reported at TIME = 0, unlike the per-row sdtab echo.
 fn build_individual_estimates(
     result: &FitResult,
     population: &Population,
@@ -3029,27 +3038,16 @@ fn build_individual_estimates(
     }
     let n_eta = model.n_eta;
     let n_kappa = model.n_kappa;
-    // (position in `indiv_param_names`, name) for every user-facing parameter.
-    let columns: Vec<(usize, &str)> = model
-        .indiv_param_names
-        .iter()
-        .enumerate()
-        .filter(|(_, name)| {
-            !SYNTHETIC_INDIV_PARAM_PREFIXES
-                .iter()
-                .any(|prefix| name.starts_with(prefix))
-        })
-        .map(|(i, name)| (i, name.as_str()))
-        .collect();
-    if columns.is_empty() {
-        return ().into();
-    }
+    // `SubjectResult::mixest` is already 1-based (ferx-core writes `mixest + 1`
+    // onto it in `api/fit.rs`), which is the convention `indiv_param_value_map`
+    // wants. It panics on class 0 or a class past the model's count, so a class
+    // out of range - a hand-built or deserialised fit - falls back to `None`
+    // rather than aborting across the FFI boundary.
+    let n_classes = model.mixture.as_ref().map_or(1, |m| m.n_classes);
 
     let mut ids: Vec<String> = Vec::with_capacity(n_subj);
-    let mut param_cols: Vec<Vec<f64>> =
-        (0..columns.len()).map(|_| Vec::with_capacity(n_subj)).collect();
-
     let mut eta_buf: Vec<f64> = vec![0.0; n_eta + n_kappa];
+    let mut maps: Vec<HashMap<String, f64>> = Vec::with_capacity(n_subj);
 
     for (si, sr) in result.subjects.iter().enumerate() {
         let subj = &population.subjects[si];
@@ -3061,29 +3059,35 @@ fn build_individual_estimates(
         for k in 0..n_kappa {
             eta_buf[n_eta + k] = 0.0;
         }
-        let pk = (model.pk_param_fn)(&result.theta, &eta_buf, &subj.covariates, 0.0);
-        for (col, &(i, _)) in columns.iter().enumerate() {
-            // `pk_indices` is parallel to `indiv_param_names` on both engines.
-            // ODE models do NOT write sequentially: ferx-core's
-            // `ode_param_slots` puts canonical names (CL, V, KA, F, LAGTIME,
-            // ...) at their fixed PK slot and every other name in the lowest
-            // free slot that is not reserved for F/lagtime. Reading slot `i`
-            // returned another parameter's value (or an unwritten 0).
-            //
-            // Known gap (ferx-core #1356): on an analytical model a top-level
-            // name not bound in `pk(...)` carries a placeholder `pk_indices`
-            // entry of 0, so it reads CL's value. `pk_indices` alone cannot
-            // tell that placeholder from the real CL entry; the fix is a
-            // by-name value API in ferx-core.
-            let slot = model.pk_indices.get(i).copied().unwrap_or(i);
-            let v = pk.values.get(slot).copied().unwrap_or(f64::NAN);
-            param_cols[col].push(v);
-        }
+        let mix_class = sr.mixest.filter(|&k| k >= 1 && k <= n_classes);
+        maps.push(model.indiv_param_value_map(
+            &result.theta,
+            &eta_buf,
+            &subj.covariates,
+            0.0,
+            mix_class,
+        ));
     }
 
-    let mut pairs: Vec<(&str, Robj)> = Vec::new();
+    // Declaration order, minus whatever the map dropped as internal. The key set
+    // is the same for every subject, so the first map decides the columns.
+    let columns: Vec<&str> = model
+        .indiv_param_names
+        .iter()
+        .map(String::as_str)
+        .filter(|name| maps[0].contains_key(*name))
+        .collect();
+    if columns.is_empty() {
+        return ().into();
+    }
+
+    let mut pairs: Vec<(&str, Robj)> = Vec::with_capacity(columns.len() + 1);
     pairs.push(("ID", ids.into()));
-    for (&(_, name), values) in columns.iter().zip(param_cols) {
+    for &name in &columns {
+        let values: Vec<f64> = maps
+            .iter()
+            .map(|m| m.get(name).copied().unwrap_or(f64::NAN))
+            .collect();
         pairs.push((name, values.into()));
     }
     let mut df = List::from_pairs(pairs);
