@@ -101,6 +101,55 @@ test_that("argument validation happens in R, before the engine is called", {
   expect_error(do.call(ferx_globalsearch, c(args, list(rank = 1))), "single string")
 })
 
+test_that("resume with nothing to resume from is refused before any fit", {
+  # A `resume = TRUE` the engine cannot honour reaches it as an ordinary run:
+  # the flag is set, there is no journal, and the search silently refits
+  # everything. On a tool whose whole cost is fits that is an expensive way to
+  # learn the argument did nothing, so both halves are refused up front
+  # (PR #375 review).
+  ex <- ferx_example("two_cpt_oral_global")
+  args <- list(model = ex$model, data = ex$data,
+               search_space = "PERIPHERALS(0..1)")
+
+  # No directory at all: nowhere a journal could be.
+  expect_error(do.call(ferx_globalsearch, c(args, list(resume = TRUE))),
+               "needs the `directory`", fixed = TRUE)
+  # A directory no earlier run wrote.
+  expect_error(
+    do.call(ferx_globalsearch,
+            c(args, list(resume = TRUE,
+                         directory = file.path(tempdir(), "no-such-run")))),
+    "there is nothing at"
+  )
+  # `resume = NA` is still answered by the type check, not by this one.
+  expect_error(do.call(ferx_globalsearch, c(args, list(resume = NA))),
+               "TRUE or FALSE")
+})
+
+test_that("the resume guard covers the whole search family, not just this tool", {
+  # The rule lives in `.ferx_search_directory()`, which every tool routes its
+  # `directory` through, so a sibling cannot quietly keep the old behaviour.
+  # `ferx_allometry()` is absent on purpose: it fits a base and a scaled arm
+  # and journals nothing, so it is the one search tool with no `resume`.
+  for (what in c("ferx_modelsearch", "ferx_covsearch", "ferx_iivsearch",
+                 "ferx_iovsearch", "ferx_ruvsearch", "ferx_amd",
+                 "ferx_globalsearch")) {
+    expect_error(ferx:::.ferx_search_directory(NULL, what, resume = TRUE),
+                 "needs the `directory`", fixed = TRUE)
+  }
+  expect_false("resume" %in% names(formals(ferx_allometry)))
+  # Without `resume` an absent directory is still the in-memory run.
+  expect_equal(ferx:::.ferx_search_directory(NULL, "ferx_globalsearch"), "")
+  expect_equal(
+    ferx:::.ferx_search_directory(NULL, "ferx_globalsearch", resume = FALSE), ""
+  )
+  # And an existing directory resumes fine.
+  d <- file.path(tempdir(), "resume-guard-ok")
+  dir.create(d, showWarnings = FALSE, recursive = TRUE)
+  expect_equal(ferx:::.ferx_search_directory(d, "ferx_globalsearch", resume = TRUE),
+               normalizePath(d))
+})
+
 test_that("an unknown ga or penalty knob is refused by name, from the engine's list", {
   ex <- ferx_example("two_cpt_oral_global")
   args <- list(model = ex$model, data = ex$data,
@@ -235,7 +284,11 @@ test_that("the result reports the search the engine ran", {
 
   # Four axes, sixteen points, and the input is a row of the table beside them.
   expect_equal(length(res$axes), 4L)
-  expect_equal(res$space_size, 16L)
+  expect_equal(res$space_size, 16)
+  # A double, not an integer: 31 binary axes already overflow R's integer
+  # range, and `as.integer()` would answer a searchable grid with NA
+  # (PR #375 review).
+  expect_type(res$space_size, "double")
   expect_setequal(names(res$axes),
                   c("PERIPHERALS", "LAGTIME", "CL-WT", "CL-CRCL"))
   expect_true("input" %in% res$models$id)
@@ -430,7 +483,7 @@ test_that("a single-point space returns the input model, fitted", {
     progress     = FALSE
   )
 
-  expect_equal(res$space_size, 1L)
+  expect_equal(res$space_size, 1)
   # The input and the one grid point, nothing else.
   expect_equal(nrow(res$models), 2L)
   expect_equal(sum(res$models$selected), 1L)
@@ -526,4 +579,18 @@ test_that("print() shows the grid and the charges, and summary() shows the rest"
   full <- paste(capture.output(summary(res)), collapse = "\n")
   expect_match(full, "Every model")
   expect_match(full, "Penalty schedule")
+})
+
+test_that("print() renders a grid larger than R's integer range", {
+  skip_on_cran()
+  # 31 binary axes is 2^31 points - a grid the GA searches perfectly well
+  # (it evaluates only its population), and one `%d` would refuse outright.
+  # The object is doctored rather than run: the point under test is the
+  # formatting, not a 2-billion-fit search.
+  res <- globalsearch_run()
+  res$space_size <- 2^31
+
+  out <- paste(capture.output(print(res)), collapse = "\n")
+  expect_match(out, "2,147,483,648 points", fixed = TRUE)
+  expect_no_match(out, "NA points", fixed = TRUE)
 })

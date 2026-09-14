@@ -180,7 +180,7 @@ ferx_ruvsearch <- function(model = NULL,
     .ferx_search_model_data(model, data, what)
   }
 
-  dir_arg <- .ferx_search_directory(directory, what)
+  dir_arg <- .ferx_search_directory(directory, what, resume)
   raw <- ferx_rust_ruvsearch(
     config_path     = config_path,
     model_path      = paths$model,

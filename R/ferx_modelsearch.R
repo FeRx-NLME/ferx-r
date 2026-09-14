@@ -176,7 +176,7 @@ ferx_modelsearch <- function(model = NULL,
     stop(what, ": `rank` must be a single string or NULL")
   }
 
-  dir_arg <- .ferx_search_directory(directory, what)
+  dir_arg <- .ferx_search_directory(directory, what, resume)
   raw <- ferx_rust_modelsearch(
     config_path  = config_path,
     model_path   = paths$model,

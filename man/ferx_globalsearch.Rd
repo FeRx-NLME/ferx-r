@@ -97,7 +97,10 @@ be resumed.}
 
 \item{resume}{Reuse the fits already journalled in \code{directory}. The
 genetic algorithm proposes the same genomes for the same \code{seed} on
-the same grid, which is what makes a resume reuse its journal.}
+the same grid, which is what makes a resume reuse its journal. Refused
+before the first fit when there is nothing to resume from - no
+\code{directory}, or a \code{directory} no earlier run wrote - rather
+than quietly searching from scratch.}
 
 \item{progress}{Print the engine's batch progress to the console.}
 
@@ -127,7 +130,10 @@ the search added to the criterion to reach the fitness.}
 when a degraded resume could not recover it.}
 \item{model_text}{Every evaluated model's text, named by model id.}
 \item{axes, space_size}{The grid: a named list of each axis's allele
-labels, and the number of points they multiply out to.}
+labels, and the number of points they multiply out to. A double
+rather than an integer, because the product of enough axes exceeds
+R's integer range while remaining a grid the genetic algorithm can
+search.}
 \item{generations}{The genetic algorithm's trajectory - \code{index},
 \code{best} (the model id), \code{best_fitness}, \code{mean_fitness},
 \code{polished} - or \code{NULL} for an exhaustive search.}
@@ -228,22 +234,35 @@ anything.
 
 \examples{
 \dontrun{
-ex <- ferx_example("warfarin_global")
+ex <- ferx_example("two_cpt_oral_global")
 
 # Inline: a small grid, enumerated exhaustively
 res <- ferx_globalsearch(
   model        = ex$model,
   data         = ex$data,
-  search_space = "PERIPHERALS(0..1); LAGTIME([OFF,ON])",
+  search_space = "PERIPHERALS(0..1); COVARIATE?(CL, WT, pow)",
   algorithm    = "exhaustive",
   directory    = "globalsearch-run-1"
 )
 res
 res$models[, c("id", "genome", "criterion", "charge_gate", "fitness", "rank")]
 
-# The genetic algorithm, on the bundled file
-res2 <- ferx_globalsearch(config = ex$search, directory = "globalsearch-run-2")
+# The genetic algorithm over the same grid, seeded so a resume can reuse
+# the journal it writes
+res2 <- ferx_globalsearch(
+  model        = ex$model,
+  data         = ex$data,
+  search_space = "PERIPHERALS(0..1); COVARIATE?(CL, WT, pow)",
+  algorithm    = "ga",
+  ga           = list(population_size = 8, generations = 3, seed = 1),
+  directory    = "globalsearch-run-2"
+)
 res2$generations
+
+# Reproducible: the bundled .ferxsearch is the artifact, and states the
+# whole search - a four-axis grid, enumerated, ranked on penalized fitness
+res3 <- ferx_globalsearch(config = ex$search, directory = "globalsearch-run-3")
+summary(res3)
 }
 
 }
