@@ -1491,6 +1491,39 @@
 
 ## Documentation
 
+- **`?ferx_fit`'s `[parameters]` syntax section no longer advertises a `(FIX)`
+  that the engine does not accept**
+  ([ferx-core #1377](https://github.com/FeRx-NLME/ferx-core/issues/1377)). Four
+  of the declarations in that section were never grammar: `theta
+  CL(0.134, 0.001, 10.0) (FIX)`, `theta CL (FIX) (0.134, 0.001, 10.0)`, `omega
+  ETA_CL ~ 0.07 (FIX)` and `omega ETA_CL (FIX) ~ 0.07`, plus the sentence
+  promising the same "flexible placement" for `sigma` and `kappa`. `FIX` is a
+  bare keyword - after a theta's closing paren, inside its argument list, or
+  after an omega/sigma/kappa value - and is never parenthesised. The section now
+  shows the forms that parse, including the `(sd)` scale tag, and says so
+  explicitly.
+
+  Measured against the engine before ferx-core #1377 (merge-base `257be39`) and
+  after it. Not one of the six was an error before: each did something silent
+  and wrong, which is why the help page went uncorrected for so long.
+
+  | documented spelling | before #1377 | after #1377 |
+  |---|---|---|
+  | `theta CL(0.134, 0.001, 10.0) (FIX)` | parses, **`fixed = false`** | parse error |
+  | `omega ETA_CL ~ 0.07 (FIX)` | parses, **`fixed = false`** | parse error |
+  | `sigma PROP ~ 0.04 (FIX)` | parses, **`fixed = false`** | parse error |
+  | `kappa KAPPA_CL ~ 0.04 (FIX)` | parses, **`fixed = false`** | parse error |
+  | `theta CL (FIX) (0.134, 0.001, 10.0)` | **ignored: no theta declared** | parse error |
+  | `omega ETA_CL (FIX) ~ 0.07` | **ignored: no omega declared** | parse error |
+
+  Up to 0.3.x a declaration was matched as a *prefix* of its line, so a trailing
+  `(FIX)` was dropped and the parameter the user meant to hold fixed was
+  estimated instead; a line matching no form at all was dropped whole, declaring
+  nothing. The file reported VALID either way. From 0.4.0 the line must be
+  consumed end to end by exactly one form, so all six are an `E_PARSE` naming
+  the offending line - anyone who copied them will now see an error where they
+  previously, and silently, got the wrong model.
+
 - **`?ferx_simulate` now says which predictive distribution it produces**
   ([#299](https://github.com/FeRx-NLME/ferx-r/issues/299)). `ferx_simulate()`
   draws a fresh set of random effects for every ID in the data in every
