@@ -988,7 +988,19 @@ columns \code{param}, \code{transform}, \code{estimate}, \code{se},
 \code{estimate_natural}, \code{lower_95_natural},
 \code{upper_95_natural}, \code{init_as_sd}, \code{weight}. SE-derived
 and natural-scale columns are \code{NA} when not applicable or when the
-covariance step was not run. \code{weight} carries the sample-size
+covariance step was not run. \code{lower_95}/\code{upper_95} are always
+the symmetric Wald interval on the scale \code{estimate} is reported on.
+For \code{"log"} and \code{"logit"} thetas the natural-scale columns
+back-transform that estimate and interval. A
+\code{"logit_probability"} theta is reported already on \eqn{(0, 1)}, so
+\code{estimate_natural} equals \code{estimate}; its natural-scale
+interval is instead formed on the logit scale - the standard error is
+carried there by the delta method, \eqn{se / (p (1 - p))} - and brought
+back through \code{inv_logit}, so it is asymmetric and always inside
+\eqn{(0, 1)}, unlike \code{lower_95}/\code{upper_95}, which on a
+probability need not be. It is the same interval the identical model
+declared on a \code{"logit"} theta reports.
+\code{weight} carries the sample-size
 weight expression of a weighted kappa row (see \code{kappa_weights})
 and is \code{NA} on every other row; on such a row \code{estimate} is
 the \emph{unweighted} variance, so the between-occasion SD at a weight

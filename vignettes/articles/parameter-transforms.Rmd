@@ -25,8 +25,9 @@ ferx supports three parameterisation styles for individual parameters:
 | **Logit-normal** | `P = inv_logit(logit(THETA_P) + ETA_P)` | Fractions/probabilities (F, bioavailability) — bounded (0, 1) |
 | **Additive** | `P = TVP + ETA_P` | Parameters with natural additive variability (lag time, threshold) |
 
-The optimiser always works on the unbounded or transformed scale; ferx
-back-transforms to the natural scale when reporting results.
+Which scale a theta is *reported* on follows from how you declared it, and
+`fit$estimates` says so in its `transform` column. Where the reported scale is
+not the natural one, the `*_natural` columns carry the back-transform.
 
 ---
 
@@ -105,54 +106,86 @@ When a parameter is a fraction bounded between 0 and 1, use `inv_logit` /
 F = inv_logit(logit(THETA_F) + ETA_F)
 ```
 
-`THETA_F` is specified on the natural (0, 1) scale in `[parameters]`; ferx
-maps it to the logit scale internally so the optimiser works on an unbounded
-space. The omega for `ETA_F` is the variance on the logit scale.
+`THETA_F` is specified on the natural (0, 1) scale in `[parameters]` — the
+initial value is the expected typical bioavailability, `0.70` for 70 % — and it
+is **reported on that same scale**. The `logit()` in the expression applies to
+`THETA_F` inside the model, so it is `ETA_F`, not the theta, that lives on the
+logit scale; the omega for `ETA_F` is a variance there.
+
+The `transform` the backend reports for this shape is `"logit_probability"`.
+That is a different thing from `"logit"`, which is what you get when the theta
+itself is declared on the logit scale:
+
+| Declared as | `transform` | `estimate` is | Typical initial |
+|---|---|---|---|
+| `F = inv_logit(logit(THETA_F) + ETA_F)` | `logit_probability` | the probability | `0.70` |
+| `F = inv_logit(THETA_F + ETA_F)` | `logit` | the logit of it | `0.847` |
+
+Both fit the same model and reach the same objective; they differ only in which
+number you type and which number comes back.
 
 ```{r logit-inspect}
-ex_logit <- ferx_example("warfarin_logit_f")
+ex_logit <- ferx_example("bioavailability")
 ferx_model_inspect(ex_logit$model)
 ```
 
 After fitting, `print()` shows:
 
-- `THETA_F` with `[logit scale]` and a 95 % CI back-transformed through
-  `inv_logit` so the CI is on the (0, 1) scale.
-- `ETA_F` with `[logit]`, `SD_logit`, and a ±1 SD interval on the (0, 1)
-  scale.
+- `THETA_F` with **no scale tag** — the estimate on the row is already the
+  typical bioavailability — followed by a `(95% CI)` line.
+- `ETA_F` with `[logit]`, `SD_logit`, and a ±1 SD interval on the (0, 1) scale,
+  centred on `logit(THETA_F)`.
 
 ```{r logit-fit, eval = FALSE}
 fit_logit <- ferx_fit(ex_logit$model, ex_logit$data)
 fit_logit
+# THETA
+# ------------------------------------------------------------
+# Parameter            Estimate           SE       %RSE
+# ----------------------------------------------------
+# TVCL                 5.713144     1.756373       30.7
+# TVV                 56.672404    17.132226       30.2
+# TVKA                 1.500092     0.073531        4.9
+# THETA_F              0.792359     0.248511       31.4
+#   (95% CI)                                       [0.1650, 0.9866]
+#
+# OMEGA  (between-subject variability)
+# ------------------------------------------------------------
+#   ETA_CL                   [log-normal]  = 0.068115  CV% = 26.5  SE = 0.022915
+#   ETA_F                    [logit]       = 0.156633  SD_logit = 0.3958  +/-1SD = [0.720, 0.850]  SE = 0.351608
 ```
 
-`fit$estimates` populates `estimate_natural`, `lower_95_natural`, and
-`upper_95_natural` for logit-transformed thetas. The CI is computed
-symmetrically on the logit scale and then back-transformed through `inv_logit`,
-giving an asymmetric interval on the (0, 1) scale:
-
-The `transform` value the backend reports for a logit-scaled theta is
-`"logit_probability"` (not `"logit"`):
+In `fit$estimates`, `estimate_natural` equals `estimate` — there is nothing to
+back-transform. The two interval pairs differ, and the difference is the point:
 
 ```{r logit-estimates, eval = FALSE}
 est <- fit_logit$estimates
-est[est$param == "THETA_F", ]
-#   param           transform   estimate     se  rse_pct  lower_95  upper_95  estimate_natural  lower_95_natural  upper_95_natural
-#   THETA_F  logit_probability   0.80197 0.00652   0.8136   0.78918   0.81476           0.69040           0.68766           0.69312
-# estimate         - logit scale (what the optimiser works with)
-# estimate_natural - inv_logit(estimate) = probability on (0, 1) scale
-# lower/upper_95_natural - asymmetric CI back-transformed to (0, 1)
-# (values captured from a real warfarin_logit_f fit)
+est["THETA_F", ]
+#   param          transform  estimate      se  rse_pct  lower_95  upper_95  estimate_natural  lower_95_natural  upper_95_natural
+#   THETA_F logit_probability   0.79236 0.24851   31.363   0.30528    1.2794           0.79236           0.16503           0.98661
 ```
+
+- `lower_95` / `upper_95` are the symmetric Wald interval on the scale the
+  estimate is reported on, exactly as for every other transform. On a
+  probability that interval is not constrained to (0, 1), and here it is not:
+  `upper_95` is `1.2794`.
+- `lower_95_natural` / `upper_95_natural` are formed where the parameter is
+  unbounded. The standard error is carried to the logit scale by the delta
+  method, `se / (p (1 - p))`, the interval is taken symmetrically there, and
+  `inv_logit()` brings it back. The result is asymmetric, always inside (0, 1),
+  and identical to what the same model declared on a `logit` theta reports.
+
+Use the `_natural` pair when quoting a confidence interval for a bounded
+parameter.
 
 The omega for `ETA_F` has `transform = "variance"` (variance on the logit
 scale, symmetric CI - same label as all omega rows; the bare ETA name is the
 parameter label):
 
 ```{r logit-omega, eval = FALSE}
-est[est$param == "ETA_F", ]
+est["ETA_F", ]
 #   param  transform  estimate      se  rse_pct  lower_95  upper_95  init_as_sd
-#   ETA_F   variance    0.1000  0.0633    63.3   -0.0240    0.2240       FALSE
+#   ETA_F   variance   0.15663 0.35161   224.48  -0.53252   0.84578       FALSE
 # lower_95 < 0 can occur with Wald CIs when RSE% is large; variance is
 # non-negative by definition but the symmetric Wald interval is not constrained.
 ```
@@ -246,5 +279,5 @@ expressions and applies the correct transform automatically.
 | Transform | Omega interpretation | Print label | `fit$estimates` columns |
 |---|---|---|---|
 | Log-normal | variance on log scale | `[log-normal]` + CV% | `transform = "variance"`, symmetric CI on log-var scale |
-| Logit-normal | variance on logit scale | `[logit]` + SD_logit + ±1 SD interval | `transform = "variance"`; logit theta gets `estimate_natural` etc. |
+| Logit-normal | variance on logit scale | `[logit]` + SD_logit + ±1 SD interval | `transform = "variance"`; the paired theta gets `estimate_natural` etc. |
 | Additive | variance in original units | `[additive]` + SD | `transform = "variance"`, symmetric CI in original units² |

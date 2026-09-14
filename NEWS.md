@@ -1084,6 +1084,59 @@
   The table is one row per subject, so a parameter that reads the `TIME`
   built-in is evaluated at `TIME = 0`; this is now documented in
   `?ferx_fit`.
+- **A `logit_probability` theta was back-transformed a second time on the way
+  out of the fit, and its confidence interval was not on a probability scale**
+  ([#371](https://github.com/FeRx-NLME/ferx-r/issues/371)).
+  `logit_probability` is the one transform label that means "the engine reports
+  this theta *already* on (0, 1)" - that is the point of the parameterisation -
+  but `.ferx_est_row()` handled it in the same branch as `logit` and applied
+  `inv_logit()` to it. The engine was right and correctly labelled throughout;
+  only the reporting was wrong. On the bundled `bioavailability` example the
+  estimated bioavailability is `0.7923592`, and `fit$estimates` reported
+  `estimate_natural` `0.6883377`; the same model written onto a genuine
+  logit-scale theta agreed with the engine, so the two parameterisations of one
+  model disagreed by 0.104 of a probability. `print()` compounded it, tagging
+  the row `[logit scale]` and printing a `(typical)` line of the same
+  double-transformed value - on `warfarin_logit_f`, whose typical `F` is
+  `0.0126`, it read `0.5032` with a 95 % CI of `[0.3339, 0.6717]`.
+
+  Such a theta is now reported as what it is. `estimate` and
+  `estimate_natural` are both the probability. `lower_95` / `upper_95` stay the
+  symmetric Wald interval on the reported scale, as for every other transform,
+  which on a probability is not constrained to (0, 1). The natural-scale
+  interval is formed where the parameter is unbounded instead: the standard
+  error is carried to the logit scale by the delta method, `se / (p (1 - p))`,
+  and the symmetric interval there is brought back through `inv_logit()`. On
+  `bioavailability` that is `[0.16503, 0.98661]`, against a `lower_95` /
+  `upper_95` of `[0.30528, 1.27944]` - the upper bound being a bioavailability
+  of 128 %. Written on a `logit` theta the identical model reports
+  `[0.16547, 0.98657]`, so the two parameterisations now agree on every
+  natural-scale column rather than only on the point estimate.
+
+  `print()` emits neither the scale tag nor a `(typical)` line for such a theta
+  - the row above already carries the probability - but gains a `(95% CI)` line
+  holding the interval above, which the old `(typical)` line's CI was standing
+  in for.
+
+  The `+/-1SD` range printed beside a `logit_probability` OMEGA row is fixed
+  with it: the eta is on the logit scale but the linked theta is not, so the
+  theta is now put on the logit scale before the eta SD is added. On
+  `bioavailability` that range moves from `[0.598, 0.766]`, which did not
+  contain the estimate, to `[0.720, 0.850]`, which does. Which conversion
+  applies is decided by the theta's own `transform` rather than by the eta's
+  label, since it is the theta whose scale is in question. A theta outside the
+  open interval, where the logit is not finite, prints `SD_logit` alone rather
+  than a range.
+
+  **For users:** a script reading `estimate_natural` for a `logit_probability`
+  theta previously got `inv_logit(estimate)` and now gets `estimate` itself,
+  and `lower_95_natural` / `upper_95_natural` move correspondingly. Nothing was
+  added or removed from `fit$estimates`; the values change. The correction also
+  reaches existing `.fitrx` files, since `ferx_load_fit()` recomputes the table
+  rather than storing it.
+
+  `vignettes/articles/parameter-transforms.Rmd` documented the old behaviour as
+  intended and has been rewritten against a real fit.
 
 - **NPDE / NPD now sample the occasion `kappa`**
   ([ferx-core #734](https://github.com/FeRx-NLME/ferx-core/issues/734)). The
