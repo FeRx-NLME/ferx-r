@@ -1858,6 +1858,7 @@ fn default_fit_result(
         sigma_init: Vec::new(),
         obs_time_range: None,
         final_gradient: None,
+        final_gradient_source: None,
         optimizer: "auto".to_string(),
         n_starts: 1,
         multi_start_seed: None,
@@ -2833,7 +2834,8 @@ fn fit_result_to_list(
         sigma_init = result.sigma_init.clone(),
         // obs_time_range: c(min_time, max_time) or NULL.
         obs_time_range = obs_time_range_robj,
-        // final_gradient: gradient at best-OFV point; NULL for BOBYQA/BFGS/GN/SAEM.
+        // final_gradient: optimizer gradient, or a post-fit FD gradient for BOBYQA
+        // (ferx-core #1380); NULL for built-in BFGS and SAEM.
         final_gradient = final_gradient_robj,
         // ── run-settings fields (ferx-core#172 Step 7) ────────────────────
         // optimizer: human-readable label string.
@@ -3694,6 +3696,7 @@ fn ferx_rust_sir(
         sigma_init: Vec::new(),
         obs_time_range: None,
         final_gradient: None,
+        final_gradient_source: None,
         optimizer: "auto".to_string(),
         n_starts: 1,
         multi_start_seed: None,
@@ -4107,6 +4110,7 @@ fn ferx_rust_covariance(
         sigma_init: Vec::new(),
         obs_time_range: None,
         final_gradient: None,
+        final_gradient_source: None,
         optimizer: "auto".to_string(),
         n_starts: 1,
         multi_start_seed: None,

@@ -2,6 +2,32 @@
 
 ## Breaking changes
 
+- **A `.ferx` `[parameters]` line that ferx-core used to ignore is now an error**
+  ([ferx-core #1377](https://github.com/FeRx-NLME/ferx-core/issues/1377),
+  [ferx-core #1388](https://github.com/FeRx-NLME/ferx-core/pull/1388)). Every
+  line must be consumed end to end by exactly one declaration. Before, trailing
+  or leading text, a misspelt scale tag, a stray line, or a `;` comment was
+  dropped with `ferx_model_validate()` reporting the model valid. The most
+  consequential case: a scale tag on a block, as in
+  `block_omega (ETA_CL, ETA_V) = [...] (sd)`, now fails with
+  `E_BLOCK_VARIANCE_ONLY` and a repair suggestion; before, it was read as
+  variances. A non-numeric `theta` bound (`theta CL(50, 0.001-10.0)`) is an
+  error rather than the default bound. `;` does not start a comment in a
+  `.ferx` file; use `#` (accepting `;` is
+  [ferx-core #1393](https://github.com/FeRx-NLME/ferx-core/issues/1393)).
+  None of the bundled `inst/examples/models` changes.
+
+- **The reported OFV can be lower on a fit whose empirical Bayes estimates
+  depend on their starting point**
+  ([ferx-core #833](https://github.com/FeRx-NLME/ferx-core/issues/833),
+  [#1349](https://github.com/FeRx-NLME/ferx-core/issues/1349)). The final inner
+  loop re-derived the EBEs from a cold start, so on a multimodal individual
+  objective the reported OFV (and AIC, BIC and the covariance step) could sit
+  above the point the optimizer had found: +3.5 on a fluconazole binding model,
+  +6.96 on the FREM warfarin fixture. It now keeps whichever EBE set scores
+  lower, and says so with the new `ebe_start_dependent` warning. A FREM inner
+  restart also no longer resets covariate etas to zero.
+
 - **A `block_omega` declared beside a separate diagonal `omega` now fits the
   model it declares, so estimates, OFV, AIC and BIC of such a fit change**
   ([ferx-core #1018](https://github.com/FeRx-NLME/ferx-core/issues/1018),
@@ -235,6 +261,23 @@
   (`one_cpt_iv_pooled`, `binary_logistic`) request `focei` and are unaffected.
 
 ## New features
+
+- **`fit$final_gradient` is now reported for derivative-free fits too**
+  ([ferx-core #997](https://github.com/FeRx-NLME/ferx-core/issues/997),
+  [#1380](https://github.com/FeRx-NLME/ferx-core/pull/1380)). A BOBYQA run,
+  which `optimizer = "auto"` picks for ODE models, used to return `NULL`; it
+  now carries a finite-difference gradient computed at the reported estimates,
+  so `converged` can be checked where it is least trustworthy. It is still
+  `NULL` for the built-in BFGS and SAEM, and `report_final_gradient = false` in
+  `[fit_options]` turns the extra evaluations off.
+
+- **Two new warning categories with guidance in `ferx_get_warnings()`**:
+  `stalled_at_init`, when a fit never left its initial estimates, so its OFV
+  describes the starting values even if `converged` is `TRUE`
+  ([ferx-core #1380](https://github.com/FeRx-NLME/ferx-core/pull/1380)); and
+  `ebe_start_dependent`, when the EBEs, and every diagnostic built on them,
+  depend on where the inner loop starts
+  ([ferx-core #1386](https://github.com/FeRx-NLME/ferx-core/pull/1386)).
 
 - **`ferx_globalsearch()` - global model search from R**
   ([#364](https://github.com/FeRx-NLME/ferx-r/issues/364), option 3 of
@@ -1103,6 +1146,17 @@
   default package build.
 
 ## Bug fixes
+
+- **A fit whose objective is `NaN`, infinite, or the divergence sentinel is no
+  longer reported as `converged = TRUE`**
+  ([ferx-core #1303](https://github.com/FeRx-NLME/ferx-core/issues/1303)). It
+  now carries a critical `convergence` warning naming which of the three it was.
+  The estimates and per-subject diagnostics are still returned, to help find
+  the offending record.
+
+- **A lagged dose arriving exactly on a covariate-changing record no longer
+  gives an ODE model an invalid eta gradient**
+  ([ferx-core #1068](https://github.com/FeRx-NLME/ferx-core/issues/1068)).
 
 - **`fit$individual_estimates` reported `CL`'s value for an unbound analytical
   parameter, and class-1 values for every subject of a mixture model**

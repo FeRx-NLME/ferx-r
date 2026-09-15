@@ -274,13 +274,14 @@ test_that(".ferx_warning_guidance returns negative-autocorrelation guidance", {
     "absorption_twin_declined", "bloq_method", "boundary_estimate", "cancelled",
     "condition_number", "convergence", "covariance_failed",
     "covariance_regularized", "covariance_step", "data_quality",
-    "dw_autocorrelation", "eps_shrinkage", "eta_normality", "eta_shrinkage",
+    "dw_autocorrelation", "ebe_start_dependent", "eps_shrinkage",
+    "eta_normality", "eta_shrinkage",
     "experimental", "flat_parameter", "flip_flop", "gradient_fallback",
     "high_correlation", "importance_sampling", "inflated_rse",
     "init_outside_bounds", "mu_referencing",
     "multi_start", "ode_solver", "omega_structure", "optimizer_config",
     "optimizer_health", "parameter_at_runaway_guard", "simulation", "sir",
-    "threads", "vi_bad_basin"
+    "stalled_at_init", "threads", "vi_bad_basin"
   )
 }
 

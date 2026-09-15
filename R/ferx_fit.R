@@ -887,8 +887,16 @@
 #'     header.}
 #'   \item{final_gradient}{Numeric vector containing the gradient of the
 #'     objective function at the best-OFV parameter point (packed space:
-#'     log-theta, Cholesky-omega, log-sigma). \code{NULL} for derivative-free
-#'     optimizers (BOBYQA), built-in BFGS, Gauss-Newton, and SAEM. Use
+#'     log-theta, Cholesky-omega, log-sigma). For a gradient-based NLopt
+#'     optimizer, trust-region or Gauss-Newton it is the optimizer's own
+#'     gradient. For a derivative-free NLopt run (BOBYQA, which
+#'     \code{optimizer = "auto"} picks for ODE models) it is a central
+#'     finite-difference gradient computed after the fit at the reported
+#'     estimates, so \code{converged} can be checked there too (ferx-core
+#'     #1380). That costs one gradient's worth of extra objective
+#'     evaluations; \code{report_final_gradient = false} in
+#'     \code{[fit_options]} turns it off. \code{NULL} for the built-in BFGS and
+#'     for SAEM. Use
 #'     \code{\link{ferx_runlog}} to interpret with a convergence threshold.}
 #'   \item{optimizer_label}{Human-readable label for the outer optimizer used
 #'     (e.g. \code{"LBFGS"}, \code{"BOBYQA"}). Mirrors the \code{optimizer}
