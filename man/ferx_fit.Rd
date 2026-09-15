@@ -1250,7 +1250,7 @@ check \code{fit$gradient_used} if it matters.
 \strong{Theta (fixed effects):}
 \preformatted{
   theta CL(0.134, 0.001, 10.0)          # (initial, lower, upper)
-  theta CL(0.1, 0.001)                  # lower-bound only (no upper bound)
+  theta CL(0.1, 0.001)                  # lower bound only (upper defaults to 1e9)
   theta CL(0.134, 0.001, 10.0) FIX      # fixed: bare FIX after the closing paren
   theta CL(0.134, 0.001, 10.0, FIX)     # fixed: bare FIX inside the argument list
 }
@@ -1278,7 +1278,9 @@ parsed with the \code{(FIX)} thrown away - so the parameter the user
 meant to hold fixed was estimated instead.
 \item \code{theta CL (FIX) (0.134, 0.001, 10.0)} and \code{omega ETA_CL
     (FIX) ~ 0.07} were worse still: the line matched no form at all, so it
-was ignored outright and \strong{no parameter was declared}.
+was ignored outright and \strong{no parameter was declared}. The model
+still parsed, so every reference to that name silently resolved to
+something other than the parameter the user wrote.
 }
 
 Up to ferx-core 0.3.x a declaration was matched as a \emph{prefix} of its

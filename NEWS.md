@@ -1519,7 +1519,8 @@
   Up to 0.3.x a declaration was matched as a *prefix* of its line, so a trailing
   `(FIX)` was dropped and the parameter the user meant to hold fixed was
   estimated instead; a line matching no form at all was dropped whole, declaring
-  nothing. The file reported VALID either way. From 0.4.0 the line must be
+  nothing, while the model still parsed and every reference to that name
+  resolved to something else. The file reported VALID either way. From 0.4.0 the line must be
   consumed end to end by exactly one form, so all six are an `E_PARSE` naming
   the offending line - anyone who copied them will now see an error where they
   previously, and silently, got the wrong model.
