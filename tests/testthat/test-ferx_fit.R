@@ -224,6 +224,21 @@ test_that("$model_name falls back to basename when engine returns Unnamed", {
   fit <- warfarin_fit()
   expect_equal(fit$model_name, "warfarin")
 })
+test_that("$model_name comes from a top-level `model <name>` line when present", {
+  # #367 read the fallback above as the only behaviour and concluded the name
+  # was always the filename. The engine reads a bare `model <name>` line - it
+  # is not a `[block]`, which is why it is absent from the block registry and
+  # from every bundled example.
+  ex   <- ferx_example("warfarin")
+  path <- withr::local_tempfile(fileext = ".ferx")
+  writeLines(c("model warfarin_pk", readLines(ex$model)), path)
+  fit <- suppressWarnings(ferx_fit(path, ex$data, covariance = FALSE,
+                                   verbose = FALSE,
+                                   settings = list(maxiter = 5L)))
+  expect_equal(fit$model_name, "warfarin_pk")
+  expect_false(identical(fit$model_name,
+                         tools::file_path_sans_ext(basename(path))))
+})
 test_that("$sdtab is a data frame", {
   fit <- warfarin_fit()
   expect_s3_class(fit$sdtab, "data.frame")
@@ -252,6 +267,43 @@ test_that("$sdtab does not contain ETA columns (ETAs live in ebe_etas)", {
   eta_pattern <- "^ETA_|^ETA[0-9]"
   eta_cols <- grep(eta_pattern, names(fit$sdtab), value = TRUE)
   expect_length(eta_cols, 0L)
+})
+test_that("an eta named in [output] is reported, not silently dropped", {
+  # #367: the engine downgrades an eta in `[output]` to `W_OUTPUT_DUPLICATE`,
+  # but that warning is raised by its validation pass, which `fit()` does not
+  # run - so the requested column was simply absent with nothing said. A theta
+  # in the same position is a hard error, which is what made the silence
+  # surprising.
+  ex   <- ferx_example("warfarin")
+  path <- withr::local_tempfile(fileext = ".ferx")
+  writeLines(c(readLines(ex$model), "", "[output]", "  ETA_CL"), path)
+
+  fit <- suppressWarnings(ferx_fit(path, ex$data, covariance = FALSE,
+                                   verbose = FALSE,
+                                   settings = list(maxiter = 5L)))
+  expect_false("ETA_CL" %in% names(fit$sdtab))
+  ws <- fit$warnings_structured
+  expect_true("output" %in% ws$category)
+  msg <- ws$message[ws$category == "output"]
+  expect_true(grepl("ETA_CL", msg, fixed = TRUE))
+  expect_true(grepl("ebe_etas", msg, fixed = TRUE))
+  # The per-subject values the user was after are on the fit.
+  expect_true("ETA_CL" %in% names(fit$ebe_etas))
+
+  # It must also reach the flat vector: that is what `ferx_save_fit()` writes,
+  # and a loaded fit has no structured table to fall back on - a warning about
+  # a silently missing column must not itself go missing across a round trip.
+  expect_true(any(grepl("ETA_CL", fit$warnings, fixed = TRUE)))
+  bundle <- withr::local_tempfile(fileext = ".fitrx")
+  ferx_save_fit(fit, bundle)
+  loaded <- ferx_load_fit(bundle)
+  expect_true(any(grepl("named in [output]", loaded$warnings, fixed = TRUE)))
+  expect_true(any(grepl("ETA_CL", ferx_get_warnings(loaded)$message, fixed = TRUE)))
+
+  # The printed form carries the category's guidance line, which is what the
+  # user actually reads when the column they asked for is not there.
+  out <- capture.output(ferx_get_warnings(fit))
+  expect_true(any(grepl("produced no sdtab column", out, fixed = TRUE)))
 })
 test_that("$sdtab has one row per observation", {
   fit <- warfarin_fit()
@@ -3143,6 +3195,40 @@ test_that("a block_omega beside a diagonal omega keeps the cross covariances at 
   expect_equal(full$n_parameters, 10L)
   expect_gt(abs(full$omega[["ETA_KA", "ETA_CL"]]), 1e-3)
   expect_gt(abs(fit$ofv - full$ofv), 1.0)
+})
+
+# The same fixture, read through `cov_matrix` (#367). The engine packs a block
+# omega's rows as the lower triangle COLUMN-major - the packing `se_omega` is
+# documented with and `.omega_se_at()` indexes - but the dimnames were built
+# row-major, so on this 3x3 block two labels sat on the wrong rows: the held
+# (KA,CL) covariance was labelled `ETA_V,ETA_V`, reporting an estimated
+# variance as exactly zero.
+test_that("cov_matrix labels a block omega's rows in the order it stores them", {
+  ex  <- ferx_example("warfarin_block_omega")
+  fit <- suppressWarnings(ferx_fit(ex$model, ex$data, verbose = FALSE))
+  skip_if(is.null(fit$cov_matrix), "covariance step did not produce a matrix")
+
+  d <- diag(fit$cov_matrix)
+  expect_true(all(
+    c("ETA_CL,ETA_CL", "ETA_V,ETA_CL", "ETA_KA,ETA_CL",
+      "ETA_V,ETA_V", "ETA_KA,ETA_V", "ETA_KA,ETA_KA") %in% names(d)
+  ))
+  # The partial block holds (KA,CL) and (KA,V) at zero; every declared
+  # parameter is estimated, so no *variance* row may be zero.
+  expect_identical(unname(d[["ETA_KA,ETA_CL"]]), 0)
+  expect_identical(unname(d[["ETA_KA,ETA_V"]]), 0)
+  expect_gt(d[["ETA_V,ETA_V"]], 0)
+  expect_gt(d[["ETA_CL,ETA_CL"]], 0)
+  expect_gt(d[["ETA_KA,ETA_KA"]], 0)
+
+  # `se_omega` is packed in that same order, so the held entries - the only
+  # zeros either vector carries - have to line up slot for slot.
+  om_rows <- grep(",", names(d), fixed = TRUE, value = TRUE)
+  expect_equal(length(om_rows), length(fit$se_omega))
+  expect_identical(which(unname(d[om_rows]) == 0), which(fit$se_omega == 0))
+
+  # cor_matrix inherits the dimnames, so it moves with them.
+  expect_identical(rownames(fit$cor_matrix), rownames(fit$cov_matrix))
 })
 
 # A `block_omega (ETA_CL, ETA_V)` beside a diagonal `omega ETA_KA` has structural
