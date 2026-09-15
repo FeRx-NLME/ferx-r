@@ -270,16 +270,8 @@ ferx_covariance <- function(fit,
     omega_names <- if (n_omega_packed == n_eta) {
       if (!is.null(eta_nms)) eta_nms else paste0("OMEGA(", seq_len(n_eta), ",", seq_len(n_eta), ")")
     } else {
-      # Block lower-triangle: L(i,j) for i >= j, column-major.
-      nm <- character(max(n_omega_packed, 0L))
-      k <- 0L
-      for (i in seq_len(n_eta)) {
-        for (j in seq_len(i)) {
-          k <- k + 1L
-          nm[k] <- if (!is.null(eta_nms)) sprintf("%s,%s", eta_nms[i], eta_nms[j]) else sprintf("OMEGA(%d,%d)", i, j)
-        }
-      }
-      nm
+      # Block lower-triangle: L(i,j) for i >= j, column-major (#367).
+      .ferx_omega_block_labels(n_eta, eta_nms)
     }
     pnames <- c(
       theta_names,

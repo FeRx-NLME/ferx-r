@@ -475,6 +475,7 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
     threads            = "Thread-pool sizing note. Consider matching threads to the subject count.",
     cancelled          = "The fit was cancelled before completion.",
     unused_parameter   = "A declared parameter is never referenced in [individual_parameters] or [error_model]. Remove it from [parameters] or complete the expression that uses it.",
+    output             = "A name in [output] produced no sdtab column. Drop it from the block, or read the quantity where it does live (etas: fit$ebe_etas).",
     NULL
   )
 }

@@ -597,3 +597,82 @@ test_that(".ferx_iov_labels() leaves an unweighted model's kappa names bare", {
   )
   expect_equal(.ferx_iov_labels(list(iov = NULL)), character(0))
 })
+
+# -- Block-omega labels for cov_matrix (#367) ---------------------------------
+#
+# The engine packs a block omega's rows column-major; labelling them row-major
+# put `ETA_V,ETA_V` on the row holding the held (KA,CL) covariance, so an
+# estimated variance read as exactly zero.
+
+test_that(".ferx_omega_block_labels() walks the lower triangle column-major", {
+  expect_equal(
+    .ferx_omega_block_labels(3L, c("ETA_CL", "ETA_V", "ETA_KA")),
+    c("ETA_CL,ETA_CL", "ETA_V,ETA_CL", "ETA_KA,ETA_CL",
+      "ETA_V,ETA_V",   "ETA_KA,ETA_V",
+      "ETA_KA,ETA_KA")
+  )
+})
+
+test_that(".ferx_omega_block_labels() indexes the same slots as .omega_se_at()", {
+  n <- 4L
+  nms <- .ferx_omega_block_labels(n)
+  # Position k of the packed vector must be the element `.omega_se_at()` reads
+  # back for the coordinates that label spells out - that equivalence is the
+  # whole contract between the labels and `se_omega`.
+  se <- seq_along(nms)
+  for (k in seq_along(nms)) {
+    ij <- as.integer(regmatches(nms[k], gregexpr("[0-9]+", nms[k]))[[1]])
+    expect_identical(.omega_se_at(se, n, ij[1], ij[2]), se[k])
+  }
+})
+
+test_that(".ferx_omega_block_labels() falls back to OMEGA(i,j) without names", {
+  expect_equal(
+    .ferx_omega_block_labels(2L),
+    c("OMEGA(1,1)", "OMEGA(2,1)", "OMEGA(2,2)")
+  )
+  expect_equal(.ferx_omega_block_labels(0L), character(0))
+})
+
+# -- [output] columns the fit did not deliver (#367) --------------------------
+
+test_that(".ferx_dropped_output_warning() flags an eta named in [output]", {
+  fit <- list(
+    model_text = paste(c("[output]", "  WT ETA_CL", "[error_model]", "  y = f"),
+                       collapse = "\n"),
+    sdtab      = data.frame(ID = 1, TIME = 0, WT = 70),
+    eta_names  = c("ETA_CL", "ETA_V")
+  )
+  msg <- .ferx_dropped_output_warning(fit)
+  expect_true(grepl("`ETA_CL`", msg, fixed = TRUE))
+  expect_true(grepl("fit$ebe_etas", msg, fixed = TRUE))
+  # The covariate that did arrive is not reported.
+  expect_false(grepl("WT", msg, fixed = TRUE))
+})
+
+test_that(".ferx_dropped_output_warning() is silent when every column arrived", {
+  fit <- list(
+    model_text = paste(c("[output]", "  WT", "  AGE"), collapse = "\n"),
+    sdtab      = data.frame(ID = 1, wt = 70, AGE = 40),  # case-insensitive match
+    eta_names  = character(0)
+  )
+  expect_null(.ferx_dropped_output_warning(fit))
+})
+
+test_that(".ferx_dropped_output_warning() needs a block and model text", {
+  expect_null(.ferx_dropped_output_warning(list(model_text = NULL)))
+  expect_null(.ferx_dropped_output_warning(
+    list(model_text = "[error_model]\n  y = f", sdtab = data.frame(ID = 1))
+  ))
+})
+
+test_that("a dropped [output] column becomes a structured warning row", {
+  fit <- list(
+    model_text = "[output]\n  ETA_CL",
+    sdtab      = data.frame(ID = 1, TIME = 0),
+    eta_names  = "ETA_CL"
+  )
+  ws <- .ferx_assemble_structured_warnings(list(), fit)
+  expect_true("output" %in% ws$category)
+  expect_identical(ws$severity[ws$category == "output"], "warning")
+})
