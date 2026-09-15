@@ -289,6 +289,16 @@ test_that("an eta named in [output] is reported, not silently dropped", {
   expect_true(grepl("ebe_etas", msg, fixed = TRUE))
   # The per-subject values the user was after are on the fit.
   expect_true("ETA_CL" %in% names(fit$ebe_etas))
+
+  # It must also reach the flat vector: that is what `ferx_save_fit()` writes,
+  # and a loaded fit has no structured table to fall back on - a warning about
+  # a silently missing column must not itself go missing across a round trip.
+  expect_true(any(grepl("ETA_CL", fit$warnings, fixed = TRUE)))
+  bundle <- withr::local_tempfile(fileext = ".fitrx")
+  ferx_save_fit(fit, bundle)
+  loaded <- ferx_load_fit(bundle)
+  expect_true(any(grepl("named in [output]", loaded$warnings, fixed = TRUE)))
+  expect_true(any(grepl("ETA_CL", ferx_get_warnings(loaded)$message, fixed = TRUE)))
 })
 test_that("$sdtab has one row per observation", {
   fit <- warfarin_fit()

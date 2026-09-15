@@ -375,22 +375,31 @@
   hdr <- sprintf("  %4s  %13s  %13s", "ITER", ofv_label, dofv_label)
   bar <- sprintf("  %4s  %13s  %13s", "----", "-------------", "-------------")
 
-  add_col <- function(label, w) {
-    hdr <<- paste0(hdr, sprintf(paste0("  %", w, "s"), label))
-    bar <<- paste0(bar, sprintf(paste0("  %", w, "s"), strrep("-", w)))
-  }
-
-  if (!is_saem) {
-    if (show_grad) add_col("GRAD_NORM", 11)
-    if (show_step) add_col("STEP_NORM", 11)
-    if (show_lm)   add_col("LM_LAMBDA", 11)
-    if (show_acc)  add_col("ACC",        5)
+  # Optional columns in display order, as (label, width) pairs. Collecting them
+  # first and folding once keeps the header and its underline derived from a
+  # single list - the two used to be grown side by side through `<<-`, which is
+  # what the linter objects to and what would let them drift apart.
+  opt_cols <- if (!is_saem) {
+    list(
+      if (show_grad) list("GRAD_NORM", 11L),
+      if (show_step) list("STEP_NORM", 11L),
+      if (show_lm)   list("LM_LAMBDA", 11L),
+      if (show_acc)  list("ACC",        5L)
+    )
   } else {
-    if (show_saem_phase) add_col("PHASE",     10)
-    if (show_gamma)      add_col("GAMMA",      9)
-    if (show_mh)         add_col("MH_ACCEPT",  9)
+    list(
+      if (show_saem_phase) list("PHASE",     10L),
+      if (show_gamma)      list("GAMMA",      9L),
+      if (show_mh)         list("MH_ACCEPT",  9L)
+    )
   }
-  if (show_ebe) add_col("EBE_WARN", 8)
+  opt_cols <- c(opt_cols, list(if (show_ebe) list("EBE_WARN", 8L)))
+  for (col in Filter(Negate(is.null), opt_cols)) {
+    w   <- col[[2L]]
+    fmt <- paste0("  %", w, "s")
+    hdr <- paste0(hdr, sprintf(fmt, col[[1L]]))
+    bar <- paste0(bar, sprintf(fmt, strrep("-", w)))
+  }
 
   # Helpers
   na_w  <- function(w) sprintf(paste0("%", w, "s"), "NA")
@@ -862,10 +871,23 @@
   result$model_hash <- empty_to_null(result$model_hash) %||% NA_character_
   result$data_hash <- empty_to_null(result$data_hash) %||% NA_character_
 
+  # The dropped-`[output]` finding also goes into the flat vector, not only the
+  # structured table: `fit$warnings` is what `ferx_save_fit()` serialises, and
+  # `ferx_load_fit()` does not restore `warnings_structured`, so a
+  # structured-only row would vanish across a `.fitrx` round trip - a warning
+  # about a silently missing column going silently missing itself. Deduplicated
+  # by exact string so a future engine-side `W_OUTPUT_DUPLICATE` cannot double
+  # it up with an identical message.
+  do_msg <- .ferx_dropped_output_warning(result)
+  if (!is.null(do_msg)) {
+    result$warnings <- unique(c(result$warnings, do_msg))
+  }
+
   # Assemble the structured-warning table. Core supplies severity/category for
   # every warning it emitted (including Durbin-Watson autocorrelation); the R
   # side appends only the diagnostics it computes itself (condition number,
-  # ETA normality). No string re-parsing of core messages happens here.
+  # ETA normality, dropped `[output]` columns). No string re-parsing of core
+  # messages happens here.
   result$warnings_structured <- .ferx_assemble_structured_warnings(raw, result)
 
   # Reconstruct the per-iteration IMPMAP parameter trace as a data.frame.
