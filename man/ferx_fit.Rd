@@ -479,7 +479,9 @@ avoids grinding on noisy ODE / FD-inner objectives, where \code{1e-8} is
 unreachable. Set an explicit value to pin it for every model.}
 \item{\code{global_search}}{Logical. When \code{TRUE}, run a global
 search phase before local refinement (default \code{FALSE}).
-Not accepted by pure \code{"gn"}.}
+Not accepted by pure \code{"gn"}. This is a wider search for the
+parameter values of \emph{this} model, and is unrelated to
+\code{\link{ferx_globalsearch}}, which searches over \emph{models}.}
 \item{\code{global_maxeval}}{Function evaluations budget for the global
 search phase, read only when \code{global_search = TRUE}. The default
 \code{0} does not mean "no budget": it selects an automatic one of
@@ -935,8 +937,16 @@ observations. Used by \code{\link{ferx_runlog}} for the data-summary
 header.}
 \item{final_gradient}{Numeric vector containing the gradient of the
 objective function at the best-OFV parameter point (packed space:
-log-theta, Cholesky-omega, log-sigma). \code{NULL} for derivative-free
-optimizers (BOBYQA), built-in BFGS, Gauss-Newton, and SAEM. Use
+log-theta, Cholesky-omega, log-sigma). For a gradient-based NLopt
+optimizer, trust-region or Gauss-Newton it is the optimizer's own
+gradient. For a derivative-free NLopt run (BOBYQA, which
+\code{optimizer = "auto"} picks for ODE models) it is a central
+finite-difference gradient computed after the fit at the reported
+estimates, so \code{converged} can be checked there too (ferx-core
+#1380). That costs one gradient's worth of extra objective
+evaluations; \code{report_final_gradient = false} in
+\code{[fit_options]} turns it off. \code{NULL} for the built-in BFGS and
+for SAEM. Use
 \code{\link{ferx_runlog}} to interpret with a convergence threshold.}
 \item{optimizer_label}{Human-readable label for the outer optimizer used
 (e.g. \code{"LBFGS"}, \code{"BOBYQA"}). Mirrors the \code{optimizer}
@@ -1258,20 +1268,45 @@ check \code{fit$gradient_used} if it matters.
 \strong{Theta (fixed effects):}
 \preformatted{
   theta CL(0.134, 0.001, 10.0)          # (initial, lower, upper)
-  theta CL(0.1, 0.001)                  # lower-bound only (no upper bound)
-  theta CL(0.134, 0.001, 10.0) (FIX)    # FIX at end (traditional)
-  theta CL (FIX) (0.134, 0.001, 10.0)   # FIX anywhere (flexible placement)
+  theta CL(0.1, 0.001)                  # lower bound only (upper defaults to 1e9)
+  theta CL(0.134, 0.001, 10.0) FIX      # fixed: bare FIX after the closing paren
+  theta CL(0.134, 0.001, 10.0, FIX)     # fixed: bare FIX inside the argument list
 }
 
 \strong{Omega (inter-individual variability):}
 \preformatted{
   omega ETA_CL ~ 0.07           # variance parameterisation (default)
-  omega ETA_CL ~ 0.07 (FIX)    # fixed omega, FIX at end
-  omega ETA_CL (FIX) ~ 0.07    # fixed omega, FIX before the tilde
+  omega ETA_CL ~ 0.07 FIX       # fixed omega
+  omega ETA_CL ~ 0.26 (sd)      # initial value given on the SD scale
+  omega ETA_CL ~ 0.26 (sd) FIX  # both; FIX may also precede the tag
 }
 
-The same flexible \code{(FIX)} placement applies to \code{sigma} and
-\code{kappa} (IOV) declarations.
+The same forms apply to \code{sigma} and \code{kappa} (IOV) declarations.
+
+\strong{\code{FIX} is a bare keyword, never parenthesised.} Earlier versions
+of this page showed \code{(FIX)}, and a \code{FIX} placed before the
+\code{~} or before a theta's argument list. None of it is grammar. Measured
+against the engine as it stood before ferx-core #1377 and after it, not one
+of those spellings was an error: each did something silent and wrong.
+
+\itemize{
+\item \code{theta CL(0.134, 0.001, 10.0) (FIX)}, \code{omega ETA_CL ~
+    0.07 (FIX)}, and the same shape on \code{sigma} and \code{kappa},
+parsed with the \code{(FIX)} thrown away - so the parameter the user
+meant to hold fixed was estimated instead.
+\item \code{theta CL (FIX) (0.134, 0.001, 10.0)} and \code{omega ETA_CL
+    (FIX) ~ 0.07} were worse still: the line matched no form at all, so it
+was ignored outright and \strong{no parameter was declared}. The model
+still parsed, so every reference to that name silently resolved to
+something other than the parameter the user wrote.
+}
+
+Up to ferx-core 0.3.x a declaration was matched as a \emph{prefix} of its
+line, and a line matching no form at all was dropped without a diagnostic -
+the file reported VALID either way. From 0.4.0 a \code{[parameters]} line
+must be consumed end to end by exactly one declaration form, so all six
+spellings are now reported as \code{E_PARSE} with the offending line quoted
+(ferx-core #1377).
 
 \strong{Unused-parameter warning:} a \code{warning} severity message with
 category \code{"unused_parameter"} is emitted by the parser when a

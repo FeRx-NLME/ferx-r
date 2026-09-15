@@ -438,6 +438,13 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
   }
   switch(category,
     convergence        = "Optimizer did not reach convergence. Try different initial values, method = c(\"saem\", \"focei\"), or settings = list(n_starts = 4L).",
+    # ferx-core #1380. Emitted even when `converged` is TRUE: a fit that never
+    # moved has a flat objective trace to plateau on, so the flag cannot be
+    # trusted by itself. The engine suppresses it for an evaluation-only run.
+    stalled_at_init    = "The fit never left its initial estimates, so the reported OFV is the objective of the starting values and says nothing about the model, even if converged is TRUE. Check fit$final_gradient, try different initial estimates, or a gradient-based optimizer if this fit used a derivative-free one.",
+    # ferx-core #1386. The reported fit already uses the better of the two EBE
+    # sets; the warning is about how far the EBE-derived output can be trusted.
+    ebe_start_dependent = "The empirical Bayes estimates depend on where the inner loop starts, so IPRED, IWRES, CWRES, shrinkage and the covariance step do too. Raise settings = list(inner_maxiter = 500L) to rule out an inner budget a cold start cannot finish within, or inner_restarts for a suspected second mode.",
     condition_number   = "Parameters are correlated/ill-scaled. Consider fixing or removing a parameter, or reparameterising.",
     optimizer_health   = "Optimizer struggled (trust region / Hessian). Inspect the trace and consider better starting values.",
     vi_bad_basin       = "VI's final ELBO check found that the flat objective is a bad basin, not a usable variational approximation. Refit from different initial values, raise settings = list(n_starts = 4L), or use method = \"focei\".",

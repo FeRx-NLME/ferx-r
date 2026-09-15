@@ -57,6 +57,11 @@
 #'     and CRCL relations rather than being asked about ones the base already
 #'     carries, and \code{\link{ferx_allometry}} can scale it without counting
 #'     body size twice. Ships its own \code{.ferxsearch} as \code{$search}}
+#'   \item{two_cpt_oral_global}{A \emph{one}-compartment, covariate-free model
+#'     on the same dataset - under-specified on both axes at once, which is
+#'     what \code{\link{ferx_globalsearch}} decides together rather than one
+#'     at a time. Ships a \code{.ferxsearch} laying the structural and
+#'     covariate statements out as one grid as \code{$search}}
 #'   \item{three_cpt_iv}{Three-compartment IV bolus}
 #'   \item{three_cpt_oral}{Three-compartment oral (analytical \code{three_cpt_oral})}
 #'   \item{one_cpt_iv_ode, warfarin_ode, two_cpt_iv_ode, two_cpt_oral_cov_ode,
@@ -411,6 +416,11 @@ ferx_example <- function(name = NULL) {
     # The covariate-free base of two_cpt_oral_cov: same dataset, so a search
     # that adds WT / CRCL relations is comparable with the model that has them.
     two_cpt_oral_base       = "two_cpt_oral_cov",
+
+    # The global search's starting model: one compartment and no covariates on
+    # the same dataset, so the grid it searches is comparable with the model
+    # the stepwise tools reach one axis at a time.
+    two_cpt_oral_global     = "two_cpt_oral_cov",
 
     # ODE-form siblings of the standard analytical models share their
     # analytical counterpart's dataset, so the two can be verified to give

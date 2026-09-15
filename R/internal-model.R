@@ -199,8 +199,10 @@ ferx_section_headers <- function(lines) {
 # The `= [` is required, as it is in the engine's regex. Without it, a header
 # line whose values start on the *next* line - which `join_bracketed_lines()`
 # does not rejoin, since that line carries no `[` - would be read here as a
-# declaration the engine ignores, and this function would report etas the
-# fitted model does not have. A genuinely multi-line block keeps `= [` on its
+# declaration the engine does not accept, and this function would report etas
+# for a model that has none. Up to ferx-core 0.3.x the engine dropped such a
+# line silently; from 0.4.0 it rejects it as an unrecognized `[parameters]`
+# line (ferx-core #1377). A genuinely multi-line block keeps `= [` on its
 # header line, which is what makes that line self-describing.
 #
 # An empty name (a trailing comma) is dropped rather than reported. The engine

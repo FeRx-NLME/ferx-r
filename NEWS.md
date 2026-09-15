@@ -2,6 +2,32 @@
 
 ## Breaking changes
 
+- **A `.ferx` `[parameters]` line that ferx-core used to ignore is now an error**
+  ([ferx-core #1377](https://github.com/FeRx-NLME/ferx-core/issues/1377),
+  [ferx-core #1388](https://github.com/FeRx-NLME/ferx-core/pull/1388)). Every
+  line must be consumed end to end by exactly one declaration. Before, trailing
+  or leading text, a misspelt scale tag, a stray line, or a `;` comment was
+  dropped with `ferx_model_validate()` reporting the model valid. The most
+  consequential case: a scale tag on a block, as in
+  `block_omega (ETA_CL, ETA_V) = [...] (sd)`, now fails with
+  `E_BLOCK_VARIANCE_ONLY` and a repair suggestion; before, it was read as
+  variances. A non-numeric `theta` bound (`theta CL(50, 0.001-10.0)`) is an
+  error rather than the default bound. `;` does not start a comment in a
+  `.ferx` file; use `#` (accepting `;` is
+  [ferx-core #1393](https://github.com/FeRx-NLME/ferx-core/issues/1393)).
+  None of the bundled `inst/examples/models` changes.
+
+- **The reported OFV can be lower on a fit whose empirical Bayes estimates
+  depend on their starting point**
+  ([ferx-core #833](https://github.com/FeRx-NLME/ferx-core/issues/833),
+  [#1349](https://github.com/FeRx-NLME/ferx-core/issues/1349)). The final inner
+  loop re-derived the EBEs from a cold start, so on a multimodal individual
+  objective the reported OFV (and AIC, BIC and the covariance step) could sit
+  above the point the optimizer had found: +3.5 on a fluconazole binding model,
+  +6.96 on the FREM warfarin fixture. It now keeps whichever EBE set scores
+  lower, and says so with the new `ebe_start_dependent` warning. A FREM inner
+  restart also no longer resets covariate etas to zero.
+
 - **A `block_omega` declared beside a separate diagonal `omega` now fits the
   model it declares, so estimates, OFV, AIC and BIC of such a fit change**
   ([ferx-core #1018](https://github.com/FeRx-NLME/ferx-core/issues/1018),
@@ -236,6 +262,65 @@
 
 ## New features
 
+- **`fit$final_gradient` is now reported for derivative-free fits too**
+  ([ferx-core #997](https://github.com/FeRx-NLME/ferx-core/issues/997),
+  [#1380](https://github.com/FeRx-NLME/ferx-core/pull/1380)). A BOBYQA run,
+  which `optimizer = "auto"` picks for ODE models, used to return `NULL`; it
+  now carries a finite-difference gradient computed at the reported estimates,
+  so `converged` can be checked where it is least trustworthy. It is still
+  `NULL` for the built-in BFGS and SAEM, and `report_final_gradient = false` in
+  `[fit_options]` turns the extra evaluations off.
+
+- **Two new warning categories with guidance in `ferx_get_warnings()`**:
+  `stalled_at_init`, when a fit never left its initial estimates, so its OFV
+  describes the starting values even if `converged` is `TRUE`
+  ([ferx-core #1380](https://github.com/FeRx-NLME/ferx-core/pull/1380)); and
+  `ebe_start_dependent`, when the EBEs, and every diagnostic built on them,
+  depend on where the inner loop starts
+  ([ferx-core #1386](https://github.com/FeRx-NLME/ferx-core/pull/1386)).
+
+- **`ferx_globalsearch()` - global model search from R**
+  ([#364](https://github.com/FeRx-NLME/ferx-r/issues/364), option 3 of
+  [#347](https://github.com/FeRx-NLME/ferx-r/issues/347)). The sixth and last
+  tool of the search family, over ferx-core's `run_globalsearch`. Where
+  `ferx_modelsearch()` decides the structure with the covariate model fixed and
+  `ferx_covsearch()` the covariates with the structure fixed, this lays both
+  out as one grid - every structural category an axis with its values as
+  alleles, every optional `COVARIATE?` pair an axis with `none` and each of its
+  forms - and decides them together, either exhaustively or with pyDarwin's
+  genetic algorithm (`algorithm = "ga"`, the default). It takes the two entry
+  forms every other tool has (`config = "x.ferxsearch"` or inline `model` /
+  `data` / `search_space`), the same `directory` / `resume` / `threads` /
+  `progress` meanings, and a `print()` / `summary()` pair in the same idiom.
+
+  `[rank] type` defaults to `"penalized"` here, where every other tool defaults
+  to a BIC, and the search charges three things the criterion cannot see under
+  *any* criterion: a gene that changed nothing in the rendered model, a
+  candidate that produced no fit, and a fit the strictness gate refused. Those
+  are `charge_non_influential`, `charge_gate` and `charge_crash` on `$models`,
+  beside the `criterion` and the `fitness` they sum to, so a genome that lost
+  to a tie-break penalty does not read as though it lost on OFV; `$penalties`
+  is the effective schedule the run charged. `$axes` and `$space_size` are the
+  grid, `$generations` the genetic algorithm's trajectory, and `$models` the
+  engine's own `models.csv` - which `ferx_search_results(dir, type = "models")`
+  now recognises as a fourth model-table schema, so a run produced by
+  `ferx globalsearch` on the command line reads back the same way.
+
+  Two knobs take a named list validated against the engine's own key list, so
+  an unknown setting is refused by name before a config file is rendered: `ga`
+  for `[globalsearch.ga]` and `penalties` for `[rank.penalties]`. `algorithm`
+  is matched exactly rather than by prefix.
+
+  `[globalsearch]` is therefore no longer reported as a section no R tool runs.
+  Note the name collision this shares with nothing else in the package:
+  `ferx_fit(settings = list(global_search = TRUE))` is a global *optimizer*
+  phase inside the estimation of one model; `ferx_globalsearch()` is a global
+  search over *models*. The name here is the engine's, the `.ferxsearch`
+  file's, the CLI's and Pharmpy/pyDarwin's, so a search stays portable between
+  them. New bundled example `two_cpt_oral_global` (a one-compartment,
+  covariate-free model on the `two_cpt_oral_cov` dataset, with its own
+  `.ferxsearch`) and `inst/examples/ex_globalsearch.R`.
+
 - **The engine gained per-parameter priors for penalized ML / MAP estimation**
   ([ferx-core #254](https://github.com/FeRx-NLME/ferx-core/issues/254)),
   declared inline in the model file as `prior(value, rse = 25%)` on any `theta`,
@@ -277,10 +362,12 @@
   section a later ferx-core adds to `TOOL_SECTIONS` is reported from the day a
   file can carry it, and stops being reported on the day a binding for it lands
   here. Where a section can be run somewhere else the warning says where, by
-  name: `[globalsearch]` points at `ferx globalsearch`, while `[structsearch]`,
+  name: `[globalsearch]` pointed at `ferx globalsearch`, while `[structsearch]`,
   which is accepted vocabulary with no engine module and no CLI command behind
   it, is reported without a remediation rather than with one that names a
-  command that does not exist.
+  command that does not exist. (`ferx_globalsearch()`, above, has since taken
+  `[globalsearch]` off the reported list entirely; `[structsearch]` is the one
+  section left.)
 
 - **`ferx_search_config()` reports the `[rank.penalties]` schedule it
   validated** ([#348](https://github.com/FeRx-NLME/ferx-r/issues/348), folded
@@ -1096,6 +1183,16 @@
   arrive as an `output`-category warning, pointing at `fit$ebe_etas` for etas.
   `?ferx_fit` also no longer claims sdtab carries `ETA_*` columns - it has not
   since ferx-core #188, which the package's own tests already guarded.
+- **A fit whose objective is `NaN`, infinite, or the divergence sentinel is no
+  longer reported as `converged = TRUE`**
+  ([ferx-core #1303](https://github.com/FeRx-NLME/ferx-core/issues/1303)). It
+  now carries a critical `convergence` warning naming which of the three it was.
+  The estimates and per-subject diagnostics are still returned, to help find
+  the offending record.
+
+- **A lagged dose arriving exactly on a covariate-changing record no longer
+  gives an ODE model an invalid eta gradient**
+  ([ferx-core #1068](https://github.com/FeRx-NLME/ferx-core/issues/1068)).
 
 - **`fit$individual_estimates` reported `CL`'s value for an unbound analytical
   parameter, and class-1 values for every subject of a mixture model**
@@ -1560,6 +1657,39 @@
   the name from a bare top-level `model <name>` line (e.g. `model warfarin_pk`),
   which is why it is absent from the block registry and from every bundled
   example.
+- **`?ferx_fit`'s `[parameters]` syntax section no longer advertises a `(FIX)`
+  that the engine does not accept**
+  ([ferx-core #1377](https://github.com/FeRx-NLME/ferx-core/issues/1377)). Four
+  of the declarations in that section were never grammar: `theta
+  CL(0.134, 0.001, 10.0) (FIX)`, `theta CL (FIX) (0.134, 0.001, 10.0)`, `omega
+  ETA_CL ~ 0.07 (FIX)` and `omega ETA_CL (FIX) ~ 0.07`, plus the sentence
+  promising the same "flexible placement" for `sigma` and `kappa`. `FIX` is a
+  bare keyword - after a theta's closing paren, inside its argument list, or
+  after an omega/sigma/kappa value - and is never parenthesised. The section now
+  shows the forms that parse, including the `(sd)` scale tag, and says so
+  explicitly.
+
+  Measured against the engine before ferx-core #1377 (merge-base `257be39`) and
+  after it. Not one of the six was an error before: each did something silent
+  and wrong, which is why the help page went uncorrected for so long.
+
+  | documented spelling | before #1377 | after #1377 |
+  |---|---|---|
+  | `theta CL(0.134, 0.001, 10.0) (FIX)` | parses, **`fixed = false`** | parse error |
+  | `omega ETA_CL ~ 0.07 (FIX)` | parses, **`fixed = false`** | parse error |
+  | `sigma PROP ~ 0.04 (FIX)` | parses, **`fixed = false`** | parse error |
+  | `kappa KAPPA_CL ~ 0.04 (FIX)` | parses, **`fixed = false`** | parse error |
+  | `theta CL (FIX) (0.134, 0.001, 10.0)` | **ignored: no theta declared** | parse error |
+  | `omega ETA_CL (FIX) ~ 0.07` | **ignored: no omega declared** | parse error |
+
+  Up to 0.3.x a declaration was matched as a *prefix* of its line, so a trailing
+  `(FIX)` was dropped and the parameter the user meant to hold fixed was
+  estimated instead; a line matching no form at all was dropped whole, declaring
+  nothing, while the model still parsed and every reference to that name
+  resolved to something else. The file reported VALID either way. From 0.4.0 the line must be
+  consumed end to end by exactly one form, so all six are an `E_PARSE` naming
+  the offending line - anyone who copied them will now see an error where they
+  previously, and silently, got the wrong model.
 
 - **`?ferx_simulate` now says which predictive distribution it produces**
   ([#299](https://github.com/FeRx-NLME/ferx-r/issues/299)). `ferx_simulate()`

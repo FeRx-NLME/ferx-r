@@ -63,6 +63,7 @@ reference:
       - ferx_ruvsearch
       - ferx_covsearch
       - ferx_allometry
+      - ferx_globalsearch
       - ferx_amd
       - ferx_amd_plan
       - ferx_bic
