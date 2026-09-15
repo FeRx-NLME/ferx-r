@@ -414,6 +414,19 @@ test_that("ferx_fit() attaches the engine's diagnostic code to a refused fit", {
   expect_true(err$code %in% res$diagnostics$code)
 })
 
+test_that(".ferx_engine_error() leaves a condition it cannot attribute alone", {
+  # The fallback matters as much as the happy path: an engine failure the
+  # validation pass does not explain must reach the caller as the engine wrote
+  # it, not wearing a code taken from an unrelated finding. A clean model has
+  # no error diagnostics at all, so nothing can be attributed.
+  ex <- ferx_example("warfarin")
+  e  <- simpleError("Fit error: something the validator does not check")
+  out <- ferx:::.ferx_engine_error(e, ex$model, ex$data)
+  expect_identical(out, e)
+  expect_false(inherits(out, "ferx_engine_error"))
+  expect_null(out$code)
+})
+
 test_that("a class-blind tryCatch still sees an ordinary error", {
   ex    <- ferx_example("warfarin")
   lines <- c(readLines(ex$model), "", "[fit_option]", "  method = focei")

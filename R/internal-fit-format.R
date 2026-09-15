@@ -186,9 +186,9 @@
   parts <- character(0)
   if (any(is_eta)) {
     parts <- c(parts, sprintf(
-      "%s named in [output] %s an ETA estimate; sdtab holds per-observation rows only, so the declaration was ignored - the per-subject values are in `fit$ebe_etas`",
+      "%s named in [output] %s; sdtab holds per-observation rows only, so the declaration was ignored - the per-subject values are in `fit$ebe_etas`",
       paste(sprintf("`%s`", dropped[is_eta]), collapse = ", "),
-      if (sum(is_eta) == 1L) "is" else "are"
+      if (sum(is_eta) == 1L) "is an ETA estimate" else "are ETA estimates"
     ))
   }
   if (any(!is_eta)) {

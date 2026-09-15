@@ -164,3 +164,25 @@ test_that("ferx_covariance errors when the fit has no recorded model path", {
   fit$model_path <- NULL
   expect_error(ferx_covariance(fit), "no recorded model_path")
 })
+
+test_that("ferx_covariance labels a block omega's rows column-major", {
+  # The second call site of `.ferx_omega_block_labels()` (#367): `ferx_fit()`
+  # and this function name the same matrix, and a fit that skipped the
+  # covariance step and picked it up here must arrive at identical dimnames.
+  ex  <- ferx_example("warfarin_block_omega")
+  fit <- suppressWarnings(ferx_fit(ex$model, ex$data, verbose = FALSE,
+                                   covariance = FALSE))
+  out <- suppressWarnings(ferx_covariance(fit))
+  skip_if(is.null(out$cov_matrix), cov_skip)
+
+  d <- diag(out$cov_matrix)
+  expect_true(all(
+    c("ETA_CL,ETA_CL", "ETA_V,ETA_CL", "ETA_KA,ETA_CL",
+      "ETA_V,ETA_V", "ETA_KA,ETA_V", "ETA_KA,ETA_KA") %in% names(d)
+  ))
+  # The held covariances of the partial block are the zeros; no variance is.
+  expect_identical(unname(d[["ETA_KA,ETA_CL"]]), 0)
+  expect_identical(unname(d[["ETA_KA,ETA_V"]]), 0)
+  expect_gt(d[["ETA_V,ETA_V"]], 0)
+  expect_identical(rownames(out$cor_matrix), rownames(out$cov_matrix))
+})

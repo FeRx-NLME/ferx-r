@@ -664,6 +664,38 @@ test_that(".ferx_dropped_output_warning() needs a block and model text", {
   expect_null(.ferx_dropped_output_warning(
     list(model_text = "[error_model]\n  y = f", sdtab = data.frame(ID = 1))
   ))
+  # An empty `[output]` block asks for nothing, so nothing is missing.
+  expect_null(.ferx_dropped_output_warning(
+    list(model_text = "[output]\n", sdtab = data.frame(ID = 1))
+  ))
+})
+
+test_that(".ferx_dropped_output_warning() reports non-eta names separately", {
+  # An eta has somewhere else to be read from; anything else does not, so the
+  # two get different sentences - and both lists are named in one message
+  # rather than one warning per column.
+  fit <- list(
+    model_text = "[output]\n  WT AGE ETA_CL ETA_V",
+    sdtab      = data.frame(ID = 1, TIME = 0),
+    eta_names  = c("ETA_CL", "ETA_V")
+  )
+  msg <- .ferx_dropped_output_warning(fit)
+  expect_true(grepl("`ETA_CL`, `ETA_V` named in [output] are ETA estimates",
+                    msg, fixed = TRUE))
+  expect_true(grepl("`WT`, `AGE` named in [output] were not written to sdtab",
+                    msg, fixed = TRUE))
+})
+
+test_that(".ferx_dropped_output_warning() says nothing when there is no sdtab", {
+  # No sdtab at all is not the same as a column missing out of one; reporting
+  # every declared name there would be noise on a fit that never had a table.
+  expect_null(.ferx_dropped_output_warning(
+    list(model_text = "[output]\n  WT", sdtab = NULL, eta_names = character(0))
+  ))
+  expect_null(.ferx_dropped_output_warning(
+    list(model_text = "[output]\n  WT", sdtab = data.frame(),
+         eta_names = character(0))
+  ))
 })
 
 test_that("a dropped [output] column becomes a structured warning row", {

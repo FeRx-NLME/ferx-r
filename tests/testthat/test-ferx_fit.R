@@ -299,6 +299,11 @@ test_that("an eta named in [output] is reported, not silently dropped", {
   loaded <- ferx_load_fit(bundle)
   expect_true(any(grepl("named in [output]", loaded$warnings, fixed = TRUE)))
   expect_true(any(grepl("ETA_CL", ferx_get_warnings(loaded)$message, fixed = TRUE)))
+
+  # The printed form carries the category's guidance line, which is what the
+  # user actually reads when the column they asked for is not there.
+  out <- capture.output(ferx_get_warnings(fit))
+  expect_true(any(grepl("produced no sdtab column", out, fixed = TRUE)))
 })
 test_that("$sdtab has one row per observation", {
   fit <- warfarin_fit()
