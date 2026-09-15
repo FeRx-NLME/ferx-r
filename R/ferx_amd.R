@@ -220,12 +220,11 @@ ferx_amd <- function(model = NULL,
   # step's input model as a file, because that is what the next tool reads.
   # `directory = NULL` therefore means a temporary one, removed on the way out
   # rather than never written.
-  dir_arg <- .ferx_search_directory(directory, what)
+  # `.ferx_search_directory()` refuses `resume = TRUE` without a directory for
+  # every tool, so the guard that used to live here is gone rather than
+  # duplicated.
+  dir_arg <- .ferx_search_directory(directory, what, resume)
   keep <- nzchar(dir_arg)
-  if (!keep && .ferx_search_bool(resume, "resume", what)) {
-    stop(what, ": `resume = TRUE` needs the `directory` of the run to resume; ",
-         "without one there are no journalled fits to reuse")
-  }
   if (!keep) {
     dir_arg <- tempfile(pattern = "ferx-amd-")
     dir.create(dir_arg, recursive = TRUE)

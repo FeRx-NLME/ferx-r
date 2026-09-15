@@ -1997,6 +1997,135 @@ test_that("individual_estimates omits parser-synthesized readout parameters", {
   expect_equal(ie$KA, fit$theta[["TVKA"]] * exp(fit$ebe_etas$ETA_KA),
                tolerance = 1e-10)
 })
+# On an analytical (`pk ...`) model, a top-level [individual_parameters] name
+# the [structural_model] line does not bind has no PK slot of its own: the
+# parser leaves its `pk_indices` entry at the placeholder 0, which is CL's slot.
+# Reading values through that map reported CL's value for every such name
+# (ferx-core #1356). `HALF` below is the unbound name; `CL = TVCL * 2 * exp(...)`
+# keeps the fixture non-degenerate, because under the idiomatic
+# `CL = TVCL * exp(ETA_CL)` an intermediate equals CL at eta = 0 and the wrong
+# read returns the right number.
+test_that("individual_estimates on an analytical model reads unbound names by name", {
+  ex <- ferx_example("warfarin")
+  model <- write_test_model(list(
+    parameters = c(
+      "  theta TVCL(0.134, 0.001, 10.0)",
+      "  theta TVV(8.1, 0.1, 500.0)",
+      "  theta TVKA(1.0, 0.01, 50.0)",
+      "  omega ETA_CL ~ 0.07",
+      "  omega ETA_V  ~ 0.02",
+      "  sigma PROP_ERR ~ 0.01 (sd)"
+    ),
+    individual_parameters = c(
+      "  HALF = TVCL * 0.5",
+      "  CL   = HALF * 4 * exp(ETA_CL)",
+      "  V    = TVV * exp(ETA_V)",
+      "  KA   = TVKA"
+    ),
+    structural_model = "  pk one_cpt_oral(cl=CL, v=V, ka=KA)",
+    error_model = "  DV ~ proportional(PROP_ERR)"
+  ))
+  on.exit(unlink(model), add = TRUE)
+  fit <- ferx_fit(model, ex$data, verbose = FALSE, covariance = FALSE,
+                  settings = list(maxiter = 0L))
+  ie <- fit$individual_estimates
+
+  expect_identical(names(ie), c("ID", "HALF", "CL", "V", "KA"))
+  half <- fit$theta[["TVCL"]] * 0.5
+  cl   <- half * 4 * exp(fit$ebe_etas$ETA_CL)
+  # Non-degenerate: the old slot read returned CL for HALF, so the two must
+  # differ for the check to mean anything.
+  expect_false(isTRUE(all.equal(rep(half, nrow(ie)), cl)))
+  expect_equal(ie$HALF, rep(half, nrow(ie)), tolerance = 1e-10)
+  expect_equal(ie$CL, cl, tolerance = 1e-10)
+  expect_equal(ie$V, fit$theta[["TVV"]] * exp(fit$ebe_etas$ETA_V), tolerance = 1e-10)
+  expect_equal(ie$KA, rep(fit$theta[["TVKA"]], nrow(ie)), tolerance = 1e-10)
+})
+# The bundled TTE example is the same defect with no fixture needed: LAMBDA is
+# not bound by `pk one_cpt_iv(cl=CL, v=V)`, so it used to report DUMMY_CL (1.0)
+# for every subject instead of TVLAMBDA * exp(ETA_LAMBDA).
+test_that("individual_estimates reports LAMBDA, not DUMMY_CL, on tte_exponential", {
+  ex  <- ferx_example("tte_exponential")
+  fit <- ferx_fit(ex$model, ex$data, verbose = FALSE, covariance = FALSE,
+                  settings = list(maxiter = 5L))
+  ie  <- fit$individual_estimates
+
+  expect_identical(names(ie), c("ID", "LAMBDA", "CL", "V"))
+  expect_equal(ie$LAMBDA,
+               fit$theta[["TVLAMBDA"]] * exp(fit$ebe_etas$ETA_LAMBDA),
+               tolerance = 1e-10)
+  # The old read returned DUMMY_CL, which is FIXed at 1.0.
+  expect_false(any(abs(ie$LAMBDA - fit$theta[["DUMMY_CL"]]) < 1e-8))
+  expect_equal(ie$CL, rep(fit$theta[["DUMMY_CL"]], nrow(ie)), tolerance = 1e-10)
+  expect_equal(ie$V,  rep(fit$theta[["DUMMY_V"]],  nrow(ie)), tolerance = 1e-10)
+})
+# `MIXNUM` reads a thread-local that defaults to class 1, so evaluating the
+# [individual_parameters] block without setting it gave every subject the
+# class-1 typical value. The fitted class travels on the subject result (and as
+# the sdtab MIXEST column), so a class-2 subject must carry TVCL2.
+test_that("individual_estimates uses each subject's fitted mixture class", {
+  # Two clearly separated subpopulations (CL = 1 and CL = 3, V = 10) so the
+  # posterior class assignment is unambiguous at the initial estimates.
+  set.seed(11L)
+  times <- c(0.5, 1, 2, 4, 8, 12)
+  dose  <- 100
+  v     <- 10
+  rows  <- lapply(seq_len(12L), function(i) {
+    cl   <- if (i %% 2L == 0L) 3.0 else 1.0
+    conc <- (dose / v) * exp(-cl / v * times) * exp(rnorm(length(times), 0, 0.05))
+    rbind(
+      data.frame(ID = i, TIME = 0, DV = 0, EVID = 1, AMT = dose, CMT = 1, MDV = 1),
+      data.frame(ID = i, TIME = times, DV = conc, EVID = 0, AMT = 0, CMT = 1, MDV = 0)
+    )
+  })
+  data_path <- tempfile(fileext = ".csv")
+  on.exit(unlink(data_path), add = TRUE)
+  write.csv(do.call(rbind, rows), data_path, row.names = FALSE)
+
+  model <- write_test_model(list(
+    parameters = c(
+      "  theta TVCL1(1.0, 0.01, 10.0)",
+      "  theta TVCL2(3.0, 0.01, 20.0)",
+      "  theta TVV(10.0, 1.0, 100.0)",
+      "  theta MIXL(0.0)",
+      "  omega ETA_CL ~ 0.04",
+      "  sigma PROP_ERR ~ 0.05 (sd)"
+    ),
+    mixture = c(
+      "  nsub = 2",
+      "  logit(1) = MIXL"
+    ),
+    individual_parameters = c(
+      "  CL = if (MIXNUM == 1) TVCL1 * exp(ETA_CL) else TVCL2 * exp(ETA_CL)",
+      "  V  = TVV"
+    ),
+    structural_model = "  pk one_cpt_iv(cl=CL, v=V)",
+    error_model = "  DV ~ proportional(PROP_ERR)"
+  ))
+  on.exit(unlink(model), add = TRUE)
+  fit <- ferx_fit(model, data_path, verbose = FALSE, covariance = FALSE,
+                  settings = list(maxiter = 0L))
+
+  expect_true("MIXEST" %in% names(fit$sdtab))
+  mixest <- vapply(
+    split(fit$sdtab$MIXEST, factor(fit$sdtab$ID, levels = unique(fit$sdtab$ID))),
+    function(x) x[1L], numeric(1L)
+  )
+  # Non-degenerate: both classes must be represented, or class-1-for-everyone
+  # would pass.
+  expect_setequal(unique(mixest), c(1, 2))
+
+  ie <- fit$individual_estimates
+  expect_identical(names(ie), c("ID", "CL", "V"))
+  expect_equal(ie$ID, fit$ebe_etas$ID)
+  tv <- ifelse(mixest[as.character(ie$ID)] == 1,
+               fit$theta[["TVCL1"]], fit$theta[["TVCL2"]])
+  expect_equal(ie$CL, unname(tv) * exp(fit$ebe_etas$ETA_CL), tolerance = 1e-10)
+  # The class-1 default would have put TVCL1 on every row.
+  expect_false(isTRUE(all.equal(
+    ie$CL, fit$theta[["TVCL1"]] * exp(fit$ebe_etas$ETA_CL)
+  )))
+})
 test_that("sdtab no longer contains ETA columns", {
   fit <- warfarin_fit()
   expect_s3_class(fit$sdtab, "data.frame")

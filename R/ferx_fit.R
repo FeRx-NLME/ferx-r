@@ -438,7 +438,9 @@
 #'       unreachable. Set an explicit value to pin it for every model.}
 #'     \item{\code{global_search}}{Logical. When \code{TRUE}, run a global
 #'       search phase before local refinement (default \code{FALSE}).
-#'       Not accepted by pure \code{"gn"}.}
+#'       Not accepted by pure \code{"gn"}. This is a wider search for the
+#'       parameter values of \emph{this} model, and is unrelated to
+#'       \code{\link{ferx_globalsearch}}, which searches over \emph{models}.}
 #'     \item{\code{global_maxeval}}{Function evaluations budget for the global
 #'       search phase, read only when \code{global_search = TRUE}. The default
 #'       \code{0} does not mean "no budget": it selects an automatic one of
@@ -750,7 +752,13 @@
 #'     individual-parameter expressions at the subject's EBE eta with kappa
 #'     fixed at zero, so the result reflects each subject's typical value
 #'     under the model's covariate effects. For inter-occasion variation see
-#'     \code{ebe_kappas}.}
+#'     \code{ebe_kappas}. On a \code{[mixture]} model each row is evaluated in
+#'     that subject's own fitted class (the \code{MIXEST} column of
+#'     \code{sdtab}), so a class-2 subject carries the class-2 typical values.
+#'     The table is one row per subject and therefore has no row time: a
+#'     parameter that reads the \code{TIME} built-in is evaluated at
+#'     \code{TIME = 0}, unlike the per-row \code{sdtab} echo of the same
+#'     parameter.}
 #'   \item{warnings}{Character vector of warnings}
 #'   \item{warnings_structured}{Data frame with columns \code{severity}
 #'     (\code{"critical"}, \code{"warning"}, or \code{"info"}),
@@ -879,8 +887,16 @@
 #'     header.}
 #'   \item{final_gradient}{Numeric vector containing the gradient of the
 #'     objective function at the best-OFV parameter point (packed space:
-#'     log-theta, Cholesky-omega, log-sigma). \code{NULL} for derivative-free
-#'     optimizers (BOBYQA), built-in BFGS, Gauss-Newton, and SAEM. Use
+#'     log-theta, Cholesky-omega, log-sigma). For a gradient-based NLopt
+#'     optimizer, trust-region or Gauss-Newton it is the optimizer's own
+#'     gradient. For a derivative-free NLopt run (BOBYQA, which
+#'     \code{optimizer = "auto"} picks for ODE models) it is a central
+#'     finite-difference gradient computed after the fit at the reported
+#'     estimates, so \code{converged} can be checked there too (ferx-core
+#'     #1380). That costs one gradient's worth of extra objective
+#'     evaluations; \code{report_final_gradient = false} in
+#'     \code{[fit_options]} turns it off. \code{NULL} for the built-in BFGS and
+#'     for SAEM. Use
 #'     \code{\link{ferx_runlog}} to interpret with a convergence threshold.}
 #'   \item{optimizer_label}{Human-readable label for the outer optimizer used
 #'     (e.g. \code{"LBFGS"}, \code{"BOBYQA"}). Mirrors the \code{optimizer}

@@ -23,9 +23,9 @@
 # `TOOL_SECTIONS` in ferx-core accepts a section for every tool the *engine*
 # knows, and this package binds a subset of them: a file carrying one of the
 # rest loads clean, and the tool it is handed to ignores the section addressed
-# to a different tool - so a user who writes `[globalsearch] algorithm =
-# "exhaustive"` and hands the file to `ferx_covsearch()` gets a stepwise
-# search, which is the right answer to a question they did not ask (#347).
+# to a different tool - so a user who writes `[structsearch] ...` and hands the
+# file to `ferx_covsearch()` gets a stepwise search, which is the right answer
+# to a question they did not ask (#347).
 #
 # The list below is the half R owns: the sections this package has a tool for.
 # What no R tool can run is the *complement* of `$tools` against it, never a
@@ -37,22 +37,23 @@
   "allometry",    # ferx_allometry()
   "amd",          # ferx_amd() / ferx_amd_plan()
   "covsearch",    # ferx_covsearch()
+  "globalsearch", # ferx_globalsearch()
   "iivsearch",    # ferx_iivsearch()
   "iovsearch",    # ferx_iovsearch()
   "modelsearch",  # ferx_modelsearch()
   "ruvsearch"     # ferx_ruvsearch()
 )
 
-# Where a section this package cannot run *can* be run, by name. `[globalsearch]`
-# is the engine's own tool with a `ferx globalsearch` subcommand behind it, so
-# pointing there is real advice. Nothing else gets a promise: `[structsearch]`
-# is accepted vocabulary with no engine module and no CLI command behind it, and
-# a section added to the engine later has no remediation this package can know
-# about. Saying "use the CLI" for those would send someone to a command that
-# does not exist.
-.FERX_SEARCH_SECTION_REMEDY <- c(
-  globalsearch = "use the `ferx globalsearch` command-line tool"
-)
+# Where a section this package cannot run *can* be run, by name. Empty since
+# `ferx_globalsearch()` landed (#364): `[globalsearch]` was the one entry, and
+# a section with an R tool is not reported here at all. The table stays because
+# the rule it encodes is per section, not per package version - only a section
+# with somewhere real to send someone gets a pointer. `[structsearch]` is
+# accepted vocabulary with no engine module and no CLI command behind it, and a
+# section added to the engine later has no remediation this package can know
+# about; saying "use the CLI" for either would name a command that does not
+# exist.
+.FERX_SEARCH_SECTION_REMEDY <- stats::setNames(character(0), character(0))
 
 # Warn about a section the R surface cannot run. A warning rather than an error:
 # the file is valid, the engine loaded it, and the rest of it still describes a
@@ -211,12 +212,43 @@
 
 # "" is the bindings' "no directory": the run stays in memory, writes nothing
 # and cannot be resumed.
-.ferx_search_directory <- function(directory, what) {
-  if (is.null(directory)) return("")
+#
+# Which is why `resume` is checked here and not per tool. A `resume = TRUE`
+# with nowhere to resume *from* reaches the engine as an ordinary run: the
+# flag is set, there is no journal to read, and the search silently refits
+# everything from scratch. On a tool whose whole cost is fits, that is an
+# expensive way to learn the argument did nothing - so both halves of "there
+# is a run to resume" are refused before the first model is compiled, the way
+# `ferx_bootstrap()` refuses them.
+#
+# `isTRUE()` rather than a validation: `resume` is checked properly by
+# `.ferx_search_bool()` further down each tool, and pre-empting it here would
+# answer `resume = NA` with the wrong complaint.
+.ferx_search_directory <- function(directory, what, resume = FALSE) {
+  if (is.null(directory)) {
+    if (isTRUE(resume)) {
+      stop(sprintf(
+        paste0("%s: `resume = TRUE` needs the `directory` of the run to ",
+               "resume; without one there are no journalled fits to reuse ",
+               "and the search would start over without saying so."),
+        what
+      ))
+    }
+    return("")
+  }
   if (!is.character(directory) || length(directory) != 1L || is.na(directory)) {
     stop(sprintf("%s: `directory` must be a single path or NULL", what))
   }
-  normalizePath(directory, mustWork = FALSE)
+  path <- normalizePath(directory, mustWork = FALSE)
+  if (isTRUE(resume) && !dir.exists(path)) {
+    stop(sprintf(
+      paste0("%s: `resume = TRUE` needs the `directory` of an earlier run, ",
+             "and there is nothing at `%s`. Drop `resume` to start a fresh ",
+             "run there."),
+      what, path
+    ))
+  }
+  path
 }
 
 # The mutual exclusion that keeps the inline form from becoming a second way of

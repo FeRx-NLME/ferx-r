@@ -30,7 +30,8 @@
 #' @param type Which table to read: \code{"candidates"} (the default) for the
 #'   runner's own candidate table, written by every tool, \code{"models"} for
 #'   the model table \code{\link{ferx_modelsearch}},
-#'   \code{\link{ferx_iivsearch}} and \code{\link{ferx_iovsearch}} write, or
+#'   \code{\link{ferx_iivsearch}}, \code{\link{ferx_iovsearch}} and
+#'   \code{\link{ferx_globalsearch}} write, or
 #'   \code{"steps"} for the step table \code{\link{ferx_covsearch}} and
 #'   \code{\link{ferx_ruvsearch}} write. A run has more than one: the candidate
 #'   table is one row per fit the runner was asked for, the model or step table
@@ -55,8 +56,10 @@
 #'   \code{parent}, \code{layer}, \code{path}, the four structural columns,
 #'   \code{criterion}, \code{rank}, ...), iivsearch's 18 (\code{id},
 #'   \code{parent}, \code{step}, \code{description}, \code{etas},
-#'   \code{blocks}, ...) or iovsearch's 19 (..., \code{kappas},
-#'   \code{kappa_blocks}, ...) - typed the same way and carrying the same
+#'   \code{blocks}, ...), iovsearch's 19 (..., \code{kappas},
+#'   \code{kappa_blocks}, ...) or globalsearch's 24 (..., \code{genome},
+#'   \code{covariates}, \code{fitness}, \code{non_influential},
+#'   \code{duplicate_of}, ...) - typed the same way and carrying the same
 #'   \code{tool} attribute. Otherwise a data frame with the
 #'   engine's 15 candidate columns: \code{id},
 #'   \code{parent}, \code{hash}, \code{features}, \code{criterion} (numeric),
@@ -185,11 +188,12 @@ ferx_search_results <- function(directory, partial = NULL,
 # the same way as the candidate table above and against the engine's own column
 # lists.
 #
-# Three tools write a file of that name - modelsearch's 21 structural columns,
-# iivsearch's 18 and iovsearch's 19 - so the file's own header says which tool
-# wrote it, and a file matching none is named as such rather than typed against
-# the wrong schema. The three are told apart by a column only one of them has
-# (`layer`, `blocks`, `kappas`), which is why a partial match is not enough.
+# Four tools write a file of that name - modelsearch's 21 structural columns,
+# iivsearch's 18, iovsearch's 19 and globalsearch's 24 - so the file's own
+# header says which tool wrote it, and a file matching none is named as such
+# rather than typed against the wrong schema. The four are told apart by a
+# column only one of them has (`layer`, `blocks`, `kappas`, `genome`), which is
+# why a partial match is not enough.
 #
 # There is no `models.partial.csv`: a cancelled search writes the one table
 # with the rows it reached, and says so on the object it returns. `partial` is
@@ -210,9 +214,10 @@ ferx_search_results <- function(directory, partial = NULL,
 
   raw <- utils::read.csv(path, colClasses = "character", check.names = FALSE)
   schemas <- list(
-    modelsearch = ferx_rust_modelsearch_columns(),
-    iivsearch   = ferx_rust_iivsearch_columns(),
-    iovsearch   = ferx_rust_iovsearch_columns()
+    modelsearch  = ferx_rust_modelsearch_columns(),
+    iivsearch    = ferx_rust_iivsearch_columns(),
+    iovsearch    = ferx_rust_iovsearch_columns(),
+    globalsearch = ferx_rust_globalsearch_columns()
   )
   hit <- vapply(schemas, function(cols) length(setdiff(cols, names(raw))) == 0L,
                 logical(1))
@@ -221,8 +226,10 @@ ferx_search_results <- function(directory, partial = NULL,
          "structural columns (", paste(schemas$modelsearch, collapse = ", "),
          "), the variability columns (",
          paste(schemas$iivsearch, collapse = ", "),
-         ") or the inter-occasion columns (",
-         paste(schemas$iovsearch, collapse = ", "), ")")
+         "), the inter-occasion columns (",
+         paste(schemas$iovsearch, collapse = ", "),
+         ") or the global-search columns (",
+         paste(schemas$globalsearch, collapse = ", "), ")")
   }
   tool <- names(schemas)[hit][1L]
   expected <- schemas[[tool]]
@@ -230,11 +237,22 @@ ferx_search_results <- function(directory, partial = NULL,
   # newer engine wrote is worth keeping, not silently dropping.
   raw <- raw[, c(expected, setdiff(names(raw), expected)), drop = FALSE]
 
-  int <- intersect(c("layer", "step", "peripherals", "n_parameters", "rank",
-                     "starts"), names(raw))
-  num <- intersect(c("ofv", "criterion", "d_criterion", "seconds"), names(raw))
-  lgl <- intersect(c("converged", "passed", "selected", "continued", "reused"),
-                   names(raw))
+  # Which columns hold what is per tool, not shared: `step` is a layer index
+  # in the variability tables and a batch label (`generation-3`) in the global
+  # search's, so one list across all four would read the labels back as NA.
+  types <- if (identical(tool, "globalsearch")) {
+    list(int = c("peripherals", "n_parameters", "rank", "non_influential"),
+         num = c("ofv", "criterion", "fitness", "seconds"),
+         lgl = c("converged", "passed", "selected", "reused"))
+  } else {
+    list(int = c("layer", "step", "peripherals", "n_parameters", "rank",
+                 "starts"),
+         num = c("ofv", "criterion", "d_criterion", "seconds"),
+         lgl = c("converged", "passed", "selected", "continued", "reused"))
+  }
+  int <- intersect(types$int, names(raw))
+  num <- intersect(types$num, names(raw))
+  lgl <- intersect(types$lgl, names(raw))
   chr <- setdiff(names(raw), c(int, num, lgl))
   for (col in int) raw[[col]] <- as.integer(.ferx_csv_num(raw[[col]]))
   for (col in num) raw[[col]] <- .ferx_csv_num(raw[[col]])
