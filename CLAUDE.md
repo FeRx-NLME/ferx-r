@@ -43,6 +43,8 @@ Any cargo command that resolves **with a patch in place** rewrites the lock: an 
 
 The wrapper says which of the three lock outcomes happened: `Cargo.lock untouched by this build`, `Cargo.lock restored to its pin`, or a `WARNING` that the lock was **already** unpinned before the build, in which case it is put back exactly as found and nothing is claimed about a pin. It also keeps the lock through an interrupt and through a reader that goes away mid-build (`R CMD INSTALL . | head`), which `kill -9` is now the only way past.
 
+**One sibling build at a time per checkout.** A snapshot is only good while nobody else is rewriting the same lock, so the wrapper holds a guard (`src/rust/target/.ferx-lock-guard`) across read, snapshot, build, verdict and restore. A second build says `ferx: waiting for another sibling build in this checkout` and starts when the first is done; a guard left by a killed build is taken over, with a warning naming the dead process. Two builds at once used to end with whichever finished last putting the other's mid-build lock back - unpinned, both exiting 0.
+
 Damage can still reach the lock — a stale `config.toml` from a checkout that has not been rebuilt since #353, a `cargo update`, a `kill -9`. Check before staging; this runs no cargo, so it is always safe, and it is exactly what CI runs:
 
 ```bash

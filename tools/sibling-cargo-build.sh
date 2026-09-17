@@ -11,7 +11,8 @@
 # sibling - while an unused one appends [[patch.unused]] tables instead. Here
 # the patch is handed to this one cargo invocation with --config, and the lock
 # is snapshotted and put back around it, so nothing else in the checkout ever
-# sees a patch.
+# sees a patch. One such build at a time runs per checkout (see the guard
+# below): concurrent ones would snapshot each other's mid-build locks.
 #
 # Building against the sibling is therefore an explicit opt-in: src/Makevars
 # calls this script, and by hand it is
@@ -164,25 +165,8 @@ if { [ "$core_expected" = yes ] && [ "$tools_expected" = no ]; } ||
   exit 1
 fi
 
-# -- snapshot the lock -------------------------------------------------------
+# -- snapshot the lock, one build at a time ----------------------------------
 
-# Whether the lock was pinned *before* this build. A lock that some earlier
-# direct cargo run already stripped is put back exactly as found, and saying
-# "restored to its pin" about it would be a lie.
-pin_before=unknown
-if [ -f "$CHECK" ] && command -v bash >/dev/null 2>&1; then
-  if bash "$CHECK" "$LOCK" >/dev/null 2>&1; then
-    pin_before=intact
-  else
-    pin_before=broken
-  fi
-fi
-
-# mktemp, not a fixed name under target/: two builds in one checkout would
-# otherwise share one snapshot, and the second to finish would restore - or fail
-# to find - the first one's file.
-SNAPSHOT=$(mktemp "${TMPDIR:-/tmp}/ferx-Cargo.lock.XXXXXX")
-cp "$LOCK" "$SNAPSHOT"
 restored=unknown
 
 restore_lock() {
@@ -199,13 +183,64 @@ restore_lock() {
   rm -f "$SNAPSHOT"
 }
 
-on_signal() {
+# A snapshot only helps while nobody else is rewriting the same lock. Two
+# wrapper builds in one checkout do exactly that: if A resolves before B takes
+# its snapshot, B saves A's *stripped* lock, and then whoever finishes last
+# decides - A restores the pin, B puts the strip back, both exit 0 and the
+# checkout is left unpinned. Reading the verdict off the lock has the same
+# problem: it would describe the other build's resolve. So one build at a time
+# holds this guard, across read, snapshot, build, verdict and restore.
+#
+# mkdir is the portable atomic test-and-set (no flock on macOS, no shell
+# builtin anywhere). The pid inside lets a crashed holder be taken over rather
+# than block the checkout forever, and the re-read before taking over keeps two
+# waiters from both deciding to clean up the same corpse.
+GUARD="$RUST_DIR/target/.ferx-lock-guard"
+guard_held=no
+
+acquire_guard() {
+  mkdir -p "$RUST_DIR/target" 2>/dev/null || true
+  announced=no
+  while ! mkdir "$GUARD" 2>/dev/null; do
+    holder=$(cat "$GUARD/pid" 2>/dev/null || true)
+    if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then
+      sleep 1
+      if [ "$(cat "$GUARD/pid" 2>/dev/null || true)" = "$holder" ]; then
+        err "WARNING taking over the build guard left behind by process $holder"
+        rm -rf "$GUARD"
+      fi
+      continue
+    fi
+    if [ "$announced" = no ]; then
+      say "waiting for another sibling build in this checkout (process ${holder:-?})"
+      announced=yes
+    fi
+    sleep 1
+  done
+  echo $$ > "$GUARD/pid"
+  guard_held=yes
+}
+
+release_guard() {
+  [ "$guard_held" = yes ] || return 0
+  guard_held=no
+  rm -rf "$GUARD"
+}
+
+cleanup() {
   restore_lock
+  release_guard
+}
+
+on_signal() {
+  cleanup
   trap - EXIT
   exit 130
 }
 
-trap restore_lock EXIT
+# Installed before the guard is taken, so an interrupt in the wait loop still
+# releases whatever this build holds.
+trap cleanup EXIT
 trap on_signal HUP INT TERM
 # dash - /bin/sh on Debian and Ubuntu - does not run an EXIT trap when a write
 # hits a closed pipe: SIGPIPE kills the shell outright. That is not exotic here;
@@ -214,6 +249,26 @@ trap on_signal HUP INT TERM
 # nobody reads) both produce it, and the lock would stay stripped. Ignoring
 # SIGPIPE turns the write into an ordinary EIO failure, which does run the trap.
 trap '' PIPE
+
+acquire_guard
+
+# Whether the lock was pinned *before* this build. A lock that some earlier
+# direct cargo run already stripped is put back exactly as found, and saying
+# "restored to its pin" about it would be a lie. Read inside the guard, so it
+# describes this build's starting point and not someone else's mid-build state.
+pin_before=unknown
+if [ -f "$CHECK" ] && command -v bash >/dev/null 2>&1; then
+  if bash "$CHECK" "$LOCK" >/dev/null 2>&1; then
+    pin_before=intact
+  else
+    pin_before=broken
+  fi
+fi
+
+# mktemp, not a fixed name under target/: a snapshot named after the checkout
+# would be shared by whatever else is running against it, guard or no guard.
+SNAPSHOT=$(mktemp "${TMPDIR:-/tmp}/ferx-Cargo.lock.XXXXXX")
+cp "$LOCK" "$SNAPSHOT"
 
 # -- build -------------------------------------------------------------------
 
@@ -239,7 +294,10 @@ unused=$(ferx_lock_patch_unused_names "$LOCK" | tr '\n' ' ' | sed 's/ *$//')
 
 # Put the lock back before saying anything about the build: a verdict printed
 # first is a verdict that can be lost with the shell that was about to print it.
+# The guard goes with it - the next build may start as soon as the lock is its
+# own again, and everything below this point only prints.
 restore_lock
+release_guard
 
 case "$pin_before,$restored" in
   *,failed)

@@ -1749,7 +1749,11 @@
   alone, and the wrapper snapshots and restores it around the one run that does
   carry a patch - through an interrupt, and through a reader that goes away
   mid-build (`R CMD INSTALL . | head`, which on dash used to skip the cleanup
-  entirely). The wrapper also reports, per crate, whether the build came from
+  entirely), and through a second build in the same checkout: those are
+  serialised on a guard under `src/rust/target/`, since two of them would
+  otherwise snapshot each other's mid-build locks and the last one to finish
+  would leave the checkout unpinned. The wrapper also reports, per crate,
+  whether the build came from
   the sibling or from the pin; refuses a build that would take one crate from
   each, before compiling when the manifests predict it; and says so instead of
   claiming a restore when the lock was already unpinned before the build.

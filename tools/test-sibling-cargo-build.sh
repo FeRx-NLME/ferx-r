@@ -84,6 +84,13 @@ case "${STUB_MODE:-apply}" in
   mixed)  strip_pin ferx-core; mark_unused ferx-tools ;;
   noop)   ;;
 esac
+# Sit on the rewritten lock until released, so a second build can be started
+# with a resolve already in flight - the ordering a `sleep` before the rewrite
+# cannot produce.
+if [ -n "${STUB_HOLD:-}" ]; then
+  : > "$STUB_DIR/resolved"
+  while [ ! -f "$STUB_HOLD" ]; do sleep 0.2; done
+fi
 echo "stub cargo: built (mode ${STUB_MODE:-apply})"
 exit "${STUB_EXIT:-0}"
 STUB
@@ -212,6 +219,23 @@ else
   echo "ok   a vanished snapshot fails loudly"
 fi
 
+# 7b. A guard left behind by a build that was killed outright. The checkout must
+#     not be blocked forever by a directory whose owner is gone.
+dir=$(make_case stale-guard "$LOCK_VERSION" "$LOCK_VERSION")
+mkdir -p "$dir/pkg/src/rust/target/.ferx-lock-guard"
+# A pid that cannot be running: allocated, then reaped.
+sh -c 'exit 0' & dead_pid=$!; wait "$dead_pid" 2>/dev/null
+echo "$dead_pid" > "$dir/pkg/src/rust/target/.ferx-lock-guard/pid"
+out=$(STUB_MODE=apply run_case "$dir" /bin/sh); rc=$?
+check "a guard from a dead build is taken over" "$dir" 0 "$out" "$rc" \
+  "taking over the build guard left behind by process $dead_pid" \
+  "Cargo.lock restored to its pin"
+if [[ -d "$dir/pkg/src/rust/target/.ferx-lock-guard" ]]; then
+  report "a guard from a dead build is taken over: the guard was not released" "$out"
+else
+  echo "ok   the guard is released on the way out"
+fi
+
 # 8. A sibling predating the ferx-tools workspace split.
 dir=$(make_case no-ferx-tools "$LOCK_VERSION" "$LOCK_VERSION")
 rm -rf "$dir/ferx-core/crates"
@@ -318,6 +342,61 @@ for shell in "${shells[@]}"; do
     report "two concurrent builds restore the lock ($label): a snapshot went missing" "$both"
   else
     echo "ok   two concurrent builds restore the lock ($label)"
+  fi
+
+  # The ordering that breaks a snapshot on its own: A resolves first and its
+  # rewritten lock is on disk *before* B starts. Unguarded, B snapshots A's
+  # stripped lock, A restores the pin, and B then puts the strip back - both
+  # exiting 0 on an unpinned checkout. B must instead wait for A.
+  dir=$(make_case "ordered-race-$label" "$LOCK_VERSION" "$LOCK_VERSION")
+  out_a="$dir/out-a"; out_b="$dir/out-b"
+  ( cd "$dir/pkg/src" &&
+    env PATH="$dir/bin:$PATH" STUB_DIR="$dir" STUB_MODE=apply STUB_HOLD="$dir/release" \
+      FERX_CORE_SIBLING="$dir/ferx-core" "$shell" "$SCRIPT" build >"$out_a" 2>&1 ) &
+  pid_a=$!
+  # A has rewritten the lock and is holding it there.
+  for _ in $(seq 1 100); do
+    [[ -f "$dir/resolved" ]] && break
+    sleep 0.2
+  done
+  if [[ ! -f "$dir/resolved" ]] || lock_unchanged "$dir"; then
+    report "a build started mid-resolve waits its turn ($label)" \
+      "the stub never got the lock into its rewritten state, so the case tested nothing"
+    kill "$pid_a" 2>/dev/null
+    wait "$pid_a" 2>/dev/null
+    continue
+  fi
+  # B's stub is slow, so B is the one that finishes last and gets the last word
+  # on the lock - the order in which an unguarded B puts A's strip back for good.
+  ( cd "$dir/pkg/src" &&
+    env PATH="$dir/bin:$PATH" STUB_DIR="$dir" STUB_MODE=apply STUB_SLEEP=4 \
+      FERX_CORE_SIBLING="$dir/ferx-core" "$shell" "$SCRIPT" build >"$out_b" 2>&1 ) &
+  pid_b=$!
+  sleep 1                 # long enough for B to reach the point it snapshots at
+  : > "$dir/release"      # let A finish and restore, while B is still going
+  wait "$pid_a"; rc_a=$?
+  # B blocks until A is done; a wrapper that never releases must not hang CI.
+  b_done=no
+  for _ in $(seq 1 120); do
+    kill -0 "$pid_b" 2>/dev/null || { b_done=yes; break; }
+    sleep 0.5
+  done
+  if [[ "$b_done" == no ]]; then
+    kill -9 "$pid_b" 2>/dev/null
+    report "a build started mid-resolve waits its turn ($label)" "B never finished (60s)"
+  fi
+  wait "$pid_b"; rc_b=$?
+  both=$(cat "$out_a" "$out_b")
+  if [[ "$b_done" == no ]]; then
+    : # already reported
+  elif ! lock_unchanged "$dir"; then
+    report "a build started mid-resolve waits its turn ($label): Cargo.lock left rewritten" "$both"
+  elif [[ "$rc_a" -ne 0 || "$rc_b" -ne 0 ]]; then
+    report "a build started mid-resolve waits its turn ($label): exits $rc_a / $rc_b" "$both"
+  elif ! grep -q "waiting for another sibling build" "$out_b"; then
+    report "a build started mid-resolve waits its turn ($label): B never said it waited" "$both"
+  else
+    echo "ok   a build started mid-resolve waits its turn ($label)"
   fi
 done
 
