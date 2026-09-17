@@ -43,12 +43,14 @@ jobs:
       - uses: actions/checkout@v7
 
       # Guard against an accidentally-unpinned ferx-core / ferx-tools dependency.
-      # src/rust/.cargo/config.toml (written by src/Makevars) carries a [patch]
-      # that redirects both crates to a sibling ../ferx-core when present
-      # (local-dev). Any cargo run that resolves with that patch applied - a
-      # local R CMD INSTALL included - strips the `source = "git+..."` lines,
-      # silently unpinning them for everyone who builds without the sibling; one
-      # whose patch went unused appends [[patch.unused]] tables.
+      # A local build with a sibling ../ferx-core checkout patches both crates to
+      # it, and a cargo run that resolves with that patch applied strips the
+      # `source = "git+..."` lines, silently unpinning them for everyone who
+      # builds without the sibling; one whose patch went unused appends
+      # [[patch.unused]] tables. tools/sibling-cargo-build.sh now restores the
+      # lock around that one run (#353), but a `cargo update`, a `kill -9` or a
+      # checkout still holding the pre-#353 [patch] in src/rust/.cargo/config.toml
+      # all reach the lock anyway.
       #
       # Both crates come from the one repository, so they must also sit on the
       # same revision: a lock pinning them apart is two halves of a workspace
@@ -62,6 +64,16 @@ jobs:
       # sibling build leaves behind, and assert each verdict and message.
       - name: Test the pin check against damaged locks
         run: bash tools/test-check-ferx-core-pin.sh
+
+      # CI never has a sibling ferx-core checkout, so the patched build path -
+      # the one that rewrites Cargo.lock - is never exercised here by a real
+      # build. Drive it with a stub cargo instead: the patch applied, unused,
+      # mixed across the two crates, cargo failing, a lock that was already
+      # stripped, a reader that goes away mid-build (dash does not run an EXIT
+      # trap on SIGPIPE), and two builds racing in one checkout. Every case
+      # asserts src/rust/Cargo.lock came out byte-identical.
+      - name: Test the sibling build wrapper with a stub cargo
+        run: bash tools/test-sibling-cargo-build.sh
 
       # Every ferx-core / ferx-tools `*Options` struct derives `Default`
       # (ferx-core #529, enforced there by the A4 guard in
