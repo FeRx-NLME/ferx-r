@@ -129,7 +129,7 @@ test_that("a retired section is labelled retired, not unknown", {
 test_that("a feature-gated section is labelled disabled, not unknown", {
   # `markov_model` is a name the engine recognises in every build but only
   # accepts with `--features markov`, which this package does not enable
-  # (src/Makevars builds ferx-core with ci,nn,survival). It is therefore absent
+  # (src/Makevars builds ferx-core with ci,nn,survival by default). It is absent
   # from `ferx_rust_known_blocks()` while the parser still reports it precisely.
   skip_if("markov_model" %in% ferx:::ferx_rust_known_blocks(),
           "this build enables the markov feature")
