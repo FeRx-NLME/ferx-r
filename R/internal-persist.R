@@ -111,3 +111,51 @@
   result$eta_cov    <- .ferx_compute_eta_cov(result$ebe_etas, result$data_path)
   result
 }
+
+# -- Parameter priors (ferx-core #254) ---------------------------------------
+#
+# `PriorSummary` on the wire is a plain array of objects with eight required
+# fields (no serde defaults), so the write path emits every column and the read
+# path tolerates a missing one only by filling NA. The pair is written *only*
+# for a priored fit, matching ferx-core's own writer: absent means "this bundle
+# predates priors", and the loader then reconstructs `ofv_data = ofv`, which is
+# right for every such file because no prior could have been applied.
+
+.fitrx_prior_summary_to_wire <- function(ps) {
+  if (!is.data.frame(ps) || nrow(ps) == 0L) return(NULL)
+  lapply(seq_len(nrow(ps)), function(i) {
+    list(
+      name               = as.character(ps$name[[i]]),
+      prior_value        = as.numeric(ps$prior_value[[i]]),
+      estimate           = as.numeric(ps$estimate[[i]]),
+      shift_in_prior_sds = as.numeric(ps$shift_in_prior_sds[[i]]),
+      penalty            = as.numeric(ps$penalty[[i]]),
+      family             = as.character(ps$family[[i]]),
+      prior_lower_95     = as.numeric(ps$prior_lower_95[[i]]),
+      prior_upper_95     = as.numeric(ps$prior_upper_95[[i]])
+    )
+  })
+}
+
+.fitrx_prior_summary_from_wire <- function(x) {
+  if (is.null(x) || length(x) == 0L) return(NULL)
+  num <- function(el, k) {
+    v <- suppressWarnings(as.numeric(el[[k]] %||% NA_real_))
+    if (length(v) != 1L) NA_real_ else v
+  }
+  chr <- function(el, k) {
+    v <- as.character(el[[k]] %||% NA_character_)
+    if (length(v) != 1L) NA_character_ else v
+  }
+  data.frame(
+    name               = vapply(x, chr, character(1L), "name"),
+    prior_value        = vapply(x, num, numeric(1L), "prior_value"),
+    estimate           = vapply(x, num, numeric(1L), "estimate"),
+    shift_in_prior_sds = vapply(x, num, numeric(1L), "shift_in_prior_sds"),
+    penalty            = vapply(x, num, numeric(1L), "penalty"),
+    family             = vapply(x, chr, character(1L), "family"),
+    prior_lower_95     = vapply(x, num, numeric(1L), "prior_lower_95"),
+    prior_upper_95     = vapply(x, num, numeric(1L), "prior_upper_95"),
+    stringsAsFactors   = FALSE
+  )
+}

@@ -75,14 +75,14 @@ ferx_rust_npde_from_fit <- function(model_path, data_path, theta, omega_flat, om
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_sir <- function(model_path, data_path, model_hash, data_hash, ofv, interaction, theta, omega_flat, omega_dim, sigma, residual_rho, cov_matrix_flat, cov_matrix_dim, eta_hats_flat, n_subjects, sir_samples, sir_resamples, sir_seed, sir_keep_samples, verbose) {
-  .Call("wrap__ferx_rust_sir", model_path, data_path, model_hash, data_hash, ofv, interaction, theta, omega_flat, as.integer(omega_dim), sigma, residual_rho, cov_matrix_flat, as.integer(cov_matrix_dim), eta_hats_flat, as.integer(n_subjects), as.integer(sir_samples), as.integer(sir_resamples), as.integer(sir_seed), sir_keep_samples, verbose)
+ferx_rust_sir <- function(model_path, data_path, model_hash, data_hash, ofv, ofv_prior, interaction, theta, omega_flat, omega_dim, sigma, residual_rho, cov_matrix_flat, cov_matrix_dim, eta_hats_flat, n_subjects, sir_samples, sir_resamples, sir_seed, sir_keep_samples, verbose) {
+  .Call("wrap__ferx_rust_sir", model_path, data_path, model_hash, data_hash, ofv, ofv_prior, interaction, theta, omega_flat, as.integer(omega_dim), sigma, residual_rho, cov_matrix_flat, as.integer(cov_matrix_dim), eta_hats_flat, as.integer(n_subjects), as.integer(sir_samples), as.integer(sir_resamples), as.integer(sir_seed), sir_keep_samples, verbose)
 }
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_covariance <- function(model_path, data_path, model_hash, data_hash, ofv, interaction, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, eta_hats_flat, n_subjects, covariance_method, mu_referencing, verbose) {
-  .Call("wrap__ferx_rust_covariance", model_path, data_path, model_hash, data_hash, ofv, interaction, theta, omega_flat, as.integer(omega_dim), sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, eta_hats_flat, as.integer(n_subjects), covariance_method, mu_referencing, verbose)
+ferx_rust_covariance <- function(model_path, data_path, model_hash, data_hash, ofv, ofv_prior, interaction, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, eta_hats_flat, n_subjects, covariance_method, mu_referencing, verbose) {
+  .Call("wrap__ferx_rust_covariance", model_path, data_path, model_hash, data_hash, ofv, ofv_prior, interaction, theta, omega_flat, as.integer(omega_dim), sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, eta_hats_flat, as.integer(n_subjects), covariance_method, mu_referencing, verbose)
 }
 
 #' @title Internal Rust backend binding

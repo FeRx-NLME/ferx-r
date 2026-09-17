@@ -1224,7 +1224,8 @@ test_that("summary.ferx_fit returns a ferx_summary with expected fields", {
   expect_named(s, c(
     "model_name", "data_name", "gradient", "gradient_used",
     "method", "method_chain",
-    "converged", "ofv", "aic", "bic", "n_subjects", "n_obs",
+    "converged", "ofv", "ofv_data", "ofv_prior", "prior_summary",
+    "aic", "bic", "n_subjects", "n_obs",
     "n_parameters", "n_iterations", "theta", "se_theta", "omega",
     "se_omega", "sigma", "se_sigma", "shrinkage_eta", "shrinkage_eps",
     "covariance_status", "eigenvalues", "condition_number",

@@ -807,3 +807,19 @@
 
   result
 }
+
+# One line reporting the parameter-prior split of a fit's objective, or NULL
+# when the model declares no `prior(...)` (ferx-core #254). `fit$ofv` is the
+# penalized total on a priored fit, so a reader comparing it against an
+# unpriored run of the same model needs `ofv_data` - which is also what AIC and
+# BIC were computed from. Printed under the OFV line by print.ferx_fit() and
+# print.ferx_summary() alike, so the two cannot disagree.
+.ferx_prior_ofv_line <- function(x) {
+  ps <- x$prior_summary
+  if (!is.data.frame(ps) || nrow(ps) == 0L) return(NULL)
+  sprintf(
+    "  (prior on %d parameter%s: data OFV %.4f + prior penalty %.4f; AIC/BIC use the data half)",
+    nrow(ps), if (nrow(ps) == 1L) "" else "s",
+    as.numeric(x$ofv_data %||% NA_real_), .ferx_ofv_prior(x)
+  )
+}

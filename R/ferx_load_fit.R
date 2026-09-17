@@ -186,6 +186,14 @@ ferx_load_fit <- function(path) {
     method_chain = vapply(as.character(w$method_chain), .fitrx_method_label, character(1L), USE.NAMES = FALSE),
     converged = isTRUE(w$converged),
     ofv = as.numeric(w$ofv),
+    # Parameter-prior split (ferx-core #254), reconstructed the way the engine's
+    # own loader does: a bundle written before priors existed carries neither
+    # half, and `ofv_data = ofv` / `ofv_prior = 0` is the truth there because no
+    # prior could have been applied. `ferx_sir()` reads `ofv_prior` to hand the
+    # engine the data half (ferx-r #366), so it has to survive a round-trip.
+    ofv_data = as.numeric(.fitrx_unwrap_opt_num(w$ofv_data) %||% w$ofv),
+    ofv_prior = as.numeric(.fitrx_unwrap_opt_num(w$ofv_prior) %||% 0),
+    prior_summary = .fitrx_prior_summary_from_wire(w$prior_summary),
     aic = as.numeric(w$aic),
     bic = as.numeric(w$bic),
     n_obs = as.integer(w$n_obs),

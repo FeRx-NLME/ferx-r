@@ -262,6 +262,32 @@
 
 ## New features
 
+- **A priored fit now reports which half of its objective is the data and which
+  is the penalty** ([#366](https://github.com/FeRx-NLME/ferx-r/issues/366)).
+  `fit$ofv_data`, `fit$ofv_prior` and the per-parameter `fit$prior_summary`
+  (one row per priored parameter: where the prior sat, where the estimate
+  landed, the signed shift in prior SDs, that parameter's penalty, the realised
+  family and the implied 95% prior interval) are surfaced from the Rust glue,
+  written into a `.fitrx` bundle and read back out of one. `fit$ofv` is
+  unchanged - it is still the penalized total - and `print()` and `summary()`
+  now say so under the OFV line when a `prior(...)` is declared, naming the
+  data half that AIC and BIC were actually computed from. A model that declares
+  no prior reports `ofv_data == ofv`, `ofv_prior == 0` and a `NULL` summary, and
+  prints exactly as before.
+
+  This closes the gap recorded below when the engine gained priors. It also
+  removes a silent assumption in `ferx_sir()`: the engine takes SIR's reference
+  objective as `ofv - ofv_prior` and adds the prior penalty back itself, so
+  handing it a penalized `ofv` beside a hard-coded zero prior half counted the
+  penalty twice. Nothing moved - the double count was a constant offset on
+  `ofv_hat`, and `dofv` only ever enters normalized importance weights - so the
+  correctness of `ferx_sir()` on a priored model rested on a cancellation
+  documented in another repository. `ferx_sir()` now passes the fit's own
+  `ofv_prior` through. `ferx_covariance()` passes it too; that path was already
+  right, because the covariance step re-derives the prior curvature from the
+  model file rather than from the fit, and a test now pins that rather than
+  leaving it to be re-read out of ferx-core.
+
 - **`fit$final_gradient` is now reported for derivative-free fits too**
   ([ferx-core #997](https://github.com/FeRx-NLME/ferx-core/issues/997),
   [#1380](https://github.com/FeRx-NLME/ferx-core/pull/1380)). A BOBYQA run,
@@ -328,12 +354,12 @@
   into the `.ferx` file: the fit runs, the penalty reaches the standard errors
   and the SIR intervals, and AIC/BIC stay on the data half of the objective.
 
-  **The three fields the engine added to report it - `ofv_data`, `ofv_prior` and
-  the per-parameter `prior_summary` - are not surfaced on the `ferx_fit` object
-  yet.** `fit$ofv` is the *penalized* objective, and the split is not readable
-  from R: `theta TVCL(0.134, 0.001, 10.0) prior(0.15, rse = 10%)` on the bundled
+  `fit$ofv` is the *penalized* objective:
+  `theta TVCL(0.134, 0.001, 10.0) prior(0.15, rse = 10%)` on the bundled
   `warfarin` model fits to `fit$ofv = -279.1978` while the console trace reports
-  the data half, `-280.126253`. Surfacing the three fields is a follow-up.
+  the data half, `-280.126253`. The three fields the engine added to report that
+  split - `ofv_data`, `ofv_prior` and the per-parameter `prior_summary` - are
+  surfaced on the `ferx_fit` object, per the entry at the top of this section.
 
 - **`[covariate_nn]` models with IOV now get the exact analytic FOCE/FOCEI outer
   gradient** ([ferx-core #1339](https://github.com/FeRx-NLME/ferx-core/issues/1339)),

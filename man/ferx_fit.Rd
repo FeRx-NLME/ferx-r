@@ -739,7 +739,25 @@ Full slot descriptions:
 \item{converged}{Logical; did the optimizer converge}
 \item{method}{Estimation method used}
 \item{n_iterations}{Number of outer iterations run}
-\item{ofv}{Objective function value (-2 log-likelihood)}
+\item{ofv}{Objective function value (-2 log-likelihood). The
+\emph{penalized} objective when the model declares a \code{prior(...)}
+on any parameter, i.e. \code{ofv_data + ofv_prior}.}
+\item{ofv_data}{The data half of \code{ofv} - the -2 log-likelihood the
+AIC and BIC are computed from, and the value to compare against an
+unpriored fit of the same model. Equal to \code{ofv} when no prior is
+declared.}
+\item{ofv_prior}{The prior half of \code{ofv}: the penalty summed over
+the priored coordinates. Exactly 0 when no prior is declared.}
+\item{prior_summary}{Per-parameter prior report, or \code{NULL} when the
+model declares no prior. One row per priored parameter with columns
+\code{name}, \code{prior_value}, \code{estimate},
+\code{shift_in_prior_sds} (signed, in prior SDs),
+\code{penalty} (this parameter's contribution to \code{ofv_prior}),
+\code{family} (\code{"lognormal"} or \code{"normal"}, decided by the
+parameter's declared lower bound), and the implied 95\% prior interval
+\code{prior_lower_95} / \code{prior_upper_95}. When this is non-NULL the
+standard errors in \code{se_theta} and friends are the curvature of the
+\emph{penalized} objective - MAP / penalized-ML SEs, not posterior SDs.}
 \item{aic}{Akaike Information Criterion}
 \item{bic}{Bayesian Information Criterion}
 \item{theta}{Named numeric vector of fixed effect estimates}
