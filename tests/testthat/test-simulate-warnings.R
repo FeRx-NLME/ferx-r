@@ -79,6 +79,16 @@ test_that("a clean dataset raises no simulation warning", {
   expect_length(attr(pred, "simulation_warnings", exact = TRUE), 0L)
 })
 
+# Every empty cell in the returned frame is asserted twice, and both halves are
+# load-bearing (Codex review on ferx-r#381):
+#   is.na(x)  alone passes for a NaN, which is the bug.
+#   !is.nan(x) alone passes for any ordinary number, e.g. a wrong 0.
+# Only the pair pins the cell to NA_real_.
+expect_na_real <- function(x) {
+  expect_true(all(is.na(x)))
+  expect_false(any(is.nan(x)))
+}
+
 test_that("OBSERVED is NA, not NaN, on a continuous row", {
   # Specifically NA_real_: `is.na()` was already TRUE for a NaN, so the
   # documented `is.na(OBSERVED)` idiom never broke -- but the column printed as
@@ -87,8 +97,7 @@ test_that("OBSERVED is NA, not NaN, on a continuous row", {
   ex <- ferx_example("warfarin")
   sim <- ferx_simulate(ex$model, ex$data, n_sim = 1L, seed = 1L)
 
-  expect_true(all(is.na(sim$OBSERVED)))
-  expect_false(any(is.nan(sim$OBSERVED)))
+  expect_na_real(sim$OBSERVED)
   # DV_SIM and IPRED are real numbers here; nothing was turned into NA.
   expect_true(all(is.finite(sim$DV_SIM)))
   expect_true(all(is.finite(sim$IPRED)))
@@ -100,11 +109,15 @@ test_that("a TTE row's empty DV_SIM/IPRED are NA, not NaN", {
 
   ev <- sim[!is.na(sim$OBSERVED), ]
   expect_gt(nrow(ev), 0)
-  # The event row has no Gaussian prediction; that absence is NA.
-  expect_false(any(is.nan(ev$DV_SIM)))
-  expect_false(any(is.nan(ev$IPRED)))
-  expect_true(all(is.na(ev$DV_SIM)))
-  # OBSERVED itself is a real 0/1 on these rows, and NA nowhere else.
+  # The event row has no Gaussian prediction; that absence is NA, not a NaN and
+  # not a stand-in number.
+  expect_na_real(ev$DV_SIM)
+  expect_na_real(ev$IPRED)
+  # OBSERVED itself is a real 0/1 on these rows...
   expect_true(all(ev$OBSERVED %in% c(0, 1)))
-  expect_false(any(is.nan(sim$OBSERVED)))
+  # ...and NA_real_ on the continuous rows of the same frame. This is the case a
+  # warfarin-only check cannot reach: OBSERVED is all-empty there, while here the
+  # column mixes real flags with empty cells.
+  expect_na_real(sim$OBSERVED[is.na(sim$OBSERVED)])
+  expect_true(all(is.finite(sim$DV_SIM[is.na(sim$OBSERVED)])))
 })
