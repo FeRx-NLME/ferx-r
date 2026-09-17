@@ -5,16 +5,19 @@
 # sibling checkout together, so they are bumped together and must end up on the
 # same revision.
 #
-# Why this script exists: src/rust/.cargo/config.toml carries a [patch] that
-# redirects ferx-core to a sibling ../ferx-core checkout when present. If you
-# run any `cargo` command that resolves while that patch is applied, cargo
-# writes a *path*-style lock entry with no `source = "git+..."` line — which
-# silently unpins ferx-core for everyone who builds without the sibling (CI,
-# downstream users). That happened twice, both times in a lock bump
-# (commits 1ce7f59, b96c867).
+# Why this script exists: src/rust/.cargo/config.toml used to carry a [patch]
+# redirecting ferx-core to a sibling ../ferx-core checkout. If you ran any
+# `cargo` command that resolved while that patch was applied, cargo wrote a
+# *path*-style lock entry with no `source = "git+..."` line — which silently
+# unpins ferx-core for everyone who builds without the sibling (CI, downstream
+# users). That happened twice, both times in a lock bump (commits 1ce7f59,
+# b96c867). Since #353 the patch is passed to one cargo run with --config
+# (tools/sibling-cargo-build.sh) and config.toml holds only [build], so a plain
+# `cargo update` here is already safe.
 #
-# This script temporarily removes the patch so cargo resolves ferx-core from
-# GitHub and writes the correct git+https pin. It runs a whole-graph
+# This script still moves any config.toml out of the way, because a checkout
+# that has not been rebuilt since #353 keeps the old [patch] in it until the
+# next build truncates the file. It runs a whole-graph
 # `cargo update`, which also moves every registry crate to its latest
 # compatible version. With the patch absent, `cargo update -p ferx-core
 # --precise <sha>` also works (measured 2026-09-11): it moves ferx-core and

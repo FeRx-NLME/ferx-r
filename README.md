@@ -39,6 +39,22 @@ First install takes ~1-2 hours (Rust compilation from scratch). Subsequent insta
 
 All estimation methods (FOCE/FOCEI/SAEM/IMP) work with the standard build.
 
+#### Building without Deep Compartment Models
+
+The default build enables `nn` (Deep Compartment Models / low-dim neural ODEs,
+the `[covariate_nn NAME]` block). It is the heaviest part of the dependency
+graph, and the final link of the Rust static library is where a machine short
+on memory tends to give up. Drop it by setting `CARGO_FEATURES` in the
+environment:
+
+```bash
+CARGO_FEATURES="--no-default-features --features ci,survival" R CMD INSTALL .
+```
+
+Keep `ci` and `survival`: they carry the covariance step and time-to-event
+support. A build without `nn` rejects a model declaring `[covariate_nn]` with
+`E_NN_FEATURE_DISABLED`; everything else is unchanged.
+
 ### Windows
 
 Native Windows installs are supported.

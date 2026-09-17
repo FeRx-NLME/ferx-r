@@ -1184,6 +1184,90 @@
 
 ## Bug fixes
 
+- **The engine's data-reader diagnostics now reach the caller on the simulate
+  and predict paths** ([#283](https://github.com/FeRx-NLME/ferx-r/issues/283)).
+  `ferx_fit()` has always returned them in `fit$warnings`; `ferx_simulate()`
+  passed on only a count re-derived in the R glue, for the one case that count
+  was written for (a record kept as a design point because its `DV` was empty),
+  and `ferx_predict()` had no warnings channel at all. So a dose that never
+  landed (`W_NO_DOSES`, `W_AMT_NOT_DOSED`), an `ADDL` with no `II`, an
+  unparseable `OCC` or a covariate with no value for half the subjects was
+  diagnosed by the engine and then dropped on the floor - the simulation ran on
+  the dataset the engine actually read, with nothing said about how that
+  differed from the one the user thought they wrote. All of them now ride the
+  `simulation_warnings` attribute and are re-emitted as a single R warning, on
+  `ferx_simulate()`, `ferx_simulate_with_uncertainty()`,
+  `ferx_simulate_adaptive()` and `ferx_predict()` (both its default-parameter
+  and `fit = ` paths). The empty-DV message is now the engine's own
+  `W_DESIGN_DV` text rather than the glue's paraphrase. `W_NO_DOSES` is
+  suppressed on the `ferx_simulate_adaptive()` path alone, where the controller
+  supplies the regimen and a dose-free observation grid is the normal input.
+
+- **`OBSERVED` printed as `NaN` rather than `NA` on every non-event row**
+  ([#283](https://github.com/FeRx-NLME/ferx-r/issues/283)). `OBSERVED` carries
+  the 1/0 event flag of a time-to-event row and has no value on any other row,
+  which is most rows of most runs - but the empty cell was a bare `NaN`, which
+  reads as an arithmetic failure inside the model rather than as a column that
+  does not apply here. Same for a TTE row's `IPRED` and `DV_SIM`, which have no
+  Gaussian prediction. These are now `NA_real_` (`is.na()` was already `TRUE`
+  for a `NaN`, so the documented `is.na(OBSERVED)` idiom is unchanged). `?ferx_simulate`
+  now documents every returned column, and states that `OBSERVED` is **not** an
+  echo of the input `DV` - nothing in the returned frame is, since simulation is
+  what produces that column.
+- **The cargo feature set can be chosen at install time, so a build can leave
+  out Deep Compartment Models**
+  ([#288](https://github.com/FeRx-NLME/ferx-r/issues/288)). `src/Makevars` set
+  `CARGO_FEATURES` with a plain `=`, which beats the environment (`R CMD
+  INSTALL` does not run make with `-e`), so `nn` - the heaviest part of the
+  dependency graph, and where the final static-library link dies on a
+  memory-constrained machine - could only be dropped by editing a tracked file.
+  It is now `?=`, so
+
+  ```bash
+  CARGO_FEATURES="--no-default-features --features ci,survival" R CMD INSTALL .
+  ```
+
+  builds without it. Left unset, the default is unchanged: `ci,nn,survival`.
+  The README documents the opt-out, and the comment claiming `R CMD INSTALL`
+  runs make with `-e` - the reason the environment was expected to be
+  honoured - is corrected.
+
+- **`fit$cov_matrix` labelled a block omega's rows in a different order than it
+  stored them** ([#367](https://github.com/FeRx-NLME/ferx-r/issues/367)). The
+  engine packs those rows as the full lower triangle in *column-major* order -
+  the packing `se_omega` is documented with - but the dimnames were generated
+  row-major, so from a 3x3 block onwards two labels sat on the wrong rows. On
+  the bundled `warfarin_block_omega` example (a `block_omega (ETA_CL, ETA_V)`
+  beside a diagonal `omega ETA_KA`) the held `(ETA_KA, ETA_CL)` covariance was
+  labelled `ETA_V,ETA_V`, so `diag(fit$cov_matrix)` showed an estimated
+  variance as exactly `0` while `se_omega` gave it a finite standard error.
+  `fit$cor_matrix` inherits the dimnames and moved with it. Both call sites -
+  `ferx_fit()` and `ferx_covariance()` - now take the labels from one shared
+  helper, and `?ferx_fit` states the ordering.
+
+- **A refused `ferx_fit()` dropped the stable diagnostic code**
+  ([#367](https://github.com/FeRx-NLME/ferx-r/issues/367)).
+  `ferx_model_validate()` returned `E_UNKNOWN_BLOCK` for a model with an
+  unrecognised block header; fitting the same file raised the same prose with
+  no code, so a script could branch on the identifier only on the path most
+  users reach second. A refused fit now raises a condition of class
+  `ferx_engine_error` carrying `code`, `block`, `line` and `suggestion`, with
+  the code appended to the message in square brackets. The engine's prose is
+  preserved verbatim at the front of the message, so existing `tryCatch()` /
+  `expect_error()` matches on it keep working, and a failure that cannot be
+  attributed to a single diagnostic is raised unchanged.
+
+- **An eta named in `[output]` is no longer dropped in silence**
+  ([#367](https://github.com/FeRx-NLME/ferx-r/issues/367)). sdtab is
+  per-observation and an empirical Bayes estimate is one value per subject, so
+  the engine ignores an eta listed in `[output]`; its validation pass says so
+  with `W_OUTPUT_DUPLICATE`, but `fit()` does not run that pass, so the
+  requested column was simply absent with nothing reported - while a theta in
+  the same position is a hard error. `ferx_fit()` now compares the declared
+  `[output]` names against the delivered `sdtab` and reports any that did not
+  arrive as an `output`-category warning, pointing at `fit$ebe_etas` for etas.
+  `?ferx_fit` also no longer claims sdtab carries `ETA_*` columns - it has not
+  since ferx-core #188, which the package's own tests already guarded.
 - **A fit whose objective is `NaN`, infinite, or the divergence sentinel is no
   longer reported as `converged = TRUE`**
   ([ferx-core #1303](https://github.com/FeRx-NLME/ferx-core/issues/1303)). It
@@ -1650,6 +1734,14 @@
 
 ## Documentation
 
+- **`?ferx_fit` now says how a model declares its name**
+  ([#367](https://github.com/FeRx-NLME/ferx-r/issues/367)). The `model_name`
+  entry said the field falls back to the file's basename "when the file
+  declares no name" without saying how one is declared - and there is no
+  `[model]` block to find, so the syntax read as nonexistent. The engine takes
+  the name from a bare top-level `model <name>` line (e.g. `model warfarin_pk`),
+  which is why it is absent from the block registry and from every bundled
+  example.
 - **`?ferx_fit`'s `[parameters]` syntax section no longer advertises a `(FIX)`
   that the engine does not accept**
   ([ferx-core #1377](https://github.com/FeRx-NLME/ferx-core/issues/1377)). Four
@@ -1725,6 +1817,36 @@
   own: it arrived with the pin move to `944cbf1e`, which already contained it.
 
 ## Internal
+
+- **A local build with a sibling `../ferx-core` checkout no longer rewrites
+  `src/rust/Cargo.lock`** ([#353](https://github.com/FeRx-NLME/ferx-r/issues/353)).
+  The `[patch]` that redirects `ferx-core` and `ferx-tools` to the sibling used
+  to be written into the persistent `src/rust/.cargo/config.toml`, so *every*
+  later cargo resolve in the checkout rewrote the lock: `R CMD INSTALL`,
+  `roxygen2::roxygenize()`, `pkgload::load_all()`, cargo run by hand, an
+  editor's rust-analyzer. An applied patch deletes both `source = "git+..."`
+  pins - unpinning the crates for CI and for everyone who builds without the
+  sibling - and an unused one appends `[[patch.unused]]` tables; `git status`
+  shows either as an ordinary modified file. `src/Makevars` now passes the patch
+  to its own cargo run with `--config`, through the new
+  `tools/sibling-cargo-build.sh`, and `config.toml` holds only `[build]`. So
+  plain cargo and rust-analyzer resolve the pinned revision and leave the lock
+  alone, and the wrapper snapshots and restores it around the one run that does
+  carry a patch - through an interrupt, and through a reader that goes away
+  mid-build (`R CMD INSTALL . | head`, which on dash used to skip the cleanup
+  entirely), and through a second build in the same checkout: those are
+  serialised on a guard under `src/rust/target/`, since two of them would
+  otherwise snapshot each other's mid-build locks and the last one to finish
+  would leave the checkout unpinned. The wrapper also reports, per crate,
+  whether the build came from
+  the sibling or from the pin; refuses a build that would take one crate from
+  each, before compiling when the manifests predict it; and says so instead of
+  claiming a restore when the lock was already unpinned before the build.
+  Building against the sibling by hand is `cd src && sh
+  ../tools/sibling-cargo-build.sh <cargo args>`. New
+  `tools/test-sibling-cargo-build.sh` drives all of this with a stub cargo under
+  every shell on the machine, and `R-CMD-check` runs it - CI has no sibling
+  checkout, so nothing else exercises that path.
 
 - **The pinned engine revision moves `8694824` -> `8372248c`**, with `ferx-core`
   and `ferx-tools` both staying at `0.4.0` (one repository, one revision, two

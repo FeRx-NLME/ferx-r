@@ -132,8 +132,73 @@
       stringsAsFactors = FALSE
     )
   }
+  # Columns asked for in `[output]` that never reached sdtab (#367).
+  do_msg <- .ferx_dropped_output_warning(result)
+  if (!is.null(do_msg)) {
+    extra[[length(extra) + 1L]] <- data.frame(
+      severity      = "warning",
+      category      = "output",
+      message       = do_msg,
+      source_method = "",
+      stringsAsFactors = FALSE
+    )
+  }
   if (length(extra) > 0L) df <- rbind(df, do.call(rbind, extra))
   df
+}
+
+# Warn about `[output]` columns the fit did not deliver (#367).
+#
+# The engine refuses an `[output]` name it does not recognise
+# (`E_OUTPUT_UNKNOWN_COLUMN`), and its validation pass downgrades a name it
+# recognises but cannot write - an eta, or one of the columns sdtab always
+# carries - to `W_OUTPUT_DUPLICATE`. That warning is raised by
+# `validate_model_file()`, which `fit()` does not run, so on the fitting path
+# an eta named in `[output]` was accepted, silently dropped, and never
+# mentioned: the requested column was simply absent from `fit$sdtab`. This
+# re-derives the finding from what the fit already carries - the model text and
+# the delivered sdtab - so the column cannot go missing quietly.
+#
+# Returns NULL when nothing was dropped, or when the fit carries no model text
+# to read the block from.
+.ferx_dropped_output_warning <- function(result) {
+  txt <- result$model_text
+  if (is.null(txt) || length(txt) == 0L || !nzchar(txt[[1L]])) return(NULL)
+  lines <- unlist(strsplit(paste(as.character(txt), collapse = "\n"), "\n", fixed = TRUE))
+  requested <- .ferx_extract_blocks_from_lines(lines)[["output"]]
+  if (is.null(requested) || length(requested) == 0L) return(NULL)
+  # Entries are bare names, one or more per line, whitespace-separated.
+  requested <- unlist(strsplit(trimws(requested), "[[:space:]]+"))
+  requested <- requested[nzchar(requested)]
+  if (length(requested) == 0L) return(NULL)
+
+  # No sdtab at all is a different situation from a column missing out of one -
+  # say nothing rather than report every declared name as dropped.
+  if (!is.data.frame(result$sdtab) || ncol(result$sdtab) == 0L) return(NULL)
+  # The engine matches `[output]` names case-insensitively, so compare the same
+  # way - a name written in another case is delivered, not dropped.
+  delivered <- tolower(names(result$sdtab))
+  dropped <- requested[!(tolower(requested) %in% delivered)]
+  if (length(dropped) == 0L) return(NULL)
+
+  etas <- tolower(result$eta_names %||% character(0))
+  is_eta <- tolower(dropped) %in% etas
+  parts <- character(0)
+  if (any(is_eta)) {
+    parts <- c(parts, sprintf(
+      "%s named in [output] %s; sdtab holds per-observation rows only, so the declaration was ignored - the per-subject values are in `fit$ebe_etas`",
+      paste(sprintf("`%s`", dropped[is_eta]), collapse = ", "),
+      if (sum(is_eta) == 1L) "is an ETA estimate" else "are ETA estimates"
+    ))
+  }
+  if (any(!is_eta)) {
+    parts <- c(parts, sprintf(
+      "%s named in [output] %s not written to sdtab",
+      paste(sprintf("`%s`", dropped[!is_eta]), collapse = ", "),
+      if (sum(!is_eta) == 1L) "was" else "were"
+    ))
+  }
+  paste0(paste(parts, collapse = "; "), ".")
 }
 
 # Fold the per-ETA Shapiro-Wilk flags into a single warning message that lists
@@ -161,6 +226,37 @@
     "Shapiro-Wilk flags possible non-normal distribution for %d %s: %s",
     nrow(flagged), noun, paste(parts, collapse = ", ")
   )
+}
+
+# Internal: row/column labels for the omega block of `cov_matrix` /
+# `cor_matrix` when omega is a block (full lower triangle, not just the
+# diagonal).
+#
+# The engine packs those rows in COLUMN-major order - (1,1), (2,1), ..., (n,1),
+# (2,2), (3,2), ... - the same packing `.omega_se_at()` indexes `se_omega`
+# with. Labelling them row-major put two names on the wrong rows of a 3x3
+# block, so a held (zero) covariance read as an estimated variance with zero
+# variance (#367). Both call sites - `ferx_fit()` and `ferx_covariance()` -
+# take the names from here so the two cannot drift apart again.
+#
+# `eta_nms` is the vector of declared eta names, or NULL for the
+# `OMEGA(i,j)` fallback.
+.ferx_omega_block_labels <- function(n_eta, eta_nms = NULL) {
+  n <- n_eta * (n_eta + 1L) / 2L
+  nm <- character(max(n, 0L))
+  k <- 0L
+  for (j in seq_len(n_eta)) {
+    for (i in seq_len(n_eta)) {
+      if (i < j) next
+      k <- k + 1L
+      nm[k] <- if (!is.null(eta_nms)) {
+        sprintf("%s,%s", eta_nms[i], eta_nms[j])
+      } else {
+        sprintf("OMEGA(%d,%d)", i, j)
+      }
+    }
+  }
+  nm
 }
 
 # Internal: look up SE for omega element (i, j) from se_omega vector.
@@ -279,27 +375,30 @@
   hdr <- sprintf("  %4s  %13s  %13s", "ITER", ofv_label, dofv_label)
   bar <- sprintf("  %4s  %13s  %13s", "----", "-------------", "-------------")
 
-  # Optional columns the trace actually carries, as label -> width. A named
-  # list keeps insertion order, and the labels are unique, so the header and
-  # its rule are built from one ordered collection rather than by two closures
-  # super-assigning into this frame.
-  extra_cols <- list()
-  if (!is_saem) {
-    if (show_grad) extra_cols[["GRAD_NORM"]] <- 11
-    if (show_step) extra_cols[["STEP_NORM"]] <- 11
-    if (show_lm)   extra_cols[["LM_LAMBDA"]] <- 11
-    if (show_acc)  extra_cols[["ACC"]]       <- 5
+  # Optional columns in display order, as (label, width) pairs. Collecting them
+  # first and folding once keeps the header and its underline derived from a
+  # single list - the two used to be grown side by side through `<<-`, which is
+  # what the linter objects to and what would let them drift apart.
+  opt_cols <- if (!is_saem) {
+    list(
+      if (show_grad) list("GRAD_NORM", 11L),
+      if (show_step) list("STEP_NORM", 11L),
+      if (show_lm)   list("LM_LAMBDA", 11L),
+      if (show_acc)  list("ACC",        5L)
+    )
   } else {
-    if (show_saem_phase) extra_cols[["PHASE"]]     <- 10
-    if (show_gamma)      extra_cols[["GAMMA"]]     <- 9
-    if (show_mh)         extra_cols[["MH_ACCEPT"]] <- 9
+    list(
+      if (show_saem_phase) list("PHASE",     10L),
+      if (show_gamma)      list("GAMMA",      9L),
+      if (show_mh)         list("MH_ACCEPT",  9L)
+    )
   }
-  if (show_ebe) extra_cols[["EBE_WARN"]] <- 8
-
-  for (label in names(extra_cols)) {
-    w <- extra_cols[[label]]
-    hdr <- paste0(hdr, sprintf(paste0("  %", w, "s"), label))
-    bar <- paste0(bar, sprintf(paste0("  %", w, "s"), strrep("-", w)))
+  opt_cols <- c(opt_cols, list(if (show_ebe) list("EBE_WARN", 8L)))
+  for (col in Filter(Negate(is.null), opt_cols)) {
+    w   <- col[[2L]]
+    fmt <- paste0("  %", w, "s")
+    hdr <- paste0(hdr, sprintf(fmt, col[[1L]]))
+    bar <- paste0(bar, sprintf(fmt, strrep("-", w)))
   }
 
   # Helpers
@@ -534,16 +633,8 @@
       if (!is.null(eta_nms)) eta_nms
       else paste0("OMEGA(", seq_len(n_eta), ",", seq_len(n_eta), ")")
     } else {
-      # Block lower-triangle: L(i,j) for i >= j, column-major
-      nm <- character(n_omega_packed)
-      k <- 0L
-      for (i in seq_len(n_eta)) {
-        for (j in seq_len(i)) {
-          k <- k + 1L
-          nm[k] <- if (!is.null(eta_nms)) sprintf("%s,%s", eta_nms[i], eta_nms[j]) else sprintf("OMEGA(%d,%d)", i, j)
-        }
-      }
-      nm
+      # Block lower-triangle: L(i,j) for i >= j, column-major (#367).
+      .ferx_omega_block_labels(n_eta, eta_nms)
     }
     sig_nms <- if (!is.null(result$sigma_names) && length(result$sigma_names) == n_sigma) result$sigma_names else NULL
     pnames <- c(
@@ -780,10 +871,23 @@
   result$model_hash <- empty_to_null(result$model_hash) %||% NA_character_
   result$data_hash <- empty_to_null(result$data_hash) %||% NA_character_
 
+  # The dropped-`[output]` finding also goes into the flat vector, not only the
+  # structured table: `fit$warnings` is what `ferx_save_fit()` serialises, and
+  # `ferx_load_fit()` does not restore `warnings_structured`, so a
+  # structured-only row would vanish across a `.fitrx` round trip - a warning
+  # about a silently missing column going silently missing itself. Deduplicated
+  # by exact string so a future engine-side `W_OUTPUT_DUPLICATE` cannot double
+  # it up with an identical message.
+  do_msg <- .ferx_dropped_output_warning(result)
+  if (!is.null(do_msg)) {
+    result$warnings <- unique(c(result$warnings, do_msg))
+  }
+
   # Assemble the structured-warning table. Core supplies severity/category for
   # every warning it emitted (including Durbin-Watson autocorrelation); the R
   # side appends only the diagnostics it computes itself (condition number,
-  # ETA normality). No string re-parsing of core messages happens here.
+  # ETA normality, dropped `[output]` columns). No string re-parsing of core
+  # messages happens here.
   result$warnings_structured <- .ferx_assemble_structured_warnings(raw, result)
 
   # Reconstruct the per-iteration IMPMAP parameter trace as a data.frame.

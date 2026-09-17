@@ -20,7 +20,14 @@ never read, so an empty cell means "predict here". Rows marked
 \code{fit$theta} instead of the model file's initial estimate for theta.}
 }
 \value{
-A data.frame with columns: ID, TIME, PRED
+A data.frame with columns: ID, TIME, PRED.
+
+The frame carries a \code{simulation_warnings} attribute (a character
+vector, empty for a clean run) holding the engine's data-reader
+diagnostics for \code{data} - the same ones \code{ferx_fit()} returns in
+\code{fit$warnings}, e.g. a record kept as a design point because its
+\code{DV} was empty, a dose that never landed, or a covariate with no
+value for some subjects. They are also re-emitted as a single R warning.
 }
 \description{
 Computes population-level predictions (eta = 0) for all subjects.

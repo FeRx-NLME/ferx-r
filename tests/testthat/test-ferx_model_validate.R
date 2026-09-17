@@ -129,7 +129,7 @@ test_that("a retired section is labelled retired, not unknown", {
 test_that("a feature-gated section is labelled disabled, not unknown", {
   # `markov_model` is a name the engine recognises in every build but only
   # accepts with `--features markov`, which this package does not enable
-  # (src/Makevars builds ferx-core with ci,nn,survival). It is therefore absent
+  # (src/Makevars builds ferx-core with ci,nn,survival by default). It is absent
   # from `ferx_rust_known_blocks()` while the parser still reports it precisely.
   skip_if("markov_model" %in% ferx:::ferx_rust_known_blocks(),
           "this build enables the markov feature")
@@ -383,6 +383,59 @@ test_that("a theta whose declared range is empty is reported, not a panic", {
   capture.output(res <- ferx_model_validate(path))
   expect_false(isTRUE(res$ok))
   expect_true("E_INIT_BOUNDS_INVERTED" %in% res$diagnostics$code)
+})
+
+# -- The refused fit carries the same code validation prints (#367) -----------
+
+test_that("ferx_fit() attaches the engine's diagnostic code to a refused fit", {
+  # `ferx_model_validate()` returned `E_UNKNOWN_BLOCK` while fitting the same
+  # file raised the same prose without it, so a script could branch on the code
+  # only on the path most users reach second.
+  ex    <- ferx_example("warfarin")
+  lines <- c(readLines(ex$model), "", "[fit_option]", "  method = focei")
+  path  <- withr::local_tempfile(fileext = ".ferx")
+  writeLines(lines, path)
+
+  err <- tryCatch(
+    suppressWarnings(ferx_fit(path, ex$data, covariance = FALSE, verbose = FALSE)),
+    error = function(e) e
+  )
+  expect_s3_class(err, "ferx_engine_error")
+  expect_identical(err$code, "E_UNKNOWN_BLOCK")
+  expect_identical(err$block, "fit_option")
+  expect_true(grepl("fit_options", err$suggestion, fixed = TRUE))
+  # The engine's own prose survives at the front, so existing matches still
+  # work, and the code is readable from the console message too.
+  expect_true(grepl("Unknown block", conditionMessage(err), fixed = TRUE))
+  expect_true(grepl("[E_UNKNOWN_BLOCK]", conditionMessage(err), fixed = TRUE))
+
+  # And it is the same identifier the validator reports for that file.
+  invisible(capture.output(res <- ferx_model_validate(path)))
+  expect_true(err$code %in% res$diagnostics$code)
+})
+
+test_that(".ferx_engine_error() leaves a condition it cannot attribute alone", {
+  # The fallback matters as much as the happy path: an engine failure the
+  # validation pass does not explain must reach the caller as the engine wrote
+  # it, not wearing a code taken from an unrelated finding. A clean model has
+  # no error diagnostics at all, so nothing can be attributed.
+  ex <- ferx_example("warfarin")
+  e  <- simpleError("Fit error: something the validator does not check")
+  out <- ferx:::.ferx_engine_error(e, ex$model, ex$data)
+  expect_identical(out, e)
+  expect_false(inherits(out, "ferx_engine_error"))
+  expect_null(out$code)
+})
+
+test_that("a class-blind tryCatch still sees an ordinary error", {
+  ex    <- ferx_example("warfarin")
+  lines <- c(readLines(ex$model), "", "[fit_option]", "  method = focei")
+  path  <- withr::local_tempfile(fileext = ".ferx")
+  writeLines(lines, path)
+  expect_error(
+    suppressWarnings(ferx_fit(path, ex$data, covariance = FALSE, verbose = FALSE)),
+    "Unknown block"
+  )
 })
 
 test_that("ferx_fit() refuses a theta starting outside its declared range", {

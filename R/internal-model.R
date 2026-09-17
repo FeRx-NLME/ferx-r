@@ -34,7 +34,14 @@ ferx_section_headers <- function(lines) {
 # Extract all named [section] blocks from a .ferx file.
 # Returns a named list: section name ? character vector of (comment-stripped, trimmed) lines.
 .ferx_extract_blocks <- function(path) {
-  raw <- readLines(path, warn = FALSE)
+  .ferx_extract_blocks_from_lines(readLines(path, warn = FALSE))
+}
+
+# As `.ferx_extract_blocks()`, but over model text already in memory - a fit
+# carries the file verbatim in `fit$model_text`, so a post-fit check can read
+# the declared blocks without going back to disk (the file may have moved, and
+# an in-memory fit never had one).
+.ferx_extract_blocks_from_lines <- function(raw) {
   blocks  <- list()
   current <- NULL
   for (line in raw) {
