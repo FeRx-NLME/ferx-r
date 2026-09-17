@@ -2,13 +2,15 @@
 # Check that src/rust/Cargo.lock still pins ferx-core and ferx-tools to the
 # ferx-core GitHub repository, on one revision, with no [[patch.unused]] tables.
 #
-# Why: src/Makevars patches both crates to a sibling ../ferx-core checkout when
-# one exists, and any cargo command that resolves while that [patch] is in place
-# rewrites the lock - R CMD INSTALL, roxygenize() and load_all() included, as
-# well as cargo run by hand or by an editor's rust-analyzer. An applied patch
-# deletes both `source = "git+..."` lines (unpinning the crates for CI and
-# everyone who builds without the sibling); an unused one appends
-# [[patch.unused]] tables instead.
+# Why: any cargo command that resolves while a [patch] to a sibling ../ferx-core
+# checkout is in place rewrites the lock. An applied patch deletes both
+# `source = "git+..."` lines (unpinning the crates for CI and everyone who
+# builds without the sibling); an unused one appends [[patch.unused]] tables
+# instead. Since #353 only tools/sibling-cargo-build.sh passes such a patch, to
+# its own cargo run, and it restores the lock afterwards - but a checkout that
+# has not been rebuilt since then still has the old [patch] in
+# src/rust/.cargo/config.toml, and `cargo update` and a `kill -9` reach the lock
+# either way.
 #
 # Runs no cargo, so it is always safe. Used by the R-CMD-check workflow and by
 # tools/update-ferx-core-lock.sh, and exercised by tools/test-check-ferx-core-pin.sh.
@@ -18,8 +20,13 @@
 
 set -euo pipefail
 
-LOCK="${1:-$(dirname "$0")/../src/rust/Cargo.lock}"
-GIT_SOURCE='source = "git+https://github.com/FeRx-NLME/ferx-core'
+TOOLS_DIR="$(cd "$(dirname "$0")" && pwd)"
+# The lock parsing is shared with tools/sibling-cargo-build.sh, which reports
+# per crate what a local sibling build resolved.
+# shellcheck source=tools/ferx-core-lock-lib.sh
+. "$TOOLS_DIR/ferx-core-lock-lib.sh"
+
+LOCK="${1:-$TOOLS_DIR/../src/rust/Cargo.lock}"
 status=0
 
 fail() {
@@ -36,25 +43,15 @@ if [[ ! -f "$LOCK" ]]; then
   exit 1
 fi
 
-# The `source = ` line of a package's [[package]] table; empty for a path
-# package, which is what an applied [patch] leaves behind.
-source_of() {
-  awk -v pkg="$1" '
-    $0 == "name = \"" pkg "\"" { in_pkg = 1; next }
-    in_pkg && /^source = / { print; exit }
-    in_pkg && /^\[/ { exit }
-  ' "$LOCK"
-}
-
 for pkg in ferx-core ferx-tools; do
-  case "$(source_of "$pkg")" in
-    "$GIT_SOURCE"*) ;;
+  case "$(ferx_lock_source_of "$pkg" "$LOCK")" in
+    "$FERX_GIT_SOURCE_PREFIX"*) ;;
     *) fail "$pkg lacks a git source pin - a cargo run with the sibling ../ferx-core [patch] applied strips it." ;;
   esac
 done
 
-core_rev=$(source_of ferx-core | sed -E 's/.*#([0-9a-f]+).*/\1/')
-tools_rev=$(source_of ferx-tools | sed -E 's/.*#([0-9a-f]+).*/\1/')
+core_rev=$(ferx_lock_source_of ferx-core "$LOCK" | sed -E 's/.*#([0-9a-f]+).*/\1/')
+tools_rev=$(ferx_lock_source_of ferx-tools "$LOCK" | sed -E 's/.*#([0-9a-f]+).*/\1/')
 if [[ -n "$core_rev" && -n "$tools_rev" && "$core_rev" != "$tools_rev" ]]; then
   fail "ferx-core ($core_rev) and ferx-tools ($tools_rev) are pinned to different revisions of the same repository."
 fi
@@ -77,9 +74,10 @@ Read `git diff src/rust/Cargo.lock` before restoring:
 - only the damage above: `git checkout -- src/rust/Cargo.lock`.
 - a pin bump you meant: re-run tools/update-ferx-core-lock.sh.
 - any other change you meant (e.g. a new dependency): `git checkout -- src/rust/Cargo.lock`,
-  move src/rust/.cargo/config.toml aside, run cargo in src/rust (e.g. `cargo metadata
-  --format-version 1 >/dev/null`), move config.toml back, and run this check again.
-  Not the bump script: its whole-graph `cargo update` also moves the pin to ferx-core main.
+  run cargo in src/rust (e.g. `cargo metadata --format-version 1 >/dev/null`), and run this
+  check again. A plain cargo run there carries no [patch], so it records that change and
+  nothing else. Not the bump script: its whole-graph `cargo update` also moves the pin to
+  ferx-core main.
 EOF
   fi
   exit 1

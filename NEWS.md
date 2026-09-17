@@ -1781,6 +1781,36 @@
 
 ## Internal
 
+- **A local build with a sibling `../ferx-core` checkout no longer rewrites
+  `src/rust/Cargo.lock`** ([#353](https://github.com/FeRx-NLME/ferx-r/issues/353)).
+  The `[patch]` that redirects `ferx-core` and `ferx-tools` to the sibling used
+  to be written into the persistent `src/rust/.cargo/config.toml`, so *every*
+  later cargo resolve in the checkout rewrote the lock: `R CMD INSTALL`,
+  `roxygen2::roxygenize()`, `pkgload::load_all()`, cargo run by hand, an
+  editor's rust-analyzer. An applied patch deletes both `source = "git+..."`
+  pins - unpinning the crates for CI and for everyone who builds without the
+  sibling - and an unused one appends `[[patch.unused]]` tables; `git status`
+  shows either as an ordinary modified file. `src/Makevars` now passes the patch
+  to its own cargo run with `--config`, through the new
+  `tools/sibling-cargo-build.sh`, and `config.toml` holds only `[build]`. So
+  plain cargo and rust-analyzer resolve the pinned revision and leave the lock
+  alone, and the wrapper snapshots and restores it around the one run that does
+  carry a patch - through an interrupt, and through a reader that goes away
+  mid-build (`R CMD INSTALL . | head`, which on dash used to skip the cleanup
+  entirely), and through a second build in the same checkout: those are
+  serialised on a guard under `src/rust/target/`, since two of them would
+  otherwise snapshot each other's mid-build locks and the last one to finish
+  would leave the checkout unpinned. The wrapper also reports, per crate,
+  whether the build came from
+  the sibling or from the pin; refuses a build that would take one crate from
+  each, before compiling when the manifests predict it; and says so instead of
+  claiming a restore when the lock was already unpinned before the build.
+  Building against the sibling by hand is `cd src && sh
+  ../tools/sibling-cargo-build.sh <cargo args>`. New
+  `tools/test-sibling-cargo-build.sh` drives all of this with a stub cargo under
+  every shell on the machine, and `R-CMD-check` runs it - CI has no sibling
+  checkout, so nothing else exercises that path.
+
 - **The pinned engine revision moves `8694824` -> `8372248c`**, with `ferx-core`
   and `ferx-tools` both staying at `0.4.0` (one repository, one revision, two
   lock entries). The range is 29 commits; the user-visible ones are written up
