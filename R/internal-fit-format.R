@@ -279,22 +279,28 @@
   hdr <- sprintf("  %4s  %13s  %13s", "ITER", ofv_label, dofv_label)
   bar <- sprintf("  %4s  %13s  %13s", "----", "-------------", "-------------")
 
-  add_col <- function(label, w) {
-    hdr <<- paste0(hdr, sprintf(paste0("  %", w, "s"), label))
-    bar <<- paste0(bar, sprintf(paste0("  %", w, "s"), strrep("-", w)))
-  }
-
+  # Optional columns the trace actually carries, as label -> width. A named
+  # list keeps insertion order, and the labels are unique, so the header and
+  # its rule are built from one ordered collection rather than by two closures
+  # super-assigning into this frame.
+  extra_cols <- list()
   if (!is_saem) {
-    if (show_grad) add_col("GRAD_NORM", 11)
-    if (show_step) add_col("STEP_NORM", 11)
-    if (show_lm)   add_col("LM_LAMBDA", 11)
-    if (show_acc)  add_col("ACC",        5)
+    if (show_grad) extra_cols[["GRAD_NORM"]] <- 11
+    if (show_step) extra_cols[["STEP_NORM"]] <- 11
+    if (show_lm)   extra_cols[["LM_LAMBDA"]] <- 11
+    if (show_acc)  extra_cols[["ACC"]]       <- 5
   } else {
-    if (show_saem_phase) add_col("PHASE",     10)
-    if (show_gamma)      add_col("GAMMA",      9)
-    if (show_mh)         add_col("MH_ACCEPT",  9)
+    if (show_saem_phase) extra_cols[["PHASE"]]     <- 10
+    if (show_gamma)      extra_cols[["GAMMA"]]     <- 9
+    if (show_mh)         extra_cols[["MH_ACCEPT"]] <- 9
   }
-  if (show_ebe) add_col("EBE_WARN", 8)
+  if (show_ebe) extra_cols[["EBE_WARN"]] <- 8
+
+  for (label in names(extra_cols)) {
+    w <- extra_cols[[label]]
+    hdr <- paste0(hdr, sprintf(paste0("  %", w, "s"), label))
+    bar <- paste0(bar, sprintf(paste0("  %", w, "s"), strrep("-", w)))
+  }
 
   # Helpers
   na_w  <- function(w) sprintf(paste0("%", w, "s"), "NA")
