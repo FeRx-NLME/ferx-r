@@ -19,10 +19,19 @@ makevars_path <- function() {
   if (file.exists(p)) normalizePath(p, winslash = "/") else NA_character_
 }
 
-# Resolve one variable the way make itself would, with `env` (a named character
-# vector) added to the environment of the make process. The variables are set
-# on this process and restored afterwards rather than passed to `system2(env=)`,
-# which is not portable to Windows and does not quote values containing spaces.
+# Resolve one variable the way make itself would, under the environment `env`
+# (a named character vector; `NA` means "unset this one"). The variables are
+# set on this process and restored afterwards rather than passed to
+# `system2(env=)`, which is not portable to Windows and does not quote values
+# containing spaces.
+#
+# Every caller states the full environment it needs, including the variables it
+# needs *absent*: whatever the person running the suite exported would otherwise
+# leak in and decide the answer. `CARGO_FEATURES` set in the caller's shell -
+# the very thing this file is about, and documented in the README - would make
+# the default case read back that value, and an inherited `MAKEFLAGS=-e` makes
+# the environment beat a makefile `=` too, so the override case would pass
+# against the old, broken assignment.
 resolve_make_var <- function(makevars, var, env = character()) {
   dir <- tempfile("ferx-makevars-probe")
   dir.create(dir)
@@ -36,12 +45,14 @@ resolve_make_var <- function(makevars, var, env = character()) {
     probe
   )
   if (length(env)) {
-    set <- Sys.getenv(names(env), unset = NA_character_, names = TRUE)
-    do.call(Sys.setenv, as.list(env))
+    before <- Sys.getenv(names(env), unset = NA_character_, names = TRUE)
+    wanted <- !is.na(env)
+    if (any(wanted)) do.call(Sys.setenv, as.list(env[wanted]))
+    if (any(!wanted)) Sys.unsetenv(names(env)[!wanted])
     on.exit({
-      keep <- !is.na(set)
-      if (any(keep)) do.call(Sys.setenv, as.list(set[keep]))
-      if (any(!keep)) Sys.unsetenv(names(set)[!keep])
+      had <- !is.na(before)
+      if (any(had)) do.call(Sys.setenv, as.list(before[had]))
+      if (any(!had)) Sys.unsetenv(names(before)[!had])
     }, add = TRUE)
   }
   out <- suppressWarnings(system2(
@@ -55,13 +66,28 @@ resolve_make_var <- function(makevars, var, env = character()) {
   trimws(paste(out, collapse = " "))
 }
 
+# The environment every probe starts from: the three variables that can change
+# what the makefile resolves to are unset, and a case that wants one of them
+# names it. Spelling the absences out is what keeps the suite's verdict
+# independent of the shell it was launched from.
+clean_env <- function(...) {
+  base <- c(
+    CARGO_FEATURES = NA_character_,
+    CARGO_PROFILE_RELEASE_LTO = NA_character_,
+    MAKEFLAGS = NA_character_
+  )
+  named <- c(...)
+  if (length(named)) base[names(named)] <- named
+  base
+}
+
 skip_unless_make_probe_works <- function() {
   mk <- makevars_path()
   skip_if(is.na(mk), "package source src/Makevars not available")
   skip_if(!nzchar(make_program()), "no make on PATH")
   # Nothing here should fail merely because make could not parse the probe.
   skip_if(
-    is.na(resolve_make_var(mk, "STATLIB")),
+    is.na(resolve_make_var(mk, "STATLIB", env = clean_env())),
     "make could not evaluate src/Makevars"
   )
   mk
@@ -70,7 +96,7 @@ skip_unless_make_probe_works <- function() {
 test_that("CARGO_FEATURES defaults to the shipped feature set", {
   mk <- skip_unless_make_probe_works()
   expect_equal(
-    resolve_make_var(mk, "CARGO_FEATURES"),
+    resolve_make_var(mk, "CARGO_FEATURES", env = clean_env()),
     "--no-default-features --features ci,nn,survival"
   )
 })
@@ -81,7 +107,10 @@ test_that("CARGO_FEATURES can be overridden from the environment without -e", {
   expect_equal(
     resolve_make_var(
       mk, "CARGO_FEATURES",
-      env = c(CARGO_FEATURES = without_nn)
+      # MAKEFLAGS stays unset: under -e the environment beats a makefile `=`
+      # too, so this case would pass against the assignment it exists to
+      # reject.
+      env = clean_env(CARGO_FEATURES = without_nn)
     ),
     without_nn
   )
@@ -92,7 +121,7 @@ test_that("CARGO_PROFILE_RELEASE_LTO stays thin whatever the environment says", 
   expect_equal(
     resolve_make_var(
       mk, "CARGO_PROFILE_RELEASE_LTO",
-      env = c(CARGO_PROFILE_RELEASE_LTO = "fat", MAKEFLAGS = "-e")
+      env = clean_env(CARGO_PROFILE_RELEASE_LTO = "fat", MAKEFLAGS = "-e")
     ),
     "thin"
   )
