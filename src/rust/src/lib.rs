@@ -2680,11 +2680,23 @@ fn fit_result_to_list(
         sigma_random = result.bic_inputs.sigma_random
     );
 
+    // Parameter priors (ferx-core #254). `ofv` is the *penalized* objective once
+    // a `prior(...)` is declared; the two halves and the per-parameter report are
+    // shipped beside it so R can tell the data likelihood from the penalty -
+    // AIC/BIC are computed from `ofv_data`, and `ferx_sir()` has to hand the
+    // engine the data half rather than the penalized total (ferx-r #366).
+    // For a model that declares no prior, `ofv_data == ofv`, `ofv_prior == 0`
+    // and the report is NULL.
+    let prior_summary = prior_summary_to_dataframe(result);
+
     list!(
         converged = result.converged,
         method = method_label,
         method_chain = method_chain,
         ofv = result.ofv,
+        ofv_data = result.ofv_data,
+        ofv_prior = result.ofv_prior,
+        prior_summary = prior_summary,
         aic = result.aic,
         bic = result.bic,
         bic_inputs = bic_inputs,
@@ -2940,6 +2952,56 @@ fn finish_df(pairs: Vec<(&str, Robj)>, nrow: usize) -> Robj {
     let row_names: Vec<i32> = (1..=nrow as i32).collect();
     df.set_attrib("row.names", row_names).unwrap();
     df.into()
+}
+
+// -- Helper: per-parameter prior report as a data frame (ferx-core #254) --
+//
+// One row per priored coordinate, NULL when the model declares no `prior(...)`.
+// `prior_value` / `estimate` / `prior_lower_95` / `prior_upper_95` are on the
+// declared scale; `shift_in_prior_sds` and `penalty` are in packed space, and
+// the penalties sum to `ofv_prior`.
+fn prior_summary_to_dataframe(result: &FitResult) -> Robj {
+    let n = result.prior_summary.len();
+    if n == 0 {
+        return ().into();
+    }
+    let name: Vec<String> = result.prior_summary.iter().map(|p| p.name.clone()).collect();
+    let prior_value: Vec<f64> = result.prior_summary.iter().map(|p| p.prior_value).collect();
+    let estimate: Vec<f64> = result.prior_summary.iter().map(|p| p.estimate).collect();
+    let shift: Vec<f64> = result
+        .prior_summary
+        .iter()
+        .map(|p| p.shift_in_prior_sds)
+        .collect();
+    let penalty: Vec<f64> = result.prior_summary.iter().map(|p| p.penalty).collect();
+    let family: Vec<String> = result
+        .prior_summary
+        .iter()
+        .map(|p| p.family.clone())
+        .collect();
+    let lower: Vec<f64> = result
+        .prior_summary
+        .iter()
+        .map(|p| p.prior_lower_95)
+        .collect();
+    let upper: Vec<f64> = result
+        .prior_summary
+        .iter()
+        .map(|p| p.prior_upper_95)
+        .collect();
+    finish_df(
+        vec![
+            ("name", name.into()),
+            ("prior_value", prior_value.into()),
+            ("estimate", estimate.into()),
+            ("shift_in_prior_sds", shift.into()),
+            ("penalty", penalty.into()),
+            ("family", family.into()),
+            ("prior_lower_95", lower.into()),
+            ("prior_upper_95", upper.into()),
+        ],
+        n,
+    )
 }
 
 // -- Helper: build per-subject EBE eta data frame --
@@ -3394,7 +3456,11 @@ fn ferx_rust_inits_from_nca(model_path: &str, data_path: &str, method: &str) -> 
 /// @param data_path Path to the NONMEM CSV as recorded on the fit.
 /// @param model_hash Expected SHA-256 of the model file; empty string disables the check.
 /// @param data_hash Expected SHA-256 of the data file; empty string disables the check.
-/// @param ofv Original fit's OFV (= 2 * nll).
+/// @param ofv Original fit's OFV (= 2 * nll). The *penalized* total when the
+///   model declares a `prior(...)`.
+/// @param ofv_prior The prior half of `ofv`; 0 when the model declares no
+///   prior. SIR's reference objective is the data half, `ofv - ofv_prior`,
+///   and the engine adds the penalty back itself (ferx-r #366).
 /// @param interaction TRUE for a FOCEI fit, FALSE for FOCE. Controls the inner-loop NLL.
 /// @param theta Vector of theta point estimates.
 /// @param omega_flat Row-major flattened omega matrix.
@@ -3421,6 +3487,7 @@ fn ferx_rust_sir(
     model_hash: &str,
     data_hash: &str,
     ofv: f64,
+    ofv_prior: f64,
     interaction: bool,
     theta: Vec<f64>,
     omega_flat: Vec<f64>,
@@ -3596,19 +3663,18 @@ fn ferx_rust_sir(
         // ferx-core main split the objective into a data and a prior half
         // (#254). `run_sir` reads neither field directly: it takes its reference
         // objective as `data_ofv(fit) = fit.ofv - fit.ofv_prior`, deliberately
-        // not `ofv_data`, which a deserialised legacy fit carries as 0. The
-        // `ofv` handed in here is the whole objective the R fit recorded, so the
-        // data half carries it and the prior half is 0 - what an unpriored fit
-        // reports.
+        // not `ofv_data`, which a deserialised legacy fit carries as 0. So the
+        // prior half has to arrive here as itself: `ofv` is the penalized total
+        // for a priored fit, and `run_sir_core` adds the penalty back on top of
+        // whatever reference it is given (ferx-r #366). Passing `ofv_prior = 0`
+        // beside a penalized `ofv` would count the penalty twice - a constant
+        // offset that cancels in today's normalized importance weights, and a
+        // wrong number the moment `ofv_hat` is used as anything but a difference.
         //
-        // For a *priored* fit that `ofv` is already penalized, so `data_ofv`
-        // returns the penalized total and `run_sir_core` adds the penalty a
-        // second time. That shifts `ofv_hat` by a constant, which cancels in the
-        // normalized importance weights, so no number moves today - but the
-        // right fix is for `ferx_sir()` to pass the fit's own `ofv_prior`
-        // through rather than to rely on that cancellation (ferx-r #366).
-        ofv_data: ofv,
-        ofv_prior: 0.0,
+        // `prior_summary` stays empty: it is a report, not an input, and
+        // `run_sir` does not read it.
+        ofv_data: ofv - ofv_prior,
+        ofv_prior,
         prior_summary: Vec::new(),
         aic: 0.0,
         bic: 0.0,
@@ -3814,7 +3880,12 @@ fn ferx_rust_sir(
 /// @param data_path Path to the NONMEM CSV as recorded on the fit.
 /// @param model_hash Expected SHA-256 of the model file; empty string disables the check.
 /// @param data_hash Expected SHA-256 of the data file; empty string disables the check.
-/// @param ofv Original fit's OFV (= 2 * nll).
+/// @param ofv Original fit's OFV (= 2 * nll). The *penalized* total when the
+///   model declares a `prior(...)`.
+/// @param ofv_prior The prior half of `ofv`; 0 when the model declares no
+///   prior. The covariance step re-derives the prior curvature from
+///   `model.priors` rather than reading either half, but the skeleton records
+///   the split it was handed rather than asserting an unpriored fit.
 /// @param interaction TRUE for a FOCEI fit, FALSE for FOCE. Controls the inner-loop NLL.
 /// @param theta Vector of theta point estimates.
 /// @param omega_flat Row-major flattened omega matrix.
@@ -3840,6 +3911,7 @@ fn ferx_rust_covariance(
     model_hash: &str,
     data_hash: &str,
     ofv: f64,
+    ofv_prior: f64,
     interaction: bool,
     theta: Vec<f64>,
     omega_flat: Vec<f64>,
@@ -4017,12 +4089,14 @@ fn ferx_rust_covariance(
         converged: true,
         ofv,
         // ferx-core main split the objective into a data and a prior half
-        // (#254). `run_covariance` reads neither - it re-derives the penalty
-        // from `model.priors` when the model declares one - so the `ofv` handed
-        // in carries the data half and the prior half is 0, as for an unpriored
-        // fit.
-        ofv_data: ofv,
-        ofv_prior: 0.0,
+        // (#254). `run_covariance` reads neither - it re-derives the prior
+        // curvature from `model.priors` when the model declares one, which is
+        // why the standalone `ferx_covariance()` path gets the priored SEs
+        // right without being told about the prior. The split is still recorded
+        // as handed in rather than flattened to "unpriored", so this skeleton
+        // does not depend on the engine continuing not to look (ferx-r #366).
+        ofv_data: ofv - ofv_prior,
+        ofv_prior,
         prior_summary: Vec::new(),
         aic: 0.0,
         bic: 0.0,

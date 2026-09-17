@@ -351,6 +351,22 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
     r_extras = .fitrx_collect_r_extras(fit)
   )
 
+  # Parameter priors (ferx-core #254). Written only for a priored fit - the
+  # three fields are `Option` / `skip_serializing_if` on the wire, and
+  # `prior_summary` deserialises as a `Vec`, which an explicit `null` would
+  # fail rather than default. Assigned after the fact because `list(x = NULL)`
+  # keeps the name and `null = "null"` would emit exactly that null.
+  prior_rows <- .fitrx_prior_summary_to_wire(fit$prior_summary)
+  # A fit loaded from a pre-#366 bundle has its prior half recovered from the
+  # stored AIC but no per-parameter report, so the halves are written on a
+  # non-zero `ofv_prior` alone - otherwise re-saving such a fit would drop the
+  # split again and put the next reader back where this PR found them.
+  if (!is.null(prior_rows) || .ferx_ofv_prior(fit) != 0) {
+    wire$ofv_data <- as.numeric(fit$ofv_data %||% fit$ofv)
+    wire$ofv_prior <- .ferx_ofv_prior(fit)
+    if (!is.null(prior_rows)) wire$prior_summary <- prior_rows
+  }
+
   jsonlite::write_json(
     wire,
     path,

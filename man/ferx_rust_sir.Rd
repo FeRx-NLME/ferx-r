@@ -10,6 +10,7 @@ ferx_rust_sir(
   model_hash,
   data_hash,
   ofv,
+  ofv_prior,
   interaction,
   theta,
   omega_flat,

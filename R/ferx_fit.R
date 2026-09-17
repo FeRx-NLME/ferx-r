@@ -690,7 +690,25 @@
 #'   \item{converged}{Logical; did the optimizer converge}
 #'   \item{method}{Estimation method used}
 #'   \item{n_iterations}{Number of outer iterations run}
-#'   \item{ofv}{Objective function value (-2 log-likelihood)}
+#'   \item{ofv}{Objective function value (-2 log-likelihood). The
+#'     \emph{penalized} objective when the model declares a \code{prior(...)}
+#'     on any parameter, i.e. \code{ofv_data + ofv_prior}.}
+#'   \item{ofv_data}{The data half of \code{ofv} - the -2 log-likelihood the
+#'     AIC and BIC are computed from, and the value to compare against an
+#'     unpriored fit of the same model. Equal to \code{ofv} when no prior is
+#'     declared.}
+#'   \item{ofv_prior}{The prior half of \code{ofv}: the penalty summed over
+#'     the priored coordinates. Exactly 0 when no prior is declared.}
+#'   \item{prior_summary}{Per-parameter prior report, or \code{NULL} when the
+#'     model declares no prior. One row per priored parameter with columns
+#'     \code{name}, \code{prior_value}, \code{estimate},
+#'     \code{shift_in_prior_sds} (signed, in prior SDs),
+#'     \code{penalty} (this parameter's contribution to \code{ofv_prior}),
+#'     \code{family} (\code{"lognormal"} or \code{"normal"}, decided by the
+#'     parameter's declared lower bound), and the implied 95% prior interval
+#'     \code{prior_lower_95} / \code{prior_upper_95}. When this is non-NULL the
+#'     standard errors in \code{se_theta} and friends are the curvature of the
+#'     \emph{penalized} objective - MAP / penalized-ML SEs, not posterior SDs.}
 #'   \item{aic}{Akaike Information Criterion}
 #'   \item{bic}{Bayesian Information Criterion}
 #'   \item{theta}{Named numeric vector of fixed effect estimates}
@@ -2381,8 +2399,11 @@ print.ferx_fit <- function(x, ...) {
   status_tail_str <- if (length(status_tail) > 0L) paste0("   ", paste(status_tail, collapse = "   ")) else ""
   cat("\n STATUS: ", .ferx_style(status_lbl, status_style), status_tail_str, "\n", sep = "")
 
-  # OFV / AIC / BIC on a single line.
+  # OFV / AIC / BIC on a single line, with the parameter-prior split under it
+  # when the model declares one (the OFV above is then the penalized total).
   cat(sprintf(" OFV: %.4f    AIC: %.4f    BIC: %.4f\n", x$ofv, x$aic, x$bic))
+  prior_line <- .ferx_prior_ofv_line(x)
+  if (!is.null(prior_line)) cat(prior_line, "\n", sep = "")
 
   # DATA SELECTION block (only when [data_selection] rules were active).
   ex <- x$exclusions
@@ -3009,6 +3030,13 @@ summary.ferx_fit <- function(object, ...) {
     method_chain = x$method_chain,
     converged = x$converged,
     ofv = x$ofv,
+    # Parameter-prior split (ferx-core #254). Carried onto the summary object
+    # so print.ferx_summary() can annotate its OFV line the same way
+    # print.ferx_fit() does; both halves collapse to the unpriored values when
+    # the model declares no prior.
+    ofv_data = x$ofv_data,
+    ofv_prior = x$ofv_prior,
+    prior_summary = x$prior_summary,
     aic = x$aic,
     bic = x$bic,
     n_subjects = x$n_subjects,
@@ -3121,6 +3149,8 @@ print.ferx_summary <- function(x, ...) {
   }
 
   cat(sprintf("\nOFV: %.4f  AIC: %.4f  BIC: %.4f\n", x$ofv, x$aic, x$bic))
+  prior_line <- .ferx_prior_ofv_line(x)
+  if (!is.null(prior_line)) cat(prior_line, "\n", sep = "")
   cat(sprintf(
     "Subjects: %d  Obs: %d  Params: %s  Iter: %d\n",
     x$n_subjects, x$n_obs,

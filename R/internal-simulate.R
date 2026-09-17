@@ -42,3 +42,19 @@ validate_fit_for_params <- function(fit) {
   if (is.data.frame(rc) && nrow(rc) > 0L) return(as.numeric(rc$rho))
   numeric(0)
 }
+
+# The prior half of a fit's objective, for the FFI.
+#
+# `fit$ofv` is the *penalized* total once the model declares a `prior(...)`
+# (ferx-core #254). Both the SIR and the standalone covariance binding rebuild a
+# skeleton FitResult from the primitives flattened out of the fit, and SIR takes
+# its reference objective as `ofv - ofv_prior` - so handing it a penalized `ofv`
+# with a zero prior half counts the penalty twice (ferx-r #366).
+#
+# Returns 0 for an unpriored fit, and for one that predates the field (an older
+# .fitrx bundle), which is the truth in both cases: no prior was applied, so
+# `ofv` is already the data half.
+.ferx_ofv_prior <- function(fit) {
+  v <- suppressWarnings(as.numeric(fit$ofv_prior %||% 0))
+  if (length(v) != 1L || !is.finite(v)) 0 else v
+}
