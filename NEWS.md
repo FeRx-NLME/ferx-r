@@ -275,6 +275,17 @@
   no prior reports `ofv_data == ofv`, `ofv_prior == 0` and a `NULL` summary, and
   prints exactly as before.
 
+  A bundle written by `ferx_save_fit()` *before* this change carries neither
+  half even when the fit had a prior, so reading a missing split as "no prior"
+  would relabel that bundle's penalized objective as its likelihood. Such a
+  bundle instead has its split recovered from the stored AIC, which the engine
+  computes as `ofv_data + 2 * n_parameters` for every fit: `ferx_load_fit()`
+  reports the recovered halves and warns once that the per-parameter
+  `prior_summary` is not recoverable and a refit would restore it. The recovery
+  is guarded - a recovered prior half below zero means the identity does not
+  hold for that file, and the unpriored reading is kept - and re-saving such a
+  fit writes the two halves explicitly, so the split is not lost again.
+
   This closes the gap recorded below when the engine gained priors. It also
   removes a silent assumption in `ferx_sir()`: the engine takes SIR's reference
   objective as `ofv - ofv_prior` and adds the prior penalty back itself, so

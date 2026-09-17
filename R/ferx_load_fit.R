@@ -181,19 +181,46 @@ ferx_load_fit <- function(path) {
 }
 
 .fitrx_wire_to_fit <- function(w) {
+  # Parameter-prior split (ferx-core #254). A bundle that carries the two halves
+  # is believed as written; one that does not has them recovered from the stored
+  # AIC, because a bundle this package wrote before ferx-r #366 omitted them
+  # even for a priored fit. `ferx_sir()` reads `ofv_prior` to hand the engine
+  # the data half, so a wrong split here is the #366 double count all over again.
+  split <- if (is.null(.fitrx_unwrap_opt_num(w$ofv_data))) {
+    .fitrx_recover_ofv_split(w)
+  } else {
+    list(
+      ofv_data = as.numeric(.fitrx_unwrap_opt_num(w$ofv_data)),
+      ofv_prior = as.numeric(.fitrx_unwrap_opt_num(w$ofv_prior) %||% 0),
+      recovered = FALSE
+    )
+  }
+  prior_summary <- .fitrx_prior_summary_from_wire(w$prior_summary)
+  # A recovered prior half has no per-parameter report to go with it - that was
+  # never written. Say so once: the fit is usable and `ferx_sir()` is now right
+  # on it, but `prior_summary` is NULL and the standard errors it would have
+  # flagged as penalized-ML are unannotated. A refit restores both. Only a
+  # *recovered* split warns - re-saving such a fit writes the two halves
+  # explicitly, and loading that back is not a guess and says nothing.
+  if (isTRUE(split$recovered)) {
+    warning(
+      "ferx_load_fit: this bundle predates the parameter-prior fields and was ",
+      "written from a fit with a prior; its data / prior objective split was ",
+      "recovered from the stored AIC (ofv_data = ", format(split$ofv_data),
+      ", ofv_prior = ", format(split$ofv_prior), "). The per-parameter ",
+      "prior_summary is not recoverable - re-fit the model to restore it.",
+      call. = FALSE
+    )
+  }
+
   out <- list(
     method = .fitrx_method_label(w$method),
     method_chain = vapply(as.character(w$method_chain), .fitrx_method_label, character(1L), USE.NAMES = FALSE),
     converged = isTRUE(w$converged),
     ofv = as.numeric(w$ofv),
-    # Parameter-prior split (ferx-core #254), reconstructed the way the engine's
-    # own loader does: a bundle written before priors existed carries neither
-    # half, and `ofv_data = ofv` / `ofv_prior = 0` is the truth there because no
-    # prior could have been applied. `ferx_sir()` reads `ofv_prior` to hand the
-    # engine the data half (ferx-r #366), so it has to survive a round-trip.
-    ofv_data = as.numeric(.fitrx_unwrap_opt_num(w$ofv_data) %||% w$ofv),
-    ofv_prior = as.numeric(.fitrx_unwrap_opt_num(w$ofv_prior) %||% 0),
-    prior_summary = .fitrx_prior_summary_from_wire(w$prior_summary),
+    ofv_data = split$ofv_data,
+    ofv_prior = split$ofv_prior,
+    prior_summary = prior_summary,
     aic = as.numeric(w$aic),
     bic = as.numeric(w$bic),
     n_obs = as.integer(w$n_obs),

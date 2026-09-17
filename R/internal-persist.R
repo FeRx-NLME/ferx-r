@@ -159,3 +159,51 @@
     stringsAsFactors   = FALSE
   )
 }
+
+# Recover the objective's data / prior split from a bundle that does not carry
+# it, returning list(ofv_data =, ofv_prior =).
+#
+# ferx-core's own loader reads a missing split as "this file predates priors",
+# and for a bundle *it* wrote that is sound: once the feature existed, its
+# writer always emitted the split for a priored fit. It is NOT sound for a
+# bundle this package wrote. `ferx_save_fit()` shipped before ferx-r #366 and
+# emitted neither half, while R could already fit a priored model - so an
+# R-written bundle of a priored fit carries a penalized `ofv` and nothing to
+# say so. Reading that as the data half relabels the penalized objective as the
+# likelihood, breaks the `aic == ofv_data + 2k` invariant the stored AIC was
+# computed under, and hands `ferx_sir()` back the #366 double count.
+#
+# The split is recoverable from what such a bundle does carry: the engine
+# computes `aic = ofv_data + 2 * n_parameters` for every fit, priored or not
+# (ferx-core api/fit.rs), and both `aic` and `n_parameters` are on the wire. So
+# `ofv_data = aic - 2 * n_parameters` and `ofv_prior = ofv - ofv_data`.
+#
+# Guarded, because the identity is only as good as the two fields it reads. A
+# penalty is a sum of squares, so a recovered prior half below zero means the
+# identity does not hold for this file (a hand-edited bundle, a writer that
+# computed AIC differently) and the unpriored reading is restored. A recovered
+# half within rounding distance of zero is taken as exactly zero, which is what
+# the overwhelmingly common unpriored bundle should report.
+.fitrx_recover_ofv_split <- function(w) {
+  ofv <- suppressWarnings(as.numeric(w$ofv %||% NA_real_))
+  unpriored <- list(ofv_data = ofv, ofv_prior = 0, recovered = FALSE)
+  if (length(ofv) != 1L || !is.finite(ofv)) return(unpriored)
+
+  aic <- suppressWarnings(as.numeric(w$aic %||% NA_real_))
+  k <- suppressWarnings(as.numeric(w$n_parameters %||% NA_real_))
+  if (length(aic) != 1L || !is.finite(aic) ||
+        length(k) != 1L || !is.finite(k) || k < 0) {
+    return(unpriored)
+  }
+
+  ofv_data <- aic - 2 * k
+  ofv_prior <- ofv - ofv_data
+  if (!is.finite(ofv_prior)) return(unpriored)
+  # The JSON carries full f64 precision, so the identity round-trips to within
+  # rounding; anything below this is noise, not a prior.
+  tol <- 1e-9 * max(1, abs(ofv))
+  if (ofv_prior < -tol) return(unpriored)
+  if (ofv_prior <= tol) return(unpriored)
+
+  list(ofv_data = ofv_data, ofv_prior = ofv_prior, recovered = TRUE)
+}
