@@ -21,11 +21,13 @@ ferx_simulate_with_uncertainty(
 The \code{DV} column may be left empty (\code{.} / \code{NA}) on the
 sampling rows - the DV is what the simulation produces, so an empty cell
 means "simulate here" (a placeholder value is not needed). Rows marked
-\code{MDV = 1} are excluded, as always. Kept empty-DV records are counted
+\code{MDV = 1} are excluded, as always. Kept empty-DV records are reported
 in the \code{simulation_warnings} attribute and re-emitted as an R warning:
 \code{ferx_fit()} skips those same records, so simulated rows at those
 times have no counterpart in a fit's \code{sdtab} (do not overlay the two,
-e.g. in a VPC).}
+e.g. in a VPC). Every other data-reader diagnostic the engine raises for
+\code{data} - a dose that never landed, a covariate with no value for some
+subjects, and so on - travels the same channel.}
 
 \item{fit}{A \code{ferx_fit} result. Must carry either \code{cov_matrix}
 (asymptotic) or \code{sir_resamples} (SIR) depending on \code{method}.}
@@ -43,8 +45,9 @@ uncertainty distribution}
 A data.frame with columns: DRAW, SIM, ID, TIME, CMT, IPRED, DV_SIM,
 OBSERVED. \code{CMT} is the observation compartment; \code{OBSERVED} is
 \code{NA} throughout (this path is Gaussian-only - a drug-driven ODE-TTE
-endpoint is not supported here). Row count:
-\code{n_uncertainty_draws * n_sim_per_draw * n_obs}.
+endpoint is not supported here, and \code{OBSERVED} never echoes the input
+\code{DV}; see \code{\link{ferx_simulate}} for what each column holds).
+Row count: \code{n_uncertainty_draws * n_sim_per_draw * n_obs}.
 }
 \description{
 For each parameter set drawn from the uncertainty distribution, the

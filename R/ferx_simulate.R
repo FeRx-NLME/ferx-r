@@ -59,11 +59,13 @@
 #'   The \code{DV} column may be left empty (\code{.} / \code{NA}) on the
 #'   sampling rows - the DV is what the simulation produces, so an empty cell
 #'   means "simulate here" (a placeholder value is not needed). Rows marked
-#'   \code{MDV = 1} are excluded, as always. Kept empty-DV records are counted
+#'   \code{MDV = 1} are excluded, as always. Kept empty-DV records are reported
 #'   in the \code{simulation_warnings} attribute and re-emitted as an R warning:
 #'   \code{ferx_fit()} skips those same records, so simulated rows at those
 #'   times have no counterpart in a fit's \code{sdtab} (do not overlay the two,
-#'   e.g. in a VPC).
+#'   e.g. in a VPC). Every other data-reader diagnostic the engine raises for
+#'   \code{data} - a dose that never landed, a covariate with no value for some
+#'   subjects, and so on - travels the same channel.
 #' @param n_sim Number of simulation replicates
 #' @param seed Random seed for reproducibility
 #' @param fit Optional \code{ferx_fit} result. When provided, simulation uses
@@ -96,11 +98,34 @@
 #'   until the cumulative hazard reaches \code{-log U}, censoring at
 #'   \code{horizon} if no event fires (ferx-core #564). Purely-Gaussian models
 #'   ignore it. \code{NULL} (default) leaves it unset.
-#' @return A data.frame. Gaussian rows carry DRAW, SIM, ID, TIME, CMT, IPRED,
-#'   DV_SIM (with \code{OBSERVED = NA}). For a joint PK-TTE model each subject
-#'   also yields a TTE row on the event CMT, where TIME is the sampled
-#'   event/censor time and \code{OBSERVED} is 1 (event before \code{horizon}) or
-#'   0 (right-censored at it); its IPRED and DV_SIM are \code{NA}. Use
+#' @return A data.frame, one row per simulated record, with these columns:
+#'   \describe{
+#'     \item{\code{DRAW}}{Parameter draw. Always 1 here; it is the grouping
+#'       variable in \code{\link{ferx_simulate_with_uncertainty}}.}
+#'     \item{\code{SIM}}{Replicate index, 1 to \code{n_sim}.}
+#'     \item{\code{ID}}{Subject identifier, as a character string, exactly as
+#'       the \code{ID} column of \code{data} spelled it.}
+#'     \item{\code{TIME}}{Sampling time from \code{data} - or, on a TTE row,
+#'       the \emph{sampled} event or censoring time (see \code{OBSERVED}).}
+#'     \item{\code{CMT}}{Observation compartment: the data file's \code{CMT}
+#'       for a continuous row, the \code{[event_model]} / \code{[binary_model]}
+#'       compartment for an event or categorical row.}
+#'     \item{\code{IPRED}}{Individual prediction - the drawn subject's mean
+#'       response, random effects but no residual error.}
+#'     \item{\code{DV_SIM}}{The simulated observation: \code{IPRED} plus
+#'       residual error, and the column a VPC or a predictive interval is built
+#'       from.}
+#'     \item{\code{OBSERVED}}{Event indicator for a time-to-event row only -
+#'       1 = the event fired before \code{horizon}, 0 = administratively
+#'       right-censored at it - and \code{NA} on every other row. It is
+#'       \strong{not} the input \code{DV}: nothing in this frame echoes the
+#'       data file's observations, since simulation is what produces that
+#'       column. Compare against the observed data by joining \code{data} on
+#'       ID/TIME yourself.}
+#'   }
+#'   Gaussian rows carry DRAW, SIM, ID, TIME, CMT, IPRED and DV_SIM, with
+#'   \code{OBSERVED = NA}. For a joint PK-TTE model each subject also yields a
+#'   TTE row on the event CMT, whose IPRED and DV_SIM are \code{NA}; use
 #'   \code{is.na(OBSERVED)} to separate continuous rows from event rows. For a
 #'   \code{[binary_model]} endpoint the categorical row on the binary CMT carries
 #'   the simulated 0/1 outcome in \code{DV_SIM} (coded as the input CSV codes DV),
@@ -109,7 +134,9 @@
 #'   The returned frame carries a \code{simulation_warnings} attribute (a
 #'   character vector, empty for a clean run) listing any per-subject simulation
 #'   diagnostics from ferx-core (e.g. a degenerate or pathological hazard that
-#'   censored a subject with no event); these are also raised as an R warning.
+#'   censored a subject with no event) together with the engine's data-reader
+#'   diagnostics for \code{data} - the same ones \code{ferx_fit()} returns in
+#'   \code{fit$warnings}; these are also raised as an R warning.
 #'
 #' @examples
 #' ex <- ferx_example("warfarin")
@@ -180,16 +207,17 @@ ferx_simulate <- function(model, data = NULL, n_sim = 1L, seed = 42L, fit = NULL
   .ferx_surface_sim_warnings(res)
 }
 
-# Emit ferx-core's per-subject simulation diagnostics (#762/#763), attached by the
-# Rust glue as a `simulation_warnings` character-vector attribute, as a single R
-# warning so they are not silently lost; return `res` unchanged (the attribute is
-# left in place for programmatic access). `res` may be NULL when the Rust side
-# errored, in which case there is nothing to surface.
+# Emit the diagnostics attached by the Rust glue as a `simulation_warnings`
+# character-vector attribute - ferx-core's per-subject simulation diagnostics
+# (#762/#763) plus every data-reader diagnostic the engine raised for the dataset
+# (#283) - as a single R warning, so they are not silently lost; return `res`
+# unchanged (the attribute is left in place for programmatic access). `res` may be
+# NULL when the Rust side errored, in which case there is nothing to surface.
 .ferx_surface_sim_warnings <- function(res, fn = "ferx_simulate") {
   w <- attr(res, "simulation_warnings", exact = TRUE)
   if (length(w) > 0L) {
     warning(
-      fn, " produced ", length(w), " simulation diagnostic",
+      fn, " produced ", length(w), " diagnostic",
       if (length(w) > 1L) "s" else "", ":\n  ",
       paste(w, collapse = "\n  "),
       call. = FALSE
