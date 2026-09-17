@@ -729,7 +729,6 @@ A named list. Where to find commonly-needed quantities:\tabular{llll}{
    Residuals, PRED, IPRED, diagnostics \tab \code{fit$sdtab} \tab one row per observation \tab always \cr
    Covariates echoed per observation (via \verb{[output]}) \tab \code{fit$sdtab} \tab one row per observation, LOCF \tab declared in \verb{[output]} \cr
    Raw covariate values for all dataset records \tab \code{fit$covtab} \tab one row per dataset record (doses + obs) \tab model has \verb{[covariates]} block \cr
-   ETA / EBE values per observation row \tab \code{fit$sdtab} (\code{ETA_CL}, \code{ETA_V}, ...) \tab one row per observation, value repeated \tab always \cr
    ETA / EBE values per subject \tab \code{fit$ebe_etas} \tab one row per subject \tab model declares etas \cr
    Individual PK parameters per subject \tab \code{fit$individual_estimates} \tab one row per subject \tab always \cr
 }
@@ -772,11 +771,11 @@ automatically.  Columns declared in \code{[derived]} (per-row
 expressions, aggregates, integrals) and \code{[output]} (individual
 PK parameters or covariates echoed by name) appear at the end of the
 data frame in declaration order.
-ETA columns (\code{ETA_CL}, \code{ETA_V}, etc.) are included
-automatically - the same EBE value is repeated for every observation
-row of that subject. For a compact per-subject view use
-\code{fit$ebe_etas}; for individual PK parameter values use
-\code{fit$individual_estimates}.}
+sdtab carries no ETA columns: it is per-observation, and an EBE is one
+value per subject. Naming an eta in \code{[output]} therefore does not
+add a column - the fit warns that the declaration was ignored. Use
+\code{fit$ebe_etas} for the per-subject EBEs, and
+\code{fit$individual_estimates} for individual PK parameter values.}
 \item{covtab}{Data frame echoing the declared covariate columns, present
 only when the model has a \code{[covariates]} block. Columns: \code{ID},
 \code{TIME}, \code{EVID}, then one column per declared covariate (in
@@ -898,9 +897,12 @@ IWRES values.}
 subjects. Positive values indicate under-fitting, negative values
 indicate over-fitting. \code{NA} when insufficient observations.}
 \item{wall_time_secs}{Total wall-clock time for the fit in seconds.}
-\item{model_name}{Model name from the \code{.ferx} file. Falls back to
+\item{model_name}{Model name declared in the \code{.ferx} file by a
+top-level \code{model <name>} line (outside any \code{[block]}, e.g.
+\code{model warfarin_pk}); the name is a single word. There is no
+\code{[model]} block - the engine reads the bare line. Falls back to
 the model file's basename (without extension) when the file declares
-no name.}
+no name, which is what every bundled example does.}
 \item{data_name}{Dataset name, derived as the basename of the \code{data}
 path with its extension stripped.}
 \item{gradient}{The inner-loop gradient method as requested by the
@@ -1565,6 +1567,27 @@ fit$estimates    # tidy data frame: theta / omega / sigma + SE / %RSE
 fit$cor_matrix   # parameter correlation matrix (needs covariance = TRUE)
 fit$eta_cov      # ETA-covariate correlation table
 }
+}
+
+\section{Errors raised by the engine}{
+
+
+When the engine refuses the model or the data, \code{ferx_fit()} raises a
+condition of class \code{ferx_engine_error}. It carries the same stable
+identifier \code{\link{ferx_model_validate}} reports for the same file, so
+a script can branch on the code instead of matching the message text:
+
+\preformatted{
+res <- tryCatch(ferx_fit(model, data), ferx_engine_error = function(e) e)
+res$code        # e.g. "E_UNKNOWN_BLOCK"
+res$block       # owning [block], or NA
+res$line        # 1-based source line, or NA
+res$suggestion  # actionable hint, or NA
+}
+
+The code is also appended to the message in square brackets. A failure the
+engine's validation pass cannot attribute to one diagnostic is raised as an
+ordinary error with the engine's message unchanged.
 }
 
 \examples{

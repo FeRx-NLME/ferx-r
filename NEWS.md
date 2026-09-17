@@ -1165,6 +1165,42 @@
   runs make with `-e` - the reason the environment was expected to be
   honoured - is corrected.
 
+- **`fit$cov_matrix` labelled a block omega's rows in a different order than it
+  stored them** ([#367](https://github.com/FeRx-NLME/ferx-r/issues/367)). The
+  engine packs those rows as the full lower triangle in *column-major* order -
+  the packing `se_omega` is documented with - but the dimnames were generated
+  row-major, so from a 3x3 block onwards two labels sat on the wrong rows. On
+  the bundled `warfarin_block_omega` example (a `block_omega (ETA_CL, ETA_V)`
+  beside a diagonal `omega ETA_KA`) the held `(ETA_KA, ETA_CL)` covariance was
+  labelled `ETA_V,ETA_V`, so `diag(fit$cov_matrix)` showed an estimated
+  variance as exactly `0` while `se_omega` gave it a finite standard error.
+  `fit$cor_matrix` inherits the dimnames and moved with it. Both call sites -
+  `ferx_fit()` and `ferx_covariance()` - now take the labels from one shared
+  helper, and `?ferx_fit` states the ordering.
+
+- **A refused `ferx_fit()` dropped the stable diagnostic code**
+  ([#367](https://github.com/FeRx-NLME/ferx-r/issues/367)).
+  `ferx_model_validate()` returned `E_UNKNOWN_BLOCK` for a model with an
+  unrecognised block header; fitting the same file raised the same prose with
+  no code, so a script could branch on the identifier only on the path most
+  users reach second. A refused fit now raises a condition of class
+  `ferx_engine_error` carrying `code`, `block`, `line` and `suggestion`, with
+  the code appended to the message in square brackets. The engine's prose is
+  preserved verbatim at the front of the message, so existing `tryCatch()` /
+  `expect_error()` matches on it keep working, and a failure that cannot be
+  attributed to a single diagnostic is raised unchanged.
+
+- **An eta named in `[output]` is no longer dropped in silence**
+  ([#367](https://github.com/FeRx-NLME/ferx-r/issues/367)). sdtab is
+  per-observation and an empirical Bayes estimate is one value per subject, so
+  the engine ignores an eta listed in `[output]`; its validation pass says so
+  with `W_OUTPUT_DUPLICATE`, but `fit()` does not run that pass, so the
+  requested column was simply absent with nothing reported - while a theta in
+  the same position is a hard error. `ferx_fit()` now compares the declared
+  `[output]` names against the delivered `sdtab` and reports any that did not
+  arrive as an `output`-category warning, pointing at `fit$ebe_etas` for etas.
+  `?ferx_fit` also no longer claims sdtab carries `ETA_*` columns - it has not
+  since ferx-core #188, which the package's own tests already guarded.
 - **A fit whose objective is `NaN`, infinite, or the divergence sentinel is no
   longer reported as `converged = TRUE`**
   ([ferx-core #1303](https://github.com/FeRx-NLME/ferx-core/issues/1303)). It
@@ -1631,6 +1667,14 @@
 
 ## Documentation
 
+- **`?ferx_fit` now says how a model declares its name**
+  ([#367](https://github.com/FeRx-NLME/ferx-r/issues/367)). The `model_name`
+  entry said the field falls back to the file's basename "when the file
+  declares no name" without saying how one is declared - and there is no
+  `[model]` block to find, so the syntax read as nonexistent. The engine takes
+  the name from a bare top-level `model <name>` line (e.g. `model warfarin_pk`),
+  which is why it is absent from the block registry and from every bundled
+  example.
 - **`?ferx_fit`'s `[parameters]` syntax section no longer advertises a `(FIX)`
   that the engine does not accept**
   ([ferx-core #1377](https://github.com/FeRx-NLME/ferx-core/issues/1377)). Four

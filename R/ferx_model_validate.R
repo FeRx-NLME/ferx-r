@@ -99,15 +99,7 @@ ferx_model_validate <- function(path, data = NULL) {
   data_arg <- if (is.null(data)) "" else normalizePath(data)
   rust_result <- ferx_rust_validate_model(normalizePath(path), data_arg)
 
-  diag <- data.frame(
-    severity   = as.character(rust_result$severity),
-    code       = as.character(rust_result$code),
-    message    = as.character(rust_result$message),
-    block      = ifelse(nzchar(rust_result$block), rust_result$block, NA_character_),
-    line       = ifelse(rust_result$line == 0L, NA_integer_, as.integer(rust_result$line)),
-    suggestion = ifelse(nzchar(rust_result$suggestion), rust_result$suggestion, NA_character_),
-    stringsAsFactors = FALSE
-  )
+  diag <- .ferx_diagnostics_frame(rust_result)
 
   # An unrecognised section counts against `ok`. It used to be printed as
   # `[unknown section]` and then left out of the returned status, so `res$ok`
@@ -180,4 +172,82 @@ ferx_model_validate <- function(path, data = NULL) {
     data = if (is.null(data)) NULL else as.character(rust_result$data),
     diagnostics = diag
   ))
+}
+
+# -- Engine diagnostics as a data frame --------------------------------------
+
+# Shape what `ferx_rust_validate_model()` returns (parallel character / integer
+# vectors) into the `diagnostics` data frame `ferx_model_validate()` documents.
+# Shared with `.ferx_engine_error()` so the code attached to a refused fit is
+# the same identifier `ferx_model_validate()` prints for the same file.
+.ferx_diagnostics_frame <- function(rust_result) {
+  data.frame(
+    severity   = as.character(rust_result$severity),
+    code       = as.character(rust_result$code),
+    message    = as.character(rust_result$message),
+    block      = ifelse(nzchar(rust_result$block), rust_result$block, NA_character_),
+    line       = ifelse(rust_result$line == 0L, NA_integer_, as.integer(rust_result$line)),
+    suggestion = ifelse(nzchar(rust_result$suggestion), rust_result$suggestion, NA_character_),
+    stringsAsFactors = FALSE
+  )
+}
+
+# Re-raise an engine error from a fit with the stable diagnostic code attached.
+#
+# A refused fit used to carry only the engine's prose, while
+# `ferx_model_validate()` on the same file returned `E_UNKNOWN_BLOCK` (or
+# whichever code applied). A script could therefore branch on the code only on
+# the path most users reach second (#367). This runs the engine's own
+# validation over the same model / data, finds the diagnostic behind the
+# failure, and returns a condition of class `ferx_engine_error` carrying
+# `code`, `block`, `line` and `suggestion`, with the code appended to the
+# message for whoever reads the console. The engine's prose is preserved
+# verbatim at the front of the message, so existing `tryCatch()` /
+# `expect_error()` matches on it keep working. Returns the original condition
+# unchanged when no diagnostic can be tied to the failure.
+#
+# Only the failure path pays for the extra validation pass; a fit that runs
+# never calls this.
+.ferx_engine_error <- function(e, model, data) {
+  msg  <- conditionMessage(e)
+  diag <- tryCatch(
+    .ferx_diagnostics_frame(ferx_rust_validate_model(
+      normalizePath(model),
+      if (is.null(data)) "" else normalizePath(data)
+    )),
+    error = function(...) NULL
+  )
+  if (is.null(diag) || nrow(diag) == 0L) return(e)
+  errs <- diag[diag$severity == "error", , drop = FALSE]
+  if (nrow(errs) == 0L) return(e)
+
+  # Prefer the diagnostic whose message the engine actually raised: both paths
+  # render the same prose, so a substring match identifies the finding exactly.
+  # Only when nothing matches do we fall back, and then only if validation
+  # found a single error - with several, guessing which one stopped the fit
+  # would risk labelling the failure with an unrelated code.
+  hit <- which(vapply(
+    errs$message,
+    function(m) nzchar(m) && grepl(m, msg, fixed = TRUE),
+    logical(1)
+  ))
+  i <- if (length(hit) > 0L) {
+    hit[1L]
+  } else if (nrow(errs) == 1L) {
+    1L
+  } else {
+    return(e)
+  }
+
+  structure(
+    class = c("ferx_engine_error", "error", "condition"),
+    list(
+      message    = sprintf("%s [%s]", msg, errs$code[i]),
+      call       = conditionCall(e),
+      code       = errs$code[i],
+      block      = errs$block[i],
+      line       = errs$line[i],
+      suggestion = errs$suggestion[i]
+    )
+  )
 }
