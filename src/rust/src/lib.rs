@@ -460,7 +460,7 @@ fn ferx_rust_simulate(
 
     attach_sim_warnings(
         sim_results_to_df(&output.results),
-        [design_point_warnings(&population), output.warnings].concat(),
+        [data_reader_warnings(&population), output.warnings].concat(),
     )
 }
 
@@ -576,7 +576,7 @@ fn ferx_rust_simulate_from_fit(
     };
     attach_sim_warnings(
         sim_results_to_df(&output.results),
-        [design_point_warnings(&population), output.warnings].concat(),
+        [data_reader_warnings(&population), output.warnings].concat(),
     )
 }
 
@@ -673,12 +673,18 @@ fn ferx_rust_simulate_adaptive(
         spec,
         &opts,
     ) {
-        // Adaptive returns a list rather than a bare frame, so the design-point
-        // warning rides on the list itself; `ferx_simulate_adaptive()` surfaces
-        // it through the same `simulation_warnings` reader the other paths use.
+        // Adaptive returns a list rather than a bare frame, so the data-reader
+        // warnings ride on the list itself; `ferx_simulate_adaptive()` surfaces
+        // them through the same `simulation_warnings` reader the other paths use.
+        // `W_NO_DOSES` is dropped here and only here: on this path the controller
+        // supplies the whole regimen, so a dataset that carries only an
+        // observation grid is the normal input, not a missing AMT column.
         Ok(result) => attach_sim_warnings(
             adaptive_result_to_list(&result),
-            design_point_warnings(&population),
+            data_reader_warnings(&population)
+                .into_iter()
+                .filter(|w| !w.starts_with("W_NO_DOSES"))
+                .collect(),
         ),
         Err(e) => throw_r_error(format!("ferx_simulate_adaptive: {e}")),
     }
@@ -920,7 +926,7 @@ fn ferx_rust_simulate_with_uncertainty(
     match ferx_core::simulate_with_uncertainty(&parsed.model, &population, &fit_result, &opts) {
         Ok(results) => attach_sim_warnings(
             sim_results_to_df(&results),
-            design_point_warnings(&population),
+            data_reader_warnings(&population),
         ),
         Err(e) => {
             rprintln!("simulate_with_uncertainty error: {}", e);
@@ -976,7 +982,14 @@ fn ferx_rust_predict(
     let time: Vec<f64> = results.iter().map(|r| r.time).collect();
     let pred: Vec<f64> = results.iter().map(|r| r.pred).collect();
 
-    data_frame!(ID = id, TIME = time, PRED = pred).into()
+    // The data reader's diagnostics reach the caller here too (ferx-r #283):
+    // `ferx_predict()` reads the same file through the same reader, so a dose
+    // that never landed or a covariate missing for half the subjects is exactly
+    // as worth saying as it is on the simulate path.
+    attach_sim_warnings(
+        data_frame!(ID = id, TIME = time, PRED = pred).into(),
+        data_reader_warnings(&population),
+    )
 }
 
 /// Population predictions using fitted parameters.
@@ -1057,7 +1070,14 @@ fn ferx_rust_predict_from_fit(
     let time: Vec<f64> = results.iter().map(|r| r.time).collect();
     let pred: Vec<f64> = results.iter().map(|r| r.pred).collect();
 
-    data_frame!(ID = id, TIME = time, PRED = pred).into()
+    // The data reader's diagnostics reach the caller here too (ferx-r #283):
+    // `ferx_predict()` reads the same file through the same reader, so a dose
+    // that never landed or a covariate missing for half the subjects is exactly
+    // as worth saying as it is on the simulate path.
+    attach_sim_warnings(
+        data_frame!(ID = id, TIME = time, PRED = pred).into(),
+        data_reader_warnings(&population),
+    )
 }
 
 /// Flatten survival-function predictions into an R data frame (one row per
@@ -1887,43 +1907,31 @@ fn default_fit_result(
 
 // -- Helper: SimulationResult slice → R data frame --
 
-/// Attach ferx-core #762/#763 per-subject simulation diagnostics as a
-/// `simulation_warnings` character-vector attribute on the returned data frame,
-/// so `ferx_simulate()` can surface them without changing the data-frame contract
-/// (an empty vector when the run was clean). Mirrors how the fit path exposes
-/// `FitResult.warnings`, but as an attribute since simulate returns a bare frame.
-/// Warn when the simulation reader kept design points, i.e. `EVID=0, MDV=0`
-/// records whose `DV` cell was empty (ferx-core #957).
+/// Every non-fatal diagnostic ferx-core's data reader raised while reading the
+/// dataset, verbatim (`Population.warnings`).
 ///
-/// `read_population_for_simulation` keeps such a record as a sampling time; the
-/// fitting reader (`read_population_for`) skips it as a forgotten `MDV=1`. The
-/// two readings therefore disagree on the same file, and the disagreement is
-/// otherwise silent: a dataset that carries an *accidental* missing DV rather
-/// than a deliberate design gets simulated rows at times `ferx_fit()`'s `sdtab`
-/// has no observation for, which biases a VPC built by overlaying the two.
-/// Surface the count through the existing `simulation_warnings` channel so the
-/// divergence is visible without changing the data-frame contract.
-///
-/// Only Gaussian rows are counted: an integer-coded endpoint's design point
-/// carries a finite state-code placeholder, so it is indistinguishable from a
-/// real observation here.
-fn design_point_warnings(population: &Population) -> Vec<String> {
-    let n: usize = population
-        .subjects
-        .iter()
-        .map(|s| s.observations.iter().filter(|v| !v.is_finite()).count())
-        .sum();
-    if n == 0 {
-        return Vec::new();
-    }
-    vec![format!(
-        "{n} observation record(s) had an empty DV and were simulated as design \
-         points. ferx_fit() skips these same records, so simulated rows at those \
-         times have no counterpart in a fit's sdtab (do not overlay the two, e.g. \
-         in a VPC). Set MDV = 1 to exclude a record from the simulation too."
-    )]
+/// The fit path ships these to R inside `FitResult.warnings`; the simulate and
+/// predict paths used to drop them on the floor, so a dataset problem the engine
+/// had already diagnosed -- `W_DESIGN_DV` (an `EVID=0, MDV=0` record whose `DV`
+/// cell was empty, kept as a design point where `ferx_fit()` skips it, so a VPC
+/// built by overlaying the two is biased), a dose that never landed
+/// (`W_AMT_NOT_DOSED` / `W_NO_DOSES`), `ADDL` with no `II`, an unparseable `OCC`,
+/// a covariate with no value for some subjects -- reached the caller nowhere at
+/// all (ferx-r #283). Route the whole vector through the `simulation_warnings`
+/// channel: the engine is the one place that knows what it found, and a
+/// re-derived count here can only ever answer for the one case it was written
+/// for.
+fn data_reader_warnings(population: &Population) -> Vec<String> {
+    population.warnings.clone()
 }
 
+/// Attach simulation / data-reader diagnostics as a `simulation_warnings`
+/// character-vector attribute on the returned data frame, so the caller can
+/// surface them without changing the data-frame contract (an empty vector when
+/// the run was clean). Mirrors how the fit path exposes `FitResult.warnings`,
+/// but as an attribute since simulate and predict return a bare frame. Carries
+/// ferx-core #762/#763 per-subject simulation diagnostics and everything
+/// [`data_reader_warnings`] collected.
 fn attach_sim_warnings(mut df: Robj, warnings: Vec<String>) -> Robj {
     df.set_attrib("simulation_warnings", warnings).unwrap();
     df
@@ -1940,7 +1948,17 @@ fn sim_results_to_df(results: &[ferx_core::api::SimulationResult]) -> Robj {
     // long-format frame (without it, a binary draw was indistinguishable from a PK row
     // that failed to predict -- ferx-r #271).
     let cmt: Vec<i32> = results.iter().map(|r| r.cmt as i32).collect();
-    let ipred: Vec<f64> = results.iter().map(|r| r.ipred).collect();
+    // IPRED / DV_SIM / OBSERVED are emitted as `Option<f64>` so a value the
+    // engine has no number for becomes R's `NA_real_` and not `NaN` (ferx-r
+    // #283). The two are not interchangeable at the R prompt: `NA` prints as
+    // the missing marker every other column uses and survives `format()` /
+    // `write.csv()` as `NA`, while a bare `NaN` reads as an arithmetic failure
+    // in the model -- which is exactly the wrong thing to conclude about a
+    // continuous row's OBSERVED, where "no event flag here" is the normal case
+    // for every non-TTE row in the frame. (`is.na()` was already TRUE for both,
+    // so the documented `is.na(OBSERVED)` idiom is unchanged.)
+    let na_if_nan = |v: f64| if v.is_nan() { None } else { Some(v) };
+    let ipred: Vec<Option<f64>> = results.iter().map(|r| na_if_nan(r.ipred)).collect();
     // DV_SIM per outcome kind. The old code called `outcome.continuous_value()`
     // unconditionally, whose non-Gaussian arms return `f64::NAN` behind a
     // `debug_assert!(false)` misuse guard (compiled out in ferx-r's --release
@@ -1949,32 +1967,30 @@ fn sim_results_to_df(results: &[ferx_core::api::SimulationResult]) -> Robj {
     // outcome (0/1 for a `[binary_model]` endpoint), matching how the input CSV
     // codes DV and how NONMEM records it. TTE `Event` rows stay `NA` here -- their
     // payload is the sampled event time, already carried in the TIME column.
-    let dv_sim: Vec<f64> = results
+    let dv_sim: Vec<Option<f64>> = results
         .iter()
         .map(|r| match &r.outcome {
-            SimOutcome::Continuous { value } => *value,
-            SimOutcome::Category { state } => *state as f64,
-            SimOutcome::Count { count } => *count as f64,
+            SimOutcome::Continuous { value } => na_if_nan(*value),
+            SimOutcome::Category { state } => Some(*state as f64),
+            SimOutcome::Count { count } => Some(*count as f64),
             #[cfg(feature = "survival")]
-            SimOutcome::Event { .. } => f64::NAN,
+            SimOutcome::Event { .. } => None,
         })
         .collect();
     // OBSERVED: a drug-driven TTE row (`SimOutcome::Event`) carries its event time in
     // TIME and the observed/censored flag here -- 1 = event fired before the horizon,
-    // 0 = administratively right-censored at the horizon. Gaussian rows are NaN -> R
-    // `NA`, so `is.na(OBSERVED)` separates continuous rows from event rows (and the
-    // event rows' DV_SIM / IPRED are NaN, since there is no Gaussian prediction).
-    let observed: Vec<f64> = results
+    // 0 = administratively right-censored at the horizon. It is NOT the input DV
+    // (ferx-r #283): nothing in this frame echoes the data file's DV column, because
+    // simulation *produces* that column. Gaussian rows are `NA`, so
+    // `is.na(OBSERVED)` separates continuous rows from event rows (and the event
+    // rows' DV_SIM / IPRED are `NA`, since there is no Gaussian prediction).
+    let observed: Vec<Option<f64>> = results
         .iter()
         .map(|r| match r.outcome {
             ferx_core::SimOutcome::Event { observed, .. } => {
-                if observed {
-                    1.0
-                } else {
-                    0.0
-                }
+                Some(if observed { 1.0 } else { 0.0 })
             }
-            _ => f64::NAN,
+            _ => None,
         })
         .collect();
 
