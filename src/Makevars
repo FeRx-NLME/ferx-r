@@ -19,11 +19,24 @@ endif
 # stable host channel selected below. `survival` is added back explicitly because
 # `--no-default-features` drops it: TTE support (the datareader routing and
 # `predict_survival`, both behind ferx-core's `survival` feature) must ship here.
-CARGO_FEATURES = --no-default-features --features ci,nn,survival
+#
+# `?=`, not `=`, so the set can be replaced from the environment without editing
+# this (tracked) file:
+#
+#   CARGO_FEATURES="--no-default-features --features ci,survival" R CMD INSTALL .
+#
+# drops `nn` (Deep Compartment Models / low-dim neural ODEs), the heaviest part
+# of the dependency graph and where the final staticlib link dies on a
+# memory-constrained machine. No `make -e` is needed: make imports the
+# environment into its own variable space, so a variable set there is already
+# defined and `?=` declines to overwrite it. Unset, the default below is used
+# and the shipped build is unchanged.
+CARGO_FEATURES ?= --no-default-features --features ci,nn,survival
 # Thin LTO keeps cross-crate inlining without the fat-LTO link-time/memory cost.
-# `override` makes the makefile's value authoritative even under R CMD INSTALL's
-# make -e semantics, where a stale CARGO_PROFILE_RELEASE_LTO in the environment
-# would otherwise win.
+# `override` keeps the makefile's value authoritative even when make runs with
+# -e and the environment carries a stale CARGO_PROFILE_RELEASE_LTO. R CMD
+# INSTALL does not pass -e itself, so this only bites when the caller sets
+# MAKEFLAGS=-e, but the value is not meant to be tuned per build either way.
 override CARGO_PROFILE_RELEASE_LTO := thin
 
 # Ensure cargo driver host arch matches R's arch (avoids mismatch when the

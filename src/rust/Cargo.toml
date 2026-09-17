@@ -20,10 +20,14 @@ default = ["survival"]
 survival = ["ferx-core/survival"]
 ci = ["ferx-core/ci"]
 # Deep Compartment Models (DCM) and low-dim neural ODEs — Phase A from
-# ferx-core's plans/dcm-and-low-dim-node.md. Off by default. Opt in via
-# `cargo build --features nn` (or by adding it to `default` for a local
-# build) to enable parsing of `[covariate_nn]` blocks and the matching
-# `neural_networks` section in `FitResult` / fit YAML / .fitrx output.
+# ferx-core's plans/dcm-and-low-dim-node.md. Enables parsing of
+# `[covariate_nn]` blocks and the matching `neural_networks` section in
+# `FitResult` / fit YAML / .fitrx output. Not in `default` above, but the R
+# package build names it explicitly (`--no-default-features --features
+# ci,nn,survival` in src/Makevars), so an `R CMD INSTALL` ships it. It is the
+# heaviest part of the dependency graph; to build without it, override
+# CARGO_FEATURES in the environment - see the comment on that line in
+# src/Makevars.
 nn = ["ferx-core/nn"]
 
 [dependencies]
