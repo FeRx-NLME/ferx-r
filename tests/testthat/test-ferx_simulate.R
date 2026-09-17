@@ -214,7 +214,9 @@ test_that(".ferx_surface_sim_warnings emits attached diagnostics as one warning,
       "W_RTTE_DEGENERATE: subject 7"
     )
   )
-  expect_warning(out <- .ferx_surface_sim_warnings(fake), "2 simulation diagnostics")
+  # "diagnostics", not "simulation diagnostics": `ferx_predict()` shares this
+  # helper now, where the latter read oddly (ferx-r #283).
+  expect_warning(out <- .ferx_surface_sim_warnings(fake), "2 diagnostics")
   # Returned unchanged, attribute preserved for programmatic access.
   expect_identical(out, fake)
   expect_length(attr(out, "simulation_warnings"), 2L)

@@ -98,15 +98,17 @@ test_that("a kept design point is reported through simulation_warnings", {
   # The two readers disagree on the same file: simulation keeps an empty-DV
   # record, `ferx_fit()` skips it. That divergence must not be silent, or a VPC
   # built by overlaying simulated rows on a fit's sdtab is quietly biased at
-  # times the fit never scored.
+  # times the fit never scored. The text is the engine's own `W_DESIGN_DV`
+  # (ferx-r #283): the count is no longer re-derived in the glue.
   ex <- ferx_example("warfarin")
   expect_warning(
     sim <- ferx_simulate(ex$model, write_design_template(), n_sim = 1L, seed = 1L),
-    "empty DV"
+    "W_DESIGN_DV"
   )
   w <- attr(sim, "simulation_warnings", exact = TRUE)
   expect_length(w, 1L)
-  expect_match(w, "^6 observation record")
+  expect_match(w, "^W_DESIGN_DV: 6 observation row\\(s\\)")
+  expect_match(w, "kept as design points")
 })
 
 test_that("the `fit =` path simulates a design template too", {
@@ -162,7 +164,10 @@ test_that("ferx_simulate_adaptive simulates a design template", {
 
   expect_equal(nrow(res$trajectories), 9L)
   expect_true(all(is.finite(res$trajectories$DV_SIM)))
-  expect_match(attr(res, "simulation_warnings", exact = TRUE), "^9 observation record")
+  expect_match(
+    attr(res, "simulation_warnings", exact = TRUE),
+    "^W_DESIGN_DV: 9 observation row\\(s\\)"
+  )
 })
 
 test_that("ferx_predict also accepts a design template", {
@@ -170,7 +175,7 @@ test_that("ferx_predict also accepts a design template", {
   # the same template must work there -- otherwise the package supports an empty
   # DV in `ferx_simulate()` and silently returns an empty frame next door.
   ex <- ferx_example("warfarin")
-  pred <- ferx_predict(ex$model, write_design_template())
+  pred <- suppressWarnings(ferx_predict(ex$model, write_design_template()))
 
   expect_equal(nrow(pred), 6L)
   expect_equal(sort(unique(pred$TIME)), c(0.5, 4, 24))

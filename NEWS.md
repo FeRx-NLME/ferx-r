@@ -1147,6 +1147,54 @@
 
 ## Bug fixes
 
+- **The engine's data-reader diagnostics now reach the caller on the simulate
+  and predict paths** ([#283](https://github.com/FeRx-NLME/ferx-r/issues/283)).
+  `ferx_fit()` has always returned them in `fit$warnings`; `ferx_simulate()`
+  passed on only a count re-derived in the R glue, for the one case that count
+  was written for (a record kept as a design point because its `DV` was empty),
+  and `ferx_predict()` had no warnings channel at all. So a dose that never
+  landed (`W_NO_DOSES`, `W_AMT_NOT_DOSED`), an `ADDL` with no `II`, an
+  unparseable `OCC` or a covariate with no value for half the subjects was
+  diagnosed by the engine and then dropped on the floor - the simulation ran on
+  the dataset the engine actually read, with nothing said about how that
+  differed from the one the user thought they wrote. All of them now ride the
+  `simulation_warnings` attribute and are re-emitted as a single R warning, on
+  `ferx_simulate()`, `ferx_simulate_with_uncertainty()`,
+  `ferx_simulate_adaptive()` and `ferx_predict()` (both its default-parameter
+  and `fit = ` paths). The empty-DV message is now the engine's own
+  `W_DESIGN_DV` text rather than the glue's paraphrase. `W_NO_DOSES` is
+  suppressed on the `ferx_simulate_adaptive()` path alone, where the controller
+  supplies the regimen and a dose-free observation grid is the normal input.
+
+- **`OBSERVED` printed as `NaN` rather than `NA` on every non-event row**
+  ([#283](https://github.com/FeRx-NLME/ferx-r/issues/283)). `OBSERVED` carries
+  the 1/0 event flag of a time-to-event row and has no value on any other row,
+  which is most rows of most runs - but the empty cell was a bare `NaN`, which
+  reads as an arithmetic failure inside the model rather than as a column that
+  does not apply here. Same for a TTE row's `IPRED` and `DV_SIM`, which have no
+  Gaussian prediction. These are now `NA_real_` (`is.na()` was already `TRUE`
+  for a `NaN`, so the documented `is.na(OBSERVED)` idiom is unchanged). `?ferx_simulate`
+  now documents every returned column, and states that `OBSERVED` is **not** an
+  echo of the input `DV` - nothing in the returned frame is, since simulation is
+  what produces that column.
+- **The cargo feature set can be chosen at install time, so a build can leave
+  out Deep Compartment Models**
+  ([#288](https://github.com/FeRx-NLME/ferx-r/issues/288)). `src/Makevars` set
+  `CARGO_FEATURES` with a plain `=`, which beats the environment (`R CMD
+  INSTALL` does not run make with `-e`), so `nn` - the heaviest part of the
+  dependency graph, and where the final static-library link dies on a
+  memory-constrained machine - could only be dropped by editing a tracked file.
+  It is now `?=`, so
+
+  ```bash
+  CARGO_FEATURES="--no-default-features --features ci,survival" R CMD INSTALL .
+  ```
+
+  builds without it. Left unset, the default is unchanged: `ci,nn,survival`.
+  The README documents the opt-out, and the comment claiming `R CMD INSTALL`
+  runs make with `-e` - the reason the environment was expected to be
+  honoured - is corrected.
+
 - **`fit$cov_matrix` labelled a block omega's rows in a different order than it
   stored them** ([#367](https://github.com/FeRx-NLME/ferx-r/issues/367)). The
   engine packs those rows as the full lower triangle in *column-major* order -

@@ -88,6 +88,9 @@ Rscript -e 'roxygen2::roxygenize()'
 ```
 
 Building against the sibling is an explicit opt-in: the two R-driven commands take it automatically when the checkout is there, and plain `cargo` never does. Every one of them leaves `src/rust/Cargo.lock` as it found it (see the dependency section).
+The cargo feature set is `CARGO_FEATURES` in `src/Makevars`, assigned with `?=` so the environment wins (#288): `CARGO_FEATURES="--no-default-features --features ci,survival" R CMD INSTALL .` builds without `nn` (Deep Compartment Models), the heaviest part of the dependency graph. Unset, the default `ci,nn,survival` is used - that is what CI and every release build compile, so never assume a local no-`nn` build's block list matches theirs.
+
+**With a sibling `../ferx-core` patched in, all three commands rewrite `src/rust/Cargo.lock`** — `roxygenize()` too, since it compiles through `src/Makevars` — so run `tools/check-ferx-core-pin.sh` before staging (see the dependency section).
 
 ## Architecture
 
