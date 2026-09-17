@@ -1147,6 +1147,24 @@
 
 ## Bug fixes
 
+- **The cargo feature set can be chosen at install time, so a build can leave
+  out Deep Compartment Models**
+  ([#288](https://github.com/FeRx-NLME/ferx-r/issues/288)). `src/Makevars` set
+  `CARGO_FEATURES` with a plain `=`, which beats the environment (`R CMD
+  INSTALL` does not run make with `-e`), so `nn` - the heaviest part of the
+  dependency graph, and where the final static-library link dies on a
+  memory-constrained machine - could only be dropped by editing a tracked file.
+  It is now `?=`, so
+
+  ```bash
+  CARGO_FEATURES="--no-default-features --features ci,survival" R CMD INSTALL .
+  ```
+
+  builds without it. Left unset, the default is unchanged: `ci,nn,survival`.
+  The README documents the opt-out, and the comment claiming `R CMD INSTALL`
+  runs make with `-e` - the reason the environment was expected to be
+  honoured - is corrected.
+
 - **A fit whose objective is `NaN`, infinite, or the divergence sentinel is no
   longer reported as `converged = TRUE`**
   ([ferx-core #1303](https://github.com/FeRx-NLME/ferx-core/issues/1303)). It
