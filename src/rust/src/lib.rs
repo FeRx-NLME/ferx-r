@@ -20,8 +20,8 @@ use std::path::Path;
 //      exit cooperatively; ferx_core::fit returns Err("cancelled by user").
 //
 // Declared here rather than pulling libR-sys to keep the dependency surface
-// small. These symbols are stable parts of R's public API (R.h / Rinterface.h /
-// R_ext/Memory.h).
+// small. These symbols are stable parts of R's public API (R.h / Rinterface.h).
+// Raising has its own extern block, inside `mod raise` below.
 
 extern "C" {
     fn R_CheckUserInterrupt();
@@ -29,12 +29,6 @@ extern "C" {
         fun: extern "C" fn(*mut std::ffi::c_void),
         data: *mut std::ffi::c_void,
     ) -> std::ffi::c_int;
-    // Raising: see `raise_verbatim` below. `Rf_error` is variadic and reads its
-    // first argument as a printf format; `R_alloc` hands back memory R itself
-    // reclaims when the error unwinds, so the message needs no Rust owner alive
-    // across the longjmp.
-    fn Rf_error(fmt: *const std::ffi::c_char, ...) -> !;
-    fn R_alloc(n: usize, size: std::ffi::c_int) -> *mut std::ffi::c_char;
 }
 
 extern "C" fn check_interrupt_cb(_: *mut std::ffi::c_void) {
@@ -73,46 +67,87 @@ fn pending_interrupt() -> bool {
 // frame return - dropping its locals, and the moved-in arguments with it - and
 // only then raises, through a `"%s"` format this file owns.
 //
-// tools/check-glue-raise.sh holds the shape that the compiler cannot.
+// Most of that shape is held by the compiler - the `throw_r_error` shadow and
+// `mod raise` below - and tools/check-glue-raise.sh holds what is left.
 
-/// Raise `msg` as an R error whose message is `msg`, byte for byte.
+/// The only scope in which `Rf_error` exists.
 ///
-/// Not `extendr_api::throw_r_error`: on 0.9.0 that passes its argument to
-/// `Rf_error` as the format string (`src/thread_safety.rs:51-58`), while
-/// extendr `main` (`b0cb8a81`, extendr/extendr#1058, unreleased) passes it as
-/// a `"%s"` argument - so doubling `%` here to suit 0.9.0 would start printing
-/// `5%%` the day that release lands. A format this file owns reads the same
-/// under both.
+/// It is declared in here, rather than in the file-scope extern block above,
+/// so that the rest of lib.rs cannot name it. `unsafe { Rf_error(c.as_ptr()) }`
+/// in a body nine thousand lines down - #388 reintroduced, with the message as
+/// the format again - is `error[E0425]` on every machine rather than a review
+/// finding, and the way around it, `raise::Rf_error(..)`, is `error[E0603]`:
+/// a private item of a private module.
 ///
-/// The text is copied into `R_alloc` memory, which R reclaims when the error
-/// unwinds, and the owned `String` is dropped before the longjmp, so nothing of
-/// the message is left behind. Bytes at and after an interior NUL are dropped:
-/// C would stop there anyway, and `CString::new(..).unwrap()` would panic.
-///
-/// Called from `entry` and nowhere else.
-fn raise_verbatim(msg: String) -> ! {
-    let bytes = msg.as_bytes();
-    let len = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
-    unsafe {
-        let buf = R_alloc(len + 1, 1);
-        std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf.cast::<u8>(), len);
-        *buf.add(len) = 0;
-        drop(msg);
-        Rf_error(b"%s\0".as_ptr().cast(), buf)
+/// Same guarantee the `throw_r_error` shadow gives, by the other route - a
+/// shadow hides a name the prelude hands this file, a module hides one the
+/// file declares itself.
+mod raise {
+    // `R_alloc` (R_ext/Memory.h) hands back memory R itself reclaims when the
+    // error unwinds, so the message needs no Rust owner alive across the
+    // longjmp.
+    extern "C" {
+        fn Rf_error(fmt: *const std::ffi::c_char, ...) -> !;
+        fn R_alloc(n: usize, size: std::ffi::c_int) -> *mut std::ffi::c_char;
+    }
+
+    /// Raise `msg` as an R error whose message is `msg`, byte for byte.
+    ///
+    /// Not `extendr_api::throw_r_error`: on 0.9.0 that passes its argument to
+    /// `Rf_error` as the format string (`src/thread_safety.rs:51-58`), while
+    /// extendr `main` (`b0cb8a81`, extendr/extendr#1058, unreleased) passes it
+    /// as a `"%s"` argument - so doubling `%` here to suit 0.9.0 would start
+    /// printing `5%%` the day that release lands. A format this file owns reads
+    /// the same under both.
+    ///
+    /// The text is copied into `R_alloc` memory, which R reclaims when the
+    /// error unwinds, and the owned `String` is dropped before the longjmp, so
+    /// nothing of the message is left behind. Bytes at and after an interior
+    /// NUL are dropped: C would stop there anyway, and
+    /// `CString::new(..).unwrap()` would panic.
+    ///
+    /// Called from `entry` and nowhere else.
+    pub(super) fn raise_verbatim(msg: String) -> ! {
+        let bytes = msg.as_bytes();
+        let len = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+        unsafe {
+            let buf = R_alloc(len + 1, 1);
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf.cast::<u8>(), len);
+            *buf.add(len) = 0;
+            drop(msg);
+            Rf_error(b"%s\0".as_ptr().cast(), buf)
+        }
     }
 }
 
-/// The text a panic carried, read the way extendr reads it
+use raise::raise_verbatim;
+
+/// The text a panic carried. The `&str` and `String` payloads - between them
+/// everything `panic!` produces - are read the way extendr reads them
 /// (`extendr-macros-0.9.0/src/wrappers.rs:277-283`), so a panic that used to
-/// reach R through extendr still reads the same. The payload is dropped here
-/// rather than left to a scope the longjmp will skip.
-fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
+/// reach R through extendr still reads the same.
+///
+/// A payload that is neither (`panic_any`, a foreign `resume_unwind`) carries
+/// no text, and there extendr names the function instead:
+/// `format!("User function panicked: {}", r_name)`. `entry` is one function for
+/// all 44 of them, so `at` - the `#[track_caller]` location of the `entry(`
+/// call - stands in for the name and points at the entry point's own line.
+///
+/// The payload is dropped here rather than left to a scope the longjmp skips.
+fn panic_message(
+    payload: Box<dyn std::any::Any + Send>,
+    at: &std::panic::Location<'_>,
+) -> String {
     let msg = if let Some(s) = payload.downcast_ref::<&str>() {
         (*s).to_string()
     } else if let Some(s) = payload.downcast_ref::<String>() {
         s.clone()
     } else {
-        "ferx: the engine panicked without a message".to_string()
+        format!(
+            "ferx: the engine panicked without a message, in the entry point at {}:{}",
+            at.file(),
+            at.line()
+        )
     };
     drop(payload);
     msg
@@ -124,11 +159,15 @@ fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
 /// The `catch_unwind` sits inside extendr's own (`wrappers.rs:255`), which
 /// hands a panic's text to `throw_r_error` and so carries the `%` problem of
 /// its own; catching first means extendr never sees one.
+///
+/// `#[track_caller]` so that a panic carrying no text can still say which of
+/// the 44 entry points it came out of - see `panic_message`.
+#[track_caller]
 fn entry<T>(f: impl FnOnce() -> Result<T, String>) -> T {
     let msg = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
         Ok(Ok(value)) => return value,
         Ok(Err(msg)) => msg,
-        Err(payload) => panic_message(payload),
+        Err(payload) => panic_message(payload, std::panic::Location::caller()),
     };
     raise_verbatim(msg)
 }
@@ -3315,12 +3354,23 @@ fn ferx_rust_autodiff_enabled() -> bool {
 /// today are not a durable fixture for that - FeRx-NLME/ferx-core#1487 turns
 /// the measured one into an `Err` - so the test drives this instead.
 ///
-/// @param msg Text to panic with
+/// The one sentinel, `"<non-string payload>"`, panics with a payload that is
+/// neither `&str` nor `String`. That is `panic_message`'s third arm, the only
+/// raise-position message whose text this package writes itself, and the only
+/// one that depends on `entry` still being `#[track_caller]`. Reaching it takes
+/// a `panic_any`, which nothing in the engine does; a sentinel here costs no
+/// extra entry point.
+///
+/// @param msg Text to panic with, or `"<non-string payload>"` for a panic that
+///   carries no text at all
 /// @return Never returns; the panic arrives in R as an error
 /// @keywords internal
 #[extendr]
 fn ferx_rust_test_panic(msg: &str) -> Robj {
     entry(move || -> Result<Robj, String> {
+        if msg == "<non-string payload>" {
+            std::panic::panic_any(0u8);
+        }
         panic!("{msg}");
     })
 }
