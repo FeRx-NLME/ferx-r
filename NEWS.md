@@ -1184,6 +1184,36 @@
 
 ## Bug fixes
 
+- **A `%` in an engine error message was read as a printf conversion: a garbled
+  message, or an aborted R session**
+  ([#388](https://github.com/FeRx-NLME/ferx-r/issues/388)). The glue handed the
+  engine's text to `Rf_error()` as its *format* string, so anything the engine
+  quoted back with a `%` in it was consumed as a conversion against arguments
+  that do not exist. `[data_selection] ignore = DV < 5%` came back as
+  `... 'DV < 5right-hand side '5-2139062144s not a number`, and text carrying
+  `%s` ended the session with `An irrecoverable exception occurred`. `%` is
+  ordinary text here - `CV%`, `5%`, a `my%20data.csv` path - and it now reaches
+  R verbatim from all four places it can enter: the model file, the dataset,
+  MFL / `.ferxsearch` text (`ferx_covsearch()`, `ferx_modelsearch()`,
+  `ferx_iivsearch()`, `ferx_amd()`, `ferx_globalsearch()`,
+  `ferx_search_space()`, `ferx_search_config()`), and an R argument - a
+  `settings` key such as `list("bad%skey" = 1)` segfaulted. The same change
+  covers the panic path, where extendr raised a panic's text the same way: a
+  dataset whose `ID` carried `%s` could abort the session through
+  `ferx_predict()`. A message with no `%` in it is unchanged, byte for byte, so
+  `tryCatch(..., ferx_engine_error = )` classes exactly what it classed before.
+
+- **Every refused call leaked the parsed model and the population read from the
+  dataset** ([#389](https://github.com/FeRx-NLME/ferx-r/issues/389)).
+  `Rf_error()` longjmps out of Rust without unwinding, and the glue raised from
+  inside each entry point, so nothing the body was holding was ever dropped -
+  about 10 KB per refusal on the bundled examples, more with the size of the
+  population. It mattered for exactly the script
+  [#385](https://github.com/FeRx-NLME/ferx-r/issues/385) exists to support: a
+  loop over candidate models or designs in which refusals are expected. Every
+  `#[extendr]` body now returns a `Result` and the error is raised once, after
+  that body's frame has returned and its locals are gone.
+
 - **`ferx_predict()`, `ferx_simulate()` and their siblings printed the engine's
   error and returned `NULL` instead of raising it**
   ([#385](https://github.com/FeRx-NLME/ferx-r/issues/385)). A model or dataset
