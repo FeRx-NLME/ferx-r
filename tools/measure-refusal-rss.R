@@ -7,6 +7,12 @@
 # restructure moved the raise into `entry()`, which runs after the body's frame
 # has returned, so the refused loop should now grow like the accepted one.
 #
+# What this script does NOT measure: the *arguments*. extendr protects every
+# argument SEXP in a frame outside the body, which the raise still jumps over
+# (ferx-r#394). The loops below pass a model path, a data path, `n_sim` and a
+# seed - all bytes - so their numbers say "the body's locals are gone", not
+# "nothing leaks". #394 has the vector-sized measurement.
+#
 # Not a testthat test on purpose: 3000 calls take ~13 minutes, and RSS is noisy
 # enough that a threshold on it would be a coin flip in CI (the control loop
 # below fell 7 MB over the same 2500 calls on the machine this was written on).

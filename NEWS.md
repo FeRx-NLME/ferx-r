@@ -1189,9 +1189,10 @@
   ([#388](https://github.com/FeRx-NLME/ferx-r/issues/388)). The glue handed the
   engine's text to `Rf_error()` as its *format* string, so anything the engine
   quoted back with a `%` in it was consumed as a conversion against arguments
-  that do not exist. `[data_selection] ignore = DV < 5%` came back as
-  `... 'DV < 5right-hand side '5-2139062144s not a number`, and text carrying
-  `%s` ended the session with `An irrecoverable exception occurred`. `%` is
+  that do not exist. `[data_selection] ignore = DV < 5%` came back with the
+  text from the `%` onwards eaten and whatever that machine happened to have on
+  its stack printed in its place, and text carrying `%s` ended the session with
+  `An irrecoverable exception occurred`. `%` is
   ordinary text here - `CV%`, `5%`, a `my%20data.csv` path - and it now reaches
   R verbatim from all four places it can enter: the model file, the dataset,
   MFL / `.ferxsearch` text (`ferx_covsearch()`, `ferx_modelsearch()`,
@@ -1204,7 +1205,8 @@
   `tryCatch(..., ferx_engine_error = )` classes exactly what it classed before.
 
 - **Every refused call leaked the parsed model and the population read from the
-  dataset** ([#389](https://github.com/FeRx-NLME/ferx-r/issues/389)).
+  dataset** ([#389](https://github.com/FeRx-NLME/ferx-r/issues/389), partly -
+  see below).
   `Rf_error()` longjmps out of Rust without unwinding, and the glue raised from
   inside each entry point, so nothing the body was holding was ever dropped -
   about 10 KB per refusal on the bundled examples, more with the size of the
@@ -1212,7 +1214,14 @@
   [#385](https://github.com/FeRx-NLME/ferx-r/issues/385) exists to support: a
   loop over candidate models or designs in which refusals are expected. Every
   `#[extendr]` body now returns a `Result` and the error is raised once, after
-  that body's frame has returned and its locals are gone.
+  that body's frame has returned and its locals are gone. Not the *arguments*:
+  extendr protects each argument SEXP in its own frame, outside that body, and
+  the raise still jumps over it, so a refusal handed a large vector retains it
+  (~32.5 MB over 20 refused calls with 200,000-element `settings` vectors;
+  path-sized arguments retain nothing measurable). That was true before this
+  change too, and closing it needs a released extendr carrying
+  extendr/extendr#1058 -
+  [#394](https://github.com/FeRx-NLME/ferx-r/issues/394).
 
 - **`ferx_predict()`, `ferx_simulate()` and their siblings printed the engine's
   error and returned `NULL` instead of raising it**
