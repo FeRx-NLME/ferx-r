@@ -17,16 +17,15 @@
 #     `%s` cases run in a `callr` child where only the child dies.
 #   * nothing asserts what the bug printed. Those digits are whatever was on
 #     that platform's stack; only the verbatim text is portable.
+#
+# The assertion itself is `expect_refusal()` from helper-engine-errors.R, the
+# same one the twin file uses: a `%` must reach R verbatim *and* the refusal
+# must still leave the console clean (#385), and these 15 entry points appear
+# in no other test that would notice if it stopped doing so.
 
 # The engine's own words for `[data_selection] ignore = DV < 5%`, which quote
 # the `%` back twice.
 PERCENT_PARSE <- "malformed filter expression 'DV < 5%': right-hand side '5%' is not a number"
-
-expect_verbatim <- function(probe, phrase) {
-  expect_s3_class(probe$cond, "error")
-  msg <- conditionMessage(probe$cond)
-  expect_true(grepl(phrase, msg, fixed = TRUE), info = msg)
-}
 
 # -- The model file -----------------------------------------------------------
 #
@@ -68,7 +67,7 @@ for (nm in names(percent_model_callers())) {
 
     test_that(paste(nm, "quotes a '%' from the model back as written"), {
       probe <- engine_error_probe(percent_model_callers()[[nm]](percent_selection_model()))
-      expect_verbatim(probe, PERCENT_PARSE)
+      expect_refusal(probe, PERCENT_PARSE)
     })
   })
 }
@@ -98,14 +97,14 @@ for (nm in names(percent_mfl_callers())) {
 
     test_that(paste(nm, "quotes a '%' from the search space back as written"), {
       probe <- engine_error_probe(percent_mfl_callers()[[nm]]("X5%dY(1)"))
-      expect_verbatim(probe, "unexpected character `%` at offset 2")
+      expect_refusal(probe, "unexpected character `%` at offset 2")
     })
   })
 }
 
 test_that("ferx_search_config() quotes a '%' from the .ferxsearch file back as written", {
   probe <- engine_error_probe(ferx_search_config(percent_search_config()))
-  expect_verbatim(probe, "X5%dY(1)")
+  expect_refusal(probe, "X5%dY(1)")
 })
 
 # -- An R argument ------------------------------------------------------------
@@ -118,7 +117,7 @@ test_that("ferx_fit() quotes a '%' in a settings key back as written", {
   probe <- engine_error_probe(
     ferx_fit(ex$model, ex$data, verbose = FALSE, settings = list("bad%dkey" = 1))
   )
-  expect_verbatim(probe, "`bad%dkey`")
+  expect_refusal(probe, "`bad%dkey`")
 })
 
 # -- The dataset --------------------------------------------------------------
@@ -133,7 +132,7 @@ test_that("a '%' in a subject id comes back as written", {
   probe <- engine_error_probe(
     ferx_predict(ferx_example("warfarin")$model, percent_id_data())
   )
-  expect_verbatim(probe, "subject s1%d, time 0")
+  expect_refusal(probe, "subject s1%d, time 0")
 })
 
 # -- A literal `%%` in the user's text ----------------------------------------
@@ -147,7 +146,7 @@ test_that("a literal '%%' in the model survives as '%%'", {
   probe <- engine_error_probe(
     ferx_fit(percent_escape_model(), ferx_example("warfarin")$data, verbose = FALSE)
   )
-  expect_verbatim(probe, "'DV < 5%%'")
+  expect_refusal(probe, "'DV < 5%%'")
   msg <- conditionMessage(probe$cond)
   expect_false(grepl("5%%%%", msg, fixed = TRUE), info = msg)
 })
@@ -215,12 +214,34 @@ test_that("a '%s' chain in a settings key raises instead of ending the session",
 
 test_that("a panic message with a '%' arrives verbatim", {
   probe <- engine_error_probe(ferx:::ferx_rust_test_panic("50% of %d subjects"))
-  expect_verbatim(probe, "50% of %d subjects")
+  expect_refusal(probe, "50% of %d subjects")
 })
 
 test_that("a panic message with a '%s' chain raises instead of ending the session", {
   msg <- child_message('ferx:::ferx_rust_test_panic("%s%s%s%s")')
   expect_true(grepl("%s%s%s%s", msg, fixed = TRUE), info = msg)
+})
+
+# A payload that is neither `&str` nor `String` carries no text, and this is the
+# one raise-position message ferx writes itself rather than passing through from
+# the engine. extendr names the function in that case; `entry()` is one function
+# for all 44, so it is `#[track_caller]` and the caller's line stands in for the
+# name.
+#
+# The line is what makes the assertion worth anything: `entry()` itself sits in
+# the first ~200 lines of lib.rs, and every entry point is thousands of lines
+# below it. Drop the `#[track_caller]` and `Location::caller()` reports entry's
+# own line instead, which is what the bound below catches.
+test_that("a panic carrying no text names the entry point it came out of", {
+  probe <- engine_error_probe(ferx:::ferx_rust_test_panic("<non-string payload>"))
+  expect_refusal(
+    probe, "ferx: the engine panicked without a message, in the entry point at "
+  )
+  msg  <- conditionMessage(probe$cond)
+  line <- as.integer(sub("^.*src/lib\\.rs:([0-9]+).*$", "\\1", msg))
+  expect_true(grepl("src/lib.rs:", msg, fixed = TRUE), info = msg)
+  expect_false(is.na(line), info = msg)
+  expect_gt(line, 1000L)
 })
 
 # The other half of the same restructure - that a refused call no longer leaks
