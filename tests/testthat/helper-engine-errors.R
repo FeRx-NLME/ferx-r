@@ -76,9 +76,34 @@ bad_selection_model <- function(env = parent.frame()) {
 }
 
 # A `[data_selection]` clause whose refusal quotes a `%` back at the user. The
-# glue hands its message to `Rf_error()`, which reads it as a printf format.
+# glue used to hand its message to `Rf_error()` as the printf format (#388), so
+# `5%': r` was read as a conversion; it now goes through a `"%s"` the glue owns.
 percent_selection_model <- function(env = parent.frame()) {
   model_with_lines(c("[data_selection]", "  ignore = DV < 5%"), env)
+}
+
+# The same, with a literal `%%` in the user's own text: a glue that escaped `%`
+# as `%%` to suit a printf format would print this back as `5%`.
+percent_escape_model <- function(env = parent.frame()) {
+  model_with_lines(c("[data_selection]", "  ignore = DV < 5%%"), env)
+}
+
+# The same, with a `%s` chain: printf would read a pointer off the stack and
+# dereference it, ending the session. Only ever run in a `callr` child.
+percent_chain_model <- function(env = parent.frame()) {
+  model_with_lines(c("[data_selection]", "  ignore = DV < %s%s%s%s"), env)
+}
+
+# A `.ferxsearch` file whose MFL carries a `%`: the third input space, text the
+# user typed rather than a model the engine parsed.
+percent_search_config <- function(env = parent.frame()) {
+  ex   <- ferx_example("warfarin")
+  path <- withr::local_tempfile(fileext = ".ferxsearch", .local_envir = env)
+  writeLines(c("[run]",
+               sprintf('model = "%s"', ex$model),
+               sprintf('data = "%s"', ex$data),
+               "mfl = X5%dY(1)"), path)
+  path
 }
 
 example_rows <- function(example = "warfarin") {
@@ -108,6 +133,19 @@ infusion_into_cmt0_data <- function(example = "warfarin", env = parent.frame()) 
   if (!"RATE" %in% names(d)) d$RATE <- 0
   d$RATE[d$EVID == 1] <- 10
   d$CMT[d$EVID == 1]  <- 0
+  write_nonmem_csv(d, env)
+}
+
+# The same refusal, on a dataset whose subject id carries the `%`: the second
+# input space of #388, and the one that arrives through the panic path rather
+# than through a glue `Err` (the diagnostic names the subject).
+percent_id_data <- function(id = "s1%d", example = "warfarin",
+                            env = parent.frame()) {
+  d <- example_rows(example)
+  if (!"RATE" %in% names(d)) d$RATE <- 0
+  d$RATE[d$EVID == 1] <- 10
+  d$CMT[d$EVID == 1]  <- 0
+  d$ID <- id
   write_nonmem_csv(d, env)
 }
 
