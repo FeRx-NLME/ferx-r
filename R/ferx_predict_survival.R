@@ -56,25 +56,32 @@ ferx_predict_survival <- function(model, data = NULL, times, fit = NULL) {
   )
   times <- as.numeric(times)
 
+  # A refusal is an R error, classed like a refused `ferx_fit()` (#385).
   if (is.null(fit)) {
-    return(ferx_rust_predict_survival(
-      model_path = normalizePath(model),
-      data_path = normalizePath(data),
-      times = times
+    return(.ferx_engine_call(
+      ferx_rust_predict_survival(
+        model_path = normalizePath(model),
+        data_path = normalizePath(data),
+        times = times
+      ),
+      model, data
     ))
   }
 
   fit_pieces <- validate_fit_for_params(fit)
-  ferx_rust_predict_survival_from_fit(
-    model_path = normalizePath(model),
-    data_path = normalizePath(data),
-    times = times,
-    theta = fit_pieces$theta,
-    omega_flat = fit_pieces$omega_flat,
-    omega_dim = fit_pieces$omega_dim,
-    sigma = fit_pieces$sigma,
-    omega_iov_flat = fit_pieces$omega_iov_flat,
-    omega_iov_dim = fit_pieces$omega_iov_dim,
-    residual_rho = fit_pieces$residual_rho
+  .ferx_engine_call(
+    ferx_rust_predict_survival_from_fit(
+      model_path = normalizePath(model),
+      data_path = normalizePath(data),
+      times = times,
+      theta = fit_pieces$theta,
+      omega_flat = fit_pieces$omega_flat,
+      omega_dim = fit_pieces$omega_dim,
+      sigma = fit_pieces$sigma,
+      omega_iov_flat = fit_pieces$omega_iov_flat,
+      omega_iov_dim = fit_pieces$omega_iov_dim,
+      residual_rho = fit_pieces$residual_rho
+    ),
+    model, data
   )
 }

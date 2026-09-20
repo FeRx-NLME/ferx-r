@@ -251,3 +251,12 @@ ferx_model_validate <- function(path, data = NULL) {
     )
   )
 }
+
+# Evaluate a call into the Rust glue so that a refusal reaches the caller the
+# way a refused `ferx_fit()` does: as an R error, classed `ferx_engine_error`
+# when `.ferx_engine_error()` can tie a diagnostic code to it (#385). `call` is
+# evaluated lazily inside the `tryCatch()`, so it covers a failure the glue
+# raises itself and one extendr raises for it (a panic in the engine) alike.
+.ferx_engine_call <- function(call, model, data) {
+  tryCatch(call, error = function(e) stop(.ferx_engine_error(e, model, data)))
+}

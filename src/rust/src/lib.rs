@@ -396,20 +396,14 @@ fn ferx_rust_simulate(
 ) -> Robj {
     let match_method = match parse_match_method(match_method) {
         Ok(m) => m,
-        Err(e) => {
-            rprintln!("{}", e);
-            return ().into();
-        }
+        Err(e) => throw_r_error(e),
     };
     // parse_full_model_file (vs parse_model_file) so iov_column is available
     // for the reader; without it, models with kappa declarations panic in
     // pk_param_fn (Eta index >= n_bsv_eta).
     let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
         Ok(p) => p,
-        Err(e) => {
-            rprintln!("Error parsing model: {}", e);
-            return ().into();
-        }
+        Err(e) => throw_r_error(format!("Error parsing model: {e}")),
     };
     let iov_col = parsed.fit_options.iov_column.clone();
 
@@ -428,10 +422,7 @@ fn ferx_rust_simulate(
             &parsed.column_map,
         ) {
             Ok(r) => r,
-            Err(e) => {
-                rprintln!("Error reading data: {}", e);
-                return ().into();
-            }
+            Err(e) => throw_r_error(format!("Error reading data: {e}")),
         };
 
     let opts = ferx_core::SimulateOptions {
@@ -452,10 +443,7 @@ fn ferx_rust_simulate(
         &opts,
     ) {
         Ok(o) => o,
-        Err(e) => {
-            rprintln!("Error simulating: {}", e);
-            return ().into();
-        }
+        Err(e) => throw_r_error(format!("Error simulating: {e}")),
     };
 
     attach_sim_warnings(
@@ -502,17 +490,11 @@ fn ferx_rust_simulate_from_fit(
 ) -> Robj {
     let match_method = match parse_match_method(match_method) {
         Ok(m) => m,
-        Err(e) => {
-            rprintln!("{}", e);
-            return ().into();
-        }
+        Err(e) => throw_r_error(e),
     };
     let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
         Ok(p) => p,
-        Err(e) => {
-            rprintln!("Error parsing model: {}", e);
-            return ().into();
-        }
+        Err(e) => throw_r_error(format!("Error parsing model: {e}")),
     };
     let iov_col = parsed.fit_options.iov_column.clone();
 
@@ -531,10 +513,7 @@ fn ferx_rust_simulate_from_fit(
             &parsed.column_map,
         ) {
             Ok(r) => r,
-            Err(e) => {
-                rprintln!("Error reading data: {}", e);
-                return ().into();
-            }
+            Err(e) => throw_r_error(format!("Error reading data: {e}")),
         };
 
     let params = match params_from_fit(
@@ -548,10 +527,7 @@ fn ferx_rust_simulate_from_fit(
         &residual_rho,
     ) {
         Ok(p) => p,
-        Err(e) => {
-            rprintln!("{}", e);
-            return ().into();
-        }
+        Err(e) => throw_r_error(e),
     };
 
     let opts = ferx_core::SimulateOptions {
@@ -569,10 +545,7 @@ fn ferx_rust_simulate_from_fit(
         &opts,
     ) {
         Ok(o) => o,
-        Err(e) => {
-            rprintln!("Error simulating: {}", e);
-            return ().into();
-        }
+        Err(e) => throw_r_error(format!("Error simulating: {e}")),
     };
     attach_sim_warnings(
         sim_results_to_df(&output.results),
@@ -844,10 +817,7 @@ fn ferx_rust_simulate_with_uncertainty(
 ) -> Robj {
     let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
         Ok(p) => p,
-        Err(e) => {
-            rprintln!("Error parsing model: {}", e);
-            return ().into();
-        }
+        Err(e) => throw_r_error(format!("Error parsing model: {e}")),
     };
     let iov_col = parsed.fit_options.iov_column.clone();
     // Simulation reads a missing `DV` as a design point, not as a forgotten
@@ -865,10 +835,7 @@ fn ferx_rust_simulate_with_uncertainty(
             &parsed.column_map,
         ) {
             Ok(r) => r,
-            Err(e) => {
-                rprintln!("Error reading data: {}", e);
-                return ().into();
-            }
+            Err(e) => throw_r_error(format!("Error reading data: {e}")),
         };
 
     // Decode the method string to the engine enum.
@@ -877,13 +844,9 @@ fn ferx_rust_simulate_with_uncertainty(
             ferx_core::UncertaintyMethod::Asymptotic
         }
         "sir" => ferx_core::UncertaintyMethod::Sir,
-        other => {
-            rprintln!(
-                "Unknown uncertainty method '{}' — expected 'asymptotic' or 'sir'",
-                other
-            );
-            return ().into();
-        }
+        other => throw_r_error(format!(
+            "Unknown uncertainty method '{other}' — expected 'asymptotic' or 'sir'"
+        )),
     };
 
     let fit_result =
@@ -904,10 +867,7 @@ fn ferx_rust_simulate_with_uncertainty(
             &residual_rho,
         ) {
             Ok(f) => f,
-            Err(e) => {
-                rprintln!("{}", e);
-                return ().into();
-            }
+            Err(e) => throw_r_error(e),
         };
 
     let opts = ferx_core::SimulateUncertaintyOptions {
@@ -928,10 +888,7 @@ fn ferx_rust_simulate_with_uncertainty(
             sim_results_to_df(&results),
             data_reader_warnings(&population),
         ),
-        Err(e) => {
-            rprintln!("simulate_with_uncertainty error: {}", e);
-            ().into()
-        }
+        Err(e) => throw_r_error(format!("simulate_with_uncertainty error: {e}")),
     }
 }
 
@@ -948,10 +905,7 @@ fn ferx_rust_predict(
 ) -> Robj {
     let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
         Ok(p) => p,
-        Err(e) => {
-            rprintln!("Error parsing model: {}", e);
-            return ().into();
-        }
+        Err(e) => throw_r_error(format!("Error parsing model: {e}")),
     };
     let iov_col = parsed.fit_options.iov_column.clone();
 
@@ -970,10 +924,7 @@ fn ferx_rust_predict(
             &parsed.column_map,
         ) {
             Ok(r) => r,
-            Err(e) => {
-                rprintln!("Error reading data: {}", e);
-                return ().into();
-            }
+            Err(e) => throw_r_error(format!("Error reading data: {e}")),
         };
 
     let results = ferx_core::predict(&parsed.model, &population, &parsed.model.default_params);
@@ -1019,10 +970,7 @@ fn ferx_rust_predict_from_fit(
 ) -> Robj {
     let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
         Ok(p) => p,
-        Err(e) => {
-            rprintln!("Error parsing model: {}", e);
-            return ().into();
-        }
+        Err(e) => throw_r_error(format!("Error parsing model: {e}")),
     };
     let iov_col = parsed.fit_options.iov_column.clone();
 
@@ -1041,10 +989,7 @@ fn ferx_rust_predict_from_fit(
             &parsed.column_map,
         ) {
             Ok(r) => r,
-            Err(e) => {
-                rprintln!("Error reading data: {}", e);
-                return ().into();
-            }
+            Err(e) => throw_r_error(format!("Error reading data: {e}")),
         };
 
     let params = match params_from_fit(
@@ -1058,10 +1003,7 @@ fn ferx_rust_predict_from_fit(
         &residual_rho,
     ) {
         Ok(p) => p,
-        Err(e) => {
-            rprintln!("{}", e);
-            return ().into();
-        }
+        Err(e) => throw_r_error(e),
     };
 
     let results = ferx_core::predict(&parsed.model, &population, &params);
@@ -1123,10 +1065,7 @@ fn survival_results_to_df(results: &[ferx_core::SurvivalPredictionResult]) -> Ro
 fn ferx_rust_predict_survival(model_path: &str, data_path: &str, times: Vec<f64>) -> Robj {
     let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
         Ok(p) => p,
-        Err(e) => {
-            rprintln!("Error parsing model: {}", e);
-            return ().into();
-        }
+        Err(e) => throw_r_error(format!("Error parsing model: {e}")),
     };
     let iov_col = parsed.fit_options.iov_column.clone();
 
@@ -1140,10 +1079,7 @@ fn ferx_rust_predict_survival(model_path: &str, data_path: &str, times: Vec<f64>
         &parsed.column_map,
     ) {
         Ok(r) => r,
-        Err(e) => {
-            rprintln!("Error reading data: {}", e);
-            return ().into();
-        }
+        Err(e) => throw_r_error(format!("Error reading data: {e}")),
     };
 
     let results =
@@ -1182,10 +1118,7 @@ fn ferx_rust_predict_survival_from_fit(
 ) -> Robj {
     let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
         Ok(p) => p,
-        Err(e) => {
-            rprintln!("Error parsing model: {}", e);
-            return ().into();
-        }
+        Err(e) => throw_r_error(format!("Error parsing model: {e}")),
     };
     let iov_col = parsed.fit_options.iov_column.clone();
 
@@ -1199,10 +1132,7 @@ fn ferx_rust_predict_survival_from_fit(
         &parsed.column_map,
     ) {
         Ok(r) => r,
-        Err(e) => {
-            rprintln!("Error reading data: {}", e);
-            return ().into();
-        }
+        Err(e) => throw_r_error(format!("Error reading data: {e}")),
     };
 
     let params = match params_from_fit(
@@ -1216,10 +1146,7 @@ fn ferx_rust_predict_survival_from_fit(
         &residual_rho,
     ) {
         Ok(p) => p,
-        Err(e) => {
-            rprintln!("{}", e);
-            return ().into();
-        }
+        Err(e) => throw_r_error(e),
     };
 
     let results = ferx_core::predict_survival(&parsed.model, &population, &params, &times);
@@ -1261,16 +1188,12 @@ fn ferx_rust_npde_from_fit(
     seed: i32,
 ) -> Robj {
     if nsim <= 0 {
-        rprintln!("npde error: nsim must be a positive integer");
-        return ().into();
+        throw_r_error("npde error: nsim must be a positive integer");
     }
 
     let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
         Ok(p) => p,
-        Err(e) => {
-            rprintln!("Error parsing model: {}", e);
-            return ().into();
-        }
+        Err(e) => throw_r_error(format!("Error parsing model: {e}")),
     };
     let iov_col = parsed.fit_options.iov_column.clone();
 
@@ -1286,10 +1209,7 @@ fn ferx_rust_npde_from_fit(
         &parsed.fit_options.ignore_subjects,
     ) {
         Ok(f) => f,
-        Err(e) => {
-            rprintln!("Error in [data_selection]: {}", e);
-            return ().into();
-        }
+        Err(e) => throw_r_error(format!("Error in [data_selection]: {e}")),
     };
     let filter_opt = if filter.is_empty() { None } else { Some(&filter) };
 
@@ -1303,10 +1223,7 @@ fn ferx_rust_npde_from_fit(
         &parsed.column_map,
     ) {
         Ok(r) => r,
-        Err(e) => {
-            rprintln!("Error reading data: {}", e);
-            return ().into();
-        }
+        Err(e) => throw_r_error(format!("Error reading data: {e}")),
     };
 
     let params = match params_from_fit(
@@ -1320,10 +1237,7 @@ fn ferx_rust_npde_from_fit(
         &residual_rho,
     ) {
         Ok(p) => p,
-        Err(e) => {
-            rprintln!("{}", e);
-            return ().into();
-        }
+        Err(e) => throw_r_error(e),
     };
 
     let seed_opt = if seed < 0 { None } else { Some(seed as u64) };
@@ -3378,40 +3292,30 @@ fn ferx_rust_model_data_path(model_path: &str) -> String {
 /// @param method One of "nca", "nca_sweep", "nca_ebe"
 /// @return Named list with `theta_names`, `theta`, `theta_fixed`, `eta_names`,
 ///   `omega` (row-major flattened matrix), `omega_dim`, `method`, and
-///   `warnings`. Returns an empty list on a parse/read error.
+///   `warnings`. A parse/read error is raised as an R error.
 /// @export
 #[extendr]
 fn ferx_rust_inits_from_nca(model_path: &str, data_path: &str, method: &str) -> List {
     let parsed = match ferx_core::parser::model_parser::parse_full_model_file(Path::new(model_path))
     {
         Ok(p) => p,
-        Err(e) => {
-            rprintln!("Error parsing model: {}", e);
-            return List::new(0);
-        }
+        Err(e) => throw_r_error(format!("Error parsing model: {e}")),
     };
 
     let iov_col = parsed.fit_options.iov_column.clone();
     let population =
         match ferx_core::read_nonmem_csv(Path::new(data_path), None, iov_col.as_deref()) {
             Ok(p) => p,
-            Err(e) => {
-                rprintln!("Error reading data: {}", e);
-                return List::new(0);
-            }
+            Err(e) => throw_r_error(format!("Error reading data: {e}")),
         };
 
     let nca_method = match method.trim().to_lowercase().as_str() {
         "nca" => ferx_core::NcaInit::Nca,
         "" | "true" | "sweep" | "nca_sweep" => ferx_core::NcaInit::Sweep,
         "ebe" | "nca_ebe" => ferx_core::NcaInit::Ebe,
-        other => {
-            rprintln!(
-                "Unknown inits_from_nca method '{}' — expected 'nca', 'nca_sweep', or 'nca_ebe'",
-                other
-            );
-            return List::new(0);
-        }
+        other => throw_r_error(format!(
+            "Unknown inits_from_nca method '{other}' — expected 'nca', 'nca_sweep', or 'nca_ebe'"
+        )),
     };
     let method_label = match nca_method {
         ferx_core::NcaInit::Nca => "nca",

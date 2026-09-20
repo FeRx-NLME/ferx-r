@@ -97,25 +97,29 @@ ferx_simulate_with_uncertainty <- function(model, data, fit,
   fit_pieces <- validate_fit_for_params(fit)
   unc_pieces <- validate_fit_for_uncertainty(fit, method)
 
-  res <- ferx_rust_simulate_with_uncertainty(
-    model_path           = normalizePath(model),
-    data_path            = normalizePath(data),
-    theta                = fit_pieces$theta,
-    omega_flat           = fit_pieces$omega_flat,
-    omega_dim            = fit_pieces$omega_dim,
-    sigma                = fit_pieces$sigma,
-    omega_iov_flat       = fit_pieces$omega_iov_flat,
-    omega_iov_dim        = fit_pieces$omega_iov_dim,
-    method               = method,
-    cov_matrix_flat      = unc_pieces$cov_matrix_flat,
-    cov_matrix_dim       = unc_pieces$cov_matrix_dim,
-    sir_resamples_flat   = unc_pieces$sir_resamples_flat,
-    sir_resamples_n      = unc_pieces$sir_resamples_n,
-    sir_resamples_dim    = unc_pieces$sir_resamples_dim,
-    residual_rho         = fit_pieces$residual_rho,
-    n_uncertainty_draws  = as.integer(n_uncertainty_draws),
-    n_sim_per_draw       = as.integer(n_sim_per_draw),
-    seed                 = as.integer(seed)
+  # A refusal is an R error, classed like a refused `ferx_fit()` (#385).
+  res <- .ferx_engine_call(
+    ferx_rust_simulate_with_uncertainty(
+      model_path           = normalizePath(model),
+      data_path            = normalizePath(data),
+      theta                = fit_pieces$theta,
+      omega_flat           = fit_pieces$omega_flat,
+      omega_dim            = fit_pieces$omega_dim,
+      sigma                = fit_pieces$sigma,
+      omega_iov_flat       = fit_pieces$omega_iov_flat,
+      omega_iov_dim        = fit_pieces$omega_iov_dim,
+      method               = method,
+      cov_matrix_flat      = unc_pieces$cov_matrix_flat,
+      cov_matrix_dim       = unc_pieces$cov_matrix_dim,
+      sir_resamples_flat   = unc_pieces$sir_resamples_flat,
+      sir_resamples_n      = unc_pieces$sir_resamples_n,
+      sir_resamples_dim    = unc_pieces$sir_resamples_dim,
+      residual_rho         = fit_pieces$residual_rho,
+      n_uncertainty_draws  = as.integer(n_uncertainty_draws),
+      n_sim_per_draw       = as.integer(n_sim_per_draw),
+      seed                 = as.integer(seed)
+    ),
+    model, data
   )
 
   # Same `simulation_warnings` channel `ferx_simulate()` uses - here it carries
