@@ -9,23 +9,33 @@
 # body is a closure returning `Result<_, String>`, and `entry()` raises once -
 # after that closure frame has returned - through a `"%s"` format the glue owns.
 #
-# Most of that shape the compiler holds on its own. lib.rs shadows the prelude
+# Part of that shape the compiler holds on its own. lib.rs shadows the prelude
 # `throw_r_error` with a local `fn throw_r_error(_: Infallible) -> !`, so a bare
 # `throw_r_error(format!(..))` is `error[E0308]`; and `Rf_error` is declared
-# inside `mod raise`, so a call from anywhere else in the file is `error[E0425]`
-# and `raise::Rf_error(..)` is `error[E0603]`. Neither is a CI finding, on any
-# machine. This script covers only what the compiler cannot see:
+# inside `mod raise`, so `Rf_error(..)` from elsewhere in the file is
+# `error[E0425]` and `raise::Rf_error(..)` is `error[E0603]`.
+#
+# The module is not a substitute for check 4 below and check 4 is not a
+# substitute for the module - they are complements. Measured on 2026-09-20: a
+# second `extern "C" { fn Rf_error(..) -> !; }` block anywhere in the file
+# re-declares the symbol at file scope and compiles with no warning, which puts
+# #388 back with both the compiler and checks 1-3 green. The module closes the
+# accidental call; only a text rule closes the deliberate re-declaration.
+#
+# So, what the compiler cannot see:
 #
 #   1. the shadow itself is there, and no other `throw_r_error(` is in the code
 #      (a fully qualified `extendr_api::throw_r_error(..)` walks past the shadow);
 #   2. `raise_verbatim(` is called from exactly one place, so no body can raise
 #      while its locals are still alive;
-#   3. every `#[extendr]` fn body opens with `entry(`.
+#   3. every `#[extendr]` fn body opens with `entry(`;
+#   4. `Rf_error` is named nowhere outside `mod raise` - not called, and not
+#      declared a second time.
 #
-# `//` comments are stripped before every test, so naming a helper in prose is
-# free. The strip is a plain `sub(/[[:space:]]*\/\/.*$/, "", ...)` with no idea
-# of string literals, so the first `https://` inside a message would blind every
-# check on that line - keep URLs in `//` comments, where they cost nothing.
+# `//` and `/* .. */` comments are stripped before every test, so naming a
+# helper in prose is free. Neither strip knows about string literals, so the
+# first `https://` inside a message would blind every check on that line - keep
+# URLs in comments, where they cost nothing.
 # Exercised by tools/test-check-glue-raise.sh.
 #
 # Usage: tools/check-glue-raise.sh [dir]   (default src/rust/src)
@@ -61,9 +71,36 @@ scan() {
     awk -v file="${f#"$ROOT"/}" '
       {
         code = $0
+        if (in_block) {
+          if (match(code, /\*\//)) { code = substr(code, RSTART + 2); in_block = 0 }
+          else code = ""
+        }
+        while (match(code, /\/\*/)) {
+          head = substr(code, 1, RSTART - 1)
+          tail = substr(code, RSTART + 2)
+          if (match(tail, /\*\//)) code = head substr(tail, RSTART + 2)
+          else { code = head; in_block = 1; break }
+        }
         sub(/[[:space:]]*\/\/.*$/, "", code)
         trimmed = code
         sub(/^[[:space:]]+/, "", trimmed)
+      }
+
+      # The extent of `mod raise`, by brace depth. Not by a plain `}` test: the
+      # extern block and raise_verbatim each close with one, and the module
+      # would end three lines in.
+      {
+        if (in_raise) {
+          raise_depth += gsub(/\{/, "{", code) - gsub(/\}/, "}", code)
+          if (raise_depth <= 0) in_raise = 0
+        } else if (trimmed ~ /^mod[[:space:]]+raise([[:space:]]|\{|$)/) {
+          in_raise = 1
+          raise_depth = gsub(/\{/, "{", code) - gsub(/\}/, "}", code)
+        }
+      }
+
+      !in_raise && code ~ /Rf_error/ {
+        printf "%s\t%d\tfinding\t%s\n", file, NR, "Rf_error is named outside mod raise. It is declared in there, privately, so that nothing but raise_verbatim can reach it - but a second extern \"C\" block re-declaring the symbol compiles, and hands the engine text to Rf_error as its format string again (#388)."
       }
 
       code ~ /throw_r_error[[:space:]]*\(/ {
@@ -78,8 +115,21 @@ scan() {
         printf "%s\t%d\t@raise\t-\n", file, NR
       }
 
-      trimmed ~ /^#\[extendr([[:space:]]*\(.*\))?\][[:space:]]*$/ \
-        { pending = 1; in_sig = 0; expect_entry = 0; next }
+      trimmed ~ /^#\[extendr(\]|\(|[[:space:]])/ {
+        pending = 1; in_sig = 0; expect_entry = 0
+        # `#[extendr(` may wrap over several lines; run to the one that closes
+        # the attribute, or the signature below is never seen.
+        if (trimmed !~ /\][[:space:]]*$/) in_attr = 1
+        next
+      }
+      in_attr { if (trimmed ~ /\][[:space:]]*$/) in_attr = 0; next }
+
+      pending && !in_sig && trimmed ~ /^impl([[:space:]]|<)/ {
+        printf "%s\t%d\tfinding\t%s\n", file, NR, "#[extendr] on an impl block. This guard only understands #[extendr] fn - it would check only the first method in that block and skip every other one. Teach it that shape before using it here."
+        pending = 0
+        next
+      }
+
       pending && !in_sig && trimmed ~ /^fn[[:space:]]/ {
         in_sig = 1; fn_line = NR
         name = trimmed
@@ -141,6 +191,6 @@ if [[ $raises -eq 0 ]]; then
 fi
 
 if [[ $status -eq 0 ]]; then
-  echo "glue raise shape OK: entry() opens every #[extendr] body, one raise_verbatim() call site, throw_r_error() shadowed."
+  echo "glue raise shape OK: entry() opens every #[extendr] body, one raise_verbatim() call site, throw_r_error() shadowed, Rf_error named only inside mod raise."
 fi
 exit $status

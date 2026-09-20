@@ -7,9 +7,10 @@
 # compiler cannot see the shape it holds (a fully qualified
 # `extendr_api::throw_r_error(..)` compiles; a second `raise_verbatim(` call
 # site compiles; a `#[extendr]` body that never returns through `entry()`
-# compiles). The stubs are the only thing that reddens when a check goes away,
-# so each of the four has a fixture of its own - including "nothing raises at
-# all", whose absence let that check be deleted with the harness still green.
+# compiles; a second extern "C" block re-declaring Rf_error compiles). The
+# stubs are the only thing that reddens when a check goes away, so each of the
+# four has a fixture of its own - including "nothing raises at all", whose
+# absence let that check be deleted with the harness still green.
 #
 # Every bad fixture must exit 1 with its own message, so a check firing for the
 # wrong reason does not pass. Each case runs twice - GITHUB_ACTIONS unset and
@@ -145,14 +146,67 @@ fn ferx_rust_named(x: &str) -> Robj {
     entry(move || Ok(x.into()))
 }')" 0 "glue raise shape OK"
 
-# ferx_rust_known_blocks is a one-liner in lib.rs today, wrapped; the check used
-# to wait for a line that ends in `{` and so swallowed the body whole.
+# No #[extendr] body in lib.rs is a one-liner today, but the check used to wait
+# for a line that ends in `{`, so any body written on its signature line was
+# swallowed whole.
 expect "a wrapped one-line body passes" \
   "$(fixture one-line-ok '
 #[extendr]
 fn ferx_rust_blocks() -> Robj { entry(move || Ok(NULL.into())) }')" 0 "glue raise shape OK"
 
+# `#[extendr(` may wrap. The attribute used to have to close on its own line
+# for the signature below it to be seen at all.
+expect "a wrapped #[extendr(..) attribute still finds the body" \
+  "$(fixture attr-wrapped '
+#[extendr(
+    use_try_from = true
+)]
+fn ferx_rust_wrapped_attr(x: &str) -> Robj {
+    entry(move || Ok(x.into()))
+}')" 0 "glue raise shape OK"
+
+# The `//` strip knows nothing of /* .. */, so a body opening after a block
+# comment used to be read as the body itself.
+expect "a block comment before the body is not the body" \
+  "$(fixture block-comment '
+#[extendr]
+fn ferx_rust_blocky(x: &str) -> Robj {
+    /* the engine refuses an empty path, and says so itself */
+    entry(move || Ok(x.into()))
+}')" 0 "glue raise shape OK"
+
 # -- red ----------------------------------------------------------------------
+
+# #388 rebuilt by hand: `mod raise` keeps Rf_error out of scope, but a second
+# extern block re-declares the symbol at file scope and compiles clean.
+expect "a second extern block re-declaring Rf_error is refused" \
+  "$(fixture redeclared '
+extern "C" {
+    fn Rf_error(fmt: *const std::ffi::c_char, ...) -> !;
+}
+
+#[extendr]
+fn ferx_rust_redeclares(x: &str) -> Robj {
+    entry(move || {
+        let c = std::ffi::CString::new(x).unwrap();
+        unsafe { Rf_error(c.as_ptr()) }
+    })
+}')" 1 "Rf_error is named outside mod raise"
+
+# #[extendr] impl: the guard reads the first method and nothing else, so it
+# says so rather than passing the block.
+expect "#[extendr] on an impl block is refused" \
+  "$(fixture extendr-impl '
+#[extendr]
+impl Fit {
+    fn ofv(&self) -> f64 {
+        entry(move || Ok(0.0))
+    }
+    fn theta(&self) -> f64 {
+        0.0
+    }
+}')" 1 "on an impl block"
+
 
 expect "a bare throw_r_error() call is refused" \
   "$(fixture bare '
@@ -189,6 +243,16 @@ fn ferx_rust_try_from(x: &str) -> Robj {
     Ok(y.into()).unwrap()
 }')" 1 "does not open its body with entry()"
 
+expect "a wrapped #[extendr(..) attribute over an unwrapped body is refused" \
+  "$(fixture attr-wrapped-unwrapped '
+#[extendr(
+    use_try_from = true
+)]
+fn ferx_rust_wrapped_bare(x: &str) -> Robj {
+    let y = x.to_string();
+    Ok(y.into()).unwrap()
+}')" 1 "does not open its body with entry()"
+
 expect "an unwrapped one-line body is refused" \
   "$(fixture one-line-unwrapped '
 #[extendr]
@@ -217,6 +281,14 @@ mkdir -p "$raiseless"
 preamble | grep -v '^    raise_verbatim(msg)$' > "$raiseless/lib.rs"
 expect "a glue that calls raise_verbatim() nowhere is refused" "$raiseless" 1 \
   "nothing calls raise_verbatim()"
+
+# `mod raise` deleted outright: Rf_error back at file scope, which is where it
+# was before the module and is what check 4 is ultimately holding.
+moduleless="$TMP/moduleless"
+mkdir -p "$moduleless"
+preamble | grep -v '^mod raise {$' > "$moduleless/lib.rs"
+expect "deleting mod raise is refused" "$moduleless" 1 \
+  "Rf_error is named outside mod raise"
 
 empty="$TMP/empty"
 mkdir -p "$empty"

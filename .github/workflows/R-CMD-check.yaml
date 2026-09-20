@@ -79,14 +79,17 @@ jobs:
       # longjmps out of Rust without unwinding, so the glue must raise in
       # exactly one place: an `#[extendr]` body returns `Result<_, String>` and
       # `entry()` raises once, after that body's frame is gone (#388, #389).
-      # Most of that the compiler holds, on every machine: lib.rs shadows the
+      # Part of that the compiler holds, on every machine: lib.rs shadows the
       # prelude's `throw_r_error` with a local `fn throw_r_error(_: Infallible)`,
       # so a bare call is `error[E0308]`, and it declares `Rf_error` itself
       # inside `mod raise`, so a call from anywhere else in the file is
-      # `error[E0425]`. This step covers the four residues it cannot see: the
-      # shadow being deleted, a fully qualified `extendr_api::throw_r_error(..)`,
-      # a second `raise_verbatim(` call site, and an `#[extendr]` body that does
-      # not open with `entry(`.
+      # `error[E0425]`. That closes the accidental call and not the deliberate
+      # one: a second `extern "C"` block re-declaring `Rf_error` compiles with
+      # no warning, so the module and this step are complements. Four checks,
+      # over five residues the compiler cannot see: the shadow being deleted, a
+      # fully qualified `extendr_api::throw_r_error(..)`, a second
+      # `raise_verbatim(` call site, an `#[extendr]` body that does not open
+      # with `entry(`, and `Rf_error` named anywhere outside `mod raise`.
       - name: Verify the glue raises through entry() only
         run: bash tools/check-glue-raise.sh
 
