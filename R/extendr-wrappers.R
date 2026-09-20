@@ -93,6 +93,12 @@ ferx_rust_autodiff_enabled <- function() {
 
 #' @title Internal Rust backend binding
 #' @keywords internal
+ferx_rust_test_panic <- function(msg) {
+  .Call("wrap__ferx_rust_test_panic", msg)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
 ferx_rust_known_blocks <- function() {
   .Call("wrap__ferx_rust_known_blocks")
 }

@@ -133,6 +133,16 @@ fn entry<T>(f: impl FnOnce() -> Result<T, String>) -> T {
     raise_verbatim(msg)
 }
 
+/// Shadows `extendr_api::prelude::throw_r_error`, which the glob import at the
+/// top of this file would otherwise bring into scope. An explicit item beats a
+/// glob import and `Infallible` has no values, so `throw_r_error(format!(..))`
+/// is `error[E0308]` on every machine rather than something only CI notices.
+/// Never called; raising goes through `entry`.
+#[allow(dead_code)]
+fn throw_r_error(never: std::convert::Infallible) -> ! {
+    match never {}
+}
+
 /// Poll interval for the interrupt-check loop. 100ms keeps Ctrl-C responsive
 /// while adding negligible overhead to the worker.
 const POLL_MS: u64 = 100;
@@ -190,7 +200,7 @@ fn ferx_rust_fit(
         let mut parsed =
             match ferx_core::parser::model_parser::parse_full_model_file(Path::new(model_path)) {
                 Ok(p) => p,
-                Err(e) => throw_r_error(format!("Error parsing model: {e}")),
+                Err(e) => return Err(format!("Error parsing model: {e}")),
             };
 
         // Build fit options
@@ -207,7 +217,7 @@ fn ferx_rust_fit(
         // reading happens AFTER this loop so the SelectionFilter sees the merged
         // model-file + R-call conditions.
         if settings_keys.len() != settings_values.len() {
-            throw_r_error(format!(
+            return Err(format!(
                 "Error: settings keys/values length mismatch ({} vs {})",
                 settings_keys.len(),
                 settings_values.len()
@@ -237,14 +247,14 @@ fn ferx_rust_fit(
                 .iter()
                 .any(|r| r.eq_ignore_ascii_case(key))
             {
-                throw_r_error(format!(
+                return Err(format!(
                     "Error: setting `{key}` conflicts with a dedicated ferx_fit() argument — pass it via that argument instead"
                 ));
             }
             match ferx_core::parser::model_parser::apply_fit_option(&mut opts, key, v) {
                 Ok(true) => {}
-                Ok(false) => throw_r_error(format!("Error: unknown fit setting `{key}`")),
-                Err(e) => throw_r_error(format!("Error: {e}")),
+                Ok(false) => return Err(format!("Error: unknown fit setting `{key}`")),
+                Err(e) => return Err(format!("Error: {e}")),
             }
         }
 
@@ -271,7 +281,7 @@ fn ferx_rust_fit(
                 &opts.ignore_subjects,
             ) {
                 Ok(f) => f,
-                Err(e) => throw_r_error(format!("Error in [data_selection]: {e}")),
+                Err(e) => return Err(format!("Error in [data_selection]: {e}")),
             };
             let filter_opt = if filter.is_empty() { None } else { Some(&filter) };
             match read_population_for(
@@ -284,7 +294,7 @@ fn ferx_rust_fit(
                 &parsed.column_map,
             ) {
                 Ok(result) => result,
-                Err(e) => throw_r_error(format!("Error reading data: {e}")),
+                Err(e) => return Err(format!("Error reading data: {e}")),
             }
         };
 
@@ -295,7 +305,7 @@ fn ferx_rust_fit(
         if !method.is_empty() {
             let chain: Vec<EstimationMethod> = match method.iter().map(|m| parse_method(m)).collect() {
                 Ok(v) => v,
-                Err(e) => throw_r_error(format!("{e}")),
+                Err(e) => return Err(format!("{e}")),
             };
             let final_method = *chain.last().unwrap();
             // The reported `interaction` flag must reflect the last *estimating* stage
@@ -438,13 +448,11 @@ fn ferx_rust_fit(
             Ok(Ok(r)) => r,
             Ok(Err(_)) if cancel.is_cancelled() => {
                 // Raise a proper R error so the user sees a clean condition
-                // instead of a silent empty-list return. A small one-time leak
-                // of the worker's locals is acceptable here — one R session's
-                // worth of cancelled fits won't add up to anything meaningful.
-                throw_r_error("ferx_fit: cancelled by user");
+                // instead of a silent empty-list return.
+                return Err("ferx_fit: cancelled by user".to_string());
             }
-            Ok(Err(e)) => throw_r_error(format!("Fit error: {e}")),
-            Err(_) => throw_r_error("Fit error: worker thread panicked"),
+            Ok(Err(e)) => return Err(format!("Fit error: {e}")),
+            Err(_) => return Err("Fit error: worker thread panicked".to_string()),
         };
 
         // Record source-file provenance on the result so `ferx_sir(fit)` can
@@ -491,14 +499,14 @@ fn ferx_rust_simulate(
     entry(move || {
         let match_method = match parse_match_method(match_method) {
             Ok(m) => m,
-            Err(e) => raise_verbatim(e),
+            Err(e) => return Err(e),
         };
         // parse_full_model_file (vs parse_model_file) so iov_column is available
         // for the reader; without it, models with kappa declarations panic in
         // pk_param_fn (Eta index >= n_bsv_eta).
         let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
             Ok(p) => p,
-            Err(e) => raise_verbatim(format!("Error parsing model: {e}")),
+            Err(e) => return Err(format!("Error parsing model: {e}")),
         };
         let iov_col = parsed.fit_options.iov_column.clone();
 
@@ -517,7 +525,7 @@ fn ferx_rust_simulate(
                 &parsed.column_map,
             ) {
                 Ok(r) => r,
-                Err(e) => raise_verbatim(format!("Error reading data: {e}")),
+                Err(e) => return Err(format!("Error reading data: {e}")),
             };
 
         let opts = ferx_core::SimulateOptions {
@@ -538,7 +546,7 @@ fn ferx_rust_simulate(
             &opts,
         ) {
             Ok(o) => o,
-            Err(e) => raise_verbatim(format!("Error simulating: {e}")),
+            Err(e) => return Err(format!("Error simulating: {e}")),
         };
 
         Ok(attach_sim_warnings(
@@ -587,11 +595,11 @@ fn ferx_rust_simulate_from_fit(
     entry(move || {
         let match_method = match parse_match_method(match_method) {
             Ok(m) => m,
-            Err(e) => raise_verbatim(e),
+            Err(e) => return Err(e),
         };
         let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
             Ok(p) => p,
-            Err(e) => raise_verbatim(format!("Error parsing model: {e}")),
+            Err(e) => return Err(format!("Error parsing model: {e}")),
         };
         let iov_col = parsed.fit_options.iov_column.clone();
 
@@ -610,7 +618,7 @@ fn ferx_rust_simulate_from_fit(
                 &parsed.column_map,
             ) {
                 Ok(r) => r,
-                Err(e) => raise_verbatim(format!("Error reading data: {e}")),
+                Err(e) => return Err(format!("Error reading data: {e}")),
             };
 
         let params = match params_from_fit(
@@ -624,7 +632,7 @@ fn ferx_rust_simulate_from_fit(
             &residual_rho,
         ) {
             Ok(p) => p,
-            Err(e) => raise_verbatim(e),
+            Err(e) => return Err(e),
         };
 
         let opts = ferx_core::SimulateOptions {
@@ -642,7 +650,7 @@ fn ferx_rust_simulate_from_fit(
             &opts,
         ) {
             Ok(o) => o,
-            Err(e) => raise_verbatim(format!("Error simulating: {e}")),
+            Err(e) => return Err(format!("Error simulating: {e}")),
         };
         Ok(attach_sim_warnings(
             sim_results_to_df(&output.results),
@@ -690,15 +698,16 @@ fn ferx_rust_simulate_adaptive(
     entry(move || {
         let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
             Ok(p) => p,
-            Err(e) => throw_r_error(format!("ferx_simulate_adaptive: error parsing model: {e}")),
+            Err(e) => return Err(format!("ferx_simulate_adaptive: error parsing model: {e}")),
         };
         // The reactive controller is the model file's `[adaptive_dosing]` block; a
         // model without one cannot be simulated this way (use `ferx_simulate`).
         let spec = match parsed.adaptive_dosing.as_ref() {
             Some(s) => s,
-            None => throw_r_error(
+            None => return Err(
                 "ferx_simulate_adaptive: model has no [adaptive_dosing] block (this entry point \
-                 requires one; use ferx_simulate for a fixed regimen)",
+                 requires one; use ferx_simulate for a fixed regimen)"
+                    .to_string(),
             ),
         };
         let iov_col = parsed.fit_options.iov_column.clone();
@@ -716,7 +725,7 @@ fn ferx_rust_simulate_adaptive(
             &parsed.column_map,
         ) {
             Ok(r) => r,
-            Err(e) => throw_r_error(format!("ferx_simulate_adaptive: error reading data: {e}")),
+            Err(e) => return Err(format!("ferx_simulate_adaptive: error reading data: {e}")),
         };
 
         // The spec owns the decision schedule (`at`) and the monitored signal
@@ -758,7 +767,7 @@ fn ferx_rust_simulate_adaptive(
                     .filter(|w| !w.starts_with("W_NO_DOSES"))
                     .collect(),
             ),
-            Err(e) => throw_r_error(format!("ferx_simulate_adaptive: {e}")),
+            Err(e) => return Err(format!("ferx_simulate_adaptive: {e}")),
         })
     })
 }
@@ -918,7 +927,7 @@ fn ferx_rust_simulate_with_uncertainty(
     entry(move || {
         let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
             Ok(p) => p,
-            Err(e) => raise_verbatim(format!("Error parsing model: {e}")),
+            Err(e) => return Err(format!("Error parsing model: {e}")),
         };
         let iov_col = parsed.fit_options.iov_column.clone();
         // Simulation reads a missing `DV` as a design point, not as a forgotten
@@ -936,7 +945,7 @@ fn ferx_rust_simulate_with_uncertainty(
                 &parsed.column_map,
             ) {
                 Ok(r) => r,
-                Err(e) => raise_verbatim(format!("Error reading data: {e}")),
+                Err(e) => return Err(format!("Error reading data: {e}")),
             };
 
         // Decode the method string to the engine enum.
@@ -945,7 +954,7 @@ fn ferx_rust_simulate_with_uncertainty(
                 ferx_core::UncertaintyMethod::Asymptotic
             }
             "sir" => ferx_core::UncertaintyMethod::Sir,
-            other => raise_verbatim(format!(
+            other => return Err(format!(
                 "Unknown uncertainty method '{other}' — expected 'asymptotic' or 'sir'"
             )),
         };
@@ -968,7 +977,7 @@ fn ferx_rust_simulate_with_uncertainty(
                 &residual_rho,
             ) {
                 Ok(f) => f,
-                Err(e) => raise_verbatim(e),
+                Err(e) => return Err(e),
             };
 
         let opts = ferx_core::SimulateUncertaintyOptions {
@@ -989,7 +998,7 @@ fn ferx_rust_simulate_with_uncertainty(
                 sim_results_to_df(&results),
                 data_reader_warnings(&population),
             ),
-            Err(e) => raise_verbatim(format!("simulate_with_uncertainty error: {e}")),
+            Err(e) => return Err(format!("simulate_with_uncertainty error: {e}")),
         })
     })
 }
@@ -1008,7 +1017,7 @@ fn ferx_rust_predict(
     entry(move || {
         let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
             Ok(p) => p,
-            Err(e) => raise_verbatim(format!("Error parsing model: {e}")),
+            Err(e) => return Err(format!("Error parsing model: {e}")),
         };
         let iov_col = parsed.fit_options.iov_column.clone();
 
@@ -1027,7 +1036,7 @@ fn ferx_rust_predict(
                 &parsed.column_map,
             ) {
                 Ok(r) => r,
-                Err(e) => raise_verbatim(format!("Error reading data: {e}")),
+                Err(e) => return Err(format!("Error reading data: {e}")),
             };
 
         let results = ferx_core::predict(&parsed.model, &population, &parsed.model.default_params);
@@ -1075,7 +1084,7 @@ fn ferx_rust_predict_from_fit(
     entry(move || {
         let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
             Ok(p) => p,
-            Err(e) => raise_verbatim(format!("Error parsing model: {e}")),
+            Err(e) => return Err(format!("Error parsing model: {e}")),
         };
         let iov_col = parsed.fit_options.iov_column.clone();
 
@@ -1094,7 +1103,7 @@ fn ferx_rust_predict_from_fit(
                 &parsed.column_map,
             ) {
                 Ok(r) => r,
-                Err(e) => raise_verbatim(format!("Error reading data: {e}")),
+                Err(e) => return Err(format!("Error reading data: {e}")),
             };
 
         let params = match params_from_fit(
@@ -1108,7 +1117,7 @@ fn ferx_rust_predict_from_fit(
             &residual_rho,
         ) {
             Ok(p) => p,
-            Err(e) => raise_verbatim(e),
+            Err(e) => return Err(e),
         };
 
         let results = ferx_core::predict(&parsed.model, &population, &params);
@@ -1172,7 +1181,7 @@ fn ferx_rust_predict_survival(model_path: &str, data_path: &str, times: Vec<f64>
     entry(move || {
         let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
             Ok(p) => p,
-            Err(e) => raise_verbatim(format!("Error parsing model: {e}")),
+            Err(e) => return Err(format!("Error parsing model: {e}")),
         };
         let iov_col = parsed.fit_options.iov_column.clone();
 
@@ -1186,7 +1195,7 @@ fn ferx_rust_predict_survival(model_path: &str, data_path: &str, times: Vec<f64>
             &parsed.column_map,
         ) {
             Ok(r) => r,
-            Err(e) => raise_verbatim(format!("Error reading data: {e}")),
+            Err(e) => return Err(format!("Error reading data: {e}")),
         };
 
         let results =
@@ -1227,7 +1236,7 @@ fn ferx_rust_predict_survival_from_fit(
     entry(move || {
         let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
             Ok(p) => p,
-            Err(e) => raise_verbatim(format!("Error parsing model: {e}")),
+            Err(e) => return Err(format!("Error parsing model: {e}")),
         };
         let iov_col = parsed.fit_options.iov_column.clone();
 
@@ -1241,7 +1250,7 @@ fn ferx_rust_predict_survival_from_fit(
             &parsed.column_map,
         ) {
             Ok(r) => r,
-            Err(e) => raise_verbatim(format!("Error reading data: {e}")),
+            Err(e) => return Err(format!("Error reading data: {e}")),
         };
 
         let params = match params_from_fit(
@@ -1255,7 +1264,7 @@ fn ferx_rust_predict_survival_from_fit(
             &residual_rho,
         ) {
             Ok(p) => p,
-            Err(e) => raise_verbatim(e),
+            Err(e) => return Err(e),
         };
 
         let results = ferx_core::predict_survival(&parsed.model, &population, &params, &times);
@@ -1299,12 +1308,12 @@ fn ferx_rust_npde_from_fit(
 ) -> Robj {
     entry(move || {
         if nsim <= 0 {
-            raise_verbatim("npde error: nsim must be a positive integer".to_string());
+            return Err("npde error: nsim must be a positive integer".to_string());
         }
 
         let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
             Ok(p) => p,
-            Err(e) => raise_verbatim(format!("Error parsing model: {e}")),
+            Err(e) => return Err(format!("Error parsing model: {e}")),
         };
         let iov_col = parsed.fit_options.iov_column.clone();
 
@@ -1320,7 +1329,7 @@ fn ferx_rust_npde_from_fit(
             &parsed.fit_options.ignore_subjects,
         ) {
             Ok(f) => f,
-            Err(e) => raise_verbatim(format!("Error in [data_selection]: {e}")),
+            Err(e) => return Err(format!("Error in [data_selection]: {e}")),
         };
         let filter_opt = if filter.is_empty() { None } else { Some(&filter) };
 
@@ -1334,7 +1343,7 @@ fn ferx_rust_npde_from_fit(
             &parsed.column_map,
         ) {
             Ok(r) => r,
-            Err(e) => raise_verbatim(format!("Error reading data: {e}")),
+            Err(e) => return Err(format!("Error reading data: {e}")),
         };
 
         let params = match params_from_fit(
@@ -1348,7 +1357,7 @@ fn ferx_rust_npde_from_fit(
             &residual_rho,
         ) {
             Ok(p) => p,
-            Err(e) => raise_verbatim(e),
+            Err(e) => return Err(e),
         };
 
         let seed_opt = if seed < 0 { None } else { Some(seed as u64) };
@@ -3297,6 +3306,26 @@ fn ferx_rust_autodiff_enabled() -> bool {
     })
 }
 
+/// Panic with `msg`, to exercise the panic path from a test.
+///
+/// extendr's own wrapper hands a panic's text to `throw_r_error`
+/// (`extendr-macros-0.9.0/src/wrappers.rs:285`), so a panic carrying a `%` had
+/// the same two failures a raise did (#388), and `entry` catches the unwind
+/// before extendr sees it. The panics that are reachable through a dataset
+/// today are not a durable fixture for that - FeRx-NLME/ferx-core#1487 turns
+/// the measured one into an `Err` - so the test drives this instead.
+///
+/// @param msg Text to panic with
+/// @return Never returns; the panic arrives in R as an error
+/// @keywords internal
+/// @export
+#[extendr]
+fn ferx_rust_test_panic(msg: &str) -> Robj {
+    entry(move || -> Result<Robj, String> {
+        panic!("{msg}");
+    })
+}
+
 /// Every `[block]` name this build of the engine recognises.
 ///
 /// The engine's block names are closed-world (ferx-core #1040): a header that
@@ -3400,7 +3429,7 @@ fn ferx_rust_model_data_path(model_path: &str) -> String {
     entry(move || {
         Ok(match ferx_core::parser::model_parser::parse_full_model_file(Path::new(model_path)) {
             Ok(p) => p.data_path.unwrap_or_default(),
-            Err(e) => throw_r_error(format!("Error parsing model: {e}")),
+            Err(e) => return Err(format!("Error parsing model: {e}")),
         })
     })
 }
@@ -3420,21 +3449,21 @@ fn ferx_rust_inits_from_nca(model_path: &str, data_path: &str, method: &str) -> 
         let parsed = match ferx_core::parser::model_parser::parse_full_model_file(Path::new(model_path))
         {
             Ok(p) => p,
-            Err(e) => raise_verbatim(format!("Error parsing model: {e}")),
+            Err(e) => return Err(format!("Error parsing model: {e}")),
         };
 
         let iov_col = parsed.fit_options.iov_column.clone();
         let population =
             match ferx_core::read_nonmem_csv(Path::new(data_path), None, iov_col.as_deref()) {
                 Ok(p) => p,
-                Err(e) => raise_verbatim(format!("Error reading data: {e}")),
+                Err(e) => return Err(format!("Error reading data: {e}")),
             };
 
         let nca_method = match method.trim().to_lowercase().as_str() {
             "nca" => ferx_core::NcaInit::Nca,
             "" | "true" | "sweep" | "nca_sweep" => ferx_core::NcaInit::Sweep,
             "ebe" | "nca_ebe" => ferx_core::NcaInit::Ebe,
-            other => raise_verbatim(format!(
+            other => return Err(format!(
                 "Unknown inits_from_nca method '{other}' — expected 'nca', 'nca_sweep', or 'nca_ebe'"
             )),
         };
@@ -3531,17 +3560,16 @@ fn ferx_rust_sir(
     verbose: bool,
 ) -> Robj {
     entry(move || {
-        // All error paths in this binding throw an R condition (via
-        // `throw_r_error`) rather than printing to stderr + returning NULL.
-        // The latter pattern (used by `ferx_rust_fit`) loses the engine
-        // message to stderr — callers using `tryCatch()` or
-        // `expect_error(..., regexp = ...)` see only a generic
-        // "backend returned no result" from the R wrapper. Throwing
-        // propagates the actual message (e.g. "hash mismatch") into the R
-        // condition, which is what test code expects and what users want.
+        // All error paths in this binding return `Err`, which `entry` raises as
+        // an R condition, rather than printing to stderr + returning NULL. The
+        // latter pattern loses the engine message to stderr — callers using
+        // `tryCatch()` or `expect_error(..., regexp = ...)` see only a generic
+        // "backend returned no result" from the R wrapper. Raising propagates
+        // the actual message (e.g. "hash mismatch") into the R condition, which
+        // is what test code expects and what users want.
         let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
             Ok(p) => p,
-            Err(e) => throw_r_error(&format!(
+            Err(e) => return Err(format!(
                 "ferx_sir: error parsing model at {}: {}",
                 model_path, e
             )),
@@ -3556,35 +3584,35 @@ fn ferx_rust_sir(
         let n_packed = cov_matrix_dim as usize;
 
         if n_theta != template.theta.len() {
-            throw_r_error(&format!(
+            return Err(format!(
                 "ferx_sir: theta length {} does not match model ({} expected)",
                 n_theta,
                 template.theta.len()
             ));
         }
         if n_sigma != template.sigma.values.len() {
-            throw_r_error(&format!(
+            return Err(format!(
                 "ferx_sir: sigma length {} does not match model ({} expected)",
                 n_sigma,
                 template.sigma.values.len()
             ));
         }
         if n_eta != template.omega.dim() {
-            throw_r_error(&format!(
+            return Err(format!(
                 "ferx_sir: omega dim {} does not match model ({} expected)",
                 n_eta,
                 template.omega.dim()
             ));
         }
         if omega_flat.len() != n_eta * n_eta {
-            throw_r_error(&format!(
+            return Err(format!(
                 "ferx_sir: omega_flat length {} does not match dim^2 = {}",
                 omega_flat.len(),
                 n_eta * n_eta
             ));
         }
         if n_packed == 0 || cov_matrix_flat.len() != n_packed * n_packed {
-            throw_r_error(&format!(
+            return Err(format!(
                 "ferx_sir: cov_matrix is missing or malformed (dim={}, len={}). \
                  Re-fit with `covariance = TRUE`.",
                 n_packed,
@@ -3592,7 +3620,7 @@ fn ferx_rust_sir(
             ));
         }
         if eta_hats_flat.len() != n_subj * n_eta {
-            throw_r_error(&format!(
+            return Err(format!(
                 "ferx_sir: eta_hats_flat length {} does not match n_subjects * n_eta = {}",
                 eta_hats_flat.len(),
                 n_subj * n_eta
@@ -3643,7 +3671,7 @@ fn ferx_rust_sir(
         let residual_correlations_resolved =
             match overlay_residual_rho(model.residual_correlations.clone(), &residual_rho) {
                 Ok(rc) => rc,
-                Err(e) => throw_r_error(&format!("ferx_sir: {}", e)),
+                Err(e) => return Err(format!("ferx_sir: {}", e)),
             };
 
         // Skeleton FitResult — only the fields ferx_core::run_sir actually
@@ -3850,7 +3878,7 @@ fn ferx_rust_sir(
         // fires — that is the whole point of having hashes here.
         let new_fit = match ferx_core::run_sir(&fit, None, None, &opts) {
             Ok(f) => f,
-            Err(e) => throw_r_error(&format!("ferx_sir: {}", e)),
+            Err(e) => return Err(format!("ferx_sir: {}", e)),
         };
 
         let flatten_ci = |ci: &Option<Vec<(f64, f64)>>| -> Vec<f64> {
@@ -3955,13 +3983,13 @@ fn ferx_rust_covariance(
     verbose: bool,
 ) -> Robj {
     entry(move || {
-        // All error paths in this binding throw an R condition (via
-        // `throw_r_error`), mirroring `ferx_rust_sir`, so the engine message
+        // All error paths in this binding return `Err`, which `entry` raises as
+        // an R condition, mirroring `ferx_rust_sir`, so the engine message
         // (e.g. "hash mismatch") propagates into the R condition rather than
         // being lost to stderr.
         let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
             Ok(p) => p,
-            Err(e) => throw_r_error(&format!(
+            Err(e) => return Err(format!(
                 "ferx_covariance: error parsing model at {}: {}",
                 model_path, e
             )),
@@ -3975,35 +4003,35 @@ fn ferx_rust_covariance(
         let n_subj = n_subjects.max(0) as usize;
 
         if n_theta != template.theta.len() {
-            throw_r_error(&format!(
+            return Err(format!(
                 "ferx_covariance: theta length {} does not match model ({} expected)",
                 n_theta,
                 template.theta.len()
             ));
         }
         if n_sigma != template.sigma.values.len() {
-            throw_r_error(&format!(
+            return Err(format!(
                 "ferx_covariance: sigma length {} does not match model ({} expected)",
                 n_sigma,
                 template.sigma.values.len()
             ));
         }
         if n_eta != template.omega.dim() {
-            throw_r_error(&format!(
+            return Err(format!(
                 "ferx_covariance: omega dim {} does not match model ({} expected)",
                 n_eta,
                 template.omega.dim()
             ));
         }
         if omega_flat.len() != n_eta * n_eta {
-            throw_r_error(&format!(
+            return Err(format!(
                 "ferx_covariance: omega_flat length {} does not match dim^2 = {}",
                 omega_flat.len(),
                 n_eta * n_eta
             ));
         }
         if eta_hats_flat.len() != n_subj * n_eta {
-            throw_r_error(&format!(
+            return Err(format!(
                 "ferx_covariance: eta_hats_flat length {} does not match n_subjects * n_eta = {}",
                 eta_hats_flat.len(),
                 n_subj * n_eta
@@ -4014,7 +4042,7 @@ fn ferx_rust_covariance(
             "r" | "hessian" => CovarianceMethod::Hessian,
             "s" | "cross_product" => CovarianceMethod::CrossProduct,
             "rsr" | "sandwich" => CovarianceMethod::Sandwich,
-            other => throw_r_error(&format!(
+            other => return Err(format!(
                 "ferx_covariance: unknown covariance_method `{}` — expected r/s/rsr",
                 other
             )),
@@ -4071,7 +4099,7 @@ fn ferx_rust_covariance(
         let residual_correlations_resolved =
             match overlay_residual_rho(model.residual_correlations.clone(), &residual_rho) {
                 Ok(rc) => rc,
-                Err(e) => throw_r_error(&format!("ferx_covariance: {}", e)),
+                Err(e) => return Err(format!("ferx_covariance: {}", e)),
             };
 
         // Skeleton FitResult — only the fields ferx_core::run_covariance actually
@@ -4270,7 +4298,7 @@ fn ferx_rust_covariance(
         // whole point of forwarding the hashes here.
         let new_fit = match ferx_core::run_covariance(&fit, None, None, &opts) {
             Ok(f) => f,
-            Err(e) => throw_r_error(&format!("ferx_covariance: {}", e)),
+            Err(e) => return Err(format!("ferx_covariance: {}", e)),
         };
 
         let (cov_matrix_flat, cov_matrix_dim): (Vec<f64>, i32) = match &new_fit.covariance_matrix {
@@ -4406,7 +4434,7 @@ fn ferx_rust_prepare_frem(
             fit_init.as_ref(),
         ) {
             Ok(r) => r,
-            Err(e) => throw_r_error(format!("Error in prepare_frem: {e}")),
+            Err(e) => return Err(format!("Error in prepare_frem: {e}")),
         };
 
         let mean_names: Vec<String> = result.covariate_means.iter().map(|(n, _)| n.clone()).collect();
@@ -4969,13 +4997,13 @@ fn ferx_rust_bootstrap(
             retry_failed,
         ) {
             Ok(o) => o,
-            Err(e) => throw_r_error(format!("ferx_bootstrap: {e}")),
+            Err(e) => return Err(format!("ferx_bootstrap: {e}")),
         };
 
         let data = (!data_path.is_empty()).then_some(data_path);
         let mut prepared = match ferx_core::prepare_run(model_path, data) {
             Ok(p) => p,
-            Err(e) => throw_r_error(format!("ferx_bootstrap: {e}")),
+            Err(e) => return Err(format!("ferx_bootstrap: {e}")),
         };
 
         // Install a cancellation token so Ctrl-C aborts the run (#315). There is no
@@ -5018,22 +5046,23 @@ fn ferx_rust_bootstrap(
         // `ferx_bootstrap_summarize()` will summarise them.
         if cancel.is_cancelled() {
             match &options.directory {
-                Some(dir) => throw_r_error(format!(
+                Some(dir) => return Err(format!(
                     "ferx_bootstrap: cancelled by user. The replicates that finished are in '{}' - \
                      ferx_bootstrap_summarize() summarises them.",
                     dir.display()
                 )),
-                None => throw_r_error(
+                None => return Err(
                     "ferx_bootstrap: cancelled by user. No `directory` was set, so the replicates \
                      that finished were held in memory only and are gone; set `directory` to keep \
-                     the partial results of a run you may want to stop.",
+                     the partial results of a run you may want to stop."
+                        .to_string(),
                 ),
             }
         }
 
         let result = match outcome {
             Ok(r) => r,
-            Err(e) => throw_r_error(format!("ferx_bootstrap: {e}")),
+            Err(e) => return Err(format!("ferx_bootstrap: {e}")),
         };
 
         let out = List::from_pairs(vec![
@@ -5098,7 +5127,7 @@ fn ferx_rust_bootstrap_summarize(
         let dir = std::path::Path::new(directory);
         let summary = match resummarize(dir, &options) {
             Ok(s) => s,
-            Err(e) => throw_r_error(format!("ferx_bootstrap_summarize: {e}")),
+            Err(e) => return Err(format!("ferx_bootstrap_summarize: {e}")),
         };
         // Read back the two run-level facts the summary does not carry, from the
         // diagnostics file `resummarize` just rewrote.
@@ -5428,7 +5457,7 @@ fn ferx_rust_search_config_load(path: &str) -> List {
     entry(move || {
         let cfg = match ferx_tools::search::SearchConfig::load(path) {
             Ok(cfg) => cfg,
-            Err(e) => throw_r_error(e),
+            Err(e) => return Err(e),
         };
 
         let (feature, keyword, optional) = search_feature_columns(&cfg.mfl);
@@ -5527,7 +5556,7 @@ fn ferx_rust_search_space_parse(mfl: &str, model_path: &str, data_path: &str) ->
 
         let parsed = match ferx_tools::search::Mfl::parse(mfl) {
             Ok(m) => m,
-            Err(e) => throw_r_error(e),
+            Err(e) => return Err(e),
         };
         let (feature, keyword, optional) = search_feature_columns(&parsed);
 
@@ -5557,15 +5586,15 @@ fn ferx_rust_search_space_parse(mfl: &str, model_path: &str, data_path: &str) ->
         };
         let prepared = match ferx_core::prepare_run(model_path, data_opt) {
             Ok(p) => p,
-            Err(e) => throw_r_error(e),
+            Err(e) => return Err(e),
         };
         let source = match std::fs::read_to_string(model_path) {
             Ok(s) => s,
-            Err(e) => throw_r_error(format!("cannot read {model_path}: {e}")),
+            Err(e) => return Err(format!("cannot read {model_path}: {e}")),
         };
         let text = match ferx_core::edit::ModelText::parse(&source) {
             Ok(t) => t,
-            Err(e) => throw_r_error(e),
+            Err(e) => return Err(e),
         };
         let ctx = match ferx_tools::search::ModelContext::from_model(
             &prepared.parsed,
@@ -5573,11 +5602,11 @@ fn ferx_rust_search_space_parse(mfl: &str, model_path: &str, data_path: &str) ->
             &prepared.population,
         ) {
             Ok(c) => c,
-            Err(e) => throw_r_error(e),
+            Err(e) => return Err(e),
         };
         let resolved = match ferx_tools::search::resolve(&parsed, &ctx) {
             Ok(r) => r,
-            Err(e) => throw_r_error(e),
+            Err(e) => return Err(e),
         };
 
         let (r_feature, r_keyword, r_optional) = search_feature_columns(&resolved.mfl);
@@ -5625,7 +5654,7 @@ fn ferx_rust_search_coverage(mfl: &str) -> List {
     entry(move || {
         let parsed = match ferx_tools::search::Mfl::parse(mfl) {
             Ok(m) => m,
-            Err(e) => throw_r_error(e),
+            Err(e) => return Err(e),
         };
         let (feature, covered, reason) = search_coverage_rows(&parsed);
         Ok(list!(feature = feature, covered = covered, reason = reason))
@@ -5911,16 +5940,16 @@ fn ferx_rust_covsearch(
             resume,
         ) {
             Ok(c) => c,
-            Err(e) => throw_r_error(format!("ferx_covsearch: {e}")),
+            Err(e) => return Err(format!("ferx_covsearch: {e}")),
         };
         // Refuse a space covsearch cannot honour before the dataset is read - a
         // structural feature here is a file meant for modelsearch.
         if let Err(e) = ferx_tools::covsearch::CovsearchOptions::from_config(&config) {
-            throw_r_error(format!("ferx_covsearch: {e}"));
+            return Err(format!("ferx_covsearch: {e}"));
         }
         let mut base = match config.load_base() {
             Ok(b) => b,
-            Err(e) => throw_r_error(format!("ferx_covsearch: {e}")),
+            Err(e) => return Err(format!("ferx_covsearch: {e}")),
         };
 
         // One flag, two paths into the engine: `CovsearchRun::cancel` stops the
@@ -5982,7 +6011,7 @@ fn ferx_rust_covsearch(
             )
         }) {
             Ok(r) => r,
-            Err(e) => throw_r_error(format!("ferx_covsearch: {e}")),
+            Err(e) => return Err(format!("ferx_covsearch: {e}")),
         };
 
         // The step table, column for column as `STEP_COLUMNS` orders it.
@@ -6046,7 +6075,7 @@ fn ferx_rust_covsearch(
         let final_fit: Robj = match &result.final_fit {
             Some(fit) => match search_final_fit(fit, &final_model, &base.prepared.data_path) {
                 Ok(l) => l.into(),
-                Err(e) => throw_r_error(format!("ferx_covsearch: {e}")),
+                Err(e) => return Err(format!("ferx_covsearch: {e}")),
             },
             None => NULL.into(),
         };
@@ -6143,14 +6172,14 @@ fn ferx_rust_allometry(
             let data = (!data_path.is_empty()).then_some(data_path);
             let prepared = match ferx_core::prepare_run(model_path, data) {
                 Ok(p) => p,
-                Err(e) => throw_r_error(format!("ferx_allometry: {e}")),
+                Err(e) => return Err(format!("ferx_allometry: {e}")),
             };
             let text = match std::fs::read_to_string(model_path)
                 .map_err(|e| format!("cannot read {model_path}: {e}"))
                 .and_then(|s| ferx_core::edit::ModelText::parse(&s))
             {
                 Ok(t) => t,
-                Err(e) => throw_r_error(format!("ferx_allometry: {e}")),
+                Err(e) => return Err(format!("ferx_allometry: {e}")),
             };
             (
                 ferx_tools::search::BaseModel { prepared, text },
@@ -6160,15 +6189,15 @@ fn ferx_rust_allometry(
         } else {
             let config = match ferx_tools::search::SearchConfig::load(Path::new(config_path)) {
                 Ok(c) => c,
-                Err(e) => throw_r_error(format!("ferx_allometry: {e}")),
+                Err(e) => return Err(format!("ferx_allometry: {e}")),
             };
             let options = match ferx_tools::allometry::AllometryOptions::from_config(&config) {
                 Ok(o) => o,
-                Err(e) => throw_r_error(format!("ferx_allometry: {e}")),
+                Err(e) => return Err(format!("ferx_allometry: {e}")),
             };
             let base = match config.load_base() {
                 Ok(b) => b,
-                Err(e) => throw_r_error(format!("ferx_allometry: {e}")),
+                Err(e) => return Err(format!("ferx_allometry: {e}")),
             };
             let run_options = config.run_options();
             (base, options, run_options)
@@ -6199,7 +6228,7 @@ fn ferx_rust_allometry(
             }
         }
         if let Err(e) = options.validate() {
-            throw_r_error(format!("ferx_allometry: {e}"));
+            return Err(format!("ferx_allometry: {e}"));
         }
         if retries >= 0 {
             run_options.n_starts = retries as usize + 1;
@@ -6220,7 +6249,7 @@ fn ferx_rust_allometry(
         if !fit {
             let built = match ferx_tools::allometry::allometric_model(&base, &options) {
                 Ok(b) => b,
-                Err(e) => throw_r_error(format!("ferx_allometry: {e}")),
+                Err(e) => return Err(format!("ferx_allometry: {e}")),
             };
             let (parameter, exponent, is_fixed, theta) = scaling_columns(&built.scalings);
             return Ok(list!(
@@ -6257,7 +6286,7 @@ fn ferx_rust_allometry(
             )
         }) {
             Ok(r) => r,
-            Err(e) => throw_r_error(format!("ferx_allometry: {e}")),
+            Err(e) => return Err(format!("ferx_allometry: {e}")),
         };
 
         let (parameter, exponent, is_fixed, theta) = scaling_columns(&result.scalings);
@@ -6265,7 +6294,7 @@ fn ferx_rust_allometry(
         let scaled_fit: Robj = match &result.scaled.fit {
             Some(fit) => match search_final_fit(fit, &scaled_model, &base.prepared.data_path) {
                 Ok(l) => l.into(),
-                Err(e) => throw_r_error(format!("ferx_allometry: {e}")),
+                Err(e) => return Err(format!("ferx_allometry: {e}")),
             },
             None => NULL.into(),
         };
@@ -6273,7 +6302,7 @@ fn ferx_rust_allometry(
         let base_fit: Robj = match &result.base.fit {
             Some(fit) => match search_final_fit(fit, &base_text, &base.prepared.data_path) {
                 Ok(l) => l.into(),
-                Err(e) => throw_r_error(format!("ferx_allometry: {e}")),
+                Err(e) => return Err(format!("ferx_allometry: {e}")),
             },
             None => NULL.into(),
         };
@@ -6389,7 +6418,7 @@ fn ferx_rust_modelsearch(
         let config =
             match search_config_for_tool(config_path, &text, &inline_dir, threads, retries, resume) {
                 Ok(c) => c,
-                Err(e) => throw_r_error(format!("ferx_modelsearch: {e}")),
+                Err(e) => return Err(format!("ferx_modelsearch: {e}")),
             };
         // Both refusals happen before the dataset is read: a file whose keys this
         // tool cannot honour, and a space that is not a structural one - a
@@ -6397,14 +6426,14 @@ fn ferx_rust_modelsearch(
         // report the base model as the winner.
         let options = match ferx_tools::modelsearch::ModelsearchOptions::from_config(&config) {
             Ok(o) => o,
-            Err(e) => throw_r_error(format!("ferx_modelsearch: {e}")),
+            Err(e) => return Err(format!("ferx_modelsearch: {e}")),
         };
         if let Err(e) = ferx_tools::modelsearch::ModelsearchOptions::check_space(&config) {
-            throw_r_error(format!("ferx_modelsearch: {e}"));
+            return Err(format!("ferx_modelsearch: {e}"));
         }
         let mut base = match config.load_base() {
             Ok(b) => b,
-            Err(e) => throw_r_error(format!("ferx_modelsearch: {e}")),
+            Err(e) => return Err(format!("ferx_modelsearch: {e}")),
         };
 
         // One flag, two paths into the engine: `ModelsearchRun::cancel` stops the
@@ -6451,7 +6480,7 @@ fn ferx_rust_modelsearch(
             )
         }) {
             Ok(r) => r,
-            Err(e) => throw_r_error(format!("ferx_modelsearch: {e}")),
+            Err(e) => return Err(format!("ferx_modelsearch: {e}")),
         };
 
         // The model table, column for column as `MODEL_COLUMNS` orders it.
@@ -6528,7 +6557,7 @@ fn ferx_rust_modelsearch(
         let final_fit: Robj = match &result.final_fit {
             Some(fit) => match search_final_fit(fit, &final_model, &base.prepared.data_path) {
                 Ok(l) => l.into(),
-                Err(e) => throw_r_error(format!("ferx_modelsearch: {e}")),
+                Err(e) => return Err(format!("ferx_modelsearch: {e}")),
             },
             None => NULL.into(),
         };
@@ -6699,18 +6728,18 @@ fn ferx_rust_ruvsearch(
         let config =
             match search_config_for_tool(config_path, &text, &inline_dir, threads, retries, resume) {
                 Ok(c) => c,
-                Err(e) => throw_r_error(format!("ferx_ruvsearch: {e}")),
+                Err(e) => return Err(format!("ferx_ruvsearch: {e}")),
             };
         // Before the dataset is read: a file whose keys this tool cannot honour - a
         // `[space]`, or a `[rank]` asking for a BIC, which ruvsearch does not
         // select on - is refused by name rather than ignored.
         let options = match ferx_tools::ruvsearch::RuvsearchOptions::from_config(&config) {
             Ok(o) => o,
-            Err(e) => throw_r_error(format!("ferx_ruvsearch: {e}")),
+            Err(e) => return Err(format!("ferx_ruvsearch: {e}")),
         };
         let mut base = match config.load_base() {
             Ok(b) => b,
-            Err(e) => throw_r_error(format!("ferx_ruvsearch: {e}")),
+            Err(e) => return Err(format!("ferx_ruvsearch: {e}")),
         };
 
         // One flag, two paths into the engine: `RuvsearchRun::cancel` stops the
@@ -6772,7 +6801,7 @@ fn ferx_rust_ruvsearch(
             )
         }) {
             Ok(r) => r,
-            Err(e) => throw_r_error(format!("ferx_ruvsearch: {e}")),
+            Err(e) => return Err(format!("ferx_ruvsearch: {e}")),
         };
 
         // The step table, column for column as `STEP_COLUMNS` orders it, with the
@@ -6839,7 +6868,7 @@ fn ferx_rust_ruvsearch(
         let final_fit: Robj = match &result.final_fit {
             Some(fit) => match search_final_fit(fit, &final_model, &base.prepared.data_path) {
                 Ok(l) => l.into(),
-                Err(e) => throw_r_error(format!("ferx_ruvsearch: {e}")),
+                Err(e) => return Err(format!("ferx_ruvsearch: {e}")),
             },
             None => NULL.into(),
         };
@@ -7154,18 +7183,18 @@ fn ferx_rust_iivsearch(
         let config =
             match search_config_for_tool(config_path, &text, &inline_dir, threads, retries, resume) {
                 Ok(c) => c,
-                Err(e) => throw_r_error(format!("ferx_iivsearch: {e}")),
+                Err(e) => return Err(format!("ferx_iivsearch: {e}")),
             };
         // Before the dataset is read: a file whose `[iivsearch]` keys contradict
         // one another, or that names no variability space at all, is refused by
         // name rather than searching nothing and reporting the input as the winner.
         let options = match ferx_tools::iivsearch::IivsearchOptions::from_config(&config) {
             Ok(o) => o,
-            Err(e) => throw_r_error(format!("ferx_iivsearch: {e}")),
+            Err(e) => return Err(format!("ferx_iivsearch: {e}")),
         };
         let mut base = match config.load_base() {
             Ok(b) => b,
-            Err(e) => throw_r_error(format!("ferx_iivsearch: {e}")),
+            Err(e) => return Err(format!("ferx_iivsearch: {e}")),
         };
 
         // One flag, two paths into the engine: `IivsearchRun::cancel` stops the
@@ -7227,7 +7256,7 @@ fn ferx_rust_iivsearch(
             )
         }) {
             Ok(r) => r,
-            Err(e) => throw_r_error(format!("ferx_iivsearch: {e}")),
+            Err(e) => return Err(format!("ferx_iivsearch: {e}")),
         };
 
         // The model table, column for column as `MODEL_COLUMNS` orders it, with
@@ -7361,7 +7390,7 @@ fn ferx_rust_iivsearch(
         let final_fit: Robj = match &result.final_fit {
             Some(fit) => match search_final_fit(fit, &final_model, &base.prepared.data_path) {
                 Ok(l) => l.into(),
-                Err(e) => throw_r_error(format!("ferx_iivsearch: {e}")),
+                Err(e) => return Err(format!("ferx_iivsearch: {e}")),
             },
             None => NULL.into(),
         };
@@ -7548,15 +7577,15 @@ fn ferx_rust_iovsearch(
         let config =
             match search_config_for_tool(config_path, &text, &inline_dir, threads, retries, resume) {
                 Ok(c) => c,
-                Err(e) => throw_r_error(format!("ferx_iovsearch: {e}")),
+                Err(e) => return Err(format!("ferx_iovsearch: {e}")),
             };
         let options = match ferx_tools::iovsearch::IovsearchOptions::from_config(&config) {
             Ok(o) => o,
-            Err(e) => throw_r_error(format!("ferx_iovsearch: {e}")),
+            Err(e) => return Err(format!("ferx_iovsearch: {e}")),
         };
         let mut base = match config.load_base() {
             Ok(b) => b,
-            Err(e) => throw_r_error(format!("ferx_iovsearch: {e}")),
+            Err(e) => return Err(format!("ferx_iovsearch: {e}")),
         };
 
         let cancel = CancelFlag::new();
@@ -7610,7 +7639,7 @@ fn ferx_rust_iovsearch(
             )
         }) {
             Ok(r) => r,
-            Err(e) => throw_r_error(format!("ferx_iovsearch: {e}")),
+            Err(e) => return Err(format!("ferx_iovsearch: {e}")),
         };
 
         let n = result.rows.len();
@@ -7749,7 +7778,7 @@ fn ferx_rust_iovsearch(
         let final_fit: Robj = match &result.final_fit {
             Some(fit) => match search_final_fit(fit, &final_model, &base.prepared.data_path) {
                 Ok(l) => l.into(),
-                Err(e) => throw_r_error(format!("ferx_iovsearch: {e}")),
+                Err(e) => return Err(format!("ferx_iovsearch: {e}")),
             },
             None => NULL.into(),
         };
@@ -7923,11 +7952,14 @@ fn amd_config_and_base(
     threads: i32,
     retries: i32,
     resume: bool,
-) -> (
-    ferx_tools::search::SearchConfig,
-    ferx_tools::amd::AmdOptions,
-    ferx_tools::search::BaseModel,
-) {
+) -> Result<
+    (
+        ferx_tools::search::SearchConfig,
+        ferx_tools::amd::AmdOptions,
+        ferx_tools::search::BaseModel,
+    ),
+    String,
+> {
     let section = amd_section(strategy, retries_on, skip);
     let text = search_config_text(
         model_path,
@@ -7944,20 +7976,20 @@ fn amd_config_and_base(
     let config =
         match search_config_for_tool(config_path, &text, &inline_dir, threads, retries, resume) {
             Ok(c) => c,
-            Err(e) => throw_r_error(format!("ferx_amd: {e}")),
+            Err(e) => return Err(format!("ferx_amd: {e}")),
         };
     // Before the dataset is read: a `skip` naming a step this strategy does
     // not run, or a space carrying a statement no step of the pipeline can
     // read, is refused by name rather than searched half-silently.
     let options = match ferx_tools::amd::AmdOptions::from_config(&config) {
         Ok(o) => o,
-        Err(e) => throw_r_error(format!("ferx_amd: {e}")),
+        Err(e) => return Err(format!("ferx_amd: {e}")),
     };
     let base = match config.load_base() {
         Ok(b) => b,
-        Err(e) => throw_r_error(format!("ferx_amd: {e}")),
+        Err(e) => return Err(format!("ferx_amd: {e}")),
     };
-    (config, options, base)
+    Ok((config, options, base))
 }
 
 /// The AMD pipeline as planned, without fitting anything.
@@ -8002,11 +8034,11 @@ fn ferx_rust_amd_plan(
             0,
             -1,
             false,
-        );
+        )?;
         let ctx = ferx_tools::amd::Context::from_base(&base);
         let plan = match ferx_tools::amd::plan(&options, &config.mfl, &ctx) {
             Ok(p) => p,
-            Err(e) => throw_r_error(format!("ferx_amd: {e}")),
+            Err(e) => return Err(format!("ferx_amd: {e}")),
         };
         Ok(list!(
             index = plan.iter().map(|s| s.index as i32).collect::<Vec<_>>(),
@@ -8091,7 +8123,7 @@ fn ferx_rust_amd(
 ) -> Robj {
     entry(move || {
         if directory.is_empty() {
-            throw_r_error("ferx_amd: a run directory is required");
+            return Err("ferx_amd: a run directory is required".to_string());
         }
         let (config, options, mut base) = amd_config_and_base(
             config_path,
@@ -8106,7 +8138,7 @@ fn ferx_rust_amd(
             threads,
             retries,
             resume,
-        );
+        )?;
 
         // One flag, two paths into the engine: `AmdRun::cancel` stops the pipeline
         // between steps, and the copy on `fit_options` unwinds the fits already in
@@ -8198,7 +8230,7 @@ fn ferx_rust_amd(
             )
         }) {
             Ok(r) => r,
-            Err(e) => throw_r_error(format!("ferx_amd: {e}")),
+            Err(e) => return Err(format!("ferx_amd: {e}")),
         };
 
         // The step table, column for column as `STEP_COLUMNS` orders it, with the
@@ -8287,7 +8319,7 @@ fn ferx_rust_amd(
         let final_fit: Robj = match &result.final_fit {
             Some(fit) => match search_final_fit(fit, &final_model, &base.prepared.data_path) {
                 Ok(l) => l.into(),
-                Err(e) => throw_r_error(format!("ferx_amd: {e}")),
+                Err(e) => return Err(format!("ferx_amd: {e}")),
             },
             None => NULL.into(),
         };
@@ -8588,7 +8620,7 @@ fn ferx_rust_globalsearch(
         let config =
             match search_config_for_tool(config_path, &text, &inline_dir, threads, retries, resume) {
                 Ok(c) => c,
-                Err(e) => throw_r_error(format!("ferx_globalsearch: {e}")),
+                Err(e) => return Err(format!("ferx_globalsearch: {e}")),
             };
         // Both refusals happen before the dataset is read: a file whose keys this
         // tool cannot honour, and a space it cannot lay out as a grid - an
@@ -8596,14 +8628,14 @@ fn ferx_rust_globalsearch(
         // rather than quietly dropped from the grid.
         let options = match ferx_tools::globalsearch::GlobalsearchOptions::from_config(&config) {
             Ok(o) => o,
-            Err(e) => throw_r_error(format!("ferx_globalsearch: {e}")),
+            Err(e) => return Err(format!("ferx_globalsearch: {e}")),
         };
         if let Err(e) = ferx_tools::globalsearch::GlobalsearchOptions::check_space(&config) {
-            throw_r_error(format!("ferx_globalsearch: {e}"));
+            return Err(format!("ferx_globalsearch: {e}"));
         }
         let mut base = match config.load_base() {
             Ok(b) => b,
-            Err(e) => throw_r_error(format!("ferx_globalsearch: {e}")),
+            Err(e) => return Err(format!("ferx_globalsearch: {e}")),
         };
 
         // One flag, two paths into the engine: `GlobalsearchRun::cancel` stops the
@@ -8657,7 +8689,7 @@ fn ferx_rust_globalsearch(
             )
         }) {
             Ok(r) => r,
-            Err(e) => throw_r_error(format!("ferx_globalsearch: {e}")),
+            Err(e) => return Err(format!("ferx_globalsearch: {e}")),
         };
 
         // The model table, column for column as `MODEL_COLUMNS` orders it, then
@@ -8814,7 +8846,7 @@ fn ferx_rust_globalsearch(
         let final_fit: Robj = match &result.final_fit {
             Some(fit) => match search_final_fit(fit, &final_model, &base.prepared.data_path) {
                 Ok(l) => l.into(),
-                Err(e) => throw_r_error(format!("ferx_globalsearch: {e}")),
+                Err(e) => return Err(format!("ferx_globalsearch: {e}")),
             },
             None => NULL.into(),
         };
@@ -8911,6 +8943,7 @@ extendr_module! {
     fn ferx_rust_sir;
     fn ferx_rust_covariance;
     fn ferx_rust_autodiff_enabled;
+    fn ferx_rust_test_panic;
     fn ferx_rust_known_blocks;
     fn ferx_rust_validate_model;
     fn ferx_rust_model_data_path;
