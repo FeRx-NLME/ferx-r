@@ -208,7 +208,13 @@ ferx_model_validate <- function(path, data = NULL) {
 #
 # Only the failure path pays for the extra validation pass; a fit that runs
 # never calls this.
-.ferx_engine_error <- function(e, model, data) {
+#
+# `fallback_stages`: the single-error fallback below labels a failure with the
+# one error validation found, without a text match. `NULL` allows it for any
+# message, which is sound where every failure is a failure of the model or the
+# data (`ferx_fit()`). Otherwise a regular expression naming the messages it
+# may apply to; see `.ferx_engine_call()`.
+.ferx_engine_error <- function(e, model, data, fallback_stages = NULL) {
   msg  <- conditionMessage(e)
   diag <- tryCatch(
     .ferx_diagnostics_frame(ferx_rust_validate_model(
@@ -226,14 +232,19 @@ ferx_model_validate <- function(path, data = NULL) {
   # Only when nothing matches do we fall back, and then only if validation
   # found a single error - with several, guessing which one stopped the fit
   # would risk labelling the failure with an unrelated code.
+  #
+  # Byte-wise: the diagnostic arrives marked UTF-8 and the condition message as
+  # unmarked bytes, so outside a UTF-8 locale a message with a non-ASCII
+  # character in it (the engine writes em-dashes) never matched itself.
   hit <- which(vapply(
     errs$message,
-    function(m) nzchar(m) && grepl(m, msg, fixed = TRUE),
+    function(m) nzchar(m) && grepl(m, msg, fixed = TRUE, useBytes = TRUE),
     logical(1)
   ))
+  fallback_ok <- is.null(fallback_stages) || grepl(fallback_stages, msg, useBytes = TRUE)
   i <- if (length(hit) > 0L) {
     hit[1L]
-  } else if (nrow(errs) == 1L) {
+  } else if (fallback_ok && nrow(errs) == 1L) {
     1L
   } else {
     return(e)
@@ -257,6 +268,26 @@ ferx_model_validate <- function(path, data = NULL) {
 # when `.ferx_engine_error()` can tie a diagnostic code to it (#385). `call` is
 # evaluated lazily inside the `tryCatch()`, so it covers a failure the glue
 # raises itself and one extendr raises for it (a panic in the engine) alike.
+#
+# Unlike `ferx_fit()`, these entry points also fail for reasons the validation
+# pass never sees - a `fit` whose theta does not fit the model, a TTE simulation
+# with no horizon - and with one unrelated error in the data the single-error
+# fallback labelled those with that error's code ("theta length 2 does not match
+# model [E_DOSE_CMT_NOT_INFUSABLE]", #386 review). So the fallback is confined
+# to the two stages validation re-runs with the engine's own parser and reader,
+# which the glue names in its prefix; there a text match is not to be had (the
+# parser adds "(line N)", validation wraps the reader's message in the file
+# name) and the single error is the one that stopped the call. A message from
+# any other stage gets a code only on a text match: a missing code, never a
+# wrong one.
+.ferx_engine_fallback_stages <- "^Error (parsing model|reading data): "
+
 .ferx_engine_call <- function(call, model, data) {
-  tryCatch(call, error = function(e) stop(.ferx_engine_error(e, model, data)))
+  tryCatch(
+    call,
+    error = function(e) {
+      stop(.ferx_engine_error(e, model, data,
+                              fallback_stages = .ferx_engine_fallback_stages))
+    }
+  )
 }
