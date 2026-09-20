@@ -27,6 +27,8 @@
 #'   hazard, cif, survival_all, median_survival, mean_survival (one row per
 #'   subject \eqn{\times} TTE CMT \eqn{\times} time).
 #'
+#' @inheritSection ferx_simulate Errors raised by the engine
+#'
 #' @examples
 #' \dontrun{
 #' # `model` must contain at least one [event_model] (TTE) block.

@@ -1184,6 +1184,31 @@
 
 ## Bug fixes
 
+- **`ferx_predict()`, `ferx_simulate()` and their siblings printed the engine's
+  error and returned `NULL` instead of raising it**
+  ([#385](https://github.com/FeRx-NLME/ferx-r/issues/385)). A model or dataset
+  the engine refused - an unknown block, a malformed `[data_selection]` clause,
+  a CSV with no `TIME` column, a joint PK-TTE model simulated without a
+  `horizon`, a `fit` that cannot drive the model's `kappa` - produced console
+  text that looked like an error and a `NULL` result, so `tryCatch(..., error =
+  )` caught nothing and a loop over candidate models or designs dropped the
+  refused ones in silence. These now raise an R error, on `ferx_predict()`,
+  `ferx_simulate()`, `ferx_simulate_with_uncertainty()`,
+  `ferx_predict_survival()`, `ferx_calc_npde()` and `ferx_inits_from_nca()`,
+  in both the model + data form and the `fit = ` form. Where the engine's
+  validation pass names the finding, the error is the same classed
+  `ferx_engine_error` a refused `ferx_fit()` raises, with `code`, `block`,
+  `line` and `suggestion`, so one handler covers every entry point; this
+  includes a dose the model cannot deliver (`E_DOSE_CMT_NOT_INFUSABLE`), which
+  was already an error but carried no code. The engine's prose is unchanged
+  and nothing is printed in its place. `ferx_calc_npde()` and
+  `ferx_inits_from_nca()` did raise, but with "see the message above" in place
+  of the reason; they now carry the reason. A script that tested the result
+  with `is.null()` needs a `tryCatch()` instead. This is the error half of
+  [#283](https://github.com/FeRx-NLME/ferx-r/issues/283), and it has to be in
+  place before the engine reports more of these failures as errors rather than
+  panics ([FeRx-NLME/ferx-core#898](https://github.com/FeRx-NLME/ferx-core/issues/898)).
+
 - **The engine's data-reader diagnostics now reach the caller on the simulate
   and predict paths** ([#283](https://github.com/FeRx-NLME/ferx-r/issues/283)).
   `ferx_fit()` has always returned them in `fit$warnings`; `ferx_simulate()`

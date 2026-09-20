@@ -21,6 +21,8 @@
 #'   \code{DV} was empty, a dose that never landed, or a covariate with no
 #'   value for some subjects. They are also re-emitted as a single R warning.
 #'
+#' @inheritSection ferx_simulate Errors raised by the engine
+#'
 #' @examples
 #' ex <- ferx_example("warfarin")
 #' fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)

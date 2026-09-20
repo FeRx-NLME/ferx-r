@@ -65,6 +65,8 @@
 #'   function. To preview the strategy a model file declares, pass that value
 #'   explicitly via \code{method}.
 #'
+#' @inheritSection ferx_simulate Errors raised by the engine
+#'
 #' @examples
 #' \donttest{
 #' ex <- ferx_example("warfarin")

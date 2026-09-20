@@ -46,6 +46,8 @@
 #'   \code{DV}; see \code{\link{ferx_simulate}} for what each column holds).
 #'   Row count: \code{n_uncertainty_draws * n_sim_per_draw * n_obs}.
 #'
+#' @inheritSection ferx_simulate Errors raised by the engine
+#'
 #' @examples
 #' \dontrun{
 #' ex  <- ferx_example("warfarin")

@@ -28,6 +28,8 @@
 #'   \code{\link{ferx_xpose}} and goodness-of-fit plots pick them up
 #'   automatically.
 #'
+#' @inheritSection ferx_simulate Errors raised by the engine
+#'
 #' @examples
 #' ex  <- ferx_example("warfarin")
 #' fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
