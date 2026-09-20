@@ -186,283 +186,285 @@ fn ferx_rust_fit(
     settings_keys: Vec<String>,
     settings_values: Vec<String>,
 ) -> List {
-    let mut parsed =
-        match ferx_core::parser::model_parser::parse_full_model_file(Path::new(model_path)) {
-            Ok(p) => p,
-            Err(e) => throw_r_error(format!("Error parsing model: {e}")),
-        };
+    entry(move || {
+        let mut parsed =
+            match ferx_core::parser::model_parser::parse_full_model_file(Path::new(model_path)) {
+                Ok(p) => p,
+                Err(e) => throw_r_error(format!("Error parsing model: {e}")),
+            };
 
-    // Build fit options
-    let mut opts = parsed.fit_options.clone();
+        // Build fit options
+        let mut opts = parsed.fit_options.clone();
 
-    // Apply generic `settings` list before the dedicated args below — the
-    // dedicated args are the single source of truth for their keys and always
-    // win. Reserved keys (those with a dedicated R argument) are rejected so
-    // the precedence rule is explicit rather than silently clobbered.
-    //
-    // Data-selection keys (`ignore`, `accept`, `ignore_subjects`) are NOT
-    // reserved — they flow through `apply_fit_option` which populates
-    // opts.ignore_exprs / opts.accept_exprs / opts.ignore_subjects. Data
-    // reading happens AFTER this loop so the SelectionFilter sees the merged
-    // model-file + R-call conditions.
-    if settings_keys.len() != settings_values.len() {
-        throw_r_error(format!(
-            "Error: settings keys/values length mismatch ({} vs {})",
-            settings_keys.len(),
-            settings_values.len()
-        ));
-    }
-    // Reserved keys: these have dedicated ferx_fit() arguments. Keeping them
-    // out of `settings` means there is one source of truth per value.
-    // NOTE: `optimizer`, `inner_maxiter`, `inner_tol`, and
-    // `steihaug_max_iters` intentionally flow through `settings` — they
-    // were previously candidates for dedicated args but are fit-method
-    // tuning knobs that belong alongside `n_exploration`, `sir_samples`,
-    // etc.
-    const RESERVED: &[&str] = &[
-        "method",
-        "covariance",
-        "verbose",
-        "bloq_method",
-        "bloq",
-        "threads",
-        "sir",
-        "gradient",
-        "gradient_method",
-    ];
-    for (k, v) in settings_keys.iter().zip(settings_values.iter()) {
-        let key = k.trim();
-        if RESERVED
-            .iter()
-            .any(|r| r.eq_ignore_ascii_case(key))
-        {
+        // Apply generic `settings` list before the dedicated args below — the
+        // dedicated args are the single source of truth for their keys and always
+        // win. Reserved keys (those with a dedicated R argument) are rejected so
+        // the precedence rule is explicit rather than silently clobbered.
+        //
+        // Data-selection keys (`ignore`, `accept`, `ignore_subjects`) are NOT
+        // reserved — they flow through `apply_fit_option` which populates
+        // opts.ignore_exprs / opts.accept_exprs / opts.ignore_subjects. Data
+        // reading happens AFTER this loop so the SelectionFilter sees the merged
+        // model-file + R-call conditions.
+        if settings_keys.len() != settings_values.len() {
             throw_r_error(format!(
-                "Error: setting `{key}` conflicts with a dedicated ferx_fit() argument — pass it via that argument instead"
+                "Error: settings keys/values length mismatch ({} vs {})",
+                settings_keys.len(),
+                settings_values.len()
             ));
         }
-        match ferx_core::parser::model_parser::apply_fit_option(&mut opts, key, v) {
-            Ok(true) => {}
-            Ok(false) => throw_r_error(format!("Error: unknown fit setting `{key}`")),
-            Err(e) => throw_r_error(format!("Error: {e}")),
+        // Reserved keys: these have dedicated ferx_fit() arguments. Keeping them
+        // out of `settings` means there is one source of truth per value.
+        // NOTE: `optimizer`, `inner_maxiter`, `inner_tol`, and
+        // `steihaug_max_iters` intentionally flow through `settings` — they
+        // were previously candidates for dedicated args but are fit-method
+        // tuning knobs that belong alongside `n_exploration`, `sir_samples`,
+        // etc.
+        const RESERVED: &[&str] = &[
+            "method",
+            "covariance",
+            "verbose",
+            "bloq_method",
+            "bloq",
+            "threads",
+            "sir",
+            "gradient",
+            "gradient_method",
+        ];
+        for (k, v) in settings_keys.iter().zip(settings_values.iter()) {
+            let key = k.trim();
+            if RESERVED
+                .iter()
+                .any(|r| r.eq_ignore_ascii_case(key))
+            {
+                throw_r_error(format!(
+                    "Error: setting `{key}` conflicts with a dedicated ferx_fit() argument — pass it via that argument instead"
+                ));
+            }
+            match ferx_core::parser::model_parser::apply_fit_option(&mut opts, key, v) {
+                Ok(true) => {}
+                Ok(false) => throw_r_error(format!("Error: unknown fit setting `{key}`")),
+                Err(e) => throw_r_error(format!("Error: {e}")),
+            }
         }
-    }
 
-    // Re-apply the (now settings-merged) ODE solver tolerances onto the model's
-    // OdeSpec so call-time `ode_reltol` / `ode_abstol` / `ode_max_steps`
-    // overrides take effect. The parser already baked the [fit_options] values;
-    // this lets a `ferx_fit(settings = ...)` override win. No-op for analytical
-    // models.
-    parsed.model.sync_ode_solver_opts(&opts);
+        // Re-apply the (now settings-merged) ODE solver tolerances onto the model's
+        // OdeSpec so call-time `ode_reltol` / `ode_abstol` / `ode_max_steps`
+        // overrides take effect. The parser already baked the [fit_options] values;
+        // this lets a `ferx_fit(settings = ...)` override win. No-op for analytical
+        // models.
+        parsed.model.sync_ode_solver_opts(&opts);
 
-    // Read data via read_population_for, which handles [covariates] validation,
-    // [data_selection] filters, and TTE endpoint routing in one call.
-    // This replaces the previous 4-way dispatch that could not pass tte_cmts to
-    // the reader (causing TTE rows to land in the Gaussian vectors instead of
-    // subject.obs_records). It also fixes the pre-existing gap where the combined
-    // covariates + filter case fell through to the filter-only path, losing the
-    // covariate table.
-    let (population, covariate_table) = {
-        use ferx_core::api::read_population_for;
-        use ferx_core::io::datareader::SelectionFilter;
-        let filter = match SelectionFilter::from_opts(
-            &opts.ignore_exprs,
-            &opts.accept_exprs,
-            &opts.ignore_subjects,
-        ) {
-            Ok(f) => f,
-            Err(e) => throw_r_error(format!("Error in [data_selection]: {e}")),
+        // Read data via read_population_for, which handles [covariates] validation,
+        // [data_selection] filters, and TTE endpoint routing in one call.
+        // This replaces the previous 4-way dispatch that could not pass tte_cmts to
+        // the reader (causing TTE rows to land in the Gaussian vectors instead of
+        // subject.obs_records). It also fixes the pre-existing gap where the combined
+        // covariates + filter case fell through to the filter-only path, losing the
+        // covariate table.
+        let (population, covariate_table) = {
+            use ferx_core::api::read_population_for;
+            use ferx_core::io::datareader::SelectionFilter;
+            let filter = match SelectionFilter::from_opts(
+                &opts.ignore_exprs,
+                &opts.accept_exprs,
+                &opts.ignore_subjects,
+            ) {
+                Ok(f) => f,
+                Err(e) => throw_r_error(format!("Error in [data_selection]: {e}")),
+            };
+            let filter_opt = if filter.is_empty() { None } else { Some(&filter) };
+            match read_population_for(
+                &parsed.model,
+                &parsed.covariate_decls,
+                data_path,
+                None,
+                opts.iov_column.as_deref(),
+                filter_opt,
+                &parsed.column_map,
+            ) {
+                Ok(result) => result,
+                Err(e) => throw_r_error(format!("Error reading data: {e}")),
+            }
         };
-        let filter_opt = if filter.is_empty() { None } else { Some(&filter) };
-        match read_population_for(
-            &parsed.model,
-            &parsed.covariate_decls,
-            data_path,
-            None,
-            opts.iov_column.as_deref(),
-            filter_opt,
-            &parsed.column_map,
-        ) {
-            Ok(result) => result,
-            Err(e) => throw_r_error(format!("Error reading data: {e}")),
-        }
-    };
 
-    // An empty `method` vector means the R caller did not pass `method=` — keep
-    // whatever the model file's [fit_options] selected (already in `opts` from
-    // `parsed.fit_options`). Only an explicit R-side method overrides it, so a
-    // model-file `method = saem` is no longer clobbered by R's default (#558).
-    if !method.is_empty() {
-        let chain: Vec<EstimationMethod> = match method.iter().map(|m| parse_method(m)).collect() {
-            Ok(v) => v,
-            Err(e) => throw_r_error(format!("{e}")),
-        };
-        let final_method = *chain.last().unwrap();
-        // The reported `interaction` flag must reflect the last *estimating* stage
-        // — IMP is a diagnostic terminal stage that does not update parameters, so
-        // a chain like `c("focei", "imp")` should still report `interaction = TRUE`.
-        let last_estimator = chain
-            .iter()
-            .rev()
-            .find(|m| **m != EstimationMethod::Imp)
-            .copied()
-            .unwrap_or(final_method);
-        opts.method = final_method;
-        opts.interaction = last_estimator == EstimationMethod::FoceI;
-        opts.methods = if chain.len() > 1 { chain } else { Vec::new() };
-        // Mark the method as explicitly chosen so the engine does not warn that
-        // it defaulted (ferx-core's method_default_warning keys off this).
-        if !opts.user_set_keys.iter().any(|k| k == "method") {
-            opts.user_set_keys.push("method".to_string());
+        // An empty `method` vector means the R caller did not pass `method=` — keep
+        // whatever the model file's [fit_options] selected (already in `opts` from
+        // `parsed.fit_options`). Only an explicit R-side method overrides it, so a
+        // model-file `method = saem` is no longer clobbered by R's default (#558).
+        if !method.is_empty() {
+            let chain: Vec<EstimationMethod> = match method.iter().map(|m| parse_method(m)).collect() {
+                Ok(v) => v,
+                Err(e) => throw_r_error(format!("{e}")),
+            };
+            let final_method = *chain.last().unwrap();
+            // The reported `interaction` flag must reflect the last *estimating* stage
+            // — IMP is a diagnostic terminal stage that does not update parameters, so
+            // a chain like `c("focei", "imp")` should still report `interaction = TRUE`.
+            let last_estimator = chain
+                .iter()
+                .rev()
+                .find(|m| **m != EstimationMethod::Imp)
+                .copied()
+                .unwrap_or(final_method);
+            opts.method = final_method;
+            opts.interaction = last_estimator == EstimationMethod::FoceI;
+            opts.methods = if chain.len() > 1 { chain } else { Vec::new() };
+            // Mark the method as explicitly chosen so the engine does not warn that
+            // it defaulted (ferx-core's method_default_warning keys off this).
+            if !opts.user_set_keys.iter().any(|k| k == "method") {
+                opts.user_set_keys.push("method".to_string());
+            }
         }
-    }
-    // Boolean fit options forwarded from R as sentinel strings: "" keeps the
-    // model file's [fit_options] value (already in `opts` from
-    // `parsed.fit_options`), "true"/"false" override it. This prevents an
-    // accepted R-side default from silently overruling the model file (#558).
-    let apply_flag = |slot: &mut bool, raw: &str, name: &str| {
-        // The only caller (`.flag_arg` in fit.R) emits exactly "", "true", or
-        // "false"; the catch-all guards against a malformed value rather than
-        // accepting tokens the R side never sends.
-        match raw.trim().to_lowercase().as_str() {
+        // Boolean fit options forwarded from R as sentinel strings: "" keeps the
+        // model file's [fit_options] value (already in `opts` from
+        // `parsed.fit_options`), "true"/"false" override it. This prevents an
+        // accepted R-side default from silently overruling the model file (#558).
+        let apply_flag = |slot: &mut bool, raw: &str, name: &str| {
+            // The only caller (`.flag_arg` in fit.R) emits exactly "", "true", or
+            // "false"; the catch-all guards against a malformed value rather than
+            // accepting tokens the R side never sends.
+            match raw.trim().to_lowercase().as_str() {
+                "" => {}
+                "true" => *slot = true,
+                "false" => *slot = false,
+                other => {
+                    rprintln!(
+                        "Unknown {name} value '{}' - expected TRUE or FALSE (keeping model default)",
+                        other
+                    );
+                }
+            }
+        };
+        apply_flag(&mut opts.run_covariance_step, covariance, "covariance");
+        apply_flag(&mut opts.verbose, verbose, "verbose");
+        apply_flag(&mut opts.mu_referencing, mu_referencing, "mu_referencing");
+        apply_flag(&mut opts.sir, sir, "sir");
+        opts.threads = if threads > 0 {
+            Some(threads as usize)
+        } else {
+            None
+        };
+
+        // Optional R-side override for BLOQ handling. Empty string → keep whatever
+        // the model file specified.
+        match bloq_method.trim().to_lowercase().as_str() {
             "" => {}
-            "true" => *slot = true,
-            "false" => *slot = false,
+            "m3" => opts.bloq_method = BloqMethod::M3,
+            "drop" | "none" | "ignore" => opts.bloq_method = BloqMethod::Drop,
             other => {
                 rprintln!(
-                    "Unknown {name} value '{}' - expected TRUE or FALSE (keeping model default)",
+                    "Unknown bloq_method '{}' — expected 'm3' or 'drop' (falling back to model default)",
                     other
                 );
             }
         }
-    };
-    apply_flag(&mut opts.run_covariance_step, covariance, "covariance");
-    apply_flag(&mut opts.verbose, verbose, "verbose");
-    apply_flag(&mut opts.mu_referencing, mu_referencing, "mu_referencing");
-    apply_flag(&mut opts.sir, sir, "sir");
-    opts.threads = if threads > 0 {
-        Some(threads as usize)
-    } else {
-        None
-    };
+        // Mirror onto the compiled model so likelihood functions pick it up.
+        parsed.model.bloq_method = opts.bloq_method;
 
-    // Optional R-side override for BLOQ handling. Empty string → keep whatever
-    // the model file specified.
-    match bloq_method.trim().to_lowercase().as_str() {
-        "" => {}
-        "m3" => opts.bloq_method = BloqMethod::M3,
-        "drop" | "none" | "ignore" => opts.bloq_method = BloqMethod::Drop,
-        other => {
-            rprintln!(
-                "Unknown bloq_method '{}' — expected 'm3' or 'drop' (falling back to model default)",
-                other
-            );
+        // Gradient method override. Empty string → keep the model file's value
+        // (#558) instead of forcing Auto; an explicit token overrides it.
+        match gradient.trim().to_lowercase().as_str() {
+            "" => {}
+            "auto" => opts.gradient_method = ferx_core::GradientMethod::Auto,
+            "ad" | "autodiff" => opts.gradient_method = ferx_core::GradientMethod::Ad,
+            "fd" | "finite" | "finite_difference" => {
+                opts.gradient_method = ferx_core::GradientMethod::Fd
+            }
+            other => {
+                rprintln!(
+                    "Unknown gradient method '{}' — expected 'auto', 'ad', or 'fd' (falling back to auto)",
+                    other
+                );
+                opts.gradient_method = ferx_core::GradientMethod::Auto;
+            }
         }
-    }
-    // Mirror onto the compiled model so likelihood functions pick it up.
-    parsed.model.bloq_method = opts.bloq_method;
+        parsed.model.gradient_method = opts.gradient_method;
 
-    // Gradient method override. Empty string → keep the model file's value
-    // (#558) instead of forcing Auto; an explicit token overrides it.
-    match gradient.trim().to_lowercase().as_str() {
-        "" => {}
-        "auto" => opts.gradient_method = ferx_core::GradientMethod::Auto,
-        "ad" | "autodiff" => opts.gradient_method = ferx_core::GradientMethod::Ad,
-        "fd" | "finite" | "finite_difference" => {
-            opts.gradient_method = ferx_core::GradientMethod::Fd
-        }
-        other => {
-            rprintln!(
-                "Unknown gradient method '{}' — expected 'auto', 'ad', or 'fd' (falling back to auto)",
-                other
-            );
-            opts.gradient_method = ferx_core::GradientMethod::Auto;
-        }
-    }
-    parsed.model.gradient_method = opts.gradient_method;
+        // Install a cancellation token so Ctrl-C on the R console aborts the fit.
+        let cancel = CancelFlag::new();
+        opts.cancel = Some(cancel.clone());
 
-    // Install a cancellation token so Ctrl-C on the R console aborts the fit.
-    let cancel = CancelFlag::new();
-    opts.cancel = Some(cancel.clone());
+        // Build initial parameters (initial values now live in [parameters] block)
+        let init_params = parsed.model.default_params.clone();
 
-    // Build initial parameters (initial values now live in [parameters] block)
-    let init_params = parsed.model.default_params.clone();
+        // Run the fit on a worker thread and poll for R interrupts on the main
+        // thread. Scoped threads let us borrow `parsed.model` and `population`
+        // without cloning them. The worker exits cooperatively when `cancel` is
+        // set — there is a small (poll-interval bounded) tail where the worker
+        // drains its last iteration before returning Err("cancelled by user").
+        //
+        // The worker signals completion on a channel so the main thread wakes the
+        // instant the fit finishes. `POLL_MS` therefore bounds only interrupt
+        // latency, not the wall time of a fast fit — a previous `is_finished()` +
+        // `sleep(POLL_MS)` loop imposed a ~POLL_MS floor on every call, which
+        // dominated short fits (e.g. fixed-parameter MAP, where the fit is sub-ms).
+        let result = std::thread::scope(|s| {
+            let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+            // Bind borrows explicitly so the `move` closure captures these Copy
+            // references (and `done_tx` by value) rather than moving `parsed` /
+            // `population`, which are still needed after the fit returns.
+            let model_ref = &parsed.model;
+            let pop_ref = &population;
+            let init_ref = &init_params;
+            let opts_ref = &opts;
+            let handle = s.spawn(move || {
+                let r = ferx_core::fit(model_ref, pop_ref, init_ref, opts_ref);
+                // Ignore send errors: the receiver is only dropped once we stop
+                // waiting, which happens after the worker has already finished.
+                let _ = done_tx.send(());
+                r
+            });
 
-    // Run the fit on a worker thread and poll for R interrupts on the main
-    // thread. Scoped threads let us borrow `parsed.model` and `population`
-    // without cloning them. The worker exits cooperatively when `cancel` is
-    // set — there is a small (poll-interval bounded) tail where the worker
-    // drains its last iteration before returning Err("cancelled by user").
-    //
-    // The worker signals completion on a channel so the main thread wakes the
-    // instant the fit finishes. `POLL_MS` therefore bounds only interrupt
-    // latency, not the wall time of a fast fit — a previous `is_finished()` +
-    // `sleep(POLL_MS)` loop imposed a ~POLL_MS floor on every call, which
-    // dominated short fits (e.g. fixed-parameter MAP, where the fit is sub-ms).
-    let result = std::thread::scope(|s| {
-        let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
-        // Bind borrows explicitly so the `move` closure captures these Copy
-        // references (and `done_tx` by value) rather than moving `parsed` /
-        // `population`, which are still needed after the fit returns.
-        let model_ref = &parsed.model;
-        let pop_ref = &population;
-        let init_ref = &init_params;
-        let opts_ref = &opts;
-        let handle = s.spawn(move || {
-            let r = ferx_core::fit(model_ref, pop_ref, init_ref, opts_ref);
-            // Ignore send errors: the receiver is only dropped once we stop
-            // waiting, which happens after the worker has already finished.
-            let _ = done_tx.send(());
-            r
-        });
-
-        loop {
-            match done_rx.recv_timeout(std::time::Duration::from_millis(POLL_MS)) {
-                // Worker finished (or its sender was dropped on panic) — join
-                // below collects the real result / propagates the panic.
-                Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                    // Still running: service R interrupts, then keep waiting
-                    // for the worker to drain and report (cancelled or not).
-                    if pending_interrupt() {
-                        cancel.cancel();
+            loop {
+                match done_rx.recv_timeout(std::time::Duration::from_millis(POLL_MS)) {
+                    // Worker finished (or its sender was dropped on panic) — join
+                    // below collects the real result / propagates the panic.
+                    Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                        // Still running: service R interrupts, then keep waiting
+                        // for the worker to drain and report (cancelled or not).
+                        if pending_interrupt() {
+                            cancel.cancel();
+                        }
                     }
                 }
             }
-        }
 
-        handle.join()
-    });
+            handle.join()
+        });
 
-    let mut result = match result {
-        Ok(Ok(r)) => r,
-        Ok(Err(_)) if cancel.is_cancelled() => {
-            // Raise a proper R error so the user sees a clean condition
-            // instead of a silent empty-list return. A small one-time leak
-            // of the worker's locals is acceptable here — one R session's
-            // worth of cancelled fits won't add up to anything meaningful.
-            throw_r_error("ferx_fit: cancelled by user");
-        }
-        Ok(Err(e)) => throw_r_error(format!("Fit error: {e}")),
-        Err(_) => throw_r_error("Fit error: worker thread panicked"),
-    };
+        let mut result = match result {
+            Ok(Ok(r)) => r,
+            Ok(Err(_)) if cancel.is_cancelled() => {
+                // Raise a proper R error so the user sees a clean condition
+                // instead of a silent empty-list return. A small one-time leak
+                // of the worker's locals is acceptable here — one R session's
+                // worth of cancelled fits won't add up to anything meaningful.
+                throw_r_error("ferx_fit: cancelled by user");
+            }
+            Ok(Err(e)) => throw_r_error(format!("Fit error: {e}")),
+            Err(_) => throw_r_error("Fit error: worker thread panicked"),
+        };
 
-    // Record source-file provenance on the result so `ferx_sir(fit)` can
-    // refuse to run against a tampered model or dataset later. We compute
-    // the hashes here (not inside ferx_core::fit) because the R binding
-    // owns the path strings the user supplied. Hashing failures are
-    // non-fatal — the fit already succeeded, and missing hashes just mean
-    // `ferx_sir` will fall back to a no-verification call.
-    result.model_path = Some(model_path.to_string());
-    result.data_path = Some(data_path.to_string());
-    result.model_hash = ferx_core::io::hash::sha256_file(Path::new(model_path)).ok();
-    result.data_hash = ferx_core::io::hash::sha256_file(Path::new(data_path)).ok();
-    result.model_text = std::fs::read_to_string(model_path).ok();
-    // Attach the covariate table built during the strict read above (None when
-    // the model has no `[covariates]` block). `fit()` itself leaves this None.
-    result.covariate_table = covariate_table;
+        // Record source-file provenance on the result so `ferx_sir(fit)` can
+        // refuse to run against a tampered model or dataset later. We compute
+        // the hashes here (not inside ferx_core::fit) because the R binding
+        // owns the path strings the user supplied. Hashing failures are
+        // non-fatal — the fit already succeeded, and missing hashes just mean
+        // `ferx_sir` will fall back to a no-verification call.
+        result.model_path = Some(model_path.to_string());
+        result.data_path = Some(data_path.to_string());
+        result.model_hash = ferx_core::io::hash::sha256_file(Path::new(model_path)).ok();
+        result.data_hash = ferx_core::io::hash::sha256_file(Path::new(data_path)).ok();
+        result.model_text = std::fs::read_to_string(model_path).ok();
+        // Attach the covariate table built during the strict read above (None when
+        // the model has no `[covariates]` block). `fit()` itself leaves this None.
+        result.covariate_table = covariate_table;
 
-    // Convert to R list
-    fit_result_to_list(&result, &population, &parsed.model)
+        // Convert to R list
+        Ok(fit_result_to_list(&result, &population, &parsed.model))
+    })
 }
 
 /// Simulate from a NLME model.
@@ -486,62 +488,64 @@ fn ferx_rust_simulate(
     match_method: &str,
     horizon: f64,
 ) -> Robj {
-    let match_method = match parse_match_method(match_method) {
-        Ok(m) => m,
-        Err(e) => raise_verbatim(e),
-    };
-    // parse_full_model_file (vs parse_model_file) so iov_column is available
-    // for the reader; without it, models with kappa declarations panic in
-    // pk_param_fn (Eta index >= n_bsv_eta).
-    let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
-        Ok(p) => p,
-        Err(e) => raise_verbatim(format!("Error parsing model: {e}")),
-    };
-    let iov_col = parsed.fit_options.iov_column.clone();
+    entry(move || {
+        let match_method = match parse_match_method(match_method) {
+            Ok(m) => m,
+            Err(e) => raise_verbatim(e),
+        };
+        // parse_full_model_file (vs parse_model_file) so iov_column is available
+        // for the reader; without it, models with kappa declarations panic in
+        // pk_param_fn (Eta index >= n_bsv_eta).
+        let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
+            Ok(p) => p,
+            Err(e) => raise_verbatim(format!("Error parsing model: {e}")),
+        };
+        let iov_col = parsed.fit_options.iov_column.clone();
 
-    // Simulation reads a missing `DV` as a design point, not as a forgotten
-    // `MDV=1` (ferx-core #957): here the DV is the column being produced, so
-    // `DV = .` at a sampling time means "simulate here". `MDV=1` still excludes
-    // the record, and fitting keeps the skip.
-    let (population, _) =
-        match ferx_core::api::read_population_for_simulation(
+        // Simulation reads a missing `DV` as a design point, not as a forgotten
+        // `MDV=1` (ferx-core #957): here the DV is the column being produced, so
+        // `DV = .` at a sampling time means "simulate here". `MDV=1` still excludes
+        // the record, and fitting keeps the skip.
+        let (population, _) =
+            match ferx_core::api::read_population_for_simulation(
+                &parsed.model,
+                &parsed.covariate_decls,
+                data_path,
+                None,
+                iov_col.as_deref(),
+                None,
+                &parsed.column_map,
+            ) {
+                Ok(r) => r,
+                Err(e) => raise_verbatim(format!("Error reading data: {e}")),
+            };
+
+        let opts = ferx_core::SimulateOptions {
+            seed: Some(seed as u64),
+            match_method,
+            // TTE administrative horizon for ODE-accumulated (joint PK-TTE) endpoints
+            // (ferx-core #522/#564). A finite, positive value enables drug-driven
+            // event-time sampling; a non-finite / non-positive value (the R wrapper's
+            // `horizon = NULL` sentinel) means "unset", i.e. Gaussian-only as before.
+            horizon: (horizon.is_finite() && horizon > 0.0).then_some(horizon),
+            ..Default::default()
+        };
+        let output = match ferx_core::simulate_with_options_diag(
             &parsed.model,
-            &parsed.covariate_decls,
-            data_path,
-            None,
-            iov_col.as_deref(),
-            None,
-            &parsed.column_map,
+            &population,
+            &parsed.model.default_params,
+            n_sim as usize,
+            &opts,
         ) {
-            Ok(r) => r,
-            Err(e) => raise_verbatim(format!("Error reading data: {e}")),
+            Ok(o) => o,
+            Err(e) => raise_verbatim(format!("Error simulating: {e}")),
         };
 
-    let opts = ferx_core::SimulateOptions {
-        seed: Some(seed as u64),
-        match_method,
-        // TTE administrative horizon for ODE-accumulated (joint PK-TTE) endpoints
-        // (ferx-core #522/#564). A finite, positive value enables drug-driven
-        // event-time sampling; a non-finite / non-positive value (the R wrapper's
-        // `horizon = NULL` sentinel) means "unset", i.e. Gaussian-only as before.
-        horizon: (horizon.is_finite() && horizon > 0.0).then_some(horizon),
-        ..Default::default()
-    };
-    let output = match ferx_core::simulate_with_options_diag(
-        &parsed.model,
-        &population,
-        &parsed.model.default_params,
-        n_sim as usize,
-        &opts,
-    ) {
-        Ok(o) => o,
-        Err(e) => raise_verbatim(format!("Error simulating: {e}")),
-    };
-
-    attach_sim_warnings(
-        sim_results_to_df(&output.results),
-        [data_reader_warnings(&population), output.warnings].concat(),
-    )
+        Ok(attach_sim_warnings(
+            sim_results_to_df(&output.results),
+            [data_reader_warnings(&population), output.warnings].concat(),
+        ))
+    })
 }
 
 /// Simulate using fitted parameters.
@@ -580,69 +584,71 @@ fn ferx_rust_simulate_from_fit(
     match_method: &str,
     horizon: f64,
 ) -> Robj {
-    let match_method = match parse_match_method(match_method) {
-        Ok(m) => m,
-        Err(e) => raise_verbatim(e),
-    };
-    let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
-        Ok(p) => p,
-        Err(e) => raise_verbatim(format!("Error parsing model: {e}")),
-    };
-    let iov_col = parsed.fit_options.iov_column.clone();
+    entry(move || {
+        let match_method = match parse_match_method(match_method) {
+            Ok(m) => m,
+            Err(e) => raise_verbatim(e),
+        };
+        let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
+            Ok(p) => p,
+            Err(e) => raise_verbatim(format!("Error parsing model: {e}")),
+        };
+        let iov_col = parsed.fit_options.iov_column.clone();
 
-    // Simulation reads a missing `DV` as a design point, not as a forgotten
-    // `MDV=1` (ferx-core #957): here the DV is the column being produced, so
-    // `DV = .` at a sampling time means "simulate here". `MDV=1` still excludes
-    // the record, and fitting keeps the skip.
-    let (population, _) =
-        match ferx_core::api::read_population_for_simulation(
+        // Simulation reads a missing `DV` as a design point, not as a forgotten
+        // `MDV=1` (ferx-core #957): here the DV is the column being produced, so
+        // `DV = .` at a sampling time means "simulate here". `MDV=1` still excludes
+        // the record, and fitting keeps the skip.
+        let (population, _) =
+            match ferx_core::api::read_population_for_simulation(
+                &parsed.model,
+                &parsed.covariate_decls,
+                data_path,
+                None,
+                iov_col.as_deref(),
+                None,
+                &parsed.column_map,
+            ) {
+                Ok(r) => r,
+                Err(e) => raise_verbatim(format!("Error reading data: {e}")),
+            };
+
+        let params = match params_from_fit(
             &parsed.model,
-            &parsed.covariate_decls,
-            data_path,
-            None,
-            iov_col.as_deref(),
-            None,
-            &parsed.column_map,
+            &theta,
+            &omega_flat,
+            omega_dim,
+            &sigma,
+            &omega_iov_flat,
+            omega_iov_dim,
+            &residual_rho,
         ) {
-            Ok(r) => r,
-            Err(e) => raise_verbatim(format!("Error reading data: {e}")),
+            Ok(p) => p,
+            Err(e) => raise_verbatim(e),
         };
 
-    let params = match params_from_fit(
-        &parsed.model,
-        &theta,
-        &omega_flat,
-        omega_dim,
-        &sigma,
-        &omega_iov_flat,
-        omega_iov_dim,
-        &residual_rho,
-    ) {
-        Ok(p) => p,
-        Err(e) => raise_verbatim(e),
-    };
-
-    let opts = ferx_core::SimulateOptions {
-        seed: Some(seed as u64),
-        match_method,
-        // TTE administrative horizon (ferx-core #522/#564); see `ferx_rust_simulate`.
-        horizon: (horizon.is_finite() && horizon > 0.0).then_some(horizon),
-        ..Default::default()
-    };
-    let output = match ferx_core::simulate_with_options_diag(
-        &parsed.model,
-        &population,
-        &params,
-        n_sim as usize,
-        &opts,
-    ) {
-        Ok(o) => o,
-        Err(e) => raise_verbatim(format!("Error simulating: {e}")),
-    };
-    attach_sim_warnings(
-        sim_results_to_df(&output.results),
-        [data_reader_warnings(&population), output.warnings].concat(),
-    )
+        let opts = ferx_core::SimulateOptions {
+            seed: Some(seed as u64),
+            match_method,
+            // TTE administrative horizon (ferx-core #522/#564); see `ferx_rust_simulate`.
+            horizon: (horizon.is_finite() && horizon > 0.0).then_some(horizon),
+            ..Default::default()
+        };
+        let output = match ferx_core::simulate_with_options_diag(
+            &parsed.model,
+            &population,
+            &params,
+            n_sim as usize,
+            &opts,
+        ) {
+            Ok(o) => o,
+            Err(e) => raise_verbatim(format!("Error simulating: {e}")),
+        };
+        Ok(attach_sim_warnings(
+            sim_results_to_df(&output.results),
+            [data_reader_warnings(&population), output.warnings].concat(),
+        ))
+    })
 }
 
 /// Simulate state-reactive ("adaptive" / feedback) dosing from a model's
@@ -681,78 +687,80 @@ fn ferx_rust_simulate_adaptive(
     verify: &str,
     max_decisions: i32,
 ) -> Robj {
-    let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
-        Ok(p) => p,
-        Err(e) => throw_r_error(format!("ferx_simulate_adaptive: error parsing model: {e}")),
-    };
-    // The reactive controller is the model file's `[adaptive_dosing]` block; a
-    // model without one cannot be simulated this way (use `ferx_simulate`).
-    let spec = match parsed.adaptive_dosing.as_ref() {
-        Some(s) => s,
-        None => throw_r_error(
-            "ferx_simulate_adaptive: model has no [adaptive_dosing] block (this entry point \
-             requires one; use ferx_simulate for a fixed regimen)",
-        ),
-    };
-    let iov_col = parsed.fit_options.iov_column.clone();
-    // Simulation reads a missing `DV` as a design point, not as a forgotten
-    // `MDV=1` (ferx-core #957): here the DV is the column being produced, so
-    // `DV = .` at a sampling time means "simulate here". `MDV=1` still excludes
-    // the record, and fitting keeps the skip.
-    let (population, _) = match ferx_core::api::read_population_for_simulation(
-        &parsed.model,
-        &parsed.covariate_decls,
-        data_path,
-        None,
-        iov_col.as_deref(),
-        None,
-        &parsed.column_map,
-    ) {
-        Ok(r) => r,
-        Err(e) => throw_r_error(format!("ferx_simulate_adaptive: error reading data: {e}")),
-    };
+    entry(move || {
+        let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
+            Ok(p) => p,
+            Err(e) => throw_r_error(format!("ferx_simulate_adaptive: error parsing model: {e}")),
+        };
+        // The reactive controller is the model file's `[adaptive_dosing]` block; a
+        // model without one cannot be simulated this way (use `ferx_simulate`).
+        let spec = match parsed.adaptive_dosing.as_ref() {
+            Some(s) => s,
+            None => throw_r_error(
+                "ferx_simulate_adaptive: model has no [adaptive_dosing] block (this entry point \
+                 requires one; use ferx_simulate for a fixed regimen)",
+            ),
+        };
+        let iov_col = parsed.fit_options.iov_column.clone();
+        // Simulation reads a missing `DV` as a design point, not as a forgotten
+        // `MDV=1` (ferx-core #957): here the DV is the column being produced, so
+        // `DV = .` at a sampling time means "simulate here". `MDV=1` still excludes
+        // the record, and fitting keeps the skip.
+        let (population, _) = match ferx_core::api::read_population_for_simulation(
+            &parsed.model,
+            &parsed.covariate_decls,
+            data_path,
+            None,
+            iov_col.as_deref(),
+            None,
+            &parsed.column_map,
+        ) {
+            Ok(r) => r,
+            Err(e) => throw_r_error(format!("ferx_simulate_adaptive: error reading data: {e}")),
+        };
 
-    // The spec owns the decision schedule (`at`) and the monitored signal
-    // (`observe` / `with_assay_error`), so `decision_times` and `monitors` stay
-    // empty here — ferx-core errors if they are set alongside a spec.
-    // `AdaptiveSimulateOptions` is `#[non_exhaustive]`, so build it from
-    // `default()` and set fields rather than with a struct literal.
-    let mut opts = ferx_core::AdaptiveSimulateOptions::default();
-    opts.seed = Some(seed as u64);
-    opts.verify = matches!(verify.trim().to_lowercase().as_str(), "true" | "t" | "1");
-    if max_decisions > 0 {
-        opts.max_decisions = max_decisions as usize;
-    }
+        // The spec owns the decision schedule (`at`) and the monitored signal
+        // (`observe` / `with_assay_error`), so `decision_times` and `monitors` stay
+        // empty here — ferx-core errors if they are set alongside a spec.
+        // `AdaptiveSimulateOptions` is `#[non_exhaustive]`, so build it from
+        // `default()` and set fields rather than with a struct literal.
+        let mut opts = ferx_core::AdaptiveSimulateOptions::default();
+        opts.seed = Some(seed as u64);
+        opts.verify = matches!(verify.trim().to_lowercase().as_str(), "true" | "t" | "1");
+        if max_decisions > 0 {
+            opts.max_decisions = max_decisions as usize;
+        }
 
-    // A failure here (analytical model, an unsupported dosing/covariate
-    // combination, or a verify divergence that taints the result) is raised as an
-    // R error rather than
-    // returned as NULL: the adaptive path has more — and more consequential —
-    // failure modes than a plain simulate, and a verify divergence in particular
-    // must not be silently missable.
-    match ferx_core::simulate_adaptive_from_spec(
-        &parsed.model,
-        &population,
-        &parsed.model.default_params,
-        n_sim as usize,
-        spec,
-        &opts,
-    ) {
-        // Adaptive returns a list rather than a bare frame, so the data-reader
-        // warnings ride on the list itself; `ferx_simulate_adaptive()` surfaces
-        // them through the same `simulation_warnings` reader the other paths use.
-        // `W_NO_DOSES` is dropped here and only here: on this path the controller
-        // supplies the whole regimen, so a dataset that carries only an
-        // observation grid is the normal input, not a missing AMT column.
-        Ok(result) => attach_sim_warnings(
-            adaptive_result_to_list(&result),
-            data_reader_warnings(&population)
-                .into_iter()
-                .filter(|w| !w.starts_with("W_NO_DOSES"))
-                .collect(),
-        ),
-        Err(e) => throw_r_error(format!("ferx_simulate_adaptive: {e}")),
-    }
+        // A failure here (analytical model, an unsupported dosing/covariate
+        // combination, or a verify divergence that taints the result) is raised as an
+        // R error rather than
+        // returned as NULL: the adaptive path has more — and more consequential —
+        // failure modes than a plain simulate, and a verify divergence in particular
+        // must not be silently missable.
+        Ok(match ferx_core::simulate_adaptive_from_spec(
+            &parsed.model,
+            &population,
+            &parsed.model.default_params,
+            n_sim as usize,
+            spec,
+            &opts,
+        ) {
+            // Adaptive returns a list rather than a bare frame, so the data-reader
+            // warnings ride on the list itself; `ferx_simulate_adaptive()` surfaces
+            // them through the same `simulation_warnings` reader the other paths use.
+            // `W_NO_DOSES` is dropped here and only here: on this path the controller
+            // supplies the whole regimen, so a dataset that carries only an
+            // observation grid is the normal input, not a missing AMT column.
+            Ok(result) => attach_sim_warnings(
+                adaptive_result_to_list(&result),
+                data_reader_warnings(&population)
+                    .into_iter()
+                    .filter(|w| !w.starts_with("W_NO_DOSES"))
+                    .collect(),
+            ),
+            Err(e) => throw_r_error(format!("ferx_simulate_adaptive: {e}")),
+        })
+    })
 }
 
 /// Convert an [`AdaptiveSimulationResult`] into a named R list of four data
@@ -907,81 +915,83 @@ fn ferx_rust_simulate_with_uncertainty(
     n_sim_per_draw: i32,
     seed: i32,
 ) -> Robj {
-    let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
-        Ok(p) => p,
-        Err(e) => raise_verbatim(format!("Error parsing model: {e}")),
-    };
-    let iov_col = parsed.fit_options.iov_column.clone();
-    // Simulation reads a missing `DV` as a design point, not as a forgotten
-    // `MDV=1` (ferx-core #957): here the DV is the column being produced, so
-    // `DV = .` at a sampling time means "simulate here". `MDV=1` still excludes
-    // the record, and fitting keeps the skip.
-    let (population, _) =
-        match ferx_core::api::read_population_for_simulation(
-            &parsed.model,
-            &parsed.covariate_decls,
-            data_path,
-            None,
-            iov_col.as_deref(),
-            None,
-            &parsed.column_map,
-        ) {
-            Ok(r) => r,
-            Err(e) => raise_verbatim(format!("Error reading data: {e}")),
+    entry(move || {
+        let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
+            Ok(p) => p,
+            Err(e) => raise_verbatim(format!("Error parsing model: {e}")),
+        };
+        let iov_col = parsed.fit_options.iov_column.clone();
+        // Simulation reads a missing `DV` as a design point, not as a forgotten
+        // `MDV=1` (ferx-core #957): here the DV is the column being produced, so
+        // `DV = .` at a sampling time means "simulate here". `MDV=1` still excludes
+        // the record, and fitting keeps the skip.
+        let (population, _) =
+            match ferx_core::api::read_population_for_simulation(
+                &parsed.model,
+                &parsed.covariate_decls,
+                data_path,
+                None,
+                iov_col.as_deref(),
+                None,
+                &parsed.column_map,
+            ) {
+                Ok(r) => r,
+                Err(e) => raise_verbatim(format!("Error reading data: {e}")),
+            };
+
+        // Decode the method string to the engine enum.
+        let uncertainty_method = match method.trim().to_lowercase().as_str() {
+            "asymptotic" | "cov" | "covariance" => {
+                ferx_core::UncertaintyMethod::Asymptotic
+            }
+            "sir" => ferx_core::UncertaintyMethod::Sir,
+            other => raise_verbatim(format!(
+                "Unknown uncertainty method '{other}' — expected 'asymptotic' or 'sir'"
+            )),
         };
 
-    // Decode the method string to the engine enum.
-    let uncertainty_method = match method.trim().to_lowercase().as_str() {
-        "asymptotic" | "cov" | "covariance" => {
-            ferx_core::UncertaintyMethod::Asymptotic
-        }
-        "sir" => ferx_core::UncertaintyMethod::Sir,
-        other => raise_verbatim(format!(
-            "Unknown uncertainty method '{other}' — expected 'asymptotic' or 'sir'"
-        )),
-    };
+        let fit_result =
+            match build_fit_result_for_uncertainty(
+                &parsed.model,
+                &theta,
+                &omega_flat,
+                omega_dim,
+                &sigma,
+                &omega_iov_flat,
+                omega_iov_dim,
+                uncertainty_method,
+                &cov_matrix_flat,
+                cov_matrix_dim,
+                &sir_resamples_flat,
+                sir_resamples_n,
+                sir_resamples_dim,
+                &residual_rho,
+            ) {
+                Ok(f) => f,
+                Err(e) => raise_verbatim(e),
+            };
 
-    let fit_result =
-        match build_fit_result_for_uncertainty(
-            &parsed.model,
-            &theta,
-            &omega_flat,
-            omega_dim,
-            &sigma,
-            &omega_iov_flat,
-            omega_iov_dim,
-            uncertainty_method,
-            &cov_matrix_flat,
-            cov_matrix_dim,
-            &sir_resamples_flat,
-            sir_resamples_n,
-            sir_resamples_dim,
-            &residual_rho,
-        ) {
-            Ok(f) => f,
-            Err(e) => raise_verbatim(e),
+        let opts = ferx_core::SimulateUncertaintyOptions {
+            n_uncertainty_draws: n_uncertainty_draws.max(0) as usize,
+            n_sim_per_draw: n_sim_per_draw.max(0) as usize,
+            method: uncertainty_method,
+            seed: Some(seed as u64),
+            // Spread the rest so a field added in ferx-core is additive here rather
+            // than an `error[E0063]: missing field` build break (ferx-core #529).
+            // Every field this entry point exposes stays explicit: the two counts
+            // default to `0`, which would draw nothing, and `method` is a real R
+            // argument decoded above, not something to inherit.
+            ..Default::default()
         };
 
-    let opts = ferx_core::SimulateUncertaintyOptions {
-        n_uncertainty_draws: n_uncertainty_draws.max(0) as usize,
-        n_sim_per_draw: n_sim_per_draw.max(0) as usize,
-        method: uncertainty_method,
-        seed: Some(seed as u64),
-        // Spread the rest so a field added in ferx-core is additive here rather
-        // than an `error[E0063]: missing field` build break (ferx-core #529).
-        // Every field this entry point exposes stays explicit: the two counts
-        // default to `0`, which would draw nothing, and `method` is a real R
-        // argument decoded above, not something to inherit.
-        ..Default::default()
-    };
-
-    match ferx_core::simulate_with_uncertainty(&parsed.model, &population, &fit_result, &opts) {
-        Ok(results) => attach_sim_warnings(
-            sim_results_to_df(&results),
-            data_reader_warnings(&population),
-        ),
-        Err(e) => raise_verbatim(format!("simulate_with_uncertainty error: {e}")),
-    }
+        Ok(match ferx_core::simulate_with_uncertainty(&parsed.model, &population, &fit_result, &opts) {
+            Ok(results) => attach_sim_warnings(
+                sim_results_to_df(&results),
+                data_reader_warnings(&population),
+            ),
+            Err(e) => raise_verbatim(format!("simulate_with_uncertainty error: {e}")),
+        })
+    })
 }
 
 /// Population predictions from a NLME model.
@@ -995,44 +1005,46 @@ fn ferx_rust_predict(
     model_path: &str,
     data_path: &str,
 ) -> Robj {
-    let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
-        Ok(p) => p,
-        Err(e) => raise_verbatim(format!("Error parsing model: {e}")),
-    };
-    let iov_col = parsed.fit_options.iov_column.clone();
-
-    // `predict()` never reads the DV -- PRED is the column it produces -- so a
-    // design template (`DV = .` at every sampling time) is as valid here as it is
-    // for `simulate()`, and reading it with the fitting policy would return an
-    // empty frame (ferx-core #957, ferx-r #286). `MDV=1` still excludes the record.
-    let (population, _) =
-        match ferx_core::api::read_population_for_simulation(
-            &parsed.model,
-            &parsed.covariate_decls,
-            data_path,
-            None,
-            iov_col.as_deref(),
-            None,
-            &parsed.column_map,
-        ) {
-            Ok(r) => r,
-            Err(e) => raise_verbatim(format!("Error reading data: {e}")),
+    entry(move || {
+        let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
+            Ok(p) => p,
+            Err(e) => raise_verbatim(format!("Error parsing model: {e}")),
         };
+        let iov_col = parsed.fit_options.iov_column.clone();
 
-    let results = ferx_core::predict(&parsed.model, &population, &parsed.model.default_params);
+        // `predict()` never reads the DV -- PRED is the column it produces -- so a
+        // design template (`DV = .` at every sampling time) is as valid here as it is
+        // for `simulate()`, and reading it with the fitting policy would return an
+        // empty frame (ferx-core #957, ferx-r #286). `MDV=1` still excludes the record.
+        let (population, _) =
+            match ferx_core::api::read_population_for_simulation(
+                &parsed.model,
+                &parsed.covariate_decls,
+                data_path,
+                None,
+                iov_col.as_deref(),
+                None,
+                &parsed.column_map,
+            ) {
+                Ok(r) => r,
+                Err(e) => raise_verbatim(format!("Error reading data: {e}")),
+            };
 
-    let id: Vec<String> = results.iter().map(|r| r.id.clone()).collect();
-    let time: Vec<f64> = results.iter().map(|r| r.time).collect();
-    let pred: Vec<f64> = results.iter().map(|r| r.pred).collect();
+        let results = ferx_core::predict(&parsed.model, &population, &parsed.model.default_params);
 
-    // The data reader's diagnostics reach the caller here too (ferx-r #283):
-    // `ferx_predict()` reads the same file through the same reader, so a dose
-    // that never landed or a covariate missing for half the subjects is exactly
-    // as worth saying as it is on the simulate path.
-    attach_sim_warnings(
-        data_frame!(ID = id, TIME = time, PRED = pred).into(),
-        data_reader_warnings(&population),
-    )
+        let id: Vec<String> = results.iter().map(|r| r.id.clone()).collect();
+        let time: Vec<f64> = results.iter().map(|r| r.time).collect();
+        let pred: Vec<f64> = results.iter().map(|r| r.pred).collect();
+
+        // The data reader's diagnostics reach the caller here too (ferx-r #283):
+        // `ferx_predict()` reads the same file through the same reader, so a dose
+        // that never landed or a covariate missing for half the subjects is exactly
+        // as worth saying as it is on the simulate path.
+        Ok(attach_sim_warnings(
+            data_frame!(ID = id, TIME = time, PRED = pred).into(),
+            data_reader_warnings(&population),
+        ))
+    })
 }
 
 /// Population predictions using fitted parameters.
@@ -1060,58 +1072,60 @@ fn ferx_rust_predict_from_fit(
     omega_iov_dim: i32,
     residual_rho: Vec<f64>,
 ) -> Robj {
-    let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
-        Ok(p) => p,
-        Err(e) => raise_verbatim(format!("Error parsing model: {e}")),
-    };
-    let iov_col = parsed.fit_options.iov_column.clone();
+    entry(move || {
+        let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
+            Ok(p) => p,
+            Err(e) => raise_verbatim(format!("Error parsing model: {e}")),
+        };
+        let iov_col = parsed.fit_options.iov_column.clone();
 
-    // `predict()` never reads the DV -- PRED is the column it produces -- so a
-    // design template (`DV = .` at every sampling time) is as valid here as it is
-    // for `simulate()`, and reading it with the fitting policy would return an
-    // empty frame (ferx-core #957, ferx-r #286). `MDV=1` still excludes the record.
-    let (population, _) =
-        match ferx_core::api::read_population_for_simulation(
+        // `predict()` never reads the DV -- PRED is the column it produces -- so a
+        // design template (`DV = .` at every sampling time) is as valid here as it is
+        // for `simulate()`, and reading it with the fitting policy would return an
+        // empty frame (ferx-core #957, ferx-r #286). `MDV=1` still excludes the record.
+        let (population, _) =
+            match ferx_core::api::read_population_for_simulation(
+                &parsed.model,
+                &parsed.covariate_decls,
+                data_path,
+                None,
+                iov_col.as_deref(),
+                None,
+                &parsed.column_map,
+            ) {
+                Ok(r) => r,
+                Err(e) => raise_verbatim(format!("Error reading data: {e}")),
+            };
+
+        let params = match params_from_fit(
             &parsed.model,
-            &parsed.covariate_decls,
-            data_path,
-            None,
-            iov_col.as_deref(),
-            None,
-            &parsed.column_map,
+            &theta,
+            &omega_flat,
+            omega_dim,
+            &sigma,
+            &omega_iov_flat,
+            omega_iov_dim,
+            &residual_rho,
         ) {
-            Ok(r) => r,
-            Err(e) => raise_verbatim(format!("Error reading data: {e}")),
+            Ok(p) => p,
+            Err(e) => raise_verbatim(e),
         };
 
-    let params = match params_from_fit(
-        &parsed.model,
-        &theta,
-        &omega_flat,
-        omega_dim,
-        &sigma,
-        &omega_iov_flat,
-        omega_iov_dim,
-        &residual_rho,
-    ) {
-        Ok(p) => p,
-        Err(e) => raise_verbatim(e),
-    };
+        let results = ferx_core::predict(&parsed.model, &population, &params);
 
-    let results = ferx_core::predict(&parsed.model, &population, &params);
+        let id: Vec<String> = results.iter().map(|r| r.id.clone()).collect();
+        let time: Vec<f64> = results.iter().map(|r| r.time).collect();
+        let pred: Vec<f64> = results.iter().map(|r| r.pred).collect();
 
-    let id: Vec<String> = results.iter().map(|r| r.id.clone()).collect();
-    let time: Vec<f64> = results.iter().map(|r| r.time).collect();
-    let pred: Vec<f64> = results.iter().map(|r| r.pred).collect();
-
-    // The data reader's diagnostics reach the caller here too (ferx-r #283):
-    // `ferx_predict()` reads the same file through the same reader, so a dose
-    // that never landed or a covariate missing for half the subjects is exactly
-    // as worth saying as it is on the simulate path.
-    attach_sim_warnings(
-        data_frame!(ID = id, TIME = time, PRED = pred).into(),
-        data_reader_warnings(&population),
-    )
+        // The data reader's diagnostics reach the caller here too (ferx-r #283):
+        // `ferx_predict()` reads the same file through the same reader, so a dose
+        // that never landed or a covariate missing for half the subjects is exactly
+        // as worth saying as it is on the simulate path.
+        Ok(attach_sim_warnings(
+            data_frame!(ID = id, TIME = time, PRED = pred).into(),
+            data_reader_warnings(&population),
+        ))
+    })
 }
 
 /// Flatten survival-function predictions into an R data frame (one row per
@@ -1155,28 +1169,30 @@ fn survival_results_to_df(results: &[ferx_core::SurvivalPredictionResult]) -> Ro
 /// @export
 #[extendr]
 fn ferx_rust_predict_survival(model_path: &str, data_path: &str, times: Vec<f64>) -> Robj {
-    let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
-        Ok(p) => p,
-        Err(e) => raise_verbatim(format!("Error parsing model: {e}")),
-    };
-    let iov_col = parsed.fit_options.iov_column.clone();
+    entry(move || {
+        let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
+            Ok(p) => p,
+            Err(e) => raise_verbatim(format!("Error parsing model: {e}")),
+        };
+        let iov_col = parsed.fit_options.iov_column.clone();
 
-    let (population, _) = match ferx_core::api::read_population_for(
-        &parsed.model,
-        &parsed.covariate_decls,
-        data_path,
-        None,
-        iov_col.as_deref(),
-        None,
-        &parsed.column_map,
-    ) {
-        Ok(r) => r,
-        Err(e) => raise_verbatim(format!("Error reading data: {e}")),
-    };
+        let (population, _) = match ferx_core::api::read_population_for(
+            &parsed.model,
+            &parsed.covariate_decls,
+            data_path,
+            None,
+            iov_col.as_deref(),
+            None,
+            &parsed.column_map,
+        ) {
+            Ok(r) => r,
+            Err(e) => raise_verbatim(format!("Error reading data: {e}")),
+        };
 
-    let results =
-        ferx_core::predict_survival(&parsed.model, &population, &parsed.model.default_params, &times);
-    survival_results_to_df(&results)
+        let results =
+            ferx_core::predict_survival(&parsed.model, &population, &parsed.model.default_params, &times);
+        Ok(survival_results_to_df(&results))
+    })
 }
 
 /// Survival-function predictions for TTE endpoints using fitted parameters.
@@ -1208,41 +1224,43 @@ fn ferx_rust_predict_survival_from_fit(
     omega_iov_dim: i32,
     residual_rho: Vec<f64>,
 ) -> Robj {
-    let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
-        Ok(p) => p,
-        Err(e) => raise_verbatim(format!("Error parsing model: {e}")),
-    };
-    let iov_col = parsed.fit_options.iov_column.clone();
+    entry(move || {
+        let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
+            Ok(p) => p,
+            Err(e) => raise_verbatim(format!("Error parsing model: {e}")),
+        };
+        let iov_col = parsed.fit_options.iov_column.clone();
 
-    let (population, _) = match ferx_core::api::read_population_for(
-        &parsed.model,
-        &parsed.covariate_decls,
-        data_path,
-        None,
-        iov_col.as_deref(),
-        None,
-        &parsed.column_map,
-    ) {
-        Ok(r) => r,
-        Err(e) => raise_verbatim(format!("Error reading data: {e}")),
-    };
+        let (population, _) = match ferx_core::api::read_population_for(
+            &parsed.model,
+            &parsed.covariate_decls,
+            data_path,
+            None,
+            iov_col.as_deref(),
+            None,
+            &parsed.column_map,
+        ) {
+            Ok(r) => r,
+            Err(e) => raise_verbatim(format!("Error reading data: {e}")),
+        };
 
-    let params = match params_from_fit(
-        &parsed.model,
-        &theta,
-        &omega_flat,
-        omega_dim,
-        &sigma,
-        &omega_iov_flat,
-        omega_iov_dim,
-        &residual_rho,
-    ) {
-        Ok(p) => p,
-        Err(e) => raise_verbatim(e),
-    };
+        let params = match params_from_fit(
+            &parsed.model,
+            &theta,
+            &omega_flat,
+            omega_dim,
+            &sigma,
+            &omega_iov_flat,
+            omega_iov_dim,
+            &residual_rho,
+        ) {
+            Ok(p) => p,
+            Err(e) => raise_verbatim(e),
+        };
 
-    let results = ferx_core::predict_survival(&parsed.model, &population, &params, &times);
-    survival_results_to_df(&results)
+        let results = ferx_core::predict_survival(&parsed.model, &population, &params, &times);
+        Ok(survival_results_to_df(&results))
+    })
 }
 
 /// Simulation-based NPDE / NPD diagnostics from fitted parameters.
@@ -1279,93 +1297,95 @@ fn ferx_rust_npde_from_fit(
     nsim: i32,
     seed: i32,
 ) -> Robj {
-    if nsim <= 0 {
-        raise_verbatim("npde error: nsim must be a positive integer".to_string());
-    }
-
-    let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
-        Ok(p) => p,
-        Err(e) => raise_verbatim(format!("Error parsing model: {e}")),
-    };
-    let iov_col = parsed.fit_options.iov_column.clone();
-
-    // Re-apply the model file's `[data_selection]` ignore/accept/ignore_subjects
-    // so the population matches the one the fit was computed on. Without this the
-    // NPDE decorrelation would run over a different per-subject observation set
-    // than the fit, silently disagreeing with a fit-time `npde_nsim` run. (Only
-    // the model-file selection is visible here; selection applied via R-side
-    // `ferx_fit(settings=)` is not carried on the fit object.)
-    let filter = match ferx_core::io::datareader::SelectionFilter::from_opts(
-        &parsed.fit_options.ignore_exprs,
-        &parsed.fit_options.accept_exprs,
-        &parsed.fit_options.ignore_subjects,
-    ) {
-        Ok(f) => f,
-        Err(e) => raise_verbatim(format!("Error in [data_selection]: {e}")),
-    };
-    let filter_opt = if filter.is_empty() { None } else { Some(&filter) };
-
-    let (population, _) = match ferx_core::api::read_population_for(
-        &parsed.model,
-        &parsed.covariate_decls,
-        data_path,
-        None,
-        iov_col.as_deref(),
-        filter_opt,
-        &parsed.column_map,
-    ) {
-        Ok(r) => r,
-        Err(e) => raise_verbatim(format!("Error reading data: {e}")),
-    };
-
-    let params = match params_from_fit(
-        &parsed.model,
-        &theta,
-        &omega_flat,
-        omega_dim,
-        &sigma,
-        &omega_iov_flat,
-        omega_iov_dim,
-        &residual_rho,
-    ) {
-        Ok(p) => p,
-        Err(e) => raise_verbatim(e),
-    };
-
-    let seed_opt = if seed < 0 { None } else { Some(seed as u64) };
-    let per_subject = ferx_core::stats::npde::compute_npde_npd(
-        &parsed.model,
-        &population,
-        &params,
-        nsim as usize,
-        seed_opt,
-    );
-
-    // Flatten per-subject NPDE/NPD back to one row per observation. ID and TIME
-    // are emitted exactly as `io::output::sdtab` builds them — numeric ID
-    // (`id.parse::<f64>()`, falling back to the 1-based subject index) and the
-    // raw data TIME — so the R side can align this table to `fit$sdtab`
-    // positionally and assert per-row ID/TIME agreement rather than re-joining.
-    let mut id: Vec<f64> = Vec::new();
-    let mut time: Vec<f64> = Vec::new();
-    let mut npde: Vec<f64> = Vec::new();
-    let mut npd: Vec<f64> = Vec::new();
-    for (si, (subj, sn)) in population.subjects.iter().zip(per_subject.iter()).enumerate() {
-        let id_num = subj.id.parse::<f64>().unwrap_or(si as f64 + 1.0);
-        for j in 0..subj.observations.len() {
-            id.push(id_num);
-            time.push(
-                subj.obs_raw_times
-                    .get(j)
-                    .copied()
-                    .unwrap_or(subj.obs_times[j]),
-            );
-            npde.push(sn.npde.get(j).copied().unwrap_or(f64::NAN));
-            npd.push(sn.npd.get(j).copied().unwrap_or(f64::NAN));
+    entry(move || {
+        if nsim <= 0 {
+            raise_verbatim("npde error: nsim must be a positive integer".to_string());
         }
-    }
 
-    data_frame!(ID = id, TIME = time, NPDE = npde, NPD = npd).into()
+        let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
+            Ok(p) => p,
+            Err(e) => raise_verbatim(format!("Error parsing model: {e}")),
+        };
+        let iov_col = parsed.fit_options.iov_column.clone();
+
+        // Re-apply the model file's `[data_selection]` ignore/accept/ignore_subjects
+        // so the population matches the one the fit was computed on. Without this the
+        // NPDE decorrelation would run over a different per-subject observation set
+        // than the fit, silently disagreeing with a fit-time `npde_nsim` run. (Only
+        // the model-file selection is visible here; selection applied via R-side
+        // `ferx_fit(settings=)` is not carried on the fit object.)
+        let filter = match ferx_core::io::datareader::SelectionFilter::from_opts(
+            &parsed.fit_options.ignore_exprs,
+            &parsed.fit_options.accept_exprs,
+            &parsed.fit_options.ignore_subjects,
+        ) {
+            Ok(f) => f,
+            Err(e) => raise_verbatim(format!("Error in [data_selection]: {e}")),
+        };
+        let filter_opt = if filter.is_empty() { None } else { Some(&filter) };
+
+        let (population, _) = match ferx_core::api::read_population_for(
+            &parsed.model,
+            &parsed.covariate_decls,
+            data_path,
+            None,
+            iov_col.as_deref(),
+            filter_opt,
+            &parsed.column_map,
+        ) {
+            Ok(r) => r,
+            Err(e) => raise_verbatim(format!("Error reading data: {e}")),
+        };
+
+        let params = match params_from_fit(
+            &parsed.model,
+            &theta,
+            &omega_flat,
+            omega_dim,
+            &sigma,
+            &omega_iov_flat,
+            omega_iov_dim,
+            &residual_rho,
+        ) {
+            Ok(p) => p,
+            Err(e) => raise_verbatim(e),
+        };
+
+        let seed_opt = if seed < 0 { None } else { Some(seed as u64) };
+        let per_subject = ferx_core::stats::npde::compute_npde_npd(
+            &parsed.model,
+            &population,
+            &params,
+            nsim as usize,
+            seed_opt,
+        );
+
+        // Flatten per-subject NPDE/NPD back to one row per observation. ID and TIME
+        // are emitted exactly as `io::output::sdtab` builds them — numeric ID
+        // (`id.parse::<f64>()`, falling back to the 1-based subject index) and the
+        // raw data TIME — so the R side can align this table to `fit$sdtab`
+        // positionally and assert per-row ID/TIME agreement rather than re-joining.
+        let mut id: Vec<f64> = Vec::new();
+        let mut time: Vec<f64> = Vec::new();
+        let mut npde: Vec<f64> = Vec::new();
+        let mut npd: Vec<f64> = Vec::new();
+        for (si, (subj, sn)) in population.subjects.iter().zip(per_subject.iter()).enumerate() {
+            let id_num = subj.id.parse::<f64>().unwrap_or(si as f64 + 1.0);
+            for j in 0..subj.observations.len() {
+                id.push(id_num);
+                time.push(
+                    subj.obs_raw_times
+                        .get(j)
+                        .copied()
+                        .unwrap_or(subj.obs_times[j]),
+                );
+                npde.push(sn.npde.get(j).copied().unwrap_or(f64::NAN));
+                npd.push(sn.npd.get(j).copied().unwrap_or(f64::NAN));
+            }
+        }
+
+        Ok(data_frame!(ID = id, TIME = time, NPDE = npde, NPD = npd).into())
+    })
 }
 
 // -- Helper: parse a single R-side propensity-matching token into an
@@ -3272,7 +3292,9 @@ fn covariate_types_robj(table: Option<&ferx_core::CovariateTable>) -> Robj {
 /// that probe it.
 #[extendr]
 fn ferx_rust_autodiff_enabled() -> bool {
-    false
+    entry(move || {
+        Ok(false)
+    })
 }
 
 /// Every `[block]` name this build of the engine recognises.
@@ -3299,10 +3321,12 @@ fn ferx_rust_autodiff_enabled() -> bool {
 /// @export
 #[extendr]
 fn ferx_rust_known_blocks() -> Vec<String> {
-    ferx_core::known_block_names()
-        .into_iter()
-        .map(String::from)
-        .collect()
+    entry(move || {
+        Ok(ferx_core::known_block_names()
+            .into_iter()
+            .map(String::from)
+            .collect())
+    })
 }
 
 /// Validate a .ferx model file (and optionally its dataset) without fitting.
@@ -3323,40 +3347,42 @@ fn ferx_rust_known_blocks() -> Vec<String> {
 /// @export
 #[extendr]
 fn ferx_rust_validate_model(model_path: &str, data_path: &str) -> List {
-    let data_opt: Option<&str> = if data_path.is_empty() { None } else { Some(data_path) };
-    let report = ferx_core::validate_model_file(model_path, data_opt);
+    entry(move || {
+        let data_opt: Option<&str> = if data_path.is_empty() { None } else { Some(data_path) };
+        let report = ferx_core::validate_model_file(model_path, data_opt);
 
-    let n = report.diagnostics.len();
-    let mut severity: Vec<String> = Vec::with_capacity(n);
-    let mut code:     Vec<String> = Vec::with_capacity(n);
-    let mut message:  Vec<String> = Vec::with_capacity(n);
-    let mut block:    Vec<String> = Vec::with_capacity(n);
-    let mut line:     Vec<i32>    = Vec::with_capacity(n);
-    let mut suggestion: Vec<String> = Vec::with_capacity(n);
-    for d in &report.diagnostics {
-        severity.push(match d.severity {
-            ferx_core::Severity::Error => "error".to_string(),
-            ferx_core::Severity::Warning => "warning".to_string(),
-        });
-        code.push(d.code.clone());
-        message.push(d.message.clone());
-        block.push(d.block.clone().unwrap_or_default());
-        // 0 sentinel for "no line" — R side maps to NA_integer_.
-        line.push(d.line.map(|l| l as i32).unwrap_or(0));
-        suggestion.push(d.suggestion.clone().unwrap_or_default());
-    }
+        let n = report.diagnostics.len();
+        let mut severity: Vec<String> = Vec::with_capacity(n);
+        let mut code:     Vec<String> = Vec::with_capacity(n);
+        let mut message:  Vec<String> = Vec::with_capacity(n);
+        let mut block:    Vec<String> = Vec::with_capacity(n);
+        let mut line:     Vec<i32>    = Vec::with_capacity(n);
+        let mut suggestion: Vec<String> = Vec::with_capacity(n);
+        for d in &report.diagnostics {
+            severity.push(match d.severity {
+                ferx_core::Severity::Error => "error".to_string(),
+                ferx_core::Severity::Warning => "warning".to_string(),
+            });
+            code.push(d.code.clone());
+            message.push(d.message.clone());
+            block.push(d.block.clone().unwrap_or_default());
+            // 0 sentinel for "no line" — R side maps to NA_integer_.
+            line.push(d.line.map(|l| l as i32).unwrap_or(0));
+            suggestion.push(d.suggestion.clone().unwrap_or_default());
+        }
 
-    list!(
-        ok = report.valid,
-        model = report.model,
-        data = report.data.unwrap_or_default(),
-        severity = severity,
-        code = code,
-        message = message,
-        block = block,
-        line = line,
-        suggestion = suggestion,
-    )
+        Ok(list!(
+            ok = report.valid,
+            model = report.model,
+            data = report.data.unwrap_or_default(),
+            severity = severity,
+            code = code,
+            message = message,
+            block = block,
+            line = line,
+            suggestion = suggestion,
+        ))
+    })
 }
 
 /// Return the dataset path declared in a model file's `[data]` block (#254).
@@ -3371,10 +3397,12 @@ fn ferx_rust_validate_model(model_path: &str, data_path: &str) -> List {
 /// @export
 #[extendr]
 fn ferx_rust_model_data_path(model_path: &str) -> String {
-    match ferx_core::parser::model_parser::parse_full_model_file(Path::new(model_path)) {
-        Ok(p) => p.data_path.unwrap_or_default(),
-        Err(e) => throw_r_error(format!("Error parsing model: {e}")),
-    }
+    entry(move || {
+        Ok(match ferx_core::parser::model_parser::parse_full_model_file(Path::new(model_path)) {
+            Ok(p) => p.data_path.unwrap_or_default(),
+            Err(e) => throw_r_error(format!("Error parsing model: {e}")),
+        })
+    })
 }
 
 /// Derive NCA-based starting values from the data without running a fit.
@@ -3388,55 +3416,57 @@ fn ferx_rust_model_data_path(model_path: &str) -> String {
 /// @export
 #[extendr]
 fn ferx_rust_inits_from_nca(model_path: &str, data_path: &str, method: &str) -> List {
-    let parsed = match ferx_core::parser::model_parser::parse_full_model_file(Path::new(model_path))
-    {
-        Ok(p) => p,
-        Err(e) => raise_verbatim(format!("Error parsing model: {e}")),
-    };
-
-    let iov_col = parsed.fit_options.iov_column.clone();
-    let population =
-        match ferx_core::read_nonmem_csv(Path::new(data_path), None, iov_col.as_deref()) {
+    entry(move || {
+        let parsed = match ferx_core::parser::model_parser::parse_full_model_file(Path::new(model_path))
+        {
             Ok(p) => p,
-            Err(e) => raise_verbatim(format!("Error reading data: {e}")),
+            Err(e) => raise_verbatim(format!("Error parsing model: {e}")),
         };
 
-    let nca_method = match method.trim().to_lowercase().as_str() {
-        "nca" => ferx_core::NcaInit::Nca,
-        "" | "true" | "sweep" | "nca_sweep" => ferx_core::NcaInit::Sweep,
-        "ebe" | "nca_ebe" => ferx_core::NcaInit::Ebe,
-        other => raise_verbatim(format!(
-            "Unknown inits_from_nca method '{other}' — expected 'nca', 'nca_sweep', or 'nca_ebe'"
-        )),
-    };
-    let method_label = match nca_method {
-        ferx_core::NcaInit::Nca => "nca",
-        ferx_core::NcaInit::Sweep => "nca_sweep",
-        ferx_core::NcaInit::Ebe => "nca_ebe",
-    };
+        let iov_col = parsed.fit_options.iov_column.clone();
+        let population =
+            match ferx_core::read_nonmem_csv(Path::new(data_path), None, iov_col.as_deref()) {
+                Ok(p) => p,
+                Err(e) => raise_verbatim(format!("Error reading data: {e}")),
+            };
 
-    let suggested = ferx_core::inits_from_nca(&parsed.model, &population, nca_method);
-    let params = &suggested.params;
+        let nca_method = match method.trim().to_lowercase().as_str() {
+            "nca" => ferx_core::NcaInit::Nca,
+            "" | "true" | "sweep" | "nca_sweep" => ferx_core::NcaInit::Sweep,
+            "ebe" | "nca_ebe" => ferx_core::NcaInit::Ebe,
+            other => raise_verbatim(format!(
+                "Unknown inits_from_nca method '{other}' — expected 'nca', 'nca_sweep', or 'nca_ebe'"
+            )),
+        };
+        let method_label = match nca_method {
+            ferx_core::NcaInit::Nca => "nca",
+            ferx_core::NcaInit::Sweep => "nca_sweep",
+            ferx_core::NcaInit::Ebe => "nca_ebe",
+        };
 
-    // Omega as a row-major flattened matrix (same convention as fit_result_to_list).
-    let n_eta = params.omega.dim();
-    let mut omega_flat: Vec<f64> = Vec::with_capacity(n_eta * n_eta);
-    for i in 0..n_eta {
-        for j in 0..n_eta {
-            omega_flat.push(params.omega.matrix[(i, j)]);
+        let suggested = ferx_core::inits_from_nca(&parsed.model, &population, nca_method);
+        let params = &suggested.params;
+
+        // Omega as a row-major flattened matrix (same convention as fit_result_to_list).
+        let n_eta = params.omega.dim();
+        let mut omega_flat: Vec<f64> = Vec::with_capacity(n_eta * n_eta);
+        for i in 0..n_eta {
+            for j in 0..n_eta {
+                omega_flat.push(params.omega.matrix[(i, j)]);
+            }
         }
-    }
 
-    list!(
-        theta_names = params.theta_names.clone(),
-        theta = params.theta.clone(),
-        theta_fixed = params.theta_fixed.clone(),
-        eta_names = params.omega.eta_names.clone(),
-        omega = omega_flat,
-        omega_dim = n_eta as i32,
-        method = method_label,
-        warnings = suggested.warnings.clone()
-    )
+        Ok(list!(
+            theta_names = params.theta_names.clone(),
+            theta = params.theta.clone(),
+            theta_fixed = params.theta_fixed.clone(),
+            eta_names = params.omega.eta_names.clone(),
+            omega = omega_flat,
+            omega_dim = n_eta as i32,
+            method = method_label,
+            warnings = suggested.warnings.clone()
+        ))
+    })
 }
 
 /// Standalone SIR — run Sampling Importance Resampling against an existing fit.
@@ -3500,362 +3530,364 @@ fn ferx_rust_sir(
     sir_keep_samples: bool,
     verbose: bool,
 ) -> Robj {
-    // All error paths in this binding throw an R condition (via
-    // `throw_r_error`) rather than printing to stderr + returning NULL.
-    // The latter pattern (used by `ferx_rust_fit`) loses the engine
-    // message to stderr — callers using `tryCatch()` or
-    // `expect_error(..., regexp = ...)` see only a generic
-    // "backend returned no result" from the R wrapper. Throwing
-    // propagates the actual message (e.g. "hash mismatch") into the R
-    // condition, which is what test code expects and what users want.
-    let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
-        Ok(p) => p,
-        Err(e) => throw_r_error(&format!(
-            "ferx_sir: error parsing model at {}: {}",
-            model_path, e
-        )),
-    };
-    let model = &parsed.model;
-    let template = &model.default_params;
+    entry(move || {
+        // All error paths in this binding throw an R condition (via
+        // `throw_r_error`) rather than printing to stderr + returning NULL.
+        // The latter pattern (used by `ferx_rust_fit`) loses the engine
+        // message to stderr — callers using `tryCatch()` or
+        // `expect_error(..., regexp = ...)` see only a generic
+        // "backend returned no result" from the R wrapper. Throwing
+        // propagates the actual message (e.g. "hash mismatch") into the R
+        // condition, which is what test code expects and what users want.
+        let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
+            Ok(p) => p,
+            Err(e) => throw_r_error(&format!(
+                "ferx_sir: error parsing model at {}: {}",
+                model_path, e
+            )),
+        };
+        let model = &parsed.model;
+        let template = &model.default_params;
 
-    let n_theta = theta.len();
-    let n_sigma = sigma.len();
-    let n_eta = omega_dim as usize;
-    let n_subj = n_subjects.max(0) as usize;
-    let n_packed = cov_matrix_dim as usize;
+        let n_theta = theta.len();
+        let n_sigma = sigma.len();
+        let n_eta = omega_dim as usize;
+        let n_subj = n_subjects.max(0) as usize;
+        let n_packed = cov_matrix_dim as usize;
 
-    if n_theta != template.theta.len() {
-        throw_r_error(&format!(
-            "ferx_sir: theta length {} does not match model ({} expected)",
-            n_theta,
-            template.theta.len()
-        ));
-    }
-    if n_sigma != template.sigma.values.len() {
-        throw_r_error(&format!(
-            "ferx_sir: sigma length {} does not match model ({} expected)",
-            n_sigma,
-            template.sigma.values.len()
-        ));
-    }
-    if n_eta != template.omega.dim() {
-        throw_r_error(&format!(
-            "ferx_sir: omega dim {} does not match model ({} expected)",
-            n_eta,
-            template.omega.dim()
-        ));
-    }
-    if omega_flat.len() != n_eta * n_eta {
-        throw_r_error(&format!(
-            "ferx_sir: omega_flat length {} does not match dim^2 = {}",
-            omega_flat.len(),
-            n_eta * n_eta
-        ));
-    }
-    if n_packed == 0 || cov_matrix_flat.len() != n_packed * n_packed {
-        throw_r_error(&format!(
-            "ferx_sir: cov_matrix is missing or malformed (dim={}, len={}). \
-             Re-fit with `covariance = TRUE`.",
-            n_packed,
-            cov_matrix_flat.len()
-        ));
-    }
-    if eta_hats_flat.len() != n_subj * n_eta {
-        throw_r_error(&format!(
-            "ferx_sir: eta_hats_flat length {} does not match n_subjects * n_eta = {}",
-            eta_hats_flat.len(),
-            n_subj * n_eta
-        ));
-    }
-
-    let omega_mat = DMatrix::from_row_slice(n_eta, n_eta, &omega_flat);
-    let cov_mat = DMatrix::from_row_slice(n_packed, n_packed, &cov_matrix_flat);
-
-    // Build SubjectResult vec with only `eta` populated (the only field
-    // ferx_core::run_sir reads off subjects). IDs are synthesised because
-    // SIR doesn't consume them; the original IDs live on the R fit list.
-    let mut subjects: Vec<SubjectResult> = Vec::with_capacity(n_subj);
-    for i in 0..n_subj {
-        let mut eta = nalgebra::DVector::<f64>::zeros(n_eta);
-        for k in 0..n_eta {
-            eta[k] = eta_hats_flat[i * n_eta + k];
+        if n_theta != template.theta.len() {
+            throw_r_error(&format!(
+                "ferx_sir: theta length {} does not match model ({} expected)",
+                n_theta,
+                template.theta.len()
+            ));
         }
-        subjects.push(SubjectResult {
-            id: format!("{}", i + 1),
-            eta,
-            ipred: Vec::new(),
-            pred: Vec::new(),
-            iwres: Vec::new(),
-            cwres: Vec::new(),
-            ofv_contribution: 0.0,
-            cens: Vec::new(),
-            n_obs: 0,
-            extra_columns: Vec::new(),
-            per_obs_tad: Vec::new(),
-            // PR #207 (ferx-core) added this field; the SIR path never reads it.
-            compartment_states: Vec::new(),
-            // PR #377 (ferx-core) added NPDE/NPD; the SIR path never reads them.
-            npde: Vec::new(),
-            npd: Vec::new(),
-            // ferx-core #900 added categorical sdtab rows; the SIR path never reads them.
-            discrete_rows: Vec::new(),
-            // ferx-core #977 added per-subject mixture posteriors; the SIR path
-            // never reads them, and these scaffolds carry no class assignment.
-            pmix: None,
-            mixest: None,
-        });
-    }
+        if n_sigma != template.sigma.values.len() {
+            throw_r_error(&format!(
+                "ferx_sir: sigma length {} does not match model ({} expected)",
+                n_sigma,
+                template.sigma.values.len()
+            ));
+        }
+        if n_eta != template.omega.dim() {
+            throw_r_error(&format!(
+                "ferx_sir: omega dim {} does not match model ({} expected)",
+                n_eta,
+                template.omega.dim()
+            ));
+        }
+        if omega_flat.len() != n_eta * n_eta {
+            throw_r_error(&format!(
+                "ferx_sir: omega_flat length {} does not match dim^2 = {}",
+                omega_flat.len(),
+                n_eta * n_eta
+            ));
+        }
+        if n_packed == 0 || cov_matrix_flat.len() != n_packed * n_packed {
+            throw_r_error(&format!(
+                "ferx_sir: cov_matrix is missing or malformed (dim={}, len={}). \
+                 Re-fit with `covariance = TRUE`.",
+                n_packed,
+                cov_matrix_flat.len()
+            ));
+        }
+        if eta_hats_flat.len() != n_subj * n_eta {
+            throw_r_error(&format!(
+                "ferx_sir: eta_hats_flat length {} does not match n_subjects * n_eta = {}",
+                eta_hats_flat.len(),
+                n_subj * n_eta
+            ));
+        }
 
-    // The fitted `block_sigma` correlations, overlaid on the model's declared
-    // pairing - SIR resamples the residual covariance, so starting from the
-    // declared rho would resample around the wrong centre.
-    let residual_correlations_resolved =
-        match overlay_residual_rho(model.residual_correlations.clone(), &residual_rho) {
-            Ok(rc) => rc,
+        let omega_mat = DMatrix::from_row_slice(n_eta, n_eta, &omega_flat);
+        let cov_mat = DMatrix::from_row_slice(n_packed, n_packed, &cov_matrix_flat);
+
+        // Build SubjectResult vec with only `eta` populated (the only field
+        // ferx_core::run_sir reads off subjects). IDs are synthesised because
+        // SIR doesn't consume them; the original IDs live on the R fit list.
+        let mut subjects: Vec<SubjectResult> = Vec::with_capacity(n_subj);
+        for i in 0..n_subj {
+            let mut eta = nalgebra::DVector::<f64>::zeros(n_eta);
+            for k in 0..n_eta {
+                eta[k] = eta_hats_flat[i * n_eta + k];
+            }
+            subjects.push(SubjectResult {
+                id: format!("{}", i + 1),
+                eta,
+                ipred: Vec::new(),
+                pred: Vec::new(),
+                iwres: Vec::new(),
+                cwres: Vec::new(),
+                ofv_contribution: 0.0,
+                cens: Vec::new(),
+                n_obs: 0,
+                extra_columns: Vec::new(),
+                per_obs_tad: Vec::new(),
+                // PR #207 (ferx-core) added this field; the SIR path never reads it.
+                compartment_states: Vec::new(),
+                // PR #377 (ferx-core) added NPDE/NPD; the SIR path never reads them.
+                npde: Vec::new(),
+                npd: Vec::new(),
+                // ferx-core #900 added categorical sdtab rows; the SIR path never reads them.
+                discrete_rows: Vec::new(),
+                // ferx-core #977 added per-subject mixture posteriors; the SIR path
+                // never reads them, and these scaffolds carry no class assignment.
+                pmix: None,
+                mixest: None,
+            });
+        }
+
+        // The fitted `block_sigma` correlations, overlaid on the model's declared
+        // pairing - SIR resamples the residual covariance, so starting from the
+        // declared rho would resample around the wrong centre.
+        let residual_correlations_resolved =
+            match overlay_residual_rho(model.residual_correlations.clone(), &residual_rho) {
+                Ok(rc) => rc,
+                Err(e) => throw_r_error(&format!("ferx_sir: {}", e)),
+            };
+
+        // Skeleton FitResult — only the fields ferx_core::run_sir actually
+        // reads are populated; everything else gets a neutral default.
+        let fit = FitResult {
+            // ferx-core main added a checkpoint-restore flag; the SIR path never reads it.
+            restored_from_checkpoint: false,
+            // ferx-core main grew `residual_correlations` and `vi` after the rev
+            // this branch originally pinned. The *pairing* is a property of the
+            // compiled model and is taken from there, but a plain `block_sigma`
+            // estimates rho, so the fitted value is overlaid on top - reading the
+            // model's own value would reconstruct this fit at its declared initial
+            // correlation. This scaffold carries no VI run. The two weighted-kappa
+            // fields it also grew (#1031) are set below, beside `kappa_init_as_sd`.
+            residual_correlations: residual_correlations_resolved,
+            // Parallel FIX flags and standard errors for those correlations
+            // (ferx-core #847): the declaration is structural and comes from the
+            // template; the SEs would come from a covariance step this scaffold
+            // never runs.
+            residual_correlation_fixed: template.residual_correlation_fixed.clone(),
+            se_residual_correlations: None,
+            // The packed Omega / kappa layout (ferx-core #1177). `fit()` records it
+            // as `Some(params.omega.diagonal)`; the covariance matrix handed in
+            // here was packed with the model's own layout, so report that rather
+            // than `None` - `natural_scale_covariance()` needs it to put a
+            // `block_omega` covariance back on the natural scale.
+            omega_is_diagonal: Some(template.omega.diagonal),
+            kappa_is_diagonal: template.omega_iov.as_ref().map(|m| m.diagonal),
+            vi: None,
+            method: if interaction {
+                EstimationMethod::FoceI
+            } else {
+                EstimationMethod::Foce
+            },
+            method_chain: vec![if interaction {
+                EstimationMethod::FoceI
+            } else {
+                EstimationMethod::Foce
+            }],
+            bayes: None,
+            cond_dist: None,
+            converged: true,
+            ofv,
+            // ferx-core main split the objective into a data and a prior half
+            // (#254). `run_sir` reads neither field directly: it takes its reference
+            // objective as `data_ofv(fit) = fit.ofv - fit.ofv_prior`, deliberately
+            // not `ofv_data`, which a deserialised legacy fit carries as 0. So the
+            // prior half has to arrive here as itself: `ofv` is the penalized total
+            // for a priored fit, and `run_sir_core` adds the penalty back on top of
+            // whatever reference it is given (ferx-r #366). Passing `ofv_prior = 0`
+            // beside a penalized `ofv` would count the penalty twice - a constant
+            // offset that cancels in today's normalized importance weights, and a
+            // wrong number the moment `ofv_hat` is used as anything but a difference.
+            //
+            // `prior_summary` stays empty: it is a report, not an input, and
+            // `run_sir` does not read it.
+            ofv_data: ofv - ofv_prior,
+            ofv_prior,
+            prior_summary: Vec::new(),
+            aic: 0.0,
+            bic: 0.0,
+            theta: theta.clone(),
+            theta_names: template.theta_names.clone(),
+            eta_names: template.omega.eta_names.clone(),
+            omega: omega_mat,
+            sigma: sigma.clone(),
+            sigma_names: template.sigma.names.clone(),
+            error_model: model.error_model,
+            covariance_matrix: Some(cov_mat),
+            se_theta: None,
+            se_omega: None,
+            se_sigma: None,
+            theta_fixed: template.theta_fixed.clone(),
+            omega_fixed: template.omega_fixed.clone(),
+            sigma_fixed: template.sigma_fixed.clone(),
+            subjects,
+            n_obs: 0,
+            n_subjects: n_subj,
+            n_parameters: n_packed,
+            n_iterations: 0,
+            interaction,
+            warnings: Vec::new(),
+            sir_ci_theta: None,
+            sir_ci_omega: None,
+            sir_ci_sigma: None,
+            sir_ess: None,
+            sir_resamples_packed: None,
+            importance_sampling: None,
+            impmap_trace: None,
+            omega_iov: None,
+            kappa_names: model.kappa_names.clone(),
+            kappa_fixed: template.kappa_fixed.clone(),
+            se_kappa: None,
+            shrinkage_kappa: Vec::new(),
+            shrinkage_kappa_by_occ: Vec::new(),
+            ebe_kappas: Vec::new(),
+            saem_mu_ref_m_step_evals_saved: None,
+            saem_n_subjects_hmc: None,
+            gradient_method_inner: String::new(),
+            gradient_method_outer: String::new(),
+            uses_ode_solver: model.is_ode_based(),
+            n_threads_used: 1,
+            nlopt_missing_algorithms: Vec::new(),
+            covariance_n_evals_estimated: None,
+            trace_path: None,
+            // In-process optimisation for a `run_covariance` called straight after a fit;
+            // `#[serde(skip)]` upstream, so a reconstructed result legitimately carries `None`
+            // and `run_covariance` re-packs from `omega`. No `.fitrx` / R format change.
+            packed_estimate: None,
+            // No outer optimizer ran in this scaffold, so there is no init-escape
+            // verdict, and no packed tally to classify: `model_selection::bic()`
+            // reports NaN on the default `BicInputs` rather than a wrong penalty
+            // (ferx-core #1177).
+            left_init: None,
+            bic_inputs: BicInputs::default(),
+            ebe_convergence_warnings: 0,
+            max_unconverged_subjects: 0,
+            total_ebe_fallbacks: 0,
+            covariance_status: CovarianceStatus::Computed,
+            shrinkage_eta: Vec::new(),
+            shrinkage_eps: f64::NAN,
+            wall_time_secs: 0.0,
+            model_name: model.name.clone(),
+            ferx_version: String::new(),
+            eta_param_info: Vec::new(),
+            theta_transform: Vec::new(),
+            sigma_types: Vec::new(),
+            cov_eigenvalues: None,
+            cov_condition_number: None,
+            eta_log_transformed: Vec::new(),
+            omega_param_corr: None,
+            omega_iov_param_corr: None,
+            model_path: Some(model_path.to_string()),
+            data_path: Some(data_path.to_string()),
+            model_hash: if model_hash.is_empty() {
+                None
+            } else {
+                Some(model_hash.to_string())
+            },
+            data_hash: if data_hash.is_empty() {
+                None
+            } else {
+                Some(data_hash.to_string())
+            },
+            dw_statistic: f64::NAN,
+            iwres_lag1_r: f64::NAN,
+            uses_sde: false,
+            omega_init_as_sd: Vec::new(),
+            sigma_init_as_sd: Vec::new(),
+            kappa_init_as_sd: Vec::new(),
+            // ferx-core #1031 added the sample-size weight (`kappa K ~ g2 weight = N`)
+            // to `FitResult` for reporting only; these skeleton results are never
+            // printed, so both stay empty.
+            kappa_weights: Vec::new(),
+            kappa_weight_typical: Vec::new(),
+            warnings_structured: Vec::new(),
+            model_text: None,
+            theta_init: Vec::new(),
+            omega_init: nalgebra::DMatrix::zeros(0, 0),
+            sigma_init: Vec::new(),
+            obs_time_range: None,
+            final_gradient: None,
+            final_gradient_source: None,
+            optimizer: "auto".to_string(),
+            n_starts: 1,
+            multi_start_seed: None,
+            saem_seed: None,
+            sir_seed: None,
+            imp_seed: None,
+            npde_seed: None,
+            bloq_method: "drop".to_string(),
+            outer_maxiter: 0,
+            outer_gtol: 0.0,
+            inits_from_nca: None,
+            covariate_names: Vec::new(),
+            input_columns: Vec::new(),
+            covariate_table: None,
+            // ferx-core #1111 added the [covariate_model] relation echo; the SIR
+            // path never reads it.
+            covariate_relations: Vec::new(),
+            exclusions: None,
+            method_wall_times_secs: Vec::new(),
+            covariance_wall_time_secs: 0.0,
+            environment: ferx_core::environment::EnvironmentInfo::default(),
+            #[cfg(feature = "nn")]
+            neural_networks: Vec::new(),
+        };
+
+        let mut opts = FitOptions::default();
+        opts.sir_samples = sir_samples.max(0) as usize;
+        opts.sir_resamples = sir_resamples.max(0) as usize;
+        opts.sir_seed = if sir_seed < 0 {
+            None
+        } else {
+            Some(sir_seed as u64)
+        };
+        opts.sir_keep_samples = sir_keep_samples;
+        opts.interaction = interaction;
+        opts.verbose = verbose;
+
+        // ferx_core::run_sir verifies hashes (when set), re-parses model + data,
+        // reconstructs the inner ModelParameters, and runs SIR. We pass None for
+        // model/population so that path goes through and the integrity check
+        // fires — that is the whole point of having hashes here.
+        let new_fit = match ferx_core::run_sir(&fit, None, None, &opts) {
+            Ok(f) => f,
             Err(e) => throw_r_error(&format!("ferx_sir: {}", e)),
         };
 
-    // Skeleton FitResult — only the fields ferx_core::run_sir actually
-    // reads are populated; everything else gets a neutral default.
-    let fit = FitResult {
-        // ferx-core main added a checkpoint-restore flag; the SIR path never reads it.
-        restored_from_checkpoint: false,
-        // ferx-core main grew `residual_correlations` and `vi` after the rev
-        // this branch originally pinned. The *pairing* is a property of the
-        // compiled model and is taken from there, but a plain `block_sigma`
-        // estimates rho, so the fitted value is overlaid on top - reading the
-        // model's own value would reconstruct this fit at its declared initial
-        // correlation. This scaffold carries no VI run. The two weighted-kappa
-        // fields it also grew (#1031) are set below, beside `kappa_init_as_sd`.
-        residual_correlations: residual_correlations_resolved,
-        // Parallel FIX flags and standard errors for those correlations
-        // (ferx-core #847): the declaration is structural and comes from the
-        // template; the SEs would come from a covariance step this scaffold
-        // never runs.
-        residual_correlation_fixed: template.residual_correlation_fixed.clone(),
-        se_residual_correlations: None,
-        // The packed Omega / kappa layout (ferx-core #1177). `fit()` records it
-        // as `Some(params.omega.diagonal)`; the covariance matrix handed in
-        // here was packed with the model's own layout, so report that rather
-        // than `None` - `natural_scale_covariance()` needs it to put a
-        // `block_omega` covariance back on the natural scale.
-        omega_is_diagonal: Some(template.omega.diagonal),
-        kappa_is_diagonal: template.omega_iov.as_ref().map(|m| m.diagonal),
-        vi: None,
-        method: if interaction {
-            EstimationMethod::FoceI
-        } else {
-            EstimationMethod::Foce
-        },
-        method_chain: vec![if interaction {
-            EstimationMethod::FoceI
-        } else {
-            EstimationMethod::Foce
-        }],
-        bayes: None,
-        cond_dist: None,
-        converged: true,
-        ofv,
-        // ferx-core main split the objective into a data and a prior half
-        // (#254). `run_sir` reads neither field directly: it takes its reference
-        // objective as `data_ofv(fit) = fit.ofv - fit.ofv_prior`, deliberately
-        // not `ofv_data`, which a deserialised legacy fit carries as 0. So the
-        // prior half has to arrive here as itself: `ofv` is the penalized total
-        // for a priored fit, and `run_sir_core` adds the penalty back on top of
-        // whatever reference it is given (ferx-r #366). Passing `ofv_prior = 0`
-        // beside a penalized `ofv` would count the penalty twice - a constant
-        // offset that cancels in today's normalized importance weights, and a
-        // wrong number the moment `ofv_hat` is used as anything but a difference.
-        //
-        // `prior_summary` stays empty: it is a report, not an input, and
-        // `run_sir` does not read it.
-        ofv_data: ofv - ofv_prior,
-        ofv_prior,
-        prior_summary: Vec::new(),
-        aic: 0.0,
-        bic: 0.0,
-        theta: theta.clone(),
-        theta_names: template.theta_names.clone(),
-        eta_names: template.omega.eta_names.clone(),
-        omega: omega_mat,
-        sigma: sigma.clone(),
-        sigma_names: template.sigma.names.clone(),
-        error_model: model.error_model,
-        covariance_matrix: Some(cov_mat),
-        se_theta: None,
-        se_omega: None,
-        se_sigma: None,
-        theta_fixed: template.theta_fixed.clone(),
-        omega_fixed: template.omega_fixed.clone(),
-        sigma_fixed: template.sigma_fixed.clone(),
-        subjects,
-        n_obs: 0,
-        n_subjects: n_subj,
-        n_parameters: n_packed,
-        n_iterations: 0,
-        interaction,
-        warnings: Vec::new(),
-        sir_ci_theta: None,
-        sir_ci_omega: None,
-        sir_ci_sigma: None,
-        sir_ess: None,
-        sir_resamples_packed: None,
-        importance_sampling: None,
-        impmap_trace: None,
-        omega_iov: None,
-        kappa_names: model.kappa_names.clone(),
-        kappa_fixed: template.kappa_fixed.clone(),
-        se_kappa: None,
-        shrinkage_kappa: Vec::new(),
-        shrinkage_kappa_by_occ: Vec::new(),
-        ebe_kappas: Vec::new(),
-        saem_mu_ref_m_step_evals_saved: None,
-        saem_n_subjects_hmc: None,
-        gradient_method_inner: String::new(),
-        gradient_method_outer: String::new(),
-        uses_ode_solver: model.is_ode_based(),
-        n_threads_used: 1,
-        nlopt_missing_algorithms: Vec::new(),
-        covariance_n_evals_estimated: None,
-        trace_path: None,
-        // In-process optimisation for a `run_covariance` called straight after a fit;
-        // `#[serde(skip)]` upstream, so a reconstructed result legitimately carries `None`
-        // and `run_covariance` re-packs from `omega`. No `.fitrx` / R format change.
-        packed_estimate: None,
-        // No outer optimizer ran in this scaffold, so there is no init-escape
-        // verdict, and no packed tally to classify: `model_selection::bic()`
-        // reports NaN on the default `BicInputs` rather than a wrong penalty
-        // (ferx-core #1177).
-        left_init: None,
-        bic_inputs: BicInputs::default(),
-        ebe_convergence_warnings: 0,
-        max_unconverged_subjects: 0,
-        total_ebe_fallbacks: 0,
-        covariance_status: CovarianceStatus::Computed,
-        shrinkage_eta: Vec::new(),
-        shrinkage_eps: f64::NAN,
-        wall_time_secs: 0.0,
-        model_name: model.name.clone(),
-        ferx_version: String::new(),
-        eta_param_info: Vec::new(),
-        theta_transform: Vec::new(),
-        sigma_types: Vec::new(),
-        cov_eigenvalues: None,
-        cov_condition_number: None,
-        eta_log_transformed: Vec::new(),
-        omega_param_corr: None,
-        omega_iov_param_corr: None,
-        model_path: Some(model_path.to_string()),
-        data_path: Some(data_path.to_string()),
-        model_hash: if model_hash.is_empty() {
-            None
-        } else {
-            Some(model_hash.to_string())
-        },
-        data_hash: if data_hash.is_empty() {
-            None
-        } else {
-            Some(data_hash.to_string())
-        },
-        dw_statistic: f64::NAN,
-        iwres_lag1_r: f64::NAN,
-        uses_sde: false,
-        omega_init_as_sd: Vec::new(),
-        sigma_init_as_sd: Vec::new(),
-        kappa_init_as_sd: Vec::new(),
-        // ferx-core #1031 added the sample-size weight (`kappa K ~ g2 weight = N`)
-        // to `FitResult` for reporting only; these skeleton results are never
-        // printed, so both stay empty.
-        kappa_weights: Vec::new(),
-        kappa_weight_typical: Vec::new(),
-        warnings_structured: Vec::new(),
-        model_text: None,
-        theta_init: Vec::new(),
-        omega_init: nalgebra::DMatrix::zeros(0, 0),
-        sigma_init: Vec::new(),
-        obs_time_range: None,
-        final_gradient: None,
-        final_gradient_source: None,
-        optimizer: "auto".to_string(),
-        n_starts: 1,
-        multi_start_seed: None,
-        saem_seed: None,
-        sir_seed: None,
-        imp_seed: None,
-        npde_seed: None,
-        bloq_method: "drop".to_string(),
-        outer_maxiter: 0,
-        outer_gtol: 0.0,
-        inits_from_nca: None,
-        covariate_names: Vec::new(),
-        input_columns: Vec::new(),
-        covariate_table: None,
-        // ferx-core #1111 added the [covariate_model] relation echo; the SIR
-        // path never reads it.
-        covariate_relations: Vec::new(),
-        exclusions: None,
-        method_wall_times_secs: Vec::new(),
-        covariance_wall_time_secs: 0.0,
-        environment: ferx_core::environment::EnvironmentInfo::default(),
-        #[cfg(feature = "nn")]
-        neural_networks: Vec::new(),
-    };
-
-    let mut opts = FitOptions::default();
-    opts.sir_samples = sir_samples.max(0) as usize;
-    opts.sir_resamples = sir_resamples.max(0) as usize;
-    opts.sir_seed = if sir_seed < 0 {
-        None
-    } else {
-        Some(sir_seed as u64)
-    };
-    opts.sir_keep_samples = sir_keep_samples;
-    opts.interaction = interaction;
-    opts.verbose = verbose;
-
-    // ferx_core::run_sir verifies hashes (when set), re-parses model + data,
-    // reconstructs the inner ModelParameters, and runs SIR. We pass None for
-    // model/population so that path goes through and the integrity check
-    // fires — that is the whole point of having hashes here.
-    let new_fit = match ferx_core::run_sir(&fit, None, None, &opts) {
-        Ok(f) => f,
-        Err(e) => throw_r_error(&format!("ferx_sir: {}", e)),
-    };
-
-    let flatten_ci = |ci: &Option<Vec<(f64, f64)>>| -> Vec<f64> {
-        ci.as_ref()
-            .map(|v| v.iter().flat_map(|(lo, hi)| [*lo, *hi]).collect())
-            .unwrap_or_default()
-    };
-    let (sir_resamples_flat, sir_resamples_n, sir_resamples_dim): (Vec<f64>, i32, i32) =
-        match &new_fit.sir_resamples_packed {
-            Some(pool) if !pool.is_empty() => {
-                let n = pool.len();
-                let d = pool[0].len();
-                let mut v = Vec::with_capacity(n * d);
-                for row in pool {
-                    v.extend_from_slice(row);
-                }
-                (v, n as i32, d as i32)
-            }
-            _ => (Vec::new(), 0i32, 0i32),
+        let flatten_ci = |ci: &Option<Vec<(f64, f64)>>| -> Vec<f64> {
+            ci.as_ref()
+                .map(|v| v.iter().flat_map(|(lo, hi)| [*lo, *hi]).collect())
+                .unwrap_or_default()
         };
+        let (sir_resamples_flat, sir_resamples_n, sir_resamples_dim): (Vec<f64>, i32, i32) =
+            match &new_fit.sir_resamples_packed {
+                Some(pool) if !pool.is_empty() => {
+                    let n = pool.len();
+                    let d = pool[0].len();
+                    let mut v = Vec::with_capacity(n * d);
+                    for row in pool {
+                        v.extend_from_slice(row);
+                    }
+                    (v, n as i32, d as i32)
+                }
+                _ => (Vec::new(), 0i32, 0i32),
+            };
 
-    // SIR-step warnings (ferx-core#1021: a rank-deficient or bound-shrunk
-    // proposal) live on the returned fit's `warnings`. The skeleton FitResult
-    // we passed in carries none, so everything here was produced by this SIR
-    // run — no filtering needed. Mirrors `ferx_rust_covariance`.
-    list!(
-        sir_ess = new_fit.sir_ess.unwrap_or(f64::NAN),
-        sir_ci_theta = flatten_ci(&new_fit.sir_ci_theta),
-        sir_ci_omega = flatten_ci(&new_fit.sir_ci_omega),
-        sir_ci_sigma = flatten_ci(&new_fit.sir_ci_sigma),
-        sir_resamples = sir_resamples_flat,
-        sir_resamples_n = sir_resamples_n,
-        sir_resamples_dim = sir_resamples_dim,
-        warnings = new_fit.warnings.clone()
-    )
-    .into()
+        // SIR-step warnings (ferx-core#1021: a rank-deficient or bound-shrunk
+        // proposal) live on the returned fit's `warnings`. The skeleton FitResult
+        // we passed in carries none, so everything here was produced by this SIR
+        // run — no filtering needed. Mirrors `ferx_rust_covariance`.
+        Ok(list!(
+            sir_ess = new_fit.sir_ess.unwrap_or(f64::NAN),
+            sir_ci_theta = flatten_ci(&new_fit.sir_ci_theta),
+            sir_ci_omega = flatten_ci(&new_fit.sir_ci_omega),
+            sir_ci_sigma = flatten_ci(&new_fit.sir_ci_sigma),
+            sir_resamples = sir_resamples_flat,
+            sir_resamples_n = sir_resamples_n,
+            sir_resamples_dim = sir_resamples_dim,
+            warnings = new_fit.warnings.clone()
+        )
+        .into())
+    })
 }
 
 /// Run the FD-Hessian covariance step against an existing fit.
@@ -3922,368 +3954,370 @@ fn ferx_rust_covariance(
     mu_referencing: bool,
     verbose: bool,
 ) -> Robj {
-    // All error paths in this binding throw an R condition (via
-    // `throw_r_error`), mirroring `ferx_rust_sir`, so the engine message
-    // (e.g. "hash mismatch") propagates into the R condition rather than
-    // being lost to stderr.
-    let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
-        Ok(p) => p,
-        Err(e) => throw_r_error(&format!(
-            "ferx_covariance: error parsing model at {}: {}",
-            model_path, e
-        )),
-    };
-    let model = &parsed.model;
-    let template = &model.default_params;
+    entry(move || {
+        // All error paths in this binding throw an R condition (via
+        // `throw_r_error`), mirroring `ferx_rust_sir`, so the engine message
+        // (e.g. "hash mismatch") propagates into the R condition rather than
+        // being lost to stderr.
+        let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
+            Ok(p) => p,
+            Err(e) => throw_r_error(&format!(
+                "ferx_covariance: error parsing model at {}: {}",
+                model_path, e
+            )),
+        };
+        let model = &parsed.model;
+        let template = &model.default_params;
 
-    let n_theta = theta.len();
-    let n_sigma = sigma.len();
-    let n_eta = omega_dim as usize;
-    let n_subj = n_subjects.max(0) as usize;
+        let n_theta = theta.len();
+        let n_sigma = sigma.len();
+        let n_eta = omega_dim as usize;
+        let n_subj = n_subjects.max(0) as usize;
 
-    if n_theta != template.theta.len() {
-        throw_r_error(&format!(
-            "ferx_covariance: theta length {} does not match model ({} expected)",
-            n_theta,
-            template.theta.len()
-        ));
-    }
-    if n_sigma != template.sigma.values.len() {
-        throw_r_error(&format!(
-            "ferx_covariance: sigma length {} does not match model ({} expected)",
-            n_sigma,
-            template.sigma.values.len()
-        ));
-    }
-    if n_eta != template.omega.dim() {
-        throw_r_error(&format!(
-            "ferx_covariance: omega dim {} does not match model ({} expected)",
-            n_eta,
-            template.omega.dim()
-        ));
-    }
-    if omega_flat.len() != n_eta * n_eta {
-        throw_r_error(&format!(
-            "ferx_covariance: omega_flat length {} does not match dim^2 = {}",
-            omega_flat.len(),
-            n_eta * n_eta
-        ));
-    }
-    if eta_hats_flat.len() != n_subj * n_eta {
-        throw_r_error(&format!(
-            "ferx_covariance: eta_hats_flat length {} does not match n_subjects * n_eta = {}",
-            eta_hats_flat.len(),
-            n_subj * n_eta
-        ));
-    }
-
-    let covariance_method_enum = match covariance_method.to_lowercase().as_str() {
-        "r" | "hessian" => CovarianceMethod::Hessian,
-        "s" | "cross_product" => CovarianceMethod::CrossProduct,
-        "rsr" | "sandwich" => CovarianceMethod::Sandwich,
-        other => throw_r_error(&format!(
-            "ferx_covariance: unknown covariance_method `{}` — expected r/s/rsr",
-            other
-        )),
-    };
-
-    let omega_mat = DMatrix::from_row_slice(n_eta, n_eta, &omega_flat);
-
-    // Reconstruct the fitted IOV omega matrix when the fit carries one.
-    // `fitted_params_from_result` reads this off the FitResult (falling back to
-    // the model-file init when None); passing the fitted matrix keeps IOV
-    // kappa standard errors on the estimated scale.
-    let n_iov = omega_iov_dim.max(0) as usize;
-    let omega_iov: Option<DMatrix<f64>> = if n_iov > 0 && omega_iov_flat.len() == n_iov * n_iov {
-        Some(DMatrix::from_row_slice(n_iov, n_iov, &omega_iov_flat))
-    } else {
-        None
-    };
-
-    // Build SubjectResult vec with only `eta` populated — the warm-start the
-    // covariance step reconverges from. IDs are synthesised (unused here).
-    let mut subjects: Vec<SubjectResult> = Vec::with_capacity(n_subj);
-    for i in 0..n_subj {
-        let mut eta = nalgebra::DVector::<f64>::zeros(n_eta);
-        for k in 0..n_eta {
-            eta[k] = eta_hats_flat[i * n_eta + k];
+        if n_theta != template.theta.len() {
+            throw_r_error(&format!(
+                "ferx_covariance: theta length {} does not match model ({} expected)",
+                n_theta,
+                template.theta.len()
+            ));
         }
-        subjects.push(SubjectResult {
-            id: format!("{}", i + 1),
-            eta,
-            ipred: Vec::new(),
-            pred: Vec::new(),
-            iwres: Vec::new(),
-            cwres: Vec::new(),
-            ofv_contribution: 0.0,
-            cens: Vec::new(),
-            n_obs: 0,
-            extra_columns: Vec::new(),
-            per_obs_tad: Vec::new(),
-            compartment_states: Vec::new(),
-            npde: Vec::new(),
-            npd: Vec::new(),
-            // ferx-core #900 added categorical sdtab rows; the covariance path never reads them.
-            discrete_rows: Vec::new(),
-            // ferx-core #977 added per-subject mixture posteriors; the covariance
-            // path never reads them, and these scaffolds carry no class assignment.
-            pmix: None,
-            mixest: None,
-        });
-    }
+        if n_sigma != template.sigma.values.len() {
+            throw_r_error(&format!(
+                "ferx_covariance: sigma length {} does not match model ({} expected)",
+                n_sigma,
+                template.sigma.values.len()
+            ));
+        }
+        if n_eta != template.omega.dim() {
+            throw_r_error(&format!(
+                "ferx_covariance: omega dim {} does not match model ({} expected)",
+                n_eta,
+                template.omega.dim()
+            ));
+        }
+        if omega_flat.len() != n_eta * n_eta {
+            throw_r_error(&format!(
+                "ferx_covariance: omega_flat length {} does not match dim^2 = {}",
+                omega_flat.len(),
+                n_eta * n_eta
+            ));
+        }
+        if eta_hats_flat.len() != n_subj * n_eta {
+            throw_r_error(&format!(
+                "ferx_covariance: eta_hats_flat length {} does not match n_subjects * n_eta = {}",
+                eta_hats_flat.len(),
+                n_subj * n_eta
+            ));
+        }
 
-    // The fitted `block_sigma` correlations, overlaid on the model's declared
-    // pairing - the covariance step differentiates around the fitted point, so
-    // the declared rho would centre it on the wrong parameters.
-    let residual_correlations_resolved =
-        match overlay_residual_rho(model.residual_correlations.clone(), &residual_rho) {
-            Ok(rc) => rc,
+        let covariance_method_enum = match covariance_method.to_lowercase().as_str() {
+            "r" | "hessian" => CovarianceMethod::Hessian,
+            "s" | "cross_product" => CovarianceMethod::CrossProduct,
+            "rsr" | "sandwich" => CovarianceMethod::Sandwich,
+            other => throw_r_error(&format!(
+                "ferx_covariance: unknown covariance_method `{}` — expected r/s/rsr",
+                other
+            )),
+        };
+
+        let omega_mat = DMatrix::from_row_slice(n_eta, n_eta, &omega_flat);
+
+        // Reconstruct the fitted IOV omega matrix when the fit carries one.
+        // `fitted_params_from_result` reads this off the FitResult (falling back to
+        // the model-file init when None); passing the fitted matrix keeps IOV
+        // kappa standard errors on the estimated scale.
+        let n_iov = omega_iov_dim.max(0) as usize;
+        let omega_iov: Option<DMatrix<f64>> = if n_iov > 0 && omega_iov_flat.len() == n_iov * n_iov {
+            Some(DMatrix::from_row_slice(n_iov, n_iov, &omega_iov_flat))
+        } else {
+            None
+        };
+
+        // Build SubjectResult vec with only `eta` populated — the warm-start the
+        // covariance step reconverges from. IDs are synthesised (unused here).
+        let mut subjects: Vec<SubjectResult> = Vec::with_capacity(n_subj);
+        for i in 0..n_subj {
+            let mut eta = nalgebra::DVector::<f64>::zeros(n_eta);
+            for k in 0..n_eta {
+                eta[k] = eta_hats_flat[i * n_eta + k];
+            }
+            subjects.push(SubjectResult {
+                id: format!("{}", i + 1),
+                eta,
+                ipred: Vec::new(),
+                pred: Vec::new(),
+                iwres: Vec::new(),
+                cwres: Vec::new(),
+                ofv_contribution: 0.0,
+                cens: Vec::new(),
+                n_obs: 0,
+                extra_columns: Vec::new(),
+                per_obs_tad: Vec::new(),
+                compartment_states: Vec::new(),
+                npde: Vec::new(),
+                npd: Vec::new(),
+                // ferx-core #900 added categorical sdtab rows; the covariance path never reads them.
+                discrete_rows: Vec::new(),
+                // ferx-core #977 added per-subject mixture posteriors; the covariance
+                // path never reads them, and these scaffolds carry no class assignment.
+                pmix: None,
+                mixest: None,
+            });
+        }
+
+        // The fitted `block_sigma` correlations, overlaid on the model's declared
+        // pairing - the covariance step differentiates around the fitted point, so
+        // the declared rho would centre it on the wrong parameters.
+        let residual_correlations_resolved =
+            match overlay_residual_rho(model.residual_correlations.clone(), &residual_rho) {
+                Ok(rc) => rc,
+                Err(e) => throw_r_error(&format!("ferx_covariance: {}", e)),
+            };
+
+        // Skeleton FitResult — only the fields ferx_core::run_covariance actually
+        // reads (via fitted_params_from_result + the inner loop) are populated;
+        // everything else gets a neutral default. `bayes = None` so the returned
+        // covariance_status resolves to Computed/Failed rather than NotRequested.
+        let fit = FitResult {
+            // ferx-core main added a checkpoint-restore flag; the covariance path never reads it.
+            restored_from_checkpoint: false,
+            // ferx-core main grew `residual_correlations` and `vi` after the rev
+            // this branch originally pinned. The *pairing* is a property of the
+            // compiled model and is taken from there, but a plain `block_sigma`
+            // estimates rho, so the fitted value is overlaid on top - reading the
+            // model's own value would reconstruct this fit at its declared initial
+            // correlation. This scaffold carries no VI run. The two weighted-kappa
+            // fields it also grew (#1031) are set below, beside `kappa_init_as_sd`.
+            residual_correlations: residual_correlations_resolved,
+            // Parallel FIX flags and standard errors for those correlations
+            // (ferx-core #847): the declaration is structural and comes from the
+            // template; the SEs would come from a covariance step this scaffold
+            // never runs.
+            residual_correlation_fixed: template.residual_correlation_fixed.clone(),
+            se_residual_correlations: None,
+            // The packed Omega / kappa layout (ferx-core #1177). `fit()` records it
+            // as `Some(params.omega.diagonal)`; the covariance matrix handed in
+            // here was packed with the model's own layout, so report that rather
+            // than `None` - `natural_scale_covariance()` needs it to put a
+            // `block_omega` covariance back on the natural scale.
+            omega_is_diagonal: Some(template.omega.diagonal),
+            kappa_is_diagonal: template.omega_iov.as_ref().map(|m| m.diagonal),
+            vi: None,
+            method: if interaction {
+                EstimationMethod::FoceI
+            } else {
+                EstimationMethod::Foce
+            },
+            method_chain: vec![if interaction {
+                EstimationMethod::FoceI
+            } else {
+                EstimationMethod::Foce
+            }],
+            bayes: None,
+            cond_dist: None,
+            converged: true,
+            ofv,
+            // ferx-core main split the objective into a data and a prior half
+            // (#254). `run_covariance` reads neither - it re-derives the prior
+            // curvature from `model.priors` when the model declares one, which is
+            // why the standalone `ferx_covariance()` path gets the priored SEs
+            // right without being told about the prior. The split is still recorded
+            // as handed in rather than flattened to "unpriored", so this skeleton
+            // does not depend on the engine continuing not to look (ferx-r #366).
+            ofv_data: ofv - ofv_prior,
+            ofv_prior,
+            prior_summary: Vec::new(),
+            aic: 0.0,
+            bic: 0.0,
+            theta: theta.clone(),
+            theta_names: template.theta_names.clone(),
+            eta_names: template.omega.eta_names.clone(),
+            omega: omega_mat,
+            sigma: sigma.clone(),
+            sigma_names: template.sigma.names.clone(),
+            error_model: model.error_model,
+            covariance_matrix: None,
+            se_theta: None,
+            se_omega: None,
+            se_sigma: None,
+            theta_fixed: template.theta_fixed.clone(),
+            omega_fixed: template.omega_fixed.clone(),
+            sigma_fixed: template.sigma_fixed.clone(),
+            subjects,
+            n_obs: 0,
+            n_subjects: n_subj,
+            n_parameters: 0,
+            n_iterations: 0,
+            interaction,
+            warnings: Vec::new(),
+            sir_ci_theta: None,
+            sir_ci_omega: None,
+            sir_ci_sigma: None,
+            sir_ess: None,
+            sir_resamples_packed: None,
+            importance_sampling: None,
+            impmap_trace: None,
+            omega_iov,
+            kappa_names: model.kappa_names.clone(),
+            kappa_fixed: template.kappa_fixed.clone(),
+            se_kappa: None,
+            shrinkage_kappa: Vec::new(),
+            shrinkage_kappa_by_occ: Vec::new(),
+            ebe_kappas: Vec::new(),
+            saem_mu_ref_m_step_evals_saved: None,
+            saem_n_subjects_hmc: None,
+            gradient_method_inner: String::new(),
+            gradient_method_outer: String::new(),
+            uses_ode_solver: model.is_ode_based(),
+            n_threads_used: 1,
+            nlopt_missing_algorithms: Vec::new(),
+            covariance_n_evals_estimated: None,
+            trace_path: None,
+            // In-process optimisation for a `run_covariance` called straight after a fit;
+            // `#[serde(skip)]` upstream, so a reconstructed result legitimately carries `None`
+            // and `run_covariance` re-packs from `omega`. No `.fitrx` / R format change.
+            packed_estimate: None,
+            // No outer optimizer ran in this scaffold, so there is no init-escape
+            // verdict, and no packed tally to classify: `model_selection::bic()`
+            // reports NaN on the default `BicInputs` rather than a wrong penalty
+            // (ferx-core #1177).
+            left_init: None,
+            bic_inputs: BicInputs::default(),
+            ebe_convergence_warnings: 0,
+            max_unconverged_subjects: 0,
+            total_ebe_fallbacks: 0,
+            covariance_status: CovarianceStatus::NotRequested,
+            shrinkage_eta: Vec::new(),
+            shrinkage_eps: f64::NAN,
+            wall_time_secs: 0.0,
+            model_name: model.name.clone(),
+            ferx_version: String::new(),
+            eta_param_info: Vec::new(),
+            theta_transform: Vec::new(),
+            sigma_types: Vec::new(),
+            cov_eigenvalues: None,
+            cov_condition_number: None,
+            eta_log_transformed: Vec::new(),
+            omega_param_corr: None,
+            omega_iov_param_corr: None,
+            model_path: Some(model_path.to_string()),
+            data_path: Some(data_path.to_string()),
+            model_hash: if model_hash.is_empty() {
+                None
+            } else {
+                Some(model_hash.to_string())
+            },
+            data_hash: if data_hash.is_empty() {
+                None
+            } else {
+                Some(data_hash.to_string())
+            },
+            dw_statistic: f64::NAN,
+            iwres_lag1_r: f64::NAN,
+            uses_sde: false,
+            omega_init_as_sd: Vec::new(),
+            sigma_init_as_sd: Vec::new(),
+            kappa_init_as_sd: Vec::new(),
+            // ferx-core #1031 added the sample-size weight (`kappa K ~ g2 weight = N`)
+            // to `FitResult` for reporting only; these skeleton results are never
+            // printed, so both stay empty.
+            kappa_weights: Vec::new(),
+            kappa_weight_typical: Vec::new(),
+            warnings_structured: Vec::new(),
+            model_text: None,
+            theta_init: Vec::new(),
+            omega_init: nalgebra::DMatrix::zeros(0, 0),
+            sigma_init: Vec::new(),
+            obs_time_range: None,
+            final_gradient: None,
+            final_gradient_source: None,
+            optimizer: "auto".to_string(),
+            n_starts: 1,
+            multi_start_seed: None,
+            saem_seed: None,
+            sir_seed: None,
+            imp_seed: None,
+            npde_seed: None,
+            bloq_method: "drop".to_string(),
+            outer_maxiter: 0,
+            outer_gtol: 0.0,
+            inits_from_nca: None,
+            covariate_names: Vec::new(),
+            input_columns: Vec::new(),
+            covariate_table: None,
+            // ferx-core #1111 added the [covariate_model] relation echo; the
+            // covariance path never reads it.
+            covariate_relations: Vec::new(),
+            exclusions: None,
+            method_wall_times_secs: Vec::new(),
+            covariance_wall_time_secs: 0.0,
+            environment: ferx_core::environment::EnvironmentInfo::default(),
+            #[cfg(feature = "nn")]
+            neural_networks: Vec::new(),
+        };
+
+        let mut opts = FitOptions::default();
+        // run_covariance_step is ignored by run_covariance (calling it *is* the
+        // request); set it anyway for clarity.
+        opts.run_covariance_step = true;
+        opts.covariance_method = covariance_method_enum;
+        opts.mu_referencing = mu_referencing;
+        opts.interaction = interaction;
+        opts.verbose = verbose;
+
+        // Pass None for model/population so run_covariance re-parses model + data
+        // from the recorded paths and fires the SHA-256 integrity check — the
+        // whole point of forwarding the hashes here.
+        let new_fit = match ferx_core::run_covariance(&fit, None, None, &opts) {
+            Ok(f) => f,
             Err(e) => throw_r_error(&format!("ferx_covariance: {}", e)),
         };
 
-    // Skeleton FitResult — only the fields ferx_core::run_covariance actually
-    // reads (via fitted_params_from_result + the inner loop) are populated;
-    // everything else gets a neutral default. `bayes = None` so the returned
-    // covariance_status resolves to Computed/Failed rather than NotRequested.
-    let fit = FitResult {
-        // ferx-core main added a checkpoint-restore flag; the covariance path never reads it.
-        restored_from_checkpoint: false,
-        // ferx-core main grew `residual_correlations` and `vi` after the rev
-        // this branch originally pinned. The *pairing* is a property of the
-        // compiled model and is taken from there, but a plain `block_sigma`
-        // estimates rho, so the fitted value is overlaid on top - reading the
-        // model's own value would reconstruct this fit at its declared initial
-        // correlation. This scaffold carries no VI run. The two weighted-kappa
-        // fields it also grew (#1031) are set below, beside `kappa_init_as_sd`.
-        residual_correlations: residual_correlations_resolved,
-        // Parallel FIX flags and standard errors for those correlations
-        // (ferx-core #847): the declaration is structural and comes from the
-        // template; the SEs would come from a covariance step this scaffold
-        // never runs.
-        residual_correlation_fixed: template.residual_correlation_fixed.clone(),
-        se_residual_correlations: None,
-        // The packed Omega / kappa layout (ferx-core #1177). `fit()` records it
-        // as `Some(params.omega.diagonal)`; the covariance matrix handed in
-        // here was packed with the model's own layout, so report that rather
-        // than `None` - `natural_scale_covariance()` needs it to put a
-        // `block_omega` covariance back on the natural scale.
-        omega_is_diagonal: Some(template.omega.diagonal),
-        kappa_is_diagonal: template.omega_iov.as_ref().map(|m| m.diagonal),
-        vi: None,
-        method: if interaction {
-            EstimationMethod::FoceI
-        } else {
-            EstimationMethod::Foce
-        },
-        method_chain: vec![if interaction {
-            EstimationMethod::FoceI
-        } else {
-            EstimationMethod::Foce
-        }],
-        bayes: None,
-        cond_dist: None,
-        converged: true,
-        ofv,
-        // ferx-core main split the objective into a data and a prior half
-        // (#254). `run_covariance` reads neither - it re-derives the prior
-        // curvature from `model.priors` when the model declares one, which is
-        // why the standalone `ferx_covariance()` path gets the priored SEs
-        // right without being told about the prior. The split is still recorded
-        // as handed in rather than flattened to "unpriored", so this skeleton
-        // does not depend on the engine continuing not to look (ferx-r #366).
-        ofv_data: ofv - ofv_prior,
-        ofv_prior,
-        prior_summary: Vec::new(),
-        aic: 0.0,
-        bic: 0.0,
-        theta: theta.clone(),
-        theta_names: template.theta_names.clone(),
-        eta_names: template.omega.eta_names.clone(),
-        omega: omega_mat,
-        sigma: sigma.clone(),
-        sigma_names: template.sigma.names.clone(),
-        error_model: model.error_model,
-        covariance_matrix: None,
-        se_theta: None,
-        se_omega: None,
-        se_sigma: None,
-        theta_fixed: template.theta_fixed.clone(),
-        omega_fixed: template.omega_fixed.clone(),
-        sigma_fixed: template.sigma_fixed.clone(),
-        subjects,
-        n_obs: 0,
-        n_subjects: n_subj,
-        n_parameters: 0,
-        n_iterations: 0,
-        interaction,
-        warnings: Vec::new(),
-        sir_ci_theta: None,
-        sir_ci_omega: None,
-        sir_ci_sigma: None,
-        sir_ess: None,
-        sir_resamples_packed: None,
-        importance_sampling: None,
-        impmap_trace: None,
-        omega_iov,
-        kappa_names: model.kappa_names.clone(),
-        kappa_fixed: template.kappa_fixed.clone(),
-        se_kappa: None,
-        shrinkage_kappa: Vec::new(),
-        shrinkage_kappa_by_occ: Vec::new(),
-        ebe_kappas: Vec::new(),
-        saem_mu_ref_m_step_evals_saved: None,
-        saem_n_subjects_hmc: None,
-        gradient_method_inner: String::new(),
-        gradient_method_outer: String::new(),
-        uses_ode_solver: model.is_ode_based(),
-        n_threads_used: 1,
-        nlopt_missing_algorithms: Vec::new(),
-        covariance_n_evals_estimated: None,
-        trace_path: None,
-        // In-process optimisation for a `run_covariance` called straight after a fit;
-        // `#[serde(skip)]` upstream, so a reconstructed result legitimately carries `None`
-        // and `run_covariance` re-packs from `omega`. No `.fitrx` / R format change.
-        packed_estimate: None,
-        // No outer optimizer ran in this scaffold, so there is no init-escape
-        // verdict, and no packed tally to classify: `model_selection::bic()`
-        // reports NaN on the default `BicInputs` rather than a wrong penalty
-        // (ferx-core #1177).
-        left_init: None,
-        bic_inputs: BicInputs::default(),
-        ebe_convergence_warnings: 0,
-        max_unconverged_subjects: 0,
-        total_ebe_fallbacks: 0,
-        covariance_status: CovarianceStatus::NotRequested,
-        shrinkage_eta: Vec::new(),
-        shrinkage_eps: f64::NAN,
-        wall_time_secs: 0.0,
-        model_name: model.name.clone(),
-        ferx_version: String::new(),
-        eta_param_info: Vec::new(),
-        theta_transform: Vec::new(),
-        sigma_types: Vec::new(),
-        cov_eigenvalues: None,
-        cov_condition_number: None,
-        eta_log_transformed: Vec::new(),
-        omega_param_corr: None,
-        omega_iov_param_corr: None,
-        model_path: Some(model_path.to_string()),
-        data_path: Some(data_path.to_string()),
-        model_hash: if model_hash.is_empty() {
-            None
-        } else {
-            Some(model_hash.to_string())
-        },
-        data_hash: if data_hash.is_empty() {
-            None
-        } else {
-            Some(data_hash.to_string())
-        },
-        dw_statistic: f64::NAN,
-        iwres_lag1_r: f64::NAN,
-        uses_sde: false,
-        omega_init_as_sd: Vec::new(),
-        sigma_init_as_sd: Vec::new(),
-        kappa_init_as_sd: Vec::new(),
-        // ferx-core #1031 added the sample-size weight (`kappa K ~ g2 weight = N`)
-        // to `FitResult` for reporting only; these skeleton results are never
-        // printed, so both stay empty.
-        kappa_weights: Vec::new(),
-        kappa_weight_typical: Vec::new(),
-        warnings_structured: Vec::new(),
-        model_text: None,
-        theta_init: Vec::new(),
-        omega_init: nalgebra::DMatrix::zeros(0, 0),
-        sigma_init: Vec::new(),
-        obs_time_range: None,
-        final_gradient: None,
-        final_gradient_source: None,
-        optimizer: "auto".to_string(),
-        n_starts: 1,
-        multi_start_seed: None,
-        saem_seed: None,
-        sir_seed: None,
-        imp_seed: None,
-        npde_seed: None,
-        bloq_method: "drop".to_string(),
-        outer_maxiter: 0,
-        outer_gtol: 0.0,
-        inits_from_nca: None,
-        covariate_names: Vec::new(),
-        input_columns: Vec::new(),
-        covariate_table: None,
-        // ferx-core #1111 added the [covariate_model] relation echo; the
-        // covariance path never reads it.
-        covariate_relations: Vec::new(),
-        exclusions: None,
-        method_wall_times_secs: Vec::new(),
-        covariance_wall_time_secs: 0.0,
-        environment: ferx_core::environment::EnvironmentInfo::default(),
-        #[cfg(feature = "nn")]
-        neural_networks: Vec::new(),
-    };
-
-    let mut opts = FitOptions::default();
-    // run_covariance_step is ignored by run_covariance (calling it *is* the
-    // request); set it anyway for clarity.
-    opts.run_covariance_step = true;
-    opts.covariance_method = covariance_method_enum;
-    opts.mu_referencing = mu_referencing;
-    opts.interaction = interaction;
-    opts.verbose = verbose;
-
-    // Pass None for model/population so run_covariance re-parses model + data
-    // from the recorded paths and fires the SHA-256 integrity check — the
-    // whole point of forwarding the hashes here.
-    let new_fit = match ferx_core::run_covariance(&fit, None, None, &opts) {
-        Ok(f) => f,
-        Err(e) => throw_r_error(&format!("ferx_covariance: {}", e)),
-    };
-
-    let (cov_matrix_flat, cov_matrix_dim): (Vec<f64>, i32) = match &new_fit.covariance_matrix {
-        Some(m) => {
-            let d = m.nrows();
-            let mut v = Vec::with_capacity(d * d);
-            for i in 0..d {
-                for j in 0..d {
-                    v.push(m[(i, j)]);
+        let (cov_matrix_flat, cov_matrix_dim): (Vec<f64>, i32) = match &new_fit.covariance_matrix {
+            Some(m) => {
+                let d = m.nrows();
+                let mut v = Vec::with_capacity(d * d);
+                for i in 0..d {
+                    for j in 0..d {
+                        v.push(m[(i, j)]);
+                    }
                 }
+                (v, d as i32)
             }
-            (v, d as i32)
-        }
-        None => (Vec::new(), 0i32),
-    };
+            None => (Vec::new(), 0i32),
+        };
 
-    let covariance_status_str = match new_fit.covariance_status {
-        CovarianceStatus::Computed => "computed",
-        CovarianceStatus::Failed => "failed",
-        CovarianceStatus::NotRequested => "not_requested",
-        CovarianceStatus::SirFallback => "sir_fallback",
-    };
+        let covariance_status_str = match new_fit.covariance_status {
+            CovarianceStatus::Computed => "computed",
+            CovarianceStatus::Failed => "failed",
+            CovarianceStatus::NotRequested => "not_requested",
+            CovarianceStatus::SirFallback => "sir_fallback",
+        };
 
-    list!(
-        cov_matrix = cov_matrix_flat,
-        cov_matrix_dim = cov_matrix_dim,
-        se_theta = new_fit.se_theta.clone().unwrap_or_default(),
-        se_omega = new_fit.se_omega.clone().unwrap_or_default(),
-        se_sigma = new_fit.se_sigma.clone().unwrap_or_default(),
-        se_kappa = new_fit.se_kappa.clone().unwrap_or_default(),
-        covariance_status = covariance_status_str,
-        cov_eigenvalues = new_fit.cov_eigenvalues.clone().unwrap_or_default(),
-        cov_condition_number = new_fit.cov_condition_number.unwrap_or(f64::NAN),
-        // Refreshed alongside the matrix it is read off, so a fit that gains a
-        // covariance step here also gains the correlation gate that step feeds
-        // (ferx-core #1177) instead of keeping the pre-step NA.
-        max_abs_correlation =
-            ferx_core::model_selection::max_abs_correlation(&new_fit).unwrap_or(f64::NAN),
-        // The `block_sigma` correlation SEs come out of the same step.
-        se_residual_correlation = new_fit
-            .se_residual_correlations
-            .clone()
-            .unwrap_or_default(),
-        warnings = new_fit.warnings.clone()
-    )
-    .into()
+        Ok(list!(
+            cov_matrix = cov_matrix_flat,
+            cov_matrix_dim = cov_matrix_dim,
+            se_theta = new_fit.se_theta.clone().unwrap_or_default(),
+            se_omega = new_fit.se_omega.clone().unwrap_or_default(),
+            se_sigma = new_fit.se_sigma.clone().unwrap_or_default(),
+            se_kappa = new_fit.se_kappa.clone().unwrap_or_default(),
+            covariance_status = covariance_status_str,
+            cov_eigenvalues = new_fit.cov_eigenvalues.clone().unwrap_or_default(),
+            cov_condition_number = new_fit.cov_condition_number.unwrap_or(f64::NAN),
+            // Refreshed alongside the matrix it is read off, so a fit that gains a
+            // covariance step here also gains the correlation gate that step feeds
+            // (ferx-core #1177) instead of keeping the pre-step NA.
+            max_abs_correlation =
+                ferx_core::model_selection::max_abs_correlation(&new_fit).unwrap_or(f64::NAN),
+            // The `block_sigma` correlation SEs come out of the same step.
+            se_residual_correlation = new_fit
+                .se_residual_correlations
+                .clone()
+                .unwrap_or_default(),
+            warnings = new_fit.warnings.clone()
+        )
+        .into())
+    })
 }
 
 /// Prepare a FREM (Full Random Effects Model) dataset and model file.
@@ -4328,73 +4362,75 @@ fn ferx_rust_prepare_frem(
     fit_omega_flat: Vec<f64>,
     fit_omega_dim: i32,
 ) -> List {
-    let cat_opt: Option<Vec<String>> = if categorical_covariates.is_empty() {
-        None
-    } else {
-        Some(categorical_covariates)
-    };
-    let out_model: Option<&Path> = if output_model_path.is_empty() {
-        None
-    } else {
-        Some(Path::new(output_model_path))
-    };
-    let out_data: Option<&Path> = if output_data_path.is_empty() {
-        None
-    } else {
-        Some(Path::new(output_data_path))
-    };
-
-    // Seed values from a prior fit of the base model (issue #239). Absent
-    // when the R caller passed `fit = NULL`, in which case both name vectors
-    // are empty and the generated model keeps the base model's declared inits.
-    let fit_init: Option<ferx_core::FremFitInit> =
-        if fit_theta_names.is_empty() && fit_eta_names.is_empty() {
+    entry(move || {
+        let cat_opt: Option<Vec<String>> = if categorical_covariates.is_empty() {
             None
         } else {
-            let dim = fit_omega_dim.max(0) as usize;
-            let omega = DMatrix::from_row_slice(dim, dim, &fit_omega_flat);
-            Some(ferx_core::FremFitInit {
-                theta: fit_theta_names.into_iter().zip(fit_theta_values).collect(),
-                eta_names: fit_eta_names,
-                omega,
-            })
+            Some(categorical_covariates)
+        };
+        let out_model: Option<&Path> = if output_model_path.is_empty() {
+            None
+        } else {
+            Some(Path::new(output_model_path))
+        };
+        let out_data: Option<&Path> = if output_data_path.is_empty() {
+            None
+        } else {
+            Some(Path::new(output_data_path))
         };
 
-    let result = match ferx_core::prepare_frem(
-        Path::new(model_path),
-        Path::new(data_path),
-        &covariates,
-        cat_opt.as_deref(),
-        out_model,
-        out_data,
-        None, // missing value indicator (default: -99)
-        fit_init.as_ref(),
-    ) {
-        Ok(r) => r,
-        Err(e) => throw_r_error(format!("Error in prepare_frem: {e}")),
-    };
+        // Seed values from a prior fit of the base model (issue #239). Absent
+        // when the R caller passed `fit = NULL`, in which case both name vectors
+        // are empty and the generated model keeps the base model's declared inits.
+        let fit_init: Option<ferx_core::FremFitInit> =
+            if fit_theta_names.is_empty() && fit_eta_names.is_empty() {
+                None
+            } else {
+                let dim = fit_omega_dim.max(0) as usize;
+                let omega = DMatrix::from_row_slice(dim, dim, &fit_omega_flat);
+                Some(ferx_core::FremFitInit {
+                    theta: fit_theta_names.into_iter().zip(fit_theta_values).collect(),
+                    eta_names: fit_eta_names,
+                    omega,
+                })
+            };
 
-    let mean_names: Vec<String> = result.covariate_means.iter().map(|(n, _)| n.clone()).collect();
-    let mean_vals: Vec<f64> = result.covariate_means.iter().map(|(_, v)| *v).collect();
-    let var_names: Vec<String> = result.covariate_variances.iter().map(|(n, _)| n.clone()).collect();
-    let var_vals: Vec<f64> = result.covariate_variances.iter().map(|(_, v)| *v).collect();
-    let ft_names: Vec<String> = result.fremtype_map.iter().map(|(n, _)| n.clone()).collect();
-    let ft_vals: Vec<i32> = result.fremtype_map.iter().map(|(_, v)| *v as i32).collect();
+        let result = match ferx_core::prepare_frem(
+            Path::new(model_path),
+            Path::new(data_path),
+            &covariates,
+            cat_opt.as_deref(),
+            out_model,
+            out_data,
+            None, // missing value indicator (default: -99)
+            fit_init.as_ref(),
+        ) {
+            Ok(r) => r,
+            Err(e) => throw_r_error(format!("Error in prepare_frem: {e}")),
+        };
 
-    let warnings: Vec<String> = result.warnings.clone();
+        let mean_names: Vec<String> = result.covariate_means.iter().map(|(n, _)| n.clone()).collect();
+        let mean_vals: Vec<f64> = result.covariate_means.iter().map(|(_, v)| *v).collect();
+        let var_names: Vec<String> = result.covariate_variances.iter().map(|(n, _)| n.clone()).collect();
+        let var_vals: Vec<f64> = result.covariate_variances.iter().map(|(_, v)| *v).collect();
+        let ft_names: Vec<String> = result.fremtype_map.iter().map(|(n, _)| n.clone()).collect();
+        let ft_vals: Vec<i32> = result.fremtype_map.iter().map(|(_, v)| *v as i32).collect();
 
-    list!(
-        model_path = result.model_path.to_string_lossy().to_string(),
-        data_path = result.data_path.to_string_lossy().to_string(),
-        covariate_mean_names = mean_names,
-        covariate_mean_values = mean_vals,
-        covariate_var_names = var_names,
-        covariate_var_values = var_vals,
-        fremtype_names = ft_names,
-        fremtype_values = ft_vals,
-        n_total_etas = result.n_total_etas as i32,
-        warnings = warnings
-    )
+        let warnings: Vec<String> = result.warnings.clone();
+
+        Ok(list!(
+            model_path = result.model_path.to_string_lossy().to_string(),
+            data_path = result.data_path.to_string_lossy().to_string(),
+            covariate_mean_names = mean_names,
+            covariate_mean_values = mean_vals,
+            covariate_var_names = var_names,
+            covariate_var_values = var_vals,
+            fremtype_names = ft_names,
+            fremtype_values = ft_vals,
+            n_total_etas = result.n_total_etas as i32,
+            warnings = warnings
+        ))
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -4911,125 +4947,127 @@ fn ferx_rust_bootstrap(
     verbose: bool,
     progress: Robj,
 ) -> Robj {
-    let options = match bootstrap_options_from_r(
-        samples,
-        seed,
-        sample_size_keys,
-        sample_size_values,
-        stratify_on,
-        update_inits,
-        run_base_model,
-        keep_covariance,
-        threads,
-        skip_minimization_terminated,
-        skip_estimate_near_boundary,
-        skip_covariance_step_terminated,
-        skip_with_covstep_warnings,
-        dofv,
-        directory,
-        confidence_level,
-        resume,
-        retry_failed,
-    ) {
-        Ok(o) => o,
-        Err(e) => throw_r_error(format!("ferx_bootstrap: {e}")),
-    };
+    entry(move || {
+        let options = match bootstrap_options_from_r(
+            samples,
+            seed,
+            sample_size_keys,
+            sample_size_values,
+            stratify_on,
+            update_inits,
+            run_base_model,
+            keep_covariance,
+            threads,
+            skip_minimization_terminated,
+            skip_estimate_near_boundary,
+            skip_covariance_step_terminated,
+            skip_with_covstep_warnings,
+            dofv,
+            directory,
+            confidence_level,
+            resume,
+            retry_failed,
+        ) {
+            Ok(o) => o,
+            Err(e) => throw_r_error(format!("ferx_bootstrap: {e}")),
+        };
 
-    let data = (!data_path.is_empty()).then_some(data_path);
-    let mut prepared = match ferx_core::prepare_run(model_path, data) {
-        Ok(p) => p,
-        Err(e) => throw_r_error(format!("ferx_bootstrap: {e}")),
-    };
+        let data = (!data_path.is_empty()).then_some(data_path);
+        let mut prepared = match ferx_core::prepare_run(model_path, data) {
+            Ok(p) => p,
+            Err(e) => throw_r_error(format!("ferx_bootstrap: {e}")),
+        };
 
-    // Install a cancellation token so Ctrl-C aborts the run (#315). There is no
-    // `BootstrapOptions::cancel` yet (ferx-core #1161), but there does not need
-    // to be: the flag lives on the model's own `fit_options`, and ferx-tools
-    // clones those into every replicate's options - and into the dofv pass - so
-    // one assignment here reaches the base fit and all of the replicates.
-    let cancel = CancelFlag::new();
-    prepared.parsed.fit_options.cancel = Some(cancel.clone());
-    if verbose {
-        if let Some(w) = &prepared.data_path_warning {
-            eprintln!("Warning: {w}");
+        // Install a cancellation token so Ctrl-C aborts the run (#315). There is no
+        // `BootstrapOptions::cancel` yet (ferx-core #1161), but there does not need
+        // to be: the flag lives on the model's own `fit_options`, and ferx-tools
+        // clones those into every replicate's options - and into the dofv pass - so
+        // one assignment here reaches the base fit and all of the replicates.
+        let cancel = CancelFlag::new();
+        prepared.parsed.fit_options.cancel = Some(cancel.clone());
+        if verbose {
+            if let Some(w) = &prepared.data_path_warning {
+                eprintln!("Warning: {w}");
+            }
+            eprintln!(
+                "Bootstrap: {} samples of {} subjects, seed {}",
+                options.samples,
+                prepared.population.subjects.len(),
+                options.seed
+            );
         }
-        eprintln!(
-            "Bootstrap: {} samples of {} subjects, seed {}",
-            options.samples,
-            prepared.population.subjects.len(),
-            options.seed
-        );
-    }
 
-    // A handler makes this the watched path; `NULL` keeps the plain one. Both
-    // run the fits on a worker thread - the watched one to draw from the R
-    // thread, the plain one to poll it for interrupts.
-    let outcome = match progress.as_function() {
-        Some(callback) => run_bootstrap_reporting(&prepared, &options, &callback, &cancel),
-        None => run_bootstrap_cancellable(&prepared, &options, &cancel),
-    };
+        // A handler makes this the watched path; `NULL` keeps the plain one. Both
+        // run the fits on a worker thread - the watched one to draw from the R
+        // thread, the plain one to poll it for interrupts.
+        let outcome = match progress.as_function() {
+            Some(callback) => run_bootstrap_reporting(&prepared, &options, &callback, &cancel),
+            None => run_bootstrap_cancellable(&prepared, &options, &cancel),
+        };
 
-    // Cancellation is reported as a condition, as `ferx_fit()` reports it, and
-    // it is checked before the outcome because a cancel does not necessarily
-    // produce an `Err`: it does when it lands on the base fit, but a cancel
-    // during the replicates comes back as `Ok` with the aborted replicates
-    // recorded as *failed* fits. Returning that would be worse than useless - a
-    // legitimate-looking table computed over however many replicates happened
-    // to finish, with nothing on it to say the run was cut short.
-    //
-    // The completed replicates are not lost when the run had a `directory`:
-    // ferx-tools journals each one as it lands, so they are on disk and
-    // `ferx_bootstrap_summarize()` will summarise them.
-    if cancel.is_cancelled() {
-        match &options.directory {
-            Some(dir) => throw_r_error(format!(
-                "ferx_bootstrap: cancelled by user. The replicates that finished are in '{}' - \
-                 ferx_bootstrap_summarize() summarises them.",
-                dir.display()
-            )),
-            None => throw_r_error(
-                "ferx_bootstrap: cancelled by user. No `directory` was set, so the replicates \
-                 that finished were held in memory only and are gone; set `directory` to keep \
-                 the partial results of a run you may want to stop.",
-            ),
+        // Cancellation is reported as a condition, as `ferx_fit()` reports it, and
+        // it is checked before the outcome because a cancel does not necessarily
+        // produce an `Err`: it does when it lands on the base fit, but a cancel
+        // during the replicates comes back as `Ok` with the aborted replicates
+        // recorded as *failed* fits. Returning that would be worse than useless - a
+        // legitimate-looking table computed over however many replicates happened
+        // to finish, with nothing on it to say the run was cut short.
+        //
+        // The completed replicates are not lost when the run had a `directory`:
+        // ferx-tools journals each one as it lands, so they are on disk and
+        // `ferx_bootstrap_summarize()` will summarise them.
+        if cancel.is_cancelled() {
+            match &options.directory {
+                Some(dir) => throw_r_error(format!(
+                    "ferx_bootstrap: cancelled by user. The replicates that finished are in '{}' - \
+                     ferx_bootstrap_summarize() summarises them.",
+                    dir.display()
+                )),
+                None => throw_r_error(
+                    "ferx_bootstrap: cancelled by user. No `directory` was set, so the replicates \
+                     that finished were held in memory only and are gone; set `directory` to keep \
+                     the partial results of a run you may want to stop.",
+                ),
+            }
         }
-    }
 
-    let result = match outcome {
-        Ok(r) => r,
-        Err(e) => throw_r_error(format!("ferx_bootstrap: {e}")),
-    };
+        let result = match outcome {
+            Ok(r) => r,
+            Err(e) => throw_r_error(format!("ferx_bootstrap: {e}")),
+        };
 
-    let out = List::from_pairs(vec![
-        ("parameters", bootstrap_parameters_df(&result.summary)),
-        ("raw", bootstrap_raw_df(&result, &options)),
-        (
-            "diagnostics",
-            bootstrap_diagnostics_df(
-                result.replicates.len(),
-                result.n_estimated_parameters,
-                &result.summary,
+        let out = List::from_pairs(vec![
+            ("parameters", bootstrap_parameters_df(&result.summary)),
+            ("raw", bootstrap_raw_df(&result, &options)),
+            (
+                "diagnostics",
+                bootstrap_diagnostics_df(
+                    result.replicates.len(),
+                    result.n_estimated_parameters,
+                    &result.summary,
+                ),
             ),
-        ),
-        ("delta_ofv", bootstrap_delta_ofv_df(&result, &options)),
-        (
-            "parameter_names",
-            result.parameter_names.clone().into(),
-        ),
-        ("subject_ids", result.subject_ids.clone().into()),
-        ("n_completed", (result.summary.n_completed as i32).into()),
-        ("n_included", (result.summary.n_included as i32).into()),
-        (
-            "chi_square_df",
-            (result.n_estimated_parameters as i32).into(),
-        ),
-        (
-            "confidence_level",
-            result.summary.confidence_level.into(),
-        ),
-        ("model_name", prepared.parsed.model.name.clone().into()),
-        ("data_path", prepared.data_path.clone().into()),
-    ]);
-    out.into()
+            ("delta_ofv", bootstrap_delta_ofv_df(&result, &options)),
+            (
+                "parameter_names",
+                result.parameter_names.clone().into(),
+            ),
+            ("subject_ids", result.subject_ids.clone().into()),
+            ("n_completed", (result.summary.n_completed as i32).into()),
+            ("n_included", (result.summary.n_included as i32).into()),
+            (
+                "chi_square_df",
+                (result.n_estimated_parameters as i32).into(),
+            ),
+            (
+                "confidence_level",
+                result.summary.confidence_level.into(),
+            ),
+            ("model_name", prepared.parsed.model.name.clone().into()),
+            ("data_path", prepared.data_path.clone().into()),
+        ]);
+        Ok(out.into())
+    })
 }
 
 /// Re-summarise a finished run from its `raw_results.csv` under different
@@ -5045,51 +5083,53 @@ fn ferx_rust_bootstrap_summarize(
     skip_with_covstep_warnings: bool,
     confidence_level: f64,
 ) -> Robj {
-    // `samples` only has to pass `BootstrapOptions::validate`; nothing is drawn
-    // on this path, the estimates are read back off disk.
-    let options = BootstrapOptions {
-        samples: 1,
-        skip_minimization_terminated,
-        skip_estimate_near_boundary,
-        skip_covariance_step_terminated,
-        skip_with_covstep_warnings,
-        confidence_level,
-        ..BootstrapOptions::default()
-    };
-    let dir = std::path::Path::new(directory);
-    let summary = match resummarize(dir, &options) {
-        Ok(s) => s,
-        Err(e) => throw_r_error(format!("ferx_bootstrap_summarize: {e}")),
-    };
-    // Read back the two run-level facts the summary does not carry, from the
-    // diagnostics file `resummarize` just rewrote.
-    let diag = dir.join("bootstrap_diagnostics.csv");
-    let requested =
-        bootstrap_output::read_diagnostic(&diag, "samples_requested").unwrap_or(0.0) as usize;
-    let chi_df = bootstrap_output::read_diagnostic(&diag, "chi_square_df").unwrap_or(0.0) as usize;
+    entry(move || {
+        // `samples` only has to pass `BootstrapOptions::validate`; nothing is drawn
+        // on this path, the estimates are read back off disk.
+        let options = BootstrapOptions {
+            samples: 1,
+            skip_minimization_terminated,
+            skip_estimate_near_boundary,
+            skip_covariance_step_terminated,
+            skip_with_covstep_warnings,
+            confidence_level,
+            ..BootstrapOptions::default()
+        };
+        let dir = std::path::Path::new(directory);
+        let summary = match resummarize(dir, &options) {
+            Ok(s) => s,
+            Err(e) => throw_r_error(format!("ferx_bootstrap_summarize: {e}")),
+        };
+        // Read back the two run-level facts the summary does not carry, from the
+        // diagnostics file `resummarize` just rewrote.
+        let diag = dir.join("bootstrap_diagnostics.csv");
+        let requested =
+            bootstrap_output::read_diagnostic(&diag, "samples_requested").unwrap_or(0.0) as usize;
+        let chi_df = bootstrap_output::read_diagnostic(&diag, "chi_square_df").unwrap_or(0.0) as usize;
 
-    let out = List::from_pairs(vec![
-        ("parameters", bootstrap_parameters_df(&summary)),
-        (
-            "diagnostics",
-            bootstrap_diagnostics_df(requested, chi_df, &summary),
-        ),
-        (
-            "parameter_names",
-            summary
-                .parameters
-                .iter()
-                .map(|p| p.name.clone())
-                .collect::<Vec<String>>()
-                .into(),
-        ),
-        ("n_completed", (summary.n_completed as i32).into()),
-        ("n_included", (summary.n_included as i32).into()),
-        ("chi_square_df", (chi_df as i32).into()),
-        ("confidence_level", summary.confidence_level.into()),
-        ("directory", directory.to_string().into()),
-    ]);
-    out.into()
+        let out = List::from_pairs(vec![
+            ("parameters", bootstrap_parameters_df(&summary)),
+            (
+                "diagnostics",
+                bootstrap_diagnostics_df(requested, chi_df, &summary),
+            ),
+            (
+                "parameter_names",
+                summary
+                    .parameters
+                    .iter()
+                    .map(|p| p.name.clone())
+                    .collect::<Vec<String>>()
+                    .into(),
+            ),
+            ("n_completed", (summary.n_completed as i32).into()),
+            ("n_included", (summary.n_included as i32).into()),
+            ("chi_square_df", (chi_df as i32).into()),
+            ("confidence_level", summary.confidence_level.into()),
+            ("directory", directory.to_string().into()),
+        ]);
+        Ok(out.into())
+    })
 }
 
 /// GAM covariate pre-screening (internal Rust computation layer).
@@ -5130,96 +5170,98 @@ fn ferx_rust_gam_screen(
     include_linear: bool,
     shrinkage_warn: f64,
 ) -> List {
-    let n = n_subjects as usize;
-    let n_eta = eta_names.len();
-    let n_cov = cov_names.len();
+    entry(move || {
+        let n = n_subjects as usize;
+        let n_eta = eta_names.len();
+        let n_cov = cov_names.len();
 
-    // Column slices from the flat (column-major) arrays.
-    let eta_cols: Vec<&[f64]> = (0..n_eta)
-        .map(|j| &eta_flat[j * n..(j + 1) * n])
-        .collect();
-    let eta_name_refs: Vec<&str> = eta_names.iter().map(|s| s.as_str()).collect();
+        // Column slices from the flat (column-major) arrays.
+        let eta_cols: Vec<&[f64]> = (0..n_eta)
+            .map(|j| &eta_flat[j * n..(j + 1) * n])
+            .collect();
+        let eta_name_refs: Vec<&str> = eta_names.iter().map(|s| s.as_str()).collect();
 
-    let cov_cols: Vec<&[f64]> = (0..n_cov)
-        .map(|j| &cov_flat[j * n..(j + 1) * n])
-        .collect();
-    let cov_name_refs: Vec<&str> = cov_names.iter().map(|s| s.as_str()).collect();
+        let cov_cols: Vec<&[f64]> = (0..n_cov)
+            .map(|j| &cov_flat[j * n..(j + 1) * n])
+            .collect();
+        let cov_name_refs: Vec<&str> = cov_names.iter().map(|s| s.as_str()).collect();
 
-    let cov_kind_parsed: Vec<ferx_core::types::CovariateKind> = cov_kinds
-        .iter()
-        .map(|s| match s.as_str() {
-            "categorical" => ferx_core::CovariateKind::Categorical,
-            _ => ferx_core::CovariateKind::Continuous,
-        })
-        .collect();
+        let cov_kind_parsed: Vec<ferx_core::types::CovariateKind> = cov_kinds
+            .iter()
+            .map(|s| match s.as_str() {
+                "categorical" => ferx_core::CovariateKind::Categorical,
+                _ => ferx_core::CovariateKind::Continuous,
+            })
+            .collect();
 
-    let spline_df_usize: Vec<usize> = spline_df
-        .iter()
-        .filter(|&&d| d > 0)
-        .map(|&d| d as usize)
-        .collect();
+        let spline_df_usize: Vec<usize> = spline_df
+            .iter()
+            .filter(|&&d| d > 0)
+            .map(|&d| d as usize)
+            .collect();
 
-    let opts = ferx_tools::gam::GamOptions {
-        spline_df: spline_df_usize,
-        include_linear,
-        shrinkage_warn_threshold: shrinkage_warn,
-        // `etas` / `covariates` keep their default `None` ("screen all"), which
-        // is what this entry point passed explicitly before; spreading the rest
-        // keeps a newly added ferx-tools field additive (ferx-core #529).
-        ..Default::default()
-    };
+        let opts = ferx_tools::gam::GamOptions {
+            spline_df: spline_df_usize,
+            include_linear,
+            shrinkage_warn_threshold: shrinkage_warn,
+            // `etas` / `covariates` keep their default `None` ("screen all"), which
+            // is what this entry point passed explicitly before; spreading the rest
+            // keeps a newly added ferx-tools field additive (ferx-core #529).
+            ..Default::default()
+        };
 
-    let result = ferx_tools::gam::gam_screen_raw(
-        &eta_name_refs,
-        &eta_cols,
-        &shrinkage,
-        &cov_name_refs,
-        &cov_cols,
-        &cov_kind_parsed,
-        &opts,
-    );
+        let result = ferx_tools::gam::gam_screen_raw(
+            &eta_name_refs,
+            &eta_cols,
+            &shrinkage,
+            &cov_name_refs,
+            &cov_cols,
+            &cov_kind_parsed,
+            &opts,
+        );
 
-    // Flatten into parallel vectors for the R side.
-    // aic_null per row = score.aic + score.delta_aic (= per-covariate null AIC
-    // computed inside screen_eta_raw, not stored separately but recoverable
-    // since delta_aic = aic_null_local - aic_best).
-    let mut out_eta_name: Vec<String> = Vec::new();
-    let mut out_covariate: Vec<String> = Vec::new();
-    let mut out_delta_aic: Vec<f64> = Vec::new();
-    let mut out_best_form: Vec<String> = Vec::new();
-    let mut out_aic: Vec<f64> = Vec::new();
-    let mut out_aic_null: Vec<f64> = Vec::new();
-    let mut out_r_squared: Vec<f64> = Vec::new();
-    let mut out_shrinkage: Vec<f64> = Vec::new();
+        // Flatten into parallel vectors for the R side.
+        // aic_null per row = score.aic + score.delta_aic (= per-covariate null AIC
+        // computed inside screen_eta_raw, not stored separately but recoverable
+        // since delta_aic = aic_null_local - aic_best).
+        let mut out_eta_name: Vec<String> = Vec::new();
+        let mut out_covariate: Vec<String> = Vec::new();
+        let mut out_delta_aic: Vec<f64> = Vec::new();
+        let mut out_best_form: Vec<String> = Vec::new();
+        let mut out_aic: Vec<f64> = Vec::new();
+        let mut out_aic_null: Vec<f64> = Vec::new();
+        let mut out_r_squared: Vec<f64> = Vec::new();
+        let mut out_shrinkage: Vec<f64> = Vec::new();
 
-    for eta_res in &result.eta_results {
-        for score in &eta_res.covariate_scores {
-            out_eta_name.push(eta_res.eta_name.clone());
-            out_covariate.push(score.covariate.clone());
-            out_delta_aic.push(score.delta_aic);
-            out_best_form.push(match &score.best_form {
-                ferx_tools::gam::CovariateForm::Linear => "Linear".into(),
-                ferx_tools::gam::CovariateForm::Spline { df } => format!("Spline(df={df})"),
-                ferx_tools::gam::CovariateForm::Categorical => "Categorical".into(),
-            });
-            out_aic.push(score.aic);
-            out_aic_null.push(score.aic + score.delta_aic);
-            out_r_squared.push(score.r_squared);
-            out_shrinkage.push(eta_res.shrinkage);
+        for eta_res in &result.eta_results {
+            for score in &eta_res.covariate_scores {
+                out_eta_name.push(eta_res.eta_name.clone());
+                out_covariate.push(score.covariate.clone());
+                out_delta_aic.push(score.delta_aic);
+                out_best_form.push(match &score.best_form {
+                    ferx_tools::gam::CovariateForm::Linear => "Linear".into(),
+                    ferx_tools::gam::CovariateForm::Spline { df } => format!("Spline(df={df})"),
+                    ferx_tools::gam::CovariateForm::Categorical => "Categorical".into(),
+                });
+                out_aic.push(score.aic);
+                out_aic_null.push(score.aic + score.delta_aic);
+                out_r_squared.push(score.r_squared);
+                out_shrinkage.push(eta_res.shrinkage);
+            }
         }
-    }
 
-    list!(
-        eta_name  = out_eta_name,
-        covariate = out_covariate,
-        delta_aic = out_delta_aic,
-        best_form = out_best_form,
-        aic       = out_aic,
-        aic_null  = out_aic_null,
-        r_squared = out_r_squared,
-        shrinkage = out_shrinkage,
-        warnings  = result.warnings
-    )
+        Ok(list!(
+            eta_name  = out_eta_name,
+            covariate = out_covariate,
+            delta_aic = out_delta_aic,
+            best_form = out_best_form,
+            aic       = out_aic,
+            aic_null  = out_aic_null,
+            r_squared = out_r_squared,
+            shrinkage = out_shrinkage,
+            warnings  = result.warnings
+        ))
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -5383,81 +5425,83 @@ fn search_penalty_columns(
 /// @keywords internal
 #[extendr]
 fn ferx_rust_search_config_load(path: &str) -> List {
-    let cfg = match ferx_tools::search::SearchConfig::load(path) {
-        Ok(cfg) => cfg,
-        Err(e) => throw_r_error(e),
-    };
-
-    let (feature, keyword, optional) = search_feature_columns(&cfg.mfl);
-
-    // The effective gate: the file's keys overlaid on ferx-core's defaults, so
-    // R reports what the search would actually enforce. `strictness_set` says
-    // which of them the file stated, for a print method that wants to show the
-    // difference.
-    let gate = cfg.strictness.strictness();
-    let mut strictness_set: Vec<String> = Vec::new();
-    {
-        let s = &cfg.strictness;
-        let mut stated = |set: bool, name: &str| {
-            if set {
-                strictness_set.push(name.to_string());
-            }
+    entry(move || {
+        let cfg = match ferx_tools::search::SearchConfig::load(path) {
+            Ok(cfg) => cfg,
+            Err(e) => throw_r_error(e),
         };
-        stated(s.require_converged.is_some(), "require_converged");
-        stated(s.require_covariance.is_some(), "require_covariance");
-        stated(s.max_condition_number.is_some(), "max_condition_number");
-        stated(s.max_correlation.is_some(), "max_correlation");
-        stated(s.reject_on_boundary.is_some(), "reject_on_boundary");
-        stated(s.reject_init_stall.is_some(), "reject_init_stall");
-    }
 
-    // NaN is the "no value" sentinel for the optional numerics (the R side maps
-    // it to NA); 0 is the sentinel for `[run] threads`, whose absence means
-    // "let the runner choose".
-    let nan_if_none = |v: Option<f64>| v.unwrap_or(f64::NAN);
+        let (feature, keyword, optional) = search_feature_columns(&cfg.mfl);
 
-    // The effective penalty schedule, on the same "report what would run"
-    // footing as the strictness gate above: `[rank.penalties]` is read whatever
-    // the `[rank] type`, since a global search charges the search-level
-    // penalties under any criterion.
-    let (penalty_name, penalty_value, penalty_set) =
-        search_penalty_columns(&cfg.rank.penalties());
+        // The effective gate: the file's keys overlaid on ferx-core's defaults, so
+        // R reports what the search would actually enforce. `strictness_set` says
+        // which of them the file stated, for a print method that wants to show the
+        // difference.
+        let gate = cfg.strictness.strictness();
+        let mut strictness_set: Vec<String> = Vec::new();
+        {
+            let s = &cfg.strictness;
+            let mut stated = |set: bool, name: &str| {
+                if set {
+                    strictness_set.push(name.to_string());
+                }
+            };
+            stated(s.require_converged.is_some(), "require_converged");
+            stated(s.require_covariance.is_some(), "require_covariance");
+            stated(s.max_condition_number.is_some(), "max_condition_number");
+            stated(s.max_correlation.is_some(), "max_correlation");
+            stated(s.reject_on_boundary.is_some(), "reject_on_boundary");
+            stated(s.reject_init_stall.is_some(), "reject_init_stall");
+        }
 
-    list!(
-        base = cfg.base.to_string_lossy().into_owned(),
-        data = cfg
-            .data
-            .as_ref()
-            .map(|d| d.to_string_lossy().into_owned())
-            .unwrap_or_default(),
-        dir = cfg.dir.to_string_lossy().into_owned(),
-        mfl = cfg.mfl_source.clone(),
-        feature = feature,
-        keyword = keyword,
-        optional = optional,
-        rank_type = search_rank_label(cfg.rank.kind),
-        rank_cutoff = nan_if_none(cfg.rank.cutoff),
-        penalty_name = penalty_name,
-        penalty_value = penalty_value,
-        penalty_set = penalty_set,
-        require_converged = gate.require_converged,
-        require_covariance = gate.require_covariance,
-        max_condition_number = nan_if_none(gate.max_condition_number),
-        max_correlation = nan_if_none(gate.max_correlation),
-        reject_on_boundary = gate.reject_on_boundary,
-        reject_init_stall = gate.reject_init_stall,
-        strictness_set = strictness_set,
-        threads = cfg.run.threads.unwrap_or(0) as i32,
-        retries = cfg.run.retries as i32,
-        cache_dir = cfg
-            .run
-            .cache_dir
-            .as_ref()
-            .map(|d| cfg.dir.join(d).to_string_lossy().into_owned())
-            .unwrap_or_default(),
-        resume = cfg.run.resume,
-        tools = cfg.tools.keys().cloned().collect::<Vec<String>>(),
-    )
+        // NaN is the "no value" sentinel for the optional numerics (the R side maps
+        // it to NA); 0 is the sentinel for `[run] threads`, whose absence means
+        // "let the runner choose".
+        let nan_if_none = |v: Option<f64>| v.unwrap_or(f64::NAN);
+
+        // The effective penalty schedule, on the same "report what would run"
+        // footing as the strictness gate above: `[rank.penalties]` is read whatever
+        // the `[rank] type`, since a global search charges the search-level
+        // penalties under any criterion.
+        let (penalty_name, penalty_value, penalty_set) =
+            search_penalty_columns(&cfg.rank.penalties());
+
+        Ok(list!(
+            base = cfg.base.to_string_lossy().into_owned(),
+            data = cfg
+                .data
+                .as_ref()
+                .map(|d| d.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            dir = cfg.dir.to_string_lossy().into_owned(),
+            mfl = cfg.mfl_source.clone(),
+            feature = feature,
+            keyword = keyword,
+            optional = optional,
+            rank_type = search_rank_label(cfg.rank.kind),
+            rank_cutoff = nan_if_none(cfg.rank.cutoff),
+            penalty_name = penalty_name,
+            penalty_value = penalty_value,
+            penalty_set = penalty_set,
+            require_converged = gate.require_converged,
+            require_covariance = gate.require_covariance,
+            max_condition_number = nan_if_none(gate.max_condition_number),
+            max_correlation = nan_if_none(gate.max_correlation),
+            reject_on_boundary = gate.reject_on_boundary,
+            reject_init_stall = gate.reject_init_stall,
+            strictness_set = strictness_set,
+            threads = cfg.run.threads.unwrap_or(0) as i32,
+            retries = cfg.run.retries as i32,
+            cache_dir = cfg
+                .run
+                .cache_dir
+                .as_ref()
+                .map(|d| cfg.dir.join(d).to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            resume = cfg.run.resume,
+            tools = cfg.tools.keys().cloned().collect::<Vec<String>>(),
+        ))
+    })
 }
 
 /// Parse an MFL search space, optionally resolving it against a base model.
@@ -5478,95 +5522,97 @@ fn ferx_rust_search_config_load(path: &str) -> List {
 /// @keywords internal
 #[extendr]
 fn ferx_rust_search_space_parse(mfl: &str, model_path: &str, data_path: &str) -> List {
-    use ferx_tools::search::mfl::Mode as _;
+    entry(move || {
+        use ferx_tools::search::mfl::Mode as _;
 
-    let parsed = match ferx_tools::search::Mfl::parse(mfl) {
-        Ok(m) => m,
-        Err(e) => throw_r_error(e),
-    };
-    let (feature, keyword, optional) = search_feature_columns(&parsed);
+        let parsed = match ferx_tools::search::Mfl::parse(mfl) {
+            Ok(m) => m,
+            Err(e) => throw_r_error(e),
+        };
+        let (feature, keyword, optional) = search_feature_columns(&parsed);
 
-    if model_path.is_empty() {
-        return list!(
+        if model_path.is_empty() {
+            return Ok(list!(
+                mfl = mfl.to_string(),
+                feature = feature,
+                keyword = keyword,
+                optional = optional,
+                resolved = false,
+                resolved_feature = Vec::<String>::new(),
+                resolved_keyword = Vec::<String>::new(),
+                resolved_optional = Vec::<bool>::new(),
+                effect_parameter = Vec::<String>::new(),
+                effect_covariate = Vec::<String>::new(),
+                effect_form = Vec::<String>::new(),
+                effect_op = Vec::<String>::new(),
+                effect_optional = Vec::<bool>::new(),
+                notes = Vec::<String>::new(),
+            ));
+        }
+
+        let data_opt: Option<&str> = if data_path.is_empty() {
+            None
+        } else {
+            Some(data_path)
+        };
+        let prepared = match ferx_core::prepare_run(model_path, data_opt) {
+            Ok(p) => p,
+            Err(e) => throw_r_error(e),
+        };
+        let source = match std::fs::read_to_string(model_path) {
+            Ok(s) => s,
+            Err(e) => throw_r_error(format!("cannot read {model_path}: {e}")),
+        };
+        let text = match ferx_core::edit::ModelText::parse(&source) {
+            Ok(t) => t,
+            Err(e) => throw_r_error(e),
+        };
+        let ctx = match ferx_tools::search::ModelContext::from_model(
+            &prepared.parsed,
+            &text,
+            &prepared.population,
+        ) {
+            Ok(c) => c,
+            Err(e) => throw_r_error(e),
+        };
+        let resolved = match ferx_tools::search::resolve(&parsed, &ctx) {
+            Ok(r) => r,
+            Err(e) => throw_r_error(e),
+        };
+
+        let (r_feature, r_keyword, r_optional) = search_feature_columns(&resolved.mfl);
+
+        let n = resolved.covariate_effects.len();
+        let mut effect_parameter = Vec::with_capacity(n);
+        let mut effect_covariate = Vec::with_capacity(n);
+        let mut effect_form = Vec::with_capacity(n);
+        let mut effect_op = Vec::with_capacity(n);
+        let mut effect_optional = Vec::with_capacity(n);
+        for spec in &resolved.covariate_effects {
+            effect_parameter.push(spec.parameter.clone());
+            effect_covariate.push(spec.covariate.clone());
+            effect_form.push(spec.effect.label().to_string());
+            effect_op.push(spec.op.label().to_string());
+            effect_optional.push(spec.optional);
+        }
+
+        Ok(list!(
             mfl = mfl.to_string(),
             feature = feature,
             keyword = keyword,
             optional = optional,
-            resolved = false,
-            resolved_feature = Vec::<String>::new(),
-            resolved_keyword = Vec::<String>::new(),
-            resolved_optional = Vec::<bool>::new(),
-            effect_parameter = Vec::<String>::new(),
-            effect_covariate = Vec::<String>::new(),
-            effect_form = Vec::<String>::new(),
-            effect_op = Vec::<String>::new(),
-            effect_optional = Vec::<bool>::new(),
-            notes = Vec::<String>::new(),
-        );
-    }
-
-    let data_opt: Option<&str> = if data_path.is_empty() {
-        None
-    } else {
-        Some(data_path)
-    };
-    let prepared = match ferx_core::prepare_run(model_path, data_opt) {
-        Ok(p) => p,
-        Err(e) => throw_r_error(e),
-    };
-    let source = match std::fs::read_to_string(model_path) {
-        Ok(s) => s,
-        Err(e) => throw_r_error(format!("cannot read {model_path}: {e}")),
-    };
-    let text = match ferx_core::edit::ModelText::parse(&source) {
-        Ok(t) => t,
-        Err(e) => throw_r_error(e),
-    };
-    let ctx = match ferx_tools::search::ModelContext::from_model(
-        &prepared.parsed,
-        &text,
-        &prepared.population,
-    ) {
-        Ok(c) => c,
-        Err(e) => throw_r_error(e),
-    };
-    let resolved = match ferx_tools::search::resolve(&parsed, &ctx) {
-        Ok(r) => r,
-        Err(e) => throw_r_error(e),
-    };
-
-    let (r_feature, r_keyword, r_optional) = search_feature_columns(&resolved.mfl);
-
-    let n = resolved.covariate_effects.len();
-    let mut effect_parameter = Vec::with_capacity(n);
-    let mut effect_covariate = Vec::with_capacity(n);
-    let mut effect_form = Vec::with_capacity(n);
-    let mut effect_op = Vec::with_capacity(n);
-    let mut effect_optional = Vec::with_capacity(n);
-    for spec in &resolved.covariate_effects {
-        effect_parameter.push(spec.parameter.clone());
-        effect_covariate.push(spec.covariate.clone());
-        effect_form.push(spec.effect.label().to_string());
-        effect_op.push(spec.op.label().to_string());
-        effect_optional.push(spec.optional);
-    }
-
-    list!(
-        mfl = mfl.to_string(),
-        feature = feature,
-        keyword = keyword,
-        optional = optional,
-        resolved = true,
-        resolved_feature = r_feature,
-        resolved_keyword = r_keyword,
-        resolved_optional = r_optional,
-        effect_parameter = effect_parameter,
-        effect_covariate = effect_covariate,
-        effect_form = effect_form,
-        effect_op = effect_op,
-        effect_optional = effect_optional,
-        notes = resolved.notes.clone(),
-    )
+            resolved = true,
+            resolved_feature = r_feature,
+            resolved_keyword = r_keyword,
+            resolved_optional = r_optional,
+            effect_parameter = effect_parameter,
+            effect_covariate = effect_covariate,
+            effect_form = effect_form,
+            effect_op = effect_op,
+            effect_optional = effect_optional,
+            notes = resolved.notes.clone(),
+        ))
+    })
 }
 
 /// Coverage-check an MFL space without aborting on a gap.
@@ -5576,12 +5622,14 @@ fn ferx_rust_search_space_parse(mfl: &str, model_path: &str, data_path: &str) ->
 /// @keywords internal
 #[extendr]
 fn ferx_rust_search_coverage(mfl: &str) -> List {
-    let parsed = match ferx_tools::search::Mfl::parse(mfl) {
-        Ok(m) => m,
-        Err(e) => throw_r_error(e),
-    };
-    let (feature, covered, reason) = search_coverage_rows(&parsed);
-    list!(feature = feature, covered = covered, reason = reason)
+    entry(move || {
+        let parsed = match ferx_tools::search::Mfl::parse(mfl) {
+            Ok(m) => m,
+            Err(e) => throw_r_error(e),
+        };
+        let (feature, covered, reason) = search_coverage_rows(&parsed);
+        Ok(list!(feature = feature, covered = covered, reason = reason))
+    })
 }
 
 /// The columns of a search run's `candidates.csv`, in order, from the engine.
@@ -5590,10 +5638,12 @@ fn ferx_rust_search_coverage(mfl: &str) -> List {
 /// @keywords internal
 #[extendr]
 fn ferx_rust_search_table_columns() -> Vec<String> {
-    ferx_tools::search::TABLE_COLUMNS
-        .iter()
-        .map(|s| s.to_string())
-        .collect()
+    entry(move || {
+        Ok(ferx_tools::search::TABLE_COLUMNS
+            .iter()
+            .map(|s| s.to_string())
+            .collect())
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -5823,223 +5873,225 @@ fn ferx_rust_covsearch(
     directory: &str,
     progress: bool,
 ) -> Robj {
-    let mut section = String::from("\n[covsearch]\n");
-    if !algorithm.is_empty() {
-        section.push_str(&format!("algorithm = {}\n", toml_basic(algorithm)));
-    }
-    if p_forward.is_finite() {
-        section.push_str(&format!("p_forward = {p_forward}\n"));
-    }
-    if p_backward.is_finite() {
-        section.push_str(&format!("p_backward = {p_backward}\n"));
-    }
-    if max_steps > 0 {
-        section.push_str(&format!("max_steps = {max_steps}\n"));
-    }
-    if adaptive >= 0 {
-        section.push_str(&format!("adaptive_scope_reduction = {}\n", adaptive == 1));
-    }
-    let text = search_config_text(
-        model_path,
-        data_path,
-        mfl,
-        rank,
-        rank_cutoff,
-        threads,
-        retries,
-        resume,
-        &section,
-    );
-    let inline_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let config = match search_config_for_tool(
-        config_path,
-        &text,
-        &inline_dir,
-        threads,
-        retries,
-        resume,
-    ) {
-        Ok(c) => c,
-        Err(e) => throw_r_error(format!("ferx_covsearch: {e}")),
-    };
-    // Refuse a space covsearch cannot honour before the dataset is read - a
-    // structural feature here is a file meant for modelsearch.
-    if let Err(e) = ferx_tools::covsearch::CovsearchOptions::from_config(&config) {
-        throw_r_error(format!("ferx_covsearch: {e}"));
-    }
-    let mut base = match config.load_base() {
-        Ok(b) => b,
-        Err(e) => throw_r_error(format!("ferx_covsearch: {e}")),
-    };
-
-    // One flag, two paths into the engine: `CovsearchRun::cancel` stops the
-    // candidate loop, and the copy on `fit_options` unwinds the fits already
-    // in flight (the same wiring `ferx_bootstrap()` uses).
-    let cancel = CancelFlag::new();
-    base.prepared.parsed.fit_options.cancel = Some(cancel.clone());
-
-    let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
-    let report = |event: ferx_tools::covsearch::CovsearchEvent| {
-        use ferx_tools::covsearch::{CovsearchEvent as E, Phase};
-        if !progress {
-            return;
+    entry(move || {
+        let mut section = String::from("\n[covsearch]\n");
+        if !algorithm.is_empty() {
+            section.push_str(&format!("algorithm = {}\n", toml_basic(algorithm)));
         }
-        match event {
-            E::BaseStarted => eprintln!("Fitting the base model..."),
-            E::BaseFinished { ofv, n_parameters } => {
-                eprintln!("Base model: OFV {ofv:.3}, {n_parameters} free parameters")
-            }
-            E::StepStarted {
-                step,
-                phase,
-                candidates,
-            } => eprintln!(
-                "Step {step} ({}): fitting {candidates} candidate{}...",
-                phase.label(),
-                if candidates == 1 { "" } else { "s" }
-            ),
-            E::StepFinished {
-                step,
-                phase,
-                selected,
-            } => match selected {
-                Some((effect, ofv)) => eprintln!(
-                    "Step {step} ({}): {} {} (OFV {ofv:.3})",
-                    phase.label(),
-                    if phase == Phase::Backward {
-                        "removed"
-                    } else {
-                        "added"
-                    },
-                    effect.label()
-                ),
-                None => eprintln!("Step {step} ({}): nothing accepted", phase.label()),
-            },
+        if p_forward.is_finite() {
+            section.push_str(&format!("p_forward = {p_forward}\n"));
         }
-    };
-
-    let result = match run_search_cancellable(&cancel, || {
-        ferx_tools::covsearch::run_covsearch(
-            &config,
-            &base,
-            ferx_tools::covsearch::CovsearchRun {
-                dir: dir.clone(),
-                threads: config.run.threads,
-                cancel: Some(cancel.clone()),
-                progress: Some(&report),
-            },
-        )
-    }) {
-        Ok(r) => r,
-        Err(e) => throw_r_error(format!("ferx_covsearch: {e}")),
-    };
-
-    // The step table, column for column as `STEP_COLUMNS` orders it.
-    let n = result.steps.len();
-    let mut step = Vec::with_capacity(n);
-    let mut phase = Vec::with_capacity(n);
-    let mut candidate = Vec::with_capacity(n);
-    let mut parameter = Vec::with_capacity(n);
-    let mut covariate = Vec::with_capacity(n);
-    let mut form = Vec::with_capacity(n);
-    let mut parent_ofv = Vec::with_capacity(n);
-    let mut ofv = Vec::with_capacity(n);
-    let mut dofv = Vec::with_capacity(n);
-    let mut df = Vec::with_capacity(n);
-    let mut p_value = Vec::with_capacity(n);
-    let mut alpha = Vec::with_capacity(n);
-    let mut significant = Vec::with_capacity(n);
-    let mut selected = Vec::with_capacity(n);
-    let mut converged = Vec::with_capacity(n);
-    let mut passed = Vec::with_capacity(n);
-    let mut failures = Vec::with_capacity(n);
-    for r in &result.steps {
-        step.push(r.step as i32);
-        phase.push(r.phase.label().to_string());
-        candidate.push(r.candidate.clone());
-        parameter.push(r.effect.parameter.clone());
-        covariate.push(r.effect.covariate.clone());
-        form.push(r.effect.form_label().to_string());
-        parent_ofv.push(r.parent_ofv);
-        ofv.push(opt_f64(r.ofv));
-        dofv.push(opt_f64(r.lrt.map(|t| t.dofv)));
-        df.push(opt_f64(r.lrt.map(|t| t.df as f64)));
-        p_value.push(opt_f64(r.lrt.map(|t| t.p_value)));
-        alpha.push(opt_f64(r.lrt.map(|t| t.alpha)));
-        significant.push(opt_bool_chr(r.lrt.map(|t| t.significant)));
-        selected.push(r.selected);
-        converged.push(opt_bool_chr(r.converged));
-        passed.push(r.passed);
-        // The engine's own fallback: a candidate with no gate failure but a
-        // reason it could not be compared says so in the same column.
-        failures.push(if r.failures.is_empty() {
-            r.note.clone().unwrap_or_default()
-        } else {
-            r.failures.join("; ")
-        });
-    }
-
-    let included_parameter: Vec<String> =
-        result.included.iter().map(|i| i.effect.parameter.clone()).collect();
-    let included_covariate: Vec<String> =
-        result.included.iter().map(|i| i.effect.covariate.clone()).collect();
-    let included_form: Vec<String> = result
-        .included
-        .iter()
-        .map(|i| i.effect.form_label().to_string())
-        .collect();
-    let included_origin: Vec<String> =
-        result.included.iter().map(|i| i.origin.label()).collect();
-
-    let final_model = result.final_model.render();
-    let final_fit: Robj = match &result.final_fit {
-        Some(fit) => match search_final_fit(fit, &final_model, &base.prepared.data_path) {
-            Ok(l) => l.into(),
+        if p_backward.is_finite() {
+            section.push_str(&format!("p_backward = {p_backward}\n"));
+        }
+        if max_steps > 0 {
+            section.push_str(&format!("max_steps = {max_steps}\n"));
+        }
+        if adaptive >= 0 {
+            section.push_str(&format!("adaptive_scope_reduction = {}\n", adaptive == 1));
+        }
+        let text = search_config_text(
+            model_path,
+            data_path,
+            mfl,
+            rank,
+            rank_cutoff,
+            threads,
+            retries,
+            resume,
+            &section,
+        );
+        let inline_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let config = match search_config_for_tool(
+            config_path,
+            &text,
+            &inline_dir,
+            threads,
+            retries,
+            resume,
+        ) {
+            Ok(c) => c,
             Err(e) => throw_r_error(format!("ferx_covsearch: {e}")),
-        },
-        None => NULL.into(),
-    };
+        };
+        // Refuse a space covsearch cannot honour before the dataset is read - a
+        // structural feature here is a file meant for modelsearch.
+        if let Err(e) = ferx_tools::covsearch::CovsearchOptions::from_config(&config) {
+            throw_r_error(format!("ferx_covsearch: {e}"));
+        }
+        let mut base = match config.load_base() {
+            Ok(b) => b,
+            Err(e) => throw_r_error(format!("ferx_covsearch: {e}")),
+        };
 
-    list!(
-        step = step,
-        phase = phase,
-        candidate = candidate,
-        parameter = parameter,
-        covariate = covariate,
-        form = form,
-        parent_ofv = parent_ofv,
-        ofv = ofv,
-        dofv = dofv,
-        df = df,
-        p_value = p_value,
-        alpha = alpha,
-        significant = significant,
-        selected = selected,
-        converged = converged,
-        passed = passed,
-        failures = failures,
-        included_parameter = included_parameter,
-        included_covariate = included_covariate,
-        included_form = included_form,
-        included_origin = included_origin,
-        base_model = result.base_model.render(),
-        base_ofv = result.base_ofv,
-        final_model = final_model,
-        final_ofv = result.final_ofv,
-        final_step = result.final_step as i32,
-        final_fit = final_fit,
-        algorithm = ferx_tools::covsearch::CovsearchOptions::from_config(&config)
-            .map(|o| o.algorithm.label().to_string())
-            .unwrap_or_default(),
-        directory = directory.to_string(),
-        // The base model as the config resolved it, so the R object names the
-        // same file in both entry forms.
-        model = config.base.to_string_lossy().into_owned(),
-        data = base.prepared.data_path.clone(),
-        notes = result.notes.clone(),
-        cancelled = result.cancelled,
-    )
-    .into()
+        // One flag, two paths into the engine: `CovsearchRun::cancel` stops the
+        // candidate loop, and the copy on `fit_options` unwinds the fits already
+        // in flight (the same wiring `ferx_bootstrap()` uses).
+        let cancel = CancelFlag::new();
+        base.prepared.parsed.fit_options.cancel = Some(cancel.clone());
+
+        let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
+        let report = |event: ferx_tools::covsearch::CovsearchEvent| {
+            use ferx_tools::covsearch::{CovsearchEvent as E, Phase};
+            if !progress {
+                return;
+            }
+            match event {
+                E::BaseStarted => eprintln!("Fitting the base model..."),
+                E::BaseFinished { ofv, n_parameters } => {
+                    eprintln!("Base model: OFV {ofv:.3}, {n_parameters} free parameters")
+                }
+                E::StepStarted {
+                    step,
+                    phase,
+                    candidates,
+                } => eprintln!(
+                    "Step {step} ({}): fitting {candidates} candidate{}...",
+                    phase.label(),
+                    if candidates == 1 { "" } else { "s" }
+                ),
+                E::StepFinished {
+                    step,
+                    phase,
+                    selected,
+                } => match selected {
+                    Some((effect, ofv)) => eprintln!(
+                        "Step {step} ({}): {} {} (OFV {ofv:.3})",
+                        phase.label(),
+                        if phase == Phase::Backward {
+                            "removed"
+                        } else {
+                            "added"
+                        },
+                        effect.label()
+                    ),
+                    None => eprintln!("Step {step} ({}): nothing accepted", phase.label()),
+                },
+            }
+        };
+
+        let result = match run_search_cancellable(&cancel, || {
+            ferx_tools::covsearch::run_covsearch(
+                &config,
+                &base,
+                ferx_tools::covsearch::CovsearchRun {
+                    dir: dir.clone(),
+                    threads: config.run.threads,
+                    cancel: Some(cancel.clone()),
+                    progress: Some(&report),
+                },
+            )
+        }) {
+            Ok(r) => r,
+            Err(e) => throw_r_error(format!("ferx_covsearch: {e}")),
+        };
+
+        // The step table, column for column as `STEP_COLUMNS` orders it.
+        let n = result.steps.len();
+        let mut step = Vec::with_capacity(n);
+        let mut phase = Vec::with_capacity(n);
+        let mut candidate = Vec::with_capacity(n);
+        let mut parameter = Vec::with_capacity(n);
+        let mut covariate = Vec::with_capacity(n);
+        let mut form = Vec::with_capacity(n);
+        let mut parent_ofv = Vec::with_capacity(n);
+        let mut ofv = Vec::with_capacity(n);
+        let mut dofv = Vec::with_capacity(n);
+        let mut df = Vec::with_capacity(n);
+        let mut p_value = Vec::with_capacity(n);
+        let mut alpha = Vec::with_capacity(n);
+        let mut significant = Vec::with_capacity(n);
+        let mut selected = Vec::with_capacity(n);
+        let mut converged = Vec::with_capacity(n);
+        let mut passed = Vec::with_capacity(n);
+        let mut failures = Vec::with_capacity(n);
+        for r in &result.steps {
+            step.push(r.step as i32);
+            phase.push(r.phase.label().to_string());
+            candidate.push(r.candidate.clone());
+            parameter.push(r.effect.parameter.clone());
+            covariate.push(r.effect.covariate.clone());
+            form.push(r.effect.form_label().to_string());
+            parent_ofv.push(r.parent_ofv);
+            ofv.push(opt_f64(r.ofv));
+            dofv.push(opt_f64(r.lrt.map(|t| t.dofv)));
+            df.push(opt_f64(r.lrt.map(|t| t.df as f64)));
+            p_value.push(opt_f64(r.lrt.map(|t| t.p_value)));
+            alpha.push(opt_f64(r.lrt.map(|t| t.alpha)));
+            significant.push(opt_bool_chr(r.lrt.map(|t| t.significant)));
+            selected.push(r.selected);
+            converged.push(opt_bool_chr(r.converged));
+            passed.push(r.passed);
+            // The engine's own fallback: a candidate with no gate failure but a
+            // reason it could not be compared says so in the same column.
+            failures.push(if r.failures.is_empty() {
+                r.note.clone().unwrap_or_default()
+            } else {
+                r.failures.join("; ")
+            });
+        }
+
+        let included_parameter: Vec<String> =
+            result.included.iter().map(|i| i.effect.parameter.clone()).collect();
+        let included_covariate: Vec<String> =
+            result.included.iter().map(|i| i.effect.covariate.clone()).collect();
+        let included_form: Vec<String> = result
+            .included
+            .iter()
+            .map(|i| i.effect.form_label().to_string())
+            .collect();
+        let included_origin: Vec<String> =
+            result.included.iter().map(|i| i.origin.label()).collect();
+
+        let final_model = result.final_model.render();
+        let final_fit: Robj = match &result.final_fit {
+            Some(fit) => match search_final_fit(fit, &final_model, &base.prepared.data_path) {
+                Ok(l) => l.into(),
+                Err(e) => throw_r_error(format!("ferx_covsearch: {e}")),
+            },
+            None => NULL.into(),
+        };
+
+        Ok(list!(
+            step = step,
+            phase = phase,
+            candidate = candidate,
+            parameter = parameter,
+            covariate = covariate,
+            form = form,
+            parent_ofv = parent_ofv,
+            ofv = ofv,
+            dofv = dofv,
+            df = df,
+            p_value = p_value,
+            alpha = alpha,
+            significant = significant,
+            selected = selected,
+            converged = converged,
+            passed = passed,
+            failures = failures,
+            included_parameter = included_parameter,
+            included_covariate = included_covariate,
+            included_form = included_form,
+            included_origin = included_origin,
+            base_model = result.base_model.render(),
+            base_ofv = result.base_ofv,
+            final_model = final_model,
+            final_ofv = result.final_ofv,
+            final_step = result.final_step as i32,
+            final_fit = final_fit,
+            algorithm = ferx_tools::covsearch::CovsearchOptions::from_config(&config)
+                .map(|o| o.algorithm.label().to_string())
+                .unwrap_or_default(),
+            directory = directory.to_string(),
+            // The base model as the config resolved it, so the R object names the
+            // same file in both entry forms.
+            model = config.base.to_string_lossy().into_owned(),
+            data = base.prepared.data_path.clone(),
+            notes = result.notes.clone(),
+            cancelled = result.cancelled,
+        )
+        .into())
+    })
 }
 
 /// Allometric scaling - Pharmpy's `allometry`.
@@ -6086,172 +6138,174 @@ fn ferx_rust_allometry(
     directory: &str,
     fit: bool,
 ) -> Robj {
-    let (base, mut options, mut run_options) = if config_path.is_empty() {
-        let data = (!data_path.is_empty()).then_some(data_path);
-        let prepared = match ferx_core::prepare_run(model_path, data) {
-            Ok(p) => p,
-            Err(e) => throw_r_error(format!("ferx_allometry: {e}")),
+    entry(move || {
+        let (base, mut options, mut run_options) = if config_path.is_empty() {
+            let data = (!data_path.is_empty()).then_some(data_path);
+            let prepared = match ferx_core::prepare_run(model_path, data) {
+                Ok(p) => p,
+                Err(e) => throw_r_error(format!("ferx_allometry: {e}")),
+            };
+            let text = match std::fs::read_to_string(model_path)
+                .map_err(|e| format!("cannot read {model_path}: {e}"))
+                .and_then(|s| ferx_core::edit::ModelText::parse(&s))
+            {
+                Ok(t) => t,
+                Err(e) => throw_r_error(format!("ferx_allometry: {e}")),
+            };
+            (
+                ferx_tools::search::BaseModel { prepared, text },
+                ferx_tools::allometry::AllometryOptions::default(),
+                ferx_tools::search::RunOptions::default(),
+            )
+        } else {
+            let config = match ferx_tools::search::SearchConfig::load(Path::new(config_path)) {
+                Ok(c) => c,
+                Err(e) => throw_r_error(format!("ferx_allometry: {e}")),
+            };
+            let options = match ferx_tools::allometry::AllometryOptions::from_config(&config) {
+                Ok(o) => o,
+                Err(e) => throw_r_error(format!("ferx_allometry: {e}")),
+            };
+            let base = match config.load_base() {
+                Ok(b) => b,
+                Err(e) => throw_r_error(format!("ferx_allometry: {e}")),
+            };
+            let run_options = config.run_options();
+            (base, options, run_options)
         };
-        let text = match std::fs::read_to_string(model_path)
-            .map_err(|e| format!("cannot read {model_path}: {e}"))
-            .and_then(|s| ferx_core::edit::ModelText::parse(&s))
-        {
-            Ok(t) => t,
-            Err(e) => throw_r_error(format!("ferx_allometry: {e}")),
-        };
-        (
-            ferx_tools::search::BaseModel { prepared, text },
-            ferx_tools::allometry::AllometryOptions::default(),
-            ferx_tools::search::RunOptions::default(),
-        )
-    } else {
-        let config = match ferx_tools::search::SearchConfig::load(Path::new(config_path)) {
-            Ok(c) => c,
-            Err(e) => throw_r_error(format!("ferx_allometry: {e}")),
-        };
-        let options = match ferx_tools::allometry::AllometryOptions::from_config(&config) {
-            Ok(o) => o,
-            Err(e) => throw_r_error(format!("ferx_allometry: {e}")),
-        };
-        let base = match config.load_base() {
-            Ok(b) => b,
-            Err(e) => throw_r_error(format!("ferx_allometry: {e}")),
-        };
-        let run_options = config.run_options();
-        (base, options, run_options)
-    };
 
-    // The R defaults mirror `AllometryOptions::default()`, so an argument left
-    // alone leaves the engine's own value in place; only a stated one overrides
-    // (and a config file's `[allometry]` section is overridden by nothing).
-    if config_path.is_empty() {
-        if !covariate.is_empty() {
-            options.covariate = covariate.to_string();
+        // The R defaults mirror `AllometryOptions::default()`, so an argument left
+        // alone leaves the engine's own value in place; only a stated one overrides
+        // (and a config file's `[allometry]` section is overridden by nothing).
+        if config_path.is_empty() {
+            if !covariate.is_empty() {
+                options.covariate = covariate.to_string();
+            }
+            if reference.is_finite() {
+                options.reference = reference;
+            }
+            if !parameters.is_empty() {
+                options.parameters = Some(parameters);
+            }
+            if !exponents.is_empty() {
+                options.exponents = Some(exponents);
+            }
+            options.fixed = fixed;
+            if lower.is_finite() {
+                options.lower = lower;
+            }
+            if upper.is_finite() {
+                options.upper = upper;
+            }
         }
-        if reference.is_finite() {
-            options.reference = reference;
+        if let Err(e) = options.validate() {
+            throw_r_error(format!("ferx_allometry: {e}"));
         }
-        if !parameters.is_empty() {
-            options.parameters = Some(parameters);
+        if retries >= 0 {
+            run_options.n_starts = retries as usize + 1;
         }
-        if !exponents.is_empty() {
-            options.exponents = Some(exponents);
-        }
-        options.fixed = fixed;
-        if lower.is_finite() {
-            options.lower = lower;
-        }
-        if upper.is_finite() {
-            options.upper = upper;
-        }
-    }
-    if let Err(e) = options.validate() {
-        throw_r_error(format!("ferx_allometry: {e}"));
-    }
-    if retries >= 0 {
-        run_options.n_starts = retries as usize + 1;
-    }
 
-    let scaling_columns = |scalings: &[ferx_tools::allometry::Scaling]| {
-        (
-            scalings.iter().map(|s| s.parameter.clone()).collect::<Vec<String>>(),
-            scalings.iter().map(|s| s.exponent).collect::<Vec<f64>>(),
-            scalings.iter().map(|s| s.fixed).collect::<Vec<bool>>(),
-            scalings
-                .iter()
-                .map(|s| s.theta.clone().unwrap_or_default())
-                .collect::<Vec<String>>(),
-        )
-    };
+        let scaling_columns = |scalings: &[ferx_tools::allometry::Scaling]| {
+            (
+                scalings.iter().map(|s| s.parameter.clone()).collect::<Vec<String>>(),
+                scalings.iter().map(|s| s.exponent).collect::<Vec<f64>>(),
+                scalings.iter().map(|s| s.fixed).collect::<Vec<bool>>(),
+                scalings
+                    .iter()
+                    .map(|s| s.theta.clone().unwrap_or_default())
+                    .collect::<Vec<String>>(),
+            )
+        };
 
-    if !fit {
-        let built = match ferx_tools::allometry::allometric_model(&base, &options) {
-            Ok(b) => b,
+        if !fit {
+            let built = match ferx_tools::allometry::allometric_model(&base, &options) {
+                Ok(b) => b,
+                Err(e) => throw_r_error(format!("ferx_allometry: {e}")),
+            };
+            let (parameter, exponent, is_fixed, theta) = scaling_columns(&built.scalings);
+            return Ok(list!(
+                parameter = parameter,
+                exponent = exponent,
+                fixed = is_fixed,
+                theta = theta,
+                covariate = options.covariate.clone(),
+                reference = options.reference,
+                model = built.model.render(),
+                base_model = base.text.render(),
+                data = base.prepared.data_path.clone(),
+                notes = built.notes,
+                fitted = false,
+            )
+            .into());
+        }
+
+        let cancel = CancelFlag::new();
+        let mut base = base;
+        base.prepared.parsed.fit_options.cancel = Some(cancel.clone());
+        let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
+        let threads = (threads > 0).then_some(threads as usize);
+        let result = match run_search_cancellable(&cancel, || {
+            ferx_tools::allometry::run_allometry(
+                &base,
+                &options,
+                ferx_tools::allometry::AllometryRun {
+                    dir: dir.clone(),
+                    threads,
+                    cancel: Some(cancel.clone()),
+                    run_options: run_options.clone(),
+                },
+            )
+        }) {
+            Ok(r) => r,
             Err(e) => throw_r_error(format!("ferx_allometry: {e}")),
         };
-        let (parameter, exponent, is_fixed, theta) = scaling_columns(&built.scalings);
-        return list!(
+
+        let (parameter, exponent, is_fixed, theta) = scaling_columns(&result.scalings);
+        let scaled_model = result.model.render();
+        let scaled_fit: Robj = match &result.scaled.fit {
+            Some(fit) => match search_final_fit(fit, &scaled_model, &base.prepared.data_path) {
+                Ok(l) => l.into(),
+                Err(e) => throw_r_error(format!("ferx_allometry: {e}")),
+            },
+            None => NULL.into(),
+        };
+        let base_text = base.text.render();
+        let base_fit: Robj = match &result.base.fit {
+            Some(fit) => match search_final_fit(fit, &base_text, &base.prepared.data_path) {
+                Ok(l) => l.into(),
+                Err(e) => throw_r_error(format!("ferx_allometry: {e}")),
+            },
+            None => NULL.into(),
+        };
+
+        Ok(list!(
             parameter = parameter,
             exponent = exponent,
             fixed = is_fixed,
             theta = theta,
             covariate = options.covariate.clone(),
             reference = options.reference,
-            model = built.model.render(),
-            base_model = base.text.render(),
+            model = scaled_model,
+            base_model = base_text,
             data = base.prepared.data_path.clone(),
-            notes = built.notes,
-            fitted = false,
+            base_ofv = opt_f64(result.base.ofv),
+            scaled_ofv = opt_f64(result.scaled.ofv),
+            dofv = opt_f64(result.dofv()),
+            base_converged = opt_bool_chr(result.base.converged),
+            scaled_converged = opt_bool_chr(result.scaled.converged),
+            base_passed = result.base.verdict.passed,
+            scaled_passed = result.scaled.verdict.passed,
+            base_failures = result.base.verdict.failures.clone(),
+            scaled_failures = result.scaled.verdict.failures.clone(),
+            base_fit = base_fit,
+            scaled_fit = scaled_fit,
+            directory = directory.to_string(),
+            notes = result.notes.clone(),
+            cancelled = result.cancelled,
+            fitted = true,
         )
-        .into();
-    }
-
-    let cancel = CancelFlag::new();
-    let mut base = base;
-    base.prepared.parsed.fit_options.cancel = Some(cancel.clone());
-    let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
-    let threads = (threads > 0).then_some(threads as usize);
-    let result = match run_search_cancellable(&cancel, || {
-        ferx_tools::allometry::run_allometry(
-            &base,
-            &options,
-            ferx_tools::allometry::AllometryRun {
-                dir: dir.clone(),
-                threads,
-                cancel: Some(cancel.clone()),
-                run_options: run_options.clone(),
-            },
-        )
-    }) {
-        Ok(r) => r,
-        Err(e) => throw_r_error(format!("ferx_allometry: {e}")),
-    };
-
-    let (parameter, exponent, is_fixed, theta) = scaling_columns(&result.scalings);
-    let scaled_model = result.model.render();
-    let scaled_fit: Robj = match &result.scaled.fit {
-        Some(fit) => match search_final_fit(fit, &scaled_model, &base.prepared.data_path) {
-            Ok(l) => l.into(),
-            Err(e) => throw_r_error(format!("ferx_allometry: {e}")),
-        },
-        None => NULL.into(),
-    };
-    let base_text = base.text.render();
-    let base_fit: Robj = match &result.base.fit {
-        Some(fit) => match search_final_fit(fit, &base_text, &base.prepared.data_path) {
-            Ok(l) => l.into(),
-            Err(e) => throw_r_error(format!("ferx_allometry: {e}")),
-        },
-        None => NULL.into(),
-    };
-
-    list!(
-        parameter = parameter,
-        exponent = exponent,
-        fixed = is_fixed,
-        theta = theta,
-        covariate = options.covariate.clone(),
-        reference = options.reference,
-        model = scaled_model,
-        base_model = base_text,
-        data = base.prepared.data_path.clone(),
-        base_ofv = opt_f64(result.base.ofv),
-        scaled_ofv = opt_f64(result.scaled.ofv),
-        dofv = opt_f64(result.dofv()),
-        base_converged = opt_bool_chr(result.base.converged),
-        scaled_converged = opt_bool_chr(result.scaled.converged),
-        base_passed = result.base.verdict.passed,
-        scaled_passed = result.scaled.verdict.passed,
-        base_failures = result.base.verdict.failures.clone(),
-        scaled_failures = result.scaled.verdict.failures.clone(),
-        base_fit = base_fit,
-        scaled_fit = scaled_fit,
-        directory = directory.to_string(),
-        notes = result.notes.clone(),
-        cancelled = result.cancelled,
-        fitted = true,
-    )
-    .into()
+        .into())
+    })
 }
 
 /// The columns of a modelsearch run's `models.csv`, in order, from the engine.
@@ -6260,10 +6314,12 @@ fn ferx_rust_allometry(
 /// @keywords internal
 #[extendr]
 fn ferx_rust_modelsearch_columns() -> Vec<String> {
-    ferx_tools::modelsearch::MODEL_COLUMNS
-        .iter()
-        .map(|s| s.to_string())
-        .collect()
+    entry(move || {
+        Ok(ferx_tools::modelsearch::MODEL_COLUMNS
+            .iter()
+            .map(|s| s.to_string())
+            .collect())
+    })
 }
 
 /// Structural PK model search - Pharmpy's `modelsearch`.
@@ -6310,228 +6366,230 @@ fn ferx_rust_modelsearch(
     directory: &str,
     progress: bool,
 ) -> Robj {
-    let mut section = String::from("\n[modelsearch]\n");
-    if !algorithm.is_empty() {
-        section.push_str(&format!("algorithm = {}\n", toml_basic(algorithm)));
-    }
-    if !iiv_strategy.is_empty() {
-        section.push_str(&format!("iiv_strategy = {}\n", toml_basic(iiv_strategy)));
-    }
-    let text = search_config_text(
-        model_path,
-        data_path,
-        mfl,
-        rank,
-        rank_cutoff,
-        threads,
-        retries,
-        resume,
-        &section,
-    );
-    let inline_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let config =
-        match search_config_for_tool(config_path, &text, &inline_dir, threads, retries, resume) {
-            Ok(c) => c,
+    entry(move || {
+        let mut section = String::from("\n[modelsearch]\n");
+        if !algorithm.is_empty() {
+            section.push_str(&format!("algorithm = {}\n", toml_basic(algorithm)));
+        }
+        if !iiv_strategy.is_empty() {
+            section.push_str(&format!("iiv_strategy = {}\n", toml_basic(iiv_strategy)));
+        }
+        let text = search_config_text(
+            model_path,
+            data_path,
+            mfl,
+            rank,
+            rank_cutoff,
+            threads,
+            retries,
+            resume,
+            &section,
+        );
+        let inline_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let config =
+            match search_config_for_tool(config_path, &text, &inline_dir, threads, retries, resume) {
+                Ok(c) => c,
+                Err(e) => throw_r_error(format!("ferx_modelsearch: {e}")),
+            };
+        // Both refusals happen before the dataset is read: a file whose keys this
+        // tool cannot honour, and a space that is not a structural one - a
+        // covariate file handed to modelsearch would otherwise search nothing and
+        // report the base model as the winner.
+        let options = match ferx_tools::modelsearch::ModelsearchOptions::from_config(&config) {
+            Ok(o) => o,
             Err(e) => throw_r_error(format!("ferx_modelsearch: {e}")),
         };
-    // Both refusals happen before the dataset is read: a file whose keys this
-    // tool cannot honour, and a space that is not a structural one - a
-    // covariate file handed to modelsearch would otherwise search nothing and
-    // report the base model as the winner.
-    let options = match ferx_tools::modelsearch::ModelsearchOptions::from_config(&config) {
-        Ok(o) => o,
-        Err(e) => throw_r_error(format!("ferx_modelsearch: {e}")),
-    };
-    if let Err(e) = ferx_tools::modelsearch::ModelsearchOptions::check_space(&config) {
-        throw_r_error(format!("ferx_modelsearch: {e}"));
-    }
-    let mut base = match config.load_base() {
-        Ok(b) => b,
-        Err(e) => throw_r_error(format!("ferx_modelsearch: {e}")),
-    };
-
-    // One flag, two paths into the engine: `ModelsearchRun::cancel` stops the
-    // layer loop, and the copy on `fit_options` unwinds the fits already in
-    // flight (the same wiring `ferx_covsearch()` uses).
-    let cancel = CancelFlag::new();
-    base.prepared.parsed.fit_options.cancel = Some(cancel.clone());
-
-    let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
-    let report = |event: ferx_tools::modelsearch::ModelsearchEvent| {
-        use ferx_tools::modelsearch::ModelsearchEvent as E;
-        if !progress {
-            return;
+        if let Err(e) = ferx_tools::modelsearch::ModelsearchOptions::check_space(&config) {
+            throw_r_error(format!("ferx_modelsearch: {e}"));
         }
-        match event {
-            E::InputStarted => eprintln!("Fitting the input model..."),
-            E::BaseStarted => eprintln!("Fitting the base model..."),
-            E::BaseFinished { ofv, criterion } => {
-                eprintln!("Base model: OFV {ofv:.3}, criterion {criterion:.3}")
-            }
-            E::LayerStarted { layer, candidates } => eprintln!(
-                "Layer {layer}: fitting {candidates} candidate{}...",
-                if candidates == 1 { "" } else { "s" }
-            ),
-            E::LayerFinished { layer, best } => match best {
-                Some((id, criterion)) => {
-                    eprintln!("Layer {layer}: best {id} (criterion {criterion:.3})")
-                }
-                None => eprintln!("Layer {layer}: no candidate passed the gate"),
-            },
-        }
-    };
-
-    let result = match run_search_cancellable(&cancel, || {
-        ferx_tools::modelsearch::run_modelsearch(
-            &config,
-            &base,
-            ferx_tools::modelsearch::ModelsearchRun {
-                dir: dir.clone(),
-                threads: config.run.threads,
-                cancel: Some(cancel.clone()),
-                progress: Some(&report),
-            },
-        )
-    }) {
-        Ok(r) => r,
-        Err(e) => throw_r_error(format!("ferx_modelsearch: {e}")),
-    };
-
-    // The model table, column for column as `MODEL_COLUMNS` orders it.
-    let n = result.rows.len();
-    let mut id = Vec::with_capacity(n);
-    let mut parent = Vec::with_capacity(n);
-    let mut layer = Vec::with_capacity(n);
-    let mut path = Vec::with_capacity(n);
-    let mut absorption = Vec::with_capacity(n);
-    let mut peripherals = Vec::with_capacity(n);
-    let mut transits = Vec::with_capacity(n);
-    let mut lagtime = Vec::with_capacity(n);
-    let mut n_parameters = Vec::with_capacity(n);
-    let mut ofv = Vec::with_capacity(n);
-    let mut criterion = Vec::with_capacity(n);
-    let mut d_criterion = Vec::with_capacity(n);
-    let mut rank_col = Vec::with_capacity(n);
-    let mut converged = Vec::with_capacity(n);
-    let mut passed = Vec::with_capacity(n);
-    let mut failures = Vec::with_capacity(n);
-    let mut error = Vec::with_capacity(n);
-    let mut seconds = Vec::with_capacity(n);
-    let mut selected = Vec::with_capacity(n);
-    let mut continued = Vec::with_capacity(n);
-    let mut reused = Vec::with_capacity(n);
-    let mut structure = Vec::with_capacity(n);
-    for r in &result.rows {
-        id.push(r.id.clone());
-        parent.push(r.parent.clone().unwrap_or_default());
-        layer.push(r.layer as i32);
-        path.push(
-            r.path
-                .iter()
-                .map(|k| k.to_string())
-                .collect::<Vec<_>>()
-                .join(";"),
-        );
-        absorption.push(r.structure.absorption.label().to_string());
-        peripherals.push(r.structure.peripherals as i32);
-        // `0` when the drug is absorbed first-order, `N` for the estimated
-        // count - the same three spellings `models.csv` writes.
-        transits.push(match r.structure.transits {
-            None => "0".to_string(),
-            Some(t) => t.to_string(),
-        });
-        lagtime.push(if r.structure.lagtime { "ON" } else { "OFF" }.to_string());
-        n_parameters.push(opt_f64(r.n_parameters.map(|v| v as f64)));
-        ofv.push(opt_f64(r.ofv));
-        criterion.push(r.criterion);
-        d_criterion.push(opt_f64(r.d_criterion));
-        rank_col.push(opt_f64(r.rank.map(|v| v as f64)));
-        converged.push(opt_bool_chr(r.converged));
-        passed.push(r.passed);
-        failures.push(r.failures.join("; "));
-        error.push(
-            r.error
-                .as_ref()
-                .map(|e| e.message.clone())
-                .unwrap_or_default(),
-        );
-        seconds.push(r.seconds);
-        selected.push(r.selected);
-        continued.push(r.continued);
-        reused.push(r.reused);
-        structure.push(ferx_tools::modelsearch::structure_label(&r.structure));
-    }
-
-    // Every candidate's text, so a user can read or refit the model the table
-    // ranked second without re-running the search.
-    let model_id: Vec<String> = result.models.keys().cloned().collect();
-    let model_text: Vec<String> = result.models.values().map(|m| m.render()).collect();
-
-    let final_model = result.final_model.render();
-    let final_fit: Robj = match &result.final_fit {
-        Some(fit) => match search_final_fit(fit, &final_model, &base.prepared.data_path) {
-            Ok(l) => l.into(),
+        let mut base = match config.load_base() {
+            Ok(b) => b,
             Err(e) => throw_r_error(format!("ferx_modelsearch: {e}")),
-        },
-        None => NULL.into(),
-    };
-    let base_row_ofv = result
-        .row(&result.base_id)
-        .and_then(|r| r.ofv)
-        .unwrap_or(f64::NAN);
-    let base_criterion = result
-        .row(&result.base_id)
-        .map(|r| r.criterion)
-        .unwrap_or(f64::NAN);
+        };
 
-    list!(
-        id = id,
-        parent = parent,
-        layer = layer,
-        path = path,
-        absorption = absorption,
-        peripherals = peripherals,
-        transits = transits,
-        lagtime = lagtime,
-        n_parameters = n_parameters,
-        ofv = ofv,
-        criterion = criterion,
-        d_criterion = d_criterion,
-        rank = rank_col,
-        converged = converged,
-        passed = passed,
-        failures = failures,
-        error = error,
-        seconds = seconds,
-        selected = selected,
-        continued = continued,
-        reused = reused,
-        structure = structure,
-        model_id = model_id,
-        model_text = model_text,
-        input_model = result.input_model.render(),
-        base_id = result.base_id.clone(),
-        base_structure = ferx_tools::modelsearch::structure_label(&result.base_structure),
-        base_ofv = base_row_ofv,
-        base_criterion = base_criterion,
-        final_id = result.final_id.clone(),
-        final_model = final_model,
-        final_criterion = result.final_criterion,
-        final_fit = final_fit,
-        n_layers = result.n_layers() as i32,
-        criterion_label = result.criterion.label().to_string(),
-        algorithm = options.algorithm.label().to_string(),
-        iiv_strategy = options.iiv_strategy.label().to_string(),
-        summary = ferx_tools::modelsearch::render_summary(&result),
-        directory = directory.to_string(),
-        // The base model as the config resolved it, so the R object names the
-        // same file in both entry forms.
-        model = config.base.to_string_lossy().into_owned(),
-        data = base.prepared.data_path.clone(),
-        notes = result.notes.clone(),
-        cancelled = result.cancelled,
-    )
-    .into()
+        // One flag, two paths into the engine: `ModelsearchRun::cancel` stops the
+        // layer loop, and the copy on `fit_options` unwinds the fits already in
+        // flight (the same wiring `ferx_covsearch()` uses).
+        let cancel = CancelFlag::new();
+        base.prepared.parsed.fit_options.cancel = Some(cancel.clone());
+
+        let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
+        let report = |event: ferx_tools::modelsearch::ModelsearchEvent| {
+            use ferx_tools::modelsearch::ModelsearchEvent as E;
+            if !progress {
+                return;
+            }
+            match event {
+                E::InputStarted => eprintln!("Fitting the input model..."),
+                E::BaseStarted => eprintln!("Fitting the base model..."),
+                E::BaseFinished { ofv, criterion } => {
+                    eprintln!("Base model: OFV {ofv:.3}, criterion {criterion:.3}")
+                }
+                E::LayerStarted { layer, candidates } => eprintln!(
+                    "Layer {layer}: fitting {candidates} candidate{}...",
+                    if candidates == 1 { "" } else { "s" }
+                ),
+                E::LayerFinished { layer, best } => match best {
+                    Some((id, criterion)) => {
+                        eprintln!("Layer {layer}: best {id} (criterion {criterion:.3})")
+                    }
+                    None => eprintln!("Layer {layer}: no candidate passed the gate"),
+                },
+            }
+        };
+
+        let result = match run_search_cancellable(&cancel, || {
+            ferx_tools::modelsearch::run_modelsearch(
+                &config,
+                &base,
+                ferx_tools::modelsearch::ModelsearchRun {
+                    dir: dir.clone(),
+                    threads: config.run.threads,
+                    cancel: Some(cancel.clone()),
+                    progress: Some(&report),
+                },
+            )
+        }) {
+            Ok(r) => r,
+            Err(e) => throw_r_error(format!("ferx_modelsearch: {e}")),
+        };
+
+        // The model table, column for column as `MODEL_COLUMNS` orders it.
+        let n = result.rows.len();
+        let mut id = Vec::with_capacity(n);
+        let mut parent = Vec::with_capacity(n);
+        let mut layer = Vec::with_capacity(n);
+        let mut path = Vec::with_capacity(n);
+        let mut absorption = Vec::with_capacity(n);
+        let mut peripherals = Vec::with_capacity(n);
+        let mut transits = Vec::with_capacity(n);
+        let mut lagtime = Vec::with_capacity(n);
+        let mut n_parameters = Vec::with_capacity(n);
+        let mut ofv = Vec::with_capacity(n);
+        let mut criterion = Vec::with_capacity(n);
+        let mut d_criterion = Vec::with_capacity(n);
+        let mut rank_col = Vec::with_capacity(n);
+        let mut converged = Vec::with_capacity(n);
+        let mut passed = Vec::with_capacity(n);
+        let mut failures = Vec::with_capacity(n);
+        let mut error = Vec::with_capacity(n);
+        let mut seconds = Vec::with_capacity(n);
+        let mut selected = Vec::with_capacity(n);
+        let mut continued = Vec::with_capacity(n);
+        let mut reused = Vec::with_capacity(n);
+        let mut structure = Vec::with_capacity(n);
+        for r in &result.rows {
+            id.push(r.id.clone());
+            parent.push(r.parent.clone().unwrap_or_default());
+            layer.push(r.layer as i32);
+            path.push(
+                r.path
+                    .iter()
+                    .map(|k| k.to_string())
+                    .collect::<Vec<_>>()
+                    .join(";"),
+            );
+            absorption.push(r.structure.absorption.label().to_string());
+            peripherals.push(r.structure.peripherals as i32);
+            // `0` when the drug is absorbed first-order, `N` for the estimated
+            // count - the same three spellings `models.csv` writes.
+            transits.push(match r.structure.transits {
+                None => "0".to_string(),
+                Some(t) => t.to_string(),
+            });
+            lagtime.push(if r.structure.lagtime { "ON" } else { "OFF" }.to_string());
+            n_parameters.push(opt_f64(r.n_parameters.map(|v| v as f64)));
+            ofv.push(opt_f64(r.ofv));
+            criterion.push(r.criterion);
+            d_criterion.push(opt_f64(r.d_criterion));
+            rank_col.push(opt_f64(r.rank.map(|v| v as f64)));
+            converged.push(opt_bool_chr(r.converged));
+            passed.push(r.passed);
+            failures.push(r.failures.join("; "));
+            error.push(
+                r.error
+                    .as_ref()
+                    .map(|e| e.message.clone())
+                    .unwrap_or_default(),
+            );
+            seconds.push(r.seconds);
+            selected.push(r.selected);
+            continued.push(r.continued);
+            reused.push(r.reused);
+            structure.push(ferx_tools::modelsearch::structure_label(&r.structure));
+        }
+
+        // Every candidate's text, so a user can read or refit the model the table
+        // ranked second without re-running the search.
+        let model_id: Vec<String> = result.models.keys().cloned().collect();
+        let model_text: Vec<String> = result.models.values().map(|m| m.render()).collect();
+
+        let final_model = result.final_model.render();
+        let final_fit: Robj = match &result.final_fit {
+            Some(fit) => match search_final_fit(fit, &final_model, &base.prepared.data_path) {
+                Ok(l) => l.into(),
+                Err(e) => throw_r_error(format!("ferx_modelsearch: {e}")),
+            },
+            None => NULL.into(),
+        };
+        let base_row_ofv = result
+            .row(&result.base_id)
+            .and_then(|r| r.ofv)
+            .unwrap_or(f64::NAN);
+        let base_criterion = result
+            .row(&result.base_id)
+            .map(|r| r.criterion)
+            .unwrap_or(f64::NAN);
+
+        Ok(list!(
+            id = id,
+            parent = parent,
+            layer = layer,
+            path = path,
+            absorption = absorption,
+            peripherals = peripherals,
+            transits = transits,
+            lagtime = lagtime,
+            n_parameters = n_parameters,
+            ofv = ofv,
+            criterion = criterion,
+            d_criterion = d_criterion,
+            rank = rank_col,
+            converged = converged,
+            passed = passed,
+            failures = failures,
+            error = error,
+            seconds = seconds,
+            selected = selected,
+            continued = continued,
+            reused = reused,
+            structure = structure,
+            model_id = model_id,
+            model_text = model_text,
+            input_model = result.input_model.render(),
+            base_id = result.base_id.clone(),
+            base_structure = ferx_tools::modelsearch::structure_label(&result.base_structure),
+            base_ofv = base_row_ofv,
+            base_criterion = base_criterion,
+            final_id = result.final_id.clone(),
+            final_model = final_model,
+            final_criterion = result.final_criterion,
+            final_fit = final_fit,
+            n_layers = result.n_layers() as i32,
+            criterion_label = result.criterion.label().to_string(),
+            algorithm = options.algorithm.label().to_string(),
+            iiv_strategy = options.iiv_strategy.label().to_string(),
+            summary = ferx_tools::modelsearch::render_summary(&result),
+            directory = directory.to_string(),
+            // The base model as the config resolved it, so the R object names the
+            // same file in both entry forms.
+            model = config.base.to_string_lossy().into_owned(),
+            data = base.prepared.data_path.clone(),
+            notes = result.notes.clone(),
+            cancelled = result.cancelled,
+        )
+        .into())
+    })
 }
 
 /// The columns of a residual-error run's `steps.csv`, in order, from the engine.
@@ -6540,10 +6598,12 @@ fn ferx_rust_modelsearch(
 /// @keywords internal
 #[extendr]
 fn ferx_rust_ruvsearch_columns() -> Vec<String> {
-    ferx_tools::ruvsearch::STEP_COLUMNS
-        .iter()
-        .map(|s| s.to_string())
-        .collect()
+    entry(move || {
+        Ok(ferx_tools::ruvsearch::STEP_COLUMNS
+            .iter()
+            .map(|s| s.to_string())
+            .collect())
+    })
 }
 
 /// The columns of a covariate run's `steps.csv`, in order, from the engine.
@@ -6555,10 +6615,12 @@ fn ferx_rust_ruvsearch_columns() -> Vec<String> {
 /// @keywords internal
 #[extendr]
 fn ferx_rust_covsearch_columns() -> Vec<String> {
-    ferx_tools::covsearch::STEP_COLUMNS
-        .iter()
-        .map(|s| s.to_string())
-        .collect()
+    entry(move || {
+        Ok(ferx_tools::covsearch::STEP_COLUMNS
+            .iter()
+            .map(|s| s.to_string())
+            .collect())
+    })
 }
 
 /// Residual-error model search - Pharmpy's `ruvsearch`.
@@ -6604,244 +6666,246 @@ fn ferx_rust_ruvsearch(
     directory: &str,
     progress: bool,
 ) -> Robj {
-    let mut section = String::from("\n[ruvsearch]\n");
-    if groups > 0 {
-        section.push_str(&format!("groups = {groups}\n"));
-    }
-    if p_value.is_finite() {
-        section.push_str(&format!("p_value = {p_value}\n"));
-    }
-    if !skip.is_empty() {
-        let items: Vec<String> = skip.iter().map(|s| toml_basic(s)).collect();
-        section.push_str(&format!("skip = [{}]\n", items.join(", ")));
-    }
-    if max_iter > 0 {
-        section.push_str(&format!("max_iter = {max_iter}\n"));
-    }
-    if cwres_prescreen >= 0 {
-        section.push_str(&format!("cwres_prescreen = {}\n", cwres_prescreen == 1));
-    }
-    let text = search_config_text(
-        model_path,
-        data_path,
-        "",
-        "",
-        f64::NAN,
-        threads,
-        retries,
-        resume,
-        &section,
-    );
-    let inline_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let config =
-        match search_config_for_tool(config_path, &text, &inline_dir, threads, retries, resume) {
-            Ok(c) => c,
+    entry(move || {
+        let mut section = String::from("\n[ruvsearch]\n");
+        if groups > 0 {
+            section.push_str(&format!("groups = {groups}\n"));
+        }
+        if p_value.is_finite() {
+            section.push_str(&format!("p_value = {p_value}\n"));
+        }
+        if !skip.is_empty() {
+            let items: Vec<String> = skip.iter().map(|s| toml_basic(s)).collect();
+            section.push_str(&format!("skip = [{}]\n", items.join(", ")));
+        }
+        if max_iter > 0 {
+            section.push_str(&format!("max_iter = {max_iter}\n"));
+        }
+        if cwres_prescreen >= 0 {
+            section.push_str(&format!("cwres_prescreen = {}\n", cwres_prescreen == 1));
+        }
+        let text = search_config_text(
+            model_path,
+            data_path,
+            "",
+            "",
+            f64::NAN,
+            threads,
+            retries,
+            resume,
+            &section,
+        );
+        let inline_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let config =
+            match search_config_for_tool(config_path, &text, &inline_dir, threads, retries, resume) {
+                Ok(c) => c,
+                Err(e) => throw_r_error(format!("ferx_ruvsearch: {e}")),
+            };
+        // Before the dataset is read: a file whose keys this tool cannot honour - a
+        // `[space]`, or a `[rank]` asking for a BIC, which ruvsearch does not
+        // select on - is refused by name rather than ignored.
+        let options = match ferx_tools::ruvsearch::RuvsearchOptions::from_config(&config) {
+            Ok(o) => o,
             Err(e) => throw_r_error(format!("ferx_ruvsearch: {e}")),
         };
-    // Before the dataset is read: a file whose keys this tool cannot honour - a
-    // `[space]`, or a `[rank]` asking for a BIC, which ruvsearch does not
-    // select on - is refused by name rather than ignored.
-    let options = match ferx_tools::ruvsearch::RuvsearchOptions::from_config(&config) {
-        Ok(o) => o,
-        Err(e) => throw_r_error(format!("ferx_ruvsearch: {e}")),
-    };
-    let mut base = match config.load_base() {
-        Ok(b) => b,
-        Err(e) => throw_r_error(format!("ferx_ruvsearch: {e}")),
-    };
-
-    // One flag, two paths into the engine: `RuvsearchRun::cancel` stops the
-    // iteration loop, and the copy on `fit_options` unwinds the fits already in
-    // flight (the same wiring `ferx_covsearch()` uses).
-    let cancel = CancelFlag::new();
-    base.prepared.parsed.fit_options.cancel = Some(cancel.clone());
-
-    let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
-    let report = |event: ferx_tools::ruvsearch::RuvsearchEvent| {
-        use ferx_tools::ruvsearch::RuvsearchEvent as E;
-        if !progress {
-            return;
-        }
-        match event {
-            E::InputStarted => eprintln!("Fitting the input model..."),
-            E::InputFinished { ofv } => eprintln!("Input model: OFV {ofv:.3}"),
-            E::BaseStarted => eprintln!("Fitting the proportional base..."),
-            E::BaseFinished { ofv } => eprintln!("Proportional base: OFV {ofv:.3}"),
-            E::IterationStarted {
-                iteration,
-                candidates,
-                screening,
-            } => eprintln!(
-                "Iteration {iteration}: fitting {candidates} {}candidate{}...",
-                if screening { "screening " } else { "" },
-                if candidates == 1 { "" } else { "s" }
-            ),
-            E::Screened { iteration, feature } => match feature {
-                Some(f) => eprintln!("Iteration {iteration}: pre-screen picked {}", f.label()),
-                None => eprintln!("Iteration {iteration}: pre-screen found nothing to refit"),
-            },
-            E::IterationFinished {
-                iteration,
-                selected,
-            } => match selected {
-                Some((f, ofv)) => eprintln!(
-                    "Iteration {iteration}: accepted {} (OFV {ofv:.3})",
-                    f.label()
-                ),
-                None => eprintln!("Iteration {iteration}: nothing accepted"),
-            },
-            E::Reverted { to, ofv } => {
-                eprintln!("Final comparison returned the {to} model (OFV {ofv:.3})")
-            }
-        }
-    };
-
-    let result = match run_search_cancellable(&cancel, || {
-        ferx_tools::ruvsearch::run_ruvsearch(
-            &config,
-            &base,
-            ferx_tools::ruvsearch::RuvsearchRun {
-                dir: dir.clone(),
-                threads: config.run.threads,
-                cancel: Some(cancel.clone()),
-                progress: Some(&report),
-            },
-        )
-    }) {
-        Ok(r) => r,
-        Err(e) => throw_r_error(format!("ferx_ruvsearch: {e}")),
-    };
-
-    // The step table, column for column as `STEP_COLUMNS` orders it, with the
-    // feature's family and the note beside them.
-    let n = result.rows.len();
-    let mut iteration = Vec::with_capacity(n);
-    let mut candidate = Vec::with_capacity(n);
-    let mut feature = Vec::with_capacity(n);
-    let mut family = Vec::with_capacity(n);
-    let mut screened = Vec::with_capacity(n);
-    let mut parent_ofv = Vec::with_capacity(n);
-    let mut ofv = Vec::with_capacity(n);
-    let mut dofv = Vec::with_capacity(n);
-    let mut df = Vec::with_capacity(n);
-    let mut p_value_col = Vec::with_capacity(n);
-    let mut alpha = Vec::with_capacity(n);
-    let mut significant = Vec::with_capacity(n);
-    let mut cwres_dofv = Vec::with_capacity(n);
-    let mut selected = Vec::with_capacity(n);
-    let mut converged = Vec::with_capacity(n);
-    let mut passed = Vec::with_capacity(n);
-    let mut failures = Vec::with_capacity(n);
-    let mut note = Vec::with_capacity(n);
-    let mut seconds = Vec::with_capacity(n);
-    for r in &result.rows {
-        iteration.push(r.iteration as i32);
-        candidate.push(r.candidate.clone());
-        feature.push(r.feature.map(|f| f.label()).unwrap_or_default());
-        family.push(
-            r.feature
-                .map(|f| f.family().label().to_string())
-                .unwrap_or_default(),
-        );
-        screened.push(r.screened);
-        parent_ofv.push(r.parent_ofv);
-        ofv.push(opt_f64(r.ofv));
-        dofv.push(opt_f64(r.lrt.map(|t| t.dofv)));
-        df.push(opt_f64(r.lrt.map(|t| t.df as f64)));
-        p_value_col.push(opt_f64(r.lrt.map(|t| t.p_value)));
-        alpha.push(opt_f64(r.lrt.map(|t| t.alpha)));
-        significant.push(opt_bool_chr(r.lrt.map(|t| t.significant)));
-        cwres_dofv.push(opt_f64(r.cwres_dofv));
-        selected.push(r.selected);
-        converged.push(opt_bool_chr(r.converged));
-        passed.push(r.passed);
-        // The engine's own fallback, so the column reads as `steps.csv` does: a
-        // row with no gate failure but a reason it could not be compared says
-        // so in the same column. `note` carries that reason on its own.
-        failures.push(if r.failures.is_empty() {
-            r.note.clone().unwrap_or_default()
-        } else {
-            r.failures.join("; ")
-        });
-        note.push(r.note.clone().unwrap_or_default());
-        seconds.push(r.seconds);
-    }
-
-    // Every candidate's text, so a form the search rejected can still be read
-    // or refitted without re-running anything.
-    let model_id: Vec<String> = result.models.keys().cloned().collect();
-    let model_text: Vec<String> = result.models.values().map(|m| m.render()).collect();
-
-    let final_model = result.final_model.render();
-    let final_fit: Robj = match &result.final_fit {
-        Some(fit) => match search_final_fit(fit, &final_model, &base.prepared.data_path) {
-            Ok(l) => l.into(),
+        let mut base = match config.load_base() {
+            Ok(b) => b,
             Err(e) => throw_r_error(format!("ferx_ruvsearch: {e}")),
-        },
-        None => NULL.into(),
-    };
+        };
 
-    list!(
-        iteration = iteration,
-        candidate = candidate,
-        feature = feature,
-        family = family,
-        screened = screened,
-        parent_ofv = parent_ofv,
-        ofv = ofv,
-        dofv = dofv,
-        df = df,
-        p_value = p_value_col,
-        alpha = alpha,
-        significant = significant,
-        cwres_dofv = cwres_dofv,
-        selected = selected,
-        converged = converged,
-        passed = passed,
-        failures = failures,
-        note = note,
-        seconds = seconds,
-        model_id = model_id,
-        model_text = model_text,
-        input_model = result.input_model.render(),
-        input_ofv = result.input_ofv,
-        base_id = result.base_id.clone(),
-        base_ofv = result.base_ofv,
-        final_id = result.final_id.clone(),
-        final_model = final_model,
-        final_ofv = result.final_ofv,
-        final_fit = final_fit,
-        final_features = result
-            .features
-            .iter()
-            .map(|f| f.label())
-            .collect::<Vec<_>>(),
-        final_families = result
-            .features
-            .iter()
-            .map(|f| f.family().label().to_string())
-            .collect::<Vec<_>>(),
-        n_iterations = result.n_iterations() as i32,
-        opt_groups = options.groups as i32,
-        opt_p_value = options.p_value,
-        opt_skip = options
-            .skip
-            .iter()
-            .map(|f| f.label().to_string())
-            .collect::<Vec<_>>(),
-        opt_max_iter = options.max_iter as i32,
-        opt_cwres_prescreen = options.cwres_prescreen,
-        opt_cutoff = options.cutoff(),
-        summary = ferx_tools::ruvsearch::render_summary(&result),
-        directory = directory.to_string(),
-        // The base model as the config resolved it, so the R object names the
-        // same file in both entry forms.
-        model = config.base.to_string_lossy().into_owned(),
-        data = base.prepared.data_path.clone(),
-        notes = result.notes.clone(),
-        cancelled = result.cancelled,
-    )
-    .into()
+        // One flag, two paths into the engine: `RuvsearchRun::cancel` stops the
+        // iteration loop, and the copy on `fit_options` unwinds the fits already in
+        // flight (the same wiring `ferx_covsearch()` uses).
+        let cancel = CancelFlag::new();
+        base.prepared.parsed.fit_options.cancel = Some(cancel.clone());
+
+        let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
+        let report = |event: ferx_tools::ruvsearch::RuvsearchEvent| {
+            use ferx_tools::ruvsearch::RuvsearchEvent as E;
+            if !progress {
+                return;
+            }
+            match event {
+                E::InputStarted => eprintln!("Fitting the input model..."),
+                E::InputFinished { ofv } => eprintln!("Input model: OFV {ofv:.3}"),
+                E::BaseStarted => eprintln!("Fitting the proportional base..."),
+                E::BaseFinished { ofv } => eprintln!("Proportional base: OFV {ofv:.3}"),
+                E::IterationStarted {
+                    iteration,
+                    candidates,
+                    screening,
+                } => eprintln!(
+                    "Iteration {iteration}: fitting {candidates} {}candidate{}...",
+                    if screening { "screening " } else { "" },
+                    if candidates == 1 { "" } else { "s" }
+                ),
+                E::Screened { iteration, feature } => match feature {
+                    Some(f) => eprintln!("Iteration {iteration}: pre-screen picked {}", f.label()),
+                    None => eprintln!("Iteration {iteration}: pre-screen found nothing to refit"),
+                },
+                E::IterationFinished {
+                    iteration,
+                    selected,
+                } => match selected {
+                    Some((f, ofv)) => eprintln!(
+                        "Iteration {iteration}: accepted {} (OFV {ofv:.3})",
+                        f.label()
+                    ),
+                    None => eprintln!("Iteration {iteration}: nothing accepted"),
+                },
+                E::Reverted { to, ofv } => {
+                    eprintln!("Final comparison returned the {to} model (OFV {ofv:.3})")
+                }
+            }
+        };
+
+        let result = match run_search_cancellable(&cancel, || {
+            ferx_tools::ruvsearch::run_ruvsearch(
+                &config,
+                &base,
+                ferx_tools::ruvsearch::RuvsearchRun {
+                    dir: dir.clone(),
+                    threads: config.run.threads,
+                    cancel: Some(cancel.clone()),
+                    progress: Some(&report),
+                },
+            )
+        }) {
+            Ok(r) => r,
+            Err(e) => throw_r_error(format!("ferx_ruvsearch: {e}")),
+        };
+
+        // The step table, column for column as `STEP_COLUMNS` orders it, with the
+        // feature's family and the note beside them.
+        let n = result.rows.len();
+        let mut iteration = Vec::with_capacity(n);
+        let mut candidate = Vec::with_capacity(n);
+        let mut feature = Vec::with_capacity(n);
+        let mut family = Vec::with_capacity(n);
+        let mut screened = Vec::with_capacity(n);
+        let mut parent_ofv = Vec::with_capacity(n);
+        let mut ofv = Vec::with_capacity(n);
+        let mut dofv = Vec::with_capacity(n);
+        let mut df = Vec::with_capacity(n);
+        let mut p_value_col = Vec::with_capacity(n);
+        let mut alpha = Vec::with_capacity(n);
+        let mut significant = Vec::with_capacity(n);
+        let mut cwres_dofv = Vec::with_capacity(n);
+        let mut selected = Vec::with_capacity(n);
+        let mut converged = Vec::with_capacity(n);
+        let mut passed = Vec::with_capacity(n);
+        let mut failures = Vec::with_capacity(n);
+        let mut note = Vec::with_capacity(n);
+        let mut seconds = Vec::with_capacity(n);
+        for r in &result.rows {
+            iteration.push(r.iteration as i32);
+            candidate.push(r.candidate.clone());
+            feature.push(r.feature.map(|f| f.label()).unwrap_or_default());
+            family.push(
+                r.feature
+                    .map(|f| f.family().label().to_string())
+                    .unwrap_or_default(),
+            );
+            screened.push(r.screened);
+            parent_ofv.push(r.parent_ofv);
+            ofv.push(opt_f64(r.ofv));
+            dofv.push(opt_f64(r.lrt.map(|t| t.dofv)));
+            df.push(opt_f64(r.lrt.map(|t| t.df as f64)));
+            p_value_col.push(opt_f64(r.lrt.map(|t| t.p_value)));
+            alpha.push(opt_f64(r.lrt.map(|t| t.alpha)));
+            significant.push(opt_bool_chr(r.lrt.map(|t| t.significant)));
+            cwres_dofv.push(opt_f64(r.cwres_dofv));
+            selected.push(r.selected);
+            converged.push(opt_bool_chr(r.converged));
+            passed.push(r.passed);
+            // The engine's own fallback, so the column reads as `steps.csv` does: a
+            // row with no gate failure but a reason it could not be compared says
+            // so in the same column. `note` carries that reason on its own.
+            failures.push(if r.failures.is_empty() {
+                r.note.clone().unwrap_or_default()
+            } else {
+                r.failures.join("; ")
+            });
+            note.push(r.note.clone().unwrap_or_default());
+            seconds.push(r.seconds);
+        }
+
+        // Every candidate's text, so a form the search rejected can still be read
+        // or refitted without re-running anything.
+        let model_id: Vec<String> = result.models.keys().cloned().collect();
+        let model_text: Vec<String> = result.models.values().map(|m| m.render()).collect();
+
+        let final_model = result.final_model.render();
+        let final_fit: Robj = match &result.final_fit {
+            Some(fit) => match search_final_fit(fit, &final_model, &base.prepared.data_path) {
+                Ok(l) => l.into(),
+                Err(e) => throw_r_error(format!("ferx_ruvsearch: {e}")),
+            },
+            None => NULL.into(),
+        };
+
+        Ok(list!(
+            iteration = iteration,
+            candidate = candidate,
+            feature = feature,
+            family = family,
+            screened = screened,
+            parent_ofv = parent_ofv,
+            ofv = ofv,
+            dofv = dofv,
+            df = df,
+            p_value = p_value_col,
+            alpha = alpha,
+            significant = significant,
+            cwres_dofv = cwres_dofv,
+            selected = selected,
+            converged = converged,
+            passed = passed,
+            failures = failures,
+            note = note,
+            seconds = seconds,
+            model_id = model_id,
+            model_text = model_text,
+            input_model = result.input_model.render(),
+            input_ofv = result.input_ofv,
+            base_id = result.base_id.clone(),
+            base_ofv = result.base_ofv,
+            final_id = result.final_id.clone(),
+            final_model = final_model,
+            final_ofv = result.final_ofv,
+            final_fit = final_fit,
+            final_features = result
+                .features
+                .iter()
+                .map(|f| f.label())
+                .collect::<Vec<_>>(),
+            final_families = result
+                .features
+                .iter()
+                .map(|f| f.family().label().to_string())
+                .collect::<Vec<_>>(),
+            n_iterations = result.n_iterations() as i32,
+            opt_groups = options.groups as i32,
+            opt_p_value = options.p_value,
+            opt_skip = options
+                .skip
+                .iter()
+                .map(|f| f.label().to_string())
+                .collect::<Vec<_>>(),
+            opt_max_iter = options.max_iter as i32,
+            opt_cwres_prescreen = options.cwres_prescreen,
+            opt_cutoff = options.cutoff(),
+            summary = ferx_tools::ruvsearch::render_summary(&result),
+            directory = directory.to_string(),
+            // The base model as the config resolved it, so the R object names the
+            // same file in both entry forms.
+            model = config.base.to_string_lossy().into_owned(),
+            data = base.prepared.data_path.clone(),
+            notes = result.notes.clone(),
+            cancelled = result.cancelled,
+        )
+        .into())
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -6980,10 +7044,12 @@ fn block_labels_of(members: &[String], blocks: &[Vec<String>], labels: &[String]
 /// @keywords internal
 #[extendr]
 fn ferx_rust_iivsearch_columns() -> Vec<String> {
-    ferx_tools::iivsearch::MODEL_COLUMNS
-        .iter()
-        .map(|s| s.to_string())
-        .collect()
+    entry(move || {
+        Ok(ferx_tools::iivsearch::MODEL_COLUMNS
+            .iter()
+            .map(|s| s.to_string())
+            .collect())
+    })
 }
 
 /// The columns of an inter-occasion run's `models.csv`, in order, from the
@@ -6996,10 +7062,12 @@ fn ferx_rust_iivsearch_columns() -> Vec<String> {
 /// @keywords internal
 #[extendr]
 fn ferx_rust_iovsearch_columns() -> Vec<String> {
-    ferx_tools::iovsearch::MODEL_COLUMNS
-        .iter()
-        .map(|s| s.to_string())
-        .collect()
+    entry(move || {
+        Ok(ferx_tools::iovsearch::MODEL_COLUMNS
+            .iter()
+            .map(|s| s.to_string())
+            .collect())
+    })
 }
 
 /// Variability-structure search - Pharmpy's `iivsearch`.
@@ -7054,338 +7122,340 @@ fn ferx_rust_iivsearch(
     directory: &str,
     progress: bool,
 ) -> Robj {
-    let mut section = String::from("\n[iivsearch]\n");
-    if !algorithm.is_empty() {
-        section.push_str(&format!("algorithm = {}\n", toml_basic(algorithm)));
-    }
-    if !correlation_algorithm.is_empty() {
-        section.push_str(&format!(
-            "correlation_algorithm = {}\n",
-            toml_basic(correlation_algorithm)
-        ));
-    }
-    if as_fullblock >= 0 {
-        section.push_str(&format!("as_fullblock = {}\n", as_fullblock == 1));
-    }
-    if block_retries >= 0 {
-        section.push_str(&format!("block_retries = {block_retries}\n"));
-    }
-    let text = search_config_text(
-        model_path,
-        data_path,
-        mfl,
-        rank,
-        rank_cutoff,
-        threads,
-        retries,
-        resume,
-        &section,
-    );
-    let inline_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let config =
-        match search_config_for_tool(config_path, &text, &inline_dir, threads, retries, resume) {
-            Ok(c) => c,
+    entry(move || {
+        let mut section = String::from("\n[iivsearch]\n");
+        if !algorithm.is_empty() {
+            section.push_str(&format!("algorithm = {}\n", toml_basic(algorithm)));
+        }
+        if !correlation_algorithm.is_empty() {
+            section.push_str(&format!(
+                "correlation_algorithm = {}\n",
+                toml_basic(correlation_algorithm)
+            ));
+        }
+        if as_fullblock >= 0 {
+            section.push_str(&format!("as_fullblock = {}\n", as_fullblock == 1));
+        }
+        if block_retries >= 0 {
+            section.push_str(&format!("block_retries = {block_retries}\n"));
+        }
+        let text = search_config_text(
+            model_path,
+            data_path,
+            mfl,
+            rank,
+            rank_cutoff,
+            threads,
+            retries,
+            resume,
+            &section,
+        );
+        let inline_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let config =
+            match search_config_for_tool(config_path, &text, &inline_dir, threads, retries, resume) {
+                Ok(c) => c,
+                Err(e) => throw_r_error(format!("ferx_iivsearch: {e}")),
+            };
+        // Before the dataset is read: a file whose `[iivsearch]` keys contradict
+        // one another, or that names no variability space at all, is refused by
+        // name rather than searching nothing and reporting the input as the winner.
+        let options = match ferx_tools::iivsearch::IivsearchOptions::from_config(&config) {
+            Ok(o) => o,
             Err(e) => throw_r_error(format!("ferx_iivsearch: {e}")),
         };
-    // Before the dataset is read: a file whose `[iivsearch]` keys contradict
-    // one another, or that names no variability space at all, is refused by
-    // name rather than searching nothing and reporting the input as the winner.
-    let options = match ferx_tools::iivsearch::IivsearchOptions::from_config(&config) {
-        Ok(o) => o,
-        Err(e) => throw_r_error(format!("ferx_iivsearch: {e}")),
-    };
-    let mut base = match config.load_base() {
-        Ok(b) => b,
-        Err(e) => throw_r_error(format!("ferx_iivsearch: {e}")),
-    };
-
-    // One flag, two paths into the engine: `IivsearchRun::cancel` stops the
-    // step loop, and the copy on `fit_options` unwinds the fits already in
-    // flight (the same wiring `ferx_covsearch()` uses).
-    let cancel = CancelFlag::new();
-    base.prepared.parsed.fit_options.cancel = Some(cancel.clone());
-
-    let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
-    let report = |event: ferx_tools::iivsearch::IivsearchEvent| {
-        use ferx_tools::iivsearch::IivsearchEvent as E;
-        if !progress {
-            return;
-        }
-        match event {
-            E::InputStarted => eprintln!("Fitting the input model..."),
-            E::InputFinished { ofv, criterion } => {
-                eprintln!("Input model: OFV {ofv:.3}, criterion {criterion:.3}")
-            }
-            E::BaseStarted => eprintln!("Fitting the base model..."),
-            E::BaseFinished { ofv, criterion } => {
-                eprintln!("Base model: OFV {ofv:.3}, criterion {criterion:.3}")
-            }
-            E::StepStarted {
-                step,
-                kind,
-                candidates,
-            } => eprintln!(
-                "Step {step} ({}): fitting {candidates} candidate{}...",
-                kind.label(),
-                if candidates == 1 { "" } else { "s" }
-            ),
-            E::StepFinished {
-                step,
-                best,
-                improved,
-            } => eprintln!(
-                "Step {step}: {} {} (criterion {:.3})",
-                if improved { "best" } else { "kept" },
-                best.0,
-                best.1
-            ),
-            E::Reverted { criterion } => {
-                eprintln!("Final comparison returned the input model (criterion {criterion:.3})")
-            }
-        }
-    };
-
-    let result = match run_search_cancellable(&cancel, || {
-        ferx_tools::iivsearch::run_iivsearch(
-            &config,
-            &base,
-            ferx_tools::iivsearch::IivsearchRun {
-                dir: dir.clone(),
-                threads: config.run.threads,
-                cancel: Some(cancel.clone()),
-                progress: Some(&report),
-            },
-        )
-    }) {
-        Ok(r) => r,
-        Err(e) => throw_r_error(format!("ferx_iivsearch: {e}")),
-    };
-
-    // The model table, column for column as `MODEL_COLUMNS` orders it, with
-    // the declared eta labels beside the parameter names.
-    let n = result.rows.len();
-    let mut id = Vec::with_capacity(n);
-    let mut parent = Vec::with_capacity(n);
-    let mut step = Vec::with_capacity(n);
-    let mut description = Vec::with_capacity(n);
-    let mut etas = Vec::with_capacity(n);
-    let mut blocks = Vec::with_capacity(n);
-    let mut n_parameters = Vec::with_capacity(n);
-    let mut ofv = Vec::with_capacity(n);
-    let mut criterion = Vec::with_capacity(n);
-    let mut d_criterion = Vec::with_capacity(n);
-    let mut rank_col = Vec::with_capacity(n);
-    let mut converged = Vec::with_capacity(n);
-    let mut passed = Vec::with_capacity(n);
-    let mut failures = Vec::with_capacity(n);
-    let mut error = Vec::with_capacity(n);
-    let mut starts = Vec::with_capacity(n);
-    let mut seconds = Vec::with_capacity(n);
-    let mut selected = Vec::with_capacity(n);
-    let mut step_kind = Vec::with_capacity(n);
-    let mut eta_labels = Vec::with_capacity(n);
-    let mut block_labels = Vec::with_capacity(n);
-    let mut structure = Vec::with_capacity(n);
-    for r in &result.rows {
-        // The labels come from the row's *own* model, which is the only text
-        // that says what this candidate calls its eta - the base model's would
-        // be silent about an eta this candidate added.
-        let declared = result
-            .models
-            .get(&r.id)
-            .map(|m| variability_labels(m).0)
-            .unwrap_or_default();
-        let labels = resolved_labels(&r.structure.etas, &declared, omega_fallback);
-        id.push(r.id.clone());
-        parent.push(r.parent.clone().unwrap_or_default());
-        step.push(r.step as i32);
-        description.push(r.structure.description());
-        etas.push(r.structure.etas.join(";"));
-        blocks.push(
-            r.structure
-                .blocks
-                .iter()
-                .map(|b| b.join(","))
-                .collect::<Vec<_>>()
-                .join(";"),
-        );
-        n_parameters.push(opt_f64(r.n_parameters.map(|v| v as f64)));
-        ofv.push(opt_f64(r.ofv));
-        criterion.push(r.criterion);
-        d_criterion.push(opt_f64(r.d_criterion));
-        rank_col.push(opt_f64(r.rank.map(|v| v as f64)));
-        converged.push(opt_bool_chr(r.converged));
-        passed.push(r.passed);
-        failures.push(r.failures.join("; "));
-        error.push(
-            r.error
-                .as_ref()
-                .map(|e| e.message.clone())
-                .unwrap_or_default(),
-        );
-        starts.push(r.starts as i32);
-        seconds.push(r.seconds);
-        selected.push(r.selected);
-        // The stage the row belongs to, from the step it was fitted in: the
-        // number of eta and the block structure are two stages, and a table
-        // that lost which is which would report a search it did not run.
-        step_kind.push(
-            result
-                .steps
-                .iter()
-                .find(|s| s.step == r.step)
-                .map(|s| s.kind.label().to_string())
-                .unwrap_or_default(),
-        );
-        eta_labels.push(labels.join(";"));
-        block_labels.push(block_labels_of(
-            &r.structure.etas,
-            &r.structure.blocks,
-            &labels,
-        ));
-        structure.push(labelled_family(
-            &r.structure.etas,
-            &r.structure.blocks,
-            &labels,
-        ));
-    }
-
-    // The per-step rankings, one row per model ranked in a step: the stage,
-    // its parent, and where each model placed within it.
-    let mut s_step = Vec::new();
-    let mut s_kind = Vec::new();
-    let mut s_parent = Vec::new();
-    let mut s_id = Vec::new();
-    let mut s_criterion = Vec::new();
-    let mut s_d_criterion = Vec::new();
-    let mut s_rank = Vec::new();
-    let mut s_best = Vec::new();
-    for summary in &result.steps {
-        for r in &summary.ranked {
-            s_step.push(summary.step as i32);
-            s_kind.push(summary.kind.label().to_string());
-            s_parent.push(summary.parent.clone());
-            s_id.push(r.id.clone());
-            s_criterion.push(r.criterion);
-            s_d_criterion.push(opt_f64(r.d_criterion));
-            s_rank.push(opt_f64(r.rank.map(|v| v as f64)));
-            s_best.push(r.id == summary.best);
-        }
-    }
-
-    // Every candidate's text, so a structure the search rejected can be read
-    // or refitted without re-running it.
-    let model_id: Vec<String> = result.models.keys().cloned().collect();
-    let model_text: Vec<String> = result.models.values().map(|m| m.render()).collect();
-
-    let final_model = result.final_model.render();
-    let final_labels = resolved_labels(
-        &result.final_structure.etas,
-        &variability_labels(&result.final_model).0,
-        omega_fallback,
-    );
-    let input_labels = resolved_labels(
-        &result.input_structure.etas,
-        &variability_labels(&result.input_model).0,
-        omega_fallback,
-    );
-    let final_fit: Robj = match &result.final_fit {
-        Some(fit) => match search_final_fit(fit, &final_model, &base.prepared.data_path) {
-            Ok(l) => l.into(),
+        let mut base = match config.load_base() {
+            Ok(b) => b,
             Err(e) => throw_r_error(format!("ferx_iivsearch: {e}")),
-        },
-        None => NULL.into(),
-    };
-    let base_row_ofv = result
-        .row(&result.base_id)
-        .and_then(|r| r.ofv)
-        .unwrap_or(f64::NAN);
-    let base_criterion = result
-        .row(&result.base_id)
-        .map(|r| r.criterion)
-        .unwrap_or(f64::NAN);
+        };
 
-    list!(
-        id = id,
-        parent = parent,
-        step = step,
-        description = description,
-        etas = etas,
-        blocks = blocks,
-        n_parameters = n_parameters,
-        ofv = ofv,
-        criterion = criterion,
-        d_criterion = d_criterion,
-        rank = rank_col,
-        converged = converged,
-        passed = passed,
-        failures = failures,
-        error = error,
-        starts = starts,
-        seconds = seconds,
-        selected = selected,
-        step_kind = step_kind,
-        eta_labels = eta_labels,
-        block_labels = block_labels,
-        structure = structure,
-        s_step = s_step,
-        s_kind = s_kind,
-        s_parent = s_parent,
-        s_id = s_id,
-        s_criterion = s_criterion,
-        s_d_criterion = s_d_criterion,
-        s_rank = s_rank,
-        s_best = s_best,
-        model_id = model_id,
-        model_text = model_text,
-        input_model = result.input_model.render(),
-        input_description = result.input_structure.description(),
-        input_structure = labelled_family(
+        // One flag, two paths into the engine: `IivsearchRun::cancel` stops the
+        // step loop, and the copy on `fit_options` unwinds the fits already in
+        // flight (the same wiring `ferx_covsearch()` uses).
+        let cancel = CancelFlag::new();
+        base.prepared.parsed.fit_options.cancel = Some(cancel.clone());
+
+        let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
+        let report = |event: ferx_tools::iivsearch::IivsearchEvent| {
+            use ferx_tools::iivsearch::IivsearchEvent as E;
+            if !progress {
+                return;
+            }
+            match event {
+                E::InputStarted => eprintln!("Fitting the input model..."),
+                E::InputFinished { ofv, criterion } => {
+                    eprintln!("Input model: OFV {ofv:.3}, criterion {criterion:.3}")
+                }
+                E::BaseStarted => eprintln!("Fitting the base model..."),
+                E::BaseFinished { ofv, criterion } => {
+                    eprintln!("Base model: OFV {ofv:.3}, criterion {criterion:.3}")
+                }
+                E::StepStarted {
+                    step,
+                    kind,
+                    candidates,
+                } => eprintln!(
+                    "Step {step} ({}): fitting {candidates} candidate{}...",
+                    kind.label(),
+                    if candidates == 1 { "" } else { "s" }
+                ),
+                E::StepFinished {
+                    step,
+                    best,
+                    improved,
+                } => eprintln!(
+                    "Step {step}: {} {} (criterion {:.3})",
+                    if improved { "best" } else { "kept" },
+                    best.0,
+                    best.1
+                ),
+                E::Reverted { criterion } => {
+                    eprintln!("Final comparison returned the input model (criterion {criterion:.3})")
+                }
+            }
+        };
+
+        let result = match run_search_cancellable(&cancel, || {
+            ferx_tools::iivsearch::run_iivsearch(
+                &config,
+                &base,
+                ferx_tools::iivsearch::IivsearchRun {
+                    dir: dir.clone(),
+                    threads: config.run.threads,
+                    cancel: Some(cancel.clone()),
+                    progress: Some(&report),
+                },
+            )
+        }) {
+            Ok(r) => r,
+            Err(e) => throw_r_error(format!("ferx_iivsearch: {e}")),
+        };
+
+        // The model table, column for column as `MODEL_COLUMNS` orders it, with
+        // the declared eta labels beside the parameter names.
+        let n = result.rows.len();
+        let mut id = Vec::with_capacity(n);
+        let mut parent = Vec::with_capacity(n);
+        let mut step = Vec::with_capacity(n);
+        let mut description = Vec::with_capacity(n);
+        let mut etas = Vec::with_capacity(n);
+        let mut blocks = Vec::with_capacity(n);
+        let mut n_parameters = Vec::with_capacity(n);
+        let mut ofv = Vec::with_capacity(n);
+        let mut criterion = Vec::with_capacity(n);
+        let mut d_criterion = Vec::with_capacity(n);
+        let mut rank_col = Vec::with_capacity(n);
+        let mut converged = Vec::with_capacity(n);
+        let mut passed = Vec::with_capacity(n);
+        let mut failures = Vec::with_capacity(n);
+        let mut error = Vec::with_capacity(n);
+        let mut starts = Vec::with_capacity(n);
+        let mut seconds = Vec::with_capacity(n);
+        let mut selected = Vec::with_capacity(n);
+        let mut step_kind = Vec::with_capacity(n);
+        let mut eta_labels = Vec::with_capacity(n);
+        let mut block_labels = Vec::with_capacity(n);
+        let mut structure = Vec::with_capacity(n);
+        for r in &result.rows {
+            // The labels come from the row's *own* model, which is the only text
+            // that says what this candidate calls its eta - the base model's would
+            // be silent about an eta this candidate added.
+            let declared = result
+                .models
+                .get(&r.id)
+                .map(|m| variability_labels(m).0)
+                .unwrap_or_default();
+            let labels = resolved_labels(&r.structure.etas, &declared, omega_fallback);
+            id.push(r.id.clone());
+            parent.push(r.parent.clone().unwrap_or_default());
+            step.push(r.step as i32);
+            description.push(r.structure.description());
+            etas.push(r.structure.etas.join(";"));
+            blocks.push(
+                r.structure
+                    .blocks
+                    .iter()
+                    .map(|b| b.join(","))
+                    .collect::<Vec<_>>()
+                    .join(";"),
+            );
+            n_parameters.push(opt_f64(r.n_parameters.map(|v| v as f64)));
+            ofv.push(opt_f64(r.ofv));
+            criterion.push(r.criterion);
+            d_criterion.push(opt_f64(r.d_criterion));
+            rank_col.push(opt_f64(r.rank.map(|v| v as f64)));
+            converged.push(opt_bool_chr(r.converged));
+            passed.push(r.passed);
+            failures.push(r.failures.join("; "));
+            error.push(
+                r.error
+                    .as_ref()
+                    .map(|e| e.message.clone())
+                    .unwrap_or_default(),
+            );
+            starts.push(r.starts as i32);
+            seconds.push(r.seconds);
+            selected.push(r.selected);
+            // The stage the row belongs to, from the step it was fitted in: the
+            // number of eta and the block structure are two stages, and a table
+            // that lost which is which would report a search it did not run.
+            step_kind.push(
+                result
+                    .steps
+                    .iter()
+                    .find(|s| s.step == r.step)
+                    .map(|s| s.kind.label().to_string())
+                    .unwrap_or_default(),
+            );
+            eta_labels.push(labels.join(";"));
+            block_labels.push(block_labels_of(
+                &r.structure.etas,
+                &r.structure.blocks,
+                &labels,
+            ));
+            structure.push(labelled_family(
+                &r.structure.etas,
+                &r.structure.blocks,
+                &labels,
+            ));
+        }
+
+        // The per-step rankings, one row per model ranked in a step: the stage,
+        // its parent, and where each model placed within it.
+        let mut s_step = Vec::new();
+        let mut s_kind = Vec::new();
+        let mut s_parent = Vec::new();
+        let mut s_id = Vec::new();
+        let mut s_criterion = Vec::new();
+        let mut s_d_criterion = Vec::new();
+        let mut s_rank = Vec::new();
+        let mut s_best = Vec::new();
+        for summary in &result.steps {
+            for r in &summary.ranked {
+                s_step.push(summary.step as i32);
+                s_kind.push(summary.kind.label().to_string());
+                s_parent.push(summary.parent.clone());
+                s_id.push(r.id.clone());
+                s_criterion.push(r.criterion);
+                s_d_criterion.push(opt_f64(r.d_criterion));
+                s_rank.push(opt_f64(r.rank.map(|v| v as f64)));
+                s_best.push(r.id == summary.best);
+            }
+        }
+
+        // Every candidate's text, so a structure the search rejected can be read
+        // or refitted without re-running it.
+        let model_id: Vec<String> = result.models.keys().cloned().collect();
+        let model_text: Vec<String> = result.models.values().map(|m| m.render()).collect();
+
+        let final_model = result.final_model.render();
+        let final_labels = resolved_labels(
+            &result.final_structure.etas,
+            &variability_labels(&result.final_model).0,
+            omega_fallback,
+        );
+        let input_labels = resolved_labels(
             &result.input_structure.etas,
-            &result.input_structure.blocks,
-            &input_labels
-        ),
-        base_id = result.base_id.clone(),
-        base_ofv = base_row_ofv,
-        base_criterion = base_criterion,
-        final_id = result.final_id.clone(),
-        final_model = final_model,
-        final_description = result.final_structure.description(),
-        final_structure = labelled_family(
-            &result.final_structure.etas,
-            &result.final_structure.blocks,
-            &final_labels
-        ),
-        final_etas = final_labels.clone(),
-        final_blocks = block_labels_of(
-            &result.final_structure.etas,
-            &result.final_structure.blocks,
-            &final_labels
-        ),
-        final_criterion = result.final_criterion,
-        final_fit = final_fit,
-        n_steps = result.steps.len() as i32,
-        criterion_label = result.criterion.label().to_string(),
-        algorithm = options.algorithm.label().to_string(),
-        correlation_algorithm = options
-            .correlation_algorithm
-            .map(|c| c.label().to_string())
-            .unwrap_or_default(),
-        block_stage = options.block_stage(),
-        as_fullblock = options.as_fullblock,
-        block_retries = options.block_retries as i32,
-        starts_base = options.starts as i32,
-        opt_cutoff = opt_f64(options.cutoff),
-        summary = ferx_tools::iivsearch::render_summary(&result),
-        directory = directory.to_string(),
-        // The base model as the config resolved it, so the R object names the
-        // same file in both entry forms.
-        model = config.base.to_string_lossy().into_owned(),
-        data = base.prepared.data_path.clone(),
-        notes = result.notes.clone(),
-        cancelled = result.cancelled,
-    )
-    .into()
+            &variability_labels(&result.input_model).0,
+            omega_fallback,
+        );
+        let final_fit: Robj = match &result.final_fit {
+            Some(fit) => match search_final_fit(fit, &final_model, &base.prepared.data_path) {
+                Ok(l) => l.into(),
+                Err(e) => throw_r_error(format!("ferx_iivsearch: {e}")),
+            },
+            None => NULL.into(),
+        };
+        let base_row_ofv = result
+            .row(&result.base_id)
+            .and_then(|r| r.ofv)
+            .unwrap_or(f64::NAN);
+        let base_criterion = result
+            .row(&result.base_id)
+            .map(|r| r.criterion)
+            .unwrap_or(f64::NAN);
+
+        Ok(list!(
+            id = id,
+            parent = parent,
+            step = step,
+            description = description,
+            etas = etas,
+            blocks = blocks,
+            n_parameters = n_parameters,
+            ofv = ofv,
+            criterion = criterion,
+            d_criterion = d_criterion,
+            rank = rank_col,
+            converged = converged,
+            passed = passed,
+            failures = failures,
+            error = error,
+            starts = starts,
+            seconds = seconds,
+            selected = selected,
+            step_kind = step_kind,
+            eta_labels = eta_labels,
+            block_labels = block_labels,
+            structure = structure,
+            s_step = s_step,
+            s_kind = s_kind,
+            s_parent = s_parent,
+            s_id = s_id,
+            s_criterion = s_criterion,
+            s_d_criterion = s_d_criterion,
+            s_rank = s_rank,
+            s_best = s_best,
+            model_id = model_id,
+            model_text = model_text,
+            input_model = result.input_model.render(),
+            input_description = result.input_structure.description(),
+            input_structure = labelled_family(
+                &result.input_structure.etas,
+                &result.input_structure.blocks,
+                &input_labels
+            ),
+            base_id = result.base_id.clone(),
+            base_ofv = base_row_ofv,
+            base_criterion = base_criterion,
+            final_id = result.final_id.clone(),
+            final_model = final_model,
+            final_description = result.final_structure.description(),
+            final_structure = labelled_family(
+                &result.final_structure.etas,
+                &result.final_structure.blocks,
+                &final_labels
+            ),
+            final_etas = final_labels.clone(),
+            final_blocks = block_labels_of(
+                &result.final_structure.etas,
+                &result.final_structure.blocks,
+                &final_labels
+            ),
+            final_criterion = result.final_criterion,
+            final_fit = final_fit,
+            n_steps = result.steps.len() as i32,
+            criterion_label = result.criterion.label().to_string(),
+            algorithm = options.algorithm.label().to_string(),
+            correlation_algorithm = options
+                .correlation_algorithm
+                .map(|c| c.label().to_string())
+                .unwrap_or_default(),
+            block_stage = options.block_stage(),
+            as_fullblock = options.as_fullblock,
+            block_retries = options.block_retries as i32,
+            starts_base = options.starts as i32,
+            opt_cutoff = opt_f64(options.cutoff),
+            summary = ferx_tools::iivsearch::render_summary(&result),
+            directory = directory.to_string(),
+            // The base model as the config resolved it, so the R object names the
+            // same file in both entry forms.
+            model = config.base.to_string_lossy().into_owned(),
+            data = base.prepared.data_path.clone(),
+            notes = result.notes.clone(),
+            cancelled = result.cancelled,
+        )
+        .into())
+    })
 }
 
 /// Inter-occasion variability search - Pharmpy's `iovsearch`.
@@ -7440,352 +7510,354 @@ fn ferx_rust_iovsearch(
     directory: &str,
     progress: bool,
 ) -> Robj {
-    let mut section = String::from("\n[iovsearch]\n");
-    if !column.is_empty() {
-        section.push_str(&format!("column = {}\n", toml_basic(column)));
-    }
-    if !distribution.is_empty() {
-        section.push_str(&format!("distribution = {}\n", toml_basic(distribution)));
-    }
-    if !groups.is_empty() {
-        // One comma-separated parameter list per block on the R side, a TOML
-        // array of arrays here - the shape `[iovsearch] groups` is written in.
-        let rendered: Vec<String> = groups
-            .iter()
-            .map(|g| {
-                let members: Vec<String> = g.split(',').map(|p| toml_basic(p.trim())).collect();
-                format!("[{}]", members.join(", "))
-            })
-            .collect();
-        section.push_str(&format!("groups = [{}]\n", rendered.join(", ")));
-    }
-    if block_retries >= 0 {
-        section.push_str(&format!("block_retries = {block_retries}\n"));
-    }
-    let text = search_config_text(
-        model_path,
-        data_path,
-        mfl,
-        rank,
-        rank_cutoff,
-        threads,
-        retries,
-        resume,
-        &section,
-    );
-    let inline_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let config =
-        match search_config_for_tool(config_path, &text, &inline_dir, threads, retries, resume) {
-            Ok(c) => c,
+    entry(move || {
+        let mut section = String::from("\n[iovsearch]\n");
+        if !column.is_empty() {
+            section.push_str(&format!("column = {}\n", toml_basic(column)));
+        }
+        if !distribution.is_empty() {
+            section.push_str(&format!("distribution = {}\n", toml_basic(distribution)));
+        }
+        if !groups.is_empty() {
+            // One comma-separated parameter list per block on the R side, a TOML
+            // array of arrays here - the shape `[iovsearch] groups` is written in.
+            let rendered: Vec<String> = groups
+                .iter()
+                .map(|g| {
+                    let members: Vec<String> = g.split(',').map(|p| toml_basic(p.trim())).collect();
+                    format!("[{}]", members.join(", "))
+                })
+                .collect();
+            section.push_str(&format!("groups = [{}]\n", rendered.join(", ")));
+        }
+        if block_retries >= 0 {
+            section.push_str(&format!("block_retries = {block_retries}\n"));
+        }
+        let text = search_config_text(
+            model_path,
+            data_path,
+            mfl,
+            rank,
+            rank_cutoff,
+            threads,
+            retries,
+            resume,
+            &section,
+        );
+        let inline_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let config =
+            match search_config_for_tool(config_path, &text, &inline_dir, threads, retries, resume) {
+                Ok(c) => c,
+                Err(e) => throw_r_error(format!("ferx_iovsearch: {e}")),
+            };
+        let options = match ferx_tools::iovsearch::IovsearchOptions::from_config(&config) {
+            Ok(o) => o,
             Err(e) => throw_r_error(format!("ferx_iovsearch: {e}")),
         };
-    let options = match ferx_tools::iovsearch::IovsearchOptions::from_config(&config) {
-        Ok(o) => o,
-        Err(e) => throw_r_error(format!("ferx_iovsearch: {e}")),
-    };
-    let mut base = match config.load_base() {
-        Ok(b) => b,
-        Err(e) => throw_r_error(format!("ferx_iovsearch: {e}")),
-    };
-
-    let cancel = CancelFlag::new();
-    base.prepared.parsed.fit_options.cancel = Some(cancel.clone());
-
-    let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
-    let report = |event: ferx_tools::iovsearch::IovsearchEvent| {
-        use ferx_tools::iovsearch::IovsearchEvent as E;
-        if !progress {
-            return;
-        }
-        match event {
-            E::InputStarted => eprintln!("Fitting the input model..."),
-            E::InputFinished { ofv, criterion } => {
-                eprintln!("Input model: OFV {ofv:.3}, criterion {criterion:.3}")
-            }
-            E::FullIovStarted { parameters } => eprintln!(
-                "Fitting the full-IOV model ({parameters} parameter{})...",
-                if parameters == 1 { "" } else { "s" }
-            ),
-            E::FullIovFinished { ofv, criterion } => {
-                eprintln!("Full-IOV model: OFV {ofv:.3}, criterion {criterion:.3}")
-            }
-            E::StepStarted { step, candidates } => eprintln!(
-                "Step {step}: fitting {candidates} candidate{}...",
-                if candidates == 1 { "" } else { "s" }
-            ),
-            E::StepFinished {
-                step,
-                best,
-                improved,
-            } => eprintln!(
-                "Step {step}: {} {} (criterion {:.3})",
-                if improved { "best" } else { "kept" },
-                best.0,
-                best.1
-            ),
-        }
-    };
-
-    let result = match run_search_cancellable(&cancel, || {
-        ferx_tools::iovsearch::run_iovsearch(
-            &config,
-            &base,
-            ferx_tools::iovsearch::IovsearchRun {
-                dir: dir.clone(),
-                threads: config.run.threads,
-                cancel: Some(cancel.clone()),
-                progress: Some(&report),
-            },
-        )
-    }) {
-        Ok(r) => r,
-        Err(e) => throw_r_error(format!("ferx_iovsearch: {e}")),
-    };
-
-    let n = result.rows.len();
-    let mut id = Vec::with_capacity(n);
-    let mut parent = Vec::with_capacity(n);
-    let mut step = Vec::with_capacity(n);
-    let mut description = Vec::with_capacity(n);
-    let mut etas = Vec::with_capacity(n);
-    let mut kappas = Vec::with_capacity(n);
-    let mut kappa_blocks = Vec::with_capacity(n);
-    let mut n_parameters = Vec::with_capacity(n);
-    let mut ofv = Vec::with_capacity(n);
-    let mut criterion = Vec::with_capacity(n);
-    let mut d_criterion = Vec::with_capacity(n);
-    let mut rank_col = Vec::with_capacity(n);
-    let mut converged = Vec::with_capacity(n);
-    let mut passed = Vec::with_capacity(n);
-    let mut failures = Vec::with_capacity(n);
-    let mut error = Vec::with_capacity(n);
-    let mut starts = Vec::with_capacity(n);
-    let mut seconds = Vec::with_capacity(n);
-    let mut selected = Vec::with_capacity(n);
-    let mut step_kind = Vec::with_capacity(n);
-    let mut eta_labels = Vec::with_capacity(n);
-    let mut kappa_labels = Vec::with_capacity(n);
-    let mut kappa_block_labels = Vec::with_capacity(n);
-    let mut structure = Vec::with_capacity(n);
-    for r in &result.rows {
-        let (eta_map, kappa_map) = result
-            .models
-            .get(&r.id)
-            .map(variability_labels)
-            .unwrap_or_default();
-        let eta_lab = resolved_labels(&r.structure.etas, &eta_map, omega_fallback);
-        let kappa_lab = resolved_labels(&r.structure.kappas, &kappa_map, kappa_fallback);
-        id.push(r.id.clone());
-        parent.push(r.parent.clone().unwrap_or_default());
-        step.push(r.step as i32);
-        description.push(r.structure.description());
-        etas.push(r.structure.etas.join(";"));
-        kappas.push(r.structure.kappas.join(";"));
-        kappa_blocks.push(
-            r.structure
-                .kappa_blocks
-                .iter()
-                .map(|b| b.join(","))
-                .collect::<Vec<_>>()
-                .join(";"),
-        );
-        n_parameters.push(opt_f64(r.n_parameters.map(|v| v as f64)));
-        ofv.push(opt_f64(r.ofv));
-        criterion.push(r.criterion);
-        d_criterion.push(opt_f64(r.d_criterion));
-        rank_col.push(opt_f64(r.rank.map(|v| v as f64)));
-        converged.push(opt_bool_chr(r.converged));
-        passed.push(r.passed);
-        failures.push(r.failures.join("; "));
-        error.push(
-            r.error
-                .as_ref()
-                .map(|e| e.message.clone())
-                .unwrap_or_default(),
-        );
-        starts.push(r.starts as i32);
-        seconds.push(r.seconds);
-        selected.push(r.selected);
-        step_kind.push(
-            result
-                .steps
-                .iter()
-                .find(|s| s.step == r.step)
-                .map(|s| s.kind.label().to_string())
-                .unwrap_or_default(),
-        );
-        eta_labels.push(eta_lab.join(";"));
-        kappa_labels.push(kappa_lab.join(";"));
-        kappa_block_labels.push(block_labels_of(
-            &r.structure.kappas,
-            &r.structure.kappa_blocks,
-            &kappa_lab,
-        ));
-        structure.push(format!(
-            "IIV({});IOV({})",
-            labelled_iov_family(&r.structure.etas, &r.structure.eta_blocks, &eta_lab),
-            labelled_iov_family(&r.structure.kappas, &r.structure.kappa_blocks, &kappa_lab)
-        ));
-    }
-
-    let mut s_step = Vec::new();
-    let mut s_kind = Vec::new();
-    let mut s_parent = Vec::new();
-    let mut s_id = Vec::new();
-    let mut s_criterion = Vec::new();
-    let mut s_d_criterion = Vec::new();
-    let mut s_rank = Vec::new();
-    let mut s_best = Vec::new();
-    for summary in &result.steps {
-        for r in &summary.ranked {
-            s_step.push(summary.step as i32);
-            s_kind.push(summary.kind.label().to_string());
-            s_parent.push(summary.parent.clone());
-            s_id.push(r.id.clone());
-            s_criterion.push(r.criterion);
-            s_d_criterion.push(opt_f64(r.d_criterion));
-            s_rank.push(opt_f64(r.rank.map(|v| v as f64)));
-            s_best.push(r.id == summary.best);
-        }
-    }
-
-    let model_id: Vec<String> = result.models.keys().cloned().collect();
-    let model_text: Vec<String> = result.models.values().map(|m| m.render()).collect();
-
-    let final_model = result.final_model.render();
-    let (final_eta_map, final_kappa_map) = variability_labels(&result.final_model);
-    let (input_eta_map, input_kappa_map) = variability_labels(&result.input_model);
-    let final_eta_lab = resolved_labels(
-        &result.final_structure.etas,
-        &final_eta_map,
-        omega_fallback,
-    );
-    let final_kappa_lab = resolved_labels(
-        &result.final_structure.kappas,
-        &final_kappa_map,
-        kappa_fallback,
-    );
-    let input_eta_lab = resolved_labels(
-        &result.input_structure.etas,
-        &input_eta_map,
-        omega_fallback,
-    );
-    let input_kappa_lab = resolved_labels(
-        &result.input_structure.kappas,
-        &input_kappa_map,
-        kappa_fallback,
-    );
-    let final_fit: Robj = match &result.final_fit {
-        Some(fit) => match search_final_fit(fit, &final_model, &base.prepared.data_path) {
-            Ok(l) => l.into(),
+        let mut base = match config.load_base() {
+            Ok(b) => b,
             Err(e) => throw_r_error(format!("ferx_iovsearch: {e}")),
-        },
-        None => NULL.into(),
-    };
-    let input_row_ofv = result.row("input").and_then(|r| r.ofv).unwrap_or(f64::NAN);
-    let input_criterion = result.row("input").map(|r| r.criterion).unwrap_or(f64::NAN);
+        };
 
-    list!(
-        id = id,
-        parent = parent,
-        step = step,
-        description = description,
-        etas = etas,
-        kappas = kappas,
-        kappa_blocks = kappa_blocks,
-        n_parameters = n_parameters,
-        ofv = ofv,
-        criterion = criterion,
-        d_criterion = d_criterion,
-        rank = rank_col,
-        converged = converged,
-        passed = passed,
-        failures = failures,
-        error = error,
-        starts = starts,
-        seconds = seconds,
-        selected = selected,
-        step_kind = step_kind,
-        eta_labels = eta_labels,
-        kappa_labels = kappa_labels,
-        kappa_block_labels = kappa_block_labels,
-        structure = structure,
-        s_step = s_step,
-        s_kind = s_kind,
-        s_parent = s_parent,
-        s_id = s_id,
-        s_criterion = s_criterion,
-        s_d_criterion = s_d_criterion,
-        s_rank = s_rank,
-        s_best = s_best,
-        model_id = model_id,
-        model_text = model_text,
-        input_model = result.input_model.render(),
-        input_description = result.input_structure.description(),
-        input_structure = format!(
-            "IIV({});IOV({})",
-            labelled_iov_family(
-                &result.input_structure.etas,
-                &result.input_structure.eta_blocks,
-                &input_eta_lab
-            ),
-            labelled_iov_family(
-                &result.input_structure.kappas,
-                &result.input_structure.kappa_blocks,
-                &input_kappa_lab
+        let cancel = CancelFlag::new();
+        base.prepared.parsed.fit_options.cancel = Some(cancel.clone());
+
+        let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
+        let report = |event: ferx_tools::iovsearch::IovsearchEvent| {
+            use ferx_tools::iovsearch::IovsearchEvent as E;
+            if !progress {
+                return;
+            }
+            match event {
+                E::InputStarted => eprintln!("Fitting the input model..."),
+                E::InputFinished { ofv, criterion } => {
+                    eprintln!("Input model: OFV {ofv:.3}, criterion {criterion:.3}")
+                }
+                E::FullIovStarted { parameters } => eprintln!(
+                    "Fitting the full-IOV model ({parameters} parameter{})...",
+                    if parameters == 1 { "" } else { "s" }
+                ),
+                E::FullIovFinished { ofv, criterion } => {
+                    eprintln!("Full-IOV model: OFV {ofv:.3}, criterion {criterion:.3}")
+                }
+                E::StepStarted { step, candidates } => eprintln!(
+                    "Step {step}: fitting {candidates} candidate{}...",
+                    if candidates == 1 { "" } else { "s" }
+                ),
+                E::StepFinished {
+                    step,
+                    best,
+                    improved,
+                } => eprintln!(
+                    "Step {step}: {} {} (criterion {:.3})",
+                    if improved { "best" } else { "kept" },
+                    best.0,
+                    best.1
+                ),
+            }
+        };
+
+        let result = match run_search_cancellable(&cancel, || {
+            ferx_tools::iovsearch::run_iovsearch(
+                &config,
+                &base,
+                ferx_tools::iovsearch::IovsearchRun {
+                    dir: dir.clone(),
+                    threads: config.run.threads,
+                    cancel: Some(cancel.clone()),
+                    progress: Some(&report),
+                },
             )
-        ),
-        input_ofv = input_row_ofv,
-        input_criterion = input_criterion,
-        final_id = result.final_id.clone(),
-        final_model = final_model,
-        final_description = result.final_structure.description(),
-        final_structure = format!(
-            "IIV({});IOV({})",
-            labelled_iov_family(
-                &result.final_structure.etas,
-                &result.final_structure.eta_blocks,
-                &final_eta_lab
+        }) {
+            Ok(r) => r,
+            Err(e) => throw_r_error(format!("ferx_iovsearch: {e}")),
+        };
+
+        let n = result.rows.len();
+        let mut id = Vec::with_capacity(n);
+        let mut parent = Vec::with_capacity(n);
+        let mut step = Vec::with_capacity(n);
+        let mut description = Vec::with_capacity(n);
+        let mut etas = Vec::with_capacity(n);
+        let mut kappas = Vec::with_capacity(n);
+        let mut kappa_blocks = Vec::with_capacity(n);
+        let mut n_parameters = Vec::with_capacity(n);
+        let mut ofv = Vec::with_capacity(n);
+        let mut criterion = Vec::with_capacity(n);
+        let mut d_criterion = Vec::with_capacity(n);
+        let mut rank_col = Vec::with_capacity(n);
+        let mut converged = Vec::with_capacity(n);
+        let mut passed = Vec::with_capacity(n);
+        let mut failures = Vec::with_capacity(n);
+        let mut error = Vec::with_capacity(n);
+        let mut starts = Vec::with_capacity(n);
+        let mut seconds = Vec::with_capacity(n);
+        let mut selected = Vec::with_capacity(n);
+        let mut step_kind = Vec::with_capacity(n);
+        let mut eta_labels = Vec::with_capacity(n);
+        let mut kappa_labels = Vec::with_capacity(n);
+        let mut kappa_block_labels = Vec::with_capacity(n);
+        let mut structure = Vec::with_capacity(n);
+        for r in &result.rows {
+            let (eta_map, kappa_map) = result
+                .models
+                .get(&r.id)
+                .map(variability_labels)
+                .unwrap_or_default();
+            let eta_lab = resolved_labels(&r.structure.etas, &eta_map, omega_fallback);
+            let kappa_lab = resolved_labels(&r.structure.kappas, &kappa_map, kappa_fallback);
+            id.push(r.id.clone());
+            parent.push(r.parent.clone().unwrap_or_default());
+            step.push(r.step as i32);
+            description.push(r.structure.description());
+            etas.push(r.structure.etas.join(";"));
+            kappas.push(r.structure.kappas.join(";"));
+            kappa_blocks.push(
+                r.structure
+                    .kappa_blocks
+                    .iter()
+                    .map(|b| b.join(","))
+                    .collect::<Vec<_>>()
+                    .join(";"),
+            );
+            n_parameters.push(opt_f64(r.n_parameters.map(|v| v as f64)));
+            ofv.push(opt_f64(r.ofv));
+            criterion.push(r.criterion);
+            d_criterion.push(opt_f64(r.d_criterion));
+            rank_col.push(opt_f64(r.rank.map(|v| v as f64)));
+            converged.push(opt_bool_chr(r.converged));
+            passed.push(r.passed);
+            failures.push(r.failures.join("; "));
+            error.push(
+                r.error
+                    .as_ref()
+                    .map(|e| e.message.clone())
+                    .unwrap_or_default(),
+            );
+            starts.push(r.starts as i32);
+            seconds.push(r.seconds);
+            selected.push(r.selected);
+            step_kind.push(
+                result
+                    .steps
+                    .iter()
+                    .find(|s| s.step == r.step)
+                    .map(|s| s.kind.label().to_string())
+                    .unwrap_or_default(),
+            );
+            eta_labels.push(eta_lab.join(";"));
+            kappa_labels.push(kappa_lab.join(";"));
+            kappa_block_labels.push(block_labels_of(
+                &r.structure.kappas,
+                &r.structure.kappa_blocks,
+                &kappa_lab,
+            ));
+            structure.push(format!(
+                "IIV({});IOV({})",
+                labelled_iov_family(&r.structure.etas, &r.structure.eta_blocks, &eta_lab),
+                labelled_iov_family(&r.structure.kappas, &r.structure.kappa_blocks, &kappa_lab)
+            ));
+        }
+
+        let mut s_step = Vec::new();
+        let mut s_kind = Vec::new();
+        let mut s_parent = Vec::new();
+        let mut s_id = Vec::new();
+        let mut s_criterion = Vec::new();
+        let mut s_d_criterion = Vec::new();
+        let mut s_rank = Vec::new();
+        let mut s_best = Vec::new();
+        for summary in &result.steps {
+            for r in &summary.ranked {
+                s_step.push(summary.step as i32);
+                s_kind.push(summary.kind.label().to_string());
+                s_parent.push(summary.parent.clone());
+                s_id.push(r.id.clone());
+                s_criterion.push(r.criterion);
+                s_d_criterion.push(opt_f64(r.d_criterion));
+                s_rank.push(opt_f64(r.rank.map(|v| v as f64)));
+                s_best.push(r.id == summary.best);
+            }
+        }
+
+        let model_id: Vec<String> = result.models.keys().cloned().collect();
+        let model_text: Vec<String> = result.models.values().map(|m| m.render()).collect();
+
+        let final_model = result.final_model.render();
+        let (final_eta_map, final_kappa_map) = variability_labels(&result.final_model);
+        let (input_eta_map, input_kappa_map) = variability_labels(&result.input_model);
+        let final_eta_lab = resolved_labels(
+            &result.final_structure.etas,
+            &final_eta_map,
+            omega_fallback,
+        );
+        let final_kappa_lab = resolved_labels(
+            &result.final_structure.kappas,
+            &final_kappa_map,
+            kappa_fallback,
+        );
+        let input_eta_lab = resolved_labels(
+            &result.input_structure.etas,
+            &input_eta_map,
+            omega_fallback,
+        );
+        let input_kappa_lab = resolved_labels(
+            &result.input_structure.kappas,
+            &input_kappa_map,
+            kappa_fallback,
+        );
+        let final_fit: Robj = match &result.final_fit {
+            Some(fit) => match search_final_fit(fit, &final_model, &base.prepared.data_path) {
+                Ok(l) => l.into(),
+                Err(e) => throw_r_error(format!("ferx_iovsearch: {e}")),
+            },
+            None => NULL.into(),
+        };
+        let input_row_ofv = result.row("input").and_then(|r| r.ofv).unwrap_or(f64::NAN);
+        let input_criterion = result.row("input").map(|r| r.criterion).unwrap_or(f64::NAN);
+
+        Ok(list!(
+            id = id,
+            parent = parent,
+            step = step,
+            description = description,
+            etas = etas,
+            kappas = kappas,
+            kappa_blocks = kappa_blocks,
+            n_parameters = n_parameters,
+            ofv = ofv,
+            criterion = criterion,
+            d_criterion = d_criterion,
+            rank = rank_col,
+            converged = converged,
+            passed = passed,
+            failures = failures,
+            error = error,
+            starts = starts,
+            seconds = seconds,
+            selected = selected,
+            step_kind = step_kind,
+            eta_labels = eta_labels,
+            kappa_labels = kappa_labels,
+            kappa_block_labels = kappa_block_labels,
+            structure = structure,
+            s_step = s_step,
+            s_kind = s_kind,
+            s_parent = s_parent,
+            s_id = s_id,
+            s_criterion = s_criterion,
+            s_d_criterion = s_d_criterion,
+            s_rank = s_rank,
+            s_best = s_best,
+            model_id = model_id,
+            model_text = model_text,
+            input_model = result.input_model.render(),
+            input_description = result.input_structure.description(),
+            input_structure = format!(
+                "IIV({});IOV({})",
+                labelled_iov_family(
+                    &result.input_structure.etas,
+                    &result.input_structure.eta_blocks,
+                    &input_eta_lab
+                ),
+                labelled_iov_family(
+                    &result.input_structure.kappas,
+                    &result.input_structure.kappa_blocks,
+                    &input_kappa_lab
+                )
             ),
-            labelled_iov_family(
+            input_ofv = input_row_ofv,
+            input_criterion = input_criterion,
+            final_id = result.final_id.clone(),
+            final_model = final_model,
+            final_description = result.final_structure.description(),
+            final_structure = format!(
+                "IIV({});IOV({})",
+                labelled_iov_family(
+                    &result.final_structure.etas,
+                    &result.final_structure.eta_blocks,
+                    &final_eta_lab
+                ),
+                labelled_iov_family(
+                    &result.final_structure.kappas,
+                    &result.final_structure.kappa_blocks,
+                    &final_kappa_lab
+                )
+            ),
+            final_etas = final_eta_lab.clone(),
+            final_kappas = final_kappa_lab.clone(),
+            final_kappa_blocks = block_labels_of(
                 &result.final_structure.kappas,
                 &result.final_structure.kappa_blocks,
                 &final_kappa_lab
-            )
-        ),
-        final_etas = final_eta_lab.clone(),
-        final_kappas = final_kappa_lab.clone(),
-        final_kappa_blocks = block_labels_of(
-            &result.final_structure.kappas,
-            &result.final_structure.kappa_blocks,
-            &final_kappa_lab
-        ),
-        final_criterion = result.final_criterion,
-        final_fit = final_fit,
-        n_steps = result.steps.len() as i32,
-        criterion_label = result.criterion.label().to_string(),
-        distribution = options.distribution.label().to_string(),
-        column = options
-            .column
-            .clone()
-            .or_else(|| base.prepared.parsed.fit_options.iov_column.clone())
-            .unwrap_or_default(),
-        groups = options
-            .groups
-            .iter()
-            .map(|g| g.join(","))
-            .collect::<Vec<_>>(),
-        block_retries = options.block_retries as i32,
-        starts_base = options.starts as i32,
-        opt_cutoff = opt_f64(options.cutoff),
-        summary = ferx_tools::iovsearch::render_summary(&result),
-        directory = directory.to_string(),
-        model = config.base.to_string_lossy().into_owned(),
-        data = base.prepared.data_path.clone(),
-        notes = result.notes.clone(),
-        cancelled = result.cancelled,
-    )
-    .into()
+            ),
+            final_criterion = result.final_criterion,
+            final_fit = final_fit,
+            n_steps = result.steps.len() as i32,
+            criterion_label = result.criterion.label().to_string(),
+            distribution = options.distribution.label().to_string(),
+            column = options
+                .column
+                .clone()
+                .or_else(|| base.prepared.parsed.fit_options.iov_column.clone())
+                .unwrap_or_default(),
+            groups = options
+                .groups
+                .iter()
+                .map(|g| g.join(","))
+                .collect::<Vec<_>>(),
+            block_retries = options.block_retries as i32,
+            starts_base = options.starts as i32,
+            opt_cutoff = opt_f64(options.cutoff),
+            summary = ferx_tools::iovsearch::render_summary(&result),
+            directory = directory.to_string(),
+            model = config.base.to_string_lossy().into_owned(),
+            data = base.prepared.data_path.clone(),
+            notes = result.notes.clone(),
+            cancelled = result.cancelled,
+        )
+        .into())
+    })
 }
 
 /// The columns of an AMD run's `steps.csv`, in order, from the engine.
@@ -7794,10 +7866,12 @@ fn ferx_rust_iovsearch(
 /// @keywords internal
 #[extendr]
 fn ferx_rust_amd_step_columns() -> Vec<String> {
-    ferx_tools::amd::STEP_COLUMNS
-        .iter()
-        .map(|s| s.to_string())
-        .collect()
+    entry(move || {
+        Ok(ferx_tools::amd::STEP_COLUMNS
+            .iter()
+            .map(|s| s.to_string())
+            .collect())
+    })
 }
 
 /// The columns of an AMD run's `candidates.csv`, in order, from the engine.
@@ -7806,10 +7880,12 @@ fn ferx_rust_amd_step_columns() -> Vec<String> {
 /// @keywords internal
 #[extendr]
 fn ferx_rust_amd_candidate_columns() -> Vec<String> {
-    ferx_tools::amd::CANDIDATE_COLUMNS
-        .iter()
-        .map(|s| s.to_string())
-        .collect()
+    entry(move || {
+        Ok(ferx_tools::amd::CANDIDATE_COLUMNS
+            .iter()
+            .map(|s| s.to_string())
+            .collect())
+    })
 }
 
 /// The `[amd]` section an inline call renders.
@@ -7912,53 +7988,55 @@ fn ferx_rust_amd_plan(
     retries_on: &str,
     skip: Vec<String>,
 ) -> Robj {
-    let (config, options, base) = amd_config_and_base(
-        config_path,
-        model_path,
-        data_path,
-        mfl,
-        strategy,
-        retries_on,
-        &skip,
-        "",
-        f64::NAN,
-        0,
-        -1,
-        false,
-    );
-    let ctx = ferx_tools::amd::Context::from_base(&base);
-    let plan = match ferx_tools::amd::plan(&options, &config.mfl, &ctx) {
-        Ok(p) => p,
-        Err(e) => throw_r_error(format!("ferx_amd: {e}")),
-    };
-    list!(
-        index = plan.iter().map(|s| s.index as i32).collect::<Vec<_>>(),
-        step = plan
-            .iter()
-            .map(|s| s.step.label().to_string())
-            .collect::<Vec<_>>(),
-        tool = plan
-            .iter()
-            .map(|s| s.step.tool().to_string())
-            .collect::<Vec<_>>(),
-        rerun = plan.iter().map(|s| s.rerun).collect::<Vec<_>>(),
-        directory = plan.iter().map(|s| s.dir.clone()).collect::<Vec<_>>(),
-        skipped = plan
-            .iter()
-            .map(|s| s.skipped.clone().unwrap_or_default())
-            .collect::<Vec<_>>(),
-        strategy = options.strategy.label().to_string(),
-        retries_on = options.retries.label().to_string(),
-        skip_steps = options
-            .skip
-            .iter()
-            .map(|s| s.label().to_string())
-            .collect::<Vec<_>>(),
-        iov_column = ctx.iov_column.clone().unwrap_or_default(),
-        model = config.base.to_string_lossy().into_owned(),
-        data = base.prepared.data_path.clone(),
-    )
-    .into()
+    entry(move || {
+        let (config, options, base) = amd_config_and_base(
+            config_path,
+            model_path,
+            data_path,
+            mfl,
+            strategy,
+            retries_on,
+            &skip,
+            "",
+            f64::NAN,
+            0,
+            -1,
+            false,
+        );
+        let ctx = ferx_tools::amd::Context::from_base(&base);
+        let plan = match ferx_tools::amd::plan(&options, &config.mfl, &ctx) {
+            Ok(p) => p,
+            Err(e) => throw_r_error(format!("ferx_amd: {e}")),
+        };
+        Ok(list!(
+            index = plan.iter().map(|s| s.index as i32).collect::<Vec<_>>(),
+            step = plan
+                .iter()
+                .map(|s| s.step.label().to_string())
+                .collect::<Vec<_>>(),
+            tool = plan
+                .iter()
+                .map(|s| s.step.tool().to_string())
+                .collect::<Vec<_>>(),
+            rerun = plan.iter().map(|s| s.rerun).collect::<Vec<_>>(),
+            directory = plan.iter().map(|s| s.dir.clone()).collect::<Vec<_>>(),
+            skipped = plan
+                .iter()
+                .map(|s| s.skipped.clone().unwrap_or_default())
+                .collect::<Vec<_>>(),
+            strategy = options.strategy.label().to_string(),
+            retries_on = options.retries.label().to_string(),
+            skip_steps = options
+                .skip
+                .iter()
+                .map(|s| s.label().to_string())
+                .collect::<Vec<_>>(),
+            iov_column = ctx.iov_column.clone().unwrap_or_default(),
+            model = config.base.to_string_lossy().into_owned(),
+            data = base.prepared.data_path.clone(),
+        )
+        .into())
+    })
 }
 
 /// The AMD pipeline - Pharmpy's `amd`, run end to end.
@@ -8011,275 +8089,277 @@ fn ferx_rust_amd(
     directory: &str,
     progress: bool,
 ) -> Robj {
-    if directory.is_empty() {
-        throw_r_error("ferx_amd: a run directory is required");
-    }
-    let (config, options, mut base) = amd_config_and_base(
-        config_path,
-        model_path,
-        data_path,
-        mfl,
-        strategy,
-        retries_on,
-        &skip,
-        rank,
-        rank_cutoff,
-        threads,
-        retries,
-        resume,
-    );
-
-    // One flag, two paths into the engine: `AmdRun::cancel` stops the pipeline
-    // between steps, and the copy on `fit_options` unwinds the fits already in
-    // flight (the same wiring every search tool here uses).
-    let cancel = CancelFlag::new();
-    base.prepared.parsed.fit_options.cancel = Some(cancel.clone());
-
-    let report = |event: ferx_tools::amd::AmdEvent| {
-        use ferx_tools::amd::AmdEvent as E;
-        if !progress {
-            return;
+    entry(move || {
+        if directory.is_empty() {
+            throw_r_error("ferx_amd: a run directory is required");
         }
-        let show = |v: Option<f64>| {
-            v.map(|v| format!("{v:.3}"))
-                .unwrap_or_else(|| "-".to_string())
-        };
-        match event {
-            E::Planned { steps } => {
-                for s in &steps {
-                    match &s.skipped {
-                        Some(reason) => {
-                            eprintln!("  {} {:<12} skipped: {reason}", s.index, s.step.label())
+        let (config, options, mut base) = amd_config_and_base(
+            config_path,
+            model_path,
+            data_path,
+            mfl,
+            strategy,
+            retries_on,
+            &skip,
+            rank,
+            rank_cutoff,
+            threads,
+            retries,
+            resume,
+        );
+
+        // One flag, two paths into the engine: `AmdRun::cancel` stops the pipeline
+        // between steps, and the copy on `fit_options` unwinds the fits already in
+        // flight (the same wiring every search tool here uses).
+        let cancel = CancelFlag::new();
+        base.prepared.parsed.fit_options.cancel = Some(cancel.clone());
+
+        let report = |event: ferx_tools::amd::AmdEvent| {
+            use ferx_tools::amd::AmdEvent as E;
+            if !progress {
+                return;
+            }
+            let show = |v: Option<f64>| {
+                v.map(|v| format!("{v:.3}"))
+                    .unwrap_or_else(|| "-".to_string())
+            };
+            match event {
+                E::Planned { steps } => {
+                    for s in &steps {
+                        match &s.skipped {
+                            Some(reason) => {
+                                eprintln!("  {} {:<12} skipped: {reason}", s.index, s.step.label())
+                            }
+                            None => eprintln!("  {} {:<12} -> {}", s.index, s.step.label(), s.dir),
                         }
-                        None => eprintln!("  {} {:<12} -> {}", s.index, s.step.label(), s.dir),
                     }
                 }
-            }
-            E::StartStarted => eprintln!("Fitting the starting model..."),
-            E::StartFinished { ofv } => eprintln!("Starting model: OFV {}", show(ofv)),
-            E::StepStarted {
-                position,
-                total,
-                step,
-                rerun,
-                ..
-            } => eprintln!(
-                "Step {position}/{total}: {}{} ({})...",
-                step.label(),
-                if rerun { " (rerun)" } else { "" },
-                step.tool()
-            ),
-            E::StepSkipped { step, reason, .. } => {
-                eprintln!("Skipping {}: {reason}", step.label())
-            }
-            E::StepFailed { step, error, .. } => eprintln!(
-                "Step {} failed: {error}; carrying on from the model it was handed",
-                step.label()
-            ),
-            E::StepFinished {
-                step,
-                criterion,
-                before,
-                after,
-                selected,
-                ..
-            } => eprintln!(
-                "  {} done: {criterion} {} -> {}; selected {}",
-                step.label(),
-                show(before),
-                show(after),
-                if selected.is_empty() {
-                    "nothing".to_string()
-                } else {
-                    selected.join("; ")
+                E::StartStarted => eprintln!("Fitting the starting model..."),
+                E::StartFinished { ofv } => eprintln!("Starting model: OFV {}", show(ofv)),
+                E::StepStarted {
+                    position,
+                    total,
+                    step,
+                    rerun,
+                    ..
+                } => eprintln!(
+                    "Step {position}/{total}: {}{} ({})...",
+                    step.label(),
+                    if rerun { " (rerun)" } else { "" },
+                    step.tool()
+                ),
+                E::StepSkipped { step, reason, .. } => {
+                    eprintln!("Skipping {}: {reason}", step.label())
                 }
-            ),
-            E::RetriesStarted { starts, .. } => {
-                eprintln!("  retries: refitting the selected model with {starts} starts...")
+                E::StepFailed { step, error, .. } => eprintln!(
+                    "Step {} failed: {error}; carrying on from the model it was handed",
+                    step.label()
+                ),
+                E::StepFinished {
+                    step,
+                    criterion,
+                    before,
+                    after,
+                    selected,
+                    ..
+                } => eprintln!(
+                    "  {} done: {criterion} {} -> {}; selected {}",
+                    step.label(),
+                    show(before),
+                    show(after),
+                    if selected.is_empty() {
+                        "nothing".to_string()
+                    } else {
+                        selected.join("; ")
+                    }
+                ),
+                E::RetriesStarted { starts, .. } => {
+                    eprintln!("  retries: refitting the selected model with {starts} starts...")
+                }
+                E::RetriesFinished { improved, ofv } => eprintln!(
+                    "  retries: {} (OFV {})",
+                    if improved { "improved" } else { "kept" },
+                    show(ofv)
+                ),
             }
-            E::RetriesFinished { improved, ofv } => eprintln!(
-                "  retries: {} (OFV {})",
-                if improved { "improved" } else { "kept" },
-                show(ofv)
-            ),
-        }
-    };
+        };
 
-    let dir = std::path::PathBuf::from(directory);
-    let result = match run_search_cancellable(&cancel, || {
-        ferx_tools::amd::run_amd(
-            &config,
-            &base,
-            ferx_tools::amd::AmdRun {
-                dir: dir.clone(),
-                threads: config.run.threads,
-                cancel: Some(cancel.clone()),
-                progress: Some(&report),
-            },
-        )
-    }) {
-        Ok(r) => r,
-        Err(e) => throw_r_error(format!("ferx_amd: {e}")),
-    };
-
-    // The step table, column for column as `STEP_COLUMNS` orders it, with the
-    // pipeline position beside the step's name: a `reevaluation` run carries
-    // two rows called `iivsearch`, and the name alone would not say which.
-    let n = result.steps.len();
-    let mut s_index = Vec::with_capacity(n);
-    let mut s_step = Vec::with_capacity(n);
-    let mut s_tool = Vec::with_capacity(n);
-    let mut s_rerun = Vec::with_capacity(n);
-    let mut s_dir = Vec::with_capacity(n);
-    let mut s_status = Vec::with_capacity(n);
-    let mut s_reason = Vec::with_capacity(n);
-    let mut s_criterion = Vec::with_capacity(n);
-    let mut s_value_before = Vec::with_capacity(n);
-    let mut s_value_after = Vec::with_capacity(n);
-    let mut s_ofv_before = Vec::with_capacity(n);
-    let mut s_ofv_after = Vec::with_capacity(n);
-    let mut s_candidates = Vec::with_capacity(n);
-    let mut s_selected = Vec::with_capacity(n);
-    let mut s_seconds = Vec::with_capacity(n);
-    let mut s_notes = Vec::with_capacity(n);
-    for s in &result.steps {
-        s_index.push(s.index as i32);
-        s_step.push(s.step.label().to_string());
-        s_tool.push(s.step.tool().to_string());
-        s_rerun.push(s.rerun);
-        s_dir.push(s.dir.clone());
-        s_status.push(s.status().to_string());
-        s_reason.push(s.reason().unwrap_or_default().to_string());
-        s_criterion.push(s.criterion.to_string());
-        s_value_before.push(opt_f64(s.value_before));
-        s_value_after.push(opt_f64(s.value_after));
-        s_ofv_before.push(opt_f64(s.ofv_before));
-        s_ofv_after.push(opt_f64(s.ofv_after));
-        s_candidates.push(s.candidates as i32);
-        s_selected.push(s.selected.join("; "));
-        s_seconds.push(s.seconds);
-        s_notes.push(s.notes.join("; "));
-    }
-
-    // Every candidate of every step, as `CANDIDATE_COLUMNS` orders it. The
-    // strictness verdict and its reasons travel with each row: a step's winner
-    // is only as trustworthy as the gate's verdict on the siblings it beat.
-    let m = result.rows.len();
-    let mut c_step = Vec::with_capacity(m);
-    let mut c_tool = Vec::with_capacity(m);
-    let mut c_id = Vec::with_capacity(m);
-    let mut c_parent = Vec::with_capacity(m);
-    let mut c_description = Vec::with_capacity(m);
-    let mut c_criterion = Vec::with_capacity(m);
-    let mut c_value = Vec::with_capacity(m);
-    let mut c_d_value = Vec::with_capacity(m);
-    let mut c_ofv = Vec::with_capacity(m);
-    let mut c_d_ofv = Vec::with_capacity(m);
-    let mut c_rank = Vec::with_capacity(m);
-    let mut c_converged = Vec::with_capacity(m);
-    let mut c_passed = Vec::with_capacity(m);
-    let mut c_failures = Vec::with_capacity(m);
-    let mut c_error = Vec::with_capacity(m);
-    let mut c_note = Vec::with_capacity(m);
-    let mut c_seconds = Vec::with_capacity(m);
-    let mut c_selected = Vec::with_capacity(m);
-    for r in &result.rows {
-        c_step.push(r.step as i32);
-        c_tool.push(r.tool.clone());
-        c_id.push(r.id.clone());
-        c_parent.push(r.parent.clone().unwrap_or_default());
-        c_description.push(r.description.clone());
-        c_criterion.push(r.criterion.to_string());
-        c_value.push(opt_f64(r.value));
-        c_d_value.push(opt_f64(r.d_value));
-        c_ofv.push(opt_f64(r.ofv));
-        c_d_ofv.push(opt_f64(r.d_ofv));
-        c_rank.push(opt_f64(r.rank.map(|v| v as f64)));
-        c_converged.push(opt_bool_chr(r.converged));
-        c_passed.push(r.passed);
-        c_failures.push(r.failures.join("; "));
-        c_error.push(r.error.clone().unwrap_or_default());
-        c_note.push(r.note.clone().unwrap_or_default());
-        c_seconds.push(r.seconds);
-        c_selected.push(r.selected);
-    }
-
-    let final_model = result.final_model.render();
-    let final_fit: Robj = match &result.final_fit {
-        Some(fit) => match search_final_fit(fit, &final_model, &base.prepared.data_path) {
-            Ok(l) => l.into(),
+        let dir = std::path::PathBuf::from(directory);
+        let result = match run_search_cancellable(&cancel, || {
+            ferx_tools::amd::run_amd(
+                &config,
+                &base,
+                ferx_tools::amd::AmdRun {
+                    dir: dir.clone(),
+                    threads: config.run.threads,
+                    cancel: Some(cancel.clone()),
+                    progress: Some(&report),
+                },
+            )
+        }) {
+            Ok(r) => r,
             Err(e) => throw_r_error(format!("ferx_amd: {e}")),
-        },
-        None => NULL.into(),
-    };
+        };
 
-    list!(
-        s_index = s_index,
-        s_step = s_step,
-        s_tool = s_tool,
-        s_rerun = s_rerun,
-        s_dir = s_dir,
-        s_status = s_status,
-        s_reason = s_reason,
-        s_criterion = s_criterion,
-        s_value_before = s_value_before,
-        s_value_after = s_value_after,
-        s_ofv_before = s_ofv_before,
-        s_ofv_after = s_ofv_after,
-        s_candidates = s_candidates,
-        s_selected = s_selected,
-        s_seconds = s_seconds,
-        s_notes = s_notes,
-        c_step = c_step,
-        c_tool = c_tool,
-        c_id = c_id,
-        c_parent = c_parent,
-        c_description = c_description,
-        c_criterion = c_criterion,
-        c_value = c_value,
-        c_d_value = c_d_value,
-        c_ofv = c_ofv,
-        c_d_ofv = c_d_ofv,
-        c_rank = c_rank,
-        c_converged = c_converged,
-        c_passed = c_passed,
-        c_failures = c_failures,
-        c_error = c_error,
-        c_note = c_note,
-        c_seconds = c_seconds,
-        c_selected = c_selected,
-        input_model = result.input_model.render(),
-        input_ofv = opt_f64(result.input_fit.as_ref().map(|f| f.ofv)),
-        final_model = final_model,
-        final_ofv = opt_f64(result.final_fit.as_ref().map(|f| f.ofv)),
-        final_fit = final_fit,
-        d_ofv = opt_f64(result.d_ofv()),
-        strategy = options.strategy.label().to_string(),
-        retries_on = options.retries.label().to_string(),
-        skip_steps = options
-            .skip
-            .iter()
-            .map(|s| s.label().to_string())
-            .collect::<Vec<_>>(),
-        summary = ferx_tools::amd::render_summary(&result),
-        directory = directory.to_string(),
-        steps_csv = ferx_tools::amd::steps_path(&dir)
-            .to_string_lossy()
-            .into_owned(),
-        candidates_csv = ferx_tools::amd::candidates_path(&dir)
-            .to_string_lossy()
-            .into_owned(),
-        final_model_path = ferx_tools::amd::final_model_path(&dir)
-            .to_string_lossy()
-            .into_owned(),
-        // The base model as the config resolved it, so the R object names the
-        // same file in both entry forms.
-        model = config.base.to_string_lossy().into_owned(),
-        data = base.prepared.data_path.clone(),
-        notes = result.notes.clone(),
-        cancelled = result.cancelled,
-    )
-    .into()
+        // The step table, column for column as `STEP_COLUMNS` orders it, with the
+        // pipeline position beside the step's name: a `reevaluation` run carries
+        // two rows called `iivsearch`, and the name alone would not say which.
+        let n = result.steps.len();
+        let mut s_index = Vec::with_capacity(n);
+        let mut s_step = Vec::with_capacity(n);
+        let mut s_tool = Vec::with_capacity(n);
+        let mut s_rerun = Vec::with_capacity(n);
+        let mut s_dir = Vec::with_capacity(n);
+        let mut s_status = Vec::with_capacity(n);
+        let mut s_reason = Vec::with_capacity(n);
+        let mut s_criterion = Vec::with_capacity(n);
+        let mut s_value_before = Vec::with_capacity(n);
+        let mut s_value_after = Vec::with_capacity(n);
+        let mut s_ofv_before = Vec::with_capacity(n);
+        let mut s_ofv_after = Vec::with_capacity(n);
+        let mut s_candidates = Vec::with_capacity(n);
+        let mut s_selected = Vec::with_capacity(n);
+        let mut s_seconds = Vec::with_capacity(n);
+        let mut s_notes = Vec::with_capacity(n);
+        for s in &result.steps {
+            s_index.push(s.index as i32);
+            s_step.push(s.step.label().to_string());
+            s_tool.push(s.step.tool().to_string());
+            s_rerun.push(s.rerun);
+            s_dir.push(s.dir.clone());
+            s_status.push(s.status().to_string());
+            s_reason.push(s.reason().unwrap_or_default().to_string());
+            s_criterion.push(s.criterion.to_string());
+            s_value_before.push(opt_f64(s.value_before));
+            s_value_after.push(opt_f64(s.value_after));
+            s_ofv_before.push(opt_f64(s.ofv_before));
+            s_ofv_after.push(opt_f64(s.ofv_after));
+            s_candidates.push(s.candidates as i32);
+            s_selected.push(s.selected.join("; "));
+            s_seconds.push(s.seconds);
+            s_notes.push(s.notes.join("; "));
+        }
+
+        // Every candidate of every step, as `CANDIDATE_COLUMNS` orders it. The
+        // strictness verdict and its reasons travel with each row: a step's winner
+        // is only as trustworthy as the gate's verdict on the siblings it beat.
+        let m = result.rows.len();
+        let mut c_step = Vec::with_capacity(m);
+        let mut c_tool = Vec::with_capacity(m);
+        let mut c_id = Vec::with_capacity(m);
+        let mut c_parent = Vec::with_capacity(m);
+        let mut c_description = Vec::with_capacity(m);
+        let mut c_criterion = Vec::with_capacity(m);
+        let mut c_value = Vec::with_capacity(m);
+        let mut c_d_value = Vec::with_capacity(m);
+        let mut c_ofv = Vec::with_capacity(m);
+        let mut c_d_ofv = Vec::with_capacity(m);
+        let mut c_rank = Vec::with_capacity(m);
+        let mut c_converged = Vec::with_capacity(m);
+        let mut c_passed = Vec::with_capacity(m);
+        let mut c_failures = Vec::with_capacity(m);
+        let mut c_error = Vec::with_capacity(m);
+        let mut c_note = Vec::with_capacity(m);
+        let mut c_seconds = Vec::with_capacity(m);
+        let mut c_selected = Vec::with_capacity(m);
+        for r in &result.rows {
+            c_step.push(r.step as i32);
+            c_tool.push(r.tool.clone());
+            c_id.push(r.id.clone());
+            c_parent.push(r.parent.clone().unwrap_or_default());
+            c_description.push(r.description.clone());
+            c_criterion.push(r.criterion.to_string());
+            c_value.push(opt_f64(r.value));
+            c_d_value.push(opt_f64(r.d_value));
+            c_ofv.push(opt_f64(r.ofv));
+            c_d_ofv.push(opt_f64(r.d_ofv));
+            c_rank.push(opt_f64(r.rank.map(|v| v as f64)));
+            c_converged.push(opt_bool_chr(r.converged));
+            c_passed.push(r.passed);
+            c_failures.push(r.failures.join("; "));
+            c_error.push(r.error.clone().unwrap_or_default());
+            c_note.push(r.note.clone().unwrap_or_default());
+            c_seconds.push(r.seconds);
+            c_selected.push(r.selected);
+        }
+
+        let final_model = result.final_model.render();
+        let final_fit: Robj = match &result.final_fit {
+            Some(fit) => match search_final_fit(fit, &final_model, &base.prepared.data_path) {
+                Ok(l) => l.into(),
+                Err(e) => throw_r_error(format!("ferx_amd: {e}")),
+            },
+            None => NULL.into(),
+        };
+
+        Ok(list!(
+            s_index = s_index,
+            s_step = s_step,
+            s_tool = s_tool,
+            s_rerun = s_rerun,
+            s_dir = s_dir,
+            s_status = s_status,
+            s_reason = s_reason,
+            s_criterion = s_criterion,
+            s_value_before = s_value_before,
+            s_value_after = s_value_after,
+            s_ofv_before = s_ofv_before,
+            s_ofv_after = s_ofv_after,
+            s_candidates = s_candidates,
+            s_selected = s_selected,
+            s_seconds = s_seconds,
+            s_notes = s_notes,
+            c_step = c_step,
+            c_tool = c_tool,
+            c_id = c_id,
+            c_parent = c_parent,
+            c_description = c_description,
+            c_criterion = c_criterion,
+            c_value = c_value,
+            c_d_value = c_d_value,
+            c_ofv = c_ofv,
+            c_d_ofv = c_d_ofv,
+            c_rank = c_rank,
+            c_converged = c_converged,
+            c_passed = c_passed,
+            c_failures = c_failures,
+            c_error = c_error,
+            c_note = c_note,
+            c_seconds = c_seconds,
+            c_selected = c_selected,
+            input_model = result.input_model.render(),
+            input_ofv = opt_f64(result.input_fit.as_ref().map(|f| f.ofv)),
+            final_model = final_model,
+            final_ofv = opt_f64(result.final_fit.as_ref().map(|f| f.ofv)),
+            final_fit = final_fit,
+            d_ofv = opt_f64(result.d_ofv()),
+            strategy = options.strategy.label().to_string(),
+            retries_on = options.retries.label().to_string(),
+            skip_steps = options
+                .skip
+                .iter()
+                .map(|s| s.label().to_string())
+                .collect::<Vec<_>>(),
+            summary = ferx_tools::amd::render_summary(&result),
+            directory = directory.to_string(),
+            steps_csv = ferx_tools::amd::steps_path(&dir)
+                .to_string_lossy()
+                .into_owned(),
+            candidates_csv = ferx_tools::amd::candidates_path(&dir)
+                .to_string_lossy()
+                .into_owned(),
+            final_model_path = ferx_tools::amd::final_model_path(&dir)
+                .to_string_lossy()
+                .into_owned(),
+            // The base model as the config resolved it, so the R object names the
+            // same file in both entry forms.
+            model = config.base.to_string_lossy().into_owned(),
+            data = base.prepared.data_path.clone(),
+            notes = result.notes.clone(),
+            cancelled = result.cancelled,
+        )
+        .into())
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -8355,18 +8435,20 @@ fn globalsearch_ga_columns(
 /// @keywords internal
 #[extendr]
 fn ferx_rust_globalsearch_option_keys() -> Robj {
-    let (ga_name, ga_value, ga_kind) =
-        globalsearch_ga_columns(&ferx_tools::globalsearch::GaOptions::default());
-    let (penalty_name, penalty_value, _) =
-        search_penalty_columns(&ferx_tools::search::Penalties::default());
-    list!(
-        ga_name = ga_name,
-        ga_value = ga_value,
-        ga_kind = ga_kind,
-        penalty_name = penalty_name,
-        penalty_value = penalty_value,
-    )
-    .into()
+    entry(move || {
+        let (ga_name, ga_value, ga_kind) =
+            globalsearch_ga_columns(&ferx_tools::globalsearch::GaOptions::default());
+        let (penalty_name, penalty_value, _) =
+            search_penalty_columns(&ferx_tools::search::Penalties::default());
+        Ok(list!(
+            ga_name = ga_name,
+            ga_value = ga_value,
+            ga_kind = ga_kind,
+            penalty_name = penalty_name,
+            penalty_value = penalty_value,
+        )
+        .into())
+    })
 }
 
 /// The columns of a global search's `models.csv`, in order, from the engine.
@@ -8375,10 +8457,12 @@ fn ferx_rust_globalsearch_option_keys() -> Robj {
 /// @keywords internal
 #[extendr]
 fn ferx_rust_globalsearch_columns() -> Vec<String> {
-    ferx_tools::globalsearch::MODEL_COLUMNS
-        .iter()
-        .map(|s| s.to_string())
-        .collect()
+    entry(move || {
+        Ok(ferx_tools::globalsearch::MODEL_COLUMNS
+            .iter()
+            .map(|s| s.to_string())
+            .collect())
+    })
 }
 
 /// The `[globalsearch]`, `[globalsearch.ga]` and `[rank.penalties]` sections
@@ -8479,335 +8563,337 @@ fn ferx_rust_globalsearch(
     directory: &str,
     progress: bool,
 ) -> Robj {
-    let section = globalsearch_section(
-        algorithm,
-        iiv_strategy,
-        max_models,
-        &ga_keys,
-        &ga_values,
-        &penalty_keys,
-        &penalty_values,
-    );
-    let text = search_config_text(
-        model_path,
-        data_path,
-        mfl,
-        rank,
-        rank_cutoff,
-        threads,
-        retries,
-        resume,
-        &section,
-    );
-    let inline_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let config =
-        match search_config_for_tool(config_path, &text, &inline_dir, threads, retries, resume) {
-            Ok(c) => c,
+    entry(move || {
+        let section = globalsearch_section(
+            algorithm,
+            iiv_strategy,
+            max_models,
+            &ga_keys,
+            &ga_values,
+            &penalty_keys,
+            &penalty_values,
+        );
+        let text = search_config_text(
+            model_path,
+            data_path,
+            mfl,
+            rank,
+            rank_cutoff,
+            threads,
+            retries,
+            resume,
+            &section,
+        );
+        let inline_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let config =
+            match search_config_for_tool(config_path, &text, &inline_dir, threads, retries, resume) {
+                Ok(c) => c,
+                Err(e) => throw_r_error(format!("ferx_globalsearch: {e}")),
+            };
+        // Both refusals happen before the dataset is read: a file whose keys this
+        // tool cannot honour, and a space it cannot lay out as a grid - an
+        // ALLOMETRY or variability statement is another tool's axis and is named
+        // rather than quietly dropped from the grid.
+        let options = match ferx_tools::globalsearch::GlobalsearchOptions::from_config(&config) {
+            Ok(o) => o,
             Err(e) => throw_r_error(format!("ferx_globalsearch: {e}")),
         };
-    // Both refusals happen before the dataset is read: a file whose keys this
-    // tool cannot honour, and a space it cannot lay out as a grid - an
-    // ALLOMETRY or variability statement is another tool's axis and is named
-    // rather than quietly dropped from the grid.
-    let options = match ferx_tools::globalsearch::GlobalsearchOptions::from_config(&config) {
-        Ok(o) => o,
-        Err(e) => throw_r_error(format!("ferx_globalsearch: {e}")),
-    };
-    if let Err(e) = ferx_tools::globalsearch::GlobalsearchOptions::check_space(&config) {
-        throw_r_error(format!("ferx_globalsearch: {e}"));
-    }
-    let mut base = match config.load_base() {
-        Ok(b) => b,
-        Err(e) => throw_r_error(format!("ferx_globalsearch: {e}")),
-    };
-
-    // One flag, two paths into the engine: `GlobalsearchRun::cancel` stops the
-    // batch loop, and the copy on `fit_options` unwinds the fits already in
-    // flight (the same wiring every search tool here uses).
-    let cancel = CancelFlag::new();
-    base.prepared.parsed.fit_options.cancel = Some(cancel.clone());
-
-    let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
-    let report = |event: ferx_tools::globalsearch::GlobalsearchEvent| {
-        use ferx_tools::globalsearch::GlobalsearchEvent as E;
-        if !progress {
-            return;
+        if let Err(e) = ferx_tools::globalsearch::GlobalsearchOptions::check_space(&config) {
+            throw_r_error(format!("ferx_globalsearch: {e}"));
         }
-        match event {
-            E::InputStarted => eprintln!("Fitting the input model..."),
-            E::InputFinished { ofv, criterion } => {
-                eprintln!("Input model: OFV {ofv:.3}, criterion {criterion:.3}")
+        let mut base = match config.load_base() {
+            Ok(b) => b,
+            Err(e) => throw_r_error(format!("ferx_globalsearch: {e}")),
+        };
+
+        // One flag, two paths into the engine: `GlobalsearchRun::cancel` stops the
+        // batch loop, and the copy on `fit_options` unwinds the fits already in
+        // flight (the same wiring every search tool here uses).
+        let cancel = CancelFlag::new();
+        base.prepared.parsed.fit_options.cancel = Some(cancel.clone());
+
+        let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
+        let report = |event: ferx_tools::globalsearch::GlobalsearchEvent| {
+            use ferx_tools::globalsearch::GlobalsearchEvent as E;
+            if !progress {
+                return;
             }
-            E::Space { axes, size } => eprintln!(
-                "Grid: {size} point{} over {axes} ax{}",
-                if size == 1 { "" } else { "s" },
-                if axes == 1 { "is" } else { "es" }
-            ),
-            E::BatchStarted {
-                step,
-                proposed,
-                candidates,
-            } => eprintln!(
-                "{step}: {proposed} genome{} proposed, {candidates} to fit...",
-                if proposed == 1 { "" } else { "s" }
-            ),
-            E::BatchFinished { step, best } => match best {
-                Some((id, fitness)) => eprintln!("{step}: best {id} (fitness {fitness:.3})"),
-                None => eprintln!("{step}: no candidate passed the gate"),
-            },
-        }
-    };
-
-    let result = match run_search_cancellable(&cancel, || {
-        ferx_tools::globalsearch::run_globalsearch(
-            &config,
-            &base,
-            ferx_tools::globalsearch::GlobalsearchRun {
-                dir: dir.clone(),
-                threads: config.run.threads,
-                cancel: Some(cancel.clone()),
-                progress: Some(&report),
-                ..Default::default()
-            },
-        )
-    }) {
-        Ok(r) => r,
-        Err(e) => throw_r_error(format!("ferx_globalsearch: {e}")),
-    };
-
-    // The model table, column for column as `MODEL_COLUMNS` orders it, then
-    // the three charges that separate a row's fitness from its criterion.
-    // Those are not a fourth table: `fitness_of` in the engine is what they
-    // restate, so that a genome which lost to a tie-break penalty does not
-    // read as though it lost on OFV (#364).
-    let penalties = result.options.penalties;
-    let n = result.rows.len();
-    let mut id = Vec::with_capacity(n);
-    let mut parent = Vec::with_capacity(n);
-    let mut step = Vec::with_capacity(n);
-    let mut genome = Vec::with_capacity(n);
-    let mut absorption = Vec::with_capacity(n);
-    let mut elimination = Vec::with_capacity(n);
-    let mut peripherals = Vec::with_capacity(n);
-    let mut transits = Vec::with_capacity(n);
-    let mut lagtime = Vec::with_capacity(n);
-    let mut covariates = Vec::with_capacity(n);
-    let mut n_parameters = Vec::with_capacity(n);
-    let mut ofv = Vec::with_capacity(n);
-    let mut criterion = Vec::with_capacity(n);
-    let mut fitness = Vec::with_capacity(n);
-    let mut rank_col = Vec::with_capacity(n);
-    let mut converged = Vec::with_capacity(n);
-    let mut passed = Vec::with_capacity(n);
-    let mut failures = Vec::with_capacity(n);
-    let mut error = Vec::with_capacity(n);
-    let mut seconds = Vec::with_capacity(n);
-    let mut selected = Vec::with_capacity(n);
-    let mut non_influential = Vec::with_capacity(n);
-    let mut duplicate_of = Vec::with_capacity(n);
-    let mut reused = Vec::with_capacity(n);
-    let mut charge_non_influential = Vec::with_capacity(n);
-    let mut charge_gate = Vec::with_capacity(n);
-    let mut charge_crash = Vec::with_capacity(n);
-    for r in &result.rows {
-        let s = r.structure;
-        id.push(r.id.clone());
-        parent.push(r.parent.clone().unwrap_or_default());
-        step.push(r.step.clone());
-        // Empty for the input row, which is no point of the grid.
-        genome.push(
-            r.genome
-                .as_ref()
-                .map(|_| r.description.clone())
-                .unwrap_or_default(),
-        );
-        absorption.push(
-            s.map(|s| s.absorption.label().to_string())
-                .unwrap_or_default(),
-        );
-        elimination.push(
-            s.map(|s| s.elimination.label().to_string())
-                .unwrap_or_default(),
-        );
-        peripherals.push(s.map(|s| s.peripherals.to_string()).unwrap_or_default());
-        // `0` when the drug is absorbed first-order, `N` for the estimated
-        // count - the same three spellings `models.csv` writes.
-        transits.push(
-            s.map(|s| match s.transits {
-                None => "0".to_string(),
-                Some(t) => t.to_string(),
-            })
-            .unwrap_or_default(),
-        );
-        lagtime.push(
-            s.map(|s| if s.lagtime { "ON" } else { "OFF" }.to_string())
-                .unwrap_or_default(),
-        );
-        covariates.push(
-            r.effects
-                .iter()
-                .map(|e| format!("{}={}", e.pair_key(), e.form_label()))
-                .collect::<Vec<_>>()
-                .join(";"),
-        );
-        n_parameters.push(opt_f64(r.n_parameters.map(|v| v as f64)));
-        ofv.push(opt_f64(r.ofv));
-        criterion.push(r.criterion);
-        fitness.push(r.fitness);
-        rank_col.push(opt_f64(r.rank.map(|v| v as f64)));
-        converged.push(opt_bool_chr(r.converged));
-        passed.push(r.passed);
-        failures.push(r.failures.join("; "));
-        error.push(
-            r.error
-                .as_ref()
-                .map(|e| e.message.clone())
-                .unwrap_or_default(),
-        );
-        seconds.push(r.seconds);
-        selected.push(r.selected);
-        non_influential.push(r.non_influential as i32);
-        duplicate_of.push(r.duplicate_of.clone().unwrap_or_default());
-        reused.push(r.reused);
-        // The decomposition the engine applies: a row with no usable
-        // criterion is charged the crash value outright, anything else is its
-        // criterion plus the non-influential tie-break and, when the gate
-        // refused it, the gate charge. The three always sum to
-        // `fitness - criterion`, or to `fitness` when there is no criterion.
-        let (c_ni, c_gate, c_crash) = if r.error.is_some() || !r.criterion.is_finite() {
-            (0.0, 0.0, penalties.crash)
-        } else {
-            (
-                penalties.non_influential_charge(r.non_influential),
-                if r.passed { 0.0 } else { penalties.gate },
-                0.0,
-            )
+            match event {
+                E::InputStarted => eprintln!("Fitting the input model..."),
+                E::InputFinished { ofv, criterion } => {
+                    eprintln!("Input model: OFV {ofv:.3}, criterion {criterion:.3}")
+                }
+                E::Space { axes, size } => eprintln!(
+                    "Grid: {size} point{} over {axes} ax{}",
+                    if size == 1 { "" } else { "s" },
+                    if axes == 1 { "is" } else { "es" }
+                ),
+                E::BatchStarted {
+                    step,
+                    proposed,
+                    candidates,
+                } => eprintln!(
+                    "{step}: {proposed} genome{} proposed, {candidates} to fit...",
+                    if proposed == 1 { "" } else { "s" }
+                ),
+                E::BatchFinished { step, best } => match best {
+                    Some((id, fitness)) => eprintln!("{step}: best {id} (fitness {fitness:.3})"),
+                    None => eprintln!("{step}: no candidate passed the gate"),
+                },
+            }
         };
-        charge_non_influential.push(c_ni);
-        charge_gate.push(c_gate);
-        charge_crash.push(c_crash);
-    }
 
-    // The grid, axis by axis, as a named list of allele labels - the engine's
-    // own labels, so the `genome` column and the axes read in one vocabulary.
-    let axis_names: Vec<String> = result.axes.iter().map(|(n, _)| n.clone()).collect();
-    let axis_values: Vec<Robj> = result
-        .axes
-        .iter()
-        .map(|(_, alleles)| alleles.clone().into())
-        .collect();
-    let mut axes = List::from_values(axis_values);
-    let _ = axes.set_names(&axis_names);
-
-    // The GA's trajectory; empty for an exhaustive search.
-    let mut g_index = Vec::with_capacity(result.generations.len());
-    let mut g_best = Vec::with_capacity(result.generations.len());
-    let mut g_best_fitness = Vec::with_capacity(result.generations.len());
-    let mut g_mean_fitness = Vec::with_capacity(result.generations.len());
-    let mut g_polished = Vec::with_capacity(result.generations.len());
-    for g in &result.generations {
-        g_index.push(g.index as i32);
-        g_best.push(
-            result
-                .rows
-                .iter()
-                .find(|r| r.genome.as_ref() == Some(&g.best))
-                .map(|r| r.id.clone())
-                .unwrap_or_default(),
-        );
-        g_best_fitness.push(g.best_fitness);
-        g_mean_fitness.push(g.mean_fitness);
-        g_polished.push(g.polished as i32);
-    }
-
-    // Every candidate's text, so a user can read or refit the model the table
-    // ranked second without re-running the search.
-    let model_id: Vec<String> = result.models.keys().cloned().collect();
-    let model_text: Vec<String> = result.models.values().map(|m| m.render()).collect();
-
-    let final_model = result.final_model.render();
-    let final_fit: Robj = match &result.final_fit {
-        Some(fit) => match search_final_fit(fit, &final_model, &base.prepared.data_path) {
-            Ok(l) => l.into(),
+        let result = match run_search_cancellable(&cancel, || {
+            ferx_tools::globalsearch::run_globalsearch(
+                &config,
+                &base,
+                ferx_tools::globalsearch::GlobalsearchRun {
+                    dir: dir.clone(),
+                    threads: config.run.threads,
+                    cancel: Some(cancel.clone()),
+                    progress: Some(&report),
+                    ..Default::default()
+                },
+            )
+        }) {
+            Ok(r) => r,
             Err(e) => throw_r_error(format!("ferx_globalsearch: {e}")),
-        },
-        None => NULL.into(),
-    };
+        };
 
-    let (ga_name, ga_value, _) = globalsearch_ga_columns(&result.options.ga);
-    let (penalty_name, penalty_value, _) = search_penalty_columns(&penalties);
-    let input_row = result.row("input");
+        // The model table, column for column as `MODEL_COLUMNS` orders it, then
+        // the three charges that separate a row's fitness from its criterion.
+        // Those are not a fourth table: `fitness_of` in the engine is what they
+        // restate, so that a genome which lost to a tie-break penalty does not
+        // read as though it lost on OFV (#364).
+        let penalties = result.options.penalties;
+        let n = result.rows.len();
+        let mut id = Vec::with_capacity(n);
+        let mut parent = Vec::with_capacity(n);
+        let mut step = Vec::with_capacity(n);
+        let mut genome = Vec::with_capacity(n);
+        let mut absorption = Vec::with_capacity(n);
+        let mut elimination = Vec::with_capacity(n);
+        let mut peripherals = Vec::with_capacity(n);
+        let mut transits = Vec::with_capacity(n);
+        let mut lagtime = Vec::with_capacity(n);
+        let mut covariates = Vec::with_capacity(n);
+        let mut n_parameters = Vec::with_capacity(n);
+        let mut ofv = Vec::with_capacity(n);
+        let mut criterion = Vec::with_capacity(n);
+        let mut fitness = Vec::with_capacity(n);
+        let mut rank_col = Vec::with_capacity(n);
+        let mut converged = Vec::with_capacity(n);
+        let mut passed = Vec::with_capacity(n);
+        let mut failures = Vec::with_capacity(n);
+        let mut error = Vec::with_capacity(n);
+        let mut seconds = Vec::with_capacity(n);
+        let mut selected = Vec::with_capacity(n);
+        let mut non_influential = Vec::with_capacity(n);
+        let mut duplicate_of = Vec::with_capacity(n);
+        let mut reused = Vec::with_capacity(n);
+        let mut charge_non_influential = Vec::with_capacity(n);
+        let mut charge_gate = Vec::with_capacity(n);
+        let mut charge_crash = Vec::with_capacity(n);
+        for r in &result.rows {
+            let s = r.structure;
+            id.push(r.id.clone());
+            parent.push(r.parent.clone().unwrap_or_default());
+            step.push(r.step.clone());
+            // Empty for the input row, which is no point of the grid.
+            genome.push(
+                r.genome
+                    .as_ref()
+                    .map(|_| r.description.clone())
+                    .unwrap_or_default(),
+            );
+            absorption.push(
+                s.map(|s| s.absorption.label().to_string())
+                    .unwrap_or_default(),
+            );
+            elimination.push(
+                s.map(|s| s.elimination.label().to_string())
+                    .unwrap_or_default(),
+            );
+            peripherals.push(s.map(|s| s.peripherals.to_string()).unwrap_or_default());
+            // `0` when the drug is absorbed first-order, `N` for the estimated
+            // count - the same three spellings `models.csv` writes.
+            transits.push(
+                s.map(|s| match s.transits {
+                    None => "0".to_string(),
+                    Some(t) => t.to_string(),
+                })
+                .unwrap_or_default(),
+            );
+            lagtime.push(
+                s.map(|s| if s.lagtime { "ON" } else { "OFF" }.to_string())
+                    .unwrap_or_default(),
+            );
+            covariates.push(
+                r.effects
+                    .iter()
+                    .map(|e| format!("{}={}", e.pair_key(), e.form_label()))
+                    .collect::<Vec<_>>()
+                    .join(";"),
+            );
+            n_parameters.push(opt_f64(r.n_parameters.map(|v| v as f64)));
+            ofv.push(opt_f64(r.ofv));
+            criterion.push(r.criterion);
+            fitness.push(r.fitness);
+            rank_col.push(opt_f64(r.rank.map(|v| v as f64)));
+            converged.push(opt_bool_chr(r.converged));
+            passed.push(r.passed);
+            failures.push(r.failures.join("; "));
+            error.push(
+                r.error
+                    .as_ref()
+                    .map(|e| e.message.clone())
+                    .unwrap_or_default(),
+            );
+            seconds.push(r.seconds);
+            selected.push(r.selected);
+            non_influential.push(r.non_influential as i32);
+            duplicate_of.push(r.duplicate_of.clone().unwrap_or_default());
+            reused.push(r.reused);
+            // The decomposition the engine applies: a row with no usable
+            // criterion is charged the crash value outright, anything else is its
+            // criterion plus the non-influential tie-break and, when the gate
+            // refused it, the gate charge. The three always sum to
+            // `fitness - criterion`, or to `fitness` when there is no criterion.
+            let (c_ni, c_gate, c_crash) = if r.error.is_some() || !r.criterion.is_finite() {
+                (0.0, 0.0, penalties.crash)
+            } else {
+                (
+                    penalties.non_influential_charge(r.non_influential),
+                    if r.passed { 0.0 } else { penalties.gate },
+                    0.0,
+                )
+            };
+            charge_non_influential.push(c_ni);
+            charge_gate.push(c_gate);
+            charge_crash.push(c_crash);
+        }
 
-    list!(
-        id = id,
-        parent = parent,
-        step = step,
-        genome = genome,
-        absorption = absorption,
-        elimination = elimination,
-        peripherals = peripherals,
-        transits = transits,
-        lagtime = lagtime,
-        covariates = covariates,
-        n_parameters = n_parameters,
-        ofv = ofv,
-        criterion = criterion,
-        fitness = fitness,
-        rank = rank_col,
-        converged = converged,
-        passed = passed,
-        failures = failures,
-        error = error,
-        seconds = seconds,
-        selected = selected,
-        non_influential = non_influential,
-        duplicate_of = duplicate_of,
-        reused = reused,
-        charge_non_influential = charge_non_influential,
-        charge_gate = charge_gate,
-        charge_crash = charge_crash,
-        axes = axes,
-        space_size = result.space_size as f64,
-        g_index = g_index,
-        g_best = g_best,
-        g_best_fitness = g_best_fitness,
-        g_mean_fitness = g_mean_fitness,
-        g_polished = g_polished,
-        model_id = model_id,
-        model_text = model_text,
-        input_model = result.input_model.render(),
-        input_ofv = opt_f64(input_row.and_then(|r| r.ofv)),
-        input_criterion = input_row.map(|r| r.criterion).unwrap_or(f64::NAN),
-        input_fitness = input_row.map(|r| r.fitness).unwrap_or(f64::NAN),
-        final_id = result.final_id.clone(),
-        final_model = final_model,
-        final_fitness = result.final_fitness,
-        final_fit = final_fit,
-        n_fitted = result.n_fitted() as i32,
-        criterion_label = result.criterion.label().to_string(),
-        algorithm = result.options.algorithm.label().to_string(),
-        iiv_strategy = result.options.iiv_strategy.label().to_string(),
-        max_models = result.options.max_models as f64,
-        rank_cutoff = options.cutoff.unwrap_or(f64::NAN),
-        // The effective schedule, not the file's keys: what the search
-        // charged, which is the only thing the fitness column can be read
-        // against. Both schedules come from the same helpers the key list
-        // and `ferx_search_config()` use, so a charge cannot be named one
-        // way here and another there.
-        penalty_name = penalty_name,
-        penalty_value = penalty_value,
-        ga_name = ga_name,
-        ga_value = ga_value,
-        summary = ferx_tools::globalsearch::render_summary(&result),
-        directory = directory.to_string(),
-        // The base model as the config resolved it, so the R object names the
-        // same file in both entry forms.
-        model = config.base.to_string_lossy().into_owned(),
-        data = base.prepared.data_path.clone(),
-        notes = result.notes.clone(),
-        cancelled = result.cancelled,
-    )
-    .into()
+        // The grid, axis by axis, as a named list of allele labels - the engine's
+        // own labels, so the `genome` column and the axes read in one vocabulary.
+        let axis_names: Vec<String> = result.axes.iter().map(|(n, _)| n.clone()).collect();
+        let axis_values: Vec<Robj> = result
+            .axes
+            .iter()
+            .map(|(_, alleles)| alleles.clone().into())
+            .collect();
+        let mut axes = List::from_values(axis_values);
+        let _ = axes.set_names(&axis_names);
+
+        // The GA's trajectory; empty for an exhaustive search.
+        let mut g_index = Vec::with_capacity(result.generations.len());
+        let mut g_best = Vec::with_capacity(result.generations.len());
+        let mut g_best_fitness = Vec::with_capacity(result.generations.len());
+        let mut g_mean_fitness = Vec::with_capacity(result.generations.len());
+        let mut g_polished = Vec::with_capacity(result.generations.len());
+        for g in &result.generations {
+            g_index.push(g.index as i32);
+            g_best.push(
+                result
+                    .rows
+                    .iter()
+                    .find(|r| r.genome.as_ref() == Some(&g.best))
+                    .map(|r| r.id.clone())
+                    .unwrap_or_default(),
+            );
+            g_best_fitness.push(g.best_fitness);
+            g_mean_fitness.push(g.mean_fitness);
+            g_polished.push(g.polished as i32);
+        }
+
+        // Every candidate's text, so a user can read or refit the model the table
+        // ranked second without re-running the search.
+        let model_id: Vec<String> = result.models.keys().cloned().collect();
+        let model_text: Vec<String> = result.models.values().map(|m| m.render()).collect();
+
+        let final_model = result.final_model.render();
+        let final_fit: Robj = match &result.final_fit {
+            Some(fit) => match search_final_fit(fit, &final_model, &base.prepared.data_path) {
+                Ok(l) => l.into(),
+                Err(e) => throw_r_error(format!("ferx_globalsearch: {e}")),
+            },
+            None => NULL.into(),
+        };
+
+        let (ga_name, ga_value, _) = globalsearch_ga_columns(&result.options.ga);
+        let (penalty_name, penalty_value, _) = search_penalty_columns(&penalties);
+        let input_row = result.row("input");
+
+        Ok(list!(
+            id = id,
+            parent = parent,
+            step = step,
+            genome = genome,
+            absorption = absorption,
+            elimination = elimination,
+            peripherals = peripherals,
+            transits = transits,
+            lagtime = lagtime,
+            covariates = covariates,
+            n_parameters = n_parameters,
+            ofv = ofv,
+            criterion = criterion,
+            fitness = fitness,
+            rank = rank_col,
+            converged = converged,
+            passed = passed,
+            failures = failures,
+            error = error,
+            seconds = seconds,
+            selected = selected,
+            non_influential = non_influential,
+            duplicate_of = duplicate_of,
+            reused = reused,
+            charge_non_influential = charge_non_influential,
+            charge_gate = charge_gate,
+            charge_crash = charge_crash,
+            axes = axes,
+            space_size = result.space_size as f64,
+            g_index = g_index,
+            g_best = g_best,
+            g_best_fitness = g_best_fitness,
+            g_mean_fitness = g_mean_fitness,
+            g_polished = g_polished,
+            model_id = model_id,
+            model_text = model_text,
+            input_model = result.input_model.render(),
+            input_ofv = opt_f64(input_row.and_then(|r| r.ofv)),
+            input_criterion = input_row.map(|r| r.criterion).unwrap_or(f64::NAN),
+            input_fitness = input_row.map(|r| r.fitness).unwrap_or(f64::NAN),
+            final_id = result.final_id.clone(),
+            final_model = final_model,
+            final_fitness = result.final_fitness,
+            final_fit = final_fit,
+            n_fitted = result.n_fitted() as i32,
+            criterion_label = result.criterion.label().to_string(),
+            algorithm = result.options.algorithm.label().to_string(),
+            iiv_strategy = result.options.iiv_strategy.label().to_string(),
+            max_models = result.options.max_models as f64,
+            rank_cutoff = options.cutoff.unwrap_or(f64::NAN),
+            // The effective schedule, not the file's keys: what the search
+            // charged, which is the only thing the fitness column can be read
+            // against. Both schedules come from the same helpers the key list
+            // and `ferx_search_config()` use, so a charge cannot be named one
+            // way here and another there.
+            penalty_name = penalty_name,
+            penalty_value = penalty_value,
+            ga_name = ga_name,
+            ga_value = ga_value,
+            summary = ferx_tools::globalsearch::render_summary(&result),
+            directory = directory.to_string(),
+            // The base model as the config resolved it, so the R object names the
+            // same file in both entry forms.
+            model = config.base.to_string_lossy().into_owned(),
+            data = base.prepared.data_path.clone(),
+            notes = result.notes.clone(),
+            cancelled = result.cancelled,
+        )
+        .into())
+    })
 }
 
 extendr_module! {
