@@ -110,8 +110,8 @@ test_that("ferx_search_config() quotes a '%' from the .ferxsearch file back as w
 
 # -- An R argument ------------------------------------------------------------
 #
-# The third input space, and the one the issue did not have: the text is not
-# the engine quoting a file, it is the name the caller passed.
+# The input space the issue did not have: the text is not the engine quoting a
+# file, it is the name the caller passed.
 
 test_that("ferx_fit() quotes a '%' in a settings key back as written", {
   ex    <- ferx_example("warfarin")
@@ -123,9 +123,9 @@ test_that("ferx_fit() quotes a '%' in a settings key back as written", {
 
 # -- The dataset --------------------------------------------------------------
 #
-# The second input space, and the one that does not arrive through a glue
-# `Err`: the engine's dose diagnostic names the subject, and at the pinned
-# engine it is a panic, which extendr raised through `throw_r_error` in turn.
+# The input space that does not arrive through a glue `Err`: the engine's dose
+# diagnostic names the subject, and at the pinned engine it is a panic, which
+# extendr raised through `throw_r_error` in turn.
 # FeRx-NLME/ferx-core#1487 turns this particular one into an `Err`; the
 # assertion is the same either way, which is the point of making it here.
 
