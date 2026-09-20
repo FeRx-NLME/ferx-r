@@ -9,10 +9,12 @@
 # body is a closure returning `Result<_, String>`, and `entry()` raises once -
 # after that closure frame has returned - through a `"%s"` format the glue owns.
 #
-# Most of that shape the compiler holds on its own: lib.rs shadows the prelude
+# Most of that shape the compiler holds on its own. lib.rs shadows the prelude
 # `throw_r_error` with a local `fn throw_r_error(_: Infallible) -> !`, so a bare
-# `throw_r_error(format!(..))` is `error[E0308]` on every machine, not a CI
-# finding. This script covers only what the compiler cannot see:
+# `throw_r_error(format!(..))` is `error[E0308]`; and `Rf_error` is declared
+# inside `mod raise`, so a call from anywhere else in the file is `error[E0425]`
+# and `raise::Rf_error(..)` is `error[E0603]`. Neither is a CI finding, on any
+# machine. This script covers only what the compiler cannot see:
 #
 #   1. the shadow itself is there, and no other `throw_r_error(` is in the code
 #      (a fully qualified `extendr_api::throw_r_error(..)` walks past the shadow);
@@ -21,7 +23,10 @@
 #   3. every `#[extendr]` fn body opens with `entry(`.
 #
 # `//` comments are stripped before every test, so naming a helper in prose is
-# free. Exercised by tools/test-check-glue-raise.sh.
+# free. The strip is a plain `sub(/[[:space:]]*\/\/.*$/, "", ...)` with no idea
+# of string literals, so the first `https://` inside a message would blind every
+# check on that line - keep URLs in `//` comments, where they cost nothing.
+# Exercised by tools/test-check-glue-raise.sh.
 #
 # Usage: tools/check-glue-raise.sh [dir]   (default src/rust/src)
 # Exits 0 when the glue is in shape, 1 otherwise.
@@ -69,11 +74,12 @@ scan() {
       }
 
       code ~ /raise_verbatim[[:space:]]*\(/ \
-        && trimmed !~ /^fn[[:space:]]+raise_verbatim[[:space:]]*\(/ {
+        && trimmed !~ /^(pub(\([^)]*\))?[[:space:]]+)?fn[[:space:]]+raise_verbatim[[:space:]]*\(/ {
         printf "%s\t%d\t@raise\t-\n", file, NR
       }
 
-      trimmed == "#[extendr]" { pending = 1; in_sig = 0; expect_entry = 0; next }
+      trimmed ~ /^#\[extendr([[:space:]]*\(.*\))?\][[:space:]]*$/ \
+        { pending = 1; in_sig = 0; expect_entry = 0; next }
       pending && !in_sig && trimmed ~ /^fn[[:space:]]/ {
         in_sig = 1; fn_line = NR
         name = trimmed
@@ -82,7 +88,21 @@ scan() {
         fn_name = name
       }
       in_sig {
-        if (code ~ /\{[[:space:]]*$/) { in_sig = 0; expect_entry = 1 }
+        # The first `{` on a signature line opens the body - a Rust signature
+        # has no other brace. What follows it is either nothing (the body opens
+        # on the next line) or the whole body, on this one.
+        if (match(code, /\{/)) {
+          rest = substr(code, RSTART + 1)
+          sub(/^[[:space:]]+/, "", rest)
+          in_sig = 0
+          if (rest == "") {
+            expect_entry = 1
+          } else {
+            if (rest !~ /^entry[[:space:]]*\(/)
+              printf "%s\t%d\tfinding\t%s\n", file, fn_line, fn_name " does not open its body with entry(). Every #[extendr] body is entry(move || { ..; Ok(value) }), so the raise happens once, after the body has returned."
+            pending = 0
+          }
+        }
         next
       }
       expect_entry && trimmed == "" { next }
