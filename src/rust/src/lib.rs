@@ -20,7 +20,8 @@ use std::path::Path;
 //      exit cooperatively; ferx_core::fit returns Err("cancelled by user").
 //
 // Declared here rather than pulling libR-sys to keep the dependency surface
-// small. These symbols are stable parts of R's public API (R.h / Rinterface.h).
+// small. These symbols are stable parts of R's public API (R.h / Rinterface.h /
+// R_ext/Memory.h).
 
 extern "C" {
     fn R_CheckUserInterrupt();
@@ -28,6 +29,12 @@ extern "C" {
         fun: extern "C" fn(*mut std::ffi::c_void),
         data: *mut std::ffi::c_void,
     ) -> std::ffi::c_int;
+    // Raising: see `raise_verbatim` below. `Rf_error` is variadic and reads its
+    // first argument as a printf format; `R_alloc` hands back memory R itself
+    // reclaims when the error unwinds, so the message needs no Rust owner alive
+    // across the longjmp.
+    fn Rf_error(fmt: *const std::ffi::c_char, ...) -> !;
+    fn R_alloc(n: usize, size: std::ffi::c_int) -> *mut std::ffi::c_char;
 }
 
 extern "C" fn check_interrupt_cb(_: *mut std::ffi::c_void) {
@@ -41,19 +48,89 @@ fn pending_interrupt() -> bool {
     unsafe { R_ToplevelExec(check_interrupt_cb, std::ptr::null_mut()) == 0 }
 }
 
-/// Raise `msg` as an R error whose message is `msg`, character for character.
+// ---------------------------------------------------------------------------
+//  Raising an R error: once, from one place, after the body has returned
+// ---------------------------------------------------------------------------
+//
+// `Rf_error` does two awkward things. It reads its first argument as a printf
+// *format* string, and it longjmps: Rust frames between here and R's context
+// are skipped, so every local alive at the call leaks and no destructor runs.
+//
+// Both used to happen inside the entry points, with the engine's message as the
+// format. A `%` in that text - `ignore = DV < 5%`, a `CV%` column, a path like
+// `my%20data.csv` - was read as a conversion against arguments that do not
+// exist: a garbled message for `%d`, an aborted R session for `%s` (ferx-r
+// #388). And the parsed model plus the population read from the CSV were still
+// alive at every one of those calls (ferx-r #389).
+//
+// So no body raises. Every `#[extendr]` function is
+//
+//     fn ferx_rust_x(..) -> List {
+//         entry(move || { ..; Ok(value) })
+//     }
+//
+// and each failure inside is a `return Err(msg)`. `entry` lets that closure's
+// frame return - dropping its locals, and the moved-in arguments with it - and
+// only then raises, through a `"%s"` format this file owns.
+//
+// tools/check-glue-raise.sh holds the shape that the compiler cannot.
+
+/// Raise `msg` as an R error whose message is `msg`, byte for byte.
 ///
-/// extendr 0.9.0's `throw_r_error` passes its argument to `Rf_error` as the
-/// *format* string, and the messages raised here quote the user's model and
-/// data. A `%` in that text (`ignore = DV < 5%`, a `CV%` column) was therefore
-/// read as a printf conversion against arguments that do not exist: a garbled
-/// message for `%d`, an aborted R session for `%s` (ferx-r #386 review).
-/// Doubling every `%` makes the format string print the text as written.
+/// Not `extendr_api::throw_r_error`: on 0.9.0 that passes its argument to
+/// `Rf_error` as the format string (`src/thread_safety.rs:51-58`), while
+/// extendr `main` (`b0cb8a81`, extendr/extendr#1058, unreleased) passes it as
+/// a `"%s"` argument - so doubling `%` here to suit 0.9.0 would start printing
+/// `5%%` the day that release lands. A format this file owns reads the same
+/// under both.
 ///
-/// Used by the entry points #385 converted. The `throw_r_error` call sites that
-/// predate it have the same exposure and are tracked in ferx-r #388.
-fn raise_verbatim<S: AsRef<str>>(msg: S) -> ! {
-    throw_r_error(msg.as_ref().replace('%', "%%"))
+/// The text is copied into `R_alloc` memory, which R reclaims when the error
+/// unwinds, and the owned `String` is dropped before the longjmp, so nothing of
+/// the message is left behind. Bytes at and after an interior NUL are dropped:
+/// C would stop there anyway, and `CString::new(..).unwrap()` would panic.
+///
+/// Called from `entry` and nowhere else.
+fn raise_verbatim(msg: String) -> ! {
+    let bytes = msg.as_bytes();
+    let len = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+    unsafe {
+        let buf = R_alloc(len + 1, 1);
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf.cast::<u8>(), len);
+        *buf.add(len) = 0;
+        drop(msg);
+        Rf_error(b"%s\0".as_ptr().cast(), buf)
+    }
+}
+
+/// The text a panic carried, read the way extendr reads it
+/// (`extendr-macros-0.9.0/src/wrappers.rs:277-283`), so a panic that used to
+/// reach R through extendr still reads the same. The payload is dropped here
+/// rather than left to a scope the longjmp will skip.
+fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
+    let msg = if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "ferx: the engine panicked without a message".to_string()
+    };
+    drop(payload);
+    msg
+}
+
+/// Run one `#[extendr]` body and raise what it refused - or what panicked
+/// under it - as an R error, from here, after its frame has returned.
+///
+/// The `catch_unwind` sits inside extendr's own (`wrappers.rs:255`), which
+/// hands a panic's text to `throw_r_error` and so carries the `%` problem of
+/// its own; catching first means extendr never sees one.
+fn entry<T>(f: impl FnOnce() -> Result<T, String>) -> T {
+    let msg = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+        Ok(Ok(value)) => return value,
+        Ok(Err(msg)) => msg,
+        Err(payload) => panic_message(payload),
+    };
+    raise_verbatim(msg)
 }
 
 /// Poll interval for the interrupt-check loop. 100ms keeps Ctrl-C responsive
@@ -1203,7 +1280,7 @@ fn ferx_rust_npde_from_fit(
     seed: i32,
 ) -> Robj {
     if nsim <= 0 {
-        raise_verbatim("npde error: nsim must be a positive integer");
+        raise_verbatim("npde error: nsim must be a positive integer".to_string());
     }
 
     let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
