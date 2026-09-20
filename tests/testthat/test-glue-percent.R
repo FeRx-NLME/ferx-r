@@ -228,20 +228,38 @@ test_that("a panic message with a '%s' chain raises instead of ending the sessio
 # for all 44, so it is `#[track_caller]` and the caller's line stands in for the
 # name.
 #
-# The line is what makes the assertion worth anything: `entry()` itself sits in
-# the first ~200 lines of lib.rs, and every entry point is thousands of lines
-# below it. Drop the `#[track_caller]` and `Location::caller()` reports entry's
-# own line instead, which is what the bound below catches.
+# The line is what makes the assertion worth anything, so read the line the
+# fixture actually calls `entry(` on out of lib.rs and compare. The package
+# source is not there for an installed package or under `R CMD check`, and the
+# fallback is a bound: `ferx_rust_test_panic` calls `entry(` around lib.rs:3370
+# while `entry()` itself is at lib.rs:166, so a dropped `#[track_caller]` makes
+# `Location::caller()` report its own line, ~170. The bound is the weaker test -
+# it would go false-green if `entry()` ever moved past line 1000 - which is why
+# it is only the fallback.
+glue_entry_line <- function(fn) {
+  p <- file.path("..", "..", "src", "rust", "src", "lib.rs")
+  if (!file.exists(p)) return(NA_integer_)
+  src   <- readLines(p, warn = FALSE)
+  start <- grep(sprintf("^fn %s\\(", fn), src)
+  if (length(start) != 1L) return(NA_integer_)
+  window <- seq(start, min(start + 20L, length(src)))
+  hit    <- grep("^\\s*entry\\(", src[window])
+  if (length(hit) < 1L) return(NA_integer_)
+  window[hit[1]]
+}
+
 test_that("a panic carrying no text names the entry point it came out of", {
   probe <- engine_error_probe(ferx:::ferx_rust_test_panic("<non-string payload>"))
   expect_refusal(
     probe, "ferx: the engine panicked without a message, in the entry point at "
   )
   msg  <- conditionMessage(probe$cond)
-  line <- as.integer(sub("^.*src/lib\\.rs:([0-9]+).*$", "\\1", msg))
   expect_true(grepl("src/lib.rs:", msg, fixed = TRUE), info = msg)
+  line <- as.integer(sub("^.*src/lib\\.rs:([0-9]+).*$", "\\1", msg))
   expect_false(is.na(line), info = msg)
-  expect_gt(line, 1000L)
+
+  want <- glue_entry_line("ferx_rust_test_panic")
+  if (is.na(want)) expect_gt(line, 1000L) else expect_identical(line, want)
 })
 
 # The other half of the same restructure - that a refused call no longer leaks

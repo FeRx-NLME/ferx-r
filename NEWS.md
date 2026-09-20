@@ -1189,9 +1189,9 @@
   ([#388](https://github.com/FeRx-NLME/ferx-r/issues/388)). The glue handed the
   engine's text to `Rf_error()` as its *format* string, so anything the engine
   quoted back with a `%` in it was consumed as a conversion against arguments
-  that do not exist. `[data_selection] ignore = DV < 5%` came back with the
-  text from the `%` onwards eaten and whatever that machine happened to have on
-  its stack printed in its place, and text carrying `%s` ended the session with
+  that do not exist. With `[data_selection] ignore = DV < 5%`, each `%` in the
+  message swallowed the few characters after it and printed a number off that
+  machine's stack in their place; text carrying `%s` ended the session with
   `An irrecoverable exception occurred`. `%` is
   ordinary text here - `CV%`, `5%`, a `my%20data.csv` path - and it now reaches
   R verbatim from all four places it can enter: the model file, the dataset,
