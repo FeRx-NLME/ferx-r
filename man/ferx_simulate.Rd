@@ -163,6 +163,18 @@ For the individual etas conditioned on observed data, see
 \code{fit$ebe_etas} and \code{\link{ferx_conddist}}.
 }
 
+\section{Errors raised by the engine}{
+
+A model or dataset the engine refuses is an R error, never a \code{NULL}
+result. Where the engine's validation pass names the finding, the error has
+class \code{ferx_engine_error} and carries \code{code}, \code{block},
+\code{line} and \code{suggestion} - the same condition a refused
+\code{\link{ferx_fit}} raises, so one
+\code{tryCatch(..., ferx_engine_error = )} handler covers every entry
+point. A failure the validation pass cannot attribute to one diagnostic is
+raised as an ordinary error carrying the engine's message.
+}
+
 \examples{
 ex <- ferx_example("warfarin")
 fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)

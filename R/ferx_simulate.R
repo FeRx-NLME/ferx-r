@@ -138,6 +138,16 @@
 #'   diagnostics for \code{data} - the same ones \code{ferx_fit()} returns in
 #'   \code{fit$warnings}; these are also raised as an R warning.
 #'
+#' @section Errors raised by the engine:
+#' A model or dataset the engine refuses is an R error, never a \code{NULL}
+#' result. Where the engine's validation pass names the finding, the error has
+#' class \code{ferx_engine_error} and carries \code{code}, \code{block},
+#' \code{line} and \code{suggestion} - the same condition a refused
+#' \code{\link{ferx_fit}} raises, so one
+#' \code{tryCatch(..., ferx_engine_error = )} handler covers every entry
+#' point. A failure the validation pass cannot attribute to one diagnostic is
+#' raised as an ordinary error carrying the engine's message.
+#'
 #' @examples
 #' ex <- ferx_example("warfarin")
 #' fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
@@ -173,31 +183,38 @@ ferx_simulate <- function(model, data = NULL, n_sim = 1L, seed = 42L, fit = NULL
   }
   horizon_arg <- if (is.null(horizon)) -1 else as.numeric(horizon)
 
+  # A refusal is an R error, classed like a refused `ferx_fit()` (#385).
   res <- if (is.null(fit)) {
-    ferx_rust_simulate(
-      model_path = normalizePath(model),
-      data_path = normalizePath(data),
-      n_sim = as.integer(n_sim),
-      seed = as.integer(seed),
-      match_method = match_method,
-      horizon = horizon_arg
+    .ferx_engine_call(
+      ferx_rust_simulate(
+        model_path = normalizePath(model),
+        data_path = normalizePath(data),
+        n_sim = as.integer(n_sim),
+        seed = as.integer(seed),
+        match_method = match_method,
+        horizon = horizon_arg
+      ),
+      model, data
     )
   } else {
     fit_pieces <- validate_fit_for_params(fit)
-    ferx_rust_simulate_from_fit(
-      model_path = normalizePath(model),
-      data_path = normalizePath(data),
-      theta = fit_pieces$theta,
-      omega_flat = fit_pieces$omega_flat,
-      omega_dim = fit_pieces$omega_dim,
-      sigma = fit_pieces$sigma,
-      omega_iov_flat = fit_pieces$omega_iov_flat,
-      omega_iov_dim = fit_pieces$omega_iov_dim,
-      residual_rho = fit_pieces$residual_rho,
-      n_sim = as.integer(n_sim),
-      seed = as.integer(seed),
-      match_method = match_method,
-      horizon = horizon_arg
+    .ferx_engine_call(
+      ferx_rust_simulate_from_fit(
+        model_path = normalizePath(model),
+        data_path = normalizePath(data),
+        theta = fit_pieces$theta,
+        omega_flat = fit_pieces$omega_flat,
+        omega_dim = fit_pieces$omega_dim,
+        sigma = fit_pieces$sigma,
+        omega_iov_flat = fit_pieces$omega_iov_flat,
+        omega_iov_dim = fit_pieces$omega_iov_dim,
+        residual_rho = fit_pieces$residual_rho,
+        n_sim = as.integer(n_sim),
+        seed = as.integer(seed),
+        match_method = match_method,
+        horizon = horizon_arg
+      ),
+      model, data
     )
   }
 
@@ -211,8 +228,7 @@ ferx_simulate <- function(model, data = NULL, n_sim = 1L, seed = 42L, fit = NULL
 # character-vector attribute - ferx-core's per-subject simulation diagnostics
 # (#762/#763) plus every data-reader diagnostic the engine raised for the dataset
 # (#283) - as a single R warning, so they are not silently lost; return `res`
-# unchanged (the attribute is left in place for programmatic access). `res` may be
-# NULL when the Rust side errored, in which case there is nothing to surface.
+# unchanged (the attribute is left in place for programmatic access).
 .ferx_surface_sim_warnings <- function(res, fn = "ferx_simulate") {
   w <- attr(res, "simulation_warnings", exact = TRUE)
   if (length(w) > 0L) {

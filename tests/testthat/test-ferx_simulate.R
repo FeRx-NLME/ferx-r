@@ -39,12 +39,13 @@ test_that("ferx_simulate samples drug-driven TTE event times given a horizon", {
 test_that("an ODE-accumulated TTE model without a horizon does not simulate", {
   # ferx-core rejects drug-driven event-time sampling without a finite horizon
   # (the hazard can vanish, so there is no implicit observation window); the
-  # simulate glue surfaces that as a NULL result rather than fabricating rows.
+  # simulate glue raises that as an R error rather than fabricating rows - or,
+  # before #385, printing the message and returning NULL.
   ex <- ferx_example("pktte_joint")
-  res <- suppressWarnings(
-    ferx_simulate(ex$model, ex$data, n_sim = 1L, seed = 1L)
+  expect_error(
+    suppressWarnings(ferx_simulate(ex$model, ex$data, n_sim = 1L, seed = 1L)),
+    "requires a finite, positive administrative horizon"
   )
-  expect_null(res)
 })
 test_that("ferx_simulate from a fitted joint PK-TTE model honours `horizon`", {
   # The `fit` path threads `horizon` the same way as the default-parameter path;
@@ -303,8 +304,10 @@ test_that("simulating a kappa model from a fit stripped of omega_iov is an error
                   settings = list(maxiter = 3L))
   fit$omega_iov <- NULL
 
-  res <- suppressWarnings(
-    ferx_simulate(ex$model, ex$data, n_sim = 1L, seed = 1L, fit = fit)
+  expect_error(
+    suppressWarnings(
+      ferx_simulate(ex$model, ex$data, n_sim = 1L, seed = 1L, fit = fit)
+    ),
+    "the fit carries no omega_iov"
   )
-  expect_null(res)
 })

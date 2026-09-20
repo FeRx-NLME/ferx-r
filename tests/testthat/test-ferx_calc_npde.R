@@ -114,8 +114,8 @@ test_that("ferx_calc_npde errors when the fit carries no sdtab", {
   expect_error(ferx_calc_npde(bad), "sdtab` is empty")
 })
 test_that("ferx_calc_npde surfaces a clean error when the engine returns NULL", {
-  # The FFI prints its own message and returns NULL on failure; ferx_calc_npde must
-  # turn that into a clear R error rather than crash in the alignment step.
+  # The FFI raises on failure (#385), so a NULL table is not expected; should one
+  # arrive anyway, ferx_calc_npde must say so rather than crash in the alignment step.
   fit <- list(theta = c(1, 2), omega = matrix(c(0.1, 0, 0, 0.1), 2, 2),
               sigma = 0.05, sdtab = data.frame(ID = 1, TIME = 1, DV = 5),
               model_path = tempfile(fileext = ".ferx"),

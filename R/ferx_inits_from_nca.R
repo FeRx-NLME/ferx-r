@@ -65,6 +65,8 @@
 #'   function. To preview the strategy a model file declares, pass that value
 #'   explicitly via \code{method}.
 #'
+#' @inheritSection ferx_simulate Errors raised by the engine
+#'
 #' @examples
 #' \donttest{
 #' ex <- ferx_example("warfarin")
@@ -122,14 +124,15 @@ ferx_inits_from_nca <- function(model, data = NULL,
   }
   stopifnot(file.exists(model), file.exists(data))
 
-  res <- ferx_rust_inits_from_nca(
-    normalizePath(model),
-    normalizePath(data),
-    method
+  # A refusal is an R error, classed like a refused `ferx_fit()` (#385).
+  res <- .ferx_engine_call(
+    ferx_rust_inits_from_nca(
+      normalizePath(model),
+      normalizePath(data),
+      method
+    ),
+    model, data
   )
-  if (length(res) == 0L) {
-    stop("`ferx_inits_from_nca()` failed - see the messages above for details.")
-  }
 
   theta <- as.numeric(res$theta)
   names(theta) <- res$theta_names

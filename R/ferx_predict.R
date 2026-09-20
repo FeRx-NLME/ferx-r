@@ -21,6 +21,8 @@
 #'   \code{DV} was empty, a dose that never landed, or a covariate with no
 #'   value for some subjects. They are also re-emitted as a single R warning.
 #'
+#' @inheritSection ferx_simulate Errors raised by the engine
+#'
 #' @examples
 #' ex <- ferx_example("warfarin")
 #' fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
@@ -39,23 +41,30 @@ ferx_predict <- function(model, data = NULL, fit = NULL) {
   }
   stopifnot(file.exists(model), file.exists(data))
 
+  # A refusal is an R error, classed like a refused `ferx_fit()` (#385).
   res <- if (is.null(fit)) {
-    ferx_rust_predict(
-      model_path = normalizePath(model),
-      data_path = normalizePath(data)
+    .ferx_engine_call(
+      ferx_rust_predict(
+        model_path = normalizePath(model),
+        data_path = normalizePath(data)
+      ),
+      model, data
     )
   } else {
     fit_pieces <- validate_fit_for_params(fit)
-    ferx_rust_predict_from_fit(
-      model_path = normalizePath(model),
-      data_path = normalizePath(data),
-      theta = fit_pieces$theta,
-      omega_flat = fit_pieces$omega_flat,
-      omega_dim = fit_pieces$omega_dim,
-      sigma = fit_pieces$sigma,
-      omega_iov_flat = fit_pieces$omega_iov_flat,
-      omega_iov_dim = fit_pieces$omega_iov_dim,
-      residual_rho = fit_pieces$residual_rho
+    .ferx_engine_call(
+      ferx_rust_predict_from_fit(
+        model_path = normalizePath(model),
+        data_path = normalizePath(data),
+        theta = fit_pieces$theta,
+        omega_flat = fit_pieces$omega_flat,
+        omega_dim = fit_pieces$omega_dim,
+        sigma = fit_pieces$sigma,
+        omega_iov_flat = fit_pieces$omega_iov_flat,
+        omega_iov_dim = fit_pieces$omega_iov_dim,
+        residual_rho = fit_pieces$residual_rho
+      ),
+      model, data
     )
   }
 

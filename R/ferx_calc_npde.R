@@ -28,6 +28,8 @@
 #'   \code{\link{ferx_xpose}} and goodness-of-fit plots pick them up
 #'   automatically.
 #'
+#' @inheritSection ferx_simulate Errors raised by the engine
+#'
 #' @examples
 #' ex  <- ferx_example("warfarin")
 #' fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
@@ -66,25 +68,28 @@ ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = 
     stop("No usable data file: pass `data=` or refit so `fit$data_path` is set.")
   }
 
-  npde_tbl <- ferx_rust_npde_from_fit(
-    model_path = normalizePath(model),
-    data_path  = normalizePath(data),
-    theta      = fit_pieces$theta,
-    omega_flat = fit_pieces$omega_flat,
-    omega_dim  = fit_pieces$omega_dim,
-    sigma      = fit_pieces$sigma,
-    omega_iov_flat = fit_pieces$omega_iov_flat,
-    omega_iov_dim  = fit_pieces$omega_iov_dim,
-    residual_rho = fit_pieces$residual_rho,
-    nsim       = nsim,
-    seed       = seed_int
+  # A refusal (bad params, unreadable data, ...) is an R error, classed like a
+  # refused `ferx_fit()` (#385).
+  npde_tbl <- .ferx_engine_call(
+    ferx_rust_npde_from_fit(
+      model_path = normalizePath(model),
+      data_path  = normalizePath(data),
+      theta      = fit_pieces$theta,
+      omega_flat = fit_pieces$omega_flat,
+      omega_dim  = fit_pieces$omega_dim,
+      sigma      = fit_pieces$sigma,
+      omega_iov_flat = fit_pieces$omega_iov_flat,
+      omega_iov_dim  = fit_pieces$omega_iov_dim,
+      residual_rho = fit_pieces$residual_rho,
+      nsim       = nsim,
+      seed       = seed_int
+    ),
+    model, data
   )
-  # The engine prints its error and returns NULL on failure (bad params, unreadable
-  # data, ...). Surface that as a clean R error instead of letting the alignment
-  # step fail cryptically on a NULL table.
+  # The glue raises rather than returning NULL, so this only guards the alignment
+  # step against a table of the wrong shape.
   if (is.null(npde_tbl) || !is.data.frame(npde_tbl)) {
-    stop("ferx_calc_npde: the engine returned no NPDE table (see the message above).",
-         call. = FALSE)
+    stop("ferx_calc_npde: the engine returned no NPDE table.", call. = FALSE)
   }
 
   fit$sdtab <- .ferx_attach_npde(fit$sdtab, npde_tbl)

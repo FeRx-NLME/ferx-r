@@ -72,6 +72,18 @@ The \code{method} argument always wins: a \code{[fit_options]
 function. To preview the strategy a model file declares, pass that value
 explicitly via \code{method}.
 }
+\section{Errors raised by the engine}{
+
+A model or dataset the engine refuses is an R error, never a \code{NULL}
+result. Where the engine's validation pass names the finding, the error has
+class \code{ferx_engine_error} and carries \code{code}, \code{block},
+\code{line} and \code{suggestion} - the same condition a refused
+\code{\link{ferx_fit}} raises, so one
+\code{tryCatch(..., ferx_engine_error = )} handler covers every entry
+point. A failure the validation pass cannot attribute to one diagnostic is
+raised as an ordinary error carrying the engine's message.
+}
+
 \examples{
 \donttest{
 ex <- ferx_example("warfarin")
