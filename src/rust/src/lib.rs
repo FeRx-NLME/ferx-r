@@ -3318,7 +3318,6 @@ fn ferx_rust_autodiff_enabled() -> bool {
 /// @param msg Text to panic with
 /// @return Never returns; the panic arrives in R as an error
 /// @keywords internal
-/// @export
 #[extendr]
 fn ferx_rust_test_panic(msg: &str) -> Robj {
     entry(move || -> Result<Robj, String> {
