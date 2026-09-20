@@ -75,6 +75,25 @@ jobs:
       - name: Test the sibling build wrapper with a stub cargo
         run: bash tools/test-sibling-cargo-build.sh
 
+      # `Rf_error()` reads its first argument as a printf format string and
+      # longjmps out of Rust without unwinding, so the glue must raise in
+      # exactly one place: an `#[extendr]` body returns `Result<_, String>` and
+      # `entry()` raises once, after that body's frame is gone (#388, #389).
+      # Most of that the compiler holds - lib.rs shadows the prelude's
+      # `throw_r_error` with a local `fn throw_r_error(_: Infallible)`, so a
+      # bare call is `error[E0308]` on every machine. This step covers the three
+      # residues it cannot see: the shadow being deleted, a fully qualified
+      # `extendr_api::throw_r_error(..)`, a second `raise_verbatim(` call site,
+      # and an `#[extendr]` body that does not open with `entry(`.
+      - name: Verify the glue raises through entry() only
+        run: bash tools/check-glue-raise.sh
+
+      # The real lib.rs is always in shape, so nothing above would fail if one
+      # of those checks were deleted. Feed the script stub sources instead, one
+      # per shape it must catch and one per shape it must not.
+      - name: Test the glue-raise guard against stub sources
+        run: bash tools/test-check-glue-raise.sh
+
       # Every ferx-core / ferx-tools `*Options` struct derives `Default`
       # (ferx-core #529, enforced there by the A4 guard in
       # tests/public_api_boundary.rs), so the glue must construct them with a
