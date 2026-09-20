@@ -72,6 +72,16 @@ for (nm in setdiff(engine_entry_point_names(), "ferx_calc_npde()")) {
   })
 }
 
+test_that("the code is attached outside a UTF-8 locale too", {
+  # The diagnostic has an em-dash in it and arrives marked UTF-8; the condition
+  # message is the same bytes, unmarked. Compared as characters in the C locale
+  # the text did not match itself, and this failure has no fallback to hide that.
+  withr::local_locale(c(LC_CTYPE = "C"))
+  ex    <- ferx_example("warfarin")
+  probe <- engine_error_probe(ferx_predict(ex$model, infusion_into_cmt0_data()))
+  expect_coded_refusal(probe, "infusion into compartment 0", "E_DOSE_CMT_NOT_INFUSABLE")
+})
+
 test_that("ferx_calc_npde() raises an infusion into CMT = 0, uncoded while the engine words it differently", {
   # NPDE reaches the dose without the up-front compartment check, so the engine
   # panics deeper, in different words from the validation diagnostic. A code is

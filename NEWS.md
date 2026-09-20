@@ -1200,7 +1200,11 @@
   `ferx_engine_error` a refused `ferx_fit()` raises, with `code`, `block`,
   `line` and `suggestion`, so one handler covers every entry point; this
   includes a dose the model cannot deliver (`E_DOSE_CMT_NOT_INFUSABLE`), which
-  was already an error but carried no code. The engine's prose is unchanged
+  was already an error but carried no code (and still carries none from
+  `ferx_calc_npde()`, where the engine words it differently). A failure the
+  validation pass does not see - a `fit` that does not fit the model, a
+  missing `horizon` - is an ordinary error and is never given the code of some
+  other finding in the same data. The engine's prose is unchanged
   and nothing is printed in its place. `ferx_calc_npde()` and
   `ferx_inits_from_nca()` did raise, but with "see the message above" in place
   of the reason; they now carry the reason. A script that tested the result
