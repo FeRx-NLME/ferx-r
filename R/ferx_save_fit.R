@@ -226,7 +226,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   "method_chain", "prior_summary", "method_wall_times_secs",
   "nlopt_missing_algorithms", "warnings", "cov_eigenvalues", "eta_param_info",
   "theta_init", "sigma_init", "final_gradient", "covariate_names",
-  "input_columns", "neural_networks",
+  "input_columns",
   # ThetaWire / OmegaWire / SigmaWire
   "names", "estimates", "se", "fixed", "transform", "log_transformed",
   "shrinkage", "init_as_sd", "types", "residual_correlations",
@@ -242,6 +242,15 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   "ess_tail", "mcse",
   "excluded_subject_ids", "fired_ignore", "fired_accept"
 )
+
+# Not in the table, deliberately: `neural_networks`. `.fitrx_write_fit_json()`
+# does not emit it - the `[covariate_nn]` metadata reaches R on `fit` but is
+# dropped on the way to the bundle - so listing it would describe a field this
+# writer never writes. If the writer starts emitting it, the key belongs above
+# *and* `NeuralNetworkInfo`'s own vector fields do: `shape`, `input_names`,
+# `output_names`, `input_center` and `input_scale`, the last two being the ones
+# a single-input network makes length 1. `test-fitrx-engine-roundtrip.R` fails
+# the day a bundle carries `neural_networks`, so this cannot go unnoticed.
 
 # The keys whose *elements* are arrays too (`Vec<Vec<f64>>`, `Vec<(f64, f64)>`).
 # A one-kappa model's `shrinkage_kappa_by_occ` row is a length-1 vector, which

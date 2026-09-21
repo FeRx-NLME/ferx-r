@@ -60,6 +60,28 @@ test_that("fit.json writes the schema's array fields as JSON arrays", {
   expect_type(manifest$entries, "list")
 })
 
+test_that("the array table still covers everything the writer emits", {
+  # `.FITRX_ARRAY_KEYS` leaves out `neural_networks` because this writer never
+  # emits it. That is only safe while it stays true: a `[covariate_nn]` fit
+  # whose metadata reached the bundle would write `shape`, `input_names`,
+  # `output_names`, `input_center` and `input_scale` unboxed, and the engine
+  # would refuse it exactly the way it refused `method_chain`. This fails the
+  # day that happens.
+  bundle <- fitrx_r_bundle()
+  staging <- withr::local_tempdir()
+  utils::unzip(bundle, exdir = staging)
+  wire <- jsonlite::read_json(file.path(staging, "fit.json"),
+                              simplifyVector = FALSE)
+  expect_null(
+    wire$neural_networks,
+    info = paste(
+      "fit.json now carries `neural_networks`: add it to .FITRX_ARRAY_KEYS",
+      "together with shape / input_names / output_names / input_center /",
+      "input_scale, and assert their shapes here."
+    )
+  )
+})
+
 test_that("a one-kappa IOV fit writes the nested arrays as arrays", {
   # `shrinkage_kappa_by_occ` is `Vec<Vec<f64>>`: with a single kappa each
   # occasion's row is a length-1 vector, so the *inner* sequence is the one
