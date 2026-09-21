@@ -1802,6 +1802,28 @@
 
 ## Documentation
 
+- **ferx no longer recommends SDE process noise as a remedy for residual
+  autocorrelation** ([#384](https://github.com/FeRx-NLME/ferx-r/issues/384),
+  [ferx-core #1285](https://github.com/FeRx-NLME/ferx-core/issues/1285),
+  [ferx-core #1426](https://github.com/FeRx-NLME/ferx-core/pull/1426)). The
+  guidance printed under a positive Durbin-Watson warning by
+  `ferx_get_warnings()` appended "For ODE models, also consider SDE process
+  noise (`[diffusion]` block)." on every ODE fit that did not already have one -
+  exactly the population the hint should not reach. ferx implements the
+  covariance half of the EKF only: the state covariance is propagated and
+  shrunk at each observation, but the state mean stays the deterministic ODE
+  solution and is never corrected by the observed values, so a `[diffusion]`
+  term re-weights the fit instead of following a subject's drift. Measured by
+  ferx-core on a two-compartment population fitted as one compartment, adding
+  `central ~ 0.01` moved the objective by -669 for one parameter, left
+  Durbin-Watson below its threshold (0.40 -> 0.77) and moved CL from 0.99 to
+  2.49 against a truth of 1.0. The guidance keeps the transit-absorption, extra
+  compartment and IOV remedies, matching the engine's message. The same claim
+  is gone from `?ferx_fit`'s "Process noise (SDE / diffusion)" section, from
+  `inst/examples/models/warfarin_sde.ferx`, and from
+  `inst/examples/ex8_warfarin_sde.R`; `?ferx_fit` now also notes that sdtab
+  `IWRES` reads over-dispersed on a `[diffusion]` fit. No numerical change.
+
 - **`?ferx_fit` now says how a model declares its name**
   ([#367](https://github.com/FeRx-NLME/ferx-r/issues/367)). The `model_name`
   entry said the field falls back to the file's basename "when the file

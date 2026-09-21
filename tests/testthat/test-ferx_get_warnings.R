@@ -253,13 +253,21 @@ test_that("ferx_get_warnings() shows guidance for an unused declaration", {
 
 
 
-test_that(".ferx_warning_guidance toggles the SDE hint for positive autocorrelation", {
-  pos_ode <- ferx:::.ferx_warning_guidance("dw_autocorrelation", "positive", uses_sde = FALSE)
-  expect_match(pos_ode, "Positive IWRES autocorrelation")
-  expect_match(pos_ode, "SDE process noise")            # hint shown when not already using SDE
-  pos_sde <- ferx:::.ferx_warning_guidance("dw_autocorrelation", "positive", uses_sde = TRUE)
-  expect_match(pos_sde, "Positive IWRES autocorrelation")
-  expect_false(grepl("SDE process noise", pos_sde))     # hint suppressed
+test_that(".ferx_warning_guidance never recommends SDE process noise for positive autocorrelation", {
+  pos <- ferx:::.ferx_warning_guidance("dw_autocorrelation", "positive")
+  # The remedies the guidance does still name, so this is not a pure negative.
+  expect_match(pos, "Positive IWRES autocorrelation")
+  expect_match(pos, "transit absorption", fixed = TRUE)
+  expect_match(pos, "an extra compartment", fixed = TRUE)
+  expect_match(pos, "IOV on ka/F", fixed = TRUE)
+  # ferx-core #1426 dropped the equivalent sentence from the engine's own
+  # Durbin-Watson warning; R must not contradict it.
+  expect_false(grepl("SDE", pos, fixed = TRUE))
+  expect_false(grepl("diffusion", pos, fixed = TRUE))
+  # The hint used to be toggled by a `uses_sde` argument, so it reached every
+  # ODE model without a [diffusion] block - exactly the population it should no
+  # longer reach. There is no longer a side of that toggle that shows it.
+  expect_false("uses_sde" %in% names(formals(ferx:::.ferx_warning_guidance)))
 })
 test_that(".ferx_warning_guidance returns negative-autocorrelation guidance", {
   neg <- ferx:::.ferx_warning_guidance("dw_autocorrelation", "Negative autocorrelation")

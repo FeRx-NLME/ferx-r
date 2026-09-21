@@ -1190,11 +1190,18 @@ Fits a NLME model using FOCE or FOCEI estimation with a Rust backend.
 \section{Process noise (SDE / diffusion)}{
 
 
-ODE-based PK/PD models occasionally produce autocorrelated IWRES when the
-structural model is misspecified (missing compartment, unmodelled feedback).
-Adding continuous within-subject process noise via an SDE framework - solved
-by an Extended Kalman Filter (EKF) - absorbs this drift and yields a
-better-calibrated likelihood.
+A \code{[diffusion]} block adds continuous within-subject process noise to
+ODE states, fitted with an Extended Kalman Filter (EKF). It buys one extra
+parameter per state: how much unexplained variance accumulates along the
+trajectory. A large \code{DIFF_<STATE>} relative to sigma says the ODE
+structure is missing a mechanism.
+
+It is \strong{not} a remedy for residual (IWRES) autocorrelation. ferx
+implements the covariance half of the filter only: the state covariance is
+propagated and shrunk at each observation, while the state mean stays the
+deterministic ODE solution and is never corrected by the observed values. A
+diffusion term therefore re-weights the fit rather than following a
+subject's drift. Fit the missing compartment, not the noise.
 
 Add a \code{[diffusion]} block to the \code{.ferx} model file to enable SDE
 mode. Each line declares the diffusion variance for one ODE state:
@@ -1213,6 +1220,9 @@ standard deviations. A value of 0.5 means \eqn{\sigma^2 = 0.5}, not
 \code{fit$estimates} treat them as regular thetas.
 \item SDE models use finite differences for the EKF covariance
 propagation.
+\item \code{sdtab} \code{IWRES} is scaled by the residual error alone, so
+it reads over-dispersed on a \code{[diffusion]} fit; the process
+variance the objective adds never reaches it.
 \item SAEM is not supported with SDE models; a hard error is raised.
 \item \code{fit$uses_sde} is \code{TRUE} whenever a \code{[diffusion]}
 block was present.
@@ -1819,7 +1829,7 @@ starting values before a full run.
 \item \code{\link{plot.ferx_fit}} - convergence trace plot.
 }
 
-Other fitting: 
+Other fitting:
 \code{\link{ferx_bootstrap}()},
 \code{\link{ferx_bootstrap_summarize}()},
 \code{\link{ferx_check_init}()},
