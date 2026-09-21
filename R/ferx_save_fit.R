@@ -158,7 +158,8 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
     entries = c("manifest.json", entries)
   )
   jsonlite::write_json(
-    manifest,
+    # `entries` is `Vec<String>` on the Rust `Manifest` (#379).
+    .fitrx_wire_arrays(manifest),
     file.path(staging, "manifest.json"),
     auto_unbox = TRUE,
     pretty = TRUE,
@@ -199,6 +200,80 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
 }
 
 # ----- internals ------------------------------------------------------------
+
+# Every key the .fitrx schema declares as a JSON array, as a flat table.
+#
+# `jsonlite::write_json(..., auto_unbox = TRUE)` collapses any length-1 vector
+# to a JSON scalar, and ferx-core's reader declares these fields as sequences
+# (`Vec<..>` on `FitWire` and its sub-structs, ferx-core/src/io/fitrx.rs). So a
+# fit with one sigma, one warning, or a single unchained method wrote a bundle
+# the engine refuses to load - `invalid type: string "foce", expected a
+# sequence at line 3 column 24` - while `ferx_load_fit()` read it back happily,
+# which is why it went unnoticed (#379). Almost every real fit has at least one
+# length-1 array, so this was the common case, not an edge case.
+#
+# A table rather than per-field `as.list()` calls on purpose: the failure mode
+# is silent until a reader happens to be Rust, and patching the fields one
+# model happens to expose leaves the next model failing somewhere else.
+#
+# Matched by name at any depth. That is sound because every occurrence of each
+# name below is an array in the schema - `names` / `estimates` / `se` /
+# `fixed` occur under theta, omega and sigma alike, `data` only inside a
+# matrix wire - and `r_extras` is skipped entirely, so an R-only field that
+# happens to share a name keeps whatever shape it has today.
+.FITRX_ARRAY_KEYS <- c(
+  # FitWire
+  "method_chain", "prior_summary", "method_wall_times_secs",
+  "nlopt_missing_algorithms", "warnings", "cov_eigenvalues", "eta_param_info",
+  "theta_init", "sigma_init", "final_gradient", "covariate_names",
+  "input_columns", "neural_networks",
+  # ThetaWire / OmegaWire / SigmaWire
+  "names", "estimates", "se", "fixed", "transform", "log_transformed",
+  "shrinkage", "init_as_sd", "types", "residual_correlations",
+  "residual_correlation_fixed", "se_residual_correlations",
+  # IovWire
+  "kappa_names", "kappa_fixed", "se_kappa", "shrinkage_kappa",
+  "kappa_init_as_sd", "kappa_weights", "kappa_weight_typical",
+  # MatrixWire, and the manifest
+  "data", "entries",
+  # R-only sections the engine ignores (`bayes`, `exclusions`): included so the
+  # file is consistent for any reader, not because ferx-core reads them.
+  "param_names", "mean", "sd", "q025", "median", "q975", "rhat", "ess_bulk",
+  "ess_tail", "mcse",
+  "excluded_subject_ids", "fired_ignore", "fired_accept"
+)
+
+# The keys whose *elements* are arrays too (`Vec<Vec<f64>>`, `Vec<(f64, f64)>`).
+# A one-kappa model's `shrinkage_kappa_by_occ` row is a length-1 vector, which
+# unboxes into a bare number where the engine expects an inner sequence.
+.FITRX_ARRAY_OF_ARRAY_KEYS <- c(
+  "ci_theta", "ci_omega", "ci_sigma", "resamples_packed",
+  "shrinkage_kappa_by_occ"
+)
+
+# Walk a wire list and wrap every array-valued field in `as.list()`, which
+# `auto_unbox = TRUE` leaves alone at any length. `unname()` because a named
+# vector would otherwise become a JSON *object*.
+.fitrx_wire_arrays <- function(x) {
+  if (!is.list(x)) return(x)
+  nms <- names(x)
+  for (i in seq_along(x)) {
+    key <- if (is.null(nms)) "" else nms[[i]]
+    # R-only payload: left exactly as it is written today, so this cannot move
+    # anything on the `ferx_save_fit()` -> `ferx_load_fit()` path.
+    if (identical(key, "r_extras")) next
+    v <- x[[i]]
+    if (is.null(v) || length(v) == 0L) next
+    if (key %in% .FITRX_ARRAY_OF_ARRAY_KEYS) {
+      x[[i]] <- lapply(unname(as.list(v)), function(e) as.list(unname(e)))
+    } else if (key %in% .FITRX_ARRAY_KEYS && !is.list(v)) {
+      x[[i]] <- as.list(unname(v))
+    } else if (is.list(v)) {
+      x[[i]] <- .fitrx_wire_arrays(v)
+    }
+  }
+  x
+}
 
 # Build the on-disk fit.json from the in-memory ferx_fit list. The schema
 # matches the Rust FitWire layout (see ferx-core/src/io/fitrx.rs); R-only
@@ -368,7 +443,9 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   }
 
   jsonlite::write_json(
-    wire,
+    # Array-valued fields wrapped so `auto_unbox` cannot collapse a length-1
+    # one to a scalar (#379); see `.FITRX_ARRAY_KEYS`.
+    .fitrx_wire_arrays(wire),
     path,
     auto_unbox = TRUE,
     pretty = TRUE,
