@@ -1,4 +1,4 @@
-# ferx 0.3.0.9000 (development version)
+# ferx 0.4.0
 
 ## Breaking changes
 
