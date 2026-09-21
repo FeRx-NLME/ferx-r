@@ -1184,6 +1184,21 @@
 
 ## Bug fixes
 
+- **`ferx_simulate_adaptive()` now raises the engine's refusal as a
+  `ferx_engine_error`, like every other entry point**
+  ([#390](https://github.com/FeRx-NLME/ferx-r/issues/390)). It already raised an
+  R error rather than printing and returning `NULL`, but a plain `simpleError`:
+  no class, no `code` / `block` / `line` / `suggestion`. After
+  [#386](https://github.com/FeRx-NLME/ferx-r/issues/386), `?ferx_simulate` says
+  one `tryCatch(..., ferx_engine_error = )` handler covers every entry point,
+  and this was the one simulate-family function that handler missed. Its glue
+  call is now wrapped in the same `.ferx_engine_call()` the others use, and
+  `?ferx_simulate_adaptive` inherits the "Errors raised by the engine" section.
+  A refusal the validation pass cannot name - a model with no
+  `[adaptive_dosing]` block, or whatever the controller or the regimen rejects -
+  still arrives as an ordinary error carrying the engine's own prose, never
+  another finding's code.
+
 - **A `%` in an engine error message was read as a printf conversion: a garbled
   message, or an aborted R session**
   ([#388](https://github.com/FeRx-NLME/ferx-r/issues/388)). The glue handed the

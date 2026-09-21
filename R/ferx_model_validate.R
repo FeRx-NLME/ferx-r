@@ -280,7 +280,17 @@ ferx_model_validate <- function(path, data = NULL) {
 # name) and the single error is the one that stopped the call. A message from
 # any other stage gets a code only on a text match: a missing code, never a
 # wrong one.
-.ferx_engine_fallback_stages <- "^Error (parsing model|reading data): "
+#
+# Most of the glue spells those two prefixes "Error parsing model: " /
+# "Error reading data: ". `ferx_rust_simulate_adaptive()` puts its own name in
+# front and lower-cases the word ("ferx_simulate_adaptive: error parsing
+# model: ", #390), so the optional `ferx_*: ` prefix is what lets those two
+# stages reach the fallback there too. Nothing else is widened: that function's
+# other refusals - a model with no `[adaptive_dosing]` block, and whatever the
+# controller or the regimen rejects - carry the same prefix but neither stage
+# name, so they still get a code only on a text match.
+.ferx_engine_fallback_stages <-
+  "^(ferx_[a-z_]+: )?[Ee]rror (parsing model|reading data): "
 
 .ferx_engine_call <- function(call, model, data) {
   tryCatch(
