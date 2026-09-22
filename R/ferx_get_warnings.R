@@ -42,7 +42,6 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
   }
 
   use_cli   <- .ferx_use_cli()
-  uses_sde  <- isTRUE(fit$uses_sde)
   model_lbl <- fit$model_name %||% "fit"
   cat(sprintf("ferx fit warnings  (%s)\n", model_lbl))
   cat(strrep("-", 49), "\n", sep = "")
@@ -75,9 +74,7 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
     row <- df_ord[i, ]
     cat(sprintf("%s %s\n", label_for(row$severity), row$category))
     cat(wrap_indent(row$message), "\n", sep = "")
-    guide <- .ferx_warning_guidance(row$category,
-                                    message  = row$message,
-                                    uses_sde = uses_sde)
+    guide <- .ferx_warning_guidance(row$category, message = row$message)
     if (!is.null(guide)) {
       cat(.ferx_style(wrap_indent(guide), "dim", use_cli), "\n", sep = "")
     }
@@ -264,20 +261,26 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
 # category. Returns NULL for unknown categories so callers can skip printing
 # rather than showing a generic placeholder.
 #
-# message and uses_sde are used for dw_autocorrelation (positive vs negative
-# DW; SDE hint suppressed when already in use) and for covariance_step (the
-# specific failure mode embedded in the message text selects targeted advice).
-.ferx_warning_guidance <- function(category, message = "", uses_sde = FALSE) {
+# message picks the dw_autocorrelation arm (positive vs negative DW) and, for
+# covariance_step, selects targeted advice from the specific failure mode
+# embedded in the message text.
+#
+# No [diffusion] arm here, on purpose. The positive-autocorrelation guidance
+# used to append "For ODE models, also consider SDE process noise ([diffusion]
+# block)." on every ODE fit. ferx-core dropped the equivalent sentence from its
+# own Durbin-Watson warning in ferx-core #1426 (refs ferx-core #1285): ferx
+# implements the covariance half of the EKF only, so the state mean stays the
+# deterministic ODE solution and is never corrected by the observed values. A
+# [diffusion] term re-weights the fit rather than following a subject's drift,
+# and is not a remedy for IWRES autocorrelation.
+.ferx_warning_guidance <- function(category, message = "") {
   if (category == "dw_autocorrelation") {
     if (grepl("egative", message, ignore.case = TRUE)) {
       return("Negative IWRES autocorrelation suggests over-parameterisation or a misspecified error model. Consider removing a parameter or simplifying the residual model.")
     }
-    sde_hint <- if (isTRUE(uses_sde)) "" else
-      " For ODE models, also consider SDE process noise ([diffusion] block)."
     return(paste0(
       "Positive IWRES autocorrelation suggests missing structural dynamics.",
-      " Consider transit absorption, an extra compartment, or IOV on ka/F.",
-      sde_hint
+      " Consider transit absorption, an extra compartment, or IOV on ka/F."
     ))
   }
   if (category == "ode_solver") {

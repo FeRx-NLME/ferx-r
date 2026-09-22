@@ -1,11 +1,16 @@
 ## Warfarin — one-compartment ODE model with SDE process noise (EKF)
 ##
 ## Demonstrates the [diffusion] block: DIFF_CENTRAL is a within-subject
-## system-noise variance fitted alongside the structural PK parameters.
+## system-noise variance fitted alongside the structural PK parameters. It
+## measures how much unexplained variance accumulates along the trajectory;
+## a value large relative to sigma says the ODE structure is missing a
+## mechanism.
+##
 ## The Extended Kalman Filter (EKF) integrates the covariance ODE alongside
 ## the state ODE and inflates the observation variance at each time point by
-## the predicted P[central], giving a better-calibrated likelihood when
-## IWRES shows autocorrelation.
+## the predicted P[central]. The state mean is never corrected by the observed
+## values, so this is not a remedy for IWRES autocorrelation - it re-weights
+## the fit rather than following a subject's drift.
 ##
 ## Performance note: SDE models use finite differences (FD) for gradients.
 ## This makes each function evaluation significantly slower than a comparable
