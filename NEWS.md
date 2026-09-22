@@ -1184,6 +1184,22 @@
 
 ## Bug fixes
 
+- **A `.fitrx` written by `ferx_save_fit()` now loads in ferx-core**
+  ([#379](https://github.com/FeRx-NLME/ferx-r/issues/379)). The bundle was
+  written with `jsonlite::write_json(..., auto_unbox = TRUE)`, which collapses
+  every length-1 vector to a JSON scalar, while ferx-core's reader declares
+  those fields as sequences. A fit with one sigma, one warning or a single
+  unchained method - which is most fits - therefore produced a bundle the
+  engine refused with `invalid type: string "foce", expected a sequence`,
+  breaking `ferx summary` and `[priors] from_fit` on any R-written artifact.
+  The R -> R round trip was unaffected throughout, which is why it went
+  unnoticed: `ferx_load_fit()` reads either shape. Every field the format
+  declares as an array is now written as one at any length, from a single
+  table of array keys (`.FITRX_ARRAY_KEYS`) applied to the whole wire rather
+  than field by field, since the failure is silent until a reader happens to
+  be Rust. Bundles written before this fix are unchanged and still load in R;
+  re-save them to make them readable by the engine.
+
 - **A `%` in an engine error message was read as a printf conversion: a garbled
   message, or an aborted R session**
   ([#388](https://github.com/FeRx-NLME/ferx-r/issues/388)). The glue handed the
