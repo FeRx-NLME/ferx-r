@@ -44,7 +44,15 @@ engine_entry_points <- function(fit) {
     "ferx_calc_npde()" = function(m, d) {
       ferx_calc_npde(fit, nsim = 20L, seed = 1L, model = m, data = d)
     },
-    "ferx_inits_from_nca()" = function(m, d) ferx_inits_from_nca(m, d)
+    "ferx_inits_from_nca()" = function(m, d) ferx_inits_from_nca(m, d),
+    # #390. Its glue refuses a model without an `[adaptive_dosing]` block
+    # between the parse and the data read, so the data-stage rows would stop
+    # there on the bare warfarin model; `with_adaptive_block()` gives every row
+    # a controller to get past that check. A model that fails to parse still
+    # fails to parse.
+    "ferx_simulate_adaptive()" = function(m, d) {
+      ferx_simulate_adaptive(with_adaptive_block(m), d, n_sim = 1L, seed = 1L)
+    }
   )
 }
 
@@ -62,6 +70,32 @@ model_with_lines <- function(lines, env) {
   ex   <- ferx_example("warfarin")
   path <- withr::local_tempfile(fileext = ".ferx", .local_envir = env)
   writeLines(c(readLines(ex$model), "", lines), path)
+  path
+}
+
+# The same model with a minimal `[adaptive_dosing]` controller appended, for
+# `ferx_simulate_adaptive()` (#390): its glue checks for the block between the
+# parse and the data read, so without one every data-stage row would stop at
+# "model has no [adaptive_dosing] block" instead of the failure under test.
+# Appending is deliberate - a model the parser refuses is still refused, so the
+# parse rows are unaffected.
+#
+# This gets the warfarin model through the parse and data-read stages only: the
+# engine then refuses `[adaptive_dosing]` on an analytical model ("requires an
+# ODE model"), which is why the dose-compartment row uses the bundled
+# `adaptive_vanco_loading` example instead of this.
+with_adaptive_block <- function(model, env = parent.frame()) {
+  path <- withr::local_tempfile(fileext = ".ferx", .local_envir = env)
+  writeLines(c(readLines(model), "",
+               "[adaptive_dosing]",
+               "  with_assay_error = true",
+               "  assay_cmt        = 1",
+               "  at               = every 24 from 0 to 96",
+               "  start_dose       = 100",
+               "  route            = bolus(cmt=1)",
+               "  dose_bounds      = [0, 200]",
+               "  confirm          = 1",
+               "  when signal < 1 : increase 25%"), path)
   path
 }
 

@@ -59,7 +59,8 @@ for (nm in engine_entry_point_names()) {
 # caller must not be able to tell. The phrase is the validation diagnostic's
 # own, which the panic text carries.
 
-for (nm in setdiff(engine_entry_point_names(), "ferx_calc_npde()")) {
+for (nm in setdiff(engine_entry_point_names(),
+                   c("ferx_calc_npde()", "ferx_simulate_adaptive()"))) {
   local({
     nm <- nm
 
@@ -80,6 +81,22 @@ test_that("the code is attached outside a UTF-8 locale too", {
   ex    <- ferx_example("warfarin")
   probe <- engine_error_probe(ferx_predict(ex$model, infusion_into_cmt0_data()))
   expect_coded_refusal(probe, "infusion into compartment 0", "E_DOSE_CMT_NOT_INFUSABLE")
+})
+
+test_that("ferx_simulate_adaptive() raises E_DOSE_CMT_NOT_INFUSABLE for an infusion into CMT = 0", {
+  # Not in the loop above: `[adaptive_dosing]` is refused on an analytical
+  # model, so the warfarin fixture cannot reach the dose. The bundled
+  # `adaptive_vanco_loading` example is an ODE model with a controller and a
+  # base regimen, so its dose rows are there to break. The code is attached by
+  # the text match, not by the single-error fallback - this message names
+  # neither the parse nor the data-read stage.
+  probe <- engine_error_probe(
+    ferx_simulate_adaptive(ferx_example("adaptive_vanco_loading")$model,
+                           infusion_into_cmt0_data("adaptive_vanco_loading"),
+                           n_sim = 1L, seed = 1L)
+  )
+  expect_coded_refusal(probe, "infusion into compartment 0",
+                       "E_DOSE_CMT_NOT_INFUSABLE")
 })
 
 test_that("ferx_calc_npde() raises an infusion into CMT = 0, uncoded while the engine words it differently", {
@@ -167,6 +184,19 @@ test_that("a missing horizon is not labelled with the data's diagnostic", {
     ferx_simulate(ex$model, infusion_into_cmt0_data("pktte_joint"), n_sim = 1L, seed = 1L)
   )
   expect_uncoded_refusal(probe, "requires a finite, positive administrative horizon")
+})
+
+test_that("a missing [adaptive_dosing] block is not labelled with the data's diagnostic", {
+  # #390's own version of the shape above. `ferx_simulate_adaptive()`'s glue
+  # prefixes every message with the function's name, and the fallback allows
+  # that prefix in front of the two stages it re-runs - but this refusal names
+  # neither stage, so it must stay uncoded even though the data carries exactly
+  # one validation error the fallback could have reached for.
+  ex    <- ferx_example("warfarin")
+  probe <- engine_error_probe(
+    ferx_simulate_adaptive(ex$model, infusion_into_cmt0_data(), n_sim = 1L, seed = 1L)
+  )
+  expect_uncoded_refusal(probe, "model has no [adaptive_dosing] block")
 })
 
 # -- One handler for every entry point ----------------------------------------

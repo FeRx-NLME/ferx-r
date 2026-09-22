@@ -109,6 +109,18 @@ are supported on the constant-covariate path); and an \code{auc_target} metric
 combined with a time-varying covariate, a \code{TIME}-dependent PK parameter,
 IOV, or a reset.
 }
+\section{Errors raised by the engine}{
+
+A model or dataset the engine refuses is an R error, never a \code{NULL}
+result. Where the engine's validation pass names the finding, the error has
+class \code{ferx_engine_error} and carries \code{code}, \code{block},
+\code{line} and \code{suggestion} - the same condition a refused
+\code{\link{ferx_fit}} raises, so one
+\code{tryCatch(..., ferx_engine_error = )} handler covers every entry
+point. A failure the validation pass cannot attribute to one diagnostic is
+raised as an ordinary error carrying the engine's message.
+}
+
 \examples{
 \dontrun{
 ex  <- ferx_example("adaptive_tdm")

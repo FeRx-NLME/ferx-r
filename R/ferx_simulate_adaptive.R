@@ -87,6 +87,8 @@
 #'       \code{target_window} is declared).}
 #'   }
 #'
+#' @inheritSection ferx_simulate Errors raised by the engine
+#'
 #' @examples
 #' \dontrun{
 #' ex  <- ferx_example("adaptive_tdm")
@@ -116,13 +118,22 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
   if (length(n_sim) != 1L || is.na(n_sim) || n_sim < 1L) {
     stop("`n_sim` must be a single positive integer.", call. = FALSE)
   }
-  res <- ferx_rust_simulate_adaptive(
-    model_path = normalizePath(model),
-    data_path = normalizePath(data),
-    n_sim = n_sim,
-    seed = as.integer(seed),
-    verify = if (isTRUE(verify)) "true" else "false",
-    max_decisions = as.integer(max_decisions)
+  # A refusal is an R error, classed like a refused `ferx_fit()` (#385, #390).
+  # This glue prefixes its parse / data-read messages with the function's own
+  # name ("ferx_simulate_adaptive: error parsing model: ..."), which the
+  # single-error fallback in `.ferx_engine_call()` allows for; a controller or
+  # regimen refusal the validation pass cannot name still gets the engine's
+  # prose and no code, never another finding's code.
+  res <- .ferx_engine_call(
+    ferx_rust_simulate_adaptive(
+      model_path = normalizePath(model),
+      data_path = normalizePath(data),
+      n_sim = n_sim,
+      seed = as.integer(seed),
+      verify = if (isTRUE(verify)) "true" else "false",
+      max_decisions = as.integer(max_decisions)
+    ),
+    model, data
   )
 
   # Same `simulation_warnings` channel `ferx_simulate()` uses - here it carries
