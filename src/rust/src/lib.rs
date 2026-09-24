@@ -2207,6 +2207,31 @@ fn model_structure_list(model: &CompiledModel) -> Robj {
 
 // -- Helper: convert FitResult + Population to R named list --
 
+/// The name ferx-core gives a model whose file declares no `model NAME` line.
+///
+/// Mirrors `ferx_core::parser::model_parser::UNNAMED_MODEL`, which is
+/// `pub(crate)`: the engine's own fallback, `api::run::set_model_name`, swaps it
+/// for the file stem, but that is `pub(crate)` too, and the glue's fit parses
+/// the model itself. Once ferx-core exports either, use it here and drop this
+/// copy (ferx-r #34).
+const ENGINE_UNNAMED_MODEL: &str = "Unnamed";
+
+/// The model name as R should see it: the declared name, or `""` when the file
+/// declared none.
+///
+/// This is the one place the engine's placeholder crosses the FFI boundary, so
+/// R's contract is plain - `""` means "no declared name, use the file stem" -
+/// and no R code has to know the placeholder's spelling (ferx-r #34). A file
+/// that declares `model Unnamed` reads as undeclared, as it does in ferx-core's
+/// own `set_model_name`, so the R and CLI names agree.
+fn declared_model_name(name: &str) -> &str {
+    if name == ENGINE_UNNAMED_MODEL {
+        ""
+    } else {
+        name
+    }
+}
+
 fn fit_result_to_list(
     result: &FitResult,
     population: &Population,
@@ -2831,7 +2856,7 @@ fn fit_result_to_list(
         shrinkage_eta = result.shrinkage_eta.clone(),
         shrinkage_eps = result.shrinkage_eps,
         wall_time_secs = result.wall_time_secs,
-        model_name = result.model_name.clone(),
+        model_name = declared_model_name(&result.model_name).to_string(),
         ferx_version = result.ferx_version.clone(),
         cov_matrix = cov_matrix_flat,
         cov_matrix_dim = cov_matrix_dim,
