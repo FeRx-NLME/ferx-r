@@ -1292,13 +1292,20 @@
 #' spellings are now reported as \code{E_PARSE} with the offending line quoted
 #' (ferx-core #1377).
 #'
-#' \strong{Unused-parameter warning:} a \code{warning} severity message with
-#' category \code{"unused_parameter"} is emitted by the parser when a
-#' parameter is declared in \code{[parameters]} but never referenced in
-#' \code{[individual_parameters]} or \code{[error_model]}. This usually
-#' indicates a commented-out expression or a typo in the parameter name.
-#' Inspect \code{ferx_get_warnings(fit)} or check \code{ferx_model_validate()}
-#' before fitting.
+#' \strong{Unused-parameter warning:} the parser emits a \code{warning}
+#' severity message in two cases: a parameter declared in \code{[parameters]}
+#' but never referenced in \code{[individual_parameters]} or
+#' \code{[error_model]}, and a variable computed in
+#' \code{[individual_parameters]} but never used (not mapped into the
+#' structural model and not referenced by any other block). Both arrive under
+#' category \code{"general"} - ferx-core has no dedicated code for them - and
+#' \code{ferx_get_warnings()} attaches the unused-parameter guidance by
+#' message. This usually indicates a commented-out expression or a typo in
+#' the parameter name. A THETA that is used but has no effect on the objective
+#' is a different warning (category \code{"flat_parameter"}): it is frozen at
+#' its initial value rather than estimated. Inspect
+#' \code{ferx_get_warnings(fit)} or check \code{ferx_model_validate()} before
+#' fitting.
 #'
 #' @section Steady-state dosing (\code{SS} and \code{II} columns):
 #'
@@ -2407,8 +2414,9 @@ print.ferx_fit <- function(x, ...) {
   status_lbl <- if (isTRUE(x$converged)) "CONVERGED" else "NOT CONVERGED"
   status_style <- if (isTRUE(x$converged)) "green" else "red"
   status_tail <- character(0)
-  # Categories come from the engine; no R-side string parsing needed.
-  ws <- x$warnings_structured
+  # Categories come from the engine; no R-side string parsing needed. Read
+  # through .ferx_fit_warnings() so a loaded fit's flat warnings count too.
+  ws <- .ferx_fit_warnings(x)
   if (!is.null(ws) && is.data.frame(ws) && all(c("severity", "category") %in% names(ws))) {
     crit_rows <- ws[ws$severity == "critical", , drop = FALSE]
     if (nrow(crit_rows) > 0L) {
@@ -2976,9 +2984,10 @@ print.ferx_fit <- function(x, ...) {
   }
 
   # Warning summary - a compact tally and a call-to-action rather than a wall
-  # of message strings. Severity comes from fit$warnings_structured (PR 2);
-  # the legacy flat fit$warnings vector is used only as a count fallback.
-  ws <- x$warnings_structured
+  # of message strings. Severity comes from the structured table plus any flat
+  # message it lacks, classified by the engine (.ferx_fit_warnings(), #308);
+  # the bare count below is a fallback for a table that cannot be built.
+  ws <- .ferx_fit_warnings(x)
   if (!is.null(ws) && is.data.frame(ws) && nrow(ws) > 0L) {
     n_crit <- sum(ws$severity == "critical")
     n_warn <- sum(ws$severity == "warning")

@@ -563,3 +563,86 @@ test_that(".get_col_sel matches column names case-insensitively, else NULL", {
   expect_identical(ferx:::.get_col_sel(df, "time"), c(0, 1))
   expect_null(ferx:::.get_col_sel(df, "dv"))
 })
+
+# ---------------------------------------------------------------------------
+# ferx_apply_selection(model = ) applies the model's [data] column map
+# (ferx-r #405 review)
+# ---------------------------------------------------------------------------
+
+# Warfarin with TIME and ID renamed, and a model mapping them back. `extra` is
+# appended to the model (a [data_selection] block, say).
+mapped_sel_warfarin <- function(extra = character(0), env = parent.frame()) {
+  d <- example_rows()
+  names(d)[names(d) == "TIME"] <- "TAFD"
+  names(d)[names(d) == "ID"]   <- "SUBJ"
+  csv <- normalizePath(write_nonmem_csv(d, env))
+  model <- model_with_lines(
+    c("[data]", paste0("  path = ", csv), "  TIME = TAFD", "  ID = SUBJ", "",
+      extra), env
+  )
+  list(model = model, data = csv)
+}
+
+test_that("ferx_apply_selection(model = ) evaluates filters on mapped columns", {
+  ex <- ferx_example("warfarin")
+  mapped <- mapped_sel_warfarin()
+
+  plain <- ferx_apply_selection(ex$data, ignore = "TIME > 24",
+                                ignore_ids = 1)
+  via_map <- ferx_apply_selection(mapped$data, ignore = "TIME > 24",
+                                  ignore_ids = 1, model = mapped$model)
+
+  expect_identical(attr(via_map, "exclusions"), attr(plain, "exclusions"))
+  expect_identical(nrow(via_map), nrow(plain))
+  # The returned rows keep the dataset's own headers.
+  expect_true(all(c("TAFD", "SUBJ") %in% names(via_map)))
+  expect_false("TIME" %in% names(via_map))
+
+  # A ferx_model is accepted too.
+  expect_identical(
+    attr(ferx_apply_selection(mapped$data, ignore = "TIME > 24",
+                              model = ferx_model(mapped$data, mapped$model)),
+         "exclusions")$n_obs_excluded,
+    attr(ferx_apply_selection(ex$data, ignore = "TIME > 24"),
+         "exclusions")$n_obs_excluded
+  )
+
+  # Without the model, TIME matches no column and nothing is excluded.
+  unmapped <- ferx_apply_selection(mapped$data, ignore = "TIME > 24")
+  expect_identical(nrow(unmapped), nrow(example_rows()))
+})
+
+test_that("ferx_apply_selection(model = ) rejects a model that is not a file", {
+  ex <- ferx_example("warfarin")
+  expect_error(
+    ferx_apply_selection(ex$data, ignore = "TIME > 24", model = 1),
+    "`model` must be"
+  )
+})
+
+test_that("the mapped preview agrees with the engine's exclusions, and a fit replays them", {
+  skip_on_cran()
+  mapped <- mapped_sel_warfarin(c("[data_selection]", "  ignore = TIME > 24"))
+  # A 5-iteration fit: its convergence warnings are not the point here.
+  fit <- suppressWarnings(
+    ferx_fit(mapped$model, mapped$data, method = "foce", verbose = FALSE,
+             covariance = FALSE, settings = list(maxiter = 5L))
+  )
+  preview <- attr(
+    ferx_apply_selection(mapped$data, ignore = "TIME > 24",
+                         model = mapped$model),
+    "exclusions"
+  )
+
+  expect_gt(fit$exclusions$n_obs_excluded, 0L)
+  for (f in c("n_obs_excluded", "n_dose_excluded", "n_other_excluded")) {
+    expect_equal(preview[[f]], fit$exclusions[[f]], info = f)
+  }
+
+  # ferx_apply_selection(fit) replays the fired rule through the fit's model.
+  replayed <- ferx_apply_selection(fit, excluded = TRUE)
+  expect_equal(nrow(replayed),
+               fit$exclusions$n_obs_excluded + fit$exclusions$n_dose_excluded +
+                 fit$exclusions$n_other_excluded)
+  expect_true("TAFD" %in% names(replayed))
+})

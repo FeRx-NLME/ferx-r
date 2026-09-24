@@ -105,6 +105,12 @@ ferx_rust_known_blocks <- function() {
 
 #' @title Internal Rust backend binding
 #' @keywords internal
+ferx_rust_classify_warnings <- function(messages) {
+  .Call("wrap__ferx_rust_classify_warnings", messages)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
 ferx_rust_validate_model <- function(model_path, data_path) {
   .Call("wrap__ferx_rust_validate_model", model_path, data_path)
 }
@@ -113,6 +119,12 @@ ferx_rust_validate_model <- function(model_path, data_path) {
 #' @keywords internal
 ferx_rust_model_data_path <- function(model_path) {
   .Call("wrap__ferx_rust_model_data_path", model_path)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_model_column_map <- function(model_path) {
+  .Call("wrap__ferx_rust_model_column_map", model_path)
 }
 
 #' @title Internal Rust backend binding

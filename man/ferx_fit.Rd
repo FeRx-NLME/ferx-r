@@ -1348,13 +1348,20 @@ must be consumed end to end by exactly one declaration form, so all six
 spellings are now reported as \code{E_PARSE} with the offending line quoted
 (ferx-core #1377).
 
-\strong{Unused-parameter warning:} a \code{warning} severity message with
-category \code{"unused_parameter"} is emitted by the parser when a
-parameter is declared in \code{[parameters]} but never referenced in
-\code{[individual_parameters]} or \code{[error_model]}. This usually
-indicates a commented-out expression or a typo in the parameter name.
-Inspect \code{ferx_get_warnings(fit)} or check \code{ferx_model_validate()}
-before fitting.
+\strong{Unused-parameter warning:} the parser emits a \code{warning}
+severity message in two cases: a parameter declared in \code{[parameters]}
+but never referenced in \code{[individual_parameters]} or
+\code{[error_model]}, and a variable computed in
+\code{[individual_parameters]} but never used (not mapped into the
+structural model and not referenced by any other block). Both arrive under
+category \code{"general"} - ferx-core has no dedicated code for them - and
+\code{ferx_get_warnings()} attaches the unused-parameter guidance by
+message. This usually indicates a commented-out expression or a typo in
+the parameter name. A THETA that is used but has no effect on the objective
+is a different warning (category \code{"flat_parameter"}): it is frozen at
+its initial value rather than estimated. Inspect
+\code{ferx_get_warnings(fit)} or check \code{ferx_model_validate()} before
+fitting.
 }
 
 \section{Steady-state dosing (\code{SS} and \code{II} columns)}{

@@ -4,7 +4,10 @@
 #' (\code{critical}, \code{warning}, \code{info}) and category. Severity and
 #' category are assigned by the ferx-core engine (for engine warnings) or by
 #' the R diagnostics layer (for condition number and ETA normality); the R
-#' side never re-parses message text to guess severity.
+#' side never re-parses message text to guess severity. A fit read back with
+#' \code{\link{ferx_load_fit}} carries only the flat message strings, so each
+#' one is run through the engine's own classifier to recover the severity and
+#' category the fresh fit had.
 #'
 #' @param fit A \code{ferx_fit} object returned by \code{\link{ferx_fit}}.
 #' @param as_df Logical. When \code{TRUE}, returns the raw data frame
@@ -24,19 +27,7 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
   if (!inherits(fit, "ferx_fit")) {
     stop("`fit` must be a ferx_fit object")
   }
-  df <- fit$warnings_structured
-  if (is.null(df) || !is.data.frame(df)) {
-    # Backward-compat fallback for fits saved before structured warnings:
-    # surface the flat character vector as undifferentiated warnings.
-    msgs <- fit$warnings %||% character(0)
-    df <- data.frame(
-      severity      = rep("warning", length(msgs)),
-      category      = rep("general", length(msgs)),
-      message       = as.character(msgs),
-      source_method = rep("", length(msgs)),
-      stringsAsFactors = FALSE
-    )
-  }
+  df <- .ferx_fit_warnings(fit)
   if (isTRUE(as_df)) {
     return(df)
   }
@@ -91,6 +82,119 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
     .ferx_style(sprintf("%d INFO",     n_info), "dim", use_cli)
   ))
   invisible(df)
+}
+
+# Severity and category for flat warning strings, as ferx-core assigns them.
+#
+# Delegates to the engine's `classify_warning` (via ferx_rust_classify_warnings)
+# so the R side keeps no second copy of its message patterns. The one R-side
+# message the engine does not know - the dropped-`[output]` finding, which goes
+# into the flat vector so it survives a `.fitrx` round trip - is recovered here.
+# Returns the same four-column data frame as `fit$warnings_structured`.
+.ferx_classify_flat_warnings <- function(msgs) {
+  msgs <- as.character(msgs)
+  msgs[is.na(msgs)] <- ""
+  if (length(msgs) == 0L) {
+    return(data.frame(severity = character(0), category = character(0),
+                      message = character(0), source_method = character(0),
+                      stringsAsFactors = FALSE))
+  }
+  cl <- ferx_rust_classify_warnings(msgs)
+  df <- data.frame(
+    severity      = as.character(cl$severity),
+    category      = as.character(cl$category),
+    message       = as.character(cl$message),
+    source_method = as.character(cl$source_method),
+    stringsAsFactors = FALSE
+  )
+  is_output <- df$category == "general" &
+    grepl("named in [output]", df$message, fixed = TRUE)
+  df$category[is_output] <- "output"
+  df
+}
+
+# The fit's warnings as one structured table: `fit$warnings_structured` plus
+# every flat message it does not already carry, classified by the engine.
+#
+# `ferx_load_fit()` does not restore `warnings_structured`, so a loaded fit has
+# only the flat strings - and `ferx_sir()` / `ferx_covariance()` run on it then
+# install a table holding just their own rows. Reading the table alone would
+# drop every older warning on that fit; reading it only when absent (as this
+# once did) dropped them the moment either post-hoc step ran (#308 review). On
+# a fresh fit every flat message is already in the table, so it is returned
+# unchanged. The fit itself is never modified, so check_strictness(), which
+# reads `warnings_structured` directly, is unaffected.
+.ferx_fit_warnings <- function(fit) {
+  cols <- c("severity", "category", "message", "source_method")
+  ws <- fit$warnings_structured
+  if (is.data.frame(ws) && all(cols[1:3] %in% names(ws))) {
+    if (!"source_method" %in% names(ws)) ws$source_method <- rep("", nrow(ws))
+    ws <- ws[, cols, drop = FALSE]
+  } else {
+    ws <- NULL
+  }
+  msgs <- unique(as.character(unlist(fit$warnings %||% character(0),
+                                     use.names = FALSE)))
+  msgs <- msgs[!is.na(msgs) & nzchar(msgs)]
+  flat <- .ferx_classify_flat_warnings(msgs)
+  if (is.null(ws)) return(flat)
+  missing <- !(flat$message %in% ws$message)
+  if (!any(missing)) return(ws)
+  out <- rbind(ws, flat[missing, , drop = FALSE])
+  rownames(out) <- NULL
+  out
+}
+
+# Guidance for the `mu_referencing` category. ferx-core's classifier gives this
+# code two severities: Warning for "not mu-referenced" (a parameter the
+# closed-form updates cannot use) and Info for every other mu-referencing note.
+.ferx_mu_referencing_guidance <- function(message = "") {
+  if (grepl("not mu-referenced", message, ignore.case = TRUE)) {
+    return(paste0(
+      "The listed individual parameters are not mu-referenced, so the ",
+      "closed-form updates SAEM and IMPMAP use for mu-referenced parameters do ",
+      "not apply to them and convergence can be slower or less stable. Where ",
+      "possible, write them as typical value times exp(ETA), e.g. ",
+      "CL = TVCL * exp(ETA_CL)."
+    ))
+  }
+  "Mu-referencing note (informational): it reports how mu-referencing was detected or applied for the listed parameters. No action needed."
+}
+
+# Guidance for the `optimizer_config` category. Warning for "global_search
+# disabled" - the CRS2-LM pre-search failed at runtime and the fit ran without
+# it - and Info for the other global_search notes.
+.ferx_optimizer_config_guidance <- function(message = "") {
+  if (grepl("global_search disabled", message, ignore.case = TRUE)) {
+    return(paste0(
+      "The global pre-search (CRS2-LM) could not start, so the fit ran from the ",
+      "declared initial values without it and may have settled in a local ",
+      "optimum. Check the reason quoted in the message, or cover the parameter ",
+      "space another way, e.g. settings = list(n_starts = 4L)."
+    ))
+  }
+  "Optimizer configuration note (informational)."
+}
+
+# Guidance for the `flip_flop` category. Two emitters share it: the auto-reroute
+# note (the ODE twin evaluates flip-flop parameters, so the profile is correct)
+# and a twin-less model whose subjects silently degenerate at their EBEs.
+.ferx_flip_flop_guidance <- function(message = "") {
+  if (grepl("automatically evaluates", message, fixed = TRUE)) {
+    return(paste0(
+      "Informational: the flip-flop parameters are evaluated with the equivalent ",
+      "ODE model, so predictions are correct but slower than the closed form. ",
+      "Check the absorption starting estimates if flip-flop kinetics are not ",
+      "expected."
+    ))
+  }
+  paste0(
+    "The listed subjects fall where the analytic absorption closed form returns ",
+    "an all-zero concentration profile, and this model has no ODE equivalent to ",
+    "fall back on, so their likelihood contributions are silently degenerate. ",
+    "Rewrite the absorption as an explicit [odes] model, or revisit the ",
+    "absorption and clearance starting estimates."
+  )
 }
 
 # Guidance for the `sir` category. The proposal-conditioning diagnostics
@@ -274,6 +378,15 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
 # [diffusion] term re-weights the fit rather than following a subject's drift,
 # and is not a remedy for IWRES autocorrelation.
 .ferx_warning_guidance <- function(category, message = "") {
+  # A `general` row is recovered to the category the engine gives its message
+  # first. `ferx_load_fit()` does not restore `warnings_structured`, so a loaded
+  # fit's rows would otherwise all arrive here as `general`, and every arm
+  # below keyed on a category would be dead for them (#308). A message the
+  # engine itself files under `general` is unchanged by this.
+  if (identical(category, "general") && is.character(message) &&
+      length(message) == 1L && !is.na(message) && nzchar(message)) {
+    category <- .ferx_classify_flat_warnings(message)$category
+  }
   if (category == "dw_autocorrelation") {
     if (grepl("egative", message, ignore.case = TRUE)) {
       return("Negative IWRES autocorrelation suggests over-parameterisation or a misspecified error model. Consider removing a parameter or simplifying the residual model.")
@@ -388,6 +501,26 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
         "convergence. Check the estimates against their bounds, then try the ",
         "R-matrix covariance (ferx_covariance(fit, covariance_method = \"r\")) ",
         "or ferx_sir()."
+      ))
+    }
+    # An invalid step never reaches the Hessian: nothing about the model was
+    # diagnosed, so the identifiability advice in the fallback does not apply.
+    if (grepl("fd_hessian_step must be positive and finite", message, fixed = TRUE)) {
+      return(paste0(
+        "The covariance step did not run because fd_hessian_step is not a ",
+        "positive finite number. Set a positive value (the default is 0.01) in ",
+        "ferx_fit(..., fd_hessian_step = ) or in [fit_options], and re-run."
+      ))
+    }
+    # covariance_method = "s" alone: the S matrix itself cannot be inverted.
+    # The R-matrix estimators do not need it inverted, so they are the remedy.
+    if (grepl("score cross-product matrix S is singular", message, fixed = TRUE)) {
+      return(paste0(
+        "The score cross-product S is singular, which usually means fewer ",
+        "subjects than free parameters or collinear per-subject scores, so the ",
+        "S-only covariance cannot be formed. Use an estimator that does not ",
+        "invert S: ferx_covariance(fit, covariance_method = \"r\") or ",
+        "covariance_method = \"rsr\"."
       ))
     }
     # Cancelled part-way (`COV_CANCELLED_MSG`). No standard errors, but nothing
@@ -544,6 +677,7 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
     condition_number   = "Parameters are correlated/ill-scaled. Consider fixing or removing a parameter, or reparameterising.",
     optimizer_health   = "Optimizer struggled (trust region / Hessian). Inspect the trace and consider better starting values.",
     vi_bad_basin       = "VI's final ELBO check found that the flat objective is a bad basin, not a usable variational approximation. Refit from different initial values, raise settings = list(n_starts = 4L), or use method = \"focei\".",
+    boundary_estimate  = "A THETA estimate finished on one of its declared bounds, so it is not an interior optimum and its standard error is not meaningful. Widen the bound if it is too tight, FIX the parameter if the boundary value is intended, or simplify the model if the data do not inform it.",
     parameter_at_runaway_guard = "A coordinate is pinned to an internal safety limit (an implicit theta cap, or an omega/sigma guard), so this is not an interior optimum. Give the parameter explicit bounds, fix it, or remove the term it belongs to.",
     # The start-side twin of parameter_at_runaway_guard above: same internal
     # rails, but this one fires before the first objective evaluation rather
@@ -564,6 +698,15 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
     # follow, printed directly beneath an engine message that already gives the
     # right one.
     init_outside_bounds = "A start value was clamped onto one of the optimizer's internal rails before the first objective evaluation, so the fit did not begin from what the model file declares. This is an omega variance or a sigma SD, neither of which takes explicit bounds: move the start inside the rail quoted above, or FIX the parameter to hold the declared value.",
+    inflated_rse       = "The listed THETAs are imprecisely estimated: the data barely inform them. Check that the design covers them (e.g. absorption-phase samples for KA), consider fixing or removing them, and cross-check their intervals with ferx_sir().",
+    high_correlation   = "Highly correlated estimates are not separated by the data. Inspect fit$cor_matrix, then fix or remove one parameter of each pair, or reparameterise.",
+    eta_shrinkage      = "EBE-based diagnostics (ETA-versus-covariate plots, IPRED, IWRES) are unreliable for the listed ETAs - do not screen covariates on them. Consider removing that IIV term, or a design that informs it.",
+    eps_shrinkage      = "Negative EPS shrinkage means the residuals at the EBEs are larger than the residual error model allows. Inspect IWRES in fit$sdtab; if a SAEM fit, polish with method = c(\"saem\", \"focei\"), otherwise revisit the error model or the subjects it fits poorly.",
+    flat_parameter     = "The THETA had no effect on the objective at its initial value, so it was FIXed there and not estimated. Map it into the model (e.g. in [structural_model]) or remove it from [parameters].",
+    experimental       = "This model uses a feature marked experimental (SDE [diffusion] or neural-network components), validated on few datasets. Cross-check the result against a model without the feature, and treat its standard errors with caution.",
+    absorption_twin_declined = "The absorption model stays closed-form with no ODE fallback, so subjects that need one (time-varying covariates, IOV, steady-state or infusion doses, flip-flop kinetics) will be rejected with an error. Fix the reason quoted after 'Reason:', or write the absorption as an explicit [odes] model.",
+    flip_flop          = .ferx_flip_flop_guidance(message),
+    simulation         = "A simulated subject drew a degenerate hazard; it was censored at the end of its observation window instead of producing events. Check the hazard parameters and that subject's covariate values.",
     eta_normality      = "ETA distribution may be non-normal. High shrinkage or sparse data can cause this; prefer QQ-plots for diagnosis.",
     bloq_method        = "LOQ censoring note. Set method = \"focei\" explicitly to silence, or review the M3 setup.",
     sir                = .ferx_sir_guidance(message),
@@ -572,8 +715,8 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
     omega_structure    = "Mixed parameterisation in a block omega. Check the [individual_parameters] forms for the correlated etas.",
     ebe_convergence    = "Some subjects' inner EBE search did not converge. Inspect those subjects or relax inner_tol / max_unconverged_frac.",
     gradient_fallback  = "Gradient method fell back (e.g. AD -> FD or HMC -> MH). The fit is valid; expect a longer runtime.",
-    mu_referencing     = "Mu-referencing was auto-detected for the listed parameters (informational).",
-    optimizer_config   = "Optimizer configuration note (informational).",
+    mu_referencing     = .ferx_mu_referencing_guidance(message),
+    optimizer_config   = .ferx_optimizer_config_guidance(message),
     multi_start        = "Multi-start information (informational).",
     threads            = "Thread-pool sizing note. Consider matching threads to the subject count.",
     cancelled          = "The fit was cancelled before completion.",

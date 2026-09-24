@@ -374,15 +374,71 @@ ferx_section_headers <- function(lines) {
 # Returns the resolved path (character(1)) or NULL when the model file declares
 # no `[data] path`. Relative paths are resolved by the engine relative to the
 # model file's directory. `model_path` must be a path to a .ferx file.
-.ferx_model_data_path <- function(model_path) {
+#
+# A model the engine cannot parse is not "a model without a `[data]` block":
+# answering NULL for it sent every caller to its "No data supplied" error,
+# telling the user to add the block the file already had (#387). So by default
+# a parse failure is raised the way the explicit-`data` path raises it, through
+# `.ferx_engine_call()` - classed `ferx_engine_error` with the diagnostic code
+# where validation names one. `strict = FALSE` keeps the old answer (NULL) for
+# the one caller that must accept a half-written file: the `ferx_model()`
+# constructor, whose object reaches this helper again - strictly - in whichever
+# entry point it is piped into.
+.ferx_model_data_path <- function(model_path, strict = TRUE) {
   if (is.null(model_path) || !is.character(model_path) ||
       length(model_path) != 1L || !file.exists(model_path)) {
     return(NULL)
   }
-  p <- tryCatch(
-    ferx_rust_model_data_path(normalizePath(model_path)),
-    error = function(e) ""
-  )
+  resolve <- function() ferx_rust_model_data_path(normalizePath(model_path))
+  p <- if (strict) {
+    .ferx_engine_call(resolve(), model_path, NULL)
+  } else {
+    tryCatch(resolve(), error = function(e) "")
+  }
   if (length(p) != 1L || is.na(p) || !nzchar(p)) return(NULL)
   p
+}
+
+# The column renames a model file's `[data]` block declares (#730/#742), as a
+# data.frame with character columns `target` (the name the engine's reader
+# gives the column: `TIME`, `DV`, ... for a role, or an arbitrary rename such
+# as `WT` as written) and `actual` (the CSV header, matched case-insensitively).
+# Zero rows when the model declares none, or when `model_path` is NULL / not a
+# file. The parse runs in the engine, so R never re-implements the block.
+# `strict = FALSE` also maps a model the engine cannot parse to zero rows, for
+# callers (fit$eta_cov) that must not fail on a model file edited since the fit.
+.ferx_model_column_map <- function(model_path, strict = TRUE) {
+  none <- data.frame(target = character(0), actual = character(0),
+                     stringsAsFactors = FALSE)
+  if (is.null(model_path) || !is.character(model_path) ||
+      length(model_path) != 1L || is.na(model_path) ||
+      !file.exists(model_path)) {
+    return(none)
+  }
+  m <- if (strict) {
+    ferx_rust_model_column_map(normalizePath(model_path))
+  } else {
+    tryCatch(ferx_rust_model_column_map(normalizePath(model_path)),
+             error = function(e) NULL)
+  }
+  if (is.null(m) || length(m$target) == 0L) return(none)
+  data.frame(target = as.character(m$target), actual = as.character(m$actual),
+             stringsAsFactors = FALSE)
+}
+
+# Rename `df`'s columns the way the engine's reader applies a `[data]` column
+# map: each `actual` header (case-insensitive) takes its `target` name, every
+# header resolved against the original names before any rename. Used by the R
+# helpers that re-read the raw CSV (ferx_apply_selection(), fit$eta_cov) so a
+# mapped column is seen under the name the engine gives it. Lenient where the
+# engine refuses: a mapped header that is absent is skipped rather than raised,
+# since the fit / read that uses the same map reports it.
+.ferx_apply_column_map <- function(df, column_map) {
+  if (is.null(column_map) || nrow(column_map) == 0L) return(df)
+  nm  <- names(df)
+  idx <- match(tolower(column_map$actual), tolower(nm))
+  ok  <- !is.na(idx)
+  nm[idx[ok]] <- column_map$target[ok]
+  names(df) <- nm
+  df
 }
