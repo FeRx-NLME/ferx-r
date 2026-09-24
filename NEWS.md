@@ -1203,6 +1203,13 @@
   whether it alone moves the fit to the analytic route; when it names loose
   ODE tolerances, it points at
   `ferx_fit(settings = list(ode_reltol = 1e-6, ode_abstol = 1e-8))`.
+  On ferx-core's hybrid analytic/FD covariance route
+  ([ferx-core #1514](https://github.com/FeRx-NLME/ferx-core/issues/1514)) the
+  route change is the finite-differenced subjects', not the whole fit's; the
+  hybrid off-diagonal-stencil warning is described as a missing
+  finite-differenced share rather than zeroed terms; and the
+  `W_COV_ANALYTIC_SALVAGE` note gets informational guidance instead of the
+  "Standard errors unavailable" fallback.
   `?ferx_fit`'s `ode_reltol` entry gains the matching covariance caveat and
   notes that it also governs the closed-form transit / inverse-Gaussian
   absorption ODE twin.

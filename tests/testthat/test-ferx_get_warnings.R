@@ -213,6 +213,97 @@ test_that("magnitude-graded regularisation guidance gives the action, not the me
     "1e-8 is on the measured accuracy plateau for this stencil (#520).")))
   expect_match(twin, "ode_reltol = 1e-6", fixed = TRUE)
   expect_match(twin, "Minor Hessian regularisation", fixed = TRUE)
+  # Pure FD route: the rewrite is the whole fit's route change.
+  expect_false(grepl("finite-differenced subjects", alone, fixed = TRUE))
+})
+
+test_that("hybrid analytic/FD regularisation keeps the route change on those subjects", {
+  # ferx-core #1514 / #1516: on the hybrid route the declining clauses belong
+  # to the finite-differenced subjects only; everyone else is already
+  # analytic, so "moves the fit" / "keeps the fit on FD" would be false.
+  # Exact shapes from cov_diagnostics.rs decline_sentences().
+  hyb <- function(tail) paste0(
+    "Covariance step regularized: eigenvalue floor applied to the hybrid ",
+    "analytic/FD R-matrix (1 of 13 free-block eigenvalues clipped; min eig = ",
+    "-3.100e-2, max eig = 4.200e+3, |min eig|/max eig = 7.38e-6, floor = ",
+    "4.200e-11; worst inflation of a reported variance = 4.400e3x; severity: ",
+    "severe). Standard errors for the affected parameters come mostly from the ",
+    "floor rather than from the data and are not reliable; SIR-based confidence ",
+    "intervals are recommended.", tail)
+  g <- function(msg) ferx:::.ferx_warning_guidance("covariance_regularized",
+                                                   message = msg)
+  alone <- g(hyb(paste0(
+    " The finite-differenced subjects declined the exact analytic covariance ",
+    "R-matrix because [scaling] obs_scale = ... is in use. Writing the readout ",
+    "as an explicit expression ([scaling] y = central / V) instead of obs_scale ",
+    "moves those subjects onto the analytic route.")))
+  expect_match(alone, "moves the finite-differenced subjects onto the analytic route",
+               fixed = TRUE)
+  expect_false(grepl("the fit", alone, fixed = TRUE))
+
+  together <- g(hyb(paste0(
+    " The finite-differenced subjects declined the exact analytic covariance ",
+    "R-matrix because gradient = fd and [scaling] obs_scale = ... is in use. ",
+    "Dropping gradient = fd and writing the readout as an explicit expression ",
+    "([scaling] y = central / V) instead of obs_scale together move those ",
+    "subjects onto the analytic route.")))
+  expect_match(together, "moves the finite-differenced subjects onto the analytic route",
+               fixed = TRUE)
+  expect_false(grepl("the fit", together, fixed = TRUE))
+
+  blocked <- g(hyb(paste0(
+    " The finite-differenced subjects declined the exact analytic covariance ",
+    "R-matrix because [scaling] obs_scale = ... is in use and the model is a ",
+    "mixture model. Writing the readout as an explicit expression ([scaling] ",
+    "y = central / V) instead of obs_scale clears that clause, but the ",
+    "remaining clause has no one-line remedy, so those subjects stay on the ",
+    "finite-difference route until all of them are cleared.")))
+  expect_match(blocked,
+               "keep the finite-differenced subjects on the finite-difference route",
+               fixed = TRUE)
+  expect_false(grepl("the fit", blocked, fixed = TRUE))
+})
+
+test_that("off-diagonal FD stencil guidance distinguishes pure-FD from hybrid", {
+  g <- function(msg) ferx:::.ferx_warning_guidance("covariance_regularized",
+                                                   message = msg)
+  fd <- g(paste0(
+    "Covariance step: off-diagonal FD stencil(s) non-finite for theta[CL]. ",
+    "Cross-partial correlation set to 0; SE for these parameter(s) may be ",
+    "over-optimistic. Try tuning fd_hessian_step."))
+  expect_match(fd, "were set to zero", fixed = TRUE)
+  expect_false(grepl("finite-differenced subjects", fd, fixed = TRUE))
+
+  hy <- g(paste0(
+    "Covariance step: off-diagonal FD stencil(s) non-finite for theta[CL]. ",
+    "Those cross-partials keep only the analytically assembled subjects' ",
+    "contribution \u2014 the finite-differenced subjects' share of them is ",
+    "missing \u2014 so SE for these parameter(s) may be over-optimistic. Try ",
+    "tuning fd_hessian_step."))
+  expect_match(hy, "finite-differenced subjects' share", fixed = TRUE)
+  expect_match(hy, "analytically assembled subjects' share is kept", fixed = TRUE)
+  expect_false(grepl("set to zero", hy, fixed = TRUE))
+  for (x in c(fd, hy)) {
+    expect_match(x, "Standard errors were produced", fixed = TRUE)
+    expect_match(x, "fd_hessian_step", fixed = TRUE)
+  }
+})
+
+test_that("W_COV_ANALYTIC_SALVAGE is informational, not a failure (ferx-core #1514)", {
+  # ferx-core classifies it (Info, CovarianceStep) on its token.
+  msg <- paste0(
+    "W_COV_ANALYTIC_SALVAGE: 2 of 30 subjects (IDs 7 and 12) are outside the ",
+    "exact analytic covariance R-matrix scope; their information terms were ",
+    "finite-differenced from their own marginals, and the remaining 28 subjects ",
+    "were assembled analytically. Each subject contributes its own term to the ",
+    "information matrix, so only the named subjects' terms use a different ",
+    "estimator.")
+  g <- ferx:::.ferx_warning_guidance("covariance_step", message = msg)
+  expect_match(g, "Informational", fixed = TRUE)
+  expect_match(g, "complete", fixed = TRUE)
+  expect_match(g, "only their terms were finite-differenced", fixed = TRUE)
+  expect_false(grepl("unavailable|identifiability", g, ignore.case = TRUE))
+  expect_identical(ferx:::.ferx_warning_guidance("covariance", message = msg), g)
 })
 
 test_that("the informational covariance_step note does not read as a failure", {
@@ -708,6 +799,25 @@ test_that("every covariance message ferx-core emits gets non-contradictory guida
                       "for these parameter(s) may be over-optimistic. Try tuning ",
                       "fd_hessian_step."),
          ok = "over-optimistic", never = "unavailable"),
+    list(cat = "covariance_regularized",
+         # Hybrid analytic/FD route (ferx-core #1514): only the
+         # finite-differenced subjects' share is missing.
+         msg = paste0("Covariance step: off-diagonal FD stencil(s) non-finite for ",
+                      "theta[CL]. Those cross-partials keep only the analytically ",
+                      "assembled subjects' contribution \u2014 the finite-differenced ",
+                      "subjects' share of them is missing \u2014 so SE for these ",
+                      "parameter(s) may be over-optimistic. Try tuning ",
+                      "fd_hessian_step."),
+         ok = "over-optimistic", never = "set to zero"),
+    list(cat = "covariance_step",
+         # Informational salvage note after a successful hybrid covariance.
+         msg = paste0("W_COV_ANALYTIC_SALVAGE: 1 of 30 subjects (ID 7) is outside ",
+                      "the exact analytic covariance R-matrix scope; its information ",
+                      "term was finite-differenced from its own marginal, and the ",
+                      "remaining 29 subjects were assembled analytically. Each ",
+                      "subject contributes its own term to the information matrix, ",
+                      "so only the named subjects' terms use a different estimator."),
+         ok = "Informational", never = "unavailable"),
     list(cat = "covariance_step",
          # Info-level cost note, primary form -- the step has not even run.
          msg = paste0("Covariance step: 35 parameters \u2192 1225 OFV evaluations ",
