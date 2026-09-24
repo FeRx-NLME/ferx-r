@@ -386,3 +386,47 @@ ferx_section_headers <- function(lines) {
   if (length(p) != 1L || is.na(p) || !nzchar(p)) return(NULL)
   p
 }
+
+# The column renames a model file's `[data]` block declares (#730/#742), as a
+# data.frame with character columns `target` (the name the engine's reader
+# gives the column: `TIME`, `DV`, ... for a role, or an arbitrary rename such
+# as `WT` as written) and `actual` (the CSV header, matched case-insensitively).
+# Zero rows when the model declares none, or when `model_path` is NULL / not a
+# file. The parse runs in the engine, so R never re-implements the block.
+# `strict = FALSE` also maps a model the engine cannot parse to zero rows, for
+# callers (fit$eta_cov) that must not fail on a model file edited since the fit.
+.ferx_model_column_map <- function(model_path, strict = TRUE) {
+  none <- data.frame(target = character(0), actual = character(0),
+                     stringsAsFactors = FALSE)
+  if (is.null(model_path) || !is.character(model_path) ||
+      length(model_path) != 1L || is.na(model_path) ||
+      !file.exists(model_path)) {
+    return(none)
+  }
+  m <- if (strict) {
+    ferx_rust_model_column_map(normalizePath(model_path))
+  } else {
+    tryCatch(ferx_rust_model_column_map(normalizePath(model_path)),
+             error = function(e) NULL)
+  }
+  if (is.null(m) || length(m$target) == 0L) return(none)
+  data.frame(target = as.character(m$target), actual = as.character(m$actual),
+             stringsAsFactors = FALSE)
+}
+
+# Rename `df`'s columns the way the engine's reader applies a `[data]` column
+# map: each `actual` header (case-insensitive) takes its `target` name, every
+# header resolved against the original names before any rename. Used by the R
+# helpers that re-read the raw CSV (ferx_apply_selection(), fit$eta_cov) so a
+# mapped column is seen under the name the engine gives it. Lenient where the
+# engine refuses: a mapped header that is absent is skipped rather than raised,
+# since the fit / read that uses the same map reports it.
+.ferx_apply_column_map <- function(df, column_map) {
+  if (is.null(column_map) || nrow(column_map) == 0L) return(df)
+  nm  <- names(df)
+  idx <- match(tolower(column_map$actual), tolower(nm))
+  ok  <- !is.na(idx)
+  nm[idx[ok]] <- column_map$target[ok]
+  names(df) <- nm
+  df
+}

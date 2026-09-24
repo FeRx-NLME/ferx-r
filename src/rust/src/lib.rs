@@ -3483,6 +3483,34 @@ fn ferx_rust_model_data_path(model_path: &str) -> String {
     })
 }
 
+/// Return the column remappings a model file's `[data]` block declares (#730).
+///
+/// Parses `model_path` and returns `parsed.column_map` as two parallel
+/// character vectors: `target` (the name the engine's reader gives the column:
+/// a canonical role upper-cased, e.g. `"TIME"`, or an arbitrary rename such as
+/// `WT` kept as written, #742) and `actual` (the CSV header renamed to it,
+/// matched case-insensitively, e.g. `"TAFD"`). Both are empty when the model
+/// declares no mappings. The R helpers that re-read the raw
+/// CSV (`ferx_apply_selection()`, `fit$eta_cov`) apply these renames so they
+/// see the columns the engine's reader sees (ferx-r #405 review).
+///
+/// @param model_path Path to .ferx model file
+/// @return Named list with character vectors `target` and `actual`
+/// @export
+#[extendr]
+fn ferx_rust_model_column_map(model_path: &str) -> List {
+    entry(move || {
+        let parsed =
+            match ferx_core::parser::model_parser::parse_full_model_file(Path::new(model_path)) {
+                Ok(p) => p,
+                Err(e) => return Err(format!("Error parsing model: {e}")),
+            };
+        let (target, actual): (Vec<String>, Vec<String>) =
+            parsed.column_map.iter().cloned().unzip();
+        Ok(list!(target = target, actual = actual))
+    })
+}
+
 /// Derive NCA-based starting values from the data without running a fit.
 ///
 /// @param model_path Path to .ferx model file
@@ -9021,6 +9049,7 @@ extendr_module! {
     fn ferx_rust_known_blocks;
     fn ferx_rust_validate_model;
     fn ferx_rust_model_data_path;
+    fn ferx_rust_model_column_map;
     fn ferx_rust_inits_from_nca;
     fn ferx_rust_prepare_frem;
     fn ferx_rust_bootstrap;

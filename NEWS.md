@@ -1195,6 +1195,19 @@
   values can change. A read failure on such a model is also no longer
   labelled with the code of an unrelated validation finding.
 
+- **`ferx_apply_selection()` and `fit$eta_cov` honour the model's `[data]`
+  column map** ([#405](https://github.com/FeRx-NLME/ferx-r/pull/405)). Both
+  re-read the raw CSV in R and saw the dataset's own headers, not the names
+  the engine gives mapped columns. With `time = TAFD`, a preview filter
+  `TIME > 24` matched nothing while the fit excluded those rows, and
+  `fit$eta_cov` could take a mapped `ID` / `RATE` for a covariate (or pick the
+  wrong subject column). `ferx_apply_selection()` gains a `model =` argument
+  (a `.ferx` path or `ferx_model`); filters are evaluated on the mapped names,
+  and the returned rows keep the dataset's headers. `ferx_apply_selection(fit)`
+  uses the fit's model, and `fit$eta_cov` the fitted model's map; a covariate
+  rename (`WT = weight`) is reported as `WT`. `fit$eta_cov` also finds a
+  lowercase `id` / `rate` header, as the engine does.
+
 - **`ferx_simulate_adaptive()` now raises the engine's refusal as a
   `ferx_engine_error`, like every other entry point**
   ([#390](https://github.com/FeRx-NLME/ferx-r/issues/390)). It already raised an
