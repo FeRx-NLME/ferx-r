@@ -70,6 +70,32 @@ to come from a \code{ferx_fit()} call with \code{covariance = TRUE}.}
 \code{settings}).}
 }
 }
+\section{Bounded thetas under \code{method = "asymptotic"}}{
+
+A theta with a non-negative lower bound is packed as \code{log(theta)}, so
+its asymptotic draws are log-normal: always above 0, with no ceiling. A
+draw past a declared upper bound is rejected and the whole parameter set
+redrawn, which keeps the draws inside the bound but truncates their
+distribution.
+
+For a \code{"logit_probability"} theta - one declared on \eqn{(0, 1)} and
+used as \code{inv_logit(logit(THETA) + ETA)} - the draws are therefore not
+the logit-normal ones the fit implies. With an upper bound below 1 they are
+truncated, and so pulled low. With an upper bound at or above 1 (an
+undeclared bound defaults to \code{1e9}) a draw at or above 1 is simulated,
+and the model's \code{logit()} clamps it so that every subject in that draw
+gets a probability of 1. When more than 0.1\% of draws are expected to reach
+1, the function warns (class \code{"ferx_logit_probability_draws"}), naming
+the theta and the expected share.
+
+\code{method = "sir"} does not share the bias: its draws come from the same
+proposal but are resampled by likelihood weight, so a value reaches the
+pool only in proportion to how well it fits. Neither does a probability
+declared on the logit scale - \code{inv_logit(LOGIT_F + ETA_F)} with a
+negative lower bound on \code{LOGIT_F} - since that theta is packed, and so
+drawn, on the logit scale.
+}
+
 \section{Errors raised by the engine}{
 
 A model or dataset the engine refuses is an R error, never a \code{NULL}

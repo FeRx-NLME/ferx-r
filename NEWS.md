@@ -1184,6 +1184,22 @@
 
 ## Bug fixes
 
+- **`ferx_simulate_with_uncertainty(method = "asymptotic")` now warns when its
+  draws of a `logit_probability` theta leave (0, 1)**
+  ([#373](https://github.com/FeRx-NLME/ferx-r/issues/373)). The engine draws
+  in its packed space, where a theta with a non-negative lower bound is
+  `log(theta)`, so a probability declared on (0, 1) is drawn log-normally with
+  no ceiling at 1 - about 23% of the draws on the bundled `bioavailability`
+  fit. A draw past a declared upper bound is rejected and redrawn, truncating
+  the distribution; one at or above 1 (an undeclared upper bound defaults to
+  `1e9`) is simulated with the model's `logit()` clamping the probability to 1
+  for every subject. Neither is the logit-normal draw the fit implies. The
+  warning (class `ferx_logit_probability_draws`) names the theta and the
+  expected share, and points at `method = "sir"` or a logit-scale declaration.
+  Drawing such a theta on the logit scale is an engine change; `ferx_sir()`
+  and `method = "sir"` are not affected, as the likelihood weights correct the
+  proposal.
+
 - **`ferx_simulate_adaptive()` now raises the engine's refusal as a
   `ferx_engine_error`, like every other entry point**
   ([#390](https://github.com/FeRx-NLME/ferx-r/issues/390)). It already raised an

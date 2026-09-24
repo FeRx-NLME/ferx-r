@@ -19,6 +19,30 @@
 #'     \code{settings}).}
 #' }
 #'
+#' @section Bounded thetas under \code{method = "asymptotic"}:
+#' A theta with a non-negative lower bound is packed as \code{log(theta)}, so
+#' its asymptotic draws are log-normal: always above 0, with no ceiling. A
+#' draw past a declared upper bound is rejected and the whole parameter set
+#' redrawn, which keeps the draws inside the bound but truncates their
+#' distribution.
+#'
+#' For a \code{"logit_probability"} theta - one declared on \eqn{(0, 1)} and
+#' used as \code{inv_logit(logit(THETA) + ETA)} - the draws are therefore not
+#' the logit-normal ones the fit implies. With an upper bound below 1 they are
+#' truncated, and so pulled low. With an upper bound at or above 1 (an
+#' undeclared bound defaults to \code{1e9}) a draw at or above 1 is simulated,
+#' and the model's \code{logit()} clamps it so that every subject in that draw
+#' gets a probability of 1. When more than 0.1% of draws are expected to reach
+#' 1, the function warns (class \code{"ferx_logit_probability_draws"}), naming
+#' the theta and the expected share.
+#'
+#' \code{method = "sir"} does not share the bias: its draws come from the same
+#' proposal but are resampled by likelihood weight, so a value reaches the
+#' pool only in proportion to how well it fits. Neither does a probability
+#' declared on the logit scale - \code{inv_logit(LOGIT_F + ETA_F)} with a
+#' negative lower bound on \code{LOGIT_F} - since that theta is packed, and so
+#' drawn, on the logit scale.
+#'
 #' @param model Path to a .ferx model file
 #' @param data Path to a NONMEM-format CSV (provides population structure).
 #'   The \code{DV} column may be left empty (\code{.} / \code{NA}) on the
@@ -127,7 +151,79 @@ ferx_simulate_with_uncertainty <- function(model, data, fit,
   # Same `simulation_warnings` channel `ferx_simulate()` uses - here it carries
   # the design-point count (a kept empty-DV record; see the `data` note above),
   # which otherwise diverges silently from what `ferx_fit()` scored.
-  .ferx_surface_sim_warnings(res, "ferx_simulate_with_uncertainty")
+  res <- .ferx_surface_sim_warnings(res, "ferx_simulate_with_uncertainty")
+
+  if (method == "asymptotic") {
+    .ferx_warn_logit_probability_draws(fit, "ferx_simulate_with_uncertainty")
+  }
+  res
+}
+
+# Internal: share of asymptotic draws that put each `logit_probability` theta
+# at or above 1 (#373).
+#
+# The engine draws in its packed space, where a theta with a non-negative lower
+# bound is packed as `log(theta)`, and `fit$cov_matrix` is the covariance in
+# that space. So a `logit_probability` theta - declared on (0, 1) - is drawn
+# log-normally: `exp(log(theta) + sd * Z)` stays above 0 but has no ceiling at
+# 1. The share that reaches 1 is `P(log(theta) + sd * Z >= 0)`, i.e.
+# `pnorm(log(theta) / sd)`.
+#
+# Returns a named numeric vector (theta name -> share), with one entry per
+# `logit_probability` theta that carries a positive, finite variance; empty
+# when there is none (no such theta, a FIXed one, or no covariance matrix).
+.ferx_logit_probability_draw_share <- function(fit) {
+  tf    <- fit$theta_transforms
+  theta <- fit$theta
+  cov   <- fit$cov_matrix
+  if (is.null(tf) || is.null(theta) || !is.matrix(cov)) return(numeric(0))
+  idx <- which(as.character(tf) == "logit_probability")
+  # `theta` occupies the leading segment of the packed vector, so theta i is
+  # row/column i of `cov_matrix`.
+  idx <- idx[idx <= length(theta) & idx <= nrow(cov)]
+  if (length(idx) == 0L) return(numeric(0))
+  est <- as.numeric(theta[idx])
+  sd  <- sqrt(pmax(diag(cov)[idx], 0))
+  ok  <- is.finite(est) & est > 0 & est < 1 & is.finite(sd) & sd > 0
+  if (!any(ok)) return(numeric(0))
+  nms <- names(theta)[idx]
+  if (is.null(nms)) nms <- paste0("THETA", idx)
+  stats::setNames(stats::pnorm(log(est[ok]) / sd[ok]), nms[ok])
+}
+
+# Internal: warn when asymptotic draws of a `logit_probability` theta leave
+# (0, 1) often enough to matter (#373). What becomes of such a draw is decided
+# by the engine, not here, and neither outcome is a draw from the intended
+# distribution:
+#   - declared upper bound below 1 (the bundled `bioavailability` example):
+#     the whole parameter vector is rejected and redrawn, so the theta's
+#     distribution is truncated - the draws stay in (0, 1) but are pulled low;
+#   - declared upper bound at or above 1 (an undeclared bound defaults to 1e9):
+#     the draw is simulated, and the model's `logit()` clamps its argument to
+#     `1 - 1e-15`, so every subject in that draw gets a probability of ~1.
+# Sampling such a theta on the logit scale needs a change in the engine's
+# sampler; until then the warning names the theta, the share, and the ways
+# round it.
+.ferx_warn_logit_probability_draws <- function(fit, fn, threshold = 1e-3) {
+  share <- .ferx_logit_probability_draw_share(fit)
+  share <- share[share >= threshold]
+  if (length(share) == 0L) return(invisible(share))
+  what <- paste0(names(share), " ", sprintf("%.1f%%", 100 * share),
+                 collapse = ", ")
+  msg <- paste0(
+    fn, "(method = \"asymptotic\"): expected share of draws at or above 1 ",
+    "for logit_probability theta ", what, ". The engine draws thetas on ",
+    "the log scale from `fit$cov_matrix`, so nothing holds such a theta below ",
+    "1: a draw ",
+    "past a declared upper bound is rejected (truncating the distribution), ",
+    "and one at or above 1 is simulated with the probability clamped to 1. ",
+    "Use method = \"sir\", which resamples the proposal by likelihood ",
+    "weight, or declare the parameter on the logit scale - F = inv_logit(LOGIT_F + ETA_F) ",
+    "with a negative lower bound on LOGIT_F - so it is drawn there."
+  )
+  warning(warningCondition(msg, class = "ferx_logit_probability_draws",
+                           call = NULL))
+  invisible(share)
 }
 
 # Internal: pull the uncertainty payload out of a ferx_fit result, validate it

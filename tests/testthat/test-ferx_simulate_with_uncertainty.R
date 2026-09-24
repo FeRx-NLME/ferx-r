@@ -232,3 +232,104 @@ test_that("validate_fit_for_uncertainty (SIR) passes through resamples", {
   expect_identical(out$sir_resamples_n, 2L)
   expect_identical(out$sir_resamples_flat, c(1, 2, 3, 4))
 })
+
+# ---- logit_probability draws (#373) ----
+# The engine draws in its packed space, where a theta with a non-negative
+# lower bound is `log(theta)`, so a `logit_probability` theta (declared on
+# (0, 1)) is drawn log-normally with no ceiling at 1. The wrapper cannot change
+# the draw, but it warns with the expected share that reaches 1.
+
+.logit_prob_share <- getFromNamespace(".ferx_logit_probability_draw_share", "ferx")
+.warn_logit_prob  <- getFromNamespace(".ferx_warn_logit_probability_draws", "ferx")
+
+logit_prob_fit <- function(theta_f = 0.7923592, sd_f = 0.3136337) {
+  # Shape of the bundled `bioavailability` fit the issue reports: THETA_F is
+  # theta 4, and its packed SD is the relative SE `se / estimate`.
+  theta <- c(TVCL = 5.71, TVV = 56.7, TVKA = 1.50, THETA_F = theta_f)
+  cov <- diag(c(0.307, 0.302, 0.049, sd_f, 0.2)^2)
+  dimnames(cov) <- list(c(names(theta), "ETA_CL"), c(names(theta), "ETA_CL"))
+  list(
+    theta = theta,
+    theta_transforms = c(TVCL = "identity", TVV = "identity",
+                         TVKA = "identity", THETA_F = "logit_probability"),
+    cov_matrix = cov
+  )
+}
+
+test_that("draw share for a logit_probability theta is P(log-normal draw >= 1)", {
+  share <- .logit_prob_share(logit_prob_fit())
+  expect_named(share, "THETA_F")
+  # log(0.7923592) / 0.3136337 = -0.742: about 23% of draws reach 1.
+  expect_equal(unname(share), pnorm(log(0.7923592) / 0.3136337))
+  expect_gt(share, 0.2)
+  expect_lt(share, 0.25)
+})
+
+test_that("draw share ignores other transforms and degenerate entries", {
+  fit <- logit_prob_fit()
+  fit$theta_transforms[["THETA_F"]] <- "logit"
+  expect_length(.logit_prob_share(fit), 0L)
+
+  # FIXed theta: no variance, no draws leave it.
+  fit <- logit_prob_fit(sd_f = 0)
+  expect_length(.logit_prob_share(fit), 0L)
+
+  # No covariance matrix, or no transforms (an old fit): nothing to report.
+  fit <- logit_prob_fit()
+  fit$cov_matrix <- NULL
+  expect_length(.logit_prob_share(fit), 0L)
+  fit <- logit_prob_fit()
+  fit$theta_transforms <- NULL
+  expect_length(.logit_prob_share(fit), 0L)
+})
+
+test_that("the warning names the theta and share, and is classed", {
+  w <- expect_warning(
+    .warn_logit_prob(logit_prob_fit(), "ferx_simulate_with_uncertainty"),
+    class = "ferx_logit_probability_draws"
+  )
+  expect_match(conditionMessage(w), "logit_probability theta THETA_F 22.9%.", fixed = TRUE)
+  expect_match(conditionMessage(w), "method = \"sir\"", fixed = TRUE)
+  expect_match(conditionMessage(w), "inv_logit(LOGIT_F + ETA_F)", fixed = TRUE)
+})
+
+test_that("no warning when the expected share is negligible", {
+  # A tight estimate far from 1: pnorm(log(0.3) / 0.05) is ~0.
+  expect_no_warning(
+    .warn_logit_prob(logit_prob_fit(theta_f = 0.3, sd_f = 0.05), "f")
+  )
+})
+
+test_that("asymptotic simulation warns for an exposed logit_probability theta", {
+  fit <- warfarin_fit_cov()
+  skip_if(is.null(fit$cov_matrix), cov_skip)
+  ex <- ferx_example("warfarin")
+  # Relabel TVCL (~0.13, bounds 0.001-10) as a logit_probability theta and
+  # widen its packed SD to 1: pnorm(log(0.13) / 1) is ~2%, and the engine's
+  # draws stay well inside TVCL's box, so the simulation itself runs normally.
+  fit$theta_transforms[[1]] <- "logit_probability"
+  fit$cov_matrix[1, 1] <- 1
+  expect_warning(
+    sims <- ferx_simulate_with_uncertainty(
+      ex$model, ex$data, fit,
+      n_uncertainty_draws = 2L, n_sim_per_draw = 1L,
+      method = "asymptotic", seed = 7L
+    ),
+    class = "ferx_logit_probability_draws"
+  )
+  expect_s3_class(sims, "data.frame")
+})
+
+test_that("asymptotic simulation without a logit_probability theta does not warn", {
+  fit <- warfarin_fit_cov()
+  skip_if(is.null(fit$cov_matrix), cov_skip)
+  ex <- ferx_example("warfarin")
+  expect_no_warning(
+    ferx_simulate_with_uncertainty(
+      ex$model, ex$data, fit,
+      n_uncertainty_draws = 2L, n_sim_per_draw = 1L,
+      method = "asymptotic", seed = 7L
+    ),
+    class = "ferx_logit_probability_draws"
+  )
+})
