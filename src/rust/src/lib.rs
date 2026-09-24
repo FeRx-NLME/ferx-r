@@ -3502,11 +3502,36 @@ fn ferx_rust_inits_from_nca(model_path: &str, data_path: &str, method: &str) -> 
         };
 
         let iov_col = parsed.fit_options.iov_column.clone();
-        let population =
-            match ferx_core::read_nonmem_csv(Path::new(data_path), None, iov_col.as_deref()) {
-                Ok(p) => p,
-                Err(e) => return Err(format!("Error reading data: {e}")),
-            };
+
+        // Read through the same reader as ferx_fit() and the engine's validation
+        // pass: it applies the `[data]` column map (a renamed TIME/DV/AMT/...),
+        // `[covariates]` and TTE routing. The bare `read_nonmem_csv` used before
+        // never saw the column map, so a mapped model failed here with "Missing
+        // TIME column" while ferx_predict()/ferx_fit() read it fine (ferx-r #391).
+        // The model file's `[data_selection]` is applied too, so the NCA runs on
+        // the rows a fit with `inits_from_nca` would see.
+        let filter = match ferx_core::io::datareader::SelectionFilter::from_opts(
+            &parsed.fit_options.ignore_exprs,
+            &parsed.fit_options.accept_exprs,
+            &parsed.fit_options.ignore_subjects,
+        ) {
+            Ok(f) => f,
+            Err(e) => return Err(format!("Error in [data_selection]: {e}")),
+        };
+        let filter_opt = if filter.is_empty() { None } else { Some(&filter) };
+
+        let (population, _) = match ferx_core::api::read_population_for(
+            &parsed.model,
+            &parsed.covariate_decls,
+            data_path,
+            None,
+            iov_col.as_deref(),
+            filter_opt,
+            &parsed.column_map,
+        ) {
+            Ok(r) => r,
+            Err(e) => return Err(format!("Error reading data: {e}")),
+        };
 
         let nca_method = match method.trim().to_lowercase().as_str() {
             "nca" => ferx_core::NcaInit::Nca,
