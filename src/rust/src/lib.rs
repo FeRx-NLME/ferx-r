@@ -3407,6 +3407,46 @@ fn ferx_rust_known_blocks() -> Vec<String> {
     })
 }
 
+/// Declared theta bounds and transforms of a model, as the engine parsed them.
+///
+/// The asymptotic uncertainty sampler draws each theta in the engine's packed
+/// space - `log(theta)` when the declared lower bound is non-negative, the
+/// natural scale otherwise - and rejects a draw past a declared bound. What a
+/// draw of a `logit_probability` theta turns into therefore depends on these
+/// bounds (ferx-r #373), and the fit object does not carry them.
+///
+/// @param model_path Path to .ferx model file
+/// @return List with `names`, `lower`, `upper` (the effective declared bounds;
+///   an undeclared bound is the parser default) and `transform` (one of
+///   `"identity"`, `"log"`, `"logit"`, `"logit_probability"`), one entry per
+///   theta in packed order.
+/// @export
+#[extendr]
+fn ferx_rust_theta_packing(model_path: &str) -> Robj {
+    entry(move || {
+        let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
+            Ok(p) => p,
+            Err(e) => return Err(format!("Error parsing model: {e}")),
+        };
+        let model = &parsed.model;
+        let p = &model.default_params;
+        let transform: Vec<String> = (0..p.theta.len())
+            .map(|i| match model.theta_transform.get(i) {
+                Some(ferx_core::types::ThetaTransform::Log) => "log",
+                Some(ferx_core::types::ThetaTransform::Logit) => "logit",
+                Some(ferx_core::types::ThetaTransform::LogitProbability) => "logit_probability",
+                _ => "identity",
+            }.to_string())
+            .collect();
+        Ok(list!(
+            names = p.theta_names.clone(),
+            lower = p.theta_lower.clone(),
+            upper = p.theta_upper.clone(),
+            transform = transform
+        ).into())
+    })
+}
+
 /// Validate a .ferx model file (and optionally its dataset) without fitting.
 ///
 /// Runs the parser plus every data-independent check, and — when `data_path`
@@ -8994,6 +9034,7 @@ extendr_module! {
     fn ferx_rust_autodiff_enabled;
     fn ferx_rust_test_panic;
     fn ferx_rust_known_blocks;
+    fn ferx_rust_theta_packing;
     fn ferx_rust_validate_model;
     fn ferx_rust_model_data_path;
     fn ferx_rust_inits_from_nca;

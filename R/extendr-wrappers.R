@@ -105,6 +105,12 @@ ferx_rust_known_blocks <- function() {
 
 #' @title Internal Rust backend binding
 #' @keywords internal
+ferx_rust_theta_packing <- function(model_path) {
+  .Call("wrap__ferx_rust_theta_packing", model_path)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
 ferx_rust_validate_model <- function(model_path, data_path) {
   .Call("wrap__ferx_rust_validate_model", model_path, data_path)
 }
