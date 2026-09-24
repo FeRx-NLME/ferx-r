@@ -1491,3 +1491,102 @@ test_that("a dropped-[output] row keeps its guidance on a loaded fit", {
   expect_identical(ferx:::.ferx_warning_guidance("general", message = msg),
                    ferx:::.ferx_warning_guidance("output"))
 })
+
+# ---------------------------------------------------------------------------
+# #308 review: a partial structured table must not hide the flat warnings
+# ---------------------------------------------------------------------------
+test_that("flat warnings missing from a partial structured table are merged in", {
+  # The shape a loaded fit has after ferx_sir() / ferx_covariance(): two older
+  # flat warnings, and a structured table holding only the post-hoc row.
+  fake <- structure(
+    list(
+      model_name = "loaded",
+      warnings = c("Outer optimization did not converge", "something else",
+                   "SIR failed: no usable proposal"),
+      warnings_structured = data.frame(
+        severity = "warning", category = "sir",
+        message = "SIR failed: no usable proposal", source_method = "",
+        stringsAsFactors = FALSE
+      )
+    ),
+    class = "ferx_fit"
+  )
+  df <- ferx_get_warnings(fake, as_df = TRUE)
+  expect_equal(nrow(df), 3L)
+  expect_setequal(df$message, fake$warnings)
+  # The table's own row keeps the category it was given ...
+  expect_identical(df$category[df$message == "SIR failed: no usable proposal"], "sir")
+  # ... and the recovered ones get the engine's.
+  expect_identical(df$category[df$message == "Outer optimization did not converge"],
+                   "convergence")
+  # The fit is read, never written: strictness still sees the stored table.
+  expect_equal(nrow(fake$warnings_structured), 1L)
+})
+
+test_that("a fresh fit's warnings come back exactly as its structured table", {
+  # On a fresh fit every flat message is already in the table, so the merge
+  # must add nothing - no duplicate rows under a second category.
+  fit <- warning_anchor_fit()
+  expect_identical(ferx_get_warnings(fit, as_df = TRUE),
+                   fit$warnings_structured[, c("severity", "category", "message",
+                                               "source_method")])
+})
+
+test_that("a loaded fit keeps its older warnings after ferx_covariance()", {
+  fit <- warning_anchor_fit()
+  path <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(path))
+  ferx_save_fit(fit, path)
+  loaded <- ferx_load_fit(path)
+  before <- ferx_get_warnings(loaded, as_df = TRUE)
+  expect_gt(nrow(before), 0L)
+
+  recov <- suppressWarnings(ferx_covariance(loaded))
+  expect_true(is.data.frame(recov$warnings_structured))
+  after <- ferx_get_warnings(recov, as_df = TRUE)
+  # Every warning the loaded fit showed is still shown, under its category.
+  for (i in seq_len(nrow(before))) {
+    j <- match(before$message[i], after$message)
+    expect_false(is.na(j), info = before$message[i])
+    if (!is.na(j) && !identical(after$category[j], "covariance")) {
+      expect_identical(after$category[j], before$category[i], info = before$message[i])
+    }
+  }
+})
+
+test_that("a loaded fit keeps its older warnings after ferx_sir()", {
+  ex <- ferx_example("warfarin")
+  fit <- ferx_fit(ex$model, ex$data, method = "focei", covariance = TRUE,
+                  verbose = FALSE, settings = list(maxiter = 30L))
+  skip_if(is.null(fit$cov_matrix), "covariance step did not produce a matrix")
+  # Give the loaded fit an older warning of a known category to track.
+  old <- "Outer optimization did not converge"
+  fit$warnings <- unique(c(fit$warnings, old))
+  path <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(path))
+  ferx_save_fit(fit, path)
+  loaded <- ferx_load_fit(path)
+  expect_null(loaded$warnings_structured)
+
+  sired <- suppressWarnings(ferx_sir(loaded, sir_samples = 200L,
+                                     sir_resamples = 50L, sir_seed = 1L))
+  ws <- ferx_get_warnings(sired, as_df = TRUE)
+  expect_true(old %in% ws$message)
+  expect_identical(ws$category[ws$message == old], "convergence")
+  expect_identical(ws$severity[ws$message == old], "critical")
+})
+
+test_that("print() of a reloaded fit tallies the recovered severities", {
+  fit <- warning_anchor_fit()
+  path <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(path))
+  ferx_save_fit(fit, path)
+  loaded <- ferx_load_fit(path)
+  expect_null(loaded$warnings_structured)
+  out <- paste(capture.output(print(loaded)), collapse = "\n")
+  # The anchor fit's covariance failure is critical; before the fix a loaded
+  # fit printed only "N warning(s) -- inspect fit$warnings".
+  expect_match(out, "critical", fixed = TRUE)
+  expect_match(out, "covariance_failed", fixed = TRUE)
+  expect_false(grepl("inspect fit$warnings", out, fixed = TRUE))
+})

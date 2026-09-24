@@ -130,7 +130,7 @@ use raise::raise_verbatim;
 /// A payload that is neither (`panic_any`, a foreign `resume_unwind`) carries
 /// no text, and there extendr names the function instead:
 /// `format!("User function panicked: {}", r_name)`. `entry` is one function for
-/// all 44 of them, so `at` - the `#[track_caller]` location of the `entry(`
+/// all 45 of them, so `at` - the `#[track_caller]` location of the `entry(`
 /// call - stands in for the name and points at the entry point's own line.
 ///
 /// The payload is dropped here rather than left to a scope the longjmp skips.
@@ -161,7 +161,7 @@ fn panic_message(
 /// its own; catching first means extendr never sees one.
 ///
 /// `#[track_caller]` so that a panic carrying no text can still say which of
-/// the 44 entry points it came out of - see `panic_message`.
+/// the 45 entry points it came out of - see `panic_message`.
 #[track_caller]
 fn entry<T>(f: impl FnOnce() -> Result<T, String>) -> T {
     let msg = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {

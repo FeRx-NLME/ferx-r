@@ -2402,8 +2402,9 @@ print.ferx_fit <- function(x, ...) {
   status_lbl <- if (isTRUE(x$converged)) "CONVERGED" else "NOT CONVERGED"
   status_style <- if (isTRUE(x$converged)) "green" else "red"
   status_tail <- character(0)
-  # Categories come from the engine; no R-side string parsing needed.
-  ws <- x$warnings_structured
+  # Categories come from the engine; no R-side string parsing needed. Read
+  # through .ferx_fit_warnings() so a loaded fit's flat warnings count too.
+  ws <- .ferx_fit_warnings(x)
   if (!is.null(ws) && is.data.frame(ws) && all(c("severity", "category") %in% names(ws))) {
     crit_rows <- ws[ws$severity == "critical", , drop = FALSE]
     if (nrow(crit_rows) > 0L) {
@@ -2971,9 +2972,10 @@ print.ferx_fit <- function(x, ...) {
   }
 
   # Warning summary - a compact tally and a call-to-action rather than a wall
-  # of message strings. Severity comes from fit$warnings_structured (PR 2);
-  # the legacy flat fit$warnings vector is used only as a count fallback.
-  ws <- x$warnings_structured
+  # of message strings. Severity comes from the structured table plus any flat
+  # message it lacks, classified by the engine (.ferx_fit_warnings(), #308);
+  # the bare count below is a fallback for a table that cannot be built.
+  ws <- .ferx_fit_warnings(x)
   if (!is.null(ws) && is.data.frame(ws) && nrow(ws) > 0L) {
     n_crit <- sum(ws$severity == "critical")
     n_warn <- sum(ws$severity == "warning")

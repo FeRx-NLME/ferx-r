@@ -27,15 +27,7 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
   if (!inherits(fit, "ferx_fit")) {
     stop("`fit` must be a ferx_fit object")
   }
-  df <- fit$warnings_structured
-  if (is.null(df) || !is.data.frame(df)) {
-    # No structured table: a fit read back by ferx_load_fit() (which does not
-    # restore it) or one saved before structured warnings existed. Re-classify
-    # the flat strings with the engine's own classifier rather than stamping
-    # every row `general`, which left each category-keyed guidance arm dead
-    # for loaded fits (#308).
-    df <- .ferx_classify_flat_warnings(fit$warnings %||% character(0))
-  }
+  df <- .ferx_fit_warnings(fit)
   if (isTRUE(as_df)) {
     return(df)
   }
@@ -102,6 +94,11 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
 .ferx_classify_flat_warnings <- function(msgs) {
   msgs <- as.character(msgs)
   msgs[is.na(msgs)] <- ""
+  if (length(msgs) == 0L) {
+    return(data.frame(severity = character(0), category = character(0),
+                      message = character(0), source_method = character(0),
+                      stringsAsFactors = FALSE))
+  }
   cl <- ferx_rust_classify_warnings(msgs)
   df <- data.frame(
     severity      = as.character(cl$severity),
@@ -114,6 +111,38 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
     grepl("named in [output]", df$message, fixed = TRUE)
   df$category[is_output] <- "output"
   df
+}
+
+# The fit's warnings as one structured table: `fit$warnings_structured` plus
+# every flat message it does not already carry, classified by the engine.
+#
+# `ferx_load_fit()` does not restore `warnings_structured`, so a loaded fit has
+# only the flat strings - and `ferx_sir()` / `ferx_covariance()` run on it then
+# install a table holding just their own rows. Reading the table alone would
+# drop every older warning on that fit; reading it only when absent (as this
+# once did) dropped them the moment either post-hoc step ran (#308 review). On
+# a fresh fit every flat message is already in the table, so it is returned
+# unchanged. The fit itself is never modified, so check_strictness(), which
+# reads `warnings_structured` directly, is unaffected.
+.ferx_fit_warnings <- function(fit) {
+  cols <- c("severity", "category", "message", "source_method")
+  ws <- fit$warnings_structured
+  if (is.data.frame(ws) && all(cols[1:3] %in% names(ws))) {
+    if (!"source_method" %in% names(ws)) ws$source_method <- rep("", nrow(ws))
+    ws <- ws[, cols, drop = FALSE]
+  } else {
+    ws <- NULL
+  }
+  msgs <- unique(as.character(unlist(fit$warnings %||% character(0),
+                                     use.names = FALSE)))
+  msgs <- msgs[!is.na(msgs) & nzchar(msgs)]
+  flat <- .ferx_classify_flat_warnings(msgs)
+  if (is.null(ws)) return(flat)
+  missing <- !(flat$message %in% ws$message)
+  if (!any(missing)) return(ws)
+  out <- rbind(ws, flat[missing, , drop = FALSE])
+  rownames(out) <- NULL
+  out
 }
 
 # Guidance for the `mu_referencing` category. ferx-core's classifier gives this

@@ -1202,7 +1202,10 @@
   guidance, whatever it said. The flat messages are now re-classified by the
   engine's own classifier (a new internal binding,
   `ferx_rust_classify_warnings()`), so a reloaded fit shows the severity,
-  category and guidance the fresh fit had. The `ferx_fit()` documentation of
+  category and guidance the fresh fit had - also after `ferx_sir()` or
+  `ferx_covariance()` has added rows of its own, which used to hide every older
+  warning on a loaded fit, and in the warning tally and STATUS line that
+  `print()` shows. The `ferx_fit()` documentation of
   the unused-parameter warning now covers the `[individual_parameters]`
   computed-but-never-used case too.
 
