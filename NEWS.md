@@ -1938,6 +1938,17 @@
 
 ## Internal
 
+- **The R layer no longer knows ferx-core's placeholder model name**
+  ([#34](https://github.com/FeRx-NLME/ferx-r/issues/34)). ferx-core names a
+  model whose file declares no `model NAME` line `"Unnamed"`, and the fit
+  formatter compared `$model_name` against that string before substituting
+  the file stem. The Rust glue now reports an undeclared name as `""` at the
+  one place a fit crosses into R (`fit_result_to_list()`), so the R fallback
+  keys on an empty name alone - for `ferx_fit()` and for every search tool's
+  final fit. `$model_name` is unchanged for users. The placeholder is still
+  spelled once, in the glue, because ferx-core keeps both it and its own
+  stem fallback (`set_model_name()`) crate-private.
+
 - **A local build with a sibling `../ferx-core` checkout no longer rewrites
   `src/rust/Cargo.lock`** ([#353](https://github.com/FeRx-NLME/ferx-r/issues/353)).
   The `[patch]` that redirects `ferx-core` and `ferx-tools` to the sibling used
