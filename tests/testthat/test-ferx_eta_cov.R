@@ -148,3 +148,85 @@ test_that(".ferx_compute_eta_cov() has one row per ETA-covariate pair", {
   # One covariate (WT) × n_etas rows expected
   expect_equal(nrow(res), n_etas)
 })
+
+# -- The model's [data] column map (ferx-r #405 review) ------------------------
+
+# warfarin_dat_with_cov_path()'s data with the ID, RATE and WT columns under
+# other names (ID moved last, so "the first column" is TIME), and the warfarin
+# model with a `[data]` block mapping them back.
+mapped_cov_data <- function(env = parent.frame()) {
+  dat <- read.csv(warfarin_dat_with_cov_path())
+  names(dat)[names(dat) == "RATE"] <- "INFRATE"
+  names(dat)[names(dat) == "WT"]   <- "weight"
+  names(dat)[names(dat) == "ID"]   <- "SUBJ"
+  dat <- dat[, c(setdiff(names(dat), "SUBJ"), "SUBJ")]
+  # normalizePath(): a `//` in a `[data] path` reads as a comment (#405).
+  csv <- normalizePath(.write_csv_path(dat))
+  list(
+    data  = csv,
+    model = model_with_lines(
+      c("[data]", paste0("  path = ", csv), "  ID = SUBJ", "  RATE = INFRATE",
+        "  WT = weight"), env
+    )
+  )
+}
+
+test_that(".ferx_compute_eta_cov() applies the model's [data] column map", {
+  fit <- warfarin_fit()
+  mapped <- mapped_cov_data()
+
+  expected <- .compute_eta_cov(fit$ebe_etas, warfarin_dat_with_cov_path())
+  expect_identical(
+    .compute_eta_cov(fit$ebe_etas, mapped$data, mapped$model),
+    expected
+  )
+  # A covariate rename is reported under the model's name; a mapped RATE is
+  # not taken for a covariate.
+  expect_identical(unique(expected$covariate), "WT")
+
+  # Without the map the raw headers mislead it: ID falls back to TIME, and
+  # INFRATE / weight are read as covariates.
+  expect_false(identical(
+    .compute_eta_cov(fit$ebe_etas, mapped$data), expected
+  ))
+})
+
+test_that(".ferx_compute_eta_cov() falls back to the raw headers when the model is gone", {
+  fit <- warfarin_fit()
+  path <- warfarin_dat_with_cov_path()
+  expect_identical(
+    .compute_eta_cov(fit$ebe_etas, path, tempfile(fileext = ".ferx")),
+    .compute_eta_cov(fit$ebe_etas, path)
+  )
+  expect_identical(
+    .compute_eta_cov(fit$ebe_etas, path, NA_character_),
+    .compute_eta_cov(fit$ebe_etas, path)
+  )
+})
+
+test_that(".ferx_compute_eta_cov() finds a lowercase id / rate header", {
+  fit <- warfarin_fit()
+  dat <- read.csv(warfarin_dat_with_cov_path())
+  names(dat)[names(dat) == "ID"]   <- "id"
+  names(dat)[names(dat) == "RATE"] <- "rate"
+  expect_identical(
+    .compute_eta_cov(fit$ebe_etas, .write_csv_path(dat)),
+    .compute_eta_cov(fit$ebe_etas, warfarin_dat_with_cov_path())
+  )
+})
+
+test_that("fit$eta_cov uses the fitted model's [data] column map", {
+  skip_on_cran()
+  mapped <- mapped_cov_data()
+  # A 5-iteration fit: its convergence warnings are not the point here.
+  fit <- suppressWarnings(
+    ferx_fit(mapped$model, mapped$data, method = "foce", verbose = FALSE,
+             covariance = FALSE, settings = list(maxiter = 5L))
+  )
+  expect_s3_class(fit$eta_cov, "data.frame")
+  expect_identical(unique(fit$eta_cov$covariate), "WT")
+  expect_identical(
+    fit$eta_cov,
+    .compute_eta_cov(fit$ebe_etas, mapped$data, mapped$model)
+  )
+})

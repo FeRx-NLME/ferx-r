@@ -3483,6 +3483,34 @@ fn ferx_rust_model_data_path(model_path: &str) -> String {
     })
 }
 
+/// Return the column remappings a model file's `[data]` block declares (#730).
+///
+/// Parses `model_path` and returns `parsed.column_map` as two parallel
+/// character vectors: `target` (the name the engine's reader gives the column:
+/// a canonical role upper-cased, e.g. `"TIME"`, or an arbitrary rename such as
+/// `WT` kept as written, #742) and `actual` (the CSV header renamed to it,
+/// matched case-insensitively, e.g. `"TAFD"`). Both are empty when the model
+/// declares no mappings. The R helpers that re-read the raw
+/// CSV (`ferx_apply_selection()`, `fit$eta_cov`) apply these renames so they
+/// see the columns the engine's reader sees (ferx-r #405 review).
+///
+/// @param model_path Path to .ferx model file
+/// @return Named list with character vectors `target` and `actual`
+/// @export
+#[extendr]
+fn ferx_rust_model_column_map(model_path: &str) -> List {
+    entry(move || {
+        let parsed =
+            match ferx_core::parser::model_parser::parse_full_model_file(Path::new(model_path)) {
+                Ok(p) => p,
+                Err(e) => return Err(format!("Error parsing model: {e}")),
+            };
+        let (target, actual): (Vec<String>, Vec<String>) =
+            parsed.column_map.iter().cloned().unzip();
+        Ok(list!(target = target, actual = actual))
+    })
+}
+
 /// Derive NCA-based starting values from the data without running a fit.
 ///
 /// @param model_path Path to .ferx model file
@@ -3502,11 +3530,36 @@ fn ferx_rust_inits_from_nca(model_path: &str, data_path: &str, method: &str) -> 
         };
 
         let iov_col = parsed.fit_options.iov_column.clone();
-        let population =
-            match ferx_core::read_nonmem_csv(Path::new(data_path), None, iov_col.as_deref()) {
-                Ok(p) => p,
-                Err(e) => return Err(format!("Error reading data: {e}")),
-            };
+
+        // Read through the same reader as ferx_fit() and the engine's validation
+        // pass: it applies the `[data]` column map (a renamed TIME/DV/AMT/...),
+        // `[covariates]` and TTE routing. The bare `read_nonmem_csv` used before
+        // never saw the column map, so a mapped model failed here with "Missing
+        // TIME column" while ferx_predict()/ferx_fit() read it fine (ferx-r #391).
+        // The model file's `[data_selection]` is applied too, so the NCA runs on
+        // the rows a fit with `inits_from_nca` would see.
+        let filter = match ferx_core::io::datareader::SelectionFilter::from_opts(
+            &parsed.fit_options.ignore_exprs,
+            &parsed.fit_options.accept_exprs,
+            &parsed.fit_options.ignore_subjects,
+        ) {
+            Ok(f) => f,
+            Err(e) => return Err(format!("Error in [data_selection]: {e}")),
+        };
+        let filter_opt = if filter.is_empty() { None } else { Some(&filter) };
+
+        let (population, _) = match ferx_core::api::read_population_for(
+            &parsed.model,
+            &parsed.covariate_decls,
+            data_path,
+            None,
+            iov_col.as_deref(),
+            filter_opt,
+            &parsed.column_map,
+        ) {
+            Ok(r) => r,
+            Err(e) => return Err(format!("Error reading data: {e}")),
+        };
 
         let nca_method = match method.trim().to_lowercase().as_str() {
             "nca" => ferx_core::NcaInit::Nca,
@@ -8996,6 +9049,7 @@ extendr_module! {
     fn ferx_rust_known_blocks;
     fn ferx_rust_validate_model;
     fn ferx_rust_model_data_path;
+    fn ferx_rust_model_column_map;
     fn ferx_rust_inits_from_nca;
     fn ferx_rust_prepare_frem;
     fn ferx_rust_bootstrap;

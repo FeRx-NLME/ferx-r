@@ -9,7 +9,8 @@ ferx_apply_selection(
   ignore = NULL,
   accept = NULL,
   ignore_ids = NULL,
-  excluded = FALSE
+  excluded = FALSE,
+  model = NULL
 )
 }
 \arguments{
@@ -44,6 +45,15 @@ returned as a \code{ferx_data} object. When \code{TRUE} the function returns
 a plain data.frame of the \strong{excluded} records instead, with an extra
 \code{.exclude_reason} column naming the first rule that dropped each record
 (this replaces the former \code{ferx_selection_excluded()} accessor).}
+
+\item{model}{Optional path to the \code{.ferx} model file (or a
+\code{ferx_model} object) the data will be fitted with. When the model
+declares a \code{[data]} column map (e.g. \code{time = TAFD}), the
+expressions and \code{ignore_ids} are evaluated against the columns under
+the names the engine gives them, so \code{"TIME > 24"} matches the
+\code{TAFD} column as it does at fit time. The returned records keep the
+dataset's own headers. Ignored when \code{data} is a \code{ferx_data}
+object; for a \code{ferx_fit} the fit's recorded model is used.}
 }
 \value{
 When \code{excluded = FALSE}, an object of class \code{"ferx_data"}

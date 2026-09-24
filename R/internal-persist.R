@@ -108,7 +108,8 @@
 .ferx_populate_derived_fields <- function(result) {
   result$cor_matrix <- .ferx_compute_cor_matrix(result$cov_matrix)
   result$estimates  <- .ferx_compute_estimates(result)
-  result$eta_cov    <- .ferx_compute_eta_cov(result$ebe_etas, result$data_path)
+  result$eta_cov    <- .ferx_compute_eta_cov(result$ebe_etas, result$data_path,
+                                           result$model_path)
   result
 }
 
