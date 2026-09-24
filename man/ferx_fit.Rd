@@ -428,10 +428,22 @@ reproduces analytical closed forms in PRED to about \code{1e-4}, but
 the FOCE objective amplifies solver error, so an ODE-form model's OFV
 can differ from its analytical equivalent by several units. Set tighter
 (e.g. \code{1e-10}) when the ODE-form OFV must match an analytical
-reference; expect slower fits. Can also be set in the model file's
-\code{[fit_options]} block.}
-\item{\code{ode_abstol}}{Absolute tolerance for ODE models
-(default \code{1e-6}).}
+reference; expect slower fits. Standard errors have their own
+sensitivity: when the covariance step falls back to the
+finite-difference Hessian it divides by \code{h^2} and so amplifies
+integration noise (SEs on ferx-core's 3-cpt IV ODE fixture were 2-7x
+too large at the default), and a \code{covariance_regularized}
+warning then names the tolerances; \code{ode_reltol = 1e-6} with
+\code{ode_abstol = 1e-8} is on the measured accuracy plateau. The
+exact analytic covariance R-matrix, which most Gaussian
+\code{[odes]} fits take, does not second-difference the objective and
+is unaffected. Also applies to the ODE twin that closed-form transit /
+inverse-Gaussian absorption models (\code{one_cpt_transit},
+\code{two_cpt_transit}, \code{one_cpt_ig}, \code{two_cpt_ig}) use for
+IOV, time-varying-covariate and \code{TIME}-switch subjects. Can also
+be set in the model file's \code{[fit_options]} block.}
+\item{\code{ode_abstol}}{Absolute tolerance for ODE models and the
+absorption ODE twin, as for \code{ode_reltol} (default \code{1e-6}).}
 \item{\code{ode_max_steps}}{Maximum solver steps per integration segment
 (default \code{10000}). Raise if a tight \code{ode_reltol} exhausts the
 step budget on stiff multi-compartment systems -- or switch
