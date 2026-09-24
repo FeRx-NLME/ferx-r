@@ -10,7 +10,14 @@
 # `ebe_etas` is purpose-built: ID + one column per BSV eta. `data_path` is
 # re-read from disk here (rather than reusing an in-memory data.frame) since
 # ferx_fit() only ever holds the CSV path, not a loaded copy of the dataset.
-.ferx_compute_eta_cov <- function(ebe_etas, data_path) {
+#
+# `model_path` supplies the model's `[data]` column map: the raw CSV is renamed
+# the way the engine's reader renames it before the ID / standard columns are
+# picked out, so a mapped `TAFD` (TIME), `SUBJ` (ID) or `INFRATE` (RATE) is not
+# taken for a covariate, and a covariate rename (`WT = weight`) is reported
+# under the name the model uses. A model file that no longer parses, or is gone
+# (a loaded fit), falls back to the raw headers.
+.ferx_compute_eta_cov <- function(ebe_etas, data_path, model_path = NULL) {
   if (is.null(ebe_etas) || !is.data.frame(ebe_etas)) return(NULL)
   data <- tryCatch(
     suppressWarnings(utils::read.csv(data_path, stringsAsFactors = FALSE,
@@ -29,12 +36,18 @@
     }
     return(NULL)
   }
+  data <- .ferx_apply_column_map(
+    data, .ferx_model_column_map(model_path, strict = FALSE)
+  )
 
   # Treat every non-ID column as an eta - a "^ETA" prefix filter would
   # silently drop columns from models that don't follow the conventional
   # naming.
   ebe_id  <- if ("ID" %in% names(ebe_etas)) "ID" else names(ebe_etas)[1L]
-  data_id <- if ("ID" %in% names(data))     "ID" else names(data)[1L]
+  # The engine finds ID and the standard columns case-insensitively; so does
+  # this, or a lowercase `id` / `rate` header would fall through as a covariate.
+  data_id <- names(data)[match("id", tolower(names(data)))]
+  if (is.na(data_id)) data_id <- names(data)[1L]
   eta_cols <- setdiff(names(ebe_etas), ebe_id)
   if (length(eta_cols) == 0L) return(NULL)
 
@@ -47,7 +60,7 @@
 
   # Numeric columns in data that could be covariates
   num_cols <- names(data)[vapply(data, is.numeric, logical(1L))]
-  num_cols <- setdiff(num_cols, c(data_id, SKIP))
+  num_cols <- num_cols[num_cols != data_id & !(toupper(num_cols) %in% SKIP)]
 
   if (length(num_cols) == 0L) return(NULL)
 

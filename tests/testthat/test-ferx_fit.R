@@ -220,9 +220,35 @@ test_that("$method equals requested method", {
   fit <- warfarin_fit()
   expect_equal(tolower(fit$method), "focei")
 })
-test_that("$model_name falls back to basename when engine returns Unnamed", {
+test_that("$model_name falls back to basename when the file declares no name", {
   fit <- warfarin_fit()
   expect_equal(fit$model_name, "warfarin")
+})
+test_that("$model_name of an undeclared model is the file stem, never the engine placeholder", {
+  # #34: ferx-core names an undeclared model "Unnamed"; the glue maps that to
+  # "" and R substitutes the stem. A stem that matches no bundled example
+  # proves the name came from this file, not from a coincidence.
+  ex   <- ferx_example("warfarin")
+  dir  <- tempfile("ferx34-")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  path <- file.path(dir, "my_pk_model_34.ferx")
+  writeLines(readLines(ex$model), path)
+  fit <- suppressWarnings(ferx_fit(path, ex$data, covariance = FALSE,
+                                   verbose = FALSE,
+                                   settings = list(maxiter = 5L)))
+  expect_equal(fit$model_name, "my_pk_model_34")
+  expect_false(identical(fit$model_name, "Unnamed"))
+})
+test_that("the engine placeholder name is not spelled anywhere in R/ (#34)", {
+  # The placeholder is mapped to "" once, in the Rust glue. An R-side check for
+  # it would be a second copy of a ferx-core internal to keep in step.
+  r_dir <- testthat::test_path("..", "..", "R")
+  skip_if_not(dir.exists(r_dir), "package sources not available")
+  hits <- unlist(lapply(list.files(r_dir, pattern = "[.]R$", full.names = TRUE),
+                        function(f) grep('"Unnamed"', readLines(f, warn = FALSE),
+                                         fixed = TRUE, value = TRUE)))
+  expect_length(hits, 0L)
 })
 test_that("$model_name comes from a top-level `model <name>` line when present", {
   # #367 read the fallback above as the only behaviour and concluded the name
