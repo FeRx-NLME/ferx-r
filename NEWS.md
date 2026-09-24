@@ -1208,6 +1208,43 @@
   `print()` shows. The `ferx_fit()` documentation of
   the unused-parameter warning now covers the `[individual_parameters]`
   computed-but-never-used case too.
+- **A model that fails to parse is reported as the parse error when `data` is
+  omitted, not as "No data supplied"**
+  ([#387](https://github.com/FeRx-NLME/ferx-r/issues/387)). With `data = NULL`,
+  every entry point asks the model file for its `[data]` block, and a model the
+  engine could not parse was taken for one without the block - so
+  `ferx_fit()`, `ferx_predict()`, `ferx_predict_survival()`, `ferx_simulate()`,
+  `ferx_simulate_adaptive()`, `ferx_inits_from_nca()`, `ferx_check_init()`,
+  `ferx_model_to_frem()` and the search tools told the user to add the block
+  the file already had, as a plain `simpleError`. They now raise the same
+  `ferx_engine_error` (with `code` / `block` / `line` / `suggestion`) that the
+  explicit-`data` call raises. "No data supplied" is kept for a model that
+  parses and declares no `[data] path`. `ferx_model()` stays lenient: a
+  half-written model file still constructs, with `data = NULL`, and the entry
+  point it is piped into reports the parse error.
+- **`ferx_inits_from_nca()` now reads the data the way `ferx_fit()` does**
+  ([#391](https://github.com/FeRx-NLME/ferx-r/issues/391)). It used a bare CSV
+  reader that never saw the model's `[data]` column map, so a model mapping
+  `time = TAFD` (or `DV`, `AMT`, ...) failed with `Missing TIME column` while
+  `ferx_predict()`, `ferx_simulate()` and `ferx_fit()` read it. It now goes
+  through the same reader, which also applies the model's `[covariates]` and
+  `[data_selection]`: the NCA runs on the rows a fit with `inits_from_nca`
+  would see, so on a model with a `[data_selection]` block the suggested
+  values can change. A read failure on such a model is also no longer
+  labelled with the code of an unrelated validation finding.
+
+- **`ferx_apply_selection()` and `fit$eta_cov` honour the model's `[data]`
+  column map** ([#405](https://github.com/FeRx-NLME/ferx-r/pull/405)). Both
+  re-read the raw CSV in R and saw the dataset's own headers, not the names
+  the engine gives mapped columns. With `time = TAFD`, a preview filter
+  `TIME > 24` matched nothing while the fit excluded those rows, and
+  `fit$eta_cov` could take a mapped `ID` / `RATE` for a covariate (or pick the
+  wrong subject column). `ferx_apply_selection()` gains a `model =` argument
+  (a `.ferx` path or `ferx_model`); filters are evaluated on the mapped names,
+  and the returned rows keep the dataset's headers. `ferx_apply_selection(fit)`
+  uses the fit's model, and `fit$eta_cov` the fitted model's map; a covariate
+  rename (`WT = weight`) is reported as `WT`. `fit$eta_cov` also finds a
+  lowercase `id` / `rate` header, as the engine does.
 
 - **`ferx_simulate_adaptive()` now raises the engine's refusal as a
   `ferx_engine_error`, like every other entry point**
@@ -1962,6 +1999,17 @@
   own: it arrived with the pin move to `944cbf1e`, which already contained it.
 
 ## Internal
+
+- **The R layer no longer knows ferx-core's placeholder model name**
+  ([#34](https://github.com/FeRx-NLME/ferx-r/issues/34)). ferx-core names a
+  model whose file declares no `model NAME` line `"Unnamed"`, and the fit
+  formatter compared `$model_name` against that string before substituting
+  the file stem. The Rust glue now reports an undeclared name as `""` at the
+  one place a fit crosses into R (`fit_result_to_list()`), so the R fallback
+  keys on an empty name alone - for `ferx_fit()` and for every search tool's
+  final fit. `$model_name` is unchanged for users. The placeholder is still
+  spelled once, in the glue, because ferx-core keeps both it and its own
+  stem fallback (`set_model_name()`) crate-private.
 
 - **A local build with a sibling `../ferx-core` checkout no longer rewrites
   `src/rust/Cargo.lock`** ([#353](https://github.com/FeRx-NLME/ferx-r/issues/353)).
