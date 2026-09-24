@@ -105,6 +105,12 @@ ferx_rust_known_blocks <- function() {
 
 #' @title Internal Rust backend binding
 #' @keywords internal
+ferx_rust_classify_warnings <- function(messages) {
+  .Call("wrap__ferx_rust_classify_warnings", messages)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
 ferx_rust_validate_model <- function(model_path, data_path) {
   .Call("wrap__ferx_rust_validate_model", model_path, data_path)
 }

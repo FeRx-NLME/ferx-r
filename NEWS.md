@@ -1184,6 +1184,30 @@
 
 ## Bug fixes
 
+- **`ferx_get_warnings()` answers every engine warning code, and answers a
+  loaded fit the same way as a fresh one**
+  ([#308](https://github.com/FeRx-NLME/ferx-r/issues/308)). Ten codes printed
+  no remediation line at all: `absorption_twin_declined`, `boundary_estimate`,
+  `eps_shrinkage`, `eta_shrinkage`, `experimental`, `flat_parameter`,
+  `flip_flop`, `high_correlation`, `inflated_rse` and `simulation`. Each now has
+  one, and `flip_flop` tells the auto-rerouted note apart from a model whose
+  subjects silently degenerate. `mu_referencing` and `optimizer_config` carry
+  two severities each and used to answer both with the informational text; a
+  parameter that is not mu-referenced and a global search that failed to start
+  now get advice of their own. An invalid `fd_hessian_step` and a singular
+  score cross-product (`covariance_method = "s"`) get targeted covariance-step
+  guidance instead of the generic "check identifiability" fallback.
+  `ferx_load_fit()` does not restore `warnings_structured`, so every row of a
+  reloaded fit used to arrive as `general` - with a `warning` severity and no
+  guidance, whatever it said. The flat messages are now re-classified by the
+  engine's own classifier (a new internal binding,
+  `ferx_rust_classify_warnings()`), so a reloaded fit shows the severity,
+  category and guidance the fresh fit had - also after `ferx_sir()` or
+  `ferx_covariance()` has added rows of its own, which used to hide every older
+  warning on a loaded fit, and in the warning tally and STATUS line that
+  `print()` shows. The `ferx_fit()` documentation of
+  the unused-parameter warning now covers the `[individual_parameters]`
+  computed-but-never-used case too.
 - **A model that fails to parse is reported as the parse error when `data` is
   omitted, not as "No data supplied"**
   ([#387](https://github.com/FeRx-NLME/ferx-r/issues/387)). With `data = NULL`,

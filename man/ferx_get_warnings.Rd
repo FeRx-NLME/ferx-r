@@ -23,7 +23,10 @@ Returns or prints the warnings produced by a fit, classified by severity
 (\code{critical}, \code{warning}, \code{info}) and category. Severity and
 category are assigned by the ferx-core engine (for engine warnings) or by
 the R diagnostics layer (for condition number and ETA normality); the R
-side never re-parses message text to guess severity.
+side never re-parses message text to guess severity. A fit read back with
+\code{\link{ferx_load_fit}} carries only the flat message strings, so each
+one is run through the engine's own classifier to recover the severity and
+category the fresh fit had.
 }
 \examples{
 ex  <- ferx_example("warfarin")
