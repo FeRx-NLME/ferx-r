@@ -374,15 +374,27 @@ ferx_section_headers <- function(lines) {
 # Returns the resolved path (character(1)) or NULL when the model file declares
 # no `[data] path`. Relative paths are resolved by the engine relative to the
 # model file's directory. `model_path` must be a path to a .ferx file.
-.ferx_model_data_path <- function(model_path) {
+#
+# A model the engine cannot parse is not "a model without a `[data]` block":
+# answering NULL for it sent every caller to its "No data supplied" error,
+# telling the user to add the block the file already had (#387). So by default
+# a parse failure is raised the way the explicit-`data` path raises it, through
+# `.ferx_engine_call()` - classed `ferx_engine_error` with the diagnostic code
+# where validation names one. `strict = FALSE` keeps the old answer (NULL) for
+# the one caller that must accept a half-written file: the `ferx_model()`
+# constructor, whose object reaches this helper again - strictly - in whichever
+# entry point it is piped into.
+.ferx_model_data_path <- function(model_path, strict = TRUE) {
   if (is.null(model_path) || !is.character(model_path) ||
       length(model_path) != 1L || !file.exists(model_path)) {
     return(NULL)
   }
-  p <- tryCatch(
-    ferx_rust_model_data_path(normalizePath(model_path)),
-    error = function(e) ""
-  )
+  resolve <- function() ferx_rust_model_data_path(normalizePath(model_path))
+  p <- if (strict) {
+    .ferx_engine_call(resolve(), model_path, NULL)
+  } else {
+    tryCatch(resolve(), error = function(e) "")
+  }
   if (length(p) != 1L || is.na(p) || !nzchar(p)) return(NULL)
   p
 }

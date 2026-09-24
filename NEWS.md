@@ -1184,6 +1184,20 @@
 
 ## Bug fixes
 
+- **A model that fails to parse is reported as the parse error when `data` is
+  omitted, not as "No data supplied"**
+  ([#387](https://github.com/FeRx-NLME/ferx-r/issues/387)). With `data = NULL`,
+  every entry point asks the model file for its `[data]` block, and a model the
+  engine could not parse was taken for one without the block - so
+  `ferx_fit()`, `ferx_predict()`, `ferx_predict_survival()`, `ferx_simulate()`,
+  `ferx_simulate_adaptive()`, `ferx_inits_from_nca()`, `ferx_check_init()`,
+  `ferx_model_to_frem()` and the search tools told the user to add the block
+  the file already had, as a plain `simpleError`. They now raise the same
+  `ferx_engine_error` (with `code` / `block` / `line` / `suggestion`) that the
+  explicit-`data` call raises. "No data supplied" is kept for a model that
+  parses and declares no `[data] path`. `ferx_model()` stays lenient: a
+  half-written model file still constructs, with `data = NULL`, and the entry
+  point it is piped into reports the parse error.
 - **`ferx_inits_from_nca()` now reads the data the way `ferx_fit()` does**
   ([#391](https://github.com/FeRx-NLME/ferx-r/issues/391)). It used a bare CSV
   reader that never saw the model's `[data]` column map, so a model mapping

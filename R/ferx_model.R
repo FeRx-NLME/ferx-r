@@ -210,7 +210,9 @@ ferx_model <- function(data = NULL, model = NULL, template = NULL,
   # Resolve before the existence check so a bad declared path fails the same
   # way an explicit `data` argument would, instead of silently constructing a
   # ferx_model that carries a non-existent dataset.
-  if (is.null(data)) data <- .ferx_model_data_path(model)
+  # Lenient: a model file that does not parse yet is a normal input to the
+  # constructor (#387); the entry point it is piped into reports the error.
+  if (is.null(data)) data <- .ferx_model_data_path(model, strict = FALSE)
   if (!is.null(data) && !file.exists(data)) stop("Data file not found: ", data)
   structure(list(model = model, data = data), class = "ferx_model")
 }
