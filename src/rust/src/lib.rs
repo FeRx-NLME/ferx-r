@@ -3407,6 +3407,50 @@ fn ferx_rust_known_blocks() -> Vec<String> {
     })
 }
 
+/// Classify flat warning messages with the engine's own classifier.
+///
+/// `ferx_load_fit()` does not restore `warnings_structured`: a fit read back
+/// from disk carries only the flat `warnings` strings, so every row of it used
+/// to reach `ferx_get_warnings()` under `general` - and every guidance arm keyed
+/// on a category went dead for it (ferx-r #308). This runs each message
+/// through `ferx_core::classify_warning`, the same function that assigned the
+/// severity and category on the fresh fit, so the R side recovers them without
+/// keeping a second copy of the engine's message patterns. A leading
+/// `[METHOD]` chain prefix is split off into `source_method`, as on a fresh fit.
+///
+/// @param messages Character vector of warning messages.
+/// @return A list of four parallel character vectors: `severity` (lowercase),
+///   `category` (the `WarningCode` token), `message` and `source_method`.
+/// @export
+#[extendr]
+fn ferx_rust_classify_warnings(messages: Vec<String>) -> List {
+    entry(move || {
+        let entries: Vec<_> = messages
+            .iter()
+            .map(|m| ferx_core::classify_warning(m))
+            .collect();
+        let severity: Vec<String> = entries
+            .iter()
+            .map(|w| format!("{:?}", w.severity).to_lowercase())
+            .collect();
+        let category: Vec<String> = entries
+            .iter()
+            .map(|w| w.category.as_str().to_string())
+            .collect();
+        let message: Vec<String> = entries.iter().map(|w| w.message.clone()).collect();
+        let source_method: Vec<String> = entries
+            .iter()
+            .map(|w| w.source_method.clone().unwrap_or_default())
+            .collect();
+        Ok(list!(
+            severity = severity,
+            category = category,
+            message = message,
+            source_method = source_method
+        ))
+    })
+}
+
 /// Validate a .ferx model file (and optionally its dataset) without fitting.
 ///
 /// Runs the parser plus every data-independent check, and — when `data_path`
@@ -8994,6 +9038,7 @@ extendr_module! {
     fn ferx_rust_autodiff_enabled;
     fn ferx_rust_test_panic;
     fn ferx_rust_known_blocks;
+    fn ferx_rust_classify_warnings;
     fn ferx_rust_validate_model;
     fn ferx_rust_model_data_path;
     fn ferx_rust_inits_from_nca;

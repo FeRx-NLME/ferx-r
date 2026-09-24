@@ -26,8 +26,25 @@ test_that("ferx_get_warnings() falls back to flat warnings when structured is ab
   )
   df <- ferx_get_warnings(fake, as_df = TRUE)
   expect_equal(nrow(df), 2L)
-  expect_true(all(df$severity == "warning"))
-  expect_true(all(df$category == "general"))
+  # The flat strings are re-classified by the engine's own classifier (#308),
+  # so a recognised message gets the severity and category a fresh fit would
+  # have carried, and an unrecognised one stays `general`.
+  expect_identical(df$severity, c("critical", "warning"))
+  expect_identical(df$category, c("convergence", "general"))
+  expect_identical(df$source_method, c("", ""))
+})
+
+test_that("the flat-warning fallback splits a [METHOD] prefix like a fresh fit", {
+  fake <- structure(
+    list(model_name = "legacy",
+         warnings = "[FOCEI] Outer optimization did not converge",
+         warnings_structured = NULL),
+    class = "ferx_fit"
+  )
+  df <- ferx_get_warnings(fake, as_df = TRUE)
+  expect_identical(df$source_method, "FOCEI")
+  expect_identical(df$message, "Outer optimization did not converge")
+  expect_identical(df$category, "convergence")
 })
 test_that(".ferx_warning_guidance dispatches the covariance family by message content", {
   # Each message is paired with the category ferx-core's `classify_warning`
@@ -312,14 +329,13 @@ test_that(".ferx_warning_guidance returns negative-autocorrelation guidance", {
   c("covariance", "unused_parameter")
 }
 
-# ferx-core tokens this package deliberately answers with nothing. Guidance text
-# for them is a separate change; what matters here is that the set is explicit,
-# so a code ferx-core adds later lands in neither list and fails the drift test
-# rather than silently printing nothing.
+# ferx-core tokens this package deliberately answers with nothing. Empty since
+# #308 answered the last ten. Kept, rather than deleted, so a code that has to
+# go unanswered for a while has one explicit place to be listed: a code
+# ferx-core adds later lands in neither list and fails the drift test rather
+# than silently printing nothing.
 .unanswered_warning_cats <- function() {
-  c("absorption_twin_declined", "boundary_estimate", "eps_shrinkage",
-    "eta_shrinkage", "experimental", "flat_parameter", "flip_flop",
-    "high_correlation", "inflated_rse", "simulation")
+  character(0)
 }
 
 test_that("every category in the guidance table returns guidance", {
@@ -639,7 +655,22 @@ test_that("every covariance message ferx-core emits gets non-contradictory guida
          # so no subject is named and the advice is about the estimates.
          msg = paste0("Covariance step failed: non-finite score cross-product. ",
                       "SE estimates not available."),
-         ok = "score cross-product", never = NULL)
+         ok = "score cross-product", never = NULL),
+    list(cat = "covariance_failed",
+         # An invalid step: the Hessian was never attempted, so nothing about
+         # the model was diagnosed (#308).
+         msg = paste0("Covariance step failed: fd_hessian_step must be positive ",
+                      "and finite, got -1. SE estimates not available."),
+         ok = "positive finite", never = "identifiability"),
+    list(cat = "covariance_failed",
+         # covariance_method = "s": S itself is singular, and the remedy is an
+         # estimator that does not invert it (#308).
+         msg = paste0("Covariance step failed: the score cross-product matrix S ",
+                      "is singular or rank-deficient (covariance_method = s); ",
+                      "typically fewer subjects than free parameters, or ",
+                      "collinear per-subject scores. Use covariance_method = r ",
+                      "or rsr. SE estimates not available."),
+         ok = "covariance_method = \"rsr\"", never = "identifiability")
   )
   for (case in cases) {
     g <- ferx:::.ferx_warning_guidance(case$cat, message = case$msg)
@@ -672,11 +703,13 @@ test_that("a flat THETA is not answered as an unused parameter, by either door",
                 "never used (unmapped, or dropped from the structural / scaling ",
                 "model). Freezing it at its initial value (1.5) so the remaining ",
                 "parameters can be estimated; map or remove `TVCL` to silence this.")
-  # This package has no `flat_parameter` guidance (that text is a separate
-  # change), so the requirement here is only that the message is NOT captured by
-  # the unused-parameter reroute and answered with its text.
+  # Through the `general` door the engine's classifier recovers
+  # `flat_parameter`, so both doors now give the flat-THETA answer - and
+  # neither gives the unused-parameter one.
   loaded <- ferx:::.ferx_warning_guidance("general", message = msg)
-  expect_null(loaded)
+  fresh  <- ferx:::.ferx_warning_guidance("flat_parameter", message = msg)
+  expect_identical(loaded, fresh)
+  expect_match(loaded, "not estimated", fixed = TRUE)
   expect_false(identical(loaded, ferx:::.ferx_warning_guidance("unused_parameter")))
 
   # The genuine unused-declaration messages still resolve, and a live fit's own
@@ -685,7 +718,9 @@ test_that("a flat THETA is not answered as an unused parameter, by either door",
                    "any model expression \u2014 it will not affect predictions")
   expect_match(ferx:::.ferx_warning_guidance("general", message = unused),
                "never referenced", fixed = TRUE)
-  expect_null(ferx:::.ferx_warning_guidance("flat_parameter", message = unused))
+  expect_false(grepl("never referenced",
+                     ferx:::.ferx_warning_guidance("flat_parameter", message = unused),
+                     fixed = TRUE))
 })
 
 test_that("`general` does not claim messages that only mention the covariance step", {
@@ -706,8 +741,13 @@ test_that("`general` does not claim messages that only mention the covariance st
   requested <- paste0("SIR requested but the covariance step did not succeed and no ",
                       "usable SIR proposal could be built from it, so SIR could not ",
                       "run \u2014 see the covariance warning above for the cause.")
+  # Since #308 a `general` row is first recovered to the engine's own category,
+  # so these now get SIR's guidance - which is the point: never the covariance
+  # fallback and its covariance = FALSE advice.
   for (msg in c(shrunk, requested)) {
-    expect_null(ferx:::.ferx_warning_guidance("general", message = msg), info = msg)
+    g <- ferx:::.ferx_warning_guidance("general", message = msg)
+    expect_identical(g, ferx:::.ferx_warning_guidance("sir", message = msg), info = msg)
+    expect_false(grepl("covariance = FALSE", g, fixed = TRUE), info = msg)
   }
   # ... while a real covariance message under `general` is still answered, with
   # or without a [METHOD] chain prefix.
@@ -760,16 +800,11 @@ test_that("no covariance message ferx-core emits is missing from the inventory",
   exempt <- c(
     # Inline `#[cfg(test)]` fixture in run_sir.rs (the file itself is not a
     # test-only source, so the path filter above cannot drop it).
-    "matrix was not positive definite",
-    # Answered by the generic fallback rather than a targeted arm: correct as
-    # far as it goes (the standard errors really are unavailable), just not
-    # specific. Targeted text for these is a separate change.
-    "fd_hessian_step must be",
-    "score cross-product matrix"
+    "matrix was not positive definite"
   )
   # Fragments the inventory test covers. Not one per case: the two Omega
   # descriptors share "Omega matrix is" and the two cost-note forms share
-  # "OFV evaluations", so 11 fragments cover 15 cases.
+  # "OFV evaluations", so 13 fragments cover 17 cases.
   covered <- c(
     "cancelled before completion",
     "ill-conditioned entries",
@@ -784,7 +819,10 @@ test_that("no covariance message ferx-core emits is missing from the inventory",
     # subject whose quadrature score could not be evaluated, the other reports
     # the summed cross-product coming out non-finite.
     "quadrature score for subject",
-    "non-finite score cross-product"
+    "non-finite score cross-product",
+    # Given targeted arms in #308; answered by the generic fallback before.
+    "fd_hessian_step must be",
+    "score cross-product matrix"
   )
   accounted <- function(lit) any(vapply(c(exempt, covered),
                                         function(k) grepl(k, lit, fixed = TRUE),
@@ -1222,4 +1260,234 @@ test_that("the ode_solver phrases the guidance keys on are still in the engine",
   }
   # The escalation note's token is a const outside the function.
   expect_true(any(grepl('"W_ODE_SOLVER_ESCALATION_NOTE"', ln, fixed = TRUE)))
+})
+
+# ---------------------------------------------------------------------------
+# #308: the codes that used to print no guidance, and the two split codes
+# ---------------------------------------------------------------------------
+# Each `msg` is ferx-core's own text at the pinned revision with its `{}`
+# placeholders filled in. Every case is routed through the engine's real
+# classifier first, so a pairing production never emits cannot pass here: the
+# case asserts the category ferx-core gives the message, then the guidance that
+# category earns, then that the `general` door (a loaded fit) gives the same.
+.engine_routed_cases <- function() {
+  list(
+    list(cat = "boundary_estimate", sev = "warning",
+         msg = paste0("Parameter estimate(s) pinned to an optimizer bound: TVKA ",
+                      "(50.0000 at upper bound). This often indicates ",
+                      "non-identifiability or a too-tight bound; inspect the ",
+                      "affected parameter(s) and consider relaxing the bound or ",
+                      "simplifying the model."),
+         ok = "declared bounds"),
+    list(cat = "inflated_rse", sev = "warning",
+         msg = paste0("High relative standard error (RSE > 50%): TVKA (84.2%). ",
+                      "These parameter(s) are imprecisely estimated — often a ",
+                      "sign of over-parameterization or data that do not inform ",
+                      "them; consider simplifying the model."),
+         ok = "imprecisely estimated"),
+    list(cat = "high_correlation", sev = "warning",
+         msg = paste0("Highly correlated parameter pair(s) (|r| >= 0.95): TVCL ~ ",
+                      "TVV (0.97). Highly correlated estimates indicate ",
+                      "over-parameterization or non-identifiability; consider ",
+                      "fixing or removing one of each pair."),
+         ok = "fit$cor_matrix"),
+    list(cat = "eta_shrinkage", sev = "warning",
+         msg = paste0("High ETA shrinkage (≥ 30%): ETA_KA (54%). EBE-based ",
+                      "diagnostics for these random effects are unreliable and ",
+                      "the data poorly inform their individual estimates; ",
+                      "consider removing the IIV on the affected parameter(s) or ",
+                      "collecting more informative data."),
+         ok = "do not screen covariates"),
+    list(cat = "eps_shrinkage", sev = "warning",
+         msg = paste0("EPS shrinkage is notably negative (-35.0%): mean(IWRES^2) ",
+                      "> 1, which means the residual error model does not absorb ",
+                      "the residuals at the final EBE etas. Common causes: SAEM ",
+                      "converged to a local optimum with under-fit sigma (try ",
+                      "`method = [saem, focei]` to polish with FOCEI, or ",
+                      "different starts); model misspecification on a subset of ",
+                      "subjects; sigma at a bound. Inspect the IWRES distribution ",
+                      "in the sdtab."),
+         ok = "IWRES"),
+    list(cat = "flat_parameter", sev = "warning",
+         msg = paste0("[parameters] `TVX` has no effect on the objective ",
+                      "(gradient ≈ 0 at the initial estimate) — it is ",
+                      "likely computed but never used (unmapped, or dropped from ",
+                      "the structural / scaling model). Freezing it at its ",
+                      "initial value (1) so the remaining parameters can be ",
+                      "estimated; map or remove `TVX` to silence this."),
+         ok = "not estimated"),
+    list(cat = "experimental", sev = "warning",
+         msg = paste0("Stochastic differential equations ([diffusion] / Extended ",
+                      "Kalman Filter) are an EXPERIMENTAL feature: validated only ",
+                      "on a small set of toy examples, with estimator support ",
+                      "limited to FOCE/FOCEI. Standard errors and convergence ",
+                      "behaviour are not yet proven across diverse datasets ",
+                      "— validate results carefully before relying on them. ",
+                      "See the Feature Maturity page in the documentation."),
+         ok = "experimental"),
+    list(cat = "absorption_twin_declined", sev = "warning",
+         msg = paste0("This absorption model's ODE equivalent could not be built, ",
+                      "so the model stays closed-form. Subjects needing the ODE ",
+                      "fallback (time-varying covariates, a `TIME`-dependent ",
+                      "parameter, IOV, steady-state or infusion doses, or the ",
+                      "flip-flop regime) will be rejected with an explicit error ",
+                      "instead of silently rerouting (W_ABSORPTION_TWIN_DECLINED, ",
+                      "#1008). Reason: unknown symbol `Q`."),
+         ok = "no ODE fallback"),
+    # flip_flop, both emitters.
+    list(cat = "flip_flop", sev = "warning",
+         msg = paste0("one_cpt_transit disposition rate (2.5000) ≥ transit ",
+                      "rate KTR = (n+1)/mtt (2.0000) at typical values (subject ",
+                      "1): the flip-flop regime, outside the analytic absorption ",
+                      "closed form's convergence domain. ferx automatically ",
+                      "evaluates the equivalent ODE transit() model for such ",
+                      "parameters (correct, but slower than the closed form) ",
+                      "— check the MTT / CL starting estimates if the ",
+                      "flip-flop is unexpected."),
+         ok = "Informational", never = "degenerate"),
+    list(cat = "flip_flop", sev = "warning",
+         msg = paste0("2 subject(s) [3, 7] enter the analytic absorption closed ",
+                      "form's clamp region — the flip-flop regime ",
+                      "(disposition rate ≥ transit rate KTR = (n+1)/mtt), or ",
+                      "(for a 2-cpt model) coincident disposition eigenvalues ",
+                      "— at their fitted empirical-Bayes estimates, where the ",
+                      "closed form returns an identically-zero concentration ",
+                      "profile, silently degenerating those subjects' likelihood ",
+                      "contributions."),
+         ok = "degenerate", never = "Informational"),
+    list(cat = "simulation", sev = "warning",
+         msg = paste0("W_TTE_DEGENERATE_HAZARD: subject '4' (CMT=2) drew a ",
+                      "non-positive / non-finite effective hazard rate; no event ",
+                      "was generated and the subject is censored at the ",
+                      "observation window (#763). Check the hazard parameters / ",
+                      "covariate values."),
+         ok = "degenerate hazard"),
+    list(cat = "simulation", sev = "warning",
+         msg = paste0("W_RTTE_DEGENERATE: subject '4' (CMT=2) has a degenerate ",
+                      "recurrent hazard (~1.000e7 events expected before horizon ",
+                      "100); its event stream was skipped and the subject ",
+                      "censored at the horizon (#762). Check the hazard ",
+                      "parameters / covariate values."),
+         ok = "degenerate hazard"),
+    # mu_referencing: one code, two severities, two answers.
+    list(cat = "mu_referencing", sev = "warning",
+         msg = paste0("individual parameter(s) not mu-referenced: KA. This can ",
+                      "strongly affect convergence; prefer forms such as ",
+                      "`CL = TVCL * exp(ETA_CL)` when possible."),
+         ok = "not mu-referenced", never = "informational"),
+    list(cat = "mu_referencing", sev = "info",
+         msg = paste0("covariate mu-reference on CL (reads WT) is not used: its ",
+                      "random effect has no variance."),
+         ok = "informational", never = "not mu-referenced"),
+    # optimizer_config: likewise.
+    list(cat = "optimizer_config", sev = "warning",
+         msg = "global_search disabled: CRS2-LM initialisation failed",
+         ok = "could not start", never = "informational"),
+    list(cat = "optimizer_config", sev = "info",
+         msg = paste0("global_search = true with n_starts = 4: CRS2-LM only runs ",
+                      "on start 0 (it ignores the starting point and would ",
+                      "override the theta perturbation on starts 1..4)"),
+         ok = "informational", never = "could not start")
+  )
+}
+
+test_that("the engine routes each #308 message to the category its guidance keys on", {
+  cases <- .engine_routed_cases()
+  cl <- ferx:::.ferx_classify_flat_warnings(vapply(cases, `[[`, "", "msg"))
+  for (i in seq_along(cases)) {
+    case <- cases[[i]]
+    expect_identical(cl$category[i], case$cat, info = case$msg)
+    expect_identical(cl$severity[i], case$sev, info = case$msg)
+  }
+})
+
+test_that("each #308 message gets its own guidance, through either door", {
+  for (case in .engine_routed_cases()) {
+    g <- ferx:::.ferx_warning_guidance(case$cat, message = case$msg)
+    expect_true(is.character(g) && length(g) == 1L && nzchar(g), info = case$msg)
+    expect_match(g, case$ok, fixed = TRUE, info = case$msg)
+    if (!is.null(case$never)) {
+      expect_false(grepl(case$never, g, fixed = TRUE), info = case$msg)
+    }
+    # A loaded fit hands every row in as `general`; the answer must not change.
+    expect_identical(ferx:::.ferx_warning_guidance("general", message = case$msg),
+                     g, info = case$msg)
+  }
+})
+
+test_that("the #308 message texts are still what the engine emits", {
+  # The cases above are hand-copied; this reads a fixed fragment of each back
+  # out of ferx-core at the pinned revision, so a reworded emitter fails here
+  # rather than leaving the cases testing a message nobody sends.
+  core_src <- .core_src_at_pin()
+  skip_if(is.null(core_src), "cannot materialise ferx-core at the pinned revision")
+  rs <- list.files(core_src, pattern = "\\.rs$", recursive = TRUE, full.names = TRUE)
+  rs <- rs[!grepl("tests?(/|\\.rs$)|_tests\\.rs$", rs)]
+  # Join backslash-continued string literals so a fragment spanning a line
+  # break in the source still matches.
+  src <- paste(vapply(rs, function(f) paste(readLines(f, warn = FALSE), collapse = "\n"),
+                      ""), collapse = "\n")
+  src <- gsub("\\\\\n[[:space:]]*", "", src)
+  fragments <- c(
+    "pinned to an optimizer bound: {list}",
+    "High relative standard error (RSE > {:.0}%)",
+    "Highly correlated parameter pair(s)",
+    "EBE-based diagnostics for these random effects are unreliable",
+    "EPS shrinkage is notably negative",
+    "has no effect on the objective",
+    "are an EXPERIMENTAL feature",
+    "(W_ABSORPTION_TWIN_DECLINED, #1008)",
+    "ferx automatically evaluates the equivalent ODE",
+    "identically-zero concentration profile, silently degenerating",
+    "W_TTE_DEGENERATE_HAZARD: subject",
+    "W_RTTE_DEGENERATE: subject",
+    "individual parameter(s) not mu-referenced",
+    "global_search disabled: {}",
+    "CRS2-LM only runs on start 0",
+    "fd_hessian_step must be positive and finite",
+    "the score cross-product matrix S is singular"
+  )
+  for (f in fragments) {
+    expect_true(grepl(f, src, fixed = TRUE), info = f)
+  }
+})
+
+test_that("a loaded fit's warnings get the same categories and guidance as the fresh fit", {
+  # ferx_load_fit() does not restore warnings_structured, so before #308 every
+  # row of a reloaded fit arrived as `general` and all but three guidance arms
+  # were dead for it. This drives the real round trip.
+  fit <- warning_anchor_fit()
+  path <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(path))
+  ferx_save_fit(fit, path)
+  loaded <- ferx_load_fit(path)
+  expect_null(loaded$warnings_structured)
+
+  fresh_ws  <- ferx_get_warnings(fit, as_df = TRUE)
+  loaded_ws <- ferx_get_warnings(loaded, as_df = TRUE)
+  expect_gt(nrow(loaded_ws), 0L)
+  # Something other than `general` came back - the recovery actually ran.
+  expect_true(any(loaded_ws$category != "general"))
+  for (i in seq_len(nrow(loaded_ws))) {
+    j <- match(loaded_ws$message[i], fresh_ws$message)
+    if (is.na(j)) next   # an R-side row the flat vector does not carry
+    expect_identical(loaded_ws$category[i], fresh_ws$category[j],
+                     info = loaded_ws$message[i])
+    expect_identical(loaded_ws$severity[i], fresh_ws$severity[j],
+                     info = loaded_ws$message[i])
+    expect_identical(
+      ferx:::.ferx_warning_guidance(loaded_ws$category[i], loaded_ws$message[i]),
+      ferx:::.ferx_warning_guidance(fresh_ws$category[j], fresh_ws$message[j]),
+      info = loaded_ws$message[i]
+    )
+  }
+})
+
+test_that("a dropped-[output] row keeps its guidance on a loaded fit", {
+  # The one R-side message that rides in the flat vector; the engine files it
+  # under `general`, so it is recovered by its text.
+  msg <- "`FOO` named in [output] was not written to sdtab."
+  expect_identical(ferx:::.ferx_classify_flat_warnings(msg)$category, "output")
+  expect_identical(ferx:::.ferx_warning_guidance("general", message = msg),
+                   ferx:::.ferx_warning_guidance("output"))
 })
