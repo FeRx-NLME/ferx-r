@@ -1184,6 +1184,29 @@
 
 ## Bug fixes
 
+- **`ferx_get_warnings()` guidance for `covariance_regularized` follows
+  ferx-core's magnitude grading**
+  ([#395](https://github.com/FeRx-NLME/ferx-r/issues/395), ferx-core
+  [#1508](https://github.com/FeRx-NLME/ferx-core/pull/1508)). ferx-core now
+  grades the tier on the worst variance inflation the eigenvalue floor caused
+  and on `|min eig| / max eig`, and its message says which of the two fired.
+  The R guidance no longer restates a mechanism (its severe text, "standard
+  errors come from the floor", is false when only the indefiniteness leg
+  fired) and gives the action per tier: severe -> `ferx_sir()`, moderate ->
+  "worth a look" and a SIR cross-check, minor -> no action, stating the
+  measured bound (every SE moved by less than 1%) instead of "usually
+  benign". A minor tier from an older, count-graded message (a fit saved
+  before the pin moved) is told to check `%RSE` instead, since there it could
+  sit above a 4400x-inflated SE. When the message names `[scaling] obs_scale`
+  as the clause that declined the exact analytic covariance R-matrix, the
+  guidance gives the one-line rewrite (`[scaling] y = central / V`) and says
+  whether it alone moves the fit to the analytic route; when it names loose
+  ODE tolerances, it points at
+  `ferx_fit(settings = list(ode_reltol = 1e-6, ode_abstol = 1e-8))`.
+  `?ferx_fit`'s `ode_reltol` entry gains the matching covariance caveat and
+  notes that it also governs the closed-form transit / inverse-Gaussian
+  absorption ODE twin.
+
 - **`ferx_simulate_adaptive()` now raises the engine's refusal as a
   `ferx_engine_error`, like every other entry point**
   ([#390](https://github.com/FeRx-NLME/ferx-r/issues/390)). It already raised an

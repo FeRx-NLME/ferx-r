@@ -384,28 +384,81 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
       ))
     }
     # Regularisation path -- severity is embedded in the message.
+    #
+    # ferx-core #1508 (#520) grades the tier on magnitude -- the worst variance
+    # inflation the eigenvalue floor caused and |min eig| / max eig -- and the
+    # message then carries its own interpretation, chosen by WHICH of the two
+    # legs fired. So the guidance restates no mechanism (on the
+    # indefiniteness-only cell "the SEs come from the floor" is false) and gives
+    # only the action per tier. Older messages (the count-based tiers, still in
+    # fits saved before the ferx-core pin moved) carry no "worst inflation"
+    # figure; under those "minor" could sit above a 4400x-inflated SE, so it is
+    # not told that no action is needed.
     if (grepl("covariance step regularized", message, ignore.case = TRUE)) {
-      if (grepl("severity: severe", message, ignore.case = TRUE)) {
-        return(paste0(
-          "Severe Hessian regularisation: standard errors are likely unreliable. ",
-          "Run ferx_sir() to obtain non-parametric confidence intervals, or ",
-          "simplify the model structure."
+      graded <- grepl("worst inflation of a reported variance", message,
+                      fixed = TRUE)
+      tier <- if (grepl("severity: severe", message, ignore.case = TRUE)) {
+        paste0(
+          "Severe Hessian regularisation: do not rely on the reported standard ",
+          "errors for the affected parameters. Run ferx_sir() for ",
+          "non-parametric confidence intervals."
+        )
+      } else if (grepl("severity: moderate", message, ignore.case = TRUE)) {
+        paste0(
+          "Moderate Hessian regularisation: worth a look rather than a sign ",
+          "that the fit failed. Interpret the affected standard errors with ",
+          "caution and cross-check them with ferx_sir()."
+        )
+      } else if (graded) {
+        # severity: minor (or any unrecognised tier from future core
+        # versions) under magnitude grading: the floor moved every reported
+        # standard error by less than 1%.
+        paste0(
+          "Minor Hessian regularisation: the eigenvalue floor needs no ",
+          "action. ferx-core grades this on the size of the floor's effect, ",
+          "not on how many eigenvalues were clipped; minor means it moved ",
+          "every reported standard error by less than 1%."
+        )
+      } else {
+        paste0(
+          "Minor Hessian regularisation, graded by an older ferx-core on how ",
+          "many eigenvalues were clipped rather than on how far the standard ",
+          "errors moved. Check the %RSE of the affected parameters before ",
+          "relying on them."
+        )
+      }
+      extra <- character(0)
+      # The FD-route clause that declined the exact analytic R-matrix. The
+      # rewrite is only a route change when it clears every named clause, which
+      # ferx-core says with "no one-line remedy" when it does not.
+      if (grepl("[scaling] obs_scale", message, fixed = TRUE)) {
+        extra <- c(extra, paste0(
+          "The message names [scaling] obs_scale as a reason the exact ",
+          "analytic covariance R-matrix was declined: writing the readout as ",
+          "an explicit expression ([scaling] y = central / V) clears that ",
+          "clause",
+          if (grepl("no one-line remedy", message, fixed = TRUE)) {
+            paste0(", but the other clauses it names keep the fit on the ",
+                   "finite-difference route.")
+          } else if (grepl("together move", message, fixed = TRUE)) {
+            paste0("; together with the other changes the message lists it ",
+                   "moves the fit onto the analytic route.")
+          } else {
+            paste0(" and moves the fit onto the analytic route - usually a ",
+                   "cheaper fix than simplifying the model.")
+          }
         ))
       }
-      if (grepl("severity: moderate", message, ignore.case = TRUE)) {
-        return(paste0(
-          "Moderate Hessian regularisation: standard errors should be interpreted ",
-          "with caution. Run ferx_sir() to obtain non-parametric confidence ",
-          "intervals as a cross-check."
+      # ODE tolerances looser than the FD stencil's measured accuracy plateau.
+      if (grepl("ode_reltol = ", message, fixed = TRUE) &&
+          grepl("amplifies integration noise", message, fixed = TRUE)) {
+        extra <- c(extra, paste0(
+          "The finite-difference covariance amplifies ODE integration noise; ",
+          "re-fit at the plateau tolerances with ferx_fit(..., settings = ",
+          "list(ode_reltol = 1e-6, ode_abstol = 1e-8))."
         ))
       }
-      # severity: minor (or any unrecognised tier from future core versions) --
-      # treat as benign; minor is the only tier ferx-core emits below moderate.
-      return(paste0(
-        "Minor Hessian regularisation: standard errors are likely reliable. A ",
-        "small eigenvalue floor was applied; this is common on smooth OFV ",
-        "surfaces and is usually benign."
-      ))
+      return(paste(c(tier, extra), collapse = " "))
     }
     # ferx-core's Info-level note about the cost of the step, emitted BEFORE it
     # runs. Matched on the message, never on the `covariance_step` code alone:
