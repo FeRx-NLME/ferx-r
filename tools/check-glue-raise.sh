@@ -41,7 +41,10 @@
 #      passes its text to `Rf_error` as the format, which extendr `main`
 #      (b0cb8a81, extendr/extendr#1058) changes to a `"%s"` argument. A lock
 #      that moves extendr has to come past that function: drop the doubling
-#      for a release carrying b0cb8a81, then move the pin here.
+#      for a release carrying b0cb8a81, then move the pin here and the `=`
+#      pins in src/rust/Cargo.toml. Those keep `cargo update` - and the
+#      ferx-core bump script's whole-graph update - from moving extendr on
+#      their own; this check explains why when someone moves them by hand.
 #
 # `//` and `/* .. */` comments are stripped before every test, so naming a
 # helper in prose is free. Neither strip knows about string literals, so the
@@ -227,7 +230,7 @@ else
     if [[ -z "$entry" ]]; then
       fail "$lock_rel" 1 "$crate is not in the lock. raise_verbatim unwinds into extendr's wrapper and escapes % for extendr-api $EXTENDR_RAISE_VERSION's throw_r_error; without extendr that is unchecked."
     elif [[ "$got" != "$EXTENDR_RAISE_VERSION" ]]; then
-      fail "$lock_rel" 1 "$crate is $got in the lock, but raise::format_escaped doubles % for $EXTENDR_RAISE_VERSION, whose throw_r_error hands the text to Rf_error as its format. A release carrying extendr b0cb8a81 passes it as a \"%s\" argument, and every % would print as %%. Update format_escaped for $got, then EXTENDR_RAISE_VERSION here (#394)."
+      fail "$lock_rel" 1 "$crate is $got in the lock, but raise::format_escaped doubles % for $EXTENDR_RAISE_VERSION, whose throw_r_error hands the text to Rf_error as its format. A release carrying extendr b0cb8a81 passes it as a \"%s\" argument, and every % would print as %%. Update format_escaped for $got, then the = pins in src/rust/Cargo.toml and EXTENDR_RAISE_VERSION here (#394)."
     elif [[ "$src" != "$EXTENDR_RAISE_SOURCE" ]]; then
       fail "$lock_rel" 1 "$crate $got comes from '$src' in the lock, not crates.io. raise::format_escaped and the unwind into extendr's wrapper are written against the published $EXTENDR_RAISE_VERSION; a git or path replacement at the same version can differ in both. Point it back at crates.io, or re-check format_escaped against that source and teach this check its source (#394)."
     fi

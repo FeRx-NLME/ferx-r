@@ -287,6 +287,7 @@ name = "ferx"
 version = "0.2.0"
 dependencies = [
  "extendr-api",
+ "extendr-macros",
  "ferx-core",
  "ferx-tools",
  "nalgebra",

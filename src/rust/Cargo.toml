@@ -31,7 +31,16 @@ ci = ["ferx-core/ci"]
 nn = ["ferx-core/nn"]
 
 [dependencies]
-extendr-api = "0.9"
+# Exact pins, extendr-macros included although nothing names it directly
+# (extendr-api asks only for ^0.9.0 of it, and it is the crate that generates
+# the wrapper). The glue raises by unwinding into that wrapper and doubles
+# every `%` for 0.9.0's format-string `throw_r_error` - see
+# `raise::format_escaped` in src/lib.rs (ferx-r #394). A release carrying
+# extendr b0cb8a81 would print `%%`, so moving either pin means revisiting
+# that function first; tools/check-glue-raise.sh (check 5) holds the lock to
+# the same version and says so.
+extendr-api = "=0.9.0"
+extendr-macros = "=0.9.0"
 ferx-core = { git = "https://github.com/FeRx-NLME/ferx-core", branch = "main", default-features = false }
 ferx-tools = { git = "https://github.com/FeRx-NLME/ferx-core", branch = "main" }
 nalgebra = "0.35"
