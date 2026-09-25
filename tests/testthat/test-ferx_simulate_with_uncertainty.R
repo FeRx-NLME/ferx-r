@@ -232,3 +232,86 @@ test_that("validate_fit_for_uncertainty (SIR) passes through resamples", {
   expect_identical(out$sir_resamples_n, 2L)
   expect_identical(out$sir_resamples_flat, c(1, 2, 3, 4))
 })
+
+# ---- logit_probability draws (#373, ferx-core #1548) ----
+# A `logit_probability` theta - used as inv_logit(logit(THETA_F) + ETA_F) -
+# is drawn on the logit scale: centre logit(theta_hat), SD by the delta method
+# (packed SD / (1 - theta_hat) for a log-packed theta). Before ferx-core #1548
+# the draw was log-normal: 23% of it sat above 1, and was either rejected
+# (upper bound 0.999: truncated, median pulled to ~0.72) or clamped to F = 1
+# (upper bound above 1).
+#
+# The fixture fit pins every other parameter (packed SD 1e-6) and shrinks both
+# omegas to the smallest variance the packed box allows, so within a draw every
+# subject carries F almost exactly, and IPRED is proportional to it. Dividing
+# each draw's IPRED by a reference run at theta_hat recovers the drawn F.
+
+lp_est <- 0.7923592 # THETA_F on the bundled bioavailability fit
+lp_sd  <- 0.3136337 # its packed (log-scale) SD, i.e. the relative SE
+
+lp_fit <- function(sd_f = lp_sd) {
+  theta <- c(TVCL = 5.7131442, TVV = 56.6724035, TVKA = 1.5000921,
+             THETA_F = lp_est)
+  # Packed layout: 4 thetas, 2 omega diagonals (log Cholesky), 1 sigma.
+  pn  <- c(names(theta), "ETA_CL", "ETA_F", "PROP_ERR")
+  cov <- diag(c(rep(1e-6, 3), sd_f, rep(1e-6, 3))^2)
+  dimnames(cov) <- list(pn, pn)
+  list(
+    theta      = theta,
+    omega      = diag(c(1e-5, 1e-5), 2, 2,
+                      names = list(c("ETA_CL", "ETA_F"), c("ETA_CL", "ETA_F"))),
+    sigma      = c(PROP_ERR = 0.15),
+    cov_matrix = cov
+  )
+}
+
+# The bundled model with THETA_F's upper bound replaced by `upper`.
+lp_model <- function(upper) {
+  ex  <- ferx_example("bioavailability")
+  src <- readLines(ex$model, warn = FALSE)
+  i   <- grep("theta THETA_F(", src, fixed = TRUE)
+  src[i] <- sprintf("  theta THETA_F(0.70, 0.001, %s)", format(upper))
+  path <- tempfile(fileext = ".ferx")
+  writeLines(src, path)
+  normalizePath(path)
+}
+
+# One drawn F per uncertainty draw.
+lp_drawn_f <- function(model, n_draws = 400L) {
+  ex  <- ferx_example("bioavailability")
+  ref <- ferx_simulate_with_uncertainty(
+    model, ex$data, lp_fit(sd_f = 1e-6),
+    n_uncertainty_draws = 1L, n_sim_per_draw = 1L, seed = 3L
+  )
+  sims <- ferx_simulate_with_uncertainty(
+    model, ex$data, lp_fit(),
+    n_uncertainty_draws = n_draws, n_sim_per_draw = 1L, seed = 11L
+  )
+  keep <- ref$IPRED > 0
+  vapply(split(sims$IPRED, sims$DRAW), function(ipred) {
+    lp_est * stats::median(ipred[keep] / ref$IPRED[keep])
+  }, numeric(1))
+}
+
+expect_logit_normal_draws <- function(f) {
+  expect_true(all(f > 0 & f < 1))
+  # No point mass at F = 1: P(F > 0.99) is ~1.5% under the logit-normal draw,
+  # >= 23% under the old log-normal one when the upper bound is above 1.
+  expect_lt(mean(f > 0.99), 0.06)
+  # Logit-normal: the median is theta_hat (the truncated draw's was ~0.72) ...
+  expect_lt(abs(stats::median(f) - lp_est), 0.04)
+  # ... and the logit-scale IQR is 2 * qnorm(0.75) * the delta-method SD.
+  y   <- stats::qlogis(f)
+  iqr <- unname(diff(stats::quantile(y, c(0.25, 0.75))))
+  expect_equal(iqr, 2 * stats::qnorm(0.75) * lp_sd / (1 - lp_est),
+               tolerance = 0.15)
+}
+
+test_that("asymptotic logit_probability draws are logit-normal (upper 0.999)", {
+  ex <- ferx_example("bioavailability")
+  expect_logit_normal_draws(lp_drawn_f(ex$model))
+})
+
+test_that("asymptotic logit_probability draws are logit-normal (upper above 1)", {
+  expect_logit_normal_draws(lp_drawn_f(lp_model(5)))
+})

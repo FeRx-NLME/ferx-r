@@ -441,6 +441,15 @@
   handing back a silent `NA`; note that a parameter declared `FIX` is not that
   case - the engine gives it an exact `0`, which both the table and `ferx_se()`
   report as such.
+- **`ferx_get_warnings()` explains a start value the packer could not
+  represent** ([ferx-core #1307](https://github.com/FeRx-NLME/ferx-core/issues/1307)).
+  `W_INIT_NOT_REPRESENTABLE` arrives under the new `init_not_representable`
+  category: a theta, omega or sigma start at or below the `1e-10` log-packing
+  floor, or a free residual correlation past its Fisher-z rail, was moved
+  before the first objective evaluation. Every coordinate it names is inside
+  its box, so `init_outside_bounds` stays silent. The guidance says the fit did
+  not start from the declared value and points at the remedy in the engine's
+  message.
 - **`ferx_warnings()` now explains a clamped initial estimate**
   ([ferx-core #1251](https://github.com/FeRx-NLME/ferx-core/issues/1251)).
   `W_INIT_OUTSIDE_BOUNDS` arrives under the new `init_outside_bounds` category,
@@ -1184,7 +1193,20 @@
 
 ## Bug fixes
 
-- **`ferx_get_warnings()` guidance for `covariance_regularized` follows
+- **`ferx_simulate_with_uncertainty()` draws a `logit_probability` theta on
+  the logit scale** ([#373](https://github.com/FeRx-NLME/ferx-r/issues/373),
+  ferx-core [#1548](https://github.com/FeRx-NLME/ferx-core/issues/1548)). A
+  theta used as `inv_logit(logit(THETA) + ETA)` used to be drawn log-normally,
+  like any positive theta, so nothing kept it below 1. On the bundled
+  `bioavailability` fit, 23% of the `THETA_F` draws landed above 1. With the
+  declared upper bound of 0.999 those draws were rejected, which pulled the
+  distribution low (median about 0.72 against an estimate of 0.79). With an
+  upper bound above 1, or none declared, they were simulated as `F = 1` for
+  every subject in the draw. Draws are now logit-normal, centred on the
+  estimate, with the delta-method SD behind the natural-scale confidence
+  interval `ferx_estimates()` reports. SIR proposals get the same treatment. Asymptotic
+  simulations of such models give different numbers for the same seed; other
+  models are unchanged.
   ferx-core's magnitude grading**
   ([#395](https://github.com/FeRx-NLME/ferx-r/issues/395), ferx-core
   [#1508](https://github.com/FeRx-NLME/ferx-core/pull/1508)). ferx-core now

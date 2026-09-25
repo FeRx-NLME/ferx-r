@@ -19,6 +19,24 @@
 #'     \code{settings}).}
 #' }
 #'
+#' @section Bounded thetas and \code{logit_probability} draws:
+#' A theta used as \code{inv_logit(logit(THETA) + ETA)} (a
+#' \code{logit_probability} theta, such as \code{THETA_F} in the bundled
+#' \code{bioavailability} example) is drawn on the logit scale, not the packed
+#' log scale. Its centre is \code{logit(THETA)} and its variance comes from
+#' \code{fit$cov_matrix} by the delta method, the same one behind the
+#' natural-scale confidence interval \code{\link{ferx_estimates}} reports for
+#' that theta. Each draw is then mapped back through \code{inv_logit()}, so
+#' every draw lies strictly inside (0, 1) and follows the logit-normal
+#' distribution the fit implies. SIR proposals are built the same way. Before
+#' ferx-core #1548 these draws were log-normal: draws above a declared upper
+#' bound below 1 were rejected, which truncated the distribution, and draws
+#' above 1 were clamped to a probability of 1.
+#'
+#' A FIX'd \code{logit_probability} theta is not drawn. A free one whose
+#' estimate is not strictly inside (0, 1) has no logit, so the engine refuses
+#' to draw it. Declare its upper bound below 1 (e.g. \code{0.999}) and refit.
+#'
 #' @param model Path to a .ferx model file
 #' @param data Path to a NONMEM-format CSV (provides population structure).
 #'   The \code{DV} column may be left empty (\code{.} / \code{NA}) on the

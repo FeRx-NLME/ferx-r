@@ -495,7 +495,7 @@ test_that(".ferx_warning_guidance returns negative-autocorrelation guidance", {
     "eta_normality", "eta_shrinkage",
     "experimental", "flat_parameter", "flip_flop", "gradient_fallback",
     "high_correlation", "importance_sampling", "inflated_rse",
-    "init_outside_bounds", "mu_referencing",
+    "init_not_representable", "init_outside_bounds", "mu_referencing",
     "multi_start", "ode_solver", "omega_structure", "optimizer_config",
     "optimizer_health", "parameter_at_runaway_guard", "simulation", "sir",
     "stalled_at_init", "threads", "vi_bad_basin"
@@ -1011,7 +1011,11 @@ test_that("no covariance message ferx-core emits is missing from the inventory",
   exempt <- c(
     # Inline `#[cfg(test)]` fixture in run_sir.rs (the file itself is not a
     # test-only source, so the path filter above cannot drop it).
-    "matrix was not positive definite"
+    "matrix was not positive definite",
+    # ferx-core's REGULARIZED_PREFIX constant (cov_diagnostics.rs): the shared
+    # opening of the regularized message, not a message of its own. The message
+    # it starts is covered below by "regularized: eigenvalue floor".
+    "Covariance step regularized:"
   )
   # Fragments the inventory test covers. Not one per case: the two Omega
   # descriptors share "Omega matrix is" and the two cost-note forms share
@@ -1379,12 +1383,13 @@ test_that("a real fit over an unorderable ODE timeline prints the timeline guida
   # the guidance under it. Unlike the transcribed fixtures, this message comes
   # from the pinned engine itself, so it runs in CI as well.
   #
-  # The fixture is ferx-core's own (a_fit_over_an_unorderable_timeline_says_so):
-  # a two-state ODE model and one subject whose dose TIME is NaN. Nothing
-  # upstream rejects that - the engine's data checks cover dose attributes
-  # (ALAG / F / D / R), not record times. The CSV is written with na = "NaN"
-  # because write.csv() writes NaN as NA by default, which the reader treats as
-  # a missing value, so the timeline never becomes NaN.
+  # The fixture follows ferx-core's own (a_fit_over_an_unorderable_timeline_says_so):
+  # a two-state ODE model and one subject whose dose time is not finite. The
+  # engine test uses NaN, but a CSV cannot carry one any more: since ferx-core
+  # #1501 the reader treats `NaN` like `.`, `NA` and a blank (a missing cell,
+  # read as 0), so the timeline would be ordered. `Inf` still parses as a
+  # number, and nothing upstream rejects it - the engine's data checks cover
+  # dose attributes (ALAG / F / D / R), not record times.
   model <- tempfile(fileext = ".ferx")
   writeLines(c(
     "[parameters]",
@@ -1413,8 +1418,8 @@ test_that("a real fit over an unorderable ODE timeline prints the timeline guida
                CMT = 1, MDV = c(1, 0, 0, 0, 0))
   }
   data <- tempfile(fileext = ".csv")
-  utils::write.csv(rbind(subject(1, NaN, 1.0), subject(2, 0, 1.2)), data,
-                   row.names = FALSE, na = "NaN")
+  utils::write.csv(rbind(subject(1, Inf, 1.0), subject(2, 0, 1.2)), data,
+                   row.names = FALSE)
   on.exit(unlink(c(model, data)))
 
   fit <- ferx_fit(model, data, method = "focei", settings = list(maxiter = 1L),

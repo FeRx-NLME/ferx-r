@@ -186,7 +186,12 @@ test_that("both stages are visible, each with its StepKind", {
   # two parents. A table that collapsed them would report a search that was
   # never run.
   expect_true(all(c("no_of_etas", "block_structure") %in% res$steps$kind))
-  expect_true("compare_to_input" %in% res$steps$kind)
+  # The final comparison with the input is a third step only when the stages
+  # moved off it: the engine skips it when the input itself survived both.
+  stage_best <- res$steps$id[res$steps$best &
+                               res$steps$kind %in% c("no_of_etas", "block_structure")]
+  moved <- !identical(utils::tail(stage_best, 1L), "input")
+  expect_identical("compare_to_input" %in% res$steps$kind, moved)
   expect_equal(names(res$steps),
                c("step", "kind", "parent", "id", "criterion", "d_criterion",
                  "rank", "best"))
@@ -352,9 +357,12 @@ test_that("the winning fit is a ferx_fit whose omega carries the eta names", {
 
   expect_s3_class(res$fit, "ferx_fit")
   # The label convention again, on the fit this time: omega dimnames are the
-  # declared eta names, and they are the labels the table reported.
-  expect_equal(rownames(res$fit$omega), res$final_etas)
-  expect_equal(colnames(res$fit$omega), res$final_etas)
+  # declared eta names, and they are the labels the table reported. Compared as
+  # sets: `final_etas` follows the engine's `IivStructure`, which lists the
+  # parameters carrying an eta alphabetically, while omega keeps the model's
+  # declaration order.
+  expect_setequal(rownames(res$fit$omega), res$final_etas)
+  expect_identical(colnames(res$fit$omega), rownames(res$fit$omega))
 })
 
 test_that("both entry forms run the same search", {
