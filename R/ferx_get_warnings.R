@@ -698,6 +698,13 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
     # follow, printed directly beneath an engine message that already gives the
     # right one.
     init_outside_bounds = "A start value was clamped onto one of the optimizer's internal rails before the first objective evaluation, so the fit did not begin from what the model file declares. This is an omega variance or a sigma SD, neither of which takes explicit bounds: move the start inside the rail quoted above, or FIX the parameter to hold the declared value.",
+    # ferx-core #1307: a start the *packer* moved, before any box existed, so
+    # every coordinate it names is inside its box and init_outside_bounds stays
+    # silent. Two causes, both log/Fisher-z packing limits: a theta, omega or
+    # sigma start at or below the 1e-10 log-packing floor, or a free residual
+    # correlation past the Fisher-z rail. The engine message quotes the value
+    # the optimizer sees and the specific remedy.
+    init_not_representable = "A declared start value cannot be represented on the optimizer's packed scale, so it was moved before the first objective evaluation and the fit began from the value quoted above, not the declared one. The absence of an init_outside_bounds warning does not mean the declared values were used. Raise a theta, omega or sigma start above the 1e-10 log-packing floor (or FIX it), or move a free residual correlation away from +/-1, as the message says.",
     inflated_rse       = "The listed THETAs are imprecisely estimated: the data barely inform them. Check that the design covers them (e.g. absorption-phase samples for KA), consider fixing or removing them, and cross-check their intervals with ferx_sir().",
     high_correlation   = "Highly correlated estimates are not separated by the data. Inspect fit$cor_matrix, then fix or remove one parameter of each pair, or reparameterise.",
     eta_shrinkage      = "EBE-based diagnostics (ETA-versus-covariate plots, IPRED, IWRES) are unreliable for the listed ETAs - do not screen covariates on them. Consider removing that IIV term, or a design that informs it.",

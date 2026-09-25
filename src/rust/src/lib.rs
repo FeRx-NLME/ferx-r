@@ -588,9 +588,12 @@ fn ferx_rust_simulate(
             Err(e) => return Err(format!("Error simulating: {e}")),
         };
 
+        // `output.warnings` already carries the data reader's findings: ferx-core
+        // #1410 folds `population.warnings` into it (minus the ones the model
+        // makes moot), so prepending `data_reader_warnings` here would say each twice.
         Ok(attach_sim_warnings(
             sim_results_to_df(&output.results),
-            [data_reader_warnings(&population), output.warnings].concat(),
+            output.warnings,
         ))
     })
 }
@@ -691,9 +694,10 @@ fn ferx_rust_simulate_from_fit(
             Ok(o) => o,
             Err(e) => return Err(format!("Error simulating: {e}")),
         };
+        // Reader findings are already in `output.warnings`; see `ferx_rust_simulate`.
         Ok(attach_sim_warnings(
             sim_results_to_df(&output.results),
-            [data_reader_warnings(&population), output.warnings].concat(),
+            output.warnings,
         ))
     })
 }
@@ -1078,7 +1082,8 @@ fn ferx_rust_predict(
                 Err(e) => return Err(format!("Error reading data: {e}")),
             };
 
-        let results = ferx_core::predict(&parsed.model, &population, &parsed.model.default_params);
+        let results = ferx_core::predict(&parsed.model, &population, &parsed.model.default_params)
+            .map_err(|e| format!("Error predicting: {e}"))?;
 
         let id: Vec<String> = results.iter().map(|r| r.id.clone()).collect();
         let time: Vec<f64> = results.iter().map(|r| r.time).collect();
@@ -1159,7 +1164,8 @@ fn ferx_rust_predict_from_fit(
             Err(e) => return Err(e),
         };
 
-        let results = ferx_core::predict(&parsed.model, &population, &params);
+        let results = ferx_core::predict(&parsed.model, &population, &params)
+            .map_err(|e| format!("Error predicting: {e}"))?;
 
         let id: Vec<String> = results.iter().map(|r| r.id.clone()).collect();
         let time: Vec<f64> = results.iter().map(|r| r.time).collect();
@@ -1238,7 +1244,8 @@ fn ferx_rust_predict_survival(model_path: &str, data_path: &str, times: Vec<f64>
         };
 
         let results =
-            ferx_core::predict_survival(&parsed.model, &population, &parsed.model.default_params, &times);
+            ferx_core::predict_survival(&parsed.model, &population, &parsed.model.default_params, &times)
+                .map_err(|e| format!("Error predicting: {e}"))?;
         Ok(survival_results_to_df(&results))
     })
 }
@@ -1306,7 +1313,8 @@ fn ferx_rust_predict_survival_from_fit(
             Err(e) => return Err(e),
         };
 
-        let results = ferx_core::predict_survival(&parsed.model, &population, &params, &times);
+        let results = ferx_core::predict_survival(&parsed.model, &population, &params, &times)
+            .map_err(|e| format!("Error predicting: {e}"))?;
         Ok(survival_results_to_df(&results))
     })
 }
@@ -1818,6 +1826,10 @@ fn default_fit_result(
         // ferx-core main added a checkpoint-restore flag; a defaulted FitResult is
         // never a restored one.
         restored_from_checkpoint: false,
+        // ferx-core #1444 / covariance-estimator label: a skeleton FitResult ran
+        // neither SAEM nor a covariance step of its own.
+        saem_mh_accept_tail: None,
+        covariance_method: None,
         // ferx-core main grew `residual_correlations` and `vi` after the rev
         // this branch originally pinned. The *pairing* is a property of the
         // compiled model and is taken from there, but a plain `block_sigma`
@@ -1923,7 +1935,10 @@ fn default_fit_result(
         model_name: model.name.clone(),
         ferx_version: String::new(),
         eta_param_info: Vec::new(),
-        theta_transform: Vec::new(),
+        // `draw_asymptotic` reads this to draw a `logit_probability` theta on the
+        // logit scale (ferx-core #1548). Left empty, the engine falls back to
+        // log-normal draws that leave (0, 1) - the bug in ferx-r #373.
+        theta_transform: model.theta_transform.clone(),
         sigma_types: Vec::new(),
         cov_eigenvalues: None,
         cov_condition_number: None,
@@ -3644,7 +3659,8 @@ fn ferx_rust_inits_from_nca(model_path: &str, data_path: &str, method: &str) -> 
             ferx_core::NcaInit::Ebe => "nca_ebe",
         };
 
-        let suggested = ferx_core::inits_from_nca(&parsed.model, &population, nca_method);
+        let suggested = ferx_core::inits_from_nca(&parsed.model, &population, nca_method)
+            .map_err(|e| format!("inits_from_nca: {e}"))?;
         let params = &suggested.params;
 
         // Omega as a row-major flattened matrix (same convention as fit_result_to_list).
@@ -3850,6 +3866,10 @@ fn ferx_rust_sir(
         let fit = FitResult {
             // ferx-core main added a checkpoint-restore flag; the SIR path never reads it.
             restored_from_checkpoint: false,
+            // ferx-core #1444 / covariance-estimator label: a skeleton FitResult ran
+            // neither SAEM nor a covariance step of its own.
+            saem_mh_accept_tail: None,
+            covariance_method: None,
             // ferx-core main grew `residual_correlations` and `vi` after the rev
             // this branch originally pinned. The *pairing* is a property of the
             // compiled model and is taken from there, but a plain `block_sigma`
@@ -4280,6 +4300,10 @@ fn ferx_rust_covariance(
         let fit = FitResult {
             // ferx-core main added a checkpoint-restore flag; the covariance path never reads it.
             restored_from_checkpoint: false,
+            // ferx-core #1444 / covariance-estimator label: a skeleton FitResult ran
+            // neither SAEM nor a covariance step of its own.
+            saem_mh_accept_tail: None,
+            covariance_method: None,
             // ferx-core main grew `residual_correlations` and `vi` after the rev
             // this branch originally pinned. The *pairing* is a property of the
             // compiled model and is taken from there, but a plain `block_sigma`
