@@ -290,16 +290,22 @@ expect "deleting mod raise is refused" "$moduleless" 1 \
 
 # Check 5: the % escape in raise_verbatim is right for extendr-api 0.9.0's
 # throw_r_error only (#394), so a lock that moves extendr is a finding.
-lock_fixture() { # name, extendr-api version, extendr-macros version ("" = absent)
-  local f="$TMP/$1.lock"
+CRATES_IO="registry+https://github.com/rust-lang/crates.io-index"
+# name, extendr-api version, extendr-macros version ("" = absent),
+# extendr-api source ("-" = no source line, as for a path package)
+lock_fixture() {
+  local f="$TMP/$1.lock" api_src=${4:-$CRATES_IO}
   {
     echo 'version = 4'
     echo
     if [[ -n "$2" ]]; then
-      printf '[[package]]\nname = "extendr-api"\nversion = "%s"\n\n' "$2"
+      printf '[[package]]\nname = "extendr-api"\nversion = "%s"\n' "$2"
+      if [[ "$api_src" != - ]]; then printf 'source = "%s"\n' "$api_src"; fi
+      printf 'dependencies = [\n "extendr-macros",\n]\n\n'
     fi
     if [[ -n "$3" ]]; then
-      printf '[[package]]\nname = "extendr-macros"\nversion = "%s"\n\n' "$3"
+      printf '[[package]]\nname = "extendr-macros"\nversion = "%s"\nsource = "%s"\n\n' \
+        "$3" "$CRATES_IO"
     fi
   } > "$f"
   echo "$f"
@@ -320,6 +326,19 @@ expect "a lock that moves extendr-macros alone is refused" \
 expect "a lock without extendr is refused" \
   "$in_shape" 1 "extendr-api is not in the lock" \
   "$(lock_fixture lock-none '' 0.9.0)"
+
+expect "a lock without extendr-macros is refused" \
+  "$in_shape" 1 "extendr-macros is not in the lock" \
+  "$(lock_fixture lock-no-macros 0.9.0 '')"
+
+# Same version, different code: what a [patch.crates-io] or a git dep leaves.
+expect "a git-sourced extendr-api at 0.9.0 is refused" \
+  "$in_shape" 1 "not crates.io" \
+  "$(lock_fixture lock-git 0.9.0 0.9.0 'git+https://github.com/extendr/extendr?rev=b0cb8a81#b0cb8a81')"
+
+expect "a path extendr-api at 0.9.0 is refused" \
+  "$in_shape" 1 "comes from '-' in the lock" \
+  "$(lock_fixture lock-path 0.9.0 0.9.0 -)"
 
 expect "a missing lock is refused" \
   "$in_shape" 1 "no Cargo.lock at" "$TMP/no-such.lock"

@@ -34,7 +34,9 @@
 #   3. every `#[extendr]` fn body opens with `entry(`;
 #   4. `Rf_error` is named nowhere outside `mod raise` - not called, and not
 #      declared a second time;
-#   5. Cargo.lock resolves extendr-api and extendr-macros to 0.9.0. The `%`
+#   5. Cargo.lock resolves extendr-api and extendr-macros to 0.9.0 *from
+#      crates.io* - a git or path replacement can report 0.9.0 and still carry
+#      a different wrapper or `throw_r_error`. The `%`
 #      doubling in `raise::format_escaped` is right only while `throw_r_error`
 #      passes its text to `Rf_error` as the format, which extendr `main`
 #      (b0cb8a81, extendr/extendr#1058) changes to a `"%s"` argument. A lock
@@ -58,6 +60,7 @@ DIR="${1:-$ROOT/src/rust/src}"
 LOCK="${2:-$ROOT/src/rust/Cargo.lock}"
 # The extendr release whose `throw_r_error` raise_verbatim escapes for.
 EXTENDR_RAISE_VERSION="0.9.0"
+EXTENDR_RAISE_SOURCE="registry+https://github.com/rust-lang/crates.io-index"
 status=0
 
 fail() { # file, line, message
@@ -204,19 +207,29 @@ if [[ $raises -eq 0 ]]; then
 fi
 
 # Check 5. `name = ".."` is followed by its `version = ".."` in every
-# Cargo.lock package table.
+# Cargo.lock package table, then by `source = ".."` - absent for a path
+# package, which is what a `[patch.crates-io]` path replacement leaves.
 lock_rel="${LOCK#"$ROOT"/}"
 if [[ ! -f "$LOCK" ]]; then
   fail "$lock_rel" 1 "no Cargo.lock at $LOCK. raise_verbatim's % escape is right for one extendr release only, so the lock has to say which one."
 else
   for crate in extendr-api extendr-macros; do
-    got=$(awk -v want="name = \"$crate\"" '
-      $0 == want { getline; if ($1 == "version") { gsub(/"/, "", $3); print $3 } }
+    # `version<TAB>source` of the crate's table, source "-" when there is none.
+    entry=$(awk -v want="name = \"$crate\"" '
+      $0 == want { found = 1; v = ""; s = "-"; next }
+      found && $1 == "version" { v = $3; gsub(/"/, "", v); next }
+      found && $1 == "source" { s = $3; gsub(/"/, "", s); next }
+      found && ($0 == "" || $0 ~ /^\[/) { print v "\t" s; found = 0 }
+      END { if (found) print v "\t" s }
     ' "$LOCK")
-    if [[ -z "$got" ]]; then
+    got="${entry%%$'\t'*}"
+    src="${entry#*$'\t'}"
+    if [[ -z "$entry" ]]; then
       fail "$lock_rel" 1 "$crate is not in the lock. raise_verbatim unwinds into extendr's wrapper and escapes % for extendr-api $EXTENDR_RAISE_VERSION's throw_r_error; without extendr that is unchecked."
     elif [[ "$got" != "$EXTENDR_RAISE_VERSION" ]]; then
       fail "$lock_rel" 1 "$crate is $got in the lock, but raise::format_escaped doubles % for $EXTENDR_RAISE_VERSION, whose throw_r_error hands the text to Rf_error as its format. A release carrying extendr b0cb8a81 passes it as a \"%s\" argument, and every % would print as %%. Update format_escaped for $got, then EXTENDR_RAISE_VERSION here (#394)."
+    elif [[ "$src" != "$EXTENDR_RAISE_SOURCE" ]]; then
+      fail "$lock_rel" 1 "$crate $got comes from '$src' in the lock, not crates.io. raise::format_escaped and the unwind into extendr's wrapper are written against the published $EXTENDR_RAISE_VERSION; a git or path replacement at the same version can differ in both. Point it back at crates.io, or re-check format_escaped against that source and teach this check its source (#394)."
     fi
   done
 fi

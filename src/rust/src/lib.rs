@@ -167,6 +167,16 @@ mod raise {
 
 use raise::raise_verbatim;
 
+// Every refusal is an unwind now, and `entry`'s own `catch_unwind` was one
+// before that. Under `panic = "abort"` - a `CARGO_PROFILE_RELEASE_PANIC=abort`,
+// `-C panic=abort` in RUSTFLAGS - each of them would end the R session instead
+// of raising an error, so such a build is refused rather than shipped.
+#[cfg(panic = "abort")]
+compile_error!(
+    "ferx's glue raises R errors by unwinding into extendr's wrapper (ferx-r #394); \
+     build with panic = \"unwind\""
+);
+
 /// The text a panic carried. The `&str` and `String` payloads - between them
 /// everything `panic!` produces - are read the way extendr reads them
 /// (`extendr-macros-0.9.0/src/wrappers.rs:277-283`), so a panic that used to

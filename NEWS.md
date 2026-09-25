@@ -1351,7 +1351,10 @@
   5-6 MB per refused call with two 200,000-element `settings` vectors,
   measured on R 4.5 / aarch64. The glue now raises by unwinding into extendr's
   wrapper, which drops the arguments before it raises the message, and the same
-  loop holds flat. The message itself is unchanged, `%` and all (#388). No
+  loop no longer grows with its arguments. What a refusal still leaves behind
+  is extendr's own copy of the message plus a 16-byte payload, which its
+  wrapper never frees: about a hundred bytes for a typical refusal, whatever
+  the size of the arguments. The message itself is unchanged, `%` and all (#388). No
   extendr upgrade was needed: the `%` escape this relies on is written for
   extendr-api 0.9.0, and `tools/check-glue-raise.sh` fails a lock that moves
   extendr until the escape is revisited (extendr/extendr#1058 changes it).
