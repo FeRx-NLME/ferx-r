@@ -7,7 +7,10 @@
 # raising from inside an entry point body leaks every local that body is
 # holding (ferx-r #389). Both are closed by the same shape: an `#[extendr]`
 # body is a closure returning `Result<_, String>`, and `entry()` raises once -
-# after that closure frame has returned - through a `"%s"` format the glue owns.
+# after that closure frame has returned. It raises by unwinding into extendr's
+# wrapper with the text `%`-escaped for extendr-api 0.9.0's `throw_r_error`,
+# so that extendr's own frame - which holds every argument `Robj` - unwinds too
+# instead of being longjmp'd over (ferx-r #394).
 #
 # Part of that shape the compiler holds on its own. lib.rs shadows the prelude
 # `throw_r_error` with a local `fn throw_r_error(_: Infallible) -> !`, so a bare
@@ -30,7 +33,18 @@
 #      while its locals are still alive;
 #   3. every `#[extendr]` fn body opens with `entry(`;
 #   4. `Rf_error` is named nowhere outside `mod raise` - not called, and not
-#      declared a second time.
+#      declared a second time;
+#   5. Cargo.lock resolves extendr-api and extendr-macros to 0.9.0 *from
+#      crates.io* - a git or path replacement can report 0.9.0 and still carry
+#      a different wrapper or `throw_r_error`. The `%`
+#      doubling in `raise::format_escaped` is right only while `throw_r_error`
+#      passes its text to `Rf_error` as the format, which extendr `main`
+#      (b0cb8a81, extendr/extendr#1058) changes to a `"%s"` argument. A lock
+#      that moves extendr has to come past that function: drop the doubling
+#      for a release carrying b0cb8a81, then move the pin here and the `=`
+#      pins in src/rust/Cargo.toml. Those keep `cargo update` - and the
+#      ferx-core bump script's whole-graph update - from moving extendr on
+#      their own; this check explains why when someone moves them by hand.
 #
 # `//` and `/* .. */` comments are stripped before every test, so naming a
 # helper in prose is free. Neither strip knows about string literals, so the
@@ -38,13 +52,18 @@
 # URLs in comments, where they cost nothing.
 # Exercised by tools/test-check-glue-raise.sh.
 #
-# Usage: tools/check-glue-raise.sh [dir]   (default src/rust/src)
+# Usage: tools/check-glue-raise.sh [dir [lock]]
+#   (defaults src/rust/src and src/rust/Cargo.lock)
 # Exits 0 when the glue is in shape, 1 otherwise.
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DIR="${1:-$ROOT/src/rust/src}"
+LOCK="${2:-$ROOT/src/rust/Cargo.lock}"
+# The extendr release whose `throw_r_error` raise_verbatim escapes for.
+EXTENDR_RAISE_VERSION="0.9.0"
+EXTENDR_RAISE_SOURCE="registry+https://github.com/rust-lang/crates.io-index"
 status=0
 
 fail() { # file, line, message
@@ -190,7 +209,35 @@ if [[ $raises -eq 0 ]]; then
     "nothing calls raise_verbatim(). entry() is the one place an R error is raised from; a glue that raises nowhere is a glue whose errors went somewhere else."
 fi
 
+# Check 5. `name = ".."` is followed by its `version = ".."` in every
+# Cargo.lock package table, then by `source = ".."` - absent for a path
+# package, which is what a `[patch.crates-io]` path replacement leaves.
+lock_rel="${LOCK#"$ROOT"/}"
+if [[ ! -f "$LOCK" ]]; then
+  fail "$lock_rel" 1 "no Cargo.lock at $LOCK. raise_verbatim's % escape is right for one extendr release only, so the lock has to say which one."
+else
+  for crate in extendr-api extendr-macros; do
+    # `version<TAB>source` of the crate's table, source "-" when there is none.
+    entry=$(awk -v want="name = \"$crate\"" '
+      $0 == want { found = 1; v = ""; s = "-"; next }
+      found && $1 == "version" { v = $3; gsub(/"/, "", v); next }
+      found && $1 == "source" { s = $3; gsub(/"/, "", s); next }
+      found && ($0 == "" || $0 ~ /^\[/) { print v "\t" s; found = 0 }
+      END { if (found) print v "\t" s }
+    ' "$LOCK")
+    got="${entry%%$'\t'*}"
+    src="${entry#*$'\t'}"
+    if [[ -z "$entry" ]]; then
+      fail "$lock_rel" 1 "$crate is not in the lock. raise_verbatim unwinds into extendr's wrapper and escapes % for extendr-api $EXTENDR_RAISE_VERSION's throw_r_error; without extendr that is unchecked."
+    elif [[ "$got" != "$EXTENDR_RAISE_VERSION" ]]; then
+      fail "$lock_rel" 1 "$crate is $got in the lock, but raise::format_escaped doubles % for $EXTENDR_RAISE_VERSION, whose throw_r_error hands the text to Rf_error as its format. A release carrying extendr b0cb8a81 passes it as a \"%s\" argument, and every % would print as %%. Update format_escaped for $got, then the = pins in src/rust/Cargo.toml and EXTENDR_RAISE_VERSION here (#394)."
+    elif [[ "$src" != "$EXTENDR_RAISE_SOURCE" ]]; then
+      fail "$lock_rel" 1 "$crate $got comes from '$src' in the lock, not crates.io. raise::format_escaped and the unwind into extendr's wrapper are written against the published $EXTENDR_RAISE_VERSION; a git or path replacement at the same version can differ in both. Point it back at crates.io, or re-check format_escaped against that source and teach this check its source (#394)."
+    fi
+  done
+fi
+
 if [[ $status -eq 0 ]]; then
-  echo "glue raise shape OK: entry() opens every #[extendr] body, one raise_verbatim() call site, throw_r_error() shadowed, Rf_error named only inside mod raise."
+  echo "glue raise shape OK: entry() opens every #[extendr] body, one raise_verbatim() call site, throw_r_error() shadowed, Rf_error named only inside mod raise, extendr at $EXTENDR_RAISE_VERSION."
 fi
 exit $status

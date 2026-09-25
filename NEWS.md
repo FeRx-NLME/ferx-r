@@ -1362,9 +1362,24 @@
   the raise still jumps over it, so a refusal handed a large vector retains it
   (~32.5 MB over 20 refused calls with 200,000-element `settings` vectors;
   path-sized arguments retain nothing measurable). That was true before this
-  change too, and closing it needs a released extendr carrying
-  extendr/extendr#1058 -
-  [#394](https://github.com/FeRx-NLME/ferx-r/issues/394).
+  change too; it is closed by the next entry.
+
+- **A refused call kept its argument vectors alive for the rest of the
+  session** ([#394](https://github.com/FeRx-NLME/ferx-r/issues/394)). extendr
+  protects every argument in a frame of its own, outside the glue function, and
+  the `Rf_error()` longjmp that raised the refusal skipped the destructors that
+  release that protection. A loop that refuses calls while passing large
+  vectors - a `settings` list built per candidate, say - grew without bound:
+  5-6 MB per refused call with two 200,000-element `settings` vectors,
+  measured on R 4.5 / aarch64. The glue now raises by unwinding into extendr's
+  wrapper, which drops the arguments before it raises the message, and the same
+  loop no longer grows with its arguments. What a refusal still leaves behind
+  is extendr's own copy of the message plus a 16-byte payload, which its
+  wrapper never frees: about a hundred bytes for a typical refusal, whatever
+  the size of the arguments. The message itself is unchanged, `%` and all (#388). No
+  extendr upgrade was needed: the `%` escape this relies on is written for
+  extendr-api 0.9.0, and `tools/check-glue-raise.sh` fails a lock that moves
+  extendr until the escape is revisited (extendr/extendr#1058 changes it).
 
 - **`ferx_predict()`, `ferx_simulate()` and their siblings printed the engine's
   error and returned `NULL` instead of raising it**

@@ -6,7 +6,8 @@
 # session with "An irrecoverable exception occurred".
 #
 # Every `#[extendr]` body now returns a `Result` and `entry()` raises once,
-# after that body has returned, through a `"%s"` format the glue owns. What is
+# after that body has returned, by unwinding into extendr's wrapper with every
+# `%` doubled for the format extendr-api 0.9.0 hands `Rf_error()` (#394). What is
 # tested here is the four places a `%` can enter from: the model file, the
 # dataset, MFL / `.ferxsearch` text, and an R argument.
 #
@@ -138,9 +139,11 @@ test_that("a '%' in a subject id comes back as written", {
 # -- A literal `%%` in the user's text ----------------------------------------
 #
 # The other half of "verbatim": escaping `%` as `%%` before handing the text to
-# a printf format prints `5%%` as `5%`. extendr main (b0cb8a81, unreleased)
-# switches `throw_r_error` to `"%s"`, at which point a glue that escaped would
-# print `5%%%%` - so this is the test that makes that upgrade safe either way.
+# a printf format prints `5%%` as `5%` unless the escape doubles it again,
+# which the glue's does (#394: it escapes for extendr-api 0.9.0's format-string
+# `throw_r_error`). extendr main (b0cb8a81, unreleased) switches that to
+# `"%s"`, at which point the escape would print `5%%%%` - so this is the test
+# that makes that upgrade safe either way.
 
 test_that("a literal '%%' in the model survives as '%%'", {
   probe <- engine_error_probe(
@@ -266,3 +269,5 @@ test_that("a panic carrying no text names the entry point it came out of", {
 # what the body was holding (#389) - is a memory measurement, not an assertion:
 # 3000 calls take ~13 minutes and RSS is too noisy to threshold in CI. It lives
 # in tools/measure-refusal-rss.R, to be run by hand when the raise path changes.
+# The arguments' half (#394) is exact under gc() and lives in
+# test-glue-refusal-args.R.
