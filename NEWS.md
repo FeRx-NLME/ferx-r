@@ -1184,24 +1184,96 @@
 
 ## Bug fixes
 
-- **`ferx_simulate_with_uncertainty()` now warns when its draws of a
-  `logit_probability` theta leave (0, 1)**
-  ([#373](https://github.com/FeRx-NLME/ferx-r/issues/373)). The engine draws
-  in its packed space, where a theta with a non-negative lower bound is
-  `log(theta)`, so a probability declared on (0, 1) is drawn log-normally with
-  no ceiling at 1 - about 23% of the draws on the bundled `bioavailability`
-  fit. What becomes of such a draw depends on the declared upper bound: at or
-  below 1 (the bundled model uses 0.999) it is rejected and redrawn,
-  truncating the distribution; above 1 (an undeclared bound defaults to `1e9`)
-  it is simulated with the model's `logit()` clamping the probability to 1 for
-  every subject in the draw. Neither is the logit-normal draw the fit implies.
-  The warning (class `ferx_logit_probability_draws`) names the theta, its
-  declared upper bound, and the share rejected or clamped. `method = "sir"`
-  starts from the same proposal; its pool is checked directly, and any
-  pooled draw above 1 is reported. The remedy is to declare the probability on
-  the logit scale (`F = inv_logit(LOGIT_F + ETA_F)` with a negative lower
-  bound on `LOGIT_F`); drawing a `logit_probability` theta on the logit scale
-  is [ferx-core #1548](https://github.com/FeRx-NLME/ferx-core/issues/1548).
+- **`ferx_get_warnings()` guidance for `covariance_regularized` follows
+  ferx-core's magnitude grading**
+  ([#395](https://github.com/FeRx-NLME/ferx-r/issues/395), ferx-core
+  [#1508](https://github.com/FeRx-NLME/ferx-core/pull/1508)). ferx-core now
+  grades the tier on the worst variance inflation the eigenvalue floor caused
+  and on `|min eig| / max eig`, and its message says which of the two fired.
+  The R guidance no longer restates a mechanism (its severe text, "standard
+  errors come from the floor", is false when only the indefiniteness leg
+  fired) and gives the action per tier: severe -> `ferx_sir()`, moderate ->
+  "worth a look" and a SIR cross-check, minor -> no action, stating the
+  measured bound (every SE moved by less than 1%) instead of "usually
+  benign". A minor tier from an older, count-graded message (a fit saved
+  before the pin moved) is told to check `%RSE` instead, since there it could
+  sit above a 4400x-inflated SE. When the message names `[scaling] obs_scale`
+  as the clause that declined the exact analytic covariance R-matrix, the
+  guidance gives the one-line rewrite (`[scaling] y = central / V`) and says
+  whether it alone moves the fit to the analytic route; when it names loose
+  ODE tolerances, it points at
+  `ferx_fit(settings = list(ode_reltol = 1e-6, ode_abstol = 1e-8))`.
+  On ferx-core's hybrid analytic/FD covariance route
+  ([ferx-core #1514](https://github.com/FeRx-NLME/ferx-core/issues/1514)) the
+  route change is the finite-differenced subjects', not the whole fit's; the
+  hybrid off-diagonal-stencil warning is described as a missing
+  finite-differenced share rather than zeroed terms; and the
+  `W_COV_ANALYTIC_SALVAGE` note gets informational guidance instead of the
+  "Standard errors unavailable" fallback.
+  `?ferx_fit`'s `ode_reltol` entry gains the matching covariance caveat and
+  notes that it also governs the closed-form transit / inverse-Gaussian
+  absorption ODE twin.
+- **`ferx_get_warnings()` answers every engine warning code, and answers a
+  loaded fit the same way as a fresh one**
+  ([#308](https://github.com/FeRx-NLME/ferx-r/issues/308)). Ten codes printed
+  no remediation line at all: `absorption_twin_declined`, `boundary_estimate`,
+  `eps_shrinkage`, `eta_shrinkage`, `experimental`, `flat_parameter`,
+  `flip_flop`, `high_correlation`, `inflated_rse` and `simulation`. Each now has
+  one, and `flip_flop` tells the auto-rerouted note apart from a model whose
+  subjects silently degenerate. `mu_referencing` and `optimizer_config` carry
+  two severities each and used to answer both with the informational text; a
+  parameter that is not mu-referenced and a global search that failed to start
+  now get advice of their own. An invalid `fd_hessian_step` and a singular
+  score cross-product (`covariance_method = "s"`) get targeted covariance-step
+  guidance instead of the generic "check identifiability" fallback.
+  `ferx_load_fit()` does not restore `warnings_structured`, so every row of a
+  reloaded fit used to arrive as `general` - with a `warning` severity and no
+  guidance, whatever it said. The flat messages are now re-classified by the
+  engine's own classifier (a new internal binding,
+  `ferx_rust_classify_warnings()`), so a reloaded fit shows the severity,
+  category and guidance the fresh fit had - also after `ferx_sir()` or
+  `ferx_covariance()` has added rows of its own, which used to hide every older
+  warning on a loaded fit, and in the warning tally and STATUS line that
+  `print()` shows. The `ferx_fit()` documentation of
+  the unused-parameter warning now covers the `[individual_parameters]`
+  computed-but-never-used case too.
+- **A model that fails to parse is reported as the parse error when `data` is
+  omitted, not as "No data supplied"**
+  ([#387](https://github.com/FeRx-NLME/ferx-r/issues/387)). With `data = NULL`,
+  every entry point asks the model file for its `[data]` block, and a model the
+  engine could not parse was taken for one without the block - so
+  `ferx_fit()`, `ferx_predict()`, `ferx_predict_survival()`, `ferx_simulate()`,
+  `ferx_simulate_adaptive()`, `ferx_inits_from_nca()`, `ferx_check_init()`,
+  `ferx_model_to_frem()` and the search tools told the user to add the block
+  the file already had, as a plain `simpleError`. They now raise the same
+  `ferx_engine_error` (with `code` / `block` / `line` / `suggestion`) that the
+  explicit-`data` call raises. "No data supplied" is kept for a model that
+  parses and declares no `[data] path`. `ferx_model()` stays lenient: a
+  half-written model file still constructs, with `data = NULL`, and the entry
+  point it is piped into reports the parse error.
+- **`ferx_inits_from_nca()` now reads the data the way `ferx_fit()` does**
+  ([#391](https://github.com/FeRx-NLME/ferx-r/issues/391)). It used a bare CSV
+  reader that never saw the model's `[data]` column map, so a model mapping
+  `time = TAFD` (or `DV`, `AMT`, ...) failed with `Missing TIME column` while
+  `ferx_predict()`, `ferx_simulate()` and `ferx_fit()` read it. It now goes
+  through the same reader, which also applies the model's `[covariates]` and
+  `[data_selection]`: the NCA runs on the rows a fit with `inits_from_nca`
+  would see, so on a model with a `[data_selection]` block the suggested
+  values can change. A read failure on such a model is also no longer
+  labelled with the code of an unrelated validation finding.
+
+- **`ferx_apply_selection()` and `fit$eta_cov` honour the model's `[data]`
+  column map** ([#405](https://github.com/FeRx-NLME/ferx-r/pull/405)). Both
+  re-read the raw CSV in R and saw the dataset's own headers, not the names
+  the engine gives mapped columns. With `time = TAFD`, a preview filter
+  `TIME > 24` matched nothing while the fit excluded those rows, and
+  `fit$eta_cov` could take a mapped `ID` / `RATE` for a covariate (or pick the
+  wrong subject column). `ferx_apply_selection()` gains a `model =` argument
+  (a `.ferx` path or `ferx_model`); filters are evaluated on the mapped names,
+  and the returned rows keep the dataset's headers. `ferx_apply_selection(fit)`
+  uses the fit's model, and `fit$eta_cov` the fitted model's map; a covariate
+  rename (`WT = weight`) is reported as `WT`. `fit$eta_cov` also finds a
+  lowercase `id` / `rate` header, as the engine does.
 
 - **`ferx_simulate_adaptive()` now raises the engine's refusal as a
   `ferx_engine_error`, like every other entry point**
@@ -1956,6 +2028,17 @@
   own: it arrived with the pin move to `944cbf1e`, which already contained it.
 
 ## Internal
+
+- **The R layer no longer knows ferx-core's placeholder model name**
+  ([#34](https://github.com/FeRx-NLME/ferx-r/issues/34)). ferx-core names a
+  model whose file declares no `model NAME` line `"Unnamed"`, and the fit
+  formatter compared `$model_name` against that string before substituting
+  the file stem. The Rust glue now reports an undeclared name as `""` at the
+  one place a fit crosses into R (`fit_result_to_list()`), so the R fallback
+  keys on an empty name alone - for `ferx_fit()` and for every search tool's
+  final fit. `$model_name` is unchanged for users. The placeholder is still
+  spelled once, in the glue, because ferx-core keeps both it and its own
+  stem fallback (`set_model_name()`) crate-private.
 
 - **A local build with a sibling `../ferx-core` checkout no longer rewrites
   `src/rust/Cargo.lock`** ([#353](https://github.com/FeRx-NLME/ferx-r/issues/353)).

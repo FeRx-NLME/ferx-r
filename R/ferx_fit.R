@@ -387,10 +387,22 @@
 #'       the FOCE objective amplifies solver error, so an ODE-form model's OFV
 #'       can differ from its analytical equivalent by several units. Set tighter
 #'       (e.g. \code{1e-10}) when the ODE-form OFV must match an analytical
-#'       reference; expect slower fits. Can also be set in the model file's
-#'       \code{[fit_options]} block.}
-#'     \item{\code{ode_abstol}}{Absolute tolerance for ODE models
-#'       (default \code{1e-6}).}
+#'       reference; expect slower fits. Standard errors have their own
+#'       sensitivity: when the covariance step falls back to the
+#'       finite-difference Hessian it divides by \code{h^2} and so amplifies
+#'       integration noise (SEs on ferx-core's 3-cpt IV ODE fixture were 2-7x
+#'       too large at the default), and a \code{covariance_regularized}
+#'       warning then names the tolerances; \code{ode_reltol = 1e-6} with
+#'       \code{ode_abstol = 1e-8} is on the measured accuracy plateau. The
+#'       exact analytic covariance R-matrix, which most Gaussian
+#'       \code{[odes]} fits take, does not second-difference the objective and
+#'       is unaffected. Also applies to the ODE twin that closed-form transit /
+#'       inverse-Gaussian absorption models (\code{one_cpt_transit},
+#'       \code{two_cpt_transit}, \code{one_cpt_ig}, \code{two_cpt_ig}) use for
+#'       IOV, time-varying-covariate and \code{TIME}-switch subjects. Can also
+#'       be set in the model file's \code{[fit_options]} block.}
+#'     \item{\code{ode_abstol}}{Absolute tolerance for ODE models and the
+#'       absorption ODE twin, as for \code{ode_reltol} (default \code{1e-6}).}
 #'     \item{\code{ode_max_steps}}{Maximum solver steps per integration segment
 #'       (default \code{10000}). Raise if a tight \code{ode_reltol} exhausts the
 #'       step budget on stiff multi-compartment systems -- or switch
@@ -1280,13 +1292,20 @@
 #' spellings are now reported as \code{E_PARSE} with the offending line quoted
 #' (ferx-core #1377).
 #'
-#' \strong{Unused-parameter warning:} a \code{warning} severity message with
-#' category \code{"unused_parameter"} is emitted by the parser when a
-#' parameter is declared in \code{[parameters]} but never referenced in
-#' \code{[individual_parameters]} or \code{[error_model]}. This usually
-#' indicates a commented-out expression or a typo in the parameter name.
-#' Inspect \code{ferx_get_warnings(fit)} or check \code{ferx_model_validate()}
-#' before fitting.
+#' \strong{Unused-parameter warning:} the parser emits a \code{warning}
+#' severity message in two cases: a parameter declared in \code{[parameters]}
+#' but never referenced in \code{[individual_parameters]} or
+#' \code{[error_model]}, and a variable computed in
+#' \code{[individual_parameters]} but never used (not mapped into the
+#' structural model and not referenced by any other block). Both arrive under
+#' category \code{"general"} - ferx-core has no dedicated code for them - and
+#' \code{ferx_get_warnings()} attaches the unused-parameter guidance by
+#' message. This usually indicates a commented-out expression or a typo in
+#' the parameter name. A THETA that is used but has no effect on the objective
+#' is a different warning (category \code{"flat_parameter"}): it is frozen at
+#' its initial value rather than estimated. Inspect
+#' \code{ferx_get_warnings(fit)} or check \code{ferx_model_validate()} before
+#' fitting.
 #'
 #' @section Steady-state dosing (\code{SS} and \code{II} columns):
 #'
@@ -2395,8 +2414,9 @@ print.ferx_fit <- function(x, ...) {
   status_lbl <- if (isTRUE(x$converged)) "CONVERGED" else "NOT CONVERGED"
   status_style <- if (isTRUE(x$converged)) "green" else "red"
   status_tail <- character(0)
-  # Categories come from the engine; no R-side string parsing needed.
-  ws <- x$warnings_structured
+  # Categories come from the engine; no R-side string parsing needed. Read
+  # through .ferx_fit_warnings() so a loaded fit's flat warnings count too.
+  ws <- .ferx_fit_warnings(x)
   if (!is.null(ws) && is.data.frame(ws) && all(c("severity", "category") %in% names(ws))) {
     crit_rows <- ws[ws$severity == "critical", , drop = FALSE]
     if (nrow(crit_rows) > 0L) {
@@ -2964,9 +2984,10 @@ print.ferx_fit <- function(x, ...) {
   }
 
   # Warning summary - a compact tally and a call-to-action rather than a wall
-  # of message strings. Severity comes from fit$warnings_structured (PR 2);
-  # the legacy flat fit$warnings vector is used only as a count fallback.
-  ws <- x$warnings_structured
+  # of message strings. Severity comes from the structured table plus any flat
+  # message it lacks, classified by the engine (.ferx_fit_warnings(), #308);
+  # the bare count below is a fallback for a table that cannot be built.
+  ws <- .ferx_fit_warnings(x)
   if (!is.null(ws) && is.data.frame(ws) && nrow(ws) > 0L) {
     n_crit <- sum(ws$severity == "critical")
     n_warn <- sum(ws$severity == "warning")

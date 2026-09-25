@@ -225,7 +225,7 @@ test_that("a panic message with a '%s' chain raises instead of ending the sessio
 # A payload that is neither `&str` nor `String` carries no text, and this is the
 # one raise-position message ferx writes itself rather than passing through from
 # the engine. extendr names the function in that case; `entry()` is one function
-# for all 44, so it is `#[track_caller]` and the caller's line stands in for the
+# for all 45, so it is `#[track_caller]` and the caller's line stands in for the
 # name.
 #
 # The line is what makes the assertion worth anything, so read the line the

@@ -19,40 +19,6 @@
 #'     \code{settings}).}
 #' }
 #'
-#' @section Bounded thetas and \code{logit_probability} draws:
-#' The engine draws in its packed parameter space. A theta with a non-negative
-#' lower bound is packed as \code{log(theta)}, so its asymptotic draws are
-#' log-normal: always above 0, with no ceiling. A draw past a declared upper
-#' bound is rejected and the whole parameter set redrawn, which keeps the
-#' draws inside the bound but truncates their distribution.
-#'
-#' For a \code{"logit_probability"} theta - one declared on \eqn{(0, 1)} and
-#' used as \code{inv_logit(logit(THETA) + ETA)} - the draws are therefore not
-#' the logit-normal ones the fit implies:
-#' \itemize{
-#'   \item With a declared upper bound of 1 or below (the bundled
-#'     \code{bioavailability} example uses 0.999), draws past it are rejected,
-#'     so the distribution is truncated and pulled low.
-#'   \item With a declared upper bound above 1 (an undeclared bound defaults to
-#'     \code{1e9}), a draw above 1 is simulated, and the model's
-#'     \code{logit()} clamps it so that every subject in that draw gets a
-#'     probability of 1.
-#' }
-#' \code{method = "asymptotic"} warns (class
-#' \code{"ferx_logit_probability_draws"}) when more than 0.1% of draws are
-#' expected to be rejected or clamped this way, naming the theta, its declared
-#' upper bound and the share. \code{method = "sir"} starts from the same
-#' log-packed proposal: its likelihood weighting corrects the truncation, but
-#' with an upper bound above 1 a clamped draw still gets a finite weight and
-#' can reach the resample pool. So under \code{method = "sir"} the function
-#' checks the pool itself and warns when any pooled draw is above 1.
-#'
-#' Declaring the probability on the logit scale avoids all of this:
-#' \code{F = inv_logit(LOGIT_F + ETA_F)} with a negative lower bound on
-#' \code{LOGIT_F} is packed, and so drawn, on the logit scale. Drawing a
-#' \code{logit_probability} theta on the logit scale is an engine change
-#' (\href{https://github.com/FeRx-NLME/ferx-core/issues/1548}{ferx-core #1548}).
-#'
 #' @param model Path to a .ferx model file
 #' @param data Path to a NONMEM-format CSV (provides population structure).
 #'   The \code{DV} column may be left empty (\code{.} / \code{NA}) on the
@@ -161,12 +127,7 @@ ferx_simulate_with_uncertainty <- function(model, data, fit,
   # Same `simulation_warnings` channel `ferx_simulate()` uses - here it carries
   # the design-point count (a kept empty-DV record; see the `data` note above),
   # which otherwise diverges silently from what `ferx_fit()` scored.
-  res <- .ferx_surface_sim_warnings(res, "ferx_simulate_with_uncertainty")
-
-  .ferx_warn_logit_probability_draws(
-    fit, .ferx_theta_packing(model), method, "ferx_simulate_with_uncertainty"
-  )
-  res
+  .ferx_surface_sim_warnings(res, "ferx_simulate_with_uncertainty")
 }
 
 # Internal: pull the uncertainty payload out of a ferx_fit result, validate it
@@ -214,141 +175,4 @@ validate_fit_for_uncertainty <- function(fit, method) {
       sir_resamples_dim  = as.integer(d)
     )
   }
-}
-
-# Internal: the model's declared theta bounds and transforms, as the engine
-# parsed them (#373). NULL when the model cannot be read, so a diagnostic built
-# on it degrades to nothing rather than failing a simulation that ran.
-.ferx_theta_packing <- function(model) {
-  if (!is.character(model) || length(model) != 1L || !file.exists(model)) {
-    return(NULL)
-  }
-  info <- tryCatch(ferx_rust_theta_packing(normalizePath(model)),
-                   error = function(e) NULL)
-  if (is.null(info) || length(info$names) == 0L) return(NULL)
-  info
-}
-
-# Internal: how often the uncertainty draws of each `logit_probability` theta
-# leave (0, 1), and what the engine does with them (#373).
-#
-# The engine draws in its packed space: `log(theta)` when the declared lower
-# bound is non-negative, the natural scale otherwise. `fit$cov_matrix` is the
-# covariance there, so an asymptotic draw of a probability has no ceiling at 1.
-# Then:
-#   - declared upper <= 1: a draw past the bound is rejected and redrawn
-#     (`outcome = "rejected"`), truncating the distribution;
-#   - declared upper > 1: a draw in (1, upper] is simulated with the model's
-#     `logit()` clamping it to a probability of 1 (`outcome = "clamped"`).
-# Under `method = "asymptotic"` the share is the Gaussian tail of the proposal;
-# under `method = "sir"` it is counted in the retained resample pool, which is
-# where a clamped draw that won a likelihood weight ends up.
-#
-# `packing` is `.ferx_theta_packing()`'s list. Returns a data frame with one
-# row per exposed theta (theta, upper, share, n, outcome); zero rows when there
-# is nothing to report.
-.ferx_logit_probability_draw_share <- function(fit, packing, method = "asymptotic") {
-  empty <- data.frame(theta = character(0), upper = numeric(0),
-                      share = numeric(0), n = integer(0),
-                      outcome = character(0), stringsAsFactors = FALSE)
-  theta <- fit$theta
-  if (is.null(packing) || is.null(theta)) return(empty)
-  n_theta <- min(length(theta), length(packing$transform))
-  idx <- which(packing$transform[seq_len(n_theta)] == "logit_probability")
-  if (length(idx) == 0L) return(empty)
-
-  rows <- lapply(idx, function(i) {
-    lower    <- packing$lower[i]
-    upper    <- packing$upper[i]
-    log_pack <- isTRUE(lower >= 0)
-    clamped  <- isTRUE(upper > 1)
-    if (method == "sir") {
-      pool <- .ferx_sir_pool(fit)
-      if (is.null(pool) || ncol(pool) < i) return(NULL)
-      # Resampled draws already sit inside the box, so only clamping can show.
-      if (!clamped) return(NULL)
-      draws <- if (log_pack) exp(pool[, i]) else pool[, i]
-      k <- sum(draws > 1)
-      share <- k / length(draws)
-      n <- length(draws)
-    } else {
-      cov <- fit$cov_matrix
-      if (!is.matrix(cov) || nrow(cov) < i) return(NULL)
-      est <- as.numeric(theta[i])
-      sd  <- sqrt(max(cov[i, i], 0))
-      if (!is.finite(est) || est <= 0 || !is.finite(sd) || sd <= 0) return(NULL)
-      # P(draw > c) for the proposal centred on the estimate.
-      above <- function(c) {
-        if (!is.finite(c)) return(0)
-        if (log_pack) stats::pnorm((log(est) - log(c)) / sd)
-        else stats::pnorm((est - c) / sd)
-      }
-      # Clamped draws are the ones in (1, upper]; beyond that they are rejected.
-      share <- if (clamped) above(1) - above(upper) else above(upper)
-      n <- NA_integer_
-    }
-    nm <- names(theta)[i]
-    if (is.null(nm) || !nzchar(nm)) nm <- packing$names[i]
-    data.frame(theta = nm, upper = upper, share = share, n = n,
-               outcome = if (clamped) "clamped" else "rejected",
-               stringsAsFactors = FALSE)
-  })
-  rows <- Filter(Negate(is.null), rows)
-  if (length(rows) == 0L) return(empty)
-  do.call(rbind, rows)
-}
-
-# Internal: the retained SIR resample pool as an n x d matrix of packed
-# vectors, or NULL.
-.ferx_sir_pool <- function(fit) {
-  v <- fit$sir_resamples
-  n <- fit$sir_resamples_n
-  d <- fit$sir_resamples_dim
-  if (is.null(v) || is.null(n) || is.null(d) || n < 1L || d < 1L ||
-      length(v) != n * d) {
-    return(NULL)
-  }
-  matrix(as.numeric(v), nrow = n, ncol = d, byrow = TRUE)
-}
-
-# Internal: warn when uncertainty draws of a `logit_probability` theta leave
-# (0, 1) often enough to matter (#373). Under `method = "asymptotic"` the
-# threshold is an expected share of 0.1%; under `method = "sir"` any clamped
-# draw in the pool is reported, since it is a draw that will be simulated.
-.ferx_warn_logit_probability_draws <- function(fit, packing, method, fn,
-                                               threshold = 1e-3) {
-  ex <- .ferx_logit_probability_draw_share(fit, packing, method)
-  keep <- if (method == "sir") ex$share > 0 else ex$share >= threshold
-  ex <- ex[keep, , drop = FALSE]
-  if (nrow(ex) == 0L) return(invisible(ex))
-  what <- vapply(seq_len(nrow(ex)), function(r) {
-    e <- ex[r, ]
-    pct <- sprintf("%.1f%%", 100 * e$share)
-    bound <- format(e$upper, digits = 4)
-    if (method == "sir") {
-      sprintf(paste0("%s: %d of %d pooled SIR draws (%s) are above 1 ",
-                     "(declared upper bound %s), so logit() clamps each to a ",
-                     "probability of 1 for every subject in that draw"),
-              e$theta, as.integer(round(e$share * e$n)), e$n, pct, bound)
-    } else if (e$outcome == "clamped") {
-      sprintf(paste0("%s: about %s of draws land above 1 (declared upper ",
-                     "bound %s), so logit() clamps each to a probability of 1 ",
-                     "for every subject in that draw"), e$theta, pct, bound)
-    } else {
-      sprintf(paste0("%s: about %s of draws exceed the declared upper bound ",
-                     "%s and are rejected, truncating the distribution below ",
-                     "it"), e$theta, pct, bound)
-    }
-  }, character(1))
-  msg <- paste0(
-    fn, "(method = \"", method, "\"): draws of a logit_probability theta ",
-    "leave (0, 1). The engine draws it on the log scale, not the logit scale ",
-    "(ferx-core #1548).\n  ", paste(what, collapse = "\n  "), "\n",
-    "Declare the probability on the logit scale - ",
-    "F = inv_logit(LOGIT_F + ETA_F) with a negative lower bound on LOGIT_F - ",
-    "so it is drawn there."
-  )
-  warning(warningCondition(msg, class = "ferx_logit_probability_draws",
-                           call = NULL))
-  invisible(ex)
 }

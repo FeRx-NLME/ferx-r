@@ -70,42 +70,6 @@ to come from a \code{ferx_fit()} call with \code{covariance = TRUE}.}
 \code{settings}).}
 }
 }
-\section{Bounded thetas and \code{logit_probability} draws}{
-
-The engine draws in its packed parameter space. A theta with a non-negative
-lower bound is packed as \code{log(theta)}, so its asymptotic draws are
-log-normal: always above 0, with no ceiling. A draw past a declared upper
-bound is rejected and the whole parameter set redrawn, which keeps the
-draws inside the bound but truncates their distribution.
-
-For a \code{"logit_probability"} theta - one declared on \eqn{(0, 1)} and
-used as \code{inv_logit(logit(THETA) + ETA)} - the draws are therefore not
-the logit-normal ones the fit implies:
-\itemize{
-\item With a declared upper bound of 1 or below (the bundled
-\code{bioavailability} example uses 0.999), draws past it are rejected,
-so the distribution is truncated and pulled low.
-\item With a declared upper bound above 1 (an undeclared bound defaults to
-\code{1e9}), a draw above 1 is simulated, and the model's
-\code{logit()} clamps it so that every subject in that draw gets a
-probability of 1.
-}
-\code{method = "asymptotic"} warns (class
-\code{"ferx_logit_probability_draws"}) when more than 0.1\% of draws are
-expected to be rejected or clamped this way, naming the theta, its declared
-upper bound and the share. \code{method = "sir"} starts from the same
-log-packed proposal: its likelihood weighting corrects the truncation, but
-with an upper bound above 1 a clamped draw still gets a finite weight and
-can reach the resample pool. So under \code{method = "sir"} the function
-checks the pool itself and warns when any pooled draw is above 1.
-
-Declaring the probability on the logit scale avoids all of this:
-\code{F = inv_logit(LOGIT_F + ETA_F)} with a negative lower bound on
-\code{LOGIT_F} is packed, and so drawn, on the logit scale. Drawing a
-\code{logit_probability} theta on the logit scale is an engine change
-(\href{https://github.com/FeRx-NLME/ferx-core/issues/1548}{ferx-core #1548}).
-}
-
 \section{Errors raised by the engine}{
 
 A model or dataset the engine refuses is an R error, never a \code{NULL}

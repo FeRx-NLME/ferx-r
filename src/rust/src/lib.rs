@@ -130,7 +130,7 @@ use raise::raise_verbatim;
 /// A payload that is neither (`panic_any`, a foreign `resume_unwind`) carries
 /// no text, and there extendr names the function instead:
 /// `format!("User function panicked: {}", r_name)`. `entry` is one function for
-/// all 44 of them, so `at` - the `#[track_caller]` location of the `entry(`
+/// all 45 of them, so `at` - the `#[track_caller]` location of the `entry(`
 /// call - stands in for the name and points at the entry point's own line.
 ///
 /// The payload is dropped here rather than left to a scope the longjmp skips.
@@ -161,7 +161,7 @@ fn panic_message(
 /// its own; catching first means extendr never sees one.
 ///
 /// `#[track_caller]` so that a panic carrying no text can still say which of
-/// the 44 entry points it came out of - see `panic_message`.
+/// the 45 entry points it came out of - see `panic_message`.
 #[track_caller]
 fn entry<T>(f: impl FnOnce() -> Result<T, String>) -> T {
     let msg = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
@@ -2207,6 +2207,31 @@ fn model_structure_list(model: &CompiledModel) -> Robj {
 
 // -- Helper: convert FitResult + Population to R named list --
 
+/// The name ferx-core gives a model whose file declares no `model NAME` line.
+///
+/// Mirrors `ferx_core::parser::model_parser::UNNAMED_MODEL`, which is
+/// `pub(crate)`: the engine's own fallback, `api::run::set_model_name`, swaps it
+/// for the file stem, but that is `pub(crate)` too, and the glue's fit parses
+/// the model itself. Once ferx-core exports either, use it here and drop this
+/// copy (ferx-r #34).
+const ENGINE_UNNAMED_MODEL: &str = "Unnamed";
+
+/// The model name as R should see it: the declared name, or `""` when the file
+/// declared none.
+///
+/// This is the one place the engine's placeholder crosses the FFI boundary, so
+/// R's contract is plain - `""` means "no declared name, use the file stem" -
+/// and no R code has to know the placeholder's spelling (ferx-r #34). A file
+/// that declares `model Unnamed` reads as undeclared, as it does in ferx-core's
+/// own `set_model_name`, so the R and CLI names agree.
+fn declared_model_name(name: &str) -> &str {
+    if name == ENGINE_UNNAMED_MODEL {
+        ""
+    } else {
+        name
+    }
+}
+
 fn fit_result_to_list(
     result: &FitResult,
     population: &Population,
@@ -2831,7 +2856,7 @@ fn fit_result_to_list(
         shrinkage_eta = result.shrinkage_eta.clone(),
         shrinkage_eps = result.shrinkage_eps,
         wall_time_secs = result.wall_time_secs,
-        model_name = result.model_name.clone(),
+        model_name = declared_model_name(&result.model_name).to_string(),
         ferx_version = result.ferx_version.clone(),
         cov_matrix = cov_matrix_flat,
         cov_matrix_dim = cov_matrix_dim,
@@ -3407,43 +3432,47 @@ fn ferx_rust_known_blocks() -> Vec<String> {
     })
 }
 
-/// Declared theta bounds and transforms of a model, as the engine parsed them.
+/// Classify flat warning messages with the engine's own classifier.
 ///
-/// The asymptotic uncertainty sampler draws each theta in the engine's packed
-/// space - `log(theta)` when the declared lower bound is non-negative, the
-/// natural scale otherwise - and rejects a draw past a declared bound. What a
-/// draw of a `logit_probability` theta turns into therefore depends on these
-/// bounds (ferx-r #373), and the fit object does not carry them.
+/// `ferx_load_fit()` does not restore `warnings_structured`: a fit read back
+/// from disk carries only the flat `warnings` strings, so every row of it used
+/// to reach `ferx_get_warnings()` under `general` - and every guidance arm keyed
+/// on a category went dead for it (ferx-r #308). This runs each message
+/// through `ferx_core::classify_warning`, the same function that assigned the
+/// severity and category on the fresh fit, so the R side recovers them without
+/// keeping a second copy of the engine's message patterns. A leading
+/// `[METHOD]` chain prefix is split off into `source_method`, as on a fresh fit.
 ///
-/// @param model_path Path to .ferx model file
-/// @return List with `names`, `lower`, `upper` (the effective declared bounds;
-///   an undeclared bound is the parser default) and `transform` (one of
-///   `"identity"`, `"log"`, `"logit"`, `"logit_probability"`), one entry per
-///   theta in packed order.
+/// @param messages Character vector of warning messages.
+/// @return A list of four parallel character vectors: `severity` (lowercase),
+///   `category` (the `WarningCode` token), `message` and `source_method`.
 /// @export
 #[extendr]
-fn ferx_rust_theta_packing(model_path: &str) -> Robj {
+fn ferx_rust_classify_warnings(messages: Vec<String>) -> List {
     entry(move || {
-        let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
-            Ok(p) => p,
-            Err(e) => return Err(format!("Error parsing model: {e}")),
-        };
-        let model = &parsed.model;
-        let p = &model.default_params;
-        let transform: Vec<String> = (0..p.theta.len())
-            .map(|i| match model.theta_transform.get(i) {
-                Some(ferx_core::types::ThetaTransform::Log) => "log",
-                Some(ferx_core::types::ThetaTransform::Logit) => "logit",
-                Some(ferx_core::types::ThetaTransform::LogitProbability) => "logit_probability",
-                _ => "identity",
-            }.to_string())
+        let entries: Vec<_> = messages
+            .iter()
+            .map(|m| ferx_core::classify_warning(m))
+            .collect();
+        let severity: Vec<String> = entries
+            .iter()
+            .map(|w| format!("{:?}", w.severity).to_lowercase())
+            .collect();
+        let category: Vec<String> = entries
+            .iter()
+            .map(|w| w.category.as_str().to_string())
+            .collect();
+        let message: Vec<String> = entries.iter().map(|w| w.message.clone()).collect();
+        let source_method: Vec<String> = entries
+            .iter()
+            .map(|w| w.source_method.clone().unwrap_or_default())
             .collect();
         Ok(list!(
-            names = p.theta_names.clone(),
-            lower = p.theta_lower.clone(),
-            upper = p.theta_upper.clone(),
-            transform = transform
-        ).into())
+            severity = severity,
+            category = category,
+            message = message,
+            source_method = source_method
+        ))
     })
 }
 
@@ -3523,6 +3552,34 @@ fn ferx_rust_model_data_path(model_path: &str) -> String {
     })
 }
 
+/// Return the column remappings a model file's `[data]` block declares (#730).
+///
+/// Parses `model_path` and returns `parsed.column_map` as two parallel
+/// character vectors: `target` (the name the engine's reader gives the column:
+/// a canonical role upper-cased, e.g. `"TIME"`, or an arbitrary rename such as
+/// `WT` kept as written, #742) and `actual` (the CSV header renamed to it,
+/// matched case-insensitively, e.g. `"TAFD"`). Both are empty when the model
+/// declares no mappings. The R helpers that re-read the raw
+/// CSV (`ferx_apply_selection()`, `fit$eta_cov`) apply these renames so they
+/// see the columns the engine's reader sees (ferx-r #405 review).
+///
+/// @param model_path Path to .ferx model file
+/// @return Named list with character vectors `target` and `actual`
+/// @export
+#[extendr]
+fn ferx_rust_model_column_map(model_path: &str) -> List {
+    entry(move || {
+        let parsed =
+            match ferx_core::parser::model_parser::parse_full_model_file(Path::new(model_path)) {
+                Ok(p) => p,
+                Err(e) => return Err(format!("Error parsing model: {e}")),
+            };
+        let (target, actual): (Vec<String>, Vec<String>) =
+            parsed.column_map.iter().cloned().unzip();
+        Ok(list!(target = target, actual = actual))
+    })
+}
+
 /// Derive NCA-based starting values from the data without running a fit.
 ///
 /// @param model_path Path to .ferx model file
@@ -3542,11 +3599,36 @@ fn ferx_rust_inits_from_nca(model_path: &str, data_path: &str, method: &str) -> 
         };
 
         let iov_col = parsed.fit_options.iov_column.clone();
-        let population =
-            match ferx_core::read_nonmem_csv(Path::new(data_path), None, iov_col.as_deref()) {
-                Ok(p) => p,
-                Err(e) => return Err(format!("Error reading data: {e}")),
-            };
+
+        // Read through the same reader as ferx_fit() and the engine's validation
+        // pass: it applies the `[data]` column map (a renamed TIME/DV/AMT/...),
+        // `[covariates]` and TTE routing. The bare `read_nonmem_csv` used before
+        // never saw the column map, so a mapped model failed here with "Missing
+        // TIME column" while ferx_predict()/ferx_fit() read it fine (ferx-r #391).
+        // The model file's `[data_selection]` is applied too, so the NCA runs on
+        // the rows a fit with `inits_from_nca` would see.
+        let filter = match ferx_core::io::datareader::SelectionFilter::from_opts(
+            &parsed.fit_options.ignore_exprs,
+            &parsed.fit_options.accept_exprs,
+            &parsed.fit_options.ignore_subjects,
+        ) {
+            Ok(f) => f,
+            Err(e) => return Err(format!("Error in [data_selection]: {e}")),
+        };
+        let filter_opt = if filter.is_empty() { None } else { Some(&filter) };
+
+        let (population, _) = match ferx_core::api::read_population_for(
+            &parsed.model,
+            &parsed.covariate_decls,
+            data_path,
+            None,
+            iov_col.as_deref(),
+            filter_opt,
+            &parsed.column_map,
+        ) {
+            Ok(r) => r,
+            Err(e) => return Err(format!("Error reading data: {e}")),
+        };
 
         let nca_method = match method.trim().to_lowercase().as_str() {
             "nca" => ferx_core::NcaInit::Nca,
@@ -9034,9 +9116,10 @@ extendr_module! {
     fn ferx_rust_autodiff_enabled;
     fn ferx_rust_test_panic;
     fn ferx_rust_known_blocks;
-    fn ferx_rust_theta_packing;
+    fn ferx_rust_classify_warnings;
     fn ferx_rust_validate_model;
     fn ferx_rust_model_data_path;
+    fn ferx_rust_model_column_map;
     fn ferx_rust_inits_from_nca;
     fn ferx_rust_prepare_frem;
     fn ferx_rust_bootstrap;

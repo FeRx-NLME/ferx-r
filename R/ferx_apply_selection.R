@@ -37,6 +37,14 @@
 #'   a plain data.frame of the \strong{excluded} records instead, with an extra
 #'   \code{.exclude_reason} column naming the first rule that dropped each record
 #'   (this replaces the former \code{ferx_selection_excluded()} accessor).
+#' @param model Optional path to the \code{.ferx} model file (or a
+#'   \code{ferx_model} object) the data will be fitted with. When the model
+#'   declares a \code{[data]} column map (e.g. \code{time = TAFD}), the
+#'   expressions and \code{ignore_ids} are evaluated against the columns under
+#'   the names the engine gives them, so \code{"TIME > 24"} matches the
+#'   \code{TAFD} column as it does at fit time. The returned records keep the
+#'   dataset's own headers. Ignored when \code{data} is a \code{ferx_data}
+#'   object; for a \code{ferx_fit} the fit's recorded model is used.
 #'
 #' @return When \code{excluded = FALSE}, an object of class \code{"ferx_data"}
 #'   (also a \code{data.frame}) containing the \strong{retained} records. When
@@ -60,7 +68,8 @@
 #' @family data selection
 #' @export
 ferx_apply_selection <- function(data, ignore = NULL, accept = NULL,
-                                 ignore_ids = NULL, excluded = FALSE) {
+                                 ignore_ids = NULL, excluded = FALSE,
+                                 model = NULL) {
   # An already-selected object caches its excluded rows on an attribute; a
   # fitted object carries its fired conditions. Handle both before the raw
   # path/data.frame compute so callers can recover the selection - or, with
@@ -93,6 +102,17 @@ ferx_apply_selection <- function(data, ignore = NULL, accept = NULL,
   accept     <- as.character(accept)
   ignore_ids <- as.character(ignore_ids)
 
+  # Filters are evaluated on `df_eval`, the dataset under the column names the
+  # engine's reader gives it (the model's `[data]` map applied); the rows
+  # returned come from `df`, with the dataset's own headers, so a ferx_data
+  # passed on to ferx_fit() still matches the model's map.
+  if (inherits(model, "ferx_model")) model <- model$model
+  if (!is.null(model) && !(is.character(model) && length(model) == 1L &&
+                           file.exists(model))) {
+    stop("`model` must be a path to an existing .ferx file or a ferx_model object")
+  }
+  df_eval <- .ferx_apply_column_map(df, .ferx_model_column_map(model))
+
   .get_col <- function(df, name) {
     idx <- match(name, tolower(names(df)))
     if (is.na(idx)) NULL else df[[idx]]
@@ -112,7 +132,7 @@ ferx_apply_selection <- function(data, ignore = NULL, accept = NULL,
   include <- rep(TRUE, n)
   exclude_reason <- rep(NA_character_, n)
 
-  id_col <- .get_col(df, "id")
+  id_col <- .get_col(df_eval, "id")
   if (length(ignore_ids) > 0L && !is.null(id_col)) {
     ids_char <- as.character(id_col)
     mask <- ids_char %in% ignore_ids & include
@@ -123,7 +143,7 @@ ferx_apply_selection <- function(data, ignore = NULL, accept = NULL,
 
   fired_ignore <- character(0)
   for (expr in ignore) {
-    mask <- .eval_expr(expr, df) & include
+    mask <- .eval_expr(expr, df_eval) & include
     if (any(mask)) fired_ignore <- c(fired_ignore, paste0("ignore: ", expr))
     exclude_reason[mask & is.na(exclude_reason)] <- paste0("ignore: ", expr)
     include[mask] <- FALSE
@@ -131,7 +151,7 @@ ferx_apply_selection <- function(data, ignore = NULL, accept = NULL,
 
   fired_accept <- character(0)
   for (expr in accept) {
-    mask <- !.eval_expr(expr, df) & include
+    mask <- !.eval_expr(expr, df_eval) & include
     if (any(mask)) fired_accept <- c(fired_accept, paste0("accept: ", expr))
     exclude_reason[mask & is.na(exclude_reason)] <- paste0("accept: ", expr)
     include[mask] <- FALSE
@@ -141,16 +161,16 @@ ferx_apply_selection <- function(data, ignore = NULL, accept = NULL,
   excluded_df <- df[!include, , drop = FALSE]
   excluded_df$.exclude_reason <- exclude_reason[!include]
 
-  evid_col <- .get_col(df[!include, , drop = FALSE], "evid")
-  mdv_col  <- .get_col(df[!include, , drop = FALSE], "mdv")
+  evid_col <- .get_col(df_eval[!include, , drop = FALSE], "evid")
+  mdv_col  <- .get_col(df_eval[!include, , drop = FALSE], "mdv")
   excl_evid <- if (!is.null(evid_col)) as.integer(evid_col) else integer(nrow(excluded_df))
   excl_mdv  <- if (!is.null(mdv_col))  as.integer(mdv_col)  else integer(nrow(excluded_df))
   n_obs_excl   <- sum(excl_evid == 0L & excl_mdv == 0L, na.rm = TRUE)
   n_dose_excl  <- sum(excl_evid %in% c(1L, 4L), na.rm = TRUE)
   n_other_excl <- nrow(excluded_df) - n_obs_excl - n_dose_excl
 
-  excl_id_col <- .get_col(excluded_df, "id")
-  incl_id_col <- .get_col(retained, "id")
+  excl_id_col <- .get_col(df_eval[!include, , drop = FALSE], "id")
+  incl_id_col <- .get_col(df_eval[include, , drop = FALSE], "id")
   excl_subj_ids <- character(0)
   if (!is.null(excl_id_col) && !is.null(incl_id_col)) {
     all_excl <- unique(as.character(excl_id_col))
@@ -255,7 +275,10 @@ print.ferx_data <- function(x, n = 6L, ...) {
     ignore     = strip_prefix(ex$fired_ignore),
     accept     = strip_prefix(ex$fired_accept),
     ignore_ids = ex$excluded_subject_ids,
-    excluded   = excluded
+    excluded   = excluded,
+    # The fit's `[data]` column map, when its model file is still there, so the
+    # replayed rules see the columns the fit's reader saw.
+    model      = .ferx_existing_path(fit$model_path)
   )
 }
 
@@ -332,4 +355,11 @@ print.ferx_data <- function(x, n = 6L, ...) {
     ">=" = !is.na(lhs_use) & lhs_use >= rhs,
     rep(FALSE, length(lhs_use))
   )
+}
+
+# `path` when it names an existing file, else NULL (a loaded fit's model_path
+# can be NA or point at a file that has since gone).
+.ferx_existing_path <- function(path) {
+  if (is.character(path) && length(path) == 1L && !is.na(path) &&
+      nzchar(path) && file.exists(path)) path else NULL
 }
