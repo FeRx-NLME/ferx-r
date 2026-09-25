@@ -332,17 +332,19 @@ test_that("a gate-excluded model is a row with its reason, and cannot win", {
   expect_true(all(is.na(gated$rank)))
   expect_false(any(gated$selected))
 
-  # The criterion alone does not separate them from the winner: the two
-  # two-compartment models with a lag land on the same fit as the winner
-  # because Q collapses, and come back 2.0e-6 and 7.8e-8 OFV *worse* - a
-  # measured tie. So the gate is doing the separating, and a report showing
-  # only the criterion would present three indistinguishable winners, one of
-  # them with |r| = 1 between TVKA and TVV2. The bound is 1e-3, ~500x the
-  # realised gap.
+  # The criterion alone need not separate them from the winner: the two
+  # two-compartment models with a lag can land on the winner's fit because Q
+  # collapses (at ferx-core d66046e they came back 2.0e-6 and 7.8e-8 OFV worse,
+  # a measured tie, one of them with |r| = 1 between TVKA and TVV2). How close
+  # they land is an optimizer outcome that differs across engine revisions and
+  # platforms (0.93 worse on Linux at 3335d7b, still a tie on macOS), so the
+  # contract asserted is the gate's: the winner is the best model that passed,
+  # whatever the gated ones scored.
   winner <- res$models[res$models$selected, , drop = FALSE]
   expect_equal(nrow(winner), 1L)
   expect_true(winner$passed)
-  expect_lt(min(gated$criterion, na.rm = TRUE) - winner$criterion, 1e-3)
+  passed <- res$models[res$models$passed, , drop = FALSE]
+  expect_equal(winner$criterion, min(passed$criterion, na.rm = TRUE))
 
   # And the winner here is not the base model, so the transformed-model path -
   # the model text, `final.ferx` and the fit that comes back - is exercised.
