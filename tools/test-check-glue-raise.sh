@@ -7,9 +7,10 @@
 # compiler cannot see the shape it holds (a fully qualified
 # `extendr_api::throw_r_error(..)` compiles; a second `raise_verbatim(` call
 # site compiles; a `#[extendr]` body that never returns through `entry()`
-# compiles; a second extern "C" block re-declaring Rf_error compiles). The
-# stubs are the only thing that reddens when a check goes away, so each of the
-# four has a fixture of its own - including "nothing raises at all", whose
+# compiles; a second extern "C" block re-declaring Rf_error compiles; a
+# Cargo.lock moving extendr past the release raise_verbatim escapes for
+# resolves). The stubs are the only thing that reddens when a check goes away,
+# so each of the five has a fixture of its own - including "nothing raises at all", whose
 # absence let that check be deleted with the harness still green.
 #
 # Every bad fixture must exit 1 with its own message, so a check firing for the
@@ -42,14 +43,10 @@ use extendr_api::prelude::*;
 mod raise {
     extern "C" {
         fn Rf_error(fmt: *const std::ffi::c_char, ...) -> !;
-        fn R_alloc(n: usize, size: std::ffi::c_int) -> *mut std::ffi::c_char;
     }
 
     pub(super) fn raise_verbatim(msg: String) -> ! {
-        unsafe {
-            let buf = R_alloc(msg.len() + 1, 1);
-            Rf_error(b"%s\0".as_ptr().cast(), buf)
-        }
+        std::panic::resume_unwind(Box::new(msg.replace('%', "%%")))
     }
 }
 
@@ -87,14 +84,15 @@ fixture() { # name, extra source appended to the preamble
   echo "$dir"
 }
 
-expect() { # name, dir, expected exit, message fragment
-  local name=$1 dir=$2 want=$3 fragment=$4 mode out rc
+expect() { # name, dir, expected exit, message fragment[, Cargo.lock]
+  local name=$1 dir=$2 want=$3 fragment=$4 lock=${5:-$ROOT/src/rust/Cargo.lock}
+  local mode out rc
   for mode in local ci; do
     rc=0
     if [[ "$mode" == ci ]]; then
-      out=$(GITHUB_ACTIONS=true bash "$CHECK" "$dir" 2>&1) || rc=$?
+      out=$(GITHUB_ACTIONS=true bash "$CHECK" "$dir" "$lock" 2>&1) || rc=$?
     else
-      out=$(env -u GITHUB_ACTIONS bash "$CHECK" "$dir" 2>&1) || rc=$?
+      out=$(env -u GITHUB_ACTIONS bash "$CHECK" "$dir" "$lock" 2>&1) || rc=$?
     fi
     if [[ "$rc" != "$want" ]]; then
       report "FAIL [$mode] $name: expected exit $want, got $rc" "$out"
@@ -289,6 +287,42 @@ mkdir -p "$moduleless"
 preamble | grep -v '^mod raise {$' > "$moduleless/lib.rs"
 expect "deleting mod raise is refused" "$moduleless" 1 \
   "Rf_error is named outside mod raise"
+
+# Check 5: the % escape in raise_verbatim is right for extendr-api 0.9.0's
+# throw_r_error only (#394), so a lock that moves extendr is a finding.
+lock_fixture() { # name, extendr-api version, extendr-macros version ("" = absent)
+  local f="$TMP/$1.lock"
+  {
+    echo 'version = 4'
+    echo
+    if [[ -n "$2" ]]; then
+      printf '[[package]]\nname = "extendr-api"\nversion = "%s"\n\n' "$2"
+    fi
+    if [[ -n "$3" ]]; then
+      printf '[[package]]\nname = "extendr-macros"\nversion = "%s"\n\n' "$3"
+    fi
+  } > "$f"
+  echo "$f"
+}
+in_shape="$(fixture lock-shape '')"
+
+expect "a lock at the extendr the escape was written for passes" \
+  "$in_shape" 0 "extendr at 0.9.0" "$(lock_fixture lock-ok 0.9.0 0.9.0)"
+
+expect "a lock that moves extendr-api is refused" \
+  "$in_shape" 1 "extendr-api is 0.9.1 in the lock" \
+  "$(lock_fixture lock-api 0.9.1 0.9.0)"
+
+expect "a lock that moves extendr-macros alone is refused" \
+  "$in_shape" 1 "extendr-macros is 0.10.0 in the lock" \
+  "$(lock_fixture lock-macros 0.9.0 0.10.0)"
+
+expect "a lock without extendr is refused" \
+  "$in_shape" 1 "extendr-api is not in the lock" \
+  "$(lock_fixture lock-none '' 0.9.0)"
+
+expect "a missing lock is refused" \
+  "$in_shape" 1 "no Cargo.lock at" "$TMP/no-such.lock"
 
 empty="$TMP/empty"
 mkdir -p "$empty"

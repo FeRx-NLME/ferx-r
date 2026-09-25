@@ -111,7 +111,7 @@ bad_selection_model <- function(env = parent.frame()) {
 
 # A `[data_selection]` clause whose refusal quotes a `%` back at the user. The
 # glue used to hand its message to `Rf_error()` as the printf format (#388), so
-# `5%': r` was read as a conversion; it now goes through a `"%s"` the glue owns.
+# `5%': r` was read as a conversion; the glue now doubles every `%` for it.
 percent_selection_model <- function(env = parent.frame()) {
   model_with_lines(c("[data_selection]", "  ignore = DV < 5%"), env)
 }

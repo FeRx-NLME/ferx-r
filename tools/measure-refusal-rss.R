@@ -8,10 +8,11 @@
 # has returned, so the refused loop should now grow like the accepted one.
 #
 # What this script does NOT measure: the *arguments*. extendr protects every
-# argument SEXP in a frame outside the body, which the raise still jumps over
-# (ferx-r#394). The loops below pass a model path, a data path, `n_sim` and a
-# seed - all bytes - so their numbers say "the body's locals are gone", not
-# "nothing leaks". #394 has the vector-sized measurement.
+# argument SEXP in a frame outside the body (ferx-r#394). The loops below pass
+# a model path, a data path, `n_sim` and a seed - all bytes - so their numbers
+# say "the body's locals are gone", not "nothing leaks". The argument half is
+# tests/testthat/test-glue-refusal-args.R, which measures Vcells and is exact
+# enough to run in CI.
 #
 # Not a testthat test on purpose: 3000 calls take ~13 minutes, and RSS is noisy
 # enough that a threshold on it would be a coin flip in CI (the control loop

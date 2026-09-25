@@ -65,58 +65,103 @@ fn pending_interrupt() -> bool {
 //
 // and each failure inside is a `return Err(msg)`. `entry` lets that closure's
 // frame return - dropping its locals, and the moved-in arguments with it - and
-// only then raises, through a `"%s"` format this file owns.
+// only then raises.
+//
+// And `entry` does not longjmp either (ferx-r #394). extendr's generated
+// wrapper (`extendr-macros-0.9.0/src/wrappers.rs:248-258`) converts every
+// argument SEXP to an `Robj` - which puts it on R's precious list - inside a
+// `catch_unwind` closure of its own, one frame *outside* the glue function.
+// An `Rf_error` from `entry` jumped over that closure too, so the arguments
+// were never unprotected: fresh 200,000-element `settings_keys` /
+// `settings_values` vectors stayed alive after every refused call, for the
+// rest of the session. A Rust unwind is what that closure's destructors do run
+// for, so `entry` hands the message to extendr as a panic payload: the unwind
+// drops the argument `Robj`s on its way out, and extendr raises the message
+// once its closure has returned (`wrappers.rs:264-286`).
 //
 // Most of that shape is held by the compiler - the `throw_r_error` shadow and
 // `mod raise` below - and tools/check-glue-raise.sh holds what is left.
 
-/// The only scope in which `Rf_error` exists.
+/// The only scope in which an R error is raised, and in which `Rf_error`
+/// exists.
 ///
-/// It is declared in here, rather than in the file-scope extern block above,
-/// so that the rest of lib.rs cannot name it. `unsafe { Rf_error(c.as_ptr()) }`
-/// in a body nine thousand lines down - #388 reintroduced, with the message as
-/// the format again - is `error[E0425]` on every machine rather than a review
-/// finding, and the way around it, `raise::Rf_error(..)`, is `error[E0603]`:
-/// a private item of a private module.
+/// `Rf_error` is declared in here, rather than in the file-scope extern block
+/// above, so that the rest of lib.rs cannot name it. `unsafe {
+/// Rf_error(c.as_ptr()) }` in a body nine thousand lines down - #388
+/// reintroduced, with the message as the format again - is `error[E0425]` on
+/// every machine rather than a review finding, and the way around it,
+/// `raise::Rf_error(..)`, is `error[E0603]`: a private item of a private
+/// module. Nothing calls it any more (`raise_verbatim` unwinds instead, #394),
+/// but the declaration stays so that the name keeps meaning "only in here" -
+/// tools/check-glue-raise.sh refuses it anywhere else.
 ///
 /// Same guarantee the `throw_r_error` shadow gives, by the other route - a
 /// shadow hides a name the prelude hands this file, a module hides one the
 /// file declares itself.
 mod raise {
-    // `R_alloc` (R_ext/Memory.h) hands back memory R itself reclaims when the
-    // error unwinds, so the message needs no Rust owner alive across the
-    // longjmp.
     extern "C" {
+        #[allow(dead_code)]
         fn Rf_error(fmt: *const std::ffi::c_char, ...) -> !;
-        fn R_alloc(n: usize, size: std::ffi::c_int) -> *mut std::ffi::c_char;
     }
 
-    /// Raise `msg` as an R error whose message is `msg`, byte for byte.
+    /// The text of the refusal in flight, `%`-escaped. Owned here rather than
+    /// by the panic payload because extendr raises without dropping the
+    /// payload: a `String` payload would leave a message-sized allocation
+    /// behind per refusal, on top of the copy of the text extendr makes and
+    /// never frees either. A `&'static str` into this buffer costs 16 bytes.
     ///
-    /// Not `extendr_api::throw_r_error`: on 0.9.0 that passes its argument to
-    /// `Rf_error` as the format string (`src/thread_safety.rs:51-58`), while
-    /// extendr `main` (`b0cb8a81`, extendr/extendr#1058, unreleased) passes it
-    /// as a `"%s"` argument - so doubling `%` here to suit 0.9.0 would start
-    /// printing `5%%` the day that release lands. A format this file owns reads
-    /// the same under both.
+    /// Overwritten by the next refusal only. extendr copies the text out
+    /// (`(*s).to_string()`, `wrappers.rs:275-276`) before it raises, and R is
+    /// single-threaded, so nothing reads the old text after it is replaced.
+    static IN_FLIGHT: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+    /// `msg` with every `%` doubled, for extendr-api 0.9.0's `throw_r_error`,
+    /// which hands its argument to `Rf_error` as the *format* string
+    /// (`src/thread_safety.rs:51-58`). `%%` is the one conversion that takes no
+    /// argument and prints a single `%`, so the message still reaches R byte
+    /// for byte - the #388 fix, moved from a `"%s"` format this file owned to
+    /// an escape of the format extendr passes.
     ///
-    /// The text is copied into `R_alloc` memory, which R reclaims when the
-    /// error unwinds, and the owned `String` is dropped before the longjmp, so
-    /// nothing of the message is left behind. Bytes at and after an interior
-    /// NUL are dropped: C would stop there anyway, and
-    /// `CString::new(..).unwrap()` would panic.
+    /// Correct for 0.9.0 only. extendr `main` (`b0cb8a81`, extendr/extendr#1058,
+    /// unreleased at 0.9.0) passes the text as a `"%s"` argument instead, and
+    /// there every `%` doubled here would print as `%%`. tools/check-glue-raise.sh
+    /// refuses a Cargo.lock whose extendr-api is not 0.9.0, so the upgrade
+    /// cannot land without passing by this function; when it does, drop the
+    /// doubling. tests/testthat/test-glue-percent.R is the behavioural guard.
+    ///
+    /// Bytes at and after an interior NUL are dropped: C would stop there
+    /// anyway, and extendr's `CString::new(s).unwrap()` - outside any
+    /// `catch_unwind` - would abort the session on one.
+    pub(super) fn format_escaped(msg: &str) -> String {
+        // A NUL byte is always a char boundary, so the slice cannot panic.
+        let len = msg.find('\0').unwrap_or(msg.len());
+        msg[..len].replace('%', "%%")
+    }
+
+    /// Raise `msg` as an R error whose message is `msg`, byte for byte, by
+    /// unwinding into extendr's wrapper and letting it raise - see the banner
+    /// above for why that and not `Rf_error` (#394).
+    ///
+    /// `resume_unwind`, not `panic!`: it skips the panic hook, so a refusal
+    /// prints nothing to stderr and the console stays clean (#385).
+    ///
+    /// `msg` is dropped before the unwind starts. What the raise leaves behind
+    /// is extendr's copy of the text and a 16-byte payload - message-sized,
+    /// never argument-sized.
     ///
     /// Called from `entry` and nowhere else.
     pub(super) fn raise_verbatim(msg: String) -> ! {
-        let bytes = msg.as_bytes();
-        let len = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
-        unsafe {
-            let buf = R_alloc(len + 1, 1);
-            std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf.cast::<u8>(), len);
-            *buf.add(len) = 0;
-            drop(msg);
-            Rf_error(b"%s\0".as_ptr().cast(), buf)
-        }
+        let escaped = format_escaped(&msg);
+        drop(msg);
+        let text: &'static str = {
+            let mut slot = IN_FLIGHT.lock().unwrap_or_else(|e| e.into_inner());
+            *slot = escaped;
+            // SAFETY: the buffer is a static and is not written again until
+            // the next refusal, by which time extendr has copied this text out
+            // and raised it (see `IN_FLIGHT`).
+            unsafe { &*(slot.as_str() as *const str) }
+        };
+        std::panic::resume_unwind(Box::new(text))
     }
 }
 
@@ -157,8 +202,11 @@ fn panic_message(
 /// under it - as an R error, from here, after its frame has returned.
 ///
 /// The `catch_unwind` sits inside extendr's own (`wrappers.rs:255`), which
-/// hands a panic's text to `throw_r_error` and so carries the `%` problem of
-/// its own; catching first means extendr never sees one.
+/// hands a panic's text to `throw_r_error` as its format string; catching
+/// first means extendr never sees a raw one. What it does see is the unwind
+/// `raise_verbatim` starts with the text already `%`-escaped for it - and that
+/// unwind, unlike an `Rf_error`, lets extendr drop the argument `Robj`s it
+/// protected before it raises (#394).
 ///
 /// `#[track_caller]` so that a panic carrying no text can still say which of
 /// the 45 entry points it came out of - see `panic_message`.
