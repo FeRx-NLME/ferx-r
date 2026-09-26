@@ -2,6 +2,53 @@
 
 ## Breaking changes
 
+- **ferx now builds against the released ferx-core 0.4.0**
+  ([`v0.4.0`](https://github.com/FeRx-NLME/ferx-core/releases/tag/v0.4.0),
+  commit `2a6076af`). Read the
+  [ferx-core 0.4.0 changelog](https://github.com/FeRx-NLME/ferx-core/blob/v0.4.0/CHANGELOG.md#040---2026-09-25)
+  before upgrading. The entries below describe the changes that reach R through
+  the package's own code; these engine changes reach every `ferx_fit()`,
+  `ferx_check()`, `ferx_predict()` and `ferx_simulate()` call without one:
+
+  - **A model file that ran before can now fail to parse**, where the engine
+    used to ignore or misread part of it: a call to a function ferx does not
+    have (`tanh(ETA_CL)` used to evaluate as `ETA_CL`;
+    [ferx-core #1332](https://github.com/FeRx-NLME/ferx-core/issues/1332)); a
+    `[fit_options]` or `[error_model]` line that matches no known form
+    ([#1390](https://github.com/FeRx-NLME/ferx-core/issues/1390)); more than
+    one plain `DV ~` line
+    ([#1022](https://github.com/FeRx-NLME/ferx-core/issues/1022)); both
+    spellings of one `pk(...)` slot bound to different values
+    ([#1048](https://github.com/FeRx-NLME/ferx-core/issues/1048)); a free
+    variance declared on the optimizer's lower rail
+    ([#1229](https://github.com/FeRx-NLME/ferx-core/issues/1229)).
+    `ferx_check()` reports each one.
+  - **A dataset that read before can now be refused**: a cell that is not a
+    number (`DV = abc` used to score as a measured `0`;
+    [#1501](https://github.com/FeRx-NLME/ferx-core/issues/1501)), and a `CENS`
+    cell that is not a whole number on a kept Gaussian observation row
+    ([#1496](https://github.com/FeRx-NLME/ferx-core/issues/1496)). A whole
+    number written as `1.0` in an integer column now reads as that number
+    ([#1502](https://github.com/FeRx-NLME/ferx-core/pull/1502)), so a fit on
+    such a file can change.
+  - **Results can move on an unchanged model**: SAEM now defaults to
+    `scale_adaptation = "robbins_monro"`
+    ([#1449](https://github.com/FeRx-NLME/ferx-core/issues/1449)),
+    `n_mh_steps = "auto"`
+    ([#1459](https://github.com/FeRx-NLME/ferx-core/issues/1459)) and
+    `mstep_damping = 1` outside `iiv_on_ruv` models
+    ([#1415](https://github.com/FeRx-NLME/ferx-core/issues/1415)), so an
+    existing SAEM fit's estimates move; pass the old values through
+    `settings =` (`scale_adaptation = "interval"`, `n_mh_steps = 20`,
+    `mstep_damping = 0.03`) to get the old behaviour back. `?ferx_fit` now
+    documents the new defaults. `CWRES` is now NONMEM's decorrelated CWRES
+    ([#1182](https://github.com/FeRx-NLME/ferx-core/issues/1182)), and a plain
+    `block_sigma` estimates its correlation
+    ([#847](https://github.com/FeRx-NLME/ferx-core/issues/847)).
+  - **Known issue**: a `[covariate_nn]` (DCM) FOCEI fit can report convergence
+    at an objective far above the point where every network weight is zero
+    ([#1561](https://github.com/FeRx-NLME/ferx-core/issues/1561)).
+
 - **A `.ferx` `[parameters]` line that ferx-core used to ignore is now an error**
   ([ferx-core #1377](https://github.com/FeRx-NLME/ferx-core/issues/1377),
   [ferx-core #1388](https://github.com/FeRx-NLME/ferx-core/pull/1388)). Every
