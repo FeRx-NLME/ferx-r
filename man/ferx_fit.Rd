@@ -543,13 +543,20 @@ production diagnostics usually want thousands).}
 draws rather than just the summaries.}
 \item{\code{n_convergence}}{Averaging / convergence phase iterations
 (default 250).}
-\item{\code{n_mh_steps}}{(default 20) Metropolis-Hastings steps per subject
-per iteration. Also sizes the componentwise decorrelating kernel that
+\item{\code{n_mh_steps}}{(default \code{"auto"}) Metropolis-Hastings
+steps per subject per iteration. \code{"auto"} sizes it from the data
+as 2.5 x observations per subject per random effect, clamped to
+\code{[6, 20]}. Also sizes the componentwise decorrelating kernel that
 prevents block-Omega collapse. When \code{n_leapfrog > 0} it applies to
 the subjects that fall back to MH. Consumed by \code{"saem"} and
-\code{"bayes"}.}
-\item{\code{adapt_interval}}{How often (in iterations) the MH proposal
-covariance is adapted (default 50).}
+\code{"bayes"}; \code{"bayes"} does not apply the \code{"auto"} rule
+and keeps 20 unless you set a number.}
+\item{\code{scale_adaptation}}{(default \code{"robbins_monro"}) How the
+MH step scales are adapted. \code{"interval"} is the rule used before
+ferx-core 0.4.0.}
+\item{\code{adapt_interval}}{How often (in iterations) the MH step
+scales are adapted under \code{scale_adaptation = "interval"}
+(default 50). Also governs the IOV scales under either rule.}
 \item{\code{omega_burnin}}{Initial iterations during which Omega is held
 fixed while the sampler warms up (default 20). Guards against Omega
 collapse on sparse data. Set to \code{0} to disable.}
