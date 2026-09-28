@@ -1417,7 +1417,7 @@
 #'
 #' For the complete settings reference - including which options apply to which
 #' method, valid combinations, and a convergence troubleshooting guide - see
-#' \href{https://ferx-nlme.github.io/model-dsl/fit-options.html}{ferx-nlme.github.io/model-dsl/fit-options}.
+#' \href{https://ferx-nlme.org/model-dsl/fit-options.html}{ferx-nlme.github.io/model-dsl/fit-options}.
 #'
 #' \strong{Outer optimizer selection:}
 #' \preformatted{
@@ -1772,7 +1772,7 @@
 #' @param ... Reserved for future use. Unrecognised arguments raise an error.
 #' @seealso
 #'   \itemize{
-#'     \item \href{https://ferx-nlme.github.io/model-dsl/fit-options.html}{Fit
+#'     \item \href{https://ferx-nlme.org/model-dsl/fit-options.html}{Fit
 #'       options reference} - full documentation of every \code{[fit_options]}
 #'       key and \code{settings} knob, organised by method with a
 #'       convergence-troubleshooting guide and a method x option compatibility
