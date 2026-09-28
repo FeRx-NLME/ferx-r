@@ -39,7 +39,7 @@ via \code{See Also}.
 \seealso{
 Useful links:
 \itemize{
-  \item \url{https://ferx-nlme.github.io/reference/}
+  \item \url{https://ferx-nlme.org/reference/}
 }
 
 }
