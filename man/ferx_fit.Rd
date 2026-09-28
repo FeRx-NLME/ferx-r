@@ -1481,7 +1481,7 @@ duplicated in \code{settings} - pass them via the named argument.
 
 For the complete settings reference - including which options apply to which
 method, valid combinations, and a convergence troubleshooting guide - see
-\href{https://ferx-nlme.org/model-dsl/fit-options.html}{ferx-nlme.github.io/model-dsl/fit-options}.
+\href{https://ferx-nlme.org/model-dsl/fit-options.html}{ferx-nlme.org/model-dsl/fit-options}.
 
 \strong{Outer optimizer selection:}
 \preformatted{
