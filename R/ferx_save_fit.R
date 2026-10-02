@@ -9,6 +9,11 @@ FITRX_FORMAT_VERSION <- "1"
 #' includes parameter estimates, per-subject EBEs, per-observation
 #' predictions, and the verbatim \code{.ferx} model source.
 #'
+#' Every number is written so that it reads back as the same double: the
+#' estimates, the per-subject and per-observation tables, and the predictions
+#' and simulations a reloaded fit drives are \code{identical()} to the
+#' original's.
+#'
 #' The schema is shared with the ferx-core Rust crate; see its
 #' \code{docs/src/file-formats/fitrx.md} for the full field reference.
 #'
@@ -104,7 +109,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   # file) usually won't. Bundle on `is.data.frame()`, not `nrow() > 0L`, so a
   # valid header-only (zero-iteration) trace still round-trips.
   if (is.data.frame(fit[["trace"]])) {
-    utils::write.csv(fit[["trace"]], file.path(staging, "trace.csv"), row.names = FALSE, na = "")
+    .fitrx_write_csv_exact(fit[["trace"]], file.path(staging, "trace.csv"), quote = TRUE)
     entries <- c(entries, "trace.csv")
   }
 
@@ -458,7 +463,9 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
     path,
     auto_unbox = TRUE,
     pretty = TRUE,
-    digits = NA, # full f64 precision
+    # 17 significant digits identify every double; `digits = NA` means 15,
+    # which moved theta, omega and sigma in their last bit on a round trip.
+    digits = I(17),
     null = "null",
     na = "null"
   )
@@ -496,10 +503,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
       ebes$n_obs <- NA_integer_
     }
   }
-  utils::write.table(
-    ebes, path,
-    row.names = FALSE, quote = FALSE, sep = ",", na = ""
-  )
+  .fitrx_write_csv_exact(ebes, path)
 }
 
 .fitrx_write_ebes_kappa_csv <- function(fit, path) {
@@ -507,17 +511,11 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   if (is.null(k) || nrow(k) == 0L) {
     return(invisible())
   }
-  utils::write.table(
-    k, path,
-    row.names = FALSE, quote = FALSE, sep = ",", na = ""
-  )
+  .fitrx_write_csv_exact(k, path)
 }
 
 .fitrx_write_conddist_csv <- function(fit, path) {
-  utils::write.table(
-    fit$cond_dist$data, path,
-    row.names = FALSE, quote = FALSE, sep = ",", na = ""
-  )
+  .fitrx_write_csv_exact(fit$cond_dist$data, path)
 }
 
 .fitrx_has_cond_dist <- function(fit) {
@@ -532,10 +530,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
     return(invisible())
   }
   # sdtab$ID is the original numeric subject ID from the NONMEM CSV.
-  utils::write.table(
-    sdtab, path,
-    row.names = FALSE, quote = FALSE, sep = ",", na = ""
-  )
+  .fitrx_write_csv_exact(sdtab, path)
 }
 
 .fitrx_write_covtab_csv <- function(fit, path) {
@@ -545,7 +540,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   }
   # Quote so a free-form character ID containing a comma/quote round-trips
   # intact; missing covariate values (NA/NaN) are written as empty cells.
-  utils::write.csv(covtab, path, row.names = FALSE, na = "")
+  .fitrx_write_csv_exact(covtab, path, quote = TRUE)
 }
 
 .fitrx_subject_string_ids <- function(fit) {

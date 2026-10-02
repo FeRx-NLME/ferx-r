@@ -87,7 +87,9 @@ ferx_trace <- function(fit) {
 # from a live trace_path) and ferx_fit() (populating fit$trace right after
 # the fit completes, while the temp file still exists).
 .ferx_read_trace_csv <- function(path) {
-  tr <- read.csv(path, stringsAsFactors = FALSE, check.names = FALSE)
+  # Exact doubles: the engine writes each value in its shortest round-trip
+  # form, and R's own parser would move some of them by an ulp.
+  tr <- .fitrx_read_csv_exact(path)
 
   na_cols <- c("grad_norm", "step_norm", "inner_iter_count",
                "lm_lambda", "ofv_delta", "step_accepted",
@@ -96,7 +98,7 @@ ferx_trace <- function(fit) {
     if (col %in% names(tr)) {
       v <- tr[[col]]
       if (is.character(v)) {
-        tr[[col]] <- suppressWarnings(as.numeric(v))
+        tr[[col]] <- .fitrx_parse_doubles(v)
       }
     }
   }

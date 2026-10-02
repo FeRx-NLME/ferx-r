@@ -208,3 +208,97 @@
 
   list(ofv_data = ofv_data, ofv_prior = ofv_prior, recovered = TRUE)
 }
+
+# -- Exact doubles in the bundle --
+#
+# A .fitrx round trip must give back the doubles it was handed. Two things
+# stood in the way. jsonlite's `digits = NA` and `write.table()` /
+# `write.csv()` all write a double with 15 significant digits, which is not
+# enough to identify it. And R's own number parser (`as.numeric()`,
+# `read.csv()`) is not correctly rounded: on a build whose long double is a
+# plain double (aarch64) it reads about one in five 17-digit strings one ulp
+# away. So `fit.json` is written with 17 significant digits and read by
+# jsonlite, whose parser is correctly rounded; the CSV entries get the
+# shortest text that reads back as the same double, and are read back
+# through jsonlite's parser too.
+
+# Correctly rounded parse of decimal text, as `as.numeric()` would read it:
+# "" and "NA" are NA, "NaN" is NaN, "Inf" / "-Inf" (and Rust's "inf" /
+# "-inf") are infinite. Text that is not a plain decimal number falls back to
+# `as.numeric()`, so an unexpected bundle still loads as it did before.
+.fitrx_parse_doubles <- function(txt) {
+  s <- trimws(as.character(txt))
+  out <- rep(NA_real_, length(s))
+  out[s %in% c("Inf", "+Inf", "inf", "+inf")] <- Inf
+  out[s %in% c("-Inf", "-inf")] <- -Inf
+  out[s %in% c("NaN", "nan")] <- NaN
+  # JSON's number grammar exactly, so the batch below never fails on one odd
+  # token; text outside it ("1.", "007") takes the per-element fallback.
+  num <- !is.na(s) &
+    grepl("^-?(0|[1-9][0-9]*)(\\.[0-9]+)?([eE][-+]?[0-9]+)?$", s)
+  if (any(num)) {
+    out[num] <- tryCatch(
+      as.numeric(jsonlite::parse_json(
+        paste0("[", paste(s[num], collapse = ","), "]"),
+        simplifyVector = TRUE
+      )),
+      error = function(e) suppressWarnings(as.numeric(s[num]))
+    )
+  }
+  odd <- !is.na(s) & nzchar(s) & s != "NA" & !num &
+    !(s %in% c("Inf", "+Inf", "inf", "+inf", "-Inf", "-inf", "NaN", "nan"))
+  if (any(odd)) out[odd] <- suppressWarnings(as.numeric(s[odd]))
+  out
+}
+
+# The shortest decimal text (15, 16 or 17 significant digits) that
+# `.fitrx_parse_doubles()` reads back as exactly `x`. NA and NaN become NA
+# (an empty cell, as `write.table(na = "")` wrote them), +/-Inf "Inf" /
+# "-Inf". 17 digits always suffice for a double.
+.fitrx_double_text <- function(x) {
+  out <- rep(NA_character_, length(x))
+  inf <- is.infinite(x)
+  out[inf] <- ifelse(x[inf] > 0, "Inf", "-Inf")
+  fin <- is.finite(x)
+  xf <- x[fin]
+  txt <- sprintf("%.15g", xf)
+  for (d in 16:17) {
+    bad <- .fitrx_parse_doubles(txt) != xf
+    if (!any(bad)) break
+    txt[bad] <- sprintf(paste0("%.", d, "g"), xf[bad])
+  }
+  out[fin] <- txt
+  out
+}
+
+# Write a data frame as a bundle CSV with every double column in
+# `.fitrx_double_text()` form. `quote = TRUE` keeps write.csv()'s behaviour
+# for the entries that used it: the columns that were text are quoted, and a
+# number never is.
+.fitrx_write_csv_exact <- function(df, path, quote = FALSE) {
+  text_cols <- which(vapply(df, function(v) is.character(v) || is.factor(v),
+                            logical(1)))
+  for (j in which(vapply(df, is.double, logical(1)))) {
+    df[[j]] <- .fitrx_double_text(df[[j]])
+  }
+  utils::write.table(
+    df, path,
+    row.names = FALSE, sep = ",", na = "",
+    quote = if (isTRUE(quote)) text_cols else FALSE,
+    qmethod = "double"
+  )
+}
+
+# `read.csv()`, with every column it types as double re-parsed by
+# `.fitrx_parse_doubles()`. read.csv() still decides the column types, so a
+# loaded table has the shape it always had.
+.fitrx_read_csv_exact <- function(path) {
+  df <- utils::read.csv(path, stringsAsFactors = FALSE, check.names = FALSE)
+  dbl <- which(vapply(df, is.double, logical(1)))
+  if (length(dbl) > 0L) {
+    raw <- utils::read.csv(path, stringsAsFactors = FALSE, check.names = FALSE,
+                           colClasses = "character", na.strings = character())
+    for (j in dbl) df[[j]] <- .fitrx_parse_doubles(raw[[j]])
+  }
+  df
+}

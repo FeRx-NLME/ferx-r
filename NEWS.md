@@ -68,6 +68,22 @@
     also gains `bind_theta_levels_from_fit`, which #370 will use to simulate
     these models with a fit's theta.
 
+## Bug fixes
+
+- **A `ferx_save_fit()` / `ferx_load_fit()` round trip now gives back every
+  number bit for bit.** Theta, omega, sigma, the covariance matrix and the
+  CSV tables (sdtab, EBEs, covtab, conditional distributions, trace) used to
+  be written with 15 significant digits, so a reloaded fit's estimates moved
+  in their last bit and its predictions by about 1e-14 (the warfarin
+  example's by up to 1.4e-14). `fit.json` is now written with 17 significant
+  digits, and each CSV double with the shortest text that reads back
+  exactly. R's own number parser is not correctly rounded on every platform
+  (about one in five 17-digit numbers comes back one ulp off on aarch64), so
+  the loader reads those columns through jsonlite's parser instead. The
+  trace file an `optimizer_trace = TRUE` fit reads from the engine goes
+  through the same reader. A bundle written before this fix still loads, with
+  the 15 digits it was written with.
+
 # ferx 0.4.0
 
 ## Breaking changes
