@@ -87,8 +87,9 @@ ferx_trace <- function(fit) {
 # from a live trace_path) and ferx_fit() (populating fit$trace right after
 # the fit completes, while the temp file still exists).
 .ferx_read_trace_csv <- function(path) {
-  # Exact doubles: the engine writes each value in its shortest round-trip
-  # form, and R's own parser would move some of them by an ulp.
+  # Exact doubles. The engine writes fixed-precision text ({:.6} / {:.9e}),
+  # so this cannot recover its values; it makes the save/load leg exact, as
+  # fit$trace goes through the same reader when a .fitrx bundle is loaded.
   tr <- .fitrx_read_csv_exact(path)
 
   na_cols <- c("grad_norm", "step_norm", "inner_iter_count",
