@@ -9,10 +9,10 @@ FITRX_FORMAT_VERSION <- "1"
 #' includes parameter estimates, per-subject EBEs, per-observation
 #' predictions, and the verbatim \code{.ferx} model source.
 #'
-#' Every number is written so that it reads back as the same double: the
-#' estimates, the per-subject and per-observation tables, and the predictions
-#' and simulations a reloaded fit drives are \code{identical()} to the
-#' original's.
+#' Every number is written so that it reads back exactly: every
+#' double value in the estimates and in the per-subject and per-observation
+#' tables reads back as the same double, and the predictions and simulations
+#' a reloaded fit drives are \code{identical()} to the original's.
 #'
 #' The schema is shared with the ferx-core Rust crate; see its
 #' \code{docs/src/file-formats/fitrx.md} for the full field reference.
