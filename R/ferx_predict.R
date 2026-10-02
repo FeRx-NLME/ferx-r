@@ -22,6 +22,7 @@
 #'   value for some subjects. They are also re-emitted as a single R warning.
 #'
 #' @inheritSection ferx_simulate Errors raised by the engine
+#' @inheritSection ferx_simulate Theta level blocks
 #'
 #' @examples
 #' ex <- ferx_example("warfarin")
@@ -62,7 +63,12 @@ ferx_predict <- function(model, data = NULL, fit = NULL) {
         sigma = fit_pieces$sigma,
         omega_iov_flat = fit_pieces$omega_iov_flat,
         omega_iov_dim = fit_pieces$omega_iov_dim,
-        residual_rho = fit_pieces$residual_rho
+        residual_rho = fit_pieces$residual_rho,
+        level_block = fit_pieces$level_block,
+        level_index = fit_pieces$level_index,
+        level_label = fit_pieces$level_label,
+        level_group = fit_pieces$level_group,
+        level_contrast = fit_pieces$level_contrast
       ),
       model, data
     )

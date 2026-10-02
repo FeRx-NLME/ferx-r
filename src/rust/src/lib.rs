@@ -1,5 +1,6 @@
 use extendr_api::prelude::*;
 use ferx_core::cancel::CancelFlag;
+use ferx_core::parser::model_parser::{LevelBinding, LevelBindings, LevelContrast};
 use ferx_core::types::*;
 use nalgebra::DMatrix;
 use std::collections::HashMap;
@@ -355,13 +356,6 @@ fn ferx_rust_fit(
             }
         }
 
-        // Re-apply the (now settings-merged) ODE solver tolerances onto the model's
-        // OdeSpec so call-time `ode_reltol` / `ode_abstol` / `ode_max_steps`
-        // overrides take effect. The parser already baked the [fit_options] values;
-        // this lets a `ferx_fit(settings = ...)` override win. No-op for analytical
-        // models.
-        parsed.model.sync_ode_solver_opts(&opts);
-
         // Read data via read_population_for, which handles [covariates] validation,
         // [data_selection] filters, and TTE endpoint routing in one call.
         // This replaces the previous 4-way dispatch that could not pass tte_cmts to
@@ -369,7 +363,7 @@ fn ferx_rust_fit(
         // subject.obs_records). It also fixes the pre-existing gap where the combined
         // covariates + filter case fell through to the filter-only path, losing the
         // covariate table.
-        let (population, covariate_table) = {
+        let (mut population, covariate_table) = {
             use ferx_core::api::read_population_for;
             use ferx_core::io::datareader::SelectionFilter;
             let filter = match SelectionFilter::from_opts(
@@ -394,6 +388,20 @@ fn ferx_rust_fit(
                 Err(e) => return Err(format!("Error reading data: {e}")),
             }
         };
+
+        // Bind `theta NAME[COL, ...]` level blocks against the data just read
+        // (ferx-r #370): the level count, and so the theta layout, is a property
+        // of the (selected) dataset. The bind re-parses `parsed.model`, so it has
+        // to come before every stamp on the model below - a stamp made earlier is
+        // silently lost. No-op without a re-parse for a model with no level block.
+        bind_design(&mut parsed, model_path, &mut population)?;
+
+        // Re-apply the (now settings-merged) ODE solver tolerances onto the model's
+        // OdeSpec so call-time `ode_reltol` / `ode_abstol` / `ode_max_steps`
+        // overrides take effect. The parser already baked the [fit_options] values;
+        // this lets a `ferx_fit(settings = ...)` override win. No-op for analytical
+        // models. After the level bind, which would otherwise drop it.
+        parsed.model.sync_ode_solver_opts(&opts);
 
         // An empty `method` vector means the R caller did not pass `method=` — keep
         // whatever the model file's [fit_options] selected (already in `opts` from
@@ -568,7 +576,12 @@ fn ferx_rust_fit(
         result.covariate_table = covariate_table;
 
         // Convert to R list
-        Ok(fit_result_to_list(&result, &population, &parsed.model))
+        Ok(fit_result_to_list(
+            &result,
+            &population,
+            &parsed.model,
+            &parsed.bindings.levels,
+        ))
     })
 }
 
@@ -601,7 +614,7 @@ fn ferx_rust_simulate(
         // parse_full_model_file (vs parse_model_file) so iov_column is available
         // for the reader; without it, models with kappa declarations panic in
         // pk_param_fn (Eta index >= n_bsv_eta).
-        let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
+        let mut parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
             Ok(p) => p,
             Err(e) => return Err(format!("Error parsing model: {e}")),
         };
@@ -611,7 +624,7 @@ fn ferx_rust_simulate(
         // `MDV=1` (ferx-core #957): here the DV is the column being produced, so
         // `DV = .` at a sampling time means "simulate here". `MDV=1` still excludes
         // the record, and fitting keeps the skip.
-        let (population, _) =
+        let (mut population, _) =
             match ferx_core::api::read_population_for_simulation(
                 &parsed.model,
                 &parsed.covariate_decls,
@@ -624,6 +637,11 @@ fn ferx_rust_simulate(
                 Ok(r) => r,
                 Err(e) => return Err(format!("Error reading data: {e}")),
             };
+
+        // A level block's theta layout comes from this design: the model's own
+        // initial values drive it, so the design's levels are the right ones
+        // (ferx-r #370). No-op for a model with no level block.
+        bind_design(&mut parsed, model_path, &mut population)?;
 
         let opts = ferx_core::SimulateOptions {
             seed: Some(seed as u64),
@@ -687,6 +705,11 @@ fn ferx_rust_simulate_from_fit(
     omega_iov_flat: Vec<f64>,
     omega_iov_dim: i32,
     residual_rho: Vec<f64>,
+    level_block: Vec<String>,
+    level_index: Vec<i32>,
+    level_label: Vec<String>,
+    level_group: Vec<i32>,
+    level_contrast: Vec<String>,
     n_sim: i32,
     seed: i32,
     match_method: &str,
@@ -697,7 +720,7 @@ fn ferx_rust_simulate_from_fit(
             Ok(m) => m,
             Err(e) => return Err(e),
         };
-        let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
+        let mut parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
             Ok(p) => p,
             Err(e) => return Err(format!("Error parsing model: {e}")),
         };
@@ -707,7 +730,7 @@ fn ferx_rust_simulate_from_fit(
         // `MDV=1` (ferx-core #957): here the DV is the column being produced, so
         // `DV = .` at a sampling time means "simulate here". `MDV=1` still excludes
         // the record, and fitting keeps the skip.
-        let (population, _) =
+        let (mut population, _) =
             match ferx_core::api::read_population_for_simulation(
                 &parsed.model,
                 &parsed.covariate_decls,
@@ -720,6 +743,17 @@ fn ferx_rust_simulate_from_fit(
                 Ok(r) => r,
                 Err(e) => return Err(format!("Error reading data: {e}")),
             };
+
+        // Place the design on the fit's theta layout before anything reads theta
+        // by position (ferx-r #370); see `bind_design_from_fit`.
+        let fit_levels = level_bindings_from_r(
+            &level_block,
+            &level_index,
+            &level_label,
+            &level_group,
+            &level_contrast,
+        )?;
+        bind_design_from_fit(&mut parsed, model_path, &mut population, &fit_levels)?;
 
         let params = match params_from_fit(
             &parsed.model,
@@ -797,13 +831,15 @@ fn ferx_rust_simulate_adaptive(
     max_decisions: i32,
 ) -> Robj {
     entry(move || {
-        let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
+        let mut parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
             Ok(p) => p,
             Err(e) => return Err(format!("ferx_simulate_adaptive: error parsing model: {e}")),
         };
         // The reactive controller is the model file's `[adaptive_dosing]` block; a
         // model without one cannot be simulated this way (use `ferx_simulate`).
-        let spec = match parsed.adaptive_dosing.as_ref() {
+        // Taken out of `parsed` rather than borrowed, so the level bind below can
+        // re-parse the model; the bind replaces `parsed.model` only.
+        let spec = match parsed.adaptive_dosing.take() {
             Some(s) => s,
             None => return Err(
                 "ferx_simulate_adaptive: model has no [adaptive_dosing] block (this entry point \
@@ -816,7 +852,7 @@ fn ferx_rust_simulate_adaptive(
         // `MDV=1` (ferx-core #957): here the DV is the column being produced, so
         // `DV = .` at a sampling time means "simulate here". `MDV=1` still excludes
         // the record, and fitting keeps the skip.
-        let (population, _) = match ferx_core::api::read_population_for_simulation(
+        let (mut population, _) = match ferx_core::api::read_population_for_simulation(
             &parsed.model,
             &parsed.covariate_decls,
             data_path,
@@ -828,6 +864,12 @@ fn ferx_rust_simulate_adaptive(
             Ok(r) => r,
             Err(e) => return Err(format!("ferx_simulate_adaptive: error reading data: {e}")),
         };
+
+        // A level block's theta layout comes from this design: the model's own
+        // initial values drive it, so the design's levels are the right ones
+        // (ferx-r #370). No-op for a model with no level block.
+        bind_design(&mut parsed, model_path, &mut population)
+            .map_err(|e| format!("ferx_simulate_adaptive: {e}"))?;
 
         // The spec owns the decision schedule (`at`) and the monitored signal
         // (`observe` / `with_assay_error`), so `decision_times` and `monitors` stay
@@ -852,7 +894,7 @@ fn ferx_rust_simulate_adaptive(
             &population,
             &parsed.model.default_params,
             n_sim as usize,
-            spec,
+            &spec,
             &opts,
         ) {
             // Adaptive returns a list rather than a bare frame, so the data-reader
@@ -1021,12 +1063,17 @@ fn ferx_rust_simulate_with_uncertainty(
     sir_resamples_n: i32,
     sir_resamples_dim: i32,
     residual_rho: Vec<f64>,
+    level_block: Vec<String>,
+    level_index: Vec<i32>,
+    level_label: Vec<String>,
+    level_group: Vec<i32>,
+    level_contrast: Vec<String>,
     n_uncertainty_draws: i32,
     n_sim_per_draw: i32,
     seed: i32,
 ) -> Robj {
     entry(move || {
-        let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
+        let mut parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
             Ok(p) => p,
             Err(e) => return Err(format!("Error parsing model: {e}")),
         };
@@ -1035,7 +1082,7 @@ fn ferx_rust_simulate_with_uncertainty(
         // `MDV=1` (ferx-core #957): here the DV is the column being produced, so
         // `DV = .` at a sampling time means "simulate here". `MDV=1` still excludes
         // the record, and fitting keeps the skip.
-        let (population, _) =
+        let (mut population, _) =
             match ferx_core::api::read_population_for_simulation(
                 &parsed.model,
                 &parsed.covariate_decls,
@@ -1048,6 +1095,17 @@ fn ferx_rust_simulate_with_uncertainty(
                 Ok(r) => r,
                 Err(e) => return Err(format!("Error reading data: {e}")),
             };
+
+        // Place the design on the fit's theta layout before anything reads theta
+        // by position (ferx-r #370); see `bind_design_from_fit`.
+        let fit_levels = level_bindings_from_r(
+            &level_block,
+            &level_index,
+            &level_label,
+            &level_group,
+            &level_contrast,
+        )?;
+        bind_design_from_fit(&mut parsed, model_path, &mut population, &fit_levels)?;
 
         // Decode the method string to the engine enum.
         let uncertainty_method = match method.trim().to_lowercase().as_str() {
@@ -1116,7 +1174,7 @@ fn ferx_rust_predict(
     data_path: &str,
 ) -> Robj {
     entry(move || {
-        let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
+        let mut parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
             Ok(p) => p,
             Err(e) => return Err(format!("Error parsing model: {e}")),
         };
@@ -1126,7 +1184,7 @@ fn ferx_rust_predict(
         // design template (`DV = .` at every sampling time) is as valid here as it is
         // for `simulate()`, and reading it with the fitting policy would return an
         // empty frame (ferx-core #957, ferx-r #286). `MDV=1` still excludes the record.
-        let (population, _) =
+        let (mut population, _) =
             match ferx_core::api::read_population_for_simulation(
                 &parsed.model,
                 &parsed.covariate_decls,
@@ -1139,6 +1197,11 @@ fn ferx_rust_predict(
                 Ok(r) => r,
                 Err(e) => return Err(format!("Error reading data: {e}")),
             };
+
+        // A level block's theta layout comes from this design: the model's own
+        // initial values drive it, so the design's levels are the right ones
+        // (ferx-r #370). No-op for a model with no level block.
+        bind_design(&mut parsed, model_path, &mut population)?;
 
         let results = ferx_core::predict(&parsed.model, &population, &parsed.model.default_params)
             .map_err(|e| format!("Error predicting: {e}"))?;
@@ -1182,9 +1245,14 @@ fn ferx_rust_predict_from_fit(
     omega_iov_flat: Vec<f64>,
     omega_iov_dim: i32,
     residual_rho: Vec<f64>,
+    level_block: Vec<String>,
+    level_index: Vec<i32>,
+    level_label: Vec<String>,
+    level_group: Vec<i32>,
+    level_contrast: Vec<String>,
 ) -> Robj {
     entry(move || {
-        let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
+        let mut parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
             Ok(p) => p,
             Err(e) => return Err(format!("Error parsing model: {e}")),
         };
@@ -1194,7 +1262,7 @@ fn ferx_rust_predict_from_fit(
         // design template (`DV = .` at every sampling time) is as valid here as it is
         // for `simulate()`, and reading it with the fitting policy would return an
         // empty frame (ferx-core #957, ferx-r #286). `MDV=1` still excludes the record.
-        let (population, _) =
+        let (mut population, _) =
             match ferx_core::api::read_population_for_simulation(
                 &parsed.model,
                 &parsed.covariate_decls,
@@ -1207,6 +1275,17 @@ fn ferx_rust_predict_from_fit(
                 Ok(r) => r,
                 Err(e) => return Err(format!("Error reading data: {e}")),
             };
+
+        // Place the design on the fit's theta layout before anything reads theta
+        // by position (ferx-r #370); see `bind_design_from_fit`.
+        let fit_levels = level_bindings_from_r(
+            &level_block,
+            &level_index,
+            &level_label,
+            &level_group,
+            &level_contrast,
+        )?;
+        bind_design_from_fit(&mut parsed, model_path, &mut population, &fit_levels)?;
 
         let params = match params_from_fit(
             &parsed.model,
@@ -1282,13 +1361,13 @@ fn survival_results_to_df(results: &[ferx_core::SurvivalPredictionResult]) -> Ro
 #[extendr]
 fn ferx_rust_predict_survival(model_path: &str, data_path: &str, times: Vec<f64>) -> Robj {
     entry(move || {
-        let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
+        let mut parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
             Ok(p) => p,
             Err(e) => return Err(format!("Error parsing model: {e}")),
         };
         let iov_col = parsed.fit_options.iov_column.clone();
 
-        let (population, _) = match ferx_core::api::read_population_for(
+        let (mut population, _) = match ferx_core::api::read_population_for(
             &parsed.model,
             &parsed.covariate_decls,
             data_path,
@@ -1300,6 +1379,11 @@ fn ferx_rust_predict_survival(model_path: &str, data_path: &str, times: Vec<f64>
             Ok(r) => r,
             Err(e) => return Err(format!("Error reading data: {e}")),
         };
+
+        // A level block's theta layout comes from this design: the model's own
+        // initial values drive it, so the design's levels are the right ones
+        // (ferx-r #370). No-op for a model with no level block.
+        bind_design(&mut parsed, model_path, &mut population)?;
 
         let results =
             ferx_core::predict_survival(&parsed.model, &population, &parsed.model.default_params, &times)
@@ -1336,15 +1420,20 @@ fn ferx_rust_predict_survival_from_fit(
     omega_iov_flat: Vec<f64>,
     omega_iov_dim: i32,
     residual_rho: Vec<f64>,
+    level_block: Vec<String>,
+    level_index: Vec<i32>,
+    level_label: Vec<String>,
+    level_group: Vec<i32>,
+    level_contrast: Vec<String>,
 ) -> Robj {
     entry(move || {
-        let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
+        let mut parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
             Ok(p) => p,
             Err(e) => return Err(format!("Error parsing model: {e}")),
         };
         let iov_col = parsed.fit_options.iov_column.clone();
 
-        let (population, _) = match ferx_core::api::read_population_for(
+        let (mut population, _) = match ferx_core::api::read_population_for(
             &parsed.model,
             &parsed.covariate_decls,
             data_path,
@@ -1356,6 +1445,17 @@ fn ferx_rust_predict_survival_from_fit(
             Ok(r) => r,
             Err(e) => return Err(format!("Error reading data: {e}")),
         };
+
+        // Place the design on the fit's theta layout before anything reads theta
+        // by position (ferx-r #370); see `bind_design_from_fit`.
+        let fit_levels = level_bindings_from_r(
+            &level_block,
+            &level_index,
+            &level_label,
+            &level_group,
+            &level_contrast,
+        )?;
+        bind_design_from_fit(&mut parsed, model_path, &mut population, &fit_levels)?;
 
         let params = match params_from_fit(
             &parsed.model,
@@ -1408,6 +1508,11 @@ fn ferx_rust_npde_from_fit(
     omega_iov_flat: Vec<f64>,
     omega_iov_dim: i32,
     residual_rho: Vec<f64>,
+    level_block: Vec<String>,
+    level_index: Vec<i32>,
+    level_label: Vec<String>,
+    level_group: Vec<i32>,
+    level_contrast: Vec<String>,
     nsim: i32,
     seed: i32,
 ) -> Robj {
@@ -1416,7 +1521,7 @@ fn ferx_rust_npde_from_fit(
             return Err("npde error: nsim must be a positive integer".to_string());
         }
 
-        let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
+        let mut parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
             Ok(p) => p,
             Err(e) => return Err(format!("Error parsing model: {e}")),
         };
@@ -1438,7 +1543,7 @@ fn ferx_rust_npde_from_fit(
         };
         let filter_opt = if filter.is_empty() { None } else { Some(&filter) };
 
-        let (population, _) = match ferx_core::api::read_population_for(
+        let (mut population, _) = match ferx_core::api::read_population_for(
             &parsed.model,
             &parsed.covariate_decls,
             data_path,
@@ -1450,6 +1555,17 @@ fn ferx_rust_npde_from_fit(
             Ok(r) => r,
             Err(e) => return Err(format!("Error reading data: {e}")),
         };
+
+        // Place the design on the fit's theta layout before anything reads theta
+        // by position (ferx-r #370); see `bind_design_from_fit`.
+        let fit_levels = level_bindings_from_r(
+            &level_block,
+            &level_index,
+            &level_label,
+            &level_group,
+            &level_contrast,
+        )?;
+        bind_design_from_fit(&mut parsed, model_path, &mut population, &fit_levels)?;
 
         let params = match params_from_fit(
             &parsed.model,
@@ -1500,6 +1616,282 @@ fn ferx_rust_npde_from_fit(
 
         Ok(data_frame!(ID = id, TIME = time, NPDE = npde, NPD = npd).into())
     })
+}
+
+// ---------------------------------------------------------------------------
+//  Theta level blocks (ferx-r #370)
+// ---------------------------------------------------------------------------
+//
+// A `theta NAME[COL, ...]` block has one theta per observed combination of the
+// columns, so its theta layout is fixed by the data it is bound to. The rule:
+// the fit binds against its own data with `bind_theta_levels`; every later use
+// of that fit binds the design against the fit's layout with
+// `bind_theta_levels_from_fit`, so a theta is never read at a position the fit
+// did not give it; a use without a fit binds the design's own levels. Every
+// bind re-parses `parsed.model`, so it runs before any stamp on the model.
+//
+// The fit's bindings travel to R as `fit$theta_levels` (one row per level) and
+// come back flattened through `validate_fit_for_params()`. ferx-core's
+// `FitResult` has no slot for them yet (FeRx-NLME/ferx-core#1621).
+
+/// The model text a level bind re-parses, read only when the model declares a
+/// level block (the binders early-return otherwise, and so does every caller).
+fn level_model_text(model_path: &str) -> std::result::Result<String, String> {
+    std::fs::read_to_string(model_path).map_err(|e| {
+        format!("cannot re-read the model file `{model_path}` to bind its theta level blocks: {e}")
+    })
+}
+
+fn declares_level_blocks(parsed: &ParsedModel) -> bool {
+    !parsed.model.theta_blocks().level_blocks().is_empty()
+}
+
+fn level_block_names(model: &CompiledModel) -> String {
+    model
+        .theta_blocks()
+        .level_blocks()
+        .iter()
+        .map(|d| format!("`{}`", d.name()))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Bind a design's own levels, for a use without a fit. The engine's refusal is
+/// passed through unprefixed: neither stage prefix applies, and either would
+/// let `.ferx_engine_call()`'s single-error fallback attach an unrelated code.
+fn bind_design(
+    parsed: &mut ParsedModel,
+    model_path: &str,
+    population: &mut Population,
+) -> std::result::Result<(), String> {
+    if !declares_level_blocks(parsed) {
+        return Ok(());
+    }
+    let model_text = level_model_text(model_path)?;
+    ferx_core::api::bind_theta_levels(parsed, &model_text, population)
+}
+
+/// The one from-fit binder: places a design on the theta layout a fit was bound
+/// with, before anything reads the fit's theta by position.
+///
+/// A model that declares level blocks paired with a fit that carries no
+/// bindings is refused here, in R's terms, rather than with the engine's "was
+/// the model edited" text, which would be wrong for the usual cause. Everything
+/// else is the engine's call, passed through unprefixed - above all the refusal
+/// of design levels the fit never observed, which names every such label.
+///
+/// FeRx-NLME/ferx-core#1619: the `[covariate_model]` statistics a fit was bound
+/// with are bound from the fit here too, once core can carry them, and nowhere
+/// else (ferx-r #412).
+fn bind_design_from_fit(
+    parsed: &mut ParsedModel,
+    model_path: &str,
+    population: &mut Population,
+    fit_levels: &LevelBindings,
+) -> std::result::Result<(), String> {
+    if fit_levels.is_empty() {
+        if !declares_level_blocks(parsed) {
+            return Ok(());
+        }
+        return Err(format!(
+            "the model declares the theta level block(s) {}, but this fit carries no theta \
+             level bindings (`fit$theta_levels` is empty or absent), so there is no fitted \
+             theta layout to place the design on. A .fitrx bundle written by ferx-core, or a \
+             fit made before ferx recorded the bindings, does not carry them. Refit with \
+             `ferx_fit()` to record them.",
+            level_block_names(&parsed.model)
+        ));
+    }
+    let model_text = level_model_text(model_path)?;
+    ferx_core::api::bind_theta_levels_from_fit(parsed, &model_text, population, fit_levels)
+}
+
+/// SIR and the standalone covariance step re-read the data to keep their hash
+/// integrity check, and that read binds no level block, so the fitted theta
+/// would not fit the unbound model. Refused up front, naming the block, until
+/// ferx-core can run them on a fit's own bindings (FeRx-NLME/ferx-core#1622).
+fn refuse_level_blocks(model: &CompiledModel, entry_point: &str) -> std::result::Result<(), String> {
+    if model.theta_blocks().level_blocks().is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "{entry_point}: not supported yet for a model with the theta level block(s) {}. This \
+         step re-reads the data without binding the block to it, so it cannot place the \
+         fitted theta (FeRx-NLME/ferx-core#1622).",
+        level_block_names(model)
+    ))
+}
+
+/// The DSL token for a level contrast - the spelling `contrast = ...` takes in
+/// a model file. Exhaustive with no wildcard: a contrast ferx-core adds is a
+/// compile error here rather than a fit whose bindings cannot travel.
+fn level_contrast_token(contrast: LevelContrast) -> &'static str {
+    match contrast {
+        LevelContrast::Auto => "auto",
+        LevelContrast::SumToZero => "sum_to_zero",
+        LevelContrast::SumToZeroWithin => "sum_to_zero_within",
+        LevelContrast::Ref => "ref",
+        LevelContrast::Unconstrained => "none",
+    }
+}
+
+/// The inverse of [`level_contrast_token`], on the canonical spelling only: the
+/// tokens come from a fit, not from a user, so anything else means the fit was
+/// edited and is refused by name rather than read as some default.
+fn level_contrast_from_token(token: &str) -> std::result::Result<LevelContrast, String> {
+    match token {
+        "auto" => Ok(LevelContrast::Auto),
+        "sum_to_zero" => Ok(LevelContrast::SumToZero),
+        "sum_to_zero_within" => Ok(LevelContrast::SumToZeroWithin),
+        "ref" => Ok(LevelContrast::Ref),
+        "none" => Ok(LevelContrast::Unconstrained),
+        other => Err(format!(
+            "the fit's theta level bindings (`fit$theta_levels`) carry the unknown contrast \
+             `{other}`; expected one of auto, sum_to_zero, sum_to_zero_within, ref, none"
+        )),
+    }
+}
+
+/// `fit$theta_levels`: one row per level, blocks in declaration order and
+/// levels in the order the engine bound them. `theta_name` is the level's entry
+/// in `theta_names` (`NAME[label]`), NA for a level the contrast derives from
+/// the others; its value is not reported (FeRx-NLME/ferx-core#1623). Zero rows
+/// for a model with no level block.
+fn level_bindings_to_r(
+    model: &CompiledModel,
+    bindings: &LevelBindings,
+    theta_names: &[String],
+) -> Robj {
+    // Declaration order first; a binding the model does not declare cannot
+    // happen on a bound model, but would still be reported rather than dropped.
+    let mut order: Vec<&str> = model
+        .theta_blocks()
+        .level_blocks()
+        .iter()
+        .map(|d| d.name())
+        .filter(|n| bindings.contains_key(*n))
+        .collect();
+    let mut extra: Vec<&str> = bindings
+        .keys()
+        .map(String::as_str)
+        .filter(|n| !order.contains(n))
+        .collect();
+    extra.sort_unstable();
+    order.extend(extra);
+
+    let mut block: Vec<String> = Vec::new();
+    let mut index: Vec<i32> = Vec::new();
+    let mut label: Vec<String> = Vec::new();
+    let mut group: Vec<Option<i32>> = Vec::new();
+    let mut contrast: Vec<String> = Vec::new();
+    let mut theta_name: Vec<Option<String>> = Vec::new();
+    for name in order {
+        let b = &bindings[name];
+        for (i, l) in b.labels.iter().enumerate() {
+            let tn = format!("{name}[{l}]");
+            block.push(name.to_string());
+            index.push(i as i32 + 1);
+            label.push(l.clone());
+            group.push(b.groups.get(i).map(|g| *g as i32));
+            contrast.push(level_contrast_token(b.contrast).to_string());
+            theta_name.push(theta_names.contains(&tn).then_some(tn));
+        }
+    }
+    let n = block.len();
+    finish_df(
+        vec![
+            ("block", block.into()),
+            ("index", index.into()),
+            ("label", label.into()),
+            ("group", group.into()),
+            ("contrast", contrast.into()),
+            ("theta_name", theta_name.into()),
+        ],
+        n,
+    )
+}
+
+/// Rebuild a fit's [`LevelBindings`] from the flattened `fit$theta_levels`
+/// columns. Refuses a table whose columns are not parallel, whose indices within
+/// a block are not exactly 1..n, whose contrast varies within a block, or whose
+/// group is missing or negative: each would bind the design against a layout the
+/// fit never had.
+fn level_bindings_from_r(
+    block: &[String],
+    index: &[i32],
+    label: &[String],
+    group: &[i32],
+    contrast: &[String],
+) -> std::result::Result<LevelBindings, String> {
+    const WHAT: &str = "the fit's theta level bindings (`fit$theta_levels`)";
+    let n = block.len();
+    if [index.len(), label.len(), group.len(), contrast.len()]
+        .iter()
+        .any(|&m| m != n)
+    {
+        return Err(format!(
+            "{WHAT} are malformed: the block, index, label, group and contrast columns have \
+             {n}, {}, {}, {} and {} rows; they must be parallel",
+            index.len(),
+            label.len(),
+            group.len(),
+            contrast.len()
+        ));
+    }
+    // Rows grouped by block, in first-seen order.
+    let mut names: Vec<&str> = Vec::new();
+    let mut rows: HashMap<&str, Vec<usize>> = HashMap::new();
+    for (r, b) in block.iter().enumerate() {
+        if !rows.contains_key(b.as_str()) {
+            names.push(b.as_str());
+        }
+        rows.entry(b.as_str()).or_default().push(r);
+    }
+    let mut out = LevelBindings::new();
+    for name in names {
+        let mut members = rows.remove(name).unwrap_or_default();
+        members.sort_by_key(|&r| index[r]);
+        let indices: Vec<i32> = members.iter().map(|&r| index[r]).collect();
+        if indices.iter().enumerate().any(|(i, &k)| k != i as i32 + 1) {
+            return Err(format!(
+                "{WHAT} are malformed: block `{name}` has the level indices {:?}; they must be \
+                 exactly 1..{}",
+                indices,
+                members.len()
+            ));
+        }
+        let tokens: Vec<&str> = members.iter().map(|&r| contrast[r].as_str()).collect();
+        if tokens.iter().any(|t| *t != tokens[0]) {
+            return Err(format!(
+                "{WHAT} are malformed: block `{name}` mixes the contrasts {:?}; a block has one",
+                tokens
+            ));
+        }
+        let contrast = level_contrast_from_token(tokens[0])?;
+        let mut groups = Vec::with_capacity(members.len());
+        for &r in &members {
+            let g = group[r];
+            // R's NA_integer_ arrives as i32::MIN, which the sign test catches.
+            if g < 0 {
+                return Err(format!(
+                    "{WHAT} are malformed: block `{name}` level {} has the group {}; groups \
+                     are non-negative integers",
+                    index[r],
+                    if g == i32::MIN { "NA".to_string() } else { g.to_string() }
+                ));
+            }
+            groups.push(g as usize);
+        }
+        out.insert(
+            name.to_string(),
+            LevelBinding {
+                labels: members.iter().map(|&r| label[r].clone()).collect(),
+                groups,
+                contrast,
+            },
+        );
+    }
+    Ok(out)
 }
 
 // -- Helper: parse a single R-side propensity-matching token into an
@@ -2309,6 +2701,7 @@ fn fit_result_to_list(
     result: &FitResult,
     population: &Population,
     model: &CompiledModel,
+    level_bindings: &LevelBindings,
 ) -> List {
     // Theta
     let theta_names: Vec<String> = result.theta_names.clone();
@@ -2882,6 +3275,9 @@ fn fit_result_to_list(
         n_parameters = result.n_parameters as i32,
         n_iterations = result.n_iterations as i32,
         theta = theta_values,
+        // One row per theta level-block level (ferx-r #370); zero rows for a
+        // model with no level block. Built before `theta_names` moves.
+        theta_levels = level_bindings_to_r(model, level_bindings, &theta_names),
         theta_names = theta_names,
         omega = omega_flat,
         omega_dim = n_eta as i32,
@@ -3819,6 +4215,9 @@ fn ferx_rust_sir(
                 model_path, e
             )),
         };
+        // Not on a level-block fit yet (ferx-r #370): this path re-reads the data
+        // to keep the integrity check, and that read binds no level block.
+        refuse_level_blocks(&parsed.model, "ferx_sir")?;
         let model = &parsed.model;
         let template = &model.default_params;
 
@@ -4243,6 +4642,9 @@ fn ferx_rust_covariance(
                 model_path, e
             )),
         };
+        // Not on a level-block fit yet (ferx-r #370): this path re-reads the data
+        // to keep the integrity check, and that read binds no level block.
+        refuse_level_blocks(&parsed.model, "ferx_covariance")?;
         let model = &parsed.model;
         let template = &model.default_params;
 
@@ -6101,7 +6503,16 @@ fn search_final_fit(
     let out = std::fs::write(&path, model_text)
         .map_err(|e| format!("cannot write `{}`: {e}", path.display()))
         .and_then(|()| ferx_core::prepare_run(&path.to_string_lossy(), data))
-        .map(|prepared| fit_result_to_list(fit, &prepared.population, &prepared.parsed.model));
+        .map(|prepared| {
+            // `prepare_run` binds level blocks, so a search fit carries the same
+            // `theta_levels` as `ferx_fit()` and can drive `ferx_simulate()` too.
+            fit_result_to_list(
+                fit,
+                &prepared.population,
+                &prepared.parsed.model,
+                &prepared.parsed.bindings.levels,
+            )
+        });
 
     let _ = std::fs::remove_file(&path);
     let _ = std::fs::remove_dir(&dir);

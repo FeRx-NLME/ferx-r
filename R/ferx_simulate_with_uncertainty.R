@@ -65,6 +65,7 @@
 #'   Row count: \code{n_uncertainty_draws * n_sim_per_draw * n_obs}.
 #'
 #' @inheritSection ferx_simulate Errors raised by the engine
+#' @inheritSection ferx_simulate Theta level blocks
 #'
 #' @examples
 #' \dontrun{
@@ -135,6 +136,11 @@ ferx_simulate_with_uncertainty <- function(model, data, fit,
       sir_resamples_n      = unc_pieces$sir_resamples_n,
       sir_resamples_dim    = unc_pieces$sir_resamples_dim,
       residual_rho         = fit_pieces$residual_rho,
+      level_block          = fit_pieces$level_block,
+      level_index          = fit_pieces$level_index,
+      level_label          = fit_pieces$level_label,
+      level_group          = fit_pieces$level_group,
+      level_contrast       = fit_pieces$level_contrast,
       n_uncertainty_draws  = as.integer(n_uncertainty_draws),
       n_sim_per_draw       = as.integer(n_sim_per_draw),
       seed                 = as.integer(seed)
