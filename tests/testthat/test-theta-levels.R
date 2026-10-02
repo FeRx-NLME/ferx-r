@@ -563,3 +563,83 @@ test_that("T13: the counted form keeps its names and an empty theta_levels", {
   # The counted form drives a from-fit prediction with no bindings at all.
   expect_true(all(is.finite(ferx_predict(counted, data, fit = fit)$PRED)))
 })
+
+# --- R1: a tampered theta_levels is refused by the glue -------------------------
+
+test_that("R1: the glue refuses a theta_levels table it cannot trust", {
+  b <- tl_base()
+  refused <- function(tl, pattern) {
+    fit <- b$fit
+    fit$theta_levels <- tl
+    expect_error(ferx_predict(b$model, b$data, fit = fit), pattern, fixed = TRUE)
+  }
+  tl <- b$fit$theta_levels
+  # Columns that are not parallel (a list, since a data frame cannot be).
+  ragged <- as.list(tl)
+  ragged$label <- ragged$label[-1]
+  refused(ragged, "columns have 6, 6, 5, 6 and 6 rows; they must be parallel")
+  # A level missing from the block.
+  refused(tl[-3, ], "has the level indices [1, 2, 4, 5, 6]; they must be exactly 1..5")
+  # An NA index, shown as R shows it.
+  na_index <- tl
+  na_index$index[2] <- NA_integer_
+  refused(na_index, "has the level indices [NA, 1, 3, 4, 5, 6]")
+  # Two levels under one label: the engine would blame an unseen level.
+  dup <- tl
+  dup$label[2] <- dup$label[1]
+  refused(dup, "gives the label `STUDY=1,TIME=1` to levels 1 and 2")
+  # A contrast that changes inside the block.
+  mixed <- tl
+  mixed$contrast[2] <- "none"
+  refused(mixed, "mixes the contrasts")
+  # A missing or negative group.
+  na_group <- tl
+  na_group$group[2] <- NA_integer_
+  refused(na_group, "level 2 has the group NA")
+  neg_group <- tl
+  neg_group$group[2] <- -1L
+  refused(neg_group, "level 2 has the group -1")
+})
+
+# --- R6: a malformed bundle entry is refused by the loader ----------------------
+
+test_that("R6: the loader refuses a malformed r_extras$theta_levels", {
+  wire <- list(
+    block = list("P", "P"), index = list(1L, 2L), label = list("A=1", "A=2"),
+    group = list(0L, 0L), contrast = list("none", "none"),
+    theta_name = list("P[A=1]", NULL)
+  )
+  from_wire <- ferx:::.fitrx_theta_levels_from_wire
+  # The well-formed entry, with JSON null read back as NA.
+  ok <- from_wire(wire)
+  expect_identical(ok$theta_name, c("P[A=1]", NA))
+  expect_identical(ok$index, 1:2)
+  missing_col <- wire
+  missing_col$contrast <- NULL
+  expect_error(from_wire(missing_col), "expected the columns", fixed = TRUE)
+  ragged <- wire
+  ragged$label <- list("A=1")
+  expect_error(from_wire(ragged), "the columns differ in length", fixed = TRUE)
+  null_label <- wire
+  null_label$label <- list("A=1", NULL)
+  expect_error(from_wire(null_label), "column `label` has a null", fixed = TRUE)
+  fractional <- wire
+  fractional$index <- list(1, 2.5)
+  expect_error(from_wire(fractional),
+               "column `index` has an entry that is not a single integer",
+               fixed = TRUE)
+})
+
+# --- R2: search tools' final fits carry theta_levels ---------------------------
+
+test_that("R2: a search tool's final fit carries theta_levels and drives predict", {
+  skip_on_cran()
+  b <- tl_base()
+  res <- ferx_ruvsearch(b$model, b$data, progress = FALSE)
+  expect_s3_class(res$fit, "ferx_fit")
+  expect_identical(nrow(res$fit$theta_levels), 6L)
+  expect_identical(res$fit$theta_levels$label, b$fit$theta_levels$label)
+  pred <- ferx_predict(res$final_model_path, b$data, fit = res$fit)
+  expect_identical(nrow(pred), 6L)
+  expect_true(all(is.finite(pred$PRED)))
+})
