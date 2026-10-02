@@ -822,5 +822,22 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   for (k in r_only_keys) {
     if (!is.null(fit[[k]])) out[[k]] <- fit[[k]]
   }
+  # Theta level-block bindings (#370). The cross-language schema has no slot
+  # for them yet (FeRx-NLME/ferx-core#1621), so they ride here, and without
+  # them the reloaded fit cannot drive a simulation of its own model.
+  tl <- .fitrx_theta_levels_to_wire(fit$theta_levels)
+  if (!is.null(tl)) out$theta_levels <- tl
+  out
+}
+
+# `fit$theta_levels` as columns of JSON arrays. `r_extras` is skipped by the
+# array-key table, so every column is wrapped here: `auto_unbox` would write a
+# one-level block's columns as bare scalars, and the loader insists on arrays.
+# NA (a derived level's `theta_name`) is written as JSON null.
+.fitrx_theta_levels_to_wire <- function(tl) {
+  if (!is.data.frame(tl)) return(NULL)
+  cols <- c("block", "index", "label", "group", "contrast", "theta_name")
+  out <- lapply(cols, function(k) as.list(unname(tl[[k]])))
+  names(out) <- cols
   out
 }

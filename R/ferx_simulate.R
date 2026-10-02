@@ -5,6 +5,28 @@
 #' and sigma replace the model file's initial values - which is the usual flow
 #' after \code{\link{ferx_fit}} (e.g. for posterior-predictive checks or VPCs).
 #'
+#' @section Theta level blocks:
+#' A \code{theta NAME[COL, ...]} level block has one theta per combination of
+#' the columns observed in the data it is bound to. With a \code{fit}, the
+#' design in \code{data} is placed on the \strong{fit's} levels, recorded in
+#' \code{fit$theta_levels}: each design record reads the theta its level was
+#' estimated under, whatever order or subset of the fit's levels the design
+#' holds. A design level the fit never observed is refused, naming every such
+#' level, because no theta was estimated for it. In particular:
+#' \itemize{
+#'   \item A block keyed on \code{TIME} can be simulated only at the fit's
+#'     observation times. Use the fit's own data as the VPC design; a denser
+#'     or different time grid has no fitted theta.
+#'   \item A study the fit never saw cannot be simulated with fitted level
+#'     thetas.
+#'   \item A block whose columns do not include \code{TIME} is unaffected by
+#'     the time grid.
+#' }
+#' Without a \code{fit}, the design's own levels are bound and the model's
+#' initial values are used. A fit without \code{theta_levels} (a \code{.fitrx}
+#' written by ferx-core, or one saved before ferx recorded them) is refused on
+#' a level-block model; refit it with \code{\link{ferx_fit}}.
+#'
 #' @section Which predictive distribution you get:
 #' \code{ferx_simulate()} draws a \strong{fresh set of random effects for every
 #' ID in \code{data}, in every replicate}, and adds residual error on top. At
@@ -209,6 +231,11 @@ ferx_simulate <- function(model, data = NULL, n_sim = 1L, seed = 42L, fit = NULL
         omega_iov_flat = fit_pieces$omega_iov_flat,
         omega_iov_dim = fit_pieces$omega_iov_dim,
         residual_rho = fit_pieces$residual_rho,
+        level_block = fit_pieces$level_block,
+        level_index = fit_pieces$level_index,
+        level_label = fit_pieces$level_label,
+        level_group = fit_pieces$level_group,
+        level_contrast = fit_pieces$level_contrast,
         n_sim = as.integer(n_sim),
         seed = as.integer(seed),
         match_method = match_method,

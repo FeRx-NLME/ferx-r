@@ -436,6 +436,10 @@ ferx_load_fit <- function(path) {
       out[[key]] <- extras[[key]]
     }
   }
+  # Theta level-block bindings (#370): absent from a bundle written by ferx-core
+  # or before #370, which leaves `theta_levels` NULL - and the simulate paths
+  # refusing a level-block model with that cause named.
+  out$theta_levels <- .fitrx_theta_levels_from_wire(extras$theta_levels)
   # Tri-state verdicts (ferx-core #1177) are NA when the optimizer recorded no
   # verdict. `NA` serialises to JSON null and assigning NULL back would drop
   # the key entirely, turning a documented `NA` into `is.na(x)` on a
@@ -444,6 +448,55 @@ ferx_load_fit <- function(path) {
   if (is.null(out$estimate_near_boundary)) out$estimate_near_boundary <- NA
   if (is.null(out$max_abs_correlation)) out$max_abs_correlation <- NA_real_
   out
+}
+
+# Rebuild `fit$theta_levels` from its wire form (see
+# `.fitrx_theta_levels_to_wire()`): six columns, each a JSON array of one
+# scalar per level. The types are rebuilt explicitly, because a JSON array
+# carries none, and through the constructor `ferx_fit()` uses, so the reloaded
+# frame is identical to the saved one. A column that is not an array, or not
+# as long as the others, is refused rather than read into a wrong layout. The
+# contrast tokens are checked where they are used, by the glue.
+.fitrx_theta_levels_from_wire <- function(w) {
+  if (is.null(w)) return(NULL)
+  cols <- c("block", "index", "label", "group", "contrast", "theta_name")
+  bad <- function(why) {
+    stop("ferx_load_fit: the bundle's theta level bindings (r_extras$theta_levels) ",
+         "are malformed: ", why, ".", call. = FALSE)
+  }
+  if (!is.list(w) || !all(cols %in% names(w))) {
+    bad(paste0("expected the columns ", paste(cols, collapse = ", ")))
+  }
+  for (k in cols) {
+    if (!is.list(w[[k]])) bad(sprintf("column `%s` is not an array", k))
+  }
+  n <- length(w$block)
+  if (any(lengths(w[cols]) != n)) bad("the columns differ in length")
+  # `type` is the column's R type; `nullable` columns read JSON null as NA.
+  scalar <- function(k, type, nullable = FALSE) {
+    na <- if (type == "integer") NA_integer_ else NA_character_
+    vapply(w[[k]], function(v) {
+      if (is.null(v)) {
+        if (nullable) return(na)
+        bad(sprintf("column `%s` has a null", k))
+      }
+      ok <- length(v) == 1L && if (type == "integer") {
+        is.numeric(v) && v == round(v)
+      } else {
+        is.character(v)
+      }
+      if (!ok) bad(sprintf("column `%s` has an entry that is not a single %s", k, type))
+      if (type == "integer") as.integer(v) else v
+    }, na, USE.NAMES = FALSE)
+  }
+  .ferx_theta_levels_frame(
+    block = scalar("block", "character"),
+    index = scalar("index", "integer"),
+    label = scalar("label", "character"),
+    group = scalar("group", "integer"),
+    contrast = scalar("contrast", "character"),
+    theta_name = scalar("theta_name", "character", nullable = TRUE)
+  )
 }
 
 .fitrx_method_label <- function(token) {
