@@ -791,7 +791,11 @@ group, 0-based), \code{contrast} (the resolved convention:
 \code{"none"}) and \code{theta_name} (the level's name in
 \code{theta}, \code{NA} for a level the contrast derives from the
 others, whose value is not reported). Zero rows for a model with no
-level block. \code{\link{ferx_simulate}} and the other functions that
+level block. \code{NULL} on a fit loaded by \code{\link{ferx_load_fit}}
+from a bundle that does not record the bindings (one written by
+ferx-core, or saved before ferx recorded them): unknown, not empty, so
+test it with \code{NROW(fit$theta_levels) > 0}.
+\code{\link{ferx_simulate}} and the other functions that
 take a \code{fit} use it to place a design on the fit's levels; see
 the "Theta level blocks" section there.}
 \item{omega}{Between-subject variability covariance matrix. Row and column
