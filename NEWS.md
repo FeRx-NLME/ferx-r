@@ -1,3 +1,73 @@
+# ferx 0.4.0.9000 (development version)
+
+## Breaking changes
+
+- **ferx now builds against ferx-core `9423e333`**, up from the `v0.4.0`
+  release (`2a6076af`). These engine changes reach every fit, prediction
+  and simulation entry point with no change to the package's own code:
+
+  - **Results move on datasets with mid-timeline `SS=1` records, EVID=3/4
+    resets, or lagged doses**, where ferx now does what NONMEM does:
+    - a mid-timeline `SS=1` record resets the system, so an earlier dose no
+      longer contributes after it
+      ([#1576](https://github.com/FeRx-NLME/ferx-core/issues/1576));
+    - a dose row before a co-timed `SS=1` row contributes nothing, and a
+      pending lagged dose is cancelled at the `SS=1` record
+      ([#1588](https://github.com/FeRx-NLME/ferx-core/issues/1588));
+    - an `SS=1` record stops every infusion and `zero_order` window recorded
+      before it ([#1586](https://github.com/FeRx-NLME/ferx-core/issues/1586));
+    - an EVID=3/4 reset cancels a lagged dose recorded before it that has not
+      arrived yet ([#1587](https://github.com/FeRx-NLME/ferx-core/issues/1587));
+    - on ODE models, a dose given between a lagged `SS=1` dose's record and
+      its arrival is no longer erased at the arrival
+      ([#1275](https://github.com/FeRx-NLME/ferx-core/issues/1275)).
+
+    The affected records read up to 270 % off against NONMEM before. A
+    dataset without these patterns gives the same results, up to ODE solver
+    tolerance.
+  - **A dose keeps the absorption parameters of its own dose record for its
+    whole absorption**
+    ([#1569](https://github.com/FeRx-NLME/ferx-core/issues/1569)). With IOV
+    or a time-varying covariate on an absorption-kernel parameter (e.g. `KA`,
+    `MTT`, `MAT`), `FR` or a per-route `lag=`, a dose still absorbing when
+    the parameter changed used to create or destroy drug; such fits now
+    move. The `E_ABSORPTION_DOMAIN` /
+    `E_ABSORPTION_FRACTION` checks now look at dose records only.
+  - **A diverging ODE state now returns `NaN`** at the affected times in
+    every compartment, instead of freezing the other compartments at finite,
+    wrong values ([#1539](https://github.com/FeRx-NLME/ferx-core/issues/1539)).
+    The ODE solver warning says a state became non-finite.
+    `ferx_simulate_adaptive()` with its default `verify = TRUE` now refuses
+    such a run with an error, where it used to return finite, wrong rows.
+  - **`ferx_simulate_adaptive()`**: a decision now reads the latest data
+    record at or before it, including dose and EVID=3/4 reset rows, for its
+    covariates, signals and the `F` of the dose it issues
+    ([#1148](https://github.com/FeRx-NLME/ferx-core/issues/1148)). A pre-dose
+    window whose `[odes]` read an unanchored `TAD` / `TAFD` through a
+    comparison (`if (TAD < 5)`, `min(TAD, 24)`) is now refused with an error
+    naming the window, instead of silently taking one branch
+    ([#1535](https://github.com/FeRx-NLME/ferx-core/issues/1535)).
+  - **Closed-form transit and inverse-Gaussian models (`one_cpt_transit`,
+    `two_cpt_transit`, `one_cpt_ig`, `two_cpt_ig`) keep IOV and
+    time-varying-covariate subjects analytic**, instead of running them on
+    the model's ODE twin: 3-4x (transit) and 1.1-2.3x (IG) faster per subject
+    at default ODE tolerances
+    ([#1560](https://github.com/FeRx-NLME/ferx-core/issues/1560)). A subject
+    still goes to the ODE twin in the flip-flop regime, with an SS dose, an
+    infusion or a `TIME`-dependent parameter, or with 24 or more stacked IOV
+    random effects. For non-IOV time-varying-covariate subjects of these
+    models, a `[derived]` expression reading `compartments[i]` is now `NaN`
+    (it used to read the wrong compartment), and the covariance step takes
+    the finite-difference route.
+  - **The error for an unbound `theta NAME[COL, ...]` level block now names
+    the engine's `bind_theta_levels`**
+    ([#1384](https://github.com/FeRx-NLME/ferx-core/issues/1384)). This
+    package does not call it yet, so such a model still cannot be fitted from
+    R ([#370](https://github.com/FeRx-NLME/ferx-r/issues/370)); declare
+    `theta NAME[N]` and index it with your own column instead. The engine
+    also gains `bind_theta_levels_from_fit`, which #370 will use to simulate
+    these models with a fit's theta.
+
 # ferx 0.4.0
 
 ## Breaking changes
