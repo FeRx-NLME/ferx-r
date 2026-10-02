@@ -78,7 +78,8 @@
   example's by up to 1.4e-14). `fit.json` is now written with 17 significant
   digits, and each CSV double with the shortest text that reads back
   exactly. R's own number parser is not correctly rounded on every platform
-  (about one in five 17-digit numbers comes back one ulp off on aarch64), so
+  (on aarch64, up to four in five 17-digit numbers come back off, depending
+  on magnitude), so
   the loader reads those columns through jsonlite's parser instead. The
   trace file an `optimizer_trace = TRUE` fit reads from the engine goes
   through the same reader. A bundle written before this fix still loads, with

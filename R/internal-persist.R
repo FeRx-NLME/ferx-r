@@ -216,8 +216,8 @@
 # `write.csv()` all write a double with 15 significant digits, which is not
 # enough to identify it. And R's own number parser (`as.numeric()`,
 # `read.csv()`) is not correctly rounded: on a build whose long double is a
-# plain double (aarch64) it reads about one in five 17-digit strings one ulp
-# away. So `fit.json` is written with 17 significant digits and read by
+# plain double (aarch64) it reads up to four in five 17-digit strings an ulp
+# or more away, depending on magnitude. So `fit.json` is written with 17 significant digits and read by
 # jsonlite, whose parser is correctly rounded; the CSV entries get the
 # shortest text that reads back as the same double, and are read back
 # through jsonlite's parser too.
