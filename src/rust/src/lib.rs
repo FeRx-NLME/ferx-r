@@ -1762,22 +1762,20 @@ fn level_bindings_to_r(
     bindings: &LevelBindings,
     theta_names: &[String],
 ) -> Robj {
-    // Declaration order first; a binding the model does not declare cannot
-    // happen on a bound model, but would still be reported rather than dropped.
-    let mut order: Vec<&str> = model
+    // Declaration order. Both binders key the bindings by the model's own
+    // declarations, so a binding for an undeclared block cannot reach here.
+    let order: Vec<&str> = model
         .theta_blocks()
         .level_blocks()
         .iter()
         .map(|d| d.name())
         .filter(|n| bindings.contains_key(*n))
         .collect();
-    let mut extra: Vec<&str> = bindings
-        .keys()
-        .map(String::as_str)
-        .filter(|n| !order.contains(n))
-        .collect();
-    extra.sort_unstable();
-    order.extend(extra);
+    debug_assert_eq!(
+        order.len(),
+        bindings.len(),
+        "level bindings for a block the model does not declare"
+    );
 
     let mut block: Vec<String> = Vec::new();
     let mut index: Vec<i32> = Vec::new();
@@ -1811,11 +1809,22 @@ fn level_bindings_to_r(
     )
 }
 
+/// An R integer as R prints it: `NA_integer_` arrives as `i32::MIN`.
+fn r_int_text(v: i32) -> String {
+    if v == i32::MIN {
+        "NA".to_string()
+    } else {
+        v.to_string()
+    }
+}
+
 /// Rebuild a fit's [`LevelBindings`] from the flattened `fit$theta_levels`
 /// columns. Refuses a table whose columns are not parallel, whose indices within
-/// a block are not exactly 1..n, whose contrast varies within a block, or whose
-/// group is missing or negative: each would bind the design against a layout the
-/// fit never had.
+/// a block are not exactly 1..n, whose labels repeat within a block, whose
+/// contrast varies within a block, or whose group is missing or negative: each
+/// would bind the design against a layout the fit never had. A repeated label
+/// is caught here because the engine would otherwise report the level it
+/// displaced as one the fit never observed, which names the wrong cause.
 fn level_bindings_from_r(
     block: &[String],
     index: &[i32],
@@ -1854,11 +1863,20 @@ fn level_bindings_from_r(
         let indices: Vec<i32> = members.iter().map(|&r| index[r]).collect();
         if indices.iter().enumerate().any(|(i, &k)| k != i as i32 + 1) {
             return Err(format!(
-                "{WHAT} are malformed: block `{name}` has the level indices {:?}; they must be \
+                "{WHAT} are malformed: block `{name}` has the level indices [{}]; they must be \
                  exactly 1..{}",
-                indices,
+                indices.iter().map(|&k| r_int_text(k)).collect::<Vec<_>>().join(", "),
                 members.len()
             ));
+        }
+        for (i, &r) in members.iter().enumerate() {
+            if let Some(&first) = members[..i].iter().find(|&&p| label[p] == label[r]) {
+                return Err(format!(
+                    "{WHAT} are malformed: block `{name}` gives the label `{}` to levels {} and \
+                     {}; each level has its own label",
+                    label[r], index[first], index[r]
+                ));
+            }
         }
         let tokens: Vec<&str> = members.iter().map(|&r| contrast[r].as_str()).collect();
         if tokens.iter().any(|t| *t != tokens[0]) {
@@ -1877,7 +1895,7 @@ fn level_bindings_from_r(
                     "{WHAT} are malformed: block `{name}` level {} has the group {}; groups \
                      are non-negative integers",
                     index[r],
-                    if g == i32::MIN { "NA".to_string() } else { g.to_string() }
+                    r_int_text(g)
                 ));
             }
             groups.push(g as usize);
