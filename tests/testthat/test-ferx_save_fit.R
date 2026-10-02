@@ -142,6 +142,17 @@ test_that("bundle doubles are written and read back bit for bit", {
   on.exit(unlink(path), add = TRUE)
   ferx:::.fitrx_write_csv_exact(df, path, quote = TRUE)
   expect_identical(ferx:::.fitrx_read_csv_exact(path), df)
+
+  # The random doubles above only catch an inexact parser on aarch64: x86_64
+  # R parses through an 80-bit long double and reads every %.17g string
+  # exactly, so on the ubuntu CI runner they pass under as.numeric() too. It
+  # is still not correctly rounded on arbitrary text, and this literal is one
+  # it misreads (as.numeric() gives ...4c5p+714 there, ...4cap+714 on
+  # aarch64), so these two checks fail on both if the parse half is reverted.
+  hard <- "1.6268116685806102e215"
+  expect_identical(ferx:::.fitrx_parse_doubles(hard), 0x1.e33cb7bcbb4c6p+714)
+  writeLines(c("ID,x", paste0("1,", hard)), path)
+  expect_identical(ferx:::.fitrx_read_csv_exact(path)$x, 0x1.e33cb7bcbb4c6p+714)
 })
 
 test_that("a real fit round-trips bit for bit", {
