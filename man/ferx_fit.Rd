@@ -1049,7 +1049,8 @@ correlation matrix.}
 \code{cov_matrix} and named like them: \code{TRUE} for a coordinate the
 engine held rather than estimated - a parameter declared \code{FIX}, or
 a structural-zero covariance of a mixed block omega. Such a row and
-column of \code{cov_matrix} are all zero. \code{NULL} when
+column of \code{cov_matrix} are all zero; one that is not is reported
+with a warning. \code{NULL} when
 \code{cov_matrix} is \code{NULL}, and on a fit reloaded from a bundle
 written before this field existed.}
 \item{cor_matrix}{Correlation matrix derived from \code{cov_matrix}, same

@@ -195,21 +195,28 @@ test_that("cor_matrix keys on the mask: an all-zero row the engine says it estim
     "estimated parameter\\(s\\) #2 in cov_matrix"
   )
   expect_identical(is.na(cor), outer(1:3 == 2L, 1:3 == 2L, "|"))
-  # ...and a row the mask holds is NA even when it is not zero.
-  expect_no_warning(
-    cor <- .compute_cor_matrix(diag(c(1, 2, 4)), fixed = c(FALSE, TRUE, FALSE))
+  # ...and a row the mask holds is NA even when it is not zero, but the
+  # disagreement between mask and matrix is reported. (A held row that IS
+  # zero stays quiet: B in the test above.)
+  cm <- diag(c(1, 2, 4))
+  dimnames(cm) <- list(c("A", "B", "C"), c("A", "B", "C"))
+  w <- testthat::capture_warnings(
+    cor <- .compute_cor_matrix(cm, fixed = c(FALSE, TRUE, FALSE))
   )
-  expect_identical(is.na(cor), outer(1:3 == 2L, 1:3 == 2L, "|"))
+  expect_identical(w, paste0("cov_matrix has non-zero entries for held parameter(s) B; ",
+                             "their correlations are NA."))
+  expect_identical(unname(is.na(cor)), outer(1:3 == 2L, 1:3 == 2L, "|"))
 })
 
 test_that("the derived-fields step hands fit$cov_fixed to cor_matrix", {
   # The step ferx_fit(), ferx_covariance() and ferx_load_fit() share. The
-  # mask holds a row that is not zero, so reading zeros instead would differ.
+  # mask calls an all-zero row estimated, so it warns; reading zeros instead
+  # would take the row as held and stay quiet.
   populate <- getFromNamespace(".ferx_populate_derived_fields", "ferx")
-  fit <- make_fake_fit(cov_matrix = diag(c(1, 2)), cov_fixed = c(FALSE, TRUE),
+  fit <- make_fake_fit(cov_matrix = diag(c(1, 0)), cov_fixed = c(FALSE, FALSE),
                        theta = c(CL = 1), omega = matrix(0.1, 1, 1),
                        eta_names = "ETA_CL", data_path = NA_character_)
-  out <- populate(fit)
+  expect_warning(out <- populate(fit), "estimated parameter\\(s\\) #2 in cov_matrix")
   expect_identical(is.na(out$cor_matrix), outer(1:2 == 2L, 1:2 == 2L, "|"))
 })
 
@@ -240,7 +247,7 @@ warfarin_fix_fit <- function(covariance = TRUE) {
 }
 
 test_that("a fit with FIX parameters is quiet, and cor_matrix is NA exactly on them", {
-  expect_no_warning(fit <- warfarin_fix_fit(), message = "variance")
+  expect_no_warning(fit <- warfarin_fix_fit(), message = "[Nn]on-positive|held parameter")
   skip_if(is.null(fit$cov_matrix), "covariance step did not converge - skipping")
   held <- c(TVCL = FALSE, TVV = TRUE, TVKA = FALSE, ETA_CL = FALSE,
             ETA_V = FALSE, ETA_KA = FALSE, PROP_ERR = TRUE)
@@ -253,7 +260,7 @@ test_that("a fit with FIX parameters is quiet, and cor_matrix is NA exactly on t
   f <- tempfile(fileext = ".fitrx")
   on.exit(unlink(f), add = TRUE)
   ferx_save_fit(fit, f)
-  expect_no_warning(fit2 <- ferx_load_fit(f), message = "variance")
+  expect_no_warning(fit2 <- ferx_load_fit(f), message = "[Nn]on-positive|held parameter")
   # unname(): ferx_load_fit() does not restore cov_matrix's dimnames, a gap
   # that predates #424 (#417). The values have to match.
   expect_identical(unname(fit2$cov_fixed), unname(fit$cov_fixed))
@@ -263,7 +270,7 @@ test_that("a fit with FIX parameters is quiet, and cor_matrix is NA exactly on t
 test_that("ferx_covariance() on a FIX fit carries the mask and is quiet", {
   fit <- warfarin_fix_fit(covariance = FALSE)
   expect_null(fit$cov_fixed)
-  expect_no_warning(out <- ferx_covariance(fit), message = "variance")
+  expect_no_warning(out <- ferx_covariance(fit), message = "[Nn]on-positive|held parameter")
   skip_if(is.null(out$cov_matrix), "covariance step did not converge - skipping")
   expect_identical(names(which(out$cov_fixed)), c("TVV", "PROP_ERR"))
   expect_identical(which(is.na(diag(out$cor_matrix))), c(TVV = 2L, PROP_ERR = 7L))
@@ -273,7 +280,7 @@ test_that("the bundled mbma_placebo fit (sigma FIX, weight = SE) is quiet, in fi
   skip_on_cran()
   ex <- ferx_example("mbma_placebo")
   expect_no_warning(fit <- ferx_fit(ex$model, ex$data, verbose = FALSE),
-                    message = "variance")
+                    message = "[Nn]on-positive|held parameter")
   skip_if(is.null(fit$cov_matrix), "covariance step did not converge - skipping")
   # 22 thetas, ETA_E0, then ADD_ERR (FIX), then KAPPA_ARM: the packed order
   # puts sigma before kappa.
@@ -282,7 +289,7 @@ test_that("the bundled mbma_placebo fit (sigma FIX, weight = SE) is quiet, in fi
   f <- tempfile(fileext = ".fitrx")
   on.exit(unlink(f), add = TRUE)
   ferx_save_fit(fit, f)
-  expect_no_warning(fit2 <- ferx_load_fit(f), message = "variance")
+  expect_no_warning(fit2 <- ferx_load_fit(f), message = "[Nn]on-positive|held parameter")
   expect_identical(fit2$cov_fixed, fit$cov_fixed)
   expect_identical(fit2$cor_matrix, fit$cor_matrix)
 })

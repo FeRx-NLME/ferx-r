@@ -15,12 +15,21 @@
   if (is.null(cov_matrix)) return(NULL)
   v <- diag(cov_matrix)
   held <- .ferx_cov_held(cov_matrix, fixed)
+  nms <- rownames(cov_matrix)
+  label <- function(i) {
+    paste(if (is.null(nms)) paste0("#", which(i)) else nms[i], collapse = ", ")
+  }
+  # The covariance step writes a held coordinate as an all-zero row. A held
+  # row that is not zero means the mask and the matrix disagree; it stays NA
+  # (the mask is the engine's word on what was estimated), but not silently.
+  odd <- held & !.ferx_cov_zero_rows(cov_matrix)
+  if (any(odd)) {
+    warning("cov_matrix has non-zero entries for held parameter(s) ", label(odd),
+            "; their correlations are NA.", call. = FALSE)
+  }
   bad <- !held & !is.na(v) & v <= 0
   if (any(bad)) {
-    nms <- rownames(cov_matrix)
-    lab <- if (is.null(nms)) paste0("#", which(bad)) else nms[bad]
-    warning("Non-positive variance for estimated parameter(s) ",
-            paste(lab, collapse = ", "),
+    warning("Non-positive variance for estimated parameter(s) ", label(bad),
             " in cov_matrix; their correlations are NA.", call. = FALSE)
   }
   # Test before sqrt(): a negative variance would otherwise come back NaN with
@@ -41,15 +50,19 @@
 
 # Which rows of `cov_matrix` the engine held. The engine's own mask when the
 # fit carries one of the right length. Without one - a bundle written before
-# #424, or by a writer that does not record it - a row and column that are
-# exactly zero is read as held, since that is how the covariance step writes a
+# #424, or by a writer that does not record it - a row that is exactly zero
+# is read as held, since that is how the covariance step writes a
 # coordinate it did not estimate; an estimated parameter does not come out
 # with an exactly-zero row.
 .ferx_cov_held <- function(cov_matrix, fixed = NULL) {
-  n <- nrow(cov_matrix)
-  if (length(fixed) == n) return(as.logical(unname(fixed)) %in% TRUE)
-  zero <- !is.na(cov_matrix) & cov_matrix == 0
-  unname(rowSums(zero) == n & colSums(zero) == n)
+  if (length(fixed) == nrow(cov_matrix)) return(as.logical(unname(fixed)) %in% TRUE)
+  .ferx_cov_zero_rows(cov_matrix)
+}
+
+# Rows of `cov_matrix` that are exactly zero. Rows only: a covariance matrix
+# is symmetric, so the matching column is zero too.
+.ferx_cov_zero_rows <- function(cov_matrix) {
+  unname(rowSums(!is.na(cov_matrix) & cov_matrix == 0) == ncol(cov_matrix))
 }
 
 # `fit$cov_fixed` from the engine's mask: a logical vector named like
