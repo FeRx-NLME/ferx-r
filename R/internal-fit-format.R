@@ -657,6 +657,9 @@
     result$cov_matrix <- NULL
   }
   result$cov_matrix_dim <- NULL
+  # Which of those coordinates the engine held (#424), named like the rows.
+  result$cov_fixed <- .ferx_cov_fixed_named(result$cov_fixed,
+                                                   result$cov_matrix)
 
   result <- .ferx_apply_cov_sentinels(result)
 

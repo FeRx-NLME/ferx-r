@@ -2700,6 +2700,21 @@ fn declared_model_name(name: &str) -> &str {
     }
 }
 
+/// Which coordinates of the packed covariance matrix the engine held (ferx-r
+/// #424): FIX, and the structural zeros of a mixed block Omega. The engine's own
+/// `packed_fixed_mask`, the mask its covariance step excludes, so a held row is
+/// told from a degenerate one without reading it off a zero diagonal. Empty when
+/// there is no matrix, or when the model's packed layout does not have the
+/// matrix's dimension - R then has no mask rather than a misaligned one.
+fn cov_matrix_held(model: &CompiledModel, cov_matrix_dim: i32) -> Vec<bool> {
+    let mask = ferx_core::estimation::parameterization::packed_fixed_mask(&model.default_params);
+    if cov_matrix_dim > 0 && mask.len() == cov_matrix_dim as usize {
+        mask
+    } else {
+        Vec::new()
+    }
+}
+
 fn fit_result_to_list(
     result: &FitResult,
     population: &Population,
@@ -3332,6 +3347,7 @@ fn fit_result_to_list(
         ferx_version = result.ferx_version.clone(),
         cov_matrix = cov_matrix_flat,
         cov_matrix_dim = cov_matrix_dim,
+        cov_fixed = cov_matrix_held(model, cov_matrix_dim),
         cov_eigenvalues = result.cov_eigenvalues.clone().unwrap_or_default(),
         cov_condition_number = result.cov_condition_number.unwrap_or(f64::NAN),
         // Packed Omega / kappa layout (ferx-core #1177). `.fitrx` bundles
@@ -4983,6 +4999,7 @@ fn ferx_rust_covariance(
         Ok(list!(
             cov_matrix = cov_matrix_flat,
             cov_matrix_dim = cov_matrix_dim,
+            cov_fixed = cov_matrix_held(model, cov_matrix_dim),
             se_theta = new_fit.se_theta.clone().unwrap_or_default(),
             se_omega = new_fit.se_omega.clone().unwrap_or_default(),
             se_sigma = new_fit.se_sigma.clone().unwrap_or_default(),
