@@ -101,7 +101,10 @@
     `fit$covariate_names` now holds only the data's own columns, and the
     "used in model expressions but not declared in [covariates]" warning no
     longer lists `__level_NAME`; the block's own columns, such as `STUDY`,
-    are still named there when undeclared. Estimates do not change. A
+    are still named there when undeclared. The same column no longer shows
+    up as a candidate in `ferx_gam_screen()`, in the dataset
+    `ferx_model_to_frem()` writes, or in the covariate-search resolver.
+    Estimates do not change. A
     `.fitrx` saved before this still carries `__level_NAME` in
     `covariate_names` and loads unchanged. The engine's `predict` now
     refuses an unbound level block with the unbound-block error instead of
