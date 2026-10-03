@@ -483,11 +483,11 @@ test_that("the counted form on LEVEL_IDX fits like the data-driven form", {
 
   col <- mb_model("  theta PLACEBO[STUDY, TIME, contrast = none](0.0, -10.0, 10.0)", "PLACEBO")
   counted <- mb_model("  theta PLACEBO[4](0.0, -10.0, 10.0)", "PLACEBO[LEVEL_IDX]")
-  # gradient = "fd": on the default gradient a gathered theta never leaves
-  # its initial value (FeRx-NLME/ferx-core#1628), and two fits stuck at
-  # their inits agree whatever the index says.
+  # Default gradient: the analytic gradient moves a gathered theta since
+  # FeRx-NLME/ferx-core#1628. Before it, both fits stayed at their inits and
+  # agreed whatever the index said; the closed-form check below catches that.
   fit <- function(model) {
-    suppressWarnings(ferx_fit(model, data, verbose = FALSE, gradient = "fd"))
+    suppressWarnings(ferx_fit(model, data, verbose = FALSE))
   }
   f_col <- fit(col)
   f_cnt <- fit(counted)
@@ -504,9 +504,9 @@ test_that("the counted form on LEVEL_IDX fits like the data-driven form", {
   # 1 and weight = SE, each level is its (study, time) cell's
   # inverse-variance weighted mean, in the order above. Both fits must hit it,
   # so a LEVEL_IDX pointing rows at the wrong level fails here. Measured
-  # worst error 5.2e-7, the optimizer's stopping tolerance (the same at
-  # maxiter 20, 50 and 200); the bound leaves 20x headroom, and the closest
-  # two cell means are 0.4 apart.
+  # worst error 1.4e-11 on the default gradient (5.2e-7 with gradient = "fd",
+  # the optimizer's stopping tolerance); the bound covers either route, and
+  # the closest two cell means are 0.4 apart.
   cell <- data.frame(trial = x$trial, week = round(x$week, 12))
   key <- paste(cell$trial, cell$week)
   w <- 1 / x$se^2

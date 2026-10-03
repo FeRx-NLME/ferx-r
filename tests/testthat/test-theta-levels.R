@@ -483,18 +483,10 @@ test_that("T10: predict and simulate without a fit bind the design's own levels"
   pred <- ferx_predict(b$model, b$data)
   expect_identical(nrow(pred), 6L)
   expect_true(all(is.finite(pred$PRED)))
-  # The engine's unused-theta check does not see a gathered theta as used and
-  # warns about every level - the counted form `PLACEBO[6]` gets the same
-  # warning, so it predates #370. Only that warning is muffled.
-  sim <- withCallingHandlers(
-    ferx_simulate(b$model, b$data, n_sim = 1L),
-    warning = function(w) {
-      if (grepl("is declared in [parameters] but not referenced",
-                conditionMessage(w), fixed = TRUE)) {
-        invokeRestart("muffleWarning")
-      }
-    }
-  )
+  # A gathered theta counts as used (FeRx-NLME/ferx-core#1628): before it,
+  # the unused-theta check warned about every level, here and for the
+  # counted form `PLACEBO[6]` alike.
+  expect_no_warning(sim <- ferx_simulate(b$model, b$data, n_sim = 1L))
   expect_identical(nrow(sim), 6L)
   expect_true(all(is.finite(sim$IPRED)))
 })
