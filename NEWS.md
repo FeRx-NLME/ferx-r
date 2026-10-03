@@ -2,7 +2,7 @@
 
 ## Breaking changes
 
-- **ferx now builds against ferx-core `9423e333`**, up from the `v0.4.0`
+- **ferx now builds against ferx-core `956e7951`**, up from the `v0.4.0`
   release (`2a6076af`). These engine changes reach every fit, prediction
   and simulation entry point with no change to the package's own code:
 
@@ -68,6 +68,27 @@
     also gains `bind_theta_levels_from_fit`, which #370 will use to simulate
     these models with a fit's theta. (Level blocks now fit from R; see New
     features.)
+  - **Results move for SAEM and IMP/IMPMAP fits in which two covariate
+    mu-referenced typical values share one estimated theta**
+    ([#1620](https://github.com/FeRx-NLME/ferx-core/issues/1620)), e.g.
+    `THETA_WT` on both `CL` and `V1` in the bundled `two_cpt_oral_cov`
+    model. Those typical values now take one joint M-step, so the shared
+    theta is no longer driven towards its bound. On that model SAEM used to
+    put `THETA_WT` at 0.0101 (NONMEM SAEM: 0.6618) and IMPMAP pulled
+    `THETA_CRCL` to 0.358 (NONMEM IMPMAP: 0.5630); both now land near the
+    NONMEM values. The fit warns, naming the etas and the shared theta.
+    Models whose covariate mu-references share no theta give bit-identical
+    results.
+  - **The refusals for level-block models no longer name an engine
+    function**
+    ([#1623](https://github.com/FeRx-NLME/ferx-core/issues/1623)). A design
+    level the fit never observed is still refused, and the error now advises
+    simulating only the fit's levels, or simulating the design without the
+    fit's theta (from a theta vector for the design's own levels, such as the
+    model's initial values). `ferx_simulate()` and its siblings do the latter
+    when called without `fit`. A theta vector of the wrong length on a
+    level-block model now says that a fit's theta fits only a design bound
+    against that fit's level bindings.
 
 ## New features
 
