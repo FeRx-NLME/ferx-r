@@ -391,8 +391,12 @@ tl_roundtrip <- function(fit) {
 tl_expect_roundtrip <- function(model, data, fit) {
   fit2 <- tl_roundtrip(fit)
   expect_identical(fit2$theta_levels, fit$theta_levels)
-  # A .fitrx round trip gives back every double bit for bit (#415), so the
-  # reloaded fit predicts exactly what the original does.
+  # A .fitrx round trip gives back every double bit for bit (#415). PRED reads
+  # theta alone, so omega and sigma are checked directly; sigma unnamed, as a
+  # reload names it and the fit does not (#417).
+  expect_identical(fit2$theta, fit$theta)
+  expect_identical(fit2$omega, fit$omega)
+  expect_identical(unname(fit2$sigma), unname(fit$sigma))
   expect_identical(
     ferx_predict(model, data, fit = fit2),
     ferx_predict(model, data, fit = fit)
