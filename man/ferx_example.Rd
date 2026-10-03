@@ -319,6 +319,18 @@ NONMEM \code{$PRED} equivalent. The assignments in
 observation, with no \code{pk}, \code{ode}, compartments, doses, or
 integration. Paired with a fully synthetic 30-subject dataset generated
 from a fixed seed and anchored against the equivalent NONMEM model.}
+\item{mbma_placebo}{Compartment-free model-based meta-analysis (MBMA) of
+arm-level summary data: 6 synthetic studies with a placebo arm and 2-3
+dose arms each, observed at 4 visits. A study-by-visit placebo level
+block \code{PLACEBO[STUDY, TIME]} (\code{contrast = sum_to_zero_within},
+so \code{TVE0} is each study's mean placebo level over its visits), an
+Emax dose-response over time, between-study variability on the baseline,
+between-arm variability weighted by arm size (\code{weight = NARM}), and
+inverse-variance weighting (\code{weight = SE}, sigma fixed to 1). The
+data come from a seeded base-R generator,
+\code{mbma_placebo/simulate_dataset.R}, shaped with
+\code{\link{ferx_mbma_data}}. The fitted levels cover only the
+(study, visit) cells in the data, so simulate on that grid.}
 \item{warfarin_derived}{One-compartment oral (warfarin) with a
 \code{[derived]} block demonstrating per-row expressions (KE, T_HALF),
 aggregates (CMAX, TMAX, CMAX_D1), numeric integration (AUC_0_72,
