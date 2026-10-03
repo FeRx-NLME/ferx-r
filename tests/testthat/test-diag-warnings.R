@@ -65,7 +65,7 @@ test_that("ferx_predict(fit = ) on a compartment-free model is quiet too", {
   # A separate glue entry point (`ferx_rust_predict_from_fit`); the common one
   # after a fit, so it must not be the half that still warns.
   ex <- ferx_example("emax_timecourse")
-  fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
+  fit <- suppressWarnings(ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE))
   expect_warning(pred <- ferx_predict(ex$model, ex$data, fit = fit), NA)
   codes <- reader_codes(pred)
   expect_false("W_CMT_DEFAULTED" %in% codes)
@@ -85,7 +85,7 @@ test_that("a one-compartment twin on the same dose-free data still raises W_NO_D
 
 test_that("ferx_simulate_with_uncertainty on a compartment-free model raises no moot reader finding", {
   ex <- ferx_example("emax_timecourse")
-  fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = TRUE)
+  fit <- suppressWarnings(ferx_fit(ex$model, ex$data, method = "gn", covariance = TRUE))
   expect_warning(
     sims <- ferx_simulate_with_uncertainty(
       ex$model, ex$data, fit,
@@ -99,7 +99,7 @@ test_that("ferx_simulate_with_uncertainty on a compartment-free model raises no 
   expect_gt(nrow(sims), 0L)
 })
 
-test_that("ferx_predict relays the bundle ferx_simulate relays, not only reader findings", {
+test_that("ferx_predict relays the engine's non-fit bundle, not only reader findings", {
   # A parse warning reached `ferx_simulate()` and never `ferx_predict()`,
   # which relayed the data reader's list alone.
   ex <- ferx_example("warfarin")

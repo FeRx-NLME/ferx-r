@@ -904,8 +904,8 @@ fn ferx_rust_simulate_adaptive(
             // filter, which on this path also withholds `W_NO_DOSES`: the controller
             // supplies the whole regimen, so an observation grid alone is the normal
             // input (ferx-r #426).
-            Ok(result) => {
-                let warnings = result.warnings.clone();
+            Ok(mut result) => {
+                let warnings = std::mem::take(&mut result.warnings);
                 attach_sim_warnings(adaptive_result_to_list(&result), warnings)
             }
             Err(e) => return Err(format!("ferx_simulate_adaptive: {e}")),
@@ -1211,10 +1211,10 @@ fn ferx_rust_predict(
         let time: Vec<f64> = results.iter().map(|r| r.time).collect();
         let pred: Vec<f64> = results.iter().map(|r| r.pred).collect();
 
-        // Core's non-fit bundle, the one `ferx_simulate()` relays (ferx-r #426):
-        // parse and model/data findings, ODE-solver diagnostics, and the data
-        // reader's findings through core's one filter -- never `population.warnings`
-        // raw, which still holds the ones a compartment-free model makes moot.
+        // Core's non-fit bundle (ferx-r #426): parse, model/data,
+        // experimental-feature and ODE-solver findings, and the data reader's
+        // findings through core's one filter -- never `population.warnings` raw,
+        // which still holds the ones a compartment-free model makes moot.
         Ok(attach_sim_warnings(
             data_frame!(ID = id, TIME = time, PRED = pred).into(),
             output.warnings,

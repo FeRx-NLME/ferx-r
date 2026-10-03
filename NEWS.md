@@ -196,9 +196,9 @@
   ([ferx-core#1645](https://github.com/FeRx-NLME/ferx-core/issues/1645),
   [#426](https://github.com/FeRx-NLME/ferx-r/issues/426)). A model with
   compartments and no doses still gets `W_NO_DOSES`.
-- **`ferx_predict()` now reports the same warnings `ferx_simulate()` does**:
-  model-parse and model/data findings and ODE-solver diagnostics, not only
-  the data reader's findings
+- **`ferx_predict()` now reports the engine's non-fit warning bundle**:
+  model-parse, model/data, experimental-feature and ODE-solver findings, not
+  only the data reader's findings
   ([#426](https://github.com/FeRx-NLME/ferx-r/issues/426)).
 - **`ferx_simulate_with_uncertainty()` now reports its warnings**, including
   a note naming each parameter draw skipped because it landed in the

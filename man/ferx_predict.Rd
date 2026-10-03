@@ -23,10 +23,10 @@ never read, so an empty cell means "predict here". Rows marked
 A data.frame with columns: ID, TIME, PRED.
 
 The frame carries a \code{simulation_warnings} attribute (a character
-vector, empty for a clean run) holding the same warning bundle
-\code{ferx_simulate()} reports: model-parse and model/data findings,
-ODE-solver diagnostics, and the engine's data-reader diagnostics for
-\code{data}, e.g. a record kept as a design point because its \code{DV}
+vector, empty for a clean run) holding the engine's non-fit warning
+bundle: model-parse, model/data, experimental-feature and ODE-solver
+findings, and the engine's data-reader diagnostics for \code{data},
+e.g. a record kept as a design point because its \code{DV}
 was empty, a dose that never landed, or a covariate with no value for
 some subjects. Reader findings the model makes moot (no doses, or a
 defaulted \code{CMT}, on a model with no compartments) are left out, as
