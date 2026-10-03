@@ -391,13 +391,15 @@ tl_roundtrip <- function(fit) {
 tl_expect_roundtrip <- function(model, data, fit) {
   fit2 <- tl_roundtrip(fit)
   expect_identical(fit2$theta_levels, fit$theta_levels)
-  # Not `identical()`: a .fitrx round trip already moves theta, omega and sigma
-  # in their last bit, level block or not (measured at ecccbac: the warfarin
-  # fit's predictions move by 1.4e-14), so the reloaded fit is held to that.
-  expect_equal(
+  # A .fitrx round trip gives back every double bit for bit (#415). PRED reads
+  # theta alone, so omega and sigma are checked directly; sigma unnamed, as a
+  # reload names it and the fit does not (#417).
+  expect_identical(fit2$theta, fit$theta)
+  expect_identical(fit2$omega, fit$omega)
+  expect_identical(unname(fit2$sigma), unname(fit$sigma))
+  expect_identical(
     ferx_predict(model, data, fit = fit2),
-    ferx_predict(model, data, fit = fit),
-    tolerance = 1e-12
+    ferx_predict(model, data, fit = fit)
   )
 }
 
@@ -452,10 +454,10 @@ test_that("T8: a model without a level block round-trips an empty frame", {
     "  theta TVCL(2.0, 0.001, 20.0)\n  theta PLACEBO[6](0.0, -5.0, 5.0)",
     "TVCL + PLACEBO[PLA_IDX]"
   ), ".ferx")
-  fit <- tl_fit(counted, tl_write(tl_data, ".csv"))
+  data <- tl_write(tl_data, ".csv")
+  fit <- tl_fit(counted, data)
   expect_identical(nrow(fit$theta_levels), 0L)
-  fit2 <- tl_roundtrip(fit)
-  expect_identical(fit2$theta_levels, fit$theta_levels)
+  tl_expect_roundtrip(counted, data, fit)
 })
 
 # --- T9: a fit without bindings ------------------------------------------------
