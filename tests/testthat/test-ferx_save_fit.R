@@ -120,6 +120,78 @@ test_that("ferx_save_fit + ferx_load_fit round-trip a real fit", {
   expect_equal(loaded$model_name, fit$model_name)
   expect_equal(loaded$ferx_version, fit$ferx_version)
 })
+
+test_that("bundle doubles are written and read back bit for bit", {
+  # 15 significant digits (jsonlite's `digits = NA`, write.table()) cannot
+  # identify a double, and R's own parser is not correctly rounded on every
+  # platform, so both halves are checked across the whole double range.
+  set.seed(20261002)
+  x <- c(rnorm(5000) * 10^runif(5000, -300, 300), 0.1, 1 / 3, 5e-324,
+         .Machine$double.xmax, -280.36396183775315, 1, 1e22)
+  expect_identical(ferx:::.fitrx_parse_doubles(ferx:::.fitrx_double_text(x)), x)
+  # The shortest text that round-trips, not always 17 digits.
+  expect_identical(ferx:::.fitrx_double_text(c(0.1, 1, 1e22)), c("0.1", "1", "1e+22"))
+  expect_identical(
+    ferx:::.fitrx_parse_doubles(c("", "NA", "NaN", "Inf", "-Inf", "inf", "1.5")),
+    c(NA, NA, NaN, Inf, -Inf, Inf, 1.5)
+  )
+  # A CSV entry: text stays text, missing stays missing, doubles are exact.
+  df <- data.frame(ID = c("a,1", "2", "3"), x = c(0.1 + 0.2, NA, 1 / 3),
+                   n = 1:3, stringsAsFactors = FALSE)
+  path <- tempfile(fileext = ".csv")
+  on.exit(unlink(path), add = TRUE)
+  ferx:::.fitrx_write_csv_exact(df, path, quote = TRUE)
+  expect_identical(ferx:::.fitrx_read_csv_exact(path), df)
+
+  # The random doubles above only catch an inexact parser on aarch64: x86_64
+  # R parses through an 80-bit long double and reads every %.17g string
+  # exactly, so on the ubuntu CI runner they pass under as.numeric() too. It
+  # is still not correctly rounded on arbitrary text, and this literal is one
+  # it misreads (as.numeric() gives ...4c5p+714 there, ...4cap+714 on
+  # aarch64), so these two checks fail on both if the parse half is reverted.
+  hard <- "1.6268116685806102e215"
+  expect_identical(ferx:::.fitrx_parse_doubles(hard), 0x1.e33cb7bcbb4c6p+714)
+  writeLines(c("ID,x", paste0("1,", hard)), path)
+  expect_identical(ferx:::.fitrx_read_csv_exact(path)$x, 0x1.e33cb7bcbb4c6p+714)
+})
+
+test_that("a real fit round-trips bit for bit", {
+  skip_on_cran()
+  fit <- warfarin_fit_cov()
+  path <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(path), add = TRUE)
+  ferx_save_fit(fit, path)
+  loaded <- ferx_load_fit(path)
+
+  # fit.json
+  expect_identical(loaded$theta, fit$theta)
+  expect_identical(loaded$omega, fit$omega)
+  # Values only for these two: their names / dimnames differ across a round
+  # trip for reasons that have nothing to do with the doubles.
+  expect_identical(unname(loaded$sigma), unname(fit$sigma))
+  expect_identical(unname(loaded$cov_matrix), unname(fit$cov_matrix))
+  expect_identical(loaded$ofv, fit$ofv)
+  expect_identical(unname(loaded$se_theta), unname(fit$se_theta))
+  # the CSV entries: every double column
+  for (tab in c("sdtab", "ebe_etas")) {
+    dbl <- names(fit[[tab]])[vapply(fit[[tab]], is.double, logical(1))]
+    expect_gt(length(dbl), 0L)
+    for (col in dbl) {
+      expect_identical(as.numeric(loaded[[tab]][[col]]), fit[[tab]][[col]],
+                       info = sprintf("%s$%s", tab, col))
+    }
+  }
+  # and what a reloaded fit drives
+  ex <- ferx_example("warfarin")
+  expect_identical(
+    ferx_predict(ex$model, ex$data, fit = loaded),
+    ferx_predict(ex$model, ex$data, fit = fit)
+  )
+  expect_identical(
+    ferx_simulate(ex$model, ex$data, n_sim = 2L, seed = 7L, fit = loaded),
+    ferx_simulate(ex$model, ex$data, n_sim = 2L, seed = 7L, fit = fit)
+  )
+})
 test_that("bare (extension-less) output path defaults to .fitrx and round-trips (#268)", {
   skip_on_cran()
   fit <- warfarin_fit_cov()
