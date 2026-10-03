@@ -505,6 +505,14 @@
     names(result$theta) <- result$theta_names
   }
 
+  # Theta level-block bindings (#370): rebuilt through the one constructor
+  # `ferx_load_fit()` uses, so a reloaded fit is identical to this one. Zero
+  # rows for a model with no level block.
+  tl <- result$theta_levels
+  result$theta_levels <- .ferx_theta_levels_frame(
+    tl$block, tl$index, tl$label, tl$group, tl$contrast, tl$theta_name
+  )
+
   # Reshape omega into a matrix. A model with no random effects (n_eta = 0 - e.g.
   # a fixed-effects `[binary_model]`) returns an empty omega; keep it a 0x0 matrix
   # rather than a bare numeric(0), so downstream `nrow(result$omega)` is 0, not

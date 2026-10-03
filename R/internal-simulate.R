@@ -30,7 +30,33 @@ validate_fit_for_params <- function(fit) {
     # A plain (non-FIX) block estimates rho, so passing them is what keeps the
     # engine from rebuilding this fit at the model file's declared correlation;
     # empty for a model that declares none.
-    residual_rho = .ferx_residual_rho_vec(fit)
+    residual_rho = .ferx_residual_rho_vec(fit),
+    # The theta level-block layout the fit was bound with (#370), flattened
+    # for the glue, which places the design on it before reading theta by
+    # position. Empty for a model with no level block - and for a fit that
+    # predates the field, which the glue refuses on a level-block model.
+    level_block = as.character(fit$theta_levels$block),
+    level_index = as.integer(fit$theta_levels$index),
+    level_label = as.character(fit$theta_levels$label),
+    level_group = as.integer(fit$theta_levels$group),
+    level_contrast = as.character(fit$theta_levels$contrast)
+  )
+}
+
+# The one constructor of `fit$theta_levels` (#370), shared by `ferx_fit()` and
+# `ferx_load_fit()` so a fresh fit and a reloaded one are `identical()`. Takes
+# the columns as plain vectors; a NULL column reads as zero rows.
+.ferx_theta_levels_frame <- function(block = NULL, index = NULL, label = NULL,
+                                     group = NULL, contrast = NULL,
+                                     theta_name = NULL) {
+  data.frame(
+    block = as.character(block),
+    index = as.integer(index),
+    label = as.character(label),
+    group = as.integer(group),
+    contrast = as.character(contrast),
+    theta_name = as.character(theta_name),
+    stringsAsFactors = FALSE
   )
 }
 

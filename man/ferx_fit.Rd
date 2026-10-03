@@ -778,7 +778,26 @@ standard errors in \code{se_theta} and friends are the curvature of the
 \emph{penalized} objective - MAP / penalized-ML SEs, not posterior SDs.}
 \item{aic}{Akaike Information Criterion}
 \item{bic}{Bayesian Information Criterion}
-\item{theta}{Named numeric vector of fixed effect estimates}
+\item{theta}{Named numeric vector of fixed effect estimates. A free level
+of a \code{theta NAME[COL, ...]} level block is named
+\code{NAME[COL=value,...]}, e.g. \code{PLACEBO[STUDY=1,TIME=4]}.}
+\item{theta_levels}{Data frame with one row per level of each
+\code{theta NAME[COL, ...]} level block, as the block was bound to the
+fitted data (after \code{[data_selection]} and \code{ignore}), with
+columns \code{block}, \code{index} (1-based level position within the
+block), \code{label} (\code{COL=value,...}), \code{group} (contrast
+group, 0-based), \code{contrast} (the resolved convention:
+\code{"sum_to_zero"}, \code{"sum_to_zero_within"}, \code{"ref"} or
+\code{"none"}) and \code{theta_name} (the level's name in
+\code{theta}, \code{NA} for a level the contrast derives from the
+others, whose value is not reported). Zero rows for a model with no
+level block. \code{NULL} on a fit loaded by \code{\link{ferx_load_fit}}
+from a bundle that does not record the bindings (one written by
+ferx-core, or saved before ferx recorded them): unknown, not empty, so
+test it with \code{NROW(fit$theta_levels) > 0}.
+\code{\link{ferx_simulate}} and the other functions that
+take a \code{fit} use it to place a design on the fit's levels; see
+the "Theta level blocks" section there.}
 \item{omega}{Between-subject variability covariance matrix. Row and column
 names are the declared ETA names (e.g. \code{"ETA_CL"}); fallback is
 \code{"OMEGA(1,1)"} when names are absent.}

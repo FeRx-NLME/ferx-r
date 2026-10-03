@@ -66,7 +66,38 @@
     R ([#370](https://github.com/FeRx-NLME/ferx-r/issues/370)); declare
     `theta NAME[N]` and index it with your own column instead. The engine
     also gains `bind_theta_levels_from_fit`, which #370 will use to simulate
-    these models with a fit's theta.
+    these models with a fit's theta. (#370 has since landed; see New
+    features.)
+
+## New features
+
+- **`theta NAME[COL, ...]` level blocks can be fitted and simulated from R**
+  ([#370](https://github.com/FeRx-NLME/ferx-r/issues/370)). A level block
+  declares one theta per observed combination of the columns - the
+  unstructured placebo of a model-based meta-analysis, one theta per study
+  and timepoint - so its theta count comes from the data.
+  - `ferx_fit()` binds the block to the fitted data (after `[data_selection]`
+    and `ignore =`), and the fit names each free level `PLACEBO[STUDY=1,TIME=1]`.
+    The new `fit$theta_levels` lists every level, its contrast group, the
+    resolved contrast, and the theta it is reported under (`NA` for the level
+    the contrast derives from the others). Search tools' final fits carry it
+    too.
+  - `ferx_simulate()`, `ferx_predict()`, `ferx_simulate_with_uncertainty()`,
+    `ferx_calc_npde()` and `ferx_predict_survival()` with a `fit` place the
+    design on the fit's own levels, so a fitted theta is never read at a
+    position the fit did not give it. A design level the fit never observed
+    is refused, naming every such level: a block keyed on `TIME` can be
+    simulated only at the fit's observation times, and a study the fit never
+    saw cannot be simulated with fitted level thetas. Without a `fit`, these
+    functions bind the design's own levels and use the model's initial values.
+  - `ferx_save_fit()` / `ferx_load_fit()` carry `theta_levels`. A fit that
+    lacks them - a `.fitrx` written by ferx-core, or one saved before this
+    release - cannot drive a simulation of a level-block model; the refusal
+    says so and asks for a refit.
+  - `ferx_sir()` and `ferx_covariance()` refuse a level-block model for now:
+    both re-read the data without binding the block
+    ([FeRx-NLME/ferx-core#1622](https://github.com/FeRx-NLME/ferx-core/issues/1622)).
+    Run the covariance step inside `ferx_fit()` instead.
 
 ## Bug fixes
 

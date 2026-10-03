@@ -14,7 +14,12 @@ ferx_rust_predict_survival_from_fit(
   sigma,
   omega_iov_flat,
   omega_iov_dim,
-  residual_rho
+  residual_rho,
+  level_block,
+  level_index,
+  level_label,
+  level_group,
+  level_contrast
 )
 }
 \description{
