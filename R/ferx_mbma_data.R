@@ -335,8 +335,10 @@ ferx_mbma_data <- function(data, study, arm, time, mean, se = NULL, sd = NULL,
     level_table <- built$table
   }
 
+  # From the sorted frame, so a normalised STUDY (levels =) matches it.
   arms <- unique(data.frame(
-    STUDY = study_val, OCC = occ, study = data[[study]], arm = data[[arm]]
+    STUDY = out_df$STUDY, OCC = out_df$OCC,
+    study = data[[study]][ord], arm = data[[arm]][ord]
   ))
   arms <- arms[order(arms$STUDY, arms$OCC), , drop = FALSE]
   rownames(arms) <- NULL

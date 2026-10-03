@@ -407,6 +407,7 @@ test_that("level values are what write.csv writes, labelled as the engine does",
   d <- mb(x2, levels = c("STUDY", "TIME"))
   expect_identical(d$STUDY[1], 0.333333333333333)
   expect_identical(d$ID, d$STUDY)
+  expect_identical(sort(unique(attr(d, "arms")$STUDY)), sort(unique(d$STUDY)))
   # -0 is written as 0, and 1e-7 as 1e-07, which the engine labels in full.
   x$flag <- rep(c(-0, 1e-7), each = 4)
   d <- mb(x, covariates = "flag", levels = "flag")
