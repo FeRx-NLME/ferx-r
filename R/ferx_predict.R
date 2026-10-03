@@ -15,11 +15,15 @@
 #' @return A data.frame with columns: ID, TIME, PRED.
 #'
 #'   The frame carries a \code{simulation_warnings} attribute (a character
-#'   vector, empty for a clean run) holding the engine's data-reader
-#'   diagnostics for \code{data} - the same ones \code{ferx_fit()} returns in
-#'   \code{fit$warnings}, e.g. a record kept as a design point because its
-#'   \code{DV} was empty, a dose that never landed, or a covariate with no
-#'   value for some subjects. They are also re-emitted as a single R warning.
+#'   vector, empty for a clean run) holding the engine's non-fit warning
+#'   bundle: model-parse, model/data, experimental-feature and ODE-solver
+#'   findings, and the engine's data-reader diagnostics for \code{data},
+#'   e.g. a record kept as a design point because its \code{DV}
+#'   was empty, a dose that never landed, or a covariate with no value for
+#'   some subjects. Reader findings the model makes moot (no doses, or a
+#'   defaulted \code{CMT}, on a model with no compartments) are left out, as
+#'   \code{ferx_fit()} leaves them out. They are also re-emitted as a single
+#'   R warning.
 #'
 #' @inheritSection ferx_simulate Errors raised by the engine
 #' @inheritSection ferx_simulate Theta level blocks
@@ -74,8 +78,9 @@ ferx_predict <- function(model, data = NULL, fit = NULL) {
     )
   }
 
-  # Same `simulation_warnings` channel the simulate paths use - here it carries
-  # the data-reader diagnostics for `data`, which reached the caller nowhere at
-  # all before (ferx-r #283).
+  # Same `simulation_warnings` channel the simulate paths use, carrying the
+  # engine's non-fit warning bundle for this pass (ferx-r #283, #426). Unlike
+  # simulate it has no capped steady-state equilibration notes: core's
+  # `predict_diag` does not report them.
   .ferx_surface_sim_warnings(res, "ferx_predict")
 }

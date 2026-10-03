@@ -48,7 +48,9 @@
 #'   times have no counterpart in a fit's \code{sdtab} (do not overlay the two,
 #'   e.g. in a VPC). Every other data-reader diagnostic the engine raises for
 #'   \code{data} - a dose that never landed, a covariate with no value for some
-#'   subjects, and so on - travels the same channel.
+#'   subjects, and so on - travels the same channel, as do the model/data and
+#'   ODE-solver findings \code{ferx_simulate()} reports and a note naming each
+#'   parameter draw skipped because it landed in the flip-flop regime.
 #' @param fit A \code{ferx_fit} result. Must carry either \code{cov_matrix}
 #'   (asymptotic) or \code{sir_resamples} (SIR) depending on \code{method}.
 #' @param n_uncertainty_draws Number of parameter sets to draw from the
@@ -149,8 +151,7 @@ ferx_simulate_with_uncertainty <- function(model, data, fit,
   )
 
   # Same `simulation_warnings` channel `ferx_simulate()` uses - here it carries
-  # the design-point count (a kept empty-DV record; see the `data` note above),
-  # which otherwise diverges silently from what `ferx_fit()` scored.
+  # the engine's warning bundle for the run, skipped draws included (ferx-r #426).
   .ferx_surface_sim_warnings(res, "ferx_simulate_with_uncertainty")
 }
 

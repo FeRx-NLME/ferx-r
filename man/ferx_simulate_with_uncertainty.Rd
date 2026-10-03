@@ -27,7 +27,9 @@ in the \code{simulation_warnings} attribute and re-emitted as an R warning:
 times have no counterpart in a fit's \code{sdtab} (do not overlay the two,
 e.g. in a VPC). Every other data-reader diagnostic the engine raises for
 \code{data} - a dose that never landed, a covariate with no value for some
-subjects, and so on - travels the same channel.}
+subjects, and so on - travels the same channel, as do the model/data and
+ODE-solver findings \code{ferx_simulate()} reports and a note naming each
+parameter draw skipped because it landed in the flip-flop regime.}
 
 \item{fit}{A \code{ferx_fit} result. Must carry either \code{cov_matrix}
 (asymptotic) or \code{sir_resamples} (SIR) depending on \code{method}.}
