@@ -454,10 +454,10 @@ test_that("T8: a model without a level block round-trips an empty frame", {
     "  theta TVCL(2.0, 0.001, 20.0)\n  theta PLACEBO[6](0.0, -5.0, 5.0)",
     "TVCL + PLACEBO[PLA_IDX]"
   ), ".ferx")
-  fit <- tl_fit(counted, tl_write(tl_data, ".csv"))
+  data <- tl_write(tl_data, ".csv")
+  fit <- tl_fit(counted, data)
   expect_identical(nrow(fit$theta_levels), 0L)
-  fit2 <- tl_roundtrip(fit)
-  expect_identical(fit2$theta_levels, fit$theta_levels)
+  tl_expect_roundtrip(counted, data, fit)
 })
 
 # --- T9: a fit without bindings ------------------------------------------------
