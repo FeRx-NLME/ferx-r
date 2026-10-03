@@ -90,10 +90,10 @@
     intermediate such as `PL = PLACEBO`. On the default gradient every
     gathered theta had a zero gradient, so the fit returned the whole block
     at its initial values while `gradient = "fd"` estimated it. Such fits now
-    move the block and land at the finite-difference optimum. The same models
-    no longer warn that every level is "declared in [parameters] but not
-    referenced", in `ferx_fit()`, `ferx_predict()` and `ferx_simulate()`
-    alike.
+    move the block and land at the finite-difference optimum. For the same
+    models, `fit$warnings` no longer lists every level as "declared in
+    [parameters] but not referenced", and `ferx_simulate()` no longer raises
+    that warning.
 
 ## New features
 
