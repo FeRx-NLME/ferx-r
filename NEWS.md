@@ -2,7 +2,7 @@
 
 ## Breaking changes
 
-- **ferx now builds against ferx-core `c0300d18`**, up from the `v0.4.0`
+- **ferx now builds against ferx-core `4643eef7`**, up from the `v0.4.0`
   release (`2a6076af`). These engine changes reach every fit, prediction
   and simulation entry point with no change to the package's own code:
 
@@ -95,6 +95,22 @@
     models, `fit$warnings` no longer lists every level as "declared in
     [parameters] but not referenced", and `ferx_simulate()` no longer raises
     that warning.
+  - **A `theta NAME[COL, ...]` block's internal `__level_NAME` column no
+    longer leaks into what a fit reports**
+    ([#1644](https://github.com/FeRx-NLME/ferx-core/issues/1644)).
+    `fit$covariate_names` now holds only the data's own columns, and the
+    "used in model expressions but not declared in [covariates]" warning no
+    longer lists `__level_NAME`; the block's own columns, such as `STUDY`,
+    are still named there when undeclared. The same column no longer shows
+    up as a candidate in `ferx_gam_screen()`, in the dataset
+    `ferx_model_to_frem()` writes, or in the covariate-search resolver.
+    Estimates do not change. A
+    `.fitrx` saved before this still carries `__level_NAME` in
+    `covariate_names` and loads unchanged. The engine's `predict` now
+    refuses an unbound level block with the unbound-block error instead of
+    reporting `__level_NAME` missing from the data; `ferx_predict()` binds
+    the block (or refuses) before it reaches the engine, so this is not an
+    error it raises.
 
 ## New features
 
