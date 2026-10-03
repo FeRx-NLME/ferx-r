@@ -74,6 +74,12 @@ reference:
       - ferx_apply_selection
       - print.ferx_data
 
+  - title: "Data preparation"
+    desc: "Build and check a summary-level dataset for model-based meta-analysis."
+    contents:
+      - ferx_mbma_data
+      - print.ferx_mbma_data
+
   - title: "Utilities"
     desc: "Helper functions for exploring bundled examples and checking model initialisation."
     contents:
