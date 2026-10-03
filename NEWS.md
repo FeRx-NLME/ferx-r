@@ -2,7 +2,7 @@
 
 ## Breaking changes
 
-- **ferx now builds against ferx-core `956e7951`**, up from the `v0.4.0`
+- **ferx now builds against ferx-core `c0300d18`**, up from the `v0.4.0`
   release (`2a6076af`). These engine changes reach every fit, prediction
   and simulation entry point with no change to the package's own code:
 
@@ -83,6 +83,18 @@
     `mu_referencing`, not a warning) naming the etas and the shared theta.
     Models whose covariate mu-references share no theta give bit-identical
     results.
+  - **Results move for fits in which a theta is read only through a
+    gather** ([#1628](https://github.com/FeRx-NLME/ferx-core/issues/1628)):
+    a counted block indexed by a column (`CL = PLACEBO[PLA_IDX]`), a
+    `theta NAME[COL, ...]` level block read bare (`PLACEBO`), or an
+    intermediate such as `PL = PLACEBO`. On the default gradient every
+    gathered theta had a zero gradient, so the fit returned the whole block
+    at its initial values while `gradient = "fd"` estimated it. Such fits now
+    move the block, and on an identifiable model they land where
+    `gradient = "fd"` does. For the same
+    models, `fit$warnings` no longer lists every level as "declared in
+    [parameters] but not referenced", and `ferx_simulate()` no longer raises
+    that warning.
 
 ## New features
 
