@@ -36,9 +36,11 @@ sum(is.na(fit$theta_levels$theta_name))
 # TVE0 is not the week-0 baseline. With sum_to_zero_within, TVE0 + ETA_E0 is
 # each study's MEAN placebo level over its own visits, and the PLACEBO levels
 # are deviations from it. The generator's nominal 50 is therefore not the
-# truth to compare against; the realised truth is 50 plus the mean placebo
-# deviation, which simulate_dataset.R prints: 47.4775.
-truth <- c(TVE0 = 47.4775, EMAX = 12, ED50 = 40, ET50 = 3)
+# truth to compare against. A study's mean placebo level is
+# 50 + eta_s + (its mean placebo deviation), and the truth TVE0 estimates is the
+# realised mean of that over the 6 studies, which simulate_dataset.R prints:
+# 48.1949.
+truth <- c(TVE0 = 48.1949, EMAX = 12, ED50 = 40, ET50 = 3)
 est <- fit$theta[names(truth)]
 se <- fit$se_theta[names(truth)]
 data.frame(
@@ -68,17 +70,18 @@ fit$shrinkage_kappa                    # a fraction, not a percent
 # -- Visual predictive check --------------------------------------------------
 # Simulate at the fit's own studies and visits. The placebo levels exist only
 # for the (study, visit) cells the fit saw, so this is the grid to simulate on.
-sim <- ferx_simulate(ex$model, ex$data, n_sim = 200, fit = fit)
+n_sim <- 200
+sim <- ferx_simulate(ex$model, ex$data, n_sim = n_sim, fit = fit)
 # Each replicate holds the data rows in file order, so the arm's dose can be
 # carried across by position.
-sim$DOSE <- rep(d$DOSE, times = 200)
+sim$DOSE <- rep(d$DOSE, times = n_sim)
 sim$ARM <- ifelse(sim$DOSE == 0, "placebo", "active")
-d$ARM <- ifelse(d$DOSE == 0, "placebo", "active")
+obs <- transform(d, ARM = ifelse(DOSE == 0, "placebo", "active"))
 # Simulated 5th / 50th / 95th percentiles of the arm means, by visit ...
 stats::aggregate(DV_SIM ~ ARM + TIME, sim, stats::quantile,
                  probs = c(0.05, 0.5, 0.95))
 # ... and the observed medians to set beside them.
-stats::aggregate(DV ~ ARM + TIME, d, stats::median)
+stats::aggregate(DV ~ ARM + TIME, obs, stats::median)
 
 # A denser grid is refused, by design: a visit the fit never saw has no
 # placebo level, and the engine will not invent one (it does not default the
@@ -89,6 +92,7 @@ dense_path <- tempfile(fileext = ".csv")
 utils::write.csv(dense, dense_path, row.names = FALSE)
 refused <- tryCatch(ferx_simulate(ex$model, dense_path, n_sim = 1, fit = fit),
                     error = function(e) e)
+stopifnot(inherits(refused, "error"))
 cat(conditionMessage(refused), "\n")
 
 # To pool visits into windows (week 1-3 as one level, say), number the cells

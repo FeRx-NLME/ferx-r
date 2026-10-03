@@ -1,13 +1,16 @@
 # Model-based meta-analysis (MBMA) of arm-level summary data, with a
 # study-by-visit placebo time course.
 #
-# Run:
-#   source(system.file("examples", "ex_mbma_placebo.R", package = "ferx"))
+# Open the example script to step through it:
+#   file.edit(system.file("examples", "ex_mbma_placebo.R", package = "ferx"))
+# or run it in one go, printing as it goes:
+#   source(system.file("examples", "ex_mbma_placebo.R", package = "ferx"), echo = TRUE)
 #
 # Data: one row per study arm and visit, built by ferx_mbma_data() (columns
 # ID, STUDY, OCC, TIME, DV, MDV, NARM, SE, DOSE). DV is the reported arm mean,
-# SE its standard error, NARM the arm size. The data are synthetic; see
-# inst/examples/mbma_placebo/simulate_dataset.R for the generator and truth.
+# SE its standard error, NARM the arm size. The data are synthetic; the
+# generator and the truth are in
+#   system.file("examples", "mbma_placebo", "simulate_dataset.R", package = "ferx")
 #
 # The pieces:
 #

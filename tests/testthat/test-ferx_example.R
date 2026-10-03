@@ -71,11 +71,12 @@ test_that("warfarin_derived $data points to warfarin.csv (alias check)", {
 
 mbma_cols <- c("ID", "STUDY", "OCC", "TIME", "DV", "MDV", "NARM", "SE", "DOSE")
 
-# The generator's truth. TVE0 is the realised one: under sum_to_zero_within
-# TVE0 + ETA_E0 is a study's mean placebo level over its own visits, so the
-# truth is the nominal 50 plus the mean placebo deviation (T2 checks it
-# against the generator). GAMMA2 is the between-arm variance of a 1-patient arm.
-mbma_truth <- c(TVE0 = 47.4775, EMAX = 12, ED50 = 40, ET50 = 3, GAMMA2 = 100)
+# The generator's truth (T2 ties every value back to it). TVE0 is the realised
+# one: under sum_to_zero_within TVE0 + ETA_E0 is a study's mean placebo level
+# over its own visits, 50 + eta_s + mean_t P(s, t), so the truth is the mean of
+# that over the 6 studies. GAMMA2 is the between-arm variance of a 1-patient
+# arm.
+mbma_truth <- c(TVE0 = 48.1949, EMAX = 12, ED50 = 40, ET50 = 3, GAMMA2 = 100)
 
 # Fit the example once for T3-T5. Engine warnings land in fit$warnings; R-level
 # warnings raised on the way are kept beside the fit.
@@ -128,15 +129,27 @@ test_that("T2: the bundled CSV is what mbma_placebo/simulate_dataset.R writes", 
   ex <- ferx_example("mbma_placebo")
   gen <- system.file("examples", "mbma_placebo", "simulate_dataset.R", package = "ferx")
   env <- new.env()
-  env$out_csv <- tempfile(fileext = ".csv")
-  on.exit(unlink(env$out_csv), add = TRUE)
+  env$mbma_out_csv <- tempfile(fileext = ".csv")
+  on.exit(unlink(env$mbma_out_csv), add = TRUE)
   capture.output(suppressMessages(sys.source(gen, envir = env)))
 
   # The draws were measured bit-identical (17 significant digits) on aarch64
   # macOS (R 4.6.1) and on rocker/r-ver 4.4.2 under linux/amd64 and
   # linux/arm64, so this holds on CI too.
-  expect_equal(utils::read.csv(env$out_csv), utils::read.csv(ex$data), tolerance = 1e-12)
-  expect_equal(env$TVE0 + mean(env$placebo_mean), mbma_truth[["TVE0"]], tolerance = 1e-5)
+  expect_equal(utils::read.csv(env$mbma_out_csv), utils::read.csv(ex$data),
+               tolerance = 1e-12)
+  # mbma_truth is what the generator used ...
+  expect_equal(env$tve0_realised, mbma_truth[["TVE0"]], tolerance = 1e-5)
+  expect_identical(
+    c(EMAX = env$EMAX, ED50 = env$ED50, ET50 = env$ET50, GAMMA2 = env$GAMMA2),
+    mbma_truth[c("EMAX", "ED50", "ET50", "GAMMA2")]
+  )
+  # ... and so is the truth table the example script prints.
+  script <- readLines(system.file("examples", "ex_mbma_placebo.R", package = "ferx"))
+  truth_line <- grep("^truth <- c\\(", script, value = TRUE)
+  expect_length(truth_line, 1L)
+  expect_identical(eval(parse(text = sub("^truth <- ", "", truth_line))),
+                   mbma_truth[c("TVE0", "EMAX", "ED50", "ET50")])
 })
 
 test_that("T3: the mbma_placebo fit recovers its simulation truth", {
@@ -174,7 +187,7 @@ test_that("T4: the mbma_placebo fit raises no false 'not referenced' warning", {
   expect_false(any(grepl("not referenced", res$r_warnings)))
 })
 
-test_that("T5: PLACEBO on its own line fits exactly like the shipped form", {
+test_that("T5: PLACEBO on its own line fits like the shipped form (to 1e-8)", {
   skip_on_cran()
   ex <- ferx_example("mbma_placebo")
   fit <- mbma_fit()$fit
@@ -187,8 +200,10 @@ test_that("T5: PLACEBO on its own line fits exactly like the shipped form", {
   on.exit(unlink(split), add = TRUE)
   writeLines(txt, split)
 
-  # Before ferx-core#1640 (#1628) the split form left every level at its init.
+  # Before ferx-core#1640 (#1628) the split form left every level at its init:
+  # OFV 284.76 against 97.07. The two texts may compile to differently ordered
+  # expressions, so they are compared to 1e-8 rather than bit for bit.
   fit_split <- suppressWarnings(ferx_fit(split, ex$data, verbose = FALSE))
-  expect_identical(fit_split$ofv, fit$ofv)
-  expect_identical(fit_split$theta, fit$theta)
+  expect_equal(fit_split$ofv, fit$ofv, tolerance = 1e-8)
+  expect_equal(fit_split$theta, fit$theta, tolerance = 1e-8)
 })

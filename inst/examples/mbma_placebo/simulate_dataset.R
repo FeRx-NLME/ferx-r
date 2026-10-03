@@ -12,7 +12,7 @@
 # Run from this directory:  Rscript simulate_dataset.R
 # Writes ../data/mbma_placebo.csv. To write elsewhere, pass a path:
 #   Rscript simulate_dataset.R /tmp/mbma_placebo.csv
-# or set `out_csv` before sourcing this file.
+# or set `mbma_out_csv` before sourcing this file.
 #
 # Truth (natural scale, a symptom score, lower = better):
 #
@@ -30,9 +30,11 @@
 # estimated parameters.
 #
 # TVE0 below is the nominal 50. Under contrast = sum_to_zero_within the model's
-# TVE0 + ETA_E0 is each study's MEAN placebo level over its own visits, so the
-# truth a fit recovers is the realised 50 + mean over studies of
-# mean_t P(s, t). This script prints it (about 47.5).
+# TVE0 + ETA_E0 is each study's MEAN placebo level over its own visits,
+# 50 + eta_s + mean_t P(s, t). With 6 studies the fit pins those down almost
+# without shrinkage, so the truth its TVE0 estimates is their realised mean
+# over studies, 50 + mean_s(eta_s) + mean_s(mean_t P(s, t)). This script
+# prints it as `tve0_realised` (48.1949).
 
 library(ferx)
 
@@ -51,11 +53,13 @@ DOSE_POOL  <- c(10, 25, 50, 100, 200)
 set.seed(370)
 
 rows <- list()
+study_eta <- numeric(0)
 placebo_mean <- numeric(0)
 for (s in seq_len(N_STUDY)) {
   weeks <- sort(unique(c(0, sample(TIMES_POOL, 3))))
   doses <- c(0, sort(sample(DOSE_POOL, sample(2:3, 1))))
   eta <- rnorm(1, 0, OMEGA_SD)
+  study_eta <- c(study_eta, eta)
   # Placebo: a study-specific improving trend plus visit noise, 0 at week 0.
   slope <- runif(1, 2, 8)
   P <- -slope * weeks / (weeks + 2) + c(0, rnorm(length(weeks) - 1, 0, 1))
@@ -74,15 +78,17 @@ for (s in seq_len(N_STUDY)) {
 }
 arms <- do.call(rbind, rows)
 
-cat(sprintf("Realised TVE0 truth (nominal %g + mean placebo deviation): %.4f\n",
-            TVE0, TVE0 + mean(placebo_mean)))
+tve0_realised <- TVE0 + mean(study_eta) + mean(placebo_mean)
+cat(sprintf(paste0("Realised TVE0 truth (nominal %g + mean study eta %.4f",
+                   " + mean placebo deviation %.4f): %.4f\n"),
+            TVE0, mean(study_eta), mean(placebo_mean), tve0_realised))
 
 d <- ferx_mbma_data(arms, study = "trial", arm = "arm", time = "week",
                     mean = "mean", sd = "sd", n = "n", covariates = "DOSE")
 
-if (!exists("out_csv", inherits = FALSE)) {
+if (!exists("mbma_out_csv", inherits = FALSE)) {
   args <- commandArgs(trailingOnly = TRUE)
-  out_csv <- if (length(args)) args[1] else file.path("..", "data", "mbma_placebo.csv")
+  mbma_out_csv <- if (length(args)) args[1] else file.path("..", "data", "mbma_placebo.csv")
 }
-utils::write.csv(d, out_csv, row.names = FALSE)
-cat("Wrote", nrow(d), "rows to", out_csv, "\n")
+utils::write.csv(d, mbma_out_csv, row.names = FALSE)
+cat("Wrote", nrow(d), "rows to", mbma_out_csv, "\n")
