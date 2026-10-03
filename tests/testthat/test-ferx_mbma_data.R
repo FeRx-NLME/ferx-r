@@ -68,6 +68,19 @@ test_that("a numeric study keeps its own values and sorts numerically", {
   expect_null(attr(d, "codes")$study)
 })
 
+test_that("character codes do not depend on the collation locale", {
+  old <- Sys.getlocale("LC_COLLATE")
+  on.exit(Sys.setlocale("LC_COLLATE", old), add = TRUE)
+  if (!nzchar(suppressWarnings(Sys.setlocale("LC_COLLATE", "en_US.UTF-8")))) {
+    skip("the en_US.UTF-8 locale is not available")
+  }
+  # en_US.UTF-8 collates a < b < B; the codes follow C order, B < a < b.
+  x <- rbind(mb_arms(), transform(mb_arms()[5:8, ], trial = "a"))
+  x$trial[5:8] <- "b"
+  d <- mb(x)
+  expect_identical(attr(d, "codes")$study, c(B = 1L, a = 2L, b = 3L))
+})
+
 test_that("covariates are carried through; character coded, logical 0/1", {
   x <- mb_arms()
   x$flare <- rep(c(TRUE, FALSE), each = 4)
@@ -110,8 +123,9 @@ test_that("the arguments themselves are checked", {
   expect_error(mb(x), "Column `week` (`time`) must be numeric.", fixed = TRUE)
   x <- mb_arms()
   x$treatment[3] <- NA
+  x$week[5] <- Inf
   expect_error(
-    mb(x), "`study`, `arm` and `time` must not be missing; row(s) 3.",
+    mb(x), "`study` and `arm` must be present and `time` finite; row(s) 3, 5.",
     fixed = TRUE
   )
 })
@@ -124,6 +138,22 @@ test_that("rows with a missing mean are dropped, with a message", {
   expect_identical(nrow(d), 7L)
 })
 
+test_that("no row with a mean is refused", {
+  x <- mb_arms()
+  x$change <- NA_real_
+  expect_error(
+    suppressMessages(mb(x)), "No row has a `mean`.", fixed = TRUE
+  )
+})
+
+test_that("an infinite mean is refused, naming the cell", {
+  x <- mb_arms()
+  x$change[3] <- Inf
+  expect_error(
+    mb(x), "`mean` must be finite: (study B, arm drug, time 0).", fixed = TRUE
+  )
+})
+
 test_that("a negative mean is accepted (change from baseline)", {
   d <- expect_no_warning(mb())
   expect_true(any(d$DV < 0))
@@ -131,26 +161,30 @@ test_that("a negative mean is accepted (change from baseline)", {
 
 # --- row 1: se ---------------------------------------------------------------
 
-test_that("a negative, zero or missing se is refused, naming the cell", {
-  for (bad in c(-0.1, 0, NA)) {
+test_that("a negative, zero, missing or infinite se is refused, naming the cell", {
+  for (bad in c(-0.1, 0, NA, Inf)) {
     x <- mb_arms()
     x$se[6] <- bad
     expect_error(
       mb(x),
-      "`se` must be positive wherever `mean` is present: (study A, arm placebo, time 12).",
+      "`se` must be positive and finite wherever `mean` is present: (study A, arm placebo, time 12).",
       fixed = TRUE
     )
   }
 })
 
-test_that("a non-positive n is refused, naming the cell", {
-  x <- mb_arms()
-  x$n[1] <- 0
-  expect_error(
-    mb(x),
-    "`n` must be positive and present on every row: (study B, arm placebo, time 0).",
-    fixed = TRUE
-  )
+test_that("a non-positive, missing or infinite n is refused, naming the cell", {
+  # n = Inf with sd = would give SE = 0, the infinite weight se's check
+  # exists to refuse.
+  for (bad in c(0, -1, NA, Inf)) {
+    x <- mb_arms()
+    x$n[1] <- bad
+    expect_error(
+      mb(x, sd = "sd"),
+      "`n` must be positive and finite on every row: (study B, arm placebo, time 0).",
+      fixed = TRUE
+    )
+  }
 })
 
 # --- row 4: se or sd ----------------------------------------------------------
@@ -177,7 +211,7 @@ test_that("a negative sd is refused under its own name", {
   x$sd[1] <- -2
   expect_error(
     mb(x, sd = "sd"),
-    "`sd` must be positive wherever `mean` is present: (study B, arm placebo, time 0).",
+    "`sd` must be positive and finite wherever `mean` is present: (study B, arm placebo, time 0).",
     fixed = TRUE
   )
 })
@@ -198,6 +232,10 @@ test_that("a proportion outside [0, 1] is refused; the percent hint is gated", {
     "The values look like percentages; use scale = \"percent\".",
     fixed = TRUE
   )
+  # Below 0 it cannot be a percentage either: no hint.
+  x$change[1] <- -5
+  e <- expect_error(mb(x, scale = "proportion"))
+  expect_no_match(conditionMessage(e), "percent", fixed = TRUE)
   # Above 100 it cannot be a percentage: no hint.
   x$change[1] <- 135
   e <- expect_error(mb(x, scale = "proportion"))
@@ -281,7 +319,7 @@ test_that("a user index is checked and carried through", {
   expect_identical(d$IDX, rep(1:2, 4))
   expect_false("LEVEL_IDX" %in% names(d))
 
-  for (bad in list(c(NA, 2), c(1.5, 2), c(0, 2))) {
+  for (bad in list(c(NA, 2), c(1.5, 2), c(0, 2), c(Inf, 2))) {
     x$IDX <- rep(bad, 4)
     expect_error(
       mb(x, index = "IDX"),
@@ -350,13 +388,41 @@ test_that("levels must name output columns", {
   expect_identical(attr(d, "levels")$label[1], "region=1,TIME=0")
 })
 
-test_that("a level value is labelled in its shortest form", {
-  lv <- ferx:::.mbma_level_value
-  expect_identical(lv(7), "7")
-  expect_identical(lv(-3), "-3")
-  expect_identical(lv(0.5), "0.5")
-  expect_identical(lv(2.25), "2.25")
-  expect_identical(lv(0.1), "0.1")
+test_that("level values are what write.csv writes, labelled as the engine does", {
+  # The engine reads the CSV, where 0.1 + 0.2 is written as 0.3 (15
+  # significant digits), 1/3 as 0.333333333333333 and 1e5 as 1e+05.
+  x <- mb_arms()
+  x$week <- c(0, 0.3, 0, 0.1 + 0.2, 0, 1 / 3, 0, 1e5)
+  d <- mb(x, levels = c("STUDY", "TIME"))
+  expect_identical(attr(d, "levels")$label, c(
+    "STUDY=1,TIME=0", "STUDY=1,TIME=0.333333333333333", "STUDY=1,TIME=100000",
+    "STUDY=2,TIME=0", "STUDY=2,TIME=0.3"
+  ))
+  expect_identical(d$LEVEL_IDX, c(1L, 3L, 1L, 2L, 4L, 5L, 4L, 5L))
+  # The column holds the value written, so 0.1 + 0.2 is now 0.3.
+  expect_identical(d$TIME[c(6, 8)], c(0.3, 0.3))
+  # A study id is normalised like any level value, and ID follows it.
+  x2 <- x
+  x2$trial <- rep(c(2, 1 / 3), each = 4)
+  d <- mb(x2, levels = c("STUDY", "TIME"))
+  expect_identical(d$STUDY[1], 0.333333333333333)
+  expect_identical(d$ID, d$STUDY)
+  # -0 is written as 0, and 1e-7 as 1e-07, which the engine labels in full.
+  x$flag <- rep(c(-0, 1e-7), each = 4)
+  d <- mb(x, covariates = "flag", levels = "flag")
+  expect_identical(attr(d, "levels")$label, c("flag=0", "flag=0.0000001"))
+})
+
+test_that("a missing value in a level column is refused, naming the cell", {
+  x <- mb_arms()
+  x$dose <- c(0, 0, 50, 50, 0, 0, NA, 50)
+  expect_error(
+    mb(x, covariates = "dose", levels = "dose"),
+    "Level column `dose` must be finite on every row: (study A, arm drug, time 0).",
+    fixed = TRUE
+  )
+  # Outside `levels`, a missing covariate is carried through.
+  expect_identical(sum(is.na(mb(x, covariates = "dose")$dose)), 1L)
 })
 
 # --- print -------------------------------------------------------------------
@@ -403,9 +469,13 @@ mb_model <- function(theta, effect) {
 }
 
 test_that("the counted form on LEVEL_IDX fits like the data-driven form", {
+  # Study 10 sorts after study 2. Study 2's arms are at 0.3 and 0.1 + 0.2,
+  # one level once written; study 10's are at 1/3. No cell mean is 0, the
+  # initial value.
   x <- mb_arms()
   x$trial <- rep(c(10, 2), each = 4)
-  x$week <- rep(c(0, 0.5), 4)
+  x$week <- c(0, 1 / 3, 0, 1 / 3, 0, 0.3, 0, 0.1 + 0.2)
+  x$change <- c(0.4, -1.1, 0.2, -2.4, -0.3, -0.8, 0.1, -2.0)
   d <- mb(x, levels = c("STUDY", "TIME"))
   data <- tempfile(fileext = ".csv")
   utils::write.csv(d, data, row.names = FALSE)
@@ -422,16 +492,29 @@ test_that("the counted form on LEVEL_IDX fits like the data-driven form", {
   f_cnt <- fit(counted)
 
   # The helper's table names the engine's levels, in the engine's order.
-  expect_identical(attr(d, "levels")$label, f_col$theta_levels$label)
-  expect_identical(
-    names(f_col$theta), paste0("PLACEBO[", attr(d, "levels")$label, "]")
+  labels <- c(
+    "STUDY=2,TIME=0", "STUDY=2,TIME=0.3",
+    "STUDY=10,TIME=0", "STUDY=10,TIME=0.333333333333333"
   )
-  # Closed form, outside the engine: with sigma fixed to 1 and weight = SE,
-  # each level is its cell's inverse-variance weighted mean (0 at TIME 0,
-  # -1.3745 and -1.7198 at TIME 0.5). Measured worst error 1.3e-15.
-  w <- 1 / d$SE^2
-  cell_mean <- unname(tapply(d$DV * w, d$LEVEL_IDX, sum) / tapply(w, d$LEVEL_IDX, sum))
-  expect_lt(max(abs(unname(f_cnt$theta) - cell_mean)), 1e-8)
+  expect_identical(attr(d, "levels")$label, labels)
+  expect_identical(f_col$theta_levels$label, labels)
+  expect_identical(names(f_col$theta), paste0("PLACEBO[", labels, "]"))
+  # Closed form from the input rows, not from LEVEL_IDX: with sigma fixed to
+  # 1 and weight = SE, each level is its (study, time) cell's
+  # inverse-variance weighted mean, in the order above. Both fits must hit it,
+  # so a LEVEL_IDX pointing rows at the wrong level fails here. Measured
+  # worst error 5.2e-7, the optimizer's stopping tolerance (the same at
+  # maxiter 20, 50 and 200); the bound leaves 20x headroom, and the closest
+  # two cell means are 0.4 apart.
+  cell <- data.frame(trial = x$trial, week = round(x$week, 12))
+  key <- paste(cell$trial, cell$week)
+  w <- 1 / x$se^2
+  m <- tapply(x$change * w, key, sum) / tapply(w, key, sum)
+  cells <- unique(cell)
+  cells <- cells[order(cells$trial, cells$week), ]
+  cell_mean <- unname(m[paste(cells$trial, cells$week)])
+  expect_true(all(abs(cell_mean) > 0.1))
+  expect_lt(max(abs(unname(f_col$theta) - cell_mean)), 1e-5)
+  expect_lt(max(abs(unname(f_cnt$theta) - cell_mean)), 1e-5)
   expect_equal(f_col$ofv, f_cnt$ofv, tolerance = 1e-10)
-  expect_equal(unname(f_col$theta), unname(f_cnt$theta), tolerance = 1e-10)
 })

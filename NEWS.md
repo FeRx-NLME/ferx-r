@@ -106,8 +106,10 @@
   study, arm and timepoint it writes `ID` (the study, so a random effect on
   `ID` is between-study variability), a separate `STUDY` column for level
   blocks, `OCC` (the arm), `TIME`, `DV`, `NARM` and `SE`, plus any
-  covariates, with character columns coded as integers.
-  - It refuses a missing, zero or negative SE (or SD), a mean outside
+  covariates, with character columns coded as integers in C-locale order
+  (the same on every machine).
+  - It refuses a missing, zero, negative or infinite SE (or SD) or `n`, an
+    infinite mean, a mean outside
     `[0, 1]` for `scale = "proportion"` (pointing at `scale = "percent"` when
     the values look like percentages) or outside `[0, 100]` for
     `scale = "percent"`, and a repeated (study, arm, time) row, naming the
@@ -119,7 +121,10 @@
   - `levels = c("STUDY", "TIME")` adds a `LEVEL_IDX` column, numbered in the
     order the engine discovers a `theta NAME[STUDY, TIME]` block's levels,
     so the counted form `theta NAME[N]` read at `NAME[LEVEL_IDX]` estimates
-    the same levels. `index =` checks a level index you built yourself.
+    the same levels. Levels are built from the values `write.csv()` writes
+    (15 significant digits), which are what the engine reads, so
+    `0.1 + 0.2` and `0.3` are one level. `index =` checks a level index you
+    built yourself.
   - `print()` reports studies, arms per study, timepoints per arm, and the
     range of the between-subject SD the standard errors imply.
   - The fitting functions take a CSV path, so write the result out first

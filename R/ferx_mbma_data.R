@@ -21,19 +21,22 @@
 #'
 #' @section Checks:
 #' \describe{
-#'   \item{Errors}{A \code{se} (or \code{sd}) that is missing, zero or
-#'     negative where \code{mean} is present, a missing or non-positive
-#'     \code{n}, a \code{mean} outside the range of \code{scale}, a missing
-#'     \code{study}, \code{arm} or \code{time}, a repeated (study, arm, time)
-#'     row, and an \code{index} column that is not 1..N without gaps. Each
-#'     message names the offending rows.}
+#'   \item{Errors}{A \code{se} (or \code{sd}) that is missing, zero,
+#'     negative or infinite where \code{mean} is present, an \code{n} that is
+#'     missing, non-positive or infinite, an infinite \code{mean} or one
+#'     outside the range of \code{scale}, a missing \code{study} or
+#'     \code{arm}, a missing or infinite \code{time}, a repeated (study, arm,
+#'     time) row, a missing value in a \code{levels} column, and an
+#'     \code{index} column that is not 1..N without gaps. Each message names
+#'     the offending rows.}
 #'   \item{Warnings}{An arm whose \code{n} changes between timepoints (the
 #'     per-row \code{n} is kept in \code{NARM}), a study with a single arm,
 #'     and an arm without a \code{time == 0} record.}
 #'   \item{Accepted}{A negative \code{mean}: change from baseline is negative
 #'     by nature.}
 #' }
-#' Rows whose \code{mean} is missing are dropped, with a message.
+#' Rows whose \code{mean} is missing are dropped, with a message; if that
+#' leaves no row, the call is refused.
 #'
 #' @section Levels for a theta level block:
 #' \code{levels = c("STUDY", "TIME")} adds a \code{LEVEL_IDX} column numbering
@@ -45,9 +48,10 @@
 #' form is what lets you define the cells yourself (for example, pooled visit
 #' windows, via \code{index}). The table mapping each index to its cell is
 #' kept in \code{attr(d, "levels")}, labelled as the engine labels a level
-#' (\code{STUDY=7,TIME=4}). Labels match the engine for integer and
-#' short decimal values; a value such as 1/3 may be written with different
-#' digits.
+#' (\code{STUDY=7,TIME=4}). The levels are built from the values
+#' \code{utils::write.csv()} writes (15 significant digits), which are what
+#' the engine reads, and the level columns in the result hold those values:
+#' 0.1 + 0.2 and 0.3 are one level, as they are in the written file.
 #'
 #' @param data A data.frame with one row per study, arm and timepoint.
 #' @param study,arm,time,mean,n Names of the columns in \code{data} holding the
@@ -147,10 +151,10 @@ ferx_mbma_data <- function(data, study, arm, time, mean, se = NULL, sd = NULL,
     }
   }
 
-  key_na <- is.na(data[[study]]) | is.na(data[[arm]]) | is.na(data[[time]])
+  key_na <- is.na(data[[study]]) | is.na(data[[arm]]) | !is.finite(data[[time]])
   if (any(key_na)) {
     stop(sprintf(
-      "`study`, `arm` and `time` must not be missing; row(s) %s.",
+      "`study` and `arm` must be present and `time` finite; row(s) %s.",
       .mbma_list(which(key_na))
     ), call. = FALSE)
   }
@@ -162,13 +166,16 @@ ferx_mbma_data <- function(data, study, arm, time, mean, se = NULL, sd = NULL,
     ))
     data <- data[!absent, , drop = FALSE]
   }
+  if (nrow(data) == 0L) {
+    stop("No row has a `mean`.", call. = FALSE)
+  }
   cell <- .mbma_cells(data[[study]], data[[arm]], data[[time]])
 
   n_val <- data[[n]]
-  bad_n <- is.na(n_val) | n_val <= 0
+  bad_n <- !is.finite(n_val) | n_val <= 0
   if (any(bad_n)) {
     stop(sprintf(
-      "`n` must be positive and present on every row: %s.",
+      "`n` must be positive and finite on every row: %s.",
       .mbma_list(cell[bad_n])
     ), call. = FALSE)
   }
@@ -180,10 +187,10 @@ ferx_mbma_data <- function(data, study, arm, time, mean, se = NULL, sd = NULL,
     prec <- data[[se]]
     prec_role <- "se"
   }
-  bad_prec <- is.na(prec) | prec <= 0
+  bad_prec <- !is.finite(prec) | prec <= 0
   if (any(bad_prec)) {
     stop(sprintf(
-      "`%s` must be positive wherever `mean` is present: %s.",
+      "`%s` must be positive and finite wherever `mean` is present: %s.",
       prec_role, .mbma_list(cell[bad_prec])
     ), call. = FALSE)
   }
@@ -193,10 +200,16 @@ ferx_mbma_data <- function(data, study, arm, time, mean, se = NULL, sd = NULL,
   }
 
   dv <- data[[mean]]
+  bad_mean <- !is.finite(dv)
+  if (any(bad_mean)) {
+    stop(sprintf(
+      "`mean` must be finite: %s.", .mbma_list(cell[bad_mean])
+    ), call. = FALSE)
+  }
   if (scale == "proportion") {
     out <- dv < 0 | dv > 1
     if (any(out)) {
-      hint <- if (max(dv) <= 100) {
+      hint <- if (min(dv) >= 0 && max(dv) <= 100) {
         " The values look like percentages; use scale = \"percent\"."
       } else {
         ""
@@ -289,11 +302,6 @@ ferx_mbma_data <- function(data, study, arm, time, mean, se = NULL, sd = NULL,
     out_df[[index]] <- .mbma_check_index(data[[index]], index, cell)
   }
 
-  ord <- order(out_df$STUDY, out_df$OCC, out_df$TIME)
-  out_df <- out_df[ord, , drop = FALSE]
-  rownames(out_df) <- NULL
-
-  level_table <- NULL
   if (!is.null(levels)) {
     allowed <- c("STUDY", "TIME", covariates)
     if (!is.character(levels) || length(levels) == 0L ||
@@ -303,7 +311,26 @@ ferx_mbma_data <- function(data, study, arm, time, mean, se = NULL, sd = NULL,
         .mbma_list(allowed, quote = TRUE)
       ), call. = FALSE)
     }
+    for (col in levels) {
+      bad <- !is.finite(out_df[[col]])
+      if (any(bad)) {
+        stop(sprintf(
+          "Level column `%s` must be finite on every row: %s.",
+          col, .mbma_list(cell[bad])
+        ), call. = FALSE)
+      }
+    }
+  }
+
+  ord <- order(out_df$STUDY, out_df$OCC, out_df$TIME)
+  out_df <- out_df[ord, , drop = FALSE]
+  rownames(out_df) <- NULL
+
+  level_table <- NULL
+  if (!is.null(levels)) {
     built <- .mbma_level_index(out_df[levels])
+    out_df[levels] <- built$values
+    out_df$ID <- out_df$STUDY
     out_df$LEVEL_IDX <- built$index
     level_table <- built$table
   }
@@ -399,7 +426,13 @@ print.ferx_mbma_data <- function(x, n = 6L, ...) {
   if (is.logical(x)) {
     return(list(values = as.integer(x), codes = NULL))
   }
-  lv <- if (is.factor(x)) base::levels(droplevels(x)) else sort(unique(as.character(x)))
+  # Radix sort: C-locale order, so the codes do not depend on the collation
+  # locale of the machine that built the frame.
+  lv <- if (is.factor(x)) {
+    base::levels(droplevels(x))
+  } else {
+    sort(unique(as.character(x)), method = "radix")
+  }
   values <- match(as.character(x), lv)
   list(values = values, codes = stats::setNames(seq_along(lv), lv))
 }
@@ -409,7 +442,7 @@ print.ferx_mbma_data <- function(x, n = 6L, ...) {
   if (!is.numeric(idx)) {
     stop(sprintf("`index` column `%s` must be numeric.", col), call. = FALSE)
   }
-  bad <- is.na(idx) | idx != round(idx) | idx < 1
+  bad <- !is.finite(idx) | idx != round(idx) | idx < 1
   if (any(bad)) {
     stop(sprintf(
       "`index` column `%s` must hold whole numbers from 1; offending value(s) %s at %s.",
@@ -426,38 +459,50 @@ print.ferx_mbma_data <- function(x, n = 6L, ...) {
   as.integer(idx)
 }
 
-# Number the observed combinations of `cols` 1..N in ascending lexicographic
-# order of their numeric values - the order the engine discovers a level
-# block's levels in - and label each as the engine does.
+# Number the observed combinations of `cols` 1..N as the engine discovers a
+# level block's levels, and label each as the engine does. The engine reads
+# the CSV, so a value is what utils::write.csv() writes for it (15
+# significant digits): levels are matched by that text, sorted ascending by
+# its value column by column, and the columns come back holding those values.
 .mbma_level_index <- function(cols) {
-  cells <- unique(cols)
-  cells <- cells[do.call(order, unname(as.list(cells))), , drop = FALSE]
-  rownames(cells) <- NULL
+  text <- lapply(cols, .mbma_csv_text)
+  values <- lapply(text, as.numeric)
+  key <- do.call(paste, c(unname(text), sep = "\r"))
+  first <- which(!duplicated(key))
+  first <- first[do.call(order, unname(lapply(values, `[`, first)))]
   label <- do.call(paste, c(
-    lapply(names(cells), function(nm) {
-      paste0(nm, "=", vapply(cells[[nm]], .mbma_level_value, character(1)))
+    lapply(names(cols), function(nm) {
+      paste0(nm, "=", .mbma_level_text(text[[nm]][first]))
     }),
     sep = ","
   ))
-  key <- do.call(paste, c(unname(as.list(cols)), sep = "\r"))
-  cell_key <- do.call(paste, c(unname(as.list(cells)), sep = "\r"))
+  cells <- as.data.frame(lapply(values, `[`, first))
   list(
-    index = match(key, cell_key),
-    table = data.frame(index = seq_len(nrow(cells)), label = label, cells)
+    index = match(key, key[first]),
+    values = values,
+    table = data.frame(index = seq_along(first), label = label, cells)
   )
 }
 
-# A level value as the engine writes it: integers without a decimal point,
-# anything else in the fewest significant digits that read back as the value.
-.mbma_level_value <- function(v) {
-  if (v == round(v) && abs(v) < 1e15) {
-    return(sprintf("%.0f", v))
-  }
-  for (d in 1:17) {
-    s <- formatC(v, digits = d, format = "fg")
-    if (as.numeric(s) == v) {
-      return(s)
-    }
-  }
+# The text utils::write.csv() writes for a numeric vector.
+.mbma_csv_text <- function(v) {
+  con <- textConnection("out", "w", local = TRUE)
+  utils::write.table(
+    data.frame(v), con, sep = ",", col.names = FALSE, row.names = FALSE
+  )
+  close(con)
+  out
+}
+
+# A level value as the engine labels it: the shortest decimal that reads
+# back as the value, never in exponent form. A decimal of 15 significant
+# digits or fewer reads back exactly, so the written text is that decimal;
+# only an exponent needs rewriting.
+.mbma_level_text <- function(s) {
+  sci <- grepl("e", s, fixed = TRUE)
+  s[sci] <- vapply(
+    as.numeric(s[sci]), format, character(1),
+    scientific = FALSE, digits = 15, trim = TRUE
+  )
   s
 }

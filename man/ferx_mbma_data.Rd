@@ -89,19 +89,22 @@ write it out first:
 \section{Checks}{
 
 \describe{
-\item{Errors}{A \code{se} (or \code{sd}) that is missing, zero or
-negative where \code{mean} is present, a missing or non-positive
-\code{n}, a \code{mean} outside the range of \code{scale}, a missing
-\code{study}, \code{arm} or \code{time}, a repeated (study, arm, time)
-row, and an \code{index} column that is not 1..N without gaps. Each
-message names the offending rows.}
+\item{Errors}{A \code{se} (or \code{sd}) that is missing, zero,
+negative or infinite where \code{mean} is present, an \code{n} that is
+missing, non-positive or infinite, an infinite \code{mean} or one
+outside the range of \code{scale}, a missing \code{study} or
+\code{arm}, a missing or infinite \code{time}, a repeated (study, arm,
+time) row, a missing value in a \code{levels} column, and an
+\code{index} column that is not 1..N without gaps. Each message names
+the offending rows.}
 \item{Warnings}{An arm whose \code{n} changes between timepoints (the
 per-row \code{n} is kept in \code{NARM}), a study with a single arm,
 and an arm without a \code{time == 0} record.}
 \item{Accepted}{A negative \code{mean}: change from baseline is negative
 by nature.}
 }
-Rows whose \code{mean} is missing are dropped, with a message.
+Rows whose \code{mean} is missing are dropped, with a message; if that
+leaves no row, the call is refused.
 }
 
 \section{Levels for a theta level block}{
@@ -115,9 +118,10 @@ levels as the data-driven form with \code{contrast = none}. The counted
 form is what lets you define the cells yourself (for example, pooled visit
 windows, via \code{index}). The table mapping each index to its cell is
 kept in \code{attr(d, "levels")}, labelled as the engine labels a level
-(\code{STUDY=7,TIME=4}). Labels match the engine for integer and
-short decimal values; a value such as 1/3 may be written with different
-digits.
+(\code{STUDY=7,TIME=4}). The levels are built from the values
+\code{utils::write.csv()} writes (15 significant digits), which are what
+the engine reads, and the level columns in the result hold those values:
+0.1 + 0.2 and 0.3 are one level, as they are in the written file.
 }
 
 \examples{
