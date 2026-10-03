@@ -4,18 +4,18 @@
 # carry an info note naming it; test-shared-theta-mstep.R pins both from R.
 #
 # The model's [fit_options] say `method = focei` and `covariance = true`, so
-# the call-time overrides raise two R conflict warnings. Only those are
-# muffled here; any other R warning still reaches the test.
-two_cpt_oral_cov_fit <- function(method, settings) {
+# the call-time overrides raise two R conflict warnings. Only conflicts on
+# those two keys are muffled here; any other R warning still reaches the test.
+two_cpt_oral_cov_fit <- function(method, settings, model = NULL) {
   ex <- ferx_example("two_cpt_oral_cov")
   withCallingHandlers(
     ferx_fit(
-      ex$model, ex$data,
+      model %||% ex$model, ex$data,
       method = method, verbose = FALSE, covariance = FALSE,
       settings = settings
     ),
     warning = function(w) {
-      if (grepl("overrides it with", conditionMessage(w), fixed = TRUE)) {
+      if (grepl("sets `(method|covariance) = ", conditionMessage(w))) {
         invokeRestart("muffleWarning")
       }
     }
@@ -43,6 +43,33 @@ two_cpt_oral_cov_impmap_fit <- local({
       fit <<- two_cpt_oral_cov_fit(
         "impmap", list(impmap_iterations = 3L, impmap_seed = 42L)
       )
+    }
+    fit
+  }
+})
+
+# The negative control: the same model with V1 on its own exponent THETA_WTV,
+# so both covariate mu-references stay but no theta is shared between them.
+# SAEM, seed 42, about 0.15 s.
+two_cpt_oral_cov_separate_saem_fit <- local({
+  fit <- NULL
+  function() {
+    if (is.null(fit)) {
+      txt <- readLines(ferx_example("two_cpt_oral_cov")$model)
+      edited <- sub(
+        "theta THETA_WT(0.75, 0.01, 5.0)",
+        "theta THETA_WT(0.75, 0.01, 5.0)\n  theta THETA_WTV(0.75, 0.01, 5.0)",
+        txt, fixed = TRUE
+      )
+      edited <- sub(
+        "V1 = TVV1 * (WT / 70)^THETA_WT *", "V1 = TVV1 * (WT / 70)^THETA_WTV *",
+        edited, fixed = TRUE
+      )
+      stopifnot(sum(edited != txt) == 2L)
+      path <- tempfile(fileext = ".ferx")
+      on.exit(unlink(path))
+      writeLines(edited, path)
+      fit <<- two_cpt_oral_cov_fit("saem", list(seed = 42L), model = path)
     }
     fit
   }

@@ -14,8 +14,10 @@ joint_mstep_rows <- function(fit) {
 test_that("SAEM moves THETA_WT off its pre-#1620 value on a shared theta", {
   skip_on_cran()
   fit <- two_cpt_oral_cov_saem_fit()
-  # 0.0109 before #1620, 0.618 after; NONMEM SAEM gives 0.6618.
+  # 0.0109 before #1620, 0.618 after; NONMEM SAEM gives 0.6618. The upper
+  # side catches a joint step that overshoots towards the 5.0 bound.
   expect_gt(fit$theta[["THETA_WT"]], 0.3)
+  expect_lt(fit$theta[["THETA_WT"]], 1.2)
 })
 
 test_that("the joint M-step note reaches R as one info row per method", {
@@ -27,20 +29,28 @@ test_that("the joint M-step note reaches R as one info row per method", {
   for (method in names(fits)) {
     rows <- joint_mstep_rows(fits[[method]])
     expect_equal(nrow(rows), 1L, label = paste(method, "joint M-step rows"))
-    expect_identical(rows$severity, "info")
-    expect_identical(rows$category, "mu_referencing")
+    expect_identical(rows$severity, "info",
+                     label = paste(method, "severity"))
+    expect_identical(rows$category, "mu_referencing",
+                     label = paste(method, "category"))
     msg <- rows$message
     expect_true(startsWith(msg, paste0(method, ":")), label = msg)
-    for (name in c("ETA_CL", "ETA_V1", "THETA_WT")) {
-      expect_match(msg, name, fixed = TRUE)
+    for (eta in c("ETA_CL", "ETA_V1")) {
+      expect_match(msg, eta, fixed = TRUE, label = paste(method, "note"))
     }
+    # THETA_CRCL is also in the note's `reads` lists; this pins which theta
+    # the note says is shared.
+    expect_match(msg, "share THETA_WT and", fixed = TRUE,
+                 label = paste(method, "note"))
   }
 })
 
-test_that("no joint M-step note without a shared theta", {
+test_that("no joint M-step note when the covariate mu-refs share no theta", {
   skip_on_cran()
-  # warfarin_saem has no covariate mu-references, so no theta is shared.
-  fit <- warfarin_saem_conddist_fit()
+  # Same model, V1 on its own exponent THETA_WTV: still two covariate
+  # mu-references, but nothing shared between them.
+  fit <- two_cpt_oral_cov_separate_saem_fit()
+  expect_true("THETA_WTV" %in% names(fit$theta))
   expect_equal(nrow(joint_mstep_rows(fit)), 0L)
 })
 
