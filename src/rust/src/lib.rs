@@ -666,7 +666,7 @@ fn ferx_rust_simulate(
 
         // `output.warnings` already carries the data reader's findings: ferx-core
         // #1410 folds `population.warnings` into it (minus the ones the model
-        // makes moot), so prepending `data_reader_warnings` here would say each twice.
+        // makes moot), so relaying `population.warnings` too would say each twice.
         Ok(attach_sim_warnings(
             sim_results_to_df(&output.results),
             output.warnings,
@@ -897,19 +897,17 @@ fn ferx_rust_simulate_adaptive(
             &spec,
             &opts,
         ) {
-            // Adaptive returns a list rather than a bare frame, so the data-reader
-            // warnings ride on the list itself; `ferx_simulate_adaptive()` surfaces
-            // them through the same `simulation_warnings` reader the other paths use.
-            // `W_NO_DOSES` is dropped here and only here: on this path the controller
-            // supplies the whole regimen, so a dataset that carries only an
-            // observation grid is the normal input, not a missing AMT column.
-            Ok(result) => attach_sim_warnings(
-                adaptive_result_to_list(&result),
-                data_reader_warnings(&population)
-                    .into_iter()
-                    .filter(|w| !w.starts_with("W_NO_DOSES"))
-                    .collect(),
-            ),
+            // Adaptive returns a list rather than a bare frame, so the warnings ride
+            // on the list itself; `ferx_simulate_adaptive()` surfaces them through the
+            // same `simulation_warnings` reader the other paths use. `result.warnings`
+            // is core's non-fit bundle, reader findings included through its one
+            // filter, which on this path also withholds `W_NO_DOSES`: the controller
+            // supplies the whole regimen, so an observation grid alone is the normal
+            // input (ferx-r #426).
+            Ok(result) => {
+                let warnings = result.warnings.clone();
+                attach_sim_warnings(adaptive_result_to_list(&result), warnings)
+            }
             Err(e) => return Err(format!("ferx_simulate_adaptive: {e}")),
         })
     })
@@ -1152,10 +1150,12 @@ fn ferx_rust_simulate_with_uncertainty(
             ..Default::default()
         };
 
-        Ok(match ferx_core::simulate_with_uncertainty(&parsed.model, &population, &fit_result, &opts) {
-            Ok(results) => attach_sim_warnings(
-                sim_results_to_df(&results),
-                data_reader_warnings(&population),
+        // `output.warnings` carries the skipped-draw notes and core's non-fit bundle,
+        // reader findings included through its one filter (ferx-r #426).
+        Ok(match ferx_core::simulate_with_uncertainty_diag(&parsed.model, &population, &fit_result, &opts) {
+            Ok(output) => attach_sim_warnings(
+                sim_results_to_df(&output.results),
+                output.warnings,
             ),
             Err(e) => return Err(format!("simulate_with_uncertainty error: {e}")),
         })
@@ -1203,20 +1203,21 @@ fn ferx_rust_predict(
         // (ferx-r #370). No-op for a model with no level block.
         bind_design(&mut parsed, model_path, &mut population)?;
 
-        let results = ferx_core::predict(&parsed.model, &population, &parsed.model.default_params)
+        let output = ferx_core::predict_diag(&parsed.model, &population, &parsed.model.default_params)
             .map_err(|e| format!("Error predicting: {e}"))?;
+        let results = &output.results;
 
         let id: Vec<String> = results.iter().map(|r| r.id.clone()).collect();
         let time: Vec<f64> = results.iter().map(|r| r.time).collect();
         let pred: Vec<f64> = results.iter().map(|r| r.pred).collect();
 
-        // The data reader's diagnostics reach the caller here too (ferx-r #283):
-        // `ferx_predict()` reads the same file through the same reader, so a dose
-        // that never landed or a covariate missing for half the subjects is exactly
-        // as worth saying as it is on the simulate path.
+        // Core's non-fit bundle, the one `ferx_simulate()` relays (ferx-r #426):
+        // parse and model/data findings, ODE-solver diagnostics, and the data
+        // reader's findings through core's one filter -- never `population.warnings`
+        // raw, which still holds the ones a compartment-free model makes moot.
         Ok(attach_sim_warnings(
             data_frame!(ID = id, TIME = time, PRED = pred).into(),
-            data_reader_warnings(&population),
+            output.warnings,
         ))
     })
 }
@@ -1301,20 +1302,18 @@ fn ferx_rust_predict_from_fit(
             Err(e) => return Err(e),
         };
 
-        let results = ferx_core::predict(&parsed.model, &population, &params)
+        let output = ferx_core::predict_diag(&parsed.model, &population, &params)
             .map_err(|e| format!("Error predicting: {e}"))?;
+        let results = &output.results;
 
         let id: Vec<String> = results.iter().map(|r| r.id.clone()).collect();
         let time: Vec<f64> = results.iter().map(|r| r.time).collect();
         let pred: Vec<f64> = results.iter().map(|r| r.pred).collect();
 
-        // The data reader's diagnostics reach the caller here too (ferx-r #283):
-        // `ferx_predict()` reads the same file through the same reader, so a dose
-        // that never landed or a covariate missing for half the subjects is exactly
-        // as worth saying as it is on the simulate path.
+        // Core's non-fit bundle; see `ferx_rust_predict` (ferx-r #426).
         Ok(attach_sim_warnings(
             data_frame!(ID = id, TIME = time, PRED = pred).into(),
-            data_reader_warnings(&population),
+            output.warnings,
         ))
     })
 }
@@ -2464,31 +2463,17 @@ fn default_fit_result(
 
 // -- Helper: SimulationResult slice → R data frame --
 
-/// Every non-fatal diagnostic ferx-core's data reader raised while reading the
-/// dataset, verbatim (`Population.warnings`).
-///
-/// The fit path ships these to R inside `FitResult.warnings`; the simulate and
-/// predict paths used to drop them on the floor, so a dataset problem the engine
-/// had already diagnosed -- `W_DESIGN_DV` (an `EVID=0, MDV=0` record whose `DV`
-/// cell was empty, kept as a design point where `ferx_fit()` skips it, so a VPC
-/// built by overlaying the two is biased), a dose that never landed
-/// (`W_AMT_NOT_DOSED` / `W_NO_DOSES`), `ADDL` with no `II`, an unparseable `OCC`,
-/// a covariate with no value for some subjects -- reached the caller nowhere at
-/// all (ferx-r #283). Route the whole vector through the `simulation_warnings`
-/// channel: the engine is the one place that knows what it found, and a
-/// re-derived count here can only ever answer for the one case it was written
-/// for.
-fn data_reader_warnings(population: &Population) -> Vec<String> {
-    population.warnings.clone()
-}
-
 /// Attach simulation / data-reader diagnostics as a `simulation_warnings`
 /// character-vector attribute on the returned data frame, so the caller can
 /// surface them without changing the data-frame contract (an empty vector when
 /// the run was clean). Mirrors how the fit path exposes `FitResult.warnings`,
-/// but as an attribute since simulate and predict return a bare frame. Carries
-/// ferx-core #762/#763 per-subject simulation diagnostics and everything
-/// [`data_reader_warnings`] collected.
+/// but as an attribute since simulate and predict return a bare frame.
+///
+/// `warnings` is always the `warnings` of a ferx-core `*_diag` result, never
+/// `Population.warnings`: core folds the data reader's findings into that bundle
+/// through its one suppression filter, and the raw list still holds the ones it
+/// withholds (`W_NO_DOSES` / `W_CMT_DEFAULTED` on a compartment-free model,
+/// `W_NO_DOSES` on the adaptive path; ferx-r #426, ferx-core #1645).
 fn attach_sim_warnings(mut df: Robj, warnings: Vec<String>) -> Robj {
     df.set_attrib("simulation_warnings", warnings).unwrap();
     df

@@ -29,7 +29,9 @@ in the \code{simulation_warnings} attribute and re-emitted as an R warning:
 times have no counterpart in a fit's \code{sdtab} (do not overlay the two,
 e.g. in a VPC). Every other data-reader diagnostic the engine raises for
 \code{data} - a dose that never landed, a covariate with no value for some
-subjects, and so on - travels the same channel.}
+subjects, and so on - travels the same channel, as do the model/data and
+ODE-solver findings \code{ferx_simulate()} reports. A dataset with no dose
+rows raises no \code{W_NO_DOSES} here: the controller supplies the regimen.}
 
 \item{n_sim}{Number of simulation replicates}
 

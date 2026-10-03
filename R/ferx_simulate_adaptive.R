@@ -52,7 +52,9 @@
 #'   times have no counterpart in a fit's \code{sdtab} (do not overlay the two,
 #'   e.g. in a VPC). Every other data-reader diagnostic the engine raises for
 #'   \code{data} - a dose that never landed, a covariate with no value for some
-#'   subjects, and so on - travels the same channel.
+#'   subjects, and so on - travels the same channel, as do the model/data and
+#'   ODE-solver findings \code{ferx_simulate()} reports. A dataset with no dose
+#'   rows raises no \code{W_NO_DOSES} here: the controller supplies the regimen.
 #' @param n_sim Number of simulation replicates
 #' @param seed Random seed for reproducibility
 #' @param verify Run the frozen-schedule replay verifier after every
@@ -137,7 +139,6 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
   )
 
   # Same `simulation_warnings` channel `ferx_simulate()` uses - here it carries
-  # the design-point count (a kept empty-DV record; see the `data` note above),
-  # which otherwise diverges silently from what `ferx_fit()` scored.
+  # the engine's warning bundle for the run (ferx-r #426).
   .ferx_surface_sim_warnings(res, "ferx_simulate_adaptive")
 }

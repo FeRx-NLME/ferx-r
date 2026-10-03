@@ -190,6 +190,26 @@
 
 ## Bug fixes
 
+- **`ferx_predict()` no longer reports `W_CMT_DEFAULTED` / `W_NO_DOSES` on a
+  compartment-free model**, such as the `emax_timecourse` example, where
+  `ferx_fit()` and `ferx_simulate()` already stayed quiet
+  ([ferx-core#1645](https://github.com/FeRx-NLME/ferx-core/issues/1645),
+  [#426](https://github.com/FeRx-NLME/ferx-r/issues/426)). A model with
+  compartments and no doses still gets `W_NO_DOSES`.
+- **`ferx_predict()` now reports the same warnings `ferx_simulate()` does**:
+  model-parse and model/data findings and ODE-solver diagnostics, not only
+  the data reader's findings
+  ([#426](https://github.com/FeRx-NLME/ferx-r/issues/426)).
+- **`ferx_simulate_with_uncertainty()` now reports its warnings**, including
+  a note naming each parameter draw skipped because it landed in the
+  flip-flop regime. Before, it relayed only the data reader's findings, and
+  a skipped draw went unmentioned
+  ([#426](https://github.com/FeRx-NLME/ferx-r/issues/426)).
+- **`ferx_simulate_adaptive()` relays the engine's full warning bundle** for
+  the run, model/data and ODE-solver findings included, instead of the data
+  reader's findings alone. A dataset with no dose rows still raises no
+  `W_NO_DOSES` there
+  ([#426](https://github.com/FeRx-NLME/ferx-r/issues/426)).
 - **A `ferx_save_fit()` / `ferx_load_fit()` round trip now gives back every
   number bit for bit.** Theta, omega, sigma, the covariance matrix and the
   CSV tables (sdtab, EBEs, covtab, conditional distributions, trace) used to
