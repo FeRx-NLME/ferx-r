@@ -66,7 +66,7 @@
     R ([#370](https://github.com/FeRx-NLME/ferx-r/issues/370)); declare
     `theta NAME[N]` and index it with your own column instead. The engine
     also gains `bind_theta_levels_from_fit`, which #370 will use to simulate
-    these models with a fit's theta. (#370 has since landed; see New
+    these models with a fit's theta. (Level blocks now fit from R; see New
     features.)
 
 ## New features
@@ -98,6 +98,32 @@
     both re-read the data without binding the block
     ([FeRx-NLME/ferx-core#1622](https://github.com/FeRx-NLME/ferx-core/issues/1622)).
     Run the covariance step inside `ferx_fit()` instead.
+
+- **`ferx_mbma_data()` builds and checks a summary-level dataset** for a
+  model-based meta-analysis
+  ([#370](https://github.com/FeRx-NLME/ferx-r/issues/370),
+  [#298](https://github.com/FeRx-NLME/ferx-r/issues/298)). From one row per
+  study, arm and timepoint it writes `ID` (the study, so a random effect on
+  `ID` is between-study variability), a separate `STUDY` column for level
+  blocks, `OCC` (the arm), `TIME`, `DV`, `NARM` and `SE`, plus any
+  covariates, with character columns coded as integers.
+  - It refuses a missing, zero or negative SE (or SD), a mean outside
+    `[0, 1]` for `scale = "proportion"` (pointing at `scale = "percent"` when
+    the values look like percentages) or outside `[0, 100]` for
+    `scale = "percent"`, and a repeated (study, arm, time) row, naming the
+    offending rows. It converts `sd =` to a standard error and a percentage
+    to a proportion, and says so.
+  - It warns on an arm whose `n` changes between timepoints, a study with a
+    single arm, and an arm without a `time = 0` record. A negative mean is
+    accepted: change from baseline is negative by nature.
+  - `levels = c("STUDY", "TIME")` adds a `LEVEL_IDX` column, numbered in the
+    order the engine discovers a `theta NAME[STUDY, TIME]` block's levels,
+    so the counted form `theta NAME[N]` read at `NAME[LEVEL_IDX]` estimates
+    the same levels. `index =` checks a level index you built yourself.
+  - `print()` reports studies, arms per study, timepoints per arm, and the
+    range of the between-subject SD the standard errors imply.
+  - The fitting functions take a CSV path, so write the result out first
+    with `utils::write.csv(d, path, row.names = FALSE)`.
 
 ## Bug fixes
 
