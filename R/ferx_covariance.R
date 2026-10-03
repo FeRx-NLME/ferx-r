@@ -285,6 +285,7 @@ ferx_covariance <- function(fit,
   } else {
     fit$cov_matrix <- NULL
   }
+  fit$cov_fixed <- .ferx_cov_fixed_named(raw$cov_fixed, fit$cov_matrix)
 
   # Standard errors: name theta SEs, drop empties to NULL (consistent with
   # ferx_fit()). se_omega / se_sigma stay as bare vectors - the printers index

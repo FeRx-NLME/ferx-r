@@ -440,6 +440,10 @@ ferx_load_fit <- function(path) {
   # or before #370, which leaves `theta_levels` NULL - and the simulate paths
   # refusing a level-block model with that cause named.
   out$theta_levels <- .fitrx_theta_levels_from_wire(extras$theta_levels)
+  # Held-coordinate mask over `cov_matrix` (#424), named like its rows as
+  # ferx_fit() names it. Absent from older bundles: NULL, and the correlation
+  # matrix falls back to reading an all-zero row as held.
+  out$cov_fixed <- .ferx_cov_fixed_named(extras$cov_fixed, out$cov_matrix)
   # Tri-state verdicts (ferx-core #1177) are NA when the optimizer recorded no
   # verdict. `NA` serialises to JSON null and assigning NULL back would drop
   # the key entirely, turning a documented `NA` into `is.na(x)` on a

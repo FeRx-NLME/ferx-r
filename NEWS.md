@@ -190,6 +190,16 @@
 
 ## Bug fixes
 
+- **A fit with a `FIX` parameter no longer warns "One or more diagonal
+  elements are non-positive"**, in `ferx_fit()`, `ferx_covariance()` or
+  `ferx_load_fit()` ([#424](https://github.com/FeRx-NLME/ferx-r/issues/424)).
+  That was every MBMA fit, since `sigma ... FIX` with `weight = SE` is the
+  standard inverse-variance weighting. The new `fit$cov_fixed` marks the
+  coordinates of `cov_matrix` the engine held rather than estimated (a `FIX`
+  parameter, or a structural-zero covariance of a mixed block omega), and
+  their rows and columns of `cor_matrix` are `NA`. A non-positive variance
+  on an *estimated* parameter still warns, now naming the parameter; before,
+  a negative one slipped past the check with only R's `NaNs produced`.
 - **`ferx_predict()` no longer reports `W_CMT_DEFAULTED` / `W_NO_DOSES` on a
   compartment-free model**, such as the `emax_timecourse` example, where
   `ferx_fit()` and `ferx_simulate()` already stayed quiet

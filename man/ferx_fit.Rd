@@ -1045,10 +1045,21 @@ matrix (params ? params). Row/column names use declared variable names
 \code{"OMEGA(1,1)"} / \code{"SIGMA(1)"}. \code{NULL} when covariance
 step was not run or failed. See \code{cor_matrix} for the derived
 correlation matrix.}
+\item{cov_fixed}{Logical vector, one entry per row of
+\code{cov_matrix} and named like them: \code{TRUE} for a coordinate the
+engine held rather than estimated - a parameter declared \code{FIX}, or
+a structural-zero covariance of a mixed block omega. Such a row and
+column of \code{cov_matrix} are all zero; one that is not is reported
+with a warning. \code{NULL} when
+\code{cov_matrix} is \code{NULL}, and on a fit reloaded from a bundle
+written before this field existed.}
 \item{cor_matrix}{Correlation matrix derived from \code{cov_matrix}, same
 dimnames. A correlation close to \eqn{\pm 1} between two parameters
-flags a structural identifiability problem in the model. \code{NULL}
-when \code{cov_matrix} is \code{NULL}.}
+flags a structural identifiability problem in the model. The row and
+column of a held coordinate (see \code{cov_fixed}) are
+\code{NA}: it has no variance to correlate. A non-positive variance on
+an estimated parameter gives \code{NA} too, with a warning naming it.
+\code{NULL} when \code{cov_matrix} is \code{NULL}.}
 \item{estimates}{Tidy data frame of all estimated parameters (theta,
 omega diagonal, sigma, and - for IOV models - kappa diagonal), with
 columns \code{param}, \code{transform}, \code{estimate}, \code{se},

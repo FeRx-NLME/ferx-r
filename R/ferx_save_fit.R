@@ -822,6 +822,11 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   # them the reloaded fit cannot drive a simulation of its own model.
   tl <- .fitrx_theta_levels_to_wire(fit$theta_levels)
   if (!is.null(tl)) out$theta_levels <- tl
+  # The engine's held-coordinate mask over `cov_matrix` (#424); the schema has
+  # no slot for it. Wrapped as a list so a one-parameter mask stays an array.
+  if (!is.null(fit$cov_fixed)) {
+    out$cov_fixed <- as.list(unname(as.logical(fit$cov_fixed)))
+  }
   out
 }
 
