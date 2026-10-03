@@ -391,13 +391,11 @@ tl_roundtrip <- function(fit) {
 tl_expect_roundtrip <- function(model, data, fit) {
   fit2 <- tl_roundtrip(fit)
   expect_identical(fit2$theta_levels, fit$theta_levels)
-  # Not `identical()`: a .fitrx round trip already moves theta, omega and sigma
-  # in their last bit, level block or not (measured at ecccbac: the warfarin
-  # fit's predictions move by 1.4e-14), so the reloaded fit is held to that.
-  expect_equal(
+  # A .fitrx round trip gives back every double bit for bit (#415), so the
+  # reloaded fit predicts exactly what the original does.
+  expect_identical(
     ferx_predict(model, data, fit = fit2),
-    ferx_predict(model, data, fit = fit),
-    tolerance = 1e-12
+    ferx_predict(model, data, fit = fit)
   )
 }
 
