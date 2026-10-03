@@ -157,6 +157,21 @@
   - The fitting functions take a CSV path, so write the result out first
     with `utils::write.csv(d, path, row.names = FALSE)`.
 
+- **New bundled example `mbma_placebo`**: a model-based meta-analysis of
+  arm-level summary data
+  ([#370](https://github.com/FeRx-NLME/ferx-r/issues/370)). Six synthetic
+  studies, each with a placebo arm and 2-3 dose arms, are fitted with a
+  study-by-visit placebo level block (`PLACEBO[STUDY, TIME]`,
+  `contrast = sum_to_zero_within`), an Emax dose-response that builds up over
+  time, between-study variability on the baseline, between-arm variability
+  scaled by arm size (`kappa ... weight = NARM`), and inverse-variance
+  weighting (`weight = SE`). `ex_mbma_placebo.R` compares the estimates with
+  the simulation truth, reads the kappa as gamma^2, runs a visual predictive
+  check on the fitted grid, and shows that a denser grid is refused. The data
+  come from a seeded, base-R generator in `mbma_placebo/simulate_dataset.R`,
+  independent of the engine. It is synthetic because the published naproxen
+  MBMA data is licensed CC BY-NC.
+
 ## Bug fixes
 
 - **A `ferx_save_fit()` / `ferx_load_fit()` round trip now gives back every
