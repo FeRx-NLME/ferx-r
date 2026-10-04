@@ -32,7 +32,7 @@ ferx_section_headers <- function(lines) {
 
 
 # Extract all named [section] blocks from a .ferx file.
-# Returns a named list: section name ? character vector of (comment-stripped, trimmed) lines.
+# Returns a named list: section name -> character vector of (comment-stripped, trimmed) lines.
 .ferx_extract_blocks <- function(path) {
   .ferx_extract_blocks_from_lines(readLines(path, warn = FALSE))
 }
@@ -47,9 +47,14 @@ ferx_section_headers <- function(lines) {
   for (line in raw) {
     stripped <- trimws(sub("(#|//).*$", "", line))
     if (!nzchar(stripped)) next
-    m <- regmatches(stripped, regexpr("^\\[(\\w+)\\]$", stripped, perl = TRUE))
+    # The engine's own header pattern (ferx-core `extract_blocks`): `[type]` or
+    # `[type INSTANCE]`, e.g. `[event_model cause_a]`. A bare `\w+` used to miss
+    # the instance form, so the header and its whole body were appended to the
+    # block before it (#306). Every instance is keyed on its type; whether a
+    # type takes an instance name is the engine's check, not this one.
+    m <- regmatches(stripped, regexec("^\\[(\\w+)(?:\\s+\\w+)?\\]$", stripped, perl = TRUE))[[1L]]
     if (length(m) > 0L) {
-      current <- tolower(gsub("^\\[|\\]$", "", m))
+      current <- tolower(m[[2L]])
       if (is.null(blocks[[current]])) blocks[[current]] <- character(0)
       next
     }

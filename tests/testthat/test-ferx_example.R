@@ -42,28 +42,16 @@ test_that("$data path exists on disk for every bundled example", {
     )
   }
 })
-test_that("every bundled example passes ferx_model_validate() with its data (#410)", {
+test_that("every bundled example passes ferx_model_validate() with its data (#410, #306)", {
   # The path checks above never parse a model, so three examples whose omega
   # start the engine refuses (E_OMEGA_INIT_AT_RAIL, ferx-core #1229) shipped
-  # reported INVALID by the package's own validator.
-  #
-  # Known failures, each tied to an open issue: delete a name when its issue is
-  # fixed. The validator's R-side required-section list does not know that a
-  # binary or time-to-event model has no [individual_parameters],
-  # [structural_model] or [error_model] (#306).
-  known_invalid <- c("binary_logistic", "tte_competing_risks", "tte_gompertz",
-                     "tte_weibull")
+  # reported INVALID by the package's own validator; four binary/TTE examples
+  # were reported INVALID by an R-side required-section list (#306).
   for (nm in ferx_example()) {
     ex <- ferx_example(nm)
     out <- capture.output(res <- ferx_model_validate(ex$model, ex$data))
-    if (nm %in% known_invalid) {
-      # Fails loudly once #306 lands, so the list cannot outlive the bug.
-      expect_false(isTRUE(res$ok),
-                   label = paste0("'", nm, "' now validates: drop it from known_invalid"))
-    } else {
-      expect_true(isTRUE(res$ok),
-                  label = paste0("'", nm, "' validates (", paste(out, collapse = "\n"), ")"))
-    }
+    expect_true(isTRUE(res$ok),
+                label = paste0("'", nm, "' validates (", paste(out, collapse = "\n"), ")"))
   }
 })
 test_that("emax_timecourse bundles a compartment-free model and synthetic data", {

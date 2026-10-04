@@ -18,7 +18,10 @@ signs). \code{NULL} runs the model-only checks.}
 }
 \value{
 Invisibly returns a list with \code{ok} (logical - FALSE when the
-engine reports an error, a required section is missing, or the file
+engine reports an error, including a section this model's family requires
+(\code{E_MISSING_BLOCK}; a binary or time-to-event model needs no
+\code{[individual_parameters]}, \code{[structural_model]} or
+\code{[error_model]}), or the file
 carries a section name this build of the engine does not accept - one it
 never knew, one it has retired, or one behind a disabled feature),
 \code{model},
@@ -52,7 +55,7 @@ res$ok
 res$diagnostics
 
 \dontrun{
-# Invalid model (missing required sections)
+# Invalid model (no [error_model]: the engine names the first missing section)
 bad <- tempfile(fileext = ".ferx")
 writeLines(c(
   "[parameters]",
@@ -65,13 +68,11 @@ ferx_model_validate(bad)
 #
 # Sections present:
 #   parameters                     [ok]
-#   individual_parameters          [MISSING]
 #   structural_model               [ok]
 #   error_model                    [MISSING]
 #
 # Result: INVALID
-#   * Missing required section: [individual_parameters]
-#   * Missing required section: [error_model]
+#   * ERROR E_MISSING_BLOCK [error_model]: Missing [error_model] block
 }
 
 }
