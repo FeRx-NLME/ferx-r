@@ -17,7 +17,8 @@
 #' @return Invisibly returns a list with \code{ok} (logical - FALSE when the
 #'   engine reports an error, including a section this model's family requires
 #'   (\code{E_MISSING_BLOCK}; a binary or time-to-event model needs no
-#'   \code{[structural_model]} or \code{[error_model]}), or the file
+#'   \code{[individual_parameters]}, \code{[structural_model]} or
+#'   \code{[error_model]}), or the file
 #'   carries a section name this build of the engine does not accept - one it
 #'   never knew, one it has retired, or one behind a disabled feature),
 #'   \code{model},
