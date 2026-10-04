@@ -927,7 +927,9 @@ test_that("FIX flags of an in-memory fit survive a .fitrx round-trip (#436)", {
   for (nm in c("TVKA", "ETA_V", "ADD_ERR")) {
     expect_match(row_of(nm), "FIXED", fixed = TRUE, label = nm)
   }
+  # expect_no_match(NA, ...) passes, so a missing row must fail on its own.
   for (nm in c("TVCL", "ETA_CL", "PROP_ERR")) {
+    expect_false(is.na(row_of(nm)), label = paste(nm, "row missing"))
     expect_no_match(row_of(nm), "FIXED", fixed = TRUE, label = nm)
   }
 
