@@ -772,8 +772,11 @@
 #'     \code{sigma} itself)}
 #'   \item{theta_fixed, omega_fixed, sigma_fixed}{Logical FIX flags, one per
 #'     theta, per eta (the omega diagonal; every eta of a fixed block is
-#'     \code{TRUE}) and per sigma. \code{ferx_save_fit()} writes them into the
-#'     bundle, so a reloaded fit carries the same flags.}
+#'     \code{TRUE}) and per sigma. \code{TRUE} also marks a theta the engine
+#'     held at its initial value because it had no effect on the objective
+#'     (see the \code{flat_parameter} warning), even without \code{FIX} in
+#'     the model. \code{ferx_save_fit()} writes them into the bundle, so a
+#'     reloaded fit carries the same flags.}
 #'   \item{sdtab}{Data frame with ID, TIME, DV, PRED, IPRED, CWRES, IWRES,
 #'     EBE_OFV, N_OBS; OCC if any subject carries an occasion column; CENS
 #'     if any rows are LOQ-censored; CMT if the dataset has more than one
