@@ -12,15 +12,16 @@
 # Anchored to NONMEM 7.6.0 (ADVAN2 TRANS2, S2 = V): the DV column of
 # infusion_absorption.csv carries the NONMEM population prediction, and
 # ferx_predict() reproduces it to < 1e-4 (see ex_infusion_absorption.R). A fit
-# works identically (raise the omega and add subjects).
+# works identically (raise the omega, drop its FIX and add subjects).
 
 [parameters]
   theta TVCL(1.0,  0.01, 50.0)    # clearance (L/h)
   theta TVV(20.0,  0.5, 200.0)    # central volume (L); C = central / V
   theta TVKA(0.6,  0.005, 20.0)   # first-order absorption rate (1/h)
 
-  omega ETA_CL ~ 0.0              # no IIV: a single typical-value subject (this is a
-                                  # prediction cross-check; raise omega + add subjects to fit)
+  omega ETA_CL ~ 0.0 FIX          # no IIV: a single typical-value subject (this is a
+                                  # prediction cross-check; to fit, raise the omega, drop
+                                  # FIX and add subjects)
 
   sigma PROP_ERR ~ 0.01 (sd)      # proportional residual error
 

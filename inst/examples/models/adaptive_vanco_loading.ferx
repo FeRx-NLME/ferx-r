@@ -19,16 +19,16 @@
 # The loading dose is a base dose, so it never appears in the returned dose
 # ledger or in metrics$CUM_DOSE (which count controller doses only).
 #
-# Negligible IIV / no covariates: an effectively typical-value patient, so the
-# realized ladder is reproducible.
+# No IIV / no covariates: a typical-value patient, so the realized ladder is
+# reproducible.
 
 [parameters]
   theta TVCL(4.0,  0.1,  50.0)   # vancomycin clearance (L/h)
   theta TVV(80.0,  5.0, 300.0)   # central volume (L); CENT/V is the concentration
 
-  # Negligible IIV: the engine requires at least one omega, so CL carries a
-  # vanishing variance. The patient is effectively typical-value.
-  omega ETA_CL ~ 1e-10
+  # No IIV: the engine requires at least one omega, so CL carries one fixed at
+  # zero. The patient is typical-value.
+  omega ETA_CL ~ 0.0 FIX
 
   sigma ADD ~ 1.0                # nominal additive error; the latent `observe`
                                  # signal is un-noised, so it never enters the
