@@ -22,6 +22,6 @@ cmp$rel_err <- abs(cmp$PRED - cmp$DV) / cmp$DV
 print(cmp)
 cat(sprintf("max relative error vs NONMEM PRED: %.2e\n", max(cmp$rel_err)))
 
-# A fit works the same way -- raise omega ETA_CL and add subjects to estimate
-# from steady-state data:
+# A fit works the same way -- raise omega ETA_CL, drop its FIX and add subjects
+# to estimate from steady-state data:
 #   fit <- ferx_fit(ex$model, ex$data)

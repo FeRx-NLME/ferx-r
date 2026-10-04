@@ -26,8 +26,8 @@
   theta TVCL(4.0,  0.1,  50.0)   # vancomycin clearance (L/h)
   theta TVV(80.0,  5.0, 300.0)   # central volume (L); CENT/V is the concentration
 
-  # No IIV: the engine requires at least one omega, so CL carries one fixed at
-  # zero. The patient is typical-value.
+  # No IIV: CL keeps its usual exp(ETA_CL) form with the omega fixed at zero,
+  # so the patient is typical-value.
   omega ETA_CL ~ 0.0 FIX
 
   sigma ADD ~ 1.0                # nominal additive error; the latent `observe`
