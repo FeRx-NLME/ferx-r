@@ -229,6 +229,17 @@
 
 ## Bug fixes
 
+- **The `ss_absorption`, `infusion_absorption` and `adaptive_vanco_loading`
+  examples pass `ferx_model_validate()`**
+  ([#410](https://github.com/FeRx-NLME/ferx-r/issues/410)). Each declared a
+  free omega starting at `0.0` or `1e-10`, which the engine refuses as a start
+  on the optimizer's lower rail (`E_OMEGA_INIT_AT_RAIL`), so the validator
+  reported the shipped models INVALID and the commented-out fits in the first
+  two scripts were refused as written. They now say `omega ETA_CL ~ 0.0 FIX`.
+  The two prediction examples give identical output. `adaptive_vanco_loading`
+  no longer draws a vanishing eta (SD `1e-5`), so its simulated doses and
+  concentrations move by less than 0.03 %.
+
 - **`fit$cov_matrix` and `fit$cor_matrix` carry row and column names on IOV
   models** ([#437](https://github.com/FeRx-NLME/ferx-r/issues/437)). Any
   model with a `kappa` used to come back with no names at all, from
