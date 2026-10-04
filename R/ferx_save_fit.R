@@ -290,10 +290,41 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   x
 }
 
+# A fit from before the FIX flags were shipped (#449) - `saveRDS()`'d under
+# ferx 0.4.0 - carries no `*_fixed` vector. The wire requires one per class,
+# so the writer below still fills in FALSE, but that calls every FIX parameter
+# estimated: say so, naming the classes (#452).
+#
+# Recovering the flags from `fit$model_text` was measured and rejected: the
+# only binding that returns a FIX flag from a model file is
+# `ferx_rust_inits_from_nca()`, which needs the data, runs an NCA, and returns
+# theta flags only; and a parser's flags are not a fit's - the engine also
+# FIXes a theta with no effect on the objective (`flat_parameter`), which the
+# parser reports as free.
+.fitrx_warn_missing_fixed <- function(fit) {
+  sizes <- c(
+    theta = length(fit$theta),
+    omega = NROW(fit$omega),
+    sigma = length(fit$sigma),
+    kappa = if (is.null(fit$omega_iov)) 0L else NROW(fit$omega_iov)
+  )
+  missing <- names(sizes)[sizes > 0L & vapply(
+    paste0(names(sizes), "_fixed"), function(f) is.null(fit[[f]]), logical(1L)
+  )]
+  if (length(missing) == 0L) return(invisible())
+  classes <- paste(missing, collapse = ", ")
+  warning(sprintf(paste0(
+    "ferx_save_fit(): the FIX flags for %s are unknown, because this fit was ",
+    "made before ferx recorded them. Every %s parameter is recorded as ",
+    "estimated in the bundle, so a FIX one will reload as free. Refit with ",
+    "this version of ferx to keep them."), classes, classes), call. = FALSE)
+}
+
 # Build the on-disk fit.json from the in-memory ferx_fit list. The schema
 # matches the Rust FitWire layout (see ferx-core/src/io/fitrx.rs); R-only
 # fields land under `r_extras` and are ignored by non-R readers.
 .fitrx_write_fit_json <- function(fit, path) {
+  .fitrx_warn_missing_fixed(fit)
   wire <- list(
     method = .fitrx_method_to_token(fit$method),
     method_chain = vapply(

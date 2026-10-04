@@ -1026,11 +1026,17 @@
 #'     \code{NULL} when \code{cov_matrix} is \code{NULL}.}
 #'   \item{estimates}{Tidy data frame of all estimated parameters (theta,
 #'     omega diagonal, sigma, and - for IOV models - kappa diagonal), with
-#'     columns \code{param}, \code{transform}, \code{estimate}, \code{se},
-#'     \code{rse_pct}, \code{lower_95}, \code{upper_95},
+#'     columns \code{param}, \code{transform}, \code{estimate}, \code{fixed},
+#'     \code{se}, \code{rse_pct}, \code{lower_95}, \code{upper_95},
 #'     \code{estimate_natural}, \code{lower_95_natural},
 #'     \code{upper_95_natural}, \code{init_as_sd}, \code{weight},
-#'     \code{scale}. \code{scale} is the scale an omega or kappa row's random
+#'     \code{scale}. \code{fixed} is \code{TRUE} for a parameter the fit held
+#'     (from \code{theta_fixed} / \code{omega_fixed} / \code{sigma_fixed} /
+#'     \code{kappa_fixed}); its \code{se}, \code{rse_pct} and intervals are
+#'     \code{NA}, since a held parameter has no standard error, and
+#'     \code{print()} shows its SE as \code{FIXED}. A fit without those flags
+#'     (saved before they existed) has \code{fixed = FALSE} throughout.
+#'     \code{scale} is the scale an omega or kappa row's random
 #'     effect enters on (see \code{eta_param_types} and
 #'     \code{kappa_param_types}), \code{NA} on theta and sigma rows and on a
 #'     kappa row with no recorded scale. \code{transform} stays
@@ -2560,7 +2566,13 @@ print.ferx_fit <- function(x, ...) {
     if (nn_skip[i]) next
     est       <- x$theta[i]
     transform <- if (!is.null(x$theta_transforms) && length(x$theta_transforms) >= i) x$theta_transforms[i] else "identity"
-    if (!is.null(x$se_theta) && length(x$se_theta) >= i) {
+    # A FIX theta: the engine reports SE 0, which is not a standard error
+    # (#451). Keyed on the flag, never on SE == 0 - see .ferx_is_fixed().
+    if (.ferx_is_fixed(x$theta_fixed, i)) {
+      se_val  <- NA_real_
+      se_str  <- "FIXED"
+      rse_str <- "FIXED"
+    } else if (!is.null(x$se_theta) && length(x$se_theta) >= i) {
       se_val  <- x$se_theta[i]
       rse     <- if (abs(est) > 1e-12) abs(se_val / est) * 100 else NaN
       se_str  <- sprintf("%.6f", se_val)
@@ -2655,7 +2667,13 @@ print.ferx_fit <- function(x, ...) {
     eta_type <- if (!is.null(x$eta_param_types) && length(x$eta_param_types) >= i) x$eta_param_types[i] else "log_normal"
     linked_theta_name <- if (!is.null(x$eta_linked_theta) && length(x$eta_linked_theta) >= i) x$eta_linked_theta[i] else ""
     se_val <- .omega_se_at(x$se_omega, n_eta, i, i)
-    se_str <- if (!is.na(se_val)) sprintf("%.6f", se_val) else "N/A"
+    se_str <- if (.ferx_is_fixed(x$omega_fixed, i)) {
+      "FIXED"
+    } else if (!is.na(se_val)) {
+      sprintf("%.6f", se_val)
+    } else {
+      "N/A"
+    }
 
     extra <- if (eta_type == "log_normal") {
       cv <- if (var_ii > 0) sqrt(exp(var_ii) - 1) * 100 else 0
@@ -2748,7 +2766,13 @@ print.ferx_fit <- function(x, ...) {
         }
         corr_label <- if (!is.null(x$omega_param_corr)) "param corr" else "corr"
         se_ij <- .omega_se_at(x$se_omega, n_eta, i, j)
-        se_part <- if (!is.na(se_ij)) sprintf("  SE = %.6f", se_ij) else ""
+        se_part <- if (.ferx_omega_is_fixed(x$omega_fixed, i, j)) {
+          "  SE = FIXED"
+        } else if (!is.na(se_ij)) {
+          sprintf("  SE = %.6f", se_ij)
+        } else {
+          ""
+        }
         has_nms <- !is.null(x$eta_names) && length(x$eta_names) >= i
         if (has_nms) {
           lbl_i <- if (nzchar(x$eta_names[i])) x$eta_names[i] else sprintf("OMEGA(%d,%d)", i, i)
@@ -2789,7 +2813,13 @@ print.ferx_fit <- function(x, ...) {
       kap_type <- if (length(x$kappa_param_types) >= i) x$kappa_param_types[[i]] else NA_character_
       weighted <- length(x$kappa_weights) >= i && !is.na(x$kappa_weights[[i]])
       se_idx   <- if (is_block_se) diag_se_idx(i) else i
-      se_str   <- if (!is.null(x$se_kappa) && n_se >= se_idx) sprintf("%.6f", x$se_kappa[se_idx]) else "N/A"
+      se_str   <- if (.ferx_is_fixed(x$kappa_fixed, i)) {
+        "FIXED"
+      } else if (!is.null(x$se_kappa) && n_se >= se_idx) {
+        sprintf("%.6f", x$se_kappa[se_idx])
+      } else {
+        "N/A"
+      }
       shr_str  <- if (!is.null(x$shrinkage_kappa) && length(x$shrinkage_kappa) >= i) {
         sprintf("%.1f%%", x$shrinkage_kappa[i] * 100)
       } else "N/A"
@@ -2859,7 +2889,9 @@ print.ferx_fit <- function(x, ...) {
       sprintf("SIGMA(%d)", i)
     }
     typ <- if (length(x$sigma_types) >= i) x$sigma_types[i] else NA_character_
-    se_str <- if (!is.null(x$se_sigma) && length(x$se_sigma) >= i) {
+    se_str <- if (.ferx_is_fixed(x$sigma_fixed, i)) {
+      "FIXED"
+    } else if (!is.null(x$se_sigma) && length(x$se_sigma) >= i) {
       sprintf("%.6f", x$se_sigma[i])
     } else {
       "N/A"

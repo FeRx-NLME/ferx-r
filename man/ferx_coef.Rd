@@ -27,8 +27,11 @@ silently. \code{NULL} (default) returns every parameter, in table order.}
 \value{
 A named numeric vector, one element per requested name, in the order
 requested. For \code{ferx_se()}, \code{NA} where the covariance step did
-not run or produced no standard error for that parameter; a parameter
-declared \code{FIX} carries the engine's exact \code{0}, not \code{NA}.
+not run or produced no standard error for that parameter. A parameter
+the fit held (\code{FIX}, see the \code{fixed} column of
+\code{fit$estimates}) also gives \code{NA}: it was not estimated, so it
+has no standard error (ferx 0.4.0 gave the engine's \code{0}).
+Only free parameters trigger the "no standard errors" warning.
 }
 \description{
 Name-based accessors for \code{fit$estimates}. \code{ferx_coef()} returns the

@@ -275,6 +275,24 @@
   m
 }
 
+# Internal: is entry `i` of a fit's FIX flag vector (`theta_fixed`,
+# `omega_fixed`, `sigma_fixed`, `kappa_fixed`) TRUE? The engine reports SE 0
+# for a FIX entry, so print() and fit$estimates key on this flag - never on
+# SE == 0, which a free parameter also reaches when its covariance step is
+# regularized. An absent or short vector (a fit saved before #449) reads as
+# not fixed: an unknown flag never claims FIXED, and such a fit shows the SE
+# the engine reported.
+.ferx_is_fixed <- function(flags, i) {
+  length(flags) >= i && isTRUE(as.logical(flags[[i]]))
+}
+
+# Internal: is omega element (i, j) held? The engine holds every Cholesky
+# element whose row or column belongs to a FIX eta (the parser only accepts
+# FIX on a whole block), so an off-diagonal is fixed when either eta is.
+.ferx_omega_is_fixed <- function(omega_fixed, i, j) {
+  .ferx_is_fixed(omega_fixed, i) || .ferx_is_fixed(omega_fixed, j)
+}
+
 # Internal: look up SE for omega element (i, j) from se_omega vector.
 # se_omega may be diagonal-only (length n_eta) or full lower-triangle
 # (length n_eta*(n_eta+1)/2, column-major).

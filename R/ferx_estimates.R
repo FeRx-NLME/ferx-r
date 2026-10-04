@@ -4,7 +4,9 @@
 # natural-scale back-transformed estimates and CIs. `logit_probability` is not
 # one of them: that theta is already on (0, 1) when the engine reports it. Omega is reported on the variance scale
 # (matching the .ferx model file convention); for block omega, only the
-# diagonal variances are included. Stored on the fit object as
+# diagonal variances are included. `fixed` marks a parameter the fit held
+# (FIX, or a flat theta the engine fixed); its se / rse_pct / interval are NA
+# (#451). Stored on the fit object as
 # `fit$estimates`. (Formerly the exported ferx_estimates(fit); see issue #226.)
 .ferx_compute_estimates <- function(fit) {
   rows   <- list()
@@ -16,7 +18,8 @@
   for (i in seq_along(fit$theta)) {
     se        <- if (!is.null(fit$se_theta) && length(fit$se_theta) >= i) fit$se_theta[i] else NA_real_
     transform <- if (!is.null(fit$theta_transforms) && length(fit$theta_transforms) >= i) fit$theta_transforms[i] else "identity"
-    rows[[length(rows) + 1L]] <- .ferx_est_row(theta_names[i], fit$theta[i], se, transform, FALSE)
+    rows[[length(rows) + 1L]] <- .ferx_est_row(theta_names[i], fit$theta[i], se, transform, FALSE,
+                                               fixed = .ferx_is_fixed(fit$theta_fixed, i))
     blocks <- c(blocks, "theta")
   }
 
@@ -30,7 +33,8 @@
     init_sd  <- !is.null(fit$omega_init_as_sd) && length(fit$omega_init_as_sd) >= i && isTRUE(fit$omega_init_as_sd[i])
     scale    <- if (length(fit$eta_param_types) >= i) fit$eta_param_types[[i]] else NA_character_
     rows[[length(rows) + 1L]] <- .ferx_est_row(pname, om[i, i], se, "variance", init_sd,
-                                               scale = scale)
+                                               scale = scale,
+                                               fixed = .ferx_is_fixed(fit$omega_fixed, i))
     blocks <- c(blocks, "omega")
   }
 
@@ -40,7 +44,8 @@
     se            <- if (!is.null(fit$se_sigma) && length(fit$se_sigma) >= i) fit$se_sigma[i] else NA_real_
     sig_transform <- if (!is.null(fit$sigma_types) && length(fit$sigma_types) >= i) fit$sigma_types[i] else "proportional"
     init_sd       <- !is.null(fit$sigma_init_as_sd) && length(fit$sigma_init_as_sd) >= i && isTRUE(fit$sigma_init_as_sd[i])
-    rows[[length(rows) + 1L]] <- .ferx_est_row(pname, fit$sigma[i], se, sig_transform, init_sd)
+    rows[[length(rows) + 1L]] <- .ferx_est_row(pname, fit$sigma[i], se, sig_transform, init_sd,
+                                               fixed = .ferx_is_fixed(fit$sigma_fixed, i))
     blocks <- c(blocks, "sigma")
   }
 
@@ -76,7 +81,8 @@
         NA_character_
       if (!isTRUE(nzchar(wt))) wt <- NA_character_
       rows[[length(rows) + 1L]] <- .ferx_est_row(kap_names[i], m_iov[i, i], se, "variance", init_sd,
-                                                 weight = wt, scale = scale)
+                                                 weight = wt, scale = scale,
+                                                 fixed = .ferx_is_fixed(fit$kappa_fixed, i))
       blocks <- c(blocks, "kappa")
     }
   }
@@ -111,7 +117,13 @@
 }
 
 .ferx_est_row <- function(param, estimate, se, transform = "identity", init_as_sd = FALSE,
-                          weight = NA_character_, scale = NA_character_) {
+                          weight = NA_character_, scale = NA_character_,
+                          fixed = FALSE) {
+  # A FIX parameter was not estimated, so it has no standard error: the
+  # engine's 0 would read as a perfectly determined estimate, with RSE 0% and
+  # a zero-width interval. NA, with `fixed` saying why (#451). The point
+  # estimate and its natural-scale value are exact and stay.
+  if (fixed) se <- NA_real_
   rse_pct  <- if (!is.na(se) && abs(estimate) > 1e-12) abs(se / estimate) * 100 else NA_real_
 
   # Asymmetric CI and natural-scale back-transform per theta type
@@ -151,14 +163,14 @@
   } else if (transform == "log") {
     lower_95          <- if (!is.na(se)) estimate - 1.96 * se else NA_real_
     upper_95          <- if (!is.na(se)) estimate + 1.96 * se else NA_real_
-    estimate_natural  <- if (!is.na(se)) exp(estimate) else NA_real_
+    estimate_natural  <- if (!is.na(se) || fixed) exp(estimate) else NA_real_
     lower_95_natural  <- if (!is.na(se)) exp(estimate - 1.96 * se) else NA_real_
     upper_95_natural  <- if (!is.na(se)) exp(estimate + 1.96 * se) else NA_real_
   } else if (transform == "logit") {
     # theta is on the logit scale; CI is symmetric on logit then back-transformed
     lower_95          <- if (!is.na(se)) estimate - 1.96 * se else NA_real_
     upper_95          <- if (!is.na(se)) estimate + 1.96 * se else NA_real_
-    estimate_natural  <- if (!is.na(se)) .ferx_inv_logit(estimate) else NA_real_
+    estimate_natural  <- if (!is.na(se) || fixed) .ferx_inv_logit(estimate) else NA_real_
     lower_95_natural  <- if (!is.na(se)) .ferx_inv_logit(estimate - 1.96 * se) else NA_real_
     upper_95_natural  <- if (!is.na(se)) .ferx_inv_logit(estimate + 1.96 * se) else NA_real_
   } else {
@@ -172,6 +184,7 @@
   data.frame(param            = param,
              transform        = transform,
              estimate         = estimate,
+             fixed            = isTRUE(fixed),
              se               = se,
              rse_pct          = rse_pct,
              lower_95         = lower_95,

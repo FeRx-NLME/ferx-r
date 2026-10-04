@@ -107,11 +107,12 @@ test_that("a name declared in two blocks is addressable, never silently first", 
   expect_identical(names(ferx_coef(fit)), c("CL.theta", "CL.omega"))
 })
 
-# A FIX'd parameter is not NA-SE: the engine carries a zero covariance diagonal
-# and .ferx_compute_estimates() preserves it, so ferx_se() reports an exact 0.
-# The @return docs say so; this pins the behaviour they describe against the
-# engine rather than against a crafted fit (#343 review).
-test_that("a FIX'd parameter reports SE 0, not NA", {
+# A FIX'd parameter has no standard error. The engine carries a zero on the
+# covariance diagonal; since #451 .ferx_compute_estimates() reads the fit's FIX
+# flags and reports NA with `fixed = TRUE`, so ferx_se() gives NA - quietly,
+# since nothing is missing. (#343 had pinned the engine's 0 here.) Pinned
+# against the engine rather than a crafted fit.
+test_that("a FIX'd parameter reports SE NA, quietly, and is marked fixed", {
   skip_on_cran()
   ex    <- ferx_example("warfarin")
   model <- readLines(ex$model)
@@ -127,13 +128,15 @@ test_that("a FIX'd parameter reports SE 0, not NA", {
   fit <- suppressWarnings(
     ferx_fit(path, ex$data, method = "foce", covariance = TRUE, verbose = FALSE)
   )
-  # Fixed at their declared values, with an exact-zero standard error.
+  # Fixed at their declared values. The engine's SE is an exact 0; the table
+  # reports NA and says why.
   expect_equal(ferx_coef(fit, "TVKA"), c(TVKA = 1.0))
   expect_equal(ferx_coef(fit, "ETA_KA"), c(ETA_KA = 0.4))
-  expect_identical(ferx_se(fit, "TVKA"), c(TVKA = 0))
-  expect_identical(ferx_se(fit, "ETA_KA"), c(ETA_KA = 0))
-  # Zero is not NA: the "no standard errors" warning must not fire for it.
-  expect_silent(ferx_se(fit, c("TVKA", "ETA_KA")))
+  expect_identical(unname(fit$se_theta[["TVKA"]]), 0)
+  expect_identical(fit$estimates[c("TVKA", "ETA_KA"), "fixed"], c(TRUE, TRUE))
+  # The "no standard errors" warning must not fire for a held parameter.
+  expect_silent(se <- ferx_se(fit, c("TVKA", "ETA_KA")))
+  expect_identical(se, c(TVKA = NA_real_, ETA_KA = NA_real_))
   # The estimated parameters alongside them still carry real SEs.
   expect_true(ferx_se(fit, "TVCL") > 0)
 })
