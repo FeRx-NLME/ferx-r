@@ -265,7 +265,11 @@
   `custom`, and one with no entry stays log-normal.
   `fit$eta_param_types`, `fit$eta_linked_theta` and `ferx_load_fit()` (for
   a bundle written by ferx-core, which keeps the statement order) all use
-  the name.
+  the name. A `.fitrx` written by `ferx_save_fit()` before this version
+  keeps the labels it was saved with. The old writer stored the mismatched
+  types under each ETA's own name, and the bundle carries nothing a loader
+  could correct them from. Re-fit to get the corrected labels. Estimates
+  are unaffected.
 - **The `ss_absorption`, `infusion_absorption` and `adaptive_vanco_loading`
   examples pass `ferx_model_validate()`**
   ([#410](https://github.com/FeRx-NLME/ferx-r/issues/410)). Each declared a
