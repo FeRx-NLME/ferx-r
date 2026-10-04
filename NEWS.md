@@ -2,7 +2,7 @@
 
 ## Breaking changes
 
-- **ferx now builds against ferx-core `4643eef7`**, up from the `v0.4.0`
+- **ferx now builds against ferx-core `1b45d951`**, up from the `v0.4.0`
   release (`2a6076af`). These engine changes reach every fit, prediction
   and simulation entry point with no change to the package's own code:
 
@@ -111,6 +111,45 @@
     reporting `__level_NAME` missing from the data; `ferx_predict()` binds
     the block (or refuses) before it reaches the engine, so this is not an
     error it raises.
+  - **Results move for fits in which a `theta NAME[COL, ...]` level block is
+    read directly in the prediction** rather than in
+    `[individual_parameters]`, e.g. `y = central / V * SCALE[STUDY]` in
+    `[scaling]` or `y = PLACEBO[STUDY] + ...` in a compartment-free model
+    ([#1636](https://github.com/FeRx-NLME/ferx-core/issues/1636)). Such fits
+    used to fall back to finite-difference gradients for every subject and
+    could stop well short of the optimum; they now keep the analytic gradient
+    and fit identically to the `[individual_parameters]` spelling. Their
+    levels are no longer reported as "declared in [parameters] but not
+    referenced".
+  - **Results move under `method = "gn"` for a level block in a
+    residual-error magnitude**, e.g.
+    `DV ~ proportional(PROP_ERR * ERRSCALE[STUDY])`
+    ([#1638](https://github.com/FeRx-NLME/ferx-core/issues/1638)). Its levels
+    used to stay at their initial values; they are now estimated, as under
+    `gradient = "fd"`. A bare named block is now accepted in a magnitude, and
+    the levels are no longer reported as "declared in [parameters] but not
+    referenced".
+  - **`contrast = auto` sees the `y` readout and an eta reached through a
+    variable** ([#1642](https://github.com/FeRx-NLME/ferx-core/issues/1642)).
+    A block read next to a parameter carrying an eta (`E0 = TVE0 + ETA_E0`,
+    `y = E0 + PLACEBO + ...`, or `E1 = E0 + PLACEBO`) now defaults to
+    `sum_to_zero_within`, as the single-line spelling always did, so such a
+    model has fewer free thetas and its fit moves. An explicit global
+    contrast on these spellings is refused. A fit made before still predicts
+    and simulates on its own saved layout.
+  - **More level-block models are refused when they are parsed or bound**,
+    instead of fitting silently wrong:
+    a level block read in `[odes]`, `init(...)`, an ODE-accumulated
+    `[event_model] hazard`, or an error-model selector `if (...)`
+    ([#1637](https://github.com/FeRx-NLME/ferx-core/issues/1637)); a kappa
+    `weight` reading an estimated level block
+    ([#1639](https://github.com/FeRx-NLME/ferx-core/issues/1639)); and a block
+    that would estimate no theta under any contrast, such as a single level
+    under `ref` ([#1624](https://github.com/FeRx-NLME/ferx-core/issues/1624)).
+    A refusal names the block and the remedy: assign it in
+    `[individual_parameters]` for the ODE contexts, or use a data column for
+    a selector. A bare named block in `[odes]`, already refused, now gets the
+    same message instead of naming the internal `__level_` column.
 
 ## New features
 
