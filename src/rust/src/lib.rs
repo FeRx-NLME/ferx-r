@@ -2717,9 +2717,17 @@ fn cov_matrix_held(model: &CompiledModel, cov_matrix_dim: i32) -> Vec<bool> {
 
 /// Row / column labels of the packed covariance matrix (ferx-r #437), one per
 /// coordinate in the engine's packing order - θ, Ω, σ, Ω_IOV, the `[mixture]`
-/// Ω then Σ overrides, the `block_sigma` ρ's - walked over the same template
-/// `cov_matrix_held` reads, so R no longer re-derives the layout from counts
-/// (which read the κ segment as Ω and dropped every name on an IOV model).
+/// Ω then Σ overrides, the `block_sigma` ρ's - so R no longer re-derives the
+/// layout from counts (which read the κ segment as Ω and dropped every name on
+/// an IOV model).
+///
+/// This is a second, hand-written walk of that order over the template
+/// `cov_matrix_held` reads, not the engine's own: `packed_segments` is
+/// `pub(crate)`, and the public `coordinate_names` spells entries differently
+/// (`ETA_V~ETA_CL`, `ETA_CL_MIX2`). Only the total length is checked against
+/// the matrix, so an engine reordering of two segments of equal length would
+/// mislabel rows without an error; the end-to-end tests in
+/// `test-ferx_covariance.R` pin the order for every pair the engine accepts.
 ///
 /// A diagonal Ω / Ω_IOV entry is the bare declared name; a block one, in the
 /// column-major lower-triangle order `pack_params` uses, is `ROW,COL` - its

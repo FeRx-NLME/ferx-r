@@ -232,9 +232,11 @@
 # ships next to it (`cov_labels`), one per packed coordinate in the engine's
 # own order - theta, omega, sigma, IOV kappa, mixture overrides, block_sigma
 # rho. R used to rebuild them from counts, which read the kappa segment as
-# omega and so dropped every name on an IOV model (#437); the glue walks the
-# same template as `cov_fixed`, so the two cannot drift apart. A label vector
-# that does not cover the matrix leaves it unnamed rather than misnamed.
+# omega and so dropped every name on an IOV model (#437). The glue walks the
+# same template as `cov_fixed`, but with its own copy of the packing order:
+# only the length is checked here, so a vector of the wrong length leaves the
+# matrix unnamed, while one of the right length in the wrong order would not
+# be caught. The end-to-end tests in test-ferx_covariance.R pin the order.
 .ferx_cov_dimnames <- function(m, labels) {
   labels <- as.character(unlist(labels, use.names = FALSE))
   if (length(labels) == nrow(m)) rownames(m) <- colnames(m) <- labels
