@@ -237,6 +237,15 @@
 
 ## Bug fixes
 
+- **`ferx_save_fit()` keeps the FIX flags of a fit made in this session**
+  ([#436](https://github.com/FeRx-NLME/ferx-r/issues/436)). A fresh fit
+  carried no per-parameter FIX flags, so the bundle recorded every theta,
+  omega, sigma and kappa as estimated, and so did `ferx_load_fit()` and any
+  other reader of it. `ferx_fit()` now returns `theta_fixed`, `omega_fixed`,
+  `sigma_fixed` and `kappa_fixed`, the bundle stores them, and
+  `ferx_runlog()` now prints `FIXED` for a fixed theta, omega or sigma of an
+  in-memory fit.
+
 - **An additive or logit kappa no longer prints a CV%**
   ([#1643](https://github.com/FeRx-NLME/ferx-core/issues/1643)). The
   `OMEGA_IOV` rows of `print()` gave every kappa a log-normal CV%, so the

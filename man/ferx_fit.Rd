@@ -818,6 +818,13 @@ of length n_eta*(n_eta+1)/2 (full lower triangle, column-major) including
 off-diagonal covariance SEs.}
 \item{se_sigma}{Standard errors for sigma (on the SD scale, like
 \code{sigma} itself)}
+\item{theta_fixed, omega_fixed, sigma_fixed}{Logical FIX flags, one per
+theta, per eta (the omega diagonal; every eta of a fixed block is
+\code{TRUE}) and per sigma. \code{TRUE} also marks a theta the engine
+held at its initial value because it had no effect on the objective
+(see the \code{flat_parameter} warning), even without \code{FIX} in
+the model. \code{ferx_save_fit()} writes them into the bundle, so a
+reloaded fit carries the same flags.}
 \item{sdtab}{Data frame with ID, TIME, DV, PRED, IPRED, CWRES, IWRES,
 EBE_OFV, N_OBS; OCC if any subject carries an occasion column; CENS
 if any rows are LOQ-censored; CMT if the dataset has more than one
@@ -1125,6 +1132,8 @@ etas), its row is still returned but \code{W} and \code{p_val} are
 \code{NA}.}
 \item{omega_iov}{IOV variance matrix for kappa parameters (\code{NULL} if no IOV).}
 \item{kappa_names}{Names of kappa (IOV) parameters (\code{NULL} if no IOV).}
+\item{kappa_fixed}{Logical FIX flag per kappa, parallel to
+\code{kappa_names}; empty when the model has no IOV.}
 \item{se_kappa}{Standard errors for kappa parameters: length \code{d}
 (diagonal kappa) or \code{d*(d+1)/2} (block_kappa, lower-triangle order).
 \code{NULL} if covariance step not run or no IOV.}

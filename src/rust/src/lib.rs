@@ -3396,6 +3396,12 @@ fn fit_result_to_list(
         se_theta = se_theta,
         se_omega = se_omega,
         se_sigma = se_sigma,
+        // Per-parameter FIX flags, parallel to `theta`, the omega diagonal and
+        // `sigma` (ferx-r #436). `ferx_save_fit()` writes them into the bundle;
+        // without them an in-memory fit saved every FIX parameter as free.
+        theta_fixed = result.theta_fixed.clone(),
+        omega_fixed = result.omega_fixed.clone(),
+        sigma_fixed = result.sigma_fixed.clone(),
         sdtab = sdtab,
         warnings = warnings,
         warnings_severity = warnings_severity,
@@ -3446,6 +3452,8 @@ fn fit_result_to_list(
         omega_iov = omega_iov_flat,
         omega_iov_dim = omega_iov_dim,
         kappa_names = kappa_names,
+        // Per-kappa FIX flags, parallel to `kappa_names` (ferx-r #436).
+        kappa_fixed = result.kappa_fixed.clone(),
         se_kappa = se_kappa,
         shrinkage_kappa = shrinkage_kappa,
         shrinkage_kappa_by_occ = shrinkage_kappa_by_occ_df,
