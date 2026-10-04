@@ -2402,6 +2402,7 @@ fn default_fit_result(
         model_name: model.name.clone(),
         ferx_version: String::new(),
         eta_param_info: Vec::new(),
+        kappa_param_types: Vec::new(),
         // `draw_asymptotic` reads this to draw a `logit_probability` theta on the
         // logit scale (ferx-core #1548). Left empty, the engine falls back to
         // log-normal draws that leave (0, 1) - the bug in ferx-r #373.
@@ -4538,6 +4539,7 @@ fn ferx_rust_sir(
             model_name: model.name.clone(),
             ferx_version: String::new(),
             eta_param_info: Vec::new(),
+            kappa_param_types: Vec::new(),
             theta_transform: Vec::new(),
             sigma_types: Vec::new(),
             cov_eigenvalues: None,
@@ -4969,6 +4971,7 @@ fn ferx_rust_covariance(
             model_name: model.name.clone(),
             ferx_version: String::new(),
             eta_param_info: Vec::new(),
+            kappa_param_types: Vec::new(),
             theta_transform: Vec::new(),
             sigma_types: Vec::new(),
             cov_eigenvalues: None,
