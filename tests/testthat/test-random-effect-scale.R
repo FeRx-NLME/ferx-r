@@ -9,7 +9,8 @@
 ferx_rust_eta_info_by_name <- getFromNamespace("ferx_rust_eta_info_by_name", "ferx")
 
 # One mbma_placebo fit per file: KAPPA_ARM is the additive, NARM-weighted kappa
-# (`BASE = TVE0 + PLACEBO + ETA_E0 + KAPPA_ARM`) that read as CV% = 1249.1.
+# (`BASE = TVE0 + PLACEBO + ETA_E0 + KAPPA_ARM`) that print() showed with the
+# log-normal CV% sqrt(exp(v) - 1) * 100, about 7.6e35 at v = 156.
 .mbma_fit_cache <- new.env(parent = emptyenv())
 mbma_fit <- function() {
   if (is.null(.mbma_fit_cache$fit)) {
