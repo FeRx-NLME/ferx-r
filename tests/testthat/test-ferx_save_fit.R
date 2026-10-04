@@ -879,6 +879,64 @@ test_that("LTBS residual label survives a .fitrx round-trip", {
   loaded <- ferx_load_fit(path)
   expect_equal(loaded$model_structure$residual, "additive (log-transformed)")
 })
+test_that("FIX flags of an in-memory fit survive a .fitrx round-trip (#436)", {
+  skip_on_cran()
+  # Regression: the glue shipped no theta/omega/sigma/kappa_fixed, so
+  # ferx_save_fit() fell back to rep(FALSE, ...) and the bundle claimed every
+  # FIX parameter was estimated. One FIX and one free entry per class, so a
+  # flag forced to either value is caught.
+  ex <- ferx_example("warfarin_iov")
+  md <- tempfile(fileext = ".ferx")
+  writeLines(c(
+    "[parameters]",
+    "  theta TVCL(0.134, 0.001, 10.0)",
+    "  theta TVV(8.1, 0.1, 500.0)",
+    "  theta TVKA(1.0, FIX)",
+    "  omega ETA_CL ~ 0.07",
+    "  omega ETA_V  ~ 0.02 FIX",
+    "  kappa KAPPA_CL ~ 0.04 FIX",
+    "  kappa KAPPA_V  ~ 0.01",
+    "  sigma PROP_ERR ~ 0.01 (sd)",
+    "  sigma ADD_ERR  ~ 0.1 (sd) FIX",
+    "[individual_parameters]",
+    "  CL = TVCL * exp(ETA_CL + KAPPA_CL)",
+    "  V  = TVV  * exp(ETA_V + KAPPA_V)",
+    "  KA = TVKA",
+    "[structural_model]",
+    "  pk one_cpt_oral(cl=CL, v=V, ka=KA)",
+    "[error_model]",
+    "  DV ~ combined(PROP_ERR, ADD_ERR)",
+    "[fit_options]",
+    "  method     = foce",
+    "  iov_column = OCC",
+    "  covariance = false"
+  ), md)
+  path <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(c(md, path)), add = TRUE)
+
+  fit <- ferx_fit(md, data = ex$data, verbose = FALSE,
+                  settings = list(maxiter = 5L))
+  expect_identical(fit$theta_fixed, c(FALSE, FALSE, TRUE))
+  expect_identical(fit$omega_fixed, c(FALSE, TRUE))
+  expect_identical(fit$sigma_fixed, c(FALSE, TRUE))
+  expect_identical(fit$kappa_fixed, c(TRUE, FALSE))
+
+  # ferx_runlog() reads the same flags: FIXED on the fixed rows only.
+  log_lines <- strsplit(ferx_runlog(fit, verbose = FALSE), "\n", fixed = TRUE)[[1]]
+  row_of <- function(nm) grep(paste0("^\\s*", nm, "\\s"), log_lines, value = TRUE)[1]
+  for (nm in c("TVKA", "ETA_V", "ADD_ERR")) {
+    expect_match(row_of(nm), "FIXED", fixed = TRUE, label = nm)
+  }
+  for (nm in c("TVCL", "ETA_CL", "PROP_ERR")) {
+    expect_no_match(row_of(nm), "FIXED", fixed = TRUE, label = nm)
+  }
+
+  ferx_save_fit(fit, path)
+  loaded <- ferx_load_fit(path)
+  for (f in c("theta_fixed", "omega_fixed", "sigma_fixed", "kappa_fixed")) {
+    expect_identical(loaded[[f]], fit[[f]], label = paste0("loaded$", f))
+  }
+})
 test_that(".fitrx_build_iov_wire uses empty list when shrinkage_kappa_by_occ is absent", {
   fake_iov_fit <- list(
     omega_iov              = matrix(0.09, 1, 1),
