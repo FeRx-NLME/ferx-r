@@ -112,6 +112,39 @@ test_that("a bundled example with a [covariates] block validates clean", {
   expect_true(isTRUE(res$ok))
   expect_false(any(grepl("unknown section", out, fixed = TRUE)))
 })
+test_that("an instance-named header opens its own block (#306)", {
+  # `[event_model cause_a]` used to be read as a body line, so it and its whole
+  # body were appended to [parameters] and `event_model` was never seen.
+  blocks <- ferx:::.ferx_extract_blocks(ferx_example("tte_competing_risks")$model)
+  expect_true(all(c("parameters", "event_model", "fit_options") %in% names(blocks)))
+  expect_false(any(grepl("^\\[|^(cmt|family|scale)\\b", blocks$parameters)))
+  # Both instances are keyed on the type, in file order.
+  expect_identical(grep("^cmt", blocks$event_model, value = TRUE),
+                   c("cmt    = 2", "cmt    = 3"))
+  expect_identical(blocks$fit_options, c("method  = focei", "maxiter = 300"))
+})
+test_that("a time-to-event or binary model needs no PK sections (#306)", {
+  # The required set depends on the model family, which only the engine knows.
+  # An R-side list reported these as missing [individual_parameters],
+  # [structural_model] and [error_model].
+  for (nm in c("tte_competing_risks", "tte_weibull", "binary_logistic")) {
+    out <- capture.output(res <- ferx_model_validate(ferx_example(nm)$model))
+    expect_true(isTRUE(res$ok), label = nm)
+    expect_false(any(grepl("MISSING", out, fixed = TRUE)), label = nm)
+  }
+})
+test_that("a missing section is the engine's E_MISSING_BLOCK, marked in the report (#306)", {
+  path <- write_ferx(grep("^\\[error_model\\]|^  DV ~", VALID_WARFARIN_SECTIONS,
+                          value = TRUE, invert = TRUE))
+  on.exit(unlink(path))
+  out <- capture.output(res <- ferx_model_validate(path))
+  expect_false(isTRUE(res$ok))
+  d <- res$diagnostics[res$diagnostics$code == "E_MISSING_BLOCK", , drop = FALSE]
+  expect_identical(d$block, "error_model")
+  expect_true(any(grepl("^  error_model +\\[MISSING\\]$", out)))
+  # Present sections are not marked missing.
+  expect_true(any(grepl("^  structural_model +\\[ok\\]$", out)))
+})
 test_that("a retired section is labelled retired, not unknown", {
   # `ferx_rust_known_blocks()` lists only what this build *accepts*, so a
   # retired name lands in the R-side `unknown` set. Printing `[unknown section]`

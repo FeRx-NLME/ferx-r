@@ -15,7 +15,9 @@
 #'   signs). \code{NULL} runs the model-only checks.
 #'
 #' @return Invisibly returns a list with \code{ok} (logical - FALSE when the
-#'   engine reports an error, a required section is missing, or the file
+#'   engine reports an error, including a section this model's family requires
+#'   (\code{E_MISSING_BLOCK}; a binary or time-to-event model needs no
+#'   \code{[structural_model]} or \code{[error_model]}), or the file
 #'   carries a section name this build of the engine does not accept - one it
 #'   never knew, one it has retired, or one behind a disabled feature),
 #'   \code{model},
@@ -42,7 +44,7 @@
 #' res$diagnostics
 #'
 #' \dontrun{
-#' # Invalid model (missing required sections)
+#' # Invalid model (no [error_model]: the engine names the first missing section)
 #' bad <- tempfile(fileext = ".ferx")
 #' writeLines(c(
 #'   "[parameters]",
@@ -55,13 +57,11 @@
 #' #
 #' # Sections present:
 #' #   parameters                     [ok]
-#' #   individual_parameters          [MISSING]
 #' #   structural_model               [ok]
 #' #   error_model                    [MISSING]
 #' #
 #' # Result: INVALID
-#' #   * Missing required section: [individual_parameters]
-#' #   * Missing required section: [error_model]
+#' #   * ERROR E_MISSING_BLOCK [error_model]: Missing [error_model] block
 #' }
 #'
 #' @seealso \code{\link{ferx_model_inspect}}, \code{\link{ferx_model_show}}
@@ -77,29 +77,25 @@ ferx_model_validate <- function(path, data = NULL) {
     if (!file.exists(data)) stop("Data file not found: ", data)
   }
 
-  required_sections <- c(
-    "parameters", "individual_parameters", "structural_model",
-    "error_model"
-  )
-  # Optional sections come from the engine (ferx-core's `known_block_names()`),
-  # never a list maintained here. The duplicated vector this replaces had
-  # drifted: it omitted covariates, event_model, binary_model, markov_model,
-  # data_selection, adaptive_dosing, mixture, data and simulation - all of them
-  # blocks the parser reads and all of them used by bundled examples, so
-  # `ferx_model_validate(ferx_example("two_cpt_oral_cov")$model)` reported
-  # `covariates [unknown section]` - and it still listed `initial_values`,
-  # which the engine dropped in ferx-core e5e934d. See ferx-core #1040.
-  optional_sections <- setdiff(ferx_rust_known_blocks(), required_sections)
+  # Which sections exist, and which a model needs, both come from the engine.
+  # The known names are ferx-core's `known_block_names()`; an R copy of that
+  # list drifted (ferx-core #1040). Which ones are *required* depends on the
+  # model family - a binary or time-to-event model has no
+  # [individual_parameters], [structural_model] or [error_model] - and the
+  # engine's parser says so itself with `E_MISSING_BLOCK`, naming the block.
+  # A hard-coded required list here reported four valid bundled examples
+  # INVALID (#306).
+  known_sections <- ferx_rust_known_blocks()
 
   blocks   <- .ferx_extract_blocks(path)
   present  <- names(blocks)
-  missing  <- setdiff(required_sections, present)
-  unknown  <- setdiff(present, c(required_sections, optional_sections))
+  unknown  <- setdiff(present, known_sections)
 
   data_arg <- if (is.null(data)) "" else normalizePath(data)
   rust_result <- ferx_rust_validate_model(normalizePath(path), data_arg)
 
   diag <- .ferx_diagnostics_frame(rust_result)
+  missing <- unique(diag$block[diag$code == "E_MISSING_BLOCK" & !is.na(diag$block)])
 
   # An unrecognised section counts against `ok`. It used to be printed as
   # `[unknown section]` and then left out of the returned status, so `res$ok`
@@ -107,19 +103,18 @@ ferx_model_validate <- function(path, data = NULL) {
   # silent-drop ferx-core #1040 closes. A current engine already errors on it
   # (`E_UNKNOWN_BLOCK`), which is what `rust_result$ok` carries; folding it in
   # here keeps the status honest against an older pinned engine too.
-  ok <- isTRUE(rust_result$ok) && length(missing) == 0L && length(unknown) == 0L
+  ok <- isTRUE(rust_result$ok) && length(unknown) == 0L
 
   cat("Validating:", basename(path), "\n")
   if (!is.null(data)) cat("       data:", basename(data), "\n")
   cat("\n")
 
   cat("Sections present:\n")
-  for (s in required_sections) {
-    status <- if (s %in% present) "[ok]" else "[MISSING]"
-    cat(sprintf("  %-30s %s\n", s, status))
+  for (s in intersect(present, known_sections)) {
+    cat(sprintf("  %-30s [ok]\n", s))
   }
-  for (s in optional_sections) {
-    if (s %in% present) cat(sprintf("  %-30s [ok] (optional)\n", s))
+  for (s in setdiff(missing, present)) {
+    cat(sprintf("  %-30s [MISSING]\n", s))
   }
   # `ferx_rust_known_blocks()` is build-dependent and omits names the engine
   # still recognises: a retired block (`E_DEPRECATED_BLOCK`) and one gated
@@ -150,9 +145,6 @@ ferx_model_validate <- function(path, data = NULL) {
     cat("Result: VALID (with warnings)\n")
   } else {
     cat("Result: INVALID\n")
-  }
-  if (length(missing) > 0L) {
-    for (s in missing) cat("  * Missing required section: [", s, "]\n", sep = "")
   }
   if (nrow(diag) > 0L) {
     for (i in seq_len(nrow(diag))) {

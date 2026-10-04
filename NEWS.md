@@ -240,6 +240,21 @@
   no longer draws a vanishing eta (SD `1e-5`), so its simulated doses and
   concentrations move by less than 0.03 %.
 
+- **`ferx_model_validate()` accepts binary and time-to-event models, and sees
+  instance-named sections**
+  ([#306](https://github.com/FeRx-NLME/ferx-r/issues/306)). It required
+  `[individual_parameters]`, `[structural_model]` and `[error_model]` from an
+  R-side list, so the bundled `binary_logistic`, `tte_competing_risks`,
+  `tte_gompertz` and `tte_weibull` models were reported INVALID although the
+  engine accepts them. Which sections a model needs now comes from the engine:
+  a missing one is its `E_MISSING_BLOCK` diagnostic, and the report marks that
+  section `[MISSING]`. The engine names the first missing section, where the
+  old list named every one. Present sections are no longer tagged
+  `(optional)`. A header with an instance name, such as
+  `[event_model cause_a]`, is now read as a section. It used to be taken for
+  a body line, so the header and its body were appended to the section before
+  it, and `event_model` and `covariate_nn` were never listed.
+
 - **`fit$cov_matrix` and `fit$cor_matrix` carry row and column names on IOV
   models** ([#437](https://github.com/FeRx-NLME/ferx-r/issues/437)). Any
   model with a `kappa` used to come back with no names at all, from
