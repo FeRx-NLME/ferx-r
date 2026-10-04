@@ -334,11 +334,18 @@ ferx_load_fit <- function(path) {
     out$covariate_types <- unlist(ct, use.names = TRUE)
   }
 
-  # eta_param_info ? parallel R vectors
+  # eta_param_info -> R vectors parallel to eta_names, matched by name (#438):
+  # ferx-core writes the list in [individual_parameters] statement order, may
+  # skip an ETA and may list one twice. Same rule as a live fit.
   epi <- w$eta_param_info
   if (!is.null(epi) && length(epi) > 0L) {
-    out$eta_param_types <- vapply(epi, function(x) as.character(x$param_type %||% ""), character(1L))
-    out$eta_linked_theta <- vapply(epi, function(x) as.character(x$linked_theta %||% ""), character(1L))
+    field <- function(nm) vapply(epi, function(x) as.character(x[[nm]] %||% ""), character(1L))
+    by_name <- ferx_rust_eta_info_by_name(
+      as.character(out$eta_names %||% character()),
+      field("eta_name"), field("param_type"), field("linked_theta")
+    )
+    out$eta_param_types <- by_name$eta_param_types
+    out$eta_linked_theta <- by_name$eta_linked_theta
   } else {
     out$eta_param_types <- character()
     out$eta_linked_theta <- character()
@@ -404,6 +411,10 @@ ferx_load_fit <- function(path) {
     )
     out$kappa_weights <- kw$kappa_weights
     out$kappa_weight_typical <- kw$kappa_weight_typical
+    # ferx-core #1643. Absent from every bundle written before it: empty.
+    out$kappa_param_types <- .ferx_name_kappa_param_types(
+      w$iov$kappa_param_types, out$kappa_names, length(out$kappa_names)
+    )
   } else {
     out$kappa_names <- character()
     out$kappa_fixed <- logical()

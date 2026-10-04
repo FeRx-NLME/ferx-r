@@ -2,7 +2,7 @@
 
 ## Breaking changes
 
-- **ferx now builds against ferx-core `1b45d951`**, up from the `v0.4.0`
+- **ferx now builds against ferx-core `45ebd3c9`**, up from the `v0.4.0`
   release (`2a6076af`). These engine changes reach every fit, prediction
   and simulation entry point with no change to the package's own code:
 
@@ -150,6 +150,14 @@
     `[individual_parameters]` for the ODE contexts, or use a data column for
     a selector. A bare named block in `[odes]`, already refused, now gets the
     same message instead of naming the internal `__level_` column.
+  - **The engine reports the scale each kappa enters its parameter on**
+    ([#1643](https://github.com/FeRx-NLME/ferx-core/issues/1643)): log-normal
+    under `exp()`, logit under `inv_logit()`, additive when only `+` and `-`
+    stand between the kappa and its parameter, custom otherwise. A kappa is
+    followed through an intermediate variable (`IOVCL = KAPPA_CL`, then
+    `CL = TVCL * exp(ETA_CL + IOVCL)` is log-normal). No estimate moves.
+    `print()` and `fit$estimates` now use it (see Bug fixes), and
+    `ferx_save_fit()` stores it in the `.fitrx` bundle.
 
 ## New features
 
@@ -229,6 +237,35 @@
 
 ## Bug fixes
 
+- **An additive or logit kappa no longer prints a CV%**
+  ([#1643](https://github.com/FeRx-NLME/ferx-core/issues/1643)). The
+  `OMEGA_IOV` rows of `print()` gave every kappa a log-normal CV%, so the
+  additive, `NARM`-weighted `KAPPA_ARM` of the `mbma_placebo` example
+  (variance about 156) printed `CV% = 7.6e35` written out in full. A kappa row now shows `(CV% = ...)` for a
+  log-normal kappa, `(SD = ...)` for an additive one and
+  `(SD = ..., logit scale)` for a logit one, and nothing for any other
+  expression. A weighted kappa's SD reads `at weight 1`, the SD of a
+  one-subject arm, and the SD at the typical weight follows on the next
+  line as before. The new `fit$kappa_param_types` holds each kappa's
+  scale, parallel to `kappa_names`. `fit$estimates` gains a `scale` column
+  with the scale of each omega and kappa row (`NA` on theta and sigma
+  rows). `transform` stays `"variance"` on those rows, and their intervals
+  are unchanged. A `.fitrx` saved before this version carries no kappa
+  scale: it loads with `kappa_param_types` empty and prints as before.
+- **Each ETA's scale is matched to the ETA by name**
+  ([#438](https://github.com/FeRx-NLME/ferx-r/issues/438)). The engine lists
+  `eta_param_info` in `[individual_parameters]` statement order. It can skip
+  an ETA, and it lists an ETA once for each parameter it enters. ferx read
+  that list by position, so when the ETAs were declared in a different
+  order from the statements, `print()` gave each ETA another ETA's scale.
+  For example, with `omega ETA_V` declared before `omega ETA_CL` and
+  `CL = TVCL * exp(ETA_CL)` written before `V = TVV + ETA_V`, it printed
+  `ETA_V` as log-normal with a CV%, and `ETA_CL` as additive. Each ETA now
+  takes the scale of its own entries. An ETA whose entries disagree is
+  `custom`, and one with no entry stays log-normal.
+  `fit$eta_param_types`, `fit$eta_linked_theta` and `ferx_load_fit()` (for
+  a bundle written by ferx-core, which keeps the statement order) all use
+  the name.
 - **The `ss_absorption`, `infusion_absorption` and `adaptive_vanco_loading`
   examples pass `ferx_model_validate()`**
   ([#410](https://github.com/FeRx-NLME/ferx-r/issues/410)). Each declared a

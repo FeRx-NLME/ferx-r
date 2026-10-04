@@ -105,6 +105,12 @@ ferx_rust_known_blocks <- function() {
 
 #' @title Internal Rust backend binding
 #' @keywords internal
+ferx_rust_eta_info_by_name <- function(eta_names, info_names, info_types, info_linked) {
+  .Call("wrap__ferx_rust_eta_info_by_name", eta_names, info_names, info_types, info_linked)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
 ferx_rust_classify_warnings <- function(messages) {
   .Call("wrap__ferx_rust_classify_warnings", messages)
 }
