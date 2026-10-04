@@ -2715,6 +2715,71 @@ fn cov_matrix_held(model: &CompiledModel, cov_matrix_dim: i32) -> Vec<bool> {
     }
 }
 
+/// Row / column labels of the packed covariance matrix (ferx-r #437), one per
+/// coordinate in the engine's packing order - θ, Ω, σ, Ω_IOV, the `[mixture]`
+/// Ω then Σ overrides, the `block_sigma` ρ's - walked over the same template
+/// `cov_matrix_held` reads, so R no longer re-derives the layout from counts
+/// (which read the κ segment as Ω and dropped every name on an IOV model).
+///
+/// A diagonal Ω / Ω_IOV entry is the bare declared name; a block one, in the
+/// column-major lower-triangle order `pack_params` uses, is `ROW,COL` - its
+/// diagonal too (`ETA_CL,ETA_CL`), the spelling R gave the Ω block (#367).
+/// Fallbacks per the output-label convention: `THETA<i>`, `OMEGA(i,j)`,
+/// `SIGMA(i)`, `KAPPA<i>` (`KAPPA(i,j)` off the diagonal). A mixture override is
+/// the overridden name with its class, `ETA_CL (class 2)`. Empty, like the mask,
+/// when there is no matrix or the layout does not have its dimension.
+fn cov_matrix_labels(model: &CompiledModel, cov_matrix_dim: i32) -> Vec<String> {
+    let p = &model.default_params;
+    let named = |names: &[String], k: usize| names.get(k).filter(|n| !n.is_empty()).cloned();
+    let theta = |k: usize| named(&p.theta_names, k).unwrap_or_else(|| format!("THETA{}", k + 1));
+    let eta = |k: usize| named(&p.omega.eta_names, k);
+    let sigma = |k: usize| named(&p.sigma.names, k).unwrap_or_else(|| format!("SIGMA({})", k + 1));
+    // Column-major lower triangle, `row >= col`; one entry per column when diagonal.
+    let lower_tri = |n: usize, diagonal: bool| {
+        (0..n).flat_map(move |c| (c..if diagonal { c + 1 } else { n }).map(move |r| (r, c)))
+    };
+
+    let mut labels: Vec<String> = (0..p.theta.len()).map(theta).collect();
+    for (r, c) in lower_tri(p.omega.dim(), p.omega.diagonal) {
+        labels.push(match (eta(r), eta(c)) {
+            (Some(a), _) if p.omega.diagonal => a,
+            (Some(a), Some(b)) => format!("{a},{b}"),
+            _ => format!("OMEGA({},{})", r + 1, c + 1),
+        });
+    }
+    labels.extend((0..p.sigma.values.len()).map(sigma));
+    if let Some(ref iov) = p.omega_iov {
+        let kappa = |k: usize| named(&iov.eta_names, k).or_else(|| named(&model.kappa_names, k));
+        for (r, c) in lower_tri(iov.dim(), iov.diagonal) {
+            labels.push(match (kappa(r), kappa(c)) {
+                (Some(a), _) if iov.diagonal => a,
+                (Some(a), Some(b)) => format!("{a},{b}"),
+                _ if iov.diagonal => format!("KAPPA{}", r + 1),
+                _ => format!("KAPPA({},{})", r + 1, c + 1),
+            });
+        }
+    }
+    if let Some(ref mix) = p.mixture {
+        for &(class, k) in &mix.omega_override_addr {
+            let nm = eta(k).unwrap_or_else(|| format!("OMEGA({},{})", k + 1, k + 1));
+            labels.push(format!("{nm} (class {})", class + 1));
+        }
+        for &(class, k) in &mix.sigma_override_addr {
+            labels.push(format!("{} (class {})", sigma(k), class + 1));
+        }
+    }
+    // Same `A ~ B` spelling as `residual_correlation_names`.
+    for c in &p.residual_correlations {
+        labels.push(format!("{} ~ {}", sigma(c.sigma_i), sigma(c.sigma_j)));
+    }
+
+    if cov_matrix_dim > 0 && labels.len() == cov_matrix_dim as usize {
+        labels
+    } else {
+        Vec::new()
+    }
+}
+
 fn fit_result_to_list(
     result: &FitResult,
     population: &Population,
@@ -3348,6 +3413,7 @@ fn fit_result_to_list(
         cov_matrix = cov_matrix_flat,
         cov_matrix_dim = cov_matrix_dim,
         cov_fixed = cov_matrix_held(model, cov_matrix_dim),
+        cov_labels = cov_matrix_labels(model, cov_matrix_dim),
         cov_eigenvalues = result.cov_eigenvalues.clone().unwrap_or_default(),
         cov_condition_number = result.cov_condition_number.unwrap_or(f64::NAN),
         // Packed Omega / kappa layout (ferx-core #1177). `.fitrx` bundles
@@ -5000,6 +5066,7 @@ fn ferx_rust_covariance(
             cov_matrix = cov_matrix_flat,
             cov_matrix_dim = cov_matrix_dim,
             cov_fixed = cov_matrix_held(model, cov_matrix_dim),
+            cov_labels = cov_matrix_labels(model, cov_matrix_dim),
             se_theta = new_fit.se_theta.clone().unwrap_or_default(),
             se_omega = new_fit.se_omega.clone().unwrap_or_default(),
             se_sigma = new_fit.se_sigma.clone().unwrap_or_default(),

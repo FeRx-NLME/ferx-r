@@ -228,35 +228,17 @@
   )
 }
 
-# Internal: row/column labels for the omega block of `cov_matrix` /
-# `cor_matrix` when omega is a block (full lower triangle, not just the
-# diagonal).
-#
-# The engine packs those rows in COLUMN-major order - (1,1), (2,1), ..., (n,1),
-# (2,2), (3,2), ... - the same packing `.omega_se_at()` indexes `se_omega`
-# with. Labelling them row-major put two names on the wrong rows of a 3x3
-# block, so a held (zero) covariance read as an estimated variance with zero
-# variance (#367). Both call sites - `ferx_fit()` and `ferx_covariance()` -
-# take the names from here so the two cannot drift apart again.
-#
-# `eta_nms` is the vector of declared eta names, or NULL for the
-# `OMEGA(i,j)` fallback.
-.ferx_omega_block_labels <- function(n_eta, eta_nms = NULL) {
-  n <- n_eta * (n_eta + 1L) / 2L
-  nm <- character(max(n, 0L))
-  k <- 0L
-  for (j in seq_len(n_eta)) {
-    for (i in seq_len(n_eta)) {
-      if (i < j) next
-      k <- k + 1L
-      nm[k] <- if (!is.null(eta_nms)) {
-        sprintf("%s,%s", eta_nms[i], eta_nms[j])
-      } else {
-        sprintf("OMEGA(%d,%d)", i, j)
-      }
-    }
-  }
-  nm
+# Internal: name the rows and columns of `cov_matrix` with the labels the glue
+# ships next to it (`cov_labels`), one per packed coordinate in the engine's
+# own order - theta, omega, sigma, IOV kappa, mixture overrides, block_sigma
+# rho. R used to rebuild them from counts, which read the kappa segment as
+# omega and so dropped every name on an IOV model (#437); the glue walks the
+# same template as `cov_fixed`, so the two cannot drift apart. A label vector
+# that does not cover the matrix leaves it unnamed rather than misnamed.
+.ferx_cov_dimnames <- function(m, labels) {
+  labels <- as.character(unlist(labels, use.names = FALSE))
+  if (length(labels) == nrow(m)) rownames(m) <- colnames(m) <- labels
+  m
 }
 
 # Internal: look up SE for omega element (i, j) from se_omega vector.
@@ -625,38 +607,13 @@
   d <- result$cov_matrix_dim %||% 0L
   if (!is.null(result$cov_matrix) && length(result$cov_matrix) > 0L && d > 0L) {
     m <- matrix(result$cov_matrix, nrow = d, ncol = d, byrow = TRUE)
-    n_theta <- length(result$theta_names)
-    n_eta <- result$omega_dim %||% 0L
-    n_sigma <- length(result$sigma)
-    # The engine packs the `block_sigma` correlations *last* (after sigma), so
-    # they have to come out of the count before it can be read as omega -
-    # otherwise every trailing coordinate is off by the number of rho's and the
-    # sigma rows carry the wrong labels.
-    rho_nms <- .ferx_residual_corr_labels(result)
-    n_rho <- length(rho_nms)
-    n_omega_packed <- d - n_theta - n_sigma - n_rho
-    # Determine parameterisation: diagonal (n_omega_packed == n_eta) or block
-    eta_nms <- if (!is.null(result$eta_names) && length(result$eta_names) == n_eta) result$eta_names else NULL
-    omega_names <- if (n_omega_packed == n_eta) {
-      if (!is.null(eta_nms)) eta_nms
-      else paste0("OMEGA(", seq_len(n_eta), ",", seq_len(n_eta), ")")
-    } else {
-      # Block lower-triangle: L(i,j) for i >= j, column-major (#367).
-      .ferx_omega_block_labels(n_eta, eta_nms)
-    }
-    sig_nms <- if (!is.null(result$sigma_names) && length(result$sigma_names) == n_sigma) result$sigma_names else NULL
-    pnames <- c(
-      result$theta_names,
-      if (n_omega_packed > 0L) omega_names else character(0L),
-      if (n_sigma > 0L) (if (!is.null(sig_nms)) sig_nms else paste0("SIGMA(", seq_len(n_sigma), ")")) else character(0L),
-      rho_nms
-    )
-    if (length(pnames) == d) rownames(m) <- colnames(m) <- pnames
+    m <- .ferx_cov_dimnames(m, result$cov_labels)
     result$cov_matrix <- m
   } else {
     result$cov_matrix <- NULL
   }
   result$cov_matrix_dim <- NULL
+  result$cov_labels <- NULL
   # Which of those coordinates the engine held (#424), named like the rows.
   result$cov_fixed <- .ferx_cov_fixed_named(result$cov_fixed, result$cov_matrix)
 

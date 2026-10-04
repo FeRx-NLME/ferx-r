@@ -190,6 +190,15 @@
 
 ## Bug fixes
 
+- **`fit$cov_matrix` and `fit$cor_matrix` carry row and column names on IOV
+  models** ([#437](https://github.com/FeRx-NLME/ferx-r/issues/437)). Any
+  model with a `kappa` used to come back with no names at all, from
+  `ferx_fit()` and from `ferx_covariance()`. The labels now come from the
+  engine in its own packing order: thetas, omega, sigma, then the kappas,
+  named like the omega block (`KAPPA_CL`, or `KAPPA_CL,KAPPA_V` within a
+  `block_kappa`). A `[mixture]` per-class override is labelled with its
+  class, as in `ETA_CL (class 2)`. `fit$cov_fixed` takes the same names.
+
 - **A fit with a `FIX` parameter no longer warns "One or more diagonal
   elements are non-positive"**, in `ferx_fit()`, `ferx_covariance()` or
   `ferx_load_fit()` ([#424](https://github.com/FeRx-NLME/ferx-r/issues/424)).

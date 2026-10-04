@@ -166,7 +166,7 @@ test_that("ferx_covariance errors when the fit has no recorded model path", {
 })
 
 test_that("ferx_covariance labels a block omega's rows column-major", {
-  # The second call site of `.ferx_omega_block_labels()` (#367): `ferx_fit()`
+  # The second call site of the cov_matrix labels (#367, #437): `ferx_fit()`
   # and this function name the same matrix, and a fit that skipped the
   # covariance step and picked it up here must arrive at identical dimnames.
   ex  <- ferx_example("warfarin_block_omega")
@@ -185,4 +185,109 @@ test_that("ferx_covariance labels a block omega's rows column-major", {
   expect_identical(unname(d[["ETA_KA,ETA_V"]]), 0)
   expect_gt(d[["ETA_V,ETA_V"]], 0)
   expect_identical(rownames(out$cor_matrix), rownames(out$cov_matrix))
+})
+
+# -- IOV models: the kappa segment gets its own labels (#437) ------------------
+#
+# The engine packs theta / omega / sigma / kappa. R used to label the matrix
+# from counts, read every coordinate after theta and before sigma as omega, and
+# so came up one name short on any IOV model - and dropped all of them. Each
+# model below changes one segment of warfarin_iov: a block omega in front of a
+# diagonal kappa, then a diagonal omega in front of a block kappa. Both are
+# checked through both call sites: ferx_fit()'s covariance step, and
+# ferx_covariance() on a fit that skipped it.
+
+iov_variant_fit <- function(edit, covariance) {
+  ex  <- ferx_example("warfarin_iov")
+  txt <- edit(readLines(ex$model))
+  mod <- tempfile(fileext = ".ferx")
+  writeLines(txt, mod)
+  suppressWarnings(ferx_fit(mod, ex$data, method = "foce", verbose = FALSE,
+                            covariance = covariance,
+                            settings = list(maxiter = 30L)))
+}
+
+block_omega_iov <- function(txt) {
+  txt <- sub("^\\s*omega ETA_CL ~ .*$",
+             "  block_omega (ETA_CL, ETA_V) = [0.07, 0.01, 0.02]", txt)
+  txt <- txt[!grepl("^\\s*omega ETA_V\\s+~", txt)]
+  stopifnot(sum(grepl("block_omega", txt)) == 1L,
+            !any(grepl("^\\s*omega ETA_V", txt)))
+  txt
+}
+
+block_kappa_iov <- function(txt) {
+  txt <- sub("^\\s*kappa KAPPA_CL ~ .*$",
+             "  block_kappa (KAPPA_CL, KAPPA_V) = [0.04, 0.005, 0.02]", txt)
+  txt <- sub("TVV  \\* exp\\(ETA_V\\)", "TVV  * exp(ETA_V + KAPPA_V)", txt)
+  stopifnot(sum(grepl("block_kappa", txt)) == 1L,
+            sum(grepl("exp\\(ETA_V \\+ KAPPA_V\\)", txt)) == 1L)
+  txt
+}
+
+expect_iov_labels <- function(edit, expected) {
+  fit <- iov_variant_fit(edit, covariance = TRUE)
+  out <- suppressWarnings(ferx_covariance(iov_variant_fit(edit, covariance = FALSE)))
+  for (x in list(fit, out)) {
+    if (is.null(x$cov_matrix)) next
+    expect_identical(dimnames(x$cov_matrix), list(expected, expected))
+    expect_identical(rownames(x$cor_matrix), expected)
+    expect_identical(names(x$cov_fixed), expected)
+  }
+  skip_if(is.null(fit$cov_matrix) && is.null(out$cov_matrix), cov_skip)
+}
+
+test_that("a block omega with a diagonal kappa labels kappa after sigma", {
+  # Mixed block + diagonal omega packs its full lower triangle (6), then sigma,
+  # then the one kappa.
+  expect_iov_labels(block_omega_iov, c(
+    "TVCL", "TVV", "TVKA",
+    "ETA_CL,ETA_CL", "ETA_V,ETA_CL", "ETA_KA,ETA_CL",
+    "ETA_V,ETA_V", "ETA_KA,ETA_V", "ETA_KA,ETA_KA",
+    "PROP_ERR", "KAPPA_CL"
+  ))
+})
+
+test_that("a diagonal omega with a block kappa labels kappa column-major", {
+  expect_iov_labels(block_kappa_iov, c(
+    "TVCL", "TVV", "TVKA", "ETA_CL", "ETA_V", "ETA_KA", "PROP_ERR",
+    "KAPPA_CL,KAPPA_CL", "KAPPA_V,KAPPA_CL", "KAPPA_V,KAPPA_V"
+  ))
+})
+
+test_that("[mixture] per-class overrides are labelled with their class", {
+  # The overrides pack after kappa (none here), omega ones before sigma ones.
+  ex  <- ferx_example("warfarin")
+  mod <- tempfile(fileext = ".ferx")
+  writeLines(c(
+    "[parameters]",
+    "  theta TVCL1(0.1, 0.001, 10.0)",
+    "  theta TVCL2(0.3, 0.001, 10.0)",
+    "  theta TVV(8.0, 0.1, 500.0)",
+    "  theta TVKA(1.0, 0.01, 50.0)",
+    "  theta P1(0.5, 0.01, 0.99)",
+    "  omega ETA_CL ~ 0.05",
+    "  omega ETA_V ~ 0.02",
+    "  sigma PROP_ERR ~ 0.01 (sd)",
+    "[mixture]",
+    "  nsub = 2",
+    "  p(1) = P1",
+    "  omega(2) ETA_CL ~ 0.10",
+    "  sigma(2) PROP_ERR ~ 0.02 (sd)",
+    "[individual_parameters]",
+    "  CL = if (MIXNUM == 1) TVCL1 * exp(ETA_CL) else TVCL2 * exp(ETA_CL)",
+    "  V  = TVV * exp(ETA_V)",
+    "  KA = TVKA",
+    "[structural_model]",
+    "  pk one_cpt_oral(cl=CL, v=V, ka=KA)",
+    "[error_model]",
+    "  DV ~ proportional(PROP_ERR)"
+  ), mod)
+  fit <- suppressWarnings(ferx_fit(mod, ex$data, method = "foce", verbose = FALSE,
+                                   covariance = TRUE,
+                                   settings = list(maxiter = 30L)))
+  skip_if(is.null(fit$cov_matrix), cov_skip)
+  expected <- c("TVCL1", "TVCL2", "TVV", "TVKA", "P1", "ETA_CL", "ETA_V",
+                "PROP_ERR", "ETA_CL (class 2)", "PROP_ERR (class 2)")
+  expect_identical(dimnames(fit$cov_matrix), list(expected, expected))
 })

@@ -283,15 +283,22 @@ test_that("the bundled mbma_placebo fit (sigma FIX, weight = SE) is quiet, in fi
                     message = "[Nn]on-positive|held parameter")
   skip_if(is.null(fit$cov_matrix), "covariance step did not converge - skipping")
   # 22 thetas, ETA_E0, then ADD_ERR (FIX), then KAPPA_ARM: the packed order
-  # puts sigma before kappa.
-  expect_identical(which(fit$cov_fixed), 24L)
-  expect_identical(is.na(fit$cor_matrix), outer(1:25 == 24L, 1:25 == 24L, "|"))
+  # puts sigma before kappa. Before #437 the kappa segment was counted as omega,
+  # the labels came up one short, and the matrix carried no names at all.
+  labels <- c(names(fit$theta), "ETA_E0", "ADD_ERR", "KAPPA_ARM")
+  expect_length(labels, 25L)
+  expect_identical(dimnames(fit$cov_matrix), list(labels, labels))
+  expect_identical(dimnames(fit$cor_matrix), list(labels, labels))
+  expect_identical(which(fit$cov_fixed), c(ADD_ERR = 24L))
+  expect_identical(unname(is.na(fit$cor_matrix)),
+                   outer(1:25 == 24L, 1:25 == 24L, "|"))
   f <- tempfile(fileext = ".fitrx")
   on.exit(unlink(f), add = TRUE)
   ferx_save_fit(fit, f)
   expect_no_warning(fit2 <- ferx_load_fit(f), message = "[Nn]on-positive|held parameter")
-  expect_identical(fit2$cov_fixed, fit$cov_fixed)
-  expect_identical(fit2$cor_matrix, fit$cor_matrix)
+  # unname(): the reload does not restore cov_matrix's dimnames (#417).
+  expect_identical(unname(fit2$cov_fixed), unname(fit$cov_fixed))
+  expect_identical(unname(fit2$cor_matrix), unname(fit$cor_matrix))
 })
 test_that(".ferx_compute_cor_matrix returns NULL when no covariance matrix is present", {
   expect_null(.compute_cor_matrix(NULL))
