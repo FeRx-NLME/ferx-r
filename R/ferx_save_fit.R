@@ -239,6 +239,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   # IovWire
   "kappa_names", "kappa_fixed", "se_kappa", "shrinkage_kappa",
   "kappa_init_as_sd", "kappa_weights", "kappa_weight_typical",
+  "kappa_param_types",
   # MatrixWire, and the manifest
   "data", "entries",
   # R-only sections the engine ignores (`bayes`, `exclusions`): included so the
@@ -754,6 +755,13 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
     wire$kappa_weight_typical <- as.list(as.numeric(
       fit$kappa_weight_typical %||% rep(NA_real_, length(fit$kappa_weights))
     ))
+  }
+  # The scale of each kappa (ferx-core #1643), parallel to kappa_names. The
+  # engine declares it `#[serde(default)]`, so, like the weights, it is
+  # written only when the fit has it: a fit from before #1643 (or loaded from
+  # such a bundle) writes the bundle it always wrote.
+  if (length(fit$kappa_param_types) > 0L) {
+    wire$kappa_param_types <- as.list(unname(as.character(fit$kappa_param_types)))
   }
   wire
 }

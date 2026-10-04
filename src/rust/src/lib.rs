@@ -2402,6 +2402,7 @@ fn default_fit_result(
         model_name: model.name.clone(),
         ferx_version: String::new(),
         eta_param_info: Vec::new(),
+        kappa_param_types: Vec::new(),
         // `draw_asymptotic` reads this to draw a `logit_probability` theta on the
         // logit scale (ferx-core #1548). Left empty, the engine falls back to
         // log-normal draws that leave (0, 1) - the bug in ferx-r #373.
@@ -3211,19 +3212,23 @@ fn fit_result_to_list(
     };
 
     // Parameter transform metadata (added in ferx-core PR #54; empty vecs for
-    // older binaries that don't populate these fields).
-    let eta_param_types: Vec<String> = result.eta_param_info.iter().map(|info| {
-        match info.param_type {
-            ferx_core::types::EtaParamType::LogNormal        => "log_normal",
-            ferx_core::types::EtaParamType::Additive         => "additive",
-            ferx_core::types::EtaParamType::Logit            => "logit",
-            ferx_core::types::EtaParamType::LogitProbability => "logit_probability",
-            ferx_core::types::EtaParamType::Custom           => "custom",
-        }.to_string()
-    }).collect();
-    // Linked theta name for each ETA (empty string when not detected).
-    let eta_linked_theta: Vec<String> = result.eta_param_info.iter()
-        .map(|info| info.linked_theta.clone().unwrap_or_default())
+    // older binaries that don't populate these fields). `eta_param_info` is in
+    // [individual_parameters] statement order, so it is matched to
+    // `eta_names` by name (#438); both vectors come out parallel to
+    // `eta_names`, or empty when the engine classified nothing.
+    let info_names: Vec<String> = result.eta_param_info.iter().map(|i| i.eta_name.clone()).collect();
+    let info_types: Vec<String> = result.eta_param_info.iter()
+        .map(|i| eta_param_type_str(i.param_type).to_string())
+        .collect();
+    let info_linked: Vec<String> = result.eta_param_info.iter()
+        .map(|i| i.linked_theta.clone().unwrap_or_default())
+        .collect();
+    let (eta_param_types, eta_linked_theta) =
+        eta_info_by_name(&result.eta_names, &info_names, &info_types, &info_linked);
+    // Scale of each IOV kappa (ferx-core #1643), parallel to `kappa_names`;
+    // empty on a result that predates it.
+    let kappa_param_types: Vec<String> = result.kappa_param_types.iter()
+        .map(|t| eta_param_type_str(*t).to_string())
         .collect();
     let theta_transforms: Vec<String> = result.theta_transform.iter().map(|t| {
         match t {
@@ -3453,6 +3458,7 @@ fn fit_result_to_list(
         eta_log_transformed = eta_log_transformed,
         eta_param_types = eta_param_types,
         eta_linked_theta = eta_linked_theta,
+        kappa_param_types = kappa_param_types,
         eta_names = result.eta_names.clone(),
         theta_transforms = theta_transforms,
         // Resolved gradient methods reported by the engine. `gradient_method_inner`
@@ -3991,6 +3997,89 @@ fn ferx_rust_known_blocks() -> Vec<String> {
             .into_iter()
             .map(String::from)
             .collect())
+    })
+}
+
+/// The R spelling of an `EtaParamType`, as `eta_param_types`,
+/// `kappa_param_types` and the `.fitrx` wire use it.
+fn eta_param_type_str(t: ferx_core::types::EtaParamType) -> &'static str {
+    match t {
+        ferx_core::types::EtaParamType::LogNormal        => "log_normal",
+        ferx_core::types::EtaParamType::Additive         => "additive",
+        ferx_core::types::EtaParamType::Logit            => "logit",
+        ferx_core::types::EtaParamType::LogitProbability => "logit_probability",
+        ferx_core::types::EtaParamType::Custom           => "custom",
+    }
+}
+
+/// Each ETA's scale and linked theta, looked up **by name** in the engine's
+/// `eta_param_info` (given as three parallel vectors) (#438). That list is in
+/// [individual_parameters] statement order, not `eta_names` order: it skips an
+/// ETA no statement classifies and holds one entry per parameter an ETA
+/// enters. Entries that all agree give that type (that theta); a disagreement
+/// gives `"custom"` (no theta); no entry gives `"log_normal"` (no theta), the
+/// CV% every row printed before - the same rule as ferx-core's console. An
+/// empty list gives empty vectors, so R's own default applies unchanged.
+fn eta_info_by_name(
+    eta_names: &[String],
+    info_names: &[String],
+    info_types: &[String],
+    info_linked: &[String],
+) -> (Vec<String>, Vec<String>) {
+    if info_names.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+    eta_names
+        .iter()
+        .map(|name| {
+            let mut hits = (0..info_names.len()).filter(|&k| &info_names[k] == name);
+            let Some(first) = hits.next() else {
+                return ("log_normal".to_string(), String::new());
+            };
+            let (mut ty, mut linked) = (info_types[first].clone(), info_linked[first].clone());
+            for k in hits {
+                if info_types[k] != info_types[first] {
+                    ty = "custom".to_string();
+                }
+                if info_linked[k] != info_linked[first] {
+                    linked = String::new();
+                }
+            }
+            (ty, linked)
+        })
+        .unzip()
+}
+
+/// Map a `.fitrx` bundle's `eta_param_info` onto its ETAs by name.
+///
+/// `ferx_load_fit()` reads `eta_param_info` from the bundle, where ferx-core
+/// writes it in statement order; this applies the same by-name rule as a live
+/// fit (#438), so a loaded fit and a fresh one cannot disagree.
+///
+/// @param eta_names Character vector, the fit's ETA names.
+/// @param info_names,info_types,info_linked Parallel character vectors, one
+///   element per `eta_param_info` entry (`""` for no linked theta).
+/// @return List with `eta_param_types` and `eta_linked_theta`, parallel to
+///   `eta_names`, or both empty when `info_names` is.
+/// @export
+#[extendr]
+fn ferx_rust_eta_info_by_name(
+    eta_names: Vec<String>,
+    info_names: Vec<String>,
+    info_types: Vec<String>,
+    info_linked: Vec<String>,
+) -> List {
+    entry(move || {
+        if info_types.len() != info_names.len() || info_linked.len() != info_names.len() {
+            return Err(format!(
+                "eta_param_info vectors differ in length: {} names, {} types, {} linked thetas",
+                info_names.len(),
+                info_types.len(),
+                info_linked.len()
+            ));
+        }
+        let (types, linked) = eta_info_by_name(&eta_names, &info_names, &info_types, &info_linked);
+        Ok(list!(eta_param_types = types, eta_linked_theta = linked))
     })
 }
 
@@ -4538,6 +4627,7 @@ fn ferx_rust_sir(
             model_name: model.name.clone(),
             ferx_version: String::new(),
             eta_param_info: Vec::new(),
+            kappa_param_types: Vec::new(),
             theta_transform: Vec::new(),
             sigma_types: Vec::new(),
             cov_eigenvalues: None,
@@ -4969,6 +5059,7 @@ fn ferx_rust_covariance(
             model_name: model.name.clone(),
             ferx_version: String::new(),
             eta_param_info: Vec::new(),
+            kappa_param_types: Vec::new(),
             theta_transform: Vec::new(),
             sigma_types: Vec::new(),
             cov_eigenvalues: None,
@@ -9704,6 +9795,7 @@ extendr_module! {
     fn ferx_rust_autodiff_enabled;
     fn ferx_rust_test_panic;
     fn ferx_rust_known_blocks;
+    fn ferx_rust_eta_info_by_name;
     fn ferx_rust_classify_warnings;
     fn ferx_rust_validate_model;
     fn ferx_rust_model_data_path;

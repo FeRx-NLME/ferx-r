@@ -37,6 +37,38 @@
   list(kappa_weights = w, kappa_weight_typical = tv)
 }
 
+# The scale each kappa enters its parameter on (ferx-core #1643), named by
+# kappa_names. The engine keeps the vector parallel to kappa_names; a fit or a
+# bundle from before #1643 has none, and gets character(0), which every reader
+# takes as "unknown" and prints the log-normal CV% it always printed.
+.ferx_name_kappa_param_types <- function(types, kappa_names, n_kappa) {
+  types <- as.character(unlist(types, use.names = FALSE) %||% character())
+  if (n_kappa == 0L || length(types) != n_kappa) return(character())
+  if (length(kappa_names) == n_kappa) names(types) <- kappa_names
+  types
+}
+
+# The parenthetical of a kappa row in print.ferx_fit(): the variance read on
+# the scale the kappa enters (ferx-core #1643). Log-normal, or unknown (NA: a
+# fit from before #1643), keeps the exact CV% every row printed before. An
+# additive or logit kappa gets its SD; a weighted one's variance is the
+# unweighted gamma^2, so its SD is that of a weight-1 arm and says so (the
+# SD at the typical weight follows on the next line). Any other expression has
+# no scale to read on, and gets NULL. Labels match ferx-core's console.
+.ferx_kappa_variance_note <- function(type, var, weighted) {
+  at_w <- if (weighted) " at weight 1" else ""
+  sd <- sqrt(max(var, 0))
+  if (is.na(type) || type == "log_normal") {
+    sprintf("CV%% = %.1f", if (var > 0) sqrt(exp(var) - 1) * 100 else 0)
+  } else if (type == "additive") {
+    sprintf("SD = %.4f%s", sd, at_w)
+  } else if (type %in% c("logit", "logit_probability")) {
+    sprintf("SD = %.4f%s, logit scale", sd, at_w)
+  } else {
+    NULL
+  }
+}
+
 # Format the one-line weight annotation printed under a weighted kappa's
 # estimate. `var` is the *unweighted* gamma^2 the engine reports; the number a
 # reader needs next to it is the effective between-occasion SD at a typical
@@ -683,6 +715,9 @@
     result[c("kappa_weights", "kappa_weight_typical")] <-
       .ferx_name_kappa_weights(result$kappa_weights, result$kappa_weight_typical,
                                result$kappa_names, d_iov)
+    result$kappa_param_types <- .ferx_name_kappa_param_types(
+      result$kappa_param_types, result$kappa_names, d_iov
+    )
   } else {
     result$omega_iov <- NULL
     result$se_kappa <- NULL
@@ -692,6 +727,7 @@
     result$ebe_kappas <- NULL
     result$kappa_weights <- NULL
     result$kappa_weight_typical <- NULL
+    result$kappa_param_types <- NULL
   }
 
   # Reshape omega_param_corr into a square matrix using omega_dim to guard

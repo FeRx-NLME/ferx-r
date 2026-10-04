@@ -28,7 +28,9 @@
     pname    <- if (!is.null(fit$eta_names) && length(fit$eta_names) >= i && nzchar(fit$eta_names[i])) fit$eta_names[i] else sprintf("OMEGA(%d,%d)", i, i)
     se       <- .omega_se_at(fit$se_omega, n_eta, i, i)
     init_sd  <- !is.null(fit$omega_init_as_sd) && length(fit$omega_init_as_sd) >= i && isTRUE(fit$omega_init_as_sd[i])
-    rows[[length(rows) + 1L]] <- .ferx_est_row(pname, om[i, i], se, "variance", init_sd)
+    scale    <- if (length(fit$eta_param_types) >= i) fit$eta_param_types[[i]] else NA_character_
+    rows[[length(rows) + 1L]] <- .ferx_est_row(pname, om[i, i], se, "variance", init_sd,
+                                               scale = scale)
     blocks <- c(blocks, "omega")
   }
 
@@ -55,7 +57,11 @@
     for (i in seq_len(n_kap)) {
       se_idx  <- if (is_block_se) diag_se_idx(i) else i
       se      <- if (n_se >= se_idx) fit$se_kappa[se_idx] else NA_real_
-      kap_type <- if (!is.null(fit$kappa_param_types) && length(fit$kappa_param_types) >= i) fit$kappa_param_types[i] else "variance"
+      # The kappa's scale (ferx-core #1643) is its own column: `transform`
+      # stays "variance", since it picks how the variance's interval is
+      # formed, and a "logit" there would inv_logit() a variance. NA on a fit
+      # from before #1643.
+      scale    <- if (length(fit$kappa_param_types) >= i) fit$kappa_param_types[[i]] else NA_character_
       init_sd  <- !is.null(fit$kappa_init_as_sd) && length(fit$kappa_init_as_sd) >= i && isTRUE(fit$kappa_init_as_sd[i])
       # Sample-size-weighted IOV (ferx-core #1031): `estimate` is the
       # *unweighted* gamma^2 of `kappa_ik ~ N(0, gamma^2 / W_ik)`. Without the
@@ -69,8 +75,8 @@
       else
         NA_character_
       if (!isTRUE(nzchar(wt))) wt <- NA_character_
-      rows[[length(rows) + 1L]] <- .ferx_est_row(kap_names[i], m_iov[i, i], se, kap_type, init_sd,
-                                                 weight = wt)
+      rows[[length(rows) + 1L]] <- .ferx_est_row(kap_names[i], m_iov[i, i], se, "variance", init_sd,
+                                                 weight = wt, scale = scale)
       blocks <- c(blocks, "kappa")
     }
   }
@@ -105,7 +111,7 @@
 }
 
 .ferx_est_row <- function(param, estimate, se, transform = "identity", init_as_sd = FALSE,
-                          weight = NA_character_) {
+                          weight = NA_character_, scale = NA_character_) {
   rse_pct  <- if (!is.na(se) && abs(estimate) > 1e-12) abs(se / estimate) * 100 else NA_real_
 
   # Asymmetric CI and natural-scale back-transform per theta type
@@ -175,5 +181,6 @@
              upper_95_natural = upper_95_natural,
              init_as_sd       = init_as_sd,
              weight           = weight,
+             scale            = scale,
              stringsAsFactors = FALSE)
 }

@@ -57,9 +57,10 @@ data.frame(
 #
 # KAPPA_ARM uses weight = NARM, so its estimate is the unweighted gamma^2 (the
 # generator used 100): an arm of NARM patients has between-arm SD
-# sqrt(gamma^2 / NARM). Read it as a variance. The CV% that print(fit) shows
-# beside it assumes a log-normal kappa and is wrong for this additive one;
-# ignore it until FeRx-NLME/ferx-core#1643 is fixed.
+# sqrt(gamma^2 / NARM). Read it as a variance. KAPPA_ARM is additive, so
+# print(fit) shows its SD, sqrt(gamma^2), "at weight 1" - the SD of a
+# one-patient arm - and not a CV%.
+fit$kappa_param_types
 gamma2 <- fit$omega_iov[1, 1]
 gamma2
 # The arm SD at the typical (median) arm size, as print(fit) shows it.

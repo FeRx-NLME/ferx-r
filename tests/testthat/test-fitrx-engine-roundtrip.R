@@ -107,6 +107,9 @@ test_that("a one-kappa IOV fit writes the nested arrays as arrays", {
     expect_length(row, 1L)
   }
   expect_type(wire$iov$omega_iov$data, "list")
+  # ferx-core #1643: `Vec<EtaParamType>`, one per kappa - an array even here.
+  expect_type(wire$iov$kappa_param_types, "list")
+  expect_identical(wire$iov$kappa_param_types, list("log_normal"))
 
   ferx_bin <- Sys.which("ferx")
   if (nzchar(ferx_bin)) {
@@ -140,6 +143,31 @@ test_that("the R -> R round trip still reads the bundle", {
 # `from_fit` is read by the engine's own `.fitrx` loader while the model file
 # is parsed, so this fails on an unreadable bundle without needing the CLI -
 # it runs wherever the package's tests run.
+
+test_that("[priors] from_fit reads a one-kappa IOV bundle, kappa_param_types included", {
+  # The iov wire's `kappa_param_types` (ferx-core #1643) is read by the
+  # engine's loader; a single kappa is the length-1 case `auto_unbox` would
+  # turn into a scalar the engine refuses.
+  ex  <- ferx_example("warfarin_iov")
+  fit <- ferx_fit(ex$model, ex$data, method = "focei", verbose = FALSE,
+                  covariance = TRUE, settings = list(maxiter = 30L))
+  skip_if(is.null(fit$cov_matrix), "covariance step did not run - nothing to import")
+  expect_identical(fit$kappa_param_types, c(KAPPA_CL = "log_normal"))
+  bundle <- withr::local_tempfile(fileext = ".fitrx")
+  ferx_save_fit(fit, bundle)
+  model <- withr::local_tempfile(fileext = ".ferx")
+  writeLines(
+    c(readLines(ex$model), "",
+      "[priors]",
+      paste0("  from_fit = ", fitrx_block_path(bundle))),
+    model
+  )
+  res <- ferx_model_validate(model, ex$data)
+  expect_true(
+    isTRUE(res$ok),
+    info = paste(utils::capture.output(print(res$diagnostics)), collapse = "\n")
+  )
+})
 
 test_that("[priors] from_fit reads a bundle written by ferx_save_fit()", {
   ex     <- ferx_example("warfarin")
