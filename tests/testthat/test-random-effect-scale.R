@@ -129,6 +129,22 @@ test_that("a custom kappa prints no parenthetical at all", {
   expect_identical(row, "  KAPPA_V = 0.040000  SE = 0.010000  Shrinkage = 10.0%")
 })
 
+test_that("print labels an additive kappa's SD 'at weight 1' only when it is weighted", {
+  base <- list(
+    omega = matrix(0.10, 1, 1),
+    omega_iov = matrix(0.04, 1, 1), kappa_names = "KAPPA_V",
+    se_kappa = 0.01, shrinkage_kappa = 0.1, kappa_param_types = "additive"
+  )
+  plain <- do.call(make_fake_fit, base)
+  expect_identical(printed_row(plain, "^  KAPPA_V = "),
+                   "  KAPPA_V = 0.040000  (SD = 0.2000)  SE = 0.010000  Shrinkage = 10.0%")
+  weighted <- do.call(make_fake_fit, c(base, list(
+    kappa_weights = c(KAPPA_V = "NARM"), kappa_weight_typical = c(KAPPA_V = 4)
+  )))
+  expect_identical(printed_row(weighted, "^  KAPPA_V = "),
+                   "  KAPPA_V = 0.040000  (SD = 0.2000 at weight 1)  SE = 0.010000  Shrinkage = 10.0%")
+})
+
 # -- ETA rows by name (#438) --------------------------------------------------
 
 test_that("eta types follow the ETA's name, not eta_param_info's position", {
