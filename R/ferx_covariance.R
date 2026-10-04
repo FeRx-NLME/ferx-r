@@ -245,42 +245,14 @@ ferx_covariance <- function(fit,
   }
 
   theta_names <- names(fit$theta)
-  n_theta <- length(fit$theta)
-  n_sigma <- length(fit$sigma)
-  sig_nms <- if (!is.null(fit$sigma_names) && length(fit$sigma_names) == n_sigma) {
-    fit$sigma_names
-  } else {
-    names(fit$sigma)
-  }
-  eta_nms <- if (!is.null(fit$eta_names) && length(fit$eta_names) == n_eta) {
-    fit$eta_names
-  } else {
-    NULL
-  }
+  n_rho <- length(.ferx_residual_corr_labels(fit))
 
-  # The engine packs the `block_sigma` correlations last, after sigma, so their
-  # coordinates come out of the count before the rest can be read as omega -
-  # otherwise the sigma rows are labelled at the wrong offset.
-  rho_nms <- .ferx_residual_corr_labels(fit)
-  n_rho <- length(rho_nms)
-
+  # Row / column names come from the glue, in the engine's packing order
+  # (#437), the same labels ferx_fit() puts on its matrix.
   d <- raw$cov_matrix_dim %||% 0L
   if (!is.null(raw$cov_matrix) && length(raw$cov_matrix) > 0L && d > 0L) {
     m <- matrix(raw$cov_matrix, nrow = d, ncol = d, byrow = TRUE)
-    n_omega_packed <- d - n_theta - n_sigma - n_rho
-    omega_names <- if (n_omega_packed == n_eta) {
-      if (!is.null(eta_nms)) eta_nms else paste0("OMEGA(", seq_len(n_eta), ",", seq_len(n_eta), ")")
-    } else {
-      # Block lower-triangle: L(i,j) for i >= j, column-major (#367).
-      .ferx_omega_block_labels(n_eta, eta_nms)
-    }
-    pnames <- c(
-      theta_names,
-      if (n_omega_packed > 0L) omega_names else character(0L),
-      if (n_sigma > 0L) (if (!is.null(sig_nms)) sig_nms else paste0("SIGMA(", seq_len(n_sigma), ")")) else character(0L),
-      rho_nms
-    )
-    if (length(pnames) == d) rownames(m) <- colnames(m) <- pnames
+    m <- .ferx_cov_dimnames(m, raw$cov_labels)
     fit$cov_matrix <- m
   } else {
     fit$cov_matrix <- NULL

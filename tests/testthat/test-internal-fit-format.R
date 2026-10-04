@@ -598,40 +598,23 @@ test_that(".ferx_iov_labels() leaves an unweighted model's kappa names bare", {
   expect_equal(.ferx_iov_labels(list(iov = NULL)), character(0))
 })
 
-# -- Block-omega labels for cov_matrix (#367) ---------------------------------
+# -- cov_matrix dimnames from the glue's labels (#437) -------------------------
 #
-# The engine packs a block omega's rows column-major; labelling them row-major
-# put `ETA_V,ETA_V` on the row holding the held (KA,CL) covariance, so an
-# estimated variance read as exactly zero.
+# The labels themselves are the glue's (one per packed coordinate, walked over
+# the engine's own template); the end-to-end tests in test-ferx_covariance.R pin
+# their order. Here: a vector that covers the matrix names it, one that does
+# not leaves it unnamed rather than misnamed.
 
-test_that(".ferx_omega_block_labels() walks the lower triangle column-major", {
-  expect_equal(
-    .ferx_omega_block_labels(3L, c("ETA_CL", "ETA_V", "ETA_KA")),
-    c("ETA_CL,ETA_CL", "ETA_V,ETA_CL", "ETA_KA,ETA_CL",
-      "ETA_V,ETA_V",   "ETA_KA,ETA_V",
-      "ETA_KA,ETA_KA")
-  )
+test_that(".ferx_cov_dimnames() names rows and columns from a covering vector", {
+  m <- .ferx_cov_dimnames(diag(3), list("TVCL", "ETA_CL", "KAPPA_CL"))
+  expect_identical(dimnames(m), list(c("TVCL", "ETA_CL", "KAPPA_CL"),
+                                     c("TVCL", "ETA_CL", "KAPPA_CL")))
 })
 
-test_that(".ferx_omega_block_labels() indexes the same slots as .omega_se_at()", {
-  n <- 4L
-  nms <- .ferx_omega_block_labels(n)
-  # Position k of the packed vector must be the element `.omega_se_at()` reads
-  # back for the coordinates that label spells out - that equivalence is the
-  # whole contract between the labels and `se_omega`.
-  se <- seq_along(nms)
-  for (k in seq_along(nms)) {
-    ij <- as.integer(regmatches(nms[k], gregexpr("[0-9]+", nms[k]))[[1]])
-    expect_identical(.omega_se_at(se, n, ij[1], ij[2]), se[k])
-  }
-})
-
-test_that(".ferx_omega_block_labels() falls back to OMEGA(i,j) without names", {
-  expect_equal(
-    .ferx_omega_block_labels(2L),
-    c("OMEGA(1,1)", "OMEGA(2,1)", "OMEGA(2,2)")
-  )
-  expect_equal(.ferx_omega_block_labels(0L), character(0))
+test_that(".ferx_cov_dimnames() leaves the matrix unnamed when the labels miss it", {
+  expect_null(dimnames(.ferx_cov_dimnames(diag(3), c("TVCL", "ETA_CL"))))
+  expect_null(dimnames(.ferx_cov_dimnames(diag(3), character(0))))
+  expect_null(dimnames(.ferx_cov_dimnames(diag(3), NULL)))
 })
 
 # -- [output] columns the fit did not deliver (#367) --------------------------
