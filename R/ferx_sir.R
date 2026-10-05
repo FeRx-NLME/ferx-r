@@ -12,6 +12,13 @@
 #' `sir_keep_samples = TRUE`, `sir_resamples` / `sir_resamples_n` /
 #' `sir_resamples_dim`) populated.
 #'
+#' The fit is rebuilt at its fitted estimates, including the IOV (kappa)
+#' covariance `fit$omega_iov`, under the inner loop of its last estimation
+#' method (FOCE or FOCEI). With the same `sir_seed` and sample sizes the result
+#' is the one `ferx_fit(..., sir = TRUE)` reports. The SIR proposal's degrees
+#' of freedom (`sir_df`) and the inner-loop settings take their defaults,
+#' whatever the fit used.
+#'
 #' ## Integrity check
 #'
 #' `ferx_fit()` records the model and data file paths plus SHA-256 hashes
@@ -248,7 +255,9 @@ ferx_sir <- function(fit,
     data_hash = data_hash_arg,
     ofv = as.numeric(fit$ofv),
     ofv_prior = .ferx_ofv_prior(fit),
-    interaction = isTRUE(fit$interaction),
+    # `fit$interaction` is not plumbed to R, so reading it gave FALSE on every
+    # fit and a FOCEI fit was resampled under the FOCE inner loop.
+    interaction = .ferx_fit_interaction(fit),
     theta = as.numeric(fit$theta),
     omega_flat = omega_flat,
     omega_dim = nrow(fit$omega),

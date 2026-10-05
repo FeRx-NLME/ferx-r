@@ -60,6 +60,13 @@ warm-starts for the inner loop. The returned fit is the input with
 \code{sir_ess}, \code{sir_ci_theta}, \code{sir_ci_omega}, \code{sir_ci_sigma} (and, when
 \code{sir_keep_samples = TRUE}, \code{sir_resamples} / \code{sir_resamples_n} /
 \code{sir_resamples_dim}) populated.
+
+The fit is rebuilt at its fitted estimates, including the IOV (kappa)
+covariance \code{fit$omega_iov}, under the inner loop of its last estimation
+method (FOCE or FOCEI). With the same \code{sir_seed} and sample sizes the result
+is the one \code{ferx_fit(..., sir = TRUE)} reports. The SIR proposal's degrees
+of freedom (\code{sir_df}) and the inner-loop settings take their defaults,
+whatever the fit used.
 \subsection{Integrity check}{
 
 \code{ferx_fit()} records the model and data file paths plus SHA-256 hashes

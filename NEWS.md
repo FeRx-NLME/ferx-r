@@ -335,6 +335,22 @@
 
 ## Bug fixes
 
+- **`ferx_sir()` resamples an IOV fit around its fitted kappa, and a FOCEI
+  fit under the FOCEI inner loop**
+  ([#465](https://github.com/FeRx-NLME/ferx-r/issues/465)). Standalone SIR
+  on a model with a `kappa` (every MBMA fit) silently rebuilt the fit at the
+  model file's *initial* kappa and resampled around the wrong centre: on the
+  MBMA example without its level block it reported ESS 1.8 against the
+  in-fit SIR's 212, with intervals to match. On every FOCEI fit it also ran
+  the FOCE inner loop, because it read a `fit$interaction` field the fit
+  never carries. `ferx_sir(fit, ...)` now reproduces `ferx_fit(sir = TRUE)`
+  exactly for the same seed and sample sizes, so **standalone SIR intervals
+  change on every IOV fit and every FOCEI fit**; a FOCE fit without IOV is
+  unchanged. A kappa fit whose `fit$omega_iov` has been removed is now
+  refused rather than resampled around the initial value. `ferx_sir()` still
+  runs with the default `sir_df` and inner-loop settings, whatever the fit
+  used.
+
 - **`print()` shows `FIXED` for the standard error of a FIX parameter, and
   `fit$estimates` gives it `NA`**
   ([#451](https://github.com/FeRx-NLME/ferx-r/issues/451)). The engine

@@ -318,11 +318,11 @@ test_that("ferx_sir leaves a healthy fit free of sir warnings", {
 sir_iov_settings <- list(maxiter = 30L, sir_samples = 200L,
                          sir_resamples = 100L, sir_seed = 7L)
 
-sir_fit_with_infit_sir <- function(example, edit = identity) {
+sir_fit_with_infit_sir <- function(example, edit = identity, method = "foce") {
   ex  <- ferx_example(example)
   mod <- tempfile(fileext = ".ferx")
   writeLines(edit(readLines(ex$model)), mod)
-  suppressWarnings(ferx_fit(mod, ex$data, method = "foce", verbose = FALSE,
+  suppressWarnings(ferx_fit(mod, ex$data, method = method, verbose = FALSE,
                             covariance = TRUE, sir = TRUE,
                             settings = sir_iov_settings))
 }
@@ -393,6 +393,19 @@ test_that("ferx_sir on a fit without IOV still reproduces the in-fit SIR (#465)"
   fit <- sir_fit_with_infit_sir("warfarin")
   skip_if(is.null(fit$cov_matrix) || is.null(fit$sir_ess), sir_cov_skip)
   expect_null(fit$omega_iov)
+
+  expect_same_sir(standalone_sir(fit), fit)
+})
+
+# Found by the #465 skeleton audit: `ferx_sir()` read `fit$interaction`, a field
+# the R fit list never carries, so every FOCEI fit was resampled under the FOCE
+# inner loop (warfarin, 200/100, seed 7: ESS 61.27 against the in-fit 78.37).
+# `.ferx_fit_interaction()` derives it from the method chain, as
+# `ferx_covariance()` already did.
+test_that("ferx_sir on a FOCEI fit resamples under the FOCEI inner loop", {
+  fit <- sir_fit_with_infit_sir("warfarin", method = "focei")
+  skip_if(is.null(fit$cov_matrix) || is.null(fit$sir_ess), sir_cov_skip)
+  expect_true(.ferx_fit_interaction(fit))
 
   expect_same_sir(standalone_sir(fit), fit)
 })
