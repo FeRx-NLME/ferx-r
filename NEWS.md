@@ -191,9 +191,11 @@
     `CL = TVCL * exp(ECL)`) takes the scale of the parameter it ends up in. A
     reassigned parameter is labelled by its last assignment:
     `CL = TVCL + ETA_CL` followed by `CL = CL * TVV` is now custom (no SD
-    row), as the one-line `CL = (TVCL + ETA_CL) * TVV` always was. Kappas
-    follow the same rules. These are labels only: no estimate or OFV moves,
-    and no other bundled example's labels change. Two side effects:
+    row), as the one-line `CL = (TVCL + ETA_CL) * TVV` always was. An ETA
+    that shares an `exp()` with a second ETA (`exp(ETA_CL + ETA_V)`) now gets
+    a row where it had none. Kappas follow the same rules. No other bundled
+    example's labels change. Apart from two side effects, these are labels
+    only and no estimate or OFV moves:
     `iiv_on_ruv = ETA_RUV` is now refused when `ETA_RUV` also sits in a
     structural `exp(ETA_CL + ETA_RUV)`, where it used to fit with the ETA
     doing two jobs; and a model too large for the compiled
@@ -226,8 +228,8 @@
     A fit made before this still predicts and simulates on its own saved
     layout. The bundled `mbma_placebo` example is still accepted and fits
     to the same OFV and estimates.
-  - **`ferx_covariance()` and `ferx_sir()` re-read the data the way the fit
-    did** ([#1680](https://github.com/FeRx-NLME/ferx-core/pull/1680)).
+  - **`ferx_covariance()` and `ferx_sir()` apply the model's
+    `[data_selection]`** ([#1680](https://github.com/FeRx-NLME/ferx-core/pull/1680)).
     - For a model with a `[data_selection]` block in the model file, they now
       apply it. They used to compute on the unfiltered data: for the bundled
       `warfarin_data_selection` model, the standalone `TVCL` SE moves from
@@ -241,7 +243,7 @@
       Use `covariance = TRUE` / `sir = TRUE` in `ferx_fit()` for such a fit.
     - An `ignore =` filter passed to `ferx_fit()` that drops records but no
       whole subject is still not applied by the standalone steps; this is
-      unchanged.
+      unchanged ([#462](https://github.com/FeRx-NLME/ferx-r/issues/462)).
   - ferx-core #1665, #1668, #1681, #1690 and #1692 change nothing an R user
     sees: a KAPPA section, kappa correlations and kappa shrinkage in the
     engine's own text summary, the `at weight 1` label on a weighted
