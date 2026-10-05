@@ -622,6 +622,9 @@ test_that(".fitrx_write_predictions_csv handles character sdtab$ID", {
       sigma = c(prop = 0.05),
       sigma_names = "prop",
       sigma_types = "proportional",
+      # The FIX flags a current fit carries; without them ferx_save_fit()
+      # warns that they are unknown (#452), which is not what this tests.
+      theta_fixed = FALSE, omega_fixed = FALSE, sigma_fixed = FALSE,
       ofv = 0, aic = 2, bic = 4,
       n_obs = 3L, n_subjects = 2L, n_parameters = 1L, n_iterations = 1L,
       method = "FOCEI", method_chain = "FOCEI",

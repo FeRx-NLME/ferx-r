@@ -1074,11 +1074,17 @@ an estimated parameter gives \code{NA} too, with a warning naming it.
 \code{NULL} when \code{cov_matrix} is \code{NULL}.}
 \item{estimates}{Tidy data frame of all estimated parameters (theta,
 omega diagonal, sigma, and - for IOV models - kappa diagonal), with
-columns \code{param}, \code{transform}, \code{estimate}, \code{se},
-\code{rse_pct}, \code{lower_95}, \code{upper_95},
+columns \code{param}, \code{transform}, \code{estimate}, \code{fixed},
+\code{se}, \code{rse_pct}, \code{lower_95}, \code{upper_95},
 \code{estimate_natural}, \code{lower_95_natural},
 \code{upper_95_natural}, \code{init_as_sd}, \code{weight},
-\code{scale}. \code{scale} is the scale an omega or kappa row's random
+\code{scale}. \code{fixed} is \code{TRUE} for a parameter the fit held
+(from \code{theta_fixed} / \code{omega_fixed} / \code{sigma_fixed} /
+\code{kappa_fixed}); its \code{se}, \code{rse_pct} and intervals are
+\code{NA}, since a held parameter has no standard error, and
+\code{print()} shows its SE as \code{FIXED}. A fit without those flags
+(saved before they existed) has \code{fixed = FALSE} throughout.
+\code{scale} is the scale an omega or kappa row's random
 effect enters on (see \code{eta_param_types} and
 \code{kappa_param_types}), \code{NA} on theta and sigma rows and on a
 kappa row with no recorded scale. \code{transform} stays
@@ -1106,8 +1112,8 @@ works; a name declared in more than one block is qualified by that block
 (\code{"CL.theta"} / \code{"CL.omega"}), so no bare name silently
 addresses one of a colliding pair. Use \code{\link{ferx_coef}} /
 \code{\link{ferx_se}} to have an unknown or ambiguous name error rather
-than return \code{NA}. A parameter declared \code{FIX} carries an exact
-\code{0} in \code{se} and \code{rse_pct}, not \code{NA}.}
+than return \code{NA}. A parameter declared \code{FIX} carries
+\code{NA} in \code{se} and \code{rse_pct}, with \code{fixed = TRUE}.}
 \item{eta_cov}{Data frame of Pearson correlations between each ETA and
 each constant-per-subject numeric covariate in the dataset, with
 columns \code{eta}, \code{covariate}, \code{r}, \code{p_val},

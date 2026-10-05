@@ -2,6 +2,13 @@
 
 ## Breaking changes
 
+- **`ferx_se()` returns `NA` for a FIX parameter, not `0`**
+  ([#451](https://github.com/FeRx-NLME/ferx-r/issues/451)). A held parameter
+  has no standard error. `fit$estimates$fixed` says which parameters were
+  held. The "no standard errors" warning now fires only when every requested
+  *free* parameter lacks one. Code that tested `ferx_se(fit) == 0` to find
+  fixed parameters should read `fit$estimates$fixed` instead.
+
 - **ferx now builds against ferx-core `9e42d5af`**, up from the `v0.4.0`
   release (`2a6076af`). These engine changes reach every fit, prediction
   and simulation entry point with no change to the package's own code:
@@ -252,6 +259,32 @@
   MBMA data is licensed CC BY-NC.
 
 ## Bug fixes
+
+- **`print()` shows `FIXED` for the standard error of a FIX parameter, and
+  `fit$estimates` gives it `NA`**
+  ([#451](https://github.com/FeRx-NLME/ferx-r/issues/451)). The engine
+  reports SE 0 for a parameter it held, so a fixed theta printed `SE 0` and
+  `%RSE 0.0`, and a fixed omega, sigma or kappa printed `SE = 0.000000`, as if
+  it were perfectly determined. Every MBMA fit showed this on its
+  `sigma ... FIX` (`weight = SE`). The SE of a fixed theta, omega (diagonal
+  and the off-diagonals of a fixed block), sigma or kappa now prints as
+  `FIXED`, with or without a covariance step. `fit$estimates` has a new
+  `fixed` column, and a fixed row's `se`, `rse_pct` and intervals are `NA`.
+  The decision comes from the fit's `theta_fixed` / `omega_fixed` /
+  `sigma_fixed` / `kappa_fixed` flags, never from the SE itself: a free
+  parameter whose SE is 0 still prints 0. A fit without those flags (from
+  ferx 0.4.0) prints as before. `ferx_se()` follows the table (see Breaking
+  changes).
+
+- **`ferx_save_fit()` warns when a fit carries no FIX flags**
+  ([#452](https://github.com/FeRx-NLME/ferx-r/issues/452)). A fit made by
+  ferx 0.4.0 and kept with `saveRDS()` has no `*_fixed` vectors, and the
+  bundle recorded each of its parameters as estimated, without a word. The
+  bundle still has to record something, but `ferx_save_fit()` now names the
+  classes whose flags are unknown, and says to refit. The flags are not
+  recovered from the model text: no R-reachable parser returns them for
+  omega, sigma or kappa, and a parser's theta flags miss the thetas the
+  engine fixes because they do not affect the objective.
 
 - **`ferx_save_fit()` keeps the FIX flags of a fit made in this session**
   ([#436](https://github.com/FeRx-NLME/ferx-r/issues/436)). A fresh fit
