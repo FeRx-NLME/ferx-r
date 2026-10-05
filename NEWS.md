@@ -9,7 +9,7 @@
   *free* parameter lacks one. Code that tested `ferx_se(fit) == 0` to find
   fixed parameters should read `fit$estimates$fixed` instead.
 
-- **ferx now builds against ferx-core `9e42d5af`**, up from the `v0.4.0`
+- **ferx now builds against ferx-core `4263f7d0`**, up from the `v0.4.0`
   release (`2a6076af`). These engine changes reach every fit, prediction
   and simulation entry point with no change to the package's own code:
 
@@ -178,9 +178,76 @@
     NONMEM 7.5.1 at its final estimates to 2e-5 in OFV. Separately, an ODE
     model with no theta and no eta is now labelled as using finite
     differences, which it always did.
-  - ferx-core #1665 and #1668 (a KAPPA section in the engine's text summary;
-    `FitResult` carrying the fit's data bindings) change nothing an R user
-    sees.
+  - **An ETA is labelled by where it sits, so more ETA rows print an SD**
+    ([#1669](https://github.com/FeRx-NLME/ferx-core/pull/1669),
+    [#1687](https://github.com/FeRx-NLME/ferx-core/pull/1687)). An ETA in a
+    sum with more than one other term, such as
+    `BASE = TVE0 + PLACEBO + ETA_E0 + KAPPA_ARM` or
+    `E0 = TVE0 + B_FLARE * FLARE + ETA_E0`, is now additive: `print()` shows
+    its SD where it showed `CV% = N/A`, and `fit$eta_param_types` reads
+    `"additive"` instead of `"custom"`. In the bundled `mbma_placebo`
+    example, `ETA_E0` now reads `[additive] ... SD = 2.1940`. An ETA reached
+    through an intermediate variable (`ECL = ETA_CL`,
+    `CL = TVCL * exp(ECL)`) takes the scale of the parameter it ends up in. A
+    reassigned parameter is labelled by its last assignment:
+    `CL = TVCL + ETA_CL` followed by `CL = CL * TVV` is now custom (no SD
+    row), as the one-line `CL = (TVCL + ETA_CL) * TVV` always was. Kappas
+    follow the same rules. These are labels only: no estimate or OFV moves,
+    and no other bundled example's labels change. Two side effects:
+    `iiv_on_ruv = ETA_RUV` is now refused when `ETA_RUV` also sits in a
+    structural `exp(ETA_CL + ETA_RUV)`, where it used to fit with the ETA
+    doing two jobs; and a model too large for the compiled
+    parameter program (more than 24 thetas and ETAs) whose ETA is reached
+    through an intermediate, or shares an `exp()` with another ETA, now fits
+    with finite-difference gradients instead of a wrong closed-form one, so
+    such fits can move. Parsing a model with deep chains of intermediate
+    variables is also much faster.
+  - **A level block that absorbs a random effect is refused, and
+    `contrast = auto` counts every random effect that reaches the
+    prediction** ([#1675](https://github.com/FeRx-NLME/ferx-core/pull/1675)).
+    - A one-column block whose levels each belong to one subject, such as
+      `theta PLACEBO[STUDY]` with one subject per study next to
+      `E0 = TVE0 + PLACEBO + ETA_E0`, makes each level the same quantity as
+      that subject's ETA. `ferx_fit()` used to drive the ETA's omega to 0
+      with no warning naming the cause; it now stops with an error that
+      names the expression and advises removing the block or the ETA.
+    - A block that takes a level at every observation, such as
+      `PLACEBO[STUDY, TIME]` with one subject per study, can reproduce any
+      per-subject effect, so it now counts an ETA that reaches the
+      prediction through the compartments too (an ETA on `V` or `CL` read as
+      `central / V`). For such a model `contrast = auto` now resolves to
+      `sum_to_zero_within`, which estimates fewer thetas, so the fit moves;
+      an explicit `sum_to_zero`, `ref` or `none` is refused.
+    - On a block whose last column holds several observation times
+      (`[STUDY, VISIT]`), an ETA that reaches the prediction only through a
+      time-varying term (`EMAX` in `EMAX * TIME / (TIME + ET50)`) no longer
+      counts, so a global contrast that used to be refused is accepted.
+
+    A fit made before this still predicts and simulates on its own saved
+    layout. The bundled `mbma_placebo` example is still accepted and fits
+    to the same OFV and estimates.
+  - **`ferx_covariance()` and `ferx_sir()` re-read the data the way the fit
+    did** ([#1680](https://github.com/FeRx-NLME/ferx-core/pull/1680)).
+    - For a model with a `[data_selection]` block in the model file, they now
+      apply it. They used to compute on the unfiltered data: for the bundled
+      `warfarin_data_selection` model, the standalone `TVCL` SE moves from
+      0.006676 to 0.006709, next to 0.006710 from the fit's own covariance
+      step, and the SIR intervals move.
+    - After `ferx_fit(ignore_ids = ...)`, they now stop with an error that
+      the data has more subjects than the fit. Before, `ferx_covariance()`
+      silently returned standard errors computed on every subject (0.00767
+      instead of 0.00895 for `TVCL` on `warfarin` with 3 of 10 subjects
+      dropped), and `ferx_sir()` failed with an index-out-of-bounds error.
+      Use `covariance = TRUE` / `sir = TRUE` in `ferx_fit()` for such a fit.
+    - An `ignore =` filter passed to `ferx_fit()` that drops records but no
+      whole subject is still not applied by the standalone steps; this is
+      unchanged.
+  - ferx-core #1665, #1668, #1681, #1690 and #1692 change nothing an R user
+    sees: a KAPPA section, kappa correlations and kappa shrinkage in the
+    engine's own text summary, the `at weight 1` label on a weighted
+    log-normal kappa's CV% in the engine console (`print()` builds its own
+    rows), `FitResult` carrying the fit's data bindings, and documentation
+    and CI.
 
 ## New features
 

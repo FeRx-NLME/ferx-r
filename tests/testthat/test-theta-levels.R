@@ -6,7 +6,9 @@
 # the fit's layout (`fit$theta_levels`), so a theta is never read at a position
 # the fit did not give it. The fixtures are ferx-core's own
 # (tests/theta_level_blocks.rs): two studies x TIME {1, 4, 12}, one subject per
-# study, plus a PLA_IDX column holding the same design in the counted form.
+# study, plus a PLA_IDX column holding the same design in the counted form. As
+# in core since #1675, the default random effect sits on a parameter `y` never
+# reads (see tl_model()).
 # The fits stop after two outer iterations: the assertions are about binding,
 # not about where the optimizer ends up.
 
@@ -45,9 +47,18 @@ tl_fit_options <- "
 
 # A one-compartment IV model whose clearance reads `cl`, with the theta lines
 # `thetas` and the structural block `structure` (analytical by default).
+#
+# By default the random effect sits on `Z`, a parameter `y` never reads, as in
+# ferx-core's fixture since #1675: with one subject per study the [STUDY, TIME]
+# block takes a level at every observation, so an eta that reached `y` would be
+# absorbed by it - `contrast = auto` then resolves to sum_to_zero_within and an
+# explicit none / sum_to_zero / ref is refused. `Z` is reported in [derived],
+# which does not reach `y`, so the unused-parameter check stays quiet. Pass
+# `z = NULL` to drop both.
 tl_model <- function(thetas, cl,
                      structure = "[structural_model]\n  pk one_cpt_iv(cl=CL, v=V)\n",
-                     eta = "  omega ETA_V ~ 0.04", v = "TVV * exp(ETA_V)") {
+                     eta = "  omega ETA_V ~ 0.04", v = "TVV",
+                     z = "TVV * exp(ETA_V)") {
   paste0(
     "[parameters]\n", thetas, "\n",
     "  theta TVV(10.0, 0.1, 500.0)\n",
@@ -55,8 +66,10 @@ tl_model <- function(thetas, cl,
     "  sigma PROP_ERR ~ 0.05\n\n",
     "[individual_parameters]\n",
     "  CL = ", cl, "\n",
-    "  V  = ", v, "\n\n",
+    "  V  = ", v, "\n",
+    if (!is.null(z)) paste0("  Z  = ", z, "\n"), "\n",
     structure, "\n",
+    if (!is.null(z)) "[derived]\n  Z_OUT = Z\n\n",
     "[error_model]\n  DV ~ proportional(PROP_ERR)\n",
     tl_fit_options
   )
@@ -147,7 +160,7 @@ test_that("T2: contrast = none fits exactly like the counted form", {
   f_cnt <- tl_fit(counted, data)
   expect_identical(f_col$theta_levels$contrast, rep("none", 6L))
   expect_false(anyNA(f_col$theta_levels$theta_name))
-  # Measured bit-identical (OFV 24.578051826322419 for both, theta max abs
+  # Measured bit-identical (OFV -1.792364950549102 for both, theta max abs
   # difference 0): the same records read the same theta through the same
   # gather. The tolerance only absorbs a platform's floating-point noise.
   expect_equal(f_col$ofv, f_cnt$ofv, tolerance = 1e-10)
@@ -298,7 +311,7 @@ tl_nested_model <- function() {
   tl_write(tl_model(
     "  theta TVCL(2.0, 0.001, 10.0)\n  theta PLACEBO[STUDY, TIME](0.0, -10.0, 10.0)",
     "TVCL * exp(ETA_CL) + PLACEBO",
-    eta = "  omega ETA_CL ~ 0.09", v = "TVV"
+    eta = "  omega ETA_CL ~ 0.09", v = "TVV", z = NULL
   ), ".ferx")
 }
 
@@ -629,7 +642,16 @@ test_that("R6: the loader refuses a malformed r_extras$theta_levels", {
 test_that("R2: a search tool's final fit carries theta_levels and drives predict", {
   skip_on_cran()
   b <- tl_base()
-  res <- ferx_ruvsearch(b$model, b$data, progress = FALSE)
+  # The search gates on a converged input fit, which the two-iteration fixture
+  # is not built to give. It used to pass the gate only because ETA_V sat on V,
+  # where the block absorbed it and its omega ran off to 1 in two iterations
+  # (FeRx-NLME/ferx-core#1649); with the eta off `y` (#1675) the fit needs a
+  # real budget to converge.
+  model <- tl_write(sub(
+    "  maxiter = 2\n  inner_maxiter = 3\n", "  maxiter = 200\n  inner_maxiter = 50\n",
+    paste(readLines(b$model), collapse = "\n"), fixed = TRUE
+  ), ".ferx")
+  res <- ferx_ruvsearch(model, b$data, progress = FALSE)
   expect_s3_class(res$fit, "ferx_fit")
   expect_identical(nrow(res$fit$theta_levels), 6L)
   expect_identical(res$fit$theta_levels$label, b$fit$theta_levels$label)
