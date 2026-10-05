@@ -2,7 +2,7 @@
 
 ## Breaking changes
 
-- **ferx now builds against ferx-core `45ebd3c9`**, up from the `v0.4.0`
+- **ferx now builds against ferx-core `9e42d5af`**, up from the `v0.4.0`
   release (`2a6076af`). These engine changes reach every fit, prediction
   and simulation entry point with no change to the package's own code:
 
@@ -158,6 +158,22 @@
     `CL = TVCL * exp(ETA_CL + IOVCL)` is log-normal). No estimate moves.
     `print()` and `fit$estimates` now use it (see Bug fixes), and
     `ferx_save_fit()` stores it in the `.fitrx` bundle.
+  - **ODE models with more than 12 individual parameters now use exact
+    analytic gradients instead of finite differences**
+    ([#1661](https://github.com/FeRx-NLME/ferx-core/issues/1661)).
+    Parameters copied from data columns, constants such as a modeled
+    duration `D1`, and `F` scalings that start a compartment at baseline all
+    counted towards that limit, so sequential PK/PD models crossed it easily.
+    Such fits are now several times faster: on a 14-parameter
+    myelosuppression model, 7.6 s instead of 92 s. Estimates can move
+    slightly towards the optimum, because the finite-difference inner loop
+    sometimes stopped short of the best EBEs. The engine's evaluation matches
+    NONMEM 7.5.1 at its final estimates to 2e-5 in OFV. Separately, an ODE
+    model with no theta and no eta is now labelled as using finite
+    differences, which it always did.
+  - ferx-core #1665 and #1668 (a KAPPA section in the engine's text summary;
+    `FitResult` carrying the fit's data bindings) change nothing an R user
+    sees.
 
 ## New features
 
