@@ -304,3 +304,108 @@ test_that("ferx_sir leaves a healthy fit free of sir warnings", {
   # Pre-existing warnings survive the merge.
   expect_true(all(before %in% out$warnings))
 })
+
+# -- IOV fits: SIR resamples around the fitted kappa (#465) --------------------
+#
+# The standalone binding used to build its skeleton FitResult with
+# `omega_iov: None`, so the engine rebuilt the fit at the model file's
+# *initial* kappa and resampled around the wrong centre - silently, on every
+# IOV fit. The fixture starts KAPPA_CL ten times above where the data put it
+# (0.4 against a fitted ~0.04), so a fallback to the initial value cannot hide.
+# In-fit SIR resamples around the fitted parameters by construction, which makes
+# it the oracle: with the same seed and sample sizes the standalone run must
+# reproduce it draw for draw.
+sir_iov_settings <- list(maxiter = 30L, sir_samples = 200L,
+                         sir_resamples = 100L, sir_seed = 7L)
+
+sir_fit_with_infit_sir <- function(example, edit = identity, method = "foce") {
+  ex  <- ferx_example(example)
+  mod <- tempfile(fileext = ".ferx")
+  writeLines(edit(readLines(ex$model)), mod)
+  suppressWarnings(ferx_fit(mod, ex$data, method = method, verbose = FALSE,
+                            covariance = TRUE, sir = TRUE,
+                            settings = sir_iov_settings))
+}
+
+warfarin_iov_sir_fit <- local({
+  fit <- NULL
+  function() {
+    if (is.null(fit)) {
+      fit <<- sir_fit_with_infit_sir("warfarin_iov", function(txt) {
+        out <- sub("kappa KAPPA_CL ~ 0.04", "kappa KAPPA_CL ~ 0.4", txt,
+                   fixed = TRUE)
+        stopifnot(sum(out != txt) == 1L)
+        out
+      })
+    }
+    fit
+  }
+})
+
+standalone_sir <- function(fit) {
+  suppressWarnings(ferx_sir(fit,
+                            sir_samples = sir_iov_settings$sir_samples,
+                            sir_resamples = sir_iov_settings$sir_resamples,
+                            sir_seed = sir_iov_settings$sir_seed))
+}
+
+expect_same_sir <- function(a, b) {
+  expect_identical(a$sir_ess, b$sir_ess)
+  expect_identical(a$sir_ci_theta, b$sir_ci_theta)
+  expect_identical(a$sir_ci_omega, b$sir_ci_omega)
+  expect_identical(a$sir_ci_sigma, b$sir_ci_sigma)
+}
+
+test_that("ferx_sir on an IOV fit reproduces the in-fit SIR draw for draw (#465)", {
+  fit <- warfarin_iov_sir_fit()
+  skip_if(is.null(fit$cov_matrix) || is.null(fit$sir_ess), sir_cov_skip)
+  # The fixture straddles the bug: the fitted kappa is far from the initial
+  # 0.4, so resampling around the initial value would move every CI.
+  expect_lt(fit$omega_iov[1L, 1L], 0.4 / 5)
+
+  expect_same_sir(standalone_sir(fit), fit)
+})
+
+test_that("ferx_sir on an IOV fit follows the fit's kappa, not the model file's (#465)", {
+  fit <- warfarin_iov_sir_fit()
+  skip_if(is.null(fit$cov_matrix) || is.null(fit$sir_ess), sir_cov_skip)
+  scaled <- fit
+  scaled$omega_iov <- fit$omega_iov * 10
+
+  base <- standalone_sir(fit)
+  moved <- standalone_sir(scaled)
+  # Before #465 these two runs were identical(): the binding never read
+  # fit$omega_iov.
+  expect_false(identical(moved$sir_ci_theta, base$sir_ci_theta))
+  expect_false(identical(moved$sir_ess, base$sir_ess))
+})
+
+test_that("ferx_sir refuses a kappa fit that has lost its omega_iov (#465)", {
+  fit <- warfarin_iov_sir_fit()
+  skip_if(is.null(fit$cov_matrix), sir_cov_skip)
+  fit$omega_iov <- NULL
+  # Resampling around the model file's initial kappa would be a silently wrong
+  # answer, so the binding refuses instead.
+  expect_error(standalone_sir(fit), "carries no omega_iov", fixed = TRUE)
+})
+
+test_that("ferx_sir on a fit without IOV still reproduces the in-fit SIR (#465)", {
+  fit <- sir_fit_with_infit_sir("warfarin")
+  skip_if(is.null(fit$cov_matrix) || is.null(fit$sir_ess), sir_cov_skip)
+  expect_null(fit$omega_iov)
+
+  expect_same_sir(standalone_sir(fit), fit)
+})
+
+# Found by the #465 skeleton audit: `ferx_sir()` read `fit$interaction`, a field
+# the R fit list never carries, so every FOCEI fit was resampled under the FOCE
+# inner loop (warfarin, 200/100, seed 7: ESS 61.27 against the in-fit 78.37).
+# `.ferx_fit_interaction()` derives it from the method chain, as
+# `ferx_covariance()` already did.
+test_that("ferx_sir on a FOCEI fit resamples under the FOCEI inner loop", {
+  fit <- sir_fit_with_infit_sir("warfarin", method = "focei")
+  skip_if(is.null(fit$cov_matrix) || is.null(fit$sir_ess), sir_cov_skip)
+  expect_true(.ferx_fit_interaction(fit))
+
+  expect_same_sir(standalone_sir(fit), fit)
+})

@@ -4410,6 +4410,8 @@ fn ferx_rust_inits_from_nca(model_path: &str, data_path: &str, method: &str) -> 
 /// @param omega_flat Row-major flattened omega matrix.
 /// @param omega_dim Dimension of the omega matrix.
 /// @param sigma Vector of sigma point estimates.
+/// @param omega_iov_flat Row-major flattened fitted IOV kappa covariance; empty when no IOV.
+/// @param omega_iov_dim Dimension of the IOV kappa covariance; 0 when no IOV.
 /// @param cov_matrix_flat Row-major flattened parameter covariance matrix.
 /// @param cov_matrix_dim Dimension of the covariance matrix.
 /// @param residual_rho Fitted `block_sigma` residual correlations, in model
@@ -4437,6 +4439,8 @@ fn ferx_rust_sir(
     omega_flat: Vec<f64>,
     omega_dim: i32,
     sigma: Vec<f64>,
+    omega_iov_flat: Vec<f64>,
+    omega_iov_dim: i32,
     residual_rho: Vec<f64>,
     cov_matrix_flat: Vec<f64>,
     cov_matrix_dim: i32,
@@ -4525,6 +4529,13 @@ fn ferx_rust_sir(
 
         let omega_mat = DMatrix::from_row_slice(n_eta, n_eta, &omega_flat);
         let cov_mat = DMatrix::from_row_slice(n_packed, n_packed, &cov_matrix_flat);
+        // The fitted kappa (IOV) covariance. `fitted_params_from_result` falls
+        // back to the model file's *initial* kappa when the skeleton carries
+        // `None`, so SIR would resample around the wrong centre (ferx-r #465).
+        // Strict: a kappa model whose fit carries no matching matrix is refused.
+        let omega_iov = omega_iov_from_fit(model, &omega_iov_flat, omega_iov_dim)
+            .map_err(|e| format!("ferx_sir: {}", e))?
+            .map(|m| m.matrix);
 
         // Build SubjectResult vec with only `eta` populated (the only field
         // ferx_core::run_sir reads off subjects). IDs are synthesised because
@@ -4663,7 +4674,7 @@ fn ferx_rust_sir(
             sir_resamples_packed: None,
             importance_sampling: None,
             impmap_trace: None,
-            omega_iov: None,
+            omega_iov,
             kappa_names: model.kappa_names.clone(),
             kappa_fixed: template.kappa_fixed.clone(),
             se_kappa: None,
