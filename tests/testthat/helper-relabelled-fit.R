@@ -9,7 +9,8 @@
 #
 # `relabel` maps the bundled ID column to the new labels; `key` names the cache
 # entry. The rewritten CSV lives for the whole test run, since the fit records
-# its path and hash and the standalone steps re-read it.
+# its path and hash and the standalone steps re-read it. The cache is keyed on
+# `key`, not on `relabel`, so each key's relabelling is defined once, below.
 relabelled_fit <- local({
   cache <- list()
   function(example, key, relabel, covariance = TRUE, maxiter = 30L) {
@@ -29,6 +30,9 @@ relabelled_fit <- local({
     cache[[id]]
   }
 })
+
+# The "gappy" key's labels: non-1-based, with gaps.
+relabel_gappy <- function(id) 3L * id + 107L
 
 # Capture the arguments a binding is called with, then abort. The SIR and
 # covariance steps are expensive and their output cannot show everything they

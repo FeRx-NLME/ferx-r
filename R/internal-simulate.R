@@ -69,8 +69,16 @@ validate_fit_for_params <- function(fit) {
 .ferx_fit_subject_ids <- function(fit, caller) {
   ids <- NULL
   source <- NULL
-  if (!is.null(fit$ebe_etas) && nrow(fit$ebe_etas) > 0L &&
-      !is.null(fit$ebe_etas$ID)) {
+  if (!is.null(fit$ebe_etas) && nrow(fit$ebe_etas) > 0L) {
+    # EBE rows are what the warm-start is built from, so their IDs are the only
+    # ones known to be in the same order; never borrow another table's.
+    if (is.null(fit$ebe_etas$ID)) {
+      stop(
+        caller, ": fit$ebe_etas has no ID column, so its rows cannot be ",
+        "matched to the data's subjects.",
+        call. = FALSE
+      )
+    }
     ids <- fit$ebe_etas$ID
     source <- "fit$ebe_etas$ID"
   } else if (!is.null(fit$individual_estimates$ID) &&

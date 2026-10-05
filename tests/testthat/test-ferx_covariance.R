@@ -336,8 +336,6 @@ test_that("the [mixture] overrides pack ahead of the block_sigma correlation", {
 # checks by position against the population it re-reads from the data. Before
 # #468 it invented `1..n`, so every other ID set was refused.
 
-relabel_gappy <- function(id) 3L * id + 107L   # non-1-based, with gaps
-
 test_that("ferx_covariance gives the same answer on any subject labels (#468)", {
   base <- relabelled_fit("warfarin", "identity", identity)
   gappy <- relabelled_fit("warfarin", "gappy", relabel_gappy)
@@ -432,4 +430,15 @@ test_that(".ferx_fit_subject_ids refuses NA IDs, counting them (#468)", {
   expect_match(err, "matched to the data subject by subject", fixed = TRUE)
   expect_match(err, "every one must be present", fixed = TRUE)
   expect_no_match(err, "covariance = TRUE", fixed = TRUE)
+})
+
+test_that(".ferx_fit_subject_ids never borrows IDs for EBE rows without an ID column (#468)", {
+  subject_ids <- getFromNamespace(".ferx_fit_subject_ids", "ferx")
+  # The warm-start is built from these rows; another table's IDs carry no
+  # guarantee of the same order.
+  no_id <- list(ebe_etas = data.frame(ETA_CL = c(0.1, 0.2)),
+                individual_estimates = data.frame(ID = c("B", "A")))
+  err <- tryCatch(subject_ids(no_id, "ferx_sir"), error = conditionMessage)
+  expect_match(err, "^ferx_sir: fit\\$ebe_etas has no ID column")
+  expect_match(err, "cannot be matched to the data's subjects", fixed = TRUE)
 })

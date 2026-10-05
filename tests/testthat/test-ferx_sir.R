@@ -415,7 +415,6 @@ test_that("ferx_sir on a FOCEI fit resamples under the FOCEI inner loop", {
 # in the glue, so it gets its own twin.
 
 test_that("ferx_sir gives the same draw on any subject labels (#468)", {
-  relabel_gappy <- function(id) 3L * id + 107L
   base <- relabelled_fit("warfarin", "identity", identity)
   gappy <- relabelled_fit("warfarin", "gappy", relabel_gappy)
   skip_if(is.null(base$cov_matrix) || is.null(gappy$cov_matrix), sir_cov_skip)
@@ -429,7 +428,7 @@ test_that("ferx_sir gives the same draw on any subject labels (#468)", {
 
 test_that("ferx_sir hands the binding the fit's IDs verbatim (#468)", {
   skip_if_not_installed("mockery")
-  gappy <- relabelled_fit("warfarin", "gappy", function(id) 3L * id + 107L)
+  gappy <- relabelled_fit("warfarin", "gappy", relabel_gappy)
   skip_if(is.null(gappy$cov_matrix), sir_cov_skip)
   cap <- capture_binding_args()
   mockery::stub(ferx_sir, "ferx_rust_sir", cap$fake)
