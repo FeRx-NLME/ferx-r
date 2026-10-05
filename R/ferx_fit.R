@@ -1064,8 +1064,8 @@
 #'     (\code{"CL.theta"} / \code{"CL.omega"}), so no bare name silently
 #'     addresses one of a colliding pair. Use \code{\link{ferx_coef}} /
 #'     \code{\link{ferx_se}} to have an unknown or ambiguous name error rather
-#'     than return \code{NA}. A parameter declared \code{FIX} carries an exact
-#'     \code{0} in \code{se} and \code{rse_pct}, not \code{NA}.}
+#'     than return \code{NA}. A parameter declared \code{FIX} carries
+#'     \code{NA} in \code{se} and \code{rse_pct}, with \code{fixed = TRUE}.}
 #'   \item{eta_cov}{Data frame of Pearson correlations between each ETA and
 #'     each constant-per-subject numeric covariate in the dataset, with
 #'     columns \code{eta}, \code{covariate}, \code{r}, \code{p_val},
