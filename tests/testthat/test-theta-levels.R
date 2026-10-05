@@ -52,9 +52,12 @@ tl_fit_options <- "
 # ferx-core's fixture since #1675: with one subject per study the [STUDY, TIME]
 # block takes a level at every observation, so an eta that reached `y` would be
 # absorbed by it - `contrast = auto` then resolves to sum_to_zero_within and an
-# explicit none / sum_to_zero / ref is refused. `Z` is reported in [derived],
-# which does not reach `y`, so the unused-parameter check stays quiet. Pass
-# `z = NULL` to drop both.
+# explicit none / sum_to_zero / ref is refused (T14 pins that). `Z` is reported
+# in [derived], which does not reach `y`, so the unused-parameter check stays
+# quiet. ETA_V then has no effect on the OFV and its omega is not identified;
+# it is kept only so the fit has an eta at all, since a fit without one cannot
+# make the persistence round trips T8 and T12 take (FeRx-NLME/ferx-r#461).
+# Pass `z = NULL` to drop both.
 tl_model <- function(thetas, cl,
                      structure = "[structural_model]\n  pk one_cpt_iv(cl=CL, v=V)\n",
                      eta = "  omega ETA_V ~ 0.04", v = "TVV",
@@ -571,6 +574,44 @@ test_that("T13: the counted form keeps its names and an empty theta_levels", {
   expect_true(all(is.finite(ferx_predict(counted, data, fit = fit)$PRED)))
 })
 
+# --- T14: an eta the block can reproduce (FeRx-NLME/ferx-core#1675) -----------
+
+# The fixture before #1675: ETA_V on `V`, which `y` reads as central / V. With
+# one subject per study, PLACEBO[STUDY, TIME] takes a level at every
+# observation, so it can reproduce any per-subject effect; only a contrast
+# that sums to zero within each study keeps the two apart.
+tl_absorbing_model <- function(block) {
+  tl_write(tl_model(
+    paste0("  theta TVCL(2.0, 0.001, 20.0)\n  theta ", block),
+    "TVCL + PLACEBO", v = "TVV * exp(ETA_V)", z = NULL
+  ), ".ferx")
+}
+
+test_that("T14: auto resolves to sum_to_zero_within next to an eta that reaches y", {
+  data <- tl_write(tl_data, ".csv")
+  fit <- tl_fit(tl_absorbing_model("PLACEBO[STUDY, TIME](0.0, -5.0, 5.0)"), data)
+  tl <- fit$theta_levels
+  expect_identical(tl$contrast, rep("sum_to_zero_within", 6L))
+  expect_identical(tl$group, c(0L, 0L, 0L, 1L, 1L, 1L))
+  # One level per study is derived from the others.
+  expect_identical(which(is.na(tl$theta_name)), c(3L, 6L))
+})
+
+test_that("T14: an explicit global contrast next to such an eta is refused", {
+  data <- tl_write(tl_data, ".csv")
+  for (contrast in c("none", "sum_to_zero", "ref")) {
+    model <- tl_absorbing_model(sprintf(
+      "PLACEBO[STUDY, TIME, contrast = %s](0.0, -5.0, 5.0)", contrast
+    ))
+    e <- tryCatch(tl_fit(model, data), error = function(e) e)
+    expect_s3_class(e, "ferx_engine_error")
+    expect_identical(e$code, "E_THETA_LEVEL_BINDING", label = contrast)
+    expect_match(conditionMessage(e), "ETA_V", fixed = TRUE, label = contrast)
+    expect_match(conditionMessage(e), "sum_to_zero_within", fixed = TRUE,
+                 label = contrast)
+  }
+})
+
 # --- R1: a tampered theta_levels is refused by the glue -------------------------
 
 test_that("R1: the glue refuses a theta_levels table it cannot trust", {
@@ -647,9 +688,13 @@ test_that("R2: a search tool's final fit carries theta_levels and drives predict
   # where the block absorbed it and its omega ran off to 1 in two iterations
   # (FeRx-NLME/ferx-core#1649); with the eta off `y` (#1675) the fit needs a
   # real budget to converge.
+  budget <- "  maxiter = 2\n  inner_maxiter = 3\n"
+  text <- paste(readLines(b$model), collapse = "\n")
+  # Fail loudly if tl_fit_options moves on, rather than search from the
+  # two-iteration fit and report the gate.
+  stopifnot(grepl(budget, text, fixed = TRUE))
   model <- tl_write(sub(
-    "  maxiter = 2\n  inner_maxiter = 3\n", "  maxiter = 200\n  inner_maxiter = 50\n",
-    paste(readLines(b$model), collapse = "\n"), fixed = TRUE
+    budget, "  maxiter = 200\n  inner_maxiter = 50\n", text, fixed = TRUE
   ), ".ferx")
   res <- ferx_ruvsearch(model, b$data, progress = FALSE)
   expect_s3_class(res$fit, "ferx_fit")
