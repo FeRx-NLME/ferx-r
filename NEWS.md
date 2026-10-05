@@ -9,7 +9,7 @@
   *free* parameter lacks one. Code that tested `ferx_se(fit) == 0` to find
   fixed parameters should read `fit$estimates$fixed` instead.
 
-- **ferx now builds against ferx-core `4263f7d0`**, up from the `v0.4.0`
+- **ferx now builds against ferx-core `c8a0727b`**, up from the `v0.4.0`
   release (`2a6076af`). These engine changes reach every fit, prediction
   and simulation entry point with no change to the package's own code:
 
@@ -244,12 +244,52 @@
     - An `ignore =` filter passed to `ferx_fit()` that drops records but no
       whole subject is still not applied by the standalone steps; this is
       unchanged ([#462](https://github.com/FeRx-NLME/ferx-r/issues/462)).
-  - ferx-core #1665, #1668, #1681, #1690 and #1692 change nothing an R user
-    sees: a KAPPA section, kappa correlations and kappa shrinkage in the
-    engine's own text summary, the `at weight 1` label on a weighted
-    log-normal kappa's CV% in the engine console (`print()` builds its own
-    rows), `FitResult` carrying the fit's data bindings, and documentation
-    and CI.
+  - **`ferx_sir()` and in-fit SIR now work on fits with a theta that may be
+    negative** (level blocks, covariate slopes, shifts, NN weights); before,
+    every SIR sample was rejected
+    ([#1701](https://github.com/FeRx-NLME/ferx-core/issues/1701)). A theta now
+    only has to lie inside its declared bounds; only sigma and the omega and kappa
+    diagonals must be positive. `ferx_simulate_with_uncertainty()`'s
+    asymptotic draws are no longer silently truncated to theta > 0, so its
+    replicates move on such models. The rejection message now reads
+    "... non-finite theta or non-positive sigma/omega/kappa variance ...".
+    Models whose thetas all have a lower bound >= 0 give identical results.
+  - **More level-block models are refused, and a kappa is measured on its
+    occasions**
+    ([#1679](https://github.com/FeRx-NLME/ferx-core/issues/1679),
+    [#1678](https://github.com/FeRx-NLME/ferx-core/issues/1678),
+    [#1696](https://github.com/FeRx-NLME/ferx-core/issues/1696)).
+    - A block with levels that have no effect on the likelihood (for
+      `PLACEBO[STUDY, TIME]` read as `PLACEBO * TIME`, or on `EMAX` in
+      `EMAX * TIME / (TIME + ET50)`, every study's `TIME = 0` level) now
+      binds only under a contrast that can carry them: `contrast = auto`
+      takes `sum_to_zero_within`, so such a fit has fewer free thetas and
+      moves, and `none`, or `ref` outside the reference, is refused with an
+      error listing the levels.
+    - A block that absorbs two random effects (an ETA on each of `E0` and
+      `EMAX` with one subject per study) is refused under every contrast.
+      Levels that nest in subjects sharing a key (two subjects of one study
+      on disjoint times) now refuse a global contrast, and `auto` takes
+      `sum_to_zero_within`.
+    - A kappa counts toward `contrast = auto` when each level lies within one
+      occasion of one subject. In the MBMA layout, where each arm is an
+      occasion, a between-arm kappa no longer refuses an explicit
+      `sum_to_zero`; a `[STUDY, OCC]` block, or occasions that split a
+      subject's records into periods, now counts it.
+
+    The bundled `mbma_placebo` example binds as before.
+  - **Parsing models with many intermediate variables is faster**
+    ([#1684](https://github.com/FeRx-NLME/ferx-core/issues/1684),
+    [#1676](https://github.com/FeRx-NLME/ferx-core/issues/1676)): a
+    20-level diamond of intermediates (`B = A + 1`, `C = A + 2`,
+    `D = B + C`, ...) took 38.8 s to parse with a level block and now
+    takes 1.1 s. No estimate moves.
+  - ferx-core #1665, #1668, #1681, #1682, #1683, #1690, #1692, #1697 and
+    #1698 change nothing an R user sees: a KAPPA section, kappa correlations
+    and kappa shrinkage in the engine's own text summary, the wording of a
+    weighted kappa's `at weight 1` label and weight line in the engine
+    console (`print()` builds its own rows), `FitResult` carrying the fit's
+    data bindings, and documentation and CI.
 
 ## New features
 
