@@ -330,3 +330,115 @@ test_that("the [mixture] overrides pack ahead of the block_sigma correlation", {
     "ADD_ERR ~ PROP_ERR"
   ))
 })
+
+# ---- subject IDs on the standalone skeleton (#468) ----
+# The skeleton FitResult carries the fit's own subject IDs, which the engine
+# checks by position against the population it re-reads from the data. Before
+# #468 it invented `1..n`, so every other ID set was refused.
+
+test_that("ferx_covariance gives the same answer on any subject labels (#468)", {
+  base <- relabelled_fit("warfarin", "identity", identity)
+  gappy <- relabelled_fit("warfarin", "gappy", relabel_gappy)
+  expect_identical(gappy$ebe_etas$ID, as.character(relabel_gappy(1:10)))
+
+  out_base <- ferx_covariance(base)
+  skip_if(is.null(out_base$cov_matrix), cov_skip)
+  out_gappy <- ferx_covariance(gappy)
+  expect_identical(out_gappy$se_theta, out_base$se_theta)
+  expect_identical(out_gappy$cov_matrix, out_base$cov_matrix)
+})
+
+test_that("a fit without random effects takes its IDs from individual_estimates (#468)", {
+  base <- relabelled_fit("one_cpt_iv_pooled", "identity", identity)
+  shifted <- relabelled_fit("one_cpt_iv_pooled", "plus100", function(id) id + 100L)
+  # n_eta = 0: no EBE table, so the IDs come from the per-subject table.
+  expect_null(shifted$ebe_etas)
+  expect_identical(shifted$individual_estimates$ID[1:2], c("101", "102"))
+
+  out_base <- ferx_covariance(base)
+  skip_if(is.null(out_base$cov_matrix), cov_skip)
+  expect_identical(ferx_covariance(shifted)$se_theta, out_base$se_theta)
+
+  skip_if(is.null(base$cov_matrix) || is.null(shifted$cov_matrix), cov_skip)
+  sir <- function(f) ferx_sir(f, sir_samples = 50L, sir_resamples = 20L, sir_seed = 1L)
+  sir_base <- sir(base)
+  sir_shifted <- sir(shifted)
+  expect_identical(sir_shifted$sir_ess, sir_base$sir_ess)
+  expect_identical(sir_shifted$sir_ci_theta, sir_base$sir_ci_theta)
+})
+
+test_that("the IDs reach the engine's check in fit order, not sorted or re-read (#468)", {
+  gappy <- relabelled_fit("warfarin", "gappy", relabel_gappy)
+  rotated <- gappy
+  ids <- gappy$ebe_etas$ID
+  rotated$ebe_etas$ID <- c(ids[-1], ids[1])
+  expect_error(
+    ferx_covariance(rotated),
+    "subject 1 of the population is `110`, but the fit's is `113`",
+    fixed = TRUE
+  )
+})
+
+test_that("ferx_covariance hands the binding the fit's IDs verbatim (#468)", {
+  skip_if_not_installed("mockery")
+  gappy <- relabelled_fit("warfarin", "gappy", relabel_gappy)
+  cap <- capture_binding_args()
+  mockery::stub(ferx_covariance, "ferx_rust_covariance", cap$fake)
+  expect_error(ferx_covariance(gappy), "captured")
+  args <- cap$seen()
+  expect_identical(args$subject_ids, gappy$ebe_etas$ID)
+  expect_null(args$n_subjects)
+})
+
+test_that(".ferx_fit_subject_ids reads ebe_etas, then individual_estimates (#468)", {
+  subject_ids <- getFromNamespace(".ferx_fit_subject_ids", "ferx")
+  both <- list(
+    ebe_etas = data.frame(ID = c("PT1", "PT2"), ETA_CL = c(0, 0)),
+    individual_estimates = data.frame(ID = c("X", "Y"))
+  )
+  expect_identical(subject_ids(both, "ferx_sir"), c("PT1", "PT2"))
+  pooled <- list(ebe_etas = NULL, individual_estimates = data.frame(ID = c("7", "9")))
+  expect_identical(subject_ids(pooled, "ferx_sir"), c("7", "9"))
+  # A numeric ID column (hand-built list) still crosses as text.
+  numeric_ids <- list(individual_estimates = data.frame(ID = c(7, 9)))
+  expect_identical(subject_ids(numeric_ids, "ferx_sir"), c("7", "9"))
+})
+
+test_that(".ferx_fit_subject_ids refuses a fit with no IDs, naming both fields (#468)", {
+  subject_ids <- getFromNamespace(".ferx_fit_subject_ids", "ferx")
+  none <- list(ebe_etas = NULL, individual_estimates = NULL, n_subjects = 10L)
+  err <- tryCatch(subject_ids(none, "ferx_covariance"), error = conditionMessage)
+  expect_match(err, "^ferx_covariance: the fit carries no subject IDs")
+  expect_match(err, "fit$ebe_etas$ID", fixed = TRUE)
+  expect_match(err, "fit$individual_estimates$ID", fixed = TRUE)
+  expect_match(err, "cannot be matched to the data", fixed = TRUE)
+  expect_match(err, "Re-fit via ferx_fit(model, data).", fixed = TRUE)
+  # A recorded subject count is not an ID set: it must not be used, or named.
+  expect_no_match(err, "n_subjects", fixed = TRUE)
+  expect_no_match(err, "SIR", fixed = TRUE)
+  expect_no_match(err, "data file", fixed = TRUE)
+  sir_err <- tryCatch(subject_ids(none, "ferx_sir"), error = conditionMessage)
+  expect_match(sir_err, "^ferx_sir: ")
+  expect_no_match(sir_err, "covariance", fixed = TRUE)
+})
+
+test_that(".ferx_fit_subject_ids refuses NA IDs, counting them (#468)", {
+  subject_ids <- getFromNamespace(".ferx_fit_subject_ids", "ferx")
+  with_na <- list(ebe_etas = data.frame(ID = c("1", NA, NA), ETA_CL = 0))
+  err <- tryCatch(subject_ids(with_na, "ferx_covariance"), error = conditionMessage)
+  expect_match(err, "^ferx_covariance: 2 of the 3 subject IDs in fit\\$ebe_etas\\$ID are NA\\.")
+  expect_match(err, "matched to the data subject by subject", fixed = TRUE)
+  expect_match(err, "every one must be present", fixed = TRUE)
+  expect_no_match(err, "covariance = TRUE", fixed = TRUE)
+})
+
+test_that(".ferx_fit_subject_ids never borrows IDs for EBE rows without an ID column (#468)", {
+  subject_ids <- getFromNamespace(".ferx_fit_subject_ids", "ferx")
+  # The warm-start is built from these rows; another table's IDs carry no
+  # guarantee of the same order.
+  no_id <- list(ebe_etas = data.frame(ETA_CL = c(0.1, 0.2)),
+                individual_estimates = data.frame(ID = c("B", "A")))
+  err <- tryCatch(subject_ids(no_id, "ferx_sir"), error = conditionMessage)
+  expect_match(err, "^ferx_sir: fit\\$ebe_etas has no ID column")
+  expect_match(err, "cannot be matched to the data's subjects", fixed = TRUE)
+})

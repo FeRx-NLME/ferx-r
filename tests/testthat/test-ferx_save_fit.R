@@ -1518,3 +1518,65 @@ test_that("an unweighted IOV fit writes no kappa weight fields", {
   expect_null(loaded$kappa_weights)
   expect_null(loaded$kappa_weight_typical)
 })
+
+test_that("every ID column survives a save / load round-trip verbatim (synthetic, #468)", {
+  # `001` and `1.0` are what a type-inferring read turns into `1`; the old
+  # loader then put back only the type, so `ferx_sir()` / `ferx_covariance()`
+  # on the loaded fit handed the engine IDs the data does not carry.
+  ids <- c("001", "1.0")
+  cd_data <- data.frame(
+    ID = rep(ids, each = 2L),
+    ETA = c("ETA_CL", "ETA_V", "ETA_CL", "ETA_V"),
+    COND_MEAN = c(0.05, -0.02, -0.03, 0.01),
+    COND_SD = c(0.12, 0.15, 0.11, 0.14),
+    COND_MODE = c(0.04, -0.01, -0.02, 0.02),
+    stringsAsFactors = FALSE
+  )
+  fake <- structure(
+    list(
+      theta = c(TVCL = 1.0, TVV = 10.0),
+      omega = matrix(c(0.04, 0, 0, 0.09), 2L, 2L,
+                     dimnames = list(c("ETA_CL", "ETA_V"), c("ETA_CL", "ETA_V"))),
+      eta_names = c("ETA_CL", "ETA_V"),
+      sigma = c(prop = 0.05),
+      sigma_names = "prop",
+      sigma_types = "proportional",
+      cond_dist = list(data = cd_data, shrinkage = c(0.1, 0.05),
+                        nsamp = 20L, burnin = 5L),
+      ebe_etas = data.frame(ID = ids, ETA_CL = c(0.04, -0.02),
+                             ETA_V = c(-0.01, 0.02), stringsAsFactors = FALSE),
+      covtab = data.frame(ID = ids, TIME = c(0, 0), WT = c(70.5, 80.25),
+                          stringsAsFactors = FALSE),
+      ebe_kappas = data.frame(ID = rep(ids, each = 2L), OCC = c(1L, 2L, 1L, 2L),
+                              KAPPA_CL = c(0.01, -0.01, 0.02, -0.02),
+                              stringsAsFactors = FALSE),
+      ofv = 0, aic = 2, bic = 4,
+      n_obs = 3L, n_subjects = 2L, n_parameters = 2L, n_iterations = 1L,
+      method = "SAEM", method_chain = "SAEM",
+      converged = TRUE,
+      warnings = character(),
+      shrinkage_eta = c(0, 0), shrinkage_eps = 0,
+      wall_time_secs = 0, model_name = "fake", ferx_version = "0.1.0",
+      gradient_method_inner = "Enzyme AD",
+      gradient_method_outer = "N/A",
+      covariance_status = "NotRequested",
+      model_source = "model fake\n",
+      data_path = NA_character_
+    ),
+    class = "ferx_fit"
+  )
+  path <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(path), add = TRUE)
+  ferx_save_fit(fake, path)
+  entries <- utils::unzip(path, list = TRUE)$Name
+  expect_true(all(c("ebes.csv", "covtab.csv", "ebes_kappa.csv", "conddist.csv") %in% entries))
+
+  loaded <- ferx_load_fit(path)
+  expect_identical(loaded$ebe_etas$ID, ids)
+  expect_identical(loaded$covtab$ID, ids)
+  expect_identical(loaded$ebe_kappas$ID, rep(ids, each = 2L))
+  expect_identical(loaded$cond_dist$data$ID, rep(ids, each = 2L))
+  # Only the ID columns are read as text; the others keep their types.
+  expect_identical(loaded$ebe_etas$ETA_CL, fake$ebe_etas$ETA_CL)
+  expect_identical(loaded$covtab$WT, fake$covtab$WT)
+})

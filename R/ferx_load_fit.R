@@ -78,11 +78,9 @@ ferx_load_fit <- function(path) {
   # Subject-level tables
   ebes_path <- file.path(staging, "ebes.csv")
   if (file.exists(ebes_path)) {
-    result$ebe_etas <- .fitrx_read_csv_exact(ebes_path)
-    # Preserve the live-fit type of the ID column (character); read.csv would
-    # otherwise infer integer for numeric-looking IDs, diverging from
-    # cond_dist$data$ID (and covtab$ID) below.
-    result$ebe_etas$ID <- as.character(result$ebe_etas$ID)
+    # ID columns are read verbatim, as on the live fit: `ferx_sir()` and
+    # `ferx_covariance()` match them to the data (#468).
+    result$ebe_etas <- .fitrx_read_csv_exact(ebes_path, id_cols = "ID")
   }
   preds_path <- file.path(staging, "predictions.csv")
   if (file.exists(preds_path)) {
@@ -90,21 +88,17 @@ ferx_load_fit <- function(path) {
   }
   covtab_path <- file.path(staging, "covtab.csv")
   if (file.exists(covtab_path)) {
-    result$covtab <- .fitrx_read_csv_exact(covtab_path)
-    # Preserve the live-fit type of the ID column (character); read.csv would
-    # otherwise infer integer for numeric-looking IDs.
-    result$covtab$ID <- as.character(result$covtab$ID)
+    result$covtab <- .fitrx_read_csv_exact(covtab_path, id_cols = "ID")
   }
   kappa_path <- file.path(staging, "ebes_kappa.csv")
   if (file.exists(kappa_path)) {
-    result$ebe_kappas <- .fitrx_read_csv_exact(kappa_path)
+    result$ebe_kappas <- .fitrx_read_csv_exact(kappa_path, id_cols = "ID")
   } else {
     result$ebe_kappas <- NULL
   }
   conddist_path <- file.path(staging, "conddist.csv")
   if (file.exists(conddist_path)) {
-    cd_df <- .fitrx_read_csv_exact(conddist_path)
-    cd_df$ID <- as.character(cd_df$ID)
+    cd_df <- .fitrx_read_csv_exact(conddist_path, id_cols = "ID")
     result$cond_dist <- list(
       data      = cd_df,
       # `conddist.csv` carries no distribution-based shrinkage / provenance

@@ -335,6 +335,18 @@
 
 ## Bug fixes
 
+- **`ferx_sir()` and `ferx_covariance()` run on any subject IDs**
+  ([#468](https://github.com/FeRx-NLME/ferx-r/issues/468)). Both refused
+  every dataset whose IDs were not exactly `1..n` in file order (`101, 102,
+  ..`, gaps, descending, `PT001`): the fit they rebuild for the engine gave
+  its subjects made-up IDs `1..n`, which the engine's check against the data
+  rejected. They now pass the fit's own IDs, and the same data under any
+  labels gives identical standard errors and SIR intervals. A fit that
+  carries no subject IDs at all is refused with a message naming the two
+  fields it looked at. `ferx_load_fit()` now reads the ID column of `ebe_etas`,
+  `covtab`, `ebe_kappas` and `cond_dist` verbatim: IDs such as `001` or `1.0`
+  used to come back as `1`, so a loaded fit with them was refused too.
+
 - **`ferx_sir()` resamples an IOV fit around its fitted kappa, and a FOCEI
   fit under the FOCEI inner loop**
   ([#465](https://github.com/FeRx-NLME/ferx-r/issues/465)). Standalone SIR

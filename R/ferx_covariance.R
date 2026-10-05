@@ -137,16 +137,6 @@ ferx_covariance <- function(fit,
     # NONMEM's `$COVARIANCE` default (`rsr`) is the estimator that accounts for
     # the within-subject correlation such a model deliberately ignores.
     eta_hats_flat <- numeric(0)
-    # `nrow(eta_mat)` is the usual subject count, but there is no eta matrix
-    # here; the engine still needs the count to size its warm-start scaffold.
-    n_subj <- as.integer(fit$n_subjects %||% 0L)
-    if (n_subj <= 0L) {
-      stop(
-        "ferx_covariance: fit has no random effects and no recorded ",
-        "n_subjects, so the subject count cannot be determined. Re-fit via ",
-        "ferx_fit(model, data)."
-      )
-    }
   } else {
     if (is.null(ebes) || nrow(ebes) == 0L) {
       stop(
@@ -168,8 +158,11 @@ ferx_covariance <- function(fit,
     eta_mat <- as.matrix(ebes[, eta_cols, drop = FALSE])
     storage.mode(eta_mat) <- "double"
     eta_hats_flat <- as.numeric(t(eta_mat))  # row-major
-    n_subj <- nrow(eta_mat)
   }
+  # The fit's own subject IDs, in fit order (#468); their count is the
+  # subject count, and in the n_eta > 0 branch they come from the same
+  # `ebe_etas` rows as `eta_mat`.
+  subject_ids <- .ferx_fit_subject_ids(fit, "ferx_covariance")
 
   # Hash plumbing, identical to ferx_sir(): non-empty hex string forwards and
   # Rust enforces equality; NULL (older binary) or NA (hashing failed at fit
@@ -214,7 +207,7 @@ ferx_covariance <- function(fit,
     omega_iov_dim = iov_args$omega_iov_dim,
     residual_rho = .ferx_residual_rho_vec(fit),
     eta_hats_flat = eta_hats_flat,
-    n_subjects = n_subj,
+    subject_ids = subject_ids,
     covariance_method = cov_method,
     mu_referencing = isTRUE(mu_referencing),
     verbose = isTRUE(verbose),

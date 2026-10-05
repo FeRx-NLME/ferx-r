@@ -169,3 +169,18 @@ test_that(".fitrx_unwrap_named_se names values when lengths match", {
   # Mismatched name length -> unnamed values
   expect_identical(ferx:::.fitrx_unwrap_named_se(c(1, 2), c("only_one")), c(1, 2))
 })
+
+test_that("a loaded fit with zero-padded IDs runs ferx_covariance like the live one (#468)", {
+  fit <- relabelled_fit("warfarin", "padded", function(id) sprintf("%03d", id),
+                        covariance = FALSE)
+  expect_identical(fit$ebe_etas$ID[1:2], c("001", "002"))
+  path <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(path), add = TRUE)
+  ferx_save_fit(fit, path)
+  loaded <- ferx_load_fit(path)
+  expect_identical(loaded$ebe_etas$ID, fit$ebe_etas$ID)
+
+  live <- ferx_covariance(fit)
+  skip_if(is.null(live$cov_matrix), "covariance step did not converge - skipping")
+  expect_identical(ferx_covariance(loaded)$se_theta, live$se_theta)
+})
