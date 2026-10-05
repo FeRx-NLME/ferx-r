@@ -4524,11 +4524,9 @@ fn ferx_rust_sir(
         }
         if eta_hats_flat.len() != n_subj * n_eta {
             return Err(format!(
-                "ferx_sir: eta_hats_flat length {} does not match n_subjects * n_eta = {} \
-                 ({} subject IDs)",
+                "ferx_sir: eta_hats_flat length {} does not match n_subjects * n_eta = {}",
                 eta_hats_flat.len(),
-                n_subj * n_eta,
-                n_subj
+                n_subj * n_eta
             ));
         }
 
@@ -4962,11 +4960,9 @@ fn ferx_rust_covariance(
         }
         if eta_hats_flat.len() != n_subj * n_eta {
             return Err(format!(
-                "ferx_covariance: eta_hats_flat length {} does not match n_subjects * n_eta = {} \
-                 ({} subject IDs)",
+                "ferx_covariance: eta_hats_flat length {} does not match n_subjects * n_eta = {}",
                 eta_hats_flat.len(),
-                n_subj * n_eta,
-                n_subj
+                n_subj * n_eta
             ));
         }
 
