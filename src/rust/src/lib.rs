@@ -1735,7 +1735,9 @@ fn bind_layout_from_fit(
 
 /// A fit's level bindings as the `DataBindings` core's from-fit binder takes.
 /// The covariate statistics stay empty: R cannot fit a symbolic centre yet, so
-/// no R fit carries any (ferx-r #412).
+/// no R fit carries any (ferx-r #412). Built by assignment because
+/// `DataBindings` is `#[non_exhaustive]`: a struct literal, even with
+/// `..Default::default()`, is E0639 outside ferx-core.
 fn fit_data_bindings(fit_levels: &LevelBindings) -> DataBindings {
     let mut bindings = DataBindings::default();
     bindings.levels = fit_levels.clone();
@@ -1756,9 +1758,9 @@ fn no_fit_levels_error(model: &CompiledModel) -> String {
 }
 
 /// The theta-count refusal of SIR and the standalone covariance step. On a
-/// level model the count comes from `fit$theta_levels`, so a mismatch means the
-/// bindings and the theta no longer belong together (an edited fit), not that
-/// the model file is wrong.
+/// level model the count is the whole model's, laid out on `fit$theta_levels`,
+/// so either side can be the edited one: the model file (this check runs
+/// before the engine's model-hash check) or the bindings. Both are named.
 fn theta_length_error(entry_point: &str, model: &CompiledModel, n_theta: usize, expected: usize) -> String {
     if model.theta_blocks().level_blocks().is_empty() {
         return format!(
@@ -1766,9 +1768,10 @@ fn theta_length_error(entry_point: &str, model: &CompiledModel, n_theta: usize, 
         );
     }
     format!(
-        "{entry_point}: the fit's theta level bindings (`fit$theta_levels`) lay out {expected} \
-         thetas for the level block(s) {}, but the fit carries {n_theta} (`fit$theta`). The two \
-         no longer belong to the same fit; refit with `ferx_fit()`.",
+        "{entry_point}: the model file, laid out on the fit's theta level bindings \
+         (`fit$theta_levels`) for its level block(s) {}, has {expected} thetas, but the fit \
+         carries {n_theta} (`fit$theta`). Either the model file was edited since the fit, or \
+         `fit$theta_levels` was; refit with `ferx_fit()`.",
         level_block_names(model)
     )
 }

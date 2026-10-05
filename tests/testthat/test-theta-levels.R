@@ -525,11 +525,40 @@ test_that("T9c: bindings that no longer lay out the fit's theta are named", {
     }, error = function(e) e)
     expect_s3_class(err, "error")
     msg <- conditionMessage(err)
+    # The count is the whole model's (TVCL, TVV and four free levels), not the
+    # block's alone.
     expect_match(msg, paste0(
-      who, ": the fit's theta level bindings (`fit$theta_levels`) lay out 6 ",
-      "thetas for the level block(s) `PLACEBO`, but the fit carries 7"
+      who, ": the model file, laid out on the fit's theta level bindings ",
+      "(`fit$theta_levels`) for its level block(s) `PLACEBO`, has 6 thetas, ",
+      "but the fit carries 7 (`fit$theta`). Either the model file was edited ",
+      "since the fit, or `fit$theta_levels` was"
     ), fixed = TRUE)
     expect_no_match(msg, "does not match model", fixed = TRUE)
+  }
+  check(ferx_covariance(fit), "ferx_covariance")
+  check(ferx_sir(fit, sir_samples = 20L, sir_resamples = 10L), "ferx_sir")
+})
+
+test_that("T9d: a model file edited after the fit is named as a possible cause", {
+  # The glue's theta count check runs before the engine's model-hash check,
+  # so an edited model file reaches it first and must not be blamed on
+  # `fit$theta_levels` alone.
+  b <- tl_base()
+  model <- tl_col_model()
+  fit <- tl_with_cov(tl_fit(model, b$data))
+  text <- readLines(model)
+  at <- which(text == "[parameters]")
+  writeLines(append(text, "  theta EXTRA(1.0, 0.1, 10.0)", after = at), model)
+  check <- function(expr, who) {
+    err <- tryCatch({
+      expr
+      NULL
+    }, error = function(e) e)
+    expect_s3_class(err, "error")
+    msg <- conditionMessage(err)
+    expect_match(msg, paste0(who, ": the model file, laid out"), fixed = TRUE)
+    expect_match(msg, "has 8 thetas, but the fit carries 7", fixed = TRUE)
+    expect_match(msg, "Either the model file was edited since the fit", fixed = TRUE)
   }
   check(ferx_covariance(fit), "ferx_covariance")
   check(ferx_sir(fit, sir_samples = 20L, sir_resamples = 10L), "ferx_sir")
