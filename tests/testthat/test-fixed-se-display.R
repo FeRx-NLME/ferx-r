@@ -126,12 +126,16 @@ test_that("estimates: fixed column, NA SE / RSE / CI for FIX, free SE 0 kept", {
   expect_identical(old["TVKA", "se"], 0)
 })
 
-test_that("estimates: a FIX log theta keeps its natural-scale estimate, without an interval", {
-  fit <- crafted_fit("zero")
-  fit$theta_transforms[["TVKA"]] <- "log"
-  est <- .compute_estimates(fit)
-  expect_equal(est["TVKA", "estimate_natural"], exp(1.0))
-  expect_true(is.na(est["TVKA", "lower_95_natural"]))
+test_that("estimates: a FIX log or logit theta keeps its natural-scale estimate, without an interval", {
+  for (tf in c("log", "logit")) {
+    fit <- crafted_fit("zero")
+    fit$theta_transforms[["TVKA"]] <- tf
+    est <- .compute_estimates(fit)
+    want <- if (tf == "log") exp(1.0) else stats::plogis(1.0)
+    expect_equal(est["TVKA", "estimate_natural"], want, info = tf)
+    expect_true(is.na(est["TVKA", "lower_95_natural"]), info = tf)
+    expect_true(is.na(est["TVKA", "upper_95_natural"]), info = tf)
+  }
 })
 
 test_that("ferx_se(): NA for a FIX parameter, without the no-standard-errors warning", {
