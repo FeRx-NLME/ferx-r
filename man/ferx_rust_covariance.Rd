@@ -23,7 +23,12 @@ ferx_rust_covariance(
   n_subjects,
   covariance_method,
   mu_referencing,
-  verbose
+  verbose,
+  level_block,
+  level_index,
+  level_label,
+  level_group,
+  level_contrast
 )
 }
 \description{

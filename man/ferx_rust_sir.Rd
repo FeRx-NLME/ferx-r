@@ -25,7 +25,12 @@ ferx_rust_sir(
   sir_resamples,
   sir_seed,
   sir_keep_samples,
-  verbose
+  verbose,
+  level_block,
+  level_index,
+  level_label,
+  level_group,
+  level_contrast
 )
 }
 \description{

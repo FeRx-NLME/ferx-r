@@ -1,6 +1,6 @@
 use extendr_api::prelude::*;
 use ferx_core::cancel::CancelFlag;
-use ferx_core::parser::model_parser::{LevelBinding, LevelBindings, LevelContrast};
+use ferx_core::parser::model_parser::{DataBindings, LevelBinding, LevelBindings, LevelContrast};
 use ferx_core::types::*;
 use nalgebra::DMatrix;
 use std::collections::HashMap;
@@ -1624,14 +1624,16 @@ fn ferx_rust_npde_from_fit(
 // A `theta NAME[COL, ...]` block has one theta per observed combination of the
 // columns, so its theta layout is fixed by the data it is bound to. The rule:
 // the fit binds against its own data with `bind_theta_levels`; every later use
-// of that fit binds the design against the fit's layout with
-// `bind_theta_levels_from_fit`, so a theta is never read at a position the fit
-// did not give it; a use without a fit binds the design's own levels. Every
-// bind re-parses `parsed.model`, so it runs before any stamp on the model.
+// of that fit binds the design against the fit's layout with `bind_from_fit`,
+// so a theta is never read at a position the fit did not give it; a use without
+// a fit binds the design's own levels. Every bind re-parses `parsed.model`, so
+// it runs before any stamp on the model.
 //
 // The fit's bindings travel to R as `fit$theta_levels` (one row per level) and
-// come back flattened through `validate_fit_for_params()`. ferx-core's
-// `FitResult` has no slot for them yet (FeRx-NLME/ferx-core#1621).
+// come back flattened through `validate_fit_for_params()`. SIR and the
+// standalone covariance step, which take no population here, hand them to the
+// engine in the skeleton `FitResult`'s `data_bindings` instead, the slot
+// ferx-core's own `fit()` records them in (FeRx-NLME/ferx-core#1621).
 
 /// The model text a level bind re-parses, read only when the model declares a
 /// level block (the binders early-return otherwise, and so does every caller).
@@ -1692,33 +1694,83 @@ fn bind_design_from_fit(
         if !declares_level_blocks(parsed) {
             return Ok(());
         }
-        return Err(format!(
-            "the model declares the theta level block(s) {}, but this fit carries no theta \
-             level bindings (`fit$theta_levels` is empty or absent), so there is no fitted \
-             theta layout to place the design on. A .fitrx bundle written by ferx-core, or a \
-             fit made before ferx recorded the bindings, does not carry them. Refit with \
-             `ferx_fit()` to record them.",
-            level_block_names(&parsed.model)
-        ));
+        return Err(no_fit_levels_error(&parsed.model));
     }
     let model_text = level_model_text(model_path)?;
-    ferx_core::api::bind_theta_levels_from_fit(parsed, &model_text, population, fit_levels)
+    ferx_core::api::bind_from_fit(parsed, &model_text, population, &fit_data_bindings(fit_levels))
 }
 
-/// SIR and the standalone covariance step re-read the data to keep their hash
-/// integrity check, and that read binds no level block, so the fitted theta
-/// would not fit the unbound model. Refused up front, naming the block, until
-/// ferx-core can run them on a fit's own bindings (FeRx-NLME/ferx-core#1622).
-fn refuse_level_blocks(model: &CompiledModel, entry_point: &str) -> std::result::Result<(), String> {
-    if model.theta_blocks().level_blocks().is_empty() {
-        return Ok(());
+/// Lay the glue's own parse out on a fit's level bindings, for SIR and the
+/// standalone covariance step, which hold no population here. It only sizes the
+/// skeleton `FitResult` (theta count, names, FIX flags) and puts the bindings in
+/// its `data_bindings`: the engine re-binds the re-read data from those, with
+/// the full validation of `bind_from_fit` (unseen levels, split groups, blocks
+/// the model does not declare), before it reads theta (`resolve_fit_inputs`).
+/// Core's own population-less bind refuses a level model by design, hence the
+/// plain re-parse here.
+///
+/// Empty bindings are refused on a level model with the text the predict paths
+/// give, and are a no-op otherwise; bindings on a model without a block are laid
+/// out anyway, so the engine refuses them rather than ignoring them.
+fn bind_layout_from_fit(
+    parsed: &mut ParsedModel,
+    model_path: &str,
+    fit_levels: &LevelBindings,
+) -> std::result::Result<(), String> {
+    if fit_levels.is_empty() {
+        if !declares_level_blocks(parsed) {
+            return Ok(());
+        }
+        return Err(no_fit_levels_error(&parsed.model));
     }
-    Err(format!(
-        "{entry_point}: not supported yet for a model with the theta level block(s) {}. This \
-         step re-reads the data without binding the block to it, so it cannot place the \
-         fitted theta (FeRx-NLME/ferx-core#1622).",
+    let model_text = level_model_text(model_path)?;
+    let mut bindings = parsed.bindings.clone();
+    bindings.levels = fit_levels.clone();
+    let mut rebound = ferx_core::parser::model_parser::parse_full_model_with(&model_text, &bindings)?.model;
+    rebound.name = parsed.model.name.clone();
+    parsed.model = rebound;
+    parsed.bindings = bindings;
+    Ok(())
+}
+
+/// A fit's level bindings as the `DataBindings` core's from-fit binder takes.
+/// The covariate statistics stay empty: R cannot fit a symbolic centre yet, so
+/// no R fit carries any (ferx-r #412).
+fn fit_data_bindings(fit_levels: &LevelBindings) -> DataBindings {
+    let mut bindings = DataBindings::default();
+    bindings.levels = fit_levels.clone();
+    bindings
+}
+
+/// The refusal for a level model paired with a fit that carries no bindings,
+/// shared by every from-fit path so the text cannot drift between them.
+fn no_fit_levels_error(model: &CompiledModel) -> String {
+    format!(
+        "the model declares the theta level block(s) {}, but this fit carries no theta \
+         level bindings (`fit$theta_levels` is empty or absent), so there is no fitted \
+         theta layout to place the design on. A .fitrx bundle written by ferx-core, or a \
+         fit made before ferx recorded the bindings, does not carry them. Refit with \
+         `ferx_fit()` to record them.",
         level_block_names(model)
-    ))
+    )
+}
+
+/// The theta-count refusal of SIR and the standalone covariance step. On a
+/// level model the count comes from `fit$theta_levels`, so a mismatch means the
+/// bindings and the theta no longer belong together (an edited fit), not that
+/// the model file is wrong.
+fn theta_length_error(entry_point: &str, model: &CompiledModel, n_theta: usize, expected: usize) -> String {
+    if model.theta_blocks().level_blocks().is_empty() {
+        return format!(
+            "{entry_point}: theta length {n_theta} does not match model ({expected} expected)"
+        );
+    }
+    format!(
+        "{entry_point}: the fit's theta level bindings (`fit$theta_levels`) lay out {expected} \
+         thetas for the level block(s) {}, but the fit carries {n_theta} (`fit$theta`). The two \
+         no longer belong to the same fit; refit with `ferx_fit()`.",
+        level_block_names(model)
+    )
 }
 
 /// The DSL token for a level contrast - the spelling `contrast = ...` takes in
@@ -4392,6 +4444,11 @@ fn ferx_rust_sir(
     sir_seed: i32,
     sir_keep_samples: bool,
     verbose: bool,
+    level_block: Vec<String>,
+    level_index: Vec<i32>,
+    level_label: Vec<String>,
+    level_group: Vec<i32>,
+    level_contrast: Vec<String>,
 ) -> Robj {
     entry(move || {
         // All error paths in this binding return `Err`, which `entry` raises as
@@ -4401,16 +4458,19 @@ fn ferx_rust_sir(
         // "backend returned no result" from the R wrapper. Raising propagates
         // the actual message (e.g. "hash mismatch") into the R condition, which
         // is what test code expects and what users want.
-        let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
+        let mut parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
             Ok(p) => p,
             Err(e) => return Err(format!(
                 "ferx_sir: error parsing model at {}: {}",
                 model_path, e
             )),
         };
-        // Not on a level-block fit yet (ferx-r #370): this path re-reads the data
-        // to keep the integrity check, and that read binds no level block.
-        refuse_level_blocks(&parsed.model, "ferx_sir")?;
+        // On a level-block fit, the theta is the fit's layout: size the skeleton
+        // from it, and carry it to the engine in the skeleton's `data_bindings`.
+        let fit_levels = level_bindings_from_r(
+            &level_block, &level_index, &level_label, &level_group, &level_contrast,
+        )?;
+        bind_layout_from_fit(&mut parsed, model_path, &fit_levels)?;
         let model = &parsed.model;
         let template = &model.default_params;
 
@@ -4421,11 +4481,7 @@ fn ferx_rust_sir(
         let n_packed = cov_matrix_dim as usize;
 
         if n_theta != template.theta.len() {
-            return Err(format!(
-                "ferx_sir: theta length {} does not match model ({} expected)",
-                n_theta,
-                template.theta.len()
-            ));
+            return Err(theta_length_error("ferx_sir", model, n_theta, template.theta.len()));
         }
         if n_sigma != template.sigma.values.len() {
             return Err(format!(
@@ -4825,22 +4881,30 @@ fn ferx_rust_covariance(
     covariance_method: &str,
     mu_referencing: bool,
     verbose: bool,
+    level_block: Vec<String>,
+    level_index: Vec<i32>,
+    level_label: Vec<String>,
+    level_group: Vec<i32>,
+    level_contrast: Vec<String>,
 ) -> Robj {
     entry(move || {
         // All error paths in this binding return `Err`, which `entry` raises as
         // an R condition, mirroring `ferx_rust_sir`, so the engine message
         // (e.g. "hash mismatch") propagates into the R condition rather than
         // being lost to stderr.
-        let parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
+        let mut parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
             Ok(p) => p,
             Err(e) => return Err(format!(
                 "ferx_covariance: error parsing model at {}: {}",
                 model_path, e
             )),
         };
-        // Not on a level-block fit yet (ferx-r #370): this path re-reads the data
-        // to keep the integrity check, and that read binds no level block.
-        refuse_level_blocks(&parsed.model, "ferx_covariance")?;
+        // On a level-block fit, the theta is the fit's layout: size the skeleton
+        // from it, and carry it to the engine in the skeleton's `data_bindings`.
+        let fit_levels = level_bindings_from_r(
+            &level_block, &level_index, &level_label, &level_group, &level_contrast,
+        )?;
+        bind_layout_from_fit(&mut parsed, model_path, &fit_levels)?;
         let model = &parsed.model;
         let template = &model.default_params;
 
@@ -4850,11 +4914,7 @@ fn ferx_rust_covariance(
         let n_subj = n_subjects.max(0) as usize;
 
         if n_theta != template.theta.len() {
-            return Err(format!(
-                "ferx_covariance: theta length {} does not match model ({} expected)",
-                n_theta,
-                template.theta.len()
-            ));
+            return Err(theta_length_error("ferx_covariance", model, n_theta, template.theta.len()));
         }
         if n_sigma != template.sigma.values.len() {
             return Err(format!(
