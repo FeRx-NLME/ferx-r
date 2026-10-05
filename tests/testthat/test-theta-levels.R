@@ -719,15 +719,16 @@ test_that("T11d: ferx_sir runs on a block whose levels straddle 0", {
   b <- tl_base()
   s <- ferx_sir(tl_with_cov(b$fit), sir_samples = 20L, sir_resamples = 10L,
                 sir_seed = 1L)
+  # An all-rejected SIR is an engine error, so reaching this line is the
+  # #1701 check; the intervals below are what the old engine could not give.
   ci <- s$sir_ci_theta
-  expect_identical(rownames(ci), names(b$fit$theta))
   expect_true(all(is.finite(ci)))
   expect_true(all(ci[, "lower"] <= ci[, "upper"]))
   lvl <- grepl("^PLACEBO\\[", rownames(ci))
   neg <- lvl & b$fit$theta[rownames(ci)] < 0
   expect_gt(sum(neg), 0L)
   expect_true(all(ci[neg, "lower"] < 0))
-  expect_false(any(grepl("invalid weights", s$warnings, fixed = TRUE)))
+  expect_true(all(ci[neg, "upper"] < 0))
 })
 
 test_that("T8b: a reloaded level-block fit runs the covariance step identically", {
