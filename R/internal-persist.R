@@ -291,9 +291,19 @@
 
 # `read.csv()`, with every column it types as double re-parsed by
 # `.fitrx_parse_doubles()`. read.csv() still decides the column types, so a
-# loaded table has the shape it always had.
-.fitrx_read_csv_exact <- function(path) {
-  df <- utils::read.csv(path, stringsAsFactors = FALSE, check.names = FALSE)
+# loaded table has the shape it always had - except the `id_cols`, which are
+# read as text, verbatim: inferring a type turns the IDs `001` and `1.0` into
+# `1`, and `as.character()` afterwards only puts the type back (#468).
+.fitrx_read_csv_exact <- function(path, id_cols = character()) {
+  header <- names(utils::read.csv(path, nrows = 0L, check.names = FALSE))
+  id_cols <- intersect(id_cols, header)
+  col_classes <- if (length(id_cols) > 0L) {
+    stats::setNames(rep("character", length(id_cols)), id_cols)
+  } else {
+    NA
+  }
+  df <- utils::read.csv(path, stringsAsFactors = FALSE, check.names = FALSE,
+                        colClasses = col_classes)
   dbl <- which(vapply(df, is.double, logical(1)))
   if (length(dbl) > 0L) {
     raw <- utils::read.csv(path, stringsAsFactors = FALSE, check.names = FALSE,
