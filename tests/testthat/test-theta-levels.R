@@ -670,9 +670,12 @@ test_that("T11a: ferx_covariance on a level-block fit matches the counted form",
   expect_true(all(is.finite(c_col$se_theta)))
   expect_identical(unname(c_col$cov_matrix), unname(c_cnt$cov_matrix))
   expect_identical(unname(c_col$se_theta), unname(c_cnt$se_theta))
-  # Each also equals its own fit's in-fit covariance step.
-  expect_identical(unname(c_col$se_theta), unname(tw$col$se_theta))
-  expect_identical(unname(c_cnt$se_theta), unname(tw$cnt$se_theta))
+  # Each also agrees with its own fit's in-fit covariance step. Bit for bit on
+  # the macOS FD build, but 3e-12 apart (relative) on CI's Linux build: the
+  # standalone step rebuilds Omega from `fit$omega`. A layout the fit never
+  # had moves these SEs by up to 3593x.
+  expect_equal(unname(c_col$se_theta), unname(tw$col$se_theta), tolerance = 1e-10)
+  expect_equal(unname(c_cnt$se_theta), unname(tw$cnt$se_theta), tolerance = 1e-10)
   expect_identical(names(c_col$theta), names(tw$col$theta))
 })
 
@@ -733,8 +736,9 @@ test_that("T8b: a reloaded level-block fit runs the covariance step identically"
   expect_true(all(is.finite(c1$se_theta)))
   expect_identical(c2$cov_matrix, c1$cov_matrix)
   expect_identical(c2$se_theta, c1$se_theta)
-  # The unread FIX eta moves nothing: the same SEs as the T11a twin.
-  expect_identical(unname(c1$se_theta), unname(tl_twin()$col$se_theta))
+  # The unread FIX eta moves nothing: the T11a twin's SEs (its in-fit step,
+  # so the same 1e-10 band as T11a).
+  expect_equal(unname(c1$se_theta), unname(tl_twin()$col$se_theta), tolerance = 1e-10)
 })
 
 test_that("R7: bindings on a model without a level block are refused", {
