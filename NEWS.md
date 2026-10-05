@@ -343,9 +343,9 @@
   rejected. They now pass the fit's own IDs, and the same data under any
   labels gives identical standard errors and SIR intervals. A fit that
   carries no subject IDs at all is refused with a message naming the two
-  fields it looked at. `ferx_load_fit()` now reads every ID column verbatim:
-  IDs such as `001` or `1.0` used to come back as `1`, so a loaded fit with
-  them was refused too.
+  fields it looked at. `ferx_load_fit()` now reads the ID column of `ebe_etas`,
+  `covtab`, `ebe_kappas` and `cond_dist` verbatim: IDs such as `001` or `1.0`
+  used to come back as `1`, so a loaded fit with them was refused too.
 
 - **`ferx_sir()` resamples an IOV fit around its fitted kappa, and a FOCEI
   fit under the FOCEI inner loop**

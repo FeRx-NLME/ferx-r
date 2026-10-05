@@ -1518,6 +1518,7 @@ test_that("an unweighted IOV fit writes no kappa weight fields", {
   expect_null(loaded$kappa_weights)
   expect_null(loaded$kappa_weight_typical)
 })
+
 test_that("every ID column survives a save / load round-trip verbatim (synthetic, #468)", {
   # `001` and `1.0` are what a type-inferring read turns into `1`; the old
   # loader then put back only the type, so `ferx_sir()` / `ferx_covariance()`
