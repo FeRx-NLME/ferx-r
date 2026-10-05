@@ -347,9 +347,12 @@
   exactly for the same seed and sample sizes, so **standalone SIR intervals
   change on every IOV fit and every FOCEI fit**; a FOCE fit without IOV is
   unchanged. A kappa fit whose `fit$omega_iov` has been removed is now
-  refused rather than resampled around the initial value. `ferx_sir()` still
-  runs with the default `sir_df` and inner-loop settings, whatever the fit
-  used.
+  refused rather than resampled around the initial value, and
+  `ferx_covariance()` now stops on a `fit$omega_iov` that is not a square
+  matrix instead of treating it as "no IOV". `ferx_sir()` still runs with the
+  default `sir_df`, inner-loop settings and call-time ODE tolerances
+  (`settings = list(ode_reltol = ...)`), whatever the fit used
+  ([#472](https://github.com/FeRx-NLME/ferx-r/issues/472)).
 
 - **`print()` shows `FIXED` for the standard error of a FIX parameter, and
   `fit$estimates` gives it `NA`**

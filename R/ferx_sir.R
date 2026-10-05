@@ -16,8 +16,10 @@
 #' covariance `fit$omega_iov`, under the inner loop of its last estimation
 #' method (FOCE or FOCEI). With the same `sir_seed` and sample sizes the result
 #' is the one `ferx_fit(..., sir = TRUE)` reports. The SIR proposal's degrees
-#' of freedom (`sir_df`) and the inner-loop settings take their defaults,
-#' whatever the fit used.
+#' of freedom (`sir_df`), the inner-loop settings, and ODE solver tolerances
+#' passed to `ferx_fit()` through `settings =` (`ode_reltol`, `ode_abstol`,
+#' `ode_max_steps`) take their defaults, whatever the fit used; tolerances
+#' written in the model file's `[fit_options]` are kept.
 #'
 #' ## Integrity check
 #'

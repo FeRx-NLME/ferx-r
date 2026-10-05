@@ -65,8 +65,10 @@ The fit is rebuilt at its fitted estimates, including the IOV (kappa)
 covariance \code{fit$omega_iov}, under the inner loop of its last estimation
 method (FOCE or FOCEI). With the same \code{sir_seed} and sample sizes the result
 is the one \code{ferx_fit(..., sir = TRUE)} reports. The SIR proposal's degrees
-of freedom (\code{sir_df}) and the inner-loop settings take their defaults,
-whatever the fit used.
+of freedom (\code{sir_df}), the inner-loop settings, and ODE solver tolerances
+passed to \code{ferx_fit()} through \verb{settings =} (\code{ode_reltol}, \code{ode_abstol},
+\code{ode_max_steps}) take their defaults, whatever the fit used; tolerances
+written in the model file's \verb{[fit_options]} are kept.
 \subsection{Integrity check}{
 
 \code{ferx_fit()} records the model and data file paths plus SHA-256 hashes
