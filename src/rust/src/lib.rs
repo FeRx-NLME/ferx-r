@@ -4416,8 +4416,11 @@ fn ferx_rust_inits_from_nca(model_path: &str, data_path: &str, method: &str) -> 
 /// @param cov_matrix_dim Dimension of the covariance matrix.
 /// @param residual_rho Fitted `block_sigma` residual correlations, in model
 ///   declaration order (empty when the model declares none).
-/// @param eta_hats_flat Row-major flattened per-subject EBE etas (n_subjects × n_eta).
-/// @param n_subjects Number of subjects.
+/// @param eta_hats_flat Row-major flattened per-subject EBE etas (one row per
+///   entry of `subject_ids`, n_eta columns).
+/// @param subject_ids The fit's subject IDs, verbatim and in fit order. The
+///   engine checks them against the population it re-reads from the data
+///   (ferx-r #468); their length is the subject count.
 /// @param sir_samples Number of proposal samples (M).
 /// @param sir_resamples Number of resamples (m); must be <= M.
 /// @param sir_seed Random seed; pass -1 for the engine default.
@@ -4445,7 +4448,7 @@ fn ferx_rust_sir(
     cov_matrix_flat: Vec<f64>,
     cov_matrix_dim: i32,
     eta_hats_flat: Vec<f64>,
-    n_subjects: i32,
+    subject_ids: Vec<String>,
     sir_samples: i32,
     sir_resamples: i32,
     sir_seed: i32,
@@ -4484,7 +4487,7 @@ fn ferx_rust_sir(
         let n_theta = theta.len();
         let n_sigma = sigma.len();
         let n_eta = omega_dim as usize;
-        let n_subj = n_subjects.max(0) as usize;
+        let n_subj = subject_ids.len();
         let n_packed = cov_matrix_dim as usize;
 
         if n_theta != template.theta.len() {
@@ -4521,9 +4524,11 @@ fn ferx_rust_sir(
         }
         if eta_hats_flat.len() != n_subj * n_eta {
             return Err(format!(
-                "ferx_sir: eta_hats_flat length {} does not match n_subjects * n_eta = {}",
+                "ferx_sir: eta_hats_flat length {} does not match n_subjects * n_eta = {} \
+                 ({} subject IDs)",
                 eta_hats_flat.len(),
-                n_subj * n_eta
+                n_subj * n_eta,
+                n_subj
             ));
         }
 
@@ -4538,8 +4543,9 @@ fn ferx_rust_sir(
             .map(|m| m.matrix);
 
         // Build SubjectResult vec with only `eta` populated (the only field
-        // ferx_core::run_sir reads off subjects). IDs are synthesised because
-        // SIR doesn't consume them; the original IDs live on the R fit list.
+        // ferx_core::run_sir reads off subjects) and the fit's own IDs, which
+        // the engine checks by position against the population it re-reads
+        // from the data (ferx-r #468).
         let mut subjects: Vec<SubjectResult> = Vec::with_capacity(n_subj);
         for i in 0..n_subj {
             let mut eta = nalgebra::DVector::<f64>::zeros(n_eta);
@@ -4547,7 +4553,7 @@ fn ferx_rust_sir(
                 eta[k] = eta_hats_flat[i * n_eta + k];
             }
             subjects.push(SubjectResult {
-                id: format!("{}", i + 1),
+                id: subject_ids[i].clone(),
                 eta,
                 ipred: Vec::new(),
                 pred: Vec::new(),
@@ -4865,8 +4871,11 @@ fn ferx_rust_sir(
 /// @param omega_iov_dim Dimension of the IOV omega matrix; 0 when no IOV.
 /// @param residual_rho Fitted `block_sigma` residual correlations, in model
 ///   declaration order (empty when the model declares none).
-/// @param eta_hats_flat Row-major flattened per-subject EBE etas (n_subjects × n_eta).
-/// @param n_subjects Number of subjects.
+/// @param eta_hats_flat Row-major flattened per-subject EBE etas (one row per
+///   entry of `subject_ids`, n_eta columns).
+/// @param subject_ids The fit's subject IDs, verbatim and in fit order. The
+///   engine checks them against the population it re-reads from the data
+///   (ferx-r #468); their length is the subject count.
 /// @param covariance_method Covariance estimator: "r"/"hessian", "s"/"cross_product", or "rsr"/"sandwich".
 /// @param mu_referencing TRUE to use mu-referencing for the inner-loop warm restart.
 /// @param verbose When TRUE, the engine prints progress to stderr.
@@ -4891,7 +4900,7 @@ fn ferx_rust_covariance(
     omega_iov_dim: i32,
     residual_rho: Vec<f64>,
     eta_hats_flat: Vec<f64>,
-    n_subjects: i32,
+    subject_ids: Vec<String>,
     covariance_method: &str,
     mu_referencing: bool,
     verbose: bool,
@@ -4925,7 +4934,7 @@ fn ferx_rust_covariance(
         let n_theta = theta.len();
         let n_sigma = sigma.len();
         let n_eta = omega_dim as usize;
-        let n_subj = n_subjects.max(0) as usize;
+        let n_subj = subject_ids.len();
 
         if n_theta != template.theta.len() {
             return Err(theta_length_error("ferx_covariance", model, n_theta, template.theta.len()));
@@ -4953,9 +4962,11 @@ fn ferx_rust_covariance(
         }
         if eta_hats_flat.len() != n_subj * n_eta {
             return Err(format!(
-                "ferx_covariance: eta_hats_flat length {} does not match n_subjects * n_eta = {}",
+                "ferx_covariance: eta_hats_flat length {} does not match n_subjects * n_eta = {} \
+                 ({} subject IDs)",
                 eta_hats_flat.len(),
-                n_subj * n_eta
+                n_subj * n_eta,
+                n_subj
             ));
         }
 
@@ -4983,7 +4994,8 @@ fn ferx_rust_covariance(
         };
 
         // Build SubjectResult vec with only `eta` populated — the warm-start the
-        // covariance step reconverges from. IDs are synthesised (unused here).
+        // covariance step reconverges from — and the fit's own IDs, which the
+        // engine checks by position against the re-read population (ferx-r #468).
         let mut subjects: Vec<SubjectResult> = Vec::with_capacity(n_subj);
         for i in 0..n_subj {
             let mut eta = nalgebra::DVector::<f64>::zeros(n_eta);
@@ -4991,7 +5003,7 @@ fn ferx_rust_covariance(
                 eta[k] = eta_hats_flat[i * n_eta + k];
             }
             subjects.push(SubjectResult {
-                id: format!("{}", i + 1),
+                id: subject_ids[i].clone(),
                 eta,
                 ipred: Vec::new(),
                 pred: Vec::new(),

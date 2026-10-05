@@ -60,6 +60,44 @@ validate_fit_for_params <- function(fit) {
   )
 }
 
+# The fit's subject IDs, verbatim and in fit order, for the skeleton FitResult
+# that `ferx_sir()` / `ferx_covariance()` hand the engine, which checks them by
+# position against the population it re-reads from the data (#468). Read from
+# `fit$ebe_etas` - the rows the EBE matrix is built from, so the two agree by
+# construction - and, on a fit without random effects (no EBE rows), from
+# `fit$individual_estimates`. `fit$sdtab$ID` is numeric and not an ID source.
+.ferx_fit_subject_ids <- function(fit, caller) {
+  ids <- NULL
+  source <- NULL
+  if (!is.null(fit$ebe_etas) && nrow(fit$ebe_etas) > 0L &&
+      !is.null(fit$ebe_etas$ID)) {
+    ids <- fit$ebe_etas$ID
+    source <- "fit$ebe_etas$ID"
+  } else if (!is.null(fit$individual_estimates$ID) &&
+             length(fit$individual_estimates$ID) > 0L) {
+    ids <- fit$individual_estimates$ID
+    source <- "fit$individual_estimates$ID"
+  }
+  if (is.null(ids)) {
+    stop(
+      caller, ": the fit carries no subject IDs (neither fit$ebe_etas$ID nor ",
+      "fit$individual_estimates$ID), so it cannot be matched to the data. ",
+      "Re-fit via ferx_fit(model, data).",
+      call. = FALSE
+    )
+  }
+  n_na <- sum(is.na(ids))
+  if (n_na > 0L) {
+    stop(
+      caller, ": ", n_na, " of the ", length(ids), " subject IDs in ", source,
+      " are NA. The IDs are matched to the data subject by subject, so every ",
+      "one must be present.",
+      call. = FALSE
+    )
+  }
+  as.character(ids)
+}
+
 # The one constructor of `fit$theta_levels` (#370), shared by `ferx_fit()` and
 # `ferx_load_fit()` so a fresh fit and a reloaded one are `identical()`. Takes
 # the columns as plain vectors; a NULL column reads as zero rows.

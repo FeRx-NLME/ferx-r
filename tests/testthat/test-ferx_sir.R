@@ -409,3 +409,32 @@ test_that("ferx_sir on a FOCEI fit resamples under the FOCEI inner loop", {
 
   expect_same_sir(standalone_sir(fit), fit)
 })
+
+# ---- subject IDs on the standalone skeleton (#468) ----
+# See the matching block in test-ferx_covariance.R; SIR builds its own skeleton
+# in the glue, so it gets its own twin.
+
+test_that("ferx_sir gives the same draw on any subject labels (#468)", {
+  relabel_gappy <- function(id) 3L * id + 107L
+  base <- relabelled_fit("warfarin", "identity", identity)
+  gappy <- relabelled_fit("warfarin", "gappy", relabel_gappy)
+  skip_if(is.null(base$cov_matrix) || is.null(gappy$cov_matrix), sir_cov_skip)
+
+  sir <- function(f) ferx_sir(f, sir_samples = 50L, sir_resamples = 20L, sir_seed = 1L)
+  out_base <- sir(base)
+  out_gappy <- sir(gappy)
+  expect_identical(out_gappy$sir_ess, out_base$sir_ess)
+  expect_identical(out_gappy$sir_ci_theta, out_base$sir_ci_theta)
+})
+
+test_that("ferx_sir hands the binding the fit's IDs verbatim (#468)", {
+  skip_if_not_installed("mockery")
+  gappy <- relabelled_fit("warfarin", "gappy", function(id) 3L * id + 107L)
+  skip_if(is.null(gappy$cov_matrix), sir_cov_skip)
+  cap <- capture_binding_args()
+  mockery::stub(ferx_sir, "ferx_rust_sir", cap$fake)
+  expect_error(ferx_sir(gappy, sir_samples = 4L, sir_resamples = 2L), "captured")
+  args <- cap$seen()
+  expect_identical(args$subject_ids, gappy$ebe_etas$ID)
+  expect_null(args$n_subjects)
+})

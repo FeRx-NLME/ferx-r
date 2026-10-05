@@ -184,16 +184,6 @@ ferx_sir <- function(fit,
     # applies: it resamples the theta/sigma block, which is the whole parameter
     # vector here.
     eta_hats_flat <- numeric(0)
-    # `nrow(eta_mat)` is the usual subject count, but there is no eta matrix
-    # here; the engine still needs the count to size its warm-start scaffold.
-    n_subj <- as.integer(fit$n_subjects %||% 0L)
-    if (n_subj <= 0L) {
-      stop(
-        "ferx_sir: fit has no random effects and no recorded n_subjects, so ",
-        "the subject count cannot be determined. Re-fit via ",
-        "ferx_fit(model, data)."
-      )
-    }
   } else {
     if (is.null(ebes) || nrow(ebes) == 0L) {
       stop(
@@ -215,8 +205,11 @@ ferx_sir <- function(fit,
     eta_mat <- as.matrix(ebes[, eta_cols, drop = FALSE])
     storage.mode(eta_mat) <- "double"
     eta_hats_flat <- as.numeric(t(eta_mat))  # row-major
-    n_subj <- nrow(eta_mat)
   }
+  # The fit's own subject IDs, in fit order (#468); their count is the
+  # subject count, and in the n_eta > 0 branch they come from the same
+  # `ebe_etas` rows as `eta_mat`.
+  subject_ids <- .ferx_fit_subject_ids(fit, "ferx_sir")
 
   # The Rust binding wants row-major matrices and treats empty hash strings
   # as "no integrity check needed". Pass the recorded hashes through; the
@@ -270,7 +263,7 @@ ferx_sir <- function(fit,
     cov_matrix_flat = cov_flat,
     cov_matrix_dim = nrow(fit$cov_matrix),
     eta_hats_flat = eta_hats_flat,
-    n_subjects = n_subj,
+    subject_ids = subject_ids,
     sir_samples = as.integer(sir_samples),
     sir_resamples = as.integer(sir_resamples),
     sir_seed = if (is.null(sir_seed)) -1L else as.integer(sir_seed),

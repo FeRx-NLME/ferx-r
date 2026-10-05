@@ -124,19 +124,8 @@ test_that(".ferx_ofv_prior reads 0 off a fit that predates the field", {
   expect_equal(ferx:::.ferx_ofv_prior(list(ofv_prior = 2.5)), 2.5)
 })
 
-# Capture the arguments a binding is called with, then abort. The SIR and
-# covariance steps are expensive and their output cannot show what reference
-# objective they were handed, so the forwarding is asserted on the call itself.
-capture_binding_args <- function() {
-  seen <- NULL
-  list(
-    fake = function(...) {
-      seen <<- list(...)
-      stop("captured", call. = FALSE)
-    },
-    seen = function() seen
-  )
-}
+# `capture_binding_args()` lives in helper-relabelled-fit.R, shared with the
+# subject-ID forwarding tests (#468).
 
 test_that("ferx_sir forwards the fit's own prior half to the binding", {
   skip_if_not_installed("mockery")
