@@ -2293,6 +2293,9 @@ fn default_fit_result(
         // ferx-core main added a checkpoint-restore flag; a defaulted FitResult is
         // never a restored one.
         restored_from_checkpoint: false,
+        // ferx-core #1668: the level-block / covariate-statistic bindings the model was
+        // compiled from, copied as ferx-core's own fit() does.
+        data_bindings: model.data_bindings().clone(),
         // ferx-core #1444 / covariance-estimator label: a skeleton FitResult ran
         // neither SAEM nor a covariance step of its own.
         saem_mh_accept_tail: None,
@@ -4513,6 +4516,8 @@ fn ferx_rust_sir(
         let fit = FitResult {
             // ferx-core main added a checkpoint-restore flag; the SIR path never reads it.
             restored_from_checkpoint: false,
+            // ferx-core #1668: the bindings the model was compiled from, as fit() copies them.
+            data_bindings: model.data_bindings().clone(),
             // ferx-core #1444 / covariance-estimator label: a skeleton FitResult ran
             // neither SAEM nor a covariance step of its own.
             saem_mh_accept_tail: None,
@@ -4951,6 +4956,8 @@ fn ferx_rust_covariance(
         let fit = FitResult {
             // ferx-core main added a checkpoint-restore flag; the covariance path never reads it.
             restored_from_checkpoint: false,
+            // ferx-core #1668: the bindings the model was compiled from, as fit() copies them.
+            data_bindings: model.data_bindings().clone(),
             // ferx-core #1444 / covariance-estimator label: a skeleton FitResult ran
             // neither SAEM nor a covariance step of its own.
             saem_mh_accept_tail: None,
