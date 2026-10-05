@@ -237,6 +237,9 @@ ferx_sir <- function(fit,
   omega_flat <- as.numeric(t(fit$omega))
   cov_flat <- as.numeric(t(fit$cov_matrix))
 
+  # The fitted kappa (IOV) covariance: without it the engine rebuilds the fit at
+  # the model file's initial kappa and resamples around the wrong centre (#465).
+  iov_args <- .ferx_omega_iov_args(fit)
   level_args <- .ferx_theta_level_args(fit)
   raw <- ferx_rust_sir(
     model_path = model_path,
@@ -250,6 +253,8 @@ ferx_sir <- function(fit,
     omega_flat = omega_flat,
     omega_dim = nrow(fit$omega),
     sigma = as.numeric(fit$sigma),
+    omega_iov_flat = iov_args$omega_iov_flat,
+    omega_iov_dim = iov_args$omega_iov_dim,
     residual_rho = .ferx_residual_rho_vec(fit),
     cov_matrix_flat = cov_flat,
     cov_matrix_dim = nrow(fit$cov_matrix),

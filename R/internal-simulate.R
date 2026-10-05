@@ -10,28 +10,37 @@ validate_fit_for_params <- function(fit) {
   if (!is.matrix(omega) || nrow(omega) != ncol(omega)) {
     stop("`fit$omega` must be a square matrix.")
   }
-  # Fitted IOV (kappa) covariance. A `kappa` model needs it downstream: the engine
-  # draws (simulate) or conditions on (predict / npde) one kappa vector per occasion
-  # from it, and dropping it panicked ferx-core's simulate path (#1019). NULL for a
-  # non-IOV fit, which maps to an empty vector + dim 0 ("no IOV") on the Rust side.
-  omega_iov <- fit$omega_iov
-  if (!is.null(omega_iov) &&
-      (!is.matrix(omega_iov) || nrow(omega_iov) != ncol(omega_iov))) {
-    stop("`fit$omega_iov` must be a square matrix (or NULL for a model without IOV).")
-  }
   c(list(
     theta = theta,
     omega_flat = as.numeric(t(omega)),  # row-major
     omega_dim = as.integer(nrow(omega)),
-    sigma = sigma,
-    omega_iov_flat = if (is.null(omega_iov)) numeric(0) else as.numeric(t(omega_iov)),
-    omega_iov_dim = if (is.null(omega_iov)) 0L else as.integer(nrow(omega_iov)),
+    sigma = sigma
+  ), .ferx_omega_iov_args(fit), list(
     # Fitted `block_sigma` residual correlations, in model declaration order.
     # A plain (non-FIX) block estimates rho, so passing them is what keeps the
     # engine from rebuilding this fit at the model file's declared correlation;
     # empty for a model that declares none.
     residual_rho = .ferx_residual_rho_vec(fit)
   ), .ferx_theta_level_args(fit))
+}
+
+# Fitted IOV (kappa) covariance, flattened row-major for the FFI. A `kappa` model
+# needs it downstream: the engine draws (simulate) or conditions on (predict /
+# npde) one kappa vector per occasion from it, and dropping it panicked
+# ferx-core's simulate path (#1019); the SIR and covariance skeletons fall back to
+# the model file's *initial* kappa without it (#465). NULL for a non-IOV fit,
+# which maps to an empty vector + dim 0 ("no IOV") on the Rust side. The one
+# source of these two arguments for every from-fit entry point.
+.ferx_omega_iov_args <- function(fit) {
+  omega_iov <- fit$omega_iov
+  if (!is.null(omega_iov) &&
+      (!is.matrix(omega_iov) || nrow(omega_iov) != ncol(omega_iov))) {
+    stop("`fit$omega_iov` must be a square matrix (or NULL for a model without IOV).")
+  }
+  list(
+    omega_iov_flat = if (is.null(omega_iov)) numeric(0) else as.numeric(t(omega_iov)),
+    omega_iov_dim = if (is.null(omega_iov)) 0L else as.integer(nrow(omega_iov))
+  )
 }
 
 # The theta level-block layout the fit was bound with (#370), flattened for

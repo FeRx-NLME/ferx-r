@@ -195,13 +195,7 @@ ferx_covariance <- function(fit,
   # IOV omega (empty when no IOV). Forwarding the fitted matrix keeps IOV kappa
   # standard errors on the estimated scale; when absent the engine falls back
   # to the model-file init.
-  if (!is.null(fit$omega_iov) && is.matrix(fit$omega_iov) && nrow(fit$omega_iov) > 0L) {
-    omega_iov_flat <- as.numeric(t(fit$omega_iov))
-    omega_iov_dim <- nrow(fit$omega_iov)
-  } else {
-    omega_iov_flat <- numeric(0)
-    omega_iov_dim <- 0L
-  }
+  iov_args <- .ferx_omega_iov_args(fit)
 
   level_args <- .ferx_theta_level_args(fit)
   raw <- ferx_rust_covariance(
@@ -216,8 +210,8 @@ ferx_covariance <- function(fit,
     omega_flat = omega_flat,
     omega_dim = nrow(fit$omega),
     sigma = as.numeric(fit$sigma),
-    omega_iov_flat = omega_iov_flat,
-    omega_iov_dim = as.integer(omega_iov_dim),
+    omega_iov_flat = iov_args$omega_iov_flat,
+    omega_iov_dim = iov_args$omega_iov_dim,
     residual_rho = .ferx_residual_rho_vec(fit),
     eta_hats_flat = eta_hats_flat,
     n_subjects = n_subj,
