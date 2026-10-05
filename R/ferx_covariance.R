@@ -203,6 +203,7 @@ ferx_covariance <- function(fit,
     omega_iov_dim <- 0L
   }
 
+  level_args <- .ferx_theta_level_args(fit)
   raw <- ferx_rust_covariance(
     model_path = model_path,
     data_path = data_path,
@@ -222,7 +223,12 @@ ferx_covariance <- function(fit,
     n_subjects = n_subj,
     covariance_method = cov_method,
     mu_referencing = isTRUE(mu_referencing),
-    verbose = isTRUE(verbose)
+    verbose = isTRUE(verbose),
+    level_block = level_args$level_block,
+    level_index = level_args$level_index,
+    level_label = level_args$level_label,
+    level_group = level_args$level_group,
+    level_contrast = level_args$level_contrast
   )
 
   # All error paths inside `ferx_rust_covariance` throw an R condition (via

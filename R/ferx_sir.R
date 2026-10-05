@@ -237,6 +237,7 @@ ferx_sir <- function(fit,
   omega_flat <- as.numeric(t(fit$omega))
   cov_flat <- as.numeric(t(fit$cov_matrix))
 
+  level_args <- .ferx_theta_level_args(fit)
   raw <- ferx_rust_sir(
     model_path = model_path,
     data_path = data_path,
@@ -258,7 +259,12 @@ ferx_sir <- function(fit,
     sir_resamples = as.integer(sir_resamples),
     sir_seed = if (is.null(sir_seed)) -1L else as.integer(sir_seed),
     sir_keep_samples = isTRUE(sir_keep_samples),
-    verbose = isTRUE(verbose)
+    verbose = isTRUE(verbose),
+    level_block = level_args$level_block,
+    level_index = level_args$level_index,
+    level_label = level_args$level_label,
+    level_group = level_args$level_group,
+    level_contrast = level_args$level_contrast
   )
 
   # All error paths inside `ferx_rust_sir` throw an R condition (via

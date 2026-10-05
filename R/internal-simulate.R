@@ -19,7 +19,7 @@ validate_fit_for_params <- function(fit) {
       (!is.matrix(omega_iov) || nrow(omega_iov) != ncol(omega_iov))) {
     stop("`fit$omega_iov` must be a square matrix (or NULL for a model without IOV).")
   }
-  list(
+  c(list(
     theta = theta,
     omega_flat = as.numeric(t(omega)),  # row-major
     omega_dim = as.integer(nrow(omega)),
@@ -30,11 +30,19 @@ validate_fit_for_params <- function(fit) {
     # A plain (non-FIX) block estimates rho, so passing them is what keeps the
     # engine from rebuilding this fit at the model file's declared correlation;
     # empty for a model that declares none.
-    residual_rho = .ferx_residual_rho_vec(fit),
-    # The theta level-block layout the fit was bound with (#370), flattened
-    # for the glue, which places the design on it before reading theta by
-    # position. Empty for a model with no level block - and for a fit that
-    # predates the field, which the glue refuses on a level-block model.
+    residual_rho = .ferx_residual_rho_vec(fit)
+  ), .ferx_theta_level_args(fit))
+}
+
+# The theta level-block layout the fit was bound with (#370), flattened for
+# the glue, which lays the model out on it before reading theta by position.
+# Empty for a model with no level block - and for a fit that predates the
+# field, which the glue refuses on a level-block model. The one source of these
+# five arguments for every from-fit entry point (predict / simulate / npde via
+# `validate_fit_for_params()`, `ferx_sir()`, `ferx_covariance()`), so they
+# cannot drift apart.
+.ferx_theta_level_args <- function(fit) {
+  list(
     level_block = as.character(fit$theta_levels$block),
     level_index = as.integer(fit$theta_levels$index),
     level_label = as.character(fit$theta_levels$label),

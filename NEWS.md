@@ -276,10 +276,16 @@
     lacks them - a `.fitrx` written by ferx-core, or one saved before this
     release - cannot drive a simulation of a level-block model; the refusal
     says so and asks for a refit.
-  - `ferx_sir()` and `ferx_covariance()` refuse a level-block model for now:
-    both re-read the data without binding the block
-    ([FeRx-NLME/ferx-core#1622](https://github.com/FeRx-NLME/ferx-core/issues/1622)).
-    Run the covariance step inside `ferx_fit()` instead.
+  - `ferx_sir()` and `ferx_covariance()` run on a level-block fit, on the
+    fit's own level layout: they hand `fit$theta_levels` to the engine, which
+    binds the re-read data to it
+    ([#463](https://github.com/FeRx-NLME/ferx-r/issues/463)). A fit without
+    the bindings is refused with the same text as the predict paths, and a
+    `fit$theta_levels` that no longer lays out `fit$theta` is refused naming
+    both counts. SIR on a block whose levels can be zero or negative (any
+    block centred on 0, such as the bundled `mbma_placebo`) still fails in
+    the engine, which rejects every non-positive theta whatever its bounds
+    ([FeRx-NLME/ferx-core#1701](https://github.com/FeRx-NLME/ferx-core/issues/1701)).
 
 - **`ferx_mbma_data()` builds and checks a summary-level dataset** for a
   model-based meta-analysis

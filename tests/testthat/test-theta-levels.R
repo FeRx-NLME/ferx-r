@@ -492,6 +492,78 @@ test_that("T9: a level-block model with a fit lacking bindings is refused", {
   expect_no_match(msg, "was the model edited", fixed = TRUE)
 })
 
+test_that("T9b: ferx_sir / ferx_covariance give the predict paths' refusal", {
+  b <- tl_base()
+  fit <- tl_with_cov(b$fit)
+  fit$theta_levels <- NULL
+  msg_of <- function(expr) {
+    tryCatch({
+      expr
+      NA_character_
+    }, error = function(e) conditionMessage(e))
+  }
+  # Byte for byte the text T9 anchors: one function writes it for every path.
+  sim <- msg_of(ferx_simulate(b$model, b$data, fit = fit))
+  expect_match(sim, "this fit carries no theta level bindings", fixed = TRUE)
+  expect_identical(msg_of(ferx_covariance(fit)), sim)
+  expect_identical(
+    msg_of(ferx_sir(fit, sir_samples = 20L, sir_resamples = 10L)), sim
+  )
+  expect_no_match(sim, "theta length", fixed = TRUE)
+  expect_no_match(sim, "expected)", fixed = TRUE)
+})
+
+test_that("T9c: bindings that no longer lay out the fit's theta are named", {
+  b <- tl_base()
+  fit <- tl_with_cov(b$fit)
+  # An edited fit: one level row gone, so the layout is one theta short.
+  fit$theta_levels <- fit$theta_levels[-nrow(fit$theta_levels), ]
+  check <- function(expr, who) {
+    err <- tryCatch({
+      expr
+      NULL
+    }, error = function(e) e)
+    expect_s3_class(err, "error")
+    msg <- conditionMessage(err)
+    # The count is the whole model's (TVCL, TVV and four free levels), not the
+    # block's alone.
+    expect_match(msg, paste0(
+      who, ": the model file, laid out on the fit's theta level bindings ",
+      "(`fit$theta_levels`) for its level block(s) `PLACEBO`, has 6 thetas, ",
+      "but the fit carries 7 (`fit$theta`). Either the model file was edited ",
+      "since the fit, or `fit$theta_levels` was"
+    ), fixed = TRUE)
+    expect_no_match(msg, "does not match model", fixed = TRUE)
+  }
+  check(ferx_covariance(fit), "ferx_covariance")
+  check(ferx_sir(fit, sir_samples = 20L, sir_resamples = 10L), "ferx_sir")
+})
+
+test_that("T9d: a model file edited after the fit is named as a possible cause", {
+  # The glue's theta count check runs before the engine's model-hash check,
+  # so an edited model file reaches it first and must not be blamed on
+  # `fit$theta_levels` alone.
+  b <- tl_base()
+  model <- tl_col_model()
+  fit <- tl_with_cov(tl_fit(model, b$data))
+  text <- readLines(model)
+  at <- which(text == "[parameters]")
+  writeLines(append(text, "  theta EXTRA(1.0, 0.1, 10.0)", after = at), model)
+  check <- function(expr, who) {
+    err <- tryCatch({
+      expr
+      NULL
+    }, error = function(e) e)
+    expect_s3_class(err, "error")
+    msg <- conditionMessage(err)
+    expect_match(msg, paste0(who, ": the model file, laid out"), fixed = TRUE)
+    expect_match(msg, "has 8 thetas, but the fit carries 7", fixed = TRUE)
+    expect_match(msg, "Either the model file was edited since the fit", fixed = TRUE)
+  }
+  check(ferx_covariance(fit), "ferx_covariance")
+  check(ferx_sir(fit, sir_samples = 20L, sir_resamples = 10L), "ferx_sir")
+})
+
 # --- T10: uses without a fit ---------------------------------------------------
 
 test_that("T10: predict and simulate without a fit bind the design's own levels", {
@@ -509,23 +581,187 @@ test_that("T10: predict and simulate without a fit bind the design's own levels"
 
 # --- T11: SIR and the standalone covariance step -------------------------------
 
-test_that("T11: ferx_sir and ferx_covariance refuse a level-block fit", {
+#
+# Both run on the fit's own level layout (#463): the glue lays the model out on
+# `fit$theta_levels` and hands the bindings to the engine, which binds the
+# re-read data to them. The oracle is a twin: the bundled mbma_placebo data
+# with no random effect reaching `y`, once as
+# `PLACEBO[STUDY, TIME, contrast = none]` and once as the counted `PLACEBO[24]`
+# read through a `PLA_IDX` column. The counted form binds no level block, so it
+# ran through both entry points before #463; the two are the same model, so
+# every number must agree bit for bit. An eta or kappa reaching `y` would be
+# absorbed by a [STUDY, TIME] block under contrast = none
+# (FeRx-NLME/ferx-core#1675), and tl_data's six observations are too few for
+# an identified covariance step. `eta = TRUE` adds a FIX eta on a parameter `y`
+# never reads, as tl_model() does, so the fit can take a .fitrx round trip
+# (FeRx-NLME/ferx-r#461) without moving any number.
+
+tl_twin_model <- function(placebo, base, extra_covariate = "", eta = FALSE) {
+  paste0(
+    "[parameters]\n",
+    "  theta EMAX(8.0, 0.0, 100.0)\n",
+    "  theta ED50(20.0, 0.1, 1000.0)\n",
+    "  theta ET50(2.0, 0.01, 100.0)\n",
+    "  theta ", placebo, "(45.0, 0.0, 200.0)\n",
+    if (eta) "  omega ETA_Z ~ 0.04 FIX\n",
+    "  sigma ADD_ERR ~ 1.0 (variance) FIX\n\n",
+    "[covariates]\n",
+    "  STUDY categorical\n",
+    "  NARM  continuous\n",
+    "  SE    continuous\n",
+    "  DOSE  continuous\n",
+    extra_covariate, "\n",
+    "[individual_parameters]\n",
+    "  BASE = ", base, "\n",
+    if (eta) "  Z = EMAX * exp(ETA_Z)\n", "\n",
+    "[structural_model]\n",
+    "  DRUG = EMAX * DOSE / (ED50 + DOSE) * TIME / (TIME + ET50)\n",
+    "  y    = BASE - DRUG\n\n",
+    if (eta) "[derived]\n  Z_OUT = Z\n\n",
+    "[error_model]\n",
+    "  DV ~ additive(ADD_ERR) weight = SE\n\n",
+    "[fit_options]\n",
+    "  method     = focei\n",
+    "  covariance = true\n"
+  )
+}
+
+tl_twin_data <- function() {
+  if (is.null(tl_cache$twin_data)) {
+    d <- utils::read.csv(ferx_example("mbma_placebo")$data)
+    lab <- paste0("STUDY=", d$STUDY, ",TIME=", d$TIME)
+    d$PLA_IDX <- match(lab, unique(lab))
+    path <- tempfile(fileext = ".csv")
+    utils::write.csv(d, path, row.names = FALSE, quote = FALSE)
+    tl_cache$twin_data <- path
+  }
+  tl_cache$twin_data
+}
+
+tl_twin_col_model <- function(eta = FALSE) {
+  tl_write(tl_twin_model("PLACEBO[STUDY, TIME, contrast = none]", "PLACEBO",
+                         eta = eta), ".ferx")
+}
+
+# Both twin fits, shared by T11a and T11b.
+tl_twin <- function() {
+  if (is.null(tl_cache$twin)) {
+    data <- tl_twin_data()
+    n_levels <- max(utils::read.csv(data)$PLA_IDX)
+    counted <- tl_write(tl_twin_model(
+      sprintf("PLACEBO[%d]", n_levels), "PLACEBO[PLA_IDX]",
+      "  PLA_IDX continuous\n"
+    ), ".ferx")
+    tl_cache$twin <- list(
+      col = tl_fit(tl_twin_col_model(), data),
+      cnt = tl_fit(counted, data)
+    )
+  }
+  tl_cache$twin
+}
+
+test_that("T11a: ferx_covariance on a level-block fit matches the counted form", {
+  tw <- tl_twin()
+  expect_identical(nrow(tw$col$theta_levels), 24L)
+  expect_identical(nrow(tw$cnt$theta_levels), 0L)
+  expect_identical(tw$col$ofv, tw$cnt$ofv)
+  c_col <- ferx_covariance(tw$col)
+  c_cnt <- ferx_covariance(tw$cnt)
+  expect_true(all(is.finite(c_col$se_theta)))
+  expect_identical(unname(c_col$cov_matrix), unname(c_cnt$cov_matrix))
+  expect_identical(unname(c_col$se_theta), unname(c_cnt$se_theta))
+  # Each also agrees with its own fit's in-fit covariance step. Bit for bit on
+  # the macOS FD build, but 3e-12 apart (relative) on CI's Linux build: the
+  # standalone step rebuilds Omega from `fit$omega`. A layout the fit never
+  # had moves these SEs by up to 3593x.
+  expect_equal(unname(c_col$se_theta), unname(tw$col$se_theta), tolerance = 1e-10)
+  expect_equal(unname(c_cnt$se_theta), unname(tw$cnt$se_theta), tolerance = 1e-10)
+  expect_identical(names(c_col$theta), names(tw$col$theta))
+})
+
+test_that("T11b: ferx_sir on a level-block fit matches the counted form", {
+  tw <- tl_twin()
+  sir <- function(fit) {
+    ferx_sir(fit, sir_samples = 300L, sir_resamples = 100L, sir_seed = 5L)
+  }
+  s_col <- sir(tw$col)
+  s_cnt <- sir(tw$cnt)
+  expect_true(is.finite(s_col$sir_ess))
+  expect_identical(s_col$sir_ess, s_cnt$sir_ess)
+  expect_identical(unname(as.matrix(s_col$sir_ci_theta)),
+                   unname(as.matrix(s_cnt$sir_ci_theta)))
+})
+
+test_that("T11c: ferx_covariance on the bundled mbma_placebo fit matches the in-fit step", {
+  skip_on_cran()
+  ex <- ferx_example("mbma_placebo")
+  fit <- ferx_fit(ex$model, ex$data, verbose = FALSE)
+  expect_gt(nrow(fit$theta_levels), 0L)
+  sa <- ferx_covariance(fit)
+  # Not bit for bit: the standalone step rebuilds Omega from `fit$omega`, and
+  # this fit's free placebo levels are ill-conditioned, which amplifies the
+  # re-decomposition. Measured 1.5e-5 (theta), 2.4e-6 (omega), 4.0e-7 (kappa);
+  # a layout the fit never had moves SEs by orders of magnitude.
+  rel <- function(a, b) max(abs(unname(a) - unname(b)) / abs(unname(b)))
+  expect_lt(rel(sa$se_theta, fit$se_theta), 1e-4)
+  expect_lt(rel(sa$se_omega, fit$se_omega), 1e-4)
+  expect_lt(rel(sa$se_kappa, fit$se_kappa), 1e-4)
+})
+
+test_that("T11d: ferx_sir on a block whose levels straddle 0 fails in the engine", {
+  # FeRx-NLME/ferx-core#1701: the engine's SIR rejects every sample holding a
+  # theta <= 0, whatever that theta's bounds, so a level block centred on 0
+  # never passes. The glue hands the fit over; this pins that the failure is
+  # the engine's. Flip it when core#1701 lands.
   b <- tl_base()
-  check <- function(expr, who) {
+  err <- tryCatch(
+    ferx_sir(tl_with_cov(b$fit), sir_samples = 20L, sir_resamples = 10L),
+    error = function(e) e
+  )
+  expect_s3_class(err, "error")
+  msg <- conditionMessage(err)
+  expect_match(msg, "non-positive theta", fixed = TRUE)
+  expect_no_match(msg, "not supported yet", fixed = TRUE)
+  expect_no_match(msg, "theta level bindings", fixed = TRUE)
+})
+
+test_that("T8b: a reloaded level-block fit runs the covariance step identically", {
+  # R's .fitrx carries the bindings under r_extras (#466 moves them to the
+  # native slot), and that is enough for the standalone step.
+  fit <- tl_fit(tl_twin_col_model(eta = TRUE), tl_twin_data())
+  fit2 <- tl_roundtrip(fit)
+  expect_identical(fit2$theta_levels, fit$theta_levels)
+  c1 <- ferx_covariance(fit)
+  c2 <- ferx_covariance(fit2)
+  expect_true(all(is.finite(c1$se_theta)))
+  expect_identical(c2$cov_matrix, c1$cov_matrix)
+  expect_identical(c2$se_theta, c1$se_theta)
+  # The unread FIX eta moves nothing: the T11a twin's SEs (its in-fit step,
+  # so the same 1e-10 band as T11a).
+  expect_equal(unname(c1$se_theta), unname(tl_twin()$col$se_theta), tolerance = 1e-10)
+})
+
+test_that("R7: bindings on a model without a level block are refused", {
+  b <- tl_base()
+  counted <- tl_write(tl_model(
+    "  theta TVCL(2.0, 0.001, 20.0)\n  theta PLACEBO[6](0.0, -5.0, 5.0)",
+    "TVCL + PLACEBO[PLA_IDX]"
+  ), ".ferx")
+  fit <- tl_with_cov(tl_fit(counted, b$data))
+  # Stray rows from another fit: before #463 both steps ignored them.
+  fit$theta_levels <- b$fit$theta_levels
+  check <- function(expr) {
     err <- tryCatch({
       expr
       NULL
     }, error = function(e) e)
     expect_s3_class(err, "error")
-    msg <- conditionMessage(err)
-    expect_match(msg, paste0(who, ": not supported yet"), fixed = TRUE)
-    expect_match(msg, "`PLACEBO`", fixed = TRUE)
-    expect_match(msg, "FeRx-NLME/ferx-core#1622", fixed = TRUE)
-    expect_no_match(msg, "values but this model has")
+    expect_match(conditionMessage(err),
+                 "carry the block(s) `PLACEBO`, which this model does not declare",
+                 fixed = TRUE)
   }
-  check(ferx_sir(tl_with_cov(b$fit), sir_samples = 20L, sir_resamples = 10L),
-        "ferx_sir")
-  check(ferx_covariance(b$fit), "ferx_covariance")
+  check(ferx_covariance(fit))
+  check(ferx_sir(fit, sir_samples = 20L, sir_resamples = 10L))
 })
 
 # --- T12: a tampered bundle ----------------------------------------------------
