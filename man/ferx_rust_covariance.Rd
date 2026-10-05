@@ -20,7 +20,7 @@ ferx_rust_covariance(
   omega_iov_dim,
   residual_rho,
   eta_hats_flat,
-  n_subjects,
+  subject_ids,
   covariance_method,
   mu_referencing,
   verbose,

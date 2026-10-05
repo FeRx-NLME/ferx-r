@@ -22,7 +22,7 @@ ferx_rust_sir(
   cov_matrix_flat,
   cov_matrix_dim,
   eta_hats_flat,
-  n_subjects,
+  subject_ids,
   sir_samples,
   sir_resamples,
   sir_seed,
