@@ -283,7 +283,7 @@
     [#1676](https://github.com/FeRx-NLME/ferx-core/issues/1676)): a
     20-level diamond of intermediates (`B = A + 1`, `C = A + 2`,
     `D = B + C`, ...) took 38.8 s to parse with a level block and now
-    takes 1.1 s. No estimate moves.
+    takes 1.1 s (debug build). No estimate moves.
   - ferx-core #1665, #1668, #1681, #1682, #1683, #1690, #1692, #1697 and
     #1698 change nothing an R user sees: a KAPPA section, kappa correlations
     and kappa shrinkage in the engine's own text summary, the wording of a
@@ -322,10 +322,8 @@
     ([#463](https://github.com/FeRx-NLME/ferx-r/issues/463)). A fit without
     the bindings is refused with the same text as the predict paths, and a
     `fit$theta_levels` that no longer lays out `fit$theta` is refused naming
-    both counts. SIR on a block whose levels can be zero or negative (any
-    block centred on 0, such as the bundled `mbma_placebo`) still fails in
-    the engine, which rejects every non-positive theta whatever its bounds
-    ([FeRx-NLME/ferx-core#1701](https://github.com/FeRx-NLME/ferx-core/issues/1701)).
+    both counts. SIR runs on blocks whose levels can be zero or negative
+    since ferx-core #1701 (see the engine-bump entry above).
 
 - **`ferx_mbma_data()` builds and checks a summary-level dataset** for a
   model-based meta-analysis
