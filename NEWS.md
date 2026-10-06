@@ -9,6 +9,28 @@
   *free* parameter lacks one. Code that tested `ferx_se(fit) == 0` to find
   fixed parameters should read `fit$estimates$fixed` instead.
 
+- **A fit whose `method = foce` comes from the model file now gets FOCE
+  `CWRES` and FOCE-weighted in-fit SIR**
+  ([ferx-core #1710](https://github.com/FeRx-NLME/ferx-core/issues/1710)).
+  With no `method =` in the `ferx_fit()` call, the model file's `foce` left
+  the engine's interaction flag at its `TRUE` default. The estimates and OFV
+  were FOCE, but everything scored after the fit used FOCEI: the sdtab
+  `CWRES`, the in-fit SIR weights, and the FOCE-M3 warning, which never
+  fired. Now all of them are FOCE.
+  - **`CWRES` move; OFV and estimates do not.** On `warfarin_iov` the first
+    two `CWRES` go from -0.5666 to -0.5008 and from -0.6369 to -0.5765, at
+    an unchanged OFV of 203.5575. The new values agree with NONMEM
+    `$EST METHOD=1`: on `warfarin` the worst difference falls from 0.679 to
+    0.006 (ferx-core's NONMEM anchor).
+  - **In-fit SIR intervals move.** On `warfarin_iov` (1000/250 samples,
+    seed 7) the effective sample size goes from 2.5 to 224, identical to
+    `ferx_sir()` on the same fit.
+  - **The FOCE-M3 warning can now appear** on such fits with BLQ data.
+
+  A call that passes `method = "foce"`, and `ferx_sir()` /
+  `ferx_covariance()`, were already scored under FOCE and do not move.
+  Refit a saved fit to update its `CWRES` and in-fit SIR.
+
 - **ferx now builds against ferx-core `d234b25c`**, up from the `v0.4.0`
   release (`2a6076af`). These engine changes reach every fit, prediction
   and simulation entry point with no change to the package's own code:
@@ -284,22 +306,13 @@
     20-level diamond of intermediates (`B = A + 1`, `C = A + 2`,
     `D = B + C`, ...) took 38.8 s to parse with a level block and now
     takes 1.1 s (debug build). No estimate moves.
-  - **A fit whose `method = foce` comes from the model file is now scored
-    under FOCE after the fit, not FOCEI**
-    ([#1710](https://github.com/FeRx-NLME/ferx-core/issues/1710)). With no
-    `method =` in the `ferx_fit()` call, the model file's `foce` left the
-    engine's interaction flag at its `TRUE` default, so in-fit SIR weighted
-    its draws with the FOCEI objective around the FOCE estimates, the sdtab
-    `CWRES` were the FOCEI ones, and the FOCE-M3 warning never fired. On
-    `warfarin_iov` (1000/250 samples, seed 7) the in-fit SIR's effective
-    sample size goes from 2.5 to 224, now identical to `ferx_sir()` on the
-    same fit. Such fits' `CWRES` and in-fit SIR intervals move; refit a
-    saved one to update them. A call that passes `method = "foce"`, and
-    `ferx_sir()` / `ferx_covariance()`, were already scored under FOCE and
-    do not move.
-  - ferx-core #1665, #1668, #1681, #1682, #1683, #1690, #1692, #1697,
-    #1698, #1709, #1719 and #1686 change nothing an R user sees: a KAPPA section,
-    kappa correlations and kappa shrinkage in the engine's own text summary,
+  - Post-fit scoring of a model-file `method = foce` fit
+    ([#1710](https://github.com/FeRx-NLME/ferx-core/issues/1710)): see the
+    breaking change above.
+  - ferx-core #1665, #1668, #1681, #1682, #1683, #1686, #1690, #1692,
+    #1697, #1698, #1709 and #1719 change nothing an R user sees: a KAPPA
+    section, kappa correlations and kappa shrinkage in the engine's own text
+    summary,
     the wording of a weighted kappa's `at weight 1` label and weight line in
     the engine console (`print()` builds its own rows), `FitResult` carrying
     the fit's data bindings, a refusal for a symbolic-statistics model
@@ -443,10 +456,10 @@
   never carries. `ferx_sir(fit, ...)` now reproduces `ferx_fit(sir = TRUE)`
   exactly for the same seed and sample sizes (since ferx-core
   [#1710](https://github.com/FeRx-NLME/ferx-core/issues/1710), also for a
-  FOCE fit whose method comes from the model file), so **standalone SIR intervals change on every IOV fit and every FOCEI
-  fit**; a FOCE fit without IOV is
-  unchanged. A kappa fit whose `fit$omega_iov` has been removed is now
-  refused rather than resampled around the initial value, and
+  FOCE fit whose method comes from the model file), so **standalone SIR
+  intervals change on every IOV fit and every FOCEI fit**; a FOCE fit
+  without IOV is unchanged. A kappa fit whose `fit$omega_iov` has been
+  removed is now refused rather than resampled around the initial value, and
   `ferx_covariance()` now stops on a `fit$omega_iov` that is not a square
   matrix instead of treating it as "no IOV". `ferx_sir()` still runs with the
   default `sir_df`, inner-loop settings and call-time ODE tolerances
