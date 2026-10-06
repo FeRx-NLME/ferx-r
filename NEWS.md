@@ -50,7 +50,9 @@
 
 - **ferx now builds against ferx-core `53133688`**, up from the `v0.4.0`
   release (`2a6076af`). These engine changes reach every fit, prediction
-  and simulation entry point with no change to the package's own code:
+  and simulation entry point. The package's own code is unchanged, except
+  that `ferx_calc_npde()` now passes on the engine's refusal of an unseen
+  categorical level (below):
 
   - **A categorical covariate value outside its `[covariate_model]`
     relation's levels is now refused by `ferx_predict()`,
@@ -84,7 +86,6 @@
     ([#1738](https://github.com/FeRx-NLME/ferx-core/issues/1738)), such as
     `CL ~ WT power(center = median) => THETA_CL_WT(...)`, with or without
     data. A theta nothing reads still warns.
-
   - **Results move on datasets with mid-timeline `SS=1` records, EVID=3/4
     resets, or lagged doses**, where ferx now does what NONMEM does:
     - a mid-timeline `SS=1` record resets the system, so an earlier dose no
