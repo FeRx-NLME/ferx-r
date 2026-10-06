@@ -2104,19 +2104,74 @@ fn omega_iov_from_fit(
 
 // -- Helper: materialize ModelParameters from R-side theta/omega/sigma --
 
-// Overlay the fitted `block_sigma` correlations (ferx-core #847) onto the
-// pairing the model declares. The (sigma_i, sigma_j) indices are structural
-// and come from the parsed model; the value is fitted, so taking it from the
-// template would reconstruct the fit at its declared *initial* correlation
-// after the optimizer moved it. An empty `rho` means the caller has none to
-// supply - a fit taken before the correlation was estimable - and keeps the
-// declared values.
-fn overlay_residual_rho(
-    mut rc: Vec<ResidualCorrelation>,
+// The `A ~ B` label of a `block_sigma` correlation: the two declared sigma
+// names joined by `~`, falling back to `SIGMA(i)` when the model named neither.
+// One spelling for `fit$residual_correlations$name`, the covariance-matrix
+// dimnames and the from-fit refusals, so a message names a correlation exactly
+// as the fit object does.
+fn residual_correlation_label(sigma_names: &[String], c: &ResidualCorrelation) -> String {
+    let nm = |k: usize| {
+        sigma_names
+            .get(k)
+            .filter(|n| !n.is_empty())
+            .cloned()
+            .unwrap_or_else(|| format!("SIGMA({})", k + 1))
+    };
+    format!("{} ~ {}", nm(c.sigma_i), nm(c.sigma_j))
+}
+
+// The model's `block_sigma` correlations at the fit's values (ferx-core #847),
+// the twin of `omega_iov_from_fit`. The (sigma_i, sigma_j) pairing is
+// structural and comes from the parsed model; the value is fitted, so taking it
+// from the model would rebuild the fit at its declared *initial* correlation
+// after the optimizer moved it. `rho` is `fit$residual_correlations$rho` in
+// declaration order. An empty `rho` is accepted only when every correlation is
+// `FIX` - its fitted value is the declared one by construction; an estimated
+// correlation without a fitted value is refused (#480), as is a value outside
+// (-1, 1). An empty FIX-flag vector alongside correlations counts as free, as
+// in core's own validation. Errors carry no prefix; each caller adds its own.
+fn residual_correlations_from_fit(
+    model: &CompiledModel,
     rho: &[f64],
 ) -> std::result::Result<Vec<ResidualCorrelation>, String> {
+    let p = &model.default_params;
+    let mut rc = p.residual_correlations.clone();
+    let label = |c: &ResidualCorrelation| residual_correlation_label(&p.sigma.names, c);
     if rho.is_empty() {
-        return Ok(rc);
+        let fixed = &p.residual_correlation_fixed;
+        let free: Vec<String> = rc
+            .iter()
+            .enumerate()
+            .filter(|&(k, _)| fixed.len() != rc.len() || !fixed[k])
+            .map(|(_, c)| label(c))
+            .collect();
+        if free.is_empty() {
+            return Ok(rc);
+        }
+        let (noun, object, subject, rebuilt_at, held) = if free.len() == 1 {
+            (
+                "correlation",
+                "it",
+                "it",
+                "the declared initial correlation",
+                "this correlation at its declared value",
+            )
+        } else {
+            (
+                "correlations",
+                "them",
+                "they",
+                "their declared initial correlations",
+                "these correlations at their declared values",
+            )
+        };
+        return Err(format!(
+            "the model estimates the block_sigma {noun} {}, but the fit carries no value for \
+             {object} (fit$residual_correlations is missing or empty), so {subject} would be \
+             rebuilt at {rebuilt_at}. A fit made with ferx 0.3.x or earlier held {held} and \
+             predates the field. Re-fit via ferx_fit(model, data).",
+            free.join(", ")
+        ));
     }
     if rho.len() != rc.len() {
         return Err(format!(
@@ -2126,13 +2181,27 @@ fn overlay_residual_rho(
         ));
     }
     for (c, &r) in rc.iter_mut().zip(rho.iter()) {
+        if !r.is_finite() || r.abs() >= 1.0 {
+            // R's NA_real_ crosses the FFI as a NaN payload; name it as R does.
+            let shown = if CanBeNA::is_na(&r) {
+                "NA".to_string()
+            } else {
+                r.to_string()
+            };
+            return Err(format!(
+                "the block_sigma correlation {} has rho = {shown} in \
+                 fit$residual_correlations$rho, which must be finite and strictly \
+                 between -1 and 1",
+                label(c)
+            ));
+        }
         c.rho = r;
     }
     Ok(rc)
 }
 
 // `residual_rho` carries the fitted `block_sigma` correlations, in the order
-// the model declares them; see `overlay_residual_rho`.
+// the model declares them; see `residual_correlations_from_fit`.
 fn params_from_fit(
     model: &CompiledModel,
     theta: &[f64],
@@ -2208,15 +2277,11 @@ fn params_from_fit(
         // initializer is likewise taken from `template`.
         mixture: template.mixture.clone(),
         // ferx-core #847 moved the residual correlations (and their FIX flags)
-        // into the parameter set. The *pairing* is structural and comes from the
-        // parsed model, but a plain (non-FIX) `block_sigma` estimates rho, so
-        // taking the value from the template would reconstruct the fit at its
-        // declared initial correlation instead of the fitted one. Take the
-        // indices from the model and the value from the fit.
-        residual_correlations: overlay_residual_rho(
-            template.residual_correlations.clone(),
-            residual_rho,
-        )?,
+        // into the parameter set. The pairing comes from the parsed model and
+        // the value from the fit; a free correlation the fit carries no value
+        // for is refused rather than rebuilt at its declared initial value.
+        residual_correlations: residual_correlations_from_fit(model, residual_rho)
+            .map_err(|e| format!("Fit error: {e}"))?,
         residual_correlation_fixed: template.residual_correlation_fixed.clone(),
     })
 }
@@ -2327,7 +2392,8 @@ fn build_fit_result_for_uncertainty(
         omega_iov_from_fit(model, omega_iov_flat, omega_iov_dim)?.map(|m| m.matrix),
         covariance_matrix,
         sir_resamples_packed,
-        overlay_residual_rho(model.residual_correlations.clone(), residual_rho)?,
+        residual_correlations_from_fit(model, residual_rho)
+            .map_err(|e| format!("Uncertainty error: {e}"))?,
     ))
 }
 
@@ -2840,7 +2906,7 @@ fn cov_matrix_labels(model: &CompiledModel, cov_matrix_dim: i32) -> Vec<String> 
     }
     // Same `A ~ B` spelling as `residual_correlation_names`.
     for c in &p.residual_correlations {
-        labels.push(format!("{} ~ {}", sigma(c.sigma_i), sigma(c.sigma_j)));
+        labels.push(residual_correlation_label(&p.sigma.names, c));
     }
 
     if cov_matrix_dim > 0 && labels.len() == cov_matrix_dim as usize {
@@ -2914,22 +2980,11 @@ fn fit_result_to_list(
         .se_residual_correlations
         .clone()
         .unwrap_or_default();
-    // Labels follow the off-diagonal convention: the two declared sigma names
-    // joined by `~`, falling back to SIGMA(i) when the model named neither.
+    // Labels follow the off-diagonal convention; see `residual_correlation_label`.
     let rho_names: Vec<String> = result
         .residual_correlations
         .iter()
-        .map(|c| {
-            let nm = |k: usize| {
-                result
-                    .sigma_names
-                    .get(k)
-                    .filter(|n| !n.is_empty())
-                    .cloned()
-                    .unwrap_or_else(|| format!("SIGMA({})", k + 1))
-            };
-            format!("{} ~ {}", nm(c.sigma_i), nm(c.sigma_j))
-        })
+        .map(|c| residual_correlation_label(&result.sigma_names, c))
         .collect();
 
     // Warnings
@@ -4518,12 +4573,12 @@ fn fit_skeleton(
         });
     }
 
-    // The fitted `block_sigma` correlations, overlaid on the model's declared
-    // pairing: both steps work at the fitted point, so the declared rho would
-    // centre them on the wrong parameters.
-    let residual_correlations_resolved =
-        overlay_residual_rho(model.residual_correlations.clone(), x.residual_rho)
-            .map_err(|e| format!("{entry_point}: {e}"))?;
+    // The fitted `block_sigma` correlations on the model's declared pairing:
+    // both steps work at the fitted point, so the declared rho would centre
+    // them on the wrong parameters. A free correlation without a fitted value
+    // is refused, not filled from the model.
+    let residual_correlations_resolved = residual_correlations_from_fit(model, x.residual_rho)
+        .map_err(|e| format!("{entry_point}: {e}"))?;
 
     Ok(FitResult {
         // ferx-core main added a checkpoint-restore flag; neither step reads it.
