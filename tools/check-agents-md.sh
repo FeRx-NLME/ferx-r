@@ -9,8 +9,9 @@
 #
 #   - AGENTS.md is tracked at the root and opens with `# AGENTS.md`;
 #   - the old Claude-specific file is not back at the root (not even as a symlink);
-#   - no tracked file names the old file. NEWS.md is exempt: it is history, and
-#     the entry recording the rename names the old file by necessity.
+#   - no tracked file names the old file, plain or regex-escaped (the spelling
+#     .Rbuildignore used). NEWS.md is exempt: it is history, and the entry
+#     recording the rename names the old file by necessity.
 #
 # Tracked files, not a directory walk: a walk would also see untracked and
 # gitignored files that exist on one machine only (.claude/, local notes).
@@ -26,6 +27,9 @@ set -euo pipefail
 ROOT="${1:-$(cd "$(dirname "$0")/.." && pwd)}"
 # Built at runtime, so this script does not match its own scan.
 LEGACY="CLAUDE"".md"
+# The same name as a regex spells it, dot escaped: that is how .Rbuildignore
+# held it, and a fixed-string match on the plain name does not see it.
+LEGACY_ESCAPED="CLAUDE""\\.md"
 HISTORY=NEWS.md
 status=0
 
@@ -50,7 +54,7 @@ fi
 
 # git grep exits 1 for "no match" and >1 for an error; an error must not read as clean.
 rc=0
-hits=$(git -C "$ROOT" grep -n -a -F --no-color -e "$LEGACY" -- . ":(exclude)$HISTORY") || rc=$?
+hits=$(git -C "$ROOT" grep -n -a -F --no-color -e "$LEGACY" -e "$LEGACY_ESCAPED" -- . ":(exclude)$HISTORY") || rc=$?
 if [[ "$rc" -gt 1 ]]; then
   echo "git grep failed (exit $rc) in $ROOT" >&2
   exit 1

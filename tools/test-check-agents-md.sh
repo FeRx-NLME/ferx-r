@@ -93,6 +93,13 @@ printf 'f <- function() 1\n# The label convention (%s).\n' "$LEGACY" > "$d/R/f.R
 expect "a tracked file naming the old file fails, with file and line" "$d" 1 \
   "names $LEGACY, which was renamed to AGENTS.md in #489" R/f.R:2
 
+# The spelling the one reference .Rbuildignore held used: a regex, dot escaped.
+d=$(fixture escaped-mention)
+printf '^\\.github$\n^%s\\.md$\n' "CLAUDE" > "$d/.Rbuildignore"
+git -C "$d" add -A
+expect "a regex-escaped mention of the old file fails" "$d" 1 \
+  "names $LEGACY, which was renamed to AGENTS.md in #489" .Rbuildignore:2
+
 # A history exemption keyed on a basename would let this through.
 d=$(fixture nested-news)
 mkdir -p "$d/docs"
