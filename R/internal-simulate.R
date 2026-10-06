@@ -22,7 +22,7 @@ validate_fit_for_params <- function(fit) {
     # Empty when the fit carries none: the engine accepts that only when every
     # correlation is FIX, and refuses an estimated one (#480).
     residual_rho = .ferx_residual_rho_vec(fit)
-  ), .ferx_theta_level_args(fit))
+  ), .ferx_fit_binding_args(fit))
 }
 
 # Fitted IOV (kappa) covariance, flattened row-major for the FFI. A `kappa` model
@@ -45,21 +45,33 @@ validate_fit_for_params <- function(fit) {
   )
 }
 
-# The theta level-block layout the fit was bound with (#370), flattened for
-# the glue, which lays the model out on it before reading theta by position.
-# Empty for a model with no level block - and for a fit that predates the
-# field, which the glue refuses on a level-block model. The one source of these
-# five arguments for every from-fit entry point (predict / simulate / npde via
-# `validate_fit_for_params()`, `ferx_sir()`, `ferx_covariance()`), so they
-# cannot drift apart.
-.ferx_theta_level_args <- function(fit) {
-  list(
-    level_block = as.character(fit$theta_levels$block),
-    level_index = as.integer(fit$theta_levels$index),
-    level_label = as.character(fit$theta_levels$label),
-    level_group = as.integer(fit$theta_levels$group),
-    level_contrast = as.character(fit$theta_levels$contrast)
-  )
+# The data-derived bindings the fit was made with, as the one `fit_bindings`
+# list the glue decodes into core's `DataBindings` (#412): the theta level-block
+# layout (`fit$theta_levels`, #370) and the `[covariate_model]` statistics
+# (`fit$covariate_stats`), flattened column by column. Both halves travel
+# together so neither can be dropped on its way to the engine. Empty for a
+# model that declares nothing data-derived - and for a fit that predates a
+# field, which the engine refuses on a model that needs it. The one source of
+# this argument for every from-fit entry point (predict / simulate / npde via
+# `validate_fit_for_params()`, `ferx_sir()`, `ferx_covariance()`), so the
+# paths cannot drift apart.
+.ferx_fit_binding_args <- function(fit) {
+  tl <- fit$theta_levels
+  cs <- fit$covariate_stats
+  list(fit_bindings = list(
+    level_block = as.character(tl$block),
+    level_index = as.integer(tl$index),
+    level_label = as.character(tl$label),
+    level_group = as.integer(tl$group),
+    level_contrast = as.character(tl$contrast),
+    stat_covariate = as.character(cs$covariate),
+    stat_median = as.numeric(cs$median),
+    stat_mean = as.numeric(cs$mean),
+    stat_min = as.numeric(cs$min),
+    stat_max = as.numeric(cs$max),
+    stat_mode = as.numeric(cs$mode),
+    stat_levels = lapply(cs$levels, as.numeric)
+  ))
 }
 
 # The fit's subject IDs, verbatim and in fit order, for the skeleton FitResult
@@ -123,6 +135,28 @@ validate_fit_for_params <- function(fit) {
     theta_name = as.character(theta_name),
     stringsAsFactors = FALSE
   )
+}
+
+# The one constructor of `fit$covariate_stats` (#412), shared by `ferx_fit()`
+# and `ferx_load_fit()` so a fresh fit and a reloaded one are `identical()`:
+# one row per covariate a `[covariate_model]` relation reads, with the
+# statistics the fit's symbolic centres resolved against, and `levels` a list
+# column of the distinct values (`levels = auto`). A NULL column reads as zero
+# rows.
+.ferx_covariate_stats_frame <- function(covariate = NULL, median = NULL,
+                                        mean = NULL, min = NULL, max = NULL,
+                                        mode = NULL, levels = NULL) {
+  out <- data.frame(
+    covariate = as.character(covariate),
+    median = as.numeric(median),
+    mean = as.numeric(mean),
+    min = as.numeric(min),
+    max = as.numeric(max),
+    mode = as.numeric(mode),
+    stringsAsFactors = FALSE
+  )
+  out$levels <- lapply(unname(as.list(levels)), as.numeric)
+  out
 }
 
 # The fitted residual correlations as a bare numeric vector for the FFI.

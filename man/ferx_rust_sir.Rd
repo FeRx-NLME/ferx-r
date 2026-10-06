@@ -28,11 +28,7 @@ ferx_rust_sir(
   sir_seed,
   sir_keep_samples,
   verbose,
-  level_block,
-  level_index,
-  level_label,
-  level_group,
-  level_contrast
+  fit_bindings
 )
 }
 \description{

@@ -561,6 +561,12 @@
   result$theta_levels <- .ferx_theta_levels_frame(
     tl$block, tl$index, tl$label, tl$group, tl$contrast, tl$theta_name
   )
+  # `[covariate_model]` statistics (#412), through the constructor
+  # `ferx_load_fit()` uses. Zero rows for a model with no symbolic centre.
+  cs <- result$covariate_stats
+  result$covariate_stats <- .ferx_covariate_stats_frame(
+    cs$covariate, cs$median, cs$mean, cs$min, cs$max, cs$mode, cs$levels
+  )
 
   # Reshape omega into a matrix. A model with no random effects (n_eta = 0 - e.g.
   # a fixed-effects `[binary_model]`) returns an empty omega; keep it a 0x0 matrix

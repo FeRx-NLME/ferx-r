@@ -82,11 +82,7 @@ ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = 
       omega_iov_flat = fit_pieces$omega_iov_flat,
       omega_iov_dim  = fit_pieces$omega_iov_dim,
       residual_rho = fit_pieces$residual_rho,
-      level_block = fit_pieces$level_block,
-      level_index = fit_pieces$level_index,
-      level_label = fit_pieces$level_label,
-      level_group = fit_pieces$level_group,
-      level_contrast = fit_pieces$level_contrast,
+      fit_bindings = fit_pieces$fit_bindings,
       nsim       = nsim,
       seed       = seed_int
     ),

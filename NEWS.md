@@ -340,6 +340,36 @@
 
 ## New features
 
+- **`[covariate_model]` relations with a data-derived centre
+  (`center = median`, `ref = mode`, `levels = auto`) can be fitted,
+  predicted and simulated from R**
+  ([#412](https://github.com/FeRx-NLME/ferx-r/issues/412)). `ferx_fit()`,
+  and `ferx_predict()` / `ferx_simulate()` without a fit, refused them with
+  an error that told the R user to call a Rust function, although
+  `ferx_model_validate()` accepted the model.
+  - `ferx_fit()` resolves the statistics on the fitted data (after
+    `[data_selection]` and `ignore =`, one value per subject) and records
+    them in the new `fit$covariate_stats`: one row per covariate, with
+    `median`, `mean`, `min`, `max`, `mode` and the list column `levels`. On
+    `two_cpt_oral_cov` with `CL ~ WT power(center = median)` the fit is its
+    `center = 70.85` twin to the last bit (OFV and theta identical).
+  - Every function that takes a `fit` (`ferx_predict()`, `ferx_simulate()`,
+    `ferx_simulate_with_uncertainty()`, `ferx_calc_npde()`,
+    `ferx_predict_survival()`, `ferx_sir()`, `ferx_covariance()`) centres the
+    relations on the **fit's** statistics, never on the design's. On the
+    heavier half of the same subjects (median `WT` 80.6 against the fit's
+    70.85), centring on the design would have moved `PRED` by up to 13 %.
+    Without a fit, the statistics come from `data`.
+  - `ferx_save_fit()` writes the statistics into ferx-core's own
+    `data_bindings` slot of `fit.json`, so the engine reads them from an R
+    bundle and `ferx_load_fit()` reads them from an engine bundle. A bundle
+    without the slot loads `covariate_stats` as `NULL`.
+  - A fit that does not carry the statistics, on a model that needs them, is
+    refused on every path with the engine's own text, which names the
+    covariate and asks for a refit
+    ([#487](https://github.com/FeRx-NLME/ferx-r/issues/487)). The empty
+    theta-level-binding refusal of a level-block model is unchanged.
+
 - **SIR reports intervals for the IOV kappa variances: `fit$sir_ci_kappa`**
   ([ferx-core #1705](https://github.com/FeRx-NLME/ferx-core/issues/1705)).
   `ferx_fit(sir = TRUE)` and `ferx_sir()` now return a 95% interval for each

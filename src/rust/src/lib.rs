@@ -1,6 +1,8 @@
 use extendr_api::prelude::*;
 use ferx_core::cancel::CancelFlag;
-use ferx_core::parser::model_parser::{DataBindings, LevelBinding, LevelBindings, LevelContrast};
+use ferx_core::parser::model_parser::{
+    DataBindings, LevelBinding, LevelBindings, LevelContrast, ParseBindings,
+};
 use ferx_core::types::*;
 use nalgebra::DMatrix;
 use std::collections::HashMap;
@@ -580,7 +582,7 @@ fn ferx_rust_fit(
             &result,
             &population,
             &parsed.model,
-            &parsed.bindings.levels,
+            &parsed.bindings,
         ))
     })
 }
@@ -705,11 +707,7 @@ fn ferx_rust_simulate_from_fit(
     omega_iov_flat: Vec<f64>,
     omega_iov_dim: i32,
     residual_rho: Vec<f64>,
-    level_block: Vec<String>,
-    level_index: Vec<i32>,
-    level_label: Vec<String>,
-    level_group: Vec<i32>,
-    level_contrast: Vec<String>,
+    fit_bindings: List,
     n_sim: i32,
     seed: i32,
     match_method: &str,
@@ -746,14 +744,8 @@ fn ferx_rust_simulate_from_fit(
 
         // Place the design on the fit's theta layout before anything reads theta
         // by position (ferx-r #370); see `bind_design_from_fit`.
-        let fit_levels = level_bindings_from_r(
-            &level_block,
-            &level_index,
-            &level_label,
-            &level_group,
-            &level_contrast,
-        )?;
-        bind_design_from_fit(&mut parsed, model_path, &mut population, &fit_data_bindings(&fit_levels))?;
+        let fitted = fit_bindings_from_r(&fit_bindings)?;
+        bind_design_from_fit(&mut parsed, model_path, &mut population, &fitted)?;
 
         let params = match params_from_fit(
             &parsed.model,
@@ -1061,11 +1053,7 @@ fn ferx_rust_simulate_with_uncertainty(
     sir_resamples_n: i32,
     sir_resamples_dim: i32,
     residual_rho: Vec<f64>,
-    level_block: Vec<String>,
-    level_index: Vec<i32>,
-    level_label: Vec<String>,
-    level_group: Vec<i32>,
-    level_contrast: Vec<String>,
+    fit_bindings: List,
     n_uncertainty_draws: i32,
     n_sim_per_draw: i32,
     seed: i32,
@@ -1096,14 +1084,8 @@ fn ferx_rust_simulate_with_uncertainty(
 
         // Place the design on the fit's theta layout before anything reads theta
         // by position (ferx-r #370); see `bind_design_from_fit`.
-        let fit_levels = level_bindings_from_r(
-            &level_block,
-            &level_index,
-            &level_label,
-            &level_group,
-            &level_contrast,
-        )?;
-        bind_design_from_fit(&mut parsed, model_path, &mut population, &fit_data_bindings(&fit_levels))?;
+        let fitted = fit_bindings_from_r(&fit_bindings)?;
+        bind_design_from_fit(&mut parsed, model_path, &mut population, &fitted)?;
 
         // Decode the method string to the engine enum.
         let uncertainty_method = match method.trim().to_lowercase().as_str() {
@@ -1246,11 +1228,7 @@ fn ferx_rust_predict_from_fit(
     omega_iov_flat: Vec<f64>,
     omega_iov_dim: i32,
     residual_rho: Vec<f64>,
-    level_block: Vec<String>,
-    level_index: Vec<i32>,
-    level_label: Vec<String>,
-    level_group: Vec<i32>,
-    level_contrast: Vec<String>,
+    fit_bindings: List,
 ) -> Robj {
     entry(move || {
         let mut parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
@@ -1279,14 +1257,8 @@ fn ferx_rust_predict_from_fit(
 
         // Place the design on the fit's theta layout before anything reads theta
         // by position (ferx-r #370); see `bind_design_from_fit`.
-        let fit_levels = level_bindings_from_r(
-            &level_block,
-            &level_index,
-            &level_label,
-            &level_group,
-            &level_contrast,
-        )?;
-        bind_design_from_fit(&mut parsed, model_path, &mut population, &fit_data_bindings(&fit_levels))?;
+        let fitted = fit_bindings_from_r(&fit_bindings)?;
+        bind_design_from_fit(&mut parsed, model_path, &mut population, &fitted)?;
 
         let params = match params_from_fit(
             &parsed.model,
@@ -1419,11 +1391,7 @@ fn ferx_rust_predict_survival_from_fit(
     omega_iov_flat: Vec<f64>,
     omega_iov_dim: i32,
     residual_rho: Vec<f64>,
-    level_block: Vec<String>,
-    level_index: Vec<i32>,
-    level_label: Vec<String>,
-    level_group: Vec<i32>,
-    level_contrast: Vec<String>,
+    fit_bindings: List,
 ) -> Robj {
     entry(move || {
         let mut parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
@@ -1447,14 +1415,8 @@ fn ferx_rust_predict_survival_from_fit(
 
         // Place the design on the fit's theta layout before anything reads theta
         // by position (ferx-r #370); see `bind_design_from_fit`.
-        let fit_levels = level_bindings_from_r(
-            &level_block,
-            &level_index,
-            &level_label,
-            &level_group,
-            &level_contrast,
-        )?;
-        bind_design_from_fit(&mut parsed, model_path, &mut population, &fit_data_bindings(&fit_levels))?;
+        let fitted = fit_bindings_from_r(&fit_bindings)?;
+        bind_design_from_fit(&mut parsed, model_path, &mut population, &fitted)?;
 
         let params = match params_from_fit(
             &parsed.model,
@@ -1507,11 +1469,7 @@ fn ferx_rust_npde_from_fit(
     omega_iov_flat: Vec<f64>,
     omega_iov_dim: i32,
     residual_rho: Vec<f64>,
-    level_block: Vec<String>,
-    level_index: Vec<i32>,
-    level_label: Vec<String>,
-    level_group: Vec<i32>,
-    level_contrast: Vec<String>,
+    fit_bindings: List,
     nsim: i32,
     seed: i32,
 ) -> Robj {
@@ -1557,14 +1515,8 @@ fn ferx_rust_npde_from_fit(
 
         // Place the design on the fit's theta layout before anything reads theta
         // by position (ferx-r #370); see `bind_design_from_fit`.
-        let fit_levels = level_bindings_from_r(
-            &level_block,
-            &level_index,
-            &level_label,
-            &level_group,
-            &level_contrast,
-        )?;
-        bind_design_from_fit(&mut parsed, model_path, &mut population, &fit_data_bindings(&fit_levels))?;
+        let fitted = fit_bindings_from_r(&fit_bindings)?;
+        bind_design_from_fit(&mut parsed, model_path, &mut population, &fitted)?;
 
         let params = match params_from_fit(
             &parsed.model,
@@ -1629,14 +1581,21 @@ fn ferx_rust_npde_from_fit(
 // a fit binds the design's own levels. Every bind re-parses `parsed.model`, so
 // it runs before any stamp on the model.
 //
+// A `[covariate_model]` relation with a symbolic centre (`center = median`)
+// follows the same rule (ferx-r #412): the fit resolves it on its own data
+// with `bind_covariate_stats`, and every later use takes the fit's statistics
+// through the same `bind_from_fit`, never the design's.
+//
 // The fit's bindings travel to R as `fit$theta_levels` (one row per level) and
-// come back flattened through `validate_fit_for_params()`. SIR and the
+// `fit$covariate_stats` (one row per covariate), and come back as the one
+// `fit_bindings` list `fit_bindings_from_r` decodes. SIR and the
 // standalone covariance step, which take no population here, hand them to the
 // engine in the skeleton `FitResult`'s `data_bindings` instead, the slot
 // ferx-core's own `fit()` records them in (FeRx-NLME/ferx-core#1621).
 
-/// The model text a bind re-parses: read when the model declares a level block
-/// (`bind_design`) and on every from-fit bind (`from_fit_model_text`).
+/// The model text a bind re-parses: read when the model declares something
+/// data-derived (`bind_design`) and on every from-fit bind
+/// (`from_fit_model_text`).
 fn level_model_text(model_path: &str) -> std::result::Result<String, String> {
     std::fs::read_to_string(model_path).map_err(|e| {
         format!(
@@ -1660,19 +1619,35 @@ fn level_block_names(model: &CompiledModel) -> String {
         .join(", ")
 }
 
-/// Bind a design's own levels, for a use without a fit. The engine's refusal is
-/// passed through unprefixed: neither stage prefix applies, and either would
-/// let `.ferx_engine_call()`'s single-error fallback attach an unrelated code.
+/// True when the model's `[covariate_model]` states a statistic symbolically
+/// (`center = median`, `ref = mode`, `levels = auto`) that no data has
+/// resolved yet.
+fn needs_covariate_stats(parsed: &ParsedModel) -> bool {
+    parsed
+        .model
+        .covariate_model
+        .as_ref()
+        .is_some_and(|spec| !spec.unresolved().is_empty())
+}
+
+/// Bind a design's own data-derived bindings, for a fit and for a use without
+/// a fit: the theta level blocks, then the `[covariate_model]` statistics
+/// (ferx-r #412), in the order core's own `fit()` / `prepare_run` bind them.
+/// Each re-parses with the other's bindings kept. A no-op, and no file read,
+/// on a model that declares neither. The engine's refusal is passed through
+/// unprefixed: neither stage prefix applies, and either would let
+/// `.ferx_engine_call()`'s single-error fallback attach an unrelated code.
 fn bind_design(
     parsed: &mut ParsedModel,
     model_path: &str,
     population: &mut Population,
 ) -> std::result::Result<(), String> {
-    if !declares_level_blocks(parsed) {
+    if !declares_level_blocks(parsed) && !needs_covariate_stats(parsed) {
         return Ok(());
     }
     let model_text = level_model_text(model_path)?;
-    ferx_core::api::bind_theta_levels(parsed, &model_text, population)
+    ferx_core::api::bind_theta_levels(parsed, &model_text, population)?;
+    ferx_core::api::bind_covariate_stats(parsed, &model_text, population)
 }
 
 /// The one prologue of every from-fit bind (ferx-r #487): a from-fit bind
@@ -1731,17 +1706,6 @@ fn bind_layout_from_fit(
 ) -> std::result::Result<(), String> {
     let model_text = from_fit_model_text(parsed, model_path, fitted)?;
     ferx_core::api::layout_from_fit(parsed, &model_text, fitted)
-}
-
-/// A fit's level bindings as the `DataBindings` core's from-fit binder takes.
-/// The covariate statistics stay empty: R cannot fit a symbolic centre yet, so
-/// no R fit carries any (ferx-r #412). Built by assignment because
-/// `DataBindings` is `#[non_exhaustive]`: a struct literal, even with
-/// `..Default::default()`, is E0639 outside ferx-core.
-fn fit_data_bindings(fit_levels: &LevelBindings) -> DataBindings {
-    let mut bindings = DataBindings::default();
-    bindings.levels = fit_levels.clone();
-    bindings
 }
 
 /// The refusal for a level model paired with a fit that carries no bindings,
@@ -1960,6 +1924,148 @@ fn level_bindings_from_r(
                 labels: members.iter().map(|&r| label[r].clone()).collect(),
                 groups,
                 contrast,
+            },
+        );
+    }
+    Ok(out)
+}
+
+/// `fit$covariate_stats` as the glue hands it to R: the `[covariate_model]`
+/// statistics the fit was bound with (ferx-r #412), one entry per covariate
+/// sorted by name, `levels` a list of numeric vectors. Empty for a model that
+/// states no statistic symbolically. R builds the frame through
+/// `.ferx_covariate_stats_frame()`, the constructor `ferx_load_fit()` uses too.
+fn covariate_stats_to_r(stats: &HashMap<String, CovariateSummary>) -> Robj {
+    let mut names: Vec<&String> = stats.keys().collect();
+    names.sort();
+    let column = |f: fn(&CovariateSummary) -> f64| -> Robj {
+        names.iter().map(|n| f(&stats[*n])).collect::<Vec<f64>>().into()
+    };
+    List::from_pairs(vec![
+        ("covariate", names.iter().map(|n| n.to_string()).collect::<Vec<String>>().into()),
+        ("median", column(|s| s.median)),
+        ("mean", column(|s| s.mean)),
+        ("min", column(|s| s.min)),
+        ("max", column(|s| s.max)),
+        ("mode", column(|s| s.mode)),
+        (
+            "levels",
+            List::from_values(names.iter().map(|n| Robj::from(stats[*n].levels.clone()))).into(),
+        ),
+    ])
+    .into()
+}
+
+/// Rebuild a fit's whole [`DataBindings`] from the one `fit_bindings` list
+/// `.ferx_fit_binding_args()` builds for every from-fit entry point (the #412
+/// review comment: one struct, so the two halves cannot travel apart): the
+/// `level_*` columns of `fit$theta_levels`, decoded by
+/// [`level_bindings_from_r`], and the `stat_*` columns of
+/// `fit$covariate_stats`. A missing column reads as empty. Whether the model
+/// needs what the fit carries is core's call (`bind_from_fit`); refused here
+/// is only a table no fit could have written: columns that are not parallel,
+/// a covariate listed twice, or a statistic that is not a finite number.
+fn fit_bindings_from_r(r: &List) -> std::result::Result<DataBindings, String> {
+    const WHAT: &str = "the fit's covariate statistics (`fit$covariate_stats`)";
+    let cols: HashMap<&str, Robj> = r.iter().collect();
+    let col = |name: &str| cols.get(name).cloned().unwrap_or_else(|| Robj::from(()));
+    let mistyped = |name: &str, ty: &str| format!("internal: `fit_bindings${name}` is not {ty}");
+    let strings = |name: &str| -> std::result::Result<Vec<String>, String> {
+        let v = col(name);
+        if v.is_null() {
+            return Ok(Vec::new());
+        }
+        v.as_string_vector().ok_or_else(|| mistyped(name, "a character vector"))
+    };
+    let ints = |name: &str| -> std::result::Result<Vec<i32>, String> {
+        let v = col(name);
+        if v.is_null() {
+            return Ok(Vec::new());
+        }
+        v.as_integer_vector().ok_or_else(|| mistyped(name, "an integer vector"))
+    };
+    let reals = |name: &str| -> std::result::Result<Vec<f64>, String> {
+        let v = col(name);
+        if v.is_null() {
+            return Ok(Vec::new());
+        }
+        v.as_real_vector().ok_or_else(|| mistyped(name, "a double vector"))
+    };
+
+    let mut out = DataBindings::default();
+    out.levels = level_bindings_from_r(
+        &strings("level_block")?,
+        &ints("level_index")?,
+        &strings("level_label")?,
+        &ints("level_group")?,
+        &strings("level_contrast")?,
+    )?;
+
+    let covariate = strings("stat_covariate")?;
+    let median = reals("stat_median")?;
+    let mean = reals("stat_mean")?;
+    let min = reals("stat_min")?;
+    let max = reals("stat_max")?;
+    let mode = reals("stat_mode")?;
+    let levels_col = col("stat_levels");
+    let levels: Vec<Robj> = if levels_col.is_null() {
+        Vec::new()
+    } else {
+        levels_col
+            .as_list()
+            .ok_or_else(|| mistyped("stat_levels", "a list"))?
+            .values()
+            .collect()
+    };
+    let n = covariate.len();
+    let lens = [median.len(), mean.len(), min.len(), max.len(), mode.len(), levels.len()];
+    if lens.iter().any(|&m| m != n) {
+        return Err(format!(
+            "{WHAT} are malformed: the covariate, median, mean, min, max, mode and levels \
+             columns have {n}, {}, {}, {}, {}, {} and {} rows; they must be parallel",
+            lens[0], lens[1], lens[2], lens[3], lens[4], lens[5]
+        ));
+    }
+    for (i, name) in covariate.iter().enumerate() {
+        if out.covariate_stats.contains_key(name) {
+            return Err(format!(
+                "{WHAT} are malformed: covariate `{name}` is listed twice; each covariate has \
+                 one row"
+            ));
+        }
+        let stat_levels = if levels[i].is_null() {
+            Vec::new()
+        } else {
+            levels[i].as_real_vector().ok_or_else(|| {
+                format!("{WHAT} are malformed: covariate `{name}` has `levels` that are not numeric")
+            })?
+        };
+        let values = [
+            ("median", median[i]),
+            ("mean", mean[i]),
+            ("min", min[i]),
+            ("max", max[i]),
+            ("mode", mode[i]),
+        ];
+        let not_finite = values
+            .iter()
+            .find(|(_, v)| !v.is_finite())
+            .map(|(k, _)| *k)
+            .or_else(|| stat_levels.iter().any(|v| !v.is_finite()).then_some("levels"));
+        if let Some(k) = not_finite {
+            return Err(format!(
+                "{WHAT} are malformed: covariate `{name}` has a `{k}` that is not a finite number"
+            ));
+        }
+        out.covariate_stats.insert(
+            name.clone(),
+            CovariateSummary {
+                median: median[i],
+                mean: mean[i],
+                min: min[i],
+                max: max[i],
+                mode: mode[i],
+                levels: stat_levels,
             },
         );
     }
@@ -2918,7 +3024,7 @@ fn fit_result_to_list(
     result: &FitResult,
     population: &Population,
     model: &CompiledModel,
-    level_bindings: &LevelBindings,
+    bindings: &ParseBindings,
 ) -> List {
     // Theta
     let theta_names: Vec<String> = result.theta_names.clone();
@@ -3490,7 +3596,10 @@ fn fit_result_to_list(
         theta = theta_values,
         // One row per theta level-block level (ferx-r #370); zero rows for a
         // model with no level block. Built before `theta_names` moves.
-        theta_levels = level_bindings_to_r(model, level_bindings, &theta_names),
+        theta_levels = level_bindings_to_r(model, &bindings.levels, &theta_names),
+        // The `[covariate_model]` statistics the fit was bound with (ferx-r
+        // #412); empty for a model that states none symbolically.
+        covariate_stats = covariate_stats_to_r(&bindings.covariate_stats),
         theta_names = theta_names,
         omega = omega_flat,
         omega_dim = n_eta as i32,
@@ -4845,11 +4954,7 @@ fn ferx_rust_sir(
     sir_seed: i32,
     sir_keep_samples: bool,
     verbose: bool,
-    level_block: Vec<String>,
-    level_index: Vec<i32>,
-    level_label: Vec<String>,
-    level_group: Vec<i32>,
-    level_contrast: Vec<String>,
+    fit_bindings: List,
 ) -> Robj {
     entry(move || {
         // All error paths in this binding return `Err`, which `entry` raises as
@@ -4868,10 +4973,8 @@ fn ferx_rust_sir(
         };
         // On a level-block fit, the theta is the fit's layout: size the skeleton
         // from it, and carry it to the engine in the skeleton's `data_bindings`.
-        let fit_levels = level_bindings_from_r(
-            &level_block, &level_index, &level_label, &level_group, &level_contrast,
-        )?;
-        bind_layout_from_fit(&mut parsed, model_path, &fit_data_bindings(&fit_levels))?;
+        let fitted = fit_bindings_from_r(&fit_bindings)?;
+        bind_layout_from_fit(&mut parsed, model_path, &fitted)?;
         let model = &parsed.model;
 
         let n_packed = cov_matrix_dim.max(0) as usize;
@@ -5029,11 +5132,7 @@ fn ferx_rust_covariance(
     covariance_method: &str,
     mu_referencing: bool,
     verbose: bool,
-    level_block: Vec<String>,
-    level_index: Vec<i32>,
-    level_label: Vec<String>,
-    level_group: Vec<i32>,
-    level_contrast: Vec<String>,
+    fit_bindings: List,
 ) -> Robj {
     entry(move || {
         // All error paths in this binding return `Err`, which `entry` raises as
@@ -5049,10 +5148,8 @@ fn ferx_rust_covariance(
         };
         // On a level-block fit, the theta is the fit's layout: size the skeleton
         // from it, and carry it to the engine in the skeleton's `data_bindings`.
-        let fit_levels = level_bindings_from_r(
-            &level_block, &level_index, &level_label, &level_group, &level_contrast,
-        )?;
-        bind_layout_from_fit(&mut parsed, model_path, &fit_data_bindings(&fit_levels))?;
+        let fitted = fit_bindings_from_r(&fit_bindings)?;
+        bind_layout_from_fit(&mut parsed, model_path, &fitted)?;
         let model = &parsed.model;
 
         let covariance_method_enum = match covariance_method.to_lowercase().as_str() {
@@ -6658,7 +6755,7 @@ fn search_final_fit(
                 fit,
                 &prepared.population,
                 &prepared.parsed.model,
-                &prepared.parsed.bindings.levels,
+                &prepared.parsed.bindings,
             )
         });
 
