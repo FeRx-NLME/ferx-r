@@ -462,7 +462,7 @@ test_that("sir_ci_kappa rows follow kappa_names, not their position (#1705)", {
     matrix(c(0.1, 0.3, 0.2, 0.4), 2L,
            dimnames = list(c("KAPPA_V", "KAPPA_CL"), c("lower", "upper")))
   )
-  # The CLAUDE.md fallback when the names do not line up.
+  # The AGENTS.md fallback when the names do not line up.
   expect_identical(rownames(.ferx_sir_ci_kappa(c(0.1, 0.2), character())), "KAPPA1")
   # No kappa, or no SIR: NULL, never a zero-row matrix.
   expect_null(.ferx_sir_ci_kappa(numeric(), character()))

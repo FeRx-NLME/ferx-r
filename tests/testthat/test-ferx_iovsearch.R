@@ -177,7 +177,7 @@ test_that("every structure row is labelled with the declared random effects", {
   skip_on_cran()
   res <- iovsearch_run()
 
-  # The label convention (CLAUDE.md): the bare declared names, never
+  # The label convention (AGENTS.md): the bare declared names, never
   # OMEGA(i,i) / KAPPA<i> on a model that names its random effects.
   etas <- unlist(strsplit(stats::na.omit(res$models$eta_labels), ";",
                           fixed = TRUE))

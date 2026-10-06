@@ -55,7 +55,7 @@ jobs:
       # Both crates come from the one repository, so they must also sit on the
       # same revision: a lock pinning them apart is two halves of a workspace
       # that is only ever tested together. The check lives in a script so
-      # contributors run exactly what CI runs (CLAUDE.md, "ferx-core dependency").
+      # contributors run exactly what CI runs (AGENTS.md, "ferx-core dependency").
       - name: Verify ferx-core and ferx-tools are pinned in Cargo.lock
         run: bash tools/check-ferx-core-pin.sh
 
@@ -99,12 +99,27 @@ jobs:
       - name: Test the glue-raise guard against stub sources
         run: bash tools/test-check-glue-raise.sh
 
+      # AGENTS.md is the one agent-guidance file (#489, as ferx-core #1528): it
+      # opens with `# AGENTS.md`, no file under the old Claude-specific name is
+      # back (at the root, or tracked in a subdirectory, where agents load it as
+      # guidance for that directory), and no tracked file but NEWS.md (history)
+      # names the old file, in any letter case, plain or regex-escaped.
+      # Not a testthat test: R CMD check runs the tests from a built copy of the
+      # package, which has neither the git index nor AGENTS.md (.Rbuildignore).
+      - name: Verify AGENTS.md is the one agent-guidance file
+        run: bash tools/check-agents-md.sh
+
+      # The checkout is always in shape, so nothing above would fail if one of
+      # its checks were deleted. Feed it stub repositories, one per shape.
+      - name: Test the AGENTS.md guard against stub repositories
+        run: bash tools/test-check-agents-md.sh
+
       # Every ferx-core / ferx-tools `*Options` struct derives `Default`
       # (ferx-core #529, enforced there by the A4 guard in
       # tests/public_api_boundary.rs), so the glue must construct them with a
       # `..Default::default()` spread. An exhaustive literal breaks this build
       # with `error[E0063]: missing field` the moment the engine adds a field —
-      # the cross-repo trap CLAUDE.md's sibling-repo note warns about, which
+      # the cross-repo trap AGENTS.md's sibling-repo note warns about, which
       # already bit us once for `SimulateOptions` (ferx-core #522 -> #200).
       #
       # The scan is textual: it opens at any `<Name>Options {` that is not a

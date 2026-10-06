@@ -315,7 +315,7 @@ case "$pin_before,$restored" in
     say "WARNING Cargo.lock was ALREADY unpinned before this build, so it has been"
     say "  put back as it was found, not to a pin. Some earlier cargo run wrote it."
     say "  Run tools/check-ferx-core-pin.sh for what is wrong, and restore the lock"
-    say "  as CLAUDE.md's \"ferx-core dependency\" section describes."
+    say "  as AGENTS.md's \"ferx-core dependency\" section describes."
     ;;
   *) say "Cargo.lock put back as found (its pin was not checked: no bash on PATH)" ;;
 esac

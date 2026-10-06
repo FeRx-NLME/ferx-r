@@ -631,6 +631,22 @@
   through the same reader. A bundle written before this fix still loads, with
   the 15 digits it was written with.
 
+## Internal
+
+- **The agent-guidance file is now `AGENTS.md`**
+  ([#489](https://github.com/FeRx-NLME/ferx-r/issues/489)). It was
+  `CLAUDE.md`, renamed as ferx-core did in
+  [ferx-core #1528](https://github.com/FeRx-NLME/ferx-core/issues/1528), so
+  any agent that follows the [AGENTS.md](https://agents.md) convention reads
+  it. Every reference in the repository moved with it. A new CI step,
+  `tools/check-agents-md.sh`, fails in any of three cases, matching names in
+  any letter case:
+  - a file under the old name is at the root or in a tracked subdirectory;
+  - a tracked file other than this one names it, plainly or regex-escaped;
+  - `AGENTS.md` is missing or lacks its `# AGENTS.md` title.
+
+  `tools/test-check-agents-md.sh` tests that check against stub repositories.
+
 # ferx 0.4.0
 
 ## Breaking changes

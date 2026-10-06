@@ -555,7 +555,7 @@ test_that("every category in the guidance table returns guidance", {
 
 # Locate a sibling ferx-core checkout. Walks upward rather than using a fixed
 # relative depth: testthat's wd is tests/testthat, so `../../../ferx-core` only
-# resolves for a plain checkout. ferx-r's CLAUDE.md mandates working in a git
+# resolves for a plain checkout. ferx-r's AGENTS.md mandates working in a git
 # worktree under <repo>/.claude/worktrees/<name>, where that path points at
 # <repo>/.claude/worktrees/ferx-core and never exists -- so the guards that
 # depend on it silently skipped in exactly the workflow they were written for.
@@ -624,7 +624,7 @@ test_that(".ferx_warning_guidance matches ferx-core's WarningCode vocabulary", {
   #
   # Skipped when the sibling is absent: ferx-r CI builds the pinned crate, not a
   # checkout. That is the right trade -- drift is introduced on a developer
-  # machine, which per CLAUDE.md always has ../ferx-core, and this fails there.
+  # machine, which per AGENTS.md always has ../ferx-core, and this fails there.
   core_src <- .core_src_at_pin()
   skip_if(is.null(core_src), "cannot materialise ferx-core at the pinned revision")
   types_rs <- file.path(core_src, "types.rs")

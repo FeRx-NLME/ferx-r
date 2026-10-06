@@ -7763,7 +7763,7 @@ fn ferx_rust_ruvsearch(
 //  3. **The rows are labelled with the model's own random-effect names.** The
 //     engine's structure is written in *parameter* names (`[CL,V]+[KA]`),
 //     which is Pharmpy's spelling and what `models.csv` carries. ferx's output
-//     convention (CLAUDE.md) is the declared eta / kappa name - `ETA_CL`,
+//     convention (AGENTS.md) is the declared eta / kappa name - `ETA_CL`,
 //     `KAPPA_CL` - so every row carries the labels beside the parameter names,
 //     read off the *candidate's own text*: a model that calls its eta
 //     something other than `ETA_<P>` is labelled as it is written, never as R
