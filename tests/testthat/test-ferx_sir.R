@@ -486,8 +486,9 @@ test_that("a .fitrx written before #1705 loads with no sir_ci_kappa", {
 })
 
 test_that("an IOV SIR bundle from ferx_save_fit() still loads in the engine (#1705)", {
-  # `ci_kappa` is `Option<Vec<(f64, f64)>>` on the engine's SirWire: with one
-  # kappa the pair list has length 1, the case `auto_unbox` would collapse.
+  # `ci_kappa` is `Option<Vec<(f64, f64)>>` on the engine's SirWire, written
+  # through `.FITRX_ARRAY_OF_ARRAY_KEYS` like the other SIR intervals. The
+  # engine has to accept what R writes for it.
   fit <- warfarin_iov_sir_fit()
   skip_if(is.null(fit$cov_matrix) || is.null(fit$sir_ess), sir_cov_skip)
   bundle <- withr::local_tempfile(fileext = ".fitrx")
@@ -509,8 +510,7 @@ test_that("an IOV SIR bundle from ferx_save_fit() still loads in the engine (#17
 test_that("a fit without IOV carries no sir_ci_kappa, in memory or on disk (#1705)", {
   fit <- sir_fit_with_infit_sir("warfarin")
   skip_if(is.null(fit$cov_matrix) || is.null(fit$sir_ess), sir_cov_skip)
-  # Mutation: an empty interval list turned into a zero-row matrix, or a key
-  # written for every fit.
+  # Mutation: an empty interval list turned into a zero-row matrix.
   expect_false("sir_ci_kappa" %in% names(fit))
   expect_false("sir_ci_kappa" %in% names(standalone_sir(fit)))
   path <- withr::local_tempfile(fileext = ".fitrx")
@@ -519,7 +519,10 @@ test_that("a fit without IOV carries no sir_ci_kappa, in memory or on disk (#170
   utils::unzip(path, exdir = staging)
   wire <- jsonlite::read_json(file.path(staging, "fit.json"), simplifyVector = FALSE)
   expect_false(is.null(wire$sir))
-  expect_null(wire$sir$ci_kappa)
+  # No key at all, as the engine writes it: `read_json` maps `null` and an
+  # absent key alike to NULL, so test the names, not the value.
+  # Mutation: write `"ci_kappa": null` for every fit.
+  expect_false("ci_kappa" %in% names(wire$sir))
   expect_false("sir_ci_kappa" %in% names(ferx_load_fit(path)))
 })
 

@@ -262,7 +262,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
 # A one-kappa model's `shrinkage_kappa_by_occ` row is a length-1 vector, which
 # unboxes into a bare number where the engine expects an inner sequence.
 .FITRX_ARRAY_OF_ARRAY_KEYS <- c(
-  "ci_theta", "ci_omega", "ci_sigma", "resamples_packed",
+  "ci_theta", "ci_omega", "ci_sigma", "ci_kappa", "resamples_packed",
   "shrinkage_kappa_by_occ"
 )
 
@@ -703,15 +703,18 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
     !is.null(fit$sir_ci_omega) || !is.null(fit$sir_ci_sigma) ||
     !is.null(fit$sir_ci_kappa)
   if (!has_any) return(NULL)
-  list(
+  wire <- list(
     ci_theta = .fitrx_ci_to_wire(fit$sir_ci_theta),
     ci_omega = .fitrx_ci_to_wire(fit$sir_ci_omega),
     ci_sigma = .fitrx_ci_to_wire(fit$sir_ci_sigma),
-    # ferx-core #1705; the engine's SirWire key, absent on a non-IOV fit.
-    ci_kappa = .fitrx_ci_to_wire(fit$sir_ci_kappa),
     ess = .fitrx_opt_num(fit$sir_ess),
     resamples_packed = NULL
   )
+  # ferx-core #1705's SirWire key. `[[<-` with NULL adds nothing, so a fit with
+  # no kappa writes no key at all - as the engine's writer omits it - rather
+  # than `"ci_kappa": null`.
+  wire[["ci_kappa"]] <- .fitrx_ci_to_wire(fit$sir_ci_kappa)
+  wire
 }
 
 # Bayes posterior summary (method = "bayes"). Stored as scalar metadata plus
