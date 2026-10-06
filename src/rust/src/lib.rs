@@ -2146,17 +2146,28 @@ fn residual_correlations_from_fit(
         if free.is_empty() {
             return Ok(rc);
         }
-        let (noun, pronoun) = if free.len() == 1 {
-            ("correlation", "it")
+        let (noun, object, subject, rebuilt_at, held) = if free.len() == 1 {
+            (
+                "correlation",
+                "it",
+                "it",
+                "the declared initial correlation",
+                "this correlation at its declared value",
+            )
         } else {
-            ("correlations", "them")
+            (
+                "correlations",
+                "them",
+                "they",
+                "their declared initial correlations",
+                "these correlations at their declared values",
+            )
         };
         return Err(format!(
             "the model estimates the block_sigma {noun} {}, but the fit carries no value for \
-             {pronoun} (fit$residual_correlations is missing or empty), so it would be rebuilt \
-             at the declared initial correlation. A fit made with ferx 0.3.x or earlier held \
-             this correlation at its declared value and predates the field. \
-             Re-fit via ferx_fit(model, data).",
+             {object} (fit$residual_correlations is missing or empty), so {subject} would be \
+             rebuilt at {rebuilt_at}. A fit made with ferx 0.3.x or earlier held {held} and \
+             predates the field. Re-fit via ferx_fit(model, data).",
             free.join(", ")
         ));
     }
@@ -2169,8 +2180,14 @@ fn residual_correlations_from_fit(
     }
     for (c, &r) in rc.iter_mut().zip(rho.iter()) {
         if !r.is_finite() || r.abs() >= 1.0 {
+            // R's NA_real_ crosses the FFI as a NaN payload; name it as R does.
+            let shown = if CanBeNA::is_na(&r) {
+                "NA".to_string()
+            } else {
+                r.to_string()
+            };
             return Err(format!(
-                "the block_sigma correlation {} has rho = {r} in \
+                "the block_sigma correlation {} has rho = {shown} in \
                  fit$residual_correlations$rho, which must be finite and strictly \
                  between -1 and 1",
                 label(c)
