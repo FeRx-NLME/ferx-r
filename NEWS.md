@@ -9,7 +9,7 @@
   *free* parameter lacks one. Code that tested `ferx_se(fit) == 0` to find
   fixed parameters should read `fit$estimates$fixed` instead.
 
-- **ferx now builds against ferx-core `c8a0727b`**, up from the `v0.4.0`
+- **ferx now builds against ferx-core `a3e78319`**, up from the `v0.4.0`
   release (`2a6076af`). These engine changes reach every fit, prediction
   and simulation entry point with no change to the package's own code:
 
@@ -284,14 +284,33 @@
     20-level diamond of intermediates (`B = A + 1`, `C = A + 2`,
     `D = B + C`, ...) took 38.8 s to parse with a level block and now
     takes 1.1 s (debug build). No estimate moves.
-  - ferx-core #1665, #1668, #1681, #1682, #1683, #1690, #1692, #1697 and
-    #1698 change nothing an R user sees: a KAPPA section, kappa correlations
-    and kappa shrinkage in the engine's own text summary, the wording of a
-    weighted kappa's `at weight 1` label and weight line in the engine
-    console (`print()` builds its own rows), `FitResult` carrying the fit's
-    data bindings, and documentation and CI.
+  - ferx-core #1665, #1668, #1681, #1682, #1683, #1690, #1692, #1697,
+    #1698, #1709 and #1719 change nothing an R user sees: a KAPPA section,
+    kappa correlations and kappa shrinkage in the engine's own text summary,
+    the wording of a weighted kappa's `at weight 1` label and weight line in
+    the engine console (`print()` builds its own rows), `FitResult` carrying
+    the fit's data bindings, and documentation, changelog tooling and CI.
 
 ## New features
+
+- **SIR reports intervals for the IOV kappa variances: `fit$sir_ci_kappa`**
+  ([ferx-core #1705](https://github.com/FeRx-NLME/ferx-core/issues/1705)).
+  `ferx_fit(sir = TRUE)` and `ferx_sir()` now return a 95% interval for each
+  kappa variance, next to `sir_ci_theta`, `sir_ci_omega` and `sir_ci_sigma`:
+  a matrix with columns `lower` and `upper`, one row per kappa named by
+  `kappa_names`. `print()` lists them in its SIR block. The two paths give
+  identical intervals for the same seed and sample sizes, and the field
+  survives `ferx_save_fit()` / `ferx_load_fit()`. A model without IOV has no
+  `sir_ci_kappa`, and a `.fitrx` written by an earlier ferx loads without
+  one. On the bundled `mbma_placebo` example (seed 7, 1000/250 samples, ESS
+  342), `KAPPA_ARM` = 156.0 gets the SIR interval [68.3, 415.6], against
+  the covariance step's [30.2, 281.9]. On `warfarin_iov` fitted with the
+  model file's `method = foce`, in-fit SIR is degenerate (ESS 2.5) and its
+  `KAPPA_CL` interval excludes the estimate; that is the engine scoring
+  the FOCE fit with the FOCEI objective
+  ([ferx-core #1710](https://github.com/FeRx-NLME/ferx-core/issues/1710)).
+  `ferx_sir()` on the same fit, or `ferx_fit(method = "foce", sir = TRUE)`,
+  is not affected (ESS 224, [0.0198, 0.1101] around 0.0390).
 
 - **`theta NAME[COL, ...]` level blocks can be fitted and simulated from R**
   ([#370](https://github.com/FeRx-NLME/ferx-r/issues/370)). A level block
@@ -394,8 +413,11 @@
   in-fit SIR's 212, with intervals to match. On every FOCEI fit it also ran
   the FOCE inner loop, because it read a `fit$interaction` field the fit
   never carries. `ferx_sir(fit, ...)` now reproduces `ferx_fit(sir = TRUE)`
-  exactly for the same seed and sample sizes, so **standalone SIR intervals
-  change on every IOV fit and every FOCEI fit**; a FOCE fit without IOV is
+  exactly for the same seed and sample sizes (except a FOCE fit whose method
+  comes from the model file, where in-fit SIR itself is off:
+  [ferx-core #1710](https://github.com/FeRx-NLME/ferx-core/issues/1710)),
+  so **standalone SIR intervals change on every IOV fit and every FOCEI
+  fit**; a FOCE fit without IOV is
   unchanged. A kappa fit whose `fit$omega_iov` has been removed is now
   refused rather than resampled around the initial value, and
   `ferx_covariance()` now stops on a `fit$omega_iov` that is not a square
