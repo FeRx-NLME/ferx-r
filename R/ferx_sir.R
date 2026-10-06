@@ -241,8 +241,9 @@ ferx_sir <- function(fit,
   omega_flat <- as.numeric(t(fit$omega))
   cov_flat <- as.numeric(t(fit$cov_matrix))
 
-  # The fitted kappa (IOV) covariance: without it the engine rebuilds the fit at
-  # the model file's initial kappa and resamples around the wrong centre (#465).
+  # The fitted kappa (IOV) covariance: without it the engine would rebuild the
+  # fit at the model file's initial kappa and resample around the wrong centre,
+  # so the glue refuses a kappa fit that lacks it (#465).
   iov_args <- .ferx_omega_iov_args(fit)
   level_args <- .ferx_theta_level_args(fit)
   raw <- ferx_rust_sir(

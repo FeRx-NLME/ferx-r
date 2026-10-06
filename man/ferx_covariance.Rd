@@ -45,8 +45,9 @@ loaded from a \code{.fitrx} bundle.
 }
 \details{
 \code{ferx_covariance()} reconstructs the fitted parameters from the fit,
-re-runs the inner loop (seeded from the per-subject empirical Bayes ETAs) to
-rebuild the covariance-step inputs, and calls the same covariance
+including the IOV (kappa) covariance \code{fit$omega_iov}, re-runs the inner
+loop (seeded from the per-subject empirical Bayes ETAs) to rebuild the
+covariance-step inputs, and calls the same covariance
 step \code{\link[=ferx_fit]{ferx_fit()}} runs inline. The result closely matches fitting with
 \code{covariance = TRUE} (the same engine step; agreement is close but not
 bit-exact, since the standalone re-reads the data and cold-starts the inner
@@ -60,7 +61,9 @@ non-positive-definite or structurally-unusable covariance Hessian, from the
 analytic R-matrix or the FD stencil alike) is \strong{not} an
 error: the returned fit reports \code{covariance_status = "failed"} with a
 diagnostic appended to \code{warnings}, mirroring \code{\link[=ferx_fit]{ferx_fit()}}. An error is
-reserved for input problems (missing / hash-mismatched model or data).
+reserved for input problems (missing / hash-mismatched model or data, or a
+fit whose parameters do not match the model, such as a \code{kappa} model whose
+fit carries no \code{omega_iov}).
 \subsection{Integrity check}{
 
 Like \code{\link[=ferx_sir]{ferx_sir()}}, \code{ferx_covariance()} re-reads the model and data files

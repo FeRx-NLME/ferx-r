@@ -387,7 +387,9 @@ test_that("ferx_sir refuses a kappa fit that has lost its omega_iov (#465)", {
   fit$omega_iov <- NULL
   # Resampling around the model file's initial kappa would be a silently wrong
   # answer, so the binding refuses instead.
-  expect_error(standalone_sir(fit), "carries no omega_iov", fixed = TRUE)
+  # Anchored on the binding's prefix, the shared builder's one per-binding input.
+  expect_error(standalone_sir(fit), "^ferx_sir: .*carries no omega_iov",
+               info = "ferx_sir side of the shared skeleton (#473)")
 })
 
 test_that("ferx_sir on a fit without IOV still reproduces the in-fit SIR (#465)", {
