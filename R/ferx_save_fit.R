@@ -700,12 +700,15 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
 
 .fitrx_build_sir_wire <- function(fit) {
   has_any <- !is.null(fit$sir_ess) || !is.null(fit$sir_ci_theta) ||
-    !is.null(fit$sir_ci_omega) || !is.null(fit$sir_ci_sigma)
+    !is.null(fit$sir_ci_omega) || !is.null(fit$sir_ci_sigma) ||
+    !is.null(fit$sir_ci_kappa)
   if (!has_any) return(NULL)
   list(
     ci_theta = .fitrx_ci_to_wire(fit$sir_ci_theta),
     ci_omega = .fitrx_ci_to_wire(fit$sir_ci_omega),
     ci_sigma = .fitrx_ci_to_wire(fit$sir_ci_sigma),
+    # ferx-core #1705; the engine's SirWire key, absent on a non-IOV fit.
+    ci_kappa = .fitrx_ci_to_wire(fit$sir_ci_kappa),
     ess = .fitrx_opt_num(fit$sir_ess),
     resamples_packed = NULL
   )

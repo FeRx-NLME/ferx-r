@@ -2417,6 +2417,7 @@ fn default_fit_result(
         sir_ci_theta: None,
         sir_ci_omega: None,
         sir_ci_sigma: None,
+        sir_ci_kappa: None,
         sir_ess: None,
         sir_resamples_packed,
         importance_sampling: None,
@@ -2976,6 +2977,9 @@ fn fit_result_to_list(
     let sir_ci_theta = flatten_ci(&result.sir_ci_theta);
     let sir_ci_omega = flatten_ci(&result.sir_ci_omega);
     let sir_ci_sigma = flatten_ci(&result.sir_ci_sigma);
+    // ferx-core #1705: one interval per IOV kappa variance, in kappa_names order;
+    // empty for a model with no kappa.
+    let sir_ci_kappa = flatten_ci(&result.sir_ci_kappa);
 
     // SIR resamples flattened row-major as a length-(n_resamples * n_packed)
     // vector; (sir_resamples_n, sir_resamples_dim) lets R re-shape on read.
@@ -3470,6 +3474,7 @@ fn fit_result_to_list(
         sir_ci_theta = sir_ci_theta,
         sir_ci_omega = sir_ci_omega,
         sir_ci_sigma = sir_ci_sigma,
+        sir_ci_kappa = sir_ci_kappa,
         sir_resamples = sir_resamples_flat,
         sir_resamples_n = sir_resamples_n,
         sir_resamples_dim = sir_resamples_dim,
@@ -4427,6 +4432,7 @@ fn ferx_rust_inits_from_nca(model_path: &str, data_path: &str, method: &str) -> 
 /// @param sir_keep_samples When TRUE, retains the resampled packed parameter vectors.
 /// @param verbose When TRUE, the engine prints progress to stderr.
 /// @return Named list with `sir_ess`, `sir_ci_theta`, `sir_ci_omega`, `sir_ci_sigma`,
+///   `sir_ci_kappa`,
 ///   `sir_resamples`, `sir_resamples_n`, `sir_resamples_dim`, and `warnings`.
 #[extendr]
 #[allow(clippy::too_many_arguments)]
@@ -4674,6 +4680,7 @@ fn ferx_rust_sir(
             sir_ci_theta: None,
             sir_ci_omega: None,
             sir_ci_sigma: None,
+            sir_ci_kappa: None,
             sir_ess: None,
             sir_resamples_packed: None,
             importance_sampling: None,
@@ -4827,6 +4834,7 @@ fn ferx_rust_sir(
             sir_ci_theta = flatten_ci(&new_fit.sir_ci_theta),
             sir_ci_omega = flatten_ci(&new_fit.sir_ci_omega),
             sir_ci_sigma = flatten_ci(&new_fit.sir_ci_sigma),
+            sir_ci_kappa = flatten_ci(&new_fit.sir_ci_kappa),
             sir_resamples = sir_resamples_flat,
             sir_resamples_n = sir_resamples_n,
             sir_resamples_dim = sir_resamples_dim,
@@ -5116,6 +5124,7 @@ fn ferx_rust_covariance(
             sir_ci_theta: None,
             sir_ci_omega: None,
             sir_ci_sigma: None,
+            sir_ci_kappa: None,
             sir_ess: None,
             sir_resamples_packed: None,
             importance_sampling: None,

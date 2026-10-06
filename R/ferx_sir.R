@@ -8,9 +8,9 @@
 #' `ferx_sir()` re-uses the fit's asymptotic covariance matrix as the SIR
 #' proposal distribution and the per-subject empirical Bayes ETAs as
 #' warm-starts for the inner loop. The returned fit is the input with
-#' `sir_ess`, `sir_ci_theta`, `sir_ci_omega`, `sir_ci_sigma` (and, when
-#' `sir_keep_samples = TRUE`, `sir_resamples` / `sir_resamples_n` /
-#' `sir_resamples_dim`) populated.
+#' `sir_ess`, `sir_ci_theta`, `sir_ci_omega`, `sir_ci_sigma`, `sir_ci_kappa`
+#' (IOV models only) and, when `sir_keep_samples = TRUE`, `sir_resamples` /
+#' `sir_resamples_n` / `sir_resamples_dim` populated.
 #'
 #' The fit is rebuilt at its fitted estimates, including the IOV (kappa)
 #' covariance `fit$omega_iov`, under the inner loop of its last estimation
@@ -56,14 +56,16 @@
 #'   Default `FALSE`.
 #'
 #' @return The input `fit`, augmented with `sir_ess`, `sir_ci_theta`,
-#'   `sir_ci_omega`, `sir_ci_sigma`, and (when requested) `sir_resamples` /
-#'   `sir_resamples_n` / `sir_resamples_dim`. Any warnings the SIR step emitted
-#'   are appended to `fit$warnings` and to `fit$warnings_structured` under the
-#'   `sir` category - in particular the proposal diagnostics: a covariance that
-#'   is rank-deficient beyond its `FIX`ed parameters, or a proposal direction
-#'   shrunk to keep draws inside the parameter bounds. Both name the parameters
-#'   involved and mean the same thing - those directions are not identified by
-#'   the data, and their SIR intervals understate the uncertainty. See
+#'   `sir_ci_omega`, `sir_ci_sigma`, `sir_ci_kappa` (one row per IOV kappa
+#'   variance, named by `kappa_names`; NULL without IOV), and (when
+#'   requested) `sir_resamples` / `sir_resamples_n` / `sir_resamples_dim`.
+#'   Any warnings the SIR step emitted are appended to `fit$warnings` and to
+#'   `fit$warnings_structured` under the `sir` category - in particular the
+#'   proposal diagnostics: a covariance that is rank-deficient beyond its
+#'   `FIX`ed parameters, or a proposal direction shrunk to keep draws inside
+#'   the parameter bounds. Both name the parameters involved and mean the same
+#'   thing - those directions are not identified by the data, and their SIR
+#'   intervals understate the uncertainty. See
 #'   [ferx_get_warnings()].
 #'
 #' @examples
@@ -314,6 +316,7 @@ ferx_sir <- function(fit,
   sn <- fit$sigma_names
   sig_names <- if (!is.null(sn) && length(sn) == length(fit$sigma)) sn else paste0("SIGMA(", seq_along(fit$sigma), ")")
   fit$sir_ci_sigma <- reshape_ci(raw$sir_ci_sigma, sig_names)
+  fit$sir_ci_kappa <- .ferx_sir_ci_kappa(raw$sir_ci_kappa, fit$kappa_names)
 
   if (isTRUE(sir_keep_samples)) {
     fit$sir_resamples <- as.numeric(raw$sir_resamples)
