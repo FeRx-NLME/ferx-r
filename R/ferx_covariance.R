@@ -8,7 +8,7 @@
 #' loaded from a `.fitrx` bundle.
 #'
 #' `ferx_covariance()` reconstructs the fitted parameters from the fit,
-#' re-runs the inner loop (seeded from the per-subject empirical Bayes ETAs) to
+#' including the IOV (kappa) covariance `fit$omega_iov`, re-runs the inner loop (seeded from the per-subject empirical Bayes ETAs) to
 #' rebuild the covariance-step inputs, and calls the same covariance
 #' step [ferx_fit()] runs inline. The result closely matches fitting with
 #' `covariance = TRUE` (the same engine step; agreement is close but not
@@ -23,7 +23,9 @@
 #' analytic R-matrix or the FD stencil alike) is **not** an
 #' error: the returned fit reports `covariance_status = "failed"` with a
 #' diagnostic appended to `warnings`, mirroring [ferx_fit()]. An error is
-#' reserved for input problems (missing / hash-mismatched model or data).
+#' reserved for input problems (missing / hash-mismatched model or data, or a
+#' fit whose parameters do not match the model, such as a `kappa` model whose
+#' fit carries no `omega_iov`).
 #'
 #' ## Integrity check
 #'
@@ -185,9 +187,9 @@ ferx_covariance <- function(fit,
 
   omega_flat <- as.numeric(t(fit$omega))
 
-  # IOV omega (empty when no IOV). Forwarding the fitted matrix keeps IOV kappa
-  # standard errors on the estimated scale; when absent the engine falls back
-  # to the model-file init.
+  # The fitted kappa (IOV) covariance (empty when no IOV). Without it the engine
+  # would rebuild the fit at the model file's initial kappa, so the glue refuses
+  # a kappa model whose fit carries no matching matrix (#473).
   iov_args <- .ferx_omega_iov_args(fit)
 
   level_args <- .ferx_theta_level_args(fit)

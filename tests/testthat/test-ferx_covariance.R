@@ -275,6 +275,59 @@ test_that("ferx_covariance(): a diagonal omega with a block kappa labels kappa c
   expect_cov_labels(suppressWarnings(ferx_covariance(fit)), block_kappa_iov_labels)
 })
 
+# -- IOV fits: the covariance step runs at the fitted kappa (#473) -------------
+#
+# The twin of the #465 SIR block in test-ferx_sir.R. The binding used to pass
+# the fitted kappa only when `fit$omega_iov` was present and the right length,
+# and `None` otherwise, which the engine fills from the model file's *initial*
+# kappa: standard errors around the wrong point, with no error. Both bindings
+# now build their skeleton through one helper that refuses instead. The fixture
+# starts KAPPA_CL ten times above where the data put it, so a fallback to the
+# initial value cannot hide.
+kappa_far_from_init <- function(txt) {
+  out <- sub("kappa KAPPA_CL ~ 0.04", "kappa KAPPA_CL ~ 0.4", txt, fixed = TRUE)
+  stopifnot(sum(out != txt) == 1L)
+  out
+}
+
+warfarin_iov_cov_fit <- local({
+  fit <- NULL
+  function() {
+    if (is.null(fit)) fit <<- iov_variant_fit(kappa_far_from_init, covariance = TRUE)
+    fit
+  }
+})
+
+test_that("ferx_covariance on an IOV fit reproduces the inline covariance step (#473)", {
+  fit <- warfarin_iov_cov_fit()
+  skip_if(is.null(fit$cov_matrix), cov_skip)
+  expect_lt(fit$omega_iov[1L, 1L], 0.4 / 5)
+
+  out <- suppressWarnings(ferx_covariance(fit))
+  skip_if(is.null(out$cov_matrix), cov_skip)
+  # Same bound as the warfarin parity test above: the standalone step re-solves
+  # the EBEs, so it is close, not bit-exact. Centred on the initial kappa the
+  # kappa SE alone moves by orders of magnitude more.
+  expect_lt(max(abs(unname(out$cov_matrix) - unname(fit$cov_matrix))), 2e-3)
+  expect_lt(abs(out$se_kappa - fit$se_kappa), 5e-3)
+})
+
+test_that("ferx_covariance refuses a kappa fit that has lost its omega_iov (#473)", {
+  fit <- warfarin_iov_cov_fit()
+  fit$omega_iov <- NULL
+  expect_error(ferx_covariance(fit), "carries no omega_iov", fixed = TRUE,
+               info = "ferx_covariance side of the shared skeleton (#473)")
+})
+
+test_that("ferx_covariance refuses a kappa matrix of the wrong size (#473)", {
+  fit <- iov_variant_fit(block_kappa_iov, covariance = FALSE)
+  expect_identical(dim(fit$omega_iov), c(2L, 2L))
+  fit$omega_iov <- fit$omega_iov[1L, 1L, drop = FALSE]
+  expect_error(ferx_covariance(fit),
+               "omega_iov dim 1 does not match model (2 expected)", fixed = TRUE,
+               info = "ferx_covariance side of the shared skeleton (#473)")
+})
+
 # A two-class [mixture] model with an omega(2) and a sigma(2) override, plus
 # either a kappa (on the warfarin_iov data) or a block_sigma correlation (on
 # the warfarin data). Checked through ferx_fit() only: ferx_covariance() does

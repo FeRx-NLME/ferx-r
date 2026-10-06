@@ -4387,6 +4387,332 @@ fn ferx_rust_inits_from_nca(model_path: &str, data_path: &str, method: &str) -> 
     })
 }
 
+/// What a fit object hands the standalone SIR and covariance steps: the fitted
+/// point, the per-subject EBEs, and the provenance the engine re-reads and
+/// verifies. The R side sends the same set to both bindings.
+struct FitSkeletonInputs<'a> {
+    model_path: &'a str,
+    data_path: &'a str,
+    model_hash: &'a str,
+    data_hash: &'a str,
+    ofv: f64,
+    ofv_prior: f64,
+    interaction: bool,
+    theta: &'a [f64],
+    omega_flat: &'a [f64],
+    omega_dim: i32,
+    sigma: &'a [f64],
+    omega_iov_flat: &'a [f64],
+    omega_iov_dim: i32,
+    residual_rho: &'a [f64],
+    eta_hats_flat: &'a [f64],
+    subject_ids: &'a [String],
+}
+
+/// The skeleton `FitResult` `ferx_core::run_sir` and `ferx_core::run_covariance`
+/// both start from, rebuilt from the R fit list. Only the fields those two read
+/// (through `fitted_params_from_result` and the inner loop) carry real values;
+/// the rest get neutral defaults.
+///
+/// One builder for both bindings (ferx-r #473): the covariance twin used to
+/// keep its own copy, which passed `omega_iov: None` for a kappa fit without a
+/// matching matrix - and `None` makes the engine rebuild the fit at the model
+/// file's *initial* kappa, so the standard errors were computed around the
+/// wrong point, with no error. SIR had been fixed (#465) and the copy had not.
+///
+/// `covariance_matrix` is the only caller-specific input: SIR hands in the
+/// proposal covariance, the covariance step has none yet - computing it is the
+/// point. `n_parameters` and `covariance_status` follow from it.
+fn fit_skeleton(
+    entry_point: &str,
+    model: &CompiledModel,
+    x: &FitSkeletonInputs,
+    covariance_matrix: Option<DMatrix<f64>>,
+) -> std::result::Result<FitResult, String> {
+    let template = &model.default_params;
+    let n_theta = x.theta.len();
+    let n_sigma = x.sigma.len();
+    let n_eta = x.omega_dim.max(0) as usize;
+    let n_subj = x.subject_ids.len();
+
+    if n_theta != template.theta.len() {
+        return Err(theta_length_error(entry_point, model, n_theta, template.theta.len()));
+    }
+    if n_sigma != template.sigma.values.len() {
+        return Err(format!(
+            "{entry_point}: sigma length {} does not match model ({} expected)",
+            n_sigma,
+            template.sigma.values.len()
+        ));
+    }
+    if n_eta != template.omega.dim() {
+        return Err(format!(
+            "{entry_point}: omega dim {} does not match model ({} expected)",
+            n_eta,
+            template.omega.dim()
+        ));
+    }
+    if x.omega_flat.len() != n_eta * n_eta {
+        return Err(format!(
+            "{entry_point}: omega_flat length {} does not match dim^2 = {}",
+            x.omega_flat.len(),
+            n_eta * n_eta
+        ));
+    }
+    if x.eta_hats_flat.len() != n_subj * n_eta {
+        return Err(format!(
+            "{entry_point}: eta_hats_flat length {} does not match n_subjects * n_eta = {}",
+            x.eta_hats_flat.len(),
+            n_subj * n_eta
+        ));
+    }
+
+    let omega_mat = DMatrix::from_row_slice(n_eta, n_eta, x.omega_flat);
+    // The fitted kappa (IOV) covariance. `fitted_params_from_result` falls back
+    // to the model file's *initial* kappa when the skeleton carries `None`, so
+    // SIR would resample, and the covariance step differentiate, around the
+    // wrong point (ferx-r #465, #473). Strict: a kappa model whose fit carries no
+    // matching matrix is refused.
+    let omega_iov = omega_iov_from_fit(model, x.omega_iov_flat, x.omega_iov_dim)
+        .map_err(|e| format!("{entry_point}: {e}"))?
+        .map(|m| m.matrix);
+
+    // Only `eta` is populated - the warm start both steps reconverge from - plus
+    // the fit's own IDs, which the engine checks by position against the
+    // population it re-reads from the data (ferx-r #468).
+
+    let mut subjects: Vec<SubjectResult> = Vec::with_capacity(n_subj);
+    for i in 0..n_subj {
+        let mut eta = nalgebra::DVector::<f64>::zeros(n_eta);
+        for k in 0..n_eta {
+            eta[k] = x.eta_hats_flat[i * n_eta + k];
+        }
+        subjects.push(SubjectResult {
+            id: x.subject_ids[i].clone(),
+            eta,
+            ipred: Vec::new(),
+            pred: Vec::new(),
+            iwres: Vec::new(),
+            cwres: Vec::new(),
+            ofv_contribution: 0.0,
+            cens: Vec::new(),
+            n_obs: 0,
+            extra_columns: Vec::new(),
+            per_obs_tad: Vec::new(),
+            compartment_states: Vec::new(),
+            npde: Vec::new(),
+            npd: Vec::new(),
+            // ferx-core #900 added categorical sdtab rows; neither step reads them.
+            discrete_rows: Vec::new(),
+            // ferx-core #977 added per-subject mixture posteriors; neither step
+            // reads them, and these scaffolds carry no class assignment.
+            pmix: None,
+            mixest: None,
+        });
+    }
+
+    // The fitted `block_sigma` correlations, overlaid on the model's declared
+    // pairing: both steps work at the fitted point, so the declared rho would
+    // centre them on the wrong parameters.
+    let residual_correlations_resolved =
+        overlay_residual_rho(model.residual_correlations.clone(), x.residual_rho)
+            .map_err(|e| format!("{entry_point}: {e}"))?;
+
+    Ok(FitResult {
+        // ferx-core main added a checkpoint-restore flag; neither step reads it.
+        restored_from_checkpoint: false,
+        // ferx-core #1668: the bindings the model was compiled from, as fit() copies them.
+        data_bindings: model.data_bindings().clone(),
+        // ferx-core #1444 / covariance-estimator label: a skeleton FitResult ran
+        // neither SAEM nor a covariance step of its own.
+        saem_mh_accept_tail: None,
+        covariance_method: None,
+        // ferx-core main grew `residual_correlations` and `vi` after the rev
+        // this branch originally pinned. The *pairing* is a property of the
+        // compiled model and is taken from there, but a plain `block_sigma`
+        // estimates rho, so the fitted value is overlaid on top - reading the
+        // model's own value would reconstruct this fit at its declared initial
+        // correlation. This scaffold carries no VI run. The two weighted-kappa
+        // fields it also grew (#1031) are set below, beside `kappa_init_as_sd`.
+        residual_correlations: residual_correlations_resolved,
+        // Parallel FIX flags and standard errors for those correlations
+        // (ferx-core #847): the declaration is structural and comes from the
+        // template; the SEs would come from a covariance step this scaffold
+        // never runs.
+        residual_correlation_fixed: template.residual_correlation_fixed.clone(),
+        se_residual_correlations: None,
+        // The packed Omega / kappa layout (ferx-core #1177). `fit()` records it
+        // as `Some(params.omega.diagonal)`; the covariance matrix handed in
+        // here was packed with the model's own layout, so report that rather
+        // than `None` - `natural_scale_covariance()` needs it to put a
+        // `block_omega` covariance back on the natural scale.
+        omega_is_diagonal: Some(template.omega.diagonal),
+        kappa_is_diagonal: template.omega_iov.as_ref().map(|m| m.diagonal),
+        vi: None,
+        method: if x.interaction {
+            EstimationMethod::FoceI
+        } else {
+            EstimationMethod::Foce
+        },
+        method_chain: vec![if x.interaction {
+            EstimationMethod::FoceI
+        } else {
+            EstimationMethod::Foce
+        }],
+        bayes: None,
+        cond_dist: None,
+        converged: true,
+        ofv: x.ofv,
+        // ferx-core main split the objective into a data and a prior half
+        // (#254). `run_sir` takes its reference objective as
+        // `data_ofv(fit) = fit.ofv - fit.ofv_prior`, deliberately not `ofv_data`,
+        // which a deserialised legacy fit carries as 0, and `run_sir_core` adds
+        // the penalty back on top (ferx-r #366). So the prior half has to arrive
+        // as itself: `ofv` is the penalized total for a priored fit, and
+        // `ofv_prior = 0` beside it would count the penalty twice.
+        // `run_covariance` reads neither - it re-derives the prior curvature from
+        // `model.priors` - but gets the same split rather than an "unpriored" one,
+        // so it does not depend on the engine continuing not to look.
+        //
+        // `prior_summary` stays empty: it is a report, not an input.
+        ofv_data: x.ofv - x.ofv_prior,
+        ofv_prior: x.ofv_prior,
+        prior_summary: Vec::new(),
+        aic: 0.0,
+        bic: 0.0,
+        theta: x.theta.to_vec(),
+        theta_names: template.theta_names.clone(),
+        eta_names: template.omega.eta_names.clone(),
+        omega: omega_mat,
+        sigma: x.sigma.to_vec(),
+        sigma_names: template.sigma.names.clone(),
+        error_model: model.error_model,
+        n_parameters: covariance_matrix.as_ref().map_or(0, |m| m.nrows()),
+        covariance_status: if covariance_matrix.is_some() {
+            CovarianceStatus::Computed
+        } else {
+            CovarianceStatus::NotRequested
+        },
+        covariance_matrix,
+        se_theta: None,
+        se_omega: None,
+        se_sigma: None,
+        theta_fixed: template.theta_fixed.clone(),
+        omega_fixed: template.omega_fixed.clone(),
+        sigma_fixed: template.sigma_fixed.clone(),
+        subjects,
+        n_obs: 0,
+        n_subjects: n_subj,
+        n_iterations: 0,
+        interaction: x.interaction,
+        warnings: Vec::new(),
+        sir_ci_theta: None,
+        sir_ci_omega: None,
+        sir_ci_sigma: None,
+        sir_ess: None,
+        sir_resamples_packed: None,
+        importance_sampling: None,
+        impmap_trace: None,
+        omega_iov,
+        kappa_names: model.kappa_names.clone(),
+        kappa_fixed: template.kappa_fixed.clone(),
+        se_kappa: None,
+        shrinkage_kappa: Vec::new(),
+        shrinkage_kappa_by_occ: Vec::new(),
+        ebe_kappas: Vec::new(),
+        saem_mu_ref_m_step_evals_saved: None,
+        saem_n_subjects_hmc: None,
+        gradient_method_inner: String::new(),
+        gradient_method_outer: String::new(),
+        uses_ode_solver: model.is_ode_based(),
+        n_threads_used: 1,
+        nlopt_missing_algorithms: Vec::new(),
+        covariance_n_evals_estimated: None,
+        trace_path: None,
+        // In-process optimisation for a `run_covariance` called straight after a fit;
+        // `#[serde(skip)]` upstream, so a reconstructed result legitimately carries `None`
+        // and `run_covariance` re-packs from `omega`. No `.fitrx` / R format change.
+        packed_estimate: None,
+        // No outer optimizer ran in this scaffold, so there is no init-escape
+        // verdict, and no packed tally to classify: `model_selection::bic()`
+        // reports NaN on the default `BicInputs` rather than a wrong penalty
+        // (ferx-core #1177).
+        left_init: None,
+        bic_inputs: BicInputs::default(),
+        ebe_convergence_warnings: 0,
+        max_unconverged_subjects: 0,
+        total_ebe_fallbacks: 0,
+        shrinkage_eta: Vec::new(),
+        shrinkage_eps: f64::NAN,
+        wall_time_secs: 0.0,
+        model_name: model.name.clone(),
+        ferx_version: String::new(),
+        eta_param_info: Vec::new(),
+        kappa_param_types: Vec::new(),
+        theta_transform: Vec::new(),
+        sigma_types: Vec::new(),
+        cov_eigenvalues: None,
+        cov_condition_number: None,
+        eta_log_transformed: Vec::new(),
+        omega_param_corr: None,
+        omega_iov_param_corr: None,
+        model_path: Some(x.model_path.to_string()),
+        data_path: Some(x.data_path.to_string()),
+        model_hash: if x.model_hash.is_empty() {
+            None
+        } else {
+            Some(x.model_hash.to_string())
+        },
+        data_hash: if x.data_hash.is_empty() {
+            None
+        } else {
+            Some(x.data_hash.to_string())
+        },
+        dw_statistic: f64::NAN,
+        iwres_lag1_r: f64::NAN,
+        uses_sde: false,
+        omega_init_as_sd: Vec::new(),
+        sigma_init_as_sd: Vec::new(),
+        kappa_init_as_sd: Vec::new(),
+        // ferx-core #1031 added the sample-size weight (`kappa K ~ g2 weight = N`)
+        // to `FitResult` for reporting only; these skeleton results are never
+        // printed, so both stay empty.
+        kappa_weights: Vec::new(),
+        kappa_weight_typical: Vec::new(),
+        warnings_structured: Vec::new(),
+        model_text: None,
+        theta_init: Vec::new(),
+        omega_init: nalgebra::DMatrix::zeros(0, 0),
+        sigma_init: Vec::new(),
+        obs_time_range: None,
+        final_gradient: None,
+        final_gradient_source: None,
+        optimizer: "auto".to_string(),
+        n_starts: 1,
+        multi_start_seed: None,
+        saem_seed: None,
+        sir_seed: None,
+        imp_seed: None,
+        npde_seed: None,
+        bloq_method: "drop".to_string(),
+        outer_maxiter: 0,
+        outer_gtol: 0.0,
+        inits_from_nca: None,
+        covariate_names: Vec::new(),
+        input_columns: Vec::new(),
+        covariate_table: None,
+        // ferx-core #1111 added the [covariate_model] relation echo; neither
+        // step reads it.
+        covariate_relations: Vec::new(),
+        exclusions: None,
+        method_wall_times_secs: Vec::new(),
+        covariance_wall_time_secs: 0.0,
+        environment: ferx_core::environment::EnvironmentInfo::default(),
+        #[cfg(feature = "nn")]
+        neural_networks: Vec::new(),
+    })
+}
+
 /// Standalone SIR — run Sampling Importance Resampling against an existing fit.
 ///
 /// The R wrapper `ferx_sir()` flattens the fit list into the primitives this
@@ -4482,38 +4808,8 @@ fn ferx_rust_sir(
         )?;
         bind_layout_from_fit(&mut parsed, model_path, &fit_levels)?;
         let model = &parsed.model;
-        let template = &model.default_params;
 
-        let n_theta = theta.len();
-        let n_sigma = sigma.len();
-        let n_eta = omega_dim as usize;
-        let n_subj = subject_ids.len();
-        let n_packed = cov_matrix_dim as usize;
-
-        if n_theta != template.theta.len() {
-            return Err(theta_length_error("ferx_sir", model, n_theta, template.theta.len()));
-        }
-        if n_sigma != template.sigma.values.len() {
-            return Err(format!(
-                "ferx_sir: sigma length {} does not match model ({} expected)",
-                n_sigma,
-                template.sigma.values.len()
-            ));
-        }
-        if n_eta != template.omega.dim() {
-            return Err(format!(
-                "ferx_sir: omega dim {} does not match model ({} expected)",
-                n_eta,
-                template.omega.dim()
-            ));
-        }
-        if omega_flat.len() != n_eta * n_eta {
-            return Err(format!(
-                "ferx_sir: omega_flat length {} does not match dim^2 = {}",
-                omega_flat.len(),
-                n_eta * n_eta
-            ));
-        }
+        let n_packed = cov_matrix_dim.max(0) as usize;
         if n_packed == 0 || cov_matrix_flat.len() != n_packed * n_packed {
             return Err(format!(
                 "ferx_sir: cov_matrix is missing or malformed (dim={}, len={}). \
@@ -4522,261 +4818,26 @@ fn ferx_rust_sir(
                 cov_matrix_flat.len()
             ));
         }
-        if eta_hats_flat.len() != n_subj * n_eta {
-            return Err(format!(
-                "ferx_sir: eta_hats_flat length {} does not match n_subjects * n_eta = {}",
-                eta_hats_flat.len(),
-                n_subj * n_eta
-            ));
-        }
-
-        let omega_mat = DMatrix::from_row_slice(n_eta, n_eta, &omega_flat);
         let cov_mat = DMatrix::from_row_slice(n_packed, n_packed, &cov_matrix_flat);
-        // The fitted kappa (IOV) covariance. `fitted_params_from_result` falls
-        // back to the model file's *initial* kappa when the skeleton carries
-        // `None`, so SIR would resample around the wrong centre (ferx-r #465).
-        // Strict: a kappa model whose fit carries no matching matrix is refused.
-        let omega_iov = omega_iov_from_fit(model, &omega_iov_flat, omega_iov_dim)
-            .map_err(|e| format!("ferx_sir: {}", e))?
-            .map(|m| m.matrix);
-
-        // Build SubjectResult vec with only `eta` populated (the only field
-        // ferx_core::run_sir reads off subjects) and the fit's own IDs, which
-        // the engine checks by position against the population it re-reads
-        // from the data (ferx-r #468).
-        let mut subjects: Vec<SubjectResult> = Vec::with_capacity(n_subj);
-        for i in 0..n_subj {
-            let mut eta = nalgebra::DVector::<f64>::zeros(n_eta);
-            for k in 0..n_eta {
-                eta[k] = eta_hats_flat[i * n_eta + k];
-            }
-            subjects.push(SubjectResult {
-                id: subject_ids[i].clone(),
-                eta,
-                ipred: Vec::new(),
-                pred: Vec::new(),
-                iwres: Vec::new(),
-                cwres: Vec::new(),
-                ofv_contribution: 0.0,
-                cens: Vec::new(),
-                n_obs: 0,
-                extra_columns: Vec::new(),
-                per_obs_tad: Vec::new(),
-                // PR #207 (ferx-core) added this field; the SIR path never reads it.
-                compartment_states: Vec::new(),
-                // PR #377 (ferx-core) added NPDE/NPD; the SIR path never reads them.
-                npde: Vec::new(),
-                npd: Vec::new(),
-                // ferx-core #900 added categorical sdtab rows; the SIR path never reads them.
-                discrete_rows: Vec::new(),
-                // ferx-core #977 added per-subject mixture posteriors; the SIR path
-                // never reads them, and these scaffolds carry no class assignment.
-                pmix: None,
-                mixest: None,
-            });
-        }
-
-        // The fitted `block_sigma` correlations, overlaid on the model's declared
-        // pairing - SIR resamples the residual covariance, so starting from the
-        // declared rho would resample around the wrong centre.
-        let residual_correlations_resolved =
-            match overlay_residual_rho(model.residual_correlations.clone(), &residual_rho) {
-                Ok(rc) => rc,
-                Err(e) => return Err(format!("ferx_sir: {}", e)),
-            };
-
-        // Skeleton FitResult — only the fields ferx_core::run_sir actually
-        // reads are populated; everything else gets a neutral default.
-        let fit = FitResult {
-            // ferx-core main added a checkpoint-restore flag; the SIR path never reads it.
-            restored_from_checkpoint: false,
-            // ferx-core #1668: the bindings the model was compiled from, as fit() copies them.
-            data_bindings: model.data_bindings().clone(),
-            // ferx-core #1444 / covariance-estimator label: a skeleton FitResult ran
-            // neither SAEM nor a covariance step of its own.
-            saem_mh_accept_tail: None,
-            covariance_method: None,
-            // ferx-core main grew `residual_correlations` and `vi` after the rev
-            // this branch originally pinned. The *pairing* is a property of the
-            // compiled model and is taken from there, but a plain `block_sigma`
-            // estimates rho, so the fitted value is overlaid on top - reading the
-            // model's own value would reconstruct this fit at its declared initial
-            // correlation. This scaffold carries no VI run. The two weighted-kappa
-            // fields it also grew (#1031) are set below, beside `kappa_init_as_sd`.
-            residual_correlations: residual_correlations_resolved,
-            // Parallel FIX flags and standard errors for those correlations
-            // (ferx-core #847): the declaration is structural and comes from the
-            // template; the SEs would come from a covariance step this scaffold
-            // never runs.
-            residual_correlation_fixed: template.residual_correlation_fixed.clone(),
-            se_residual_correlations: None,
-            // The packed Omega / kappa layout (ferx-core #1177). `fit()` records it
-            // as `Some(params.omega.diagonal)`; the covariance matrix handed in
-            // here was packed with the model's own layout, so report that rather
-            // than `None` - `natural_scale_covariance()` needs it to put a
-            // `block_omega` covariance back on the natural scale.
-            omega_is_diagonal: Some(template.omega.diagonal),
-            kappa_is_diagonal: template.omega_iov.as_ref().map(|m| m.diagonal),
-            vi: None,
-            method: if interaction {
-                EstimationMethod::FoceI
-            } else {
-                EstimationMethod::Foce
-            },
-            method_chain: vec![if interaction {
-                EstimationMethod::FoceI
-            } else {
-                EstimationMethod::Foce
-            }],
-            bayes: None,
-            cond_dist: None,
-            converged: true,
+        let inputs = FitSkeletonInputs {
+            model_path,
+            data_path,
+            model_hash,
+            data_hash,
             ofv,
-            // ferx-core main split the objective into a data and a prior half
-            // (#254). `run_sir` reads neither field directly: it takes its reference
-            // objective as `data_ofv(fit) = fit.ofv - fit.ofv_prior`, deliberately
-            // not `ofv_data`, which a deserialised legacy fit carries as 0. So the
-            // prior half has to arrive here as itself: `ofv` is the penalized total
-            // for a priored fit, and `run_sir_core` adds the penalty back on top of
-            // whatever reference it is given (ferx-r #366). Passing `ofv_prior = 0`
-            // beside a penalized `ofv` would count the penalty twice - a constant
-            // offset that cancels in today's normalized importance weights, and a
-            // wrong number the moment `ofv_hat` is used as anything but a difference.
-            //
-            // `prior_summary` stays empty: it is a report, not an input, and
-            // `run_sir` does not read it.
-            ofv_data: ofv - ofv_prior,
             ofv_prior,
-            prior_summary: Vec::new(),
-            aic: 0.0,
-            bic: 0.0,
-            theta: theta.clone(),
-            theta_names: template.theta_names.clone(),
-            eta_names: template.omega.eta_names.clone(),
-            omega: omega_mat,
-            sigma: sigma.clone(),
-            sigma_names: template.sigma.names.clone(),
-            error_model: model.error_model,
-            covariance_matrix: Some(cov_mat),
-            se_theta: None,
-            se_omega: None,
-            se_sigma: None,
-            theta_fixed: template.theta_fixed.clone(),
-            omega_fixed: template.omega_fixed.clone(),
-            sigma_fixed: template.sigma_fixed.clone(),
-            subjects,
-            n_obs: 0,
-            n_subjects: n_subj,
-            n_parameters: n_packed,
-            n_iterations: 0,
             interaction,
-            warnings: Vec::new(),
-            sir_ci_theta: None,
-            sir_ci_omega: None,
-            sir_ci_sigma: None,
-            sir_ess: None,
-            sir_resamples_packed: None,
-            importance_sampling: None,
-            impmap_trace: None,
-            omega_iov,
-            kappa_names: model.kappa_names.clone(),
-            kappa_fixed: template.kappa_fixed.clone(),
-            se_kappa: None,
-            shrinkage_kappa: Vec::new(),
-            shrinkage_kappa_by_occ: Vec::new(),
-            ebe_kappas: Vec::new(),
-            saem_mu_ref_m_step_evals_saved: None,
-            saem_n_subjects_hmc: None,
-            gradient_method_inner: String::new(),
-            gradient_method_outer: String::new(),
-            uses_ode_solver: model.is_ode_based(),
-            n_threads_used: 1,
-            nlopt_missing_algorithms: Vec::new(),
-            covariance_n_evals_estimated: None,
-            trace_path: None,
-            // In-process optimisation for a `run_covariance` called straight after a fit;
-            // `#[serde(skip)]` upstream, so a reconstructed result legitimately carries `None`
-            // and `run_covariance` re-packs from `omega`. No `.fitrx` / R format change.
-            packed_estimate: None,
-            // No outer optimizer ran in this scaffold, so there is no init-escape
-            // verdict, and no packed tally to classify: `model_selection::bic()`
-            // reports NaN on the default `BicInputs` rather than a wrong penalty
-            // (ferx-core #1177).
-            left_init: None,
-            bic_inputs: BicInputs::default(),
-            ebe_convergence_warnings: 0,
-            max_unconverged_subjects: 0,
-            total_ebe_fallbacks: 0,
-            covariance_status: CovarianceStatus::Computed,
-            shrinkage_eta: Vec::new(),
-            shrinkage_eps: f64::NAN,
-            wall_time_secs: 0.0,
-            model_name: model.name.clone(),
-            ferx_version: String::new(),
-            eta_param_info: Vec::new(),
-            kappa_param_types: Vec::new(),
-            theta_transform: Vec::new(),
-            sigma_types: Vec::new(),
-            cov_eigenvalues: None,
-            cov_condition_number: None,
-            eta_log_transformed: Vec::new(),
-            omega_param_corr: None,
-            omega_iov_param_corr: None,
-            model_path: Some(model_path.to_string()),
-            data_path: Some(data_path.to_string()),
-            model_hash: if model_hash.is_empty() {
-                None
-            } else {
-                Some(model_hash.to_string())
-            },
-            data_hash: if data_hash.is_empty() {
-                None
-            } else {
-                Some(data_hash.to_string())
-            },
-            dw_statistic: f64::NAN,
-            iwres_lag1_r: f64::NAN,
-            uses_sde: false,
-            omega_init_as_sd: Vec::new(),
-            sigma_init_as_sd: Vec::new(),
-            kappa_init_as_sd: Vec::new(),
-            // ferx-core #1031 added the sample-size weight (`kappa K ~ g2 weight = N`)
-            // to `FitResult` for reporting only; these skeleton results are never
-            // printed, so both stay empty.
-            kappa_weights: Vec::new(),
-            kappa_weight_typical: Vec::new(),
-            warnings_structured: Vec::new(),
-            model_text: None,
-            theta_init: Vec::new(),
-            omega_init: nalgebra::DMatrix::zeros(0, 0),
-            sigma_init: Vec::new(),
-            obs_time_range: None,
-            final_gradient: None,
-            final_gradient_source: None,
-            optimizer: "auto".to_string(),
-            n_starts: 1,
-            multi_start_seed: None,
-            saem_seed: None,
-            sir_seed: None,
-            imp_seed: None,
-            npde_seed: None,
-            bloq_method: "drop".to_string(),
-            outer_maxiter: 0,
-            outer_gtol: 0.0,
-            inits_from_nca: None,
-            covariate_names: Vec::new(),
-            input_columns: Vec::new(),
-            covariate_table: None,
-            // ferx-core #1111 added the [covariate_model] relation echo; the SIR
-            // path never reads it.
-            covariate_relations: Vec::new(),
-            exclusions: None,
-            method_wall_times_secs: Vec::new(),
-            covariance_wall_time_secs: 0.0,
-            environment: ferx_core::environment::EnvironmentInfo::default(),
-            #[cfg(feature = "nn")]
-            neural_networks: Vec::new(),
+            theta: &theta,
+            omega_flat: &omega_flat,
+            omega_dim,
+            sigma: &sigma,
+            omega_iov_flat: &omega_iov_flat,
+            omega_iov_dim,
+            residual_rho: &residual_rho,
+            eta_hats_flat: &eta_hats_flat,
+            subject_ids: &subject_ids,
         };
+        let fit = fit_skeleton("ferx_sir", model, &inputs, Some(cov_mat))?;
 
         let mut opts = FitOptions::default();
         opts.sir_samples = sir_samples.max(0) as usize;
@@ -4927,44 +4988,6 @@ fn ferx_rust_covariance(
         )?;
         bind_layout_from_fit(&mut parsed, model_path, &fit_levels)?;
         let model = &parsed.model;
-        let template = &model.default_params;
-
-        let n_theta = theta.len();
-        let n_sigma = sigma.len();
-        let n_eta = omega_dim as usize;
-        let n_subj = subject_ids.len();
-
-        if n_theta != template.theta.len() {
-            return Err(theta_length_error("ferx_covariance", model, n_theta, template.theta.len()));
-        }
-        if n_sigma != template.sigma.values.len() {
-            return Err(format!(
-                "ferx_covariance: sigma length {} does not match model ({} expected)",
-                n_sigma,
-                template.sigma.values.len()
-            ));
-        }
-        if n_eta != template.omega.dim() {
-            return Err(format!(
-                "ferx_covariance: omega dim {} does not match model ({} expected)",
-                n_eta,
-                template.omega.dim()
-            ));
-        }
-        if omega_flat.len() != n_eta * n_eta {
-            return Err(format!(
-                "ferx_covariance: omega_flat length {} does not match dim^2 = {}",
-                omega_flat.len(),
-                n_eta * n_eta
-            ));
-        }
-        if eta_hats_flat.len() != n_subj * n_eta {
-            return Err(format!(
-                "ferx_covariance: eta_hats_flat length {} does not match n_subjects * n_eta = {}",
-                eta_hats_flat.len(),
-                n_subj * n_eta
-            ));
-        }
 
         let covariance_method_enum = match covariance_method.to_lowercase().as_str() {
             "r" | "hessian" => CovarianceMethod::Hessian,
@@ -4976,249 +4999,25 @@ fn ferx_rust_covariance(
             )),
         };
 
-        let omega_mat = DMatrix::from_row_slice(n_eta, n_eta, &omega_flat);
-
-        // Reconstruct the fitted IOV omega matrix when the fit carries one.
-        // `fitted_params_from_result` reads this off the FitResult (falling back to
-        // the model-file init when None); passing the fitted matrix keeps IOV
-        // kappa standard errors on the estimated scale.
-        let n_iov = omega_iov_dim.max(0) as usize;
-        let omega_iov: Option<DMatrix<f64>> = if n_iov > 0 && omega_iov_flat.len() == n_iov * n_iov {
-            Some(DMatrix::from_row_slice(n_iov, n_iov, &omega_iov_flat))
-        } else {
-            None
-        };
-
-        // Build SubjectResult vec with only `eta` populated — the warm-start the
-        // covariance step reconverges from — and the fit's own IDs, which the
-        // engine checks by position against the re-read population (ferx-r #468).
-        let mut subjects: Vec<SubjectResult> = Vec::with_capacity(n_subj);
-        for i in 0..n_subj {
-            let mut eta = nalgebra::DVector::<f64>::zeros(n_eta);
-            for k in 0..n_eta {
-                eta[k] = eta_hats_flat[i * n_eta + k];
-            }
-            subjects.push(SubjectResult {
-                id: subject_ids[i].clone(),
-                eta,
-                ipred: Vec::new(),
-                pred: Vec::new(),
-                iwres: Vec::new(),
-                cwres: Vec::new(),
-                ofv_contribution: 0.0,
-                cens: Vec::new(),
-                n_obs: 0,
-                extra_columns: Vec::new(),
-                per_obs_tad: Vec::new(),
-                compartment_states: Vec::new(),
-                npde: Vec::new(),
-                npd: Vec::new(),
-                // ferx-core #900 added categorical sdtab rows; the covariance path never reads them.
-                discrete_rows: Vec::new(),
-                // ferx-core #977 added per-subject mixture posteriors; the covariance
-                // path never reads them, and these scaffolds carry no class assignment.
-                pmix: None,
-                mixest: None,
-            });
-        }
-
-        // The fitted `block_sigma` correlations, overlaid on the model's declared
-        // pairing - the covariance step differentiates around the fitted point, so
-        // the declared rho would centre it on the wrong parameters.
-        let residual_correlations_resolved =
-            match overlay_residual_rho(model.residual_correlations.clone(), &residual_rho) {
-                Ok(rc) => rc,
-                Err(e) => return Err(format!("ferx_covariance: {}", e)),
-            };
-
-        // Skeleton FitResult — only the fields ferx_core::run_covariance actually
-        // reads (via fitted_params_from_result + the inner loop) are populated;
-        // everything else gets a neutral default. `bayes = None` so the returned
-        // covariance_status resolves to Computed/Failed rather than NotRequested.
-        let fit = FitResult {
-            // ferx-core main added a checkpoint-restore flag; the covariance path never reads it.
-            restored_from_checkpoint: false,
-            // ferx-core #1668: the bindings the model was compiled from, as fit() copies them.
-            data_bindings: model.data_bindings().clone(),
-            // ferx-core #1444 / covariance-estimator label: a skeleton FitResult ran
-            // neither SAEM nor a covariance step of its own.
-            saem_mh_accept_tail: None,
-            covariance_method: None,
-            // ferx-core main grew `residual_correlations` and `vi` after the rev
-            // this branch originally pinned. The *pairing* is a property of the
-            // compiled model and is taken from there, but a plain `block_sigma`
-            // estimates rho, so the fitted value is overlaid on top - reading the
-            // model's own value would reconstruct this fit at its declared initial
-            // correlation. This scaffold carries no VI run. The two weighted-kappa
-            // fields it also grew (#1031) are set below, beside `kappa_init_as_sd`.
-            residual_correlations: residual_correlations_resolved,
-            // Parallel FIX flags and standard errors for those correlations
-            // (ferx-core #847): the declaration is structural and comes from the
-            // template; the SEs would come from a covariance step this scaffold
-            // never runs.
-            residual_correlation_fixed: template.residual_correlation_fixed.clone(),
-            se_residual_correlations: None,
-            // The packed Omega / kappa layout (ferx-core #1177). `fit()` records it
-            // as `Some(params.omega.diagonal)`; the covariance matrix handed in
-            // here was packed with the model's own layout, so report that rather
-            // than `None` - `natural_scale_covariance()` needs it to put a
-            // `block_omega` covariance back on the natural scale.
-            omega_is_diagonal: Some(template.omega.diagonal),
-            kappa_is_diagonal: template.omega_iov.as_ref().map(|m| m.diagonal),
-            vi: None,
-            method: if interaction {
-                EstimationMethod::FoceI
-            } else {
-                EstimationMethod::Foce
-            },
-            method_chain: vec![if interaction {
-                EstimationMethod::FoceI
-            } else {
-                EstimationMethod::Foce
-            }],
-            bayes: None,
-            cond_dist: None,
-            converged: true,
+        let inputs = FitSkeletonInputs {
+            model_path,
+            data_path,
+            model_hash,
+            data_hash,
             ofv,
-            // ferx-core main split the objective into a data and a prior half
-            // (#254). `run_covariance` reads neither - it re-derives the prior
-            // curvature from `model.priors` when the model declares one, which is
-            // why the standalone `ferx_covariance()` path gets the priored SEs
-            // right without being told about the prior. The split is still recorded
-            // as handed in rather than flattened to "unpriored", so this skeleton
-            // does not depend on the engine continuing not to look (ferx-r #366).
-            ofv_data: ofv - ofv_prior,
             ofv_prior,
-            prior_summary: Vec::new(),
-            aic: 0.0,
-            bic: 0.0,
-            theta: theta.clone(),
-            theta_names: template.theta_names.clone(),
-            eta_names: template.omega.eta_names.clone(),
-            omega: omega_mat,
-            sigma: sigma.clone(),
-            sigma_names: template.sigma.names.clone(),
-            error_model: model.error_model,
-            covariance_matrix: None,
-            se_theta: None,
-            se_omega: None,
-            se_sigma: None,
-            theta_fixed: template.theta_fixed.clone(),
-            omega_fixed: template.omega_fixed.clone(),
-            sigma_fixed: template.sigma_fixed.clone(),
-            subjects,
-            n_obs: 0,
-            n_subjects: n_subj,
-            n_parameters: 0,
-            n_iterations: 0,
             interaction,
-            warnings: Vec::new(),
-            sir_ci_theta: None,
-            sir_ci_omega: None,
-            sir_ci_sigma: None,
-            sir_ess: None,
-            sir_resamples_packed: None,
-            importance_sampling: None,
-            impmap_trace: None,
-            omega_iov,
-            kappa_names: model.kappa_names.clone(),
-            kappa_fixed: template.kappa_fixed.clone(),
-            se_kappa: None,
-            shrinkage_kappa: Vec::new(),
-            shrinkage_kappa_by_occ: Vec::new(),
-            ebe_kappas: Vec::new(),
-            saem_mu_ref_m_step_evals_saved: None,
-            saem_n_subjects_hmc: None,
-            gradient_method_inner: String::new(),
-            gradient_method_outer: String::new(),
-            uses_ode_solver: model.is_ode_based(),
-            n_threads_used: 1,
-            nlopt_missing_algorithms: Vec::new(),
-            covariance_n_evals_estimated: None,
-            trace_path: None,
-            // In-process optimisation for a `run_covariance` called straight after a fit;
-            // `#[serde(skip)]` upstream, so a reconstructed result legitimately carries `None`
-            // and `run_covariance` re-packs from `omega`. No `.fitrx` / R format change.
-            packed_estimate: None,
-            // No outer optimizer ran in this scaffold, so there is no init-escape
-            // verdict, and no packed tally to classify: `model_selection::bic()`
-            // reports NaN on the default `BicInputs` rather than a wrong penalty
-            // (ferx-core #1177).
-            left_init: None,
-            bic_inputs: BicInputs::default(),
-            ebe_convergence_warnings: 0,
-            max_unconverged_subjects: 0,
-            total_ebe_fallbacks: 0,
-            covariance_status: CovarianceStatus::NotRequested,
-            shrinkage_eta: Vec::new(),
-            shrinkage_eps: f64::NAN,
-            wall_time_secs: 0.0,
-            model_name: model.name.clone(),
-            ferx_version: String::new(),
-            eta_param_info: Vec::new(),
-            kappa_param_types: Vec::new(),
-            theta_transform: Vec::new(),
-            sigma_types: Vec::new(),
-            cov_eigenvalues: None,
-            cov_condition_number: None,
-            eta_log_transformed: Vec::new(),
-            omega_param_corr: None,
-            omega_iov_param_corr: None,
-            model_path: Some(model_path.to_string()),
-            data_path: Some(data_path.to_string()),
-            model_hash: if model_hash.is_empty() {
-                None
-            } else {
-                Some(model_hash.to_string())
-            },
-            data_hash: if data_hash.is_empty() {
-                None
-            } else {
-                Some(data_hash.to_string())
-            },
-            dw_statistic: f64::NAN,
-            iwres_lag1_r: f64::NAN,
-            uses_sde: false,
-            omega_init_as_sd: Vec::new(),
-            sigma_init_as_sd: Vec::new(),
-            kappa_init_as_sd: Vec::new(),
-            // ferx-core #1031 added the sample-size weight (`kappa K ~ g2 weight = N`)
-            // to `FitResult` for reporting only; these skeleton results are never
-            // printed, so both stay empty.
-            kappa_weights: Vec::new(),
-            kappa_weight_typical: Vec::new(),
-            warnings_structured: Vec::new(),
-            model_text: None,
-            theta_init: Vec::new(),
-            omega_init: nalgebra::DMatrix::zeros(0, 0),
-            sigma_init: Vec::new(),
-            obs_time_range: None,
-            final_gradient: None,
-            final_gradient_source: None,
-            optimizer: "auto".to_string(),
-            n_starts: 1,
-            multi_start_seed: None,
-            saem_seed: None,
-            sir_seed: None,
-            imp_seed: None,
-            npde_seed: None,
-            bloq_method: "drop".to_string(),
-            outer_maxiter: 0,
-            outer_gtol: 0.0,
-            inits_from_nca: None,
-            covariate_names: Vec::new(),
-            input_columns: Vec::new(),
-            covariate_table: None,
-            // ferx-core #1111 added the [covariate_model] relation echo; the
-            // covariance path never reads it.
-            covariate_relations: Vec::new(),
-            exclusions: None,
-            method_wall_times_secs: Vec::new(),
-            covariance_wall_time_secs: 0.0,
-            environment: ferx_core::environment::EnvironmentInfo::default(),
-            #[cfg(feature = "nn")]
-            neural_networks: Vec::new(),
+            theta: &theta,
+            omega_flat: &omega_flat,
+            omega_dim,
+            sigma: &sigma,
+            omega_iov_flat: &omega_iov_flat,
+            omega_iov_dim,
+            residual_rho: &residual_rho,
+            eta_hats_flat: &eta_hats_flat,
+            subject_ids: &subject_ids,
         };
+        let fit = fit_skeleton("ferx_covariance", model, &inputs, None)?;
 
         let mut opts = FitOptions::default();
         // run_covariance_step is ignored by run_covariance (calling it *is* the
