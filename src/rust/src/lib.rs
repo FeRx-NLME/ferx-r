@@ -4569,7 +4569,10 @@ fn fit_skeleton(
         // which a deserialised legacy fit carries as 0, and `run_sir_core` adds
         // the penalty back on top (ferx-r #366). So the prior half has to arrive
         // as itself: `ofv` is the penalized total for a priored fit, and
-        // `ofv_prior = 0` beside it would count the penalty twice.
+        // `ofv_prior = 0` beside it would count the penalty twice - a constant
+        // offset that cancels in today's normalized importance weights, so no
+        // SIR test would notice, and a wrong number the moment `ofv_hat` is used
+        // as anything but a difference.
         // `run_covariance` reads neither - it re-derives the prior curvature from
         // `model.priors` - but gets the same split rather than an "unpriored" one,
         // so it does not depend on the engine continuing not to look.

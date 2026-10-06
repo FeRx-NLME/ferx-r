@@ -8,8 +8,9 @@
 #' loaded from a `.fitrx` bundle.
 #'
 #' `ferx_covariance()` reconstructs the fitted parameters from the fit,
-#' including the IOV (kappa) covariance `fit$omega_iov`, re-runs the inner loop (seeded from the per-subject empirical Bayes ETAs) to
-#' rebuild the covariance-step inputs, and calls the same covariance
+#' including the IOV (kappa) covariance `fit$omega_iov`, re-runs the inner
+#' loop (seeded from the per-subject empirical Bayes ETAs) to rebuild the
+#' covariance-step inputs, and calls the same covariance
 #' step [ferx_fit()] runs inline. The result closely matches fitting with
 #' `covariance = TRUE` (the same engine step; agreement is close but not
 #' bit-exact, since the standalone re-reads the data and cold-starts the inner

@@ -45,8 +45,9 @@ loaded from a \code{.fitrx} bundle.
 }
 \details{
 \code{ferx_covariance()} reconstructs the fitted parameters from the fit,
-including the IOV (kappa) covariance \code{fit$omega_iov}, re-runs the inner loop (seeded from the per-subject empirical Bayes ETAs) to
-rebuild the covariance-step inputs, and calls the same covariance
+including the IOV (kappa) covariance \code{fit$omega_iov}, re-runs the inner
+loop (seeded from the per-subject empirical Bayes ETAs) to rebuild the
+covariance-step inputs, and calls the same covariance
 step \code{\link[=ferx_fit]{ferx_fit()}} runs inline. The result closely matches fitting with
 \code{covariance = TRUE} (the same engine step; agreement is close but not
 bit-exact, since the standalone re-reads the data and cold-starts the inner
