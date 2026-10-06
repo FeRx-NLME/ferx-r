@@ -16,9 +16,9 @@
 # held `FIX` and with two independent sigmas: the controls for #480, where a
 # fit without its fitted rho is refused only when the model estimates one.
 rho_fixture <- function(sigma_lines) {
-  cached <- NULL
+  cache <- new.env(parent = emptyenv())
   function() {
-    if (!is.null(cached)) return(cached)
+    if (!is.null(cache$v)) return(cache$v)
     dir <- tempfile("ferx-rho-")
     dir.create(dir)
     model <- file.path(dir, "rho.ferx")
@@ -48,10 +48,10 @@ rho_fixture <- function(sigma_lines) {
       CMT  = 1,
       MDV  = rep(c(1, 0, 0, 0), 3)
     ), data, row.names = FALSE, quote = FALSE)
-    cached <<- list(model = model, data = data,
+    cache$v <- list(model = model, data = data,
                     fit = ferx_fit(model, data, verbose = FALSE,
                                    covariance = TRUE))
-    cached
+    cache$v
   }
 }
 rho_case <- rho_fixture(
@@ -157,6 +157,15 @@ without_rho <- function(fit) {
 
 declared_rho <- 0.10 / sqrt(0.04 * 0.30)
 
+# Assert that `expr` raises a message matching `regexp`, and return that
+# message for the sentence checks. When nothing is raised the expectation
+# fails and "" comes back, so the checks after it fail too instead of
+# aborting the test on a type error.
+refusal <- function(expr, regexp) {
+  err <- expect_error(expr, regexp)
+  if (inherits(err, "condition")) conditionMessage(err) else ""
+}
+
 test_that("covariance and SIR refuse a free fit without its fitted rho", {
   skip_on_cran()
   fit <- without_rho(rho_case()$fit)
@@ -210,8 +219,10 @@ test_that("an intact free fit is rebuilt at its fitted rho", {
 
   # The inline and the standalone covariance step see the same parameters
   # only if the fitted rho reaches the engine: at the declared 0.913 the
-  # standalone se_theta moves by 23 %.
-  expect_identical(ferx_covariance(fit)$se_theta, fit$se_theta)
+  # standalone se_theta moves by 23 %. Not bit-identical across platforms:
+  # on Linux the two differ by ~8e-11 relative, so compare with a tolerance
+  # far inside the signal.
+  expect_equal(ferx_covariance(fit)$se_theta, fit$se_theta, tolerance = 1e-6)
 
   # simulate reads rho through the residual draw, so moving it to the
   # declared value has to change DV_SIM.
@@ -261,9 +272,11 @@ test_that("a non-finite or out-of-range fitted rho is refused", {
 
   na_fit <- case$fit
   na_fit$residual_correlations$rho <- NA_real_
-  msg <- tryCatch(ferx_covariance(na_fit), error = conditionMessage)
-  expect_match(msg, "^ferx_covariance: the block_sigma correlation ")
+  msg <- refusal(ferx_covariance(na_fit),
+                 "^ferx_covariance: the block_sigma correlation ")
   expect_match(msg, label, fixed = TRUE)
+  # NA_real_ is named as R names it, not as the NaN it crosses the FFI as.
+  expect_match(msg, "rho = NA ", fixed = TRUE)
   expect_match(msg, "must be finite and strictly between -1 and 1",
                fixed = TRUE)
   expect_match(msg, "fit$residual_correlations$rho", fixed = TRUE)
@@ -271,12 +284,11 @@ test_that("a non-finite or out-of-range fitted rho is refused", {
 
   one_fit <- case$fit
   one_fit$residual_correlations$rho <- 1
-  msg <- tryCatch(
+  msg <- refusal(
     ferx_simulate(case$model, case$data, n_sim = 1L, seed = 1L,
                   fit = one_fit),
-    error = conditionMessage
+    "^Fit error: the block_sigma correlation "
   )
-  expect_match(msg, "^Fit error: the block_sigma correlation ")
   expect_match(msg, "rho = 1 ", fixed = TRUE)
   expect_match(msg, "must be finite and strictly between -1 and 1",
                fixed = TRUE)
@@ -286,9 +298,8 @@ test_that("the refusal names the correlation and the remedy", {
   skip_on_cran()
   fit <- rho_case()$fit
   label <- fit$residual_correlations$name
-  msg <- tryCatch(ferx_covariance(without_rho(fit)), error = conditionMessage)
+  msg <- refusal(ferx_covariance(without_rho(fit)), "^ferx_covariance: ")
 
-  expect_match(msg, "^ferx_covariance: ")
   expect_match(
     msg,
     paste0("the model estimates the block_sigma correlation ", label, ","),
