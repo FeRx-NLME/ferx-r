@@ -363,3 +363,52 @@ test_that("C9: levels = auto / ref = mode fit and bind from the fit like their t
     ferx_predict(b$twin, b$design, fit = b$fit)$PRED
   )
 })
+
+# --- C10: uncertainty simulation and NPDE from a symbolic fit (#494) ---------
+
+# The fit's data with every weight raised by 15: the same ID / TIME rows, so
+# its NPDE still aligns with `fit$sdtab`, but a median 15 above the fit's. On the
+# fit's own data an unbound symbolic model centres on the fit's median anyway,
+# so NPDE there could not tell a dropped bind from a working one.
+cs_shifted <- function() {
+  if (is.null(cs_cache$shifted)) {
+    rows <- utils::read.csv(cs_base()$data)
+    rows$WT <- rows$WT + 15
+    path <- tempfile(fileext = ".csv")
+    utils::write.csv(rows, path, row.names = FALSE, quote = FALSE, na = ".")
+    cs_cache$shifted <- path
+    cs_cache$shifted_wt <- cs_subject_wt(rows)
+  }
+  list(data = cs_cache$shifted, wt = cs_cache$shifted_wt)
+}
+
+test_that("C10a: ferx_simulate_with_uncertainty() centres on the fit's median", {
+  b <- cs_base()
+  fit <- cs_with_cov(b$fit)
+  swu <- function(model) {
+    ferx_simulate_with_uncertainty(model, b$design, fit,
+                                   n_uncertainty_draws = 3L, seed = 7L)
+  }
+  sym <- swu(b$sym)
+  expect_gt(nrow(sym), 0L)
+  expect_identical(sym, swu(b$twin))
+  # Centring on the design's own median moves IPRED, so the identity above is
+  # not true of a bind from the wrong source.
+  at_design <- cs_model(sprintf("%.17g", stats::median(b$design_wt)))
+  expect_gt(max(abs(sym$IPRED - swu(at_design)$IPRED)), 1e-3)
+})
+
+test_that("C10b: ferx_calc_npde() centres on the fit's median, not the data's", {
+  b <- cs_base()
+  s <- cs_shifted()
+  npde <- function(model) {
+    ferx_calc_npde(b$fit, nsim = 50L, seed = 5L, model = model,
+                   data = s$data)$sdtab$NPDE
+  }
+  sym <- npde(b$sym)
+  expect_true(all(is.finite(sym)))
+  expect_identical(sym, npde(b$twin))
+  expect_gt(abs(stats::median(s$wt) - b$fit$covariate_stats$median), 1)
+  at_data <- cs_model(sprintf("%.17g", stats::median(s$wt)))
+  expect_gt(max(abs(sym - npde(at_data))), 1e-3)
+})
