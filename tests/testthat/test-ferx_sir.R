@@ -367,6 +367,19 @@ test_that("ferx_sir on an IOV fit reproduces the in-fit SIR draw for draw (#465)
   expect_same_sir(standalone_sir(fit), fit)
 })
 
+test_that("in-fit SIR on a model-file `method = foce` fit scores under FOCE (ferx-core #1710)", {
+  # warfarin_iov sets `method = foce` in [fit_options]. With the method from
+  # the file rather than the call, the engine used to score the in-fit SIR
+  # weights with the FOCEI objective around the FOCE estimates (ESS 2.5 of
+  # 1000), while ferx_sir() - which passes the fit's method - did not. Now
+  # both score under FOCE. Mutation that reddens this: the pin before
+  # ferx-core d234b25c (#1725).
+  fit <- sir_fit_with_infit_sir("warfarin_iov", method = NULL)
+  skip_if(is.null(fit$cov_matrix) || is.null(fit$sir_ess), sir_cov_skip)
+  expect_identical(fit$method, "FOCE")
+  expect_same_sir(standalone_sir(fit), fit)
+})
+
 test_that("ferx_sir on an IOV fit follows the fit's kappa, not the model file's (#465)", {
   fit <- warfarin_iov_sir_fit()
   skip_if(is.null(fit$cov_matrix) || is.null(fit$sir_ess), sir_cov_skip)

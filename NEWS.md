@@ -9,7 +9,7 @@
   *free* parameter lacks one. Code that tested `ferx_se(fit) == 0` to find
   fixed parameters should read `fit$estimates$fixed` instead.
 
-- **ferx now builds against ferx-core `a3e78319`**, up from the `v0.4.0`
+- **ferx now builds against ferx-core `d234b25c`**, up from the `v0.4.0`
   release (`2a6076af`). These engine changes reach every fit, prediction
   and simulation entry point with no change to the package's own code:
 
@@ -284,12 +284,29 @@
     20-level diamond of intermediates (`B = A + 1`, `C = A + 2`,
     `D = B + C`, ...) took 38.8 s to parse with a level block and now
     takes 1.1 s (debug build). No estimate moves.
+  - **A fit whose `method = foce` comes from the model file is now scored
+    under FOCE after the fit, not FOCEI**
+    ([#1710](https://github.com/FeRx-NLME/ferx-core/issues/1710)). With no
+    `method =` in the `ferx_fit()` call, the model file's `foce` left the
+    engine's interaction flag at its `TRUE` default, so in-fit SIR weighted
+    its draws with the FOCEI objective around the FOCE estimates, the sdtab
+    `CWRES` were the FOCEI ones, and the FOCE-M3 warning never fired. On
+    `warfarin_iov` (1000/250 samples, seed 7) the in-fit SIR's effective
+    sample size goes from 2.5 to 224, now identical to `ferx_sir()` on the
+    same fit. Such fits' `CWRES` and in-fit SIR intervals move; refit a
+    saved one to update them. A call that passes `method = "foce"`, and
+    `ferx_sir()` / `ferx_covariance()`, were already scored under FOCE and
+    do not move.
   - ferx-core #1665, #1668, #1681, #1682, #1683, #1690, #1692, #1697,
-    #1698, #1709 and #1719 change nothing an R user sees: a KAPPA section,
+    #1698, #1709, #1719 and #1686 change nothing an R user sees: a KAPPA section,
     kappa correlations and kappa shrinkage in the engine's own text summary,
     the wording of a weighted kappa's `at weight 1` label and weight line in
     the engine console (`print()` builds its own rows), `FitResult` carrying
-    the fit's data bindings, and documentation, changelog tooling and CI.
+    the fit's data bindings, a refusal for a symbolic-statistics model
+    paired with a fit that records no bindings (no R fit records covariate
+    statistics yet,
+    [#412](https://github.com/FeRx-NLME/ferx-r/issues/412)), and
+    documentation, changelog tooling and CI.
 
 ## New features
 
@@ -304,14 +321,8 @@
   `sir_ci_kappa`, and a `.fitrx` written by an earlier ferx loads without
   one. On the bundled `mbma_placebo` example (seed 7, 1000/250 samples, ESS
   342), `KAPPA_ARM` = 156.0 gets the SIR interval [68.3, 415.6], against
-  the covariance step's [30.2, 281.9]. On `warfarin_iov` fitted with the
-  model file's `method = foce`, in-fit SIR is degenerate (ESS 2.5 of 1000)
-  and its `KAPPA_CL` interval far too narrow; at 200/100 samples it
-  excludes the estimate. That is the engine scoring
-  the FOCE fit with the FOCEI objective
-  ([ferx-core #1710](https://github.com/FeRx-NLME/ferx-core/issues/1710)).
-  `ferx_sir()` on the same fit, or `ferx_fit(method = "foce", sir = TRUE)`,
-  is not affected (ESS 224, [0.0198, 0.1101] around 0.0390).
+  the covariance step's [30.2, 281.9]. On `warfarin_iov` (1000/250
+  samples, seed 7), `KAPPA_CL` = 0.0390 gets [0.0198, 0.1101] at ESS 224.
 
 - **`theta NAME[COL, ...]` level blocks can be fitted and simulated from R**
   ([#370](https://github.com/FeRx-NLME/ferx-r/issues/370)). A level block
@@ -343,7 +354,11 @@
     the bindings is refused with the same text as the predict paths, and a
     `fit$theta_levels` that no longer lays out `fit$theta` is refused naming
     both counts. SIR runs on blocks whose levels can be zero or negative
-    since ferx-core #1701 (see the engine-bump entry above).
+    since ferx-core #1701 (see the engine-bump entry above). Malformed
+    bindings in `fit$theta_levels` (a split contrast group, a recorded `auto`
+    contrast, a block the model does not declare) are refused up front, by
+    the validation ferx-core's `bind_from_fit` runs
+    ([#469](https://github.com/FeRx-NLME/ferx-r/issues/469)).
 
 - **`ferx_mbma_data()` builds and checks a summary-level dataset** for a
   model-based meta-analysis
@@ -426,10 +441,9 @@
   in-fit SIR's 212, with intervals to match. On every FOCEI fit it also ran
   the FOCE inner loop, because it read a `fit$interaction` field the fit
   never carries. `ferx_sir(fit, ...)` now reproduces `ferx_fit(sir = TRUE)`
-  exactly for the same seed and sample sizes (except a FOCE fit whose method
-  comes from the model file, where in-fit SIR itself is off:
-  [ferx-core #1710](https://github.com/FeRx-NLME/ferx-core/issues/1710)),
-  so **standalone SIR intervals change on every IOV fit and every FOCEI
+  exactly for the same seed and sample sizes (since ferx-core
+  [#1710](https://github.com/FeRx-NLME/ferx-core/issues/1710), also for a
+  FOCE fit whose method comes from the model file), so **standalone SIR intervals change on every IOV fit and every FOCEI
   fit**; a FOCE fit without IOV is
   unchanged. A kappa fit whose `fit$omega_iov` has been removed is now
   refused rather than resampled around the initial value, and

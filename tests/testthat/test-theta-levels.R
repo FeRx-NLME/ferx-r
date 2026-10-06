@@ -770,6 +770,96 @@ test_that("R7: bindings on a model without a level block are refused", {
   check(ferx_sir(fit, sir_samples = 20L, sir_resamples = 10L))
 })
 
+# --- R8: the skeleton is laid out by core's layout_from_fit (ferx-r #469) ------
+
+test_that("R8a: the SIR / covariance skeleton keeps the fit's theta count, names and FIX flags", {
+  # A FIX theta next to the level block, so the FIX mask has a theta entry
+  # whose position depends on the layout. Mutation that reddens this: drop the
+  # `layout_from_fit` call in bind_layout_from_fit() (the skeleton is then the
+  # unbound parse, one PLACEBO theta, and the count check refuses).
+  text <- sub("theta ET50(2.0, 0.01, 100.0)", "theta ET50(2.0, FIX)",
+              tl_twin_model("PLACEBO[STUDY, TIME, contrast = none]", "PLACEBO"),
+              fixed = TRUE)
+  fit <- tl_fit(tl_write(text, ".ferx"), tl_twin_data())
+  expect_gt(nrow(fit$theta_levels), 0L)
+  expect_true(fit$cov_fixed[["ET50"]])
+  cv <- ferx_covariance(fit)
+  expect_identical(names(cv$theta), names(fit$theta))
+  expect_identical(rownames(cv$cov_matrix), rownames(fit$cov_matrix))
+  expect_identical(cv$cov_fixed, fit$cov_fixed)
+  expect_identical(cv$estimates$fixed, fit$estimates$fixed)
+  s <- ferx_sir(fit, sir_samples = 50L, sir_resamples = 20L, sir_seed = 1L)
+  expect_identical(rownames(s$sir_ci_theta), names(fit$theta))
+})
+
+test_that("R8b: malformed level bindings are refused before the skeleton is built", {
+  # Before ferx-r #469 the glue re-parsed on the edited bindings itself: a split group
+  # failed in the parser's words ("is not contiguous"), and an `auto` contrast
+  # was laid out and refused only later, by the engine (`run_sir:` /
+  # `run_covariance:`). Now core's layout_from_fit, the validation
+  # bind_from_fit runs, refuses both up front. Mutation that reddens this:
+  # restore the hand-copied `parse_full_model_with` re-parse.
+  refused <- function(fit, text) {
+    for (who in c("ferx_covariance", "ferx_sir")) {
+      msg <- tryCatch({
+        if (who == "ferx_sir") {
+          ferx_sir(fit, sir_samples = 20L, sir_resamples = 10L)
+        } else {
+          ferx_covariance(fit)
+        }
+        NA_character_
+      }, error = function(e) conditionMessage(e))
+      expect_match(msg, text, fixed = TRUE, info = who)
+      expect_no_match(msg, "run_sir:", fixed = TRUE, info = who)
+      expect_no_match(msg, "run_covariance:", fixed = TRUE, info = who)
+      expect_no_match(msg, "is not contiguous", fixed = TRUE, info = who)
+    }
+  }
+  # A split contrast group, on the nested (sum_to_zero_within) fit.
+  nested <- tl_with_cov(tl_fit(tl_nested_model(), tl_write(tl_data3, ".csv")))
+  expect_identical(nested$theta_levels$group, rep(0:2, each = 3L))
+  split <- nested
+  split$theta_levels$group <- c(0L, 0L, 1L, 0L, 1L, 1L, 2L, 2L, 2L)
+  refused(split, paste0(
+    "theta PLACEBO[STUDY, TIME]: the fit's level bindings are malformed: the ",
+    "levels of contrast group 0 are split"
+  ))
+  # `auto` recorded as the contrast: a fit records the contrast it resolved to.
+  auto <- tl_with_cov(tl_base()$fit)
+  auto$theta_levels$contrast <- "auto"
+  refused(auto, paste0(
+    "theta PLACEBO[STUDY, TIME]: the fit's level bindings are malformed: they ",
+    "record the contrast `auto`"
+  ))
+  # A repeated label never reaches core: the glue's own table check names it
+  # (as for the predict paths, R1). Mutation that reddens this: delete the
+  # label loop in level_bindings_from_r(), and core's wording comes back.
+  dup <- tl_with_cov(tl_base()$fit)
+  dup$theta_levels$label[2] <- dup$theta_levels$label[1]
+  refused(dup, "gives the label `STUDY=1,TIME=1` to levels 1 and 2")
+})
+
+test_that("R8c: a fit that lost one block's rows names the missing block", {
+  # The case ferx-r #469 was filed for. Mutation that reddens this: restore
+  # the hand-copied re-parse, which never checks that every declared block is
+  # bound.
+  model <- tl_write(tl_model(
+    paste0("  theta TVCL(2.0, 0.001, 20.0)\n",
+           "  theta PLACEBO[STUDY, TIME](0.0, -5.0, 5.0)\n",
+           "  theta VSHIFT[STUDY](0.0, -5.0, 5.0)"),
+    "TVCL + PLACEBO", v = "TVV * exp(VSHIFT)"
+  ), ".ferx")
+  fit <- tl_with_cov(tl_fit(model, tl_write(tl_data, ".csv")))
+  expect_setequal(unique(fit$theta_levels$block), c("PLACEBO", "VSHIFT"))
+  fit$theta_levels <- fit$theta_levels[fit$theta_levels$block != "VSHIFT", ]
+  text <- paste0("theta VSHIFT[STUDY]: the fit's level bindings carry no `VSHIFT`, ",
+                 "so there is no fitted layout to bind the design against ",
+                 "(was the model edited since the fit?)")
+  expect_error(ferx_covariance(fit), text, fixed = TRUE)
+  expect_error(ferx_sir(fit, sir_samples = 20L, sir_resamples = 10L), text,
+               fixed = TRUE)
+})
+
 # --- T12: a tampered bundle ----------------------------------------------------
 
 test_that("T12: an unknown contrast token in a bundle is refused by name", {
