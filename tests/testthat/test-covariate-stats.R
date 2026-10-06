@@ -680,3 +680,145 @@ test_that("C12c: every from-fit path on the combined model matches its twin", {
   expect_identical(s_sym$sir_ci_omega, s_twin$sir_ci_omega)
   expect_identical(s_sym$sir_ci_sigma, s_twin$sir_ci_sigma)
 })
+
+# --- C13: a categorical value outside the fit's levels (ferx-core #1740) -----
+
+# C9's fit, on its own subjects with the first level-3 subject recoded: to 4,
+# a level the fit has no theta for, and to 2, the reference, as the twin. The
+# engine used to score 4 as the reference silently - every path below returned
+# the twin's numbers - and now refuses it. C13a and C13c are reddened by the
+# pin before #1740 (202bea5e); C13a's npde row also by a glue that drops the
+# engine's `Err` (`.unwrap_or_default()` for the `?` in
+# `ferx_rust_npde_from_fit`). C13b is the control: it passes at both pins.
+cs_recoded <- function(to, env = parent.frame()) {
+  rows <- utils::read.csv(cs_categorical()$data)
+  first3 <- rows$ID[rows$GRP == 3][1L]
+  rows$GRP[rows$ID == first3] <- to
+  path <- withr::local_tempfile(fileext = ".csv", .local_envir = env)
+  utils::write.csv(rows, path, row.names = FALSE, quote = FALSE, na = ".")
+  path
+}
+
+# The four from-fit paths on design `data`, each a value or the condition it
+# raised. SIR and the covariance step re-read `fit$data_path`; a fit without a
+# data hash is how they reach other data. Only the missing-hash warning that
+# this causes is muffled; any other warning still reaches the test.
+cs_from_fit_paths <- function(data) {
+  b <- cs_categorical()
+  fit <- cs_with_cov(b$fit)
+  fit$data_path <- data
+  fit$data_hash <- NA_character_
+  grab <- function(expr) {
+    tryCatch(
+      withCallingHandlers(expr, warning = function(w) {
+        if (grepl("file hashes are missing on the fit", conditionMessage(w),
+                  fixed = TRUE)) {
+          invokeRestart("muffleWarning")
+        }
+      }),
+      error = function(e) e
+    )
+  }
+  list(
+    predict = grab(ferx_predict(b$sym, data, fit = b$fit)$PRED),
+    npde = grab(ferx_calc_npde(b$fit, nsim = 20L, seed = 5L, model = b$sym,
+                               data = data)$sdtab$NPDE),
+    covariance = grab(ferx_covariance(fit)$se_theta),
+    sir = grab(ferx_sir(fit, sir_samples = 20L, sir_resamples = 10L,
+                        sir_seed = 1L)$sir_ci_theta)
+  )
+}
+
+test_that("C13a: from-fit predict / npde / covariance / SIR refuse a level the fit never saw", {
+  got <- cs_from_fit_paths(cs_recoded(4))
+  for (k in names(got)) {
+    e <- got[[k]]
+    expect_true(inherits(e, "error"), info = k)
+    msg <- if (inherits(e, "condition")) conditionMessage(e) else ""
+    expect_match(msg, "has the fit's levels [1.0, 2.0, 3.0] (reference 2)",
+                 fixed = TRUE, info = k)
+    expect_match(msg, "`GRP` takes [4.0] in this data", fixed = TRUE, info = k)
+    # The from-fit advice: the fit has no theta for 4, so `levels = auto`
+    # would not help.
+    expect_match(msg, "The fit estimated no", fixed = TRUE, info = k)
+    expect_no_match(msg, "levels = auto", fixed = TRUE, info = k)
+  }
+})
+
+test_that("C13b: the same paths run on the twin recoded to the reference level", {
+  got <- cs_from_fit_paths(cs_recoded(2))
+  for (k in names(got)) {
+    expect_false(inherits(got[[k]], "condition"), info = k)
+    expect_true(all(is.finite(unlist(got[[k]]))), info = k)
+  }
+})
+
+test_that("C13c: without a fit, written-out levels refuse the value with its code", {
+  b <- cs_categorical()
+  e <- tryCatch(ferx_predict(b$twin, cs_recoded(4)), error = function(e) e)
+  expect_s3_class(e, "ferx_engine_error")
+  expect_identical(e$code, "E_COV_LEVEL_UNKNOWN")
+  expect_identical(e$block, "covariate_model")
+  # The literal-levels advice, not the from-fit one.
+  msg <- if (inherits(e, "condition")) conditionMessage(e) else ""
+  expect_match(msg, "use `levels = auto`", fixed = TRUE)
+  expect_no_match(msg, "The fit estimated no", fixed = TRUE)
+})
+
+# --- C14: a statistic the data cannot bind (ferx-core #1739) -----------------
+
+# `levels = auto` on data with a single level leaves the relation nothing to
+# estimate. That is a [covariate_model] failure with its own code; it used to
+# be labelled E_THETA_LEVEL_BINDING on [parameters], the level-block code,
+# which ferx_fit() and ferx_predict() attached through the single-error
+# fallback. Reddened by the pin before #1739 (202bea5e).
+test_that("C14: a single-level levels = auto design carries E_COVARIATE_STATS_BINDING", {
+  b <- cs_categorical()
+  rows <- utils::read.csv(b$data)
+  rows$GRP <- 2
+  data <- withr::local_tempfile(fileext = ".csv")
+  utils::write.csv(rows, data, row.names = FALSE, quote = FALSE, na = ".")
+  utils::capture.output(res <- ferx_model_validate(b$sym, data))
+  errs <- res$diagnostics[res$diagnostics$severity == "error", ]
+  expect_identical(errs$code, "E_COVARIATE_STATS_BINDING")
+  expect_identical(errs$block, "covariate_model")
+  calls <- list(
+    fit = function() ferx_fit(b$sym, data, verbose = FALSE),
+    predict = function() ferx_predict(b$sym, data)
+  )
+  for (k in names(calls)) {
+    e <- tryCatch(calls[[k]](), error = function(e) e)
+    expect_true(inherits(e, "ferx_engine_error"), info = k)
+    expect_identical(e$code, "E_COVARIATE_STATS_BINDING", info = k)
+    expect_identical(e$block, "covariate_model", info = k)
+    expect_match(conditionMessage(e), "has nothing to estimate", fixed = TRUE,
+                 info = k)
+  }
+})
+
+# --- C15: no false unused-theta warning (ferx-core #1738) --------------------
+
+# `=> THETA_CL_WT(...)` on a `center = median` relation is read once the
+# relation is bound, so it is not unused, with or without data. Reddened by
+# the pin before #1738 (202bea5e), which warned about it in both cells. The
+# control is `UNUSED_T`, which nothing reads: it must keep warning in every
+# cell, so "the check stopped running" cannot pass for the fix.
+test_that("C15: a symbolic-centre relation's theta is not reported unused", {
+  b <- cs_base()
+  lines <- readLines(b$sym)
+  at <- grep("theta TVCL(", lines, fixed = TRUE)
+  model <- withr::local_tempfile(fileext = ".ferx")
+  writeLines(append(lines, "  theta UNUSED_T(1.0, 0.1, 10.0)", after = at),
+             model)
+  for (with_data in c(FALSE, TRUE)) {
+    utils::capture.output(
+      res <- if (with_data) ferx_model_validate(model, b$data)
+             else ferx_model_validate(model)
+    )
+    dg <- res$diagnostics
+    unused <- dg$message[dg$code == "W_UNUSED_PARAM"]
+    cell <- paste("with data:", with_data)
+    expect_false(any(grepl("'THETA_CL_WT'", unused, fixed = TRUE)), info = cell)
+    expect_true(any(grepl("'UNUSED_T'", unused, fixed = TRUE)), info = cell)
+  }
+})
