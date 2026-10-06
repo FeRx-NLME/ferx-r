@@ -373,6 +373,18 @@
 
 ## Bug fixes
 
+- **`ferx_covariance()` refuses a `kappa` fit that has lost its kappa
+  matrix** ([#473](https://github.com/FeRx-NLME/ferx-r/issues/473)). With
+  `fit$omega_iov` missing it silently computed standard errors around the
+  model file's *initial* kappa instead of the fitted one: on `warfarin_iov`
+  started at `KAPPA_CL ~ 0.4`, the kappa entry of `cov_matrix` came out
+  0.26 instead of 0.049, with no error. It now stops with the message
+  `ferx_sir()` gives since #465. A kappa matrix of the wrong size, which used
+  to fail with an engine panic (`Gemv: dimensions mismatch`), gets the same
+  named refusal. An intact fit, with or without IOV, gives identical results.
+  The two functions now rebuild the fit through one shared builder, so this
+  check cannot drift between them again.
+
 - **`ferx_sir()` and `ferx_covariance()` run on any subject IDs**
   ([#468](https://github.com/FeRx-NLME/ferx-r/issues/468)). Both refused
   every dataset whose IDs were not exactly `1..n` in file order (`101, 102,
