@@ -7,11 +7,18 @@
 # same model with the literal centre the fit resolved, which ferx-core's
 # desugar makes the same model to the last bit
 # (tests/covariate_model_equivalence.rs). The fixture is that test's data,
-# `two_cpt_oral_cov.csv`, with one relation, `CL ~ WT power(center = C)`.
+# `two_cpt_oral_cov.csv`, with one relation, `CL ~ WT power(center = C)`; C9
+# adds a categorical `GRP` for the `levels` and `mode` statistics.
 # The fits stop after two outer iterations: the assertions are about binding,
 # not about where the optimizer ends up.
 
-cs_model <- function(center) {
+# `covariates` is the [covariates] line and `relation` the [covariate_model]
+# line; by default the continuous `WT` power relation centred on `center`.
+cs_model <- function(center, covariates = "WT continuous",
+                     relation = sprintf(
+                       "CL ~ WT power(center = %s) => THETA_CL_WT(0.6, 0.01, 5.0)",
+                       center
+                     )) {
   path <- tempfile(fileext = ".ferx")
   writeLines(sprintf("
 [parameters]
@@ -32,10 +39,10 @@ cs_model <- function(center) {
   KA = TVKA
 
 [covariates]
-  WT continuous
+  %s
 
 [covariate_model]
-  CL ~ WT power(center = %s) => THETA_CL_WT(0.6, 0.01, 5.0)
+  %s
 
 [structural_model]
   pk two_cpt_oral(cl=CL, v1=V1, q=Q, v2=V2, ka=KA)
@@ -47,7 +54,7 @@ cs_model <- function(center) {
   method   = focei
   maxiter  = 2
   covariance = false
-", center), path)
+", covariates, relation), path)
   path
 }
 
@@ -283,5 +290,68 @@ test_that("C8d: the engine's own .fitrx loader reads the statistics slot", {
   expect_true(
     isTRUE(res$ok),
     info = paste(utils::capture.output(print(res$diagnostics)), collapse = "\n")
+  )
+})
+
+# --- C9: levels = auto / ref = mode (review of #493, row 1) -----------------
+
+# A categorical relation reads the statistics a continuous centre never does:
+# `levels = auto` sets the relation's theta count from `levels`, and
+# `ref = mode` its reference level from `mode`. `GRP` cycles 1, 2, 2, 3 over
+# the subjects, so the mode (2) is neither the smallest nor the largest level.
+cs_categorical <- function() {
+  if (is.null(cs_cache$cat_fit)) {
+    rows <- utils::read.csv(ferx_example("two_cpt_oral_cov")$data)
+    ids <- sort(unique(rows$ID))
+    grp <- stats::setNames(rep(c(1, 2, 2, 3), length.out = length(ids)), ids)
+    rows$GRP <- grp[as.character(rows$ID)]
+    data <- tempfile(fileext = ".csv")
+    utils::write.csv(rows, data, row.names = FALSE, quote = FALSE, na = ".")
+    # Levels 1 and 2 only: the fit's level set and reference must be kept.
+    design <- tempfile(fileext = ".csv")
+    utils::write.csv(rows[rows$GRP %in% c(1, 2), ], design, row.names = FALSE,
+                     quote = FALSE, na = ".")
+    model <- function(levels, ref) {
+      cs_model(covariates = sprintf("GRP categorical(levels = %s)", levels),
+               relation = sprintf("CL ~ GRP categorical(ref = %s)", ref))
+    }
+    cs_cache$cat_data <- data
+    cs_cache$cat_design <- design
+    cs_cache$cat_sym <- model("auto", "mode")
+    cs_cache$cat_twin <- model("[1, 2, 3]", "2")
+    cs_cache$cat_fit <- ferx_fit(cs_cache$cat_sym, data, verbose = FALSE)
+    cs_cache$cat_twin_fit <- ferx_fit(cs_cache$cat_twin, data, verbose = FALSE)
+  }
+  list(data = cs_cache$cat_data, design = cs_cache$cat_design,
+       sym = cs_cache$cat_sym, twin = cs_cache$cat_twin,
+       fit = cs_cache$cat_fit, twin_fit = cs_cache$cat_twin_fit)
+}
+
+test_that("C9: levels = auto / ref = mode fit and bind from the fit like their twin", {
+  b <- cs_categorical()
+  cs <- b$fit$covariate_stats
+  expect_identical(cs$covariate, "GRP")
+  expect_identical(cs$levels, list(c(1, 2, 3)))
+  expect_identical(cs$mode, 2)
+  # Reference 2: one theta per other level.
+  expect_identical(
+    names(b$fit$theta)[6:7], c("THETA_CL_GRP_1", "THETA_CL_GRP_3")
+  )
+  expect_identical(b$fit$ofv, b$twin_fit$ofv)
+  expect_identical(b$fit$theta, b$twin_fit$theta)
+  # The design holds levels 1 and 2 only. Its own `levels = auto` would drop
+  # level 3 and change the theta count, so this reads the fit's `levels`.
+  expect_identical(
+    ferx_predict(b$sym, b$design, fit = b$fit)$PRED,
+    ferx_predict(b$twin, b$design, fit = b$fit)$PRED
+  )
+  # And through a bundle, which carries `levels` as a JSON array.
+  bundle <- withr::local_tempfile(fileext = ".fitrx")
+  ferx_save_fit(b$fit, bundle)
+  re <- ferx_load_fit(bundle)
+  expect_identical(re$covariate_stats, cs)
+  expect_identical(
+    ferx_predict(b$sym, b$design, fit = re)$PRED,
+    ferx_predict(b$twin, b$design, fit = b$fit)$PRED
   )
 })
