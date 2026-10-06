@@ -99,6 +99,19 @@ jobs:
       - name: Test the glue-raise guard against stub sources
         run: bash tools/test-check-glue-raise.sh
 
+      # AGENTS.md is the one agent-guidance file (#489, as ferx-core #1528): it
+      # opens with `# AGENTS.md`, the old Claude-specific file is not back at
+      # the root, and no tracked file but NEWS.md (history) names the old file.
+      # Not a testthat test: R CMD check runs the tests from a built copy of the
+      # package, which has neither the git index nor AGENTS.md (.Rbuildignore).
+      - name: Verify AGENTS.md is the one agent-guidance file
+        run: bash tools/check-agents-md.sh
+
+      # The checkout is always in shape, so nothing above would fail if one of
+      # its checks were deleted. Feed it stub repositories, one per shape.
+      - name: Test the AGENTS.md guard against stub repositories
+        run: bash tools/test-check-agents-md.sh
+
       # Every ferx-core / ferx-tools `*Options` struct derives `Default`
       # (ferx-core #529, enforced there by the A4 guard in
       # tests/public_api_boundary.rs), so the glue must construct them with a
