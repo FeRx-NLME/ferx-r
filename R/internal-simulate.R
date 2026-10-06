@@ -18,8 +18,9 @@ validate_fit_for_params <- function(fit) {
   ), .ferx_omega_iov_args(fit), list(
     # Fitted `block_sigma` residual correlations, in model declaration order.
     # A plain (non-FIX) block estimates rho, so passing them is what keeps the
-    # engine from rebuilding this fit at the model file's declared correlation;
-    # empty for a model that declares none.
+    # engine from rebuilding this fit at the model file's declared correlation.
+    # Empty when the fit carries none: the engine accepts that only when every
+    # correlation is FIX, and refuses an estimated one (#480).
     residual_rho = .ferx_residual_rho_vec(fit)
   ), .ferx_theta_level_args(fit))
 }
@@ -125,8 +126,10 @@ validate_fit_for_params <- function(fit) {
 }
 
 # The fitted residual correlations as a bare numeric vector for the FFI.
-# Reads the tidy frame ferx_fit() builds, and stays empty for a fit that
-# predates it (an older .fitrx bundle) so the engine keeps the declared values.
+# Reads the tidy frame ferx_fit() builds, and stays empty when the fit carries
+# none (NULL or zero rows). The engine decides what empty means, because only it
+# has the model's FIX flags: declared values when every correlation is FIX, a
+# refusal naming the estimated ones otherwise (#480).
 .ferx_residual_rho_vec <- function(fit) {
   rc <- fit$residual_correlations
   if (is.data.frame(rc) && nrow(rc) > 0L) return(as.numeric(rc$rho))
