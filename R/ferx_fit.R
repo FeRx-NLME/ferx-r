@@ -750,6 +750,22 @@
 #'     \code{\link{ferx_simulate}} and the other functions that
 #'     take a \code{fit} use it to place a design on the fit's levels; see
 #'     the "Theta level blocks" section there.}
+#'   \item{covariate_stats}{Data frame of the statistics a
+#'     \code{[covariate_model]} relation stated symbolically
+#'     (\code{center = median}, \code{ref = mode}, \code{levels = auto}) was
+#'     resolved against: one row per covariate a relation reads, summarised
+#'     over the fitted data (after \code{[data_selection]} and \code{ignore}).
+#'     Each subject contributes each distinct value it takes: one value for a
+#'     subject-static covariate, every value it moves through for a
+#'     time-varying one. Columns \code{covariate}, \code{median},
+#'     \code{mean}, \code{min}, \code{max}, \code{mode} (the most frequent
+#'     value, ties to the smallest, so on a continuous covariate whose values
+#'     are all distinct it equals \code{min}) and the list column
+#'     \code{levels} (the distinct values, ascending). Zero rows
+#'     when no relation states a statistic symbolically. \code{NULL} on a fit
+#'     loaded from a bundle that does not record them. The functions that
+#'     take a \code{fit} centre the relations on these values, not on the
+#'     design's, so the fitted theta keeps the meaning it was estimated with.}
 #'   \item{omega}{Between-subject variability covariance matrix. Row and column
 #'     names are the declared ETA names (e.g. \code{"ETA_CL"}); fallback is
 #'     \code{"OMEGA(1,1)"} when names are absent.}

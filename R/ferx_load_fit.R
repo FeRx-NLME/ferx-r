@@ -448,6 +448,11 @@ ferx_load_fit <- function(path) {
   # or before #370, which leaves `theta_levels` NULL - and the simulate paths
   # refusing a level-block model with that cause named.
   out$theta_levels <- .fitrx_theta_levels_from_wire(extras$theta_levels)
+  # `[covariate_model]` statistics (#412), from ferx-core's own slot, so a
+  # bundle written by the engine carries them too. A bundle without the slot
+  # leaves `covariate_stats` NULL: unknown, as for `theta_levels`, and the
+  # from-fit paths refuse a symbolic model with that cause named.
+  out$covariate_stats <- .fitrx_covariate_stats_from_wire(w$data_bindings)
   # Held-coordinate mask over `cov_matrix` (#424), named like its rows as
   # ferx_fit() names it. Absent from older bundles: NULL, and the correlation
   # matrix falls back to reading an all-zero row as held.
@@ -508,6 +513,55 @@ ferx_load_fit <- function(path) {
     group = scalar("group", "integer"),
     contrast = scalar("contrast", "character"),
     theta_name = scalar("theta_name", "character", nullable = TRUE)
+  )
+}
+
+# Rebuild `fit$covariate_stats` from ferx-core's `data_bindings` wire (see
+# `.fitrx_covariate_stats_to_wire()`): `covariate_stats` is an object keyed by
+# covariate, each entry five numbers and a `levels` array. Rows are sorted by
+# covariate, as `ferx_fit()` orders them, and built through the same
+# constructor, so the reloaded frame is identical to the saved one. An empty
+# object is zero rows; NULL when the bundle does not record the statistics (no
+# slot: written before ferx recorded them, or by the engine for a fit with
+# none). An entry missing a field, or holding something other than a number
+# there, is refused rather than read as a wrong centre.
+.fitrx_covariate_stats_from_wire <- function(w) {
+  cs <- w$covariate_stats
+  if (is.null(cs)) return(NULL)
+  if (length(cs) == 0L) return(.ferx_covariate_stats_frame())
+  bad <- function(why) {
+    stop("ferx_load_fit: the bundle's covariate statistics ",
+         "(data_bindings$covariate_stats) are malformed: ", why, ".",
+         call. = FALSE)
+  }
+  if (!is.list(cs) || is.null(names(cs)) || any(names(cs) == "")) {
+    bad("expected an object keyed by covariate")
+  }
+  stats <- c("median", "mean", "min", "max", "mode")
+  num <- function(v) is.numeric(v) && length(v) == 1L
+  cs <- cs[order(names(cs), method = "radix")]  # byte order, as the glue sorts
+  for (k in names(cs)) {
+    e <- cs[[k]]
+    if (!is.list(e) || !all(c(stats, "levels") %in% names(e))) {
+      bad(sprintf("covariate `%s` lacks one of %s, levels", k,
+                  paste(stats, collapse = ", ")))
+    }
+    for (s in stats) {
+      if (!num(e[[s]])) bad(sprintf("covariate `%s` has a `%s` that is not a number", k, s))
+    }
+    if (!is.list(e$levels) || !all(vapply(e$levels, num, logical(1L)))) {
+      bad(sprintf("covariate `%s` has `levels` that are not an array of numbers", k))
+    }
+  }
+  pick <- function(s) vapply(cs, function(e) as.numeric(e[[s]]), numeric(1L), USE.NAMES = FALSE)
+  .ferx_covariate_stats_frame(
+    covariate = names(cs),
+    median = pick("median"),
+    mean = pick("mean"),
+    min = pick("min"),
+    max = pick("max"),
+    mode = pick("mode"),
+    levels = lapply(unname(cs), function(e) as.numeric(unlist(e$levels)))
   )
 }
 

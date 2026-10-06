@@ -193,7 +193,7 @@ ferx_covariance <- function(fit,
   # a kappa model whose fit carries no matching matrix (#473).
   iov_args <- .ferx_omega_iov_args(fit)
 
-  level_args <- .ferx_theta_level_args(fit)
+  binding_args <- .ferx_fit_binding_args(fit)
   raw <- ferx_rust_covariance(
     model_path = model_path,
     data_path = data_path,
@@ -214,11 +214,7 @@ ferx_covariance <- function(fit,
     covariance_method = cov_method,
     mu_referencing = isTRUE(mu_referencing),
     verbose = isTRUE(verbose),
-    level_block = level_args$level_block,
-    level_index = level_args$level_index,
-    level_label = level_args$level_label,
-    level_group = level_args$level_group,
-    level_contrast = level_args$level_contrast
+    fit_bindings = binding_args$fit_bindings
   )
 
   # All error paths inside `ferx_rust_covariance` throw an R condition (via

@@ -24,11 +24,7 @@ ferx_rust_covariance(
   covariance_method,
   mu_referencing,
   verbose,
-  level_block,
-  level_index,
-  level_label,
-  level_group,
-  level_contrast
+  fit_bindings
 )
 }
 \description{

@@ -277,6 +277,9 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
     # R-only payload: left exactly as it is written today, so this cannot move
     # anything on the `ferx_save_fit()` -> `ferx_load_fit()` path.
     if (identical(key, "r_extras")) next
+    # Built in its final shape by `.fitrx_covariate_stats_to_wire()`: its
+    # `median` / `mean` are scalars, which the name match above would wrap.
+    if (identical(key, "data_bindings")) next
     v <- x[[i]]
     if (is.null(v) || length(v) == 0L) next
     if (key %in% .FITRX_ARRAY_OF_ARRAY_KEYS) {
@@ -487,6 +490,13 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
     wire$ofv_prior <- .ferx_ofv_prior(fit)
     if (!is.null(prior_rows)) wire$prior_summary <- prior_rows
   }
+
+  # `[covariate_model]` statistics (#412), in ferx-core's own slot
+  # (`data_bindings.covariate_stats`, its `DataBindingsWire`), so the engine
+  # reads an R bundle's statistics and R reads an engine bundle's. The engine
+  # reads an empty object as no statistics, which it is.
+  stats <- .fitrx_covariate_stats_to_wire(fit$covariate_stats)
+  if (!is.null(stats)) wire$data_bindings <- list(covariate_stats = stats)
 
   jsonlite::write_json(
     # Array-valued fields wrapped so `auto_unbox` cannot collapse a length-1
@@ -862,9 +872,11 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   for (k in r_only_keys) {
     if (!is.null(fit[[k]])) out[[k]] <- fit[[k]]
   }
-  # Theta level-block bindings (#370). The cross-language schema has no slot
-  # for them yet (FeRx-NLME/ferx-core#1621), so they ride here, and without
-  # them the reloaded fit cannot drive a simulation of its own model.
+  # Theta level-block bindings (#370). The schema has a slot for them since
+  # FeRx-NLME/ferx-core#1621 (`data_bindings.levels`), where the covariate
+  # statistics already go; moving the levels there too is #466. Until then
+  # they ride here, and without them the reloaded fit cannot drive a
+  # simulation of its own model.
   tl <- .fitrx_theta_levels_to_wire(fit$theta_levels)
   if (!is.null(tl)) out$theta_levels <- tl
   # The engine's held-coordinate mask over `cov_matrix` (#424); the schema has
@@ -884,5 +896,26 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   cols <- c("block", "index", "label", "group", "contrast", "theta_name")
   out <- lapply(cols, function(k) as.list(unname(tl[[k]])))
   names(out) <- cols
+  out
+}
+
+# `fit$covariate_stats` as ferx-core's `CovariateStatBindings` wire: an object
+# keyed by covariate, each a `CovariateSummary` (`median`, `mean`, `min`,
+# `max`, `mode` scalars and a `levels` array, wrapped so a one-level covariate
+# stays an array). Zero rows write an empty object, so a reloaded fit keeps
+# "no symbolic statistic" apart from "not recorded"; NULL (no frame, e.g. a
+# fit loaded from a bundle without the slot) leaves the slot out.
+.fitrx_covariate_stats_to_wire <- function(cs) {
+  if (!is.data.frame(cs)) return(NULL)
+  if (nrow(cs) == 0L) return(stats::setNames(list(), character(0)))
+  out <- lapply(seq_len(nrow(cs)), function(i) list(
+    median = cs$median[[i]],
+    mean = cs$mean[[i]],
+    min = cs$min[[i]],
+    max = cs$max[[i]],
+    mode = cs$mode[[i]],
+    levels = as.list(unname(as.numeric(cs$levels[[i]])))
+  ))
+  names(out) <- cs$covariate
   out
 }

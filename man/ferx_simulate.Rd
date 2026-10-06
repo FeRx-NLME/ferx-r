@@ -138,6 +138,20 @@ written by ferx-core, or one saved before ferx recorded them) is refused on
 a level-block model; refit it with \code{\link{ferx_fit}}.
 }
 
+\section{Symbolic covariate centres}{
+
+A \code{[covariate_model]} relation may state its centre as a statistic of
+the data (\code{center = median}, \code{ref = mode}, \code{levels = auto}).
+\code{\link{ferx_fit}} resolves it on the fitted data and records the
+values in \code{fit$covariate_stats}. With a \code{fit}, the relations are
+centred on \strong{those} values, never on the design's: a design of
+heavier subjects has a higher median weight, and centring on it would move
+every covariate effect the fitted theta was estimated against. Without a
+\code{fit}, the statistics are taken from \code{data}. A fit that does not
+record the statistics (a bundle saved before ferx recorded them) is refused
+on such a model; refit it with \code{\link{ferx_fit}}.
+}
+
 \section{Which predictive distribution you get}{
 
 \code{ferx_simulate()} draws a \strong{fresh set of random effects for every

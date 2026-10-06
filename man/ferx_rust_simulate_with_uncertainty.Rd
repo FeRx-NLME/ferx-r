@@ -20,11 +20,7 @@ ferx_rust_simulate_with_uncertainty(
   sir_resamples_n,
   sir_resamples_dim,
   residual_rho,
-  level_block,
-  level_index,
-  level_label,
-  level_group,
-  level_contrast,
+  fit_bindings,
   n_uncertainty_draws,
   n_sim_per_draw,
   seed

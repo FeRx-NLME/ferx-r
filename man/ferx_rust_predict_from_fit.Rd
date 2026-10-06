@@ -14,11 +14,7 @@ ferx_rust_predict_from_fit(
   omega_iov_flat,
   omega_iov_dim,
   residual_rho,
-  level_block,
-  level_index,
-  level_label,
-  level_group,
-  level_contrast
+  fit_bindings
 )
 }
 \description{
