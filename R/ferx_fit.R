@@ -754,10 +754,14 @@
 #'     \code{[covariate_model]} relation stated symbolically
 #'     (\code{center = median}, \code{ref = mode}, \code{levels = auto}) was
 #'     resolved against: one row per covariate a relation reads, summarised
-#'     over the fitted data (after \code{[data_selection]} and \code{ignore})
-#'     with one value per subject, with columns \code{covariate},
-#'     \code{median}, \code{mean}, \code{min}, \code{max}, \code{mode} and the
-#'     list column \code{levels} (the distinct values, ascending). Zero rows
+#'     over the fitted data (after \code{[data_selection]} and \code{ignore}).
+#'     Each subject contributes each distinct value it takes: one value for a
+#'     subject-static covariate, every value it moves through for a
+#'     time-varying one. Columns \code{covariate}, \code{median},
+#'     \code{mean}, \code{min}, \code{max}, \code{mode} (the most frequent
+#'     value, ties to the smallest, so on a continuous covariate whose values
+#'     are all distinct it equals \code{min}) and the list column
+#'     \code{levels} (the distinct values, ascending). Zero rows
 #'     when no relation states a statistic symbolically. \code{NULL} on a fit
 #'     loaded from a bundle that does not record them. The functions that
 #'     take a \code{fit} centre the relations on these values, not on the

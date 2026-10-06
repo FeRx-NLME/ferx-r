@@ -348,7 +348,8 @@
   an error that told the R user to call a Rust function, although
   `ferx_model_validate()` accepted the model.
   - `ferx_fit()` resolves the statistics on the fitted data (after
-    `[data_selection]` and `ignore =`, one value per subject) and records
+    `[data_selection]` and `ignore =`; each subject contributes each
+    distinct value it takes, so one value for a static covariate) and records
     them in the new `fit$covariate_stats`: one row per covariate, with
     `median`, `mean`, `min`, `max`, `mode` and the list column `levels`. On
     `two_cpt_oral_cov` with `CL ~ WT power(center = median)` the fit is its

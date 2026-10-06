@@ -872,9 +872,11 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   for (k in r_only_keys) {
     if (!is.null(fit[[k]])) out[[k]] <- fit[[k]]
   }
-  # Theta level-block bindings (#370). The cross-language schema has no slot
-  # for them yet (FeRx-NLME/ferx-core#1621), so they ride here, and without
-  # them the reloaded fit cannot drive a simulation of its own model.
+  # Theta level-block bindings (#370). The schema has a slot for them since
+  # FeRx-NLME/ferx-core#1621 (`data_bindings.levels`), where the covariate
+  # statistics already go; moving the levels there too is #466. Until then
+  # they ride here, and without them the reloaded fit cannot drive a
+  # simulation of its own model.
   tl <- .fitrx_theta_levels_to_wire(fit$theta_levels)
   if (!is.null(tl)) out$theta_levels <- tl
   # The engine's held-coordinate mask over `cov_matrix` (#424); the schema has
