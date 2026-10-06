@@ -9,6 +9,23 @@
   *free* parameter lacks one. Code that tested `ferx_se(fit) == 0` to find
   fixed parameters should read `fit$estimates$fixed` instead.
 
+- **A fit of a non-FIX `block_sigma` model that carries no fitted
+  correlation is refused** by `ferx_covariance()`, `ferx_sir()`,
+  `ferx_predict()`, `ferx_simulate()`, `ferx_predict_survival()`,
+  `ferx_calc_npde()` and `ferx_simulate_with_uncertainty()`
+  ([#480](https://github.com/FeRx-NLME/ferx-r/issues/480)). These paths used
+  to rebuild such a fit at the model's declared initial correlation, with no
+  error; on a fit whose `fit$residual_correlations` had been dropped that
+  moved `ferx_covariance()`'s standard errors by up to 23 %. The error names
+  the correlation. **Fits made with ferx 0.3.x or earlier** of a non-FIX
+  `block_sigma` model have no `fit$residual_correlations` and are refused
+  too, including from a saved `.rds` or `.fitrx`, although their numbers
+  were correct (that ferx held the correlation at its declared value).
+  Re-fit them with `ferx_fit(model, data)`, which now estimates the
+  correlation as the model declares. A `FIX` correlation and a diagonal
+  sigma need no fitted value and are unaffected. A fitted correlation that
+  is not finite or not strictly between -1 and 1 is refused as well.
+
 - **ferx now builds against ferx-core `a3e78319`**, up from the `v0.4.0`
   release (`2a6076af`). These engine changes reach every fit, prediction
   and simulation entry point with no change to the package's own code:
