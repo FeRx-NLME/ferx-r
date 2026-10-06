@@ -412,3 +412,97 @@ test_that("C10b: ferx_calc_npde() centres on the fit's median, not the data's", 
   at_data <- cs_model(sprintf("%.17g", stats::median(s$wt)))
   expect_gt(max(abs(sym - npde(at_data))), 1e-3)
 })
+
+# --- C11: survival from a symbolic-centre TTE fit (#494) ---------------------
+
+# The bundled exponential TTE data with a per-subject WT and the hazard scaled
+# on it. `[individual_parameters]` needs the structural and error blocks, so
+# the model keeps the bundled example's FIX dummy one-compartment triple.
+cs_tte_model <- function(center) {
+  path <- tempfile(fileext = ".ferx")
+  writeLines(sprintf("
+[parameters]
+  theta TVLAMBDA(0.05, 0.001, 10.0)
+  theta DUMMY_CL(1.0, FIX)
+  theta DUMMY_V(1.0, FIX)
+  omega ETA_LAMBDA ~ 0.09
+  sigma SIGMA_DV ~ 0.01 FIX
+
+[individual_parameters]
+  LAMBDA = TVLAMBDA * exp(ETA_LAMBDA)
+  CL     = DUMMY_CL
+  V      = DUMMY_V
+
+[covariates]
+  WT continuous
+
+[covariate_model]
+  LAMBDA ~ WT power(center = %s) => THETA_LAMBDA_WT(0.8, 0.01, 5.0)
+
+[structural_model]
+  pk one_cpt_iv(cl=CL, v=V)
+
+[error_model]
+  DV ~ additive(SIGMA_DV)
+
+[event_model]
+  cmt    = 2
+  family = exponential
+  scale  = LAMBDA
+
+[fit_options]
+  method   = focei
+  maxiter  = 2
+  covariance = false
+", center), path)
+  path
+}
+
+# The symbolic TTE fit, its twin, and a design of the heavier half.
+cs_tte <- function() {
+  if (is.null(cs_cache$tte_fit)) {
+    rows <- utils::read.csv(ferx_example("tte_exponential")$data)
+    # Heavier subjects tend to have their events earlier (a fixed scramble of
+    # the event order), so the fit estimates an exponent inside its bounds: at
+    # the lower one the design's median and the fit's would give almost the
+    # same survival.
+    ids <- rows$ID[order(rows$TIME, rows$ID)]
+    rank <- seq_along(ids)
+    wt <- stats::setNames(100 - 2 * rank + 12 * ((rank * 7) %% 5 - 2), ids)
+    rows$WT <- wt[as.character(rows$ID)]
+    data <- tempfile(fileext = ".csv")
+    utils::write.csv(rows, data, row.names = FALSE, quote = FALSE, na = ".")
+    heavy <- names(wt)[wt > stats::median(wt)]
+    design <- tempfile(fileext = ".csv")
+    utils::write.csv(rows[as.character(rows$ID) %in% heavy, ], design,
+                     row.names = FALSE, quote = FALSE, na = ".")
+    sym <- cs_tte_model("median")
+    fit <- ferx_fit(sym, data, verbose = FALSE)
+    twin <- cs_tte_model(sprintf("%.17g", fit$covariate_stats$median))
+    cs_cache$tte_design <- design
+    cs_cache$tte_design_wt <- unname(wt[heavy])
+    cs_cache$tte_sym <- sym
+    cs_cache$tte_twin <- twin
+    cs_cache$tte_fit <- fit
+    cs_cache$tte_twin_fit <- ferx_fit(twin, data, verbose = FALSE)
+  }
+  list(design = cs_cache$tte_design, design_wt = cs_cache$tte_design_wt,
+       sym = cs_cache$tte_sym, twin = cs_cache$tte_twin,
+       fit = cs_cache$tte_fit, twin_fit = cs_cache$tte_twin_fit)
+}
+
+test_that("C11: ferx_predict_survival() centres on a TTE fit's median", {
+  b <- cs_tte()
+  expect_identical(b$fit$covariate_stats$covariate, "WT")
+  expect_identical(b$fit$ofv, b$twin_fit$ofv)
+  expect_identical(b$fit$theta, b$twin_fit$theta)
+  surv <- function(model) {
+    ferx_predict_survival(model, b$design, times = c(5, 10, 20),
+                          fit = b$fit)$survival
+  }
+  sym <- surv(b$sym)
+  expect_gt(length(sym), 0L)
+  expect_identical(sym, surv(b$twin))
+  at_design <- cs_tte_model(sprintf("%.17g", stats::median(b$design_wt)))
+  expect_gt(max(abs(sym - surv(at_design))), 1e-3)
+})
