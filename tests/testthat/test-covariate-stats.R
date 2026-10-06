@@ -1,0 +1,287 @@
+# Symbolic [covariate_model] statistics from R (#412, #487).
+#
+# A relation may state its centre as a statistic of the data
+# (`center = median`). ferx_fit() resolves it on the fitted data and records
+# the values in `fit$covariate_stats`; every later use of the fit centres the
+# relations on those values, never on the design's. The oracle is the twin: the
+# same model with the literal centre the fit resolved, which ferx-core's
+# desugar makes the same model to the last bit
+# (tests/covariate_model_equivalence.rs). The fixture is that test's data,
+# `two_cpt_oral_cov.csv`, with one relation, `CL ~ WT power(center = C)`.
+# The fits stop after two outer iterations: the assertions are about binding,
+# not about where the optimizer ends up.
+
+cs_model <- function(center) {
+  path <- tempfile(fileext = ".ferx")
+  writeLines(sprintf("
+[parameters]
+  theta TVCL(4.0, 0.1, 100.0)
+  theta TVV1(40.0, 1.0, 500.0)
+  theta TVQ(8.0, 0.1, 100.0)
+  theta TVV2(80.0, 1.0, 500.0)
+  theta TVKA(1.0, 0.01, 10.0)
+  omega ETA_CL ~ 0.15
+  omega ETA_V1 ~ 0.15
+  sigma PROP_ERR ~ 0.04 (sd)
+
+[individual_parameters]
+  CL = TVCL * exp(ETA_CL)
+  V1 = TVV1 * exp(ETA_V1)
+  Q  = TVQ
+  V2 = TVV2
+  KA = TVKA
+
+[covariates]
+  WT continuous
+
+[covariate_model]
+  CL ~ WT power(center = %s) => THETA_CL_WT(0.6, 0.01, 5.0)
+
+[structural_model]
+  pk two_cpt_oral(cl=CL, v1=V1, q=Q, v2=V2, ka=KA)
+
+[error_model]
+  DV ~ proportional(PROP_ERR)
+
+[fit_options]
+  method   = focei
+  maxiter  = 2
+  covariance = false
+", center), path)
+  path
+}
+
+# Per-subject WT, one value per subject: how core summarises a static
+# covariate (PsN's weighting).
+cs_subject_wt <- function(rows) {
+  vapply(split(rows$WT, rows$ID), function(x) unique(x)[1L], numeric(1L))
+}
+
+# The symbolic fit, its literal twin, and a design of the heavier half of the
+# subjects, whose median weight is not the fit's. Shared by the tests that only
+# read them.
+cs_cache <- new.env(parent = emptyenv())
+cs_base <- function() {
+  if (is.null(cs_cache$fit)) {
+    data <- ferx_example("two_cpt_oral_cov")$data
+    rows <- utils::read.csv(data)
+    wt <- cs_subject_wt(rows)
+    heavy <- rows[rows$ID %in% as.numeric(names(wt)[wt > stats::median(wt)]), ]
+    design <- tempfile(fileext = ".csv")
+    utils::write.csv(heavy, design, row.names = FALSE, quote = FALSE, na = ".")
+    sym <- cs_model("median")
+    fit <- ferx_fit(sym, data, verbose = FALSE)
+    twin <- cs_model(sprintf("%.17g", fit$covariate_stats$median))
+    cs_cache$data <- data
+    cs_cache$wt <- wt
+    cs_cache$design <- design
+    cs_cache$design_wt <- cs_subject_wt(heavy)
+    cs_cache$sym <- sym
+    cs_cache$twin <- twin
+    cs_cache$fit <- fit
+    cs_cache$twin_fit <- ferx_fit(twin, data, verbose = FALSE)
+  }
+  as.list(cs_cache)
+}
+
+# A copy of `fit` carrying a hand-made positive-definite covariance matrix in
+# the packed space, so SIR and the covariance step reach the engine without
+# relying on a two-iteration covariance step.
+cs_with_cov <- function(fit) {
+  n <- length(fit$theta) + nrow(fit$omega) + length(fit$sigma)
+  fit$cov_matrix <- diag(1e-4, n)
+  fit
+}
+
+cs_msg <- function(expr) {
+  tryCatch({
+    expr
+    NA_character_
+  }, error = function(e) conditionMessage(e))
+}
+
+# --- C1: the fit binds -------------------------------------------------------
+
+test_that("C1: ferx_fit() binds center = median and reports covariate_stats", {
+  b <- cs_base()
+  cs <- b$fit$covariate_stats
+  expect_s3_class(cs, "data.frame")
+  expect_identical(
+    names(cs), c("covariate", "median", "mean", "min", "max", "mode", "levels")
+  )
+  expect_identical(cs$covariate, "WT")
+  # One value per subject, as core summarises a static covariate.
+  expect_equal(cs$median, stats::median(b$wt), tolerance = 1e-14)
+  expect_equal(cs$mean, mean(b$wt), tolerance = 1e-12)
+  expect_identical(cs$min, min(b$wt))
+  expect_identical(cs$max, max(b$wt))
+  expect_identical(cs$levels[[1L]], sort(unique(unname(b$wt))))
+  # The median differs from the design's, or C3 would prove nothing.
+  expect_gt(abs(stats::median(b$design_wt) - cs$median), 1)
+})
+
+test_that("C1b: the symbolic fit is its literal twin, to the last bit", {
+  b <- cs_base()
+  expect_identical(b$fit$ofv, b$twin_fit$ofv)
+  expect_identical(b$fit$theta, b$twin_fit$theta)
+  # A model with no symbolic relation records no statistics.
+  expect_identical(nrow(b$twin_fit$covariate_stats), 0L)
+})
+
+test_that("C2: predict and simulate without a fit centre on the design", {
+  b <- cs_base()
+  at_design <- cs_model(sprintf("%.17g", stats::median(b$design_wt)))
+  expect_identical(
+    ferx_predict(b$sym, b$design)$PRED,
+    ferx_predict(at_design, b$design)$PRED
+  )
+  expect_identical(
+    ferx_simulate(b$sym, b$design, n_sim = 1L, seed = 3L)$IPRED,
+    ferx_simulate(at_design, b$design, n_sim = 1L, seed = 3L)$IPRED
+  )
+})
+
+# --- C3: a fit centres the design on the fit's statistics (T4 of #487) -------
+
+test_that("C3: from-fit predict / simulate centre on the fit's median, not the design's", {
+  b <- cs_base()
+  sym <- ferx_predict(b$sym, b$design, fit = b$fit)$PRED
+  expect_identical(sym, ferx_predict(b$twin, b$design, fit = b$fit)$PRED)
+  # The shift this prevents: centring on the design's own median moves PRED.
+  at_design <- cs_model(sprintf("%.17g", stats::median(b$design_wt)))
+  expect_gt(
+    max(abs(sym - ferx_predict(at_design, b$design, fit = b$fit)$PRED)), 1e-3
+  )
+  expect_identical(
+    ferx_simulate(b$sym, b$design, fit = b$fit, n_sim = 1L, seed = 3L)$IPRED,
+    ferx_simulate(b$twin, b$design, fit = b$fit, n_sim = 1L, seed = 3L)$IPRED
+  )
+})
+
+test_that("C4: ferx_covariance / ferx_sir run on a symbolic fit like its twin", {
+  b <- cs_base()
+  c_sym <- ferx_covariance(cs_with_cov(b$fit))
+  c_twin <- ferx_covariance(cs_with_cov(b$twin_fit))
+  expect_identical(c_sym$ofv, c_twin$ofv)
+  expect_identical(unname(c_sym$se_theta), unname(c_twin$se_theta))
+  expect_s3_class(
+    ferx_sir(cs_with_cov(b$fit), sir_samples = 20L, sir_resamples = 10L,
+             sir_seed = 1L),
+    "ferx_fit"
+  )
+})
+
+# --- C5: a fit without statistics (T3 of #487) -------------------------------
+
+test_that("C5: a symbolic model with a fit lacking statistics gets core's refusal on every path", {
+  b <- cs_base()
+  fit <- cs_with_cov(b$fit)
+  # The shape of a fit saved before ferx recorded the statistics.
+  fit$covariate_stats <- NULL
+  msgs <- c(
+    predict = cs_msg(ferx_predict(b$sym, b$design, fit = fit)),
+    simulate = cs_msg(ferx_simulate(b$sym, b$design, fit = fit)),
+    covariance = cs_msg(ferx_covariance(fit)),
+    sir = cs_msg(ferx_sir(fit, sir_samples = 20L, sir_resamples = 10L))
+  )
+  for (k in names(msgs)) {
+    expect_match(msgs[[k]], "this fit carries no data-derived bindings",
+                 fixed = TRUE, info = k)
+    expect_match(msgs[[k]], "a statistic of `WT` symbolically", fixed = TRUE,
+                 info = k)
+    # Nothing an R user cannot act on, and not the level-block refusal.
+    expect_no_match(msgs[[k]], "ferx_core::api", fixed = TRUE, info = k)
+    expect_no_match(msgs[[k]], "bind_covariate_stats", fixed = TRUE, info = k)
+    expect_no_match(msgs[[k]], "theta level", fixed = TRUE, info = k)
+  }
+  # One engine writes it for every path.
+  expect_length(unique(unname(msgs)), 1L)
+})
+
+test_that("C6: statistics for a covariate the model does not read are refused", {
+  b <- cs_base()
+  fit <- b$fit
+  fit$covariate_stats$covariate <- "AGE"
+  msg <- cs_msg(ferx_predict(b$sym, b$design, fit = fit))
+  expect_match(msg, "carry no entry for it", fixed = TRUE)
+})
+
+test_that("C7: malformed statistics are refused in R's terms", {
+  b <- cs_base()
+  dup <- b$fit
+  dup$covariate_stats <- rbind(dup$covariate_stats, dup$covariate_stats)
+  expect_match(cs_msg(ferx_predict(b$sym, b$design, fit = dup)),
+               "covariate `WT` is listed twice", fixed = TRUE)
+  na <- b$fit
+  na$covariate_stats$median <- NA_real_
+  expect_match(cs_msg(ferx_predict(b$sym, b$design, fit = na)),
+               "covariate `WT` has a `median` that is not a finite number",
+               fixed = TRUE)
+})
+
+# --- C8: persistence ---------------------------------------------------------
+
+test_that("C8: ferx_save_fit / ferx_load_fit keep covariate_stats", {
+  b <- cs_base()
+  bundle <- withr::local_tempfile(fileext = ".fitrx")
+  ferx_save_fit(b$fit, bundle)
+  re <- ferx_load_fit(bundle)
+  expect_identical(re$covariate_stats, b$fit$covariate_stats)
+  expect_identical(
+    ferx_predict(b$sym, b$design, fit = re)$PRED,
+    ferx_predict(b$sym, b$design, fit = b$fit)$PRED
+  )
+  # In ferx-core's own slot, so the engine reads them too.
+  fit_json <- file.path(withr::local_tempdir(), "x")
+  utils::unzip(bundle, files = "fit.json", exdir = dirname(fit_json))
+  wire <- jsonlite::read_json(file.path(dirname(fit_json), "fit.json"))
+  expect_identical(wire$data_bindings$covariate_stats$WT$median,
+                   b$fit$covariate_stats$median)
+  expect_null(wire$r_extras$covariate_stats)
+})
+
+test_that("C8b: no statistic round-trips as zero rows; an absent slot loads NULL", {
+  b <- cs_base()
+  bundle <- withr::local_tempfile(fileext = ".fitrx")
+  ferx_save_fit(b$twin_fit, bundle)
+  expect_identical(ferx_load_fit(bundle)$covariate_stats,
+                   b$twin_fit$covariate_stats)
+  # A bundle that does not record them (before #412): unknown, not empty.
+  expect_null(ferx:::.fitrx_covariate_stats_from_wire(NULL))
+})
+
+test_that("C8c: a malformed statistics entry in a bundle is refused by name", {
+  w <- list(covariate_stats = list(WT = list(
+    median = 70, mean = 70, min = 45, max = 93, levels = list(45, 93)
+  )))
+  expect_error(ferx:::.fitrx_covariate_stats_from_wire(w),
+               "covariate `WT` lacks one of median, mean, min, max, mode",
+               fixed = TRUE)
+  w$covariate_stats$WT$mode <- list(45)
+  expect_error(ferx:::.fitrx_covariate_stats_from_wire(w),
+               "covariate `WT` has a `mode` that is not a number", fixed = TRUE)
+})
+
+test_that("C8d: the engine's own .fitrx loader reads the statistics slot", {
+  # `[priors] from_fit` is read by ferx-core's loader while the model file is
+  # parsed, so a slot it cannot deserialise (a `median` written as an array, a
+  # `levels` written as a scalar) fails validation with a parse error.
+  # The covariance step's result: an import needs standard errors, and the
+  # step keeps the fit's statistics.
+  b <- cs_base()
+  fit <- ferx_covariance(cs_with_cov(b$fit))
+  expect_identical(fit$covariate_stats, b$fit$covariate_stats)
+  bundle <- withr::local_tempfile(fileext = ".fitrx")
+  ferx_save_fit(fit, bundle)
+  model <- withr::local_tempfile(fileext = ".ferx")
+  writeLines(
+    c(readLines(b$sym), "", "[priors]",
+      paste0("  from_fit = ", gsub("/+", "/", normalizePath(bundle)))),
+    model
+  )
+  utils::capture.output(res <- ferx_model_validate(model, b$data))
+  expect_true(
+    isTRUE(res$ok),
+    info = paste(utils::capture.output(print(res$diagnostics)), collapse = "\n")
+  )
+})
