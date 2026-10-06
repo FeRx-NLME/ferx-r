@@ -8,7 +8,10 @@
 # desugar makes the same model to the last bit
 # (tests/covariate_model_equivalence.rs). The fixture is that test's data,
 # `two_cpt_oral_cov.csv`, with one relation, `CL ~ WT power(center = C)`; C9
-# adds a categorical `GRP` for the `levels` and `mode` statistics.
+# adds a categorical `GRP` for the `levels` and `mode` statistics. C11 uses the
+# bundled exponential TTE data with a WT added, for ferx_predict_survival(); C12
+# uses ferx-core's three-study level fixture with a WT added, for a model with
+# both a theta level block and a symbolic centre (#494).
 # The fits stop after two outer iterations: the assertions are about binding,
 # not about where the optimizer ends up.
 
@@ -171,11 +174,19 @@ test_that("C4: ferx_covariance / ferx_sir run on a symbolic fit like its twin", 
   c_twin <- ferx_covariance(cs_with_cov(b$twin_fit))
   expect_identical(c_sym$ofv, c_twin$ofv)
   expect_identical(unname(c_sym$se_theta), unname(c_twin$se_theta))
-  expect_s3_class(
-    ferx_sir(cs_with_cov(b$fit), sir_samples = 20L, sir_resamples = 10L,
-             sir_seed = 1L),
-    "ferx_fit"
-  )
+  # SIR re-reads the fit's own data and refuses any other (`data hash
+  # mismatch`), so no design can make a wrong centre differ from the right
+  # one here: the twin's intervals are the strongest check SIR admits (#494).
+  sir <- function(fit) {
+    ferx_sir(cs_with_cov(fit), sir_samples = 50L, sir_resamples = 20L,
+             sir_seed = 1L)
+  }
+  s_sym <- sir(b$fit)
+  s_twin <- sir(b$twin_fit)
+  expect_s3_class(s_sym, "ferx_fit")
+  expect_identical(s_sym$sir_ci_theta, s_twin$sir_ci_theta)
+  expect_identical(s_sym$sir_ci_omega, s_twin$sir_ci_omega)
+  expect_identical(s_sym$sir_ci_sigma, s_twin$sir_ci_sigma)
 })
 
 # --- C5: a fit without statistics (T3 of #487) -------------------------------
@@ -354,4 +365,318 @@ test_that("C9: levels = auto / ref = mode fit and bind from the fit like their t
     ferx_predict(b$sym, b$design, fit = re)$PRED,
     ferx_predict(b$twin, b$design, fit = b$fit)$PRED
   )
+})
+
+# --- C10: uncertainty simulation and NPDE from a symbolic fit (#494) ---------
+
+# The fit's data with every weight raised by 15: the same ID / TIME rows, so
+# its NPDE still aligns with `fit$sdtab`, but a median 15 above the fit's. On the
+# fit's own data an unbound symbolic model centres on the fit's median anyway,
+# so NPDE there could not tell a dropped bind from a working one.
+cs_shifted <- function() {
+  if (is.null(cs_cache$shifted)) {
+    rows <- utils::read.csv(cs_base()$data)
+    rows$WT <- rows$WT + 15
+    path <- tempfile(fileext = ".csv")
+    utils::write.csv(rows, path, row.names = FALSE, quote = FALSE, na = ".")
+    cs_cache$shifted <- path
+    cs_cache$shifted_wt <- cs_subject_wt(rows)
+  }
+  list(data = cs_cache$shifted, wt = cs_cache$shifted_wt)
+}
+
+test_that("C10a: ferx_simulate_with_uncertainty() centres on the fit's median", {
+  b <- cs_base()
+  fit <- cs_with_cov(b$fit)
+  swu <- function(model) {
+    ferx_simulate_with_uncertainty(model, b$design, fit,
+                                   n_uncertainty_draws = 3L, seed = 7L)
+  }
+  sym <- swu(b$sym)
+  expect_gt(nrow(sym), 0L)
+  expect_identical(sym, swu(b$twin))
+  # Centring on the design's own median moves IPRED, so the identity above is
+  # not true of a bind from the wrong source.
+  at_design <- cs_model(sprintf("%.17g", stats::median(b$design_wt)))
+  expect_gt(max(abs(sym$IPRED - swu(at_design)$IPRED)), 1e-3)
+})
+
+test_that("C10b: ferx_calc_npde() centres on the fit's median, not the data's", {
+  b <- cs_base()
+  s <- cs_shifted()
+  npde <- function(model) {
+    ferx_calc_npde(b$fit, nsim = 50L, seed = 5L, model = model,
+                   data = s$data)$sdtab$NPDE
+  }
+  sym <- npde(b$sym)
+  expect_true(all(is.finite(sym)))
+  expect_identical(sym, npde(b$twin))
+  expect_gt(abs(stats::median(s$wt) - b$fit$covariate_stats$median), 1)
+  at_data <- cs_model(sprintf("%.17g", stats::median(s$wt)))
+  expect_gt(max(abs(sym - npde(at_data))), 1e-3)
+})
+
+# --- C11: survival from a symbolic-centre TTE fit (#494) ---------------------
+
+# The bundled exponential TTE data with a per-subject WT and the hazard scaled
+# on it. `[individual_parameters]` needs the structural and error blocks, so
+# the model keeps the bundled example's FIX dummy one-compartment triple.
+cs_tte_model <- function(center) {
+  path <- tempfile(fileext = ".ferx")
+  writeLines(sprintf("
+[parameters]
+  theta TVLAMBDA(0.05, 0.001, 10.0)
+  theta DUMMY_CL(1.0, FIX)
+  theta DUMMY_V(1.0, FIX)
+  omega ETA_LAMBDA ~ 0.09
+  sigma SIGMA_DV ~ 0.01 FIX
+
+[individual_parameters]
+  LAMBDA = TVLAMBDA * exp(ETA_LAMBDA)
+  CL     = DUMMY_CL
+  V      = DUMMY_V
+
+[covariates]
+  WT continuous
+
+[covariate_model]
+  LAMBDA ~ WT power(center = %s) => THETA_LAMBDA_WT(0.8, 0.01, 5.0)
+
+[structural_model]
+  pk one_cpt_iv(cl=CL, v=V)
+
+[error_model]
+  DV ~ additive(SIGMA_DV)
+
+[event_model]
+  cmt    = 2
+  family = exponential
+  scale  = LAMBDA
+
+[fit_options]
+  method   = focei
+  maxiter  = 2
+  covariance = false
+", center), path)
+  path
+}
+
+# The symbolic TTE fit, its twin, and a design of the heavier half.
+cs_tte <- function() {
+  if (is.null(cs_cache$tte_fit)) {
+    rows <- utils::read.csv(ferx_example("tte_exponential")$data)
+    # Heavier subjects tend to have their events earlier (a fixed scramble of
+    # the event order), so the fit estimates an exponent inside its bounds: at
+    # the lower one the design's median and the fit's would give almost the
+    # same survival. The three earliest are 40 heavier still, a tail that pulls
+    # the mean (73) off the median (69), so C11 can tell the two apart.
+    ids <- rows$ID[order(rows$TIME, rows$ID)]
+    rank <- seq_along(ids)
+    wt <- 100 - 2 * rank + 12 * ((rank * 7) %% 5 - 2) + 40 * (rank <= 3)
+    wt <- stats::setNames(wt, ids)
+    rows$WT <- wt[as.character(rows$ID)]
+    data <- tempfile(fileext = ".csv")
+    utils::write.csv(rows, data, row.names = FALSE, quote = FALSE, na = ".")
+    heavy <- names(wt)[wt > stats::median(wt)]
+    design <- tempfile(fileext = ".csv")
+    utils::write.csv(rows[as.character(rows$ID) %in% heavy, ], design,
+                     row.names = FALSE, quote = FALSE, na = ".")
+    sym <- cs_tte_model("median")
+    fit <- ferx_fit(sym, data, verbose = FALSE)
+    twin <- cs_tte_model(sprintf("%.17g", fit$covariate_stats$median))
+    cs_cache$tte_wt <- wt
+    cs_cache$tte_design <- design
+    cs_cache$tte_design_wt <- unname(wt[heavy])
+    cs_cache$tte_sym <- sym
+    cs_cache$tte_twin <- twin
+    cs_cache$tte_fit <- fit
+    cs_cache$tte_twin_fit <- ferx_fit(twin, data, verbose = FALSE)
+  }
+  list(wt = cs_cache$tte_wt,
+       design = cs_cache$tte_design, design_wt = cs_cache$tte_design_wt,
+       sym = cs_cache$tte_sym, twin = cs_cache$tte_twin,
+       fit = cs_cache$tte_fit, twin_fit = cs_cache$tte_twin_fit)
+}
+
+test_that("C11: ferx_predict_survival() centres on a TTE fit's median", {
+  b <- cs_tte()
+  expect_identical(b$fit$covariate_stats$covariate, "WT")
+  # An oracle outside the engine for the twin's centre, and a fixture on which
+  # the mean is not the median.
+  expect_identical(b$fit$covariate_stats$median, stats::median(b$wt))
+  expect_gt(abs(mean(b$wt) - stats::median(b$wt)), 1)
+  expect_identical(b$fit$ofv, b$twin_fit$ofv)
+  expect_identical(b$fit$theta, b$twin_fit$theta)
+  surv <- function(model) {
+    ferx_predict_survival(model, b$design, times = c(5, 10, 20),
+                          fit = b$fit)$survival
+  }
+  sym <- surv(b$sym)
+  expect_gt(length(sym), 0L)
+  expect_identical(sym, surv(b$twin))
+  at_design <- cs_tte_model(sprintf("%.17g", stats::median(b$design_wt)))
+  expect_gt(max(abs(sym - surv(at_design))), 1e-3)
+})
+
+# --- C12: a level block and a symbolic centre in one model (#494) ------------
+
+# ferx-core #1735 rebuilt how the level and statistics binders keep each
+# other's bindings; only a model with both reaches that code. ferx-core's
+# three-study level fixture (as in test-theta-levels.R) with a per-subject WT
+# of 60 / 72 / 95, so the fit's median is 72 and a design of subjects 1 and 3
+# has 77.5. The random effect sits on `Z`, which `y` never reads, for the
+# reason test-theta-levels.R's tl_model() gives.
+cs_combo_data <- "ID,TIME,DV,EVID,AMT,CMT,RATE,MDV,STUDY,WT
+1,0,.,1,100,1,0,1,1,60
+1,1,8.1,0,.,1,0,0,1,60
+1,4,6.2,0,.,1,0,0,1,60
+1,12,3.1,0,.,1,0,0,1,60
+2,0,.,1,100,1,0,1,2,72
+2,1,7.4,0,.,1,0,0,2,72
+2,4,5.5,0,.,1,0,0,2,72
+2,12,2.8,0,.,1,0,0,2,72
+3,0,.,1,100,1,0,1,3,95
+3,1,7.9,0,.,1,0,0,3,95
+3,4,5.9,0,.,1,0,0,3,95
+3,12,2.5,0,.,1,0,0,3,95"
+
+# `CL` must stay a top-level product for the relation to multiply in, hence
+# `exp(PLACEBO)` rather than core's `TVCL + PLACEBO`.
+cs_combo_model <- function(center) {
+  path <- tempfile(fileext = ".ferx")
+  writeLines(sprintf("
+[parameters]
+  theta TVCL(2.0, 0.001, 20.0)
+  theta PLACEBO[STUDY, TIME](0.0, -5.0, 5.0)
+  theta TVV(10.0, 0.1, 500.0)
+  omega ETA_V ~ 0.04
+  sigma PROP_ERR ~ 0.05
+
+[individual_parameters]
+  CL = TVCL * exp(PLACEBO)
+  V  = TVV
+  Z  = TVV * exp(ETA_V)
+
+[covariates]
+  STUDY categorical
+  WT continuous
+
+[covariate_model]
+  CL ~ WT power(center = %s) => THETA_CL_WT(0.6, 0.01, 5.0)
+
+[structural_model]
+  pk one_cpt_iv(cl=CL, v=V)
+
+[derived]
+  Z_OUT = Z
+
+[error_model]
+  DV ~ proportional(PROP_ERR)
+
+[fit_options]
+  maxiter = 2
+  inner_maxiter = 3
+  covariance = false
+", center), path)
+  path
+}
+
+# The combined model, its twin (centre 72), its data, a design of subjects 1
+# and 3, and the data with every weight raised by 15 (median 87) for NPDE.
+# Without the fits, so C12b's no-fit paths are measured on their own.
+cs_combo_files <- function() {
+  if (is.null(cs_cache$combo_data)) {
+    data <- tempfile(fileext = ".csv")
+    writeLines(cs_combo_data, data)
+    rows <- utils::read.csv(data)
+    design <- tempfile(fileext = ".csv")
+    utils::write.csv(rows[rows$ID %in% c(1, 3), ], design, row.names = FALSE,
+                     quote = FALSE, na = ".")
+    rows$WT <- rows$WT + 15
+    shifted <- tempfile(fileext = ".csv")
+    utils::write.csv(rows, shifted, row.names = FALSE, quote = FALSE, na = ".")
+    cs_cache$combo_design <- design
+    cs_cache$combo_shifted <- shifted
+    cs_cache$combo_sym <- cs_combo_model("median")
+    cs_cache$combo_twin <- cs_combo_model("72")
+    cs_cache$combo_data <- data
+  }
+  list(data = cs_cache$combo_data, design = cs_cache$combo_design,
+       shifted = cs_cache$combo_shifted, sym = cs_cache$combo_sym,
+       twin = cs_cache$combo_twin)
+}
+
+# The files above plus the symbolic fit and the twin's.
+cs_combo <- function() {
+  b <- cs_combo_files()
+  if (is.null(cs_cache$combo_fit)) {
+    cs_cache$combo_fit <- ferx_fit(b$sym, b$data, verbose = FALSE)
+    cs_cache$combo_twin_fit <- ferx_fit(b$twin, b$data, verbose = FALSE)
+  }
+  c(b, list(fit = cs_cache$combo_fit, twin_fit = cs_cache$combo_twin_fit))
+}
+
+test_that("C12a: a level block plus a symbolic centre binds both, like its twin", {
+  b <- cs_combo()
+  # Three studies x three times: nine levels. Each binder kept the other's half.
+  expect_identical(nrow(b$fit$theta_levels), 9L)
+  expect_identical(b$fit$covariate_stats$covariate, "WT")
+  expect_identical(b$fit$covariate_stats$median, 72)
+  expect_identical(b$fit$ofv, b$twin_fit$ofv)
+  expect_identical(b$fit$theta, b$twin_fit$theta)
+  expect_identical(b$fit$theta_levels, b$twin_fit$theta_levels)
+})
+
+test_that("C12b: without a fit the combined model centres on the design", {
+  b <- cs_combo_files()
+  at_design <- cs_combo_model("77.5")
+  expect_identical(
+    ferx_predict(b$sym, b$design)$PRED,
+    ferx_predict(at_design, b$design)$PRED
+  )
+  expect_identical(
+    ferx_simulate(b$sym, b$design, n_sim = 1L, seed = 3L)$IPRED,
+    ferx_simulate(at_design, b$design, n_sim = 1L, seed = 3L)$IPRED
+  )
+})
+
+test_that("C12c: every from-fit path on the combined model matches its twin", {
+  b <- cs_combo()
+  fit <- b$fit
+  pred <- ferx_predict(b$sym, b$design, fit = fit)$PRED
+  expect_identical(pred, ferx_predict(b$twin, b$design, fit = fit)$PRED)
+  at_design <- cs_combo_model("77.5")
+  expect_gt(
+    max(abs(pred - ferx_predict(at_design, b$design, fit = fit)$PRED)), 1e-3
+  )
+  expect_identical(
+    ferx_simulate(b$sym, b$design, fit = fit, n_sim = 1L, seed = 3L)$IPRED,
+    ferx_simulate(b$twin, b$design, fit = fit, n_sim = 1L, seed = 3L)$IPRED
+  )
+  swu <- function(model) {
+    ferx_simulate_with_uncertainty(model, b$design, cs_with_cov(fit),
+                                   n_uncertainty_draws = 3L, seed = 7L)
+  }
+  expect_identical(swu(b$sym), swu(b$twin))
+  npde <- function(model) {
+    ferx_calc_npde(fit, nsim = 50L, seed = 5L, model = model,
+                   data = b$shifted)$sdtab$NPDE
+  }
+  n_sym <- npde(b$sym)
+  expect_true(all(is.finite(n_sym)))
+  expect_identical(n_sym, npde(b$twin))
+  expect_gt(max(abs(n_sym - npde(cs_combo_model("87")))), 1e-3)
+  c_sym <- ferx_covariance(cs_with_cov(fit))
+  c_twin <- ferx_covariance(cs_with_cov(b$twin_fit))
+  expect_identical(c_sym$ofv, c_twin$ofv)
+  expect_identical(unname(c_sym$se_theta), unname(c_twin$se_theta))
+  sir <- function(f) {
+    ferx_sir(cs_with_cov(f), sir_samples = 50L, sir_resamples = 20L,
+             sir_seed = 1L)
+  }
+  s_sym <- sir(fit)
+  s_twin <- sir(b$twin_fit)
+  expect_identical(s_sym$sir_ci_theta, s_twin$sir_ci_theta)
+  expect_identical(s_sym$sir_ci_omega, s_twin$sir_ci_omega)
+  expect_identical(s_sym$sir_ci_sigma, s_twin$sir_ci_sigma)
 })
