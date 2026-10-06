@@ -8,7 +8,10 @@
 # desugar makes the same model to the last bit
 # (tests/covariate_model_equivalence.rs). The fixture is that test's data,
 # `two_cpt_oral_cov.csv`, with one relation, `CL ~ WT power(center = C)`; C9
-# adds a categorical `GRP` for the `levels` and `mode` statistics.
+# adds a categorical `GRP` for the `levels` and `mode` statistics. C11 uses the
+# bundled exponential TTE data with a WT added, for ferx_predict_survival(); C12
+# uses ferx-core's three-study level fixture with a WT added, for a model with
+# both a theta level block and a symbolic centre (#494).
 # The fits stop after two outer iterations: the assertions are about binding,
 # not about where the optimizer ends up.
 
@@ -465,10 +468,12 @@ cs_tte <- function() {
     # Heavier subjects tend to have their events earlier (a fixed scramble of
     # the event order), so the fit estimates an exponent inside its bounds: at
     # the lower one the design's median and the fit's would give almost the
-    # same survival.
+    # same survival. The three earliest are 40 heavier still, a tail that pulls
+    # the mean (73) off the median (69), so C11 can tell the two apart.
     ids <- rows$ID[order(rows$TIME, rows$ID)]
     rank <- seq_along(ids)
-    wt <- stats::setNames(100 - 2 * rank + 12 * ((rank * 7) %% 5 - 2), ids)
+    wt <- 100 - 2 * rank + 12 * ((rank * 7) %% 5 - 2) + 40 * (rank <= 3)
+    wt <- stats::setNames(wt, ids)
     rows$WT <- wt[as.character(rows$ID)]
     data <- tempfile(fileext = ".csv")
     utils::write.csv(rows, data, row.names = FALSE, quote = FALSE, na = ".")
@@ -479,6 +484,7 @@ cs_tte <- function() {
     sym <- cs_tte_model("median")
     fit <- ferx_fit(sym, data, verbose = FALSE)
     twin <- cs_tte_model(sprintf("%.17g", fit$covariate_stats$median))
+    cs_cache$tte_wt <- wt
     cs_cache$tte_design <- design
     cs_cache$tte_design_wt <- unname(wt[heavy])
     cs_cache$tte_sym <- sym
@@ -486,7 +492,8 @@ cs_tte <- function() {
     cs_cache$tte_fit <- fit
     cs_cache$tte_twin_fit <- ferx_fit(twin, data, verbose = FALSE)
   }
-  list(design = cs_cache$tte_design, design_wt = cs_cache$tte_design_wt,
+  list(wt = cs_cache$tte_wt,
+       design = cs_cache$tte_design, design_wt = cs_cache$tte_design_wt,
        sym = cs_cache$tte_sym, twin = cs_cache$tte_twin,
        fit = cs_cache$tte_fit, twin_fit = cs_cache$tte_twin_fit)
 }
@@ -494,6 +501,10 @@ cs_tte <- function() {
 test_that("C11: ferx_predict_survival() centres on a TTE fit's median", {
   b <- cs_tte()
   expect_identical(b$fit$covariate_stats$covariate, "WT")
+  # An oracle outside the engine for the twin's centre, and a fixture on which
+  # the mean is not the median.
+  expect_identical(b$fit$covariate_stats$median, stats::median(b$wt))
+  expect_gt(abs(mean(b$wt) - stats::median(b$wt)), 1)
   expect_identical(b$fit$ofv, b$twin_fit$ofv)
   expect_identical(b$fit$theta, b$twin_fit$theta)
   surv <- function(model) {
@@ -661,7 +672,11 @@ test_that("C12c: every from-fit path on the combined model matches its twin", {
   expect_identical(unname(c_sym$se_theta), unname(c_twin$se_theta))
   sir <- function(f) {
     ferx_sir(cs_with_cov(f), sir_samples = 50L, sir_resamples = 20L,
-             sir_seed = 1L)$sir_ci_theta
+             sir_seed = 1L)
   }
-  expect_identical(sir(fit), sir(b$twin_fit))
+  s_sym <- sir(fit)
+  s_twin <- sir(b$twin_fit)
+  expect_identical(s_sym$sir_ci_theta, s_twin$sir_ci_theta)
+  expect_identical(s_sym$sir_ci_omega, s_twin$sir_ci_omega)
+  expect_identical(s_sym$sir_ci_sigma, s_twin$sir_ci_sigma)
 })
