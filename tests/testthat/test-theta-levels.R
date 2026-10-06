@@ -773,16 +773,37 @@ test_that("R7: bindings on a model without a level block are refused", {
 # --- R8: the skeleton is laid out by core's layout_from_fit (ferx-r #469) ------
 
 test_that("R8a: the SIR / covariance skeleton keeps the fit's theta count, names and FIX flags", {
-  # A FIX theta next to the level block, so the FIX mask has a theta entry
-  # whose position depends on the layout. Mutation that reddens this: drop the
-  # `layout_from_fit` call in bind_layout_from_fit() (the skeleton is then the
-  # unbound parse, one PLACEBO theta, and the count check refuses).
-  text <- sub("theta ET50(2.0, 0.01, 100.0)", "theta ET50(2.0, FIX)",
-              tl_twin_model("PLACEBO[STUDY, TIME, contrast = none]", "PLACEBO"),
-              fixed = TRUE)
+  # A FIX theta declared *after* the level block, so its position in the FIX
+  # mask depends on the layout: last of the bound thetas, but third of the
+  # unbound parse's, which carries no PLACEBO theta at all. Declared before the
+  # block, as the twin model has it, ET50 is third in both layouts and no mask
+  # check can tell them apart (ferx-r #488).
+  #
+  # Only `cov_fixed` and the `cov_matrix` dimnames come from the glue's
+  # layout. `names(cv$theta)`, `estimates$fixed` and the SIR row names are
+  # built in R from `fit$theta` / `fit$theta_fixed`, so they can only check
+  # that the glue's count agreed; they are kept for that.
+  #
+  # Mutations that redden this (ferx-r #488, each built into a scratch
+  # library): drop the `layout_from_fit` call in bind_layout_from_fit() (the
+  # count check refuses); return the unbound parse's FIX mask, padded with free
+  # entries to the bound count (`cov_fixed` flags the third theta; green before
+  # ET50 moved below the block); return the unbound parse's mask unpadded (no
+  # mask comes back); label the theta rows from the unbound parse, padded with
+  # `THETA<i>` (dimnames); reverse the level labels before the layout
+  # (dimnames).
+  placebo <- "PLACEBO[STUDY, TIME, contrast = none]"
+  text <- sub(
+    paste0("  theta ET50(2.0, 0.01, 100.0)\n  theta ", placebo, "(45.0, 0.0, 200.0)\n"),
+    paste0("  theta ", placebo, "(45.0, 0.0, 200.0)\n  theta ET50(2.0, FIX)\n"),
+    tl_twin_model(placebo, "PLACEBO"),
+    fixed = TRUE
+  )
   fit <- tl_fit(tl_write(text, ".ferx"), tl_twin_data())
-  expect_gt(nrow(fit$theta_levels), 0L)
-  expect_true(fit$cov_fixed[["ET50"]])
+  expect_gt(nrow(fit$theta_levels), 1L)
+  n_theta <- length(fit$theta)
+  expect_identical(names(fit$theta)[n_theta], "ET50")
+  expect_identical(unname(which(fit$cov_fixed[seq_len(n_theta)])), n_theta)
   cv <- ferx_covariance(fit)
   expect_identical(names(cv$theta), names(fit$theta))
   expect_identical(rownames(cv$cov_matrix), rownames(fit$cov_matrix))
