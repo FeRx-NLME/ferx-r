@@ -171,11 +171,19 @@ test_that("C4: ferx_covariance / ferx_sir run on a symbolic fit like its twin", 
   c_twin <- ferx_covariance(cs_with_cov(b$twin_fit))
   expect_identical(c_sym$ofv, c_twin$ofv)
   expect_identical(unname(c_sym$se_theta), unname(c_twin$se_theta))
-  expect_s3_class(
-    ferx_sir(cs_with_cov(b$fit), sir_samples = 20L, sir_resamples = 10L,
-             sir_seed = 1L),
-    "ferx_fit"
-  )
+  # SIR re-reads the fit's own data and refuses any other (`data hash
+  # mismatch`), so no design can make a wrong centre differ from the right
+  # one here: the twin's intervals are the strongest check SIR admits (#494).
+  sir <- function(fit) {
+    ferx_sir(cs_with_cov(fit), sir_samples = 50L, sir_resamples = 20L,
+             sir_seed = 1L)
+  }
+  s_sym <- sir(b$fit)
+  s_twin <- sir(b$twin_fit)
+  expect_s3_class(s_sym, "ferx_fit")
+  expect_identical(s_sym$sir_ci_theta, s_twin$sir_ci_theta)
+  expect_identical(s_sym$sir_ci_omega, s_twin$sir_ci_omega)
+  expect_identical(s_sym$sir_ci_sigma, s_twin$sir_ci_sigma)
 })
 
 # --- C5: a fit without statistics (T3 of #487) -------------------------------
