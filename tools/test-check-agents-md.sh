@@ -17,10 +17,16 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CHECK="$ROOT/tools/check-agents-md.sh"
-TMP="$(mktemp -d)"
+# An explicit template, so TMPDIR is honoured on BSD mktemp (macOS) as on GNU.
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/test-check-agents-md.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
+# A fixture that is not a repository must stay one even when TMPDIR sits inside
+# a git checkout: git's discovery stops at $TMP instead of climbing into it.
+export GIT_CEILING_DIRECTORIES="$TMP"
 # Built at runtime, so this harness does not trip the check it drives.
 LEGACY="CLAUDE"".md"
+LEGACY_ESCAPED="CLAUDE""\\.md"
+LOWER="claude"".md"
 failures=0
 
 report() { # headline, captured output
@@ -43,16 +49,23 @@ fixture() { # name
   echo "$dir"
 }
 
-expect() { # name, dir, expected exit, message fragment[, file:line]
-  local name=$1 dir=$2 want=$3 fragment=$4 at=${5:-}
+run_check() { # mode, dir -> sets out, rc
+  rc=0
+  if [[ "$1" == ci ]]; then
+    out=$(GITHUB_ACTIONS=true bash "$CHECK" "$2" 2>&1) || rc=$?
+  else
+    out=$(env -u GITHUB_ACTIONS bash "$CHECK" "$2" 2>&1) || rc=$?
+  fi
+}
+
+# file and line, when given, must appear as each mode prints a location:
+# `file:line: ` locally, `::error file=...,line=...::` in CI, where the file is
+# escaped (ci_file, defaulting to file).
+expect() { # name, dir, expected exit, message fragment[, file, line[, ci_file]]
+  local name=$1 dir=$2 want=$3 fragment=$4 file=${5:-} line=${6:-} ci_file=${7:-${5:-}}
   local mode out rc where
   for mode in local ci; do
-    rc=0
-    if [[ "$mode" == ci ]]; then
-      out=$(GITHUB_ACTIONS=true bash "$CHECK" "$dir" 2>&1) || rc=$?
-    else
-      out=$(env -u GITHUB_ACTIONS bash "$CHECK" "$dir" 2>&1) || rc=$?
-    fi
+    run_check "$mode" "$dir"
     if [[ "$rc" != "$want" ]]; then
       report "FAIL [$mode] $name: expected exit $want, got $rc" "$out"
       continue
@@ -61,9 +74,8 @@ expect() { # name, dir, expected exit, message fragment[, file:line]
       report "FAIL [$mode] $name: output does not mention \"$fragment\"" "$out"
       continue
     fi
-    # The location, in the form each mode prints it.
-    if [[ -n "$at" ]]; then
-      if [[ "$mode" == ci ]]; then where="::error file=${at%%:*},line=${at#*:}::"; else where="$at: "; fi
+    if [[ -n "$file" ]]; then
+      if [[ "$mode" == ci ]]; then where="::error file=$ci_file,line=$line::"; else where="$file:$line: "; fi
       if ! printf '%s' "$out" | grep -qF -- "$where"; then
         report "FAIL [$mode] $name: output does not locate the hit as \"$where\"" "$out"
         continue
@@ -73,7 +85,25 @@ expect() { # name, dir, expected exit, message fragment[, file:line]
   done
 }
 
+expect_count() { # name, dir, fragment, number of output lines holding it
+  local name=$1 dir=$2 fragment=$3 want=$4
+  local mode out rc n
+  for mode in local ci; do
+    run_check "$mode" "$dir"
+    n=$(printf '%s\n' "$out" | grep -cF -- "$fragment" || true)
+    if [[ "$n" != "$want" ]]; then
+      report "FAIL [$mode] $name: $n lines mention \"$fragment\", expected $want" "$out"
+      continue
+    fi
+    echo "ok   [$mode] $name"
+  done
+}
+
 OK="AGENTS.md is the one agent-guidance file: OK"
+RENAMED="which was renamed to AGENTS.md in #489"
+BACK="is back at the repository root: keep one guidance file, AGENTS.md (#489)"
+NESTED="in a subdirectory is loaded as guidance for it: keep one guidance file, AGENTS.md (#489)"
+UNTRACKED="AGENTS.md is not tracked at the repository root: it is the one agent-guidance file (#489)"
 
 # -- green --------------------------------------------------------------------
 
@@ -84,21 +114,28 @@ expect "this checkout passes" "$ROOT" 0 "$OK"
 # Untracked files exist on one machine only; the scan must not see them.
 d=$(fixture untracked-mention)
 printf 'see %s\n' "$LEGACY" > "$d/notes.txt"
-expect "an untracked file naming the old file is not scanned" "$d" 0 "$OK"
+mkdir -p "$d/scratch"
+printf 'x\n' > "$d/scratch/$LEGACY"
+expect "an untracked file naming the old file, or under it below the root, is not scanned" "$d" 0 "$OK"
 
-# -- red ----------------------------------------------------------------------
+# -- red: contents ------------------------------------------------------------
 
 d=$(fixture tracked-mention)
 printf 'f <- function() 1\n# The label convention (%s).\n' "$LEGACY" > "$d/R/f.R"
 expect "a tracked file naming the old file fails, with file and line" "$d" 1 \
-  "names $LEGACY, which was renamed to AGENTS.md in #489" R/f.R:2
+  "names $LEGACY, $RENAMED" R/f.R 2
 
 # The spelling the one reference .Rbuildignore held used: a regex, dot escaped.
 d=$(fixture escaped-mention)
-printf '^\\.github$\n^%s\\.md$\n' "CLAUDE" > "$d/.Rbuildignore"
+printf '^\\.github$\n^%s$\n' "$LEGACY_ESCAPED" > "$d/.Rbuildignore"
 git -C "$d" add -A
 expect "a regex-escaped mention of the old file fails" "$d" 1 \
-  "names $LEGACY, which was renamed to AGENTS.md in #489" .Rbuildignore:2
+  "names $LEGACY_ESCAPED, $RENAMED" .Rbuildignore 2
+
+d=$(fixture lowercase-mention)
+printf 'f <- function() 1\n# see %s\n' "$LOWER" > "$d/R/f.R"
+expect "a lowercase mention of the old file fails" "$d" 1 \
+  "names $LOWER, $RENAMED" R/f.R 2
 
 # A history exemption keyed on a basename would let this through.
 d=$(fixture nested-news)
@@ -106,31 +143,67 @@ mkdir -p "$d/docs"
 printf 'see %s\n' "$LEGACY" > "$d/docs/NEWS.md"
 git -C "$d" add -A
 expect "only the root NEWS.md is exempt" "$d" 1 \
-  "names $LEGACY, which was renamed to AGENTS.md in #489" docs/NEWS.md:1
+  "names $LEGACY, $RENAMED" docs/NEWS.md 1
 
 # One invalid UTF-8 byte must not hide the rest of the file from the scan.
 d=$(fixture binary-mention)
 printf '\377\376\000bytes\nsee %s\n' "$LEGACY" > "$d/blob.bin"
 git -C "$d" add -A
 expect "a binary file naming the old file fails" "$d" 1 \
-  "names $LEGACY, which was renamed to AGENTS.md in #489" blob.bin:2
+  "names $LEGACY, $RENAMED" blob.bin 2
 
-BACK="$LEGACY is back at the repository root: keep one guidance file, AGENTS.md (#489)"
-UNTRACKED="AGENTS.md is not tracked at the repository root: it is the one agent-guidance file (#489)"
+# Without -z git quotes such a path ("sub:dir/we\"ird,na%me.R"), and splitting
+# at the first `:` cuts it in two; in CI, `:` and `,` would end the file=
+# property, and an unescaped `%` would be read as the start of an escape.
+d=$(fixture awkward-path)
+mkdir -p "$d/sub:dir"
+printf 'x\nsee %s\n' "$LEGACY" > "$d/sub:dir/we\"ird,na%me.R"
+git -C "$d" add -A
+expect "a path holding \`:\`, \`,\`, \`%\` and a quote is reported verbatim, escaped in CI" "$d" 1 \
+  "names $LEGACY, $RENAMED" 'sub:dir/we"ird,na%me.R' 2 'sub%3Adir/we"ird%2Cna%25me.R'
+
+d=$(fixture two-on-a-line)
+printf 'f <- function() 1\n# %s, or %s\n' "$LEGACY" "$LEGACY_ESCAPED" > "$d/R/f.R"
+expect_count "two mentions on one line are one finding" "$d" "$RENAMED" 1
+
+# -- red: the file itself -----------------------------------------------------
 
 d=$(fixture legacy-back)
 printf '# %s\n' "$LEGACY" > "$d/$LEGACY"
-expect "the old file recreated at the root fails, even untracked" "$d" 1 "$BACK" "$LEGACY:1"
+expect "the old file recreated at the root fails, even untracked" "$d" 1 \
+  "$LEGACY $BACK" "$LEGACY" 1
 
 # Dangling, so `-e` (which follows the link) is false and only `-L` sees it.
 d=$(fixture legacy-symlink)
 ln -s nowhere "$d/$LEGACY"
-expect "a dangling symlink under the old name fails" "$d" 1 "$BACK"
+expect "a dangling symlink under the old name fails" "$d" 1 "$LEGACY $BACK"
+
+# Matched by name, not by `-e`: on a case-insensitive filesystem `-e` would find
+# it under the old spelling too, on Linux it would not.
+d=$(fixture legacy-lowercase)
+printf 'x\n' > "$d/$LOWER"
+expect "the old file at the root in lowercase fails" "$d" 1 "$LOWER $BACK" "$LOWER" 1
+
+d=$(fixture legacy-nested)
+mkdir -p "$d/inst"
+printf 'x\n' > "$d/inst/$LEGACY"
+git -C "$d" add -A
+expect "a tracked file under the old name in a subdirectory fails" "$d" 1 \
+  "$LEGACY $NESTED" "inst/$LEGACY" 1
+
+d=$(fixture legacy-nested-lowercase)
+mkdir -p "$d/a/b"
+printf 'x\n' > "$d/a/b/$LOWER"
+git -C "$d" add -A
+expect "a tracked lowercase file under the old name, two levels down, fails" "$d" 1 \
+  "$LOWER $NESTED" "a/b/$LOWER" 1
+
+# -- red: AGENTS.md -----------------------------------------------------------
 
 d=$(fixture wrong-heading)
 printf '# Guidance\n\nGuidance for agents.\n' > "$d/AGENTS.md"
 expect "AGENTS.md without its title fails" "$d" 1 \
-  'AGENTS.md must open with its own name as the title: `# AGENTS.md`' AGENTS.md:1
+  'AGENTS.md must open with its own name as the title: `# AGENTS.md`' AGENTS.md 1
 
 d=$(fixture agents-missing)
 git -C "$d" rm -q --cached AGENTS.md
@@ -141,12 +214,12 @@ d=$(fixture agents-untracked)
 git -C "$d" rm -q --cached AGENTS.md
 expect "an AGENTS.md on disk but not in git fails" "$d" 1 "$UNTRACKED"
 
-# Not a repository at all: git grep errors, and that must not read as "no match".
+# Not a repository at all: git errors, and that must not read as "no match".
 d="$TMP/not-a-repo"
 mkdir -p "$d"
 printf '# AGENTS.md\n' > "$d/AGENTS.md"
 expect "a directory outside git fails rather than passing vacuously" "$d" 1 \
-  "git grep failed"
+  "git ls-files failed (exit 128) in $d"
 
 if [[ "$failures" -gt 0 ]]; then
   echo "$failures case(s) failed"

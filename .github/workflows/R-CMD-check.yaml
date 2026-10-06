@@ -100,8 +100,10 @@ jobs:
         run: bash tools/test-check-glue-raise.sh
 
       # AGENTS.md is the one agent-guidance file (#489, as ferx-core #1528): it
-      # opens with `# AGENTS.md`, the old Claude-specific file is not back at
-      # the root, and no tracked file but NEWS.md (history) names the old file.
+      # opens with `# AGENTS.md`, no file under the old Claude-specific name is
+      # back (at the root, or tracked in a subdirectory, where agents load it as
+      # guidance for that directory), and no tracked file but NEWS.md (history)
+      # names the old file, in any letter case, plain or regex-escaped.
       # Not a testthat test: R CMD check runs the tests from a built copy of the
       # package, which has neither the git index nor AGENTS.md (.Rbuildignore).
       - name: Verify AGENTS.md is the one agent-guidance file
