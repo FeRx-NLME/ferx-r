@@ -27,8 +27,9 @@ validate_fit_for_params <- function(fit) {
 # Fitted IOV (kappa) covariance, flattened row-major for the FFI. A `kappa` model
 # needs it downstream: the engine draws (simulate) or conditions on (predict /
 # npde) one kappa vector per occasion from it, and dropping it panicked
-# ferx-core's simulate path (#1019); the SIR and covariance skeletons fall back to
-# the model file's *initial* kappa without it (#465). NULL for a non-IOV fit,
+# ferx-core's simulate path (#1019), and the engine would rebuild the SIR and
+# covariance skeletons at the model file's *initial* kappa without it, so the
+# glue refuses a kappa fit that lacks it (#465, #473). NULL for a non-IOV fit,
 # which maps to an empty vector + dim 0 ("no IOV") on the Rust side. The one
 # source of these two arguments for every from-fit entry point.
 .ferx_omega_iov_args <- function(fit) {
