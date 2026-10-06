@@ -505,6 +505,7 @@ test_that("T9b: ferx_sir / ferx_covariance give the predict paths' refusal", {
   # Byte for byte the text T9 anchors: one function writes it for every path.
   sim <- msg_of(ferx_simulate(b$model, b$data, fit = fit))
   expect_match(sim, "this fit carries no theta level bindings", fixed = TRUE)
+  expect_identical(msg_of(ferx_predict(b$model, b$data, fit = fit)), sim)
   expect_identical(msg_of(ferx_covariance(fit)), sim)
   expect_identical(
     msg_of(ferx_sir(fit, sir_samples = 20L, sir_resamples = 10L)), sim
@@ -904,6 +905,24 @@ test_that("T13: the counted form keeps its names and an empty theta_levels", {
   expect_identical(nrow(fit$theta_levels), 0L)
   # The counted form drives a from-fit prediction with no bindings at all.
   expect_true(all(is.finite(ferx_predict(counted, data, fit = fit)$PRED)))
+})
+
+test_that("T13b: a plain fit with no bindings drives every from-fit path", {
+  # The control for the one cell R refuses itself (#487): empty level bindings
+  # are refused only on a model that declares a level block. A model that
+  # declares nothing data-derived reaches core, which binds nothing.
+  data <- tl_write(tl_data, ".csv")
+  counted <- tl_write(tl_model(
+    "  theta TVCL(2.0, 0.001, 20.0)\n  theta PLACEBO[6](0.0, -5.0, 5.0)",
+    "TVCL + PLACEBO[PLA_IDX]"
+  ), ".ferx")
+  fit <- tl_with_cov(tl_fit(counted, data))
+  expect_identical(nrow(fit$theta_levels), 0L)
+  expect_true(all(is.finite(ferx_predict(counted, data, fit = fit)$PRED)))
+  sim <- ferx_simulate(counted, data, fit = fit, n_sim = 1L, seed = 1L)
+  expect_gt(nrow(sim), 0L)
+  expect_s3_class(ferx_covariance(fit), "ferx_fit")
+  expect_s3_class(ferx_sir(fit, sir_samples = 20L, sir_resamples = 10L), "ferx_fit")
 })
 
 # --- T14: an eta the block can reproduce (FeRx-NLME/ferx-core#1675) -----------

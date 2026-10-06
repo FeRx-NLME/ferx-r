@@ -753,7 +753,7 @@ fn ferx_rust_simulate_from_fit(
             &level_group,
             &level_contrast,
         )?;
-        bind_design_from_fit(&mut parsed, model_path, &mut population, &fit_levels)?;
+        bind_design_from_fit(&mut parsed, model_path, &mut population, &fit_data_bindings(&fit_levels))?;
 
         let params = match params_from_fit(
             &parsed.model,
@@ -1103,7 +1103,7 @@ fn ferx_rust_simulate_with_uncertainty(
             &level_group,
             &level_contrast,
         )?;
-        bind_design_from_fit(&mut parsed, model_path, &mut population, &fit_levels)?;
+        bind_design_from_fit(&mut parsed, model_path, &mut population, &fit_data_bindings(&fit_levels))?;
 
         // Decode the method string to the engine enum.
         let uncertainty_method = match method.trim().to_lowercase().as_str() {
@@ -1286,7 +1286,7 @@ fn ferx_rust_predict_from_fit(
             &level_group,
             &level_contrast,
         )?;
-        bind_design_from_fit(&mut parsed, model_path, &mut population, &fit_levels)?;
+        bind_design_from_fit(&mut parsed, model_path, &mut population, &fit_data_bindings(&fit_levels))?;
 
         let params = match params_from_fit(
             &parsed.model,
@@ -1454,7 +1454,7 @@ fn ferx_rust_predict_survival_from_fit(
             &level_group,
             &level_contrast,
         )?;
-        bind_design_from_fit(&mut parsed, model_path, &mut population, &fit_levels)?;
+        bind_design_from_fit(&mut parsed, model_path, &mut population, &fit_data_bindings(&fit_levels))?;
 
         let params = match params_from_fit(
             &parsed.model,
@@ -1564,7 +1564,7 @@ fn ferx_rust_npde_from_fit(
             &level_group,
             &level_contrast,
         )?;
-        bind_design_from_fit(&mut parsed, model_path, &mut population, &fit_levels)?;
+        bind_design_from_fit(&mut parsed, model_path, &mut population, &fit_data_bindings(&fit_levels))?;
 
         let params = match params_from_fit(
             &parsed.model,
@@ -1635,11 +1635,14 @@ fn ferx_rust_npde_from_fit(
 // engine in the skeleton `FitResult`'s `data_bindings` instead, the slot
 // ferx-core's own `fit()` records them in (FeRx-NLME/ferx-core#1621).
 
-/// The model text a level bind re-parses, read only when the model declares a
-/// level block (the binders early-return otherwise, and so does every caller).
+/// The model text a bind re-parses: read when the model declares a level block
+/// (`bind_design`) and on every from-fit bind (`from_fit_model_text`).
 fn level_model_text(model_path: &str) -> std::result::Result<String, String> {
     std::fs::read_to_string(model_path).map_err(|e| {
-        format!("cannot re-read the model file `{model_path}` to bind its theta level blocks: {e}")
+        format!(
+            "cannot re-read the model file `{model_path}` to bind it to the fit's data-derived \
+             bindings: {e}"
+        )
     })
 }
 
@@ -1672,67 +1675,62 @@ fn bind_design(
     ferx_core::api::bind_theta_levels(parsed, &model_text, population)
 }
 
-/// The one from-fit binder: places a design on the theta layout a fit was bound
-/// with, before anything reads the fit's theta by position.
-///
-/// A model that declares level blocks paired with a fit that carries no
-/// bindings is refused here, in R's terms, rather than with the engine's "was
-/// the model edited" text, which would be wrong for the usual cause. Everything
-/// else is the engine's call, passed through unprefixed - above all the refusal
-/// of design levels the fit never observed, which names every such label.
-///
-/// FeRx-NLME/ferx-core#1619: the `[covariate_model]` statistics a fit was bound
-/// with are bound from the fit here too, once core can carry them, and nowhere
-/// else (ferx-r #412).
+/// The one prologue of every from-fit bind (ferx-r #487): a from-fit bind
+/// always reaches core with the fit's whole `DataBindings`, so core decides
+/// every refusal but one. R keeps exactly one cell, a model that declares a
+/// level block paired with a fit whose level bindings are empty: that gets
+/// `no_fit_levels_error`, byte-identical on every from-fit path (predict,
+/// simulate, npde, SIR, covariance), rather than core's generic "this fit
+/// carries no data-derived bindings". Everything else - a symbolic
+/// `[covariate_model]` centre with no statistics (ferx-core #1686), bindings for
+/// a block or covariate the model does not have - is core's text, passed
+/// through unprefixed. Returns the model text the bind re-parses.
+fn from_fit_model_text(
+    parsed: &ParsedModel,
+    model_path: &str,
+    fitted: &DataBindings,
+) -> std::result::Result<String, String> {
+    if fitted.levels.is_empty() && declares_level_blocks(parsed) {
+        return Err(no_fit_levels_error(&parsed.model));
+    }
+    level_model_text(model_path)
+}
+
+/// The one from-fit binder: places a design on the data-derived bindings a fit
+/// was made with (its theta level layout and its `[covariate_model]`
+/// statistics), before anything reads the fit's theta by position. Core's
+/// `bind_from_fit`; a no-op without a re-parse on a model that declares nothing
+/// data-derived when the fit carries nothing. A design level the fit never
+/// observed is refused there, naming every such label.
 fn bind_design_from_fit(
     parsed: &mut ParsedModel,
     model_path: &str,
     population: &mut Population,
-    fit_levels: &LevelBindings,
+    fitted: &DataBindings,
 ) -> std::result::Result<(), String> {
-    if fit_levels.is_empty() {
-        if !declares_level_blocks(parsed) {
-            return Ok(());
-        }
-        return Err(no_fit_levels_error(&parsed.model));
-    }
-    let model_text = level_model_text(model_path)?;
-    ferx_core::api::bind_from_fit(parsed, &model_text, population, &fit_data_bindings(fit_levels))
+    let model_text = from_fit_model_text(parsed, model_path, fitted)?;
+    ferx_core::api::bind_from_fit(parsed, &model_text, population, fitted)
 }
 
-/// Lay the glue's own parse out on a fit's level bindings, for SIR and the
-/// standalone covariance step, which hold no population here. It sizes the
+/// Lay the glue's own parse out on a fit's data-derived bindings, for SIR and
+/// the standalone covariance step, which hold no population here. It sizes the
 /// skeleton `FitResult` (theta count, names, FIX flags) and puts the bindings in
 /// its `data_bindings`. The layout is core's `layout_from_fit`, the model half
-/// of `bind_from_fit`: malformed bindings (a split contrast group, a recorded
-/// `auto` contrast, a missing block or one the model does not declare) are
-/// refused here, before the skeleton is built. A repeated label never gets
-/// this far: `level_bindings_from_r` refuses it first, naming the R column.
-/// The engine re-binds the re-read data from the skeleton's bindings before it
-/// reads theta (`resolve_fit_inputs`), which is where a level the fit never
-/// observed is refused.
-///
-/// The empty-bindings check stays in R on purpose, mirroring
-/// `bind_design_from_fit`: core refuses empty bindings on a level model too, but
-/// in its own words, and every from-fit path (predict, simulate, SIR,
-/// covariance) must give the same `no_fit_levels_error` text. The early `Ok`
-/// keys on the levels half only, which is sound while no R fit carries
-/// covariate statistics. When ferx-r #412 fills that half, this prologue and
-/// `bind_design_from_fit`'s must call core whenever the stats are non-empty,
-/// or core's refusals for them (ferx-core #1686) never reach R.
+/// of `bind_from_fit`, behind the same prologue as `bind_design_from_fit`:
+/// malformed bindings (a split contrast group, a recorded `auto` contrast, a
+/// missing block or one the model does not declare, statistics for a covariate
+/// no relation reads) are refused here, before the skeleton is built. A
+/// repeated label never gets this far: `level_bindings_from_r` refuses it
+/// first, naming the R column. The engine re-binds the re-read data from the
+/// skeleton's bindings before it reads theta (`resolve_fit_inputs`), which is
+/// where a level the fit never observed is refused.
 fn bind_layout_from_fit(
     parsed: &mut ParsedModel,
     model_path: &str,
-    fit_levels: &LevelBindings,
+    fitted: &DataBindings,
 ) -> std::result::Result<(), String> {
-    if fit_levels.is_empty() {
-        if !declares_level_blocks(parsed) {
-            return Ok(());
-        }
-        return Err(no_fit_levels_error(&parsed.model));
-    }
-    let model_text = level_model_text(model_path)?;
-    ferx_core::api::layout_from_fit(parsed, &model_text, &fit_data_bindings(fit_levels))
+    let model_text = from_fit_model_text(parsed, model_path, fitted)?;
+    ferx_core::api::layout_from_fit(parsed, &model_text, fitted)
 }
 
 /// A fit's level bindings as the `DataBindings` core's from-fit binder takes.
@@ -4873,7 +4871,7 @@ fn ferx_rust_sir(
         let fit_levels = level_bindings_from_r(
             &level_block, &level_index, &level_label, &level_group, &level_contrast,
         )?;
-        bind_layout_from_fit(&mut parsed, model_path, &fit_levels)?;
+        bind_layout_from_fit(&mut parsed, model_path, &fit_data_bindings(&fit_levels))?;
         let model = &parsed.model;
 
         let n_packed = cov_matrix_dim.max(0) as usize;
@@ -5054,7 +5052,7 @@ fn ferx_rust_covariance(
         let fit_levels = level_bindings_from_r(
             &level_block, &level_index, &level_label, &level_group, &level_contrast,
         )?;
-        bind_layout_from_fit(&mut parsed, model_path, &fit_levels)?;
+        bind_layout_from_fit(&mut parsed, model_path, &fit_data_bindings(&fit_levels))?;
         let model = &parsed.model;
 
         let covariance_method_enum = match covariance_method.to_lowercase().as_str() {
