@@ -65,7 +65,7 @@ if [[ "$status" -ne 0 ]]; then
     cat <<'EOF'
 The committed Cargo.lock is broken, so there is nothing local to check out. Locally,
 restore it from main (`git checkout origin/main -- src/rust/Cargo.lock`) and redo any
-wanted lock change the way CLAUDE.md's "ferx-core dependency" section describes, or, if
+wanted lock change the way AGENTS.md's "ferx-core dependency" section describes, or, if
 this PR bumps the pin, re-run tools/update-ferx-core-lock.sh. Then commit the lock.
 EOF
   else

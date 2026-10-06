@@ -221,7 +221,7 @@ test_that("every structure row is labelled with the model's declared etas", {
   skip_on_cran()
   res <- iivsearch_run()
 
-  # The label convention (CLAUDE.md): the bare declared name, never OMEGA(i,i)
+  # The label convention (AGENTS.md): the bare declared name, never OMEGA(i,i)
   # on a model that names its etas. warfarin_block_omega declares ETA_CL,
   # ETA_V and ETA_KA, so every label is one of those.
   labels <- unlist(strsplit(stats::na.omit(res$models$eta_labels), ";",

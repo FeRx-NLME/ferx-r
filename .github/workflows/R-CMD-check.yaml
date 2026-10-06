@@ -55,7 +55,7 @@ jobs:
       # Both crates come from the one repository, so they must also sit on the
       # same revision: a lock pinning them apart is two halves of a workspace
       # that is only ever tested together. The check lives in a script so
-      # contributors run exactly what CI runs (CLAUDE.md, "ferx-core dependency").
+      # contributors run exactly what CI runs (AGENTS.md, "ferx-core dependency").
       - name: Verify ferx-core and ferx-tools are pinned in Cargo.lock
         run: bash tools/check-ferx-core-pin.sh
 
@@ -104,7 +104,7 @@ jobs:
       # tests/public_api_boundary.rs), so the glue must construct them with a
       # `..Default::default()` spread. An exhaustive literal breaks this build
       # with `error[E0063]: missing field` the moment the engine adds a field —
-      # the cross-repo trap CLAUDE.md's sibling-repo note warns about, which
+      # the cross-repo trap AGENTS.md's sibling-repo note warns about, which
       # already bit us once for `SimulateOptions` (ferx-core #522 -> #200).
       #
       # The scan is textual: it opens at any `<Name>Options {` that is not a

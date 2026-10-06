@@ -21,7 +21,7 @@ be linked directly.
   `src/rust/.cargo/config.toml` auto-swaps in the local `../../../ferx-core`
   checkout, so you can develop and test against an unmerged branch locally —
   but the PR must target a merged ferx-core commit.
-- Read `CLAUDE.md` in both repos before starting.
+- Read `AGENTS.md` in both repos before starting.
 - Fill every section of `.github/PULL_REQUEST_TEMPLATE.md` before opening a PR.
 
 ---
