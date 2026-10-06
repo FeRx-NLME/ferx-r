@@ -1701,17 +1701,25 @@ fn bind_design_from_fit(
 }
 
 /// Lay the glue's own parse out on a fit's level bindings, for SIR and the
-/// standalone covariance step, which hold no population here. It only sizes the
+/// standalone covariance step, which hold no population here. It sizes the
 /// skeleton `FitResult` (theta count, names, FIX flags) and puts the bindings in
-/// its `data_bindings`: the engine re-binds the re-read data from those, with
-/// the full validation of `bind_from_fit` (unseen levels, split groups, blocks
-/// the model does not declare), before it reads theta (`resolve_fit_inputs`).
-/// Core's own population-less bind refuses a level model by design, hence the
-/// plain re-parse here.
+/// its `data_bindings`. The layout is core's `layout_from_fit`, the model half
+/// of `bind_from_fit`: malformed bindings (a split contrast group, a recorded
+/// `auto` contrast, a missing block or one the model does not declare) are
+/// refused here, before the skeleton is built. A repeated label never gets
+/// this far: `level_bindings_from_r` refuses it first, naming the R column.
+/// The engine re-binds the re-read data from the skeleton's bindings before it
+/// reads theta (`resolve_fit_inputs`), which is where a level the fit never
+/// observed is refused.
 ///
-/// Empty bindings are refused on a level model with the text the predict paths
-/// give, and are a no-op otherwise; bindings on a model without a block are laid
-/// out anyway, so the engine refuses them rather than ignoring them.
+/// The empty-bindings check stays in R on purpose, mirroring
+/// `bind_design_from_fit`: core refuses empty bindings on a level model too, but
+/// in its own words, and every from-fit path (predict, simulate, SIR,
+/// covariance) must give the same `no_fit_levels_error` text. The early `Ok`
+/// keys on the levels half only, which is sound while no R fit carries
+/// covariate statistics. When ferx-r #412 fills that half, this prologue and
+/// `bind_design_from_fit`'s must call core whenever the stats are non-empty,
+/// or core's refusals for them (ferx-core #1686) never reach R.
 fn bind_layout_from_fit(
     parsed: &mut ParsedModel,
     model_path: &str,
@@ -1724,13 +1732,7 @@ fn bind_layout_from_fit(
         return Err(no_fit_levels_error(&parsed.model));
     }
     let model_text = level_model_text(model_path)?;
-    let mut bindings = parsed.bindings.clone();
-    bindings.levels = fit_levels.clone();
-    let mut rebound = ferx_core::parser::model_parser::parse_full_model_with(&model_text, &bindings)?.model;
-    rebound.name = parsed.model.name.clone();
-    parsed.model = rebound;
-    parsed.bindings = bindings;
-    Ok(())
+    ferx_core::api::layout_from_fit(parsed, &model_text, &fit_data_bindings(fit_levels))
 }
 
 /// A fit's level bindings as the `DataBindings` core's from-fit binder takes.
