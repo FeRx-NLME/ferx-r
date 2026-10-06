@@ -376,6 +376,8 @@ test_that("in-fit SIR on a model-file `method = foce` fit scores under FOCE (fer
   # ferx-core d234b25c (#1725).
   fit <- sir_fit_with_infit_sir("warfarin_iov", method = NULL)
   skip_if(is.null(fit$cov_matrix) || is.null(fit$sir_ess), sir_cov_skip)
+  # Precondition, not the check: the file's method reached the fit (this
+  # holds on the old pin too). expect_same_sir() is what the old pin fails.
   expect_identical(fit$method, "FOCE")
   expect_same_sir(standalone_sir(fit), fit)
 })
