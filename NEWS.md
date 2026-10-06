@@ -305,8 +305,9 @@
   one. On the bundled `mbma_placebo` example (seed 7, 1000/250 samples, ESS
   342), `KAPPA_ARM` = 156.0 gets the SIR interval [68.3, 415.6], against
   the covariance step's [30.2, 281.9]. On `warfarin_iov` fitted with the
-  model file's `method = foce`, in-fit SIR is degenerate (ESS 2.5) and its
-  `KAPPA_CL` interval excludes the estimate; that is the engine scoring
+  model file's `method = foce`, in-fit SIR is degenerate (ESS 2.5 of 1000)
+  and its `KAPPA_CL` interval far too narrow; at 200/100 samples it
+  excludes the estimate. That is the engine scoring
   the FOCE fit with the FOCEI objective
   ([ferx-core #1710](https://github.com/FeRx-NLME/ferx-core/issues/1710)).
   `ferx_sir()` on the same fit, or `ferx_fit(method = "foce", sir = TRUE)`,
