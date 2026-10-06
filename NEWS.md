@@ -48,9 +48,42 @@
   sigma need no fitted value and are unaffected. A fitted correlation that
   is not finite or not strictly between -1 and 1 is refused as well.
 
-- **ferx now builds against ferx-core `202bea5e`**, up from the `v0.4.0`
+- **ferx now builds against ferx-core `53133688`**, up from the `v0.4.0`
   release (`2a6076af`). These engine changes reach every fit, prediction
   and simulation entry point with no change to the package's own code:
+
+  - **A categorical covariate value outside its `[covariate_model]`
+    relation's levels is now refused by `ferx_predict()`,
+    `ferx_predict_survival()`, `ferx_calc_npde()`, `ferx_sir()` and
+    `ferx_covariance()`**, with or without `fit`
+    ([#1740](https://github.com/FeRx-NLME/ferx-core/issues/1740)). These
+    used to score such a value as the reference level with no error: a
+    design recoding a level-3 subject to 4 gave the same predictions,
+    NPDE, SIR intervals and standard errors as recoding it to the reference.
+    `ferx_fit()` and `ferx_simulate()` already refused it. The error says
+    how to repair it: on a fit's levels (`levels = auto`, or any model
+    used with `fit =`), drop or recode those rows or refit; on levels
+    written out in the model, add the value to `levels = [...]`, use
+    `levels = auto`, or drop or recode the rows. A missing value is still
+    allowed. Without `fit`, the error is a `ferx_engine_error` with code
+    `E_COV_LEVEL_UNKNOWN`. With `fit`, it is a plain error carrying the same
+    message, because the code is not yet attached on the from-fit paths.
+    The refusal text also changed for `ferx_fit()` and `ferx_simulate()`: it
+    now reads "has levels ... but `GRP` takes [4.0] in this data", not
+    "declares levels ... also takes".
+  - **A `[covariate_model]` statistic the data cannot bind is reported as
+    `E_COVARIATE_STATS_BINDING` on block `covariate_model`**
+    ([#1739](https://github.com/FeRx-NLME/ferx-core/issues/1739)), e.g. a
+    `levels = auto` relation on data with one level. It used to carry
+    `E_THETA_LEVEL_BINDING` on `parameters`, the code for a
+    `theta NAME[COL, ...]` level block, in `ferx_model_validate()` and on
+    the `ferx_engine_error` that `ferx_fit()` and `ferx_predict()` raise.
+    Code that branches on `e$code` for this failure must test the new code.
+  - **`ferx_model_validate()` no longer warns `W_UNUSED_PARAM` for the theta
+    of a relation with a data-derived centre**
+    ([#1738](https://github.com/FeRx-NLME/ferx-core/issues/1738)), such as
+    `CL ~ WT power(center = median) => THETA_CL_WT(...)`, with or without
+    data. A theta nothing reads still warns.
 
   - **Results move on datasets with mid-timeline `SS=1` records, EVID=3/4
     resets, or lagged doses**, where ferx now does what NONMEM does:
