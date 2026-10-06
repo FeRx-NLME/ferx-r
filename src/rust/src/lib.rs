@@ -1539,7 +1539,11 @@ fn ferx_rust_npde_from_fit(
             &params,
             nsim as usize,
             seed_opt,
-        );
+        )
+        // A categorical covariate value outside the model's levels is refused
+        // (`E_COV_LEVEL_UNKNOWN`'s message, ferx-core #1740) rather than scored as
+        // the reference level.
+        .map_err(|e| format!("npde error: {e}"))?;
 
         // Flatten per-subject NPDE/NPD back to one row per observation. ID and TIME
         // are emitted exactly as `io::output::sdtab` builds them — numeric ID
