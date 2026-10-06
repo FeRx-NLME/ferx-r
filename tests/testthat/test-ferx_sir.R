@@ -354,6 +354,7 @@ expect_same_sir <- function(a, b) {
   expect_identical(a$sir_ci_theta, b$sir_ci_theta)
   expect_identical(a$sir_ci_omega, b$sir_ci_omega)
   expect_identical(a$sir_ci_sigma, b$sir_ci_sigma)
+  expect_identical(a$sir_ci_kappa, b$sir_ci_kappa)
 }
 
 test_that("ferx_sir on an IOV fit reproduces the in-fit SIR draw for draw (#465)", {
@@ -397,6 +398,134 @@ test_that("ferx_sir on a fit without IOV still reproduces the in-fit SIR (#465)"
   expect_null(fit$omega_iov)
 
   expect_same_sir(standalone_sir(fit), fit)
+})
+
+# -- SIR intervals for the IOV kappa variances (ferx-core #1705) --------------
+#
+# The engine reports one interval per kappa variance, in kappa_names order, on
+# both SIR paths; a model with no kappa gets none. R names the rows by
+# kappa_names, as sir_ci_omega is named by eta_names.
+
+test_that("in-fit SIR reports a kappa interval named by kappa_names that brackets the fit (#1705)", {
+  fit <- warfarin_iov_sir_fit()
+  skip_if(is.null(fit$cov_matrix) || is.null(fit$sir_ess), sir_cov_skip)
+  ci <- fit$sir_ci_kappa
+  # Mutation: drop `sir_ci_kappa` from fit_result_to_list() -> NULL here.
+  expect_true(is.matrix(ci))
+  # Mutation: name by position (KAPPA1) instead of kappa_names.
+  expect_identical(dimnames(ci), list(fit$kappa_names, c("lower", "upper")))
+  expect_true(all(is.finite(ci)))
+  kappa <- diag(fit$omega_iov)
+  expect_true(all(ci[, "lower"] <= kappa & kappa <= ci[, "upper"]))
+})
+
+test_that("ferx_sir reports the in-fit kappa interval, and print() shows it (#1705)", {
+  fit <- warfarin_iov_sir_fit()
+  skip_if(is.null(fit$cov_matrix) || is.null(fit$sir_ess), sir_cov_skip)
+  bare <- fit
+  bare$sir_ci_kappa <- NULL
+  # Mutation: drop `sir_ci_kappa` from ferx_rust_sir()'s list, or from
+  # ferx_sir()'s reshape -> NULL, not identical().
+  out <- standalone_sir(bare)
+  expect_identical(out$sir_ci_kappa, fit$sir_ci_kappa)
+
+  printed <- utils::capture.output(print(fit))
+  sir_at <- grep("^SIR", printed)
+  expect_length(sir_at, 1L)
+  expect_true(any(startsWith(
+    printed[-seq_len(sir_at)],
+    sprintf("  %s : [", fit$kappa_names[1L])
+  )))
+})
+
+test_that("sir_ci_kappa rows follow kappa_names, not their position (#1705)", {
+  # Two kappas whose names sort the other way round, so neither a positional
+  # KAPPA<i> label nor a sorted one can pass.
+  ci <- .ferx_sir_ci_kappa(c(0.1, 0.2, 0.3, 0.4), c("KAPPA_V", "KAPPA_CL"))
+  expect_identical(
+    ci,
+    matrix(c(0.1, 0.3, 0.2, 0.4), 2L,
+           dimnames = list(c("KAPPA_V", "KAPPA_CL"), c("lower", "upper")))
+  )
+  # The CLAUDE.md fallback when the names do not line up.
+  expect_identical(rownames(.ferx_sir_ci_kappa(c(0.1, 0.2), character())), "KAPPA1")
+  # No kappa, or no SIR: NULL, never a zero-row matrix.
+  expect_null(.ferx_sir_ci_kappa(numeric(), character()))
+  expect_null(.ferx_sir_ci_kappa(NULL, NULL))
+})
+
+test_that("sir_ci_kappa survives a .fitrx round trip (#1705)", {
+  fit <- warfarin_iov_sir_fit()
+  skip_if(is.null(fit$cov_matrix) || is.null(fit$sir_ess), sir_cov_skip)
+  path <- withr::local_tempfile(fileext = ".fitrx")
+  ferx_save_fit(fit, path)
+  # Mutation: drop `ci_kappa` from .fitrx_build_sir_wire() or from the loader.
+  expect_identical(ferx_load_fit(path)$sir_ci_kappa, fit$sir_ci_kappa)
+})
+
+test_that("a .fitrx written before #1705 loads with no sir_ci_kappa", {
+  fit <- warfarin_iov_sir_fit()
+  skip_if(is.null(fit$cov_matrix) || is.null(fit$sir_ess), sir_cov_skip)
+  path <- withr::local_tempfile(fileext = ".fitrx")
+  ferx_save_fit(fit, path)
+  # Rewrite fit.json without the key, as every older bundle has it.
+  staging <- withr::local_tempdir()
+  utils::unzip(path, exdir = staging)
+  json <- file.path(staging, "fit.json")
+  wire <- jsonlite::read_json(json, simplifyVector = FALSE)
+  expect_false(is.null(wire$sir$ci_kappa))
+  wire$sir$ci_kappa <- NULL
+  jsonlite::write_json(wire, json, auto_unbox = TRUE, digits = NA, null = "null")
+  old <- withr::local_tempfile(fileext = ".fitrx")
+  withr::with_dir(staging, utils::zip(old, list.files(), flags = "-q"))
+
+  loaded <- expect_no_error(ferx_load_fit(old))
+  expect_null(loaded$sir_ci_kappa)
+  # The rest of the SIR block still loads. Not identical(): re-serialising
+  # fit.json through jsonlite moves the last bits of the doubles.
+  expect_equal(loaded$sir_ci_theta, ferx_load_fit(path)$sir_ci_theta,
+               tolerance = 1e-12)
+})
+
+test_that("an IOV SIR bundle from ferx_save_fit() still loads in the engine (#1705)", {
+  # `ci_kappa` is `Option<Vec<(f64, f64)>>` on the engine's SirWire, written
+  # through `.FITRX_ARRAY_OF_ARRAY_KEYS` like the other SIR intervals. The
+  # engine has to accept what R writes for it.
+  fit <- warfarin_iov_sir_fit()
+  skip_if(is.null(fit$cov_matrix) || is.null(fit$sir_ess), sir_cov_skip)
+  bundle <- withr::local_tempfile(fileext = ".fitrx")
+  ferx_save_fit(fit, bundle)
+  ex <- ferx_example("warfarin_iov")
+  model <- withr::local_tempfile(fileext = ".ferx")
+  writeLines(
+    c(readLines(ex$model), "", "[priors]",
+      paste0("  from_fit = ", gsub("/+", "/", normalizePath(bundle)))),
+    model
+  )
+  res <- ferx_model_validate(model, ex$data)
+  expect_true(
+    isTRUE(res$ok),
+    info = paste(utils::capture.output(print(res$diagnostics)), collapse = "\n")
+  )
+})
+
+test_that("a fit without IOV carries no sir_ci_kappa, in memory or on disk (#1705)", {
+  fit <- sir_fit_with_infit_sir("warfarin")
+  skip_if(is.null(fit$cov_matrix) || is.null(fit$sir_ess), sir_cov_skip)
+  # Mutation: an empty interval list turned into a zero-row matrix.
+  expect_false("sir_ci_kappa" %in% names(fit))
+  expect_false("sir_ci_kappa" %in% names(standalone_sir(fit)))
+  path <- withr::local_tempfile(fileext = ".fitrx")
+  ferx_save_fit(fit, path)
+  staging <- withr::local_tempdir()
+  utils::unzip(path, exdir = staging)
+  wire <- jsonlite::read_json(file.path(staging, "fit.json"), simplifyVector = FALSE)
+  expect_false(is.null(wire$sir))
+  # No key at all, as the engine writes it: `read_json` maps `null` and an
+  # absent key alike to NULL, so test the names, not the value.
+  # Mutation: write `"ci_kappa": null` for every fit.
+  expect_false("ci_kappa" %in% names(wire$sir))
+  expect_false("sir_ci_kappa" %in% names(ferx_load_fit(path)))
 })
 
 # Found by the #465 skeleton audit: `ferx_sir()` read `fit$interaction`, a field

@@ -48,6 +48,21 @@
   types
 }
 
+# SIR 95% intervals for the IOV kappa variances (ferx-core #1705), from the
+# flat [lo1, hi1, lo2, hi2, ...] vector the FFI list and a .fitrx bundle both
+# carry, as the (n_kappa, 2) lower/upper matrix the other sir_ci_* fields are.
+# One row per kappa, in kappa_names order; KAPPA<i> rows when the names do not
+# line up. NULL when the model has no kappa, SIR did not run, or the bundle
+# predates #1705.
+.ferx_sir_ci_kappa <- function(v, kappa_names) {
+  v <- as.numeric(unlist(v, use.names = FALSE))
+  if (length(v) == 0L || length(v) %% 2L != 0L) return(NULL)
+  m <- matrix(v, ncol = 2L, byrow = TRUE)
+  rn <- if (length(kappa_names) == nrow(m)) as.character(kappa_names) else paste0("KAPPA", seq_len(nrow(m)))
+  dimnames(m) <- list(rn, c("lower", "upper"))
+  m
+}
+
 # The parenthetical of a kappa row in print.ferx_fit(): the variance read on
 # the scale the kappa enters (ferx-core #1643). Log-normal, or unknown (NA: a
 # fit from before #1643), keeps the exact CV% every row printed before. An
@@ -593,6 +608,7 @@
   sn <- result$sigma_names
   sig_names <- if (!is.null(sn) && length(sn) == length(result$sigma)) sn else paste0("SIGMA(", seq_along(result$sigma), ")")
   result$sir_ci_sigma <- reshape_ci(result$sir_ci_sigma, sig_names)
+  result$sir_ci_kappa <- .ferx_sir_ci_kappa(result$sir_ci_kappa, result$kappa_names)
 
   # Normalize trace_path: NULL/empty means no trace was written
   tp <- result$trace_path

@@ -834,6 +834,10 @@
 #'   \item{sir_ess}{SIR effective sample size (NULL if SIR not run)}
 #'   \item{sir_ci_theta, sir_ci_omega, sir_ci_sigma}{SIR \code{95\%} CI matrices
 #'     with columns \code{lower} and \code{upper} (NULL if SIR not run)}
+#'   \item{sir_ci_kappa}{SIR \code{95\%} CI matrix for the IOV kappa
+#'     variances, one row per kappa named by \code{kappa_names}, columns
+#'     \code{lower} and \code{upper} (NULL if SIR not run or the model has
+#'     no IOV)}
 #'   \item{importance_sampling}{Importance-sampling marginal log-likelihood
 #'     diagnostics, populated only when the method chain ends with an
 #'     \code{"imp"} stage (\code{NULL} otherwise). A list with
@@ -2931,6 +2935,7 @@ print.ferx_fit <- function(x, ...) {
     print_ci(x$sir_ci_theta)
     print_ci(x$sir_ci_omega)
     print_ci(x$sir_ci_sigma)
+    print_ci(x$sir_ci_kappa)
   }
 
   # Importance Sampling marginal log-likelihood (IMP terminal stage)
