@@ -1704,16 +1704,22 @@ fn bind_design_from_fit(
 /// standalone covariance step, which hold no population here. It sizes the
 /// skeleton `FitResult` (theta count, names, FIX flags) and puts the bindings in
 /// its `data_bindings`. The layout is core's `layout_from_fit`, the model half
-/// of `bind_from_fit`: malformed bindings (a repeated label, a split contrast
-/// group, a block the model does not declare) are refused here, before the
-/// skeleton is built. The engine re-binds the re-read data from the skeleton's
-/// bindings before it reads theta (`resolve_fit_inputs`), which is where a
-/// level the fit never observed is refused.
+/// of `bind_from_fit`: malformed bindings (a split contrast group, a recorded
+/// `auto` contrast, a missing block or one the model does not declare) are
+/// refused here, before the skeleton is built. A repeated label never gets
+/// this far: `level_bindings_from_r` refuses it first, naming the R column.
+/// The engine re-binds the re-read data from the skeleton's bindings before it
+/// reads theta (`resolve_fit_inputs`), which is where a level the fit never
+/// observed is refused.
 ///
 /// The empty-bindings check stays in R on purpose, mirroring
 /// `bind_design_from_fit`: core refuses empty bindings on a level model too, but
 /// in its own words, and every from-fit path (predict, simulate, SIR,
-/// covariance) must give the same `no_fit_levels_error` text.
+/// covariance) must give the same `no_fit_levels_error` text. The early `Ok`
+/// keys on the levels half only, which is sound while no R fit carries
+/// covariate statistics. When ferx-r #412 fills that half, this prologue and
+/// `bind_design_from_fit`'s must call core whenever the stats are non-empty,
+/// or core's refusals for them (ferx-core #1686) never reach R.
 fn bind_layout_from_fit(
     parsed: &mut ParsedModel,
     model_path: &str,
