@@ -48,7 +48,7 @@
   sigma need no fitted value and are unaffected. A fitted correlation that
   is not finite or not strictly between -1 and 1 is refused as well.
 
-- **ferx now builds against ferx-core `d234b25c`**, up from the `v0.4.0`
+- **ferx now builds against ferx-core `202bea5e`**, up from the `v0.4.0`
   release (`2a6076af`). These engine changes reach every fit, prediction
   and simulation entry point with no change to the package's own code:
 

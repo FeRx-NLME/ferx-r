@@ -296,7 +296,7 @@ dependencies = [
 [[package]]
 name = "ferx-core"
 version = "0.4.0"
-source = "git+https://github.com/FeRx-NLME/ferx-core?branch=main#d234b25cf82f9a419b0951053b218d5e254ff07e"
+source = "git+https://github.com/FeRx-NLME/ferx-core?branch=main#202bea5e68f9220a932c015369a87620005cf049"
 dependencies = [
  "argmin",
  "argmin-math",
@@ -319,7 +319,7 @@ dependencies = [
 [[package]]
 name = "ferx-tools"
 version = "0.4.0"
-source = "git+https://github.com/FeRx-NLME/ferx-core?branch=main#d234b25cf82f9a419b0951053b218d5e254ff07e"
+source = "git+https://github.com/FeRx-NLME/ferx-core?branch=main#202bea5e68f9220a932c015369a87620005cf049"
 dependencies = [
  "csv",
  "ferx-core",
