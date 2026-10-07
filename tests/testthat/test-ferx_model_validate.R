@@ -471,6 +471,29 @@ test_that("a class-blind tryCatch still sees an ordinary error", {
   )
 })
 
+test_that("a model file gone before the data bind is E_MODEL_REREAD with no block (ferx-core #1743)", {
+  skip_on_os("windows")  # needs a FIFO
+  skip_if(!nzchar(Sys.which("mkfifo")), "mkfifo not available")
+  ex    <- ferx_example("warfarin")
+  dir   <- withr::local_tempdir()
+  model <- file.path(dir, "m.ferx")
+  file.copy(ex$model, model)
+  # The data file is a FIFO, so the writer decides when the read finishes: it
+  # deletes the model while the validator blocks on the pipe, after the parse
+  # and before the re-read the data bind does, then hands over the rows.
+  fifo <- file.path(dir, "data.csv")
+  system2("mkfifo", shQuote(fifo))
+  system(sprintf("(sleep 2; rm %s; cat %s > %s) &",
+                 shQuote(model), shQuote(ex$data), shQuote(fifo)))
+  utils::capture.output(res <- ferx_model_validate(model, fifo))
+  errs <- res$diagnostics[res$diagnostics$severity == "error", ]
+  # Before ferx-core 712cd47b: E_THETA_LEVEL_BINDING on `parameters`, on a
+  # model with no level block.
+  expect_identical(errs$code, "E_MODEL_REREAD")
+  expect_true(is.na(errs$block))
+  expect_match(errs$message, "Failed to re-read the model file", fixed = TRUE)
+})
+
 test_that("ferx_fit() refuses a theta starting outside its declared range", {
   # ferx_model_validate() is advisory; this is the assertion that pins the
   # *breaking* change, because a fit is what a user's script actually runs.

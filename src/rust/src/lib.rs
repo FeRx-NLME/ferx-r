@@ -4928,6 +4928,9 @@ fn fit_skeleton(
 /// @param sir_resamples Number of resamples (m); must be <= M.
 /// @param sir_seed Random seed; pass -1 for the engine default.
 /// @param sir_keep_samples When TRUE, retains the resampled packed parameter vectors.
+/// @param sir_scale The scale SIR's target is flat on: "packed" (the engine
+///   default) or "natural" (ferx-core #1723). Parsed by the engine's own
+///   `[fit_options] sir_scale` reader, so its spellings and refusals apply.
 /// @param verbose When TRUE, the engine prints progress to stderr.
 /// @return Named list with `sir_ess`, `sir_ci_theta`, `sir_ci_omega`, `sir_ci_sigma`,
 ///   `sir_ci_kappa`,
@@ -4957,6 +4960,7 @@ fn ferx_rust_sir(
     sir_resamples: i32,
     sir_seed: i32,
     sir_keep_samples: bool,
+    sir_scale: &str,
     verbose: bool,
     fit_bindings: List,
 ) -> Robj {
@@ -5020,6 +5024,11 @@ fn ferx_rust_sir(
             Some(sir_seed as u64)
         };
         opts.sir_keep_samples = sir_keep_samples;
+        if let Err(e) =
+            ferx_core::parser::model_parser::apply_fit_option(&mut opts, "sir_scale", sir_scale)
+        {
+            return Err(format!("ferx_sir: {e}"));
+        }
         opts.interaction = interaction;
         opts.verbose = verbose;
 

@@ -75,8 +75,8 @@ ferx_rust_npde_from_fit <- function(model_path, data_path, theta, omega_flat, om
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_sir <- function(model_path, data_path, model_hash, data_hash, ofv, ofv_prior, interaction, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, cov_matrix_flat, cov_matrix_dim, eta_hats_flat, subject_ids, sir_samples, sir_resamples, sir_seed, sir_keep_samples, verbose, fit_bindings) {
-  .Call("wrap__ferx_rust_sir", model_path, data_path, model_hash, data_hash, ofv, ofv_prior, interaction, theta, omega_flat, as.integer(omega_dim), sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, cov_matrix_flat, as.integer(cov_matrix_dim), eta_hats_flat, as.character(subject_ids), as.integer(sir_samples), as.integer(sir_resamples), as.integer(sir_seed), sir_keep_samples, verbose, fit_bindings)
+ferx_rust_sir <- function(model_path, data_path, model_hash, data_hash, ofv, ofv_prior, interaction, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, cov_matrix_flat, cov_matrix_dim, eta_hats_flat, subject_ids, sir_samples, sir_resamples, sir_seed, sir_keep_samples, sir_scale, verbose, fit_bindings) {
+  .Call("wrap__ferx_rust_sir", model_path, data_path, model_hash, data_hash, ofv, ofv_prior, interaction, theta, omega_flat, as.integer(omega_dim), sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, cov_matrix_flat, as.integer(cov_matrix_dim), eta_hats_flat, as.character(subject_ids), as.integer(sir_samples), as.integer(sir_resamples), as.integer(sir_seed), sir_keep_samples, sir_scale, verbose, fit_bindings)
 }
 
 #' @title Internal Rust backend binding
