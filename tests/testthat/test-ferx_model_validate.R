@@ -471,7 +471,7 @@ test_that("a class-blind tryCatch still sees an ordinary error", {
   )
 })
 
-test_that("a model file gone before the data bind is E_MODEL_REREAD with no block (ferx-core #1743)", {
+test_that("a model file gone before the data bind is bound from the one read (ferx-core #1752)", {
   skip_on_os("windows")  # needs a FIFO
   skip_if(!nzchar(Sys.which("mkfifo")), "mkfifo not available")
   ex    <- ferx_example("warfarin")
@@ -495,11 +495,12 @@ test_that("a model file gone before the data bind is E_MODEL_REREAD with no bloc
   withr::defer(close(fifo(fifo, "r", blocking = FALSE)))
   utils::capture.output(res <- ferx_model_validate(model, fifo))
   errs <- res$diagnostics[res$diagnostics$severity == "error", ]
-  # Before ferx-core 712cd47b: E_THETA_LEVEL_BINDING on `parameters`, on a
-  # model with no level block.
-  expect_identical(errs$code, "E_MODEL_REREAD")
-  expect_true(is.na(errs$block))
-  expect_match(errs$message, "Failed to re-read the model file", fixed = TRUE)
+  # The check reads the model once and binds the text it parsed, so a model
+  # deleted after that read no longer matters. Before ferx-core 712cd47b this
+  # was E_THETA_LEVEL_BINDING on `parameters`, at 712cd47b E_MODEL_REREAD:
+  # the data bind read the file a second time.
+  expect_identical(errs$code, character(0))
+  expect_true(isTRUE(res$ok))
 })
 
 test_that("ferx_fit() refuses a theta starting outside its declared range", {

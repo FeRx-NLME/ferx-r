@@ -223,14 +223,93 @@ fn panic_message(
 ///
 /// `#[track_caller]` so that a panic carrying no text can still say which of
 /// the 45 entry points it came out of - see `panic_message`.
+///
+/// A refusal `engine_refusal` recorded with a code during this call is handed
+/// on to `RAISED_DIAGNOSTIC` here, and only when its text is the text being
+/// raised; every raise overwrites that slot, so it never outlives the next one.
 #[track_caller]
 fn entry<T>(f: impl FnOnce() -> Result<T, String>) -> T {
+    take_slot(&PENDING_DIAGNOSTIC);
     let msg = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
         Ok(Ok(value)) => return value,
         Ok(Err(msg)) => msg,
         Err(payload) => panic_message(payload, std::panic::Location::caller()),
     };
+    let raised = take_slot(&PENDING_DIAGNOSTIC).filter(|d| d.text == msg);
+    *RAISED_DIAGNOSTIC.lock().unwrap_or_else(|e| e.into_inner()) = raised;
     raise_verbatim(msg)
+}
+
+/// What a refusal carrying ferx-core's own diagnostic code hands R beside its
+/// text (ferx-r #498): the condition `.ferx_engine_error()` builds from it
+/// takes the code from the engine instead of re-validating the model to find
+/// one. `text` is the raised message, byte for byte - R uses the record only
+/// for the condition whose message it is. `message` is that text with the
+/// engine's suggestion left out, which is `suggestion`'s alone.
+#[derive(Clone)]
+struct EngineDiagnostic {
+    text: String,
+    message: String,
+    code: String,
+    block: Option<String>,
+    line: Option<usize>,
+    suggestion: Option<String>,
+}
+
+/// Recorded by `engine_refusal` during an entry point's body.
+static PENDING_DIAGNOSTIC: std::sync::Mutex<Option<EngineDiagnostic>> =
+    std::sync::Mutex::new(None);
+/// The diagnostic of the refusal `entry` last raised, if it carried one;
+/// read and cleared by `ferx_rust_take_engine_diagnostic()`.
+static RAISED_DIAGNOSTIC: std::sync::Mutex<Option<EngineDiagnostic>> =
+    std::sync::Mutex::new(None);
+
+fn take_slot(slot: &std::sync::Mutex<Option<EngineDiagnostic>>) -> Option<EngineDiagnostic> {
+    slot.lock().unwrap_or_else(|e| e.into_inner()).take()
+}
+
+/// The text an entry point raises for an `EngineError` (ferx-core #1746):
+/// `prefix` and the error's `Display`, exactly as when the error was a
+/// `String`. When ferx-core has a code for the refusal, its diagnostic is
+/// recorded for `entry` to hand to R; without one, R re-validates as before.
+fn engine_refusal(prefix: &str, e: ferx_core::EngineError) -> String {
+    let text = format!("{prefix}{e}");
+    if let Some(code) = e.code() {
+        let context = e.context().map(|c| format!("{c}: ")).unwrap_or_default();
+        *PENDING_DIAGNOSTIC.lock().unwrap_or_else(|e| e.into_inner()) = Some(EngineDiagnostic {
+            message: format!("{prefix}{context}{}", e.message()),
+            code: code.to_string(),
+            block: e.block().map(str::to_string),
+            line: e.diagnostic().and_then(|d| d.line),
+            suggestion: e.suggestion().map(str::to_string),
+            text: text.clone(),
+        });
+    }
+    text
+}
+
+/// The diagnostic code ferx-core attached to the refusal the glue raised
+/// last, for `.ferx_engine_error()` (ferx-r #498).
+///
+/// @return `NULL` when that refusal carried no code; otherwise a list with
+///   `text` (the raised message), `message`, `code`, `block`, `line` (0 when
+///   unknown) and `suggestion` (`""` when absent).
+#[extendr]
+fn ferx_rust_take_engine_diagnostic() -> Robj {
+    entry(move || {
+        Ok(match take_slot(&RAISED_DIAGNOSTIC) {
+            None => ().into(),
+            Some(d) => list!(
+                text = d.text,
+                message = d.message,
+                code = d.code,
+                block = d.block.unwrap_or_default(),
+                line = d.line.map_or(0i32, |l| l as i32),
+                suggestion = d.suggestion.unwrap_or_default()
+            )
+            .into(),
+        })
+    })
 }
 
 /// Shadows `extendr_api::prelude::throw_r_error`, which the glob import at the
@@ -663,7 +742,7 @@ fn ferx_rust_simulate(
             &opts,
         ) {
             Ok(o) => o,
-            Err(e) => return Err(format!("Error simulating: {e}")),
+            Err(e) => return Err(engine_refusal("Error simulating: ", e)),
         };
 
         // `output.warnings` already carries the data reader's findings: ferx-core
@@ -776,7 +855,7 @@ fn ferx_rust_simulate_from_fit(
             &opts,
         ) {
             Ok(o) => o,
-            Err(e) => return Err(format!("Error simulating: {e}")),
+            Err(e) => return Err(engine_refusal("Error simulating: ", e)),
         };
         // Reader findings are already in `output.warnings`; see `ferx_rust_simulate`.
         Ok(attach_sim_warnings(
@@ -900,7 +979,7 @@ fn ferx_rust_simulate_adaptive(
                 let warnings = std::mem::take(&mut result.warnings);
                 attach_sim_warnings(adaptive_result_to_list(&result), warnings)
             }
-            Err(e) => return Err(format!("ferx_simulate_adaptive: {e}")),
+            Err(e) => return Err(engine_refusal("ferx_simulate_adaptive: ", e)),
         })
     })
 }
@@ -1139,7 +1218,7 @@ fn ferx_rust_simulate_with_uncertainty(
                 sim_results_to_df(&output.results),
                 output.warnings,
             ),
-            Err(e) => return Err(format!("simulate_with_uncertainty error: {e}")),
+            Err(e) => return Err(engine_refusal("simulate_with_uncertainty error: ", e)),
         })
     })
 }
@@ -1186,7 +1265,7 @@ fn ferx_rust_predict(
         bind_design(&mut parsed, model_path, &mut population)?;
 
         let output = ferx_core::predict_diag(&parsed.model, &population, &parsed.model.default_params)
-            .map_err(|e| format!("Error predicting: {e}"))?;
+            .map_err(|e| engine_refusal("Error predicting: ", e))?;
         let results = &output.results;
 
         let id: Vec<String> = results.iter().map(|r| r.id.clone()).collect();
@@ -1275,7 +1354,7 @@ fn ferx_rust_predict_from_fit(
         };
 
         let output = ferx_core::predict_diag(&parsed.model, &population, &params)
-            .map_err(|e| format!("Error predicting: {e}"))?;
+            .map_err(|e| engine_refusal("Error predicting: ", e))?;
         let results = &output.results;
 
         let id: Vec<String> = results.iter().map(|r| r.id.clone()).collect();
@@ -1358,7 +1437,7 @@ fn ferx_rust_predict_survival(model_path: &str, data_path: &str, times: Vec<f64>
 
         let results =
             ferx_core::predict_survival(&parsed.model, &population, &parsed.model.default_params, &times)
-                .map_err(|e| format!("Error predicting: {e}"))?;
+                .map_err(|e| engine_refusal("Error predicting: ", e))?;
         Ok(survival_results_to_df(&results))
     })
 }
@@ -1433,7 +1512,7 @@ fn ferx_rust_predict_survival_from_fit(
         };
 
         let results = ferx_core::predict_survival(&parsed.model, &population, &params, &times)
-            .map_err(|e| format!("Error predicting: {e}"))?;
+            .map_err(|e| engine_refusal("Error predicting: ", e))?;
         Ok(survival_results_to_df(&results))
     })
 }
@@ -1543,7 +1622,7 @@ fn ferx_rust_npde_from_fit(
         // A categorical covariate value outside the model's levels is refused
         // (`E_COV_LEVEL_UNKNOWN`'s message, ferx-core #1740) rather than scored as
         // the reference level.
-        .map_err(|e| format!("npde error: {e}"))?;
+        .map_err(|e| engine_refusal("npde error: ", e))?;
 
         // Flatten per-subject NPDE/NPD back to one row per observation. ID and TIME
         // are emitted exactly as `io::output::sdtab` builds them — numeric ID
@@ -4535,7 +4614,7 @@ fn ferx_rust_inits_from_nca(model_path: &str, data_path: &str, method: &str) -> 
         };
 
         let suggested = ferx_core::inits_from_nca(&parsed.model, &population, nca_method)
-            .map_err(|e| format!("inits_from_nca: {e}"))?;
+            .map_err(|e| engine_refusal("inits_from_nca: ", e))?;
         let params = &suggested.params;
 
         // Omega as a row-major flattened matrix (same convention as fit_result_to_list).
@@ -5038,7 +5117,7 @@ fn ferx_rust_sir(
         // fires — that is the whole point of having hashes here.
         let new_fit = match ferx_core::run_sir(&fit, None, None, &opts) {
             Ok(f) => f,
-            Err(e) => return Err(format!("ferx_sir: {}", e)),
+            Err(e) => return Err(engine_refusal("ferx_sir: ", e)),
         };
 
         let flatten_ci = |ci: &Option<Vec<(f64, f64)>>| -> Vec<f64> {
@@ -5209,7 +5288,7 @@ fn ferx_rust_covariance(
         // whole point of forwarding the hashes here.
         let new_fit = match ferx_core::run_covariance(&fit, None, None, &opts) {
             Ok(f) => f,
-            Err(e) => return Err(format!("ferx_covariance: {}", e)),
+            Err(e) => return Err(engine_refusal("ferx_covariance: ", e)),
         };
 
         let (cov_matrix_flat, cov_matrix_dim): (Vec<f64>, i32) = match &new_fit.covariance_matrix {
@@ -9864,6 +9943,7 @@ extendr_module! {
     fn ferx_rust_npde_from_fit;
     fn ferx_rust_sir;
     fn ferx_rust_covariance;
+    fn ferx_rust_take_engine_diagnostic;
     fn ferx_rust_autodiff_enabled;
     fn ferx_rust_test_panic;
     fn ferx_rust_known_blocks;

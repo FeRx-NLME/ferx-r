@@ -275,7 +275,9 @@ ferx_sir <- function(fit,
   # so the glue refuses a kappa fit that lacks it (#465).
   iov_args <- .ferx_omega_iov_args(fit)
   binding_args <- .ferx_fit_binding_args(fit)
-  raw <- ferx_rust_sir(
+  # A refusal reaches the caller as `ferx_engine_error` with ferx-core's code
+  # when the engine gave it one (#498); see `.ferx_engine_call()`.
+  raw <- .ferx_engine_call(ferx_rust_sir(
     model_path = model_path,
     data_path = data_path,
     model_hash = model_hash_arg,
@@ -303,11 +305,10 @@ ferx_sir <- function(fit,
     sir_scale = sir_scale,
     verbose = isTRUE(verbose),
     fit_bindings = binding_args$fit_bindings
-  )
+  ), model_path, data_path)
 
-  # All error paths inside `ferx_rust_sir` throw an R condition (via
-  # `throw_r_error`) and never return `NULL`, so we don't need to test
-  # for that here.
+  # All error paths inside `ferx_rust_sir` raise an R condition and never
+  # return `NULL`, so we don't need to test for that here.
 
   # Merge results onto the fit object. Mirrors the post-processing
   # `ferx_fit()` applies to its inline SIR output so downstream code sees

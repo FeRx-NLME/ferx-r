@@ -101,7 +101,7 @@ test_that("the engine's own validation runs before the dataset is read", {
   # instead, which is what says the refusals above were not this one.
   expect_error(ferx_iivsearch(config = write_cfg(
     'base = "model.ferx"', "[space]", 'mfl = "IIV?(@PK, exp)"'
-  )), "read model file")
+  )), "cannot read the model file")
 })
 
 test_that("an inline cutoff reaches the engine, which names it", {

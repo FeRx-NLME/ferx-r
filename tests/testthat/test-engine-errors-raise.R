@@ -199,6 +199,38 @@ test_that("a missing [adaptive_dosing] block is not labelled with the data's dia
   expect_uncoded_refusal(probe, "model has no [adaptive_dosing] block")
 })
 
+# -- The engine's own code, and the fallback when it has none (#498) ----------
+
+test_that("a refusal the engine raises with no code is still classified by re-validation", {
+  # The parse stage is the glue's, not an `EngineError`, so the glue records no
+  # code beside it; `.ferx_engine_error()` falls back to validating the model.
+  ex    <- ferx_example("warfarin")
+  model <- unknown_block_model()
+  tryCatch(ferx:::ferx_rust_predict(model, ex$data), error = function(e) NULL)
+  expect_null(ferx:::ferx_rust_take_engine_diagnostic())
+
+  probe <- engine_error_probe(ferx_predict(model, ex$data))
+  expect_coded_refusal(probe, "Unknown block `[not_a_block]`", "E_UNKNOWN_BLOCK")
+})
+
+test_that("a refusal the engine raises with a code carries it without re-validation", {
+  ex <- ferx_example("warfarin")
+  data <- infusion_into_cmt0_data()
+  raised <- tryCatch(ferx:::ferx_rust_predict(ex$model, data),
+                     error = function(e) conditionMessage(e))
+  d <- ferx:::ferx_rust_take_engine_diagnostic()
+  expect_identical(d$code, "E_DOSE_CMT_NOT_INFUSABLE")
+  expect_identical(charToRaw(d$text), charToRaw(raised))
+
+  # Re-validation is not consulted: with it disabled the code still arrives.
+  local_mocked_bindings(
+    ferx_rust_validate_model = function(...) stop("re-validation was called"),
+    .package = "ferx"
+  )
+  probe <- engine_error_probe(ferx_predict(ex$model, data))
+  expect_coded_refusal(probe, "infusion into compartment 0", "E_DOSE_CMT_NOT_INFUSABLE")
+})
+
 # -- One handler for every entry point ----------------------------------------
 
 test_that("#385's script: a loop over candidate models stops on the refused one", {

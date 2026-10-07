@@ -87,6 +87,12 @@ ferx_rust_covariance <- function(model_path, data_path, model_hash, data_hash, o
 
 #' @title Internal Rust backend binding
 #' @keywords internal
+ferx_rust_take_engine_diagnostic <- function() {
+  .Call("wrap__ferx_rust_take_engine_diagnostic")
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
 ferx_rust_autodiff_enabled <- function() {
   .Call("wrap__ferx_rust_autodiff_enabled")
 }
