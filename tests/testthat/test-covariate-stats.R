@@ -721,6 +721,8 @@ cs_from_fit_paths <- function(data) {
   }
   list(
     predict = grab(ferx_predict(b$sym, data, fit = b$fit)$PRED),
+    simulate = grab(ferx_simulate(b$sym, data, fit = b$fit, n_sim = 1L,
+                                  seed = 3L)$IPRED),
     npde = grab(ferx_calc_npde(b$fit, nsim = 20L, seed = 5L, model = b$sym,
                                data = data)$sdtab$NPDE),
     covariance = grab(ferx_covariance(fit)$se_theta),
@@ -743,6 +745,84 @@ test_that("C13a: from-fit predict / npde / covariance / SIR refuse a level the f
     expect_match(msg, "The fit estimated no", fixed = TRUE, info = k)
     expect_no_match(msg, "levels = auto", fixed = TRUE, info = k)
   }
+})
+
+# Every one of those refusals carries the engine's own code (#498). Re-validating
+# the model and data could not supply it: without the fit, validation sees the
+# symbolic `levels = auto` relation read the recoded data and has no unknown
+# level to report. Reddened by a glue that formats the `EngineError` to text
+# and drops its code (C13a still passes there).
+test_that("C13d: from-fit predict / simulate / npde / covariance / SIR carry E_COV_LEVEL_UNKNOWN", {
+  got <- cs_from_fit_paths(cs_recoded(4))
+  for (k in names(got)) {
+    e <- got[[k]]
+    expect_s3_class(e, "ferx_engine_error")
+    expect_identical(e$code, "E_COV_LEVEL_UNKNOWN", info = k)
+    expect_identical(e$block, "covariate_model", info = k)
+    msg <- if (inherits(e, "condition")) conditionMessage(e) else ""
+    expect_match(msg, "[E_COV_LEVEL_UNKNOWN]", fixed = TRUE, info = k)
+    expect_identical(lengths(regmatches(msg, gregexpr("The fit estimated no", msg,
+                                                      fixed = TRUE))),
+                     1L, info = k)
+  }
+})
+
+# The code travels beside the raised text, not inside it, and is handed over
+# once: a refusal raised after it, with no code of its own, does not inherit it.
+#
+# Two gates keep a code from reaching the wrong refusal, and each is tested
+# alone, through the raw glue so that nothing in R takes the record first:
+# `entry()` overwrites the record on every raise (C13e), and R uses a record
+# only for the condition whose message is its text (C13f).
+
+# The raw glue's from-fit predict on the recoded design: a coded refusal whose
+# record nobody takes. Returns the raised text.
+cs_raise_coded <- function(data) {
+  b <- cs_categorical()
+  args <- ferx:::.ferx_fit_binding_args(b$fit)
+  tryCatch(
+    ferx:::ferx_rust_predict_from_fit(
+      b$sym, data, as.numeric(b$fit$theta), as.numeric(t(b$fit$omega)),
+      nrow(b$fit$omega), as.numeric(b$fit$sigma), numeric(0), 0L, numeric(0),
+      args$fit_bindings
+    ),
+    error = function(e) conditionMessage(e)
+  )
+}
+
+test_that("C13e: a coded refusal's record is the glue's, and does not outlive the next refusal", {
+  data <- cs_recoded(4)
+  raised <- cs_raise_coded(data)
+  d <- ferx:::ferx_rust_take_engine_diagnostic()
+  expect_identical(charToRaw(d$text), charToRaw(raised))
+  expect_identical(d$code, "E_COV_LEVEL_UNKNOWN")
+  expect_identical(d$block, "covariate_model")
+  # Taken once.
+  expect_null(ferx:::ferx_rust_take_engine_diagnostic())
+
+  # Left untaken, it is overwritten by the next refusal the glue raises, which
+  # has no code: the TTE simulation with no horizon.
+  cs_raise_coded(data)
+  ex <- ferx_example("pktte_joint")
+  uncoded <- tryCatch(ferx:::ferx_rust_simulate(ex$model, ex$data, 1L, 1L, "none", NaN),
+                      error = function(e) conditionMessage(e))
+  expect_match(uncoded, "requires a finite, positive administrative horizon",
+               fixed = TRUE)
+  expect_null(ferx:::ferx_rust_take_engine_diagnostic())
+})
+
+test_that("C13f: a coded record is not attached to a condition whose text is not its own", {
+  b <- cs_categorical()
+  data <- cs_recoded(4)
+  cs_raise_coded(data)
+  # An error the glue never raised, so `entry()` never replaced the record.
+  e <- tryCatch(
+    ferx:::.ferx_engine_call(stop("some other refusal"), b$sym, data),
+    error = function(e) e
+  )
+  expect_false(inherits(e, "ferx_engine_error"))
+  expect_null(e$code)
+  expect_identical(conditionMessage(e), "some other refusal")
 })
 
 test_that("C13b: the same paths run on the twin recoded to the reference level", {

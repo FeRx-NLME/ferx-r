@@ -87,11 +87,18 @@
     the fit, so the warnings describe the intervals it returns; the
     `SIR requested` and `SIR fallback` lines stay. See the new `sir_scale`
     under New features.
-  - **A model file that disappears while `ferx_model_validate(model, data)`
-    runs is reported as `E_MODEL_REREAD`**, with no block
-    ([ferx-core #1743](https://github.com/FeRx-NLME/ferx-core/issues/1743)).
-    It used to be `E_THETA_LEVEL_BINDING` on `parameters`, even for a model
-    with no level block.
+  - **Every entry point reads the model file once**
+    ([ferx-core #1743](https://github.com/FeRx-NLME/ferx-core/issues/1743),
+    [#1752](https://github.com/FeRx-NLME/ferx-core/issues/1752)). A fit,
+    `ferx_model_validate(model, data)` and the search tools used to parse the
+    file and then read it again to bind it to the data, so an edit made
+    meanwhile could bind a different version than the one parsed. A model
+    file that disappeared in between was reported as `E_THETA_LEVEL_BINDING`
+    on `parameters`, even for a model with no level block; now the text that
+    was parsed is the text bound. The search tools (`ferx_amd()`,
+    `ferx_iivsearch()`, etc.) report a base model they cannot read as
+    `cannot read the model file <path>: <reason>` (it was `Failed to read
+    model file`).
 
   - **A categorical covariate value outside its `[covariate_model]`
     relation's levels is now refused by `ferx_predict()`,
@@ -106,9 +113,9 @@
     used with `fit =`), drop or recode those rows or refit; on levels
     written out in the model, add the value to `levels = [...]`, use
     `levels = auto`, or drop or recode the rows. A missing value is still
-    allowed. Without `fit`, the error is a `ferx_engine_error` with code
-    `E_COV_LEVEL_UNKNOWN`. With `fit`, it is a plain error carrying the same
-    message, because the code is not yet attached on the from-fit paths.
+    allowed. With or without `fit`, the error is a `ferx_engine_error` with
+    code `E_COV_LEVEL_UNKNOWN` (on the from-fit paths since
+    [#498](https://github.com/FeRx-NLME/ferx-r/issues/498); see New features).
     The refusal text also changed for `ferx_fit()` and `ferx_simulate()`: it
     now reads "has levels ... but `GRP` takes [4.0] in this data", not
     "declares levels ... also takes".
@@ -413,6 +420,21 @@
 
 ## New features
 
+- **Engine refusals from prediction, simulation, NPDE, `ferx_sir()` and
+  `ferx_covariance()` now carry ferx-core's own diagnostic code** (e.g.
+  `E_COV_LEVEL_UNKNOWN`) on the `ferx_engine_error` condition, including on
+  designs bound from a fit
+  ([#498](https://github.com/FeRx-NLME/ferx-r/issues/498),
+  [ferx-core #1746](https://github.com/FeRx-NLME/ferx-core/issues/1746)).
+  The code used to be recovered by re-validating the model and data, which
+  could not see a from-fit design and left those refusals uncoded. A refusal
+  the engine gives no code still goes through re-validation, as does a theta
+  level-block refusal until
+  [ferx-core #1773](https://github.com/FeRx-NLME/ferx-core/issues/1773).
+  `ferx_sir()` and `ferx_covariance()` refusals are now classified like the
+  other entry points': the engine's code when it gives one, otherwise
+  re-validation of the model and data.
+
 - **`sir_scale` chooses the scale SIR's target is flat on**
   ([ferx-core #1723](https://github.com/FeRx-NLME/ferx-core/issues/1723)):
   `ferx_sir(fit, sir_scale = "natural")`, or
@@ -555,6 +577,15 @@
   MBMA data is licensed CC BY-NC.
 
 ## Bug fixes
+
+- **`ferx_sir()` and `ferx_covariance()` refuse a `[mixture]` fit with
+  per-class `omega(k)` / `sigma(k)` overrides by name**
+  ([ferx-core #1704](https://github.com/FeRx-NLME/ferx-core/issues/1704),
+  [#1765](https://github.com/FeRx-NLME/ferx-core/issues/1765)). The fit R
+  hands the engine carries no fitted override values. With it, `ferx_sir()`
+  used to stop on a covariance dimension mismatch and `ferx_covariance()`
+  returned no matrix. Both now stop with an error that names the overrides.
+  The in-fit covariance step and SIR of `ferx_fit()` are unaffected.
 
 - **`ferx_covariance()` refuses a `kappa` fit that has lost its kappa
   matrix** ([#473](https://github.com/FeRx-NLME/ferx-r/issues/473)). With

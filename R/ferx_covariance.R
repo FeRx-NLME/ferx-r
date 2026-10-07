@@ -194,7 +194,9 @@ ferx_covariance <- function(fit,
   iov_args <- .ferx_omega_iov_args(fit)
 
   binding_args <- .ferx_fit_binding_args(fit)
-  raw <- ferx_rust_covariance(
+  # A refusal reaches the caller as `ferx_engine_error` with ferx-core's code
+  # when the engine gave it one (#498); see `.ferx_engine_call()`.
+  raw <- .ferx_engine_call(ferx_rust_covariance(
     model_path = model_path,
     data_path = data_path,
     model_hash = model_hash_arg,
@@ -215,10 +217,10 @@ ferx_covariance <- function(fit,
     mu_referencing = isTRUE(mu_referencing),
     verbose = isTRUE(verbose),
     fit_bindings = binding_args$fit_bindings
-  )
+  ), model_path, data_path)
 
-  # All error paths inside `ferx_rust_covariance` throw an R condition (via
-  # `throw_r_error`) and never return `NULL`, so we don't test for that here.
+  # All error paths inside `ferx_rust_covariance` raise an R condition and
+  # never return `NULL`, so we don't test for that here.
 
   # --- Merge the refreshed covariance fields onto the fit --------------------
   # The reshaping mirrors the covariance block in ferx_fit()'s post-processing,

@@ -200,7 +200,9 @@ ferx_model_validate <- function(path, data = NULL) {
 # unchanged when no diagnostic can be tied to the failure.
 #
 # Only the failure path pays for the extra validation pass; a fit that runs
-# never calls this.
+# never calls this. Nor does a refusal that already carries ferx-core's code
+# (#498, `.ferx_engine_coded_error()`): the validation pass is the fallback for
+# the ones that do not - `ferx_fit()`'s, and an uncoded one from elsewhere.
 #
 # `fallback_stages`: the single-error fallback below labels a failure with the
 # one error validation found, without a text match. `NULL` allows it for any
@@ -209,6 +211,8 @@ ferx_model_validate <- function(path, data = NULL) {
 # may apply to; see `.ferx_engine_call()`.
 .ferx_engine_error <- function(e, model, data, fallback_stages = NULL) {
   msg  <- conditionMessage(e)
+  coded <- .ferx_engine_coded_error(e, msg)
+  if (!is.null(coded)) return(coded)
   diag <- tryCatch(
     .ferx_diagnostics_frame(ferx_rust_validate_model(
       normalizePath(model),
@@ -252,6 +256,37 @@ ferx_model_validate <- function(path, data = NULL) {
       block      = errs$block[i],
       line       = errs$line[i],
       suggestion = errs$suggestion[i]
+    )
+  )
+}
+
+# The condition for a refusal ferx-core raised with its own diagnostic code
+# (ferx-r #498), or NULL when it carried none and `.ferx_engine_error()` has to
+# re-validate to find one. Since ferx-core #1746 the prediction, simulation,
+# NPDE, SIR and covariance entry points return the `Diagnostic` `ferx check`
+# reports for the same refusal; the glue keeps it beside the text it raised.
+# The record is used only for the condition whose message is that text, byte
+# for byte, so a refusal the glue raised without a code never borrows the
+# previous one's.
+#
+# The message is the raised text, as on the re-validation path: the engine's
+# prose verbatim, then the code. In the one refusal whose text folds the
+# suggestion in (ferx-core `EngineError::with_suggestion_in_display`) the
+# advice is therefore in both the message and `suggestion`. The record's
+# `message` (the text without the suggestion) is kept for #504, which shows
+# the suggestion in the message without saying it twice.
+.ferx_engine_coded_error <- function(e, msg) {
+  d <- tryCatch(ferx_rust_take_engine_diagnostic(), error = function(...) NULL)
+  if (is.null(d) || !identical(charToRaw(d$text), charToRaw(msg))) return(NULL)
+  structure(
+    class = c("ferx_engine_error", "error", "condition"),
+    list(
+      message    = sprintf("%s [%s]", msg, d$code),
+      call       = conditionCall(e),
+      code       = d$code,
+      block      = if (nzchar(d$block)) d$block else NA_character_,
+      line       = if (d$line == 0L) NA_integer_ else d$line,
+      suggestion = if (nzchar(d$suggestion)) d$suggestion else NA_character_
     )
   )
 }

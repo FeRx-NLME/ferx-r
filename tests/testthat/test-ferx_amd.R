@@ -112,7 +112,7 @@ test_that("the engine's own validation runs before the dataset is read", {
   # one.
   expect_error(ferx_amd(config = write_cfg(
     'base = "model.ferx"', "[space]", 'mfl = "IIV?(@PK, exp)"'
-  )), "read model file")
+  )), "cannot read the model file")
 })
 
 # -- The plan ----------------------------------------------------------------
