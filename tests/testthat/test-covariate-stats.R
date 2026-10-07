@@ -723,7 +723,7 @@ cs_from_fit_paths <- function(data) {
     predict = grab(ferx_predict(b$sym, data, fit = b$fit)$PRED),
     simulate = grab(ferx_simulate(b$sym, data, fit = b$fit, n_sim = 1L,
                                   seed = 3L)$IPRED),
-    npde =grab(ferx_calc_npde(b$fit, nsim = 20L, seed = 5L, model = b$sym,
+    npde = grab(ferx_calc_npde(b$fit, nsim = 20L, seed = 5L, model = b$sym,
                                data = data)$sdtab$NPDE),
     covariance = grab(ferx_covariance(fit)$se_theta),
     sir = grab(ferx_sir(fit, sir_samples = 20L, sir_resamples = 10L,
