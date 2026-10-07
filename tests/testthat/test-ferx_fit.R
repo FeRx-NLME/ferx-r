@@ -3449,6 +3449,9 @@ test_that("warfarin_iov FOCE matches NONMEM METHOD=1 (ferx-core #1747)", {
   fit <- ferx_fit(ex$model, ex$data, method = "foce", verbose = FALSE)
   expect_identical(fit$method, "FOCE")
   expect_lt(abs(fit$ofv - 205.0905379), 0.01)
-  expect_equal(unname(fit$theta), c(0.315410, 8.38248, 2.64431),
-               tolerance = 0.005)
+  # Each theta to 0.5 %: expect_equal()'s tolerance is the mean relative
+  # difference over the vector, which TVV dominates (TVCL 14 % off passes it).
+  # Today's worst is TVKA at 0.18 %; the old pin's is TVKA at 6.3 %.
+  rel <- abs(unname(fit$theta) / c(0.315410, 8.38248, 2.64431) - 1)
+  expect_lt(max(rel), 0.005)
 })

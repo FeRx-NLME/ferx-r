@@ -481,10 +481,18 @@ test_that("a model file gone before the data bind is E_MODEL_REREAD with no bloc
   # The data file is a FIFO, so the writer decides when the read finishes: it
   # deletes the model while the validator blocks on the pipe, after the parse
   # and before the re-read the data bind does, then hands over the rows.
+  # Assumption: the model parse finishes within the writer's 2 s sleep (it
+  # takes milliseconds); a slower parse would see the model already gone.
   fifo <- file.path(dir, "data.csv")
   system2("mkfifo", shQuote(fifo))
   system(sprintf("(sleep 2; rm %s; cat %s > %s) &",
                  shQuote(model), shQuote(ex$data), shQuote(fifo)))
+  # Bounded unblockers, so a broken validator fails this test rather than
+  # hanging the suite or outliving it. A reader that opens the FIFO a second
+  # time gets EOF after 30 s; on exit, a non-blocking read-open releases a
+  # writer still waiting in open() because the validator never read the pipe.
+  system(sprintf("(sleep 30; : <> %s) 2>/dev/null &", shQuote(fifo)))
+  withr::defer(close(fifo(fifo, "r", blocking = FALSE)))
   utils::capture.output(res <- ferx_model_validate(model, fifo))
   errs <- res$diagnostics[res$diagnostics$severity == "error", ]
   # Before ferx-core 712cd47b: E_THETA_LEVEL_BINDING on `parameters`, on a
