@@ -10,8 +10,8 @@ ferx_sir(
   sir_resamples = 250L,
   sir_seed = NULL,
   sir_keep_samples = FALSE,
-  sir_scale = c("packed", "natural"),
-  verbose = FALSE
+  verbose = FALSE,
+  sir_scale = c("packed", "natural")
 )
 }
 \arguments{
@@ -33,6 +33,9 @@ parameter vectors on the returned fit. Required for
 \code{\link[=ferx_simulate_with_uncertainty]{ferx_simulate_with_uncertainty()}} with \code{method = "sir"}. Default
 \code{FALSE}.}
 
+\item{verbose}{When \code{TRUE}, the engine prints progress to stderr.
+Default \code{FALSE}.}
+
 \item{sir_scale}{The parameter scale SIR's importance-sampling target is
 flat on (ferx-core #1723). \code{"packed"} (the default, and the only scale
 before ferx-core #1723) is flat on the optimizer's packed scale (log-sd
@@ -46,9 +49,6 @@ a model with \code{prior(...)}. The same option is
 \code{settings = list(sir_scale = ...)} in \code{\link[=ferx_fit]{ferx_fit()}} and \code{sir_scale} in the
 model's \verb{[fit_options]}; this argument does not read the model file's
 value.}
-
-\item{verbose}{When \code{TRUE}, the engine prints progress to stderr.
-Default \code{FALSE}.}
 }
 \value{
 The input \code{fit}, augmented with \code{sir_ess}, \code{sir_ci_theta},

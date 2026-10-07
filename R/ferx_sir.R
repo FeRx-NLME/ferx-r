@@ -52,6 +52,8 @@
 #'   parameter vectors on the returned fit. Required for
 #'   [ferx_simulate_with_uncertainty()] with `method = "sir"`. Default
 #'   `FALSE`.
+#' @param verbose When `TRUE`, the engine prints progress to stderr.
+#'   Default `FALSE`.
 #' @param sir_scale The parameter scale SIR's importance-sampling target is
 #'   flat on (ferx-core #1723). `"packed"` (the default, and the only scale
 #'   before ferx-core #1723) is flat on the optimizer's packed scale (log-sd
@@ -65,8 +67,6 @@
 #'   `settings = list(sir_scale = ...)` in [ferx_fit()] and `sir_scale` in the
 #'   model's `[fit_options]`; this argument does not read the model file's
 #'   value.
-#' @param verbose When `TRUE`, the engine prints progress to stderr.
-#'   Default `FALSE`.
 #'
 #' @return The input `fit`, augmented with `sir_ess`, `sir_ci_theta`,
 #'   `sir_ci_omega`, `sir_ci_sigma`, `sir_ci_kappa` (one row per IOV kappa
@@ -135,8 +135,8 @@ ferx_sir <- function(fit,
                      sir_resamples = 250L,
                      sir_seed = NULL,
                      sir_keep_samples = FALSE,
-                     sir_scale = c("packed", "natural"),
-                     verbose = FALSE) {
+                     verbose = FALSE,
+                     sir_scale = c("packed", "natural")) {
   if (!inherits(fit, "ferx_fit")) {
     stop("`fit` must be a ferx_fit object (from ferx_fit() or ferx_load_fit()).")
   }
