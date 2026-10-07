@@ -769,11 +769,18 @@ test_that("C13d: from-fit predict / simulate / npde / covariance / SIR carry E_C
 
 # The code travels beside the raised text, not inside it, and is handed over
 # once: a refusal raised after it, with no code of its own, does not inherit it.
-test_that("C13e: a coded refusal's record is the glue's, and does not outlive the next refusal", {
+#
+# Two gates keep a code from reaching the wrong refusal, and each is tested
+# alone, through the raw glue so that nothing in R takes the record first:
+# `entry()` overwrites the record on every raise (C13e), and R uses a record
+# only for the condition whose message is its text (C13f).
+
+# The raw glue's from-fit predict on the recoded design: a coded refusal whose
+# record nobody takes. Returns the raised text.
+cs_raise_coded <- function(data) {
   b <- cs_categorical()
-  data <- cs_recoded(4)
   args <- ferx:::.ferx_fit_binding_args(b$fit)
-  raised <- tryCatch(
+  tryCatch(
     ferx:::ferx_rust_predict_from_fit(
       b$sym, data, as.numeric(b$fit$theta), as.numeric(t(b$fit$omega)),
       nrow(b$fit$omega), as.numeric(b$fit$sigma), numeric(0), 0L, numeric(0),
@@ -781,6 +788,11 @@ test_that("C13e: a coded refusal's record is the glue's, and does not outlive th
     ),
     error = function(e) conditionMessage(e)
   )
+}
+
+test_that("C13e: a coded refusal's record is the glue's, and does not outlive the next refusal", {
+  data <- cs_recoded(4)
+  raised <- cs_raise_coded(data)
   d <- ferx:::ferx_rust_take_engine_diagnostic()
   expect_identical(charToRaw(d$text), charToRaw(raised))
   expect_identical(d$code, "E_COV_LEVEL_UNKNOWN")
@@ -788,22 +800,29 @@ test_that("C13e: a coded refusal's record is the glue's, and does not outlive th
   # Taken once.
   expect_null(ferx:::ferx_rust_take_engine_diagnostic())
 
-  # Left untaken, it is overwritten by the next refusal, which has no code.
-  tryCatch(
-    ferx:::ferx_rust_predict_from_fit(
-      b$sym, data, as.numeric(b$fit$theta), as.numeric(t(b$fit$omega)),
-      nrow(b$fit$omega), as.numeric(b$fit$sigma), numeric(0), 0L, numeric(0),
-      args$fit_bindings
-    ),
-    error = function(e) NULL
-  )
+  # Left untaken, it is overwritten by the next refusal the glue raises, which
+  # has no code: the TTE simulation with no horizon.
+  cs_raise_coded(data)
   ex <- ferx_example("pktte_joint")
-  e <- tryCatch(ferx_simulate(ex$model, ex$data, n_sim = 1L, seed = 1L),
-                error = function(e) e)
-  expect_false(inherits(e, "ferx_engine_error"))
-  expect_match(conditionMessage(e),
-               "requires a finite, positive administrative horizon", fixed = TRUE)
+  uncoded <- tryCatch(ferx:::ferx_rust_simulate(ex$model, ex$data, 1L, 1L, "none", NaN),
+                      error = function(e) conditionMessage(e))
+  expect_match(uncoded, "requires a finite, positive administrative horizon",
+               fixed = TRUE)
   expect_null(ferx:::ferx_rust_take_engine_diagnostic())
+})
+
+test_that("C13f: a coded record is not attached to a condition whose text is not its own", {
+  b <- cs_categorical()
+  data <- cs_recoded(4)
+  cs_raise_coded(data)
+  # An error the glue never raised, so `entry()` never replaced the record.
+  e <- tryCatch(
+    ferx:::.ferx_engine_call(stop("some other refusal"), b$sym, data),
+    error = function(e) e
+  )
+  expect_false(inherits(e, "ferx_engine_error"))
+  expect_null(e$code)
+  expect_identical(conditionMessage(e), "some other refusal")
 })
 
 test_that("C13b: the same paths run on the twin recoded to the reference level", {
