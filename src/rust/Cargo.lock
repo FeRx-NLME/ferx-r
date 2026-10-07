@@ -225,9 +225,9 @@ dependencies = [
 
 [[package]]
 name = "either"
-version = "1.18.0"
+version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "252afb9ae5eaa683babdc6a068b3f5726eb19e05070c731f9b2a23a7c3e8ed34"
+checksum = "0e9c71c2167ca323c882b99918929403426e2373ea17242ff5653e0d5e1058be"
 
 [[package]]
 name = "equivalent"
@@ -296,7 +296,7 @@ dependencies = [
 [[package]]
 name = "ferx-core"
 version = "0.4.0"
-source = "git+https://github.com/FeRx-NLME/ferx-core?branch=main#53133688d7e7a28132c8f9e21681e5df6cd23949"
+source = "git+https://github.com/FeRx-NLME/ferx-core?branch=main#712cd47b2ac36afde5af6017e6794fcac2b172b2"
 dependencies = [
  "argmin",
  "argmin-math",
@@ -319,7 +319,7 @@ dependencies = [
 [[package]]
 name = "ferx-tools"
 version = "0.4.0"
-source = "git+https://github.com/FeRx-NLME/ferx-core?branch=main#53133688d7e7a28132c8f9e21681e5df6cd23949"
+source = "git+https://github.com/FeRx-NLME/ferx-core?branch=main#712cd47b2ac36afde5af6017e6794fcac2b172b2"
 dependencies = [
  "csv",
  "ferx-core",
@@ -1163,18 +1163,18 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "zerocopy"
-version = "0.8.60"
+version = "0.8.61"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6400fc4bb7426f6faac3fb07566122bb18622e3022bd2c36426a92ed489b1dbe"
+checksum = "879fb705ce98c32e41ebdb970fbe1204f8492423b314c6ab0354c3e7b5542866"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.60"
+version = "0.8.61"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "99c27cc7525bad4df59a45e073c45b2c2aa820efb588234cc23a547ec69a34db"
+checksum = "708882a28301d604fa039cc7727607a98d04c4b86dc76ec9cc683f805d709759"
 dependencies = [
  "proc-macro2",
  "quote",

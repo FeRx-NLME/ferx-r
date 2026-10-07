@@ -48,11 +48,50 @@
   sigma need no fitted value and are unaffected. A fitted correlation that
   is not finite or not strictly between -1 and 1 is refused as well.
 
-- **ferx now builds against ferx-core `53133688`**, up from the `v0.4.0`
+- **ferx now builds against ferx-core `712cd47b`**, up from the `v0.4.0`
   release (`2a6076af`). These engine changes reach every fit, prediction
   and simulation entry point. The package's own code is unchanged, except
   that `ferx_calc_npde()` now passes on the engine's refusal of an unseen
-  categorical level (below):
+  categorical level, and `ferx_sir()` takes the new `sir_scale` (both
+  below):
+
+  - **`method = "foce"` estimates and OFV change: refit your FOCE models**
+    ([ferx-core #1722](https://github.com/FeRx-NLME/ferx-core/issues/1722)).
+    Non-interaction FOCE now finds each subject's EBEs with the residual
+    variance held at the population prediction f(eta = 0), as NONMEM
+    `METHOD=1` without `INTER` does. Before, a FOCE fit with proportional or
+    combined error scored that variance at the individual prediction during
+    the EBE search, so its EBEs, OFV and estimates disagreed with NONMEM. On
+    `warfarin_iov` with `method = "foce"` the OFV moves from 203.5575 to
+    205.0903, against NONMEM 7.6.0's 205.0905, and TVCL / TVKA from
+    0.3227 / 2.476 to 0.3157 / 2.640 (NONMEM 0.3154 / 2.644). FOCE
+    estimates, EBEs, `CWRES`, standard errors and SIR intervals all move for
+    these error models, as does anything else run with
+    `interaction = false`. Additive error and FOCEI are unchanged (the
+    `warfarin_iov` FOCEI fit is identical to the last digit). A FOCE fit with
+    proportional or combined error now computes its covariance step by
+    finite differences instead of the analytic Hessian. A saved FOCE fit
+    keeps its old numbers until it is refit.
+  - **SIR now warns when its effective sample size is below 100**
+    ([ferx-core #1723](https://github.com/FeRx-NLME/ferx-core/issues/1723)),
+    instead of returning intervals silently. The `SIR:` warning lands in
+    `fit$warnings` and in `fit$warnings_structured` (category `sir`), from
+    `sir = TRUE` and from `ferx_sir()`. It names the draw the intervals
+    hinge on and every Omega / kappa variance the data do not bound away
+    from zero, whose SIR lower limit then reflects the parameter box rather
+    than the data. `warfarin_iov` fitted with FOCEI and `sir = TRUE`
+    (`sir_seed = 7`) now warns at ESS 14.9 of 1000 draws and names
+    `ETA_KA`. The bundled `mbma_placebo` example does not warn (ESS 342 of
+    1000 with `sir_seed = 7`, 209 with the default seed). `ferx_sir()` now
+    replaces the `SIR:` and `SIR failed:` lines an earlier SIR run left on
+    the fit, so the warnings describe the intervals it returns; the
+    `SIR requested` and `SIR fallback` lines stay. See the new `sir_scale`
+    under New features.
+  - **A model file that disappears while `ferx_model_validate(model, data)`
+    runs is reported as `E_MODEL_REREAD`**, with no block
+    ([ferx-core #1743](https://github.com/FeRx-NLME/ferx-core/issues/1743)).
+    It used to be `E_THETA_LEVEL_BINDING` on `parameters`, even for a model
+    with no level block.
 
   - **A categorical covariate value outside its `[covariate_model]`
     relation's levels is now refused by `ferx_predict()`,
@@ -373,6 +412,20 @@
     documentation, changelog tooling and CI.
 
 ## New features
+
+- **`sir_scale` chooses the scale SIR's target is flat on**
+  ([ferx-core #1723](https://github.com/FeRx-NLME/ferx-core/issues/1723)):
+  `ferx_sir(fit, sir_scale = "natural")`, or
+  `ferx_fit(..., sir = TRUE, settings = list(sir_scale = "natural"))`, or
+  `sir_scale = natural` in `[fit_options]`. `"packed"` stays the default.
+  `"natural"` is the PsN SIR convention: flat on the reported scale, so the
+  lower limit of a variance the data cannot bound away from zero no longer
+  tracks the parameter box, at the cost of a heavy upper tail for a variance
+  informed by few groups. On `warfarin_iov` fitted with FOCEI
+  (`sir_seed = 7`) the ESS goes from 14.9 to 276 of 1000 draws, and the
+  `ETA_KA` interval from [0.00033, 0.096] to [0.0031, 0.32]. It is refused
+  for a model with `prior(...)`. Any other value is an error.
+  `ferx_sir()` does not read the model file's `sir_scale`; pass it.
 
 - **`[covariate_model]` relations with a data-derived centre
   (`center = median`, `ref = mode`, `levels = auto`) can be fitted,

@@ -3436,3 +3436,22 @@ test_that("ferx_fit() on an n_eta = 0 model (binary logistic) returns cleanly", 
   expect_identical(nrow(fit$omega), 0L)
   expect_length(fit$theta, 3L)   # TH0, THX, THT; no etas, no sigmas
 })
+
+# Non-interaction FOCE holds the residual variance at f(eta = 0) during the EBE
+# search, as NONMEM METHOD=1 without INTER does (ferx-core #1722, PR #1747).
+# Reference: NONMEM 7.6.0 on the same model and data,
+# ferx-core nonmem_anchor/results/foce_ebe_freeze_iov.ext (OFV 205.0905379,
+# TVCL 0.315410, TVV 8.38248, TVKA 2.64431). ferx's own optimum sits at
+# 205.0903; the pin before ferx-core 712cd47b gave 203.5575 (TVCL 0.3227,
+# TVKA 2.476), which this test rejects.
+test_that("warfarin_iov FOCE matches NONMEM METHOD=1 (ferx-core #1747)", {
+  ex  <- ferx_example("warfarin_iov")
+  fit <- ferx_fit(ex$model, ex$data, method = "foce", verbose = FALSE)
+  expect_identical(fit$method, "FOCE")
+  expect_lt(abs(fit$ofv - 205.0905379), 0.01)
+  # Each theta to 0.5 %: expect_equal()'s tolerance is the mean relative
+  # difference over the vector, which TVV dominates (TVCL 14 % off passes it).
+  # Today's worst is TVKA at 0.18 %; the old pin's is TVKA at 6.3 %.
+  rel <- abs(unname(fit$theta) / c(0.315410, 8.38248, 2.64431) - 1)
+  expect_lt(max(rel), 0.005)
+})

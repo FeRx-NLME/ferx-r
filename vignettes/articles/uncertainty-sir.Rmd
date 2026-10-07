@@ -172,7 +172,9 @@ To propagate the SIR resamples into a simulation, retain them with
 `sir_keep_samples = TRUE` and pass the fit to
 `ferx_simulate_with_uncertainty()` with `method = "sir"`. Calling
 `ferx_sir()` a second time overwrites the previous SIR fields with fresh
-resampling - it does not accumulate across calls:
+resampling - it does not accumulate across calls. Its `SIR:` warnings
+(such as the low-ESS warning below an effective sample size of 100) replace
+the earlier run's too, so `fit$warnings` describes the intervals on the fit:
 
 ```{r sir-simulate, eval = FALSE}
 fit <- ferx_sir(fit,

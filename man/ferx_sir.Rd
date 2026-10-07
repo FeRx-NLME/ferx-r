@@ -10,7 +10,8 @@ ferx_sir(
   sir_resamples = 250L,
   sir_seed = NULL,
   sir_keep_samples = FALSE,
-  verbose = FALSE
+  verbose = FALSE,
+  sir_scale = c("packed", "natural")
 )
 }
 \arguments{
@@ -34,6 +35,20 @@ parameter vectors on the returned fit. Required for
 
 \item{verbose}{When \code{TRUE}, the engine prints progress to stderr.
 Default \code{FALSE}.}
+
+\item{sir_scale}{The parameter scale SIR's importance-sampling target is
+flat on (ferx-core #1723). \code{"packed"} (the default, and the only scale
+before ferx-core #1723) is flat on the optimizer's packed scale (log-sd
+for a variance); a variance the data cannot bound away from zero then has
+a likelihood shelf down to the parameter box floor, so its SIR lower limit
+tracks the box. \code{"natural"} is flat on the reported scale (Omega / kappa
+variances, sigma as a variance, theta as declared), the PsN SIR
+convention: its lower limits no longer depend on the box, but a variance
+informed by few groups gets a heavy upper tail. \code{"natural"} is refused for
+a model with \code{prior(...)}. The same option is
+\code{settings = list(sir_scale = ...)} in \code{\link[=ferx_fit]{ferx_fit()}} and \code{sir_scale} in the
+model's \verb{[fit_options]}; this argument does not read the model file's
+value.}
 }
 \value{
 The input \code{fit}, augmented with \code{sir_ess}, \code{sir_ci_theta},
@@ -46,7 +61,14 @@ proposal diagnostics: a covariance that is rank-deficient beyond its
 \code{FIX}ed parameters, or a proposal direction shrunk to keep draws inside
 the parameter bounds. Both name the parameters involved and mean the same
 thing - those directions are not identified by the data, and their SIR
-intervals understate the uncertainty. See
+intervals understate the uncertainty. A run whose effective sample size
+is below 100 adds a \verb{SIR:} low-ESS warning naming the draw the intervals
+hinge on and, under \code{sir_scale = "packed"}, every Omega / kappa variance
+the data do not bound away from zero, whose SIR lower limit then reflects
+the parameter box (ferx-core #1723). This run's \verb{SIR:}
+lines replace the ones an earlier SIR run (inline \code{sir = TRUE}, or a
+previous \code{ferx_sir()}) left on the fit, as do its \verb{SIR failed:} lines, so
+the warnings describe the intervals on the returned fit. See
 \code{\link[=ferx_get_warnings]{ferx_get_warnings()}}.
 }
 \description{
@@ -109,6 +131,12 @@ fit$sir_ci_omega
 
 # 95\% CI for residual error sigma
 fit$sir_ci_sigma
+
+# Below ESS 100 a "SIR:" warning names the variances whose lower limit
+# tracks the parameter box; the natural scale removes that dependence
+grep("^SIR:", fit$warnings, value = TRUE)
+fit_nat <- ferx_sir(fit, sir_seed = 42, sir_scale = "natural")
+fit_nat$sir_ci_omega
 
 # Retain resamples for downstream uncertainty simulation
 fit2 <- ferx_sir(fit, sir_samples = 2000, sir_resamples = 500,

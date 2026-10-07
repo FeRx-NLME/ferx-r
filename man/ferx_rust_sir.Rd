@@ -27,6 +27,7 @@ ferx_rust_sir(
   sir_resamples,
   sir_seed,
   sir_keep_samples,
+  sir_scale,
   verbose,
   fit_bindings
 )

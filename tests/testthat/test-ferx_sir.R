@@ -583,3 +583,130 @@ test_that("ferx_sir hands the binding the fit's IDs verbatim (#468)", {
   expect_identical(args$subject_ids, gappy$ebe_etas$ID)
   expect_null(args$n_subjects)
 })
+
+# -- Low-ESS warning and sir_scale (ferx-core #1723) ---------------------------
+#
+# Below an effective sample size of 100 the engine adds a `SIR: effective
+# sample size is ...` warning, whose advice depends on the scale: under
+# "packed" it may name variances the data do not bound from zero, under
+# "natural" it says a variance informed by few groups has a heavy upper tail.
+# The FOCEI warfarin_iov fixture below lands there on both scales (200 draws,
+# seed 7: ESS 17.5 packed, 47.2 natural), so the text tells the scales apart.
+sir_low_ess_settings <- list(maxiter = 30L, sir_samples = 200L,
+                             sir_resamples = 100L, sir_seed = 7L)
+
+sir_low_ess_fit <- function(sir_scale = NULL) {
+  ex <- ferx_example("warfarin_iov")
+  s <- sir_low_ess_settings
+  s$sir_scale <- sir_scale
+  suppressWarnings(ferx_fit(ex$model, ex$data, method = "focei", verbose = FALSE,
+                            covariance = TRUE, sir = TRUE, settings = s))
+}
+
+sir_low_ess_packed <- local({
+  fit <- NULL
+  function() {
+    if (is.null(fit)) fit <<- sir_low_ess_fit()
+    fit
+  }
+})
+
+sir_low_ess_rerun <- function(fit, ...) {
+  suppressWarnings(ferx_sir(fit,
+                            sir_samples = sir_low_ess_settings$sir_samples,
+                            sir_resamples = sir_low_ess_settings$sir_resamples,
+                            sir_seed = sir_low_ess_settings$sir_seed, ...))
+}
+
+low_ess_lines <- function(x) {
+  x[startsWith(x, "SIR: effective sample size is ")]
+}
+natural_advice <- "Under `sir_scale = natural` a variance informed by few groups"
+
+test_that("in-fit SIR relays the engine's low-ESS warning (ferx-core #1723)", {
+  fit <- sir_low_ess_packed()
+  skip_if(is.null(fit$cov_matrix) || is.null(fit$sir_ess), sir_cov_skip)
+  # Precondition: the fixture is below the threshold.
+  expect_lt(fit$sir_ess, 100)
+  # Mutation that reddens this: the pin before ferx-core 712cd47b (no warning).
+  line <- low_ess_lines(fit$warnings)
+  expect_length(line, 1L)
+  expect_match(line, "of 200 draws", fixed = TRUE)
+  expect_no_match(line, natural_advice, fixed = TRUE)
+  ws <- fit$warnings_structured
+  expect_identical(ws$category[ws$message == line], "sir")
+})
+
+test_that("ferx_sir relays the low-ESS warning in place of the earlier run's (ferx-core #1723)", {
+  fit <- sir_low_ess_packed()
+  skip_if(is.null(fit$cov_matrix) || is.null(fit$sir_ess), sir_cov_skip)
+  out <- sir_low_ess_rerun(fit, sir_scale = "natural")
+  line <- low_ess_lines(out$warnings)
+  # One line, this run's: the packed in-fit line is gone. Mutation: drop the
+  # stale `SIR: ` filter in ferx_sir() -> two lines here.
+  expect_length(line, 1L)
+  expect_match(line, natural_advice, fixed = TRUE)
+  ws <- out$warnings_structured
+  expect_identical(low_ess_lines(ws$message), line)
+  expect_identical(ws$category[ws$message == line], "sir")
+})
+
+test_that("sir_scale reaches the engine from ferx_sir() and from settings (ferx-core #1723)", {
+  packed <- sir_low_ess_packed()
+  skip_if(is.null(packed$cov_matrix) || is.null(packed$sir_ess), sir_cov_skip)
+  natural <- sir_low_ess_fit("natural")
+  skip_if(is.null(natural$sir_ess), sir_cov_skip)
+  # The settings path: the in-fit SIR ran on the natural scale.
+  expect_match(low_ess_lines(natural$warnings), natural_advice, fixed = TRUE)
+  expect_false(identical(natural$sir_ci_omega, packed$sir_ci_omega))
+  # The ferx_sir() path reproduces it draw for draw. Mutation: drop
+  # `sir_scale` from ferx_sir()'s call to the binding, or from the binding's
+  # FitOptions -> the packed draw, and these differ.
+  expect_same_sir(sir_low_ess_rerun(packed, sir_scale = "natural"), natural)
+  # The default stays packed: ferx_sir() with no sir_scale reproduces the
+  # packed in-fit SIR.
+  expect_same_sir(sir_low_ess_rerun(packed), packed)
+})
+
+test_that("an unknown sir_scale is refused on both paths (ferx-core #1723)", {
+  fit <- warfarin_fit_cov()
+  skip_if(is.null(fit$cov_matrix), sir_cov_skip)
+  # Mutation: drop match.arg() in ferx_sir() -> the typo reaches the engine
+  # and the message changes.
+  expect_error(ferx_sir(fit, sir_samples = 8L, sir_resamples = 4L,
+                        sir_scale = "naturl"),
+               "should be one of")
+  ex <- ferx_example("warfarin")
+  expect_error(
+    ferx_fit(ex$model, ex$data, method = "focei", verbose = FALSE,
+             covariance = TRUE, sir = TRUE,
+             settings = list(maxiter = 2L, sir_scale = "naturl")),
+    "sir_scale must be `packed` or `natural`", fixed = TRUE
+  )
+})
+
+test_that("ferx_sir drops only the replaced run's SIR lines (ferx-core #1723)", {
+  fit <- warfarin_fit_cov()
+  skip_if(is.null(fit$cov_matrix), sir_cov_skip)
+  kept <- c("Minimization terminated",
+            "SIR fallback: proposal was shrunk in 1 direction(s).",
+            "SIR requested but no covariance")
+  stale <- c("SIR: effective sample size is 3.5 of 1000 draws",
+             "SIR failed: covariance not positive definite")
+  fit$warnings <- c(kept, stale)
+  fit$warnings_structured <- data.frame(
+    severity = "warning", category = "sir", message = c(kept, stale),
+    source_method = "", stringsAsFactors = FALSE
+  )
+  fresh <- "SIR: effective sample size is 140.2 of 1000 draws"
+  testthat::local_mocked_bindings(
+    ferx_rust_sir = function(...) {
+      fake_sir_return(fresh, length(fit$theta), nrow(fit$omega), length(fit$sigma))
+    },
+    .package = "ferx"
+  )
+  out <- ferx_sir(fit, sir_samples = 8L, sir_resamples = 4L, sir_seed = 1L)
+  # Mutation: drop the stale filter -> the two stale lines survive.
+  expect_identical(out$warnings, c(kept, fresh))
+  expect_identical(out$warnings_structured$message, c(kept, fresh))
+})

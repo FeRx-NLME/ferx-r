@@ -694,6 +694,15 @@ proposal.}
 \item{\code{sir_keep_samples}}{(default \code{FALSE}) Retain the resampled
 parameter vectors, which \code{\link{ferx_simulate_with_uncertainty}}
 requires.}
+\item{\code{sir_scale}}{(default \code{"packed"}) The scale SIR's
+target is flat on: \code{"packed"} (the optimizer's scale, log-sd for
+a variance) or \code{"natural"} (the reported scale, the PsN SIR
+convention). Under \code{"packed"} a variance the data cannot bound
+away from zero gets a SIR lower limit that tracks the parameter box;
+\code{"natural"} removes that, at the cost of a heavy upper tail for a
+variance informed by few groups. Refused with \code{prior(...)}. See
+\code{\link{ferx_sir}}. A SIR run with effective sample size below
+100 adds a \code{SIR:} warning to \code{fit$warnings}.}
 }
 
 \strong{Multi-start optimization}
