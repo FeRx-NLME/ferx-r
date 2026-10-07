@@ -113,9 +113,9 @@
     used with `fit =`), drop or recode those rows or refit; on levels
     written out in the model, add the value to `levels = [...]`, use
     `levels = auto`, or drop or recode the rows. A missing value is still
-    allowed. Without `fit`, the error is a `ferx_engine_error` with code
-    `E_COV_LEVEL_UNKNOWN`. With `fit`, it is a plain error carrying the same
-    message, because the code is not yet attached on the from-fit paths.
+    allowed. With or without `fit`, the error is a `ferx_engine_error` with
+    code `E_COV_LEVEL_UNKNOWN` (on the from-fit paths since
+    [#498](https://github.com/FeRx-NLME/ferx-r/issues/498); see New features).
     The refusal text also changed for `ferx_fit()` and `ferx_simulate()`: it
     now reads "has levels ... but `GRP` takes [4.0] in this data", not
     "declares levels ... also takes".
@@ -431,8 +431,9 @@
   the engine gives no code still goes through re-validation, as does a theta
   level-block refusal until
   [ferx-core #1773](https://github.com/FeRx-NLME/ferx-core/issues/1773).
-  `ferx_sir()` and `ferx_covariance()` refusals are now `ferx_engine_error`
-  conditions too when they carry a code.
+  `ferx_sir()` and `ferx_covariance()` refusals are now classified like the
+  other entry points': the engine's code when it gives one, otherwise
+  re-validation of the model and data.
 
 - **`sir_scale` chooses the scale SIR's target is flat on**
   ([ferx-core #1723](https://github.com/FeRx-NLME/ferx-core/issues/1723)):
