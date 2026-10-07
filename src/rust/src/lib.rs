@@ -244,8 +244,9 @@ fn entry<T>(f: impl FnOnce() -> Result<T, String>) -> T {
 /// text (ferx-r #498): the condition `.ferx_engine_error()` builds from it
 /// takes the code from the engine instead of re-validating the model to find
 /// one. `text` is the raised message, byte for byte - R uses the record only
-/// for the condition whose message it is. `message` is that text with the
-/// engine's suggestion left out, which is `suggestion`'s alone.
+/// for the condition whose message it is, and builds that message from
+/// `text`. `message` is `text` with a suggestion the engine folded into it
+/// left out, for showing `suggestion` beside it without repeating it (#504).
 #[derive(Clone)]
 struct EngineDiagnostic {
     text: String,

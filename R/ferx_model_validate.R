@@ -267,15 +267,21 @@ ferx_model_validate <- function(path, data = NULL) {
 # reports for the same refusal; the glue keeps it beside the text it raised.
 # The record is used only for the condition whose message is that text, byte
 # for byte, so a refusal the glue raised without a code never borrows the
-# previous one's. `message` is the engine's message without its suggestion,
-# which is the `suggestion` field's alone, so the advice is never shown twice.
+# previous one's.
+#
+# The message is the raised text, as on the re-validation path: the engine's
+# prose verbatim, then the code. In the one refusal whose text folds the
+# suggestion in (ferx-core `EngineError::with_suggestion_in_display`) the
+# advice is therefore in both the message and `suggestion`. The record's
+# `message` (the text without the suggestion) is kept for #504, which shows
+# the suggestion in the message without saying it twice.
 .ferx_engine_coded_error <- function(e, msg) {
   d <- tryCatch(ferx_rust_take_engine_diagnostic(), error = function(...) NULL)
   if (is.null(d) || !identical(charToRaw(d$text), charToRaw(msg))) return(NULL)
   structure(
     class = c("ferx_engine_error", "error", "condition"),
     list(
-      message    = sprintf("%s [%s]", d$message, d$code),
+      message    = sprintf("%s [%s]", msg, d$code),
       call       = conditionCall(e),
       code       = d$code,
       block      = if (nzchar(d$block)) d$block else NA_character_,
