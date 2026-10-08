@@ -1009,12 +1009,15 @@
 #'     \code{sir_seed}, or the built-in default 12345 when \code{sir_seed} was
 #'     unset. \code{NA} when SIR did not run, even if a \code{sir_seed} was
 #'     given. \code{\link{ferx_sir}} sets it to the seed of its own run.}
-#'   \item{iov_occasion}{Character string (or \code{NULL}) giving the IOV
-#'     occasion rule the fit derived its occasions with, in the spelling
+#'   \item{iov_occasion}{Character string giving the IOV occasion rule the fit
+#'     derived its occasions with, in the spelling
 #'     \code{settings = list(iov_occasion = ...)} takes: \code{"column"},
-#'     \code{"dose"} or \code{"time(24, 48)"}. \code{\link{ferx_sir}} and
-#'     \code{\link{ferx_covariance}} derive the occasions with it, and
-#'     \code{\link{ferx_save_fit}} keeps it.}
+#'     \code{"dose"} or \code{"time(24, 48)"}. Every fit records one;
+#'     \code{"column"} (occasions from \code{iov_column}, or none) is the
+#'     default, also for a model without IOV. \code{NULL} only on a fit
+#'     loaded from a \code{.fitrx} bundle saved before ferx-core recorded the
+#'     rule. \code{\link{ferx_sir}} and \code{\link{ferx_covariance}} derive
+#'     the occasions with it, and \code{\link{ferx_save_fit}} keeps it.}
 #'   \item{imp_seed}{Numeric scalar (or \code{NULL}) giving the importance
 #'     sampling seed. \code{NULL} when IS was not run.}
 #'   \item{bloq_method_label}{Character string describing the LOQ-censoring
