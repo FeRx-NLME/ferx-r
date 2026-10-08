@@ -460,6 +460,73 @@ test_that(".ferx_engine_error() leaves a condition it cannot attribute alone", {
   expect_null(out$code)
 })
 
+# A refusal of the call itself is not a model or data failure (#517). On a
+# model and data with exactly one validation error - warfarin_iov with neither
+# an `iov_column` nor an OCC column, E_IOV_MISSING_OCC - the single-error
+# fallback used to label a bad `settings` entry with that error's code.
+# Mutations that redden this: the glue raising these refusals without
+# `argument_refusal()` (the fallback attaches E_IOV_MISSING_OCC), or
+# `.ferx_engine_coded_error()` without its empty-code return (the condition
+# becomes a `ferx_engine_error` with an empty code).
+test_that("ferx_fit() leaves its own argument refusals uncoded (#517)", {
+  ex <- ferx_example("warfarin_iov")
+  model <- withr::local_tempfile(fileext = ".ferx")
+  text <- readLines(ex$model)
+  writeLines(text[!grepl("iov_column", text, fixed = TRUE)], model)
+  rows <- utils::read.csv(ex$data, na.strings = ".")
+  rows$OCC <- NULL
+  data <- withr::local_tempfile(fileext = ".csv")
+  utils::write.csv(rows, data, row.names = FALSE, quote = FALSE, na = ".")
+  invisible(capture.output(res <- ferx_model_validate(model, data)))
+  expect_identical(res$diagnostics$code[res$diagnostics$severity == "error"],
+                   "E_IOV_MISSING_OCC")
+
+  plain <- function(expr, pattern) {
+    e <- tryCatch({
+      suppressWarnings(expr)
+      NULL
+    }, error = function(e) e)
+    expect_s3_class(e, "error")
+    expect_false(inherits(e, "ferx_engine_error"), info = pattern)
+    expect_null(e$code)
+    msg <- if (inherits(e, "condition")) conditionMessage(e) else ""
+    expect_match(msg, pattern, fixed = TRUE)
+    expect_no_match(msg, "[E_", fixed = TRUE)
+  }
+  fit <- function(...) ferx_fit(model, data, covariance = FALSE, verbose = FALSE, ...)
+  plain(fit(settings = list(iov_occasion = "dose", sir = TRUE)),
+        "setting `sir` conflicts with a dedicated ferx_fit() argument")
+  plain(fit(settings = list(iov_occasion = "dose", not_a_setting = 1)),
+        "unknown fit setting `not_a_setting`")
+  plain(fit(settings = list(iov_occasion = "weekly")),
+        "fit option `iov_occasion`: unknown value `weekly`")
+
+  # Two refusals of the call only the raw glue can reach: a method token R's
+  # own check does not list, and `settings` keys without values (R builds the
+  # two vectors together). Each record is taken straight after its raise: the
+  # next raise overwrites the slot.
+  glue_refusal <- function(method, keys, values, pattern) {
+    raised <- tryCatch(
+      ferx:::ferx_rust_fit(model, data, method, "false", "false", "", 0L, "", "",
+                           "", keys, values),
+      error = function(e) conditionMessage(e)
+    )
+    d <- ferx:::ferx_rust_take_engine_diagnostic()
+    expect_match(raised, pattern, fixed = TRUE)
+    expect_identical(d$code, "", info = pattern)
+    expect_identical(charToRaw(d$text %||% ""), charToRaw(raised), info = pattern)
+  }
+  glue_refusal("agq", character(), character(), "method = \"agq\" has been removed")
+  glue_refusal(character(), "maxiter", character(),
+               "settings keys/values length mismatch (1 vs 0)")
+
+  # The model's own refusal still gets its code: without a rule anywhere the
+  # fit is refused for want of occasion labels.
+  e <- tryCatch(suppressWarnings(fit()), error = function(e) e)
+  expect_s3_class(e, "ferx_engine_error")
+  expect_identical(e$code, "E_IOV_MISSING_OCC")
+})
+
 test_that("a class-blind tryCatch still sees an ordinary error", {
   ex    <- ferx_example("warfarin")
   lines <- c(readLines(ex$model), "", "[fit_option]", "  method = focei")

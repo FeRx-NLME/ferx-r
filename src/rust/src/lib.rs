@@ -224,7 +224,8 @@ fn panic_message(
 /// `#[track_caller]` so that a panic carrying no text can still say which of
 /// the 45 entry points it came out of - see `panic_message`.
 ///
-/// A refusal `engine_refusal` recorded with a code during this call is handed
+/// A refusal recorded during this call - by `engine_refusal` with ferx-core's
+/// code, or by `argument_refusal` with an empty one (ferx-r #517) - is handed
 /// on to `RAISED_DIAGNOSTIC` here, and only when its text is the text being
 /// raised; every raise overwrites that slot, so it never outlives the next one.
 #[track_caller]
@@ -257,11 +258,12 @@ struct EngineDiagnostic {
     suggestion: Option<String>,
 }
 
-/// Recorded by `engine_refusal` during an entry point's body.
+/// Recorded by `engine_refusal` or `argument_refusal` during an entry point's
+/// body.
 static PENDING_DIAGNOSTIC: std::sync::Mutex<Option<EngineDiagnostic>> =
     std::sync::Mutex::new(None);
-/// The diagnostic of the refusal `entry` last raised, if it carried one;
-/// read and cleared by `ferx_rust_take_engine_diagnostic()`.
+/// The record of the refusal `entry` last raised, if it carried one; read and
+/// cleared by `ferx_rust_take_engine_diagnostic()`.
 static RAISED_DIAGNOSTIC: std::sync::Mutex<Option<EngineDiagnostic>> =
     std::sync::Mutex::new(None);
 
@@ -289,12 +291,34 @@ fn engine_refusal(prefix: &str, e: ferx_core::EngineError) -> String {
     text
 }
 
-/// The diagnostic code ferx-core attached to the refusal the glue raised
-/// last, for `.ferx_engine_error()` (ferx-r #498).
+/// The text an entry point raises when it refuses its own call - an argument
+/// or a `settings` entry - rather than the model or the data (ferx-r #517).
+/// It is recorded with an empty code, which tells `.ferx_engine_error()` there
+/// is nothing to re-validate: re-running validation on the model and data
+/// would find whatever is wrong with *them*, and the single-error fallback
+/// used to attach that finding's code to this refusal ("setting `sir`
+/// conflicts with a dedicated ferx_fit() argument [E_IOV_MISSING_OCC]").
+fn argument_refusal(text: String) -> String {
+    *PENDING_DIAGNOSTIC.lock().unwrap_or_else(|e| e.into_inner()) = Some(EngineDiagnostic {
+        message: text.clone(),
+        code: String::new(),
+        block: None,
+        line: None,
+        suggestion: None,
+        text: text.clone(),
+    });
+    text
+}
+
+/// The record the glue kept for the refusal it raised last, for
+/// `.ferx_engine_error()`: ferx-core's diagnostic code (ferx-r #498), or the
+/// mark of a refusal of the call itself (ferx-r #517).
 ///
-/// @return `NULL` when that refusal carried no code; otherwise a list with
-///   `text` (the raised message), `message`, `code`, `block`, `line` (0 when
-///   unknown) and `suggestion` (`""` when absent).
+/// @return `NULL` when that refusal left no record (an uncoded engine or
+///   glue failure, which R re-validates); otherwise a list with `text` (the
+///   raised message), `message`, `code`, `block`, `line` (0 when unknown) and
+///   `suggestion` (`""` when absent). `code` is `""` for a refusal of the call
+///   itself (`argument_refusal`), which R leaves uncoded without re-validating.
 #[extendr]
 fn ferx_rust_take_engine_diagnostic() -> Robj {
     entry(move || {
@@ -397,11 +421,11 @@ fn ferx_rust_fit(
         // reading happens AFTER this loop so the SelectionFilter sees the merged
         // model-file + R-call conditions.
         if settings_keys.len() != settings_values.len() {
-            return Err(format!(
+            return Err(argument_refusal(format!(
                 "Error: settings keys/values length mismatch ({} vs {})",
                 settings_keys.len(),
                 settings_values.len()
-            ));
+            )));
         }
         // Reserved keys: these have dedicated ferx_fit() arguments. Keeping them
         // out of `settings` means there is one source of truth per value.
@@ -427,14 +451,16 @@ fn ferx_rust_fit(
                 .iter()
                 .any(|r| r.eq_ignore_ascii_case(key))
             {
-                return Err(format!(
+                return Err(argument_refusal(format!(
                     "Error: setting `{key}` conflicts with a dedicated ferx_fit() argument — pass it via that argument instead"
-                ));
+                )));
             }
             match ferx_core::parser::model_parser::apply_fit_option(&mut opts, key, v) {
                 Ok(true) => {}
-                Ok(false) => return Err(format!("Error: unknown fit setting `{key}`")),
-                Err(e) => return Err(format!("Error: {e}")),
+                Ok(false) => {
+                    return Err(argument_refusal(format!("Error: unknown fit setting `{key}`")))
+                }
+                Err(e) => return Err(argument_refusal(format!("Error: {e}"))),
             }
         }
 
@@ -492,7 +518,7 @@ fn ferx_rust_fit(
         if !method.is_empty() {
             let chain: Vec<EstimationMethod> = match method.iter().map(|m| parse_method(m)).collect() {
                 Ok(v) => v,
-                Err(e) => return Err(format!("{e}")),
+                Err(e) => return Err(argument_refusal(e)),
             };
             let final_method = *chain.last().unwrap();
             // The reported `interaction` flag must reflect the last *estimating* stage
