@@ -686,12 +686,7 @@ fn ferx_rust_fit(
         result.covariate_table = covariate_table;
 
         // Convert to R list
-        Ok(fit_result_to_list(
-            &result,
-            &population,
-            &parsed.model,
-            &parsed.bindings,
-        ))
+        fit_result_to_list(&result, &population, &parsed.model, &parsed.bindings)
     })
 }
 
@@ -1932,13 +1927,16 @@ fn level_contrast_from_token(token: &str) -> std::result::Result<LevelContrast, 
 /// `fit$theta_levels`: one row per level, blocks in declaration order and
 /// levels in the order the engine bound them. `theta_name` is the level's entry
 /// in `theta_names` (`NAME[label]`), NA for a level the contrast derives from
-/// the others; its value is not reported (FeRx-NLME/ferx-core#1623). Zero rows
-/// for a model with no level block.
+/// the others. `value` is the level's value at the fitted `theta`, derived
+/// levels included, as the engine's own evaluator reads it
+/// ([`ferx_core::theta_level_values`], ferx-r #430), so R never re-derives a
+/// contrast. Zero rows for a model with no level block.
 fn level_bindings_to_r(
     model: &CompiledModel,
     bindings: &LevelBindings,
     theta_names: &[String],
-) -> Robj {
+    theta: &[f64],
+) -> std::result::Result<Robj, String> {
     // Declaration order. Both binders key the bindings by the model's own
     // declarations, so a binding for an undeclared block cannot reach here.
     let order: Vec<&str> = model
@@ -1954,26 +1952,46 @@ fn level_bindings_to_r(
         "level bindings for a block the model does not declare"
     );
 
+    // Only a model with a bound block asks the engine: it refuses a theta of
+    // the wrong length, and a model without one has nothing to report.
+    let values = if order.is_empty() {
+        std::collections::HashMap::new()
+    } else {
+        ferx_core::theta_level_values(model, theta)
+            .map_err(|e| format!("theta level values: {e}"))?
+    };
+
     let mut block: Vec<String> = Vec::new();
     let mut index: Vec<i32> = Vec::new();
     let mut label: Vec<String> = Vec::new();
     let mut group: Vec<Option<i32>> = Vec::new();
     let mut contrast: Vec<String> = Vec::new();
     let mut theta_name: Vec<Option<String>> = Vec::new();
+    let mut value: Vec<f64> = Vec::new();
     for name in order {
         let b = &bindings[name];
+        // Joined by label, not position, and a level the engine does not report
+        // is refused rather than given a neighbour's value.
+        let block_values = values.get(name);
         for (i, l) in b.labels.iter().enumerate() {
             let tn = format!("{name}[{l}]");
+            let v = block_values
+                .and_then(|vs| vs.iter().find(|v| &v.label == l))
+                .map(|v| v.value)
+                .ok_or_else(|| {
+                    format!("theta {name}: the engine reports no value for level `{l}`")
+                })?;
             block.push(name.to_string());
             index.push(i as i32 + 1);
             label.push(l.clone());
             group.push(b.groups.get(i).map(|g| *g as i32));
             contrast.push(level_contrast_token(b.contrast).to_string());
             theta_name.push(theta_names.contains(&tn).then_some(tn));
+            value.push(v);
         }
     }
     let n = block.len();
-    finish_df(
+    Ok(finish_df(
         vec![
             ("block", block.into()),
             ("index", index.into()),
@@ -1981,9 +1999,10 @@ fn level_bindings_to_r(
             ("group", group.into()),
             ("contrast", contrast.into()),
             ("theta_name", theta_name.into()),
+            ("value", value.into()),
         ],
         n,
-    )
+    ))
 }
 
 /// An R integer as R prints it: `NA_integer_` arrives as `i32::MIN`.
@@ -3193,7 +3212,7 @@ fn fit_result_to_list(
     population: &Population,
     model: &CompiledModel,
     bindings: &ParseBindings,
-) -> List {
+) -> std::result::Result<List, String> {
     // Theta
     let theta_names: Vec<String> = result.theta_names.clone();
     let theta_values: Vec<f64> = result.theta.clone();
@@ -3741,7 +3760,12 @@ fn fit_result_to_list(
     // and the report is NULL.
     let prior_summary = prior_summary_to_dataframe(result);
 
-    list!(
+    // One row per theta level-block level (ferx-r #370), with its fitted value
+    // (#430); zero rows for a model with no level block.
+    let theta_levels =
+        level_bindings_to_r(model, &bindings.levels, &theta_names, &result.theta)?;
+
+    Ok(list!(
         converged = result.converged,
         method = method_label,
         method_chain = method_chain,
@@ -3762,9 +3786,7 @@ fn fit_result_to_list(
         n_parameters = result.n_parameters as i32,
         n_iterations = result.n_iterations as i32,
         theta = theta_values,
-        // One row per theta level-block level (ferx-r #370); zero rows for a
-        // model with no level block. Built before `theta_names` moves.
-        theta_levels = level_bindings_to_r(model, &bindings.levels, &theta_names),
+        theta_levels = theta_levels,
         // The `[covariate_model]` statistics the fit was bound with (ferx-r
         // #412); empty for a model that states none symbolically.
         covariate_stats = covariate_stats_to_r(&bindings.covariate_stats),
@@ -3964,7 +3986,7 @@ fn fit_result_to_list(
         covtab            = covtab,
         // covariate_types: named char vector covariate -> "continuous"/"categorical".
         covariate_types   = covariate_types
-    )
+    ))
 }
 
 /// Build the R-side `neural_networks` list from `result.neural_networks`.
@@ -4405,6 +4427,26 @@ fn ferx_rust_known_blocks() -> Vec<String> {
             .into_iter()
             .map(String::from)
             .collect())
+    })
+}
+
+/// The theta blocks `print.ferx_fit` reports as a compact summary instead of one
+/// row per coefficient (ferx-r #413): ferx-core's own rule
+/// (`compact_theta_blocks`, threshold `THETA_BLOCK_COMPACT_MIN` free
+/// coefficients), so R and the engine's console report collapse the same blocks.
+///
+/// @param theta_names Character vector, the fit's theta names in theta order.
+/// @return A list with `block` (name), `from` and `to` (1-based, inclusive
+///   positions in `theta_names`), one entry per block to collapse.
+/// @export
+#[extendr]
+fn ferx_rust_compact_theta_blocks(theta_names: Vec<String>) -> List {
+    entry(move || {
+        let blocks = ferx_core::io::output::compact_theta_blocks(&theta_names);
+        let block: Vec<String> = blocks.iter().map(|(b, _)| b.clone()).collect();
+        let from: Vec<i32> = blocks.iter().map(|(_, r)| r.start as i32 + 1).collect();
+        let to: Vec<i32> = blocks.iter().map(|(_, r)| r.end as i32).collect();
+        Ok(list!(block = block, from = from, to = to))
     })
 }
 
@@ -6979,7 +7021,7 @@ fn search_final_fit(
     let out = std::fs::write(&path, model_text)
         .map_err(|e| format!("cannot write `{}`: {e}", path.display()))
         .and_then(|()| ferx_core::prepare_run(&path.to_string_lossy(), data))
-        .map(|prepared| {
+        .and_then(|prepared| {
             // `prepare_run` binds level blocks, so a search fit carries the same
             // `theta_levels` as `ferx_fit()` and can drive `ferx_simulate()` too.
             fit_result_to_list(
@@ -10086,6 +10128,7 @@ extendr_module! {
     fn ferx_rust_autodiff_enabled;
     fn ferx_rust_test_panic;
     fn ferx_rust_known_blocks;
+    fn ferx_rust_compact_theta_blocks;
     fn ferx_rust_eta_info_by_name;
     fn ferx_rust_classify_warnings;
     fn ferx_rust_validate_model;

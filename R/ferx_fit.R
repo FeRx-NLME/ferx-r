@@ -753,10 +753,15 @@
 #'     block), \code{label} (\code{COL=value,...}), \code{group} (contrast
 #'     group, 0-based), \code{contrast} (the resolved convention:
 #'     \code{"sum_to_zero"}, \code{"sum_to_zero_within"}, \code{"ref"} or
-#'     \code{"none"}) and \code{theta_name} (the level's name in
+#'     \code{"none"}), \code{theta_name} (the level's name in
 #'     \code{theta}, \code{NA} for a level the contrast derives from the
-#'     others, whose value is not reported). Zero rows for a model with no
-#'     level block. \code{NULL} on a fit loaded by \code{\link{ferx_load_fit}}
+#'     others) and \code{value} (the level's fitted value, derived levels
+#'     included: minus the sum of its group's free levels under
+#'     \code{sum_to_zero} / \code{sum_to_zero_within}, 0 for a \code{ref}
+#'     reference level. Computed by ferx-core exactly as the model applies
+#'     it, so no contrast arithmetic is needed in R. \code{NA} on a fit
+#'     loaded from a bundle saved before ferx recorded it). Zero rows for a
+#'     model with no level block. \code{NULL} on a fit loaded by \code{\link{ferx_load_fit}}
 #'     from a bundle that does not record the bindings (one written by
 #'     ferx-core, or saved before ferx recorded them): unknown, not empty, so
 #'     test it with \code{NROW(fit$theta_levels) > 0}.
@@ -2502,6 +2507,17 @@ ferx_fit <- function(model, data = NULL,
   }
 }
 
+# c(min, median, max) of a compact theta block's free coefficients, for the
+# THETA BLOCKS lines of print.ferx_fit (#413). The median is the lower of the
+# two middle values on an even count, never their mean. This repeats ferx-core's
+# `block_summary` (src/io/output.rs), which is still private; drop it for the
+# engine's own once FeRx-NLME/ferx-core#1812 makes that public.
+.ferx_theta_block_summary <- function(values) {
+  v <- sort(values)
+  n <- length(v)
+  c(v[1L], v[(n - 1L) %/% 2L + 1L], v[n])
+}
+
 #' @export
 print.ferx_fit <- function(x, ...) {
   bar <- strrep("=", 60)
@@ -2610,6 +2626,13 @@ print.ferx_fit <- function(x, ...) {
       }
     }
   }
+  # Large theta blocks (a level block or a counted `theta NAME[N]`) move to the
+  # compact THETA BLOCKS summary below (#413). Which blocks is ferx-core's rule,
+  # the one its own console report applies, not a threshold kept here.
+  theta_blocks <- ferx_rust_compact_theta_blocks(as.character(theta_names))
+  for (b in seq_along(theta_blocks$block)) {
+    nn_skip[seq(theta_blocks$from[b], theta_blocks$to[b])] <- TRUE
+  }
   for (i in seq_along(x$theta)) {
     if (nn_skip[i]) next
     est       <- x$theta[i]
@@ -2668,6 +2691,20 @@ print.ferx_fit <- function(x, ...) {
                     .ferx_inv_logit(lg + 1.96 * se_logit)))
       }
     }
+  }
+
+  # THETA BLOCKS: one line per collapsed block, as ferx-core's report prints
+  # it. Every level stays in x$theta, ferx_estimates() and x$theta_levels.
+  if (length(theta_blocks$block) > 0L) {
+    cat("\n", .ferx_style("THETA BLOCKS", "bold"), "\n", sep = "")
+    cat(strrep("-", 60), "\n", sep = "")
+    for (b in seq_along(theta_blocks$block)) {
+      vals <- unname(x$theta[seq(theta_blocks$from[b], theta_blocks$to[b])])
+      s <- .ferx_theta_block_summary(vals)
+      cat(sprintf("%s  %d free coefficients   min %.4f  median %.4f  max %.4f\n",
+                  theta_blocks$block[b], length(vals), s[1], s[2], s[3]))
+    }
+    cat("  (every coefficient is in fit$theta)\n")
   }
 
   # NEURAL NETWORKS
