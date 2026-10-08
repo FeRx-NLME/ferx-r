@@ -1678,8 +1678,9 @@ fn ferx_rust_npde_from_fit(
 // ferx-core's own `fit()` records them in (FeRx-NLME/ferx-core#1621).
 
 /// The model text a bind re-parses: read when the model declares something
-/// data-derived (`bind_design`) and on every from-fit bind
-/// (`from_fit_model_text`).
+/// data-derived (`bind_design`) and on every from-fit bind that holds a
+/// population (`from_fit_model_text`). SIR and the standalone covariance step
+/// take theirs from their one hash-checked read instead (`read_fit_model`).
 fn level_model_text(model_path: &str) -> std::result::Result<String, String> {
     std::fs::read_to_string(model_path).map_err(|e| {
         format!(
@@ -1734,16 +1735,18 @@ fn bind_design(
     ferx_core::api::bind_covariate_stats(parsed, &model_text, population)
 }
 
-/// The one prologue of every from-fit bind (ferx-r #487): a from-fit bind
-/// always reaches core with the fit's whole `DataBindings`, so core decides
-/// every refusal but one. R keeps exactly one cell, a model that declares a
-/// level block paired with a fit whose level bindings are empty: that gets
-/// `no_fit_levels_error`, byte-identical on every from-fit path (predict,
-/// simulate, npde, SIR, covariance), rather than core's generic "this fit
-/// carries no data-derived bindings". Everything else - a symbolic
-/// `[covariate_model]` centre with no statistics (ferx-core #1686), bindings for
-/// a block or covariate the model does not have - is core's text, passed
-/// through unprefixed. Returns the model text the bind re-parses.
+/// The prologue of a from-fit bind that holds a population (predict, simulate,
+/// npde; ferx-r #487): a from-fit bind always reaches core with the fit's whole
+/// `DataBindings`, so core decides every refusal but one. R keeps exactly one
+/// cell, `refuse_unbound_levels`: a model that declares a level block paired
+/// with a fit whose level bindings are empty gets `no_fit_levels_error`,
+/// byte-identical on every from-fit path (these three, and SIR and covariance,
+/// which call the cell from `bind_layout_from_fit` after their hash-checked
+/// read), rather than core's generic "this fit carries no data-derived
+/// bindings". Everything else - a symbolic `[covariate_model]` centre with no
+/// statistics (ferx-core #1686), bindings for a block or covariate the model
+/// does not have - is core's text, passed through unprefixed. Returns the model
+/// text the bind re-parses.
 fn from_fit_model_text(
     parsed: &ParsedModel,
     model_path: &str,

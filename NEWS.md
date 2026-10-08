@@ -588,10 +588,11 @@
   `model hash mismatch ... The .ferx file has changed since the fit was
   produced`. So does an edit that leaves the file unparsable: the hash is
   compared before the file is parsed. A fit with no recorded hash is not
-  checked, as before. A model
-  file that does not parse is now reported as `ferx_sir: <parser message>`
-  (or `ferx_covariance: ...`) instead of `ferx_sir: error parsing model at
-  <path>: <parser message>`.
+  checked, as before. On such a fit a model file that does not parse is now
+  reported as `ferx_sir: <parser message>` (or `ferx_covariance: ...`)
+  instead of `ferx_sir: error parsing model at <path>: <parser message>`,
+  so the message no longer names the file
+  ([ferx-core #1807](https://github.com/FeRx-NLME/ferx-core/issues/1807)).
 
 - **`ferx_sir()` and `ferx_covariance()` refuse a `[mixture]` fit with
   per-class `omega(k)` / `sigma(k)` overrides by name**
