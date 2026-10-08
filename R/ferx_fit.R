@@ -97,10 +97,14 @@
 #'   genuinely exclude them, use \code{ignore = "CENS == 1"}.
 #' @param threads Number of worker threads for the per-subject parallel loops
 #'   in the Rust backend (inner EBE search, SAEM, SIR). \code{NULL} (default)
-#'   uses the engine's default: available cores minus one (floored at 1), capped
-#'   at 8 -- most fits gain little from spreading across every core, and not all
-#'   cores are equal on asymmetric platforms (e.g. Apple Silicon E-cores). Pass
-#'   a positive integer to pin the count. The setting is per-call,
+#'   uses the model file's \code{[fit_options] threads}; when the file does not
+#'   set it, the engine's default: available cores minus one (floored at 1),
+#'   capped at 8 -- most fits gain little from spreading across every core, and
+#'   not all cores are equal on asymmetric platforms (e.g. Apple Silicon
+#'   E-cores). \code{0} asks for the engine default by name and overrides a
+#'   count pinned in the file. A positive integer pins the count and overrides
+#'   the file. Either explicit value warns when it differs from the file's.
+#'   The setting is per-call,
 #'   so successive fits in the same R session can use different values.
 #' @param mu_referencing Logical, or \code{NULL} (the default). When \code{TRUE},
 #'   automatically
@@ -1237,9 +1241,11 @@
 #'     for the covariance step, computed before the step runs on large models.
 #'     \code{NULL} when the model is small (exact count used instead) or when
 #'     \code{covariance = FALSE}.}
-#'   \item{n_threads_used}{Integer. Actual number of parallel threads used by
-#'     the engine during fitting. May be lower than the requested \code{threads}
-#'     argument when fewer subjects are available.}
+#'   \item{n_threads_used}{Integer. Width of the worker pool the engine ran
+#'     the fit on: the \code{threads} argument, else the model file's
+#'     \code{[fit_options] threads}, else the engine default. It is not reduced
+#'     when there are fewer subjects than threads; the engine adds a note to
+#'     \code{warnings} instead.}
 #'   \item{nlopt_missing_algorithms}{Character vector of NLopt algorithm names
 #'     that are not available in the current build (empty on most platforms).
 #'     Informational; the engine falls back automatically.}
@@ -2076,7 +2082,9 @@ ferx_fit <- function(model, data = NULL,
     bloq_arg <- match.arg(tolower(bloq_method), c("drop", "m3"))
   }
   if (is.null(threads)) {
-    threads_arg <- 0L
+    # -1L: not given, keep the model file's `threads` (#505). 0L stays the
+    # engine default named explicitly, which overrides a pinned file value.
+    threads_arg <- -1L
   } else {
     if (!is.numeric(threads) || length(threads) != 1L || !is.finite(threads) ||
       threads != as.integer(threads) || threads < 0L) {
@@ -3399,7 +3407,15 @@ print.ferx_summary <- function(x, ...) {
   warn <- function(key, model_val, call_val) {
     call_str  <- as.character(call_val)
     model_str <- as.character(model_val)
-    if (!identical(tolower(model_str), tolower(call_str))) {
+    model_cmp <- tolower(model_str)
+    call_cmp  <- tolower(call_str)
+    # `threads = auto` in the file and an explicit 0 both mean the engine
+    # default, so they do not conflict (#505).
+    if (identical(key, "threads")) {
+      model_cmp <- sub("^auto$", "0", model_cmp)
+      call_cmp  <- sub("^auto$", "0", call_cmp)
+    }
+    if (!identical(model_cmp, call_cmp)) {
       warning(
         "Model file [fit_options] sets `", key, " = ", model_str,
         "` but ferx_fit() argument overrides it with `", call_str, "`.",
