@@ -23,9 +23,9 @@
 #'     the time grid.
 #' }
 #' Without a \code{fit}, the design's own levels are bound and the model's
-#' initial values are used. A fit without \code{theta_levels} (a \code{.fitrx}
-#' written by ferx-core, or one saved before ferx recorded them) is refused on
-#' a level-block model; refit it with \code{\link{ferx_fit}}.
+#' initial values are used. A fit without \code{theta_levels} (one made, or a
+#' \code{.fitrx} saved, before ferx recorded them) is refused on a level-block
+#' model; refit it with \code{\link{ferx_fit}}.
 #'
 #' @section Symbolic covariate centres:
 #' A \code{[covariate_model]} relation may state its centre as a statistic of

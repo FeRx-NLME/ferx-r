@@ -491,12 +491,17 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
     if (!is.null(prior_rows)) wire$prior_summary <- prior_rows
   }
 
-  # `[covariate_model]` statistics (#412), in ferx-core's own slot
-  # (`data_bindings.covariate_stats`, its `DataBindingsWire`), so the engine
-  # reads an R bundle's statistics and R reads an engine bundle's. The engine
-  # reads an empty object as no statistics, which it is.
-  stats <- .fitrx_covariate_stats_to_wire(fit$covariate_stats)
-  if (!is.null(stats)) wire$data_bindings <- list(covariate_stats = stats)
+  # The fit's data-derived bindings in ferx-core's own slot (`data_bindings`,
+  # its `DataBindingsWire`), so the engine reads an R bundle's bindings and R
+  # reads an engine bundle's: the theta level layout (#466) and the
+  # `[covariate_model]` statistics (#412). The engine reads an empty
+  # statistics object as no statistics, which it is.
+  bindings <- list(
+    levels = .fitrx_level_bindings_to_wire(fit$theta_levels),
+    covariate_stats = .fitrx_covariate_stats_to_wire(fit$covariate_stats)
+  )
+  bindings <- bindings[!vapply(bindings, is.null, logical(1L))]
+  if (length(bindings)) wire$data_bindings <- bindings
   # The IOV occasion rule, under the key ferx-core writes (#1783, #512); absent
   # when the fit records none, as the engine leaves it.
   wire$iov_occasion <- .fitrx_iov_occasion_to_wire(fit$iov_occasion)
@@ -875,11 +880,10 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   for (k in r_only_keys) {
     if (!is.null(fit[[k]])) out[[k]] <- fit[[k]]
   }
-  # Theta level-block bindings (#370). The schema has a slot for them since
-  # FeRx-NLME/ferx-core#1621 (`data_bindings.levels`), where the covariate
-  # statistics already go; moving the levels there too is #466. Until then
-  # they ride here, and without them the reloaded fit cannot drive a
-  # simulation of its own model.
+  # Theta level-block bindings (#370). Since #466 they are written to the
+  # schema's own slot, `data_bindings.levels`, and the loader reads them from
+  # there. This copy stays for one release, so a ferx that predates #466
+  # still finds them in a bundle written by this one.
   tl <- .fitrx_theta_levels_to_wire(fit$theta_levels)
   if (!is.null(tl)) out$theta_levels <- tl
   # The engine's held-coordinate mask over `cov_matrix` (#424); the schema has
@@ -901,6 +905,28 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   cols <- intersect(cols, names(tl))
   out <- lapply(cols, function(k) as.list(unname(tl[[k]])))
   names(out) <- cols
+  out
+}
+
+# `fit$theta_levels` as ferx-core's `data_bindings.levels` wire (#466): an
+# object keyed by block, each a `LevelBinding` - `labels` and `groups` arrays in
+# level order and `contrast` as its DSL token. Only the layout travels: which
+# level has its own theta, and every level's value, are the model's, and the
+# loader asks the engine for them. NULL for no frame or zero rows, which leaves
+# the key out, as the engine does for a model without a level block.
+.fitrx_level_bindings_to_wire <- function(tl) {
+  if (!is.data.frame(tl) || nrow(tl) == 0L) return(NULL)
+  blocks <- unique(tl$block)
+  out <- lapply(blocks, function(b) {
+    rows <- tl[tl$block == b, , drop = FALSE]
+    rows <- rows[order(rows$index), , drop = FALSE]
+    list(
+      labels = as.list(unname(as.character(rows$label))),
+      groups = as.list(unname(as.integer(rows$group))),
+      contrast = rows$contrast[[1L]]
+    )
+  })
+  names(out) <- blocks
   out
 }
 

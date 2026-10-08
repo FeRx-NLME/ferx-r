@@ -117,6 +117,18 @@ ferx_rust_compact_theta_blocks <- function(theta_names) {
 
 #' @title Internal Rust backend binding
 #' @keywords internal
+ferx_rust_theta_levels_from_fit <- function(model_path, theta, theta_names, fit_bindings) {
+  .Call("wrap__ferx_rust_theta_levels_from_fit", model_path, theta, theta_names, fit_bindings)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_fitrx_engine_resave <- function(path, out_path) {
+  .Call("wrap__ferx_rust_fitrx_engine_resave", path, out_path)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
 ferx_rust_eta_info_by_name <- function(eta_names, info_names, info_types, info_linked) {
   .Call("wrap__ferx_rust_eta_info_by_name", eta_names, info_names, info_types, info_linked)
 }

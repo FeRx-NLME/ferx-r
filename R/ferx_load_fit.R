@@ -159,6 +159,12 @@ ferx_load_fit <- function(path) {
   # but the path resolves locally, leave it as-is - `ferx_sir()` will
   # use it directly (and the hash check still applies).
 
+  # Theta level layout from ferx-core's own slot (#466), laid out on the model
+  # file staged above, so an engine-written bundle carries it too.
+  result$theta_levels <- .fitrx_theta_levels_from_bindings(
+    result, wire$data_bindings$levels
+  )
+
   # Warnings - fit.json is the source of truth, warnings.txt is a mirror.
   if (is.null(result$warnings)) result$warnings <- character()
 
@@ -446,9 +452,13 @@ ferx_load_fit <- function(path) {
       out[[key]] <- extras[[key]]
     }
   }
-  # Theta level-block bindings (#370): absent from a bundle written by ferx-core
-  # or before #370, which leaves `theta_levels` NULL - and the simulate paths
-  # refusing a level-block model with that cause named.
+  # Theta level-block bindings (#370), as an R writer before #466 stored them.
+  # A bundle with the native `data_bindings.levels` is read from there by
+  # `ferx_load_fit()` once the model file is staged
+  # (`.fitrx_theta_levels_from_bindings()`); this copy is then only checked
+  # against it. Absent from a bundle saved before #370, which leaves
+  # `theta_levels` NULL - and the from-fit paths refusing a level-block model
+  # with that cause named.
   out$theta_levels <- .fitrx_theta_levels_from_wire(extras$theta_levels)
   # `[covariate_model]` statistics (#412), from ferx-core's own slot, so a
   # bundle written by the engine carries them too. A bundle without the slot
@@ -520,6 +530,101 @@ ferx_load_fit <- function(path) {
     theta_name = scalar("theta_name", "character", nullable = TRUE),
     value = if ("value" %in% cols) scalar("value", "double", nullable = TRUE)
   )
+}
+
+# Rebuild `fit$theta_levels` from ferx-core's `data_bindings.levels` wire (see
+# `.fitrx_level_bindings_to_wire()`): an object keyed by block, each with
+# `labels`, `groups` and `contrast`. The wire is the layout alone, keyed in
+# sorted order, so the frame is the engine's: the bundle's model file laid out
+# on these bindings (`ferx_rust_theta_levels_from_fit()`) gives the
+# declaration order, which level has its own theta and every level's value,
+# exactly as `ferx_fit()` built them. Returns `fit$theta_levels` unchanged when
+# the slot is absent (a bundle saved before #466, or by the engine for a model
+# without a level block).
+#
+# A bundle that also carries the pre-#466 copy under `r_extras` (an R writer,
+# which keeps writing it for one release) must agree with the slot on the
+# layout, and is refused by column when it does not: one of the two was edited,
+# and there is no telling which.
+.fitrx_theta_levels_from_bindings <- function(fit, levels) {
+  if (is.null(levels)) return(fit$theta_levels)
+  bad <- function(why) {
+    stop("ferx_load_fit: the bundle's theta level bindings ",
+         "(data_bindings$levels) are malformed: ", why, ".", call. = FALSE)
+  }
+  if (!is.list(levels) || length(levels) == 0L || is.null(names(levels)) ||
+      any(names(levels) == "")) {
+    bad("expected an object keyed by block")
+  }
+  is_str <- function(v) is.character(v) && length(v) == 1L
+  is_int <- function(v) is.numeric(v) && length(v) == 1L && v == round(v)
+  for (b in names(levels)) {
+    e <- levels[[b]]
+    if (!is.list(e) || !all(c("labels", "groups", "contrast") %in% names(e))) {
+      bad(sprintf("block `%s` lacks one of labels, groups, contrast", b))
+    }
+    if (!is.list(e$labels) || length(e$labels) == 0L ||
+        !all(vapply(e$labels, is_str, logical(1L)))) {
+      bad(sprintf("block `%s` has `labels` that are not an array of strings", b))
+    }
+    if (!is.list(e$groups) || !all(vapply(e$groups, is_int, logical(1L)))) {
+      bad(sprintf("block `%s` has `groups` that are not an array of integers", b))
+    }
+    if (length(e$groups) != length(e$labels)) {
+      bad(sprintf("block `%s` has %d labels and %d groups", b,
+                  length(e$labels), length(e$groups)))
+    }
+    if (!is_str(e$contrast)) bad(sprintf("block `%s` has a `contrast` that is not a string", b))
+  }
+  model_path <- fit$model_path
+  if (is.null(model_path) || is.na(model_path) || !file.exists(model_path)) {
+    stop("ferx_load_fit: the bundle carries theta level bindings ",
+         "(data_bindings$levels) but no model file to lay them out on.",
+         call. = FALSE)
+  }
+  n <- lengths(lapply(levels, `[[`, "labels"))
+  wire <- .ferx_theta_levels_frame(
+    block = rep(names(levels), n),
+    index = unlist(lapply(n, seq_len), use.names = FALSE),
+    label = unlist(lapply(levels, `[[`, "labels"), use.names = FALSE),
+    group = unlist(lapply(levels, `[[`, "groups"), use.names = FALSE),
+    contrast = rep(vapply(levels, `[[`, character(1L), "contrast"), n),
+    theta_name = rep(NA_character_, sum(n))
+  )
+  args <- .ferx_fit_binding_args(list(
+    theta_levels = wire, covariate_stats = fit$covariate_stats
+  ))
+  tl <- tryCatch(
+    ferx_rust_theta_levels_from_fit(
+      model_path, as.numeric(fit$theta), as.character(names(fit$theta)),
+      args$fit_bindings
+    ),
+    error = function(e) {
+      stop("ferx_load_fit: the bundle's theta level bindings ",
+           "(data_bindings$levels) do not fit its own model: ",
+           conditionMessage(e), call. = FALSE)
+    }
+  )
+  tl <- .ferx_theta_levels_frame(
+    tl$block, tl$index, tl$label, tl$group, tl$contrast, tl$theta_name,
+    tl$value
+  )
+  old <- fit$theta_levels
+  if (!is.null(old)) {
+    layout <- c("block", "index", "label", "group", "contrast", "theta_name")
+    differ <- layout[!vapply(layout, function(k) {
+      nrow(old) == nrow(tl) && identical(old[[k]], tl[[k]])
+    }, logical(1L))]
+    if (length(differ)) {
+      stop("ferx_load_fit: the bundle's two copies of the theta level ",
+           "bindings disagree - data_bindings$levels and ",
+           "r_extras$theta_levels differ in ",
+           paste0("`", differ, "`", collapse = ", "),
+           ". One of them was edited after the fit was saved; refit with ",
+           "ferx_fit() to write a consistent bundle.", call. = FALSE)
+    }
+  }
+  tl
 }
 
 # Rebuild `fit$covariate_stats` from ferx-core's `data_bindings` wire (see

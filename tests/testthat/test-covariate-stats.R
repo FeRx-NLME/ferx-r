@@ -931,3 +931,23 @@ test_that("C15: a symbolic-centre relation's theta is not reported unused", {
     expect_true(any(grepl("'UNUSED_T'", unused, fixed = TRUE)), info = cell)
   }
 })
+
+# The #493 review's two cells (#466). An R bundle that filled only the
+# statistics half of `data_bindings` read in the engine as bindings without
+# levels, so a level + symbolic model was refused as "edited since the fit";
+# and an engine bundle read in R took the statistics and dropped the levels,
+# so every from-fit path refused it. Both halves go through the engine's own
+# reader and writer here.
+test_that("C16: a level + symbolic fit round-trips R -> engine -> R with both halves", {
+  b <- cs_combo()
+  trip <- fitrx_engine_trip(b$fit)
+  expect_identical(trip$read, b$fit$theta_levels[fitrx_layout_cols])
+  loaded <- ferx_load_fit(trip$core_path)
+  expect_null(fitrx_fit_json(trip$core_path)$r_extras)
+  expect_identical(loaded$theta_levels, b$fit$theta_levels)
+  expect_identical(loaded$covariate_stats, b$fit$covariate_stats)
+  expect_identical(
+    ferx_predict(b$sym, b$data, fit = loaded),
+    ferx_predict(b$sym, b$data, fit = b$fit)
+  )
+})

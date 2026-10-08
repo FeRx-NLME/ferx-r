@@ -538,13 +538,15 @@ test_that("T8: a model without a level block round-trips an empty frame", {
 test_that("T9: a level-block model with a fit lacking bindings is refused", {
   b <- tl_base()
   fit <- b$fit
-  # The shape of a .fitrx written by ferx-core, or saved before #370.
+  # The shape of a fit saved before ferx recorded its bindings (#370).
   fit$theta_levels <- NULL
   err <- tryCatch(ferx_simulate(b$model, b$data, fit = fit), error = function(e) e)
   expect_s3_class(err, "error")
   msg <- conditionMessage(err)
   expect_match(msg, "this fit carries no theta level bindings", fixed = TRUE)
-  expect_match(msg, "written by ferx-core", fixed = TRUE)
+  expect_match(msg, "before ferx recorded the bindings", fixed = TRUE)
+  # A bundle written by ferx-core carries them since #466.
+  expect_no_match(msg, "written by ferx-core", fixed = TRUE)
   expect_match(msg, "Refit with `ferx_fit()`", fixed = TRUE)
   expect_no_match(msg, "was the model edited", fixed = TRUE)
 })
@@ -964,6 +966,9 @@ test_that("T12: an unknown contrast token in a bundle is refused by name", {
   w <- jsonlite::read_json(json, simplifyVector = FALSE)
   w$r_extras$theta_levels$contrast <-
     lapply(w$r_extras$theta_levels$contrast, function(x) "sum_to_zero_wthin")
+  # The shape of a bundle saved before #466: the R copy is the only one, and
+  # the token reaches the glue at the first from-fit call.
+  w$data_bindings$levels <- NULL
   jsonlite::write_json(w, json, auto_unbox = TRUE, pretty = TRUE, digits = NA,
                        null = "null", na = "null")
   tampered <- tempfile(fileext = ".fitrx")
@@ -977,6 +982,15 @@ test_that("T12: an unknown contrast token in a bundle is refused by name", {
     ferx_predict(b$model, b$data, fit = fit2),
     "unknown contrast `sum_to_zero_wthin`", fixed = TRUE
   )
+  # In the native slot (#466) the layout is laid out on the model at load, so
+  # the same token is refused there, still by name.
+  native <- fitrx_edit_bundle(path, function(w) {
+    w$data_bindings$levels$PLACEBO$contrast <- "sum_to_zero_wthin"
+    w$r_extras$theta_levels <- NULL
+    w
+  })
+  expect_error(ferx_load_fit(native), "unknown contrast `sum_to_zero_wthin`",
+               fixed = TRUE)
 })
 
 # --- T13: the counted form is untouched ---------------------------------------
@@ -1320,4 +1334,172 @@ test_that("T16b: the block summary's median is the lower middle value", {
   # read over all three values and the max is NaN, not a finite value.
   expect_identical(s(c(1, NaN, 2)), c(1, 2, NaN))
   expect_identical(s(c(NaN, NaN)), c(NaN, NaN, NaN))
+})
+
+# --- T17: the .fitrx native data_bindings.levels slot (#466) ------------------
+
+# One fit per contrast, each with its model and data.
+tl_contrast_fits <- function() {
+  data <- tl_write(tl_data, ".csv")
+  data3 <- tl_write(tl_data3, ".csv")
+  b <- tl_base()
+  none <- tl_write(tl_model(
+    "  theta PLACEBO[STUDY, TIME, contrast = none](2.0, 0.001, 20.0)", "PLACEBO"
+  ), ".ferx")
+  ref <- tl_write(tl_model(
+    "  theta TVCL(2.0, 0.001, 20.0)\n  theta PLACEBO[STUDY, TIME, contrast = ref](0.0, -5.0, 5.0)",
+    "TVCL + PLACEBO"
+  ), ".ferx")
+  nested <- tl_nested_model()
+  list(
+    sum_to_zero = list(model = b$model, data = b$data, fit = b$fit),
+    none = list(model = none, data = data, fit = tl_fit(none, data)),
+    ref = list(model = ref, data = data, fit = tl_fit(ref, data)),
+    sum_to_zero_within = list(model = nested, data = data3,
+                              fit = tl_fit(nested, data3))
+  )
+}
+
+test_that("T17a: fit.json carries data_bindings.levels in the engine's shape", {
+  b <- tl_base()
+  path <- tempfile(fileext = ".fitrx")
+  ferx_save_fit(b$fit, path)
+  lv <- fitrx_fit_json(path)$data_bindings$levels
+  expect_identical(names(lv), "PLACEBO")
+  expect_identical(names(lv$PLACEBO), c("labels", "groups", "contrast"))
+  expect_identical(unlist(lv$PLACEBO$labels), b$fit$theta_levels$label)
+  expect_identical(as.integer(unlist(lv$PLACEBO$groups)), b$fit$theta_levels$group)
+  # One token per block, a scalar, as the engine's `LevelContrast` reads it.
+  expect_identical(lv$PLACEBO$contrast, "sum_to_zero")
+  # The pre-#466 copy is still written, for one release, so a ferx that reads
+  # only `r_extras` keeps the layout of a bundle this one writes.
+  old <- fitrx_fit_json(path)$r_extras$theta_levels
+  expect_identical(unlist(old$label), b$fit$theta_levels$label)
+})
+
+test_that("T17b: a model without a level block writes no levels slot", {
+  counted <- tl_write(tl_model(
+    "  theta TVCL(2.0, 0.001, 20.0)\n  theta PLACEBO[6](0.0, -5.0, 5.0)",
+    "TVCL + PLACEBO[PLA_IDX]"
+  ), ".ferx")
+  fit <- tl_fit(counted, tl_write(tl_data, ".csv"))
+  path <- tempfile(fileext = ".fitrx")
+  ferx_save_fit(fit, path)
+  expect_null(fitrx_fit_json(path)$data_bindings$levels)
+  expect_identical(ferx_load_fit(path)$theta_levels, fit$theta_levels)
+})
+
+test_that("T17c: the engine's loader reads an R bundle's layout, per contrast", {
+  fits <- tl_contrast_fits()
+  for (contrast in names(fits)) {
+    f <- fits[[contrast]]$fit
+    expect_identical(unique(f$theta_levels$contrast), contrast)
+    trip <- fitrx_engine_trip(f)
+    # One block per fixture, so the engine's sorted order is the fit's.
+    expect_identical(trip$read, f$theta_levels[fitrx_layout_cols], info = contrast)
+  }
+})
+
+test_that("T17d: an engine-written bundle loads the fit's theta_levels, per contrast", {
+  fits <- tl_contrast_fits()
+  for (contrast in names(fits)) {
+    f <- fits[[contrast]]
+    trip <- fitrx_engine_trip(f$fit)
+    wire <- fitrx_fit_json(trip$core_path)
+    # Written by the engine: no R copy for the loader to fall back on.
+    expect_null(wire$r_extras, info = contrast)
+    expect_false(is.null(wire$data_bindings$levels), info = contrast)
+    loaded <- ferx_load_fit(trip$core_path)
+    expect_identical(loaded$theta_levels, f$fit$theta_levels, info = contrast)
+    expect_identical(
+      ferx_predict(f$model, f$data, fit = loaded),
+      ferx_predict(f$model, f$data, fit = f$fit),
+      info = contrast
+    )
+  }
+})
+
+test_that("T17e: a bundle saved before #466 still loads and predicts on its layout", {
+  path <- test_path("fixtures", "theta_levels_pre466.fitrx")
+  wire <- fitrx_fit_json(path)
+  expect_null(wire$data_bindings)
+  expect_false(is.null(wire$r_extras$theta_levels))
+  fit <- ferx_load_fit(path)
+  tl <- fit$theta_levels
+  expect_identical(tl$label, c(
+    "STUDY=1,TIME=1", "STUDY=1,TIME=4", "STUDY=1,TIME=12",
+    "STUDY=2,TIME=1", "STUDY=2,TIME=4", "STUDY=2,TIME=12"
+  ))
+  expect_identical(unique(tl$contrast), "sum_to_zero")
+  expect_identical(which(is.na(tl$theta_name)), 6L)
+  # Saved before ferx recorded the values (#430): unknown, not 0.
+  expect_identical(tl$value, rep(NA_real_, 6L))
+  # Its own layout places its own bundled data: the fitted placebo reaches
+  # PRED, so zeroing the level thetas moves it.
+  pred <- ferx_predict(fit$model_path, fit$data_path, fit = fit)
+  expect_true(nrow(pred) > 0L && all(is.finite(pred$PRED)))
+  flat <- fit
+  flat$theta[startsWith(names(flat$theta), "PLACEBO[")] <- 0
+  expect_false(identical(
+    pred$PRED, ferx_predict(fit$model_path, fit$data_path, fit = flat)$PRED
+  ))
+})
+
+test_that("T17f: two copies of a layout that disagree are refused by column", {
+  b <- tl_base()
+  path <- tempfile(fileext = ".fitrx")
+  ferx_save_fit(b$fit, path)
+  edited <- fitrx_edit_bundle(path, function(w) {
+    w$r_extras$theta_levels$label[[1]] <- "STUDY=9,TIME=1"
+    w
+  })
+  msg <- tryCatch({
+    ferx_load_fit(edited)
+    NA_character_
+  }, error = function(e) conditionMessage(e))
+  expect_match(msg, "two copies of the theta level bindings disagree", fixed = TRUE)
+  expect_match(msg, "differ in `label`.", fixed = TRUE)
+  expect_match(msg, "edited after the fit was saved", fixed = TRUE)
+  expect_match(msg, "refit with ferx_fit()", fixed = TRUE)
+})
+
+test_that("T17g: malformed data_bindings.levels are refused by name", {
+  b <- tl_base()
+  path <- tempfile(fileext = ".fitrx")
+  ferx_save_fit(b$fit, path)
+  short <- fitrx_edit_bundle(path, function(w) {
+    w$data_bindings$levels$PLACEBO$groups[[6]] <- NULL
+    w
+  })
+  expect_error(
+    ferx_load_fit(short),
+    "(data_bindings$levels) are malformed: block `PLACEBO` has 6 labels and 5 groups",
+    fixed = TRUE
+  )
+  # A layout the bundle's own model does not take - a block it does not
+  # declare - is the engine's refusal, named as the bundle's.
+  renamed <- fitrx_edit_bundle(path, function(w) {
+    names(w$data_bindings$levels) <- "OTHER"
+    w$r_extras <- NULL
+    w
+  })
+  expect_error(ferx_load_fit(renamed),
+               "(data_bindings$levels) do not fit its own model", fixed = TRUE)
+  # No model to lay the layout out on: no bundled model.ferx, and a recorded
+  # path that does not resolve here.
+  staging <- withr::local_tempdir()
+  utils::unzip(path, exdir = staging, junkpaths = TRUE)
+  json <- file.path(staging, "fit.json")
+  wire <- jsonlite::read_json(json, simplifyVector = FALSE)
+  wire$model_path <- file.path(staging, "gone.ferx")
+  jsonlite::write_json(wire, json, auto_unbox = TRUE, pretty = TRUE,
+                       digits = I(17), null = "null", na = "null")
+  unlink(file.path(staging, "model.ferx"))
+  modelless <- tempfile(fileext = ".fitrx")
+  utils::zip(modelless, list.files(staging, full.names = TRUE), flags = "-j -q")
+  expect_error(
+    ferx_load_fit(modelless),
+    "carries theta level bindings (data_bindings$levels) but no model file to lay them out on.",
+    fixed = TRUE
+  )
 })
