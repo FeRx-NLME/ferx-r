@@ -470,12 +470,14 @@ ferx_load_fit <- function(path) {
 }
 
 # Rebuild `fit$theta_levels` from its wire form (see
-# `.fitrx_theta_levels_to_wire()`): six columns, each a JSON array of one
-# scalar per level. The types are rebuilt explicitly, because a JSON array
-# carries none, and through the constructor `ferx_fit()` uses, so the reloaded
-# frame is identical to the saved one. A column that is not an array, or not
-# as long as the others, is refused rather than read into a wrong layout. The
-# contrast tokens are checked where they are used, by the glue.
+# `.fitrx_theta_levels_to_wire()`): six columns, plus `value` (#430) when the
+# bundle records it, each a JSON array of one scalar per level. The types are
+# rebuilt explicitly, because a JSON array carries none, and through the
+# constructor `ferx_fit()` uses, so the reloaded frame is identical to the
+# saved one. A column that is not an array, or not as long as the others, is
+# refused rather than read into a wrong layout. A bundle without `value` (saved
+# before ferx recorded it) reads as NA values: unknown, not 0. The contrast
+# tokens are checked where they are used, by the glue.
 .fitrx_theta_levels_from_wire <- function(w) {
   if (is.null(w)) return(NULL)
   cols <- c("block", "index", "label", "group", "contrast", "theta_name")
@@ -486,6 +488,7 @@ ferx_load_fit <- function(path) {
   if (!is.list(w) || !all(cols %in% names(w))) {
     bad(paste0("expected the columns ", paste(cols, collapse = ", ")))
   }
+  if ("value" %in% names(w)) cols <- c(cols, "value")
   for (k in cols) {
     if (!is.list(w[[k]])) bad(sprintf("column `%s` is not an array", k))
   }
@@ -493,19 +496,19 @@ ferx_load_fit <- function(path) {
   if (any(lengths(w[cols]) != n)) bad("the columns differ in length")
   # `type` is the column's R type; `nullable` columns read JSON null as NA.
   scalar <- function(k, type, nullable = FALSE) {
-    na <- if (type == "integer") NA_integer_ else NA_character_
+    na <- switch(type, integer = NA_integer_, double = NA_real_, NA_character_)
     vapply(w[[k]], function(v) {
       if (is.null(v)) {
         if (nullable) return(na)
         bad(sprintf("column `%s` has a null", k))
       }
-      ok <- length(v) == 1L && if (type == "integer") {
-        is.numeric(v) && v == round(v)
-      } else {
+      ok <- length(v) == 1L && switch(type,
+        integer = is.numeric(v) && v == round(v),
+        double = is.numeric(v),
         is.character(v)
-      }
+      )
       if (!ok) bad(sprintf("column `%s` has an entry that is not a single %s", k, type))
-      if (type == "integer") as.integer(v) else v
+      switch(type, integer = as.integer(v), double = as.numeric(v), v)
     }, na, USE.NAMES = FALSE)
   }
   .ferx_theta_levels_frame(
@@ -514,7 +517,8 @@ ferx_load_fit <- function(path) {
     label = scalar("label", "character"),
     group = scalar("group", "integer"),
     contrast = scalar("contrast", "character"),
-    theta_name = scalar("theta_name", "character", nullable = TRUE)
+    theta_name = scalar("theta_name", "character", nullable = TRUE),
+    value = if ("value" %in% cols) scalar("value", "double", nullable = TRUE)
   )
 }
 

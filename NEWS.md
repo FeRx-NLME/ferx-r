@@ -2,6 +2,11 @@
 
 ## Breaking changes
 
+- **`fit$theta_levels` has a seventh column, `value`** (the fitted value of
+  each level; see New features). Code that checks its `ncol()` or `names()`
+  exactly needs updating
+  ([#430](https://github.com/FeRx-NLME/ferx-r/issues/430)).
+
 - **ferx now builds against ferx-core `826d3bb9`**, up from `e2f9f641`.
   These engine changes reach R:
 
@@ -477,6 +482,20 @@
     documentation, changelog tooling and CI.
 
 ## New features
+
+- **`fit$theta_levels` has a `value` column, and `print()` collapses large
+  theta blocks.** `value` is each level's fitted value, the levels a
+  contrast derives included (minus the group sum under `sum_to_zero` /
+  `sum_to_zero_within`, 0 for a `ref` reference level), computed by
+  ferx-core as the model applies it, so a placebo time course needs no
+  contrast arithmetic in R
+  ([#430](https://github.com/FeRx-NLME/ferx-r/issues/430)). It survives
+  `ferx_save_fit()` / `ferx_load_fit()`; a bundle saved earlier reads `NA`.
+  `print.ferx_fit()` moves a theta block with 20 or more free coefficients
+  out of the THETA table into a one-line THETA BLOCKS summary (count, min,
+  median, max), by ferx-core's own rule; every level stays in `fit$theta`,
+  `ferx_estimates()` and `fit$theta_levels`
+  ([#413](https://github.com/FeRx-NLME/ferx-r/issues/413)).
 
 - **Engine refusals from prediction, simulation, NPDE, `ferx_sir()` and
   `ferx_covariance()` now carry ferx-core's own diagnostic code** (e.g.

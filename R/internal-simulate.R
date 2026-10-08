@@ -122,10 +122,13 @@ validate_fit_for_params <- function(fit) {
 
 # The one constructor of `fit$theta_levels` (#370), shared by `ferx_fit()` and
 # `ferx_load_fit()` so a fresh fit and a reloaded one are `identical()`. Takes
-# the columns as plain vectors; a NULL column reads as zero rows.
+# the columns as plain vectors; a NULL column reads as zero rows. `value` (#430)
+# is the engine's fitted value per level; NULL there on a non-empty table (a
+# bundle saved before ferx recorded it) reads as NA, unknown, never 0.
 .ferx_theta_levels_frame <- function(block = NULL, index = NULL, label = NULL,
                                      group = NULL, contrast = NULL,
-                                     theta_name = NULL) {
+                                     theta_name = NULL, value = NULL) {
+  if (is.null(value)) value <- rep(NA_real_, length(block))
   data.frame(
     block = as.character(block),
     index = as.integer(index),
@@ -133,6 +136,7 @@ validate_fit_for_params <- function(fit) {
     group = as.integer(group),
     contrast = as.character(contrast),
     theta_name = as.character(theta_name),
+    value = as.numeric(value),
     stringsAsFactors = FALSE
   )
 }
