@@ -305,8 +305,9 @@ ferx_load_fit <- function(path) {
     iov_occasion = .fitrx_iov_occasion_from_wire(w$iov_occasion),
     # The reader settings and population fingerprint (#462), back to the
     # JSON strings the fit carries; NULL in a bundle written without them.
-    reader_settings = .fitrx_json_from_wire(w$reader_settings),
-    population_fingerprint = .fitrx_json_from_wire(w$population_fingerprint),
+    reader_settings = .fitrx_json_from_wire(w$reader_settings, "reader_settings"),
+    population_fingerprint = .fitrx_json_from_wire(w$population_fingerprint,
+                                                   "population_fingerprint"),
 
     input_columns   = as.character(unlist(w$input_columns   %||% list(), use.names = FALSE)),
     covariate_names = as.character(unlist(w$covariate_names %||% list(), use.names = FALSE))

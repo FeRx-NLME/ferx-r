@@ -672,8 +672,10 @@
   subject); the three steps re-read the fit's own rows and covariance / SIR
   verify them against the fingerprint. `ferx_save_fit()` / `ferx_load_fit()`
   keep both under the keys ferx-core writes. A fit made before this change
-  whose `fit$exclusions` show a clause its model file does not state is
-  refused, naming the clause, instead of being scored on other rows.
+  whose `fit$exclusions` show a clause, or whose `settings =` set an
+  `iov_column`, that its model file does not state is refused, naming it,
+  instead of being scored on other data. `ferx_calc_npde(model = )` replays
+  only the fit's selection on the override's own reader settings.
 
 - **`ferx_sir()` and `ferx_covariance()` run on a fit whose `iov_occasion`
   was passed only through `settings =`**

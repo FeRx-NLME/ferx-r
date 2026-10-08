@@ -364,11 +364,20 @@
 
 # A JSON-carried fit field (`fit$reader_settings`, `fit$population_fingerprint`,
 # #462) back from the wire, where `ferx_save_fit()` wrote it verbatim and
-# `read_json(simplifyVector = FALSE)` read it as nested lists. Re-serialised as
-# the engine wrote it: arrays stay arrays (lists never unbox), scalars unbox,
-# and `digits = NA` gives each double the shortest spelling that reads back to
-# it, as serde_json does. NULL when the bundle carries none.
-.fitrx_json_from_wire <- function(w) {
+# `read_json(simplifyVector = FALSE)` read it as nested lists. jsonlite spells
+# numbers its own way (`[0, 1]` for serde's `[0.0, 1.0]`), so the lists are
+# written back losslessly - arrays stay arrays (lists never unbox), scalars
+# unbox, 17 significant digits identify every double - and the engine
+# re-serialises them in its own spelling, which is the string the fit carried
+# (#526 review 2). NULL when the bundle carries none.
+.fitrx_json_from_wire <- function(w, field) {
   if (is.null(w)) return(NULL)
-  as.character(jsonlite::toJSON(w, auto_unbox = TRUE, null = "null", digits = NA))
+  json <- as.character(jsonlite::toJSON(w, auto_unbox = TRUE, null = "null",
+                                        digits = I(17)))
+  tryCatch(
+    ferx_rust_fit_json_canonical(field, json),
+    error = function(e) {
+      stop("ferx_load_fit: the bundle's ", conditionMessage(e), call. = FALSE)
+    }
+  )
 }

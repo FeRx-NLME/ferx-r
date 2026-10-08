@@ -28,7 +28,8 @@
 #' selection applies as well as the model file's `[data_selection]`, and the
 #' engine checks the rows it reads against `fit$population_fingerprint`. A fit
 #' made before these were recorded is refused when its `fit$exclusions` show a
-#' clause the model file does not state, rather than scored on other rows.
+#' clause, or its `fit$call_settings` an `iov_column`, that the model file does
+#' not state, rather than scored on other data.
 #'
 #' ## Integrity check
 #'

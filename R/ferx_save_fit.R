@@ -505,11 +505,19 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   # bundle. The fit carries both as the engine's JSON; written verbatim
   # (`json_verbatim` below) as the objects they are, not as quoted strings.
   # Absent when the fit records none, as the engine leaves them.
-  if (!is.null(fit$reader_settings)) {
-    wire$reader_settings <- structure(fit$reader_settings, class = "json")
-  }
-  if (!is.null(fit$population_fingerprint)) {
-    wire$population_fingerprint <- structure(fit$population_fingerprint, class = "json")
+  # A value that is not JSON would be written as-is and break the whole bundle
+  # for `ferx_load_fit()` and the engine's `load_fit`, so it is refused here,
+  # by name (#526 review 8).
+  for (field in c("reader_settings", "population_fingerprint")) {
+    value <- fit[[field]]
+    if (is.null(value)) next
+    if (!is.character(value) || length(value) != 1L || is.na(value) ||
+          !isTRUE(jsonlite::validate(value))) {
+      stop("ferx_save_fit: `fit$", field, "` is not the engine's JSON record; ",
+           "it was edited after the fit. Refit, or set it to NULL.",
+           call. = FALSE)
+    }
+    wire[[field]] <- structure(value, class = "json")
   }
 
   jsonlite::write_json(

@@ -646,10 +646,35 @@ test_that("the guard labels the model file's clauses through the engine's parse 
   lines[at] <- '  ignore = "DV < 1.0"'
   writeLines(lines, model)
   unstated <- ferx:::ferx_rust_unstated_selection(
-    model, "", c("ignore: DV < 1.0", "ignore: TIME > 100", "ignore_subjects: 4"),
-    "accept: TIME < 120"
+    "probe", model, "", c("ignore: DV < 1.0", "ignore: TIME > 100", "ignore_subjects: 4"),
+    "accept: TIME < 120", ""
   )
   # Only the clauses the file does not state, the file's own dropped.
   expect_identical(unstated,
                    c("ignore: TIME > 100", "ignore_subjects: 4", "accept: TIME < 120"))
+})
+
+test_that("the guard compares a call-time iov_column with the file's, case-insensitively (#526)", {
+  ex <- ferx_example("warfarin_iov")
+  unstated <- function(col) {
+    ferx:::ferx_rust_unstated_selection("probe", ex$model, "", character(), character(), col)
+  }
+  # The file says `iov_column = OCC`.
+  expect_identical(unstated("VISIT"), "iov_column: VISIT")
+  expect_identical(unstated("occ"), character())
+  expect_identical(unstated(""), character())
+})
+
+test_that("a legacy fit read with a `settings =` iov_column is refused, naming it (#526)", {
+  fit <- rs_legacy(rs_iov_fit())
+  expect_identical(fit$call_settings$iov_column, "VISIT")
+  e <- tryCatch(suppressWarnings(ferx_covariance(fit)), error = function(e) e)
+  expect_s3_class(e, "error")
+  msg <- conditionMessage(e)
+  expect_match(msg, "ferx_covariance: this fit predates", fixed = TRUE)
+  expect_match(msg, '`settings = list(iov_column = "VISIT")`', fixed = TRUE)
+  expect_match(msg, "ferx_fit(..., covariance = TRUE)", fixed = TRUE)
+  # The same fit with its settings recorded runs.
+  out <- suppressWarnings(ferx_covariance(rs_iov_fit()))
+  expect_true(is.numeric(out$se_theta))
 })

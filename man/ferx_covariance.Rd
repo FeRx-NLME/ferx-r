@@ -71,7 +71,8 @@ The data are re-read with the selection the fit was made with, recorded as
 selection applies as well as the model file's \verb{[data_selection]}, and the
 engine checks the rows it reads against \code{fit$population_fingerprint}. A fit
 made before these were recorded is refused when its \code{fit$exclusions} show a
-clause the model file does not state, rather than scored on other rows.
+clause, or its \code{fit$call_settings} an \code{iov_column}, that the model file does
+not state, rather than scored on other data.
 }
 
 \subsection{Integrity check}{
