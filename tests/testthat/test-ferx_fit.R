@@ -1079,7 +1079,10 @@ test_that("ferx_fit() runs on the model file's `threads` when none is passed (#5
 test_that("ferx_fit(threads = NULL) is the same as not passing it (#505)", {
   fx <- make_fast_warfarin_threads(9L)
   on.exit(unlink(fx$dir, recursive = TRUE))
-  expect_no_warning(fit <- suppressMessages(fast_threads_fit(fx, threads = NULL)))
+  expect_no_warning(
+    fit <- suppressMessages(fast_threads_fit(fx, threads = NULL)),
+    message = "overrides it"
+  )
   expect_identical(as.integer(fit$n_threads_used), 9L)
 })
 test_that("ferx_fit(threads = n) overrides the model file's `threads` and says so (#505)", {
@@ -1093,12 +1096,19 @@ test_that("ferx_fit(threads = n) overrides the model file's `threads` and says s
 })
 test_that("ferx_fit(threads = 0L) names the engine default and overrides a pinned file value (#505)", {
   # 0 / "auto" is an explicit request, not 'unset' (ferx-core #1416). A fix that
-  # maps 0 to 'keep the file' fails here.
+  # maps 0 to 'keep the file' fails here. The oracle is this host's engine
+  # default, read off a fit with no `threads` anywhere.
+  fx_default <- make_fast_warfarin()
   fx <- make_fast_warfarin_threads(9L)
-  on.exit(unlink(fx$dir, recursive = TRUE))
-  fit <- suppressWarnings(suppressMessages(fast_threads_fit(fx, threads = 0L)))
-  expect_lte(as.integer(fit$n_threads_used), 8L)   # engine default is capped at 8
-  expect_false(identical(as.integer(fit$n_threads_used), 9L))
+  on.exit(unlink(c(fx$dir, fx_default$dir), recursive = TRUE))
+  n_default <- as.integer(
+    suppressWarnings(suppressMessages(fast_threads_fit(fx_default)))$n_threads_used
+  )
+  expect_warning(
+    fit <- suppressMessages(fast_threads_fit(fx, threads = 0L)),
+    "threads = 9.*overrides it with `0`"
+  )
+  expect_identical(as.integer(fit$n_threads_used), n_default)
 })
 test_that("ferx_fit() without a `threads` key anywhere keeps the engine default (#505)", {
   fx <- make_fast_warfarin()

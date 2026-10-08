@@ -103,7 +103,8 @@
 #'   not all cores are equal on asymmetric platforms (e.g. Apple Silicon
 #'   E-cores). \code{0} asks for the engine default by name and overrides a
 #'   count pinned in the file. A positive integer pins the count and overrides
-#'   the file, with a warning when the two differ. The setting is per-call,
+#'   the file. Either explicit value warns when it differs from the file's.
+#'   The setting is per-call,
 #'   so successive fits in the same R session can use different values.
 #' @param mu_referencing Logical, or \code{NULL} (the default). When \code{TRUE},
 #'   automatically
@@ -1240,9 +1241,11 @@
 #'     for the covariance step, computed before the step runs on large models.
 #'     \code{NULL} when the model is small (exact count used instead) or when
 #'     \code{covariance = FALSE}.}
-#'   \item{n_threads_used}{Integer. Actual number of parallel threads used by
-#'     the engine during fitting. May be lower than the requested \code{threads}
-#'     argument when fewer subjects are available.}
+#'   \item{n_threads_used}{Integer. Width of the worker pool the engine ran
+#'     the fit on: the \code{threads} argument, else the model file's
+#'     \code{[fit_options] threads}, else the engine default. It is not reduced
+#'     when there are fewer subjects than threads; the engine adds a note to
+#'     \code{warnings} instead.}
 #'   \item{nlopt_missing_algorithms}{Character vector of NLopt algorithm names
 #'     that are not available in the current build (empty on most platforms).
 #'     Informational; the engine falls back automatically.}
