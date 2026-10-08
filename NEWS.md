@@ -578,6 +578,22 @@
 
 ## Bug fixes
 
+- **`ferx_sir()` and `ferx_covariance()` report a model file edited after
+  the fit as edited** ([#492](https://github.com/FeRx-NLME/ferx-r/issues/492)).
+  An edit that adds a theta level block (`theta TVKA[ID, ...]`) or a
+  symbolic centre (`center = median`) used to be refused with "this fit
+  carries no theta level bindings" or "this fit carries no data-derived
+  bindings", which blames the fit. The model file is now checked against
+  `fit$model_hash` first, so both edits get ferx-core's
+  `model hash mismatch ... The .ferx file has changed since the fit was
+  produced`. So does an edit that leaves the file unparsable: the hash is
+  compared before the file is parsed. A fit with no recorded hash is not
+  checked, as before. On such a fit a model file that does not parse is now
+  reported as `ferx_sir: <parser message>` (or `ferx_covariance: ...`)
+  instead of `ferx_sir: error parsing model at <path>: <parser message>`,
+  so the message no longer names the file
+  ([ferx-core #1807](https://github.com/FeRx-NLME/ferx-core/issues/1807)).
+
 - **`ferx_sir()` and `ferx_covariance()` refuse a `[mixture]` fit with
   per-class `omega(k)` / `sigma(k)` overrides by name**
   ([ferx-core #1704](https://github.com/FeRx-NLME/ferx-core/issues/1704),
