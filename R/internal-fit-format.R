@@ -915,6 +915,10 @@
   )
   result$model_hash <- empty_to_null(result$model_hash) %||% NA_character_
   result$data_hash <- empty_to_null(result$data_hash) %||% NA_character_
+  # The IOV occasion rule the fit ran with (ferx-core #1783), in the
+  # `settings = list(iov_occasion = ...)` spelling; NULL when none was
+  # recorded. ferx_sir() / ferx_covariance() hand it back (#512).
+  result$iov_occasion <- empty_to_null(result$iov_occasion)
 
   # The dropped-`[output]` finding also goes into the flat vector, not only the
   # structured table: `fit$warnings` is what `ferx_save_fit()` serialises, and

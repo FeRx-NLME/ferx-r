@@ -1001,8 +1001,16 @@
 #'     seed used for multi-start parameter perturbation.}
 #'   \item{saem_seed}{Numeric scalar (or \code{NULL}) giving the SAEM
 #'     stochastic seed. \code{NULL} for non-SAEM methods.}
-#'   \item{sir_seed_used}{Numeric scalar (or \code{NULL}) giving the SIR
-#'     resampling seed. \code{NULL} when SIR was not run.}
+#'   \item{sir_seed_used}{Numeric scalar (or \code{NULL}) giving the seed SIR
+#'     resampled with: \code{sir_seed}, or the built-in default 12345 when
+#'     \code{sir_seed} was unset. \code{NULL} when SIR did not run, even if a
+#'     \code{sir_seed} was given.}
+#'   \item{iov_occasion}{Character string (or \code{NULL}) giving the IOV
+#'     occasion rule the fit derived its occasions with, in the spelling
+#'     \code{settings = list(iov_occasion = ...)} takes: \code{"column"},
+#'     \code{"dose"} or \code{"time(24, 48)"}. \code{\link{ferx_sir}} and
+#'     \code{\link{ferx_covariance}} derive the occasions with it, and
+#'     \code{\link{ferx_save_fit}} keeps it.}
 #'   \item{imp_seed}{Numeric scalar (or \code{NULL}) giving the importance
 #'     sampling seed. \code{NULL} when IS was not run.}
 #'   \item{bloq_method_label}{Character string describing the LOQ-censoring

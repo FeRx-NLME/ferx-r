@@ -298,6 +298,10 @@ ferx_sir <- function(fit,
     cov_matrix_dim = nrow(fit$cov_matrix),
     eta_hats_flat = eta_hats_flat,
     subject_ids = subject_ids,
+    # The occasion rule the fit derived its occasions with; without it the
+    # engine falls back to the model file's and refuses a rule passed only
+    # through `settings =` (#512).
+    iov_occasion = as.character(fit$iov_occasion %||% ""),
     sir_samples = as.integer(sir_samples),
     sir_resamples = as.integer(sir_resamples),
     sir_seed = if (is.null(sir_seed)) -1L else as.integer(sir_seed),

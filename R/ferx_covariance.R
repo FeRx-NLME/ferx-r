@@ -213,6 +213,10 @@ ferx_covariance <- function(fit,
     residual_rho = .ferx_residual_rho_vec(fit),
     eta_hats_flat = eta_hats_flat,
     subject_ids = subject_ids,
+    # The occasion rule the fit derived its occasions with; without it the
+    # engine falls back to the model file's and refuses a rule passed only
+    # through `settings =` (#512).
+    iov_occasion = as.character(fit$iov_occasion %||% ""),
     covariance_method = cov_method,
     mu_referencing = isTRUE(mu_referencing),
     verbose = isTRUE(verbose),

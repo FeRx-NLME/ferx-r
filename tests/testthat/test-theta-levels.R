@@ -293,6 +293,62 @@ test_that("T5: every from-fit entry point refuses labels the fit never saw", {
   check(ferx_predict_survival(b$model, design, times = c(1, 2), fit = b$fit))
 })
 
+# Every from-fit level refusal carries the engine's code (ferx-core #1791, the
+# leftover cell of ferx-r #498): before #1791 the binders returned a bare
+# `String`, so these were plain errors - re-validating the model and design
+# finds nothing wrong, since without the fit the design's own levels bind.
+# SIR and the covariance step reach the binders through `layout_from_fit`
+# (R8c's missing block); the adaptive path binds the design's own levels
+# (T14b). Mutation that reddens this: a
+# glue binder that formats the `EngineError` to text (`e.to_string()`)
+# instead of handing it to `engine_refusal`.
+# The refusal `expr` raises, checked to carry the level-block code; its message.
+tl_coded <- function(expr, who) {
+  e <- tryCatch({
+    expr
+    NULL
+  }, error = function(e) e)
+  expect_s3_class(e, "ferx_engine_error")
+  expect_identical(e$code, "E_THETA_LEVEL_BINDING", info = who)
+  expect_identical(e$block, "parameters", info = who)
+  msg <- if (inherits(e, "condition")) conditionMessage(e) else ""
+  expect_match(msg, "[E_THETA_LEVEL_BINDING]", fixed = TRUE, info = who)
+  msg
+}
+
+test_that("T5b: from-fit level refusals carry E_THETA_LEVEL_BINDING on every path", {
+  b <- tl_base()
+  design <- tl_write(gsub(",12,", ",24,", tl_data, fixed = TRUE), ".csv")
+  coded <- tl_coded
+  coded(ferx_predict(b$model, design, fit = b$fit), "predict")
+  coded(ferx_simulate(b$model, design, fit = b$fit), "simulate")
+  coded(ferx_simulate_with_uncertainty(b$model, design, tl_with_cov(b$fit),
+                                       n_uncertainty_draws = 2L),
+        "simulate_with_uncertainty")
+  coded(ferx_calc_npde(b$fit, nsim = 10L, model = b$model, data = design),
+        "npde")
+  coded(ferx_predict_survival(b$model, design, times = c(1, 2), fit = b$fit),
+        "predict_survival")
+
+  model <- tl_write(tl_model(
+    paste0("  theta TVCL(2.0, 0.001, 20.0)\n",
+           "  theta PLACEBO[STUDY, TIME](0.0, -5.0, 5.0)\n",
+           "  theta VSHIFT[STUDY](0.0, -5.0, 5.0)"),
+    "TVCL + PLACEBO", v = "TVV * exp(VSHIFT)"
+  ), ".ferx")
+  fit <- tl_with_cov(tl_fit(model, tl_write(tl_data, ".csv")))
+  fit$theta_levels <- fit$theta_levels[fit$theta_levels$block != "VSHIFT", ]
+  for (who in c("ferx_covariance", "ferx_sir")) {
+    msg <- coded(if (who == "ferx_sir") {
+      ferx_sir(fit, sir_samples = 20L, sir_resamples = 10L)
+    } else {
+      ferx_covariance(fit)
+    }, who)
+    expect_match(msg, "the fit's level bindings carry no `VSHIFT`", fixed = TRUE,
+                 info = who)
+  }
+})
+
 # --- T6: design order does not matter -----------------------------------------
 
 test_that("T6: a reordered design predicts the same rows", {
@@ -994,6 +1050,19 @@ test_that("T14: an explicit global contrast next to such an eta is refused", {
     expect_match(conditionMessage(e), "sum_to_zero_within", fixed = TRUE,
                  label = contrast)
   }
+})
+
+# The adaptive path binds the design's own levels (`bind_design`) and is
+# refused there with the code too (ferx-core #1791). Its glue puts its own name
+# in front of the engine's text, which must not cost the code.
+test_that("T14b: ferx_simulate_adaptive() refuses the global contrast with its code", {
+  model <- tl_absorbing_model("PLACEBO[STUDY, TIME, contrast = none](0.0, -5.0, 5.0)")
+  msg <- tl_coded(ferx_simulate_adaptive(with_adaptive_block(model),
+                                         tl_write(tl_data, ".csv"),
+                                         n_sim = 1L, seed = 1L),
+                  "simulate_adaptive")
+  expect_match(msg, "^ferx_simulate_adaptive: ")
+  expect_match(msg, "sum_to_zero_within", fixed = TRUE)
 })
 
 # --- R1: a tampered theta_levels is refused by the glue -------------------------

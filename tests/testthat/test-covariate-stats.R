@@ -224,6 +224,35 @@ test_that("C6: statistics for a covariate the model does not read are refused", 
   expect_match(msg, "carry no entry for it", fixed = TRUE)
 })
 
+# C5's and C6's refusals carry the engine's statistics code on every from-fit
+# path (ferx-core #1791, the leftover cell of #498): the binders returned a bare
+# `String` before it, so these were plain errors, and re-validating the model
+# and design finds nothing to report. Mutation that reddens this: a glue binder
+# that formats the `EngineError` to text instead of handing it to
+# `engine_refusal`.
+test_that("C6b: from-fit statistics refusals carry E_COVARIATE_STATS_BINDING", {
+  b <- cs_base()
+  coded <- function(expr, who) {
+    e <- tryCatch({
+      expr
+      NULL
+    }, error = function(e) e)
+    expect_s3_class(e, "ferx_engine_error")
+    expect_identical(e$code, "E_COVARIATE_STATS_BINDING", info = who)
+    expect_identical(e$block, "covariate_model", info = who)
+  }
+  bare <- cs_with_cov(b$fit)
+  bare$covariate_stats <- NULL
+  coded(ferx_predict(b$sym, b$design, fit = bare), "predict")
+  coded(ferx_simulate(b$sym, b$design, fit = bare), "simulate")
+  coded(ferx_calc_npde(bare, nsim = 10L, model = b$sym, data = b$design), "npde")
+  coded(ferx_covariance(bare), "covariance")
+  coded(ferx_sir(bare, sir_samples = 20L, sir_resamples = 10L), "sir")
+  other <- b$fit
+  other$covariate_stats$covariate <- "AGE"
+  coded(ferx_predict(b$sym, b$design, fit = other), "predict, unread covariate")
+})
+
 test_that("C7: malformed statistics are refused in R's terms", {
   b <- cs_base()
   dup <- b$fit

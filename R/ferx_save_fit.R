@@ -497,6 +497,9 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   # reads an empty object as no statistics, which it is.
   stats <- .fitrx_covariate_stats_to_wire(fit$covariate_stats)
   if (!is.null(stats)) wire$data_bindings <- list(covariate_stats = stats)
+  # The IOV occasion rule, under the key ferx-core writes (#1783, #512); absent
+  # when the fit records none, as the engine leaves it.
+  wire$iov_occasion <- .fitrx_iov_occasion_to_wire(fit$iov_occasion)
 
   jsonlite::write_json(
     # Array-valued fields wrapped so `auto_unbox` cannot collapse a length-1
