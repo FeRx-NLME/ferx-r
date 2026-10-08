@@ -28,9 +28,12 @@ print(fit)
 # contrast = sum_to_zero_within the levels sum to zero within each study, so
 # one level per study (6 in all) is derived as minus the sum of the others.
 # Those have no theta of their own, so theta_name is NA; they are not
-# separate estimates.
+# separate estimates. `value` is every level's fitted value, the derived ones
+# included, so each study's values sum to zero and the placebo time course
+# can be plotted as is.
 fit$theta_levels
 sum(is.na(fit$theta_levels$theta_name))
+round(tapply(fit$theta_levels$value, fit$theta_levels$group, sum), 10)
 
 # -- Truth versus estimate ----------------------------------------------------
 # TVE0 is not the week-0 baseline. With sum_to_zero_within, TVE0 + ETA_E0 is

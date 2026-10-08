@@ -801,10 +801,15 @@ columns \code{block}, \code{index} (1-based level position within the
 block), \code{label} (\code{COL=value,...}), \code{group} (contrast
 group, 0-based), \code{contrast} (the resolved convention:
 \code{"sum_to_zero"}, \code{"sum_to_zero_within"}, \code{"ref"} or
-\code{"none"}) and \code{theta_name} (the level's name in
+\code{"none"}), \code{theta_name} (the level's name in
 \code{theta}, \code{NA} for a level the contrast derives from the
-others, whose value is not reported). Zero rows for a model with no
-level block. \code{NULL} on a fit loaded by \code{\link{ferx_load_fit}}
+others) and \code{value} (the level's fitted value, derived levels
+included: minus the sum of its group's free levels under
+\code{sum_to_zero} / \code{sum_to_zero_within}, 0 for a \code{ref}
+reference level. Computed by ferx-core exactly as the model applies
+it, so no contrast arithmetic is needed in R. \code{NA} on a fit
+loaded from a bundle saved before ferx recorded it). Zero rows for a
+model with no level block. \code{NULL} on a fit loaded by \code{\link{ferx_load_fit}}
 from a bundle that does not record the bindings (one written by
 ferx-core, or saved before ferx recorded them): unknown, not empty, so
 test it with \code{NROW(fit$theta_levels) > 0}.

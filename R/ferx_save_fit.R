@@ -906,10 +906,12 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
 # `fit$theta_levels` as columns of JSON arrays. `r_extras` is skipped by the
 # array-key table, so every column is wrapped here: `auto_unbox` would write a
 # one-level block's columns as bare scalars, and the loader insists on arrays.
-# NA (a derived level's `theta_name`) is written as JSON null.
+# NA (a derived level's `theta_name`) is written as JSON null. `value` (#430)
+# is stored rather than recomputed on load, which would need the model.
 .fitrx_theta_levels_to_wire <- function(tl) {
   if (!is.data.frame(tl)) return(NULL)
-  cols <- c("block", "index", "label", "group", "contrast", "theta_name")
+  cols <- c("block", "index", "label", "group", "contrast", "theta_name", "value")
+  cols <- intersect(cols, names(tl))
   out <- lapply(cols, function(k) as.list(unname(tl[[k]])))
   names(out) <- cols
   out

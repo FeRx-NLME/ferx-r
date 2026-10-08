@@ -131,7 +131,8 @@ test_that("T1: ferx_fit() binds a level block and reports theta_levels", {
   tl <- fit$theta_levels
   expect_s3_class(tl, "data.frame")
   expect_identical(
-    names(tl), c("block", "index", "label", "group", "contrast", "theta_name")
+    names(tl),
+    c("block", "index", "label", "group", "contrast", "theta_name", "value")
   )
   expect_identical(nrow(tl), 6L)
   expect_identical(tl$block, rep("PLACEBO", 6L))
@@ -1175,7 +1176,153 @@ test_that("R2: a search tool's final fit carries theta_levels and drives predict
   expect_s3_class(res$fit, "ferx_fit")
   expect_identical(nrow(res$fit$theta_levels), 6L)
   expect_identical(res$fit$theta_levels$label, b$fit$theta_levels$label)
+  # The search's final fit fills the values through the same glue (#430).
+  expect_false(anyNA(res$fit$theta_levels$value))
   pred <- ferx_predict(res$final_model_path, b$data, fit = res$fit)
   expect_identical(nrow(pred), 6L)
   expect_true(all(is.finite(pred$PRED)))
+})
+
+# --- T15: fitted level values (#430) ------------------------------------------
+
+# Checks `fit$theta_levels$value` against the fit's own theta: a free level is
+# its theta, bit for bit; a derived one is minus its group's free levels under
+# sum_to_zero(_within), exactly 0 under ref. `nonzero` guards against a fixture
+# whose derived levels sit so near 0 that a value of 0 would pass too.
+tl_expect_values <- function(fit, contrast, nonzero = TRUE) {
+  tl <- fit$theta_levels
+  expect_identical(unique(tl$contrast), contrast)
+  expect_false(anyNA(tl$value), info = contrast)
+  free <- !is.na(tl$theta_name)
+  expect_identical(tl$value[free], unname(fit$theta[tl$theta_name[free]]),
+                   info = contrast)
+  derived <- tl$value[!free]
+  if (contrast == "none") {
+    expect_identical(sum(!free), 0L)
+  } else if (contrast == "ref") {
+    expect_identical(derived, rep(0, length(derived)))
+  } else {
+    sums <- tapply(tl$value, tl$group, sum)
+    expect_equal(unname(as.vector(sums)), rep(0, length(sums)),
+                 tolerance = 1e-12, info = contrast)
+    if (nonzero) expect_true(all(abs(derived) > 1e-8), info = contrast)
+  }
+}
+
+test_that("T15: theta_levels$value is the engine's value per level, per contrast", {
+  data <- tl_write(tl_data, ".csv")
+  tl_expect_values(tl_base()$fit, "sum_to_zero")
+  none <- tl_write(tl_model(
+    "  theta PLACEBO[STUDY, TIME, contrast = none](2.0, 0.001, 20.0)", "PLACEBO"
+  ), ".ferx")
+  tl_expect_values(tl_fit(none, data), "none")
+  ref <- tl_write(tl_model(
+    "  theta TVCL(2.0, 0.001, 20.0)\n  theta PLACEBO[STUDY, TIME, contrast = ref](0.0, -5.0, 5.0)",
+    "TVCL + PLACEBO"
+  ), ".ferx")
+  f_ref <- tl_fit(ref, data)
+  tl_expect_values(f_ref, "ref")
+  # The free ref levels have moved off 0, so a reference level reported as
+  # "minus the sum" instead would not be 0.
+  expect_gt(abs(sum(f_ref$theta_levels$value)), 1e-8)
+  # The two-iteration nested fit leaves every level at its initial 0, so it
+  # cannot tell a derived value from 0; the converged mbma_placebo fit (T15b)
+  # carries that check for sum_to_zero_within.
+  f_within <- tl_fit(tl_nested_model(), tl_write(tl_data3, ".csv"))
+  tl_expect_values(f_within, "sum_to_zero_within", nonzero = FALSE)
+})
+
+test_that("T15b: the bundled mbma_placebo fit reports every placebo level", {
+  skip_on_cran()
+  ex <- ferx_example("mbma_placebo")
+  fit <- ferx_fit(ex$model, ex$data, verbose = FALSE)
+  tl <- fit$theta_levels
+  # 6 studies x 4 visits, one level per study derived.
+  expect_identical(nrow(tl), 24L)
+  expect_identical(sum(is.na(tl$theta_name)), 6L)
+  expect_identical(as.vector(table(tl$group)), rep(4L, 6L))
+  tl_expect_values(fit, "sum_to_zero_within")
+})
+
+test_that("T15c: theta_levels$value survives .fitrx, and an old bundle reads NA", {
+  b <- tl_base()
+  fit2 <- tl_roundtrip(b$fit)
+  expect_identical(fit2$theta_levels$value, b$fit$theta_levels$value)
+  expect_false(anyNA(fit2$theta_levels$value))
+  # A bundle saved before #430 has the six original columns only: the values
+  # are unknown, so NA, never 0 (which would read as a fitted placebo of 0).
+  wire <- ferx:::.fitrx_theta_levels_to_wire(b$fit$theta_levels)
+  wire$value <- NULL
+  old <- ferx:::.fitrx_theta_levels_from_wire(wire)
+  expect_identical(old$value, rep(NA_real_, 6L))
+  keep <- setdiff(names(old), "value")
+  expect_identical(old[keep], b$fit$theta_levels[keep])
+})
+
+# --- T16: print collapses large blocks (#413) ---------------------------------
+
+# One subject per study, `n_study` studies x four visits: 4 * n_study cells of a
+# PLACEBO[STUDY, TIME] block. The DV differs per cell, so the fitted levels are
+# distinct.
+tl_grid_data <- function(n_study) {
+  times <- c(1, 2, 4, 12)
+  rows <- "ID,TIME,DV,EVID,AMT,CMT,RATE,MDV,STUDY"
+  for (s in seq_len(n_study)) {
+    k <- 0.15 + 0.02 * s
+    dv <- round(10 * exp(-k * times) * (1 + 0.05 * seq_along(times)), 3)
+    rows <- c(rows, sprintf("%d,0,.,1,100,1,0,1,%d", s, s),
+              sprintf("%d,%g,%g,0,.,1,0,0,%d", s, times, dv, s))
+  }
+  tl_write(paste(rows, collapse = "\n"), ".csv")
+}
+
+test_that("T16: print.ferx_fit collapses a block of 20 free levels, not one of 19", {
+  data <- tl_grid_data(5)
+  # contrast = none: 20 levels, 20 free coefficients -> collapsed.
+  none <- tl_write(tl_model(
+    "  theta PLACEBO[STUDY, TIME, contrast = none](2.0, 0.001, 20.0)", "PLACEBO"
+  ), ".ferx")
+  fit <- tl_fit(none, data)
+  is_pla <- startsWith(names(fit$theta), "PLACEBO[")
+  expect_identical(sum(is_pla), 20L)
+  out <- capture.output(print(fit))
+  expect_false(any(grepl("^PLACEBO\\[", out)))
+  expect_true(any(out == "THETA BLOCKS"))
+  # The structural theta keeps its row.
+  expect_true(any(grepl("^TVV ", out)))
+  # min / lower median / max of the 20 fitted values, recomputed here. The
+  # lower middle value must differ from the mean of the two middle ones at the
+  # printed precision, or the test could not tell the two rules apart.
+  v <- sort(unname(fit$theta[is_pla]))
+  expect_false(sprintf("%.4f", v[10]) == sprintf("%.4f", mean(v[10:11])))
+  expect_true(any(out == sprintf(
+    "PLACEBO  20 free coefficients   min %.4f  median %.4f  max %.4f",
+    v[1], v[10], v[20]
+  )))
+  # Every level is still on the fit.
+  expect_identical(nrow(fit$theta_levels), 20L)
+
+  # Global sum_to_zero over the same 20 levels: 19 free coefficients, below
+  # ferx-core's threshold, so every free level keeps its row.
+  stz <- tl_write(tl_model(
+    "  theta TVCL(2.0, 0.001, 20.0)\n  theta PLACEBO[STUDY, TIME](0.0, -5.0, 5.0)",
+    "TVCL + PLACEBO"
+  ), ".ferx")
+  fit19 <- tl_fit(stz, data)
+  expect_identical(nrow(fit19$theta_levels), 20L)
+  out19 <- capture.output(print(fit19))
+  expect_identical(sum(grepl("^PLACEBO\\[", out19)), 19L)
+  expect_false(any(out19 == "THETA BLOCKS"))
+})
+
+test_that("T16b: the block summary's median is the lower middle value", {
+  s <- ferx:::.ferx_theta_block_summary
+  # ferx-core's own block_summary unit cases (src/io/output.rs).
+  expect_identical(s(c(3, -1, 2)), c(-1, 2, 3))
+  expect_identical(s(c(4, 1, 3, 2)), c(1, 2, 4))
+  expect_identical(s(7.5), c(7.5, 7.5, 7.5))
+  # A NaN stays in and sorts last, as under core's total_cmp: the median is
+  # read over all three values and the max is NaN, not a finite value.
+  expect_identical(s(c(1, NaN, 2)), c(1, 2, NaN))
+  expect_identical(s(c(NaN, NaN)), c(NaN, NaN, NaN))
 })
