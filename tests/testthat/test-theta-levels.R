@@ -1484,7 +1484,8 @@ test_that("T17g: malformed data_bindings.levels are refused by name", {
     w
   })
   expect_error(ferx_load_fit(renamed),
-               "(data_bindings$levels) do not fit its own model", fixed = TRUE)
+               "(data_bindings$levels) could not be laid out on its model file",
+               fixed = TRUE)
   # No model to lay the layout out on: no bundled model.ferx, and a recorded
   # path that does not resolve here.
   staging <- withr::local_tempdir()
@@ -1502,4 +1503,71 @@ test_that("T17g: malformed data_bindings.levels are refused by name", {
     "carries theta level bindings (data_bindings$levels) but no model file to lay them out on.",
     fixed = TRUE
   )
+  # An empty slot is no levels, as the engine reads it (`#[serde(default)]`).
+  empty <- fitrx_edit_bundle(path, function(w) {
+    w$data_bindings$levels <- structure(list(), names = character(0))
+    w
+  })
+  expect_length(fitrx_fit_json(empty)$data_bindings$levels, 0L)
+  expect_false(is.null(fitrx_fit_json(empty)$data_bindings$levels))
+  expect_identical(ferx_load_fit(empty)$theta_levels, b$fit$theta_levels)
+})
+
+# Two blocks declared in the order opposite to the wire's sorted one, so
+# declaration order, `theta_name` and `value` all have to come from the model
+# (PR #529 review, finding 4). AST's reference level is derived; `ref` takes
+# init 0 only, and the fit moves its free level off it.
+tl_two_block_model <- function() {
+  tl_write(tl_model(paste0(
+    "  theta TVCL(2.0, 0.001, 20.0)\n",
+    "  theta ZPLA[STUDY, TIME, contrast = none](0.1, -5.0, 5.0)\n",
+    "  theta AST[STUDY, contrast = ref](0.0, -5.0, 5.0)"
+  ), "TVCL + ZPLA + AST"), ".ferx")
+}
+
+test_that("T17h: two blocks keep declaration order, theta names and values through the engine", {
+  model <- tl_two_block_model()
+  data <- tl_write(tl_data, ".csv")
+  fit <- tl_fit(model, data)
+  tl <- fit$theta_levels
+  expect_identical(unique(tl$block), c("ZPLA", "AST"))
+  expect_true(all(tl$value[!is.na(tl$theta_name)] != 0))
+  trip <- fitrx_engine_trip(fit)
+  # The engine reads its wire in sorted order: the order is not on the wire.
+  expect_identical(unique(trip$read$block), c("AST", "ZPLA"))
+  loaded <- ferx_load_fit(trip$core_path)
+  expect_null(fitrx_fit_json(trip$core_path)$r_extras)
+  expect_identical(loaded$theta_levels, tl)
+  expect_identical(ferx_predict(model, data, fit = loaded),
+                   ferx_predict(model, data, fit = fit))
+})
+
+test_that("T17i: a model file edited since the fit is named, not laid out by position", {
+  # A bundle without `model.ferx` falls back on the recorded model path; a
+  # file edited there since the fit must not place the thetas (PR #529
+  # review, findings 1 and 2).
+  model <- tl_two_block_model()
+  data <- tl_write(tl_data, ".csv")
+  fit <- tl_fit(model, data)
+  trip <- fitrx_engine_trip(fit)
+  lines <- readLines(model)
+  z <- grep("theta ZPLA[", lines, fixed = TRUE)
+  a <- grep("theta AST[", lines, fixed = TRUE)
+  lines[c(z, a)] <- lines[c(a, z)]
+  writeLines(lines, model)
+  drop_model <- function(path) fitrx_edit_bundle(path, function(w) {
+    w$model_path <- model
+    w
+  }, drop = "model.ferx")
+  # Engine-written: refused by the model's hash, instead of AST reading
+  # ZPLA's values.
+  expect_error(ferx_load_fit(drop_model(trip$core_path)), "model hash mismatch",
+               fixed = TRUE)
+  # R-written, both copies present: the model is named, neither copy is.
+  msg <- tryCatch({
+    ferx_load_fit(drop_model(trip$r_path))
+    NA_character_
+  }, error = function(e) conditionMessage(e))
+  expect_match(msg, "model hash mismatch", fixed = TRUE)
+  expect_no_match(msg, "two copies", fixed = TRUE)
 })

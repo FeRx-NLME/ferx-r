@@ -26,11 +26,12 @@ fitrx_fit_json <- function(path) {
 }
 
 # A copy of the bundle at `path` with fit.json rewritten through `edit`, in
-# the writer's own JSON settings.
-fitrx_edit_bundle <- function(path, edit) {
+# the writer's own JSON settings, and the archive entries `drop` left out.
+fitrx_edit_bundle <- function(path, edit, drop = character()) {
   staging <- tempfile("fitrx_edit_")
   dir.create(staging)
   utils::unzip(path, exdir = staging, junkpaths = TRUE)
+  unlink(file.path(staging, drop))
   json <- file.path(staging, "fit.json")
   wire <- edit(jsonlite::read_json(json, simplifyVector = FALSE))
   jsonlite::write_json(wire, json, auto_unbox = TRUE, pretty = TRUE,

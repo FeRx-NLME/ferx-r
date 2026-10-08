@@ -117,8 +117,8 @@ ferx_rust_compact_theta_blocks <- function(theta_names) {
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_theta_levels_from_fit <- function(model_path, theta, theta_names, fit_bindings) {
-  .Call("wrap__ferx_rust_theta_levels_from_fit", model_path, theta, theta_names, fit_bindings)
+ferx_rust_theta_levels_from_fit <- function(model_path, model_hash, theta, theta_names, fit_bindings) {
+  .Call("wrap__ferx_rust_theta_levels_from_fit", model_path, model_hash, theta, theta_names, fit_bindings)
 }
 
 #' @title Internal Rust backend binding

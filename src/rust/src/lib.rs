@@ -2016,7 +2016,13 @@ fn level_bindings_to_r(
 /// the frame is built by `level_bindings_to_r`, the builder `ferx_fit()` uses.
 /// A loaded fit's frame and a fresh fit's are therefore one construction.
 ///
+/// The model file is checked against the fit's `model_hash` before it is
+/// parsed (`read_fit_model`, as SIR and covariance do, #492): the layout places
+/// theta by position, so a file edited since the fit would give every level a
+/// neighbour's value without an error (PR #529 review, finding 1).
+///
 /// @param model_path Path to the bundle's model file.
+/// @param model_hash The fit's `model_hash`; empty skips the check.
 /// @param theta,theta_names The fit's theta and its names.
 /// @param fit_bindings The fit's data-derived bindings, as
 ///   `.ferx_fit_binding_args()` flattens them.
@@ -2025,12 +2031,13 @@ fn level_bindings_to_r(
 #[extendr]
 fn ferx_rust_theta_levels_from_fit(
     model_path: &str,
+    model_hash: &str,
     theta: Vec<f64>,
     theta_names: Vec<String>,
     fit_bindings: List,
 ) -> Robj {
     entry(move || {
-        let src = read_fit_model("ferx_load_fit", model_path, "")?;
+        let src = read_fit_model("ferx_load_fit", model_path, model_hash)?;
         let mut parsed = src.parsed;
         let fitted = fit_bindings_from_r(&fit_bindings)?;
         // Not `engine_refusal`: the caller words this as a malformed bundle,

@@ -1,7 +1,7 @@
 # Writes fixtures/theta_levels_pre466.fitrx: a level-block fit saved by a ferx
 # that predates #466, so its level layout is under `r_extras$theta_levels` only
 # (and, predating #430 and #412, without `value` and without `data_bindings`).
-# test-fitrx-data-bindings.R loads it with today's ferx_load_fit().
+# test-theta-levels.R (T17e) loads it with today's ferx_load_fit().
 #
 # Committed as written by ferx 0.4.0.9000 at 6c7d02a (FeRx-NLME/ferx-r#427).
 # Run it with that build, never with a current one, from tests/testthat:

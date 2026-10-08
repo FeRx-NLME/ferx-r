@@ -4,7 +4,13 @@
 \alias{ferx_rust_theta_levels_from_fit}
 \title{Internal Rust backend binding}
 \usage{
-ferx_rust_theta_levels_from_fit(model_path, theta, theta_names, fit_bindings)
+ferx_rust_theta_levels_from_fit(
+  model_path,
+  model_hash,
+  theta,
+  theta_names,
+  fit_bindings
+)
 }
 \description{
 Internal Rust backend binding

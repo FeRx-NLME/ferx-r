@@ -539,20 +539,21 @@ ferx_load_fit <- function(path) {
 # on these bindings (`ferx_rust_theta_levels_from_fit()`) gives the
 # declaration order, which level has its own theta and every level's value,
 # exactly as `ferx_fit()` built them. Returns `fit$theta_levels` unchanged when
-# the slot is absent (a bundle saved before #466, or by the engine for a model
-# without a level block).
+# the slot is absent or empty (a bundle saved before #466, or by the engine for
+# a model without a level block; the engine reads `{}` as no levels too).
 #
 # A bundle that also carries the pre-#466 copy under `r_extras` (an R writer,
 # which keeps writing it for one release) must agree with the slot on the
 # layout, and is refused by column when it does not: one of the two was edited,
-# and there is no telling which.
+# and there is no telling which. A model file edited since the fit is refused
+# before that, by its hash, so it is never blamed on either copy.
 .fitrx_theta_levels_from_bindings <- function(fit, levels) {
-  if (is.null(levels)) return(fit$theta_levels)
+  if (length(levels) == 0L) return(fit$theta_levels)
   bad <- function(why) {
     stop("ferx_load_fit: the bundle's theta level bindings ",
          "(data_bindings$levels) are malformed: ", why, ".", call. = FALSE)
   }
-  if (!is.list(levels) || length(levels) == 0L || is.null(names(levels)) ||
+  if (!is.list(levels) || is.null(names(levels)) ||
       any(names(levels) == "")) {
     bad("expected an object keyed by block")
   }
@@ -585,7 +586,7 @@ ferx_load_fit <- function(path) {
   n <- lengths(lapply(levels, `[[`, "labels"))
   wire <- .ferx_theta_levels_frame(
     block = rep(names(levels), n),
-    index = unlist(lapply(n, seq_len), use.names = FALSE),
+    index = sequence(n),
     label = unlist(lapply(levels, `[[`, "labels"), use.names = FALSE),
     group = unlist(lapply(levels, `[[`, "groups"), use.names = FALSE),
     contrast = rep(vapply(levels, `[[`, character(1L), "contrast"), n),
@@ -594,14 +595,19 @@ ferx_load_fit <- function(path) {
   args <- .ferx_fit_binding_args(list(
     theta_levels = wire, covariate_stats = fit$covariate_stats
   ))
+  # The model file is checked against the fit's hash first: the layout places
+  # theta by position, so a file edited since the fit (one at the recorded
+  # path, when the bundle has no `model.ferx`) would give every level a
+  # neighbour's value without an error. The engine's `model hash mismatch`
+  # names that cause, rather than the bindings.
   tl <- tryCatch(
     ferx_rust_theta_levels_from_fit(
-      model_path, as.numeric(fit$theta), as.character(names(fit$theta)),
-      args$fit_bindings
+      model_path, .ferx_hash_arg(fit$model_hash), as.numeric(fit$theta),
+      as.character(names(fit$theta)), args$fit_bindings
     ),
     error = function(e) {
       stop("ferx_load_fit: the bundle's theta level bindings ",
-           "(data_bindings$levels) do not fit its own model: ",
+           "(data_bindings$levels) could not be laid out on its model file: ",
            conditionMessage(e), call. = FALSE)
     }
   )
