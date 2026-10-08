@@ -501,17 +501,24 @@ test_that("ferx_fit() leaves its own argument refusals uncoded (#517)", {
   plain(fit(settings = list(iov_occasion = "weekly")),
         "fit option `iov_occasion`: unknown value `weekly`")
 
-  # A method token the glue refuses: R's own check stops the ones it does not
-  # list, so this one is only reachable through the glue directly.
-  raised <- tryCatch(
-    ferx:::ferx_rust_fit(model, data, "agq", "false", "false", "", 0L, "", "", "",
-                         character(), character()),
-    error = function(e) conditionMessage(e)
-  )
-  expect_match(raised, "method = \"agq\" has been removed", fixed = TRUE)
-  d <- ferx:::ferx_rust_take_engine_diagnostic()
-  expect_identical(d$code, "")
-  expect_identical(charToRaw(d$text), charToRaw(raised))
+  # Two refusals of the call only the raw glue can reach: a method token R's
+  # own check does not list, and `settings` keys without values (R builds the
+  # two vectors together). Each record is taken straight after its raise: the
+  # next raise overwrites the slot.
+  glue_refusal <- function(method, keys, values, pattern) {
+    raised <- tryCatch(
+      ferx:::ferx_rust_fit(model, data, method, "false", "false", "", 0L, "", "",
+                           "", keys, values),
+      error = function(e) conditionMessage(e)
+    )
+    d <- ferx:::ferx_rust_take_engine_diagnostic()
+    expect_match(raised, pattern, fixed = TRUE)
+    expect_identical(d$code, "", info = pattern)
+    expect_identical(charToRaw(d$text %||% ""), charToRaw(raised), info = pattern)
+  }
+  glue_refusal("agq", character(), character(), "method = \"agq\" has been removed")
+  glue_refusal(character(), "maxiter", character(),
+               "settings keys/values length mismatch (1 vs 0)")
 
   # The model's own refusal still gets its code: without a rule anywhere the
   # fit is refused for want of occasion labels.
