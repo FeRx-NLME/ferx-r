@@ -2,6 +2,11 @@
 
 ## Breaking changes
 
+- **`fit$theta_levels` has a seventh column, `value`** (the fitted value of
+  each level; see New features). Code that checks its `ncol()` or `names()`
+  exactly needs updating
+  ([#430](https://github.com/FeRx-NLME/ferx-r/issues/430)).
+
 - **ferx now builds against ferx-core `826d3bb9`**, up from `e2f9f641`.
   These engine changes reach R:
 
