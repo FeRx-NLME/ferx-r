@@ -130,10 +130,13 @@ genuinely exclude them, use \code{ignore = "CENS == 1"}.}
 
 \item{threads}{Number of worker threads for the per-subject parallel loops
 in the Rust backend (inner EBE search, SAEM, SIR). \code{NULL} (default)
-uses the engine's default: available cores minus one (floored at 1), capped
-at 8 -- most fits gain little from spreading across every core, and not all
-cores are equal on asymmetric platforms (e.g. Apple Silicon E-cores). Pass
-a positive integer to pin the count. The setting is per-call,
+uses the model file's \code{[fit_options] threads}; when the file does not
+set it, the engine's default: available cores minus one (floored at 1),
+capped at 8 -- most fits gain little from spreading across every core, and
+not all cores are equal on asymmetric platforms (e.g. Apple Silicon
+E-cores). \code{0} asks for the engine default by name and overrides a
+count pinned in the file. A positive integer pins the count and overrides
+the file, with a warning when the two differ. The setting is per-call,
 so successive fits in the same R session can use different values.}
 
 \item{mu_referencing}{Logical, or \code{NULL} (the default). When \code{TRUE},

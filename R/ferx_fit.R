@@ -97,10 +97,13 @@
 #'   genuinely exclude them, use \code{ignore = "CENS == 1"}.
 #' @param threads Number of worker threads for the per-subject parallel loops
 #'   in the Rust backend (inner EBE search, SAEM, SIR). \code{NULL} (default)
-#'   uses the engine's default: available cores minus one (floored at 1), capped
-#'   at 8 -- most fits gain little from spreading across every core, and not all
-#'   cores are equal on asymmetric platforms (e.g. Apple Silicon E-cores). Pass
-#'   a positive integer to pin the count. The setting is per-call,
+#'   uses the model file's \code{[fit_options] threads}; when the file does not
+#'   set it, the engine's default: available cores minus one (floored at 1),
+#'   capped at 8 -- most fits gain little from spreading across every core, and
+#'   not all cores are equal on asymmetric platforms (e.g. Apple Silicon
+#'   E-cores). \code{0} asks for the engine default by name and overrides a
+#'   count pinned in the file. A positive integer pins the count and overrides
+#'   the file, with a warning when the two differ. The setting is per-call,
 #'   so successive fits in the same R session can use different values.
 #' @param mu_referencing Logical, or \code{NULL} (the default). When \code{TRUE},
 #'   automatically
@@ -2076,7 +2079,9 @@ ferx_fit <- function(model, data = NULL,
     bloq_arg <- match.arg(tolower(bloq_method), c("drop", "m3"))
   }
   if (is.null(threads)) {
-    threads_arg <- 0L
+    # -1L: not given, keep the model file's `threads` (#505). 0L stays the
+    # engine default named explicitly, which overrides a pinned file value.
+    threads_arg <- -1L
   } else {
     if (!is.numeric(threads) || length(threads) != 1L || !is.finite(threads) ||
       threads != as.integer(threads) || threads < 0L) {
@@ -3399,7 +3404,15 @@ print.ferx_summary <- function(x, ...) {
   warn <- function(key, model_val, call_val) {
     call_str  <- as.character(call_val)
     model_str <- as.character(model_val)
-    if (!identical(tolower(model_str), tolower(call_str))) {
+    model_cmp <- tolower(model_str)
+    call_cmp  <- tolower(call_str)
+    # `threads = auto` in the file and an explicit 0 both mean the engine
+    # default, so they do not conflict (#505).
+    if (identical(key, "threads")) {
+      model_cmp <- sub("^auto$", "0", model_cmp)
+      call_cmp  <- sub("^auto$", "0", call_cmp)
+    }
+    if (!identical(model_cmp, call_cmp)) {
       warning(
         "Model file [fit_options] sets `", key, " = ", model_str,
         "` but ferx_fit() argument overrides it with `", call_str, "`.",

@@ -790,6 +790,17 @@ make_fast_warfarin_no_cov <- function() {
   fx
 }
 
+# Helper: like make_fast_warfarin(), but pin `threads` in the model file's
+# [fit_options] (#505).
+make_fast_warfarin_threads <- function(threads = 9L) {
+  fx <- make_fast_warfarin()
+  src <- readLines(fx$model)
+  src <- src[!grepl("^\\s*threads\\s*=", src)]
+  src <- sub("(\\[fit_options\\])", paste0("\\1\n  threads = ", threads), src)
+  writeLines(src, fx$model)
+  fx
+}
+
 
 
 
@@ -882,6 +893,24 @@ test_that("aliased model-file keys are matched (gradient_method → gradient)", 
       settings_parts     = empty_settings()
     ),
     "gradient_method = ad.*overrides it with `fd`"
+  )
+})
+test_that("file `threads = auto` and an explicit 0 do not conflict (#505)", {
+  # Both mean the engine default; the other spelling pair must still warn.
+  expect_silent(
+    ferx:::.ferx_warn_fit_option_conflicts(
+      model_file_opts    = c(threads = "auto"),
+      dedicated_explicit = list(threads = "0"),
+      settings_parts     = empty_settings()
+    )
+  )
+  expect_warning(
+    ferx:::.ferx_warn_fit_option_conflicts(
+      model_file_opts    = c(threads = "auto"),
+      dedicated_explicit = list(threads = "4"),
+      settings_parts     = empty_settings()
+    ),
+    "threads = auto.*overrides it with `4`"
   )
 })
 test_that("ferx_fit() does not warn when defaults are accepted (regression for #66 review)", {
@@ -1034,6 +1063,48 @@ test_that("ferx_fit() errors when sir = TRUE but the model file disables covaria
     ),
     "requires covariance"
   )
+})
+# The file pins 9 threads on purpose: the engine default is
+# min(max(cores - 1, 1), 8), so no host's default can equal 9 (#505).
+fast_threads_fit <- function(fx, ...) {
+  ferx_fit(fx$model, fx$data, verbose = FALSE,
+           settings = list(max_unconverged_frac = 1.0), ...)
+}
+test_that("ferx_fit() runs on the model file's `threads` when none is passed (#505)", {
+  fx <- make_fast_warfarin_threads(9L)
+  on.exit(unlink(fx$dir, recursive = TRUE))
+  fit <- suppressMessages(fast_threads_fit(fx))
+  expect_identical(as.integer(fit$n_threads_used), 9L)
+})
+test_that("ferx_fit(threads = NULL) is the same as not passing it (#505)", {
+  fx <- make_fast_warfarin_threads(9L)
+  on.exit(unlink(fx$dir, recursive = TRUE))
+  expect_no_warning(fit <- suppressMessages(fast_threads_fit(fx, threads = NULL)))
+  expect_identical(as.integer(fit$n_threads_used), 9L)
+})
+test_that("ferx_fit(threads = n) overrides the model file's `threads` and says so (#505)", {
+  fx <- make_fast_warfarin_threads(9L)
+  on.exit(unlink(fx$dir, recursive = TRUE))
+  expect_warning(
+    fit <- suppressMessages(fast_threads_fit(fx, threads = 3L)),
+    "threads = 9.*overrides it with `3`"
+  )
+  expect_identical(as.integer(fit$n_threads_used), 3L)
+})
+test_that("ferx_fit(threads = 0L) names the engine default and overrides a pinned file value (#505)", {
+  # 0 / "auto" is an explicit request, not 'unset' (ferx-core #1416). A fix that
+  # maps 0 to 'keep the file' fails here.
+  fx <- make_fast_warfarin_threads(9L)
+  on.exit(unlink(fx$dir, recursive = TRUE))
+  fit <- suppressWarnings(suppressMessages(fast_threads_fit(fx, threads = 0L)))
+  expect_lte(as.integer(fit$n_threads_used), 8L)   # engine default is capped at 8
+  expect_false(identical(as.integer(fit$n_threads_used), 9L))
+})
+test_that("ferx_fit() without a `threads` key anywhere keeps the engine default (#505)", {
+  fx <- make_fast_warfarin()
+  on.exit(unlink(fx$dir, recursive = TRUE))
+  fit <- suppressWarnings(suppressMessages(fast_threads_fit(fx)))
+  expect_lte(as.integer(fit$n_threads_used), 8L)
 })
 test_that("ferx_fit() errors when sir = TRUE and covariance = FALSE explicitly", {
   fx <- make_fast_warfarin()
