@@ -224,7 +224,8 @@ fn panic_message(
 /// `#[track_caller]` so that a panic carrying no text can still say which of
 /// the 45 entry points it came out of - see `panic_message`.
 ///
-/// A refusal `engine_refusal` recorded with a code during this call is handed
+/// A refusal recorded during this call - by `engine_refusal` with ferx-core's
+/// code, or by `argument_refusal` with an empty one (ferx-r #517) - is handed
 /// on to `RAISED_DIAGNOSTIC` here, and only when its text is the text being
 /// raised; every raise overwrites that slot, so it never outlives the next one.
 #[track_caller]
@@ -257,11 +258,12 @@ struct EngineDiagnostic {
     suggestion: Option<String>,
 }
 
-/// Recorded by `engine_refusal` during an entry point's body.
+/// Recorded by `engine_refusal` or `argument_refusal` during an entry point's
+/// body.
 static PENDING_DIAGNOSTIC: std::sync::Mutex<Option<EngineDiagnostic>> =
     std::sync::Mutex::new(None);
-/// The diagnostic of the refusal `entry` last raised, if it carried one;
-/// read and cleared by `ferx_rust_take_engine_diagnostic()`.
+/// The record of the refusal `entry` last raised, if it carried one; read and
+/// cleared by `ferx_rust_take_engine_diagnostic()`.
 static RAISED_DIAGNOSTIC: std::sync::Mutex<Option<EngineDiagnostic>> =
     std::sync::Mutex::new(None);
 
@@ -308,13 +310,15 @@ fn argument_refusal(text: String) -> String {
     text
 }
 
-/// The diagnostic code ferx-core attached to the refusal the glue raised
-/// last, for `.ferx_engine_error()` (ferx-r #498).
+/// The record the glue kept for the refusal it raised last, for
+/// `.ferx_engine_error()`: ferx-core's diagnostic code (ferx-r #498), or the
+/// mark of a refusal of the call itself (ferx-r #517).
 ///
-/// @return `NULL` when that refusal carried no code; otherwise a list with
-///   `text` (the raised message), `message`, `code`, `block`, `line` (0 when
-///   unknown) and `suggestion` (`""` when absent). `code` is `""` for a
-///   refusal of the call itself (`argument_refusal`, ferx-r #517).
+/// @return `NULL` when that refusal left no record (an uncoded engine or
+///   glue failure, which R re-validates); otherwise a list with `text` (the
+///   raised message), `message`, `code`, `block`, `line` (0 when unknown) and
+///   `suggestion` (`""` when absent). `code` is `""` for a refusal of the call
+///   itself (`argument_refusal`), which R leaves uncoded without re-validating.
 #[extendr]
 fn ferx_rust_take_engine_diagnostic() -> Robj {
     entry(move || {

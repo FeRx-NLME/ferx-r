@@ -206,12 +206,14 @@ ferx_model_validate <- function(path, data = NULL) {
 #
 # `fallback_stages`: the single-error fallback below labels a failure with the
 # one error validation found, without a text match. `NULL` allows it for any
-# message, which is sound where every failure is a failure of the model or the
-# data (`ferx_fit()`). The glue's refusals of the call itself (a `settings`
-# entry, a method token) are not, and never get this far: the glue records
-# them with an empty code, and `.ferx_engine_coded_error()` returns them as
-# they are (#517). Otherwise a regular expression naming the messages it may
-# apply to; see `.ferx_engine_call()`.
+# message, which `ferx_fit()` passes because almost all of its failures are
+# failures of the model, the data, or the engine on them. The glue's refusals
+# of the call itself (a `settings` entry, a method token) are not, and never
+# get this far: the glue records them with an empty code, and
+# `.ferx_engine_coded_error()` returns them as they are (#517). Two known gaps
+# still reach the fallback: a cancelled fit and a panicked worker (#521).
+# Otherwise a regular expression naming the messages it may apply to; see
+# `.ferx_engine_call()`.
 .ferx_engine_error <- function(e, model, data, fallback_stages = NULL) {
   msg  <- conditionMessage(e)
   coded <- .ferx_engine_coded_error(e, msg)
