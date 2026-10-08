@@ -104,9 +104,12 @@ test_that("P4: the rule survives ferx_save_fit() / ferx_load_fit() (#512)", {
     ferx_save_fit(fit, path)
     loaded <- ferx_load_fit(path)
     expect_identical(loaded$iov_occasion, rule, info = rule)
-    skip_if(is.null(fit$cov_matrix), "covariance step did not converge - skipping")
-    expect_identical(ferx_covariance(loaded)$se_theta, ferx_covariance(fit)$se_theta,
-                     info = rule)
+    # Only the covariance comparison needs a converged step; a skip here would
+    # also drop the next rule's round trip.
+    if (!is.null(fit$cov_matrix)) {
+      expect_identical(ferx_covariance(loaded)$se_theta,
+                       ferx_covariance(fit)$se_theta, info = rule)
+    }
   }
 })
 
@@ -125,6 +128,10 @@ test_that("P5: the .fitrx spelling of the rule is ferx-core's", {
   expect_identical(from("per_dose"), "dose")
   expect_identical(from(list(time_windows = list(24, 48.5))), "time(24, 48.5)")
   expect_identical(from(list(time_windows = list(0.1 + 0.2))), "time(0.30000000000000004)")
+  # No exponent, as Rust's `{}` writes none: round edges are where R's
+  # format() would switch to scientific notation.
+  expect_identical(from(list(time_windows = list(1e5, 2e6))), "time(100000, 2000000)")
+  expect_identical(from(list(time_windows = list(1e-5))), "time(0.00001)")
   expect_error(to("weekly"), "not \"column\"", fixed = TRUE)
   expect_error(from("weekly"), "is not \"column\"", fixed = TRUE)
 })

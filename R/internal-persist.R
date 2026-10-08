@@ -347,10 +347,11 @@
   if (is.list(w) && identical(names(w), "time_windows")) {
     edges <- as.numeric(unlist(w$time_windows, use.names = FALSE))
     # The shortest spelling that reads back to the same double, as the glue
-    # writes it: 120.1, not 120.09999999999999.
+    # writes it: 120.1, not 120.09999999999999; 100000, not 1e+05 (Rust's
+    # `{}` never writes an exponent).
     spell <- vapply(edges, function(e) {
       for (d in 15:17) {
-        s <- format(e, digits = d, trim = TRUE)
+        s <- format(e, digits = d, trim = TRUE, scientific = FALSE)
         if (as.numeric(s) == e) return(s)
       }
       s
