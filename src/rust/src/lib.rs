@@ -1866,8 +1866,8 @@ fn no_fit_levels_error(model: &CompiledModel) -> String {
     format!(
         "the model declares the theta level block(s) {}, but this fit carries no theta \
          level bindings (`fit$theta_levels` is empty or absent), so there is no fitted \
-         theta layout to place the design on. A .fitrx bundle written by ferx-core, or a \
-         fit made before ferx recorded the bindings, does not carry them. Refit with \
+         theta layout to place the design on. A fit made, or a .fitrx bundle saved, before \
+         ferx recorded the bindings does not carry them. Refit with \
          `ferx_fit()` to record them.",
         level_block_names(model)
     )
@@ -2003,6 +2003,108 @@ fn level_bindings_to_r(
         ],
         n,
     ))
+}
+
+/// `fit$theta_levels` for a fit read from a `.fitrx` bundle's native
+/// `data_bindings.levels` (ferx-r #466).
+///
+/// The wire carries each block's `{labels, groups, contrast}`, keyed by block
+/// name in sorted order: not the model's declaration order, not which level has
+/// its own theta, and not the fitted value of a derived level. All three are
+/// the model's, so the bundle's own model file is laid out on the bindings with
+/// core's `layout_from_fit` (the from-fit prologue SIR and covariance run) and
+/// the frame is built by `level_bindings_to_r`, the builder `ferx_fit()` uses.
+/// A loaded fit's frame and a fresh fit's are therefore one construction.
+///
+/// The model file is checked against the fit's `model_hash` before it is
+/// parsed (`read_fit_model`, as SIR and covariance do, #492): the layout places
+/// theta by position, so a file edited since the fit would give every level a
+/// neighbour's value without an error (PR #529 review, finding 1).
+///
+/// @param model_path Path to the bundle's model file.
+/// @param model_hash The fit's `model_hash`; empty skips the check.
+/// @param theta,theta_names The fit's theta and its names.
+/// @param fit_bindings The fit's data-derived bindings, as
+///   `.ferx_fit_binding_args()` flattens them.
+/// @return A data frame with the columns of `fit$theta_levels`.
+/// @export
+#[extendr]
+fn ferx_rust_theta_levels_from_fit(
+    model_path: &str,
+    model_hash: &str,
+    theta: Vec<f64>,
+    theta_names: Vec<String>,
+    fit_bindings: List,
+) -> Robj {
+    entry(move || {
+        let src = read_fit_model("ferx_load_fit", model_path, model_hash)?;
+        let mut parsed = src.parsed;
+        let fitted = fit_bindings_from_r(&fit_bindings)?;
+        // Not `engine_refusal`: the caller words this as a malformed bundle,
+        // and no diagnostic code should outlive the call.
+        bind_layout_from_fit(&mut parsed, &src.text, &fitted).map_err(|e| e.to_string())?;
+        level_bindings_to_r(&parsed.model, &fitted.levels, &theta_names, &theta)
+    })
+}
+
+/// Read a `.fitrx` bundle with ferx-core's own loader and write it back with
+/// ferx-core's own writer (ferx-r #466): the engine's side of a bundle round
+/// trip, for the tests that hold `ferx_save_fit()` / `ferx_load_fit()` to the
+/// engine's wire rather than to each other.
+///
+/// The bundle must carry `data.csv` (`ferx_save_fit(include_data = TRUE)`):
+/// core's writer re-derives the predictions table from the population. The
+/// re-written bundle bundles no data.
+///
+/// @param path The bundle to read.
+/// @param out_path Where core writes it back.
+/// @return The level bindings core's loader read, one row per level in core's
+///   order (blocks sorted by name, levels in level order): `block`, `label`,
+///   `group` and `contrast`.
+/// @export
+#[extendr]
+fn ferx_rust_fitrx_engine_resave(path: &str, out_path: &str) -> Robj {
+    entry(move || {
+        use ferx_core::io::fitrx::{load_fit, save_fit, SaveFitOptions};
+        let loaded = load_fit(Path::new(path))
+            .map_err(|e| format!("ferx-core's .fitrx loader refused `{path}`: {e}"))?;
+        let population = loaded.population.as_ref().ok_or_else(|| {
+            format!("`{path}` bundles no data.csv; save it with `include_data = TRUE`")
+        })?;
+        save_fit(
+            &loaded.fit,
+            population,
+            &loaded.model_source,
+            Path::new(out_path),
+            SaveFitOptions::default(),
+        )
+        .map_err(|e| format!("ferx-core's .fitrx writer refused `{out_path}`: {e}"))?;
+
+        let levels: std::collections::BTreeMap<_, _> =
+            loaded.fit.data_bindings.levels.iter().collect();
+        let mut block: Vec<String> = Vec::new();
+        let mut label: Vec<String> = Vec::new();
+        let mut group: Vec<i32> = Vec::new();
+        let mut contrast: Vec<String> = Vec::new();
+        for (name, b) in levels {
+            for (i, l) in b.labels.iter().enumerate() {
+                block.push(name.clone());
+                label.push(l.clone());
+                group.push(b.groups.get(i).map_or(i32::MIN, |g| *g as i32));
+                contrast.push(level_contrast_token(b.contrast).to_string());
+            }
+        }
+        let n = block.len();
+        Ok(finish_df(
+            vec![
+                ("block", block.into()),
+                ("label", label.into()),
+                ("group", group.into()),
+                ("contrast", contrast.into()),
+            ],
+            n,
+        ))
+    })
 }
 
 /// An R integer as R prints it: `NA_integer_` arrives as `i32::MIN`.
@@ -10129,6 +10231,8 @@ extendr_module! {
     fn ferx_rust_test_panic;
     fn ferx_rust_known_blocks;
     fn ferx_rust_compact_theta_blocks;
+    fn ferx_rust_theta_levels_from_fit;
+    fn ferx_rust_fitrx_engine_resave;
     fn ferx_rust_eta_info_by_name;
     fn ferx_rust_classify_warnings;
     fn ferx_rust_validate_model;

@@ -483,6 +483,18 @@
 
 ## New features
 
+- **`.fitrx` bundles carry theta level layouts both ways between R and
+  ferx-core.** `ferx_save_fit()` writes `fit$theta_levels` into ferx-core's
+  own `data_bindings.levels` slot of `fit.json`, so the engine reads an R
+  bundle's layout. `ferx_load_fit()` reads it from there, so a bundle written
+  by ferx-core loads with its `theta_levels` (values included) and drives
+  `ferx_predict()`, `ferx_simulate()`, `ferx_sir()` and the other from-fit
+  paths instead of being refused. Bundles saved before this change still load
+  from their R-only copy, and new bundles keep writing that copy for one
+  release so an older ferx can read them. When the two copies disagree, the
+  load is refused, naming the columns that differ
+  ([#466](https://github.com/FeRx-NLME/ferx-r/issues/466)).
+
 - **`fit$theta_levels` has a `value` column, and `print()` collapses large
   theta blocks.** `value` is each level's fitted value, the levels a
   contrast derives included (minus the group sum under `sum_to_zero` /
