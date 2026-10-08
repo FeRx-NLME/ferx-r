@@ -578,6 +578,16 @@
 
 ## Bug fixes
 
+- **`ferx_fit()` no longer labels a bad `settings =` entry with an unrelated
+  diagnostic code** ([#517](https://github.com/FeRx-NLME/ferx-r/issues/517)).
+  On a model and data with exactly one validation error, a reserved, unknown
+  or mis-valued setting was refused as a `ferx_engine_error` carrying that
+  error's code: `settings = list(sir = TRUE)` on an IOV model without an
+  occasion column read "setting `sir` conflicts with a dedicated ferx_fit()
+  argument ... [E_IOV_MISSING_OCC]". A refusal of the call itself is now a
+  plain error with no code. The model's and the data's own refusals keep
+  theirs.
+
 - **A model file that pins `threads` in `[fit_options]` now takes effect from
   `ferx_fit()`** ([#505](https://github.com/FeRx-NLME/ferx-r/issues/505)).
   `threads = NULL` (the default) was sent to the engine as "engine default",
