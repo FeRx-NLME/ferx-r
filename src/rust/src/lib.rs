@@ -339,10 +339,10 @@ const POLL_MS: u64 = 100;
 ///   model file's [fit_options] value
 /// @param verbose Print progress: "true"/"false", or "" to keep the model default
 /// @param bloq_method BLOQ handling: "drop", "m3", or "" to use the model default
-/// @param threads Number of rayon worker threads for the per-subject parallel
-///   loops. Pass `0` (or any value `<= 0`) to leave rayon's global pool alone
-///   (one worker per logical CPU). Positive values run this fit inside a
-///   scoped local pool of that size.
+/// @param threads Number of worker threads for the per-subject parallel
+///   loops. `< 0`: not given, keep the model file's [fit_options] threads
+///   (#505). `0`: the engine default (cores - 1, capped at 8), requested
+///   explicitly, so it overrides a pinned file value. `> 0`: pin the count.
 /// @param mu_referencing Use mu-referencing for ETA initialisation:
 ///   "true"/"false", or "" to keep the model default
 /// @param sir Run SIR uncertainty estimation as a post-fit step: "true"/"false",
@@ -538,11 +538,12 @@ fn ferx_rust_fit(
         apply_flag(&mut opts.verbose, verbose, "verbose");
         apply_flag(&mut opts.mu_referencing, mu_referencing, "mu_referencing");
         apply_flag(&mut opts.sir, sir, "sir");
-        opts.threads = if threads > 0 {
-            Some(threads as usize)
-        } else {
-            None
-        };
+        // threads < 0: R passed NULL, keep the model file's `threads` (#505).
+        // threads == 0: the engine default, named explicitly - it overrides a
+        // pinned file value (ferx-core #1416). threads > 0: pin.
+        if threads >= 0 {
+            opts.threads = (threads > 0).then_some(threads as usize);
+        }
 
         // Optional R-side override for BLOQ handling. Empty string → keep whatever
         // the model file specified.

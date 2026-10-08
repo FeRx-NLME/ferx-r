@@ -647,6 +647,18 @@
   both steps, and `ferx_save_fit()` / `ferx_load_fit()` keep it under the key
   ferx-core writes. `ferx_sir()` then repeats the fit's own SIR exactly.
 
+- **A model file that pins `threads` in `[fit_options]` now takes effect from
+  `ferx_fit()`** ([#505](https://github.com/FeRx-NLME/ferx-r/issues/505)).
+  `threads = NULL` (the default) was sent to the engine as "engine default",
+  which overwrote the file's value, so a file with `threads = 16` ran on at
+  most 8 workers without a message. This is the `threads` case that the
+  FeRx-NLME/ferx-core#558 fix missed. `NULL` now keeps the file's value.
+  `threads = 0` still asks for the engine default by name and overrides the
+  file. **Visible change:** a file that pins a count now runs on that count,
+  even on a machine with fewer cores. Separately, a file `threads = auto` with
+  an explicit `threads = 0` no longer triggers an override warning, since both
+  mean the engine default. `ferx_fit_async()` gets both changes.
+
 - **`ferx_sir()` and `ferx_covariance()` report a model file edited after
   the fit as edited** ([#492](https://github.com/FeRx-NLME/ferx-r/issues/492)).
   An edit that adds a theta level block (`theta TVKA[ID, ...]`) or a
