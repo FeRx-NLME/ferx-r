@@ -2,6 +2,64 @@
 
 ## Breaking changes
 
+- **ferx now builds against ferx-core `826d3bb9`**, up from `e2f9f641`.
+  These engine changes reach R:
+
+  - **TTE, binary and Markov models get correct standard errors under
+    `covariance_method = "s"` / `"rsr"`, and the gradient optimizers no
+    longer stall on them**
+    ([ferx-core #1744](https://github.com/FeRx-NLME/ferx-core/issues/1744)).
+    The score left out the non-Gaussian term: on `tte_exponential` `rsr`
+    reported an SE of 0.0028 where 0.0086 is right (0 without random
+    effects), and `optimizer = "lbfgs"` stayed at the initial estimates.
+    Fits with the default optimizer and `covariance_method = "r"` do not
+    move.
+  - **`ferx_covariance()` and `ferx_sir()` are right on LTBS fits and on fits
+    whose occasions come from `iov_occasion`**
+    ([ferx-core #1790](https://github.com/FeRx-NLME/ferx-core/issues/1790)).
+    They did not log-transform DV (standard errors hundreds of times too
+    large, reported as computed), and derived no occasions (a failed
+    covariance step, an SIR effective sample size of 1). A rule passed only
+    through `ferx_fit(settings = list(iov_occasion = ...))` now reaches them
+    too ([#512](https://github.com/FeRx-NLME/ferx-r/issues/512); see Bug
+    fixes).
+  - **Theta level-block and `[covariate_model]` statistics refusals carry
+    their code** (`E_THETA_LEVEL_BINDING` on `parameters`,
+    `E_COVARIATE_STATS_BINDING` on `covariate_model`) on every path, `fit =`
+    included
+    ([ferx-core #1791](https://github.com/FeRx-NLME/ferx-core/issues/1791)).
+  - **`ferx_predict_survival()` and `ferx_calc_npde()` refuse a covariate the
+    data lacks or an unbound theta level block**, as `ferx_predict()` does, instead of returning wrong or `NaN`
+    values; a population bound on other levels than the model's is refused
+    as `E_THETA_LEVELS_DATA_MISMATCH`
+    ([ferx-core #1792](https://github.com/FeRx-NLME/ferx-core/issues/1792)).
+  - **A mis-shaped omega, sigma or IOV omega is refused as `E_PARAM_SHAPE`**
+    by fitting, simulation, NPDE, `ferx_sir()` and `ferx_covariance()`,
+    instead of a panic or being ignored
+    ([ferx-core #1787](https://github.com/FeRx-NLME/ferx-core/issues/1787)).
+  - **`ferx_covariance()` and `ferx_sir()` use the default inner solver, not
+    the one the last fit in the session happened to use**
+    ([ferx-core #1801](https://github.com/FeRx-NLME/ferx-core/issues/1801)).
+    `inner_optimizer` and `ebe_warm_start` now apply to their own call only;
+    the engine's process-wide `set_inner_optimizer` / `set_ebe_warm_start`
+    are removed.
+  - **`fit$sir_seed_used` is the seed SIR resampled with**: the given
+    `sir_seed`, or 12345 when it was unset (it was `NA`); `NA` when SIR did
+    not run, even if a `sir_seed` was given. `ferx_sir()` now sets it to its
+    own run's seed instead of keeping the input fit's
+    ([ferx-core #1767](https://github.com/FeRx-NLME/ferx-core/issues/1767)).
+  - **A fit records the reader settings and a fingerprint of its population**
+    in the engine
+    ([ferx-core #1776](https://github.com/FeRx-NLME/ferx-core/issues/1776)).
+    Nothing changes in R yet: carrying them into the R fit follows in
+    [#462](https://github.com/FeRx-NLME/ferx-r/issues/462).
+  - **A fit records the inner-loop and ODE settings of the stage that
+    produced its estimates**
+    ([ferx-core #1805](https://github.com/FeRx-NLME/ferx-core/issues/1805)),
+    so the engine's covariance step can repeat them. `ferx_covariance()`
+    does not use the record yet; it still takes those settings from its own
+    defaults ([#511](https://github.com/FeRx-NLME/ferx-r/issues/511)).
+
 - **`ferx_se()` returns `NA` for a FIX parameter, not `0`**
   ([#451](https://github.com/FeRx-NLME/ferx-r/issues/451)). A held parameter
   has no standard error. `fit$estimates$fixed` says which parameters were
@@ -428,9 +486,10 @@
   [ferx-core #1746](https://github.com/FeRx-NLME/ferx-core/issues/1746)).
   The code used to be recovered by re-validating the model and data, which
   could not see a from-fit design and left those refusals uncoded. A refusal
-  the engine gives no code still goes through re-validation, as does a theta
-  level-block refusal until
-  [ferx-core #1773](https://github.com/FeRx-NLME/ferx-core/issues/1773).
+  the engine gives no code still goes through re-validation. Theta
+  level-block and `[covariate_model]` statistics refusals carry their code
+  since the bump to ferx-core `826d3bb9`
+  ([ferx-core #1773](https://github.com/FeRx-NLME/ferx-core/issues/1773)).
   `ferx_sir()` and `ferx_covariance()` refusals are now classified like the
   other entry points': the engine's code when it gives one, otherwise
   re-validation of the model and data.
@@ -577,6 +636,16 @@
   MBMA data is licensed CC BY-NC.
 
 ## Bug fixes
+
+- **`ferx_sir()` and `ferx_covariance()` run on a fit whose `iov_occasion`
+  was passed only through `settings =`**
+  ([#512](https://github.com/FeRx-NLME/ferx-r/issues/512)). With the model
+  file setting no rule and the data no occasion column, both refused the fit
+  after ferx-core #1790 ("this fit records no IOV occasion rule"), and before
+  it ran without occasions. The fit now records the rule as
+  `fit$iov_occasion` (`"column"`, `"dose"` or `"time(24, 48)"`), hands it to
+  both steps, and `ferx_save_fit()` / `ferx_load_fit()` keep it under the key
+  ferx-core writes. `ferx_sir()` then repeats the fit's own SIR exactly.
 
 - **`ferx_fit()` no longer labels a bad `settings =` entry with an unrelated
   diagnostic code** ([#517](https://github.com/FeRx-NLME/ferx-r/issues/517)).

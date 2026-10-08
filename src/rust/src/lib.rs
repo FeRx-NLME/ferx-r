@@ -502,7 +502,8 @@ fn ferx_rust_fit(
         // of the (selected) dataset. The bind re-parses `parsed.model`, so it has
         // to come before every stamp on the model below - a stamp made earlier is
         // silently lost. No-op without a re-parse for a model with no level block.
-        bind_design(&mut parsed, model_path, &mut population)?;
+        bind_design(&mut parsed, model_path, &mut population)
+            .map_err(|e| engine_refusal("", e))?;
 
         // Re-apply the (now settings-merged) ODE solver tolerances onto the model's
         // OdeSpec so call-time `ode_reltol` / `ode_abstol` / `ode_max_steps`
@@ -750,7 +751,8 @@ fn ferx_rust_simulate(
         // A level block's theta layout comes from this design: the model's own
         // initial values drive it, so the design's levels are the right ones
         // (ferx-r #370). No-op for a model with no level block.
-        bind_design(&mut parsed, model_path, &mut population)?;
+        bind_design(&mut parsed, model_path, &mut population)
+            .map_err(|e| engine_refusal("", e))?;
 
         let opts = ferx_core::SimulateOptions {
             seed: Some(seed as u64),
@@ -852,7 +854,8 @@ fn ferx_rust_simulate_from_fit(
         // Place the design on the fit's theta layout before anything reads theta
         // by position (ferx-r #370); see `bind_design_from_fit`.
         let fitted = fit_bindings_from_r(&fit_bindings)?;
-        bind_design_from_fit(&mut parsed, model_path, &mut population, &fitted)?;
+        bind_design_from_fit(&mut parsed, model_path, &mut population, &fitted)
+            .map_err(|e| engine_refusal("", e))?;
 
         let params = match params_from_fit(
             &parsed.model,
@@ -968,7 +971,7 @@ fn ferx_rust_simulate_adaptive(
         // initial values drive it, so the design's levels are the right ones
         // (ferx-r #370). No-op for a model with no level block.
         bind_design(&mut parsed, model_path, &mut population)
-            .map_err(|e| format!("ferx_simulate_adaptive: {e}"))?;
+            .map_err(|e| engine_refusal("ferx_simulate_adaptive: ", e))?;
 
         // The spec owns the decision schedule (`at`) and the monitored signal
         // (`observe` / `with_assay_error`), so `decision_times` and `monitors` stay
@@ -1192,7 +1195,8 @@ fn ferx_rust_simulate_with_uncertainty(
         // Place the design on the fit's theta layout before anything reads theta
         // by position (ferx-r #370); see `bind_design_from_fit`.
         let fitted = fit_bindings_from_r(&fit_bindings)?;
-        bind_design_from_fit(&mut parsed, model_path, &mut population, &fitted)?;
+        bind_design_from_fit(&mut parsed, model_path, &mut population, &fitted)
+            .map_err(|e| engine_refusal("", e))?;
 
         // Decode the method string to the engine enum.
         let uncertainty_method = match method.trim().to_lowercase().as_str() {
@@ -1290,7 +1294,8 @@ fn ferx_rust_predict(
         // A level block's theta layout comes from this design: the model's own
         // initial values drive it, so the design's levels are the right ones
         // (ferx-r #370). No-op for a model with no level block.
-        bind_design(&mut parsed, model_path, &mut population)?;
+        bind_design(&mut parsed, model_path, &mut population)
+            .map_err(|e| engine_refusal("", e))?;
 
         let output = ferx_core::predict_diag(&parsed.model, &population, &parsed.model.default_params)
             .map_err(|e| engine_refusal("Error predicting: ", e))?;
@@ -1365,7 +1370,8 @@ fn ferx_rust_predict_from_fit(
         // Place the design on the fit's theta layout before anything reads theta
         // by position (ferx-r #370); see `bind_design_from_fit`.
         let fitted = fit_bindings_from_r(&fit_bindings)?;
-        bind_design_from_fit(&mut parsed, model_path, &mut population, &fitted)?;
+        bind_design_from_fit(&mut parsed, model_path, &mut population, &fitted)
+            .map_err(|e| engine_refusal("", e))?;
 
         let params = match params_from_fit(
             &parsed.model,
@@ -1461,7 +1467,8 @@ fn ferx_rust_predict_survival(model_path: &str, data_path: &str, times: Vec<f64>
         // A level block's theta layout comes from this design: the model's own
         // initial values drive it, so the design's levels are the right ones
         // (ferx-r #370). No-op for a model with no level block.
-        bind_design(&mut parsed, model_path, &mut population)?;
+        bind_design(&mut parsed, model_path, &mut population)
+            .map_err(|e| engine_refusal("", e))?;
 
         let results =
             ferx_core::predict_survival(&parsed.model, &population, &parsed.model.default_params, &times)
@@ -1523,7 +1530,8 @@ fn ferx_rust_predict_survival_from_fit(
         // Place the design on the fit's theta layout before anything reads theta
         // by position (ferx-r #370); see `bind_design_from_fit`.
         let fitted = fit_bindings_from_r(&fit_bindings)?;
-        bind_design_from_fit(&mut parsed, model_path, &mut population, &fitted)?;
+        bind_design_from_fit(&mut parsed, model_path, &mut population, &fitted)
+            .map_err(|e| engine_refusal("", e))?;
 
         let params = match params_from_fit(
             &parsed.model,
@@ -1623,7 +1631,8 @@ fn ferx_rust_npde_from_fit(
         // Place the design on the fit's theta layout before anything reads theta
         // by position (ferx-r #370); see `bind_design_from_fit`.
         let fitted = fit_bindings_from_r(&fit_bindings)?;
-        bind_design_from_fit(&mut parsed, model_path, &mut population, &fitted)?;
+        bind_design_from_fit(&mut parsed, model_path, &mut population, &fitted)
+            .map_err(|e| engine_refusal("", e))?;
 
         let params = match params_from_fit(
             &parsed.model,
@@ -1749,11 +1758,14 @@ fn needs_covariate_stats(parsed: &ParsedModel) -> bool {
 /// on a model that declares neither. The engine's refusal is passed through
 /// unprefixed: neither stage prefix applies, and either would let
 /// `.ferx_engine_call()`'s single-error fallback attach an unrelated code.
+/// It stays the `EngineError` core returned (ferx-core #1791), so the caller's
+/// `engine_refusal` hands R its `E_THETA_LEVEL_BINDING` /
+/// `E_COVARIATE_STATS_BINDING`; the three binders below return it the same way.
 fn bind_design(
     parsed: &mut ParsedModel,
     model_path: &str,
     population: &mut Population,
-) -> std::result::Result<(), String> {
+) -> std::result::Result<(), ferx_core::EngineError> {
     if !declares_level_blocks(parsed) && !needs_covariate_stats(parsed) {
         return Ok(());
     }
@@ -1806,7 +1818,7 @@ fn bind_design_from_fit(
     model_path: &str,
     population: &mut Population,
     fitted: &DataBindings,
-) -> std::result::Result<(), String> {
+) -> std::result::Result<(), ferx_core::EngineError> {
     let model_text = from_fit_model_text(parsed, model_path, fitted)?;
     ferx_core::api::bind_from_fit(parsed, &model_text, population, fitted)
 }
@@ -1848,7 +1860,7 @@ fn bind_layout_from_fit(
     parsed: &mut ParsedModel,
     model_text: &str,
     fitted: &DataBindings,
-) -> std::result::Result<(), String> {
+) -> std::result::Result<(), ferx_core::EngineError> {
     refuse_unbound_levels(parsed, fitted)?;
     ferx_core::api::layout_from_fit(parsed, model_text, fitted)
 }
@@ -2667,6 +2679,15 @@ fn default_fit_result(
         // ferx-core main added a checkpoint-restore flag; a defaulted FitResult is
         // never a restored one.
         restored_from_checkpoint: false,
+        // ferx-core #1767 / #1805 / #1776 / #1790: the settings a fit's SIR and
+        // estimating stage ran under, how it read its data, a fingerprint of its
+        // population and its IOV occasion rule. This scaffold carries R-supplied
+        // estimates into the uncertainty draws, which read none of them.
+        sir_settings: None,
+        scoring_settings: None,
+        reader_settings: None,
+        population_fingerprint: None,
+        iov_occasion: None,
         // ferx-core #1668: the level-block / covariate-statistic bindings the model was
         // compiled from, copied as ferx-core's own fit() does.
         data_bindings: model.data_bindings().clone(),
@@ -3859,6 +3880,11 @@ fn fit_result_to_list(
         data_path = result.data_path.clone().unwrap_or_default(),
         model_hash = result.model_hash.clone().unwrap_or_default(),
         data_hash = result.data_hash.clone().unwrap_or_default(),
+        // The IOV occasion rule the fit ran with (ferx-core #1783), in the
+        // `settings = list(iov_occasion = ...)` spelling; "" when the engine
+        // recorded none. `ferx_sir()` / `ferx_covariance()` hand it back
+        // (ferx-r #512).
+        iov_occasion = result.iov_occasion.as_ref().map(iov_occasion_to_r).unwrap_or_default(),
         uses_sde = result.uses_sde,
         saem_n_subjects_hmc = result.saem_n_subjects_hmc.map(|n| n as i32),
         dw_statistic = result.dw_statistic,
@@ -4723,6 +4749,41 @@ struct FitSkeletonInputs<'a> {
     residual_rho: &'a [f64],
     eta_hats_flat: &'a [f64],
     subject_ids: &'a [String],
+    /// `fit$iov_occasion`; "" when the fit carries none.
+    iov_occasion: &'a str,
+}
+
+/// An IOV occasion rule in the spelling `ferx_fit(settings = list(iov_occasion =
+/// ...))` takes, which `iov_occasion_from_r` reads back to the same rule: an
+/// edge's `{}` is the shortest text that parses to the same `f64`.
+fn iov_occasion_to_r(rule: &ferx_core::IovOccasionRule) -> String {
+    match rule {
+        ferx_core::IovOccasionRule::Column => "column".to_string(),
+        ferx_core::IovOccasionRule::PerDose => "dose".to_string(),
+        ferx_core::IovOccasionRule::TimeWindows(edges) => format!(
+            "time({})",
+            edges.iter().map(|e| e.to_string()).collect::<Vec<_>>().join(", ")
+        ),
+    }
+}
+
+/// `fit$iov_occasion` as the rule the skeleton records, so `run_sir` /
+/// `run_covariance` derive the population's occasions as the fit did (ferx-core
+/// #1783). Without it they fall back to the model file's `[fit_options]`, and a
+/// rule passed only through `settings =` is refused for want of occasion labels
+/// (ferx-r #512). Read by core's own `[fit_options]` parser; "" is `None`, a fit
+/// that records no rule.
+fn iov_occasion_from_r(
+    entry_point: &str,
+    value: &str,
+) -> std::result::Result<Option<ferx_core::IovOccasionRule>, String> {
+    if value.is_empty() {
+        return Ok(None);
+    }
+    let mut opts = ferx_core::FitOptions::default();
+    ferx_core::parser::model_parser::apply_fit_option(&mut opts, "iov_occasion", value)
+        .map_err(|e| format!("{entry_point}: `fit$iov_occasion`: {e}"))?;
+    Ok(Some(opts.iov_occasion))
 }
 
 /// The skeleton `FitResult` `ferx_core::run_sir` and `ferx_core::run_covariance`
@@ -4750,6 +4811,7 @@ fn fit_skeleton(
     let n_sigma = x.sigma.len();
     let n_eta = x.omega_dim.max(0) as usize;
     let n_subj = x.subject_ids.len();
+    let iov_occasion = iov_occasion_from_r(entry_point, x.iov_occasion)?;
 
     if n_theta != template.theta.len() {
         return Err(theta_length_error(entry_point, model, n_theta, template.theta.len()));
@@ -4837,6 +4899,16 @@ fn fit_skeleton(
     Ok(FitResult {
         // ferx-core main added a checkpoint-restore flag; neither step reads it.
         restored_from_checkpoint: false,
+        // ferx-core #1767 / #1805: no record of the settings the fit's SIR or its
+        // estimating stage ran under, so `run_sir` / `run_covariance` resolve them
+        // from the options R passes, as before. #1776: no reader settings or
+        // population fingerprint; the steps re-read `data_path` as they did.
+        sir_settings: None,
+        scoring_settings: None,
+        reader_settings: None,
+        population_fingerprint: None,
+        // ferx-core #1783: the rule the fit derived its occasions with (ferx-r #512).
+        iov_occasion,
         // ferx-core #1668: the bindings the model was compiled from, as fit() copies them.
         data_bindings: model.data_bindings().clone(),
         // ferx-core #1444 / covariance-estimator label: a skeleton FitResult ran
@@ -5067,6 +5139,8 @@ fn fit_skeleton(
 /// @param subject_ids The fit's subject IDs, verbatim and in fit order. The
 ///   engine checks them against the population it re-reads from the data
 ///   (ferx-r #468); their length is the subject count.
+/// @param iov_occasion `fit$iov_occasion`, the IOV occasion rule the fit ran
+///   with (ferx-r #512); "" when the fit records none.
 /// @param sir_samples Number of proposal samples (M).
 /// @param sir_resamples Number of resamples (m); must be <= M.
 /// @param sir_seed Random seed; pass -1 for the engine default.
@@ -5099,6 +5173,7 @@ fn ferx_rust_sir(
     cov_matrix_dim: i32,
     eta_hats_flat: Vec<f64>,
     subject_ids: Vec<String>,
+    iov_occasion: &str,
     sir_samples: i32,
     sir_resamples: i32,
     sir_seed: i32,
@@ -5120,7 +5195,8 @@ fn ferx_rust_sir(
         // On a level-block fit, the theta is the fit's layout: size the skeleton
         // from it, and carry it to the engine in the skeleton's `data_bindings`.
         let fitted = fit_bindings_from_r(&fit_bindings)?;
-        bind_layout_from_fit(&mut parsed, &src.text, &fitted)?;
+        bind_layout_from_fit(&mut parsed, &src.text, &fitted)
+            .map_err(|e| engine_refusal("", e))?;
         let model = &parsed.model;
 
         let n_packed = cov_matrix_dim.max(0) as usize;
@@ -5150,6 +5226,7 @@ fn ferx_rust_sir(
             residual_rho: &residual_rho,
             eta_hats_flat: &eta_hats_flat,
             subject_ids: &subject_ids,
+            iov_occasion,
         };
         let fit = fit_skeleton("ferx_sir", model, &inputs, Some(cov_mat))?;
 
@@ -5211,6 +5288,9 @@ fn ferx_rust_sir(
             sir_resamples = sir_resamples_flat,
             sir_resamples_n = sir_resamples_n,
             sir_resamples_dim = sir_resamples_dim,
+            // The seed this run resampled with, resolved (ferx-core #1767):
+            // `sir_seed`, or the engine's default when R passed none.
+            sir_seed_used = new_fit.sir_seed.map(|s| s as f64),
             warnings = new_fit.warnings.clone()
         )
         .into())
@@ -5255,6 +5335,8 @@ fn ferx_rust_sir(
 /// @param subject_ids The fit's subject IDs, verbatim and in fit order. The
 ///   engine checks them against the population it re-reads from the data
 ///   (ferx-r #468); their length is the subject count.
+/// @param iov_occasion `fit$iov_occasion`, the IOV occasion rule the fit ran
+///   with (ferx-r #512); "" when the fit records none.
 /// @param covariance_method Covariance estimator: "r"/"hessian", "s"/"cross_product", or "rsr"/"sandwich".
 /// @param mu_referencing TRUE to use mu-referencing for the inner-loop warm restart.
 /// @param verbose When TRUE, the engine prints progress to stderr.
@@ -5280,6 +5362,7 @@ fn ferx_rust_covariance(
     residual_rho: Vec<f64>,
     eta_hats_flat: Vec<f64>,
     subject_ids: Vec<String>,
+    iov_occasion: &str,
     covariance_method: &str,
     mu_referencing: bool,
     verbose: bool,
@@ -5295,7 +5378,8 @@ fn ferx_rust_covariance(
         // On a level-block fit, the theta is the fit's layout: size the skeleton
         // from it, and carry it to the engine in the skeleton's `data_bindings`.
         let fitted = fit_bindings_from_r(&fit_bindings)?;
-        bind_layout_from_fit(&mut parsed, &src.text, &fitted)?;
+        bind_layout_from_fit(&mut parsed, &src.text, &fitted)
+            .map_err(|e| engine_refusal("", e))?;
         let model = &parsed.model;
 
         let covariance_method_enum = match covariance_method.to_lowercase().as_str() {
@@ -5325,6 +5409,7 @@ fn ferx_rust_covariance(
             residual_rho: &residual_rho,
             eta_hats_flat: &eta_hats_flat,
             subject_ids: &subject_ids,
+            iov_occasion,
         };
         let fit = fit_skeleton("ferx_covariance", model, &inputs, None)?;
 

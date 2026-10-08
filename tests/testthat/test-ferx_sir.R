@@ -710,3 +710,19 @@ test_that("ferx_sir drops only the replaced run's SIR lines (ferx-core #1723)", 
   expect_identical(out$warnings, c(kept, fresh))
   expect_identical(out$warnings_structured$message, c(kept, fresh))
 })
+
+# `sir_seed_used` is the seed the SIR run resampled with (ferx-core #1767):
+# the given one, or the engine's default 12345, never the input fit's. The
+# fit made without SIR records none, whatever `sir_seed` it was given.
+# Mutation that reddens this: drop `fit$sir_seed_used <- raw$sir_seed_used`
+# from ferx_sir(), which keeps the input fit's NA.
+test_that("ferx_sir sets sir_seed_used to the seed of its own run", {
+  fit <- warfarin_fit_cov()
+  skip_if(is.null(fit$cov_matrix), sir_cov_skip)
+  expect_identical(fit$sir_seed_used, NA_real_)
+  seeded <- ferx_sir(fit, sir_samples = 8L, sir_resamples = 4L, sir_seed = 4L)
+  expect_identical(seeded$sir_seed_used, 4)
+  expect_identical(
+    ferx_sir(seeded, sir_samples = 8L, sir_resamples = 4L)$sir_seed_used, 12345
+  )
+})

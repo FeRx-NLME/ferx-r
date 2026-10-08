@@ -23,6 +23,7 @@ ferx_rust_sir(
   cov_matrix_dim,
   eta_hats_flat,
   subject_ids,
+  iov_occasion,
   sir_samples,
   sir_resamples,
   sir_seed,

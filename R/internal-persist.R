@@ -312,3 +312,52 @@
   }
   df
 }
+
+# `fit$iov_occasion` (the `settings = list(iov_occasion = ...)` spelling the
+# glue writes: "column", "dose" or "time(24, 48.5)") to and from the `.fitrx`
+# key ferx-core writes for `FitResult::iov_occasion` (#1783): "column",
+# "per_dose" or {"time_windows": [24, 48.5]}. NULL both ways when the fit
+# records no rule, so `ferx_sir()` / `ferx_covariance()` on a reloaded fit
+# derive its occasions as the fit did (#512).
+.fitrx_iov_occasion_to_wire <- function(rule) {
+  rule <- .fitrx_opt_chr(rule)
+  if (is.null(rule)) return(NULL)
+  if (identical(rule, "column")) return("column")
+  if (identical(rule, "dose")) return("per_dose")
+  edges <- sub("^time\\((.*)\\)$", "\\1", rule)
+  if (identical(edges, rule)) {
+    stop("ferx_save_fit: `fit$iov_occasion` is \"", rule, "\", not \"column\", ",
+         "\"dose\" or \"time(...)\".", call. = FALSE)
+  }
+  edges <- suppressWarnings(as.numeric(strsplit(edges, ",", fixed = TRUE)[[1]]))
+  if (!length(edges) || anyNA(edges)) {
+    stop("ferx_save_fit: `fit$iov_occasion` \"", rule, "\" has a breakpoint ",
+         "that is not a number.", call. = FALSE)
+  }
+  # A list, so `auto_unbox` keeps a one-edge rule an array.
+  list(time_windows = as.list(edges))
+}
+
+.fitrx_iov_occasion_from_wire <- function(w) {
+  if (is.null(w)) return(NULL)
+  if (is.character(w) && length(w) == 1L) {
+    if (identical(w, "column")) return("column")
+    if (identical(w, "per_dose")) return("dose")
+  }
+  if (is.list(w) && identical(names(w), "time_windows")) {
+    edges <- as.numeric(unlist(w$time_windows, use.names = FALSE))
+    # The shortest spelling that reads back to the same double, as the glue
+    # writes it: 120.1, not 120.09999999999999; 100000, not 1e+05 (Rust's
+    # `{}` never writes an exponent).
+    spell <- vapply(edges, function(e) {
+      for (d in 15:17) {
+        s <- format(e, digits = d, trim = TRUE, scientific = FALSE)
+        if (as.numeric(s) == e) return(s)
+      }
+      s
+    }, character(1))
+    return(sprintf("time(%s)", paste(spell, collapse = ", ")))
+  }
+  stop("ferx_load_fit: the bundle's `iov_occasion` is not \"column\", ",
+       "\"per_dose\" or {\"time_windows\": [...]}.", call. = FALSE)
+}

@@ -70,8 +70,10 @@
 #'
 #' @return The input `fit`, augmented with `sir_ess`, `sir_ci_theta`,
 #'   `sir_ci_omega`, `sir_ci_sigma`, `sir_ci_kappa` (one row per IOV kappa
-#'   variance, named by `kappa_names`; NULL without IOV), and (when
-#'   requested) `sir_resamples` / `sir_resamples_n` / `sir_resamples_dim`.
+#'   variance, named by `kappa_names`; NULL without IOV), `sir_seed_used`
+#'   (the seed this run resampled with: `sir_seed`, or 12345 when it is
+#'   `NULL`), and (when requested) `sir_resamples` / `sir_resamples_n` /
+#'   `sir_resamples_dim`.
 #'   Any warnings the SIR step emitted are appended to `fit$warnings` and to
 #'   `fit$warnings_structured` under the `sir` category - in particular the
 #'   proposal diagnostics: a covariance that is rank-deficient beyond its
@@ -298,6 +300,10 @@ ferx_sir <- function(fit,
     cov_matrix_dim = nrow(fit$cov_matrix),
     eta_hats_flat = eta_hats_flat,
     subject_ids = subject_ids,
+    # The occasion rule the fit derived its occasions with; without it the
+    # engine falls back to the model file's and refuses a rule passed only
+    # through `settings =` (#512).
+    iov_occasion = as.character(fit$iov_occasion %||% ""),
     sir_samples = as.integer(sir_samples),
     sir_resamples = as.integer(sir_resamples),
     sir_seed = if (is.null(sir_seed)) -1L else as.integer(sir_seed),
@@ -345,6 +351,8 @@ ferx_sir <- function(fit,
   sig_names <- if (!is.null(sn) && length(sn) == length(fit$sigma)) sn else paste0("SIGMA(", seq_along(fit$sigma), ")")
   fit$sir_ci_sigma <- reshape_ci(raw$sir_ci_sigma, sig_names)
   fit$sir_ci_kappa <- .ferx_sir_ci_kappa(raw$sir_ci_kappa, fit$kappa_names)
+  # The seed this run used (ferx-core #1767), not the input fit's.
+  fit$sir_seed_used <- raw$sir_seed_used
 
   if (isTRUE(sir_keep_samples)) {
     fit$sir_resamples <- as.numeric(raw$sir_resamples)

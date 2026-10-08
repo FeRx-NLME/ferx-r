@@ -301,6 +301,8 @@ ferx_load_fit <- function(path) {
     data_path = .fitrx_unwrap_opt_chr(w$data_path),
     model_hash = .fitrx_unwrap_opt_chr(w$model_hash),
     data_hash = .fitrx_unwrap_opt_chr(w$data_hash),
+    # The IOV occasion rule (#1783), for ferx_sir() / ferx_covariance() (#512).
+    iov_occasion = .fitrx_iov_occasion_from_wire(w$iov_occasion),
 
     input_columns   = as.character(unlist(w$input_columns   %||% list(), use.names = FALSE)),
     covariate_names = as.character(unlist(w$covariate_names %||% list(), use.names = FALSE))
