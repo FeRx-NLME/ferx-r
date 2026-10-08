@@ -21,6 +21,15 @@
 #' `ode_max_steps`) take their defaults, whatever the fit used; tolerances
 #' written in the model file's `[fit_options]` are kept.
 #'
+#' ## Data selection
+#'
+#' The data are re-read with the selection the fit was made with, recorded as
+#' `fit$reader_settings`: a `ferx_fit(ignore =, accept =, ignore_ids =)`
+#' selection applies as well as the model file's `[data_selection]`, and the
+#' engine checks the rows it reads against `fit$population_fingerprint`. A fit
+#' made before these were recorded is refused when its `fit$exclusions` show a
+#' clause the model file does not state, rather than scored on other rows.
+#'
 #' ## Integrity check
 #'
 #' `ferx_fit()` records the model and data file paths plus SHA-256 hashes
@@ -277,6 +286,11 @@ ferx_sir <- function(fit,
   # so the glue refuses a kappa fit that lacks it (#465).
   iov_args <- .ferx_omega_iov_args(fit)
   binding_args <- .ferx_fit_binding_args(fit)
+  reader_args <- .ferx_fit_reader_args(fit)
+  .ferx_refuse_unrecorded_selection(
+    fit, "ferx_sir",
+    "Refit with `ferx_fit(..., sir = TRUE)`, or refit and call ferx_sir() on the new fit."
+  )
   # A refusal reaches the caller as `ferx_engine_error` with ferx-core's code
   # when the engine gave it one (#498); see `.ferx_engine_call()`.
   raw <- .ferx_engine_call(ferx_rust_sir(
@@ -304,6 +318,11 @@ ferx_sir <- function(fit,
     # engine falls back to the model file's and refuses a rule passed only
     # through `settings =` (#512).
     iov_occasion = as.character(fit$iov_occasion %||% ""),
+    # The reader settings the fit read its data with and the fingerprint of
+    # what it read: the engine re-reads the fit's own rows and verifies them
+    # (#462).
+    reader_settings = reader_args$reader_settings,
+    population_fingerprint = reader_args$population_fingerprint,
     sir_samples = as.integer(sir_samples),
     sir_resamples = as.integer(sir_resamples),
     sir_seed = if (is.null(sir_seed)) -1L else as.integer(sir_seed),

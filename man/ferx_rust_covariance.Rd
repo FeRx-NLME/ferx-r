@@ -22,6 +22,8 @@ ferx_rust_covariance(
   eta_hats_flat,
   subject_ids,
   iov_occasion,
+  reader_settings,
+  population_fingerprint,
   covariance_method,
   mu_referencing,
   verbose,

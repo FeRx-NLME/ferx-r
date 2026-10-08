@@ -124,3 +124,38 @@ test_that("ferx_calc_npde surfaces a clean error when the engine returns NULL", 
   testthat::local_mocked_bindings(ferx_rust_npde_from_fit = function(...) NULL)
   expect_error(ferx_calc_npde(fit), "engine returned no NPDE table")
 })
+
+# --- #416: the fit's own data selection -----------------------------------
+
+test_that("ferx_calc_npde on an `ignore =` fit scores the fit's rows (#416)", {
+  # Before #416 the re-read kept the two records the fit dropped and the
+  # alignment check refused: "110 row(s) but fit$sdtab has 108".
+  fit <- rs_fit(ignore = rs_ignore)
+  out <- ferx_calc_npde(fit, nsim = 50L, seed = 1L)
+  expect_identical(nrow(out$sdtab), nrow(fit$sdtab))
+  expect_true(all(is.finite(out$sdtab$NPD)))
+})
+
+test_that("ferx_calc_npde refuses a legacy fit with a record-only `ignore =` (#416)", {
+  fit <- rs_legacy(rs_fit(ignore = rs_ignore))
+  e <- rs_steps(fit)$npde
+  expect_s3_class(e, "error")
+  msg <- conditionMessage(e)
+  expect_match(msg, "ferx_calc_npde: this fit predates", fixed = TRUE)
+  expect_match(msg, "`ignore: EVID == 0 && DV < 1.0`", fixed = TRUE)
+  expect_match(msg, "settings = list(npde_nsim = 20)", fixed = TRUE)
+  # Not the alignment check's cause, which names the wrong one.
+  expect_no_match(msg, "differ from the fit", fixed = TRUE)
+})
+
+test_that("ferx_calc_npde runs on a legacy fit whose selection the model file states (#416)", {
+  fit <- rs_legacy(warfarin_sel_fit())
+  out <- rs_steps(fit)$npde
+  expect_false(inherits(out, "condition"))
+})
+
+test_that("ferx_calc_npde runs on a legacy fit whose record-only clause fired nothing (#416)", {
+  fit <- rs_legacy(rs_fit(ignore = "DV < -1"))
+  out <- rs_steps(fit)$npde
+  expect_false(inherits(out, "condition"))
+})

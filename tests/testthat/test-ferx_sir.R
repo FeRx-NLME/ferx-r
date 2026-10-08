@@ -726,3 +726,43 @@ test_that("ferx_sir sets sir_seed_used to the seed of its own run", {
     ferx_sir(seeded, sir_samples = 8L, sir_resamples = 4L)$sir_seed_used, 12345
   )
 })
+
+# --- #462: the fit's own data selection -----------------------------------
+
+test_that("ferx_sir on an `ignore =` fit reproduces the in-fit SIR (#462)", {
+  # Before #462 the standalone draw re-read the two dropped records and landed
+  # at ESS 369.25 against the in-fit 382.12, silently.
+  fit <- rs_fit(ignore = rs_ignore, sir = TRUE)
+  skip_if(is.null(fit$cov_matrix) || is.null(fit$sir_ess), sir_cov_skip)
+  out <- suppressWarnings(ferx_sir(fit, sir_samples = 200L, sir_resamples = 100L,
+                                   sir_seed = fit$sir_seed_used))
+  expect_identical(out$sir_ess, fit$sir_ess)
+  expect_identical(out$sir_ci_theta, fit$sir_ci_theta)
+  expect_identical(out$sir_ci_omega, fit$sir_ci_omega)
+  expect_identical(out$sir_ci_sigma, fit$sir_ci_sigma)
+})
+
+test_that("ferx_sir refuses a legacy fit with a record-only `ignore =` (#462)", {
+  fit <- rs_legacy(rs_fit(ignore = rs_ignore))
+  skip_if(is.null(fit$cov_matrix), sir_cov_skip)
+  e <- rs_steps(fit)$sir
+  expect_s3_class(e, "error")
+  msg <- conditionMessage(e)
+  expect_match(msg, "ferx_sir: this fit predates", fixed = TRUE)
+  expect_match(msg, "`ignore: EVID == 0 && DV < 1.0`", fixed = TRUE)
+  expect_match(msg, "ferx_fit(..., sir = TRUE)", fixed = TRUE)
+})
+
+test_that("ferx_sir runs on a legacy fit whose selection the model file states (#462)", {
+  fit <- rs_legacy(warfarin_sel_fit())
+  skip_if(is.null(fit$cov_matrix), sir_cov_skip)
+  out <- rs_steps(fit)$sir
+  expect_false(inherits(out, "condition"))
+})
+
+test_that("ferx_sir runs on a legacy fit whose record-only clause fired nothing (#462)", {
+  fit <- rs_legacy(rs_fit(ignore = "DV < -1"))
+  skip_if(is.null(fit$cov_matrix), sir_cov_skip)
+  out <- rs_steps(fit)$sir
+  expect_false(inherits(out, "condition"))
+})

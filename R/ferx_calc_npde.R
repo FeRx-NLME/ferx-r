@@ -9,6 +9,13 @@
 #' nonlinearity and non-Gaussian random effects, and follow N(0, 1) under a
 #' correctly specified model.
 #'
+#' The data are re-read with the selection the fit was made with
+#' (\code{fit$reader_settings}): a \code{ferx_fit(ignore =, accept =,
+#' ignore_ids =)} selection applies as well as the model file's
+#' \code{[data_selection]}, also to a file passed as \code{data}. A fit made
+#' before the selection was recorded is refused when its \code{fit$exclusions}
+#' show a clause the model file does not state.
+#'
 #' @param fit A \code{ferx_fit} result, carrying \code{theta}, \code{omega},
 #'   \code{sigma}, and (unless overridden) the \code{model_path} / \code{data_path}
 #'   captured at fit time.
@@ -69,6 +76,14 @@ ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = 
     stop("No usable data file: pass `data=` or refit so `fit$data_path` is set.")
   }
 
+  .ferx_refuse_unrecorded_selection(
+    fit, "ferx_calc_npde",
+    paste0(
+      "Refit with `ferx_fit(..., settings = list(npde_nsim = ", nsim, "))`, ",
+      "or refit and call ferx_calc_npde() on the new fit."
+    )
+  )
+
   # A refusal (bad params, unreadable data, ...) is an R error, classed like a
   # refused `ferx_fit()` (#385).
   npde_tbl <- .ferx_engine_call(
@@ -83,6 +98,8 @@ ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = 
       omega_iov_dim  = fit_pieces$omega_iov_dim,
       residual_rho = fit_pieces$residual_rho,
       fit_bindings = fit_pieces$fit_bindings,
+      # The fit's own selection, replayed on whichever file is read (#416).
+      reader_settings = .ferx_fit_reader_args(fit)$reader_settings,
       nsim       = nsim,
       seed       = seed_int
     ),

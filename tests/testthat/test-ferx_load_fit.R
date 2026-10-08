@@ -184,3 +184,21 @@ test_that("a loaded fit with zero-padded IDs runs ferx_covariance like the live 
   skip_if(is.null(live$cov_matrix), "covariance step did not converge - skipping")
   expect_identical(ferx_covariance(loaded)$se_theta, live$se_theta)
 })
+
+test_that("a bundle without reader settings loads with neither field and still runs (#462)", {
+  # As written before #462: a fit that records neither leaves both keys out.
+  fit <- rs_legacy(warfarin_fit_cov())
+  skip_if(is.null(fit$cov_matrix), "covariance step did not converge - skipping")
+  path <- withr::local_tempfile(fileext = ".fitrx")
+  ferx_save_fit(fit, path)
+  staging <- withr::local_tempdir()
+  utils::unzip(path, exdir = staging)
+  wire <- jsonlite::read_json(file.path(staging, "fit.json"), simplifyVector = FALSE)
+  expect_false(any(c("reader_settings", "population_fingerprint") %in% names(wire)))
+
+  loaded <- ferx_load_fit(path)
+  expect_null(loaded$reader_settings)
+  expect_null(loaded$population_fingerprint)
+  out <- suppressWarnings(ferx_covariance(loaded))
+  expect_lt(rs_rel(out$se_theta, fit$se_theta), 1e-8)
+})

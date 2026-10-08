@@ -41,6 +41,14 @@ et al. 2008). Use this when a model was fitted without
 nonlinearity and non-Gaussian random effects, and follow N(0, 1) under a
 correctly specified model.
 }
+\details{
+The data are re-read with the selection the fit was made with
+(\code{fit$reader_settings}): a \code{ferx_fit(ignore =, accept =,
+ignore_ids =)} selection applies as well as the model file's
+\code{[data_selection]}, also to a file passed as \code{data}. A fit made
+before the selection was recorded is refused when its \code{fit$exclusions}
+show a clause the model file does not state.
+}
 \section{Errors raised by the engine}{
 
 A model or dataset the engine refuses is an R error, never a \code{NULL}

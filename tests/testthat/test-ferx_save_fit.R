@@ -1580,3 +1580,28 @@ test_that("every ID column survives a save / load round-trip verbatim (synthetic
   expect_identical(loaded$ebe_etas$ETA_CL, fake$ebe_etas$ETA_CL)
   expect_identical(loaded$covtab$WT, fake$covtab$WT)
 })
+
+# --- #462: the fit's reader settings and population fingerprint ------------
+
+test_that("reader settings and fingerprint survive a .fitrx round trip verbatim (#462)", {
+  fit <- rs_fit(ignore = rs_ignore)
+  skip_if(is.null(fit$cov_matrix), "covariance step did not converge - skipping")
+  for (include_data in c(FALSE, TRUE)) {
+    path <- withr::local_tempfile(fileext = ".fitrx")
+    ferx_save_fit(fit, path, include_data = include_data)
+    loaded <- ferx_load_fit(path)
+    info <- paste("include_data:", include_data)
+    expect_identical(loaded$reader_settings, fit$reader_settings, info = info)
+    expect_identical(loaded$population_fingerprint, fit$population_fingerprint,
+                     info = info)
+    # Written as the objects they are, under the engine's own keys.
+    staging <- withr::local_tempdir()
+    utils::unzip(path, exdir = staging)
+    wire <- jsonlite::read_json(file.path(staging, "fit.json"),
+                                simplifyVector = FALSE)
+    expect_type(wire$reader_settings, "list")
+    expect_type(wire$population_fingerprint, "list")
+    out <- suppressWarnings(ferx_covariance(loaded))
+    expect_lt(rs_rel(out$se_theta, fit$se_theta), 1e-8)
+  }
+})

@@ -920,6 +920,12 @@
   # every fit ("column" by default), so NULL here would mean an engine that
   # recorded none. ferx_sir() / ferx_covariance() hand it back (#512).
   result$iov_occasion <- empty_to_null(result$iov_occasion)
+  # The reader settings the fit read its data with and the fingerprint of the
+  # population it read (#462), as the engine's own JSON: opaque on purpose,
+  # compared by the engine, never read in R (`fit$exclusions` is the readable
+  # record of what was dropped). NULL when the engine recorded none.
+  result$reader_settings <- empty_to_null(result$reader_settings)
+  result$population_fingerprint <- empty_to_null(result$population_fingerprint)
 
   # The dropped-`[output]` finding also goes into the flat vector, not only the
   # structured table: `fit$warnings` is what `ferx_save_fit()` serialises, and

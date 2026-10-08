@@ -361,3 +361,14 @@
   stop("ferx_load_fit: the bundle's `iov_occasion` is not \"column\", ",
        "\"per_dose\" or {\"time_windows\": [...]}.", call. = FALSE)
 }
+
+# A JSON-carried fit field (`fit$reader_settings`, `fit$population_fingerprint`,
+# #462) back from the wire, where `ferx_save_fit()` wrote it verbatim and
+# `read_json(simplifyVector = FALSE)` read it as nested lists. Re-serialised as
+# the engine wrote it: arrays stay arrays (lists never unbox), scalars unbox,
+# and `digits = NA` gives each double the shortest spelling that reads back to
+# it, as serde_json does. NULL when the bundle carries none.
+.fitrx_json_from_wire <- function(w) {
+  if (is.null(w)) return(NULL)
+  as.character(jsonlite::toJSON(w, auto_unbox = TRUE, null = "null", digits = NA))
+}

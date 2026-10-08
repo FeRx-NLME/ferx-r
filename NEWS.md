@@ -637,6 +637,25 @@
 
 ## Bug fixes
 
+- **`ferx_covariance(fit)`, `ferx_sir(fit)` and `ferx_calc_npde(fit)` use
+  the data selection the fit was made with**
+  ([#462](https://github.com/FeRx-NLME/ferx-r/issues/462),
+  [#416](https://github.com/FeRx-NLME/ferx-r/issues/416)). They re-read
+  `fit$data_path` with the model file's `[data_selection]` only, so a
+  selection passed through `ferx_fit(ignore =, accept =, ignore_ids =)` was
+  lost: covariance and SIR silently scored other rows than the fit (standard
+  errors 2e-5 to 2e-4 off relative, an SIR effective sample size of 369 for
+  the in-fit 382), `ignore_ids =` and npde refused with a wrong cause, and
+  npde on a theta level-block fit refused levels the fit had excluded. The
+  fit now records the reader settings it read its data with and the engine's
+  fingerprint of what it read, as `fit$reader_settings` and
+  `fit$population_fingerprint` (the engine's JSON, about 270 bytes per
+  subject); the three steps re-read the fit's own rows and covariance / SIR
+  verify them against the fingerprint. `ferx_save_fit()` / `ferx_load_fit()`
+  keep both under the keys ferx-core writes. A fit made before this change
+  whose `fit$exclusions` show a clause its model file does not state is
+  refused, naming the clause, instead of being scored on other rows.
+
 - **`ferx_sir()` and `ferx_covariance()` run on a fit whose `iov_occasion`
   was passed only through `settings =`**
   ([#512](https://github.com/FeRx-NLME/ferx-r/issues/512)). With the model

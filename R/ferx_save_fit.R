@@ -500,6 +500,17 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   # The IOV occasion rule, under the key ferx-core writes (#1783, #512); absent
   # when the fit records none, as the engine leaves it.
   wire$iov_occasion <- .fitrx_iov_occasion_to_wire(fit$iov_occasion)
+  # The reader settings and population fingerprint (#462), under ferx-core's
+  # own keys (#1685), so the engine verifies an R bundle and R reads an engine
+  # bundle. The fit carries both as the engine's JSON; written verbatim
+  # (`json_verbatim` below) as the objects they are, not as quoted strings.
+  # Absent when the fit records none, as the engine leaves them.
+  if (!is.null(fit$reader_settings)) {
+    wire$reader_settings <- structure(fit$reader_settings, class = "json")
+  }
+  if (!is.null(fit$population_fingerprint)) {
+    wire$population_fingerprint <- structure(fit$population_fingerprint, class = "json")
+  }
 
   jsonlite::write_json(
     # Array-valued fields wrapped so `auto_unbox` cannot collapse a length-1
@@ -512,7 +523,9 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
     # which moved theta, omega and sigma in their last bit on a round trip.
     digits = I(17),
     null = "null",
-    na = "null"
+    na = "null",
+    # Writes the class-"json" fields above as-is.
+    json_verbatim = TRUE
   )
 }
 

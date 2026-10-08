@@ -69,20 +69,26 @@ ferx_rust_predict_survival_from_fit <- function(model_path, data_path, times, th
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_npde_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, fit_bindings, nsim, seed) {
-  .Call("wrap__ferx_rust_npde_from_fit", model_path, data_path, theta, omega_flat, as.integer(omega_dim), sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, fit_bindings, as.integer(nsim), as.integer(seed))
+ferx_rust_npde_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, fit_bindings, reader_settings, nsim, seed) {
+  .Call("wrap__ferx_rust_npde_from_fit", model_path, data_path, theta, omega_flat, as.integer(omega_dim), sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, fit_bindings, reader_settings, as.integer(nsim), as.integer(seed))
 }
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_sir <- function(model_path, data_path, model_hash, data_hash, ofv, ofv_prior, interaction, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, cov_matrix_flat, cov_matrix_dim, eta_hats_flat, subject_ids, iov_occasion, sir_samples, sir_resamples, sir_seed, sir_keep_samples, sir_scale, verbose, fit_bindings) {
-  .Call("wrap__ferx_rust_sir", model_path, data_path, model_hash, data_hash, ofv, ofv_prior, interaction, theta, omega_flat, as.integer(omega_dim), sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, cov_matrix_flat, as.integer(cov_matrix_dim), eta_hats_flat, as.character(subject_ids), iov_occasion, as.integer(sir_samples), as.integer(sir_resamples), as.integer(sir_seed), sir_keep_samples, sir_scale, verbose, fit_bindings)
+ferx_rust_sir <- function(model_path, data_path, model_hash, data_hash, ofv, ofv_prior, interaction, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, cov_matrix_flat, cov_matrix_dim, eta_hats_flat, subject_ids, iov_occasion, reader_settings, population_fingerprint, sir_samples, sir_resamples, sir_seed, sir_keep_samples, sir_scale, verbose, fit_bindings) {
+  .Call("wrap__ferx_rust_sir", model_path, data_path, model_hash, data_hash, ofv, ofv_prior, interaction, theta, omega_flat, as.integer(omega_dim), sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, cov_matrix_flat, as.integer(cov_matrix_dim), eta_hats_flat, as.character(subject_ids), iov_occasion, reader_settings, population_fingerprint, as.integer(sir_samples), as.integer(sir_resamples), as.integer(sir_seed), sir_keep_samples, sir_scale, verbose, fit_bindings)
 }
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_covariance <- function(model_path, data_path, model_hash, data_hash, ofv, ofv_prior, interaction, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, eta_hats_flat, subject_ids, iov_occasion, covariance_method, mu_referencing, verbose, fit_bindings) {
-  .Call("wrap__ferx_rust_covariance", model_path, data_path, model_hash, data_hash, ofv, ofv_prior, interaction, theta, omega_flat, as.integer(omega_dim), sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, eta_hats_flat, as.character(subject_ids), iov_occasion, covariance_method, mu_referencing, verbose, fit_bindings)
+ferx_rust_covariance <- function(model_path, data_path, model_hash, data_hash, ofv, ofv_prior, interaction, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, eta_hats_flat, subject_ids, iov_occasion, reader_settings, population_fingerprint, covariance_method, mu_referencing, verbose, fit_bindings) {
+  .Call("wrap__ferx_rust_covariance", model_path, data_path, model_hash, data_hash, ofv, ofv_prior, interaction, theta, omega_flat, as.integer(omega_dim), sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, eta_hats_flat, as.character(subject_ids), iov_occasion, reader_settings, population_fingerprint, covariance_method, mu_referencing, verbose, fit_bindings)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_unstated_selection <- function(model_path, model_hash, fired_ignore, fired_accept) {
+  .Call("wrap__ferx_rust_unstated_selection", model_path, model_hash, as.character(fired_ignore), as.character(fired_accept))
 }
 
 #' @title Internal Rust backend binding
