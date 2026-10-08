@@ -47,12 +47,25 @@ hf_model_text <- "
   covariance = false
 "
 
-# The two edits of #492's table. Each asks for bindings the fit was not made
-# with, so without the hash check first each is refused as a fit lacking them.
+# The two edits of #492's table, and one that breaks the parse. The first two
+# ask for bindings the fit was not made with, so without the hash check first
+# each is refused as a fit lacking them; the third is caught only if the hash
+# is compared before the file is parsed. `no_hash` is the refusal each gets on
+# a fit that carries no hash, where nothing is compared.
 hf_edits <- list(
-  level_block = c("theta TVKA(1.0, 0.01, 10.0)",
-                  "theta TVKA[ID, contrast = none](1.0, 0.01, 10.0)"),
-  symbolic_centre = c("center = 70", "center = median")
+  level_block = list(
+    edit = c("theta TVKA(1.0, 0.01, 10.0)",
+             "theta TVKA[ID, contrast = none](1.0, 0.01, 10.0)"),
+    no_hash = "this fit carries no theta level bindings"
+  ),
+  symbolic_centre = list(
+    edit = c("center = 70", "center = median"),
+    no_hash = "this fit carries no data-derived bindings"
+  ),
+  unparsable = list(
+    edit = c("[error_model]", "[error_modl]"),
+    no_hash = "Unknown block `[error_modl]`"
+  )
 )
 
 # A fit of the unedited model, in its own directory so the edit cannot reach
@@ -94,7 +107,7 @@ hf_calls <- list(
 test_that("an edited model file is refused as edited, not as a fit lacking bindings", {
   for (edit in names(hf_edits)) {
     h <- hf_fit()
-    hf_edit(h$model, hf_edits[[edit]])
+    hf_edit(h$model, hf_edits[[edit]]$edit)
     for (entry in names(hf_calls)) {
       info <- paste(edit, entry)
       msg <- hf_msg(hf_calls[[entry]](h$fit))
@@ -115,16 +128,22 @@ test_that("an edited model file is refused as edited, not as a fit lacking bindi
 
 test_that("a fit with no model_hash is not checked: the from-fit prologue still answers", {
   # The other side of the gate. An empty hash disables the check (an older
-  # fit, or one whose hash failed at fit time), so the edited level block
-  # reaches the prologue's own refusal.
-  h <- hf_fit()
-  hf_edit(h$model, hf_edits$level_block)
-  fit <- h$fit
-  fit$model_hash <- NA_character_
-  for (entry in names(hf_calls)) {
-    msg <- hf_msg(suppressWarnings(hf_calls[[entry]](fit)))
-    expect_match(msg, "this fit carries no theta level bindings", fixed = TRUE,
-                 info = entry)
-    expect_no_match(msg, "hash mismatch", fixed = TRUE, info = entry)
+  # fit, or one whose hash failed at fit time), so each edit reaches the
+  # refusal of the step it breaks: the from-fit prologue for the two binding
+  # edits, the parser, under this entry's name, for the unparsable one.
+  for (edit in names(hf_edits)) {
+    h <- hf_fit()
+    hf_edit(h$model, hf_edits[[edit]]$edit)
+    fit <- h$fit
+    fit$model_hash <- NA_character_
+    for (entry in names(hf_calls)) {
+      info <- paste(edit, entry)
+      msg <- hf_msg(suppressWarnings(hf_calls[[entry]](fit)))
+      expect_match(msg, hf_edits[[edit]]$no_hash, fixed = TRUE, info = info)
+      if (edit == "unparsable") {
+        expect_match(msg, paste0("^", entry, ": Unknown block"), info = info)
+      }
+      expect_no_match(msg, "hash mismatch", fixed = TRUE, info = info)
+    }
   }
 })
