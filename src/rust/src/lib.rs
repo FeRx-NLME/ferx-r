@@ -5261,6 +5261,9 @@ fn ferx_rust_sir(
             sir_resamples = sir_resamples_flat,
             sir_resamples_n = sir_resamples_n,
             sir_resamples_dim = sir_resamples_dim,
+            // The seed this run resampled with, resolved (ferx-core #1767):
+            // `sir_seed`, or the engine's default when R passed none.
+            sir_seed_used = new_fit.sir_seed.map(|s| s as f64),
             warnings = new_fit.warnings.clone()
         )
         .into())

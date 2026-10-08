@@ -53,8 +53,10 @@ value.}
 \value{
 The input \code{fit}, augmented with \code{sir_ess}, \code{sir_ci_theta},
 \code{sir_ci_omega}, \code{sir_ci_sigma}, \code{sir_ci_kappa} (one row per IOV kappa
-variance, named by \code{kappa_names}; NULL without IOV), and (when
-requested) \code{sir_resamples} / \code{sir_resamples_n} / \code{sir_resamples_dim}.
+variance, named by \code{kappa_names}; NULL without IOV), \code{sir_seed_used}
+(the seed this run resampled with: \code{sir_seed}, or 12345 when it is
+\code{NULL}), and (when requested) \code{sir_resamples} / \code{sir_resamples_n} /
+\code{sir_resamples_dim}.
 Any warnings the SIR step emitted are appended to \code{fit$warnings} and to
 \code{fit$warnings_structured} under the \code{sir} category - in particular the
 proposal diagnostics: a covariance that is rank-deficient beyond its

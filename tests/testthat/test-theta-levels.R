@@ -1052,17 +1052,34 @@ test_that("T14: an explicit global contrast next to such an eta is refused", {
   }
 })
 
-# The adaptive path binds the design's own levels (`bind_design`) and is
-# refused there with the code too (ferx-core #1791). Its glue puts its own name
-# in front of the engine's text, which must not cost the code.
-test_that("T14b: ferx_simulate_adaptive() refuses the global contrast with its code", {
-  model <- tl_absorbing_model("PLACEBO[STUDY, TIME, contrast = none](0.0, -5.0, 5.0)")
-  msg <- tl_coded(ferx_simulate_adaptive(with_adaptive_block(model),
-                                         tl_write(tl_data, ".csv"),
-                                         n_sim = 1L, seed = 1L),
-                  "simulate_adaptive")
-  expect_match(msg, "^ferx_simulate_adaptive: ")
-  expect_match(msg, "sum_to_zero_within", fixed = TRUE)
+# The adaptive path takes no fit: it binds the design's own levels
+# (`bind_design`), so its level refusal is one re-validating the model and data
+# reproduces, and `ferx_simulate_adaptive()` carried the code before ferx-core
+# #1791 as well. What #1791 changes is where the code comes from: the glue's
+# own record, kept beside the raised text, which its `ferx_simulate_adaptive: `
+# prefix must not separate from it. Checked on the raw glue, as C13e does.
+# Mutation that reddens this: the adaptive glue formatting the `EngineError`
+# into its prefixed text (`format!("ferx_simulate_adaptive: {e}")`) instead of
+# handing it to `engine_refusal`.
+test_that("T14b: the adaptive glue records the global contrast's code beside its text", {
+  model <- with_adaptive_block(
+    tl_absorbing_model("PLACEBO[STUDY, TIME, contrast = none](0.0, -5.0, 5.0)")
+  )
+  data <- tl_write(tl_data, ".csv")
+  raised <- tryCatch(
+    ferx:::ferx_rust_simulate_adaptive(model, data, 1L, 1L, "false", 0L),
+    error = function(e) conditionMessage(e)
+  )
+  expect_match(raised, "^ferx_simulate_adaptive: ")
+  expect_match(raised, "sum_to_zero_within", fixed = TRUE)
+  d <- ferx:::ferx_rust_take_engine_diagnostic()
+  expect_false(is.null(d))
+  expect_identical(d$code, "E_THETA_LEVEL_BINDING")
+  expect_identical(d$block, "parameters")
+  expect_identical(charToRaw(d$text), charToRaw(raised))
+  # And the R entry point raises it with that code.
+  tl_coded(ferx_simulate_adaptive(model, data, n_sim = 1L, seed = 1L),
+           "simulate_adaptive")
 })
 
 # --- R1: a tampered theta_levels is refused by the glue -------------------------

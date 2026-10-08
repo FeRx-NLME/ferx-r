@@ -1001,10 +1001,10 @@
 #'     seed used for multi-start parameter perturbation.}
 #'   \item{saem_seed}{Numeric scalar (or \code{NULL}) giving the SAEM
 #'     stochastic seed. \code{NULL} for non-SAEM methods.}
-#'   \item{sir_seed_used}{Numeric scalar (or \code{NULL}) giving the seed SIR
-#'     resampled with: \code{sir_seed}, or the built-in default 12345 when
-#'     \code{sir_seed} was unset. \code{NULL} when SIR did not run, even if a
-#'     \code{sir_seed} was given.}
+#'   \item{sir_seed_used}{Numeric scalar giving the seed SIR resampled with:
+#'     \code{sir_seed}, or the built-in default 12345 when \code{sir_seed} was
+#'     unset. \code{NA} when SIR did not run, even if a \code{sir_seed} was
+#'     given. \code{\link{ferx_sir}} sets it to the seed of its own run.}
 #'   \item{iov_occasion}{Character string (or \code{NULL}) giving the IOV
 #'     occasion rule the fit derived its occasions with, in the spelling
 #'     \code{settings = list(iov_occasion = ...)} takes: \code{"column"},
