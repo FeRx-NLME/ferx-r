@@ -1316,4 +1316,8 @@ test_that("T16b: the block summary's median is the lower middle value", {
   expect_identical(s(c(3, -1, 2)), c(-1, 2, 3))
   expect_identical(s(c(4, 1, 3, 2)), c(1, 2, 4))
   expect_identical(s(7.5), c(7.5, 7.5, 7.5))
+  # A NaN stays in and sorts last, as under core's total_cmp: the median is
+  # read over all three values and the max is NaN, not a finite value.
+  expect_identical(s(c(1, NaN, 2)), c(1, 2, NaN))
+  expect_identical(s(c(NaN, NaN)), c(NaN, NaN, NaN))
 })

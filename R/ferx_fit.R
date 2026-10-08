@@ -2509,11 +2509,12 @@ ferx_fit <- function(model, data = NULL,
 
 # c(min, median, max) of a compact theta block's free coefficients, for the
 # THETA BLOCKS lines of print.ferx_fit (#413). The median is the lower of the
-# two middle values on an even count, never their mean. This repeats ferx-core's
+# two middle values on an even count, never their mean. A NaN is kept and sorts
+# last, as core's `total_cmp` sort puts it. This repeats ferx-core's
 # `block_summary` (src/io/output.rs), which is still private; drop it for the
 # engine's own once FeRx-NLME/ferx-core#1812 makes that public.
 .ferx_theta_block_summary <- function(values) {
-  v <- sort(values)
+  v <- sort(values, na.last = TRUE)
   n <- length(v)
   c(v[1L], v[(n - 1L) %/% 2L + 1L], v[n])
 }
