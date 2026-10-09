@@ -1605,6 +1605,24 @@ test_that("text IDs survive a save / load round-trip in every subject table (#47
   }
 })
 
+test_that("predictions.csv keeps sdtab's number when sdtab merges two subjects (#475)", {
+  # Subjects `a` (position 1) and `1` both have sdtab number 1, so sdtab shows
+  # one block for two subjects and cannot say which rows are whose. The text
+  # IDs would be misaligned, so the writer keeps the numbers.
+  fake <- id_trip_fake(c("a", "1"))
+  fake$sdtab <- data.frame(ID = c(1, 1, 1, 1), TIME = c(0.5, 1, 0.5, 1),
+                           DV = c(5, 6, 4, 3), PRED = c(5, 6, 4, 3),
+                           IPRED = c(5, 6, 4, 3), CWRES = 0, IWRES = 0)
+  path <- withr::local_tempfile(fileext = ".fitrx")
+  ferx_save_fit(fake, path)
+  staging <- withr::local_tempdir()
+  utils::unzip(path, exdir = staging)
+  preds <- utils::read.csv(file.path(staging, "predictions.csv"),
+                           colClasses = c(ID = "character"))
+  expect_identical(preds$ID, rep("1", 4L))
+  expect_identical(ferx_load_fit(path)$sdtab$ID, fake$sdtab$ID)
+})
+
 test_that("bundle text cells are quoted as ferx-core's writer quotes them (#475)", {
   # Quoted, with `"` doubled, only when the cell holds a comma, a quote or a
   # newline (`csv_escape()` in ferx-core's io/fitrx.rs); NA is an empty cell.
