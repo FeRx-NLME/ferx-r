@@ -107,7 +107,10 @@ the sample sizes, the seed, the proposal degrees of freedom (\code{df}), the
 each draw was scored with. Every argument left at \code{NULL} takes the recorded
 value, so \code{ferx_sir(fit)} repeats the fit's SIR: its intervals and effective
 sample size are \code{identical()} to the in-fit ones, also after a
-\code{\link[=ferx_save_fit]{ferx_save_fit()}} / \code{\link[=ferx_load_fit]{ferx_load_fit()}} round trip. An argument you pass
+\code{\link[=ferx_save_fit]{ferx_save_fit()}} / \code{\link[=ferx_load_fit]{ferx_load_fit()}} round trip. The exception is a
+normal proposal (\code{sir_df = Inf}): a \code{.fitrx} bundle cannot record it yet
+(ferx-core#1819), so \code{ferx_save_fit()} warns and saves no SIR settings, and
+the loaded fit runs as one with no record. An argument you pass
 replaces that one setting and keeps the rest. The returned fit's
 \code{sir_settings} records the run it made.
 
