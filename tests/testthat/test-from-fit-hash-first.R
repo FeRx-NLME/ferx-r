@@ -120,8 +120,9 @@ test_that("an edited model file is refused as edited, not as a fit lacking bindi
       # Not either from-fit refusal the edit used to reach.
       expect_no_match(msg, "carries no", fixed = TRUE, info = info)
       # Core gives the stale-source refusal no diagnostic code (ferx-core
-      # #1746), and R does not borrow one.
-      expect_no_match(msg, "\\[E_[A-Z_]+\\]$", info = info)
+      # #1746), and R does not borrow one. A borrowed code ends the first
+      # line, with a `hint:` line after it when it has a suggestion (#504).
+      expect_no_match(msg, "\\[E_[A-Z_]+\\](\n|$)", info = info)
     }
   }
 })
