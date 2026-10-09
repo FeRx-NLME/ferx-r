@@ -188,6 +188,61 @@ test_that("a loaded fit with zero-padded IDs runs ferx_covariance like the live 
   expect_identical(ferx_covariance(loaded)$se_theta, live$se_theta)
 })
 
+# ---- text subject IDs through save / load (#475) ----
+# Each key gives subject 1 one awkward label and leaves the others numeric.
+# "numeric" relabels nothing, so it pins the unchanged case.
+text_id_labels <- list(na = "NA", comma = "Smith, 2019", quote = "q\"x",
+                       padded = "007", numeric = "1")
+
+text_id_fit <- function(key) {
+  label <- text_id_labels[[key]]
+  relabelled_fit("warfarin", paste0("text_", key),
+                 function(id) ifelse(id == 1L, label, as.character(id)))
+}
+
+test_that("a reloaded fit keeps text IDs and runs ferx_covariance and ferx_sir (#475)", {
+  for (key in names(text_id_labels)) {
+    fit <- text_id_fit(key)
+    expect_identical(fit$ebe_etas$ID[1], text_id_labels[[key]], info = key)
+    skip_if(is.null(fit$cov_matrix), "covariance step did not converge - skipping")
+    path <- withr::local_tempfile(fileext = ".fitrx")
+    ferx_save_fit(fit, path)
+    loaded <- ferx_load_fit(path)
+    expect_identical(loaded$ebe_etas$ID, fit$ebe_etas$ID, info = key)
+    expect_identical(loaded$sdtab$ID, fit$sdtab$ID, info = key)
+
+    # A bundle carries no packed estimate (ferx-core#1815), so the live side
+    # drops it too (#511).
+    fit$packed_estimate <- NULL
+    expect_identical(ferx_covariance(loaded)$se_theta,
+                     ferx_covariance(fit)$se_theta, info = key)
+    sir <- function(f) ferx_sir(f, sir_samples = 50L, sir_resamples = 20L, sir_seed = 1L)
+    expect_identical(sir(loaded)$sir_ci_theta, sir(fit)$sir_ci_theta, info = key)
+  }
+})
+
+test_that("ferx-core's loader reads an R-written bundle with the same text IDs (#475)", {
+  # The oracle is the engine's own load_fit / save_fit, not R reading back
+  # what R wrote; its loader also checks predictions.csv against ebes.csv.
+  for (key in names(text_id_labels)) {
+    fit <- text_id_fit(key)
+    trip <- fitrx_engine_trip(fit)
+    from_core <- ferx_load_fit(trip$core_path)
+    expect_identical(from_core$ebe_etas$ID, fit$ebe_etas$ID, info = key)
+    expect_identical(from_core$sdtab$ID, fit$sdtab$ID, info = key)
+  }
+})
+
+test_that("predictions.csv IDs read back as the engine's sdtab number (#475)", {
+  # Rust's f64 parse where it succeeds, else the subject's 1-based position.
+  expect_identical(
+    ferx:::.fitrx_sdtab_id_number(c("NA", "NA", "007", "Smith, 2019", "1.",
+                                    "+.5", "1E2", "-inf", "Infinity", "nan",
+                                    "0x10", " 7")),
+    c(1, 1, 7, 3, 1, 0.5, 100, -Inf, Inf, NaN, 10, 11)
+  )
+})
+
 test_that("a bundle without reader settings loads with neither field and still runs (#462)", {
   # As written before #462: a fit that records neither leaves both keys out.
   fit <- rs_legacy(warfarin_fit_cov())

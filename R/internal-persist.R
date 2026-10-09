@@ -271,29 +271,39 @@
   out
 }
 
+# A text cell as ferx-core's `.fitrx` writer spells it (`csv_escape()` in
+# `io/fitrx.rs`): quoted, with `"` doubled, only when it holds a comma, a quote
+# or a newline; verbatim otherwise. NA stays NA (an empty cell). Both readers
+# take either form, so a subject ID such as `Smith, 2019` round-trips (#475).
+.fitrx_csv_escape <- function(x) {
+  x <- as.character(x)
+  hit <- !is.na(x) & grepl("[,\"\n]", x)
+  x[hit] <- paste0("\"", gsub("\"", "\"\"", x[hit], fixed = TRUE), "\"")
+  x
+}
+
 # Write a data frame as a bundle CSV with every double column in
-# `.fitrx_double_text()` form. `quote = TRUE` keeps write.csv()'s behaviour
-# for the entries that used it: the columns that were text are quoted, and a
-# number never is.
-.fitrx_write_csv_exact <- function(df, path, quote = FALSE) {
-  text_cols <- which(vapply(df, function(v) is.character(v) || is.factor(v),
-                            logical(1)))
+# `.fitrx_double_text()` form and every text column in `.fitrx_csv_escape()`
+# form, the quoting ferx-core's own writer uses. A number is never quoted.
+.fitrx_write_csv_exact <- function(df, path) {
+  for (j in which(vapply(df, function(v) is.character(v) || is.factor(v),
+                         logical(1)))) {
+    df[[j]] <- .fitrx_csv_escape(df[[j]])
+  }
   for (j in which(vapply(df, is.double, logical(1)))) {
     df[[j]] <- .fitrx_double_text(df[[j]])
   }
-  utils::write.table(
-    df, path,
-    row.names = FALSE, sep = ",", na = "",
-    quote = if (isTRUE(quote)) text_cols else FALSE,
-    qmethod = "double"
-  )
+  utils::write.table(df, path, row.names = FALSE, sep = ",", na = "",
+                     quote = FALSE)
 }
 
 # `read.csv()`, with every column it types as double re-parsed by
 # `.fitrx_parse_doubles()`. read.csv() still decides the column types, so a
 # loaded table has the shape it always had - except the `id_cols`, which are
 # read as text, verbatim: inferring a type turns the IDs `001` and `1.0` into
-# `1`, and `as.character()` afterwards only puts the type back (#468).
+# `1`, and `as.character()` afterwards only puts the type back (#468). They
+# come from a pass with no NA strings, since the writers never put an NA in an
+# ID column and read.csv() reads `NA` as one even when quoted (#475).
 .fitrx_read_csv_exact <- function(path, id_cols = character()) {
   header <- names(utils::read.csv(path, nrows = 0L, check.names = FALSE))
   id_cols <- intersect(id_cols, header)
@@ -305,12 +315,28 @@
   df <- utils::read.csv(path, stringsAsFactors = FALSE, check.names = FALSE,
                         colClasses = col_classes)
   dbl <- which(vapply(df, is.double, logical(1)))
-  if (length(dbl) > 0L) {
+  if (length(dbl) > 0L || length(id_cols) > 0L) {
     raw <- utils::read.csv(path, stringsAsFactors = FALSE, check.names = FALSE,
                            colClasses = "character", na.strings = character())
     for (j in dbl) df[[j]] <- .fitrx_parse_doubles(raw[[j]])
+    for (j in id_cols) df[[j]] <- raw[[j]]
   }
   df
+}
+
+# `predictions.csv`'s subject IDs (text) as the number ferx-core puts in
+# `sdtab$ID`: the ID parsed as Rust parses an f64, else the subject's
+# position, 1-based (`io::output::sdtab`). A bundle written before #475 holds
+# that number already, which parses to itself.
+.fitrx_sdtab_id_number <- function(ids) {
+  out <- as.numeric(.ferx_subject_index(ids))
+  s <- tolower(ids)
+  dec <- grepl("^[-+]?([0-9]+\\.?[0-9]*|\\.[0-9]+)(e[-+]?[0-9]+)?$", s)
+  out[dec] <- .fitrx_parse_doubles(sub("^\\+", "", s[dec]))
+  inf <- grepl("^[-+]?inf(inity)?$", s)
+  out[inf] <- ifelse(startsWith(s[inf], "-"), -Inf, Inf)
+  out[grepl("^[-+]?nan$", s)] <- NaN
+  out
 }
 
 # `fit$iov_occasion` (the `settings = list(iov_occasion = ...)` spelling the

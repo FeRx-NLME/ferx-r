@@ -140,7 +140,7 @@ test_that("bundle doubles are written and read back bit for bit", {
                    n = 1:3, stringsAsFactors = FALSE)
   path <- tempfile(fileext = ".csv")
   on.exit(unlink(path), add = TRUE)
-  ferx:::.fitrx_write_csv_exact(df, path, quote = TRUE)
+  ferx:::.fitrx_write_csv_exact(df, path)
   expect_identical(ferx:::.fitrx_read_csv_exact(path), df)
 
   # The random doubles above only catch an inexact parser on aarch64: x86_64
@@ -645,7 +645,10 @@ test_that(".fitrx_write_predictions_csv handles character sdtab$ID", {
 
   expect_silent(ferx_save_fit(fake, path))
   loaded <- ferx_load_fit(path)
-  expect_equal(as.character(loaded$sdtab$ID), c("PT001", "PT001", "PT002"))
+  # predictions.csv carries the subject IDs as text, as ferx-core writes it;
+  # the loader turns them into the number a live fit's sdtab holds, the
+  # subject's position for IDs that do not parse (#475).
+  expect_identical(loaded$sdtab$ID, c(1, 1, 2))
   expect_equal(loaded$n_subjects, 2L)
 })
 test_that("init_as_sd flags survive a ferx_save_fit / ferx_load_fit round-trip (synthetic)", {
@@ -1519,11 +1522,9 @@ test_that("an unweighted IOV fit writes no kappa weight fields", {
   expect_null(loaded$kappa_weight_typical)
 })
 
-test_that("every ID column survives a save / load round-trip verbatim (synthetic, #468)", {
-  # `001` and `1.0` are what a type-inferring read turns into `1`; the old
-  # loader then put back only the type, so `ferx_sir()` / `ferx_covariance()`
-  # on the loaded fit handed the engine IDs the data does not carry.
-  ids <- c("001", "1.0")
+# A synthetic fit whose four subject tables (`ebe_etas`, `covtab`,
+# `ebe_kappas`, `cond_dist$data`) carry the two subject IDs `ids`.
+id_trip_fake <- function(ids) {
   cd_data <- data.frame(
     ID = rep(ids, each = 2L),
     ETA = c("ETA_CL", "ETA_V", "ETA_CL", "ETA_V"),
@@ -1565,6 +1566,14 @@ test_that("every ID column survives a save / load round-trip verbatim (synthetic
     ),
     class = "ferx_fit"
   )
+}
+
+test_that("every ID column survives a save / load round-trip verbatim (synthetic, #468)", {
+  # `001` and `1.0` are what a type-inferring read turns into `1`; the old
+  # loader then put back only the type, so `ferx_sir()` / `ferx_covariance()`
+  # on the loaded fit handed the engine IDs the data does not carry.
+  ids <- c("001", "1.0")
+  fake <- id_trip_fake(ids)
   path <- tempfile(fileext = ".fitrx")
   on.exit(unlink(path), add = TRUE)
   ferx_save_fit(fake, path)
@@ -1579,6 +1588,37 @@ test_that("every ID column survives a save / load round-trip verbatim (synthetic
   # Only the ID columns are read as text; the others keep their types.
   expect_identical(loaded$ebe_etas$ETA_CL, fake$ebe_etas$ETA_CL)
   expect_identical(loaded$covtab$WT, fake$covtab$WT)
+})
+
+test_that("text IDs survive a save / load round-trip in every subject table (#475)", {
+  # read.csv() reads `NA` as missing even when quoted; a comma or quote in an
+  # unquoted cell splits the row. In MBMA the ID is a study name.
+  for (ids in list(c("NA", "Smith, 2019"), c("q\"x", "007"), c("a \"b\", c", "12"))) {
+    info <- paste(ids, collapse = " | ")
+    path <- withr::local_tempfile(fileext = ".fitrx")
+    ferx_save_fit(id_trip_fake(ids), path)
+    loaded <- ferx_load_fit(path)
+    expect_identical(loaded$ebe_etas$ID, ids, info = info)
+    expect_identical(loaded$covtab$ID, ids, info = info)
+    expect_identical(loaded$ebe_kappas$ID, rep(ids, each = 2L), info = info)
+    expect_identical(loaded$cond_dist$data$ID, rep(ids, each = 2L), info = info)
+  }
+})
+
+test_that("bundle text cells are quoted as ferx-core's writer quotes them (#475)", {
+  # Quoted, with `"` doubled, only when the cell holds a comma, a quote or a
+  # newline (`csv_escape()` in ferx-core's io/fitrx.rs); NA is an empty cell.
+  expect_identical(
+    ferx:::.fitrx_csv_escape(c("NA", "007", "Smith, 2019", "q\"x", "a\nb", NA)),
+    c("NA", "007", "\"Smith, 2019\"", "\"q\"\"x\"", "\"a\nb\"", NA)
+  )
+  path <- withr::local_tempfile(fileext = ".fitrx")
+  ferx_save_fit(id_trip_fake(c("NA", "Smith, 2019")), path)
+  staging <- withr::local_tempdir()
+  utils::unzip(path, exdir = staging)
+  ebes <- readLines(file.path(staging, "ebes.csv"))
+  expect_identical(sub(",.*", "", ebes[2]), "NA")
+  expect_match(ebes[3], "^\"Smith, 2019\",", perl = TRUE)
 })
 
 # --- #462: the fit's reader settings and population fingerprint ------------

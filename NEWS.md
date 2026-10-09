@@ -710,6 +710,20 @@
 
 ## Bug fixes
 
+- **Subject IDs survive `ferx_save_fit()` / `ferx_load_fit()` as the same
+  text** ([#475](https://github.com/FeRx-NLME/ferx-r/issues/475)). An ID
+  spelled `NA` came back as a missing value, and an ID with a comma or a
+  quote (`Smith, 2019`, the usual MBMA study name) split its row in
+  `ebes.csv`, `ebes_kappa.csv` and `conddist.csv`, so `ferx_sir()` and
+  `ferx_covariance()` refused the reloaded fit although the live one ran.
+  Bundle text cells are now quoted as ferx-core's own writer quotes them.
+  `predictions.csv` now carries each row's subject ID as text, as
+  ferx-core writes it. The R writer put `sdtab`'s number there, so ferx-core's
+  loader refused any bundle whose IDs were not plain numbers (`001`, `PT01`).
+  `ferx_load_fit()` turns the text back into that number, so a reloaded
+  `fit$sdtab$ID` is now numeric, as on the live fit, also for bundles
+  ferx-core wrote (it used to come back as the text ID).
+
 - **`ferx_covariance(fit)` and `ferx_sir(fit)` repeat the in-fit steps
   exactly** ([#511](https://github.com/FeRx-NLME/ferx-r/issues/511),
   [#472](https://github.com/FeRx-NLME/ferx-r/issues/472)). They ran under

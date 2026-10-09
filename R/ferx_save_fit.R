@@ -109,7 +109,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   # file) usually won't. Bundle on `is.data.frame()`, not `nrow() > 0L`, so a
   # valid header-only (zero-iteration) trace still round-trips.
   if (is.data.frame(fit[["trace"]])) {
-    .fitrx_write_csv_exact(fit[["trace"]], file.path(staging, "trace.csv"), quote = TRUE)
+    .fitrx_write_csv_exact(fit[["trace"]], file.path(staging, "trace.csv"))
     entries <- c(entries, "trace.csv")
   }
 
@@ -612,7 +612,14 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
     cat("ID,TIME,DV,PRED,IPRED,CWRES,IWRES,EBE_OFV,N_OBS\n", file = path)
     return(invisible())
   }
-  # sdtab$ID is the original numeric subject ID from the NONMEM CSV.
+  # sdtab$ID is a number: the subject ID parsed as one, else the subject's
+  # position. ferx-core's writer puts the subject ID itself here, as text, and
+  # its loader refuses a row whose ID is not its ebes.csv subject's, so write
+  # the same: `NA`, `007` and `Smith, 2019` all differ from their number
+  # (#475). The loader turns it back (`.fitrx_sdtab_id_number()`).
+  ids <- .fitrx_subject_string_ids(fit)
+  subj <- .ferx_subject_index(sdtab$ID)
+  if (!is.null(ids) && max(subj) == length(ids)) sdtab$ID <- ids[subj]
   .fitrx_write_csv_exact(sdtab, path)
 }
 
@@ -621,9 +628,8 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   if (is.null(covtab) || nrow(covtab) == 0L) {
     return(invisible())
   }
-  # Quote so a free-form character ID containing a comma/quote round-trips
-  # intact; missing covariate values (NA/NaN) are written as empty cells.
-  .fitrx_write_csv_exact(covtab, path, quote = TRUE)
+  # Missing covariate values (NA/NaN) are written as empty cells.
+  .fitrx_write_csv_exact(covtab, path)
 }
 
 .fitrx_subject_string_ids <- function(fit) {
