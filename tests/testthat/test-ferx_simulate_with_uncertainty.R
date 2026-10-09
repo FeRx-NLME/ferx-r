@@ -318,13 +318,14 @@ test_that("asymptotic logit_probability draws are logit-normal (upper above 1)",
 
 # -- ferx-core #1485: skipped draws are one coded warning, flip-flop refusals --
 #
-# A twin-less transit closed form (the inert `[scaling]` block declines the
-# ODE twin), inside the absorption domain at its point estimate: ke = CL/V =
-# 0.125, below KTR = (NTR + 1) / MTT = 0.2. A wide log-TVCL variance sends some
-# draws into the flip-flop regime. This is the engine's own fixture
-# (src/api/tests/simulate_with_uncertainty_tests.rs).
-ff_model <- function(tvcl = 0.5) {
-  path <- tempfile(fileext = ".ferx")
+# Twin-less closed forms (the inert `[scaling]` block declines the ODE twin):
+# the engine's own fixtures (src/api/tests/simulate_with_uncertainty_tests.rs).
+#
+# Transit: ke = CL/V = 0.125 at TVCL = 0.5, below KTR = (NTR + 1) / MTT = 0.2,
+# so in-domain; a wide log-TVCL variance sends some draws past it. TVCL = 1
+# puts the point estimate itself in the flip-flop regime.
+ff_model <- function(tvcl = 0.5, env = parent.frame()) {
+  path <- withr::local_tempfile(fileext = ".ferx", .local_envir = env)
   writeLines(c(
     "[parameters]",
     sprintf("  theta TVCL(%s, 0.001, 50.0)", format(tvcl)),
@@ -348,8 +349,34 @@ ff_model <- function(tvcl = 0.5) {
   normalizePath(path)
 }
 
-ff_data <- function() {
-  path <- tempfile(fileext = ".csv")
+# Inverse Gaussian: at TVCL = 50, ke = 1 is past 1 / (2 * MAT * CV2) = 0.833.
+ig_model <- function(tvcl = 50, env = parent.frame()) {
+  path <- withr::local_tempfile(fileext = ".ferx", .local_envir = env)
+  writeLines(c(
+    "[parameters]",
+    sprintf("  theta TVCL(%s, 0.1, 100.0)", format(tvcl)),
+    "  theta TVV(50.0, 5.0, 500.0)",
+    "  theta TVMAT(2.0, 0.05, 24.0)",
+    "  theta TVCV2(0.3, 0.001, 10.0)",
+    "  omega ETA_CL ~ 0.09",
+    "  sigma PROP ~ 0.15 (sd)",
+    "[individual_parameters]",
+    "  CL = TVCL * exp(ETA_CL)",
+    "  V = TVV",
+    "  MAT = TVMAT",
+    "  CV2 = TVCV2",
+    "[structural_model]",
+    "  pk one_cpt_ig(cl=CL, v=V, mat=MAT, cv2=CV2)",
+    "[scaling]",
+    "  obs_scale = 1",
+    "[error_model]",
+    "  DV ~ proportional(PROP)"
+  ), path)
+  normalizePath(path)
+}
+
+ff_data <- function(env = parent.frame()) {
+  path <- withr::local_tempfile(fileext = ".csv", .local_envir = env)
   write.csv(data.frame(
     ID   = rep(1:2, each = 4),
     TIME = rep(c(0, 1, 2, 3), 2),
@@ -364,8 +391,8 @@ ff_data <- function() {
 
 # Packed layout: 4 thetas, 1 omega diagonal, 1 sigma; the first coordinate is
 # log TVCL.
-ff_fit <- function(tvcl = 0.5, var_log_cl = 4) {
-  theta <- c(TVCL = tvcl, TVV = 4, TVNTR = 3, TVMTT = 20)
+ff_fit <- function(theta = c(TVCL = 0.5, TVV = 4, TVNTR = 3, TVMTT = 20),
+                   var_log_cl = 4) {
   pn  <- c(names(theta), "ETA_CL", "PROP")
   cov <- diag(c(var_log_cl, rep(0.01, 5)))
   dimnames(cov) <- list(pn, pn)
@@ -401,15 +428,38 @@ test_that("skipped flip-flop draws reach R as one coded warning", {
   expect_match(skips, sprintf("(draws %s)", paste(skipped, collapse = ", ")),
                fixed = TRUE)
   expect_false(any(startsWith(diag, "uncertainty draw ")))
-  # The R warning carries it too.
-  expect_true(any(grepl("W_UNCERTAINTY_DRAWS_SKIPPED", w, fixed = TRUE)))
+  # Exactly one R warning carries it.
+  expect_length(grep("W_UNCERTAINTY_DRAWS_SKIPPED", w, fixed = TRUE), 1L)
 })
 
 test_that("a flip-flop point estimate is refused, not thinned silently", {
-  # TVCL = 1: ke = 0.25 >= KTR = 0.2 at the point estimate itself.
   probe <- engine_error_probe(ferx_simulate_with_uncertainty(
-    ff_model(tvcl = 1), ff_data(), ff_fit(tvcl = 1, var_log_cl = 0.01),
+    ff_model(tvcl = 1), ff_data(),
+    ff_fit(c(TVCL = 1, TVV = 4, TVNTR = 3, TVMTT = 20), var_log_cl = 0.01),
     n_uncertainty_draws = 5L, n_sim_per_draw = 1L, seed = 7L
   ))
   expect_coded_refusal(probe, "flip-flop", "E_TRANSIT_FLIP_FLOP")
+
+  probe <- engine_error_probe(ferx_simulate_with_uncertainty(
+    ig_model(), ff_data(),
+    ff_fit(c(TVCL = 50, TVV = 50, TVMAT = 2, TVCV2 = 0.3), var_log_cl = 0.01),
+    n_uncertainty_draws = 5L, n_sim_per_draw = 1L, seed = 7L
+  ))
+  expect_coded_refusal(probe, "flip-flop", "E_IG_FLIP_FLOP")
+})
+
+test_that("a run whose every draw is skipped is refused, not returned empty", {
+  # The engine's fixture: TVCL = 0.75 is in-domain (ke = 0.1875 < 0.2), and at
+  # this seed all five draws cross. The engine codes this E_TRANSIT_FLIP_FLOP,
+  # but its message is over 1000 bytes. R truncates an error at
+  # `warning.length`, the truncated text no longer matches the engine's record
+  # byte for byte, and the code is dropped (ferx-r #542). Only the refusal is
+  # asserted here.
+  probe <- engine_error_probe(ferx_simulate_with_uncertainty(
+    ff_model(tvcl = 0.75), ff_data(),
+    ff_fit(c(TVCL = 0.75, TVV = 4, TVNTR = 3, TVMTT = 20), var_log_cl = 0.01),
+    n_uncertainty_draws = 5L, n_sim_per_draw = 1L, seed = 9L
+  ))
+  expect_refusal(probe, "all 5 uncertainty draws landed in the flip-flop regime")
+  expect_null(probe$value)
 })
