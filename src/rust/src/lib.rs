@@ -5165,8 +5165,17 @@ fn apply_settings_record(
         let na_text = if *key == "ode_stiff_abort_after" { "off" } else { "" };
         let text = record_value_text(v, na_text)
             .map_err(|e| format!("{entry_point}: `{field}${name}`: {e}"))?;
-        ferx_core::parser::model_parser::apply_fit_option(opts, key, &text)
+        // `Ok(false)` is a key the parser does not know: a record name here
+        // spelled differently from ferx-core's, which would otherwise leave the
+        // setting at its default without a word.
+        let known = ferx_core::parser::model_parser::apply_fit_option(opts, key, &text)
             .map_err(|e| format!("{entry_point}: `{field}`: {e}"))?;
+        if !known {
+            return Err(format!(
+                "internal: `{field}${name}` maps to `[fit_options]` key `{key}`, which \
+                 ferx-core does not know"
+            ));
+        }
     }
     match nested {
         None => Ok(None),
