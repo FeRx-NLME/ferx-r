@@ -26,11 +26,9 @@ ferx_rust_sir(
   iov_occasion,
   reader_settings,
   population_fingerprint,
-  sir_samples,
-  sir_resamples,
-  sir_seed,
-  sir_keep_samples,
-  sir_scale,
+  scoring_settings,
+  sir_settings,
+  packed_estimate,
   verbose,
   fit_bindings
 )

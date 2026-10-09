@@ -7,7 +7,7 @@
 ferx_covariance(
   fit,
   covariance_method = "r",
-  mu_referencing = TRUE,
+  mu_referencing = NULL,
   verbose = FALSE
 )
 }
@@ -21,8 +21,9 @@ default, NONMEM \code{MATRIX=R}), \code{"s"} (inverse cross-product,
 \code{"hessian"} / \code{"cross_product"} / \code{"sandwich"} are accepted as aliases.}
 
 \item{mu_referencing}{Use mu-referencing for the inner-loop warm restart.
-Default \code{TRUE} (the engine default). Set to match the setting used for
-the original fit.}
+\code{NULL} (the default) takes the fit's recorded value
+(\code{fit$scoring_settings$mu_referencing}), else \code{TRUE}. \code{TRUE} or \code{FALSE}
+overrides the record for this call.}
 
 \item{verbose}{When \code{TRUE}, the engine prints progress to stderr.
 Default \code{FALSE}.}
@@ -46,12 +47,8 @@ loaded from a \code{.fitrx} bundle.
 \details{
 \code{ferx_covariance()} reconstructs the fitted parameters from the fit,
 including the IOV (kappa) covariance \code{fit$omega_iov}, re-runs the inner
-loop (seeded from the per-subject empirical Bayes ETAs) to rebuild the
-covariance-step inputs, and calls the same covariance
-step \code{\link[=ferx_fit]{ferx_fit()}} runs inline. The result closely matches fitting with
-\code{covariance = TRUE} (the same engine step; agreement is close but not
-bit-exact, since the standalone re-reads the data and cold-starts the inner
-EBE loop). The returned fit is the input with
+loop to rebuild the covariance-step inputs, and calls the same covariance
+step \code{\link[=ferx_fit]{ferx_fit()}} runs inline. The returned fit is the input with
 \code{cov_matrix}, \code{cor_matrix}, \code{se_theta} / \code{se_omega} / \code{se_sigma} /
 \code{se_kappa}, \code{covariance_status}, \code{eigenvalues}, and \code{condition_number}
 refreshed.
@@ -64,6 +61,28 @@ diagnostic appended to \code{warnings}, mirroring \code{\link[=ferx_fit]{ferx_fi
 reserved for input problems (missing / hash-mismatched model or data, or a
 fit whose parameters do not match the model, such as a \code{kappa} model whose
 fit carries no \code{omega_iov}).
+\subsection{Settings}{
+
+The step scores the objective under the inner-loop and ODE settings the fit
+recorded as \code{fit$scoring_settings} (the stage that produced the estimates:
+\code{inner_maxiter}, \code{inner_tol}, \code{inner_optimizer}, \code{mu_referencing},
+\code{ode_reltol}, ...), and starts from the optimizer's exact estimate
+\code{fit$packed_estimate}. With both, \code{ferx_covariance(fit)} is \code{identical()} to
+the covariance \code{ferx_fit(..., covariance = TRUE)} reports, unless
+\code{covariance_method} differs from the fit's (it is a setting of the step, not
+of the fit, and is not recorded).
+
+A fit loaded with \code{\link[=ferx_load_fit]{ferx_load_fit()}} keeps \code{scoring_settings} but not
+\code{packed_estimate}, which \code{.fitrx} bundles do not carry, so its result
+differs from the in-fit one in the last digits (on warfarin_iov, about 1e-7
+relative in the standard errors). A fit whose estimates were edited after
+the fit does not use \code{packed_estimate}. A fit with no \code{scoring_settings} (a
+bundle saved before they were recorded) is scored with the engine's
+defaults, as before. A \verb{[mixture]} fit with per-class overrides needs
+\code{packed_estimate} to read the overrides back, so after a reload the step
+refuses it.
+}
+
 \subsection{Data selection}{
 
 The data are re-read with the selection the fit was made with, recorded as

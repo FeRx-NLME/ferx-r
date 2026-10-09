@@ -24,8 +24,10 @@ ferx_rust_covariance(
   iov_occasion,
   reader_settings,
   population_fingerprint,
+  scoring_settings,
+  sir_settings,
+  packed_estimate,
   covariance_method,
-  mu_referencing,
   verbose,
   fit_bindings
 )

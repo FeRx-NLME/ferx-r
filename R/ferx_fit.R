@@ -1035,6 +1035,32 @@
 #'     and \code{\link{ferx_save_fit}} keeps both. \code{NULL} on a fit made
 #'     before they were recorded; \code{reader_settings} is also \code{NULL}
 #'     on a search's final fit, which carries the fingerprint alone.}
+#'   \item{scoring_settings}{Named list of the inner-loop and ODE settings
+#'     the stage that produced the estimates scored the objective under:
+#'     \code{inner_maxiter}, \code{inner_tol} (as the stage ran it, after the
+#'     tightening ferx applies for LTBS and quadrature), \code{inner_restarts},
+#'     \code{mu_referencing}, \code{n_agq}, \code{inner_optimizer},
+#'     \code{ebe_warm_start}, \code{ode_reltol}, \code{ode_abstol},
+#'     \code{ode_max_steps}, \code{ode_method}, \code{ode_stiff_abort_after}
+#'     (\code{NA} when off) and \code{ode_auto_switch}, with the values
+#'     \code{[fit_options]} spells. \code{\link{ferx_covariance}} scores under
+#'     them, and \code{\link{ferx_save_fit}} keeps them. \code{NULL} when the
+#'     engine recorded none, and on a fit saved before they were recorded.}
+#'   \item{sir_settings}{Named list of the settings the fit's SIR ran under:
+#'     \code{samples}, \code{resamples}, \code{seed} (resolved: 12345 when
+#'     \code{sir_seed} was unset), \code{df}, \code{scale},
+#'     \code{keep_samples}, and \code{scoring}, the inner-loop and ODE
+#'     settings each draw was scored with, shaped as
+#'     \code{scoring_settings}. \code{\link{ferx_sir}} repeats this SIR by
+#'     default and records its own run here; \code{\link{ferx_save_fit}}
+#'     keeps it. \code{NULL} when SIR did not run.}
+#'   \item{packed_estimate}{Numeric vector: the optimizer's estimate on its
+#'     packed scale (FOCE, FOCEI, Laplace and Gauss-Newton fits; \code{NULL}
+#'     otherwise). \code{\link{ferx_covariance}} starts from it, which makes
+#'     its result \code{identical()} to the inline covariance step, and reads
+#'     a \code{[mixture]} fit's per-class overrides from it. Ignored once it
+#'     no longer unpacks to the fit's estimates. Not saved by
+#'     \code{\link{ferx_save_fit}}.}
 #'   \item{imp_seed}{Numeric scalar (or \code{NULL}) giving the importance
 #'     sampling seed. \code{NULL} when IS was not run.}
 #'   \item{bloq_method_label}{Character string describing the LOQ-censoring
