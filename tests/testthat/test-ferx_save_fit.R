@@ -1173,10 +1173,23 @@ test_that(".fitrx_ci_to_wire accepts the legacy flat layout and rejects odd leng
   expect_null(ferx:::.fitrx_ci_to_wire(NULL))
 })
 test_that("CI round-trips matrix -> wire -> matrix", {
-  ci <- matrix(c(0.5, 1.5, 2.5, 3.5), ncol = 2, byrow = TRUE)
-  back <- ferx:::.fitrx_unwrap_ci(ferx:::.fitrx_ci_to_wire(ci))
-  expect_equal(back, ci)
-  expect_null(ferx:::.fitrx_unwrap_ci(NULL))
+  ci <- matrix(c(0.5, 1.5, 2.5, 3.5), ncol = 2, byrow = TRUE,
+               dimnames = list(c("TVCL", "TVV"), c("lower", "upper")))
+  wire <- ferx:::.fitrx_ci_to_wire(ci)
+  back <- ferx:::.ferx_sir_ci_matrices(wire, NULL, NULL, rownames(ci), NULL, NULL)
+  expect_identical(back$sir_ci_theta, ci)
+  expect_null(back$sir_ci_omega)
+  expect_null(back$sir_ci_sigma)
+})
+test_that("SIR CI rows fall back to THETA<i> / OMEGA(i,i) / SIGMA(i) (#482)", {
+  ci <- ferx:::.ferx_sir_ci_matrices(
+    c(1, 2, 3, 4), list(c(1, 2), c(3, 4)), c(5, 6),
+    theta_names = "only_one", eta_names = NULL, sigma_names = character()
+  )
+  expect_identical(rownames(ci$sir_ci_theta), c("THETA1", "THETA2"))
+  expect_identical(rownames(ci$sir_ci_omega), c("OMEGA(1,1)", "OMEGA(2,2)"))
+  expect_identical(rownames(ci$sir_ci_sigma), "SIGMA(1)")
+  expect_identical(colnames(ci$sir_ci_sigma), c("lower", "upper"))
 })
 test_that(".fitrx_subject_string_ids extracts character IDs or NULL", {
   expect_null(ferx:::.fitrx_subject_string_ids(list()))

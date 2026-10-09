@@ -14,9 +14,11 @@
 #'     parameter space, using \code{fit$cov_matrix}. Requires \code{fit}
 #'     to come from a \code{ferx_fit()} call with \code{covariance = TRUE}.}
 #'   \item{\code{method = "sir"}}{Sample with replacement from
-#'     \code{fit$sir_resamples}. Requires the fit to have been run with
-#'     \code{sir = TRUE} and \code{sir_keep_samples = TRUE} (passed via
-#'     \code{settings}).}
+#'     \code{fit$sir_resamples}. Requires SIR draws kept on the fit:
+#'     \code{ferx_sir(fit, sir_keep_samples = TRUE)}, or
+#'     \code{ferx_fit(..., sir = TRUE, settings = list(sir_keep_samples = TRUE))}.
+#'     A fit saved with \code{ferx_save_fit()} keeps them through
+#'     \code{ferx_load_fit()}.}
 #' }
 #'
 #' @section Bounded thetas and \code{logit_probability} draws:
@@ -185,8 +187,9 @@ validate_fit_for_uncertainty <- function(fit, method) {
     d <- fit$sir_resamples_dim
     if (is.null(resamples) || length(resamples) == 0L ||
         is.null(n) || n == 0L || is.null(d) || d == 0L) {
-      stop("`fit$sir_resamples` is empty - re-fit with `sir = TRUE` and ",
-           "`sir_keep_samples = TRUE` in `settings` for SIR uncertainty.")
+      stop("`fit$sir_resamples` is empty: SIR did not keep its draws. ",
+           "Run `fit <- ferx_sir(fit, sir_keep_samples = TRUE)`, or fit with ",
+           "`ferx_fit(..., sir = TRUE, settings = list(sir_keep_samples = TRUE))`.")
     }
     list(
       cov_matrix_flat    = numeric(0),

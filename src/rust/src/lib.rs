@@ -2750,7 +2750,8 @@ fn build_fit_result_for_uncertainty(
             let pd = sir_resamples_dim as usize;
             if n == 0 || pd == 0 || sir_resamples_flat.is_empty() {
                 return Err("SIR uncertainty requires resamples on the fit object — \
-                    re-fit with `sir = TRUE` and `sir_keep_samples = TRUE` in `settings`."
+                    run `ferx_sir(fit, sir_keep_samples = TRUE)`, or fit with \
+                    `ferx_fit(..., sir = TRUE, settings = list(sir_keep_samples = TRUE))`."
                     .to_string());
             }
             if sir_resamples_flat.len() != n * pd {

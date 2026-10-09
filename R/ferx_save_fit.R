@@ -14,6 +14,18 @@ FITRX_FORMAT_VERSION <- "1"
 #' tables reads back as the same double, and the predictions and simulations
 #' a reloaded fit drives are \code{identical()} to the original's.
 #'
+#' SIR draws kept with \code{sir_keep_samples = TRUE} (\code{fit$sir_resamples})
+#' are written to \code{sir.resamples_packed} in \code{fit.json}, so
+#' \code{ferx_simulate_with_uncertainty(method = "sir")} works on the reloaded
+#' fit. They are the bulk of such a bundle: \code{n_resamples x n_packed x 8}
+#' bytes as doubles, and about the same again in the compressed archive (1000
+#' draws of warfarin's 7 packed parameters, 56 kB of doubles, add 60 kB to
+#' the \code{.fitrx}). Each row is one draw in the engine's
+#' packed parameter space, not on the natural scale: how each column is
+#' packed depends on the model (a theta with a negative lower bound is not
+#' log-packed, for one), and the bundle does not yet name the columns or
+#' their packing.
+#'
 #' The schema is shared with the ferx-core Rust crate; see its
 #' \code{docs/src/file-formats/fitrx.md} for the full field reference.
 #'
@@ -759,19 +771,42 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   has_any <- !is.null(fit$sir_ess) || !is.null(fit$sir_ci_theta) ||
     !is.null(fit$sir_ci_omega) || !is.null(fit$sir_ci_sigma) ||
     !is.null(fit$sir_ci_kappa)
-  if (!has_any) return(NULL)
+  resamples <- .fitrx_resamples_to_wire(fit)
+  if (!has_any && is.null(resamples)) return(NULL)
   wire <- list(
     ci_theta = .fitrx_ci_to_wire(fit$sir_ci_theta),
     ci_omega = .fitrx_ci_to_wire(fit$sir_ci_omega),
     ci_sigma = .fitrx_ci_to_wire(fit$sir_ci_sigma),
     ess = .fitrx_opt_num(fit$sir_ess),
-    resamples_packed = NULL
+    resamples_packed = resamples
   )
   # ferx-core #1705's SirWire key. `[[<-` with NULL adds nothing, so a fit with
   # no kappa writes no key at all - as the engine's writer omits it - rather
   # than `"ci_kappa": null`.
   wire[["ci_kappa"]] <- .fitrx_ci_to_wire(fit$sir_ci_kappa)
   wire
+}
+
+# The retained SIR draws (`sir_keep_samples = TRUE`) in ferx-core's
+# `SirWire.resamples_packed` shape: one array per resample, each
+# `sir_resamples_dim` values in packed space - the flat, row-major vector the
+# fit carries, cut into its rows (#549). NULL when the fit kept none, which
+# writes `null` as the engine does.
+.fitrx_resamples_to_wire <- function(fit) {
+  v <- fit$sir_resamples
+  n <- fit$sir_resamples_n
+  d <- fit$sir_resamples_dim
+  if (length(v) == 0L || length(n) != 1L || length(d) != 1L) return(NULL)
+  n <- as.integer(n)
+  d <- as.integer(d)
+  if (is.na(n) || is.na(d) || n < 1L || d < 1L || length(v) != n * d) {
+    stop("ferx_save_fit: `fit$sir_resamples` holds ", length(v), " values, ",
+         "not `sir_resamples_n` x `sir_resamples_dim` = ", n, " x ", d,
+         "; it was edited after the fit. Re-run ferx_sir(), or set all three ",
+         "to NULL.", call. = FALSE)
+  }
+  m <- matrix(as.numeric(v), nrow = n, ncol = d, byrow = TRUE)
+  lapply(seq_len(n), function(i) m[i, ])
 }
 
 # Bayes posterior summary (method = "bayes"). Stored as scalar metadata plus

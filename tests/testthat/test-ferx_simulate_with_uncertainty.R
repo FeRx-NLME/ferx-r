@@ -225,6 +225,16 @@ test_that("validate_fit_for_uncertainty (asymptotic) flattens a valid cov matrix
 test_that("validate_fit_for_uncertainty (SIR) errors when resamples are empty", {
   expect_error(.validate_uncertainty(list(), "sir"), "sir_resamples` is empty")
 })
+test_that("validate_fit_for_uncertainty (SIR) names both calls that keep draws (#549)", {
+  msg <- tryCatch(.validate_uncertainty(list(), "sir"),
+                  error = conditionMessage)
+  # ferx_sir() on the fit in hand: no re-fit needed.
+  expect_match(msg, "ferx_sir(fit, sir_keep_samples = TRUE)", fixed = TRUE)
+  # `sir` as ferx_fit()'s own argument - inside `settings` it is refused.
+  expect_match(msg, "ferx_fit(..., sir = TRUE, settings = list(sir_keep_samples = TRUE))",
+               fixed = TRUE)
+  expect_no_match(msg, "re-fit", fixed = TRUE)
+})
 test_that("validate_fit_for_uncertainty (SIR) passes through resamples", {
   fit <- list(sir_resamples = c(1, 2, 3, 4), sir_resamples_n = 2L,
               sir_resamples_dim = 2L)
