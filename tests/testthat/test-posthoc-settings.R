@@ -148,6 +148,54 @@ test_that("S4: ferx_sir(fit) with no arguments repeats the in-fit SIR", {
   }
 })
 
+test_that("S6: an explicit argument overrides the fit's record, even at its default value", {
+  # The engine resolves a record by value, so an explicit default passed as an
+  # option would lose to it (plan section 0c); the argument edits the record.
+  fit <- ps_cov_fit(ps_cov_rows[[3L]])  # warfarin_iov, recorded mu_referencing = FALSE
+  no_record <- fit
+  no_record$scoring_settings <- NULL
+  over <- ferx_covariance(fit, mu_referencing = TRUE)$cov_matrix
+  expect_identical(over, ferx_covariance(no_record)$cov_matrix)
+  expect_false(identical(over, fit$cov_matrix))
+  expect_identical(ferx_covariance(fit, mu_referencing = FALSE)$cov_matrix,
+                   fit$cov_matrix)
+
+  nat <- ps_sir_fit(ps_sir_rows[[3L]])  # warfarin_iov, recorded sir_scale = "natural"
+  packed <- ferx_sir(nat, sir_scale = "packed")
+  ref <- nat
+  ref$sir_settings <- NULL
+  expect_identical(ps_sir_fields(packed),
+                   ps_sir_fields(ferx_sir(ref, 300L, 100L, sir_seed = 1L)))
+  expect_false(identical(ps_sir_fields(packed), ps_sir_fields(nat)))
+  # The run records what it did; the settings not passed stay the fit's.
+  expect_identical(packed$sir_settings$scale, "packed")
+  expect_identical(packed$sir_settings[c("samples", "resamples", "seed")],
+                   nat$sir_settings[c("samples", "resamples", "seed")])
+})
+
+test_that("S7: a fit with no record is scored as it always was, and says nothing", {
+  bare <- function(fit) {
+    fit$scoring_settings <- NULL
+    fit$sir_settings <- NULL
+    fit$packed_estimate <- NULL
+    fit
+  }
+  f0 <- bare(ps_cov_fit(ps_cov_rows[[3L]]))
+  expect_no_warning(cov <- ferx_covariance(f0))
+  # An explicit argument on a record-less fit edits the engine's default record:
+  # at the default value it is the same run.
+  expect_identical(cov$cov_matrix,
+                   ferx_covariance(f0, mu_referencing = TRUE)$cov_matrix)
+
+  s0 <- bare(ps_sir_fit(ps_sir_rows[[1L]]))
+  expect_no_warning(sir <- ferx_sir(s0))
+  expect_identical(sir$sir_settings[c("samples", "resamples", "seed", "df", "scale")],
+                   list(samples = 1000L, resamples = 250L, seed = 12345, df = 5,
+                        scale = "packed"))
+  expect_identical(ps_sir_fields(sir),
+                   ps_sir_fields(ferx_sir(s0, 1000L, 250L, sir_scale = "packed")))
+})
+
 test_that("S8: a fit whose estimates were edited does not keep its packed estimate", {
   fit <- ps_fit("w_default", "warfarin")
   edited <- fit

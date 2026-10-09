@@ -137,12 +137,32 @@ validate_fit_for_params <- function(fit) {
 # `fit$packed_estimate` (numeric(0) when none). The glue puts them on the
 # skeleton both `ferx_sir()` and `ferx_covariance()` build, so with no
 # arguments those steps score what the fit scored.
-.ferx_fit_record_args <- function(fit) {
+#
+# `scoring` / `sir` are the caller's explicit arguments, named as the record
+# names them. They are written into the record, never passed as engine
+# options: the engine takes a recorded value wherever an option equals its
+# default, so an explicit default passed as an option would lose to the
+# record. A fit with no record gets the engine's default record to write them
+# into; with no explicit argument it keeps none, and runs as it always did.
+.ferx_fit_record_args <- function(fit, scoring = list(), sir = list()) {
+  edit <- function(record, kind, values) {
+    if (length(values) == 0L) return(record)
+    record <- record %||% .ferx_default_settings(kind)
+    record[names(values)] <- values
+    record
+  }
   list(
-    scoring_settings = fit$scoring_settings,
-    sir_settings = fit$sir_settings,
+    scoring_settings = edit(fit$scoring_settings, "scoring_settings", scoring),
+    sir_settings = edit(fit$sir_settings, "sir_settings", sir),
     packed_estimate = as.numeric(fit$packed_estimate %||% numeric())
   )
+}
+
+# The engine's default `scoring_settings` / `sir_settings` record: the
+# settings of a run that changed nothing (ferx-core `ScoringSettings::default()`
+# / `SirSettings::default()`), in the fit's layout.
+.ferx_default_settings <- function(kind) {
+  ferx_rust_settings_record(kind, NULL, "", "")
 }
 
 # Refuse a post-hoc step on a fit that records no reader settings when it was

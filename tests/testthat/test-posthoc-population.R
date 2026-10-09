@@ -105,10 +105,13 @@ test_that("P4: the rule survives ferx_save_fit() / ferx_load_fit() (#512)", {
     loaded <- ferx_load_fit(path)
     expect_identical(loaded$iov_occasion, rule, info = rule)
     # Only the covariance comparison needs a converged step; a skip here would
-    # also drop the next rule's round trip.
+    # also drop the next rule's round trip. A bundle carries no packed estimate
+    # (ferx-core#1815), so the in-memory side drops it too (#511).
     if (!is.null(fit$cov_matrix)) {
+      in_memory <- fit
+      in_memory$packed_estimate <- NULL
       expect_identical(ferx_covariance(loaded)$se_theta,
-                       ferx_covariance(fit)$se_theta, info = rule)
+                       ferx_covariance(in_memory)$se_theta, info = rule)
     }
   }
 })
