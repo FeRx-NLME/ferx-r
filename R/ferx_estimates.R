@@ -55,13 +55,10 @@
     if (is.null(dim(m_iov))) m_iov <- matrix(m_iov, 1L, 1L)
     n_kap  <- nrow(m_iov)
     kap_names <- if (!is.null(fit$kappa_names) && length(fit$kappa_names) == n_kap) fit$kappa_names else paste0("KAPPA", seq_len(n_kap))
+    # One SE per kappa, block_kappa included (ferx-core postfit.rs).
     n_se   <- length(fit$se_kappa)
-    n_tri  <- n_kap * (n_kap + 1L) / 2L
-    is_block_se <- (n_se == n_tri && n_kap > 1L)
-    diag_se_idx <- function(j) j * n_kap - j * (j - 1L) / 2L - (n_kap - j)
     for (i in seq_len(n_kap)) {
-      se_idx  <- if (is_block_se) diag_se_idx(i) else i
-      se      <- if (n_se >= se_idx) fit$se_kappa[se_idx] else NA_real_
+      se      <- if (n_se >= i) fit$se_kappa[[i]] else NA_real_
       # The kappa's scale (ferx-core #1643) is its own column: `transform`
       # stays "variance", since it picks how the variance's interval is
       # formed, and a "logit" there would inv_logit() a variance. NA on a fit

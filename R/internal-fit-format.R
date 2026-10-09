@@ -63,44 +63,83 @@
   m
 }
 
-# The parenthetical of a kappa row in print.ferx_fit(): the variance read on
-# the scale the kappa enters (ferx-core #1643). Log-normal, or unknown (NA: a
-# fit from before #1643), keeps the exact CV% every row printed before. An
-# additive or logit kappa gets its SD; a weighted one's variance is the
-# unweighted gamma^2, so its SD is that of a weight-1 arm and says so (the
-# SD at the typical weight follows on the next line). Any other expression has
-# no scale to read on, and gets NULL. Labels match ferx-core's console.
-.ferx_kappa_variance_note <- function(type, var, weighted) {
-  at_w <- if (weighted) " at weight 1" else ""
-  sd <- sqrt(max(var, 0))
-  if (is.na(type) || type == "log_normal") {
-    sprintf("CV%% = %.1f", if (var > 0) sqrt(exp(var) - 1) * 100 else 0)
-  } else if (type == "additive") {
-    sprintf("SD = %.4f%s", sd, at_w)
-  } else if (type %in% c("logit", "logit_probability")) {
-    sprintf("SD = %.4f%s, logit scale", sd, at_w)
-  } else {
-    NULL
-  }
+# The OMEGA_IOV rows print.ferx_fit() prints: ferx-core's own formatter
+# (format_kappa_rows_from, ferx-core #1825) over this fit's fields, so the
+# rows, their CV%/SD notes, the weighted-kappa weight line and the
+# covariance-status gate are the engine console's, not an R copy of them
+# (#470). A character vector, one element per row; empty when there is no IOV.
+# `ascii` spells the formatter's arrow and kappa glyphs in ASCII, for a console
+# that cannot print UTF-8.
+.ferx_kappa_rows <- function(fit, ascii = !isTRUE(l10n_info()[["UTF-8"]])) {
+  m <- fit$omega_iov
+  if (is.null(m)) return(character())
+  if (is.null(dim(m))) m <- matrix(m, 1L, 1L)
+  types <- as.character(fit$kappa_param_types %||% character())
+  status <- fit$covariance_status %||% "not_requested"
+  .ferx_check_kappa_row_fields(types, status)
+  rows <- ferx_rust_kappa_rows(
+    as.numeric(m), nrow(m),
+    .ferx_kappa_labels(fit$kappa_names, nrow(m)),
+    if (is.null(fit$kappa_fixed)) NULL else as.logical(fit$kappa_fixed),
+    if (is.null(fit$se_kappa)) NULL else as.numeric(fit$se_kappa),
+    types,
+    if (is.null(fit$kappa_weights)) NULL else as.character(fit$kappa_weights),
+    if (is.null(fit$kappa_weight_typical)) NULL else as.numeric(fit$kappa_weight_typical),
+    as.character(status),
+    ascii
+  )
+  strsplit(rows, "\n", fixed = TRUE)[[1L]]
 }
 
-# Format the one-line weight annotation printed under a weighted kappa's
-# estimate. `var` is the *unweighted* gamma^2 the engine reports; the number a
-# reader needs next to it is the effective between-occasion SD at a typical
-# weight, gamma / sqrt(W). Mirrors the ferx-core CLI output. Returns NULL when
-# kappa `i` carries no weight.
-.ferx_format_kappa_weight <- function(fit, i, var, name) {
-  w <- fit$kappa_weights
-  if (is.null(w) || length(w) < i || is.na(w[[i]])) return(NULL)
-  expr <- as.character(w[[i]])
-  tv <- fit$kappa_weight_typical
-  n <- if (!is.null(tv) && length(tv) >= i) tv[[i]] else NA_real_
-  if (!is.na(n) && is.finite(n) && n > 0 && !is.na(var) && var >= 0) {
-    sprintf("%22s weight = %s  ->  SD = %.4f at %s = %.4f (kappa ~ N(0, %s/%s))",
-            "", expr, sqrt(var) / sqrt(n), expr, n, name, expr)
-  } else {
-    sprintf("%22s weight = %s (kappa ~ N(0, %s/%s))", "", expr, name, expr)
+# The label of each of `n` kappas in print output: its declared name, or the
+# KAPPA<i> fallback (AGENTS.md, Output Label Convention) when the fit carries
+# no names, the wrong number of them, or an empty / NA one. The rows, the
+# correlations under them and the SHRINKAGE line all read this.
+.ferx_kappa_labels <- function(kappa_names, n) {
+  fallback <- paste0("KAPPA", seq_len(n))
+  if (length(kappa_names) != n) return(fallback)
+  out <- as.character(kappa_names)
+  bad <- is.na(out) | !nzchar(out)
+  out[bad] <- fallback[bad]
+  out
+}
+
+# The kappa fields .ferx_kappa_rows() cannot hand to ferx-core's formatter:
+# an NA or unknown scale, and an NA, empty or unknown covariance status
+# (#545). Without this print() itself aborted with extendr's bare
+# "Must not be NA." or the glue's "unknown covariance_status". Refuses with
+# a `ferx_fit_field_error` naming the field; `field` carries its name.
+.ferx_check_kappa_row_fields <- function(types, status) {
+  known_types <- c("log_normal", "additive", "logit", "logit_probability", "custom")
+  bad <- is.na(types) | !types %in% known_types
+  if (any(bad)) {
+    .ferx_fit_field_error("kappa_param_types", sprintf(
+      "fit$kappa_param_types has %s at position %s; expected one of %s.",
+      paste(ifelse(is.na(types[bad]), "NA", sprintf("\"%s\"", types[bad])), collapse = ", "),
+      paste(which(bad), collapse = ", "), paste(known_types, collapse = ", ")
+    ))
   }
+  known_status <- c("computed", "failed", "notrequested", "sirfallback")
+  key <- if (length(status) == 1L && !is.na(status)) {
+    tolower(gsub("_", "", as.character(status), fixed = TRUE))
+  } else {
+    NA_character_
+  }
+  if (is.na(key) || !key %in% known_status) {
+    .ferx_fit_field_error("covariance_status", sprintf(
+      "fit$covariance_status is %s; expected one of computed, failed, not_requested, sir_fallback.",
+      if (length(status) == 1L && !is.na(status)) sprintf("\"%s\"", status)
+      else paste(deparse(status), collapse = "")
+    ))
+  }
+  invisible(NULL)
+}
+
+# Stop with a `ferx_fit_field_error`: a field of a fit object that the code
+# reading it cannot interpret. `field` names it.
+.ferx_fit_field_error <- function(field, message) {
+  stop(errorCondition(message, class = "ferx_fit_field_error", field = field,
+                      call = NULL))
 }
 
 # Kappa labels for a model_structure list, with a sample-size-weighted kappa
@@ -716,26 +755,10 @@
     }
     if (length(result$se_kappa) == 0L) {
       result$se_kappa <- NULL
-    } else {
-      n_tri <- d_iov * (d_iov + 1L) / 2L
-      if (length(result$se_kappa) == d_iov) {
-        names(result$se_kappa) <- result$kappa_names
-      } else if (length(result$se_kappa) == n_tri) {
-        # block kappa: label lower-triangle elements as NAME (diagonal) or COV_i_j
-        tri_names <- character(n_tri)
-        idx <- 1L
-        for (j in seq_len(d_iov)) {
-          for (i in j:d_iov) {
-            tri_names[idx] <- if (i == j) {
-              result$kappa_names[i]
-            } else {
-              paste0("COV_", result$kappa_names[j], "_", result$kappa_names[i])
-            }
-            idx <- idx + 1L
-          }
-        }
-        names(result$se_kappa) <- tri_names
-      }
+    } else if (length(result$se_kappa) == d_iov) {
+      # One SE per kappa, the diagonal, block_kappa included (ferx-core
+      # postfit.rs): off-diagonal kappa SEs are not reported (#470).
+      names(result$se_kappa) <- result$kappa_names
     }
     # Per-occasion shrinkage: set column names from kappa_names; NULL when
     # the Rust glue returned an empty/NULL frame (no IOV or unbalanced design).
