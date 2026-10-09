@@ -2926,8 +2926,7 @@ print.ferx_fit <- function(x, ...) {
     m_iov <- x$omega_iov
     if (is.null(dim(m_iov))) m_iov <- matrix(m_iov, 1, 1)
     n_kap <- nrow(m_iov)
-    kap_names <- x$kappa_names
-    if (is.null(kap_names)) kap_names <- paste0("KAPPA", seq_len(n_kap))
+    kap_names <- .ferx_kappa_labels(x$kappa_names, n_kap)
     # The rows - CV%/SD note, SE, a weighted kappa's weight line - are
     # ferx-core's console rows (#470); pooled shrinkage is in SHRINKAGE below.
     cat(paste0(.ferx_kappa_rows(x), "\n"), sep = "")
@@ -3114,10 +3113,11 @@ print.ferx_fit <- function(x, ...) {
     }
     # Pooled kappa shrinkage, which ferx-core's KAPPA rows (#470) do not carry.
     if (!is.null(x$shrinkage_kappa)) {
+      kap_lbls <- .ferx_kappa_labels(x$kappa_names, length(x$shrinkage_kappa))
       for (k in seq_along(x$shrinkage_kappa)) {
         sh <- x$shrinkage_kappa[k]
         if (is.na(sh)) next
-        lbl <- if (length(x$kappa_names) >= k && nzchar(x$kappa_names[k])) x$kappa_names[k] else sprintf("KAPPA%d", k)
+        lbl <- kap_lbls[k]
         flag <- if (sh * 100 > 30) paste0(" ", .ferx_style("[!]", "yellow")) else ""
         parts <- c(parts, sprintf("%s: %.1f%%%s", lbl, sh * 100, flag))
       }

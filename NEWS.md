@@ -767,7 +767,11 @@
   hides. The rows now come from ferx-core's own formatter, so they cannot
   drift again. A FIX kappa reads `KAPPA_V [FIX] = ...  SE = ---`, as on the
   console, and pooled kappa shrinkage moves from the row to the SHRINKAGE
-  section next to the ETAs. `fit$se_kappa` is documented as what it always
+  section next to the ETAs. A fit whose `kappa_param_types` holds an `NA` or
+  an unknown scale, or whose `covariance_status` is `NA` or unknown, is
+  refused by `print()` with a `ferx_fit_field_error` naming the field
+  ([#545](https://github.com/FeRx-NLME/ferx-r/issues/545)), not an
+  unexplained engine error. `fit$se_kappa` is documented as what it always
   was, one SE per kappa (the diagonal) for a `block_kappa` too; the R code
   that read it as a packed triangle is gone.
 

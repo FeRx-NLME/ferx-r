@@ -151,6 +151,86 @@ test_that("ascii spells only the arrow and the kappa glyph differently", {
   expect_true(all(!grepl("[^ -~]", ascii)))
 })
 
+test_that("unnamed kappas print the KAPPA<i> fallback on every line that names them", {
+  # Review row 2: core's own fallback is a bare `KAPPA` for every row, which
+  # AGENTS.md's label table does not allow and the correlations below did not use.
+  fit <- make_fake_fit(
+    omega = matrix(0.10, 1, 1),
+    omega_iov = matrix(c(0.04, 0.01, 0.01, 0.02), 2, 2),
+    se_kappa = c(0.01, 0.005), shrinkage_kappa = c(0.1, 0.2),
+    kappa_param_types = c("log_normal", "log_normal")
+  )
+  rows <- printed_kappa_rows(fit)
+  expect_length(rows, 2L)
+  expect_match(rows[1L], "^  KAPPA1 +=")
+  expect_match(rows[2L], "^  KAPPA2 +=")
+  out <- utils::capture.output(print(fit))
+  expect_true(any(startsWith(out, "  KAPPA2 ~ KAPPA1 : cov = 0.010000")))
+  expect_match(grep("KAPPA1: ", out, value = TRUE), "KAPPA1: 10.0%   KAPPA2: 20.0%", fixed = TRUE)
+  # An empty name in an otherwise named fit falls back too, at its own index.
+  fit$kappa_names <- c("KAPPA_CL", "")
+  rows <- printed_kappa_rows(fit)
+  expect_match(rows[1L], "^  KAPPA_CL +=")
+  expect_match(rows[2L], "^  KAPPA2 +=")
+  out <- utils::capture.output(print(fit))
+  expect_true(any(startsWith(out, "  KAPPA2 ~ KAPPA_CL : cov = 0.010000")))
+})
+
+test_that("print refuses an unreadable kappa scale or covariance status by name (#545)", {
+  base <- make_fake_fit(
+    omega = matrix(0.10, 1, 1),
+    omega_iov = diag(c(0.04, 0.02)), kappa_names = c("KAPPA_CL", "KAPPA_V"),
+    kappa_param_types = c("additive", "log_normal"), covariance_status = "computed"
+  )
+  expect_length(printed_kappa_rows(base), 2L)
+  refuses <- function(fit, field, pattern) {
+    err <- expect_error(print(fit), class = "ferx_fit_field_error")
+    expect_identical(err$field, field)
+    expect_match(conditionMessage(err), pattern, fixed = TRUE)
+  }
+  f <- base; f$kappa_param_types <- c("additive", NA)
+  refuses(f, "kappa_param_types", "has NA at position 2")
+  f <- base; f$kappa_param_types <- c("lognormal", "additive")
+  refuses(f, "kappa_param_types", "has \"lognormal\" at position 1")
+  f <- base; f$covariance_status <- NA_character_
+  refuses(f, "covariance_status", "fit$covariance_status is NA_character_")
+  f <- base; f$covariance_status <- "done"
+  refuses(f, "covariance_status", "fit$covariance_status is \"done\"")
+  f <- base; f$covariance_status <- c("computed", "failed")
+  refuses(f, "covariance_status", "fit$covariance_status is c(\"computed\", \"failed\")")
+  # Both sides of each gate: an empty scale vector (a fit from before
+  # ferx-core #1643), a missing status, and a reloaded fit's CamelCase status
+  # are all readable.
+  for (ok in list(list(kappa_param_types = character()),
+                  list(covariance_status = NULL),
+                  list(covariance_status = "SirFallback"),
+                  list(covariance_status = "NotRequested"))) {
+    f <- utils::modifyList(base, ok)
+    class(f) <- class(base)
+    expect_length(printed_kappa_rows(f), 2L)
+  }
+})
+
+test_that("kappa shrinkage alone opens SHRINKAGE, and over 30% is flagged", {
+  # Review row 5: the kappa term of has_shrinkage and the [!] flag.
+  fit <- make_fake_fit(
+    omega = matrix(0.10, 1, 1),
+    omega_iov = diag(c(0.04, 0.02)), kappa_names = c("KAPPA_CL", "KAPPA_V"),
+    shrinkage_kappa = c(0.4, 0.1)
+  )
+  expect_null(fit$shrinkage_eta)
+  expect_null(fit$shrinkage_eps)
+  out <- utils::capture.output(print(fit))
+  expect_true(any(grepl("SHRINKAGE", out, fixed = TRUE)))
+  line <- grep("KAPPA_CL: ", out, value = TRUE)
+  expect_length(line, 1L)
+  expect_match(line, "KAPPA_CL: 40.0% [!]   KAPPA_V: 10.0%", fixed = TRUE)
+  expect_false(grepl("KAPPA_V: 10.0% [!]", line, fixed = TRUE))
+  # No kappa shrinkage either: no SHRINKAGE section at all.
+  fit$shrinkage_kappa <- NULL
+  expect_false(any(grepl("SHRINKAGE", utils::capture.output(print(fit)), fixed = TRUE)))
+})
+
 test_that("the glue refuses what it cannot read rather than guessing", {
   glue <- getFromNamespace("ferx_rust_kappa_rows", "ferx")
   call <- function(...) {

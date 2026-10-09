@@ -74,18 +74,72 @@
   m <- fit$omega_iov
   if (is.null(m)) return(character())
   if (is.null(dim(m))) m <- matrix(m, 1L, 1L)
+  types <- as.character(fit$kappa_param_types %||% character())
+  status <- fit$covariance_status %||% "not_requested"
+  .ferx_check_kappa_row_fields(types, status)
   rows <- ferx_rust_kappa_rows(
     as.numeric(m), nrow(m),
-    as.character(fit$kappa_names %||% character()),
+    .ferx_kappa_labels(fit$kappa_names, nrow(m)),
     if (is.null(fit$kappa_fixed)) NULL else as.logical(fit$kappa_fixed),
     if (is.null(fit$se_kappa)) NULL else as.numeric(fit$se_kappa),
-    as.character(fit$kappa_param_types %||% character()),
+    types,
     if (is.null(fit$kappa_weights)) NULL else as.character(fit$kappa_weights),
     if (is.null(fit$kappa_weight_typical)) NULL else as.numeric(fit$kappa_weight_typical),
-    as.character(fit$covariance_status %||% "not_requested"),
+    as.character(status),
     ascii
   )
   strsplit(rows, "\n", fixed = TRUE)[[1L]]
+}
+
+# The label of each of `n` kappas in print output: its declared name, or the
+# KAPPA<i> fallback (AGENTS.md, Output Label Convention) when the fit carries
+# no names, the wrong number of them, or an empty / NA one. The rows, the
+# correlations under them and the SHRINKAGE line all read this.
+.ferx_kappa_labels <- function(kappa_names, n) {
+  fallback <- paste0("KAPPA", seq_len(n))
+  if (length(kappa_names) != n) return(fallback)
+  out <- as.character(kappa_names)
+  bad <- is.na(out) | !nzchar(out)
+  out[bad] <- fallback[bad]
+  out
+}
+
+# The kappa fields .ferx_kappa_rows() cannot hand to ferx-core's formatter:
+# an NA or unknown scale, and an NA, empty or unknown covariance status
+# (#545). Without this print() itself aborted with extendr's bare
+# "Must not be NA." or the glue's "unknown covariance_status". Refuses with
+# a `ferx_fit_field_error` naming the field; `field` carries its name.
+.ferx_check_kappa_row_fields <- function(types, status) {
+  known_types <- c("log_normal", "additive", "logit", "logit_probability", "custom")
+  bad <- is.na(types) | !types %in% known_types
+  if (any(bad)) {
+    .ferx_fit_field_error("kappa_param_types", sprintf(
+      "fit$kappa_param_types has %s at position %s; expected one of %s.",
+      paste(ifelse(is.na(types[bad]), "NA", sprintf("\"%s\"", types[bad])), collapse = ", "),
+      paste(which(bad), collapse = ", "), paste(known_types, collapse = ", ")
+    ))
+  }
+  known_status <- c("computed", "failed", "notrequested", "sirfallback")
+  key <- if (length(status) == 1L && !is.na(status)) {
+    tolower(gsub("_", "", as.character(status), fixed = TRUE))
+  } else {
+    NA_character_
+  }
+  if (is.na(key) || !key %in% known_status) {
+    .ferx_fit_field_error("covariance_status", sprintf(
+      "fit$covariance_status is %s; expected one of computed, failed, not_requested, sir_fallback.",
+      if (length(status) == 1L && !is.na(status)) sprintf("\"%s\"", status)
+      else paste(deparse(status), collapse = "")
+    ))
+  }
+  invisible(NULL)
+}
+
+# Stop with a `ferx_fit_field_error`: a field of a fit object that the code
+# reading it cannot interpret. `field` names it.
+.ferx_fit_field_error <- function(field, message) {
+  stop(errorCondition(message, class = "ferx_fit_field_error", field = field,
+                      call = NULL))
 }
 
 # Kappa labels for a model_structure list, with a sample-size-weighted kappa
