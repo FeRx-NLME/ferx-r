@@ -589,6 +589,11 @@ fn ferx_rust_fit(
                 opts.gradient_method = ferx_core::GradientMethod::Auto;
             }
         }
+        // Not redundant with ferx-core #1613. `fit()` now applies `opts.gradient_method`
+        // itself, but only as "force FD": FD wins if either the model's flag or the options
+        // say FD, and Auto/Ad in the options never undo a model file's own `fd`. The
+        // `gradient = "auto"` / `"ad"` argument is documented to override the file, so the
+        // model's flag still has to be overwritten here.
         parsed.model.gradient_method = opts.gradient_method;
 
         // Install a cancellation token so Ctrl-C on the R console aborts the fit.

@@ -231,6 +231,20 @@ test_that("a refusal the engine raises with a code carries it without re-validat
   expect_coded_refusal(probe, "infusion into compartment 0", "E_DOSE_CMT_NOT_INFUSABLE")
 })
 
+test_that("a population with nothing to score is refused with its code", {
+  # ferx-core #1491: every DV missing used to fit to OFV 0 at the initial
+  # estimates. The engine now refuses it once for the population, and the code
+  # has to reach R through the same classed condition.
+  ex <- ferx_example("warfarin")
+  d  <- example_rows("warfarin")
+  d$DV[d$EVID == 0] <- NA
+  data <- write_nonmem_csv(d)
+  probe <- engine_error_probe(ferx_fit(ex$model, data, verbose = FALSE))
+  expect_s3_class(probe$cond, "ferx_engine_error")
+  expect_identical(probe$cond$code, "E_NO_SCORED_OBSERVATIONS")
+  expect_null(probe$value)
+})
+
 # -- One handler for every entry point ----------------------------------------
 
 test_that("#385's script: a loop over candidate models stops on the refused one", {

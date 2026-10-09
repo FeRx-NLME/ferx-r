@@ -235,6 +235,25 @@ test_that("an intact free fit is rebuilt at its fitted rho", {
   expect_false(identical(sim_fit$DV_SIM, sim_declared$DV_SIM))
 })
 
+test_that("ferx_calc_npde draws block_sigma residuals at the fitted rho", {
+  skip_on_cran()
+  case <- rho_case()
+  fit <- case$fit
+  # The control below is only a control if the fit moved rho off its start.
+  expect_gt(abs(fit$residual_correlations$rho - declared_rho), 1e-3)
+
+  # Up to ferx-core #1733 the NPDE simulation drew every residual at the rho
+  # declared in the model file, so these two were identical whatever the fit
+  # said. Same seed, same everything else: only the rho differs.
+  at_declared <- fit
+  at_declared$residual_correlations$rho <- declared_rho
+  npde_fit <- ferx_calc_npde(fit, nsim = 200L, seed = 1L)$sdtab
+  npde_declared <- ferx_calc_npde(at_declared, nsim = 200L, seed = 1L)$sdtab
+  expect_true(all(is.finite(npde_fit$NPDE)))
+  expect_false(isTRUE(all.equal(npde_fit$NPDE, npde_declared$NPDE)))
+  expect_false(isTRUE(all.equal(npde_fit$NPD, npde_declared$NPD)))
+})
+
 test_that("a FIX correlation needs no fitted value", {
   skip_on_cran()
   case <- rho_fix_case()
