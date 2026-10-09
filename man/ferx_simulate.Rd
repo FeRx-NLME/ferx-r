@@ -210,8 +210,9 @@ class \code{ferx_engine_error} and carries \code{code}, \code{block},
 \code{\link{ferx_fit}} raises, so one
 \code{tryCatch(..., ferx_engine_error = )} handler covers every entry
 point. Its message ends with the code in square brackets and, when there
-is a suggestion, a \code{hint: ...} line, as a refused fit's does. A failure the validation pass cannot attribute to one diagnostic is
-raised as an ordinary error carrying the engine's message.
+is a suggestion, a \code{hint: ...} line, as a refused fit's does. A
+failure the validation pass cannot attribute to one diagnostic is raised as
+an ordinary error carrying the engine's message.
 }
 
 \examples{
