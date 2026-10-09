@@ -244,9 +244,9 @@ test_that("an intact free fit is rebuilt at its fitted rho", {
 # ADD sd 0.6, rho -0.6) and declares the block at rho = 0. The fit keeps
 # ADD_ERR well away from zero (0.79 in fit$sigma) and recovers rho ~ -0.71.
 rho_npde_case <- local({
-  cache <- NULL
+  cache <- new.env(parent = emptyenv())
   function() {
-    if (!is.null(cache)) return(cache)
+    if (!is.null(cache$v)) return(cache$v)
     dir <- tempfile("ferx-rho-npde-")
     dir.create(dir)
     model <- file.path(dir, "rho_npde.ferx")
@@ -279,9 +279,9 @@ rho_npde_case <- local({
       "[fit_options]",
       "  method = focei"
     ), model)
-    cache <<- list(model = model, data = data,
-                   fit = ferx_fit(model, data, verbose = FALSE))
-    cache
+    cache$v <- list(model = model, data = data,
+                    fit = ferx_fit(model, data, verbose = FALSE))
+    cache$v
   }
 })
 
