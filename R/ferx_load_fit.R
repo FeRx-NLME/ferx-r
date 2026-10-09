@@ -86,7 +86,8 @@ ferx_load_fit <- function(path) {
   if (file.exists(preds_path)) {
     result$sdtab <- .fitrx_read_csv_exact(preds_path, id_cols = "ID")
     if (!is.null(result$sdtab$ID)) {
-      result$sdtab$ID <- .fitrx_sdtab_id_number(result$sdtab$ID)
+      result$sdtab$ID <- .fitrx_sdtab_id_number(result$sdtab$ID,
+                                                result$ebe_etas$ID)
     }
   }
   covtab_path <- file.path(staging, "covtab.csv")

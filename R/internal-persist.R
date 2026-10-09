@@ -273,8 +273,10 @@
 
 # A text cell as ferx-core's `.fitrx` writer spells it (`csv_escape()` in
 # `io/fitrx.rs`): quoted, with `"` doubled, only when it holds a comma, a quote
-# or a newline; verbatim otherwise. NA stays NA (an empty cell). Both readers
-# take either form, so a subject ID such as `Smith, 2019` round-trips (#475).
+# or a newline; verbatim otherwise. NA stays NA (an empty cell). R's reader
+# and ferx-core's both take a quoted comma or quote, so a subject ID such as
+# `Smith, 2019` round-trips (#475). A newline makes the trip through R only:
+# ferx-core's reader is line-based (`parse_csv_row`).
 .fitrx_csv_escape <- function(x) {
   x <- as.character(x)
   hit <- !is.na(x) & grepl("[,\"\n]", x)
@@ -326,10 +328,29 @@
 
 # `predictions.csv`'s subject IDs (text) as the number ferx-core puts in
 # `sdtab$ID`: the ID parsed as Rust parses an f64, else the subject's
-# position, 1-based (`io::output::sdtab`). A bundle written before #475 holds
-# that number already, which parses to itself.
-.fitrx_sdtab_id_number <- function(ids) {
-  out <- as.numeric(.ferx_subject_index(ids))
+# position, 1-based, among ALL subjects (`io::output::sdtab`). A subject with
+# no observations has no rows here but still takes a position, so positions
+# come from `subject_ids` (the bundle's ebes.csv IDs, every subject in order):
+# each block takes the next subject with its text. Without them, or when a
+# block's text is not found, a block takes its own index. A bundle written
+# before #475 holds the number already, which parses to itself.
+.fitrx_sdtab_id_number <- function(ids, subject_ids = NULL) {
+  blk <- .ferx_subject_index(ids)
+  pos <- seq_len(if (length(blk)) max(blk) else 0L)
+  if (length(subject_ids) > 0L) {
+    first <- ids[!duplicated(blk)]
+    walked <- integer(length(first))
+    j <- 0L
+    for (k in seq_along(first)) {
+      rest <- subject_ids[seq.int(j + 1L, length.out = length(subject_ids) - j)]
+      hit <- match(first[k], rest)
+      if (is.na(hit)) break
+      j <- j + hit
+      walked[k] <- j
+    }
+    if (all(walked > 0L)) pos <- walked
+  }
+  out <- as.numeric(pos[blk])
   s <- tolower(ids)
   dec <- grepl("^[-+]?([0-9]+\\.?[0-9]*|\\.[0-9]+)(e[-+]?[0-9]+)?$", s)
   out[dec] <- .fitrx_parse_doubles(sub("^\\+", "", s[dec]))

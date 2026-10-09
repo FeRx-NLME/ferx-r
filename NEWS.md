@@ -2,6 +2,10 @@
 
 ## Breaking changes
 
+- **A reloaded `fit$sdtab$ID` is numeric**, as on the live fit, also for a
+  `.fitrx` bundle ferx-core wrote, where it used to come back as the text ID
+  ([#475](https://github.com/FeRx-NLME/ferx-r/issues/475); see Bug fixes).
+
 - **`ferx_sir(fit)` repeats the fit's own SIR** when the fit has one
   ([#472](https://github.com/FeRx-NLME/ferx-r/issues/472)). `sir_samples`,
   `sir_resamples`, `sir_seed`, `sir_keep_samples` and `sir_scale` now default

@@ -201,10 +201,13 @@ text_id_fit <- function(key) {
 }
 
 test_that("a reloaded fit keeps text IDs and runs ferx_covariance and ferx_sir (#475)", {
+  fits <- lapply(names(text_id_labels), text_id_fit)
+  names(fits) <- names(text_id_labels)
+  skip_if(any(vapply(fits, function(f) is.null(f$cov_matrix), logical(1))),
+          "covariance step did not converge - skipping")
   for (key in names(text_id_labels)) {
-    fit <- text_id_fit(key)
+    fit <- fits[[key]]
     expect_identical(fit$ebe_etas$ID[1], text_id_labels[[key]], info = key)
-    skip_if(is.null(fit$cov_matrix), "covariance step did not converge - skipping")
     path <- withr::local_tempfile(fileext = ".fitrx")
     ferx_save_fit(fit, path)
     loaded <- ferx_load_fit(path)
@@ -241,6 +244,53 @@ test_that("predictions.csv IDs read back as the engine's sdtab number (#475)", {
                                     "0x10", " 7")),
     c(1, 1, 7, 3, 1, 0.5, 100, -Inf, Inf, NaN, 10, 11)
   )
+  # A subject with no observations has no rows but keeps its position, so the
+  # positions come from every subject's ID (ebes.csv), not the block count.
+  expect_identical(
+    ferx:::.fitrx_sdtab_id_number(c("B", "B", "C", "7"), c("Z", "B", "C", "7")),
+    c(2, 2, 3, 7)
+  )
+  # A block whose text is not among the subjects: block indices, as without.
+  expect_identical(ferx:::.fitrx_sdtab_id_number(c("B", "Q"), c("Z", "B")), c(1, 2))
+})
+
+test_that("ferx_load_fit numbers a core-spelled predictions.csv past a zero-obs subject (#475)", {
+  # ferx-core's writer puts the text ID in predictions.csv and leaves out a
+  # subject with no observations; its sdtab number for `B` is then 2, not 1.
+  fake <- structure(
+    list(
+      sdtab = data.frame(ID = c(2, 2), TIME = c(0.5, 1), DV = c(5, 6),
+                         PRED = c(5, 6), IPRED = c(5, 6), CWRES = c(0, 0),
+                         IWRES = c(0, 0)),
+      ebe_etas = data.frame(ID = c("Z", "B"), ETA_CL = c(0, 0.1),
+                            stringsAsFactors = FALSE),
+      theta = c(TVCL = 1.0),
+      omega = matrix(0.04, 1L, 1L, dimnames = list("ETA_CL", "ETA_CL")),
+      eta_names = "ETA_CL",
+      sigma = c(prop = 0.05), sigma_names = "prop", sigma_types = "proportional",
+      theta_fixed = FALSE, omega_fixed = FALSE, sigma_fixed = FALSE,
+      ofv = 0, aic = 2, bic = 4,
+      n_obs = 2L, n_subjects = 2L, n_parameters = 1L, n_iterations = 1L,
+      method = "FOCEI", method_chain = "FOCEI", converged = TRUE,
+      warnings = character(), shrinkage_eta = 0, shrinkage_eps = 0,
+      wall_time_secs = 0, model_name = "fake", ferx_version = "0.1.0",
+      gradient_method_inner = "Enzyme AD", gradient_method_outer = "N/A",
+      covariance_status = "NotRequested", model_source = "model fake\n",
+      data_path = NA_character_
+    ),
+    class = "ferx_fit"
+  )
+  path <- withr::local_tempfile(fileext = ".fitrx")
+  ferx_save_fit(fake, path)
+  staging <- withr::local_tempdir()
+  utils::unzip(path, exdir = staging)
+  preds <- file.path(staging, "predictions.csv")
+  lines <- readLines(preds)
+  lines[-1] <- sub("^[^,]*", "B", lines[-1])
+  writeLines(lines, preds)
+  core_spelled <- withr::local_tempfile(fileext = ".fitrx")
+  utils::zip(core_spelled, list.files(staging, full.names = TRUE), flags = "-j -q")
+  expect_identical(ferx_load_fit(core_spelled)$sdtab$ID, c(2, 2))
 })
 
 test_that("a bundle without reader settings loads with neither field and still runs (#462)", {
