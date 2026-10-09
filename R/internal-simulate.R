@@ -132,6 +132,19 @@ validate_fit_for_params <- function(fit) {
   )
 }
 
+# How the fit was scored (#511, #472): `fit$scoring_settings` and
+# `fit$sir_settings` (the record lists, NULL when the fit carries none) and
+# `fit$packed_estimate` (numeric(0) when none). The glue puts them on the
+# skeleton both `ferx_sir()` and `ferx_covariance()` build, so with no
+# arguments those steps score what the fit scored.
+.ferx_fit_record_args <- function(fit) {
+  list(
+    scoring_settings = fit$scoring_settings,
+    sir_settings = fit$sir_settings,
+    packed_estimate = as.numeric(fit$packed_estimate %||% numeric())
+  )
+}
+
 # Refuse a post-hoc step on a fit that records no reader settings when it was
 # read with settings its model file does not state (#462 / #416).
 #

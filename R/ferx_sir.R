@@ -288,6 +288,7 @@ ferx_sir <- function(fit,
   iov_args <- .ferx_omega_iov_args(fit)
   binding_args <- .ferx_fit_binding_args(fit)
   reader_args <- .ferx_fit_reader_args(fit)
+  record_args <- .ferx_fit_record_args(fit)
   .ferx_refuse_unrecorded_selection(
     fit, "ferx_sir",
     "Refit with `ferx_fit(..., sir = TRUE)`, or refit and call ferx_sir() on the new fit."
@@ -324,6 +325,10 @@ ferx_sir <- function(fit,
     # (#462).
     reader_settings = reader_args$reader_settings,
     population_fingerprint = reader_args$population_fingerprint,
+    # How the fit was scored, and its exact packed estimate (#472).
+    scoring_settings = record_args$scoring_settings,
+    sir_settings = record_args$sir_settings,
+    packed_estimate = record_args$packed_estimate,
     sir_samples = as.integer(sir_samples),
     sir_resamples = as.integer(sir_resamples),
     sir_seed = if (is.null(sir_seed)) -1L else as.integer(sir_seed),

@@ -205,6 +205,7 @@ ferx_covariance <- function(fit,
 
   binding_args <- .ferx_fit_binding_args(fit)
   reader_args <- .ferx_fit_reader_args(fit)
+  record_args <- .ferx_fit_record_args(fit)
   .ferx_refuse_unrecorded_selection(
     fit, "ferx_covariance",
     "Refit with `ferx_fit(..., covariance = TRUE)`, or refit and call ferx_covariance() on the new fit."
@@ -237,6 +238,10 @@ ferx_covariance <- function(fit,
     # (#462).
     reader_settings = reader_args$reader_settings,
     population_fingerprint = reader_args$population_fingerprint,
+    # How the fit was scored, and its exact packed estimate (#511).
+    scoring_settings = record_args$scoring_settings,
+    sir_settings = record_args$sir_settings,
+    packed_estimate = record_args$packed_estimate,
     covariance_method = cov_method,
     mu_referencing = isTRUE(mu_referencing),
     verbose = isTRUE(verbose),

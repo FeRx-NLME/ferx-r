@@ -71,3 +71,111 @@ test_that("S11: a fit shows its scoring record, and its SIR record only after SI
   expect_identical(sir$sir_settings[c("samples", "resamples", "seed", "df")],
                    list(samples = 300L, resamples = 100L, seed = 1, df = 3))
 })
+
+test_that("S1: on a default fit ferx_covariance(fit) is identical() to the in-fit step", {
+  # The original 1e-7 case (#511): warfarin_iov SE(TVKA) 0.76168056 vs
+  # 0.76168066 was the packed estimate, not the settings (plan section 0a).
+  fit <- ps_fit("iov_default", "warfarin_iov")
+  no_packed <- fit
+  no_packed$packed_estimate <- NULL
+  expect_false(identical(ferx_covariance(no_packed)$cov_matrix, fit$cov_matrix))
+
+  cov <- ferx_covariance(fit)
+  expect_identical(cov$cov_matrix, fit$cov_matrix)
+  expect_identical(cov$se_theta, fit$se_theta)
+})
+
+# Fits made without SIR, so `run_covariance`'s fallback to the SIR record's
+# scoring half cannot stand in for the record under test.
+ps_cov_rows <- list(
+  list(key = "w_lbfgs", example = "warfarin", setting = "inner_optimizer",
+       settings = list(inner_optimizer = "lbfgs"), value = "lbfgs"),
+  list(key = "w_tol3", example = "warfarin", setting = "inner_tol",
+       settings = list(inner_tol = 1e-3), value = 1e-3),
+  list(key = "iov_mu", example = "warfarin_iov", setting = "mu_referencing",
+       args = list(mu_referencing = FALSE), value = FALSE),
+  list(key = "ode_rtol3", example = "warfarin_ode", setting = "ode_reltol",
+       settings = list(ode_reltol = 1e-3), value = 1e-3)
+)
+
+ps_cov_fit <- function(row) {
+  do.call(ps_fit, c(list(row$key, row$example, row$settings %||% list()), row$args))
+}
+
+test_that("S2: ferx_covariance(fit) follows the fit's scoring record", {
+  for (row in ps_cov_rows) {
+    fit <- ps_cov_fit(row)
+    # The record holds the setting as the stage ran it.
+    expect_identical(fit$scoring_settings[[row$setting]], row$value, info = row$key)
+    # Premise: on this fixture the setting moves the covariance.
+    no_record <- fit
+    no_record$scoring_settings <- NULL
+    expect_false(identical(ferx_covariance(no_record)$cov_matrix, fit$cov_matrix),
+                 info = row$key)
+    cov <- ferx_covariance(fit)
+    expect_identical(cov$cov_matrix, fit$cov_matrix, info = row$key)
+    expect_identical(cov$se_theta, fit$se_theta, info = row$key)
+  }
+})
+
+# In-fit SIR at 300 / 100 / seed 1, each under one non-default setting.
+ps_sir_rows <- list(
+  list(key = "w_sir_df3", example = "warfarin", settings = list(sir_df = 3)),
+  list(key = "w_sir_maxit5", example = "warfarin", settings = list(inner_maxiter = 5L)),
+  list(key = "iov_sir_natural", example = "warfarin_iov",
+       settings = list(sir_scale = "natural")),
+  list(key = "ode_sir_rtol3", example = "warfarin_ode",
+       settings = list(ode_reltol = 1e-3))
+)
+
+ps_sir_fit <- function(row) {
+  fit <- ps_fit(row$key, row$example, row$settings, sir = TRUE)
+  skip_if(is.null(fit$sir_ess), paste(row$key, "in-fit SIR did not run"))
+  fit
+}
+
+test_that("S4: ferx_sir(fit) with no arguments repeats the in-fit SIR", {
+  for (row in ps_sir_rows) {
+    fit <- ps_sir_fit(row)
+    # Premise: the same draws without the record score differently.
+    no_record <- fit
+    no_record$sir_settings <- NULL
+    expect_false(identical(
+      ps_sir_fields(ferx_sir(no_record, 300L, 100L, sir_seed = 1L)),
+      ps_sir_fields(fit)
+    ), info = row$key)
+    expect_identical(ps_sir_fields(ferx_sir(fit)), ps_sir_fields(fit), info = row$key)
+  }
+})
+
+test_that("S8: a fit whose estimates were edited does not keep its packed estimate", {
+  fit <- ps_fit("w_default", "warfarin")
+  edited <- fit
+  edited$theta[1L] <- edited$theta[1L] * 1.01
+  edited_np <- edited
+  edited_np$packed_estimate <- NULL
+  # With the packed vector the step would differentiate at the unedited point,
+  # which is the in-fit covariance.
+  cov <- ferx_covariance(edited)$cov_matrix
+  expect_identical(cov, ferx_covariance(edited_np)$cov_matrix)
+  expect_false(identical(cov, fit$cov_matrix))
+})
+
+test_that("S9: a [mixture] per-class override fit is scored in memory, refused after a reload", {
+  ex <- list(model = test_path("fixtures", "mixture_override.ferx"),
+             data = test_path("fixtures", "mixture_iv.csv"))
+  fit <- ps_fit("mix_override", ex, method = "focei")
+  refusal <- "does not store their fitted values"
+  no_packed <- fit
+  no_packed$packed_estimate <- NULL
+  expect_error(ferx_covariance(no_packed), refusal, fixed = TRUE)
+
+  cov <- ferx_covariance(fit)
+  expect_identical(cov$cov_matrix, fit$cov_matrix)
+  expect_identical(cov$se_theta, fit$se_theta)
+
+  # .fitrx has no key for the packed estimate (ferx-core#1815).
+  loaded <- ps_round_trip(fit)
+  expect_null(loaded$packed_estimate)
+  expect_error(ferx_covariance(loaded), refusal, fixed = TRUE)
+})

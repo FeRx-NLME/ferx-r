@@ -4943,6 +4943,12 @@ struct FitSkeletonInputs<'a> {
     /// the fit carries none (ferx-r #462).
     reader_settings: &'a str,
     population_fingerprint: &'a str,
+    /// `fit$scoring_settings` / `fit$sir_settings`: the record lists, or NULL
+    /// when the fit carries none (ferx-r #511 / #472).
+    scoring_settings: &'a Robj,
+    sir_settings: &'a Robj,
+    /// `fit$packed_estimate`; empty when the fit carries none.
+    packed_estimate: &'a [f64],
 }
 
 /// An IOV occasion rule in the spelling `ferx_fit(settings = list(iov_occasion =
@@ -5289,6 +5295,8 @@ fn fit_skeleton(
     let n_eta = x.omega_dim.max(0) as usize;
     let n_subj = x.subject_ids.len();
     let iov_occasion = iov_occasion_from_r(entry_point, x.iov_occasion)?;
+    let scoring_settings = scoring_settings_from_r(entry_point, x.scoring_settings)?;
+    let sir_settings = sir_settings_from_r(entry_point, x.sir_settings)?;
 
     if n_theta != template.theta.len() {
         return Err(theta_length_error(entry_point, model, n_theta, template.theta.len()));
@@ -5373,14 +5381,15 @@ fn fit_skeleton(
     let residual_correlations_resolved = residual_correlations_from_fit(model, x.residual_rho)
         .map_err(|e| format!("{entry_point}: {e}"))?;
 
-    Ok(FitResult {
+    let mut fit = FitResult {
         // ferx-core main added a checkpoint-restore flag; neither step reads it.
         restored_from_checkpoint: false,
-        // ferx-core #1767 / #1805: no record of the settings the fit's SIR or its
-        // estimating stage ran under, so `run_sir` / `run_covariance` resolve them
-        // from the options R passes, as before.
-        sir_settings: None,
-        scoring_settings: None,
+        // ferx-core #1767 / #1805: the settings the fit's SIR and its estimating
+        // stage ran under, so `run_sir` / `run_covariance` with default options
+        // score what the fit scored (ferx-r #472 / #511). `None` for a fit that
+        // records none: the steps then resolve them from the options R passes.
+        sir_settings,
+        scoring_settings,
         // ferx-core #1776: the reader settings the fit read `data_path` with,
         // and the fingerprint of what it read, so the steps re-read the fit's
         // own rows and the engine verifies them (ferx-r #462). A fit that
@@ -5509,10 +5518,14 @@ fn fit_skeleton(
         nlopt_missing_algorithms: Vec::new(),
         covariance_n_evals_estimated: None,
         trace_path: None,
-        // In-process optimisation for a `run_covariance` called straight after a fit;
-        // `#[serde(skip)]` upstream, so a reconstructed result legitimately carries `None`
-        // and `run_covariance` re-packs from `omega`. No `.fitrx` / R format change.
-        packed_estimate: None,
+        // The optimizer's exact packed vector, so `run_covariance` builds Omega
+        // from the fit's own Cholesky factor instead of re-decomposing `omega`
+        // (a machine-epsilon shift the FD Hessian amplifies), and a [mixture]
+        // fit's per-class overrides can be read (ferx-r #511). Kept below only
+        // if it unpacks to the estimates this skeleton carries. `.fitrx` has no
+        // key for it (ferx-core#1815), so a loaded fit carries none and the step
+        // re-packs from `omega`.
+        packed_estimate: (!x.packed_estimate.is_empty()).then(|| x.packed_estimate.to_vec()),
         // No outer optimizer ran in this scaffold, so there is no init-escape
         // verdict, and no packed tally to classify: `model_selection::bic()`
         // reports NaN on the default `BicInputs` rather than a wrong penalty
@@ -5590,7 +5603,14 @@ fn fit_skeleton(
         environment: ferx_core::environment::EnvironmentInfo::default(),
         #[cfg(feature = "nn")]
         neural_networks: Vec::new(),
-    })
+    };
+    // A fit list whose estimates were edited after the fit (a test dropping
+    // `omega_iov`, a user nudging theta) keeps the original's packed vector,
+    // which `run_covariance` would evaluate at instead of the edited point.
+    if !packed_estimate_matches(model, &fit) {
+        fit.packed_estimate = None;
+    }
+    Ok(fit)
 }
 
 /// Standalone SIR — run Sampling Importance Resampling against an existing fit.
@@ -5633,6 +5653,14 @@ fn fit_skeleton(
 ///   read `data_path` with, as JSON (ferx-r #462); "" when the fit records none.
 /// @param population_fingerprint `fit$population_fingerprint`, the engine's
 ///   fingerprint of the population the fit read, as JSON; "" when none.
+/// @param scoring_settings `fit$scoring_settings`, the inner-loop and ODE
+///   settings of the stage that produced the estimates (ferx-r #511); NULL
+///   when the fit records none. Decoded through `[fit_options]`.
+/// @param sir_settings `fit$sir_settings`, what the fit's SIR ran under
+///   (ferx-r #472); NULL when it ran none.
+/// @param packed_estimate `fit$packed_estimate`, the optimizer's packed
+///   estimate; empty when the fit carries none. Dropped unless it unpacks to
+///   the fit's estimates bit for bit.
 /// @param sir_samples Number of proposal samples (M).
 /// @param sir_resamples Number of resamples (m); must be <= M.
 /// @param sir_seed Random seed; pass -1 for the engine default.
@@ -5668,6 +5696,9 @@ fn ferx_rust_sir(
     iov_occasion: &str,
     reader_settings: &str,
     population_fingerprint: &str,
+    scoring_settings: Robj,
+    sir_settings: Robj,
+    packed_estimate: Vec<f64>,
     sir_samples: i32,
     sir_resamples: i32,
     sir_seed: i32,
@@ -5723,6 +5754,9 @@ fn ferx_rust_sir(
             iov_occasion,
             reader_settings,
             population_fingerprint,
+            scoring_settings: &scoring_settings,
+            sir_settings: &sir_settings,
+            packed_estimate: &packed_estimate,
         };
         let fit = fit_skeleton("ferx_sir", model, &inputs, Some(cov_mat))?;
 
@@ -5837,6 +5871,14 @@ fn ferx_rust_sir(
 ///   read `data_path` with, as JSON (ferx-r #462); "" when the fit records none.
 /// @param population_fingerprint `fit$population_fingerprint`, the engine's
 ///   fingerprint of the population the fit read, as JSON; "" when none.
+/// @param scoring_settings `fit$scoring_settings`, the inner-loop and ODE
+///   settings of the stage that produced the estimates (ferx-r #511); NULL
+///   when the fit records none. Decoded through `[fit_options]`.
+/// @param sir_settings `fit$sir_settings`, what the fit's SIR ran under
+///   (ferx-r #472); NULL when it ran none.
+/// @param packed_estimate `fit$packed_estimate`, the optimizer's packed
+///   estimate; empty when the fit carries none. Dropped unless it unpacks to
+///   the fit's estimates bit for bit.
 /// @param covariance_method Covariance estimator: "r"/"hessian", "s"/"cross_product", or "rsr"/"sandwich".
 /// @param mu_referencing TRUE to use mu-referencing for the inner-loop warm restart.
 /// @param verbose When TRUE, the engine prints progress to stderr.
@@ -5865,6 +5907,9 @@ fn ferx_rust_covariance(
     iov_occasion: &str,
     reader_settings: &str,
     population_fingerprint: &str,
+    scoring_settings: Robj,
+    sir_settings: Robj,
+    packed_estimate: Vec<f64>,
     covariance_method: &str,
     mu_referencing: bool,
     verbose: bool,
@@ -5914,6 +5959,9 @@ fn ferx_rust_covariance(
             iov_occasion,
             reader_settings,
             population_fingerprint,
+            scoring_settings: &scoring_settings,
+            sir_settings: &sir_settings,
+            packed_estimate: &packed_estimate,
         };
         let fit = fit_skeleton("ferx_covariance", model, &inputs, None)?;
 
