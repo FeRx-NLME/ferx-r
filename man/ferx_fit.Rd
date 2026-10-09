@@ -1227,8 +1227,9 @@ etas), its row is still returned but \code{W} and \code{p_val} are
 \item{kappa_names}{Names of kappa (IOV) parameters (\code{NULL} if no IOV).}
 \item{kappa_fixed}{Logical FIX flag per kappa, parallel to
 \code{kappa_names}; empty when the model has no IOV.}
-\item{se_kappa}{Standard errors for kappa parameters: length \code{d}
-(diagonal kappa) or \code{d*(d+1)/2} (block_kappa, lower-triangle order).
+\item{se_kappa}{Standard errors of the kappa variances, one per kappa
+named by \code{kappa_names} - the diagonal only, for a
+\code{block_kappa} too (off-diagonal kappa SEs are not reported).
 \code{NULL} if covariance step not run or no IOV.}
 \item{model_structure}{Named list returned by the Rust engine, derived
 from the parsed \code{CompiledModel} so it reflects exactly what

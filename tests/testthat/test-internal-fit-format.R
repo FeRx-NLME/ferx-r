@@ -513,28 +513,6 @@ test_that(".ferx_name_kappa_weights() names and pads to one entry per kappa", {
   expect_equal(got$kappa_weights, c(KAPPA_CL = "NARM"))
   expect_equal(got$kappa_weight_typical, c(KAPPA_CL = NA_real_))
 })
-test_that(".ferx_format_kappa_weight() reports the effective SD at the typical weight", {
-  fit <- list(kappa_weights = c(KAPPA_CL = "NARM"),
-              kappa_weight_typical = c(KAPPA_CL = 400))
-  line <- .ferx_format_kappa_weight(fit, 1L, 1.840240, "KAPPA_CL")
-  # gamma / sqrt(W) = sqrt(1.84024) / sqrt(400) = 0.0678
-  expect_match(line, "weight = NARM", fixed = TRUE)
-  expect_match(line, "SD = 0.0678", fixed = TRUE)
-  expect_match(line, "at NARM = 400.0000", fixed = TRUE)
-})
-test_that(".ferx_format_kappa_weight() falls back when no typical weight is known", {
-  fit <- list(kappa_weights = c(KAPPA_CL = "NARM"),
-              kappa_weight_typical = c(KAPPA_CL = NA_real_))
-  line <- .ferx_format_kappa_weight(fit, 1L, 1.84, "KAPPA_CL")
-  expect_match(line, "weight = NARM (kappa ~ N(0, KAPPA_CL/NARM))", fixed = TRUE)
-  expect_false(grepl("SD =", line, fixed = TRUE))
-})
-test_that(".ferx_format_kappa_weight() returns NULL for an unweighted kappa", {
-  expect_null(.ferx_format_kappa_weight(list(), 1L, 0.02, "KAPPA_CL"))
-  expect_null(.ferx_format_kappa_weight(
-    list(kappa_weights = c(KAPPA_CL = NA_character_, KAPPA_V = "NARM")),
-    1L, 0.02, "KAPPA_CL"))
-})
 test_that(".ferx_print_structure() does not print (weight = NULL) after a round-trip", {
   # Regression: model_structure is persisted verbatim under r_extras and read
   # back with simplifyVector = FALSE, so iov/iov_weights arrive as lists whose

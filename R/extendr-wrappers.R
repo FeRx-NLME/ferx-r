@@ -135,7 +135,19 @@ ferx_rust_compact_theta_blocks <- function(theta_names) {
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_theta_levels_from_fit <- function(model_path, model_hash, theta, theta_names, fit_bindings) {
+ferx_rust_kappa_rows <- function(omega_iov, n_kappa, kappa_names, kappa_fixed, se_kappa, kappa_param_types, kappa_weights, kappa_weight_typical, covariance_status, ascii) {
+  .Call("wrap__ferx_rust_kappa_rows", omega_iov, n_kappa, kappa_names, kappa_fixed, se_kappa, kappa_param_types, kappa_weights, kappa_weight_typical, covariance_status, ascii)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_fitrx_kappa_rows <- function(path) {
+  .Call("wrap__ferx_rust_fitrx_kappa_rows", path)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_theta_levels_from_fit <-function(model_path, model_hash, theta, theta_names, fit_bindings) {
   .Call("wrap__ferx_rust_theta_levels_from_fit", model_path, model_hash, theta, theta_names, fit_bindings)
 }
 

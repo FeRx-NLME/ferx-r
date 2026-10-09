@@ -18,6 +18,11 @@ print_line <- function(out, label) {
   hit
 }
 
+# The SE field of a FIX row. KAPPA rows are ferx-core's own console rows
+# (#470), which label a FIX kappa `NAME [FIX]` with `SE = ---`; every other
+# block is R's and says FIXED.
+fixed_se <- function(label) if (startsWith(label, "KAPPA")) "SE = ---" else "SE = FIXED"
+
 # -- Crafted fits: every cell of class x fixed/free x covariance state --------
 
 # One FIX and one free entry per class, all with SE 0 from the "engine": the
@@ -67,7 +72,7 @@ test_that("print: the FIX entry of every class says FIXED, its free twin keeps S
   expect_match(print_line(out, "TVKA"), "^TVKA\\s+1\\.000000\\s+FIXED\\s+FIXED\\s*$")
   for (lbl in setdiff(fixed_labels, "TVKA")) {
     ln <- print_line(out, lbl)
-    expect_match(ln, "SE = FIXED", fixed = TRUE, info = lbl)
+    expect_match(ln, fixed_se(lbl), fixed = TRUE, info = lbl)
     expect_no_match(ln, "SE = 0", fixed = TRUE)
   }
   # Free twins with an SE of exactly 0: printed as 0, not FIXED (kills an
@@ -94,7 +99,7 @@ test_that("print: covariance step ok, failed or skipped - FIXED regardless, free
   expect_match(print_line(none, "TVKA"), "FIXED\\s+FIXED\\s*$")
   expect_match(print_line(none, "TVCL"), "N/A\\s+N/A\\s*$")
   for (lbl in setdiff(fixed_labels, "TVKA")) {
-    expect_match(print_line(none, lbl), "SE = FIXED", fixed = TRUE, info = lbl)
+    expect_match(print_line(none, lbl), fixed_se(lbl), fixed = TRUE, info = lbl)
   }
   for (lbl in setdiff(free_labels, "TVCL")) {
     expect_match(print_line(none, lbl), "SE = N/A", fixed = TRUE, info = lbl)
@@ -268,7 +273,7 @@ test_that("live fit, one FIX and one free per class: flags, print and estimates 
   out <- capture.output(print(fit))
   expect_match(print_line(out, "TVKA"), "FIXED\\s+FIXED\\s*$")
   for (lbl in c("ETA_CL", "ETA_V", "ADD_ERR", "KAPPA_V")) {
-    expect_match(print_line(out, lbl), "SE = FIXED", fixed = TRUE, info = lbl)
+    expect_match(print_line(out, lbl), fixed_se(lbl), fixed = TRUE, info = lbl)
   }
   expect_match(print_line(out, "ETA_V ~ ETA_CL"), "SE = FIXED\\s*$")
   est <- fit$estimates
@@ -327,7 +332,7 @@ test_that(".fitrx round trip prints the same SE / FIXED as the live fit", {
       expect_identical(se_field(b, lbl), se_field(a, lbl), info = paste(nm, lbl))
     }
     for (lbl in setdiff(cs$fixed, cs$theta)) {
-      expect_identical(se_field(b, lbl), "SE = FIXED", info = paste(nm, lbl))
+      expect_identical(se_field(b, lbl), fixed_se(lbl), info = paste(nm, lbl))
     }
     expect_identical(fit2$estimates$fixed, cs$fit$estimates$fixed)
     expect_identical(fit2$estimates$se, cs$fit$estimates$se)

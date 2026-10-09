@@ -327,30 +327,15 @@ ferx_covariance <- function(fit,
       if (length(se_rho) == n_rho) se_rho else rep(NA_real_, n_rho)
   }
 
-  # se_kappa: name per the IOV convention (diagonal -> kappa_names, block ->
-  # lower-triangle labels). NULL when no IOV or the step produced none.
+  # se_kappa: one SE per kappa, the diagonal, block_kappa included (ferx-core
+  # postfit.rs), named by kappa_names. NULL when no IOV or the step produced none.
   d_iov <- if (!is.null(fit$omega_iov) && is.matrix(fit$omega_iov)) nrow(fit$omega_iov) else 0L
   if (length(raw$se_kappa) == 0L || d_iov == 0L) {
     fit$se_kappa <- NULL
   } else {
     se_kappa <- raw$se_kappa
-    n_tri <- d_iov * (d_iov + 1L) / 2L
     if (length(se_kappa) == d_iov && length(fit$kappa_names) == d_iov) {
       names(se_kappa) <- fit$kappa_names
-    } else if (length(se_kappa) == n_tri && length(fit$kappa_names) == d_iov) {
-      tri_names <- character(n_tri)
-      idx <- 1L
-      for (j in seq_len(d_iov)) {
-        for (i in j:d_iov) {
-          tri_names[idx] <- if (i == j) {
-            fit$kappa_names[i]
-          } else {
-            paste0("COV_", fit$kappa_names[j], "_", fit$kappa_names[i])
-          }
-          idx <- idx + 1L
-        }
-      }
-      names(se_kappa) <- tri_names
     }
     fit$se_kappa <- se_kappa
   }

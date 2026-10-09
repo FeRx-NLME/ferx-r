@@ -81,7 +81,7 @@ test_that("mbma_placebo: KAPPA_ARM prints an SD at weight 1, not a CV%", {
   skip_on_cran()
   fit <- mbma_fit()
   expect_identical(fit$kappa_param_types, c(KAPPA_ARM = "additive"))
-  row <- printed_row(fit, "^  KAPPA_ARM = ")
+  row <- printed_row(fit, "^  KAPPA_ARM +=")
   var <- fit$omega_iov[1L, 1L]
   expect_true(grepl(sprintf("(SD = %.4f at weight 1)", sqrt(var)), row, fixed = TRUE),
               info = row)
@@ -101,33 +101,16 @@ test_that("mbma_placebo: ferx_estimates() gives KAPPA_ARM's scale as additive", 
   expect_true(is.na(est["ADD_ERR", "scale"]))
 })
 
-test_that("a kappa row reads on its scale, both sides of every gate", {
-  note <- getFromNamespace(".ferx_kappa_variance_note", "ferx")
-  # log-normal and unknown: the exact CV% every row printed before.
-  expect_identical(note("log_normal", 0.2, FALSE), "CV% = 47.1")
-  expect_identical(note("log_normal", 0.2, TRUE), "CV% = 47.1")
-  expect_identical(note(NA_character_, 0.2, FALSE), "CV% = 47.1")
-  expect_identical(note("log_normal", -1, FALSE), "CV% = 0.0")
-  # additive: an SD, labelled at weight 1 only when the kappa is weighted.
-  expect_identical(note("additive", 0.25, FALSE), "SD = 0.5000")
-  expect_identical(note("additive", 0.25, TRUE), "SD = 0.5000 at weight 1")
-  expect_identical(note("additive", -1, FALSE), "SD = 0.0000")
-  # logit: an SD on the logit scale.
-  expect_identical(note("logit", 0.25, FALSE), "SD = 0.5000, logit scale")
-  expect_identical(note("logit", 0.25, TRUE), "SD = 0.5000 at weight 1, logit scale")
-  # custom: nothing to say.
-  expect_null(note("custom", 0.25, FALSE))
-  expect_null(note("custom", 0.25, TRUE))
-})
-
 test_that("a custom kappa prints no parenthetical at all", {
   fit <- make_fake_fit(
     omega = matrix(0.10, 1, 1),
     omega_iov = matrix(0.04, 1, 1), kappa_names = "KAPPA_V",
     se_kappa = 0.01, shrinkage_kappa = 0.1, kappa_param_types = "custom"
   )
-  row <- printed_row(fit, "^  KAPPA_V = ")
-  expect_identical(row, "  KAPPA_V = 0.040000  SE = 0.010000  Shrinkage = 10.0%")
+  row <- printed_row(fit, "^  KAPPA_V +=")
+  expect_identical(row, "  KAPPA_V              = 0.040000  SE = 0.010000")
+  # Pooled kappa shrinkage sits with the ETA shrinkage, not on the row (#470).
+  expect_match(printed_row(fit, "KAPPA_V: "), "KAPPA_V: 10.0%", fixed = TRUE)
 })
 
 test_that("print labels an additive kappa's SD 'at weight 1' only when it is weighted", {
@@ -137,13 +120,13 @@ test_that("print labels an additive kappa's SD 'at weight 1' only when it is wei
     se_kappa = 0.01, shrinkage_kappa = 0.1, kappa_param_types = "additive"
   )
   plain <- do.call(make_fake_fit, base)
-  expect_identical(printed_row(plain, "^  KAPPA_V = "),
-                   "  KAPPA_V = 0.040000  (SD = 0.2000)  SE = 0.010000  Shrinkage = 10.0%")
+  expect_identical(printed_row(plain, "^  KAPPA_V +="),
+                   "  KAPPA_V              = 0.040000  (SD = 0.2000)  SE = 0.010000")
   weighted <- do.call(make_fake_fit, c(base, list(
     kappa_weights = c(KAPPA_V = "NARM"), kappa_weight_typical = c(KAPPA_V = 4)
   )))
-  expect_identical(printed_row(weighted, "^  KAPPA_V = "),
-                   "  KAPPA_V = 0.040000  (SD = 0.2000 at weight 1)  SE = 0.010000  Shrinkage = 10.0%")
+  expect_identical(printed_row(weighted, "^  KAPPA_V +="),
+                   "  KAPPA_V              = 0.040000  (SD = 0.2000 at weight 1)  SE = 0.010000")
 })
 
 # -- ETA rows by name (#438) --------------------------------------------------
@@ -210,8 +193,8 @@ test_that("kappa_param_types survives a save/load round trip", {
   ferx_save_fit(fit, path)
   loaded <- ferx_load_fit(path)
   expect_identical(loaded$kappa_param_types, fit$kappa_param_types)
-  expect_identical(printed_row(loaded, "^  KAPPA_ARM = "),
-                   printed_row(fit, "^  KAPPA_ARM = "))
+  expect_identical(printed_row(loaded, "^  KAPPA_ARM +="),
+                   printed_row(fit, "^  KAPPA_ARM +="))
 })
 
 test_that("a .fitrx saved before kappa_param_types loads and prints as before", {
@@ -227,13 +210,17 @@ test_that("a .fitrx saved before kappa_param_types loads and prints as before", 
   loaded <- ferx_load_fit(path)
   expect_length(loaded$kappa_param_types, 0L)
   # The reloaded variance, not the fit's: the JSON round trip can move its
-  # last digit, and this CV% (of an additive kappa) is ~1e35.
+  # last digit.
   var <- loaded$omega_iov[1L, 1L]
-  row <- printed_row(loaded, "^  KAPPA_ARM = ")
-  # The row exactly as print.ferx_fit() wrote it before: the log-normal CV%.
+  row <- printed_row(loaded, "^  KAPPA_ARM +=")
+  # An unknown scale reads as ferx-core's console reads it (#470): the
+  # log-normal CV%, sqrt(var) * 100, at weight 1 for this weighted kappa.
   expect_true(startsWith(row, sprintf(
-    "  KAPPA_ARM = %.6f  (CV%% = %.1f)  SE = ", var, sqrt(exp(var) - 1) * 100
+    "  KAPPA_ARM            = %.6f  (CV%% = %.1f at weight 1)  SE = ", var, sqrt(var) * 100
   )), info = row)
+  # And it is the row ferx-core itself prints for the same bundle.
+  core <- getFromNamespace("ferx_rust_fitrx_kappa_rows", "ferx")(path)
+  expect_identical(row, strsplit(core, "\n", fixed = TRUE)[[1L]][[1L]])
   expect_true(is.na(loaded$estimates["KAPPA_ARM", "scale"]))
   expect_identical(loaded$estimates["KAPPA_ARM", "transform"], "variance")
 })

@@ -1179,8 +1179,9 @@
 #'   \item{kappa_names}{Names of kappa (IOV) parameters (\code{NULL} if no IOV).}
 #'   \item{kappa_fixed}{Logical FIX flag per kappa, parallel to
 #'     \code{kappa_names}; empty when the model has no IOV.}
-#'   \item{se_kappa}{Standard errors for kappa parameters: length \code{d}
-#'     (diagonal kappa) or \code{d*(d+1)/2} (block_kappa, lower-triangle order).
+#'   \item{se_kappa}{Standard errors of the kappa variances, one per kappa
+#'     named by \code{kappa_names} - the diagonal only, for a
+#'     \code{block_kappa} too (off-diagonal kappa SEs are not reported).
 #'     \code{NULL} if covariance step not run or no IOV.}
 #'   \item{model_structure}{Named list returned by the Rust engine, derived
 #'     from the parsed \code{CompiledModel} so it reflects exactly what
@@ -2927,44 +2928,10 @@ print.ferx_fit <- function(x, ...) {
     n_kap <- nrow(m_iov)
     kap_names <- x$kappa_names
     if (is.null(kap_names)) kap_names <- paste0("KAPPA", seq_len(n_kap))
-    n_se <- length(x$se_kappa)
-    n_tri <- n_kap * (n_kap + 1L) / 2L
-    is_block_se <- (n_se == n_tri && n_kap > 1L)
-    # For block kappa the SEs are packed as lower triangle (column-major).
-    # Diagonal element for column j (1-indexed) sits at flat index j*n_kap - j*(j-1)/2.
-    diag_se_idx <- function(j) j * n_kap - j * (j - 1L) / 2L - (n_kap - j)
-    iov_has_offdiag <- FALSE
-    for (i in seq_len(n_kap)) {
-      var_ii   <- m_iov[i, i]
-      # Empty on a fit from before ferx-core #1643: NA, the log-normal CV%.
-      kap_type <- if (length(x$kappa_param_types) >= i) x$kappa_param_types[[i]] else NA_character_
-      weighted <- length(x$kappa_weights) >= i && !is.na(x$kappa_weights[[i]])
-      se_idx   <- if (is_block_se) diag_se_idx(i) else i
-      se_str   <- if (.ferx_is_fixed(x$kappa_fixed, i)) {
-        "FIXED"
-      } else if (!is.null(x$se_kappa) && n_se >= se_idx) {
-        sprintf("%.6f", x$se_kappa[se_idx])
-      } else {
-        "N/A"
-      }
-      shr_str  <- if (!is.null(x$shrinkage_kappa) && length(x$shrinkage_kappa) >= i) {
-        sprintf("%.1f%%", x$shrinkage_kappa[i] * 100)
-      } else "N/A"
-      note <- .ferx_kappa_variance_note(kap_type, var_ii, weighted)
-      cat(sprintf(
-        "  %s = %.6f%s  SE = %s  Shrinkage = %s\n",
-        kap_names[i], var_ii, if (is.null(note)) "" else sprintf("  (%s)", note),
-        se_str, shr_str
-      ))
-      # Sample-size-weighted IOV (ferx-core #1031): the estimate above is the
-      # *unweighted* gamma^2 - the quantity a published MBMA reports - so print
-      # the effective SD at a typical weight next to it.
-      wline <- .ferx_format_kappa_weight(x, i, var_ii, kap_names[i])
-      if (!is.null(wline)) cat(wline, "\n", sep = "")
-      for (j in seq_len(i - 1L)) {
-        if (abs(m_iov[i, j]) > 1e-15) iov_has_offdiag <- TRUE
-      }
-    }
+    # The rows - CV%/SD note, SE, a weighted kappa's weight line - are
+    # ferx-core's console rows (#470); pooled shrinkage is in SHRINKAGE below.
+    cat(paste0(.ferx_kappa_rows(x), "\n"), sep = "")
+    iov_has_offdiag <- any(abs(m_iov[lower.tri(m_iov)]) > 1e-15)
     if (iov_has_offdiag) {
       cat("  --- Correlations ---\n")
       for (i in seq_len(n_kap)) {
@@ -3129,6 +3096,7 @@ print.ferx_fit <- function(x, ...) {
   # The [!] flag (yellow when colour available) highlights values above 30%,
   # consistent with the %RSE highlighter in the THETA table.
   has_shrinkage <- (!is.null(x$shrinkage_eta) && any(!is.na(x$shrinkage_eta))) ||
+    (!is.null(x$shrinkage_kappa) && any(!is.na(x$shrinkage_kappa))) ||
     (!is.null(x$shrinkage_eps) && !is.na(x$shrinkage_eps))
   if (has_shrinkage) {
     cat("\n", .ferx_style("SHRINKAGE", "bold"), "\n", sep = "")
@@ -3142,6 +3110,16 @@ print.ferx_fit <- function(x, ...) {
         val <- sprintf("%.1f%%", sh * 100)
         flag <- if (sh * 100 > 30) paste0(" ", .ferx_style("[!]", "yellow")) else ""
         parts <- c(parts, sprintf("%s: %s%s", lbl, val, flag))
+      }
+    }
+    # Pooled kappa shrinkage, which ferx-core's KAPPA rows (#470) do not carry.
+    if (!is.null(x$shrinkage_kappa)) {
+      for (k in seq_along(x$shrinkage_kappa)) {
+        sh <- x$shrinkage_kappa[k]
+        if (is.na(sh)) next
+        lbl <- if (length(x$kappa_names) >= k && nzchar(x$kappa_names[k])) x$kappa_names[k] else sprintf("KAPPA%d", k)
+        flag <- if (sh * 100 > 30) paste0(" ", .ferx_style("[!]", "yellow")) else ""
+        parts <- c(parts, sprintf("%s: %.1f%%%s", lbl, sh * 100, flag))
       }
     }
     if (!is.null(x$shrinkage_eps) && !is.na(x$shrinkage_eps)) {

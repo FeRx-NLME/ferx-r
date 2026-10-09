@@ -757,6 +757,20 @@
 
 ## Bug fixes
 
+- **`print()`'s OMEGA_IOV rows are ferx-core's console rows**
+  ([#470](https://github.com/FeRx-NLME/ferx-r/issues/470)). R printed
+  its own copy of them, which had drifted from the engine: a log-normal
+  kappa's CV% was `sqrt(exp(var) - 1) * 100` where the console prints
+  `sqrt(var) * 100`; a weighted kappa's weight line always said `SD =`, also
+  under a CV% row, and had no `logit scale` tag; and both kept their CV%/SD
+  when the covariance step failed or fell back to SIR, which the console
+  hides. The rows now come from ferx-core's own formatter, so they cannot
+  drift again. A FIX kappa reads `KAPPA_V [FIX] = ...  SE = ---`, as on the
+  console, and pooled kappa shrinkage moves from the row to the SHRINKAGE
+  section next to the ETAs. `fit$se_kappa` is documented as what it always
+  was, one SE per kappa (the diagonal) for a `block_kappa` too; the R code
+  that read it as a packed triangle is gone.
+
 - **Subject IDs survive `ferx_save_fit()` / `ferx_load_fit()` as the same
   text** ([#475](https://github.com/FeRx-NLME/ferx-r/issues/475)). An ID
   spelled `NA` came back as a missing value, and an ID with a comma or a

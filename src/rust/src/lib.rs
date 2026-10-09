@@ -4599,6 +4599,150 @@ fn ferx_rust_compact_theta_blocks(theta_names: Vec<String>) -> List {
     })
 }
 
+/// The `OMEGA_IOV` rows `print.ferx_fit` prints, one `name = variance  (note)
+/// SE = ...` line per kappa and a weighted kappa's (ferx-core #1031) weight line
+/// under it: ferx-core's own `format_kappa_rows_from` (#1825), the formatter
+/// behind the engine's console and `format_summary`, so R cannot drift from
+/// them again (ferx-r #470). Takes the fit's own fields at print time, because
+/// `ferx_covariance(fit)` changes `covariance_status` after the fit.
+///
+/// @param omega_iov Numeric, the `n_kappa` x `n_kappa` IOV matrix flattened
+///   column-major.
+/// @param n_kappa Integer, its dimension.
+/// @param kappa_names Character, one name per kappa (shorter reads `KAPPA`).
+/// @param kappa_fixed Logical FIX flags, or `NULL`; `NA` reads as not fixed.
+/// @param se_kappa Numeric diagonal SEs, or `NULL` for `SE = N/A`.
+/// @param kappa_param_types Character scale tokens (`log_normal`, `additive`,
+///   `logit`, `logit_probability`, `custom`), or empty for a fit from before
+///   ferx-core #1643 (the log-normal CV%).
+/// @param kappa_weights Character weight column per kappa, `NA` for an
+///   unweighted one, or `NULL` when no kappa is weighted.
+/// @param kappa_weight_typical Numeric typical weight per kappa, `NA` where
+///   none, or `NULL`.
+/// @param covariance_status `"computed"`, `"failed"`, `"not_requested"` or
+///   `"sir_fallback"` (any case, underscores optional, as a loaded `.fitrx`
+///   spells them).
+/// @param ascii Logical: spell the arrow and kappa glyphs in ASCII, for a
+///   console that cannot print UTF-8.
+/// @return One string, one row per `\n`.
+/// @export
+#[extendr]
+#[allow(clippy::too_many_arguments)]
+fn ferx_rust_kappa_rows(
+    omega_iov: Vec<f64>,
+    n_kappa: i32,
+    kappa_names: Vec<String>,
+    kappa_fixed: Robj,
+    se_kappa: Robj,
+    kappa_param_types: Vec<String>,
+    kappa_weights: Robj,
+    kappa_weight_typical: Robj,
+    covariance_status: &str,
+    ascii: bool,
+) -> String {
+    entry(move || {
+        use ferx_core::io::output::{format_kappa_rows_from, KappaRowsInput, KappaRowsOptions};
+        let n = n_kappa.max(0) as usize;
+        if omega_iov.len() != n * n {
+            return Err(format!(
+                "omega_iov has {} values, not {n} x {n}",
+                omega_iov.len()
+            ));
+        }
+        let omega_iov = nalgebra::DMatrix::from_column_slice(n, n, &omega_iov);
+        let kappa_fixed: Vec<bool> = if kappa_fixed.is_null() {
+            Vec::new()
+        } else {
+            kappa_fixed
+                .as_logical_slice()
+                .ok_or("kappa_fixed must be logical")?
+                .iter()
+                .map(|b| b.is_true())
+                .collect()
+        };
+        let se_kappa: Option<Vec<f64>> = if se_kappa.is_null() {
+            None
+        } else {
+            Some(se_kappa.as_real_vector().ok_or("se_kappa must be numeric")?)
+        };
+        let kappa_param_types = kappa_param_types
+            .iter()
+            .map(|t| eta_param_type_from_str(t))
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let kappa_weights: Vec<Option<String>> = if kappa_weights.is_null() {
+            Vec::new()
+        } else {
+            let s: Strings = kappa_weights
+                .try_into()
+                .map_err(|_| "kappa_weights must be character".to_string())?;
+            s.iter()
+                .map(|w| (!w.is_na()).then(|| w.to_string()))
+                .collect()
+        };
+        let kappa_weight_typical: Vec<Option<f64>> = if kappa_weight_typical.is_null() {
+            Vec::new()
+        } else {
+            kappa_weight_typical
+                .as_real_vector()
+                .ok_or("kappa_weight_typical must be numeric")?
+                .into_iter()
+                .map(|v| (!v.is_nan()).then_some(v))
+                .collect()
+        };
+        let covariance_status =
+            match covariance_status.to_ascii_lowercase().replace('_', "").as_str() {
+                "computed" => CovarianceStatus::Computed,
+                "failed" => CovarianceStatus::Failed,
+                "notrequested" => CovarianceStatus::NotRequested,
+                "sirfallback" => CovarianceStatus::SirFallback,
+                other => return Err(format!("unknown covariance_status {other:?}")),
+            };
+        let input = KappaRowsInput {
+            omega_iov: &omega_iov,
+            kappa_names: &kappa_names,
+            kappa_fixed: &kappa_fixed,
+            se_kappa: se_kappa.as_deref(),
+            kappa_param_types: &kappa_param_types,
+            kappa_weights: &kappa_weights,
+            kappa_weight_typical: &kappa_weight_typical,
+            covariance_status,
+        };
+        Ok(format_kappa_rows_from(&input, KappaRowsOptions { ascii }))
+    })
+}
+
+/// The KAPPA rows ferx-core's console prints for a `.fitrx` bundle: core's
+/// own loader, then `KappaRowsInput::from_result` on the `FitResult` it
+/// builds - the path `print_results` and `format_summary` take, which never
+/// passes through R's copy of the fit or [`ferx_rust_kappa_rows`]'s argument
+/// conversion. The test oracle for `print.ferx_fit()`'s KAPPA block (#470).
+///
+/// @param path The bundle to read.
+/// @return One string, one row per `\n`; empty when the fit has no IOV.
+/// @export
+#[extendr]
+fn ferx_rust_fitrx_kappa_rows(path: &str) -> String {
+    entry(move || {
+        use ferx_core::io::output::{format_kappa_rows_from, KappaRowsInput, KappaRowsOptions};
+        let loaded = ferx_core::io::fitrx::load_fit(Path::new(path))
+            .map_err(|e| format!("ferx-core's .fitrx loader refused `{path}`: {e}"))?;
+        Ok(KappaRowsInput::from_result(&loaded.fit).map_or_else(String::new, |input| {
+            format_kappa_rows_from(&input, KappaRowsOptions::default())
+        }))
+    })
+}
+
+/// [`eta_param_type_str`] read back.
+fn eta_param_type_from_str(
+    s: &str,
+) -> std::result::Result<ferx_core::types::EtaParamType, String> {
+    use ferx_core::types::EtaParamType as T;
+    [T::LogNormal, T::Additive, T::Logit, T::LogitProbability, T::Custom]
+        .into_iter()
+        .find(|&t| eta_param_type_str(t) == s)
+        .ok_or_else(|| format!("unknown random-effect scale {s:?}"))
+}
+
 /// The R spelling of an `EtaParamType`, as `eta_param_types`,
 /// `kappa_param_types` and the `.fitrx` wire use it.
 fn eta_param_type_str(t: ferx_core::types::EtaParamType) -> &'static str {
@@ -10815,6 +10959,8 @@ extendr_module! {
     fn ferx_rust_test_panic;
     fn ferx_rust_known_blocks;
     fn ferx_rust_compact_theta_blocks;
+    fn ferx_rust_kappa_rows;
+    fn ferx_rust_fitrx_kappa_rows;
     fn ferx_rust_theta_levels_from_fit;
     fn ferx_rust_fitrx_engine_resave;
     fn ferx_rust_eta_info_by_name;
