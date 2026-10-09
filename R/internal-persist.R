@@ -396,6 +396,11 @@
   if (is.null(record)) return(NULL)
   record <- ferx_rust_settings_record(kind, record, "ferx_save_fit", paste0("fit$", kind))
   if (identical(kind, "sir_settings")) {
+    # A multivariate-normal proposal records `df = Inf`, which JSON cannot
+    # hold: it would be written as null, which neither ferx-core nor
+    # `ferx_load_fit()` reads as a number, and the bundle would not load. Such
+    # a fit is saved without the record and reloads as one that has none.
+    if (!is.finite(record$df)) return(NULL)
     record <- c(record[names(record) != "scoring"], record$scoring)
   }
   record

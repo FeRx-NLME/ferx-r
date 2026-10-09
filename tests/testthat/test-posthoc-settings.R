@@ -241,6 +241,10 @@ test_that("S10: the .fitrx spelling of both records is ferx-core's", {
   back$inner_restarts <- NULL
   expect_identical(from(back, "sir_settings")$scoring$inner_restarts,
                    sc$inner_restarts)
+  # A normal proposal (`df = Inf`) has no JSON spelling, so no record is
+  # written rather than one nothing can load.
+  sr$df <- Inf
+  expect_null(to(sr, "sir_settings"))
 })
 
 test_that("S12: a record the engine would refuse is refused by name", {
