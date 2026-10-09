@@ -255,7 +255,7 @@ ferx_model_validate <- function(path, data = NULL) {
   structure(
     class = c("ferx_engine_error", "error", "condition"),
     list(
-      message    = sprintf("%s [%s]", msg, errs$code[i]),
+      message    = .ferx_engine_message(msg, errs$code[i], errs$suggestion[i]),
       call       = conditionCall(e),
       code       = errs$code[i],
       block      = errs$block[i],
@@ -274,12 +274,11 @@ ferx_model_validate <- function(path, data = NULL) {
 # for byte, so a refusal the glue raised without a code never borrows the
 # previous one's.
 #
-# The message is the raised text, as on the re-validation path: the engine's
-# prose verbatim, then the code. In the one refusal whose text folds the
-# suggestion in (ferx-core `EngineError::with_suggestion_in_display`) the
-# advice is therefore in both the message and `suggestion`. The record's
-# `message` (the text without the suggestion) is kept for #504, which shows
-# the suggestion in the message without saying it twice.
+# The message is built from the record's `message` - the raised text without
+# a suggestion the engine folded into it (ferx-core
+# `EngineError::with_suggestion_in_display`) - so `.ferx_engine_message()`
+# can show the suggestion without saying it twice (#504). Everywhere else
+# `message` is the raised text itself.
 #
 # A record with an empty code is the glue refusing its own call - a `settings`
 # entry, a method token (#517) - not the model or the data. The condition is
@@ -293,7 +292,7 @@ ferx_model_validate <- function(path, data = NULL) {
   structure(
     class = c("ferx_engine_error", "error", "condition"),
     list(
-      message    = sprintf("%s [%s]", msg, d$code),
+      message    = .ferx_engine_message(d$message, d$code, d$suggestion),
       call       = conditionCall(e),
       code       = d$code,
       block      = if (nzchar(d$block)) d$block else NA_character_,
@@ -301,6 +300,40 @@ ferx_model_validate <- function(path, data = NULL) {
       suggestion = if (nzchar(d$suggestion)) d$suggestion else NA_character_
     )
   )
+}
+
+# The message of every `ferx_engine_error`, whichever constructor built it, so
+# `ferx_fit()` and the other entry points read the same (#504): the engine's
+# text, the code on the same line, and the suggestion - when there is one - on
+# the next, where `ferx_model_validate()` shows it too. The text stays at the
+# front and `[CODE]` on its first line, so `tryCatch()` / `expect_error()`
+# matches on either keep working.
+#
+# The advice is never shown twice. The coded path passes the record's
+# `message`, which leaves out a suggestion the engine folded into the raised
+# text. The re-validation path has only the raised text, and the parser and
+# the data checks often write the advice into it themselves ("... - did you
+# mean `[fit_options]`.", "Available covariate columns: ..."), so a
+# suggestion the text already contains - ignoring case and closing
+# punctuation - is left out.
+.ferx_engine_message <- function(text, code, suggestion) {
+  msg <- sprintf("%s [%s]", text, code)
+  if (length(suggestion) != 1L || is.na(suggestion)) return(msg)
+  core <- sub("[[:space:].?!]+$", "", suggestion, useBytes = TRUE)
+  if (!nzchar(core) || .ferx_contains_ci(text, core)) return(msg)
+  sprintf("%s\nhint: %s", msg, suggestion)
+}
+
+# Whether `text` contains `part`, ignoring case. Byte-wise, like the message
+# match in `.ferx_engine_error()`: outside a UTF-8 locale `tolower()` refuses
+# the engine's non-ASCII characters (em-dashes), so it folds only ASCII
+# letters, which is all the advice needs.
+.ferx_contains_ci <- function(text, part) {
+  fold <- function(x) {
+    chartr("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz",
+           iconv(x, to = "ASCII", sub = "byte"))
+  }
+  grepl(fold(part), fold(text), fixed = TRUE)
 }
 
 # Evaluate a call into the Rust glue so that a refusal reaches the caller the

@@ -1777,7 +1777,10 @@ res$line        # 1-based source line, or NA
 res$suggestion  # actionable hint, or NA
 }
 
-The code is also appended to the message in square brackets. A failure the
+The code is also appended to the message in square brackets, and the
+suggestion, when there is one, follows on the next line as
+\code{hint: ...} - the same way for every entry point that raises a
+\code{ferx_engine_error}. A failure the
 engine's validation pass cannot attribute to one diagnostic is raised as an
 ordinary error with the engine's message unchanged.
 }
