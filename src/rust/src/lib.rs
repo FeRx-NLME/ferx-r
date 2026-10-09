@@ -4707,7 +4707,10 @@ fn ferx_rust_kappa_rows(
             kappa_weight_typical: &kappa_weight_typical,
             covariance_status,
         };
-        Ok(format_kappa_rows_from(&input, KappaRowsOptions { ascii }))
+        Ok(format_kappa_rows_from(
+            &input,
+            KappaRowsOptions { ascii, ..Default::default() },
+        ))
     })
 }
 
