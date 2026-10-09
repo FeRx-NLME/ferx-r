@@ -6,12 +6,13 @@
 \usage{
 ferx_sir(
   fit,
-  sir_samples = 1000L,
-  sir_resamples = 250L,
+  sir_samples = NULL,
+  sir_resamples = NULL,
   sir_seed = NULL,
-  sir_keep_samples = FALSE,
+  sir_keep_samples = NULL,
   verbose = FALSE,
-  sir_scale = c("packed", "natural")
+  sir_scale = NULL,
+  sir_df = NULL
 )
 }
 \arguments{
@@ -20,18 +21,18 @@ ferx_sir(
 
 \item{sir_samples}{Number of proposal samples drawn from the asymptotic
 distribution. Higher values give tighter weights at proportional cost.
-Default 1000.}
+\code{NULL} (the default) takes the fit's recorded value, else 1000.}
 
 \item{sir_resamples}{Number of resampled vectors. Must be \verb{<= sir_samples}.
-Default 250.}
+\code{NULL} takes the fit's recorded value, else 250.}
 
-\item{sir_seed}{Integer RNG seed for reproducibility. \code{NULL} (the default)
-uses the engine's built-in seed.}
+\item{sir_seed}{Integer RNG seed for reproducibility. \code{NULL} takes the
+seed the fit's SIR recorded, else the engine's built-in seed (12345).}
 
 \item{sir_keep_samples}{When \code{TRUE}, retain the resampled packed
 parameter vectors on the returned fit. Required for
-\code{\link[=ferx_simulate_with_uncertainty]{ferx_simulate_with_uncertainty()}} with \code{method = "sir"}. Default
-\code{FALSE}.}
+\code{\link[=ferx_simulate_with_uncertainty]{ferx_simulate_with_uncertainty()}} with \code{method = "sir"}. \code{NULL} takes
+the fit's recorded value, else \code{FALSE}.}
 
 \item{verbose}{When \code{TRUE}, the engine prints progress to stderr.
 Default \code{FALSE}.}
@@ -47,15 +48,22 @@ convention: its lower limits no longer depend on the box, but a variance
 informed by few groups gets a heavy upper tail. \code{"natural"} is refused for
 a model with \code{prior(...)}. The same option is
 \code{settings = list(sir_scale = ...)} in \code{\link[=ferx_fit]{ferx_fit()}} and \code{sir_scale} in the
-model's \verb{[fit_options]}; this argument does not read the model file's
+model's \verb{[fit_options]}. \code{NULL} (the default) takes the fit's recorded
+scale, else \code{"packed"}; this argument does not read the model file's
 value.}
+
+\item{sir_df}{Degrees of freedom of the Student-t SIR proposal, at least 1
+(\code{Inf} is a multivariate-normal proposal). The same option is
+\code{settings = list(sir_df = ...)} in \code{\link[=ferx_fit]{ferx_fit()}}. \code{NULL} (the default)
+takes the fit's recorded value, else 5.}
 }
 \value{
 The input \code{fit}, augmented with \code{sir_ess}, \code{sir_ci_theta},
 \code{sir_ci_omega}, \code{sir_ci_sigma}, \code{sir_ci_kappa} (one row per IOV kappa
 variance, named by \code{kappa_names}; NULL without IOV), \code{sir_seed_used}
 (the seed this run resampled with: \code{sir_seed}, or 12345 when it is
-\code{NULL}), and (when requested) \code{sir_resamples} / \code{sir_resamples_n} /
+\code{NULL}), \code{sir_settings} (the settings this run used; see \code{\link[=ferx_fit]{ferx_fit()}}),
+and (when the run kept them) \code{sir_resamples} / \code{sir_resamples_n} /
 \code{sir_resamples_dim}.
 Any warnings the SIR step emitted are appended to \code{fit$warnings} and to
 \code{fit$warnings_structured} under the \code{sir} category - in particular the
@@ -89,12 +97,33 @@ warm-starts for the inner loop. The returned fit is the input with
 
 The fit is rebuilt at its fitted estimates, including the IOV (kappa)
 covariance \code{fit$omega_iov}, under the inner loop of its last estimation
-method (FOCE or FOCEI). With the same \code{sir_seed} and sample sizes the result
-is the one \code{ferx_fit(..., sir = TRUE)} reports. The SIR proposal's degrees
-of freedom (\code{sir_df}), the inner-loop settings, and ODE solver tolerances
-passed to \code{ferx_fit()} through \verb{settings =} (\code{ode_reltol}, \code{ode_abstol},
-\code{ode_max_steps}) take their defaults, whatever the fit used; tolerances
-written in the model file's \verb{[fit_options]} are kept.
+method (FOCE or FOCEI).
+\subsection{Settings}{
+
+A fit made with \code{ferx_fit(..., sir = TRUE)}, or returned by an earlier
+\code{ferx_sir()}, records the settings its SIR ran under as \code{fit$sir_settings}:
+the sample sizes, the seed, the proposal degrees of freedom (\code{df}), the
+\code{scale}, \code{keep_samples}, and under \code{scoring} the inner-loop and ODE settings
+each draw was scored with. Every argument left at \code{NULL} takes the recorded
+value, so \code{ferx_sir(fit)} repeats the fit's SIR: its intervals and effective
+sample size are \code{identical()} to the in-fit ones, also after a
+\code{\link[=ferx_save_fit]{ferx_save_fit()}} / \code{\link[=ferx_load_fit]{ferx_load_fit()}} round trip. The exception is a
+normal proposal (\code{sir_df = Inf}): a \code{.fitrx} bundle cannot record it yet
+(ferx-core#1819), so \code{ferx_save_fit()} warns and saves no SIR settings, and
+the loaded fit runs as one with no record. An argument you pass
+replaces that one setting and keeps the rest. The returned fit's
+\code{sir_settings} records the run it made.
+
+A fit with no SIR record (SIR never ran on it, or it was saved before the
+record existed) runs with the engine's defaults for every argument left at
+\code{NULL}: 1000 samples, 250 resamples, seed 12345, \code{sir_df = 5},
+\code{sir_scale = "packed"}, and default inner-loop and ODE settings
+(tolerances written in the model file's \verb{[fit_options]} are kept). On such
+a fit, settings passed to \code{ferx_fit()} through \verb{settings =} (an
+\code{inner_maxiter}, an \code{ode_reltol}) are not used: the engine reads them only
+from a SIR record (ferx-core #1806).
+}
+
 \subsection{Data selection}{
 
 The data are re-read with the selection the fit was made with, recorded as

@@ -314,6 +314,11 @@ ferx_load_fit <- function(path) {
     reader_settings = .fitrx_json_from_wire(w$reader_settings, "reader_settings"),
     population_fingerprint = .fitrx_json_from_wire(w$population_fingerprint,
                                                    "population_fingerprint"),
+    # How the fit was scored (#511) and what its SIR ran under (#472), back to
+    # the lists the fit carries; NULL in a bundle written without them. The
+    # bundle has no packed estimate (ferx-core#1815).
+    scoring_settings = .fitrx_settings_from_wire(w$scoring_settings, "scoring_settings"),
+    sir_settings = .fitrx_settings_from_wire(w$sir$settings, "sir_settings"),
 
     input_columns   = as.character(unlist(w$input_columns   %||% list(), use.names = FALSE)),
     covariate_names = as.character(unlist(w$covariate_names %||% list(), use.names = FALSE))
@@ -365,6 +370,9 @@ ferx_load_fit <- function(path) {
     out$sir_ci_omega <- .fitrx_unwrap_ci(w$sir$ci_omega)
     out$sir_ci_sigma <- .fitrx_unwrap_ci(w$sir$ci_sigma)
   }
+  # The seed the bundle's SIR resampled with (ferx-core #1767), written beside
+  # `sir.settings` (#472).
+  if (!is.null(w$sir_seed)) out$sir_seed_used <- as.numeric(w$sir_seed)
 
   # Bayes posterior summary
   if (!is.null(w$bayes)) {

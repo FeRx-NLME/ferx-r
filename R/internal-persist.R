@@ -381,3 +381,60 @@
     }
   )
 }
+
+# `fit$scoring_settings` / `fit$sir_settings` (#511, #472) on the wire, in
+# ferx-core's own layout (`ScoringSettingsWire` / `SirSettingsWire`), so the
+# engine reads an R bundle's records and R reads an engine bundle's: the
+# top-level `scoring_settings` block keyed as the R list is, and `sir.settings`
+# with the `scoring` half flattened beside the SIR keys. Enums are their
+# `[fit_options]` tokens on both sides; NA (`ode_stiff_abort_after` off) is
+# written as JSON null. The record is first read through the engine's own
+# decoder, so one edited into something the engine would refuse is refused
+# here, by name, rather than written into a bundle nothing loads.
+.fitrx_settings_to_wire <- function(fit, kind) {
+  record <- fit[[kind]]
+  if (is.null(record)) return(NULL)
+  record <- ferx_rust_settings_record(kind, record, "ferx_save_fit", paste0("fit$", kind))
+  if (identical(kind, "sir_settings")) {
+    # A multivariate-normal proposal records `df = Inf`, which JSON cannot
+    # hold: it would be written as null, which neither ferx-core nor
+    # `ferx_load_fit()` reads as a number, and the bundle would not load. Such
+    # a fit is saved without the record and reloads as one that has none
+    # (ferx-core#1819), which the caller is told.
+    if (!is.finite(record$df)) {
+      warning(
+        "ferx_save_fit: the fit's SIR used a normal proposal (`sir_df = Inf`), ",
+        "which a .fitrx bundle cannot record yet (ferx-core#1819), so its SIR ",
+        "settings are not saved. On the loaded fit, ferx_sir() runs with the ",
+        "defaults unless you pass the settings, `sir_df = Inf` included.",
+        call. = FALSE
+      )
+      return(NULL)
+    }
+    record <- c(record[names(record) != "scoring"], record$scoring)
+  }
+  record
+}
+
+# The two records back from the wire, through the engine's decoder, so the
+# loaded list is `identical()` to the one the fit carried: `read_json()` reads
+# a whole-number double as an integer and JSON null as NULL, and the decoder
+# writes each field back in the type `ferx_fit()` gives it. `sir.settings`
+# comes back un-flattened. NULL when the bundle carries none (one saved before
+# the records existed), which keeps today's behaviour.
+.fitrx_settings_from_wire <- function(w, kind) {
+  if (is.null(w)) return(NULL)
+  is_sir <- identical(kind, "sir_settings")
+  # A normal-proposal record (`df = Inf`) is written by ferx-core's serde as
+  # `"df": null` (ferx-core#1819). It is read as no record, as
+  # `ferx_save_fit()` writes it, so the bundle still loads.
+  if (is_sir && "df" %in% names(w) && is.null(w$df)) return(NULL)
+  w <- lapply(w, function(v) if (is.null(v)) NA else v)
+  tryCatch(
+    ferx_rust_settings_record(
+      if (is_sir) "sir_settings_wire" else kind, w, "ferx_load_fit",
+      if (is_sir) "sir.settings" else "scoring_settings"
+    ),
+    error = function(e) stop(conditionMessage(e), call. = FALSE)
+  )
+}

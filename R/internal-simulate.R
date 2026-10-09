@@ -132,6 +132,44 @@ validate_fit_for_params <- function(fit) {
   )
 }
 
+# How the fit was scored (#511, #472): `fit$scoring_settings` and
+# `fit$sir_settings` (the record lists, NULL when the fit carries none) and
+# `fit$packed_estimate` (numeric(0) when none). The glue puts them on the
+# skeleton both `ferx_sir()` and `ferx_covariance()` build, so with no
+# arguments those steps score what the fit scored.
+#
+# `scoring` / `sir` are the caller's explicit arguments, named as the record
+# names them. They are written into the record, never passed as engine
+# options: the engine takes a recorded value wherever an option equals its
+# default, so an explicit default passed as an option would lose to the
+# record. A fit with no record gets the record the engine would otherwise
+# have used to write them into: for the scoring settings the SIR record's
+# scoring half, which `run_covariance` falls back to (a bundle written between
+# ferx-core #1758 and #426 carries only that), else the engine's default
+# record. With no explicit argument a fit keeps what it has, and a fit with
+# no record runs as it always did.
+.ferx_fit_record_args <- function(fit, scoring = list(), sir = list()) {
+  edit <- function(record, fallback, kind, values) {
+    if (length(values) == 0L) return(record)
+    record <- record %||% fallback %||% .ferx_default_settings(kind)
+    record[names(values)] <- values
+    record
+  }
+  list(
+    scoring_settings = edit(fit$scoring_settings, fit$sir_settings$scoring,
+                            "scoring_settings", scoring),
+    sir_settings = edit(fit$sir_settings, NULL, "sir_settings", sir),
+    packed_estimate = as.numeric(fit$packed_estimate %||% numeric())
+  )
+}
+
+# The engine's default `scoring_settings` / `sir_settings` record: the
+# settings of a run that changed nothing (ferx-core `ScoringSettings::default()`
+# / `SirSettings::default()`), in the fit's layout.
+.ferx_default_settings <- function(kind) {
+  ferx_rust_settings_record(kind, NULL, "", "")
+}
+
 # Refuse a post-hoc step on a fit that records no reader settings when it was
 # read with settings its model file does not state (#462 / #416).
 #

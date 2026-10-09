@@ -3878,6 +3878,25 @@ fn fit_result_to_list(
         .map_err(|e| format!("cannot record `fit$population_fingerprint`: {e}"))?
         .unwrap_or_default();
 
+    // How the fit was scored (ferx-core #1805 / #1758) and the optimizer's exact
+    // packed estimate, each NULL when the engine recorded none: handed back by
+    // `ferx_covariance()` / `ferx_sir()` so they repeat the in-fit steps
+    // (ferx-r #511 / #472).
+    let null = || Robj::from(());
+    let scoring_settings = match &result.scoring_settings {
+        Some(s) => scoring_settings_to_r(s)?,
+        None => null(),
+    };
+    let sir_settings = match &result.sir_settings {
+        Some(s) => sir_settings_to_r(s)?,
+        None => null(),
+    };
+    let packed_estimate = result
+        .packed_estimate
+        .clone()
+        .map(Robj::from)
+        .unwrap_or_else(null);
+
     // One row per theta level-block level (ferx-r #370), with its fitted value
     // (#430); zero rows for a model with no level block.
     let theta_levels =
@@ -4031,6 +4050,9 @@ fn fit_result_to_list(
         // #462).
         reader_settings = reader_settings_json,
         population_fingerprint = population_fingerprint_json,
+        scoring_settings = scoring_settings,
+        sir_settings = sir_settings,
+        packed_estimate = packed_estimate,
         uses_sde = result.uses_sde,
         saem_n_subjects_hmc = result.saem_n_subjects_hmc.map(|n| n as i32),
         dw_statistic = result.dw_statistic,
@@ -4921,6 +4943,12 @@ struct FitSkeletonInputs<'a> {
     /// the fit carries none (ferx-r #462).
     reader_settings: &'a str,
     population_fingerprint: &'a str,
+    /// `fit$scoring_settings` / `fit$sir_settings`: the record lists, or NULL
+    /// when the fit carries none (ferx-r #511 / #472).
+    scoring_settings: &'a Robj,
+    sir_settings: &'a Robj,
+    /// `fit$packed_estimate`; empty when the fit carries none.
+    packed_estimate: &'a [f64],
 }
 
 /// An IOV occasion rule in the spelling `ferx_fit(settings = list(iov_occasion =
@@ -4956,6 +4984,374 @@ fn iov_occasion_from_r(
     Ok(Some(opts.iov_occasion))
 }
 
+/// The `[fit_options]` keys of `fit$scoring_settings`, one per `ScoringSettings`
+/// field and spelled like it (ferx-core #1805). `scoring_settings_to_r` writes
+/// exactly these names and `scoring_settings_from_r` requires exactly them.
+const SCORING_KEYS: [&str; 13] = [
+    "inner_maxiter",
+    "inner_tol",
+    "inner_restarts",
+    "mu_referencing",
+    "n_agq",
+    "inner_optimizer",
+    "ebe_warm_start",
+    "ode_reltol",
+    "ode_abstol",
+    "ode_max_steps",
+    "ode_method",
+    "ode_stiff_abort_after",
+    "ode_auto_switch",
+];
+
+/// `fit$sir_settings` names beside its nested `scoring` list, with the
+/// `[fit_options]` key each one is (ferx-core #1758).
+const SIR_KEYS: [(&str, &str); 6] = [
+    ("samples", "sir_samples"),
+    ("resamples", "sir_resamples"),
+    ("seed", "sir_seed"),
+    ("df", "sir_df"),
+    ("scale", "sir_scale"),
+    ("keep_samples", "sir_keep_samples"),
+];
+
+/// An enum setting as its `[fit_options]` token: ferx-core serialises
+/// `InnerOptimizer`, `OdeMethod` and `SirScale` as exactly that spelling, the one
+/// its `.fitrx` writes (#1758). Takes `serde_json::to_value(&setting)`.
+fn fit_option_token(
+    value: serde_json::Result<serde_json::Value>,
+) -> std::result::Result<String, String> {
+    match value {
+        Ok(serde_json::Value::String(s)) => Ok(s),
+        other => Err(format!("internal: a settings enum did not serialise to a token: {other:?}")),
+    }
+}
+
+/// A count as R holds it: an integer, or a double past `i32::MAX`.
+fn count_to_r(n: usize) -> Robj {
+    i32::try_from(n).map(Robj::from).unwrap_or_else(|_| Robj::from(n as f64))
+}
+
+/// `fit$scoring_settings`: the inner-loop and ODE settings of the stage that
+/// produced the fit's estimates (ferx-core #1805), one element per field under
+/// its `[fit_options]` name, enums as their tokens, and `ode_stiff_abort_after`
+/// NA when the budget is off. Destructured without `..`, so a field ferx-core
+/// adds fails to compile here instead of going missing from the fit.
+fn scoring_settings_to_r(s: &ferx_core::ScoringSettings) -> std::result::Result<Robj, String> {
+    let ferx_core::ScoringSettings {
+        inner_maxiter,
+        inner_tol,
+        inner_restarts,
+        mu_referencing,
+        n_agq,
+        inner_optimizer,
+        ebe_warm_start,
+        ode_reltol,
+        ode_abstol,
+        ode_max_steps,
+        ode_method,
+        ode_stiff_abort_after,
+        ode_auto_switch,
+    } = s;
+    Ok(list!(
+        inner_maxiter = count_to_r(*inner_maxiter),
+        inner_tol = *inner_tol,
+        inner_restarts = count_to_r(*inner_restarts),
+        mu_referencing = *mu_referencing,
+        n_agq = count_to_r(*n_agq),
+        inner_optimizer = fit_option_token(serde_json::to_value(inner_optimizer))?,
+        ebe_warm_start = *ebe_warm_start,
+        ode_reltol = *ode_reltol,
+        ode_abstol = *ode_abstol,
+        ode_max_steps = count_to_r(*ode_max_steps),
+        ode_method = fit_option_token(serde_json::to_value(ode_method))?,
+        // NA_integer_ is i32::MIN in R.
+        ode_stiff_abort_after = ode_stiff_abort_after
+            .map(|v| count_to_r(v as usize))
+            .unwrap_or_else(|| Robj::from(i32::MIN)),
+        ode_auto_switch = *ode_auto_switch
+    )
+    .into())
+}
+
+/// `fit$sir_settings`: the settings a SIR run scored its draws under (ferx-core
+/// #1758), with the scoring half nested as `scoring` in `fit$scoring_settings`'
+/// layout. The seed is the resolved one, a double so a `u64` survives.
+fn sir_settings_to_r(
+    s: &ferx_core::estimation::sir::SirSettings,
+) -> std::result::Result<Robj, String> {
+    let ferx_core::estimation::sir::SirSettings {
+        samples,
+        resamples,
+        seed,
+        df,
+        scale,
+        keep_samples,
+        scoring,
+    } = s;
+    Ok(list!(
+        samples = count_to_r(*samples),
+        resamples = count_to_r(*resamples),
+        seed = *seed as f64,
+        df = *df,
+        scale = fit_option_token(serde_json::to_value(scale))?,
+        keep_samples = *keep_samples,
+        scoring = scoring_settings_to_r(scoring)?
+    )
+    .into())
+}
+
+/// One element of a settings record as the text `[fit_options]` reads for its
+/// key. A double prints as the shortest text that parses back to the same
+/// `f64`, so a recorded tolerance survives bit for bit; NA becomes `na_text`.
+fn record_value_text(v: &Robj, na_text: &str) -> std::result::Result<String, String> {
+    if v.len() != 1 {
+        return Err(format!("expected a single value, got {} values", v.len()));
+    }
+    match v.rtype() {
+        Rtype::Logicals => {
+            let b = v.as_logical_slice().map(|s| s[0]).unwrap_or(Rbool::na());
+            Ok(if b.is_na() {
+                na_text.to_string()
+            } else if b.is_true() {
+                "true".to_string()
+            } else {
+                "false".to_string()
+            })
+        }
+        Rtype::Integers => {
+            let i = v.as_integer_slice().map(|s| s[0]).unwrap_or(i32::MIN);
+            Ok(if i == i32::MIN { na_text.to_string() } else { i.to_string() })
+        }
+        Rtype::Doubles => {
+            let x = v.as_real_slice().map(|s| s[0]).unwrap_or(f64::NAN);
+            Ok(if x.is_nan() { na_text.to_string() } else { x.to_string() })
+        }
+        Rtype::Strings => v
+            .as_str()
+            .map(str::to_string)
+            .ok_or_else(|| "expected a string".to_string()),
+        other => Err(format!("expected a logical, number or string, got {other:?}")),
+    }
+}
+
+/// Apply a recorded settings list to `opts` through ferx-core's own
+/// `[fit_options]` parser, one key at a time, so the record is held to the
+/// domain and spellings `ferx_fit(settings =)` and a model file are. `keys` maps
+/// each list name to its `[fit_options]` key; the list must name exactly those
+/// (plus `nested`, handed back for the caller to decode).
+fn apply_settings_record(
+    entry_point: &str,
+    field: &str,
+    record: &Robj,
+    keys: &[(&str, &str)],
+    nested: Option<&str>,
+    opts: &mut FitOptions,
+) -> std::result::Result<Option<Robj>, String> {
+    let list = record
+        .as_list()
+        .ok_or_else(|| format!("{entry_point}: `{field}`: expected a list"))?;
+    let given: HashMap<&str, Robj> = list.iter().collect();
+    for name in given.keys() {
+        if !keys.iter().any(|(k, _)| k == name) && Some(*name) != nested {
+            return Err(format!("{entry_point}: `{field}`: unknown key \"{name}\""));
+        }
+    }
+    for (name, key) in keys {
+        let v = given
+            .get(name)
+            .ok_or_else(|| format!("{entry_point}: `{field}`: missing key \"{name}\""))?;
+        // NA is "budget off" for the one optional count, and the parser's own
+        // refusal for every other key.
+        let na_text = if *key == "ode_stiff_abort_after" { "off" } else { "" };
+        let text = record_value_text(v, na_text)
+            .map_err(|e| format!("{entry_point}: `{field}${name}`: {e}"))?;
+        // `Ok(false)` is a key the parser does not know: a record name here
+        // spelled differently from ferx-core's, which would otherwise leave the
+        // setting at its default without a word.
+        let known = ferx_core::parser::model_parser::apply_fit_option(opts, key, &text)
+            .map_err(|e| format!("{entry_point}: `{field}`: {e}"))?;
+        if !known {
+            return Err(format!(
+                "internal: `{field}${name}` maps to `[fit_options]` key `{key}`, which \
+                 ferx-core does not know"
+            ));
+        }
+    }
+    match nested {
+        None => Ok(None),
+        Some(n) => given
+            .get(n)
+            .cloned()
+            .map(Some)
+            .ok_or_else(|| format!("{entry_point}: `{field}`: missing key \"{n}\"")),
+    }
+}
+
+/// `fit$scoring_settings` read back into the record `run_covariance` /
+/// `run_sir` take (ferx-r #511); NULL is `None`, a fit that records none.
+/// `field` names the record in an error (`fit$scoring_settings`).
+fn scoring_settings_from_r(
+    entry_point: &str,
+    field: &str,
+    record: &Robj,
+) -> std::result::Result<Option<ferx_core::ScoringSettings>, String> {
+    if record.is_null() {
+        return Ok(None);
+    }
+    let keys: Vec<(&str, &str)> = SCORING_KEYS.iter().map(|k| (*k, *k)).collect();
+    let mut opts = FitOptions::default();
+    apply_settings_record(entry_point, field, record, &keys, None, &mut opts)?;
+    Ok(Some(ferx_core::ScoringSettings::from_options(&opts)))
+}
+
+/// `fit$sir_settings` read back into the record `run_sir` resolves its options
+/// from (ferx-r #472); NULL is `None`, a fit whose SIR did not run.
+fn sir_settings_from_r(
+    entry_point: &str,
+    field: &str,
+    record: &Robj,
+) -> std::result::Result<Option<ferx_core::estimation::sir::SirSettings>, String> {
+    if record.is_null() {
+        return Ok(None);
+    }
+    let mut opts = FitOptions::default();
+    let scoring = apply_settings_record(
+        entry_point,
+        field,
+        record,
+        &SIR_KEYS,
+        Some("scoring"),
+        &mut opts,
+    )?
+    .unwrap_or_else(|| Robj::from(()));
+    let keys: Vec<(&str, &str)> = SCORING_KEYS.iter().map(|k| (*k, *k)).collect();
+    apply_settings_record(
+        entry_point,
+        &format!("{field}$scoring"),
+        &scoring,
+        &keys,
+        None,
+        &mut opts,
+    )?;
+    Ok(Some(ferx_core::estimation::sir::SirSettings::from_options(&opts)))
+}
+
+/// A `.fitrx` `sir.settings` block (ferx-core's `SirSettingsWire`) as the nested
+/// list `fit$sir_settings` is: the scoring keys sit flattened beside the SIR
+/// ones on the wire. A block written between ferx-core #1758 and #426 has no
+/// `inner_restarts`, which those draws never used, so the default stands in, as
+/// in ferx-core's own reader. Any other name stays at the top level, where the
+/// decoder refuses it by name.
+fn sir_settings_unflatten(record: &Robj) -> std::result::Result<Robj, String> {
+    let list = record
+        .as_list()
+        .ok_or_else(|| "expected a list".to_string())?;
+    let (mut top_names, mut top_values) = (Vec::new(), Vec::new());
+    let (mut sc_names, mut sc_values) = (Vec::new(), Vec::new());
+    for (name, value) in list.iter() {
+        if SCORING_KEYS.contains(&name) {
+            sc_names.push(name.to_string());
+            sc_values.push(value);
+        } else {
+            top_names.push(name.to_string());
+            top_values.push(value);
+        }
+    }
+    if !sc_names.iter().any(|n| n == "inner_restarts") {
+        sc_names.push("inner_restarts".to_string());
+        sc_values.push(count_to_r(FitOptions::default().inner_restarts));
+    }
+    let scoring = List::from_names_and_values(sc_names, sc_values)
+        .map_err(|e| format!("internal: {e}"))?;
+    top_names.push("scoring".to_string());
+    top_values.push(scoring.into());
+    Ok(List::from_names_and_values(top_names, top_values)
+        .map_err(|e| format!("internal: {e}"))?
+        .into())
+}
+
+/// A settings record held to ferx-core's `[fit_options]` domain and written
+/// back in the shape `ferx_fit()` gives it (ferx-r #511 / #472), so a list
+/// read from a `.fitrx` bundle - where JSON loses integer-vs-double - comes
+/// back `identical()` to the fit's, and a record edited into something the
+/// engine refuses is refused by name.
+///
+/// @param kind `"scoring_settings"`, `"sir_settings"`, or `"sir_settings_wire"`
+///   (a `.fitrx` `sir.settings` block, scoring keys flattened).
+/// @param record The record, or NULL for the engine's default record: the
+///   settings of a run that changed nothing, which `ferx_sir()` /
+///   `ferx_covariance()` edit an explicit argument into.
+/// @param entry_point,field Name the caller and the record in an error.
+/// @return The record as a named list.
+#[extendr]
+fn ferx_rust_settings_record(kind: &str, record: Robj, entry_point: &str, field: &str) -> Robj {
+    entry(move || {
+        let robj = match kind {
+            "scoring_settings" => scoring_settings_to_r(
+                &scoring_settings_from_r(entry_point, field, &record)?.unwrap_or_default(),
+            )?,
+            "sir_settings" | "sir_settings_wire" => {
+                let record = if kind == "sir_settings_wire" && !record.is_null() {
+                    sir_settings_unflatten(&record)
+                        .map_err(|e| format!("{entry_point}: `{field}`: {e}"))?
+                } else {
+                    record
+                };
+                sir_settings_to_r(
+                    &sir_settings_from_r(entry_point, field, &record)?.unwrap_or_default(),
+                )?
+            }
+            other => return Err(format!("internal: unknown settings record kind `{other}`")),
+        };
+        Ok(robj)
+    })
+}
+
+/// Whether the skeleton's `packed_estimate` is the packed form of its own
+/// estimates: unpacked against the parameters the skeleton rebuilds from its
+/// theta / Omega / sigma / kappa / residual rho, every value must come back
+/// bit for bit. `run_covariance` evaluates at the packed point whenever it has
+/// one, so a fit list whose estimates were edited after the fit must not keep
+/// the original's packed vector (ferx-r #511). A mixture fit's per-class
+/// override segment has no counterpart on the skeleton to compare with; ferx-core
+/// length-checks it.
+fn packed_estimate_matches(model: &CompiledModel, fit: &FitResult) -> bool {
+    use ferx_core::estimation::parameterization::{packed_len, unpack_params};
+    let Some(v) = fit.packed_estimate.as_deref() else {
+        return false;
+    };
+    let Ok(base) = ferx_core::estimation::uncertainty_samples::fitted_params_from_result(fit, model)
+    else {
+        return false;
+    };
+    if v.len() != packed_len(&base) {
+        return false;
+    }
+    let u = unpack_params(v, &base);
+    let same = |a: &[f64], b: &[f64]| {
+        a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.to_bits() == y.to_bits())
+    };
+    let same_mat = |a: &DMatrix<f64>, b: &DMatrix<f64>| a.shape() == b.shape() && same(a.as_slice(), b.as_slice());
+    let same_iov = match (&u.omega_iov, &base.omega_iov) {
+        (None, None) => true,
+        (Some(a), Some(b)) => same_mat(&a.matrix, &b.matrix),
+        _ => false,
+    };
+    let same_rho = u.residual_correlations.len() == base.residual_correlations.len()
+        && u
+            .residual_correlations
+            .iter()
+            .zip(&base.residual_correlations)
+            .all(|(a, b)| {
+                a.sigma_i == b.sigma_i && a.sigma_j == b.sigma_j && a.rho.to_bits() == b.rho.to_bits()
+            });
+    same(&u.theta, &base.theta)
+        && same_mat(&u.omega.matrix, &base.omega.matrix)
+        && same(&u.sigma.values, &base.sigma.values)
+        && same_iov
+        && same_rho
+}
+
 /// The skeleton `FitResult` `ferx_core::run_sir` and `ferx_core::run_covariance`
 /// both start from, rebuilt from the R fit list. Only the fields those two read
 /// (through `fitted_params_from_result` and the inner loop) carry real values;
@@ -4982,6 +5378,9 @@ fn fit_skeleton(
     let n_eta = x.omega_dim.max(0) as usize;
     let n_subj = x.subject_ids.len();
     let iov_occasion = iov_occasion_from_r(entry_point, x.iov_occasion)?;
+    let scoring_settings =
+        scoring_settings_from_r(entry_point, "fit$scoring_settings", x.scoring_settings)?;
+    let sir_settings = sir_settings_from_r(entry_point, "fit$sir_settings", x.sir_settings)?;
 
     if n_theta != template.theta.len() {
         return Err(theta_length_error(entry_point, model, n_theta, template.theta.len()));
@@ -5066,14 +5465,15 @@ fn fit_skeleton(
     let residual_correlations_resolved = residual_correlations_from_fit(model, x.residual_rho)
         .map_err(|e| format!("{entry_point}: {e}"))?;
 
-    Ok(FitResult {
+    let mut fit = FitResult {
         // ferx-core main added a checkpoint-restore flag; neither step reads it.
         restored_from_checkpoint: false,
-        // ferx-core #1767 / #1805: no record of the settings the fit's SIR or its
-        // estimating stage ran under, so `run_sir` / `run_covariance` resolve them
-        // from the options R passes, as before.
-        sir_settings: None,
-        scoring_settings: None,
+        // ferx-core #1767 / #1805: the settings the fit's SIR and its estimating
+        // stage ran under, so `run_sir` / `run_covariance` with default options
+        // score what the fit scored (ferx-r #472 / #511). `None` for a fit that
+        // records none: the steps then resolve them from the options R passes.
+        sir_settings,
+        scoring_settings,
         // ferx-core #1776: the reader settings the fit read `data_path` with,
         // and the fingerprint of what it read, so the steps re-read the fit's
         // own rows and the engine verifies them (ferx-r #462). A fit that
@@ -5202,10 +5602,14 @@ fn fit_skeleton(
         nlopt_missing_algorithms: Vec::new(),
         covariance_n_evals_estimated: None,
         trace_path: None,
-        // In-process optimisation for a `run_covariance` called straight after a fit;
-        // `#[serde(skip)]` upstream, so a reconstructed result legitimately carries `None`
-        // and `run_covariance` re-packs from `omega`. No `.fitrx` / R format change.
-        packed_estimate: None,
+        // The optimizer's exact packed vector, so `run_covariance` builds Omega
+        // from the fit's own Cholesky factor instead of re-decomposing `omega`
+        // (a machine-epsilon shift the FD Hessian amplifies), and a [mixture]
+        // fit's per-class overrides can be read (ferx-r #511). Kept below only
+        // if it unpacks to the estimates this skeleton carries. `.fitrx` has no
+        // key for it (ferx-core#1815), so a loaded fit carries none and the step
+        // re-packs from `omega`.
+        packed_estimate: (!x.packed_estimate.is_empty()).then(|| x.packed_estimate.to_vec()),
         // No outer optimizer ran in this scaffold, so there is no init-escape
         // verdict, and no packed tally to classify: `model_selection::bic()`
         // reports NaN on the default `BicInputs` rather than a wrong penalty
@@ -5283,7 +5687,14 @@ fn fit_skeleton(
         environment: ferx_core::environment::EnvironmentInfo::default(),
         #[cfg(feature = "nn")]
         neural_networks: Vec::new(),
-    })
+    };
+    // A fit list whose estimates were edited after the fit (a test dropping
+    // `omega_iov`, a user nudging theta) keeps the original's packed vector,
+    // which `run_covariance` would evaluate at instead of the edited point.
+    if !packed_estimate_matches(model, &fit) {
+        fit.packed_estimate = None;
+    }
+    Ok(fit)
 }
 
 /// Standalone SIR — run Sampling Importance Resampling against an existing fit.
@@ -5326,17 +5737,26 @@ fn fit_skeleton(
 ///   read `data_path` with, as JSON (ferx-r #462); "" when the fit records none.
 /// @param population_fingerprint `fit$population_fingerprint`, the engine's
 ///   fingerprint of the population the fit read, as JSON; "" when none.
-/// @param sir_samples Number of proposal samples (M).
-/// @param sir_resamples Number of resamples (m); must be <= M.
-/// @param sir_seed Random seed; pass -1 for the engine default.
-/// @param sir_keep_samples When TRUE, retains the resampled packed parameter vectors.
-/// @param sir_scale The scale SIR's target is flat on: "packed" (the engine
-///   default) or "natural" (ferx-core #1723). Parsed by the engine's own
-///   `[fit_options] sir_scale` reader, so its spellings and refusals apply.
+/// @param scoring_settings `fit$scoring_settings`, the inner-loop and ODE
+///   settings of the stage that produced the estimates (ferx-r #511); NULL
+///   when the fit records none. Decoded through `[fit_options]`.
+/// @param sir_settings `fit$sir_settings`, what the fit's SIR ran under
+///   (ferx-r #472); NULL when it ran none.
+///   The SIR sample sizes, seed, proposal df, scale and `keep_samples` travel
+///   in this record, never as engine options: the engine takes a recorded
+///   value wherever an option equals its default, so an explicit default
+///   passed as an option would lose to the record. `ferx_sir()` edits its
+///   explicit arguments into it, starting from the default record
+///   (`ferx_rust_settings_record("sir_settings", NULL, ...)`) when the fit has
+///   none.
+/// @param packed_estimate `fit$packed_estimate`, the optimizer's packed
+///   estimate; empty when the fit carries none. Dropped unless it unpacks to
+///   the fit's estimates bit for bit.
 /// @param verbose When TRUE, the engine prints progress to stderr.
 /// @return Named list with `sir_ess`, `sir_ci_theta`, `sir_ci_omega`, `sir_ci_sigma`,
 ///   `sir_ci_kappa`,
-///   `sir_resamples`, `sir_resamples_n`, `sir_resamples_dim`, and `warnings`.
+///   `sir_resamples`, `sir_resamples_n`, `sir_resamples_dim`, `sir_seed_used`,
+///   `sir_settings` (the record this run made), and `warnings`.
 #[extendr]
 #[allow(clippy::too_many_arguments)]
 fn ferx_rust_sir(
@@ -5361,11 +5781,9 @@ fn ferx_rust_sir(
     iov_occasion: &str,
     reader_settings: &str,
     population_fingerprint: &str,
-    sir_samples: i32,
-    sir_resamples: i32,
-    sir_seed: i32,
-    sir_keep_samples: bool,
-    sir_scale: &str,
+    scoring_settings: Robj,
+    sir_settings: Robj,
+    packed_estimate: Vec<f64>,
     verbose: bool,
     fit_bindings: List,
 ) -> Robj {
@@ -5416,23 +5834,15 @@ fn ferx_rust_sir(
             iov_occasion,
             reader_settings,
             population_fingerprint,
+            scoring_settings: &scoring_settings,
+            sir_settings: &sir_settings,
+            packed_estimate: &packed_estimate,
         };
         let fit = fit_skeleton("ferx_sir", model, &inputs, Some(cov_mat))?;
 
+        // Every SIR and scoring setting comes from the skeleton's records
+        // (ferx-r #472): default options defer to them.
         let mut opts = FitOptions::default();
-        opts.sir_samples = sir_samples.max(0) as usize;
-        opts.sir_resamples = sir_resamples.max(0) as usize;
-        opts.sir_seed = if sir_seed < 0 {
-            None
-        } else {
-            Some(sir_seed as u64)
-        };
-        opts.sir_keep_samples = sir_keep_samples;
-        if let Err(e) =
-            ferx_core::parser::model_parser::apply_fit_option(&mut opts, "sir_scale", sir_scale)
-        {
-            return Err(format!("ferx_sir: {e}"));
-        }
         opts.interaction = interaction;
         opts.verbose = verbose;
 
@@ -5480,6 +5890,12 @@ fn ferx_rust_sir(
             // The seed this run resampled with, resolved (ferx-core #1767):
             // `sir_seed`, or the engine's default when R passed none.
             sir_seed_used = new_fit.sir_seed.map(|s| s as f64),
+            // The settings this run scored under (ferx-core #1767), so the
+            // returned fit's `sir_settings` describes its own intervals.
+            sir_settings = match &new_fit.sir_settings {
+                Some(st) => sir_settings_to_r(st)?,
+                None => Robj::from(()),
+            },
             warnings = new_fit.warnings.clone()
         )
         .into())
@@ -5530,8 +5946,15 @@ fn ferx_rust_sir(
 ///   read `data_path` with, as JSON (ferx-r #462); "" when the fit records none.
 /// @param population_fingerprint `fit$population_fingerprint`, the engine's
 ///   fingerprint of the population the fit read, as JSON; "" when none.
+/// @param scoring_settings `fit$scoring_settings`, the inner-loop and ODE
+///   settings of the stage that produced the estimates (ferx-r #511); NULL
+///   when the fit records none. Decoded through `[fit_options]`.
+/// @param sir_settings `fit$sir_settings`, what the fit's SIR ran under
+///   (ferx-r #472); NULL when it ran none.
+/// @param packed_estimate `fit$packed_estimate`, the optimizer's packed
+///   estimate; empty when the fit carries none. Dropped unless it unpacks to
+///   the fit's estimates bit for bit.
 /// @param covariance_method Covariance estimator: "r"/"hessian", "s"/"cross_product", or "rsr"/"sandwich".
-/// @param mu_referencing TRUE to use mu-referencing for the inner-loop warm restart.
 /// @param verbose When TRUE, the engine prints progress to stderr.
 /// @return Named list with `cov_matrix`, `cov_matrix_dim`, `se_theta`, `se_omega`,
 ///   `se_sigma`, `se_kappa`, `covariance_status`, `cov_eigenvalues`,
@@ -5558,8 +5981,10 @@ fn ferx_rust_covariance(
     iov_occasion: &str,
     reader_settings: &str,
     population_fingerprint: &str,
+    scoring_settings: Robj,
+    sir_settings: Robj,
+    packed_estimate: Vec<f64>,
     covariance_method: &str,
-    mu_referencing: bool,
     verbose: bool,
     fit_bindings: List,
 ) -> Robj {
@@ -5607,6 +6032,9 @@ fn ferx_rust_covariance(
             iov_occasion,
             reader_settings,
             population_fingerprint,
+            scoring_settings: &scoring_settings,
+            sir_settings: &sir_settings,
+            packed_estimate: &packed_estimate,
         };
         let fit = fit_skeleton("ferx_covariance", model, &inputs, None)?;
 
@@ -5615,7 +6043,6 @@ fn ferx_rust_covariance(
         // request); set it anyway for clarity.
         opts.run_covariance_step = true;
         opts.covariance_method = covariance_method_enum;
-        opts.mu_referencing = mu_referencing;
         opts.interaction = interaction;
         opts.verbose = verbose;
 
@@ -10377,6 +10804,7 @@ extendr_module! {
     fn ferx_rust_npde_from_fit;
     fn ferx_rust_sir;
     fn ferx_rust_covariance;
+    fn ferx_rust_settings_record;
     fn ferx_rust_unstated_selection;
     fn ferx_rust_fit_json_canonical;
     fn ferx_rust_take_engine_diagnostic;

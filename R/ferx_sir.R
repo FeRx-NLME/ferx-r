@@ -14,12 +14,32 @@
 #'
 #' The fit is rebuilt at its fitted estimates, including the IOV (kappa)
 #' covariance `fit$omega_iov`, under the inner loop of its last estimation
-#' method (FOCE or FOCEI). With the same `sir_seed` and sample sizes the result
-#' is the one `ferx_fit(..., sir = TRUE)` reports. The SIR proposal's degrees
-#' of freedom (`sir_df`), the inner-loop settings, and ODE solver tolerances
-#' passed to `ferx_fit()` through `settings =` (`ode_reltol`, `ode_abstol`,
-#' `ode_max_steps`) take their defaults, whatever the fit used; tolerances
-#' written in the model file's `[fit_options]` are kept.
+#' method (FOCE or FOCEI).
+#'
+#' ## Settings
+#'
+#' A fit made with `ferx_fit(..., sir = TRUE)`, or returned by an earlier
+#' `ferx_sir()`, records the settings its SIR ran under as `fit$sir_settings`:
+#' the sample sizes, the seed, the proposal degrees of freedom (`df`), the
+#' `scale`, `keep_samples`, and under `scoring` the inner-loop and ODE settings
+#' each draw was scored with. Every argument left at `NULL` takes the recorded
+#' value, so `ferx_sir(fit)` repeats the fit's SIR: its intervals and effective
+#' sample size are `identical()` to the in-fit ones, also after a
+#' [ferx_save_fit()] / [ferx_load_fit()] round trip. The exception is a
+#' normal proposal (`sir_df = Inf`): a `.fitrx` bundle cannot record it yet
+#' (ferx-core#1819), so `ferx_save_fit()` warns and saves no SIR settings, and
+#' the loaded fit runs as one with no record. An argument you pass
+#' replaces that one setting and keeps the rest. The returned fit's
+#' `sir_settings` records the run it made.
+#'
+#' A fit with no SIR record (SIR never ran on it, or it was saved before the
+#' record existed) runs with the engine's defaults for every argument left at
+#' `NULL`: 1000 samples, 250 resamples, seed 12345, `sir_df = 5`,
+#' `sir_scale = "packed"`, and default inner-loop and ODE settings
+#' (tolerances written in the model file's `[fit_options]` are kept). On such
+#' a fit, settings passed to `ferx_fit()` through `settings =` (an
+#' `inner_maxiter`, an `ode_reltol`) are not used: the engine reads them only
+#' from a SIR record (ferx-core #1806).
 #'
 #' ## Data selection
 #'
@@ -53,15 +73,15 @@
 #'   [ferx_load_fit()].
 #' @param sir_samples Number of proposal samples drawn from the asymptotic
 #'   distribution. Higher values give tighter weights at proportional cost.
-#'   Default 1000.
+#'   `NULL` (the default) takes the fit's recorded value, else 1000.
 #' @param sir_resamples Number of resampled vectors. Must be `<= sir_samples`.
-#'   Default 250.
-#' @param sir_seed Integer RNG seed for reproducibility. `NULL` (the default)
-#'   uses the engine's built-in seed.
+#'   `NULL` takes the fit's recorded value, else 250.
+#' @param sir_seed Integer RNG seed for reproducibility. `NULL` takes the
+#'   seed the fit's SIR recorded, else the engine's built-in seed (12345).
 #' @param sir_keep_samples When `TRUE`, retain the resampled packed
 #'   parameter vectors on the returned fit. Required for
-#'   [ferx_simulate_with_uncertainty()] with `method = "sir"`. Default
-#'   `FALSE`.
+#'   [ferx_simulate_with_uncertainty()] with `method = "sir"`. `NULL` takes
+#'   the fit's recorded value, else `FALSE`.
 #' @param verbose When `TRUE`, the engine prints progress to stderr.
 #'   Default `FALSE`.
 #' @param sir_scale The parameter scale SIR's importance-sampling target is
@@ -75,14 +95,20 @@
 #'   informed by few groups gets a heavy upper tail. `"natural"` is refused for
 #'   a model with `prior(...)`. The same option is
 #'   `settings = list(sir_scale = ...)` in [ferx_fit()] and `sir_scale` in the
-#'   model's `[fit_options]`; this argument does not read the model file's
+#'   model's `[fit_options]`. `NULL` (the default) takes the fit's recorded
+#'   scale, else `"packed"`; this argument does not read the model file's
 #'   value.
+#' @param sir_df Degrees of freedom of the Student-t SIR proposal, at least 1
+#'   (`Inf` is a multivariate-normal proposal). The same option is
+#'   `settings = list(sir_df = ...)` in [ferx_fit()]. `NULL` (the default)
+#'   takes the fit's recorded value, else 5.
 #'
 #' @return The input `fit`, augmented with `sir_ess`, `sir_ci_theta`,
 #'   `sir_ci_omega`, `sir_ci_sigma`, `sir_ci_kappa` (one row per IOV kappa
 #'   variance, named by `kappa_names`; NULL without IOV), `sir_seed_used`
 #'   (the seed this run resampled with: `sir_seed`, or 12345 when it is
-#'   `NULL`), and (when requested) `sir_resamples` / `sir_resamples_n` /
+#'   `NULL`), `sir_settings` (the settings this run used; see [ferx_fit()]),
+#'   and (when the run kept them) `sir_resamples` / `sir_resamples_n` /
 #'   `sir_resamples_dim`.
 #'   Any warnings the SIR step emitted are appended to `fit$warnings` and to
 #'   `fit$warnings_structured` under the `sir` category - in particular the
@@ -143,12 +169,13 @@
 #' @family fitting
 #' @export
 ferx_sir <- function(fit,
-                     sir_samples = 1000L,
-                     sir_resamples = 250L,
+                     sir_samples = NULL,
+                     sir_resamples = NULL,
                      sir_seed = NULL,
-                     sir_keep_samples = FALSE,
+                     sir_keep_samples = NULL,
                      verbose = FALSE,
-                     sir_scale = c("packed", "natural")) {
+                     sir_scale = NULL,
+                     sir_df = NULL) {
   if (!inherits(fit, "ferx_fit")) {
     stop("`fit` must be a ferx_fit object (from ferx_fit() or ferx_load_fit()).")
   }
@@ -159,12 +186,12 @@ ferx_sir <- function(fit,
   is_positive_count <- function(x) {
     length(x) == 1L && is.finite(x) && x > 0 && x == as.integer(x)
   }
-  if (!is_positive_count(sir_samples)) {
-    stop("`sir_samples` must be a single positive integer (got: ",
+  if (!is.null(sir_samples) && !is_positive_count(sir_samples)) {
+    stop("`sir_samples` must be NULL or a single positive integer (got: ",
          paste(format(sir_samples), collapse = ", "), ").")
   }
-  if (!is_positive_count(sir_resamples)) {
-    stop("`sir_resamples` must be a single positive integer (got: ",
+  if (!is.null(sir_resamples) && !is_positive_count(sir_resamples)) {
+    stop("`sir_resamples` must be NULL or a single positive integer (got: ",
          paste(format(sir_resamples), collapse = ", "), ").")
   }
   if (!is.null(sir_seed)) {
@@ -174,6 +201,16 @@ ferx_sir <- function(fit,
                                           sir_seed >= 0)) {
       stop("`sir_seed` must be NULL or a single non-negative integer.")
     }
+  }
+  if (!is.null(sir_keep_samples) &&
+        !(is.logical(sir_keep_samples) && length(sir_keep_samples) == 1L &&
+            !is.na(sir_keep_samples))) {
+    stop("`sir_keep_samples` must be NULL, TRUE or FALSE.")
+  }
+  if (!is.null(sir_scale)) sir_scale <- match.arg(sir_scale, c("packed", "natural"))
+  if (!is.null(sir_df) &&
+        !(is.numeric(sir_df) && length(sir_df) == 1L && !is.na(sir_df) && sir_df >= 1)) {
+    stop("`sir_df` must be NULL or a single number >= 1 (`Inf` for a normal proposal).")
   }
 
   model_path <- fit$model_path
@@ -206,11 +243,30 @@ ferx_sir <- function(fit,
     )
   }
 
-  sir_scale <- match.arg(sir_scale)
-
-  if (sir_resamples > sir_samples) {
-    stop("`sir_resamples` (", sir_resamples,
-         ") must be <= `sir_samples` (", sir_samples, ")")
+  # The explicit arguments, edited into the fit's SIR record (or the engine's
+  # default record when the fit has none); every argument left NULL keeps the
+  # recorded value, so `ferx_sir(fit)` repeats the fit's SIR (#472).
+  explicit <- list(
+    samples = if (!is.null(sir_samples)) as.integer(sir_samples),
+    resamples = if (!is.null(sir_resamples)) as.integer(sir_resamples),
+    seed = if (!is.null(sir_seed)) as.numeric(sir_seed),
+    df = if (!is.null(sir_df)) as.numeric(sir_df),
+    scale = sir_scale,
+    keep_samples = sir_keep_samples
+  )
+  explicit <- explicit[!vapply(explicit, is.null, logical(1L))]
+  record_args <- .ferx_fit_record_args(fit, sir = explicit)
+  resolved <- record_args$sir_settings %||% .ferx_default_settings("sir_settings")
+  if (resolved$resamples > resolved$samples) {
+    # Name where each value came from: an argument the caller did not pass is
+    # the fit's recorded value, or the engine default on a fit with none.
+    source_of <- function(arg) {
+      if (!is.null(arg)) ""
+      else if (!is.null(fit$sir_settings)) ", recorded on the fit"
+      else ", the default"
+    }
+    stop("`sir_resamples` (", resolved$resamples, source_of(sir_resamples),
+         ") must be <= `sir_samples` (", resolved$samples, source_of(sir_samples), ")")
   }
 
   # Build the flat eta_hats matrix. `ebe_etas` is a data frame: first column
@@ -324,11 +380,10 @@ ferx_sir <- function(fit,
     # (#462).
     reader_settings = reader_args$reader_settings,
     population_fingerprint = reader_args$population_fingerprint,
-    sir_samples = as.integer(sir_samples),
-    sir_resamples = as.integer(sir_resamples),
-    sir_seed = if (is.null(sir_seed)) -1L else as.integer(sir_seed),
-    sir_keep_samples = isTRUE(sir_keep_samples),
-    sir_scale = sir_scale,
+    # How the fit was scored, and its exact packed estimate (#472).
+    scoring_settings = record_args$scoring_settings,
+    sir_settings = record_args$sir_settings,
+    packed_estimate = record_args$packed_estimate,
     verbose = isTRUE(verbose),
     fit_bindings = binding_args$fit_bindings
   ), model_path, data_path)
@@ -371,10 +426,11 @@ ferx_sir <- function(fit,
   sig_names <- if (!is.null(sn) && length(sn) == length(fit$sigma)) sn else paste0("SIGMA(", seq_along(fit$sigma), ")")
   fit$sir_ci_sigma <- reshape_ci(raw$sir_ci_sigma, sig_names)
   fit$sir_ci_kappa <- .ferx_sir_ci_kappa(raw$sir_ci_kappa, fit$kappa_names)
-  # The seed this run used (ferx-core #1767), not the input fit's.
+  # The seed and settings this run used (ferx-core #1767), not the input fit's.
   fit$sir_seed_used <- raw$sir_seed_used
+  fit$sir_settings <- raw$sir_settings
 
-  if (isTRUE(sir_keep_samples)) {
+  if (isTRUE(fit$sir_settings$keep_samples)) {
     fit$sir_resamples <- as.numeric(raw$sir_resamples)
     fit$sir_resamples_n <- as.integer(raw$sir_resamples_n)
     fit$sir_resamples_dim <- as.integer(raw$sir_resamples_dim)

@@ -814,6 +814,11 @@ test_that("T8b: a reloaded level-block fit runs the covariance step identically"
   fit <- tl_fit(tl_twin_col_model(eta = TRUE), tl_twin_data())
   fit2 <- tl_roundtrip(fit)
   expect_identical(fit2$theta_levels, fit$theta_levels)
+  # A bundle carries no packed estimate (ferx-core#1815), so the live side
+  # drops it too (#511): with it the live step starts from the optimizer's own
+  # factor, which differs from the re-decomposed point by ~1e-12 on Linux.
+  expect_null(fit2$packed_estimate)
+  fit$packed_estimate <- NULL
   c1 <- ferx_covariance(fit)
   c2 <- ferx_covariance(fit2)
   expect_true(all(is.finite(c1$se_theta)))

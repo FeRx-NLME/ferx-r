@@ -2,6 +2,17 @@
 
 ## Breaking changes
 
+- **`ferx_sir(fit)` repeats the fit's own SIR** when the fit has one
+  ([#472](https://github.com/FeRx-NLME/ferx-r/issues/472)). `sir_samples`,
+  `sir_resamples`, `sir_seed`, `sir_keep_samples` and `sir_scale` now default
+  to `NULL`, which takes the value `fit$sir_settings` records. A fit made
+  with `ferx_fit(sir = TRUE, settings = list(sir_samples = 2000))` is
+  re-run at 2000 draws, not 1000, with the same seed, and so is a fit
+  returned by an earlier `ferx_sir()`. On a fit with no SIR record the
+  defaults are unchanged (1000 / 250 / seed 12345 / `"packed"`).
+  `ferx_covariance()`'s `mu_referencing` likewise defaults to `NULL`, the
+  fit's recorded value.
+
 - **`fit$theta_levels` has a seventh column, `value`** (the fitted value of
   each level; see New features). Code that checks its `ncol()` or `names()`
   exactly needs updating
@@ -494,6 +505,26 @@
   `expect_error()` matches keep working
   ([#504](https://github.com/FeRx-NLME/ferx-r/issues/504)).
 
+- **A fit shows how it was scored: `fit$scoring_settings`,
+  `fit$sir_settings` and `fit$packed_estimate`**
+  ([#511](https://github.com/FeRx-NLME/ferx-r/issues/511),
+  [#472](https://github.com/FeRx-NLME/ferx-r/issues/472)).
+  `scoring_settings` holds the inner-loop and ODE settings of the stage
+  that produced the estimates (`inner_maxiter`, `inner_tol`,
+  `inner_optimizer`, `mu_referencing`, `ode_reltol`, ...; ferx-core
+  #1805); `sir_settings` holds what the fit's SIR ran under (sample sizes,
+  seed, `df`, `scale`, and the scoring settings of each draw; ferx-core
+  #1758), `NULL` without SIR; `packed_estimate` is the optimizer's exact
+  estimate. `ferx_save_fit()` / `ferx_load_fit()` keep both records in
+  ferx-core's `.fitrx` layout (with the top-level `sir_seed` ferx-core
+  checks against `sir.settings.seed`); `packed_estimate` is not saved
+  ([ferx-core #1815](https://github.com/FeRx-NLME/ferx-core/issues/1815)).
+
+- **`ferx_sir()` gains `sir_df`**, and an explicit argument to `ferx_sir()`
+  or `ferx_covariance(mu_referencing =)` always wins over the fit's record,
+  also when it is the default value
+  ([#472](https://github.com/FeRx-NLME/ferx-r/issues/472)).
+
 - **`.fitrx` bundles carry theta level layouts both ways between R and
   ferx-core.** `ferx_save_fit()` writes `fit$theta_levels` into ferx-core's
   own `data_bindings.levels` slot of `fit.json`, so the engine reads an R
@@ -679,6 +710,24 @@
 
 ## Bug fixes
 
+- **`ferx_covariance(fit)` and `ferx_sir(fit)` repeat the in-fit steps
+  exactly** ([#511](https://github.com/FeRx-NLME/ferx-r/issues/511),
+  [#472](https://github.com/FeRx-NLME/ferx-r/issues/472)). They ran under
+  the engine's default inner-loop and ODE settings and SIR `sir_df`,
+  whatever the fit used: on warfarin, a fit with `inner_maxiter = 5` had an
+  in-fit SIR effective sample size of 1.00 and a standalone one of 1.62
+  (`sir_df = 3`: 113.7 against 119.6), and `inner_tol = 1e-3` moved the
+  covariance by 6e-3 relative. Even at
+  default settings `ferx_covariance(fit)` differed from the in-fit step in
+  the last digits (warfarin_iov SE 0.76168056 vs 0.76168066), because Omega
+  was rebuilt from `fit$omega` rather than the optimizer's own factor. Both
+  steps now read `fit$scoring_settings`, `fit$sir_settings` and
+  `fit$packed_estimate`, and are `identical()` to the in-fit results. After
+  `ferx_load_fit()` the covariance differs in the last digits again, since
+  bundles carry no packed estimate. A fit with no record (one saved before
+  this) is scored as before. A fit whose estimates were edited after the
+  fit does not use its packed estimate.
+
 - **`ferx_covariance(fit)`, `ferx_sir(fit)` and `ferx_calc_npde(fit)` use
   the data selection the fit was made with**
   ([#462](https://github.com/FeRx-NLME/ferx-r/issues/462),
@@ -755,7 +804,10 @@
   hands the engine carries no fitted override values. With it, `ferx_sir()`
   used to stop on a covariance dimension mismatch and `ferx_covariance()`
   returned no matrix. Both now stop with an error that names the overrides.
-  The in-fit covariance step and SIR of `ferx_fit()` are unaffected.
+  The in-fit covariance step and SIR of `ferx_fit()` are unaffected. Since
+  [#511](https://github.com/FeRx-NLME/ferx-r/issues/511) the overrides are
+  read from `fit$packed_estimate`, so the refusal is left for a fit loaded
+  with `ferx_load_fit()` and for a SAEM, IMP or Bayes fit.
 
 - **`ferx_covariance()` refuses a `kappa` fit that has lost its kappa
   matrix** ([#473](https://github.com/FeRx-NLME/ferx-r/issues/473)). With

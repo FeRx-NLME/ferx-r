@@ -9,12 +9,8 @@
 #'
 #' `ferx_covariance()` reconstructs the fitted parameters from the fit,
 #' including the IOV (kappa) covariance `fit$omega_iov`, re-runs the inner
-#' loop (seeded from the per-subject empirical Bayes ETAs) to rebuild the
-#' covariance-step inputs, and calls the same covariance
-#' step [ferx_fit()] runs inline. The result closely matches fitting with
-#' `covariance = TRUE` (the same engine step; agreement is close but not
-#' bit-exact, since the standalone re-reads the data and cold-starts the inner
-#' EBE loop). The returned fit is the input with
+#' loop to rebuild the covariance-step inputs, and calls the same covariance
+#' step [ferx_fit()] runs inline. The returned fit is the input with
 #' `cov_matrix`, `cor_matrix`, `se_theta` / `se_omega` / `se_sigma` /
 #' `se_kappa`, `covariance_status`, `eigenvalues`, and `condition_number`
 #' refreshed.
@@ -27,6 +23,27 @@
 #' reserved for input problems (missing / hash-mismatched model or data, or a
 #' fit whose parameters do not match the model, such as a `kappa` model whose
 #' fit carries no `omega_iov`).
+#'
+#' ## Settings
+#'
+#' The step scores the objective under the inner-loop and ODE settings the fit
+#' recorded as `fit$scoring_settings` (the stage that produced the estimates:
+#' `inner_maxiter`, `inner_tol`, `inner_optimizer`, `mu_referencing`,
+#' `ode_reltol`, ...), and starts from the optimizer's exact estimate
+#' `fit$packed_estimate`. With both, `ferx_covariance(fit)` is `identical()` to
+#' the covariance `ferx_fit(..., covariance = TRUE)` reports, unless
+#' `covariance_method` differs from the fit's (it is a setting of the step, not
+#' of the fit, and is not recorded).
+#'
+#' A fit loaded with [ferx_load_fit()] keeps `scoring_settings` but not
+#' `packed_estimate`, which `.fitrx` bundles do not carry, so its result
+#' differs from the in-fit one in the last digits (on warfarin_iov, about 1e-7
+#' relative in the standard errors). A fit whose estimates were edited after
+#' the fit does not use `packed_estimate`. A fit with no `scoring_settings` (a
+#' bundle saved before they were recorded) is scored with the engine's
+#' defaults, as before. A `[mixture]` fit with per-class overrides needs
+#' `packed_estimate` to read the overrides back, so after a reload the step
+#' refuses it.
 #'
 #' ## Data selection
 #'
@@ -58,8 +75,9 @@
 #'   `MATRIX=S`), or `"rsr"` (the Huber-White sandwich, `MATRIX=RSR`).
 #'   `"hessian"` / `"cross_product"` / `"sandwich"` are accepted as aliases.
 #' @param mu_referencing Use mu-referencing for the inner-loop warm restart.
-#'   Default `TRUE` (the engine default). Set to match the setting used for
-#'   the original fit.
+#'   `NULL` (the default) takes the fit's recorded value
+#'   (`fit$scoring_settings$mu_referencing`), else `TRUE`. `TRUE` or `FALSE`
+#'   overrides the record for this call.
 #' @param verbose When `TRUE`, the engine prints progress to stderr.
 #'   Default `FALSE`.
 #'
@@ -91,7 +109,7 @@
 #' @export
 ferx_covariance <- function(fit,
                             covariance_method = "r",
-                            mu_referencing = TRUE,
+                            mu_referencing = NULL,
                             verbose = FALSE) {
   if (!inherits(fit, "ferx_fit")) {
     stop("`fit` must be a ferx_fit object (from ferx_fit() or ferx_load_fit()).")
@@ -109,6 +127,11 @@ ferx_covariance <- function(fit,
     stop("`covariance_method` must be one of \"r\"/\"hessian\", ",
          "\"s\"/\"cross_product\", or \"rsr\"/\"sandwich\" (got: ",
          covariance_method, ").")
+  }
+  if (!is.null(mu_referencing) &&
+        !(is.logical(mu_referencing) && length(mu_referencing) == 1L &&
+            !is.na(mu_referencing))) {
+    stop("`mu_referencing` must be NULL, TRUE or FALSE.")
   }
 
   model_path <- fit$model_path
@@ -205,6 +228,9 @@ ferx_covariance <- function(fit,
 
   binding_args <- .ferx_fit_binding_args(fit)
   reader_args <- .ferx_fit_reader_args(fit)
+  record_args <- .ferx_fit_record_args(
+    fit, scoring = list(mu_referencing = mu_referencing)[!is.null(mu_referencing)]
+  )
   .ferx_refuse_unrecorded_selection(
     fit, "ferx_covariance",
     "Refit with `ferx_fit(..., covariance = TRUE)`, or refit and call ferx_covariance() on the new fit."
@@ -237,8 +263,11 @@ ferx_covariance <- function(fit,
     # (#462).
     reader_settings = reader_args$reader_settings,
     population_fingerprint = reader_args$population_fingerprint,
+    # How the fit was scored, and its exact packed estimate (#511).
+    scoring_settings = record_args$scoring_settings,
+    sir_settings = record_args$sir_settings,
+    packed_estimate = record_args$packed_estimate,
     covariance_method = cov_method,
-    mu_referencing = isTRUE(mu_referencing),
     verbose = isTRUE(verbose),
     fit_bindings = binding_args$fit_bindings
   ), model_path, data_path)

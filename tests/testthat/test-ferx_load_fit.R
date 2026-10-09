@@ -180,6 +180,9 @@ test_that("a loaded fit with zero-padded IDs runs ferx_covariance like the live 
   loaded <- ferx_load_fit(path)
   expect_identical(loaded$ebe_etas$ID, fit$ebe_etas$ID)
 
+  # A bundle carries no packed estimate (ferx-core#1815), so the live side
+  # drops it too (#511).
+  fit$packed_estimate <- NULL
   live <- ferx_covariance(fit)
   skip_if(is.null(live$cov_matrix), "covariance step did not converge - skipping")
   expect_identical(ferx_covariance(loaded)$se_theta, live$se_theta)
