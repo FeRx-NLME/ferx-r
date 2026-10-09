@@ -1071,6 +1071,18 @@ default, also for a model without IOV. \code{NULL} only on a fit
 loaded from a \code{.fitrx} bundle saved before ferx-core recorded the
 rule. \code{\link{ferx_sir}} and \code{\link{ferx_covariance}} derive
 the occasions with it, and \code{\link{ferx_save_fit}} keeps it.}
+\item{reader_settings, population_fingerprint}{Character strings holding
+the engine's JSON record of how the fit read its data (the model
+file's \code{[data_selection]} with \code{ignore}, \code{accept},
+\code{ignore_ids} and \code{settings = list(iov_column = ...)}
+merged in) and a fingerprint of the population it read (about 270
+bytes per subject). Opaque: compared by the engine, not meant to be
+read; \code{exclusions} is the readable record of what was dropped.
+\code{\link{ferx_covariance}}, \code{\link{ferx_sir}} and
+\code{\link{ferx_calc_npde}} re-read the fit's own rows with them,
+and \code{\link{ferx_save_fit}} keeps both. \code{NULL} on a fit made
+before they were recorded; \code{reader_settings} is also \code{NULL}
+on a search's final fit, which carries the fingerprint alone.}
 \item{imp_seed}{Numeric scalar (or \code{NULL}) giving the importance
 sampling seed. \code{NULL} when IS was not run.}
 \item{bloq_method_label}{Character string describing the LOQ-censoring

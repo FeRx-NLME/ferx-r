@@ -41,6 +41,19 @@ et al. 2008). Use this when a model was fitted without
 nonlinearity and non-Gaussian random effects, and follow N(0, 1) under a
 correctly specified model.
 }
+\details{
+The data are re-read with the selection the fit was made with
+(\code{fit$reader_settings}): a \code{ferx_fit(ignore =, accept =,
+ignore_ids =)} selection applies as well as the model file's
+\code{[data_selection]}, also to a file passed as \code{data}. On a model
+passed as \code{model}, only the fit's selection is replayed: that file's
+own \code{[data]}, \code{[covariates]} and \code{iov_column} decide how the
+data are read. A fit made before the selection was recorded is refused when
+its \code{fit$exclusions} show a clause, or its \code{fit$call_settings} an
+\code{iov_column}, that the model file does not state; that model file
+(\code{model}, or \code{fit$model_path}, which must still have the fit's
+hash) is the one compared.
+}
 \section{Errors raised by the engine}{
 
 A model or dataset the engine refuses is an R error, never a \code{NULL}

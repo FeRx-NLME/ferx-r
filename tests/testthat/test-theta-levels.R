@@ -239,6 +239,11 @@ test_that("T3c: the block binds to the data after ignore =", {
     "PLACEBO[STUDY=1,TIME=1]", "PLACEBO[STUDY=1,TIME=4]",
     "PLACEBO[STUDY=1,TIME=12]", "TVV"
   ))
+  # npde re-reads the data with the fit's selection, so the design binds to
+  # the fit's three levels (#416). Before #416 the re-read kept study 2 and
+  # refused it as levels the fit estimated no theta for.
+  out <- ferx_calc_npde(fit, nsim = 20L, seed = 1L)
+  expect_identical(nrow(out$sdtab), nrow(fit$sdtab))
 })
 
 # --- T4: a design is read at the fit's positions -------------------------------

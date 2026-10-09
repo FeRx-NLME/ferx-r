@@ -95,6 +95,17 @@ of freedom (\code{sir_df}), the inner-loop settings, and ODE solver tolerances
 passed to \code{ferx_fit()} through \verb{settings =} (\code{ode_reltol}, \code{ode_abstol},
 \code{ode_max_steps}) take their defaults, whatever the fit used; tolerances
 written in the model file's \verb{[fit_options]} are kept.
+\subsection{Data selection}{
+
+The data are re-read with the selection the fit was made with, recorded as
+\code{fit$reader_settings}: a \code{ferx_fit(ignore =, accept =, ignore_ids =)}
+selection applies as well as the model file's \verb{[data_selection]}, and the
+engine checks the rows it reads against \code{fit$population_fingerprint}. A fit
+made before these were recorded is refused when its \code{fit$exclusions} show a
+clause, or its \code{fit$call_settings} an \code{iov_column}, that the model file does
+not state, rather than scored on other data.
+}
+
 \subsection{Integrity check}{
 
 \code{ferx_fit()} records the model and data file paths plus SHA-256 hashes

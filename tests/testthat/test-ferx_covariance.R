@@ -506,3 +506,175 @@ test_that(".ferx_fit_subject_ids never borrows IDs for EBE rows without an ID co
   expect_match(err, "^ferx_sir: fit\\$ebe_etas has no ID column")
   expect_match(err, "cannot be matched to the data's subjects", fixed = TRUE)
 })
+
+# --- #462: the fit's own data selection -----------------------------------
+#
+# A record-only selection (`ferx_fit(ignore =, accept =, ignore_ids =)`) used to
+# be lost on the way to the standalone step, which re-read the data with the
+# model file's selection and scored other rows than the fit. See
+# helper-reader-settings.R for the oracle and the margins.
+
+test_that("ferx_covariance on an `ignore =` fit reproduces the in-fit step (#462)", {
+  fit <- rs_fit(ignore = rs_ignore)
+  skip_if(is.null(fit$cov_matrix), cov_skip)
+  expect_type(fit$reader_settings, "character")
+  expect_type(fit$population_fingerprint, "character")
+  out <- ferx_covariance(fit)
+  expect_lt(rs_rel(out$se_theta, fit$se_theta), 1e-8)
+})
+
+test_that("ferx_covariance on an `accept =` fit reproduces the in-fit step (#462)", {
+  fit <- rs_fit(accept = "TIME < 120")
+  # The settings the fit reads with are the ones it records, so a selection
+  # lost from them is lost from the fit too: assert the fit applied it.
+  expect_identical(fit$exclusions$fired_accept, "accept: TIME < 120")
+  skip_if(is.null(fit$cov_matrix), cov_skip)
+  out <- ferx_covariance(fit)
+  expect_lt(rs_rel(out$se_theta, fit$se_theta), 1e-8)
+})
+
+test_that("ferx_covariance on an `ignore_ids =` fit runs and reproduces the in-fit step (#462)", {
+  # Refused before #462: "the population has 10 subjects but the fit has 7".
+  fit <- rs_fit(ignore_ids = 1:3)
+  expect_identical(nrow(fit$ebe_etas), 7L)
+  skip_if(is.null(fit$cov_matrix), cov_skip)
+  out <- ferx_covariance(fit)
+  expect_lt(rs_rel(out$se_theta, fit$se_theta), 1e-8)
+})
+
+test_that("the engine checks the re-read population against the fit's fingerprint (#462)", {
+  # The only test that sees the fingerprint go missing: every number above
+  # still matches with the settings alone. Editing the recorded selection makes
+  # the re-read keep a record the fit dropped.
+  fit <- rs_fit(ignore = rs_ignore)
+  edited <- sub("DV < 1.0", "DV < 0.9", fit$reader_settings, fixed = TRUE)
+  expect_false(identical(edited, fit$reader_settings))
+  fit$reader_settings <- edited
+  expect_error(ferx_covariance(fit), "is not the one the fit was given",
+               fixed = TRUE)
+})
+
+test_that("a malformed fit$reader_settings is refused by name, not a panic (#462)", {
+  fit <- rs_fit(ignore = rs_ignore)
+  fit$reader_settings <- "{not json"
+  expect_error(ferx_covariance(fit), "ferx_covariance: `fit$reader_settings`",
+               fixed = TRUE)
+  fit <- rs_fit(ignore = rs_ignore)
+  fit$population_fingerprint <- "{not json"
+  expect_error(ferx_covariance(fit), "ferx_covariance: `fit$population_fingerprint`",
+               fixed = TRUE)
+})
+
+test_that("a fit records a `settings =` iov_column in its reader settings (#462)", {
+  ex <- ferx_example("warfarin_iov")
+  data <- withr::local_tempfile(fileext = ".csv")
+  rows <- utils::read.csv(ex$data)
+  rows$VISIT <- rows$OCC
+  utils::write.csv(rows, data, row.names = FALSE, quote = FALSE, na = ".")
+  fit <- suppressWarnings(ferx_fit(ex$model, data, method = "foce", verbose = FALSE,
+                                   covariance = FALSE,
+                                   settings = list(maxiter = 2L, iov_column = "VISIT")))
+  rs <- jsonlite::fromJSON(fit$reader_settings)
+  expect_identical(rs$iov_column, "VISIT")
+})
+
+# -- The legacy guard: a fit that records no selection ----------------------
+
+test_that("a legacy fit with a record-only `ignore =` is refused, naming the clause (#462)", {
+  fit <- rs_legacy(rs_fit(ignore = rs_ignore))
+  e <- tryCatch(ferx_covariance(fit), error = function(e) e)
+  expect_s3_class(e, "error")
+  msg <- conditionMessage(e)
+  expect_match(msg, "`ignore: EVID == 0 && DV < 1.0`", fixed = TRUE)
+  expect_match(msg, "predates the record of the data selection", fixed = TRUE)
+  expect_match(msg, "ferx_fit(..., covariance = TRUE)", fixed = TRUE)
+  expect_no_match(msg, "edited", fixed = TRUE)
+  expect_no_match(msg, "reads the file differently", fixed = TRUE)
+})
+
+test_that("a legacy fit with `ignore_ids =` is refused, naming the subjects (#462)", {
+  fit <- rs_legacy(rs_fit(ignore_ids = 1:3))
+  e <- tryCatch(ferx_covariance(fit), error = function(e) e)
+  msg <- conditionMessage(e)
+  expect_match(msg, "subject(s) 1, 2, 3 (from `ignore_ids` / `ignore_subjects`)",
+               fixed = TRUE)
+  expect_no_match(msg, "`ignore_subjects: 1`", fixed = TRUE)
+})
+
+test_that("a legacy fit whose selection the model file states still runs (#462)", {
+  fit <- rs_legacy(warfarin_sel_fit())
+  expect_gt(length(fit$exclusions$fired_ignore), 0L)
+  out <- ferx_covariance(fit)
+  expect_true(is.numeric(out$se_theta))
+})
+
+test_that("a legacy fit whose record-only clause fired nothing still runs (#462)", {
+  fit <- rs_legacy(rs_fit(ignore = "DV < -1"))
+  expect_length(fit$exclusions$fired_ignore, 0L)
+  out <- ferx_covariance(fit)
+  expect_true(is.numeric(out$se_theta))
+})
+
+test_that("a legacy fit with no exclusion record runs as before (#462)", {
+  fit <- rs_legacy(warfarin_fit_cov())
+  expect_null(fit$exclusions)
+  skip_if(is.null(fit$cov_matrix), cov_skip)
+  out <- ferx_covariance(fit)
+  # M1: no selection, unchanged.
+  expect_lt(rs_rel(out$se_theta, fit$se_theta), 1e-8)
+})
+
+test_that("a legacy fit on an edited model file hears the hash mismatch, not the guard (#462)", {
+  fit <- rs_legacy(rs_fit(ignore = rs_ignore))
+  model <- withr::local_tempfile(fileext = ".ferx")
+  writeLines(c(readLines(fit$model_path), "# edited"), model)
+  fit$model_path <- model
+  e <- tryCatch(ferx_covariance(fit), error = function(e) e)
+  msg <- conditionMessage(e)
+  expect_match(msg, "hash mismatch", fixed = TRUE)
+  expect_no_match(msg, "predates the record", fixed = TRUE)
+})
+
+test_that("the guard labels the model file's clauses through the engine's parse (#462)", {
+  # A quoted spelling in the file reads as the same clause the reader logs;
+  # gluing "ignore: " onto the raw text would keep the quotes and refuse.
+  model <- withr::local_tempfile(fileext = ".ferx")
+  ex <- ferx_example("warfarin_data_selection")
+  lines <- readLines(ex$model)
+  at <- grep("ignore = DV < 1.0", lines, fixed = TRUE)
+  expect_length(at, 1L)
+  lines[at] <- '  ignore = "DV < 1.0"'
+  writeLines(lines, model)
+  unstated <- ferx:::ferx_rust_unstated_selection(
+    "probe", model, "", c("ignore: DV < 1.0", "ignore: TIME > 100", "ignore_subjects: 4"),
+    "accept: TIME < 120", ""
+  )
+  # Only the clauses the file does not state, the file's own dropped.
+  expect_identical(unstated,
+                   c("ignore: TIME > 100", "ignore_subjects: 4", "accept: TIME < 120"))
+})
+
+test_that("the guard compares a call-time iov_column with the file's, case-insensitively (#526)", {
+  ex <- ferx_example("warfarin_iov")
+  unstated <- function(col) {
+    ferx:::ferx_rust_unstated_selection("probe", ex$model, "", character(), character(), col)
+  }
+  # The file says `iov_column = OCC`.
+  expect_identical(unstated("VISIT"), "iov_column: VISIT")
+  expect_identical(unstated("occ"), character())
+  expect_identical(unstated(""), character())
+})
+
+test_that("a legacy fit read with a `settings =` iov_column is refused, naming it (#526)", {
+  fit <- rs_legacy(rs_iov_fit())
+  expect_identical(fit$call_settings$iov_column, "VISIT")
+  e <- tryCatch(suppressWarnings(ferx_covariance(fit)), error = function(e) e)
+  expect_s3_class(e, "error")
+  msg <- conditionMessage(e)
+  expect_match(msg, "ferx_covariance: this fit predates", fixed = TRUE)
+  expect_match(msg, '`settings = list(iov_column = "VISIT")`', fixed = TRUE)
+  expect_match(msg, "ferx_fit(..., covariance = TRUE)", fixed = TRUE)
+  # The same fit with its settings recorded runs.
+  out <- suppressWarnings(ferx_covariance(rs_iov_fit()))
+  expect_true(is.numeric(out$se_theta))
+})

@@ -464,38 +464,23 @@ fn ferx_rust_fit(
             }
         }
 
-        // Read data via read_population_for, which handles [covariates] validation,
-        // [data_selection] filters, and TTE endpoint routing in one call.
-        // This replaces the previous 4-way dispatch that could not pass tte_cmts to
-        // the reader (causing TTE rows to land in the Gaussian vectors instead of
-        // subject.obs_records). It also fixes the pre-existing gap where the combined
-        // covariates + filter case fell through to the filter-only path, losing the
-        // covariate table.
-        let (mut population, covariate_table) = {
-            use ferx_core::api::read_population_for;
-            use ferx_core::io::datareader::SelectionFilter;
-            let filter = match SelectionFilter::from_opts(
-                &opts.ignore_exprs,
-                &opts.accept_exprs,
-                &opts.ignore_subjects,
-            ) {
-                Ok(f) => f,
-                Err(e) => return Err(format!("Error in [data_selection]: {e}")),
-            };
-            let filter_opt = if filter.is_empty() { None } else { Some(&filter) };
-            match read_population_for(
-                &parsed.model,
-                &parsed.covariate_decls,
-                data_path,
-                None,
-                opts.iov_column.as_deref(),
-                filter_opt,
-                &parsed.column_map,
-            ) {
+        // Read data through the engine's reader settings, which handle
+        // [covariates] validation, [data_selection] filters and TTE endpoint
+        // routing in one call. The settings are the model file's with the
+        // call-time overrides (`ignore =`, `accept =`, `ignore_ids =`,
+        // `settings = list(iov_column = ...)`) merged in, and the fit records
+        // exactly these, so `ferx_covariance(fit)` / `ferx_sir(fit)` /
+        // `ferx_calc_npde(fit)` re-read the fit's own rows (ferx-r #462).
+        let mut reader_settings = ferx_core::api::ReaderSettings::from_parsed(&parsed);
+        reader_settings.iov_column = opts.iov_column.clone();
+        reader_settings.ignore_exprs = opts.ignore_exprs.clone();
+        reader_settings.accept_exprs = opts.accept_exprs.clone();
+        reader_settings.ignore_subjects = opts.ignore_subjects.clone();
+        let (mut population, covariate_table) =
+            match ferx_core::api::read_population_with(&parsed.model, &reader_settings, data_path) {
                 Ok(result) => result,
                 Err(e) => return Err(format!("Error reading data: {e}")),
-            }
-        };
+            };
 
         // Bind `theta NAME[COL, ...]` level blocks against the data just read
         // (ferx-r #370): the level count, and so the theta layout, is a property
@@ -684,6 +669,10 @@ fn ferx_rust_fit(
         // Attach the covariate table built during the strict read above (None when
         // the model has no `[covariates]` block). `fit()` itself leaves this None.
         result.covariate_table = covariate_table;
+        // `fit()` stamps the population fingerprint but not the settings the
+        // population was read with; record those so a post-hoc step re-reads
+        // the same rows (ferx-r #462), as `fit_from_files` does.
+        result.reader_settings = Some(reader_settings);
 
         // Convert to R list
         fit_result_to_list(&result, &population, &parsed.model, &parsed.bindings)
@@ -1563,6 +1552,11 @@ fn ferx_rust_predict_survival_from_fit(
 /// @param omega_iov_flat Row-major flattened fitted IOV (kappa) omega matrix;
 ///   empty when the model declares no `kappa`.
 /// @param omega_iov_dim Side length of the IOV omega matrix; 0 when no IOV.
+/// @param reader_settings `fit$reader_settings` as JSON; "" when the fit
+///   records none (read with the model file's `[data_selection]`).
+/// @param model_is_fits TRUE when `model_path` is the fit's own model file:
+///   the whole record is replayed. FALSE (a `model =` override): only its
+///   selection is, on that file's own reader settings.
 /// @param nsim Number of Monte-Carlo replicates per subject
 /// @param seed RNG seed; pass -1 for the engine default
 /// @return Data frame with ID, TIME, NPDE, NPD columns
@@ -1580,6 +1574,8 @@ fn ferx_rust_npde_from_fit(
     omega_iov_dim: i32,
     residual_rho: Vec<f64>,
     fit_bindings: List,
+    reader_settings: &str,
+    model_is_fits: bool,
     nsim: i32,
     seed: i32,
 ) -> Robj {
@@ -1592,33 +1588,37 @@ fn ferx_rust_npde_from_fit(
             Ok(p) => p,
             Err(e) => return Err(format!("Error parsing model: {e}")),
         };
-        let iov_col = parsed.fit_options.iov_column.clone();
-
-        // Re-apply the model file's `[data_selection]` ignore/accept/ignore_subjects
-        // so the population matches the one the fit was computed on. Without this the
-        // NPDE decorrelation would run over a different per-subject observation set
-        // than the fit, silently disagreeing with a fit-time `npde_nsim` run. (Only
-        // the model-file selection is visible here; selection applied via R-side
-        // `ferx_fit(settings=)` is not carried on the fit object.)
-        let filter = match ferx_core::io::datareader::SelectionFilter::from_opts(
-            &parsed.fit_options.ignore_exprs,
-            &parsed.fit_options.accept_exprs,
-            &parsed.fit_options.ignore_subjects,
-        ) {
-            Ok(f) => f,
-            Err(e) => return Err(format!("Error in [data_selection]: {e}")),
+        // Read the rows the fit was computed on, or the NPDE decorrelation runs
+        // over a different per-subject observation set than the fit and
+        // silently disagrees with a fit-time `npde_nsim` run. One reader path:
+        // the model file's own reader settings (ferx-r #526 review 10), with a
+        // fit's recorded selection replayed on them (ferx-r #462 / #416), which
+        // carries a selection passed through `ferx_fit(ignore =, accept =,
+        // ignore_ids =)` as well as the file's. On the fit's own model file the
+        // whole record is replayed (its `iov_column` override too); on a `model =`
+        // override only the selection is, so that file's `[data]`, `[covariates]`
+        // and `iov_column` still decide how it is read (review 3). Replay only: the
+        // engine's fingerprint comparison is not public, so R's row/ID/TIME
+        // alignment check in `.ferx_attach_npde()` stays the backstop. A fit that
+        // records none reads with the file's `[data_selection]`; the R entry point
+        // refuses that case when the fit's exclusions show more.
+        let settings = if reader_settings.is_empty() {
+            ferx_core::api::ReaderSettings::from_parsed(&parsed)
+        } else {
+            let recorded: ferx_core::api::ReaderSettings = serde_json::from_str(reader_settings)
+                .map_err(|e| format!("ferx_calc_npde: `fit$reader_settings`: {e}"))?;
+            if model_is_fits {
+                recorded
+            } else {
+                let mut own = ferx_core::api::ReaderSettings::from_parsed(&parsed);
+                own.ignore_exprs = recorded.ignore_exprs;
+                own.accept_exprs = recorded.accept_exprs;
+                own.ignore_subjects = recorded.ignore_subjects;
+                own
+            }
         };
-        let filter_opt = if filter.is_empty() { None } else { Some(&filter) };
-
-        let (mut population, _) = match ferx_core::api::read_population_for(
-            &parsed.model,
-            &parsed.covariate_decls,
-            data_path,
-            None,
-            iov_col.as_deref(),
-            filter_opt,
-            &parsed.column_map,
-        ) {
+        let read = ferx_core::api::read_population_with(&parsed.model, &settings, data_path);
+        let (mut population, _) = match read {
             Ok(r) => r,
             Err(e) => return Err(format!("Error reading data: {e}")),
         };
@@ -3862,6 +3862,22 @@ fn fit_result_to_list(
     // and the report is NULL.
     let prior_summary = prior_summary_to_dataframe(result);
 
+    // "" when the engine recorded none; read back by `fit_skeleton`.
+    let reader_settings_json = result
+        .reader_settings
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|e| format!("cannot record `fit$reader_settings`: {e}"))?
+        .unwrap_or_default();
+    let population_fingerprint_json = result
+        .population_fingerprint
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|e| format!("cannot record `fit$population_fingerprint`: {e}"))?
+        .unwrap_or_default();
+
     // One row per theta level-block level (ferx-r #370), with its fitted value
     // (#430); zero rows for a model with no level block.
     let theta_levels =
@@ -4009,6 +4025,12 @@ fn fit_result_to_list(
         // recorded none. `ferx_sir()` / `ferx_covariance()` hand it back
         // (ferx-r #512).
         iov_occasion = result.iov_occasion.as_ref().map(iov_occasion_to_r).unwrap_or_default(),
+        // How the fit read its data and what it read (ferx-core #1685), as
+        // opaque JSON: R compares neither, it hands both back so a post-hoc
+        // step re-reads the fit's rows and the engine verifies them (ferx-r
+        // #462).
+        reader_settings = reader_settings_json,
+        population_fingerprint = population_fingerprint_json,
         uses_sde = result.uses_sde,
         saem_n_subjects_hmc = result.saem_n_subjects_hmc.map(|n| n as i32),
         dw_statistic = result.dw_statistic,
@@ -4895,6 +4917,10 @@ struct FitSkeletonInputs<'a> {
     subject_ids: &'a [String],
     /// `fit$iov_occasion`; "" when the fit carries none.
     iov_occasion: &'a str,
+    /// `fit$reader_settings` / `fit$population_fingerprint` as JSON; "" when
+    /// the fit carries none (ferx-r #462).
+    reader_settings: &'a str,
+    population_fingerprint: &'a str,
 }
 
 /// An IOV occasion rule in the spelling `ferx_fit(settings = list(iov_occasion =
@@ -5045,12 +5071,23 @@ fn fit_skeleton(
         restored_from_checkpoint: false,
         // ferx-core #1767 / #1805: no record of the settings the fit's SIR or its
         // estimating stage ran under, so `run_sir` / `run_covariance` resolve them
-        // from the options R passes, as before. #1776: no reader settings or
-        // population fingerprint; the steps re-read `data_path` as they did.
+        // from the options R passes, as before.
         sir_settings: None,
         scoring_settings: None,
-        reader_settings: None,
-        population_fingerprint: None,
+        // ferx-core #1776: the reader settings the fit read `data_path` with,
+        // and the fingerprint of what it read, so the steps re-read the fit's
+        // own rows and the engine verifies them (ferx-r #462). A fit that
+        // records neither takes the engine's unverified re-read with the model
+        // file's selection; the R entry points refuse that case when the fit's
+        // exclusions show a selection the file does not state.
+        reader_settings: (!x.reader_settings.is_empty())
+            .then(|| serde_json::from_str(x.reader_settings))
+            .transpose()
+            .map_err(|e| format!("{entry_point}: `fit$reader_settings`: {e}"))?,
+        population_fingerprint: (!x.population_fingerprint.is_empty())
+            .then(|| serde_json::from_str(x.population_fingerprint))
+            .transpose()
+            .map_err(|e| format!("{entry_point}: `fit$population_fingerprint`: {e}"))?,
         // ferx-core #1783: the rule the fit derived its occasions with (ferx-r #512).
         iov_occasion,
         // ferx-core #1668: the bindings the model was compiled from, as fit() copies them.
@@ -5285,6 +5322,10 @@ fn fit_skeleton(
 ///   (ferx-r #468); their length is the subject count.
 /// @param iov_occasion `fit$iov_occasion`, the IOV occasion rule the fit ran
 ///   with (ferx-r #512); "" when the fit records none.
+/// @param reader_settings `fit$reader_settings`, the reader settings the fit
+///   read `data_path` with, as JSON (ferx-r #462); "" when the fit records none.
+/// @param population_fingerprint `fit$population_fingerprint`, the engine's
+///   fingerprint of the population the fit read, as JSON; "" when none.
 /// @param sir_samples Number of proposal samples (M).
 /// @param sir_resamples Number of resamples (m); must be <= M.
 /// @param sir_seed Random seed; pass -1 for the engine default.
@@ -5318,6 +5359,8 @@ fn ferx_rust_sir(
     eta_hats_flat: Vec<f64>,
     subject_ids: Vec<String>,
     iov_occasion: &str,
+    reader_settings: &str,
+    population_fingerprint: &str,
     sir_samples: i32,
     sir_resamples: i32,
     sir_seed: i32,
@@ -5371,6 +5414,8 @@ fn ferx_rust_sir(
             eta_hats_flat: &eta_hats_flat,
             subject_ids: &subject_ids,
             iov_occasion,
+            reader_settings,
+            population_fingerprint,
         };
         let fit = fit_skeleton("ferx_sir", model, &inputs, Some(cov_mat))?;
 
@@ -5481,6 +5526,10 @@ fn ferx_rust_sir(
 ///   (ferx-r #468); their length is the subject count.
 /// @param iov_occasion `fit$iov_occasion`, the IOV occasion rule the fit ran
 ///   with (ferx-r #512); "" when the fit records none.
+/// @param reader_settings `fit$reader_settings`, the reader settings the fit
+///   read `data_path` with, as JSON (ferx-r #462); "" when the fit records none.
+/// @param population_fingerprint `fit$population_fingerprint`, the engine's
+///   fingerprint of the population the fit read, as JSON; "" when none.
 /// @param covariance_method Covariance estimator: "r"/"hessian", "s"/"cross_product", or "rsr"/"sandwich".
 /// @param mu_referencing TRUE to use mu-referencing for the inner-loop warm restart.
 /// @param verbose When TRUE, the engine prints progress to stderr.
@@ -5507,6 +5556,8 @@ fn ferx_rust_covariance(
     eta_hats_flat: Vec<f64>,
     subject_ids: Vec<String>,
     iov_occasion: &str,
+    reader_settings: &str,
+    population_fingerprint: &str,
     covariance_method: &str,
     mu_referencing: bool,
     verbose: bool,
@@ -5554,6 +5605,8 @@ fn ferx_rust_covariance(
             eta_hats_flat: &eta_hats_flat,
             subject_ids: &subject_ids,
             iov_occasion,
+            reader_settings,
+            population_fingerprint,
         };
         let fit = fit_skeleton("ferx_covariance", model, &inputs, None)?;
 
@@ -5620,6 +5673,104 @@ fn ferx_rust_covariance(
             warnings = new_fit.warnings.clone()
         )
         .into())
+    })
+}
+
+/// The reader settings a fit was read with that its model file does not state
+/// (ferx-r #462): the data-selection clauses its exclusions show as fired, and
+/// a call-time `iov_column`.
+///
+/// A fit made before fits recorded their reader settings is re-read by
+/// `ferx_covariance()` / `ferx_sir()` / `ferx_calc_npde()` with the model
+/// file's reader settings only, so a selection passed through `ferx_fit(
+/// ignore =, accept =, ignore_ids =)`, or an `iov_column` passed through
+/// `settings =`, is silently lost. The fit's exclusion record names every clause
+/// that removed a row, in the reader's own `"ignore: <source>"` / `"accept:
+/// <source>"` / `"ignore_subjects: <ID>"` spelling; the file's clauses are
+/// labelled through the same parse (`FilterClause::parse`), so spacing and
+/// quoting cannot make a stated clause look unstated. An `iov_column` that
+/// differs from the file's (case-insensitively, as the reader matches columns)
+/// is returned as `"iov_column: <column>"`.
+///
+/// The file is read once and checked against `model_hash` (non-empty) by
+/// `read_fit_model`, so an edited, unreadable or unparseable file is refused
+/// here with core's own text: `ferx_calc_npde()`, which has no hash check of its
+/// own, must not run the comparison against the wrong file (ferx-r #526 review
+/// 1, 9). A `model =` override passes `""`: there is no recorded hash for it.
+///
+/// @param entry_point The R entry point, opening every refusal.
+/// @param model_path The model file the step reads.
+/// @param model_hash `fit$model_hash` for the fit's own file; "" for none.
+/// @param fired_ignore `fit$exclusions$fired_ignore`.
+/// @param fired_accept `fit$exclusions$fired_accept`.
+/// @param call_iov_column `fit$call_settings$iov_column`; "" when not passed.
+/// @return Character vector of the settings the file does not state.
+/// @export
+#[extendr]
+fn ferx_rust_unstated_selection(
+    entry_point: &str,
+    model_path: &str,
+    model_hash: &str,
+    fired_ignore: Vec<String>,
+    fired_accept: Vec<String>,
+    call_iov_column: &str,
+) -> Vec<String> {
+    entry(move || {
+        let source = read_fit_model(entry_point, model_path, model_hash)?;
+        let opts = &source.parsed.fit_options;
+        let labels = |prefix: &str, exprs: &[String]| -> Vec<String> {
+            exprs
+                .iter()
+                .filter_map(|e| ferx_core::io::filter_expr::FilterClause::parse(e).ok())
+                .map(|c| format!("{prefix}: {}", c.source))
+                .collect()
+        };
+        let mut stated = labels("ignore", &opts.ignore_exprs);
+        stated.extend(labels("accept", &opts.accept_exprs));
+        // Stored bare, and matched by the reader verbatim against the data's ID.
+        stated.extend(opts.ignore_subjects.iter().map(|id| format!("ignore_subjects: {id}")));
+        let mut unstated: Vec<String> = fired_ignore
+            .into_iter()
+            .chain(fired_accept)
+            .filter(|f| !stated.contains(f))
+            .collect();
+        let file_iov = opts.iov_column.as_deref();
+        if !call_iov_column.is_empty()
+            && !file_iov.is_some_and(|c| c.eq_ignore_ascii_case(call_iov_column))
+        {
+            unstated.push(format!("iov_column: {call_iov_column}"));
+        }
+        Ok(unstated)
+    })
+}
+
+/// A JSON-carried fit field (`fit$reader_settings`, `fit$population_fingerprint`)
+/// in the engine's own spelling: read into its engine type and written back by
+/// serde. `ferx_load_fit()` re-serialises the field from the parsed wire, which
+/// spells numbers its own way (`[0, 1]` for serde's `[0.0, 1.0]`); this makes
+/// the loaded string the one the fit carried (ferx-r #526 review 2). A field
+/// that is not the type is refused by name.
+///
+/// @param field `"reader_settings"` or `"population_fingerprint"`.
+/// @param json The field as JSON.
+/// @return The field as the engine writes it.
+/// @export
+#[extendr]
+fn ferx_rust_fit_json_canonical(field: &str, json: &str) -> String {
+    entry(move || {
+        let bad = |e: serde_json::Error| format!("`fit${field}`: {e}");
+        match field {
+            "reader_settings" => {
+                let v: ferx_core::api::ReaderSettings = serde_json::from_str(json).map_err(bad)?;
+                serde_json::to_string(&v).map_err(bad)
+            }
+            "population_fingerprint" => {
+                let v: ferx_core::types::PopulationFingerprint =
+                    serde_json::from_str(json).map_err(bad)?;
+                serde_json::to_string(&v).map_err(bad)
+            }
+            _ => Err(format!("unknown JSON fit field `{field}`")),
+        }
     })
 }
 
@@ -10226,6 +10377,8 @@ extendr_module! {
     fn ferx_rust_npde_from_fit;
     fn ferx_rust_sir;
     fn ferx_rust_covariance;
+    fn ferx_rust_unstated_selection;
+    fn ferx_rust_fit_json_canonical;
     fn ferx_rust_take_engine_diagnostic;
     fn ferx_rust_autodiff_enabled;
     fn ferx_rust_test_panic;

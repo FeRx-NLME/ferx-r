@@ -28,6 +28,16 @@
 #' fit whose parameters do not match the model, such as a `kappa` model whose
 #' fit carries no `omega_iov`).
 #'
+#' ## Data selection
+#'
+#' The data are re-read with the selection the fit was made with, recorded as
+#' `fit$reader_settings`: a `ferx_fit(ignore =, accept =, ignore_ids =)`
+#' selection applies as well as the model file's `[data_selection]`, and the
+#' engine checks the rows it reads against `fit$population_fingerprint`. A fit
+#' made before these were recorded is refused when its `fit$exclusions` show a
+#' clause, or its `fit$call_settings` an `iov_column`, that the model file does
+#' not state, rather than scored on other data.
+#'
 #' ## Integrity check
 #'
 #' Like [ferx_sir()], `ferx_covariance()` re-reads the model and data files
@@ -194,6 +204,11 @@ ferx_covariance <- function(fit,
   iov_args <- .ferx_omega_iov_args(fit)
 
   binding_args <- .ferx_fit_binding_args(fit)
+  reader_args <- .ferx_fit_reader_args(fit)
+  .ferx_refuse_unrecorded_selection(
+    fit, "ferx_covariance",
+    "Refit with `ferx_fit(..., covariance = TRUE)`, or refit and call ferx_covariance() on the new fit."
+  )
   # A refusal reaches the caller as `ferx_engine_error` with ferx-core's code
   # when the engine gave it one (#498); see `.ferx_engine_call()`.
   raw <- .ferx_engine_call(ferx_rust_covariance(
@@ -217,6 +232,11 @@ ferx_covariance <- function(fit,
     # engine falls back to the model file's and refuses a rule passed only
     # through `settings =` (#512).
     iov_occasion = as.character(fit$iov_occasion %||% ""),
+    # The reader settings the fit read its data with and the fingerprint of
+    # what it read: the engine re-reads the fit's own rows and verifies them
+    # (#462).
+    reader_settings = reader_args$reader_settings,
+    population_fingerprint = reader_args$population_fingerprint,
     covariance_method = cov_method,
     mu_referencing = isTRUE(mu_referencing),
     verbose = isTRUE(verbose),

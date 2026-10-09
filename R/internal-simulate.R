@@ -120,6 +120,112 @@ validate_fit_for_params <- function(fit) {
   as.character(ids)
 }
 
+# The fit's reader settings and population fingerprint (#462), as the JSON
+# strings the glue reads back; "" for a fit that records neither. The one
+# source of these arguments for `ferx_sir()` and `ferx_covariance()`;
+# `ferx_calc_npde()` passes the settings alone (the engine cannot verify a
+# fingerprint outside its own post-hoc steps).
+.ferx_fit_reader_args <- function(fit) {
+  list(
+    reader_settings = as.character(fit$reader_settings %||% ""),
+    population_fingerprint = as.character(fit$population_fingerprint %||% "")
+  )
+}
+
+# Refuse a post-hoc step on a fit that records no reader settings when it was
+# read with settings its model file does not state (#462 / #416).
+#
+# A fit made before `fit$reader_settings` existed is re-read with the model
+# file's reader settings only, so a selection passed through `ferx_fit(ignore =,
+# accept =, ignore_ids =)`, or an `iov_column` passed through `settings =`,
+# would be silently lost and the step would score other data than the fit.
+# `fit$exclusions` names every clause that removed a row and
+# `fit$call_settings` the call's `iov_column`; the glue subtracts what the
+# model file states, labelled through the engine's own parse. A fit with no
+# record of either shows nothing to check and runs as before.
+#
+# `model_path` / `model_hash` are the file the step reads and the hash it must
+# have: the fit's own (`fit$model_path`, `fit$model_hash`), or a `model =`
+# override with no hash to check. The glue reads that file once and refuses an
+# edited, unreadable or unparseable one with core's own text, so the comparison
+# is never made against the wrong file - `ferx_calc_npde()` has no hash check of
+# its own to say so (#526 review 1). `data` names a `data =` override, which
+# cannot be checked against the fit's selection from here. `remedy` is the entry
+# point's own way to get the step from a fresh fit.
+.ferx_refuse_unrecorded_selection <- function(fit, caller, remedy,
+                                              model_path = fit$model_path,
+                                              model_hash = fit$model_hash,
+                                              data = NULL) {
+  if (!is.null(fit$reader_settings)) {
+    return(invisible(NULL))
+  }
+  fired_ignore <- as.character(fit$exclusions$fired_ignore %||% character())
+  fired_accept <- as.character(fit$exclusions$fired_accept %||% character())
+  call_iov <- fit$call_settings$iov_column
+  call_iov <- if (is.character(call_iov) && length(call_iov) == 1L && !is.na(call_iov)) {
+    call_iov
+  } else {
+    ""
+  }
+  if (length(fired_ignore) + length(fired_accept) == 0L && !nzchar(call_iov)) {
+    return(invisible(NULL))
+  }
+  if (is.null(model_path) || is.na(model_path) || !nzchar(model_path)) {
+    return(invisible(NULL))
+  }
+  model_path <- normalizePath(model_path, mustWork = FALSE)
+  unstated <- .ferx_engine_call(
+    ferx_rust_unstated_selection(
+      entry_point = caller,
+      model_path = model_path,
+      model_hash = .ferx_hash_arg(model_hash),
+      fired_ignore = fired_ignore,
+      fired_accept = fired_accept,
+      call_iov_column = call_iov
+    ),
+    model_path, data %||% fit$data_path
+  )
+  if (length(unstated) == 0L) {
+    return(invisible(NULL))
+  }
+  subject_prefix <- "ignore_subjects: "
+  iov_prefix <- "iov_column: "
+  is_subject <- startsWith(unstated, subject_prefix)
+  is_iov <- startsWith(unstated, iov_prefix)
+  is_clause <- !is_subject & !is_iov
+  parts <- character()
+  if (any(is_clause)) {
+    parts <- c(parts, paste0("`", unstated[is_clause], "`"))
+  }
+  if (any(is_subject)) {
+    ids <- substring(unstated[is_subject], nchar(subject_prefix) + 1L)
+    parts <- c(parts, paste0(
+      "subject(s) ", paste(ids, collapse = ", "),
+      " (from `ignore_ids` / `ignore_subjects`)"
+    ))
+  }
+  if (any(is_iov)) {
+    col <- substring(unstated[is_iov], nchar(iov_prefix) + 1L)
+    parts <- c(parts, paste0("`settings = list(iov_column = \"", col, "\")`"))
+  }
+  data_note <- if (!is.null(data)) {
+    paste0(
+      " `data = \"", data, "\"` cannot be checked against the fit's selection ",
+      "from here either."
+    )
+  } else {
+    ""
+  }
+  stop(
+    caller, ": this fit predates the record of the data selection it was ",
+    "read with, and it was read with reader settings its model file does not ",
+    "state: ", paste(parts, collapse = "; "), ". Re-reading the data with the ",
+    "model file's settings only would not reproduce the data the fit was ",
+    "scored on.", data_note, " ", remedy,
+    call. = FALSE
+  )
+}
+
 # The one constructor of `fit$theta_levels` (#370), shared by `ferx_fit()` and
 # `ferx_load_fit()` so a fresh fit and a reloaded one are `identical()`. Takes
 # the columns as plain vectors; a NULL column reads as zero rows. `value` (#430)

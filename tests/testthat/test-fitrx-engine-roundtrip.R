@@ -223,3 +223,27 @@ test_that("`ferx summary` loads a bundle written by ferx_save_fit()", {
   expect_false(any(grepl("expected a sequence", out, fixed = TRUE)),
                info = paste(out, collapse = "\n"))
 })
+
+test_that("[priors] from_fit reads a bundle carrying reader settings and a fingerprint (#462)", {
+  # The two keys are ferx-core's own `FitWire` slots, so the engine
+  # deserialises them: written as a quoted string instead of the object, the
+  # bundle is refused here.
+  fit <- rs_fit(ignore = rs_ignore)
+  expect_false(is.null(fit$reader_settings))
+  expect_false(is.null(fit$population_fingerprint))
+  ex <- ferx_example("warfarin")
+  bundle <- withr::local_tempfile(fileext = ".fitrx")
+  ferx_save_fit(fit, bundle)
+  model <- withr::local_tempfile(fileext = ".ferx")
+  writeLines(
+    c(readLines(ex$model), "",
+      "[priors]",
+      paste0("  from_fit = ", fitrx_block_path(bundle))),
+    model
+  )
+  res <- ferx_model_validate(model, ex$data)
+  expect_true(
+    isTRUE(res$ok),
+    info = paste(utils::capture.output(print(res$diagnostics)), collapse = "\n")
+  )
+})

@@ -732,11 +732,12 @@ cs_recoded <- function(to, env = parent.frame()) {
 # raised. SIR and the covariance step re-read `fit$data_path`; a fit without a
 # data hash is how they reach other data. Only the missing-hash warning that
 # this causes is muffled; any other warning still reaches the test.
-cs_from_fit_paths <- function(data) {
+cs_from_fit_paths <- function(data, drop_fingerprint = FALSE) {
   b <- cs_categorical()
   fit <- cs_with_cov(b$fit)
   fit$data_path <- data
   fit$data_hash <- NA_character_
+  if (drop_fingerprint) fit$population_fingerprint <- NULL
   grab <- function(expr) {
     tryCatch(
       withCallingHandlers(expr, warning = function(w) {
@@ -854,8 +855,22 @@ test_that("C13f: a coded record is not attached to a condition whose text is not
   expect_identical(conditionMessage(e), "some other refusal")
 })
 
+# Covariance and SIR reach the twin through `fit$data_path`, with the hash
+# cleared: other data than the fit's, which the engine now catches by the
+# fit's population fingerprint (#462). Without the fingerprint they run on it
+# again, so the level check this control exists for is still exercised.
 test_that("C13b: the same paths run on the twin recoded to the reference level", {
   got <- cs_from_fit_paths(cs_recoded(2))
+  for (k in c("predict", "simulate", "npde")) {
+    expect_false(inherits(got[[k]], "condition"), info = k)
+    expect_true(all(is.finite(unlist(got[[k]]))), info = k)
+  }
+  for (k in c("covariance", "sir")) {
+    expect_true(inherits(got[[k]], "error"), info = k)
+    msg <- if (inherits(got[[k]], "condition")) conditionMessage(got[[k]]) else ""
+    expect_match(msg, "is not the one the fit was given", fixed = TRUE, info = k)
+  }
+  got <- cs_from_fit_paths(cs_recoded(2), drop_fingerprint = TRUE)
   for (k in names(got)) {
     expect_false(inherits(got[[k]], "condition"), info = k)
     expect_true(all(is.finite(unlist(got[[k]]))), info = k)

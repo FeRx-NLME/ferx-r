@@ -1580,3 +1580,70 @@ test_that("every ID column survives a save / load round-trip verbatim (synthetic
   expect_identical(loaded$ebe_etas$ETA_CL, fake$ebe_etas$ETA_CL)
   expect_identical(loaded$covtab$WT, fake$covtab$WT)
 })
+
+# --- #462: the fit's reader settings and population fingerprint ------------
+
+test_that("reader settings and fingerprint survive a .fitrx round trip verbatim (#462)", {
+  fit <- rs_fit(ignore = rs_ignore)
+  skip_if(is.null(fit$cov_matrix), "covariance step did not converge - skipping")
+  for (include_data in c(FALSE, TRUE)) {
+    path <- withr::local_tempfile(fileext = ".fitrx")
+    ferx_save_fit(fit, path, include_data = include_data)
+    loaded <- ferx_load_fit(path)
+    info <- paste("include_data:", include_data)
+    expect_identical(loaded$reader_settings, fit$reader_settings, info = info)
+    expect_identical(loaded$population_fingerprint, fit$population_fingerprint,
+                     info = info)
+    # Written as the objects they are, under the engine's own keys.
+    staging <- withr::local_tempdir()
+    utils::unzip(path, exdir = staging)
+    wire <- jsonlite::read_json(file.path(staging, "fit.json"),
+                                simplifyVector = FALSE)
+    expect_type(wire$reader_settings, "list")
+    expect_type(wire$population_fingerprint, "list")
+    out <- suppressWarnings(ferx_covariance(loaded))
+    expect_lt(rs_rel(out$se_theta, fit$se_theta), 1e-8)
+  }
+})
+
+test_that("reader settings with categorical levels survive a .fitrx round trip verbatim (#526)", {
+  # serde writes the declared levels as `[0.0, 1.0]`; jsonlite reads them back
+  # as integers and would write `[0, 1]`. The loader hands the field back to the
+  # engine to spell, so the string is the fit's own.
+  ex <- ferx_example("warfarin")
+  rows <- utils::read.csv(ex$data)
+  rows$SEX <- rows$ID %% 2
+  data <- withr::local_tempfile(fileext = ".csv")
+  utils::write.csv(rows, data, row.names = FALSE, quote = FALSE, na = ".")
+  model <- withr::local_tempfile(fileext = ".ferx")
+  writeLines(c(readLines(ex$model), "", "[covariates]",
+               "  SEX categorical(levels = [0, 1])"), model)
+  fit <- suppressWarnings(ferx_fit(model, data, method = "focei", verbose = FALSE,
+                                   covariance = FALSE, settings = list(maxiter = 3L)))
+  expect_match(fit$reader_settings, "[0.0,1.0]", fixed = TRUE)
+  for (include_data in c(FALSE, TRUE)) {
+    path <- withr::local_tempfile(fileext = ".fitrx")
+    ferx_save_fit(fit, path, include_data = include_data)
+    loaded <- ferx_load_fit(path)
+    info <- paste("include_data:", include_data)
+    expect_identical(loaded$reader_settings, fit$reader_settings, info = info)
+    expect_identical(loaded$population_fingerprint, fit$population_fingerprint,
+                     info = info)
+  }
+})
+
+test_that("ferx_save_fit refuses reader settings that are not JSON, by name (#526)", {
+  fit <- rs_fit(ignore = rs_ignore)
+  for (bad in list("{not json", NA_character_, c("{}", "{}"))) {
+    edited <- fit
+    edited$reader_settings <- bad
+    path <- withr::local_tempfile(fileext = ".fitrx")
+    expect_error(ferx_save_fit(edited, path), "`fit$reader_settings` is not the engine's JSON",
+                 fixed = TRUE)
+  }
+  edited <- fit
+  edited$population_fingerprint <- "{not json"
+  path <- withr::local_tempfile(fileext = ".fitrx")
+  expect_error(ferx_save_fit(edited, path),
+               "`fit$population_fingerprint` is not the engine's JSON", fixed = TRUE)
+})
