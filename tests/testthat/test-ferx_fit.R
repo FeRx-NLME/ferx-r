@@ -895,6 +895,35 @@ test_that("aliased model-file keys are matched (gradient_method → gradient)", 
     "gradient_method = ad.*overrides it with `fd`"
   )
 })
+test_that("gradient = \"auto\" overrides a model file's `gradient = fd`", {
+  # The parser keeps a file's `gradient = fd` in its fit options, not on the
+  # compiled model. Up to ferx-core #1613 fit() read only the model's flag, so
+  # the glue had to copy the options' method onto the model. #1613 made fit()
+  # apply FitOptions::gradient_method itself, and the copy is gone. The file's
+  # fd half of this test is what fails if a pin without #1613 meets the
+  # copy-free glue. The "auto" half checks that the call still overrides the
+  # file.
+  skip_on_cran()
+  ex  <- ferx_example("warfarin")
+  src <- readLines(ex$model, warn = FALSE)
+  fd_model <- withr::local_tempfile(fileext = ".ferx")
+  writeLines(append(src, "  gradient = fd", after = grep("^\\[fit_options\\]", src)),
+             fd_model)
+
+  from_file <- suppressWarnings(
+    ferx_fit(fd_model, ex$data, covariance = FALSE, verbose = FALSE)
+  )
+  expect_identical(from_file$gradient_method_inner, "finite differences")
+
+  overridden <- NULL
+  w <- testthat::capture_warnings(
+    overridden <- ferx_fit(fd_model, ex$data, gradient = "auto",
+                           covariance = FALSE, verbose = FALSE)
+  )
+  expect_true(any(grepl("gradient = fd.*overrides it with `auto`", w)))
+  expect_false(identical(overridden$gradient_method_inner, "finite differences"))
+  expect_false(identical(overridden$gradient_method_outer, "N/A"))
+})
 test_that("file `threads = auto` and an explicit 0 do not conflict (#505)", {
   # Both mean the engine default; the other spelling pair must still warn.
   expect_silent(

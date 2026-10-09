@@ -589,7 +589,10 @@ fn ferx_rust_fit(
                 opts.gradient_method = ferx_core::GradientMethod::Auto;
             }
         }
-        parsed.model.gradient_method = opts.gradient_method;
+        // No copy onto `parsed.model.gradient_method`: since ferx-core #1613, `fit()`
+        // applies `opts.gradient_method` itself. The parser puts a file's `gradient = fd`
+        // in `fit_options` only, so the model's own flag stays `Auto` and an "auto" here
+        // reaches the fit unopposed.
 
         // Install a cancellation token so Ctrl-C on the R console aborts the fit.
         let cancel = CancelFlag::new();

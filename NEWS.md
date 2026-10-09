@@ -22,6 +22,49 @@
   exactly needs updating
   ([#430](https://github.com/FeRx-NLME/ferx-r/issues/430)).
 
+- **ferx now builds against ferx-core `160cc9a3`**, up from `826d3bb9`.
+  These engine changes reach R:
+
+  - **`ferx_calc_npde()` and in-fit NPDE draw `block_sigma` residuals at the
+    fitted correlation**, pairing correlated rows jointly
+    ([ferx-core #1733](https://github.com/FeRx-NLME/ferx-core/issues/1733)).
+    They used the correlation declared in the model file, so a fit that
+    estimated rho got the same NPDE/NPD as at its starting value.
+  - **`ferx_simulate_with_uncertainty()` reports skipped draws as one
+    `W_UNCERTAINTY_DRAWS_SKIPPED` warning** with the count and the draw
+    indices, and refuses (`E_TRANSIT_FLIP_FLOP` / `E_IG_FLIP_FLOP`) when the
+    fit's own estimate is in a twin-less transit or inverse-Gaussian model's
+    flip-flop regime, or when every draw is skipped
+    ([ferx-core #1485](https://github.com/FeRx-NLME/ferx-core/issues/1485)).
+    Both used to return quietly thinned or empty results.
+  - **A dataset with nothing to score is refused** with
+    `E_NO_SCORED_OBSERVATIONS`, instead of fitting to OFV 0 at the initial
+    estimates: every row a dose, every `DV` missing, or every observation
+    removed by `[data_selection]`
+    ([ferx-core #1491](https://github.com/FeRx-NLME/ferx-core/issues/1491)).
+    `ferx_fit(gradient = "fd")` is applied by the engine itself now as well
+    ([ferx-core #1613](https://github.com/FeRx-NLME/ferx-core/issues/1613));
+    results from R are unchanged.
+  - **A subject with only TTE, binary, categorical or Markov records reads
+    its own level of a `theta NAME[COL]` block**, not the first level
+    ([ferx-core #1797](https://github.com/FeRx-NLME/ferx-core/issues/1797)).
+    A fit made before this on such data has a different population
+    fingerprint, so `ferx_sir()` and `ferx_covariance()` refuse it; re-fit.
+  - **In-fit SIR on Laplace / AGQ fits scores each draw at the estimation
+    stage's settings**, about four times slower on warfarin, and `ferx_sir()`
+    on a fit without an SIR record uses the fit's scoring settings rather
+    than the defaults
+    ([ferx-core #1806](https://github.com/FeRx-NLME/ferx-core/issues/1806)).
+  - **Simulating from a fit whose IOV (kappa) matrix does not match the
+    model is refused** with `E_PARAM_SHAPE`, instead of falling back to the
+    model's initial kappa
+    ([ferx-core #1789](https://github.com/FeRx-NLME/ferx-core/issues/1789)).
+  - **A level block whose random effect shares an expression with a factor
+    that varies within a subject** (for example `(TVE0 + PLACEBO + ETA_E0) *
+    (1 + 0.1 * OCC)`) is refused as unidentified, as it already was without
+    the factor
+    ([ferx-core #1712](https://github.com/FeRx-NLME/ferx-core/issues/1712)).
+
 - **ferx now builds against ferx-core `826d3bb9`**, up from `e2f9f641`.
   These engine changes reach R:
 

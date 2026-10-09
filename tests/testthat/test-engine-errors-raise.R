@@ -231,6 +231,43 @@ test_that("a refusal the engine raises with a code carries it without re-validat
   expect_coded_refusal(probe, "infusion into compartment 0", "E_DOSE_CMT_NOT_INFUSABLE")
 })
 
+test_that("a population with nothing to score is refused with its code", {
+  # ferx-core #1491: such data used to fit to OFV 0 at the initial estimates.
+  # The engine now refuses it once for the population, and the code has to
+  # reach R through the same classed condition.
+  ex <- ferx_example("warfarin")
+  d  <- example_rows("warfarin")
+
+  missing_dv <- d
+  missing_dv$DV[missing_dv$EVID == 0] <- NA
+  probe <- engine_error_probe(
+    ferx_fit(ex$model, write_nonmem_csv(missing_dv), verbose = FALSE)
+  )
+  expect_coded_refusal(probe, "nothing the likelihood can score",
+                       "E_NO_SCORED_OBSERVATIONS")
+
+  probe <- engine_error_probe(
+    ferx_fit(ex$model, write_nonmem_csv(d[d$EVID == 1, ]), verbose = FALSE)
+  )
+  expect_coded_refusal(probe, "nothing the likelihood can score",
+                       "E_NO_SCORED_OBSERVATIONS")
+})
+
+test_that("a selection that removes every observation is refused", {
+  # The same refusal, reached through `ignore =`. The engine names the
+  # selection and its count. The code does not reach R yet: the fallback
+  # re-validates the data without the call's selection, so it sees nothing
+  # wrong (ferx-r #521, second half).
+  ex <- ferx_example("warfarin")
+  probe <- engine_error_probe(
+    ferx_fit(ex$model, ex$data, verbose = FALSE, ignore = "EVID == 0")
+  )
+  expect_refusal(probe, "nothing the likelihood can score")
+  expect_match(conditionMessage(probe$cond),
+               "`[data_selection]` removed 110 row(s) classed as observations",
+               fixed = TRUE)
+})
+
 # -- One handler for every entry point ----------------------------------------
 
 test_that("#385's script: a loop over candidate models stops on the refused one", {
