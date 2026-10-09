@@ -148,6 +148,133 @@ test_that("S4: ferx_sir(fit) with no arguments repeats the in-fit SIR", {
   }
 })
 
+test_that("S3: the scoring record survives ferx_save_fit() / ferx_load_fit()", {
+  for (row in ps_cov_rows) {
+    fit <- ps_cov_fit(row)
+    loaded <- ps_round_trip(fit)
+    expect_identical(loaded$scoring_settings, fit$scoring_settings, info = row$key)
+    # A bundle has no key for the packed estimate (ferx-core#1815), so the
+    # loaded fit matches the in-memory one without it, not the in-fit step.
+    expect_null(loaded$packed_estimate)
+    in_memory <- fit
+    in_memory$packed_estimate <- NULL
+    cov <- ferx_covariance(loaded)
+    expect_identical(cov$cov_matrix, ferx_covariance(in_memory)$cov_matrix,
+                     info = row$key)
+    # Premise: the record still moves the loaded fit's covariance.
+    no_record <- loaded
+    no_record$scoring_settings <- NULL
+    expect_false(identical(ferx_covariance(no_record)$cov_matrix, cov$cov_matrix),
+                 info = row$key)
+    # The reload residual (plan section 0a: 1.3e-7 relative on warfarin_iov).
+    expect_equal(cov$se_theta, fit$se_theta, tolerance = 1e-6, info = row$key)
+  }
+})
+
+ps_bundle_wire <- function(path) {
+  con <- unz(path, "fit.json")
+  on.exit(close(con))
+  jsonlite::parse_json(paste(readLines(con, warn = FALSE), collapse = "\n"))
+}
+
+test_that("S5: the SIR record survives the round trip, so ferx_sir(loaded) repeats the in-fit SIR", {
+  for (row in ps_sir_rows) {
+    fit <- ps_sir_fit(row)
+    path <- ps_scratch(".fitrx")
+    unlink(path)
+    ferx_save_fit(fit, path)
+    # ferx-core refuses a bundle whose top-level `sir_seed` is not the record's.
+    wire <- ps_bundle_wire(path)
+    expect_identical(wire$sir_seed, 1L, info = row$key)
+    expect_identical(wire$sir$settings$seed, 1L, info = row$key)
+
+    loaded <- ferx_load_fit(path)
+    expect_identical(loaded$sir_settings, fit$sir_settings, info = row$key)
+    expect_identical(loaded$sir_seed_used, 1, info = row$key)
+    expect_identical(ps_sir_fields(ferx_sir(loaded)), ps_sir_fields(fit), info = row$key)
+    # Premise: without the record the loaded fit resamples differently.
+    no_record <- loaded
+    no_record$sir_settings <- NULL
+    expect_false(identical(
+      ps_sir_fields(ferx_sir(no_record, 300L, 100L, sir_seed = 1L)),
+      ps_sir_fields(fit)
+    ), info = row$key)
+  }
+})
+
+test_that("S10: the .fitrx spelling of both records is ferx-core's", {
+  to <- function(record, kind) ferx:::.fitrx_settings_to_wire(stats::setNames(list(record), kind), kind)
+  from <- ferx:::.fitrx_settings_from_wire
+  json <- function(w) {
+    as.character(jsonlite::toJSON(w, auto_unbox = TRUE, null = "null", na = "null",
+                                  digits = I(17)))
+  }
+
+  sc <- ferx:::.ferx_default_settings("scoring_settings")
+  sc$inner_optimizer <- "lbfgs"
+  sc$ode_method <- "rodas5p"
+  sc$inner_tol <- 1e-3
+  sc$ode_reltol <- 0.1 + 0.2
+  sc$ode_stiff_abort_after <- NA_integer_
+  w <- to(sc, "scoring_settings")
+  # ferx-core's ScoringSettingsWire keys, enums as their [fit_options] tokens.
+  expect_setequal(names(w), ps_scoring_keys)
+  text <- json(w)
+  expect_match(text, '"inner_optimizer":"lbfgs"', fixed = TRUE)
+  expect_match(text, '"ode_method":"rodas5p"', fixed = TRUE)
+  expect_match(text, '"ode_stiff_abort_after":null', fixed = TRUE)
+  # Back from JSON: doubles exact, NA restored, every field in its fit type.
+  expect_identical(from(jsonlite::parse_json(text), "scoring_settings"), sc)
+
+  sr <- ferx:::.ferx_default_settings("sir_settings")
+  sr[c("samples", "resamples", "seed", "df", "scale", "keep_samples")] <-
+    list(300L, 100L, 4242, 3, "natural", TRUE)
+  sr$scoring <- sc
+  ws <- to(sr, "sir_settings")
+  # SirSettingsWire: the scoring half flattened beside the SIR keys.
+  expect_setequal(names(ws), c("samples", "resamples", "seed", "df", "scale",
+                               "keep_samples", ps_scoring_keys))
+  expect_match(json(ws), '"scale":"natural"', fixed = TRUE)
+  back <- jsonlite::parse_json(json(ws))
+  expect_identical(from(back, "sir_settings"), sr)
+  # A block written between ferx-core #1758 and #426 has no inner_restarts.
+  back$inner_restarts <- NULL
+  expect_identical(from(back, "sir_settings")$scoring$inner_restarts,
+                   sc$inner_restarts)
+})
+
+test_that("S12: a record the engine would refuse is refused by name", {
+  sc <- ferx:::.ferx_default_settings("scoring_settings")
+  save_as <- function(record) {
+    ferx:::.fitrx_settings_to_wire(list(scoring_settings = record), "scoring_settings")
+  }
+  extra <- c(sc, list(inner_maxit = 5L))
+  expect_error(save_as(extra),
+               'ferx_save_fit: `fit$scoring_settings`: unknown key "inner_maxit"',
+               fixed = TRUE)
+  missing <- sc[names(sc) != "n_agq"]
+  expect_error(save_as(missing),
+               'ferx_save_fit: `fit$scoring_settings`: missing key "n_agq"',
+               fixed = TRUE)
+  bad <- sc
+  bad$inner_optimizer <- "newton"
+  expect_error(save_as(bad),
+               "ferx_save_fit: `fit$scoring_settings`: fit option `inner_optimizer`: unknown value `newton`",
+               fixed = TRUE)
+  bad <- sc
+  bad$ode_reltol <- -1
+  expect_error(save_as(bad),
+               "ferx_save_fit: `fit$scoring_settings`: ode_reltol must be a positive finite value, got -1",
+               fixed = TRUE)
+  # The same decoder guards the post-hoc steps: no serde error, no "corrupt".
+  w <- ps_fit("w_default", "warfarin")
+  w$scoring_settings$inner_optimizer <- "newton"
+  err <- tryCatch(ferx_covariance(w), error = conditionMessage)
+  expect_match(err, "ferx_covariance: `fit$scoring_settings`: fit option `inner_optimizer`",
+               fixed = TRUE)
+  expect_no_match(err, "corrupt|serde", ignore.case = TRUE)
+})
+
 test_that("S6: an explicit argument overrides the fit's record, even at its default value", {
   # The engine resolves a record by value, so an explicit default passed as an
   # option would lose to it (plan section 0c); the argument edits the record.

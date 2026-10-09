@@ -505,6 +505,18 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   # The IOV occasion rule, under the key ferx-core writes (#1783, #512); absent
   # when the fit records none, as the engine leaves it.
   wire$iov_occasion <- .fitrx_iov_occasion_to_wire(fit$iov_occasion)
+  # How the fit was scored (#511) and what its SIR ran under (#472), under
+  # ferx-core's keys, so `ferx_covariance()` / `ferx_sir()` on the loaded fit
+  # score as the fit did. Absent when the fit records none. The engine refuses
+  # a bundle whose top-level `sir_seed` differs from `sir.settings.seed`, so the
+  # seed is written beside the record. `packed_estimate` is not written: the
+  # schema has no key for it (ferx-core#1815).
+  wire$scoring_settings <- .fitrx_settings_to_wire(fit, "scoring_settings")
+  sir_settings <- .fitrx_settings_to_wire(fit, "sir_settings")
+  if (!is.null(sir_settings) && !is.null(wire$sir)) {
+    wire$sir$settings <- sir_settings
+    wire$sir_seed <- sir_settings$seed
+  }
   # The reader settings and population fingerprint (#462), under ferx-core's
   # own keys (#1685), so the engine verifies an R bundle and R reads an engine
   # bundle. The fit carries both as the engine's JSON; written verbatim
