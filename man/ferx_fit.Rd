@@ -762,6 +762,7 @@ A named list. Where to find commonly-needed quantities:\tabular{llll}{
    Covariates echoed per observation (via \verb{[output]}) \tab \code{fit$sdtab} \tab one row per observation, LOCF \tab declared in \verb{[output]} \cr
    Raw covariate values for all dataset records \tab \code{fit$covtab} \tab one row per dataset record (doses + obs) \tab model has \verb{[covariates]} block \cr
    ETA / EBE values per subject \tab \code{fit$ebe_etas} \tab one row per subject \tab model declares etas \cr
+   Subject IDs, verbatim \tab \code{fit$subject_ids} \tab one entry per subject \tab always \cr
    Individual PK parameters per subject \tab \code{fit$individual_estimates} \tab one row per subject \tab always \cr
 }
 
@@ -889,6 +890,11 @@ is declared.}
 empirical Bayes estimates: \code{ID} plus one column per eta named
 after the model's eta declarations (e.g. \code{ETA_CL}, \code{ETA_V}).
 \code{NULL} when the model declares no etas.}
+\item{subject_ids}{Character vector of every subject's ID, verbatim from
+the data and in fit order (the rows of \code{ebe_etas}). Present on a
+fit without random effects too, so \code{ferx_sir()} and
+\code{ferx_covariance()} can match such a fit to its data subject by
+subject.}
 \item{individual_estimates}{Data frame with one row per subject containing
 each subject's individual parameter values: \code{ID} plus one column
 per parameter declared in the \code{[individual_parameters]} block

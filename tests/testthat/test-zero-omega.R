@@ -148,3 +148,84 @@ test_that("the estimates table reports theta and sigma but no omega rows", {
   expect_true(all(c("TVCL", "TVV") %in% est$param))
   expect_length(grep("^(ETA|OMEGA)", est$param), 0L)
 })
+
+# --- #550 / #461: a no-eta fit's subject IDs ------------------------------
+#
+# A fit without random effects has no `ebe_etas` rows, and the binary example
+# has no `[individual_parameters]` either, so neither table #468 read IDs from
+# exists. `fit$subject_ids` carries them verbatim; `sdtab$ID` cannot, since it
+# is the engine's number for the ID (a text ID becomes its position).
+
+binary_sir <- function(f) ferx_sir(f, sir_samples = 400L, sir_resamples = 200L,
+                                   sir_seed = 1L)
+fitrx_reload <- function(f) {
+  path <- tempfile(fileext = ".fitrx")
+  ferx_save_fit(f, path)
+  ferx_load_fit(path)
+}
+relabel_text <- function(id) sprintf("PT%03d", 3L * id + 107L)
+
+test_that("a no-eta fit carries every subject's ID verbatim (#550)", {
+  fit <- relabelled_fit("binary_logistic", "text", relabel_text)
+  d <- utils::read.csv(ferx_example("binary_logistic")$data)
+  expect_null(fit$ebe_etas)
+  expect_null(fit$individual_estimates)
+  expect_identical(fit$subject_ids, relabel_text(unique(d$ID)))
+})
+
+test_that("ferx_sir() and ferx_covariance() run on the binary example (#550)", {
+  fit <- relabelled_fit("binary_logistic", "identity", identity)
+  cov <- ferx_covariance(fit)
+  skip_if(is.null(cov$cov_matrix), "covariance step did not converge - skipping")
+  expect_length(cov$se_theta, 3L)
+  expect_true(all(is.finite(cov$se_theta)))
+  sir <- binary_sir(fit)
+  expect_true(is.finite(sir$sir_ess) && sir$sir_ess > 0)
+})
+
+test_that("non-1..n and text IDs give the binary fit's own SIR and SEs (#550, #468)", {
+  base <- relabelled_fit("binary_logistic", "identity", identity)
+  cov_base <- ferx_covariance(base)
+  skip_if(is.null(cov_base$cov_matrix), "covariance step did not converge - skipping")
+  sir_base <- binary_sir(base)
+  for (key in c("gappy", "text")) {
+    relabel <- if (key == "gappy") relabel_gappy else relabel_text
+    f <- relabelled_fit("binary_logistic", key, relabel)
+    expect_identical(ferx_covariance(f)$se_theta, cov_base$se_theta)
+    sir <- binary_sir(f)
+    expect_identical(sir$sir_ess, sir_base$sir_ess)
+    expect_identical(sir$sir_ci_theta, sir_base$sir_ci_theta)
+  }
+})
+
+test_that("a no-eta fit survives a .fitrx round trip, IDs and all (#461, #550)", {
+  fit <- relabelled_fit("binary_logistic", "text", relabel_text)
+  back <- fitrx_reload(fit)
+  expect_identical(back$subject_ids, fit$subject_ids)
+  # Live, "no etas" is a NULL ebe_etas and a 0 x 0 omega; so it is reloaded.
+  expect_null(back$ebe_etas)
+  expect_identical(dim(back$omega), c(0L, 0L))
+  expect_identical(back$sdtab$ID, fit$sdtab$ID)
+  cov <- ferx_covariance(fit)
+  skip_if(is.null(cov$cov_matrix), "covariance step did not converge - skipping")
+  expect_identical(ferx_covariance(back)$se_theta, cov$se_theta)
+  expect_identical(binary_sir(back)$sir_ess, binary_sir(fit)$sir_ess)
+})
+
+test_that("ferx-core reads the R-written bundle of a no-eta fit (#461)", {
+  # Pooled, not binary: a binary fit's sdtab N_OBS is NaN, so its ebes.csv
+  # n_obs is empty and the engine's loader refuses it for that reason alone.
+  fit <- relabelled_fit("one_cpt_iv_pooled", "text", relabel_text)
+  trip <- fitrx_engine_trip(fit)
+  back <- ferx_load_fit(trip$core_path)
+  expect_identical(back$subject_ids, fit$subject_ids)
+  expect_null(back$ebe_etas)
+})
+
+test_that("the pooled example also round-trips (#461)", {
+  fit <- pooled_fit()
+  back <- fitrx_reload(fit)
+  expect_identical(back$subject_ids, fit$subject_ids)
+  expect_identical(dim(back$omega), c(0L, 0L))
+  expect_identical(back$estimates, fit$estimates)
+})

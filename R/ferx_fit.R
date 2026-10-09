@@ -716,6 +716,7 @@
 #'   | Covariates echoed per observation (via `[output]`) | `fit$sdtab` | one row per observation, LOCF | declared in `[output]` |
 #'   | Raw covariate values for all dataset records | `fit$covtab` | one row per dataset record (doses + obs) | model has `[covariates]` block |
 #'   | ETA / EBE values per subject | `fit$ebe_etas` | one row per subject | model declares etas |
+#'   | Subject IDs, verbatim | `fit$subject_ids` | one entry per subject | always |
 #'   | Individual PK parameters per subject | `fit$individual_estimates` | one row per subject | always |
 #'
 #'   Full slot descriptions:
@@ -841,6 +842,11 @@
 #'     empirical Bayes estimates: \code{ID} plus one column per eta named
 #'     after the model's eta declarations (e.g. \code{ETA_CL}, \code{ETA_V}).
 #'     \code{NULL} when the model declares no etas.}
+#'   \item{subject_ids}{Character vector of every subject's ID, verbatim from
+#'     the data and in fit order (the rows of \code{ebe_etas}). Present on a
+#'     fit without random effects too, so \code{ferx_sir()} and
+#'     \code{ferx_covariance()} can match such a fit to its data subject by
+#'     subject.}
 #'   \item{individual_estimates}{Data frame with one row per subject containing
 #'     each subject's individual parameter values: \code{ID} plus one column
 #'     per parameter declared in the \code{[individual_parameters]} block

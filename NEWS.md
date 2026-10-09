@@ -802,6 +802,25 @@
   the declared names, with `THETA<i>` / `OMEGA(i,i)` / `SIGMA(i)` when a
   name is missing, as on the live fit.
 
+- **`ferx_sir()` and `ferx_covariance()` run on a fit without random effects
+  again**, such as the bundled `binary_logistic` example
+  ([#550](https://github.com/FeRx-NLME/ferx-r/issues/550)). Since
+  [#468](https://github.com/FeRx-NLME/ferx-r/issues/468) both read the
+  fit's subject IDs from `fit$ebe_etas` or `fit$individual_estimates`, and a
+  fit with no etas and no `[individual_parameters]` has neither, so both
+  stopped with "the fit carries no subject IDs". Every fit now carries
+  `fit$subject_ids`: each subject's ID verbatim, in fit order, with or
+  without random effects. A fit made before this falls back to one ID per
+  `fit$sdtab` subject block, which is right for numeric IDs.
+
+- **`ferx_load_fit()` loads a fit without random effects**
+  ([#461](https://github.com/FeRx-NLME/ferx-r/issues/461)). It stopped with
+  `'data' must be of a vector type, was 'NULL'`, because the bundle's empty
+  omega came back as `NULL` rather than a 0 x 0 matrix. `ferx_save_fit()`
+  also wrote such a fit's `ebes.csv` with no rows. It now writes one row per
+  subject, as ferx-core does, so ferx-core's loader reads the bundle and
+  `fit$subject_ids` survives the round trip.
+
 - **Subject IDs survive `ferx_save_fit()` / `ferx_load_fit()` as the same
   text** ([#475](https://github.com/FeRx-NLME/ferx-r/issues/475)). An ID
   spelled `NA` came back as a missing value, and an ID with a comma or a
