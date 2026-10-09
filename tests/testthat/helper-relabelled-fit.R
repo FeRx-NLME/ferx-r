@@ -20,7 +20,9 @@ relabelled_fit <- local({
       d <- utils::read.csv(ex$data, stringsAsFactors = FALSE)
       d$ID <- relabel(d$ID)
       path <- tempfile(paste0("relabel_", key, "_"), fileext = ".csv")
-      utils::write.csv(d, path, row.names = FALSE, quote = FALSE)
+      # Text IDs are quoted (`"` doubled), so `Smith, 2019` stays one cell.
+      utils::write.csv(d, path, row.names = FALSE,
+                       quote = if (is.character(d$ID)) match("ID", names(d)) else FALSE)
       cache[[id]] <<- ferx_fit(
         ex$model, path,
         method = "focei", verbose = FALSE,
