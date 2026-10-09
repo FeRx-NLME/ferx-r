@@ -483,6 +483,17 @@
 
 ## New features
 
+- **A `ferx_engine_error` shows the engine's suggestion in its message**, on
+  a `hint: ...` line after the `[CODE]`, the same way for `ferx_fit()` and
+  every other entry point (`ferx_predict()`, `ferx_simulate()`,
+  `ferx_calc_npde()`, `ferx_sir()`, `ferx_covariance()`, ...). The advice
+  used to be only in `$suggestion`, so it never reached the console. A
+  suggestion the engine's text already gives (e.g. "did you mean
+  `[fit_options]`") is not repeated. The engine's text still opens the
+  message and the code stays on its first line, so existing `tryCatch()` /
+  `expect_error()` matches keep working
+  ([#504](https://github.com/FeRx-NLME/ferx-r/issues/504)).
+
 - **`.fitrx` bundles carry theta level layouts both ways between R and
   ferx-core.** `ferx_save_fit()` writes `fit$theta_levels` into ferx-core's
   own `data_bindings.levels` slot of `fit.json`, so the engine reads an R
