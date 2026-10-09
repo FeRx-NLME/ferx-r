@@ -244,11 +244,14 @@ test_that("ferx_calc_npde draws block_sigma residuals at the fitted rho", {
 
   # Up to ferx-core #1733 the NPDE simulation drew every residual at the rho
   # declared in the model file, so these two were identical whatever the fit
-  # said. Same seed, same everything else: only the rho differs.
+  # said. Same seed, same everything else: only the rho differs. The fit drives
+  # ADD_ERR to ~4e-4, so rho moves the residual SD by ~2 % here. At 200 sims no
+  # empirical rank crosses an observation and both builds give identical scores.
+  # At 2000 the new build's scores move, by up to 0.005.
   at_declared <- fit
   at_declared$residual_correlations$rho <- declared_rho
-  npde_fit <- ferx_calc_npde(fit, nsim = 200L, seed = 1L)$sdtab
-  npde_declared <- ferx_calc_npde(at_declared, nsim = 200L, seed = 1L)$sdtab
+  npde_fit <- ferx_calc_npde(fit, nsim = 2000L, seed = 1L)$sdtab
+  npde_declared <- ferx_calc_npde(at_declared, nsim = 2000L, seed = 1L)$sdtab
   expect_true(all(is.finite(npde_fit$NPDE)))
   expect_false(isTRUE(all.equal(npde_fit$NPDE, npde_declared$NPDE)))
   expect_false(isTRUE(all.equal(npde_fit$NPD, npde_declared$NPD)))
