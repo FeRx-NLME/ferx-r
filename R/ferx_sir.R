@@ -25,7 +25,10 @@
 #' each draw was scored with. Every argument left at `NULL` takes the recorded
 #' value, so `ferx_sir(fit)` repeats the fit's SIR: its intervals and effective
 #' sample size are `identical()` to the in-fit ones, also after a
-#' [ferx_save_fit()] / [ferx_load_fit()] round trip. An argument you pass
+#' [ferx_save_fit()] / [ferx_load_fit()] round trip. The exception is a
+#' normal proposal (`sir_df = Inf`): a `.fitrx` bundle cannot record it yet
+#' (ferx-core#1819), so `ferx_save_fit()` warns and saves no SIR settings, and
+#' the loaded fit runs as one with no record. An argument you pass
 #' replaces that one setting and keeps the rest. The returned fit's
 #' `sir_settings` records the run it made.
 #'
@@ -255,8 +258,15 @@ ferx_sir <- function(fit,
   record_args <- .ferx_fit_record_args(fit, sir = explicit)
   resolved <- record_args$sir_settings %||% .ferx_default_settings("sir_settings")
   if (resolved$resamples > resolved$samples) {
-    stop("`sir_resamples` (", resolved$resamples,
-         ") must be <= `sir_samples` (", resolved$samples, ")")
+    # Name where each value came from: an argument the caller did not pass is
+    # the fit's recorded value, or the engine default on a fit with none.
+    source_of <- function(arg) {
+      if (!is.null(arg)) ""
+      else if (!is.null(fit$sir_settings)) ", recorded on the fit"
+      else ", the default"
+    }
+    stop("`sir_resamples` (", resolved$resamples, source_of(sir_resamples),
+         ") must be <= `sir_samples` (", resolved$samples, source_of(sir_samples), ")")
   }
 
   # Build the flat eta_hats matrix. `ebe_etas` is a data frame: first column

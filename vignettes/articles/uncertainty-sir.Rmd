@@ -62,12 +62,19 @@ optimisation occurs; only proposal draws, importance weighting, and resampling.
 
 ### Tuning knobs
 
-| Argument | Default | Meaning |
+Every argument defaults to `NULL`, which takes the value the fit's last SIR
+run recorded in `fit$sir_settings`, so `ferx_sir(fit)` on a fit made with
+`sir = TRUE` repeats that SIR exactly. The values below apply to a fit whose
+SIR never ran.
+
+| Argument | Without a record | Meaning |
 |---|---|---|
 | `sir_samples` | 1000 | Number of candidate draws from the asymptotic proposal. Higher = tighter weights at proportional cost. |
 | `sir_resamples` | 250 | Number of resampled vectors retained. Must be `<= sir_samples`. |
-| `sir_seed` | `NULL` | Integer seed for reproducibility. `NULL` uses the engine's default seeding behaviour. |
+| `sir_seed` | 12345 | Integer seed for reproducibility. |
 | `sir_keep_samples` | `FALSE` | Retain the resampled packed parameter vectors on the fit. Required for downstream `ferx_simulate_with_uncertainty(method = "sir")`. |
+| `sir_scale` | `"packed"` | The scale SIR's flat prior is flat on: `"packed"` or `"natural"`. |
+| `sir_df` | 5 | Degrees of freedom of the Student-t proposal; `Inf` is a normal proposal. |
 
 ---
 
@@ -171,8 +178,10 @@ The output structure is identical to the `ferx_sir()` flow above.
 To propagate the SIR resamples into a simulation, retain them with
 `sir_keep_samples = TRUE` and pass the fit to
 `ferx_simulate_with_uncertainty()` with `method = "sir"`. Calling
-`ferx_sir()` a second time overwrites the previous SIR fields with fresh
-resampling - it does not accumulate across calls. Its `SIR:` warnings
+`ferx_sir()` a second time overwrites the previous SIR fields - it does not
+accumulate across calls. With `sir_seed` left at `NULL` it reuses the seed
+the previous run recorded, so only the arguments you pass change the draws;
+pass a new `sir_seed` for a fresh resampling. Its `SIR:` warnings
 (such as the low-ESS warning below an effective sample size of 100) replace
 the earlier run's too, so `fit$warnings` describes the intervals on the fit:
 

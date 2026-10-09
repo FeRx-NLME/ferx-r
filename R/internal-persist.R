@@ -399,8 +399,18 @@
     # A multivariate-normal proposal records `df = Inf`, which JSON cannot
     # hold: it would be written as null, which neither ferx-core nor
     # `ferx_load_fit()` reads as a number, and the bundle would not load. Such
-    # a fit is saved without the record and reloads as one that has none.
-    if (!is.finite(record$df)) return(NULL)
+    # a fit is saved without the record and reloads as one that has none
+    # (ferx-core#1819), which the caller is told.
+    if (!is.finite(record$df)) {
+      warning(
+        "ferx_save_fit: the fit's SIR used a normal proposal (`sir_df = Inf`), ",
+        "which a .fitrx bundle cannot record yet (ferx-core#1819), so its SIR ",
+        "settings are not saved. On the loaded fit, ferx_sir() runs with the ",
+        "defaults unless you pass the settings, `sir_df = Inf` included.",
+        call. = FALSE
+      )
+      return(NULL)
+    }
     record <- c(record[names(record) != "scoring"], record$scoring)
   }
   record
@@ -414,8 +424,12 @@
 # the records existed), which keeps today's behaviour.
 .fitrx_settings_from_wire <- function(w, kind) {
   if (is.null(w)) return(NULL)
-  w <- lapply(w, function(v) if (is.null(v)) NA else v)
   is_sir <- identical(kind, "sir_settings")
+  # A normal-proposal record (`df = Inf`) is written by ferx-core's serde as
+  # `"df": null` (ferx-core#1819). It is read as no record, as
+  # `ferx_save_fit()` writes it, so the bundle still loads.
+  if (is_sir && "df" %in% names(w) && is.null(w$df)) return(NULL)
+  w <- lapply(w, function(v) if (is.null(v)) NA else v)
   tryCatch(
     ferx_rust_settings_record(
       if (is_sir) "sir_settings_wire" else kind, w, "ferx_load_fit",

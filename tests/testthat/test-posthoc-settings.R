@@ -241,10 +241,15 @@ test_that("S10: the .fitrx spelling of both records is ferx-core's", {
   back$inner_restarts <- NULL
   expect_identical(from(back, "sir_settings")$scoring$inner_restarts,
                    sc$inner_restarts)
-  # A normal proposal (`df = Inf`) has no JSON spelling, so no record is
-  # written rather than one nothing can load.
+  # A normal proposal (`df = Inf`) has no JSON spelling (ferx-core#1819), so no
+  # record is written rather than one nothing can load, and the caller is told.
   sr$df <- Inf
-  expect_null(to(sr, "sir_settings"))
+  expect_warning(expect_null(to(sr, "sir_settings")),
+                 "normal proposal (`sir_df = Inf`)", fixed = TRUE)
+  # ferx-core's serde writes that record with `"df": null`; it reads as no
+  # record, so the bundle loads.
+  back["df"] <- list(NULL)
+  expect_null(from(back, "sir_settings"))
 })
 
 test_that("S12: a record the engine would refuse is refused by name", {
@@ -302,6 +307,33 @@ test_that("S6: an explicit argument overrides the fit's record, even at its defa
   expect_identical(packed$sir_settings$scale, "packed")
   expect_identical(packed$sir_settings[c("samples", "resamples", "seed")],
                    nat$sir_settings[c("samples", "resamples", "seed")])
+
+  # A fit carrying only a SIR record (a bundle from between ferx-core #1758 and
+  # #426) is scored under that record's scoring half; an explicit argument
+  # edits that half, not the engine default (review round 1, finding 4).
+  sir_only <- ps_sir_fit(ps_sir_rows[[2L]])  # warfarin, inner_maxiter = 5
+  sir_only$scoring_settings <- NULL
+  expect_identical(ferx_covariance(sir_only, mu_referencing = TRUE)$cov_matrix,
+                   ferx_covariance(sir_only)$cov_matrix)
+  # Premise: the SIR record's scoring half moves this fixture's covariance.
+  neither <- sir_only
+  neither$sir_settings <- NULL
+  expect_false(identical(ferx_covariance(neither)$cov_matrix,
+                         ferx_covariance(sir_only)$cov_matrix))
+})
+
+test_that("S13: a resamples > samples refusal names where each value came from", {
+  fit <- ps_sir_fit(ps_sir_rows[[1L]])  # recorded 300 / 100
+  expect_error(ferx_sir(fit, sir_samples = 50L),
+               "`sir_resamples` (100, recorded on the fit) must be <= `sir_samples` (50)",
+               fixed = TRUE)
+  bare <- fit
+  bare$sir_settings <- NULL
+  expect_error(ferx_sir(bare, sir_samples = 100L),
+               "`sir_resamples` (250, the default) must be <= `sir_samples` (100)",
+               fixed = TRUE)
+  expect_error(ferx_sir(bare, sir_samples = 10L, sir_resamples = 20L),
+               "`sir_resamples` (20) must be <= `sir_samples` (10)", fixed = TRUE)
 })
 
 test_that("S7: a fit with no record is scored as it always was, and says nothing", {
