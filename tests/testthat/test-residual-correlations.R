@@ -181,8 +181,9 @@ test_that("predict, simulate and NPDE refuse a free fit without its fitted rho",
   case <- rho_case()
   fit <- without_rho(case$fit)
 
-  # predict and NPDE do not read rho numerically, so the refusal is the only
-  # thing that shows they go through the same check.
+  # predict does not read rho numerically, so the refusal is the only thing
+  # that shows it goes through the same check. NPDE does read rho since
+  # ferx-core #1733 (tested below).
   expect_error(ferx_predict(case$model, case$data, fit = fit),
                "^Fit error: the model estimates")
   expect_error(ferx_simulate(case$model, case$data, n_sim = 1L, seed = 1L,
@@ -235,26 +236,89 @@ test_that("an intact free fit is rebuilt at its fitted rho", {
   expect_false(identical(sim_fit$DV_SIM, sim_declared$DV_SIM))
 })
 
+# -- ferx-core #1733: NPDE draws at the fitted rho --
+#
+# `rho_case()` cannot show this: its fit drives ADD_ERR to ~4e-4, so rho moves
+# the residual SD by ~2 %, and at 200 sims no NPDE rank moves at all. This
+# fixture simulates 24 subjects with a real correlated residual (PROP sd 0.10,
+# ADD sd 0.6, rho -0.6) and declares the block at rho = 0. The fit keeps
+# ADD_ERR well away from zero (0.79 in fit$sigma) and recovers rho ~ -0.71.
+rho_npde_case <- local({
+  cache <- NULL
+  function() {
+    if (!is.null(cache)) return(cache)
+    dir <- tempfile("ferx-rho-npde-")
+    dir.create(dir)
+    model <- file.path(dir, "rho_npde.ferx")
+    data  <- file.path(dir, "rho_npde.csv")
+    times <- c(0.5, 1, 2, 4, 8, 12)
+    d <- withr::with_seed(20261009, do.call(rbind, lapply(1:24, function(i) {
+      cl <- exp(stats::rnorm(1, 0, 0.2))
+      f  <- 10 * exp(-cl / 10 * times)
+      z1 <- stats::rnorm(length(times))
+      z2 <- stats::rnorm(length(times))
+      dv <- f * (1 + 0.10 * z1) + 0.6 * (-0.6 * z1 + 0.8 * z2)
+      data.frame(ID = i, TIME = c(0, times), DV = c(0, round(dv, 4)),
+                 EVID = c(1, rep(0, 6)), AMT = c(100, rep(0, 6)), CMT = 1,
+                 MDV = c(1, rep(0, 6)))
+    })))
+    utils::write.csv(d, data, row.names = FALSE, quote = FALSE)
+    writeLines(c(
+      "[parameters]",
+      "  theta TVCL(1.0, 0.01, 10.0)",
+      "  theta TVV(10.0, 0.1, 100.0)",
+      "  omega ETA_CL ~ 0.04",
+      "  block_sigma (PROP_ERR, ADD_ERR) = [0.01, 0.0, 0.36]",
+      "[individual_parameters]",
+      "  CL = TVCL * exp(ETA_CL)",
+      "  V  = TVV",
+      "[structural_model]",
+      "  pk one_cpt_iv(cl=CL, v=V)",
+      "[error_model]",
+      "  DV ~ combined(PROP_ERR, ADD_ERR)",
+      "[fit_options]",
+      "  method = focei"
+    ), model)
+    cache <<- list(model = model, data = data,
+                   fit = ferx_fit(model, data, verbose = FALSE))
+    cache
+  }
+})
+
 test_that("ferx_calc_npde draws block_sigma residuals at the fitted rho", {
   skip_on_cran()
-  case <- rho_case()
-  fit <- case$fit
-  # The control below is only a control if the fit moved rho off its start.
-  expect_gt(abs(fit$residual_correlations$rho - declared_rho), 1e-3)
+  fit <- rho_npde_case()$fit
+  rho <- fit$residual_correlations$rho
+  # A fixture check, not the claim: the residual stays non-degenerate and rho
+  # moved well away from the declared 0.
+  expect_gt(fit$sigma[fit$sigma_names == "ADD_ERR"], 0.1)
+  expect_lt(rho, -0.3)
 
-  # Up to ferx-core #1733 the NPDE simulation drew every residual at the rho
-  # declared in the model file, so these two were identical whatever the fit
-  # said. Same seed, same everything else: only the rho differs. The fit drives
-  # ADD_ERR to ~4e-4, so rho moves the residual SD by ~2 % here. At 200 sims no
-  # empirical rank crosses an observation and both builds give identical scores.
-  # At 2000 the new build's scores move, by up to 0.005.
-  at_declared <- fit
-  at_declared$residual_correlations$rho <- declared_rho
-  npde_fit <- ferx_calc_npde(fit, nsim = 2000L, seed = 1L)$sdtab
-  npde_declared <- ferx_calc_npde(at_declared, nsim = 2000L, seed = 1L)$sdtab
-  expect_true(all(is.finite(npde_fit$NPDE)))
-  expect_false(isTRUE(all.equal(npde_fit$NPDE, npde_declared$NPDE)))
-  expect_false(isTRUE(all.equal(npde_fit$NPD, npde_declared$NPD)))
+  npde_at <- function(r) {
+    f <- fit
+    f$residual_correlations$rho <- r
+    ferx_calc_npde(f, nsim = 200L, seed = 1L)$sdtab
+  }
+  at_fit      <- npde_at(rho)
+  at_declared <- npde_at(0)
+  at_other    <- npde_at(0.6)
+  expect_true(all(is.finite(at_fit$NPDE)))
+
+  # Up to ferx-core #1733 NPDE drew every residual at the declared rho, so all
+  # three were identical. Now each reads the rho it is given: the fitted run
+  # differs from the declared one and from a third, off-fit value. An engine
+  # that drew at any single fixed rho, 0 included, makes at least two of them
+  # equal.
+  expect_false(isTRUE(all.equal(at_fit$NPDE, at_declared$NPDE)))
+  expect_false(isTRUE(all.equal(at_fit$NPDE, at_other$NPDE)))
+  expect_false(isTRUE(all.equal(at_declared$NPDE, at_other$NPDE)))
+  expect_false(isTRUE(all.equal(at_fit$NPD, at_declared$NPD)))
+  # The direction is right too. Under the right model NPDE ~ N(0, 1), so
+  # mean |NPDE| ~ sqrt(2 / pi) = 0.80. Measured: 0.81 at the fitted rho, 0.53
+  # at rho = 0, whose reference distribution is too wide for these data.
+  target <- sqrt(2 / pi)
+  expect_lt(abs(mean(abs(at_fit$NPDE)) - target),
+            abs(mean(abs(at_declared$NPDE)) - target))
 })
 
 test_that("a FIX correlation needs no fitted value", {
