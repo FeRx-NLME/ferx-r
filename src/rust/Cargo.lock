@@ -297,7 +297,7 @@ dependencies = [
 [[package]]
 name = "ferx-core"
 version = "0.4.0"
-source = "git+https://github.com/FeRx-NLME/ferx-core?branch=main#826d3bb98cc4f94c0e4eecd08aa3d1df7d6dcbbe"
+source = "git+https://github.com/FeRx-NLME/ferx-core?branch=main#160cc9a362c9c5aa38d1b8cd358db36fa22d30c4"
 dependencies = [
  "argmin",
  "argmin-math",
@@ -320,7 +320,7 @@ dependencies = [
 [[package]]
 name = "ferx-tools"
 version = "0.4.0"
-source = "git+https://github.com/FeRx-NLME/ferx-core?branch=main#826d3bb98cc4f94c0e4eecd08aa3d1df7d6dcbbe"
+source = "git+https://github.com/FeRx-NLME/ferx-core?branch=main#160cc9a362c9c5aa38d1b8cd358db36fa22d30c4"
 dependencies = [
  "csv",
  "ferx-core",
@@ -1006,9 +1006,9 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "1.1.7+spec-1.1.0"
+version = "1.1.8+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7874cd34dd99040fc24e30923aa64a60a81ff3ddfe2b8129ccc84ba24949deed"
+checksum = "20489e00e4d8741d6be680764cc12e270655e375a20d1011e844a9c3379e678d"
 dependencies = [
  "indexmap",
  "serde_core",
@@ -1030,9 +1030,9 @@ dependencies = [
 
 [[package]]
 name = "toml_parser"
-version = "1.1.4+spec-1.1.0"
+version = "1.1.5+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bed810ee007d8e7f9cf20b4774e7198142fa27186e0f805871da7f3c39eaf333"
+checksum = "baa693a8032d7e1cada7d0041e96126df243179ff061456783ac7f12bda4744c"
 dependencies = [
  "winnow",
 ]
