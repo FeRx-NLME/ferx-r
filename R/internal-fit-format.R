@@ -91,6 +91,28 @@
   strsplit(rows, "\n", fixed = TRUE)[[1L]]
 }
 
+# SIR 95% intervals for theta, omega and sigma, from the flat
+# [lo1, hi1, lo2, hi2, ...] vectors the FFI list and a .fitrx bundle both
+# carry, as (n, 2) lower/upper matrices. Rows follow the output label
+# convention (AGENTS.md): the bare declared name, THETA<i> / OMEGA(i,i) /
+# SIGMA(i) when the names do not line up with the rows. One rule for
+# ferx_fit(), ferx_sir() and ferx_load_fit() (#482). NULL for an empty vector.
+.ferx_sir_ci_matrices <- function(ci_theta, ci_omega, ci_sigma,
+                                  theta_names, eta_names, sigma_names) {
+  reshape <- function(v, nms, fallback) {
+    v <- as.numeric(unlist(v, use.names = FALSE))
+    if (length(v) == 0L || length(v) %% 2L != 0L) return(NULL)
+    n <- length(v) %/% 2L
+    rn <- if (length(nms) == n) as.character(nms) else fallback(seq_len(n))
+    matrix(v, ncol = 2L, byrow = TRUE, dimnames = list(rn, c("lower", "upper")))
+  }
+  list(
+    sir_ci_theta = reshape(ci_theta, theta_names, function(i) paste0("THETA", i)),
+    sir_ci_omega = reshape(ci_omega, eta_names, function(i) paste0("OMEGA(", i, ",", i, ")")),
+    sir_ci_sigma = reshape(ci_sigma, sigma_names, function(i) paste0("SIGMA(", i, ")"))
+  )
+}
+
 # The label of each of `n` kappas in print output: its declared name, or the
 # KAPPA<i> fallback (AGENTS.md, Output Label Convention) when the fit carries
 # no names, the wrong number of them, or an empty / NA one. The rows, the
@@ -634,26 +656,13 @@
   if (is.null(result$sir_ess) || !is.finite(result$sir_ess)) {
     result$sir_ess <- NULL
   }
-  reshape_ci <- function(v, row_names = NULL) {
-    if (length(v) == 0) {
-      return(NULL)
-    }
-    m <- matrix(v,
-      ncol = 2, byrow = TRUE,
-      dimnames = list(row_names, c("lower", "upper"))
-    )
-    m
-  }
-  result$sir_ci_theta <- reshape_ci(result$sir_ci_theta, result$theta_names)
-  n_eta <- if (is.null(dim(result$omega))) NULL else nrow(result$omega)
-  eta_names <- if (!is.null(n_eta)) {
-    en <- result$eta_names
-    if (!is.null(en) && length(en) == n_eta) en else paste0("OMEGA(", seq_len(n_eta), ",", seq_len(n_eta), ")")
-  } else NULL
-  result$sir_ci_omega <- reshape_ci(result$sir_ci_omega, eta_names)
-  sn <- result$sigma_names
-  sig_names <- if (!is.null(sn) && length(sn) == length(result$sigma)) sn else paste0("SIGMA(", seq_along(result$sigma), ")")
-  result$sir_ci_sigma <- reshape_ci(result$sir_ci_sigma, sig_names)
+  ci <- .ferx_sir_ci_matrices(
+    result$sir_ci_theta, result$sir_ci_omega, result$sir_ci_sigma,
+    result$theta_names, result$eta_names, result$sigma_names
+  )
+  result$sir_ci_theta <- ci$sir_ci_theta
+  result$sir_ci_omega <- ci$sir_ci_omega
+  result$sir_ci_sigma <- ci$sir_ci_sigma
   result$sir_ci_kappa <- .ferx_sir_ci_kappa(result$sir_ci_kappa, result$kappa_names)
 
   # Normalize trace_path: NULL/empty means no trace was written

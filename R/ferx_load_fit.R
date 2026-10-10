@@ -9,6 +9,15 @@
 #' covered by the cross-language schema, plus any R-specific fields the
 #' writer preserved under \code{r_extras}.
 #'
+#' A bundle carrying SIR draws (\code{sir.resamples_packed}, written when the
+#' fit kept them with \code{sir_keep_samples = TRUE}) restores
+#' \code{sir_resamples} (flat, one packed-space draw after another),
+#' \code{sir_resamples_n} and \code{sir_resamples_dim}, so
+#' \code{ferx_simulate_with_uncertainty(method = "sir")} runs on the loaded
+#' fit. A bundle without them leaves all three \code{NULL}. The
+#' \code{sir_ci_*} matrices keep their row names (the declared parameter
+#' names).
+#'
 #' To call \code{\link{ferx_predict}} on a loaded fit, the embedded model
 #' source can be re-parsed through the existing pipeline.
 #'
@@ -370,9 +379,36 @@ ferx_load_fit <- function(path) {
   # SIR
   if (!is.null(w$sir)) {
     out$sir_ess <- .fitrx_unwrap_opt_num(w$sir$ess)
-    out$sir_ci_theta <- .fitrx_unwrap_ci(w$sir$ci_theta)
-    out$sir_ci_omega <- .fitrx_unwrap_ci(w$sir$ci_omega)
-    out$sir_ci_sigma <- .fitrx_unwrap_ci(w$sir$ci_sigma)
+    # Rows named as on the live fit (#482).
+    ci <- .ferx_sir_ci_matrices(
+      w$sir$ci_theta, w$sir$ci_omega, w$sir$ci_sigma,
+      names(out$theta), out$eta_names, out$sigma_names
+    )
+    out$sir_ci_theta <- ci$sir_ci_theta
+    out$sir_ci_omega <- ci$sir_ci_omega
+    out$sir_ci_sigma <- ci$sir_ci_sigma
+    # Retained draws (#549): one wire array per resample, back to the flat
+    # row-major vector + shape ferx_sir() returns. Absent from a bundle that
+    # kept none and from every R-written bundle before #549: NULL, as before.
+    rp <- w$sir$resamples_packed
+    if (length(rp) > 0L) {
+      d <- lengths(rp)
+      # A `null` cell (a NaN written as JSON) still counts in `lengths()` but
+      # vanishes in `unlist()`, which would shift every later draw: each cell
+      # must be one number. An empty row fails this too (`unlist()` of it is
+      # NULL, not numeric).
+      numeric_rows <- vapply(rp, function(r) {
+        all(lengths(r) == 1L) && is.numeric(unlist(r, use.names = FALSE))
+      }, NA)
+      if (any(d != d[[1L]]) || !all(numeric_rows)) {
+        stop("fit.json: `sir.resamples_packed` rows are empty, differ in ",
+             "length, or hold a value that is not a number; the bundle is ",
+             "corrupt.", call. = FALSE)
+      }
+      out$sir_resamples <- as.numeric(unlist(rp, use.names = FALSE))
+      out$sir_resamples_n <- length(rp)
+      out$sir_resamples_dim <- d[[1L]]
+    }
   }
   # The seed the bundle's SIR resampled with (ferx-core #1767), written beside
   # `sir.settings` (#472).
@@ -792,13 +828,6 @@ ferx_load_fit <- function(path) {
   data <- as.numeric(unlist(w$data %||% list(), use.names = FALSE))
   if (rows == 0L || cols == 0L || length(data) != rows * cols) return(NULL)
   matrix(data, nrow = rows, ncol = cols, byrow = TRUE)
-}
-
-.fitrx_unwrap_ci <- function(wire_ci) {
-  if (is.null(wire_ci) || length(wire_ci) == 0L) return(NULL)
-  mat <- do.call(rbind, lapply(wire_ci, function(p) as.numeric(unlist(p, use.names = FALSE))))
-  if (is.null(mat) || ncol(mat) != 2L) return(NULL)
-  mat
 }
 
 .fitrx_named_omega <- function(omega_wire) {

@@ -39,6 +39,18 @@ double value in the estimates and in the per-subject and per-observation
 tables reads back as the same double, and the predictions and simulations
 a reloaded fit drives are \code{identical()} to the original's.
 
+SIR draws kept with \code{sir_keep_samples = TRUE} (\code{fit$sir_resamples})
+are written to \code{sir.resamples_packed} in \code{fit.json}, so
+\code{ferx_simulate_with_uncertainty(method = "sir")} works on the reloaded
+fit. They are the bulk of such a bundle: \code{n_resamples x n_packed x 8}
+bytes as doubles, and about the same again in the compressed archive (1000
+draws of warfarin's 7 packed parameters, 56 kB of doubles, add 60 kB to
+the \code{.fitrx}). Each row is one draw in the engine's
+packed parameter space, not on the natural scale: how each column is
+packed depends on the model (a theta with a negative lower bound is not
+log-packed, for one), and the bundle does not yet name the columns or
+their packing.
+
 The schema is shared with the ferx-core Rust crate; see its
 \code{docs/src/file-formats/fitrx.md} for the full field reference.
 }

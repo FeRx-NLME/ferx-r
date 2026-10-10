@@ -775,6 +775,33 @@
   was, one SE per kappa (the diagonal) for a `block_kappa` too; the R code
   that read it as a packed triangle is gone.
 
+- **SIR draws survive `ferx_save_fit()` / `ferx_load_fit()`**
+  ([#549](https://github.com/FeRx-NLME/ferx-r/issues/549)). A fit that kept
+  its draws (`ferx_sir(fit, sir_keep_samples = TRUE)`, or `ferx_fit(...,
+  sir = TRUE, settings = list(sir_keep_samples = TRUE))`) lost them on save,
+  so `ferx_simulate_with_uncertainty(method = "sir")` refused the reloaded
+  fit. The writer now fills `sir.resamples_packed` in `fit.json`, in the
+  shape ferx-core writes it (one array per draw), and the loader restores
+  `sir_resamples`, `sir_resamples_n` and `sir_resamples_dim`, so the
+  reloaded fit simulates `identical()` results. The draws are the bulk of
+  such a bundle: `n_resamples x n_packed x 8` bytes, and about as much in
+  the compressed `.fitrx` (1000 warfarin draws added 60 kB). Columns are in the
+  engine's packed parameter space; a per-column descriptor is
+  [ferx-core #1863](https://github.com/FeRx-NLME/ferx-core/issues/1863).
+  Bundles without draws load as before. Saving refuses draws that are non-finite
+  or lack `sir_resamples_n` / `_dim`, and loading refuses a bundle whose
+  draws are not equal rows of numbers, instead of returning them shifted.
+  `ferx_sir()` run without
+  `sir_keep_samples` now drops the input fit's draws instead of keeping
+  ones from an earlier run beside its new intervals. The error for a fit
+  without draws names both calls above; it used to say to re-fit with
+  `sir_keep_samples` in `settings`, which `ferx_sir(fit)` makes unnecessary.
+
+- **`ferx_load_fit()` keeps the row names of `sir_ci_theta`, `sir_ci_omega`
+  and `sir_ci_sigma`** ([#482](https://github.com/FeRx-NLME/ferx-r/issues/482)):
+  the declared names, with `THETA<i>` / `OMEGA(i,i)` / `SIGMA(i)` when a
+  name is missing, as on the live fit.
+
 - **Subject IDs survive `ferx_save_fit()` / `ferx_load_fit()` as the same
   text** ([#475](https://github.com/FeRx-NLME/ferx-r/issues/475)). An ID
   spelled `NA` came back as a missing value, and an ID with a comma or a

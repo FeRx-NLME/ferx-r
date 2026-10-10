@@ -409,32 +409,25 @@ ferx_sir <- function(fit,
     fit$sir_ess <- raw$sir_ess
   }
 
-  reshape_ci <- function(v, row_names = NULL) {
-    if (length(v) == 0L) return(NULL)
-    matrix(
-      v,
-      ncol = 2L,
-      byrow = TRUE,
-      dimnames = list(row_names, c("lower", "upper"))
-    )
-  }
-  fit$sir_ci_theta <- reshape_ci(raw$sir_ci_theta, names(fit$theta))
-  en <- fit$eta_names
-  eta_row_names <- if (!is.null(en) && length(en) == n_eta) en else paste0("OMEGA(", seq_len(n_eta), ",", seq_len(n_eta), ")")
-  fit$sir_ci_omega <- reshape_ci(raw$sir_ci_omega, eta_row_names)
-  sn <- fit$sigma_names
-  sig_names <- if (!is.null(sn) && length(sn) == length(fit$sigma)) sn else paste0("SIGMA(", seq_along(fit$sigma), ")")
-  fit$sir_ci_sigma <- reshape_ci(raw$sir_ci_sigma, sig_names)
+  ci <- .ferx_sir_ci_matrices(
+    raw$sir_ci_theta, raw$sir_ci_omega, raw$sir_ci_sigma,
+    names(fit$theta), fit$eta_names, fit$sigma_names
+  )
+  fit$sir_ci_theta <- ci$sir_ci_theta
+  fit$sir_ci_omega <- ci$sir_ci_omega
+  fit$sir_ci_sigma <- ci$sir_ci_sigma
   fit$sir_ci_kappa <- .ferx_sir_ci_kappa(raw$sir_ci_kappa, fit$kappa_names)
   # The seed and settings this run used (ferx-core #1767), not the input fit's.
   fit$sir_seed_used <- raw$sir_seed_used
   fit$sir_settings <- raw$sir_settings
 
-  if (isTRUE(fit$sir_settings$keep_samples)) {
-    fit$sir_resamples <- as.numeric(raw$sir_resamples)
-    fit$sir_resamples_n <- as.integer(raw$sir_resamples_n)
-    fit$sir_resamples_dim <- as.integer(raw$sir_resamples_dim)
-  }
+  # A run that did not keep its draws drops the input fit's: they belong to
+  # an earlier run, and ferx_save_fit() would otherwise write them beside
+  # this run's intervals (#549).
+  keep <- isTRUE(fit$sir_settings$keep_samples)
+  fit$sir_resamples <- if (keep) as.numeric(raw$sir_resamples)
+  fit$sir_resamples_n <- if (keep) as.integer(raw$sir_resamples_n)
+  fit$sir_resamples_dim <- if (keep) as.integer(raw$sir_resamples_dim)
 
   # Append any SIR-step warnings to the structured warnings table. The engine
   # can emit warnings during the SIR run (e.g. ESS collapse, proposal issues);

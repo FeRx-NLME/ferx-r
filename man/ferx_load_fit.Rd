@@ -24,6 +24,15 @@ covered by the cross-language schema, plus any R-specific fields the
 writer preserved under \code{r_extras}.
 }
 \details{
+A bundle carrying SIR draws (\code{sir.resamples_packed}, written when the
+fit kept them with \code{sir_keep_samples = TRUE}) restores
+\code{sir_resamples} (flat, one packed-space draw after another),
+\code{sir_resamples_n} and \code{sir_resamples_dim}, so
+\code{ferx_simulate_with_uncertainty(method = "sir")} runs on the loaded
+fit. A bundle without them leaves all three \code{NULL}. The
+\code{sir_ci_*} matrices keep their row names (the declared parameter
+names).
+
 To call \code{\link{ferx_predict}} on a loaded fit, the embedded model
 source can be re-parsed through the existing pipeline.
 }
