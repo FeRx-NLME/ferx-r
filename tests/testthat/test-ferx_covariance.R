@@ -503,7 +503,7 @@ test_that(".ferx_fit_subject_ids refuses a fit with no IDs, naming every field (
   expect_match(err, "fit$individual_estimates$ID", fixed = TRUE)
   expect_match(err, "fit$sdtab$ID", fixed = TRUE)
   expect_match(err, "cannot be matched to the data", fixed = TRUE)
-  expect_match(err, "A fit from ferx_fit() or ferx_load_fit() carries fit$subject_ids.",
+  expect_match(err, "A fit from ferx_fit() in this version carries fit$subject_ids.",
                fixed = TRUE)
   # Re-fitting is not advice that helps a fit it would reproduce (#550).
   expect_no_match(err, "Re-fit", fixed = TRUE)

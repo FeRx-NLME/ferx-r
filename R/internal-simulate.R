@@ -117,8 +117,8 @@ validate_fit_for_params <- function(fit) {
     stop(
       caller, ": the fit carries no subject IDs (none of fit$ebe_etas$ID, ",
       "fit$subject_ids, fit$individual_estimates$ID or fit$sdtab$ID), so it ",
-      "cannot be matched to the data. A fit from ferx_fit() or ",
-      "ferx_load_fit() carries fit$subject_ids.",
+      "cannot be matched to the data. A fit from ferx_fit() in this ",
+      "version carries fit$subject_ids.",
       call. = FALSE
     )
   }
