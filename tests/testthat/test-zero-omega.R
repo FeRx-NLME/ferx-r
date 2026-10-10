@@ -175,12 +175,14 @@ test_that("a no-eta fit carries every subject's ID verbatim (#550)", {
 
 test_that("ferx_sir() and ferx_covariance() run on the binary example (#550)", {
   fit <- relabelled_fit("binary_logistic", "identity", identity)
+  # SIR first: it does not need the post-hoc covariance step, so a covariance
+  # that fails to converge must not turn the issue's own repro into a skip.
+  sir <- binary_sir(fit)
+  expect_true(is.finite(sir$sir_ess) && sir$sir_ess > 0)
   cov <- ferx_covariance(fit)
   skip_if(is.null(cov$cov_matrix), "covariance step did not converge - skipping")
   expect_length(cov$se_theta, 3L)
   expect_true(all(is.finite(cov$se_theta)))
-  sir <- binary_sir(fit)
-  expect_true(is.finite(sir$sir_ess) && sir$sir_ess > 0)
 })
 
 test_that("non-1..n and text IDs give the binary fit's own SIR and SEs (#550, #468)", {
