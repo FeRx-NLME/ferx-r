@@ -83,8 +83,9 @@ test_that("ferx_sir() draws and intervals survive save -> load (#549, #482)", {
 
 test_that("in-fit SIR draws and intervals survive save -> load (#549, #482)", {
   fit <- sir_res_infit()
-  skip_if(is.null(fit$sir_resamples) || length(fit$sir_resamples) == 0L,
-          "in-fit SIR did not run - skipping")
+  # Skip only when the covariance step failed, which SIR needs. A fit that ran
+  # but kept no draws is the regression this test is for, so it must fail.
+  skip_if(is.null(fit$cov_matrix), sir_res_cov_skip)
   expect_identical(fit$sir_resamples_n, 200L)
   expect_identical(rownames(fit$sir_ci_theta), names(fit$theta))
 
@@ -140,21 +141,51 @@ test_that("a bundle without resamples_packed still loads, draws NULL", {
 test_that("ferx_save_fit() refuses draws that do not fill n x dim", {
   fit <- sir_res_standalone()
   skip_if(is.null(fit), sir_res_cov_skip)
-  fit$sir_resamples <- fit$sir_resamples[-1L]
   path <- withr::local_tempfile(fileext = ".fitrx")
-  expect_error(ferx_save_fit(fit, path), "edited after the fit")
+  short <- fit
+  short$sir_resamples <- short$sir_resamples[-1L]
+  expect_error(ferx_save_fit(short, path),
+               paste0("holds ", length(short$sir_resamples), " values.*edited after the fit"))
+  # Draws without their shape are the same edit, not a silent drop (round 1 #3).
+  for (field in c("sir_resamples_n", "sir_resamples_dim")) {
+    no_shape <- fit
+    no_shape[field] <- list(NULL)
+    expect_error(ferx_save_fit(no_shape, path), "edited after the fit", info = field)
+  }
 })
 
-test_that("ferx_load_fit() refuses resamples_packed rows of unequal length", {
+test_that("ferx_save_fit() refuses non-finite draws (round 1 #1)", {
+  fit <- sir_res_standalone()
+  skip_if(is.null(fit), sir_res_cov_skip)
+  path <- withr::local_tempfile(fileext = ".fitrx")
+  for (bad in c(NaN, NA, Inf, -Inf)) {
+    f <- fit
+    f$sir_resamples[3L] <- bad
+    expect_error(ferx_save_fit(f, path), "1 non-finite value", info = format(bad))
+  }
+})
+
+test_that("ferx_load_fit() refuses resamples_packed rows that are not n x dim numbers", {
   fit <- sir_res_standalone()
   skip_if(is.null(fit), sir_res_cov_skip)
   path <- withr::local_tempfile(fileext = ".fitrx")
   ferx_save_fit(fit, path, include_data = TRUE)
-  ragged <- fitrx_edit_bundle(path, function(w) {
-    w$sir$resamples_packed[[2L]] <- w$sir$resamples_packed[[2L]][-1L]
-    w
-  })
-  expect_error(ferx_load_fit(ragged), "rows differ in length")
+  corrupt <- function(edit) {
+    p <- fitrx_edit_bundle(path, function(w) {
+      w$sir$resamples_packed <- edit(w$sir$resamples_packed)
+      w
+    })
+    expect_error(ferx_load_fit(p), "the bundle is corrupt")
+  }
+  # A shorter row.
+  corrupt(function(rp) { rp[[2L]] <- rp[[2L]][-1L]; rp })
+  # Every row empty (round 1 #7).
+  corrupt(function(rp) lapply(rp, function(r) list()))
+  # A `null` cell, as a NaN would be written: same length, one value fewer
+  # after unlist() (round 1 #1).
+  corrupt(function(rp) { rp[[1L]][3L] <- list(NULL); rp })
+  # A text cell.
+  corrupt(function(rp) { rp[[1L]][[3L]] <- "x"; rp })
 })
 
 test_that("ferx_sir() without sir_keep_samples drops the input fit's draws", {

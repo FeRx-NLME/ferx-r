@@ -393,9 +393,17 @@ ferx_load_fit <- function(path) {
     rp <- w$sir$resamples_packed
     if (length(rp) > 0L) {
       d <- lengths(rp)
-      if (any(d != d[[1L]]) || d[[1L]] == 0L) {
-        stop("fit.json: `sir.resamples_packed` rows differ in length; ",
-             "the bundle is corrupt.", call. = FALSE)
+      # A `null` cell (a NaN written as JSON) still counts in `lengths()` but
+      # vanishes in `unlist()`, which would shift every later draw: each cell
+      # must be one number. An empty row fails this too (`unlist()` of it is
+      # NULL, not numeric).
+      numeric_rows <- vapply(rp, function(r) {
+        all(lengths(r) == 1L) && is.numeric(unlist(r, use.names = FALSE))
+      }, NA)
+      if (any(d != d[[1L]]) || !all(numeric_rows)) {
+        stop("fit.json: `sir.resamples_packed` rows are empty, differ in ",
+             "length, or hold a value that is not a number; the bundle is ",
+             "corrupt.", call. = FALSE)
       }
       out$sir_resamples <- as.numeric(unlist(rp, use.names = FALSE))
       out$sir_resamples_n <- length(rp)

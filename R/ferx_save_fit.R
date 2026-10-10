@@ -796,14 +796,23 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   v <- fit$sir_resamples
   n <- fit$sir_resamples_n
   d <- fit$sir_resamples_dim
-  if (length(v) == 0L || length(n) != 1L || length(d) != 1L) return(NULL)
-  n <- as.integer(n)
-  d <- as.integer(d)
+  if (length(v) == 0L) return(NULL)
+  # A missing `_n` / `_dim` beside draws is the same edit as a wrong one.
+  n <- if (length(n) == 1L) as.integer(n) else NA_integer_
+  d <- if (length(d) == 1L) as.integer(d) else NA_integer_
   if (is.na(n) || is.na(d) || n < 1L || d < 1L || length(v) != n * d) {
     stop("ferx_save_fit: `fit$sir_resamples` holds ", length(v), " values, ",
          "not `sir_resamples_n` x `sir_resamples_dim` = ", n, " x ", d,
          "; it was edited after the fit. Re-run ferx_sir(), or set all three ",
          "to NULL.", call. = FALSE)
+  }
+  # JSON has no NaN / Inf: one would be written as `null`, and the draws after
+  # it would shift on load. The engine's draws are finite.
+  if (!all(is.finite(v))) {
+    stop("ferx_save_fit: `fit$sir_resamples` holds ", sum(!is.finite(v)),
+         " non-finite value(s), which a .fitrx bundle cannot carry; it was ",
+         "edited after the fit. Re-run ferx_sir(), or set all three to NULL.",
+         call. = FALSE)
   }
   m <- matrix(as.numeric(v), nrow = n, ncol = d, byrow = TRUE)
   lapply(seq_len(n), function(i) m[i, ])

@@ -788,7 +788,10 @@
   the compressed `.fitrx` (1000 warfarin draws added 60 kB). Columns are in the
   engine's packed parameter space; a per-column descriptor is
   [ferx-core #1863](https://github.com/FeRx-NLME/ferx-core/issues/1863).
-  Bundles without draws load as before. `ferx_sir()` run without
+  Bundles without draws load as before. Saving refuses draws that are non-finite
+  or lack `sir_resamples_n` / `_dim`, and loading refuses a bundle whose
+  draws are not equal rows of numbers, instead of returning them shifted.
+  `ferx_sir()` run without
   `sir_keep_samples` now drops the input fit's draws instead of keeping
   ones from an earlier run beside its new intervals. The error for a fit
   without draws names both calls above; it used to say to re-fit with
