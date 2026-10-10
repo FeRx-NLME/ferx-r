@@ -79,7 +79,12 @@ validate_fit_for_params <- function(fit) {
 # position against the population it re-reads from the data (#468). Read from
 # `fit$ebe_etas` - the rows the EBE matrix is built from, so the two agree by
 # construction - and, on a fit without random effects (no EBE rows), from
-# `fit$individual_estimates`. `fit$sdtab$ID` is numeric and not an ID source.
+# `fit$subject_ids`, which the engine fills for every fit (#550). A fit made
+# before that field falls back to `fit$individual_estimates`, then to one ID
+# per `fit$sdtab` subject block. That last one is the engine's number for the
+# ID (a text ID becomes its position) and misses a subject without
+# observations, so it is right only for numeric IDs; the engine's own check
+# refuses it otherwise.
 .ferx_fit_subject_ids <- function(fit, caller) {
   ids <- NULL
   source <- NULL
@@ -95,16 +100,25 @@ validate_fit_for_params <- function(fit) {
     }
     ids <- fit$ebe_etas$ID
     source <- "fit$ebe_etas$ID"
-  } else if (!is.null(fit$individual_estimates$ID) &&
-             length(fit$individual_estimates$ID) > 0L) {
+  } else if (length(fit$subject_ids) > 0L) {
+    ids <- fit$subject_ids
+    source <- "fit$subject_ids"
+  } else if (length(fit$individual_estimates$ID) > 0L) {
     ids <- fit$individual_estimates$ID
     source <- "fit$individual_estimates$ID"
+  } else if (length(fit$sdtab$ID) > 0L) {
+    first <- !duplicated(.ferx_subject_index(fit$sdtab$ID))
+    ids <- vapply(fit$sdtab$ID[first], format, character(1),
+                  scientific = FALSE, digits = 15L, trim = TRUE,
+                  USE.NAMES = FALSE)
+    source <- "fit$sdtab$ID"
   }
   if (is.null(ids)) {
     stop(
-      caller, ": the fit carries no subject IDs (neither fit$ebe_etas$ID nor ",
-      "fit$individual_estimates$ID), so it cannot be matched to the data. ",
-      "Re-fit via ferx_fit(model, data).",
+      caller, ": the fit carries no subject IDs (none of fit$ebe_etas$ID, ",
+      "fit$subject_ids, fit$individual_estimates$ID or fit$sdtab$ID), so it ",
+      "cannot be matched to the data. A fit from ferx_fit() in this ",
+      "version carries fit$subject_ids.",
       call. = FALSE
     )
   }

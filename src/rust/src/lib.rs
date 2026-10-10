@@ -3803,6 +3803,13 @@ fn fit_result_to_list(
     // Per-subject EBE etas: ID + one column per BSV eta (named).
     let ebe_etas_df: Robj = build_ebe_etas(result, population);
 
+    // Every subject's ID, verbatim and in fit order - the rows of `ebe_etas`,
+    // but present on a fit without random effects too, where `ebe_etas` is
+    // NULL and `sdtab$ID` is a number (ferx-r #550).
+    let subject_ids: Vec<String> = (0..result.subjects.len())
+        .map(|si| population.subjects[si].id.clone())
+        .collect();
+
     // Per-subject individual parameter estimates: ID + one column per
     // [individual_parameters] declaration. Computed by evaluating the block at
     // the subject's BSV eta + zero kappas + covariates, in the subject's fitted
@@ -4017,6 +4024,7 @@ fn fit_result_to_list(
         shrinkage_kappa_by_occ = shrinkage_kappa_by_occ_df,
         ebe_kappas = ebe_kappas_df,
         ebe_etas = ebe_etas_df,
+        subject_ids = subject_ids,
         individual_estimates = individual_estimates_df,
         model_structure = model_structure_list(model),
         omega_param_corr = omega_param_corr_flat,

@@ -90,13 +90,20 @@ ferx_load_fit <- function(path) {
     # ID columns are read verbatim, as on the live fit: `ferx_sir()` and
     # `ferx_covariance()` match them to the data (#468).
     result$ebe_etas <- .fitrx_read_csv_exact(ebes_path, id_cols = "ID")
+    # Every subject, in fit order, as on the live fit (#550). A fit without
+    # random effects has ID rows and no eta columns here; live, its
+    # fit$ebe_etas is NULL, which is what says "no etas" downstream.
+    result$subject_ids <- as.character(result$ebe_etas$ID)
+    eta_cols <- setdiff(names(result$ebe_etas),
+                        c("ID", "ofv_contribution", "n_obs", "MIXEST"))
+    if (all(grepl("^PMIX_[0-9]+$", eta_cols))) result$ebe_etas <- NULL
   }
   preds_path <- file.path(staging, "predictions.csv")
   if (file.exists(preds_path)) {
     result$sdtab <- .fitrx_read_csv_exact(preds_path, id_cols = "ID")
     if (!is.null(result$sdtab$ID)) {
       result$sdtab$ID <- .fitrx_sdtab_id_number(result$sdtab$ID,
-                                                result$ebe_etas$ID)
+                                                result$subject_ids)
     }
   }
   covtab_path <- file.path(staging, "covtab.csv")
@@ -832,7 +839,16 @@ ferx_load_fit <- function(path) {
 
 .fitrx_named_omega <- function(omega_wire) {
   om <- .fitrx_matrix_from_wire(omega_wire$matrix)
-  if (is.null(om)) return(om)
+  if (is.null(om)) {
+    # A fit without random effects carries a 0 x 0 omega, as it does live,
+    # not NULL (#461).
+    w <- omega_wire$matrix
+    if (!is.null(w) && identical(as.integer(w$rows %||% -1L), 0L) &&
+        identical(as.integer(w$cols %||% -1L), 0L)) {
+      return(matrix(numeric(0), 0L, 0L))
+    }
+    return(om)
+  }
   en <- unlist(omega_wire$names, use.names = FALSE)
   d  <- nrow(om)
   nms <- if (!is.null(en) && length(en) == d) en else paste0("OMEGA(", seq_len(d), ",", seq_len(d), ")")

@@ -569,9 +569,16 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
 .fitrx_write_ebes_csv <- function(fit, path) {
   ebes <- fit$ebe_etas
   if (is.null(ebes) || nrow(ebes) == 0L) {
-    # Header-only file so the entry shape is stable.
-    cat("ID,ofv_contribution,n_obs\n", file = path)
-    return(invisible())
+    # No random effects: one row per subject all the same, with no eta
+    # columns, as ferx-core writes it - its loader builds the subject list
+    # from these rows, and ours reads the IDs back into fit$subject_ids
+    # (#461, #550). Header-only for a fit that predates fit$subject_ids.
+    ids <- .fitrx_subject_string_ids(fit)
+    if (is.null(ids)) {
+      cat("ID,ofv_contribution,n_obs\n", file = path)
+      return(invisible())
+    }
+    ebes <- data.frame(ID = ids, stringsAsFactors = FALSE)
   }
   # Pull ofv_contribution / n_obs out of sdtab (one row per subject) when not
   # already present on ebes - the Rust shim doesn't expose them on ebe_etas.
@@ -644,10 +651,17 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   .fitrx_write_csv_exact(covtab, path)
 }
 
+# Every subject's ID as text, in fit order: the EBE rows' IDs, or on a fit
+# without random effects `fit$subject_ids` (#550). NULL when the fit has
+# neither.
 .fitrx_subject_string_ids <- function(fit) {
   ebes <- fit$ebe_etas
-  if (is.null(ebes) || !"ID" %in% names(ebes)) return(NULL)
-  as.character(ebes$ID)
+  if (!is.null(ebes) && nrow(ebes) > 0L) {
+    if (!"ID" %in% names(ebes)) return(NULL)
+    return(as.character(ebes$ID))
+  }
+  if (length(fit$subject_ids) == 0L) return(NULL)
+  as.character(fit$subject_ids)
 }
 
 .fitrx_per_subject_ofv_nobs <- function(fit) {

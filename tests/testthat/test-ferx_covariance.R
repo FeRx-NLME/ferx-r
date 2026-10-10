@@ -468,15 +468,45 @@ test_that(".ferx_fit_subject_ids reads ebe_etas, then individual_estimates (#468
   expect_identical(subject_ids(numeric_ids, "ferx_sir"), c("7", "9"))
 })
 
-test_that(".ferx_fit_subject_ids refuses a fit with no IDs, naming both fields (#468)", {
+test_that(".ferx_fit_subject_ids reads fit$subject_ids when there are no EBE rows (#550)", {
+  subject_ids <- getFromNamespace(".ferx_fit_subject_ids", "ferx")
+  sdtab <- data.frame(ID = c(1, 1, 2))
+  # EBE rows still win: the warm-start is built from them.
+  with_ebes <- list(ebe_etas = data.frame(ID = c("PT1", "PT2"), ETA_CL = 0),
+                    subject_ids = c("X", "Y"))
+  expect_identical(subject_ids(with_ebes, "ferx_sir"), c("PT1", "PT2"))
+  no_eta <- list(ebe_etas = NULL, subject_ids = c("007", "S 9"),
+                 individual_estimates = data.frame(ID = c("7", "9")),
+                 sdtab = sdtab)
+  expect_identical(subject_ids(no_eta, "ferx_sir"), c("007", "S 9"))
+  no_eta$subject_ids <- NULL
+  expect_identical(subject_ids(no_eta, "ferx_sir"), c("7", "9"))
+})
+
+test_that(".ferx_fit_subject_ids falls back to one ID per sdtab subject block (#550)", {
+  subject_ids <- getFromNamespace(".ferx_fit_subject_ids", "ferx")
+  # A fit from before fit$subject_ids: the engine's number per block, as the
+  # data spells an integer ID - no exponent, no decimals - and a reused ID in a
+  # later block is a subject of its own.
+  old <- list(ebe_etas = NULL, sdtab = data.frame(ID = c(1e5, 1e5, 7, 9, 9, 7, 2.5)))
+  expect_identical(subject_ids(old, "ferx_covariance"),
+                   c("100000", "7", "9", "7", "2.5"))
+})
+
+test_that(".ferx_fit_subject_ids refuses a fit with no IDs, naming every field (#468)", {
   subject_ids <- getFromNamespace(".ferx_fit_subject_ids", "ferx")
   none <- list(ebe_etas = NULL, individual_estimates = NULL, n_subjects = 10L)
   err <- tryCatch(subject_ids(none, "ferx_covariance"), error = conditionMessage)
   expect_match(err, "^ferx_covariance: the fit carries no subject IDs")
   expect_match(err, "fit$ebe_etas$ID", fixed = TRUE)
+  expect_match(err, "fit$subject_ids,", fixed = TRUE)
   expect_match(err, "fit$individual_estimates$ID", fixed = TRUE)
+  expect_match(err, "fit$sdtab$ID", fixed = TRUE)
   expect_match(err, "cannot be matched to the data", fixed = TRUE)
-  expect_match(err, "Re-fit via ferx_fit(model, data).", fixed = TRUE)
+  expect_match(err, "A fit from ferx_fit() in this version carries fit$subject_ids.",
+               fixed = TRUE)
+  # Re-fitting is not advice that helps a fit it would reproduce (#550).
+  expect_no_match(err, "Re-fit", fixed = TRUE)
   # A recorded subject count is not an ID set: it must not be used, or named.
   expect_no_match(err, "n_subjects", fixed = TRUE)
   expect_no_match(err, "SIR", fixed = TRUE)
