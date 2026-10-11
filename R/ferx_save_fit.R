@@ -106,9 +106,15 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
     entries <- c(entries, "conddist.csv")
   }
 
-  # predictions.csv
-  .fitrx_write_predictions_csv(fit, file.path(staging, "predictions.csv"))
-  entries <- c(entries, "predictions.csv")
+  # predictions.csv - the Gaussian sdtab rows, as ferx-core writes them;
+  # predictions_discrete.csv - the discrete (binary) rows, present only when
+  # the fit has any. ferx-core's loader refuses a predictions.csv row past
+  # each subject's n_obs, and does not read this second entry (#554).
+  if (.fitrx_write_predictions_csv(fit, staging)) {
+    entries <- c(entries, "predictions.csv", "predictions_discrete.csv")
+  } else {
+    entries <- c(entries, "predictions.csv")
+  }
 
   # covtab.csv - present only when the model declares a [covariates] block
   if (!is.null(fit$covtab) && nrow(fit$covtab) > 0L) {
@@ -591,32 +597,76 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
     }
     ebes <- data.frame(ID = ids, stringsAsFactors = FALSE)
   }
-  # Pull ofv_contribution / n_obs out of sdtab (one row per subject) when not
-  # already present on ebes - the Rust shim doesn't expose them on ebe_etas.
-  if (!all(c("ofv_contribution", "n_obs") %in% names(ebes))) {
-    per_subj <- .fitrx_per_subject_ofv_nobs(fit)
-    if (!is.null(per_subj)) {
-      # ebe_etas and the per-subject sdtab summary are both one row per subject
-      # in subject order, so join positionally: a dataset that reuses a subject
-      # ID in a non-contiguous block has two subjects sharing a textual ID, and
-      # an ID match would collapse them (both ebes rows get the first subject's
-      # n_obs, so ebes.csv disagrees with predictions.csv and the ferx-core
-      # loader rejects the bundle). Fall back to a string-ID match when the row
-      # counts don't line up (character IDs like PT001 still work; unrepresented
-      # subjects fall to NA).
-      idx <- if (length(per_subj$id) == nrow(ebes)) {
-        seq_len(nrow(ebes))
-      } else {
-        match(as.character(ebes$ID), per_subj$id)
-      }
-      ebes$ofv_contribution <- per_subj$ofv[idx]
-      ebes$n_obs <- per_subj$n_obs[idx]
-    } else {
-      ebes$ofv_contribution <- NA_real_
-      ebes$n_obs <- NA_integer_
+  # ofv_contribution and n_obs are the engine's per-subject values
+  # (`fit$subject_summary`), written verbatim as ferx-core's writer writes
+  # them. They used to be read back from sdtab, whose N_OBS is blank on a
+  # discrete row, so a binary fit's bundle had no n_obs (#554), and whose rows
+  # were assigned to subjects by the ID number, so two adjacent subjects with
+  # the same number swapped values (#540). n_obs_discrete is the number of
+  # predictions_discrete.csv rows per subject; ferx-core reads its base columns
+  # by position and skips this one, and it is left out when the fit has no
+  # discrete rows, so such a bundle's ebes.csv is the engine's own.
+  #
+  # ferx-core reads ofv_contribution and n_obs by position, right after the
+  # etas, and a mixture's MIXEST / PMIX_* columns by name after them, so the
+  # per-subject columns go between the two: a reloaded ferx-core mixture
+  # bundle carries MIXEST / PMIX_* in fit$ebe_etas.
+  summ <- .fitrx_subject_summary(fit, complete = FALSE)
+  if (!is.null(summ) && nrow(summ) == nrow(ebes)) {
+    mix <- grep("^(MIXEST|PMIX_[0-9]+)$", names(ebes), value = TRUE)
+    per_subject <- data.frame(
+      ofv_contribution = as.numeric(summ$ofv_contribution),
+      n_obs = as.integer(summ$n_obs)
+    )
+    if (isTRUE(any(summ$n_obs_discrete > 0L, na.rm = TRUE))) {
+      per_subject$n_obs_discrete <- as.integer(summ$n_obs_discrete)
     }
+    ebes <- cbind(ebes[setdiff(names(ebes), c(.FITRX_SUBJECT_COLS, mix))],
+                  per_subject, ebes[mix])
+  } else if (!all(c("ofv_contribution", "n_obs") %in% names(ebes))) {
+    # A fit from before fit$subject_summary: nothing says which value is
+    # whose. ferx_load_fit() reads the bundle; ferx-core's loader refuses it.
+    ebes$ofv_contribution <- NA_real_
+    ebes$n_obs <- NA_integer_
   }
   .fitrx_write_csv_exact(ebes, path)
+}
+
+# The per-subject columns ebes.csv carries next to the etas.
+.FITRX_SUBJECT_COLS <- c("ofv_contribution", "n_obs", "n_obs_discrete")
+
+# `fit$subject_summary`, else NULL (a fit from before it existed). With
+# `complete`, also NULL when a count is missing, as in a reloaded bundle
+# written before #554, whose n_obs may be empty: its values still go back to
+# ebes.csv, but its rows cannot be assigned from the counts.
+.fitrx_subject_summary <- function(fit, complete = TRUE) {
+  summ <- fit$subject_summary
+  if (!is.data.frame(summ) || nrow(summ) == 0L ||
+      !all(c("ID", .FITRX_SUBJECT_COLS) %in% names(summ))) {
+    return(NULL)
+  }
+  if (complete && (anyNA(summ$n_obs) || anyNA(summ$n_obs_discrete))) {
+    return(NULL)
+  }
+  summ
+}
+
+# The subject (1-based position in fit order) of every sdtab row, from the
+# per-subject row counts: each subject's `n_obs` Gaussian rows in subject
+# order, then each subject's `n_obs_discrete` discrete rows in subject order,
+# as `io::output::sdtab` writes them. Not from the ID number, which runs two
+# adjacent subjects with the same number together and has no rows for a
+# subject without observations (#540). NULL when the counts do not add up to
+# `n_rows`.
+.fitrx_sdtab_subject <- function(n_obs, n_obs_discrete, n_rows) {
+  n_obs <- as.integer(n_obs)
+  n_obs_discrete <- as.integer(n_obs_discrete)
+  if (anyNA(n_obs) || anyNA(n_obs_discrete) ||
+      sum(n_obs) + sum(n_obs_discrete) != n_rows) {
+    return(NULL)
+  }
+  pos <- seq_along(n_obs)
+  list(gaussian = rep.int(pos, n_obs), discrete = rep.int(pos, n_obs_discrete))
 }
 
 .fitrx_write_ebes_kappa_csv <- function(fit, path) {
@@ -636,11 +686,14 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   !is.null(cd) && is.data.frame(cd$data) && nrow(cd$data) > 0L
 }
 
-.fitrx_write_predictions_csv <- function(fit, path) {
+# Writes predictions.csv into `staging`, and predictions_discrete.csv when the
+# fit has discrete rows; TRUE when it wrote the second.
+.fitrx_write_predictions_csv <- function(fit, staging) {
+  path <- file.path(staging, "predictions.csv")
   sdtab <- fit$sdtab
   if (is.null(sdtab) || nrow(sdtab) == 0L) {
     cat("ID,TIME,DV,PRED,IPRED,CWRES,IWRES,EBE_OFV,N_OBS\n", file = path)
-    return(invisible())
+    return(FALSE)
   }
   # sdtab$ID is a number: the subject ID parsed as one, else the subject's
   # position. ferx-core's writer puts the subject ID itself here, as text, and
@@ -648,9 +701,26 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   # the same: `NA`, `007` and `Smith, 2019` all differ from their number
   # (#475). The loader turns it back (`.fitrx_sdtab_id_number()`).
   ids <- .fitrx_subject_string_ids(fit)
-  subj <- .ferx_subject_index(sdtab$ID)
-  if (!is.null(ids) && max(subj) == length(ids)) sdtab$ID <- ids[subj]
-  .fitrx_write_csv_exact(sdtab, path)
+  summ <- .fitrx_subject_summary(fit)
+  rows <- if (!is.null(summ) && !is.null(ids) && nrow(summ) == length(ids)) {
+    .fitrx_sdtab_subject(summ$n_obs, summ$n_obs_discrete, nrow(sdtab))
+  }
+  if (is.null(rows)) {
+    # A fit from before fit$subject_summary: the run-length of the ID number
+    # is all there is, right only when no two adjacent subjects share a
+    # number and every subject has observations.
+    subj <- .ferx_subject_index(sdtab$ID)
+    if (!is.null(ids) && max(subj) == length(ids)) sdtab$ID <- ids[subj]
+    .fitrx_write_csv_exact(sdtab, path)
+    return(FALSE)
+  }
+  n_gauss <- length(rows$gaussian)
+  sdtab$ID <- ids[c(rows$gaussian, rows$discrete)]
+  .fitrx_write_csv_exact(sdtab[seq_len(n_gauss), , drop = FALSE], path)
+  if (length(rows$discrete) == 0L) return(FALSE)
+  .fitrx_write_csv_exact(sdtab[n_gauss + seq_along(rows$discrete), , drop = FALSE],
+                         file.path(staging, "predictions_discrete.csv"))
+  TRUE
 }
 
 .fitrx_write_covtab_csv <- function(fit, path) {
@@ -673,23 +743,6 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   }
   if (length(fit$subject_ids) == 0L) return(NULL)
   as.character(fit$subject_ids)
-}
-
-.fitrx_per_subject_ofv_nobs <- function(fit) {
-  sdtab <- fit$sdtab
-  if (is.null(sdtab) || nrow(sdtab) == 0L) return(NULL)
-  needed <- c("ID", "EBE_OFV", "N_OBS")
-  if (!all(needed %in% names(sdtab))) return(NULL)
-  # First row of each subject block, keyed on the ordinal subject index rather
-  # than on the raw ID - `!duplicated(sdtab$ID)` would drop the second of two
-  # subjects that reuse a textual ID in a non-contiguous block.
-  subj <- .ferx_subject_index(sdtab$ID)
-  first <- !duplicated(subj)
-  list(
-    id = as.character(sdtab$ID[first]),
-    ofv = as.numeric(sdtab$EBE_OFV[first]),
-    n_obs = as.integer(sdtab$N_OBS[first])
-  )
 }
 
 .fitrx_has_kappa <- function(fit) {

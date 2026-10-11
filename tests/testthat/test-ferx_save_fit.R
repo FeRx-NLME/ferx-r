@@ -1197,18 +1197,16 @@ test_that(".fitrx_subject_string_ids extracts character IDs or NULL", {
   fit <- list(ebe_etas = data.frame(ID = c(1, 2, 10), eta = c(0, 0, 0)))
   expect_identical(ferx:::.fitrx_subject_string_ids(fit), c("1", "2", "10"))
 })
-test_that(".fitrx_per_subject_ofv_nobs pulls one row per subject from sdtab", {
-  expect_null(ferx:::.fitrx_per_subject_ofv_nobs(list()))
-  expect_null(ferx:::.fitrx_per_subject_ofv_nobs(list(sdtab = data.frame(ID = 1)))) # missing cols
-  fit <- list(sdtab = data.frame(
-    ID = c("A", "A", "B"),
-    EBE_OFV = c(1.5, 1.5, 2.5),
-    N_OBS = c(3L, 3L, 4L)
-  ))
-  res <- ferx:::.fitrx_per_subject_ofv_nobs(fit)
-  expect_identical(res$id, c("A", "B"))
-  expect_identical(res$ofv, c(1.5, 2.5))
-  expect_identical(res$n_obs, c(3L, 4L))
+test_that(".fitrx_sdtab_subject assigns rows from the per-subject counts (#540)", {
+  # Gaussian rows subject by subject, then discrete rows subject by subject;
+  # a subject with no rows of a kind takes none.
+  expect_identical(
+    ferx:::.fitrx_sdtab_subject(c(2L, 0L, 1L), c(1L, 1L, 0L), 5L),
+    list(gaussian = c(1L, 1L, 3L), discrete = c(1L, 2L))
+  )
+  # Counts that do not add up to the rows, or are missing, assign nothing.
+  expect_null(ferx:::.fitrx_sdtab_subject(c(2L, 1L), c(0L, 0L), 4L))
+  expect_null(ferx:::.fitrx_sdtab_subject(c(2L, NA), c(0L, 0L), 2L))
 })
 test_that(".fitrx_write_ebes_csv writes a stable header when ebes are absent", {
   path <- tempfile(fileext = ".csv")
