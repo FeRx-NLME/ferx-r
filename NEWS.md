@@ -22,13 +22,16 @@
   exactly needs updating
   ([#430](https://github.com/FeRx-NLME/ferx-r/issues/430)).
 
-- **ferx now builds against ferx-core `14cca400`**, up from `160cc9a3`.
+- **ferx now builds against ferx-core `deaa92f6`**, up from `160cc9a3`.
   These engine changes reach R:
 
   - **OMEGA_IOV (KAPPA) rows print the exact log-normal CV%**,
     `sqrt(exp(var) - 1) * 100`, instead of the first-order `sqrt(var) * 100`
     (0.20: 44.7 becomes 47.1)
     ([ferx-core #1858](https://github.com/FeRx-NLME/ferx-core/issues/1858)).
+  - **OMEGA rows have a public engine formatter**, `format_omega_rows_from`,
+    which `print()` now uses (see Bug fixes, #543)
+    ([ferx-core #1859](https://github.com/FeRx-NLME/ferx-core/issues/1859)).
   - **`ferx_covariance()` and `ferx_sir()` on a `gradient = "fd"` fit stay on
     finite differences with default arguments**, also after
     `ferx_load_fit()`
@@ -826,6 +829,20 @@
 
 ## Bug fixes
 
+- **`print()`'s OMEGA rows are ferx-core's console rows too**, so they agree
+  with the OMEGA_IOV rows under them: a FIX ETA reads `ETA_KA [FIX] = ...
+  SE = ---` (also on its correlation lines), no CV%/SD is shown after a failed
+  or SIR-fallback covariance step, an additive or logit ETA's note reads
+  `(SD = ..., CV% = ... at TVV = ...)` / `(SD = ..., logit scale, +/-1 SD =
+  [lo, hi])`, and a custom ETA prints no note instead of `CV% = N/A`
+  ([#543](https://github.com/FeRx-NLME/ferx-r/issues/543); ferx-core
+  `deaa92f6`).
+
+- **The `Structural:` line of `print()` and `summary()` names each theta block
+  once**, as `PLACEBO[STUDY, TIME] (18 coefficients)`, instead of listing
+  every level, whatever the block's size; the levels stay in the THETA table
+  and `fit$theta` ([#538](https://github.com/FeRx-NLME/ferx-r/issues/538)).
+
 - **A `.fitrx` bundle puts every subject's values on the right subject**
   ([#540](https://github.com/FeRx-NLME/ferx-r/issues/540)).
   `ferx_save_fit()` and `ferx_load_fit()` worked out which subject owns
@@ -852,6 +869,7 @@
   two entries it does read are what it wrote itself. `ferx_load_fit()`
   puts the rows back after the continuous ones, as in the live `sdtab`. A
   bundle written before this still loads.
+
 - **`print()`'s OMEGA_IOV rows are ferx-core's console rows**
   ([#470](https://github.com/FeRx-NLME/ferx-r/issues/470)). R printed
   its own copy of them, which had drifted from the engine: a log-normal

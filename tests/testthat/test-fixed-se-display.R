@@ -18,10 +18,10 @@ print_line <- function(out, label) {
   hit
 }
 
-# The SE field of a FIX row. KAPPA rows are ferx-core's own console rows
-# (#470), which label a FIX kappa `NAME [FIX]` with `SE = ---`; every other
-# block is R's and says FIXED.
-fixed_se <- function(label) if (startsWith(label, "KAPPA")) "SE = ---" else "SE = FIXED"
+# The SE field of a FIX row. OMEGA and KAPPA rows are ferx-core's console rows
+# (#543, #470), which label a FIX entry `NAME [FIX]` with `SE = ---`, as do the
+# OMEGA correlations; THETA and SIGMA are R's and say FIXED.
+fixed_se <- function(label) if (grepl("^(KAPPA|ETA)", label)) "SE = ---" else "SE = FIXED"
 
 # -- Crafted fits: every cell of class x fixed/free x covariance state --------
 
@@ -84,7 +84,7 @@ test_that("print: the FIX entry of every class says FIXED, its free twin keeps S
     expect_no_match(ln, "FIXED", fixed = TRUE)
   }
   # The off-diagonal of the FIX block.
-  expect_match(print_line(out, "ETA_V ~ ETA_CL"), "SE = FIXED\\s*$")
+  expect_match(print_line(out, "ETA_V ~ ETA_CL"), "SE = ---\\s*$")
 })
 
 test_that("print: covariance step ok, failed or skipped - FIXED regardless, free per its SE", {
@@ -104,7 +104,7 @@ test_that("print: covariance step ok, failed or skipped - FIXED regardless, free
   for (lbl in setdiff(free_labels, "TVCL")) {
     expect_match(print_line(none, lbl), "SE = N/A", fixed = TRUE, info = lbl)
   }
-  expect_match(print_line(none, "ETA_V ~ ETA_CL"), "SE = FIXED\\s*$")
+  expect_match(print_line(none, "ETA_V ~ ETA_CL"), "SE = ---\\s*$")
 })
 
 test_that("print: a fit with no *_fixed fields does not crash and claims no FIXED", {
@@ -275,7 +275,7 @@ test_that("live fit, one FIX and one free per class: flags, print and estimates 
   for (lbl in c("ETA_CL", "ETA_V", "ADD_ERR", "KAPPA_V")) {
     expect_match(print_line(out, lbl), fixed_se(lbl), fixed = TRUE, info = lbl)
   }
-  expect_match(print_line(out, "ETA_V ~ ETA_CL"), "SE = FIXED\\s*$")
+  expect_match(print_line(out, "ETA_V ~ ETA_CL"), "SE = ---\\s*$")
   est <- fit$estimates
   expect_identical(est[c("TVKA", "ETA_CL", "ETA_V", "ADD_ERR", "KAPPA_V"), "fixed"], rep(TRUE, 5L))
   expect_identical(est[c("TVCL", "TVV", "ETA_KA", "PROP_ERR", "KAPPA_CL"), "fixed"], rep(FALSE, 5L))

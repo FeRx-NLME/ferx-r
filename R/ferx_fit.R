@@ -2809,90 +2809,10 @@ print.ferx_fit <- function(x, ...) {
     cat("\n", .ferx_style("OMEGA  (between-subject variability)", "bold"), "\n", sep = "")
     cat(strrep("-", 60), "\n", sep = "")
   }
-  has_offdiag <- FALSE
-  for (i in seq_len(n_eta)) {
-    var_ii   <- om[i, i]
-    eta_type <- if (!is.null(x$eta_param_types) && length(x$eta_param_types) >= i) x$eta_param_types[i] else "log_normal"
-    linked_theta_name <- if (!is.null(x$eta_linked_theta) && length(x$eta_linked_theta) >= i) x$eta_linked_theta[i] else ""
-    se_val <- .omega_se_at(x$se_omega, n_eta, i, i)
-    se_str <- if (.ferx_is_fixed(x$omega_fixed, i)) {
-      "FIXED"
-    } else if (!is.na(se_val)) {
-      sprintf("%.6f", se_val)
-    } else {
-      "N/A"
-    }
-
-    extra <- if (eta_type == "log_normal") {
-      cv <- if (var_ii > 0) sqrt(exp(var_ii) - 1) * 100 else 0
-      sprintf("CV%% = %.1f", cv)
-    } else if (eta_type == "additive") {
-      sd_val  <- sqrt(max(var_ii, 0))
-      tv_name <- if (nzchar(linked_theta_name)) linked_theta_name else NULL
-      tv_val  <- if (!is.null(tv_name)) x$theta[tv_name] else NA_real_
-      cv_part <- if (!is.null(tv_val) && !is.na(tv_val) && abs(tv_val) > 1e-12) {
-        sprintf("  CV%% = %.1f (at %s=%.3g)", sd_val / abs(tv_val) * 100, tv_name, tv_val)
-      } else ""
-      sprintf("SD = %.4f%s", sd_val, cv_part)
-    } else if (eta_type %in% c("logit", "logit_probability")) {
-      # Natural-scale +/-1 SD range using linked theta (if known).  The eta is
-      # on the logit scale for both types, but the theta is not: under
-      # `logit_probability` it is already a probability, so put it on the logit
-      # scale before adding the eta SD.  Which of the two applies is decided by
-      # the *theta's* own transform rather than by `eta_type`, because that is
-      # what says which scale `x$theta[tv_name]` is on; `eta_type` only selects
-      # this branch.  The engine keeps the two in step, so this matters only if
-      # they ever drift.
-      tv_name <- if (nzchar(linked_theta_name)) linked_theta_name else NULL
-      tv_val  <- if (!is.null(tv_name)) x$theta[tv_name] else NA_real_
-      # `theta_transforms` is a *named* character vector, so take the element
-      # with `[[`: `[` keeps the name and no `identical()` against a bare
-      # string would ever match.
-      tv_tf   <- NA_character_
-      if (!is.null(tv_name) && !is.null(x$theta_transforms) && !is.null(names(x$theta))) {
-        idx <- match(tv_name, names(x$theta))
-        if (!is.na(idx) && length(x$theta_transforms) >= idx) {
-          tv_tf <- as.character(x$theta_transforms[[idx]])[1]
-        }
-      }
-      # Fall back to `eta_type` only when the theta's transform is unknown.
-      on_probability_scale <- if (!is.na(tv_tf)) {
-        tv_tf == "logit_probability"
-      } else {
-        identical(eta_type, "logit_probability")
-      }
-      if (!is.null(tv_val) && !is.na(tv_val) && on_probability_scale) {
-        tv_val <- .ferx_logit(tv_val)
-      }
-      if (!is.null(tv_val) && !is.na(tv_val)) {
-        sd_logit <- sqrt(max(var_ii, 0))
-        lo <- .ferx_inv_logit(tv_val - sd_logit)
-        hi <- .ferx_inv_logit(tv_val + sd_logit)
-        sprintf("SD_logit = %.4f  +/-1SD = [%.3f, %.3f]", sd_logit, lo, hi)
-      } else {
-        sprintf("SD_logit = %.4f", sqrt(max(var_ii, 0)))
-      }
-    } else {
-      "CV% = N/A"
-    }
-    type_tag <- switch(eta_type,
-      log_normal        = "[log-normal]",
-      additive          = "[additive]",
-      logit             = "[logit]",
-      logit_probability = "[logit]",
-      custom            = "[custom]",
-      ""
-    )
-    eta_label <- if (!is.null(x$eta_names) && length(x$eta_names) >= i && nzchar(x$eta_names[i])) x$eta_names[i] else sprintf("OMEGA(%d,%d)", i, i)
-    sd_note <- if (!is.null(x$omega_init_as_sd) && length(x$omega_init_as_sd) >= i && isTRUE(x$omega_init_as_sd[i])) "  [initial specified as SD]" else ""
-    cat(sprintf(
-      "  %-24s %-13s = %.6f  %s  SE = %s%s\n",
-      eta_label, type_tag, var_ii, extra, se_str, sd_note
-    ))
-    for (j in seq_len(i - 1L)) {
-      if (abs(om[i, j]) > 1e-15) has_offdiag <- TRUE
-    }
-  }
+  # The rows - CV%/SD note, scale tag, FIX, SE - are ferx-core's console rows
+  # (#543), the same formatter as the OMEGA_IOV rows below.
+  cat(paste0(.ferx_omega_rows(x), "\n"), sep = "")
+  has_offdiag <- n_eta > 1L && any(abs(om[lower.tri(om)]) > 1e-15)
   if (has_offdiag) {
     cat("  --- Correlations ---\n")
     for (i in seq_len(n_eta)) {
@@ -2914,8 +2834,9 @@ print.ferx_fit <- function(x, ...) {
         }
         corr_label <- if (!is.null(x$omega_param_corr)) "param corr" else "corr"
         se_ij <- .omega_se_at(x$se_omega, n_eta, i, j)
+        # FIX spelled as on the rows above: ferx-core's `SE = ---` (#543).
         se_part <- if (.ferx_omega_is_fixed(x$omega_fixed, i, j)) {
-          "  SE = FIXED"
+          "  SE = ---"
         } else if (!is.na(se_ij)) {
           sprintf("  SE = %.6f", se_ij)
         } else {

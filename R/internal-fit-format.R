@@ -1,8 +1,12 @@
 # Format the structural display string from a model_structure list.
 # Combines the optional type label with the population parameter (theta) names.
+# A theta block is named once with its coefficient count, whatever its size
+# (#538): the glue's rule, shared by print.ferx_fit() and print(summary(fit)).
+# The names arrive as a list after a .fitrx round trip; flatten first.
 .ferx_format_structural <- function(ms) {
-  theta_str <- if (length(ms$theta_names) > 0L)
-    paste(ms$theta_names, collapse = ", ")
+  theta_names <- as.character(unlist(ms$theta_names, use.names = FALSE))
+  theta_str <- if (length(theta_names) > 0L)
+    paste(ferx_rust_structural_theta_labels(theta_names), collapse = ", ")
   else
     NULL
   if (!is.null(ms$model_type) && !is.null(theta_str))
@@ -76,7 +80,7 @@
   if (is.null(dim(m))) m <- matrix(m, 1L, 1L)
   types <- as.character(fit$kappa_param_types %||% character())
   status <- fit$covariance_status %||% "not_requested"
-  .ferx_check_kappa_row_fields(types, status)
+  .ferx_check_row_fields(types, "kappa_param_types", status)
   rows <- ferx_rust_kappa_rows(
     as.numeric(m), nrow(m),
     .ferx_kappa_labels(fit$kappa_names, nrow(m)),
@@ -89,6 +93,59 @@
     ascii
   )
   strsplit(rows, "\n", fixed = TRUE)[[1L]]
+}
+
+# The OMEGA rows print.ferx_fit() prints: ferx-core's own formatter
+# (format_omega_rows_from, ferx-core #1859) over this fit's fields, so the
+# rows - the exact log-normal CV%, the SD on an additive or logit ETA's scale,
+# `NAME [FIX] ... SE = ---`, and no CV%/SD after a failed or SIR-fallback
+# covariance step - are the engine console's and the KAPPA rows' under them,
+# not an R copy (#543). The scale tag, the spread at the linked theta and
+# `[initial specified as SD]` are the formatter's options, switched on in the
+# glue. A character vector, one element per diagonal row; empty for a
+# fixed-effects-only fit. Off-diagonal correlations stay in print.ferx_fit().
+.ferx_omega_rows <- function(fit) {
+  m <- fit$omega
+  if (is.null(m)) return(character())
+  if (is.null(dim(m))) m <- matrix(m, 1L, 1L)
+  n <- nrow(m)
+  if (n == 0L) return(character())
+  types <- as.character(fit$eta_param_types %||% character())
+  if (length(types) != n) types <- character()
+  status <- fit$covariance_status %||% "not_requested"
+  .ferx_check_row_fields(types, "eta_param_types", status, na_ok = TRUE)
+  # Each ETA's linked theta (by name, as the engine resolved it), with its
+  # estimate and transform looked up in this fit's theta vector.
+  linked <- as.character(fit$eta_linked_theta %||% character())
+  if (length(linked) != n) linked <- rep(NA_character_, n)
+  idx <- match(linked, names(fit$theta))
+  idx[is.na(linked) | !nzchar(linked)] <- NA_integer_
+  tf <- as.character(fit$theta_transforms %||% character())
+  rows <- ferx_rust_omega_rows(
+    as.numeric(m), n,
+    .ferx_eta_labels(fit$eta_names, n),
+    if (is.null(fit$omega_fixed)) NULL else as.logical(fit$omega_fixed),
+    if (is.null(fit$se_omega)) NULL else as.numeric(fit$se_omega),
+    types,
+    if (is.null(fit$omega_init_as_sd)) NULL else as.logical(fit$omega_init_as_sd),
+    ifelse(is.na(idx), NA_character_, linked),
+    as.numeric(unname(fit$theta))[idx],
+    if (length(tf) == length(fit$theta)) tf[idx] else rep(NA_character_, n),
+    as.character(status)
+  )
+  strsplit(rows, "\n", fixed = TRUE)[[1L]]
+}
+
+# The label of each of `n` ETAs in print output: its declared name, or the
+# OMEGA(i,i) fallback (AGENTS.md, Output Label Convention) when the fit carries
+# no names, the wrong number of them, or an empty / NA one.
+.ferx_eta_labels <- function(eta_names, n) {
+  fallback <- sprintf("OMEGA(%d,%d)", seq_len(n), seq_len(n))
+  if (length(eta_names) != n) return(fallback)
+  out <- as.character(eta_names)
+  bad <- is.na(out) | !nzchar(out)
+  out[bad] <- fallback[bad]
+  out
 }
 
 # SIR 95% intervals for theta, omega and sigma, from the flat
@@ -126,17 +183,18 @@
   out
 }
 
-# The kappa fields .ferx_kappa_rows() cannot hand to ferx-core's formatter:
-# an NA or unknown scale, and an NA, empty or unknown covariance status
-# (#545). Without this print() itself aborted with extendr's bare
-# "Must not be NA." or the glue's "unknown covariance_status". Refuses with
-# a `ferx_fit_field_error` naming the field; `field` carries its name.
-.ferx_check_kappa_row_fields <- function(types, status) {
+# The fields .ferx_kappa_rows() and .ferx_omega_rows() cannot hand to
+# ferx-core's formatters: an unknown scale in `types` (the fit field named by
+# `types_field`), an NA one unless `na_ok`, and an NA, empty or unknown
+# covariance status (#545). Without this print() itself aborted with extendr's
+# bare "Must not be NA." or the glue's "unknown covariance_status". Refuses
+# with a `ferx_fit_field_error` naming the field; `field` carries its name.
+.ferx_check_row_fields <- function(types, types_field, status, na_ok = FALSE) {
   known_types <- c("log_normal", "additive", "logit", "logit_probability", "custom")
-  bad <- is.na(types) | !types %in% known_types
+  bad <- if (na_ok) !is.na(types) & !types %in% known_types else is.na(types) | !types %in% known_types
   if (any(bad)) {
-    .ferx_fit_field_error("kappa_param_types", sprintf(
-      "fit$kappa_param_types has %s at position %s; expected one of %s.",
+    .ferx_fit_field_error(types_field, sprintf(
+      "fit$%s has %s at position %s; expected one of %s.", types_field,
       paste(ifelse(is.na(types[bad]), "NA", sprintf("\"%s\"", types[bad])), collapse = ", "),
       paste(which(bad), collapse = ", "), paste(known_types, collapse = ", ")
     ))

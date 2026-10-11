@@ -2514,7 +2514,7 @@ test_that("print.ferx_fit shows [logit] label and +/-1SD range for logit ETA", {
   out <- capture.output(print(fit))
   omega_line <- out[grepl("OMEGA\\(1,1\\)", out)]
   expect_true(any(grepl("logit", omega_line)))
-  expect_true(any(grepl("+/-1SD", omega_line, fixed = TRUE)))
+  expect_true(any(grepl("+/-1 SD", omega_line, fixed = TRUE)))
 })
 test_that("print.ferx_fit centres the logit_probability +/-1SD on the logit (#371)", {
   # Same model as the `logit` case above, declared the other way round: the
@@ -2547,8 +2547,8 @@ test_that("print.ferx_fit omits the +/-1SD range for an out-of-range logit_proba
   )
   out <- capture.output(print(fit))
   omega_line <- out[grepl("OMEGA\\(1,1\\)", out)]
-  expect_true(any(grepl("SD_logit", omega_line)))
-  expect_false(any(grepl("+/-1SD", omega_line, fixed = TRUE)))
+  expect_true(any(grepl("logit scale", omega_line, fixed = TRUE)))
+  expect_false(any(grepl("+/-1 SD", omega_line, fixed = TRUE)))
   expect_false(any(grepl("Inf", omega_line)))
 })
 test_that("print.ferx_fit shows [proportional] label and CV% for proportional sigma", {
@@ -2943,12 +2943,12 @@ test_that("print.ferx_fit uses exact log-normal CV% when eta_param_types is 'log
   omega_line <- out[grepl("OMEGA\\(1,1\\)", out)]
   expect_true(grepl("70\\.1", omega_line))
 })
-test_that("print.ferx_fit shows SD_logit for logit eta_param_types", {
+test_that("print.ferx_fit shows the logit-scale SD for logit eta_param_types", {
   fit <- make_fake_fit(omega = matrix(0.40, 1, 1), eta_param_types = "logit")
   out <- capture.output(print(fit))
   omega_line <- out[grepl("OMEGA\\(1,1\\)", out)]
   expect_true(grepl("logit", omega_line))
-  expect_true(grepl("SD_logit", omega_line))
+  expect_true(grepl("logit scale", omega_line, fixed = TRUE))
   # CV% is not meaningful for logit ETAs — must not appear
   expect_false(grepl("CV% =", omega_line))
 })
