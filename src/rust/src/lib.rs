@@ -4854,6 +4854,7 @@ fn r_print_omega_rows_options() -> ferx_core::io::output::OmegaRowsOptions {
         type_tag: true,
         typical_value_spread: true,
         init_as_sd: true,
+        ..Default::default()
     }
 }
 
