@@ -4633,53 +4633,57 @@ fn ferx_rust_compact_theta_blocks(theta_names: Vec<String>) -> List {
 /// The theta labels of the `Structural:` line in `print.ferx_fit` and
 /// `print(summary(fit))`: each scalar theta by name, and each theta block (a
 /// level block or a counted `theta NAME[N]`) **once**, whatever its size, as
-/// `NAME[KEY1, KEY2] (n free coefficients)` - the keys from its level labels
-/// (`PLACEBO[STUDY=1,TIME=0]` gives `STUDY, TIME`) - or `NAME (n free
+/// `NAME[KEY1, KEY2] (n coefficients)` - the keys from its level labels
+/// (`PLACEBO[STUDY=1,TIME=0]` gives `STUDY, TIME`) - or `NAME (n
 /// coefficients)` when the labels carry no keys (ferx-r #538). The line names
 /// the model's declarations, so unlike the THETA table (ferx-core's
 /// `compact_theta_blocks`, which keeps a block under `THETA_BLOCK_COMPACT_MIN`
 /// coefficients as rows) it never lists a block's cells. A block is recognised
 /// by the same rule as `compact_theta_blocks`: a run of `NAME[...]` names
-/// (a scalar theta name cannot contain a bracket). `n` counts the free
-/// coefficients, the names given: a dependent `sum_to_zero` level is not one.
+/// (a scalar theta name cannot contain a bracket). `n` counts the block's
+/// thetas, the names given: a dependent `sum_to_zero` level is not one. It
+/// says nothing about which are FIX - a whole block can be (`(init, lower,
+/// upper, FIX)`), so it does not say "free" (#560 review, finding 2).
 ///
 /// @param theta_names Character, the fit's theta names in order.
 /// @return Character, one label per scalar theta or block.
 /// @export
 #[extendr]
 fn ferx_rust_structural_theta_labels(theta_names: Vec<String>) -> Vec<String> {
-    let block_of = |n: &str| -> Option<(String, String)> {
-        n.strip_suffix(']')
-            .and_then(|r| r.split_once('['))
-            .map(|(b, inner)| (b.to_string(), inner.to_string()))
-    };
-    let mut out = Vec::new();
-    let mut i = 0;
-    while i < theta_names.len() {
-        let Some((block, first)) = block_of(&theta_names[i]) else {
-            out.push(theta_names[i].clone());
-            i += 1;
-            continue;
+    entry(move || {
+        let block_of = |n: &str| -> Option<(String, String)> {
+            n.strip_suffix(']')
+                .and_then(|r| r.split_once('['))
+                .map(|(b, inner)| (b.to_string(), inner.to_string()))
         };
-        let start = i;
-        while i < theta_names.len()
-            && block_of(&theta_names[i]).is_some_and(|(b, _)| b == block)
-        {
-            i += 1;
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i < theta_names.len() {
+            let Some((block, first)) = block_of(&theta_names[i]) else {
+                out.push(theta_names[i].clone());
+                i += 1;
+                continue;
+            };
+            let start = i;
+            while i < theta_names.len()
+                && block_of(&theta_names[i]).is_some_and(|(b, _)| b == block)
+            {
+                i += 1;
+            }
+            let n = i - start;
+            let keys: Vec<&str> = first
+                .split(',')
+                .filter_map(|part| part.split_once('=').map(|(k, _)| k.trim()))
+                .collect();
+            let noun = if n == 1 { "coefficient" } else { "coefficients" };
+            out.push(if keys.is_empty() {
+                format!("{block} ({n} {noun})")
+            } else {
+                format!("{block}[{}] ({n} {noun})", keys.join(", "))
+            });
         }
-        let n = i - start;
-        let keys: Vec<&str> = first
-            .split(',')
-            .filter_map(|part| part.split_once('=').map(|(k, _)| k.trim()))
-            .collect();
-        let noun = if n == 1 { "free coefficient" } else { "free coefficients" };
-        out.push(if keys.is_empty() {
-            format!("{block} ({n} {noun})")
-        } else {
-            format!("{block}[{}] ({n} {noun})", keys.join(", "))
-        });
-    }
-    out
+        Ok(out)
+    })
 }
 
 /// The `OMEGA_IOV` rows `print.ferx_fit` prints, one `name = variance  (note)

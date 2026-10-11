@@ -1,5 +1,5 @@
 # The `Structural:` line of print.ferx_fit() and the `Structure:` line of
-# print(summary(fit)) name each theta block once with its free-coefficient
+# print(summary(fit)) name each theta block once with its coefficient
 # count, whatever its size (#538). The line lists the model's declarations;
 # the THETA table, not this line, is where ferx-core's
 # THETA_BLOCK_COMPACT_MIN decides between per-level rows and a summary.
@@ -29,14 +29,14 @@ fake_structured_fit <- function(theta_names) {
   )
 }
 
-test_that("mbma_placebo names PLACEBO once, with its free-coefficient count", {
+test_that("mbma_placebo names PLACEBO once, with its coefficient count", {
   skip_on_cran()
   ex <- ferx_example("mbma_placebo")
   fit <- suppressWarnings(ferx_fit(ex$model, ex$data, verbose = FALSE))
   n <- sum(grepl("^PLACEBO\\[", names(fit$theta)))
   expect_identical(n, 18L)
   s <- structural_from_print(fit)
-  expect_identical(s, "compartment-free  (TVE0, EMAX, ED50, ET50, PLACEBO[STUDY, TIME] (18 free coefficients))")
+  expect_identical(s, "compartment-free  (TVE0, EMAX, ED50, ET50, PLACEBO[STUDY, TIME] (18 coefficients))")
   expect_false(grepl("STUDY=", s, fixed = TRUE))
   expect_identical(structural_from_summary(fit), s)
   # Still a reload away: the bundle carries the names as a list.
@@ -51,7 +51,7 @@ test_that("a block is named once whether it has 5 or 50 coefficients", {
     fit <- fake_structured_fit(c("TVE0", level_names("PLACEBO", n), "EMAX"))
     s <- structural_from_print(fit)
     expect_identical(s, sprintf(
-      "compartment-free  (TVE0, PLACEBO[STUDY, TIME] (%d free coefficients), EMAX)", n))
+      "compartment-free  (TVE0, PLACEBO[STUDY, TIME] (%d coefficients), EMAX)", n))
     expect_identical(structural_from_summary(fit), s, info = n)
   }
 })
@@ -61,7 +61,33 @@ test_that("scalar thetas are unchanged; keyless and adjacent blocks are named ap
   expect_identical(structural_labels(character()), character())
   expect_identical(
     structural_labels(c("W[1]", "W[2]", "W[3]", "A[STUDY=1]", "B[STUDY=1]", "B[STUDY=2]")),
-    c("W (3 free coefficients)", "A[STUDY] (1 free coefficient)",
-      "B[STUDY] (2 free coefficients)")
+    c("W (3 coefficients)", "A[STUDY] (1 coefficient)",
+      "B[STUDY] (2 coefficients)")
   )
+})
+
+test_that("a whole-FIX block is not called free (#560 review, finding 2)", {
+  skip_on_cran()
+  ex <- ferx_example("mbma_placebo")
+  txt <- readLines(ex$model)
+  old <- "  theta PLACEBO[STUDY, TIME, contrast = sum_to_zero_within](0.0, -50.0, 50.0)"
+  stopifnot(sum(txt == old) == 1L)
+  txt[txt == old] <- sub("50.0)", "50.0, FIX)", old, fixed = TRUE)
+  mod <- withr::local_tempfile(fileext = ".ferx")
+  writeLines(txt, mod)
+  fit <- suppressWarnings(ferx_fit(mod, ex$data, verbose = FALSE))
+  placebo <- grepl("^PLACEBO\\[", names(fit$theta))
+  expect_true(all(fit$theta_fixed[placebo]))
+  s <- structural_from_print(fit)
+  expect_match(s, "PLACEBO[STUDY, TIME] (18 coefficients))", fixed = TRUE)
+  expect_false(grepl("free", sub("^compartment-free", "", s), fixed = TRUE))
+})
+
+test_that("a level value holding `,` or `=` does not garble the keys (finding 5)", {
+  # Keys are the `KEY=` heads of the comma-separated parts; a value's own
+  # comma gives a part without `=`, a value's own `=` sits after the key's.
+  expect_identical(structural_labels(c("P[SITE=a,b,TIME=0]", "P[SITE=c,TIME=0]")),
+                   "P[SITE, TIME] (2 coefficients)")
+  expect_identical(structural_labels(c("P[SITE=a=b,TIME=0]", "P[SITE=c,TIME=0]")),
+                   "P[SITE, TIME] (2 coefficients)")
 })

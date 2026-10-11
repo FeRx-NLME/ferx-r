@@ -29,6 +29,9 @@
     `sqrt(exp(var) - 1) * 100`, instead of the first-order `sqrt(var) * 100`
     (0.20: 44.7 becomes 47.1)
     ([ferx-core #1858](https://github.com/FeRx-NLME/ferx-core/issues/1858)).
+  - **OMEGA rows have a public engine formatter**, `format_omega_rows_from`,
+    which `print()` now uses (see Bug fixes, #543)
+    ([ferx-core #1859](https://github.com/FeRx-NLME/ferx-core/issues/1859)).
   - **`ferx_covariance()` and `ferx_sir()` on a `gradient = "fd"` fit stay on
     finite differences with default arguments**, also after
     `ferx_load_fit()`
@@ -829,7 +832,7 @@
   `deaa92f6`).
 
 - **The `Structural:` line of `print()` and `summary()` names each theta block
-  once**, as `PLACEBO[STUDY, TIME] (18 free coefficients)`, instead of listing
+  once**, as `PLACEBO[STUDY, TIME] (18 coefficients)`, instead of listing
   every level, whatever the block's size; the levels stay in the THETA table
   and `fit$theta` ([#538](https://github.com/FeRx-NLME/ferx-r/issues/538)).
 
