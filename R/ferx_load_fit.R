@@ -95,8 +95,12 @@ ferx_load_fit <- function(path) {
     # fit$ebe_etas is NULL, which is what says "no etas" downstream.
     result$subject_ids <- as.character(result$ebe_etas$ID)
     result$subject_summary <- .fitrx_read_subject_summary(result$ebe_etas)
-    eta_cols <- setdiff(names(result$ebe_etas),
-                        c("ID", .FITRX_SUBJECT_COLS, "MIXEST"))
+    # The per-subject columns live in fit$subject_summary, so the EBE table
+    # has the live fit's shape: ID and the etas. Left here, n_obs_discrete
+    # was counted as an eta by ferx_covariance() / ferx_sir() (#561).
+    result$ebe_etas <- result$ebe_etas[setdiff(names(result$ebe_etas),
+                                               .FITRX_SUBJECT_COLS)]
+    eta_cols <- setdiff(names(result$ebe_etas), c("ID", "MIXEST"))
     if (all(grepl("^PMIX_[0-9]+$", eta_cols))) result$ebe_etas <- NULL
   }
   preds_path <- file.path(staging, "predictions.csv")

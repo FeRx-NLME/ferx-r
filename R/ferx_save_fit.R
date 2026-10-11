@@ -606,14 +606,23 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   # predictions_discrete.csv rows per subject; ferx-core reads its base columns
   # by position and skips this one, and it is left out when the fit has no
   # discrete rows, so such a bundle's ebes.csv is the engine's own.
-  summ <- .fitrx_subject_summary(fit)
+  #
+  # ferx-core reads ofv_contribution and n_obs by position, right after the
+  # etas, and a mixture's MIXEST / PMIX_* columns by name after them, so the
+  # per-subject columns go between the two: a reloaded ferx-core mixture
+  # bundle carries MIXEST / PMIX_* in fit$ebe_etas.
+  summ <- .fitrx_subject_summary(fit, complete = FALSE)
   if (!is.null(summ) && nrow(summ) == nrow(ebes)) {
-    ebes <- ebes[setdiff(names(ebes), .FITRX_SUBJECT_COLS)]
-    ebes$ofv_contribution <- as.numeric(summ$ofv_contribution)
-    ebes$n_obs <- as.integer(summ$n_obs)
-    if (any(summ$n_obs_discrete > 0L)) {
-      ebes$n_obs_discrete <- as.integer(summ$n_obs_discrete)
+    mix <- grep("^(MIXEST|PMIX_[0-9]+)$", names(ebes), value = TRUE)
+    per_subject <- data.frame(
+      ofv_contribution = as.numeric(summ$ofv_contribution),
+      n_obs = as.integer(summ$n_obs)
+    )
+    if (isTRUE(any(summ$n_obs_discrete > 0L, na.rm = TRUE))) {
+      per_subject$n_obs_discrete <- as.integer(summ$n_obs_discrete)
     }
+    ebes <- cbind(ebes[setdiff(names(ebes), c(.FITRX_SUBJECT_COLS, mix))],
+                  per_subject, ebes[mix])
   } else if (!all(c("ofv_contribution", "n_obs") %in% names(ebes))) {
     # A fit from before fit$subject_summary: nothing says which value is
     # whose. ferx_load_fit() reads the bundle; ferx-core's loader refuses it.
@@ -626,14 +635,17 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
 # The per-subject columns ebes.csv carries next to the etas.
 .FITRX_SUBJECT_COLS <- c("ofv_contribution", "n_obs", "n_obs_discrete")
 
-# `fit$subject_summary` when it is one row per subject with every count
-# present, else NULL (a fit from before it existed, or a bundle written
-# before #554, whose n_obs may be empty).
-.fitrx_subject_summary <- function(fit) {
+# `fit$subject_summary`, else NULL (a fit from before it existed). With
+# `complete`, also NULL when a count is missing, as in a reloaded bundle
+# written before #554, whose n_obs may be empty: its values still go back to
+# ebes.csv, but its rows cannot be assigned from the counts.
+.fitrx_subject_summary <- function(fit, complete = TRUE) {
   summ <- fit$subject_summary
   if (!is.data.frame(summ) || nrow(summ) == 0L ||
-      !all(c("ID", "ofv_contribution", "n_obs", "n_obs_discrete") %in% names(summ)) ||
-      anyNA(summ$n_obs) || anyNA(summ$n_obs_discrete)) {
+      !all(c("ID", .FITRX_SUBJECT_COLS) %in% names(summ))) {
+    return(NULL)
+  }
+  if (complete && (anyNA(summ$n_obs) || anyNA(summ$n_obs_discrete))) {
     return(NULL)
   }
   summ

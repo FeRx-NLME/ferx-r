@@ -46,13 +46,19 @@ expect_core_summary <- function(from_core, fit) {
                fit$subject_summary$ofv_contribution, tolerance = core_tol)
 }
 
-# Fit `example` on its data after `edit` (a function of the data frame).
+# Fit `example` on its data after `edit` (a function of the data frame), and
+# its model after `model_edit` (a function of the model's lines).
 edited_fit <- local({
   cache <- list()
-  function(example, key, edit) {
+  function(example, key, edit, model_edit = NULL) {
     id <- paste(example, key, sep = "/")
     if (is.null(cache[[id]])) {
       ex <- ferx_example(example)
+      if (!is.null(model_edit)) {
+        model <- tempfile(paste0("edited_", key, "_"), fileext = ".ferx")
+        writeLines(model_edit(readLines(ex$model)), model)
+        ex$model <- model
+      }
       d <- edit(utils::read.csv(ex$data, stringsAsFactors = FALSE))
       path <- tempfile(paste0("edited_", key, "_"), fileext = ".csv")
       utils::write.csv(d, path, row.names = FALSE,
@@ -88,6 +94,38 @@ repeat_case <- function() {
 # their sdtab numbers are their positions, 1 and 3.
 gap_case <- function() {
   warfarin_relabelled("gap", c("1" = "p", "2" = "q", "3" = "p"), no_obs = 2L)
+}
+
+# Warfarin plus a binary endpoint on CMT 3: three binary records per subject
+# between its concentrations, subject 2's ID text. Each subject has rows of
+# both kinds, so sdtab's order - every subject's continuous rows, then every
+# subject's binary rows - differs from subject-by-subject order (#561).
+joint_case <- function() {
+  edited_fit("warfarin", "joint_binary",
+    edit = function(d) {
+      subj <- ferx:::.ferx_subject_index(d$ID)
+      n <- max(subj)
+      bin <- d[match(seq_len(n), subj)[rep(seq_len(n), each = 3L)], ]
+      k <- rep(0:2, n)
+      bin$TIME <- c(12, 36, 72)[k + 1L]
+      bin$DV <- as.character((rep(seq_len(n), each = 3L) + k) %% 2L)
+      bin$EVID <- 0L
+      bin$AMT <- "."
+      bin$CMT <- 3L
+      bin$RATE <- 0L
+      bin$MDV <- 0L
+      out <- rbind(d, bin)
+      s <- c(subj, rep(seq_len(n), each = 3L))
+      out <- out[order(s, out$TIME, -out$EVID), ]
+      out$ID <- ifelse(out$ID == 2L, "b", as.character(out$ID))
+      out
+    },
+    model_edit = function(m) {
+      at <- grep("^\\s*sigma ", m)[1L]
+      c(append(m, "  theta TH0(0.0, -10.0, 10.0)", after = at - 1L),
+        "", "[binary_model]", "  cmt   = 3", "  logit = TH0")
+    }
+  )
 }
 
 # Per-subject continuous observation count, from the data the fit read.
@@ -209,6 +247,93 @@ test_that("a binary fit's bundle loads in ferx-core, discrete rows apart (#554)"
   expect_identical(core_ebes$n_obs, ebes$n_obs)
   expect_equal(as.numeric(core_ebes$ofv_contribution), summ$ofv_contribution,
                tolerance = core_tol)
+})
+
+test_that("a fit with continuous and binary rows keeps both on their subjects (#561)", {
+  case <- joint_case()
+  fit <- case$fit
+  summ <- fit$subject_summary
+  d <- case$data
+  pk <- d[d$CMT != 3L, ]
+  expect_identical(summ$n_obs, data_n_obs(pk))
+  expect_identical(summ$n_obs_discrete, rep(3L, nrow(summ)))
+  expect_identical(summ$ID[1:2], c("1", "b"))
+  ids <- summ$ID
+
+  path <- withr::local_tempfile(fileext = ".fitrx")
+  ferx_save_fit(fit, path)
+  expect_identical(bundle_csv(path, "predictions.csv")$ID, rep.int(ids, summ$n_obs))
+  expect_identical(bundle_csv(path, "predictions_discrete.csv")$ID,
+                   rep(ids, each = 3L))
+
+  loaded <- ferx_load_fit(path)
+  expect_identical(loaded$sdtab$ID, fit$sdtab$ID)
+  expect_equal(as_doubles(loaded$sdtab), fit$sdtab)
+  expect_identical(loaded$subject_summary, summ)
+  # The EBE table has the live shape: the per-subject columns are in
+  # subject_summary, not counted as etas.
+  expect_identical(names(loaded$ebe_etas), names(fit$ebe_etas))
+
+  # ferx-core reads the continuous rows on their subjects; its own writer
+  # does not carry the binary rows yet (ferx-core #911).
+  trip <- fitrx_engine_trip(fit)
+  from_core <- ferx_load_fit(trip$core_path)
+  expect_identical(from_core$sdtab$ID, fit$sdtab$ID[seq_len(sum(summ$n_obs))])
+  expect_core_summary(from_core, fit)
+
+  live <- ferx_covariance(fit)
+  skip_if(is.null(live$cov_matrix), "covariance step did not converge - skipping")
+  expect_identical(ferx_covariance(loaded)$se_theta, live$se_theta)
+})
+
+test_that("ebes.csv puts ofv_contribution and n_obs before a mixture's columns (#561)", {
+  # ferx-core reads the two by position right after the etas, and MIXEST /
+  # PMIX_* by name; a reloaded ferx-core mixture bundle carries those in
+  # fit$ebe_etas.
+  fit <- list(
+    ebe_etas = data.frame(ID = c("1", "2"), ETA_CL = c(0.1, -0.1),
+                          MIXEST = c(1L, 2L), PMIX_1 = c(0.9, 0.2),
+                          PMIX_2 = c(0.1, 0.8), stringsAsFactors = FALSE),
+    subject_summary = data.frame(ID = c("1", "2"), ofv_contribution = c(3.5, 4.5),
+                                 n_obs = c(4L, 5L), n_obs_discrete = c(0L, 0L),
+                                 stringsAsFactors = FALSE)
+  )
+  path <- withr::local_tempfile(fileext = ".csv")
+  ferx:::.fitrx_write_ebes_csv(fit, path)
+  expect_identical(readLines(path)[1:2],
+                   c("ID,ETA_CL,ofv_contribution,n_obs,MIXEST,PMIX_1,PMIX_2",
+                     "1,0.1,3.5,4,1,0.9,0.1"))
+})
+
+test_that("a bundle written before #554 keeps its ofv through a reload and re-save", {
+  # The pre-#554 writer's binary bundle: ofv_contribution filled, n_obs
+  # empty, binary rows in predictions.csv, no n_obs_discrete.
+  fit <- binary_case()$fit
+  path <- withr::local_tempfile(fileext = ".fitrx")
+  ferx_save_fit(fit, path)
+  staging <- withr::local_tempdir()
+  utils::unzip(path, exdir = staging)
+  ebes <- bundle_csv(path, "ebes.csv")
+  ebes$n_obs <- ""
+  ebes$n_obs_discrete <- NULL
+  utils::write.csv(ebes, file.path(staging, "ebes.csv"), row.names = FALSE,
+                   quote = FALSE)
+  disc <- file.path(staging, "predictions_discrete.csv")
+  cat(readLines(disc)[-1], file = file.path(staging, "predictions.csv"),
+      sep = "\n", append = TRUE)
+  unlink(disc)
+  old <- withr::local_tempfile(fileext = ".fitrx")
+  utils::zip(old, list.files(staging, full.names = TRUE), flags = "-j -q")
+
+  loaded <- ferx_load_fit(old)
+  expect_identical(loaded$sdtab$ID, fit$sdtab$ID)
+  expect_identical(loaded$subject_summary$ofv_contribution,
+                   fit$subject_summary$ofv_contribution)
+  expect_true(all(is.na(loaded$subject_summary$n_obs)))
+  again <- withr::local_tempfile(fileext = ".fitrx")
+  ferx_save_fit(loaded, again)
+  expect_identical(bundle_csv(again, "ebes.csv")$ofv_contribution,
+                   ebes$ofv_contribution)
 })
 
 test_that("a TTE fit's bundle loads in ferx-core (#554)", {
