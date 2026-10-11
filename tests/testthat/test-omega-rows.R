@@ -241,6 +241,37 @@ test_that("print refuses an unreadable eta scale by name, accepts NA as unknown"
   expect_match(printed_omega_rows(f)[1L], "(CV% = ", fixed = TRUE)
 })
 
+test_that("print refuses an eta_param_types of the wrong length (#562)", {
+  # Core's formatter reads a missing scale as log-normal, so a short vector
+  # printed ETA_V (additive) with a log-normal CV%; it must refuse instead.
+  base <- make_fake_fit(omega = diag(c(0.1, 0.2)), eta_names = c("ETA_CL", "ETA_V"),
+                        eta_param_types = c("log_normal", "additive"))
+  cases <- list(
+    list(types = "log_normal", count = "1 entry"),
+    list(types = c("log_normal", "additive", "logit"), count = "3 entries")
+  )
+  for (cs in cases) {
+    f <- base; f$eta_param_types <- cs$types
+    err <- expect_error(print(f), class = "ferx_fit_field_error")
+    expect_identical(err$field, "eta_param_types")
+    expect_identical(conditionMessage(err), sprintf(
+      "fit$eta_param_types has %s; expected 2, one per row of fit$omega, or none.",
+      cs$count
+    ))
+  }
+  # The right length prints each ETA on its own scale: the additive one an SD.
+  expect_match(printed_omega_rows(base)[2L], "^  ETA_V +\\[additive\\] .*\\(SD = ")
+  # NULL (field removed) and empty (a .fitrx from before ferx-core #1643):
+  # unchanged, every ETA log-normal CV% with no scale tag.
+  for (none in list(NULL, character())) {
+    f <- base; f["eta_param_types"] <- list(none)
+    rows <- printed_omega_rows(f)
+    expect_length(rows, 2L)
+    expect_match(rows, "^  ETA_(CL|V) += \\S+  \\(CV% = ")
+    expect_no_match(rows, "[", fixed = TRUE)
+  }
+})
+
 test_that("the glue refuses what it cannot read rather than guessing", {
   glue <- getFromNamespace("ferx_rust_omega_rows", "ferx")
   call <- function(...) {
@@ -258,6 +289,16 @@ test_that("the glue refuses what it cannot read rather than guessing", {
   ))
   expect_error(call(covariance_status = "done"), "covariance_status")
   expect_error(call(eta_param_types = "lognormal"), "random-effect scale")
+  # One scale per ETA or none (#562): a short vector would read the missing
+  # ETA as log-normal, a long one is misaligned. Empty is a pre-#1643 fit.
+  two <- list(omega = c(0.04, 0, 0, 0.09), n_eta = 2L, eta_names = c("E1", "E2"),
+              linked_theta_names = character(), linked_theta_values = numeric(),
+              linked_theta_transforms = character(), omega_init_as_sd = c(FALSE, FALSE))
+  expect_error(do.call(call, c(two, list(eta_param_types = "additive"))),
+               "eta_param_types has length 1, not 2 (one per row) or 0", fixed = TRUE)
+  expect_error(call(eta_param_types = c("additive", "additive")),
+               "eta_param_types has length 2, not 1 (one per row) or 0", fixed = TRUE)
+  expect_match(call(eta_param_types = character()), "(CV% = ", fixed = TRUE)
   expect_error(call(linked_theta_transforms = "exp"), "theta transform")
   expect_error(call(omega = c(0.04, 0)), "1 x 1")
   # No linked theta: the SD alone.

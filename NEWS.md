@@ -829,6 +829,26 @@
 
 ## Bug fixes
 
+- **`print()` spells a FIX THETA or SIGMA the way it spells a FIX OMEGA or
+  KAPPA**: `TVKA [FIX]` with `---` in the SE and %RSE columns, and
+  `ADD_ERR [FIX] ... SE = ---`, instead of `FIXED`. One print now uses one
+  spelling, ferx-core's. `summary()` prints no parameter rows and is
+  unchanged. `fit$estimates` / `ferx_estimates()` still carry
+  `fixed = TRUE` with an `NA` SE, and `ferx_runlog()` keeps its NONMEM-style
+  `FIXED` columns
+  ([#563](https://github.com/FeRx-NLME/ferx-r/issues/563); public engine
+  formatters for these rows are ferx-core
+  [#1896](https://github.com/FeRx-NLME/ferx-core/issues/1896)).
+
+- **`print()` refuses an `eta_param_types` or `kappa_param_types` of the
+  wrong length** with a `ferx_fit_field_error` naming the field and both
+  lengths. It used to drop the vector (OMEGA) or pass it short (KAPPA), and
+  either way the engine's formatter read every missing scale as log-normal:
+  an additive or logit ETA printed a log-normal CV% with no error. A `NULL`
+  or empty field (a fit from before ferx-core #1643) still prints every row's
+  log-normal CV% with no scale tag
+  ([#562](https://github.com/FeRx-NLME/ferx-r/issues/562)).
+
 - **`print()`'s OMEGA rows are ferx-core's console rows too**, so they agree
   with the OMEGA_IOV rows under them: a FIX ETA reads `ETA_KA [FIX] = ...
   SE = ---` (also on its correlation lines), no CV%/SD is shown after a failed

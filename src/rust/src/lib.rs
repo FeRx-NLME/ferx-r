@@ -4735,6 +4735,18 @@ fn ferx_rust_structural_theta_labels(theta_names: Vec<String>) -> Vec<String> {
     })
 }
 
+/// A row formatter's scale vector is either empty (a fit from before
+/// ferx-core #1643: every row unknown) or one token per row. ferx-core reads a
+/// missing token as log-normal, so a short vector would print an additive or
+/// logit row's spread as a log-normal CV% (ferx-r #562).
+fn check_row_types_len(len: usize, n: usize, field: &str) -> std::result::Result<(), String> {
+    if len == 0 || len == n {
+        Ok(())
+    } else {
+        Err(format!("{field} has length {len}, not {n} (one per row) or 0"))
+    }
+}
+
 /// The `OMEGA_IOV` rows `print.ferx_fit` prints, one `name = variance  (note)
 /// SE = ...` line per kappa and a weighted kappa's (ferx-core #1031) weight line
 /// under it: ferx-core's own `format_kappa_rows_from` (#1825), the formatter
@@ -4749,8 +4761,9 @@ fn ferx_rust_structural_theta_labels(theta_names: Vec<String>) -> Vec<String> {
 /// @param kappa_fixed Logical FIX flags, or `NULL`; `NA` reads as not fixed.
 /// @param se_kappa Numeric diagonal SEs, or `NULL` for `SE = N/A`.
 /// @param kappa_param_types Character scale tokens (`log_normal`, `additive`,
-///   `logit`, `logit_probability`, `custom`), or empty for a fit from before
-///   ferx-core #1643 (the log-normal CV%).
+///   `logit`, `logit_probability`, `custom`), one per kappa, or empty for a
+///   fit from before ferx-core #1643 (the log-normal CV%); any other length
+///   is refused.
 /// @param kappa_weights Character weight column per kappa, `NA` for an
 ///   unweighted one, or `NULL` when no kappa is weighted.
 /// @param kappa_weight_typical Numeric typical weight per kappa, `NA` where
@@ -4792,6 +4805,7 @@ fn ferx_rust_kappa_rows(
         } else {
             Some(se_kappa.as_real_vector().ok_or("se_kappa must be numeric")?)
         };
+        check_row_types_len(kappa_param_types.len(), n, "kappa_param_types")?;
         let kappa_param_types = kappa_param_types
             .iter()
             .map(|t| eta_param_type_from_str(t))
@@ -4923,7 +4937,8 @@ fn r_print_omega_rows_options() -> ferx_core::io::output::OmegaRowsOptions {
 ///   a block omega - or `NULL` for `SE = N/A`.
 /// @param eta_param_types Character scale token per ETA (`log_normal`,
 ///   `additive`, `logit`, `logit_probability`, `custom`), `NA` for unknown;
-///   empty when the fit carries none (the log-normal CV%, no tag).
+///   empty when the fit carries none (the log-normal CV%, no tag); any other
+///   length than `n_eta` is refused.
 /// @param omega_init_as_sd Logical SD-init flags, or `NULL`.
 /// @param linked_theta_names Character, each ETA's linked theta, `NA` or `""`
 ///   for none; or empty.
@@ -4963,7 +4978,9 @@ fn ferx_rust_omega_rows(
         } else {
             Some(se_omega.as_real_vector().ok_or("se_omega must be numeric")?)
         };
-        let eta_param_types = opt_strings_from_robj(eta_param_types, "eta_param_types")?
+        let eta_param_types = opt_strings_from_robj(eta_param_types, "eta_param_types")?;
+        check_row_types_len(eta_param_types.len(), n, "eta_param_types")?;
+        let eta_param_types = eta_param_types
             .into_iter()
             .map(|t| t.map(|t| eta_param_type_from_str(&t)).transpose())
             .collect::<std::result::Result<Vec<_>, _>>()?;

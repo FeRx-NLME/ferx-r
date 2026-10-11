@@ -80,7 +80,7 @@
   if (is.null(dim(m))) m <- matrix(m, 1L, 1L)
   types <- as.character(fit$kappa_param_types %||% character())
   status <- fit$covariance_status %||% "not_requested"
-  .ferx_check_row_fields(types, "kappa_param_types", status)
+  .ferx_check_row_fields(types, "kappa_param_types", nrow(m), "omega_iov", status)
   rows <- ferx_rust_kappa_rows(
     as.numeric(m), nrow(m),
     .ferx_kappa_labels(fit$kappa_names, nrow(m)),
@@ -110,10 +110,11 @@
   if (is.null(dim(m))) m <- matrix(m, 1L, 1L)
   n <- nrow(m)
   if (n == 0L) return(character())
+  # NULL or empty (a fit from before ferx-core #1643): every ETA's scale is
+  # unknown, so each prints the log-normal CV% with no scale tag.
   types <- as.character(fit$eta_param_types %||% character())
-  if (length(types) != n) types <- character()
   status <- fit$covariance_status %||% "not_requested"
-  .ferx_check_row_fields(types, "eta_param_types", status, na_ok = TRUE)
+  .ferx_check_row_fields(types, "eta_param_types", n, "omega", status, na_ok = TRUE)
   # Each ETA's linked theta (by name, as the engine resolved it), with its
   # estimate and transform looked up in this fit's theta vector.
   linked <- as.character(fit$eta_linked_theta %||% character())
@@ -184,12 +185,24 @@
 }
 
 # The fields .ferx_kappa_rows() and .ferx_omega_rows() cannot hand to
-# ferx-core's formatters: an unknown scale in `types` (the fit field named by
-# `types_field`), an NA one unless `na_ok`, and an NA, empty or unknown
-# covariance status (#545). Without this print() itself aborted with extendr's
-# bare "Must not be NA." or the glue's "unknown covariance_status". Refuses
-# with a `ferx_fit_field_error` naming the field; `field` carries its name.
-.ferx_check_row_fields <- function(types, types_field, status, na_ok = FALSE) {
+# ferx-core's formatters: a `types` vector (the fit field named by
+# `types_field`) that is neither empty nor one scale per row of the `n`-row
+# matrix `rows_field` (#562: the formatters read a missing scale as
+# log-normal, so a short vector printed an additive or logit effect's spread
+# as a log-normal CV%), an unknown scale in it, an NA one unless `na_ok`, and
+# an NA, empty or unknown covariance status (#545). An empty vector is a fit
+# from before ferx-core #1643 and stays readable: every row unknown. Without
+# this print() itself aborted with extendr's bare "Must not be NA." or the
+# glue's "unknown covariance_status". Refuses with a `ferx_fit_field_error`
+# naming the field; `field` carries its name.
+.ferx_check_row_fields <- function(types, types_field, n, rows_field, status, na_ok = FALSE) {
+  if (length(types) > 0L && length(types) != n) {
+    .ferx_fit_field_error(types_field, sprintf(
+      "fit$%s has %d %s; expected %d, one per row of fit$%s, or none.",
+      types_field, length(types), ngettext(length(types), "entry", "entries"),
+      n, rows_field
+    ))
+  }
   known_types <- c("log_normal", "additive", "logit", "logit_probability", "custom")
   bad <- if (na_ok) !is.na(types) & !types %in% known_types else is.na(types) | !types %in% known_types
   if (any(bad)) {

@@ -192,6 +192,10 @@ test_that("print refuses an unreadable kappa scale or covariance status by name 
   refuses(f, "kappa_param_types", "has NA at position 2")
   f <- base; f$kappa_param_types <- c("lognormal", "additive")
   refuses(f, "kappa_param_types", "has \"lognormal\" at position 1")
+  # A short vector would print KAPPA_V log-normal by default (#562).
+  f <- base; f$kappa_param_types <- "additive"
+  refuses(f, "kappa_param_types",
+          "fit$kappa_param_types has 1 entry; expected 2, one per row of fit$omega_iov, or none.")
   f <- base; f$covariance_status <- NA_character_
   refuses(f, "covariance_status", "fit$covariance_status is NA_character_")
   f <- base; f$covariance_status <- "done"
@@ -245,6 +249,14 @@ test_that("the glue refuses what it cannot read rather than guessing", {
   expect_error(call(covariance_status = "done"), "covariance_status")
   expect_error(call(kappa_param_types = "lognormal"), "random-effect scale")
   expect_error(call(omega_iov = c(0.04, 0)), "1 x 1")
+  # One scale per kappa or none (#562): a short vector would read the missing
+  # kappa as log-normal, a long one is misaligned. Empty is a pre-#1643 fit.
+  two <- list(omega_iov = c(0.04, 0, 0, 0.09), n_kappa = 2L, kappa_names = c("K1", "K2"))
+  expect_error(do.call(call, c(two, list(kappa_param_types = "additive"))),
+               "kappa_param_types has length 1, not 2 (one per row) or 0", fixed = TRUE)
+  expect_error(call(kappa_param_types = c("additive", "additive")),
+               "kappa_param_types has length 2, not 1 (one per row) or 0", fixed = TRUE)
+  expect_match(call(kappa_param_types = character()), "(CV% = ", fixed = TRUE)
   # A loaded .fitrx spells the status in CamelCase; same rows.
   expect_identical(call(covariance_status = "SirFallback"),
                    call(covariance_status = "sir_fallback"))
