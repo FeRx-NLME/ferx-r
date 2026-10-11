@@ -3823,14 +3823,19 @@ fn fit_result_to_list(
     };
 
     // Per-subject EBE etas: ID + one column per BSV eta (named).
-    let ebe_etas_df: Robj = build_ebe_etas(result, population);
+    let ebe_etas_df: Robj = build_ebe_etas(result);
 
     // Every subject's ID, verbatim and in fit order - the rows of `ebe_etas`,
     // but present on a fit without random effects too, where `ebe_etas` is
-    // NULL and `sdtab$ID` is a number (ferx-r #550).
-    let subject_ids: Vec<String> = (0..result.subjects.len())
-        .map(|si| population.subjects[si].id.clone())
-        .collect();
+    // NULL and `sdtab$ID` is a number (ferx-r #550). Read from the
+    // `FitResult` itself, as `ebe_etas` and `sdtab` are, not from the
+    // population a caller re-read (ferx-r #554).
+    let subject_ids: Vec<String> = result.subjects.iter().map(|sr| sr.id.clone()).collect();
+
+    // The engine's per-subject result, one row per subject in fit order: what
+    // ferx-core's .fitrx writer puts in ebes.csv, and how many sdtab rows each
+    // subject owns (ferx-r #540, #554).
+    let subject_summary_df: Robj = build_subject_summary(result);
 
     // Per-subject individual parameter estimates: ID + one column per
     // [individual_parameters] declaration. Computed by evaluating the block at
@@ -4047,6 +4052,7 @@ fn fit_result_to_list(
         ebe_kappas = ebe_kappas_df,
         ebe_etas = ebe_etas_df,
         subject_ids = subject_ids,
+        subject_summary = subject_summary_df,
         individual_estimates = individual_estimates_df,
         model_structure = model_structure_list(model),
         omega_param_corr = omega_param_corr_flat,
@@ -4286,7 +4292,7 @@ fn prior_summary_to_dataframe(result: &FitResult) -> Robj {
 // Returns a data.frame with one row per subject and columns ID + one column
 // per BSV eta (named after the model's eta declarations). Returns NULL when
 // there are no subjects or the model declares no etas.
-fn build_ebe_etas(result: &FitResult, population: &Population) -> Robj {
+fn build_ebe_etas(result: &FitResult) -> Robj {
     let n_subj = result.subjects.len();
     if n_subj == 0 {
         return ().into();
@@ -4301,9 +4307,8 @@ fn build_ebe_etas(result: &FitResult, population: &Population) -> Robj {
     let mut ids: Vec<String> = Vec::with_capacity(n_subj);
     let mut eta_cols: Vec<Vec<f64>> = (0..n_eta).map(|_| Vec::with_capacity(n_subj)).collect();
 
-    for (si, sr) in result.subjects.iter().enumerate() {
-        let subj = &population.subjects[si];
-        ids.push(subj.id.clone());
+    for sr in &result.subjects {
+        ids.push(sr.id.clone());
         for k in 0..n_eta {
             eta_cols[k].push(sr.eta.get(k).copied().unwrap_or(f64::NAN));
         }
@@ -4315,6 +4320,47 @@ fn build_ebe_etas(result: &FitResult, population: &Population) -> Robj {
         pairs.push((eta_names[k].as_str(), eta_cols[k].clone().into()));
     }
     finish_df(pairs, n_subj)
+}
+
+// -- Helper: the engine's per-subject result as a data frame --
+//
+// One row per `result.subjects`, in fit order: `ID`, `ofv_contribution` and
+// `n_obs` as ferx-core's `write_ebes_csv` writes them, and `n_obs_discrete`,
+// the subject's discrete (binary) observation records. `io::output::sdtab`
+// writes each subject's `n_obs` Gaussian rows in subject order, then each
+// subject's `n_obs_discrete` discrete rows in subject order, so these two
+// counts say which subject owns every sdtab row - read back from the ID
+// number, the rows of two adjacent subjects with the same number run
+// together, and a subject without observations has none (ferx-r #540). The
+// .fitrx writer reads them from here, not from sdtab, whose `N_OBS` is blank
+// on discrete rows (ferx-r #554). NULL for a fit with no subjects.
+fn build_subject_summary(result: &FitResult) -> Robj {
+    let n_subj = result.subjects.len();
+    if n_subj == 0 {
+        return ().into();
+    }
+    let ids: Vec<String> = result.subjects.iter().map(|sr| sr.id.clone()).collect();
+    let ofv: Vec<f64> = result.subjects.iter().map(|sr| sr.ofv_contribution).collect();
+    // `sdtab` writes `ipred.len()` rows per subject; ferx-core's loader refuses
+    // a bundle where that is not `n_obs`, so the two are one count.
+    let n_obs: Vec<i32> = result.subjects.iter().map(|sr| sr.n_obs as i32).collect();
+    #[cfg(feature = "survival")]
+    let n_discrete: Vec<i32> = result
+        .subjects
+        .iter()
+        .map(|sr| sr.discrete_rows.len() as i32)
+        .collect();
+    #[cfg(not(feature = "survival"))]
+    let n_discrete: Vec<i32> = vec![0; n_subj];
+    finish_df(
+        vec![
+            ("ID", ids.into()),
+            ("ofv_contribution", ofv.into()),
+            ("n_obs", n_obs.into()),
+            ("n_obs_discrete", n_discrete.into()),
+        ],
+        n_subj,
+    )
 }
 
 // -- Helper: build long-format SAEM conditional-distribution data frame --

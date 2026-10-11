@@ -603,6 +603,13 @@
 
 ## New features
 
+- **`fit$subject_summary`**: one row per subject, in fit order, with `ID`,
+  `ofv_contribution`, `n_obs` (continuous observations) and
+  `n_obs_discrete` (binary observation records). These are the engine's
+  per-subject results, and they say which subject owns each `fit$sdtab`
+  row. `ferx_load_fit()` restores the table from the bundle
+  ([#554](https://github.com/FeRx-NLME/ferx-r/issues/554)).
+
 - **A `ferx_engine_error` shows the engine's suggestion in its message**, on
   a `hint: ...` line after the `[CODE]`, the same way for `ferx_fit()` and
   every other entry point (`ferx_predict()`, `ferx_simulate()`,
@@ -819,6 +826,32 @@
 
 ## Bug fixes
 
+- **A `.fitrx` bundle puts every subject's values on the right subject**
+  ([#540](https://github.com/FeRx-NLME/ferx-r/issues/540)).
+  `ferx_save_fit()` and `ferx_load_fit()` worked out which subject owns
+  each sdtab row from the run length of `sdtab$ID`. That ID is a number: the
+  ID parsed as one, or the subject's position for a text ID. In two cases
+  the runs were wrong:
+  - two adjacent subjects with the same number, such as `a` at position 1
+    followed by `1`, formed one run. `ebes.csv` then gave `a`'s
+    `ofv_contribution` and `n_obs` to subject `1` and left `a`'s empty;
+  - a subject without observations has no rows. ferx-core refused the
+    bundle (`bad ofv in row 1`). If the subjects either side of it shared
+    a text ID, the reload put both subjects' rows on the first.
+
+  Rows are now assigned from each subject's observation count, as ferx-core
+  does.
+- **A binary fit's `.fitrx` bundle loads in ferx-core**
+  ([#554](https://github.com/FeRx-NLME/ferx-r/issues/554)). `ebes.csv` had
+  an empty `n_obs` column, because sdtab's `N_OBS` is blank on a binary
+  row, and ferx-core refused the bundle (`bad n_obs in row 1`).
+  `ofv_contribution` and `n_obs` are now the engine's per-subject values,
+  written as ferx-core writes them. The binary rows go to a new entry,
+  `predictions_discrete.csv`, and their count per subject goes to an
+  `n_obs_discrete` column in `ebes.csv`. ferx-core reads neither, so the
+  two entries it does read are what it wrote itself. `ferx_load_fit()`
+  puts the rows back after the continuous ones, as in the live `sdtab`. A
+  bundle written before this still loads.
 - **`print()`'s OMEGA_IOV rows are ferx-core's console rows**
   ([#470](https://github.com/FeRx-NLME/ferx-r/issues/470)). R printed
   its own copy of them, which had drifted from the engine: a log-normal

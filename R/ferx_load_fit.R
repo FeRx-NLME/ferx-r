@@ -94,17 +94,15 @@ ferx_load_fit <- function(path) {
     # random effects has ID rows and no eta columns here; live, its
     # fit$ebe_etas is NULL, which is what says "no etas" downstream.
     result$subject_ids <- as.character(result$ebe_etas$ID)
+    result$subject_summary <- .fitrx_read_subject_summary(result$ebe_etas)
     eta_cols <- setdiff(names(result$ebe_etas),
-                        c("ID", "ofv_contribution", "n_obs", "MIXEST"))
+                        c("ID", .FITRX_SUBJECT_COLS, "MIXEST"))
     if (all(grepl("^PMIX_[0-9]+$", eta_cols))) result$ebe_etas <- NULL
   }
   preds_path <- file.path(staging, "predictions.csv")
   if (file.exists(preds_path)) {
-    result$sdtab <- .fitrx_read_csv_exact(preds_path, id_cols = "ID")
-    if (!is.null(result$sdtab$ID)) {
-      result$sdtab$ID <- .fitrx_sdtab_id_number(result$sdtab$ID,
-                                                result$subject_ids)
-    }
+    result$sdtab <- .fitrx_read_sdtab(staging, result$subject_ids,
+                                      result$subject_summary)
   }
   covtab_path <- file.path(staging, "covtab.csv")
   if (file.exists(covtab_path)) {
