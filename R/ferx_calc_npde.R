@@ -21,8 +21,10 @@
 #' (\code{model}, or \code{fit$model_path}, which must still have the fit's
 #' hash) is the one compared.
 #'
-#' With neither \code{model} nor \code{data} passed, the re-read data are
-#' checked against the fit's \code{fit$population_fingerprint}, as
+#' When the model and data are the fit's own (\code{model} and \code{data}
+#' left \code{NULL}, or naming \code{fit$model_path} / \code{fit$data_path}),
+#' the re-read data are checked against the fit's
+#' \code{fit$population_fingerprint}, as
 #' \code{\link{ferx_covariance}} and \code{\link{ferx_sir}} check theirs: a data
 #' file edited since the fit is refused with code
 #' \code{E_POPULATION_MISMATCH}, saying what differs.
@@ -84,6 +86,10 @@ ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = 
     identical(normalizePath(model, mustWork = FALSE),
               normalizePath(fit$model_path %||% "", mustWork = FALSE))
   data_override <- data
+  # `data =` naming the fit's own file is still the fit's data.
+  data_is_fits <- is.null(data) ||
+    identical(normalizePath(data, mustWork = FALSE),
+              normalizePath(fit$data_path %||% "", mustWork = FALSE))
   model <- model %||% fit$model_path
   data  <- data  %||% fit$data_path
   if (is.null(model) || is.na(model) || !file.exists(model)) {
@@ -106,10 +112,11 @@ ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = 
 
   # On the fit's own model and data the engine checks the re-read population
   # against the fit's fingerprint (ferx-core #1814): a data file edited since
-  # the fit is refused with E_POPULATION_MISMATCH. A `model =` or `data =`
-  # override is not the fit's population by construction, so it is not checked.
+  # the fit is refused with E_POPULATION_MISMATCH. That includes `model =` /
+  # `data =` naming the fit's own files. Another model or data file is not
+  # the fit's population by construction, so it is not checked.
   reader_args <- .ferx_fit_reader_args(fit)
-  fingerprint <- if (model_is_fits && is.null(data_override)) {
+  fingerprint <- if (model_is_fits && data_is_fits) {
     reader_args$population_fingerprint
   } else {
     ""

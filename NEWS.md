@@ -53,7 +53,8 @@
     ([ferx-core #1813](https://github.com/FeRx-NLME/ferx-core/issues/1813)).
     **`ferx_calc_npde(fit)` checks the data it re-reads against
     `fit$population_fingerprint`** the same way, so a data file edited since
-    the fit is refused instead of scored
+    the fit is refused instead of scored. That holds with `data` left
+    `NULL` or naming the fit's own file; another file is not checked
     ([ferx-core #1814](https://github.com/FeRx-NLME/ferx-core/issues/1814)).
   - **Compartment states, `[derived]` compartments, ODE hazards and CTMM
     generators read each dose's absorption, lag, `F` and rate at its own

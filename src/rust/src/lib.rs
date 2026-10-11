@@ -1560,7 +1560,7 @@ fn ferx_rust_predict_survival_from_fit(
 ///   the whole record is replayed. FALSE (a `model =` override): only its
 ///   selection is, on that file's own reader settings.
 /// @param population_fingerprint `fit$population_fingerprint` as JSON when the
-///   model is the fit's and the data are the fit's own (`data = NULL`), else "":
+///   model and the data are the fit's own (left NULL or naming its files), else "":
 ///   the re-read population is verified against it (ferx-core #1814).
 /// @param nsim Number of Monte-Carlo replicates per subject
 /// @param seed RNG seed; pass -1 for the engine default

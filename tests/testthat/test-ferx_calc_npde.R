@@ -252,4 +252,17 @@ test_that("ferx_calc_npde(fit) refuses data that are not the fit's (ferx-core #1
   expect_s3_class(e, "ferx_engine_error")
   expect_identical(e$code, "E_POPULATION_MISMATCH")
   expect_match(conditionMessage(e), "npde error: ", fixed = TRUE)
+
+  # `data =` naming the fit's own file is still the fit's data, checked too.
+  e2 <- tryCatch(ferx_calc_npde(fit, nsim = 20L, seed = 1L, data = data),
+                 error = function(e) e)
+  expect_s3_class(e2, "ferx_engine_error")
+  expect_identical(e2$code, "E_POPULATION_MISMATCH")
+
+  # Another file is not the fit's population by construction: not checked,
+  # so the same edited rows under another name run.
+  other <- withr::local_tempfile(fileext = ".csv")
+  file.copy(data, other)
+  out2 <- ferx_calc_npde(fit, nsim = 20L, seed = 1L, data = other)
+  expect_identical(nrow(out2$sdtab), nrow(fit$sdtab))
 })
