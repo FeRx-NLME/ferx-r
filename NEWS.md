@@ -22,7 +22,7 @@
   exactly needs updating
   ([#430](https://github.com/FeRx-NLME/ferx-r/issues/430)).
 
-- **ferx now builds against ferx-core `14cca400`**, up from `160cc9a3`.
+- **ferx now builds against ferx-core `deaa92f6`**, up from `160cc9a3`.
   These engine changes reach R:
 
   - **OMEGA_IOV (KAPPA) rows print the exact log-normal CV%**,
@@ -818,6 +818,20 @@
   MBMA data is licensed CC BY-NC.
 
 ## Bug fixes
+
+- **`print()`'s OMEGA rows are ferx-core's console rows too**, so they agree
+  with the OMEGA_IOV rows under them: a FIX ETA reads `ETA_KA [FIX] = ...
+  SE = ---` (also on its correlation lines), no CV%/SD is shown after a failed
+  or SIR-fallback covariance step, an additive or logit ETA's note reads
+  `(SD = ..., CV% = ... at TVV = ...)` / `(SD = ..., logit scale, +/-1 SD =
+  [lo, hi])`, and a custom ETA prints no note instead of `CV% = N/A`
+  ([#543](https://github.com/FeRx-NLME/ferx-r/issues/543); ferx-core
+  `deaa92f6`).
+
+- **The `Structural:` line of `print()` and `summary()` names each theta block
+  once**, as `PLACEBO[STUDY, TIME] (18 free coefficients)`, instead of listing
+  every level, whatever the block's size; the levels stay in the THETA table
+  and `fit$theta` ([#538](https://github.com/FeRx-NLME/ferx-r/issues/538)).
 
 - **`print()`'s OMEGA_IOV rows are ferx-core's console rows**
   ([#470](https://github.com/FeRx-NLME/ferx-r/issues/470)). R printed

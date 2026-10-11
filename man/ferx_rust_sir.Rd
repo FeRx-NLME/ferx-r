@@ -29,6 +29,7 @@ ferx_rust_sir(
   scoring_settings,
   sir_settings,
   packed_estimate,
+  bloq_method,
   verbose,
   fit_bindings
 )

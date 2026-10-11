@@ -4630,6 +4630,58 @@ fn ferx_rust_compact_theta_blocks(theta_names: Vec<String>) -> List {
     })
 }
 
+/// The theta labels of the `Structural:` line in `print.ferx_fit` and
+/// `print(summary(fit))`: each scalar theta by name, and each theta block (a
+/// level block or a counted `theta NAME[N]`) **once**, whatever its size, as
+/// `NAME[KEY1, KEY2] (n free coefficients)` - the keys from its level labels
+/// (`PLACEBO[STUDY=1,TIME=0]` gives `STUDY, TIME`) - or `NAME (n free
+/// coefficients)` when the labels carry no keys (ferx-r #538). The line names
+/// the model's declarations, so unlike the THETA table (ferx-core's
+/// `compact_theta_blocks`, which keeps a block under `THETA_BLOCK_COMPACT_MIN`
+/// coefficients as rows) it never lists a block's cells. A block is recognised
+/// by the same rule as `compact_theta_blocks`: a run of `NAME[...]` names
+/// (a scalar theta name cannot contain a bracket). `n` counts the free
+/// coefficients, the names given: a dependent `sum_to_zero` level is not one.
+///
+/// @param theta_names Character, the fit's theta names in order.
+/// @return Character, one label per scalar theta or block.
+/// @export
+#[extendr]
+fn ferx_rust_structural_theta_labels(theta_names: Vec<String>) -> Vec<String> {
+    let block_of = |n: &str| -> Option<(String, String)> {
+        n.strip_suffix(']')
+            .and_then(|r| r.split_once('['))
+            .map(|(b, inner)| (b.to_string(), inner.to_string()))
+    };
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < theta_names.len() {
+        let Some((block, first)) = block_of(&theta_names[i]) else {
+            out.push(theta_names[i].clone());
+            i += 1;
+            continue;
+        };
+        let start = i;
+        while i < theta_names.len()
+            && block_of(&theta_names[i]).is_some_and(|(b, _)| b == block)
+        {
+            i += 1;
+        }
+        let n = i - start;
+        let keys: Vec<&str> = first
+            .split(',')
+            .filter_map(|part| part.split_once('=').map(|(k, _)| k.trim()))
+            .collect();
+        let noun = if n == 1 { "free coefficient" } else { "free coefficients" };
+        out.push(if keys.is_empty() {
+            format!("{block} ({n} {noun})")
+        } else {
+            format!("{block}[{}] ({n} {noun})", keys.join(", "))
+        });
+    }
+    out
+}
+
 /// The `OMEGA_IOV` rows `print.ferx_fit` prints, one `name = variance  (note)
 /// SE = ...` line per kappa and a weighted kappa's (ferx-core #1031) weight line
 /// under it: ferx-core's own `format_kappa_rows_from` (#1825), the formatter
@@ -4681,16 +4733,7 @@ fn ferx_rust_kappa_rows(
             ));
         }
         let omega_iov = nalgebra::DMatrix::from_column_slice(n, n, &omega_iov);
-        let kappa_fixed: Vec<bool> = if kappa_fixed.is_null() {
-            Vec::new()
-        } else {
-            kappa_fixed
-                .as_logical_slice()
-                .ok_or("kappa_fixed must be logical")?
-                .iter()
-                .map(|b| b.is_true())
-                .collect()
-        };
+        let kappa_fixed = flags_from_robj(&kappa_fixed, "kappa_fixed")?;
         let se_kappa: Option<Vec<f64>> = if se_kappa.is_null() {
             None
         } else {
@@ -4720,14 +4763,7 @@ fn ferx_rust_kappa_rows(
                 .map(|v| (!v.is_nan()).then_some(v))
                 .collect()
         };
-        let covariance_status =
-            match covariance_status.to_ascii_lowercase().replace('_', "").as_str() {
-                "computed" => CovarianceStatus::Computed,
-                "failed" => CovarianceStatus::Failed,
-                "notrequested" => CovarianceStatus::NotRequested,
-                "sirfallback" => CovarianceStatus::SirFallback,
-                other => return Err(format!("unknown covariance_status {other:?}")),
-            };
+        let covariance_status = covariance_status_from_str(covariance_status)?;
         let input = KappaRowsInput {
             omega_iov: &omega_iov,
             kappa_names: &kappa_names,
@@ -4764,6 +4800,189 @@ fn ferx_rust_fitrx_kappa_rows(path: &str) -> String {
             format_kappa_rows_from(&input, KappaRowsOptions::default())
         }))
     })
+}
+
+/// A covariance status as R holds it - `fit$covariance_status`, any case,
+/// underscores optional, since a loaded `.fitrx` spells it in CamelCase - read
+/// back for the row formatters.
+fn covariance_status_from_str(s: &str) -> std::result::Result<CovarianceStatus, String> {
+    match s.to_ascii_lowercase().replace('_', "").as_str() {
+        "computed" => Ok(CovarianceStatus::Computed),
+        "failed" => Ok(CovarianceStatus::Failed),
+        "notrequested" => Ok(CovarianceStatus::NotRequested),
+        "sirfallback" => Ok(CovarianceStatus::SirFallback),
+        other => Err(format!("unknown covariance_status {other:?}")),
+    }
+}
+
+/// A logical R vector or `NULL` as per-entry flags; `NULL` gives an empty
+/// vector (every entry false) and `NA` reads as false.
+fn flags_from_robj(x: &Robj, what: &str) -> std::result::Result<Vec<bool>, String> {
+    if x.is_null() {
+        return Ok(Vec::new());
+    }
+    Ok(x.as_logical_slice()
+        .ok_or_else(|| format!("{what} must be logical"))?
+        .iter()
+        .map(|b| b.is_true())
+        .collect())
+}
+
+/// A character R vector or `NULL` as per-entry optional strings; `NULL` gives
+/// an empty vector, and `NA` or `""` reads as `None`.
+fn opt_strings_from_robj(x: Robj, what: &str) -> std::result::Result<Vec<Option<String>>, String> {
+    if x.is_null() {
+        return Ok(Vec::new());
+    }
+    let s: Strings = x.try_into().map_err(|_| format!("{what} must be character"))?;
+    Ok(s.iter()
+        .map(|v| (!v.is_na() && !v.is_empty()).then(|| v.to_string()))
+        .collect())
+}
+
+/// The options `print.ferx_fit()` renders its OMEGA rows with: the scale tag,
+/// an additive ETA's CV% and a logit ETA's +/-1 SD at the linked theta, and
+/// `[initial specified as SD]` - the extras R's own loop printed before #543.
+/// [`ferx_rust_omega_rows`] and its oracle [`ferx_rust_fitrx_omega_rows`] both
+/// read this, so the two differ only in where the fields come from.
+fn r_print_omega_rows_options() -> ferx_core::io::output::OmegaRowsOptions {
+    ferx_core::io::output::OmegaRowsOptions {
+        type_tag: true,
+        typical_value_spread: true,
+        init_as_sd: true,
+    }
+}
+
+/// The OMEGA rows `print.ferx_fit` prints, one `name [tag] = variance  (note)
+/// SE = ...` line per ETA: ferx-core's own `format_omega_rows_from` (#1859),
+/// the formatter behind the engine's console and `format_summary`, so R's
+/// OMEGA rows cannot drift from them, nor from the KAPPA rows under them
+/// (ferx-r #543). Takes the fit's own fields at print time, because
+/// `ferx_covariance(fit)` changes `covariance_status` after the fit.
+/// Off-diagonal correlations are not part of the rows.
+///
+/// @param omega Numeric, the `n_eta` x `n_eta` matrix flattened column-major.
+/// @param n_eta Integer, its dimension.
+/// @param eta_names Character, one label per ETA.
+/// @param omega_fixed Logical FIX flags, or `NULL`; `NA` reads as not fixed.
+/// @param se_omega Numeric SEs - one per ETA, or the packed lower triangle of
+///   a block omega - or `NULL` for `SE = N/A`.
+/// @param eta_param_types Character scale token per ETA (`log_normal`,
+///   `additive`, `logit`, `logit_probability`, `custom`), `NA` for unknown;
+///   empty when the fit carries none (the log-normal CV%, no tag).
+/// @param omega_init_as_sd Logical SD-init flags, or `NULL`.
+/// @param linked_theta_names Character, each ETA's linked theta, `NA` or `""`
+///   for none; or empty.
+/// @param linked_theta_values Numeric, that theta's estimate, parallel; `NA`
+///   for none.
+/// @param linked_theta_transforms Character, that theta's transform
+///   (`identity`, `log`, `logit`, `logit_probability`), `NA` when unknown.
+/// @param covariance_status As for `ferx_rust_kappa_rows`.
+/// @return One string, one row per `\n`; empty when `n_eta` is 0.
+/// @export
+#[extendr]
+#[allow(clippy::too_many_arguments)]
+fn ferx_rust_omega_rows(
+    omega: Vec<f64>,
+    n_eta: i32,
+    eta_names: Vec<String>,
+    omega_fixed: Robj,
+    se_omega: Robj,
+    eta_param_types: Robj,
+    omega_init_as_sd: Robj,
+    linked_theta_names: Robj,
+    linked_theta_values: Robj,
+    linked_theta_transforms: Robj,
+    covariance_status: &str,
+) -> String {
+    entry(move || {
+        use ferx_core::io::output::{format_omega_rows_from, EtaLinkedTheta, OmegaRowsInput};
+        let n = n_eta.max(0) as usize;
+        if omega.len() != n * n {
+            return Err(format!("omega has {} values, not {n} x {n}", omega.len()));
+        }
+        let omega = nalgebra::DMatrix::from_column_slice(n, n, &omega);
+        let omega_fixed = flags_from_robj(&omega_fixed, "omega_fixed")?;
+        let omega_init_as_sd = flags_from_robj(&omega_init_as_sd, "omega_init_as_sd")?;
+        let se_omega: Option<Vec<f64>> = if se_omega.is_null() {
+            None
+        } else {
+            Some(se_omega.as_real_vector().ok_or("se_omega must be numeric")?)
+        };
+        let eta_param_types = opt_strings_from_robj(eta_param_types, "eta_param_types")?
+            .into_iter()
+            .map(|t| t.map(|t| eta_param_type_from_str(&t)).transpose())
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let theta_names = opt_strings_from_robj(linked_theta_names, "linked_theta_names")?;
+        let theta_values: Vec<f64> = if linked_theta_values.is_null() {
+            Vec::new()
+        } else {
+            linked_theta_values
+                .as_real_vector()
+                .ok_or("linked_theta_values must be numeric")?
+        };
+        let theta_transforms =
+            opt_strings_from_robj(linked_theta_transforms, "linked_theta_transforms")?
+                .into_iter()
+                .map(|t| t.map(|t| theta_transform_from_str(&t)).transpose())
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+        let eta_linked_thetas: Vec<Option<EtaLinkedTheta>> = theta_names
+            .into_iter()
+            .enumerate()
+            .map(|(i, name)| {
+                let value = theta_values.get(i).copied().filter(|v| !v.is_nan())?;
+                Some(EtaLinkedTheta {
+                    name: name?,
+                    value,
+                    transform: theta_transforms.get(i).copied().flatten(),
+                })
+            })
+            .collect();
+        let input = OmegaRowsInput {
+            omega: &omega,
+            eta_names: &eta_names,
+            omega_fixed: &omega_fixed,
+            se_omega: se_omega.as_deref(),
+            eta_param_types,
+            omega_init_as_sd: &omega_init_as_sd,
+            eta_linked_thetas,
+            covariance_status: covariance_status_from_str(covariance_status)?,
+        };
+        Ok(format_omega_rows_from(&input, r_print_omega_rows_options()))
+    })
+}
+
+/// The OMEGA rows ferx-core prints for a `.fitrx` bundle with
+/// `print.ferx_fit()`'s options: core's own loader, then
+/// `OmegaRowsInput::from_result` on the `FitResult` it builds, which never
+/// passes through R's copy of the fit or [`ferx_rust_omega_rows`]'s argument
+/// conversion. The test oracle for `print.ferx_fit()`'s OMEGA block (#543).
+///
+/// @param path The bundle to read.
+/// @return One string, one row per `\n`; empty when the fit has no ETAs.
+/// @export
+#[extendr]
+fn ferx_rust_fitrx_omega_rows(path: &str) -> String {
+    entry(move || {
+        use ferx_core::io::output::{format_omega_rows_from, OmegaRowsInput};
+        let loaded = ferx_core::io::fitrx::load_fit(Path::new(path))
+            .map_err(|e| format!("ferx-core's .fitrx loader refused `{path}`: {e}"))?;
+        Ok(format_omega_rows_from(
+            &OmegaRowsInput::from_result(&loaded.fit),
+            r_print_omega_rows_options(),
+        ))
+    })
+}
+
+/// A theta transform as R spells it (`fit$theta_transforms`) read back.
+fn theta_transform_from_str(s: &str) -> std::result::Result<ThetaTransform, String> {
+    match s {
+        "identity" => Ok(ThetaTransform::Identity),
+        "log" => Ok(ThetaTransform::Log),
+        "logit" => Ok(ThetaTransform::Logit),
+        "logit_probability" => Ok(ThetaTransform::LogitProbability),
+        other => Err(format!("unknown theta transform {other:?}")),
+    }
 }
 
 /// [`eta_param_type_str`] read back.
@@ -11021,6 +11240,9 @@ extendr_module! {
     fn ferx_rust_compact_theta_blocks;
     fn ferx_rust_kappa_rows;
     fn ferx_rust_fitrx_kappa_rows;
+    fn ferx_rust_omega_rows;
+    fn ferx_rust_structural_theta_labels;
+    fn ferx_rust_fitrx_omega_rows;
     fn ferx_rust_theta_levels_from_fit;
     fn ferx_rust_fitrx_engine_resave;
     fn ferx_rust_eta_info_by_name;
