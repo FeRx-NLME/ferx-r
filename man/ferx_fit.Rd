@@ -763,6 +763,7 @@ A named list. Where to find commonly-needed quantities:\tabular{llll}{
    Raw covariate values for all dataset records \tab \code{fit$covtab} \tab one row per dataset record (doses + obs) \tab model has \verb{[covariates]} block \cr
    ETA / EBE values per subject \tab \code{fit$ebe_etas} \tab one row per subject \tab model declares etas \cr
    Subject IDs, verbatim \tab \code{fit$subject_ids} \tab one entry per subject \tab always \cr
+   OFV contribution and observation counts per subject \tab \code{fit$subject_summary} \tab one row per subject \tab always \cr
    Individual PK parameters per subject \tab \code{fit$individual_estimates} \tab one row per subject \tab always \cr
 }
 
@@ -895,6 +896,14 @@ the data and in fit order (the rows of \code{ebe_etas}). Present on a
 fit without random effects too, so \code{ferx_sir()} and
 \code{ferx_covariance()} can match such a fit to its data subject by
 subject.}
+\item{subject_summary}{Data frame with one row per subject, in fit order
+(the entries of \code{subject_ids}): \code{ID}; \code{ofv_contribution},
+the subject's contribution to the OFV; \code{n_obs}, its continuous
+(Gaussian) observations; and \code{n_obs_discrete}, its discrete
+(binary) observation records. \code{sdtab} holds each subject's
+\code{n_obs} rows in subject order, then each subject's
+\code{n_obs_discrete} rows in subject order. The values
+\code{ferx_save_fit()} writes to the bundle's \code{ebes.csv}.}
 \item{individual_estimates}{Data frame with one row per subject containing
 each subject's individual parameter values: \code{ID} plus one column
 per parameter declared in the \code{[individual_parameters]} block

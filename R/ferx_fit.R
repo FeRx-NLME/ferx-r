@@ -717,6 +717,7 @@
 #'   | Raw covariate values for all dataset records | `fit$covtab` | one row per dataset record (doses + obs) | model has `[covariates]` block |
 #'   | ETA / EBE values per subject | `fit$ebe_etas` | one row per subject | model declares etas |
 #'   | Subject IDs, verbatim | `fit$subject_ids` | one entry per subject | always |
+#'   | OFV contribution and observation counts per subject | `fit$subject_summary` | one row per subject | always |
 #'   | Individual PK parameters per subject | `fit$individual_estimates` | one row per subject | always |
 #'
 #'   Full slot descriptions:
@@ -847,6 +848,14 @@
 #'     fit without random effects too, so \code{ferx_sir()} and
 #'     \code{ferx_covariance()} can match such a fit to its data subject by
 #'     subject.}
+#'   \item{subject_summary}{Data frame with one row per subject, in fit order
+#'     (the entries of \code{subject_ids}): \code{ID}; \code{ofv_contribution},
+#'     the subject's contribution to the OFV; \code{n_obs}, its continuous
+#'     (Gaussian) observations; and \code{n_obs_discrete}, its discrete
+#'     (binary) observation records. \code{sdtab} holds each subject's
+#'     \code{n_obs} rows in subject order, then each subject's
+#'     \code{n_obs_discrete} rows in subject order. The values
+#'     \code{ferx_save_fit()} writes to the bundle's \code{ebes.csv}.}
 #'   \item{individual_estimates}{Data frame with one row per subject containing
 #'     each subject's individual parameter values: \code{ID} plus one column
 #'     per parameter declared in the \code{[individual_parameters]} block

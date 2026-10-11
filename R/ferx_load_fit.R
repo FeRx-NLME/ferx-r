@@ -94,17 +94,19 @@ ferx_load_fit <- function(path) {
     # random effects has ID rows and no eta columns here; live, its
     # fit$ebe_etas is NULL, which is what says "no etas" downstream.
     result$subject_ids <- as.character(result$ebe_etas$ID)
-    eta_cols <- setdiff(names(result$ebe_etas),
-                        c("ID", "ofv_contribution", "n_obs", "MIXEST"))
+    result$subject_summary <- .fitrx_read_subject_summary(result$ebe_etas)
+    # The per-subject columns live in fit$subject_summary, so the EBE table
+    # has the live fit's shape: ID and the etas. Left here, n_obs_discrete
+    # was counted as an eta by ferx_covariance() / ferx_sir() (#561).
+    result$ebe_etas <- result$ebe_etas[setdiff(names(result$ebe_etas),
+                                               .FITRX_SUBJECT_COLS)]
+    eta_cols <- setdiff(names(result$ebe_etas), c("ID", "MIXEST"))
     if (all(grepl("^PMIX_[0-9]+$", eta_cols))) result$ebe_etas <- NULL
   }
   preds_path <- file.path(staging, "predictions.csv")
   if (file.exists(preds_path)) {
-    result$sdtab <- .fitrx_read_csv_exact(preds_path, id_cols = "ID")
-    if (!is.null(result$sdtab$ID)) {
-      result$sdtab$ID <- .fitrx_sdtab_id_number(result$sdtab$ID,
-                                                result$subject_ids)
-    }
+    result$sdtab <- .fitrx_read_sdtab(staging, result$subject_ids,
+                                      result$subject_summary)
   }
   covtab_path <- file.path(staging, "covtab.csv")
   if (file.exists(covtab_path)) {

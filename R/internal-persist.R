@@ -334,23 +334,32 @@
 # each block takes the next subject with its text. Without them, or when a
 # block's text is not found, a block takes its own index. A bundle written
 # before #475 holds the number already, which parses to itself.
-.fitrx_sdtab_id_number <- function(ids, subject_ids = NULL) {
-  blk <- .ferx_subject_index(ids)
-  pos <- seq_len(if (length(blk)) max(blk) else 0L)
-  if (length(subject_ids) > 0L) {
-    first <- ids[!duplicated(blk)]
-    walked <- integer(length(first))
-    j <- 0L
-    for (k in seq_along(first)) {
-      rest <- subject_ids[seq.int(j + 1L, length.out = length(subject_ids) - j)]
-      hit <- match(first[k], rest)
-      if (is.na(hit)) break
-      j <- j + hit
-      walked[k] <- j
+#
+# `row_subject`, when given, is every row's position, from the per-subject row
+# counts (`.fitrx_sdtab_subject()`), and replaces that walk: the walk reads a
+# block from the text, so two adjacent subjects with the same text are one
+# block (#540). The walk is for a bundle whose counts are missing or do not
+# fit its rows.
+.fitrx_sdtab_id_number <- function(ids, subject_ids = NULL, row_subject = NULL) {
+  if (is.null(row_subject)) {
+    blk <- .ferx_subject_index(ids)
+    pos <- seq_len(if (length(blk)) max(blk) else 0L)
+    if (length(subject_ids) > 0L) {
+      first <- ids[!duplicated(blk)]
+      walked <- integer(length(first))
+      j <- 0L
+      for (k in seq_along(first)) {
+        rest <- subject_ids[seq.int(j + 1L, length.out = length(subject_ids) - j)]
+        hit <- match(first[k], rest)
+        if (is.na(hit)) break
+        j <- j + hit
+        walked[k] <- j
+      }
+      if (all(walked > 0L)) pos <- walked
     }
-    if (all(walked > 0L)) pos <- walked
+    row_subject <- pos[blk]
   }
-  out <- as.numeric(pos[blk])
+  out <- as.numeric(row_subject)
   s <- tolower(ids)
   dec <- grepl("^[-+]?([0-9]+\\.?[0-9]*|\\.[0-9]+)(e[-+]?[0-9]+)?$", s)
   out[dec] <- .fitrx_parse_doubles(sub("^\\+", "", s[dec]))
@@ -358,6 +367,50 @@
   out[inf] <- ifelse(startsWith(s[inf], "-"), -Inf, Inf)
   out[grepl("^[-+]?nan$", s)] <- NaN
   out
+}
+
+# `fit$subject_summary` from ebes.csv's per-subject columns, as the live fit
+# carries it. A bundle without n_obs_discrete has no discrete rows (0); one
+# written before #554 may have empty n_obs (NA). NULL when ebes.csv has no
+# ofv_contribution / n_obs.
+.fitrx_read_subject_summary <- function(ebes) {
+  if (!all(c("ID", "ofv_contribution", "n_obs") %in% names(ebes))) return(NULL)
+  n <- nrow(ebes)
+  if (n == 0L) return(NULL)
+  disc <- if ("n_obs_discrete" %in% names(ebes)) ebes$n_obs_discrete else rep(0L, n)
+  data.frame(
+    ID = as.character(ebes$ID),
+    ofv_contribution = as.numeric(ebes$ofv_contribution),
+    n_obs = as.integer(ebes$n_obs),
+    n_obs_discrete = as.integer(disc),
+    stringsAsFactors = FALSE
+  )
+}
+
+# The bundle's sdtab: predictions.csv's Gaussian rows, then
+# predictions_discrete.csv's discrete rows when present, in the live fit's
+# order. Each row's ID goes back to the engine's number for its subject, the
+# subject read from the per-subject row counts when they fit the rows and the
+# rows' IDs (`.fitrx_sdtab_subject()`, #540), else walked from the text.
+.fitrx_read_sdtab <- function(staging, subject_ids, summ) {
+  sdtab <- .fitrx_read_csv_exact(file.path(staging, "predictions.csv"),
+                                 id_cols = "ID")
+  n_gauss <- nrow(sdtab)
+  disc_path <- file.path(staging, "predictions_discrete.csv")
+  if (file.exists(disc_path)) {
+    sdtab <- rbind(sdtab, .fitrx_read_csv_exact(disc_path, id_cols = "ID"))
+  }
+  if (is.null(sdtab$ID)) return(sdtab)
+  rows <- if (!is.null(summ) && length(subject_ids) == nrow(summ)) {
+    .fitrx_sdtab_subject(summ$n_obs, summ$n_obs_discrete, nrow(sdtab))
+  }
+  row_subject <- NULL
+  if (!is.null(rows) && length(rows$gaussian) == n_gauss) {
+    pos <- c(rows$gaussian, rows$discrete)
+    if (identical(sdtab$ID, subject_ids[pos])) row_subject <- pos
+  }
+  sdtab$ID <- .fitrx_sdtab_id_number(sdtab$ID, subject_ids, row_subject)
+  sdtab
 }
 
 # `fit$iov_occasion` (the `settings = list(iov_occasion = ...)` spelling the

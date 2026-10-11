@@ -30,19 +30,19 @@ test_that("xpose join still matches by ID when counts don't line up", {
   expect_identical(res$data$P, c(7, 7, 8, NA_real_))
 })
 
-test_that("save_fit per-subject summary keeps both blocks of a reused ID", {
+test_that("save_fit per-subject values keep both blocks of a reused ID", {
   fit <- list(
     sdtab = data.frame(
       ID      = c(12, 12, 12, 5, 5, 12),
       EBE_OFV = c(1, 1, 1, 2, 2, 9),
       N_OBS   = c(3, 3, 3, 2, 2, 1)
     ),
-    ebe_etas = data.frame(ID = c("12", "5", "12"), ETA_CL = c(0.1, 0.2, 0.9))
+    ebe_etas = data.frame(ID = c("12", "5", "12"), ETA_CL = c(0.1, 0.2, 0.9)),
+    subject_summary = data.frame(ID = c("12", "5", "12"),
+                                 ofv_contribution = c(1, 2, 9),
+                                 n_obs = c(3L, 2L, 1L),
+                                 n_obs_discrete = c(0L, 0L, 0L))
   )
-  ps <- .fitrx_per_subject_ofv_nobs(fit)
-  expect_identical(ps$id,    c("12", "5", "12"))
-  expect_identical(ps$n_obs, c(3L, 2L, 1L))
-  expect_identical(ps$ofv,   c(1, 2, 9))
 
   tf <- tempfile()
   on.exit(unlink(tf), add = TRUE)
@@ -51,6 +51,7 @@ test_that("save_fit per-subject summary keeps both blocks of a reused ID", {
   # The two ID-12 rows must carry their own n_obs (3 and 1), not both = 3,
   # otherwise ebes.csv disagrees with predictions.csv and the loader rejects it.
   expect_identical(as.integer(eb$n_obs), c(3L, 2L, 1L))
+  expect_identical(as.numeric(eb$ofv_contribution), c(1, 2, 9))
 })
 
 test_that("eta_cov treats a reused ID as two subjects with distinct covariates", {
