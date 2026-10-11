@@ -289,6 +289,16 @@ test_that("the glue refuses what it cannot read rather than guessing", {
   ))
   expect_error(call(covariance_status = "done"), "covariance_status")
   expect_error(call(eta_param_types = "lognormal"), "random-effect scale")
+  # One scale per ETA or none (#562): a short vector would read the missing
+  # ETA as log-normal, a long one is misaligned. Empty is a pre-#1643 fit.
+  two <- list(omega = c(0.04, 0, 0, 0.09), n_eta = 2L, eta_names = c("E1", "E2"),
+              linked_theta_names = character(), linked_theta_values = numeric(),
+              linked_theta_transforms = character(), omega_init_as_sd = c(FALSE, FALSE))
+  expect_error(do.call(call, c(two, list(eta_param_types = "additive"))),
+               "eta_param_types has length 1, not 2 (one per row) or 0", fixed = TRUE)
+  expect_error(call(eta_param_types = c("additive", "additive")),
+               "eta_param_types has length 2, not 1 (one per row) or 0", fixed = TRUE)
+  expect_match(call(eta_param_types = character()), "(CV% = ", fixed = TRUE)
   expect_error(call(linked_theta_transforms = "exp"), "theta transform")
   expect_error(call(omega = c(0.04, 0)), "1 x 1")
   # No linked theta: the SD alone.

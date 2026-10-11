@@ -249,6 +249,14 @@ test_that("the glue refuses what it cannot read rather than guessing", {
   expect_error(call(covariance_status = "done"), "covariance_status")
   expect_error(call(kappa_param_types = "lognormal"), "random-effect scale")
   expect_error(call(omega_iov = c(0.04, 0)), "1 x 1")
+  # One scale per kappa or none (#562): a short vector would read the missing
+  # kappa as log-normal, a long one is misaligned. Empty is a pre-#1643 fit.
+  two <- list(omega_iov = c(0.04, 0, 0, 0.09), n_kappa = 2L, kappa_names = c("K1", "K2"))
+  expect_error(do.call(call, c(two, list(kappa_param_types = "additive"))),
+               "kappa_param_types has length 1, not 2 (one per row) or 0", fixed = TRUE)
+  expect_error(call(kappa_param_types = c("additive", "additive")),
+               "kappa_param_types has length 2, not 1 (one per row) or 0", fixed = TRUE)
+  expect_match(call(kappa_param_types = character()), "(CV% = ", fixed = TRUE)
   # A loaded .fitrx spells the status in CamelCase; same rows.
   expect_identical(call(covariance_status = "SirFallback"),
                    call(covariance_status = "sir_fallback"))
