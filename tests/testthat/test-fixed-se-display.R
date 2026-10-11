@@ -1,7 +1,8 @@
 # FIX parameters in print.ferx_fit() and fit$estimates (#451), and the
 # missing-flags warning in ferx_save_fit() (#452).
 #
-# The engine reports SE 0 for a FIX entry. print() must say FIXED, and
+# The engine reports SE 0 for a FIX entry. print() must label it
+# `NAME [FIX]` with `SE = ---` (THETA: `---` in the SE and %RSE columns), and
 # fit$estimates must carry NA SE / RSE with fixed = TRUE. The trigger is the
 # fit's *_fixed flags, never SE == 0: a free parameter whose covariance step
 # was skipped, failed or came back exactly 0 must keep printing its SE.
@@ -20,8 +21,12 @@ print_line <- function(out, label) {
 
 # The SE field of a FIX row. OMEGA and KAPPA rows are ferx-core's console rows
 # (#543, #470), which label a FIX entry `NAME [FIX]` with `SE = ---`, as do the
-# OMEGA correlations; THETA and SIGMA are R's and say FIXED.
-fixed_se <- function(label) if (grepl("^(KAPPA|ETA)", label)) "SE = ---" else "SE = FIXED"
+# OMEGA correlations; R's own SIGMA rows spell it the same way (#563).
+fix_se <- "SE = ---"
+# A FIX THETA table row: label, estimate, then `---` for SE and %RSE (#563).
+fix_theta_row <- function(label, est = "\\S+") {
+  sprintf("^%s \\[FIX\\]\\s+%s\\s+---\\s+---\\s*$", label, est)
+}
 
 # -- Crafted fits: every cell of class x fixed/free x covariance state --------
 
@@ -66,28 +71,34 @@ crafted_fit <- function(se = c("zero", "real", "none"), flags = TRUE) {
 fixed_labels <- c("TVKA", "ETA_CL", "ETA_V", "ADD_ERR", "KAPPA_V")
 free_labels  <- c("TVCL", "ETA_KA", "PROP_ERR", "KAPPA_CL")
 
-test_that("print: the FIX entry of every class says FIXED, its free twin keeps SE 0", {
+test_that("print: the FIX entry of every class says [FIX] and SE = ---, its free twin keeps SE 0", {
   out <- capture.output(print(crafted_fit("zero")))
-  # theta: SE and %RSE columns both read FIXED.
-  expect_match(print_line(out, "TVKA"), "^TVKA\\s+1\\.000000\\s+FIXED\\s+FIXED\\s*$")
+  # theta: SE and %RSE columns both read ---.
+  expect_match(print_line(out, "TVKA"), fix_theta_row("TVKA", "1\\.000000"))
   for (lbl in setdiff(fixed_labels, "TVKA")) {
     ln <- print_line(out, lbl)
-    expect_match(ln, fixed_se(lbl), fixed = TRUE, info = lbl)
+    expect_match(ln, sprintf("^\\s*%s \\[FIX\\] ", lbl), info = lbl)
+    expect_match(ln, fix_se, fixed = TRUE, info = lbl)
     expect_no_match(ln, "SE = 0", fixed = TRUE)
   }
-  # Free twins with an SE of exactly 0: printed as 0, not FIXED (kills an
+  # The SIGMA row whole, so its label and SE are both R's spelling (#563).
+  expect_match(print_line(out, "ADD_ERR"),
+               "^  ADD_ERR \\[FIX\\]\\s+\\[additive\\]\\s+= 0\\.500000  .*  SE = ---$")
+  # One spelling across the whole print: R's old one is gone.
+  expect_false(any(grepl("FIXED", out, fixed = TRUE)))
+  # Free twins with an SE of exactly 0: printed as 0, not [FIX] (kills an
   # SE == 0 shortcut).
   expect_match(print_line(out, "TVCL"), "^TVCL\\s+0\\.134000\\s+0\\.000000\\s+0\\.0\\s*$")
   for (lbl in setdiff(free_labels, "TVCL")) {
     ln <- print_line(out, lbl)
     expect_match(ln, "SE = 0.000000", fixed = TRUE, info = lbl)
-    expect_no_match(ln, "FIXED", fixed = TRUE)
+    expect_no_match(ln, "[FIX]", fixed = TRUE)
   }
   # The off-diagonal of the FIX block.
   expect_match(print_line(out, "ETA_V ~ ETA_CL"), "SE = ---\\s*$")
 })
 
-test_that("print: covariance step ok, failed or skipped - FIXED regardless, free per its SE", {
+test_that("print: covariance step ok, failed or skipped - [FIX] regardless, free per its SE", {
   real <- capture.output(print(crafted_fit("real")))
   expect_match(print_line(real, "TVCL"), "^TVCL\\s+0\\.134000\\s+0\\.020000\\s+14\\.9\\s*$")
   expect_match(print_line(real, "ETA_KA"), "SE = 0.090000", fixed = TRUE)
@@ -96,10 +107,10 @@ test_that("print: covariance step ok, failed or skipped - FIXED regardless, free
   # Skipped (covariance = FALSE) or failed: no SE at all. FIX is still known,
   # the free entries say N/A.
   none <- capture.output(print(crafted_fit("none")))
-  expect_match(print_line(none, "TVKA"), "FIXED\\s+FIXED\\s*$")
+  expect_match(print_line(none, "TVKA"), fix_theta_row("TVKA"))
   expect_match(print_line(none, "TVCL"), "N/A\\s+N/A\\s*$")
   for (lbl in setdiff(fixed_labels, "TVKA")) {
-    expect_match(print_line(none, lbl), fixed_se(lbl), fixed = TRUE, info = lbl)
+    expect_match(print_line(none, lbl), fix_se, fixed = TRUE, info = lbl)
   }
   for (lbl in setdiff(free_labels, "TVCL")) {
     expect_match(print_line(none, lbl), "SE = N/A", fixed = TRUE, info = lbl)
@@ -107,9 +118,18 @@ test_that("print: covariance step ok, failed or skipped - FIXED regardless, free
   expect_match(print_line(none, "ETA_V ~ ETA_CL"), "SE = ---\\s*$")
 })
 
-test_that("print: a fit with no *_fixed fields does not crash and claims no FIXED", {
-  out <- capture.output(print(crafted_fit("zero", flags = FALSE)))
+test_that("summary: prints no parameter rows, so neither FIX spelling", {
+  # print.ferx_summary() is a header (OFV, shrinkage, covariance status), with
+  # no THETA / SIGMA rows to carry either spelling (#563). If rows are ever
+  # added here, they must say `[FIX]` / `SE = ---` like print().
+  out <- capture.output(print(summary(crafted_fit("zero"))))
   expect_false(any(grepl("FIXED", out, fixed = TRUE)))
+  expect_false(any(grepl("SE = ", out, fixed = TRUE)))
+})
+
+test_that("print: a fit with no *_fixed fields does not crash and claims no FIX", {
+  out <- capture.output(print(crafted_fit("zero", flags = FALSE)))
+  expect_false(any(grepl("FIX", out, fixed = TRUE)))
   expect_match(print_line(out, "TVKA"), "^TVKA\\s+1\\.000000\\s+0\\.000000\\s+0\\.0\\s*$")
   expect_match(print_line(out, "ADD_ERR"), "SE = 0.000000", fixed = TRUE)
 })
@@ -198,14 +218,14 @@ mbma_live <- local({
   }
 })
 
-test_that("mbma_placebo: ADD_ERR (sigma FIX) prints FIXED; a free theta keeps its SE", {
+test_that("mbma_placebo: ADD_ERR (sigma FIX) prints [FIX] and SE = ---; a free theta keeps its SE", {
   skip_on_cran()
   fit <- mbma_live()
   skip_if(is.null(fit$se_theta), "covariance step did not run - skipping")
   expect_identical(fit$sigma_fixed, TRUE)
   out <- capture.output(print(fit))
   ln <- print_line(out, "ADD_ERR")
-  expect_match(ln, "SE = FIXED", fixed = TRUE)
+  expect_match(ln, "^  ADD_ERR \\[FIX\\] .*SE = ---(  \\[initial specified as SD\\])?$")
   expect_no_match(ln, "SE = 0", fixed = TRUE)
   est <- fit$estimates
   expect_true(is.na(est["ADD_ERR", "se"]))
@@ -271,9 +291,9 @@ test_that("live fit, one FIX and one free per class: flags, print and estimates 
   expect_identical(fit$sigma_fixed, c(FALSE, TRUE))
   expect_identical(fit$kappa_fixed, c(FALSE, TRUE))
   out <- capture.output(print(fit))
-  expect_match(print_line(out, "TVKA"), "FIXED\\s+FIXED\\s*$")
+  expect_match(print_line(out, "TVKA"), fix_theta_row("TVKA"))
   for (lbl in c("ETA_CL", "ETA_V", "ADD_ERR", "KAPPA_V")) {
-    expect_match(print_line(out, lbl), fixed_se(lbl), fixed = TRUE, info = lbl)
+    expect_match(print_line(out, lbl), fix_se, fixed = TRUE, info = lbl)
   }
   expect_match(print_line(out, "ETA_V ~ ETA_CL"), "SE = ---\\s*$")
   est <- fit$estimates
@@ -283,24 +303,24 @@ test_that("live fit, one FIX and one free per class: flags, print and estimates 
   skip_if(is.null(fit$se_theta), "covariance step did not run - skipping")
   for (lbl in c("TVCL", "ETA_KA", "PROP_ERR", "KAPPA_CL")) {
     ln <- print_line(out, lbl)
-    expect_no_match(ln, "FIXED", fixed = TRUE)
+    expect_no_match(ln, "[FIX]", fixed = TRUE)
     expect_false(is.na(est[lbl, "se"]), info = lbl)
   }
 })
 
-test_that("live fit with covariance = FALSE: FIX still FIXED, free entries N/A", {
+test_that("live fit with covariance = FALSE: FIX still [FIX], free entries N/A", {
   skip_on_cran()
   x <- per_class_model()
   fit <- suppressWarnings(ferx_fit(x$model, x$data, covariance = FALSE, verbose = FALSE))
   expect_null(fit$se_theta)
   out <- capture.output(print(fit))
-  expect_match(print_line(out, "TVKA"), "FIXED\\s+FIXED\\s*$")
+  expect_match(print_line(out, "TVKA"), fix_theta_row("TVKA"))
   expect_match(print_line(out, "TVCL"), "N/A\\s+N/A\\s*$")
-  expect_match(print_line(out, "ADD_ERR"), "SE = FIXED", fixed = TRUE)
+  expect_match(print_line(out, "ADD_ERR"), "^  ADD_ERR \\[FIX\\] .*SE = ---(  \\[initial specified as SD\\])?$")
   expect_match(print_line(out, "PROP_ERR"), "SE = N/A", fixed = TRUE)
 })
 
-test_that(".fitrx round trip prints the same SE / FIXED as the live fit", {
+test_that(".fitrx round trip prints the same SE / [FIX] as the live fit", {
   skip_on_cran()
   cases <- list(
     per_class = list(fit = per_class_live(),
@@ -332,7 +352,7 @@ test_that(".fitrx round trip prints the same SE / FIXED as the live fit", {
       expect_identical(se_field(b, lbl), se_field(a, lbl), info = paste(nm, lbl))
     }
     for (lbl in setdiff(cs$fixed, cs$theta)) {
-      expect_identical(se_field(b, lbl), fixed_se(lbl), info = paste(nm, lbl))
+      expect_identical(se_field(b, lbl), fix_se, info = paste(nm, lbl))
     }
     expect_identical(fit2$estimates$fixed, cs$fit$estimates$fixed)
     expect_identical(fit2$estimates$se, cs$fit$estimates$se)

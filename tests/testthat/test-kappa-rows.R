@@ -192,6 +192,10 @@ test_that("print refuses an unreadable kappa scale or covariance status by name 
   refuses(f, "kappa_param_types", "has NA at position 2")
   f <- base; f$kappa_param_types <- c("lognormal", "additive")
   refuses(f, "kappa_param_types", "has \"lognormal\" at position 1")
+  # A short vector would print KAPPA_V log-normal by default (#562).
+  f <- base; f$kappa_param_types <- "additive"
+  refuses(f, "kappa_param_types",
+          "fit$kappa_param_types has 1 entry; expected 2, one per row of fit$omega_iov, or none.")
   f <- base; f$covariance_status <- NA_character_
   refuses(f, "covariance_status", "fit$covariance_status is NA_character_")
   f <- base; f$covariance_status <- "done"
