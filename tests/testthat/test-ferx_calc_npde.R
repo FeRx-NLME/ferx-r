@@ -266,3 +266,17 @@ test_that("ferx_calc_npde(fit) refuses data that are not the fit's (ferx-core #1
   out2 <- ferx_calc_npde(fit, nsim = 20L, seed = 1L, data = other)
   expect_identical(nrow(out2$sdtab), nrow(fit$sdtab))
 })
+
+test_that("ferx_calc_npde(fit) verifies a level-block fit's population after binding it (ferx-core #1814)", {
+  # `verify` compares the population as the model scores it, so a theta level
+  # block needs the population bound with the fit's layout first. Checked with
+  # the fingerprint on (no `model =`, no `data =`): verifying before the bind
+  # refuses the fit's own data.
+  ex <- ferx_example("mbma_placebo")
+  fit <- suppressWarnings(ferx_fit(ex$model, ex$data, verbose = FALSE))
+  expect_false(is.null(fit$population_fingerprint))
+  expect_gt(nrow(fit$theta_levels), 0L)
+  expect_no_warning(out <- ferx_calc_npde(fit, nsim = 50L, seed = 1L))
+  expect_identical(nrow(out$sdtab), nrow(fit$sdtab))
+  expect_false(anyNA(out$sdtab$NPD))
+})
