@@ -530,6 +530,11 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   if (length(fit$packed_estimate)) {
     wire$packed_estimate <- as.numeric(fit$packed_estimate)
   }
+  # The LOQ method the fit scored, under ferx-core's `bloq_method` key, so the
+  # post-hoc steps on the loaded fit score it too (ferx-core #1824); absent
+  # when the fit records none, which the engine reads as "".
+  bloq <- .ferx_fit_bloq_label(fit)
+  if (nzchar(bloq)) wire$bloq_method <- bloq
   sir_settings <- .fitrx_settings_to_wire(fit, "sir_settings")
   if (!is.null(sir_settings) && !is.null(wire$sir)) {
     wire$sir$settings <- sir_settings

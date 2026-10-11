@@ -421,3 +421,49 @@ test_that("S9: a [mixture] per-class override fit is scored in memory and after 
   expect_identical(cov$cov_matrix, fit$cov_matrix)
   expect_identical(cov$se_theta, fit$se_theta)
 })
+
+# Since ferx-core #1824 `run_covariance` / `run_sir` score the LOQ method the
+# fit reports, so the skeleton must carry the fit's (#558 review 1): a
+# hard-coded "drop" re-scored an M3 fit without its censored rows (SE off by
+# up to 37% on warfarin_bloq).
+ps_bloq_drop_model <- function(env = parent.frame()) {
+  # warfarin_bloq's model without its `bloq_method = m3` line: a drop-file
+  # model, so M3 reaches the fit only through `ferx_fit(bloq_method =)`.
+  path <- ps_scratch(".ferx", env)
+  lines <- readLines(ferx_example("warfarin_bloq")$model)
+  writeLines(lines[!grepl("^\\s*bloq_method\\s*=", lines)], path)
+  path
+}
+
+test_that("S14: ferx_covariance(fit) on an M3 fit scores M3, in memory and after a reload", {
+  file_m3 <- ps_fit("bloq_file_m3", "warfarin_bloq")
+  drop_model <- ps_bloq_drop_model()
+  arg_m3 <- ps_fit("bloq_arg_m3",
+                   list(model = drop_model, data = ferx_example("warfarin_bloq")$data),
+                   bloq_method = "m3")
+  for (fit in list(file_m3, arg_m3)) {
+    expect_identical(fit$bloq_method_label, "m3")
+    # Premise: scored as drop, the censored rows move the covariance.
+    as_drop <- fit
+    as_drop$bloq_method_label <- "drop"
+    expect_false(identical(ferx_covariance(as_drop)$se_theta, fit$se_theta))
+
+    cov <- ferx_covariance(fit)
+    expect_identical(cov$cov_matrix, fit$cov_matrix)
+    expect_identical(cov$se_theta, fit$se_theta)
+    loaded <- ps_round_trip(fit)
+    expect_identical(loaded$bloq_method_label, "m3")
+    expect_identical(ferx_covariance(loaded)$se_theta, fit$se_theta)
+  }
+  # A fit that records no method (a bundle saved before the key) falls back
+  # to the model file's: still M3 for the file fit.
+  no_label <- file_m3
+  no_label$bloq_method_label <- NULL
+  expect_identical(ferx_covariance(no_label)$se_theta, file_m3$se_theta)
+})
+
+test_that("S15: ferx_sir(fit) on an M3 fit repeats the in-fit SIR", {
+  fit <- ps_fit("bloq_file_m3_sir", "warfarin_bloq", sir = TRUE)
+  skip_if(is.null(fit$sir_ess), "bloq_file_m3_sir in-fit SIR did not run")
+  expect_identical(ps_sir_fields(ferx_sir(fit)), ps_sir_fields(fit))
+})

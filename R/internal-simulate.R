@@ -173,8 +173,16 @@ validate_fit_for_params <- function(fit) {
     scoring_settings = edit(fit$scoring_settings, fit$sir_settings$scoring,
                             "scoring_settings", scoring),
     sir_settings = edit(fit$sir_settings, NULL, "sir_settings", sir),
-    packed_estimate = as.numeric(fit$packed_estimate %||% numeric())
+    packed_estimate = as.numeric(fit$packed_estimate %||% numeric()),
+    # The LOQ method the fit scored ("drop" / "m3"), which the post-hoc steps
+    # score too (ferx-core #1824); "" leaves the model file's.
+    bloq_method = .ferx_fit_bloq_label(fit)
   )
+}
+
+.ferx_fit_bloq_label <- function(fit) {
+  label <- fit$bloq_method_label
+  if (is.character(label) && length(label) == 1L && !is.na(label)) label else ""
 }
 
 # The engine's default `scoring_settings` / `sir_settings` record: the

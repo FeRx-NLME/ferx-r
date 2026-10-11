@@ -5130,6 +5130,10 @@ struct FitSkeletonInputs<'a> {
     sir_settings: &'a Robj,
     /// `fit$packed_estimate`; empty when the fit carries none.
     packed_estimate: &'a [f64],
+    /// `fit$bloq_method_label` (`"drop"` / `"m3"`); "" when the fit carries
+    /// none. Since ferx-core #1824 the post-hoc steps score the method the fit
+    /// reports, so it must be the fit's, not a placeholder.
+    bloq_method: &'a str,
 }
 
 /// An IOV occasion rule in the spelling `ferx_fit(settings = list(iov_occasion =
@@ -5862,7 +5866,11 @@ fn fit_skeleton(
         sir_seed: None,
         imp_seed: None,
         npde_seed: None,
-        bloq_method: "drop".to_string(),
+        // The fit's LOQ method (ferx-r #558 review 1): `run_covariance` /
+        // `run_sir` score the method this field names (ferx-core #1824), so a
+        // hard-coded "drop" re-scored every M3 fit without its censored rows.
+        // "" leaves the caller's options, which carry the model file's.
+        bloq_method: x.bloq_method.to_string(),
         outer_maxiter: 0,
         outer_gtol: 0.0,
         inits_from_nca: None,
@@ -5943,6 +5951,8 @@ fn fit_skeleton(
 /// @param packed_estimate `fit$packed_estimate`, the optimizer's packed
 ///   estimate; empty when the fit carries none. Dropped unless it unpacks to
 ///   the fit's estimates bit for bit.
+/// @param bloq_method `fit$bloq_method_label`, the LOQ method the fit scored
+///   (`"drop"` / `"m3"`); "" when the fit records none (the model file's).
 /// @param verbose When TRUE, the engine prints progress to stderr.
 /// @return Named list with `sir_ess`, `sir_ci_theta`, `sir_ci_omega`, `sir_ci_sigma`,
 ///   `sir_ci_kappa`,
@@ -5975,6 +5985,7 @@ fn ferx_rust_sir(
     scoring_settings: Robj,
     sir_settings: Robj,
     packed_estimate: Vec<f64>,
+    bloq_method: &str,
     verbose: bool,
     fit_bindings: List,
 ) -> Robj {
@@ -6028,6 +6039,7 @@ fn ferx_rust_sir(
             scoring_settings: &scoring_settings,
             sir_settings: &sir_settings,
             packed_estimate: &packed_estimate,
+            bloq_method,
         };
         let fit = fit_skeleton("ferx_sir", model, &inputs, Some(cov_mat))?;
 
@@ -6145,6 +6157,8 @@ fn ferx_rust_sir(
 /// @param packed_estimate `fit$packed_estimate`, the optimizer's packed
 ///   estimate; empty when the fit carries none. Dropped unless it unpacks to
 ///   the fit's estimates bit for bit.
+/// @param bloq_method `fit$bloq_method_label`, the LOQ method the fit scored
+///   (`"drop"` / `"m3"`); "" when the fit records none (the model file's).
 /// @param covariance_method Covariance estimator: "r"/"hessian", "s"/"cross_product", or "rsr"/"sandwich".
 /// @param verbose When TRUE, the engine prints progress to stderr.
 /// @return Named list with `cov_matrix`, `cov_matrix_dim`, `se_theta`, `se_omega`,
@@ -6175,6 +6189,7 @@ fn ferx_rust_covariance(
     scoring_settings: Robj,
     sir_settings: Robj,
     packed_estimate: Vec<f64>,
+    bloq_method: &str,
     covariance_method: &str,
     verbose: bool,
     fit_bindings: List,
@@ -6226,6 +6241,7 @@ fn ferx_rust_covariance(
             scoring_settings: &scoring_settings,
             sir_settings: &sir_settings,
             packed_estimate: &packed_estimate,
+            bloq_method,
         };
         let fit = fit_skeleton("ferx_covariance", model, &inputs, None)?;
 

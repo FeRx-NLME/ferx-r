@@ -272,6 +272,7 @@ ferx_covariance <- function(fit,
     scoring_settings = record_args$scoring_settings,
     sir_settings = record_args$sir_settings,
     packed_estimate = record_args$packed_estimate,
+    bloq_method = record_args$bloq_method,
     covariance_method = cov_method,
     verbose = isTRUE(verbose),
     fit_bindings = binding_args$fit_bindings

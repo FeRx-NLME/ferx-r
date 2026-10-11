@@ -41,10 +41,14 @@
     bit, and a reloaded `[mixture]` fit with per-class overrides is scored
     instead of refused
     ([ferx-core #1815](https://github.com/FeRx-NLME/ferx-core/issues/1815)).
-  - **`bloq_method` passed to `ferx_fit()` applies to that fit** through the
-    engine's own per-call option, rather than being copied onto the model
-    ([ferx-core #1824](https://github.com/FeRx-NLME/ferx-core/issues/1824));
-    results from R are unchanged.
+  - **`ferx_covariance()` and `ferx_sir()` score the LOQ method the fit
+    used**, `fit$bloq_method_label`, also after `ferx_load_fit()`
+    ([ferx-core #1824](https://github.com/FeRx-NLME/ferx-core/issues/1824)).
+    A fit made with `ferx_fit(bloq_method = "m3")` on a model file without
+    `bloq_method` was re-scored as `drop` by these steps; it is now scored
+    as M3, as the fit was. `ferx_save_fit()` keeps the method, and
+    `bloq_method` passed to `ferx_fit()` reaches the engine as its own
+    per-call option.
   - **`ferx_sir()` / `ferx_covariance()` refuse a population that is not the
     fit's with one code, `E_POPULATION_MISMATCH`**, saying what differs and
     how the data were read; when the population is the fit's but the fit's
