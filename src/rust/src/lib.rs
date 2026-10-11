@@ -4341,8 +4341,11 @@ fn build_subject_summary(result: &FitResult) -> Robj {
     }
     let ids: Vec<String> = result.subjects.iter().map(|sr| sr.id.clone()).collect();
     let ofv: Vec<f64> = result.subjects.iter().map(|sr| sr.ofv_contribution).collect();
-    // `sdtab` writes `ipred.len()` rows per subject; ferx-core's loader refuses
-    // a bundle where that is not `n_obs`, so the two are one count.
+    // `sdtab` writes `ipred.len()` rows per subject, and this is `n_obs`, which
+    // the engine's post-fit pass sets to `subject.observations.len()`, the same
+    // observations `ipred` is computed over (`api/postfit.rs`). Were the two
+    // ever to differ, the counts would not add up to `nrow(sdtab)` and the R
+    // writer would fall back to grouping rows by the ID number.
     let n_obs: Vec<i32> = result.subjects.iter().map(|sr| sr.n_obs as i32).collect();
     #[cfg(feature = "survival")]
     let n_discrete: Vec<i32> = result
