@@ -692,7 +692,7 @@
   tl <- result$theta_levels
   result$theta_levels <- .ferx_theta_levels_frame(
     tl$block, tl$index, tl$label, tl$group, tl$contrast, tl$theta_name,
-    tl$value
+    tl$value, tl$se, tl$sir_lo, tl$sir_hi
   )
   # `[covariate_model]` statistics (#412), through the constructor
   # `ferx_load_fit()` uses. Zero rows for a model with no symbolic centre.

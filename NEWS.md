@@ -2,6 +2,30 @@
 
 ## Breaking changes
 
+- **ferx now builds against ferx-core `6eb1a4d2`**, up from `deaa92f6`.
+  These engine changes reach R:
+
+  - **`fit$theta_levels` gains `se`, `sir_lo` and `sir_hi` per level**, with
+    the delta method for derived (`sum_to_zero`) levels
+    ([#528](https://github.com/FeRx-NLME/ferx-r/issues/528),
+    [ferx-core #1890](https://github.com/FeRx-NLME/ferx-core/issues/1890)).
+    Code that checks its `ncol()` or `names()` exactly needs updating.
+  - **A FIX level block is no longer reported as free coefficients** in
+    `print()`'s THETA BLOCKS section
+    ([ferx-core #1891](https://github.com/FeRx-NLME/ferx-core/issues/1891)).
+  - **An `[individual_parameters]` name assigned only inside an `if` with no
+    `else`, and read anywhere, is now a parse error**; the fix is a default
+    before the `if`, or an `else`
+    ([ferx-core #1857](https://github.com/FeRx-NLME/ferx-core/issues/1857),
+    narrowed by [#1902](https://github.com/FeRx-NLME/ferx-core/issues/1902)).
+  - **On an analytical model, `[initial_conditions]` and a Form B
+    `obs_scale` read an individual parameter no `pk(...)` role binds as its
+    own value**; before they silently read `CL`, so results move for such
+    models ([ferx-core #1898](https://github.com/FeRx-NLME/ferx-core/issues/1898)).
+  - **An all-arm `if`/`else` individual parameter read only by an ODE
+    `[event_model]` hazard now parses**
+    ([ferx-core #1897](https://github.com/FeRx-NLME/ferx-core/issues/1897)).
+
 - **A reloaded `fit$sdtab$ID` is numeric**, as on the live fit, also for a
   `.fitrx` bundle ferx-core wrote, where it used to come back as the text ID
   ([#475](https://github.com/FeRx-NLME/ferx-r/issues/475); see Bug fixes).

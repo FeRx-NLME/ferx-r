@@ -762,7 +762,14 @@
 #'     \code{sum_to_zero} / \code{sum_to_zero_within}, 0 for a \code{ref}
 #'     reference level. Computed by ferx-core exactly as the model applies
 #'     it, so no contrast arithmetic is needed in R. \code{NA} on a fit
-#'     loaded from a bundle saved before ferx recorded it). Zero rows for a
+#'     loaded from a bundle saved before ferx recorded it), \code{se} (the
+#'     level's standard error: a free level's \code{se_theta} entry, a
+#'     derived level's delta-method standard error of the negated sum;
+#'     \code{NA} for a \code{ref} reference level and for every level of a
+#'     fit without a covariance matrix) and \code{sir_lo} / \code{sir_hi}
+#'     (the level's 95 percent SIR interval over the kept draws; \code{NA} unless
+#'     SIR ran with \code{sir_keep_samples = TRUE}). \code{ferx_covariance}
+#'     and \code{ferx_sir} refresh \code{se} and the interval. Zero rows for a
 #'     model with no level block. \code{NULL} on a fit loaded by \code{\link{ferx_load_fit}}
 #'     from a bundle that does not record the bindings (one written by
 #'     ferx-core, or saved before ferx recorded them): unknown, not empty, so
@@ -2576,7 +2583,8 @@ ferx_fit <- function(model, data = NULL,
   }
 }
 
-# c(min, median, max) of a compact theta block's free coefficients, for the
+# c(min, median, max) of every coefficient of a compact theta block, FIX ones
+# included (ferx-core #1891), for the
 # THETA BLOCKS lines of print.ferx_fit (#413). The median is the lower of the
 # two middle values on an even count, never their mean. A NaN is kept and sorts
 # last, as core's `total_cmp` sort puts it. This repeats ferx-core's
@@ -2773,10 +2781,19 @@ print.ferx_fit <- function(x, ...) {
     cat("\n", .ferx_style("THETA BLOCKS", "bold"), "\n", sep = "")
     cat(strrep("-", 60), "\n", sep = "")
     for (b in seq_along(theta_blocks$block)) {
-      vals <- unname(x$theta[seq(theta_blocks$from[b], theta_blocks$to[b])])
+      idx <- seq(theta_blocks$from[b], theta_blocks$to[b])
+      vals <- unname(x$theta[idx])
       s <- .ferx_theta_block_summary(vals)
-      cat(sprintf("%s  %d free coefficients   min %.4f  median %.4f  max %.4f\n",
-                  theta_blocks$block[b], length(vals), s[1], s[2], s[3]))
+      # A FIX coefficient is not free (ferx-core #1891): the count splits as
+      # core's report does once any is fixed; min/median/max cover them all.
+      n_fixed <- sum(vapply(idx, function(i) .ferx_is_fixed(x$theta_fixed, i), logical(1L)))
+      count <- if (n_fixed == 0L) {
+        sprintf("%d free coefficients", length(vals))
+      } else {
+        sprintf("%d free, %d FIX coefficients", length(vals) - n_fixed, n_fixed)
+      }
+      cat(sprintf("%s  %s   min %.4f  median %.4f  max %.4f\n",
+                  theta_blocks$block[b], count, s[1], s[2], s[3]))
     }
     cat("  (every coefficient is in fit$theta)\n")
   }

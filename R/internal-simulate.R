@@ -290,11 +290,14 @@ validate_fit_for_params <- function(fit) {
 # `ferx_load_fit()` so a fresh fit and a reloaded one are `identical()`. Takes
 # the columns as plain vectors; a NULL column reads as zero rows. `value` (#430)
 # is the engine's fitted value per level; NULL there on a non-empty table (a
-# bundle saved before ferx recorded it) reads as NA, unknown, never 0.
+# bundle saved before ferx recorded it) reads as NA, unknown, never 0. `se`,
+# `sir_lo` and `sir_hi` (#528) are the engine's uncertainty per level, NULL
+# read as NA the same way.
 .ferx_theta_levels_frame <- function(block = NULL, index = NULL, label = NULL,
                                      group = NULL, contrast = NULL,
-                                     theta_name = NULL, value = NULL) {
-  if (is.null(value)) value <- rep(NA_real_, length(block))
+                                     theta_name = NULL, value = NULL,
+                                     se = NULL, sir_lo = NULL, sir_hi = NULL) {
+  na <- function(x) if (is.null(x)) rep(NA_real_, length(block)) else x
   data.frame(
     block = as.character(block),
     index = as.integer(index),
@@ -302,8 +305,40 @@ validate_fit_for_params <- function(fit) {
     group = as.integer(group),
     contrast = as.character(contrast),
     theta_name = as.character(theta_name),
-    value = as.numeric(value),
+    value = as.numeric(na(value)),
+    se = as.numeric(na(se)),
+    sir_lo = as.numeric(na(sir_lo)),
+    sir_hi = as.numeric(na(sir_hi)),
     stringsAsFactors = FALSE
+  )
+}
+
+# `fit$theta_levels` as the engine lays it out on `model_path` from the fit's
+# `layout` (a `fit$theta_levels`-shaped frame; only its layout columns are
+# read), theta, covariance and kept SIR draws: every level's value, se and SIR
+# interval (#430, #528). `ferx_load_fit()` rebuilds the frame with it, and
+# `ferx_covariance()` / `ferx_sir()` refresh it, so a level's uncertainty is
+# always the one the fit's current `cov_matrix` and `sir_resamples` give,
+# never an earlier run's. The model file is checked against the fit's hash.
+.ferx_theta_levels_from_engine <- function(fit, model_path,
+                                           layout = fit$theta_levels) {
+  args <- .ferx_fit_binding_args(list(
+    theta_levels = layout, covariate_stats = fit$covariate_stats
+  ))
+  cov <- fit$cov_matrix
+  has_cov <- is.matrix(cov) && nrow(cov) > 0L
+  tl <- ferx_rust_theta_levels_from_fit(
+    model_path, .ferx_hash_arg(fit$model_hash), as.numeric(fit$theta),
+    as.character(names(fit$theta)), args$fit_bindings,
+    cov_matrix_flat = if (has_cov) as.numeric(t(cov)) else numeric(0),
+    cov_matrix_dim = if (has_cov) nrow(cov) else 0L,
+    sir_resamples_flat = as.numeric(fit$sir_resamples %||% numeric(0)),
+    sir_resamples_n = as.integer(fit$sir_resamples_n %||% 0L),
+    sir_resamples_dim = as.integer(fit$sir_resamples_dim %||% 0L)
+  )
+  .ferx_theta_levels_frame(
+    tl$block, tl$index, tl$label, tl$group, tl$contrast, tl$theta_name,
+    tl$value, tl$se, tl$sir_lo, tl$sir_hi
   )
 }
 

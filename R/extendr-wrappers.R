@@ -165,8 +165,8 @@ ferx_rust_structural_theta_labels <- function(theta_names) {
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_theta_levels_from_fit <-function(model_path, model_hash, theta, theta_names, fit_bindings) {
-  .Call("wrap__ferx_rust_theta_levels_from_fit", model_path, model_hash, theta, theta_names, fit_bindings)
+ferx_rust_theta_levels_from_fit <-function(model_path, model_hash, theta, theta_names, fit_bindings, cov_matrix_flat, cov_matrix_dim, sir_resamples_flat, sir_resamples_n, sir_resamples_dim) {
+  .Call("wrap__ferx_rust_theta_levels_from_fit", model_path, model_hash, theta, theta_names, fit_bindings, cov_matrix_flat, as.integer(cov_matrix_dim), sir_resamples_flat, as.integer(sir_resamples_n), as.integer(sir_resamples_dim))
 }
 
 #' @title Internal Rust backend binding
