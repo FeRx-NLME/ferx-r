@@ -436,11 +436,24 @@ test_that("the IDs reach the engine's check in fit order, not sorted or re-read 
   rotated <- gappy
   ids <- gappy$ebe_etas$ID
   rotated$ebe_etas$ID <- c(ids[-1], ids[1])
-  expect_error(
-    ferx_covariance(rotated),
-    "subject 1 of the population is `110`, but the fit's is `113`",
-    fixed = TRUE
-  )
+  # ferx-core #1813: one coded refusal. A live fit carries its fingerprint, so
+  # the population is verified as the fit's and what differs is the fit's own
+  # per-subject rows (E_FIT_SUBJECTS_MISMATCH).
+  expect_false(is.null(rotated$population_fingerprint))
+  e <- tryCatch(ferx_covariance(rotated), error = function(e) e)
+  expect_s3_class(e, "ferx_engine_error")
+  expect_identical(e$code, "E_FIT_SUBJECTS_MISMATCH")
+  # Both IDs are still named, so the message says which subject moved.
+  expect_match(conditionMessage(e), "`110`", fixed = TRUE)
+  expect_match(conditionMessage(e), "`113`", fixed = TRUE)
+
+  # Without a fingerprint (a fit saved before it was recorded) the subject
+  # list is all there is to compare: the population is not the fit's.
+  legacy <- rotated
+  legacy$population_fingerprint <- NULL
+  e2 <- tryCatch(ferx_covariance(legacy), error = function(e) e)
+  expect_s3_class(e2, "ferx_engine_error")
+  expect_identical(e2$code, "E_POPULATION_MISMATCH")
 })
 
 test_that("ferx_covariance hands the binding the fit's IDs verbatim (#468)", {

@@ -21,6 +21,14 @@
 #' (\code{model}, or \code{fit$model_path}, which must still have the fit's
 #' hash) is the one compared.
 #'
+#' When the model and data are the fit's own (\code{model} and \code{data}
+#' left \code{NULL}, or naming \code{fit$model_path} / \code{fit$data_path}),
+#' the re-read data are checked against the fit's
+#' \code{fit$population_fingerprint}, as
+#' \code{\link{ferx_covariance}} and \code{\link{ferx_sir}} check theirs: a data
+#' file edited since the fit is refused with code
+#' \code{E_POPULATION_MISMATCH}, saying what differs.
+#'
 #' @param fit A \code{ferx_fit} result, carrying \code{theta}, \code{omega},
 #'   \code{sigma}, and (unless overridden) the \code{model_path} / \code{data_path}
 #'   captured at fit time.
@@ -78,6 +86,10 @@ ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = 
     identical(normalizePath(model, mustWork = FALSE),
               normalizePath(fit$model_path %||% "", mustWork = FALSE))
   data_override <- data
+  # `data =` naming the fit's own file is still the fit's data.
+  data_is_fits <- is.null(data) ||
+    identical(normalizePath(data, mustWork = FALSE),
+              normalizePath(fit$data_path %||% "", mustWork = FALSE))
   model <- model %||% fit$model_path
   data  <- data  %||% fit$data_path
   if (is.null(model) || is.na(model) || !file.exists(model)) {
@@ -98,6 +110,18 @@ ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = 
     data = data_override
   )
 
+  # On the fit's own model and data the engine checks the re-read population
+  # against the fit's fingerprint (ferx-core #1814): a data file edited since
+  # the fit is refused with E_POPULATION_MISMATCH. That includes `model =` /
+  # `data =` naming the fit's own files. Another model or data file is not
+  # the fit's population by construction, so it is not checked.
+  reader_args <- .ferx_fit_reader_args(fit)
+  fingerprint <- if (model_is_fits && data_is_fits) {
+    reader_args$population_fingerprint
+  } else {
+    ""
+  }
+
   # A refusal (bad params, unreadable data, ...) is an R error, classed like a
   # refused `ferx_fit()` (#385).
   npde_tbl <- .ferx_engine_call(
@@ -113,8 +137,9 @@ ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = 
       residual_rho = fit_pieces$residual_rho,
       fit_bindings = fit_pieces$fit_bindings,
       # The fit's own selection, replayed on whichever file is read (#416).
-      reader_settings = .ferx_fit_reader_args(fit)$reader_settings,
+      reader_settings = reader_args$reader_settings,
       model_is_fits = model_is_fits,
+      population_fingerprint = fingerprint,
       nsim       = nsim,
       seed       = seed_int
     ),
@@ -124,6 +149,11 @@ ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = 
   # step against a table of the wrong shape.
   if (is.null(npde_tbl) || !is.data.frame(npde_tbl)) {
     stop("ferx_calc_npde: the engine returned no NPDE table.", call. = FALSE)
+  }
+  # The fingerprint check's notes, e.g. a fingerprint from another ferx
+  # version's encoding that could not be compared.
+  for (note in attr(npde_tbl, "npde_notes", exact = TRUE)) {
+    warning("ferx_calc_npde: ", note, call. = FALSE)
   }
 
   fit$sdtab <- .ferx_attach_npde(fit$sdtab, npde_tbl)

@@ -335,10 +335,18 @@ ferx_load_fit <- function(path) {
     population_fingerprint = .fitrx_json_from_wire(w$population_fingerprint,
                                                    "population_fingerprint"),
     # How the fit was scored (#511) and what its SIR ran under (#472), back to
-    # the lists the fit carries; NULL in a bundle written without them. The
-    # bundle has no packed estimate (ferx-core#1815).
+    # the lists the fit carries; NULL in a bundle written without them.
     scoring_settings = .fitrx_settings_from_wire(w$scoring_settings, "scoring_settings"),
     sir_settings = .fitrx_settings_from_wire(w$sir$settings, "sir_settings"),
+    # The LOQ method the fit scored (ferx-core `bloq_method`), which the
+    # post-hoc steps score too (#1824); NULL when the bundle records none.
+    bloq_method_label = .fitrx_unwrap_opt_chr(w$bloq_method),
+    # The optimizer's packed estimate (ferx-core #1815), bit for bit; NULL in a
+    # bundle written without it (before #1815, or from a fit that has none).
+    # A JSON null (a non-finite value) reads back as NA.
+    packed_estimate = if (is.null(w$packed_estimate)) NULL else
+      vapply(w$packed_estimate, function(v) if (is.null(v)) NA_real_ else as.numeric(v),
+             numeric(1L)),
 
     input_columns   = as.character(unlist(w$input_columns   %||% list(), use.names = FALSE)),
     covariate_names = as.character(unlist(w$covariate_names %||% list(), use.names = FALSE))

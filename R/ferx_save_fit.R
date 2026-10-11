@@ -243,7 +243,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   "method_chain", "prior_summary", "method_wall_times_secs",
   "nlopt_missing_algorithms", "warnings", "cov_eigenvalues", "eta_param_info",
   "theta_init", "sigma_init", "final_gradient", "covariate_names",
-  "input_columns",
+  "input_columns", "packed_estimate",
   # ThetaWire / OmegaWire / SigmaWire
   "names", "estimates", "se", "fixed", "transform", "log_transformed",
   "shrinkage", "init_as_sd", "types", "residual_correlations",
@@ -521,9 +521,20 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   # ferx-core's keys, so `ferx_covariance()` / `ferx_sir()` on the loaded fit
   # score as the fit did. Absent when the fit records none. The engine refuses
   # a bundle whose top-level `sir_seed` differs from `sir.settings.seed`, so the
-  # seed is written beside the record. `packed_estimate` is not written: the
-  # schema has no key for it (ferx-core#1815).
+  # seed is written beside the record. The optimizer's packed estimate goes
+  # under ferx-core's `packed_estimate` key (#1815), at the 17 significant
+  # digits the writer uses below, so it reads back bit for bit: the engine uses
+  # it only when it unpacks exactly to the fit's estimates. Absent when the fit
+  # carries none.
   wire$scoring_settings <- .fitrx_settings_to_wire(fit, "scoring_settings")
+  if (length(fit$packed_estimate)) {
+    wire$packed_estimate <- as.numeric(fit$packed_estimate)
+  }
+  # The LOQ method the fit scored, under ferx-core's `bloq_method` key, so the
+  # post-hoc steps on the loaded fit score it too (ferx-core #1824); absent
+  # when the fit records none, which the engine reads as "".
+  bloq <- .ferx_fit_bloq_label(fit)
+  if (nzchar(bloq)) wire$bloq_method <- bloq
   sir_settings <- .fitrx_settings_to_wire(fit, "sir_settings")
   if (!is.null(sir_settings) && !is.null(wire$sir)) {
     wire$sir$settings <- sir_settings

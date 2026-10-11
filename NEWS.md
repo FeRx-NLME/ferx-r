@@ -22,6 +22,68 @@
   exactly needs updating
   ([#430](https://github.com/FeRx-NLME/ferx-r/issues/430)).
 
+- **ferx now builds against ferx-core `14cca400`**, up from `160cc9a3`.
+  These engine changes reach R:
+
+  - **OMEGA_IOV (KAPPA) rows print the exact log-normal CV%**,
+    `sqrt(exp(var) - 1) * 100`, instead of the first-order `sqrt(var) * 100`
+    (0.20: 44.7 becomes 47.1)
+    ([ferx-core #1858](https://github.com/FeRx-NLME/ferx-core/issues/1858)).
+  - **`ferx_covariance()` and `ferx_sir()` on a `gradient = "fd"` fit stay on
+    finite differences with default arguments**, also after
+    `ferx_load_fit()`
+    ([ferx-core #1835](https://github.com/FeRx-NLME/ferx-core/issues/1835)).
+    They used to build the covariance from the analytic gradient. The route
+    is recorded as `fit$scoring_settings$gradient_method` (`"auto"` or
+    `"fd"`), and a record saved before this reads as `"auto"`.
+  - **A reloaded fit's `ferx_covariance()` repeats the inline step
+    exactly**: `ferx_save_fit()` now keeps `fit$packed_estimate`, bit for
+    bit, and a reloaded `[mixture]` fit with per-class overrides is scored
+    instead of refused
+    ([ferx-core #1815](https://github.com/FeRx-NLME/ferx-core/issues/1815)).
+  - **`ferx_covariance()` and `ferx_sir()` score the LOQ method the fit
+    used**, `fit$bloq_method_label`, also after `ferx_load_fit()`
+    ([ferx-core #1824](https://github.com/FeRx-NLME/ferx-core/issues/1824)).
+    A fit made with `ferx_fit(bloq_method = "m3")` on a model file without
+    `bloq_method` was re-scored as `drop` by these steps; it is now scored
+    as M3, as the fit was. `ferx_save_fit()` keeps the method, and
+    `bloq_method` passed to `ferx_fit()` reaches the engine as its own
+    per-call option.
+  - **`ferx_sir()` / `ferx_covariance()` refuse a population that is not the
+    fit's with one code, `E_POPULATION_MISMATCH`**, saying what differs and
+    how the data were read; when the population is the fit's but the fit's
+    per-subject rows are in another count or order, the code is
+    `E_FIT_SUBJECTS_MISMATCH`
+    ([ferx-core #1813](https://github.com/FeRx-NLME/ferx-core/issues/1813)).
+    **`ferx_calc_npde(fit)` checks the data it re-reads against
+    `fit$population_fingerprint`** the same way, so a data file edited since
+    the fit is refused instead of scored. That holds with `data` left
+    `NULL` or naming the fit's own file; another file is not checked
+    ([ferx-core #1814](https://github.com/FeRx-NLME/ferx-core/issues/1814)).
+  - **Compartment states, `[derived]` compartments, ODE hazards and CTMM
+    generators read each dose's absorption, lag, `F` and rate at its own
+    dose record**, as IPRED already did. With a time-varying covariate or a
+    `TIME`-reading `$PK` they could be off by up to the whole dose, with no
+    warning
+    ([ferx-core #1575](https://github.com/FeRx-NLME/ferx-core/issues/1575)).
+  - **Level blocks that absorb a random effect are refused as unidentified
+    in more forms** (`E_THETA_LEVEL_BINDING`): proportional `if` branches, a
+    factor distributed over a sum, a self-reassigned funnel
+    (`E0 = E0 * (1 + 0.1 * OCC)`), and a read gated by a theta or a random
+    effect. This includes a block whose levels each lie within one subject
+    when each subject is observed once
+    ([ferx-core #1834](https://github.com/FeRx-NLME/ferx-core/issues/1834),
+    [#1880](https://github.com/FeRx-NLME/ferx-core/issues/1880),
+    [#1836](https://github.com/FeRx-NLME/ferx-core/issues/1836),
+    [#1822](https://github.com/FeRx-NLME/ferx-core/issues/1822)).
+    The Omega / sigma / Omega_IOV shape checks now include squareness
+    (`E_PARAM_SHAPE`)
+    ([ferx-core #1833](https://github.com/FeRx-NLME/ferx-core/issues/1833)).
+  - **AGQ (`n_agq > 1`) covariance factors the Hessian only at the mode**,
+    which is faster and sends fewer subjects to the finite-difference
+    salvage
+    ([ferx-core #1844](https://github.com/FeRx-NLME/ferx-core/issues/1844)).
+
 - **ferx now builds against ferx-core `160cc9a3`**, up from `826d3bb9`.
   These engine changes reach R:
 

@@ -17,6 +17,7 @@ ferx_rust_npde_from_fit(
   fit_bindings,
   reader_settings,
   model_is_fits,
+  population_fingerprint,
   nsim,
   seed
 )

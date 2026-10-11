@@ -52,7 +52,8 @@ ps_sir_fields <- function(fit) {
 ps_scoring_keys <- c(
   "inner_maxiter", "inner_tol", "inner_restarts", "mu_referencing", "n_agq",
   "inner_optimizer", "ebe_warm_start", "ode_reltol", "ode_abstol",
-  "ode_max_steps", "ode_method", "ode_stiff_abort_after", "ode_auto_switch"
+  "ode_max_steps", "ode_method", "ode_stiff_abort_after", "ode_auto_switch",
+  "gradient_method"
 )
 
 test_that("S11: a fit shows its scoring record, and its SIR record only after SIR", {
@@ -70,6 +71,37 @@ test_that("S11: a fit shows its scoring record, and its SIR record only after SI
   expect_identical(names(sir$sir_settings$scoring), ps_scoring_keys)
   expect_identical(sir$sir_settings[c("samples", "resamples", "seed", "df")],
                    list(samples = 300L, resamples = 100L, seed = 1, df = 3))
+})
+
+test_that("S12: a gradient = \"fd\" fit stays on finite differences in ferx_covariance(), also after a reload", {
+  # ferx-core #1835: the fit records its gradient route, and the post-hoc step
+  # takes it as a union with the caller's (either side's fd wins).
+  fd <- ps_fit("w_fd", "warfarin", gradient = "fd")
+  expect_identical(fd$scoring_settings$gradient_method, "fd")
+  expect_identical(ps_fit("w_default", "warfarin")$scoring_settings$gradient_method,
+                   "auto")
+  # Premise: the analytic route moves this fit's covariance.
+  as_auto <- fd
+  as_auto$scoring_settings$gradient_method <- "auto"
+  expect_false(identical(ferx_covariance(as_auto)$cov_matrix, fd$cov_matrix))
+
+  cov <- ferx_covariance(fd)
+  expect_identical(cov$cov_matrix, fd$cov_matrix)
+  loaded <- ps_round_trip(fd)
+  expect_identical(loaded$scoring_settings, fd$scoring_settings)
+  expect_identical(ferx_covariance(loaded)$cov_matrix, fd$cov_matrix)
+})
+
+test_that("S13: a scoring record without gradient_method (saved before ferx-core #1835) reads it as auto", {
+  fit <- ps_fit("w_default", "warfarin")
+  old <- fit
+  old$scoring_settings$gradient_method <- NULL
+  expect_identical(ferx_covariance(old)$cov_matrix, fit$cov_matrix)
+  # The same in the SIR record's scoring half, read through the record decoder.
+  rec <- ferx:::ferx_rust_settings_record("sir_settings", NULL, "test", "rec")
+  rec$scoring$gradient_method <- NULL
+  back <- ferx:::ferx_rust_settings_record("sir_settings", rec, "test", "rec")
+  expect_identical(back$scoring$gradient_method, "auto")
 })
 
 test_that("S1: on a default fit ferx_covariance(fit) is identical() to the in-fit step", {
@@ -153,21 +185,17 @@ test_that("S3: the scoring record survives ferx_save_fit() / ferx_load_fit()", {
     fit <- ps_cov_fit(row)
     loaded <- ps_round_trip(fit)
     expect_identical(loaded$scoring_settings, fit$scoring_settings, info = row$key)
-    # A bundle has no key for the packed estimate (ferx-core#1815), so the
-    # loaded fit matches the in-memory one without it, not the in-fit step.
-    expect_null(loaded$packed_estimate)
-    in_memory <- fit
-    in_memory$packed_estimate <- NULL
+    # The bundle carries the packed estimate bit for bit (ferx-core #1815), so
+    # the loaded fit repeats the in-fit step exactly.
+    expect_identical(loaded$packed_estimate, fit$packed_estimate, info = row$key)
     cov <- ferx_covariance(loaded)
-    expect_identical(cov$cov_matrix, ferx_covariance(in_memory)$cov_matrix,
-                     info = row$key)
+    expect_identical(cov$cov_matrix, fit$cov_matrix, info = row$key)
+    expect_identical(cov$se_theta, fit$se_theta, info = row$key)
     # Premise: the record still moves the loaded fit's covariance.
     no_record <- loaded
     no_record$scoring_settings <- NULL
     expect_false(identical(ferx_covariance(no_record)$cov_matrix, cov$cov_matrix),
                  info = row$key)
-    # The reload residual (plan section 0a: 1.3e-7 relative on warfarin_iov).
-    expect_equal(cov$se_theta, fit$se_theta, tolerance = 1e-6, info = row$key)
   }
 })
 
@@ -372,7 +400,7 @@ test_that("S8: a fit whose estimates were edited does not keep its packed estima
   expect_false(identical(cov, fit$cov_matrix))
 })
 
-test_that("S9: a [mixture] per-class override fit is scored in memory, refused after a reload", {
+test_that("S9: a [mixture] per-class override fit is scored in memory and after a reload", {
   ex <- list(model = test_path("fixtures", "mixture_override.ferx"),
              data = test_path("fixtures", "mixture_iv.csv"))
   fit <- ps_fit("mix_override", ex, method = "focei")
@@ -385,8 +413,57 @@ test_that("S9: a [mixture] per-class override fit is scored in memory, refused a
   expect_identical(cov$cov_matrix, fit$cov_matrix)
   expect_identical(cov$se_theta, fit$se_theta)
 
-  # .fitrx has no key for the packed estimate (ferx-core#1815).
+  # The bundle carries the packed estimate (ferx-core #1815), which holds the
+  # overrides, so the reloaded fit is scored too.
   loaded <- ps_round_trip(fit)
-  expect_null(loaded$packed_estimate)
-  expect_error(ferx_covariance(loaded), refusal, fixed = TRUE)
+  expect_identical(loaded$packed_estimate, fit$packed_estimate)
+  cov <- ferx_covariance(loaded)
+  expect_identical(cov$cov_matrix, fit$cov_matrix)
+  expect_identical(cov$se_theta, fit$se_theta)
+})
+
+# Since ferx-core #1824 `run_covariance` / `run_sir` score the LOQ method the
+# fit reports, so the skeleton must carry the fit's (#558 review 1): a
+# hard-coded "drop" re-scored an M3 fit without its censored rows (SE off by
+# up to 37% on warfarin_bloq).
+ps_bloq_drop_model <- function(env = parent.frame()) {
+  # warfarin_bloq's model without its `bloq_method = m3` line: a drop-file
+  # model, so M3 reaches the fit only through `ferx_fit(bloq_method =)`.
+  path <- ps_scratch(".ferx", env)
+  lines <- readLines(ferx_example("warfarin_bloq")$model)
+  writeLines(lines[!grepl("^\\s*bloq_method\\s*=", lines)], path)
+  path
+}
+
+test_that("S14: ferx_covariance(fit) on an M3 fit scores M3, in memory and after a reload", {
+  file_m3 <- ps_fit("bloq_file_m3", "warfarin_bloq")
+  drop_model <- ps_bloq_drop_model()
+  arg_m3 <- ps_fit("bloq_arg_m3",
+                   list(model = drop_model, data = ferx_example("warfarin_bloq")$data),
+                   bloq_method = "m3")
+  for (fit in list(file_m3, arg_m3)) {
+    expect_identical(fit$bloq_method_label, "m3")
+    # Premise: scored as drop, the censored rows move the covariance.
+    as_drop <- fit
+    as_drop$bloq_method_label <- "drop"
+    expect_false(identical(ferx_covariance(as_drop)$se_theta, fit$se_theta))
+
+    cov <- ferx_covariance(fit)
+    expect_identical(cov$cov_matrix, fit$cov_matrix)
+    expect_identical(cov$se_theta, fit$se_theta)
+    loaded <- ps_round_trip(fit)
+    expect_identical(loaded$bloq_method_label, "m3")
+    expect_identical(ferx_covariance(loaded)$se_theta, fit$se_theta)
+  }
+  # A fit that records no method (a bundle saved before the key) falls back
+  # to the model file's: still M3 for the file fit.
+  no_label <- file_m3
+  no_label$bloq_method_label <- NULL
+  expect_identical(ferx_covariance(no_label)$se_theta, file_m3$se_theta)
+})
+
+test_that("S15: ferx_sir(fit) on an M3 fit repeats the in-fit SIR", {
+  fit <- ps_fit("bloq_file_m3_sir", "warfarin_bloq", sir = TRUE)
+  skip_if(is.null(fit$sir_ess), "bloq_file_m3_sir in-fit SIR did not run")
+  expect_identical(ps_sir_fields(ferx_sir(fit)), ps_sir_fields(fit))
 })

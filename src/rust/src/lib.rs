@@ -557,11 +557,12 @@ fn ferx_rust_fit(
         }
 
         // Optional R-side override for BLOQ handling. Empty string → keep whatever
-        // the model file specified.
+        // the model file specified. No copy onto `parsed.model.bloq_method`: since
+        // ferx-core #1824, `fit()` resolves `opts.bloq_method` itself, per call.
         match bloq_method.trim().to_lowercase().as_str() {
             "" => {}
-            "m3" => opts.bloq_method = BloqMethod::M3,
-            "drop" | "none" | "ignore" => opts.bloq_method = BloqMethod::Drop,
+            "m3" => opts.bloq_method = Some(BloqMethod::M3),
+            "drop" | "none" | "ignore" => opts.bloq_method = Some(BloqMethod::Drop),
             other => {
                 rprintln!(
                     "Unknown bloq_method '{}' — expected 'm3' or 'drop' (falling back to model default)",
@@ -569,8 +570,6 @@ fn ferx_rust_fit(
                 );
             }
         }
-        // Mirror onto the compiled model so likelihood functions pick it up.
-        parsed.model.bloq_method = opts.bloq_method;
 
         // Gradient method override. Empty string → keep the model file's value
         // (#558) instead of forcing Auto; an explicit token overrides it.
@@ -1560,9 +1559,13 @@ fn ferx_rust_predict_survival_from_fit(
 /// @param model_is_fits TRUE when `model_path` is the fit's own model file:
 ///   the whole record is replayed. FALSE (a `model =` override): only its
 ///   selection is, on that file's own reader settings.
+/// @param population_fingerprint `fit$population_fingerprint` as JSON when the
+///   model and the data are the fit's own (left NULL or naming its files), else "":
+///   the re-read population is verified against it (ferx-core #1814).
 /// @param nsim Number of Monte-Carlo replicates per subject
 /// @param seed RNG seed; pass -1 for the engine default
-/// @return Data frame with ID, TIME, NPDE, NPD columns
+/// @return Data frame with ID, TIME, NPDE, NPD columns, and an
+///   `npde_notes` character attribute (the fingerprint check's notes)
 /// @export
 #[extendr]
 #[allow(clippy::too_many_arguments)]
@@ -1579,6 +1582,7 @@ fn ferx_rust_npde_from_fit(
     fit_bindings: List,
     reader_settings: &str,
     model_is_fits: bool,
+    population_fingerprint: &str,
     nsim: i32,
     seed: i32,
 ) -> Robj {
@@ -1600,9 +1604,10 @@ fn ferx_rust_npde_from_fit(
         // ignore_ids =)` as well as the file's. On the fit's own model file the
         // whole record is replayed (its `iov_column` override too); on a `model =`
         // override only the selection is, so that file's `[data]`, `[covariates]`
-        // and `iov_column` still decide how it is read (review 3). Replay only: the
-        // engine's fingerprint comparison is not public, so R's row/ID/TIME
-        // alignment check in `.ferx_attach_npde()` stays the backstop. A fit that
+        // and `iov_column` still decide how it is read (review 3). On the fit's own
+        // model and data the re-read population is then verified against the fit's
+        // fingerprint (ferx-core #1814), below; R's row/ID/TIME alignment check in
+        // `.ferx_attach_npde()` stays the backstop for the other cases. A fit that
         // records none reads with the file's `[data_selection]`; the R entry point
         // refuses that case when the fit's exclusions show more.
         let settings = if reader_settings.is_empty() {
@@ -1631,6 +1636,19 @@ fn ferx_rust_npde_from_fit(
         let fitted = fit_bindings_from_r(&fit_bindings)?;
         bind_design_from_fit(&mut parsed, model_path, &mut population, &fitted)
             .map_err(|e| engine_refusal("", e))?;
+
+        // The population, bound for any level block, is the fit's: the same
+        // checks, order and `E_POPULATION_MISMATCH` refusal as `run_sir` /
+        // `run_covariance` (ferx-core #1814). Only for the fit's own model and
+        // data: R passes "" otherwise.
+        let notes = if population_fingerprint.is_empty() {
+            Vec::new()
+        } else {
+            let fp: ferx_core::PopulationFingerprint = serde_json::from_str(population_fingerprint)
+                .map_err(|e| format!("ferx_calc_npde: `fit$population_fingerprint`: {e}"))?;
+            fp.verify(&parsed.model, &population)
+                .map_err(|e| engine_refusal("npde error: ", e))?
+        };
 
         let params = match params_from_fit(
             &parsed.model,
@@ -1683,7 +1701,10 @@ fn ferx_rust_npde_from_fit(
             }
         }
 
-        Ok(data_frame!(ID = id, TIME = time, NPDE = npde, NPD = npd).into())
+        let mut df: Robj = data_frame!(ID = id, TIME = time, NPDE = npde, NPD = npd).into();
+        df.set_attrib("npde_notes", notes)
+            .map_err(|e| format!("internal: {e}"))?;
+        Ok(df)
     })
 }
 
@@ -2887,9 +2908,10 @@ fn default_fit_result(
         sir_resamples_packed,
         importance_sampling: None,
         impmap_trace: None,
-        // The IOV covariance the uncertainty draws are taken around. Dropping it made
+        // The IOV covariance the uncertainty draws are taken around. Dropping it once made
         // ferx-core's `fitted_params_from_result` fall back to the model file's *initial*
-        // Omega_IOV, simulating the wrong inter-occasion spread with no diagnostic (#1019).
+        // Omega_IOV, simulating the wrong inter-occasion spread with no diagnostic (#1019);
+        // since ferx-core #1789 / #1833 it refuses a kappa model without one (E_PARAM_SHAPE).
         omega_iov,
         kappa_names: model.kappa_names.clone(),
         kappa_fixed: template.kappa_fixed.clone(),
@@ -5108,6 +5130,10 @@ struct FitSkeletonInputs<'a> {
     sir_settings: &'a Robj,
     /// `fit$packed_estimate`; empty when the fit carries none.
     packed_estimate: &'a [f64],
+    /// `fit$bloq_method_label` (`"drop"` / `"m3"`); "" when the fit carries
+    /// none. Since ferx-core #1824 the post-hoc steps score the method the fit
+    /// reports, so it must be the fit's, not a placeholder.
+    bloq_method: &'a str,
 }
 
 /// An IOV occasion rule in the spelling `ferx_fit(settings = list(iov_occasion =
@@ -5146,7 +5172,7 @@ fn iov_occasion_from_r(
 /// The `[fit_options]` keys of `fit$scoring_settings`, one per `ScoringSettings`
 /// field and spelled like it (ferx-core #1805). `scoring_settings_to_r` writes
 /// exactly these names and `scoring_settings_from_r` requires exactly them.
-const SCORING_KEYS: [&str; 13] = [
+const SCORING_KEYS: [&str; 14] = [
     "inner_maxiter",
     "inner_tol",
     "inner_restarts",
@@ -5160,6 +5186,7 @@ const SCORING_KEYS: [&str; 13] = [
     "ode_method",
     "ode_stiff_abort_after",
     "ode_auto_switch",
+    "gradient_method",
 ];
 
 /// `fit$sir_settings` names beside its nested `scoring` list, with the
@@ -5210,6 +5237,7 @@ fn scoring_settings_to_r(s: &ferx_core::ScoringSettings) -> std::result::Result<
         ode_method,
         ode_stiff_abort_after,
         ode_auto_switch,
+        gradient_method,
     } = s;
     Ok(list!(
         inner_maxiter = count_to_r(*inner_maxiter),
@@ -5227,7 +5255,8 @@ fn scoring_settings_to_r(s: &ferx_core::ScoringSettings) -> std::result::Result<
         ode_stiff_abort_after = ode_stiff_abort_after
             .map(|v| count_to_r(v as usize))
             .unwrap_or_else(|| Robj::from(i32::MIN)),
-        ode_auto_switch = *ode_auto_switch
+        ode_auto_switch = *ode_auto_switch,
+        gradient_method = fit_option_token(serde_json::to_value(gradient_method))?
     )
     .into())
 }
@@ -5316,6 +5345,12 @@ fn apply_settings_record(
         }
     }
     for (name, key) in keys {
+        // A record written before ferx-core #1835 has no `gradient_method`: the
+        // default (`auto`) stands in, as in ferx-core's own `.fitrx` reader, and
+        // a post-hoc step on that fit takes the caller's route as it did before.
+        if *key == "gradient_method" && !given.contains_key(name) {
+            continue;
+        }
         let v = given
             .get(name)
             .ok_or_else(|| format!("{entry_point}: `{field}`: missing key \"{name}\""))?;
@@ -5574,11 +5609,12 @@ fn fit_skeleton(
     }
 
     let omega_mat = DMatrix::from_row_slice(n_eta, n_eta, x.omega_flat);
-    // The fitted kappa (IOV) covariance. `fitted_params_from_result` falls back
-    // to the model file's *initial* kappa when the skeleton carries `None`, so
-    // SIR would resample, and the covariance step differentiate, around the
-    // wrong point (ferx-r #465, #473). Strict: a kappa model whose fit carries no
-    // matching matrix is refused.
+    // The fitted kappa (IOV) covariance. `fitted_params_from_result` used to fall
+    // back to the model file's *initial* kappa when the skeleton carried `None`, so
+    // SIR resampled, and the covariance step differentiated, around the wrong
+    // point (ferx-r #465, #473); since ferx-core #1789 / #1833 it refuses that
+    // with E_PARAM_SHAPE. Refused here first, by name: a kappa model whose fit
+    // carries no matching matrix.
     let omega_iov = omega_iov_from_fit(model, x.omega_iov_flat, x.omega_iov_dim)
         .map_err(|e| format!("{entry_point}: {e}"))?
         .map(|m| m.matrix);
@@ -5830,7 +5866,11 @@ fn fit_skeleton(
         sir_seed: None,
         imp_seed: None,
         npde_seed: None,
-        bloq_method: "drop".to_string(),
+        // The fit's LOQ method (ferx-r #558 review 1): `run_covariance` /
+        // `run_sir` score the method this field names (ferx-core #1824), so a
+        // hard-coded "drop" re-scored every M3 fit without its censored rows.
+        // "" leaves the caller's options, which carry the model file's.
+        bloq_method: x.bloq_method.to_string(),
         outer_maxiter: 0,
         outer_gtol: 0.0,
         inits_from_nca: None,
@@ -5911,6 +5951,8 @@ fn fit_skeleton(
 /// @param packed_estimate `fit$packed_estimate`, the optimizer's packed
 ///   estimate; empty when the fit carries none. Dropped unless it unpacks to
 ///   the fit's estimates bit for bit.
+/// @param bloq_method `fit$bloq_method_label`, the LOQ method the fit scored
+///   (`"drop"` / `"m3"`); "" when the fit records none (the model file's).
 /// @param verbose When TRUE, the engine prints progress to stderr.
 /// @return Named list with `sir_ess`, `sir_ci_theta`, `sir_ci_omega`, `sir_ci_sigma`,
 ///   `sir_ci_kappa`,
@@ -5943,6 +5985,7 @@ fn ferx_rust_sir(
     scoring_settings: Robj,
     sir_settings: Robj,
     packed_estimate: Vec<f64>,
+    bloq_method: &str,
     verbose: bool,
     fit_bindings: List,
 ) -> Robj {
@@ -5996,6 +6039,7 @@ fn ferx_rust_sir(
             scoring_settings: &scoring_settings,
             sir_settings: &sir_settings,
             packed_estimate: &packed_estimate,
+            bloq_method,
         };
         let fit = fit_skeleton("ferx_sir", model, &inputs, Some(cov_mat))?;
 
@@ -6113,6 +6157,8 @@ fn ferx_rust_sir(
 /// @param packed_estimate `fit$packed_estimate`, the optimizer's packed
 ///   estimate; empty when the fit carries none. Dropped unless it unpacks to
 ///   the fit's estimates bit for bit.
+/// @param bloq_method `fit$bloq_method_label`, the LOQ method the fit scored
+///   (`"drop"` / `"m3"`); "" when the fit records none (the model file's).
 /// @param covariance_method Covariance estimator: "r"/"hessian", "s"/"cross_product", or "rsr"/"sandwich".
 /// @param verbose When TRUE, the engine prints progress to stderr.
 /// @return Named list with `cov_matrix`, `cov_matrix_dim`, `se_theta`, `se_omega`,
@@ -6143,6 +6189,7 @@ fn ferx_rust_covariance(
     scoring_settings: Robj,
     sir_settings: Robj,
     packed_estimate: Vec<f64>,
+    bloq_method: &str,
     covariance_method: &str,
     verbose: bool,
     fit_bindings: List,
@@ -6194,6 +6241,7 @@ fn ferx_rust_covariance(
             scoring_settings: &scoring_settings,
             sir_settings: &sir_settings,
             packed_estimate: &packed_estimate,
+            bloq_method,
         };
         let fit = fit_skeleton("ferx_covariance", model, &inputs, None)?;
 

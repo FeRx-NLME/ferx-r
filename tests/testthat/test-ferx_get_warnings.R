@@ -498,7 +498,7 @@ test_that(".ferx_warning_guidance returns negative-autocorrelation guidance", {
     "init_not_representable", "init_outside_bounds", "mu_referencing",
     "multi_start", "ode_solver", "omega_structure", "optimizer_config",
     "optimizer_health", "parameter_at_runaway_guard", "simulation", "sir",
-    "stalled_at_init", "threads", "vi_bad_basin"
+    "stalled_at_init", "threads", "uncertainty_draws_skipped", "vi_bad_basin"
   )
 }
 

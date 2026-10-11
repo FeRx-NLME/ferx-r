@@ -180,9 +180,9 @@ test_that("a loaded fit with zero-padded IDs runs ferx_covariance like the live 
   loaded <- ferx_load_fit(path)
   expect_identical(loaded$ebe_etas$ID, fit$ebe_etas$ID)
 
-  # A bundle carries no packed estimate (ferx-core#1815), so the live side
-  # drops it too (#511).
-  fit$packed_estimate <- NULL
+  # The bundle carries the packed estimate (ferx-core #1815), so the loaded
+  # fit repeats the live step exactly (#511).
+  expect_identical(loaded$packed_estimate, fit$packed_estimate)
   live <- ferx_covariance(fit)
   skip_if(is.null(live$cov_matrix), "covariance step did not converge - skipping")
   expect_identical(ferx_covariance(loaded)$se_theta, live$se_theta)
@@ -214,9 +214,8 @@ test_that("a reloaded fit keeps text IDs and runs ferx_covariance and ferx_sir (
     expect_identical(loaded$ebe_etas$ID, fit$ebe_etas$ID, info = key)
     expect_identical(loaded$sdtab$ID, fit$sdtab$ID, info = key)
 
-    # A bundle carries no packed estimate (ferx-core#1815), so the live side
-    # drops it too (#511).
-    fit$packed_estimate <- NULL
+    # The bundle carries the packed estimate (ferx-core #1815), so the loaded
+    # fit repeats the live step exactly (#511).
     expect_identical(ferx_covariance(loaded)$se_theta,
                      ferx_covariance(fit)$se_theta, info = key)
     sir <- function(f) ferx_sir(f, sir_samples = 50L, sir_resamples = 20L, sir_seed = 1L)

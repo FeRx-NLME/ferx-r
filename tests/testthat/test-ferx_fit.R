@@ -3061,9 +3061,9 @@ test_that("print.ferx_fit uses omega_iov_param_corr when present for IOV correla
   expect_true(grepl("param corr = 0\\.5227", corr_line))
 })
 test_that("print.ferx_fit prints ferx-core's log-normal CV% for OMEGA_IOV when kappa_param_types absent", {
-  # The KAPPA rows are ferx-core's (#470): kappa = 0.20 -> CV% = sqrt(0.20) * 100
-  # = 44.7, the engine console's figure, not the exact sqrt(exp(0.20) - 1) * 100
-  # = 47.1 the R copy printed.
+  # The KAPPA rows are ferx-core's (#470), which print the exact log-normal
+  # CV% since ferx-core #1858: kappa = 0.20 -> sqrt(exp(0.20) - 1) * 100 = 47.1,
+  # not the first-order sqrt(0.20) * 100 = 44.7.
   fit <- make_fake_fit(
     omega           = matrix(0.10, 1, 1),
     omega_iov       = matrix(0.20, 1, 1),
@@ -3074,7 +3074,7 @@ test_that("print.ferx_fit prints ferx-core's log-normal CV% for OMEGA_IOV when k
   out <- capture.output(print(fit))
   kappa_line <- out[grepl("KAPPA1", out)]
   expect_true(length(kappa_line) >= 1L)
-  expect_match(kappa_line[1], "(CV% = 44.7)", fixed = TRUE)
+  expect_match(kappa_line[1], "(CV% = 47.1)", fixed = TRUE)
 })
 test_that("print.ferx_fit skips NN-weight thetas and emits NEURAL NETWORKS block", {
   # 2 baseline thetas (TVCL, TVV1) + 4 NN weights at offset=2.
