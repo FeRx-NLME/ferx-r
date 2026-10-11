@@ -35,15 +35,20 @@
 #' `covariance_method` differs from the fit's (it is a setting of the step, not
 #' of the fit, and is not recorded).
 #'
-#' A fit loaded with [ferx_load_fit()] keeps `scoring_settings` but not
-#' `packed_estimate`, which `.fitrx` bundles do not carry, so its result
-#' differs from the in-fit one in the last digits (on warfarin_iov, about 1e-7
-#' relative in the standard errors). A fit whose estimates were edited after
-#' the fit does not use `packed_estimate`. A fit with no `scoring_settings` (a
-#' bundle saved before they were recorded) is scored with the engine's
-#' defaults, as before. A `[mixture]` fit with per-class overrides needs
-#' `packed_estimate` to read the overrides back, so after a reload the step
-#' refuses it.
+#' A fit loaded with [ferx_load_fit()] keeps both, so its result is
+#' `identical()` to the in-fit one too. A fit loaded from a bundle saved before
+#' `packed_estimate` was recorded differs from the in-fit one in the last
+#' digits (on warfarin_iov, about 1e-7 relative in the standard errors). A fit
+#' whose estimates were edited after the fit does not use `packed_estimate`. A
+#' fit with no `scoring_settings` (a bundle saved before they were recorded) is
+#' scored with the engine's defaults, as before. A `[mixture]` fit with
+#' per-class overrides needs `packed_estimate` to read the overrides back, so
+#' the step refuses one loaded from such an older bundle.
+#'
+#' The record includes the gradient route the fit took
+#' (`fit$scoring_settings$gradient_method`): a fit made with `gradient = "fd"`
+#' is differentiated by finite differences here too, with default arguments
+#' and after a reload.
 #'
 #' ## Data selection
 #'

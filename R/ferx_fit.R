@@ -1048,10 +1048,14 @@
 #'     \code{mu_referencing}, \code{n_agq}, \code{inner_optimizer},
 #'     \code{ebe_warm_start}, \code{ode_reltol}, \code{ode_abstol},
 #'     \code{ode_max_steps}, \code{ode_method}, \code{ode_stiff_abort_after}
-#'     (\code{NA} when off) and \code{ode_auto_switch}, with the values
-#'     \code{[fit_options]} spells. \code{\link{ferx_covariance}} scores under
-#'     them, and \code{\link{ferx_save_fit}} keeps them. \code{NULL} when the
-#'     engine recorded none, and on a fit saved before they were recorded.}
+#'     (\code{NA} when off), \code{ode_auto_switch} and
+#'     \code{gradient_method} (the gradient route the fit took, \code{"auto"}
+#'     or \code{"fd"}), with the values \code{[fit_options]} spells.
+#'     \code{\link{ferx_covariance}} scores under them, and
+#'     \code{\link{ferx_save_fit}} keeps them. \code{NULL} when the engine
+#'     recorded none, and on a fit saved before they were recorded; a record
+#'     saved before \code{gradient_method} was recorded reads it as
+#'     \code{"auto"}.}
 #'   \item{sir_settings}{Named list of the settings the fit's SIR ran under:
 #'     \code{samples}, \code{resamples}, \code{seed} (resolved: 12345 when
 #'     \code{sir_seed} was unset), \code{df}, \code{scale},
@@ -1065,8 +1069,9 @@
 #'     otherwise). \code{\link{ferx_covariance}} starts from it, which makes
 #'     its result \code{identical()} to the inline covariance step, and reads
 #'     a \code{[mixture]} fit's per-class overrides from it. Ignored once it
-#'     no longer unpacks to the fit's estimates. Not saved by
-#'     \code{\link{ferx_save_fit}}.}
+#'     no longer unpacks to the fit's estimates. \code{\link{ferx_save_fit}}
+#'     keeps it bit for bit; \code{NULL} on a fit loaded from a bundle saved
+#'     before it was recorded.}
 #'   \item{imp_seed}{Numeric scalar (or \code{NULL}) giving the importance
 #'     sampling seed. \code{NULL} when IS was not run.}
 #'   \item{bloq_method_label}{Character string describing the LOQ-censoring

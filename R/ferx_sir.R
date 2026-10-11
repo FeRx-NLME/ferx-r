@@ -30,7 +30,9 @@
 #' (ferx-core#1819), so `ferx_save_fit()` warns and saves no SIR settings, and
 #' the loaded fit runs as one with no record. An argument you pass
 #' replaces that one setting and keeps the rest. The returned fit's
-#' `sir_settings` records the run it made.
+#' `sir_settings` records the run it made. The scoring half includes the
+#' gradient route the fit took (`gradient_method`), so a fit made with
+#' `gradient = "fd"` stays on finite differences here.
 #'
 #' A fit with no SIR record (SIR never ran on it, or it was saved before the
 #' record existed) runs with the engine's defaults for every argument left at

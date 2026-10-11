@@ -53,6 +53,12 @@ its \code{fit$exclusions} show a clause, or its \code{fit$call_settings} an
 \code{iov_column}, that the model file does not state; that model file
 (\code{model}, or \code{fit$model_path}, which must still have the fit's
 hash) is the one compared.
+
+With neither \code{model} nor \code{data} passed, the re-read data are
+checked against the fit's \code{fit$population_fingerprint}, as
+\code{\link{ferx_covariance}} and \code{\link{ferx_sir}} check theirs: a data
+file edited since the fit is refused with code
+\code{E_POPULATION_MISMATCH}, saying what differs.
 }
 \section{Errors raised by the engine}{
 

@@ -228,3 +228,28 @@ test_that("ferx_calc_npde refuses a legacy fit read with a `settings =` iov_colu
   expect_match(conditionMessage(e), '`settings = list(iov_column = "VISIT")`',
                fixed = TRUE)
 })
+
+# --- ferx-core #1814: the fit's population fingerprint -----------------------
+
+test_that("ferx_calc_npde(fit) refuses data that are not the fit's (ferx-core #1814)", {
+  ex <- ferx_example("warfarin")
+  data <- withr::local_tempfile(fileext = ".csv")
+  file.copy(ex$data, data)
+  fit <- suppressWarnings(ferx_fit(ex$model, data, method = "gn",
+                                   covariance = FALSE, verbose = FALSE))
+  expect_false(is.null(fit$population_fingerprint))
+  # Premise: on the fit's own data it runs, and says nothing.
+  expect_no_warning(out <- ferx_calc_npde(fit, nsim = 20L, seed = 1L))
+  expect_identical(nrow(out$sdtab), nrow(fit$sdtab))
+
+  # One observation edited in place: the same rows, IDs and times, so the
+  # sdtab alignment check alone let it through.
+  rows <- utils::read.csv(data, na.strings = ".")
+  obs <- which(rows$EVID == 0)[1L]
+  rows$DV[obs] <- rows$DV[obs] * 2
+  utils::write.csv(rows, data, row.names = FALSE, quote = FALSE, na = ".")
+  e <- tryCatch(ferx_calc_npde(fit, nsim = 20L, seed = 1L), error = function(e) e)
+  expect_s3_class(e, "ferx_engine_error")
+  expect_identical(e$code, "E_POPULATION_MISMATCH")
+  expect_match(conditionMessage(e), "npde error: ", fixed = TRUE)
+})
