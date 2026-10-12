@@ -290,11 +290,14 @@ validate_fit_for_params <- function(fit) {
 # `ferx_load_fit()` so a fresh fit and a reloaded one are `identical()`. Takes
 # the columns as plain vectors; a NULL column reads as zero rows. `value` (#430)
 # is the engine's fitted value per level; NULL there on a non-empty table (a
-# bundle saved before ferx recorded it) reads as NA, unknown, never 0.
+# bundle saved before ferx recorded it) reads as NA, unknown, never 0. `se`,
+# `sir_lo` and `sir_hi` (#528) are the engine's uncertainty per level, NULL
+# read as NA the same way.
 .ferx_theta_levels_frame <- function(block = NULL, index = NULL, label = NULL,
                                      group = NULL, contrast = NULL,
-                                     theta_name = NULL, value = NULL) {
-  if (is.null(value)) value <- rep(NA_real_, length(block))
+                                     theta_name = NULL, value = NULL,
+                                     se = NULL, sir_lo = NULL, sir_hi = NULL) {
+  na <- function(x) if (is.null(x)) rep(NA_real_, length(block)) else x
   data.frame(
     block = as.character(block),
     index = as.integer(index),
@@ -302,9 +305,44 @@ validate_fit_for_params <- function(fit) {
     group = as.integer(group),
     contrast = as.character(contrast),
     theta_name = as.character(theta_name),
-    value = as.numeric(value),
+    value = as.numeric(na(value)),
+    se = as.numeric(na(se)),
+    sir_lo = as.numeric(na(sir_lo)),
+    sir_hi = as.numeric(na(sir_hi)),
     stringsAsFactors = FALSE
   )
+}
+
+# The layout columns of `fit$theta_levels`: which level is which. Everything
+# else in the frame is a value read at the fit's estimates.
+.ferx_theta_levels_layout <- c("block", "index", "label", "group", "contrast",
+                               "theta_name")
+
+# `fit$theta_levels` refreshed from a post-hoc step's rows (#528): the engine's
+# `se` and, when `intervals` is TRUE, its `sir_lo` / `sir_hi`; otherwise the
+# fit's own intervals are kept (a covariance step never sees the draws, and
+# moves neither theta nor them). `new` must lay the levels out exactly as the
+# fit does, or the refresh is refused rather than written onto the wrong rows.
+.ferx_theta_levels_refresh <- function(fit, new, who, intervals) {
+  old <- fit$theta_levels
+  if (NROW(old) == 0L) return(old)
+  new <- .ferx_theta_levels_frame(
+    new$block, new$index, new$label, new$group, new$contrast, new$theta_name,
+    new$value, new$se, new$sir_lo, new$sir_hi
+  )
+  same <- nrow(new) == nrow(old) && all(vapply(
+    .ferx_theta_levels_layout, function(k) identical(new[[k]], old[[k]]), logical(1L)
+  ))
+  if (!same) {
+    stop(who, ": the engine laid the theta levels out differently from ",
+         "`fit$theta_levels`; refit with ferx_fit().", call. = FALSE)
+  }
+  old$se <- new$se
+  if (intervals) {
+    old$sir_lo <- new$sir_lo
+    old$sir_hi <- new$sir_hi
+  }
+  old
 }
 
 # The one constructor of `fit$covariate_stats` (#412), shared by `ferx_fit()`

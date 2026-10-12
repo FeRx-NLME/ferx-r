@@ -1954,12 +1954,20 @@ fn level_contrast_from_token(token: &str) -> std::result::Result<LevelContrast, 
 /// the others. `value` is the level's value at the fitted `theta`, derived
 /// levels included, as the engine's own evaluator reads it
 /// ([`ferx_core::theta_level_values`], ferx-r #430), so R never re-derives a
-/// contrast. Zero rows for a model with no level block.
+/// contrast. `se`, `sir_lo` and `sir_hi` are the engine's uncertainty per level
+/// (ferx-core #1890, ferx-r #528): a free level's are its `se_theta` and
+/// `sir_ci_theta` entries, a sum-to-zero dependent level's the delta-method
+/// standard error and the percentile interval of the negated sum. NA for a
+/// `ref` reference level, for every level without a covariance (`se`) or
+/// without kept SIR draws (`sir_lo`, `sir_hi`). Zero rows for a model with no
+/// level block.
 fn level_bindings_to_r(
     model: &CompiledModel,
     bindings: &LevelBindings,
     theta_names: &[String],
     theta: &[f64],
+    covariance: Option<&DMatrix<f64>>,
+    sir_resamples_packed: Option<&[Vec<f64>]>,
 ) -> std::result::Result<Robj, String> {
     // Declaration order. Both binders key the bindings by the model's own
     // declarations, so a binding for an undeclared block cannot reach here.
@@ -1981,7 +1989,7 @@ fn level_bindings_to_r(
     let values = if order.is_empty() {
         std::collections::HashMap::new()
     } else {
-        ferx_core::theta_level_values(model, theta)
+        ferx_core::theta_level_values(model, theta, covariance, sir_resamples_packed)
             .map_err(|e| format!("theta level values: {e}"))?
     };
 
@@ -1992,6 +2000,9 @@ fn level_bindings_to_r(
     let mut contrast: Vec<String> = Vec::new();
     let mut theta_name: Vec<Option<String>> = Vec::new();
     let mut value: Vec<f64> = Vec::new();
+    let mut se: Vec<Option<f64>> = Vec::new();
+    let mut sir_lo: Vec<Option<f64>> = Vec::new();
+    let mut sir_hi: Vec<Option<f64>> = Vec::new();
     for name in order {
         let b = &bindings[name];
         // Joined by label, not position, and a level the engine does not report
@@ -2001,7 +2012,6 @@ fn level_bindings_to_r(
             let tn = format!("{name}[{l}]");
             let v = block_values
                 .and_then(|vs| vs.iter().find(|v| &v.label == l))
-                .map(|v| v.value)
                 .ok_or_else(|| {
                     format!("theta {name}: the engine reports no value for level `{l}`")
                 })?;
@@ -2011,7 +2021,10 @@ fn level_bindings_to_r(
             group.push(b.groups.get(i).map(|g| *g as i32));
             contrast.push(level_contrast_token(b.contrast).to_string());
             theta_name.push(theta_names.contains(&tn).then_some(tn));
-            value.push(v);
+            value.push(v.value);
+            se.push(v.se);
+            sir_lo.push(v.sir_ci.map(|(lo, _)| lo));
+            sir_hi.push(v.sir_ci.map(|(_, hi)| hi));
         }
     }
     let n = block.len();
@@ -2024,6 +2037,9 @@ fn level_bindings_to_r(
             ("contrast", contrast.into()),
             ("theta_name", theta_name.into()),
             ("value", value.into()),
+            ("se", se.into()),
+            ("sir_lo", sir_lo.into()),
+            ("sir_hi", sir_hi.into()),
         ],
         n,
     ))
@@ -2050,15 +2066,25 @@ fn level_bindings_to_r(
 /// @param theta,theta_names The fit's theta and its names.
 /// @param fit_bindings The fit's data-derived bindings, as
 ///   `.ferx_fit_binding_args()` flattens them.
+/// @param cov_matrix_flat,cov_matrix_dim The fit's packed-space covariance
+///   (`fit$cov_matrix`), row-major; empty and 0 for a fit without one.
+/// @param sir_resamples_flat,sir_resamples_n,sir_resamples_dim The fit's kept
+///   SIR draws (`fit$sir_resamples`); empty and 0 when none were kept.
 /// @return A data frame with the columns of `fit$theta_levels`.
 /// @export
 #[extendr]
+#[allow(clippy::too_many_arguments)]
 fn ferx_rust_theta_levels_from_fit(
     model_path: &str,
     model_hash: &str,
     theta: Vec<f64>,
     theta_names: Vec<String>,
     fit_bindings: List,
+    cov_matrix_flat: Vec<f64>,
+    cov_matrix_dim: i32,
+    sir_resamples_flat: Vec<f64>,
+    sir_resamples_n: i32,
+    sir_resamples_dim: i32,
 ) -> Robj {
     entry(move || {
         let src = read_fit_model("ferx_load_fit", model_path, model_hash)?;
@@ -2067,7 +2093,37 @@ fn ferx_rust_theta_levels_from_fit(
         // Not `engine_refusal`: the caller words this as a malformed bundle,
         // and no diagnostic code should outlive the call.
         bind_layout_from_fit(&mut parsed, &src.text, &fitted).map_err(|e| e.to_string())?;
-        level_bindings_to_r(&parsed.model, &fitted.levels, &theta_names, &theta)
+        // The same covariance and draws a live fit hands the engine (#528),
+        // rebuilt from R's flat copies. A shape that does not match is
+        // refused, never read as "no uncertainty".
+        let cd = cov_matrix_dim.max(0) as usize;
+        if cov_matrix_flat.len() != cd * cd {
+            return Err(format!(
+                "the fit's cov_matrix holds {} values, not {cd} x {cd}",
+                cov_matrix_flat.len()
+            ));
+        }
+        let covariance = (cd > 0).then(|| DMatrix::from_row_slice(cd, cd, &cov_matrix_flat));
+        let (n, pd) = (
+            sir_resamples_n.max(0) as usize,
+            sir_resamples_dim.max(0) as usize,
+        );
+        if sir_resamples_flat.len() != n * pd {
+            return Err(format!(
+                "the fit's sir_resamples hold {} values, not {n} x {pd}",
+                sir_resamples_flat.len()
+            ));
+        }
+        let draws: Option<Vec<Vec<f64>>> = (n > 0 && pd > 0)
+            .then(|| sir_resamples_flat.chunks(pd).map(<[f64]>::to_vec).collect());
+        level_bindings_to_r(
+            &parsed.model,
+            &fitted.levels,
+            &theta_names,
+            &theta,
+            covariance.as_ref(),
+            draws.as_deref(),
+        )
     })
 }
 
@@ -3936,9 +3992,16 @@ fn fit_result_to_list(
         .unwrap_or_else(null);
 
     // One row per theta level-block level (ferx-r #370), with its fitted value
-    // (#430); zero rows for a model with no level block.
-    let theta_levels =
-        level_bindings_to_r(model, &bindings.levels, &theta_names, &result.theta)?;
+    // (#430) and its se and SIR interval (#528); zero rows for a model with no
+    // level block.
+    let theta_levels = level_bindings_to_r(
+        model,
+        &bindings.levels,
+        &theta_names,
+        &result.theta,
+        result.covariance_matrix.as_ref(),
+        result.sir_resamples_packed.as_deref(),
+    )?;
 
     Ok(list!(
         converged = result.converged,
@@ -6247,7 +6310,7 @@ fn fit_skeleton(
 /// @return Named list with `sir_ess`, `sir_ci_theta`, `sir_ci_omega`, `sir_ci_sigma`,
 ///   `sir_ci_kappa`,
 ///   `sir_resamples`, `sir_resamples_n`, `sir_resamples_dim`, `sir_seed_used`,
-///   `sir_settings` (the record this run made), and `warnings`.
+///   `sir_settings` (the record this run made), `theta_levels`, and `warnings`.
 #[extendr]
 #[allow(clippy::too_many_arguments)]
 fn ferx_rust_sir(
@@ -6367,6 +6430,18 @@ fn ferx_rust_sir(
                 _ => (Vec::new(), 0i32, 0i32),
             };
 
+        // Each theta level's se and SIR interval from this run (#528), off the
+        // model and bindings bound above rather than a second parse: NA
+        // intervals when the run kept no draws, never an earlier run's.
+        let theta_levels = level_bindings_to_r(
+            model,
+            &fitted.levels,
+            &new_fit.theta_names,
+            &new_fit.theta,
+            new_fit.covariance_matrix.as_ref(),
+            new_fit.sir_resamples_packed.as_deref(),
+        )?;
+
         // SIR-step warnings (ferx-core#1021: a rank-deficient or bound-shrunk
         // proposal) live on the returned fit's `warnings`. The skeleton FitResult
         // we passed in carries none, so everything here was produced by this SIR
@@ -6389,6 +6464,7 @@ fn ferx_rust_sir(
                 Some(st) => sir_settings_to_r(st)?,
                 None => Robj::from(()),
             },
+            theta_levels = theta_levels,
             warnings = new_fit.warnings.clone()
         )
         .into())
@@ -6453,7 +6529,7 @@ fn ferx_rust_sir(
 /// @param verbose When TRUE, the engine prints progress to stderr.
 /// @return Named list with `cov_matrix`, `cov_matrix_dim`, `se_theta`, `se_omega`,
 ///   `se_sigma`, `se_kappa`, `covariance_status`, `cov_eigenvalues`,
-///   `cov_condition_number`, and `warnings`.
+///   `cov_condition_number`, `theta_levels` (NA intervals), and `warnings`.
 #[extendr]
 #[allow(clippy::too_many_arguments)]
 fn ferx_rust_covariance(
@@ -6572,6 +6648,18 @@ fn ferx_rust_covariance(
             CovarianceStatus::SirFallback => "sir_fallback",
         };
 
+        // Each theta level's se from the new matrix (#528), off the model and
+        // bindings bound above. This step never sees the fit's SIR draws, so
+        // its intervals come back NA; `ferx_covariance()` keeps the fit's own.
+        let theta_levels = level_bindings_to_r(
+            model,
+            &fitted.levels,
+            &new_fit.theta_names,
+            &new_fit.theta,
+            new_fit.covariance_matrix.as_ref(),
+            None,
+        )?;
+
         Ok(list!(
             cov_matrix = cov_matrix_flat,
             cov_matrix_dim = cov_matrix_dim,
@@ -6594,6 +6682,7 @@ fn ferx_rust_covariance(
                 .se_residual_correlations
                 .clone()
                 .unwrap_or_default(),
+            theta_levels = theta_levels,
             warnings = new_fit.warnings.clone()
         )
         .into())

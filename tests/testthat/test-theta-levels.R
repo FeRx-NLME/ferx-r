@@ -132,7 +132,8 @@ test_that("T1: ferx_fit() binds a level block and reports theta_levels", {
   expect_s3_class(tl, "data.frame")
   expect_identical(
     names(tl),
-    c("block", "index", "label", "group", "contrast", "theta_name", "value")
+    c("block", "index", "label", "group", "contrast", "theta_name", "value",
+      "se", "sir_lo", "sir_hi")
   )
   expect_identical(nrow(tl), 6L)
   expect_identical(tl$block, rep("PLACEBO", 6L))
@@ -1578,4 +1579,153 @@ test_that("T17i: a model file edited since the fit is named, not laid out by pos
   }, error = function(e) conditionMessage(e))
   expect_match(msg, "model hash mismatch", fixed = TRUE)
   expect_no_match(msg, "two copies", fixed = TRUE)
+})
+
+# --- T17: each level's se and SIR interval (#528, ferx-core #1890) ------------
+
+# core's `percentile_ci`: the floor(2.5%) and ceil(97.5%) order statistics.
+tl_percentile_ci <- function(v) {
+  s <- sort(v)
+  n <- length(s)
+  c(s[min(floor(n * 0.025), n - 1) + 1], s[min(ceiling(n * 0.975), n - 1) + 1])
+}
+
+# The bundled mbma_placebo fit with its covariance step and kept SIR draws.
+tl_cache_mbma <- new.env(parent = emptyenv())
+tl_mbma_sir <- function() {
+  if (is.null(tl_cache_mbma$fit)) {
+    ex <- ferx_example("mbma_placebo")
+    tl_cache_mbma$fit <- ferx_fit(
+      ex$model, ex$data, verbose = FALSE, sir = TRUE,
+      settings = list(sir_samples = 400L, sir_resamples = 150L,
+                      sir_seed = 7L, sir_keep_samples = TRUE)
+    )
+  }
+  tl_cache_mbma$fit
+}
+
+# Every row of `fit$theta_levels` checked against the fit's own covariance and
+# draws: a free level's se / interval are its se_theta / sir_ci_theta, a derived
+# level's the delta-method se sqrt(1' C_g 1) and the percentile interval of the
+# negated sum (PLACEBO's lower bound is < 0, so the packed scale is theta's).
+tl_expect_level_uncertainty <- function(fit) {
+  tl <- fit$theta_levels
+  free <- !is.na(tl$theta_name)
+  expect_true(any(free) && any(!free))
+  expect_identical(tl$se[free], unname(fit$se_theta[tl$theta_name[free]]))
+  expect_identical(tl$sir_lo[free], unname(fit$sir_ci_theta[tl$theta_name[free], 1]))
+  expect_identical(tl$sir_hi[free], unname(fit$sir_ci_theta[tl$theta_name[free], 2]))
+  draws <- matrix(fit$sir_resamples, nrow = fit$sir_resamples_n, byrow = TRUE)
+  for (r in which(!free)) {
+    nm <- tl$theta_name[free & tl$group == tl$group[r]]
+    expect_identical(length(nm), 3L)
+    k <- match(nm, names(fit$theta))
+    cg <- fit$cov_matrix[k, k]
+    expect_equal(tl$se[r], sqrt(sum(cg)), tolerance = 1e-12, info = tl$label[r])
+    neg <- -rowSums(draws[, k, drop = FALSE])
+    expect_equal(c(tl$sir_lo[r], tl$sir_hi[r]), tl_percentile_ci(neg),
+                 tolerance = 1e-12, info = tl$label[r])
+  }
+  # A derived level's se is not a free neighbour's: the hand-computed value
+  # tells the two apart.
+  expect_false(any(tl$se[!free] %in% tl$se[free]))
+}
+
+test_that("T17: theta_levels carries each level's se and SIR interval (#528)", {
+  skip_on_cran()
+  fit <- tl_mbma_sir()
+  expect_true(is.matrix(fit$cov_matrix))
+  expect_false(is.null(fit$sir_resamples))
+  expect_false(anyNA(fit$theta_levels[c("se", "sir_lo", "sir_hi")]))
+  tl_expect_level_uncertainty(fit)
+})
+
+test_that("T17b: the level se and SIR interval survive a .fitrx round trip", {
+  skip_on_cran()
+  fit <- tl_mbma_sir()
+  fit2 <- tl_roundtrip(fit)
+  expect_identical(fit2$theta_levels, fit$theta_levels)
+  tl_expect_level_uncertainty(fit2)
+  # The loader recomputes them from the bundle's covariance and draws; the
+  # r_extras copy does not carry them.
+  wire <- ferx:::.fitrx_theta_levels_to_wire(fit$theta_levels)
+  expect_false(any(c("se", "sir_lo", "sir_hi") %in% names(wire)))
+})
+
+test_that("T17c: no covariance means NA se; no kept draws means NA intervals", {
+  skip_on_cran()
+  ex <- ferx_example("mbma_placebo")
+  expect_warning(
+    fit <- ferx_fit(ex$model, ex$data, verbose = FALSE, covariance = FALSE),
+    "overrides it with `false`", fixed = TRUE
+  )
+  tl <- fit$theta_levels
+  expect_identical(nrow(tl), 24L)
+  expect_identical(tl$se, rep(NA_real_, 24L))
+  expect_identical(tl$sir_lo, rep(NA_real_, 24L))
+  expect_identical(tl$sir_hi, rep(NA_real_, 24L))
+  expect_identical(tl_roundtrip(fit)$theta_levels, tl)
+
+  # A post-hoc covariance step fills the se in, and a post-hoc SIR run that
+  # keeps its draws the intervals - neither stays an earlier run's.
+  cv <- ferx_covariance(fit)
+  expect_false(anyNA(cv$theta_levels$se))
+  free <- !is.na(cv$theta_levels$theta_name)
+  expect_identical(cv$theta_levels$se[free],
+                   unname(cv$se_theta[cv$theta_levels$theta_name[free]]))
+  s <- ferx_sir(cv, sir_samples = 200L, sir_resamples = 80L, sir_seed = 3L,
+                sir_keep_samples = TRUE)
+  expect_false(anyNA(s$theta_levels$sir_lo))
+  tl_expect_level_uncertainty(s)
+  # A covariance step on a fit with kept draws keeps the fit's intervals: it
+  # moves neither theta nor the draws, and its own rows carry none.
+  cv2 <- ferx_covariance(s)
+  expect_identical(cv2$theta_levels$sir_lo, s$theta_levels$sir_lo)
+  expect_identical(cv2$theta_levels$sir_hi, s$theta_levels$sir_hi)
+  expect_identical(cv2$theta_levels$se[free],
+                   unname(cv2$se_theta[cv2$theta_levels$theta_name[free]]))
+  s2 <- ferx_sir(s, sir_samples = 200L, sir_resamples = 80L, sir_seed = 4L,
+                 sir_keep_samples = FALSE)
+  expect_identical(s2$theta_levels$sir_lo, rep(NA_real_, 24L))
+  expect_identical(s2$theta_levels$se, s$theta_levels$se)
+})
+
+test_that("T17d: a ref reference level has NA se", {
+  b <- tl_base()
+  ref <- tl_write(tl_model(
+    "  theta TVCL(2.0, 0.001, 20.0)\n  theta PLACEBO[STUDY, TIME, contrast = ref](0.0, -5.0, 5.0)",
+    "TVCL + PLACEBO"
+  ), ".ferx")
+  cv <- ferx_covariance(tl_fit(ref, b$data))
+  tl <- cv$theta_levels
+  free <- !is.na(tl$theta_name)
+  expect_true(any(!free))
+  expect_identical(tl$se[!free], rep(NA_real_, sum(!free)))
+  expect_false(anyNA(tl$se[free]))
+})
+
+# --- T18: a FIX level block is not reported as free (ferx-core #1891) ---------
+
+test_that("T18: THETA BLOCKS counts FIX coefficients apart from free ones", {
+  data <- tl_grid_data(5)
+  fixed <- tl_write(tl_model(
+    "  theta PLACEBO[STUDY, TIME, contrast = none](2.0, 0.001, 20.0, FIX)", "PLACEBO"
+  ), ".ferx")
+  fit <- tl_fit(fixed, data)
+  is_pla <- startsWith(names(fit$theta), "PLACEBO[")
+  expect_identical(sum(is_pla), 20L)
+  expect_true(all(fit$theta_fixed[is_pla]))
+  out <- capture.output(print(fit))
+  v <- sort(unname(fit$theta[is_pla]))
+  expect_true(any(out == sprintf(
+    "PLACEBO  0 free, 20 FIX coefficients   min %.4f  median %.4f  max %.4f",
+    v[1], v[10], v[20]
+  )))
+  expect_false(any(grepl("20 free coefficients", out, fixed = TRUE)))
+
+  # A partly fixed block splits the same way.
+  part <- fit
+  part$theta_fixed[which(is_pla)[4:20]] <- FALSE
+  out <- capture.output(print(part))
+  expect_true(any(startsWith(out, "PLACEBO  17 free, 3 FIX coefficients   min ")))
 })

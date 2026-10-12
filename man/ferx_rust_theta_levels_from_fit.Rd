@@ -9,7 +9,12 @@ ferx_rust_theta_levels_from_fit(
   model_hash,
   theta,
   theta_names,
-  fit_bindings
+  fit_bindings,
+  cov_matrix_flat,
+  cov_matrix_dim,
+  sir_resamples_flat,
+  sir_resamples_n,
+  sir_resamples_dim
 )
 }
 \description{

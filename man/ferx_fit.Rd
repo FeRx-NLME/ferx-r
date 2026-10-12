@@ -810,7 +810,16 @@ included: minus the sum of its group's free levels under
 \code{sum_to_zero} / \code{sum_to_zero_within}, 0 for a \code{ref}
 reference level. Computed by ferx-core exactly as the model applies
 it, so no contrast arithmetic is needed in R. \code{NA} on a fit
-loaded from a bundle saved before ferx recorded it). Zero rows for a
+loaded from a bundle saved before ferx recorded it), \code{se} (the
+level's standard error: a free level's \code{se_theta} entry, a
+derived level's delta-method standard error of the negated sum; 0
+for every level of a \code{FIX} block; \code{NA} for a \code{ref}
+reference level, for a derived level whose variance comes out
+negative or not finite, and for every level of a fit without a
+covariance matrix) and \code{sir_lo} / \code{sir_hi}
+(the level's 95 percent SIR interval over the kept draws; \code{NA} unless
+SIR ran with \code{sir_keep_samples = TRUE}). \code{ferx_covariance}
+and \code{ferx_sir} refresh \code{se} and the interval. Zero rows for a
 model with no level block. \code{NULL} on a fit loaded by \code{\link{ferx_load_fit}}
 from a bundle that does not record the bindings (one written by
 ferx-core, or saved before ferx recorded them): unknown, not empty, so

@@ -482,6 +482,11 @@ ferx_sir <- function(fit,
     else
       unique(sir_warnings_df)
   }
+  # Each theta level's SIR interval from this run's draws (#528); NA when the
+  # run kept none, never an earlier run's.
+  fit$theta_levels <- .ferx_theta_levels_refresh(
+    fit, raw$theta_levels, "ferx_sir", intervals = TRUE
+  )
 
   fit
 }

@@ -1059,7 +1059,9 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
 # array-key table, so every column is wrapped here: `auto_unbox` would write a
 # one-level block's columns as bare scalars, and the loader insists on arrays.
 # NA (a derived level's `theta_name`) is written as JSON null. `value` (#430)
-# is stored rather than recomputed on load, which would need the model.
+# is written for a ferx that predates #466. The level se and SIR interval
+# (#528) are not: every bundle this writes carries `data_bindings$levels`, so
+# the loader recomputes them from the bundle's covariance and draws.
 .fitrx_theta_levels_to_wire <- function(tl) {
   if (!is.data.frame(tl)) return(NULL)
   cols <- c("block", "index", "label", "group", "contrast", "theta_name", "value")
