@@ -630,6 +630,21 @@
 
 ## New features
 
+- **`ferx_contrast_vpc()`: a VPC of the treatment contrast**, for MBMA,
+  active-comparator and crossover designs. Within each study and time
+  (`time =`, e.g. time since period start for a crossover) it forms `DV[by != ref] - DV[by == ref]` on the data and on
+  every replicate of `ferx_simulate(fit = fit)`, so study-level random
+  effects cancel, and
+  returns one row per study, time and active arm with that pair's simulated
+  band, a per-dose VPC table and a `plot()` method. Studies without a
+  reference arm are named in one warning and left out; a study with two is
+  refused. Multi-endpoint data are contrasted one endpoint per call
+  (`cmt =`), and censored records (`CENS != 0`) are left out with a
+  warning. `scale` (`"observed"`, `"log"`, `"logit"`, `"expit"`) says
+  explicitly on which scale the difference is formed; under
+  `log(DV) ~ ...` the simulated DV is put back on the data's scale first
+  ([#297](https://github.com/FeRx-NLME/ferx-r/issues/297)).
+
 - **`fit$subject_summary`**: one row per subject, in fit order, with `ID`,
   `ofv_contribution`, `n_obs` (continuous observations) and
   `n_obs_discrete` (binary observation records). These are the engine's

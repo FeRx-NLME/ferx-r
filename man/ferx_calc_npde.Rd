@@ -109,6 +109,7 @@ head(fit$sdtab[, c("ID", "TIME", "NPDE", "NPD")])
 }
 \seealso{
 Other simulation:
+\code{\link[=ferx_contrast_vpc]{ferx_contrast_vpc()}},
 \code{\link[=ferx_predict]{ferx_predict()}},
 \code{\link[=ferx_predict_survival]{ferx_predict_survival()}},
 \code{\link[=ferx_simulate]{ferx_simulate()}},
