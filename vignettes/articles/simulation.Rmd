@@ -194,8 +194,10 @@ default (`scale = "observed"`): here a difference in score points. Pass
 `scale = "log"` for a log ratio, `"logit"` for a log odds ratio of a
 proportion, or `"expit"` for a difference in proportions when the data hold
 `DV = logit(p)`. A study without a placebo arm contributes no contrast and is
-named in one warning; a study with two placebo arms is refused. See
-`?ferx_contrast_vpc`.
+named in one warning; a study with two placebo arms is refused. Arms pair on
+`TIME` by default; a crossover passes `time =` naming a time-since-period-start
+column. Multi-endpoint data are contrasted one endpoint at a time with
+`cmt =`. See `?ferx_contrast_vpc`.
 
 ---
 

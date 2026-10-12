@@ -11,6 +11,8 @@ ferx_contrast_vpc(
   ref,
   within = "ID",
   arm = NULL,
+  time = "TIME",
+  cmt = NULL,
   n_sim = 500L,
   seed = 42L,
   scale = c("observed", "log", "logit", "expit"),
@@ -39,6 +41,13 @@ Default \code{"ID"}.}
 \item{arm}{Optional name of a column that identifies the arm within a
 study (e.g. \code{"OCC"} in data from \code{\link{ferx_mbma_data}}).
 Needed only when two arms of one study share a \code{by} value.}
+
+\item{time}{Name of the column arms are paired on. Default \code{"TIME"};
+a crossover passes time since the start of the period, or a visit.}
+
+\item{cmt}{The \code{CMT} of the endpoint to contrast, when the
+observation records hold more than one. Default \code{NULL}: the data
+must hold one endpoint.}
 
 \item{n_sim}{Number of simulated replicates. Default 500.}
 
@@ -71,7 +80,8 @@ in one panel.}
 An object of class \code{ferx_contrast_vpc}, a list with:
 \describe{
 \item{\code{pairs}}{One row per study, time and active arm:
-the \code{within} column, \code{TIME}, \code{ARM} (the arm's
+the \code{within} column, \code{TIME} (the value of the \code{time}
+column the pair was formed at), \code{ARM} (the arm's
 \code{arm} value, or its \code{by} value), the \code{by} column
 (the active arm's treatment), \code{DV_REF} and \code{DV_ACTIVE}
 (observed, untransformed), \code{CONTRAST} (observed, on
@@ -92,14 +102,15 @@ at one or more times, as warned.}
 \item{\code{sim_exponentiated}}{\code{TRUE} when \code{DV_SIM} was
 exponentiated back to the data's scale (a \code{log(DV) ~ ...}
 readout; see the Scale section).}
-\item{\code{within}, \code{by}, \code{ref}, \code{scale},
-\code{probs}, \code{n_sim}}{The settings used.}
+\item{\code{within}, \code{by}, \code{ref}, \code{time}, \code{cmt},
+\code{scale}, \code{probs}, \code{n_sim}}{The settings used.}
 }
 }
 \description{
 A VPC of the \strong{difference} between each active arm and the reference
 arm of the same study, at the same time - the quantity a model-based
-meta-analysis (MBMA) or an active-comparator trial is about. Every other
+meta-analysis (MBMA), an active-comparator trial or a crossover is about
+(see \code{time} in the Pairing section). Every other
 ferx diagnostic works on arm-level \code{DV} /
 \code{PRED}, and an arm-based model can fit every arm well while
 describing the contrast poorly.
@@ -144,13 +155,18 @@ single difference to form, and ferx does not pick one.
 column when given. Two arms of one study with the same \code{by} value
 at the same time (two placebo arms, two arms at one dose) are refused
 unless \code{arm} tells them apart.
-\item Arms pair only on an identical \code{TIME}. A design whose arms
-are observed at different clock times (the periods of a crossover)
-finds no pairs.
-\item The observation records must hold one endpoint. Data whose
-observation records span more than one \code{CMT} are refused, since
-pairing on study and time would difference one endpoint against
-another; pass \code{data =} holding one endpoint's observations.
+\item Arms pair on an identical value of the \code{time} column
+(\code{TIME} by default). For a design whose arms are observed at
+different clock times - the periods of a crossover - pass a column of
+time since the start of the period, or a nominal visit.
+\item One endpoint per call. When the observation records span more
+than one \code{CMT}, pass \code{cmt =}; without it the call is
+refused, since pairing on study and time would difference one
+endpoint against another. The simulation still runs on the whole data
+file; only the chosen endpoint's records are paired.
+\item A censored record (\code{CENS != 0}) is left out, counted in one
+warning: its \code{DV} is a limit, not a measurement, and the
+simulation does not censor.
 }
 }
 

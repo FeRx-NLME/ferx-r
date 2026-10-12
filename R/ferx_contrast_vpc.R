@@ -2,7 +2,8 @@
 #'
 #' A VPC of the \strong{difference} between each active arm and the reference
 #' arm of the same study, at the same time - the quantity a model-based
-#' meta-analysis (MBMA) or an active-comparator trial is about. Every other
+#' meta-analysis (MBMA), an active-comparator trial or a crossover is about
+#' (see \code{time} in the Pairing section). Every other
 #' ferx diagnostic works on arm-level \code{DV} /
 #' \code{PRED}, and an arm-based model can fit every arm well while
 #' describing the contrast poorly.
@@ -43,13 +44,18 @@
 #'     column when given. Two arms of one study with the same \code{by} value
 #'     at the same time (two placebo arms, two arms at one dose) are refused
 #'     unless \code{arm} tells them apart.
-#'   \item Arms pair only on an identical \code{TIME}. A design whose arms
-#'     are observed at different clock times (the periods of a crossover)
-#'     finds no pairs.
-#'   \item The observation records must hold one endpoint. Data whose
-#'     observation records span more than one \code{CMT} are refused, since
-#'     pairing on study and time would difference one endpoint against
-#'     another; pass \code{data =} holding one endpoint's observations.
+#'   \item Arms pair on an identical value of the \code{time} column
+#'     (\code{TIME} by default). For a design whose arms are observed at
+#'     different clock times - the periods of a crossover - pass a column of
+#'     time since the start of the period, or a nominal visit.
+#'   \item One endpoint per call. When the observation records span more
+#'     than one \code{CMT}, pass \code{cmt =}; without it the call is
+#'     refused, since pairing on study and time would difference one
+#'     endpoint against another. The simulation still runs on the whole data
+#'     file; only the chosen endpoint's records are paired.
+#'   \item A censored record (\code{CENS != 0}) is left out, counted in one
+#'     warning: its \code{DV} is a limit, not a measurement, and the
+#'     simulation does not censor.
 #' }
 #'
 #' @section Scale:
@@ -91,6 +97,11 @@
 #' @param arm Optional name of a column that identifies the arm within a
 #'   study (e.g. \code{"OCC"} in data from \code{\link{ferx_mbma_data}}).
 #'   Needed only when two arms of one study share a \code{by} value.
+#' @param time Name of the column arms are paired on. Default \code{"TIME"};
+#'   a crossover passes time since the start of the period, or a visit.
+#' @param cmt The \code{CMT} of the endpoint to contrast, when the
+#'   observation records hold more than one. Default \code{NULL}: the data
+#'   must hold one endpoint.
 #' @param n_sim Number of simulated replicates. Default 500.
 #' @param seed Random seed passed to \code{\link{ferx_simulate}}.
 #' @param scale The scale the contrast is formed on: \code{"observed"}
@@ -115,7 +126,8 @@
 #' @return An object of class \code{ferx_contrast_vpc}, a list with:
 #'   \describe{
 #'     \item{\code{pairs}}{One row per study, time and active arm:
-#'       the \code{within} column, \code{TIME}, \code{ARM} (the arm's
+#'       the \code{within} column, \code{TIME} (the value of the \code{time}
+#'       column the pair was formed at), \code{ARM} (the arm's
 #'       \code{arm} value, or its \code{by} value), the \code{by} column
 #'       (the active arm's treatment), \code{DV_REF} and \code{DV_ACTIVE}
 #'       (observed, untransformed), \code{CONTRAST} (observed, on
@@ -136,8 +148,8 @@
 #'     \item{\code{sim_exponentiated}}{\code{TRUE} when \code{DV_SIM} was
 #'       exponentiated back to the data's scale (a \code{log(DV) ~ ...}
 #'       readout; see the Scale section).}
-#'     \item{\code{within}, \code{by}, \code{ref}, \code{scale},
-#'       \code{probs}, \code{n_sim}}{The settings used.}
+#'     \item{\code{within}, \code{by}, \code{ref}, \code{time}, \code{cmt},
+#'       \code{scale}, \code{probs}, \code{n_sim}}{The settings used.}
 #'   }
 #'
 #' @examples
@@ -154,6 +166,7 @@
 #' @family simulation
 #' @export
 ferx_contrast_vpc <- function(fit, by, ref, within = "ID", arm = NULL,
+                              time = "TIME", cmt = NULL,
                               n_sim = 500L, seed = 42L,
                               scale = c("observed", "log", "logit", "expit"),
                               probs = c(0.05, 0.5, 0.95),
@@ -165,14 +178,19 @@ ferx_contrast_vpc <- function(fit, by, ref, within = "ID", arm = NULL,
   scale <- match.arg(scale)
   .ferx_cvpc_check_name(by, "by")
   .ferx_cvpc_check_name(within, "within")
+  .ferx_cvpc_check_name(time, "time")
   if (!is.null(arm)) .ferx_cvpc_check_name(arm, "arm")
-  if (length(unique(c(by, within, arm, "TIME"))) != length(c(by, within, arm)) + 1L) {
-    stop("`by`, `within`, `arm` and TIME must be four different columns.",
+  keys <- c(by, within, arm, time)
+  if (anyDuplicated(keys)) {
+    stop("`by`, `within`, `arm` and `time` must name different columns.",
          call. = FALSE)
   }
   if (length(ref) != 1L || is.na(ref)) {
     stop("`ref` must be a single non-missing value of the `by` column.",
          call. = FALSE)
+  }
+  if (!is.null(cmt) && (length(cmt) != 1L || is.na(cmt))) {
+    stop("`cmt` must be a single CMT value (or NULL).", call. = FALSE)
   }
   n_sim <- as.integer(n_sim)
   if (length(n_sim) != 1L || is.na(n_sim) || n_sim < 1L) {
@@ -195,24 +213,22 @@ ferx_contrast_vpc <- function(fit, by, ref, within = "ID", arm = NULL,
          call. = FALSE)
   }
 
-  obs <- .ferx_cvpc_obs_rows(data, model, c(by, within, arm))
-  # Pairing is on (within, TIME) only: two endpoints in the observation rows
-  # would be differenced against each other (PD minus PK) without a word.
-  cmt <- if ("CMT" %in% names(obs)) sort(unique(obs$CMT[!is.na(obs$CMT)])) else NULL
-  if (length(cmt) > 1L) {
-    stop("The observation records span ", length(cmt), " compartments (CMT ",
-         paste(cmt, collapse = ", "), "). ferx_contrast_vpc() pairs arms on ",
-         within, " and TIME only, so it would difference one endpoint against ",
-         "another. Pass `data =` holding the observation records of one ",
-         "endpoint.", call. = FALSE)
-  }
-  pairing <- .ferx_cvpc_pair(obs, by = by, ref = ref, within = within, arm = arm)
+  obs <- .ferx_cvpc_obs_rows(data, model, keys)
+  # The records that take part in the pairing. Every observation record is
+  # still simulated (the design is the whole data file); only these pair.
+  eligible <- .ferx_cvpc_eligible(obs, cmt, within, time)
+  pairing <- .ferx_cvpc_pair(obs[eligible, , drop = FALSE], by = by, ref = ref,
+                             within = within, arm = arm, time = time)
   if (length(pairing$excluded_msg)) warning(pairing$excluded_msg, call. = FALSE)
   if (length(pairing$active) == 0L) {
     stop("No study has both a reference arm (", by, " == ", format(ref),
-         ") and an active arm at the same TIME; there is no contrast to check.",
-         call. = FALSE)
+         ") and an active arm at the same ", time,
+         "; there is no contrast to check.", call. = FALSE)
   }
+  # Back to rows of `obs`, which line up with the simulated records.
+  rows <- which(eligible)
+  pairing$active <- rows[pairing$active]
+  pairing$ref <- rows[pairing$ref]
 
   f <- .ferx_cvpc_transform(scale)
   y_obs <- suppressWarnings(as.numeric(obs$DV))
@@ -248,7 +264,7 @@ ferx_contrast_vpc <- function(fit, by, ref, within = "ID", arm = NULL,
   q <- t(apply(c_sim, 1L, stats::quantile, probs = probs, na.rm = TRUE,
                names = FALSE))
   pairs <- data.frame(
-    act[[within]], TIME = act$TIME, ARM = arm_key, act[[by]],
+    act[[within]], TIME = act[[time]], ARM = arm_key, act[[by]],
     DV_REF = y_obs[pairing$ref], DV_ACTIVE = y_obs[pairing$active],
     CONTRAST = c_obs,
     SIM_LO = q[, 1L], SIM_MED = q[, 2L], SIM_HI = q[, 3L],
@@ -272,8 +288,8 @@ ferx_contrast_vpc <- function(fit, by, ref, within = "ID", arm = NULL,
     list(pairs = pairs, vpc = vpc, sim = sim_long,
          excluded = pairing$excluded,
          sim_exponentiated = log_readout,
-         within = within, by = by, ref = ref, scale = scale, probs = probs,
-         n_sim = n_sim),
+         within = within, by = by, ref = ref, time = time, cmt = cmt,
+         scale = scale, probs = probs, n_sim = n_sim),
     class = "ferx_contrast_vpc"
   )
 }
@@ -301,7 +317,7 @@ print.ferx_contrast_vpc <- function(x, ...) {
   }
   outside <- x$vpc$OBS_MED < x$vpc$SIM_LO | x$vpc$OBS_MED > x$vpc$SIM_HI
   cat("  observed median outside the band in ", sum(outside), " of ",
-      nrow(x$vpc), " ", x$by, " x TIME cells\n", sep = "")
+      nrow(x$vpc), " ", x$by, " x ", x$time %||% "TIME", " cells\n", sep = "")
   invisible(x)
 }
 
@@ -331,7 +347,7 @@ plot.ferx_contrast_vpc <- function(x, y = NULL, facet = c("by", "none"), ...) {
     pts <- if (facet == "by") x$pairs[x$pairs[[by_col]] == p, , drop = FALSE] else x$pairs
     v <- v[order(v$TIME), , drop = FALSE]
     yr <- range(c(v$SIM_LO, v$SIM_HI, pts$CONTRAST, 0), finite = TRUE)
-    graphics::plot(range(v$TIME), yr, type = "n", xlab = "TIME", ylab = ylab,
+    graphics::plot(range(v$TIME), yr, type = "n", xlab = x$time %||% "TIME", ylab = ylab,
                    main = if (facet == "by") paste0(by_col, " = ", p) else
                      paste0("All active arms vs ", by_col, " = ", format(x$ref)),
                    ...)
@@ -385,8 +401,8 @@ plot.ferx_contrast_vpc <- function(x, y = NULL, facet = c("by", "none"), ...) {
   d
 }
 
-# Index the reference row for every active row, by (within, TIME).
-.ferx_cvpc_pair <- function(obs, by, ref, within, arm) {
+# Index the reference row for every active row, by (within, time).
+.ferx_cvpc_pair <- function(obs, by, ref, within, arm, time = "TIME") {
   b <- obs[[by]]
   if (anyNA(b)) {
     stop("The `by` column ", by, " is missing on ", sum(is.na(b)),
@@ -412,16 +428,18 @@ plot.ferx_contrast_vpc <- function(x, y = NULL, facet = c("by", "none"), ...) {
          "reference per study; drop or merge the extra reference arm.",
          call. = FALSE)
   }
-  cell <- paste(w, obs$TIME, sep = "\r")
+  tm <- obs[[time]]
+  cell <- paste(w, tm, sep = "\r")
   dup <- duplicated(paste(cell, arm_id, sep = "\r"))
   if (any(dup)) {
     stop(sum(dup), " observation record(s) repeat an arm at the same ", within,
-         " and TIME (first: ", within, " ", w[dup][1L], ", TIME ",
-         obs$TIME[dup][1L], ", arm ", arm_id[dup][1L], "). ",
+         " and ", time, " (first: ", within, " ", w[dup][1L], ", ", time, " ",
+         tm[dup][1L], ", arm ", arm_id[dup][1L], "). ",
          if (is.null(arm)) {
            paste0("Two arms share a `by` value there; pass `arm =` naming ",
                   "the column that tells them apart.")
-         } else "Each arm must have one record per TIME.", call. = FALSE)
+         } else paste0("Each arm must have one record per ", time, "."),
+         call. = FALSE)
   }
 
   ref_row <- match(cell, cell[is_ref])
@@ -453,7 +471,7 @@ plot.ferx_contrast_vpc <- function(x, y = NULL, facet = c("by", "none"), ...) {
       ))
     }
     msg <- paste0(
-      "ferx_contrast_vpc: ", n_cells, " ", within, " x TIME cell",
+      "ferx_contrast_vpc: ", n_cells, " ", within, " x ", time, " cell",
       if (n_cells > 1L) "s have" else " has", " no reference arm (", by,
       " == ", format(ref), ") and contribute", if (n_cells == 1L) "s" else "",
       " no contrast: ", paste(parts, collapse = "; "), "."
@@ -461,6 +479,46 @@ plot.ferx_contrast_vpc <- function(x, y = NULL, facet = c("by", "none"), ...) {
   }
   list(active = active, ref = ref_row[active], excluded = excluded,
        excluded_msg = msg)
+}
+
+# Which observation records take part in the pairing: one endpoint (`cmt`),
+# and no censored record. Refuses data that would pair one endpoint against
+# another, and reports censored records in one warning.
+.ferx_cvpc_eligible <- function(obs, cmt, within, time) {
+  ok <- rep(TRUE, nrow(obs))
+  have <- if ("CMT" %in% names(obs)) sort(unique(obs$CMT[!is.na(obs$CMT)])) else NULL
+  if (!is.null(cmt)) {
+    if (!as.character(cmt) %in% as.character(have)) {
+      stop("`cmt = ", cmt, "` matches no observation record (observed CMT: ",
+           if (length(have)) paste(have, collapse = ", ") else "no CMT column",
+           ").", call. = FALSE)
+    }
+    ok <- ok & as.character(obs$CMT) %in% as.character(cmt)
+  } else if (length(have) > 1L) {
+    # Pairing is on (within, time) only: two endpoints would be differenced
+    # against each other (PD minus PK) without a word.
+    stop("The observation records span ", length(have), " compartments (CMT ",
+         paste(have, collapse = ", "), "). ferx_contrast_vpc() pairs arms on ",
+         within, " and ", time, " only, so it would difference one endpoint ",
+         "against another. Pass `cmt =` naming the endpoint to contrast.",
+         call. = FALSE)
+  }
+  if ("CENS" %in% names(obs)) {
+    cens <- ok & !is.na(obs$CENS) & obs$CENS != 0
+    if (any(cens)) {
+      warning("ferx_contrast_vpc: ", sum(cens), " censored observation ",
+              "record", if (sum(cens) > 1L) "s" else "", " (CENS != 0) ",
+              if (sum(cens) > 1L) "are" else "is", " left out of the contrast: ",
+              "a censored DV is a limit, not a measurement, and the simulation ",
+              "does not censor.", call. = FALSE)
+      ok <- ok & !cens
+    }
+  }
+  if (anyNA(obs[[time]][ok])) {
+    stop("The `time` column ", time, " is missing on ",
+         sum(is.na(obs[[time]][ok])), " observation record(s).", call. = FALSE)
+  }
+  ok
 }
 
 .ferx_cvpc_transform <- function(scale) {

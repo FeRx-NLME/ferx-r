@@ -107,7 +107,11 @@ test_that("`ref` must be a value of `by`; argument checks", {
   expect_error(ferx_contrast_vpc(fit, by = "NOPE", ref = 0, n_sim = 5L),
                "Column not found in the data: NOPE")
   expect_error(ferx_contrast_vpc(fit, by = "ID", ref = 0, within = "ID"),
-               "four different columns")
+               "must name different columns")
+  expect_error(ferx_contrast_vpc(fit, by = "DOSE", ref = 0, time = "DOSE"),
+               "must name different columns")
+  expect_error(ferx_contrast_vpc(fit, by = "DOSE", ref = 0, cmt = c(1, 2)),
+               "`cmt` must be a single CMT value")
   expect_error(ferx_contrast_vpc(fit, by = "DOSE", ref = 0, probs = c(0.5, 0.05, 0.95)),
                "three increasing probabilities")
   expect_error(ferx_contrast_vpc(fit, by = "DOSE", ref = 0, scale = "sqrt"),
@@ -339,7 +343,7 @@ test_that("a log(DV) readout: DV_SIM is put back on the data's scale before the 
                fixed = TRUE)
 })
 
-test_that("observation records on two endpoints are refused, not paired PD against PK (#569 review 1)", {
+test_that("two endpoints: refused without `cmt`, one contrast per endpoint with it (#569 review 1)", {
   # emax_pkpd as three two-arm studies. Asymmetric: the reference arm keeps
   # its PK records (CMT 2), the active arm its PD records (CMT 3); pairing on
   # study and time alone used to difference PD minus PK without a word.
@@ -358,19 +362,105 @@ test_that("observation records on two endpoints are refused, not paired PD again
   asym <- d[d$EVID == 1 | (d$DOSE == 0 & d$CMT == 2) | (d$DOSE == 1 & d$CMT == 3), ]
   msg <- paste0("The observation records span 2 compartments \\(CMT 2, 3\\)\\. ",
                 "ferx_contrast_vpc\\(\\) pairs arms on STUDY and TIME only, so it ",
-                "would difference one endpoint against another\\. Pass `data =` ",
-                "holding the observation records of one endpoint\\.")
+                "would difference one endpoint against another\\. Pass `cmt =` ",
+                "naming the endpoint to contrast\\.")
   expect_error(ferx_contrast_vpc(fit, by = "DOSE", ref = 0, within = "STUDY",
                                  n_sim = 5L, data = write_na(asym)), msg)
   # Both endpoints on both arms: the same refusal, not "pass `arm =`".
+  p_both <- write_na(d)
   expect_error(ferx_contrast_vpc(fit, by = "DOSE", ref = 0, within = "STUDY",
-                                 n_sim = 5L, data = write_na(d)), msg)
-  # One endpoint's observations (doses kept) pair as usual.
-  pd <- d[d$EVID == 1 | d$CMT == 3, ]
-  cv <- ferx_contrast_vpc(fit, by = "DOSE", ref = 0, within = "STUDY",
-                          n_sim = 20L, data = write_na(pd))
-  expect_identical(nrow(cv$pairs), sum(pd$EVID == 0 & pd$DOSE == 1))
-  expect_false(cv$sim_exponentiated)
+                                 n_sim = 5L, data = p_both), msg)
+
+  # `cmt =` pairs that endpoint's records only, PD with PD, while the whole
+  # file is simulated: the same contrasts as a file holding PD alone.
+  obs <- d[d$EVID == 0, ]
+  for (k in c(2L, 3L)) {
+    cv <- ferx_contrast_vpc(fit, by = "DOSE", ref = 0, within = "STUDY",
+                            cmt = k, n_sim = 20L, data = p_both)
+    ref <- obs[obs$CMT == k & obs$DOSE == 0, c("STUDY", "TIME", "DV")]
+    act <- obs[obs$CMT == k & obs$DOSE == 1, c("STUDY", "TIME", "DV")]
+    want <- merge(act, ref, by = c("STUDY", "TIME"))
+    got <- merge(cv$pairs, want, by = c("STUDY", "TIME"))
+    expect_identical(nrow(cv$pairs), nrow(want), info = k)
+    expect_equal(got$CONTRAST, got$DV.x - got$DV.y, info = k)
+    expect_identical(cv$cmt, k)
+  }
+  expect_error(ferx_contrast_vpc(fit, by = "DOSE", ref = 0, within = "STUDY",
+                                 cmt = 9L, n_sim = 5L, data = p_both),
+               "`cmt = 9` matches no observation record \\(observed CMT: 2, 3\\)\\.")
+  # The asymmetric file: PK has no active arm, PD no reference.
+  expect_error(
+    suppressWarnings(ferx_contrast_vpc(fit, by = "DOSE", ref = 0, within = "STUDY",
+                                       cmt = 3L, n_sim = 5L, data = write_na(asym))),
+    "No observation record has DOSE == 0"
+  )
+})
+
+test_that("a crossover pairs on time since period start via `time =` (#569 review 4)", {
+  # warfarin_ltbs subjects paired into two-period "studies": the active
+  # period runs a week (168 h) after the reference one, so the arms never
+  # share a clock TIME. PTIME is the time since the period's dose.
+  ex <- ferx_example("warfarin_ltbs")
+  fit <- suppressWarnings(ferx_fit(ex$model, ex$data, covariance = FALSE,
+                                   verbose = FALSE))
+  d <- utils::read.csv(ex$data, na.strings = c(".", "NA"))
+  d$STUDY <- ceiling(d$ID / 2)
+  d$TRT <- (d$ID + 1) %% 2
+  d$PTIME <- d$TIME
+  write_na <- function(x) {
+    p <- tempfile(fileext = ".csv")
+    utils::write.csv(x, p, row.names = FALSE, na = ".")
+    p
+  }
+  same_clock <- ferx_contrast_vpc(fit, by = "TRT", ref = 0, within = "STUDY",
+                                  n_sim = 50L, seed = 9L, data = write_na(d))
+  shifted <- d
+  shifted$TIME[shifted$TRT == 1] <- shifted$TIME[shifted$TRT == 1] + 168
+  p <- write_na(shifted)
+  # On clock TIME nothing pairs (every cell also lacks a reference: warned).
+  expect_error(
+    suppressWarnings(ferx_contrast_vpc(fit, by = "TRT", ref = 0, within = "STUDY",
+                                       n_sim = 5L, data = p)),
+    "No study has both a reference arm \\(TRT == 0\\) and an active arm at the same TIME"
+  )
+  cv <- ferx_contrast_vpc(fit, by = "TRT", ref = 0, within = "STUDY",
+                          time = "PTIME", n_sim = 50L, seed = 9L, data = p)
+  expect_identical(nrow(cv$pairs), nrow(same_clock$pairs))
+  expect_identical(cv$pairs$TIME, same_clock$pairs$TIME)
+  expect_equal(cv$pairs$CONTRAST, same_clock$pairs$CONTRAST)
+  # The shifted period is the same single-dose design a week later, so the
+  # simulated contrasts agree too.
+  expect_equal(cv$pairs$SIM_MED, same_clock$pairs$SIM_MED, tolerance = 1e-6)
+  expect_identical(cv$time, "PTIME")
+  pdf(NULL)
+  on.exit(grDevices::dev.off(), add = TRUE)
+  expect_identical(plot(cv, facet = "none"), cv)
+})
+
+test_that("censored records (CENS != 0) are left out, in one warning (#569 review 5)", {
+  fit <- mbma_fit()
+  d <- mbma_rows()
+  d$CENS <- 0L
+  # One active record, and the reference record of another cell.
+  d$CENS[d$ID == 1 & d$DOSE == 25 & d$TIME == 8] <- 1L
+  d$CENS[d$ID == 2 & d$DOSE == 0 & d$TIME == 2] <- 1L
+  res <- collect_warnings(
+    ferx_contrast_vpc(fit, by = "DOSE", ref = 0, n_sim = 20L,
+                      data = write_rows(d))
+  )
+  cens_w <- grep("censored", res$warnings, value = TRUE)
+  expect_identical(cens_w, paste0(
+    "ferx_contrast_vpc: 2 censored observation records (CENS != 0) are left ",
+    "out of the contrast: a censored DV is a limit, not a measurement, and ",
+    "the simulation does not censor."
+  ))
+  # The cell whose reference was censored has no reference left.
+  expect_true(any(grepl("lacks one at some times \\(2\\)", res$warnings)))
+  cv <- res$value
+  expect_false(any(cv$pairs$ID == "1" & cv$pairs$DOSE == 25 & cv$pairs$TIME == 8))
+  expect_false(any(cv$pairs$ID == "2" & cv$pairs$TIME == 2))
+  n_act_2_t2 <- sum(d$ID == 2 & d$DOSE != 0 & d$TIME == 2)
+  expect_identical(nrow(cv$pairs), sum(d$DOSE != 0) - 1L - n_act_2_t2)
 })
 
 test_that("an ID spelled with leading zeros pairs like the plain one (#569 review 3)", {
