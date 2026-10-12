@@ -1646,6 +1646,10 @@ test_that("T17b: the level se and SIR interval survive a .fitrx round trip", {
   fit2 <- tl_roundtrip(fit)
   expect_identical(fit2$theta_levels, fit$theta_levels)
   tl_expect_level_uncertainty(fit2)
+  # The loader recomputes them from the bundle's covariance and draws; the
+  # r_extras copy does not carry them.
+  wire <- ferx:::.fitrx_theta_levels_to_wire(fit$theta_levels)
+  expect_false(any(c("se", "sir_lo", "sir_hi") %in% names(wire)))
 })
 
 test_that("T17c: no covariance means NA se; no kept draws means NA intervals", {
@@ -1673,6 +1677,13 @@ test_that("T17c: no covariance means NA se; no kept draws means NA intervals", {
                 sir_keep_samples = TRUE)
   expect_false(anyNA(s$theta_levels$sir_lo))
   tl_expect_level_uncertainty(s)
+  # A covariance step on a fit with kept draws keeps the fit's intervals: it
+  # moves neither theta nor the draws, and its own rows carry none.
+  cv2 <- ferx_covariance(s)
+  expect_identical(cv2$theta_levels$sir_lo, s$theta_levels$sir_lo)
+  expect_identical(cv2$theta_levels$sir_hi, s$theta_levels$sir_hi)
+  expect_identical(cv2$theta_levels$se[free],
+                   unname(cv2$se_theta[cv2$theta_levels$theta_name[free]]))
   s2 <- ferx_sir(s, sir_samples = 200L, sir_resamples = 80L, sir_seed = 4L,
                  sir_keep_samples = FALSE)
   expect_identical(s2$theta_levels$sir_lo, rep(NA_real_, 24L))

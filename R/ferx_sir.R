@@ -484,9 +484,9 @@ ferx_sir <- function(fit,
   }
   # Each theta level's SIR interval from this run's draws (#528); NA when the
   # run kept none, never an earlier run's.
-  if (NROW(fit$theta_levels) > 0L) {
-    fit$theta_levels <- .ferx_theta_levels_from_engine(fit, model_path)
-  }
+  fit$theta_levels <- .ferx_theta_levels_refresh(
+    fit, raw$theta_levels, "ferx_sir", intervals = TRUE
+  )
 
   fit
 }

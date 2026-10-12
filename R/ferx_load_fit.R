@@ -550,9 +550,10 @@ ferx_load_fit <- function(path) {
 }
 
 # Rebuild `fit$theta_levels` from its wire form (see
-# `.fitrx_theta_levels_to_wire()`): six columns, plus `value` (#430) and
-# `se`, `sir_lo`, `sir_hi` (#528) when the bundle records them, each a JSON array of one scalar per level. The types are
-# rebuilt explicitly, because a JSON array carries none, and through the
+# `.fitrx_theta_levels_to_wire()`): six columns, plus `value` (#430) when the
+# bundle records it, each a JSON array of one scalar per level (`se`, `sir_lo`
+# and `sir_hi` are read too when present, though ferx writes none: the loader
+# recomputes them, #528). The types are rebuilt explicitly, because a JSON array carries none, and through the
 # constructor `ferx_fit()` uses, so the reloaded frame is identical to the
 # saved one. A column that is not an array, or not as long as the others, is
 # refused rather than read into a wrong layout. A bundle without `value` (saved
@@ -670,17 +671,36 @@ ferx_load_fit <- function(path) {
   # path, when the bundle has no `model.ferx`) would give every level a
   # neighbour's value without an error. The engine's `model hash mismatch`
   # names that cause, rather than the bindings.
+  args <- .ferx_fit_binding_args(list(
+    theta_levels = wire, covariate_stats = fit$covariate_stats
+  ))
+  # The fit's covariance and kept SIR draws, restored before this runs, give
+  # each level the se and SIR interval the fresh fit reported (#528).
+  cov <- fit$cov_matrix
+  has_cov <- is.matrix(cov) && nrow(cov) > 0L
   tl <- tryCatch(
-    .ferx_theta_levels_from_engine(fit, model_path, layout = wire),
+    ferx_rust_theta_levels_from_fit(
+      model_path, .ferx_hash_arg(fit$model_hash), as.numeric(fit$theta),
+      as.character(names(fit$theta)), args$fit_bindings,
+      cov_matrix_flat = if (has_cov) as.numeric(t(cov)) else numeric(0),
+      cov_matrix_dim = if (has_cov) nrow(cov) else 0L,
+      sir_resamples_flat = as.numeric(fit$sir_resamples %||% numeric(0)),
+      sir_resamples_n = as.integer(fit$sir_resamples_n %||% 0L),
+      sir_resamples_dim = as.integer(fit$sir_resamples_dim %||% 0L)
+    ),
     error = function(e) {
       stop("ferx_load_fit: the bundle's theta level bindings ",
            "(data_bindings$levels) could not be laid out on its model file: ",
            conditionMessage(e), call. = FALSE)
     }
   )
+  tl <- .ferx_theta_levels_frame(
+    tl$block, tl$index, tl$label, tl$group, tl$contrast, tl$theta_name,
+    tl$value, tl$se, tl$sir_lo, tl$sir_hi
+  )
   old <- fit$theta_levels
   if (!is.null(old)) {
-    layout <- c("block", "index", "label", "group", "contrast", "theta_name")
+    layout <- .ferx_theta_levels_layout
     differ <- layout[!vapply(layout, function(k) {
       nrow(old) == nrow(tl) && identical(old[[k]], tl[[k]])
     }, logical(1L))]

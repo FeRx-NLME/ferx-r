@@ -313,33 +313,36 @@ validate_fit_for_params <- function(fit) {
   )
 }
 
-# `fit$theta_levels` as the engine lays it out on `model_path` from the fit's
-# `layout` (a `fit$theta_levels`-shaped frame; only its layout columns are
-# read), theta, covariance and kept SIR draws: every level's value, se and SIR
-# interval (#430, #528). `ferx_load_fit()` rebuilds the frame with it, and
-# `ferx_covariance()` / `ferx_sir()` refresh it, so a level's uncertainty is
-# always the one the fit's current `cov_matrix` and `sir_resamples` give,
-# never an earlier run's. The model file is checked against the fit's hash.
-.ferx_theta_levels_from_engine <- function(fit, model_path,
-                                           layout = fit$theta_levels) {
-  args <- .ferx_fit_binding_args(list(
-    theta_levels = layout, covariate_stats = fit$covariate_stats
+# The layout columns of `fit$theta_levels`: which level is which. Everything
+# else in the frame is a value read at the fit's estimates.
+.ferx_theta_levels_layout <- c("block", "index", "label", "group", "contrast",
+                               "theta_name")
+
+# `fit$theta_levels` refreshed from a post-hoc step's rows (#528): the engine's
+# `se` and, when `intervals` is TRUE, its `sir_lo` / `sir_hi`; otherwise the
+# fit's own intervals are kept (a covariance step never sees the draws, and
+# moves neither theta nor them). `new` must lay the levels out exactly as the
+# fit does, or the refresh is refused rather than written onto the wrong rows.
+.ferx_theta_levels_refresh <- function(fit, new, who, intervals) {
+  old <- fit$theta_levels
+  if (NROW(old) == 0L) return(old)
+  new <- .ferx_theta_levels_frame(
+    new$block, new$index, new$label, new$group, new$contrast, new$theta_name,
+    new$value, new$se, new$sir_lo, new$sir_hi
+  )
+  same <- nrow(new) == nrow(old) && all(vapply(
+    .ferx_theta_levels_layout, function(k) identical(new[[k]], old[[k]]), logical(1L)
   ))
-  cov <- fit$cov_matrix
-  has_cov <- is.matrix(cov) && nrow(cov) > 0L
-  tl <- ferx_rust_theta_levels_from_fit(
-    model_path, .ferx_hash_arg(fit$model_hash), as.numeric(fit$theta),
-    as.character(names(fit$theta)), args$fit_bindings,
-    cov_matrix_flat = if (has_cov) as.numeric(t(cov)) else numeric(0),
-    cov_matrix_dim = if (has_cov) nrow(cov) else 0L,
-    sir_resamples_flat = as.numeric(fit$sir_resamples %||% numeric(0)),
-    sir_resamples_n = as.integer(fit$sir_resamples_n %||% 0L),
-    sir_resamples_dim = as.integer(fit$sir_resamples_dim %||% 0L)
-  )
-  .ferx_theta_levels_frame(
-    tl$block, tl$index, tl$label, tl$group, tl$contrast, tl$theta_name,
-    tl$value, tl$se, tl$sir_lo, tl$sir_hi
-  )
+  if (!same) {
+    stop(who, ": the engine laid the theta levels out differently from ",
+         "`fit$theta_levels`; refit with ferx_fit().", call. = FALSE)
+  }
+  old$se <- new$se
+  if (intervals) {
+    old$sir_lo <- new$sir_lo
+    old$sir_hi <- new$sir_hi
+  }
+  old
 }
 
 # The one constructor of `fit$covariate_stats` (#412), shared by `ferx_fit()`

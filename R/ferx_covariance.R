@@ -393,10 +393,11 @@ ferx_covariance <- function(fit,
   # Refresh derived fields (cor_matrix, estimates table) from the new cov_matrix
   # so they can't drift from the fitting path.
   fit <- .ferx_populate_derived_fields(fit)
-  # Each theta level's se from the new cov_matrix (#528), not the input fit's.
-  if (NROW(fit$theta_levels) > 0L) {
-    fit$theta_levels <- .ferx_theta_levels_from_engine(fit, model_path)
-  }
+  # Each theta level's se from the new cov_matrix (#528), not the input fit's;
+  # its SIR interval stays the fit's own.
+  fit$theta_levels <- .ferx_theta_levels_refresh(
+    fit, raw$theta_levels, "ferx_covariance", intervals = FALSE
+  )
 
   fit
 }

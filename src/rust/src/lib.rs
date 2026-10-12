@@ -6310,7 +6310,7 @@ fn fit_skeleton(
 /// @return Named list with `sir_ess`, `sir_ci_theta`, `sir_ci_omega`, `sir_ci_sigma`,
 ///   `sir_ci_kappa`,
 ///   `sir_resamples`, `sir_resamples_n`, `sir_resamples_dim`, `sir_seed_used`,
-///   `sir_settings` (the record this run made), and `warnings`.
+///   `sir_settings` (the record this run made), `theta_levels`, and `warnings`.
 #[extendr]
 #[allow(clippy::too_many_arguments)]
 fn ferx_rust_sir(
@@ -6430,6 +6430,18 @@ fn ferx_rust_sir(
                 _ => (Vec::new(), 0i32, 0i32),
             };
 
+        // Each theta level's se and SIR interval from this run (#528), off the
+        // model and bindings bound above rather than a second parse: NA
+        // intervals when the run kept no draws, never an earlier run's.
+        let theta_levels = level_bindings_to_r(
+            model,
+            &fitted.levels,
+            &new_fit.theta_names,
+            &new_fit.theta,
+            new_fit.covariance_matrix.as_ref(),
+            new_fit.sir_resamples_packed.as_deref(),
+        )?;
+
         // SIR-step warnings (ferx-core#1021: a rank-deficient or bound-shrunk
         // proposal) live on the returned fit's `warnings`. The skeleton FitResult
         // we passed in carries none, so everything here was produced by this SIR
@@ -6452,6 +6464,7 @@ fn ferx_rust_sir(
                 Some(st) => sir_settings_to_r(st)?,
                 None => Robj::from(()),
             },
+            theta_levels = theta_levels,
             warnings = new_fit.warnings.clone()
         )
         .into())
@@ -6516,7 +6529,7 @@ fn ferx_rust_sir(
 /// @param verbose When TRUE, the engine prints progress to stderr.
 /// @return Named list with `cov_matrix`, `cov_matrix_dim`, `se_theta`, `se_omega`,
 ///   `se_sigma`, `se_kappa`, `covariance_status`, `cov_eigenvalues`,
-///   `cov_condition_number`, and `warnings`.
+///   `cov_condition_number`, `theta_levels` (NA intervals), and `warnings`.
 #[extendr]
 #[allow(clippy::too_many_arguments)]
 fn ferx_rust_covariance(
@@ -6635,6 +6648,18 @@ fn ferx_rust_covariance(
             CovarianceStatus::SirFallback => "sir_fallback",
         };
 
+        // Each theta level's se from the new matrix (#528), off the model and
+        // bindings bound above. This step never sees the fit's SIR draws, so
+        // its intervals come back NA; `ferx_covariance()` keeps the fit's own.
+        let theta_levels = level_bindings_to_r(
+            model,
+            &fitted.levels,
+            &new_fit.theta_names,
+            &new_fit.theta,
+            new_fit.covariance_matrix.as_ref(),
+            None,
+        )?;
+
         Ok(list!(
             cov_matrix = cov_matrix_flat,
             cov_matrix_dim = cov_matrix_dim,
@@ -6657,6 +6682,7 @@ fn ferx_rust_covariance(
                 .se_residual_correlations
                 .clone()
                 .unwrap_or_default(),
+            theta_levels = theta_levels,
             warnings = new_fit.warnings.clone()
         )
         .into())
