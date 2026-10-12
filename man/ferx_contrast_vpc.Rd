@@ -49,7 +49,7 @@ Needed only when two arms of one study share a \code{by} value.}
 Scale section.}
 
 \item{probs}{Lower, middle and upper quantile of the simulated contrast.
-Default \code{c(0.05, 0.5, 0.95)}: the median and a 90\\% band.}
+Default \code{c(0.05, 0.5, 0.95)}: the median and a 90 percent band.}
 
 \item{model, data}{Optional model and data file paths, overriding
 \code{fit$model_path} / \code{fit$data_path}. The data are the design
