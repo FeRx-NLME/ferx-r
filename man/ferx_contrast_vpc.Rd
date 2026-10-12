@@ -99,8 +99,8 @@ readout; see the Scale section).}
 \description{
 A VPC of the \strong{difference} between each active arm and the reference
 arm of the same study, at the same time - the quantity a model-based
-meta-analysis (MBMA), a crossover or any active-comparator analysis is
-about. Every other ferx diagnostic works on arm-level \code{DV} /
+meta-analysis (MBMA) or an active-comparator trial is about. Every other
+ferx diagnostic works on arm-level \code{DV} /
 \code{PRED}, and an arm-based model can fit every arm well while
 describing the contrast poorly.
 }
@@ -120,6 +120,13 @@ structural drug effect plus the variability that differs between arms
 (between-arm \code{kappa}, residual error). The between-study spread that
 dominates an arm-level VPC is differenced away, so a misspecified dose- or
 time-response is not hidden behind it.
+
+What cancels is whatever the arms of one \code{within} level share. That
+is the between-study random effect only when the model's random-effect
+unit (the data's \code{ID}) is the study, as with \code{within = "ID"} in
+arm-level MBMA data. When each arm is its own \code{ID} and
+\code{within} names a study column, the \code{omega} is between-arm and
+stays in the contrast.
 }
 
 \section{Pairing}{
@@ -137,6 +144,13 @@ single difference to form, and ferx does not pick one.
 column when given. Two arms of one study with the same \code{by} value
 at the same time (two placebo arms, two arms at one dose) are refused
 unless \code{arm} tells them apart.
+\item Arms pair only on an identical \code{TIME}. A design whose arms
+are observed at different clock times (the periods of a crossover)
+finds no pairs.
+\item The observation records must hold one endpoint. Data whose
+observation records span more than one \code{CMT} are refused, since
+pairing on study and time would difference one endpoint against
+another; pass \code{data =} holding one endpoint's observations.
 }
 }
 

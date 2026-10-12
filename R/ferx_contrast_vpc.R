@@ -2,8 +2,8 @@
 #'
 #' A VPC of the \strong{difference} between each active arm and the reference
 #' arm of the same study, at the same time - the quantity a model-based
-#' meta-analysis (MBMA), a crossover or any active-comparator analysis is
-#' about. Every other ferx diagnostic works on arm-level \code{DV} /
+#' meta-analysis (MBMA) or an active-comparator trial is about. Every other
+#' ferx diagnostic works on arm-level \code{DV} /
 #' \code{PRED}, and an arm-based model can fit every arm well while
 #' describing the contrast poorly.
 #'
@@ -22,6 +22,13 @@
 #' dominates an arm-level VPC is differenced away, so a misspecified dose- or
 #' time-response is not hidden behind it.
 #'
+#' What cancels is whatever the arms of one \code{within} level share. That
+#' is the between-study random effect only when the model's random-effect
+#' unit (the data's \code{ID}) is the study, as with \code{within = "ID"} in
+#' arm-level MBMA data. When each arm is its own \code{ID} and
+#' \code{within} names a study column, the \code{omega} is between-arm and
+#' stays in the contrast.
+#'
 #' @section Pairing:
 #' Arms are matched within a level of \code{within} and a \code{TIME}. Each
 #' active arm gets its own contrast against the reference arm; there is one
@@ -36,6 +43,13 @@
 #'     column when given. Two arms of one study with the same \code{by} value
 #'     at the same time (two placebo arms, two arms at one dose) are refused
 #'     unless \code{arm} tells them apart.
+#'   \item Arms pair only on an identical \code{TIME}. A design whose arms
+#'     are observed at different clock times (the periods of a crossover)
+#'     finds no pairs.
+#'   \item The observation records must hold one endpoint. Data whose
+#'     observation records span more than one \code{CMT} are refused, since
+#'     pairing on study and time would difference one endpoint against
+#'     another; pass \code{data =} holding one endpoint's observations.
 #' }
 #'
 #' @section Scale:
@@ -182,6 +196,16 @@ ferx_contrast_vpc <- function(fit, by, ref, within = "ID", arm = NULL,
   }
 
   obs <- .ferx_cvpc_obs_rows(data, model, c(by, within, arm))
+  # Pairing is on (within, TIME) only: two endpoints in the observation rows
+  # would be differenced against each other (PD minus PK) without a word.
+  cmt <- if ("CMT" %in% names(obs)) sort(unique(obs$CMT[!is.na(obs$CMT)])) else NULL
+  if (length(cmt) > 1L) {
+    stop("The observation records span ", length(cmt), " compartments (CMT ",
+         paste(cmt, collapse = ", "), "). ferx_contrast_vpc() pairs arms on ",
+         within, " and TIME only, so it would difference one endpoint against ",
+         "another. Pass `data =` holding the observation records of one ",
+         "endpoint.", call. = FALSE)
+  }
   pairing <- .ferx_cvpc_pair(obs, by = by, ref = ref, within = within, arm = arm)
   if (length(pairing$excluded_msg)) warning(pairing$excluded_msg, call. = FALSE)
   if (length(pairing$active) == 0L) {
@@ -335,9 +359,14 @@ plot.ferx_contrast_vpc <- function(x, y = NULL, facet = c("by", "none"), ...) {
 # dose (EVID 0, or no AMT where there is no EVID column) and not MDV = 1.
 .ferx_cvpc_obs_rows <- function(data, model, cols) {
   d <- utils::read.csv(data, stringsAsFactors = FALSE, check.names = FALSE,
-                       na.strings = c("NA", ".", ""))
+                       na.strings = c("NA", ".", ""), colClasses = "character")
   # Columns under the names the engine's reader gives them (a [data] map).
   d <- .ferx_apply_column_map(d, .ferx_model_column_map(model))
+  # ID stays text, spelled as in the file (`001`), as ferx_simulate() returns
+  # it; every other column is typed as read.csv() would type it.
+  for (nm in setdiff(names(d), "ID")) {
+    d[[nm]] <- utils::type.convert(d[[nm]], as.is = TRUE)
+  }
   need <- unique(c("ID", "TIME", "DV", cols))
   miss <- setdiff(need, names(d))
   if (length(miss)) {
@@ -380,10 +409,8 @@ plot.ferx_contrast_vpc <- function(x, y = NULL, facet = c("by", "none"), ...) {
     stop(length(multi), " ", within, " level", if (length(multi) > 1L) "s have" else " has",
          " more than one reference arm (", by, " == ", format(ref), "): ",
          paste(multi, collapse = ", "), ". A contrast needs exactly one ",
-         "reference per study; ", if (is.null(arm)) {
-           paste0("if these are one arm, pass `arm =` naming the arm column, ",
-                  "otherwise ")
-         } else "", "drop or merge the extra reference arm.", call. = FALSE)
+         "reference per study; drop or merge the extra reference arm.",
+         call. = FALSE)
   }
   cell <- paste(w, obs$TIME, sep = "\r")
   dup <- duplicated(paste(cell, arm_id, sep = "\r"))
@@ -447,7 +474,8 @@ plot.ferx_contrast_vpc <- function(x, y = NULL, facet = c("by", "none"), ...) {
 # TRUE when the model's [error_model] reads `log(DV) ~ ...`: the one readout
 # the engine transforms itself, simulating DV on the log scale while the data
 # hold it on the natural scale. `DV ~ log_additive(...)` keeps both on the
-# data's (already log) scale and is FALSE here.
+# data's (already log) scale and is FALSE here. One answer per model is
+# enough: the engine refuses LTBS in a per-CMT (multi-endpoint) error model.
 .ferx_cvpc_log_dv_readout <- function(model) {
   err <- .ferx_extract_blocks(model)[["error_model"]] %||% character(0)
   any(grepl("^(CMT\\s*=\\s*[0-9]+\\s*:\\s*)?log\\s*\\(\\s*DV\\s*\\)\\s*~",
@@ -464,8 +492,9 @@ plot.ferx_contrast_vpc <- function(x, y = NULL, facet = c("by", "none"), ...) {
   if (nrow(sim) != n * n_sim || is.unsorted(sim$SIM)) {
     stop("ferx_simulate() returned ", nrow(sim), " continuous records for ",
          n_sim, " replicates of ", n, " observation records; the contrast ",
-         "cannot be paired by position. A multi-endpoint or event model is ",
-         "not supported.", call. = FALSE)
+         "cannot be paired by position. Records the simulation adds or drops ",
+         "relative to the data file (binary or time-to-event rows, a data ",
+         "selection the engine applies) are not supported.", call. = FALSE)
   }
   first <- sim[sim$SIM == sim$SIM[1L], , drop = FALSE]
   same <- as.character(first$ID) == as.character(obs$ID) &

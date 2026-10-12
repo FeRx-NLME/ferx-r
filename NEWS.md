@@ -630,14 +630,16 @@
 
 ## New features
 
-- **`ferx_contrast_vpc()`: a VPC of the treatment contrast**, for MBMA,
-  crossover and active-comparator designs. Within each study and time it
-  forms `DV[by != ref] - DV[by == ref]` on the data and on every replicate
-  of `ferx_simulate(fit = fit)`, so study-level random effects cancel, and
+- **`ferx_contrast_vpc()`: a VPC of the treatment contrast**, for MBMA and
+  active-comparator designs whose arms share observation times. Within each
+  study and time it forms `DV[by != ref] - DV[by == ref]` on the data and on
+  every replicate of `ferx_simulate(fit = fit)`, so study-level random
+  effects cancel, and
   returns one row per study, time and active arm with that pair's simulated
   band, a per-dose VPC table and a `plot()` method. Studies without a
   reference arm are named in one warning and left out; a study with two is
-  refused. `scale` (`"observed"`, `"log"`, `"logit"`, `"expit"`) says
+  refused, and so is data whose observation records span more than one
+  `CMT` (one endpoint per call). `scale` (`"observed"`, `"log"`, `"logit"`, `"expit"`) says
   explicitly on which scale the difference is formed; under
   `log(DV) ~ ...` the simulated DV is put back on the data's scale first
   ([#297](https://github.com/FeRx-NLME/ferx-r/issues/297)).

@@ -281,7 +281,11 @@ test_that("simulated records are paired by position only after checking they lin
   expect_error(ferx:::.ferx_cvpc_sim_matrix(swapped, obs, 2L),
                "do not line up.*first mismatch at record 2: data ID 1 TIME 1, simulated ID 2")
   expect_error(ferx:::.ferx_cvpc_sim_matrix(sim[-6L, ], obs, 2L),
-               "returned 5 continuous records for 2 replicates of 3 observation records")
+               paste0("returned 5 continuous records for 2 replicates of 3 observation ",
+                      "records; the contrast cannot be paired by position\\. Records the ",
+                      "simulation adds or drops relative to the data file \\(binary or ",
+                      "time-to-event rows, a data selection the engine applies\\) are not ",
+                      "supported\\."))
 })
 
 test_that("print() and plot() describe and draw the contrast", {
@@ -333,6 +337,55 @@ test_that("a log(DV) readout: DV_SIM is put back on the data's scale before the 
   expect_gt(covered(lg), 0.85)
   expect_match(capture.output(print(lg))[2L], "on the log scale (log ratio",
                fixed = TRUE)
+})
+
+test_that("observation records on two endpoints are refused, not paired PD against PK (#569 review 1)", {
+  # emax_pkpd as three two-arm studies. Asymmetric: the reference arm keeps
+  # its PK records (CMT 2), the active arm its PD records (CMT 3); pairing on
+  # study and time alone used to difference PD minus PK without a word.
+  ex <- ferx_example("emax_pkpd")
+  fit <- suppressWarnings(ferx_fit(ex$model, ex$data, covariance = FALSE,
+                                   verbose = FALSE))
+  d <- utils::read.csv(ex$data, na.strings = ".")
+  d <- d[d$ID <= 6, ]
+  d$STUDY <- ceiling(d$ID / 2)
+  d$DOSE <- ifelse(d$ID %% 2 == 1, 0, 1)
+  write_na <- function(x) {
+    p <- tempfile(fileext = ".csv")
+    utils::write.csv(x, p, row.names = FALSE, na = ".")
+    p
+  }
+  asym <- d[d$EVID == 1 | (d$DOSE == 0 & d$CMT == 2) | (d$DOSE == 1 & d$CMT == 3), ]
+  msg <- paste0("The observation records span 2 compartments \\(CMT 2, 3\\)\\. ",
+                "ferx_contrast_vpc\\(\\) pairs arms on STUDY and TIME only, so it ",
+                "would difference one endpoint against another\\. Pass `data =` ",
+                "holding the observation records of one endpoint\\.")
+  expect_error(ferx_contrast_vpc(fit, by = "DOSE", ref = 0, within = "STUDY",
+                                 n_sim = 5L, data = write_na(asym)), msg)
+  # Both endpoints on both arms: the same refusal, not "pass `arm =`".
+  expect_error(ferx_contrast_vpc(fit, by = "DOSE", ref = 0, within = "STUDY",
+                                 n_sim = 5L, data = write_na(d)), msg)
+  # One endpoint's observations (doses kept) pair as usual.
+  pd <- d[d$EVID == 1 | d$CMT == 3, ]
+  cv <- ferx_contrast_vpc(fit, by = "DOSE", ref = 0, within = "STUDY",
+                          n_sim = 20L, data = write_na(pd))
+  expect_identical(nrow(cv$pairs), sum(pd$EVID == 0 & pd$DOSE == 1))
+  expect_false(cv$sim_exponentiated)
+})
+
+test_that("an ID spelled with leading zeros pairs like the plain one (#569 review 3)", {
+  fit <- mbma_fit()
+  d <- utils::read.csv(ferx_example("mbma_placebo")$data,
+                       colClasses = c(ID = "character"))
+  plain <- ferx_contrast_vpc(fit, by = "DOSE", ref = 0, n_sim = 20L, seed = 5L)
+  d$ID <- sprintf("%03d", as.integer(d$ID))
+  p <- tempfile(fileext = ".csv")
+  utils::write.csv(d, p, row.names = FALSE, quote = FALSE)
+  padded <- ferx_contrast_vpc(fit, by = "DOSE", ref = 0, n_sim = 20L, seed = 5L,
+                              data = p)
+  expect_identical(unique(padded$pairs$ID), sprintf("%03d", 1:6))
+  expect_equal(padded$pairs$CONTRAST, plain$pairs$CONTRAST)
+  expect_identical(nrow(padded$pairs), nrow(plain$pairs))
 })
 
 test_that("only `log(DV) ~` is a readout the engine simulates off the data's scale", {
