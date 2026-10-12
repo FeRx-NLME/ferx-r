@@ -144,6 +144,59 @@ would also stratify by dose or covariate group, and bin times for sparse
 designs - both are downstream data-frame manipulations and are not built into
 ferx.
 
+### Contrast VPC: checking the treatment difference
+
+In a model-based meta-analysis (MBMA) the estimand is the **treatment
+contrast** - active arm minus placebo within a study - not the arm mean. An
+arm-based model can fit every arm well and still describe the contrast
+poorly, and an arm-level VPC cannot show it: its band is dominated by the
+between-study spread. `ferx_contrast_vpc()` forms the difference within
+each study and time, on the observed data and on every simulated
+replicate, and checks the difference instead.
+
+```{r contrast-vpc, message = FALSE, warning = FALSE}
+mb <- ferx_example("mbma_placebo")
+mb_fit <- ferx_fit(mb$model, mb$data, verbose = FALSE)
+
+cv <- ferx_contrast_vpc(mb_fit, within = "ID", by = "DOSE", ref = 0,
+                        n_sim = 500, seed = 1)
+cv
+head(cv$pairs)
+```
+
+`cv$pairs` has one row per study, time and active arm: the observed
+contrast, the 5th / 50th / 95th percentile of that pair's simulated
+contrast, and `PCTL`, where the observed value falls in its simulated
+distribution. A pair near 0 or 1 is a study whose treatment effect the
+model does not reproduce. `cv$vpc` summarises per dose and time, and
+`plot()` draws it, one panel per dose:
+
+```{r contrast-vpc-plot, fig.width = 7, fig.height = 5}
+plot(cv)
+```
+
+The study-level random effect (`ETA_E0`) and the study-by-visit placebo
+levels are shared by every arm of a study, so they cancel out of the
+contrast. Inflating the between-study variance a hundredfold widens the
+arm-level band about ninefold, and leaves the contrast band where it was:
+
+```{r contrast-vpc-cancel}
+wide <- mb_fit
+wide$omega <- mb_fit$omega * 100
+cv_wide <- ferx_contrast_vpc(wide, within = "ID", by = "DOSE", ref = 0,
+                             n_sim = 500, seed = 1)
+summary((cv_wide$pairs$SIM_HI - cv_wide$pairs$SIM_LO) /
+          (cv$pairs$SIM_HI - cv$pairs$SIM_LO))
+```
+
+The contrast is formed on the scale of the data file's `DV` column by
+default (`scale = "observed"`): here a difference in score points. Pass
+`scale = "log"` for a log ratio, `"logit"` for a log odds ratio of a
+proportion, or `"expit"` for a difference in proportions when the data hold
+`DV = logit(p)`. A study without a placebo arm contributes no contrast and is
+named in one warning; a study with two placebo arms is refused. See
+`?ferx_contrast_vpc`.
+
 ---
 
 ## Propagating parameter uncertainty

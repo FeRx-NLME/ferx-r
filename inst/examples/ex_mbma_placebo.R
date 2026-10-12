@@ -87,6 +87,19 @@ stats::aggregate(DV_SIM ~ ARM + TIME, sim, stats::quantile,
 # ... and the observed medians to set beside them.
 stats::aggregate(DV ~ ARM + TIME, obs, stats::median)
 
+# -- Contrast VPC -------------------------------------------------------------
+# The estimand of an MBMA is the treatment contrast, active minus placebo
+# within a study, not the arm mean. ferx_contrast_vpc() forms that difference
+# per study and visit on the data and on every replicate. The between-study
+# ETA_E0 and the placebo levels are shared by a study's arms and cancel, so
+# the band shows the drug effect plus between-arm and residual variability.
+cv <- ferx_contrast_vpc(fit, within = "ID", by = "DOSE", ref = 0,
+                        n_sim = n_sim)
+cv
+head(cv$pairs)   # one row per study, visit and active arm
+cv$vpc           # per dose and visit: observed median vs simulated band
+plot(cv)
+
 # A denser grid is refused, by design: a visit the fit never saw has no
 # placebo level, and the engine will not invent one (it does not default the
 # level to 0). The same holds for a new study.
