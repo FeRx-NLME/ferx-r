@@ -621,3 +621,34 @@ test_that("ferx_runlog shows fired_accept and excluded_subject_ids when present"
   expect_true(grepl("Fired accept", out, fixed = TRUE))
   expect_true(grepl("Excl. subjs", out, fixed = TRUE))
 })
+test_that("ferx_runlog shows a held value marked (FIX), and FIXED in SE / %RSE (#450)", {
+  skip_on_cran()
+  fit <- warfarin_fit_cov()
+  skip_if(is.null(fit$se_theta), "covariance step produced no SEs")
+  skip_if(is.null(fit$theta_init), "fit carries no initial values")
+  # Hold the last theta, the last eta and the only sigma. The flags are what
+  # the runlog reads; the values stay the fit's own.
+  n_eta <- nrow(fit$omega)
+  fit$theta_fixed <- c(rep(FALSE, length(fit$theta) - 1L), TRUE)
+  fit$omega_fixed <- c(rep(FALSE, n_eta - 1L), TRUE)
+  fit$sigma_fixed <- TRUE
+  lines <- strsplit(ferx_runlog(fit, verbose = FALSE), "\n", fixed = TRUE)[[1]]
+  row_of <- function(nm) grep(paste0("^\\s*", nm, "\\s"), lines, value = TRUE)[1]
+  cell <- function(x) gsub("([.()+])", "\\\\\\1", paste(sprintf("%.6g", x), "(FIX)"))
+  om_init <- matrix(fit$omega_init, n_eta, n_eta)
+  held <- list(
+    list(nm = names(fit$theta)[length(fit$theta)],
+         init = fit$theta_init[length(fit$theta)], final = fit$theta[[length(fit$theta)]]),
+    list(nm = fit$eta_names[n_eta], init = om_init[n_eta, n_eta], final = fit$omega[n_eta, n_eta]),
+    list(nm = fit$sigma_names[1L], init = fit$sigma_init[1L], final = fit$sigma[[1L]])
+  )
+  for (h in held) {
+    expect_match(row_of(h$nm),
+                 sprintf("^\\s*%s\\s+%s\\s+%s\\s+FIXED\\s+FIXED\\s*$",
+                         h$nm, cell(h$init), cell(h$final)),
+                 label = h$nm)
+  }
+  # A free row carries no marker.
+  expect_no_match(row_of(names(fit$theta)[1L]), "FIX", fixed = TRUE)
+  expect_false(is.na(row_of(names(fit$theta)[1L])))
+})

@@ -400,7 +400,26 @@ test_that(".compute_estimates() returns NA for SE-derived columns when se_theta 
   theta_row <- est[est$param == "CL", ]
   expect_true(is.na(theta_row$se))
   expect_true(is.na(theta_row$lower_95))
-  expect_true(is.na(theta_row$estimate_natural))
+  # The point estimate's back-transform needs no SE; only the interval does
+  # (#457).
+  expect_equal(theta_row$estimate_natural, exp(0.134))
+  expect_true(is.na(theta_row$lower_95_natural))
+  expect_true(is.na(theta_row$upper_95_natural))
+})
+
+test_that(".compute_estimates() gives a free logit theta's estimate_natural without an SE (#457)", {
+  fit <- make_fake_fit(
+    theta            = c(TVF = 0.4),
+    se_theta         = NULL,
+    theta_transforms = "logit",
+    omega            = matrix(0.07, 1, 1),
+    sigma            = 0.01
+  )
+  row <- .compute_estimates(fit)["TVF", ]
+  expect_false(row$fixed)
+  expect_equal(row$estimate_natural, 1 / (1 + exp(-0.4)))
+  expect_true(is.na(row$lower_95_natural))
+  expect_true(is.na(row$upper_95_natural))
 })
 
 # ---------------------------------------------------------------------------
@@ -457,4 +476,72 @@ test_that(".ferx_compute_estimates() leaves non-colliding names bare", {
   )
   expect_identical(rownames(.compute_estimates(fit)),
                    c("TVCL", "ETA_CL", "EPS_PROP"))
+})
+
+# ---------------------------------------------------------------------------
+# Live and reloaded fits (#457, #447)
+# ---------------------------------------------------------------------------
+
+# A warfarin-data model written to a temp file, fitted for 5 iterations with
+# no covariance step.
+fit_temp_model <- function(lines) {
+  md <- tempfile(fileext = ".ferx")
+  writeLines(c("[parameters]", lines$parameters,
+               "[individual_parameters]", lines$individual,
+               "[structural_model]", "  pk one_cpt_oral(cl=CL, v=V, ka=KA)",
+               "[error_model]", "  DV ~ proportional(PROP_ERR)",
+               "[fit_options]", "  method = foce", "  covariance = false"), md)
+  on.exit(unlink(md))
+  ferx_fit(md, ferx_example("warfarin")$data, verbose = FALSE,
+           settings = list(maxiter = 5L))
+}
+
+reload <- function(fit) {
+  path <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(path))
+  ferx_save_fit(fit, path)
+  ferx_load_fit(path)
+}
+
+test_that("a free log theta fitted without covariance has estimate_natural, live and reloaded (#457)", {
+  skip_on_cran()
+  fit <- fit_temp_model(list(
+    parameters = c("  theta LCL(-2.0, -10, 3)", "  theta TVV(8.1, 0.1, 500.0)",
+                   "  theta TVKA(1.0, 0.01, 50.0)", "  omega ETA_CL ~ 0.07",
+                   "  sigma PROP_ERR ~ 0.01 (sd)"),
+    individual = c("  CL = exp(LCL + ETA_CL)", "  V = TVV", "  KA = TVKA")
+  ))
+  expect_identical(fit$covariance_status, "not_requested")
+  for (f in list(live = fit, loaded = reload(fit))) {
+    row <- f$estimates["LCL", ]
+    expect_identical(row$transform, "log")
+    expect_false(row$fixed)
+    expect_true(is.na(row$se))
+    expect_equal(row$estimate_natural, exp(f$theta[["LCL"]]))
+    expect_true(is.na(row$lower_95_natural))
+    expect_true(is.na(row$upper_95_natural))
+  }
+})
+
+test_that("an ETA the engine classified nowhere has scale NA, live and reloaded (#447)", {
+  skip_on_cran()
+  # ETA_CL is declared but no [individual_parameters] statement uses it, so
+  # the engine records no eta_param_info at all.
+  fit <- fit_temp_model(list(
+    parameters = c("  theta TVCL(0.134, 0.001, 10.0)", "  theta TVV(8.1, 0.1, 500.0)",
+                   "  theta TVKA(1.0, 0.01, 50.0)", "  omega ETA_CL ~ 0.07",
+                   "  sigma PROP_ERR ~ 0.01 (sd)"),
+    individual = c("  CL = TVCL", "  V = TVV", "  KA = TVKA")
+  ))
+  loaded <- reload(fit)
+  # The bundle writes no eta_param_info for it, so a second round trip keeps
+  # it unknown.
+  again <- reload(loaded)
+  for (f in list(live = fit, loaded = loaded, again = again)) {
+    expect_identical(f$eta_param_types, character())
+    expect_identical(f$estimates["ETA_CL", "scale"], NA_character_)
+    # print() keeps its own log-normal default for an unknown scale.
+    out <- capture.output(print(f))
+    expect_match(grep("^\\s*ETA_CL\\s", out, value = TRUE), "(CV% = ", fixed = TRUE)
+  }
 })

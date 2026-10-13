@@ -846,7 +846,7 @@ ferx_load_fit <- function(path) {
                      character(1L)),
     rho     = rho,
     fixed   = fixed,
-    se      = se,
+    se      = .ferx_residual_corr_se(se, fixed),
     stringsAsFactors = FALSE
   )
 }

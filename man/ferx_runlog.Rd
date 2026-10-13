@@ -49,6 +49,10 @@ The data summary shows subject and observation counts when \code{fit$n_subjects}
 and \code{fit$n_obs} are present; observation time range when
 \code{fit$obs_time_range} is present.  Missing counts produce a partial
 summary rather than an error.
+
+A parameter the fit held (\code{FIX}) shows its value in the INITIAL and
+FINAL columns, marked \code{(FIX)} (e.g. \code{1 (FIX)}), and
+\code{FIXED} in the SE and \%RSE columns.
 }
 \examples{
 \dontrun{

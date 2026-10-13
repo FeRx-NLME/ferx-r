@@ -950,9 +950,10 @@
 #'     Columns \code{sigma_i} / \code{sigma_j} (1-based indices into
 #'     \code{sigma}), \code{name} (the \code{EPS_A ~ EPS_B} label used in the
 #'     covariance matrix), \code{rho}, \code{fixed}, and \code{se}
-#'     (\code{NA} without a covariance step, \code{0} for a \code{FIX}ed
-#'     entry). A plain \code{block_sigma} estimates \code{rho}; a
-#'     \code{block_sigma ... FIX} holds it at the declared value.}
+#'     (\code{NA} without a covariance step). A plain \code{block_sigma}
+#'     estimates \code{rho}; a \code{block_sigma ... FIX} holds it at the
+#'     declared value, with \code{fixed = TRUE} and \code{se = NA}, since a
+#'     held parameter has no standard error, as in \code{estimates}.}
 #'   \item{omega_is_diagonal}{\code{TRUE} when the OMEGA block the fit was
 #'     estimated under is diagonal, \code{FALSE} for a \code{block_omega}
 #'     model, \code{NA} when the engine recorded no layout. Says how the
@@ -1155,11 +1156,15 @@
 #'     (saved before they existed) has \code{fixed = FALSE} throughout.
 #'     \code{scale} is the scale an omega or kappa row's random
 #'     effect enters on (see \code{eta_param_types} and
-#'     \code{kappa_param_types}), \code{NA} on theta and sigma rows and on a
-#'     kappa row with no recorded scale. \code{transform} stays
-#'     \code{"variance"} on those rows. SE-derived
-#'     and natural-scale columns are \code{NA} when not applicable or when the
-#'     covariance step was not run. \code{lower_95}/\code{upper_95} are always
+#'     \code{kappa_param_types}), \code{NA} on theta and sigma rows and on an
+#'     omega or kappa row with no recorded scale, on a live fit and a loaded
+#'     one alike. \code{transform} stays
+#'     \code{"variance"} on those rows. SE-derived columns, the natural-scale
+#'     intervals among them, are \code{NA} when not applicable or when the
+#'     covariance step was not run or failed; \code{estimate_natural} needs no
+#'     standard error and is reported for every \code{"log"},
+#'     \code{"logit"} and \code{"logit_probability"} theta, held or free.
+#'     \code{lower_95}/\code{upper_95} are always
 #'     the symmetric Wald interval on the scale \code{estimate} is reported on.
 #'     For \code{"log"} and \code{"logit"} thetas the natural-scale columns
 #'     back-transform that estimate and interval. A
@@ -1298,13 +1303,15 @@
 #'     \code{"additive"}, \code{"logit"}, \code{"logit_probability"} or
 #'     \code{"custom"}. Each ETA takes the engine's classification of its own
 #'     statements, matched by name. An ETA classified differently in two
-#'     statements is \code{"custom"}, and one with no classification is
-#'     \code{"log_normal"}. \code{print()} shows a \code{CV\%} for log-normal, an SD
-#'     for additive and logit, and neither for custom. Empty for a fit loaded
-#'     from a \code{.fitrx} saved before ferx-core #1643; such a fit, or one
-#'     with the field removed, prints the log-normal \code{CV\%} for every ETA
-#'     with no scale tag. \code{print()} refuses a vector of any other length
-#'     than \code{nrow(omega)} with a \code{ferx_fit_field_error}.}
+#'     statements is \code{"custom"}, and one left unclassified while others
+#'     are classified is \code{"log_normal"}. \code{print()} shows a
+#'     \code{CV\%} for log-normal, an SD for additive and logit, and neither
+#'     for custom. Empty when the engine classified no ETA at all, and for a
+#'     fit loaded from a \code{.fitrx} saved before ferx-core #1643; such a
+#'     fit, or one with the field removed, prints the log-normal \code{CV\%}
+#'     for every ETA with no scale tag, and its \code{estimates$scale} is
+#'     \code{NA}. \code{print()} refuses a vector of any other length than
+#'     \code{nrow(omega)} with a \code{ferx_fit_field_error}.}
 #'   \item{eta_linked_theta}{Character vector parallel to \code{eta_names}: the
 #'     typical-value theta each ETA is attached to, or \code{""} when there is
 #'     none or its statements disagree.}
@@ -2384,23 +2391,34 @@ ferx_fit <- function(model, data = NULL,
 # The fitted `block_sigma` residual correlations as a data frame, or NULL when
 # the model declares none. Columns: sigma_i / sigma_j (1-based indices into
 # `sigma`), name (the `EPS_A ~ EPS_B` label), rho, fixed, se. `se` is NA when
-# the covariance step did not run; the engine reports 0 for a FIXed entry.
+# the covariance step did not run, and on a FIXed entry (see below).
 .ferx_residual_corr_frame <- function(result) {
   rho <- as.numeric(result$residual_correlation_rho %||% numeric())
   n <- length(rho)
   if (n == 0L) return(NULL)
   se <- as.numeric(result$se_residual_correlation %||% numeric())
   if (length(se) != n) se <- rep(NA_real_, n)
+  fixed <- as.logical(result$residual_correlation_fixed %||% rep(FALSE, n))
   data.frame(
     sigma_i = as.integer(result$residual_correlation_i %||% rep(NA_integer_, n)),
     sigma_j = as.integer(result$residual_correlation_j %||% rep(NA_integer_, n)),
     name    = as.character(result$residual_correlation_names %||%
                              paste0("RHO(", seq_len(n), ")")),
     rho     = rho,
-    fixed   = as.logical(result$residual_correlation_fixed %||% rep(FALSE, n)),
-    se      = se,
+    fixed   = fixed,
+    se      = .ferx_residual_corr_se(se, fixed),
     stringsAsFactors = FALSE
   )
+}
+
+# A FIXed residual correlation was not estimated, so it has no standard error:
+# the engine's 0 would read as a perfectly determined rho. NA, with `fixed`
+# saying why, as fit$estimates does (#451, #458). Every builder of
+# fit$residual_correlations (ferx_fit(), ferx_covariance(), ferx_load_fit())
+# goes through here. The bundle writer puts the engine's 0 back.
+.ferx_residual_corr_se <- function(se, fixed) {
+  se[!is.na(fixed) & fixed] <- NA_real_
+  se
 }
 
 # Covariance-matrix labels for the trailing residual-correlation coordinates.

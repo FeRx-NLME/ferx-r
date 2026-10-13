@@ -38,6 +38,10 @@
 #' \code{fit$obs_time_range} is present.  Missing counts produce a partial
 #' summary rather than an error.
 #'
+#' A parameter the fit held (\code{FIX}) shows its value in the INITIAL and
+#' FINAL columns, marked \code{(FIX)} (e.g. \code{1 (FIX)}), and
+#' \code{FIXED} in the SE and %RSE columns.
+#'
 #' @examples
 #' \dontrun{
 #' ex  <- ferx_example("warfarin")
@@ -149,13 +153,13 @@ ferx_runlog <- function(fit, gradient_tol = 0.1, show_iterations = TRUE, verbose
               fit$model_structure$theta_names %||%
               paste0("THETA(", seq_along(thetas), ")")
   th_init  <- if (has_inits) fit$theta_init else NULL
-  th_fixed <- fit$theta_fixed %||% rep(FALSE, length(thetas))
+  th_fixed <- fit$theta_fixed
   se_th    <- if (has_se) fit$se_theta else NULL
 
   for (i in seq_along(thetas)) {
     nm    <- if (i <= length(th_names)) th_names[i] else sprintf("THETA(%d)", i)
-    fixed <- isTRUE(th_fixed[i])
-    final_str <- if (fixed) sprintf("%14s", "FIXED") else sprintf("%14.6g", thetas[i])
+    fixed <- .ferx_is_fixed(th_fixed, i)
+    final_str <- .runlog_value(thetas[i], fixed)
     se_str    <- ""
     rse_str   <- ""
     if (has_se && !fixed && !is.null(se_th) && i <= length(se_th)) {
@@ -168,12 +172,12 @@ ferx_runlog <- function(fit, gradient_tol = 0.1, show_iterations = TRUE, verbose
       rse_str <- sprintf("%7s", "FIXED")
     }
     if (has_inits && has_se) {
-      init_str <- if (fixed) sprintf("%14s", "FIXED") else sprintf("%14.6g", th_init[i])
+      init_str <- .runlog_value(th_init[i], fixed)
       lines <- c(lines, sprintf("  %-28s  %s  %s  %s  %s", nm, init_str, final_str, se_str, rse_str))
     } else if (has_se) {
       lines <- c(lines, sprintf("  %-28s  %s  %s  %s", nm, final_str, se_str, rse_str))
     } else if (has_inits) {
-      init_str <- if (fixed) sprintf("%14s", "FIXED") else sprintf("%14.6g", th_init[i])
+      init_str <- .runlog_value(th_init[i], fixed)
       lines <- c(lines, sprintf("  %-28s  %s  %s", nm, init_str, final_str))
     } else {
       lines <- c(lines, sprintf("  %-28s  %s", nm, final_str))
@@ -189,14 +193,14 @@ ferx_runlog <- function(fit, gradient_tol = 0.1, show_iterations = TRUE, verbose
     om_init <- matrix(om_init, n_eta, n_eta)
   }
   has_om_init <- !is.null(om_init) && all(dim(om_init) == n_eta)
-  om_fixed <- fit$omega_fixed %||% rep(FALSE, n_eta)
+  om_fixed <- fit$omega_fixed
   eta_nms  <- fit$eta_names   %||% paste0("OMEGA(", seq_len(n_eta), ",", seq_len(n_eta), ")")
   se_om    <- fit$se_omega
 
   for (i in seq_len(n_eta)) {
     nm    <- if (i <= length(eta_nms)) eta_nms[i] else sprintf("OMEGA(%d,%d)", i, i)
-    fixed <- isTRUE(om_fixed[i])
-    final_str <- if (fixed) sprintf("%14s", "FIXED") else sprintf("%14.6g", om[i, i])
+    fixed <- .ferx_is_fixed(om_fixed, i)
+    final_str <- .runlog_value(om[i, i], fixed)
     se_str  <- ""
     rse_str <- ""
     if (has_se && !is.null(se_om) && !fixed) {
@@ -209,10 +213,10 @@ ferx_runlog <- function(fit, gradient_tol = 0.1, show_iterations = TRUE, verbose
       rse_str <- sprintf("%7s", "FIXED")
     }
     if (has_inits && has_om_init && has_se) {
-      init_str <- if (fixed) sprintf("%14s", "FIXED") else sprintf("%14.6g", om_init[i, i])
+      init_str <- .runlog_value(om_init[i, i], fixed)
       lines <- c(lines, sprintf("  %-28s  %s  %s  %s  %s", nm, init_str, final_str, se_str, rse_str))
     } else if (has_inits && has_om_init) {
-      init_str <- if (fixed) sprintf("%14s", "FIXED") else sprintf("%14.6g", om_init[i, i])
+      init_str <- .runlog_value(om_init[i, i], fixed)
       lines <- c(lines, sprintf("  %-28s  %s  %s", nm, init_str, final_str))
     } else if (has_inits && has_se) {
       lines <- c(lines, sprintf("  %-28s  %s  %s  %s  %s",
@@ -232,13 +236,13 @@ ferx_runlog <- function(fit, gradient_tol = 0.1, show_iterations = TRUE, verbose
   sig_nms   <- fit$sigma_names %||% paste0("SIGMA(", seq_along(sigmas), ")")
   sig_init  <- if (has_inits && !is.null(fit$sigma_init) &&
                    length(fit$sigma_init) > 0L) fit$sigma_init else NULL
-  sig_fixed <- fit$sigma_fixed %||% rep(FALSE, length(sigmas))
+  sig_fixed <- fit$sigma_fixed
   se_sig    <- fit$se_sigma
 
   for (i in seq_along(sigmas)) {
     nm    <- if (i <= length(sig_nms)) sig_nms[i] else sprintf("SIGMA(%d)", i)
-    fixed <- isTRUE(sig_fixed[i])
-    final_str <- if (fixed) sprintf("%14s", "FIXED") else sprintf("%14.6g", sigmas[i])
+    fixed <- .ferx_is_fixed(sig_fixed, i)
+    final_str <- .runlog_value(sigmas[i], fixed)
     se_str  <- ""
     rse_str <- ""
     if (has_se && !is.null(se_sig) && i <= length(se_sig) && !fixed) {
@@ -251,10 +255,10 @@ ferx_runlog <- function(fit, gradient_tol = 0.1, show_iterations = TRUE, verbose
       rse_str <- sprintf("%7s", "FIXED")
     }
     if (has_inits && !is.null(sig_init) && has_se) {
-      init_str <- if (fixed) sprintf("%14s", "FIXED") else sprintf("%14.6g", sig_init[i])
+      init_str <- .runlog_value(sig_init[i], fixed)
       lines <- c(lines, sprintf("  %-28s  %s  %s  %s  %s", nm, init_str, final_str, se_str, rse_str))
     } else if (has_inits && !is.null(sig_init)) {
-      init_str <- if (fixed) sprintf("%14s", "FIXED") else sprintf("%14.6g", sig_init[i])
+      init_str <- .runlog_value(sig_init[i], fixed)
       lines <- c(lines, sprintf("  %-28s  %s  %s", nm, init_str, final_str))
     } else if (has_se) {
       init_str <- if (has_inits) sprintf("%14s", "N/A") else NULL
@@ -476,4 +480,11 @@ ferx_runlog <- function(fit, gradient_tol = 0.1, show_iterations = TRUE, verbose
   out <- paste(lines, collapse = "\n")
   if (isTRUE(verbose)) cat(out, "\n")
   invisible(out)
+}
+
+# Internal: one INITIAL / FINAL cell of the parameter table. A held parameter
+# shows its value, marked `(FIX)` as print()'s `[FIX]` marks it, so the value
+# it was held at appears in the log (#450). The SE / %RSE cells keep `FIXED`.
+.runlog_value <- function(x, fixed) {
+  if (fixed) sprintf("%14s", paste(sprintf("%.6g", x), "(FIX)")) else sprintf("%14.6g", x)
 }

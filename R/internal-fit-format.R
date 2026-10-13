@@ -914,8 +914,13 @@
   n_theta_fit <- length(result$theta)
   n_sigma_fit <- length(result$sigma)
 
-  if (is.null(result$eta_param_types) || length(result$eta_param_types) != n_eta_fit) {
-    result$eta_param_types <- rep("log_normal", n_eta_fit)
+  # An engine that classified no ETA gives an empty vector, kept as it is, the
+  # same "unknown" a loaded bundle without `eta_param_info` carries: NA in
+  # `fit$estimates$scale` on both paths, and print()'s own log-normal default
+  # (#447). A wrong-length vector cannot come from the glue, which emits one
+  # entry per ETA or none.
+  if (is.null(result$eta_param_types)) {
+    result$eta_param_types <- character()
   }
   if (is.null(result$eta_linked_theta) || length(result$eta_linked_theta) != n_eta_fit) {
     result$eta_linked_theta <- rep("", n_eta_fit)

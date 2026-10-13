@@ -340,6 +340,53 @@ test_that("a FIX correlation needs no fitted value", {
                    ferx_predict(case$model, case$data, fit = fit)$PRED)
 })
 
+test_that("a FIX correlation has se NA, not the engine's 0, on every path (#458)", {
+  skip_on_cran()
+  fix  <- rho_fix_case()$fit
+  free <- rho_case()$fit
+  skip_if(!identical(fix$covariance_status, "computed"), "covariance step did not run")
+  skip_if(!identical(free$covariance_status, "computed"), "covariance step did not run")
+  check <- function(f, what) {
+    rc <- f$residual_correlations
+    expect_true(rc$fixed, label = paste(what, "fixed"))
+    expect_identical(rc$se, NA_real_, label = paste(what, "se"))
+  }
+  check(fix, "live")
+  check(ferx_covariance(fix), "ferx_covariance()")
+  path <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(path), add = TRUE)
+  ferx_save_fit(fix, path)
+  check(ferx_load_fit(path), "loaded")
+  # The free control keeps its estimated SE on the same paths.
+  expect_false(free$residual_correlations$fixed)
+  expect_true(is.finite(free$residual_correlations$se))
+  expect_gt(free$residual_correlations$se, 0)
+  expect_identical(ferx_covariance(free)$residual_correlations$se,
+                   free$residual_correlations$se)
+})
+
+test_that("each frame builder blanks the SE of the FIX rows only (#458)", {
+  # A FIX block alongside a free one, in the engine's two shapes: the FFI's
+  # parallel vectors (ferx_fit()) and the bundle wire (ferx_load_fit()). The
+  # engine reports 0 for the held entry.
+  raw <- list(residual_correlation_i = c(1L, 3L), residual_correlation_j = c(2L, 4L),
+              residual_correlation_names = c("A ~ B", "C ~ D"),
+              residual_correlation_rho = c(0.3, 0.5),
+              residual_correlation_fixed = c(TRUE, FALSE),
+              se_residual_correlation = c(0, 0.07))
+  expect_identical(.ferx_residual_corr_frame(raw)$se, c(NA, 0.07))
+  wire <- list(
+    residual_correlations = list(list(sigma_i = 0L, sigma_j = 1L, rho = 0.3),
+                                 list(sigma_i = 2L, sigma_j = 3L, rho = 0.5)),
+    residual_correlation_fixed = list(TRUE, FALSE),
+    se_residual_correlations = list(0, 0.07)
+  )
+  rc <- .fitrx_residual_corr_from_wire(wire)
+  expect_identical(rc$se, c(NA, 0.07))
+  # The writer gives the engine back its 0 for the held entry.
+  expect_identical(.fitrx_residual_corr_se(list(residual_correlations = rc)), c(0, 0.07))
+})
+
 test_that("a diagonal-sigma fit runs without a residual_correlations field", {
   skip_on_cran()
   case <- rho_diag_case()

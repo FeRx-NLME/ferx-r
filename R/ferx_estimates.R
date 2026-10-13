@@ -160,14 +160,16 @@
   } else if (transform == "log") {
     lower_95          <- if (!is.na(se)) estimate - 1.96 * se else NA_real_
     upper_95          <- if (!is.na(se)) estimate + 1.96 * se else NA_real_
-    estimate_natural  <- if (!is.na(se) || fixed) exp(estimate) else NA_real_
+    # The back-transform of a point estimate needs no SE; only the interval
+    # does (#457). A free theta fitted without a covariance step keeps it.
+    estimate_natural  <- exp(estimate)
     lower_95_natural  <- if (!is.na(se)) exp(estimate - 1.96 * se) else NA_real_
     upper_95_natural  <- if (!is.na(se)) exp(estimate + 1.96 * se) else NA_real_
   } else if (transform == "logit") {
     # theta is on the logit scale; CI is symmetric on logit then back-transformed
     lower_95          <- if (!is.na(se)) estimate - 1.96 * se else NA_real_
     upper_95          <- if (!is.na(se)) estimate + 1.96 * se else NA_real_
-    estimate_natural  <- if (!is.na(se) || fixed) .ferx_inv_logit(estimate) else NA_real_
+    estimate_natural  <- .ferx_inv_logit(estimate)
     lower_95_natural  <- if (!is.na(se)) .ferx_inv_logit(estimate - 1.96 * se) else NA_real_
     upper_95_natural  <- if (!is.na(se)) .ferx_inv_logit(estimate + 1.96 * se) else NA_real_
   } else {
