@@ -26,6 +26,14 @@
     `[event_model]` hazard now parses**
     ([ferx-core #1897](https://github.com/FeRx-NLME/ferx-core/issues/1897)).
 
+- **`ferx_simulate()`, `ferx_predict()` and `ferx_predict_survival()` with
+  `fit =` and no `data` use the data that fit was fitted to**, when it can
+  still be found (its file, or the data a data.frame fit carries), and fall
+  back to the model file's `[data]` block only otherwise. Before, they always
+  read the `[data]` block, so a fit of other data - a data.frame in
+  particular - simulated a different design than it was fitted to. Pass
+  `data =` to keep the old choice
+  ([#419](https://github.com/FeRx-NLME/ferx-r/issues/419)).
 - **A reloaded `fit$sdtab$ID` is numeric**, as on the live fit, also for a
   `.fitrx` bundle ferx-core wrote, where it used to come back as the text ID
   ([#475](https://github.com/FeRx-NLME/ferx-r/issues/475); see Bug fixes).

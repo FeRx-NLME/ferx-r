@@ -377,6 +377,36 @@ test_that("a CSV fit without include_data bundles no data, as before", {
   expect_null(ferx_load_fit(out)$data_source)
 })
 
+test_that("simulate and predict with `fit =` and no `data` use the fit's own data", {
+  skip_on_cran()
+  ex <- ferx_example("warfarin")
+  # A model that declares a [data] block: the whole warfarin dataset.
+  model <- tempfile(fileext = ".ferx")
+  on.exit(unlink(model), add = TRUE)
+  writeLines(c(readLines(ex$model), "", "[data]",
+               paste0("  path = ", normalizePath(ex$data))), model)
+  all_ids <- unique(utils::read.csv(ex$data)$ID)
+  # The fit is of five subjects only, from a data.frame.
+  df <- .read_example("warfarin")
+  df <- df[df$ID %in% all_ids[1:5], ]
+  fit <- .fit_quiet(model, df, covariance = FALSE, settings = list(maxiter = 2L))
+
+  .forget_written_data()
+  sim <- ferx_simulate(model, n_sim = 1L, seed = 1L, fit = fit)
+  expect_setequal(unique(sim$ID), all_ids[1:5])
+  pred <- ferx_predict(model, fit = fit)
+  expect_setequal(unique(pred$ID), all_ids[1:5])
+
+  # A fit whose data can no longer be found falls back to the [data] block.
+  lost <- fit
+  lost$data_source <- NULL
+  lost$data_path <- file.path(tempdir(), "no-such-data.csv")
+  expect_setequal(unique(ferx_simulate(model, n_sim = 1L, seed = 1L, fit = lost)$ID),
+                  all_ids)
+  # Without a fit, as before, the [data] block.
+  expect_setequal(unique(ferx_predict(model)$ID), all_ids)
+})
+
 test_that("a fit without data_source keeps reporting a missing file", {
   fake <- list(data_path = file.path(tempdir(), "no-such-data.csv"))
   expect_identical(.fit_data_path(fake), fake$data_path)

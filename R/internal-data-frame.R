@@ -174,6 +174,22 @@
   text
 }
 
+# `data` left out of a call that takes `fit =` (ferx_simulate(), ferx_predict(),
+# ferx_predict_survival()): the data that fit was fitted to, when it can still
+# be found - its file, or its `data_source` written back - so a fit of a
+# data.frame simulates its own design; otherwise, as before, the model file's
+# `[data]` block.
+.ferx_default_data <- function(model, fit = NULL) {
+  if (inherits(fit, "ferx_fit")) {
+    path <- .ferx_fit_data_path(fit)
+    if (!is.null(path) && length(path) == 1L && !is.na(path) && nzchar(path) &&
+        file.exists(path)) {
+      return(path)
+    }
+  }
+  .ferx_model_data_path(model)
+}
+
 # The data file a fit was read from, for a step that reads it again. The
 # recorded path when it is still there; otherwise, for a fit that carries its
 # data (`fit$data_source`), the path that text is written back to. Any other
