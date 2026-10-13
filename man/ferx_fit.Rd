@@ -44,7 +44,26 @@ SS > 0), SS (steady-state flag: 1 = pre-dose at steady state, 2 = add SS
 concentration to current state), CENS (LOQ censoring flag for M3 method:
 \code{1} below LLOQ, \code{-1} above ULOQ), OCC (occasion index for IOV),
 and any covariate columns referenced in the model. See the steady-state
-section below for SS/II details.}
+section below for SS/II details.
+
+\code{data} may also be a data.frame with the same columns - one you
+built or edited in R, a \code{\link{ferx_mbma_data}} table, or a
+\code{ferx_data} from \code{\link{ferx_apply_selection}} (fitted with its
+selection rules). It is written to a CSV in the session's temporary
+directory and fitted from there, exactly as a file: every number is
+written to full precision, so the fit equals the fit of the CSV the frame
+was read from; a missing value is written as \code{.}; a factor as its
+labels; a logical as 1/0; a date-time in UTC; text, such as a subject ID
+\code{"007"}, verbatim (outside the ID column the engine reads the text
+\code{NA} as missing, as in any CSV). Every column is kept; duplicate
+column names are refused. A \code{ferx_data} whose rows were changed
+after selection (subset, edited) is fitted as the rows it now holds, with
+a warning. The fit stores the written
+text as \code{fit$data_source}, so \code{\link{ferx_sir}},
+\code{\link{ferx_covariance}}, \code{\link{ferx_calc_npde}},
+\code{\link{ferx_contrast_vpc}} and \code{\link{ferx_save_fit}} (which then always bundles
+the data) keep working after the temporary file is gone. Every other
+function that takes \code{data} accepts a data.frame the same way.}
 
 \item{method}{Estimation method(s). \code{NULL} (the default) uses whatever
 the model file's \code{[fit_options] method} specifies, falling back to
@@ -1242,6 +1261,12 @@ columns \code{eta}, \code{covariate}, \code{r}, \code{p_val},
 \code{flag}, sorted by descending \code{|r|}. \code{NULL} when the
 model declares no etas, the dataset has no usable numeric covariates,
 or the data file can no longer be read from \code{data_path}.}
+\item{data_source}{For a fit whose \code{data} was a data.frame: the
+text of the CSV the engine read (the file at \code{data_path}, in the
+session's temporary directory). The steps that re-read the data write
+it back when that file is gone. Also set on such a fit after a
+\code{\link{ferx_save_fit}} / \code{\link{ferx_load_fit}} round trip.
+\code{NULL} for a fit of a CSV path, bundled data or not.}
 \item{eigenvalues}{Numeric vector of eigenvalues of the correlation matrix
 of estimated (non-fixed) parameters, sorted descending. Computed by the
 Rust backend. \code{NULL} when the covariance step was not run, failed,

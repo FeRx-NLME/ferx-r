@@ -152,6 +152,7 @@
       what
     ))
   }
+  data <- .ferx_data_arg(data)
   if (!is.character(data) || length(data) != 1L || is.na(data) || !file.exists(data)) {
     stop(sprintf("%s: data file not found: %s", what, as.character(data)[1L]))
   }

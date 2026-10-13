@@ -40,7 +40,8 @@
 #'   (default) uses the engine's built-in default seed.
 #' @param model Path to the \code{.ferx} model file. Defaults to
 #'   \code{fit$model_path}.
-#' @param data Path to the NONMEM-format CSV. Defaults to \code{fit$data_path}.
+#' @param data Path to the NONMEM-format CSV, or a data.frame (see
+#'   \code{\link{ferx_fit}}). Defaults to the fit's own data.
 #'
 #' @return The input \code{fit}, with \code{NPDE} and \code{NPD} columns added
 #'   to its \code{sdtab} data frame (replacing any existing ones). Because the
@@ -85,13 +86,18 @@ ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = 
   model_is_fits <- is.null(model) ||
     identical(normalizePath(model, mustWork = FALSE),
               normalizePath(fit$model_path %||% "", mustWork = FALSE))
+  data <- .ferx_data_arg(data)
   data_override <- data
-  # `data =` naming the fit's own file is still the fit's data.
+  # `data =` naming the fit's own file is still the fit's data; so is a frame
+  # whose CSV text is the fit's `data_source`, whatever path it was written to
+  # (a later session, a loaded fit, #419).
   data_is_fits <- is.null(data) ||
     identical(normalizePath(data, mustWork = FALSE),
-              normalizePath(fit$data_path %||% "", mustWork = FALSE))
+              normalizePath(fit$data_path %||% "", mustWork = FALSE)) ||
+    (!is.null(fit$data_source) && file.exists(data) &&
+       identical(.ferx_read_data_text(data), fit$data_source))
   model <- model %||% fit$model_path
-  data  <- data  %||% fit$data_path
+  data  <- data  %||% .ferx_fit_data_path(fit)
   if (is.null(model) || is.na(model) || !file.exists(model)) {
     stop("No usable model file: pass `model=` or refit so `fit$model_path` is set.")
   }

@@ -10,8 +10,10 @@ ferx_predict_survival(model, data = NULL, times, fit = NULL)
 \item{model}{Path to a .ferx model file containing at least one
 \code{[event_model]} block.}
 
-\item{data}{Path to a NONMEM-format CSV. When omitted, the model file's
-\code{[data]} block (\code{path = ...}) is used.}
+\item{data}{Path to a NONMEM-format CSV, or a data.frame (see \code{\link{ferx_fit}}). When omitted, the data
+\code{fit} was fitted to (when \code{fit} is given and its data can still
+be found), otherwise the model file's \code{[data]} block
+(\code{path = ...}).}
 
 \item{times}{Numeric vector of times at which to evaluate \eqn{S(t)},
 \eqn{H(t)}, \eqn{h(t)}.}

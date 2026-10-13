@@ -32,7 +32,7 @@ ferx_bootstrap(
 \item{model}{Path to a \code{.ferx} model file, or a \code{ferx_model} object from
 \code{\link[=ferx_model]{ferx_model()}}.}
 
-\item{data}{Path to a NONMEM-format CSV. \code{NULL} (the default) uses the
+\item{data}{Path to a NONMEM-format CSV, or a data.frame (see \code{\link{ferx_fit}}). \code{NULL} (the default) uses the
 model's \verb{[data]} block.}
 
 \item{samples}{Number of bootstrap datasets. Default 200, PsN's default and

@@ -15,9 +15,8 @@
 #' \code{theta NAME[COL, ...]} level block reads its columns from the
 #' covariates, and \code{ID} is not one.
 #'
-#' The result is a data.frame. The fitting functions take a CSV path, so
-#' write it out first:
-#' \code{utils::write.csv(d, path, row.names = FALSE)}.
+#' The result is a data.frame, passed as it is as the \code{data} of
+#' \code{\link{ferx_fit}} and the other fitting and simulation functions.
 #'
 #' @section Checks:
 #' \describe{
@@ -48,10 +47,12 @@
 #' form is what lets you define the cells yourself (for example, pooled visit
 #' windows, via \code{index}). The table mapping each index to its cell is
 #' kept in \code{attr(d, "levels")}, labelled as the engine labels a level
-#' (\code{STUDY=7,TIME=4}). The levels are built from the values
-#' \code{utils::write.csv()} writes (15 significant digits), which are what
-#' the engine reads, and the level columns in the result hold those values:
-#' 0.1 + 0.2 and 0.3 are one level, as they are in the written file.
+#' (\code{STUDY=7,TIME=4}). The levels are built from the level columns
+#' rounded to 15 significant digits, the text \code{utils::write.csv()}
+#' writes, and the level columns in the result hold those rounded values:
+#' 0.1 + 0.2 and 0.3 are one level. A rounded value is written back exactly,
+#' so the engine sees the same levels whether the result is passed to
+#' \code{\link{ferx_fit}} as it is or written with \code{utils::write.csv()}.
 #'
 #' @param data A data.frame with one row per study, arm and timepoint.
 #' @param study,arm,time,mean,n Names of the columns in \code{data} holding the
@@ -107,8 +108,7 @@
 #' )
 #' d
 #' attr(d, "levels")
-#' path <- tempfile(fileext = ".csv")
-#' utils::write.csv(d, path, row.names = FALSE)
+#' # `d` is the `data` of a fit as it is: ferx_fit(model, d)
 #'
 #' @export
 ferx_mbma_data <- function(data, study, arm, time, mean, se = NULL, sd = NULL,

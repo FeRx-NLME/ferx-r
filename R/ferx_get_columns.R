@@ -8,6 +8,8 @@
 #' @param data One of:
 #'   \itemize{
 #'     \item A character string path to a NONMEM CSV file.
+#'     \item A data.frame -- reports the columns \code{\link{ferx_fit}} would
+#'       write for it.
 #'     \item A \code{ferx_fit} object -- uses \code{fit$data_path}.
 #'     \item The list returned by \code{\link{ferx_example}} -- uses
 #'       \code{x$data}.
@@ -107,8 +109,10 @@ ferx_get_columns <- function(data) {
 }
 
 .ferx_resolve_data_path <- function(data) {
+  # A data.frame is a named list too, so it is taken before the list branch.
+  if (is.data.frame(data)) return(.ferx_data_arg(data))
   if (inherits(data, "ferx_fit")) {
-    p <- data$data_path
+    p <- .ferx_fit_data_path(data)
     if (is.null(p) || length(p) != 1L || is.na(p) || !nzchar(p)) {
       stop("The ferx_fit object does not have a valid data_path.")
     }
@@ -116,6 +120,7 @@ ferx_get_columns <- function(data) {
   }
   if (is.list(data) && !is.null(names(data)) && "data" %in% names(data)) {
     p <- data[["data"]]
+    if (is.data.frame(p)) return(.ferx_data_arg(p))
     if (!is.character(p) || length(p) != 1L || is.na(p) || !nzchar(p)) {
       stop("The list's '$data' element is not a valid file path string.")
     }
@@ -125,7 +130,7 @@ ferx_get_columns <- function(data) {
     return(data)
   }
   stop(
-    "`data` must be a file path (character), a ferx_fit object, ",
-    "or a ferx_example() list."
+    "`data` must be a file path (character), a data.frame, a ferx_fit ",
+    "object, or a ferx_example() list."
   )
 }

@@ -11,7 +11,7 @@ ferx_model_validate(path, data = NULL)
 a \code{.ferx} extension; otherwise an error is raised (these are caller
 errors, not validation failures).}
 
-\item{data}{Optional path to a NONMEM-format CSV. When supplied, the engine
+\item{data}{Optional path to a NONMEM-format CSV, or a data.frame (see \code{\link{ferx_fit}}). When supplied, the engine
 additionally runs data-dependent checks (covariate columns present,
 per-CMT scaling/error-model coverage, steady-state II sanity, lagtime
 signs). \code{NULL} runs the model-only checks.}

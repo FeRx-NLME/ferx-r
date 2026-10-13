@@ -77,7 +77,7 @@
 #'
 #' @param model Path to a `.ferx` model file, or a `ferx_model` object from
 #'   [ferx_model()].
-#' @param data Path to a NONMEM-format CSV. `NULL` (the default) uses the
+#' @param data Path to a NONMEM-format CSV, or a data.frame (see \code{\link{ferx_fit}}). `NULL` (the default) uses the
 #'   model's `[data]` block.
 #' @param samples Number of bootstrap datasets. Default 200, PsN's default and
 #'   its stated rule of thumb for standard errors.
@@ -227,9 +227,10 @@ ferx_bootstrap <- function(model,
   if (!file.exists(model)) {
     stop("Model file not found: ", model)
   }
+  data <- .ferx_data_arg(data)
   if (!is.null(data)) {
     if (!is.character(data) || length(data) != 1L || is.na(data)) {
-      stop("`data` must be a single path to a NONMEM-format CSV, or NULL.")
+      stop("`data` must be a single path to a NONMEM-format CSV, a data.frame, or NULL.")
     }
     if (!file.exists(data)) stop("Data file not found: ", data)
   }

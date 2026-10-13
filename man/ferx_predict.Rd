@@ -9,8 +9,10 @@ ferx_predict(model, data = NULL, fit = NULL)
 \arguments{
 \item{model}{Path to a .ferx model file}
 
-\item{data}{Path to a NONMEM-format CSV. When omitted, the model file's
-\code{[data]} block (\code{path = ...}) is used.
+\item{data}{Path to a NONMEM-format CSV, or a data.frame (see \code{\link{ferx_fit}}). When omitted, the data
+\code{fit} was fitted to (when \code{fit} is given and its data can still
+be found), otherwise the model file's \code{[data]} block
+(\code{path = ...}).
 The \code{DV} column may be left empty (\code{.} / \code{NA}) on the
 sampling rows - \code{PRED} is what this function produces and the DV is
 never read, so an empty cell means "predict here". Rows marked

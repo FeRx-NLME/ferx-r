@@ -3,8 +3,10 @@
 #' Computes population-level predictions (eta = 0) for all subjects.
 #'
 #' @param model Path to a .ferx model file
-#' @param data Path to a NONMEM-format CSV. When omitted, the model file's
-#'   \code{[data]} block (\code{path = ...}) is used.
+#' @param data Path to a NONMEM-format CSV, or a data.frame (see \code{\link{ferx_fit}}). When omitted, the data
+#'   \code{fit} was fitted to (when \code{fit} is given and its data can still
+#'   be found), otherwise the model file's \code{[data]} block
+#'   (\code{path = ...}).
 #'   The \code{DV} column may be left empty (\code{.} / \code{NA}) on the
 #'   sampling rows - \code{PRED} is what this function produces and the DV is
 #'   never read, so an empty cell means "predict here". Rows marked
@@ -37,13 +39,14 @@
 #' @family simulation
 #' @export
 ferx_predict <- function(model, data = NULL, fit = NULL) {
-  if (is.null(data)) data <- .ferx_model_data_path(model)
+  if (is.null(data)) data <- .ferx_default_data(model, fit)
   if (is.null(data)) {
     stop(
       "No data supplied. Pass `data`, or add a `[data]` block ",
       "(`path = ...`) to the model file."
     )
   }
+  data <- .ferx_data_arg(data)
   stopifnot(file.exists(model), file.exists(data))
 
   # A refusal is an R error, classed like a refused `ferx_fit()` (#385).

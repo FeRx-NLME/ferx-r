@@ -19,7 +19,7 @@ ferx_model_to_frem(
 object. The model must declare its covariates in a \code{[covariates]}
 block, each tagged continuous or categorical.}
 
-\item{data}{Path to a NONMEM-format CSV file containing the covariate
+\item{data}{Path to a NONMEM-format CSV file, or a data.frame (see \code{\link{ferx_fit}}), containing the covariate
 columns. Optional when \code{model} is a \code{ferx_model} that already
 carries a data path, or when the model file declares a \code{[data]} block
 (\code{path = ...}); passing \code{data} here overrides either.}

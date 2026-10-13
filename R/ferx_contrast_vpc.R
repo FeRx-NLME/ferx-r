@@ -109,7 +109,8 @@
 #'   Scale section.
 #' @param probs Lower, middle and upper quantile of the simulated contrast.
 #'   Default \code{c(0.05, 0.5, 0.95)}: the median and a 90 percent band.
-#' @param model,data Optional model and data file paths, overriding
+#' @param model,data Optional model file path and data (a CSV path or a
+#'   data.frame, as in \code{\link{ferx_fit}}), overriding
 #'   \code{fit$model_path} / \code{fit$data_path}. The data are the design
 #'   the simulation runs on and the observations the contrast is taken from.
 #' @param ... For \code{ferx_contrast_vpc()}, further arguments to
@@ -203,7 +204,7 @@ ferx_contrast_vpc <- function(fit, by, ref, within = "ID", arm = NULL,
   }
 
   model <- model %||% fit$model_path
-  data <- data %||% fit$data_path
+  data <- .ferx_data_arg(data) %||% .ferx_fit_data_path(fit)
   if (is.null(model) || is.na(model) || !file.exists(model)) {
     stop("No usable model file: pass `model=` or refit so `fit$model_path` is set.",
          call. = FALSE)

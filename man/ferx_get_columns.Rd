@@ -10,6 +10,8 @@ ferx_get_columns(data)
 \item{data}{One of:
 \itemize{
 \item A character string path to a NONMEM CSV file.
+\item A data.frame -- reports the columns \code{\link{ferx_fit}} would
+write for it.
 \item A \code{ferx_fit} object -- uses \code{fit$data_path}.
 \item The list returned by \code{\link{ferx_example}} -- uses
 \code{x$data}.

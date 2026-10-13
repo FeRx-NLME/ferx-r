@@ -17,7 +17,7 @@ not given), or a \code{ferx_search_space} to re-resolve.}
 \item{model}{Optional path to a \code{.ferx} model, or a \code{ferx_model}
 object. \code{NULL} parses the space without resolving it.}
 
-\item{data}{Optional path to the dataset. Defaults to the model's
+\item{data}{Optional path to the dataset, or a data.frame (see \code{\link{ferx_fit}}). Defaults to the model's
 \code{[data]} block when the model declares one.}
 
 \item{x}{A \code{ferx_search_space}.}

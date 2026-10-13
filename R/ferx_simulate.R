@@ -87,9 +87,10 @@
 #' \code{fit$ebe_etas} and \code{\link{ferx_conddist}}.
 #'
 #' @param model Path to a .ferx model file
-#' @param data Path to a NONMEM-format CSV (provides population structure: doses,
-#'   obs times). When omitted, the model file's \code{[data]} block (\code{path
-#'   = ...}) is used.
+#' @param data Path to a NONMEM-format CSV, or a data.frame (see \code{\link{ferx_fit}}), (provides population structure: doses,
+#'   obs times). When omitted, the data \code{fit} was fitted to (when
+#'   \code{fit} is given and its data can still be found), otherwise the model
+#'   file's \code{[data]} block (\code{path = ...}).
 #'   The \code{DV} column may be left empty (\code{.} / \code{NA}) on the
 #'   sampling rows - the DV is what the simulation produces, so an empty cell
 #'   means "simulate here" (a placeholder value is not needed). Rows marked
@@ -198,13 +199,14 @@
 #' @export
 ferx_simulate <- function(model, data = NULL, n_sim = 1L, seed = 42L, fit = NULL,
                           match = FALSE, horizon = NULL) {
-  if (is.null(data)) data <- .ferx_model_data_path(model)
+  if (is.null(data)) data <- .ferx_default_data(model, fit)
   if (is.null(data)) {
     stop(
       "No data supplied. Pass `data`, or add a `[data]` block ",
       "(`path = ...`) to the model file."
     )
   }
+  data <- .ferx_data_arg(data)
   stopifnot(file.exists(model), file.exists(data))
   match_method <- normalize_match_method(match)
   # A finite, positive `horizon` is required to sample drug-driven (joint PK-TTE)

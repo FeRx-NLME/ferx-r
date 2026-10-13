@@ -40,7 +40,7 @@
 #' to draw it. Declare its upper bound below 1 (e.g. \code{0.999}) and refit.
 #'
 #' @param model Path to a .ferx model file
-#' @param data Path to a NONMEM-format CSV (provides population structure).
+#' @param data Path to a NONMEM-format CSV, or a data.frame (see \code{\link{ferx_fit}}), (provides population structure).
 #'   The \code{DV} column may be left empty (\code{.} / \code{NA}) on the
 #'   sampling rows - the DV is what the simulation produces, so an empty cell
 #'   means "simulate here" (a placeholder value is not needed). Rows marked
@@ -106,6 +106,7 @@ ferx_simulate_with_uncertainty <- function(model, data, fit,
                                            n_sim_per_draw = 1L,
                                            method = c("asymptotic", "sir"),
                                            seed = 42L) {
+  data <- .ferx_data_arg(data)
   stopifnot(file.exists(model), file.exists(data))
   method <- match.arg(method)
 

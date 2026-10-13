@@ -26,6 +26,14 @@
     `[event_model]` hazard now parses**
     ([ferx-core #1897](https://github.com/FeRx-NLME/ferx-core/issues/1897)).
 
+- **`ferx_simulate()`, `ferx_predict()` and `ferx_predict_survival()` with
+  `fit =` and no `data` use the data that fit was fitted to**, when it can
+  still be found (its file, or the data a data.frame fit carries), and fall
+  back to the model file's `[data]` block only otherwise. Before, they always
+  read the `[data]` block, so a fit of other data - a data.frame in
+  particular - simulated a different design than it was fitted to. Pass
+  `data =` to keep the old choice
+  ([#419](https://github.com/FeRx-NLME/ferx-r/issues/419)).
 - **A reloaded `fit$sdtab$ID` is numeric**, as on the live fit, also for a
   `.fitrx` bundle ferx-core wrote, where it used to come back as the text ID
   ([#475](https://github.com/FeRx-NLME/ferx-r/issues/475); see Bug fixes).
@@ -630,6 +638,32 @@
 
 ## New features
 
+- **A data.frame is accepted wherever `data` is**: `ferx_fit()`,
+  `ferx_fit_async()`, `ferx_bootstrap()`, `ferx_check_init()`,
+  `ferx_inits_from_nca()`, the simulation and prediction functions,
+  `ferx_calc_npde()`, `ferx_contrast_vpc()`, `ferx_model()`,
+  `ferx_model_validate()`, `ferx_model_to_frem()`, `ferx_get_columns()`,
+  `ferx_search_space()` and every search. That includes a `ferx_mbma_data()`
+  table, so its "write it to a CSV first" step is gone, and a `ferx_data`
+  that `ferx_apply_selection()` built from a data.frame, which `ferx_fit()`
+  used to refuse and now fits with its selection rules. A `ferx_data` that
+  was subset or edited after selection, whether built from a path or a
+  frame, is now fitted as the rows it holds, with a warning; before, a
+  path-built one silently refitted its whole source file. The frame is
+  written to a CSV in the session's temporary directory: numbers at full
+  precision, so a fit of the frame is identical to a fit of the CSV it was
+  read from; missing values as `.`; factors as their labels; date-times in
+  UTC; text IDs verbatim; every column kept; duplicate column names refused.
+  The fit keeps the written text as `fit$data_source`, so `ferx_sir()`,
+  `ferx_covariance()`, `ferx_calc_npde()` and `ferx_contrast_vpc()` still
+  work on the fit once that file is gone, `ferx_save_fit()` always bundles
+  it, and `ferx_load_fit()` restores it. A bundle of a CSV fit saved with
+  `include_data = TRUE` is unchanged: re-saving the loaded fit without
+  `include_data` leaves the data out
+  ([#419](https://github.com/FeRx-NLME/ferx-r/issues/419)).
+- **`fit$eta_cov` reads `.` and blank cells as missing**, as the engine
+  does, so a covariate with a missing value is no longer dropped from it
+  ([#419](https://github.com/FeRx-NLME/ferx-r/issues/419)).
 - **`ferx_contrast_vpc()`: a VPC of the treatment contrast**, for MBMA,
   active-comparator and crossover designs. Within each study and time
   (`time =`, e.g. time since period start for a crossover) it forms `DV[by != ref] - DV[by == ref]` on the data and on

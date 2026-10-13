@@ -9,7 +9,7 @@
 #' @param path Path to a \code{.ferx} model file. The file must exist and have
 #'   a \code{.ferx} extension; otherwise an error is raised (these are caller
 #'   errors, not validation failures).
-#' @param data Optional path to a NONMEM-format CSV. When supplied, the engine
+#' @param data Optional path to a NONMEM-format CSV, or a data.frame (see \code{\link{ferx_fit}}). When supplied, the engine
 #'   additionally runs data-dependent checks (covariate columns present,
 #'   per-CMT scaling/error-model coverage, steady-state II sanity, lagtime
 #'   signs). \code{NULL} runs the model-only checks.
@@ -71,9 +71,10 @@
 ferx_model_validate <- function(path, data = NULL) {
   if (!file.exists(path)) stop("File not found: ", path)
   if (tolower(tools::file_ext(path)) != "ferx") stop("'path' must be a .ferx file")
+  data <- .ferx_data_arg(data)
   if (!is.null(data)) {
     if (!is.character(data) || length(data) != 1L) {
-      stop("'data' must be a single file path or NULL")
+      stop("'data' must be a single file path, a data.frame or NULL")
     }
     if (!file.exists(data)) stop("Data file not found: ", data)
   }
