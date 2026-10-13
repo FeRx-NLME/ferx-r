@@ -88,10 +88,14 @@ ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = 
               normalizePath(fit$model_path %||% "", mustWork = FALSE))
   data <- .ferx_data_arg(data)
   data_override <- data
-  # `data =` naming the fit's own file is still the fit's data.
+  # `data =` naming the fit's own file is still the fit's data; so is a frame
+  # whose CSV text is the fit's `data_source`, whatever path it was written to
+  # (a later session, a loaded fit, #419).
   data_is_fits <- is.null(data) ||
     identical(normalizePath(data, mustWork = FALSE),
-              normalizePath(fit$data_path %||% "", mustWork = FALSE))
+              normalizePath(fit$data_path %||% "", mustWork = FALSE)) ||
+    (!is.null(fit$data_source) && file.exists(data) &&
+       identical(.ferx_read_data_text(data), fit$data_source))
   model <- model %||% fit$model_path
   data  <- data  %||% .ferx_fit_data_path(fit)
   if (is.null(model) || is.na(model) || !file.exists(model)) {

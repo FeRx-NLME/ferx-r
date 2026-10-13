@@ -248,6 +248,123 @@ test_that("ferx_save_fit() bundles a data.frame fit's data and ferx_load_fit() r
   unlink(loaded$data_path)
   cov <- ferx_covariance(loaded)
   expect_true(is.matrix(cov$cov_matrix))
+
+  # A second round trip keeps it: the loaded fit still says where its data
+  # came from, so a re-save bundles it again.
+  again <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(again), add = TRUE)
+  ferx_save_fit(loaded, again)
+  .forget_written_data()
+  expect_identical(ferx_load_fit(again)$data_source, fit$data_source)
+})
+
+test_that("a CSV fit's bundled data is not forced into the next save (review r1 #2)", {
+  skip_on_cran()
+  fit <- warfarin_fit()
+  with_data <- tempfile(fileext = ".fitrx")
+  without <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(c(with_data, without)), add = TRUE)
+  ferx_save_fit(fit, with_data, include_data = TRUE)
+  loaded <- ferx_load_fit(with_data)
+  expect_null(loaded$data_source)
+  expect_true(file.exists(loaded$data_path))
+  # Stripping the data before sharing keeps it stripped.
+  ferx_save_fit(loaded, without)
+  expect_false("data.csv" %in% utils::unzip(without, list = TRUE)$Name)
+})
+
+test_that("a ferx_data subset or edited after selection is fitted as the rows it holds (review r1 #1)", {
+  skip_on_cran()
+  ex <- ferx_example("warfarin_data_selection")
+  df <- utils::read.csv(ex$data, stringsAsFactors = FALSE, check.names = FALSE)
+  fit_rows <- function(data) {
+    ferx_fit(ex$model, data, verbose = FALSE, threads = 1L, covariance = FALSE,
+             settings = list(maxiter = 1L))
+  }
+  for (sel in list(ferx_apply_selection(df, ignore = "DV < 1.0"),
+                   ferx_apply_selection(ex$data, ignore = "DV < 1.0"))) {
+    dropped <- sel[sel$ID != 1, ]
+    expect_warning(fit <- fit_rows(dropped), "rows changed after ferx_apply_selection")
+    expect_false("1" %in% as.character(fit$subject_ids))
+    expect_identical(length(fit$subject_ids), length(unique(dropped$ID)))
+    # The rows were already selected; the rules remove nothing more.
+    expect_equal(fit$exclusions$n_obs_excluded, 0)
+
+    edited <- sel
+    edited$DV[edited$EVID == 0][1L] <- 99
+    expect_warning(fit <- fit_rows(edited), "rows changed after ferx_apply_selection")
+    expect_true(99 %in% fit$sdtab$DV)
+  }
+  # An untouched selection is fitted from its source, without the warning.
+  expect_no_warning(fit_rows(ferx_apply_selection(df, ignore = "DV < 1.0")),
+                    message = "rows changed")
+})
+
+test_that("duplicate column names are refused (review r1 #6)", {
+  expect_error(.data_arg(data.frame(ID = 1, a = 1, a = 2, check.names = FALSE)),
+               "more than one column named `a`")
+})
+
+test_that("a date-time is written in UTC whatever the session's time zone (review r1 #9)", {
+  t0 <- as.POSIXct("2026-01-01 12:00:00", tz = "")
+  df <- data.frame(ID = 1, T = t0)
+  old <- Sys.getenv("TZ")
+  on.exit(Sys.setenv(TZ = old), add = TRUE)
+  Sys.setenv(TZ = "America/New_York")
+  a <- .df_csv_text(df)
+  Sys.setenv(TZ = "Asia/Tokyo")
+  b <- .df_csv_text(df)
+  expect_identical(a, b)
+  expect_match(a, format(t0, tz = "UTC", usetz = TRUE), fixed = TRUE)
+})
+
+test_that("a bit64::integer64 column is written as its digits, or refused without bit64 (review r1 #3)", {
+  if (requireNamespace("bit64", quietly = TRUE)) {
+    ids <- bit64::as.integer64(c("1", "3000000000"))
+    cells <- .read_cells(.data_arg(data.frame(ID = ids, TIME = 0)))
+    expect_identical(cells$ID, c("1", "3000000000"))
+  } else {
+    # The bits of integer64 1, read as a double.
+    fake <- structure(4.94065645841247e-324, class = "integer64")
+    expect_error(.data_arg(data.frame(ID = I(fake), TIME = 0)), "`ID`")
+  }
+})
+
+test_that("eta_cov reads `.` as missing, so a covariate with a gap is kept (review r1 #4)", {
+  eta_cov <- getFromNamespace(".ferx_compute_eta_cov", "ferx")
+  csv <- tempfile(fileext = ".csv")
+  on.exit(unlink(csv), add = TRUE)
+  writeLines(c("ID,TIME,DV,WT",
+               "1,0,1,60", "2,0,1,70", "3,0,1,.", "4,0,1,80",
+               "5,0,1,90", "6,0,1,65"), csv)
+  etas <- data.frame(ID = 1:6, ETA_CL = c(-0.2, 0.1, 0.0, 0.3, 0.4, -0.1))
+  out <- eta_cov(etas, csv)
+  expect_true("WT" %in% out$covariate)
+})
+
+test_that("ferx_calc_npde() checks a frame equal to the fit's data against the fit (review r1 #8)", {
+  skip_on_cran()
+  ex <- ferx_example("warfarin")
+  df <- .read_example("warfarin")
+  fit <- .fit_quiet(ex$model, df, covariance = FALSE, settings = list(maxiter = 2L))
+  expect_true(nzchar(fit$population_fingerprint))
+  # As in a later session: the recorded path is another session's.
+  fit$data_path <- file.path(tempdir(), "other-session", "ferx-data",
+                             basename(fit$data_path))
+  seen <- NULL
+  local_mocked_bindings(
+    ferx_rust_npde_from_fit = function(...) {
+      seen <<- list(...)$population_fingerprint
+      stop("stop after capture")
+    },
+    .package = "ferx"
+  )
+  expect_error(ferx_calc_npde(fit, nsim = 5L, seed = 1L, data = df), "stop after capture")
+  expect_true(is.character(seen) && nzchar(seen))
+  # Different data is not the fit's population: no fingerprint check.
+  other <- transform(df, DV = DV * 2)
+  expect_error(ferx_calc_npde(fit, nsim = 5L, seed = 1L, data = other), "stop after capture")
+  expect_identical(seen, "")
 })
 
 test_that("a CSV fit without include_data bundles no data, as before", {

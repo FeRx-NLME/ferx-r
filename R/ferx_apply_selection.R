@@ -57,6 +57,10 @@
 #'       records included, or \code{NULL} when \code{data} was a path.
 #'       \code{\link{ferx_fit}} fits it with the stored conditions, as it fits
 #'       \code{source_path}.}
+#'     \item{\code{retained_rows}}{The retained records as selected. When the
+#'       object's rows no longer match them - it was subset or edited -
+#'       \code{\link{ferx_fit}} fits the rows it now holds, with a warning,
+#'       instead of \code{source_path} / \code{source_data}.}
 #'     \item{\code{ignore}, \code{accept}, \code{ignore_ids}}{The filter
 #'       conditions used (character / character / character vectors).}
 #'     \item{\code{excluded_rows}}{A data.frame of the excluded records with
@@ -201,6 +205,10 @@ ferx_apply_selection <- function(data, ignore = NULL, accept = NULL,
     # The whole frame a selection was made from, so ferx_fit() can hand the
     # engine the dataset and the rules, as it does for a path (#419).
     source_data  = if (is.null(source_path)) df,
+    # The rows as selected, so ferx_fit() can tell that they were since subset
+    # or edited and fit what the object now holds instead (#419). Shares its
+    # columns with the object until one of them is modified.
+    retained_rows = .ferx_selection_rows(retained),
     ignore       = ignore,
     accept       = accept,
     ignore_ids   = ignore_ids,
@@ -287,6 +295,16 @@ print.ferx_data <- function(x, n = 6L, ...) {
     # replayed rules see the columns the fit's reader saw.
     model      = .ferx_existing_path(fit$model_path)
   )
+}
+
+# A ferx_data's rows as a plain data.frame - columns, names and row names,
+# none of the selection attributes. ferx_fit() compares it with
+# `retained_rows`, and fits it when the two differ.
+.ferx_selection_rows <- function(x) {
+  a <- attributes(x)
+  attributes(x) <- list(names = a$names, row.names = a$row.names,
+                        class = "data.frame")
+  x
 }
 
 .get_col_sel <- function(df, name) {

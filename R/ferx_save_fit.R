@@ -169,7 +169,11 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   if (isTRUE(include_data) || !is.null(fit$data_source)) {
     data_path <- .ferx_fit_data_path(fit)
     if (is.null(data_path) || is.na(data_path) || !file.exists(data_path)) {
-      stop("include_data = TRUE but fit$data_path is missing or does not exist.")
+      stop(if (is.null(fit$data_source)) {
+        "include_data = TRUE but fit$data_path is missing or does not exist."
+      } else {
+        "The fit's data (fit$data_source) could not be written to a file to bundle."
+      })
     }
     file.copy(data_path, file.path(staging, "data.csv"), overwrite = TRUE)
     entries <- c(entries, "data.csv")

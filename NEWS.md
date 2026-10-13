@@ -638,15 +638,24 @@
   `ferx_search_space()` and every search. That includes a `ferx_mbma_data()`
   table, so its "write it to a CSV first" step is gone, and a `ferx_data`
   that `ferx_apply_selection()` built from a data.frame, which `ferx_fit()`
-  used to refuse and now fits with its selection rules. The frame is written
-  to a CSV in the session's temporary directory: numbers at full precision,
-  so a fit of the frame is identical to a fit of the CSV it was read from;
-  missing values as `.`; factors as their labels; text IDs verbatim; every
-  column kept. The fit keeps the written text as `fit$data_source`, so
-  `ferx_sir()`, `ferx_covariance()`, `ferx_calc_npde()` and
-  `ferx_contrast_vpc()` still work on the fit once that file is gone, and `ferx_save_fit()` always
-  bundles it; `ferx_load_fit()` restores `fit$data_source` from a bundle's
-  data ([#419](https://github.com/FeRx-NLME/ferx-r/issues/419)).
+  used to refuse and now fits with its selection rules. A `ferx_data` that
+  was subset or edited after selection, whether built from a path or a
+  frame, is now fitted as the rows it holds, with a warning; before, a
+  path-built one silently refitted its whole source file. The frame is
+  written to a CSV in the session's temporary directory: numbers at full
+  precision, so a fit of the frame is identical to a fit of the CSV it was
+  read from; missing values as `.`; factors as their labels; date-times in
+  UTC; text IDs verbatim; every column kept; duplicate column names refused.
+  The fit keeps the written text as `fit$data_source`, so `ferx_sir()`,
+  `ferx_covariance()`, `ferx_calc_npde()` and `ferx_contrast_vpc()` still
+  work on the fit once that file is gone, `ferx_save_fit()` always bundles
+  it, and `ferx_load_fit()` restores it. A bundle of a CSV fit saved with
+  `include_data = TRUE` is unchanged: re-saving the loaded fit without
+  `include_data` leaves the data out
+  ([#419](https://github.com/FeRx-NLME/ferx-r/issues/419)).
+- **`fit$eta_cov` reads `.` and blank cells as missing**, as the engine
+  does, so a covariate with a missing value is no longer dropped from it
+  ([#419](https://github.com/FeRx-NLME/ferx-r/issues/419)).
 - **`ferx_contrast_vpc()`: a VPC of the treatment contrast**, for MBMA,
   active-comparator and crossover designs. Within each study and time
   (`time =`, e.g. time since period start for a crossover) it forms `DV[by != ref] - DV[by == ref]` on the data and on

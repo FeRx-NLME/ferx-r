@@ -20,8 +20,12 @@
 .ferx_compute_eta_cov <- function(ebe_etas, data_path, model_path = NULL) {
   if (is.null(ebe_etas) || !is.data.frame(ebe_etas)) return(NULL)
   data <- tryCatch(
+    # Every missing spelling the engine's reader takes, `.` (NONMEM's, and
+    # what a data.frame is written with, #419) included; otherwise a
+    # covariate with a missing value reads as text and drops out.
     suppressWarnings(utils::read.csv(data_path, stringsAsFactors = FALSE,
-                                      check.names = FALSE)),
+                                      check.names = FALSE,
+                                      na.strings = c("NA", ".", ""))),
     error = function(e) NULL
   )
   if (is.null(data) || !is.data.frame(data)) {

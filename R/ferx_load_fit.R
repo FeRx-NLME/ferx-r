@@ -168,15 +168,22 @@ ferx_load_fit <- function(path) {
     result$model_path <- NA_character_
   }
   data_staging <- file.path(staging, "data.csv")
-  if (file.exists(data_staging)) {
+  # Data fitted from a data.frame (#419) was read from a file named for its
+  # md5 and exists nowhere but in the bundle. Only then does the loaded fit
+  # carry it as `data_source` - which makes the next ferx_save_fit() bundle
+  # it again - and only when the bundled bytes are that file's. A bundled copy
+  # of the user's own CSV stays an ordinary `include_data` copy, so re-saving
+  # without `include_data` leaves it out.
+  frame_md5 <- .ferx_data_cache_md5(result$data_path)
+  if (file.exists(data_staging) && !is.null(frame_md5) &&
+      identical(unname(tools::md5sum(data_staging)), frame_md5)) {
+    result$data_source <- .ferx_read_data_text(data_staging)
+    result$data_path <- .ferx_write_data_text(result$data_source)
+  } else if (file.exists(data_staging)) {
     # Copy out of the staging dir so it survives the on.exit() cleanup.
     persisted_data <- tempfile("fitrx_data_", fileext = ".csv")
     file.copy(data_staging, persisted_data, overwrite = TRUE)
     result$data_path <- persisted_data
-    # The bundled bytes also go on the fit, as `model_source` does for the
-    # model, so the steps that re-read the data still find them after this
-    # session's temporary directory is gone (#419).
-    result$data_source <- .ferx_read_data_text(persisted_data)
   } else if (is.null(result$data_path) || !nzchar(result$data_path)) {
     # No bundled data and the wire didn't carry a path either.
     result$data_path <- NA_character_

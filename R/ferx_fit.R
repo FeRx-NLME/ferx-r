@@ -25,8 +25,12 @@
 #'   directory and fitted from there, exactly as a file: every number is
 #'   written to full precision, so the fit equals the fit of the CSV the frame
 #'   was read from; a missing value is written as \code{.}; a factor as its
-#'   labels; a logical as 1/0; text, such as a subject ID \code{"007"} or
-#'   \code{"NA"}, verbatim. Every column is kept. The fit stores the written
+#'   labels; a logical as 1/0; a date-time in UTC; text, such as a subject ID
+#'   \code{"007"}, verbatim (outside the ID column the engine reads the text
+#'   \code{NA} as missing, as in any CSV). Every column is kept; duplicate
+#'   column names are refused. A \code{ferx_data} whose rows were changed
+#'   after selection (subset, edited) is fitted as the rows it now holds, with
+#'   a warning. The fit stores the written
 #'   text as \code{fit$data_source}, so \code{\link{ferx_sir}},
 #'   \code{\link{ferx_covariance}}, \code{\link{ferx_calc_npde}},
 #'   \code{\link{ferx_contrast_vpc}} and \code{\link{ferx_save_fit}} (which then always bundles
@@ -1207,9 +1211,9 @@
 #'   \item{data_source}{For a fit whose \code{data} was a data.frame: the
 #'     text of the CSV the engine read (the file at \code{data_path}, in the
 #'     session's temporary directory). The steps that re-read the data write
-#'     it back when that file is gone. Also set on a fit loaded from a
-#'     \code{.fitrx} bundle that carries its data. \code{NULL} for a fit of a
-#'     CSV path.}
+#'     it back when that file is gone. Also set on such a fit after a
+#'     \code{\link{ferx_save_fit}} / \code{\link{ferx_load_fit}} round trip.
+#'     \code{NULL} for a fit of a CSV path, bundled data or not.}
 #'   \item{eigenvalues}{Numeric vector of eigenvalues of the correlation matrix
 #'     of estimated (non-fixed) parameters, sorted descending. Computed by the
 #'     Rust backend. \code{NULL} when the covariance step was not run, failed,
@@ -2070,11 +2074,26 @@ ferx_fit <- function(model, data = NULL,
   # path, or the data.frame it was built from - and merge its stored conditions
   # with the explicit ignore/accept/ignore_ids args, so the engine applies the
   # selection and `fit$exclusions` counts it. A ferx_data that carries neither
-  # (built before #419) is fitted as its retained rows.
+  # (built before #419) is fitted as its retained rows. So is one whose rows
+  # are no longer the ones selected: `[`, `$<-` and dplyr verbs keep the
+  # attributes, so the source would bring back what the user dropped or undo
+  # what they edited.
   if (inherits(data, "ferx_data")) {
     fd <- data
-    data <- attr(fd, "source_path") %||% attr(fd, "source_data") %||%
-      as.data.frame(fd)
+    rows <- .ferx_selection_rows(fd)
+    selected <- attr(fd, "retained_rows")
+    if (!is.null(selected) && !identical(rows, selected)) {
+      warning(
+        "`data` is a ferx_data whose rows changed after ferx_apply_selection() ",
+        "(subset or edited); fitting the ", nrow(rows), " rows it now holds, ",
+        "not the dataset they were selected from. Call ferx_apply_selection() ",
+        "on the edited data to fit a source with its rules.",
+        call. = FALSE
+      )
+      data <- rows
+    } else {
+      data <- attr(fd, "source_path") %||% attr(fd, "source_data") %||% rows
+    }
     ignore      <- unique(c(attr(fd, "ignore"),    ignore))
     accept      <- unique(c(attr(fd, "accept"),    accept))
     ignore_ids  <- unique(c(attr(fd, "ignore_ids"), ignore_ids))

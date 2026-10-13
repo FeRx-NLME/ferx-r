@@ -37,13 +37,17 @@
 #    a fit of the frame equals a fit of the CSV it was read from.
 #  - A missing value (NA, NaN) is `.`, the NONMEM spelling the reader takes as
 #    missing in every column.
-#  - A factor is its labels, a logical 1/0, a Date or date-time its
-#    `format()`. Text is written verbatim - an ID `007` stays `007`, the
-#    string "NA" stays "NA" - and quoted, with `"` doubled, when it holds a
-#    comma, a quote or a line break.
+#  - A factor is its labels, a logical 1/0, a Date its `format()`, a
+#    date-time its `format()` in UTC (so the bytes, and the fit's
+#    `data_hash`, do not depend on the session's time zone), a
+#    `bit64::integer64` its digits. Text is written verbatim - an ID `007`
+#    stays `007` - and quoted, with `"` doubled, when it holds a comma, a
+#    quote or a line break. (The engine reads the text `NA` as missing in
+#    every column but ID, as it does in any CSV.)
 #  - Every column is written, under its own name, in its own order: the
 #    engine decides which columns it reads.
-# A column of any other type (a list, a matrix, complex) is refused, naming it.
+# A column of any other type (a list, a matrix, complex) is refused, naming
+# it, and so are duplicate or empty column names.
 .ferx_data_csv_text <- function(df, arg = "data") {
   df <- as.data.frame(df, stringsAsFactors = FALSE, optional = TRUE)
   nms <- names(df)
@@ -52,6 +56,13 @@
   }
   if (anyNA(nms) || !all(nzchar(nms))) {
     stop(sprintf("`%s` has a column without a name.", arg), call. = FALSE)
+  }
+  dup <- unique(nms[duplicated(nms)])
+  if (length(dup) > 0L) {
+    stop(sprintf(
+      "`%s` has more than one column named %s; the engine would read only one of them.",
+      arg, paste0("`", dup, "`", collapse = ", ")
+    ), call. = FALSE)
   }
   bad <- !vapply(df, .ferx_data_column_ok, logical(1))
   if (any(bad)) {
@@ -70,14 +81,23 @@
   text
 }
 
+# A `bit64::integer64` is stored as a double holding the integer's bits, so
+# it is written through bit64's own methods; without bit64 it is refused
+# rather than written as the bits' meaningless double value.
 .ferx_data_column_ok <- function(v) {
+  if (inherits(v, "integer64")) return(requireNamespace("bit64", quietly = TRUE))
+  # Checked before is.list(): a POSIXlt is a list.
+  if (inherits(v, c("Date", "POSIXt"))) return(TRUE)
   is.null(dim(v)) && !is.list(v) &&
-    (is.numeric(v) || is.character(v) || is.factor(v) || is.logical(v) ||
-       inherits(v, c("Date", "POSIXt")))
+    (is.numeric(v) || is.character(v) || is.factor(v) || is.logical(v))
 }
 
 .ferx_data_column_text <- function(v) {
-  out <- if (is.factor(v) || inherits(v, c("Date", "POSIXt"))) {
+  out <- if (inherits(v, "integer64")) {
+    as.character(v)
+  } else if (inherits(v, "POSIXt")) {
+    .ferx_data_csv_quote(format(v, tz = "UTC", usetz = TRUE))
+  } else if (is.factor(v) || inherits(v, "Date")) {
     .ferx_data_csv_quote(enc2utf8(as.character(if (is.factor(v)) v else format(v))))
   } else if (is.logical(v)) {
     ifelse(v, "1", "0")
@@ -128,10 +148,24 @@
   }
   dir <- normalizePath(.ferx_data_cache_dir(), mustWork = FALSE)
   if (!identical(normalizePath(dirname(path), mustWork = FALSE), dir) ||
-      !grepl("^data-[0-9a-f]{32}\\.csv$", basename(path))) {
+      is.null(.ferx_data_cache_md5(path))) {
     return(NULL)
   }
   .ferx_read_data_text(path)
+}
+
+# The md5 a data file written from a data.frame carries in its name
+# (`ferx-data/data-<md5>.csv`, in any session's tempdir()); NULL for any other
+# path. `ferx_load_fit()` uses it to tell a bundle's data that came from a
+# data.frame - which exists nowhere else - from a copy of the user's own CSV.
+.ferx_data_cache_md5 <- function(path) {
+  if (is.null(path) || length(path) != 1L || is.na(path) || !nzchar(path) ||
+      basename(dirname(path)) != "ferx-data") {
+    return(NULL)
+  }
+  m <- regmatches(basename(path),
+                  regexec("^data-([0-9a-f]{32})\\.csv$", basename(path)))[[1L]]
+  if (length(m) == 2L) m[[2L]] else NULL
 }
 
 .ferx_read_data_text <- function(path) {
