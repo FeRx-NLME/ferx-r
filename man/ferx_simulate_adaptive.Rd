@@ -17,7 +17,7 @@ ferx_simulate_adaptive(
 \item{model}{Path to a .ferx model file containing an \code{[adaptive_dosing]}
 block}
 
-\item{data}{Path to a NONMEM-format CSV: an observation grid, any covariates,
+\item{data}{Path to a NONMEM-format CSV, or a data.frame (see \code{\link{ferx_fit}}): an observation grid, any covariates,
 and optionally a pre-scheduled base regimen (dose rows). When omitted, the
 model file's \code{[data]} block (\code{path = ...}) is used.
 The \code{DV} column may be left empty (\code{.} / \code{NA}) on the

@@ -35,7 +35,7 @@
 #' the skeleton to the console and writes nothing (returns \code{NULL}). This
 #' replaces the former \code{ferx_model_new()}.
 #'
-#' @param data Optional path to a NONMEM-format CSV data file. Can be omitted
+#' @param data Optional path to a NONMEM-format CSV data file, or a data.frame (see \code{\link{ferx_fit}}). Can be omitted
 #'   here and supplied later to \code{\link{ferx_fit}}. When omitted, it defaults
 #'   to the dataset declared in the model file's \code{[data]} block
 #'   (\code{path = ...}) if the model file has one.
@@ -156,7 +156,7 @@ ferx_model <- function(data = NULL, model = NULL, template = NULL,
     }
     # Validate data before any side effect so a bad path doesn't leave a
     # written file / spawned editor behind (matches wrap mode's ordering).
-    if (!is.null(data) && !file.exists(data)) stop("Data file not found: ", data)
+    .ferx_model_check_data(data)
     writeLines(skeleton, path)
     message("Created ", path)
     if (isTRUE(edit)) utils::file.edit(path)
@@ -213,15 +213,36 @@ ferx_model <- function(data = NULL, model = NULL, template = NULL,
   # Lenient: a model file that does not parse yet is a normal input to the
   # constructor (#387); the entry point it is piped into reports the error.
   if (is.null(data)) data <- .ferx_model_data_path(model, strict = FALSE)
-  if (!is.null(data) && !file.exists(data)) stop("Data file not found: ", data)
+  .ferx_model_check_data(data)
   structure(list(model = model, data = data), class = "ferx_model")
+}
+
+# `data` as a ferx_model carries it: a CSV path, which must exist, or a
+# data.frame, kept as it is. The frame is written to a CSV only by the
+# function the model is piped into, so a fit records that its data came from
+# a frame and keeps it (#419).
+.ferx_model_check_data <- function(data) {
+  if (is.null(data) || is.data.frame(data)) return(invisible(NULL))
+  if (!is.character(data) || length(data) != 1L || is.na(data)) {
+    stop("`data` must be a path to a NONMEM-format CSV file or a data.frame.")
+  }
+  if (!file.exists(data)) stop("Data file not found: ", data)
+  invisible(NULL)
+}
+
+.ferx_model_data_label <- function(data) {
+  if (is.null(data)) return("<none>")
+  if (is.data.frame(data)) {
+    return(sprintf("<data.frame: %d rows, %d columns>", nrow(data), ncol(data)))
+  }
+  data
 }
 
 #' @export
 print.ferx_model <- function(x, ...) {
   cat("ferx_model\n")
   cat("  Model: ", x$model, "\n", sep = "")
-  cat("  Data:  ", if (is.null(x$data)) "<none>" else x$data, "\n", sep = "")
+  cat("  Data:  ", .ferx_model_data_label(x$data), "\n", sep = "")
   s <- tryCatch(.ferx_parse_structure(x$model), error = function(e) NULL)
   if (!is.null(s)) {
     cat("  ---\n")

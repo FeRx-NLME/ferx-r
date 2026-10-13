@@ -3,7 +3,7 @@
 #' Computes population-level predictions (eta = 0) for all subjects.
 #'
 #' @param model Path to a .ferx model file
-#' @param data Path to a NONMEM-format CSV. When omitted, the model file's
+#' @param data Path to a NONMEM-format CSV, or a data.frame (see \code{\link{ferx_fit}}). When omitted, the model file's
 #'   \code{[data]} block (\code{path = ...}) is used.
 #'   The \code{DV} column may be left empty (\code{.} / \code{NA}) on the
 #'   sampling rows - \code{PRED} is what this function produces and the DV is
@@ -44,6 +44,7 @@ ferx_predict <- function(model, data = NULL, fit = NULL) {
       "(`path = ...`) to the model file."
     )
   }
+  data <- .ferx_data_arg(data)
   stopifnot(file.exists(model), file.exists(data))
 
   # A refusal is an R error, classed like a refused `ferx_fit()` (#385).

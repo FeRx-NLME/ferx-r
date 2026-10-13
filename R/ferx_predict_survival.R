@@ -16,7 +16,7 @@
 #'
 #' @param model Path to a .ferx model file containing at least one
 #'   \code{[event_model]} block.
-#' @param data Path to a NONMEM-format CSV. When omitted, the model file's
+#' @param data Path to a NONMEM-format CSV, or a data.frame (see \code{\link{ferx_fit}}). When omitted, the model file's
 #'   \code{[data]} block (\code{path = ...}) is used.
 #' @param times Numeric vector of times at which to evaluate \eqn{S(t)},
 #'   \eqn{H(t)}, \eqn{h(t)}.
@@ -50,6 +50,7 @@ ferx_predict_survival <- function(model, data = NULL, times, fit = NULL) {
       "(`path = ...`) to the model file."
     )
   }
+  data <- .ferx_data_arg(data)
   stopifnot(
     file.exists(model),
     file.exists(data),

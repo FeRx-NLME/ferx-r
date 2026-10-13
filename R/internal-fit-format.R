@@ -1017,6 +1017,10 @@
   result$data_path <- normalize_or_na(
     empty_to_null(result$data_path) %||% data
   )
+  # Data passed as a data.frame was read from a session-temporary file; the
+  # fit keeps that file's text, so the steps that re-read the data still find
+  # it once the file is gone (#419). NULL for a fit of the user's own CSV.
+  result$data_source <- .ferx_data_cache_text(result$data_path)
   result$model_hash <- empty_to_null(result$model_hash) %||% NA_character_
   result$data_hash <- empty_to_null(result$data_hash) %||% NA_character_
   # The IOV occasion rule the fit ran with (ferx-core #1783), in the

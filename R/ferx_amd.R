@@ -72,7 +72,7 @@
 #'
 #' @param model Path to a \code{.ferx} model, or a \code{ferx_model} object.
 #'   Omit when \code{config} is given.
-#' @param data Path to the dataset. Defaults to the model's \code{[data]}
+#' @param data Path to the dataset, or a data.frame (see \code{\link{ferx_fit}}). Defaults to the model's \code{[data]}
 #'   block. Names the dataset the pipeline runs on, so like \code{model} it
 #'   cannot be given beside \code{config}.
 #' @param search_space MFL search space, as a string or a character vector of

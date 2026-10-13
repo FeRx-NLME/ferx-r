@@ -105,9 +105,8 @@ plot(cv)
 # level to 0). The same holds for a new study.
 dense <- d[d$STUDY == 1 & d$OCC == 1, ][rep(1, 3), ]
 dense$TIME <- c(1, 3, 6)
-dense_path <- tempfile(fileext = ".csv")
-utils::write.csv(dense, dense_path, row.names = FALSE)
-refused <- tryCatch(ferx_simulate(ex$model, dense_path, n_sim = 1, fit = fit),
+# A data.frame is accepted wherever a CSV path is, so `dense` goes in as is.
+refused <- tryCatch(ferx_simulate(ex$model, dense, n_sim = 1, fit = fit),
                     error = function(e) e)
 stopifnot(inherits(refused, "error"))
 cat(conditionMessage(refused), "\n")

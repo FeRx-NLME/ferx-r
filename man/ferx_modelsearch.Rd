@@ -30,7 +30,7 @@ ferx_modelsearch(
 \item{model}{Path to a \code{.ferx} model, or a \code{ferx_model} object.
 Omit when \code{config} is given.}
 
-\item{data}{Path to the dataset. Defaults to the model's \code{[data]}
+\item{data}{Path to the dataset, or a data.frame (see \code{\link{ferx_fit}}). Defaults to the model's \code{[data]}
 block. Names the dataset the search runs on, so like \code{model} it
 cannot be given beside \code{config} - the file's own \code{data} key
 says which dataset that file searches.}

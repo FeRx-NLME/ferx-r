@@ -39,6 +39,9 @@ FITRX_FORMAT_VERSION <- "1"
 #'   to fit the model is embedded verbatim inside the archive (as
 #'   \code{data.csv}). Requires that the file is still accessible at the
 #'   path captured at fit time (\code{fit$data_path}). Default \code{FALSE}.
+#'   A fit whose \code{data} was a data.frame (\code{fit$data_source} set)
+#'   always embeds it: its file lives only in a temporary directory, so a
+#'   bundle without it could not be re-read.
 #' @return Invisibly returns \code{fit}, so the function can be used inside a
 #'   pipe without breaking the chain:
 #'   \preformatted{
@@ -162,9 +165,9 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   writeLines(warns, file.path(staging, "warnings.txt"))
   entries <- c(entries, "warnings.txt")
 
-  # data.csv (optional)
-  if (isTRUE(include_data)) {
-    data_path <- fit$data_path
+  # data.csv (optional; always for a fit of a data.frame, #419)
+  if (isTRUE(include_data) || !is.null(fit$data_source)) {
+    data_path <- .ferx_fit_data_path(fit)
     if (is.null(data_path) || is.na(data_path) || !file.exists(data_path)) {
       stop("include_data = TRUE but fit$data_path is missing or does not exist.")
     }

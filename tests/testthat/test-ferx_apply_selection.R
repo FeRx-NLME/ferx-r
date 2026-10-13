@@ -324,15 +324,23 @@ test_that("ferx_apply_selection() accepts a data.frame and sets source_path to N
   expect_null(.sel_attr(sel, "source_path"))
   expect_equal(.sel_attr(sel, "exclusions")$n_obs_excluded, 2L)
 })
-test_that("ferx_fit errors clearly when ferx_data has no source_path", {
+test_that("ferx_fit fits a ferx_data built from a data.frame as one built from its path (#419)", {
   skip_on_cran()
   ex  <- ferx_example("warfarin_data_selection")
   df  <- utils::read.csv(ex$data, stringsAsFactors = FALSE, check.names = FALSE)
-  sel <- ferx_apply_selection(df, ignore = "DV < 1.0")
-  expect_error(
-    ferx_fit(ex$model, sel),
-    regexp = "no source file path"
-  )
+  sel_df   <- ferx_apply_selection(df, ignore = "DV < 1.0")
+  sel_path <- ferx_apply_selection(ex$data, ignore = "DV < 1.0")
+  expect_identical(.sel_attr(sel_df, "source_data"), df)
+  expect_null(.sel_attr(sel_path, "source_data"))
+  fit_df   <- ferx_fit(ex$model, sel_df, verbose = FALSE, threads = 1L,
+                       settings = list(maxiter = 5L))
+  fit_path <- ferx_fit(ex$model, sel_path, verbose = FALSE, threads = 1L,
+                       settings = list(maxiter = 5L))
+  expect_identical(fit_df$ofv, fit_path$ofv)
+  # The engine applied the rule to the whole frame, so it counts what the rule
+  # removed - as it does for the path - rather than seeing the rows already gone.
+  expect_identical(fit_df$exclusions, fit_path$exclusions)
+  expect_true("ignore: DV < 1.0" %in% fit_df$exclusions$fired_ignore)
 })
 test_that("ferx_apply_selection(fit, excluded = TRUE) returns excluded rows with .exclude_reason", {
   skip_on_cran()

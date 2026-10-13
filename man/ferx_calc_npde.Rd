@@ -22,7 +22,8 @@ full-rank simulated covariance; subjects that fail this get \code{NA} NPDE
 \item{model}{Path to the \code{.ferx} model file. Defaults to
 \code{fit$model_path}.}
 
-\item{data}{Path to the NONMEM-format CSV. Defaults to \code{fit$data_path}.}
+\item{data}{Path to the NONMEM-format CSV, or a data.frame (see
+\code{\link{ferx_fit}}). Defaults to the fit's own data.}
 }
 \value{
 The input \code{fit}, with \code{NPDE} and \code{NPD} columns added

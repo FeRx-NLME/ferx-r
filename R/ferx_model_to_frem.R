@@ -12,7 +12,7 @@
 #' @param model Path to a \code{.ferx} model file, or a \code{\link{ferx_model}}
 #'   object. The model must declare its covariates in a \code{[covariates]}
 #'   block, each tagged continuous or categorical.
-#' @param data Path to a NONMEM-format CSV file containing the covariate
+#' @param data Path to a NONMEM-format CSV file, or a data.frame (see \code{\link{ferx_fit}}), containing the covariate
 #'   columns. Optional when \code{model} is a \code{ferx_model} that already
 #'   carries a data path, or when the model file declares a \code{[data]} block
 #'   (\code{path = ...}); passing \code{data} here overrides either.
@@ -94,6 +94,7 @@ ferx_model_to_frem <- function(model,
   if (is.null(data) && is.character(model_path) && length(model_path) == 1L) {
     data <- .ferx_model_data_path(model_path)
   }
+  data <- .ferx_data_arg(data)
 
   # --- validate inputs ---
   if (!is.character(model_path) || length(model_path) != 1L || !nzchar(model_path)) {

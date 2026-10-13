@@ -630,6 +630,23 @@
 
 ## New features
 
+- **A data.frame is accepted wherever `data` is**: `ferx_fit()`,
+  `ferx_fit_async()`, `ferx_bootstrap()`, `ferx_check_init()`,
+  `ferx_inits_from_nca()`, the simulation and prediction functions,
+  `ferx_calc_npde()`, `ferx_contrast_vpc()`, `ferx_model()`,
+  `ferx_model_validate()`, `ferx_model_to_frem()`, `ferx_get_columns()`,
+  `ferx_search_space()` and every search. That includes a `ferx_mbma_data()`
+  table, so its "write it to a CSV first" step is gone, and a `ferx_data`
+  that `ferx_apply_selection()` built from a data.frame, which `ferx_fit()`
+  used to refuse and now fits with its selection rules. The frame is written
+  to a CSV in the session's temporary directory: numbers at full precision,
+  so a fit of the frame is identical to a fit of the CSV it was read from;
+  missing values as `.`; factors as their labels; text IDs verbatim; every
+  column kept. The fit keeps the written text as `fit$data_source`, so
+  `ferx_sir()`, `ferx_covariance()`, `ferx_calc_npde()` and
+  `ferx_contrast_vpc()` still work on the fit once that file is gone, and `ferx_save_fit()` always
+  bundles it; `ferx_load_fit()` restores `fit$data_source` from a bundle's
+  data ([#419](https://github.com/FeRx-NLME/ferx-r/issues/419)).
 - **`ferx_contrast_vpc()`: a VPC of the treatment contrast**, for MBMA,
   active-comparator and crossover designs. Within each study and time
   (`time =`, e.g. time since period start for a crossover) it forms `DV[by != ref] - DV[by == ref]` on the data and on

@@ -17,7 +17,7 @@ ferx_simulate(
 \arguments{
 \item{model}{Path to a .ferx model file}
 
-\item{data}{Path to a NONMEM-format CSV (provides population structure: doses,
+\item{data}{Path to a NONMEM-format CSV, or a data.frame (see \code{\link{ferx_fit}}), (provides population structure: doses,
 obs times). When omitted, the model file's \code{[data]} block (\code{path
 = ...}) is used.
 The \code{DV} column may be left empty (\code{.} / \code{NA}) on the

@@ -40,7 +40,7 @@
 #'
 #' @param model Path to a .ferx model file containing an \code{[adaptive_dosing]}
 #'   block
-#' @param data Path to a NONMEM-format CSV: an observation grid, any covariates,
+#' @param data Path to a NONMEM-format CSV, or a data.frame (see \code{\link{ferx_fit}}): an observation grid, any covariates,
 #'   and optionally a pre-scheduled base regimen (dose rows). When omitted, the
 #'   model file's \code{[data]} block (\code{path = ...}) is used.
 #'   The \code{DV} column may be left empty (\code{.} / \code{NA}) on the
@@ -110,6 +110,7 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
       "(`path = ...`) to the model file."
     )
   }
+  data <- .ferx_data_arg(data)
   stopifnot(file.exists(model), file.exists(data))
   if (length(verify) != 1L || is.na(verify) || !is.logical(verify)) {
     stop("`verify` must be a single TRUE or FALSE.", call. = FALSE)

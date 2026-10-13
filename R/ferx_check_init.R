@@ -10,7 +10,7 @@
 #'   object created by \code{\link{ferx_model}}. When a \code{ferx_model} is
 #'   passed and \code{data} is not supplied, the data path on the object is
 #'   used.
-#' @param data  Path to a NONMEM-format CSV file. Optional when \code{model}
+#' @param data  Path to a NONMEM-format CSV file, or a data.frame (see \code{\link{ferx_fit}}). Optional when \code{model}
 #'   is a \code{ferx_model} that already carries a data path, or when the model
 #'   file declares a \code{[data]} block (\code{path = ...}).
 #' @param method Estimation method string, passed to \code{\link{ferx_fit}}.

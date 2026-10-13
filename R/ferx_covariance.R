@@ -150,7 +150,7 @@ ferx_covariance <- function(fit,
     stop("ferx_covariance: model file not found at ", model_path)
   }
 
-  data_path <- fit$data_path
+  data_path <- .ferx_fit_data_path(fit)
   if (is.null(data_path) || is.na(data_path) || !nzchar(data_path)) {
     stop(
       "ferx_covariance: fit has no recorded data_path; cannot locate the ",

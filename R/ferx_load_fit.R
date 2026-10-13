@@ -173,6 +173,10 @@ ferx_load_fit <- function(path) {
     persisted_data <- tempfile("fitrx_data_", fileext = ".csv")
     file.copy(data_staging, persisted_data, overwrite = TRUE)
     result$data_path <- persisted_data
+    # The bundled bytes also go on the fit, as `model_source` does for the
+    # model, so the steps that re-read the data still find them after this
+    # session's temporary directory is gone (#419).
+    result$data_source <- .ferx_read_data_text(persisted_data)
   } else if (is.null(result$data_path) || !nzchar(result$data_path)) {
     # No bundled data and the wire didn't carry a path either.
     result$data_path <- NA_character_

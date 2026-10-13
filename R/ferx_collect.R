@@ -37,6 +37,12 @@ ferx_collect <- function(handle, verbose = TRUE) {
     result <- .ferx_collect_rstudio(handle, verbose)
   }
   if (is.null(result)) return(invisible(NULL))
+  # A data.frame fitted in the background was written to the worker's
+  # temporary directory, gone with the worker; write the fit's copy into this
+  # session's, so `fit$data_path` names a file that exists (#419).
+  if (inherits(result, "ferx_fit") && !is.null(result$data_source)) {
+    result$data_path <- .ferx_fit_data_path(result)
+  }
   if (!isTRUE(handle$user_wanted_trace)) {
     # optimizer_trace = TRUE was forced internally only to give ferx_collect()
     # a progress channel; drop both the temp file and the in-memory trace so

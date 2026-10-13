@@ -63,6 +63,10 @@ When \code{excluded = FALSE}, an object of class \code{"ferx_data"}
 \describe{
 \item{\code{source_path}}{Character path supplied as \code{data}, or
 \code{NULL} when \code{data} was a data.frame.}
+\item{\code{source_data}}{The data.frame supplied as \code{data}, all
+records included, or \code{NULL} when \code{data} was a path.
+\code{\link{ferx_fit}} fits it with the stored conditions, as it fits
+\code{source_path}.}
 \item{\code{ignore}, \code{accept}, \code{ignore_ids}}{The filter
 conditions used (character / character / character vectors).}
 \item{\code{excluded_rows}}{A data.frame of the excluded records with

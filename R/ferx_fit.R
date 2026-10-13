@@ -17,6 +17,21 @@
 #'   \code{1} below LLOQ, \code{-1} above ULOQ), OCC (occasion index for IOV),
 #'   and any covariate columns referenced in the model. See the steady-state
 #'   section below for SS/II details.
+#'
+#'   \code{data} may also be a data.frame with the same columns - one you
+#'   built or edited in R, a \code{\link{ferx_mbma_data}} table, or a
+#'   \code{ferx_data} from \code{\link{ferx_apply_selection}} (fitted with its
+#'   selection rules). It is written to a CSV in the session's temporary
+#'   directory and fitted from there, exactly as a file: every number is
+#'   written to full precision, so the fit equals the fit of the CSV the frame
+#'   was read from; a missing value is written as \code{.}; a factor as its
+#'   labels; a logical as 1/0; text, such as a subject ID \code{"007"} or
+#'   \code{"NA"}, verbatim. Every column is kept. The fit stores the written
+#'   text as \code{fit$data_source}, so \code{\link{ferx_sir}},
+#'   \code{\link{ferx_covariance}}, \code{\link{ferx_calc_npde}},
+#'   \code{\link{ferx_contrast_vpc}} and \code{\link{ferx_save_fit}} (which then always bundles
+#'   the data) keep working after the temporary file is gone. Every other
+#'   function that takes \code{data} accepts a data.frame the same way.
 #' @param method Estimation method(s). \code{NULL} (the default) uses whatever
 #'   the model file's \code{[fit_options] method} specifies, falling back to
 #'   \code{"focei"} if the model file sets none (the engine warns when it
@@ -1189,6 +1204,12 @@
 #'     \code{flag}, sorted by descending \code{|r|}. \code{NULL} when the
 #'     model declares no etas, the dataset has no usable numeric covariates,
 #'     or the data file can no longer be read from \code{data_path}.}
+#'   \item{data_source}{For a fit whose \code{data} was a data.frame: the
+#'     text of the CSV the engine read (the file at \code{data_path}, in the
+#'     session's temporary directory). The steps that re-read the data write
+#'     it back when that file is gone. Also set on a fit loaded from a
+#'     \code{.fitrx} bundle that carries its data. \code{NULL} for a fit of a
+#'     CSV path.}
 #'   \item{eigenvalues}{Numeric vector of eigenvalues of the correlation matrix
 #'     of estimated (non-fixed) parameters, sorted descending. Computed by the
 #'     Rust backend. \code{NULL} when the covariance step was not run, failed,
@@ -2045,20 +2066,15 @@ ferx_fit <- function(model, data = NULL,
     )
   }
   # ferx_data support: when data is a ferx_data object produced by
-  # ferx_apply_selection(), extract the source path and merge any stored conditions
-  # with the explicit ignore/accept/ignore_ids args.
+  # ferx_apply_selection(), fit the dataset it was selected from - its source
+  # path, or the data.frame it was built from - and merge its stored conditions
+  # with the explicit ignore/accept/ignore_ids args, so the engine applies the
+  # selection and `fit$exclusions` counts it. A ferx_data that carries neither
+  # (built before #419) is fitted as its retained rows.
   if (inherits(data, "ferx_data")) {
     fd <- data
-    data <- attr(fd, "source_path")
-    if (is.null(data)) {
-      stop(
-        "`data` is a ferx_data object built from a data.frame (no source file path). ",
-        "The Rust engine requires a CSV file path. ",
-        "Pass the original CSV file path to ferx_apply_selection() instead:\n",
-        "  sel <- ferx_apply_selection(\"path/to/data.csv\", ignore = ...)\n",
-        "  fit <- ferx_fit(model, sel)"
-      )
-    }
+    data <- attr(fd, "source_path") %||% attr(fd, "source_data") %||%
+      as.data.frame(fd)
     ignore      <- unique(c(attr(fd, "ignore"),    ignore))
     accept      <- unique(c(attr(fd, "accept"),    accept))
     ignore_ids  <- unique(c(attr(fd, "ignore_ids"), ignore_ids))
@@ -2078,6 +2094,7 @@ ferx_fit <- function(model, data = NULL,
       "(`path = ...`) to the model file."
     )
   }
+  data <- .ferx_data_arg(data)
   stopifnot(file.exists(model), file.exists(data))
   # `covariance` / `verbose` / `mu_referencing` / `sir` default to NULL, meaning
   # "use the model file's [fit_options] value" (falling back to the engine

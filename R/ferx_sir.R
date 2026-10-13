@@ -227,7 +227,7 @@ ferx_sir <- function(fit,
     stop("ferx_sir: model file not found at ", model_path)
   }
 
-  data_path <- fit$data_path
+  data_path <- .ferx_fit_data_path(fit)
   if (is.null(data_path) || is.na(data_path) || !nzchar(data_path)) {
     stop(
       "ferx_sir: fit has no recorded data_path; cannot locate the data file. ",

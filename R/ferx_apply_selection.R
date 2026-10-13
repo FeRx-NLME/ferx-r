@@ -53,6 +53,10 @@
 #'   \describe{
 #'     \item{\code{source_path}}{Character path supplied as \code{data}, or
 #'       \code{NULL} when \code{data} was a data.frame.}
+#'     \item{\code{source_data}}{The data.frame supplied as \code{data}, all
+#'       records included, or \code{NULL} when \code{data} was a path.
+#'       \code{\link{ferx_fit}} fits it with the stored conditions, as it fits
+#'       \code{source_path}.}
 #'     \item{\code{ignore}, \code{accept}, \code{ignore_ids}}{The filter
 #'       conditions used (character / character / character vectors).}
 #'     \item{\code{excluded_rows}}{A data.frame of the excluded records with
@@ -194,6 +198,9 @@ ferx_apply_selection <- function(data, ignore = NULL, accept = NULL,
     retained,
     class        = c("ferx_data", "data.frame"),
     source_path  = source_path,
+    # The whole frame a selection was made from, so ferx_fit() can hand the
+    # engine the dataset and the rules, as it does for a path (#419).
+    source_data  = if (is.null(source_path)) df,
     ignore       = ignore,
     accept       = accept,
     ignore_ids   = ignore_ids,
@@ -257,7 +264,7 @@ print.ferx_data <- function(x, n = 6L, ...) {
     message("No data-selection rules were active for this fit.")
     return(invisible(NULL))
   }
-  dp <- fit$data_path
+  dp <- .ferx_fit_data_path(fit)
   if (is.null(dp) || !nzchar(dp) || !file.exists(dp)) {
     message("Data path not available on fit object; cannot retrieve excluded records.")
     return(invisible(NULL))

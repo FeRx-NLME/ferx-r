@@ -26,7 +26,7 @@
 #'   not given), or a \code{ferx_search_space} to re-resolve.
 #' @param model Optional path to a \code{.ferx} model, or a \code{ferx_model}
 #'   object. \code{NULL} parses the space without resolving it.
-#' @param data Optional path to the dataset. Defaults to the model's
+#' @param data Optional path to the dataset, or a data.frame (see \code{\link{ferx_fit}}). Defaults to the model's
 #'   \code{[data]} block when the model declares one.
 #'
 #' @return A data frame of class \code{ferx_search_space} with one row per
@@ -75,6 +75,7 @@ ferx_search_space <- function(mfl, model = NULL, data = NULL) {
     if (is.null(data)) data <- model$data
     model <- model$model
   }
+  data <- .ferx_data_arg(data)
   if (is.null(model)) {
     if (!is.null(data)) {
       stop("'data' needs a 'model' - a space is resolved against the two together")
