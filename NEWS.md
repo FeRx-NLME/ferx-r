@@ -868,6 +868,36 @@
 
 ## Bug fixes
 
+- **`fit$estimates$estimate_natural` is filled for every free `log` /
+  `logit` theta**, also on a fit run with `covariance = FALSE` or whose
+  covariance step failed, where it used to be `NA`. The back-transform of a
+  point estimate needs no standard error; the natural-scale interval
+  (`lower_95_natural` / `upper_95_natural`) still does, and stays `NA`
+  without one ([#457](https://github.com/FeRx-NLME/ferx-r/issues/457)).
+
+- **An unknown ETA scale is `NA`, on a live fit and a loaded one alike.**
+  An ETA no `[individual_parameters]` statement classifies (e.g. one declared
+  but unused) is now `NA` in `fit$eta_param_types` and
+  `fit$estimates$scale`, where it was guessed as `"log_normal"`; when the
+  engine classified no ETA at all, a live fit leaves `eta_param_types` empty,
+  as a reloaded bundle always did. `ferx_save_fit()` writes no scale for an
+  unknown ETA, so it reloads as unknown. `print()` still shows such an ETA's
+  log-normal `CV%`, but without the `[log-normal]` tag it used to claim, as
+  ferx-core's console prints it
+  ([#447](https://github.com/FeRx-NLME/ferx-r/issues/447)).
+
+- **`ferx_runlog()` shows a held parameter's value**, marked `(FIX)`
+  (e.g. `1 (FIX)`), in the INITIAL and FINAL columns, where it printed
+  `FIXED` and the value appeared nowhere in the log. The SE and %RSE columns
+  still say `FIXED`. It now reads the FIX flags through the same helper as
+  `print()` ([#450](https://github.com/FeRx-NLME/ferx-r/issues/450)).
+
+- **`fit$residual_correlations$se` is `NA` for a `block_sigma ... FIX`
+  correlation**, with `fixed = TRUE`, where it reported the engine's `0`.
+  Live, after `ferx_covariance()` and after `ferx_load_fit()` alike, as
+  `fit$estimates` has done since #454; a `.fitrx` still carries the engine's
+  `0` ([#458](https://github.com/FeRx-NLME/ferx-r/issues/458)).
+
 - **`print()` spells a FIX THETA or SIGMA the way it spells a FIX OMEGA or
   KAPPA**: `TVKA [FIX]` with `---` in the SE and %RSE columns, and
   `ADD_ERR [FIX] ... SE = ---`, instead of `FIXED`. One print now uses one

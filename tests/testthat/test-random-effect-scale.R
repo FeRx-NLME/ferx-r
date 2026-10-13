@@ -152,9 +152,10 @@ test_that("the by-name lookup handles a skipped, a repeated and a disagreeing ET
     c("additive", "logit", "additive", "log_normal", "additive"),
     c("TVC", "TVA", "TVC2", "TVD", "TVD")
   )
-  # ETA_A: one entry. ETA_B: none, so the log-normal default and no theta.
-  # ETA_C: twice, types agree, thetas do not. ETA_D: twice, types disagree.
-  expect_identical(out$eta_param_types, c("logit", "log_normal", "additive", "custom"))
+  # ETA_A: one entry. ETA_B: none, so its scale is unknown (NA, #447) and it
+  # has no theta. ETA_C: twice, types agree, thetas do not. ETA_D: twice,
+  # types disagree.
+  expect_identical(out$eta_param_types, c("logit", NA, "additive", "custom"))
   expect_identical(out$eta_linked_theta, c("TVA", "", "", "TVD"))
   # No classification at all (an old engine, a skeleton result): empty, so the
   # R-side default applies exactly as before.

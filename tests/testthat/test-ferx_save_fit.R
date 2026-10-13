@@ -927,23 +927,39 @@ test_that("FIX flags of an in-memory fit survive a .fitrx round-trip (#436)", {
   expect_identical(fit$sigma_fixed, c(FALSE, TRUE))
   expect_identical(fit$kappa_fixed, c(TRUE, FALSE))
 
-  # ferx_runlog() reads the same flags: FIXED on the fixed rows only.
-  log_lines <- strsplit(ferx_runlog(fit, verbose = FALSE), "\n", fixed = TRUE)[[1]]
-  row_of <- function(nm) grep(paste0("^\\s*", nm, "\\s"), log_lines, value = TRUE)[1]
-  for (nm in c("TVKA", "ETA_V", "ADD_ERR")) {
-    expect_match(row_of(nm), "FIXED", fixed = TRUE, label = nm)
+  # ferx_runlog() reads the same flags: the held value, marked (FIX), in the
+  # INITIAL and FINAL columns of the fixed rows only (#450). No covariance
+  # step, so there is no SE column to say FIXED.
+  runlog_rows <- function(f) {
+    log_lines <- strsplit(ferx_runlog(f, verbose = FALSE), "\n", fixed = TRUE)[[1]]
+    function(nm) grep(paste0("^\\s*", nm, "\\s"), log_lines, value = TRUE)[1]
   }
-  # expect_no_match(NA, ...) passes, so a missing row must fail on its own.
-  for (nm in c("TVCL", "ETA_CL", "PROP_ERR")) {
-    expect_false(is.na(row_of(nm)), label = paste(nm, "row missing"))
-    expect_no_match(row_of(nm), "FIXED", fixed = TRUE, label = nm)
+  check_runlog <- function(f, what) {
+    row_of <- runlog_rows(f)
+    held <- c(TVKA = f$theta[["TVKA"]], ETA_V = f$omega[2, 2], ADD_ERR = f$sigma[[2]])
+    esc <- function(s) gsub("([.()+])", "\\\\\\1", s)
+    for (nm in names(held)) {
+      # INITIAL and FINAL both read "<value> (FIX)": the value was held.
+      cell <- esc(paste(sprintf("%.6g", held[[nm]]), "(FIX)"))
+      expect_match(row_of(nm), sprintf("^\\s*%s\\s+%s\\s+%s\\s*$", nm, cell, cell),
+                   label = paste(what, nm))
+      expect_no_match(row_of(nm), "FIXED", fixed = TRUE, label = paste(what, nm))
+    }
+    # expect_no_match(NA, ...) passes, so a missing row must fail on its own.
+    for (nm in c("TVCL", "ETA_CL", "PROP_ERR")) {
+      expect_false(is.na(row_of(nm)), label = paste(what, nm, "row missing"))
+      expect_no_match(row_of(nm), "FIX", fixed = TRUE, label = paste(what, nm))
+    }
   }
+  expect_identical(fit$theta[["TVKA"]], 1)
+  check_runlog(fit, "live")
 
   ferx_save_fit(fit, path)
   loaded <- ferx_load_fit(path)
   for (f in c("theta_fixed", "omega_fixed", "sigma_fixed", "kappa_fixed")) {
     expect_identical(loaded[[f]], fit[[f]], label = paste0("loaded$", f))
   }
+  check_runlog(loaded, "loaded")
 })
 test_that(".fitrx_build_iov_wire uses empty list when shrinkage_kappa_by_occ is absent", {
   fake_iov_fit <- list(

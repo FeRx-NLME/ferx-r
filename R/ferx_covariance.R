@@ -329,8 +329,10 @@ ferx_covariance <- function(fit,
   # parameter, not just theta/omega/sigma.
   if (n_rho > 0L && is.data.frame(fit$residual_correlations)) {
     se_rho <- as.numeric(raw$se_residual_correlation %||% numeric())
-    fit$residual_correlations$se <-
-      if (length(se_rho) == n_rho) se_rho else rep(NA_real_, n_rho)
+    fit$residual_correlations$se <- .ferx_residual_corr_se(
+      if (length(se_rho) == n_rho) se_rho else rep(NA_real_, n_rho),
+      fit$residual_correlations$fixed
+    )
   }
 
   # se_kappa: one SE per kappa, the diagonal, block_kappa included (ferx-core
