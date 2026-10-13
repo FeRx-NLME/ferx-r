@@ -300,6 +300,38 @@ test_that("a ferx_data subset or edited after selection is fitted as the rows it
                     message = "rows changed")
 })
 
+test_that("renumbered row names are not an edit; reordered rows are (review r2 #1)", {
+  df <- data.frame(ID = rep(1:3, each = 2), TIME = rep(0:1, 3),
+                   DV = c(0.5, 2, 3, 0.4, 5, 6))
+  sel <- ferx_apply_selection(df, ignore = "DV < 1")
+  expect_identical(rownames(sel), c("2", "3", "5", "6"))
+  rows <- getFromNamespace(".ferx_selection_rows", "ferx")
+  selected <- attr(sel, "retained_rows")
+  # What dplyr does on any verb, filter(TRUE) included: rows 1..n.
+  renumbered <- sel
+  rownames(renumbered) <- NULL
+  expect_identical(rows(renumbered), selected)
+  expect_false(identical(rows(sel[c(2, 1, 3, 4), ]), selected))
+  expect_false(identical(rows(sel[-1, ]), selected))
+})
+
+test_that("a renumbered selection is fitted from its source with its rules, without the warning (review r2 #1)", {
+  skip_on_cran()
+  ex <- ferx_example("warfarin_data_selection")
+  df <- utils::read.csv(ex$data, stringsAsFactors = FALSE, check.names = FALSE)
+  sel <- ferx_apply_selection(df, ignore = "DV < 1.0")
+  renumbered <- sel
+  rownames(renumbered) <- NULL
+  fit_rows <- function(data) {
+    ferx_fit(ex$model, data, verbose = FALSE, threads = 1L, covariance = FALSE,
+             settings = list(maxiter = 1L))
+  }
+  expect_no_warning(fit <- fit_rows(renumbered), message = "rows changed")
+  # The source and its rules, so the rule's exclusions are counted.
+  expect_identical(fit$exclusions, fit_rows(sel)$exclusions)
+  expect_gt(fit$exclusions$n_obs_excluded, 0)
+})
+
 test_that("duplicate column names are refused (review r1 #6)", {
   expect_error(.data_arg(data.frame(ID = 1, a = 1, a = 2, check.names = FALSE)),
                "more than one column named `a`")

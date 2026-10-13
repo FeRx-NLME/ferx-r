@@ -297,12 +297,16 @@ print.ferx_data <- function(x, n = 6L, ...) {
   )
 }
 
-# A ferx_data's rows as a plain data.frame - columns, names and row names,
-# none of the selection attributes. ferx_fit() compares it with
-# `retained_rows`, and fits it when the two differ.
+# A ferx_data's rows as a plain data.frame - its columns and their names,
+# none of the selection attributes, and row names reset to 1..n. ferx_fit()
+# compares it with `retained_rows`, and fits it when the two differ. Row names
+# are not data the engine reads, and dplyr renumbers them on any verb (a
+# no-op `filter(TRUE)` turns 2, 3, 4 into 1, 2, 3), so they must not count as
+# an edit; a change in the rows' order or content still does.
 .ferx_selection_rows <- function(x) {
-  a <- attributes(x)
-  attributes(x) <- list(names = a$names, row.names = a$row.names,
+  n <- .row_names_info(x, 2L)
+  attributes(x) <- list(names = attr(x, "names"),
+                        row.names = .set_row_names(n),
                         class = "data.frame")
   x
 }
