@@ -540,8 +540,36 @@ test_that("an ETA the engine classified nowhere has scale NA, live and reloaded 
   for (f in list(live = fit, loaded = loaded, again = again)) {
     expect_identical(f$eta_param_types, character())
     expect_identical(f$estimates["ETA_CL", "scale"], NA_character_)
-    # print() keeps its own log-normal default for an unknown scale.
+    # print() keeps its own log-normal CV% for an unknown scale, with no
+    # scale tag: ferx-core's console says nothing it does not know.
+    row <- grep("^\\s*ETA_CL\\s", capture.output(print(f)), value = TRUE)
+    expect_match(row, "(CV% = ", fixed = TRUE)
+    expect_no_match(row, "[log-normal]", fixed = TRUE)
+  }
+})
+
+test_that("an unused ETA next to a classified one has scale NA, live and reloaded (#447)", {
+  skip_on_cran()
+  # ETA_CL enters CL log-normally; ETA_V is declared but no statement uses it,
+  # so the engine's eta_param_info holds ETA_CL only.
+  fit <- fit_temp_model(list(
+    parameters = c("  theta TVCL(0.134, 0.001, 10.0)", "  theta TVV(8.1, 0.1, 500.0)",
+                   "  theta TVKA(1.0, 0.01, 50.0)", "  omega ETA_CL ~ 0.07",
+                   "  omega ETA_V ~ 0.02", "  sigma PROP_ERR ~ 0.01 (sd)"),
+    individual = c("  CL = TVCL * exp(ETA_CL)", "  V = TVV", "  KA = TVKA")
+  ))
+  # The bundle records no scale for ETA_V.
+  wire <- .fitrx_build_eta_param_info(fit)
+  expect_identical(vapply(wire, `[[`, "", "eta_name"), "ETA_CL")
+  loaded <- reload(fit)
+  again <- reload(loaded)
+  for (f in list(live = fit, loaded = loaded, again = again)) {
+    expect_identical(unname(f$eta_param_types), c("log_normal", NA))
+    expect_identical(f$estimates[c("ETA_CL", "ETA_V"), "scale"], c("log_normal", NA))
     out <- capture.output(print(f))
-    expect_match(grep("^\\s*ETA_CL\\s", out, value = TRUE), "(CV% = ", fixed = TRUE)
+    expect_match(grep("^\\s*ETA_CL\\s", out, value = TRUE), "[log-normal]", fixed = TRUE)
+    row_v <- grep("^\\s*ETA_V\\s", out, value = TRUE)
+    expect_match(row_v, "(CV% = ", fixed = TRUE)
+    expect_no_match(row_v, "[log-normal]", fixed = TRUE)
   }
 })

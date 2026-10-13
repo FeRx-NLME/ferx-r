@@ -1303,14 +1303,15 @@
 #'     \code{"additive"}, \code{"logit"}, \code{"logit_probability"} or
 #'     \code{"custom"}. Each ETA takes the engine's classification of its own
 #'     statements, matched by name. An ETA classified differently in two
-#'     statements is \code{"custom"}, and one left unclassified while others
-#'     are classified is \code{"log_normal"}. \code{print()} shows a
+#'     statements is \code{"custom"}, and one no statement classifies is
+#'     \code{NA}: its scale is unknown. \code{print()} shows a
 #'     \code{CV\%} for log-normal, an SD for additive and logit, and neither
 #'     for custom. Empty when the engine classified no ETA at all, and for a
-#'     fit loaded from a \code{.fitrx} saved before ferx-core #1643; such a
-#'     fit, or one with the field removed, prints the log-normal \code{CV\%}
-#'     for every ETA with no scale tag, and its \code{estimates$scale} is
-#'     \code{NA}. \code{print()} refuses a vector of any other length than
+#'     fit loaded from a \code{.fitrx} saved before ferx-core #1643. An
+#'     unknown ETA (\code{NA}, or every ETA of an empty vector or a fit with
+#'     the field removed) prints the log-normal \code{CV\%} with no scale
+#'     tag, and its \code{estimates$scale} is \code{NA}, on a live fit and a
+#'     loaded one alike. \code{print()} refuses a vector of any other length than
 #'     \code{nrow(omega)} with a \code{ferx_fit_field_error}.}
 #'   \item{eta_linked_theta}{Character vector parallel to \code{eta_names}: the
 #'     typical-value theta each ETA is attached to, or \code{""} when there is

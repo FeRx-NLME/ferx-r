@@ -918,7 +918,7 @@
   # same "unknown" a loaded bundle without `eta_param_info` carries: NA in
   # `fit$estimates$scale` on both paths, and print()'s own log-normal default
   # (#447). A wrong-length vector cannot come from the glue, which emits one
-  # entry per ETA or none.
+  # entry per ETA (NA for one no statement classifies) or none.
   if (is.null(result$eta_param_types)) {
     result$eta_param_types <- character()
   }

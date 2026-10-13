@@ -5147,15 +5147,16 @@ fn eta_param_type_str(t: ferx_core::types::EtaParamType) -> &'static str {
 /// [individual_parameters] statement order, not `eta_names` order: it skips an
 /// ETA no statement classifies and holds one entry per parameter an ETA
 /// enters. Entries that all agree give that type (that theta); a disagreement
-/// gives `"custom"` (no theta); no entry gives `"log_normal"` (no theta), the
-/// CV% every row printed before - the same rule as ferx-core's console. An
-/// empty list gives empty vectors, so R's own default applies unchanged.
+/// gives `"custom"` (no theta); no entry gives `None`, NA in R (no theta):
+/// the scale is unknown, as ferx-core's own `eta_type()` says, and the
+/// console prints that row's log-normal CV% with no tag (#447). An empty
+/// list gives empty vectors, the same "unknown" for every ETA.
 fn eta_info_by_name(
     eta_names: &[String],
     info_names: &[String],
     info_types: &[String],
     info_linked: &[String],
-) -> (Vec<String>, Vec<String>) {
+) -> (Vec<Option<String>>, Vec<String>) {
     if info_names.is_empty() {
         return (Vec::new(), Vec::new());
     }
@@ -5164,7 +5165,7 @@ fn eta_info_by_name(
         .map(|name| {
             let mut hits = (0..info_names.len()).filter(|&k| &info_names[k] == name);
             let Some(first) = hits.next() else {
-                return ("log_normal".to_string(), String::new());
+                return (None, String::new());
             };
             let (mut ty, mut linked) = (info_types[first].clone(), info_linked[first].clone());
             for k in hits {
@@ -5175,7 +5176,7 @@ fn eta_info_by_name(
                     linked = String::new();
                 }
             }
-            (ty, linked)
+            (Some(ty), linked)
         })
         .unzip()
 }
@@ -5189,8 +5190,9 @@ fn eta_info_by_name(
 /// @param eta_names Character vector, the fit's ETA names.
 /// @param info_names,info_types,info_linked Parallel character vectors, one
 ///   element per `eta_param_info` entry (`""` for no linked theta).
-/// @return List with `eta_param_types` and `eta_linked_theta`, parallel to
-///   `eta_names`, or both empty when `info_names` is.
+/// @return List with `eta_param_types` (NA for an ETA with no entry) and
+///   `eta_linked_theta`, parallel to `eta_names`, or both empty when
+///   `info_names` is.
 /// @export
 #[extendr]
 fn ferx_rust_eta_info_by_name(

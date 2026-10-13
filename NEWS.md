@@ -875,11 +875,15 @@
   (`lower_95_natural` / `upper_95_natural`) still does, and stays `NA`
   without one ([#457](https://github.com/FeRx-NLME/ferx-r/issues/457)).
 
-- **An unknown ETA scale is `NA` in `fit$estimates$scale` on a live fit, as
-  on a loaded one.** When the engine classified no ETA, a live fit filled
-  `eta_param_types` with `"log_normal"` and a reloaded bundle left it empty;
-  both now leave it empty, and a save / load round trip keeps it empty.
-  `print()` still shows such an ETA's log-normal `CV%`
+- **An unknown ETA scale is `NA`, on a live fit and a loaded one alike.**
+  An ETA no `[individual_parameters]` statement classifies (e.g. one declared
+  but unused) is now `NA` in `fit$eta_param_types` and
+  `fit$estimates$scale`, where it was guessed as `"log_normal"`; when the
+  engine classified no ETA at all, a live fit leaves `eta_param_types` empty,
+  as a reloaded bundle always did. `ferx_save_fit()` writes no scale for an
+  unknown ETA, so it reloads as unknown. `print()` still shows such an ETA's
+  log-normal `CV%`, but without the `[log-normal]` tag it used to claim, as
+  ferx-core's console prints it
   ([#447](https://github.com/FeRx-NLME/ferx-r/issues/447)).
 
 - **`ferx_runlog()` shows a held parameter's value**, marked `(FIX)`

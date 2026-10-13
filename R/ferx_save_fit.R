@@ -987,7 +987,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   if (length(eta_names) == 0L) return(list())
   types <- as.character(fit$eta_param_types %||% rep("custom", length(eta_names)))
   linked <- as.character(fit$eta_linked_theta %||% rep("", length(eta_names)))
-  mapply(
+  entries <- mapply(
     function(name, type, link) {
       list(
         eta_name = name,
@@ -999,6 +999,10 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
     eta_names, types, linked,
     SIMPLIFY = FALSE, USE.NAMES = FALSE
   )
+  # An ETA whose scale is unknown (NA, #447) gets no entry, as the engine
+  # writes none for an ETA no statement classifies, so it reloads as NA
+  # rather than as a scale nobody recorded.
+  Filter(function(e) !is.na(e$param_type), entries)
 }
 
 # The `bic_inputs` wire object: the seven counts ferx-core's `BicInputs`
