@@ -957,8 +957,10 @@
 
   # `result$model_structure` is now populated by the Rust engine in
   # `fit_result_to_list()` from the parsed CompiledModel (ferx-core#49), so it
-  # reflects exactly what ferx-core ran. The R-side `.ferx_parse_structure()`
-  # remains for the pre-fit `ferx_model_inspect(path)` workflow only.
+  # reflects exactly what ferx-core ran. `.ferx_parse_structure()` serves the
+  # pre-fit `ferx_model_inspect(path)` workflow from the same engine list
+  # (`ferx_rust_model_structure()`), with a regex fallback for a file the
+  # engine refuses.
 
   # Store the requested gradient method, and the method the engine actually
   # resolved to. The engine reports `gradient_method_inner` as one of

@@ -231,9 +231,29 @@ ferx_section_headers <- function(lines) {
 
 # Parse a .ferx file and return a named list describing model structure.
 # Fields: theta_names (pop param names), model_type (label or NULL),
-#         iiv, iov, residual.
-# Used by ferx_model_inspect() (pre-fit) and attached to ferx_fit() results.
+#         iiv, iov, iov_weights, residual.
+# Used by ferx_model_inspect() (pre-fit). The engine parses the file and
+# returns the list a fit carries as `model_structure`, so the pre-fit labels
+# are the fit's (ferx-r #573 review). A file the engine refuses - a
+# half-written model - falls back to the regex reader below, so inspect still
+# describes it.
 .ferx_parse_structure <- function(path) {
+  s <- tryCatch(ferx_rust_model_structure(normalizePath(path)),
+                error = function(e) NULL)
+  if (is.null(s)) return(.ferx_parse_structure_regex(path))
+  list(
+    theta_names = as.character(s$theta_names),
+    model_type  = s$model_type,
+    iiv         = as.character(s$iiv),
+    iov         = as.character(s$iov),
+    iov_weights = as.character(s$iov_weights),
+    residual    = s$residual
+  )
+}
+
+# Best-effort regex reading of a .ferx file the engine cannot parse; the same
+# fields as .ferx_parse_structure().
+.ferx_parse_structure_regex <- function(path) {
   b <- .ferx_extract_blocks(path)
 
   # Population (theta) parameter names from [parameters].
@@ -364,16 +384,6 @@ ferx_section_headers <- function(lines) {
       t1
     }
   }
-  # Within-group residual correlation (ferx-core #1081), `correlation
-  # cs(RHO) by ARM` or `... by (A, B)`: appended as the engine's label does.
-  corr_re <- "^\\s*correlation\\s+(\\w+)\\s*\\(\\s*(\\w+)\\s*\\)\\s+by\\s+(.*?)\\s*(#.*)?$"
-  corr_line <- grep(corr_re, err_lines, value = TRUE, ignore.case = TRUE, perl = TRUE)
-  if (length(corr_line) > 0L && residual != "unknown") {
-    m <- regmatches(corr_line[1L], regexec(corr_re, corr_line[1L], ignore.case = TRUE, perl = TRUE))[[1L]]
-    by <- gsub("\\s*,\\s*", ", ", trimws(m[4L]))
-    residual <- sprintf("%s, correlation %s(%s) by %s", residual, tolower(m[2L]), m[3L], by)
-  }
-
   list(
     theta_names = thetas,
     model_type  = model_type,

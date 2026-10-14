@@ -337,3 +337,32 @@ test_that(".ferx_parse_structure returns 'unknown' when error_model block is abs
   s <- ferx:::.ferx_parse_structure(path)
   expect_equal(s$residual, "unknown")
 })
+test_that(".ferx_parse_structure falls back to the regex reader for a file the engine refuses", {
+  # No [individual_parameters]: CL/V/KA are undefined, so the engine refuses
+  # the file, and inspect still describes it (ferx-r #573 review).
+  path <- write_ferx(c(
+    "[parameters]",
+    "  theta TVCL(0.2)",
+    "  omega ETA_CL ~ 0.1",
+    "  sigma PROP_ERR ~ 0.02",
+    "[structural_model]",
+    "  pk one_cpt_oral(cl=CL, v=V, ka=KA)",
+    "[error_model]",
+    "  DV ~ proportional(PROP_ERR)"
+  ))
+  on.exit(unlink(path))
+
+  expect_error(ferx:::ferx_rust_model_structure(normalizePath(path)))
+  s <- ferx:::.ferx_parse_structure(path)
+  expect_identical(s, ferx:::.ferx_parse_structure_regex(path))
+  expect_identical(s$theta_names, "TVCL")
+  expect_identical(s$residual, "proportional")
+})
+test_that(".ferx_parse_structure is the engine's model_structure for a file it parses", {
+  path <- ferx_example("warfarin")$model
+  eng <- ferx:::ferx_rust_model_structure(normalizePath(path))
+  s <- ferx:::.ferx_parse_structure(path)
+  expect_identical(s$theta_names, as.character(eng$theta_names))
+  expect_identical(s$model_type, eng$model_type)
+  expect_identical(s$residual, eng$residual)
+})

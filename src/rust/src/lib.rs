@@ -5385,6 +5385,27 @@ fn ferx_rust_model_column_map(model_path: &str) -> List {
     })
 }
 
+/// Return a model file's structure as the engine parses it, before any fit.
+///
+/// Parses `model_path` and returns `model_structure_list()`, the list a fit
+/// carries as `model_structure`, so `ferx_model_inspect()` reports the labels
+/// the fit will (ferx-r #573 review). The residual label in particular names
+/// a `correlation` line only when the engine keeps it.
+///
+/// @param model_path Path to .ferx model file
+/// @return Named list: `theta_names`, `model_type`, `iiv`, `iov`,
+///   `iov_weights`, `residual`
+/// @export
+#[extendr]
+fn ferx_rust_model_structure(model_path: &str) -> Robj {
+    entry(move || {
+        match ferx_core::parser::model_parser::parse_full_model_file(Path::new(model_path)) {
+            Ok(p) => Ok(model_structure_list(&p.model)),
+            Err(e) => Err(format!("Error parsing model: {e}")),
+        }
+    })
+}
+
 /// Derive NCA-based starting values from the data without running a fit.
 ///
 /// @param model_path Path to .ferx model file
@@ -11434,6 +11455,7 @@ extendr_module! {
     fn ferx_rust_validate_model;
     fn ferx_rust_model_data_path;
     fn ferx_rust_model_column_map;
+    fn ferx_rust_model_structure;
     fn ferx_rust_inits_from_nca;
     fn ferx_rust_prepare_frem;
     fn ferx_rust_bootstrap;
