@@ -695,10 +695,10 @@
     `[initial_conditions]` now parses**
     ([ferx-core #1904](https://github.com/FeRx-NLME/ferx-core/issues/1904)).
 
-- **`ferx_model_inspect()` reads a model's structure from the engine**:
-  the theta, IIV, IOV and residual labels it shows before a fit are the
-  ones the fit reports, from the same parse. A file the engine refuses
-  is still described, by the old best-effort reader
+- **`ferx_model_inspect()` and `print()` of a `ferx_model` read a model's
+  structure from the engine**: the theta, IIV, IOV and residual labels they
+  show before a fit are the ones the fit reports, from the same parse. A
+  file the engine refuses is still described, by the old best-effort reader
   ([#573](https://github.com/FeRx-NLME/ferx-r/pull/573)).
 
 - **A data.frame is accepted wherever `data` is**: `ferx_fit()`,
