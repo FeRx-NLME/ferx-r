@@ -2,6 +2,63 @@
 
 ## Breaking changes
 
+- **ferx now builds against ferx-core `e9156c98`**, up from `6eb1a4d2`.
+  These engine changes reach R; the first four move objectives and
+  estimates on the data they describe:
+
+  - **An `EVID=2` / `MDV=1` record now starts the subject's clock, co-timed
+    records apply in file order, and under IOV such a row runs under its own
+    `OCC`; an occasion only such rows carry gets its own kappa.** Objectives
+    change on such data, matching NONMEM, and a seeded `ferx_simulate()`
+    makes one extra kappa draw per such occasion
+    ([ferx-core #1809](https://github.com/FeRx-NLME/ferx-core/issues/1809),
+    [#1810](https://github.com/FeRx-NLME/ferx-core/issues/1810),
+    [#1876](https://github.com/FeRx-NLME/ferx-core/issues/1876)).
+  - **A derived `iov_occasion = dose | time(...)` rule labels `EVID=3`/`4`
+    reset rows**, so an `init(...)` re-seed at a reset runs under that
+    occasion's kappa
+    ([ferx-core #1944](https://github.com/FeRx-NLME/ferx-core/issues/1944)).
+  - **A `TIME`-keyed level block keys its cells on the `TIME` as written**,
+    with no spurious cell such as `TIME=1.9999999999999998` next to
+    `TIME=2`, which changed the fit
+    ([ferx-core #1959](https://github.com/FeRx-NLME/ferx-core/issues/1959),
+    [#1796](https://github.com/FeRx-NLME/ferx-core/issues/1796)).
+  - **A fit whose every outer trial is rejected by the EBE convergence guard
+    is reported as not converged**, with a `W_NO_FEASIBLE_EVAL` warning,
+    instead of converged at the midpoint of its bounds
+    ([ferx-core #1617](https://github.com/FeRx-NLME/ferx-core/issues/1617)).
+  - **Within-group residual correlation**: `correlation cs(RHO) by COL` or
+    `correlation ar1(RHO) by COL` in `[error_model]` correlates the residuals
+    of one subject's rows that share `COL`, with `RHO` an ordinary theta
+    (FOCE/FOCEI); `print()`'s Residual line names it
+    ([ferx-core #1081](https://github.com/FeRx-NLME/ferx-core/issues/1081)).
+  - **A level block with no intercept, or read through a difference of
+    random effects, is no longer refused** where it is identified
+    ([ferx-core #1840](https://github.com/FeRx-NLME/ferx-core/issues/1840),
+    [#1852](https://github.com/FeRx-NLME/ferx-core/issues/1852)).
+  - **Kappa shrinkage counts only the occasions an observation informs**; a
+    per-occasion slot no observation informs is `NaN` in
+    `fit$shrinkage_kappa_by_occ`, is left out of `print()`, and survives
+    `ferx_save_fit()` / `ferx_load_fit()`
+    ([ferx-core #1911](https://github.com/FeRx-NLME/ferx-core/issues/1911)).
+  - **An evaluation-only (`maxiter = 0`) IOV mixture fit reports the MIXEST
+    class's kappa estimates**, so its IPRED, residuals and kappa shrinkage
+    are no longer computed at kappa = 0
+    ([ferx-core #1932](https://github.com/FeRx-NLME/ferx-core/issues/1932)).
+  - **A model can read its `iov_column` or a record column in
+    `[individual_parameters]` without a `[covariates]` block**
+    ([ferx-core #1936](https://github.com/FeRx-NLME/ferx-core/issues/1936)).
+  - **The engine's parameter table names OMEGA/SIGMA rows and reports their
+    standard errors**
+    ([ferx-core #1748](https://github.com/FeRx-NLME/ferx-core/issues/1748)).
+  - **The analytic log-normal fallback gradient and the NCA start values
+    resolve a PK slot through its owning parameter**, so an intermediate
+    declared above `CL` no longer takes its place
+    ([ferx-core #1899](https://github.com/FeRx-NLME/ferx-core/issues/1899)).
+  - **An all-arm `if`/`else` individual parameter read only by an analytical
+    `[initial_conditions]` now parses**
+    ([ferx-core #1904](https://github.com/FeRx-NLME/ferx-core/issues/1904)).
+
 - **ferx now builds against ferx-core `6eb1a4d2`**, up from `deaa92f6`.
   These engine changes reach R:
 

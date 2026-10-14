@@ -39,6 +39,12 @@
 
 .fitrx_unwrap_nullable_num_vec <- function(x) .fitrx_unwrap_nullable_vec(x, NA_real_)
 
+# A float vector the engine writes with non-finite entries as `null` (its
+# `serde_nan` adapter), such as kappa shrinkage, whose slot reads NaN when no
+# observation informs it (ferx-core #1911). `null` comes back as NaN, as the
+# engine reads it, so a round trip returns the live fit's value.
+.fitrx_unwrap_nan_num_vec <- function(x) .fitrx_unwrap_nullable_vec(x, NaN)
+
 .fitrx_opt_int <- function(x) {
   if (is.null(x)) return(NULL)
   if (length(x) == 0L) return(NULL)

@@ -662,6 +662,53 @@ test_that("print.ferx_fit shows per-occasion shrinkage table for IOV fit", {
   expect_true(any(grepl("Shrinkage by occasion", out, fixed = TRUE)))
   expect_true(any(grepl("Occasion", out, fixed = TRUE)))
 })
+# ferx-core #1911: an occasion that only a trailing EVID=2 row carries has no
+# observation to inform its kappa, so its shrinkage slot reads NaN. print()
+# leaves it out rather than printing "NaN%", and a .fitrx round trip, which
+# writes NaN as JSON null, reads it back as NaN.
+.iov_uninformed_occ_fit <- function() {
+  ex <- ferx_example("warfarin_iov")
+  d <- utils::read.csv(ex$data, na.strings = ".")
+  new_occ <- max(d$OCC) + 1L
+  tail_rows <- do.call(rbind, lapply(split(d, d$ID), function(s) {
+    r <- s[nrow(s), ]
+    r$TIME <- r$TIME + 24
+    r$DV <- NA
+    r$EVID <- 2L
+    r$AMT <- NA
+    r$MDV <- 1L
+    r$OCC <- new_occ
+    r
+  }))
+  d2 <- rbind(d, tail_rows)
+  d2 <- d2[order(d2$ID, d2$TIME), ]
+  list(fit = ferx_fit(ex$model, d2, covariance = FALSE, verbose = FALSE),
+       occ = new_occ)
+}
+test_that("print.ferx_fit leaves out a per-occasion kappa shrinkage no observation informs", {
+  skip_on_cran()
+  case <- .iov_uninformed_occ_fit()
+  fit <- case$fit
+  df <- fit$shrinkage_kappa_by_occ
+  expect_s3_class(df, "data.frame")
+  expect_true(case$occ %in% df$occ)
+  expect_true(is.nan(df$KAPPA_CL[df$occ == case$occ]))
+  expect_true(all(is.finite(df$KAPPA_CL[df$occ != case$occ])))
+  expect_true(is.finite(fit$shrinkage_kappa[[1L]]))
+
+  out <- capture.output(suppressWarnings(print(fit)))
+  expect_true(any(grepl("Shrinkage by occasion", out, fixed = TRUE)))
+  expect_false(any(grepl("NaN", out, fixed = TRUE)))
+  expect_false(any(grepl(sprintf("Occasion %d:", case$occ), out, fixed = TRUE)))
+  expect_true(any(grepl("Occasion 1: KAPPA_CL", out, fixed = TRUE)))
+
+  path <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(path), add = TRUE)
+  ferx_save_fit(fit, path)
+  back <- ferx_load_fit(path)
+  expect_identical(back$shrinkage_kappa_by_occ, fit$shrinkage_kappa_by_occ)
+  expect_identical(back$shrinkage_kappa, fit$shrinkage_kappa)
+})
 test_that("SAEM with n_leapfrog > 0 uses HMC proposals on the AD build", {
   skip_if(
     !isTRUE(ferx_rust_autodiff_enabled()),

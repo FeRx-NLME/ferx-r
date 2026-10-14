@@ -3206,6 +3206,28 @@ fn error_model_to_string(em: ErrorModel) -> &'static str {
 // label so the fit object's `model_structure$residual` survives a `.fitrx`
 // round-trip with the LTBS distinction intact.
 fn residual_label(model: &CompiledModel) -> String {
+    let base = residual_error_label(model);
+    // Within-group residual correlation (ferx-core #1081): one `correlation`
+    // line per model, appended so print's Residual line names it and its rho.
+    match &model.residual_serial {
+        Some(rs) => {
+            let rho = model
+                .theta_names
+                .get(rs.rho_theta)
+                .map(String::as_str)
+                .unwrap_or("?");
+            let by = if rs.by.len() == 1 {
+                rs.by[0].clone()
+            } else {
+                format!("({})", rs.by.join(", "))
+            };
+            format!("{base}, correlation {}({rho}) by {by}", rs.kind.keyword())
+        }
+        None => base,
+    }
+}
+
+fn residual_error_label(model: &CompiledModel) -> String {
     if model.log_transform {
         // LTBS (`log(DV) ~ additive` / `DV ~ log_additive`): additive error on
         // the log scale. The engine rejects LTBS with per-CMT, so this is always
