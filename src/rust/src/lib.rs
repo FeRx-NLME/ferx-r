@@ -3206,6 +3206,28 @@ fn error_model_to_string(em: ErrorModel) -> &'static str {
 // label so the fit object's `model_structure$residual` survives a `.fitrx`
 // round-trip with the LTBS distinction intact.
 fn residual_label(model: &CompiledModel) -> String {
+    let base = residual_error_label(model);
+    // Within-group residual correlation (ferx-core #1081): one `correlation`
+    // line per model, appended so print's Residual line names it and its rho.
+    match &model.residual_serial {
+        Some(rs) => {
+            let rho = model
+                .theta_names
+                .get(rs.rho_theta)
+                .map(String::as_str)
+                .unwrap_or("?");
+            let by = if rs.by.len() == 1 {
+                rs.by[0].clone()
+            } else {
+                format!("({})", rs.by.join(", "))
+            };
+            format!("{base}, correlation {}({rho}) by {by}", rs.kind.keyword())
+        }
+        None => base,
+    }
+}
+
+fn residual_error_label(model: &CompiledModel) -> String {
     if model.log_transform {
         // LTBS (`log(DV) ~ additive` / `DV ~ log_additive`): additive error on
         // the log scale. The engine rejects LTBS with per-CMT, so this is always
@@ -5360,6 +5382,27 @@ fn ferx_rust_model_column_map(model_path: &str) -> List {
         let (target, actual): (Vec<String>, Vec<String>) =
             parsed.column_map.iter().cloned().unzip();
         Ok(list!(target = target, actual = actual))
+    })
+}
+
+/// Return a model file's structure as the engine parses it, before any fit.
+///
+/// Parses `model_path` and returns `model_structure_list()`, the list a fit
+/// carries as `model_structure`, so `ferx_model_inspect()` reports the labels
+/// the fit will (ferx-r #573 review). The residual label in particular names
+/// a `correlation` line only when the engine keeps it.
+///
+/// @param model_path Path to .ferx model file
+/// @return Named list: `theta_names`, `model_type`, `iiv`, `iov`,
+///   `iov_weights`, `residual`
+/// @export
+#[extendr]
+fn ferx_rust_model_structure(model_path: &str) -> Robj {
+    entry(move || {
+        match ferx_core::parser::model_parser::parse_full_model_file(Path::new(model_path)) {
+            Ok(p) => Ok(model_structure_list(&p.model)),
+            Err(e) => Err(format!("Error parsing model: {e}")),
+        }
     })
 }
 
@@ -11412,6 +11455,7 @@ extendr_module! {
     fn ferx_rust_validate_model;
     fn ferx_rust_model_data_path;
     fn ferx_rust_model_column_map;
+    fn ferx_rust_model_structure;
     fn ferx_rust_inits_from_nca;
     fn ferx_rust_prepare_frem;
     fn ferx_rust_bootstrap;

@@ -470,13 +470,16 @@ ferx_load_fit <- function(path) {
     out$kappa_names <- unlist(w$iov$kappa_names %||% list(), use.names = FALSE)
     out$kappa_fixed <- as.logical(unlist(w$iov$kappa_fixed %||% list(), use.names = FALSE))
     out$se_kappa <- .fitrx_unwrap_opt_num_vec(w$iov$se_kappa)
-    out$shrinkage_kappa <- as.numeric(unlist(w$iov$shrinkage_kappa %||% list(), use.names = FALSE))
+    out$shrinkage_kappa <- .fitrx_unwrap_nan_num_vec(w$iov$shrinkage_kappa) %||% numeric()
+    # Named and typed as the live fit's, so a round trip is identical().
+    if (length(out$shrinkage_kappa) == length(out$kappa_names)) {
+      names(out$shrinkage_kappa) <- out$kappa_names
+    }
     raw_by_occ <- w$iov$shrinkage_kappa_by_occ
     if (!is.null(raw_by_occ) && length(raw_by_occ) > 0L) {
       kn <- out$kappa_names
-      occ_col <- seq_along(raw_by_occ)
-      kappa_mat <- do.call(rbind, lapply(raw_by_occ, as.numeric))
-      df_by_occ <- as.data.frame(cbind(occ = occ_col, kappa_mat))
+      kappa_mat <- do.call(rbind, lapply(raw_by_occ, .fitrx_unwrap_nan_num_vec))
+      df_by_occ <- data.frame(occ = seq_along(raw_by_occ), kappa_mat)
       colnames(df_by_occ) <- c("occ", kn)
       out$shrinkage_kappa_by_occ <- df_by_occ
     } else {

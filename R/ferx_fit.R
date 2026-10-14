@@ -1258,12 +1258,14 @@
 #'     \code{\link{ferx_model_inspect}} to view this before or after
 #'     fitting.}
 #'   \item{shrinkage_kappa}{Named numeric vector of pooled shrinkage values for
-#'     kappa EBEs (one entry per kappa parameter). \code{NULL} when the model
-#'     has no IOV.}
+#'     kappa EBEs (one entry per kappa parameter), over the occasions an
+#'     observation informs. \code{NULL} when the model has no IOV.}
 #'   \item{shrinkage_kappa_by_occ}{Data frame with column \code{occ} (1-based
 #'     occasion index) and one numeric column per kappa parameter giving the
 #'     shrinkage at each occasion. Use this for per-occasion IOV diagnostics.
-#'     \code{NULL} when the model has no IOV.}
+#'     A cell is \code{NaN} when no observation informs that occasion (for
+#'     example one only \code{EVID=2} rows carry); \code{print()} leaves it
+#'     out. \code{NULL} when the model has no IOV.}
 #'   \item{ebe_kappas}{Data frame with columns \code{ID}, \code{OCC}, and one
 #'     column per kappa parameter containing per-subject per-occasion kappa
 #'     EBEs. \code{ID} carries the original subject identifier (matching
@@ -2985,10 +2987,13 @@ print.ferx_fit <- function(x, ...) {
       cat("  --- Shrinkage by occasion ---\n")
       df_occ <- x$shrinkage_kappa_by_occ
       kap_cols <- setdiff(colnames(df_occ), "occ")
+      # A slot no observation informs reads NaN (ferx-core#1911): it has no
+      # shrinkage, so it is left out, and so is an occasion with none left.
       for (row_i in seq_len(nrow(df_occ))) {
-        parts <- vapply(kap_cols, function(cn) {
-          sprintf("%s %.1f%%", cn, df_occ[[cn]][row_i] * 100)
-        }, character(1L))
+        vals <- vapply(kap_cols, function(cn) df_occ[[cn]][row_i], numeric(1L))
+        keep <- !is.na(vals)
+        if (!any(keep)) next
+        parts <- sprintf("%s %.1f%%", kap_cols[keep], vals[keep] * 100)
         cat(sprintf("  Occasion %d: %s\n", df_occ$occ[row_i], paste(parts, collapse = "  ")))
       }
     }
