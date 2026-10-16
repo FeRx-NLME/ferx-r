@@ -1708,6 +1708,54 @@ test_that("T17k: a model file edited after the fit still bundles the fitted byte
   expect_s3_class(sir, "ferx_fit")
 })
 
+test_that("T17l: an edit while the glue reads the data reaches neither the bind nor model_text (#577)", {
+  # The glue reads the model once (core's `ModelSource`) and parses, binds and
+  # stamps model_hash / model_text from that read. It used to re-read the file
+  # to bind the level blocks and again for the hash and text after the fit,
+  # so an edit made in between was bound against the old parse and recorded
+  # as the model that was fitted. The data is served through a FIFO; the
+  # moment the glue opens it - after its read of the model, before the level
+  # bind - the server swaps the model file for an edited one (theta lines
+  # swapped), and only then sends the rows. No timing is involved.
+  skip_on_cran()
+  skip_on_os("windows")
+  skip_if(!nzchar(Sys.which("mkfifo")), "no mkfifo")
+  model <- tl_two_block_model()
+  fitted <- readBin(model, "raw", n = file.size(model))
+  lines <- readLines(model)
+  z <- grep("theta ZPLA[", lines, fixed = TRUE)
+  a <- grep("theta AST[", lines, fixed = TRUE)
+  lines[c(z, a)] <- lines[c(a, z)]
+  edited <- tl_write(lines, ".ferx")
+  csv <- tl_write(tl_data, ".csv")
+  fifo <- tempfile(fileext = ".csv")
+  expect_identical(system2("mkfifo", fifo), 0L)
+  # Every open of the FIFO gets the rows (the data hash reads it again); the
+  # model is swapped before the first.
+  server <- callr::r_bg(function(fifo, csv, model, edited) {
+    rows <- readBin(csv, "raw", n = file.size(csv))
+    first <- TRUE
+    repeat {
+      con <- file(fifo, "wb")  # blocks until a reader opens the FIFO
+      if (first) {
+        file.copy(edited, model, overwrite = TRUE)
+        first <- FALSE
+      }
+      writeBin(rows, con)
+      close(con)
+    }
+  }, args = list(fifo, csv, model, edited))
+  withr::defer(server$kill())
+  fit <- tl_fit(model, fifo)
+  # The edit did land during the fit ...
+  expect_identical(readLines(model), lines)
+  # ... and reached none of the read's uses: the levels are laid out on the
+  # parsed declaration order, and the hash and text are the fitted bytes.
+  expect_identical(unique(fit$theta_levels$block), c("ZPLA", "AST"))
+  expect_identical(charToRaw(fit$model_text), fitted)
+  expect_identical(fit$model_hash, ferx_rust_sha256_text(rawToChar(fitted)))
+})
+
 test_that("T17j: a bundle whose model this engine rejects loads, warns and refuses from-fit (#531)", {
   # The case #531 is about: a bundle written today, loaded by a ferx whose
   # engine no longer parses its model (closed-world blocks, #1040). Stood in

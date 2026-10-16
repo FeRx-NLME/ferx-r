@@ -1769,38 +1769,3 @@ test_that("ferx_save_fit() warns when the model file changed since the fit (#531
   nohash$model_hash <- NA_character_
   expect_no_warning(ferx_save_fit(nohash, path), class = "ferx_model_edited_warning")
 })
-
-test_that("an edit to the model file while the fit runs reaches neither model_text nor model_hash (#577 review)", {
-  # The glue parses, binds, hashes and stores one read of the model file. It
-  # used to stamp model_hash / model_text from a second read after the fit, so
-  # an edit made while the fit ran was recorded - and bundled - as the model
-  # that was fitted. A background process edits the file a little after the
-  # glue is entered; the parse is the glue's first step.
-  skip_on_cran()
-  ex <- ferx_example("warfarin")
-  model <- withr::local_tempfile(fileext = ".ferx")
-  file.copy(ex$model, model)
-  fitted <- readBin(model, "raw", n = file.size(model))
-  done <- withr::local_tempfile()
-  real <- ferx_rust_fit
-  editor <- NULL
-  local_mocked_bindings(ferx_rust_fit = function(...) {
-    editor <<- callr::r_bg(function(model, done) {
-      Sys.sleep(0.3)
-      cat("# edited during the fit\n", file = model, append = TRUE)
-      file.create(done)
-    }, args = list(model, done))
-    real(...)
-  })
-  # SIR inside the fit keeps the glue busy for about a second after the parse.
-  fit <- suppressWarnings(ferx_fit(model, ex$data, method = "focei",
-                                   verbose = FALSE, sir = TRUE,
-                                   settings = list(sir_samples = 10000L,
-                                                   sir_resamples = 1000L)))
-  edited_in_time <- file.exists(done)
-  editor$wait()
-  skip_if_not(edited_in_time, "the fit returned before the edit landed")
-  expect_false(identical(readBin(model, "raw", n = file.size(model)), fitted))
-  expect_identical(charToRaw(fit$model_text), fitted)
-  expect_identical(fit$model_hash, ferx_rust_sha256_text(rawToChar(fitted)))
-})
