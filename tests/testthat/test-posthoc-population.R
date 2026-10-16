@@ -284,3 +284,53 @@ test_that("P14: a model-file rule that overrides iov_column says so without a fi
   # Without the rule the column is the source, and nothing is said.
   expect_no_warning(ferx_simulate(ex$model, ex$data, n_sim = 1L, seed = 1L))
 })
+
+test_that("P15: the override note reaches ferx_simulate_adaptive() and ferx_predict_survival() (#523 review r2)", {
+  msg <- "the iov_column dataset column is ignored"
+  rule <- c("  iov_column = OCC", "  iov_occasion = dose")
+
+  # Adaptive: the TDM example with a kappa on CL, its occasions named twice.
+  text <- readLines(ferx_example("adaptive_tdm")$model)
+  at <- grep("omega ETA_CL", text, fixed = TRUE)
+  text <- append(text, "  kappa KAPPA_CL ~ 0.04", after = at)
+  text <- sub("CL = TVCL * exp(ETA_CL)", "CL = TVCL * exp(ETA_CL + KAPPA_CL)", text, fixed = TRUE)
+  model <- pp_scratch(".ferx")
+  writeLines(c(text, "", "[fit_options]", rule), model)
+  data <- pp_scratch(".csv")
+  utils::write.csv(
+    data.frame(ID = 1L, TIME = seq(0, 96, by = 12), DV = ".", EVID = 0L,
+               AMT = ".", CMT = 1L, MDV = 0L, OCC = 1L),
+    data, row.names = FALSE, quote = FALSE
+  )
+  res <- suppressWarnings(ferx_simulate_adaptive(model, data, n_sim = 1L, seed = 1L))
+  expect_true(any(grepl(msg, attr(res, "simulation_warnings"), fixed = TRUE)))
+  expect_warning(ferx_simulate_adaptive(model, data, n_sim = 1L, seed = 1L),
+                 msg, fixed = TRUE)
+
+  # Survival: the joint PK-TTE example with a kappa on CL and an analytic
+  # hazard (the engine refuses kappa in an ODE-accumulated one).
+  ex <- ferx_example("pktte_joint")
+  text <- readLines(ex$model)
+  at <- grep("omega ETA_CL", text, fixed = TRUE)
+  text <- append(text, "  kappa KAPPA_CL ~ 0.04", after = at)
+  text <- sub("CL   = TVCL * exp(ETA_CL)", "CL   = TVCL * exp(ETA_CL + KAPPA_CL)",
+              text, fixed = TRUE)
+  at <- grep("hazard = ", text, fixed = TRUE)
+  text <- append(text[-at], c("  family = exponential", "  scale  = H0"), after = at - 1L)
+  plain <- pp_scratch(".ferx")
+  writeLines(text, plain)
+  at <- grep("[fit_options]", text, fixed = TRUE)
+  model <- pp_scratch(".ferx")
+  writeLines(append(text, rule, after = at), model)
+  rows <- utils::read.csv(ex$data, colClasses = "character")
+  rows$OCC <- "1"
+  data <- pp_scratch(".csv")
+  utils::write.csv(rows, data, row.names = FALSE, quote = FALSE)
+  expect_warning(surv <- ferx_predict_survival(model, data, times = c(0, 6)),
+                 msg, fixed = TRUE)
+  expect_true(any(grepl(msg, attr(surv, "simulation_warnings"), fixed = TRUE)))
+  # Without the rule the column is the source: no note, and no attribute.
+  writeLines(append(text, "  iov_column = OCC", after = at), plain)
+  expect_no_warning(surv <- ferx_predict_survival(plain, data, times = c(0, 6)))
+  expect_null(attr(surv, "simulation_warnings"))
+})

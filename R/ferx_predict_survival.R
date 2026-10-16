@@ -29,6 +29,13 @@
 #'   hazard, cif, survival_all, median_survival, mean_survival (one row per
 #'   subject \eqn{\times} TTE CMT \eqn{\times} time).
 #'
+#'   When the run has an occasion note, the frame carries a
+#'   \code{simulation_warnings} attribute (a character vector), re-emitted as a
+#'   single R warning: a model-file \code{iov_occasion} rule that replaces the
+#'   \code{iov_column} labels, or, with \code{fit}, a fit that records no
+#'   occasion rule and so takes the model file's. Without one the frame
+#'   carries no such attribute.
+#'
 #' @inheritSection ferx_simulate Errors raised by the engine
 #' @inheritSection ferx_simulate Theta level blocks
 #'
