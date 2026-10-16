@@ -64,14 +64,15 @@ ferx_predict_survival <- function(model, data = NULL, times, fit = NULL) {
 
   # A refusal is an R error, classed like a refused `ferx_fit()` (#385).
   if (is.null(fit)) {
-    return(.ferx_engine_call(
+    res <- .ferx_engine_call(
       ferx_rust_predict_survival(
         model_path = normalizePath(model),
         data_path = normalizePath(data),
         times = times
       ),
       model, data
-    ))
+    )
+    return(.ferx_surface_sim_warnings(res, "ferx_predict_survival"))
   }
 
   fit_pieces <- validate_fit_for_params(fit)

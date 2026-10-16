@@ -741,7 +741,7 @@ fn ferx_rust_simulate(
             .map_err(|e| engine_refusal("", e))?;
         // The occasions a model-file `iov_occasion` rule derives (ferx-r #523):
         // the reader fills them from `iov_column` only.
-        derive_file_occasions(&parsed, &mut population);
+        let occasion_notes = derive_file_occasions(&parsed, &mut population);
 
         let opts = ferx_core::SimulateOptions {
             seed: Some(seed as u64),
@@ -769,7 +769,7 @@ fn ferx_rust_simulate(
         // makes moot), so relaying `population.warnings` too would say each twice.
         Ok(attach_sim_warnings(
             sim_results_to_df(&output.results),
-            output.warnings,
+            [occasion_notes, output.warnings].concat(),
         ))
     })
 }
@@ -971,7 +971,7 @@ fn ferx_rust_simulate_adaptive(
             .map_err(|e| engine_refusal("ferx_simulate_adaptive: ", e))?;
         // The occasions a model-file `iov_occasion` rule derives (ferx-r #523):
         // the reader fills them from `iov_column` only.
-        derive_file_occasions(&parsed, &mut population);
+        let occasion_notes = derive_file_occasions(&parsed, &mut population);
 
         // The spec owns the decision schedule (`at`) and the monitored signal
         // (`observe` / `with_assay_error`), so `decision_times` and `monitors` stay
@@ -1007,7 +1007,7 @@ fn ferx_rust_simulate_adaptive(
             // supplies the whole regimen, so an observation grid alone is the normal
             // input (ferx-r #426).
             Ok(mut result) => {
-                let warnings = std::mem::take(&mut result.warnings);
+                let warnings = [occasion_notes, std::mem::take(&mut result.warnings)].concat();
                 attach_sim_warnings(adaptive_result_to_list(&result), warnings)
             }
             Err(e) => return Err(engine_refusal("ferx_simulate_adaptive: ", e)),
@@ -1306,7 +1306,7 @@ fn ferx_rust_predict(
             .map_err(|e| engine_refusal("", e))?;
         // The occasions a model-file `iov_occasion` rule derives (ferx-r #523):
         // the reader fills them from `iov_column` only.
-        derive_file_occasions(&parsed, &mut population);
+        let occasion_notes = derive_file_occasions(&parsed, &mut population);
 
         let output = ferx_core::predict_diag(&parsed.model, &population, &parsed.model.default_params)
             .map_err(|e| engine_refusal("Error predicting: ", e))?;
@@ -1322,7 +1322,7 @@ fn ferx_rust_predict(
         // which still holds the ones a compartment-free model makes moot.
         Ok(attach_sim_warnings(
             data_frame!(ID = id, TIME = time, PRED = pred).into(),
-            output.warnings,
+            [occasion_notes, output.warnings].concat(),
         ))
     })
 }
@@ -1490,12 +1490,18 @@ fn ferx_rust_predict_survival(model_path: &str, data_path: &str, times: Vec<f64>
             .map_err(|e| engine_refusal("", e))?;
         // The occasions a model-file `iov_occasion` rule derives (ferx-r #523):
         // the reader fills them from `iov_column` only.
-        derive_file_occasions(&parsed, &mut population);
+        let occasion_notes = derive_file_occasions(&parsed, &mut population);
 
         let results =
             ferx_core::predict_survival(&parsed.model, &population, &parsed.model.default_params, &times)
                 .map_err(|e| engine_refusal("Error predicting: ", e))?;
-        Ok(survival_results_to_df(&results))
+        // The rule-over-column note, if any, on the predict paths' channel.
+        let df = survival_results_to_df(&results);
+        Ok(if occasion_notes.is_empty() {
+            df
+        } else {
+            attach_sim_warnings(df, occasion_notes)
+        })
     })
 }
 
@@ -5684,10 +5690,21 @@ fn derive_fit_occasions(
 
 /// A design read without a fit: occasions from the model file's own
 /// `iov_occasion` rule, as `fit()` would derive them (ferx-r #523). A no-op for
-/// a model without kappa or under a `Column` rule.
-fn derive_file_occasions(parsed: &ParsedModel, population: &mut Population) {
-    if parsed.model.n_kappa > 0 {
-        apply_occasion_rule(population, &parsed.fit_options.iov_occasion);
+/// a model without kappa or under a `Column` rule. Returns core's override note
+/// when the file also names an `iov_column`, whose labels the rule replaces, as
+/// `fit()` warns (`apply_iov_occasion_rule`'s `had_column`).
+fn derive_file_occasions(parsed: &ParsedModel, population: &mut Population) -> Vec<String> {
+    let rule = &parsed.fit_options.iov_occasion;
+    if parsed.model.n_kappa == 0 || *rule == ferx_core::IovOccasionRule::Column {
+        return Vec::new();
+    }
+    apply_occasion_rule(population, rule);
+    if parsed.fit_options.iov_column.is_some() {
+        vec!["iov_occasion is set in [fit_options], so the model-side occasion rule is used and \
+              the iov_column dataset column is ignored."
+            .to_string()]
+    } else {
+        Vec::new()
     }
 }
 

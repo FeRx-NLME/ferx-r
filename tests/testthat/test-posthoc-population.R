@@ -228,3 +228,59 @@ test_that("P11: a fit that records no rule falls back to the model file's, or is
   )
   expect_identical(sim$IPRED, ref$IPRED)
 })
+
+test_that("P12: from-fit ferx_predict() reads fit$iov_occasion (#523 review r1)", {
+  # PRED cannot show the occasions (P9), so the path's use of the rule is
+  # pinned by what it does with a rule it cannot use, and with none at all.
+  tw <- pp_twins("dose")
+  bad <- tw$fit
+  bad$iov_occasion <- "weekly"
+  expect_error(ferx_predict(tw$model, tw$data, fit = bad),
+               "ferx_predict: `fit$iov_occasion`", fixed = TRUE)
+  legacy <- tw$fit
+  legacy$iov_occasion <- NULL
+  expect_error(ferx_predict(tw$model, tw$data, fit = legacy),
+               "records no IOV occasion rule", fixed = TRUE)
+})
+
+test_that("P13: from-fit ferx_predict_survival() reads fit$iov_occasion (#523 review r1)", {
+  # No bundled TTE model declares kappa, so the rule cannot move a survival
+  # curve here; the path is pinned by refusing a rule it cannot parse.
+  model <- pp_scratch(".ferx")
+  data <- pp_scratch(".csv")
+  writeLines(c(
+    "[parameters]",
+    "  theta TVLAMBDA(0.1, 0.001, 10.0)",
+    "  omega ETA_LAMBDA ~ 0.09",
+    "",
+    "[event_model]",
+    "  cmt    = 2",
+    "  family = exponential",
+    "  scale  = TVLAMBDA * exp(ETA_LAMBDA)"
+  ), model)
+  writeLines(c(
+    "ID,TIME,DV,EVID,CMT,MDV",
+    "1,7.2,1,0,2,0",
+    "2,24.0,0,0,2,0",
+    "3,3.1,1,0,2,0"
+  ), data)
+  fit <- suppressWarnings(ferx_fit(model, data, method = "focei", verbose = FALSE))
+  expect_identical(fit$iov_occasion, "column")
+  expect_no_error(ferx_predict_survival(model, data, times = c(0, 6), fit = fit))
+  fit$iov_occasion <- "weekly"
+  expect_error(ferx_predict_survival(model, data, times = c(0, 6), fit = fit),
+               "ferx_predict_survival: `fit$iov_occasion`", fixed = TRUE)
+})
+
+test_that("P14: a model-file rule that overrides iov_column says so without a fit (#523 review r1)", {
+  text <- readLines(ferx_example("warfarin_iov")$model)
+  at <- grep("iov_column", text, fixed = TRUE)
+  model <- pp_scratch(".ferx")
+  writeLines(append(text, "  iov_occasion = dose", after = at), model)
+  ex <- ferx_example("warfarin_iov")
+  msg <- "the iov_column dataset column is ignored"
+  expect_warning(ferx_simulate(model, ex$data, n_sim = 1L, seed = 1L), msg, fixed = TRUE)
+  expect_warning(ferx_predict(model, ex$data), msg, fixed = TRUE)
+  # Without the rule the column is the source, and nothing is said.
+  expect_no_warning(ferx_simulate(ex$model, ex$data, n_sim = 1L, seed = 1L))
+})
