@@ -967,8 +967,9 @@
 
 - **The `emax_pkpd` example no longer forces `gradient = fd`.** The model
   file, `inst/examples/ex_emax_pkpd.R` and `?ferx_example` said FD was
-  required for its per-CMT readouts, and the special-features vignette said
-  `y[CMT=N]` readouts fall back to finite differences. Per-CMT `y[CMT=N]`
+  required for its per-CMT readouts, and `?ferx_fit` and the
+  special-features vignette said `y[CMT=N]` readouts fall back to finite
+  differences. Per-CMT `y[CMT=N]`
   readouts have been differentiated analytically since ferx-core #439; only
   `obs_scale[CMT=N]` still falls back. With FD forced, `optimizer = "auto"`
   picked BOBYQA, which stopped short in the PD parameters: OFV −34.13 vs
