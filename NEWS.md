@@ -966,14 +966,14 @@
 ## Bug fixes
 
 - **The `emax_pkpd` example no longer forces `gradient = fd`.** The model
-  file and `inst/examples/ex_emax_pkpd.R` said FD was required for its
-  per-CMT readouts. Per-CMT `y[CMT=N]` readouts have been differentiated
-  analytically since ferx-core #439, and the vignette's statement that they
-  fall back to finite differences is corrected too (only `obs_scale[CMT=N]`
-  does). With FD forced, `optimizer = "auto"` picked
-  BOBYQA, which stopped short in the PD parameters: OFV −34.13 vs −36.94 on
-  the bundled data, with both fits reporting converged. Results from this
-  example move to the lower objective
+  file, `inst/examples/ex_emax_pkpd.R` and `?ferx_example` said FD was
+  required for its per-CMT readouts, and the special-features vignette said
+  `y[CMT=N]` readouts fall back to finite differences. Per-CMT `y[CMT=N]`
+  readouts have been differentiated analytically since ferx-core #439; only
+  `obs_scale[CMT=N]` still falls back. With FD forced, `optimizer = "auto"`
+  picked BOBYQA, which stopped short in the PD parameters: OFV −34.13 vs
+  −36.94 on the bundled data, with both fits reporting converged. Results
+  from this example move to the lower objective
   ([ferx-core #1625](https://github.com/FeRx-NLME/ferx-core/issues/1625)).
 
 - **ferx-core's parameter table (`ferx amd`) names OMEGA/SIGMA rows and
