@@ -1290,7 +1290,7 @@
   ([ferx-core #1815](https://github.com/FeRx-NLME/ferx-core/issues/1815)),
   so the refusal is left for a fit without one: a SAEM, IMP or Bayes fit,
   or one loaded from a bundle saved before the key. `ferx_covariance()` on
-  such a fit reproduces the in-fit matrix exactly, with a direct
+  a fit that carries it reproduces the in-fit matrix exactly, with a direct
   `p(1) = P1` mixing probability, a kappa or a `block_sigma` too; it had
   returned `"failed"` with a Hessian flat in the class-2 theta and the
   mixing probability
