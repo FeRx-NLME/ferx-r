@@ -1484,10 +1484,11 @@
 #' \itemize{
 #'   \item \code{[scaling]} is not yet supported on SDE (\code{[diffusion]}) models.
 #'   \item A \emph{uniform} Form B or Form C scale is differentiated exactly
-#'         under the default \code{gradient = auto}. The per-CMT variants
-#'         (\code{obs_scale[CMT=N]}, \code{y[CMT=N]}) fall back to finite
-#'         differences \strong{silently} -- there is no error and no warning, so
-#'         check \code{fit$gradient_used} if it matters.
+#'         under the default \code{gradient = auto}, and so is a per-CMT
+#'         Form C readout (\code{y[CMT=N]}, ferx-core #439). Per-CMT scaling
+#'         (\code{obs_scale[CMT=N]}) falls back to finite differences
+#'         \strong{silently} -- there is no error and no warning, so check
+#'         \code{fit$gradient_used} if it matters.
 #' }
 #'
 #' @section Parameter declaration syntax (\code{[parameters]} block):

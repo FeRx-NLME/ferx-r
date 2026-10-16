@@ -295,7 +295,8 @@
 #'     residual error model per endpoint via a per-CMT \code{[error_model]}
 #'     block (\code{CMT=2: DV ~ proportional(...)} for plasma,
 #'     \code{CMT=3: DV ~ additive(...)} for the PD effect). Demonstrates
-#'     multi-endpoint fitting; requires \code{gradient = fd}.}
+#'     multi-endpoint fitting. Both per-CMT readouts are differentiated
+#'     analytically, so the default \code{gradient = auto} applies.}
 #'   \item{emax_timecourse}{Compartment-free Emax response-time model -- the
 #'     NONMEM \code{$PRED} equivalent. The assignments in
 #'     \code{[structural_model]} calculate \code{y} directly for each

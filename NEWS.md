@@ -965,6 +965,18 @@
 
 ## Bug fixes
 
+- **The `emax_pkpd` example no longer forces `gradient = fd`.** The model
+  file, `inst/examples/ex_emax_pkpd.R` and `?ferx_example` said FD was
+  required for its per-CMT readouts, and `?ferx_fit` and the
+  special-features vignette said `y[CMT=N]` readouts fall back to finite
+  differences. Per-CMT `y[CMT=N]`
+  readouts have been differentiated analytically since ferx-core #439; only
+  `obs_scale[CMT=N]` still falls back. With FD forced, `optimizer = "auto"`
+  picked BOBYQA, which stopped short in the PD parameters while reporting
+  converged: on the bundled data, OFV −36.70 vs −36.94 on Linux, and −34.13
+  on macOS arm64. Results from this example move to the analytic optimum
+  ([ferx-core #1625](https://github.com/FeRx-NLME/ferx-core/issues/1625)).
+
 - **`ferx_load_fit()` loads a level-block bundle whose layout this ferx
   cannot make.** Since #529 the loader lays `data_bindings.levels` out on the
   bundle's model file, and any engine error there - a missing model file, a

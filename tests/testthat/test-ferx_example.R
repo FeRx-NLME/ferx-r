@@ -70,6 +70,17 @@ test_that("emax_timecourse bundles a compartment-free model and synthetic data",
   expect_equal(length(unique(dat$ID)), 30L)
   expect_false("AMT" %in% names(dat))
 })
+test_that("emax_pkpd leaves the gradient on the default auto route (ferx-core #1625)", {
+  # Its per-CMT y[CMT=N] readouts are analytic (ferx-core #439). A forced
+  # `gradient = fd` made optimizer = auto pick BOBYQA, which stopped short in
+  # the PD parameters (OFV -34.13 vs -36.94, both "converged"). ferx-core's
+  # tests/multi_endpoint.rs pins ferx-core's copy of the file, not this one.
+  ex <- ferx_example("emax_pkpd")
+  blocks <- ferx:::.ferx_extract_blocks(ex$model)
+  expect_true(length(blocks$fit_options) > 0L)
+  expect_false(any(grepl("^gradient\\s*=", blocks$fit_options)))
+  expect_true(any(grepl("^y\\[CMT=3\\]\\s*=", blocks$scaling)))
+})
 test_that("warfarin_derived $data points to warfarin.csv (alias check)", {
   ex <- ferx_example("warfarin_derived")
   expect_true(grepl("warfarin\\.csv$", ex$data))

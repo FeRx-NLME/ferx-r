@@ -2,8 +2,8 @@ library(ferx)
 
 # Simultaneous PK/PD: oral 1-cpt PK + biophase Emax PD, fit jointly with a
 # SEPARATE residual error model per endpoint via the per-CMT [error_model]
-# block (CMT=2 proportional, CMT=3 additive). Multi-endpoint fitting is
-# ODE-only and requires gradient = fd (set in the .ferx file).
+# block (CMT=2 proportional, CMT=3 additive). Both per-CMT readouts are
+# differentiated analytically, so the default gradient = "auto" applies.
 ex <- ferx_example("emax_pkpd")
 
 fit <- ferx_fit(ex$model, ex$data)

@@ -223,10 +223,11 @@ A more general Form C lets you write the readout expression directly
 A *uniform* expression divisor (form B) or ODE readout (form C) is
 differentiated **exactly** under the default `gradient = auto` (ferx-core #486),
 so leave the gradient alone -- form B in particular runs on the analytical
-closed-form path, not through the ODE machinery. Only the per-CMT variants
-(`obs_scale[CMT=N]`, `y[CMT=N]`) fall back to finite differences, and they do so
-**silently**: there is no error and no warning, so check `fit$gradient_used` if
-it matters.
+closed-form path, not through the ODE machinery. A per-CMT ODE readout
+(`y[CMT=N] = <expr>`) is differentiated exactly too (ferx-core #439); the
+bundled `emax_pkpd` example uses one. Only per-CMT scaling (`obs_scale[CMT=N]`)
+falls back to finite differences, and it does so **silently**: there is no
+error and no warning, so check `fit$gradient_used` if it matters.
 
 `[scaling]` is not yet supported on SDE (`[diffusion]`) models.
 
