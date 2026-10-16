@@ -819,16 +819,14 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
 
 .fitrx_method_to_token <- function(label) {
   if (is.null(label) || !nzchar(label)) return("focei")
-  switch(tolower(label),
-    "foce" = "foce",
-    "focei" = "focei",
-    "foce-gn" = "foce_gn",
-    "foce_gn" = "foce_gn",
-    "foce-gn-hybrid" = "foce_gn_hybrid",
-    "foce_gn_hybrid" = "foce_gn_hybrid",
-    "saem" = "saem",
-    tolower(label)
-  )
+  # The engine's own label -> token map (#508); `foce_gn` and friends are
+  # accepted too, since a hand-built fit may carry the token as its method.
+  tab <- .fitrx_method_table()
+  key <- tolower(label)
+  hit <- match(key, tolower(tab$label))
+  if (is.na(hit)) hit <- match(key, tab$token)
+  if (!is.na(hit)) return(tab$token[[hit]])
+  key
 }
 
 .fitrx_covariance_status_to_token <- function(s) {

@@ -4744,6 +4744,55 @@ fn ferx_rust_known_blocks() -> Vec<String> {
     })
 }
 
+/// Every estimation method's `.fitrx` token and display label (ferx-r #508):
+/// the label is ferx-core's `EstimationMethod::label()`, the token what core's
+/// `.fitrx` writer stores for that method. `ferx_load_fit()` maps the stored
+/// token to the label a live fit reports, and `ferx_save_fit()` maps back, so
+/// neither keeps a hand-written method list that a new engine method can
+/// outgrow (a reloaded VI fit used to read `"vi"` instead of `"VI"`).
+///
+/// Core keeps its token map private, so the tokens are spelled here. The match
+/// in `token` is exhaustive: a method the engine adds stops this crate
+/// compiling until it is given a token here, and added to `ALL`.
+///
+/// @return A list with `token` and `label`, character vectors, one entry per
+///   method, in the same order.
+/// @export
+#[extendr]
+fn ferx_rust_method_labels() -> List {
+    entry(move || {
+        fn token(m: EstimationMethod) -> &'static str {
+            match m {
+                EstimationMethod::Foce => "foce",
+                EstimationMethod::FoceI => "focei",
+                EstimationMethod::FoceGn => "foce_gn",
+                EstimationMethod::FoceGnHybrid => "foce_gn_hybrid",
+                EstimationMethod::Saem => "saem",
+                EstimationMethod::Imp => "imp",
+                EstimationMethod::Impmap => "impmap",
+                EstimationMethod::Bayes => "bayes",
+                EstimationMethod::Laplace => "laplace",
+                EstimationMethod::Vi => "vi",
+            }
+        }
+        const ALL: [EstimationMethod; 10] = [
+            EstimationMethod::Foce,
+            EstimationMethod::FoceI,
+            EstimationMethod::FoceGn,
+            EstimationMethod::FoceGnHybrid,
+            EstimationMethod::Saem,
+            EstimationMethod::Imp,
+            EstimationMethod::Impmap,
+            EstimationMethod::Bayes,
+            EstimationMethod::Laplace,
+            EstimationMethod::Vi,
+        ];
+        let tokens: Vec<String> = ALL.iter().map(|m| token(*m).to_string()).collect();
+        let labels: Vec<String> = ALL.iter().map(|m| m.label().to_string()).collect();
+        Ok(list!(token = tokens, label = labels))
+    })
+}
+
 /// The theta blocks `print.ferx_fit` reports as a compact summary instead of one
 /// row per coefficient (ferx-r #413): ferx-core's own rule
 /// (`compact_theta_blocks`, threshold `THETA_BLOCK_COMPACT_MIN` free
@@ -11442,6 +11491,7 @@ extendr_module! {
     fn ferx_rust_autodiff_enabled;
     fn ferx_rust_test_panic;
     fn ferx_rust_known_blocks;
+    fn ferx_rust_method_labels;
     fn ferx_rust_compact_theta_blocks;
     fn ferx_rust_kappa_rows;
     fn ferx_rust_fitrx_kappa_rows;
