@@ -972,9 +972,9 @@
   differences. Per-CMT `y[CMT=N]`
   readouts have been differentiated analytically since ferx-core #439; only
   `obs_scale[CMT=N]` still falls back. With FD forced, `optimizer = "auto"`
-  picked BOBYQA, which stopped short in the PD parameters: OFV −34.13 vs
-  −36.94 on the bundled data, with both fits reporting converged. Results
-  from this example move to the lower objective
+  picked BOBYQA, which stopped short in the PD parameters while reporting
+  converged: on the bundled data, OFV −36.70 vs −36.94 on Linux, and −34.13
+  on macOS arm64. Results from this example move to the analytic optimum
   ([ferx-core #1625](https://github.com/FeRx-NLME/ferx-core/issues/1625)).
 
 - **ferx-core's parameter table (`ferx amd`) names OMEGA/SIGMA rows and
