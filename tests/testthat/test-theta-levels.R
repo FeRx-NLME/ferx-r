@@ -1494,6 +1494,21 @@ test_that("T17f: two copies of a layout that disagree are refused by column", {
   expect_match(msg, "differ in `label`.", fixed = TRUE)
   expect_match(msg, "edited after the fit was saved", fixed = TRUE)
   expect_match(msg, "refit with ferx_fit()", fixed = TRUE)
+  # The same tamper where the layout then cannot be made - no model file -
+  # is still refused, not loaded with a warning (#531 review, finding 1).
+  modelless <- fitrx_edit_bundle(path, function(w) {
+    w$r_extras$theta_levels$label[[1]] <- "STUDY=9,TIME=1"
+    w$model_path <- file.path(tempdir(), "gone.ferx")
+    w
+  }, drop = "model.ferx")
+  expect_error(
+    withCallingHandlers(ferx_load_fit(modelless),
+                        ferx_levels_unavailable_warning = function(cnd) {
+                          fail("warned instead of refusing")
+                        }),
+    "two copies of the theta level bindings disagree - data_bindings$levels and r_extras$theta_levels differ in `label`.",
+    fixed = TRUE
+  )
 })
 
 test_that("T17g: malformed data_bindings.levels are refused by name", {
@@ -1530,7 +1545,20 @@ test_that("T17g: malformed data_bindings.levels are refused by name", {
   unlink(file.path(staging, "model.ferx"))
   modelless <- tempfile(fileext = ".fitrx")
   utils::zip(modelless, list.files(staging, full.names = TRUE), flags = "-j -q")
-  tl_load_unavailable(modelless, "the bundle carries no model file to lay them out on.")
+  nomodel <- tl_load_unavailable(modelless,
+                                 "the bundle carries no model file to lay them out on.")
+  expect_true(is.na(nomodel$unavailable_theta_levels$code))
+  # SIR and the covariance step check the model file themselves; they refuse
+  # for the missing layout first, as the load warning says (#531 review,
+  # finding 3).
+  nomodel <- tl_with_cov(nomodel)
+  for (call in list(
+    quote(ferx_sir(nomodel, sir_samples = 20L, sir_resamples = 10L)),
+    quote(ferx_covariance(nomodel))
+  )) {
+    expect_error(eval(call), class = "ferx_levels_unavailable_error",
+                 info = deparse(call))
+  }
   # An empty slot is no levels, as the engine reads it (`#[serde(default)]`).
   empty <- fitrx_edit_bundle(path, function(w) {
     w$data_bindings$levels <- structure(list(), names = character(0))
@@ -1602,6 +1630,13 @@ test_that("T17i: a model file edited since the fit is named, not laid out by pos
   expect_match(w, "model hash mismatch", fixed = TRUE)
   expect_no_match(w, "two copies", fixed = TRUE)
   expect_null(r$theta_levels)
+  # Edited so that it no longer parses either: the hash is still the cause,
+  # so the parse error's code is not the failure's (#531 review, finding 2).
+  cat("\n[not_a_block]\n  x = 1\n", file = model, append = TRUE)
+  broken <- tl_load_unavailable(drop_model(trip$core_path), "model hash mismatch")
+  expect_true(is.na(broken$unavailable_theta_levels$code))
+  expect_no_match(broken$unavailable_theta_levels$message, "E_UNKNOWN_BLOCK",
+                  fixed = TRUE)
 })
 
 test_that("T17j: a bundle whose model this engine rejects loads, warns and refuses from-fit (#531)", {

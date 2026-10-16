@@ -659,8 +659,11 @@ ferx_load_fit <- function(path) {
 # A bundle that also carries the pre-#466 copy under `r_extras` (an R writer,
 # which keeps writing it for one release) must agree with the slot on the
 # layout, and is refused by column when it does not: one of the two was edited,
-# and there is no telling which. A model file edited since the fit is refused
-# before that, by its hash, so it is never blamed on either copy.
+# and there is no telling which. The columns neither copy needs the model for
+# are compared first, so a tampered copy is refused even when the layout then
+# cannot be made; `theta_name` after the layout. A model file edited since the
+# fit is refused by its hash before that second check, so it is never blamed
+# on either copy.
 #
 # Two tiers of failure (#531). A bundle that is itself broken - a malformed
 # slot, or two copies that disagree - is refused: there is nothing to trust in
@@ -707,12 +710,6 @@ ferx_load_fit <- function(path) {
     }
     if (!is_str(e$contrast)) bad(sprintf("block `%s` has a `contrast` that is not a string", b))
   }
-  model_path <- fit$model_path
-  if (is.null(model_path) || is.na(model_path) || !file.exists(model_path)) {
-    return(.fitrx_unavailable_theta_levels(levels, simpleError(
-      "the bundle carries no model file to lay them out on."
-    ), NULL))
-  }
   n <- lengths(lapply(levels, `[[`, "labels"))
   wire <- .ferx_theta_levels_frame(
     block = rep(names(levels), n),
@@ -722,6 +719,36 @@ ferx_load_fit <- function(path) {
     contrast = rep(vapply(levels, `[[`, character(1L), "contrast"), n),
     theta_name = rep(NA_character_, sum(n))
   )
+  old <- fit$theta_levels
+  disagree <- function(differ) {
+    stop("ferx_load_fit: the bundle's two copies of the theta level ",
+         "bindings disagree - data_bindings$levels and ",
+         "r_extras$theta_levels differ in ",
+         paste0("`", differ, "`", collapse = ", "),
+         ". One of them was edited after the fit was saved; refit with ",
+         "ferx_fit() to write a consistent bundle.", call. = FALSE)
+  }
+  # The two copies are compared on what neither needs the model for before
+  # anything can fail on the model (#531 review): a layout that cannot be made
+  # must not let a tampered copy through. By (block, index), since the R copy
+  # is in declaration order and the slot need not be. `theta_name` comes from
+  # the model, and is compared after the layout below.
+  if (!is.null(old)) {
+    by_level <- function(x) x[order(x$block, x$index), , drop = FALSE]
+    a <- by_level(old)
+    w <- by_level(wire)
+    cols <- setdiff(.ferx_theta_levels_layout, "theta_name")
+    differ <- cols[!vapply(cols, function(k) {
+      nrow(a) == nrow(w) && identical(a[[k]], w[[k]])
+    }, logical(1L))]
+    if (length(differ)) disagree(differ)
+  }
+  model_path <- fit$model_path
+  if (is.null(model_path) || is.na(model_path) || !file.exists(model_path)) {
+    return(.fitrx_unavailable_theta_levels(levels, simpleError(
+      "the bundle carries no model file to lay them out on."
+    ), NULL))
+  }
   # The model file is checked against the fit's hash first: the layout places
   # theta by position, so a file edited since the fit (one at the recorded
   # path, when the bundle has no `model.ferx`) would give every level a
@@ -734,43 +761,49 @@ ferx_load_fit <- function(path) {
   # each level the se and SIR interval the fresh fit reported (#528).
   cov <- fit$cov_matrix
   has_cov <- is.matrix(cov) && nrow(cov) > 0L
-  failed <- NULL
-  tl <- tryCatch(
-    ferx_rust_theta_levels_from_fit(
-      model_path, .ferx_hash_arg(fit$model_hash), as.numeric(fit$theta),
-      as.character(names(fit$theta)), args$fit_bindings,
-      cov_matrix_flat = if (has_cov) as.numeric(t(cov)) else numeric(0),
-      cov_matrix_dim = if (has_cov) nrow(cov) else 0L,
-      sir_resamples_flat = as.numeric(fit$sir_resamples %||% numeric(0)),
-      sir_resamples_n = as.integer(fit$sir_resamples_n %||% 0L),
-      sir_resamples_dim = as.integer(fit$sir_resamples_dim %||% 0L)
-    ),
-    error = function(e) {
-      failed <<- e
-      NULL
+  # The layout call, returning the frame or the condition it failed with.
+  lay_out <- function(hash) {
+    tryCatch(
+      ferx_rust_theta_levels_from_fit(
+        model_path, hash, as.numeric(fit$theta),
+        as.character(names(fit$theta)), args$fit_bindings,
+        cov_matrix_flat = if (has_cov) as.numeric(t(cov)) else numeric(0),
+        cov_matrix_dim = if (has_cov) nrow(cov) else 0L,
+        sir_resamples_flat = as.numeric(fit$sir_resamples %||% numeric(0)),
+        sir_resamples_n = as.integer(fit$sir_resamples_n %||% 0L),
+        sir_resamples_dim = as.integer(fit$sir_resamples_dim %||% 0L)
+      ),
+      error = function(e) e
+    )
+  }
+  hash <- .ferx_hash_arg(fit$model_hash)
+  tl <- lay_out(hash)
+  if (inherits(tl, "error")) {
+    # Whether the hash is what refused it: the same call without the check
+    # (an empty hash skips it) fails the same way only when it is not. Then -
+    # and only then - is the model's own validation the cause, and its code
+    # the failure's. Read from the engine's behaviour, not from its wording.
+    hash_refused <- nzchar(hash) && {
+      again <- lay_out("")
+      !inherits(again, "error") ||
+        !identical(conditionMessage(again), conditionMessage(tl))
     }
-  )
-  if (!is.null(failed)) {
-    return(.fitrx_unavailable_theta_levels(levels, failed, model_path))
+    return(.fitrx_unavailable_theta_levels(
+      levels, tl, if (hash_refused) NULL else model_path
+    ))
   }
   tl <- .ferx_theta_levels_frame(
     tl$block, tl$index, tl$label, tl$group, tl$contrast, tl$theta_name,
     tl$value, tl$se, tl$sir_lo, tl$sir_hi
   )
-  old <- fit$theta_levels
+  # Now `theta_name` too, which only the model gives; in declaration order,
+  # which the engine's frame has.
   if (!is.null(old)) {
     layout <- .ferx_theta_levels_layout
     differ <- layout[!vapply(layout, function(k) {
       nrow(old) == nrow(tl) && identical(old[[k]], tl[[k]])
     }, logical(1L))]
-    if (length(differ)) {
-      stop("ferx_load_fit: the bundle's two copies of the theta level ",
-           "bindings disagree - data_bindings$levels and ",
-           "r_extras$theta_levels differ in ",
-           paste0("`", differ, "`", collapse = ", "),
-           ". One of them was edited after the fit was saved; refit with ",
-           "ferx_fit() to write a consistent bundle.", call. = FALSE)
-    }
+    if (length(differ)) disagree(differ)
   }
   list(theta_levels = tl, unavailable = NULL)
 }
@@ -779,13 +812,15 @@ ferx_load_fit <- function(path) {
 # naming the engine's text and code, and return the record the loaded fit
 # carries as `unavailable_theta_levels`. The code is the one validation ties
 # to the failure (`.ferx_engine_error()`), so a model this engine no longer
-# parses gets its parse code (`E_UNKNOWN_BLOCK`, `E_DEPRECATED_BLOCK`, ...). A
-# hash mismatch is never coded - the edited file's own errors are not why the
-# layout was refused - and neither is a binding the engine refuses, which the
-# glue raises without one; those carry NA, and the text says "no code".
+# parses gets its parse code (`E_UNKNOWN_BLOCK`, `E_DEPRECATED_BLOCK`, ...).
+# `model_path` is NULL when there is no model to validate, or when the hash is
+# what refused it (the caller tells): an edited file's own errors are not why
+# the layout was refused. Neither is coded, nor is a binding the engine
+# refuses, which the glue raises without one; those carry NA, and the text
+# says "no diagnostic code".
 .fitrx_unavailable_theta_levels <- function(levels, e, model_path) {
   msg <- conditionMessage(e)
-  if (!is.null(model_path) && !grepl("model hash mismatch", msg, fixed = TRUE)) {
+  if (!is.null(model_path)) {
     e <- .ferx_engine_error(e, model_path, NULL)
     msg <- conditionMessage(e)
   }

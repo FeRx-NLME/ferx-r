@@ -61,22 +61,7 @@ validate_fit_for_params <- function(fit) {
 # `ferx_load_fit()` warned about, rather than reaching the engine with no
 # layout and being told it was saved before ferx recorded one.
 .ferx_fit_binding_args <- function(fit) {
-  why <- fit$unavailable_theta_levels
-  if (!is.null(why)) {
-    code <- why$code %||% NA_character_
-    stop(errorCondition(
-      paste0(
-        "this fit has no theta level layout (fit$theta_levels): ",
-        "ferx_load_fit() could not lay the bundle's level bindings out on its ",
-        "model file. ", .ferx_levels_unavailable_reason(why),
-        " Load the bundle with a ferx whose engine accepts its model, or ",
-        "refit with ferx_fit()."
-      ),
-      class = c("ferx_levels_unavailable_error",
-                if (!is.na(code)) "ferx_engine_error"),
-      code = code, call = NULL
-    ))
-  }
+  .ferx_refuse_unavailable_levels(fit)
   tl <- fit$theta_levels
   cs <- fit$covariate_stats
   list(fit_bindings = list(
@@ -92,6 +77,28 @@ validate_fit_for_params <- function(fit) {
     stat_max = as.numeric(cs$max),
     stat_mode = as.numeric(cs$mode),
     stat_levels = lapply(cs$levels, as.numeric)
+  ))
+}
+
+# Refuse a fit whose level layout `ferx_load_fit()` could not make (#531), with
+# the reason it warned about. Called by `.ferx_fit_binding_args()`, and first
+# thing by `ferx_sir()` / `ferx_covariance()`, whose model-file checks would
+# otherwise refuse a bundle without a model file for that reason instead.
+.ferx_refuse_unavailable_levels <- function(fit) {
+  why <- fit$unavailable_theta_levels
+  if (is.null(why)) return(invisible())
+  code <- why$code %||% NA_character_
+  stop(errorCondition(
+    paste0(
+      "this fit has no theta level layout (fit$theta_levels): ",
+      "ferx_load_fit() could not lay the bundle's level bindings out on its ",
+      "model file. ", .ferx_levels_unavailable_reason(why),
+      " Load the bundle with a ferx whose engine accepts its model, or ",
+      "refit with ferx_fit()."
+    ),
+    class = c("ferx_levels_unavailable_error",
+              if (!is.na(code)) "ferx_engine_error"),
+    code = code, call = NULL
   ))
 }
 
