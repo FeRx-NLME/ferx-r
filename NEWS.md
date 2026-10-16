@@ -2,7 +2,7 @@
 
 ## Breaking changes
 
-- **ferx now builds against ferx-core `c189c471`**, up from `e9156c98`
+- **ferx now builds against ferx-core `b32f20d9`**, up from `e9156c98`
   ([#578](https://github.com/FeRx-NLME/ferx-r/issues/578)). These engine
   changes reach R:
 
