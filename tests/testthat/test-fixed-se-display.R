@@ -344,8 +344,10 @@ test_that(".fitrx round trip prints the same SE / [FIX] as the live fit", {
     for (lbl in cs$theta) {
       expect_identical(print_line(b, lbl), print_line(a, lbl), info = paste(nm, lbl))
     }
-    # Omega / sigma / kappa rows: compare the SE field. The rest of a sigma
-    # row (its type tag) does not survive a reload today - unrelated to FIX.
+    # The whole print, line for line (#455: the sigma type tag, `Cond:` and
+    # the covariance status spelling used to differ).
+    expect_identical(b, a, info = nm)
+    # Omega / sigma / kappa rows: the SE field, named for a failure message.
     se_field <- function(out, lbl) regmatches(print_line(out, lbl),
                                               regexpr("SE = \\S+", print_line(out, lbl)))
     for (lbl in cs$other) {
@@ -357,4 +359,91 @@ test_that(".fitrx round trip prints the same SE / [FIX] as the live fit", {
     expect_identical(fit2$estimates$fixed, cs$fit$estimates$fixed)
     expect_identical(fit2$estimates$se, cs$fit$estimates$se)
   }
+})
+
+test_that("mbma_placebo: a reloaded fit prints identically, and carries the live shapes (#455)", {
+  skip_on_cran()
+  fit <- mbma_live()
+  f <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(f), add = TRUE)
+  ferx_save_fit(fit, f)
+  fit2 <- suppressWarnings(ferx_load_fit(f))
+  a <- capture.output(print(fit))
+  b <- capture.output(print(fit2))
+  diff <- which(a != b)
+  expect_identical(length(b), length(a))
+  expect_length(diff, 0L)
+  if (length(diff)) {
+    fail(paste0("live  : ", a[diff], "\nloaded: ", b[diff], collapse = "\n"))
+  }
+  # The three fields behind the lines that differed.
+  expect_identical(fit2$sigma_types, fit$sigma_types)
+  expect_null(names(fit2$sigma_types))
+  expect_identical(fit2$covariance_status, fit$covariance_status)
+  expect_identical(fit2$condition_number, fit$condition_number)
+  expect_identical(fit2$eigenvalues, fit$eigenvalues)
+  expect_match(print_line(b, "ADD_ERR"), "[additive]", fixed = TRUE)
+  expect_true(any(grepl("Cond: ", b, fixed = TRUE)))
+})
+
+test_that("ferx_save_fit() warns and fills on zero-length FIX flags from a bundle (#459)", {
+  skip_on_cran()
+  fit <- per_class_live()
+  f <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(f), add = TRUE)
+  ferx_save_fit(fit, f)
+  # A bundle without the FIX field in each class: ferx_load_fit() reads it as
+  # logical(0), not NULL.
+  stripped <- fitrx_edit_bundle(f, function(w) {
+    w$theta$fixed <- NULL
+    w$omega$fixed <- NULL
+    w$sigma$fixed <- NULL
+    w$iov$kappa_fixed <- NULL
+    w
+  })
+  loaded <- suppressWarnings(ferx_load_fit(stripped))
+  for (k in c("theta_fixed", "omega_fixed", "sigma_fixed", "kappa_fixed")) {
+    expect_identical(loaded[[k]], logical(0), info = k)
+  }
+  out <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(out), add = TRUE)
+  w <- character()
+  withCallingHandlers(ferx_save_fit(loaded, out), warning = function(cnd) {
+    w <<- c(w, conditionMessage(cnd))
+    invokeRestart("muffleWarning")
+  })
+  w <- grep("FIX flags", w, value = TRUE)
+  expect_length(w, 1L)
+  expect_match(w, "FIX flags for theta, omega, sigma, kappa are unknown", fixed = TRUE)
+  # The writer filled one FALSE per parameter, not `fixed: []`.
+  wire <- fitrx_fit_json(out)
+  expect_identical(unlist(wire$theta$fixed), rep(FALSE, length(fit$theta)))
+  expect_identical(unlist(wire$omega$fixed), rep(FALSE, nrow(fit$omega)))
+  expect_identical(unlist(wire$sigma$fixed), rep(FALSE, length(fit$sigma)))
+  expect_identical(unlist(wire$iov$kappa_fixed), rep(FALSE, nrow(fit$omega_iov)))
+  # A short vector is no record either: the class is named and filled.
+  short <- fit
+  short$theta_fixed <- short$theta_fixed[-1L]
+  expect_warning(ferx_save_fit(short, out), "FIX flags for theta are unknown",
+                 fixed = TRUE)
+  expect_identical(unlist(fitrx_fit_json(out)$theta$fixed),
+                   rep(FALSE, length(fit$theta)))
+})
+
+test_that("ferx-core's own .fitrx loader reads the FIX flags ferx_save_fit() writes (#453)", {
+  skip_on_cran()
+  fit <- per_class_live()
+  # Core's load_fit() reads the R bundle into its FitResult and core's
+  # save_fit() writes that FitResult back: the flags in the core-written
+  # fit.json are the ones core's loader read, never R's reading of R's file.
+  trip <- fitrx_engine_trip(fit)
+  core <- fitrx_fit_json(trip$core_path)
+  expect_identical(unlist(core$theta$fixed), c(FALSE, FALSE, TRUE))
+  expect_identical(unlist(core$omega$fixed), c(TRUE, TRUE, FALSE))
+  expect_identical(unlist(core$sigma$fixed), c(FALSE, TRUE))
+  expect_identical(unlist(core$iov$kappa_fixed), c(FALSE, TRUE))
+  for (k in c("theta", "omega", "sigma")) {
+    expect_identical(unlist(core[[k]]$fixed), fit[[paste0(k, "_fixed")]], info = k)
+  }
+  expect_identical(unlist(core$iov$kappa_fixed), fit$kappa_fixed)
 })

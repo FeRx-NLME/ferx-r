@@ -213,9 +213,9 @@ check_strictness <- function(fit,
   v
 }
 
-# Normalise a covariance status to a comparison key: ferx_fit() carries the
-# engine's snake_case token ("not_requested"), while ferx_load_fit() maps it to
-# a CamelCase label ("NotRequested").
+# Normalise a covariance status to a comparison key: ferx_fit() and
+# ferx_load_fit() carry the engine's snake_case token ("not_requested"), but a
+# fit loaded before #455 carries a CamelCase label ("NotRequested").
 .ferx_cov_status_key <- function(status) {
   s <- as.character(status %||% "")
   if (length(s) != 1L || !nzchar(s)) return("unknown")

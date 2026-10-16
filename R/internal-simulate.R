@@ -55,7 +55,28 @@ validate_fit_for_params <- function(fit) {
 # this argument for every from-fit entry point (predict / simulate / npde via
 # `validate_fit_for_params()`, `ferx_sir()`, `ferx_covariance()`), so the
 # paths cannot drift apart.
+#
+# A fit loaded from a bundle whose level layout the engine could not make
+# (`fit$unavailable_theta_levels`, #531) is refused here, with the reason
+# `ferx_load_fit()` warned about, rather than reaching the engine with no
+# layout and being told it was saved before ferx recorded one.
 .ferx_fit_binding_args <- function(fit) {
+  why <- fit$unavailable_theta_levels
+  if (!is.null(why)) {
+    code <- why$code %||% NA_character_
+    stop(errorCondition(
+      paste0(
+        "this fit has no theta level layout (fit$theta_levels): ",
+        "ferx_load_fit() could not lay the bundle's level bindings out on its ",
+        "model file. ", .ferx_levels_unavailable_reason(why),
+        " Load the bundle with a ferx whose engine accepts its model, or ",
+        "refit with ferx_fit()."
+      ),
+      class = c("ferx_levels_unavailable_error",
+                if (!is.na(code)) "ferx_engine_error"),
+      code = code, call = NULL
+    ))
+  }
   tl <- fit$theta_levels
   cs <- fit$covariate_stats
   list(fit_bindings = list(
@@ -72,6 +93,17 @@ validate_fit_for_params <- function(fit) {
     stat_mode = as.numeric(cs$mode),
     stat_levels = lapply(cs$levels, as.numeric)
   ))
+}
+
+# The one wording of why a loaded fit has no level layout (#531), shared by the
+# load warning and the from-fit refusal so the two name the same cause. A coded
+# message already ends in `[CODE]` (`.ferx_engine_message()`).
+.ferx_levels_unavailable_reason <- function(why) {
+  code <- why$code %||% NA_character_
+  paste0(
+    if (is.na(code)) "Engine (no diagnostic code): " else "Engine: ",
+    why$message
+  )
 }
 
 # The fit's subject IDs, verbatim and in fit order, for the skeleton FitResult
