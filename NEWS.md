@@ -1003,8 +1003,9 @@
   ([#531](https://github.com/FeRx-NLME/ferx-r/issues/531)).
 
 - **`ferx_save_fit()` writes the model bytes that were fitted, not the file
-  as it is at save time.** `ferx_fit()` now takes `fit$model_text` and
-  `fit$model_hash` from one read of the model file, and the writer puts that
+  as it is at save time.** `ferx_fit()` now parses, binds, hashes and stores
+  one read of the model file (`fit$model_text`, `fit$model_hash`), so an edit
+  made while the fit runs reaches none of them, and the writer puts that
   text in the bundle's `model.ferx` byte for byte (CRLF endings, a BOM and a
   missing trailing newline included). A model file edited after the fit no
   longer reaches the bundle, so it matches its own `model_hash`, reloads with
@@ -1012,7 +1013,7 @@
   `ferx_load_fit()` keeps the bundled bytes in `fit$model_text`, so a reloaded
   fit re-saves the same `model.ferx`. The `ferx_model_edited_warning` above
   now fires only for a fit that does not carry the fitted text (one made by an
-  older ferx, or from a model file that is not UTF-8), which still falls back
+  older ferx), which still falls back
   to copying the file
   ([#577](https://github.com/FeRx-NLME/ferx-r/issues/577)).
 

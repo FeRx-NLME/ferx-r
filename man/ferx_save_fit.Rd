@@ -57,8 +57,8 @@ their packing.
 The bundle's \code{model.ferx} holds the bytes that were fitted, the ones
 \code{fit$model_hash} names, taken from \code{fit$model_text}: editing the
 model file after \code{\link{ferx_fit}} does not change what is saved. A
-fit that does not carry them (one made by an older ferx, or from a model
-file that is not UTF-8) falls back to a copy of the file at
+fit that does not carry them (one made by an older ferx, or one whose
+\code{model_text} was changed by hand) falls back to a copy of the file at
 \code{fit$model_path} as it is when you save. If that file has been edited
 since the fit (its SHA-256 no longer matches \code{fit$model_hash}), the
 bundle is still written, but a warning of class

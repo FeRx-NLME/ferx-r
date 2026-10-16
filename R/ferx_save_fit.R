@@ -29,8 +29,8 @@ FITRX_FORMAT_VERSION <- "1"
 #' The bundle's \code{model.ferx} holds the bytes that were fitted, the ones
 #' \code{fit$model_hash} names, taken from \code{fit$model_text}: editing the
 #' model file after \code{\link{ferx_fit}} does not change what is saved. A
-#' fit that does not carry them (one made by an older ferx, or from a model
-#' file that is not UTF-8) falls back to a copy of the file at
+#' fit that does not carry them (one made by an older ferx, or one whose
+#' \code{model_text} was changed by hand) falls back to a copy of the file at
 #' \code{fit$model_path} as it is when you save. If that file has been edited
 #' since the fit (its SHA-256 no longer matches \code{fit$model_hash}), the
 #' bundle is still written, but a warning of class
@@ -152,15 +152,16 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   # The bundle must carry the bytes that were fitted, the ones `fit$model_hash`
   # names, or on reload the theta level layout cannot be made and `ferx_sir()`
   # / `ferx_covariance()` refuse the fit. A fit carries them in
-  # `fit$model_text`: the glue reads the model file once and takes both the
-  # text and the hash from that read (#577), so the text holds the file's line
+  # `fit$model_text`: the glue reads the model file once and parses, binds,
+  # hashes and stores that one read (core's `ModelSource`, #577), so an edit
+  # during the fit reaches none of them, and the text holds the file's line
   # endings, BOM and trailing newline exactly. Write that, whatever has
   # happened to the file on disk since.
   #
   # Fall back to copying the file at `fit$model_path` only when the text does
   # not hash to `fit$model_hash`: a fit made before the glue took both from one
   # read, a fit loaded by a ferx that read the bundle's text with `readLines()`,
-  # or a model file that is not UTF-8. The copy keeps the bytes as they are
+  # or a `model_text` changed by hand. The copy keeps the bytes as they are
   # now, so it warns when they are not the fitted ones (#576). With no file
   # either (a hand-constructed fit), `fit$model_source` is the best
   # representation there is.
