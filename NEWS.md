@@ -965,6 +965,15 @@
 
 ## Bug fixes
 
+- **The `emax_pkpd` example no longer forces `gradient = fd`.** The model
+  file and `inst/examples/ex_emax_pkpd.R` said FD was required for its
+  per-CMT readouts. That has not been true for some time: both readouts are
+  differentiated analytically. With FD forced, `optimizer = "auto"` picked
+  BOBYQA, which stopped short in the PD parameters: OFV −34.13 vs −36.94 on
+  the bundled data, with both fits reporting converged. Results from this
+  example move to the lower objective
+  ([ferx-core #1625](https://github.com/FeRx-NLME/ferx-core/issues/1625)).
+
 - **ferx-core's parameter table (`ferx amd`) names OMEGA/SIGMA rows and
   reports their standard errors**
   ([ferx-core #1748](https://github.com/FeRx-NLME/ferx-core/issues/1748)).
