@@ -965,6 +965,46 @@
 
 ## Bug fixes
 
+- **`ferx_load_fit()` loads a level-block bundle whose layout this ferx
+  cannot make.** Since #529 the loader lays `data_bindings.levels` out on the
+  bundle's model file, and any engine error there - a missing model file, a
+  model edited since the fit, one the engine no longer parses or bindings it
+  no longer accepts - failed the whole load. Now the bundle loads with
+  `fit$theta_levels = NULL`, one warning (class
+  `ferx_levels_unavailable_warning`) names the engine's message and code, and
+  `fit$unavailable_theta_levels` keeps the reason. Estimates, `print()`,
+  `fit$estimates` and the runlog work; `ferx_predict()`,
+  `ferx_simulate()`, `ferx_calc_npde()`, `ferx_sir()` and
+  `ferx_covariance()` refuse the fit with that same reason (class
+  `ferx_levels_unavailable_error`) instead of claiming it was saved before
+  ferx recorded the bindings. `ferx_save_fit()` writes such a fit's bindings
+  back unchanged. Malformed or disagreeing bindings still refuse the load
+  ([#531](https://github.com/FeRx-NLME/ferx-r/issues/531)).
+
+- **`ferx_save_fit()` warns when the model file changed since the fit.** The
+  bundle's `model.ferx` is a copy of the file at `fit$model_path` as it is at
+  save time, so an edit made after `ferx_fit()` went into the bundle silently
+  beside a `model_hash` it no longer matches; on reload the level layout could
+  not be made and `ferx_sir()` / `ferx_covariance()` refused the fit. The
+  bundle is still written, with a `ferx_model_edited_warning` naming the file.
+  The check uses `tools::sha256sum()` and is skipped on R older than 4.5
+  ([#531](https://github.com/FeRx-NLME/ferx-r/issues/531)).
+
+- **A fit reloaded with `ferx_load_fit()` prints exactly like the live one.**
+  The SIGMA row keeps its `[additive]` / `[proportional]` tag, SD and CV%
+  (`fit$sigma_types` comes back unnamed), the diagnostics line keeps its
+  `Cond:` figure (`fit$condition_number` and `fit$eigenvalues` are restored
+  under the live names), and `fit$covariance_status` keeps the live spelling
+  (`"computed"`, not `"Computed"`)
+  ([#455](https://github.com/FeRx-NLME/ferx-r/issues/455)).
+
+- **`ferx_save_fit()` treats a FIX flag vector that is not one per parameter
+  as missing.** A fit loaded from a bundle without the `fixed` field carries
+  `logical(0)`, which skipped both the missing-flags warning and the writer's
+  fill-in and wrote `fixed: []` beside the estimates. Such a class is now
+  named in the warning and written as all-free
+  ([#459](https://github.com/FeRx-NLME/ferx-r/issues/459)).
+
 - **ferx-core's parameter table (`ferx amd`) names OMEGA/SIGMA rows and
   reports their standard errors**
   ([ferx-core #1748](https://github.com/FeRx-NLME/ferx-core/issues/1748)).
@@ -1431,6 +1471,12 @@
   the 15 digits it was written with.
 
 ## Internal
+
+- **A test holds ferx-core's own `.fitrx` loader to the FIX flags
+  `ferx_save_fit()` writes**: a bundle with one FIX and one free entry per
+  class goes through core's `load_fit()` and back out through core's
+  `save_fit()`, and the flags core wrote are the fit's
+  ([#453](https://github.com/FeRx-NLME/ferx-r/issues/453)).
 
 - **The agent-guidance file is now `AGENTS.md`**
   ([#489](https://github.com/FeRx-NLME/ferx-r/issues/489)). It was

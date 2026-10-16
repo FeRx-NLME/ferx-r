@@ -962,6 +962,27 @@ test_that("R8c: a fit that lost one block's rows names the missing block", {
                fixed = TRUE)
 })
 
+# Load a bundle whose level layout the engine cannot make (#531): exactly one
+# load warning, classed and matching `pattern`, the fit without a layout and
+# carrying why. Returns the loaded fit.
+tl_load_unavailable <- function(path, pattern) {
+  w <- list()
+  fit <- withCallingHandlers(ferx_load_fit(path), warning = function(cnd) {
+    w[[length(w) + 1L]] <<- cnd
+    invokeRestart("muffleWarning")
+  })
+  hit <- Filter(function(cnd) inherits(cnd, "ferx_levels_unavailable_warning"), w)
+  expect_length(hit, 1L)
+  expect_match(conditionMessage(hit[[1L]]), pattern, fixed = TRUE)
+  expect_match(conditionMessage(hit[[1L]]),
+               "(data_bindings$levels) could not be laid out on its model file",
+               fixed = TRUE)
+  expect_null(fit$theta_levels)
+  expect_match(fit$unavailable_theta_levels$message, pattern, fixed = TRUE)
+  expect_s3_class(fit, "ferx_fit")
+  fit
+}
+
 # --- T12: a tampered bundle ----------------------------------------------------
 
 test_that("T12: an unknown contrast token in a bundle is refused by name", {
@@ -992,14 +1013,17 @@ test_that("T12: an unknown contrast token in a bundle is refused by name", {
     "unknown contrast `sum_to_zero_wthin`", fixed = TRUE
   )
   # In the native slot (#466) the layout is laid out on the model at load, so
-  # the same token is refused there, still by name.
+  # the same token is refused there, still by name - as a warning, with the
+  # estimates loaded, and again by the from-fit paths (#531).
   native <- fitrx_edit_bundle(path, function(w) {
     w$data_bindings$levels$PLACEBO$contrast <- "sum_to_zero_wthin"
     w$r_extras$theta_levels <- NULL
     w
   })
-  expect_error(ferx_load_fit(native), "unknown contrast `sum_to_zero_wthin`",
-               fixed = TRUE)
+  fit3 <- tl_load_unavailable(native, "unknown contrast `sum_to_zero_wthin`")
+  expect_identical(fit3$theta, b$fit$theta)
+  expect_error(ferx_predict(b$model, b$data, fit = fit3),
+               "unknown contrast `sum_to_zero_wthin`", fixed = TRUE)
 })
 
 # --- T13: the counted form is untouched ---------------------------------------
@@ -1470,6 +1494,21 @@ test_that("T17f: two copies of a layout that disagree are refused by column", {
   expect_match(msg, "differ in `label`.", fixed = TRUE)
   expect_match(msg, "edited after the fit was saved", fixed = TRUE)
   expect_match(msg, "refit with ferx_fit()", fixed = TRUE)
+  # The same tamper where the layout then cannot be made - no model file -
+  # is still refused, not loaded with a warning (#531 review, finding 1).
+  modelless <- fitrx_edit_bundle(path, function(w) {
+    w$r_extras$theta_levels$label[[1]] <- "STUDY=9,TIME=1"
+    w$model_path <- file.path(tempdir(), "gone.ferx")
+    w
+  }, drop = "model.ferx")
+  expect_error(
+    withCallingHandlers(ferx_load_fit(modelless),
+                        ferx_levels_unavailable_warning = function(cnd) {
+                          fail("warned instead of refusing")
+                        }),
+    "two copies of the theta level bindings disagree - data_bindings$levels and r_extras$theta_levels differ in `label`.",
+    fixed = TRUE
+  )
 })
 
 test_that("T17g: malformed data_bindings.levels are refused by name", {
@@ -1486,15 +1525,14 @@ test_that("T17g: malformed data_bindings.levels are refused by name", {
     fixed = TRUE
   )
   # A layout the bundle's own model does not take - a block it does not
-  # declare - is the engine's refusal, named as the bundle's.
+  # declare - is the engine's refusal: the bundle loads without a layout and
+  # says why (#531).
   renamed <- fitrx_edit_bundle(path, function(w) {
     names(w$data_bindings$levels) <- "OTHER"
     w$r_extras <- NULL
     w
   })
-  expect_error(ferx_load_fit(renamed),
-               "(data_bindings$levels) could not be laid out on its model file",
-               fixed = TRUE)
+  tl_load_unavailable(renamed, "OTHER")
   # No model to lay the layout out on: no bundled model.ferx, and a recorded
   # path that does not resolve here.
   staging <- withr::local_tempdir()
@@ -1507,11 +1545,20 @@ test_that("T17g: malformed data_bindings.levels are refused by name", {
   unlink(file.path(staging, "model.ferx"))
   modelless <- tempfile(fileext = ".fitrx")
   utils::zip(modelless, list.files(staging, full.names = TRUE), flags = "-j -q")
-  expect_error(
-    ferx_load_fit(modelless),
-    "carries theta level bindings (data_bindings$levels) but no model file to lay them out on.",
-    fixed = TRUE
-  )
+  nomodel <- tl_load_unavailable(modelless,
+                                 "the bundle carries no model file to lay them out on.")
+  expect_true(is.na(nomodel$unavailable_theta_levels$code))
+  # SIR and the covariance step check the model file themselves; they refuse
+  # for the missing layout first, as the load warning says (#531 review,
+  # finding 3).
+  nomodel <- tl_with_cov(nomodel)
+  for (call in list(
+    quote(ferx_sir(nomodel, sir_samples = 20L, sir_resamples = 10L)),
+    quote(ferx_covariance(nomodel))
+  )) {
+    expect_error(eval(call), class = "ferx_levels_unavailable_error",
+                 info = deparse(call))
+  }
   # An empty slot is no levels, as the engine reads it (`#[serde(default)]`).
   empty <- fitrx_edit_bundle(path, function(w) {
     w$data_bindings$levels <- structure(list(), names = character(0))
@@ -1568,17 +1615,95 @@ test_that("T17i: a model file edited since the fit is named, not laid out by pos
     w$model_path <- model
     w
   }, drop = "model.ferx")
-  # Engine-written: refused by the model's hash, instead of AST reading
-  # ZPLA's values.
-  expect_error(ferx_load_fit(drop_model(trip$core_path)), "model hash mismatch",
-               fixed = TRUE)
+  # Engine-written: no layout, for the model's hash, instead of AST reading
+  # ZPLA's values. The estimates still load (#531).
+  core <- tl_load_unavailable(drop_model(trip$core_path), "model hash mismatch")
+  expect_identical(core$theta, fit$theta)
+  expect_true(is.na(core$unavailable_theta_levels$code))
   # R-written, both copies present: the model is named, neither copy is.
-  msg <- tryCatch({
-    ferx_load_fit(drop_model(trip$r_path))
-    NA_character_
-  }, error = function(e) conditionMessage(e))
-  expect_match(msg, "model hash mismatch", fixed = TRUE)
-  expect_no_match(msg, "two copies", fixed = TRUE)
+  w <- NULL
+  r <- withCallingHandlers(ferx_load_fit(drop_model(trip$r_path)),
+    ferx_levels_unavailable_warning = function(cnd) {
+      w <<- conditionMessage(cnd)
+      invokeRestart("muffleWarning")
+    })
+  expect_match(w, "model hash mismatch", fixed = TRUE)
+  expect_no_match(w, "two copies", fixed = TRUE)
+  expect_null(r$theta_levels)
+  # Edited so that it no longer parses either: the hash is still the cause,
+  # so the parse error's code is not the failure's (#531 review, finding 2).
+  cat("\n[not_a_block]\n  x = 1\n", file = model, append = TRUE)
+  broken <- tl_load_unavailable(drop_model(trip$core_path), "model hash mismatch")
+  expect_true(is.na(broken$unavailable_theta_levels$code))
+  expect_no_match(broken$unavailable_theta_levels$message, "E_UNKNOWN_BLOCK",
+                  fixed = TRUE)
+})
+
+test_that("T17j: a bundle whose model this engine rejects loads, warns and refuses from-fit (#531)", {
+  # The case #531 is about: a bundle written today, loaded by a ferx whose
+  # engine no longer parses its model (closed-world blocks, #1040). Stood in
+  # for by a block no engine knows, with the hash cleared so the parse - not
+  # the hash - is what refuses it.
+  b <- tl_base()
+  live <- tl_with_cov(b$fit)
+  path <- tempfile(fileext = ".fitrx")
+  ferx_save_fit(live, path)
+  staging <- withr::local_tempdir()
+  utils::unzip(path, exdir = staging, junkpaths = TRUE)
+  cat("\n[not_a_block]\n  x = 1\n", file = file.path(staging, "model.ferx"),
+      append = TRUE)
+  json <- file.path(staging, "fit.json")
+  wire <- jsonlite::read_json(json, simplifyVector = FALSE)
+  wire$model_hash <- NULL
+  jsonlite::write_json(wire, json, auto_unbox = TRUE, pretty = TRUE,
+                       digits = I(17), null = "null", na = "null")
+  rejected <- tempfile(fileext = ".fitrx")
+  utils::zip(rejected, list.files(staging, full.names = TRUE), flags = "-j -q")
+
+  fit <- tl_load_unavailable(rejected, "E_UNKNOWN_BLOCK")
+  why <- fit$unavailable_theta_levels
+  expect_identical(why$code, "E_UNKNOWN_BLOCK")
+  # Everything that does not need the layout is the live fit's.
+  expect_identical(fit$theta, live$theta)
+  expect_identical(fit$omega, live$omega)
+  expect_identical(fit$estimates, live$estimates)
+  expect_no_error(capture.output(print(fit$estimates)))
+  expect_no_error(capture.output(print(fit)))
+  expect_no_error(capture.output(ferx_runlog(fit)))
+
+  # Every from-fit path refuses with the load's reason, not "saved before ferx
+  # recorded the bindings". The cleared hash makes sir / covariance warn that
+  # they skip the integrity check; that is the fixture, not the point.
+  refusal <- function(expr) {
+    tryCatch({
+      suppressWarnings(expr, classes = "simpleWarning")
+      NULL
+    }, error = function(e) e)
+  }
+  errs <- list(
+    predict = refusal(ferx_predict(b$model, b$data, fit = fit)),
+    simulate = refusal(ferx_simulate(b$model, b$data, fit = fit)),
+    npde = refusal(ferx_calc_npde(fit, nsim = 2L, model = b$model, data = b$data)),
+    sir = refusal(ferx_sir(fit, sir_samples = 20L, sir_resamples = 10L)),
+    covariance = refusal(ferx_covariance(fit))
+  )
+  for (who in names(errs)) {
+    e <- errs[[who]]
+    expect_s3_class(e, "ferx_levels_unavailable_error")
+    expect_s3_class(e, "ferx_engine_error")
+    expect_identical(e$code, "E_UNKNOWN_BLOCK", info = who)
+    msg <- conditionMessage(e)
+    expect_match(msg, "this fit has no theta level layout", fixed = TRUE, info = who)
+    expect_match(msg, why$message, fixed = TRUE, info = who)
+    expect_no_match(msg, "before ferx recorded the bindings", fixed = TRUE, info = who)
+  }
+
+  # A re-save writes the bindings back as read, so a ferx that can lay them
+  # out still finds them.
+  resaved <- tempfile(fileext = ".fitrx")
+  ferx_save_fit(fit, resaved)
+  expect_identical(fitrx_fit_json(resaved)$data_bindings$levels,
+                   wire$data_bindings$levels)
 })
 
 # --- T17: each level's se and SIR interval (#528, ferx-core #1890) ------------

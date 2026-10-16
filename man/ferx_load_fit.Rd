@@ -35,6 +35,22 @@ names).
 
 To call \code{\link{ferx_predict}} on a loaded fit, the embedded model
 source can be re-parsed through the existing pipeline.
+
+A level-block fit's \code{theta_levels} is rebuilt by laying the bundle's
+level bindings (\code{data_bindings.levels}) out on its model file. When
+this ferx cannot do that - the model file is missing or was edited since
+the fit, its engine no longer parses the model, or no longer accepts the
+bindings - the bundle still loads: \code{theta_levels} is \code{NULL},
+\code{unavailable_theta_levels} records why (\code{code}, the engine's
+diagnostic code or \code{NA}; \code{message}; and the bundle's
+\code{levels}, which \code{\link{ferx_save_fit}} writes back unchanged),
+and one warning of class \code{ferx_levels_unavailable_warning} says so.
+Estimates, \code{fit$estimates}, \code{print()} and the runlog work
+as usual; \code{\link{ferx_predict}}, \code{\link{ferx_simulate}},
+\code{\link{ferx_calc_npde}}, \code{\link{ferx_sir}} and
+\code{\link{ferx_covariance}} refuse the fit with that reason (class
+\code{ferx_levels_unavailable_error}). Level bindings that are themselves
+malformed, or two copies of them that disagree, still refuse the load.
 }
 \examples{
 ex  <- ferx_example("warfarin")

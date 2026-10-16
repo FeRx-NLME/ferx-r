@@ -26,6 +26,15 @@ FITRX_FORMAT_VERSION <- "1"
 #' log-packed, for one), and the bundle does not yet name the columns or
 #' their packing.
 #'
+#' The bundle's \code{model.ferx} is a copy of the model file at
+#' \code{fit$model_path} as it is when you save. If that file has been edited
+#' since the fit (its SHA-256 no longer matches \code{fit$model_hash}), the
+#' bundle is still written, but a warning of class
+#' \code{ferx_model_edited_warning} says so: on reload the theta level layout
+#' cannot be made, and \code{\link{ferx_sir}} / \code{\link{ferx_covariance}}
+#' refuse the fit. Restore the file and save again, or refit. The check needs
+#' R 4.5 or later (\code{tools::sha256sum()}) and is skipped on older R.
+#'
 #' The schema is shared with the ferx-core Rust crate; see its
 #' \code{docs/src/file-formats/fitrx.md} for the full field reference.
 #'
@@ -153,6 +162,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   model_src_path <- fit$model_path
   if (!is.null(model_src_path) && !is.na(model_src_path) &&
       nzchar(model_src_path) && file.exists(model_src_path)) {
+    .fitrx_warn_model_edited(model_src_path, fit$model_hash)
     file.copy(model_src_path, file.path(staging, "model.ferx"), overwrite = TRUE)
   } else {
     writeLines(fit$model_source %||% "", file.path(staging, "model.ferx"))
@@ -318,6 +328,32 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   x
 }
 
+# The writer copies the model file as it is now, not the text that was fitted,
+# so a file edited since `ferx_fit()` goes into the bundle beside a
+# `model_hash` it no longer matches (#531 review). The bundle is still written
+# - its estimates are the fit's - but on reload the level layout is not made
+# and `ferx_sir()` / `ferx_covariance()` refuse it, so say so now, while the
+# file can still be restored. The hash is ferx-core's rule, SHA-256 of the
+# file's bytes (`ModelSource`), which `tools::sha256sum()` computes the same
+# way; it exists from R 4.5, and on an older R the check is skipped. A fit
+# without a recorded hash has nothing to compare against.
+.fitrx_warn_model_edited <- function(model_path, model_hash) {
+  if (length(model_hash) != 1L || is.na(model_hash) || !nzchar(model_hash)) {
+    return(invisible())
+  }
+  sha256 <- get0("sha256sum", envir = asNamespace("tools"), mode = "function")
+  if (is.null(sha256)) return(invisible())
+  now <- unname(sha256(model_path))
+  if (identical(tolower(now), tolower(model_hash))) return(invisible())
+  warning(warningCondition(sprintf(paste0(
+    "ferx_save_fit(): the model file %s has changed since the fit (its ",
+    "SHA-256 no longer matches fit$model_hash). The bundle carries the ",
+    "file as it is now; on reload the theta level layout cannot be made, and ",
+    "ferx_sir() / ferx_covariance() refuse the fit. Restore the file and ",
+    "save again, or refit."), model_path),
+    class = "ferx_model_edited_warning"))
+}
+
 # A fit from before the FIX flags were shipped (#449) - `saveRDS()`'d under
 # ferx 0.4.0 - carries no `*_fixed` vector. The wire requires one per class,
 # so the writer below still fills in FALSE, but that calls every FIX parameter
@@ -329,21 +365,41 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
 # theta flags only; and a parser's flags are not a fit's - the engine also
 # FIXes a theta with no effect on the objective (`flat_parameter`), which the
 # parser reports as free.
-.fitrx_warn_missing_fixed <- function(fit) {
-  sizes <- c(
+#
+# Missing means not one flag per parameter, NULL or not (#459): a fit loaded
+# from a bundle without the field carries `logical(0)`, and a short vector is
+# no more a record of which entries are FIX. The warning and the writer's
+# fill-in (`.fitrx_fixed_flags()`) read it through the one test, so they cannot
+# disagree on which classes were filled.
+.fitrx_fixed_sizes <- function(fit) {
+  c(
     theta = length(fit$theta),
     omega = NROW(fit$omega),
     sigma = length(fit$sigma),
     kappa = if (is.null(fit$omega_iov)) 0L else NROW(fit$omega_iov)
   )
-  missing <- names(sizes)[sizes > 0L & vapply(
-    paste0(names(sizes), "_fixed"), function(f) is.null(fit[[f]]), logical(1L)
+}
+
+.fitrx_fixed_known <- function(flags, n) length(flags) == n
+
+.fitrx_fixed_flags <- function(fit, class) {
+  n <- .fitrx_fixed_sizes(fit)[[class]]
+  flags <- fit[[paste0(class, "_fixed")]]
+  if (.fitrx_fixed_known(flags, n)) as.logical(flags) else rep(FALSE, n)
+}
+
+.fitrx_warn_missing_fixed <- function(fit) {
+  sizes <- .fitrx_fixed_sizes(fit)
+  missing <- names(sizes)[sizes > 0L & !vapply(
+    names(sizes), function(k) .fitrx_fixed_known(fit[[paste0(k, "_fixed")]], sizes[[k]]),
+    logical(1L)
   )]
   if (length(missing) == 0L) return(invisible())
   classes <- paste(missing, collapse = ", ")
   warning(sprintf(paste0(
-    "ferx_save_fit(): the FIX flags for %s are unknown, because this fit was ",
-    "made before ferx recorded them. Every %s parameter is recorded as ",
+    "ferx_save_fit(): the FIX flags for %s are unknown: this fit does not ",
+    "carry one per parameter (it was made before ferx recorded them, or loaded ",
+    "from a bundle without them). Every %s parameter is recorded as ",
     "estimated in the bundle, so a FIX one will reload as free. Refit with ",
     "this version of ferx to keep them."), classes, classes), call. = FALSE)
 }
@@ -388,14 +444,14 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
       names = as.character(names(fit$theta) %||% character()),
       estimates = as.numeric(fit$theta),
       se = .fitrx_opt_num_vec(fit$se_theta),
-      fixed = as.logical(fit$theta_fixed %||% rep(FALSE, length(fit$theta))),
+      fixed = .fitrx_fixed_flags(fit, "theta"),
       transform = as.character(fit$theta_transforms %||% rep("identity", length(fit$theta)))
     ),
     omega = list(
       names = as.character(fit$eta_names %||% character()),
       matrix = .fitrx_matrix_to_wire(fit$omega),
       se = .fitrx_opt_num_vec(fit$se_omega),
-      fixed = as.logical(fit$omega_fixed %||% rep(FALSE, NROW(fit$omega))),
+      fixed = .fitrx_fixed_flags(fit, "omega"),
       log_transformed = as.logical(
         fit$eta_log_transformed %||% rep(TRUE, NROW(fit$omega))
       ),
@@ -407,7 +463,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
       names = as.character(fit$sigma_names %||% character()),
       estimates = as.numeric(fit$sigma %||% numeric()),
       se = .fitrx_opt_num_vec(fit$se_sigma),
-      fixed = as.logical(fit$sigma_fixed %||% rep(FALSE, length(fit$sigma %||% numeric()))),
+      fixed = .fitrx_fixed_flags(fit, "sigma"),
       types = as.character(fit$sigma_types %||% rep("proportional", length(fit$sigma %||% numeric()))),
       init_as_sd = as.logical(fit$sigma_init_as_sd %||% rep(FALSE, length(fit$sigma %||% numeric()))),
       # `block_sigma` residual correlations (ferx-core #847). A plain block
@@ -520,9 +576,13 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   # its `DataBindingsWire`), so the engine reads an R bundle's bindings and R
   # reads an engine bundle's: the theta level layout (#466) and the
   # `[covariate_model]` statistics (#412). The engine reads an empty
-  # statistics object as no statistics, which it is.
+  # statistics object as no statistics, which it is. A fit loaded from a bundle
+  # whose layout this engine could not make (#531) has no `theta_levels`; its
+  # bundle's bindings are written back as they were read, so a ferx that can
+  # lay them out still finds them.
   bindings <- list(
-    levels = .fitrx_level_bindings_to_wire(fit$theta_levels),
+    levels = fit$unavailable_theta_levels$levels %||%
+      .fitrx_level_bindings_to_wire(fit$theta_levels),
     covariate_stats = .fitrx_covariate_stats_to_wire(fit$covariate_stats)
   )
   bindings <- bindings[!vapply(bindings, is.null, logical(1L))]
@@ -947,7 +1007,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   if (is.null(fit$omega_iov)) return(NULL)
   wire <- list(
     kappa_names = as.character(fit$kappa_names %||% character()),
-    kappa_fixed = as.logical(fit$kappa_fixed %||% rep(FALSE, length(fit$kappa_names))),
+    kappa_fixed = .fitrx_fixed_flags(fit, "kappa"),
     se_kappa = .fitrx_opt_num_vec(fit$se_kappa),
     shrinkage_kappa = as.numeric(fit$shrinkage_kappa %||% numeric()),
     shrinkage_kappa_by_occ = if (is.data.frame(fit$shrinkage_kappa_by_occ) &&

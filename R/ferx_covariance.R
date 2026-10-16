@@ -138,6 +138,9 @@ ferx_covariance <- function(fit,
             !is.na(mu_referencing))) {
     stop("`mu_referencing` must be NULL, TRUE or FALSE.")
   }
+  # Before the model-file checks, so a loaded fit without a layout is refused
+  # for that reason even when its bundle had no model file (#531).
+  .ferx_refuse_unavailable_levels(fit)
 
   model_path <- fit$model_path
   if (is.null(model_path) || is.na(model_path) || !nzchar(model_path)) {
@@ -352,8 +355,8 @@ ferx_covariance <- function(fit,
   # fields and let the shared .ferx_apply_cov_sentinels() do the conversion:
   # it sets fit$eigenvalues / fit$condition_number, clears the (now stale) wire
   # fields, and appends the flat high-condition-number warning - exactly what
-  # ferx_fit() does, so the two paths can't drift and a loaded fit's old
-  # cov_eigenvalues / cov_condition_number don't survive alongside a new matrix.
+  # ferx_fit() does, so the two paths can't drift. A loaded fit carries the
+  # same `eigenvalues` / `condition_number` names (#455), which this replaces.
   fit$cov_eigenvalues <- if (length(raw$cov_eigenvalues) == 0L) NULL else raw$cov_eigenvalues
   fit$cov_condition_number <- raw$cov_condition_number
   fit <- .ferx_apply_cov_sentinels(fit)
