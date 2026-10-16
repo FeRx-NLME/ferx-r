@@ -401,11 +401,19 @@ fn ferx_rust_fit(
     settings_values: Vec<String>,
 ) -> List {
     entry(move || {
-        let mut parsed =
-            match ferx_core::parser::model_parser::parse_full_model_file(Path::new(model_path)) {
-                Ok(p) => p,
-                Err(e) => return Err(format!("Error parsing model: {e}")),
-            };
+        // One read of the model file (core's `ModelSource`, #1752): the parse,
+        // the level/covariate bind below and the `model_hash` / `model_text`
+        // stamped on the result all describe these bytes, so an edit to the
+        // file while the fit runs reaches none of them, and `ferx_save_fit()`
+        // bundles exactly what was fitted (ferx-r #577).
+        let ferx_core::ModelSource {
+            text: model_text,
+            hash: model_hash,
+            parsed,
+            ..
+        } = ferx_core::ModelSource::read(Path::new(model_path))
+            .map_err(|e| format!("Error parsing model: {e}"))?;
+        let mut parsed = parsed;
 
         // Build fit options
         let mut opts = parsed.fit_options.clone();
@@ -487,7 +495,7 @@ fn ferx_rust_fit(
         // of the (selected) dataset. The bind re-parses `parsed.model`, so it has
         // to come before every stamp on the model below - a stamp made earlier is
         // silently lost. No-op without a re-parse for a model with no level block.
-        bind_design(&mut parsed, model_path, &mut population)
+        bind_design_text(&mut parsed, &model_text, &mut population)
             .map_err(|e| engine_refusal("", e))?;
 
         // Re-apply the (now settings-merged) ODE solver tolerances onto the model's
@@ -666,16 +674,15 @@ fn ferx_rust_fit(
         result.model_path = Some(model_path.to_string());
         result.data_path = Some(data_path.to_string());
         //
-        // `model_hash` and `model_text` come from one read of the model file,
-        // so the text is exactly the bytes the hash names (CRLF, BOM and a
-        // missing trailing newline included). `ferx_save_fit()` writes the
-        // bundle's `model.ferx` from that text rather than re-reading a file
-        // that may have been edited since the fit (ferx-r #577). A file that is
-        // not UTF-8 has no `model_text`; the writer then falls back to the file.
-        let model_bytes = std::fs::read(model_path).ok();
-        result.model_hash = model_bytes.as_deref().map(ferx_core::io::hash::sha256_bytes);
+        // `model_hash` and `model_text` are the one read the fit was parsed
+        // and bound from (above), so the text is exactly the bytes the hash
+        // names (CRLF, BOM and a missing trailing newline included).
+        // `ferx_save_fit()` writes the bundle's `model.ferx` from that text
+        // rather than re-reading a file that may have been edited since
+        // (ferx-r #577).
+        result.model_hash = Some(model_hash);
         result.data_hash = ferx_core::io::hash::sha256_file(Path::new(data_path)).ok();
-        result.model_text = model_bytes.and_then(|b| String::from_utf8(b).ok());
+        result.model_text = Some(model_text);
         // Attach the covariate table built during the strict read above (None when
         // the model has no `[covariates]` block). `fit()` itself leaves this None.
         result.covariate_table = covariate_table;
@@ -1797,8 +1804,22 @@ fn bind_design(
         return Ok(());
     }
     let model_text = level_model_text(model_path)?;
-    ferx_core::api::bind_theta_levels(parsed, &model_text, population)?;
-    ferx_core::api::bind_covariate_stats(parsed, &model_text, population)
+    bind_design_text(parsed, &model_text, population)
+}
+
+/// [`bind_design`] on model text already read: `ferx_rust_fit` binds the text
+/// of the one read it parsed and hashes (`ModelSource`, ferx-r #577) instead of
+/// reading the file again.
+fn bind_design_text(
+    parsed: &mut ParsedModel,
+    model_text: &str,
+    population: &mut Population,
+) -> std::result::Result<(), ferx_core::EngineError> {
+    if !declares_level_blocks(parsed) && !needs_covariate_stats(parsed) {
+        return Ok(());
+    }
+    ferx_core::api::bind_theta_levels(parsed, model_text, population)?;
+    ferx_core::api::bind_covariate_stats(parsed, model_text, population)
 }
 
 /// The prologue of a from-fit bind that holds a population (predict, simulate,
@@ -4740,6 +4761,18 @@ fn ferx_rust_test_panic(msg: &str) -> Robj {
 /// header being absent from the engine's diagnostics rather than assuming it
 /// is unknown.
 ///
+/// @return Character vector of block names, sorted.
+/// @export
+#[extendr]
+fn ferx_rust_known_blocks() -> Vec<String> {
+    entry(move || {
+        Ok(ferx_core::known_block_names()
+            .into_iter()
+            .map(String::from)
+            .collect())
+    })
+}
+
 /// SHA-256 of a string's UTF-8 bytes, as the lowercase hex digest
 /// `model_hash` is written in (`ferx_core::io::hash::sha256_bytes`).
 ///
@@ -4753,19 +4786,7 @@ fn ferx_rust_test_panic(msg: &str) -> Robj {
 /// @export
 #[extendr]
 fn ferx_rust_sha256_text(text: &str) -> String {
-    ferx_core::io::hash::sha256_bytes(text.as_bytes())
-}
-
-/// @return Character vector of block names, sorted.
-/// @export
-#[extendr]
-fn ferx_rust_known_blocks() -> Vec<String> {
-    entry(move || {
-        Ok(ferx_core::known_block_names()
-            .into_iter()
-            .map(String::from)
-            .collect())
-    })
+    entry(move || Ok(ferx_core::io::hash::sha256_bytes(text.as_bytes())))
 }
 
 /// The theta blocks `print.ferx_fit` reports as a compact summary instead of one
