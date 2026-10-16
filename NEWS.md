@@ -1286,8 +1286,15 @@
   returned no matrix. Both now stop with an error that names the overrides.
   The in-fit covariance step and SIR of `ferx_fit()` are unaffected. Since
   [#511](https://github.com/FeRx-NLME/ferx-r/issues/511) the overrides are
-  read from `fit$packed_estimate`, so the refusal is left for a fit loaded
-  with `ferx_load_fit()` and for a SAEM, IMP or Bayes fit.
+  read from `fit$packed_estimate`, which a `.fitrx` bundle also carries
+  ([ferx-core #1815](https://github.com/FeRx-NLME/ferx-core/issues/1815)),
+  so the refusal is left for a fit without one: a SAEM, IMP or Bayes fit,
+  or one loaded from a bundle saved before the key. `ferx_covariance()` on
+  such a fit reproduces the in-fit matrix exactly, with a direct
+  `p(1) = P1` mixing probability, a kappa or a `block_sigma` too; it had
+  returned `"failed"` with a Hessian flat in the class-2 theta and the
+  mixing probability
+  ([#441](https://github.com/FeRx-NLME/ferx-r/issues/441)).
 
 - **`ferx_covariance()` refuses a `kappa` fit that has lost its kappa
   matrix** ([#473](https://github.com/FeRx-NLME/ferx-r/issues/473)). With

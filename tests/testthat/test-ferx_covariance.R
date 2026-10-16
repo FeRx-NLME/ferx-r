@@ -339,12 +339,10 @@ test_that("ferx_covariance refuses a kappa matrix of the wrong size (#473)", {
                info = "ferx_covariance side of the shared skeleton (#473)")
 })
 
-# A two-class [mixture] model with an omega(2) and a sigma(2) override, plus
-# either a kappa (on the warfarin_iov data) or a block_sigma correlation (on
-# the warfarin data). Checked through ferx_fit() only: ferx_covariance() does
-# not compute a matrix for a [mixture] fit today (its Hessian comes out flat in
-# the class-2 theta and the mixing probability), so there is nothing to label.
-mixture_fit <- function(kappa = FALSE, rho = FALSE) {
+# A two-class [mixture] model with an omega(2) and a sigma(2) override and a
+# direct `p(1) = P1` mixing probability, plus either a kappa (on the
+# warfarin_iov data) or a block_sigma correlation (on the warfarin data).
+mixture_fit <- function(kappa = FALSE, rho = FALSE, covariance = TRUE) {
   cl_eta <- if (kappa) "ETA_CL + KAPPA_CL" else "ETA_CL"
   mod <- tempfile(fileext = ".ferx")
   writeLines(c(
@@ -377,7 +375,7 @@ mixture_fit <- function(kappa = FALSE, rho = FALSE) {
   ), mod)
   data <- ferx_example(if (kappa) "warfarin_iov" else "warfarin")$data
   suppressWarnings(ferx_fit(mod, data, method = "foce", verbose = FALSE,
-                            covariance = TRUE, settings = list(maxiter = 30L)))
+                            covariance = covariance, settings = list(maxiter = 30L)))
 }
 
 test_that("kappa packs ahead of the [mixture] overrides, which carry their class", {
@@ -393,6 +391,68 @@ test_that("the [mixture] overrides pack ahead of the block_sigma correlation", {
     "PROP_ERR", "ADD_ERR", "ETA_CL (class 2)", "PROP_ERR (class 2)",
     "ADD_ERR ~ PROP_ERR"
   ))
+})
+
+# ferx_covariance() on a [mixture] fit (#441). It used to return "failed",
+# with a Hessian flat in the class-2 theta and the mixing probability, where
+# ferx_fit(covariance = TRUE) on the same model computed the matrix. The
+# standalone step now reads the fitted per-class overrides from
+# `fit$packed_estimate` (#511), so it reproduces the in-fit matrix exactly,
+# labels included, for the plain, kappa and block_sigma variants.
+expect_mixture_cov_matches_fit <- function(kappa = FALSE, rho = FALSE) {
+  in_fit <- mixture_fit(kappa = kappa, rho = rho)
+  skip_if(is.null(in_fit$cov_matrix), cov_skip)
+  bare <- mixture_fit(kappa = kappa, rho = rho, covariance = FALSE)
+  expect_identical(bare$ofv, in_fit$ofv)
+  out <- ferx_covariance(bare)
+  expect_identical(out$covariance_status, "computed")
+  expect_identical(out$cov_matrix, in_fit$cov_matrix)
+  expect_identical(out$se_theta, in_fit$se_theta)
+  expect_identical(out$se_omega, in_fit$se_omega)
+  expect_identical(out$se_sigma, in_fit$se_sigma)
+  expect_false(any(grepl("flat objective", out$warnings, fixed = TRUE)))
+  invisible(list(in_fit = in_fit, bare = bare, out = out))
+}
+
+test_that("ferx_covariance on a [mixture] fit matches the in-fit step (#441)", {
+  res <- expect_mixture_cov_matches_fit()
+  expect_cov_labels(res$out, c(
+    "TVCL1", "TVCL2", "TVV", "TVKA", "P1", "ETA_CL", "ETA_V", "PROP_ERR",
+    "ETA_CL (class 2)", "PROP_ERR (class 2)"
+  ))
+  # The overrides are read from the packed estimate, which a .fitrx bundle
+  # carries, so a reloaded fit is scored the same way.
+  path <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(path), add = TRUE)
+  ferx_save_fit(res$bare, path)
+  loaded <- ferx_covariance(ferx_load_fit(path))
+  expect_identical(loaded$covariance_status, "computed")
+  expect_identical(loaded$cov_matrix, res$in_fit$cov_matrix)
+  # Without the packed estimate the overrides cannot be recovered: a clear
+  # refusal, never a matrix centred on the declared override inits.
+  no_packed <- res$bare
+  no_packed$packed_estimate <- NULL
+  expect_error(ferx_covariance(no_packed),
+               "does not store their fitted values", fixed = TRUE)
+})
+
+test_that("ferx_covariance on a [mixture] fit with kappa matches the in-fit step (#441)", {
+  res <- expect_mixture_cov_matches_fit(kappa = TRUE)
+  expect_cov_labels(res$out, c(
+    "TVCL1", "TVCL2", "TVV", "TVKA", "P1", "ETA_CL", "ETA_V", "PROP_ERR",
+    "KAPPA_CL", "ETA_CL (class 2)", "PROP_ERR (class 2)"
+  ))
+  expect_identical(res$out$se_kappa, res$in_fit$se_kappa)
+})
+
+test_that("ferx_covariance on a [mixture] fit with block_sigma matches the in-fit step (#441)", {
+  res <- expect_mixture_cov_matches_fit(rho = TRUE)
+  expect_cov_labels(res$out, c(
+    "TVCL1", "TVCL2", "TVV", "TVKA", "P1", "ETA_CL", "ETA_V",
+    "PROP_ERR", "ADD_ERR", "ETA_CL (class 2)", "PROP_ERR (class 2)",
+    "ADD_ERR ~ PROP_ERR"
+  ))
+  expect_identical(res$out$residual_correlations, res$in_fit$residual_correlations)
 })
 
 # ---- subject IDs on the standalone skeleton (#468) ----
