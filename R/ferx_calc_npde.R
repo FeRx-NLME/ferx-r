@@ -142,6 +142,7 @@ ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = 
       omega_iov_dim  = fit_pieces$omega_iov_dim,
       residual_rho = fit_pieces$residual_rho,
       fit_bindings = fit_pieces$fit_bindings,
+      iov_occasion = fit_pieces$iov_occasion,
       # The fit's own selection, replayed on whichever file is read (#416).
       reader_settings = reader_args$reader_settings,
       model_is_fits = model_is_fits,

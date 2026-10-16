@@ -75,7 +75,9 @@ ferx_predict_survival <- function(model, data = NULL, times, fit = NULL) {
   }
 
   fit_pieces <- validate_fit_for_params(fit)
-  .ferx_engine_call(
+  # A note on how the fit's occasions were derived (#523) comes back on the
+  # simulate paths' `simulation_warnings` channel.
+  res <- .ferx_engine_call(
     ferx_rust_predict_survival_from_fit(
       model_path = normalizePath(model),
       data_path = normalizePath(data),
@@ -87,8 +89,10 @@ ferx_predict_survival <- function(model, data = NULL, times, fit = NULL) {
       omega_iov_flat = fit_pieces$omega_iov_flat,
       omega_iov_dim = fit_pieces$omega_iov_dim,
       residual_rho = fit_pieces$residual_rho,
-      fit_bindings = fit_pieces$fit_bindings
+      fit_bindings = fit_pieces$fit_bindings,
+      iov_occasion = fit_pieces$iov_occasion
     ),
     model, data
   )
+  .ferx_surface_sim_warnings(res, "ferx_predict_survival")
 }
