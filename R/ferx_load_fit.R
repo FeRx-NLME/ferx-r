@@ -286,6 +286,9 @@ ferx_load_fit <- function(path) {
     wall_time_secs = as.numeric(w$wall_time_secs),
     n_threads_used = as.integer(w$n_threads_used %||% NA_integer_),
     uses_ode_solver = isTRUE(w$uses_ode_solver),
+    # ferx-core #2021. Absent on a bundle written before the exact linear
+    # path existed, which reads back FALSE - the route that fit ran on.
+    ode_linear_exact = isTRUE(w$ode_linear_exact),
     uses_sde = isTRUE(w$uses_sde),
     gradient_method_inner = as.character(w$gradient_method_inner %||% ""),
     gradient_method_outer = as.character(w$gradient_method_outer %||% ""),

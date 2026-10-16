@@ -427,6 +427,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
     wall_time_secs = as.numeric(fit$wall_time_secs %||% NA_real_),
     n_threads_used = as.integer(fit$n_threads_used %||% NA_integer_),
     uses_ode_solver = isTRUE(fit$uses_ode_solver),
+    ode_linear_exact = isTRUE(fit$ode_linear_exact),
     uses_sde = isTRUE(fit$uses_sde),
     gradient_method_inner = as.character(fit$gradient_method_inner %||% ""),
     gradient_method_outer = as.character(fit$gradient_method_outer %||% ""),
