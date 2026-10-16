@@ -26,13 +26,17 @@ FITRX_FORMAT_VERSION <- "1"
 #' log-packed, for one), and the bundle does not yet name the columns or
 #' their packing.
 #'
-#' The bundle's \code{model.ferx} is a copy of the model file at
+#' The bundle's \code{model.ferx} holds the bytes that were fitted, the ones
+#' \code{fit$model_hash} names, taken from \code{fit$model_text}: editing the
+#' model file after \code{\link{ferx_fit}} does not change what is saved. A
+#' fit that does not carry them (one made by an older ferx, or from a model
+#' file that is not UTF-8) falls back to a copy of the file at
 #' \code{fit$model_path} as it is when you save. If that file has been edited
 #' since the fit (its SHA-256 no longer matches \code{fit$model_hash}), the
 #' bundle is still written, but a warning of class
 #' \code{ferx_model_edited_warning} says so: on reload the theta level layout
 #' cannot be made, and \code{\link{ferx_sir}} / \code{\link{ferx_covariance}}
-#' refuse the fit. Restore the file and save again, or refit. The check needs
+#' refuse the fit. Restore the file and save again, or refit. That check needs
 #' R 4.5 or later (\code{tools::sha256sum()}) and is skipped on older R.
 #'
 #' The schema is shared with the ferx-core Rust crate; see its
@@ -145,27 +149,32 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
 
   # model.ferx
   #
-  # Prefer `file.copy(fit$model_path, ...)` so the bundled bytes match
-  # the original file exactly - including line endings, BOM, and the
-  # presence/absence of a trailing newline. `fit$model_source` was
-  # produced by `readLines + paste(collapse = "\n")` and writing it back
-  # via `writeLines` loses that fidelity, which causes
-  # `sha256(staging/model.ferx)` to drift from the stored
-  # `fit$model_hash`. That drift would then trip the hash-mismatch
-  # check inside `ferx_sir(loaded_fit)` after a save/load round-trip on
-  # any model whose bytes don't round-trip through readLines/writeLines
-  # (CRLF endings, missing trailing newline, etc.).
+  # The bundle must carry the bytes that were fitted, the ones `fit$model_hash`
+  # names, or on reload the theta level layout cannot be made and `ferx_sir()`
+  # / `ferx_covariance()` refuse the fit. A fit carries them in
+  # `fit$model_text`: the glue reads the model file once and takes both the
+  # text and the hash from that read (#577), so the text holds the file's line
+  # endings, BOM and trailing newline exactly. Write that, whatever has
+  # happened to the file on disk since.
   #
-  # Fall back to `writeLines(fit$model_source)` only when no `model_path`
-  # is available (e.g. a hand-constructed fit) - in that case the bundle
-  # carries the best representation we have.
+  # Fall back to copying the file at `fit$model_path` only when the text does
+  # not hash to `fit$model_hash`: a fit made before the glue took both from one
+  # read, a fit loaded by a ferx that read the bundle's text with `readLines()`,
+  # or a model file that is not UTF-8. The copy keeps the bytes as they are
+  # now, so it warns when they are not the fitted ones (#576). With no file
+  # either (a hand-constructed fit), `fit$model_source` is the best
+  # representation there is.
+  model_out <- file.path(staging, "model.ferx")
+  fitted_text <- .fitrx_fitted_model_text(fit)
   model_src_path <- fit$model_path
-  if (!is.null(model_src_path) && !is.na(model_src_path) &&
+  if (!is.null(fitted_text)) {
+    writeBin(charToRaw(fitted_text), model_out)
+  } else if (!is.null(model_src_path) && !is.na(model_src_path) &&
       nzchar(model_src_path) && file.exists(model_src_path)) {
     .fitrx_warn_model_edited(model_src_path, fit$model_hash)
-    file.copy(model_src_path, file.path(staging, "model.ferx"), overwrite = TRUE)
+    file.copy(model_src_path, model_out, overwrite = TRUE)
   } else {
-    writeLines(fit$model_source %||% "", file.path(staging, "model.ferx"))
+    writeLines(fit$model_source %||% "", model_out)
   }
   entries <- c(entries, "model.ferx")
 
@@ -337,6 +346,25 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
 # file's bytes (`ModelSource`), which `tools::sha256sum()` computes the same
 # way; it exists from R 4.5, and on an older R the check is skipped. A fit
 # without a recorded hash has nothing to compare against.
+# `fit$model_text` as UTF-8, when it is the text that was fitted: its bytes
+# hash to `fit$model_hash`. NULL otherwise - no text, no hash to check it
+# against, or a text that is not the fitted one (see the model.ferx block in
+# `ferx_save_fit()`). The hash is the engine's own (`sha256_bytes`), so this
+# check needs no file and works on every R version.
+.fitrx_fitted_model_text <- function(fit) {
+  txt <- fit$model_text
+  hash <- fit$model_hash
+  if (!is.character(txt) || length(txt) != 1L || is.na(txt)) return(NULL)
+  if (!is.character(hash) || length(hash) != 1L || is.na(hash) ||
+      !nzchar(hash)) {
+    return(NULL)
+  }
+  txt <- enc2utf8(txt)
+  if (!validUTF8(txt)) return(NULL)
+  if (!identical(ferx_rust_sha256_text(txt), tolower(hash))) return(NULL)
+  txt
+}
+
 .fitrx_warn_model_edited <- function(model_path, model_hash) {
   if (length(model_hash) != 1L || is.na(model_hash) || !nzchar(model_hash)) {
     return(invisible())

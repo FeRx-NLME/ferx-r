@@ -665,9 +665,17 @@ fn ferx_rust_fit(
         // `ferx_sir` will fall back to a no-verification call.
         result.model_path = Some(model_path.to_string());
         result.data_path = Some(data_path.to_string());
-        result.model_hash = ferx_core::io::hash::sha256_file(Path::new(model_path)).ok();
+        //
+        // `model_hash` and `model_text` come from one read of the model file,
+        // so the text is exactly the bytes the hash names (CRLF, BOM and a
+        // missing trailing newline included). `ferx_save_fit()` writes the
+        // bundle's `model.ferx` from that text rather than re-reading a file
+        // that may have been edited since the fit (ferx-r #577). A file that is
+        // not UTF-8 has no `model_text`; the writer then falls back to the file.
+        let model_bytes = std::fs::read(model_path).ok();
+        result.model_hash = model_bytes.as_deref().map(ferx_core::io::hash::sha256_bytes);
         result.data_hash = ferx_core::io::hash::sha256_file(Path::new(data_path)).ok();
-        result.model_text = std::fs::read_to_string(model_path).ok();
+        result.model_text = model_bytes.and_then(|b| String::from_utf8(b).ok());
         // Attach the covariate table built during the strict read above (None when
         // the model has no `[covariates]` block). `fit()` itself leaves this None.
         result.covariate_table = covariate_table;
@@ -4732,6 +4740,22 @@ fn ferx_rust_test_panic(msg: &str) -> Robj {
 /// header being absent from the engine's diagnostics rather than assuming it
 /// is unknown.
 ///
+/// SHA-256 of a string's UTF-8 bytes, as the lowercase hex digest
+/// `model_hash` is written in (`ferx_core::io::hash::sha256_bytes`).
+///
+/// `ferx_save_fit()` checks `fit$model_text` against `fit$model_hash` with it
+/// before writing the text as the bundle's `model.ferx`, and checks the model
+/// file the same way when it falls back to copying it (ferx-r #577). Unlike
+/// `tools::sha256sum()` it needs no file and no R >= 4.5.
+///
+/// @param text A single string; the caller passes it through `enc2utf8()`.
+/// @return The 64-character hex digest.
+/// @export
+#[extendr]
+fn ferx_rust_sha256_text(text: &str) -> String {
+    ferx_core::io::hash::sha256_bytes(text.as_bytes())
+}
+
 /// @return Character vector of block names, sorted.
 /// @export
 #[extendr]
@@ -11442,6 +11466,7 @@ extendr_module! {
     fn ferx_rust_autodiff_enabled;
     fn ferx_rust_test_panic;
     fn ferx_rust_known_blocks;
+    fn ferx_rust_sha256_text;
     fn ferx_rust_compact_theta_blocks;
     fn ferx_rust_kappa_rows;
     fn ferx_rust_fitrx_kappa_rows;

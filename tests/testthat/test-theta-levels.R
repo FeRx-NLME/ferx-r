@@ -1639,6 +1639,75 @@ test_that("T17i: a model file edited since the fit is named, not laid out by pos
                   fixed = TRUE)
 })
 
+# The bundle's model.ferx, as raw bytes.
+tl_bundled_model <- function(path) {
+  staging <- tempfile("fitrx_model_")
+  dir.create(staging)
+  utils::unzip(path, files = "model.ferx", exdir = staging, junkpaths = TRUE)
+  f <- file.path(staging, "model.ferx")
+  readBin(f, "raw", n = file.size(f))
+}
+
+test_that("T17k: a model file edited after the fit still bundles the fitted bytes (#577)", {
+  # ferx_save_fit() used to copy the model file as it is at save time, so a
+  # file edited after ferx_fit() gave a bundle that did not match its own
+  # model_hash: no level layout on reload, and ferx_sir() refused the fit.
+  # The line-ending variants are the bytes readLines() would not keep.
+  text <- tl_model(paste0(
+    "  theta TVCL(2.0, 0.001, 20.0)\n",
+    "  theta ZPLA[STUDY, TIME, contrast = none](0.1, -5.0, 5.0)\n",
+    "  theta AST[STUDY, contrast = ref](0.0, -5.0, 5.0)"
+  ), "TVCL + ZPLA + AST")
+  text <- sub("\n+$", "", text)
+  variants <- list(
+    lf    = paste0(text, "\n"),
+    crlf  = paste0(gsub("\n", "\r\n", text, fixed = TRUE), "\r\n"),
+    no_eol = text
+  )
+  data <- tl_write(tl_data, ".csv")
+  for (v in names(variants)) {
+    model <- tempfile(fileext = ".ferx")
+    fitted <- charToRaw(variants[[v]])
+    writeBin(fitted, model)
+    fit <- tl_fit(model, data)
+    expect_false(is.null(fit$theta_levels), info = v)
+    # The fit carries the fitted bytes, exactly.
+    expect_identical(charToRaw(fit$model_text), fitted, info = v)
+    # Edited after the fit: the theta order swapped, so a bundle carrying it
+    # could not be laid out.
+    lines <- readLines(model, warn = FALSE)
+    z <- grep("theta ZPLA[", lines, fixed = TRUE)
+    a <- grep("theta AST[", lines, fixed = TRUE)
+    lines[c(z, a)] <- lines[c(a, z)]
+    writeLines(c(lines, "# edited after the fit"), model)
+    path <- tempfile(fileext = ".fitrx")
+    expect_no_warning(ferx_save_fit(fit, path), class = "ferx_model_edited_warning")
+    expect_identical(tl_bundled_model(path), fitted, info = v)
+    if (exists("sha256sum", envir = asNamespace("tools"))) {
+      staging <- tempfile()
+      dir.create(staging)
+      utils::unzip(path, files = "model.ferx", exdir = staging)
+      expect_identical(unname(tools::sha256sum(file.path(staging, "model.ferx"))),
+                       fit$model_hash, info = v)
+    }
+    # Reloads with its level layout, and a re-save writes the same bytes.
+    loaded <- expect_no_warning(ferx_load_fit(path),
+                                class = "ferx_levels_unavailable_warning")
+    expect_identical(loaded$theta_levels$theta_name, fit$theta_levels$theta_name,
+                     info = v)
+    expect_null(loaded$unavailable_theta_levels, info = v)
+    expect_identical(charToRaw(loaded$model_text), fitted, info = v)
+    resaved <- tempfile(fileext = ".fitrx")
+    expect_no_warning(ferx_save_fit(loaded, resaved),
+                      class = "ferx_model_edited_warning")
+    expect_identical(tl_bundled_model(resaved), fitted, info = v)
+  }
+  # The fit from the bundle runs SIR, which reads the bundled model against
+  # the hash.
+  sir <- ferx_sir(tl_with_cov(loaded), sir_samples = 20L, sir_resamples = 10L)
+  expect_s3_class(sir, "ferx_fit")
+})
+
 test_that("T17j: a bundle whose model this engine rejects loads, warns and refuses from-fit (#531)", {
   # The case #531 is about: a bundle written today, loaded by a ferx whose
   # engine no longer parses its model (closed-world blocks, #1040). Stood in
