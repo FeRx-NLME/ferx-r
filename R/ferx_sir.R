@@ -214,6 +214,9 @@ ferx_sir <- function(fit,
         !(is.numeric(sir_df) && length(sir_df) == 1L && !is.na(sir_df) && sir_df >= 1)) {
     stop("`sir_df` must be NULL or a single number >= 1 (`Inf` for a normal proposal).")
   }
+  # Before the model-file checks, so a loaded fit without a layout is refused
+  # for that reason even when its bundle had no model file (#531).
+  .ferx_refuse_unavailable_levels(fit)
 
   model_path <- fit$model_path
   if (is.null(model_path) || is.na(model_path) || !nzchar(model_path)) {

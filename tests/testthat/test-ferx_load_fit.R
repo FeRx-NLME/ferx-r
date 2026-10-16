@@ -147,14 +147,6 @@ test_that(".fitrx_method_label is the inverse for every known token", {
   expect_identical(ferx:::.fitrx_method_label("bayes"), "BAYES")
   expect_identical(ferx:::.fitrx_method_label("other"), "other") # unknown passthrough
 })
-test_that(".fitrx_covariance_status_label maps tokens back to display form", {
-  expect_identical(ferx:::.fitrx_covariance_status_label(NULL), "NotRequested")
-  expect_identical(ferx:::.fitrx_covariance_status_label("computed"), "Computed")
-  expect_identical(ferx:::.fitrx_covariance_status_label("failed"), "Failed")
-  expect_identical(ferx:::.fitrx_covariance_status_label("not_requested"), "NotRequested")
-  expect_identical(ferx:::.fitrx_covariance_status_label("sir_fallback"), "SirFallback")
-  expect_identical(ferx:::.fitrx_covariance_status_label("other"), "other")
-})
 test_that(".fitrx_matrix_from_wire rebuilds the matrix and guards bad input", {
   expect_null(ferx:::.fitrx_matrix_from_wire(NULL))
   expect_null(ferx:::.fitrx_matrix_from_wire(list(rows = 0L, cols = 0L, data = numeric())))

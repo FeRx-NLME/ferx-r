@@ -54,6 +54,15 @@ packed depends on the model (a theta with a negative lower bound is not
 log-packed, for one), and the bundle does not yet name the columns or
 their packing.
 
+The bundle's \code{model.ferx} is a copy of the model file at
+\code{fit$model_path} as it is when you save. If that file has been edited
+since the fit (its SHA-256 no longer matches \code{fit$model_hash}), the
+bundle is still written, but a warning of class
+\code{ferx_model_edited_warning} says so: on reload the theta level layout
+cannot be made, and \code{\link{ferx_sir}} / \code{\link{ferx_covariance}}
+refuse the fit. Restore the file and save again, or refit. The check needs
+R 4.5 or later (\code{tools::sha256sum()}) and is skipped on older R.
+
 The schema is shared with the ferx-core Rust crate; see its
 \code{docs/src/file-formats/fitrx.md} for the full field reference.
 }
