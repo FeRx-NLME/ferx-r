@@ -1732,3 +1732,34 @@ test_that("ferx_save_fit refuses reader settings that are not JSON, by name (#52
   expect_error(ferx_save_fit(edited, path),
                "`fit$population_fingerprint` is not the engine's JSON", fixed = TRUE)
 })
+
+test_that("ferx_save_fit() warns when the model file changed since the fit (#531 review)", {
+  skip_on_cran()
+  skip_if_not(exists("sha256sum", envir = asNamespace("tools")),
+              "tools::sha256sum() needs R >= 4.5")
+  ex <- ferx_example("warfarin")
+  model <- withr::local_tempfile(fileext = ".ferx")
+  file.copy(ex$model, model)
+  fit <- suppressWarnings(ferx_fit(model, ex$data, method = "focei",
+                                   covariance = FALSE, verbose = FALSE,
+                                   settings = list(maxiter = 5L)))
+  path <- withr::local_tempfile(fileext = ".fitrx")
+  # Unchanged: quiet, and a reloaded fit (whose model is the bundle's copy)
+  # re-saves quietly too.
+  expect_no_warning(ferx_save_fit(fit, path), class = "ferx_model_edited_warning")
+  loaded <- suppressWarnings(ferx_load_fit(path))
+  expect_no_warning(ferx_save_fit(loaded, path), class = "ferx_model_edited_warning")
+  # One comment line appended after the fit: the bundle is still written,
+  # with the file as it is now, and the warning names it.
+  cat("# edited after the fit\n", file = model, append = TRUE)
+  expect_warning(ferx_save_fit(fit, path), class = "ferx_model_edited_warning")
+  w <- tryCatch(ferx_save_fit(fit, path), ferx_model_edited_warning = conditionMessage)
+  expect_match(w, basename(model), fixed = TRUE)
+  expect_match(w, "no longer matches fit$model_hash", fixed = TRUE)
+  expect_true(file.exists(path))
+  expect_identical(fitrx_fit_json(path)$model_hash, fit$model_hash)
+  # No recorded hash: nothing to compare against.
+  nohash <- fit
+  nohash$model_hash <- NA_character_
+  expect_no_warning(ferx_save_fit(nohash, path), class = "ferx_model_edited_warning")
+})

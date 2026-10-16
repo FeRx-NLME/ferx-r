@@ -26,6 +26,15 @@ FITRX_FORMAT_VERSION <- "1"
 #' log-packed, for one), and the bundle does not yet name the columns or
 #' their packing.
 #'
+#' The bundle's \code{model.ferx} is a copy of the model file at
+#' \code{fit$model_path} as it is when you save. If that file has been edited
+#' since the fit (its SHA-256 no longer matches \code{fit$model_hash}), the
+#' bundle is still written, but a warning of class
+#' \code{ferx_model_edited_warning} says so: on reload the theta level layout
+#' cannot be made, and \code{\link{ferx_sir}} / \code{\link{ferx_covariance}}
+#' refuse the fit. Restore the file and save again, or refit. The check needs
+#' R 4.5 or later (\code{tools::sha256sum()}) and is skipped on older R.
+#'
 #' The schema is shared with the ferx-core Rust crate; see its
 #' \code{docs/src/file-formats/fitrx.md} for the full field reference.
 #'
@@ -153,6 +162,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   model_src_path <- fit$model_path
   if (!is.null(model_src_path) && !is.na(model_src_path) &&
       nzchar(model_src_path) && file.exists(model_src_path)) {
+    .fitrx_warn_model_edited(model_src_path, fit$model_hash)
     file.copy(model_src_path, file.path(staging, "model.ferx"), overwrite = TRUE)
   } else {
     writeLines(fit$model_source %||% "", file.path(staging, "model.ferx"))
@@ -316,6 +326,32 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
     }
   }
   x
+}
+
+# The writer copies the model file as it is now, not the text that was fitted,
+# so a file edited since `ferx_fit()` goes into the bundle beside a
+# `model_hash` it no longer matches (#531 review). The bundle is still written
+# - its estimates are the fit's - but on reload the level layout is not made
+# and `ferx_sir()` / `ferx_covariance()` refuse it, so say so now, while the
+# file can still be restored. The hash is ferx-core's rule, SHA-256 of the
+# file's bytes (`ModelSource`), which `tools::sha256sum()` computes the same
+# way; it exists from R 4.5, and on an older R the check is skipped. A fit
+# without a recorded hash has nothing to compare against.
+.fitrx_warn_model_edited <- function(model_path, model_hash) {
+  if (length(model_hash) != 1L || is.na(model_hash) || !nzchar(model_hash)) {
+    return(invisible())
+  }
+  sha256 <- get0("sha256sum", envir = asNamespace("tools"), mode = "function")
+  if (is.null(sha256)) return(invisible())
+  now <- unname(sha256(model_path))
+  if (identical(tolower(now), tolower(model_hash))) return(invisible())
+  warning(warningCondition(sprintf(paste0(
+    "ferx_save_fit(): the model file %s has changed since the fit (its ",
+    "SHA-256 no longer matches fit$model_hash). The bundle carries the ",
+    "file as it is now; on reload the theta level layout cannot be made, and ",
+    "ferx_sir() / ferx_covariance() refuse the fit. Restore the file and ",
+    "save again, or refit."), model_path),
+    class = "ferx_model_edited_warning"))
 }
 
 # A fit from before the FIX flags were shipped (#449) - `saveRDS()`'d under

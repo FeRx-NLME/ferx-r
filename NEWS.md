@@ -981,6 +981,15 @@
   back unchanged. Malformed or disagreeing bindings still refuse the load
   ([#531](https://github.com/FeRx-NLME/ferx-r/issues/531)).
 
+- **`ferx_save_fit()` warns when the model file changed since the fit.** The
+  bundle's `model.ferx` is a copy of the file at `fit$model_path` as it is at
+  save time, so an edit made after `ferx_fit()` went into the bundle silently
+  beside a `model_hash` it no longer matches; on reload the level layout could
+  not be made and `ferx_sir()` / `ferx_covariance()` refused the fit. The
+  bundle is still written, with a `ferx_model_edited_warning` naming the file.
+  The check uses `tools::sha256sum()` and is skipped on R older than 4.5
+  ([#531](https://github.com/FeRx-NLME/ferx-r/issues/531)).
+
 - **A fit reloaded with `ferx_load_fit()` prints exactly like the live one.**
   The SIGMA row keeps its `[additive]` / `[proportional]` tag, SD and CV%
   (`fit$sigma_types` comes back unnamed), the diagnostics line keeps its
