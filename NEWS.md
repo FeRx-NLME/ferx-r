@@ -2,6 +2,54 @@
 
 ## Breaking changes
 
+- **ferx now builds against ferx-core `c46b152e`**, up from `d53e8219`.
+  These engine changes reach R:
+
+  - **`ferx_covariance()` repeats a fit's in-fit covariance step bit for bit
+    on every estimation method, also on a fit reloaded with
+    `ferx_load_fit()`**
+    ([ferx-core #1847](https://github.com/FeRx-NLME/ferx-core/issues/1847),
+    [#2092](https://github.com/FeRx-NLME/ferx-core/pull/2092)). Gauss-Newton,
+    SAEM, importance sampling and VI report the EBEs of their own
+    warm-started solves, and `ferx_covariance()` restarted them from a cold
+    solve, so their standard errors could differ from the fit's by up to
+    3.5e-7 relative; they now start from the reported EBEs. ferx-core's own
+    `.fitrx` writer now stores every CSV double (EBEs, kappas including each
+    level's `ebes_kappa_<LEVEL>.csv`, predictions, conditional distribution)
+    as the shortest text that reads back as the same value, as
+    `ferx_save_fit()` has since #415, instead of at six decimals
+    ([#1631](https://github.com/FeRx-NLME/ferx-core/issues/1631), `.fitrx`
+    part). ferx-core's loader now accepts an R-written `conddist.csv`, which
+    it refused as corrupt whenever an EBE was not a six-decimal number, so a
+    SAEM `conddist = TRUE` bundle saved from R opens in the `ferx` CLI.
+    A bundle saved before this with six-decimal values still loads; on it
+    `ferx_covariance()` restarts from the cold solve as before, which repeats
+    FOCE / FOCEI exactly and the warm-started engines to about 1e-7.
+  - **An adaptive-dosing decision on a non-finite ODE state is an error that
+    names the state**
+    ([ferx-core #1578](https://github.com/FeRx-NLME/ferx-core/issues/1578)).
+    `ferx_simulate_adaptive()` used to hand the controller the `NaN` state of
+    a diverged run: a rule could dose on it, an `amt = 10 / C` controller
+    failed as `E_ADAPTIVE_CONTROLLER_ACTION`, a `Dv` monitor's assay clamp
+    turned it into `0`, and with `verify = FALSE` the run returned results.
+    It now stops with "the ODE state is non-finite (`<state>`)", whether the
+    value came from `[odes]` or an `init()` seed, and also when a monitor
+    reads a non-finite value from a finite state. The error carries no
+    `e$code`: the model and its parameters produced it, not the call. An ODE
+    time-to-event search likewise names a state that went non-finite instead
+    of blaming the step budget or `ode_stiff_abort_after`.
+  - **`inner_restarts` acts during an estimating fit, not only on its final
+    re-solve**
+    ([ferx-core #2014](https://github.com/FeRx-NLME/ferx-core/issues/2014),
+    [#2015](https://github.com/FeRx-NLME/ferx-core/pull/2015)). An all-zero
+    EBE start now counts as cold, so the guarded inner multi-start runs on the
+    pre-flight, the first evaluation of each optimizer leg and the final
+    re-solve. A subject trapped in a shallower EBE mode no longer leaves the
+    fit at `W_EBE_START_DEPENDENT` with `converged = FALSE`, so estimates can
+    move on such fits; some models get slower (ferx-core's schnider example
+    0.88 s to 1.68 s; warfarin unchanged). `global_search` probes do not
+    scan. Set `inner_restarts = 0` to turn the scan off.
+
 - **ferx now builds against ferx-core `d53e8219`**, up from `b32f20d9`.
   These engine changes reach R:
 
