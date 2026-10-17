@@ -276,12 +276,12 @@ ferx_load_fit <- function(path) {
     method = .fitrx_method_label(w$method),
     method_chain = vapply(as.character(w$method_chain), .fitrx_method_label, character(1L), USE.NAMES = FALSE),
     converged = isTRUE(w$converged),
-    ofv = as.numeric(w$ofv),
+    ofv = .fitrx_num_or_nan(w$ofv),
     ofv_data = split$ofv_data,
     ofv_prior = split$ofv_prior,
     prior_summary = prior_summary,
-    aic = as.numeric(w$aic),
-    bic = as.numeric(w$bic),
+    aic = .fitrx_num_or_nan(w$aic),
+    bic = .fitrx_num_or_nan(w$bic),
     n_obs = as.integer(w$n_obs),
     n_subjects = as.integer(w$n_subjects),
     n_parameters = as.integer(w$n_parameters),
@@ -290,6 +290,9 @@ ferx_load_fit <- function(path) {
     wall_time_secs = as.numeric(w$wall_time_secs),
     n_threads_used = as.integer(w$n_threads_used %||% NA_integer_),
     uses_ode_solver = isTRUE(w$uses_ode_solver),
+    # ferx-core #2021. Absent on a bundle written before the exact linear
+    # path existed, which reads back FALSE - the route that fit ran on.
+    ode_linear_exact = isTRUE(w$ode_linear_exact),
     uses_sde = isTRUE(w$uses_sde),
     gradient_method_inner = as.character(w$gradient_method_inner %||% ""),
     gradient_method_outer = as.character(w$gradient_method_outer %||% ""),
@@ -892,25 +895,40 @@ ferx_load_fit <- function(path) {
   )
 }
 
+# The engine's method table (#508): each method's `.fitrx` token and the label
+# a live fit reports (ferx-core's `EstimationMethod::label()`), read once from
+# the glue, whose exhaustive match fails to compile when the engine gains a
+# method. Cached in `.ferx_state`.
+.fitrx_method_table <- function() {
+  tab <- .ferx_state$method_table
+  if (is.null(tab)) {
+    tab <- ferx_rust_method_labels()
+    .ferx_state$method_table <- tab
+  }
+  tab
+}
+
 .fitrx_method_label <- function(token) {
-  # Mirrors ferx-core's `EstimationMethod::label()`, keyed by the tokens its
-  # `method_to_str()` writes into the .fitrx. A token missing here falls through to
-  # `as.character()` and surfaces lowercase (e.g. "agq" instead of "AGQ") - so this
-  # list has to grow whenever the engine gains a method.
   if (is.null(token) || !nzchar(token)) return("FOCEI")
-  switch(token,
-    "foce" = "FOCE",
-    "focei" = "FOCEI",
-    "laplace" = "LAPLACE",
-    "agq" = "AGQ",
-    "foce_gn" = "FOCE-GN",
-    "foce_gn_hybrid" = "FOCE-GN-Hybrid",
-    "saem" = "SAEM",
-    "imp" = "IMP",
-    "impmap" = "IMPMAP",
-    "bayes" = "BAYES",
-    as.character(token)
-  )
+  tab <- .fitrx_method_table()
+  hit <- match(token, tab$token)
+  if (!is.na(hit)) return(tab$label[[hit]])
+  # `agq` was an unreleased engine token (ferx-core #251); a bundle written
+  # while it existed still reads back with the label it had.
+  if (identical(token, "agq")) return("AGQ")
+  # A token this build's engine does not know, from a bundle a newer engine
+  # wrote: every engine label is the upper-cased token apart from the GN
+  # hyphenation, so that is the closest guess.
+  toupper(as.character(token))
+}
+
+# A scalar the writer may have stored as `null`: the JSON writer turns NaN
+# into `null` (`na = "null"`), and a VI fit under `vi_final_ofv = none` has a
+# NaN OFV, AIC and BIC by design (#508). `as.numeric(NULL)` would read that
+# back as `numeric(0)`, so `null` comes back as the NaN it was.
+.fitrx_num_or_nan <- function(x) {
+  v <- as.numeric(unlist(x, use.names = FALSE))
+  if (length(v) == 0L) NaN else v[[1L]]
 }
 
 # Read the `bic_inputs` wire object back as a plain list of counts. NULL when

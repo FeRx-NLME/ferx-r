@@ -192,7 +192,8 @@
 # half within rounding distance of zero is taken as exactly zero, which is what
 # the overwhelmingly common unpriored bundle should report.
 .fitrx_recover_ofv_split <- function(w) {
-  ofv <- suppressWarnings(as.numeric(w$ofv %||% NA_real_))
+  # A null OFV (a VI fit's NaN, #508) gives a NaN data half, as on the fit.
+  ofv <- suppressWarnings(.fitrx_num_or_nan(w$ofv))
   unpriored <- list(ofv_data = ofv, ofv_prior = 0, recovered = FALSE)
   if (length(ofv) != 1L || !is.finite(ofv)) return(unpriored)
 

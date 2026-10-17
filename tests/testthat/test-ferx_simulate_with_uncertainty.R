@@ -461,15 +461,18 @@ test_that("a flip-flop point estimate is refused, not thinned silently", {
 test_that("a run whose every draw is skipped is refused, not returned empty", {
   # The engine's fixture: TVCL = 0.75 is in-domain (ke = 0.1875 < 0.2), and at
   # this seed all five draws cross. The engine codes this E_TRANSIT_FLIP_FLOP,
-  # but its message is over 1000 bytes. R truncates an error at
-  # `warning.length`, the truncated text no longer matches the engine's record
-  # byte for byte, and the code is dropped (ferx-r #542). Only the refusal is
-  # asserted here.
+  # and its message is over 1000 bytes: R truncates the raised error at
+  # `warning.length`, and the code used to be dropped with the tail (ferx-r
+  # #542). The condition carries the code and the full text again.
   probe <- engine_error_probe(ferx_simulate_with_uncertainty(
     ff_model(tvcl = 0.75), ff_data(),
     ff_fit(c(TVCL = 0.75, TVV = 4, TVNTR = 3, TVMTT = 20), var_log_cl = 0.01),
     n_uncertainty_draws = 5L, n_sim_per_draw = 1L, seed = 9L
   ))
-  expect_refusal(probe, "all 5 uncertainty draws landed in the flip-flop regime")
+  expect_coded_refusal(probe, "all 5 uncertainty draws landed in the flip-flop regime",
+                       "E_TRANSIT_FLIP_FLOP")
+  msg <- conditionMessage(probe$cond)
+  expect_gt(nchar(msg, "bytes"), getOption("warning.length"))
+  expect_true(endsWith(msg, "[E_TRANSIT_FLIP_FLOP]"), info = msg)
   expect_null(probe$value)
 })

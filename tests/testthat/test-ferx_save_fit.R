@@ -1137,10 +1137,13 @@ test_that(".fitrx_method_to_token normalises labels and defaults to focei", {
   expect_identical(ferx:::.fitrx_method_to_token("foce_gn"), "foce_gn")
   expect_identical(ferx:::.fitrx_method_to_token("foce-gn-hybrid"), "foce_gn_hybrid")
   expect_identical(ferx:::.fitrx_method_to_token("SAEM"), "saem")
+  expect_identical(ferx:::.fitrx_method_to_token("VI"), "vi")
+  expect_identical(ferx:::.fitrx_method_to_token("LAPLACE"), "laplace")
   expect_identical(ferx:::.fitrx_method_to_token("Mystery"), "mystery") # unknown -> tolower
 })
 test_that("method label/token round-trips through the canonical display names", {
-  for (lbl in c("FOCE", "FOCEI", "FOCE-GN", "FOCE-GN-Hybrid", "SAEM")) {
+  for (lbl in c("FOCE", "FOCEI", "FOCE-GN", "FOCE-GN-Hybrid", "SAEM", "IMP",
+                 "IMPMAP", "BAYES", "LAPLACE", "VI")) {
     expect_identical(ferx:::.fitrx_method_label(ferx:::.fitrx_method_to_token(lbl)), lbl)
   }
 })

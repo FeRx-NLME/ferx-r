@@ -185,6 +185,12 @@ test_that("T3: a settings ODE override survives the level bind", {
       "[scaling]\n  obs_scale = V\n"
     )
   ), ".ferx")
+  # This system is linear, which ferx-core #2021 solves exactly with no step
+  # budget to starve; pin the integrator so `ode_max_steps` still bites.
+  ode <- tl_write(sub(
+    "[fit_options]\n", "[fit_options]\n  ode_method = rk45\n",
+    paste(readLines(ode), collapse = "\n"), fixed = TRUE
+  ), ".ferx")
   has_ode_diag <- function(fit) {
     any(startsWith(fit$warnings, "W_ODE_SOLVER_DIAGNOSTICS"))
   }

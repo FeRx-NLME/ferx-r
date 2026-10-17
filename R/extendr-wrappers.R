@@ -69,8 +69,8 @@ ferx_rust_predict_survival_from_fit <- function(model_path, data_path, times, th
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_npde_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, fit_bindings, reader_settings, model_is_fits, population_fingerprint, nsim, seed) {
-  .Call("wrap__ferx_rust_npde_from_fit", model_path, data_path, theta, omega_flat, as.integer(omega_dim), sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, fit_bindings, reader_settings, model_is_fits, population_fingerprint, as.integer(nsim), as.integer(seed))
+ferx_rust_npde_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, fit_bindings, reader_settings, model_is_fits, population_fingerprint, iov_occasion, nsim, seed) {
+  .Call("wrap__ferx_rust_npde_from_fit", model_path, data_path, theta, omega_flat, as.integer(omega_dim), sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, fit_bindings, reader_settings, model_is_fits, population_fingerprint, iov_occasion, as.integer(nsim), as.integer(seed))
 }
 
 #' @title Internal Rust backend binding
@@ -131,6 +131,12 @@ ferx_rust_known_blocks <- function() {
 #' @keywords internal
 ferx_rust_sha256_text <- function(text) {
   .Call("wrap__ferx_rust_sha256_text", text)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_method_labels <- function() {
+  .Call("wrap__ferx_rust_method_labels")
 }
 
 #' @title Internal Rust backend binding
