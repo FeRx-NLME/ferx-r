@@ -1469,7 +1469,8 @@ test_that("summary.ferx_fit returns a ferx_summary with expected fields", {
     "total_ebe_fallbacks", "model_structure", "call_settings",
     "model_file_settings", "sir_ess", "importance_sampling", "bayes",
     "warnings",
-    "uses_sde", "dw_statistic", "iwres_lag1_r", "saem_n_subjects_hmc"
+    "uses_sde", "ode_linear_exact", "dw_statistic", "iwres_lag1_r",
+    "saem_n_subjects_hmc"
   ), ignore.order = TRUE)
 })
 test_that("summary.ferx_fit passes through call_settings", {
