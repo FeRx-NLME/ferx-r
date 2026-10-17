@@ -1736,23 +1736,28 @@ test_that("T17l: an edit while the glue reads the data reaches neither the bind 
   csv <- tl_write(tl_data, ".csv")
   fifo <- tempfile(fileext = ".csv")
   expect_identical(system2("mkfifo", fifo), 0L)
-  # Every open of the FIFO gets the rows (the data hash reads it again); the
-  # model is swapped before the first.
-  server <- callr::r_bg(function(fifo, csv, model, edited) {
+  # The FIFO is served once. As soon as the glue opens it, a regular copy of
+  # the rows is renamed onto its path, so any later open (the data hash reads
+  # the path again after the fit) gets an ordinary file. The model is swapped
+  # next, and only then are the rows sent. Serving the FIFO in a loop instead
+  # raced: a reopen while the first reader still held it open put a second
+  # copy of the CSV into the same stream (header read as a row), or killed
+  # the server with SIGPIPE and left the hash read blocked on a writer-less
+  # FIFO.
+  plain <- tempfile(tmpdir = dirname(fifo), fileext = ".csv")
+  file.copy(csv, plain)
+  server <- callr::r_bg(function(fifo, plain, csv, model, edited) {
     rows <- readBin(csv, "raw", n = file.size(csv))
-    first <- TRUE
-    repeat {
-      con <- file(fifo, "wb")  # blocks until a reader opens the FIFO
-      if (first) {
-        file.copy(edited, model, overwrite = TRUE)
-        first <- FALSE
-      }
-      writeBin(rows, con)
-      close(con)
-    }
-  }, args = list(fifo, csv, model, edited))
+    con <- file(fifo, "wb")  # blocks until the glue opens the FIFO
+    stopifnot(file.rename(plain, fifo))
+    file.copy(edited, model, overwrite = TRUE)
+    writeBin(rows, con)
+    close(con)
+  }, args = list(fifo, plain, csv, model, edited))
   withr::defer(server$kill())
   fit <- tl_fit(model, fifo)
+  server$wait(5000)
+  expect_identical(server$get_exit_status(), 0L)
   # The edit did land during the fit ...
   expect_identical(readLines(model), lines)
   # ... and reached none of the read's uses: the levels are laid out on the
