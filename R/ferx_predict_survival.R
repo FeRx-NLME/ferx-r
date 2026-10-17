@@ -29,6 +29,13 @@
 #'   hazard, cif, survival_all, median_survival, mean_survival (one row per
 #'   subject \eqn{\times} TTE CMT \eqn{\times} time).
 #'
+#'   When the run has an occasion note, the frame carries a
+#'   \code{simulation_warnings} attribute (a character vector), re-emitted as a
+#'   single R warning: a model-file \code{iov_occasion} rule that replaces the
+#'   \code{iov_column} labels, or, with \code{fit}, a fit that records no
+#'   occasion rule and so takes the model file's. Without one the frame
+#'   carries no such attribute.
+#'
 #' @inheritSection ferx_simulate Errors raised by the engine
 #' @inheritSection ferx_simulate Theta level blocks
 #'
@@ -64,18 +71,21 @@ ferx_predict_survival <- function(model, data = NULL, times, fit = NULL) {
 
   # A refusal is an R error, classed like a refused `ferx_fit()` (#385).
   if (is.null(fit)) {
-    return(.ferx_engine_call(
+    res <- .ferx_engine_call(
       ferx_rust_predict_survival(
         model_path = normalizePath(model),
         data_path = normalizePath(data),
         times = times
       ),
       model, data
-    ))
+    )
+    return(.ferx_surface_sim_warnings(res, "ferx_predict_survival"))
   }
 
   fit_pieces <- validate_fit_for_params(fit)
-  .ferx_engine_call(
+  # A note on how the fit's occasions were derived (#523) comes back on the
+  # simulate paths' `simulation_warnings` channel.
+  res <- .ferx_engine_call(
     ferx_rust_predict_survival_from_fit(
       model_path = normalizePath(model),
       data_path = normalizePath(data),
@@ -87,8 +97,10 @@ ferx_predict_survival <- function(model, data = NULL, times, fit = NULL) {
       omega_iov_flat = fit_pieces$omega_iov_flat,
       omega_iov_dim = fit_pieces$omega_iov_dim,
       residual_rho = fit_pieces$residual_rho,
-      fit_bindings = fit_pieces$fit_bindings
+      fit_bindings = fit_pieces$fit_bindings,
+      iov_occasion = fit_pieces$iov_occasion
     ),
     model, data
   )
+  .ferx_surface_sim_warnings(res, "ferx_predict_survival")
 }

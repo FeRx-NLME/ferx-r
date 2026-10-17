@@ -21,7 +21,12 @@ validate_fit_for_params <- function(fit) {
     # engine from rebuilding this fit at the model file's declared correlation.
     # Empty when the fit carries none: the engine accepts that only when every
     # correlation is FIX, and refuses an estimated one (#480).
-    residual_rho = .ferx_residual_rho_vec(fit)
+    residual_rho = .ferx_residual_rho_vec(fit),
+    # The IOV occasion rule the fit derived its occasions with, so a rule
+    # passed only through `ferx_fit(settings = )` reaches predict / simulate /
+    # npde, as it reaches ferx_sir() / ferx_covariance() (#512, #523). "" for a
+    # fit that records none: the engine then takes the model file's.
+    iov_occasion = as.character(fit$iov_occasion %||% "")
   ), .ferx_fit_binding_args(fit))
 }
 

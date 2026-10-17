@@ -25,6 +25,13 @@ be found), otherwise the model file's \code{[data]} block
 A data.frame with columns: ID, CMT, TIME, survival, cum_hazard,
 hazard, cif, survival_all, median_survival, mean_survival (one row per
 subject \eqn{\times} TTE CMT \eqn{\times} time).
+
+When the run has an occasion note, the frame carries a
+\code{simulation_warnings} attribute (a character vector), re-emitted as a
+single R warning: a model-file \code{iov_occasion} rule that replaces the
+\code{iov_column} labels, or, with \code{fit}, a fit that records no
+occasion rule and so takes the model file's. Without one the frame
+carries no such attribute.
 }
 \description{
 For a model with one or more \code{[event_model]} (TTE) endpoints, evaluates

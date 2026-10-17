@@ -1012,6 +1012,26 @@
 
 ## Bug fixes
 
+- **A derived `iov_occasion = dose | time(...)` rule now reaches
+  `ferx_simulate()`, `ferx_predict()`, `ferx_calc_npde()`,
+  `ferx_predict_survival()` and `ferx_simulate_with_uncertainty()`.** These
+  paths re-read the data with readers that fill occasions from `iov_column`
+  only, so under a rule every subject came back unlabelled and each
+  occasion ran at kappa = 0, with no message: simulations had no
+  inter-occasion variability and post-hoc NPDE used a reference without it.
+  The from-fit paths now derive occasions with the fit's rule
+  (`fit$iov_occasion`, which carries a rule passed only through
+  `ferx_fit(settings = )`), as `ferx_sir()` / `ferx_covariance()` do since
+  #512. A fit that records no rule (a bundle saved before ferx recorded one)
+  falls back to the model file's with a warning, and is refused when that
+  derives nothing and the data carries no occasion labels. `ferx_simulate()`
+  and `ferx_simulate_adaptive()` without a fit, and `ferx_predict()` /
+  `ferx_predict_survival()` without one, apply the model file's rule. On
+  `warfarin_iov` each path now matches its OCC-column twin; before, the
+  simulated IPRED differed by up to 8.5 and NPDE by up to 3.4
+  ([#523](https://github.com/FeRx-NLME/ferx-r/issues/523),
+  [#519](https://github.com/FeRx-NLME/ferx-r/issues/519)).
+
 - **An engine refusal longer than `warning.length` keeps its code** (#542).
   R truncates every error the glue raises at `warning.length` (1000 bytes
   by default), and the truncated text no longer matched the glue's

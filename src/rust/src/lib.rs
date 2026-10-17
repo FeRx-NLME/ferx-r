@@ -754,6 +754,9 @@ fn ferx_rust_simulate(
         // (ferx-r #370). No-op for a model with no level block.
         bind_design(&mut parsed, model_path, &mut population)
             .map_err(|e| engine_refusal("", e))?;
+        // The occasions a model-file `iov_occasion` rule derives (ferx-r #523):
+        // the reader fills them from `iov_column` only.
+        let occasion_notes = derive_file_occasions(&parsed, &mut population);
 
         let opts = ferx_core::SimulateOptions {
             seed: Some(seed as u64),
@@ -781,7 +784,7 @@ fn ferx_rust_simulate(
         // makes moot), so relaying `population.warnings` too would say each twice.
         Ok(attach_sim_warnings(
             sim_results_to_df(&output.results),
-            output.warnings,
+            [occasion_notes, output.warnings].concat(),
         ))
     })
 }
@@ -797,6 +800,9 @@ fn ferx_rust_simulate(
 /// @param omega_iov_flat Row-major flattened fitted IOV (kappa) omega matrix;
 ///   empty when the model declares no `kappa`.
 /// @param omega_iov_dim Side length of the IOV omega matrix; 0 when no IOV.
+/// @param iov_occasion `fit$iov_occasion`, the IOV occasion rule the fit ran
+///   with (ferx-r #523): the population's occasions are derived with it, as
+///   the fit derived them. "" when the fit records none.
 /// @param n_sim Number of simulations
 /// @param seed Random seed
 /// @param match_method Propensity-score matching method: "none" (off),
@@ -818,6 +824,7 @@ fn ferx_rust_simulate_from_fit(
     omega_iov_dim: i32,
     residual_rho: Vec<f64>,
     fit_bindings: List,
+    iov_occasion: &str,
     n_sim: i32,
     seed: i32,
     match_method: &str,
@@ -857,6 +864,10 @@ fn ferx_rust_simulate_from_fit(
         let fitted = fit_bindings_from_r(&fit_bindings)?;
         bind_design_from_fit(&mut parsed, model_path, &mut population, &fitted)
             .map_err(|e| engine_refusal("", e))?;
+        // The occasions the fit derived, under its own rule (ferx-r #523); see
+        // `derive_fit_occasions`.
+        let occasion_notes =
+            derive_fit_occasions("ferx_simulate", &parsed, &mut population, iov_occasion)?;
 
         let params = match params_from_fit(
             &parsed.model,
@@ -892,7 +903,7 @@ fn ferx_rust_simulate_from_fit(
         // Reader findings are already in `output.warnings`; see `ferx_rust_simulate`.
         Ok(attach_sim_warnings(
             sim_results_to_df(&output.results),
-            output.warnings,
+            [occasion_notes, output.warnings].concat(),
         ))
     })
 }
@@ -973,6 +984,9 @@ fn ferx_rust_simulate_adaptive(
         // (ferx-r #370). No-op for a model with no level block.
         bind_design(&mut parsed, model_path, &mut population)
             .map_err(|e| engine_refusal("ferx_simulate_adaptive: ", e))?;
+        // The occasions a model-file `iov_occasion` rule derives (ferx-r #523):
+        // the reader fills them from `iov_column` only.
+        let occasion_notes = derive_file_occasions(&parsed, &mut population);
 
         // The spec owns the decision schedule (`at`) and the monitored signal
         // (`observe` / `with_assay_error`), so `decision_times` and `monitors` stay
@@ -1008,7 +1022,7 @@ fn ferx_rust_simulate_adaptive(
             // supplies the whole regimen, so an observation grid alone is the normal
             // input (ferx-r #426).
             Ok(mut result) => {
-                let warnings = std::mem::take(&mut result.warnings);
+                let warnings = [occasion_notes, std::mem::take(&mut result.warnings)].concat();
                 attach_sim_warnings(adaptive_result_to_list(&result), warnings)
             }
             Err(e) => return Err(engine_refusal("ferx_simulate_adaptive: ", e)),
@@ -1128,6 +1142,9 @@ fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult) -> Robj
 /// @param omega_iov_flat Row-major flattened fitted IOV (kappa) omega matrix;
 ///   empty when the model declares no `kappa`.
 /// @param omega_iov_dim Side length of the IOV omega matrix; 0 when no IOV.
+/// @param iov_occasion `fit$iov_occasion`, the IOV occasion rule the fit ran
+///   with (ferx-r #523): the population's occasions are derived with it, as
+///   the fit derived them. "" when the fit records none.
 /// @param method Uncertainty method: `"asymptotic"` or `"sir"`
 /// @param cov_matrix_flat Row-major flattened packed-space covariance matrix
 ///   (empty when not using asymptotic mode)
@@ -1165,6 +1182,7 @@ fn ferx_rust_simulate_with_uncertainty(
     sir_resamples_dim: i32,
     residual_rho: Vec<f64>,
     fit_bindings: List,
+    iov_occasion: &str,
     n_uncertainty_draws: i32,
     n_sim_per_draw: i32,
     seed: i32,
@@ -1198,6 +1216,10 @@ fn ferx_rust_simulate_with_uncertainty(
         let fitted = fit_bindings_from_r(&fit_bindings)?;
         bind_design_from_fit(&mut parsed, model_path, &mut population, &fitted)
             .map_err(|e| engine_refusal("", e))?;
+        // The occasions the fit derived, under its own rule (ferx-r #523); see
+        // `derive_fit_occasions`.
+        let occasion_notes =
+            derive_fit_occasions("ferx_simulate_with_uncertainty", &parsed, &mut population, iov_occasion)?;
 
         // Decode the method string to the engine enum.
         let uncertainty_method = match method.trim().to_lowercase().as_str() {
@@ -1249,7 +1271,7 @@ fn ferx_rust_simulate_with_uncertainty(
         Ok(match ferx_core::simulate_with_uncertainty_diag(&parsed.model, &population, &fit_result, &opts) {
             Ok(output) => attach_sim_warnings(
                 sim_results_to_df(&output.results),
-                output.warnings,
+                [occasion_notes, output.warnings].concat(),
             ),
             Err(e) => return Err(engine_refusal("simulate_with_uncertainty error: ", e)),
         })
@@ -1297,6 +1319,9 @@ fn ferx_rust_predict(
         // (ferx-r #370). No-op for a model with no level block.
         bind_design(&mut parsed, model_path, &mut population)
             .map_err(|e| engine_refusal("", e))?;
+        // The occasions a model-file `iov_occasion` rule derives (ferx-r #523):
+        // the reader fills them from `iov_column` only.
+        let occasion_notes = derive_file_occasions(&parsed, &mut population);
 
         let output = ferx_core::predict_diag(&parsed.model, &population, &parsed.model.default_params)
             .map_err(|e| engine_refusal("Error predicting: ", e))?;
@@ -1312,7 +1337,7 @@ fn ferx_rust_predict(
         // which still holds the ones a compartment-free model makes moot.
         Ok(attach_sim_warnings(
             data_frame!(ID = id, TIME = time, PRED = pred).into(),
-            output.warnings,
+            [occasion_notes, output.warnings].concat(),
         ))
     })
 }
@@ -1328,6 +1353,9 @@ fn ferx_rust_predict(
 /// @param omega_iov_flat Row-major flattened fitted IOV (kappa) omega matrix;
 ///   empty when the model declares no `kappa`.
 /// @param omega_iov_dim Side length of the IOV omega matrix; 0 when no IOV.
+/// @param iov_occasion `fit$iov_occasion`, the IOV occasion rule the fit ran
+///   with (ferx-r #523): the population's occasions are derived with it, as
+///   the fit derived them. "" when the fit records none.
 /// @return Data frame with ID, TIME, PRED columns
 /// @export
 #[extendr]
@@ -1342,6 +1370,7 @@ fn ferx_rust_predict_from_fit(
     omega_iov_dim: i32,
     residual_rho: Vec<f64>,
     fit_bindings: List,
+    iov_occasion: &str,
 ) -> Robj {
     entry(move || {
         let mut parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
@@ -1373,6 +1402,10 @@ fn ferx_rust_predict_from_fit(
         let fitted = fit_bindings_from_r(&fit_bindings)?;
         bind_design_from_fit(&mut parsed, model_path, &mut population, &fitted)
             .map_err(|e| engine_refusal("", e))?;
+        // The occasions the fit derived, under its own rule (ferx-r #523); see
+        // `derive_fit_occasions`.
+        let occasion_notes =
+            derive_fit_occasions("ferx_predict", &parsed, &mut population, iov_occasion)?;
 
         let params = match params_from_fit(
             &parsed.model,
@@ -1399,7 +1432,7 @@ fn ferx_rust_predict_from_fit(
         // Core's non-fit bundle; see `ferx_rust_predict` (ferx-r #426).
         Ok(attach_sim_warnings(
             data_frame!(ID = id, TIME = time, PRED = pred).into(),
-            output.warnings,
+            [occasion_notes, output.warnings].concat(),
         ))
     })
 }
@@ -1470,11 +1503,20 @@ fn ferx_rust_predict_survival(model_path: &str, data_path: &str, times: Vec<f64>
         // (ferx-r #370). No-op for a model with no level block.
         bind_design(&mut parsed, model_path, &mut population)
             .map_err(|e| engine_refusal("", e))?;
+        // The occasions a model-file `iov_occasion` rule derives (ferx-r #523):
+        // the reader fills them from `iov_column` only.
+        let occasion_notes = derive_file_occasions(&parsed, &mut population);
 
         let results =
             ferx_core::predict_survival(&parsed.model, &population, &parsed.model.default_params, &times)
                 .map_err(|e| engine_refusal("Error predicting: ", e))?;
-        Ok(survival_results_to_df(&results))
+        // The rule-over-column note, if any, on the predict paths' channel.
+        let df = survival_results_to_df(&results);
+        Ok(if occasion_notes.is_empty() {
+            df
+        } else {
+            attach_sim_warnings(df, occasion_notes)
+        })
     })
 }
 
@@ -1490,6 +1532,9 @@ fn ferx_rust_predict_survival(model_path: &str, data_path: &str, times: Vec<f64>
 /// @param omega_iov_flat Row-major flattened fitted IOV (kappa) omega matrix;
 ///   empty when the model declares no `kappa`.
 /// @param omega_iov_dim Side length of the IOV omega matrix; 0 when no IOV.
+/// @param iov_occasion `fit$iov_occasion`, the IOV occasion rule the fit ran
+///   with (ferx-r #523): the population's occasions are derived with it, as
+///   the fit derived them. "" when the fit records none.
 /// @return Data frame with ID, CMT, TIME, survival, cum_hazard, hazard, cif,
 ///   survival_all, median_survival, mean_survival
 /// @export
@@ -1507,6 +1552,7 @@ fn ferx_rust_predict_survival_from_fit(
     omega_iov_dim: i32,
     residual_rho: Vec<f64>,
     fit_bindings: List,
+    iov_occasion: &str,
 ) -> Robj {
     entry(move || {
         let mut parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
@@ -1533,6 +1579,10 @@ fn ferx_rust_predict_survival_from_fit(
         let fitted = fit_bindings_from_r(&fit_bindings)?;
         bind_design_from_fit(&mut parsed, model_path, &mut population, &fitted)
             .map_err(|e| engine_refusal("", e))?;
+        // The occasions the fit derived, under its own rule (ferx-r #523); see
+        // `derive_fit_occasions`.
+        let occasion_notes =
+            derive_fit_occasions("ferx_predict_survival", &parsed, &mut population, iov_occasion)?;
 
         let params = match params_from_fit(
             &parsed.model,
@@ -1550,7 +1600,14 @@ fn ferx_rust_predict_survival_from_fit(
 
         let results = ferx_core::predict_survival(&parsed.model, &population, &params, &times)
             .map_err(|e| engine_refusal("Error predicting: ", e))?;
-        Ok(survival_results_to_df(&results))
+        // The legacy-fit occasion note, if any, on the channel the predict and
+        // simulate paths use; without one the frame carries no attribute, as before.
+        let df = survival_results_to_df(&results);
+        Ok(if occasion_notes.is_empty() {
+            df
+        } else {
+            attach_sim_warnings(df, occasion_notes)
+        })
     })
 }
 
@@ -1610,7 +1667,7 @@ fn ferx_rust_npde_from_fit(
         if nsim <= 0 {
             return Err("npde error: nsim must be a positive integer".to_string());
         }
-        let iov_occasion = iov_occasion_from_r("ferx_calc_npde", iov_occasion)?;
+        let iov_rule = iov_occasion_from_r("ferx_calc_npde", iov_occasion)?;
 
         let mut parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
             Ok(p) => p,
@@ -1670,6 +1727,12 @@ fn ferx_rust_npde_from_fit(
             fp.verify(&parsed.model, &population)
                 .map_err(|e| engine_refusal("npde error: ", e))?
         };
+        // The occasions the fit derived, under its own rule (ferx-r #523); see
+        // `derive_fit_occasions`. After the check, which is of the population as
+        // read: a fingerprint of a fit with derived occasions leaves them out.
+        let occasion_notes =
+            derive_fit_occasions("ferx_calc_npde", &parsed, &mut population, iov_occasion)?;
+        let notes = [notes, occasion_notes].concat();
 
         let params = match params_from_fit(
             &parsed.model,
@@ -1695,7 +1758,7 @@ fn ferx_rust_npde_from_fit(
             // The fit's occasion rule, else the model file's: a `dose` /
             // `time(...)` rule labels the occasions the kappa draw needs, as
             // `fit()` does on its own copy (ferx-core #1980).
-            Some(iov_occasion.as_ref().unwrap_or(&parsed.fit_options.iov_occasion)),
+            Some(iov_rule.as_ref().unwrap_or(&parsed.fit_options.iov_occasion)),
         )
         // A categorical covariate value outside the model's levels is refused
         // (`E_COV_LEVEL_UNKNOWN`'s message, ferx-core #1740) rather than scored as
@@ -5649,6 +5712,127 @@ fn iov_occasion_from_r(
     ferx_core::parser::model_parser::apply_fit_option(&mut opts, "iov_occasion", value)
         .map_err(|e| format!("{entry_point}: `fit$iov_occasion`: {e}"))?;
     Ok(Some(opts.iov_occasion))
+}
+
+/// Give a population read for a from-fit predict / simulate / npde step the
+/// occasion labels the fit derived (ferx-r #523 / #519), as core's
+/// `resolve_fit_inputs` does for `run_sir` / `run_covariance` (#1783). The
+/// readers take no rule: they fill `Subject::occasions` from `iov_column` only,
+/// so under an `iov_occasion = dose | time(...)` rule every subject came back
+/// unlabelled and the engine ran every occasion at kappa = 0 with no message -
+/// a simulation without inter-occasion variability.
+///
+/// The rule is the fit's (`fit$iov_occasion`, which carries one passed only
+/// through `settings =`); a fit that records none (a `.fitrx` saved before
+/// ferx-core #1783) takes the model file's, with core's note, and is refused
+/// when that derives nothing and the population has no labels either. Returns
+/// the notes for the step's warnings. Run after the level bind and, on the npde
+/// path, after the fingerprint check, which is of the population as read.
+fn derive_fit_occasions(
+    entry_point: &str,
+    parsed: &ParsedModel,
+    population: &mut Population,
+    iov_occasion: &str,
+) -> std::result::Result<Vec<String>, String> {
+    let recorded = iov_occasion_from_r(entry_point, iov_occasion)?;
+    if parsed.model.n_kappa == 0 {
+        return Ok(Vec::new());
+    }
+    let mut notes = Vec::new();
+    let rule = match recorded {
+        Some(rule) => rule,
+        None => {
+            let rule = parsed.fit_options.iov_occasion.clone();
+            if rule != ferx_core::IovOccasionRule::Column {
+                notes.push(format!(
+                    "{entry_point}: this fit records no IOV occasion rule (it was saved \
+                     before ferx recorded one), so the occasions were derived with the \
+                     model file's `iov_occasion = {}`. If the fit ran under another rule \
+                     (`ferx_fit(settings = list(iov_occasion = ...))`), these results are \
+                     wrong: refit so the rule is recorded.",
+                    iov_occasion_to_r(&rule)
+                ));
+            } else if population.subjects.iter().all(|s| s.occasions.is_empty()) {
+                return Err(format!(
+                    "{entry_point}: this fit records no IOV occasion rule (it was saved \
+                     before ferx recorded one), the model file sets no `iov_occasion` and \
+                     the data carries no occasion labels, so the per-occasion kappas \
+                     cannot be assigned to occasions. Refit so the rule is recorded, or \
+                     give the data the occasion column the model's `iov_column` names."
+                ));
+            }
+            rule
+        }
+    };
+    apply_occasion_rule(population, &rule);
+    Ok(notes)
+}
+
+/// A design read without a fit: occasions from the model file's own
+/// `iov_occasion` rule, as `fit()` would derive them (ferx-r #523). A no-op for
+/// a model without kappa or under a `Column` rule. Returns core's override note
+/// when the file also names an `iov_column`, whose labels the rule replaces, as
+/// `fit()` warns (`apply_iov_occasion_rule`'s `had_column`).
+fn derive_file_occasions(parsed: &ParsedModel, population: &mut Population) -> Vec<String> {
+    let rule = &parsed.fit_options.iov_occasion;
+    if parsed.model.n_kappa == 0 || *rule == ferx_core::IovOccasionRule::Column {
+        return Vec::new();
+    }
+    apply_occasion_rule(population, rule);
+    if parsed.fit_options.iov_column.is_some() {
+        vec!["iov_occasion is set in [fit_options], so the model-side occasion rule is used and \
+              the iov_column dataset column is ignored."
+            .to_string()]
+    } else {
+        Vec::new()
+    }
+}
+
+/// Core's `apply_iov_occasion_rule` (`api/validation.rs`), which is
+/// `pub(crate)`: each subject's occasion labels derived from a model-side rule,
+/// for its observations, doses, pk-only rows and reset rows. A copy, kept in
+/// step with core's, until the engine derives them itself: `compute_npde_npd`
+/// takes the rule since ferx-core #1987 (after this pin), and `simulate` /
+/// `simulate_with_uncertainty` will with #1979 (ferx-core #1955). Applying the
+/// same rule twice is harmless, so a pin past those can drop this in steps. A
+/// `Column` rule derives nothing and leaves the labels the reader filled.
+fn apply_occasion_rule(population: &mut Population, rule: &ferx_core::IovOccasionRule) {
+    // Occasion of a time under strictly increasing breakpoints: the number of
+    // edges at or before it (`time(24, 48)` -> 0 | 1 | 2).
+    let window_occ =
+        |edges: &[f64], t: f64| -> u32 { edges.iter().filter(|&&e| e <= t).count() as u32 };
+    for s in population.subjects.iter_mut() {
+        match rule {
+            ferx_core::IovOccasionRule::Column => return,
+            // Observations, doses, pk-only and reset rows on the one internal event
+            // clock, so a dose and its co-timed samples share a window.
+            ferx_core::IovOccasionRule::TimeWindows(edges) => {
+                s.occasions = s.obs_times.iter().map(|&t| window_occ(edges, t)).collect();
+                s.dose_occasions = s.doses.iter().map(|d| window_occ(edges, d.time)).collect();
+                s.pk_only_occasions = s.pk_only_times.iter().map(|&t| window_occ(edges, t)).collect();
+                s.reset_occasions = s.reset_times.iter().map(|&t| window_occ(edges, t)).collect();
+            }
+            // Each distinct dose time opens an occasion (co-timed doses share
+            // one); a record belongs to the latest dose at or before it, and a
+            // record before the first dose to occasion 0.
+            ferx_core::IovOccasionRule::PerDose => {
+                let mut dose_times: Vec<f64> = Vec::new();
+                let mut dose_occ = Vec::with_capacity(s.doses.len());
+                for d in &s.doses {
+                    if dose_times.last() != Some(&d.time) {
+                        dose_times.push(d.time);
+                    }
+                    dose_occ.push(dose_times.len().saturating_sub(1) as u32);
+                }
+                s.dose_occasions = dose_occ;
+                let occ_at =
+                    |t: f64| dose_times.partition_point(|&d| d <= t).saturating_sub(1) as u32;
+                s.occasions = s.obs_times.iter().map(|&t| occ_at(t)).collect();
+                s.pk_only_occasions = s.pk_only_times.iter().map(|&t| occ_at(t)).collect();
+                s.reset_occasions = s.reset_times.iter().map(|&t| occ_at(t)).collect();
+            }
+        }
+    }
 }
 
 /// The `[fit_options]` keys of `fit$scoring_settings`, one per `ScoringSettings`

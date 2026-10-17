@@ -136,3 +136,201 @@ test_that("P5: the .fitrx spelling of the rule is ferx-core's", {
   expect_error(to("weekly"), "not \"column\"", fixed = TRUE)
   expect_error(from("weekly"), "is not \"column\"", fixed = TRUE)
 })
+
+# #523 / #519: the from-fit predict / simulate / npde paths read the data with
+# readers that fill occasions from `iov_column` only, so under a derived rule
+# every subject came back unlabelled and the engine ran each occasion at
+# kappa = 0, with no message. Each path is measured against the twin that reads
+# the same occasions from the OCC column, at the same estimates: before the fix
+# the simulated IPRED differed by up to 8.5 and the NPDE by up to 3.4.
+
+# The column twin, fitted with a covariance step, and a fit made under `rule`
+# from the column-less data, carrying the twin's estimates so that only the
+# occasions can differ between the two.
+pp_twins <- function(rule, env = parent.frame()) {
+  col <- pp_fit(ferx_example("warfarin_iov")$model, ferx_example("warfarin_iov")$data)
+  data <- pp_iov_data(env)
+  model <- pp_iov_model(NULL, env)
+  fit <- pp_fit(model, data, settings = list(iov_occasion = rule))
+  expect_identical(fit$iov_occasion, rule)
+  for (k in c("theta", "omega", "sigma", "omega_iov", "cov_matrix")) fit[[k]] <- col[[k]]
+  list(col = col, fit = fit, model = model, data = data)
+}
+
+test_that("P6: from-fit ferx_simulate() derives the fit's occasions (#523)", {
+  for (rule in c("dose", "time(120.1)")) {
+    tw <- pp_twins(rule)
+    sim <- ferx_simulate(tw$model, tw$data, fit = tw$fit, n_sim = 2L, seed = 7L)
+    ref <- ferx_simulate(ferx_example("warfarin_iov")$model,
+                         ferx_example("warfarin_iov")$data,
+                         fit = tw$col, n_sim = 2L, seed = 7L)
+    # Under the window rule a handful of records land a few ULPs from the
+    # column twin's (measured: 2e-15 relative), so not identical.
+    expect_equal(sim$IPRED, ref$IPRED, tolerance = 1e-10, info = rule)
+    expect_equal(sim$DV_SIM, ref$DV_SIM, tolerance = 1e-10, info = rule)
+  }
+})
+
+test_that("P7: ferx_calc_npde() derives the fit's occasions (#523)", {
+  tw <- pp_twins("dose")
+  npde <- ferx_calc_npde(tw$fit, nsim = 200L, seed = 3L)
+  ref <- ferx_calc_npde(tw$col, nsim = 200L, seed = 3L)
+  expect_identical(npde$sdtab$NPDE, ref$sdtab$NPDE)
+  expect_identical(npde$sdtab$NPD, ref$sdtab$NPD)
+})
+
+test_that("P8: ferx_simulate_with_uncertainty() derives the fit's occasions (#523)", {
+  tw <- pp_twins("dose")
+  skip_if(is.null(tw$col$cov_matrix), "covariance step did not converge - skipping")
+  sim <- ferx_simulate_with_uncertainty(tw$model, tw$data, tw$fit,
+                                        n_uncertainty_draws = 3L, seed = 11L)
+  ref <- ferx_simulate_with_uncertainty(ferx_example("warfarin_iov")$model,
+                                        ferx_example("warfarin_iov")$data,
+                                        tw$col, n_uncertainty_draws = 3L, seed = 11L)
+  expect_identical(sim$IPRED, ref$IPRED)
+})
+
+test_that("P9: from-fit ferx_predict() runs on the fit's occasions (#523)", {
+  # PRED is at eta = kappa = 0, so the occasions cannot move it: this pins
+  # that the path takes the rule without refusing, not a numeric change.
+  tw <- pp_twins("dose")
+  pred <- ferx_predict(tw$model, tw$data, fit = tw$fit)
+  ref <- ferx_predict(ferx_example("warfarin_iov")$model,
+                      ferx_example("warfarin_iov")$data, fit = tw$col)
+  expect_identical(pred$PRED, ref$PRED)
+})
+
+test_that("P10: a model-file iov_occasion reaches ferx_simulate() without a fit (#523)", {
+  model <- pp_iov_model("  iov_occasion = dose")
+  sim <- ferx_simulate(model, pp_iov_data(), n_sim = 2L, seed = 5L)
+  ref <- ferx_simulate(ferx_example("warfarin_iov")$model,
+                       ferx_example("warfarin_iov")$data, n_sim = 2L, seed = 5L)
+  expect_identical(sim$IPRED, ref$IPRED)
+})
+
+test_that("P11: a fit that records no rule falls back to the model file's, or is refused (#523)", {
+  tw <- pp_twins("dose")
+  legacy <- tw$fit
+  legacy$iov_occasion <- NULL
+  # No rule in the model file and no OCC column: nothing to derive occasions with.
+  expect_error(ferx_simulate(tw$model, tw$data, fit = legacy, n_sim = 1L, seed = 1L),
+               "records no IOV occasion rule", fixed = TRUE)
+  expect_error(ferx_calc_npde(legacy, nsim = 50L, seed = 1L),
+               "records no IOV occasion rule", fixed = TRUE)
+  # The model file's rule is used, and the result says it was a guess.
+  file_model <- pp_iov_model("  iov_occasion = dose")
+  expect_warning(
+    sim <- ferx_simulate(file_model, tw$data, fit = legacy, n_sim = 1L, seed = 1L),
+    "derived with the model file's `iov_occasion = dose`", fixed = TRUE
+  )
+  ref <- suppressWarnings(
+    ferx_simulate(tw$model, tw$data, fit = tw$fit, n_sim = 1L, seed = 1L)
+  )
+  expect_identical(sim$IPRED, ref$IPRED)
+})
+
+test_that("P12: from-fit ferx_predict() reads fit$iov_occasion (#523 review r1)", {
+  # PRED cannot show the occasions (P9), so the path's use of the rule is
+  # pinned by what it does with a rule it cannot use, and with none at all.
+  tw <- pp_twins("dose")
+  bad <- tw$fit
+  bad$iov_occasion <- "weekly"
+  expect_error(ferx_predict(tw$model, tw$data, fit = bad),
+               "ferx_predict: `fit$iov_occasion`", fixed = TRUE)
+  legacy <- tw$fit
+  legacy$iov_occasion <- NULL
+  expect_error(ferx_predict(tw$model, tw$data, fit = legacy),
+               "records no IOV occasion rule", fixed = TRUE)
+})
+
+test_that("P13: from-fit ferx_predict_survival() reads fit$iov_occasion (#523 review r1)", {
+  # No bundled TTE model declares kappa, so the rule cannot move a survival
+  # curve here; the path is pinned by refusing a rule it cannot parse.
+  model <- pp_scratch(".ferx")
+  data <- pp_scratch(".csv")
+  writeLines(c(
+    "[parameters]",
+    "  theta TVLAMBDA(0.1, 0.001, 10.0)",
+    "  omega ETA_LAMBDA ~ 0.09",
+    "",
+    "[event_model]",
+    "  cmt    = 2",
+    "  family = exponential",
+    "  scale  = TVLAMBDA * exp(ETA_LAMBDA)"
+  ), model)
+  writeLines(c(
+    "ID,TIME,DV,EVID,CMT,MDV",
+    "1,7.2,1,0,2,0",
+    "2,24.0,0,0,2,0",
+    "3,3.1,1,0,2,0"
+  ), data)
+  fit <- suppressWarnings(ferx_fit(model, data, method = "focei", verbose = FALSE))
+  expect_identical(fit$iov_occasion, "column")
+  expect_no_error(ferx_predict_survival(model, data, times = c(0, 6), fit = fit))
+  fit$iov_occasion <- "weekly"
+  expect_error(ferx_predict_survival(model, data, times = c(0, 6), fit = fit),
+               "ferx_predict_survival: `fit$iov_occasion`", fixed = TRUE)
+})
+
+test_that("P14: a model-file rule that overrides iov_column says so without a fit (#523 review r1)", {
+  text <- readLines(ferx_example("warfarin_iov")$model)
+  at <- grep("iov_column", text, fixed = TRUE)
+  model <- pp_scratch(".ferx")
+  writeLines(append(text, "  iov_occasion = dose", after = at), model)
+  ex <- ferx_example("warfarin_iov")
+  msg <- "the iov_column dataset column is ignored"
+  expect_warning(ferx_simulate(model, ex$data, n_sim = 1L, seed = 1L), msg, fixed = TRUE)
+  expect_warning(ferx_predict(model, ex$data), msg, fixed = TRUE)
+  # Without the rule the column is the source, and nothing is said.
+  expect_no_warning(ferx_simulate(ex$model, ex$data, n_sim = 1L, seed = 1L))
+})
+
+test_that("P15: the override note reaches ferx_simulate_adaptive() and ferx_predict_survival() (#523 review r2)", {
+  msg <- "the iov_column dataset column is ignored"
+  rule <- c("  iov_column = OCC", "  iov_occasion = dose")
+
+  # Adaptive: the TDM example with a kappa on CL, its occasions named twice.
+  text <- readLines(ferx_example("adaptive_tdm")$model)
+  at <- grep("omega ETA_CL", text, fixed = TRUE)
+  text <- append(text, "  kappa KAPPA_CL ~ 0.04", after = at)
+  text <- sub("CL = TVCL * exp(ETA_CL)", "CL = TVCL * exp(ETA_CL + KAPPA_CL)", text, fixed = TRUE)
+  model <- pp_scratch(".ferx")
+  writeLines(c(text, "", "[fit_options]", rule), model)
+  data <- pp_scratch(".csv")
+  utils::write.csv(
+    data.frame(ID = 1L, TIME = seq(0, 96, by = 12), DV = ".", EVID = 0L,
+               AMT = ".", CMT = 1L, MDV = 0L, OCC = 1L),
+    data, row.names = FALSE, quote = FALSE
+  )
+  res <- suppressWarnings(ferx_simulate_adaptive(model, data, n_sim = 1L, seed = 1L))
+  expect_true(any(grepl(msg, attr(res, "simulation_warnings"), fixed = TRUE)))
+  expect_warning(ferx_simulate_adaptive(model, data, n_sim = 1L, seed = 1L),
+                 msg, fixed = TRUE)
+
+  # Survival: the joint PK-TTE example with a kappa on CL and an analytic
+  # hazard (the engine refuses kappa in an ODE-accumulated one).
+  ex <- ferx_example("pktte_joint")
+  text <- readLines(ex$model)
+  at <- grep("omega ETA_CL", text, fixed = TRUE)
+  text <- append(text, "  kappa KAPPA_CL ~ 0.04", after = at)
+  text <- sub("CL   = TVCL * exp(ETA_CL)", "CL   = TVCL * exp(ETA_CL + KAPPA_CL)",
+              text, fixed = TRUE)
+  at <- grep("hazard = ", text, fixed = TRUE)
+  text <- append(text[-at], c("  family = exponential", "  scale  = H0"), after = at - 1L)
+  plain <- pp_scratch(".ferx")
+  writeLines(text, plain)
+  at <- grep("[fit_options]", text, fixed = TRUE)
+  model <- pp_scratch(".ferx")
+  writeLines(append(text, rule, after = at), model)
+  rows <- utils::read.csv(ex$data, colClasses = "character")
+  rows$OCC <- "1"
+  data <- pp_scratch(".csv")
+  utils::write.csv(rows, data, row.names = FALSE, quote = FALSE)
+  expect_warning(surv <- ferx_predict_survival(model, data, times = c(0, 6)),
+                 msg, fixed = TRUE)
+  expect_true(any(grepl(msg, attr(surv, "simulation_warnings"), fixed = TRUE)))
+  # Without the rule the column is the source: no note, and no attribute.
+  writeLines(append(text, "  iov_column = OCC", after = at), plain)
+  expect_no_warning(surv <- ferx_predict_survival(plain, data, times = c(0, 6)))
+  expect_null(attr(surv, "simulation_warnings"))
+})
