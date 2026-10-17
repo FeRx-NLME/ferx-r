@@ -127,17 +127,132 @@ test_that("a nested fit's levels survive ferx_save_fit() / ferx_load_fit()", {
                    getFromNamespace(".ferx_kappa_rows", "ferx")(fit, ascii = FALSE))
 })
 
-test_that("a bundle naming a level without its CSV is refused, as ferx-core refuses it", {
+# The fit's bundle with `edit(dir)` applied to its unpacked entries, re-zipped.
+tampered_bundle <- function(fit, edit, env = parent.frame()) {
+  f <- withr::local_tempfile(fileext = ".fitrx", .local_envir = env)
+  suppressWarnings(ferx_save_fit(fit, f))
+  dir <- withr::local_tempdir(.local_envir = env)
+  utils::unzip(f, exdir = dir)
+  edit(dir)
+  g <- withr::local_tempfile(fileext = ".fitrx", .local_envir = env)
+  withr::with_dir(dir, utils::zip(g, list.files(), flags = "-q"))
+  g
+}
+
+edit_lines <- function(dir, entry, fn) {
+  path <- file.path(dir, entry)
+  writeLines(fn(readLines(path)), path)
+}
+
+edit_fit_json <- function(dir, fn) {
+  path <- file.path(dir, "fit.json")
+  json <- jsonlite::read_json(path)
+  jsonlite::write_json(fn(json), path, auto_unbox = TRUE, digits = NA, null = "null")
+}
+
+test_that("ferx_load_fit() refuses a malformed nested bundle as ferx-core's loader does", {
   fit <- nested_fit()
+  refuses <- function(edit, msg) {
+    expect_error(suppressWarnings(ferx_load_fit(tampered_bundle(fit, edit))), msg,
+                 fixed = TRUE)
+  }
+  refuses(function(d) unlink(file.path(d, "ebes_kappa_ARM.csv")),
+          "names level `ARM`, but the bundle has no ebes_kappa_ARM.csv")
+  # #587 review, finding 3: a header that is not the level's.
+  refuses(function(d) edit_lines(d, "ebes_kappa_ARM.csv",
+                                 function(l) { l[1] <- sub("K_ARM", "K_X", l[1]); l }),
+          "ebes_kappa_ARM.csv: header ID,GROUP,STUDY,ARM,K_X does not match fit.json's level")
+  # Finding 4: what core's loader refuses beyond that.
+  refuses(function(d) edit_fit_json(d, function(j) {
+            j$iov$kappa_levels <- list("STUDY"); j
+          }),
+          "iov.kappa_levels (1) does not match iov.kappa_names (2)")
+  refuses(function(d) edit_fit_json(d, function(j) {
+            j$iov$kappa_levels <- list("STUDY", "STUDY"); j
+          }),
+          "iov.levels names kappa `K_ARM` at level `ARM`, but iov.kappa_levels puts it at `STUDY`")
+  refuses(function(d) edit_lines(d, "ebes_kappa_ARM.csv",
+                                 function(l) { l[2] <- paste0(l[2], ",1"); l }),
+          "ebes_kappa_ARM.csv: row 1 has 6 fields, expected 5")
+  refuses(function(d) edit_lines(d, "ebes_kappa_ARM.csv",
+                                 function(l) { l[2] <- sub("^[^,]*", "999", l[2]); l }),
+          "ebes_kappa_ARM.csv: unknown ID \"999\"")
+  refuses(function(d) edit_lines(d, "ebes_kappa_ARM.csv",
+                                 function(l) { l[3] <- sub("^([^,]*),2,", "\\1,3,", l[3]); l }),
+          "ebes_kappa_ARM.csv: subject \"1\": GROUP must run 1..n without gaps or repeats")
+})
+
+test_that("an empty kappa cell in a level's CSV loads as a NaN estimate", {
+  # ferx-core writes a NaN estimate as an empty cell and reads it back as NaN;
+  # R's reader would make it NA (#587 review, finding 3).
+  fit <- nested_fit()
+  g <- tampered_bundle(fit, function(d) edit_lines(d, "ebes_kappa_ARM.csv", function(l) {
+    l[2] <- sub("[^,]*$", "", l[2])
+    l
+  }))
+  back <- suppressWarnings(ferx_load_fit(g))
+  k <- back$ebe_kappas_by_level$ARM$K_ARM
+  expect_true(is.nan(k[1]))
+  expect_identical(k[-1], fit$ebe_kappas_by_level$ARM$K_ARM[-1])
+})
+
+test_that("two kappas at one level keep their columns apart, live and through .fitrx", {
+  # One kappa per level cannot show a swapped pair (#587 review, finding 5):
+  # a second study kappa on the baseline, with its own variance.
+  txt <- readLines(nested_model)
+  txt <- sub("kappa K_ST ~ 0.0904362 at STUDY",
+             "kappa K_ST ~ 0.0904362 at STUDY\n  kappa K_E0 ~ 0.01 at STUDY", txt, fixed = TRUE)
+  txt <- sub("EMAX = TVEMAX * exp(ETA_SP + K_ST + K_ARM)",
+             "EMAX = TVEMAX * exp(ETA_SP + K_ST + K_ARM)\n  E0 = TVE0 * exp(K_E0)", txt,
+             fixed = TRUE)
+  txt <- sub("y = TVE0 + EMAX", "y = E0 + EMAX", txt, fixed = TRUE)
+  model <- withr::local_tempfile(fileext = ".ferx")
+  writeLines(txt, model)
+  fit <- suppressWarnings(ferx_fit(model, nested_data, method = "focei", covariance = FALSE,
+                                   settings = list(maxiter = 0L)))
+  expect_identical(fit$kappa_levels, c(K_ST = "STUDY", K_E0 = "STUDY", K_ARM = "ARM"))
+  st <- fit$ebe_kappas_by_level$STUDY
+  expect_named(st, c("ID", "GROUP", "STUDY", "K_ST", "K_E0"))
+  # Each column against the per-cell table, by name: the first arm of each
+  # study carries the study's kappas.
+  cells <- fit$ebe_kappas
+  first <- cells[c(TRUE, FALSE), ]
+  expect_identical(st$K_ST, first$K_ST)
+  expect_identical(st$K_E0, first$K_E0)
+  expect_false(isTRUE(all.equal(st$K_ST, st$K_E0)))
+
   f <- withr::local_tempfile(fileext = ".fitrx")
   suppressWarnings(ferx_save_fit(fit, f))
-  dir <- withr::local_tempdir()
-  utils::unzip(f, exdir = dir)
-  unlink(file.path(dir, "ebes_kappa_ARM.csv"))
-  g <- withr::local_tempfile(fileext = ".fitrx")
-  withr::with_dir(dir, utils::zip(g, list.files(), flags = "-q"))
-  expect_error(suppressWarnings(ferx_load_fit(g)),
-               "names level `ARM`, but the bundle has no ebes_kappa_ARM.csv", fixed = TRUE)
+  back <- suppressWarnings(ferx_load_fit(f))
+  expect_identical(back$ebe_kappas_by_level, fit$ebe_kappas_by_level)
+  fitrx_kappa_rows <- getFromNamespace("ferx_rust_fitrx_kappa_rows", "ferx")
+  expect_identical(getFromNamespace(".ferx_kappa_rows", "ferx")(fit, ascii = FALSE),
+                   strsplit(fitrx_kappa_rows(f), "\n", fixed = TRUE)[[1L]])
+})
+
+test_that("the post-hoc steps run on a nested fit", {
+  # NEWS says simulate-with-uncertainty and the NPDE reference simulate a
+  # nested model (#587 review, finding 6); SIR, covariance and predict ride
+  # the same fit.
+  fit <- suppressWarnings(ferx_fit(nested_model, nested_data, method = "focei",
+                                   covariance = TRUE, settings = list(maxiter = 0L)))
+  expect_identical(fit$covariance_status, "computed")
+  pred <- suppressWarnings(ferx_predict(nested_model, nested_data, fit = fit))
+  expect_identical(nrow(pred), 240L)
+  expect_true(all(is.finite(pred$PRED)))
+  unc <- suppressWarnings(ferx_simulate_with_uncertainty(nested_model, nested_data, fit,
+                                                         n_uncertainty_draws = 3L,
+                                                         seed = 1L))
+  expect_identical(nrow(unc), 3L * 240L)
+  expect_true(all(is.finite(unc$IPRED)))
+  npde <- suppressWarnings(ferx_calc_npde(fit, nsim = 50L, seed = 1L))
+  expect_identical(nrow(npde$sdtab), 240L)
+  expect_true(all(is.finite(npde$sdtab$NPDE)))
+  cov <- suppressWarnings(ferx_covariance(fit))
+  expect_true(all(is.finite(cov$se_kappa)))
+  sir <- suppressWarnings(ferx_sir(fit, sir_samples = 200L, sir_resamples = 50L,
+                                   sir_seed = 1L))
+  expect_identical(dim(sir$sir_ci_kappa), c(2L, 2L))
 })
 
 test_that("ferx_simulate() draws a nested model's study kappa once per study", {

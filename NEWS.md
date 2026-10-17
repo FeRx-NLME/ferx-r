@@ -826,7 +826,10 @@
   one column per kappa holding the estimate of the row's own group, and
   `ferx_save_fit()` / `ferx_load_fit()` carry both in ferx-core's layout
   (`iov.kappa_levels`, `iov.levels` and one `ebes_kappa_<LEVEL>.csv` per
-  level), so ferx-core's own loader reads an R-written bundle. Every other
+  level), so ferx-core's own loader reads an R-written bundle, and
+  `ferx_load_fit()` refuses a malformed one where ferx-core's loader does
+  (a missing or misheaded level CSV, an unknown subject, GROUPs that do not
+  run 1..n, levels that disagree with `kappa_levels`). Every other
   model's fit, print and bundle is unchanged.
 
 - **`fit$ode_linear_exact` and `ode_method = "linear"`**
