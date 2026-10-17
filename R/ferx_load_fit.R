@@ -170,7 +170,11 @@ ferx_load_fit <- function(path) {
   model_staging <- file.path(staging, "model.ferx")
   if (file.exists(model_staging)) {
     result$model_source <- paste(readLines(model_staging, warn = FALSE), collapse = "\n")
-    result$model_text   <- result$model_source  # ferx_runlog() reads model_text
+    # ferx_runlog() reads model_text, and ferx_save_fit() writes it back as
+    # the bundle's model.ferx when it hashes to model_hash (#577), so keep
+    # the bundled bytes exactly - line endings, BOM, trailing newline.
+    result$model_text   <- .fitrx_read_model_text(model_staging) %||%
+      result$model_source
     persisted_model <- tempfile("fitrx_model_", fileext = ".ferx")
     file.copy(model_staging, persisted_model, overwrite = TRUE)
     result$model_path <- persisted_model
@@ -1037,4 +1041,18 @@ ferx_load_fit <- function(path) {
   if (length(v) == 0L) return(NULL)
   nm <- unlist(names_wire, use.names = FALSE)
   if (length(nm) == length(v)) stats::setNames(v, nm) else v
+}
+
+# The bundled model.ferx as one string holding its bytes exactly, or NULL when
+# they are not a UTF-8 string (an embedded NUL, invalid UTF-8). `readLines()`
+# would drop CRLF endings, a BOM and the presence of a trailing newline, and a
+# text that no longer hashes to `model_hash` makes `ferx_save_fit()` fall back
+# to copying a file instead of writing the fitted bytes (#577).
+.fitrx_read_model_text <- function(path) {
+  bytes <- readBin(path, "raw", n = file.size(path))
+  txt <- tryCatch(rawToChar(bytes), error = function(e) NULL)
+  if (is.null(txt)) return(NULL)
+  Encoding(txt) <- "UTF-8"
+  if (!validUTF8(txt)) return(NULL)
+  txt
 }

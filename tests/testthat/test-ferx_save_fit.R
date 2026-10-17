@@ -1752,9 +1752,15 @@ test_that("ferx_save_fit() warns when the model file changed since the fit (#531
   expect_no_warning(ferx_save_fit(fit, path), class = "ferx_model_edited_warning")
   loaded <- suppressWarnings(ferx_load_fit(path))
   expect_no_warning(ferx_save_fit(loaded, path), class = "ferx_model_edited_warning")
-  # One comment line appended after the fit: the bundle is still written,
-  # with the file as it is now, and the warning names it.
+  # One comment line appended after the fit. The fit carries the fitted
+  # bytes (#577), so the bundle is written from them and there is nothing to
+  # warn about.
   cat("# edited after the fit\n", file = model, append = TRUE)
+  expect_no_warning(ferx_save_fit(fit, path), class = "ferx_model_edited_warning")
+  # A fit from before the fitted bytes were carried falls back to the file:
+  # the bundle is still written, with the file as it is now, and the warning
+  # names it.
+  fit$model_text <- NULL
   expect_warning(ferx_save_fit(fit, path), class = "ferx_model_edited_warning")
   w <- tryCatch(ferx_save_fit(fit, path), ferx_model_edited_warning = conditionMessage)
   expect_match(w, basename(model), fixed = TRUE)
