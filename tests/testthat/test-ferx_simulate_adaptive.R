@@ -354,3 +354,24 @@ test_that("unsupported adaptive combinations raise a typed error", {
     "base regimen combined with system"
   )
 })
+
+test_that("a decision on a diverged ODE state is an error naming the state (ferx-core #1578)", {
+  # The right-hand side blows up within minutes of the first 1000 mg dose, so
+  # the state is NaN at the t = 12 decision. Before #1578 the controller was
+  # handed that NaN: with `verify = FALSE` the run returned results, every
+  # later decision logged as "dosed" on a NaN signal, and with the replay
+  # verifier on it failed on "prediction 1 is NaN" after the fact.
+  model <- .write_adaptive_model("  when signal < 10 : increase 25%")
+  writeLines(sub("-(CL / V) * central", "(CL / V) * central * central",
+                 readLines(model), fixed = TRUE), model)
+  data <- ferx_example("adaptive_tdm")$data
+  for (verify in c(TRUE, FALSE)) {
+    err <- expect_error(
+      ferx_simulate_adaptive(model, data, n_sim = 1L, seed = 1L, verify = verify),
+      "decision 1 at t=12: the ODE state is non-finite (central)", fixed = TRUE
+    )
+    # A runtime failure of the model and its parameter draw, not a refusal of
+    # the caller's input: ferx-core gives it no code.
+    expect_null(err$code)
+  }
+})
