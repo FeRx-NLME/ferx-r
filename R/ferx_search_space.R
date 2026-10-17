@@ -90,7 +90,15 @@ ferx_search_space <- function(mfl, model = NULL, data = NULL) {
     data_path  <- if (is.null(data)) "" else normalizePath(data)
   }
 
-  raw <- ferx_rust_search_space_parse(mfl, model_path, data_path)
+  # With a model, the engine's model and data read can refuse with a code
+  # (ferx-core #1772); `.ferx_engine_call()` hands it to the condition as
+  # `ferx_fit()` does. Without one there is nothing to read or re-validate.
+  raw <- if (nzchar(model_path)) {
+    .ferx_engine_call(ferx_rust_search_space_parse(mfl, model_path, data_path),
+                      model_path, if (nzchar(data_path)) data_path else NULL)
+  } else {
+    ferx_rust_search_space_parse(mfl, model_path, data_path)
+  }
 
   parsed <- .ferx_space_frame(raw$feature, raw$keyword, raw$optional)
   resolved <- isTRUE(raw$resolved)

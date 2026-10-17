@@ -8765,8 +8765,10 @@ fn search_final_fit(
     let out = std::fs::write(&path, model_text)
         .map_err(|e| format!("cannot write `{}`: {e}", path.display()))
         .and_then(|()| {
-            ferx_core::prepare_run(&path.to_string_lossy(), data)
-                .map_err(|e| engine_refusal("", e))
+            // `to_string()`, not `engine_refusal`: every caller re-prefixes
+            // this text (`ferx_covsearch: ...`), so a recorded code could
+            // never match the raised message (#587 review, finding 2).
+            ferx_core::prepare_run(&path.to_string_lossy(), data).map_err(|e| e.to_string())
         })
         .and_then(|prepared| {
             // `prepare_run` binds level blocks, so a search fit carries the same
