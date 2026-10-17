@@ -303,7 +303,7 @@ dependencies = [
 [[package]]
 name = "ferx-core"
 version = "0.4.0"
-source = "git+https://github.com/FeRx-NLME/ferx-core?branch=main#d53e82192ce02eaa343e4a2e43cefd3eb718c118"
+source = "git+https://github.com/FeRx-NLME/ferx-core?branch=main#c46b152e5f6737346fe2adf3929fe5331e34f4b1"
 dependencies = [
  "argmin",
  "argmin-math",
@@ -326,7 +326,7 @@ dependencies = [
 [[package]]
 name = "ferx-tools"
 version = "0.4.0"
-source = "git+https://github.com/FeRx-NLME/ferx-core?branch=main#d53e82192ce02eaa343e4a2e43cefd3eb718c118"
+source = "git+https://github.com/FeRx-NLME/ferx-core?branch=main#c46b152e5f6737346fe2adf3929fe5331e34f4b1"
 dependencies = [
  "csv",
  "ferx-core",
@@ -1202,9 +1202,9 @@ dependencies = [
 
 [[package]]
 name = "zip"
-version = "9.0.4"
+version = "9.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a954114b47a54df49f83d2722814e86b23d4bb1b54a1b90fb7d92b41619ddc22"
+checksum = "6e04976da629d3b04204ba8105b396a193af8ad2583b2c79bfb3ab8af580a11e"
 dependencies = [
  "crc32fast",
  "flate2",
