@@ -527,6 +527,80 @@ test_that("ferx_fit() leaves its own argument refusals uncoded (#517)", {
   expect_identical(e$code, "E_IOV_MISSING_OCC")
 })
 
+# R truncates every error the glue raises at `warning.length` (`Rf_error()`
+# formats into a buffer that size), so a refusal longer than that arrives as
+# a prefix of the text the glue recorded (#542).
+test_that("the raised text matches its record when R truncated it (#542)", {
+  match <- ferx:::.ferx_is_raised_text
+  text <- paste0(strrep("x", 1200L), " [tail]")
+  expect_true(match(text, text))
+  expect_true(match(text, substr(text, 1L, 999L)))
+  # In a multibyte locale R backs off to a character boundary, up to three
+  # bytes short of the limit.
+  expect_true(match(text, substr(text, 1L, 996L)))
+  # Anything else that is a prefix is a different message.
+  expect_false(match(text, substr(text, 1L, 995L)))
+  expect_false(match(text, substr(text, 1L, 1000L)))
+  expect_false(match(text, "x"))
+  expect_false(match("short", "short message"))
+  expect_false(match(text, paste0("y", substr(text, 2L, 999L))))
+  # Byte-wise: an em-dash cut in half is still a prefix of the record.
+  dash <- paste0(strrep("x", 998L), "\u2014", strrep("x", 100L))
+  cut <- rawToChar(charToRaw(dash)[1:999])
+  expect_true(match(dash, cut))
+  # The limit is the session's `warning.length`.
+  withr::local_options(warning.length = 2000L)
+  expect_false(match(text, substr(text, 1L, 999L)))
+  expect_true(match(paste0(text, strrep("z", 1000L)),
+                    substr(paste0(text, strrep("z", 1000L)), 1L, 1999L)))
+})
+
+test_that("a truncated coded refusal keeps its code and its full text (#542)", {
+  text <- paste0("Error simulating: ", strrep("long remediation ", 70L), "end.")
+  expect_gt(nchar(text, "bytes"), 1000L)
+  testthat::local_mocked_bindings(
+    ferx_rust_take_engine_diagnostic = function() {
+      list(text = text, message = text, code = "E_TEST", block = "",
+           line = 0L, suggestion = "")
+    },
+    .package = "ferx"
+  )
+  raised <- substr(text, 1L, 999L)
+  e <- ferx:::.ferx_engine_coded_error(simpleError(raised), raised)
+  expect_s3_class(e, "ferx_engine_error")
+  expect_identical(e$code, "E_TEST")
+  expect_identical(conditionMessage(e), paste0(text, " [E_TEST]"))
+})
+
+test_that("a truncated argument refusal stays uncoded (#542, #517)", {
+  # The glue's refusal of an unknown setting has an empty code. Truncated, it
+  # used to miss its record and reach the single-error fallback, which labelled
+  # it with the model's one unrelated finding (E_IOV_MISSING_OCC).
+  ex <- ferx_example("warfarin_iov")
+  model <- withr::local_tempfile(fileext = ".ferx")
+  text <- readLines(ex$model)
+  writeLines(text[!grepl("iov_column", text, fixed = TRUE)], model)
+  rows <- utils::read.csv(ex$data, na.strings = ".")
+  rows$OCC <- NULL
+  data <- withr::local_tempfile(fileext = ".csv")
+  utils::write.csv(rows, data, row.names = FALSE, quote = FALSE, na = ".")
+
+  key <- paste0("not_a_setting_", strrep("x", 1200L))
+  settings <- list(iov_occasion = "dose", 1)
+  names(settings)[2L] <- key
+  e <- tryCatch({
+    suppressWarnings(ferx_fit(model, data, covariance = FALSE, verbose = FALSE,
+                              settings = settings))
+    NULL
+  }, error = function(e) e)
+  expect_s3_class(e, "error")
+  expect_false(inherits(e, "ferx_engine_error"))
+  expect_null(e$code)
+  msg <- conditionMessage(e)
+  expect_match(msg, "unknown fit setting `not_a_setting_", fixed = TRUE)
+  expect_no_match(msg, "[E_", fixed = TRUE)
+})
+
 test_that("a class-blind tryCatch still sees an ordinary error", {
   ex    <- ferx_example("warfarin")
   lines <- c(readLines(ex$model), "", "[fit_option]", "  method = focei")

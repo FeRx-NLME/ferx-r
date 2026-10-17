@@ -1012,6 +1012,17 @@
 
 ## Bug fixes
 
+- **An engine refusal longer than `warning.length` keeps its code** (#542).
+  R truncates every error the glue raises at `warning.length` (1000 bytes
+  by default), and the truncated text no longer matched the glue's
+  diagnostic record byte for byte, so the refusal arrived as a plain
+  `simpleError`, cut off before its `[E_...]` code. The flip-flop refusals
+  of `ferx_simulate_with_uncertainty()` (`E_TRANSIT_FLIP_FLOP`) are over
+  that limit. A raised text that is the record's text cut off at the limit
+  now matches it, and the `ferx_engine_error` carries the code and the full,
+  untruncated text. A long refusal of the call itself (an unknown
+  `settings` name) likewise stays uncoded instead of borrowing an unrelated
+  finding's code from the re-validation fallback.
 - **A VI fit reloaded with `ferx_load_fit()` reports its method as `"VI"`,
   not `"vi"`, and keeps its NaN OFV, AIC and BIC as NaN** (#508). The
   `.fitrx` method token is now mapped to its label, and back on save, from
