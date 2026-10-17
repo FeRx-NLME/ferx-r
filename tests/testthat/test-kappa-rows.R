@@ -241,11 +241,14 @@ test_that("the glue refuses what it cannot read rather than guessing", {
     args <- utils::modifyList(list(
       omega_iov = 0.04, n_kappa = 1L, kappa_names = "K", kappa_fixed = NULL,
       se_kappa = NULL, kappa_param_types = "additive", kappa_weights = NULL,
-      kappa_weight_typical = NULL, covariance_status = "computed", ascii = TRUE
+      kappa_weight_typical = NULL, kappa_levels = character(),
+      covariance_status = "computed", ascii = TRUE
     ), list(...))
     do.call(glue, args)
   }
   expect_identical(call(), "  K                    = 0.040000  (SD = 0.2000)  SE = N/A\n")
+  # Nested levels (ferx-core #1082): the kappa's level follows its name.
+  expect_match(call(kappa_levels = "STUDY"), "^  K at STUDY +=")
   expect_error(call(covariance_status = "done"), "covariance_status")
   expect_error(call(kappa_param_types = "lognormal"), "random-effect scale")
   expect_error(call(omega_iov = c(0.04, 0)), "1 x 1")

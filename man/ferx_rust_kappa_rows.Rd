@@ -13,6 +13,7 @@ ferx_rust_kappa_rows(
   kappa_param_types,
   kappa_weights,
   kappa_weight_typical,
+  kappa_levels,
   covariance_status,
   ascii
 )
