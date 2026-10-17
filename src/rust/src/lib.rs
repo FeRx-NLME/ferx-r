@@ -4744,6 +4744,56 @@ fn ferx_rust_known_blocks() -> Vec<String> {
     })
 }
 
+/// Every estimation method's `.fitrx` token and display label (ferx-r #508):
+/// the label is ferx-core's `EstimationMethod::label()`, the token what core's
+/// `.fitrx` writer stores for that method. `ferx_load_fit()` maps the stored
+/// token to the label a live fit reports, and `ferx_save_fit()` maps back, so
+/// neither keeps a hand-written method list that a new engine method can
+/// outgrow (a reloaded VI fit used to read `"vi"` instead of `"VI"`).
+///
+/// Core keeps its token map private, so the tokens are spelled here, once, in
+/// the `methods!` list below. That one list generates both the table and an
+/// exhaustive `match` over `EstimationMethod`, so a method the engine adds and
+/// the list lacks stops this crate compiling; nothing can be in the match but
+/// missing from the table.
+///
+/// @return A list with `token` and `label`, character vectors, one entry per
+///   method, in the same order.
+/// @export
+#[extendr]
+fn ferx_rust_method_labels() -> List {
+    entry(move || {
+        macro_rules! methods {
+            ($($variant:ident => $token:literal),+ $(,)?) => {{
+                // Never called: it exists so the compiler checks that the
+                // `methods!` list covers every `EstimationMethod`.
+                #[allow(dead_code)]
+                fn exhaustive(m: EstimationMethod) {
+                    match m {
+                        $(EstimationMethod::$variant => {})+
+                    }
+                }
+                [$((EstimationMethod::$variant, $token)),+]
+            }};
+        }
+        let table = methods! {
+            Foce => "foce",
+            FoceI => "focei",
+            FoceGn => "foce_gn",
+            FoceGnHybrid => "foce_gn_hybrid",
+            Saem => "saem",
+            Imp => "imp",
+            Impmap => "impmap",
+            Bayes => "bayes",
+            Laplace => "laplace",
+            Vi => "vi",
+        };
+        let tokens: Vec<String> = table.iter().map(|(_, t)| t.to_string()).collect();
+        let labels: Vec<String> = table.iter().map(|(m, _)| m.label().to_string()).collect();
+        Ok(list!(token = tokens, label = labels))
+    })
+}
+
 /// The theta blocks `print.ferx_fit` reports as a compact summary instead of one
 /// row per coefficient (ferx-r #413): ferx-core's own rule
 /// (`compact_theta_blocks`, threshold `THETA_BLOCK_COMPACT_MIN` free
@@ -11442,6 +11492,7 @@ extendr_module! {
     fn ferx_rust_autodiff_enabled;
     fn ferx_rust_test_panic;
     fn ferx_rust_known_blocks;
+    fn ferx_rust_method_labels;
     fn ferx_rust_compact_theta_blocks;
     fn ferx_rust_kappa_rows;
     fn ferx_rust_fitrx_kappa_rows;

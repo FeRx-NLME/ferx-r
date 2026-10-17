@@ -145,7 +145,34 @@ test_that(".fitrx_method_label is the inverse for every known token", {
   expect_identical(ferx:::.fitrx_method_label("imp"), "IMP")
   expect_identical(ferx:::.fitrx_method_label("impmap"), "IMPMAP")
   expect_identical(ferx:::.fitrx_method_label("bayes"), "BAYES")
-  expect_identical(ferx:::.fitrx_method_label("other"), "other") # unknown passthrough
+  # #508: "vi" had no entry and read back lowercase; the labels now come from
+  # the engine, so this one is no longer hand-listed.
+  expect_identical(ferx:::.fitrx_method_label("vi"), "VI")
+  # A token this engine does not know comes back upper-cased, the shape of
+  # every engine label, not as the raw lowercase token.
+  expect_identical(ferx:::.fitrx_method_label("other"), "OTHER")
+})
+test_that(".fitrx_method_label maps every engine token to the engine's label (#508)", {
+  # The table is the glue's exhaustive match over ferx-core's
+  # `EstimationMethod`, with labels from `EstimationMethod::label()`; every
+  # token in it must read back as its label, VI included.
+  tab <- ferx:::ferx_rust_method_labels()
+  expect_true(length(tab$token) >= 10L)
+  expect_identical(length(tab$token), length(tab$label))
+  expect_false(anyDuplicated(tab$token) > 0L)
+  expect_true("vi" %in% tab$token)
+  expect_identical(tab$label[tab$token == "vi"], "VI")
+  for (i in seq_along(tab$token)) {
+    expect_identical(ferx:::.fitrx_method_label(tab$token[[i]]), tab$label[[i]])
+    expect_identical(ferx:::.fitrx_method_to_token(tab$label[[i]]), tab$token[[i]])
+  }
+})
+test_that(".fitrx_num_or_nan reads a JSON null back as NaN (#508)", {
+  expect_identical(ferx:::.fitrx_num_or_nan(NULL), NaN)
+  expect_identical(ferx:::.fitrx_num_or_nan(list()), NaN)
+  expect_identical(ferx:::.fitrx_num_or_nan(NA_real_), NA_real_)
+  expect_identical(ferx:::.fitrx_num_or_nan(12.5), 12.5)
+  expect_identical(ferx:::.fitrx_num_or_nan(list(-3)), -3)
 })
 test_that(".fitrx_matrix_from_wire rebuilds the matrix and guards bad input", {
   expect_null(ferx:::.fitrx_matrix_from_wire(NULL))

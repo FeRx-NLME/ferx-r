@@ -965,6 +965,16 @@
 
 ## Bug fixes
 
+- **A VI fit reloaded with `ferx_load_fit()` reports its method as `"VI"`,
+  not `"vi"`, and keeps its NaN OFV, AIC and BIC as NaN** (#508). The
+  `.fitrx` method token is now mapped to its label, and back on save, from
+  the engine's own `EstimationMethod::label()`, so a method the engine gains
+  can no longer read back lowercase. A VI fit under the default
+  `vi_final_ofv = none` has no OFV by design; the bundle stores it as JSON
+  `null`, which used to read back as a zero-length `numeric(0)`. The VI
+  result itself (`fit$vi`) is not on the fit yet (#507), so it is not in the
+  bundle either.
+
 - **The `emax_pkpd` example no longer forces `gradient = fd`.** The model
   file, `inst/examples/ex_emax_pkpd.R` and `?ferx_example` said FD was
   required for its per-CMT readouts, and `?ferx_fit` and the
