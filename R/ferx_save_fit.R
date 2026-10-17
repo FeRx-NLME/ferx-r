@@ -112,6 +112,17 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
     entries <- c(entries, "ebes_kappa.csv")
   }
 
+  # ebes_kappa_<LEVEL>.csv - one per level of a nested-level fit (ferx-core
+  # #1082 PR4), the frames of fit$ebe_kappas_by_level as they stand; fit.json's
+  # `iov.levels` names them (.fitrx_build_iov_wire()).
+  if (!is.null(fit$omega_iov)) {
+    for (lv in names(fit$ebe_kappas_by_level)) {
+      entry <- .fitrx_level_kappa_entry(lv)
+      .fitrx_write_csv_exact(fit$ebe_kappas_by_level[[lv]], file.path(staging, entry))
+      entries <- c(entries, entry)
+    }
+  }
+
   # conddist.csv - present only when the SAEM conditional-distribution pass
   # ran (`conddist = TRUE`, ferx-core #257). Long format (ID, ETA, COND_MEAN,
   # COND_SD, COND_MODE), mirroring ferx-core's own `conddist.csv` .fitrx entry
@@ -284,7 +295,9 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   # IovWire
   "kappa_names", "kappa_fixed", "se_kappa", "shrinkage_kappa",
   "kappa_init_as_sd", "kappa_weights", "kappa_weight_typical",
-  "kappa_param_types",
+  "kappa_param_types", "kappa_levels",
+  # LevelWire (iov.levels, ferx-core #1082 PR4)
+  "columns",
   # MatrixWire, and the manifest
   "data", "entries",
   # R-only sections the engine ignores (`bayes`, `exclusions`): included so the
@@ -1073,6 +1086,24 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   # such a bundle) writes the bundle it always wrote.
   if (length(fit$kappa_param_types) > 0L) {
     wire$kappa_param_types <- as.list(unname(as.character(fit$kappa_param_types)))
+  }
+  # Nested levels (ferx-core #1082 PR4): each kappa's level, and per level its
+  # label columns and kappas, which name the columns of its
+  # ebes_kappa_<LEVEL>.csv. The engine skips both when empty, so they are
+  # written only for a nested-level fit, and every other bundle is unchanged.
+  if (length(fit$kappa_levels) > 0L) {
+    wire$kappa_levels <- as.list(unname(as.character(fit$kappa_levels)))
+  }
+  if (length(fit$ebe_kappas_by_level) > 0L) {
+    kn <- as.character(fit$kappa_names %||% character())
+    wire$levels <- unname(lapply(names(fit$ebe_kappas_by_level), function(lv) {
+      cols <- setdiff(names(fit$ebe_kappas_by_level[[lv]]), c("ID", "GROUP"))
+      list(
+        name = lv,
+        columns = as.list(cols[!cols %in% kn]),
+        kappa_names = as.list(cols[cols %in% kn])
+      )
+    }))
   }
   wire
 }

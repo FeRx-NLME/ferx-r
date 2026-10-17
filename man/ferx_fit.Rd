@@ -1330,7 +1330,26 @@ out. \code{NULL} when the model has no IOV.}
 column per kappa parameter containing per-subject per-occasion kappa
 EBEs. \code{ID} carries the original subject identifier (matching
 \code{sdtab}); \code{OCC} carries the labeled occasion in first-seen
-order. \code{NULL} when no IOV.}
+order. \code{NULL} when no IOV. On a model with nested levels each
+row is one cell (an arm of a study), carrying every kappa that cell
+reads, so a study kappa repeats on each of its arms; see
+\code{ebe_kappas_by_level} for each estimate once.}
+\item{kappa_levels}{Named character vector, parallel to
+\code{kappa_names}: the level each kappa is drawn at on a model with
+nested levels (\code{kappa K_ST ~ 0.04 at STUDY} gives \code{"STUDY"}).
+\code{print()} labels the kappa rows and their shrinkage
+\code{K_ST at STUDY}, and \code{shrinkage_kappa} is then pooled over the
+groups of the kappa's own level. \code{NULL} on every other model, a
+single \code{level} included.}
+\item{ebe_kappas_by_level}{Named list, one data frame per level of a
+model with nested levels, outermost first: columns \code{ID} (the
+subject), \code{GROUP} (1-based, the subject's groups of that level in
+the order their first record appears), the data columns that label the
+group (\code{STUDY}, \code{ARM}: under nesting by key a group is named by
+its whole label path) and one column per kappa at that level, each
+group's estimate once. The \code{sdtab} carries one column per kappa
+with the estimate of the row's own group. \code{NULL} on every other
+model.}
 \item{omega_param_corr}{Parameter-level correlation matrix for block omega.
 Uses the bivariate lognormal formula for lognormal pairs and falls back
 to the eta-level formula for additive or unknown parameterisations.

@@ -333,6 +333,84 @@
   df
 }
 
+# The per-level kappa estimates of a nested-level fit (ferx-core #1082 PR4):
+# one data frame per entry of fit.json's `iov.levels`, read from its
+# `ebes_kappa_<LEVEL>.csv`, in the live fit's shape - ID (text, verbatim),
+# GROUP (integer), the level's label columns and its kappas (double). An empty
+# kappa cell is a NaN estimate, as ferx-core writes and reads it. NULL when
+# fit.json names no level. Whatever ferx-core's own loader refuses is refused
+# here too, in its words (`parse_level_kappa_csv` and the `iov` checks in
+# io/fitrx.rs): a level naming a kappa that `kappa_levels` puts elsewhere, a
+# missing CSV, a header that is not the level's, a row with the wrong number
+# of fields, an ID that is not a subject of the fit (`subject_ids`), and a
+# subject whose GROUPs do not run 1..n.
+.fitrx_read_level_kappas <- function(staging, levels, kappa_names = character(),
+                                     kappa_levels = character(),
+                                     subject_ids = NULL) {
+  if (length(levels) == 0L) return(NULL)
+  out <- list()
+  for (lv in levels) {
+    name <- as.character(lv$name)
+    columns <- as.character(unlist(lv$columns, use.names = FALSE))
+    kappas <- as.character(unlist(lv$kappa_names, use.names = FALSE))
+    for (k in kappas) {
+      at <- unname(kappa_levels[match(k, kappa_names)])
+      if (length(at) != 1L || is.na(at) || !identical(at, name)) {
+        stop(sprintf(
+          "iov.levels names kappa `%s` at level `%s`, but iov.kappa_levels puts it at %s",
+          k, name, if (length(at) != 1L || is.na(at)) "no level" else sprintf("`%s`", at)
+        ))
+      }
+    }
+    entry <- .fitrx_level_kappa_entry(name)
+    path <- file.path(staging, entry)
+    if (!file.exists(path)) {
+      stop(sprintf("fit.json names level `%s`, but the bundle has no %s", name, entry))
+    }
+    expected <- c("ID", "GROUP", columns, kappas)
+    # read.csv() pads a short row and folds a long one into the next, so the
+    # field count is checked on the raw lines first.
+    n_fields <- utils::count.fields(path, sep = ",", quote = "\"", blank.lines.skip = TRUE)
+    bad <- which(n_fields != length(expected))
+    if (length(bad) > 0L && bad[1L] > 1L) {
+      stop(sprintf("%s: row %d has %d fields, expected %d",
+                   entry, bad[1L] - 1L, n_fields[bad[1L]], length(expected)))
+    }
+    df <- .fitrx_read_csv_exact(path, id_cols = "ID")
+    if (!identical(names(df), expected)) {
+      stop(sprintf("%s: header %s does not match fit.json's level (expected %s)",
+                   entry, paste(names(df), collapse = ","),
+                   paste(expected, collapse = ",")))
+    }
+    if (!is.null(subject_ids)) {
+      unknown <- setdiff(df$ID, subject_ids)
+      if (length(unknown) > 0L) {
+        stop(sprintf("%s: unknown ID \"%s\"", entry, unknown[1L]))
+      }
+    }
+    df$GROUP <- as.integer(df$GROUP)
+    for (id in unique(df$ID)) {
+      g <- df$GROUP[df$ID == id]
+      if (anyNA(g) || !identical(sort(g), seq_along(g))) {
+        stop(sprintf("%s: subject \"%s\": GROUP must run 1..n without gaps or repeats",
+                     entry, id))
+      }
+    }
+    for (col in columns) df[[col]] <- as.double(df[[col]])
+    for (col in kappas) {
+      v <- as.double(df[[col]])
+      v[is.na(v)] <- NaN
+      df[[col]] <- v
+    }
+    out[[name]] <- df
+  }
+  out
+}
+
+# The bundle entry of one level's kappa estimates, as ferx-core names it
+# (`level_kappa_entry` in io/fitrx.rs).
+.fitrx_level_kappa_entry <- function(level) paste0("ebes_kappa_", level, ".csv")
+
 # `predictions.csv`'s subject IDs (text) as the number ferx-core puts in
 # `sdtab$ID`: the ID parsed as Rust parses an f64, else the subject's
 # position, 1-based, among ALL subjects (`io::output::sdtab`). A subject with

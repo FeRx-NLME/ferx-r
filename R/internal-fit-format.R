@@ -52,6 +52,18 @@
   types
 }
 
+# The level each kappa is drawn at on a model with nested levels (ferx-core
+# #1082: `kappa K_ST ... at STUDY` gives "STUDY"), named by kappa_names. The
+# engine leaves the vector empty on every other model, a single `level`
+# included, and so does a bundle written before #1082 PR4: NULL then, which
+# prints no level.
+.ferx_name_kappa_levels <- function(levels, kappa_names, n_kappa) {
+  levels <- as.character(unlist(levels, use.names = FALSE) %||% character())
+  if (n_kappa == 0L || length(levels) != n_kappa) return(NULL)
+  if (length(kappa_names) == n_kappa) names(levels) <- kappa_names
+  levels
+}
+
 # SIR 95% intervals for the IOV kappa variances (ferx-core #1705), from the
 # flat [lo1, hi1, lo2, hi2, ...] vector the FFI list and a .fitrx bundle both
 # carry, as the (n_kappa, 2) lower/upper matrix the other sir_ci_* fields are.
@@ -89,6 +101,7 @@
     types,
     if (is.null(fit$kappa_weights)) NULL else as.character(fit$kappa_weights),
     if (is.null(fit$kappa_weight_typical)) NULL else as.numeric(fit$kappa_weight_typical),
+    as.character(fit$kappa_levels %||% character()),
     as.character(status),
     ascii
   )
@@ -862,6 +875,11 @@
     result$kappa_param_types <- .ferx_name_kappa_param_types(
       result$kappa_param_types, result$kappa_names, d_iov
     )
+    # Nested levels (ferx-core #1082): each kappa's level and each level's
+    # kappa estimates once per group; NULL on every other model.
+    result$kappa_levels <- .ferx_name_kappa_levels(result$kappa_levels,
+                                                   result$kappa_names, d_iov)
+    if (length(result$ebe_kappas_by_level) == 0L) result$ebe_kappas_by_level <- NULL
   } else {
     result$omega_iov <- NULL
     result$se_kappa <- NULL
@@ -872,6 +890,8 @@
     result$kappa_weights <- NULL
     result$kappa_weight_typical <- NULL
     result$kappa_param_types <- NULL
+    result$kappa_levels <- NULL
+    result$ebe_kappas_by_level <- NULL
   }
 
   # Reshape omega_param_corr into a square matrix using omega_dim to guard

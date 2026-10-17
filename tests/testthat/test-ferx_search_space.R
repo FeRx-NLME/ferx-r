@@ -142,3 +142,23 @@ test_that("coverage accepts a space or a configuration", {
 
   expect_error(ferx_search_coverage(42), "single MFL string")
 })
+
+test_that("a model or data refusal reaches R with the engine's code (ferx-core #1772)", {
+  # prepare_run returns EngineError since ferx-core #1772; the glue records
+  # its code and ferx_search_space() hands it to the condition, as ferx_fit()
+  # does (#587 review, finding 1).
+  ex <- ferx_example("two_cpt_oral_cov")
+  d <- utils::read.csv(ex$data)
+  d$WT <- NULL
+  d$CRCL <- NULL
+  data <- withr::local_tempfile(fileext = ".csv")
+  utils::write.csv(d, data, row.names = FALSE, na = ".")
+  e <- tryCatch(ferx_search_space("COVARIATE?(@IIV, @CONTINUOUS, [pow, lin])",
+                                  ex$model, data),
+                error = identity)
+  expect_s3_class(e, "ferx_engine_error")
+  expect_identical(e$code, "E_MISSING_COVARIATE")
+  # The record was taken by this call, not left for the next one.
+  take <- getFromNamespace("ferx_rust_take_engine_diagnostic", "ferx")
+  expect_null(take())
+})

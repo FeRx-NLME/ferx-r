@@ -303,7 +303,7 @@ dependencies = [
 [[package]]
 name = "ferx-core"
 version = "0.4.0"
-source = "git+https://github.com/FeRx-NLME/ferx-core?branch=main#b32f20d97f55512114c32e549db42b0163a7b853"
+source = "git+https://github.com/FeRx-NLME/ferx-core?branch=main#d53e82192ce02eaa343e4a2e43cefd3eb718c118"
 dependencies = [
  "argmin",
  "argmin-math",
@@ -326,7 +326,7 @@ dependencies = [
 [[package]]
 name = "ferx-tools"
 version = "0.4.0"
-source = "git+https://github.com/FeRx-NLME/ferx-core?branch=main#b32f20d97f55512114c32e549db42b0163a7b853"
+source = "git+https://github.com/FeRx-NLME/ferx-core?branch=main#d53e82192ce02eaa343e4a2e43cefd3eb718c118"
 dependencies = [
  "csv",
  "ferx-core",
@@ -476,9 +476,9 @@ checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
 
 [[package]]
 name = "libc"
-version = "0.2.190"
+version = "0.2.191"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce5d3ddc6d3fa000eb1536d85e147bfe31aacaba692ed6a876f95cb7c855be78"
+checksum = "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a"
 
 [[package]]
 name = "libflate"

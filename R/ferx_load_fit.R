@@ -134,6 +134,12 @@ ferx_load_fit <- function(path) {
   } else {
     result$ebe_kappas <- NULL
   }
+  # Nested levels (ferx-core #1082 PR4): one ebes_kappa_<LEVEL>.csv per level
+  # fit.json's `iov.levels` names. A bundle written before it names none.
+  result$ebe_kappas_by_level <- .fitrx_read_level_kappas(
+    staging, wire$iov$levels, result$kappa_names, result$kappa_levels,
+    result$subject_ids
+  )
   conddist_path <- file.path(staging, "conddist.csv")
   if (file.exists(conddist_path)) {
     cd_df <- .fitrx_read_csv_exact(conddist_path, id_cols = "ID")
@@ -533,6 +539,17 @@ ferx_load_fit <- function(path) {
     # ferx-core #1643. Absent from every bundle written before it: empty.
     out$kappa_param_types <- .ferx_name_kappa_param_types(
       w$iov$kappa_param_types, out$kappa_names, length(out$kappa_names)
+    )
+    # ferx-core #1082 PR4. Absent from every one-level and every older bundle;
+    # present, it is one level per kappa, or the bundle is refused as
+    # ferx-core's loader refuses it.
+    n_levels <- length(w$iov$kappa_levels)
+    if (n_levels > 0L && n_levels != length(out$kappa_names)) {
+      stop(sprintf("iov.kappa_levels (%d) does not match iov.kappa_names (%d)",
+                   n_levels, length(out$kappa_names)))
+    }
+    out$kappa_levels <- .ferx_name_kappa_levels(
+      w$iov$kappa_levels, out$kappa_names, length(out$kappa_names)
     )
   } else {
     out$kappa_names <- character()
