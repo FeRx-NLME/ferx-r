@@ -33,10 +33,13 @@
 #' `fit$packed_estimate`. With both, `ferx_covariance(fit)` is `identical()` to
 #' the covariance `ferx_fit(..., covariance = TRUE)` reports, unless
 #' `covariance_method` differs from the fit's (it is a setting of the step, not
-#' of the fit, and is not recorded). That holds on every estimation method with
-#' an in-fit step: Gauss-Newton, SAEM, importance sampling and VI start from the
-#' EBEs the fit reports, which their own warm-started solves produced (ferx-core
-#' #1847).
+#' of the fit, and is not recorded). On a fit without `kappa` that holds on every
+#' estimation method with an in-fit step: Gauss-Newton, SAEM, importance
+#' sampling and VI start from the EBEs the fit reports, which their own
+#' warm-started solves produced (ferx-core #1847). A fit with `kappa` (IOV)
+#' restarts from a cold inner solve, because the fit's kappa estimates are not
+#' passed to the engine: exact for FOCE / FOCEI, not for the warm-started
+#' methods, where the standard errors can differ widely (ferx-r #591).
 #'
 #' A fit loaded with [ferx_load_fit()] keeps both, so its result is
 #' `identical()` to the in-fit one too. A fit loaded from a bundle saved before

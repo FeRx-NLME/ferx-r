@@ -6,14 +6,18 @@
   These engine changes reach R:
 
   - **`ferx_covariance()` repeats a fit's in-fit covariance step bit for bit
-    on every estimation method, also on a fit reloaded with
-    `ferx_load_fit()`**
+    on every estimation method for a fit without `kappa`, also on a fit
+    reloaded with `ferx_load_fit()`**
     ([ferx-core #1847](https://github.com/FeRx-NLME/ferx-core/issues/1847),
     [#2092](https://github.com/FeRx-NLME/ferx-core/pull/2092)). Gauss-Newton,
     SAEM, importance sampling and VI report the EBEs of their own
     warm-started solves, and `ferx_covariance()` restarted them from a cold
     solve, so their standard errors could differ from the fit's by up to
-    3.5e-7 relative; they now start from the reported EBEs. ferx-core's own
+    3.5e-7 relative; they now start from the reported EBEs. A fit with
+    `kappa` (IOV) still restarts cold, because R does not pass the fit's
+    kappa estimates to the engine: FOCE / FOCEI stay exact, but a SAEM IOV
+    fit's `ferx_covariance()` standard errors can be far from the in-fit ones
+    ([#591](https://github.com/FeRx-NLME/ferx-r/issues/591)). ferx-core's own
     `.fitrx` writer now stores every CSV double (EBEs, kappas including each
     level's `ebes_kappa_<LEVEL>.csv`, predictions, conditional distribution)
     as the shortest text that reads back as the same value, as

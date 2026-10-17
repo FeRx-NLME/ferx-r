@@ -115,6 +115,8 @@ test_that("conddist.csv crosses both writers: COND_MODE is checked by value", {
   # refused every R-written conddist.csv whose EBEs were not six-decimal
   # numbers (#1847); fitrx_engine_trip() loads the R bundle with core's loader.
   fit <- warfarin_saem_conddist_fit()
+  # Without a computed step the identity below would compare NULL with NULL.
+  expect_identical(fit$covariance_status, "computed")
   trip <- quiet(fitrx_engine_trip(fit))
   expect_true("conddist.csv" %in% utils::unzip(trip$core_path, list = TRUE)$Name)
   back <- quiet(ferx_load_fit(trip$core_path))
@@ -148,4 +150,6 @@ test_that("a bundle written at six decimals before #1847 still loads", {
   gn_cov <- quiet(ferx_covariance(gn_back))
   expect_equal(gn_cov$se_theta, gn$se_theta, tolerance = 1e-6)
   expect_equal(gn_cov$se_omega, gn$se_omega, tolerance = 1e-6)
+  # ...and not the warm path: from the rounded EBEs the step runs cold.
+  expect_false(identical(cov_parts(gn_cov), cov_parts(gn)))
 })
