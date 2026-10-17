@@ -487,7 +487,7 @@ fn ferx_rust_fit(
         let (mut population, covariate_table) =
             match ferx_core::api::read_population_with(&parsed.model, &reader_settings, data_path) {
                 Ok(result) => result,
-                Err(e) => return Err(format!("Error reading data: {e}")),
+                Err(e) => return Err(engine_refusal("Error reading data: ", e)),
             };
 
         // Bind `theta NAME[COL, ...]` level blocks against the data just read
@@ -496,7 +496,7 @@ fn ferx_rust_fit(
         // to come before every stamp on the model below - a stamp made earlier is
         // silently lost. No-op without a re-parse for a model with no level block.
         bind_design_text(&mut parsed, &model_text, &mut population)
-            .map_err(|e| engine_refusal("", e))?;
+            .map_err(|e| e.refusal(""))?;
 
         // Re-apply the (now settings-merged) ODE solver tolerances onto the model's
         // OdeSpec so call-time `ode_reltol` / `ode_abstol` / `ode_max_steps`
@@ -676,7 +676,7 @@ fn ferx_rust_fit(
                 // instead of a silent empty-list return.
                 return Err("ferx_fit: cancelled by user".to_string());
             }
-            Ok(Err(e)) => return Err(format!("Fit error: {e}")),
+            Ok(Err(e)) => return Err(engine_refusal("Fit error: ", e)),
             Err(_) => return Err("Fit error: worker thread panicked".to_string()),
         };
 
@@ -768,7 +768,7 @@ fn ferx_rust_simulate(
         // initial values drive it, so the design's levels are the right ones
         // (ferx-r #370). No-op for a model with no level block.
         bind_design(&mut parsed, model_path, &mut population)
-            .map_err(|e| engine_refusal("", e))?;
+            .map_err(|e| e.refusal(""))?;
         // The occasions a model-file `iov_occasion` rule derives (ferx-r #523):
         // the reader fills them from `iov_column` only.
         let occasion_notes = derive_file_occasions(&parsed, &mut population);
@@ -878,7 +878,7 @@ fn ferx_rust_simulate_from_fit(
         // by position (ferx-r #370); see `bind_design_from_fit`.
         let fitted = fit_bindings_from_r(&fit_bindings)?;
         bind_design_from_fit(&mut parsed, model_path, &mut population, &fitted)
-            .map_err(|e| engine_refusal("", e))?;
+            .map_err(|e| e.refusal(""))?;
         // The occasions the fit derived, under its own rule (ferx-r #523); see
         // `derive_fit_occasions`.
         let occasion_notes =
@@ -998,7 +998,7 @@ fn ferx_rust_simulate_adaptive(
         // initial values drive it, so the design's levels are the right ones
         // (ferx-r #370). No-op for a model with no level block.
         bind_design(&mut parsed, model_path, &mut population)
-            .map_err(|e| engine_refusal("ferx_simulate_adaptive: ", e))?;
+            .map_err(|e| e.refusal("ferx_simulate_adaptive: "))?;
         // The occasions a model-file `iov_occasion` rule derives (ferx-r #523):
         // the reader fills them from `iov_column` only.
         let occasion_notes = derive_file_occasions(&parsed, &mut population);
@@ -1230,7 +1230,7 @@ fn ferx_rust_simulate_with_uncertainty(
         // by position (ferx-r #370); see `bind_design_from_fit`.
         let fitted = fit_bindings_from_r(&fit_bindings)?;
         bind_design_from_fit(&mut parsed, model_path, &mut population, &fitted)
-            .map_err(|e| engine_refusal("", e))?;
+            .map_err(|e| e.refusal(""))?;
         // The occasions the fit derived, under its own rule (ferx-r #523); see
         // `derive_fit_occasions`.
         let occasion_notes =
@@ -1333,7 +1333,7 @@ fn ferx_rust_predict(
         // initial values drive it, so the design's levels are the right ones
         // (ferx-r #370). No-op for a model with no level block.
         bind_design(&mut parsed, model_path, &mut population)
-            .map_err(|e| engine_refusal("", e))?;
+            .map_err(|e| e.refusal(""))?;
         // The occasions a model-file `iov_occasion` rule derives (ferx-r #523):
         // the reader fills them from `iov_column` only.
         let occasion_notes = derive_file_occasions(&parsed, &mut population);
@@ -1416,7 +1416,7 @@ fn ferx_rust_predict_from_fit(
         // by position (ferx-r #370); see `bind_design_from_fit`.
         let fitted = fit_bindings_from_r(&fit_bindings)?;
         bind_design_from_fit(&mut parsed, model_path, &mut population, &fitted)
-            .map_err(|e| engine_refusal("", e))?;
+            .map_err(|e| e.refusal(""))?;
         // The occasions the fit derived, under its own rule (ferx-r #523); see
         // `derive_fit_occasions`.
         let occasion_notes =
@@ -1517,7 +1517,7 @@ fn ferx_rust_predict_survival(model_path: &str, data_path: &str, times: Vec<f64>
         // initial values drive it, so the design's levels are the right ones
         // (ferx-r #370). No-op for a model with no level block.
         bind_design(&mut parsed, model_path, &mut population)
-            .map_err(|e| engine_refusal("", e))?;
+            .map_err(|e| e.refusal(""))?;
         // The occasions a model-file `iov_occasion` rule derives (ferx-r #523):
         // the reader fills them from `iov_column` only.
         let occasion_notes = derive_file_occasions(&parsed, &mut population);
@@ -1593,7 +1593,7 @@ fn ferx_rust_predict_survival_from_fit(
         // by position (ferx-r #370); see `bind_design_from_fit`.
         let fitted = fit_bindings_from_r(&fit_bindings)?;
         bind_design_from_fit(&mut parsed, model_path, &mut population, &fitted)
-            .map_err(|e| engine_refusal("", e))?;
+            .map_err(|e| e.refusal(""))?;
         // The occasions the fit derived, under its own rule (ferx-r #523); see
         // `derive_fit_occasions`.
         let occasion_notes =
@@ -1721,14 +1721,14 @@ fn ferx_rust_npde_from_fit(
         let read = ferx_core::api::read_population_with(&parsed.model, &settings, data_path);
         let (mut population, _) = match read {
             Ok(r) => r,
-            Err(e) => return Err(format!("Error reading data: {e}")),
+            Err(e) => return Err(engine_refusal("Error reading data: ", e)),
         };
 
         // Place the design on the fit's theta layout before anything reads theta
         // by position (ferx-r #370); see `bind_design_from_fit`.
         let fitted = fit_bindings_from_r(&fit_bindings)?;
         bind_design_from_fit(&mut parsed, model_path, &mut population, &fitted)
-            .map_err(|e| engine_refusal("", e))?;
+            .map_err(|e| e.refusal(""))?;
 
         // The population, bound for any level block, is the fit's: the same
         // checks, order and `E_POPULATION_MISMATCH` refusal as `run_sir` /
@@ -1873,6 +1873,49 @@ fn needs_covariate_stats(parsed: &ParsedModel) -> bool {
         .is_some_and(|spec| !spec.unresolved().is_empty())
 }
 
+/// A failure of the bind helpers below: the engine's own refusal, kept as the
+/// `EngineError` core returned so its code reaches R, or a glue-side one (the
+/// model file read, the from-fit prologue's unbound-level refusal), which has
+/// no code. Core has no `From<String>` for `EngineError` any more (ferx-core
+/// #1775), so the two are kept apart here rather than folded into one.
+enum BindError {
+    Engine(ferx_core::EngineError),
+    Glue(String),
+}
+
+impl From<ferx_core::EngineError> for BindError {
+    fn from(e: ferx_core::EngineError) -> Self {
+        BindError::Engine(e)
+    }
+}
+
+impl From<String> for BindError {
+    fn from(s: String) -> Self {
+        BindError::Glue(s)
+    }
+}
+
+impl std::fmt::Display for BindError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BindError::Engine(e) => e.fmt(f),
+            BindError::Glue(s) => f.write_str(s),
+        }
+    }
+}
+
+impl BindError {
+    /// The text the entry point raises: `engine_refusal` for the engine's
+    /// refusal, which records its code; a glue failure, prefixed the same way,
+    /// records none.
+    fn refusal(self, prefix: &str) -> String {
+        match self {
+            BindError::Engine(e) => engine_refusal(prefix, e),
+            BindError::Glue(s) => format!("{prefix}{s}"),
+        }
+    }
+}
+
 /// Bind a design's own data-derived bindings, for a fit and for a use without
 /// a fit: the theta level blocks, then the `[covariate_model]` statistics
 /// (ferx-r #412), in the order core's own `fit()` / `prepare_run` bind them.
@@ -1887,7 +1930,7 @@ fn bind_design(
     parsed: &mut ParsedModel,
     model_path: &str,
     population: &mut Population,
-) -> std::result::Result<(), ferx_core::EngineError> {
+) -> std::result::Result<(), BindError> {
     if !declares_level_blocks(parsed) && !needs_covariate_stats(parsed) {
         return Ok(());
     }
@@ -1902,12 +1945,12 @@ fn bind_design_text(
     parsed: &mut ParsedModel,
     model_text: &str,
     population: &mut Population,
-) -> std::result::Result<(), ferx_core::EngineError> {
+) -> std::result::Result<(), BindError> {
     if !declares_level_blocks(parsed) && !needs_covariate_stats(parsed) {
         return Ok(());
     }
     ferx_core::api::bind_theta_levels(parsed, model_text, population)?;
-    ferx_core::api::bind_covariate_stats(parsed, model_text, population)
+    Ok(ferx_core::api::bind_covariate_stats(parsed, model_text, population)?)
 }
 
 /// The prologue of a from-fit bind that holds a population (predict, simulate,
@@ -1954,9 +1997,9 @@ fn bind_design_from_fit(
     model_path: &str,
     population: &mut Population,
     fitted: &DataBindings,
-) -> std::result::Result<(), ferx_core::EngineError> {
+) -> std::result::Result<(), BindError> {
     let model_text = from_fit_model_text(parsed, model_path, fitted)?;
-    ferx_core::api::bind_from_fit(parsed, &model_text, population, fitted)
+    Ok(ferx_core::api::bind_from_fit(parsed, &model_text, population, fitted)?)
 }
 
 /// Read the model file SIR and the standalone covariance step run against, once,
@@ -1996,9 +2039,9 @@ fn bind_layout_from_fit(
     parsed: &mut ParsedModel,
     model_text: &str,
     fitted: &DataBindings,
-) -> std::result::Result<(), ferx_core::EngineError> {
+) -> std::result::Result<(), BindError> {
     refuse_unbound_levels(parsed, fitted)?;
-    ferx_core::api::layout_from_fit(parsed, model_text, fitted)
+    Ok(ferx_core::api::layout_from_fit(parsed, model_text, fitted)?)
 }
 
 /// The refusal for a level model paired with a fit that carries no bindings,
@@ -2998,6 +3041,11 @@ fn default_fit_result(
         // ferx-core main added a checkpoint-restore flag; a defaulted FitResult is
         // never a restored one.
         restored_from_checkpoint: false,
+        // ferx-core #1082 PR4: per-level kappa output. Only the console, sdtab
+        // and .fitrx writers read it; the uncertainty draws take each kappa's
+        // level from the model.
+        kappa_levels: Vec::new(),
+        ebe_kappas_by_level: Vec::new(),
         // ferx-core #1767 / #1805 / #1776 / #1790: the settings a fit's SIR and
         // estimating stage ran under, how it read its data, a fingerprint of its
         // population and its IOV occasion rule. This scaffold carries R-supplied
@@ -4020,6 +4068,10 @@ fn fit_result_to_list(
         df.into()
     };
 
+    // Nested levels (ferx-core #1082 PR4): each level's kappa estimates once per
+    // group of it, where `ebe_kappas` repeats a study kappa on every arm.
+    let ebe_kappas_by_level = build_ebe_kappas_by_level(result);
+
     // Per-subject EBE etas: ID + one column per BSV eta (named).
     let ebe_etas_df: Robj = build_ebe_etas(result);
 
@@ -4255,6 +4307,11 @@ fn fit_result_to_list(
         shrinkage_kappa = shrinkage_kappa,
         shrinkage_kappa_by_occ = shrinkage_kappa_by_occ_df,
         ebe_kappas = ebe_kappas_df,
+        // The level each kappa is drawn at, parallel to `kappa_names`, on a
+        // model with nested levels (ferx-core #1082); empty otherwise, a single
+        // `level` included.
+        kappa_levels = result.kappa_levels.clone(),
+        ebe_kappas_by_level = ebe_kappas_by_level,
         ebe_etas = ebe_etas_df,
         subject_ids = subject_ids,
         subject_summary = subject_summary_df,
@@ -4496,6 +4553,56 @@ fn prior_summary_to_dataframe(result: &FitResult) -> Robj {
         ],
         n,
     )
+}
+
+// -- Helper: per-level kappa estimates of a nested-level fit --
+//
+// `FitResult::ebe_kappas_by_level` (ferx-core #1082 PR4) as a named list, one
+// data frame per level, outermost first: `ID` (the subject, verbatim),
+// `GROUP` (1-based, the subject's groups of the level in first-record order),
+// one column per label column of the level's path (`STUDY`, `ARM`), then one
+// per kappa at the level. The columns of ferx-core's `ebes_kappa_<LEVEL>.csv`,
+// so `ferx_save_fit()` writes the frame as it stands. NULL for a fit without
+// nested levels.
+fn build_ebe_kappas_by_level(result: &FitResult) -> Robj {
+    if result.ebe_kappas_by_level.is_empty() {
+        return ().into();
+    }
+    let mut names: Vec<String> = Vec::new();
+    let mut frames: Vec<Robj> = Vec::new();
+    for level in &result.ebe_kappas_by_level {
+        let mut ids: Vec<String> = Vec::new();
+        let mut group: Vec<i32> = Vec::new();
+        let mut labels: Vec<Vec<f64>> = vec![Vec::new(); level.columns.len()];
+        let mut kappa: Vec<Vec<f64>> = vec![Vec::new(); level.kappa_names.len()];
+        for (sr, groups) in result.subjects.iter().zip(&level.groups) {
+            for (gi, g) in groups.iter().enumerate() {
+                ids.push(sr.id.clone());
+                group.push(gi as i32 + 1);
+                for (c, col) in labels.iter_mut().enumerate() {
+                    col.push(g.labels.get(c).copied().unwrap_or(f64::NAN));
+                }
+                for (k, col) in kappa.iter_mut().enumerate() {
+                    col.push(g.kappa.get(k).copied().unwrap_or(f64::NAN));
+                }
+            }
+        }
+        let n_rows = ids.len();
+        let mut pairs: Vec<(&str, Robj)> = vec![("ID", ids.into()), ("GROUP", group.into())];
+        for (name, col) in level.columns.iter().zip(labels) {
+            pairs.push((name.as_str(), col.into()));
+        }
+        for (name, col) in level.kappa_names.iter().zip(kappa) {
+            pairs.push((name.as_str(), col.into()));
+        }
+        let mut df = List::from_pairs(pairs);
+        df.set_class(&["data.frame"]).unwrap();
+        let row_names: Vec<i32> = (1..=n_rows as i32).collect();
+        df.set_attrib("row.names", row_names).unwrap();
+        names.push(level.level.clone());
+        frames.push(df.into());
+    }
+    List::from_names_and_values(names, frames).unwrap().into()
 }
 
 // -- Helper: build per-subject EBE eta data frame --
@@ -5045,6 +5152,8 @@ fn check_row_types_len(len: usize, n: usize, field: &str) -> std::result::Result
 ///   unweighted one, or `NULL` when no kappa is weighted.
 /// @param kappa_weight_typical Numeric typical weight per kappa, `NA` where
 ///   none, or `NULL`.
+/// @param kappa_levels Character level per kappa of a model with nested
+///   levels (`K_ST at STUDY`, ferx-core #1082), or empty for every other model.
 /// @param covariance_status `"computed"`, `"failed"`, `"not_requested"` or
 ///   `"sir_fallback"` (any case, underscores optional, as a loaded `.fitrx`
 ///   spells them).
@@ -5063,6 +5172,7 @@ fn ferx_rust_kappa_rows(
     kappa_param_types: Vec<String>,
     kappa_weights: Robj,
     kappa_weight_typical: Robj,
+    kappa_levels: Vec<String>,
     covariance_status: &str,
     ascii: bool,
 ) -> String {
@@ -5116,6 +5226,7 @@ fn ferx_rust_kappa_rows(
             kappa_param_types: &kappa_param_types,
             kappa_weights: &kappa_weights,
             kappa_weight_typical: &kappa_weight_typical,
+            kappa_levels: &kappa_levels,
             covariance_status,
         };
         Ok(format_kappa_rows_from(
@@ -6374,6 +6485,10 @@ fn fit_skeleton(
     let mut fit = FitResult {
         // ferx-core main added a checkpoint-restore flag; neither step reads it.
         restored_from_checkpoint: false,
+        // ferx-core #1082 PR4: per-level kappa output. Only the console, sdtab
+        // and .fitrx writers read it; neither step reaches them.
+        kappa_levels: Vec::new(),
+        ebe_kappas_by_level: Vec::new(),
         // ferx-core #1767 / #1805: the settings the fit's SIR and its estimating
         // stage ran under, so `run_sir` / `run_covariance` with default options
         // score what the fit scored (ferx-r #472 / #511). `None` for a fit that
@@ -6717,7 +6832,7 @@ fn ferx_rust_sir(
         // from it, and carry it to the engine in the skeleton's `data_bindings`.
         let fitted = fit_bindings_from_r(&fit_bindings)?;
         bind_layout_from_fit(&mut parsed, &src.text, &fitted)
-            .map_err(|e| engine_refusal("", e))?;
+            .map_err(|e| e.refusal(""))?;
         let model = &parsed.model;
 
         let n_packed = cov_matrix_dim.max(0) as usize;
@@ -6932,7 +7047,7 @@ fn ferx_rust_covariance(
         // from it, and carry it to the engine in the skeleton's `data_bindings`.
         let fitted = fit_bindings_from_r(&fit_bindings)?;
         bind_layout_from_fit(&mut parsed, &src.text, &fitted)
-            .map_err(|e| engine_refusal("", e))?;
+            .map_err(|e| e.refusal(""))?;
         let model = &parsed.model;
 
         let covariance_method_enum = match covariance_method.to_lowercase().as_str() {
@@ -8384,9 +8499,11 @@ fn ferx_rust_search_space_parse(mfl: &str, model_path: &str, data_path: &str) ->
         } else {
             Some(data_path)
         };
+        // `prepare_run` returns `EngineError` (ferx-core #1772); its code
+        // reaches R through `engine_refusal`, the text byte for byte as before.
         let prepared = match ferx_core::prepare_run(model_path, data_opt) {
             Ok(p) => p,
-            Err(e) => return Err(e),
+            Err(e) => return Err(engine_refusal("", e)),
         };
         let source = match std::fs::read_to_string(model_path) {
             Ok(s) => s,
@@ -8647,7 +8764,10 @@ fn search_final_fit(
     let data = (!data_path.is_empty()).then_some(data_path);
     let out = std::fs::write(&path, model_text)
         .map_err(|e| format!("cannot write `{}`: {e}", path.display()))
-        .and_then(|()| ferx_core::prepare_run(&path.to_string_lossy(), data))
+        .and_then(|()| {
+            ferx_core::prepare_run(&path.to_string_lossy(), data)
+                .map_err(|e| engine_refusal("", e))
+        })
         .and_then(|prepared| {
             // `prepare_run` binds level blocks, so a search fit carries the same
             // `theta_levels` as `ferx_fit()` and can drive `ferx_simulate()` too.

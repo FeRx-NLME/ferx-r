@@ -2,6 +2,111 @@
 
 ## Breaking changes
 
+- **ferx now builds against ferx-core `d53e8219`**, up from `b32f20d9`.
+  These engine changes reach R:
+
+  - **Nested variability levels fit on analytic gradients, report per level
+    and simulate per level**
+    ([ferx-core #1082](https://github.com/FeRx-NLME/ferx-core/issues/1082),
+    [#2053](https://github.com/FeRx-NLME/ferx-core/pull/2053),
+    [#2078](https://github.com/FeRx-NLME/ferx-core/pull/2078)). A model with
+    more than one `level` takes the exact inner and outer gradients one-level
+    IOV uses (on the NONMEM-anchored three-level MBMA example a FOCEI fit
+    from an off-optimum start drops from 15.2 s to 1.2 s and now reaches
+    NONMEM's optimum, OFV 107.04357); a closed-form transit or
+    inverse-Gaussian model with nested levels stays on finite differences
+    and says so. Kappa shrinkage and the weighted kappa's typical weight are
+    now pooled over the groups of each kappa's own level (24 studies, not 48
+    arm cells), so `fit$shrinkage_kappa` changes on such a fit.
+    `ferx_simulate()`, `ferx_simulate_with_uncertainty()` and the
+    `ferx_calc_npde()` reference now simulate a nested model, drawing each
+    kappa once per group of its level (one study kappa shared by the study's
+    arms); NPDE on a nested fit drew an outer-level kappa once per arm before.
+    Adaptive dosing and a residual `correlation` line on a nested model are
+    still refused. See the new fields under New features.
+  - **`ferx_fit()` refusals now carry `e$code` where `ferx_check()` has one**
+    ([ferx-core #1772](https://github.com/FeRx-NLME/ferx-core/issues/1772)):
+    the model/data preconditions, an unbound level block
+    (`E_THETA_LEVELS_UNBOUND`), a transit / inverse-Gaussian closed form it
+    cannot fit (`E_TRANSIT_UNSUPPORTED`, `E_IG_UNSUPPORTED`,
+    `E_TRANSIT_FLIP_FLOP`, `E_IG_FLIP_FLOP`), and a data file that cannot be
+    read (`E_DATA`, `E_MISSING_COVARIATE`, `E_COVARIATE_NOT_NUMERIC`).
+    `ferx_search_space()` passes the codes of its model and data read on too.
+    Messages are unchanged.
+  - **More refusals carry `e$code`**
+    ([ferx-core #2044](https://github.com/FeRx-NLME/ferx-core/issues/2044)):
+    ODE solver settings no solver can run with on `ferx_sir()` /
+    `ferx_covariance()` (`E_ODE_SOLVER_OPTIONS`); a logit-scaled theta
+    estimated outside (0, 1) on `ferx_sir()` and on
+    `ferx_simulate_uncertainty()` with the asymptotic method
+    (`E_LOGIT_THETA_OUT_OF_RANGE`, advice in `e$suggestion`); and on
+    `ferx_simulate_uncertainty()` a missing covariance matrix / SIR pool
+    (`E_FIT_INPUT_MISSING`) or one of the wrong size (`E_FIT_INPUT_MODEL`).
+    Messages unchanged.
+  - **Adaptive-dosing refusals once the driver runs carry `e$code`**
+    ([ferx-core #1983](https://github.com/FeRx-NLME/ferx-core/issues/1983)):
+    a controller action the driver refuses is `E_ADAPTIVE_CONTROLLER_ACTION`;
+    a decision time colliding with a subject's own times
+    `E_ADAPTIVE_OPTIONS`; an unreplayable base dose, a non-finite break time
+    or a `TAD` read before any dose `E_ADAPTIVE_UNSUPPORTED`.
+    `max_decisions`, a monitor compartment out of range, a `Dv` monitor with
+    no `[error_model]` and a base regimen with an EVID=3/4 reset under a
+    time-varying covariate or IOV are now refused before any subject runs,
+    so those messages no longer start with `subject '...' (sim N):`.
+  - **A zero `omega` / `kappa` simulates as exactly zero**
+    ([ferx-core #1605](https://github.com/FeRx-NLME/ferx-core/issues/1605),
+    [#2072](https://github.com/FeRx-NLME/ferx-core/pull/2072)) in
+    `ferx_simulate()`, VPCs, adaptive simulation, the NPDE reference and
+    simulation from a fit; the other random effects draw from their exact
+    declared variance (the zero used to draw with sd 1e-4, and its 1e-8
+    regularisation leaked into every other variance). Seeded simulations of
+    such models change; fits do not.
+  - **`ferx_predict()` and adaptive dosing warn when an `SS=1` dose on a
+    nonlinear ODE model hits the steady-state cycle cap**, the note
+    `ferx_simulate()` and `ferx_fit()` already gave, and report only their
+    own call's note
+    ([ferx-core #1652](https://github.com/FeRx-NLME/ferx-core/issues/1652),
+    [#2069](https://github.com/FeRx-NLME/ferx-core/pull/2069)).
+  - **`ferx_covariance()` on a fit whose own EBEs beat a cold re-solve**
+    (the `W_EBE_START_DEPENDENT` warning) **now returns the fit's inline
+    covariance and SEs** instead of re-solving the EBEs cold; a fit reloaded
+    from `.fitrx` still differs slightly, since EBEs are stored to six
+    decimals
+    ([ferx-core #2026](https://github.com/FeRx-NLME/ferx-core/issues/2026),
+    [#2032](https://github.com/FeRx-NLME/ferx-core/pull/2032)).
+  - **`covariance_method = "s"` no longer builds, or fails on, the R matrix**
+    ([ferx-core #1803](https://github.com/FeRx-NLME/ferx-core/issues/1803),
+    [#2004](https://github.com/FeRx-NLME/ferx-core/pull/2004)): it skips the
+    `2n^2` finite-difference objectives it used to evaluate and throw away,
+    and succeeds wherever `S` is full-rank, so it no longer hands the SIR
+    fallback an R-based proposal. The pre-fit cost note now counts R's route
+    as `2n^2` evaluations (it quoted `n^2`).
+  - **A closed-form IOV model with more than 24 theta + eta + kappa keeps the
+    exact analytic gradient** (about 30x faster on a 25-axis warfarin IOV
+    model, same objective); an all-subject finite-difference inner fallback
+    under an analytic label is now a warning, as without IOV
+    ([ferx-core #1907](https://github.com/FeRx-NLME/ferx-core/issues/1907),
+    [#2016](https://github.com/FeRx-NLME/ferx-core/pull/2016)). ODE models
+    past 24 theta + eta likewise keep the analytic inner (EBE) gradient
+    ([ferx-core #1804](https://github.com/FeRx-NLME/ferx-core/issues/1804)).
+  - **ODE fits no longer return a NaN objective when two observations share
+    a `TIME` with an EVID=2 row or a lagged dose between them**; EKF fits
+    with an observation each side of a co-timed dose take one Kalman update
+    for the pair, so their objective moves
+    ([ferx-core #2010](https://github.com/FeRx-NLME/ferx-core/issues/2010)).
+  - **A subject left without an IOV occasion label is simulated at
+    kappa = 0 with a `W_IOV_NO_OCCASIONS` warning**, where it used to be
+    silent ([ferx-core #1955](https://github.com/FeRx-NLME/ferx-core/issues/1955)).
+    ferx already derives the fit's or the model file's `iov_occasion` rule
+    before simulating (#523), so results are unchanged.
+  - On a compartment-free model the weighted-kappa refusal in `y = ...` and
+    the `W_PER_CMT_UNMATCHED` warning name `[structural_model]` instead of
+    `[scaling]`, a block such a file does not have
+    ([ferx-core #1827](https://github.com/FeRx-NLME/ferx-core/issues/1827)).
+  - IOV and nested-level fits rebuild each subject's occasion layout once per
+    EBE search: bit-identical results, about 13-15% faster
+    ([ferx-core #2037](https://github.com/FeRx-NLME/ferx-core/issues/2037)).
+
 - **ferx now builds against ferx-core `b32f20d9`**, up from `e9156c98`
   ([#578](https://github.com/FeRx-NLME/ferx-r/issues/578)). These engine
   changes reach R:
@@ -709,6 +814,20 @@
     documentation, changelog tooling and CI.
 
 ## New features
+
+- **Per-level output for nested variability levels**
+  ([ferx-core #1082](https://github.com/FeRx-NLME/ferx-core/issues/1082)).
+  A fit with `level STUDY by STUDY in ID` / `level ARM by ARM in STUDY` gains
+  `fit$kappa_levels` (each kappa's level, named by kappa) and
+  `fit$ebe_kappas_by_level` (one data frame per level with `ID`, `GROUP`, the
+  label columns and that level's kappas, each group's estimate once, where
+  `fit$ebe_kappas` repeats a study kappa on each of its arms). `print()`
+  labels the KAPPA rows and their shrinkage `K_ST at STUDY`, the `sdtab` has
+  one column per kappa holding the estimate of the row's own group, and
+  `ferx_save_fit()` / `ferx_load_fit()` carry both in ferx-core's layout
+  (`iov.kappa_levels`, `iov.levels` and one `ebes_kappa_<LEVEL>.csv` per
+  level), so ferx-core's own loader reads an R-written bundle. Every other
+  model's fit, print and bundle is unchanged.
 
 - **`fit$ode_linear_exact` and `ode_method = "linear"`**
   ([#578](https://github.com/FeRx-NLME/ferx-r/issues/578)).

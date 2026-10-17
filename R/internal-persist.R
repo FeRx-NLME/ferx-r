@@ -333,6 +333,48 @@
   df
 }
 
+# The per-level kappa estimates of a nested-level fit (ferx-core #1082 PR4):
+# one data frame per entry of fit.json's `iov.levels`, read from its
+# `ebes_kappa_<LEVEL>.csv`, in the live fit's shape - ID (text, verbatim),
+# GROUP (integer), the level's label columns and its kappas (double). An empty
+# kappa cell is a NaN estimate, as ferx-core writes and reads it. NULL when
+# fit.json names no level. A named level whose CSV is missing, or whose header
+# is not the level's, is refused, as ferx-core's own loader refuses it.
+.fitrx_read_level_kappas <- function(staging, levels) {
+  if (length(levels) == 0L) return(NULL)
+  out <- list()
+  for (lv in levels) {
+    name <- as.character(lv$name)
+    columns <- as.character(unlist(lv$columns, use.names = FALSE))
+    kappas <- as.character(unlist(lv$kappa_names, use.names = FALSE))
+    entry <- .fitrx_level_kappa_entry(name)
+    path <- file.path(staging, entry)
+    if (!file.exists(path)) {
+      stop(sprintf("fit.json names level `%s`, but the bundle has no %s", name, entry))
+    }
+    df <- .fitrx_read_csv_exact(path, id_cols = "ID")
+    expected <- c("ID", "GROUP", columns, kappas)
+    if (!identical(names(df), expected)) {
+      stop(sprintf("%s: header %s does not match fit.json's level (expected %s)",
+                   entry, paste(names(df), collapse = ","),
+                   paste(expected, collapse = ",")))
+    }
+    df$GROUP <- as.integer(df$GROUP)
+    for (col in columns) df[[col]] <- as.double(df[[col]])
+    for (col in kappas) {
+      v <- as.double(df[[col]])
+      v[is.na(v)] <- NaN
+      df[[col]] <- v
+    }
+    out[[name]] <- df
+  }
+  out
+}
+
+# The bundle entry of one level's kappa estimates, as ferx-core names it
+# (`level_kappa_entry` in io/fitrx.rs).
+.fitrx_level_kappa_entry <- function(level) paste0("ebes_kappa_", level, ".csv")
+
 # `predictions.csv`'s subject IDs (text) as the number ferx-core puts in
 # `sdtab$ID`: the ID parsed as Rust parses an f64, else the subject's
 # position, 1-based, among ALL subjects (`io::output::sdtab`). A subject with
