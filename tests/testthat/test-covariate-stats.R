@@ -831,13 +831,13 @@ test_that("C13e: a coded refusal's record is the glue's, and does not outlive th
   expect_null(ferx:::ferx_rust_take_engine_diagnostic())
 
   # Left untaken, it is overwritten by the next refusal the glue raises, which
-  # has no code: the TTE simulation with no horizon.
+  # has no code: an unknown match method. (The TTE simulation with no horizon
+  # served here until ferx-core #1774 gave it `E_SIMULATE_HORIZON`.)
   cs_raise_coded(data)
   ex <- ferx_example("pktte_joint")
-  uncoded <- tryCatch(ferx:::ferx_rust_simulate(ex$model, ex$data, 1L, 1L, "none", NaN),
+  uncoded <- tryCatch(ferx:::ferx_rust_simulate(ex$model, ex$data, 1L, 1L, "bogus", NaN),
                       error = function(e) conditionMessage(e))
-  expect_match(uncoded, "requires a finite, positive administrative horizon",
-               fixed = TRUE)
+  expect_match(uncoded, "Unknown match method 'bogus'", fixed = TRUE)
   expect_null(ferx:::ferx_rust_take_engine_diagnostic())
 })
 

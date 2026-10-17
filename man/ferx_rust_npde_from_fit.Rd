@@ -15,10 +15,10 @@ ferx_rust_npde_from_fit(
   omega_iov_dim,
   residual_rho,
   fit_bindings,
-  iov_occasion,
   reader_settings,
   model_is_fits,
   population_fingerprint,
+  iov_occasion,
   nsim,
   seed
 )

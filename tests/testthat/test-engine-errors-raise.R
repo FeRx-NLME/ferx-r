@@ -114,14 +114,16 @@ test_that("ferx_calc_npde() raises an infusion into CMT = 0, uncoded while the e
 
 # -- Simulate / predict stage -------------------------------------------------
 #
-# The engine's validation pass has no diagnostic for these, so they arrive as
-# ordinary errors: the engine's prose, no code. `test-ferx_simulate.R` holds
-# two of them from the user's side.
+# The engine's validation pass has no diagnostic for a missing horizon, but
+# since ferx-core #1774 the simulate entry point returns its own code for it,
+# `E_SIMULATE_HORIZON`. `test-ferx_simulate.R` holds two of them from the
+# user's side.
 
 test_that("ferx_simulate() raises the engine's refusal to sample TTE without a horizon", {
   ex    <- ferx_example("pktte_joint")
   probe <- engine_error_probe(ferx_simulate(ex$model, ex$data, n_sim = 1L, seed = 1L))
-  expect_uncoded_refusal(probe, "requires a finite, positive administrative horizon")
+  expect_coded_refusal(probe, "requires a finite, positive administrative horizon",
+                       "E_SIMULATE_HORIZON")
 })
 
 test_that("ferx_simulate(fit = ) raises the engine's refusal to sample TTE without a horizon", {
@@ -131,7 +133,8 @@ test_that("ferx_simulate(fit = ) raises the engine's refusal to sample TTE witho
   probe <- engine_error_probe(
     ferx_simulate(ex$model, ex$data, n_sim = 1L, seed = 1L, fit = fit)
   )
-  expect_uncoded_refusal(probe, "requires a finite, positive administrative horizon")
+  expect_coded_refusal(probe, "requires a finite, positive administrative horizon",
+                       "E_SIMULATE_HORIZON")
 })
 
 test_that("the fit = forms raise a fit that cannot drive the model's kappa", {
@@ -178,12 +181,14 @@ test_that("a fit that does not fit the model is not labelled with the data's dia
 })
 
 test_that("a missing horizon is not labelled with the data's diagnostic", {
-  # Not a `fit =` form and not a fit-shape message: the label was wrong here too.
+  # Not a `fit =` form and not a fit-shape message: the label was wrong here
+  # too. The refusal carries its own code now, never the data's.
   ex    <- ferx_example("pktte_joint")
   probe <- engine_error_probe(
     ferx_simulate(ex$model, infusion_into_cmt0_data("pktte_joint"), n_sim = 1L, seed = 1L)
   )
-  expect_uncoded_refusal(probe, "requires a finite, positive administrative horizon")
+  expect_coded_refusal(probe, "requires a finite, positive administrative horizon",
+                       "E_SIMULATE_HORIZON")
 })
 
 test_that("a missing [adaptive_dosing] block is not labelled with the data's diagnostic", {

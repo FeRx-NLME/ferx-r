@@ -427,6 +427,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
     wall_time_secs = as.numeric(fit$wall_time_secs %||% NA_real_),
     n_threads_used = as.integer(fit$n_threads_used %||% NA_integer_),
     uses_ode_solver = isTRUE(fit$uses_ode_solver),
+    ode_linear_exact = isTRUE(fit$ode_linear_exact),
     uses_sde = isTRUE(fit$uses_sde),
     gradient_method_inner = as.character(fit$gradient_method_inner %||% ""),
     gradient_method_outer = as.character(fit$gradient_method_outer %||% ""),
@@ -819,16 +820,14 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
 
 .fitrx_method_to_token <- function(label) {
   if (is.null(label) || !nzchar(label)) return("focei")
-  switch(tolower(label),
-    "foce" = "foce",
-    "focei" = "focei",
-    "foce-gn" = "foce_gn",
-    "foce_gn" = "foce_gn",
-    "foce-gn-hybrid" = "foce_gn_hybrid",
-    "foce_gn_hybrid" = "foce_gn_hybrid",
-    "saem" = "saem",
-    tolower(label)
-  )
+  # The engine's own label -> token map (#508); `foce_gn` and friends are
+  # accepted too, since a hand-built fit may carry the token as its method.
+  tab <- .fitrx_method_table()
+  key <- tolower(label)
+  hit <- match(key, tolower(tab$label))
+  if (is.na(hit)) hit <- match(key, tab$token)
+  if (!is.na(hit)) return(tab$token[[hit]])
+  key
 }
 
 .fitrx_covariance_status_to_token <- function(s) {

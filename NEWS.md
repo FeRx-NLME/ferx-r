@@ -2,6 +2,39 @@
 
 ## Breaking changes
 
+- **ferx now builds against ferx-core `b32f20d9`**, up from `e9156c98`
+  ([#578](https://github.com/FeRx-NLME/ferx-r/issues/578)). These engine
+  changes reach R:
+
+  - **A linear `[odes]` model is solved exactly by the matrix exponential**
+    instead of integrated, under the default `ode_method = "auto"`
+    ([ferx-core #852](https://github.com/FeRx-NLME/ferx-core/issues/852),
+    [#2021](https://github.com/FeRx-NLME/ferx-core/pull/2021)). A system
+    qualifies when its right-hand side is affine in the states, reads no
+    model time and has no absorption forcing. Such a model's OFV moves by
+    about the old integrator error (around `1e-5`), and `ode_reltol` /
+    `ode_abstol` no longer affect it. `ode_method = "rk45"` reproduces the
+    old results. The new `fit$ode_linear_exact` says which route a fit took.
+  - **Post-hoc `ferx_calc_npde()` applies a derived `iov_occasion = dose |
+    time(...)` rule**, so an IOV model's reference distribution draws its
+    kappas instead of simulating at kappa = 0. ferx passes the fit's own rule
+    (`fit$iov_occasion`), falling back to the model file's
+    ([ferx-core #1987](https://github.com/FeRx-NLME/ferx-core/pull/1987)).
+  - **IOV `CWRES` linearizes over the occasion kappas as NONMEM does**
+    ([ferx-core #1948](https://github.com/FeRx-NLME/ferx-core/issues/1948)).
+  - **A fit optimized under trapped EBEs is restarted instead of reported
+    converged**, and Nelder-Mead fallback EBEs are certified on stationarity
+    ([ferx-core #1565](https://github.com/FeRx-NLME/ferx-core/issues/1565),
+    [#1527](https://github.com/FeRx-NLME/ferx-core/issues/1527)).
+  - **IMPMAP re-solves each warm-started MAP from a cold start**, and IMP /
+    IMPMAP draw quasi-random (Owen-scrambled Sobol) samples, so seeded
+    importance-sampling objectives change
+    ([ferx-core #1629](https://github.com/FeRx-NLME/ferx-core/issues/1629),
+    [#1965](https://github.com/FeRx-NLME/ferx-core/issues/1965)).
+  - **Individual parameters read each record's `TIME` as written**, reset
+    periods included
+    ([ferx-core #1969](https://github.com/FeRx-NLME/ferx-core/issues/1969)).
+
 - **ferx now builds against ferx-core `e9156c98`**, up from `6eb1a4d2`.
   These engine changes reach R. The first three move objectives and
   estimates on the data they describe; the fourth changes `converged`:
@@ -677,6 +710,20 @@
 
 ## New features
 
+- **`fit$ode_linear_exact` and `ode_method = "linear"`**
+  ([#578](https://github.com/FeRx-NLME/ferx-r/issues/578)).
+  `fit$ode_linear_exact` is `TRUE` when the fit's `[odes]` system was solved
+  exactly by the matrix exponential at the final estimates, with no segment
+  falling back to integration; `print()` and `summary()` then report
+  the exact solution, as the ferx CLI does. It survives
+  `ferx_save_fit()` / `ferx_load_fit()`, and a bundle saved before it existed
+  reads back `FALSE`. `fit$uses_ode_solver` is now set on a fresh fit too, so
+  a saved ODE fit no longer records `FALSE` for it. `ode_method = "linear"`
+  asks for the exact path outright, and a model that cannot take it is
+  refused with the reason (`E_ODE_METHOD_LINEAR` when set through
+  `settings`, `E_PARSE` from the model file's `[fit_options]`); the default `"auto"`
+  already takes it on a linear model.
+
 - **New in ferx-core `e9156c98`** (see Breaking changes for the bump):
 
   - **Within-group residual correlation**: `correlation cs(RHO) by COL` or
@@ -984,6 +1031,27 @@
   simulated IPRED differed by up to 8.5 and NPDE by up to 3.4
   ([#523](https://github.com/FeRx-NLME/ferx-r/issues/523),
   [#519](https://github.com/FeRx-NLME/ferx-r/issues/519)).
+
+- **An engine refusal longer than `warning.length` keeps its code** (#542).
+  R truncates every error the glue raises at `warning.length` (1000 bytes
+  by default), and the truncated text no longer matched the glue's
+  diagnostic record byte for byte, so the refusal arrived as a plain
+  `simpleError`, cut off before its `[E_...]` code. The flip-flop refusals
+  of `ferx_simulate_with_uncertainty()` (`E_TRANSIT_FLIP_FLOP`) are over
+  that limit. A raised text that is the record's text cut off at the limit
+  now matches it, and the `ferx_engine_error` carries the code and the full,
+  untruncated text. A long refusal of the call itself (an unknown
+  `settings` name) likewise stays uncoded instead of borrowing an unrelated
+  finding's code from the re-validation fallback.
+- **A VI fit reloaded with `ferx_load_fit()` reports its method as `"VI"`,
+  not `"vi"`, and keeps its NaN OFV, AIC and BIC as NaN** (#508). The
+  `.fitrx` method token is now mapped to its label, and back on save, from
+  the engine's own `EstimationMethod::label()`, so a method the engine gains
+  can no longer read back lowercase. A VI fit under the default
+  `vi_final_ofv = none` has no OFV by design; the bundle stores it as JSON
+  `null`, which used to read back as a zero-length `numeric(0)`. The VI
+  result itself (`fit$vi`) is not on the fit yet (#507), so it is not in the
+  bundle either.
 
 - **The `emax_pkpd` example no longer forces `gradient = fd`.** The model
   file, `inst/examples/ex_emax_pkpd.R` and `?ferx_example` said FD was
@@ -1306,8 +1374,15 @@
   returned no matrix. Both now stop with an error that names the overrides.
   The in-fit covariance step and SIR of `ferx_fit()` are unaffected. Since
   [#511](https://github.com/FeRx-NLME/ferx-r/issues/511) the overrides are
-  read from `fit$packed_estimate`, so the refusal is left for a fit loaded
-  with `ferx_load_fit()` and for a SAEM, IMP or Bayes fit.
+  read from `fit$packed_estimate`, which a `.fitrx` bundle also carries
+  ([ferx-core #1815](https://github.com/FeRx-NLME/ferx-core/issues/1815)),
+  so the refusal is left for a fit without one: a SAEM, IMP or Bayes fit,
+  or one loaded from a bundle saved before the key. `ferx_covariance()` on
+  a fit that carries it reproduces the in-fit matrix exactly, with a direct
+  `p(1) = P1` mixing probability, a kappa or a `block_sigma` too; it had
+  returned `"failed"` with a Hessian flat in the class-2 theta and the
+  mixing probability
+  ([#441](https://github.com/FeRx-NLME/ferx-r/issues/441)).
 
 - **`ferx_covariance()` refuses a `kappa` fit that has lost its kappa
   matrix** ([#473](https://github.com/FeRx-NLME/ferx-r/issues/473)). With

@@ -593,6 +593,21 @@ fn ferx_rust_fit(
         // in `fit_options` only, so the model's own flag stays `Auto` and an "auto" here
         // reaches the fit unopposed.
 
+        // `settings = list(ode_method = "linear")` on a model that cannot take the
+        // exact linear path (ferx-core #2021). `fit()` refuses it as
+        // `E_ODE_METHOD_LINEAR` but returns only the text, so raise core's own
+        // diagnostic here to keep the code on the R condition. From the model
+        // file the parser refuses it instead (`E_PARSE`).
+        if opts.ode_method == ferx_core::ode::OdeMethod::Linear {
+            let refusal: Vec<ferx_core::Diagnostic> =
+                ferx_core::check_model_options(&parsed.model, &opts)
+                    .into_iter()
+                    .filter(|d| d.code == "E_ODE_METHOD_LINEAR")
+                    .collect();
+            ferx_core::diagnostics::first_error(&refusal)
+                .map_err(|e| engine_refusal("Fit error: ", e))?;
+        }
+
         // Install a cancellation token so Ctrl-C on the R console aborts the fit.
         let cancel = CancelFlag::new();
         opts.cancel = Some(cancel.clone());
@@ -1611,9 +1626,6 @@ fn ferx_rust_predict_survival_from_fit(
 /// @param omega_iov_flat Row-major flattened fitted IOV (kappa) omega matrix;
 ///   empty when the model declares no `kappa`.
 /// @param omega_iov_dim Side length of the IOV omega matrix; 0 when no IOV.
-/// @param iov_occasion `fit$iov_occasion`, the IOV occasion rule the fit ran
-///   with (ferx-r #523): the population's occasions are derived with it, as
-///   the fit derived them. "" when the fit records none.
 /// @param reader_settings `fit$reader_settings` as JSON; "" when the fit
 ///   records none (read with the model file's `[data_selection]`).
 /// @param model_is_fits TRUE when `model_path` is the fit's own model file:
@@ -1622,6 +1634,10 @@ fn ferx_rust_predict_survival_from_fit(
 /// @param population_fingerprint `fit$population_fingerprint` as JSON when the
 ///   model and the data are the fit's own (left NULL or naming its files), else "":
 ///   the re-read population is verified against it (ferx-core #1814).
+/// @param iov_occasion `fit$iov_occasion`, the IOV occasion rule the fit ran
+///   under; "" when the fit records none (the model file's `[fit_options]` rule
+///   is used then). A `dose` / `time(...)` rule derives the occasion labels the
+///   kappa reference draw needs (ferx-core #1980).
 /// @param nsim Number of Monte-Carlo replicates per subject
 /// @param seed RNG seed; pass -1 for the engine default
 /// @return Data frame with ID, TIME, NPDE, NPD columns, and an
@@ -1640,10 +1656,10 @@ fn ferx_rust_npde_from_fit(
     omega_iov_dim: i32,
     residual_rho: Vec<f64>,
     fit_bindings: List,
-    iov_occasion: &str,
     reader_settings: &str,
     model_is_fits: bool,
     population_fingerprint: &str,
+    iov_occasion: &str,
     nsim: i32,
     seed: i32,
 ) -> Robj {
@@ -1651,6 +1667,7 @@ fn ferx_rust_npde_from_fit(
         if nsim <= 0 {
             return Err("npde error: nsim must be a positive integer".to_string());
         }
+        let iov_rule = iov_occasion_from_r("ferx_calc_npde", iov_occasion)?;
 
         let mut parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
             Ok(p) => p,
@@ -1738,6 +1755,10 @@ fn ferx_rust_npde_from_fit(
             &params,
             nsim as usize,
             seed_opt,
+            // The fit's occasion rule, else the model file's: a `dose` /
+            // `time(...)` rule labels the occasions the kappa draw needs, as
+            // `fit()` does on its own copy (ferx-core #1980).
+            Some(iov_rule.as_ref().unwrap_or(&parsed.fit_options.iov_occasion)),
         )
         // A categorical covariate value outside the model's levels is refused
         // (`E_COV_LEVEL_UNKNOWN`'s message, ferx-core #1740) rather than scored as
@@ -3047,6 +3068,9 @@ fn default_fit_result(
         gradient_method_inner: String::new(),
         gradient_method_outer: String::new(),
         uses_ode_solver: model.is_ode_based(),
+        // ferx-core #2021: set only by a fit that ran the exact linear
+        // (matrix exponential) path; this one was synthesized, not run.
+        ode_linear_exact: false,
         n_threads_used: 1,
         nlopt_missing_algorithms: Vec::new(),
         covariance_n_evals_estimated: None,
@@ -4246,6 +4270,12 @@ fn fit_result_to_list(
         sir_settings = sir_settings,
         packed_estimate = packed_estimate,
         uses_sde = result.uses_sde,
+        // Whether the fit integrated an `[odes]` system, and whether that system
+        // was instead solved exactly by the matrix exponential at the final
+        // estimates, with no segment falling back to integration (ferx-core
+        // #2021). `print()` reports the exact route; `.fitrx` bundles keep both.
+        uses_ode_solver = result.uses_ode_solver,
+        ode_linear_exact = result.ode_linear_exact,
         saem_n_subjects_hmc = result.saem_n_subjects_hmc.map(|n| n as i32),
         dw_statistic = result.dw_statistic,
         iwres_lag1_r = result.iwres_lag1_r,
@@ -4808,6 +4838,56 @@ fn ferx_rust_known_blocks() -> Vec<String> {
             .into_iter()
             .map(String::from)
             .collect())
+    })
+}
+
+/// Every estimation method's `.fitrx` token and display label (ferx-r #508):
+/// the label is ferx-core's `EstimationMethod::label()`, the token what core's
+/// `.fitrx` writer stores for that method. `ferx_load_fit()` maps the stored
+/// token to the label a live fit reports, and `ferx_save_fit()` maps back, so
+/// neither keeps a hand-written method list that a new engine method can
+/// outgrow (a reloaded VI fit used to read `"vi"` instead of `"VI"`).
+///
+/// Core keeps its token map private, so the tokens are spelled here, once, in
+/// the `methods!` list below. That one list generates both the table and an
+/// exhaustive `match` over `EstimationMethod`, so a method the engine adds and
+/// the list lacks stops this crate compiling; nothing can be in the match but
+/// missing from the table.
+///
+/// @return A list with `token` and `label`, character vectors, one entry per
+///   method, in the same order.
+/// @export
+#[extendr]
+fn ferx_rust_method_labels() -> List {
+    entry(move || {
+        macro_rules! methods {
+            ($($variant:ident => $token:literal),+ $(,)?) => {{
+                // Never called: it exists so the compiler checks that the
+                // `methods!` list covers every `EstimationMethod`.
+                #[allow(dead_code)]
+                fn exhaustive(m: EstimationMethod) {
+                    match m {
+                        $(EstimationMethod::$variant => {})+
+                    }
+                }
+                [$((EstimationMethod::$variant, $token)),+]
+            }};
+        }
+        let table = methods! {
+            Foce => "foce",
+            FoceI => "focei",
+            FoceGn => "foce_gn",
+            FoceGnHybrid => "foce_gn_hybrid",
+            Saem => "saem",
+            Imp => "imp",
+            Impmap => "impmap",
+            Bayes => "bayes",
+            Laplace => "laplace",
+            Vi => "vi",
+        };
+        let tokens: Vec<String> = table.iter().map(|(_, t)| t.to_string()).collect();
+        let labels: Vec<String> = table.iter().map(|(m, _)| m.label().to_string()).collect();
+        Ok(list!(token = tokens, label = labels))
     })
 }
 
@@ -6379,6 +6459,9 @@ fn fit_skeleton(
         gradient_method_inner: String::new(),
         gradient_method_outer: String::new(),
         uses_ode_solver: model.is_ode_based(),
+        // ferx-core #2021: set only by a fit that ran the exact linear
+        // (matrix exponential) path; this one was synthesized, not run.
+        ode_linear_exact: false,
         n_threads_used: 1,
         nlopt_missing_algorithms: Vec::new(),
         covariance_n_evals_estimated: None,
@@ -11630,6 +11713,7 @@ extendr_module! {
     fn ferx_rust_autodiff_enabled;
     fn ferx_rust_test_panic;
     fn ferx_rust_known_blocks;
+    fn ferx_rust_method_labels;
     fn ferx_rust_compact_theta_blocks;
     fn ferx_rust_kappa_rows;
     fn ferx_rust_fitrx_kappa_rows;

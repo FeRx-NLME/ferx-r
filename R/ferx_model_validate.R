@@ -273,7 +273,9 @@ ferx_model_validate <- function(path, data = NULL) {
 # reports for the same refusal; the glue keeps it beside the text it raised.
 # The record is used only for the condition whose message is that text, byte
 # for byte, so a refusal the glue raised without a code never borrows the
-# previous one's.
+# previous one's - or that text cut off at `warning.length`, where R truncates
+# every error it raises (`.ferx_is_raised_text()`, #542). The condition then
+# carries the full text again.
 #
 # The message is built from the record's `message` - the raised text without
 # a suggestion the engine folded into it (ferx-core
@@ -288,7 +290,7 @@ ferx_model_validate <- function(path, data = NULL) {
 # that unrelated finding's code.
 .ferx_engine_coded_error <- function(e, msg) {
   d <- tryCatch(ferx_rust_take_engine_diagnostic(), error = function(...) NULL)
-  if (is.null(d) || !identical(charToRaw(d$text), charToRaw(msg))) return(NULL)
+  if (is.null(d) || !.ferx_is_raised_text(d$text, msg)) return(NULL)
   if (!nzchar(d$code)) return(e)
   structure(
     class = c("ferx_engine_error", "error", "condition"),
@@ -301,6 +303,23 @@ ferx_model_validate <- function(path, data = NULL) {
       suggestion = if (nzchar(d$suggestion)) d$suggestion else NA_character_
     )
   )
+}
+
+# Whether `msg`, a condition's message, is `text`, the message the glue
+# raised: byte for byte, or `text` cut off where R cut it. `Rf_error()` formats
+# into a buffer of `warning.length` bytes (1000 by default), so a longer
+# refusal arrives as its first `warning.length - 1` bytes - fewer by up to
+# three in a multibyte locale, where R backs off to a character boundary - and
+# without the rest (#542). A strict prefix that short of the limit is some
+# other message, and does not get the record.
+.ferx_is_raised_text <- function(text, msg) {
+  raw_text <- charToRaw(text)
+  raw_msg  <- charToRaw(msg)
+  n <- length(raw_msg)
+  if (n == length(raw_text)) return(identical(raw_msg, raw_text))
+  limit <- getOption("warning.length", 1000L)
+  n < length(raw_text) && n >= limit - 4L && n <= limit - 1L &&
+    identical(raw_msg, raw_text[seq_len(n)])
 }
 
 # The message of every `ferx_engine_error`, whichever constructor built it, so
