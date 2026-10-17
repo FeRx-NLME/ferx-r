@@ -146,6 +146,9 @@ ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = 
       reader_settings = reader_args$reader_settings,
       model_is_fits = model_is_fits,
       population_fingerprint = fingerprint,
+      # The fit's IOV occasion rule: a `dose` / `time(...)` rule derives the
+      # occasion labels the kappa reference draw needs (ferx-core #1980).
+      iov_occasion = as.character(fit$iov_occasion %||% ""),
       nsim       = nsim,
       seed       = seed_int
     ),

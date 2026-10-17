@@ -379,9 +379,20 @@
 #'
 #'   \strong{ODE models: solver method and tolerance}
 #'   \describe{
-#'     \item{\code{ode_method}}{Which stepper integrates the \code{[odes]}
-#'       block: \code{"rk45"} (default), \code{"vern7"},
-#'       \code{"rosenbrock23"}, \code{"rodas4"} or \code{"rodas5p"}. There are
+#'     \item{\code{ode_method}}{How the \code{[odes]} block is solved:
+#'       \code{"auto"} (default), \code{"linear"}, \code{"rk45"},
+#'       \code{"vern7"}, \code{"rosenbrock23"}, \code{"rodas4"} or
+#'       \code{"rodas5p"}. \code{"auto"} solves a \emph{linear} system (one
+#'       whose right-hand side is affine in the states, reads no model time and
+#'       has no absorption forcing) exactly by the matrix exponential, with no
+#'       step size and no tolerance, and probes every other system for
+#'       stiffness, starting \code{"rk45"} unless it is stability-limited.
+#'       \code{"linear"} asks for the exact path outright; a model that cannot
+#'       take it is refused with the reason (\code{E_ODE_METHOD_LINEAR} when
+#'       set through \code{settings}, a parse error from the model file).
+#'       Naming an integrator integrates even a linear system, so
+#'       \code{"rk45"} reproduces fits made before the exact path existed.
+#'       \code{fit$ode_linear_exact} says which route a fit took. There are
 #'       two independent reasons a fit's step size is small, and they want
 #'       opposite fixes, so diagnose before switching. If steps stay tiny
 #'       whatever \code{ode_reltol} you ask for, the model is
@@ -405,7 +416,8 @@
 #'       simulation and adaptive dosing all work with all of them. Can also be
 #'       set in the model file's \code{[fit_options]} block.}
 #'     \item{\code{ode_reltol}}{Relative tolerance for ODE models
-#'       (default \code{1e-4}; ignored for analytical PK). The default
+#'       (default \code{1e-4}; ignored for analytical PK and for a linear
+#'       system solved exactly, see \code{ode_method}). The default
 #'       reproduces analytical closed forms in PRED to about \code{1e-4}, but
 #'       the FOCE objective amplifies solver error, so an ODE-form model's OFV
 #'       can differ from its analytical equivalent by several units. Set tighter
@@ -1295,6 +1307,15 @@
 #'     values the model file requested and which were overridden at the R call
 #'     site. A \code{warning()} is issued automatically for each key that
 #'     appears in both sources with a different value.}
+#'   \item{uses_ode_solver}{Logical; \code{TRUE} when the model has an
+#'     \code{[odes]} block, \code{FALSE} for an analytical model.}
+#'   \item{ode_linear_exact}{Logical; \code{TRUE} when the \code{[odes]}
+#'     system was linear and solved exactly by the matrix exponential at the
+#'     final estimates instead of integrated (\code{ode_method = "auto"} on a
+#'     linear model, or \code{ode_method = "linear"}), with no segment falling
+#'     back to integration. \code{FALSE} for an analytical model, a nonlinear
+#'     system, or a linear one fitted with a named integrator such as
+#'     \code{"rk45"}. \code{print()} and \code{summary()} report it.}
 #'   \item{uses_sde}{Logical; \code{TRUE} when the model file contained a
 #'     \code{[diffusion]} block and the fit used the Extended Kalman Filter
 #'     (EKF) likelihood. \code{FALSE} for standard ODE/analytical models.
@@ -2692,6 +2713,11 @@ print.ferx_fit <- function(x, ...) {
               method_str, grad_str,
               format(x$n_subjects %||% NA),
               format(x$n_obs %||% NA)))
+  # An `[odes]` model solved exactly rather than integrated (ferx-core #2021);
+  # the same wording as the ferx CLI.
+  if (isTRUE(x$ode_linear_exact)) {
+    cat(" ODE solution: exact (linear system, matrix exponential)\n")
+  }
 
   # STATUS line - the most important diagnostic; colour green/red so the
   # eye locks on it immediately.
@@ -3347,6 +3373,7 @@ summary.ferx_fit <- function(object, ...) {
     bayes = x$bayes,
     warnings = x$warnings,
     uses_sde = isTRUE(x$uses_sde),
+    ode_linear_exact = isTRUE(x$ode_linear_exact),
     dw_statistic = x$dw_statistic,
     iwres_lag1_r = x$iwres_lag1_r,
     saem_n_subjects_hmc = x$saem_n_subjects_hmc
@@ -3378,6 +3405,9 @@ print.ferx_summary <- function(x, ...) {
   } else {
     cat(sprintf("Gradient:  %s (requested) -> %s (used)\n",
                 x$gradient %||% "?", used))
+  }
+  if (isTRUE(x$ode_linear_exact)) {
+    cat("ODE:       exact (linear system, matrix exponential)\n")
   }
   cat(sprintf("ferx v%s (core v%s)\n",
               as.character(utils::packageVersion("ferx")),

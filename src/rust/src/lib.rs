@@ -593,6 +593,21 @@ fn ferx_rust_fit(
         // in `fit_options` only, so the model's own flag stays `Auto` and an "auto" here
         // reaches the fit unopposed.
 
+        // `settings = list(ode_method = "linear")` on a model that cannot take the
+        // exact linear path (ferx-core #2021). `fit()` refuses it as
+        // `E_ODE_METHOD_LINEAR` but returns only the text, so raise core's own
+        // diagnostic here to keep the code on the R condition. From the model
+        // file the parser refuses it instead (`E_PARSE`).
+        if opts.ode_method == ferx_core::ode::OdeMethod::Linear {
+            let refusal: Vec<ferx_core::Diagnostic> =
+                ferx_core::check_model_options(&parsed.model, &opts)
+                    .into_iter()
+                    .filter(|d| d.code == "E_ODE_METHOD_LINEAR")
+                    .collect();
+            ferx_core::diagnostics::first_error(&refusal)
+                .map_err(|e| engine_refusal("Fit error: ", e))?;
+        }
+
         // Install a cancellation token so Ctrl-C on the R console aborts the fit.
         let cancel = CancelFlag::new();
         opts.cancel = Some(cancel.clone());
@@ -1562,6 +1577,10 @@ fn ferx_rust_predict_survival_from_fit(
 /// @param population_fingerprint `fit$population_fingerprint` as JSON when the
 ///   model and the data are the fit's own (left NULL or naming its files), else "":
 ///   the re-read population is verified against it (ferx-core #1814).
+/// @param iov_occasion `fit$iov_occasion`, the IOV occasion rule the fit ran
+///   under; "" when the fit records none (the model file's `[fit_options]` rule
+///   is used then). A `dose` / `time(...)` rule derives the occasion labels the
+///   kappa reference draw needs (ferx-core #1980).
 /// @param nsim Number of Monte-Carlo replicates per subject
 /// @param seed RNG seed; pass -1 for the engine default
 /// @return Data frame with ID, TIME, NPDE, NPD columns, and an
@@ -1583,6 +1602,7 @@ fn ferx_rust_npde_from_fit(
     reader_settings: &str,
     model_is_fits: bool,
     population_fingerprint: &str,
+    iov_occasion: &str,
     nsim: i32,
     seed: i32,
 ) -> Robj {
@@ -1590,6 +1610,7 @@ fn ferx_rust_npde_from_fit(
         if nsim <= 0 {
             return Err("npde error: nsim must be a positive integer".to_string());
         }
+        let iov_occasion = iov_occasion_from_r("ferx_calc_npde", iov_occasion)?;
 
         let mut parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
             Ok(p) => p,
@@ -1671,6 +1692,10 @@ fn ferx_rust_npde_from_fit(
             &params,
             nsim as usize,
             seed_opt,
+            // The fit's occasion rule, else the model file's: a `dose` /
+            // `time(...)` rule labels the occasions the kappa draw needs, as
+            // `fit()` does on its own copy (ferx-core #1980).
+            Some(iov_occasion.as_ref().unwrap_or(&parsed.fit_options.iov_occasion)),
         )
         // A categorical covariate value outside the model's levels is refused
         // (`E_COV_LEVEL_UNKNOWN`'s message, ferx-core #1740) rather than scored as
@@ -2980,6 +3005,9 @@ fn default_fit_result(
         gradient_method_inner: String::new(),
         gradient_method_outer: String::new(),
         uses_ode_solver: model.is_ode_based(),
+        // ferx-core #2021: set only by a fit that ran the exact linear
+        // (matrix exponential) path; this one was synthesized, not run.
+        ode_linear_exact: false,
         n_threads_used: 1,
         nlopt_missing_algorithms: Vec::new(),
         covariance_n_evals_estimated: None,
@@ -4179,6 +4207,12 @@ fn fit_result_to_list(
         sir_settings = sir_settings,
         packed_estimate = packed_estimate,
         uses_sde = result.uses_sde,
+        // Whether the fit integrated an `[odes]` system, and whether that system
+        // was instead solved exactly by the matrix exponential at the final
+        // estimates, with no segment falling back to integration (ferx-core
+        // #2021). `print()` reports the exact route; `.fitrx` bundles keep both.
+        uses_ode_solver = result.uses_ode_solver,
+        ode_linear_exact = result.ode_linear_exact,
         saem_n_subjects_hmc = result.saem_n_subjects_hmc.map(|n| n as i32),
         dw_statistic = result.dw_statistic,
         iwres_lag1_r = result.iwres_lag1_r,
@@ -6241,6 +6275,9 @@ fn fit_skeleton(
         gradient_method_inner: String::new(),
         gradient_method_outer: String::new(),
         uses_ode_solver: model.is_ode_based(),
+        // ferx-core #2021: set only by a fit that ran the exact linear
+        // (matrix exponential) path; this one was synthesized, not run.
+        ode_linear_exact: false,
         n_threads_used: 1,
         nlopt_missing_algorithms: Vec::new(),
         covariance_n_evals_estimated: None,

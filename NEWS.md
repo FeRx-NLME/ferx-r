@@ -2,6 +2,39 @@
 
 ## Breaking changes
 
+- **ferx now builds against ferx-core `b32f20d9`**, up from `e9156c98`
+  ([#578](https://github.com/FeRx-NLME/ferx-r/issues/578)). These engine
+  changes reach R:
+
+  - **A linear `[odes]` model is solved exactly by the matrix exponential**
+    instead of integrated, under the default `ode_method = "auto"`
+    ([ferx-core #852](https://github.com/FeRx-NLME/ferx-core/issues/852),
+    [#2021](https://github.com/FeRx-NLME/ferx-core/pull/2021)). A system
+    qualifies when its right-hand side is affine in the states, reads no
+    model time and has no absorption forcing. Such a model's OFV moves by
+    about the old integrator error (around `1e-5`), and `ode_reltol` /
+    `ode_abstol` no longer affect it. `ode_method = "rk45"` reproduces the
+    old results. The new `fit$ode_linear_exact` says which route a fit took.
+  - **Post-hoc `ferx_calc_npde()` applies a derived `iov_occasion = dose |
+    time(...)` rule**, so an IOV model's reference distribution draws its
+    kappas instead of simulating at kappa = 0. ferx passes the fit's own rule
+    (`fit$iov_occasion`), falling back to the model file's
+    ([ferx-core #1987](https://github.com/FeRx-NLME/ferx-core/pull/1987)).
+  - **IOV `CWRES` linearizes over the occasion kappas as NONMEM does**
+    ([ferx-core #1948](https://github.com/FeRx-NLME/ferx-core/issues/1948)).
+  - **A fit optimized under trapped EBEs is restarted instead of reported
+    converged**, and Nelder-Mead fallback EBEs are certified on stationarity
+    ([ferx-core #1565](https://github.com/FeRx-NLME/ferx-core/issues/1565),
+    [#1527](https://github.com/FeRx-NLME/ferx-core/issues/1527)).
+  - **IMPMAP re-solves each warm-started MAP from a cold start**, and IMP /
+    IMPMAP draw quasi-random (Owen-scrambled Sobol) samples, so seeded
+    importance-sampling objectives change
+    ([ferx-core #1629](https://github.com/FeRx-NLME/ferx-core/issues/1629),
+    [#1965](https://github.com/FeRx-NLME/ferx-core/issues/1965)).
+  - **Individual parameters read each record's `TIME` as written**, reset
+    periods included
+    ([ferx-core #1969](https://github.com/FeRx-NLME/ferx-core/issues/1969)).
+
 - **ferx now builds against ferx-core `e9156c98`**, up from `6eb1a4d2`.
   These engine changes reach R. The first three move objectives and
   estimates on the data they describe; the fourth changes `converged`:
@@ -676,6 +709,20 @@
     documentation, changelog tooling and CI.
 
 ## New features
+
+- **`fit$ode_linear_exact` and `ode_method = "linear"`**
+  ([#578](https://github.com/FeRx-NLME/ferx-r/issues/578)).
+  `fit$ode_linear_exact` is `TRUE` when the fit's `[odes]` system was solved
+  exactly by the matrix exponential at the final estimates, with no segment
+  falling back to integration; `print()` and `summary()` then report
+  the exact solution, as the ferx CLI does. It survives
+  `ferx_save_fit()` / `ferx_load_fit()`, and a bundle saved before it existed
+  reads back `FALSE`. `fit$uses_ode_solver` is now set on a fresh fit too, so
+  a saved ODE fit no longer records `FALSE` for it. `ode_method = "linear"`
+  asks for the exact path outright, and a model that cannot take it is
+  refused with the reason (`E_ODE_METHOD_LINEAR` when set through
+  `settings`, `E_PARSE` from the model file's `[fit_options]`); the default `"auto"`
+  already takes it on a linear model.
 
 - **New in ferx-core `e9156c98`** (see Breaking changes for the bump):
 
