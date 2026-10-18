@@ -1,8 +1,13 @@
 # A residual `correlation cs|ar1|car1(RHO) by ...` line next to kappa and on
 # nested levels (ferx-core #1082 PR5, #2102). Before it the engine refused
-# both. The oracles are the uncorrelated fit of the same model and data (a
-# free RHO with the uncorrelated fit nested at RHO = 0 cannot score worse),
-# and the fit's own in-fit covariance step for ferx_covariance().
+# both. The oracles are the uncorrelated fit of the same model and data, and
+# the fit's own in-fit covariance step for ferx_covariance(). The uncorrelated
+# model is the correlated one at RHO = 0, so a converged base bounds the
+# correlated OFV from above; the nested_levels_3 base stops unconverged, so
+# there it is a stopping point, not an optimum. An engine that parsed the line
+# but left it out of the likelihood would tie the base OFV and leave RHO at
+# its start (measured on mbma_placebo: OFV 97.0700 both, RHO 0.3, SE 0), so
+# each fit must beat the base by a margin and move RHO.
 
 quiet <- function(x) suppressWarnings(suppressMessages(x))
 
@@ -48,7 +53,9 @@ test_that("car1 by OCC fits next to mbma_placebo's arm kappa", {
   expect_lt(rho, 0.99)
   # The kappa is still estimated alongside it.
   expect_true(all(is.finite(diag(fit$omega_iov))))
-  expect_lte(fit$ofv, base$ofv)
+  # Measured gap 7.25 (97.07 -> 89.82).
+  expect_lt(fit$ofv, base$ofv - 1)
+  expect_gt(abs(rho - 0.3), 1e-3)
 
   out <- capture.output(quiet(print(fit)))
   expect_true(any(grepl("^RHO\\s", out)))
@@ -97,8 +104,20 @@ test_that("ar1 by a nested level fits on the three-level fixture", {
   expect_true(is.finite(rho))
   expect_gte(rho, 0)
   expect_lt(rho, 0.99)
-  expect_lte(fit$ofv, base$ofv)
+  expect_gt(abs(rho - 0.3), 1e-3)
+  # Measured gap 1.27 (107.04 -> 105.78), against an unconverged base.
+  expect_lt(fit$ofv, base$ofv - 0.5)
   expect_identical(fit$kappa_levels, c(K_ST = "STUDY", K_ARM = "ARM"))
   expect_identical(fit$model_structure$residual,
                    "additive, correlation ar1(RHO) by ARM")
+})
+
+test_that("ferx_simulate() and ferx_calc_npde() run on the car1 + kappa fit", {
+  skip_on_cran()
+  fit <- mbma_car1_fit()
+  m <- mbma_with_line("correlation car1(RHO) by OCC")
+  sim <- quiet(ferx_simulate(m$model, fit = fit, n_sim = 2L))
+  expect_s3_class(sim, "data.frame")
+  expect_true(all(is.finite(sim$DV_SIM)))
+  expect_no_error(quiet(ferx_calc_npde(fit, nsim = 50L)))
 })
