@@ -19,11 +19,19 @@
     a kappa is drawn in estimates the kappa's own covariance and is refused
     with `E_RESIDUAL_CORRELATION_CONFOUNDED_KAPPA` (use `ar1` / `car1`, or
     drop the kappa); where the two coincide in only some subjects the fit
-    runs with `W_RESIDUAL_CORRELATION_PARTLY_CONFOUNDED_KAPPA`. With the line
-    a kappa model's gradients are finite differences, so such fits are
-    slower (`mbma_placebo` with `correlation car1(RHO) by OCC`: about 15 s,
-    against 5 s without the line; OFV 97.07 to 89.82, RHO 0.76).
-    `E_NESTED_LEVEL_CORRELATION_UNSUPPORTED` is retired.
+    runs with `W_RESIDUAL_CORRELATION_PARTLY_CONFOUNDED_KAPPA`.
+    `E_NESTED_LEVEL_CORRELATION_UNSUPPORTED` is retired. With the line a
+    kappa model's gradients are finite differences, and on finite
+    differences `optimizer = "auto"` picks BOBYQA, which can report
+    convergence well short of the optimum, at a point that depends on the
+    platform and the start: `mbma_placebo` with `correlation car1(RHO) by
+    OCC` stops at OFV 89.82 on macOS but 99.18 on Linux, above the
+    uncorrelated fit's 97.07. Fit these models with
+    `settings = list(optimizer = "nlopt_lbfgs")`, which reaches 89.45
+    (RHO 0.76) from every start tried, on both platforms, in about 30 s
+    against 1 s without the line
+    ([ferx-core #1782](https://github.com/FeRx-NLME/ferx-core/issues/1782),
+    [#2101](https://github.com/FeRx-NLME/ferx-core/issues/2101)).
   - **A theta level block can be declared `profile`**
     ([ferx-core #1065](https://github.com/FeRx-NLME/ferx-core/issues/1065),
     [#2103](https://github.com/FeRx-NLME/ferx-core/pull/2103)):

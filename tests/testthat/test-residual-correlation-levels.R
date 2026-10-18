@@ -8,6 +8,17 @@
 # but left it out of the likelihood would tie the base OFV and leave RHO at
 # its start (measured on mbma_placebo: OFV 97.0700 both, RHO 0.3, SE 0), so
 # each fit must beat the base by a margin and move RHO.
+#
+# Both correlated fits run on optimizer = "nlopt_lbfgs". With the line next to
+# kappa the gradients are finite differences, so `auto` picks BOBYQA, which
+# stops on its own tolerance short of the optimum, at a point that moves with
+# the platform and the start: on mbma_placebo car1, OFV 89.82 on macOS but
+# 99.18 on Linux from RHO = 0.3, and 100.01 / 118.43 from RHO = 0.01, each
+# reported as converged. L-BFGS reaches 89.451278 (RHO 0.7598) from both
+# starts on both platforms, and SLSQP agrees; on nested_levels_3 ar1 it is
+# 105.639739 (RHO 0.11512) where BOBYQA stops at 105.78 / 106.63. The optima
+# are pinned to those values (ferx-core #2101, #1782).
+lbfgs <- list(optimizer = "nlopt_lbfgs")
 
 quiet <- function(x) suppressWarnings(suppressMessages(x))
 
@@ -30,7 +41,7 @@ mbma_car1_fit <- local({
   function() {
     if (is.null(fit)) {
       m <- mbma_with_line("correlation car1(RHO) by OCC")
-      fit <<- quiet(ferx_fit(m$model, m$data, verbose = FALSE))
+      fit <<- quiet(ferx_fit(m$model, m$data, verbose = FALSE, settings = lbfgs))
     }
     fit
   }
@@ -53,9 +64,11 @@ test_that("car1 by OCC fits next to mbma_placebo's arm kappa", {
   expect_lt(rho, 0.99)
   # The kappa is still estimated alongside it.
   expect_true(all(is.finite(diag(fit$omega_iov))))
-  # Measured gap 7.25 (97.07 -> 89.82).
+  # Measured gap 7.62 (97.070036 -> 89.451278).
   expect_lt(fit$ofv, base$ofv - 1)
   expect_gt(abs(rho - 0.3), 1e-3)
+  expect_lt(abs(fit$ofv - 89.451278), 1e-4)
+  expect_lt(abs(rho - 0.7598), 1e-3)
 
   out <- capture.output(quiet(print(fit)))
   expect_true(any(grepl("^RHO\\s", out)))
@@ -97,7 +110,7 @@ test_that("ar1 by a nested level fits on the three-level fixture", {
   corr_model <- withr::local_tempfile(fileext = ".ferx")
   writeLines(txt, corr_model)
 
-  fit <- quiet(ferx_fit(corr_model, data, verbose = FALSE))
+  fit <- quiet(ferx_fit(corr_model, data, verbose = FALSE, settings = lbfgs))
   base <- quiet(ferx_fit(model, data, verbose = FALSE))
   expect_true(fit$converged)
   rho <- fit$theta[["RHO"]]
@@ -105,8 +118,10 @@ test_that("ar1 by a nested level fits on the three-level fixture", {
   expect_gte(rho, 0)
   expect_lt(rho, 0.99)
   expect_gt(abs(rho - 0.3), 1e-3)
-  # Measured gap 1.27 (107.04 -> 105.78), against an unconverged base.
+  # Measured gap 1.40 (107.043571 -> 105.639739), against an unconverged base.
   expect_lt(fit$ofv, base$ofv - 0.5)
+  expect_lt(abs(fit$ofv - 105.639739), 1e-4)
+  expect_lt(abs(rho - 0.11512), 1e-3)
   expect_identical(fit$kappa_levels, c(K_ST = "STUDY", K_ARM = "ARM"))
   expect_identical(fit$model_structure$residual,
                    "additive, correlation ar1(RHO) by ARM")
