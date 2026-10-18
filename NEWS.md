@@ -2,6 +2,60 @@
 
 ## Breaking changes
 
+- **ferx now builds against ferx-core `f4580b77`**, up from `c46b152e`.
+  These engine changes reach R:
+
+  - **A residual `correlation` line fits next to `kappa` and on nested
+    levels**
+    ([ferx-core #1082](https://github.com/FeRx-NLME/ferx-core/issues/1082),
+    [#2102](https://github.com/FeRx-NLME/ferx-core/pull/2102)). A
+    `correlation cs|ar1|car1(RHO) by ...` line in `[error_model]` used to be
+    refused on a model with `kappa` or with more than one `level`; it now
+    fits by FOCE and FOCEI, and `ferx_simulate()` and `ferx_calc_npde()` draw
+    from the same correlated residual. On a nested model `by` may name a
+    level (`by ARM`), grouping by its groups nested by key; a spelling that a
+    level and a data column would read two ways is refused with
+    `E_RESIDUAL_CORRELATION_GROUPING_AMBIGUOUS`. `cs` over exactly the groups
+    a kappa is drawn in estimates the kappa's own covariance and is refused
+    with `E_RESIDUAL_CORRELATION_CONFOUNDED_KAPPA` (use `ar1` / `car1`, or
+    drop the kappa); where the two coincide in only some subjects the fit
+    runs with `W_RESIDUAL_CORRELATION_PARTLY_CONFOUNDED_KAPPA`.
+    `E_NESTED_LEVEL_CORRELATION_UNSUPPORTED` is retired. With the line a
+    kappa model's gradients are finite differences, and on finite
+    differences `optimizer = "auto"` picks BOBYQA, which can report
+    convergence well short of the optimum, at a point that depends on the
+    platform and the start: `mbma_placebo` with `correlation car1(RHO) by
+    OCC` stops at OFV 89.82 on macOS but 99.18 on Linux, above the
+    uncorrelated fit's 97.07. Fit these models with
+    `settings = list(optimizer = "nlopt_lbfgs")`, which reaches 89.45
+    (RHO 0.76) from every start tried, on both platforms, in about 30 s
+    against 1 s without the line
+    ([ferx-core #1782](https://github.com/FeRx-NLME/ferx-core/issues/1782),
+    [#2101](https://github.com/FeRx-NLME/ferx-core/issues/2101)).
+  - **A theta level block can be declared `profile`**
+    ([ferx-core #1065](https://github.com/FeRx-NLME/ferx-core/issues/1065),
+    [#2103](https://github.com/FeRx-NLME/ferx-core/pull/2103)):
+    `theta PLACEBO[STUDY, TIME](0.0) profile` parses and is checked, but a
+    fit of a profiled block is refused with `E_PROFILE_SCOPE` (on `e$code`)
+    until the profile solve lands; a prediction that does not read the block
+    linearly is `E_PROFILE_NOT_LINEAR`. No fit output changes yet.
+  - **SAEM / IMP covariate mu-referencing sees through `if`/`else` locals
+    and `min`/`max`**
+    ([ferx-core #1422](https://github.com/FeRx-NLME/ferx-core/issues/1422)):
+    a covariate local assigned in every arm of an `if`/`else` (a
+    Cockcroft-Gault CrCL, say) and `min(CRCLR, 120)` of such a local are
+    inlined into the typical value, so a slope on them joins the eta's
+    covariate group and takes the exact M-step instead of the numerical one
+    with a "NO associated ETA" advisory. SAEM estimates can move on such
+    models.
+  - **`ferx_model_to_frem()` keeps an `iiv_on_ruv` eta out of the FREM
+    covariate block**
+    ([ferx-core #904](https://github.com/FeRx-NLME/ferx-core/issues/904)):
+    it is emitted as its own diagonal `omega` (keeping `FIX` and a prior
+    fit's value), as NONMEM/PsN FREM do, unless the base model correlates it
+    with a PK eta in a `block_omega`, where it stays with no covariate
+    cross-terms.
+
 - **ferx now builds against ferx-core `c46b152e`**, up from `d53e8219`.
   These engine changes reach R:
 
@@ -74,8 +128,9 @@
     `ferx_calc_npde()` reference now simulate a nested model, drawing each
     kappa once per group of its level (one study kappa shared by the study's
     arms); NPDE on a nested fit drew an outer-level kappa once per arm before.
-    Adaptive dosing and a residual `correlation` line on a nested model are
-    still refused. See the new fields under New features.
+    Adaptive dosing on a nested model is still refused (a residual
+    `correlation` line fits since ferx-core `f4580b77`, above). See the new
+    fields under New features.
   - **`ferx_fit()` refusals now carry `e$code` where `ferx_check()` has one**
     ([ferx-core #1772](https://github.com/FeRx-NLME/ferx-core/issues/1772)):
     the model/data preconditions, an unbound level block

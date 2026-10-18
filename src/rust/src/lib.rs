@@ -3148,6 +3148,9 @@ fn default_fit_result(
         // ferx-core #2021: set only by a fit that ran the exact linear
         // (matrix exponential) path; this one was synthesized, not run.
         ode_linear_exact: false,
+        // ferx-core #1065: no fit of a `profile` block exists yet (E_PROFILE_SCOPE until
+        // the profile solve lands), so a skeleton rebuilt from one carries none.
+        profiled_blocks: Vec::new(),
         n_threads_used: 1,
         nlopt_missing_algorithms: Vec::new(),
         covariance_n_evals_estimated: None,
@@ -6622,6 +6625,9 @@ fn fit_skeleton(
         // ferx-core #2021: set only by a fit that ran the exact linear
         // (matrix exponential) path; this one was synthesized, not run.
         ode_linear_exact: false,
+        // ferx-core #1065: no fit of a `profile` block exists yet (E_PROFILE_SCOPE until
+        // the profile solve lands), so a skeleton rebuilt from one carries none.
+        profiled_blocks: Vec::new(),
         n_threads_used: 1,
         nlopt_missing_algorithms: Vec::new(),
         covariance_n_evals_estimated: None,
