@@ -122,6 +122,30 @@ test_that("ferx-core loads an R VI bundle and R loads core's (#508)", {
   expect_identical(ferx_load_fit(trip$core_path)$vi, fit$vi)
 })
 
+test_that("a distinct objective trace and a superseding stage round-trip (#508)", {
+  # A live warfarin fit takes the sentinel branches only (objective trace ==
+  # bound, nothing superseded); set both the other way, as a regularized
+  # `[covariate_nn]` fit and a `methods = [vi, focei]` chain would, so a
+  # writer that always omitted either field fails here.
+  fit <- vi_fit()
+  fit$vi$objective_trace <- fit$vi$elbo_trace + 1.5
+  fit$vi$superseded_by <- "FOCEI"
+
+  path <- tempfile(fileext = ".fitrx")
+  ferx_save_fit(fit, path)
+  wire <- fitrx_fit_json(path)$vi
+  expect_equal(unlist(wire$objective_trace), fit$vi$objective_trace,
+               tolerance = 0)
+  expect_identical(wire$superseded_by, "FOCEI")
+  expect_identical(ferx_load_fit(path)$vi, fit$vi)
+
+  # The engine reads both and writes them back.
+  trip <- fitrx_engine_trip(fit)
+  expect_identical(fitrx_fit_json(trip$core_path)$vi,
+                   fitrx_fit_json(trip$r_path)$vi)
+  expect_identical(ferx_load_fit(trip$core_path)$vi, fit$vi)
+})
+
 test_that("an IOV VI fit round-trips its per-occasion kappa means (#508)", {
   fit <- vi_fit(example = "warfarin_iov")
   km <- fit$vi$kappa_means
