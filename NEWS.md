@@ -2,6 +2,95 @@
 
 ## Breaking changes
 
+- **ferx now builds against ferx-core `00e5b2cc`**, up from `f4580b77`.
+  These engine changes reach R:
+
+  - **A `profile` theta level block now fits**
+    ([ferx-core #1065](https://github.com/FeRx-NLME/ferx-core/issues/1065),
+    [#2130](https://github.com/FeRx-NLME/ferx-core/pull/2130)). With
+    `theta PLACEBO[STUDY, TIME](0.0) profile`, FOCE and FOCEI solve the
+    block's levels exactly at every outer step, so the optimizer searches
+    only the structural parameters. That is what makes an unstructured
+    placebo model with hundreds of levels fit. The OFV, the estimates and
+    the standard errors are the unprofiled fit's: the levels stay in
+    `fit$theta`, count in `n_parameters` and BIC, and get standard errors
+    from the profiled `r` covariance step, in which the structural SEs
+    account for the levels. On `mbma_placebo` the profiled fit matches the
+    unprofiled one to 2.7e-9 in OFV and 8.6e-6 in the structural thetas, with
+    standard errors within 0.7%. `fit$profiled_blocks` names the profiled
+    blocks, and `fit$theta_levels` gains a `profiled` column. `print()` marks
+    the block `(n coefficients, profiled)` on its Structural line and
+    `profiled (not searched)` on its THETA BLOCKS line. `ferx_save_fit()` /
+    `ferx_load_fit()` carry the record as ferx-core's `.fitrx` does, and
+    `ferx_covariance()` repeats the profiled `covariance_method = "r"` step,
+    live or reloaded (to 4e-6 relative). It has no `"s"` / `"rsr"` step on
+    such a fit: those return no standard errors, with the reason in
+    `fit$warnings` rather than an error. A profiled block takes no bounds.
+    `ferx_fit()` refuses, with `E_PROFILE_SCOPE` on `e$code`: a bounded
+    block; a method other than `foce` / `focei`, or `n_agq > 1`; a TTE,
+    binary or other non-Gaussian endpoint; a residual error other than
+    additive, or a log-transformed (LTBS) one; censored rows scored by M3; a
+    residual `correlation` line; a `[mixture]`, a `[diffusion]` block or a
+    FREM covariate model; `covariance_method = "s"` / `"rsr"`;
+    `trust_region` / `mma`, `global_search` and priors. A block no prediction
+    reads, or one not read linearly, is `E_PROFILE_NOT_LINEAR`.
+  - **`optimizer = "auto"` takes L-BFGS on a `kappa` model with a residual
+    `correlation` line**
+    ([ferx-core #2122](https://github.com/FeRx-NLME/ferx-core/issues/2122),
+    [#2127](https://github.com/FeRx-NLME/ferx-core/pull/2127)). Its gradient
+    is finite differences, so `auto` used to pick BOBYQA. BOBYQA stopped at a
+    different objective for each starting value of the correlation, at times
+    above the same model without the line, and reported converged. You no
+    longer need the `settings = list(optimizer = "nlopt_lbfgs")` that the
+    `f4580b77` entry below advises: `mbma_placebo` with `correlation car1(RHO) by OCC` now reaches
+    OFV 89.45 from RHO = 0.01 and from 0.6 on the default, and
+    `fit$optimizer` reads `auto (nlopt_lbfgs)`. Such a fit now warns that
+    this route uses finite differences, and why. On a model also past the
+    analytic path's 24-axis cap, the cap warning stays. It now says that
+    removing parameters would not restore the analytic gradient, where it
+    used to call the fit only slower and advise dropping parameters. An
+    explicit `optimizer = "bobyqa"` is still honoured.
+  - **A typical value whose ETA is transformed is no longer reported as
+    having "NO associated ETA"**
+    ([ferx-core #1715](https://github.com/FeRx-NLME/ferx-core/issues/1715),
+    [#2057](https://github.com/FeRx-NLME/ferx-core/pull/2057)). SAEM,
+    IMP/IMPMAP and `ferx_model_to_frem()` listed every estimated theta the
+    closed-form mu-reference shift does not move as ETA-less, and told you to
+    add an ETA. A Box-Cox `TVCL` and its shape theta, or a covariate
+    coefficient sharing `CL` with `ETA_CL`, got that advice too. Such thetas
+    now get their own message: the ETA is there, but not in the
+    `log P = log TVP + ETA_P` form the shift needs, so cross-check against
+    FOCEI or IMPMAP rather than remove the transform. A theta with no ETA in
+    any statement keeps the old text. Estimates do not change.
+  - **An `[odes]` `init(...)` that reads a time-varying covariate is seeded
+    from the subject's first row in file order**
+    ([ferx-core #2121](https://github.com/FeRx-NLME/ferx-core/issues/2121),
+    [#2128](https://github.com/FeRx-NLME/ferx-core/pull/2128)), of any kind,
+    as NONMEM seeds `A_0`. When an EVID=2 row and an observation shared the
+    first TIME with different covariates, `ferx_predict()` and `ferx_fit()`
+    read the observation's (OFV 222.41 against NONMEM's 172.84 on the
+    anchor), and adaptive simulation ignored dose rows when choosing the
+    seed. Results move for such data.
+  - **Adaptive dosing reads the last of two co-timed rows**
+    ([ferx-core #1599](https://github.com/FeRx-NLME/ferx-core/issues/1599),
+    [#2118](https://github.com/FeRx-NLME/ferx-core/pull/2118)). Take a
+    decision after two rows of one kind (observations, EVID=2 or dose rows)
+    at the same time with different covariates. It now reads the row listed
+    last, not the first, so the injected dose's F and the controller's
+    covariates move for such data (2.4x on the issue's example). The
+    default-on verifier now derives which row a decision reads with its own
+    code.
+  - **Adaptive dosing judges a finite pre-dose window at the first realized
+    dose**
+    ([ferx-core #1572](https://github.com/FeRx-NLME/ferx-core/issues/1572),
+    [#2119](https://github.com/FeRx-NLME/ferx-core/pull/2119)). This applies
+    to an `[odes]` model that reads `TAD` / `TAFD` and whose state stays
+    finite. A condition that holds only for a later first dose
+    (`if (TAD < -20)` with the dose at 36) is now refused, where it used to
+    return numbers up to 23.5x off `ferx_predict()`. A condition on both a
+    compartment and `TIME` that the run never opens now runs instead of
+    being refused.
+
 - **ferx now builds against ferx-core `f4580b77`**, up from `c46b152e`.
   These engine changes reach R:
 
@@ -1261,6 +1350,25 @@
   through a model file's `method = saem` runs with interaction, which R
   used to read as `FALSE`.
 
+- **Fitted `block_sigma` correlations are matched to the model by their
+  sigma pair, not their row position (#486).** Every from-fit path
+  (`ferx_predict()`, `ferx_simulate()`, `ferx_calc_npde()`,
+  `ferx_predict_survival()`, `ferx_simulate_with_uncertainty()`,
+  `ferx_sir()`, `ferx_covariance()`) used to zip
+  `fit$residual_correlations$rho` onto the model's correlations in
+  declaration order, so a frame reordered (sorted by `name`, say) rebuilt
+  each block at the other block's fitted rho with no error, and
+  `ferx_covariance()` wrote each refreshed SE onto the wrong row. Each row is
+  now matched on its (`sigma_i`, `sigma_j`) pair, in either orientation. A
+  row whose pair the model does not declare, a pair given twice, and a frame
+  without the `sigma_i` / `sigma_j` columns are refused, and the row-count
+  mismatch error names `fit$residual_correlations` instead of the internal
+  `residual_rho` argument. A hand-built engine result whose FIX flags do not
+  match its correlations now reads as all free in `ferx_fit()`'s output too,
+  as it already did on the from-fit paths and in ferx-core's validation. The
+  plural and mixed FIX / free wording of the missing-correlation refusal
+  (#480) is now under test (#485).
+
 - **A derived `iov_occasion = dose | time(...)` rule now reaches
   `ferx_simulate()`, `ferx_predict()`, `ferx_calc_npde()`,
   `ferx_predict_survival()` and `ferx_simulate_with_uncertainty()`.** These
@@ -1353,6 +1461,21 @@
   older ferx), which still falls back
   to copying the file
   ([#577](https://github.com/FeRx-NLME/ferx-r/issues/577)).
+
+- **`fit$data_hash` names the data that was fitted, and
+  `ferx_save_fit(include_data = TRUE)` bundles only that data.**
+  `ferx_fit()` used to read the population from the data file and, once the
+  fit returned, hash the file a second time, so a CSV edited while a long fit
+  ran gave a `data_hash` of the edited file: from-fit calls then took the
+  edited rows for the fitted ones. The data file is now read once, and the
+  population and the hash both come from those bytes. `ferx_save_fit(include_data
+  = TRUE)` used to copy the file as it was at save time; it now reads it once
+  and bundles it only when it still hashes to `fit$data_hash`, refusing
+  otherwise with an error of class `ferx_data_edited_error` (on `e$data_path`)
+  that names the file, before anything is written. A fit of a data.frame is
+  bundled from its own `fit$data_source` should its cached file have changed;
+  a fit with no recorded hash (an older ferx) is bundled unchecked
+  ([#585](https://github.com/FeRx-NLME/ferx-r/issues/585)).
 
 - **A fit reloaded with `ferx_load_fit()` prints exactly like the live one.**
   The SIGMA row keeps its `[additive]` / `[proportional]` tag, SD and CV%

@@ -274,6 +274,7 @@ ferx_covariance <- function(fit,
     omega_iov_flat = iov_args$omega_iov_flat,
     omega_iov_dim = iov_args$omega_iov_dim,
     residual_rho = .ferx_residual_rho_vec(fit),
+    residual_rho_pairs = .ferx_residual_rho_pairs(fit),
     eta_hats_flat = eta_hats_flat,
     subject_ids = subject_ids,
     # The occasion rule the fit derived its occasions with; without it the
@@ -351,11 +352,17 @@ ferx_covariance <- function(fit,
   # `block_sigma` correlation SEs come out of the same step; write them back
   # onto the frame so a refreshed fit carries uncertainty for every estimated
   # parameter, not just theta/omega/sigma.
+  # The engine returns them in the model's declaration order, with their sigma
+  # pairs; each lands on the frame row with the same pair, so a reordered
+  # frame does not take another block's SE (#486).
   if (n_rho > 0L && is.data.frame(fit$residual_correlations)) {
+    rc <- fit$residual_correlations
     se_rho <- as.numeric(raw$se_residual_correlation %||% numeric())
+    se_i <- raw$se_residual_correlation_i %||% integer()
+    row <- .ferx_residual_corr_match(rc, se_i, raw$se_residual_correlation_j)
+    se <- if (length(se_rho) == length(se_i)) se_rho[row] else NA_real_
     fit$residual_correlations$se <- .ferx_residual_corr_se(
-      if (length(se_rho) == n_rho) se_rho else rep(NA_real_, n_rho),
-      fit$residual_correlations$fixed
+      rep_len(se, n_rho), rc$fixed
     )
   }
 

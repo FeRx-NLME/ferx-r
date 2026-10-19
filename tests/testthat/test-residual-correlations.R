@@ -469,3 +469,191 @@ test_that("a v0.3.x-shaped fit gets the rho refusal from SIR, not a dimension er
                         sir_seed = 7L),
                "^ferx_sir: .*estimates the block_sigma correlation")
 })
+
+# -- #486 / #485: two block_sigma blocks --
+#
+# Every fixture above declares one correlation, so neither the order of
+# fit$residual_correlations nor the plural / per-index FIX branches of the
+# #480 refusal could show. This one has two endpoints, each with its own
+# combined error and its own block (`ADD_A ~ PROP_A`, `ADD_B ~ PROP_B`); a
+# per-CMT error model needs an ODE structural model. `fix_b` holds the second
+# block FIX.
+rho2_fixture <- function(fix_b) {
+  cache <- new.env(parent = emptyenv())
+  function() {
+    if (!is.null(cache$v)) return(cache$v)
+    dir <- tempfile("ferx-rho2-")
+    dir.create(dir)
+    model <- file.path(dir, "rho2.ferx")
+    data  <- file.path(dir, "rho2.csv")
+    writeLines(c(
+      "[parameters]",
+      "  theta TVCL(1.0, 0.01, 10.0)",
+      "  theta TVV(10.0, 0.1, 100.0)",
+      "  omega ETA_CL ~ 0.04",
+      "  block_sigma (PROP_A, ADD_A) = [0.04, 0.10, 0.30]",
+      paste0("  block_sigma (PROP_B, ADD_B) = [0.02, -0.02, 0.20]",
+             if (fix_b) " FIX" else ""),
+      "[individual_parameters]",
+      "  CL = TVCL * exp(ETA_CL)",
+      "  V  = TVV",
+      "[structural_model]",
+      "  ode(states=[central])",
+      "[odes]",
+      "  d/dt(central) = -CL/V * central",
+      "[scaling]",
+      "  y[CMT=1] = central / V",
+      "  y[CMT=2] = central / V",
+      "[error_model]",
+      "  CMT=1: DV ~ combined(PROP_A, ADD_A)",
+      "  CMT=2: DV ~ combined(PROP_B, ADD_B)",
+      "[fit_options]",
+      "  method = focei"
+    ), model)
+    write.csv(data.frame(
+      ID   = rep(1:4, each = 7),
+      TIME = rep(c(0, 1, 3, 8, 1, 3, 8), 4),
+      DV   = c(0, 9.1, 6.8, 3.0, 9.0, 6.5, 3.2, 0, 8.4, 6.2, 2.6, 8.8, 6.0, 2.4,
+               0, 9.7, 7.3, 3.4, 9.5, 7.0, 3.6, 0, 9.0, 6.6, 2.9, 9.2, 6.4, 3.1),
+      EVID = rep(c(1, 0, 0, 0, 0, 0, 0), 4),
+      AMT  = rep(c(100, 0, 0, 0, 0, 0, 0), 4),
+      CMT  = rep(c(1, 1, 1, 1, 2, 2, 2), 4),
+      MDV  = rep(c(1, 0, 0, 0, 0, 0, 0), 4)
+    ), data, row.names = FALSE, quote = FALSE)
+    cache$v <- list(model = model, data = data,
+                    fit = ferx_fit(model, data, verbose = FALSE))
+    cache$v
+  }
+}
+rho2_case     <- rho2_fixture(fix_b = FALSE)
+rho2_fix_case <- rho2_fixture(fix_b = TRUE)
+
+# The free two-block fit with its two rhos set apart, so a swap shows.
+rho2_spread <- function() {
+  case <- rho2_case()
+  fit <- case$fit
+  rc <- fit$residual_correlations
+  expect_identical(nrow(rc), 2L)
+  rc$rho[rc$name == "ADD_A ~ PROP_A"] <- 0.5
+  rc$rho[rc$name == "ADD_B ~ PROP_B"] <- -0.5
+  fit$residual_correlations <- rc
+  case$fit <- fit
+  case
+}
+
+sim_dv <- function(case, fit) {
+  ferx_simulate(case$model, case$data, n_sim = 2L, seed = 1L, fit = fit)$DV_SIM
+}
+
+test_that("a reordered residual_correlations frame keeps each block's rho (#486)", {
+  skip_on_cran()
+  case <- rho2_spread()
+  fit <- case$fit
+  rc <- fit$residual_correlations
+
+  # Sorted the other way round: same rows, so the same fit.
+  reordered <- fit
+  reordered$residual_correlations <- rc[2:1, ]
+  # The control: the two rhos actually swapped between the blocks. Up to #486
+  # the reordered frame was read as this one.
+  swapped <- fit
+  swapped$residual_correlations$rho <- rev(rc$rho)
+
+  at_fit <- sim_dv(case, fit)
+  expect_identical(sim_dv(case, reordered), at_fit)
+  expect_false(identical(sim_dv(case, swapped), at_fit))
+
+  # A pair given the other way round names the same correlation.
+  flipped <- fit
+  flipped$residual_correlations$sigma_i <- rc$sigma_j
+  flipped$residual_correlations$sigma_j <- rc$sigma_i
+  expect_identical(sim_dv(case, flipped), at_fit)
+})
+
+test_that("ferx_covariance() writes each correlation SE onto its own row (#486)", {
+  skip_on_cran()
+  fit <- rho2_case()$fit
+  rc <- fit$residual_correlations
+  reordered <- fit
+  reordered$residual_correlations <- rc[2:1, ]
+
+  fresh <- ferx_covariance(fit)$residual_correlations
+  skip_if(!all(is.finite(fresh$se)), "covariance step produced no rho SEs")
+  skip_if(isTRUE(all.equal(fresh$se[1], fresh$se[2])), "SEs too close to tell apart")
+  out <- ferx_covariance(reordered)$residual_correlations
+  expect_identical(out$name, rc$name[2:1])
+  expect_equal(out$se, fresh$se[2:1], tolerance = 1e-8)
+})
+
+test_that("a pair the model does not declare is refused (#486)", {
+  skip_on_cran()
+  case <- rho2_spread()
+  fit <- case$fit
+  rc <- fit$residual_correlations
+
+  # ADD_A paired with ADD_B: two real sigmas, no declared block.
+  undeclared <- fit
+  undeclared$residual_correlations$sigma_j[1] <- rc$sigma_i[2]
+  msg <- refusal(ferx_predict(case$model, case$data, fit = undeclared),
+                 "^Fit error: fit\\$residual_correlations row 1 pairs")
+  expect_match(msg, "does not declare", fixed = TRUE)
+  expect_match(msg, "ADD_A ~ PROP_A, ADD_B ~ PROP_B", fixed = TRUE)
+
+  # Both rows on the first block leave the second without a value.
+  twice <- fit
+  twice$residual_correlations[2, c("sigma_i", "sigma_j")] <- rc[1, c("sigma_i", "sigma_j")]
+  expect_error(ferx_covariance(twice),
+               "^ferx_covariance: fit\\$residual_correlations rows 1 and 2 both give the block_sigma correlation ADD_A ~ PROP_A")
+
+  # An NA index names it as R does.
+  na_pair <- fit
+  na_pair$residual_correlations$sigma_i[2] <- NA_integer_
+  expect_error(ferx_simulate(case$model, case$data, n_sim = 1L, seed = 1L,
+                             fit = na_pair),
+               "row 2 pairs sigma_i = NA")
+
+  # Without the pair columns there is nothing to match on. The refusal fires
+  # while the fit is rebuilt, before any draw is sampled.
+  no_pairs <- fit
+  no_pairs$residual_correlations$sigma_i <- NULL
+  expect_error(ferx_simulate_with_uncertainty(case$model, case$data, no_pairs,
+                                              n_uncertainty_draws = 5L),
+               "^Uncertainty error: fit\\$residual_correlations needs integer sigma_i and sigma_j")
+})
+
+test_that("a row-count mismatch names fit$residual_correlations (#486)", {
+  skip_on_cran()
+  case <- rho2_spread()
+  short <- case$fit
+  short$residual_correlations <- short$residual_correlations[1, ]
+  msg <- refusal(ferx_predict(case$model, case$data, fit = short),
+                 "^Fit error: fit\\$residual_correlations has 1 row\\(s\\), but the model declares 2 block_sigma correlation\\(s\\)")
+  expect_false(grepl("residual_rho", msg, fixed = TRUE))
+})
+
+test_that("the #480 refusal names only the free correlation next to a FIX block (#485)", {
+  skip_on_cran()
+  case <- rho2_fix_case()
+  fit <- case$fit
+  expect_identical(fit$residual_correlations$fixed, c(FALSE, TRUE))
+
+  msg <- refusal(ferx_predict(case$model, case$data, fit = without_rho(fit)),
+                 "^Fit error: the model estimates the block_sigma correlation ADD_A ~ PROP_A, but")
+  expect_false(grepl("ADD_B", msg, fixed = TRUE))
+  expect_match(msg, "no value for it ", fixed = TRUE)
+  expect_match(msg, "so it would be rebuilt at the declared initial correlation",
+               fixed = TRUE)
+  expect_match(msg, "held this correlation at its declared value", fixed = TRUE)
+})
+
+test_that("the #480 refusal is plural throughout for two free correlations (#485)", {
+  skip_on_cran()
+  case <- rho2_case()
+  msg <- refusal(ferx_covariance(without_rho(case$fit)),
+                 "^ferx_covariance: the model estimates the block_sigma correlations ADD_A ~ PROP_A, ADD_B ~ PROP_B, but")
+  expect_match(msg, "no value for them ", fixed = TRUE)
+  expect_match(msg, "so they would be rebuilt at their declared initial correlations",
+               fixed = TRUE)
+  expect_match(msg, "held these correlations at their declared values", fixed = TRUE)
+  expect_false(grepl("\\bit\\b", msg))
+})

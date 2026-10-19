@@ -19,6 +19,7 @@ ferx_rust_covariance(
   omega_iov_flat,
   omega_iov_dim,
   residual_rho,
+  residual_rho_pairs,
   eta_hats_flat,
   subject_ids,
   iov_occasion,

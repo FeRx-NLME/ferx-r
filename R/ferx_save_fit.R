@@ -51,7 +51,12 @@ FITRX_FORMAT_VERSION <- "1"
 #' @param include_data Logical. When \code{TRUE}, the input NONMEM CSV used
 #'   to fit the model is embedded verbatim inside the archive (as
 #'   \code{data.csv}). Requires that the file is still accessible at the
-#'   path captured at fit time (\code{fit$data_path}). Default \code{FALSE}.
+#'   path captured at fit time (\code{fit$data_path}), unchanged since the
+#'   fit: a file whose SHA-256 no longer matches \code{fit$data_hash} is not
+#'   the data that was fitted, and \code{ferx_save_fit()} refuses it with an
+#'   error of class \code{ferx_data_edited_error} rather than bundle it. A fit
+#'   with no recorded \code{data_hash} (one made by an older ferx) is bundled
+#'   unchecked. Default \code{FALSE}.
 #'   A fit whose \code{data} was a data.frame (\code{fit$data_source} set)
 #'   always embeds it: its file lives only in a temporary directory, so a
 #'   bundle without it could not be re-read.
@@ -206,7 +211,15 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
         "The fit's data (fit$data_source) could not be written to a file to bundle."
       })
     }
-    file.copy(data_path, file.path(staging, "data.csv"), overwrite = TRUE)
+    # The bundle's data.csv must be the rows that were fitted, the bytes
+    # `fit$data_hash` names (#585), or the bundle ships a dataset its own
+    # hash disowns. Read the file once and check those bytes before writing
+    # them, rather than copying a file that may have been edited since the
+    # fit. A fit of a data.frame falls back to its own `fit$data_source`
+    # text. A fit with no recorded hash (an older ferx) has nothing to check
+    # against and is bundled as it is.
+    data_bytes <- .fitrx_fitted_data_bytes(fit, data_path)
+    writeBin(data_bytes, file.path(staging, "data.csv"))
     entries <- c(entries, "data.csv")
   }
 
@@ -287,7 +300,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   "method_chain", "prior_summary", "method_wall_times_secs",
   "nlopt_missing_algorithms", "warnings", "cov_eigenvalues", "eta_param_info",
   "theta_init", "sigma_init", "final_gradient", "covariate_names",
-  "input_columns", "packed_estimate",
+  "input_columns", "packed_estimate", "profiled_blocks",
   # ThetaWire / OmegaWire / SigmaWire
   "names", "estimates", "se", "fixed", "transform", "log_transformed",
   "shrinkage", "init_as_sd", "types", "residual_correlations",
@@ -377,6 +390,51 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   if (!validUTF8(txt)) return(NULL)
   if (!identical(ferx_rust_sha256_text(txt), tolower(hash))) return(NULL)
   txt
+}
+
+# The bytes to bundle as data.csv. A fit of a data.frame carries the rows it
+# fitted in `fit$data_source`; when that text hashes to `fit$data_hash` (or
+# the fit recorded no hash) it is bundled without touching the cache file,
+# which may since have become unreadable. Otherwise one read of `data_path`,
+# when it hashes to `fit$data_hash` or the fit recorded no hash. Anything
+# else is refused with a `ferx_data_edited_error` naming the file, before the
+# bundle is written: the fit's data is gone, and a data.csv its own
+# `data_hash` does not name would make from-fit calls on the reloaded fit
+# refuse (or, without a hash check, use the wrong rows).
+.fitrx_fitted_data_bytes <- function(fit, data_path) {
+  hash <- fit$data_hash
+  has_hash <- is.character(hash) && length(hash) == 1L && !is.na(hash) &&
+    nzchar(hash)
+  if (has_hash) hash <- tolower(hash)
+  src <- fit$data_source
+  if (is.character(src) && length(src) == 1L && !is.na(src)) {
+    src_bytes <- charToRaw(src)
+    if (!has_hash || identical(ferx_rust_sha256_raw(src_bytes), hash)) {
+      return(src_bytes)
+    }
+  }
+  bytes <- .fitrx_read_bytes(data_path)
+  if (!has_hash || identical(ferx_rust_sha256_raw(bytes), hash)) return(bytes)
+  stop(errorCondition(sprintf(paste0(
+    "ferx_save_fit(): the data file %s has changed since the fit (its ",
+    "SHA-256 no longer matches fit$data_hash), so it is not the data that ",
+    "was fitted and is not bundled. Restore the file and save again, save ",
+    "with include_data = FALSE, or refit."), data_path),
+    class = "ferx_data_edited_error", data_path = data_path))
+}
+
+# A file's bytes, read to EOF in one connection (no `file.size()` race: a file
+# that grows between a size query and the read would be cut short).
+.fitrx_read_bytes <- function(path) {
+  con <- file(path, "rb")
+  on.exit(close(con), add = TRUE)
+  chunks <- list()
+  repeat {
+    chunk <- readBin(con, "raw", n = 1048576L)
+    if (length(chunk) == 0L) break
+    chunks[[length(chunks) + 1L]] <- chunk
+  }
+  if (length(chunks) == 0L) raw() else do.call(c, chunks)
 }
 
 .fitrx_warn_model_edited <- function(model_path, model_hash) {
@@ -605,6 +663,12 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   # fail rather than default. Assigned after the fact because `list(x = NULL)`
   # keeps the name and `null = "null"` would emit exactly that null.
   prior_rows <- .fitrx_prior_summary_to_wire(fit$prior_summary)
+  # ferx-core #1065: the level blocks the fit profiled. The engine omits the
+  # key for a fit without one (`skip_serializing_if`) and reads a missing key
+  # as none, but would refuse a null, so it is written only when non-empty.
+  if (length(fit$profiled_blocks)) {
+    wire$profiled_blocks <- as.character(fit$profiled_blocks)
+  }
   # A fit loaded from a pre-#366 bundle has its prior half recovered from the
   # stored AIC but no per-parameter report, so the halves are written on a
   # non-zero `ofv_prior` alone - otherwise re-saving such a fit would drop the

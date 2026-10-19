@@ -4,7 +4,7 @@
 \alias{ferx_rust_structural_theta_labels}
 \title{Internal Rust backend binding}
 \usage{
-ferx_rust_structural_theta_labels(theta_names)
+ferx_rust_structural_theta_labels(theta_names, profiled_blocks)
 }
 \description{
 Internal Rust backend binding

@@ -484,11 +484,24 @@ fn ferx_rust_fit(
         reader_settings.ignore_exprs = opts.ignore_exprs.clone();
         reader_settings.accept_exprs = opts.accept_exprs.clone();
         reader_settings.ignore_subjects = opts.ignore_subjects.clone();
+        // One read of the data file, as for the model above (ferx-r #585): the
+        // population is parsed from these bytes and `data_hash` names them, so
+        // an edit to the file while the fit runs cannot leave the fit recording
+        // a hash of rows it never read. Core's reader takes only a path, so the
+        // bytes are parsed from a private copy (`StagedData`) rather than from
+        // `data_path` a second time, until core reads bytes (ferx-core #2140).
+        let data_bytes = std::fs::read(data_path)
+            .map_err(|e| format!("Error reading data: cannot read `{data_path}`: {e}"))?;
+        let data_hash = ferx_core::io::hash::sha256_bytes(&data_bytes);
+        let staged = StagedData::write(&data_bytes)
+            .map_err(|e| format!("Error reading data: {e}"))?;
+        drop(data_bytes);
         let (mut population, covariate_table) =
-            match ferx_core::api::read_population_with(&parsed.model, &reader_settings, data_path) {
+            match ferx_core::api::read_population_with(&parsed.model, &reader_settings, staged.path()) {
                 Ok(result) => result,
                 Err(e) => return Err(engine_refusal("Error reading data: ", e)),
             };
+        drop(staged);
 
         // Bind `theta NAME[COL, ...]` level blocks against the data just read
         // (ferx-r #370): the level count, and so the theta layout, is a property
@@ -689,6 +702,9 @@ fn ferx_rust_fit(
         result.model_path = Some(model_path.to_string());
         result.data_path = Some(data_path.to_string());
         //
+        // `data_hash` is the hash of the bytes the population was read from
+        // (above), not of the file as it is now (ferx-r #585).
+        //
         // `model_hash` and `model_text` are the one read the fit was parsed
         // and bound from (above), so the text is exactly the bytes the hash
         // names (CRLF, BOM and a missing trailing newline included).
@@ -696,7 +712,7 @@ fn ferx_rust_fit(
         // rather than re-reading a file that may have been edited since
         // (ferx-r #577).
         result.model_hash = Some(model_hash);
-        result.data_hash = ferx_core::io::hash::sha256_file(Path::new(data_path)).ok();
+        result.data_hash = Some(data_hash);
         result.model_text = Some(model_text);
         // Attach the covariate table built during the strict read above (None when
         // the model has no `[covariates]` block). `fit()` itself leaves this None.
@@ -838,6 +854,7 @@ fn ferx_rust_simulate_from_fit(
     omega_iov_flat: Vec<f64>,
     omega_iov_dim: i32,
     residual_rho: Vec<f64>,
+    residual_rho_pairs: Vec<i32>,
     fit_bindings: List,
     iov_occasion: &str,
     n_sim: i32,
@@ -893,6 +910,7 @@ fn ferx_rust_simulate_from_fit(
             &omega_iov_flat,
             omega_iov_dim,
             &residual_rho,
+            &residual_rho_pairs,
         ) {
             Ok(p) => p,
             Err(e) => return Err(e),
@@ -1168,8 +1186,11 @@ fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult) -> Robj
 ///   (`n_resamples * n_packed` values; empty when not using SIR mode)
 /// @param sir_resamples_n Number of SIR resamples (rows)
 /// @param sir_resamples_dim Packed-parameter dimension (columns)
-/// @param residual_rho Fitted `block_sigma` residual correlations, in model
-///   declaration order (empty when the model declares none)
+/// @param residual_rho Fitted `block_sigma` residual correlations (empty when
+///   the model declares none), one per row of `fit$residual_correlations`
+/// @param residual_rho_pairs The 1-based `(sigma_i, sigma_j)` pair of each
+///   entry of `residual_rho`, flattened `i1, j1, i2, j2, ...`; matched against
+///   the model's declared pairs, so the row order does not matter
 /// @param n_uncertainty_draws Number of parameter sets to draw from the
 ///   uncertainty distribution
 /// @param n_sim_per_draw Number of eta/eps replicates per parameter draw
@@ -1196,6 +1217,7 @@ fn ferx_rust_simulate_with_uncertainty(
     sir_resamples_n: i32,
     sir_resamples_dim: i32,
     residual_rho: Vec<f64>,
+    residual_rho_pairs: Vec<i32>,
     fit_bindings: List,
     iov_occasion: &str,
     n_uncertainty_draws: i32,
@@ -1263,6 +1285,7 @@ fn ferx_rust_simulate_with_uncertainty(
                 sir_resamples_n,
                 sir_resamples_dim,
                 &residual_rho,
+                &residual_rho_pairs,
             ) {
                 Ok(f) => f,
                 Err(e) => return Err(e),
@@ -1384,6 +1407,7 @@ fn ferx_rust_predict_from_fit(
     omega_iov_flat: Vec<f64>,
     omega_iov_dim: i32,
     residual_rho: Vec<f64>,
+    residual_rho_pairs: Vec<i32>,
     fit_bindings: List,
     iov_occasion: &str,
 ) -> Robj {
@@ -1431,6 +1455,7 @@ fn ferx_rust_predict_from_fit(
             &omega_iov_flat,
             omega_iov_dim,
             &residual_rho,
+            &residual_rho_pairs,
         ) {
             Ok(p) => p,
             Err(e) => return Err(e),
@@ -1566,6 +1591,7 @@ fn ferx_rust_predict_survival_from_fit(
     omega_iov_flat: Vec<f64>,
     omega_iov_dim: i32,
     residual_rho: Vec<f64>,
+    residual_rho_pairs: Vec<i32>,
     fit_bindings: List,
     iov_occasion: &str,
 ) -> Robj {
@@ -1608,6 +1634,7 @@ fn ferx_rust_predict_survival_from_fit(
             &omega_iov_flat,
             omega_iov_dim,
             &residual_rho,
+            &residual_rho_pairs,
         ) {
             Ok(p) => p,
             Err(e) => return Err(e),
@@ -1670,6 +1697,7 @@ fn ferx_rust_npde_from_fit(
     omega_iov_flat: Vec<f64>,
     omega_iov_dim: i32,
     residual_rho: Vec<f64>,
+    residual_rho_pairs: Vec<i32>,
     fit_bindings: List,
     reader_settings: &str,
     model_is_fits: bool,
@@ -1758,6 +1786,7 @@ fn ferx_rust_npde_from_fit(
             &omega_iov_flat,
             omega_iov_dim,
             &residual_rho,
+            &residual_rho_pairs,
         ) {
             Ok(p) => p,
             Err(e) => return Err(e),
@@ -1834,6 +1863,115 @@ fn ferx_rust_npde_from_fit(
 // standalone covariance step, which take no population here, hand them to the
 // engine in the skeleton `FitResult`'s `data_bindings` instead, the slot
 // ferx-core's own `fit()` records them in (FeRx-NLME/ferx-core#1621).
+
+/// A private copy of the data bytes `ferx_rust_fit` read, for core's
+/// path-only reader (ferx-r #585): the population is parsed from exactly the
+/// bytes `data_hash` names, whatever happens to the user's file meanwhile.
+/// The copy is of a dataset the user may keep owner-only, so it goes in R's
+/// session temporary directory (`tempdir()`: created 0700, removed when R
+/// exits, so a crash leaves nothing readable by others behind), created with
+/// `create_new` under a per-process name, owner-only (0600) on Unix, and is
+/// removed on drop.
+struct StagedData {
+    path: std::path::PathBuf,
+}
+
+impl StagedData {
+    fn write(bytes: &[u8]) -> std::result::Result<Self, String> {
+        use std::io::Write;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let dir = r_session_tempdir();
+        for _ in 0..100 {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.subsec_nanos())
+                .unwrap_or(0);
+            let path = dir.join(format!(
+                "ferx-data-{}-{}-{nanos}.csv",
+                std::process::id(),
+                SEQ.fetch_add(1, Ordering::Relaxed)
+            ));
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            let mut file = match options.open(&path) {
+                Ok(file) => file,
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(e) => {
+                    return Err(format!(
+                        "cannot stage the data in `{}`: {e}",
+                        dir.display()
+                    ))
+                }
+            };
+            let staged = StagedData { path };
+            file.write_all(bytes)
+                .and_then(|()| file.flush())
+                .map_err(|e| format!("cannot stage the data in `{}`: {e}", dir.display()))?;
+            return Ok(staged);
+        }
+        Err(format!("cannot stage the data in `{}`: no free name", dir.display()))
+    }
+
+    fn path(&self) -> &str {
+        // `tempdir()` and the name are both valid UTF-8 on every platform R
+        // runs on; a lossy conversion would name a different file, so fall
+        // back to the empty path (the read then fails loudly).
+        self.path.to_str().unwrap_or("")
+    }
+}
+
+/// R's per-session temporary directory, falling back to the system one only
+/// if R cannot be asked (never expected: the glue runs on R's thread).
+fn r_session_tempdir() -> std::path::PathBuf {
+    eval_string("base::tempdir()")
+        .ok()
+        .and_then(|dir| dir.as_str().map(std::path::PathBuf::from))
+        .unwrap_or_else(std::env::temp_dir)
+}
+
+/// Stage `bytes` exactly as `ferx_rust_fit` stages the data it read, and
+/// report the staged copy while it exists: its path, its Unix permission bits
+/// (`NA` elsewhere) and its bytes. The copy is removed before this returns.
+/// For the tests of ferx-r #585 only.
+///
+/// @param bytes A raw vector.
+/// @return A list with `path`, `mode` and `bytes`.
+/// @export
+#[extendr]
+fn ferx_rust_stage_data_probe(bytes: Raw) -> List {
+    entry(move || {
+        let staged = StagedData::write(bytes.as_slice())?;
+        let meta = std::fs::metadata(&staged.path).map_err(|e| e.to_string())?;
+        #[cfg(unix)]
+        let mode = {
+            use std::os::unix::fs::PermissionsExt;
+            Some((meta.permissions().mode() & 0o777) as i32)
+        };
+        #[cfg(not(unix))]
+        let mode: Option<i32> = {
+            let _ = meta;
+            None
+        };
+        let read = std::fs::read(&staged.path).map_err(|e| e.to_string())?;
+        Ok(list!(
+            path = staged.path().to_string(),
+            mode = mode,
+            bytes = Raw::from_bytes(&read)
+        ))
+    })
+}
+
+impl Drop for StagedData {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
 
 /// The model text a bind re-parses: read when the model declares something
 /// data-derived (`bind_design`) and on every from-fit bind that holds a
@@ -2119,11 +2257,14 @@ fn level_contrast_from_token(token: &str) -> std::result::Result<LevelContrast, 
 /// `sir_ci_theta` entries, a sum-to-zero dependent level's the delta-method
 /// standard error and the percentile interval of the negated sum. NA for a
 /// `ref` reference level, for every level without a covariance (`se`) or
-/// without kept SIR draws (`sir_lo`, `sir_hi`). Zero rows for a model with no
-/// level block.
+/// without kept SIR draws (`sir_lo`, `sir_hi`). `profiled` is TRUE on every
+/// level of a block the fit solved for rather than searched (ferx-core #1065),
+/// read from the fit's `profiled_blocks`. Zero rows for a model with no level
+/// block.
 fn level_bindings_to_r(
     model: &CompiledModel,
     bindings: &LevelBindings,
+    profiled_blocks: &[String],
     theta_names: &[String],
     theta: &[f64],
     covariance: Option<&DMatrix<f64>>,
@@ -2158,6 +2299,7 @@ fn level_bindings_to_r(
     let mut label: Vec<String> = Vec::new();
     let mut group: Vec<Option<i32>> = Vec::new();
     let mut contrast: Vec<String> = Vec::new();
+    let mut profiled: Vec<bool> = Vec::new();
     let mut theta_name: Vec<Option<String>> = Vec::new();
     let mut value: Vec<f64> = Vec::new();
     let mut se: Vec<Option<f64>> = Vec::new();
@@ -2180,6 +2322,7 @@ fn level_bindings_to_r(
             label.push(l.clone());
             group.push(b.groups.get(i).map(|g| *g as i32));
             contrast.push(level_contrast_token(b.contrast).to_string());
+            profiled.push(profiled_blocks.iter().any(|p| p == name));
             theta_name.push(theta_names.contains(&tn).then_some(tn));
             value.push(v.value);
             se.push(v.se);
@@ -2195,6 +2338,7 @@ fn level_bindings_to_r(
             ("label", label.into()),
             ("group", group.into()),
             ("contrast", contrast.into()),
+            ("profiled", profiled.into()),
             ("theta_name", theta_name.into()),
             ("value", value.into()),
             ("se", se.into()),
@@ -2279,6 +2423,7 @@ fn ferx_rust_theta_levels_from_fit(
         level_bindings_to_r(
             &parsed.model,
             &fitted.levels,
+            &profiled_blocks_from_r(&fit_bindings)?,
             &theta_names,
             &theta,
             covariance.as_ref(),
@@ -2345,6 +2490,18 @@ fn ferx_rust_fitrx_engine_resave(path: &str, out_path: &str) -> Robj {
             n,
         ))
     })
+}
+
+/// The fit's `profiled_blocks` (ferx-core #1065) from the `fit_bindings` list
+/// `.ferx_fit_binding_args()` builds; empty when the entry is absent.
+fn profiled_blocks_from_r(r: &List) -> std::result::Result<Vec<String>, String> {
+    match r.iter().find(|(k, _)| *k == "profiled_blocks") {
+        None => Ok(Vec::new()),
+        Some((_, v)) if v.is_null() => Ok(Vec::new()),
+        Some((_, v)) => v.as_string_vector().ok_or_else(|| {
+            "internal: `fit_bindings$profiled_blocks` is not a character vector".to_string()
+        }),
+    }
 }
 
 /// An R integer as R prints it: `NA_integer_` arrives as `i32::MIN`.
@@ -2748,15 +2905,22 @@ fn residual_correlation_label(sigma_names: &[String], c: &ResidualCorrelation) -
 // the twin of `omega_iov_from_fit`. The (sigma_i, sigma_j) pairing is
 // structural and comes from the parsed model; the value is fitted, so taking it
 // from the model would rebuild the fit at its declared *initial* correlation
-// after the optimizer moved it. `rho` is `fit$residual_correlations$rho` in
-// declaration order. An empty `rho` is accepted only when every correlation is
-// `FIX` - its fitted value is the declared one by construction; an estimated
+// after the optimizer moved it. `rho` is `fit$residual_correlations$rho` and
+// `pairs` the same rows' 1-based `(sigma_i, sigma_j)`, flattened. Each row is
+// matched to the declared correlation with that pair, in either orientation,
+// never by position: a reordered frame (sorted by name, say) would otherwise
+// rebuild each block at another block's rho (#486). A row whose pair the model
+// does not declare, a pair given twice and a declared pair with no row are
+// refused. An empty `rho` is accepted only when every correlation is `FIX` -
+// its fitted value is the declared one by construction; an estimated
 // correlation without a fitted value is refused (#480), as is a value outside
-// (-1, 1). An empty FIX-flag vector alongside correlations counts as free, as
-// in core's own validation. Errors carry no prefix; each caller adds its own.
+// (-1, 1). A FIX-flag vector whose length does not match the correlations
+// counts as all free, as in core's own validation and in `fit_result_to_list`.
+// Errors carry no prefix; each caller adds its own.
 fn residual_correlations_from_fit(
     model: &CompiledModel,
     rho: &[f64],
+    pairs: &[i32],
 ) -> std::result::Result<Vec<ResidualCorrelation>, String> {
     let p = &model.default_params;
     let mut rc = p.residual_correlations.clone();
@@ -2799,12 +2963,59 @@ fn residual_correlations_from_fit(
     }
     if rho.len() != rc.len() {
         return Err(format!(
-            "residual_rho length {} does not match the model's {} residual correlation(s)",
+            "fit$residual_correlations has {} row(s), but the model declares {} block_sigma \
+             correlation(s)",
             rho.len(),
             rc.len()
         ));
     }
-    for (c, &r) in rc.iter_mut().zip(rho.iter()) {
+    if pairs.len() != 2 * rho.len() {
+        return Err(
+            "fit$residual_correlations needs integer sigma_i and sigma_j columns, one pair \
+             per rho, to match each row to the model's block_sigma correlation"
+                .to_string(),
+        );
+    }
+    // Model index of each row; `None` until a row claims it, to catch a pair
+    // given twice.
+    let mut row_of: Vec<Option<usize>> = vec![None; rc.len()];
+    for (row, (pair, &r)) in pairs.chunks_exact(2).zip(rho.iter()).enumerate() {
+        let (a, b) = (pair[0], pair[1]);
+        // R's NA_integer_ crosses as i32::MIN, below every valid index.
+        let shown = |v: i32| {
+            if v == i32::MIN {
+                "NA".to_string()
+            } else {
+                v.to_string()
+            }
+        };
+        let k = rc
+            .iter()
+            .position(|c| {
+                let (i, j) = (c.sigma_i as i64 + 1, c.sigma_j as i64 + 1);
+                (i, j) == (a as i64, b as i64) || (j, i) == (a as i64, b as i64)
+            })
+            .ok_or_else(|| {
+                let declared: Vec<String> = rc.iter().map(&label).collect();
+                format!(
+                    "fit$residual_correlations row {} pairs sigma_i = {}, sigma_j = {}, which \
+                     the model does not declare as a block_sigma correlation (it declares {})",
+                    row + 1,
+                    shown(a),
+                    shown(b),
+                    declared.join(", ")
+                )
+            })?;
+        if let Some(first) = row_of[k] {
+            return Err(format!(
+                "fit$residual_correlations rows {} and {} both give the block_sigma \
+                 correlation {}",
+                first + 1,
+                row + 1,
+                label(&rc[k])
+            ));
+        }
+        row_of[k] = Some(row);
         if !r.is_finite() || r.abs() >= 1.0 {
             // R's NA_real_ crosses the FFI as a NaN payload; name it as R does.
             let shown = if CanBeNA::is_na(&r) {
@@ -2816,16 +3027,25 @@ fn residual_correlations_from_fit(
                 "the block_sigma correlation {} has rho = {shown} in \
                  fit$residual_correlations$rho, which must be finite and strictly \
                  between -1 and 1",
-                label(c)
+                label(&rc[k])
             ));
         }
-        c.rho = r;
+        rc[k].rho = r;
+    }
+    // Equal lengths, every row declared and none repeated leave no declared
+    // pair without a row; kept so a later change to the checks above cannot
+    // silently leave one at its declared value.
+    if let Some(k) = row_of.iter().position(Option::is_none) {
+        return Err(format!(
+            "fit$residual_correlations has no row for the block_sigma correlation {}",
+            label(&rc[k])
+        ));
     }
     Ok(rc)
 }
 
-// `residual_rho` carries the fitted `block_sigma` correlations, in the order
-// the model declares them; see `residual_correlations_from_fit`.
+// `residual_rho` / `residual_rho_pairs` carry the fitted `block_sigma`
+// correlations and their sigma pairs; see `residual_correlations_from_fit`.
 fn params_from_fit(
     model: &CompiledModel,
     theta: &[f64],
@@ -2835,6 +3055,7 @@ fn params_from_fit(
     omega_iov_flat: &[f64],
     omega_iov_dim: i32,
     residual_rho: &[f64],
+    residual_rho_pairs: &[i32],
 ) -> std::result::Result<ModelParameters, String> {
     let template = &model.default_params;
 
@@ -2904,8 +3125,12 @@ fn params_from_fit(
         // into the parameter set. The pairing comes from the parsed model and
         // the value from the fit; a free correlation the fit carries no value
         // for is refused rather than rebuilt at its declared initial value.
-        residual_correlations: residual_correlations_from_fit(model, residual_rho)
-            .map_err(|e| format!("Fit error: {e}"))?,
+        residual_correlations: residual_correlations_from_fit(
+            model,
+            residual_rho,
+            residual_rho_pairs,
+        )
+        .map_err(|e| format!("Fit error: {e}"))?,
         residual_correlation_fixed: template.residual_correlation_fixed.clone(),
     })
 }
@@ -2931,6 +3156,7 @@ fn build_fit_result_for_uncertainty(
     sir_resamples_n: i32,
     sir_resamples_dim: i32,
     residual_rho: &[f64],
+    residual_rho_pairs: &[i32],
 ) -> std::result::Result<FitResult, String> {
     let template = &model.default_params;
     if theta.len() != template.theta.len() {
@@ -3017,7 +3243,7 @@ fn build_fit_result_for_uncertainty(
         omega_iov_from_fit(model, omega_iov_flat, omega_iov_dim)?.map(|m| m.matrix),
         covariance_matrix,
         sir_resamples_packed,
-        residual_correlations_from_fit(model, residual_rho)
+        residual_correlations_from_fit(model, residual_rho, residual_rho_pairs)
             .map_err(|e| format!("Uncertainty error: {e}"))?,
     ))
 }
@@ -3148,8 +3374,8 @@ fn default_fit_result(
         // ferx-core #2021: set only by a fit that ran the exact linear
         // (matrix exponential) path; this one was synthesized, not run.
         ode_linear_exact: false,
-        // ferx-core #1065: no fit of a `profile` block exists yet (E_PROFILE_SCOPE until
-        // the profile solve lands), so a skeleton rebuilt from one carries none.
+        // ferx-core #1065: the uncertainty draws do not read which blocks were
+        // profiled; the fit's level values are already in `theta`.
         profiled_blocks: Vec::new(),
         n_threads_used: 1,
         nlopt_missing_algorithms: Vec::new(),
@@ -3635,14 +3861,16 @@ fn fit_result_to_list(
         .map(|c| c.sigma_j as i32 + 1)
         .collect();
     let rho_values: Vec<f64> = result.residual_correlations.iter().map(|c| c.rho).collect();
-    // A pre-#847 fit recorded no FIX flags because every correlation was fixed
-    // by construction; that is what an empty vector means, so fill it as such.
+    // A FIX-flag vector whose length does not match the correlations (only a
+    // hand-built FitResult has one; the engine always fills it) reads as all
+    // free, as in core's validation and `residual_correlations_from_fit`, so
+    // the fit object and the from-fit paths agree on what was estimated (#486).
     let rho_fixed: Vec<bool> = if result.residual_correlation_fixed.len()
         == result.residual_correlations.len()
     {
         result.residual_correlation_fixed.clone()
     } else {
-        vec![true; result.residual_correlations.len()]
+        vec![false; result.residual_correlations.len()]
     };
     let se_rho: Vec<f64> = result
         .se_residual_correlations
@@ -4194,6 +4422,7 @@ fn fit_result_to_list(
     let theta_levels = level_bindings_to_r(
         model,
         &bindings.levels,
+        &result.profiled_blocks,
         &theta_names,
         &result.theta,
         result.covariance_matrix.as_ref(),
@@ -4226,6 +4455,9 @@ fn fit_result_to_list(
         n_iterations = result.n_iterations as i32,
         theta = theta_values,
         theta_levels = theta_levels,
+        // The level blocks the fit solved for rather than searched (ferx-core
+        // #1065), in declaration order; empty for a fit without one.
+        profiled_blocks = result.profiled_blocks.clone(),
         // The `[covariate_model]` statistics the fit was bound with (ferx-r
         // #412); empty for a model that states none symbolically.
         covariate_stats = covariate_stats_to_r(&bindings.covariate_stats),
@@ -5000,6 +5232,21 @@ fn ferx_rust_sha256_text(text: &str) -> String {
     entry(move || Ok(ferx_core::io::hash::sha256_bytes(text.as_bytes())))
 }
 
+/// SHA-256 of a raw vector, as the lowercase hex digest `data_hash` is written
+/// in (`ferx_core::io::hash::sha256_bytes`).
+///
+/// `ferx_save_fit(include_data = TRUE)` reads the data file once and checks
+/// those bytes against `fit$data_hash` before writing them as the bundle's
+/// `data.csv` (ferx-r #585). The bytes need not be UTF-8.
+///
+/// @param bytes A raw vector.
+/// @return The 64-character hex digest.
+/// @export
+#[extendr]
+fn ferx_rust_sha256_raw(bytes: Raw) -> String {
+    entry(move || Ok(ferx_core::io::hash::sha256_bytes(bytes.as_slice())))
+}
+
 /// Every estimation method's `.fitrx` token and display label (ferx-r #508):
 /// the label is ferx-core's `EstimationMethod::label()`, the token what core's
 /// `.fitrx` writer stores for that method. `ferx_load_fit()` maps the stored
@@ -5083,13 +5330,21 @@ fn ferx_rust_compact_theta_blocks(theta_names: Vec<String>) -> List {
 /// (a scalar theta name cannot contain a bracket). `n` counts the block's
 /// thetas, the names given: a dependent `sum_to_zero` level is not one. It
 /// says nothing about which are FIX - a whole block can be (`(init, lower,
-/// upper, FIX)`), so it does not say "free" (#560 review, finding 2).
+/// upper, FIX)`), so it does not say "free" (#560 review, finding 2). A block
+/// in `profiled_blocks` (ferx-core #1065) reads `(n coefficients, profiled)`:
+/// its levels were solved for, not searched, and a block under the compact
+/// threshold has no THETA BLOCKS line to say so.
 ///
 /// @param theta_names Character, the fit's theta names in order.
+/// @param profiled_blocks Character, the fit's `profiled_blocks`; empty for a
+///   model without a fit.
 /// @return Character, one label per scalar theta or block.
 /// @export
 #[extendr]
-fn ferx_rust_structural_theta_labels(theta_names: Vec<String>) -> Vec<String> {
+fn ferx_rust_structural_theta_labels(
+    theta_names: Vec<String>,
+    profiled_blocks: Vec<String>,
+) -> Vec<String> {
     entry(move || {
         let block_of = |n: &str| -> Option<(String, String)> {
             n.strip_suffix(']')
@@ -5116,10 +5371,15 @@ fn ferx_rust_structural_theta_labels(theta_names: Vec<String>) -> Vec<String> {
                 .filter_map(|part| part.split_once('=').map(|(k, _)| k.trim()))
                 .collect();
             let noun = if n == 1 { "coefficient" } else { "coefficients" };
-            out.push(if keys.is_empty() {
-                format!("{block} ({n} {noun})")
+            let profiled = if profiled_blocks.contains(&block) {
+                ", profiled"
             } else {
-                format!("{block}[{}] ({n} {noun})", keys.join(", "))
+                ""
+            };
+            out.push(if keys.is_empty() {
+                format!("{block} ({n} {noun}{profiled})")
+            } else {
+                format!("{block}[{}] ({n} {noun}{profiled})", keys.join(", "))
             });
         }
         Ok(out)
@@ -5824,6 +6084,7 @@ struct FitSkeletonInputs<'a> {
     omega_iov_flat: &'a [f64],
     omega_iov_dim: i32,
     residual_rho: &'a [f64],
+    residual_rho_pairs: &'a [i32],
     eta_hats_flat: &'a [f64],
     subject_ids: &'a [String],
     /// `fit$iov_occasion`; "" when the fit carries none.
@@ -6606,8 +6867,9 @@ fn fit_skeleton(
     // both steps work at the fitted point, so the declared rho would centre
     // them on the wrong parameters. A free correlation without a fitted value
     // is refused, not filled from the model.
-    let residual_correlations_resolved = residual_correlations_from_fit(model, x.residual_rho)
-        .map_err(|e| format!("{entry_point}: {e}"))?;
+    let residual_correlations_resolved =
+        residual_correlations_from_fit(model, x.residual_rho, x.residual_rho_pairs)
+            .map_err(|e| format!("{entry_point}: {e}"))?;
     let (method, method_chain) = skeleton_methods(entry_point, x)?;
     let ebe_kappas = ebe_kappas_from_r(entry_point, x, model.n_kappa)?;
 
@@ -6748,8 +7010,9 @@ fn fit_skeleton(
         // ferx-core #2021: set only by a fit that ran the exact linear
         // (matrix exponential) path; this one was synthesized, not run.
         ode_linear_exact: false,
-        // ferx-core #1065: no fit of a `profile` block exists yet (E_PROFILE_SCOPE until
-        // the profile solve lands), so a skeleton rebuilt from one carries none.
+        // ferx-core #1065: `ferx_rust_sir` / `ferx_rust_covariance` set the fit's own
+        // record on their skeleton; the engine's covariance replay of a profiled
+        // block reads the model's `profile` declarations, not this field.
         profiled_blocks: Vec::new(),
         n_threads_used: 1,
         nlopt_missing_algorithms: Vec::new(),
@@ -6881,8 +7144,11 @@ fn fit_skeleton(
 /// @param omega_iov_dim Dimension of the IOV kappa covariance; 0 when no IOV.
 /// @param cov_matrix_flat Row-major flattened parameter covariance matrix.
 /// @param cov_matrix_dim Dimension of the covariance matrix.
-/// @param residual_rho Fitted `block_sigma` residual correlations, in model
-///   declaration order (empty when the model declares none).
+/// @param residual_rho Fitted `block_sigma` residual correlations (empty when
+///   the model declares none), one per row of `fit$residual_correlations`
+/// @param residual_rho_pairs The 1-based `(sigma_i, sigma_j)` pair of each
+///   entry of `residual_rho`, flattened `i1, j1, i2, j2, ...`; matched against
+///   the model's declared pairs, so the row order does not matter.
 /// @param eta_hats_flat Row-major flattened per-subject EBE etas (one row per
 ///   entry of `subject_ids`, n_eta columns).
 /// @param subject_ids The fit's subject IDs, verbatim and in fit order. The
@@ -6940,6 +7206,7 @@ fn ferx_rust_sir(
     omega_iov_flat: Vec<f64>,
     omega_iov_dim: i32,
     residual_rho: Vec<f64>,
+    residual_rho_pairs: Vec<i32>,
     cov_matrix_flat: Vec<f64>,
     cov_matrix_dim: i32,
     eta_hats_flat: Vec<f64>,
@@ -7000,6 +7267,7 @@ fn ferx_rust_sir(
             omega_iov_flat: &omega_iov_flat,
             omega_iov_dim,
             residual_rho: &residual_rho,
+            residual_rho_pairs: &residual_rho_pairs,
             eta_hats_flat: &eta_hats_flat,
             subject_ids: &subject_ids,
             iov_occasion,
@@ -7014,7 +7282,8 @@ fn ferx_rust_sir(
             ebe_kappas_flat: &ebe_kappas_flat,
             ebe_kappa_ids: &ebe_kappa_ids,
         };
-        let fit = fit_skeleton("ferx_sir", model, &inputs, Some(cov_mat))?;
+        let mut fit = fit_skeleton("ferx_sir", model, &inputs, Some(cov_mat))?;
+        fit.profiled_blocks = profiled_blocks_from_r(&fit_bindings)?;
 
         // Every SIR and scoring setting comes from the skeleton's records
         // (ferx-r #472): default options defer to them.
@@ -7056,6 +7325,7 @@ fn ferx_rust_sir(
         let theta_levels = level_bindings_to_r(
             model,
             &fitted.levels,
+            &fit.profiled_blocks,
             &new_fit.theta_names,
             &new_fit.theta,
             new_fit.covariance_matrix.as_ref(),
@@ -7122,8 +7392,11 @@ fn ferx_rust_sir(
 /// @param sigma Vector of sigma point estimates.
 /// @param omega_iov_flat Row-major flattened IOV kappa omega matrix; empty when no IOV.
 /// @param omega_iov_dim Dimension of the IOV omega matrix; 0 when no IOV.
-/// @param residual_rho Fitted `block_sigma` residual correlations, in model
-///   declaration order (empty when the model declares none).
+/// @param residual_rho Fitted `block_sigma` residual correlations (empty when
+///   the model declares none), one per row of `fit$residual_correlations`
+/// @param residual_rho_pairs The 1-based `(sigma_i, sigma_j)` pair of each
+///   entry of `residual_rho`, flattened `i1, j1, i2, j2, ...`; matched against
+///   the model's declared pairs, so the row order does not matter.
 /// @param eta_hats_flat Row-major flattened per-subject EBE etas (one row per
 ///   entry of `subject_ids`, n_eta columns).
 /// @param subject_ids The fit's subject IDs, verbatim and in fit order. The
@@ -7174,6 +7447,7 @@ fn ferx_rust_covariance(
     omega_iov_flat: Vec<f64>,
     omega_iov_dim: i32,
     residual_rho: Vec<f64>,
+    residual_rho_pairs: Vec<i32>,
     eta_hats_flat: Vec<f64>,
     subject_ids: Vec<String>,
     iov_occasion: &str,
@@ -7230,6 +7504,7 @@ fn ferx_rust_covariance(
             omega_iov_flat: &omega_iov_flat,
             omega_iov_dim,
             residual_rho: &residual_rho,
+            residual_rho_pairs: &residual_rho_pairs,
             eta_hats_flat: &eta_hats_flat,
             subject_ids: &subject_ids,
             iov_occasion,
@@ -7244,7 +7519,8 @@ fn ferx_rust_covariance(
             ebe_kappas_flat: &ebe_kappas_flat,
             ebe_kappa_ids: &ebe_kappa_ids,
         };
-        let fit = fit_skeleton("ferx_covariance", model, &inputs, None)?;
+        let mut fit = fit_skeleton("ferx_covariance", model, &inputs, None)?;
+        fit.profiled_blocks = profiled_blocks_from_r(&fit_bindings)?;
 
         let mut opts = FitOptions::default();
         // run_covariance_step is ignored by run_covariance (calling it *is* the
@@ -7289,6 +7565,7 @@ fn ferx_rust_covariance(
         let theta_levels = level_bindings_to_r(
             model,
             &fitted.levels,
+            &fit.profiled_blocks,
             &new_fit.theta_names,
             &new_fit.theta,
             new_fit.covariance_matrix.as_ref(),
@@ -7312,11 +7589,24 @@ fn ferx_rust_covariance(
             // (ferx-core #1177) instead of keeping the pre-step NA.
             max_abs_correlation =
                 ferx_core::model_selection::max_abs_correlation(&new_fit).unwrap_or(f64::NAN),
-            // The `block_sigma` correlation SEs come out of the same step.
+            // The `block_sigma` correlation SEs come out of the same step, in
+            // the model's declaration order; their 1-based sigma pairs ship
+            // alongside so R writes each SE onto its own row of
+            // fit$residual_correlations, whatever that frame's order (#486).
             se_residual_correlation = new_fit
                 .se_residual_correlations
                 .clone()
                 .unwrap_or_default(),
+            se_residual_correlation_i = new_fit
+                .residual_correlations
+                .iter()
+                .map(|c| c.sigma_i as i32 + 1)
+                .collect::<Vec<i32>>(),
+            se_residual_correlation_j = new_fit
+                .residual_correlations
+                .iter()
+                .map(|c| c.sigma_j as i32 + 1)
+                .collect::<Vec<i32>>(),
             theta_levels = theta_levels,
             warnings = new_fit.warnings.clone()
         )
@@ -12040,6 +12330,8 @@ extendr_module! {
     fn ferx_rust_test_panic;
     fn ferx_rust_known_blocks;
     fn ferx_rust_sha256_text;
+    fn ferx_rust_sha256_raw;
+    fn ferx_rust_stage_data_probe;
     fn ferx_rust_method_labels;
     fn ferx_rust_compact_theta_blocks;
     fn ferx_rust_kappa_rows;
