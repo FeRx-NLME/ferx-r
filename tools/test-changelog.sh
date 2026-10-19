@@ -385,6 +385,20 @@ hand_release "$d" "$(printf '## Breaking changes\n\n- **Pending fix** (#10).')"
 expect "require fails a fix filed under Breaking changes" "$d" 1 \
   "changelog.d/10.fix.md" require main
 
+# The development heading turned into a "release" of the development version:
+# DESCRIPTION untouched, so heading and Version agree, but `assemble` would
+# never write it and the entries would sit under a version that is not released.
+d=$(fixture req-dev-pseudo-release)
+printf 'Package: ferx\nVersion: 0.4.0.9000\n' >"$d/DESCRIPTION"
+commit "$d"
+branch "$d"
+git -C "$d" rm -q changelog.d/10.fix.md
+{ printf '# ferx 0.4.0.9000\n\n## Bug fixes\n\n- **Pending fix** (#10).\n\n'; sed '1,2d' "$d/NEWS.md"; } >"$d/NEWS.tmp"
+mv "$d/NEWS.tmp" "$d/NEWS.md"
+commit "$d"
+expect "require fails a development version posing as a release" "$d" 1 \
+  "adds no release section" require main
+
 d=$(fixture req-release-duplicate)
 cp "$d/changelog.d/10.fix.md" "$d/changelog.d/10-2.fix.md"
 commit "$d"

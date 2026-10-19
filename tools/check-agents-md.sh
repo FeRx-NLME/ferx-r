@@ -16,6 +16,9 @@
 #   - no tracked file names the old file, in any letter case, plain or
 #     regex-escaped (the spelling .Rbuildignore used). NEWS.md is exempt: it is
 #     history, and the entry recording the rename names the old file by necessity.
+#     So are the pending NEWS fragments, changelog.d/<N>.<category>.md (#600):
+#     that entry waits there until the next release assembles it into NEWS.md.
+#     changelog.d/README.md is guidance, not history, and is still scanned.
 #
 # Tracked files, not a directory walk: a walk would also see untracked and
 # gitignored files that exist on one machine only (.claude/, local notes).
@@ -37,6 +40,9 @@ LEGACY="CLAUDE"".md"
 # held it, and a fixed-string match on the plain name does not see it.
 LEGACY_ESCAPED="CLAUDE""\\.md"
 HISTORY=NEWS.md
+# A glob pathspec, where `*` stops at `/`; digits first, so changelog.d/README.md
+# stays in the scan.
+PENDING_HISTORY='changelog.d/[0-9]*.md'
 status=0
 # Command substitution drops NUL bytes, so the -z listings go through files.
 SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/check-agents-md.XXXXXX")"
@@ -100,7 +106,7 @@ done < "$SCRATCH/tracked"
 # Contents. `-z -n -o` prints `path NUL line NUL match LF` per match, the path
 # verbatim; `-o` keeps a binary line's own NULs out of the record.
 git_to "$SCRATCH/hits" grep -z -n -o -i -a -F --no-color -e "$LEGACY" -e "$LEGACY_ESCAPED" \
-  -- . ":(exclude)$HISTORY"
+  -- . ":(exclude)$HISTORY" ":(exclude,glob)$PENDING_HISTORY"
 seen=""
 while IFS= read -r -d '' file && IFS= read -r -d '' line && IFS= read -r match; do
   # Two matches on one line are one finding.

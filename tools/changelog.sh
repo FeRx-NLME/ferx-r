@@ -357,6 +357,13 @@ cmd_preview() {
   render_sections
 }
 
+# 0 if $1 is a release version: X.Y.Z, no leading zeros - not a development
+# X.Y.Z.9000. Single-line input only (the caller checks); grep matches per line.
+is_release_version() {
+  local num='(0|[1-9][0-9]*)'
+  printf '%s' "$1" | grep -Eq "^$num\\.$num\\.$num\$"
+}
+
 cmd_assemble() {
   [ $# -eq 1 ] || die "assemble: usage: tools/changelog.sh assemble <version>"
   local version="${1#v}"
@@ -365,8 +372,7 @@ cmd_assemble() {
   case "$version" in
     *$'\n'* | *$'\r'*) die "assemble: the version must be single-line" ;;
   esac
-  local num='(0|[1-9][0-9]*)'
-  printf '%s' "$version" | grep -Eq "^$num\\.$num\\.$num\$" ||
+  is_release_version "$version" ||
     die "assemble: '$version' is not a release version (X.Y.Z, no leading zeros)"
 
   # The release PR sets DESCRIPTION's Version and assembles NEWS.md together; a
@@ -514,17 +520,23 @@ fragment_assembled() {
   stem="${stem%.md}"
   is_category "${stem##*.}" || return 1
   heading="## $(heading_of "${stem##*.}")"
-  # Listed, not globbed: the caller walks its deletions under `set -f`.
-  for h in $(ls "$4" | grep '\.h$' | sort -n); do
-    h="$4/$h"
+  # The caller walks its deletions under `set -f`; the glob needs it lifted, and
+  # put back on every way out.
+  local noglob=0 found=1
+  case $- in *f*) noglob=1 ;; esac
+  set +f
+  for h in "$4"/*.h; do
+    [ -f "$h" ] || continue
     b="${h%.h}.b"
     [ "$(cat "$h")" = "$heading" ] || continue
     if [ "$(cat "$b")" = "$body" ]; then
       rm -f "$h" "$b"
-      return 0
+      found=0
+      break
     fi
   done
-  return 1
+  [ "$noglob" -eq 0 ] || set -f
+  return "$found"
 }
 
 # Split the release section on stdin into its entries, one pair of files per
@@ -570,6 +582,9 @@ new_release_section() {
   heading="$(sed -n "${first}p" "$news")"
   printf '%s' "$heading" | grep -Eq "$DEV_RE" && return 0
   version="${heading#\# ferx }"
+  # The version `assemble` would accept, nothing looser: a `# ferx 0.4.0.9000`
+  # heading matching an unbumped DESCRIPTION is no release.
+  is_release_version "$version" || return 0
   [ -f "$description" ] || return 0
   described="$(sed -n 's/^Version:[[:space:]]*//p' "$description" | tr -d '[:space:]')"
   [ "$version" = "$described" ] || return 0
