@@ -124,7 +124,7 @@ Section names are **closed-world** in the engine (ferx-core #1040): a header it 
 - `inst/examples/ex_<name>.R` - a runnable end-to-end script
 - the `\item{<name>}{...}` entry in `ferx_example()`'s `@details` (in `R/example.R`)
 - the regenerated `man/ferx_example.Rd` (run `roxygen2::roxygenize()`)
-- a `NEWS.md` entry
+- a NEWS fragment, `changelog.d/<N>.feature.md` (see "NEWS: add a fragment" below)
 
 Before treating example work as done:
 
@@ -192,3 +192,16 @@ Or from the shell: `python3 -c "import os; [print(f) for f in __import__('glob')
 ## Pull Requests
 
 When creating a PR in this repo, always read `.github/PULL_REQUEST_TEMPLATE.md` and fill every section before calling `gh pr create`.
+
+## NEWS: add a fragment, never edit `NEWS.md`
+
+**In the same PR as any user-facing change, add a fragment under `changelog.d/`** instead of a bullet in `NEWS.md` (#600, the convention ferx-core adopted in its #1545). Every PR used to append under the development heading at the same insertion point, so merging one green PR made every other open one conflict on `NEWS.md` - each then needed a rebase, a conflict resolution and a fresh CI run for nothing but a changelog line. Separate files cannot conflict.
+
+The file is `changelog.d/<N>.<category>.md`: `<N>` the issue or PR number (`-2`, `-3`, ... for a second entry on one number), `<category>` one of `breaking`, `feature`, `fix`, `docs`, `internal` - the `NEWS.md` sections Breaking changes, New features, Bug fixes, Documentation, Internal. Its body is exactly one bullet as it should read in `NEWS.md`: user-facing language, the `#NN` reference, continuation lines indented by two spaces. `changelog.d/README.md` has an example.
+
+Two gates:
+
+- `tools/changelog.sh check` (CI step in `R-CMD-check`) validates every fragment's name and shape, and fails if anything is written under `# ferx X.Y.Z.9000 (development version)` - that heading stays empty between releases.
+- The `NEWS fragment` workflow (`.github/workflows/changelog.yml`) fails a PR that changes `R/`, `src/` (the glue and the ferx-core pin in `Cargo.lock`), `inst/`, `NAMESPACE` or `DESCRIPTION` without adding a fragment. A PR that is not user-facing (refactor, tests, CI) takes the **`no-changelog`** label instead. The same workflow fails a PR that deletes or renames another PR's pending fragment, label or not; rewording one is fine.
+
+At release time only: set `DESCRIPTION`'s `Version`, then `tools/changelog.sh assemble <version>` replaces the development heading with `# ferx <version>` and the fragments under their sections, newest first, and deletes them; `tools/changelog.sh preview` shows what is pending. The post-release bump to `X.Y.Z.9000` adds a new, empty development heading. `tools/test-changelog.sh` (also run in CI) drives the script over scratch trees.

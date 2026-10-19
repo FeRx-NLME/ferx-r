@@ -76,7 +76,7 @@
 ## Docs
 - [ ] `roxygen2` docs updated (`devtools::document()` run)
 - [ ] Vignette updated if relevant
-- [ ] `NEWS.md` entry added
+- [ ] NEWS fragment added (`changelog.d/<N>.<category>.md`, see `changelog.d/README.md`), or the `no-changelog` label for a change that is not user-facing - never edit `NEWS.md` itself
 
 ## Checklist
 - [ ] `DESCRIPTION` version bumped if warranted
