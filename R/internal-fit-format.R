@@ -3,10 +3,14 @@
 # A theta block is named once with its coefficient count, whatever its size
 # (#538): the glue's rule, shared by print.ferx_fit() and print(summary(fit)).
 # The names arrive as a list after a .fitrx round trip; flatten first.
-.ferx_format_structural <- function(ms) {
+# `profiled_blocks` is the fit's (ferx-core #1065), marking those blocks
+# `profiled`; empty for a model that has not been fitted.
+.ferx_format_structural <- function(ms, profiled_blocks = character()) {
   theta_names <- as.character(unlist(ms$theta_names, use.names = FALSE))
   theta_str <- if (length(theta_names) > 0L)
-    paste(ferx_rust_structural_theta_labels(theta_names), collapse = ", ")
+    paste(ferx_rust_structural_theta_labels(
+      theta_names, as.character(profiled_blocks %||% character())
+    ), collapse = ", ")
   else
     NULL
   if (!is.null(ms$model_type) && !is.null(theta_str))
@@ -272,8 +276,8 @@
 
 # Print the four structural detail lines (Structural / IIV / IOV / Residual).
 # The caller is responsible for any preceding header line.
-.ferx_print_structure <- function(ms) {
-  cat(sprintf("  Structural:  %s\n", .ferx_format_structural(ms)))
+.ferx_print_structure <- function(ms, profiled_blocks = character()) {
+  cat(sprintf("  Structural:  %s\n", .ferx_format_structural(ms, profiled_blocks)))
   cat(sprintf("  IIV:         %s\n",
     if (length(ms$iiv) > 0L) paste(ms$iiv, collapse = ", ") else "none"))
   iov_lbl <- .ferx_iov_labels(ms)
@@ -705,8 +709,9 @@
   tl <- result$theta_levels
   result$theta_levels <- .ferx_theta_levels_frame(
     tl$block, tl$index, tl$label, tl$group, tl$contrast, tl$theta_name,
-    tl$value, tl$se, tl$sir_lo, tl$sir_hi
+    tl$value, tl$se, tl$sir_lo, tl$sir_hi, tl$profiled
   )
+  result$profiled_blocks <- as.character(result$profiled_blocks %||% character(0))
   # `[covariate_model]` statistics (#412), through the constructor
   # `ferx_load_fit()` uses. Zero rows for a model with no symbolic centre.
   cs <- result$covariate_stats

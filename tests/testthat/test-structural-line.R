@@ -4,7 +4,9 @@
 # the THETA table, not this line, is where ferx-core's
 # THETA_BLOCK_COMPACT_MIN decides between per-level rows and a summary.
 
-structural_labels <- getFromNamespace("ferx_rust_structural_theta_labels", "ferx")
+structural_labels <- function(theta_names, profiled_blocks = character()) {
+  getFromNamespace("ferx_rust_structural_theta_labels", "ferx")(theta_names, profiled_blocks)
+}
 
 # The theta part of each line: the text inside `compartment-free  (...)`.
 structural_from_print <- function(fit) {

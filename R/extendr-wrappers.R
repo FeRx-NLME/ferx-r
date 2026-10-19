@@ -171,8 +171,8 @@ ferx_rust_fitrx_omega_rows <- function(path) {
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_structural_theta_labels <- function(theta_names) {
-  .Call("wrap__ferx_rust_structural_theta_labels", theta_names)
+ferx_rust_structural_theta_labels <- function(theta_names, profiled_blocks) {
+  .Call("wrap__ferx_rust_structural_theta_labels", theta_names, profiled_blocks)
 }
 
 #' @title Internal Rust backend binding
