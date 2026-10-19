@@ -351,12 +351,19 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
 # keeps SIR's diagnostics -- which mention the covariance step in passing -- out
 # of this family, where they would be told to re-run with covariance = FALSE,
 # the one setting that removes the matrix SIR needs.
+#
+# `convergence` is admitted on the same anchor. ferx-core's classifier tests
+# "did not converge" ahead of "covariance step failed", so the profiled
+# covariance step's "Covariance step failed: the profile solve did not converge
+# at the estimates" is filed under `convergence` and would otherwise be told to
+# re-fit from new initial values. No optimizer convergence message begins with
+# "Covariance step".
 .ferx_is_covariance_warning <- function(category, message = "") {
   if (category %in% c("covariance_failed", "covariance_regularized",
                       "covariance_step", "covariance")) {
     return(TRUE)
   }
-  category == "general" &&
+  category %in% c("general", "convergence") &&
     grepl("^(\\[[^]]*\\][[:space:]]*)?Covariance step", message)
 }
 
@@ -521,6 +528,102 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
         "S-only covariance cannot be formed. Use an estimator that does not ",
         "invert S: ferx_covariance(fit, covariance_method = \"r\") or ",
         "covariance_method = \"rsr\"."
+      ))
+    }
+    # The covariance step of a fit with a `profile` theta level block
+    # (ferx-core profile.rs, #1065). None of these carries an eigenvalue list,
+    # so without the arms below every one inherited the generic fallback, which
+    # blames identifiability for failures that are about a sparse level, an
+    # overflow, or an estimator the profiled step does not offer.
+    #
+    # Asked for "s" / "rsr" on a profiled fit: nothing ran (#2108).
+    if (grepl("profiled", message, fixed = TRUE) &&
+        grepl("computes `r` only", message, fixed = TRUE)) {
+      return(paste0(
+        "The covariance step did not run: on a fit with a profiled theta ",
+        "level block only covariance_method = \"r\" is available, so nothing ",
+        "was diagnosed about the model. Use ferx_covariance(fit, ",
+        "covariance_method = \"r\")."
+      ))
+    }
+    # Re-profiling the levels at the fit's own estimates failed, so the step
+    # never reached a Hessian. The parenthesis is ferx-core's ProfileFailure:
+    # `Singular` is an unidentified level, `NonFinite` an overflow, and
+    # `NotConverged` / `LineSearch` a solve that ran out of steps.
+    if (grepl("the profile solve did not converge", message, fixed = TRUE)) {
+      why <- if (grepl("(Singular)", message, fixed = TRUE)) {
+        paste0(
+          "The solve found a level the data do not identify. Check ",
+          "fit$theta_levels for sparse levels and merge or remove them."
+        )
+      } else if (grepl("(NonFinite)", message, fixed = TRUE)) {
+        paste0(
+          "The objective was not finite there: check for extreme parameter ",
+          "values and constrain thetas to plausible ranges."
+        )
+      } else {
+        paste0(
+          "Check fit$converged, re-fit if it is FALSE, and re-run ",
+          "ferx_covariance(fit)."
+        )
+      }
+      return(paste0(
+        "The profiled theta level block could not be re-solved at the fit's ",
+        "estimates, so no standard errors were produced. ", why
+      ))
+    }
+    # A level the data do not inform: its conditional curvature is zero, so
+    # no finite-difference step can be sized for it.
+    if (grepl("a profiled level has no curvature", message, fixed = TRUE)) {
+      return(paste0(
+        "A level of the profiled theta level block has no curvature at the ",
+        "estimate, which means no observation informs it. Check ",
+        "fit$theta_levels for a level with no data behind it, and remove it ",
+        "from the data or from the block's levels."
+      ))
+    }
+    # D, the levels' own Hessian, is not positive definite: a level (or a set
+    # of them) is not identified, rather than a structural parameter.
+    if (grepl("in the profiled levels is not positive definite", message,
+              fixed = TRUE)) {
+      return(paste0(
+        "The profiled theta level block's levels are not all identified by ",
+        "the data: one is informed by too few observations, or several are ",
+        "collinear with each other or with a structural parameter. Check ",
+        "fit$theta_levels for sparse levels and merge or remove them."
+      ))
+    }
+    # The Schur complement over the structural parameters, the levels
+    # re-profiled, is not positive definite: a structural parameter is not
+    # identified once the levels are accounted for.
+    if (grepl("the Hessian of the profile objective is not positive definite",
+              message, fixed = TRUE)) {
+      return(paste0(
+        "The Hessian over the structural parameters, with the profiled levels ",
+        "re-solved, is not positive definite, so no standard errors were ",
+        "produced. Check identifiability: a structural parameter may be ",
+        "confounded with the level effects. Consider fixing or removing it."
+      ))
+    }
+    # Non-finite at the estimate itself: overflow, as for the base OFV.
+    if (grepl("the profile objective is not finite at the estimate", message,
+              fixed = TRUE)) {
+      return(paste0(
+        "The objective, with the profiled levels re-solved, is not finite at ",
+        "the estimates: model evaluation overflowed or underflowed. Check for ",
+        "extreme parameter values and constrain thetas to plausible ranges."
+      ))
+    }
+    # Non-finite at a stencil point, over the structural parameters or the
+    # levels: the model overflows near the estimate, not at it.
+    if (grepl("not finite at some finite-difference point", message,
+              fixed = TRUE)) {
+      return(paste0(
+        "The objective is not finite at a finite-difference point near the ",
+        "estimates, so no standard errors were produced: the model overflows ",
+        "close to the optimum. Try a smaller fd_hessian_step ",
+        "(e.g. ferx_fit(..., fd_hessian_step = 0.005)) or tighter bounds on ",
+        "the structural thetas."
       ))
     }
     # Cancelled part-way (`COV_CANCELLED_MSG`). No standard errors, but nothing

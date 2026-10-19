@@ -1330,6 +1330,20 @@
 
 ## Bug fixes
 
+- **The covariance warnings of a profiled theta level block get their own
+  guidance in `ferx_get_warnings()`.** The eight messages
+  ferx-core `00e5b2cc` emits from the profiled `r` covariance step all fell
+  to the generic "Standard errors unavailable. Check identifiability"
+  answer, which is wrong for most of them. Each now gets advice that fits
+  what failed: `covariance_method = "r"` when `"s"` / `"rsr"` was asked for,
+  `fit$theta_levels` for a level the data do not inform (no curvature, or a
+  non-positive-definite level Hessian), overflow advice for a non-finite
+  objective, and a smaller `fd_hessian_step` when only a finite-difference
+  point is non-finite. "Covariance step failed: the profile solve did not
+  converge at the estimates", which ferx-core files under `convergence`,
+  used to be told to re-fit from new initial values; it now reaches the
+  covariance advice, chosen by the reason the solve gives.
+
 - **A derived `iov_occasion = dose | time(...)` rule now reaches
   `ferx_simulate()`, `ferx_predict()`, `ferx_calc_npde()`,
   `ferx_predict_survival()` and `ferx_simulate_with_uncertainty()`.** These
