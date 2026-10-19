@@ -36,6 +36,18 @@
 #'   occasion rule and so takes the model file's. Without one the frame
 #'   carries no such attribute.
 #'
+#' @section Warnings not relayed yet:
+#' Unlike \code{\link{ferx_predict}()}, this function does not yet report the
+#' engine's own findings for the run: parse warnings (an unreferenced theta,
+#' say), data-reader findings (a covariate missing for some subjects, a dose
+#' that never lands), the model/data checks, and the ODE solver diagnostics of
+#' a joint PK-TTE hazard. The occasion note above is the only thing
+#' \code{simulation_warnings} can carry, so a frame without that attribute
+#' does not mean the model and data are clean: \code{\link{ferx_fit}()} on the
+#' same model and data reports these findings. The engine has no
+#' warnings-carrying form of its survival predictor yet (ferx-core #2164);
+#' once it does, these findings come back on the same attribute (\href{https://github.com/FeRx-NLME/ferx-r/issues/433}{#433}).
+#'
 #' @inheritSection ferx_simulate Errors raised by the engine
 #' @inheritSection ferx_simulate Theta level blocks
 #'
