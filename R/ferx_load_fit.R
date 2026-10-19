@@ -237,11 +237,10 @@ ferx_load_fit <- function(path) {
   result$unavailable_theta_levels <- levels$unavailable
 
   # fit.json stores the covariance matrix but not its row names (#417), so
-  # they come from the engine's labels for the model file staged above - the
-  # ones ferx_fit() names the live matrix with - and `cov_fixed` is renamed
-  # to match.
-  result$cov_matrix <- .fitrx_name_cov_matrix(result$cov_matrix,
-                                              result$model_path)
+  # they come from the engine's labels for the model file staged above, laid
+  # out on the level layout just read - the ones ferx_fit() names the live
+  # matrix with - and `cov_fixed` is renamed to match.
+  result$cov_matrix <- .fitrx_name_cov_matrix(result$cov_matrix, result)
   result$cov_fixed <- .ferx_cov_fixed_named(result$cov_fixed,
                                             result$cov_matrix)
 
@@ -1035,17 +1034,23 @@ ferx_load_fit <- function(path) {
 }
 
 # `cov_matrix` named by `ferx_rust_cov_labels()` on the bundle's model file,
+# laid out with the fit's bindings and checked against its `model_hash`,
 # through the helper ferx_fit() names it with. Left unnamed, as a bundle from
-# before #417 always loaded, when there is no model file to read or the
-# engine cannot parse it or lay out a matrix of this size.
-.fitrx_name_cov_matrix <- function(cov, model_path) {
+# before #417 always loaded, when there is no model file to read, the engine
+# cannot read it or lay it out (an edited file, a level layout the load could
+# not make), or the layout does not have this matrix's size.
+.fitrx_name_cov_matrix <- function(cov, fit) {
   if (!is.matrix(cov) || !is.null(dimnames(cov))) return(cov)
+  model_path <- fit$model_path
   if (!is.character(model_path) || length(model_path) != 1L ||
         is.na(model_path) || !file.exists(model_path)) {
     return(cov)
   }
-  labels <- tryCatch(ferx_rust_cov_labels(model_path, nrow(cov)),
-                     error = function(e) character())
+  labels <- tryCatch(
+    ferx_rust_cov_labels(model_path, .ferx_hash_arg(fit$model_hash),
+                         .ferx_fit_binding_args(fit)$fit_bindings, nrow(cov)),
+    error = function(e) character()
+  )
   .ferx_cov_dimnames(cov, labels)
 }
 

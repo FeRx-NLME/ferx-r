@@ -4,7 +4,7 @@
 \alias{ferx_rust_cov_labels}
 \title{Internal Rust backend binding}
 \usage{
-ferx_rust_cov_labels(model_path, cov_matrix_dim)
+ferx_rust_cov_labels(model_path, model_hash, fit_bindings, cov_matrix_dim)
 }
 \description{
 Internal Rust backend binding

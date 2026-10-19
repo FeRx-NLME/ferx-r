@@ -242,13 +242,57 @@ test_that("a cov_matrix is named on load for the engine-written bundle too (#417
   expect_identical(dimnames(loaded$cor_matrix), dimnames(fit$cor_matrix))
 })
 
+test_that("a level-block fit's cov_matrix is named on load (#417)", {
+  skip_on_cran()
+  # The level thetas exist only once the model is laid out on the fit's
+  # levels: labels from the unbound model are too few for the matrix.
+  ex <- ferx_example("mbma_placebo")
+  fit <- suppressWarnings(ferx_fit(ex$model, ex$data, verbose = FALSE))
+  skip_if(is.null(fit$cov_matrix), "no covariance step in this fit")
+  expect_gt(nrow(fit$theta_levels), 0L)
+  path <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(path), add = TRUE)
+  ferx_save_fit(fit, path)
+  loaded <- suppressWarnings(ferx_load_fit(path))
+  expect_false(is.null(dimnames(fit$cov_matrix)))
+  expect_identical(loaded$cov_matrix, fit$cov_matrix)
+  expect_identical(loaded$cov_fixed, fit$cov_fixed)
+  expect_identical(loaded$cor_matrix, fit$cor_matrix)
+})
+
 test_that("a bundle whose model the engine cannot read loads unnamed (#417)", {
   cov <- matrix(c(1, 0, 0, 1), 2L)
-  expect_identical(ferx:::.fitrx_name_cov_matrix(cov, NA_character_), cov)
+  expect_identical(
+    ferx:::.fitrx_name_cov_matrix(cov, list(model_path = NA_character_)), cov
+  )
   bad <- tempfile(fileext = ".ferx")
   on.exit(unlink(bad), add = TRUE)
   writeLines("[not_a_block]", bad)
-  expect_identical(ferx:::.fitrx_name_cov_matrix(cov, bad), cov)
+  expect_identical(
+    ferx:::.fitrx_name_cov_matrix(cov, list(model_path = bad)), cov
+  )
+})
+
+test_that("a model file that is not the fitted one leaves cov_matrix unnamed (#417)", {
+  skip_on_cran()
+  fit <- warfarin_fit_cov()
+  skip_if(is.null(fit$cov_matrix), "no covariance step in this fit")
+  # Labels are placed by position, so a file that does not hash to the fit's
+  # model_hash names nothing.
+  edited <- tempfile(fileext = ".ferx")
+  on.exit(unlink(edited), add = TRUE)
+  writeLines(c(fit$model_text, "# edited"), edited)
+  probe <- fit
+  probe$model_path <- edited
+  expect_identical(
+    ferx:::.fitrx_name_cov_matrix(unname(fit$cov_matrix), probe),
+    unname(fit$cov_matrix)
+  )
+  probe$model_hash <- NULL
+  expect_identical(
+    ferx:::.fitrx_name_cov_matrix(unname(fit$cov_matrix), probe),
+    fit$cov_matrix
+  )
 })
 
 test_that("bare (extension-less) output path defaults to .fitrx and round-trips (#268)", {
