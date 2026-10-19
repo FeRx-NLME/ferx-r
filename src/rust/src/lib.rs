@@ -228,13 +228,21 @@ fn panic_message(
 /// code, or by `argument_refusal` with an empty one (ferx-r #517) - is handed
 /// on to `RAISED_DIAGNOSTIC` here, and only when its text is the text being
 /// raised; every raise overwrites that slot, so it never outlives the next one.
+/// A panic is recorded here as `RecordKind::Panic` (ferx-r #521): whatever the
+/// body recorded before it panicked is not what is being raised.
 #[track_caller]
 fn entry<T>(f: impl FnOnce() -> Result<T, String>) -> T {
     take_slot(&PENDING_DIAGNOSTIC);
     let msg = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
         Ok(Ok(value)) => return value,
         Ok(Err(msg)) => msg,
-        Err(payload) => panic_message(payload, std::panic::Location::caller()),
+        Err(payload) => {
+            take_slot(&PENDING_DIAGNOSTIC);
+            failure_refusal(
+                RecordKind::Panic,
+                panic_message(payload, std::panic::Location::caller()),
+            )
+        }
     };
     let raised = take_slot(&PENDING_DIAGNOSTIC).filter(|d| d.text == msg);
     *RAISED_DIAGNOSTIC.lock().unwrap_or_else(|e| e.into_inner()) = raised;
@@ -250,6 +258,7 @@ fn entry<T>(f: impl FnOnce() -> Result<T, String>) -> T {
 /// left out, for showing `suggestion` beside it without repeating it (#504).
 #[derive(Clone)]
 struct EngineDiagnostic {
+    kind: RecordKind,
     text: String,
     message: String,
     code: String,
@@ -258,8 +267,36 @@ struct EngineDiagnostic {
     suggestion: Option<String>,
 }
 
-/// Recorded by `engine_refusal` or `argument_refusal` during an entry point's
-/// body.
+/// What a record says the raised failure was, so R need not infer it from the
+/// code (ferx-r #521). Only `Engine` is about the model or the data; for the
+/// other three `.ferx_engine_error()` never re-validates, because a validation
+/// finding cannot be the cause of a refusal of the call, a cancelled run or a
+/// panic, and the single-error fallback would attach one to it regardless.
+#[derive(Clone, Copy)]
+enum RecordKind {
+    /// ferx-core refused the model or the data, with its own code.
+    Engine,
+    /// The glue refused its own call: an argument or a `settings` entry (#517).
+    Call,
+    /// The user interrupted the run (Ctrl-C).
+    Cancelled,
+    /// The engine panicked, on the worker thread or under `entry`.
+    Panic,
+}
+
+impl RecordKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            RecordKind::Engine => "engine",
+            RecordKind::Call => "call",
+            RecordKind::Cancelled => "cancelled",
+            RecordKind::Panic => "panic",
+        }
+    }
+}
+
+/// Recorded by `engine_refusal`, `argument_refusal` or `failure_refusal`
+/// during an entry point's body.
 static PENDING_DIAGNOSTIC: std::sync::Mutex<Option<EngineDiagnostic>> =
     std::sync::Mutex::new(None);
 /// The record of the refusal `entry` last raised, if it carried one; read and
@@ -280,6 +317,7 @@ fn engine_refusal(prefix: &str, e: ferx_core::EngineError) -> String {
     if let Some(code) = e.code() {
         let context = e.context().map(|c| format!("{c}: ")).unwrap_or_default();
         *PENDING_DIAGNOSTIC.lock().unwrap_or_else(|e| e.into_inner()) = Some(EngineDiagnostic {
+            kind: RecordKind::Engine,
             message: format!("{prefix}{context}{}", e.message()),
             code: code.to_string(),
             block: e.block().map(str::to_string),
@@ -299,7 +337,16 @@ fn engine_refusal(prefix: &str, e: ferx_core::EngineError) -> String {
 /// used to attach that finding's code to this refusal ("setting `sir`
 /// conflicts with a dedicated ferx_fit() argument [E_IOV_MISSING_OCC]").
 fn argument_refusal(text: String) -> String {
+    failure_refusal(RecordKind::Call, text)
+}
+
+/// The text an entry point raises for a failure that is neither the model nor
+/// the data - a refusal of the call, a cancelled run, a panic - recorded with
+/// its `kind` and an empty code, so `.ferx_engine_error()` does not go looking
+/// for a validation finding to blame it on (ferx-r #517, #521).
+fn failure_refusal(kind: RecordKind, text: String) -> String {
     *PENDING_DIAGNOSTIC.lock().unwrap_or_else(|e| e.into_inner()) = Some(EngineDiagnostic {
+        kind,
         message: text.clone(),
         code: String::new(),
         block: None,
@@ -315,16 +362,18 @@ fn argument_refusal(text: String) -> String {
 /// mark of a refusal of the call itself (ferx-r #517).
 ///
 /// @return `NULL` when that refusal left no record (an uncoded engine or
-///   glue failure, which R re-validates); otherwise a list with `text` (the
-///   raised message), `message`, `code`, `block`, `line` (0 when unknown) and
-///   `suggestion` (`""` when absent). `code` is `""` for a refusal of the call
-///   itself (`argument_refusal`), which R leaves uncoded without re-validating.
+///   glue failure, which R re-validates); otherwise a list with `kind`
+///   (`"engine"`, `"call"`, `"cancelled"` or `"panic"`), `text` (the raised
+///   message), `message`, `code`, `block`, `line` (0 when unknown) and
+///   `suggestion` (`""` when absent). `code` is `""` for every kind but
+///   `"engine"`, which R leaves uncoded without re-validating (#517, #521).
 #[extendr]
 fn ferx_rust_take_engine_diagnostic() -> Robj {
     entry(move || {
         Ok(match take_slot(&RAISED_DIAGNOSTIC) {
             None => ().into(),
             Some(d) => list!(
+                kind = d.kind.as_str(),
                 text = d.text,
                 message = d.message,
                 code = d.code,
@@ -687,10 +736,20 @@ fn ferx_rust_fit(
             Ok(Err(_)) if cancel.is_cancelled() => {
                 // Raise a proper R error so the user sees a clean condition
                 // instead of a silent empty-list return.
-                return Err("ferx_fit: cancelled by user".to_string());
+                // Recorded as such, so R does not label the interrupt with a
+                // validation finding about the model (#521).
+                return Err(failure_refusal(
+                    RecordKind::Cancelled,
+                    "ferx_fit: cancelled by user".to_string(),
+                ));
             }
             Ok(Err(e)) => return Err(engine_refusal("Fit error: ", e)),
-            Err(_) => return Err("Fit error: worker thread panicked".to_string()),
+            Err(_) => {
+                return Err(failure_refusal(
+                    RecordKind::Panic,
+                    "Fit error: worker thread panicked".to_string(),
+                ))
+            }
         };
 
         // Record source-file provenance on the result so `ferx_sir(fit)` can

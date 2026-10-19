@@ -260,14 +260,15 @@ test_that("a population with nothing to score is refused with its code", {
 
 test_that("a selection that removes every observation is refused", {
   # The same refusal, reached through `ignore =`. The engine names the
-  # selection and its count. The code does not reach R yet: the fallback
-  # re-validates the data without the call's selection, so it sees nothing
-  # wrong (ferx-r #521, second half).
+  # selection and its count, and records its own code: the fallback, which
+  # re-validates the data without the call's selection, is not consulted
+  # (ferx-r #521).
   ex <- ferx_example("warfarin")
   probe <- engine_error_probe(
     ferx_fit(ex$model, ex$data, verbose = FALSE, ignore = "EVID == 0")
   )
-  expect_refusal(probe, "nothing the likelihood can score")
+  expect_coded_refusal(probe, "nothing the likelihood can score",
+                       "E_NO_SCORED_OBSERVATIONS")
   expect_match(conditionMessage(probe$cond),
                "`[data_selection]` removed 110 row(s) classed as observations",
                fixed = TRUE)

@@ -655,3 +655,138 @@ test_that("ferx_fit() refuses a theta starting outside its declared range", {
     "declared lower bound"
   )
 })
+
+# -- Failures that are not the model or the data (#521) ----------------------
+
+# warfarin_iov with neither an `iov_column` nor an OCC column: validation finds
+# exactly one error, E_IOV_MISSING_OCC, so the single-error fallback in
+# `.ferx_engine_error()` has a code to hand any failure it reaches.
+iov_without_occasions <- function(env = parent.frame()) {
+  ex <- ferx_example("warfarin_iov")
+  model <- withr::local_tempfile(fileext = ".ferx", .local_envir = env)
+  text <- readLines(ex$model)
+  writeLines(text[!grepl("iov_column", text, fixed = TRUE)], model)
+  rows <- utils::read.csv(ex$data, na.strings = ".")
+  rows$OCC <- NULL
+  data <- withr::local_tempfile(fileext = ".csv", .local_envir = env)
+  utils::write.csv(rows, data, row.names = FALSE, quote = FALSE, na = ".")
+  list(model = model, data = data)
+}
+
+fit_failure <- function(expr) {
+  tryCatch({
+    suppressWarnings(expr)
+    NULL
+  }, error = function(e) e)
+}
+
+# Ctrl-C and a worker panic cannot be raised on demand, so `ferx_rust_fit()`
+# raises their text here and the record the glue keeps beside it. Mutations
+# that redden this: the glue recording either without its kind (it reaches the
+# fallback and comes back `... [E_IOV_MISSING_OCC]`), or
+# `.ferx_failure_condition()` returning the condition unclassed.
+test_that("a cancelled or panicked fit is not labelled with a validation code (#521)", {
+  f <- iov_without_occasions()
+  for (case in list(
+    list(kind = "cancelled", text = "ferx_fit: cancelled by user",
+         class = "ferx_cancelled"),
+    list(kind = "panic", text = "Fit error: worker thread panicked",
+         class = "ferx_panic")
+  )) {
+    testthat::local_mocked_bindings(
+      ferx_rust_fit = function(...) stop(case$text, call. = FALSE),
+      ferx_rust_take_engine_diagnostic = function() {
+        list(kind = case$kind, text = case$text, message = case$text,
+             code = "", block = "", line = 0L, suggestion = "")
+      },
+      ferx_rust_validate_model = function(...) stop("re-validation was called"),
+      .package = "ferx"
+    )
+    e <- fit_failure(ferx_fit(f$model, f$data, covariance = FALSE,
+                              verbose = FALSE))
+    expect_s3_class(e, case$class)
+    expect_s3_class(e, "error")
+    expect_false(inherits(e, "ferx_engine_error"), info = case$kind)
+    expect_null(e$code)
+    expect_identical(conditionMessage(e), case$text)
+  }
+})
+
+test_that("every glue record names its kind (#521)", {
+  f <- iov_without_occasions()
+  tryCatch(
+    ferx:::ferx_rust_fit(f$model, f$data, character(), "false", "false", "",
+                         0L, "", "", "", "maxiter", character()),
+    error = function(e) NULL
+  )
+  expect_identical(ferx:::ferx_rust_take_engine_diagnostic()$kind, "call")
+
+  ex <- ferx_example("warfarin")
+  tryCatch(ferx:::ferx_rust_predict(ex$model, infusion_into_cmt0_data()),
+           error = function(e) NULL)
+  d <- ferx:::ferx_rust_take_engine_diagnostic()
+  expect_identical(d$code, "E_DOSE_CMT_NOT_INFUSABLE")
+  expect_identical(d$kind, "engine")
+})
+
+# The second half: the fallback re-validates the model file and the data, and
+# sees none of the call's settings. With `settings = list(iov_occasion =
+# "dose")` the model fits, so a failure of that fit has nothing to do with the
+# one finding validation reports without the setting.
+test_that("the fallback does not label a fit whose settings validation cannot see (#521)", {
+  f <- iov_without_occasions()
+  testthat::local_mocked_bindings(
+    ferx_rust_fit = function(...) stop("Fit error: an uncoded failure", call. = FALSE),
+    ferx_rust_take_engine_diagnostic = function() NULL,
+    .package = "ferx"
+  )
+  fit <- function(...) {
+    fit_failure(ferx_fit(f$model, f$data, verbose = FALSE, ...))
+  }
+  # No override: the fallback still labels the failure, as before.
+  e <- fit()
+  expect_s3_class(e, "ferx_engine_error")
+  expect_identical(e$code, "E_IOV_MISSING_OCC")
+  # Anything the re-validation does not see: no code, never a wrong one.
+  for (args in list(
+    list(settings = list(iov_occasion = "dose")),
+    list(ignore = "TIME > 100"),
+    list(ignore_ids = 1),
+    list(method = "foce"),
+    list(covariance = FALSE),
+    list(inits_from_nca = TRUE)
+  )) {
+    e <- do.call(fit, args)
+    expect_s3_class(e, "error")
+    expect_false(inherits(e, "ferx_engine_error"), info = names(args))
+    expect_no_match(conditionMessage(e), "[E_", fixed = TRUE)
+  }
+  # `verbose` and `threads` change nothing a check looks at.
+  e <- fit(threads = 1L)
+  expect_identical(e$code, "E_IOV_MISSING_OCC")
+})
+
+test_that("the issue's model fits with the occasion rule it was refused without (#521)", {
+  f <- iov_without_occasions()
+  # A selection that removes every observation, on top of the setting: the
+  # refusal is the selection's, not E_IOV_MISSING_OCC.
+  e <- fit_failure(ferx_fit(f$model, f$data, covariance = FALSE, verbose = FALSE,
+                            settings = list(iov_occasion = "dose"),
+                            ignore = "EVID == 0"))
+  expect_s3_class(e, "ferx_engine_error")
+  expect_match(conditionMessage(e), "nothing the likelihood can score",
+               fixed = TRUE)
+  expect_identical(e$code, "E_NO_SCORED_OBSERVATIONS")
+  expect_no_match(conditionMessage(e), "E_IOV_MISSING_OCC", fixed = TRUE)
+})
+
+test_that("a model that does not parse is still labelled with call-time settings (#521)", {
+  ex    <- ferx_example("warfarin")
+  lines <- c(readLines(ex$model), "", "[not_a_block]", "  x = 1")
+  path  <- withr::local_tempfile(fileext = ".ferx")
+  writeLines(lines, path)
+  e <- fit_failure(ferx_fit(path, ex$data, verbose = FALSE, method = "foce",
+                            settings = list(maxiter = 5)))
+  expect_s3_class(e, "ferx_engine_error")
+  expect_identical(e$code, "E_UNKNOWN_BLOCK")
+})
