@@ -33,13 +33,15 @@
 #' `fit$packed_estimate`. With both, `ferx_covariance(fit)` is `identical()` to
 #' the covariance `ferx_fit(..., covariance = TRUE)` reports, unless
 #' `covariance_method` differs from the fit's (it is a setting of the step, not
-#' of the fit, and is not recorded). On a fit without `kappa` that holds on every
-#' estimation method with an in-fit step: Gauss-Newton, SAEM, importance
-#' sampling and VI start from the EBEs the fit reports, which their own
-#' warm-started solves produced (ferx-core #1847). A fit with `kappa` (IOV)
-#' restarts from a cold inner solve, because the fit's kappa estimates are not
-#' passed to the engine: exact for FOCE / FOCEI, not for the warm-started
-#' methods, where the standard errors can differ widely (ferx-r #591).
+#' of the fit, and is not recorded). That holds on every estimation method with
+#' an in-fit step, with or without `kappa` (IOV): the step is taken for the
+#' fit's own method (`fit$method`), and Gauss-Newton, SAEM, importance sampling
+#' and VI start from the EBEs the fit reports - `fit$ebe_etas` and, under IOV,
+#' `fit$ebe_kappas` - which their own warm-started solves produced (ferx-core
+#' #1847, ferx-r #591). The method matters beyond the objective: at an SAEM,
+#' importance-sampling or VI estimate, an R matrix that needs an eigenvalue
+#' floor is replaced by S^-1 (warning `W_COV_NON_STATIONARY_ESTIMATE`), as the
+#' in-fit step does.
 #'
 #' A fit loaded with [ferx_load_fit()] keeps both, so its result is
 #' `identical()` to the in-fit one too. A fit loaded from a bundle saved before
@@ -232,8 +234,9 @@ ferx_covariance <- function(fit,
   }
 
   # FOCEI (interaction) vs FOCE controls the inner-loop NLL the covariance step
-  # differentiates, so it must match the original fit. Derived from the method
-  # chain because `fit$interaction` is not plumbed to R - see .ferx_fit_interaction().
+  # differentiates, so it must match the original fit. FOCE / FOCEI fix it from
+  # the method chain; other methods take the fit's record - see
+  # .ferx_fit_interaction().
   interaction <- .ferx_fit_interaction(fit)
 
   omega_flat <- as.numeric(t(fit$omega))
@@ -244,6 +247,8 @@ ferx_covariance <- function(fit,
   iov_args <- .ferx_omega_iov_args(fit)
 
   binding_args <- .ferx_fit_binding_args(fit)
+  method_args <- .ferx_fit_method_args(fit)
+  kappa_args <- .ferx_ebe_kappa_args(fit)
   reader_args <- .ferx_fit_reader_args(fit)
   record_args <- .ferx_fit_record_args(
     fit, scoring = list(mu_referencing = mu_referencing)[!is.null(mu_referencing)]
@@ -285,6 +290,13 @@ ferx_covariance <- function(fit,
     sir_settings = record_args$sir_settings,
     packed_estimate = record_args$packed_estimate,
     bloq_method = record_args$bloq_method,
+    # The fit's method, which the engine scores and routes the covariance
+    # step on, and its per-occasion kappa EBEs, which the covariance step
+    # starts from (#591).
+    method = method_args$method,
+    method_chain = method_args$method_chain,
+    ebe_kappas_flat = kappa_args$ebe_kappas_flat,
+    ebe_kappa_ids = kappa_args$ebe_kappa_ids,
     covariance_method = cov_method,
     verbose = isTRUE(verbose),
     fit_bindings = binding_args$fit_bindings

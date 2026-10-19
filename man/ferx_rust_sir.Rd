@@ -30,6 +30,10 @@ ferx_rust_sir(
   sir_settings,
   packed_estimate,
   bloq_method,
+  method,
+  method_chain,
+  ebe_kappas_flat,
+  ebe_kappa_ids,
   verbose,
   fit_bindings
 )

@@ -348,6 +348,8 @@ ferx_sir <- function(fit,
   # so the glue refuses a kappa fit that lacks it (#465).
   iov_args <- .ferx_omega_iov_args(fit)
   binding_args <- .ferx_fit_binding_args(fit)
+  method_args <- .ferx_fit_method_args(fit)
+  kappa_args <- .ferx_ebe_kappa_args(fit)
   reader_args <- .ferx_fit_reader_args(fit)
   .ferx_refuse_unrecorded_selection(
     fit, "ferx_sir",
@@ -362,8 +364,8 @@ ferx_sir <- function(fit,
     data_hash = data_hash_arg,
     ofv = as.numeric(fit$ofv),
     ofv_prior = .ferx_ofv_prior(fit),
-    # `fit$interaction` is not plumbed to R, so reading it gave FALSE on every
-    # fit and a FOCEI fit was resampled under the FOCE inner loop.
+    # Read through `.ferx_fit_interaction()`: a FOCEI fit's record can say
+    # FALSE (a bundle written before #591), which resampled it under FOCE.
     interaction = .ferx_fit_interaction(fit),
     theta = as.numeric(fit$theta),
     omega_flat = omega_flat,
@@ -390,6 +392,13 @@ ferx_sir <- function(fit,
     sir_settings = record_args$sir_settings,
     packed_estimate = record_args$packed_estimate,
     bloq_method = record_args$bloq_method,
+    # The fit's method, which the engine scores and routes the covariance
+    # step on, and its per-occasion kappa EBEs, which the covariance step
+    # starts from (#591).
+    method = method_args$method,
+    method_chain = method_args$method_chain,
+    ebe_kappas_flat = kappa_args$ebe_kappas_flat,
+    ebe_kappa_ids = kappa_args$ebe_kappa_ids,
     verbose = isTRUE(verbose),
     fit_bindings = binding_args$fit_bindings
   ), model_path, data_path)

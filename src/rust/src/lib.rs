@@ -4204,6 +4204,10 @@ fn fit_result_to_list(
         converged = result.converged,
         method = method_label,
         method_chain = method_chain,
+        // The interaction flag the fit's objective ran under, which SAEM, IMP
+        // and Gauss-Newton inherit rather than fix (ferx-r #591); the post-hoc
+        // steps hand it back to the engine.
+        interaction = result.interaction,
         ofv = result.ofv,
         ofv_data = result.ofv_data,
         ofv_prior = result.ofv_prior,
@@ -5838,6 +5842,126 @@ struct FitSkeletonInputs<'a> {
     /// none. Since ferx-core #1824 the post-hoc steps score the method the fit
     /// reports, so it must be the fit's, not a placeholder.
     bloq_method: &'a str,
+    /// `fit$method` and `fit$method_chain`, in the engine's labels (`"SAEM"`,
+    /// `"FOCEI"`, ...); "" / empty when the fit carries none, which falls back
+    /// to FOCE / FOCEI from `interaction` (ferx-r #591).
+    method: &'a str,
+    method_chain: &'a [String],
+    /// `fit$ebe_kappas`: the kappa columns flattened row-major, one row per
+    /// (subject, occasion) in fit order, and the `ID` of each row. Empty when
+    /// the fit carries none (ferx-r #591).
+    ebe_kappas_flat: &'a [f64],
+    ebe_kappa_ids: &'a [String],
+}
+
+/// The `EstimationMethod` whose engine label (`EstimationMethod::label()`, the
+/// spelling of `fit$method` / `fit$method_chain`) is `label`.
+fn method_from_label(label: &str) -> Option<EstimationMethod> {
+    use EstimationMethod::*;
+    // Never called: it makes the compiler check that the list below covers
+    // every `EstimationMethod`.
+    #[allow(dead_code)]
+    fn exhaustive(m: EstimationMethod) {
+        match m {
+            Foce | FoceI | FoceGn | FoceGnHybrid | Saem | Imp | Impmap | Bayes | Laplace | Vi => {}
+        }
+    }
+    [Foce, FoceI, FoceGn, FoceGnHybrid, Saem, Imp, Impmap, Bayes, Laplace, Vi]
+        .into_iter()
+        .find(|m| m.label().eq_ignore_ascii_case(label.trim()))
+}
+
+/// The method and method chain a skeleton `FitResult` reports (ferx-r #591).
+///
+/// `run_covariance` and `run_sir` score the objective of `fit.method`, and the
+/// covariance step routes on it: at an SAEM / IMP / IMPMAP / VI estimate, an R
+/// matrix that needs an eigenvalue floor is replaced by S^-1, because those
+/// engines do not minimise the FOCE objective R is the Hessian of. A skeleton
+/// that always said FOCE kept the floored R instead, and an SAEM IOV fit's
+/// standalone standard errors came out ~2000x the in-fit ones. A fit that
+/// records no method (one built by hand) keeps the old FOCE / FOCEI reading of
+/// `interaction`; an unknown label is refused rather than guessed.
+fn skeleton_methods(
+    entry_point: &str,
+    x: &FitSkeletonInputs,
+) -> std::result::Result<(EstimationMethod, Vec<EstimationMethod>), String> {
+    let parse = |label: &str| {
+        method_from_label(label).ok_or_else(|| {
+            format!("{entry_point}: unknown estimation method `{label}` on the fit")
+        })
+    };
+    let fallback = if x.interaction {
+        EstimationMethod::FoceI
+    } else {
+        EstimationMethod::Foce
+    };
+    let chain: Vec<EstimationMethod> = x
+        .method_chain
+        .iter()
+        .filter(|m| !m.trim().is_empty())
+        .map(|m| parse(m))
+        .collect::<std::result::Result<_, _>>()?;
+    let method = if x.method.trim().is_empty() {
+        chain.last().copied().unwrap_or(fallback)
+    } else {
+        parse(x.method)?
+    };
+    let chain = if chain.is_empty() { vec![method] } else { chain };
+    Ok((method, chain))
+}
+
+/// The fit's per-occasion kappa EBEs (`fit$ebe_kappas`) in `FitResult::ebe_kappas`
+/// shape: one list per subject, one vector of `n_kappa` per occasion (ferx-r #591).
+///
+/// `run_covariance` starts from the EBEs the fit reports only when the kappas
+/// come with them; without them it re-solves cold, which repeats FOCE / FOCEI
+/// exactly but not the warm-started engines (ferx-core #1847). The rows are in
+/// fit order, so each subject owns the run of rows carrying its ID; two
+/// adjacent subjects never share an ID (the reader starts a new subject on an
+/// ID change). Rows that do not line up with the subjects are refused.
+fn ebe_kappas_from_r(
+    entry_point: &str,
+    x: &FitSkeletonInputs,
+    n_kappa: usize,
+) -> std::result::Result<Vec<Vec<nalgebra::DVector<f64>>>, String> {
+    if x.ebe_kappa_ids.is_empty() && x.ebe_kappas_flat.is_empty() {
+        return Ok(Vec::new());
+    }
+    let n_rows = x.ebe_kappa_ids.len();
+    if n_kappa == 0 || x.ebe_kappas_flat.len() != n_rows * n_kappa {
+        return Err(format!(
+            "{entry_point}: fit$ebe_kappas has {} values over {n_rows} rows, which does not \
+             match the model's {n_kappa} kappa(s)",
+            x.ebe_kappas_flat.len()
+        ));
+    }
+    let mut out = Vec::with_capacity(x.subject_ids.len());
+    let mut row = 0;
+    for id in x.subject_ids {
+        let mut occasions = Vec::new();
+        while row < n_rows && &x.ebe_kappa_ids[row] == id {
+            occasions.push(nalgebra::DVector::from_column_slice(
+                &x.ebe_kappas_flat[row * n_kappa..(row + 1) * n_kappa],
+            ));
+            row += 1;
+        }
+        if occasions.is_empty() {
+            return Err(format!(
+                "{entry_point}: fit$ebe_kappas has no rows for subject `{id}` where fit order \
+                 expects them"
+            ));
+        }
+        out.push(occasions);
+    }
+    if row != n_rows {
+        return Err(format!(
+            "{entry_point}: fit$ebe_kappas row {} (ID `{}`) does not belong to any subject in \
+             fit order",
+            row + 1,
+            x.ebe_kappa_ids[row]
+        ));
+    }
+    Ok(out)
 }
 
 /// An IOV occasion rule in the spelling `ferx_fit(settings = list(iov_occasion =
@@ -6484,6 +6608,8 @@ fn fit_skeleton(
     // is refused, not filled from the model.
     let residual_correlations_resolved = residual_correlations_from_fit(model, x.residual_rho)
         .map_err(|e| format!("{entry_point}: {e}"))?;
+    let (method, method_chain) = skeleton_methods(entry_point, x)?;
+    let ebe_kappas = ebe_kappas_from_r(entry_point, x, model.n_kappa)?;
 
     let mut fit = FitResult {
         // ferx-core main added a checkpoint-restore flag; neither step reads it.
@@ -6542,16 +6668,10 @@ fn fit_skeleton(
         omega_is_diagonal: Some(template.omega.diagonal),
         kappa_is_diagonal: template.omega_iov.as_ref().map(|m| m.diagonal),
         vi: None,
-        method: if x.interaction {
-            EstimationMethod::FoceI
-        } else {
-            EstimationMethod::Foce
-        },
-        method_chain: vec![if x.interaction {
-            EstimationMethod::FoceI
-        } else {
-            EstimationMethod::Foce
-        }],
+        // The fit's own method (ferx-r #591): the steps score, and route the
+        // covariance step on, `fit.method`. See `skeleton_methods`.
+        method,
+        method_chain,
         bayes: None,
         cond_dist: None,
         converged: true,
@@ -6616,7 +6736,10 @@ fn fit_skeleton(
         se_kappa: None,
         shrinkage_kappa: Vec::new(),
         shrinkage_kappa_by_occ: Vec::new(),
-        ebe_kappas: Vec::new(),
+        // The fit's per-occasion kappa EBEs, so `run_covariance` starts from
+        // the EBEs the in-fit step was handed rather than a cold solve
+        // (ferx-r #591). `run_sir` does not read them.
+        ebe_kappas,
         saem_mu_ref_m_step_evals_saved: None,
         saem_n_subjects_hmc: None,
         gradient_method_inner: String::new(),
@@ -6788,6 +6911,13 @@ fn fit_skeleton(
 ///   the fit's estimates bit for bit.
 /// @param bloq_method `fit$bloq_method_label`, the LOQ method the fit scored
 ///   (`"drop"` / `"m3"`); "" when the fit records none (the model file's).
+/// @param method `fit$method`, the engine label of the method that produced
+///   the estimates (`"SAEM"`, `"FOCEI"`, ...); "" when the fit records none.
+///   The step scores, and routes its covariance on, this method (ferx-r #591).
+/// @param method_chain `fit$method_chain`, the engine labels of every stage.
+/// @param ebe_kappas_flat `fit$ebe_kappas` kappa columns, row-major, one row
+///   per (subject, occasion) in fit order; empty for a fit without IOV.
+/// @param ebe_kappa_ids The `ID` of each `ebe_kappas` row.
 /// @param verbose When TRUE, the engine prints progress to stderr.
 /// @return Named list with `sir_ess`, `sir_ci_theta`, `sir_ci_omega`, `sir_ci_sigma`,
 ///   `sir_ci_kappa`,
@@ -6821,6 +6951,10 @@ fn ferx_rust_sir(
     sir_settings: Robj,
     packed_estimate: Vec<f64>,
     bloq_method: &str,
+    method: &str,
+    method_chain: Vec<String>,
+    ebe_kappas_flat: Vec<f64>,
+    ebe_kappa_ids: Vec<String>,
     verbose: bool,
     fit_bindings: List,
 ) -> Robj {
@@ -6875,6 +7009,10 @@ fn ferx_rust_sir(
             sir_settings: &sir_settings,
             packed_estimate: &packed_estimate,
             bloq_method,
+            method,
+            method_chain: &method_chain,
+            ebe_kappas_flat: &ebe_kappas_flat,
+            ebe_kappa_ids: &ebe_kappa_ids,
         };
         let fit = fit_skeleton("ferx_sir", model, &inputs, Some(cov_mat))?;
 
@@ -7007,6 +7145,13 @@ fn ferx_rust_sir(
 ///   the fit's estimates bit for bit.
 /// @param bloq_method `fit$bloq_method_label`, the LOQ method the fit scored
 ///   (`"drop"` / `"m3"`); "" when the fit records none (the model file's).
+/// @param method `fit$method`, the engine label of the method that produced
+///   the estimates (`"SAEM"`, `"FOCEI"`, ...); "" when the fit records none.
+///   The step scores, and routes its covariance on, this method (ferx-r #591).
+/// @param method_chain `fit$method_chain`, the engine labels of every stage.
+/// @param ebe_kappas_flat `fit$ebe_kappas` kappa columns, row-major, one row
+///   per (subject, occasion) in fit order; empty for a fit without IOV.
+/// @param ebe_kappa_ids The `ID` of each `ebe_kappas` row.
 /// @param covariance_method Covariance estimator: "r"/"hessian", "s"/"cross_product", or "rsr"/"sandwich".
 /// @param verbose When TRUE, the engine prints progress to stderr.
 /// @return Named list with `cov_matrix`, `cov_matrix_dim`, `se_theta`, `se_omega`,
@@ -7038,6 +7183,10 @@ fn ferx_rust_covariance(
     sir_settings: Robj,
     packed_estimate: Vec<f64>,
     bloq_method: &str,
+    method: &str,
+    method_chain: Vec<String>,
+    ebe_kappas_flat: Vec<f64>,
+    ebe_kappa_ids: Vec<String>,
     covariance_method: &str,
     verbose: bool,
     fit_bindings: List,
@@ -7090,6 +7239,10 @@ fn ferx_rust_covariance(
             sir_settings: &sir_settings,
             packed_estimate: &packed_estimate,
             bloq_method,
+            method,
+            method_chain: &method_chain,
+            ebe_kappas_flat: &ebe_kappas_flat,
+            ebe_kappa_ids: &ebe_kappa_ids,
         };
         let fit = fit_skeleton("ferx_covariance", model, &inputs, None)?;
 

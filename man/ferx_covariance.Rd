@@ -70,13 +70,15 @@ recorded as \code{fit$scoring_settings} (the stage that produced the estimates:
 \code{fit$packed_estimate}. With both, \code{ferx_covariance(fit)} is \code{identical()} to
 the covariance \code{ferx_fit(..., covariance = TRUE)} reports, unless
 \code{covariance_method} differs from the fit's (it is a setting of the step, not
-of the fit, and is not recorded). On a fit without \code{kappa} that holds on every
-estimation method with an in-fit step: Gauss-Newton, SAEM, importance
-sampling and VI start from the EBEs the fit reports, which their own
-warm-started solves produced (ferx-core #1847). A fit with \code{kappa} (IOV)
-restarts from a cold inner solve, because the fit's kappa estimates are not
-passed to the engine: exact for FOCE / FOCEI, not for the warm-started
-methods, where the standard errors can differ widely (ferx-r #591).
+of the fit, and is not recorded). That holds on every estimation method with
+an in-fit step, with or without \code{kappa} (IOV): the step is taken for the
+fit's own method (\code{fit$method}), and Gauss-Newton, SAEM, importance sampling
+and VI start from the EBEs the fit reports - \code{fit$ebe_etas} and, under IOV,
+\code{fit$ebe_kappas} - which their own warm-started solves produced (ferx-core
+#1847, ferx-r #591). The method matters beyond the objective: at an SAEM,
+importance-sampling or VI estimate, an R matrix that needs an eigenvalue
+floor is replaced by S^-1 (warning \code{W_COV_NON_STATIONARY_ESTIMATE}), as the
+in-fit step does.
 
 A fit loaded with \code{\link[=ferx_load_fit]{ferx_load_fit()}} keeps both, so its result is
 \code{identical()} to the in-fit one too. A fit loaded from a bundle saved before
