@@ -163,24 +163,16 @@ test_that("a real fit round-trips bit for bit", {
   ferx_save_fit(fit, path)
   loaded <- ferx_load_fit(path)
 
-  # fit.json
+  # fit.json, names and dimnames included (#417)
   expect_identical(loaded$theta, fit$theta)
   expect_identical(loaded$omega, fit$omega)
-  # Values only for these two: their names / dimnames differ across a round
-  # trip for reasons that have nothing to do with the doubles.
-  expect_identical(unname(loaded$sigma), unname(fit$sigma))
-  expect_identical(unname(loaded$cov_matrix), unname(fit$cov_matrix))
+  expect_identical(loaded$sigma, fit$sigma)
+  expect_identical(loaded$cov_matrix, fit$cov_matrix)
   expect_identical(loaded$ofv, fit$ofv)
-  expect_identical(unname(loaded$se_theta), unname(fit$se_theta))
-  # the CSV entries: every double column
-  for (tab in c("sdtab", "ebe_etas")) {
-    dbl <- names(fit[[tab]])[vapply(fit[[tab]], is.double, logical(1))]
-    expect_gt(length(dbl), 0L)
-    for (col in dbl) {
-      expect_identical(as.numeric(loaded[[tab]][[col]]), fit[[tab]][[col]],
-                       info = sprintf("%s$%s", tab, col))
-    }
-  }
+  expect_identical(loaded$se_theta, fit$se_theta)
+  # the CSV entries, column types included (#417)
+  expect_identical(loaded$sdtab, fit$sdtab)
+  expect_identical(loaded$ebe_etas, fit$ebe_etas)
   # and what a reloaded fit drives
   ex <- ferx_example("warfarin")
   expect_identical(
@@ -192,6 +184,73 @@ test_that("a real fit round-trips bit for bit", {
     ferx_simulate(ex$model, ex$data, n_sim = 2L, seed = 7L, fit = fit)
   )
 })
+test_that("a round trip keeps names, dimnames and column types (#417)", {
+  skip_on_cran()
+  fit <- warfarin_fit_cov()
+  skip_if(is.null(fit$cov_matrix), "no covariance step in this fit")
+  path <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(path), add = TRUE)
+  ferx_save_fit(fit, path)
+  loaded <- ferx_load_fit(path)
+
+  # The live fit names sigma like theta, and the bundle gives them back.
+  expect_identical(names(fit$sigma), fit$sigma_names)
+  expect_identical(loaded$sigma, fit$sigma)
+  expect_identical(loaded$sigma_types, fit$sigma_types)
+  # fit.json has no row names for the covariance matrix; the loader asks the
+  # engine for the labels the live fit was named with.
+  expect_false(is.null(dimnames(fit$cov_matrix)))
+  expect_identical(dimnames(loaded$cov_matrix), dimnames(fit$cov_matrix))
+  expect_identical(loaded$cov_matrix, fit$cov_matrix)
+  expect_identical(loaded$cov_fixed, fit$cov_fixed)
+  expect_identical(loaded$cor_matrix, fit$cor_matrix)
+  # read.csv() types a column of whole numbers as integer; every sdtab column
+  # and every eta is double on the live fit.
+  expect_identical(loaded$sdtab, fit$sdtab)
+  expect_identical(loaded$ebe_etas, fit$ebe_etas)
+  expect_identical(vapply(loaded$sdtab, typeof, ""),
+                   vapply(fit$sdtab, typeof, ""))
+})
+
+test_that("bundle tables keep double columns double when every value is whole (#417)", {
+  df <- data.frame(ID = c("1", "2"), TIME = c(0, 24), WT = c(70, 100000),
+                   EVID = c(1L, 0L), EMPTY = c(NA_real_, NA_real_),
+                   stringsAsFactors = FALSE)
+  path <- tempfile(fileext = ".csv")
+  on.exit(unlink(path), add = TRUE)
+  ferx:::.fitrx_write_csv_exact(df, path)
+  # Without the live types, read.csv() decides: WT integer, EMPTY logical.
+  plain <- ferx:::.fitrx_read_csv_exact(path, id_cols = "ID")
+  expect_type(plain$WT, "integer")
+  expect_type(plain$EMPTY, "logical")
+  expect_identical(
+    ferx:::.fitrx_read_csv_exact(path, id_cols = "ID", integer_cols = "EVID"),
+    df
+  )
+})
+
+test_that("a cov_matrix is named on load for the engine-written bundle too (#417)", {
+  skip_on_cran()
+  fit <- warfarin_fit_cov()
+  skip_if(is.null(fit$cov_matrix), "no covariance step in this fit")
+  trip <- fitrx_engine_trip(fit)
+  on.exit(unlink(c(trip$r_path, trip$core_path)), add = TRUE)
+  # ferx-core's own writer stores no names either, so this is the path every
+  # bundle written before #417 takes.
+  loaded <- suppressWarnings(ferx_load_fit(trip$core_path))
+  expect_identical(dimnames(loaded$cov_matrix), dimnames(fit$cov_matrix))
+  expect_identical(dimnames(loaded$cor_matrix), dimnames(fit$cor_matrix))
+})
+
+test_that("a bundle whose model the engine cannot read loads unnamed (#417)", {
+  cov <- matrix(c(1, 0, 0, 1), 2L)
+  expect_identical(ferx:::.fitrx_name_cov_matrix(cov, NA_character_), cov)
+  bad <- tempfile(fileext = ".ferx")
+  on.exit(unlink(bad), add = TRUE)
+  writeLines("[not_a_block]", bad)
+  expect_identical(ferx:::.fitrx_name_cov_matrix(cov, bad), cov)
+})
+
 test_that("bare (extension-less) output path defaults to .fitrx and round-trips (#268)", {
   skip_on_cran()
   fit <- warfarin_fit_cov()
@@ -231,8 +290,7 @@ test_that("covariance step results survive round-trip", {
 
   expect_true(is.matrix(loaded$cov_matrix))
   expect_equal(dim(loaded$cov_matrix), dim(fit$cov_matrix))
-  expect_equal(loaded$cov_matrix, fit$cov_matrix, tolerance = 1e-12,
-               ignore_attr = "dimnames")
+  expect_equal(loaded$cov_matrix, fit$cov_matrix, tolerance = 1e-12)
   expect_equal(unname(loaded$se_theta), unname(fit$se_theta), tolerance = 1e-12)
 })
 test_that("the model-selection surface survives round-trip", {

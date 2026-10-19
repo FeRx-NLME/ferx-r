@@ -313,7 +313,14 @@
 # `1`, and `as.character()` afterwards only puts the type back (#468). They
 # come from a pass with no NA strings, since the writers never put an NA in an
 # ID column and read.csv() reads `NA` as one even when quoted (#475).
-.fitrx_read_csv_exact <- function(path, id_cols = character()) {
+#
+# With `integer_cols` given, the table is one whose live columns are double
+# but for these (and its text columns): any other column read.csv() types as
+# integer - every value whole, as `1`, `100000` - or as logical - every value
+# missing - is read as double too, so the table is identical() to the live
+# fit's (#417). NULL leaves the typing to read.csv().
+.fitrx_read_csv_exact <- function(path, id_cols = character(),
+                                  integer_cols = NULL) {
   header <- names(utils::read.csv(path, nrows = 0L, check.names = FALSE))
   id_cols <- intersect(id_cols, header)
   col_classes <- if (length(id_cols) > 0L) {
@@ -323,7 +330,13 @@
   }
   df <- utils::read.csv(path, stringsAsFactors = FALSE, check.names = FALSE,
                         colClasses = col_classes)
-  dbl <- which(vapply(df, is.double, logical(1)))
+  as_dbl <- if (is.null(integer_cols)) {
+    is.double
+  } else {
+    function(v) is.numeric(v) || (is.logical(v) && all(is.na(v)))
+  }
+  dbl <- which(vapply(df, as_dbl, logical(1)) &
+                 !(names(df) %in% c(id_cols, integer_cols)))
   if (length(dbl) > 0L || length(id_cols) > 0L) {
     raw <- utils::read.csv(path, stringsAsFactors = FALSE, check.names = FALSE,
                            colClasses = "character", na.strings = character())
@@ -478,12 +491,14 @@
 # subject read from the per-subject row counts when they fit the rows and the
 # rows' IDs (`.fitrx_sdtab_subject()`, #540), else walked from the text.
 .fitrx_read_sdtab <- function(staging, subject_ids, summ) {
+  # Every sdtab column is double on the live fit, ID included (#417).
   sdtab <- .fitrx_read_csv_exact(file.path(staging, "predictions.csv"),
-                                 id_cols = "ID")
+                                 id_cols = "ID", integer_cols = character())
   n_gauss <- nrow(sdtab)
   disc_path <- file.path(staging, "predictions_discrete.csv")
   if (file.exists(disc_path)) {
-    sdtab <- rbind(sdtab, .fitrx_read_csv_exact(disc_path, id_cols = "ID"))
+    sdtab <- rbind(sdtab, .fitrx_read_csv_exact(disc_path, id_cols = "ID",
+                                                 integer_cols = character()))
   }
   if (is.null(sdtab$ID)) return(sdtab)
   rows <- if (!is.null(summ) && length(subject_ids) == nrow(summ)) {

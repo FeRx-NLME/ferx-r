@@ -378,7 +378,7 @@ test_that("mbma_placebo: a reloaded fit prints identically, and carries the live
   }
   # The three fields behind the lines that differed.
   expect_identical(fit2$sigma_types, fit$sigma_types)
-  expect_null(names(fit2$sigma_types))
+  expect_identical(names(fit2$sigma_types), fit2$sigma_names)
   expect_identical(fit2$covariance_status, fit$covariance_status)
   expect_identical(fit2$condition_number, fit$condition_number)
   expect_identical(fit2$eigenvalues, fit$eigenvalues)

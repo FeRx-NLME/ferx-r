@@ -105,7 +105,10 @@ ferx_load_fit <- function(path) {
   if (file.exists(ebes_path)) {
     # ID columns are read verbatim, as on the live fit: `ferx_sir()` and
     # `ferx_covariance()` match them to the data (#468).
-    result$ebe_etas <- .fitrx_read_csv_exact(ebes_path, id_cols = "ID")
+    result$ebe_etas <- .fitrx_read_csv_exact(
+      ebes_path, id_cols = "ID",
+      integer_cols = c("n_obs", "n_obs_discrete", "MIXEST")
+    )
     # Every subject, in fit order, as on the live fit (#550). A fit without
     # random effects has ID rows and no eta columns here; live, its
     # fit$ebe_etas is NULL, which is what says "no etas" downstream.
@@ -126,11 +129,13 @@ ferx_load_fit <- function(path) {
   }
   covtab_path <- file.path(staging, "covtab.csv")
   if (file.exists(covtab_path)) {
-    result$covtab <- .fitrx_read_csv_exact(covtab_path, id_cols = "ID")
+    result$covtab <- .fitrx_read_csv_exact(covtab_path, id_cols = "ID",
+                                           integer_cols = "EVID")
   }
   kappa_path <- file.path(staging, "ebes_kappa.csv")
   if (file.exists(kappa_path)) {
-    result$ebe_kappas <- .fitrx_read_csv_exact(kappa_path, id_cols = "ID")
+    result$ebe_kappas <- .fitrx_read_csv_exact(kappa_path, id_cols = "ID",
+                                               integer_cols = "OCC")
   } else {
     result$ebe_kappas <- NULL
   }
@@ -142,7 +147,8 @@ ferx_load_fit <- function(path) {
   )
   conddist_path <- file.path(staging, "conddist.csv")
   if (file.exists(conddist_path)) {
-    cd_df <- .fitrx_read_csv_exact(conddist_path, id_cols = "ID")
+    cd_df <- .fitrx_read_csv_exact(conddist_path, id_cols = "ID",
+                                   integer_cols = character())
     result$cond_dist <- list(
       data      = cd_df,
       # `conddist.csv` carries no distribution-based shrinkage / provenance
@@ -229,6 +235,15 @@ ferx_load_fit <- function(path) {
   )
   result$theta_levels <- levels$theta_levels
   result$unavailable_theta_levels <- levels$unavailable
+
+  # fit.json stores the covariance matrix but not its row names (#417), so
+  # they come from the engine's labels for the model file staged above - the
+  # ones ferx_fit() names the live matrix with - and `cov_fixed` is renamed
+  # to match.
+  result$cov_matrix <- .fitrx_name_cov_matrix(result$cov_matrix,
+                                              result$model_path)
+  result$cov_fixed <- .ferx_cov_fixed_named(result$cov_fixed,
+                                            result$cov_matrix)
 
   # Warnings - fit.json is the source of truth, warnings.txt is a mirror.
   if (is.null(result$warnings)) result$warnings <- character()
@@ -357,7 +372,11 @@ ferx_load_fit <- function(path) {
     sigma_fixed = as.logical(unlist(w$sigma$fixed %||% list(), use.names = FALSE)),
     # Unnamed, as ferx_fit() returns it: print.ferx_fit() tests each element
     # with identical(), which a named one never passes (#455).
-    sigma_types = as.character(unlist(w$sigma$types, use.names = FALSE)),
+    # Named like `sigma`, as ferx_fit() names it (#417).
+    sigma_types = stats::setNames(
+      as.character(unlist(w$sigma$types, use.names = FALSE)),
+      unlist(w$sigma$names, use.names = FALSE)
+    ),
     se_sigma = .fitrx_unwrap_opt_num_vec(w$sigma$se),
     sigma_init_as_sd = as.logical(unlist(w$sigma$init_as_sd %||% list(), use.names = FALSE)),
     # `block_sigma` residual correlations (ferx-core #847), nested under
@@ -1013,6 +1032,21 @@ ferx_load_fit <- function(path) {
   data <- as.numeric(unlist(w$data %||% list(), use.names = FALSE))
   if (rows == 0L || cols == 0L || length(data) != rows * cols) return(NULL)
   matrix(data, nrow = rows, ncol = cols, byrow = TRUE)
+}
+
+# `cov_matrix` named by `ferx_rust_cov_labels()` on the bundle's model file,
+# through the helper ferx_fit() names it with. Left unnamed, as a bundle from
+# before #417 always loaded, when there is no model file to read or the
+# engine cannot parse it or lay out a matrix of this size.
+.fitrx_name_cov_matrix <- function(cov, model_path) {
+  if (!is.matrix(cov) || !is.null(dimnames(cov))) return(cov)
+  if (!is.character(model_path) || length(model_path) != 1L ||
+        is.na(model_path) || !file.exists(model_path)) {
+    return(cov)
+  }
+  labels <- tryCatch(ferx_rust_cov_labels(model_path, nrow(cov)),
+                     error = function(e) character())
+  .ferx_cov_dimnames(cov, labels)
 }
 
 .fitrx_named_omega <- function(omega_wire) {

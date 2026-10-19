@@ -5336,6 +5336,27 @@ fn ferx_rust_known_blocks() -> Vec<String> {
     })
 }
 
+/// Row / column labels of `fit$cov_matrix` for a model file: the labels
+/// `ferx_fit()` names the matrix with ([`cov_matrix_labels`]), for a fit read
+/// back from a `.fitrx` bundle, whose wire stores the matrix but not its names
+/// (ferx-r #417). `ferx_load_fit()` passes the bundle's own `model.ferx`.
+/// Empty when the model's packed layout does not have `cov_matrix_dim`
+/// coordinates; R then leaves the matrix unnamed.
+///
+/// @param model_path The model file the fit was run on.
+/// @param cov_matrix_dim Side length of the fit's covariance matrix.
+/// @return Character, one label per row; empty on a dimension mismatch.
+/// @export
+#[extendr]
+fn ferx_rust_cov_labels(model_path: &str, cov_matrix_dim: i32) -> Vec<String> {
+    entry(move || {
+        // Read as `ferx_rust_fit` reads it, so the labels are the live fit's.
+        let source = ferx_core::ModelSource::read(Path::new(model_path))
+            .map_err(|e| format!("Error parsing model: {e}"))?;
+        Ok(cov_matrix_labels(&source.parsed.model, cov_matrix_dim))
+    })
+}
+
 /// SHA-256 of a string's UTF-8 bytes, as the lowercase hex digest
 /// `model_hash` is written in (`ferx_core::io::hash::sha256_bytes`).
 ///
@@ -12450,6 +12471,7 @@ extendr_module! {
     fn ferx_rust_autodiff_enabled;
     fn ferx_rust_test_panic;
     fn ferx_rust_known_blocks;
+    fn ferx_rust_cov_labels;
     fn ferx_rust_sha256_text;
     fn ferx_rust_sha256_raw;
     fn ferx_rust_stage_data_probe;

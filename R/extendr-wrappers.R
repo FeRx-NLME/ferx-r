@@ -135,6 +135,12 @@ ferx_rust_known_blocks <- function() {
 
 #' @title Internal Rust backend binding
 #' @keywords internal
+ferx_rust_cov_labels <- function(model_path, cov_matrix_dim) {
+  .Call("wrap__ferx_rust_cov_labels", model_path, cov_matrix_dim)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
 ferx_rust_sha256_text <- function(text) {
   .Call("wrap__ferx_rust_sha256_text", text)
 }
