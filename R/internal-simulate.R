@@ -16,12 +16,14 @@ validate_fit_for_params <- function(fit) {
     omega_dim = as.integer(nrow(omega)),
     sigma = sigma
   ), .ferx_omega_iov_args(fit), list(
-    # Fitted `block_sigma` residual correlations, in model declaration order.
-    # A plain (non-FIX) block estimates rho, so passing them is what keeps the
+    # Fitted `block_sigma` residual correlations with their sigma pairs. A
+    # plain (non-FIX) block estimates rho, so passing them is what keeps the
     # engine from rebuilding this fit at the model file's declared correlation.
-    # Empty when the fit carries none: the engine accepts that only when every
+    # The engine matches each row on its pair, not its position (#486). Empty
+    # when the fit carries none: the engine accepts that only when every
     # correlation is FIX, and refuses an estimated one (#480).
     residual_rho = .ferx_residual_rho_vec(fit),
+    residual_rho_pairs = .ferx_residual_rho_pairs(fit),
     # The IOV occasion rule the fit derived its occasions with, so a rule
     # passed only through `ferx_fit(settings = )` reaches predict / simulate /
     # npde, as it reaches ferx_sir() / ferx_covariance() (#512, #523). "" for a
@@ -420,6 +422,34 @@ validate_fit_for_params <- function(fit) {
   rc <- fit$residual_correlations
   if (is.data.frame(rc) && nrow(rc) > 0L) return(as.numeric(rc$rho))
   numeric(0)
+}
+
+# The 1-based (sigma_i, sigma_j) pair of each entry of
+# .ferx_residual_rho_vec(), flattened i1, j1, i2, j2, ... for the FFI. The
+# engine matches every rho to the model's correlation on this pair rather than
+# by row position, so a reordered frame keeps each block at its own rho (#486).
+# A frame without the two columns sends no pairs, which the engine refuses.
+.ferx_residual_rho_pairs <- function(fit) {
+  rc <- fit$residual_correlations
+  if (!is.data.frame(rc) || nrow(rc) == 0L) return(integer(0))
+  if (is.null(rc$sigma_i) || is.null(rc$sigma_j)) return(integer(0))
+  i <- suppressWarnings(as.integer(rc$sigma_i))
+  j <- suppressWarnings(as.integer(rc$sigma_j))
+  as.vector(rbind(i, j))
+}
+
+# For each row of a residual_correlations frame, the position of the same
+# (sigma_i, sigma_j) pair - in either orientation - among the engine's pairs
+# `i`, `j`; NA for a row the engine does not report. Used to read
+# per-correlation engine output, which comes in the model's declaration order,
+# back onto a frame the user may have reordered (#486).
+.ferx_residual_corr_match <- function(rc, i, j) {
+  i <- as.integer(i %||% integer())
+  j <- as.integer(j %||% integer())
+  ri <- as.integer(rc$sigma_i)
+  rj <- as.integer(rc$sigma_j)
+  key <- function(a, b) paste(pmin(a, b), pmax(a, b))
+  match(key(ri, rj), key(i, j))
 }
 
 # The prior half of a fit's objective, for the FFI.

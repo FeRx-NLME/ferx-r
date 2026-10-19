@@ -838,6 +838,7 @@ fn ferx_rust_simulate_from_fit(
     omega_iov_flat: Vec<f64>,
     omega_iov_dim: i32,
     residual_rho: Vec<f64>,
+    residual_rho_pairs: Vec<i32>,
     fit_bindings: List,
     iov_occasion: &str,
     n_sim: i32,
@@ -893,6 +894,7 @@ fn ferx_rust_simulate_from_fit(
             &omega_iov_flat,
             omega_iov_dim,
             &residual_rho,
+            &residual_rho_pairs,
         ) {
             Ok(p) => p,
             Err(e) => return Err(e),
@@ -1168,8 +1170,11 @@ fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult) -> Robj
 ///   (`n_resamples * n_packed` values; empty when not using SIR mode)
 /// @param sir_resamples_n Number of SIR resamples (rows)
 /// @param sir_resamples_dim Packed-parameter dimension (columns)
-/// @param residual_rho Fitted `block_sigma` residual correlations, in model
-///   declaration order (empty when the model declares none)
+/// @param residual_rho Fitted `block_sigma` residual correlations (empty when
+///   the model declares none), one per row of `fit$residual_correlations`
+/// @param residual_rho_pairs The 1-based `(sigma_i, sigma_j)` pair of each
+///   entry of `residual_rho`, flattened `i1, j1, i2, j2, ...`; matched against
+///   the model's declared pairs, so the row order does not matter
 /// @param n_uncertainty_draws Number of parameter sets to draw from the
 ///   uncertainty distribution
 /// @param n_sim_per_draw Number of eta/eps replicates per parameter draw
@@ -1196,6 +1201,7 @@ fn ferx_rust_simulate_with_uncertainty(
     sir_resamples_n: i32,
     sir_resamples_dim: i32,
     residual_rho: Vec<f64>,
+    residual_rho_pairs: Vec<i32>,
     fit_bindings: List,
     iov_occasion: &str,
     n_uncertainty_draws: i32,
@@ -1263,6 +1269,7 @@ fn ferx_rust_simulate_with_uncertainty(
                 sir_resamples_n,
                 sir_resamples_dim,
                 &residual_rho,
+                &residual_rho_pairs,
             ) {
                 Ok(f) => f,
                 Err(e) => return Err(e),
@@ -1384,6 +1391,7 @@ fn ferx_rust_predict_from_fit(
     omega_iov_flat: Vec<f64>,
     omega_iov_dim: i32,
     residual_rho: Vec<f64>,
+    residual_rho_pairs: Vec<i32>,
     fit_bindings: List,
     iov_occasion: &str,
 ) -> Robj {
@@ -1431,6 +1439,7 @@ fn ferx_rust_predict_from_fit(
             &omega_iov_flat,
             omega_iov_dim,
             &residual_rho,
+            &residual_rho_pairs,
         ) {
             Ok(p) => p,
             Err(e) => return Err(e),
@@ -1566,6 +1575,7 @@ fn ferx_rust_predict_survival_from_fit(
     omega_iov_flat: Vec<f64>,
     omega_iov_dim: i32,
     residual_rho: Vec<f64>,
+    residual_rho_pairs: Vec<i32>,
     fit_bindings: List,
     iov_occasion: &str,
 ) -> Robj {
@@ -1608,6 +1618,7 @@ fn ferx_rust_predict_survival_from_fit(
             &omega_iov_flat,
             omega_iov_dim,
             &residual_rho,
+            &residual_rho_pairs,
         ) {
             Ok(p) => p,
             Err(e) => return Err(e),
@@ -1670,6 +1681,7 @@ fn ferx_rust_npde_from_fit(
     omega_iov_flat: Vec<f64>,
     omega_iov_dim: i32,
     residual_rho: Vec<f64>,
+    residual_rho_pairs: Vec<i32>,
     fit_bindings: List,
     reader_settings: &str,
     model_is_fits: bool,
@@ -1758,6 +1770,7 @@ fn ferx_rust_npde_from_fit(
             &omega_iov_flat,
             omega_iov_dim,
             &residual_rho,
+            &residual_rho_pairs,
         ) {
             Ok(p) => p,
             Err(e) => return Err(e),
@@ -2748,15 +2761,22 @@ fn residual_correlation_label(sigma_names: &[String], c: &ResidualCorrelation) -
 // the twin of `omega_iov_from_fit`. The (sigma_i, sigma_j) pairing is
 // structural and comes from the parsed model; the value is fitted, so taking it
 // from the model would rebuild the fit at its declared *initial* correlation
-// after the optimizer moved it. `rho` is `fit$residual_correlations$rho` in
-// declaration order. An empty `rho` is accepted only when every correlation is
-// `FIX` - its fitted value is the declared one by construction; an estimated
+// after the optimizer moved it. `rho` is `fit$residual_correlations$rho` and
+// `pairs` the same rows' 1-based `(sigma_i, sigma_j)`, flattened. Each row is
+// matched to the declared correlation with that pair, in either orientation,
+// never by position: a reordered frame (sorted by name, say) would otherwise
+// rebuild each block at another block's rho (#486). A row whose pair the model
+// does not declare, a pair given twice and a declared pair with no row are
+// refused. An empty `rho` is accepted only when every correlation is `FIX` -
+// its fitted value is the declared one by construction; an estimated
 // correlation without a fitted value is refused (#480), as is a value outside
-// (-1, 1). An empty FIX-flag vector alongside correlations counts as free, as
-// in core's own validation. Errors carry no prefix; each caller adds its own.
+// (-1, 1). A FIX-flag vector whose length does not match the correlations
+// counts as all free, as in core's own validation and in `fit_result_to_list`.
+// Errors carry no prefix; each caller adds its own.
 fn residual_correlations_from_fit(
     model: &CompiledModel,
     rho: &[f64],
+    pairs: &[i32],
 ) -> std::result::Result<Vec<ResidualCorrelation>, String> {
     let p = &model.default_params;
     let mut rc = p.residual_correlations.clone();
@@ -2799,12 +2819,59 @@ fn residual_correlations_from_fit(
     }
     if rho.len() != rc.len() {
         return Err(format!(
-            "residual_rho length {} does not match the model's {} residual correlation(s)",
+            "fit$residual_correlations has {} row(s), but the model declares {} block_sigma \
+             correlation(s)",
             rho.len(),
             rc.len()
         ));
     }
-    for (c, &r) in rc.iter_mut().zip(rho.iter()) {
+    if pairs.len() != 2 * rho.len() {
+        return Err(
+            "fit$residual_correlations needs integer sigma_i and sigma_j columns, one pair \
+             per rho, to match each row to the model's block_sigma correlation"
+                .to_string(),
+        );
+    }
+    // Model index of each row; `None` until a row claims it, to catch a pair
+    // given twice.
+    let mut row_of: Vec<Option<usize>> = vec![None; rc.len()];
+    for (row, (pair, &r)) in pairs.chunks_exact(2).zip(rho.iter()).enumerate() {
+        let (a, b) = (pair[0], pair[1]);
+        // R's NA_integer_ crosses as i32::MIN, below every valid index.
+        let shown = |v: i32| {
+            if v == i32::MIN {
+                "NA".to_string()
+            } else {
+                v.to_string()
+            }
+        };
+        let k = rc
+            .iter()
+            .position(|c| {
+                let (i, j) = (c.sigma_i as i64 + 1, c.sigma_j as i64 + 1);
+                (i, j) == (a as i64, b as i64) || (j, i) == (a as i64, b as i64)
+            })
+            .ok_or_else(|| {
+                let declared: Vec<String> = rc.iter().map(&label).collect();
+                format!(
+                    "fit$residual_correlations row {} pairs sigma_i = {}, sigma_j = {}, which \
+                     the model does not declare as a block_sigma correlation (it declares {})",
+                    row + 1,
+                    shown(a),
+                    shown(b),
+                    declared.join(", ")
+                )
+            })?;
+        if let Some(first) = row_of[k] {
+            return Err(format!(
+                "fit$residual_correlations rows {} and {} both give the block_sigma \
+                 correlation {}",
+                first + 1,
+                row + 1,
+                label(&rc[k])
+            ));
+        }
+        row_of[k] = Some(row);
         if !r.is_finite() || r.abs() >= 1.0 {
             // R's NA_real_ crosses the FFI as a NaN payload; name it as R does.
             let shown = if CanBeNA::is_na(&r) {
@@ -2816,16 +2883,25 @@ fn residual_correlations_from_fit(
                 "the block_sigma correlation {} has rho = {shown} in \
                  fit$residual_correlations$rho, which must be finite and strictly \
                  between -1 and 1",
-                label(c)
+                label(&rc[k])
             ));
         }
-        c.rho = r;
+        rc[k].rho = r;
+    }
+    // Equal lengths, every row declared and none repeated leave no declared
+    // pair without a row; kept so a later change to the checks above cannot
+    // silently leave one at its declared value.
+    if let Some(k) = row_of.iter().position(Option::is_none) {
+        return Err(format!(
+            "fit$residual_correlations has no row for the block_sigma correlation {}",
+            label(&rc[k])
+        ));
     }
     Ok(rc)
 }
 
-// `residual_rho` carries the fitted `block_sigma` correlations, in the order
-// the model declares them; see `residual_correlations_from_fit`.
+// `residual_rho` / `residual_rho_pairs` carry the fitted `block_sigma`
+// correlations and their sigma pairs; see `residual_correlations_from_fit`.
 fn params_from_fit(
     model: &CompiledModel,
     theta: &[f64],
@@ -2835,6 +2911,7 @@ fn params_from_fit(
     omega_iov_flat: &[f64],
     omega_iov_dim: i32,
     residual_rho: &[f64],
+    residual_rho_pairs: &[i32],
 ) -> std::result::Result<ModelParameters, String> {
     let template = &model.default_params;
 
@@ -2904,8 +2981,12 @@ fn params_from_fit(
         // into the parameter set. The pairing comes from the parsed model and
         // the value from the fit; a free correlation the fit carries no value
         // for is refused rather than rebuilt at its declared initial value.
-        residual_correlations: residual_correlations_from_fit(model, residual_rho)
-            .map_err(|e| format!("Fit error: {e}"))?,
+        residual_correlations: residual_correlations_from_fit(
+            model,
+            residual_rho,
+            residual_rho_pairs,
+        )
+        .map_err(|e| format!("Fit error: {e}"))?,
         residual_correlation_fixed: template.residual_correlation_fixed.clone(),
     })
 }
@@ -2931,6 +3012,7 @@ fn build_fit_result_for_uncertainty(
     sir_resamples_n: i32,
     sir_resamples_dim: i32,
     residual_rho: &[f64],
+    residual_rho_pairs: &[i32],
 ) -> std::result::Result<FitResult, String> {
     let template = &model.default_params;
     if theta.len() != template.theta.len() {
@@ -3017,7 +3099,7 @@ fn build_fit_result_for_uncertainty(
         omega_iov_from_fit(model, omega_iov_flat, omega_iov_dim)?.map(|m| m.matrix),
         covariance_matrix,
         sir_resamples_packed,
-        residual_correlations_from_fit(model, residual_rho)
+        residual_correlations_from_fit(model, residual_rho, residual_rho_pairs)
             .map_err(|e| format!("Uncertainty error: {e}"))?,
     ))
 }
@@ -3635,14 +3717,16 @@ fn fit_result_to_list(
         .map(|c| c.sigma_j as i32 + 1)
         .collect();
     let rho_values: Vec<f64> = result.residual_correlations.iter().map(|c| c.rho).collect();
-    // A pre-#847 fit recorded no FIX flags because every correlation was fixed
-    // by construction; that is what an empty vector means, so fill it as such.
+    // A FIX-flag vector whose length does not match the correlations (only a
+    // hand-built FitResult has one; the engine always fills it) reads as all
+    // free, as in core's validation and `residual_correlations_from_fit`, so
+    // the fit object and the from-fit paths agree on what was estimated (#486).
     let rho_fixed: Vec<bool> = if result.residual_correlation_fixed.len()
         == result.residual_correlations.len()
     {
         result.residual_correlation_fixed.clone()
     } else {
-        vec![true; result.residual_correlations.len()]
+        vec![false; result.residual_correlations.len()]
     };
     let se_rho: Vec<f64> = result
         .se_residual_correlations
@@ -5820,6 +5904,7 @@ struct FitSkeletonInputs<'a> {
     omega_iov_flat: &'a [f64],
     omega_iov_dim: i32,
     residual_rho: &'a [f64],
+    residual_rho_pairs: &'a [i32],
     eta_hats_flat: &'a [f64],
     subject_ids: &'a [String],
     /// `fit$iov_occasion`; "" when the fit carries none.
@@ -6482,8 +6567,9 @@ fn fit_skeleton(
     // both steps work at the fitted point, so the declared rho would centre
     // them on the wrong parameters. A free correlation without a fitted value
     // is refused, not filled from the model.
-    let residual_correlations_resolved = residual_correlations_from_fit(model, x.residual_rho)
-        .map_err(|e| format!("{entry_point}: {e}"))?;
+    let residual_correlations_resolved =
+        residual_correlations_from_fit(model, x.residual_rho, x.residual_rho_pairs)
+            .map_err(|e| format!("{entry_point}: {e}"))?;
 
     let mut fit = FitResult {
         // ferx-core main added a checkpoint-restore flag; neither step reads it.
@@ -6758,8 +6844,11 @@ fn fit_skeleton(
 /// @param omega_iov_dim Dimension of the IOV kappa covariance; 0 when no IOV.
 /// @param cov_matrix_flat Row-major flattened parameter covariance matrix.
 /// @param cov_matrix_dim Dimension of the covariance matrix.
-/// @param residual_rho Fitted `block_sigma` residual correlations, in model
-///   declaration order (empty when the model declares none).
+/// @param residual_rho Fitted `block_sigma` residual correlations (empty when
+///   the model declares none), one per row of `fit$residual_correlations`
+/// @param residual_rho_pairs The 1-based `(sigma_i, sigma_j)` pair of each
+///   entry of `residual_rho`, flattened `i1, j1, i2, j2, ...`; matched against
+///   the model's declared pairs, so the row order does not matter.
 /// @param eta_hats_flat Row-major flattened per-subject EBE etas (one row per
 ///   entry of `subject_ids`, n_eta columns).
 /// @param subject_ids The fit's subject IDs, verbatim and in fit order. The
@@ -6810,6 +6899,7 @@ fn ferx_rust_sir(
     omega_iov_flat: Vec<f64>,
     omega_iov_dim: i32,
     residual_rho: Vec<f64>,
+    residual_rho_pairs: Vec<i32>,
     cov_matrix_flat: Vec<f64>,
     cov_matrix_dim: i32,
     eta_hats_flat: Vec<f64>,
@@ -6866,6 +6956,7 @@ fn ferx_rust_sir(
             omega_iov_flat: &omega_iov_flat,
             omega_iov_dim,
             residual_rho: &residual_rho,
+            residual_rho_pairs: &residual_rho_pairs,
             eta_hats_flat: &eta_hats_flat,
             subject_ids: &subject_ids,
             iov_occasion,
@@ -6984,8 +7075,11 @@ fn ferx_rust_sir(
 /// @param sigma Vector of sigma point estimates.
 /// @param omega_iov_flat Row-major flattened IOV kappa omega matrix; empty when no IOV.
 /// @param omega_iov_dim Dimension of the IOV omega matrix; 0 when no IOV.
-/// @param residual_rho Fitted `block_sigma` residual correlations, in model
-///   declaration order (empty when the model declares none).
+/// @param residual_rho Fitted `block_sigma` residual correlations (empty when
+///   the model declares none), one per row of `fit$residual_correlations`
+/// @param residual_rho_pairs The 1-based `(sigma_i, sigma_j)` pair of each
+///   entry of `residual_rho`, flattened `i1, j1, i2, j2, ...`; matched against
+///   the model's declared pairs, so the row order does not matter.
 /// @param eta_hats_flat Row-major flattened per-subject EBE etas (one row per
 ///   entry of `subject_ids`, n_eta columns).
 /// @param subject_ids The fit's subject IDs, verbatim and in fit order. The
@@ -7029,6 +7123,7 @@ fn ferx_rust_covariance(
     omega_iov_flat: Vec<f64>,
     omega_iov_dim: i32,
     residual_rho: Vec<f64>,
+    residual_rho_pairs: Vec<i32>,
     eta_hats_flat: Vec<f64>,
     subject_ids: Vec<String>,
     iov_occasion: &str,
@@ -7081,6 +7176,7 @@ fn ferx_rust_covariance(
             omega_iov_flat: &omega_iov_flat,
             omega_iov_dim,
             residual_rho: &residual_rho,
+            residual_rho_pairs: &residual_rho_pairs,
             eta_hats_flat: &eta_hats_flat,
             subject_ids: &subject_ids,
             iov_occasion,
@@ -7159,11 +7255,24 @@ fn ferx_rust_covariance(
             // (ferx-core #1177) instead of keeping the pre-step NA.
             max_abs_correlation =
                 ferx_core::model_selection::max_abs_correlation(&new_fit).unwrap_or(f64::NAN),
-            // The `block_sigma` correlation SEs come out of the same step.
+            // The `block_sigma` correlation SEs come out of the same step, in
+            // the model's declaration order; their 1-based sigma pairs ship
+            // alongside so R writes each SE onto its own row of
+            // fit$residual_correlations, whatever that frame's order (#486).
             se_residual_correlation = new_fit
                 .se_residual_correlations
                 .clone()
                 .unwrap_or_default(),
+            se_residual_correlation_i = new_fit
+                .residual_correlations
+                .iter()
+                .map(|c| c.sigma_i as i32 + 1)
+                .collect::<Vec<i32>>(),
+            se_residual_correlation_j = new_fit
+                .residual_correlations
+                .iter()
+                .map(|c| c.sigma_j as i32 + 1)
+                .collect::<Vec<i32>>(),
             theta_levels = theta_levels,
             warnings = new_fit.warnings.clone()
         )
