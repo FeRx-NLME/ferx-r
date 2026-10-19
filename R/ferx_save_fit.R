@@ -300,7 +300,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   "method_chain", "prior_summary", "method_wall_times_secs",
   "nlopt_missing_algorithms", "warnings", "cov_eigenvalues", "eta_param_info",
   "theta_init", "sigma_init", "final_gradient", "covariate_names",
-  "input_columns", "packed_estimate",
+  "input_columns", "packed_estimate", "profiled_blocks",
   # ThetaWire / OmegaWire / SigmaWire
   "names", "estimates", "se", "fixed", "transform", "log_transformed",
   "shrinkage", "init_as_sd", "types", "residual_correlations",
@@ -663,6 +663,12 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   # fail rather than default. Assigned after the fact because `list(x = NULL)`
   # keeps the name and `null = "null"` would emit exactly that null.
   prior_rows <- .fitrx_prior_summary_to_wire(fit$prior_summary)
+  # ferx-core #1065: the level blocks the fit profiled. The engine omits the
+  # key for a fit without one (`skip_serializing_if`) and reads a missing key
+  # as none, but would refuse a null, so it is written only when non-empty.
+  if (length(fit$profiled_blocks)) {
+    wire$profiled_blocks <- as.character(fit$profiled_blocks)
+  }
   # A fit loaded from a pre-#366 bundle has its prior half recovered from the
   # stored AIC but no per-parameter report, so the halves are written on a
   # non-zero `ofv_prior` alone - otherwise re-saving such a fit would drop the

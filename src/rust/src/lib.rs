@@ -2244,11 +2244,14 @@ fn level_contrast_from_token(token: &str) -> std::result::Result<LevelContrast, 
 /// `sir_ci_theta` entries, a sum-to-zero dependent level's the delta-method
 /// standard error and the percentile interval of the negated sum. NA for a
 /// `ref` reference level, for every level without a covariance (`se`) or
-/// without kept SIR draws (`sir_lo`, `sir_hi`). Zero rows for a model with no
-/// level block.
+/// without kept SIR draws (`sir_lo`, `sir_hi`). `profiled` is TRUE on every
+/// level of a block the fit solved for rather than searched (ferx-core #1065),
+/// read from the fit's `profiled_blocks`. Zero rows for a model with no level
+/// block.
 fn level_bindings_to_r(
     model: &CompiledModel,
     bindings: &LevelBindings,
+    profiled_blocks: &[String],
     theta_names: &[String],
     theta: &[f64],
     covariance: Option<&DMatrix<f64>>,
@@ -2283,6 +2286,7 @@ fn level_bindings_to_r(
     let mut label: Vec<String> = Vec::new();
     let mut group: Vec<Option<i32>> = Vec::new();
     let mut contrast: Vec<String> = Vec::new();
+    let mut profiled: Vec<bool> = Vec::new();
     let mut theta_name: Vec<Option<String>> = Vec::new();
     let mut value: Vec<f64> = Vec::new();
     let mut se: Vec<Option<f64>> = Vec::new();
@@ -2305,6 +2309,7 @@ fn level_bindings_to_r(
             label.push(l.clone());
             group.push(b.groups.get(i).map(|g| *g as i32));
             contrast.push(level_contrast_token(b.contrast).to_string());
+            profiled.push(profiled_blocks.iter().any(|p| p == name));
             theta_name.push(theta_names.contains(&tn).then_some(tn));
             value.push(v.value);
             se.push(v.se);
@@ -2320,6 +2325,7 @@ fn level_bindings_to_r(
             ("label", label.into()),
             ("group", group.into()),
             ("contrast", contrast.into()),
+            ("profiled", profiled.into()),
             ("theta_name", theta_name.into()),
             ("value", value.into()),
             ("se", se.into()),
@@ -2404,6 +2410,7 @@ fn ferx_rust_theta_levels_from_fit(
         level_bindings_to_r(
             &parsed.model,
             &fitted.levels,
+            &profiled_blocks_from_r(&fit_bindings)?,
             &theta_names,
             &theta,
             covariance.as_ref(),
@@ -2470,6 +2477,18 @@ fn ferx_rust_fitrx_engine_resave(path: &str, out_path: &str) -> Robj {
             n,
         ))
     })
+}
+
+/// The fit's `profiled_blocks` (ferx-core #1065) from the `fit_bindings` list
+/// `.ferx_fit_binding_args()` builds; empty when the entry is absent.
+fn profiled_blocks_from_r(r: &List) -> std::result::Result<Vec<String>, String> {
+    match r.iter().find(|(k, _)| *k == "profiled_blocks") {
+        None => Ok(Vec::new()),
+        Some((_, v)) if v.is_null() => Ok(Vec::new()),
+        Some((_, v)) => v.as_string_vector().ok_or_else(|| {
+            "internal: `fit_bindings$profiled_blocks` is not a character vector".to_string()
+        }),
+    }
 }
 
 /// An R integer as R prints it: `NA_integer_` arrives as `i32::MIN`.
@@ -3273,8 +3292,8 @@ fn default_fit_result(
         // ferx-core #2021: set only by a fit that ran the exact linear
         // (matrix exponential) path; this one was synthesized, not run.
         ode_linear_exact: false,
-        // ferx-core #1065: no fit of a `profile` block exists yet (E_PROFILE_SCOPE until
-        // the profile solve lands), so a skeleton rebuilt from one carries none.
+        // ferx-core #1065: the uncertainty draws do not read which blocks were
+        // profiled; the fit's level values are already in `theta`.
         profiled_blocks: Vec::new(),
         n_threads_used: 1,
         nlopt_missing_algorithms: Vec::new(),
@@ -4319,6 +4338,7 @@ fn fit_result_to_list(
     let theta_levels = level_bindings_to_r(
         model,
         &bindings.levels,
+        &result.profiled_blocks,
         &theta_names,
         &result.theta,
         result.covariance_matrix.as_ref(),
@@ -4347,6 +4367,9 @@ fn fit_result_to_list(
         n_iterations = result.n_iterations as i32,
         theta = theta_values,
         theta_levels = theta_levels,
+        // The level blocks the fit solved for rather than searched (ferx-core
+        // #1065), in declaration order; empty for a fit without one.
+        profiled_blocks = result.profiled_blocks.clone(),
         // The `[covariate_model]` statistics the fit was bound with (ferx-r
         // #412); empty for a model that states none symbolically.
         covariate_stats = covariate_stats_to_r(&bindings.covariate_stats),
@@ -5219,13 +5242,21 @@ fn ferx_rust_compact_theta_blocks(theta_names: Vec<String>) -> List {
 /// (a scalar theta name cannot contain a bracket). `n` counts the block's
 /// thetas, the names given: a dependent `sum_to_zero` level is not one. It
 /// says nothing about which are FIX - a whole block can be (`(init, lower,
-/// upper, FIX)`), so it does not say "free" (#560 review, finding 2).
+/// upper, FIX)`), so it does not say "free" (#560 review, finding 2). A block
+/// in `profiled_blocks` (ferx-core #1065) reads `(n coefficients, profiled)`:
+/// its levels were solved for, not searched, and a block under the compact
+/// threshold has no THETA BLOCKS line to say so.
 ///
 /// @param theta_names Character, the fit's theta names in order.
+/// @param profiled_blocks Character, the fit's `profiled_blocks`; empty for a
+///   model without a fit.
 /// @return Character, one label per scalar theta or block.
 /// @export
 #[extendr]
-fn ferx_rust_structural_theta_labels(theta_names: Vec<String>) -> Vec<String> {
+fn ferx_rust_structural_theta_labels(
+    theta_names: Vec<String>,
+    profiled_blocks: Vec<String>,
+) -> Vec<String> {
     entry(move || {
         let block_of = |n: &str| -> Option<(String, String)> {
             n.strip_suffix(']')
@@ -5252,10 +5283,15 @@ fn ferx_rust_structural_theta_labels(theta_names: Vec<String>) -> Vec<String> {
                 .filter_map(|part| part.split_once('=').map(|(k, _)| k.trim()))
                 .collect();
             let noun = if n == 1 { "coefficient" } else { "coefficients" };
-            out.push(if keys.is_empty() {
-                format!("{block} ({n} {noun})")
+            let profiled = if profiled_blocks.contains(&block) {
+                ", profiled"
             } else {
-                format!("{block}[{}] ({n} {noun})", keys.join(", "))
+                ""
+            };
+            out.push(if keys.is_empty() {
+                format!("{block} ({n} {noun}{profiled})")
+            } else {
+                format!("{block}[{}] ({n} {noun}{profiled})", keys.join(", "))
             });
         }
         Ok(out)
@@ -6765,8 +6801,9 @@ fn fit_skeleton(
         // ferx-core #2021: set only by a fit that ran the exact linear
         // (matrix exponential) path; this one was synthesized, not run.
         ode_linear_exact: false,
-        // ferx-core #1065: no fit of a `profile` block exists yet (E_PROFILE_SCOPE until
-        // the profile solve lands), so a skeleton rebuilt from one carries none.
+        // ferx-core #1065: `ferx_rust_sir` / `ferx_rust_covariance` set the fit's own
+        // record on their skeleton; the engine's covariance replay of a profiled
+        // block reads the model's `profile` declarations, not this field.
         profiled_blocks: Vec::new(),
         n_threads_used: 1,
         nlopt_missing_algorithms: Vec::new(),
@@ -7016,7 +7053,8 @@ fn ferx_rust_sir(
             packed_estimate: &packed_estimate,
             bloq_method,
         };
-        let fit = fit_skeleton("ferx_sir", model, &inputs, Some(cov_mat))?;
+        let mut fit = fit_skeleton("ferx_sir", model, &inputs, Some(cov_mat))?;
+        fit.profiled_blocks = profiled_blocks_from_r(&fit_bindings)?;
 
         // Every SIR and scoring setting comes from the skeleton's records
         // (ferx-r #472): default options defer to them.
@@ -7058,6 +7096,7 @@ fn ferx_rust_sir(
         let theta_levels = level_bindings_to_r(
             model,
             &fitted.levels,
+            &fit.profiled_blocks,
             &new_fit.theta_names,
             &new_fit.theta,
             new_fit.covariance_matrix.as_ref(),
@@ -7231,7 +7270,8 @@ fn ferx_rust_covariance(
             packed_estimate: &packed_estimate,
             bloq_method,
         };
-        let fit = fit_skeleton("ferx_covariance", model, &inputs, None)?;
+        let mut fit = fit_skeleton("ferx_covariance", model, &inputs, None)?;
+        fit.profiled_blocks = profiled_blocks_from_r(&fit_bindings)?;
 
         let mut opts = FitOptions::default();
         // run_covariance_step is ignored by run_covariance (calling it *is* the
@@ -7276,6 +7316,7 @@ fn ferx_rust_covariance(
         let theta_levels = level_bindings_to_r(
             model,
             &fitted.levels,
+            &fit.profiled_blocks,
             &new_fit.theta_names,
             &new_fit.theta,
             new_fit.covariance_matrix.as_ref(),
