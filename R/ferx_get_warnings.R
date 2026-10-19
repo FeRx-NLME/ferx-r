@@ -356,8 +356,8 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
 # "did not converge" ahead of "covariance step failed", so the profiled
 # covariance step's "Covariance step failed: the profile solve did not converge
 # at the estimates" is filed under `convergence` and would otherwise be told to
-# re-fit from new initial values. No optimizer convergence message begins with
-# "Covariance step".
+# re-fit from new initial values (ferx-core #2158). No optimizer convergence
+# message begins with "Covariance step".
 .ferx_is_covariance_warning <- function(category, message = "") {
   if (category %in% c("covariance_failed", "covariance_regularized",
                       "covariance_step", "covariance")) {
