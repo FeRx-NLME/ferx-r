@@ -369,9 +369,9 @@ ferx_load_fit <- function(path) {
       unlist(w$sigma$names, use.names = FALSE)
     ),
     sigma_fixed = as.logical(unlist(w$sigma$fixed %||% list(), use.names = FALSE)),
-    # Unnamed, as ferx_fit() returns it: print.ferx_fit() tests each element
-    # with identical(), which a named one never passes (#455).
-    # Named like `sigma`, as ferx_fit() names it (#417).
+    # Named like `sigma`, as ferx_fit() names it (#417); print.ferx_fit()
+    # reads each element with `[[`, so the name never reaches its
+    # identical() tests (#455).
     sigma_types = stats::setNames(
       as.character(unlist(w$sigma$types, use.names = FALSE)),
       unlist(w$sigma$names, use.names = FALSE)
