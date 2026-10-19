@@ -20,14 +20,34 @@
   }
 }
 
-# TRUE when a fit's estimation used FOCEI (interaction), FALSE for FOCE. The
-# engine never plumbs `fit$interaction` to R (fit_result_to_list() omits it, so
-# `isTRUE(fit$interaction)` is always FALSE), so we derive it from the method
-# chain. Mirrors the engine's rule: the interaction flag follows the last
-# *estimating* stage, and a trailing IMP (importance-sampling) stage is
-# diagnostic-only and skipped (ferx-core: chain.iter().rev().find(|m| **m != Imp)).
-# So c("focei", "imp") is interaction = TRUE.
+# The interaction flag the fit's objective ran under, handed to the engine by
+# ferx_covariance() and ferx_sir().
+#
+# `fit$method` is the last *estimating* stage (the engine skips an
+# evaluation-only IMP when it sets it), so it decides first. FOCE and FOCEI fix
+# the flag (FALSE / TRUE), whatever a fit records: a bundle ferx-r wrote before
+# #591 stores FALSE for every fit, because fit lists did not carry the flag
+# then. Every other method (SAEM, IMP, IMPMAP, VI, Gauss-Newton, Laplace)
+# inherits it from the options it ran under, so a recorded TRUE is taken as
+# it stands (#591): an SAEM fit, or the estimating IMP of a chain
+# `method = [foce, imp]`, chosen in a model file runs with interaction. A
+# recorded FALSE cannot be told from that legacy FALSE, so it falls through
+# to the chain reading below, as does a fit that records no method.
+#
+# The chain reading (legacy): the last stage that is not IMP, so
+# c("focei", "imp") is interaction = TRUE - right for an evaluation-only IMP,
+# and for an estimating one that inherited FOCEI's flag through ferx_fit().
 .ferx_fit_interaction <- function(fit) {
+  method <- toupper(as.character(fit$method %||% character()))
+  if (length(method) == 1L && !is.na(method) && nzchar(method)) {
+    if (method %in% c("FOCE", "FOCEI")) {
+      return(identical(method, "FOCEI"))
+    }
+    recorded <- fit$interaction
+    if (is.logical(recorded) && length(recorded) == 1L && isTRUE(recorded)) {
+      return(TRUE)
+    }
+  }
   mchain <- toupper(as.character(fit$method_chain %||% fit$method))
   if (length(mchain) == 0L) return(FALSE)
   estimating <- mchain[mchain != "IMP"]
@@ -37,6 +57,37 @@
     mchain[length(mchain)]
   }
   identical(last_method, "FOCEI")
+}
+
+# The fit's method and method chain in the engine's labels ("SAEM", "FOCEI",
+# ...), as ferx_covariance() and ferx_sir() hand them to the engine (#591).
+# The engine scores the objective of the fit's method and routes the
+# covariance step on it; "" / character() leave the old FOCE / FOCEI reading.
+.ferx_fit_method_args <- function(fit) {
+  method <- as.character(fit$method %||% "")
+  list(
+    method = if (length(method) == 1L && !is.na(method)) method else "",
+    method_chain = as.character(fit$method_chain %||% character())
+  )
+}
+
+# `fit$ebe_kappas` flattened for the engine (#591): the kappa columns row-major,
+# one row per (subject, occasion) in fit order, and the ID of each row. The
+# engine starts the covariance step from the EBEs the fit reports only when
+# their kappas come too; without them it re-solves cold. Empty for a fit
+# without IOV.
+.ferx_ebe_kappa_args <- function(fit) {
+  k <- fit$ebe_kappas
+  if (is.null(k) || !is.data.frame(k) || nrow(k) == 0L) {
+    return(list(ebe_kappas_flat = numeric(0), ebe_kappa_ids = character(0)))
+  }
+  cols <- setdiff(names(k), c("ID", "OCC"))
+  mat <- as.matrix(k[, cols, drop = FALSE])
+  storage.mode(mat) <- "double"
+  list(
+    ebe_kappas_flat = as.numeric(t(mat)),
+    ebe_kappa_ids = as.character(k$ID)
+  )
 }
 
 .ferx_state <- new.env(parent = emptyenv())

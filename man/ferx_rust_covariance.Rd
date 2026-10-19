@@ -29,6 +29,10 @@ ferx_rust_covariance(
   sir_settings,
   packed_estimate,
   bloq_method,
+  method,
+  method_chain,
+  ebe_kappas_flat,
+  ebe_kappa_ids,
   covariance_method,
   verbose,
   fit_bindings

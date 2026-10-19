@@ -757,6 +757,10 @@
 #'   Full slot descriptions:
 #'   \item{converged}{Logical; did the optimizer converge}
 #'   \item{method}{Estimation method used}
+#'   \item{interaction}{Logical; the interaction flag the fitted objective
+#'     ran under. `TRUE` for FOCEI and `FALSE` for FOCE; SAEM, VI and
+#'     Gauss-Newton inherit it from the options they ran under.
+#'     [ferx_covariance()] and [ferx_sir()] hand it back to the engine.}
 #'   \item{n_iterations}{Number of outer iterations run}
 #'   \item{ofv}{Objective function value (-2 log-likelihood). The
 #'     \emph{penalized} objective when the model declares a \code{prior(...)}

@@ -9,9 +9,9 @@
 cov_skip <- "covariance step did not converge - skipping"
 
 test_that(".ferx_fit_interaction follows the last estimating (non-IMP) stage", {
-  # fit$interaction is never plumbed to R, so the flag is derived from the
-  # method chain. A trailing IMP stage is diagnostic-only and must be skipped,
-  # otherwise the covariance step would differentiate the wrong (FOCE) NLL.
+  # FOCE / FOCEI fix the flag from the method chain. A trailing IMP stage is
+  # diagnostic-only and must be skipped, otherwise the covariance step would
+  # differentiate the wrong (FOCE) NLL.
   expect_true(ferx:::.ferx_fit_interaction(list(method_chain = "FOCEI")))
   expect_false(ferx:::.ferx_fit_interaction(list(method_chain = "FOCE")))
   # c("focei", "imp"): interaction TRUE despite the terminal IMP.
@@ -22,6 +22,31 @@ test_that(".ferx_fit_interaction follows the last estimating (non-IMP) stage", {
   # Degenerate / all-IMP chains don't error.
   expect_false(ferx:::.ferx_fit_interaction(list(method_chain = character(0))))
   expect_false(ferx:::.ferx_fit_interaction(list(method_chain = "IMP")))
+})
+
+test_that(".ferx_fit_interaction takes the recorded flag only where the method inherits it (#591)", {
+  f <- ferx:::.ferx_fit_interaction
+  # A bundle ferx-r wrote before #591 records FALSE for every fit: FOCEI wins.
+  expect_true(f(list(method = "FOCEI", method_chain = "FOCEI", interaction = FALSE)))
+  expect_false(f(list(method = "FOCE", method_chain = "FOCE", interaction = TRUE)))
+  # SAEM / Gauss-Newton inherit the flag, so a recorded TRUE decides...
+  expect_true(f(list(method = "SAEM", method_chain = "SAEM", interaction = TRUE)))
+  expect_true(f(list(method = "FOCE-GN", method_chain = "FOCE-GN", interaction = TRUE)))
+  expect_false(f(list(method = "SAEM", method_chain = "SAEM", interaction = FALSE)))
+  # ...and a fit without one keeps the old reading.
+  expect_false(f(list(method = "SAEM", method_chain = "SAEM")))
+  expect_false(f(list(method = "SAEM", method_chain = "SAEM", interaction = NA)))
+  # An estimating IMP (`fit$method` is "IMP") inherits the flag: a model-file
+  # `method = [foce, imp]` runs it with interaction, which the chain reading
+  # (last non-IMP stage, FOCE) would have called FALSE (#591 review 1).
+  expect_true(f(list(method = "IMP", method_chain = c("FOCE", "IMP"), interaction = TRUE)))
+  # ferx_fit(method = c("focei", "imp")) runs it with FOCEI's flag; a legacy
+  # record of FALSE falls back to the chain, which agrees.
+  expect_true(f(list(method = "IMP", method_chain = c("FOCEI", "IMP"), interaction = FALSE)))
+  # An evaluation-only IMP (`imp_eval_only`) leaves `fit$method` on the stage
+  # before it, which fixes the flag whatever the record says.
+  expect_false(f(list(method = "FOCE", method_chain = c("FOCE", "IMP"), interaction = TRUE)))
+  expect_true(f(list(method = "FOCEI", method_chain = c("FOCEI", "IMP"), interaction = FALSE)))
 })
 
 test_that("ferx_covariance surfaces cov-step warnings in the structured table", {
@@ -780,4 +805,142 @@ test_that("a legacy fit read with a `settings =` iov_column is refused, naming i
   # The same fit with its settings recorded runs.
   out <- suppressWarnings(ferx_covariance(rs_iov_fit()))
   expect_true(is.numeric(out$se_theta))
+})
+
+# -- #591: the step the fit took, from the fit's own EBEs ---------------------
+#
+# The skeleton fit ferx_covariance() rebuilds for the engine used to say FOCE /
+# FOCEI whatever method produced the estimates, and to carry no kappa EBEs. At
+# warfarin_iov's SAEM estimate the FOCE R matrix is not positive definite: the
+# in-fit step replaces the floored R by S^-1 (W_COV_NON_STATIONARY_ESTIMATE),
+# the standalone one kept it, and its SEs came out ~2000x the in-fit ones.
+#
+# The comparisons are identical(), not a tolerance. SAEM is stochastic, but the
+# randomness is in the estimates: both steps run at the same fit's estimates,
+# from the same EBEs, under the same scoring settings, so they are the same
+# computation (ferx-core #1847). Measured: identical with the kappa EBEs,
+# 6e-8 relative without them (a cold inner solve), ~2000x before the method was
+# passed.
+
+saem_iov_fit <- local({
+  fit <- NULL
+  function() {
+    if (is.null(fit)) {
+      ex <- ferx_example("warfarin_iov")
+      fit <<- suppressWarnings(
+        ferx_fit(ex$model, ex$data, method = "saem", covariance = TRUE)
+      )
+    }
+    fit
+  }
+})
+
+expect_same_covariance <- function(out, fit, info) {
+  expect_identical(out$covariance_status, fit$covariance_status, info = info)
+  for (f in c("se_theta", "se_omega", "se_sigma", "se_kappa")) {
+    expect_identical(out[[f]], fit[[f]], info = paste(info, f))
+  }
+  expect_identical(unname(out$cov_matrix), unname(fit$cov_matrix), info = info)
+}
+
+test_that("ferx_covariance on an SAEM IOV fit is identical to the in-fit step (#591)", {
+  fit <- saem_iov_fit()
+  skip_if(is.null(fit$cov_matrix), cov_skip)
+  expect_identical(fit$method, "SAEM")
+  expect_false(is.null(fit$ebe_kappas))
+  expect_same_covariance(suppressWarnings(ferx_covariance(fit)), fit, "live")
+
+  path <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(path), add = TRUE)
+  suppressWarnings(ferx_save_fit(fit, path))
+  loaded <- suppressWarnings(ferx_load_fit(path))
+  expect_identical(loaded$interaction, fit$interaction)
+  expect_same_covariance(suppressWarnings(ferx_covariance(loaded)), fit, "loaded")
+})
+
+test_that("ferx_covariance on a model-file `method = saem` IOV fit keeps its interaction (#591)", {
+  # A method chosen in [fit_options] runs SAEM with the options' interaction
+  # (TRUE), where `method = "saem"` from R runs it with FALSE. R used to read
+  # FALSE for every SAEM fit; fit$interaction now carries the fit's own.
+  ex <- ferx_example("warfarin_iov")
+  txt <- readLines(ex$model)
+  out_txt <- sub("method\\s*=\\s*foce[a-z]*", "method = saem", txt)
+  expect_identical(sum(out_txt != txt), 1L)
+  model <- tempfile(fileext = ".ferx")
+  on.exit(unlink(model), add = TRUE)
+  writeLines(out_txt, model)
+  fit <- suppressWarnings(ferx_fit(model, ex$data, covariance = TRUE))
+  skip_if(is.null(fit$cov_matrix), cov_skip)
+  expect_identical(fit$method, "SAEM")
+  expect_true(fit$interaction)
+  expect_same_covariance(suppressWarnings(ferx_covariance(fit)), fit, "model-file saem")
+})
+
+test_that("ferx_covariance on a Gauss-Newton IOV fit is identical to the in-fit step (#591)", {
+  # one_cpt_transit_iov, where GN converges (it does not on warfarin_iov).
+  ex <- ferx_example("one_cpt_transit_iov")
+  fit <- suppressWarnings(ferx_fit(ex$model, ex$data, method = "gn", covariance = TRUE))
+  expect_true(fit$converged)
+  skip_if(is.null(fit$cov_matrix), cov_skip)
+  expect_identical(fit$method, "FOCE-GN")
+  expect_false(is.null(fit$ebe_kappas))
+  expect_same_covariance(suppressWarnings(ferx_covariance(fit)), fit, "gn")
+})
+
+test_that("ferx_covariance on a model-file `method = [foce, imp]` fit keeps the IMP's interaction (#591)", {
+  # The chain's IMP stage estimates, so `fit$method` is "IMP" and it ran with
+  # the options' interaction (TRUE). Read off the chain's last non-IMP stage
+  # (FOCE) the flag was FALSE, and the standard errors 8% off (measured).
+  ex <- ferx_example("warfarin")
+  txt <- readLines(ex$model)
+  out_txt <- sub("method\\s*=\\s*foce[a-z]*", "method = [foce, imp]", txt)
+  expect_identical(sum(out_txt != txt), 1L)
+  model <- tempfile(fileext = ".ferx")
+  on.exit(unlink(model), add = TRUE)
+  writeLines(out_txt, model)
+  fit <- suppressWarnings(ferx_fit(model, ex$data, covariance = TRUE))
+  skip_if(is.null(fit$cov_matrix), cov_skip)
+  expect_identical(fit$method, "IMP")
+  expect_identical(fit$method_chain, c("FOCE", "IMP"))
+  expect_true(fit$interaction)
+  expect_true(ferx:::.ferx_fit_interaction(fit))
+  expect_same_covariance(suppressWarnings(ferx_covariance(fit)), fit, "model-file [foce, imp]")
+})
+
+test_that("ferx_covariance refuses kappa EBEs that do not line up with the subjects (#591)", {
+  fit <- saem_iov_fit()
+  # A subject with no rows is refused here. A subject with the wrong number
+  # of occasions is the engine's to catch: it does not line up with the
+  # occasions it re-reads, and the step starts from a cold inner solve.
+  short <- fit
+  last <- utils::tail(short$ebe_kappas$ID, 1L)
+  short$ebe_kappas <- short$ebe_kappas[short$ebe_kappas$ID != last, , drop = FALSE]
+  expect_error(ferx_covariance(short),
+               "^ferx_covariance: fit\\$ebe_kappas has no rows for subject")
+  extra <- fit
+  extra$ebe_kappas <- rbind(extra$ebe_kappas, extra$ebe_kappas[1L, , drop = FALSE])
+  expect_error(ferx_covariance(extra),
+               "^ferx_covariance: fit\\$ebe_kappas row [0-9]+ .* does not belong")
+})
+
+test_that("ferx_sir and ferx_covariance hand the engine the fit's method and kappa EBEs (#591)", {
+  fit <- saem_iov_fit()
+  skip_if(is.null(fit$cov_matrix), cov_skip)
+  seen <- list()
+  capture <- function(...) {
+    seen[[length(seen) + 1L]] <<- list(...)
+    stop("captured")
+  }
+  mockery::stub(ferx_sir, "ferx_rust_sir", capture)
+  mockery::stub(ferx_covariance, "ferx_rust_covariance", capture)
+  expect_error(suppressWarnings(ferx_sir(fit)), "captured")
+  expect_error(suppressWarnings(ferx_covariance(fit)), "captured")
+  kcols <- setdiff(names(fit$ebe_kappas), c("ID", "OCC"))
+  for (args in seen) {
+    expect_identical(args$method, "SAEM")
+    expect_identical(args$method_chain, "SAEM")
+    expect_identical(args$ebe_kappa_ids, as.character(fit$ebe_kappas$ID))
+    expect_identical(args$ebe_kappas_flat,
+                     as.numeric(t(as.matrix(fit$ebe_kappas[, kcols, drop = FALSE]))))
+  }
 })

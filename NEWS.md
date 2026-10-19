@@ -157,10 +157,9 @@
     warm-started solves, and `ferx_covariance()` restarted them from a cold
     solve, so their standard errors could differ from the fit's by up to
     3.5e-7 relative; they now start from the reported EBEs. A fit with
-    `kappa` (IOV) still restarts cold, because R does not pass the fit's
-    kappa estimates to the engine: FOCE / FOCEI stay exact, but a SAEM IOV
-    fit's `ferx_covariance()` standard errors can be far from the in-fit ones
-    ([#591](https://github.com/FeRx-NLME/ferx-r/issues/591)). ferx-core's own
+    `kappa` (IOV) does too since
+    [#591](https://github.com/FeRx-NLME/ferx-r/issues/591) (under Bug
+    fixes). ferx-core's own
     `.fitrx` writer now stores every CSV double (EBEs, kappas including each
     level's `ebes_kappa_<LEVEL>.csv`, predictions, conditional distribution)
     as the shortest text that reads back as the same value, as
@@ -1339,6 +1338,27 @@
   MBMA data is licensed CC BY-NC.
 
 ## Bug fixes
+
+- **`ferx_covariance()` on an SAEM, Gauss-Newton or VI fit takes the step
+  the fit took, and with `kappa` (IOV) starts from the fit's kappa EBEs**
+  ([#591](https://github.com/FeRx-NLME/ferx-r/issues/591)). The fit
+  `ferx_covariance()` and `ferx_sir()` rebuild for the engine always said
+  FOCE or FOCEI, whatever method produced the estimates. The engine routes
+  the covariance step on the method: at an SAEM estimate, where the FOCE R
+  matrix need not be positive definite, the in-fit step replaces an
+  eigenvalue-floored R by S^-1 (`W_COV_NON_STATIONARY_ESTIMATE`), and the
+  standalone step kept the floored R. On `warfarin_iov` with
+  `method = "saem"` the standard errors came out about 2000x the in-fit
+  ones (TVCL 19.4 against 0.0094) with `covariance_status` `"computed"`.
+  Both now hand the engine `fit$method` / `fit$method_chain`, and
+  `ferx_covariance()` also `fit$ebe_kappas`, without which an IOV fit
+  restarted from a cold inner solve (a 6e-8 relative difference on that
+  fit). `ferx_covariance(fit)` is now `identical()` to the in-fit step on
+  SAEM, Gauss-Newton, FOCE and FOCEI IOV fits, live and after
+  `ferx_load_fit()`. Fit lists now carry `fit$interaction`, the flag the
+  objective ran under: SAEM, VI and Gauss-Newton inherit it, so an SAEM fit
+  through a model file's `method = saem` runs with interaction, which R
+  used to read as `FALSE`.
 
 - **The covariance warnings of a profiled theta level block get their own
   guidance in `ferx_get_warnings()`.** The eight messages
