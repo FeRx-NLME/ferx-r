@@ -22,14 +22,18 @@
     the block `(n coefficients, profiled)` on its Structural line and
     `profiled (not searched)` on its THETA BLOCKS line. `ferx_save_fit()` /
     `ferx_load_fit()` carry the record as ferx-core's `.fitrx` does, and
-    `ferx_covariance()` repeats the profiled covariance step, live or
-    reloaded (to 4e-6 relative). A profiled block takes no bounds. Refused,
-    with the code on `e$code`: a bounded block, a method other than `foce` /
-    `focei`, a non-additive residual error, a non-Gaussian endpoint,
-    `covariance_method = "s"` / `"rsr"`, `trust_region` / `mma` /
-    `global_search` and priors (`E_PROFILE_SCOPE`); a block no prediction
-    reads, or one not read linearly (`E_PROFILE_NOT_LINEAR`). A residual
-    `correlation` line next to a profiled block is still refused.
+    `ferx_covariance()` repeats the profiled `covariance_method = "r"` step,
+    live or reloaded (to 4e-6 relative). It has no `"s"` / `"rsr"` step on
+    such a fit: those return no standard errors, with the reason in
+    `fit$warnings` rather than an error. A profiled block takes no bounds.
+    `ferx_fit()` refuses, with `E_PROFILE_SCOPE` on `e$code`: a bounded
+    block; a method other than `foce` / `focei`, or `n_agq > 1`; a TTE,
+    binary or other non-Gaussian endpoint; a residual error other than
+    additive, or a log-transformed (LTBS) one; censored rows scored by M3; a
+    residual `correlation` line; a `[mixture]`, a `[diffusion]` block or a
+    FREM covariate model; `covariance_method = "s"` / `"rsr"`;
+    `trust_region` / `mma`, `global_search` and priors. A block no prediction
+    reads, or one not read linearly, is `E_PROFILE_NOT_LINEAR`.
   - **`optimizer = "auto"` takes L-BFGS on a `kappa` model with a residual
     `correlation` line**
     ([ferx-core #2122](https://github.com/FeRx-NLME/ferx-core/issues/2122),

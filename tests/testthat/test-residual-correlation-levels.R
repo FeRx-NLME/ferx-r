@@ -14,9 +14,10 @@
 # tolerance short of the optimum at a point that moved with the platform and
 # the start (mbma_placebo car1: 89.82 on macOS, 99.18 on Linux from RHO = 0.3;
 # 100.01 / 118.43 from 0.01), each reported as converged. Since ferx-core
-# #2127 (#2122) `auto` takes L-BFGS on this route, which reaches 89.451278
-# (RHO 0.7598) from every start on both platforms; on nested_levels_3 ar1 it
-# is 105.639739 (RHO 0.11512). The fits below run on the default optimizer,
+# #2127 (#2122) `auto` takes L-BFGS on this route. With an explicit
+# nlopt_lbfgs it reached 89.451278 (RHO 0.7598) from RHO = 0.01 and 0.3 on
+# macOS and Linux (#592); under `auto` it was measured from 0.01 and 0.6 on
+# macOS. On nested_levels_3 ar1 it is 105.639739 (RHO 0.11512). The fits below run on the default optimizer,
 # and the optima are pinned to those values.
 
 quiet <- function(x) suppressWarnings(suppressMessages(x))

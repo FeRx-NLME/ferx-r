@@ -384,8 +384,13 @@ validate_fit_for_params <- function(fit) {
     new$block, new$index, new$label, new$group, new$contrast, new$theta_name,
     new$value, new$se, new$sir_lo, new$sir_hi, new$profiled
   )
+  # `profiled` (ferx-core #1065) is compared too: the glue rebuilds it from the
+  # fit's own `profiled_blocks`, so engine rows that disagree were laid out for
+  # another fit. Only when the fit has the column - an R object saved before
+  # it existed does not.
+  cols <- c(.ferx_theta_levels_layout, intersect("profiled", names(old)))
   same <- nrow(new) == nrow(old) && all(vapply(
-    .ferx_theta_levels_layout, function(k) identical(new[[k]], old[[k]]), logical(1L)
+    cols, function(k) identical(new[[k]], old[[k]]), logical(1L)
   ))
   if (!same) {
     stop(who, ": the engine laid the theta levels out differently from ",

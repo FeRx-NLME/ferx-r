@@ -111,6 +111,13 @@ test_that("ferx_covariance() repeats the profiled covariance step, live and relo
     expect_lt(rel(cv$theta_levels$se, p$theta_levels$se), 1e-4)
   }
   check(quiet(ferx_covariance(p)))
+  # The glue rebuilds the rows' `profiled` from the fit's record, and the
+  # refresh compares it: a record that disagrees with the fit's own column is
+  # refused, never written onto the wrong rows.
+  bad <- p
+  bad$profiled_blocks <- character(0)
+  expect_error(quiet(ferx_covariance(bad)), "laid the theta levels out differently",
+               fixed = TRUE)
 
   path <- withr::local_tempfile(fileext = ".fitrx")
   quiet(ferx_save_fit(p, path))
@@ -134,6 +141,16 @@ test_that("profiled_blocks travels in fit.json the way ferx-core writes it", {
   # Omitted, not null, on a fit without one: ferx-core's loader reads a
   # missing key as none and refuses a null.
   expect_false("profiled_blocks" %in% names(read_fit_json(f$base)))
+
+  # ferx-core's own loader reads the R-written key, and its writer writes it
+  # back where ferx_load_fit() finds it.
+  a <- withr::local_tempfile(fileext = ".fitrx")
+  b <- withr::local_tempfile(fileext = ".fitrx")
+  quiet(ferx_save_fit(f$profiled, a, include_data = TRUE))
+  quiet(getFromNamespace("ferx_rust_fitrx_engine_resave", "ferx")(a, b))
+  back <- quiet(ferx_load_fit(b))
+  expect_identical(back$profiled_blocks, "PLACEBO")
+  expect_true(all(back$theta_levels$profiled))
 })
 
 test_that("a bounded profiled block is refused with E_PROFILE_SCOPE", {

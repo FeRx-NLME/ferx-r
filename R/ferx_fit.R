@@ -457,8 +457,11 @@
 #'     \item{\code{optimizer}}{Population-level optimizer. One of
 #'       \code{"auto"} (default; picks \code{"nlopt_lbfgs"} when the exact
 #'       analytic FOCE/FOCEI gradient is available and \code{"bobyqa"} when
-#'       only finite differences are -- the fit reports the resolved pick as
-#'       \code{"auto (<resolved>)"}),
+#'       only finite differences are, except on two finite-difference routes
+#'       where BOBYQA stops short and \code{"nlopt_lbfgs"} is used instead: a
+#'       model with \code{kappa} and a residual \code{correlation} line, and
+#'       the outer search of a fit with a \code{profile} level block -- the
+#'       fit reports the resolved pick as \code{"auto (<resolved>)"}),
 #'       \code{"bobyqa"} (derivative-free, robust),
 #'       \code{"slsqp"} (sequential quadratic programming, gradient-based),
 #'       \code{"lbfgs"} / \code{"nlopt_lbfgs"} (limited-memory BFGS via
@@ -821,7 +824,9 @@
 #'     parameters; the OFV, the levels and their standard errors are those of
 #'     the unprofiled fit, and the structural standard errors account for the
 #'     levels. \code{\link{ferx_covariance}} repeats the profiled covariance
-#'     step.}
+#'     step with \code{covariance_method = "r"}, the only method it has; with
+#'     \code{"s"} or \code{"rsr"} it returns no standard errors and says so in
+#'     \code{fit$warnings}.}
 #'   \item{covariate_stats}{Data frame of the statistics a
 #'     \code{[covariate_model]} relation stated symbolically
 #'     (\code{center = median}, \code{ref = mode}, \code{levels = auto}) was
