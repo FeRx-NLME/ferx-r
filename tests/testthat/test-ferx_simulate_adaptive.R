@@ -375,3 +375,117 @@ test_that("a decision on a diverged ODE state is an error naming the state (ferx
     expect_null(err$code)
   }
 })
+
+# --- fit = (ferx-core #1594) --------------------------------------------------
+
+# A one-compartment IV ODE model with initial values `init` (TVCL, TVV, the
+# ETA_CL variance, the PROP sd), each written with 17 significant digits so a
+# fitted double comes back from the file bit for bit. The readout is Form C,
+# `y = central / V`: an `obs_scale` readout is wrong on the adaptive path until
+# ferx-core #2142. The controller titrates on the concentration, so a change of
+# parameters reaches the dose ledger as well as the trajectories.
+.write_fit_adaptive_model <- function(init) {
+  v <- sprintf("%.17g", init)
+  path <- tempfile(fileext = ".ferx")
+  writeLines(c(
+    "[parameters]",
+    paste0("  theta TVCL(", v[1], ", 0.01, 50.0)"),
+    paste0("  theta TVV(", v[2], ", 1.0, 500.0)"),
+    paste0("  omega ETA_CL ~ ", v[3]),
+    paste0("  sigma PROP ~ ", v[4], " (sd)"),
+    "[individual_parameters]",
+    "  CL = TVCL * exp(ETA_CL)",
+    "  V  = TVV",
+    "[structural_model]",
+    "  ode(states=[central])",
+    "[odes]",
+    "  d/dt(central) = -(CL / V) * central",
+    "[scaling]",
+    "  y = central / V",
+    "[error_model]",
+    "  DV ~ proportional(PROP)",
+    "[fit_options]",
+    "  maxiter = 2",
+    "  covariance = false",
+    "[adaptive_dosing]",
+    "  observe     = central / V",
+    "  at          = every 12 from 12 to 36",
+    "  start_dose  = 100",
+    "  route       = bolus(cmt=1)",
+    "  dose_bounds = [0, 400]",
+    "  confirm     = 1",
+    "  when signal < 2 : increase 25%"
+  ), path)
+  path
+}
+
+# Three subjects, a 100 mg base dose each, observed out to 48 h. The DVs were
+# made with CL near 3 and V near 15, away from the initial values the tests
+# start from, so two outer iterations move every parameter.
+.fit_adaptive_data <- function() {
+  path <- tempfile(fileext = ".csv")
+  writeLines(c(
+    "ID,TIME,DV,EVID,AMT,CMT,MDV",
+    "1,0,.,1,100,1,1", "1,1,5.9,0,.,1,0", "1,4,3.5,0,.,1,0",
+    "1,12,0.62,0,.,1,0", "1,24,.,0,.,1,0", "1,36,.,0,.,1,0", "1,48,.,0,.,1,0",
+    "2,0,.,1,100,1,1", "2,1,6.3,0,.,1,0", "2,4,4.4,0,.,1,0",
+    "2,12,1.1,0,.,1,0", "2,24,.,0,.,1,0", "2,36,.,0,.,1,0", "2,48,.,0,.,1,0",
+    "3,0,.,1,100,1,1", "3,1,6.1,0,.,1,0", "3,4,3.1,0,.,1,0",
+    "3,12,0.48,0,.,1,0", "3,24,.,0,.,1,0", "3,36,.,0,.,1,0", "3,48,.,0,.,1,0"
+  ), path)
+  path
+}
+
+# The 24-48 h rows carry no DV, so a simulation keeps them as design points and
+# says so (`W_DESIGN_DV`); that one warning is expected here, any other is not.
+.quiet_design_dv <- function(expr) {
+  withCallingHandlers(expr, warning = function(w) {
+    if (grepl("W_DESIGN_DV", conditionMessage(w), fixed = TRUE)) {
+      invokeRestart("muffleWarning")
+    }
+  })
+}
+
+# Before ferx-core #1594 the adaptive glue simulated at the model file's
+# initial values whatever the caller had fitted. `fit =` must run at the fitted
+# ones: the same output as a model file that declares them literally, and not
+# the output at the initial values. Mutation that reddens this: the from-fit
+# glue passing `&parsed.model.default_params` instead of the fitted params.
+test_that("fit = simulates at the fitted estimates, not the initial values", {
+  init <- c(2, 10, 0.09, 0.1)
+  model <- .write_fit_adaptive_model(init)
+  data <- .fit_adaptive_data()
+  fit <- ferx_fit(model, data, verbose = FALSE)
+  # The fixture tells the two apart only if the fit moved off every initial.
+  expect_true(all(fit$theta != init[1:2]))
+  expect_true(fit$omega[1, 1] != init[3])
+  expect_true(fit$sigma[[1]] != init[4])
+
+  run <- function(model, fit = NULL) {
+    .quiet_design_dv(
+      ferx_simulate_adaptive(model, data, n_sim = 2L, seed = 7L, fit = fit)
+    )
+  }
+  at_fit <- run(model, fit)
+  at_init <- run(model)
+  literal <- run(.write_fit_adaptive_model(
+    c(fit$theta[["TVCL"]], fit$theta[["TVV"]], fit$omega[1, 1], fit$sigma[[1]])
+  ))
+
+  for (tbl in c("trajectories", "doses", "decisions", "metrics")) {
+    expect_identical(at_fit[[tbl]], literal[[tbl]], label = tbl)
+  }
+  expect_false(isTRUE(all.equal(at_fit$trajectories$IPRED,
+                                at_init$trajectories$IPRED)))
+  expect_false(isTRUE(all.equal(at_fit$doses$AMT, at_init$doses$AMT)))
+})
+
+test_that("fit = with data omitted simulates the fit's own data", {
+  model <- .write_fit_adaptive_model(c(2, 10, 0.09, 0.1))
+  data <- .fit_adaptive_data()
+  fit <- ferx_fit(model, data, verbose = FALSE)
+  expect_identical(
+    .quiet_design_dv(ferx_simulate_adaptive(model, n_sim = 1L, seed = 3L, fit = fit)),
+    .quiet_design_dv(ferx_simulate_adaptive(model, data, n_sim = 1L, seed = 3L, fit = fit))
+  )
+})

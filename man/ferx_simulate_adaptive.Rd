@@ -10,7 +10,8 @@ ferx_simulate_adaptive(
   n_sim = 1L,
   seed = 42L,
   verify = TRUE,
-  max_decisions = 0L
+  max_decisions = 0L,
+  fit = NULL
 )
 }
 \arguments{
@@ -44,6 +45,17 @@ trajectory, so the result is not trustworthy.}
 
 \item{max_decisions}{Per-run cap on the number of decision points (the
 runaway / closed-loop guard). \code{0} (default) keeps the engine default.}
+
+\item{fit}{Optional \code{ferx_fit} result. When provided, the simulation
+runs at the fitted estimates (\code{fit$theta}, \code{fit$omega},
+\code{fit$sigma}, and the IOV omega when the model has one) instead of the
+model file's initial values, as in \code{\link{ferx_simulate}}. A theta
+level block is laid out as the fit laid it out (\code{fit$theta_levels}),
+so a design that observes only some of the fit's levels reads each level's
+own fitted value; a level the fit never observed is an error. Random
+effects are still drawn from the fitted omega - a subject's own
+individual estimates are not carried over. When \code{data} is omitted,
+the data the fit was fitted to is used.}
 }
 \value{
 A list of four data frames:
