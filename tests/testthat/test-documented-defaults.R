@@ -62,6 +62,19 @@ test_that("?ferx_fit documents ode_method's engine default, \"auto\" (#510)", {
   expect_identical(dd_documented_default(rd, "ode_method"), engine)
 })
 
+test_that("?ferx_fit's ode_method item links how \"auto\" picks a stepper (#510)", {
+  item <- dd_item(dd_rd_text(), "ode_method")
+  expect_true(grepl(paste0(
+    "\\href{https://ferx-nlme.org/ferx-core/model-file/ode-models.html",
+    "#letting-ferx-pick-the-stepper-ode_method--auto}"
+  ), item, fixed = TRUE))
+  # The stiff-vs-accuracy advice is scoped to choosing a named method, not
+  # written as if a named method were the default.
+  expect_true(grepl(
+    'for choosing a named method in place of \\code{"auto"}', item, fixed = TRUE
+  ))
+})
+
 test_that("?ferx_fit's scoring-setting defaults are the engine's (#510)", {
   rd <- dd_rd_text()
   engine <- ferx:::.ferx_default_settings("scoring_settings")
