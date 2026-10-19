@@ -21,17 +21,33 @@
 }
 
 # The interaction flag the fit's objective ran under, handed to the engine by
-# ferx_covariance() and ferx_sir(). FOCE and FOCEI fix it (FALSE / TRUE),
-# whatever a fit records: a bundle ferx-r wrote before #591 stores FALSE for
-# every fit, because fit lists did not carry the flag then. Every other method
-# (SAEM, IMP, IMPMAP, VI, Gauss-Newton, Laplace) inherits it from the options
-# it ran under, so the fit's recorded `fit$interaction` is used when present
-# (#591) - an SAEM fit made through a model file's `method = saem` runs with
-# interaction - and the old reading, FALSE, when it is not. The last
-# *estimating* stage decides, and a trailing IMP (importance-sampling) stage is
-# diagnostic-only and skipped (ferx-core: chain.iter().rev().find(|m| **m !=
-# Imp)), so c("focei", "imp") is interaction = TRUE.
+# ferx_covariance() and ferx_sir().
+#
+# `fit$method` is the last *estimating* stage (the engine skips an
+# evaluation-only IMP when it sets it), so it decides first. FOCE and FOCEI fix
+# the flag (FALSE / TRUE), whatever a fit records: a bundle ferx-r wrote before
+# #591 stores FALSE for every fit, because fit lists did not carry the flag
+# then. Every other method (SAEM, IMP, IMPMAP, VI, Gauss-Newton, Laplace)
+# inherits it from the options it ran under, so a recorded TRUE is taken as
+# it stands (#591): an SAEM fit, or the estimating IMP of a chain
+# `method = [foce, imp]`, chosen in a model file runs with interaction. A
+# recorded FALSE cannot be told from that legacy FALSE, so it falls through
+# to the chain reading below, as does a fit that records no method.
+#
+# The chain reading (legacy): the last stage that is not IMP, so
+# c("focei", "imp") is interaction = TRUE - right for an evaluation-only IMP,
+# and for an estimating one that inherited FOCEI's flag through ferx_fit().
 .ferx_fit_interaction <- function(fit) {
+  method <- toupper(as.character(fit$method %||% character()))
+  if (length(method) == 1L && !is.na(method) && nzchar(method)) {
+    if (method %in% c("FOCE", "FOCEI")) {
+      return(identical(method, "FOCEI"))
+    }
+    recorded <- fit$interaction
+    if (is.logical(recorded) && length(recorded) == 1L && isTRUE(recorded)) {
+      return(TRUE)
+    }
+  }
   mchain <- toupper(as.character(fit$method_chain %||% fit$method))
   if (length(mchain) == 0L) return(FALSE)
   estimating <- mchain[mchain != "IMP"]
@@ -40,11 +56,7 @@
   } else {
     mchain[length(mchain)]
   }
-  if (last_method %in% c("FOCE", "FOCEI")) {
-    return(identical(last_method, "FOCEI"))
-  }
-  recorded <- fit$interaction
-  is.logical(recorded) && length(recorded) == 1L && isTRUE(recorded)
+  identical(last_method, "FOCEI")
 }
 
 # The fit's method and method chain in the engine's labels ("SAEM", "FOCEI",

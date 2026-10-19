@@ -27,15 +27,26 @@ test_that(".ferx_fit_interaction follows the last estimating (non-IMP) stage", {
 test_that(".ferx_fit_interaction takes the recorded flag only where the method inherits it (#591)", {
   f <- ferx:::.ferx_fit_interaction
   # A bundle ferx-r wrote before #591 records FALSE for every fit: FOCEI wins.
-  expect_true(f(list(method_chain = "FOCEI", interaction = FALSE)))
-  expect_false(f(list(method_chain = "FOCE", interaction = TRUE)))
-  # SAEM / Gauss-Newton inherit the flag, so the record decides...
-  expect_true(f(list(method_chain = "SAEM", interaction = TRUE)))
-  expect_true(f(list(method_chain = "FOCE-GN", interaction = TRUE)))
-  expect_false(f(list(method_chain = "SAEM", interaction = FALSE)))
+  expect_true(f(list(method = "FOCEI", method_chain = "FOCEI", interaction = FALSE)))
+  expect_false(f(list(method = "FOCE", method_chain = "FOCE", interaction = TRUE)))
+  # SAEM / Gauss-Newton inherit the flag, so a recorded TRUE decides...
+  expect_true(f(list(method = "SAEM", method_chain = "SAEM", interaction = TRUE)))
+  expect_true(f(list(method = "FOCE-GN", method_chain = "FOCE-GN", interaction = TRUE)))
+  expect_false(f(list(method = "SAEM", method_chain = "SAEM", interaction = FALSE)))
   # ...and a fit without one keeps the old reading.
-  expect_false(f(list(method_chain = "SAEM")))
-  expect_false(f(list(method_chain = "SAEM", interaction = NA)))
+  expect_false(f(list(method = "SAEM", method_chain = "SAEM")))
+  expect_false(f(list(method = "SAEM", method_chain = "SAEM", interaction = NA)))
+  # An estimating IMP (`fit$method` is "IMP") inherits the flag: a model-file
+  # `method = [foce, imp]` runs it with interaction, which the chain reading
+  # (last non-IMP stage, FOCE) would have called FALSE (#591 review 1).
+  expect_true(f(list(method = "IMP", method_chain = c("FOCE", "IMP"), interaction = TRUE)))
+  # ferx_fit(method = c("focei", "imp")) runs it with FOCEI's flag; a legacy
+  # record of FALSE falls back to the chain, which agrees.
+  expect_true(f(list(method = "IMP", method_chain = c("FOCEI", "IMP"), interaction = FALSE)))
+  # An evaluation-only IMP (`imp_eval_only`) leaves `fit$method` on the stage
+  # before it, which fixes the flag whatever the record says.
+  expect_false(f(list(method = "FOCE", method_chain = c("FOCE", "IMP"), interaction = TRUE)))
+  expect_true(f(list(method = "FOCEI", method_chain = c("FOCEI", "IMP"), interaction = FALSE)))
 })
 
 test_that("ferx_covariance surfaces cov-step warnings in the structured table", {
@@ -866,11 +877,34 @@ test_that("ferx_covariance on a model-file `method = saem` IOV fit keeps its int
 })
 
 test_that("ferx_covariance on a Gauss-Newton IOV fit is identical to the in-fit step (#591)", {
-  ex <- ferx_example("warfarin_iov")
+  # one_cpt_transit_iov, where GN converges (it does not on warfarin_iov).
+  ex <- ferx_example("one_cpt_transit_iov")
   fit <- suppressWarnings(ferx_fit(ex$model, ex$data, method = "gn", covariance = TRUE))
+  expect_true(fit$converged)
   skip_if(is.null(fit$cov_matrix), cov_skip)
   expect_identical(fit$method, "FOCE-GN")
+  expect_false(is.null(fit$ebe_kappas))
   expect_same_covariance(suppressWarnings(ferx_covariance(fit)), fit, "gn")
+})
+
+test_that("ferx_covariance on a model-file `method = [foce, imp]` fit keeps the IMP's interaction (#591)", {
+  # The chain's IMP stage estimates, so `fit$method` is "IMP" and it ran with
+  # the options' interaction (TRUE). Read off the chain's last non-IMP stage
+  # (FOCE) the flag was FALSE, and the standard errors 8% off (measured).
+  ex <- ferx_example("warfarin")
+  txt <- readLines(ex$model)
+  out_txt <- sub("method\\s*=\\s*foce[a-z]*", "method = [foce, imp]", txt)
+  expect_identical(sum(out_txt != txt), 1L)
+  model <- tempfile(fileext = ".ferx")
+  on.exit(unlink(model), add = TRUE)
+  writeLines(out_txt, model)
+  fit <- suppressWarnings(ferx_fit(model, ex$data, covariance = TRUE))
+  skip_if(is.null(fit$cov_matrix), cov_skip)
+  expect_identical(fit$method, "IMP")
+  expect_identical(fit$method_chain, c("FOCE", "IMP"))
+  expect_true(fit$interaction)
+  expect_true(ferx:::.ferx_fit_interaction(fit))
+  expect_same_covariance(suppressWarnings(ferx_covariance(fit)), fit, "model-file [foce, imp]")
 })
 
 test_that("ferx_covariance refuses kappa EBEs that do not line up with the subjects (#591)", {
