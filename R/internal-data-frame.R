@@ -175,7 +175,7 @@
 }
 
 # `data` left out of a call that takes `fit =` (ferx_simulate(), ferx_predict(),
-# ferx_predict_survival()): the data that fit was fitted to, when it can still
+# ferx_predict_survival(), ferx_simulate_adaptive()): the data that fit was fitted to, when it can still
 # be found - its file, or its `data_source` written back - so a fit of a
 # data.frame simulates its own design; otherwise, as before, the model file's
 # `[data]` block.

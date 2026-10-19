@@ -480,6 +480,44 @@ test_that("fit = simulates at the fitted estimates, not the initial values", {
   expect_false(isTRUE(all.equal(at_fit$doses$AMT, at_init$doses$AMT)))
 })
 
+# The adaptive engine draws kappa per decision window (occasion = decision
+# index, ferx-core `api/adaptive.rs`) and never reads the data's occasion
+# labels, so the fit's IOV occasion rule cannot change the output. A fit that
+# records no rule (`fit$iov_occasion` absent, as on a .fitrx saved before
+# ferx-core #1783), from a model file that sets none and a design with no
+# occasion column, must simulate like the same fit with its rule recorded.
+# Mutation that reddens this: the from-fit arm calling `derive_fit_occasions`,
+# which refuses the unrecorded fit for want of occasion labels.
+test_that("fit = ignores the fit's IOV occasion rule (kappa per decision window)", {
+  model <- .write_fit_adaptive_model(c(2, 10, 0.09, 0.1))
+  text <- readLines(model)
+  text <- append(text, "  kappa KAPPA_CL ~ 0.04", after = grep("omega ETA_CL", text))
+  text <- sub("CL = TVCL * exp(ETA_CL)", "CL = TVCL * exp(ETA_CL + KAPPA_CL)",
+              text, fixed = TRUE)
+  writeLines(text, model)
+  data <- .fit_adaptive_data()
+  # One base dose per subject, so `time(6)` (observations at 1 and 4 h, then
+  # 12 h) gives the fit the two occasions it needs to identify kappa.
+  fit <- ferx_fit(model, data, verbose = FALSE,
+                  settings = list(iov_occasion = "time(6)"))
+  expect_identical(fit$iov_occasion, "time(6)")
+  legacy <- fit
+  legacy$iov_occasion <- NULL
+
+  run <- function(fit) {
+    .quiet_design_dv(
+      ferx_simulate_adaptive(model, data, n_sim = 2L, seed = 5L, fit = fit)
+    )
+  }
+  recorded <- run(fit)
+  expect_identical(run(legacy), recorded)
+  # The kappa draw reaches the output: a larger fitted kappa variance moves it.
+  wider <- fit
+  wider$omega_iov <- fit$omega_iov * 4
+  expect_false(isTRUE(all.equal(run(wider)$trajectories$IPRED,
+                                recorded$trajectories$IPRED)))
+})
+
 test_that("fit = with data omitted simulates the fit's own data", {
   model <- .write_fit_adaptive_model(c(2, 10, 0.09, 0.1))
   data <- .fit_adaptive_data()

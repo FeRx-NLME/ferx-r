@@ -20,7 +20,9 @@ block}
 
 \item{data}{Path to a NONMEM-format CSV, or a data.frame (see \code{\link{ferx_fit}}): an observation grid, any covariates,
 and optionally a pre-scheduled base regimen (dose rows). When omitted, the
-model file's \code{[data]} block (\code{path = ...}) is used.
+data \code{fit} was fitted to (when \code{fit} is given and its data can
+still be found), otherwise the model file's \code{[data]} block
+(\code{path = ...}).
 The \code{DV} column may be left empty (\code{.} / \code{NA}) on the
 sampling rows - the DV is what the simulation produces, so an empty cell
 means "simulate here" (a placeholder value is not needed). Rows marked
@@ -48,14 +50,16 @@ runaway / closed-loop guard). \code{0} (default) keeps the engine default.}
 
 \item{fit}{Optional \code{ferx_fit} result. When provided, the simulation
 runs at the fitted estimates (\code{fit$theta}, \code{fit$omega},
-\code{fit$sigma}, and the IOV omega when the model has one) instead of the
-model file's initial values, as in \code{\link{ferx_simulate}}. A theta
+\code{fit$sigma}, the IOV omega when the model has one, and the fitted
+\code{block_sigma} correlations) instead of the model file's initial
+values, as in \code{\link{ferx_simulate}}. A theta
 level block is laid out as the fit laid it out (\code{fit$theta_levels}),
 so a design that observes only some of the fit's levels reads each level's
 own fitted value; a level the fit never observed is an error. Random
 effects are still drawn from the fitted omega - a subject's own
-individual estimates are not carried over. When \code{data} is omitted,
-the data the fit was fitted to is used.}
+individual estimates are not carried over, and the per-occasion kappas
+are drawn per decision window, so the fit's IOV occasion rule plays no
+part.}
 }
 \value{
 A list of four data frames:

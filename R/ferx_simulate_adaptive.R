@@ -42,7 +42,9 @@
 #'   block
 #' @param data Path to a NONMEM-format CSV, or a data.frame (see \code{\link{ferx_fit}}): an observation grid, any covariates,
 #'   and optionally a pre-scheduled base regimen (dose rows). When omitted, the
-#'   model file's \code{[data]} block (\code{path = ...}) is used.
+#'   data \code{fit} was fitted to (when \code{fit} is given and its data can
+#'   still be found), otherwise the model file's \code{[data]} block
+#'   (\code{path = ...}).
 #'   The \code{DV} column may be left empty (\code{.} / \code{NA}) on the
 #'   sampling rows - the DV is what the simulation produces, so an empty cell
 #'   means "simulate here" (a placeholder value is not needed). Rows marked
@@ -65,14 +67,16 @@
 #'   runaway / closed-loop guard). \code{0} (default) keeps the engine default.
 #' @param fit Optional \code{ferx_fit} result. When provided, the simulation
 #'   runs at the fitted estimates (\code{fit$theta}, \code{fit$omega},
-#'   \code{fit$sigma}, and the IOV omega when the model has one) instead of the
-#'   model file's initial values, as in \code{\link{ferx_simulate}}. A theta
+#'   \code{fit$sigma}, the IOV omega when the model has one, and the fitted
+#'   \code{block_sigma} correlations) instead of the model file's initial
+#'   values, as in \code{\link{ferx_simulate}}. A theta
 #'   level block is laid out as the fit laid it out (\code{fit$theta_levels}),
 #'   so a design that observes only some of the fit's levels reads each level's
 #'   own fitted value; a level the fit never observed is an error. Random
 #'   effects are still drawn from the fitted omega - a subject's own
-#'   individual estimates are not carried over. When \code{data} is omitted,
-#'   the data the fit was fitted to is used.
+#'   individual estimates are not carried over, and the per-occasion kappas
+#'   are drawn per decision window, so the fit's IOV occasion rule plays no
+#'   part.
 #'
 #' @return A list of four data frames:
 #'   \describe{
@@ -152,8 +156,9 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
       model, data
     )
   } else {
-    # The fitted estimates, placed on the fit's theta layout and occasions
-    # exactly as `ferx_simulate(fit = )` places them (ferx-core #1594).
+    # The fitted estimates, placed on the fit's theta layout exactly as
+    # `ferx_simulate(fit = )` places them (ferx-core #1594). No occasion
+    # rule is passed: the adaptive engine draws kappa per decision window.
     fit_pieces <- validate_fit_for_params(fit)
     .ferx_engine_call(
       ferx_rust_simulate_adaptive_from_fit(
@@ -167,7 +172,6 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
         omega_iov_dim = fit_pieces$omega_iov_dim,
         residual_rho = fit_pieces$residual_rho,
         fit_bindings = fit_pieces$fit_bindings,
-        iov_occasion = fit_pieces$iov_occasion,
         n_sim = n_sim,
         seed = as.integer(seed),
         verify = verify_arg,

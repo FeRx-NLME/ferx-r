@@ -967,7 +967,9 @@ fn ferx_rust_simulate_adaptive(
 /// [`ferx_rust_simulate_adaptive`] at the fitted parameters rather than the
 /// model file's initial values (ferx-core #1594), as `ferx_rust_simulate_from_fit`
 /// is `ferx_rust_simulate` at them: the design is placed on the fit's theta
-/// layout and occasions before the fitted theta is read by position.
+/// layout before the fitted theta is read by position. It takes no
+/// `iov_occasion`: the adaptive engine keys kappa by decision window, not by
+/// the data's occasions.
 ///
 /// @param model_path Path to .ferx model file containing an `[adaptive_dosing]` block
 /// @param data_path Path to NONMEM-format CSV
@@ -981,7 +983,6 @@ fn ferx_rust_simulate_adaptive(
 /// @param residual_rho Fitted `block_sigma` correlations, in declaration order.
 /// @param fit_bindings The fit's data-derived bindings (theta level layout,
 ///   covariate statistics).
-/// @param iov_occasion `fit$iov_occasion`; "" when the fit records none.
 /// @param n_sim Number of replicates
 /// @param seed Random seed
 /// @param verify "true"/"false", as in `ferx_rust_simulate_adaptive`
@@ -1001,7 +1002,6 @@ fn ferx_rust_simulate_adaptive_from_fit(
     omega_iov_dim: i32,
     residual_rho: Vec<f64>,
     fit_bindings: List,
-    iov_occasion: &str,
     n_sim: i32,
     seed: i32,
     verify: &str,
@@ -1017,7 +1017,6 @@ fn ferx_rust_simulate_adaptive_from_fit(
             omega_iov_dim,
             residual_rho: &residual_rho,
             fitted: fit_bindings_from_r(&fit_bindings)?,
-            iov_occasion,
         };
         simulate_adaptive(model_path, data_path, n_sim, seed, verify, max_decisions, Some(fit))
     })
@@ -1033,7 +1032,6 @@ struct AdaptiveFit<'a> {
     omega_iov_dim: i32,
     residual_rho: &'a [f64],
     fitted: DataBindings,
-    iov_occasion: &'a str,
 }
 
 /// The body of both adaptive entry points: at the model file's initial values
@@ -1098,14 +1096,11 @@ fn simulate_adaptive(
             // theta by position (ferx-r #370); see `bind_design_from_fit`.
             bind_design_from_fit(&mut parsed, model_path, &mut population, &f.fitted)
                 .map_err(|e| e.refusal("ferx_simulate_adaptive: "))?;
-            // The occasions the fit derived, under its own rule (ferx-r #523);
-            // see `derive_fit_occasions`.
-            let notes = derive_fit_occasions(
-                "ferx_simulate_adaptive",
-                &parsed,
-                &mut population,
-                f.iov_occasion,
-            )?;
+            // No `derive_fit_occasions`, unlike the other from-fit paths: the
+            // adaptive engine draws kappa per decision window (occasion =
+            // decision index, ferx-core `api/adaptive.rs`) and never reads the
+            // data's occasion labels. Deriving them changed no output, but it
+            // refused a fit that records no rule (ferx-r #598 review).
             let params = params_from_fit(
                 &parsed.model,
                 f.theta,
@@ -1116,7 +1111,8 @@ fn simulate_adaptive(
                 f.omega_iov_dim,
                 f.residual_rho,
             )
-            .map_err(|e| format!("ferx_simulate_adaptive: {e}"))?;            (params, notes)
+            .map_err(|e| format!("ferx_simulate_adaptive: {e}"))?;
+            (params, Vec::new())
         }
     };
 

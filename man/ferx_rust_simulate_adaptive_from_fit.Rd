@@ -15,7 +15,6 @@ ferx_rust_simulate_adaptive_from_fit(
   omega_iov_dim,
   residual_rho,
   fit_bindings,
-  iov_occasion,
   n_sim,
   seed,
   verify,

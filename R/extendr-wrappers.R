@@ -39,8 +39,8 @@ ferx_rust_simulate_adaptive <- function(model_path, data_path, n_sim, seed, veri
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_simulate_adaptive_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, fit_bindings, iov_occasion, n_sim, seed, verify, max_decisions) {
-  .Call("wrap__ferx_rust_simulate_adaptive_from_fit", model_path, data_path, theta, omega_flat, as.integer(omega_dim), sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, fit_bindings, iov_occasion, as.integer(n_sim), as.integer(seed), verify, as.integer(max_decisions))
+ferx_rust_simulate_adaptive_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, fit_bindings, n_sim, seed, verify, max_decisions) {
+  .Call("wrap__ferx_rust_simulate_adaptive_from_fit", model_path, data_path, theta, omega_flat, as.integer(omega_dim), sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, fit_bindings, as.integer(n_sim), as.integer(seed), verify, as.integer(max_decisions))
 }
 
 #' @title Internal Rust backend binding

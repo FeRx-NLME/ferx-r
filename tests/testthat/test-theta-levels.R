@@ -1174,7 +1174,9 @@ test_that("T14c: ferx_simulate_adaptive(fit = ) reads each level's fitted theta"
   # Global sum-to-zero: study 3's level is minus the sum of the free two.
   p <- rep(c(-0.5, -(0.3 - 0.5)), each = 3L)
   expected <- 100 / 10 * exp(-(2 + p) / 10 * traj$TIME)
-  expect_equal(traj$IPRED, expected, tolerance = 1e-5)
+  # Measured at 27e6f11: max relative error 4.4e-16. Reading study 3 at a
+  # level of 0 instead is off by 0.21, so 1e-10 separates the two by far.
+  expect_equal(traj$IPRED, expected, tolerance = 1e-10)
   # A design level the fit never saw has no fitted theta. Bound on its own
   # levels, studies 1, 2 and 4 take the fit's theta count, so the design would
   # be simulated quietly with study 4 reading study 3's slot; on the fit's
@@ -1189,6 +1191,8 @@ test_that("T14c: ferx_simulate_adaptive(fit = ) reads each level's fitted theta"
   )
   expect_s3_class(err, "error")
   expect_match(conditionMessage(err), "`STUDY=4`", fixed = TRUE)
+  expect_s3_class(err, "ferx_engine_error")
+  expect_identical(err$code, "E_THETA_LEVEL_BINDING")
 })
 
 # --- R1: a tampered theta_levels is refused by the glue -------------------------
