@@ -386,15 +386,20 @@
 #'       whose right-hand side is affine in the states, reads no model time and
 #'       has no absorption forcing) exactly by the matrix exponential, with no
 #'       step size and no tolerance, and probes every other system for
-#'       stiffness, starting \code{"rk45"} unless it is stability-limited.
+#'       stiffness, starting \code{"rk45"} unless it is stability-limited;
+#'       see
+#'       \href{https://ferx-nlme.org/ferx-core/model-file/ode-models.html#letting-ferx-pick-the-stepper-ode_method--auto}{Letting ferx pick the stepper}
+#'       for how it decides.
 #'       \code{"linear"} asks for the exact path outright; a model that cannot
 #'       take it is refused with the reason (\code{E_ODE_METHOD_LINEAR} when
 #'       set through \code{settings}, a parse error from the model file).
 #'       Naming an integrator integrates even a linear system, so
 #'       \code{"rk45"} reproduces fits made before the exact path existed.
-#'       \code{fit$ode_linear_exact} says which route a fit took. There are
-#'       two independent reasons a fit's step size is small, and they want
-#'       opposite fixes, so diagnose before switching. If steps stay tiny
+#'       \code{fit$ode_linear_exact} says which route a fit took. The rest of
+#'       this entry is for choosing a named method in place of
+#'       \code{"auto"}. There are two independent reasons a fit's step size
+#'       is small, and they want opposite fixes, so diagnose before switching.
+#'       If steps stay tiny
 #'       whatever \code{ode_reltol} you ask for, the model is
 #'       \emph{stability}-limited (stiff -- fast reversible binding / TMDD,
 #'       Michaelis-Menten with \code{KM} far below observed concentrations, long
