@@ -49,6 +49,22 @@ survival \code{survival_all} (\eqn{S_\mathrm{all}(t)}), with
 \code{cif} \eqn{= 1 -} \code{survival} and \code{survival_all} \eqn{=}
 \code{survival}.
 }
+\section{Warnings not relayed yet}{
+
+Unlike \code{\link{ferx_predict}()}, this function does not yet report the
+engine's own findings for the run: parse warnings (an unreferenced theta,
+say), data-reader findings (a covariate missing for some subjects, a dose
+that never lands), the model/data checks, and the ODE solver diagnostics of
+a joint PK-TTE hazard. The occasion note above is the only thing
+\code{simulation_warnings} can carry, so a frame without that attribute
+does not mean the model and data are clean: \code{\link{ferx_fit}()} on the
+same model and data reports the parse, data-reader and model/data findings.
+The solver diagnostics belong to the pass that ran: a fit reports its own,
+and nothing yet reports this prediction's. The engine has no
+warnings-carrying form of its survival predictor yet (ferx-core #2164);
+once it does, these findings come back on the same attribute (\href{https://github.com/FeRx-NLME/ferx-r/issues/433}{#433}).
+}
+
 \section{Errors raised by the engine}{
 
 A model or dataset the engine refuses is an R error, never a \code{NULL}
