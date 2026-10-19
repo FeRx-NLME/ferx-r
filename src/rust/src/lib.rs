@@ -1854,7 +1854,11 @@ fn ferx_rust_npde_from_fit(
 /// A private copy of the data bytes `ferx_rust_fit` read, for core's
 /// path-only reader (ferx-r #585): the population is parsed from exactly the
 /// bytes `data_hash` names, whatever happens to the user's file meanwhile.
-/// Created with `create_new` under a per-process name, and removed on drop.
+/// The copy is of a dataset the user may keep owner-only, so it goes in R's
+/// session temporary directory (`tempdir()`: created 0700, removed when R
+/// exits, so a crash leaves nothing readable by others behind), created with
+/// `create_new` under a per-process name, owner-only (0600) on Unix, and is
+/// removed on drop.
 struct StagedData {
     path: std::path::PathBuf,
 }
@@ -1864,7 +1868,7 @@ impl StagedData {
         use std::io::Write;
         use std::sync::atomic::{AtomicU64, Ordering};
         static SEQ: AtomicU64 = AtomicU64::new(0);
-        let dir = std::env::temp_dir();
+        let dir = r_session_tempdir();
         for _ in 0..100 {
             let nanos = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -1875,11 +1879,14 @@ impl StagedData {
                 std::process::id(),
                 SEQ.fetch_add(1, Ordering::Relaxed)
             ));
-            let mut file = match std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&path)
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
             {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            let mut file = match options.open(&path) {
                 Ok(file) => file,
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
                 Err(e) => {
@@ -1899,11 +1906,52 @@ impl StagedData {
     }
 
     fn path(&self) -> &str {
-        // `temp_dir()` and the name are both valid UTF-8 on every platform R
+        // `tempdir()` and the name are both valid UTF-8 on every platform R
         // runs on; a lossy conversion would name a different file, so fall
         // back to the empty path (the read then fails loudly).
         self.path.to_str().unwrap_or("")
     }
+}
+
+/// R's per-session temporary directory, falling back to the system one only
+/// if R cannot be asked (never expected: the glue runs on R's thread).
+fn r_session_tempdir() -> std::path::PathBuf {
+    eval_string("base::tempdir()")
+        .ok()
+        .and_then(|dir| dir.as_str().map(std::path::PathBuf::from))
+        .unwrap_or_else(std::env::temp_dir)
+}
+
+/// Stage `bytes` exactly as `ferx_rust_fit` stages the data it read, and
+/// report the staged copy while it exists: its path, its Unix permission bits
+/// (`NA` elsewhere) and its bytes. The copy is removed before this returns.
+/// For the tests of ferx-r #585 only.
+///
+/// @param bytes A raw vector.
+/// @return A list with `path`, `mode` and `bytes`.
+/// @export
+#[extendr]
+fn ferx_rust_stage_data_probe(bytes: Raw) -> List {
+    entry(move || {
+        let staged = StagedData::write(bytes.as_slice())?;
+        let meta = std::fs::metadata(&staged.path).map_err(|e| e.to_string())?;
+        #[cfg(unix)]
+        let mode = {
+            use std::os::unix::fs::PermissionsExt;
+            Some((meta.permissions().mode() & 0o777) as i32)
+        };
+        #[cfg(not(unix))]
+        let mode: Option<i32> = {
+            let _ = meta;
+            None
+        };
+        let read = std::fs::read(&staged.path).map_err(|e| e.to_string())?;
+        Ok(list!(
+            path = staged.path().to_string(),
+            mode = mode,
+            bytes = Raw::from_bytes(&read)
+        ))
+    })
 }
 
 impl Drop for StagedData {
@@ -11980,6 +12028,7 @@ extendr_module! {
     fn ferx_rust_known_blocks;
     fn ferx_rust_sha256_text;
     fn ferx_rust_sha256_raw;
+    fn ferx_rust_stage_data_probe;
     fn ferx_rust_method_labels;
     fn ferx_rust_compact_theta_blocks;
     fn ferx_rust_kappa_rows;

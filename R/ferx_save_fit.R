@@ -392,27 +392,29 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   txt
 }
 
-# The bytes to bundle as data.csv: one read of `data_path`, when they hash to
-# `fit$data_hash` or the fit recorded no hash. A fit of a data.frame whose
-# file no longer matches is bundled from `fit$data_source` when that text
-# hashes. Anything else is refused with a `ferx_data_edited_error` naming the
-# file, before the bundle is written: the fit's data is gone, and a data.csv
-# its own `data_hash` does not name would make from-fit calls on the reloaded
-# fit refuse (or, without a hash check, use the wrong rows).
+# The bytes to bundle as data.csv. A fit of a data.frame carries the rows it
+# fitted in `fit$data_source`; when that text hashes to `fit$data_hash` (or
+# the fit recorded no hash) it is bundled without touching the cache file,
+# which may since have become unreadable. Otherwise one read of `data_path`,
+# when it hashes to `fit$data_hash` or the fit recorded no hash. Anything
+# else is refused with a `ferx_data_edited_error` naming the file, before the
+# bundle is written: the fit's data is gone, and a data.csv its own
+# `data_hash` does not name would make from-fit calls on the reloaded fit
+# refuse (or, without a hash check, use the wrong rows).
 .fitrx_fitted_data_bytes <- function(fit, data_path) {
-  bytes <- .fitrx_read_bytes(data_path)
   hash <- fit$data_hash
-  if (!is.character(hash) || length(hash) != 1L || is.na(hash) ||
-      !nzchar(hash)) {
-    return(bytes)
-  }
-  hash <- tolower(hash)
-  if (identical(ferx_rust_sha256_raw(bytes), hash)) return(bytes)
+  has_hash <- is.character(hash) && length(hash) == 1L && !is.na(hash) &&
+    nzchar(hash)
+  if (has_hash) hash <- tolower(hash)
   src <- fit$data_source
   if (is.character(src) && length(src) == 1L && !is.na(src)) {
     src_bytes <- charToRaw(src)
-    if (identical(ferx_rust_sha256_raw(src_bytes), hash)) return(src_bytes)
+    if (!has_hash || identical(ferx_rust_sha256_raw(src_bytes), hash)) {
+      return(src_bytes)
+    }
   }
+  bytes <- .fitrx_read_bytes(data_path)
+  if (!has_hash || identical(ferx_rust_sha256_raw(bytes), hash)) return(bytes)
   stop(errorCondition(sprintf(paste0(
     "ferx_save_fit(): the data file %s has changed since the fit (its ",
     "SHA-256 no longer matches fit$data_hash), so it is not the data that ",

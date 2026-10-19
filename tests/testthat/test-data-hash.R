@@ -123,3 +123,42 @@ test_that("a data.frame fit bundles its own rows even if the cached file changed
   ferx_save_fit(fit, path)
   expect_identical(fitrx_entry_bytes(path, "data.csv"), src)
 })
+
+test_that("the staged copy of the data is owner-only, in R's session tempdir, and removed (#585 review)", {
+  # The glue parses the population from a copy of the bytes it read. The
+  # dataset may be owner-only, so the copy must not be world-readable in a
+  # shared temporary directory, nor outlive the read.
+  bytes <- as.raw(c(0x49, 0x44, 0x2c, 0xff, 0x0a))  # not valid UTF-8
+  probe <- ferx_rust_stage_data_probe(bytes)
+  expect_identical(probe$bytes, bytes)
+  expect_identical(normalizePath(dirname(probe$path)), normalizePath(tempdir()))
+  expect_false(file.exists(probe$path))
+  if (.Platform$OS.type == "unix") {
+    expect_identical(probe$mode, strtoi("600", 8L))
+  }
+})
+
+test_that("a fit leaves no staged data copy behind (#585 review)", {
+  skip_on_cran()
+  ex <- ferx_example("warfarin")
+  before <- list.files(tempdir(), pattern = "^ferx-data-")
+  fit <- dh_fit(ex$model, ex$data)
+  expect_identical(list.files(tempdir(), pattern = "^ferx-data-"), before)
+})
+
+test_that("a data.frame fit saves from data_source when its cache file is unreadable (#585 review)", {
+  skip_on_cran()
+  skip_on_os("windows")
+  ex <- ferx_example("warfarin")
+  fit <- dh_fit(ex$model, utils::read.csv(ex$data))
+  src <- charToRaw(fit$data_source)
+  Sys.chmod(fit$data_path, "000")
+  withr::defer({
+    Sys.chmod(fit$data_path, "644")
+    unlink(fit$data_path)
+  })
+  skip_if(file.access(fit$data_path, 4L) == 0L, "running as root")
+  path <- withr::local_tempfile(fileext = ".fitrx")
+  expect_no_error(ferx_save_fit(fit, path))
+  expect_identical(fitrx_entry_bytes(path, "data.csv"), src)
+})
