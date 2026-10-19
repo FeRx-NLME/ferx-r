@@ -4221,6 +4221,55 @@ fn fit_result_to_list(
         None => ().into(),
     };
 
+    // Variational-inference result (`method = vi`, ferx-r #507/#508). Shipped
+    // close to the engine's layout - per-subject vectors, matrices flattened
+    // row-major - and shaped into `fit$vi` by `.ferx_vi_from_raw()`, which
+    // `ferx_load_fit()` uses too, so a live and a reloaded fit are built the
+    // same way. `ids` is the subject of each `eta_means` entry, as the
+    // engine's own .fitrx writer keys `eta_posterior`.
+    let vi: Robj = match &result.vi {
+        Some(v) => {
+            let ids: Vec<String> = (0..v.eta_means.len())
+                .map(|i| {
+                    result
+                        .subjects
+                        .get(i)
+                        .map_or_else(|| "unknown".to_string(), |s| s.id.clone())
+                })
+                .collect();
+            let rows = |m: &Vec<Vec<f64>>| -> Robj {
+                Robj::from(m.iter().flatten().copied().collect::<Vec<f64>>())
+            };
+            let n_rows = |l: &Vec<Vec<Vec<f64>>>| -> Vec<i32> {
+                l.iter().map(|m| m.len() as i32).collect()
+            };
+            list!(
+                neg_two_elbo = v.neg_two_elbo,
+                data_term = v.data_term,
+                kl_term = v.kl_term,
+                n_iterations = v.n_iterations as f64,
+                converged = v.converged,
+                family = v.family.clone(),
+                n_mc_samples = v.n_mc_samples as f64,
+                kl = v.kl.clone(),
+                n_kl_fallback_subjects = v.n_kl_fallback_subjects as f64,
+                elbo_trace = v.elbo_trace.clone(),
+                objective_trace = v.objective_trace.clone(),
+                ids = ids,
+                eta_means = List::from_values(v.eta_means.iter().map(|m| Robj::from(m.clone()))),
+                eta_covs = List::from_values(v.eta_covs.iter().map(rows)),
+                eta_covs_nrow = n_rows(&v.eta_covs),
+                kappa_means = List::from_values(v.kappa_means.iter().map(rows)),
+                kappa_means_nrow = n_rows(&v.kappa_means),
+                n_fd_subjects = v.n_fd_subjects as f64,
+                elbo_tightness_ratio = v.elbo_tightness_ratio,
+                superseded_by = v.superseded_by.clone().unwrap_or_default(),
+            )
+            .into()
+        }
+        None => ().into(),
+    };
+
     // SAEM conditional-distribution summary (`conddist = true`, ferx-core #257).
     // `data` is a long-format data frame (one row per subject x eta) mirroring
     // the `conddist.csv` layout used by ferx-core's own .fitrx bundling
@@ -4626,6 +4675,7 @@ fn fit_result_to_list(
         importance_sampling = importance_sampling,
         impmap_trace = impmap_trace,
         bayes = bayes,
+        vi = vi,
         cond_dist = cond_dist,
         trace_path = trace_path,
         ebe_convergence_warnings = result.ebe_convergence_warnings as i32,
