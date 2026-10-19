@@ -132,8 +132,8 @@ test_that("T1: ferx_fit() binds a level block and reports theta_levels", {
   expect_s3_class(tl, "data.frame")
   expect_identical(
     names(tl),
-    c("block", "index", "label", "group", "contrast", "theta_name", "value",
-      "se", "sir_lo", "sir_hi")
+    c("block", "index", "label", "group", "contrast", "profiled", "theta_name",
+      "value", "se", "sir_lo", "sir_hi")
   )
   expect_identical(nrow(tl), 6L)
   expect_identical(tl$block, rep("PLACEBO", 6L))
