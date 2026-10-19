@@ -813,7 +813,7 @@ Full slot descriptions:
 \item{interaction}{Logical; the interaction flag the fitted objective
 ran under. \code{TRUE} for FOCEI and \code{FALSE} for FOCE; SAEM, VI and
 Gauss-Newton inherit it from the options they ran under.
-\code{\link[=ferx_covariance]{ferx_covariance()}} and \code{\link[=ferx_sir]{ferx_sir()}} hand it back to the engine.}
+\code{\link{ferx_covariance}()} and \code{\link{ferx_sir}()} hand it back to the engine.}
 \item{n_iterations}{Number of outer iterations run}
 \item{ofv}{Objective function value (-2 log-likelihood). The
 \emph{penalized} objective when the model declares a \code{prior(...)}
@@ -906,13 +906,15 @@ names are the declared ETA names (e.g. \code{"ETA_CL"}); fallback is
 \item{sigma}{Residual error parameter estimates on the
 \emph{standard-deviation} scale. For a proportional component
 \code{CV\% = sigma * 100}; for an additive component the value is in
-observation units. Variance is \code{sigma^2} for either type.}
+observation units. Variance is \code{sigma^2} for either type. Named
+by \code{sigma_names}, as \code{theta} is by its names.}
 \item{sigma_names}{Names of the sigma parameters as declared in the
 \code{[parameters]} block of the \code{.ferx} file. Parallel to
 \code{sigma}.}
 \item{sigma_types}{Per-component error type label, parallel to
 \code{sigma}: \code{"proportional"} or \code{"additive"}. Combined
-error models report \code{c("proportional", "additive")} in that order.}
+error models report \code{c("proportional", "additive")} in that order.
+Named like \code{sigma}.}
 \item{se_theta}{Standard errors for theta (NULL if covariance step failed)}
 \item{se_omega}{Standard errors for omega elements. For diagonal omega,
 a vector of length n_eta (one per variance). For block omega, a vector

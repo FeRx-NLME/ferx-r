@@ -5475,6 +5475,39 @@ fn ferx_rust_known_blocks() -> Vec<String> {
     })
 }
 
+/// Row / column labels of `fit$cov_matrix` for a model file: the labels
+/// `ferx_fit()` names the matrix with ([`cov_matrix_labels`]), for a fit read
+/// back from a `.fitrx` bundle, whose wire stores the matrix but not its names
+/// (ferx-r #417). `ferx_load_fit()` passes the bundle's own `model.ferx` and
+/// the fit's bindings, which lay the model out as it was fitted: a level
+/// block's thetas exist only once bound to the fit's levels, so the unbound
+/// model would have too few coordinates. A model file that does not hash to
+/// `model_hash` is refused, since the labels are placed by position. Empty
+/// when the laid-out model does not have `cov_matrix_dim` coordinates; R then
+/// leaves the matrix unnamed.
+///
+/// @param model_path The model file the fit was run on.
+/// @param model_hash The fit's `model_hash`; empty skips the check.
+/// @param fit_bindings The fit's bindings (`.ferx_fit_binding_args()`).
+/// @param cov_matrix_dim Side length of the fit's covariance matrix.
+/// @return Character, one label per row; empty on a dimension mismatch.
+/// @export
+#[extendr]
+fn ferx_rust_cov_labels(
+    model_path: &str,
+    model_hash: &str,
+    fit_bindings: List,
+    cov_matrix_dim: i32,
+) -> Vec<String> {
+    entry(move || {
+        let src = read_fit_model("ferx_load_fit", model_path, model_hash)?;
+        let mut parsed = src.parsed;
+        let fitted = fit_bindings_from_r(&fit_bindings)?;
+        bind_layout_from_fit(&mut parsed, &src.text, &fitted).map_err(|e| e.to_string())?;
+        Ok(cov_matrix_labels(&parsed.model, cov_matrix_dim))
+    })
+}
+
 /// SHA-256 of a string's UTF-8 bytes, as the lowercase hex digest
 /// `model_hash` is written in (`ferx_core::io::hash::sha256_bytes`).
 ///
@@ -12590,6 +12623,7 @@ extendr_module! {
     fn ferx_rust_test_panic;
     fn ferx_rust_test_fit_outcome;
     fn ferx_rust_known_blocks;
+    fn ferx_rust_cov_labels;
     fn ferx_rust_sha256_text;
     fn ferx_rust_sha256_raw;
     fn ferx_rust_stage_data_probe;

@@ -702,6 +702,11 @@
   if (length(result$theta) > 0 && length(result$theta_names) > 0) {
     names(result$theta) <- result$theta_names
   }
+  # ... and sigma, as ferx_load_fit() names it from the bundle (#417).
+  if (length(result$sigma) > 0 &&
+        length(result$sigma_names) == length(result$sigma)) {
+    names(result$sigma) <- result$sigma_names
+  }
 
   # Theta level-block bindings (#370): rebuilt through the one constructor
   # `ferx_load_fit()` uses, so a reloaded fit is identical to this one. Zero

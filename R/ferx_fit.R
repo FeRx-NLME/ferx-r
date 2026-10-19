@@ -858,13 +858,15 @@
 #'   \item{sigma}{Residual error parameter estimates on the
 #'     \emph{standard-deviation} scale. For a proportional component
 #'     \code{CV\% = sigma * 100}; for an additive component the value is in
-#'     observation units. Variance is \code{sigma^2} for either type.}
+#'     observation units. Variance is \code{sigma^2} for either type. Named
+#'     by \code{sigma_names}, as \code{theta} is by its names.}
 #'   \item{sigma_names}{Names of the sigma parameters as declared in the
 #'     \code{[parameters]} block of the \code{.ferx} file. Parallel to
 #'     \code{sigma}.}
 #'   \item{sigma_types}{Per-component error type label, parallel to
 #'     \code{sigma}: \code{"proportional"} or \code{"additive"}. Combined
-#'     error models report \code{c("proportional", "additive")} in that order.}
+#'     error models report \code{c("proportional", "additive")} in that order.
+#'     Named like \code{sigma}.}
 #'   \item{se_theta}{Standard errors for theta (NULL if covariance step failed)}
 #'   \item{se_omega}{Standard errors for omega elements. For diagonal omega,
 #'     a vector of length n_eta (one per variance). For block omega, a vector
@@ -3122,13 +3124,13 @@ print.ferx_fit <- function(x, ...) {
   cat("\n", .ferx_style("SIGMA  (residual error)", "bold"), "\n", sep = "")
   cat(strrep("-", 60), "\n", sep = "")
   for (i in seq_along(x$sigma)) {
-    s   <- x$sigma[i]
+    s   <- x$sigma[[i]]
     nm  <- if (length(x$sigma_names) >= i && nzchar(x$sigma_names[i])) {
       x$sigma_names[i]
     } else {
       sprintf("SIGMA(%d)", i)
     }
-    typ <- if (length(x$sigma_types) >= i) x$sigma_types[i] else NA_character_
+    typ <- if (length(x$sigma_types) >= i) x$sigma_types[[i]] else NA_character_
     # FIX: `NAME [FIX]` and `SE = ---`, as ferx-core's console and the OMEGA /
     # KAPPA rows spell it (#563).
     fixed <- .ferx_is_fixed(x$sigma_fixed, i)
