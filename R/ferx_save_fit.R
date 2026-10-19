@@ -51,7 +51,12 @@ FITRX_FORMAT_VERSION <- "1"
 #' @param include_data Logical. When \code{TRUE}, the input NONMEM CSV used
 #'   to fit the model is embedded verbatim inside the archive (as
 #'   \code{data.csv}). Requires that the file is still accessible at the
-#'   path captured at fit time (\code{fit$data_path}). Default \code{FALSE}.
+#'   path captured at fit time (\code{fit$data_path}), unchanged since the
+#'   fit: a file whose SHA-256 no longer matches \code{fit$data_hash} is not
+#'   the data that was fitted, and \code{ferx_save_fit()} refuses it with an
+#'   error of class \code{ferx_data_edited_error} rather than bundle it. A fit
+#'   with no recorded \code{data_hash} (one made by an older ferx) is bundled
+#'   unchecked. Default \code{FALSE}.
 #'   A fit whose \code{data} was a data.frame (\code{fit$data_source} set)
 #'   always embeds it: its file lives only in a temporary directory, so a
 #'   bundle without it could not be re-read.
@@ -206,7 +211,15 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
         "The fit's data (fit$data_source) could not be written to a file to bundle."
       })
     }
-    file.copy(data_path, file.path(staging, "data.csv"), overwrite = TRUE)
+    # The bundle's data.csv must be the rows that were fitted, the bytes
+    # `fit$data_hash` names (#585), or the bundle ships a dataset its own
+    # hash disowns. Read the file once and check those bytes before writing
+    # them, rather than copying a file that may have been edited since the
+    # fit. A fit of a data.frame falls back to its own `fit$data_source`
+    # text. A fit with no recorded hash (an older ferx) has nothing to check
+    # against and is bundled as it is.
+    data_bytes <- .fitrx_fitted_data_bytes(fit, data_path)
+    writeBin(data_bytes, file.path(staging, "data.csv"))
     entries <- c(entries, "data.csv")
   }
 
@@ -377,6 +390,49 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   if (!validUTF8(txt)) return(NULL)
   if (!identical(ferx_rust_sha256_text(txt), tolower(hash))) return(NULL)
   txt
+}
+
+# The bytes to bundle as data.csv: one read of `data_path`, when they hash to
+# `fit$data_hash` or the fit recorded no hash. A fit of a data.frame whose
+# file no longer matches is bundled from `fit$data_source` when that text
+# hashes. Anything else is refused with a `ferx_data_edited_error` naming the
+# file, before the bundle is written: the fit's data is gone, and a data.csv
+# its own `data_hash` does not name would make from-fit calls on the reloaded
+# fit refuse (or, without a hash check, use the wrong rows).
+.fitrx_fitted_data_bytes <- function(fit, data_path) {
+  bytes <- .fitrx_read_bytes(data_path)
+  hash <- fit$data_hash
+  if (!is.character(hash) || length(hash) != 1L || is.na(hash) ||
+      !nzchar(hash)) {
+    return(bytes)
+  }
+  hash <- tolower(hash)
+  if (identical(ferx_rust_sha256_raw(bytes), hash)) return(bytes)
+  src <- fit$data_source
+  if (is.character(src) && length(src) == 1L && !is.na(src)) {
+    src_bytes <- charToRaw(src)
+    if (identical(ferx_rust_sha256_raw(src_bytes), hash)) return(src_bytes)
+  }
+  stop(errorCondition(sprintf(paste0(
+    "ferx_save_fit(): the data file %s has changed since the fit (its ",
+    "SHA-256 no longer matches fit$data_hash), so it is not the data that ",
+    "was fitted and is not bundled. Restore the file and save again, save ",
+    "with include_data = FALSE, or refit."), data_path),
+    class = "ferx_data_edited_error", data_path = data_path))
+}
+
+# A file's bytes, read to EOF in one connection (no `file.size()` race: a file
+# that grows between a size query and the read would be cut short).
+.fitrx_read_bytes <- function(path) {
+  con <- file(path, "rb")
+  on.exit(close(con), add = TRUE)
+  chunks <- list()
+  repeat {
+    chunk <- readBin(con, "raw", n = 1048576L)
+    if (length(chunk) == 0L) break
+    chunks[[length(chunks) + 1L]] <- chunk
+  }
+  if (length(chunks) == 0L) raw() else do.call(c, chunks)
 }
 
 .fitrx_warn_model_edited <- function(model_path, model_hash) {

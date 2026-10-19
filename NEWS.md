@@ -1334,6 +1334,21 @@
   to copying the file
   ([#577](https://github.com/FeRx-NLME/ferx-r/issues/577)).
 
+- **`fit$data_hash` names the data that was fitted, and
+  `ferx_save_fit(include_data = TRUE)` bundles only that data.**
+  `ferx_fit()` used to read the population from the data file and, once the
+  fit returned, hash the file a second time, so a CSV edited while a long fit
+  ran gave a `data_hash` of the edited file: from-fit calls then took the
+  edited rows for the fitted ones. The data file is now read once, and the
+  population and the hash both come from those bytes. `ferx_save_fit(include_data
+  = TRUE)` used to copy the file as it was at save time; it now reads it once
+  and bundles it only when it still hashes to `fit$data_hash`, refusing
+  otherwise with an error of class `ferx_data_edited_error` (on `e$data_path`)
+  that names the file, before anything is written. A fit of a data.frame is
+  bundled from its own `fit$data_source` should its cached file have changed;
+  a fit with no recorded hash (an older ferx) is bundled unchecked
+  ([#585](https://github.com/FeRx-NLME/ferx-r/issues/585)).
+
 - **A fit reloaded with `ferx_load_fit()` prints exactly like the live one.**
   The SIGMA row keeps its `[additive]` / `[proportional]` tag, SD and CV%
   (`fit$sigma_types` comes back unnamed), the diagnostics line keeps its
