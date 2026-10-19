@@ -52,6 +52,29 @@ OPT_OUT_LABEL="no-changelog"
 RELEASE_RE='^# ferx [0-9]'
 DEV_RE='^# ferx [0-9][0-9.]* [(]development version[)][[:space:]]*$'
 
+# Every `# ferx ...` heading of NEWS.md ($1, default the real one) as
+# `<line>\t<text>`, skipping fenced code blocks: an old entry's example may
+# well show a NEWS heading, and counting it would misplace `assemble`'s splice.
+# Every consumer below locates headings through this one function.
+news_headings() {
+  awk -v rel="$RELEASE_RE" '
+    /^[[:space:]]*(```|~~~)/ { fence = !fence; next }
+    !fence && $0 ~ rel       { print FNR "\t" $0 }
+  ' "${1:-$news}"
+}
+
+# The line of the development heading, or nothing.
+dev_line() {
+  news_headings "$@" | awk -F '\t' -v dev="$DEV_RE" '$2 ~ dev { print $1; exit }'
+}
+
+# The line of the first heading after line $1 (0: the first heading), or nothing.
+heading_after() {
+  local after=$1
+  shift
+  news_headings "$@" | awk -F '\t' -v after="$after" '$1 + 0 > after + 0 { print $1; exit }'
+}
+
 usage() {
   cat <<EOF
 NEWS fragments (#600): each user-facing PR adds a file under changelog.d/
@@ -170,10 +193,13 @@ fragment_body() {
 # The non-blank lines of NEWS.md's development section (excluding its heading),
 # each prefixed with its line number.
 dev_content() {
-  awk -v dev="$DEV_RE" -v rel="$RELEASE_RE" '
-    $0 ~ dev           { inside = 1; next }
-    inside && $0 ~ rel { exit }
-    inside && NF       { print FNR ": " $0 }
+  local from to
+  from="$(dev_line)"
+  [ -n "$from" ] || return 0
+  to="$(heading_after "$from")"
+  awk -v from="$from" -v to="${to:-0}" '
+    to + 0 > 0 && FNR >= to + 0 { exit }
+    FNR > from + 0 && NF        { print FNR ": " $0 }
   ' "$news"
 }
 
@@ -194,12 +220,11 @@ cmd_check() {
   # `# ferx` heading. Between `assemble` and the post-release version bump there
   # is none, which is fine; two, or one below a release, means a hand edit that
   # `assemble` would splice into the wrong place.
-  devs="$(grep -Ec "$DEV_RE" "$news" || true)"
+  devs="$(news_headings | cut -f2- | grep -Ec "$DEV_RE" || true)"
   if [ "$devs" -gt 1 ]; then
     echo "NEWS.md: expected at most one '# ferx X.Y.Z.9000 (development version)' heading, found $devs" >&2
     errors=$((errors + 1))
-  elif [ "$devs" -eq 1 ] && ! awk -v dev="$DEV_RE" -v rel="$RELEASE_RE" '
-      $0 ~ rel { exit !($0 ~ dev) }' "$news"; then
+  elif [ "$devs" -eq 1 ] && [ "$(dev_line)" != "$(heading_after 0)" ]; then
     echo "NEWS.md: the development heading must come before every release heading" >&2
     errors=$((errors + 1))
   fi
@@ -333,7 +358,7 @@ cmd_assemble() {
 
   cmd_check >/dev/null # also loads FRAGMENTS: the one manifest used below
   [ ${#FRAGMENTS[@]} -gt 0 ] || die "assemble: no fragments in changelog.d/ - nothing to release"
-  if grep -Fqx "# ferx $version" "$news"; then
+  if news_headings | cut -f2- | grep -Fqx "# ferx $version"; then
     die "assemble: NEWS.md already has a '# ferx $version' section"
   fi
 
@@ -352,18 +377,27 @@ cmd_assemble() {
 
   # The new section takes the development heading's place (its body is empty,
   # `check` saw to that); without one, it goes before the first release heading,
-  # or closes a file that has none.
-  awk -v section="$section" -v dev="$DEV_RE" -v rel="$RELEASE_RE" '
+  # or closes a file that has none. Lines come from `news_headings`, so a
+  # heading quoted inside a code block is never the splice point.
+  local from to
+  from="$(dev_line)"
+  if [ -n "$from" ]; then
+    to="$(heading_after "$from")"
+  else
+    from="$(heading_after 0)"
+    to="$from"
+  fi
+  awk -v section="$section" -v from="${from:-0}" -v to="${to:-0}" '
     function emit_section(   line) {
       while ((getline line < section) > 0) print line
       close(section)
       print ""
       done = 1
     }
-    !done && $0 ~ dev  { skipping = 1; next }
-    skipping && $0 ~ rel { emit_section(); skipping = 0 }
-    skipping           { next }
-    !done && $0 ~ rel  { emit_section() }
+    # [from, to): the development heading and its empty body are dropped; with
+    # no development heading from == to and nothing is.
+    !done && from + 0 > 0 && FNR == from + 0 { emit_section() }
+    from + 0 > 0 && FNR >= from + 0 && (to + 0 == 0 || FNR < to + 0) { next }
     { print }
     END { if (!done) emit_section() }
   ' "$news" >"$tmp"
@@ -436,7 +470,9 @@ is_user_facing() {
 #    context, splitting the run without the text having changed. That proves
 #    the lines were ADDED, in order, but is blind to a lost interior blank line;
 #  - the exact body, interior blank lines and all (trailing ones trimmed, as
-#    `assemble` renders it), must appear in the resulting NEWS.md.
+#    `assemble` renders it), must appear in the new release section ($4), not
+#    merely somewhere in NEWS.md: appended to an old release, it would never
+#    reach a release of its own.
 fragment_assembled() {
   local body needle haystack
   body="$(git -C "$root" show "$1:$2" | awk '{ l[NR] = $0 } NF { last = NR }
@@ -450,11 +486,39 @@ fragment_assembled() {
     *$'\n'"$needle"$'\n'*) ;;
     *) return 1 ;;
   esac
-  haystack="$(cat "$news")"
-  case $'\n'"$haystack"$'\n' in
+  case $'\n'"$4"$'\n' in
     *$'\n'"$body"$'\n'*) return 0 ;;
   esac
   return 1
+}
+
+# The text of the release section this PR adds, as `assemble` writes it: NEWS.md's
+# first heading is `# ferx <DESCRIPTION's Version>`, a release heading the merge
+# base ($1) did not have. Prints nothing when the PR adds no such section - then
+# it is not a release, and deletes fragments for no release to carry them.
+new_release_section() {
+  local first heading version described base_news from to
+  first="$(heading_after 0)"
+  [ -n "$first" ] || return 0
+  heading="$(sed -n "${first}p" "$news")"
+  printf '%s' "$heading" | grep -Eq "$DEV_RE" && return 0
+  version="${heading#\# ferx }"
+  [ -f "$description" ] || return 0
+  described="$(sed -n 's/^Version:[[:space:]]*//p' "$description" | tr -d '[:space:]')"
+  [ "$version" = "$described" ] || return 0
+  base_news="$(mktemp)"
+  git -C "$root" show "$1:NEWS.md" >"$base_news" 2>/dev/null || true
+  if news_headings "$base_news" | cut -f2- | grep -Fqx -- "$heading"; then
+    rm -f "$base_news"
+    return 0
+  fi
+  rm -f "$base_news"
+  from="$first"
+  to="$(heading_after "$from")"
+  awk -v from="$from" -v to="${to:-0}" '
+    to + 0 > 0 && FNR >= to + 0 { exit }
+    FNR >= from + 0             { print }
+  ' "$news"
 }
 
 cmd_require() {
@@ -509,14 +573,16 @@ cmd_require() {
   fi
   deleted="$(git -C "$root" diff --no-renames --name-only --diff-filter=D "$mb" HEAD -- changelog.d/ |
     grep -Ev '^changelog\.d/(README\.md|\.gitkeep)$' || true)"
+  local release=""
   if [ -n "$deleted" ]; then
     added_lines="$(git -C "$root" diff --no-renames "$mb" HEAD -- NEWS.md |
       sed -n -e '/^+++ /d' -e 's/^+//p')"
+    release="$(new_release_section "$mb")"
     local IFS_SAVE="$IFS" f
     IFS=$'\n'
     set -f
     for f in $deleted; do
-      if ! fragment_assembled "$mb" "$f" "$added_lines"; then
+      if [ -z "$release" ] || ! fragment_assembled "$mb" "$f" "$added_lines" "$release"; then
         lost="$lost  $f"$'\n'
       fi
     done
@@ -526,9 +592,14 @@ cmd_require() {
   if [ -n "$lost" ]; then
     {
       echo "changelog: this PR deletes pending changelog fragment(s) that are not in"
-      echo "NEWS.md, so their entries would be missing from the next release:"
+      echo "a new release section of NEWS.md, so their entries would be missing from"
+      echo "the next release:"
       printf '%s' "$lost"
       echo
+      if [ -z "$release" ]; then
+        echo "This PR adds no release section: NEWS.md's first heading must be a new"
+        echo "'# ferx <version>' matching DESCRIPTION's Version, as 'assemble' writes it."
+      fi
       echo "Restore them (edit one to reword it). Only 'tools/changelog.sh assemble'"
       echo "removes fragments, at release time."
     } >&2

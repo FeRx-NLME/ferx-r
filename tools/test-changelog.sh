@@ -156,6 +156,12 @@ printf '# ferx 0.4.0\n\n# ferx 0.4.0.9000 (development version)\n' >"$d/NEWS.md"
 expect "rejects a development heading below a release" "$d" 1 \
   "must come before every release heading" check
 
+d=$(fixture fenced-heading)
+printf '\n- **Shows a heading** (#2).\n\n  ```\n# ferx 9.9.9.9000 (development version)\n# ferx 0.5.0\n  ```\n' >>"$d/NEWS.md"
+expect "a heading inside a fenced code block is no heading" "$d" 0 "fragment(s) OK" check
+expect "a fenced '# ferx 0.5.0' does not block assembling 0.5.0" "$d" 0 \
+  "assembled 1 fragment(s)" assemble 0.5.0
+
 d=$(fixture no-dev)
 sed -i.bak '1,2d' "$d/NEWS.md" && rm "$d/NEWS.md.bak"
 expect "accepts NEWS.md without a development heading" "$d" 0 "fragment(s) OK" check
@@ -317,6 +323,34 @@ branch "$d"
 (cd "$d" && CHANGELOG_ROOT="$d" bash "$SCRIPT" assemble 0.5.0 >/dev/null)
 commit "$d"
 expect "require passes a release PR that assembled every fragment" "$d" 0 "release PR" require main
+
+d=$(fixture req-fake-release)
+branch "$d"
+git -C "$d" rm -q changelog.d/10.fix.md
+printf '\n- **Pending fix** (#10).\n' >>"$d/NEWS.md"
+commit "$d"
+expect "require fails a deletion whose entry went into an old release" "$d" 1 \
+  "adds no release section" require main --opt-out true
+
+d=$(fixture req-release-wrong-version)
+branch "$d"
+(cd "$d" && CHANGELOG_ROOT="$d" bash "$SCRIPT" assemble 0.5.0 >/dev/null)
+printf 'Package: ferx\nVersion: 0.6.0\n' >"$d/DESCRIPTION"
+commit "$d"
+expect "require fails a release heading that is not DESCRIPTION's Version" "$d" 1 \
+  "adds no release section" require main
+
+d=$(fixture req-release-misplaced)
+printf -- '- **Second pending** (#11).\n' >"$d/changelog.d/11.fix.md"
+commit "$d"
+branch "$d"
+(cd "$d" && CHANGELOG_ROOT="$d" bash "$SCRIPT" assemble 0.5.0 >/dev/null)
+# Move one assembled entry out of the new section, to the end of the old one.
+sed -i.bak '/Second pending/d' "$d/NEWS.md" && rm "$d/NEWS.md.bak"
+printf '\n- **Second pending** (#11).\n' >>"$d/NEWS.md"
+commit "$d"
+expect "require fails a release whose entry sits outside the new section" "$d" 1 \
+  "changelog.d/11.fix.md" require main
 
 d=$(fixture req-release-leftover)
 branch "$d"
