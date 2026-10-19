@@ -1340,10 +1340,30 @@
   non-positive-definite level Hessian), overflow advice for a non-finite
   objective, and a smaller `fd_hessian_step` when only a finite-difference
   point over the structural parameters is non-finite (the level steps are
-  fixed, so a non-finite level point points at the levels instead). "Covariance step failed: the profile solve did not
-  converge at the estimates", which ferx-core files under `convergence`,
-  used to be told to re-fit from new initial values; it now reaches the
-  covariance advice, chosen by the reason the solve gives.
+  fixed, so a non-finite level point points at the levels instead).
+  "Covariance step failed: the profile solve did not converge at the
+  estimates", which ferx-core files under `convergence`, used to be told to
+  re-fit from new initial values; it now reaches the covariance advice,
+  chosen by the reason the solve gives.
+
+- **Fitted `block_sigma` correlations are matched to the model by their
+  sigma pair, not their row position (#486).** Every from-fit path
+  (`ferx_predict()`, `ferx_simulate()`, `ferx_calc_npde()`,
+  `ferx_predict_survival()`, `ferx_simulate_with_uncertainty()`,
+  `ferx_sir()`, `ferx_covariance()`) used to zip
+  `fit$residual_correlations$rho` onto the model's correlations in
+  declaration order, so a frame reordered (sorted by `name`, say) rebuilt
+  each block at the other block's fitted rho with no error, and
+  `ferx_covariance()` wrote each refreshed SE onto the wrong row. Each row is
+  now matched on its (`sigma_i`, `sigma_j`) pair, in either orientation. A
+  row whose pair the model does not declare, a pair given twice, and a frame
+  without the `sigma_i` / `sigma_j` columns are refused, and the row-count
+  mismatch error names `fit$residual_correlations` instead of the internal
+  `residual_rho` argument. A hand-built engine result whose FIX flags do not
+  match its correlations now reads as all free in `ferx_fit()`'s output too,
+  as it already did on the from-fit paths and in ferx-core's validation. The
+  plural and mixed FIX / free wording of the missing-correlation refusal
+  (#480) is now under test (#485).
 
 - **A derived `iov_occasion = dose | time(...)` rule now reaches
   `ferx_simulate()`, `ferx_predict()`, `ferx_calc_npde()`,

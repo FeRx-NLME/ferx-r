@@ -20,6 +20,7 @@ ferx_rust_simulate_with_uncertainty(
   sir_resamples_n,
   sir_resamples_dim,
   residual_rho,
+  residual_rho_pairs,
   fit_bindings,
   iov_occasion,
   n_uncertainty_draws,
