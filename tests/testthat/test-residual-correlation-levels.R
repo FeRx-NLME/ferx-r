@@ -9,16 +9,15 @@
 # its start (measured on mbma_placebo: OFV 97.0700 both, RHO 0.3, SE 0), so
 # each fit must beat the base by a margin and move RHO.
 #
-# Both correlated fits run on optimizer = "nlopt_lbfgs". With the line next to
-# kappa the gradients are finite differences, so `auto` picks BOBYQA, which
-# stops on its own tolerance short of the optimum, at a point that moves with
-# the platform and the start: on mbma_placebo car1, OFV 89.82 on macOS but
-# 99.18 on Linux from RHO = 0.3, and 100.01 / 118.43 from RHO = 0.01, each
-# reported as converged. L-BFGS reaches 89.451278 (RHO 0.7598) from both
-# starts on both platforms, and SLSQP agrees; on nested_levels_3 ar1 it is
-# 105.639739 (RHO 0.11512) where BOBYQA stops at 105.78 / 106.63. The optima
-# are pinned to those values (ferx-core #2101, #1782).
-lbfgs <- list(optimizer = "nlopt_lbfgs")
+# With the line next to kappa the gradients are finite differences, and on
+# that route `optimizer = "auto"` used to pick BOBYQA, which stopped on its own
+# tolerance short of the optimum at a point that moved with the platform and
+# the start (mbma_placebo car1: 89.82 on macOS, 99.18 on Linux from RHO = 0.3;
+# 100.01 / 118.43 from 0.01), each reported as converged. Since ferx-core
+# #2127 (#2122) `auto` takes L-BFGS on this route, which reaches 89.451278
+# (RHO 0.7598) from every start on both platforms; on nested_levels_3 ar1 it
+# is 105.639739 (RHO 0.11512). The fits below run on the default optimizer,
+# and the optima are pinned to those values.
 
 quiet <- function(x) suppressWarnings(suppressMessages(x))
 
@@ -36,12 +35,14 @@ mbma_with_line <- function(line, rho = "  theta RHO(0.3, 0.0, 0.99)") {
   list(model = model, data = ex$data)
 }
 
+car1_rho <- function(start) sprintf("  theta RHO(%s, 0.0, 0.95)", start)
+
 mbma_car1_fit <- local({
   fit <- NULL
   function() {
     if (is.null(fit)) {
-      m <- mbma_with_line("correlation car1(RHO) by OCC")
-      fit <<- quiet(ferx_fit(m$model, m$data, verbose = FALSE, settings = lbfgs))
+      m <- mbma_with_line("correlation car1(RHO) by OCC", car1_rho("0.6"))
+      fit <<- quiet(ferx_fit(m$model, m$data, verbose = FALSE))
     }
     fit
   }
@@ -61,12 +62,12 @@ test_that("car1 by OCC fits next to mbma_placebo's arm kappa", {
   rho <- fit$theta[["RHO"]]
   expect_true(is.finite(rho))
   expect_gte(rho, 0)
-  expect_lt(rho, 0.99)
+  expect_lt(rho, 0.95)
   # The kappa is still estimated alongside it.
   expect_true(all(is.finite(diag(fit$omega_iov))))
   # Measured gap 7.62 (97.070036 -> 89.451278).
   expect_lt(fit$ofv, base$ofv - 1)
-  expect_gt(abs(rho - 0.3), 1e-3)
+  expect_gt(abs(rho - 0.6), 1e-3)
   expect_lt(abs(fit$ofv - 89.451278), 1e-4)
   expect_lt(abs(rho - 0.7598), 1e-3)
 
@@ -74,6 +75,38 @@ test_that("car1 by OCC fits next to mbma_placebo's arm kappa", {
   expect_true(any(grepl("^RHO\\s", out)))
   expect_true(any(grepl("Residual:    additive, correlation car1(RHO) by OCC",
                         out, fixed = TRUE)))
+})
+
+test_that("auto takes L-BFGS on car1 + kappa and reaches one optimum from every start", {
+  skip_on_cran()
+  # ferx-core #2127 (#2122). From 0.01 the old BOBYQA default stopped at 100.01
+  # on macOS and 118.43 on Linux, both above the kappa-only 97.07; from 0.6 at
+  # 98.31 on Linux. L-BFGS lands within 1.2e-7 of 89.4512784 from both.
+  ex <- ferx_example("mbma_placebo")
+  base <- quiet(ferx_fit(ex$model, ex$data, verbose = FALSE))
+  m <- mbma_with_line("correlation car1(RHO) by OCC", car1_rho("0.01"))
+  low <- quiet(ferx_fit(m$model, m$data, verbose = FALSE))
+  high <- mbma_car1_fit()
+  for (fit in list(low, high)) {
+    expect_true(fit$converged)
+    expect_identical(fit$optimizer, "auto (nlopt_lbfgs)")
+    expect_lte(fit$ofv, base$ofv)
+  }
+  expect_lt(abs(low$ofv - high$ofv), 1e-5)
+  expect_lt(abs(low$theta[["RHO"]] - high$theta[["RHO"]]), 1e-3)
+
+  # The FD warnings name the route. This model has 25 theta + eta + kappa axes,
+  # one past the analytic path's 24-axis cap, so that warning stays, but it no
+  # longer says the fit is only slower or tells the user to drop parameters:
+  # dropping them would leave the correlation route on finite differences.
+  w <- high$warnings
+  route <- grep("residual `correlation` line together with kappa", w, fixed = TRUE)
+  expect_length(route, 1L)
+  expect_match(w[route], "Avoid `optimizer = bobyqa`", fixed = TRUE)
+  cap <- grep("24-axis cap", w, fixed = TRUE, value = TRUE)
+  expect_length(cap, 1L)
+  expect_match(cap, "would not restore the analytic gradient", fixed = TRUE)
+  expect_false(any(grepl("only slower", w, fixed = TRUE)))
 })
 
 test_that("ferx_covariance() repeats the car1 + kappa fit's SEs, live and reloaded", {
@@ -110,7 +143,7 @@ test_that("ar1 by a nested level fits on the three-level fixture", {
   corr_model <- withr::local_tempfile(fileext = ".ferx")
   writeLines(txt, corr_model)
 
-  fit <- quiet(ferx_fit(corr_model, data, verbose = FALSE, settings = lbfgs))
+  fit <- quiet(ferx_fit(corr_model, data, verbose = FALSE))
   base <- quiet(ferx_fit(model, data, verbose = FALSE))
   expect_true(fit$converged)
   rho <- fit$theta[["RHO"]]
@@ -130,7 +163,7 @@ test_that("ar1 by a nested level fits on the three-level fixture", {
 test_that("ferx_simulate() and ferx_calc_npde() run on the car1 + kappa fit", {
   skip_on_cran()
   fit <- mbma_car1_fit()
-  m <- mbma_with_line("correlation car1(RHO) by OCC")
+  m <- mbma_with_line("correlation car1(RHO) by OCC", car1_rho("0.6"))
   sim <- quiet(ferx_simulate(m$model, fit = fit, n_sim = 2L))
   expect_s3_class(sim, "data.frame")
   expect_true(all(is.finite(sim$DV_SIM)))

@@ -786,7 +786,10 @@
 #'     block), \code{label} (\code{COL=value,...}), \code{group} (contrast
 #'     group, 0-based), \code{contrast} (the resolved convention:
 #'     \code{"sum_to_zero"}, \code{"sum_to_zero_within"}, \code{"ref"} or
-#'     \code{"none"}), \code{theta_name} (the level's name in
+#'     \code{"none"}), \code{profiled} (\code{TRUE} on every level of a
+#'     block declared \code{profile}: its levels were solved for at every
+#'     outer step rather than searched by the optimizer, see
+#'     \code{profiled_blocks}), \code{theta_name} (the level's name in
 #'     \code{theta}, \code{NA} for a level the contrast derives from the
 #'     others) and \code{value} (the level's fitted value, derived levels
 #'     included: minus the sum of its group's free levels under
@@ -810,6 +813,15 @@
 #'     \code{\link{ferx_simulate}} and the other functions that
 #'     take a \code{fit} use it to place a design on the fit's levels; see
 #'     the "Theta level blocks" section there.}
+#'   \item{profiled_blocks}{Character vector naming the level blocks
+#'     declared \code{theta NAME[COL, ...](...) profile}, in declaration
+#'     order; \code{character(0)} for a fit without one. A profiled block's
+#'     levels are solved exactly inside the FOCE / FOCEI objective at every
+#'     outer evaluation, so the optimizer searches only the structural
+#'     parameters; the OFV, the levels and their standard errors are those of
+#'     the unprofiled fit, and the structural standard errors account for the
+#'     levels. \code{\link{ferx_covariance}} repeats the profiled covariance
+#'     step.}
 #'   \item{covariate_stats}{Data frame of the statistics a
 #'     \code{[covariate_model]} relation stated symbolically
 #'     (\code{center = median}, \code{ref = mode}, \code{levels = auto}) was
@@ -2789,7 +2801,7 @@ print.ferx_fit <- function(x, ...) {
   if (!is.null(x$model_structure)) {
     cat("\n", .ferx_style("MODEL STRUCTURE (auto-derived)", "bold"), "\n", sep = "")
     cat(strrep("-", 60), "\n", sep = "")
-    .ferx_print_structure(x$model_structure)
+    .ferx_print_structure(x$model_structure, x$profiled_blocks)
   }
 
   # THETA
@@ -2897,8 +2909,15 @@ print.ferx_fit <- function(x, ...) {
       } else {
         sprintf("%d free, %d FIX coefficients", length(vals) - n_fixed, n_fixed)
       }
-      cat(sprintf("%s  %s   min %.4f  median %.4f  max %.4f\n",
-                  theta_blocks$block[b], count, s[1], s[2], s[3]))
+      # A profiled block's levels were solved for, not searched (ferx-core
+      # #1065); core's report marks the line the same way.
+      profiled <- if (theta_blocks$block[b] %in% x$profiled_blocks) {
+        ", profiled (not searched)"
+      } else {
+        ""
+      }
+      cat(sprintf("%s  %s%s   min %.4f  median %.4f  max %.4f\n",
+                  theta_blocks$block[b], count, profiled, s[1], s[2], s[3]))
     }
     cat("  (every coefficient is in fit$theta)\n")
   }
@@ -3391,6 +3410,7 @@ summary.ferx_fit <- function(object, ...) {
     max_unconverged_subjects = x$max_unconverged_subjects,
     total_ebe_fallbacks = x$total_ebe_fallbacks,
     model_structure = x$model_structure,
+    profiled_blocks = x$profiled_blocks %||% character(),
     call_settings = x$call_settings %||% list(),
     model_file_settings = x$model_file_settings %||% list(),
     sir_ess = x$sir_ess,
@@ -3480,7 +3500,8 @@ print.ferx_summary <- function(x, ...) {
     iov_lbl <- .ferx_iov_labels(ms)
     iov_str <- if (length(iov_lbl) > 0L) paste(iov_lbl, collapse = ", ") else "none"
     cat(sprintf("\nStructure: %s  |  IIV: %s  |  IOV: %s  |  Residual: %s\n",
-                .ferx_format_structural(ms), iiv_str, iov_str, ms$residual))
+                .ferx_format_structural(ms, x$profiled_blocks), iiv_str, iov_str,
+                ms$residual))
   }
 
   cat(sprintf("\nOFV: %.4f  AIC: %.4f  BIC: %.4f\n", x$ofv, x$aic, x$bic))
