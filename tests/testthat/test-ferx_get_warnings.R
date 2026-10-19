@@ -898,7 +898,11 @@ test_that("every covariance message ferx-core emits gets non-contradictory guida
          msg = paste0("Covariance step failed: the profile solve did not converge ",
                       "at the estimates (NotConverged { criterion: 0.0021 }). SE ",
                       "estimates not available."),
-         ok = "fit\\$converged", never = "initial values"),
+         ok = "no setting reaches this solve", never = "initial values"),
+    list(cat = "convergence",
+         msg = paste0("Covariance step failed: the profile solve did not converge ",
+                      "at the estimates (LineSearch). SE estimates not available."),
+         ok = "no setting reaches this solve", never = "initial values"),
     list(cat = "convergence",
          msg = paste0("Covariance step failed: the profile solve did not converge ",
                       "at the estimates (Singular). SE estimates not available."),
@@ -919,13 +923,17 @@ test_that("every covariance message ferx-core emits gets non-contradictory guida
          msg = paste0("Covariance step failed: the objective is not finite at some ",
                       "finite-difference point of the profiled levels. SE ",
                       "estimates not available."),
-         ok = "fd_hessian_step", never = "identifiability"),
+         # Its own arm: the level steps are a fixed 0.1 SE, so the structural
+         # form's "smaller fd_hessian_step" does not reach D.
+         ok = "level steps are fixed", never = "smaller fd_hessian_step"),
     list(cat = "covariance_failed",
          # A over the structural parameters (the Schur complement): this one IS
          # an identifiability finding.
          msg = paste0("Covariance step failed: the Hessian of the profile objective ",
                       "is not positive definite. SE estimates not available."),
-         ok = "identifiability", never = "theta_levels"),
+         # Asserted on a phrase only this arm has: the generic fallback also
+         # says "identifiability" and never "theta_levels".
+         ok = "confounded with the level effects", never = "omega/sigma structure"),
     list(cat = "covariance_failed",
          # D, the levels' own Hessian: a level, not a structural parameter.
          msg = paste0("Covariance step failed: the Hessian of the objective in the ",
@@ -938,6 +946,11 @@ test_that("every covariance message ferx-core emits gets non-contradictory guida
          ok = "no observation informs it", never = "identifiability")
   )
   for (case in cases) {
+    # `cat` is the category the engine assigns, not one chosen by hand. When
+    # ferx-core #2158 refiles the profile solve under covariance_failed, this
+    # trips, and the `convergence` admission can be revisited.
+    expect_identical(ferx:::.ferx_classify_flat_warnings(case$msg)$category,
+                     case$cat, info = case$msg)
     g <- ferx:::.ferx_warning_guidance(case$cat, message = case$msg)
     expect_true(is.character(g) && length(g) == 1L && nzchar(g), info = case$msg)
     expect_match(g, case$ok, ignore.case = TRUE, info = case$msg)

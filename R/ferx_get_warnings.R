@@ -562,9 +562,14 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
           "values and constrain thetas to plausible ranges."
         )
       } else {
+        # NotConverged / LineSearch. The solve's budget is fixed and it
+        # warm-starts from the fit's own EBEs, so re-running on a converged
+        # fit fails the same way.
         paste0(
-          "Check fit$converged, re-fit if it is FALSE, and re-run ",
-          "ferx_covariance(fit)."
+          "If fit$converged is FALSE, re-fit first. If it is TRUE, no setting ",
+          "reaches this solve and re-running fails the same way: re-fit with ",
+          "the block declared without `profile` to get the unprofiled ",
+          "covariance step (slower with many levels)."
         )
       }
       return(paste0(
@@ -614,8 +619,22 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
         "extreme parameter values and constrain thetas to plausible ranges."
       ))
     }
-    # Non-finite at a stencil point, over the structural parameters or the
-    # levels: the model overflows near the estimate, not at it.
+    # Non-finite at a stencil point of the levels' own Hessian D or of the
+    # cross terms B. D steps each level by a fixed 0.1 of its conditional SE
+    # (profile.rs COV_STEP_SE), which no setting changes; fd_hessian_step
+    # reaches only the structural direction of B.
+    if (grepl("finite-difference point of the profiled levels", message,
+              fixed = TRUE)) {
+      return(paste0(
+        "The objective is not finite a small step away from a profiled ",
+        "level's estimate, so no standard errors were produced: the model ",
+        "overflows near that level. Check fit$theta_levels for extreme or ",
+        "sparsely informed levels. The level steps are fixed; only the ",
+        "structural side of the cross terms follows fd_hessian_step."
+      ))
+    }
+    # Non-finite at a stencil point over the structural parameters: the model
+    # overflows near the estimate, not at it.
     if (grepl("not finite at some finite-difference point", message,
               fixed = TRUE)) {
       return(paste0(

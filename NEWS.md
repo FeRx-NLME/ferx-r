@@ -1339,7 +1339,8 @@
   `fit$theta_levels` for a level the data do not inform (no curvature, or a
   non-positive-definite level Hessian), overflow advice for a non-finite
   objective, and a smaller `fd_hessian_step` when only a finite-difference
-  point is non-finite. "Covariance step failed: the profile solve did not
+  point over the structural parameters is non-finite (the level steps are
+  fixed, so a non-finite level point points at the levels instead). "Covariance step failed: the profile solve did not
   converge at the estimates", which ferx-core files under `convergence`,
   used to be told to re-fit from new initial values; it now reaches the
   covariance advice, chosen by the reason the solve gives.
