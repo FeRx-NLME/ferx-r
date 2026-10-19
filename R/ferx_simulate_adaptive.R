@@ -42,7 +42,9 @@
 #'   block
 #' @param data Path to a NONMEM-format CSV, or a data.frame (see \code{\link{ferx_fit}}): an observation grid, any covariates,
 #'   and optionally a pre-scheduled base regimen (dose rows). When omitted, the
-#'   model file's \code{[data]} block (\code{path = ...}) is used.
+#'   data \code{fit} was fitted to (when \code{fit} is given and its data can
+#'   still be found), otherwise the model file's \code{[data]} block
+#'   (\code{path = ...}).
 #'   The \code{DV} column may be left empty (\code{.} / \code{NA}) on the
 #'   sampling rows - the DV is what the simulation produces, so an empty cell
 #'   means "simulate here" (a placeholder value is not needed). Rows marked
@@ -63,6 +65,18 @@
 #'   trajectory, so the result is not trustworthy.
 #' @param max_decisions Per-run cap on the number of decision points (the
 #'   runaway / closed-loop guard). \code{0} (default) keeps the engine default.
+#' @param fit Optional \code{ferx_fit} result. When provided, the simulation
+#'   runs at the fitted estimates (\code{fit$theta}, \code{fit$omega},
+#'   \code{fit$sigma}, the IOV omega when the model has one, and the fitted
+#'   \code{block_sigma} correlations) instead of the model file's initial
+#'   values, as in \code{\link{ferx_simulate}}. A theta
+#'   level block is laid out as the fit laid it out (\code{fit$theta_levels}),
+#'   so a design that observes only some of the fit's levels reads each level's
+#'   own fitted value; a level the fit never observed is an error. Random
+#'   effects are still drawn from the fitted omega - a subject's own
+#'   individual estimates are not carried over, and the per-occasion kappas
+#'   are drawn per decision window, so the fit's IOV occasion rule plays no
+#'   part.
 #'
 #' @return A list of four data frames:
 #'   \describe{
@@ -102,8 +116,9 @@
 #' @family simulation
 #' @export
 ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
-                                   verify = TRUE, max_decisions = 0L) {
-  if (is.null(data)) data <- .ferx_model_data_path(model)
+                                   verify = TRUE, max_decisions = 0L,
+                                   fit = NULL) {
+  if (is.null(data)) data <- .ferx_default_data(model, fit)
   if (is.null(data)) {
     stop(
       "No data supplied. Pass `data`, or add a `[data]` block ",
@@ -127,17 +142,45 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
   # single-error fallback in `.ferx_engine_call()` allows for; a controller or
   # regimen refusal the validation pass cannot name still gets the engine's
   # prose and no code, never another finding's code.
-  res <- .ferx_engine_call(
-    ferx_rust_simulate_adaptive(
-      model_path = normalizePath(model),
-      data_path = normalizePath(data),
-      n_sim = n_sim,
-      seed = as.integer(seed),
-      verify = if (isTRUE(verify)) "true" else "false",
-      max_decisions = as.integer(max_decisions)
-    ),
-    model, data
-  )
+  verify_arg <- if (isTRUE(verify)) "true" else "false"
+  res <- if (is.null(fit)) {
+    .ferx_engine_call(
+      ferx_rust_simulate_adaptive(
+        model_path = normalizePath(model),
+        data_path = normalizePath(data),
+        n_sim = n_sim,
+        seed = as.integer(seed),
+        verify = verify_arg,
+        max_decisions = as.integer(max_decisions)
+      ),
+      model, data
+    )
+  } else {
+    # The fitted estimates, placed on the fit's theta layout exactly as
+    # `ferx_simulate(fit = )` places them (ferx-core #1594). No occasion
+    # rule is passed: the adaptive engine draws kappa per decision window.
+    fit_pieces <- validate_fit_for_params(fit)
+    .ferx_engine_call(
+      ferx_rust_simulate_adaptive_from_fit(
+        model_path = normalizePath(model),
+        data_path = normalizePath(data),
+        theta = fit_pieces$theta,
+        omega_flat = fit_pieces$omega_flat,
+        omega_dim = fit_pieces$omega_dim,
+        sigma = fit_pieces$sigma,
+        omega_iov_flat = fit_pieces$omega_iov_flat,
+        omega_iov_dim = fit_pieces$omega_iov_dim,
+        residual_rho = fit_pieces$residual_rho,
+        residual_rho_pairs = fit_pieces$residual_rho_pairs,
+        fit_bindings = fit_pieces$fit_bindings,
+        n_sim = n_sim,
+        seed = as.integer(seed),
+        verify = verify_arg,
+        max_decisions = as.integer(max_decisions)
+      ),
+      model, data
+    )
+  }
 
   # Same `simulation_warnings` channel `ferx_simulate()` uses - here it carries
   # the engine's warning bundle for the run (ferx-r #426).

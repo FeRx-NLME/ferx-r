@@ -881,9 +881,76 @@ test_that("every covariance message ferx-core emits gets non-contradictory guida
                       "typically fewer subjects than free parameters, or ",
                       "collinear per-subject scores. Use covariance_method = r ",
                       "or rsr. SE estimates not available."),
-         ok = "covariance_method = \"rsr\"", never = "identifiability")
+         ok = "covariance_method = \"rsr\"", never = "identifiability"),
+    # The profiled theta level block's covariance step (ferx-core profile.rs,
+    # #1065). Before these arms every one fell to the generic fallback.
+    list(cat = "general",
+         # replay_covariance(), asked for an estimator the profiled step does
+         # not offer (#2108): nothing ran.
+         msg = paste0("Covariance step not run: a profiled θ level block's ",
+                      "covariance step computes `r` only for now (#2108); this ",
+                      "call asks for `covariance_method = s`."),
+         ok = "covariance_method = \"r\"", never = "identifiability"),
+    list(cat = "convergence",
+         # Classed `convergence`, not `covariance_failed`: ferx-core tests "did
+         # not converge" first. It must still reach the covariance arms rather
+         # than the optimizer's re-fit-from-new-initial-values advice.
+         msg = paste0("Covariance step failed: the profile solve did not converge ",
+                      "at the estimates (NotConverged { criterion: 0.0021 }). SE ",
+                      "estimates not available."),
+         ok = "no setting reaches this solve", never = "initial values"),
+    list(cat = "convergence",
+         msg = paste0("Covariance step failed: the profile solve did not converge ",
+                      "at the estimates (LineSearch). SE estimates not available."),
+         ok = "no setting reaches this solve", never = "initial values"),
+    list(cat = "convergence",
+         msg = paste0("Covariance step failed: the profile solve did not converge ",
+                      "at the estimates (Singular). SE estimates not available."),
+         ok = "do not identify", never = "initial values"),
+    list(cat = "convergence",
+         msg = paste0("Covariance step failed: the profile solve did not converge ",
+                      "at the estimates (NonFinite). SE estimates not available."),
+         ok = "not finite", never = "initial values"),
+    list(cat = "covariance_failed",
+         msg = paste0("Covariance step failed: the profile objective is not finite ",
+                      "at the estimate. SE estimates not available."),
+         ok = "overflowed", never = "identifiability"),
+    list(cat = "covariance_failed",
+         msg = paste0("Covariance step failed: the profile objective is not finite ",
+                      "at some finite-difference point. SE estimates not available."),
+         ok = "fd_hessian_step", never = "identifiability"),
+    list(cat = "covariance_failed",
+         msg = paste0("Covariance step failed: the objective is not finite at some ",
+                      "finite-difference point of the profiled levels. SE ",
+                      "estimates not available."),
+         # Its own arm: the level steps are a fixed 0.1 SE, so the structural
+         # form's "smaller fd_hessian_step" does not reach D.
+         ok = "level steps are fixed", never = "smaller fd_hessian_step"),
+    list(cat = "covariance_failed",
+         # A over the structural parameters (the Schur complement): this one IS
+         # an identifiability finding.
+         msg = paste0("Covariance step failed: the Hessian of the profile objective ",
+                      "is not positive definite. SE estimates not available."),
+         # Asserted on a phrase only this arm has: the generic fallback also
+         # says "identifiability" and never "theta_levels".
+         ok = "confounded with the level effects", never = "omega/sigma structure"),
+    list(cat = "covariance_failed",
+         # D, the levels' own Hessian: a level, not a structural parameter.
+         msg = paste0("Covariance step failed: the Hessian of the objective in the ",
+                      "profiled levels is not positive definite. SE estimates not ",
+                      "available."),
+         ok = "theta_levels", never = "covariance = FALSE"),
+    list(cat = "covariance_failed",
+         msg = paste0("Covariance step failed: a profiled level has no curvature ",
+                      "at the estimate. SE estimates not available."),
+         ok = "no observation informs it", never = "identifiability")
   )
   for (case in cases) {
+    # `cat` is the category the engine assigns, not one chosen by hand. When
+    # ferx-core #2158 refiles the profile solve under covariance_failed, this
+    # trips, and the `convergence` admission can be revisited.
+    expect_identical(ferx:::.ferx_classify_flat_warnings(case$msg)$category,
+                     case$cat, info = case$msg)
     g <- ferx:::.ferx_warning_guidance(case$cat, message = case$msg)
     expect_true(is.character(g) && length(g) == 1L && nzchar(g), info = case$msg)
     expect_match(g, case$ok, ignore.case = TRUE, info = case$msg)
@@ -1019,7 +1086,8 @@ test_that("no covariance message ferx-core emits is missing from the inventory",
   )
   # Fragments the inventory test covers. Not one per case: the two Omega
   # descriptors share "Omega matrix is" and the two cost-note forms share
-  # "OFV evaluations", so 13 fragments cover 17 cases.
+  # "OFV evaluations", and one emit site can need several cases (the profile
+  # solve's three failure reasons), so fragments and cases do not pair up.
   covered <- c(
     "cancelled before completion",
     "ill-conditioned entries",
@@ -1037,7 +1105,16 @@ test_that("no covariance message ferx-core emits is missing from the inventory",
     "non-finite score cross-product",
     # Given targeted arms in #308; answered by the generic fallback before.
     "fd_hessian_step must be",
-    "score cross-product matrix"
+    "score cross-product matrix",
+    # The profiled theta level block's covariance step (profile.rs). The two
+    # stencil-point forms share "not finite at some finite-difference point".
+    "computes `r` only",
+    "the profile solve did not converge",
+    "the profile objective is not finite at the estimate",
+    "not finite at some finite-difference point",
+    "the Hessian of the profile objective is not positive",
+    "in the profiled levels is not positive definite",
+    "a profiled level has no curvature"
   )
   accounted <- function(lit) any(vapply(c(exempt, covered),
                                         function(k) grepl(k, lit, fixed = TRUE),

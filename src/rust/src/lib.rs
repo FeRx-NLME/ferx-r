@@ -977,89 +977,209 @@ fn ferx_rust_simulate_adaptive(
     verify: &str,
     max_decisions: i32,
 ) -> Robj {
+    entry(move || simulate_adaptive(model_path, data_path, n_sim, seed, verify, max_decisions, None))
+}
+
+/// Simulate state-reactive dosing at a fit's estimates.
+///
+/// [`ferx_rust_simulate_adaptive`] at the fitted parameters rather than the
+/// model file's initial values (ferx-core #1594), as `ferx_rust_simulate_from_fit`
+/// is `ferx_rust_simulate` at them: the design is placed on the fit's theta
+/// layout before the fitted theta is read by position. It takes no
+/// `iov_occasion`: the adaptive engine keys kappa by decision window, not by
+/// the data's occasions.
+///
+/// @param model_path Path to .ferx model file containing an `[adaptive_dosing]` block
+/// @param data_path Path to NONMEM-format CSV
+/// @param theta Fitted theta vector
+/// @param omega_flat Row-major flattened omega matrix
+/// @param omega_dim Side length of the omega matrix
+/// @param sigma Fitted sigma vector
+/// @param omega_iov_flat Row-major flattened fitted IOV (kappa) omega matrix;
+///   empty when the model declares no `kappa`.
+/// @param omega_iov_dim Side length of the IOV omega matrix; 0 when no IOV.
+/// @param residual_rho Fitted `block_sigma` residual correlations (empty when
+///   the model declares none), one per row of `fit$residual_correlations`
+/// @param residual_rho_pairs The 1-based `(sigma_i, sigma_j)` pair of each
+///   entry of `residual_rho`, flattened `i1, j1, i2, j2, ...`; matched against
+///   the model's declared pairs, so the row order does not matter
+/// @param fit_bindings The fit's data-derived bindings (theta level layout,
+///   covariate statistics).
+/// @param n_sim Number of replicates
+/// @param seed Random seed
+/// @param verify "true"/"false", as in `ferx_rust_simulate_adaptive`
+/// @param max_decisions Per-run decision cap; `<= 0` keeps the engine default
+/// @return The four-data-frame list `ferx_rust_simulate_adaptive` returns.
+/// @export
+#[extendr]
+#[allow(clippy::too_many_arguments)]
+fn ferx_rust_simulate_adaptive_from_fit(
+    model_path: &str,
+    data_path: &str,
+    theta: Vec<f64>,
+    omega_flat: Vec<f64>,
+    omega_dim: i32,
+    sigma: Vec<f64>,
+    omega_iov_flat: Vec<f64>,
+    omega_iov_dim: i32,
+    residual_rho: Vec<f64>,
+    residual_rho_pairs: Vec<i32>,
+    fit_bindings: List,
+    n_sim: i32,
+    seed: i32,
+    verify: &str,
+    max_decisions: i32,
+) -> Robj {
     entry(move || {
-        let mut parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
-            Ok(p) => p,
-            Err(e) => return Err(format!("ferx_simulate_adaptive: error parsing model: {e}")),
+        let fit = AdaptiveFit {
+            theta: &theta,
+            omega_flat: &omega_flat,
+            omega_dim,
+            sigma: &sigma,
+            omega_iov_flat: &omega_iov_flat,
+            omega_iov_dim,
+            residual_rho: &residual_rho,
+            residual_rho_pairs: &residual_rho_pairs,
+            fitted: fit_bindings_from_r(&fit_bindings)?,
         };
-        // The reactive controller is the model file's `[adaptive_dosing]` block; a
-        // model without one cannot be simulated this way (use `ferx_simulate`).
-        // Taken out of `parsed` rather than borrowed, so the level bind below can
-        // re-parse the model; the bind replaces `parsed.model` only.
-        let spec = match parsed.adaptive_dosing.take() {
-            Some(s) => s,
-            None => return Err(
-                "ferx_simulate_adaptive: model has no [adaptive_dosing] block (this entry point \
-                 requires one; use ferx_simulate for a fixed regimen)"
-                    .to_string(),
-            ),
-        };
-        let iov_col = parsed.fit_options.iov_column.clone();
-        // Simulation reads a missing `DV` as a design point, not as a forgotten
-        // `MDV=1` (ferx-core #957): here the DV is the column being produced, so
-        // `DV = .` at a sampling time means "simulate here". `MDV=1` still excludes
-        // the record, and fitting keeps the skip.
-        let (mut population, _) = match ferx_core::api::read_population_for_simulation(
-            &parsed.model,
-            &parsed.covariate_decls,
-            data_path,
-            None,
-            iov_col.as_deref(),
-            None,
-            &parsed.column_map,
-        ) {
-            Ok(r) => r,
-            Err(e) => return Err(format!("ferx_simulate_adaptive: error reading data: {e}")),
-        };
+        simulate_adaptive(model_path, data_path, n_sim, seed, verify, max_decisions, Some(fit))
+    })
+}
 
-        // A level block's theta layout comes from this design: the model's own
-        // initial values drive it, so the design's levels are the right ones
-        // (ferx-r #370). No-op for a model with no level block.
-        bind_design(&mut parsed, model_path, &mut population)
-            .map_err(|e| e.refusal("ferx_simulate_adaptive: "))?;
-        // The occasions a model-file `iov_occasion` rule derives (ferx-r #523):
-        // the reader fills them from `iov_column` only.
-        let occasion_notes = derive_file_occasions(&parsed, &mut population);
+/// The fit pieces `ferx_rust_simulate_adaptive_from_fit` simulates at.
+struct AdaptiveFit<'a> {
+    theta: &'a [f64],
+    omega_flat: &'a [f64],
+    omega_dim: i32,
+    sigma: &'a [f64],
+    omega_iov_flat: &'a [f64],
+    omega_iov_dim: i32,
+    residual_rho: &'a [f64],
+    residual_rho_pairs: &'a [i32],
+    fitted: DataBindings,
+}
 
-        // The spec owns the decision schedule (`at`) and the monitored signal
-        // (`observe` / `with_assay_error`), so `decision_times` and `monitors` stay
-        // empty here — ferx-core errors if they are set alongside a spec.
-        // `AdaptiveSimulateOptions` is `#[non_exhaustive]`, so build it from
-        // `default()` and set fields rather than with a struct literal.
-        let mut opts = ferx_core::AdaptiveSimulateOptions::default();
-        opts.seed = Some(seed as u64);
-        opts.verify = matches!(verify.trim().to_lowercase().as_str(), "true" | "t" | "1");
-        if max_decisions > 0 {
-            opts.max_decisions = max_decisions as usize;
+/// The body of both adaptive entry points: at the model file's initial values
+/// when `fit` is `None`, otherwise at the fit's.
+fn simulate_adaptive(
+    model_path: &str,
+    data_path: &str,
+    n_sim: i32,
+    seed: i32,
+    verify: &str,
+    max_decisions: i32,
+    fit: Option<AdaptiveFit>,
+) -> std::result::Result<Robj, String> {
+    let mut parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
+        Ok(p) => p,
+        Err(e) => return Err(format!("ferx_simulate_adaptive: error parsing model: {e}")),
+    };
+    // The reactive controller is the model file's `[adaptive_dosing]` block; a
+    // model without one cannot be simulated this way (use `ferx_simulate`).
+    // Taken out of `parsed` rather than borrowed, so the level bind below can
+    // re-parse the model; the bind replaces `parsed.model` only.
+    let spec = match parsed.adaptive_dosing.take() {
+        Some(s) => s,
+        None => return Err(
+            "ferx_simulate_adaptive: model has no [adaptive_dosing] block (this entry point \
+             requires one; use ferx_simulate for a fixed regimen)"
+                .to_string(),
+        ),
+    };
+    let iov_col = parsed.fit_options.iov_column.clone();
+    // Simulation reads a missing `DV` as a design point, not as a forgotten
+    // `MDV=1` (ferx-core #957): here the DV is the column being produced, so
+    // `DV = .` at a sampling time means "simulate here". `MDV=1` still excludes
+    // the record, and fitting keeps the skip.
+    let (mut population, _) = match ferx_core::api::read_population_for_simulation(
+        &parsed.model,
+        &parsed.covariate_decls,
+        data_path,
+        None,
+        iov_col.as_deref(),
+        None,
+        &parsed.column_map,
+    ) {
+        Ok(r) => r,
+        Err(e) => return Err(format!("ferx_simulate_adaptive: error reading data: {e}")),
+    };
+
+    let (params, occasion_notes) = match &fit {
+        None => {
+            // A level block's theta layout comes from this design: the model's
+            // own initial values drive it, so the design's levels are the right
+            // ones (ferx-r #370). No-op for a model with no level block.
+            bind_design(&mut parsed, model_path, &mut population)
+                .map_err(|e| e.refusal("ferx_simulate_adaptive: "))?;
+            // The occasions a model-file `iov_occasion` rule derives (ferx-r
+            // #523): the reader fills them from `iov_column` only.
+            let notes = derive_file_occasions(&parsed, &mut population);
+            (parsed.model.default_params.clone(), notes)
         }
+        Some(f) => {
+            // Place the design on the fit's theta layout before anything reads
+            // theta by position (ferx-r #370); see `bind_design_from_fit`.
+            bind_design_from_fit(&mut parsed, model_path, &mut population, &f.fitted)
+                .map_err(|e| e.refusal("ferx_simulate_adaptive: "))?;
+            // No `derive_fit_occasions`, unlike the other from-fit paths: the
+            // adaptive engine draws kappa per decision window (occasion =
+            // decision index, ferx-core `api/adaptive.rs`) and never reads the
+            // data's occasion labels. Deriving them changed no output, but it
+            // refused a fit that records no rule (ferx-r #598 review).
+            let params = params_from_fit(
+                &parsed.model,
+                f.theta,
+                f.omega_flat,
+                f.omega_dim,
+                f.sigma,
+                f.omega_iov_flat,
+                f.omega_iov_dim,
+                f.residual_rho,
+                f.residual_rho_pairs,
+            )
+            .map_err(|e| format!("ferx_simulate_adaptive: {e}"))?;
+            (params, Vec::new())
+        }
+    };
 
-        // A failure here (analytical model, an unsupported dosing/covariate
-        // combination, or a verify divergence that taints the result) is raised as an
-        // R error rather than
-        // returned as NULL: the adaptive path has more — and more consequential —
-        // failure modes than a plain simulate, and a verify divergence in particular
-        // must not be silently missable.
-        Ok(match ferx_core::simulate_adaptive_from_spec(
-            &parsed.model,
-            &population,
-            &parsed.model.default_params,
-            n_sim as usize,
-            &spec,
-            &opts,
-        ) {
-            // Adaptive returns a list rather than a bare frame, so the warnings ride
-            // on the list itself; `ferx_simulate_adaptive()` surfaces them through the
-            // same `simulation_warnings` reader the other paths use. `result.warnings`
-            // is core's non-fit bundle, reader findings included through its one
-            // filter, which on this path also withholds `W_NO_DOSES`: the controller
-            // supplies the whole regimen, so an observation grid alone is the normal
-            // input (ferx-r #426).
-            Ok(mut result) => {
-                let warnings = [occasion_notes, std::mem::take(&mut result.warnings)].concat();
-                attach_sim_warnings(adaptive_result_to_list(&result), warnings)
-            }
-            Err(e) => return Err(engine_refusal("ferx_simulate_adaptive: ", e)),
-        })
+    // The spec owns the decision schedule (`at`) and the monitored signal
+    // (`observe` / `with_assay_error`), so `decision_times` and `monitors` stay
+    // empty here — ferx-core errors if they are set alongside a spec.
+    // `AdaptiveSimulateOptions` is `#[non_exhaustive]`, so build it from
+    // `default()` and set fields rather than with a struct literal.
+    let mut opts = ferx_core::AdaptiveSimulateOptions::default();
+    opts.seed = Some(seed as u64);
+    opts.verify = matches!(verify.trim().to_lowercase().as_str(), "true" | "t" | "1");
+    if max_decisions > 0 {
+        opts.max_decisions = max_decisions as usize;
+    }
+
+    // A failure here (analytical model, an unsupported dosing/covariate
+    // combination, or a verify divergence that taints the result) is raised as an
+    // R error rather than
+    // returned as NULL: the adaptive path has more — and more consequential —
+    // failure modes than a plain simulate, and a verify divergence in particular
+    // must not be silently missable.
+    Ok(match ferx_core::simulate_adaptive_from_spec(
+        &parsed.model,
+        &population,
+        &params,
+        n_sim as usize,
+        &spec,
+        &opts,
+    ) {
+        // Adaptive returns a list rather than a bare frame, so the warnings ride
+        // on the list itself; `ferx_simulate_adaptive()` surfaces them through the
+        // same `simulation_warnings` reader the other paths use. `result.warnings`
+        // is core's non-fit bundle, reader findings included through its one
+        // filter, which on this path also withholds `W_NO_DOSES`: the controller
+        // supplies the whole regimen, so an observation grid alone is the normal
+        // input (ferx-r #426).
+        Ok(mut result) => {
+            let warnings = [occasion_notes, std::mem::take(&mut result.warnings)].concat();
+            attach_sim_warnings(adaptive_result_to_list(&result), warnings)
+        }
+        Err(e) => return Err(engine_refusal("ferx_simulate_adaptive: ", e)),
     })
 }
 
@@ -12314,6 +12434,7 @@ extendr_module! {
     fn ferx_rust_simulate;
     fn ferx_rust_simulate_from_fit;
     fn ferx_rust_simulate_adaptive;
+    fn ferx_rust_simulate_adaptive_from_fit;
     fn ferx_rust_simulate_with_uncertainty;
     fn ferx_rust_predict;
     fn ferx_rust_predict_from_fit;

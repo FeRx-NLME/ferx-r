@@ -1136,6 +1136,65 @@ test_that("T14b: the adaptive glue records the global contrast's code beside its
            "simulate_adaptive")
 })
 
+# With `fit =` the adaptive path reads the fit's theta, so it must bind the
+# design on the fit's layout, as every other from-fit path does (ferx-core
+# #1594): a design that observes studies 2 and 3 only lays out one free level
+# on its own, against the fit's two. The model is an ODE (the adaptive path
+# takes no analytical model) with the Form C readout `y = central / V`; the
+# controller always holds, so the trajectory is the base dose alone and, with
+# the eta on `Z`, which `y` never reads, deterministic. Mutations that redden
+# this: the from-fit adaptive glue calling `bind_design` (the design's own
+# levels: a theta count mismatch, and an unseen level simulated instead of
+# refused) or no binder at all in place of `bind_design_from_fit`; passing the
+# model's default params.
+test_that("T14c: ferx_simulate_adaptive(fit = ) reads each level's fitted theta", {
+  model <- with_adaptive_block(tl_write(tl_model(
+    "  theta TVCL(2.0, 0.001, 20.0)\n  theta PLACEBO[STUDY](0.0, -5.0, 5.0)",
+    "TVCL + PLACEBO",
+    structure = paste0(
+      "[structural_model]\n  ode(states=[central])\n\n",
+      "[odes]\n  d/dt(central) = -(CL / V) * central\n\n",
+      "[scaling]\n  y = central / V\n"
+    )
+  ), ".ferx"))
+  writeLines(sub("when signal < 1 : increase 25%", "when signal < 1000000 : hold",
+                 readLines(model), fixed = TRUE), model)
+  fit <- tl_fit(model, tl_write(tl_data3, ".csv"))
+  expect_identical(names(fit$theta), c(
+    "TVCL", "PLACEBO[STUDY=1]", "PLACEBO[STUDY=2]", "TVV"
+  ))
+  fit$theta[] <- c(2, 0.3, -0.5, 10)
+  # Studies 2 and 3: the fit's second free level, and its derived third.
+  rows <- strsplit(tl_data3, "\n")[[1]]
+  design <- tl_write(paste(rows[c(1, 6:13)], collapse = "\n"), ".csv")
+  res <- ferx_simulate_adaptive(model, design, n_sim = 1L, seed = 1L, fit = fit)
+  expect_true(all(res$decisions$OUTCOME == "hold"))
+  traj <- res$trajectories
+  expect_identical(traj$ID, rep(c("2", "3"), each = 3L))
+  # Global sum-to-zero: study 3's level is minus the sum of the free two.
+  p <- rep(c(-0.5, -(0.3 - 0.5)), each = 3L)
+  expected <- 100 / 10 * exp(-(2 + p) / 10 * traj$TIME)
+  # Measured at 27e6f11: max relative error 4.4e-16. Reading study 3 at a
+  # level of 0 instead is off by 0.21, so 1e-10 separates the two by far.
+  expect_equal(traj$IPRED, expected, tolerance = 1e-10)
+  # A design level the fit never saw has no fitted theta. Bound on its own
+  # levels, studies 1, 2 and 4 take the fit's theta count, so the design would
+  # be simulated quietly with study 4 reading study 3's slot; on the fit's
+  # levels it is refused, naming the label. Levels are sorted, so reordering
+  # the design's subjects cannot tell the binders apart.
+  unseen <- rows
+  unseen[10:13] <- sub(",3$", ",4", unseen[10:13])
+  err <- tryCatch(
+    ferx_simulate_adaptive(model, tl_write(paste(unseen, collapse = "\n"), ".csv"),
+                           n_sim = 1L, seed = 1L, fit = fit),
+    error = function(e) e
+  )
+  expect_s3_class(err, "error")
+  expect_match(conditionMessage(err), "`STUDY=4`", fixed = TRUE)
+  expect_s3_class(err, "ferx_engine_error")
+  expect_identical(err$code, "E_THETA_LEVEL_BINDING")
+})
+
 # --- R1: a tampered theta_levels is refused by the glue -------------------------
 
 test_that("R1: the glue refuses a theta_levels table it cannot trust", {

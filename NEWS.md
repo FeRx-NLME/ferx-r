@@ -1010,6 +1010,16 @@
 
 ## New features
 
+- **`ferx_simulate_adaptive()` gains `fit =`**
+  ([ferx-core #1594](https://github.com/FeRx-NLME/ferx-core/issues/1594)).
+  It simulates the `[adaptive_dosing]` controller at a fit's estimates
+  rather than the model file's initial values, as `ferx_simulate(fit = )`
+  does, and with `data` omitted it uses the fit's own data. A theta level
+  block is laid out as the fit laid it out, so a design that observes only
+  some of the fit's levels reads each one's fitted value. Random effects are
+  still drawn from the fitted omega; carrying a subject's own estimates over
+  is ferx-core #1594's second half.
+
 - **Per-level output for nested variability levels**
   ([ferx-core #1082](https://github.com/FeRx-NLME/ferx-core/issues/1082)).
   A fit with `level STUDY by STUDY in ID` / `level ARM by ARM in STUDY` gains
@@ -1349,6 +1359,22 @@
   objective ran under: SAEM, VI and Gauss-Newton inherit it, so an SAEM fit
   through a model file's `method = saem` runs with interaction, which R
   used to read as `FALSE`.
+
+- **The covariance warnings of a profiled theta level block get their own
+  guidance in `ferx_get_warnings()`.** The eight messages
+  ferx-core `00e5b2cc` emits from the profiled `r` covariance step all fell
+  to the generic "Standard errors unavailable. Check identifiability"
+  answer, which is wrong for most of them. Each now gets advice that fits
+  what failed: `covariance_method = "r"` when `"s"` / `"rsr"` was asked for,
+  `fit$theta_levels` for a level the data do not inform (no curvature, or a
+  non-positive-definite level Hessian), overflow advice for a non-finite
+  objective, and a smaller `fd_hessian_step` when only a finite-difference
+  point over the structural parameters is non-finite (the level steps are
+  fixed, so a non-finite level point points at the levels instead).
+  "Covariance step failed: the profile solve did not converge at the
+  estimates", which ferx-core files under `convergence`, used to be told to
+  re-fit from new initial values; it now reaches the covariance advice,
+  chosen by the reason the solve gives.
 
 - **Fitted `block_sigma` correlations are matched to the model by their
   sigma pair, not their row position (#486).** Every from-fit path
