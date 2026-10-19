@@ -1898,7 +1898,17 @@
 #' \code{hint: ...} - the same way for every entry point that raises a
 #' \code{ferx_engine_error}. A failure the
 #' engine's validation pass cannot attribute to one diagnostic is raised as an
-#' ordinary error with the engine's message unchanged.
+#' ordinary error with the engine's message unchanged. That pass reads the
+#' model file and the data only, so when the call changes what the fit runs
+#' (\code{settings}, \code{ignore}, \code{accept}, \code{ignore_ids}, or an
+#' argument that overrides \code{[fit_options]}) it labels only a model that
+#' does not parse; other failures keep no code rather than one that may not
+#' apply to this fit.
+#'
+#' A fit interrupted with Ctrl-C raises a condition of class
+#' \code{ferx_cancelled}, and a panic in the engine one of class
+#' \code{ferx_panic}. Both are errors with no \code{code}: neither is a
+#' problem with the model or the data.
 #'
 #' @examples
 #' ex <- ferx_example("warfarin")
@@ -2435,7 +2445,13 @@ ferx_fit <- function(model, data = NULL,
   # A refused fit re-raises with the engine's stable diagnostic code attached
   # (`E_UNKNOWN_BLOCK`, ...), so a caller can branch on the same identifier
   # `ferx_model_validate()` returns instead of matching prose (#367). See
-  # `.ferx_engine_error()`.
+  # `.ferx_engine_error()`. The re-validation reads only the model file and the
+  # data, so its single-error fallback is confined when this call changes what
+  # the fit runs (#521).
+  fallback_stages <- .ferx_fit_fallback_stages(
+    settings_parts$keys, method, covariance_arg, bloq_arg, mu_referencing_arg,
+    sir_arg, gradient_arg
+  )
   raw <- tryCatch(
     ferx_rust_fit(
       model_path = normalizePath(model),
@@ -2451,7 +2467,9 @@ ferx_fit <- function(model, data = NULL,
       settings_keys = settings_parts$keys,
       settings_values = settings_parts$values
     ),
-    error = function(e) stop(.ferx_engine_error(e, model, data))
+    error = function(e) {
+      stop(.ferx_engine_error(e, model, data, fallback_stages = fallback_stages))
+    }
   )
 
   if (length(raw) == 0) {
@@ -3605,6 +3623,28 @@ print.ferx_summary <- function(x, ...) {
 
   cat(bar, "\n", sep = "")
   invisible(x)
+}
+
+# Which failures of a `ferx_fit()` call the single-error fallback in
+# `.ferx_engine_error()` may label (#521). That fallback re-validates the model
+# file and the data and nothing else: a `settings` entry (`iov_occasion`,
+# `iov_column`, ...), `ignore =` / `accept =` / `ignore_ids =`, or a dedicated
+# argument that overrides `[fit_options]` (`method`, `covariance`, ...) is
+# invisible to it, so its one finding can be false for the fit that ran -
+# warfarin_iov with no occasion column fails validation with E_IOV_MISSING_OCC
+# and fits with `settings = list(iov_occasion = "dose")`. With no such
+# override, `NULL`: any failure may be labelled, as before. With one, only a
+# failure to parse the model, which reads the file alone. A text match still
+# applies to every failure, since the engine raising a finding's own message
+# is that finding whatever the settings. `verbose` and `threads` change
+# nothing a check looks at, so they do not count.
+.ferx_fit_fallback_stages <- function(settings_keys, method, covariance_arg,
+                                      bloq_arg, mu_referencing_arg, sir_arg,
+                                      gradient_arg) {
+  overridden <- length(settings_keys) > 0L || length(method) > 0L ||
+    any(nzchar(c(covariance_arg, bloq_arg, mu_referencing_arg, sir_arg,
+                 gradient_arg)))
+  if (overridden) "^Error parsing model: " else NULL
 }
 
 # Emit a warning() for each model file [fit_options] key that disagrees with

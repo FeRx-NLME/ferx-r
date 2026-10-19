@@ -129,6 +129,12 @@ ferx_rust_test_panic <- function(msg) {
 
 #' @title Internal Rust backend binding
 #' @keywords internal
+ferx_rust_test_fit_outcome <- function(case) {
+  .Call("wrap__ferx_rust_test_fit_outcome", case)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
 ferx_rust_known_blocks <- function() {
   .Call("wrap__ferx_rust_known_blocks")
 }

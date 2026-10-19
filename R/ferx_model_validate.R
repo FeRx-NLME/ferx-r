@@ -207,14 +207,14 @@ ferx_model_validate <- function(path, data = NULL) {
 #
 # `fallback_stages`: the single-error fallback below labels a failure with the
 # one error validation found, without a text match. `NULL` allows it for any
-# message, which `ferx_fit()` passes because almost all of its failures are
-# failures of the model, the data, or the engine on them. The glue's refusals
-# of the call itself (a `settings` entry, a method token) are not, and never
-# get this far: the glue records them with an empty code, and
-# `.ferx_engine_coded_error()` returns them as they are (#517). Two known gaps
-# still reach the fallback: a cancelled fit and a panicked worker (#521).
-# Otherwise a regular expression naming the messages it may apply to; see
-# `.ferx_engine_call()`.
+# message, which `ferx_fit()` passes when the call changes nothing validation
+# cannot see, because almost all of its failures are failures of the model,
+# the data, or the engine on them. The glue's refusals of the call itself (a
+# `settings` entry, a method token), a cancelled run and a panic are not, and
+# never get this far: the glue records them with a kind and no code, and
+# `.ferx_engine_coded_error()` returns them without re-validating (#517,
+# #521). Otherwise a regular expression naming the messages it may apply to;
+# see `.ferx_engine_call()` and `.ferx_fit_fallback_stages()`.
 .ferx_engine_error <- function(e, model, data, fallback_stages = NULL) {
   msg  <- conditionMessage(e)
   coded <- .ferx_engine_coded_error(e, msg)
@@ -283,15 +283,18 @@ ferx_model_validate <- function(path, data = NULL) {
 # can show the suggestion without saying it twice (#504). Everywhere else
 # `message` is the raised text itself.
 #
-# A record with an empty code is the glue refusing its own call - a `settings`
-# entry, a method token (#517) - not the model or the data. The condition is
-# returned as it is: re-validating the model and data would find whatever is
-# wrong with them, and the single-error fallback would label this refusal with
-# that unrelated finding's code.
+# A record with an empty code is not about the model or the data, and its
+# `kind` says what it is instead (#521): the glue refusing its own call - a
+# `settings` entry, a method token (#517) - a run the user cancelled, or a
+# panic in the engine. None is re-validated: re-validating the model and data
+# would find whatever is wrong with them, and the single-error fallback would
+# label this failure with that unrelated finding's code. A refusal of the call
+# is returned as it is; the other two get a class of their own,
+# `.ferx_failure_condition()`.
 .ferx_engine_coded_error <- function(e, msg) {
   d <- tryCatch(ferx_rust_take_engine_diagnostic(), error = function(...) NULL)
   if (is.null(d) || !.ferx_is_raised_text(d$text, msg)) return(NULL)
-  if (!nzchar(d$code)) return(e)
+  if (!nzchar(d$code)) return(.ferx_failure_condition(e, d))
   structure(
     class = c("ferx_engine_error", "error", "condition"),
     list(
@@ -302,6 +305,23 @@ ferx_model_validate <- function(path, data = NULL) {
       line       = if (d$line == 0L) NA_integer_ else d$line,
       suggestion = if (nzchar(d$suggestion)) d$suggestion else NA_character_
     )
+  )
+}
+
+# The condition for an uncoded record (#521): `ferx_cancelled` for a run the
+# user interrupted, `ferx_panic` for a panic in the engine, each an `error`
+# carrying the full raised text and no `code`. A refusal of the call (`kind`
+# "call", or a record from before the kind existed) is returned as raised.
+.ferx_failure_condition <- function(e, d) {
+  class <- switch(d$kind %||% "call",
+    cancelled = "ferx_cancelled",
+    panic     = "ferx_panic",
+    NULL
+  )
+  if (is.null(class)) return(e)
+  structure(
+    class = c(class, "error", "condition"),
+    list(message = d$text, call = conditionCall(e))
   )
 }
 

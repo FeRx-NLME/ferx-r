@@ -1966,7 +1966,17 @@ suggestion, when there is one, follows on the next line as
 \code{hint: ...} - the same way for every entry point that raises a
 \code{ferx_engine_error}. A failure the
 engine's validation pass cannot attribute to one diagnostic is raised as an
-ordinary error with the engine's message unchanged.
+ordinary error with the engine's message unchanged. That pass reads the
+model file and the data only, so when the call changes what the fit runs
+(\code{settings}, \code{ignore}, \code{accept}, \code{ignore_ids}, or an
+argument that overrides \code{[fit_options]}) it labels only a model that
+does not parse; other failures keep no code rather than one that may not
+apply to this fit.
+
+A fit interrupted with Ctrl-C raises a condition of class
+\code{ferx_cancelled}, and a panic in the engine one of class
+\code{ferx_panic}. Both are errors with no \code{code}: neither is a
+problem with the model or the data.
 }
 
 \examples{
