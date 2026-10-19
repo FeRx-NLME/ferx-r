@@ -71,6 +71,7 @@ ferx_predict <- function(model, data = NULL, fit = NULL) {
         omega_iov_flat = fit_pieces$omega_iov_flat,
         omega_iov_dim = fit_pieces$omega_iov_dim,
         residual_rho = fit_pieces$residual_rho,
+        residual_rho_pairs = fit_pieces$residual_rho_pairs,
         fit_bindings = fit_pieces$fit_bindings,
         iov_occasion = fit_pieces$iov_occasion
       ),

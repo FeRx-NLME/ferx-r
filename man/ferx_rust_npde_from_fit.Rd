@@ -14,6 +14,7 @@ ferx_rust_npde_from_fit(
   omega_iov_flat,
   omega_iov_dim,
   residual_rho,
+  residual_rho_pairs,
   fit_bindings,
   reader_settings,
   model_is_fits,
