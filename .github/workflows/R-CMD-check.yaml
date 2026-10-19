@@ -102,8 +102,9 @@ jobs:
       # AGENTS.md is the one agent-guidance file (#489, as ferx-core #1528): it
       # opens with `# AGENTS.md`, no file under the old Claude-specific name is
       # back (at the root, or tracked in a subdirectory, where agents load it as
-      # guidance for that directory), and no tracked file but NEWS.md (history)
-      # names the old file, in any letter case, plain or regex-escaped.
+      # guidance for that directory), and no tracked file but NEWS.md and its
+      # pending changelog.d/ fragments (history) names the old file, in any
+      # letter case, plain or regex-escaped.
       # Not a testthat test: R CMD check runs the tests from a built copy of the
       # package, which has neither the git index nor AGENTS.md (.Rbuildignore).
       - name: Verify AGENTS.md is the one agent-guidance file
@@ -113,6 +114,19 @@ jobs:
       # its checks were deleted. Feed it stub repositories, one per shape.
       - name: Test the AGENTS.md guard against stub repositories
         run: bash tools/test-check-agents-md.sh
+
+      # NEWS entries are fragments under changelog.d/, assembled into NEWS.md at
+      # release time, so concurrent PRs never conflict on NEWS.md (#600). This
+      # checks each fragment's name and shape and that nothing was written under
+      # the development heading; whether a PR adds a fragment at all is the
+      # separate `NEWS fragment` workflow, which re-runs on label changes.
+      - name: Verify NEWS fragments
+        run: bash tools/changelog.sh check
+
+      # The checkout is always in shape, so nothing above would fail if one of
+      # the checks were deleted. Drive the script over scratch trees instead.
+      - name: Test the NEWS fragment tooling against scratch trees
+        run: bash tools/test-changelog.sh
 
       # Every ferx-core / ferx-tools `*Options` struct derives `Default`
       # (ferx-core #529, enforced there by the A4 guard in

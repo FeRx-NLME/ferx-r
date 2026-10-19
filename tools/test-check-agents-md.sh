@@ -145,6 +145,28 @@ git -C "$d" add -A
 expect "only the root NEWS.md is exempt" "$d" 1 \
   "names $LEGACY, $RENAMED" docs/NEWS.md 1
 
+# Pending NEWS fragments are history too (#600); the directory's README is not,
+# and neither is a fragment-shaped file one level further down.
+d=$(fixture pending-fragment)
+mkdir -p "$d/changelog.d"
+printf -- '- Renamed %s to AGENTS.md (#489).\n' "$LEGACY" > "$d/changelog.d/490.internal.md"
+git -C "$d" add -A
+expect "a pending NEWS fragment naming the old file is exempt" "$d" 0 "$OK"
+
+d=$(fixture fragment-readme)
+mkdir -p "$d/changelog.d"
+printf 'see %s\n' "$LEGACY" > "$d/changelog.d/README.md"
+git -C "$d" add -A
+expect "changelog.d/README.md is not exempt" "$d" 1 \
+  "names $LEGACY, $RENAMED" changelog.d/README.md 1
+
+d=$(fixture nested-fragment)
+mkdir -p "$d/changelog.d/sub"
+printf 'see %s\n' "$LEGACY" > "$d/changelog.d/sub/1.fix.md"
+git -C "$d" add -A
+expect "only fragments directly under changelog.d/ are exempt" "$d" 1 \
+  "names $LEGACY, $RENAMED" changelog.d/sub/1.fix.md 1
+
 # One invalid UTF-8 byte must not hide the rest of the file from the scan.
 d=$(fixture binary-mention)
 printf '\377\376\000bytes\nsee %s\n' "$LEGACY" > "$d/blob.bin"
