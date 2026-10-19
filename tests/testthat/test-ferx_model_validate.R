@@ -712,6 +712,41 @@ test_that("a cancelled or panicked fit is not labelled with a validation code (#
   }
 })
 
+# The glue side of the test above, with nothing mocked: the arms `ferx_rust_fit`
+# takes for a cancelled run and a panicked worker (`fit_outcome`, driven by a
+# test hook because neither can be caused on demand), and a panic `entry`
+# catches in any entry point. Each must leave a record of its kind, and R must
+# turn that record into the classed condition. Mutation that reddens this: any
+# of the three recording no kind (or `Call`).
+test_that("the glue records a cancel and a panic with their kind (#521)", {
+  for (case in list(
+    list(raise = function() ferx:::ferx_rust_test_fit_outcome("cancelled"),
+         kind = "cancelled", text = "ferx_fit: cancelled by user",
+         class = "ferx_cancelled"),
+    list(raise = function() ferx:::ferx_rust_test_fit_outcome("panicked"),
+         kind = "panic", text = "Fit error: worker thread panicked",
+         class = "ferx_panic"),
+    list(raise = function() ferx:::ferx_rust_test_panic("engine blew up"),
+         kind = "panic", text = "engine blew up", class = "ferx_panic")
+  )) {
+    raised <- tryCatch(case$raise(), error = function(e) e)
+    expect_identical(conditionMessage(raised), case$text)
+    d <- ferx:::ferx_rust_take_engine_diagnostic()
+    expect_identical(d$kind, case$kind, info = case$text)
+    expect_identical(d$code, "", info = case$text)
+    expect_identical(charToRaw(d$text), charToRaw(case$text))
+
+    # Through `.ferx_engine_error()`, on the one-error model: classed, uncoded,
+    # never re-validated.
+    f <- iov_without_occasions()
+    raised <- tryCatch(case$raise(), error = function(e) e)
+    e <- ferx:::.ferx_engine_error(raised, f$model, f$data)
+    expect_s3_class(e, case$class)
+    expect_false(inherits(e, "ferx_engine_error"), info = case$text)
+    expect_null(e$code)
+  }
+})
+
 test_that("every glue record names its kind (#521)", {
   f <- iov_without_occasions()
   tryCatch(

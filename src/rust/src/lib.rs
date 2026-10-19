@@ -357,6 +357,51 @@ fn failure_refusal(kind: RecordKind, text: String) -> String {
     text
 }
 
+/// What `ferx_rust_fit`'s worker came back with, as the fit or the text to
+/// raise. A cancelled run and a worker panic are recorded as such, so R does
+/// not label either with a validation finding about the model (#521); an
+/// engine error goes to `refuse`. Generic over the error so that
+/// `ferx_rust_test_fit_outcome` can drive the two arms no test can reach
+/// through a real fit.
+fn fit_outcome<T, E>(
+    joined: std::thread::Result<Result<T, E>>,
+    cancelled: bool,
+    refuse: impl FnOnce(E) -> String,
+) -> Result<T, String> {
+    match joined {
+        Ok(Ok(r)) => Ok(r),
+        Ok(Err(_)) if cancelled => Err(failure_refusal(
+            RecordKind::Cancelled,
+            "ferx_fit: cancelled by user".to_string(),
+        )),
+        Ok(Err(e)) => Err(refuse(e)),
+        Err(_) => Err(failure_refusal(
+            RecordKind::Panic,
+            "Fit error: worker thread panicked".to_string(),
+        )),
+    }
+}
+
+/// Test hook: raise what `ferx_rust_fit` raises when its worker was
+/// `"cancelled"` or `"panicked"` - through `fit_outcome`, the function the fit
+/// itself uses - since neither a Ctrl-C nor a panic in the engine can be
+/// caused on demand (#521).
+///
+/// @param case `"cancelled"` or `"panicked"`
+/// @return Never returns; the failure arrives in R as an error
+/// @keywords internal
+#[extendr]
+fn ferx_rust_test_fit_outcome(case: &str) -> Robj {
+    entry(move || -> Result<Robj, String> {
+        let joined: std::thread::Result<Result<Robj, String>> = match case {
+            "cancelled" => Ok(Err("cancelled by user".to_string())),
+            "panicked" => Err(Box::new("worker panic")),
+            other => return Err(format!("unknown case `{other}`")),
+        };
+        fit_outcome(joined, case == "cancelled", |e| e)
+    })
+}
+
 /// The record the glue kept for the refusal it raised last, for
 /// `.ferx_engine_error()`: ferx-core's diagnostic code (ferx-r #498), or the
 /// mark of a refusal of the call itself (ferx-r #517).
@@ -731,26 +776,11 @@ fn ferx_rust_fit(
             handle.join()
         });
 
-        let mut result = match result {
-            Ok(Ok(r)) => r,
-            Ok(Err(_)) if cancel.is_cancelled() => {
-                // Raise a proper R error so the user sees a clean condition
-                // instead of a silent empty-list return.
-                // Recorded as such, so R does not label the interrupt with a
-                // validation finding about the model (#521).
-                return Err(failure_refusal(
-                    RecordKind::Cancelled,
-                    "ferx_fit: cancelled by user".to_string(),
-                ));
-            }
-            Ok(Err(e)) => return Err(engine_refusal("Fit error: ", e)),
-            Err(_) => {
-                return Err(failure_refusal(
-                    RecordKind::Panic,
-                    "Fit error: worker thread panicked".to_string(),
-                ))
-            }
-        };
+        // A cancel or a worker panic raises a proper R error, recorded as
+        // such, rather than a silent empty-list return (#521).
+        let mut result = fit_outcome(result, cancel.is_cancelled(), |e| {
+            engine_refusal("Fit error: ", e)
+        })?;
 
         // Record source-file provenance on the result so `ferx_sir(fit)` can
         // refuse to run against a tampered model or dataset later. We compute
@@ -12508,6 +12538,7 @@ extendr_module! {
     fn ferx_rust_take_engine_diagnostic;
     fn ferx_rust_autodiff_enabled;
     fn ferx_rust_test_panic;
+    fn ferx_rust_test_fit_outcome;
     fn ferx_rust_known_blocks;
     fn ferx_rust_sha256_text;
     fn ferx_rust_sha256_raw;
