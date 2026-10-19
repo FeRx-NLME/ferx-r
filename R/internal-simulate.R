@@ -77,6 +77,9 @@ validate_fit_for_params <- function(fit) {
     level_label = as.character(tl$label),
     level_group = as.integer(tl$group),
     level_contrast = as.character(tl$contrast),
+    # The blocks the fit solved for rather than searched (ferx-core #1065);
+    # the glue sets them on the SIR / covariance skeleton and its level rows.
+    profiled_blocks = as.character(fit$profiled_blocks %||% character(0)),
     stat_covariate = as.character(cs$covariate),
     stat_median = as.numeric(cs$median),
     stat_mean = as.numeric(cs$mean),
@@ -342,14 +345,21 @@ validate_fit_for_params <- function(fit) {
 .ferx_theta_levels_frame <- function(block = NULL, index = NULL, label = NULL,
                                      group = NULL, contrast = NULL,
                                      theta_name = NULL, value = NULL,
-                                     se = NULL, sir_lo = NULL, sir_hi = NULL) {
+                                     se = NULL, sir_lo = NULL, sir_hi = NULL,
+                                     profiled = NULL) {
   na <- function(x) if (is.null(x)) rep(NA_real_, length(block)) else x
+  # `profiled` (ferx-core #1065) is last in the signature, so the positional
+  # callers above stay as they are, but sits beside `contrast` in the frame: it
+  # is a property of the block. Absent means no level was profiled, which every
+  # fit made before the profile solve is.
+  if (is.null(profiled)) profiled <- rep(FALSE, length(block))
   data.frame(
     block = as.character(block),
     index = as.integer(index),
     label = as.character(label),
     group = as.integer(group),
     contrast = as.character(contrast),
+    profiled = as.logical(profiled),
     theta_name = as.character(theta_name),
     value = as.numeric(na(value)),
     se = as.numeric(na(se)),
@@ -374,10 +384,15 @@ validate_fit_for_params <- function(fit) {
   if (NROW(old) == 0L) return(old)
   new <- .ferx_theta_levels_frame(
     new$block, new$index, new$label, new$group, new$contrast, new$theta_name,
-    new$value, new$se, new$sir_lo, new$sir_hi
+    new$value, new$se, new$sir_lo, new$sir_hi, new$profiled
   )
+  # `profiled` (ferx-core #1065) is compared too: the glue rebuilds it from the
+  # fit's own `profiled_blocks`, so engine rows that disagree were laid out for
+  # another fit. Only when the fit has the column - an R object saved before
+  # it existed does not.
+  cols <- c(.ferx_theta_levels_layout, intersect("profiled", names(old)))
   same <- nrow(new) == nrow(old) && all(vapply(
-    .ferx_theta_levels_layout, function(k) identical(new[[k]], old[[k]]), logical(1L)
+    cols, function(k) identical(new[[k]], old[[k]]), logical(1L)
   ))
   if (!same) {
     stop(who, ": the engine laid the theta levels out differently from ",

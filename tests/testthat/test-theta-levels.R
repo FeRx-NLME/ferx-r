@@ -132,8 +132,8 @@ test_that("T1: ferx_fit() binds a level block and reports theta_levels", {
   expect_s3_class(tl, "data.frame")
   expect_identical(
     names(tl),
-    c("block", "index", "label", "group", "contrast", "theta_name", "value",
-      "se", "sir_lo", "sir_hi")
+    c("block", "index", "label", "group", "contrast", "profiled", "theta_name",
+      "value", "se", "sir_lo", "sir_hi")
   )
   expect_identical(nrow(tl), 6L)
   expect_identical(tl$block, rep("PLACEBO", 6L))
@@ -1349,6 +1349,14 @@ test_that("T16: print.ferx_fit collapses a block of 20 free levels, not one of 1
   )))
   # Every level is still on the fit.
   expect_identical(nrow(fit$theta_levels), 20L)
+  # A profiled block (ferx-core #1065) carries core's own suffix on this line.
+  # Set on the record in process: the line is print's, whatever fitted it.
+  prof <- fit
+  prof$profiled_blocks <- "PLACEBO"
+  expect_true(any(capture.output(print(prof)) == sprintf(
+    "PLACEBO  20 free coefficients, profiled (not searched)   min %.4f  median %.4f  max %.4f",
+    v[1], v[10], v[20]
+  )))
 
   # Global sum_to_zero over the same 20 levels: 19 free coefficients, below
   # ferx-core's threshold, so every free level keeps its row.

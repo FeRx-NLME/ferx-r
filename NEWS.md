@@ -2,6 +2,95 @@
 
 ## Breaking changes
 
+- **ferx now builds against ferx-core `00e5b2cc`**, up from `f4580b77`.
+  These engine changes reach R:
+
+  - **A `profile` theta level block now fits**
+    ([ferx-core #1065](https://github.com/FeRx-NLME/ferx-core/issues/1065),
+    [#2130](https://github.com/FeRx-NLME/ferx-core/pull/2130)). With
+    `theta PLACEBO[STUDY, TIME](0.0) profile`, FOCE and FOCEI solve the
+    block's levels exactly at every outer step, so the optimizer searches
+    only the structural parameters. That is what makes an unstructured
+    placebo model with hundreds of levels fit. The OFV, the estimates and
+    the standard errors are the unprofiled fit's: the levels stay in
+    `fit$theta`, count in `n_parameters` and BIC, and get standard errors
+    from the profiled `r` covariance step, in which the structural SEs
+    account for the levels. On `mbma_placebo` the profiled fit matches the
+    unprofiled one to 2.7e-9 in OFV and 8.6e-6 in the structural thetas, with
+    standard errors within 0.7%. `fit$profiled_blocks` names the profiled
+    blocks, and `fit$theta_levels` gains a `profiled` column. `print()` marks
+    the block `(n coefficients, profiled)` on its Structural line and
+    `profiled (not searched)` on its THETA BLOCKS line. `ferx_save_fit()` /
+    `ferx_load_fit()` carry the record as ferx-core's `.fitrx` does, and
+    `ferx_covariance()` repeats the profiled `covariance_method = "r"` step,
+    live or reloaded (to 4e-6 relative). It has no `"s"` / `"rsr"` step on
+    such a fit: those return no standard errors, with the reason in
+    `fit$warnings` rather than an error. A profiled block takes no bounds.
+    `ferx_fit()` refuses, with `E_PROFILE_SCOPE` on `e$code`: a bounded
+    block; a method other than `foce` / `focei`, or `n_agq > 1`; a TTE,
+    binary or other non-Gaussian endpoint; a residual error other than
+    additive, or a log-transformed (LTBS) one; censored rows scored by M3; a
+    residual `correlation` line; a `[mixture]`, a `[diffusion]` block or a
+    FREM covariate model; `covariance_method = "s"` / `"rsr"`;
+    `trust_region` / `mma`, `global_search` and priors. A block no prediction
+    reads, or one not read linearly, is `E_PROFILE_NOT_LINEAR`.
+  - **`optimizer = "auto"` takes L-BFGS on a `kappa` model with a residual
+    `correlation` line**
+    ([ferx-core #2122](https://github.com/FeRx-NLME/ferx-core/issues/2122),
+    [#2127](https://github.com/FeRx-NLME/ferx-core/pull/2127)). Its gradient
+    is finite differences, so `auto` used to pick BOBYQA. BOBYQA stopped at a
+    different objective for each starting value of the correlation, at times
+    above the same model without the line, and reported converged. You no
+    longer need the `settings = list(optimizer = "nlopt_lbfgs")` that the
+    `f4580b77` entry below advises: `mbma_placebo` with `correlation car1(RHO) by OCC` now reaches
+    OFV 89.45 from RHO = 0.01 and from 0.6 on the default, and
+    `fit$optimizer` reads `auto (nlopt_lbfgs)`. Such a fit now warns that
+    this route uses finite differences, and why. On a model also past the
+    analytic path's 24-axis cap, the cap warning stays. It now says that
+    removing parameters would not restore the analytic gradient, where it
+    used to call the fit only slower and advise dropping parameters. An
+    explicit `optimizer = "bobyqa"` is still honoured.
+  - **A typical value whose ETA is transformed is no longer reported as
+    having "NO associated ETA"**
+    ([ferx-core #1715](https://github.com/FeRx-NLME/ferx-core/issues/1715),
+    [#2057](https://github.com/FeRx-NLME/ferx-core/pull/2057)). SAEM,
+    IMP/IMPMAP and `ferx_model_to_frem()` listed every estimated theta the
+    closed-form mu-reference shift does not move as ETA-less, and told you to
+    add an ETA. A Box-Cox `TVCL` and its shape theta, or a covariate
+    coefficient sharing `CL` with `ETA_CL`, got that advice too. Such thetas
+    now get their own message: the ETA is there, but not in the
+    `log P = log TVP + ETA_P` form the shift needs, so cross-check against
+    FOCEI or IMPMAP rather than remove the transform. A theta with no ETA in
+    any statement keeps the old text. Estimates do not change.
+  - **An `[odes]` `init(...)` that reads a time-varying covariate is seeded
+    from the subject's first row in file order**
+    ([ferx-core #2121](https://github.com/FeRx-NLME/ferx-core/issues/2121),
+    [#2128](https://github.com/FeRx-NLME/ferx-core/pull/2128)), of any kind,
+    as NONMEM seeds `A_0`. When an EVID=2 row and an observation shared the
+    first TIME with different covariates, `ferx_predict()` and `ferx_fit()`
+    read the observation's (OFV 222.41 against NONMEM's 172.84 on the
+    anchor), and adaptive simulation ignored dose rows when choosing the
+    seed. Results move for such data.
+  - **Adaptive dosing reads the last of two co-timed rows**
+    ([ferx-core #1599](https://github.com/FeRx-NLME/ferx-core/issues/1599),
+    [#2118](https://github.com/FeRx-NLME/ferx-core/pull/2118)). Take a
+    decision after two rows of one kind (observations, EVID=2 or dose rows)
+    at the same time with different covariates. It now reads the row listed
+    last, not the first, so the injected dose's F and the controller's
+    covariates move for such data (2.4x on the issue's example). The
+    default-on verifier now derives which row a decision reads with its own
+    code.
+  - **Adaptive dosing judges a finite pre-dose window at the first realized
+    dose**
+    ([ferx-core #1572](https://github.com/FeRx-NLME/ferx-core/issues/1572),
+    [#2119](https://github.com/FeRx-NLME/ferx-core/pull/2119)). This applies
+    to an `[odes]` model that reads `TAD` / `TAFD` and whose state stays
+    finite. A condition that holds only for a later first dose
+    (`if (TAD < -20)` with the dose at 36) is now refused, where it used to
+    return numbers up to 23.5x off `ferx_predict()`. A condition on both a
+    compartment and `TIME` that the run never opens now runs instead of
+    being refused.
+
 - **ferx now builds against ferx-core `f4580b77`**, up from `c46b152e`.
   These engine changes reach R:
 

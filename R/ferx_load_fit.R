@@ -299,6 +299,9 @@ ferx_load_fit <- function(path) {
     # ferx-core #2021. Absent on a bundle written before the exact linear
     # path existed, which reads back FALSE - the route that fit ran on.
     ode_linear_exact = isTRUE(w$ode_linear_exact),
+    # ferx-core #1065: the level blocks the fit profiled. Absent on a bundle
+    # without one, which every bundle saved before the profile solve is.
+    profiled_blocks = as.character(unlist(w$profiled_blocks %||% list(), use.names = FALSE)),
     uses_sde = isTRUE(w$uses_sde),
     gradient_method_inner = as.character(w$gradient_method_inner %||% ""),
     gradient_method_outer = as.character(w$gradient_method_outer %||% ""),
@@ -779,7 +782,8 @@ ferx_load_fit <- function(path) {
   # neighbour's value without an error. The engine's `model hash mismatch`
   # names that cause, rather than the bindings.
   args <- .ferx_fit_binding_args(list(
-    theta_levels = wire, covariate_stats = fit$covariate_stats
+    theta_levels = wire, covariate_stats = fit$covariate_stats,
+    profiled_blocks = fit$profiled_blocks
   ))
   # The fit's covariance and kept SIR draws, restored before this runs, give
   # each level the se and SIR interval the fresh fit reported (#528).
@@ -818,7 +822,7 @@ ferx_load_fit <- function(path) {
   }
   tl <- .ferx_theta_levels_frame(
     tl$block, tl$index, tl$label, tl$group, tl$contrast, tl$theta_name,
-    tl$value, tl$se, tl$sir_lo, tl$sir_hi
+    tl$value, tl$se, tl$sir_lo, tl$sir_hi, tl$profiled
   )
   # Now `theta_name` too, which only the model gives; in declaration order,
   # which the engine's frame has.
