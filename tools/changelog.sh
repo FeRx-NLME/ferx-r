@@ -52,14 +52,36 @@ OPT_OUT_LABEL="no-changelog"
 RELEASE_RE='^# ferx [0-9]'
 DEV_RE='^# ferx [0-9][0-9.]* [(]development version[)][[:space:]]*$'
 
+# An awk function, prepended to the scripts that need it: `fence_step(line)`
+# returns 1 if the line opens or closes a fenced code block, and keeps
+# `fence_n` > 0 while inside one. CommonMark's rule: a fence is 3+ backticks or
+# tildes, and only a run of the SAME character, at least as long, with nothing
+# after it, closes it - so a ``` line inside a ~~~ block is content.
+# shellcheck disable=SC2016 # awk source, not shell
+FENCE_AWK='
+function fence_step(line,   s, c, n, rest) {
+  s = line
+  sub(/^[ \t]*/, "", s)
+  c = substr(s, 1, 1)
+  if (c != "`" && c != "~") return 0
+  n = 0
+  while (substr(s, n + 1, 1) == c) n++
+  if (n < 3) return 0
+  rest = substr(s, n + 1)
+  if (!fence_n) { fence_c = c; fence_n = n; return 1 }
+  if (c == fence_c && n >= fence_n && rest ~ /^[ \t]*$/) { fence_n = 0; return 1 }
+  return 0
+}
+'
+
 # Every `# ferx ...` heading of NEWS.md ($1, default the real one) as
 # `<line>\t<text>`, skipping fenced code blocks: an old entry's example may
 # well show a NEWS heading, and counting it would misplace `assemble`'s splice.
 # Every consumer below locates headings through this one function.
 news_headings() {
-  awk -v rel="$RELEASE_RE" '
-    /^[[:space:]]*(```|~~~)/ { fence = !fence; next }
-    !fence && $0 ~ rel       { print FNR "\t" $0 }
+  awk -v rel="$RELEASE_RE" "$FENCE_AWK"'
+    fence_step($0)        { next }
+    !fence_n && $0 ~ rel  { print FNR "\t" $0 }
   ' "${1:-$news}"
 }
 
@@ -470,11 +492,13 @@ is_user_facing() {
 #    context, splitting the run without the text having changed. That proves
 #    the lines were ADDED, in order, but is blind to a lost interior blank line;
 #  - the exact body, interior blank lines and all (trailing ones trimmed, as
-#    `assemble` renders it), must appear in the new release section ($4), not
-#    merely somewhere in NEWS.md: appended to an old release, it would never
-#    reach a release of its own.
+#    `assemble` renders it), must be one of the release section's ENTRIES
+#    (directory $4, from `split_entries`) under the fragment's own category
+#    heading. Each entry is consumed by the fragment it matches, so two equal
+#    fragments need two entries; text inside a code block, a fix filed under
+#    Breaking changes, or a bullet appended to an older release matches none.
 fragment_assembled() {
-  local body needle haystack
+  local body needle haystack stem heading h b
   body="$(git -C "$root" show "$1:$2" | awk '{ l[NR] = $0 } NF { last = NR }
     END { for (i = 1; i <= last; i++) print l[i] }')" || return 1
   [ -n "$body" ] || return 1
@@ -486,10 +510,53 @@ fragment_assembled() {
     *$'\n'"$needle"$'\n'*) ;;
     *) return 1 ;;
   esac
-  case $'\n'"$4"$'\n' in
-    *$'\n'"$body"$'\n'*) return 0 ;;
-  esac
+  stem="${2##*/}"
+  stem="${stem%.md}"
+  is_category "${stem##*.}" || return 1
+  heading="## $(heading_of "${stem##*.}")"
+  # Listed, not globbed: the caller walks its deletions under `set -f`.
+  for h in $(ls "$4" | grep '\.h$' | sort -n); do
+    h="$4/$h"
+    b="${h%.h}.b"
+    [ "$(cat "$h")" = "$heading" ] || continue
+    if [ "$(cat "$b")" = "$body" ]; then
+      rm -f "$h" "$b"
+      return 0
+    fi
+  done
   return 1
+}
+
+# Split the release section on stdin into its entries, one pair of files per
+# entry in directory $1: `<k>.h` the `## ` heading it sits under, `<k>.b` its
+# bullet with trailing blank lines trimmed. An entry is a column-0 `- ` line
+# outside any code block, plus the lines that continue it (indented, blank, or
+# inside a fence it opened); any other column-0 line ends it.
+split_entries() {
+  awk -v dir="$1" "$FENCE_AWK"'
+    function flush(   i, last, f) {
+      if (!k || written[k]) return
+      written[k] = 1
+      last = 0
+      for (i = 1; i <= n; i++) if (line[i] ~ /[^ \t]/) last = i
+      f = dir "/" k ".b"
+      for (i = 1; i <= last; i++) print line[i] > f
+      close(f)
+      f = dir "/" k ".h"
+      print heading[k] > f
+      close(f)
+    }
+    {
+      was = fence_n
+      fence_step($0)
+      if (was) { if (cur) line[++n] = $0; next }
+      if ($0 ~ /^## /) { flush(); cur = 0; h = $0; sub(/[ \t]+$/, "", h); next }
+      if ($0 ~ /^- /) { flush(); k++; heading[k] = h; n = 0; line[++n] = $0; cur = 1; next }
+      if ($0 ~ /^[^ \t]/) { flush(); cur = 0; next }
+      if (cur) line[++n] = $0
+    }
+    END { flush() }
+  '
 }
 
 # The text of the release section this PR adds, as `assemble` writes it: NEWS.md's
@@ -578,16 +645,20 @@ cmd_require() {
     added_lines="$(git -C "$root" diff --no-renames "$mb" HEAD -- NEWS.md |
       sed -n -e '/^+++ /d' -e 's/^+//p')"
     release="$(new_release_section "$mb")"
+    local entries
+    entries="$(mktemp -d)"
+    printf '%s\n' "$release" | split_entries "$entries"
     local IFS_SAVE="$IFS" f
     IFS=$'\n'
     set -f
     for f in $deleted; do
-      if [ -z "$release" ] || ! fragment_assembled "$mb" "$f" "$added_lines" "$release"; then
+      if [ -z "$release" ] || ! fragment_assembled "$mb" "$f" "$added_lines" "$entries"; then
         lost="$lost  $f"$'\n'
       fi
     done
     set +f
     IFS="$IFS_SAVE"
+    rm -rf "$entries"
   fi
   if [ -n "$lost" ]; then
     {

@@ -162,6 +162,14 @@ expect "a heading inside a fenced code block is no heading" "$d" 0 "fragment(s) 
 expect "a fenced '# ferx 0.5.0' does not block assembling 0.5.0" "$d" 0 \
   "assembled 1 fragment(s)" assemble 0.5.0
 
+d=$(fixture mixed-fences)
+printf '\n- **Shows a fence** (#3).\n\n~~~\n```\n# ferx 9.9.9.9000 (development version)\n~~~\n' >>"$d/NEWS.md"
+expect "a backtick line inside a tilde fence does not close it" "$d" 0 "fragment(s) OK" check
+
+d=$(fixture unclosed-by-shorter)
+printf '\n- **Shows a fence** (#3).\n\n````\n```\n# ferx 9.9.9.9000 (development version)\n````\n' >>"$d/NEWS.md"
+expect "a shorter run does not close a longer fence" "$d" 0 "fragment(s) OK" check
+
 d=$(fixture no-dev)
 sed -i.bak '1,2d' "$d/NEWS.md" && rm "$d/NEWS.md.bak"
 expect "accepts NEWS.md without a development heading" "$d" 0 "fragment(s) OK" check
@@ -351,6 +359,46 @@ printf '\n- **Second pending** (#11).\n' >>"$d/NEWS.md"
 commit "$d"
 expect "require fails a release whose entry sits outside the new section" "$d" 1 \
   "changelog.d/11.fix.md" require main
+
+# A release PR whose NEWS.md is written by hand: `# ferx 0.5.0` with the body
+# given, above the old release; every pending fragment deleted.
+hand_release() { # fixture dir, section body
+  local d=$1
+  branch "$d"
+  git -C "$d" rm -q 'changelog.d/[0-9]*.md'
+  { printf '# ferx 0.5.0\n\n%s\n\n' "$2"; sed '1,2d' "$d/NEWS.md"; } >"$d/NEWS.tmp"
+  mv "$d/NEWS.tmp" "$d/NEWS.md"
+  commit "$d"
+}
+
+d=$(fixture req-hand-release)
+hand_release "$d" "$(printf '## Bug fixes\n\n- **Pending fix** (#10).')"
+expect "require passes a hand-written release with the entry in place" "$d" 0 "release PR" require main
+
+d=$(fixture req-release-fenced)
+hand_release "$d" "$(printf '## Bug fixes\n\n```\n- **Pending fix** (#10).\n```')"
+expect "require fails a release whose entry is only inside a code block" "$d" 1 \
+  "changelog.d/10.fix.md" require main
+
+d=$(fixture req-release-wrong-category)
+hand_release "$d" "$(printf '## Breaking changes\n\n- **Pending fix** (#10).')"
+expect "require fails a fix filed under Breaking changes" "$d" 1 \
+  "changelog.d/10.fix.md" require main
+
+d=$(fixture req-release-duplicate)
+cp "$d/changelog.d/10.fix.md" "$d/changelog.d/10-2.fix.md"
+commit "$d"
+hand_release "$d" "$(printf '## Bug fixes\n\n- **Pending fix** (#10).')"
+expect "require fails two equal fragments released as one entry" "$d" 1 \
+  "deletes pending" require main
+
+d=$(fixture req-release-duplicate-ok)
+cp "$d/changelog.d/10.fix.md" "$d/changelog.d/10-2.fix.md"
+commit "$d"
+branch "$d"
+(cd "$d" && CHANGELOG_ROOT="$d" bash "$SCRIPT" assemble 0.5.0 >/dev/null)
+commit "$d"
+expect "require passes two equal fragments assembled as two entries" "$d" 0 "release PR" require main
 
 d=$(fixture req-release-leftover)
 branch "$d"
