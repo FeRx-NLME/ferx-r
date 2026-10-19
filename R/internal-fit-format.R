@@ -754,6 +754,10 @@
   result$sir_ci_sigma <- ci$sir_ci_sigma
   result$sir_ci_kappa <- .ferx_sir_ci_kappa(result$sir_ci_kappa, result$kappa_names)
 
+  # The variational-inference result (#507), through the constructor
+  # `ferx_load_fit()` uses. NULL for every method but VI.
+  result$vi <- .ferx_vi_from_raw(result$vi, result$eta_names, result$kappa_names)
+
   # Normalize trace_path: NULL/empty means no trace was written
   tp <- result$trace_path
   if (is.null(tp) || length(tp) == 0L || !nzchar(tp[[1L]])) {

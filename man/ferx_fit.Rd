@@ -1376,6 +1376,25 @@ its whole label path) and one column per kappa at that level, each
 group's estimate once. The \code{sdtab} carries one column per kappa
 with the estimate of the row's own group. \code{NULL} on every other
 model.}
+\item{vi}{The variational-inference result of a \code{method = vi} fit,
+\code{NULL} for every other method. A list: \code{neg_two_elbo}
+(-2 x ELBO, a bound rather than an OFV) and its halves
+\code{data_term} and \code{kl_term}; \code{n_iterations},
+\code{converged}, \code{family}, \code{n_mc_samples}, \code{kl} and
+\code{n_kl_fallback_subjects}; \code{elbo_trace} and
+\code{objective_trace} (the objective the optimizer minimized, equal to
+\code{elbo_trace} unless covariate-NN regularization is active);
+\code{eta_means}, a data frame of each subject's posterior means
+(\code{ID} plus one column per eta); \code{eta_covs}, a list of
+per-subject posterior covariance matrices named by subject, with the
+eta names as dimnames; \code{kappa_means}, a list named by subject of
+occasion-by-kappa matrices of the IOV posterior means (no rows without
+IOV); \code{n_fd_subjects}; \code{elbo_tightness_ratio}; and
+\code{superseded_by}, the later estimating stage that moved the
+estimates after VI, or \code{NA}. Under VI, \code{ebe_etas} holds the
+posterior means. \code{ferx_save_fit()} / \code{ferx_load_fit()} carry
+it in the bundle's \code{vi} section, the layout ferx-core itself
+uses.}
 \item{omega_param_corr}{Parameter-level correlation matrix for block omega.
 Uses the bivariate lognormal formula for lognormal pairs and falls back
 to the eta-level formula for additive or unknown parameterisations.

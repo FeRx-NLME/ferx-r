@@ -140,6 +140,9 @@ ferx_load_fit <- function(path) {
     staging, wire$iov$levels, result$kappa_names, result$kappa_levels,
     result$subject_ids
   )
+  # The variational-inference result (#508), from ferx-core's `vi` slot.
+  result$vi <- .fitrx_vi_from_wire(wire$vi, result$eta_names,
+                                   result$kappa_names, result$subject_ids)
   conddist_path <- file.path(staging, "conddist.csv")
   if (file.exists(conddist_path)) {
     cd_df <- .fitrx_read_csv_exact(conddist_path, id_cols = "ID")

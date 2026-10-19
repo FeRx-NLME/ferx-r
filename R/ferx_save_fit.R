@@ -317,7 +317,9 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   # file is consistent for any reader, not because ferx-core reads them.
   "param_names", "mean", "sd", "q025", "median", "q975", "rhat", "ess_bulk",
   "ess_tail", "mcse",
-  "excluded_subject_ids", "fired_ignore", "fired_accept"
+  "excluded_subject_ids", "fired_ignore", "fired_accept",
+  # ViWire (`vi`, ferx-core #2058); its `eta_posterior[].mean` is `mean` above
+  "elbo_trace", "objective_trace", "eta_names"
 )
 
 # Not in the table, deliberately: `neural_networks`. `.fitrx_write_fit_json()`
@@ -334,7 +336,9 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
 # unboxes into a bare number where the engine expects an inner sequence.
 .FITRX_ARRAY_OF_ARRAY_KEYS <- c(
   "ci_theta", "ci_omega", "ci_sigma", "ci_kappa", "resamples_packed",
-  "shrinkage_kappa_by_occ"
+  "shrinkage_kappa_by_occ",
+  # ViPosteriorWire (`vi.eta_posterior[]`): one row per eta / occasion
+  "cov", "kappa_means"
 )
 
 # Walk a wire list and wrap every array-valued field in `as.list()`, which
@@ -694,6 +698,11 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   )
   bindings <- bindings[!vapply(bindings, is.null, logical(1L))]
   if (length(bindings)) wire$data_bindings <- bindings
+  # The variational-inference result (#508), in ferx-core's own `vi` slot
+  # (ferx-core #2058), so the engine loads an R VI bundle and R loads the
+  # engine's. Absent for every other method, as the engine leaves it.
+  vi_wire <- .fitrx_build_vi_wire(fit)
+  if (!is.null(vi_wire)) wire$vi <- vi_wire
   # The IOV occasion rule, under the key ferx-core writes (#1783, #512); absent
   # when the fit records none, as the engine leaves it.
   wire$iov_occasion <- .fitrx_iov_occasion_to_wire(fit$iov_occasion)
