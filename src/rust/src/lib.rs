@@ -484,11 +484,24 @@ fn ferx_rust_fit(
         reader_settings.ignore_exprs = opts.ignore_exprs.clone();
         reader_settings.accept_exprs = opts.accept_exprs.clone();
         reader_settings.ignore_subjects = opts.ignore_subjects.clone();
+        // One read of the data file, as for the model above (ferx-r #585): the
+        // population is parsed from these bytes and `data_hash` names them, so
+        // an edit to the file while the fit runs cannot leave the fit recording
+        // a hash of rows it never read. Core's reader takes only a path, so the
+        // bytes are parsed from a private copy (`StagedData`) rather than from
+        // `data_path` a second time, until core reads bytes (ferx-core #2140).
+        let data_bytes = std::fs::read(data_path)
+            .map_err(|e| format!("Error reading data: cannot read `{data_path}`: {e}"))?;
+        let data_hash = ferx_core::io::hash::sha256_bytes(&data_bytes);
+        let staged = StagedData::write(&data_bytes)
+            .map_err(|e| format!("Error reading data: {e}"))?;
+        drop(data_bytes);
         let (mut population, covariate_table) =
-            match ferx_core::api::read_population_with(&parsed.model, &reader_settings, data_path) {
+            match ferx_core::api::read_population_with(&parsed.model, &reader_settings, staged.path()) {
                 Ok(result) => result,
                 Err(e) => return Err(engine_refusal("Error reading data: ", e)),
             };
+        drop(staged);
 
         // Bind `theta NAME[COL, ...]` level blocks against the data just read
         // (ferx-r #370): the level count, and so the theta layout, is a property
@@ -689,6 +702,9 @@ fn ferx_rust_fit(
         result.model_path = Some(model_path.to_string());
         result.data_path = Some(data_path.to_string());
         //
+        // `data_hash` is the hash of the bytes the population was read from
+        // (above), not of the file as it is now (ferx-r #585).
+        //
         // `model_hash` and `model_text` are the one read the fit was parsed
         // and bound from (above), so the text is exactly the bytes the hash
         // names (CRLF, BOM and a missing trailing newline included).
@@ -696,7 +712,7 @@ fn ferx_rust_fit(
         // rather than re-reading a file that may have been edited since
         // (ferx-r #577).
         result.model_hash = Some(model_hash);
-        result.data_hash = ferx_core::io::hash::sha256_file(Path::new(data_path)).ok();
+        result.data_hash = Some(data_hash);
         result.model_text = Some(model_text);
         // Attach the covariate table built during the strict read above (None when
         // the model has no `[covariates]` block). `fit()` itself leaves this None.
@@ -1847,6 +1863,115 @@ fn ferx_rust_npde_from_fit(
 // standalone covariance step, which take no population here, hand them to the
 // engine in the skeleton `FitResult`'s `data_bindings` instead, the slot
 // ferx-core's own `fit()` records them in (FeRx-NLME/ferx-core#1621).
+
+/// A private copy of the data bytes `ferx_rust_fit` read, for core's
+/// path-only reader (ferx-r #585): the population is parsed from exactly the
+/// bytes `data_hash` names, whatever happens to the user's file meanwhile.
+/// The copy is of a dataset the user may keep owner-only, so it goes in R's
+/// session temporary directory (`tempdir()`: created 0700, removed when R
+/// exits, so a crash leaves nothing readable by others behind), created with
+/// `create_new` under a per-process name, owner-only (0600) on Unix, and is
+/// removed on drop.
+struct StagedData {
+    path: std::path::PathBuf,
+}
+
+impl StagedData {
+    fn write(bytes: &[u8]) -> std::result::Result<Self, String> {
+        use std::io::Write;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let dir = r_session_tempdir();
+        for _ in 0..100 {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.subsec_nanos())
+                .unwrap_or(0);
+            let path = dir.join(format!(
+                "ferx-data-{}-{}-{nanos}.csv",
+                std::process::id(),
+                SEQ.fetch_add(1, Ordering::Relaxed)
+            ));
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            let mut file = match options.open(&path) {
+                Ok(file) => file,
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(e) => {
+                    return Err(format!(
+                        "cannot stage the data in `{}`: {e}",
+                        dir.display()
+                    ))
+                }
+            };
+            let staged = StagedData { path };
+            file.write_all(bytes)
+                .and_then(|()| file.flush())
+                .map_err(|e| format!("cannot stage the data in `{}`: {e}", dir.display()))?;
+            return Ok(staged);
+        }
+        Err(format!("cannot stage the data in `{}`: no free name", dir.display()))
+    }
+
+    fn path(&self) -> &str {
+        // `tempdir()` and the name are both valid UTF-8 on every platform R
+        // runs on; a lossy conversion would name a different file, so fall
+        // back to the empty path (the read then fails loudly).
+        self.path.to_str().unwrap_or("")
+    }
+}
+
+/// R's per-session temporary directory, falling back to the system one only
+/// if R cannot be asked (never expected: the glue runs on R's thread).
+fn r_session_tempdir() -> std::path::PathBuf {
+    eval_string("base::tempdir()")
+        .ok()
+        .and_then(|dir| dir.as_str().map(std::path::PathBuf::from))
+        .unwrap_or_else(std::env::temp_dir)
+}
+
+/// Stage `bytes` exactly as `ferx_rust_fit` stages the data it read, and
+/// report the staged copy while it exists: its path, its Unix permission bits
+/// (`NA` elsewhere) and its bytes. The copy is removed before this returns.
+/// For the tests of ferx-r #585 only.
+///
+/// @param bytes A raw vector.
+/// @return A list with `path`, `mode` and `bytes`.
+/// @export
+#[extendr]
+fn ferx_rust_stage_data_probe(bytes: Raw) -> List {
+    entry(move || {
+        let staged = StagedData::write(bytes.as_slice())?;
+        let meta = std::fs::metadata(&staged.path).map_err(|e| e.to_string())?;
+        #[cfg(unix)]
+        let mode = {
+            use std::os::unix::fs::PermissionsExt;
+            Some((meta.permissions().mode() & 0o777) as i32)
+        };
+        #[cfg(not(unix))]
+        let mode: Option<i32> = {
+            let _ = meta;
+            None
+        };
+        let read = std::fs::read(&staged.path).map_err(|e| e.to_string())?;
+        Ok(list!(
+            path = staged.path().to_string(),
+            mode = mode,
+            bytes = Raw::from_bytes(&read)
+        ))
+    })
+}
+
+impl Drop for StagedData {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
 
 /// The model text a bind re-parses: read when the model declares something
 /// data-derived (`bind_design`) and on every from-fit bind that holds a
@@ -5101,6 +5226,21 @@ fn ferx_rust_known_blocks() -> Vec<String> {
 #[extendr]
 fn ferx_rust_sha256_text(text: &str) -> String {
     entry(move || Ok(ferx_core::io::hash::sha256_bytes(text.as_bytes())))
+}
+
+/// SHA-256 of a raw vector, as the lowercase hex digest `data_hash` is written
+/// in (`ferx_core::io::hash::sha256_bytes`).
+///
+/// `ferx_save_fit(include_data = TRUE)` reads the data file once and checks
+/// those bytes against `fit$data_hash` before writing them as the bundle's
+/// `data.csv` (ferx-r #585). The bytes need not be UTF-8.
+///
+/// @param bytes A raw vector.
+/// @return The 64-character hex digest.
+/// @export
+#[extendr]
+fn ferx_rust_sha256_raw(bytes: Raw) -> String {
+    entry(move || Ok(ferx_core::io::hash::sha256_bytes(bytes.as_slice())))
 }
 
 /// Every estimation method's `.fitrx` token and display label (ferx-r #508):
@@ -12037,6 +12177,8 @@ extendr_module! {
     fn ferx_rust_test_panic;
     fn ferx_rust_known_blocks;
     fn ferx_rust_sha256_text;
+    fn ferx_rust_sha256_raw;
+    fn ferx_rust_stage_data_probe;
     fn ferx_rust_method_labels;
     fn ferx_rust_compact_theta_blocks;
     fn ferx_rust_kappa_rows;

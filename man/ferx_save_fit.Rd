@@ -18,7 +18,12 @@ path. An explicit extension is honoured as given.}
 \item{include_data}{Logical. When \code{TRUE}, the input NONMEM CSV used
 to fit the model is embedded verbatim inside the archive (as
 \code{data.csv}). Requires that the file is still accessible at the
-path captured at fit time (\code{fit$data_path}). Default \code{FALSE}.
+path captured at fit time (\code{fit$data_path}), unchanged since the
+fit: a file whose SHA-256 no longer matches \code{fit$data_hash} is not
+the data that was fitted, and \code{ferx_save_fit()} refuses it with an
+error of class \code{ferx_data_edited_error} rather than bundle it. A fit
+with no recorded \code{data_hash} (one made by an older ferx) is bundled
+unchecked. Default \code{FALSE}.
 A fit whose \code{data} was a data.frame (\code{fit$data_source} set)
 always embeds it: its file lives only in a temporary directory, so a
 bundle without it could not be re-read.}

@@ -135,6 +135,18 @@ ferx_rust_sha256_text <- function(text) {
 
 #' @title Internal Rust backend binding
 #' @keywords internal
+ferx_rust_sha256_raw <- function(bytes) {
+  .Call("wrap__ferx_rust_sha256_raw", bytes)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_stage_data_probe <- function(bytes) {
+  .Call("wrap__ferx_rust_stage_data_probe", bytes)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
 ferx_rust_method_labels <- function() {
   .Call("wrap__ferx_rust_method_labels")
 }
