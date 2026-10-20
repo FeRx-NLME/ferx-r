@@ -2779,6 +2779,12 @@ ferx_fit <- function(model, data = NULL,
 
 #' @export
 print.ferx_fit <- function(x, ...) {
+  # Format the OMEGA and OMEGA_IOV rows before the first cat(): their field
+  # checks (.ferx_check_row_fields()) refuse a fit they cannot read, and a
+  # refusal half-way down left the header and THETA table in a capture.output()
+  # or knitr chunk as a truncated report (#567). All or nothing.
+  omega_rows <- .ferx_omega_rows(x)
+  kappa_rows <- .ferx_kappa_rows(x)
   bar <- strrep("=", 60)
   cat(bar, "\n", sep = "")
   cat(" NONLINEAR MIXED EFFECTS MODEL ESTIMATION\n")
@@ -3032,7 +3038,7 @@ print.ferx_fit <- function(x, ...) {
   }
   # The rows - CV%/SD note, scale tag, FIX, SE - are ferx-core's console rows
   # (#543), the same formatter as the OMEGA_IOV rows below.
-  cat(paste0(.ferx_omega_rows(x), "\n"), sep = "")
+  cat(paste0(omega_rows, "\n"), sep = "")
   has_offdiag <- n_eta > 1L && any(abs(om[lower.tri(om)]) > 1e-15)
   if (has_offdiag) {
     cat("  --- Correlations ---\n")
@@ -3091,7 +3097,7 @@ print.ferx_fit <- function(x, ...) {
     kap_names <- .ferx_kappa_labels(x$kappa_names, n_kap)
     # The rows - CV%/SD note, SE, a weighted kappa's weight line - are
     # ferx-core's console rows (#470); pooled shrinkage is in SHRINKAGE below.
-    cat(paste0(.ferx_kappa_rows(x), "\n"), sep = "")
+    cat(paste0(kappa_rows, "\n"), sep = "")
     iov_has_offdiag <- any(abs(m_iov[lower.tri(m_iov)]) > 1e-15)
     if (iov_has_offdiag) {
       cat("  --- Correlations ---\n")
