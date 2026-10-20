@@ -110,9 +110,10 @@ test_that("S1: on a default fit ferx_covariance(fit) is identical() to the in-fi
   # 0.76168066 was the packed estimate, not the settings (plan section 0a).
   fit <- ps_fit("iov_default", "warfarin_iov")
   # Premise on the finite-difference route. Since ferx-core #2093 the default
-  # fit's covariance step is the exact R-matrix, and dropping the packed
-  # estimate no longer moves it (it moved by 6e-4 relative on the stencil); on
-  # gradient = "fd" it still does (measured 2.8e-5).
+  # fit's covariance step is the exact R-matrix, which does not read the packed
+  # estimate at all: perturbing it by 1e-4 moves nothing, while perturbing theta
+  # by 1e-4 does (5.2e-3). On the stencil, dropping it moved the covariance by
+  # 6e-4 relative; on gradient = "fd" it still does (measured 2.8e-5).
   fd <- ps_fit("iov_fd", "warfarin_iov", gradient = "fd")
   no_packed <- fd
   no_packed$packed_estimate <- NULL
@@ -130,7 +131,8 @@ test_that("S1: on a default fit ferx_covariance(fit) is identical() to the in-fi
 # w_lbfgs and ode_rtol3 run on gradient = "fd". Since ferx-core #2093 their
 # default fits take the exact R-matrix, which neither setting moves on these
 # fixtures (identical() with and without the record); on the finite-difference
-# stencil both still do (measured 2.8e-2 and 3.2e-2 relative).
+# stencil both still do (measured 2.8e-2 and 3.2e-2 relative). mm_rtol3 keeps
+# a premise on the exact R-matrix itself.
 ps_cov_rows <- list(
   list(key = "w_lbfgs", example = "warfarin", setting = "inner_optimizer",
        settings = list(inner_optimizer = "lbfgs"), args = list(gradient = "fd"),
@@ -140,7 +142,13 @@ ps_cov_rows <- list(
   list(key = "iov_mu", example = "warfarin_iov", setting = "mu_referencing",
        args = list(mu_referencing = FALSE), value = FALSE),
   list(key = "ode_rtol3", example = "warfarin_ode", setting = "ode_reltol",
-       settings = list(ode_reltol = 1e-3), args = list(gradient = "fd"), value = 1e-3)
+       settings = list(ode_reltol = 1e-3), args = list(gradient = "fd"), value = 1e-3),
+  # The same setting on the default route, where it does reach the exact
+  # R-matrix: mm_oral is a nonlinear ODE, so ode_reltol reaches its solve
+  # (warfarin_ode takes the exact linear path and ignores it). Dropping the
+  # record moved this covariance by 35.9 relative.
+  list(key = "mm_rtol3", example = "mm_oral", setting = "ode_reltol",
+       settings = list(ode_reltol = 1e-3), value = 1e-3)
 )
 
 ps_cov_fit <- function(row) {

@@ -182,14 +182,20 @@ test_that("a profiled fit's failed covariance step is reported in the covariance
   expect_identical(fit$profiled_blocks, "PLACEBO")
   expect_identical(fit$covariance_status, "failed")
 
-  check <- function(ws) {
+  # `categories` is exact, one per matching row in table order: the fit's own
+  # row is the engine's `covariance_failed`; ferx_covariance() keeps that row
+  # and adds its replay's under `covariance`, the category it assigns to the
+  # engine's flat covariance warnings (R/ferx_covariance.R).
+  check <- function(ws, categories) {
     cov <- grepl("^Covariance step failed", ws$message)
-    expect_gte(sum(cov), 1L)
-    expect_true(all(ws$category[cov] %in% c("covariance_failed", "covariance")))
-    expect_match(ws$message[cov][1], "Hessian of the profile objective", fixed = TRUE)
-    g <- ferx:::.ferx_warning_guidance(ws$category[cov][1], message = ws$message[cov][1])
-    expect_match(g, "confounded with the level effects", fixed = TRUE)
+    expect_identical(ws$category[cov], categories)
+    for (i in which(cov)) {
+      expect_match(ws$message[i], "Hessian of the profile objective", fixed = TRUE)
+      g <- ferx:::.ferx_warning_guidance(ws$category[i], message = ws$message[i])
+      expect_match(g, "confounded with the level effects", fixed = TRUE)
+    }
   }
-  check(fit$warnings_structured)
-  check(ferx_get_warnings(quiet(ferx_covariance(fit)), as_df = TRUE))
+  check(fit$warnings_structured, "covariance_failed")
+  check(ferx_get_warnings(quiet(ferx_covariance(fit)), as_df = TRUE),
+        c("covariance_failed", "covariance"))
 })

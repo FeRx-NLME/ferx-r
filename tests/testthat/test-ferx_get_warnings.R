@@ -966,6 +966,24 @@ test_that("every covariance message ferx-core emits gets non-contradictory guida
   }
 })
 
+test_that("a pre-#2158 profile-solve row filed under convergence still gets the covariance guidance", {
+  # Before ferx-core #2158 the engine classed "Covariance step failed: the
+  # profile solve did not converge ..." as `convergence`, and a
+  # warnings_structured table from then (an object kept with saveRDS()) still
+  # says so. The classifier no longer produces that pair, so this row calls the
+  # guidance with the old category directly.
+  msg <- paste0("Covariance step failed: the profile solve did not converge ",
+                "at the estimates (Singular). SE estimates not available.")
+  expect_true(ferx:::.ferx_is_covariance_warning("convergence", message = msg))
+  g <- ferx:::.ferx_warning_guidance("convergence", message = msg)
+  expect_identical(g, ferx:::.ferx_warning_guidance("covariance_failed", message = msg))
+  expect_match(g, "do not identify", fixed = TRUE)
+  expect_false(grepl("initial values", g, ignore.case = TRUE))
+  # The admission is anchored: an optimizer convergence message is not one.
+  expect_false(ferx:::.ferx_is_covariance_warning(
+    "convergence", message = "Outer optimization did not converge"))
+})
+
 
 test_that("a flat THETA is not answered as an unused parameter, by either door", {
   # ferx-core's flat-theta message contains the literal phrase "computed but
