@@ -50,7 +50,8 @@ ps_sir_fields <- function(fit) {
 }
 
 ps_scoring_keys <- c(
-  "inner_maxiter", "inner_tol", "inner_restarts", "mu_referencing", "n_agq",
+  "inner_maxiter", "inner_tol", "inner_restarts", "inner_screen",
+  "mu_referencing", "n_agq",
   "inner_optimizer", "ebe_warm_start", "ode_reltol", "ode_abstol",
   "ode_max_steps", "ode_method", "ode_stiff_abort_after", "ode_auto_switch",
   "gradient_method"
@@ -466,4 +467,61 @@ test_that("S15: ferx_sir(fit) on an M3 fit repeats the in-fit SIR", {
   fit <- ps_fit("bloq_file_m3_sir", "warfarin_bloq", sir = TRUE)
   skip_if(is.null(fit$sir_ess), "bloq_file_m3_sir in-fit SIR did not run")
   expect_identical(ps_sir_fields(ferx_sir(fit)), ps_sir_fields(fit))
+})
+
+test_that("S13: inner_screen is recorded, round-trips, and reads 0 when absent (#589)", {
+  sc <- ferx:::.ferx_default_settings("scoring_settings")
+  expect_identical(sc$inner_screen, 100L)
+  to <- function(record, kind) ferx:::.fitrx_settings_to_wire(stats::setNames(list(record), kind), kind)
+  from <- ferx:::.fitrx_settings_from_wire
+  json <- function(w) {
+    jsonlite::parse_json(as.character(jsonlite::toJSON(
+      w, auto_unbox = TRUE, null = "null", na = "null", digits = I(17)
+    )))
+  }
+  for (n in c(0L, 7L)) {
+    sc$inner_screen <- n
+    expect_identical(from(json(to(sc, "scoring_settings")), "scoring_settings"), sc)
+    sr <- ferx:::.ferx_default_settings("sir_settings")
+    sr$scoring <- sc
+    expect_identical(from(json(to(sr, "sir_settings")), "sir_settings"), sr)
+  }
+
+  # A record written before ferx-core #2013 has no inner_screen: that fit ran no
+  # screen, so it reads as 0, not the default 100 - on the wire, flat or nested,
+  # and in a fit list made before the field existed.
+  sc$inner_screen <- 100L
+  old <- json(to(sc, "scoring_settings"))
+  old$inner_screen <- NULL
+  expect_identical(from(old, "scoring_settings")$inner_screen, 0L)
+  sr <- ferx:::.ferx_default_settings("sir_settings")
+  old_sir <- json(to(sr, "sir_settings"))
+  old_sir$inner_screen <- NULL
+  expect_identical(from(old_sir, "sir_settings")$scoring$inner_screen, 0L)
+  mem <- sc[names(sc) != "inner_screen"]
+  expect_identical(
+    ferx:::ferx_rust_settings_record("scoring_settings", mem, "", "")$inner_screen, 0L
+  )
+})
+
+test_that("S14: settings = list(inner_screen =) reaches the engine as the model file's does (#589)", {
+  ex <- ferx_example("warfarin")
+  fit_r <- function(settings) {
+    suppressWarnings(ferx_fit(ex$model, ex$data, covariance = FALSE,
+                              verbose = FALSE, settings = settings))
+  }
+  off <- fit_r(list(inner_screen = 0L))
+  expect_identical(off$scoring_settings$inner_screen, 0L)
+  expect_identical(fit_r(list(inner_screen = 7L))$scoring_settings$inner_screen, 7L)
+
+  # The same fit with the option in [fit_options], as the CLI reads it.
+  model <- ps_scratch(".ferx")
+  text <- readLines(ex$model)
+  at <- grep("^\\[fit_options\\]", text)
+  writeLines(append(text, "  inner_screen = 0", after = at), model)
+  from_file <- suppressWarnings(ferx_fit(model, ex$data, covariance = FALSE,
+                                         verbose = FALSE))
+  expect_identical(from_file$scoring_settings$inner_screen, 0L)
+  expect_identical(from_file$ofv, off$ofv)
+  expect_identical(from_file$theta, off$theta)
 })

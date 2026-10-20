@@ -6674,10 +6674,11 @@ fn apply_occasion_rule(population: &mut Population, rule: &ferx_core::IovOccasio
 /// The `[fit_options]` keys of `fit$scoring_settings`, one per `ScoringSettings`
 /// field and spelled like it (ferx-core #1805). `scoring_settings_to_r` writes
 /// exactly these names and `scoring_settings_from_r` requires exactly them.
-const SCORING_KEYS: [&str; 14] = [
+const SCORING_KEYS: [&str; 15] = [
     "inner_maxiter",
     "inner_tol",
     "inner_restarts",
+    "inner_screen",
     "mu_referencing",
     "n_agq",
     "inner_optimizer",
@@ -6729,6 +6730,7 @@ fn scoring_settings_to_r(s: &ferx_core::ScoringSettings) -> std::result::Result<
         inner_maxiter,
         inner_tol,
         inner_restarts,
+        inner_screen,
         mu_referencing,
         n_agq,
         inner_optimizer,
@@ -6745,6 +6747,7 @@ fn scoring_settings_to_r(s: &ferx_core::ScoringSettings) -> std::result::Result<
         inner_maxiter = count_to_r(*inner_maxiter),
         inner_tol = *inner_tol,
         inner_restarts = count_to_r(*inner_restarts),
+        inner_screen = count_to_r(*inner_screen),
         mu_referencing = *mu_referencing,
         n_agq = count_to_r(*n_agq),
         inner_optimizer = fit_option_token(serde_json::to_value(inner_optimizer))?,
@@ -6853,9 +6856,14 @@ fn apply_settings_record(
         if *key == "gradient_method" && !given.contains_key(name) {
             continue;
         }
-        let v = given
-            .get(name)
-            .ok_or_else(|| format!("{entry_point}: `{field}`: missing key \"{name}\""))?;
+        // A record written before ferx-core #2013 has no `inner_screen`: that fit
+        // ran no screen, so `0` stands in, as in ferx-core's own `.fitrx` reader -
+        // not the default, which would screen where the fit did not.
+        let screen_off = Robj::from(0i32);
+        let v = match given.get(name) {
+            None if *key == "inner_screen" => &screen_off,
+            v => v.ok_or_else(|| format!("{entry_point}: `{field}`: missing key \"{name}\""))?,
+        };
         // NA is "budget off" for the one optional count, and the parser's own
         // refusal for every other key.
         let na_text = if *key == "ode_stiff_abort_after" { "off" } else { "" };
@@ -6936,8 +6944,11 @@ fn sir_settings_from_r(
 /// list `fit$sir_settings` is: the scoring keys sit flattened beside the SIR
 /// ones on the wire. A block written between ferx-core #1758 and #426 has no
 /// `inner_restarts`, which those draws never used, so the default stands in, as
-/// in ferx-core's own reader. Any other name stays at the top level, where the
-/// decoder refuses it by name.
+/// in ferx-core's own reader. A block written before ferx-core #2013 has no
+/// `inner_screen`; it is filled with `0`, not the default (`100`), because those
+/// draws were scored without a screen, and ferx-core's reader loads it as `0`
+/// too. Any other name stays at the top level, where the decoder refuses it by
+/// name.
 fn sir_settings_unflatten(record: &Robj) -> std::result::Result<Robj, String> {
     let list = record
         .as_list()
@@ -6956,6 +6967,10 @@ fn sir_settings_unflatten(record: &Robj) -> std::result::Result<Robj, String> {
     if !sc_names.iter().any(|n| n == "inner_restarts") {
         sc_names.push("inner_restarts".to_string());
         sc_values.push(count_to_r(FitOptions::default().inner_restarts));
+    }
+    if !sc_names.iter().any(|n| n == "inner_screen") {
+        sc_names.push("inner_screen".to_string());
+        sc_values.push(count_to_r(0));
     }
     let scoring = List::from_names_and_values(sc_names, sc_values)
         .map_err(|e| format!("internal: {e}"))?;
