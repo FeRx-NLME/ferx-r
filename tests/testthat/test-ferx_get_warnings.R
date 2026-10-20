@@ -378,11 +378,12 @@ test_that("a covariance step that succeeded is not reported as unavailable", {
   expect_false(grepl("unavailable", g, ignore.case = TRUE))
 })
 
-test_that("ferx_covariance()'s `covariance` category reaches the guidance", {
-  # `ferx_covariance()` folds the engine's flat covariance warnings into the
-  # structured table under `category = "covariance"` (R/ferx_covariance.R) --
-  # a fourth token, not one of core's three. Omitting it left the entire
-  # post-hoc covariance surface without guidance even after the routing fix.
+test_that("the legacy `covariance` category still reaches the guidance", {
+  # Until #611, `ferx_covariance()` folded the engine's flat covariance
+  # warnings into the structured table under `category = "covariance"` -- a
+  # fourth token, not one of core's three. It now classifies them with the
+  # engine, but a fit object made before that and kept in an `.rds` still
+  # carries the token, so it must keep its guidance.
   msg <- paste0(
     "Covariance step failed: Hessian has ill-conditioned entries for the ",
     "following parameter(s) \u2014 theta[CL] (zero diagonal \u2014 flat objective)."
@@ -505,8 +506,9 @@ test_that(".ferx_warning_guidance returns negative-autocorrelation guidance", {
 # Categories that reach `.ferx_warning_guidance()` without being ferx-core
 # `WarningCode` tokens.
 #
-#   covariance        - assigned by ferx_covariance() (R/ferx_covariance.R) to
-#                       the engine's flat covariance warnings.
+#   covariance        - assigned by ferx_covariance() to the engine's flat
+#                       covariance warnings until #611; still carried by fit
+#                       objects made before it and kept in an `.rds`.
 #   unused_parameter  - no core `WarningCode`; both of core's unused-declaration
 #                       messages classify to `general` and are rerouted here by
 #                       message, so the arm is reachable (see the test below
@@ -955,7 +957,8 @@ test_that("every covariance message ferx-core emits gets non-contradictory guida
     if (!is.null(case$never)) {
       expect_false(grepl(case$never, g, ignore.case = TRUE), info = case$msg)
     }
-    # Same message under ferx_covariance()'s token must give the same answer --
+    # Same message under the legacy `covariance` token (assigned by
+    # ferx_covariance() until #611) must give the same answer --
     # true for every case here because all of them hit a targeted branch. It is
     # deliberately NOT true in the fallback, where the code carries information
     # the message does not; see "the fallback does not report failure under a
@@ -1853,11 +1856,13 @@ test_that("a loaded fit keeps its older warnings after ferx_covariance()", {
   recov <- suppressWarnings(ferx_covariance(loaded))
   expect_true(is.data.frame(recov$warnings_structured))
   after <- ferx_get_warnings(recov, as_df = TRUE)
-  # Every warning the loaded fit showed is still shown, under its category.
+  # Every warning the loaded fit showed is still shown, under its category --
+  # a replayed covariance message included, since ferx_covariance() classifies
+  # it with the engine rather than labelling it `covariance` (#611).
   for (i in seq_len(nrow(before))) {
     j <- match(before$message[i], after$message)
     expect_false(is.na(j), info = before$message[i])
-    if (!is.na(j) && !identical(after$category[j], "covariance")) {
+    if (!is.na(j)) {
       expect_identical(after$category[j], before$category[i], info = before$message[i])
     }
   }

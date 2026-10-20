@@ -338,10 +338,11 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
 #
 # Four categories carry covariance-step messages, not one: ferx-core's
 # `covariance_failed` / `covariance_regularized` / `covariance_step`, plus
-# `"covariance"`, which `ferx_covariance()` assigns to the engine's flat
-# covariance warnings (R/ferx_covariance.R). Gating on `covariance_step` alone
-# made every targeted branch below unreachable, and omitting `"covariance"` left
-# the whole post-hoc covariance surface without guidance.
+# `"covariance"`, which `ferx_covariance()` assigned to the engine's flat
+# covariance warnings until #611 classified them with the engine's own
+# classify_warning. A fit object made before that and kept in memory or an
+# `.rds` still carries such rows, so the token stays admitted. Gating on
+# `covariance_step` alone made every targeted branch below unreachable.
 #
 # `general` is admitted on the message text alone, anchored at the start of the
 # message (optionally after a `[METHOD]` chain prefix) because every covariance

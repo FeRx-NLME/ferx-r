@@ -214,8 +214,11 @@ test_that("ferx_sir merges engine SIR warnings onto the fit", {
   fit <- warfarin_fit_cov()
   skip_if(is.null(fit$cov_matrix), sir_cov_skip)
 
+  # As the binding returns it: ferx-core's run_sir prefixes the proposal
+  # diagnostics with `SIR: `, which is what classify_warning files under `sir`
+  # (#611 classifies these rows with the engine instead of stamping `sir`).
   shrunk <- paste0(
-    "proposal was shrunk in 1 direction(s) so draws mostly stay inside the ",
+    "SIR: proposal was shrunk in 1 direction(s) so draws mostly stay inside the ",
     "parameter bounds [TVCL -0.99 (sd 6.15e3 -> 2.37e0)]. Those directions come ",
     "from eigenvalue-floored (non-identified) curvature in the covariance step."
   )

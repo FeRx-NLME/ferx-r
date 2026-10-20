@@ -406,20 +406,12 @@ ferx_covariance <- function(fit,
   }
   # Assembled rows: the current condition_number flag + ETA-normality (both
   # derived from the fit). The engine's covariance-step warnings arrive as flat
-  # strings (the binding returns no severity/category), so fold them in as
-  # covariance-category rows.
+  # strings; classify them with the engine's own classify_warning, as every
+  # other flat message is, so a replayed "Covariance step failed ..." is the
+  # same `covariance_failed` row, at the same severity, as the fit's own and
+  # unique() collapses the two (#611).
   assembled <- .ferx_assemble_structured_warnings(raw, fit)
-  cov_rows <- if (length(raw$warnings) > 0L) {
-    data.frame(
-      severity      = "warning",
-      category      = "covariance",
-      message       = as.character(raw$warnings),
-      source_method = "",
-      stringsAsFactors = FALSE
-    )
-  } else {
-    assembled[0, , drop = FALSE]
-  }
+  cov_rows <- .ferx_classify_flat_warnings(raw$warnings)
   merged <- rbind(ws %||% assembled[0, , drop = FALSE], assembled, cov_rows)
   fit$warnings_structured <- if (nrow(merged) > 0L) unique(merged) else NULL
 
