@@ -315,6 +315,16 @@
 #'     \code{mbma_placebo/simulate_dataset.R}, shaped with
 #'     \code{\link{ferx_mbma_data}}. The fitted levels cover only the
 #'     (study, visit) cells in the data, so simulate on that grid.}
+#'   \item{nested_levels}{Compartment-free Emax model on arm-level means with
+#'     three nested levels of random effects: 12 sponsors (the subject,
+#'     \code{ID}), 2 studies per sponsor and 2 arms per study, 5 visits per
+#'     arm. \code{level STUDY by STUDY in ID} and
+#'     \code{level ARM by ARM in STUDY} declare the levels (the labels are
+#'     local, nested by key), \code{kappa K_ST ... at STUDY} and
+#'     \code{kappa K_ARM ... at ARM weight = NARM} put a kappa at each, the
+#'     arm one scaled by arm size. The data are synthetic: ferx-core's NONMEM
+#'     anchor \code{nested_levels_3} (MIT). FOCEI from the model's initial
+#'     estimates reaches NONMEM 7.6.0's optimum, OFV 107.04357.}
 #'   \item{warfarin_derived}{One-compartment oral (warfarin) with a
 #'     \code{[derived]} block demonstrating per-row expressions (KE, T_HALF),
 #'     aggregates (CMAX, TMAX, CMAX_D1), numeric integration (AUC_0_72,
