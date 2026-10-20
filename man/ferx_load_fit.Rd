@@ -51,6 +51,16 @@ as usual; \code{\link{ferx_predict}}, \code{\link{ferx_simulate}},
 \code{\link{ferx_covariance}} refuse the fit with that reason (class
 \code{ferx_levels_unavailable_error}). Level bindings that are themselves
 malformed, or two copies of them that disagree, still refuse the load.
+
+A \code{scoring_settings} or \code{sir.settings} record that names a
+setting this ferx does not know - a bundle written by a newer ferx-core -
+is not loaded: \code{fit$scoring_settings} / \code{fit$sir_settings} is
+\code{NULL}, one warning of class
+\code{ferx_settings_record_dropped_warning} names the keys (\code{keys})
+and the record (\code{record}), and the rest of the bundle loads.
+\code{\link{ferx_covariance}} and \code{\link{ferx_sir}} then run as on a
+fit that records none. A setting the record lacks (one written before the
+engine recorded it) is filled with the value that engine ran under.
 }
 \examples{
 ex  <- ferx_example("warfarin")
