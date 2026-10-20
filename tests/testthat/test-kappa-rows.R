@@ -215,6 +215,33 @@ test_that("print refuses an unreadable kappa scale or covariance status by name 
   }
 })
 
+test_that("print's field pre-check and the glue agree on every scale and status (#551)", {
+  # The pre-check takes its lists from the glue, so every spelling the glue
+  # lists passes it and reaches the formatter, and an unknown one is refused
+  # naming the glue's list.
+  types <- ferx:::ferx_rust_known_eta_param_types()
+  statuses <- ferx:::ferx_rust_known_covariance_statuses()
+  expect_true(all(c("log_normal", "additive", "logit", "logit_probability", "custom") %in% types))
+  expect_true(all(c("computed", "failed", "not_requested", "sir_fallback") %in% statuses))
+  for (t in types) {
+    for (s in statuses) {
+      fit <- make_fake_fit(
+        omega = matrix(0.10, 1, 1),
+        omega_iov = matrix(0.04, 1, 1), kappa_names = "KAPPA_CL",
+        kappa_param_types = t, covariance_status = s
+      )
+      expect_length(printed_kappa_rows(fit), 1L)
+    }
+  }
+  check <- getFromNamespace(".ferx_check_row_fields", "ferx")
+  err <- expect_error(check("lognormal", "kappa_param_types", 1L, "omega_iov", "computed"),
+                      class = "ferx_fit_field_error")
+  expect_match(conditionMessage(err), paste(types, collapse = ", "), fixed = TRUE)
+  err <- expect_error(check(types[1L], "kappa_param_types", 1L, "omega_iov", "done"),
+                      class = "ferx_fit_field_error")
+  expect_match(conditionMessage(err), paste(statuses, collapse = ", "), fixed = TRUE)
+})
+
 test_that("kappa shrinkage alone opens SHRINKAGE, and over 30% is flagged", {
   # Review row 5: the kappa term of has_shrinkage and the [!] flag.
   fit <- make_fake_fit(
