@@ -234,13 +234,15 @@ test_that("T5: PLACEBO on its own line fits like the shipped form (to 1e-8)", {
 # -- nested_levels (ferx-core #1082) -------------------------------------------
 # Sponsor (ID) -> study -> arm on ferx-core's NONMEM anchor nested_levels_3
 # (12 sponsors x 2 studies x 2 arms, 5 visits). The model starts from NONMEM's
-# initial estimates (nested_levels_3.ctl), not its converged ones, so both ends
-# of the NONMEM run are oracles: iteration 0 (OBJ 111.94476022 in
-# nested_levels_3.ext) and the optimum (107.04357106, nested_levels_3_eval).
+# initial estimates (nonmem_anchor/nested_levels_3.ctl), not its converged
+# ones, so both ends of the NONMEM run are oracles: iteration 0 (OBJ
+# 111.94476022 in nonmem_anchor/results/nested_levels_3.ext) and the optimum
+# (107.04357106, nonmem_anchor/results/nested_levels_3_eval.ext).
 
 nested_ofv_start <- 111.94476022
 nested_ofv_optimum <- 107.04357106
-# NONMEM's estimates (.ext, 6 significant digits); ADD is the variance.
+# NONMEM's estimates (final row of nonmem_anchor/results/nested_levels_3.ext,
+# 6 significant digits); ADD is the variance.
 nested_nonmem <- c(TVE0 = 10.1818, TVEMAX = 22.0140, ED50 = 33.4048,
                    ET50 = 3.20150, ETA_SP = 0.0699388, K_ST = 0.0904362,
                    K_ARM = 3.75478, ADD = 0.255164)
@@ -282,7 +284,11 @@ test_that("N3: the nested_levels fit reaches NONMEM's optimum from its own start
   expect_lt(abs(fit$ofv - nested_ofv_optimum), 1e-4)
   got <- c(fit$theta, ETA_SP = fit$omega[1, 1], diag(fit$omega_iov),
            ADD = fit$sigma[[1]]^2)
-  expect_equal(got[names(nested_nonmem)], nested_nonmem, tolerance = 1e-4)
+  # Each estimate on its own (measured worst 3.3e-6, K_ST). A tolerance on
+  # expect_equal() pools the error over the vector, so the large thetas would
+  # hide a 10% miss on ETA_SP.
+  rel <- abs(got[names(nested_nonmem)] / nested_nonmem - 1)
+  expect_lt(max(rel), 1e-4, label = paste0("worst |rel diff| (", names(which.max(rel)), ")"))
 
   expect_identical(fit$kappa_levels, c(K_ST = "STUDY", K_ARM = "ARM"))
   expect_identical(vapply(fit$ebe_kappas_by_level, nrow, 1L),
