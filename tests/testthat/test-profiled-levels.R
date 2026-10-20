@@ -162,3 +162,34 @@ test_that("a bounded profiled block is refused with E_PROFILE_SCOPE", {
   expect_identical(e$code, "E_PROFILE_SCOPE")
   expect_match(conditionMessage(e), "takes none", fixed = TRUE)
 })
+
+test_that("a profiled fit's failed covariance step is reported in the covariance class", {
+  skip_on_cran()
+  # ferx-core #2158 (#2176): every "Covariance step failed" warning is
+  # `covariance_failed`, whatever its reason. The reason that used to be filed
+  # under `convergence`, "the profile solve did not converge", comes from
+  # replay_covariance() only when the level solve breaks at the estimates,
+  # which no bundled model does; the classifier table in
+  # test-ferx_get_warnings.R holds its text. This fit fails the step on a
+  # reason any profiled model can reach: an unused theta gives the profile
+  # objective's Hessian a zero row.
+  m <- mbma_profiled_model()
+  txt <- readLines(m$model)
+  txt <- append(txt, "  theta TVUNUSED(1.0, 0.01, 100.0)",
+                after = grep("^  theta PLACEBO\\[", txt))
+  writeLines(txt, m$model)
+  fit <- quiet(ferx_fit(m$model, m$data, verbose = FALSE))
+  expect_identical(fit$profiled_blocks, "PLACEBO")
+  expect_identical(fit$covariance_status, "failed")
+
+  check <- function(ws) {
+    cov <- grepl("^Covariance step failed", ws$message)
+    expect_gte(sum(cov), 1L)
+    expect_true(all(ws$category[cov] %in% c("covariance_failed", "covariance")))
+    expect_match(ws$message[cov][1], "Hessian of the profile objective", fixed = TRUE)
+    g <- ferx:::.ferx_warning_guidance(ws$category[cov][1], message = ws$message[cov][1])
+    expect_match(g, "confounded with the level effects", fixed = TRUE)
+  }
+  check(fit$warnings_structured)
+  check(ferx_get_warnings(quiet(ferx_covariance(fit)), as_df = TRUE))
+})

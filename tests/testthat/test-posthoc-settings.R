@@ -109,9 +109,15 @@ test_that("S1: on a default fit ferx_covariance(fit) is identical() to the in-fi
   # The original 1e-7 case (#511): warfarin_iov SE(TVKA) 0.76168056 vs
   # 0.76168066 was the packed estimate, not the settings (plan section 0a).
   fit <- ps_fit("iov_default", "warfarin_iov")
-  no_packed <- fit
+  # Premise on the finite-difference route. Since ferx-core #2093 the default
+  # fit's covariance step is the exact R-matrix, and dropping the packed
+  # estimate no longer moves it (it moved by 6e-4 relative on the stencil); on
+  # gradient = "fd" it still does (measured 2.8e-5).
+  fd <- ps_fit("iov_fd", "warfarin_iov", gradient = "fd")
+  no_packed <- fd
   no_packed$packed_estimate <- NULL
-  expect_false(identical(ferx_covariance(no_packed)$cov_matrix, fit$cov_matrix))
+  expect_false(identical(ferx_covariance(no_packed)$cov_matrix, fd$cov_matrix))
+  expect_identical(ferx_covariance(fd)$cov_matrix, fd$cov_matrix)
 
   cov <- ferx_covariance(fit)
   expect_identical(cov$cov_matrix, fit$cov_matrix)
@@ -120,15 +126,21 @@ test_that("S1: on a default fit ferx_covariance(fit) is identical() to the in-fi
 
 # Fits made without SIR, so `run_covariance`'s fallback to the SIR record's
 # scoring half cannot stand in for the record under test.
+#
+# w_lbfgs and ode_rtol3 run on gradient = "fd". Since ferx-core #2093 their
+# default fits take the exact R-matrix, which neither setting moves on these
+# fixtures (identical() with and without the record); on the finite-difference
+# stencil both still do (measured 2.8e-2 and 3.2e-2 relative).
 ps_cov_rows <- list(
   list(key = "w_lbfgs", example = "warfarin", setting = "inner_optimizer",
-       settings = list(inner_optimizer = "lbfgs"), value = "lbfgs"),
+       settings = list(inner_optimizer = "lbfgs"), args = list(gradient = "fd"),
+       value = "lbfgs"),
   list(key = "w_tol3", example = "warfarin", setting = "inner_tol",
        settings = list(inner_tol = 1e-3), value = 1e-3),
   list(key = "iov_mu", example = "warfarin_iov", setting = "mu_referencing",
        args = list(mu_referencing = FALSE), value = FALSE),
   list(key = "ode_rtol3", example = "warfarin_ode", setting = "ode_reltol",
-       settings = list(ode_reltol = 1e-3), value = 1e-3)
+       settings = list(ode_reltol = 1e-3), args = list(gradient = "fd"), value = 1e-3)
 )
 
 ps_cov_fit <- function(row) {
