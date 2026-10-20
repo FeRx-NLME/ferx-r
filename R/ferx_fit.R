@@ -258,6 +258,17 @@
 #'       mode is not accepted, so unimodal subjects are bit-identical to
 #'       \code{inner_restarts = 0}. The covariance step reconverges with the same
 #'       setting. FOCE / FOCEI / Laplace / GN / GN-hybrid.}
+#'     \item{\code{inner_screen}}{(default 100) Size of the quasi-random screen
+#'       inside that multi-start; \code{0} turns the screen off. On the same
+#'       cold solves \code{inner_restarts} gates (so \code{inner_restarts = 0}
+#'       disables it too), each subject scores this many Sobol points drawn
+#'       from \eqn{N(0, 4\Omega)} on its individual objective, descends from
+#'       the 3 lowest, and keeps a result only when it is lower than the mode
+#'       it already has and clearly distinct from it. It reaches modes that lie
+#'       off every axis, such as the flip-flop twin of a one-compartment oral
+#'       subject, which the per-coordinate restarts cannot. The points depend
+#'       on the subject's ID only, so results do not change with the thread
+#'       count or the row order. The IOV inner solve runs no screen.}
 #'     \item{\code{inner_optimizer}}{\code{"auto"} (default), \code{"bfgs"},
 #'       \code{"lbfgs"} or \code{"nelder_mead"}. Inner-loop algorithm.
 #'       \code{"auto"} uses dense BFGS, switching to limited-memory L-BFGS above
@@ -1123,7 +1134,7 @@
 #'     the stage that produced the estimates scored the objective under:
 #'     \code{inner_maxiter}, \code{inner_tol} (as the stage ran it, after the
 #'     tightening ferx applies for LTBS and quadrature), \code{inner_restarts},
-#'     \code{mu_referencing}, \code{n_agq}, \code{inner_optimizer},
+#'     \code{inner_screen}, \code{mu_referencing}, \code{n_agq}, \code{inner_optimizer},
 #'     \code{ebe_warm_start}, \code{ode_reltol}, \code{ode_abstol},
 #'     \code{ode_max_steps}, \code{ode_method}, \code{ode_stiff_abort_after}
 #'     (\code{NA} when off), \code{ode_auto_switch} and
@@ -1133,7 +1144,8 @@
 #'     \code{\link{ferx_save_fit}} keeps them. \code{NULL} when the engine
 #'     recorded none, and on a fit saved before they were recorded; a record
 #'     saved before \code{gradient_method} was recorded reads it as
-#'     \code{"auto"}.}
+#'     \code{"auto"}, and one saved before \code{inner_screen} was recorded
+#'     reads it as \code{0}, the screen that fit did not run.}
 #'   \item{sir_settings}{Named list of the settings the fit's SIR ran under:
 #'     \code{samples}, \code{resamples}, \code{seed} (resolved: 12345 when
 #'     \code{sir_seed} was unset), \code{df}, \code{scale},
