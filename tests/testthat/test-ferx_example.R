@@ -230,3 +230,64 @@ test_that("T5: PLACEBO on its own line fits like the shipped form (to 1e-8)", {
   expect_equal(fit_split$ofv, fit$ofv, tolerance = 1e-8)
   expect_equal(fit_split$theta, fit$theta, tolerance = 1e-8)
 })
+
+# -- nested_levels (ferx-core #1082) -------------------------------------------
+# Sponsor (ID) -> study -> arm on ferx-core's NONMEM anchor nested_levels_3
+# (12 sponsors x 2 studies x 2 arms, 5 visits). The model starts from NONMEM's
+# initial estimates (nested_levels_3.ctl), not its converged ones, so both ends
+# of the NONMEM run are oracles: iteration 0 (OBJ 111.94476022 in
+# nested_levels_3.ext) and the optimum (107.04357106, nested_levels_3_eval).
+
+nested_ofv_start <- 111.94476022
+nested_ofv_optimum <- 107.04357106
+# NONMEM's estimates (.ext, 6 significant digits); ADD is the variance.
+nested_nonmem <- c(TVE0 = 10.1818, TVEMAX = 22.0140, ED50 = 33.4048,
+                   ET50 = 3.20150, ETA_SP = 0.0699388, K_ST = 0.0904362,
+                   K_ARM = 3.75478, ADD = 0.255164)
+
+test_that("N1: nested_levels bundles the anchor data under a three-level model", {
+  ex <- ferx_example("nested_levels")
+  expect_true(file.exists(system.file("examples", "ex_nested_levels.R", package = "ferx")))
+  blocks <- ferx:::.ferx_extract_blocks(ex$model)
+  expect_true("level STUDY by STUDY in ID" %in% blocks$parameters)
+  expect_true("level ARM by ARM in STUDY" %in% blocks$parameters)
+  expect_true(any(grepl("^kappa K_ST ~ .* at STUDY", blocks$parameters)))
+  expect_true(any(grepl("^kappa K_ARM ~ .* at ARM weight = NARM", blocks$parameters)))
+
+  # The very rows of ferx-core's anchor: fixtures/nested_levels_3.csv is a
+  # byte copy of nonmem_anchor/nested_levels_3.csv.
+  expect_identical(unname(tools::md5sum(ex$data)),
+                   unname(tools::md5sum(test_path("fixtures", "nested_levels_3.csv"))))
+})
+
+test_that("N2: nested_levels starts where NONMEM's estimation started", {
+  skip_on_cran()
+  ex <- ferx_example("nested_levels")
+  fit0 <- suppressWarnings(ferx_fit(ex$model, ex$data, covariance = FALSE,
+                                    verbose = FALSE, settings = list(maxiter = 0L)))
+  # Measured 111.9447600389 (dOFV -1.8e-7): the start is NONMEM's, and well
+  # away from the optimum, so the fit in N3 has to travel.
+  expect_lt(abs(fit0$ofv - nested_ofv_start), 1e-4)
+  expect_gt(fit0$ofv - nested_ofv_optimum, 4)
+})
+
+test_that("N3: the nested_levels fit reaches NONMEM's optimum from its own start", {
+  skip_on_cran()
+  ex <- ferx_example("nested_levels")
+  fit <- suppressWarnings(ferx_fit(ex$model, ex$data, verbose = FALSE))
+
+  expect_true(fit$converged)
+  expect_identical(fit$covariance_status, "computed")
+  # Measured 107.0435709 (dOFV -1.4e-7) on aarch64 macOS.
+  expect_lt(abs(fit$ofv - nested_ofv_optimum), 1e-4)
+  got <- c(fit$theta, ETA_SP = fit$omega[1, 1], diag(fit$omega_iov),
+           ADD = fit$sigma[[1]]^2)
+  expect_equal(got[names(nested_nonmem)], nested_nonmem, tolerance = 1e-4)
+
+  expect_identical(fit$kappa_levels, c(K_ST = "STUDY", K_ARM = "ARM"))
+  expect_identical(vapply(fit$ebe_kappas_by_level, nrow, 1L),
+                   c(STUDY = 24L, ARM = 48L))
+  # No [covariates] block, so ferx-core #2166 (a level column reported as an
+  # undeclared covariate) does not fire here.
+  expect_false(any(grepl("not declared in \\[covariates\\]", unlist(fit$warnings))))
+})
