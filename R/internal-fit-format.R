@@ -211,7 +211,8 @@
 # from before ferx-core #1643 and stays readable: every row unknown. Without
 # this print() itself aborted with extendr's bare "Must not be NA." or the
 # glue's "unknown covariance_status". Refuses with a `ferx_fit_field_error`
-# naming the field; `field` carries its name.
+# naming the field; `field` carries its name. The known scales and statuses
+# come from the glue that reads them, never a copy here (#551).
 .ferx_check_row_fields <- function(types, types_field, n, rows_field, status, na_ok = FALSE) {
   if (length(types) > 0L && length(types) != n) {
     .ferx_fit_field_error(types_field, sprintf(
@@ -220,7 +221,7 @@
       n, rows_field
     ))
   }
-  known_types <- c("log_normal", "additive", "logit", "logit_probability", "custom")
+  known_types <- ferx_rust_known_eta_param_types()
   bad <- if (na_ok) !is.na(types) & !types %in% known_types else is.na(types) | !types %in% known_types
   if (any(bad)) {
     .ferx_fit_field_error(types_field, sprintf(
@@ -229,17 +230,17 @@
       paste(which(bad), collapse = ", "), paste(known_types, collapse = ", ")
     ))
   }
-  known_status <- c("computed", "failed", "notrequested", "sirfallback")
-  key <- if (length(status) == 1L && !is.na(status)) {
-    tolower(gsub("_", "", as.character(status), fixed = TRUE))
-  } else {
-    NA_character_
-  }
-  if (is.na(key) || !key %in% known_status) {
+  # The glue reads a status in any case, underscores optional (a loaded
+  # .fitrx spells it in CamelCase); compare the same way.
+  status_key <- function(x) tolower(gsub("_", "", as.character(x), fixed = TRUE))
+  known_status <- ferx_rust_known_covariance_statuses()
+  key <- if (length(status) == 1L && !is.na(status)) status_key(status) else NA_character_
+  if (is.na(key) || !key %in% status_key(known_status)) {
     .ferx_fit_field_error("covariance_status", sprintf(
-      "fit$covariance_status is %s; expected one of computed, failed, not_requested, sir_fallback.",
+      "fit$covariance_status is %s; expected one of %s.",
       if (length(status) == 1L && !is.na(status)) sprintf("\"%s\"", status)
-      else paste(deparse(status), collapse = "")
+      else paste(deparse(status), collapse = ""),
+      paste(known_status, collapse = ", ")
     ))
   }
   invisible(NULL)

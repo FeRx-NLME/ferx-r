@@ -4395,15 +4395,7 @@ fn fit_result_to_list(
             None => (Vec::new(), 0i32),
         };
 
-    let covariance_status_str = match result.covariance_status {
-        CovarianceStatus::Computed => "computed",
-        CovarianceStatus::Failed => "failed",
-        CovarianceStatus::NotRequested => "not_requested",
-        // SirFallback: FD Hessian was non-PD and `covariance_fallback = sir`
-        // produced SIR-based intervals (ferx-core #245). The R side maps this
-        // token to the "SirFallback" label (see persist.R).
-        CovarianceStatus::SirFallback => "sir_fallback",
-    };
+    let covariance_status_str = covariance_status_str(&result.covariance_status);
 
     // Parameter-level correlation for block omega (row-major flat); empty when diagonal or absent
     let omega_param_corr_flat: Vec<f64> = match &result.omega_param_corr {
@@ -5820,13 +5812,54 @@ fn ferx_rust_fitrx_kappa_rows(path: &str) -> String {
 /// underscores optional, since a loaded `.fitrx` spells it in CamelCase - read
 /// back for the row formatters.
 fn covariance_status_from_str(s: &str) -> std::result::Result<CovarianceStatus, String> {
-    match s.to_ascii_lowercase().replace('_', "").as_str() {
-        "computed" => Ok(CovarianceStatus::Computed),
-        "failed" => Ok(CovarianceStatus::Failed),
-        "notrequested" => Ok(CovarianceStatus::NotRequested),
-        "sirfallback" => Ok(CovarianceStatus::SirFallback),
-        other => Err(format!("unknown covariance_status {other:?}")),
+    let key = s.to_ascii_lowercase().replace('_', "");
+    all_covariance_statuses()
+        .into_iter()
+        .find(|c| covariance_status_str(c).replace('_', "") == key)
+        .ok_or_else(|| format!("unknown covariance_status {key:?}"))
+}
+
+/// The R spelling of a `CovarianceStatus`, as `fit$covariance_status` holds
+/// it. `SirFallback`: the covariance Hessian was non-PD and
+/// `covariance_fallback = sir` produced SIR-based intervals (ferx-core #245);
+/// the R side maps it to the "SirFallback" label (see persist.R).
+fn covariance_status_str(c: &CovarianceStatus) -> &'static str {
+    match c {
+        CovarianceStatus::Computed => "computed",
+        CovarianceStatus::Failed => "failed",
+        CovarianceStatus::NotRequested => "not_requested",
+        CovarianceStatus::SirFallback => "sir_fallback",
     }
+}
+
+/// Every `CovarianceStatus`. The match is exhaustive, so a variant ferx-core
+/// adds fails to compile here until it is listed (and spelled in
+/// [`covariance_status_str`]).
+fn all_covariance_statuses() -> Vec<CovarianceStatus> {
+    use CovarianceStatus as C;
+    let listed = |c: &C| match c {
+        C::Computed | C::Failed | C::NotRequested | C::SirFallback => (),
+    };
+    let all = vec![C::Computed, C::Failed, C::NotRequested, C::SirFallback];
+    all.iter().for_each(listed);
+    all
+}
+
+/// The `fit$covariance_status` spellings the row formatters' glue reads
+/// ([`ferx_rust_kappa_rows`], [`ferx_rust_omega_rows`]), one per ferx-core
+/// `CovarianceStatus`, so R's pre-check of the field never hand-copies the
+/// list (#551). The glue also accepts any case and drops underscores.
+///
+/// @return Character vector, snake_case.
+/// @export
+#[extendr]
+fn ferx_rust_known_covariance_statuses() -> Vec<String> {
+    entry(move || {
+        Ok(all_covariance_statuses()
+            .into_iter()
+            .map(|c| covariance_status_str(&c).to_string())
+            .collect())
+    })
 }
 
 /// A logical R vector or `NULL` as per-entry flags; `NULL` gives an empty
@@ -6007,11 +6040,40 @@ fn theta_transform_from_str(s: &str) -> std::result::Result<ThetaTransform, Stri
 fn eta_param_type_from_str(
     s: &str,
 ) -> std::result::Result<ferx_core::types::EtaParamType, String> {
-    use ferx_core::types::EtaParamType as T;
-    [T::LogNormal, T::Additive, T::Logit, T::LogitProbability, T::Custom]
+    all_eta_param_types()
         .into_iter()
         .find(|&t| eta_param_type_str(t) == s)
         .ok_or_else(|| format!("unknown random-effect scale {s:?}"))
+}
+
+/// Every `EtaParamType`. The match is exhaustive, so a variant ferx-core adds
+/// fails to compile here until it is listed (and spelled in
+/// [`eta_param_type_str`]).
+fn all_eta_param_types() -> Vec<ferx_core::types::EtaParamType> {
+    use ferx_core::types::EtaParamType as T;
+    let listed = |t: T| match t {
+        T::LogNormal | T::Additive | T::Logit | T::LogitProbability | T::Custom => (),
+    };
+    let all = vec![T::LogNormal, T::Additive, T::Logit, T::LogitProbability, T::Custom];
+    all.iter().copied().for_each(listed);
+    all
+}
+
+/// The random-effect scale spellings the glue reads back
+/// (`eta_param_types`, `kappa_param_types`), one per ferx-core
+/// `EtaParamType`, so R's pre-check of those fields never hand-copies the
+/// list (#551).
+///
+/// @return Character vector.
+/// @export
+#[extendr]
+fn ferx_rust_known_eta_param_types() -> Vec<String> {
+    entry(move || {
+        Ok(all_eta_param_types()
+            .into_iter()
+            .map(|t| eta_param_type_str(t).to_string())
+            .collect())
+    })
 }
 
 /// The R spelling of an `EtaParamType`, as `eta_param_types`,
@@ -7945,12 +8007,7 @@ fn ferx_rust_covariance(
             None => (Vec::new(), 0i32),
         };
 
-        let covariance_status_str = match new_fit.covariance_status {
-            CovarianceStatus::Computed => "computed",
-            CovarianceStatus::Failed => "failed",
-            CovarianceStatus::NotRequested => "not_requested",
-            CovarianceStatus::SirFallback => "sir_fallback",
-        };
+        let covariance_status_str = covariance_status_str(&new_fit.covariance_status);
 
         // Each theta level's se from the new matrix (#528), off the model and
         // bindings bound above. This step never sees the fit's SIR draws, so
@@ -12724,6 +12781,8 @@ extendr_module! {
     fn ferx_rust_test_panic;
     fn ferx_rust_test_fit_outcome;
     fn ferx_rust_known_blocks;
+    fn ferx_rust_known_eta_param_types;
+    fn ferx_rust_known_covariance_statuses;
     fn ferx_rust_cov_labels;
     fn ferx_rust_sha256_text;
     fn ferx_rust_sha256_raw;
