@@ -455,8 +455,10 @@ ferx_sir <- function(fit,
   # character vector with no severity/category (ferx-core#1021 added the
   # proposal-conditioning diagnostics that make this matter: a rank-deficient
   # proposal, or one shrunk to keep draws inside the parameter bounds, qualifies
-  # the CIs this very call just wrote onto the fit). Fold them in as
-  # sir-category rows, exactly as ferx_covariance() does for its own.
+  # the CIs this very call just wrote onto the fit). Classify them with the
+  # engine's classify_warning, as ferx_covariance() does for its own (#611):
+  # it files the `SIR` lines under `sir` itself, and anything else under the
+  # class the same message gets in a fit.
   #
   # This run's `SIR: ` lines replace an earlier SIR run's, and its success
   # replaces an in-fit `SIR failed: ` line, as ferx-core's own run_sir does
@@ -476,17 +478,7 @@ ferx_sir <- function(fit,
     fit$warnings <- unique(c(fit$warnings, as.character(raw$warnings)))
   }
   assembled <- .ferx_assemble_structured_warnings(raw, fit)
-  engine_rows <- if (length(raw$warnings) > 0L) {
-    data.frame(
-      severity      = "warning",
-      category      = "sir",
-      message       = as.character(raw$warnings),
-      source_method = "",
-      stringsAsFactors = FALSE
-    )
-  } else {
-    assembled[0, , drop = FALSE]
-  }
+  engine_rows <- .ferx_classify_flat_warnings(raw$warnings)
   sir_warnings_df <- rbind(assembled, engine_rows)
   if (nrow(sir_warnings_df) > 0L) {
     existing <- fit$warnings_structured

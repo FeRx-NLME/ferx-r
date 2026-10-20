@@ -163,6 +163,25 @@ test_that("a bounded profiled block is refused with E_PROFILE_SCOPE", {
   expect_match(conditionMessage(e), "takes none", fixed = TRUE)
 })
 
+# A profiled fit whose covariance step fails on a reason any profiled model can
+# reach: an unused theta gives the profile objective's Hessian a zero row.
+unused_theta_fit <- local({
+  out <- list()
+  function(covariance = TRUE) {
+    key <- as.character(covariance)
+    if (is.null(out[[key]])) {
+      m <- mbma_profiled_model()
+      txt <- readLines(m$model)
+      txt <- append(txt, "  theta TVUNUSED(1.0, 0.01, 100.0)",
+                    after = grep("^  theta PLACEBO\\[", txt))
+      writeLines(txt, m$model)
+      out[[key]] <<- quiet(ferx_fit(m$model, m$data, verbose = FALSE,
+                                    covariance = covariance))
+    }
+    out[[key]]
+  }
+})
+
 test_that("a profiled fit's failed covariance step is reported in the covariance class", {
   skip_on_cran()
   # ferx-core #2158 (#2176): every "Covariance step failed" warning is
@@ -170,22 +189,14 @@ test_that("a profiled fit's failed covariance step is reported in the covariance
   # under `convergence`, "the profile solve did not converge", comes from
   # replay_covariance() only when the level solve breaks at the estimates,
   # which no bundled model does; the classifier table in
-  # test-ferx_get_warnings.R holds its text. This fit fails the step on a
-  # reason any profiled model can reach: an unused theta gives the profile
-  # objective's Hessian a zero row.
-  m <- mbma_profiled_model()
-  txt <- readLines(m$model)
-  txt <- append(txt, "  theta TVUNUSED(1.0, 0.01, 100.0)",
-                after = grep("^  theta PLACEBO\\[", txt))
-  writeLines(txt, m$model)
-  fit <- quiet(ferx_fit(m$model, m$data, verbose = FALSE))
+  # test-ferx_get_warnings.R holds its text.
+  fit <- unused_theta_fit()
   expect_identical(fit$profiled_blocks, "PLACEBO")
   expect_identical(fit$covariance_status, "failed")
 
-  # `categories` is exact, one per matching row in table order: the fit's own
-  # row is the engine's `covariance_failed`; ferx_covariance() keeps that row
-  # and adds its replay's under `covariance`, the category it assigns to the
-  # engine's flat covariance warnings (R/ferx_covariance.R).
+  # `categories` is exact, one per matching row in table order. The replay's
+  # row is classified by the engine like the fit's own (#611), so it is the
+  # same row and ferx_covariance() leaves one.
   check <- function(ws, categories) {
     cov <- grepl("^Covariance step failed", ws$message)
     expect_identical(ws$category[cov], categories)
@@ -197,5 +208,35 @@ test_that("a profiled fit's failed covariance step is reported in the covariance
   }
   check(fit$warnings_structured, "covariance_failed")
   check(ferx_get_warnings(quiet(ferx_covariance(fit)), as_df = TRUE),
-        c("covariance_failed", "covariance"))
+        "covariance_failed")
+})
+
+test_that("a replayed covariance warning keeps the in-fit row's class and severity (#611)", {
+  skip_on_cran()
+  # ferx_covariance() used to fold the replay's flat warnings in as
+  # `warning`/`covariance` rows: the fit's critical `covariance_failed` row
+  # then sat beside a second, milder copy of itself, and a fit whose own step
+  # never ran printed the replay's failure as a plain warning, missing from the
+  # STATUS line.
+  cols <- c("severity", "category", "message", "source_method")
+  in_fit <- unused_theta_fit()$warnings_structured
+  in_fit <- in_fit[grepl("^Covariance step failed", in_fit$message), cols]
+  expect_identical(nrow(in_fit), 1L)
+  expect_identical(in_fit$severity, "critical")
+
+  # Replayed on top of the failed in-fit step: one row, the fit's.
+  ws <- quiet(ferx_covariance(unused_theta_fit()))$warnings_structured
+  rows <- ws[grepl("^Covariance step failed", ws$message), cols]
+  rownames(rows) <- rownames(in_fit) <- NULL
+  expect_identical(rows, in_fit)
+
+  # Replayed on a fit whose step never ran: the replay's row alone, classed as
+  # the fit's would have been, and it reaches the STATUS line.
+  recov <- quiet(ferx_covariance(unused_theta_fit(covariance = FALSE)))
+  ws <- recov$warnings_structured
+  rows <- ws[grepl("^Covariance step failed", ws$message), cols]
+  rownames(rows) <- NULL
+  expect_identical(rows, in_fit)
+  status <- grep("STATUS:", capture.output(print(recov)), value = TRUE)
+  expect_match(status, "(covariance_failed)", fixed = TRUE)
 })

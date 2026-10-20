@@ -385,6 +385,22 @@ ferx_covariance <- function(fit,
   # fields, and appends the flat high-condition-number warning - exactly what
   # ferx_fit() does, so the two paths can't drift. A loaded fit carries the
   # same `eigenvalues` / `condition_number` names (#455), which this replaces.
+  #
+  # This run's covariance-step warnings replace the fit's own, as its
+  # cov_matrix replaces the fit's: a fit whose step failed and whose replay
+  # computes must not keep reporting `covariance_failed` beside the new matrix
+  # (#611 review). They go from the flat vector too, or .ferx_fit_warnings()
+  # would re-add them from it - the fit's high-condition-number string with
+  # them, here, before .ferx_apply_cov_sentinels() appends the current one.
+  stale_cov <- function(category, message) {
+    as.logical(mapply(.ferx_is_covariance_warning, category, message,
+                      USE.NAMES = FALSE))
+  }
+  if (length(fit$warnings) > 0L) {
+    flat <- .ferx_classify_flat_warnings(fit$warnings)
+    fit$warnings <- fit$warnings[flat$category != "condition_number" &
+                                   !stale_cov(flat$category, flat$message)]
+  }
   fit$cov_eigenvalues <- if (length(raw$cov_eigenvalues) == 0L) NULL else raw$cov_eigenvalues
   fit$cov_condition_number <- raw$cov_condition_number
   fit <- .ferx_apply_cov_sentinels(fit)
@@ -402,24 +418,17 @@ ferx_covariance <- function(fit,
   # (or has a different condition number) doesn't leave a contradictory flag;
   # .ferx_assemble_structured_warnings() re-adds the current one below.
   if (!is.null(ws) && nrow(ws) > 0L) {
-    ws <- ws[ws$category != "condition_number", , drop = FALSE]
+    ws <- ws[ws$category != "condition_number" &
+               !stale_cov(ws$category, ws$message), , drop = FALSE]
   }
   # Assembled rows: the current condition_number flag + ETA-normality (both
   # derived from the fit). The engine's covariance-step warnings arrive as flat
-  # strings (the binding returns no severity/category), so fold them in as
-  # covariance-category rows.
+  # strings; classify them with the engine's own classify_warning, as every
+  # other flat message is, so a replayed "Covariance step failed ..." is the
+  # same `covariance_failed` row, at the same severity, as the fit's own would
+  # be (#611).
   assembled <- .ferx_assemble_structured_warnings(raw, fit)
-  cov_rows <- if (length(raw$warnings) > 0L) {
-    data.frame(
-      severity      = "warning",
-      category      = "covariance",
-      message       = as.character(raw$warnings),
-      source_method = "",
-      stringsAsFactors = FALSE
-    )
-  } else {
-    assembled[0, , drop = FALSE]
-  }
+  cov_rows <- .ferx_classify_flat_warnings(raw$warnings)
   merged <- rbind(ws %||% assembled[0, , drop = FALSE], assembled, cov_rows)
   fit$warnings_structured <- if (nrow(merged) > 0L) unique(merged) else NULL
 

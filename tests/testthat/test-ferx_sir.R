@@ -214,19 +214,33 @@ test_that("ferx_sir merges engine SIR warnings onto the fit", {
   fit <- warfarin_fit_cov()
   skip_if(is.null(fit$cov_matrix), sir_cov_skip)
 
+  # As the binding returns it: ferx-core's run_sir prefixes the proposal
+  # diagnostics with `SIR: `, which is what classify_warning files under `sir`
+  # (#611 classifies these rows with the engine instead of stamping `sir`).
   shrunk <- paste0(
-    "proposal was shrunk in 1 direction(s) so draws mostly stay inside the ",
+    "SIR: proposal was shrunk in 1 direction(s) so draws mostly stay inside the ",
     "parameter bounds [TVCL -0.99 (sd 6.15e3 -> 2.37e0)]. Those directions come ",
     "from eigenvalue-floored (non-identified) curvature in the covariance step."
   )
+  # And a note run_sir appends unprefixed (ferx-core FitInputs::note_warnings,
+  # its STALE_FINGERPRINT_WARNING): not a SIR message, so the engine files it
+  # under `general`, where the old `sir` stamp put it with the SIR rows (#611).
+  note <- paste0(
+    "this fit's population fingerprint is from another ferx version's scheme, ",
+    "so the population was not verified against the one the fit was given"
+  )
   testthat::local_mocked_bindings(
     ferx_rust_sir = function(...) {
-      fake_sir_return(shrunk, length(fit$theta), nrow(fit$omega), length(fit$sigma))
+      fake_sir_return(c(shrunk, note), length(fit$theta), nrow(fit$omega),
+                      length(fit$sigma))
     },
     .package = "ferx"
   )
 
   out <- ferx_sir(fit, sir_samples = 8L, sir_resamples = 4L, sir_seed = 1L)
+  note_row <- out$warnings_structured[out$warnings_structured$message == note, ]
+  expect_identical(note_row$category, "general")
+  expect_identical(note_row$severity, "warning")
 
   # Flat vector, structured table, and the pre-existing warnings all survive.
   expect_true(any(grepl("shrunk", out$warnings, fixed = TRUE)))
