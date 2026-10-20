@@ -505,11 +505,14 @@ test_that("a single-point space returns the input model, fitted", {
   expect_identical(length(unique(res$models$n_parameters)), 1L)
 
   # Which of the two fits wins is not part of the claim: they are the same
-  # model, so the winner is whichever lands lower, and that is platform
-  # dependent. Since ferx-core 0cbad3c2 the two land 0.0017 OFV apart on
-  # macOS (-172.2317 input, -172.2334 grid; it was 0.15 at e3fb3d1e) and the
-  # input row wins on Linux. The claim is that the search selects the better
-  # of them.
+  # model, and which one ranks better is platform dependent. At ferx-core
+  # 0cbad3c2, macOS lands them 0.0017 OFV apart and the grid point wins
+  # (-172.2317 input, -172.2334 grid; the gap was 0.15 at e3fb3d1e). Linux
+  # (aarch64, R 4.5.1) lands them 6e-4 apart, the grid point lower
+  # (-172.2329 input, -172.2335 grid). But the grid fit reports
+  # converged = FALSE there, and the convergence charge puts its fitness at
+  # 97.77 against the input's -102.23, so the input row wins. The claim is
+  # that the search selects the row with the best fitness.
   winner <- res$models[res$models$selected, , drop = FALSE]
   expect_equal(winner$id, res$final_model_id)
   expect_identical(winner$fitness, min(res$models$fitness))
