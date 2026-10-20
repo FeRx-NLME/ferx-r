@@ -525,3 +525,141 @@ test_that("S14: settings = list(inner_screen =) reaches the engine as the model 
   expect_identical(from_file$ofv, off$ofv)
   expect_identical(from_file$theta, off$theta)
 })
+
+# Migration policy for the two records (#535). A key a record lacks is filled
+# with what the engine that wrote it ran under, as ferx-core's
+# `ScoringSettingsWire` fills it; a key this ferx does not know drops a
+# bundle's record on load and is refused, with the way out, on a fit in memory.
+
+# The keys a record may lack, and the value each is read as. Every other key
+# is refused when missing. A key added to the records must be added here or
+# to the refusals on purpose: the test walks the engine's own record.
+ps_missing_fills <- list(inner_restarts = 1L, inner_screen = 0L, gradient_method = "auto")
+
+test_that("S16: a missing key is filled as ferx-core's wire fills it, or refused with the way out (#535)", {
+  decode <- function(kind, record, field) {
+    ferx:::ferx_rust_settings_record(kind, record, "ferx_covariance", field)
+  }
+  sc <- ferx:::.ferx_default_settings("scoring_settings")
+  # A non-default value everywhere a fill could be confused with the default.
+  sc$inner_restarts <- 4L
+  sc$inner_screen <- 7L
+  sc$gradient_method <- "fd"
+  for (name in names(sc)) {
+    rec <- sc[names(sc) != name]
+    if (name %in% names(ps_missing_fills)) {
+      back <- decode("scoring_settings", rec, "fit$scoring_settings")
+      expect_identical(back[[name]], ps_missing_fills[[name]], info = name)
+      expect_identical(back[names(back) != name], rec, info = name)
+    } else {
+      err <- tryCatch(decode("scoring_settings", rec, "fit$scoring_settings"),
+                      error = conditionMessage)
+      expect_match(err, sprintf('`fit$scoring_settings`: missing key "%s"', name),
+                   fixed = TRUE, info = name)
+      expect_match(err, "set `fit$scoring_settings <- NULL`", fixed = TRUE, info = name)
+    }
+  }
+  # The scoring half of the SIR record is filled from the same table, and
+  # every SIR key has been on the record since it existed.
+  sr <- ferx:::.ferx_default_settings("sir_settings")
+  sr$scoring[c("inner_restarts", "inner_screen")] <- NULL
+  back <- decode("sir_settings", sr, "fit$sir_settings")$scoring
+  expect_identical(back$inner_restarts, ps_missing_fills$inner_restarts)
+  expect_identical(back$inner_screen, ps_missing_fills$inner_screen)
+  for (name in setdiff(names(sr), "scoring")) {
+    err <- tryCatch(decode("sir_settings", sr[names(sr) != name], "fit$sir_settings"),
+                    error = conditionMessage)
+    expect_match(err, sprintf('missing key "%s"', name), fixed = TRUE, info = name)
+    expect_match(err, "set `fit$sir_settings <- NULL`", fixed = TRUE, info = name)
+  }
+
+  # A fit saveRDS()'d before a key was recorded runs as the filled record.
+  fit <- ps_fit("w_default", "warfarin")
+  expect_identical(fit$scoring_settings$inner_restarts, ps_missing_fills$inner_restarts)
+  old <- fit
+  old$scoring_settings$inner_restarts <- NULL
+  expect_identical(ferx_covariance(old)$cov_matrix, ferx_covariance(fit)$cov_matrix)
+  # One saved before inner_screen was recorded ran no screen (ferx-core #2013):
+  # it re-scores as the record with the screen off, not at today's default.
+  old <- fit
+  old$scoring_settings$inner_screen <- NULL
+  off <- fit
+  off$scoring_settings$inner_screen <- 0L
+  expect_identical(ferx_covariance(old)$cov_matrix, ferx_covariance(off)$cov_matrix)
+})
+
+test_that("S17: an unknown key on a fit in memory is refused by name, with the way out (#535)", {
+  fit <- ps_fit("w_default", "warfarin")
+  edited <- fit
+  edited$scoring_settings$inner_future <- 1L
+  for (step in list(
+    list("ferx_covariance", function() ferx_covariance(edited)),
+    list("ferx_save_fit", function() ferx_save_fit(edited, ps_scratch(".fitrx")))
+  )) {
+    err <- tryCatch(step[[2L]](), error = conditionMessage)
+    expect_match(err, sprintf('%s: `fit$scoring_settings`: unknown key "inner_future"',
+                              step[[1L]]), fixed = TRUE)
+    expect_match(err, "Remove that key, or set `fit$scoring_settings <- NULL`",
+                 fixed = TRUE)
+  }
+  # The way out works: the fit runs as one that records none.
+  edited$scoring_settings <- NULL
+  expect_no_error(ferx_covariance(edited))
+
+  sfit <- ps_sir_fit(ps_sir_rows[[1L]])
+  sfit$sir_settings$scoring$inner_future <- 1L
+  err <- tryCatch(ferx_sir(sfit), error = conditionMessage)
+  expect_match(err, '`fit$sir_settings$scoring`: unknown key "inner_future"', fixed = TRUE)
+  expect_match(err, "set `fit$sir_settings <- NULL`", fixed = TRUE)
+})
+
+test_that("S18: a bundle record naming an unknown key is dropped with a warning; the rest loads (#535)", {
+  fit <- ps_sir_fit(ps_sir_rows[[1L]])
+  path <- ps_scratch(".fitrx")
+  unlink(path)
+  ferx_save_fit(fit, path, include_data = TRUE)
+  newer <- list(
+    scoring_settings = fitrx_edit_bundle(path, function(w) {
+      w$scoring_settings$inner_future <- 7L
+      w
+    }),
+    sir_settings = fitrx_edit_bundle(path, function(w) {
+      w$sir$settings$inner_future <- 7L
+      w
+    })
+  )
+  without <- list(
+    scoring_settings = fitrx_edit_bundle(path, function(w) {
+      w$scoring_settings <- NULL
+      w
+    }),
+    sir_settings = fitrx_edit_bundle(path, function(w) {
+      w$sir$settings <- NULL
+      w
+    })
+  )
+  for (kind in names(newer)) {
+    # ferx-core's own reader ignores the key and loads the bundle.
+    expect_no_error(ferx:::ferx_rust_fitrx_engine_resave(newer[[kind]],
+                                                         tempfile(fileext = ".fitrx")))
+    w <- expect_warning(loaded <- ferx_load_fit(newer[[kind]]),
+                        class = "ferx_settings_record_dropped_warning")
+    expect_match(conditionMessage(w), '"inner_future"', fixed = TRUE)
+    expect_identical(w$keys, "inner_future")
+    expect_identical(w$record, kind)
+    expect_null(loaded[[kind]])
+    other <- setdiff(names(newer), kind)
+    expect_identical(loaded[[other]], fit[[other]], info = kind)
+    expect_identical(loaded$theta, fit$theta, info = kind)
+    # Exactly the fit a bundle without the record loads as (bar the paths each
+    # load stages its bundled files to), so ferx_covariance() and ferx_sir()
+    # run on it as on that one.
+    staged <- c("model_path", "data_path")
+    expect_identical(loaded[setdiff(names(loaded), staged)],
+                     ferx_load_fit(without[[kind]])[setdiff(names(loaded), staged)],
+                     info = kind)
+  }
+  loaded <- suppressWarnings(ferx_load_fit(newer$scoring_settings))
+  expect_identical(ferx_covariance(loaded)$cov_matrix,
+                   ferx_covariance(ferx_load_fit(without$scoring_settings))$cov_matrix)
+})

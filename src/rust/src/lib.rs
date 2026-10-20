@@ -6671,37 +6671,101 @@ fn apply_occasion_rule(population: &mut Population, rule: &ferx_core::IovOccasio
     }
 }
 
+/// What a settings record without one of its keys is read as (ferx-r #535).
+/// The answer is the setting the engine that wrote the record ran under, which
+/// is not always `FitOptions::default()`: a key a later ferx-core started to
+/// record is absent from every older record, and the fill must re-score such a
+/// fit as it ran. Mirrors ferx-core's `ScoringSettingsWire` serde defaults, so
+/// a record reads the same through R as through the engine's `.fitrx` reader.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum MissingKey {
+    /// In every record since the record existed (ferx-core #1758 / #1805): a
+    /// record without it was edited or damaged, and is refused by name, as
+    /// ferx-core's wire refuses it.
+    Refuse,
+    /// Recorded since a later ferx-core; an older record is read as having run
+    /// under this `[fit_options]` text.
+    Fill(&'static str),
+    /// Recorded since a later ferx-core, whose wire fills today's
+    /// `FitOptions::default()`; the key is left at that default, as there.
+    EngineDefault,
+}
+
+/// One key of a settings record: its list name, the `[fit_options]` key it is,
+/// and what a record without it is read as.
+struct RecordKey {
+    name: &'static str,
+    key: &'static str,
+    missing: MissingKey,
+}
+
+const fn record_key(name: &'static str, key: &'static str, missing: MissingKey) -> RecordKey {
+    RecordKey { name, key, missing }
+}
+
 /// The `[fit_options]` keys of `fit$scoring_settings`, one per `ScoringSettings`
-/// field and spelled like it (ferx-core #1805). `scoring_settings_to_r` writes
-/// exactly these names and `scoring_settings_from_r` requires exactly them.
-const SCORING_KEYS: [&str; 15] = [
-    "inner_maxiter",
-    "inner_tol",
-    "inner_restarts",
-    "inner_screen",
-    "mu_referencing",
-    "n_agq",
-    "inner_optimizer",
-    "ebe_warm_start",
-    "ode_reltol",
-    "ode_abstol",
-    "ode_max_steps",
-    "ode_method",
-    "ode_stiff_abort_after",
-    "ode_auto_switch",
-    "gradient_method",
+/// field and spelled like it (ferx-core #1805), each with its missing-key fill:
+/// the one place the migration policy lives (ferx-r #535). `scoring_settings_to_r`
+/// writes exactly these names and refuses to write a record whose names differ,
+/// so a field ferx-core adds fails to compile there and then, once written, fails
+/// every record until it has a row here - and a row cannot be written without
+/// deciding its `MissingKey`.
+const SCORING_KEYS: &[RecordKey] = &[
+    record_key("inner_maxiter", "inner_maxiter", MissingKey::Refuse),
+    record_key("inner_tol", "inner_tol", MissingKey::Refuse),
+    // Absent from a `sir.settings` block written between ferx-core #1758 and
+    // #426; ferx-core's wire fills today's default (`default_inner_restarts`).
+    record_key("inner_restarts", "inner_restarts", MissingKey::EngineDefault),
+    // Absent from a record written before ferx-core #2013, whose fit ran no
+    // inner screen: `0`, as ferx-core's wire fills it - not today's default
+    // (`100`), which would screen where the fit did not.
+    record_key("inner_screen", "inner_screen", MissingKey::Fill("0")),
+    record_key("mu_referencing", "mu_referencing", MissingKey::Refuse),
+    record_key("n_agq", "n_agq", MissingKey::Refuse),
+    record_key("inner_optimizer", "inner_optimizer", MissingKey::Refuse),
+    record_key("ebe_warm_start", "ebe_warm_start", MissingKey::Refuse),
+    record_key("ode_reltol", "ode_reltol", MissingKey::Refuse),
+    record_key("ode_abstol", "ode_abstol", MissingKey::Refuse),
+    record_key("ode_max_steps", "ode_max_steps", MissingKey::Refuse),
+    record_key("ode_method", "ode_method", MissingKey::Refuse),
+    record_key("ode_stiff_abort_after", "ode_stiff_abort_after", MissingKey::Refuse),
+    record_key("ode_auto_switch", "ode_auto_switch", MissingKey::Refuse),
+    // Absent from a record written before ferx-core #1835: `auto`, ferx-core's
+    // `default_gradient_method`, and a post-hoc step on that fit takes the
+    // caller's route as it did before.
+    record_key("gradient_method", "gradient_method", MissingKey::Fill("auto")),
 ];
 
 /// `fit$sir_settings` names beside its nested `scoring` list, with the
-/// `[fit_options]` key each one is (ferx-core #1758).
-const SIR_KEYS: [(&str, &str); 6] = [
-    ("samples", "sir_samples"),
-    ("resamples", "sir_resamples"),
-    ("seed", "sir_seed"),
-    ("df", "sir_df"),
-    ("scale", "sir_scale"),
-    ("keep_samples", "sir_keep_samples"),
+/// `[fit_options]` key each one is (ferx-core #1758), and the missing-key fill
+/// as for `SCORING_KEYS`. All six have been on the record since it existed.
+const SIR_KEYS: &[RecordKey] = &[
+    record_key("samples", "sir_samples", MissingKey::Refuse),
+    record_key("resamples", "sir_resamples", MissingKey::Refuse),
+    record_key("seed", "sir_seed", MissingKey::Refuse),
+    record_key("df", "sir_df", MissingKey::Refuse),
+    record_key("scale", "sir_scale", MissingKey::Refuse),
+    record_key("keep_samples", "sir_keep_samples", MissingKey::Refuse),
 ];
+
+/// Refuse to write a record whose names are not `keys` (plus `nested`) in that
+/// order: a field added to the struct but not to its key table (ferx-r #535).
+fn check_record_names(
+    field: &str,
+    list: &List,
+    keys: &[RecordKey],
+    nested: Option<&str>,
+) -> std::result::Result<(), String> {
+    let written: Vec<&str> = list.names().map(|n| n.collect()).unwrap_or_default();
+    let expected: Vec<&str> = keys.iter().map(|k| k.name).chain(nested).collect();
+    if written != expected {
+        return Err(format!(
+            "internal: {field} writes {written:?}, but its key table in the glue lists \
+             {expected:?}; give the new key a row, with its missing-key fill"
+        ));
+    }
+    Ok(())
+}
 
 /// An enum setting as its `[fit_options]` token: ferx-core serialises
 /// `InnerOptimizer`, `OdeMethod` and `SirScale` as exactly that spelling, the one
@@ -6743,7 +6807,7 @@ fn scoring_settings_to_r(s: &ferx_core::ScoringSettings) -> std::result::Result<
         ode_auto_switch,
         gradient_method,
     } = s;
-    Ok(list!(
+    let out = list!(
         inner_maxiter = count_to_r(*inner_maxiter),
         inner_tol = *inner_tol,
         inner_restarts = count_to_r(*inner_restarts),
@@ -6762,8 +6826,9 @@ fn scoring_settings_to_r(s: &ferx_core::ScoringSettings) -> std::result::Result<
             .unwrap_or_else(|| Robj::from(i32::MIN)),
         ode_auto_switch = *ode_auto_switch,
         gradient_method = fit_option_token(serde_json::to_value(gradient_method))?
-    )
-    .into())
+    );
+    check_record_names("fit$scoring_settings", &out, SCORING_KEYS, None)?;
+    Ok(out.into())
 }
 
 /// `fit$sir_settings`: the settings a SIR run scored its draws under (ferx-core
@@ -6781,7 +6846,7 @@ fn sir_settings_to_r(
         keep_samples,
         scoring,
     } = s;
-    Ok(list!(
+    let out = list!(
         samples = count_to_r(*samples),
         resamples = count_to_r(*resamples),
         seed = *seed as f64,
@@ -6789,8 +6854,9 @@ fn sir_settings_to_r(
         scale = fit_option_token(serde_json::to_value(scale))?,
         keep_samples = *keep_samples,
         scoring = scoring_settings_to_r(scoring)?
-    )
-    .into())
+    );
+    check_record_names("fit$sir_settings", &out, SIR_KEYS, Some("scoring"))?;
+    Ok(out.into())
 }
 
 /// One element of a settings record as the text `[fit_options]` reads for its
@@ -6827,16 +6893,38 @@ fn record_value_text(v: &Robj, na_text: &str) -> std::result::Result<String, Str
     }
 }
 
+/// How to recover from a settings record this ferx cannot read, for a record
+/// on a fit in memory (`fit$scoring_settings`, `fit$sir_settings$scoring`):
+/// drop the record, and the step runs as on a fit that records none (ferx-r
+/// #535). Empty for a record read from a bundle, which `ferx_load_fit()` drops
+/// itself when it names a key this ferx does not know.
+/// `fix` is the edit that repairs the record in place.
+fn record_recovery_hint(field: &str, fix: &str) -> String {
+    let mut parts = field.split('$');
+    match (parts.next(), parts.next()) {
+        (Some("fit"), Some(record)) => format!(
+            ". {fix}, or set `fit${record} <- NULL` to run as on a fit that records no \
+             {record}"
+        ),
+        _ => String::new(),
+    }
+}
+
 /// Apply a recorded settings list to `opts` through ferx-core's own
 /// `[fit_options]` parser, one key at a time, so the record is held to the
-/// domain and spellings `ferx_fit(settings =)` and a model file are. `keys` maps
-/// each list name to its `[fit_options]` key; the list must name exactly those
-/// (plus `nested`, handed back for the caller to decode).
+/// domain and spellings `ferx_fit(settings =)` and a model file are. `keys`
+/// names each list element, its `[fit_options]` key and its missing-key fill;
+/// the list may name only those (plus `nested`, handed back for the caller to
+/// decode). A missing key is filled from its row, or refused when the row says
+/// so; an unknown key is refused by name (ferx-r #535). Unlike ferx-core's
+/// serde wire, which ignores an unknown key, the glue refuses it: on a fit in
+/// memory it is an edit, and `ferx_load_fit()` drops a bundle's record that
+/// carries one before it gets here.
 fn apply_settings_record(
     entry_point: &str,
     field: &str,
     record: &Robj,
-    keys: &[(&str, &str)],
+    keys: &[RecordKey],
     nested: Option<&str>,
     opts: &mut FitOptions,
 ) -> std::result::Result<Option<Robj>, String> {
@@ -6844,25 +6932,35 @@ fn apply_settings_record(
         .as_list()
         .ok_or_else(|| format!("{entry_point}: `{field}`: expected a list"))?;
     let given: HashMap<&str, Robj> = list.iter().collect();
-    for name in given.keys() {
-        if !keys.iter().any(|(k, _)| k == name) && Some(*name) != nested {
-            return Err(format!("{entry_point}: `{field}`: unknown key \"{name}\""));
-        }
+    let mut unknown: Vec<&str> = given
+        .keys()
+        .copied()
+        .filter(|name| !keys.iter().any(|k| k.name == *name) && Some(*name) != nested)
+        .collect();
+    unknown.sort_unstable();
+    if let Some(name) = unknown.first() {
+        return Err(format!(
+            "{entry_point}: `{field}`: unknown key \"{name}\", a setting this ferx does not \
+             know{}",
+            record_recovery_hint(field, "Remove that key")
+        ));
     }
-    for (name, key) in keys {
-        // A record written before ferx-core #1835 has no `gradient_method`: the
-        // default (`auto`) stands in, as in ferx-core's own `.fitrx` reader, and
-        // a post-hoc step on that fit takes the caller's route as it did before.
-        if *key == "gradient_method" && !given.contains_key(name) {
-            continue;
-        }
-        // A record written before ferx-core #2013 has no `inner_screen`: that fit
-        // ran no screen, so `0` stands in, as in ferx-core's own `.fitrx` reader -
-        // not the default, which would screen where the fit did not.
-        let screen_off = Robj::from(0i32);
-        let v = match given.get(name) {
-            None if *key == "inner_screen" => &screen_off,
-            v => v.ok_or_else(|| format!("{entry_point}: `{field}`: missing key \"{name}\""))?,
+    for RecordKey { name, key, missing } in keys {
+        let filled;
+        let v = match (given.get(name), missing) {
+            (Some(v), _) => v,
+            // Left at `FitOptions::default()`, as ferx-core's wire fills it.
+            (None, MissingKey::EngineDefault) => continue,
+            (None, MissingKey::Fill(text)) => {
+                filled = Robj::from(*text);
+                &filled
+            }
+            (None, MissingKey::Refuse) => {
+                return Err(format!(
+                    "{entry_point}: `{field}`: missing key \"{name}\"{}",
+                    record_recovery_hint(field, "Restore it")
+                ));
+            }
         };
         // NA is "budget off" for the one optional count, and the parser's own
         // refusal for every other key.
@@ -6883,11 +6981,12 @@ fn apply_settings_record(
     }
     match nested {
         None => Ok(None),
-        Some(n) => given
-            .get(n)
-            .cloned()
-            .map(Some)
-            .ok_or_else(|| format!("{entry_point}: `{field}`: missing key \"{n}\"")),
+        Some(n) => given.get(n).cloned().map(Some).ok_or_else(|| {
+            format!(
+                "{entry_point}: `{field}`: missing key \"{n}\"{}",
+                record_recovery_hint(field, "Restore it")
+            )
+        }),
     }
 }
 
@@ -6902,9 +7001,8 @@ fn scoring_settings_from_r(
     if record.is_null() {
         return Ok(None);
     }
-    let keys: Vec<(&str, &str)> = SCORING_KEYS.iter().map(|k| (*k, *k)).collect();
     let mut opts = FitOptions::default();
-    apply_settings_record(entry_point, field, record, &keys, None, &mut opts)?;
+    apply_settings_record(entry_point, field, record, SCORING_KEYS, None, &mut opts)?;
     Ok(Some(ferx_core::ScoringSettings::from_options(&opts)))
 }
 
@@ -6923,17 +7021,16 @@ fn sir_settings_from_r(
         entry_point,
         field,
         record,
-        &SIR_KEYS,
+        SIR_KEYS,
         Some("scoring"),
         &mut opts,
     )?
     .unwrap_or_else(|| Robj::from(()));
-    let keys: Vec<(&str, &str)> = SCORING_KEYS.iter().map(|k| (*k, *k)).collect();
     apply_settings_record(
         entry_point,
         &format!("{field}$scoring"),
         &scoring,
-        &keys,
+        SCORING_KEYS,
         None,
         &mut opts,
     )?;
@@ -6942,13 +7039,10 @@ fn sir_settings_from_r(
 
 /// A `.fitrx` `sir.settings` block (ferx-core's `SirSettingsWire`) as the nested
 /// list `fit$sir_settings` is: the scoring keys sit flattened beside the SIR
-/// ones on the wire. A block written between ferx-core #1758 and #426 has no
-/// `inner_restarts`, which those draws never used, so the default stands in, as
-/// in ferx-core's own reader. A block written before ferx-core #2013 has no
-/// `inner_screen`; it is filled with `0`, not the default (`100`), because those
-/// draws were scored without a screen, and ferx-core's reader loads it as `0`
-/// too. Any other name stays at the top level, where the decoder refuses it by
-/// name.
+/// ones on the wire. A scoring key the block lacks (`inner_restarts`, absent
+/// between ferx-core #1758 and #426; `inner_screen`, absent before #2013) is
+/// filled by the decoder from `SCORING_KEYS`, as for the top-level record. Any other name stays at the top
+/// level, where the decoder refuses it by name.
 fn sir_settings_unflatten(record: &Robj) -> std::result::Result<Robj, String> {
     let list = record
         .as_list()
@@ -6956,21 +7050,13 @@ fn sir_settings_unflatten(record: &Robj) -> std::result::Result<Robj, String> {
     let (mut top_names, mut top_values) = (Vec::new(), Vec::new());
     let (mut sc_names, mut sc_values) = (Vec::new(), Vec::new());
     for (name, value) in list.iter() {
-        if SCORING_KEYS.contains(&name) {
+        if SCORING_KEYS.iter().any(|k| k.name == name) {
             sc_names.push(name.to_string());
             sc_values.push(value);
         } else {
             top_names.push(name.to_string());
             top_values.push(value);
         }
-    }
-    if !sc_names.iter().any(|n| n == "inner_restarts") {
-        sc_names.push("inner_restarts".to_string());
-        sc_values.push(count_to_r(FitOptions::default().inner_restarts));
-    }
-    if !sc_names.iter().any(|n| n == "inner_screen") {
-        sc_names.push("inner_screen".to_string());
-        sc_values.push(count_to_r(0));
     }
     let scoring = List::from_names_and_values(sc_names, sc_values)
         .map_err(|e| format!("internal: {e}"))?;

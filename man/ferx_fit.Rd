@@ -1192,8 +1192,12 @@ or \code{"fd"}), with the values \code{[fit_options]} spells.
 \code{\link{ferx_save_fit}} keeps them. \code{NULL} when the engine
 recorded none, and on a fit saved before they were recorded; a record
 saved before \code{gradient_method} was recorded reads it as
-\code{"auto"}, and one saved before \code{inner_screen} was recorded
-reads it as \code{0}, the screen that fit did not run.}
+\code{"auto"}, one before \code{inner_restarts} was recorded as
+the default, \code{1}, and one saved before \code{inner_screen} was
+recorded reads it as \code{0}, the screen that fit did not run. A
+record that names a setting this ferx does not know (one written by a
+newer ferx-core) is refused by name; set it to \code{NULL} to use the
+fit as one that records none.}
 \item{sir_settings}{Named list of the settings the fit's SIR ran under:
 \code{samples}, \code{resamples}, \code{seed} (resolved: 12345 when
 \code{sir_seed} was unset), \code{df}, \code{scale},

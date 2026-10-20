@@ -622,9 +622,33 @@
 # writes each field back in the type `ferx_fit()` gives it. `sir.settings`
 # comes back un-flattened. NULL when the bundle carries none (one saved before
 # the records existed), which keeps today's behaviour.
+#
+# Migration (#535): a key the record lacks is filled by the decoder as
+# ferx-core's wire fills it (the glue's `SCORING_KEYS` / `SIR_KEYS` table). A
+# key this ferx does not know - a bundle written by a newer ferx-core, whose
+# record gained a setting - drops that record with a
+# `ferx_settings_record_dropped_warning` naming it, and the rest of the bundle
+# loads: the fit is then one that records none, as a bundle saved before the
+# records existed. ferx-core's own reader ignores such a key and keeps the
+# record; R does not, since re-scoring under the record without a setting the
+# writer used would not repeat the writer's run.
 .fitrx_settings_from_wire <- function(w, kind) {
   if (is.null(w)) return(NULL)
   is_sir <- identical(kind, "sir_settings")
+  unknown <- setdiff(names(w), .fitrx_settings_wire_keys(kind))
+  if (length(unknown) > 0L) {
+    block <- if (is_sir) "sir.settings" else "scoring_settings"
+    warning(warningCondition(paste0(
+      "ferx_load_fit: the bundle's `", block, "` record names ",
+      if (length(unknown) == 1L) "a setting" else "settings",
+      " this ferx does not know (", paste0("\"", unknown, "\"", collapse = ", "),
+      "), so fit$", kind, " is not loaded; it was likely written by a newer ",
+      "ferx-core. The rest of the fit loads, and ferx_covariance() / ferx_sir() ",
+      "run as on a fit that records no ", kind, ". Update ferx to keep it."),
+      class = "ferx_settings_record_dropped_warning", keys = unknown,
+      record = kind))
+    return(NULL)
+  }
   # A normal-proposal record (`df = Inf`) is written by ferx-core's serde as
   # `"df": null` (ferx-core#1819). It is read as no record, as
   # `ferx_save_fit()` writes it, so the bundle still loads.
@@ -637,4 +661,12 @@
     ),
     error = function(e) stop(conditionMessage(e), call. = FALSE)
   )
+}
+
+# The names a record may carry on the wire: the engine's default record's, with
+# `sir.settings`' scoring half flattened beside the SIR keys.
+.fitrx_settings_wire_keys <- function(kind) {
+  if (!identical(kind, "sir_settings")) return(names(.ferx_default_settings(kind)))
+  c(setdiff(names(.ferx_default_settings("sir_settings")), "scoring"),
+    names(.ferx_default_settings("scoring_settings")))
 }
