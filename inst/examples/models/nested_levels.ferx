@@ -1,5 +1,6 @@
-# Nested variability levels below the subject: sponsor -> study -> arm, with
-# visits inside each arm (ferx-core #1082).
+# Nested variability levels: the sponsor is the subject (ID), with studies
+# nested in it and arms nested in each study, and visits inside each arm
+# (ferx-core #1082).
 #
 # Open the example script to step through it:
 #   file.edit(system.file("examples", "ex_nested_levels.R", package = "ferx"))
