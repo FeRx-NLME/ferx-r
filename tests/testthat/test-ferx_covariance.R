@@ -85,6 +85,14 @@ test_that("a replay that computes replaces the fit's failed covariance rows (#61
   fit$warnings <- c(fit$warnings, failed)
   fit$warnings_structured <- rbind(fit$warnings_structured, row)
   fit$covariance_status <- "failed"
+  # A condition number the replay does not reproduce, flat and as a row: the
+  # flat string must go too, or .ferx_fit_warnings() re-adds it (#611 review
+  # round 2).
+  high <- "High condition number (5000.0) -- parameter space may be ill-conditioned"
+  high_row <- ferx:::.ferx_classify_flat_warnings(high)
+  expect_identical(high_row$category, "condition_number")
+  fit$warnings <- c(fit$warnings, high)
+  fit$warnings_structured <- rbind(fit$warnings_structured, high_row)
 
   out <- ferx_covariance(fit)
   skip_if(is.null(out$cov_matrix), cov_skip)
@@ -92,10 +100,16 @@ test_that("a replay that computes replaces the fit's failed covariance rows (#61
   expect_false(failed %in% out$warnings_structured$message)
   gw <- ferx_get_warnings(out, as_df = TRUE)
   expect_false(any(gw$category == "covariance_failed"))
+  expect_false(high %in% out$warnings)
+  expect_false(high %in% gw$message)
+  # The replay's own condition number, when it is high, is the one reported.
+  if (isTRUE(out$condition_number > 1000)) {
+    expect_true(any(gw$category == "condition_number"))
+  }
   status <- grep("STATUS:", capture.output(print(out)), value = TRUE)
   expect_false(grepl("covariance_failed", status, fixed = TRUE))
   # Every other warning the fit carried survives the replay.
-  other <- setdiff(warfarin_fit()$warnings, failed)
+  other <- setdiff(warfarin_fit()$warnings, c(failed, high))
   expect_true(all(other %in% out$warnings))
 })
 

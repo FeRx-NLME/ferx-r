@@ -385,6 +385,22 @@ ferx_covariance <- function(fit,
   # fields, and appends the flat high-condition-number warning - exactly what
   # ferx_fit() does, so the two paths can't drift. A loaded fit carries the
   # same `eigenvalues` / `condition_number` names (#455), which this replaces.
+  #
+  # This run's covariance-step warnings replace the fit's own, as its
+  # cov_matrix replaces the fit's: a fit whose step failed and whose replay
+  # computes must not keep reporting `covariance_failed` beside the new matrix
+  # (#611 review). They go from the flat vector too, or .ferx_fit_warnings()
+  # would re-add them from it - the fit's high-condition-number string with
+  # them, here, before .ferx_apply_cov_sentinels() appends the current one.
+  stale_cov <- function(category, message) {
+    as.logical(mapply(.ferx_is_covariance_warning, category, message,
+                      USE.NAMES = FALSE))
+  }
+  if (length(fit$warnings) > 0L) {
+    flat <- .ferx_classify_flat_warnings(fit$warnings)
+    fit$warnings <- fit$warnings[flat$category != "condition_number" &
+                                   !stale_cov(flat$category, flat$message)]
+  }
   fit$cov_eigenvalues <- if (length(raw$cov_eigenvalues) == 0L) NULL else raw$cov_eigenvalues
   fit$cov_condition_number <- raw$cov_condition_number
   fit <- .ferx_apply_cov_sentinels(fit)
@@ -393,20 +409,6 @@ ferx_covariance <- function(fit,
   # vector: ferx_get_warnings() and the print/summary tally read
   # fit$warnings_structured and only fall back to fit$warnings when it is
   # absent (never, on a real fit). Mirror ferx_sir()'s handling.
-  #
-  # This run's covariance-step warnings replace the fit's own, as its
-  # cov_matrix replaces the fit's: a fit whose step failed and whose replay
-  # computes must not keep reporting `covariance_failed` beside the new matrix
-  # (#611 review). They go from the flat vector too, or .ferx_fit_warnings()
-  # would re-add them from it.
-  stale_cov <- function(category, message) {
-    as.logical(mapply(.ferx_is_covariance_warning, category, message,
-                      USE.NAMES = FALSE))
-  }
-  if (length(fit$warnings) > 0L) {
-    flat <- .ferx_classify_flat_warnings(fit$warnings)
-    fit$warnings <- fit$warnings[!stale_cov(flat$category, flat$message)]
-  }
   if (length(raw$warnings) > 0L) {
     fit$warnings <- unique(c(fit$warnings, raw$warnings))
   }
