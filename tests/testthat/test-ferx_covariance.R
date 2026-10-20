@@ -68,6 +68,37 @@ test_that("ferx_covariance surfaces cov-step warnings in the structured table", 
   expect_s3_class(gw, "data.frame")
 })
 
+test_that("a replay that computes replaces the fit's failed covariance rows (#611)", {
+  # The replay is the step's new outcome: the fit's own covariance-step rows
+  # go, from the table and the flat vector alike, as an earlier SIR run's do
+  # in ferx_sir(). Otherwise a fit whose step failed keeps printing
+  # `(covariance_failed)` beside the matrix the replay just computed.
+  # Mutation that reddens this: drop the `stale_cov()` filters from
+  # ferx_covariance().
+  fit <- warfarin_fit()
+  failed <- paste0(
+    "Covariance step failed: Hessian is not positive definite. Standard ",
+    "errors are unavailable."
+  )
+  row <- ferx:::.ferx_classify_flat_warnings(failed)
+  expect_identical(row$category, "covariance_failed")
+  fit$warnings <- c(fit$warnings, failed)
+  fit$warnings_structured <- rbind(fit$warnings_structured, row)
+  fit$covariance_status <- "failed"
+
+  out <- ferx_covariance(fit)
+  skip_if(is.null(out$cov_matrix), cov_skip)
+  expect_false(failed %in% out$warnings)
+  expect_false(failed %in% out$warnings_structured$message)
+  gw <- ferx_get_warnings(out, as_df = TRUE)
+  expect_false(any(gw$category == "covariance_failed"))
+  status <- grep("STATUS:", capture.output(print(out)), value = TRUE)
+  expect_false(grepl("covariance_failed", status, fixed = TRUE))
+  # Every other warning the fit carried survives the replay.
+  other <- setdiff(warfarin_fit()$warnings, failed)
+  expect_true(all(other %in% out$warnings))
+})
+
 test_that("ferx_covariance validates its inputs", {
   fit <- warfarin_fit()  # covariance = FALSE
 

@@ -393,6 +393,20 @@ ferx_covariance <- function(fit,
   # vector: ferx_get_warnings() and the print/summary tally read
   # fit$warnings_structured and only fall back to fit$warnings when it is
   # absent (never, on a real fit). Mirror ferx_sir()'s handling.
+  #
+  # This run's covariance-step warnings replace the fit's own, as its
+  # cov_matrix replaces the fit's: a fit whose step failed and whose replay
+  # computes must not keep reporting `covariance_failed` beside the new matrix
+  # (#611 review). They go from the flat vector too, or .ferx_fit_warnings()
+  # would re-add them from it.
+  stale_cov <- function(category, message) {
+    as.logical(mapply(.ferx_is_covariance_warning, category, message,
+                      USE.NAMES = FALSE))
+  }
+  if (length(fit$warnings) > 0L) {
+    flat <- .ferx_classify_flat_warnings(fit$warnings)
+    fit$warnings <- fit$warnings[!stale_cov(flat$category, flat$message)]
+  }
   if (length(raw$warnings) > 0L) {
     fit$warnings <- unique(c(fit$warnings, raw$warnings))
   }
@@ -402,14 +416,15 @@ ferx_covariance <- function(fit,
   # (or has a different condition number) doesn't leave a contradictory flag;
   # .ferx_assemble_structured_warnings() re-adds the current one below.
   if (!is.null(ws) && nrow(ws) > 0L) {
-    ws <- ws[ws$category != "condition_number", , drop = FALSE]
+    ws <- ws[ws$category != "condition_number" &
+               !stale_cov(ws$category, ws$message), , drop = FALSE]
   }
   # Assembled rows: the current condition_number flag + ETA-normality (both
   # derived from the fit). The engine's covariance-step warnings arrive as flat
   # strings; classify them with the engine's own classify_warning, as every
   # other flat message is, so a replayed "Covariance step failed ..." is the
-  # same `covariance_failed` row, at the same severity, as the fit's own and
-  # unique() collapses the two (#611).
+  # same `covariance_failed` row, at the same severity, as the fit's own would
+  # be (#611).
   assembled <- .ferx_assemble_structured_warnings(raw, fit)
   cov_rows <- .ferx_classify_flat_warnings(raw$warnings)
   merged <- rbind(ws %||% assembled[0, , drop = FALSE], assembled, cov_rows)
