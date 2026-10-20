@@ -293,7 +293,26 @@ test_that("N3: the nested_levels fit reaches NONMEM's optimum from its own start
   expect_identical(fit$kappa_levels, c(K_ST = "STUDY", K_ARM = "ARM"))
   expect_identical(vapply(fit$ebe_kappas_by_level, nrow, 1L),
                    c(STUDY = 24L, ARM = 48L))
-  # No [covariates] block, so ferx-core #2166 (a level column reported as an
-  # undeclared covariate) does not fire here.
   expect_false(any(grepl("not declared in \\[covariates\\]", unlist(fit$warnings))))
+})
+
+test_that("nested_levels with a [covariates] block does not call its level columns undeclared", {
+  skip_on_cran()
+  # ferx-core #2166 (#2175). With a [covariates] block, `level STUDY by STUDY
+  # in ID` and `level ARM by ARM in STUDY` used to add "Covariate(s) used in
+  # model expressions but not declared in [covariates]: ARM, STUDY", though no
+  # expression reads either column. The fit is unchanged (OFV 107.0435709
+  # before and after the fix, aarch64 macOS).
+  ex <- ferx_example("nested_levels")
+  txt <- readLines(ex$model)
+  at <- grep("^\\[individual_parameters\\]", txt)
+  expect_length(at, 1L)
+  txt <- append(txt, c("[covariates]", "  DOSE continuous", "  NARM continuous", ""),
+                after = at - 1L)
+  model <- withr::local_tempfile(fileext = ".ferx")
+  writeLines(txt, model)
+  fit <- suppressWarnings(ferx_fit(model, ex$data, verbose = FALSE))
+  expect_true(fit$converged)
+  expect_lt(abs(fit$ofv - nested_ofv_optimum), 1e-4)
+  expect_false(any(grepl("not declared in [covariates]", fit$warnings, fixed = TRUE)))
 })

@@ -9,16 +9,19 @@
 # its start (measured on mbma_placebo: OFV 97.0700 both, RHO 0.3, SE 0), so
 # each fit must beat the base by a margin and move RHO.
 #
-# With the line next to kappa the gradients are finite differences, and on
-# that route `optimizer = "auto"` used to pick BOBYQA, which stopped on its own
+# With the line next to kappa the gradients used to be finite differences, and
+# on that route `optimizer = "auto"` picked BOBYQA, which stopped on its own
 # tolerance short of the optimum at a point that moved with the platform and
 # the start (mbma_placebo car1: 89.82 on macOS, 99.18 on Linux from RHO = 0.3;
 # 100.01 / 118.43 from 0.01), each reported as converged. Since ferx-core
-# #2127 (#2122) `auto` takes L-BFGS on this route. With an explicit
-# nlopt_lbfgs it reached 89.451278 (RHO 0.7598) from RHO = 0.01 and 0.3 on
-# macOS and Linux (#592); under `auto` it was measured from 0.01 and 0.6 on
-# macOS. On nested_levels_3 ar1 it is 105.639739 (RHO 0.11512). The fits below run on the default optimizer,
-# and the optima are pinned to those values.
+# #2127 (#2122) `auto` takes L-BFGS on this route, and since ferx-core #2093
+# (#2101) its outer gradient and the covariance step's R-matrix are exact.
+# With an explicit nlopt_lbfgs it reached 89.451278 (RHO 0.7598) from RHO =
+# 0.01 and 0.3 on macOS and Linux (#592); under `auto` it was measured from
+# 0.01 and 0.6 on macOS, on finite differences and again on the exact gradient
+# (89.4512784 both, 34 s -> 0.3 s per fit). On nested_levels_3 ar1 it is
+# 105.639739 (RHO 0.11512). The fits below run on the default optimizer, and
+# the optima are pinned to those values.
 
 quiet <- function(x) suppressWarnings(suppressMessages(x))
 
@@ -96,18 +99,17 @@ test_that("auto takes L-BFGS on car1 + kappa and reaches one optimum from every 
   expect_lt(abs(low$ofv - high$ofv), 1e-5)
   expect_lt(abs(low$theta[["RHO"]] - high$theta[["RHO"]]), 1e-3)
 
-  # The FD warnings name the route. This model has 25 theta + eta + kappa axes,
-  # one past the analytic path's 24-axis cap, so that warning stays, but it no
-  # longer says the fit is only slower or tells the user to drop parameters:
-  # dropping them would leave the correlation route on finite differences.
-  w <- high$warnings
-  route <- grep("residual `correlation` line together with kappa", w, fixed = TRUE)
-  expect_length(route, 1L)
-  expect_match(w[route], "Avoid `optimizer = bobyqa`", fixed = TRUE)
-  cap <- grep("24-axis cap", w, fixed = TRUE, value = TRUE)
-  expect_length(cap, 1L)
-  expect_match(cap, "would not restore the analytic gradient", fixed = TRUE)
-  expect_false(any(grepl("only slower", w, fixed = TRUE)))
+  # ferx-core #2093 (#2101): the route takes the exact adjoint gradient. Before
+  # it the outer gradient was finite differences and the fit warned twice: the
+  # correlation line had no analytic gradient, and the model's 25 theta + eta +
+  # kappa axes were past the analytic path's 24-axis cap. The adjoint has no
+  # theta cap, so neither warning applies.
+  for (fit in list(low, high)) {
+    expect_identical(fit$gradient_method_outer, "analytic (Dual2)")
+    w <- fit$warnings
+    expect_false(any(grepl("together with kappa", w, fixed = TRUE)))
+    expect_false(any(grepl("24-axis cap", w, fixed = TRUE)))
+  }
 })
 
 test_that("ferx_covariance() repeats the car1 + kappa fit's SEs, live and reloaded", {

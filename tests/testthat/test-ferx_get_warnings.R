@@ -891,23 +891,23 @@ test_that("every covariance message ferx-core emits gets non-contradictory guida
                       "covariance step computes `r` only for now (#2108); this ",
                       "call asks for `covariance_method = s`."),
          ok = "covariance_method = \"r\"", never = "identifiability"),
-    list(cat = "convergence",
-         # Classed `convergence`, not `covariance_failed`: ferx-core tests "did
-         # not converge" first. It must still reach the covariance arms rather
-         # than the optimizer's re-fit-from-new-initial-values advice.
+    list(cat = "covariance_failed",
+         # Classed `convergence` until ferx-core #2158, which tested "did not
+         # converge" first and so sent it to the optimizer's re-fit-from-new-
+         # initial-values advice.
          msg = paste0("Covariance step failed: the profile solve did not converge ",
                       "at the estimates (NotConverged { criterion: 0.0021 }). SE ",
                       "estimates not available."),
          ok = "no setting reaches this solve", never = "initial values"),
-    list(cat = "convergence",
+    list(cat = "covariance_failed",
          msg = paste0("Covariance step failed: the profile solve did not converge ",
                       "at the estimates (LineSearch). SE estimates not available."),
          ok = "no setting reaches this solve", never = "initial values"),
-    list(cat = "convergence",
+    list(cat = "covariance_failed",
          msg = paste0("Covariance step failed: the profile solve did not converge ",
                       "at the estimates (Singular). SE estimates not available."),
          ok = "do not identify", never = "initial values"),
-    list(cat = "convergence",
+    list(cat = "covariance_failed",
          msg = paste0("Covariance step failed: the profile solve did not converge ",
                       "at the estimates (NonFinite). SE estimates not available."),
          ok = "not finite", never = "initial values"),
@@ -946,9 +946,7 @@ test_that("every covariance message ferx-core emits gets non-contradictory guida
          ok = "no observation informs it", never = "identifiability")
   )
   for (case in cases) {
-    # `cat` is the category the engine assigns, not one chosen by hand. When
-    # ferx-core #2158 refiles the profile solve under covariance_failed, this
-    # trips, and the `convergence` admission can be revisited.
+    # `cat` is the category the engine assigns, not one chosen by hand.
     expect_identical(ferx:::.ferx_classify_flat_warnings(case$msg)$category,
                      case$cat, info = case$msg)
     g <- ferx:::.ferx_warning_guidance(case$cat, message = case$msg)
@@ -966,6 +964,24 @@ test_that("every covariance message ferx-core emits gets non-contradictory guida
                      ferx:::.ferx_warning_guidance(case$cat, message = case$msg),
                      info = case$msg)
   }
+})
+
+test_that("a pre-#2158 profile-solve row filed under convergence still gets the covariance guidance", {
+  # Before ferx-core #2158 the engine classed "Covariance step failed: the
+  # profile solve did not converge ..." as `convergence`, and a
+  # warnings_structured table from then (an object kept with saveRDS()) still
+  # says so. The classifier no longer produces that pair, so this row calls the
+  # guidance with the old category directly.
+  msg <- paste0("Covariance step failed: the profile solve did not converge ",
+                "at the estimates (Singular). SE estimates not available.")
+  expect_true(ferx:::.ferx_is_covariance_warning("convergence", message = msg))
+  g <- ferx:::.ferx_warning_guidance("convergence", message = msg)
+  expect_identical(g, ferx:::.ferx_warning_guidance("covariance_failed", message = msg))
+  expect_match(g, "do not identify", fixed = TRUE)
+  expect_false(grepl("initial values", g, ignore.case = TRUE))
+  # The admission is anchored: an optimizer convergence message is not one.
+  expect_false(ferx:::.ferx_is_covariance_warning(
+    "convergence", message = "Outer optimization did not converge"))
 })
 
 

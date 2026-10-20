@@ -352,12 +352,14 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
 # of this family, where they would be told to re-run with covariance = FALSE,
 # the one setting that removes the matrix SIR needs.
 #
-# `convergence` is admitted on the same anchor. ferx-core's classifier tests
-# "did not converge" ahead of "covariance step failed", so the profiled
-# covariance step's "Covariance step failed: the profile solve did not converge
-# at the estimates" is filed under `convergence` and would otherwise be told to
-# re-fit from new initial values (ferx-core #2158). No optimizer convergence
-# message begins with "Covariance step".
+# `convergence` is admitted on the same anchor for fits made before ferx-core
+# #2158. Its classifier tested "did not converge" ahead of "covariance step
+# failed", so the profiled covariance step's "Covariance step failed: the
+# profile solve did not converge at the estimates" was filed under
+# `convergence`, and a `warnings_structured` table from then (an object kept
+# with saveRDS()) still says so. The engine now classes every "Covariance step
+# failed" warning `covariance_failed`. No optimizer convergence message begins
+# with "Covariance step".
 .ferx_is_covariance_warning <- function(category, message = "") {
   if (category %in% c("covariance_failed", "covariance_regularized",
                       "covariance_step", "covariance")) {

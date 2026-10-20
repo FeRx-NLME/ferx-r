@@ -467,7 +467,8 @@ test_that("a single-point space returns the input model, fitted", {
   # directly.
   #
   # Not bit-identical, and cannot be: the grid point is the input model
-  # refitted, not a transformed one, and the fit handed back is that row's.
+  # refitted, not a transformed one, and the fit handed back is the selected
+  # row's.
   #
   # What is deliberately NOT asserted is numeric agreement with a standalone
   # `ferx_fit()` of the same model. That comparison is not a property of this
@@ -496,11 +497,25 @@ test_that("a single-point space returns the input model, fitted", {
   expect_equal(nrow(res$models), 2L)
   expect_equal(sum(res$models$selected), 1L)
 
-  # The winner is the grid's one point, and that point is the input model
-  # unchanged - one compartment, no covariate relation, nothing transformed.
+  # Both rows are the input model unchanged - one compartment, no covariate
+  # relation, nothing transformed - fitted twice.
+  expect_identical(res$models$genome[res$models$id != "input"], "PERIPHERALS=0")
+  expect_identical(res$models$peripherals, c(0L, 0L))
+  expect_true(all(is.na(res$models$covariates)))
+  expect_identical(length(unique(res$models$n_parameters)), 1L)
+
+  # Which of the two fits wins is not part of the claim: they are the same
+  # model, and which one ranks better is platform dependent. At ferx-core
+  # 0cbad3c2, macOS lands them 0.0017 OFV apart and the grid point wins
+  # (-172.2317 input, -172.2334 grid; the gap was 0.15 at e3fb3d1e). Linux
+  # (aarch64, R 4.5.1) lands them 6e-4 apart, the grid point lower
+  # (-172.2329 input, -172.2335 grid). But the grid fit reports
+  # converged = FALSE there, and the convergence charge puts its fitness at
+  # 97.77 against the input's -102.23, so the input row wins. The claim is
+  # that the search selects the row with the best fitness.
   winner <- res$models[res$models$selected, , drop = FALSE]
   expect_equal(winner$id, res$final_model_id)
-  expect_equal(winner$genome, "PERIPHERALS=0")
+  expect_identical(winner$fitness, min(res$models$fitness))
   expect_equal(winner$peripherals, 0L)
   expect_true(is.na(winner$covariates))
 
