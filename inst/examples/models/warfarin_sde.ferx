@@ -13,8 +13,9 @@
 # covariance: V_total = P[central] + sigma^2(PRED).
 # DIFF_CENTRAL is estimated on the variance scale (not SD).
 #
-# Note: the ODE+EKF path has no analytic-sensitivity provider, so gradients
-# are computed by finite differences (gradient_method = fd, set below). Each
+# Note: the ODE+EKF path is outside the analytic gradient's scope (it has no
+# recorder for the filtered likelihood), so gradients are computed by finite
+# differences (gradient_method = fd, set below). Each
 # ODE+EKF evaluation is therefore significantly slower than an equivalent
 # analytical PK model.
 
