@@ -678,8 +678,16 @@ thumb apply only when it is \code{FALSE}.}
 prior \code{N(0, Omega)} rather than the mode-centred proposal, and every
 sample is scored under the mixture density. That bounds the importance
 weights, so a weakly-identified subject cannot hijack the weighted M-step
-and walk theta to its bounds. Try \code{0.1}. Enabling it disables Sobol
-QMC and raises the per-subject ESS floor.}
+and walk theta to its bounds. Try \code{0.1}. Enabling it raises the
+per-subject ESS floor. It combines with \code{imp_sobol} /
+\code{impmap_sobol}: under Sobol the defensive fraction is stratified
+rather than drawn binomially.}
+\item{\code{imp_sobol}}{(default \code{FALSE}) Sobol quasi-random draws
+for the estimating \code{imp} E-step, the counterpart of
+\code{impmap_sobol} below. \code{imp_eval_only} stays pseudo-random.
+The same limits apply: under Sobol, \code{imp_proposal_df} must be at
+most 1000 (use \code{"normal"} beyond that), and a draw uses at most
+1000 quasi-random coordinates.}
 \item{\code{iscale_min}}{(default \code{0.1}) and \code{iscale_max}
 (default \code{10}). Bounds on the proposal scaling factor for adaptive
 importance sampling (NONMEM \code{ISCALE_MIN} / \code{ISCALE_MAX}): the
@@ -722,12 +730,16 @@ for the per-subject MAP optimization (NONMEM \code{MCETA}). Each start
 draws eta from \code{N(0, Omega)} and the lowest individual NLL wins; 0
 means a single warm start. 3 is a good choice for high-dimensional models
 (e.g. FREM with 5 or more ETAs).}
-\item{\code{impmap_sobol}}{(default \code{FALSE}) Use Sobol quasi-random
-sequences (with Cranley-Patterson randomization) for the importance draws
-instead of pseudo-random, giving more uniform posterior coverage per
-sample. Applies only to multivariate-normal proposals
-(\code{impmap_proposal_df = "normal"}); under the Student-t default it is
-inert.}
+\item{\code{impmap_sobol}}{(default \code{FALSE}) Build each importance
+draw from an Owen-scrambled Sobol quasi-random point instead of
+pseudo-random numbers. That covers the normals, the Student-t scale and
+the defensive-mixture component, so it works with every proposal form
+and with \code{imp_defensive_alpha > 0}. It pays off with few ETAs and a
+fixed, small K (e.g. \code{impmap_auto = FALSE} with
+\code{impmap_samples} of 100-300). At default settings (adaptive K) the
+gain is negligible, so it stays off. Under Sobol,
+\code{impmap_proposal_df} must be at most 1000 (use \code{"normal"}
+beyond that), and a draw uses at most 1000 quasi-random coordinates.}
 \item{\code{impmap_low_ess_threshold}}{ESS fraction below which a subject
 is flagged as poorly sampled (default \code{0.1}).}
 \item{\code{impmap_trace}}{Logical; when \code{TRUE}, collect
