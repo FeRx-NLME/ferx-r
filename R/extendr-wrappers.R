@@ -147,6 +147,12 @@ ferx_rust_fit_option_keys <- function() {
 
 #' @title Internal Rust backend binding
 #' @keywords internal
+ferx_rust_fit_option_same <- function(key, a, b) {
+  .Call("wrap__ferx_rust_fit_option_same", key, a, b)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
 ferx_rust_known_eta_param_types <- function() {
   .Call("wrap__ferx_rust_known_eta_param_types")
 }
@@ -221,6 +227,12 @@ ferx_rust_omega_rows <- function(omega, n_eta, eta_names, omega_fixed, se_omega,
 #' @keywords internal
 ferx_rust_fitrx_omega_rows <- function(path) {
   .Call("wrap__ferx_rust_fitrx_omega_rows", path)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_offdiag_corrs <- function(m, n, param_corr) {
+  .Call("wrap__ferx_rust_offdiag_corrs", m, n, param_corr)
 }
 
 #' @title Internal Rust backend binding

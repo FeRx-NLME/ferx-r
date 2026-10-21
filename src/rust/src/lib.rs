@@ -5589,6 +5589,58 @@ fn ferx_rust_fit_option_keys() -> Vec<String> {
     })
 }
 
+/// The value a `[fit_options]` key leaves in the engine's `FitOptions`, or
+/// `None` when the engine does not take `value` for `key`.
+///
+/// `method` is the one key `apply_fit_option` does not own (ferx-core keeps its
+/// list-chain syntax in the block parser), so it is read here as the chain the
+/// R `method =` argument builds: `foce`, `[saem, imp]` and `saem, imp` alike,
+/// each token through the engine's own `parse_method_token` (ferx-r #506).
+/// Every other key goes through `apply_fit_option` on a fresh `FitOptions`.
+fn fit_option_normalised(key: &str, value: &str) -> Option<String> {
+    if key == "method" {
+        let inner = value.trim().trim_start_matches('[').trim_end_matches(']');
+        let chain: Vec<EstimationMethod> = inner
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(parse_method_token)
+            .collect::<std::result::Result<_, _>>()
+            .ok()?;
+        return (!chain.is_empty()).then(|| format!("{chain:?}"));
+    }
+    let mut opts = ferx_core::FitOptions::default();
+    match ferx_core::parser::model_parser::apply_fit_option(&mut opts, key, value) {
+        Ok(true) => Some(format!("{opts:?}")),
+        Ok(false) | Err(_) => None,
+    }
+}
+
+/// Whether two values of one `[fit_options]` key mean the same thing to the
+/// engine (ferx-r #515), for `.ferx_warn_fit_option_conflicts()`.
+///
+/// Each value is applied to its own default `FitOptions` and the two results
+/// are compared whole, so spellings the engine treats as one (`threads` `auto`
+/// / `0`, `gradient` `ad` / `autodiff`, `bloq_method` `drop` / `none`, `1e5` /
+/// `100000`) agree without R listing them. `NA` when either value is one the
+/// engine refuses, or the key is not a fit option; R then compares the text.
+///
+/// @param key The `[fit_options]` key, as the model file spells it.
+/// @param a,b The two values.
+/// @return `TRUE`, `FALSE`, or `NA`.
+/// @export
+#[extendr]
+fn ferx_rust_fit_option_same(key: &str, a: &str, b: &str) -> Rbool {
+    entry(move || {
+        Ok(
+            match (fit_option_normalised(key, a), fit_option_normalised(key, b)) {
+                (Some(x), Some(y)) => Rbool::from(x == y),
+                _ => Rbool::na(),
+            },
+        )
+    })
+}
+
 /// Row / column labels of `fit$cov_matrix` for a model file: the labels
 /// `ferx_fit()` names the matrix with ([`cov_matrix_labels`]), for a fit read
 /// back from a `.fitrx` bundle, whose wire stores the matrix but not its names
@@ -6177,6 +6229,65 @@ fn ferx_rust_fitrx_omega_rows(path: &str) -> String {
         Ok(format_omega_rows_from(
             &OmegaRowsInput::from_result(&loaded.fit),
             r_print_omega_rows_options(),
+        ))
+    })
+}
+
+/// The off-diagonal entries of a random-effect covariance matrix that
+/// `print.ferx_fit()`'s `--- Correlations ---` blocks report, under the OMEGA
+/// rows and under a `block_kappa`'s KAPPA rows: ferx-core's own
+/// `offdiag_corrs` (#2231), the walk behind the engine's console and
+/// `format_summary`. Core owns which pairs are reported (`|cov| > 1e-15`, in
+/// row-major lower-triangle order) and each one's correlation (the
+/// `param_corr` entry, else cov over sqrt(var_i * var_j), 0 when a variance is
+/// not positive); R formats each line with its own label convention (ferx-r
+/// #547).
+///
+/// @param m Numeric, the `n` x `n` matrix flattened column-major.
+/// @param n Integer, its dimension.
+/// @param param_corr The parameter-correlation matrix
+///   (`fit$omega_param_corr` / `fit$omega_iov_param_corr`), or `NULL`.
+/// @return A list of parallel vectors, one element per reported pair: `i`,
+///   `j` (1-based, `j < i`), `cov`, `corr`, and `param_corr` (`TRUE` when
+///   `corr` is the `param_corr` entry, `FALSE` for the fallback).
+/// @export
+#[extendr]
+fn ferx_rust_offdiag_corrs(m: Vec<f64>, n: i32, param_corr: Robj) -> List {
+    entry(move || {
+        use ferx_core::io::output::{offdiag_corrs, OffDiagCorrSource};
+        let n = n.max(0) as usize;
+        if m.len() != n * n {
+            return Err(format!("m has {} values, not {n} x {n}", m.len()));
+        }
+        let m = nalgebra::DMatrix::from_column_slice(n, n, &m);
+        let param_corr = if param_corr.is_null() {
+            None
+        } else {
+            let values = param_corr
+                .as_real_vector()
+                .ok_or("param_corr must be a numeric matrix")?;
+            let dim = param_corr
+                .get_attrib("dim")
+                .and_then(|d| d.as_integer_vector());
+            let (nr, nc) = match dim.as_deref() {
+                Some(&[nr, nc]) if nr >= 0 && nc >= 0 => (nr as usize, nc as usize),
+                _ => return Err("param_corr must be a numeric matrix".to_string()),
+            };
+            if values.len() != nr * nc {
+                return Err(format!("param_corr has {} values, not {nr} x {nc}", values.len()));
+            }
+            Some(nalgebra::DMatrix::from_column_slice(nr, nc, &values))
+        };
+        let corrs = offdiag_corrs(&m, param_corr.as_ref(), &[], "");
+        Ok(list!(
+            i = corrs.iter().map(|c| c.i as i32 + 1).collect::<Vec<_>>(),
+            j = corrs.iter().map(|c| c.j as i32 + 1).collect::<Vec<_>>(),
+            cov = corrs.iter().map(|c| c.cov).collect::<Vec<_>>(),
+            corr = corrs.iter().map(|c| c.corr).collect::<Vec<_>>(),
+            param_corr = corrs
+                .iter()
+                .map(|c| c.corr_source == OffDiagCorrSource::ParamCorr)
+                .collect::<Vec<_>>()
         ))
     })
 }
@@ -13003,6 +13114,7 @@ extendr_module! {
     fn ferx_rust_test_fit_outcome;
     fn ferx_rust_known_blocks;
     fn ferx_rust_fit_option_keys;
+    fn ferx_rust_fit_option_same;
     fn ferx_rust_known_eta_param_types;
     fn ferx_rust_known_covariance_statuses;
     fn ferx_rust_cov_labels;
@@ -13017,6 +13129,7 @@ extendr_module! {
     fn ferx_rust_omega_rows;
     fn ferx_rust_structural_theta_labels;
     fn ferx_rust_fitrx_omega_rows;
+    fn ferx_rust_offdiag_corrs;
     fn ferx_rust_theta_levels_from_fit;
     fn ferx_rust_fitrx_engine_resave;
     fn ferx_rust_eta_info_by_name;
