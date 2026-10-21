@@ -124,6 +124,29 @@ bad_body crlf '- one (#20).\r\n  more.\r\n' "CR line endings"
 bad_body no-ref '- one, with no reference.\n' "no issue/PR reference"
 bad_body zero-ref '- one (#0).\n' "no issue/PR reference"
 
+# A fragment past the pipe buffer (64 KiB on Linux): under pipefail, a reader
+# that stops early - head -n 1, grep -q - used to close the pipe while printf
+# was still writing the body, and the SIGPIPE failed the check on a fragment in
+# shape. The bad ones put the offence after the long run, so the whole body is
+# read.
+long_body() { # dir, last line
+  { printf -- '- **A long entry**.\n'
+    for _ in $(seq 4000); do printf '  continuation line of a long fragment.\n'; done
+    printf '%b' "$2"; } >"$1/changelog.d/20.fix.md"
+}
+d=$(fixture long-fragment)
+long_body "$d" '  (#20).\n'
+expect "accepts a fragment longer than the pipe buffer" "$d" 0 "2 fragment(s) OK" check
+d=$(fixture long-unindented)
+long_body "$d" '(#20).\n'
+expect "rejects an unindented line after a long run" "$d" 1 "line 4002" check
+d=$(fixture long-crlf)
+long_body "$d" '  (#20).\r\n'
+expect "rejects a CR after a long run" "$d" 1 "CR line endings" check
+d=$(fixture long-no-ref)
+long_body "$d" '  the end.\n'
+expect "rejects a long fragment with no reference" "$d" 1 "no issue/PR reference" check
+
 d=$(fixture dir-fragment)
 mkdir "$d/changelog.d/30.fix.md"
 expect "rejects a directory named like a fragment" "$d" 1 "not a regular file" check

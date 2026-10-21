@@ -227,6 +227,7 @@ dev_content() {
 
 cmd_check() {
   local errors=0 name stem cat body first bad devs
+  local ref_re='#[1-9][0-9]*'
   [ -f "$news" ] || die "no NEWS.md at $news"
   # The directory and its README are part of the convention, not optional: an
   # accidental `git rm changelog.d/*` after assembly would otherwise delete the
@@ -280,7 +281,10 @@ cmd_check() {
       errors=$((errors + 1))
       continue
     fi
-    first="$(printf '%s\n' "$body" | head -n 1)"
+    # No reader of $body below stops early: under pipefail, one that does (head,
+    # grep -q, awk's exit) can close the pipe while printf is still writing a
+    # long fragment, and the SIGPIPE fails the check on a fragment in shape.
+    first="${body%%$'\n'*}"
     if ! printf '%s' "$first" | grep -Eq '^- [^[:space:]]'; then
       echo "changelog.d/$name: line 1 must start a bullet ('- ...'), found: $first" >&2
       errors=$((errors + 1))
@@ -291,20 +295,20 @@ cmd_check() {
     # bullet. A column-0 line is a second bullet, a heading, or prose outside
     # the list; and ` - x` with ONE space is still a sibling bullet, not a
     # nested one.
-    bad="$(printf '%s\n' "$body" | awk 'NR > 1 && NF && !/^(  |\t)/ { print NR ": " $0; exit }')"
+    bad="$(printf '%s\n' "$body" | awk '!found && NR > 1 && NF && !/^(  |\t)/ { print NR ": " $0; found = 1 }')"
     if [ -n "$bad" ]; then
       echo "changelog.d/$name: must be a single bullet; line $bad is not indented" \
         "by two spaces (continuation lines need at least two; one entry per file)" >&2
       errors=$((errors + 1))
       continue
     fi
-    if printf '%s' "$body" | grep -q $'\r'; then
+    if [[ $body == *$'\r'* ]]; then
       echo "changelog.d/$name: contains CR line endings; save it with LF" >&2
       errors=$((errors + 1))
       continue
     fi
     # A real number: `#0` / `#00` is a placeholder left in, not a reference.
-    if ! printf '%s' "$body" | grep -Eq '#[1-9][0-9]*'; then
+    if ! [[ $body =~ $ref_re ]]; then
       echo "changelog.d/$name: no issue/PR reference - cite it as (#NN)" >&2
       errors=$((errors + 1))
       continue
@@ -318,7 +322,7 @@ cmd_check() {
       echo "NEWS.md: the development section must stay empty between releases (#600) -"
       echo "it is assembled from changelog.d/ at release time. Move each entry into its"
       echo "own changelog.d/<N>.<category>.md. Offending lines:"
-      printf '%s\n' "$stray" | head -n 5 | sed 's/^/  /'
+      printf '%s\n' "$stray" | sed -n '1,5s/^/  /p'
     } >&2
     errors=$((errors + 1))
   fi
