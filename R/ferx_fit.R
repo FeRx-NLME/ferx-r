@@ -1209,8 +1209,10 @@
 #'     packing order: thetas, omega, sigma, then the IOV kappas
 #'     (\code{"KAPPA_CL"}), the \code{[mixture]} per-class overrides
 #'     (\code{"ETA_CL (class 2)"}) and the \code{block_sigma} correlations.
-#'     Entries of a block omega or block kappa are named \code{"ROW,COL"}
-#'     (\code{"ETA_V,ETA_CL"}). \code{NULL} when covariance
+#'     Every variance is the bare name, in a block omega or block kappa too
+#'     (\code{"ETA_CL"}); a covariance is named \code{"ROW ~ COL"}
+#'     (\code{"ETA_V ~ ETA_CL"}), the spelling of the \code{block_sigma}
+#'     correlations (\code{"ADD_ERR ~ PROP_ERR"}). \code{NULL} when covariance
 #'     step was not run or failed. See \code{cor_matrix} for the derived
 #'     correlation matrix.}
 #'   \item{cov_fixed}{Logical vector, one entry per row of
