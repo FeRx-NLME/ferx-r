@@ -3837,15 +3837,14 @@ print.ferx_summary <- function(x, ...) {
   warn <- function(key, model_val, call_val) {
     call_str  <- as.character(call_val)
     model_str <- as.character(model_val)
-    model_cmp <- tolower(model_str)
-    call_cmp  <- tolower(call_str)
-    # `threads = auto` in the file and an explicit 0 both mean the engine
-    # default, so they do not conflict (#505).
-    if (identical(key, "threads")) {
-      model_cmp <- sub("^auto$", "0", model_cmp)
-      call_cmp  <- sub("^auto$", "0", call_cmp)
-    }
-    if (!identical(model_cmp, call_cmp)) {
+    # Compare what the engine makes of each value, not the text, so spellings
+    # it treats as one (`threads` auto / 0, `gradient` ad / autodiff,
+    # `bloq_method` drop / none, 1e5 / 100000) do not conflict (#505, #515).
+    # NA - a value the engine refuses - falls back to the text; the fit itself
+    # reports the bad value.
+    same <- ferx_rust_fit_option_same(key, model_str, call_str)
+    if (is.na(same)) same <- identical(tolower(model_str), tolower(call_str))
+    if (!same) {
       warning(
         "Model file [fit_options] sets `", key, " = ", model_str,
         "` but ferx_fit() argument overrides it with `", call_str, "`.",

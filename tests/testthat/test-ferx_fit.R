@@ -989,6 +989,83 @@ test_that("file `threads = auto` and an explicit 0 do not conflict (#505)", {
     "threads = auto.*overrides it with `4`"
   )
 })
+test_that("values the engine reads as one do not conflict (#515)", {
+  # The comparison runs on the engine's reading of each value, so no alias
+  # needs listing in R.
+  same <- list(
+    list(c(gradient = "ad"),          list(gradient = "autodiff")),
+    list(c(gradient_method = "fd"),   list(gradient = "finite_difference")),
+    list(c(bloq_method = "drop"),     list(bloq_method = "none")),
+    list(c(bloq = "ignore"),          list(bloq_method = "drop")),
+    list(c(threads = "AUTO"),         list(threads = "0")),
+    list(c(covariance = "yes"),       list(covariance = "true")),
+    list(c(method = "[saem, imp]"),   list(method = "saem, imp")),
+    list(c(method = "focei"),         list(method = "foce_i")),
+    list(c(inits_from_nca = "false"), list(inits_from_nca = "off"))
+  )
+  for (case in same) {
+    expect_silent(ferx:::.ferx_warn_fit_option_conflicts(
+      model_file_opts    = case[[1L]],
+      dedicated_explicit = case[[2L]],
+      settings_parts     = empty_settings()
+    ))
+  }
+  expect_silent(ferx:::.ferx_warn_fit_option_conflicts(
+    model_file_opts    = c(fd_hessian_step = "1e-3", ode_reltol = "0.0001"),
+    dedicated_explicit = list(),
+    settings_parts     = list(keys   = c("fd_hessian_step", "ode_reltol"),
+                              values = c("0.001", "1e-4"))
+  ))
+})
+test_that("real conflicts still warn after engine normalisation (#515)", {
+  expect_warning(
+    ferx:::.ferx_warn_fit_option_conflicts(
+      model_file_opts    = c(gradient = "autodiff"),
+      dedicated_explicit = list(gradient = "fd"),
+      settings_parts     = empty_settings()
+    ),
+    "^Model file \\[fit_options\\] sets `gradient = autodiff` but ferx_fit\\(\\) argument overrides it with `fd`\\. The call-time value will be used\\.$"
+  )
+  expect_warning(
+    ferx:::.ferx_warn_fit_option_conflicts(
+      model_file_opts    = c(method = "[saem, imp]"),
+      dedicated_explicit = list(method = "saem"),
+      settings_parts     = empty_settings()
+    ),
+    "method = \\[saem, imp\\].*overrides it with `saem`"
+  )
+  expect_warning(
+    ferx:::.ferx_warn_fit_option_conflicts(
+      model_file_opts    = c(ode_reltol = "1e-4"),
+      dedicated_explicit = list(),
+      settings_parts     = list(keys = "ode_reltol", values = "1e-6")
+    ),
+    "ode_reltol = 1e-4.*overrides it with `1e-6`"
+  )
+})
+test_that("a value the engine refuses falls back to a text comparison (#515)", {
+  expect_silent(ferx:::.ferx_warn_fit_option_conflicts(
+    model_file_opts    = c(bloq_method = "Bogus"),
+    dedicated_explicit = list(bloq_method = "bogus"),
+    settings_parts     = empty_settings()
+  ))
+  expect_warning(
+    ferx:::.ferx_warn_fit_option_conflicts(
+      model_file_opts    = c(bloq_method = "bogus"),
+      dedicated_explicit = list(bloq_method = "m3"),
+      settings_parts     = empty_settings()
+    ),
+    "bloq_method = bogus.*overrides it with `m3`"
+  )
+})
+test_that("ferx_rust_fit_option_same() reads values as the engine does (#515)", {
+  same <- getFromNamespace("ferx_rust_fit_option_same", "ferx")
+  expect_true(same("threads", "auto", "0"))
+  expect_false(same("threads", "auto", "4"))
+  expect_true(same("ode_abstol", "1e-8", "0.00000001"))
+  expect_identical(same("threads", "auto", "lots"), NA)
+  expect_identical(same("not_a_key", "1", "1"), NA)
+})
 test_that("ferx_fit() does not warn when defaults are accepted (regression for #66 review)", {
   # The model file specifies method = foce, covariance = true. Calling
   # ferx_fit() without overriding either should NOT warn — match.call() must

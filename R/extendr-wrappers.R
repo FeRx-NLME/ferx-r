@@ -147,6 +147,12 @@ ferx_rust_fit_option_keys <- function() {
 
 #' @title Internal Rust backend binding
 #' @keywords internal
+ferx_rust_fit_option_same <- function(key, a, b) {
+  .Call("wrap__ferx_rust_fit_option_same", key, a, b)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
 ferx_rust_known_eta_param_types <- function() {
   .Call("wrap__ferx_rust_known_eta_param_types")
 }
