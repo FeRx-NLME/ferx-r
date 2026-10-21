@@ -334,8 +334,12 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
 # The keys whose *elements* are arrays too (`Vec<Vec<f64>>`, `Vec<(f64, f64)>`).
 # A one-kappa model's `shrinkage_kappa_by_occ` row is a length-1 vector, which
 # unboxes into a bare number where the engine expects an inner sequence.
+# Not `resamples_packed`: it reaches jsonlite as a numeric matrix, which writes
+# one inner array per row at every shape (`[[1.5]]`, `[[1],[2]]`, `[[1,2]]`)
+# with `auto_unbox = TRUE`. Wrapping each of its cells in a list here took
+# ~18 s on a 10000 x 50 pool, against ~0.5 s for the matrix (#556).
 .FITRX_ARRAY_OF_ARRAY_KEYS <- c(
-  "ci_theta", "ci_omega", "ci_sigma", "ci_kappa", "resamples_packed",
+  "ci_theta", "ci_omega", "ci_sigma", "ci_kappa",
   "shrinkage_kappa_by_occ",
   # ViPosteriorWire (`vi.eta_posterior[]`): one row per eta / occasion
   "cov", "kappa_means"
@@ -1049,8 +1053,9 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
 # The retained SIR draws (`sir_keep_samples = TRUE`) in ferx-core's
 # `SirWire.resamples_packed` shape: one array per resample, each
 # `sir_resamples_dim` values in packed space - the flat, row-major vector the
-# fit carries, cut into its rows (#549). NULL when the fit kept none, which
-# writes `null` as the engine does.
+# fit carries, cut into its rows (#549). Returned as the n x dim matrix, which
+# jsonlite writes row by row and `.fitrx_wire_arrays()` passes through (#556).
+# NULL when the fit kept none, which writes `null` as the engine does.
 .fitrx_resamples_to_wire <- function(fit) {
   v <- fit$sir_resamples
   n <- fit$sir_resamples_n
@@ -1073,8 +1078,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
          "edited after the fit. Re-run ferx_sir(), or set all three to NULL.",
          call. = FALSE)
   }
-  m <- matrix(as.numeric(v), nrow = n, ncol = d, byrow = TRUE)
-  lapply(seq_len(n), function(i) m[i, ])
+  matrix(as.numeric(v), nrow = n, ncol = d, byrow = TRUE)
 }
 
 # Bayes posterior summary (method = "bayes"). Stored as scalar metadata plus
