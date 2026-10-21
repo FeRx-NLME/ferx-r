@@ -519,6 +519,12 @@
 # "per_dose" or {"time_windows": [24, 48.5]}. NULL both ways when the fit
 # records no rule, so `ferx_sir()` / `ferx_covariance()` on a reloaded fit
 # derive its occasions as the fit did (#512).
+#
+# A wire value of any other shape (a newer ferx-core's variant, a hand-edited
+# key) drops the field with a `ferx_iov_occasion_dropped_warning` naming the
+# value, and the rest of the bundle loads (#524): the fit is then one that
+# records no rule, as a bundle saved before ferx-core #1783, and the post-hoc
+# steps fall back to the model file's rule.
 .fitrx_iov_occasion_to_wire <- function(rule) {
   rule <- .fitrx_opt_chr(rule)
   if (is.null(rule)) return(NULL)
@@ -544,8 +550,10 @@
     if (identical(w, "column")) return("column")
     if (identical(w, "per_dose")) return("dose")
   }
-  if (is.list(w) && identical(names(w), "time_windows")) {
-    edges <- as.numeric(unlist(w$time_windows, use.names = FALSE))
+  windows <- if (is.list(w) && identical(names(w), "time_windows")) w$time_windows
+  is_edge <- function(e) is.numeric(e) && length(e) == 1L && is.finite(e)
+  if (is.list(windows) && length(windows) && all(vapply(windows, is_edge, logical(1)))) {
+    edges <- as.numeric(unlist(windows, use.names = FALSE))
     # The shortest spelling that reads back to the same double, as the glue
     # writes it: 120.1, not 120.09999999999999; 100000, not 1e+05 (Rust's
     # `{}` never writes an exponent).
@@ -558,8 +566,19 @@
     }, character(1))
     return(sprintf("time(%s)", paste(spell, collapse = ", ")))
   }
-  stop("ferx_load_fit: the bundle's `iov_occasion` is not \"column\", ",
-       "\"per_dose\" or {\"time_windows\": [...]}.", call. = FALSE)
+  value <- tryCatch(
+    as.character(jsonlite::toJSON(w, auto_unbox = TRUE, digits = I(17),
+                                  null = "null", na = "null")),
+    error = function(e) paste(format(w), collapse = " ")
+  )
+  warning(warningCondition(paste0(
+    "ferx_load_fit: the bundle's `iov_occasion` is ", value, ", not \"column\", ",
+    "\"per_dose\" or {\"time_windows\": [...]}, so fit$iov_occasion is not ",
+    "loaded; it was likely written by a newer ferx-core. The rest of the fit ",
+    "loads, and ferx_covariance() / ferx_sir() derive occasions from the model ",
+    "file's rule, as on a fit that records none. Update ferx to keep it."),
+    class = "ferx_iov_occasion_dropped_warning", value = w))
+  NULL
 }
 
 # A JSON-carried fit field (`fit$reader_settings`, `fit$population_fingerprint`,

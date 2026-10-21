@@ -5,8 +5,10 @@
 # the model. This is the shape of a model-based meta-analysis structural model,
 # and of any dose-response or response-versus-time regression.
 #
-# Run:
-#   source(system.file("examples", "ex_emax_timecourse.R", package = "ferx"))
+# Open the example script to step through it:
+#   file.edit(system.file("examples", "ex_emax_timecourse.R", package = "ferx"))
+# or run it in one go, printing as it goes:
+#   source(system.file("examples", "ex_emax_timecourse.R", package = "ferx"), echo = TRUE)
 #
 # The dataset carries no AMT column — a compartment-free model has nothing to
 # dose. See README.md for the structural-model syntax. The equivalent NONMEM

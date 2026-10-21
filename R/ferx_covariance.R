@@ -94,6 +94,11 @@
 #'   `NULL` (the default) takes the fit's recorded value
 #'   (`fit$scoring_settings$mu_referencing`), else `TRUE`. `TRUE` or `FALSE`
 #'   overrides the record for this call.
+#' @param threads Worker threads the step runs on. `NULL` (the default)
+#'   takes the width the fit ran on, `fit$n_threads_used`; `0` asks for the
+#'   engine default; a positive integer pins the width. It does not change
+#'   the result, only the resources the step uses. The returned fit's
+#'   `n_threads_used` reports the width this step ran on.
 #' @param verbose When `TRUE`, the engine prints progress to stderr.
 #'   Default `FALSE`.
 #'
@@ -101,8 +106,9 @@
 #'   `se_omega`, `se_sigma`, `se_kappa`, `covariance_status`, `eigenvalues`,
 #'   `condition_number`, `max_abs_correlation` (the largest absolute
 #'   off-diagonal parameter correlation, `NA` when the step produced no
-#'   matrix - the value [check_strictness()] gates on), and the `se` column of
-#'   `residual_correlations` refreshed.
+#'   matrix - the value [check_strictness()] gates on), the `se` column of
+#'   `residual_correlations`, and `n_threads_used` (the width this step ran
+#'   on) refreshed.
 #'
 #' @examples
 #' \dontrun{
@@ -126,10 +132,12 @@
 ferx_covariance <- function(fit,
                             covariance_method = "r",
                             mu_referencing = NULL,
-                            verbose = FALSE) {
+                            verbose = FALSE,
+                            threads = NULL) {
   if (!inherits(fit, "ferx_fit")) {
     stop("`fit` must be a ferx_fit object (from ferx_fit() or ferx_load_fit()).")
   }
+  threads_arg <- .ferx_step_threads(threads, fit)
 
   # Normalise + validate covariance_method up-front so a typo surfaces as a
   # clean R condition rather than the engine's "unknown value" further in.
@@ -299,6 +307,7 @@ ferx_covariance <- function(fit,
     ebe_kappas_flat = kappa_args$ebe_kappas_flat,
     ebe_kappa_ids = kappa_args$ebe_kappa_ids,
     covariance_method = cov_method,
+    threads = threads_arg,
     verbose = isTRUE(verbose),
     fit_bindings = binding_args$fit_bindings
   ), model_path, data_path)
@@ -312,6 +321,11 @@ ferx_covariance <- function(fit,
   # a run_covariance-refreshed fit carry identical shapes.
 
   fit$covariance_status <- raw$covariance_status %||% "not_requested"
+  # The width this step ran on, not the fit's: the field describes the step
+  # that produced the fit's standard errors (#527).
+  if (!is.null(raw$n_threads_used)) {
+    fit$n_threads_used <- as.integer(raw$n_threads_used)
+  }
   # The correlation gate check_strictness() applies is read off the matrix this
   # call just produced, so it is refreshed with it (ferx-core #1177); NaN when
   # the step still produced no matrix.

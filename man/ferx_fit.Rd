@@ -488,11 +488,16 @@ warning then names the tolerances; \code{ode_reltol = 1e-6} with
 \code{ode_abstol = 1e-8} is on the measured accuracy plateau. The
 exact analytic covariance R-matrix, which most Gaussian
 \code{[odes]} fits take, does not second-difference the objective and
-is unaffected. Also applies to the ODE twin that closed-form transit /
+is unaffected. Also applies to the ODE twin of the closed-form transit /
 inverse-Gaussian absorption models (\code{one_cpt_transit},
-\code{two_cpt_transit}, \code{one_cpt_ig}, \code{two_cpt_ig}) use for
-IOV, time-varying-covariate and \code{TIME}-switch subjects. Can also
-be set in the model file's \code{[fit_options]} block.}
+\code{two_cpt_transit}, \code{one_cpt_ig}, \code{two_cpt_ig}). Their
+IOV and time-varying-covariate subjects run analytic (ferx-core #1560),
+so the twin is only the fallback for a subject in the flip-flop regime
+(an interval's elimination rate reaches the absorption rate of a dose
+that has arrived by then), one with a steady-state dose, an infusion
+or a \code{TIME}-dependent parameter, and an IOV subject with 24 or
+more stacked random effects. Can also be set in the model file's
+\code{[fit_options]} block.}
 \item{\code{ode_abstol}}{Absolute tolerance for ODE models and the
 absorption ODE twin, as for \code{ode_reltol} (default \code{1e-6}).}
 \item{\code{ode_max_steps}}{Maximum solver steps per integration segment
@@ -1257,8 +1262,10 @@ matrix (params ? params). Row/column names use declared variable names
 packing order: thetas, omega, sigma, then the IOV kappas
 (\code{"KAPPA_CL"}), the \code{[mixture]} per-class overrides
 (\code{"ETA_CL (class 2)"}) and the \code{block_sigma} correlations.
-Entries of a block omega or block kappa are named \code{"ROW,COL"}
-(\code{"ETA_V,ETA_CL"}). \code{NULL} when covariance
+Every variance is the bare name, in a block omega or block kappa too
+(\code{"ETA_CL"}); a covariance is named \code{"ROW ~ COL"}
+(\code{"ETA_V ~ ETA_CL"}), the spelling of the \code{block_sigma}
+correlations (\code{"ADD_ERR ~ PROP_ERR"}). \code{NULL} when covariance
 step was not run or failed. See \code{cor_matrix} for the derived
 correlation matrix.}
 \item{cov_fixed}{Logical vector, one entry per row of

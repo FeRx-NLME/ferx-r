@@ -113,6 +113,68 @@ test_that("fit.json carries the draws in ferx-core's resamples_packed shape", {
   expect_sir_fields_identical(ferx_load_fit(trip$core_path), fit)
 })
 
+# A fit whose kept draws are replaced by an n x dim pool of distinct values,
+# for the shapes the standalone fixture does not have. Only the wire is under
+# test, so the draws need not be the model's own.
+sir_res_reshaped <- function(fit, n, d) {
+  fit$sir_resamples <- seq_len(n * d) / 3 + 0.1
+  fit$sir_resamples_n <- as.integer(n)
+  fit$sir_resamples_dim <- as.integer(d)
+  fit
+}
+
+test_that("resamples_packed reaches jsonlite as one array per row at every shape (#556)", {
+  # The writer hands jsonlite the n x dim matrix instead of a list per cell;
+  # the edge shapes must still be `Vec<Vec<f64>>`, not unboxed scalars.
+  cases <- list(
+    list(n = 1L, d = 1L, json = "[[1.5]]"),
+    list(n = 2L, d = 1L, json = "[[1],[2]]"),
+    list(n = 1L, d = 2L, json = "[[1,2]]")
+  )
+  for (cs in cases) {
+    v <- seq_len(cs$n * cs$d) + if (cs$n * cs$d == 1L) 0.5 else 0
+    fit <- list(sir_resamples = v, sir_resamples_n = cs$n,
+                sir_resamples_dim = cs$d)
+    wire <- ferx:::.fitrx_wire_arrays(
+      list(sir = list(resamples_packed = ferx:::.fitrx_resamples_to_wire(fit)))
+    )
+    expect_identical(
+      as.character(jsonlite::toJSON(wire, auto_unbox = TRUE, digits = I(17))),
+      paste0("{\"sir\":{\"resamples_packed\":", cs$json, "}}"),
+      info = paste(cs$n, "x", cs$d)
+    )
+  }
+  # Rows are the flat vector's row-major cuts, at 17 significant digits.
+  fit <- list(sir_resamples = c(0.1, 1 / 3, 2, 3), sir_resamples_n = 2L,
+              sir_resamples_dim = 2L)
+  json <- jsonlite::toJSON(
+    ferx:::.fitrx_wire_arrays(list(resamples_packed = ferx:::.fitrx_resamples_to_wire(fit))),
+    auto_unbox = TRUE, digits = I(17)
+  )
+  expect_identical(
+    as.character(json),
+    "{\"resamples_packed\":[[0.10000000000000001,0.33333333333333331],[2,3]]}"
+  )
+})
+
+test_that("one-draw and one-dimension pools survive R and the engine (#556)", {
+  fit <- sir_res_standalone()
+  skip_if(is.null(fit), sir_res_cov_skip)
+  for (shape in list(c(1L, 1L), c(1L, 4L), c(5L, 1L))) {
+    f <- sir_res_reshaped(fit, shape[[1L]], shape[[2L]])
+    info <- paste(shape, collapse = " x ")
+    expect_sir_fields_identical(sir_res_roundtrip(f), f)
+
+    trip <- fitrx_engine_trip(f)
+    r_wire <- fitrx_fit_json(trip$r_path)$sir$resamples_packed
+    expect_length(r_wire, shape[[1L]])
+    expect_identical(lengths(r_wire), rep(shape[[2L]], shape[[1L]]), info = info)
+    expect_identical(fitrx_fit_json(trip$core_path)$sir$resamples_packed,
+                     r_wire, info = info)
+    expect_sir_fields_identical(ferx_load_fit(trip$core_path), f)
+  }
+})
+
 test_that("a bundle without resamples_packed still loads, draws NULL", {
   fit <- sir_res_standalone()
   skip_if(is.null(fit), sir_res_cov_skip)
@@ -186,6 +248,28 @@ test_that("ferx_load_fit() refuses resamples_packed rows that are not n x dim nu
   corrupt(function(rp) { rp[[1L]][3L] <- list(NULL); rp })
   # A text cell.
   corrupt(function(rp) { rp[[1L]][[3L]] <- "x"; rp })
+})
+
+test_that("ferx_load_fit() refuses a sir.ci_* pair list with a hole in it (#557)", {
+  fit <- sir_res_standalone()
+  skip_if(is.null(fit), sir_res_cov_skip)
+  path <- withr::local_tempfile(fileext = ".fitrx")
+  ferx_save_fit(fit, path, include_data = TRUE)
+  corrupt <- function(field, edit) {
+    p <- fitrx_edit_bundle(path, function(w) {
+      w$sir[[field]] <- edit(w$sir[[field]])
+      w
+    })
+    expect_error(ferx_load_fit(p), paste0("`sir.", field, "`.*the bundle is corrupt"),
+                 info = field)
+  }
+  # A `null` bound, as a NaN would be written: unlist() would shift every
+  # later row up by one.
+  corrupt("ci_theta", function(ci) { ci[[1L]][2L] <- list(NULL); ci })
+  # A pair with one cell.
+  corrupt("ci_omega", function(ci) { ci[[1L]] <- ci[[1L]][1L]; ci })
+  # A text bound.
+  corrupt("ci_sigma", function(ci) { ci[[1L]][[1L]] <- "x"; ci })
 })
 
 test_that("ferx_sir() without sir_keep_samples drops the input fit's draws", {

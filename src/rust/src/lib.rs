@@ -1756,16 +1756,20 @@ fn ferx_rust_predict_survival(model_path: &str, data_path: &str, times: Vec<f64>
         // the reader fills them from `iov_column` only.
         let occasion_notes = derive_file_occasions(&parsed, &mut population);
 
-        let results =
-            ferx_core::predict_survival(&parsed.model, &population, &parsed.model.default_params, &times)
-                .map_err(|e| engine_refusal("Error predicting: ", e))?;
-        // The rule-over-column note, if any, on the predict paths' channel.
-        let df = survival_results_to_df(&results);
-        Ok(if occasion_notes.is_empty() {
-            df
-        } else {
-            attach_sim_warnings(df, occasion_notes)
-        })
+        let output = ferx_core::predict_survival_diag(
+            &parsed.model,
+            &population,
+            &parsed.model.default_params,
+            &times,
+        )
+        .map_err(|e| engine_refusal("Error predicting: ", e))?;
+        // The rule-over-column note, if any, then core's non-fit bundle (ferx-r
+        // #433): parse, data-reader (through core's one filter), model/data,
+        // experimental-feature and ODE-solver findings; see `ferx_rust_predict`.
+        Ok(attach_sim_warnings(
+            survival_results_to_df(&output.results),
+            [occasion_notes, output.warnings].concat(),
+        ))
     })
 }
 
@@ -1849,16 +1853,14 @@ fn ferx_rust_predict_survival_from_fit(
             Err(e) => return Err(e),
         };
 
-        let results = ferx_core::predict_survival(&parsed.model, &population, &params, &times)
+        let output = ferx_core::predict_survival_diag(&parsed.model, &population, &params, &times)
             .map_err(|e| engine_refusal("Error predicting: ", e))?;
-        // The legacy-fit occasion note, if any, on the channel the predict and
-        // simulate paths use; without one the frame carries no attribute, as before.
-        let df = survival_results_to_df(&results);
-        Ok(if occasion_notes.is_empty() {
-            df
-        } else {
-            attach_sim_warnings(df, occasion_notes)
-        })
+        // The legacy-fit occasion note, if any, then core's non-fit bundle; see
+        // `ferx_rust_predict_survival` (ferx-r #433).
+        Ok(attach_sim_warnings(
+            survival_results_to_df(&output.results),
+            [occasion_notes, output.warnings].concat(),
+        ))
     })
 }
 
@@ -3960,9 +3962,10 @@ fn cov_matrix_held(model: &CompiledModel, cov_matrix_dim: i32) -> Vec<bool> {
 /// mislabel rows without an error; the end-to-end tests in
 /// `test-ferx_covariance.R` pin the order for every pair the engine accepts.
 ///
-/// A diagonal Ω / Ω_IOV entry is the bare declared name; a block one, in the
-/// column-major lower-triangle order `pack_params` uses, is `ROW,COL` - its
-/// diagonal too (`ETA_CL,ETA_CL`), the spelling R gave the Ω block (#367).
+/// Every variance is the bare declared name, block or diagonal alike; a block
+/// covariance, in the column-major lower-triangle order `pack_params` uses, is
+/// `ROW ~ COL` (`ETA_V ~ ETA_CL`), the one off-diagonal spelling of the
+/// output-label convention, shared with the `block_sigma` ρ's (ferx-r #440).
 /// Fallbacks per the output-label convention: `THETA<i>`, `OMEGA(i,j)`,
 /// `SIGMA(i)`, `KAPPA<i>` (`KAPPA(i,j)` off the diagonal). A mixture override is
 /// the overridden name with its class, `ETA_CL (class 2)`. Empty, like the mask,
@@ -3981,8 +3984,8 @@ fn cov_matrix_labels(model: &CompiledModel, cov_matrix_dim: i32) -> Vec<String> 
     let mut labels: Vec<String> = (0..p.theta.len()).map(theta).collect();
     for (r, c) in lower_tri(p.omega.dim(), p.omega.diagonal) {
         labels.push(match (eta(r), eta(c)) {
-            (Some(a), _) if p.omega.diagonal => a,
-            (Some(a), Some(b)) => format!("{a},{b}"),
+            (Some(a), _) if r == c => a,
+            (Some(a), Some(b)) => format!("{a} ~ {b}"),
             _ => format!("OMEGA({},{})", r + 1, c + 1),
         });
     }
@@ -3991,9 +3994,9 @@ fn cov_matrix_labels(model: &CompiledModel, cov_matrix_dim: i32) -> Vec<String> 
         let kappa = |k: usize| named(&iov.eta_names, k).or_else(|| named(&model.kappa_names, k));
         for (r, c) in lower_tri(iov.dim(), iov.diagonal) {
             labels.push(match (kappa(r), kappa(c)) {
-                (Some(a), _) if iov.diagonal => a,
-                (Some(a), Some(b)) => format!("{a},{b}"),
-                _ if iov.diagonal => format!("KAPPA{}", r + 1),
+                (Some(a), _) if r == c => a,
+                (Some(a), Some(b)) => format!("{a} ~ {b}"),
+                _ if r == c => format!("KAPPA{}", r + 1),
                 _ => format!("KAPPA({},{})", r + 1, c + 1),
             });
         }
@@ -7572,6 +7575,23 @@ fn fit_skeleton(
     Ok(fit)
 }
 
+/// The worker-pool width of a standalone `ferx_sir()` / `ferx_covariance()`
+/// step (ferx-r #527), and the width to report as its `n_threads_used`.
+///
+/// `threads > 0` pins the pool; anything else leaves `FitOptions::threads`
+/// unset, which the engine runs on its default width. That width is read
+/// through `PoolPlan::from_budget(0, 1)`, which resolves a zero budget with
+/// the same function the engine sizes an unpinned pool with. The skeleton's
+/// own `n_threads_used` is a placeholder, so the engine's result cannot say.
+fn posthoc_step_threads(threads: i32) -> (Option<usize>, i32) {
+    if threads > 0 {
+        (Some(threads as usize), threads)
+    } else {
+        let n = ferx_core::PoolPlan::from_budget(0, 1).threads_per_fit();
+        (None, n as i32)
+    }
+}
+
 /// Standalone SIR — run Sampling Importance Resampling against an existing fit.
 ///
 /// The R wrapper `ferx_sir()` flattens the fit list into the primitives this
@@ -7639,11 +7659,15 @@ fn fit_skeleton(
 /// @param ebe_kappas_flat `fit$ebe_kappas` kappa columns, row-major, one row
 ///   per (subject, occasion) in fit order; empty for a fit without IOV.
 /// @param ebe_kappa_ids The `ID` of each `ebe_kappas` row.
+/// @param threads Worker threads the step runs on: `0` the engine default,
+///   `n > 0` pinned. `ferx_sir()` passes the fit's `n_threads_used` unless
+///   told otherwise (ferx-r #527).
 /// @param verbose When TRUE, the engine prints progress to stderr.
 /// @return Named list with `sir_ess`, `sir_ci_theta`, `sir_ci_omega`, `sir_ci_sigma`,
 ///   `sir_ci_kappa`,
 ///   `sir_resamples`, `sir_resamples_n`, `sir_resamples_dim`, `sir_seed_used`,
-///   `sir_settings` (the record this run made), `theta_levels`, and `warnings`.
+///   `sir_settings` (the record this run made), `theta_levels`,
+///   `n_threads_used` (the width this run's pool had), and `warnings`.
 #[extendr]
 #[allow(clippy::too_many_arguments)]
 fn ferx_rust_sir(
@@ -7677,6 +7701,7 @@ fn ferx_rust_sir(
     method_chain: Vec<String>,
     ebe_kappas_flat: Vec<f64>,
     ebe_kappa_ids: Vec<String>,
+    threads: i32,
     verbose: bool,
     fit_bindings: List,
 ) -> Robj {
@@ -7745,6 +7770,8 @@ fn ferx_rust_sir(
         let mut opts = FitOptions::default();
         opts.interaction = interaction;
         opts.verbose = verbose;
+        let (step_threads, n_threads_used) = posthoc_step_threads(threads);
+        opts.threads = step_threads;
 
         // ferx_core::run_sir verifies hashes (when set), re-parses model + data,
         // reconstructs the inner ModelParameters, and runs SIR. We pass None for
@@ -7810,6 +7837,7 @@ fn ferx_rust_sir(
                 None => Robj::from(()),
             },
             theta_levels = theta_levels,
+            n_threads_used = n_threads_used,
             warnings = new_fit.warnings.clone()
         )
         .into())
@@ -7881,10 +7909,14 @@ fn ferx_rust_sir(
 ///   per (subject, occasion) in fit order; empty for a fit without IOV.
 /// @param ebe_kappa_ids The `ID` of each `ebe_kappas` row.
 /// @param covariance_method Covariance estimator: "r"/"hessian", "s"/"cross_product", or "rsr"/"sandwich".
+/// @param threads Worker threads the step runs on: `0` the engine default,
+///   `n > 0` pinned. `ferx_covariance()` passes the fit's `n_threads_used`
+///   unless told otherwise (ferx-r #527).
 /// @param verbose When TRUE, the engine prints progress to stderr.
 /// @return Named list with `cov_matrix`, `cov_matrix_dim`, `se_theta`, `se_omega`,
 ///   `se_sigma`, `se_kappa`, `covariance_status`, `cov_eigenvalues`,
-///   `cov_condition_number`, `theta_levels` (NA intervals), and `warnings`.
+///   `cov_condition_number`, `theta_levels` (NA intervals), `n_threads_used`
+///   (the width this run's pool had), and `warnings`.
 #[extendr]
 #[allow(clippy::too_many_arguments)]
 fn ferx_rust_covariance(
@@ -7917,6 +7949,7 @@ fn ferx_rust_covariance(
     ebe_kappas_flat: Vec<f64>,
     ebe_kappa_ids: Vec<String>,
     covariance_method: &str,
+    threads: i32,
     verbose: bool,
     fit_bindings: List,
 ) -> Robj {
@@ -7984,6 +8017,8 @@ fn ferx_rust_covariance(
         opts.covariance_method = covariance_method_enum;
         opts.interaction = interaction;
         opts.verbose = verbose;
+        let (step_threads, n_threads_used) = posthoc_step_threads(threads);
+        opts.threads = step_threads;
 
         // Pass None for model/population so run_covariance re-parses model + data
         // from the recorded paths and fires the SHA-256 integrity check — the
@@ -8058,6 +8093,7 @@ fn ferx_rust_covariance(
                 .map(|c| c.sigma_j as i32 + 1)
                 .collect::<Vec<i32>>(),
             theta_levels = theta_levels,
+            n_threads_used = n_threads_used,
             warnings = new_fit.warnings.clone()
         )
         .into())
