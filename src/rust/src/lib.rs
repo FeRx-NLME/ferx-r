@@ -905,7 +905,8 @@ fn ferx_rust_simulate(
         // makes moot), so relaying `population.warnings` too would say each twice.
         Ok(attach_sim_warnings(
             sim_results_to_df(&output.results),
-            [occasion_notes, output.warnings].concat(),
+            occasion_notes,
+            &output,
         ))
     })
 }
@@ -1026,7 +1027,8 @@ fn ferx_rust_simulate_from_fit(
         // Reader findings are already in `output.warnings`; see `ferx_rust_simulate`.
         Ok(attach_sim_warnings(
             sim_results_to_df(&output.results),
-            [occasion_notes, output.warnings].concat(),
+            occasion_notes,
+            &output,
         ))
     })
 }
@@ -1228,7 +1230,7 @@ fn simulate_adaptive(
                 f.residual_rho_pairs,
             )
             .map_err(|e| format!("ferx_simulate_adaptive: {e}"))?;
-            (params, Vec::new())
+            (params, OccasionNotes::none())
         }
     };
 
@@ -1265,10 +1267,7 @@ fn simulate_adaptive(
         // filter, which on this path also withholds `W_NO_DOSES`: the controller
         // supplies the whole regimen, so an observation grid alone is the normal
         // input (ferx-r #426).
-        Ok(mut result) => {
-            let warnings = [occasion_notes, std::mem::take(&mut result.warnings)].concat();
-            attach_sim_warnings(adaptive_result_to_list(&result), warnings)
-        }
+        Ok(result) => attach_sim_warnings(adaptive_result_to_list(&result), occasion_notes, &result),
         Err(e) => return Err(engine_refusal("ferx_simulate_adaptive: ", e)),
     })
 }
@@ -1519,7 +1518,8 @@ fn ferx_rust_simulate_with_uncertainty(
         Ok(match ferx_core::simulate_with_uncertainty_diag(&parsed.model, &population, &fit_result, &opts) {
             Ok(output) => attach_sim_warnings(
                 sim_results_to_df(&output.results),
-                [occasion_notes, output.warnings].concat(),
+                occasion_notes,
+                &output,
             ),
             Err(e) => return Err(engine_refusal("simulate_with_uncertainty error: ", e)),
         })
@@ -1585,7 +1585,8 @@ fn ferx_rust_predict(
         // which still holds the ones a compartment-free model makes moot.
         Ok(attach_sim_warnings(
             data_frame!(ID = id, TIME = time, PRED = pred).into(),
-            [occasion_notes, output.warnings].concat(),
+            occasion_notes,
+            &output,
         ))
     })
 }
@@ -1682,7 +1683,8 @@ fn ferx_rust_predict_from_fit(
         // Core's non-fit bundle; see `ferx_rust_predict` (ferx-r #426).
         Ok(attach_sim_warnings(
             data_frame!(ID = id, TIME = time, PRED = pred).into(),
-            [occasion_notes, output.warnings].concat(),
+            occasion_notes,
+            &output,
         ))
     })
 }
@@ -1769,7 +1771,8 @@ fn ferx_rust_predict_survival(model_path: &str, data_path: &str, times: Vec<f64>
         // experimental-feature and ODE-solver findings; see `ferx_rust_predict`.
         Ok(attach_sim_warnings(
             survival_results_to_df(&output.results),
-            [occasion_notes, output.warnings].concat(),
+            occasion_notes,
+            &output,
         ))
     })
 }
@@ -1860,7 +1863,8 @@ fn ferx_rust_predict_survival_from_fit(
         // `ferx_rust_predict_survival` (ferx-r #433).
         Ok(attach_sim_warnings(
             survival_results_to_df(&output.results),
-            [occasion_notes, output.warnings].concat(),
+            occasion_notes,
+            &output,
         ))
     })
 }
@@ -1987,7 +1991,7 @@ fn ferx_rust_npde_from_fit(
         // read: a fingerprint of a fit with derived occasions leaves them out.
         let occasion_notes =
             derive_fit_occasions("ferx_calc_npde", &parsed, &mut population, iov_occasion)?;
-        let notes = [notes, occasion_notes].concat();
+        let notes = [notes, occasion_notes.into_vec()].concat();
 
         let params = match params_from_fit(
             &parsed.model,
@@ -3681,14 +3685,52 @@ fn default_fit_result(
 /// the run was clean). Mirrors how the fit path exposes `FitResult.warnings`,
 /// but as an attribute since simulate and predict return a bare frame.
 ///
-/// `warnings` is always the `warnings` of a ferx-core `*_diag` result, never
+/// The engine's findings come from `diag`, a ferx-core `*_diag` result, never
 /// `Population.warnings`: core folds the data reader's findings into that bundle
 /// through its one suppression filter, and the raw list still holds the ones it
 /// withholds (`W_NO_DOSES` / `W_CMT_DEFAULTED` on a compartment-free model,
-/// `W_NO_DOSES` on the adaptive path; ferx-r #426, ferx-core #1645).
-fn attach_sim_warnings(mut df: Robj, warnings: Vec<String>) -> Robj {
+/// `W_NO_DOSES` on the adaptive path; ferx-r #426, ferx-core #1645). Taking the
+/// result rather than a `Vec<String>` makes relaying the raw list a compile
+/// error (ferx-r #432). `glue_notes` holds the notes the glue itself writes,
+/// which come first; its type, `OccasionNotes`, is built only by
+/// `derive_file_occasions` and `derive_fit_occasions`, so it is closed too.
+fn attach_sim_warnings(mut df: Robj, glue_notes: OccasionNotes, diag: &impl CoreDiag) -> Robj {
+    let warnings = [glue_notes.as_slice(), diag.warnings()].concat();
     df.set_attrib("simulation_warnings", warnings).unwrap();
     df
+}
+
+/// A ferx-core result whose `warnings` is core's non-fit diagnostics bundle,
+/// the only source `attach_sim_warnings` accepts for the engine's findings
+/// (ferx-r #432). Implement it only for a core result built by
+/// `postfit::non_fit_diagnostics` (or folded through the same filter) - never
+/// for `Population` or a wrapper around its `warnings`.
+trait CoreDiag {
+    fn warnings(&self) -> &[String];
+}
+
+impl CoreDiag for ferx_core::SimulationOutput {
+    fn warnings(&self) -> &[String] {
+        &self.warnings
+    }
+}
+
+impl CoreDiag for ferx_core::PredictionOutput {
+    fn warnings(&self) -> &[String] {
+        &self.warnings
+    }
+}
+
+impl CoreDiag for ferx_core::SurvivalPredictionOutput {
+    fn warnings(&self) -> &[String] {
+        &self.warnings
+    }
+}
+
+impl CoreDiag for ferx_core::AdaptiveSimulationResult {
+    fn warnings(&self) -> &[String] {
+        &self.warnings
+    }
 }
 
 fn sim_results_to_df(results: &[ferx_core::api::SimulationResult]) -> Robj {
@@ -6683,79 +6725,111 @@ fn iov_occasion_from_r(
     Ok(Some(opts.iov_occasion))
 }
 
-/// Give a population read for a from-fit predict / simulate / npde step the
-/// occasion labels the fit derived (ferx-r #523 / #519), as core's
-/// `resolve_fit_inputs` does for `run_sir` / `run_covariance` (#1783). The
-/// readers take no rule: they fill `Subject::occasions` from `iov_column` only,
-/// so under an `iov_occasion = dose | time(...)` rule every subject came back
-/// unlabelled and the engine ran every occasion at kappa = 0 with no message -
-/// a simulation without inter-occasion variability.
-///
-/// The rule is the fit's (`fit$iov_occasion`, which carries one passed only
-/// through `settings =`); a fit that records none (a `.fitrx` saved before
-/// ferx-core #1783) takes the model file's, with core's note, and is refused
-/// when that derives nothing and the population has no labels either. Returns
-/// the notes for the step's warnings. Run after the level bind and, on the npde
-/// path, after the fingerprint check, which is of the population as read.
-fn derive_fit_occasions(
-    entry_point: &str,
-    parsed: &ParsedModel,
-    population: &mut Population,
-    iov_occasion: &str,
-) -> std::result::Result<Vec<String>, String> {
-    let recorded = iov_occasion_from_r(entry_point, iov_occasion)?;
-    if parsed.model.n_kappa == 0 {
-        return Ok(Vec::new());
-    }
-    let mut notes = Vec::new();
-    let rule = match recorded {
-        Some(rule) => rule,
-        None => {
-            let rule = parsed.fit_options.iov_occasion.clone();
-            if rule != ferx_core::IovOccasionRule::Column {
-                notes.push(format!(
-                    "{entry_point}: this fit records no IOV occasion rule (it was saved \
-                     before ferx recorded one), so the occasions were derived with the \
-                     model file's `iov_occasion = {}`. If the fit ran under another rule \
-                     (`ferx_fit(settings = list(iov_occasion = ...))`), these results are \
-                     wrong: refit so the rule is recorded.",
-                    iov_occasion_to_r(&rule)
-                ));
-            } else if population.subjects.iter().all(|s| s.occasions.is_empty()) {
-                return Err(format!(
-                    "{entry_point}: this fit records no IOV occasion rule (it was saved \
-                     before ferx recorded one), the model file sets no `iov_occasion` and \
-                     the data carries no occasion labels, so the per-occasion kappas \
-                     cannot be assigned to occasions. Refit so the rule is recorded, or \
-                     give the data the occasion column the model's `iov_column` names."
-                ));
-            }
-            rule
+/// The glue's own notes for a simulate / predict step's `simulation_warnings`:
+/// the occasion notes `derive_fit_occasions` and `derive_file_occasions` write
+/// (ferx-r #523). The field is private to this module, so outside it the only
+/// way to get one is from those two functions or `none()` - an arbitrary
+/// `Vec<String>`, such as `Population.warnings`, cannot become one. With
+/// `CoreDiag` that closes both arguments of `attach_sim_warnings` to the
+/// reader's raw list (ferx-r #426 / #432).
+mod occasion_notes {
+    use super::*;
+
+    pub(super) struct OccasionNotes(Vec<String>);
+
+    impl OccasionNotes {
+        /// No notes: a step that derives no occasions.
+        pub(super) fn none() -> Self {
+            OccasionNotes(Vec::new())
         }
-    };
-    apply_occasion_rule(population, &rule);
-    Ok(notes)
+
+        pub(super) fn as_slice(&self) -> &[String] {
+            &self.0
+        }
+
+        /// The notes as plain strings, for a step whose warnings do not go
+        /// through `attach_sim_warnings` (`ferx_rust_calc_npde`).
+        pub(super) fn into_vec(self) -> Vec<String> {
+            self.0
+        }
+    }
+
+    /// Give a population read for a from-fit predict / simulate / npde step the
+    /// occasion labels the fit derived (ferx-r #523 / #519), as core's
+    /// `resolve_fit_inputs` does for `run_sir` / `run_covariance` (#1783). The
+    /// readers take no rule: they fill `Subject::occasions` from `iov_column` only,
+    /// so under an `iov_occasion = dose | time(...)` rule every subject came back
+    /// unlabelled and the engine ran every occasion at kappa = 0 with no message -
+    /// a simulation without inter-occasion variability.
+    ///
+    /// The rule is the fit's (`fit$iov_occasion`, which carries one passed only
+    /// through `settings =`); a fit that records none (a `.fitrx` saved before
+    /// ferx-core #1783) takes the model file's, with core's note, and is refused
+    /// when that derives nothing and the population has no labels either. Returns
+    /// the notes for the step's warnings. Run after the level bind and, on the npde
+    /// path, after the fingerprint check, which is of the population as read.
+    pub(super) fn derive_fit_occasions(
+        entry_point: &str,
+        parsed: &ParsedModel,
+        population: &mut Population,
+        iov_occasion: &str,
+    ) -> std::result::Result<OccasionNotes, String> {
+        let recorded = iov_occasion_from_r(entry_point, iov_occasion)?;
+        if parsed.model.n_kappa == 0 {
+            return Ok(OccasionNotes(Vec::new()));
+        }
+        let mut notes = Vec::new();
+        let rule = match recorded {
+            Some(rule) => rule,
+            None => {
+                let rule = parsed.fit_options.iov_occasion.clone();
+                if rule != ferx_core::IovOccasionRule::Column {
+                    notes.push(format!(
+                        "{entry_point}: this fit records no IOV occasion rule (it was saved \
+                         before ferx recorded one), so the occasions were derived with the \
+                         model file's `iov_occasion = {}`. If the fit ran under another rule \
+                         (`ferx_fit(settings = list(iov_occasion = ...))`), these results are \
+                         wrong: refit so the rule is recorded.",
+                        iov_occasion_to_r(&rule)
+                    ));
+                } else if population.subjects.iter().all(|s| s.occasions.is_empty()) {
+                    return Err(format!(
+                        "{entry_point}: this fit records no IOV occasion rule (it was saved \
+                         before ferx recorded one), the model file sets no `iov_occasion` and \
+                         the data carries no occasion labels, so the per-occasion kappas \
+                         cannot be assigned to occasions. Refit so the rule is recorded, or \
+                         give the data the occasion column the model's `iov_column` names."
+                    ));
+                }
+                rule
+            }
+        };
+        apply_occasion_rule(population, &rule);
+        Ok(OccasionNotes(notes))
+    }
+
+    /// A design read without a fit: occasions from the model file's own
+    /// `iov_occasion` rule, as `fit()` would derive them (ferx-r #523). A no-op for
+    /// a model without kappa or under a `Column` rule. Returns core's override note
+    /// when the file also names an `iov_column`, whose labels the rule replaces, as
+    /// `fit()` warns (`apply_iov_occasion_rule`'s `had_column`).
+    pub(super) fn derive_file_occasions(parsed: &ParsedModel, population: &mut Population) -> OccasionNotes {
+        let rule = &parsed.fit_options.iov_occasion;
+        if parsed.model.n_kappa == 0 || *rule == ferx_core::IovOccasionRule::Column {
+            return OccasionNotes(Vec::new());
+        }
+        apply_occasion_rule(population, rule);
+        OccasionNotes(if parsed.fit_options.iov_column.is_some() {
+            vec!["iov_occasion is set in [fit_options], so the model-side occasion rule is used and \
+                  the iov_column dataset column is ignored."
+                .to_string()]
+        } else {
+            Vec::new()
+        })
+    }
 }
 
-/// A design read without a fit: occasions from the model file's own
-/// `iov_occasion` rule, as `fit()` would derive them (ferx-r #523). A no-op for
-/// a model without kappa or under a `Column` rule. Returns core's override note
-/// when the file also names an `iov_column`, whose labels the rule replaces, as
-/// `fit()` warns (`apply_iov_occasion_rule`'s `had_column`).
-fn derive_file_occasions(parsed: &ParsedModel, population: &mut Population) -> Vec<String> {
-    let rule = &parsed.fit_options.iov_occasion;
-    if parsed.model.n_kappa == 0 || *rule == ferx_core::IovOccasionRule::Column {
-        return Vec::new();
-    }
-    apply_occasion_rule(population, rule);
-    if parsed.fit_options.iov_column.is_some() {
-        vec!["iov_occasion is set in [fit_options], so the model-side occasion rule is used and \
-              the iov_column dataset column is ignored."
-            .to_string()]
-    } else {
-        Vec::new()
-    }
-}
+use occasion_notes::{derive_file_occasions, derive_fit_occasions, OccasionNotes};
 
 /// Core's `apply_iov_occasion_rule` (`api/validation.rs`), which is
 /// `pub(crate)`: each subject's occasion labels derived from a model-side rule,
