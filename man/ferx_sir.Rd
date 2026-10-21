@@ -26,7 +26,8 @@ distribution. Higher values give tighter weights at proportional cost.
 \item{sir_resamples}{Number of resampled vectors. Must be \verb{<= sir_samples}.
 \code{NULL} takes the fit's recorded value, else 250.}
 
-\item{sir_seed}{Integer RNG seed for reproducibility. \code{NULL} takes the
+\item{sir_seed}{Integer RNG seed for reproducibility, a whole number from 0
+to 2^53 (it need not fit an R integer). \code{NULL} takes the
 seed the fit's SIR recorded, else the engine's built-in seed (12345).}
 
 \item{sir_keep_samples}{When \code{TRUE}, retain the resampled packed

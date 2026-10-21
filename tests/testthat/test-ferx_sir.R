@@ -744,6 +744,41 @@ test_that("ferx_sir sets sir_seed_used to the seed of its own run", {
   expect_identical(ferx_sir(seeded, sir_seed = 7L)$sir_seed_used, 7)
 })
 
+# A count or seed beyond the integer range made `as.integer()` NA and stopped
+# in `if` with "missing value where TRUE/FALSE needed" (#536). The knobs are
+# checked before anything reads the fit, so a bare ferx_fit is enough.
+test_that("ferx_sir refuses out-of-range counts and seeds with its own message (#536)", {
+  bare <- structure(list(), class = "ferx_fit")
+  for (bad in list(3e9, Inf, -Inf, NaN, NA_real_, 0, 2.5, c(4, 5), "4")) {
+    expect_error(ferx_sir(bare, sir_samples = bad),
+                 "`sir_samples` must be NULL or a single positive integer",
+                 fixed = TRUE)
+    expect_error(ferx_sir(bare, sir_resamples = bad),
+                 "`sir_resamples` must be NULL or a single positive integer",
+                 fixed = TRUE)
+  }
+  for (bad in list(2^53 + 2, 1e20, Inf, -Inf, NaN, NA_real_, -1, 2.5, c(1, 2), "1")) {
+    expect_error(ferx_sir(bare, sir_seed = bad),
+                 "`sir_seed` must be NULL or a single non-negative integer",
+                 fixed = TRUE)
+  }
+  # In range, the knobs pass validation and the call stops later, for the
+  # fit's missing model path.
+  expect_error(ferx_sir(bare, sir_samples = .Machine$integer.max, sir_seed = 0),
+               "no recorded model_path", fixed = TRUE)
+  expect_error(ferx_sir(bare, sir_seed = 2^53), "no recorded model_path",
+               fixed = TRUE)
+})
+
+# The engine's seed is a u64: a seed beyond R's integer range runs, and is
+# the seed the run reports.
+test_that("ferx_sir runs with a seed beyond the integer range (#536)", {
+  fit <- warfarin_fit_cov()
+  skip_if(is.null(fit$cov_matrix), sir_cov_skip)
+  out <- ferx_sir(fit, sir_samples = 8L, sir_resamples = 4L, sir_seed = 3e9)
+  expect_identical(out$sir_seed_used, 3e9)
+})
+
 # --- #462: the fit's own data selection -----------------------------------
 
 test_that("ferx_sir on an `ignore =` fit reproduces the in-fit SIR (#462)", {
