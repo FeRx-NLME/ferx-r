@@ -29,26 +29,17 @@
 #'   hazard, cif, survival_all, median_survival, mean_survival (one row per
 #'   subject \eqn{\times} TTE CMT \eqn{\times} time).
 #'
-#'   When the run has an occasion note, the frame carries a
-#'   \code{simulation_warnings} attribute (a character vector), re-emitted as a
-#'   single R warning: a model-file \code{iov_occasion} rule that replaces the
-#'   \code{iov_column} labels, or, with \code{fit}, a fit that records no
-#'   occasion rule and so takes the model file's. Without one the frame
-#'   carries no such attribute.
-#'
-#' @section Warnings not relayed yet:
-#' Unlike \code{\link{ferx_predict}()}, this function does not yet report the
-#' engine's own findings for the run: parse warnings (an unreferenced theta,
-#' say), data-reader findings (a covariate missing for some subjects, a dose
-#' that never lands), the model/data checks, and the ODE solver diagnostics of
-#' a joint PK-TTE hazard. The occasion note above is the only thing
-#' \code{simulation_warnings} can carry, so a frame without that attribute
-#' does not mean the model and data are clean: \code{\link{ferx_fit}()} on the
-#' same model and data reports the parse, data-reader and model/data findings.
-#' The solver diagnostics belong to the pass that ran: a fit reports its own,
-#' and nothing yet reports this prediction's. The engine has no
-#' warnings-carrying form of its survival predictor yet (ferx-core #2164);
-#' once it does, these findings come back on the same attribute (\href{https://github.com/FeRx-NLME/ferx-r/issues/433}{#433}).
+#'   The frame carries a \code{simulation_warnings} attribute (a character
+#'   vector, empty for a clean run), re-emitted as a single R warning when
+#'   non-empty, as \code{\link{ferx_predict}()} does: the engine's parse
+#'   warnings (an unreferenced theta, say), its data-reader findings (a
+#'   covariate missing for some subjects, a dose that never lands; those a
+#'   compartment-free TTE model makes moot are withheld), the model/data
+#'   checks, and the ODE solver diagnostics of this pass for a joint PK-TTE
+#'   hazard. Ahead of them comes any occasion note: a model-file
+#'   \code{iov_occasion} rule that replaces the \code{iov_column} labels, or,
+#'   with \code{fit}, a fit that records no occasion rule and so takes the
+#'   model file's.
 #'
 #' @inheritSection ferx_simulate Errors raised by the engine
 #' @inheritSection ferx_simulate Theta level blocks

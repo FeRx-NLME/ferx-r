@@ -109,20 +109,30 @@ test_that("S1: on a default fit ferx_covariance(fit) is identical() to the in-fi
   # The original 1e-7 case (#511): warfarin_iov SE(TVKA) 0.76168056 vs
   # 0.76168066 was the packed estimate, not the settings (plan section 0a).
   fit <- ps_fit("iov_default", "warfarin_iov")
-  # Premise on the finite-difference route. Since ferx-core #2093 the default
-  # fit's covariance step is the exact R-matrix, which does not read the packed
-  # estimate at all: perturbing it by 1e-4 moves nothing, while perturbing theta
-  # by 1e-4 does (5.2e-3). On the stencil, dropping it moved the covariance by
-  # 6e-4 relative; on gradient = "fd" it still does (measured 2.8e-5).
+  # On the finite-difference route the step reads the packed estimate; see S1b.
   fd <- ps_fit("iov_fd", "warfarin_iov", gradient = "fd")
-  no_packed <- fd
-  no_packed$packed_estimate <- NULL
-  expect_false(identical(ferx_covariance(no_packed)$cov_matrix, fd$cov_matrix))
   expect_identical(ferx_covariance(fd)$cov_matrix, fd$cov_matrix)
 
   cov <- ferx_covariance(fit)
   expect_identical(cov$cov_matrix, fit$cov_matrix)
   expect_identical(cov$se_theta, fit$se_theta)
+})
+
+test_that("S1b: on gradient = \"fd\" the packed estimate is what makes S1 identical()", {
+  # Premise for S1's finite-difference half. Since ferx-core #2093 the default
+  # fit's covariance step is the exact R-matrix, which does not read the packed
+  # estimate at all. The FD route does: without the vector, core re-packs the
+  # reported estimates, and the FD Hessian amplifies the last-bit difference of
+  # that repack (2.8e-5 to 5.8e-5 relative on macOS arm64). Whether the repack
+  # differs at all is round-off, so at some optima on some platforms it comes
+  # back bit-equal (ubuntu at ferx-core 497a7a9) and the premise cannot be shown
+  # there.
+  fd <- ps_fit("iov_fd", "warfarin_iov", gradient = "fd")
+  no_packed <- fd
+  no_packed$packed_estimate <- NULL
+  moved <- !identical(ferx_covariance(no_packed)$cov_matrix, fd$cov_matrix)
+  skip_if(!moved, "the repack of the reported estimates is bit-equal here")
+  expect_true(moved)
 })
 
 # Fits made without SIR, so `run_covariance`'s fallback to the SIR record's
