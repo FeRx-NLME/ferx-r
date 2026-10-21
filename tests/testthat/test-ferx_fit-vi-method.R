@@ -19,22 +19,37 @@ test_that("ferx_fit(method = \"vi\") runs on warfarin", {
   expect_true(all(is.finite(fit$theta)))
 })
 
-test_that("an explicit method = \"vi\" keeps the inherited interaction flag", {
+test_that("an explicit method = \"vi\" gets the interaction flag a model-file vi does", {
   # VI has no R-side history (R refused it until #506), so it follows the
-  # model file's rule - interaction inherited - not the legacy R one, which
-  # turns it off for any final stage but FOCEI. warfarin's `method = foce`
-  # line would itself clear the flag, so it is dropped here.
+  # model file's rule, not the legacy R one (off for any final stage but
+  # FOCEI) - and it overrides the file's own method line: warfarin's
+  # `method = foce` clears the flag, which must not carry over to VI.
   ex <- ferx_example("warfarin")
-  src <- readLines(ex$model)
-  src <- src[!grepl("^\\s*method\\s*=", src)]
-  model <- tempfile(fileext = ".ferx")
-  on.exit(unlink(model), add = TRUE)
-  writeLines(src, model)
   fit <- suppressWarnings(ferx_fit(
-    model, ex$data, method = "vi", covariance = FALSE, verbose = FALSE,
+    ex$model, ex$data, method = "vi", covariance = FALSE, verbose = FALSE,
     settings = vi_settings()
   ))
   expect_true(fit$interaction)
+})
+
+test_that("a method alias in the call does not warn as overriding the same method", {
+  warn_conflicts <- getFromNamespace(".ferx_warn_fit_option_conflicts", "ferx")
+  file_opts <- list(method = "[focei, imp]")
+  expect_no_warning(warn_conflicts(
+    file_opts, list(method = "focei, importance_sampling"), list()
+  ))
+  expect_no_warning(warn_conflicts(
+    list(method = "laplace"), list(method = "laplacian"), list()
+  ))
+  expect_warning(
+    warn_conflicts(file_opts, list(method = "vi"), list()),
+    "overrides it with `vi`"
+  )
+  # A model-file value the engine does not read still compares as text.
+  expect_warning(
+    warn_conflicts(list(method = "nonsense"), list(method = "vi"), list()),
+    "sets `method = nonsense`"
+  )
 })
 
 test_that("c(\"vi\", \"laplace\") with agq_eval_only = TRUE scores the VI estimate", {

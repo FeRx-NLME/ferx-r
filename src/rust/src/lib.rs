@@ -634,14 +634,21 @@ fn ferx_rust_fit(
             // `interaction = TRUE`. Switching to the file's rule would change the
             // objective an R `method = "saem"` / `"gn"` fit runs under. A chain
             // with a `vi` stage has no such history - R refused "vi" until #506 -
-            // so it keeps the file's rule, and an explicit `method = "vi"` scores
-            // (`vi_final_ofv`, covariance step) as a model-file one does.
+            // so it takes the flag a model file whose method line is this value
+            // would give: applied to fresh options, not on top of the file's own
+            // method line (a `method = foce` there has already cleared it). An
+            // explicit `method = "vi"` then scores (`vi_final_ofv`, covariance
+            // step) as a model-file one does.
             let chain = if opts.methods.is_empty() {
                 vec![opts.method]
             } else {
                 opts.methods.clone()
             };
-            if !chain.contains(&EstimationMethod::Vi) {
+            if chain.contains(&EstimationMethod::Vi) {
+                let mut fresh = FitOptions::default();
+                apply_method_option(&mut fresh, &value).map_err(argument_refusal)?;
+                opts.interaction = fresh.interaction;
+            } else {
                 let last_estimator = chain
                     .iter()
                     .rev()

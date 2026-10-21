@@ -2876,6 +2876,16 @@ ferx_fit <- function(model, data = NULL,
   ferx_rust_method_tokens(as.character(method))
 }
 
+# Internal: the method kinds of a `method` value written as one string - a
+# single token or a chain, bracketed (`[focei, imp]`, the model-file form) or
+# not (`focei, imp`). NULL when a token is not one the engine reads.
+.ferx_method_chain_kinds <- function(value) {
+  tokens <- trimws(strsplit(gsub("^\\s*\\[|\\]\\s*$", "", value), ",")[[1L]])
+  tokens <- tokens[nzchar(tokens)]
+  if (length(tokens) == 0L) return(NULL)
+  tryCatch(.ferx_method_kinds(tokens), error = function(e) NULL)
+}
+
 # Internal: rebuild the IMPMAP per-iteration parameter trace from the flat
 # representation the Rust side returns (flat values + n_rows/n_cols/col_names)
 # into a data.frame with one row per Monte-Carlo EM iteration.
@@ -3840,6 +3850,13 @@ print.ferx_summary <- function(x, ...) {
     if (identical(key, "threads")) {
       model_cmp <- sub("^auto$", "0", model_cmp)
       call_cmp  <- sub("^auto$", "0", call_cmp)
+    }
+    # Method spellings compare by the method each names, as the engine reads
+    # them (#506): `laplacian` in the call does not override a file's
+    # `laplace`, nor `[focei, importance_sampling]` its `[focei, imp]`.
+    if (identical(key, "method")) {
+      model_cmp <- .ferx_method_chain_kinds(model_cmp) %||% model_cmp
+      call_cmp  <- .ferx_method_chain_kinds(call_cmp) %||% call_cmp
     }
     if (!identical(model_cmp, call_cmp)) {
       warning(
