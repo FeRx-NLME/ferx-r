@@ -47,6 +47,16 @@
 #' fit that records none. A setting the record lacks (one written before the
 #' engine recorded it) is filled with the value that engine ran under.
 #'
+#' An \code{iov_occasion} this ferx does not recognise (not
+#' \code{"column"}, \code{"per_dose"} or \code{{"time_windows": [...]}}) -
+#' a newer ferx-core's variant, or a hand-edited key - is not loaded either:
+#' \code{fit$iov_occasion} is \code{NULL}, one warning of class
+#' \code{ferx_iov_occasion_dropped_warning} carries the wire value
+#' (\code{value}), and the rest of the bundle loads.
+#' \code{\link{ferx_covariance}} and \code{\link{ferx_sir}} then derive
+#' occasions from the model file's rule, as for a bundle saved before
+#' ferx-core #1783.
+#'
 #' @param path Path to a \code{.fitrx} file. If the given path does not exist
 #'   and has no extension, a \code{.fitrx} extension is tried, mirroring
 #'   \code{\link{ferx_save_fit}}'s default (so a fit saved to
