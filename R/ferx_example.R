@@ -206,16 +206,17 @@
 #'   \item{one_cpt_transit_iov}{Analytic Savic transit-compartment absorption
 #'     (\code{pk one_cpt_transit}) carrying \emph{inter-occasion variability}
 #'     (IOV) on clearance -- a \code{kappa KAPPA_CL} random effect with
-#'     \code{iov_column = OCC} (ferx-core #719). The analytic absorption closed
-#'     forms previously rejected IOV; a subject with IOV is now transparently
-#'     rerouted, per subject, to the model's exact \code{transit()} ODE twin,
-#'     which integrates the cross-occasion dose carryover the closed-form
-#'     superposition cannot express -- so no switch to a hand-written ODE model
-#'     is needed. Paired with an 8-subject subset of the ferx-core transit+IOV
+#'     \code{iov_column = OCC}. The analytic absorption closed forms
+#'     originally rejected IOV; ferx-core #719 rerouted an IOV subject to the
+#'     model's exact \code{transit()} ODE twin, and since ferx-core #1560 it
+#'     stays analytic, on an exact event-driven walk that carries each dose's
+#'     drug across the occasion boundary with closed-form predictions and
+#'     FOCE/FOCEI gradients -- so no switch to a hand-written ODE model is
+#'     needed. Paired with an 8-subject subset of the ferx-core transit+IOV
 #'     NONMEM anchor dataset (three doses per subject, 48 h apart, near-complete
-#'     washout) simulated from the model, so the fit recovers the data-generating
-#'     parameters; the subset is kept small because each IOV subject integrates an
-#'     ODE twin, so a larger dataset is markedly slower.}
+#'     washout) simulated from the model, so the fit recovers the
+#'     data-generating parameters; the fit, standard errors included, takes
+#'     well under a second.}
 #'   \item{one_cpt_ig}{One-compartment oral model with inverse-Gaussian
 #'     (Freijer & Post) absorption as an \emph{analytic} closed form -- \code{pk
 #'     one_cpt_ig(cl, v, mat, cv2)} (ferx-core #790). The exponential-tilting
