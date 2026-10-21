@@ -1369,6 +1369,52 @@ test_that("SIR CI rows fall back to THETA<i> / OMEGA(i,i) / SIGMA(i) (#482)", {
   expect_identical(rownames(ci$sir_ci_sigma), "SIGMA(1)")
   expect_identical(colnames(ci$sir_ci_sigma), c("lower", "upper"))
 })
+test_that("SIR CI rows fall back per element on an empty or NA name (#557)", {
+  ci <- ferx:::.ferx_sir_ci_matrices(
+    c(1, 2, 3, 4), c(1, 2, 3, 4), c(1, 2, 3, 4),
+    theta_names = c("TVCL", NA), eta_names = c("ETA_CL", ""),
+    sigma_names = c(NA, "EPS_ADD")
+  )
+  expect_identical(rownames(ci$sir_ci_theta), c("TVCL", "THETA2"))
+  expect_identical(rownames(ci$sir_ci_omega), c("ETA_CL", "OMEGA(2,2)"))
+  expect_identical(rownames(ci$sir_ci_sigma), c("SIGMA(1)", "EPS_ADD"))
+  # The kappa intervals and the kappa print labels apply the same rule.
+  expect_identical(
+    rownames(ferx:::.ferx_sir_ci_kappa(c(1, 2, 3, 4), c("", "KAPPA_V"))),
+    c("KAPPA1", "KAPPA_V")
+  )
+  expect_identical(ferx:::.ferx_kappa_labels(c("", "KAPPA_V"), 2L),
+                   c("KAPPA1", "KAPPA_V"))
+})
+test_that("a malformed SIR CI vector is refused, not dropped or shifted (#557)", {
+  # Odd length on the live (FFI) path: no row structure.
+  expect_error(
+    ferx:::.ferx_sir_ci_matrices(c(1, 2, 3), NULL, NULL, NULL, NULL, NULL),
+    "`sir_ci_theta` is not a \\[lower, upper\\] number pair per row \\(got 3 values\\)"
+  )
+  expect_error(ferx:::.ferx_sir_ci_kappa(c(1, 2, 3), "KAPPA_CL"), "`sir_ci_kappa`")
+  # A pair list from a bundle: a `null` cell, a one-cell pair, a text cell.
+  bad <- list(
+    list(list(1, NULL), list(3, 4)),
+    list(list(1), list(3, 4)),
+    list(list(1, "x"), list(3, 4)),
+    list(1, 2, 3, 4)
+  )
+  for (b in bad) {
+    expect_error(
+      ferx:::.ferx_sir_ci_matrices(NULL, b, NULL, NULL, c("A", "B"), NULL, bundle = TRUE),
+      "fit.json: `sir.ci_omega` is not a list of \\[lower, upper\\] number pairs; the bundle is corrupt",
+      info = deparse(b)
+    )
+  }
+  expect_error(ferx:::.ferx_sir_ci_kappa(bad[[1L]], c("A", "B"), bundle = TRUE),
+               "`sir.ci_kappa`.*the bundle is corrupt")
+  # A well-formed pair list still loads, in row order.
+  ok <- ferx:::.ferx_sir_ci_matrices(NULL, list(list(1, 2), list(3, 4)), NULL,
+                                      NULL, c("A", "B"), NULL, bundle = TRUE)
+  expect_identical(ok$sir_ci_omega,
+                   matrix(c(1, 3, 2, 4), 2L, dimnames = list(c("A", "B"), c("lower", "upper"))))
+})
 test_that(".fitrx_subject_string_ids extracts character IDs or NULL", {
   expect_null(ferx:::.fitrx_subject_string_ids(list()))
   expect_null(ferx:::.fitrx_subject_string_ids(list(ebe_etas = data.frame(x = 1))))
