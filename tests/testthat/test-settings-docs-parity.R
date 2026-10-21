@@ -126,8 +126,8 @@ test_that("optimizer_trace / scale_params: an explicit argument wins over settin
                   optimizer_trace = FALSE, scale_params = FALSE,
                   settings = list(optimizer_trace = TRUE, scale_params = TRUE),
                   covariance = FALSE, verbose = FALSE))
-  expect_null(fit$call_settings$optimizer_trace)
-  expect_null(fit$call_settings$scale_params)
+  expect_false(fit$call_settings$optimizer_trace)
+  expect_false(fit$call_settings$scale_params)
   expect_null(fit$trace_path)
 
   # Left at its default, the argument does not shadow a settings value.
@@ -135,4 +135,46 @@ test_that("optimizer_trace / scale_params: an explicit argument wins over settin
                   settings = list(scale_params = TRUE),
                   covariance = FALSE, verbose = FALSE))
   expect_true(fit$call_settings$scale_params)
+})
+
+test_that("an explicit FALSE overrides the model file's [fit_options] (#509)", {
+  # optimizer_trace, scale_params and inits_from_nca, which ferx_fit() merges
+  # into the settings it sends.
+  ex <- ferx_example("warfarin")
+  lines <- readLines(ex$model)
+  at <- grep("^\\[fit_options\\]", lines)
+  expect_length(at, 1L)
+  model <- tempfile(fileext = ".ferx")
+  on.exit(unlink(model), add = TRUE)
+  # `parameter_scaling = none`, since the default `auto` supersedes
+  # scale_params and would hide whether it reached the engine.
+  scaled <- c("  parameter_scaling = none", "  optimizer_trace = true", "  scale_params = true",
+              "  inits_from_nca = nca_sweep")
+  writeLines(append(lines, scaled, after = at), model)
+  plain <- tempfile(fileext = ".ferx")
+  on.exit(unlink(plain), add = TRUE)
+  writeLines(append(lines, scaled[1L], after = at), plain)
+  run <- function(...) {
+    suppressWarnings(ferx_fit(model, ex$data, covariance = FALSE, verbose = FALSE, ...))
+  }
+
+  # Left at their defaults, the arguments leave the model file's values on.
+  on_fit <- run()
+  expect_false(is.null(on_fit$trace_path))
+
+  # Explicit FALSE turns both off, also when settings repeats the file's value:
+  # no trace, and the fit of the model without either key.
+  baseline <- suppressWarnings(ferx_fit(plain, ex$data, covariance = FALSE, verbose = FALSE))
+  for (settings in list(NULL, list(optimizer_trace = TRUE, scale_params = TRUE,
+                                   inits_from_nca = TRUE))) {
+    off_fit <- run(optimizer_trace = FALSE, scale_params = FALSE, inits_from_nca = FALSE,
+                   settings = settings)
+    expect_false(off_fit$call_settings$inits_from_nca)
+    expect_null(off_fit$trace_path)
+    expect_identical(off_fit$theta, baseline$theta)
+    expect_identical(off_fit$ofv, baseline$ofv)
+  }
+  # The file's keys do change this fit, so the identity above shows the
+  # arguments reached the engine.
+  expect_false(identical(on_fit$theta, baseline$theta))
 })

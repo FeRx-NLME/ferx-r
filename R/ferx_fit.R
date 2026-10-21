@@ -2498,25 +2498,18 @@ ferx_fit <- function(model, data = NULL,
   if (!is.logical(scale_params) || length(scale_params) != 1L || is.na(scale_params)) {
     stop("`scale_params` must be TRUE or FALSE")
   }
-  # Merge optimizer_trace into settings so apply_fit_option handles it on the
-  # Rust side (it's already in framework_keys()). As for inits_from_nca below,
-  # an explicitly passed argument wins - including FALSE - and strips any
-  # `settings` duplicate, which would otherwise fail as a duplicated name
-  # (#509); left at its default, a `settings` value goes through.
-  if ("optimizer_trace" %in% names(match.call())[-1L]) {
-    settings[["optimizer_trace"]] <- NULL
-  }
-  if (isTRUE(optimizer_trace)) {
-    settings <- c(list(optimizer_trace = TRUE), settings)
-  }
-  # Only inject scale_params when TRUE - the Rust default is FALSE (off, since
-  # ferx-core issue #99), so omitting it preserves the behaviour callers expect
-  # when they don't pass the argument. Same precedence as optimizer_trace.
-  if ("scale_params" %in% names(match.call())[-1L]) {
-    settings[["scale_params"]] <- NULL
-  }
-  if (isTRUE(scale_params)) {
-    settings <- c(list(scale_params = TRUE), settings)
+  # Merge optimizer_trace / scale_params into settings so apply_fit_option
+  # handles them on the Rust side (both are in framework_keys()). As for
+  # inits_from_nca below, an explicitly passed argument wins: its value is sent
+  # - FALSE included, so it also overrides a model file's `[fit_options]
+  # optimizer_trace = true` - and any `settings` duplicate is dropped, which
+  # would otherwise fail as a duplicated name (#509). Left at its default, the
+  # argument sends nothing, so a `settings` or model-file value goes through
+  # (the Rust default is FALSE for both; scale_params since ferx-core #99).
+  explicit_flags <- intersect(c("optimizer_trace", "scale_params"), names(match.call())[-1L])
+  for (flag in explicit_flags) {
+    settings[[flag]] <- NULL
+    settings <- c(stats::setNames(list(get(flag)), flag), settings)
   }
   # inits_from_nca: TRUE/FALSE or one of "nca", "nca_sweep", "nca_ebe". TRUE is
   # an alias for "nca_sweep"; FALSE disables (the default). Merged into settings
@@ -2537,9 +2530,11 @@ ferx_fit <- function(model, data = NULL,
     stop("`inits_from_nca` must be TRUE/FALSE or one of \"nca\", \"nca_sweep\", \"nca_ebe\"")
   }
   if (inits_from_nca_explicit) {
+    # An explicit FALSE is sent too, so it overrides a model file's
+    # `[fit_options] inits_from_nca` rather than leaving it in force (#509).
     settings[["inits_from_nca"]] <- NULL
-  }
-  if (!is.null(inits_value)) {
+    settings <- c(list(inits_from_nca = inits_value %||% FALSE), settings)
+  } else if (!is.null(inits_value)) {
     settings <- c(list(inits_from_nca = inits_value), settings)
   }
   # fd_hessian_step: dedicated arg wins over any `settings` duplicate.
