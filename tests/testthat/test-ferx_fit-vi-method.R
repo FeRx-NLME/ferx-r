@@ -30,6 +30,20 @@ test_that("an explicit method = \"vi\" gets the interaction flag a model-file vi
     settings = vi_settings()
   ))
   expect_true(fit$interaction)
+
+  # So does a VI fit finished by an evaluate-only readout ...
+  fit <- suppressWarnings(ferx_fit(
+    ex$model, ex$data, method = c("vi", "laplace"), covariance = FALSE,
+    verbose = FALSE, settings = vi_settings(agq_eval_only = TRUE, n_agq = 3L)
+  ))
+  expect_true(fit$interaction)
+  # ... but not a VI warm start for another estimator, which keeps the R
+  # rule that estimator has without it (off for a final GN).
+  fit <- suppressWarnings(ferx_fit(
+    ex$model, ex$data, method = c("vi", "gn"), covariance = FALSE,
+    verbose = FALSE, settings = vi_settings()
+  ))
+  expect_false(fit$interaction)
 })
 
 test_that("a method alias in the call does not warn as overriding the same method", {

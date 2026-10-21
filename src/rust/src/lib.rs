@@ -632,19 +632,34 @@ fn ferx_rust_fit(
             // foce/focei): it follows the chain's last *estimating* stage, on
             // only for FOCEI. IMP is skipped so `c("focei", "imp")` still reports
             // `interaction = TRUE`. Switching to the file's rule would change the
-            // objective an R `method = "saem"` / `"gn"` fit runs under. A chain
-            // with a `vi` stage has no such history - R refused "vi" until #506 -
-            // so it takes the flag a model file whose method line is this value
-            // would give: applied to fresh options, not on top of the file's own
-            // method line (a `method = foce` there has already cleared it). An
+            // objective an R `method = "saem"` / `"gn"` fit runs under. A fit
+            // whose estimates VI owns has no such history - R refused "vi" until
+            // #506 - so it takes the flag a model file whose method line is this
+            // value would give: applied to fresh options, not on top of the file's
+            // own method line (a `method = foce` there has already cleared it). An
             // explicit `method = "vi"` then scores (`vi_final_ofv`, covariance
-            // step) as a model-file one does.
+            // step) as a model-file one does. VI owns the estimates when it is the
+            // last stage that estimates - the last, or followed only by
+            // evaluate-only readouts (ferx-core's `is_last_estimating_stage`, which
+            // is not public); a VI warm start for `gn` or `saem` keeps the R rule.
             let chain = if opts.methods.is_empty() {
                 vec![opts.method]
             } else {
                 opts.methods.clone()
             };
-            if chain.contains(&EstimationMethod::Vi) {
+            let eval_only: Vec<EstimationMethod> = [
+                (opts.imp_eval_only, EstimationMethod::Imp),
+                (opts.agq_eval_only, EstimationMethod::Laplace),
+            ]
+            .into_iter()
+            .filter_map(|(on, m)| on.then_some(m))
+            .collect();
+            let vi_owns_estimates = chain
+                .iter()
+                .rev()
+                .find(|m| !eval_only.contains(m))
+                .is_some_and(|m| *m == EstimationMethod::Vi);
+            if vi_owns_estimates {
                 let mut fresh = FitOptions::default();
                 apply_method_option(&mut fresh, &value).map_err(argument_refusal)?;
                 opts.interaction = fresh.interaction;
