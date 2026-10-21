@@ -543,6 +543,7 @@ fn ferx_rust_fit(
             "bloq_method",
             "bloq",
             "threads",
+            "mu_referencing",
             "sir",
             "gradient",
             "gradient_method",
@@ -5467,6 +5468,73 @@ fn ferx_rust_known_blocks() -> Vec<String> {
             .into_iter()
             .map(String::from)
             .collect())
+    })
+}
+
+/// Every estimation method, for `ferx_rust_fit_option_keys()`.
+const FIT_OPTION_METHODS: [EstimationMethod; 10] = [
+    EstimationMethod::Foce,
+    EstimationMethod::FoceI,
+    EstimationMethod::FoceGn,
+    EstimationMethod::FoceGnHybrid,
+    EstimationMethod::Saem,
+    EstimationMethod::Imp,
+    EstimationMethod::Impmap,
+    EstimationMethod::Bayes,
+    EstimationMethod::Laplace,
+    EstimationMethod::Vi,
+];
+
+/// Exhaustive on purpose: a method the engine adds fails to compile here
+/// until it is listed in `FIT_OPTION_METHODS`, so its keys cannot be left out.
+#[allow(dead_code)]
+fn fit_option_method_listed(m: EstimationMethod) {
+    match m {
+        EstimationMethod::Foce
+        | EstimationMethod::FoceI
+        | EstimationMethod::FoceGn
+        | EstimationMethod::FoceGnHybrid
+        | EstimationMethod::Saem
+        | EstimationMethod::Imp
+        | EstimationMethod::Impmap
+        | EstimationMethod::Bayes
+        | EstimationMethod::Laplace
+        | EstimationMethod::Vi => {}
+    }
+}
+
+/// The `[data_selection]` keys. The engine has no public list of these; they
+/// mirror the exemption in ferx-core's `apply_fit_option` arm guard.
+const FIT_OPTION_DATA_SELECTION_KEYS: [&str; 3] = ["ignore", "accept", "ignore_subjects"];
+
+/// Every `settings` key the engine's `apply_fit_option` accepts.
+///
+/// The union of `framework_keys()`, every method's `method_specific_keys()`
+/// and the three `[data_selection]` keys. ferx-core's own guard pins every
+/// `apply_fit_option` arm to one of those lists, with the data-selection keys
+/// as its one exemption, so the union is the full accepted set. The R tests
+/// compare it with the `settings` entry of `?ferx_fit` (ferx-r #509): a key
+/// added to the engine without R docs then fails CI instead of going quietly
+/// undocumented.
+///
+/// @return Character vector of keys, sorted and de-duplicated.
+/// @export
+#[extendr]
+fn ferx_rust_fit_option_keys() -> Vec<String> {
+    entry(move || {
+        let mut keys: Vec<String> = ferx_core::framework_keys()
+            .iter()
+            .chain(
+                FIT_OPTION_METHODS
+                    .iter()
+                    .flat_map(|m| ferx_core::method_specific_keys(*m)),
+            )
+            .chain(FIT_OPTION_DATA_SELECTION_KEYS.iter())
+            .map(|k| k.to_string())
+            .collect();
+        keys.sort();
+        keys.dedup();
+        Ok(keys)
     })
 }
 
@@ -12817,6 +12885,7 @@ extendr_module! {
     fn ferx_rust_test_panic;
     fn ferx_rust_test_fit_outcome;
     fn ferx_rust_known_blocks;
+    fn ferx_rust_fit_option_keys;
     fn ferx_rust_known_eta_param_types;
     fn ferx_rust_known_covariance_statuses;
     fn ferx_rust_cov_labels;
