@@ -12,7 +12,8 @@ ferx_sir(
   sir_keep_samples = NULL,
   verbose = FALSE,
   sir_scale = NULL,
-  sir_df = NULL
+  sir_df = NULL,
+  threads = NULL
 )
 }
 \arguments{
@@ -26,7 +27,8 @@ distribution. Higher values give tighter weights at proportional cost.
 \item{sir_resamples}{Number of resampled vectors. Must be \verb{<= sir_samples}.
 \code{NULL} takes the fit's recorded value, else 250.}
 
-\item{sir_seed}{Integer RNG seed for reproducibility. \code{NULL} takes the
+\item{sir_seed}{Integer RNG seed for reproducibility, a whole number from 0
+to 2^53 (it need not fit an R integer). \code{NULL} takes the
 seed the fit's SIR recorded, else the engine's built-in seed (12345).}
 
 \item{sir_keep_samples}{When \code{TRUE}, retain the resampled packed
@@ -56,6 +58,12 @@ value.}
 (\code{Inf} is a multivariate-normal proposal). The same option is
 \code{settings = list(sir_df = ...)} in \code{\link[=ferx_fit]{ferx_fit()}}. \code{NULL} (the default)
 takes the fit's recorded value, else 5.}
+
+\item{threads}{Worker threads the step runs on. \code{NULL} (the default)
+takes the width the fit ran on, \code{fit$n_threads_used}; \code{0} asks for the
+engine default; a positive integer pins the width. It does not change
+the result, only the resources the step uses. The returned fit's
+\code{n_threads_used} reports the width this step ran on.}
 }
 \value{
 The input \code{fit}, augmented with \code{sir_ess}, \code{sir_ci_theta},
@@ -63,8 +71,8 @@ The input \code{fit}, augmented with \code{sir_ess}, \code{sir_ci_theta},
 variance, named by \code{kappa_names}; NULL without IOV), \code{sir_seed_used}
 (the seed this run resampled with: \code{sir_seed}, or 12345 when it is
 \code{NULL}), \code{sir_settings} (the settings this run used; see \code{\link[=ferx_fit]{ferx_fit()}}),
-and (when the run kept them) \code{sir_resamples} / \code{sir_resamples_n} /
-\code{sir_resamples_dim}.
+\code{n_threads_used} (the width this run ran on), and (when the run kept
+them) \code{sir_resamples} / \code{sir_resamples_n} / \code{sir_resamples_dim}.
 Any warnings the SIR step emitted are appended to \code{fit$warnings} and to
 \code{fit$warnings_structured} under the \code{sir} category - in particular the
 proposal diagnostics: a covariance that is rank-deficient beyond its

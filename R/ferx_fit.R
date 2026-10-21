@@ -226,14 +226,25 @@
 #'   dedicated \code{ferx_fit()} argument. Keys are validated: values that
 #'   duplicate a dedicated argument (\code{method}, \code{covariance},
 #'   \code{verbose}, \code{bloq_method}, \code{bloq}, \code{threads},
-#'   \code{sir}, \code{gradient}, \code{gradient_method}) are
-#'   rejected -- pass them via the dedicated argument. Unknown keys and
-#'   malformed values also raise an error.
+#'   \code{mu_referencing}, \code{sir}, \code{gradient},
+#'   \code{gradient_method}) are rejected -- pass them via the dedicated
+#'   argument. Unknown keys and malformed values also raise an error.
 #'
-#'   Every key the engine accepts is listed below, with two deliberate
+#'   Four keys are accepted both here and as a dedicated argument:
+#'   \code{optimizer_trace}, \code{scale_params}, \code{inits_from_nca} and
+#'   \code{fd_hessian_step}. When the dedicated argument is passed it wins,
+#'   and the \code{settings} entry is dropped; otherwise the \code{settings}
+#'   value is used. The data-selection keys \code{ignore}, \code{accept} and
+#'   \code{ignore_subjects} are what the \code{ignore}, \code{accept} and
+#'   \code{ignore_ids} arguments send to the engine; pass those arguments,
+#'   which take a vector of conditions.
+#'
+#'   Every other key the engine accepts is listed below, with two deliberate
 #'   exceptions: \code{frem_predictions} and \code{frem_sigma} are structural
 #'   maps written into the generated model file by
 #'   \code{\link{ferx_model_to_frem}} and cannot sensibly be hand-authored.
+#'   A test compares this list with the engine's own, so a key the engine
+#'   gains without documentation here fails the package's checks.
 #'
 #'   \strong{Precedence}: dedicated \code{ferx_fit()} arguments win over
 #'   \code{settings}, which in turn win over the model file's
@@ -311,8 +322,8 @@
 #'       trajectory -- harmless for the derivative-free default, but it can derail
 #'       a gradient-based outer optimizer into a worse basin. Validate OFV and
 #'       estimates on your own model before enabling.}
-#'     \item{\code{checkpoint}}{(default \code{TRUE}) and
-#'       \code{checkpoint_interval_secs} (default 300). Periodically save a
+#'     \item{\code{checkpoint}, \code{checkpoint_interval_secs}}{(default
+#'       \code{TRUE} and 300 seconds). Periodically save a
 #'       resume point so an interrupted run restarts from where it stopped.
 #'       Restart is coarse: the population estimates at the last save become the
 #'       new starting point, so a resumed run may need a few extra iterations to
@@ -330,9 +341,25 @@
 #'     \item{\code{npde_nsim}}{(default 0, i.e. disabled) Monte-Carlo replicates
 #'       per subject for the simulation-based NPDE/NPD diagnostics computed after
 #'       the fit; with 0 no NPDE/NPD columns are produced. A typical value is
-#'       1000, and cost scales linearly. \code{npde_seed} makes the simulation
-#'       reproducible. See also \code{\link{ferx_calc_npde}} to add them
-#'       post hoc.}
+#'       1000, and cost scales linearly. See also \code{\link{ferx_calc_npde}}
+#'       to add them post hoc.}
+#'     \item{\code{npde_seed}}{RNG seed for the NPDE/NPD simulation. Unset, a
+#'       built-in default is used, so the diagnostic is reproducible either way;
+#'       the seed actually used is reported on the fit.}
+#'     \item{\code{max_unconverged_frac}}{(default \code{0.1}) Fraction of
+#'       subjects whose inner EBE solve may fail to converge before the outer
+#'       optimizer rejects the parameter step it is trying (the objective is
+#'       returned as infinite there). \code{1} disables the guard.}
+#'     \item{\code{min_obs_for_convergence_check}}{(default \code{2}) A subject
+#'       with fewer observations than this is left out of the
+#'       \code{max_unconverged_frac} count. It is still fitted normally.}
+#'     \item{\code{report_final_gradient}}{(default \code{TRUE}) After a
+#'       derivative-free outer optimizer (BOBYQA) finishes, compute a
+#'       finite-difference gradient at the estimates, so that
+#'       \code{converged = TRUE} can be checked against it. Reporting only: it
+#'       never steers the fit. It costs \code{2 x} the number of free parameters
+#'       in objective evaluations; set \code{FALSE} to skip it on a model whose
+#'       every evaluation is slow.}
 #'     \item{\code{inner_tol}}{Gradient-norm convergence tolerance for the inner
 #'       (per-subject EBE) loop (default \code{1e-5}). A looser tolerance leaves
 #'       residual noise in each subject's EBE solution, which propagates into the
@@ -374,7 +401,7 @@
 #'       \code{"s"} (score cross-product), or \code{"rsr"} (the Huber-White
 #'       sandwich, robust to model misspecification). \code{"s"} and \code{"rsr"} are
 #'       supported for FOCEI, FOCE and IOV fits alike, all three anchored against
-#'       NONMEM \code{$COV MATRIX=S}/\code{RSR} within ~10\%. Note ferx defaults
+#'       NONMEM \code{$COV MATRIX=S}/\code{RSR} within about 10 percent. Note ferx defaults
 #'       to \code{"r"} while NONMEM's \code{$COVARIANCE} default is
 #'       \code{"rsr"} -- set \code{"rsr"} when reconciling against a NONMEM run
 #'       that used the default \code{$COV}. No effect when
@@ -447,11 +474,16 @@
 #'       \code{ode_abstol = 1e-8} is on the measured accuracy plateau. The
 #'       exact analytic covariance R-matrix, which most Gaussian
 #'       \code{[odes]} fits take, does not second-difference the objective and
-#'       is unaffected. Also applies to the ODE twin that closed-form transit /
+#'       is unaffected. Also applies to the ODE twin of the closed-form transit /
 #'       inverse-Gaussian absorption models (\code{one_cpt_transit},
-#'       \code{two_cpt_transit}, \code{one_cpt_ig}, \code{two_cpt_ig}) use for
-#'       IOV, time-varying-covariate and \code{TIME}-switch subjects. Can also
-#'       be set in the model file's \code{[fit_options]} block.}
+#'       \code{two_cpt_transit}, \code{one_cpt_ig}, \code{two_cpt_ig}). Their
+#'       IOV and time-varying-covariate subjects run analytic (ferx-core #1560),
+#'       so the twin is only the fallback for a subject in the flip-flop regime
+#'       (an interval's elimination rate reaches the absorption rate of a dose
+#'       that has arrived by then), one with a steady-state dose, an infusion
+#'       or a \code{TIME}-dependent parameter, and an IOV subject with 24 or
+#'       more stacked random effects. Can also be set in the model file's
+#'       \code{[fit_options]} block.}
 #'     \item{\code{ode_abstol}}{Absolute tolerance for ODE models and the
 #'       absorption ODE twin, as for \code{ode_reltol} (default \code{1e-6}).}
 #'     \item{\code{ode_max_steps}}{Maximum solver steps per integration segment
@@ -459,6 +491,18 @@
 #'       step budget on stiff multi-compartment systems -- or switch
 #'       \code{ode_method} to a stiff stepper, which is the actual fix when
 #'       stiffness rather than accuracy is capping the step.}
+#'     \item{\code{ode_auto_switch}}{(default \code{TRUE}) Let
+#'       \code{ode_method = "auto"} change stepper inside an integration
+#'       segment, not only at its start: the stiffness probe is re-read every 25
+#'       accepted steps. \code{FALSE} keeps one method per segment, chosen at
+#'       its start. Ignored under a named \code{ode_method}.}
+#'     \item{\code{ode_stiff_abort_after}}{(default unset, i.e. off) Abort an
+#'       integration segment once this many of its steps have clamped at the
+#'       solver's minimum step size, a sign the segment is stability-limited.
+#'       The part not integrated holds the last state, so this trades accuracy
+#'       for bounded cost, and the fit's ODE-solver warning counts the segments
+#'       cut short. Prefer \code{ode_method = "auto"} or a stiff method first.
+#'       \code{0}, \code{"off"} or \code{"none"} turn it off.}
 #'   }
 #'
 #'   \strong{FOCE / FOCEI / Laplace / GN / GN-hybrid: iteration cap}
@@ -541,8 +585,8 @@
 #'   \describe{
 #'     \item{\code{n_exploration}}{Stochastic exploration phase iterations
 #'       (default 150).}
-#'     \item{\code{conddist}}{(default \code{FALSE}; alias
-#'       \code{saem_conddist}) Run a post-fit conditional-distribution pass that
+#'     \item{\code{conddist} / \code{saem_conddist}}{(default \code{FALSE})
+#'       Run a post-fit conditional-distribution pass that
 #'       estimates each subject's \code{p(eta_i | y_i)} by MCMC, reporting
 #'       per-subject conditional mean and SD plus distribution-based
 #'       eta-shrinkage -- the shrinkage-unbiased basis for eta diagnostics. Read
@@ -564,9 +608,31 @@
 #'       the subjects that fall back to MH. Consumed by \code{"saem"} and
 #'       \code{"bayes"}; \code{"bayes"} does not apply the \code{"auto"} rule
 #'       and keeps 20 unless you set a number.}
-#'     \item{\code{scale_adaptation}}{(default \code{"robbins_monro"}) How the
-#'       MH step scales are adapted. \code{"interval"} is the rule used before
-#'       ferx-core 0.4.0.}
+#'     \item{\code{scale_adaptation} / \code{saem_scale_adaptation}}{(default
+#'       \code{"robbins_monro"}) How the MH step scales are adapted.
+#'       \code{"interval"} is the rule used before ferx-core 0.4.0.}
+#'     \item{\code{scale_deadband} / \code{saem_scale_deadband}}{(default
+#'       \code{"0.15,0.60"}) Acceptance-rate dead band for
+#'       \code{scale_adaptation = "robbins_monro"}, written \code{"lo,hi"}: an
+#'       iteration whose acceptance rate lies in \code{[lo, hi]} leaves the
+#'       step scale alone. \code{"none"} steps the scale every iteration. A band
+#'       covering all of \code{[0, 1]} is rejected, since it would freeze the
+#'       scales. Ignored under \code{"interval"}.}
+#'     \item{\code{mstep_solver} / \code{saem_mstep_solver}}{(default
+#'       \code{"bobyqa"}) Solver for the numerical theta/sigma M-step:
+#'       \code{"bobyqa"} re-maximises the frozen-eta objective each iteration;
+#'       \code{"score_sa"} takes a stochastic-approximation step on its score.}
+#'     \item{\code{mstep_draws} / \code{saem_mstep_draws}}{(default \code{1})
+#'       Number of E-step draws (this iteration's and the previous ones) the
+#'       \code{"bobyqa"} M-step objective is averaged over, which reduces the
+#'       single-draw bias at \code{K} times the M-step cost. Ignored under
+#'       \code{"score_sa"}; outside its non-IOV, non-mixture scope the fit uses
+#'       \code{1} with a warning.}
+#'     \item{\code{mstep_damping} / \code{saem_mstep_damping}}{A value in
+#'       \code{(0, 1]} that caps the exploration-phase step of the numerical
+#'       theta/sigma M-step; smaller damps harder and \code{1} is off. Unset,
+#'       it is off except for a model with \code{iiv_on_ruv}, which gets
+#'       \code{0.03}.}
 #'     \item{\code{adapt_interval}}{How often (in iterations) the MH step
 #'       scales are adapted under \code{scale_adaptation = "interval"}
 #'       (default 50). Also governs the IOV scales under either rule.}
@@ -593,6 +659,71 @@
 #'       (default \code{1}).}
 #'     \item{\code{bayes_seed}}{Base RNG seed for the Bayes sampler. Independent
 #'       of \code{seed} / \code{saem_seed}.}
+#'   }
+#'
+#'   \strong{Variational inference (\code{method = vi})}
+#'
+#'   VI is selected in the model file (\code{[fit_options] method = vi}) and
+#'   reports its result on \code{fit$vi}. Its objective is a bound, not a
+#'   likelihood, so \code{fit$ofv} is \code{NaN} unless \code{vi_final_ofv}
+#'   asks for one; for a deterministic \code{-2 log L} at the VI estimate,
+#'   chain \code{methods = vi, laplace} with \code{agq_eval_only = true} and
+#'   \code{n_agq = 21} (see below).
+#'   \describe{
+#'     \item{\code{vi_iters}}{Maximum Adam iterations (default \code{25000}).
+#'       A ceiling, not a budget: the run stops once the objective has settled
+#'       and an averaging window has been collected after that point.}
+#'     \item{\code{vi_mc_samples}}{Monte-Carlo draws per subject per iteration
+#'       (default \code{32}). It sets the noise floor the stopping rule measures
+#'       against, so lowering it can stop a fit early at a biased sigma; raise
+#'       it when the residual error matters.}
+#'     \item{\code{vi_lr}}{Adam learning rate (default \code{0.02}).}
+#'     \item{\code{vi_grad_clip}}{Global L2 gradient clip for the Adam steps
+#'       (default \code{1e4}; \code{0} disables). Keeps one extreme gradient
+#'       from freezing the optimizer; rarely worth changing.}
+#'     \item{\code{vi_family}}{Variational family: \code{"full_rank"} (default)
+#'       or \code{"mean_field"} (diagonal).}
+#'     \item{\code{vi_omega_update}, \code{vi_sigma_update}}{How Omega and
+#'       sigma are updated: \code{"closed_form"} (default; the exact ELBO
+#'       maximiser each iteration) or \code{"adam"}.}
+#'     \item{\code{vi_avg_last}}{Number of trailing iterations averaged into
+#'       the reported estimate (default: the final quarter of the run).}
+#'     \item{\code{vi_eta_grad}}{How the eta gradient is obtained:
+#'       \code{"auto"} (default; analytic where available, finite differences
+#'       otherwise), \code{"analytic"} (fail rather than fall back) or
+#'       \code{"fd"}.}
+#'     \item{\code{vi_kl}}{How the KL half of the ELBO is evaluated:
+#'       \code{"analytic"} (default) or \code{"mc"}.}
+#'     \item{\code{vi_final_ofv}}{\code{"none"} (default) or
+#'       \code{"laplace"}, which evaluates a Laplace \code{-2 log L} at the VI
+#'       estimate and reports it as \code{fit$ofv}.}
+#'     \item{\code{vi_seed}}{Seed for the common random numbers. Unset, a fixed
+#'       default is used, so runs are reproducible.}
+#'   }
+#'
+#'   \strong{Adaptive Gauss-Hermite quadrature (\code{"laplace"} /
+#'   \code{"focei"})}
+#'   \describe{
+#'     \item{\code{n_agq}}{Gauss-Hermite nodes per random effect (default
+#'       \code{1}, at most 21). See \code{method} above.}
+#'     \item{\code{agq_eval_only}}{(default \code{FALSE}) \code{"laplace"}
+#'       only: \code{TRUE} evaluates \code{-2 log L} by adaptive quadrature at
+#'       the incoming parameters instead of estimating, and must be the last
+#'       stage of the chain -- the deterministic counterpart of
+#'       \code{imp_eval_only}. It is the recommended way to finish a VI fit.}
+#'   }
+#'
+#'   \strong{Neural-network models (\code{[covariate_nn]})}
+#'
+#'   Penalties added to the objective the optimizer minimises for FOCE, FOCEI,
+#'   Laplace, GN and GN-hybrid. The reported \code{ofv}, AIC and BIC stay the
+#'   unpenalised \code{-2 log L}.
+#'   \describe{
+#'     \item{\code{nn_l2}}{(default \code{0}, off) L2 weight-decay strength on
+#'       the network weights (biases excluded).}
+#'     \item{\code{nn_smooth}}{(default \code{0}, off) Curvature penalty on each
+#'       network output along each input, which punishes wiggles and leaves
+#'       monotone slopes free.}
 #'   }
 #'
 #'   \strong{Gauss-Newton (\code{"gn"} / \code{"gn_hybrid"})}
@@ -631,8 +762,8 @@
 #'       sample-count-dependent bias in the typical-value and Omega estimates.
 #'       Note this makes the "quadruple the samples to halve the MC SE" rule of
 #'       thumb apply only when it is \code{FALSE}.}
-#'     \item{\code{imp_defensive_alpha}}{(default \code{0}, i.e. off; alias
-#'       \code{impmap_defensive_alpha}) Defensive-mixture weight in
+#'     \item{\code{imp_defensive_alpha} / \code{impmap_defensive_alpha}}{(default
+#'       \code{0}, i.e. off) Defensive-mixture weight in
 #'       \code{[0, 1)}. Each subject draws this fraction of its samples from the
 #'       prior \code{N(0, Omega)} rather than the mode-centred proposal, and every
 #'       sample is scored under the mixture density. That bounds the importance
@@ -647,8 +778,8 @@
 #'       The same limits apply: under Sobol, \code{imp_proposal_df} must be at
 #'       most 1000 (use \code{"normal"} beyond that), and a draw uses at most
 #'       1000 quasi-random coordinates.}
-#'     \item{\code{iscale_min}}{(default \code{0.1}) and \code{iscale_max}
-#'       (default \code{10}). Bounds on the proposal scaling factor for adaptive
+#'     \item{\code{iscale_min}, \code{iscale_max}}{(default \code{0.1} and
+#'       \code{10}) Bounds on the proposal scaling factor for adaptive
 #'       importance sampling (NONMEM \code{ISCALE_MIN} / \code{ISCALE_MAX}): the
 #'       proposal covariance is multiplied by \code{s^2} with \code{s} chosen from
 #'       this interval to maximise per-subject ESS. Set both to \code{1} to
@@ -1209,8 +1340,10 @@
 #'     packing order: thetas, omega, sigma, then the IOV kappas
 #'     (\code{"KAPPA_CL"}), the \code{[mixture]} per-class overrides
 #'     (\code{"ETA_CL (class 2)"}) and the \code{block_sigma} correlations.
-#'     Entries of a block omega or block kappa are named \code{"ROW,COL"}
-#'     (\code{"ETA_V,ETA_CL"}). \code{NULL} when covariance
+#'     Every variance is the bare name, in a block omega or block kappa too
+#'     (\code{"ETA_CL"}); a covariance is named \code{"ROW ~ COL"}
+#'     (\code{"ETA_V ~ ETA_CL"}), the spelling of the \code{block_sigma}
+#'     correlations (\code{"ADD_ERR ~ PROP_ERR"}). \code{NULL} when covariance
 #'     step was not run or failed. See \code{cor_matrix} for the derived
 #'     correlation matrix.}
 #'   \item{cov_fixed}{Logical vector, one entry per row of
@@ -2365,18 +2498,18 @@ ferx_fit <- function(model, data = NULL,
   if (!is.logical(scale_params) || length(scale_params) != 1L || is.na(scale_params)) {
     stop("`scale_params` must be TRUE or FALSE")
   }
-  # Merge optimizer_trace into settings so apply_fit_option handles it on the
-  # Rust side (it's already in framework_keys()).  User-supplied settings take
-  # precedence if somehow duplicated, which Rust will reject as a duplicate key
-  # - but we forbid that below via the RESERVED list.
-  if (isTRUE(optimizer_trace)) {
-    settings <- c(list(optimizer_trace = TRUE), settings)
-  }
-  # Only inject scale_params when TRUE - the Rust default is FALSE (off, since
-  # ferx-core issue #99), so omitting it preserves the behaviour callers expect
-  # when they don't pass the argument.
-  if (isTRUE(scale_params)) {
-    settings <- c(list(scale_params = TRUE), settings)
+  # Merge optimizer_trace / scale_params into settings so apply_fit_option
+  # handles them on the Rust side (both are in framework_keys()). As for
+  # inits_from_nca below, an explicitly passed argument wins: its value is sent
+  # - FALSE included, so it also overrides a model file's `[fit_options]
+  # optimizer_trace = true` - and any `settings` duplicate is dropped, which
+  # would otherwise fail as a duplicated name (#509). Left at its default, the
+  # argument sends nothing, so a `settings` or model-file value goes through
+  # (the Rust default is FALSE for both; scale_params since ferx-core #99).
+  explicit_flags <- intersect(c("optimizer_trace", "scale_params"), names(match.call())[-1L])
+  for (flag in explicit_flags) {
+    settings[[flag]] <- NULL
+    settings <- c(stats::setNames(list(get(flag)), flag), settings)
   }
   # inits_from_nca: TRUE/FALSE or one of "nca", "nca_sweep", "nca_ebe". TRUE is
   # an alias for "nca_sweep"; FALSE disables (the default). Merged into settings
@@ -2397,9 +2530,11 @@ ferx_fit <- function(model, data = NULL,
     stop("`inits_from_nca` must be TRUE/FALSE or one of \"nca\", \"nca_sweep\", \"nca_ebe\"")
   }
   if (inits_from_nca_explicit) {
+    # An explicit FALSE is sent too, so it overrides a model file's
+    # `[fit_options] inits_from_nca` rather than leaving it in force (#509).
     settings[["inits_from_nca"]] <- NULL
-  }
-  if (!is.null(inits_value)) {
+    settings <- c(list(inits_from_nca = inits_value %||% FALSE), settings)
+  } else if (!is.null(inits_value)) {
     settings <- c(list(inits_from_nca = inits_value), settings)
   }
   # fd_hessian_step: dedicated arg wins over any `settings` duplicate.
@@ -2524,10 +2659,37 @@ ferx_fit <- function(model, data = NULL,
     if (!is.character(output) || length(output) != 1L || is.na(output)) {
       stop("`output` must be a single .fitrx file path or NULL")
     }
-    ferx_save_fit(result, output, include_data = isTRUE(include_data))
+    .ferx_relay_save(
+      ferx_save_fit(result, output, include_data = isTRUE(include_data))
+    )
   }
 
   result
+}
+
+# `ferx_fit(output =)` saves through `ferx_save_fit()`, whose warnings and
+# errors name it (`ferx_save_fit: ...`, `ferx_save_fit(): ...`): a function
+# the caller never called (#537). Re-signal them under `ferx_fit`'s name,
+# keeping the condition's class and fields so a handler for e.g.
+# `ferx_data_edited_error` still catches it. Conditions without the prefix
+# pass through untouched.
+.ferx_relay_save <- function(expr, as = "ferx_fit") {
+  pattern <- "^ferx_save_fit(\\(\\))?: "
+  rename <- function(cond) {
+    cond$message <- sub(pattern, paste0(as, ": "), conditionMessage(cond))
+    cond
+  }
+  withCallingHandlers(
+    expr,
+    warning = function(w) {
+      if (!grepl(pattern, conditionMessage(w))) return()
+      warning(rename(w))
+      invokeRestart("muffleWarning")
+    },
+    error = function(e) {
+      if (grepl(pattern, conditionMessage(e))) stop(rename(e))
+    }
+  )
 }
 
 # Extract legacy mu-reference detection entries from the warnings vector.
@@ -3043,7 +3205,7 @@ print.ferx_fit <- function(x, ...) {
   # report. Printing the header above an empty body reads as an estimation that
   # failed rather than one that was never requested; ferx-core's own console
   # output suppresses the same section. Everything below is already a no-op at
-  # n_eta = 0 (the loops are over seq_len(n_eta), and has_offdiag stays FALSE).
+  # n_eta = 0 (the loops are over seq_len(n_eta), and om_corrs stays NULL).
   if (n_eta > 0L) {
     cat("\n", .ferx_style("OMEGA  (between-subject variability)", "bold"), "\n", sep = "")
     cat(strrep("-", 60), "\n", sep = "")

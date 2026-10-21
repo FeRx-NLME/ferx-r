@@ -34,6 +34,7 @@ ferx_rust_covariance(
   ebe_kappas_flat,
   ebe_kappa_ids,
   covariance_method,
+  threads,
   verbose,
   fit_bindings
 )

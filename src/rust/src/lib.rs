@@ -543,6 +543,7 @@ fn ferx_rust_fit(
             "bloq_method",
             "bloq",
             "threads",
+            "mu_referencing",
             "sir",
             "gradient",
             "gradient_method",
@@ -904,7 +905,8 @@ fn ferx_rust_simulate(
         // makes moot), so relaying `population.warnings` too would say each twice.
         Ok(attach_sim_warnings(
             sim_results_to_df(&output.results),
-            [occasion_notes, output.warnings].concat(),
+            occasion_notes,
+            &output,
         ))
     })
 }
@@ -1025,7 +1027,8 @@ fn ferx_rust_simulate_from_fit(
         // Reader findings are already in `output.warnings`; see `ferx_rust_simulate`.
         Ok(attach_sim_warnings(
             sim_results_to_df(&output.results),
-            [occasion_notes, output.warnings].concat(),
+            occasion_notes,
+            &output,
         ))
     })
 }
@@ -1227,7 +1230,7 @@ fn simulate_adaptive(
                 f.residual_rho_pairs,
             )
             .map_err(|e| format!("ferx_simulate_adaptive: {e}"))?;
-            (params, Vec::new())
+            (params, OccasionNotes::none())
         }
     };
 
@@ -1264,10 +1267,7 @@ fn simulate_adaptive(
         // filter, which on this path also withholds `W_NO_DOSES`: the controller
         // supplies the whole regimen, so an observation grid alone is the normal
         // input (ferx-r #426).
-        Ok(mut result) => {
-            let warnings = [occasion_notes, std::mem::take(&mut result.warnings)].concat();
-            attach_sim_warnings(adaptive_result_to_list(&result), warnings)
-        }
+        Ok(result) => attach_sim_warnings(adaptive_result_to_list(&result), occasion_notes, &result),
         Err(e) => return Err(engine_refusal("ferx_simulate_adaptive: ", e)),
     })
 }
@@ -1518,7 +1518,8 @@ fn ferx_rust_simulate_with_uncertainty(
         Ok(match ferx_core::simulate_with_uncertainty_diag(&parsed.model, &population, &fit_result, &opts) {
             Ok(output) => attach_sim_warnings(
                 sim_results_to_df(&output.results),
-                [occasion_notes, output.warnings].concat(),
+                occasion_notes,
+                &output,
             ),
             Err(e) => return Err(engine_refusal("simulate_with_uncertainty error: ", e)),
         })
@@ -1584,7 +1585,8 @@ fn ferx_rust_predict(
         // which still holds the ones a compartment-free model makes moot.
         Ok(attach_sim_warnings(
             data_frame!(ID = id, TIME = time, PRED = pred).into(),
-            [occasion_notes, output.warnings].concat(),
+            occasion_notes,
+            &output,
         ))
     })
 }
@@ -1681,7 +1683,8 @@ fn ferx_rust_predict_from_fit(
         // Core's non-fit bundle; see `ferx_rust_predict` (ferx-r #426).
         Ok(attach_sim_warnings(
             data_frame!(ID = id, TIME = time, PRED = pred).into(),
-            [occasion_notes, output.warnings].concat(),
+            occasion_notes,
+            &output,
         ))
     })
 }
@@ -1756,16 +1759,21 @@ fn ferx_rust_predict_survival(model_path: &str, data_path: &str, times: Vec<f64>
         // the reader fills them from `iov_column` only.
         let occasion_notes = derive_file_occasions(&parsed, &mut population);
 
-        let results =
-            ferx_core::predict_survival(&parsed.model, &population, &parsed.model.default_params, &times)
-                .map_err(|e| engine_refusal("Error predicting: ", e))?;
-        // The rule-over-column note, if any, on the predict paths' channel.
-        let df = survival_results_to_df(&results);
-        Ok(if occasion_notes.is_empty() {
-            df
-        } else {
-            attach_sim_warnings(df, occasion_notes)
-        })
+        let output = ferx_core::predict_survival_diag(
+            &parsed.model,
+            &population,
+            &parsed.model.default_params,
+            &times,
+        )
+        .map_err(|e| engine_refusal("Error predicting: ", e))?;
+        // The rule-over-column note, if any, then core's non-fit bundle (ferx-r
+        // #433): parse, data-reader (through core's one filter), model/data,
+        // experimental-feature and ODE-solver findings; see `ferx_rust_predict`.
+        Ok(attach_sim_warnings(
+            survival_results_to_df(&output.results),
+            occasion_notes,
+            &output,
+        ))
     })
 }
 
@@ -1849,16 +1857,15 @@ fn ferx_rust_predict_survival_from_fit(
             Err(e) => return Err(e),
         };
 
-        let results = ferx_core::predict_survival(&parsed.model, &population, &params, &times)
+        let output = ferx_core::predict_survival_diag(&parsed.model, &population, &params, &times)
             .map_err(|e| engine_refusal("Error predicting: ", e))?;
-        // The legacy-fit occasion note, if any, on the channel the predict and
-        // simulate paths use; without one the frame carries no attribute, as before.
-        let df = survival_results_to_df(&results);
-        Ok(if occasion_notes.is_empty() {
-            df
-        } else {
-            attach_sim_warnings(df, occasion_notes)
-        })
+        // The legacy-fit occasion note, if any, then core's non-fit bundle; see
+        // `ferx_rust_predict_survival` (ferx-r #433).
+        Ok(attach_sim_warnings(
+            survival_results_to_df(&output.results),
+            occasion_notes,
+            &output,
+        ))
     })
 }
 
@@ -1984,7 +1991,7 @@ fn ferx_rust_npde_from_fit(
         // read: a fingerprint of a fit with derived occasions leaves them out.
         let occasion_notes =
             derive_fit_occasions("ferx_calc_npde", &parsed, &mut population, iov_occasion)?;
-        let notes = [notes, occasion_notes].concat();
+        let notes = [notes, occasion_notes.into_vec()].concat();
 
         let params = match params_from_fit(
             &parsed.model,
@@ -3678,14 +3685,52 @@ fn default_fit_result(
 /// the run was clean). Mirrors how the fit path exposes `FitResult.warnings`,
 /// but as an attribute since simulate and predict return a bare frame.
 ///
-/// `warnings` is always the `warnings` of a ferx-core `*_diag` result, never
+/// The engine's findings come from `diag`, a ferx-core `*_diag` result, never
 /// `Population.warnings`: core folds the data reader's findings into that bundle
 /// through its one suppression filter, and the raw list still holds the ones it
 /// withholds (`W_NO_DOSES` / `W_CMT_DEFAULTED` on a compartment-free model,
-/// `W_NO_DOSES` on the adaptive path; ferx-r #426, ferx-core #1645).
-fn attach_sim_warnings(mut df: Robj, warnings: Vec<String>) -> Robj {
+/// `W_NO_DOSES` on the adaptive path; ferx-r #426, ferx-core #1645). Taking the
+/// result rather than a `Vec<String>` makes relaying the raw list a compile
+/// error (ferx-r #432). `glue_notes` holds the notes the glue itself writes,
+/// which come first; its type, `OccasionNotes`, is built only by
+/// `derive_file_occasions` and `derive_fit_occasions`, so it is closed too.
+fn attach_sim_warnings(mut df: Robj, glue_notes: OccasionNotes, diag: &impl CoreDiag) -> Robj {
+    let warnings = [glue_notes.as_slice(), diag.warnings()].concat();
     df.set_attrib("simulation_warnings", warnings).unwrap();
     df
+}
+
+/// A ferx-core result whose `warnings` is core's non-fit diagnostics bundle,
+/// the only source `attach_sim_warnings` accepts for the engine's findings
+/// (ferx-r #432). Implement it only for a core result built by
+/// `postfit::non_fit_diagnostics` (or folded through the same filter) - never
+/// for `Population` or a wrapper around its `warnings`.
+trait CoreDiag {
+    fn warnings(&self) -> &[String];
+}
+
+impl CoreDiag for ferx_core::SimulationOutput {
+    fn warnings(&self) -> &[String] {
+        &self.warnings
+    }
+}
+
+impl CoreDiag for ferx_core::PredictionOutput {
+    fn warnings(&self) -> &[String] {
+        &self.warnings
+    }
+}
+
+impl CoreDiag for ferx_core::SurvivalPredictionOutput {
+    fn warnings(&self) -> &[String] {
+        &self.warnings
+    }
+}
+
+impl CoreDiag for ferx_core::AdaptiveSimulationResult {
+    fn warnings(&self) -> &[String] {
+        &self.warnings
+    }
 }
 
 fn sim_results_to_df(results: &[ferx_core::api::SimulationResult]) -> Robj {
@@ -3960,9 +4005,10 @@ fn cov_matrix_held(model: &CompiledModel, cov_matrix_dim: i32) -> Vec<bool> {
 /// mislabel rows without an error; the end-to-end tests in
 /// `test-ferx_covariance.R` pin the order for every pair the engine accepts.
 ///
-/// A diagonal Ω / Ω_IOV entry is the bare declared name; a block one, in the
-/// column-major lower-triangle order `pack_params` uses, is `ROW,COL` - its
-/// diagonal too (`ETA_CL,ETA_CL`), the spelling R gave the Ω block (#367).
+/// Every variance is the bare declared name, block or diagonal alike; a block
+/// covariance, in the column-major lower-triangle order `pack_params` uses, is
+/// `ROW ~ COL` (`ETA_V ~ ETA_CL`), the one off-diagonal spelling of the
+/// output-label convention, shared with the `block_sigma` ρ's (ferx-r #440).
 /// Fallbacks per the output-label convention: `THETA<i>`, `OMEGA(i,j)`,
 /// `SIGMA(i)`, `KAPPA<i>` (`KAPPA(i,j)` off the diagonal). A mixture override is
 /// the overridden name with its class, `ETA_CL (class 2)`. Empty, like the mask,
@@ -3981,8 +4027,8 @@ fn cov_matrix_labels(model: &CompiledModel, cov_matrix_dim: i32) -> Vec<String> 
     let mut labels: Vec<String> = (0..p.theta.len()).map(theta).collect();
     for (r, c) in lower_tri(p.omega.dim(), p.omega.diagonal) {
         labels.push(match (eta(r), eta(c)) {
-            (Some(a), _) if p.omega.diagonal => a,
-            (Some(a), Some(b)) => format!("{a},{b}"),
+            (Some(a), _) if r == c => a,
+            (Some(a), Some(b)) => format!("{a} ~ {b}"),
             _ => format!("OMEGA({},{})", r + 1, c + 1),
         });
     }
@@ -3991,9 +4037,9 @@ fn cov_matrix_labels(model: &CompiledModel, cov_matrix_dim: i32) -> Vec<String> 
         let kappa = |k: usize| named(&iov.eta_names, k).or_else(|| named(&model.kappa_names, k));
         for (r, c) in lower_tri(iov.dim(), iov.diagonal) {
             labels.push(match (kappa(r), kappa(c)) {
-                (Some(a), _) if iov.diagonal => a,
-                (Some(a), Some(b)) => format!("{a},{b}"),
-                _ if iov.diagonal => format!("KAPPA{}", r + 1),
+                (Some(a), _) if r == c => a,
+                (Some(a), Some(b)) => format!("{a} ~ {b}"),
+                _ if r == c => format!("KAPPA{}", r + 1),
                 _ => format!("KAPPA({},{})", r + 1, c + 1),
             });
         }
@@ -4395,15 +4441,7 @@ fn fit_result_to_list(
             None => (Vec::new(), 0i32),
         };
 
-    let covariance_status_str = match result.covariance_status {
-        CovarianceStatus::Computed => "computed",
-        CovarianceStatus::Failed => "failed",
-        CovarianceStatus::NotRequested => "not_requested",
-        // SirFallback: FD Hessian was non-PD and `covariance_fallback = sir`
-        // produced SIR-based intervals (ferx-core #245). The R side maps this
-        // token to the "SirFallback" label (see persist.R).
-        CovarianceStatus::SirFallback => "sir_fallback",
-    };
+    let covariance_status_str = covariance_status_str(&result.covariance_status);
 
     // Parameter-level correlation for block omega (row-major flat); empty when diagonal or absent
     let omega_param_corr_flat: Vec<f64> = match &result.omega_param_corr {
@@ -5475,6 +5513,73 @@ fn ferx_rust_known_blocks() -> Vec<String> {
     })
 }
 
+/// Every estimation method, for `ferx_rust_fit_option_keys()`.
+const FIT_OPTION_METHODS: [EstimationMethod; 10] = [
+    EstimationMethod::Foce,
+    EstimationMethod::FoceI,
+    EstimationMethod::FoceGn,
+    EstimationMethod::FoceGnHybrid,
+    EstimationMethod::Saem,
+    EstimationMethod::Imp,
+    EstimationMethod::Impmap,
+    EstimationMethod::Bayes,
+    EstimationMethod::Laplace,
+    EstimationMethod::Vi,
+];
+
+/// Exhaustive on purpose: a method the engine adds fails to compile here
+/// until it is listed in `FIT_OPTION_METHODS`, so its keys cannot be left out.
+#[allow(dead_code)]
+fn fit_option_method_listed(m: EstimationMethod) {
+    match m {
+        EstimationMethod::Foce
+        | EstimationMethod::FoceI
+        | EstimationMethod::FoceGn
+        | EstimationMethod::FoceGnHybrid
+        | EstimationMethod::Saem
+        | EstimationMethod::Imp
+        | EstimationMethod::Impmap
+        | EstimationMethod::Bayes
+        | EstimationMethod::Laplace
+        | EstimationMethod::Vi => {}
+    }
+}
+
+/// The `[data_selection]` keys. The engine has no public list of these; they
+/// mirror the exemption in ferx-core's `apply_fit_option` arm guard.
+const FIT_OPTION_DATA_SELECTION_KEYS: [&str; 3] = ["ignore", "accept", "ignore_subjects"];
+
+/// Every `settings` key the engine's `apply_fit_option` accepts.
+///
+/// The union of `framework_keys()`, every method's `method_specific_keys()`
+/// and the three `[data_selection]` keys. ferx-core's own guard pins every
+/// `apply_fit_option` arm to one of those lists, with the data-selection keys
+/// as its one exemption, so the union is the full accepted set. The R tests
+/// compare it with the `settings` entry of `?ferx_fit` (ferx-r #509): a key
+/// added to the engine without R docs then fails CI instead of going quietly
+/// undocumented.
+///
+/// @return Character vector of keys, sorted and de-duplicated.
+/// @export
+#[extendr]
+fn ferx_rust_fit_option_keys() -> Vec<String> {
+    entry(move || {
+        let mut keys: Vec<String> = ferx_core::framework_keys()
+            .iter()
+            .chain(
+                FIT_OPTION_METHODS
+                    .iter()
+                    .flat_map(|m| ferx_core::method_specific_keys(*m)),
+            )
+            .chain(FIT_OPTION_DATA_SELECTION_KEYS.iter())
+            .map(|k| k.to_string())
+            .collect();
+        keys.sort();
+        keys.dedup();
+        Ok(keys)
+    })
+}
+
 /// Row / column labels of `fit$cov_matrix` for a model file: the labels
 /// `ferx_fit()` names the matrix with ([`cov_matrix_labels`]), for a fit read
 /// back from a `.fitrx` bundle, whose wire stores the matrix but not its names
@@ -5820,13 +5925,54 @@ fn ferx_rust_fitrx_kappa_rows(path: &str) -> String {
 /// underscores optional, since a loaded `.fitrx` spells it in CamelCase - read
 /// back for the row formatters.
 fn covariance_status_from_str(s: &str) -> std::result::Result<CovarianceStatus, String> {
-    match s.to_ascii_lowercase().replace('_', "").as_str() {
-        "computed" => Ok(CovarianceStatus::Computed),
-        "failed" => Ok(CovarianceStatus::Failed),
-        "notrequested" => Ok(CovarianceStatus::NotRequested),
-        "sirfallback" => Ok(CovarianceStatus::SirFallback),
-        other => Err(format!("unknown covariance_status {other:?}")),
+    let key = s.to_ascii_lowercase().replace('_', "");
+    all_covariance_statuses()
+        .into_iter()
+        .find(|c| covariance_status_str(c).replace('_', "") == key)
+        .ok_or_else(|| format!("unknown covariance_status {key:?}"))
+}
+
+/// The R spelling of a `CovarianceStatus`, as `fit$covariance_status` holds
+/// it. `SirFallback`: the covariance Hessian was non-PD and
+/// `covariance_fallback = sir` produced SIR-based intervals (ferx-core #245);
+/// the R side maps it to the "SirFallback" label (see persist.R).
+fn covariance_status_str(c: &CovarianceStatus) -> &'static str {
+    match c {
+        CovarianceStatus::Computed => "computed",
+        CovarianceStatus::Failed => "failed",
+        CovarianceStatus::NotRequested => "not_requested",
+        CovarianceStatus::SirFallback => "sir_fallback",
     }
+}
+
+/// Every `CovarianceStatus`. The match is exhaustive, so a variant ferx-core
+/// adds fails to compile here until it is listed (and spelled in
+/// [`covariance_status_str`]).
+fn all_covariance_statuses() -> Vec<CovarianceStatus> {
+    use CovarianceStatus as C;
+    let listed = |c: &C| match c {
+        C::Computed | C::Failed | C::NotRequested | C::SirFallback => (),
+    };
+    let all = vec![C::Computed, C::Failed, C::NotRequested, C::SirFallback];
+    all.iter().for_each(listed);
+    all
+}
+
+/// The `fit$covariance_status` spellings the row formatters' glue reads
+/// ([`ferx_rust_kappa_rows`], [`ferx_rust_omega_rows`]), one per ferx-core
+/// `CovarianceStatus`, so R's pre-check of the field never hand-copies the
+/// list (#551). The glue also accepts any case and drops underscores.
+///
+/// @return Character vector, snake_case.
+/// @export
+#[extendr]
+fn ferx_rust_known_covariance_statuses() -> Vec<String> {
+    entry(move || {
+        Ok(all_covariance_statuses()
+            .into_iter()
+            .map(|c| covariance_status_str(&c).to_string())
+            .collect())
+    })
 }
 
 /// A logical R vector or `NULL` as per-entry flags; `NULL` gives an empty
@@ -6066,11 +6212,40 @@ fn theta_transform_from_str(s: &str) -> std::result::Result<ThetaTransform, Stri
 fn eta_param_type_from_str(
     s: &str,
 ) -> std::result::Result<ferx_core::types::EtaParamType, String> {
-    use ferx_core::types::EtaParamType as T;
-    [T::LogNormal, T::Additive, T::Logit, T::LogitProbability, T::Custom]
+    all_eta_param_types()
         .into_iter()
         .find(|&t| eta_param_type_str(t) == s)
         .ok_or_else(|| format!("unknown random-effect scale {s:?}"))
+}
+
+/// Every `EtaParamType`. The match is exhaustive, so a variant ferx-core adds
+/// fails to compile here until it is listed (and spelled in
+/// [`eta_param_type_str`]).
+fn all_eta_param_types() -> Vec<ferx_core::types::EtaParamType> {
+    use ferx_core::types::EtaParamType as T;
+    let listed = |t: T| match t {
+        T::LogNormal | T::Additive | T::Logit | T::LogitProbability | T::Custom => (),
+    };
+    let all = vec![T::LogNormal, T::Additive, T::Logit, T::LogitProbability, T::Custom];
+    all.iter().copied().for_each(listed);
+    all
+}
+
+/// The random-effect scale spellings the glue reads back
+/// (`eta_param_types`, `kappa_param_types`), one per ferx-core
+/// `EtaParamType`, so R's pre-check of those fields never hand-copies the
+/// list (#551).
+///
+/// @return Character vector.
+/// @export
+#[extendr]
+fn ferx_rust_known_eta_param_types() -> Vec<String> {
+    entry(move || {
+        Ok(all_eta_param_types()
+            .into_iter()
+            .map(|t| eta_param_type_str(t).to_string())
+            .collect())
+    })
 }
 
 /// The R spelling of an `EtaParamType`, as `eta_param_types`,
@@ -6609,79 +6784,111 @@ fn iov_occasion_from_r(
     Ok(Some(opts.iov_occasion))
 }
 
-/// Give a population read for a from-fit predict / simulate / npde step the
-/// occasion labels the fit derived (ferx-r #523 / #519), as core's
-/// `resolve_fit_inputs` does for `run_sir` / `run_covariance` (#1783). The
-/// readers take no rule: they fill `Subject::occasions` from `iov_column` only,
-/// so under an `iov_occasion = dose | time(...)` rule every subject came back
-/// unlabelled and the engine ran every occasion at kappa = 0 with no message -
-/// a simulation without inter-occasion variability.
-///
-/// The rule is the fit's (`fit$iov_occasion`, which carries one passed only
-/// through `settings =`); a fit that records none (a `.fitrx` saved before
-/// ferx-core #1783) takes the model file's, with core's note, and is refused
-/// when that derives nothing and the population has no labels either. Returns
-/// the notes for the step's warnings. Run after the level bind and, on the npde
-/// path, after the fingerprint check, which is of the population as read.
-fn derive_fit_occasions(
-    entry_point: &str,
-    parsed: &ParsedModel,
-    population: &mut Population,
-    iov_occasion: &str,
-) -> std::result::Result<Vec<String>, String> {
-    let recorded = iov_occasion_from_r(entry_point, iov_occasion)?;
-    if parsed.model.n_kappa == 0 {
-        return Ok(Vec::new());
-    }
-    let mut notes = Vec::new();
-    let rule = match recorded {
-        Some(rule) => rule,
-        None => {
-            let rule = parsed.fit_options.iov_occasion.clone();
-            if rule != ferx_core::IovOccasionRule::Column {
-                notes.push(format!(
-                    "{entry_point}: this fit records no IOV occasion rule (it was saved \
-                     before ferx recorded one), so the occasions were derived with the \
-                     model file's `iov_occasion = {}`. If the fit ran under another rule \
-                     (`ferx_fit(settings = list(iov_occasion = ...))`), these results are \
-                     wrong: refit so the rule is recorded.",
-                    iov_occasion_to_r(&rule)
-                ));
-            } else if population.subjects.iter().all(|s| s.occasions.is_empty()) {
-                return Err(format!(
-                    "{entry_point}: this fit records no IOV occasion rule (it was saved \
-                     before ferx recorded one), the model file sets no `iov_occasion` and \
-                     the data carries no occasion labels, so the per-occasion kappas \
-                     cannot be assigned to occasions. Refit so the rule is recorded, or \
-                     give the data the occasion column the model's `iov_column` names."
-                ));
-            }
-            rule
+/// The glue's own notes for a simulate / predict step's `simulation_warnings`:
+/// the occasion notes `derive_fit_occasions` and `derive_file_occasions` write
+/// (ferx-r #523). The field is private to this module, so outside it the only
+/// way to get one is from those two functions or `none()` - an arbitrary
+/// `Vec<String>`, such as `Population.warnings`, cannot become one. With
+/// `CoreDiag` that closes both arguments of `attach_sim_warnings` to the
+/// reader's raw list (ferx-r #426 / #432).
+mod occasion_notes {
+    use super::*;
+
+    pub(super) struct OccasionNotes(Vec<String>);
+
+    impl OccasionNotes {
+        /// No notes: a step that derives no occasions.
+        pub(super) fn none() -> Self {
+            OccasionNotes(Vec::new())
         }
-    };
-    apply_occasion_rule(population, &rule);
-    Ok(notes)
+
+        pub(super) fn as_slice(&self) -> &[String] {
+            &self.0
+        }
+
+        /// The notes as plain strings, for a step whose warnings do not go
+        /// through `attach_sim_warnings` (`ferx_rust_calc_npde`).
+        pub(super) fn into_vec(self) -> Vec<String> {
+            self.0
+        }
+    }
+
+    /// Give a population read for a from-fit predict / simulate / npde step the
+    /// occasion labels the fit derived (ferx-r #523 / #519), as core's
+    /// `resolve_fit_inputs` does for `run_sir` / `run_covariance` (#1783). The
+    /// readers take no rule: they fill `Subject::occasions` from `iov_column` only,
+    /// so under an `iov_occasion = dose | time(...)` rule every subject came back
+    /// unlabelled and the engine ran every occasion at kappa = 0 with no message -
+    /// a simulation without inter-occasion variability.
+    ///
+    /// The rule is the fit's (`fit$iov_occasion`, which carries one passed only
+    /// through `settings =`); a fit that records none (a `.fitrx` saved before
+    /// ferx-core #1783) takes the model file's, with core's note, and is refused
+    /// when that derives nothing and the population has no labels either. Returns
+    /// the notes for the step's warnings. Run after the level bind and, on the npde
+    /// path, after the fingerprint check, which is of the population as read.
+    pub(super) fn derive_fit_occasions(
+        entry_point: &str,
+        parsed: &ParsedModel,
+        population: &mut Population,
+        iov_occasion: &str,
+    ) -> std::result::Result<OccasionNotes, String> {
+        let recorded = iov_occasion_from_r(entry_point, iov_occasion)?;
+        if parsed.model.n_kappa == 0 {
+            return Ok(OccasionNotes(Vec::new()));
+        }
+        let mut notes = Vec::new();
+        let rule = match recorded {
+            Some(rule) => rule,
+            None => {
+                let rule = parsed.fit_options.iov_occasion.clone();
+                if rule != ferx_core::IovOccasionRule::Column {
+                    notes.push(format!(
+                        "{entry_point}: this fit records no IOV occasion rule (it was saved \
+                         before ferx recorded one), so the occasions were derived with the \
+                         model file's `iov_occasion = {}`. If the fit ran under another rule \
+                         (`ferx_fit(settings = list(iov_occasion = ...))`), these results are \
+                         wrong: refit so the rule is recorded.",
+                        iov_occasion_to_r(&rule)
+                    ));
+                } else if population.subjects.iter().all(|s| s.occasions.is_empty()) {
+                    return Err(format!(
+                        "{entry_point}: this fit records no IOV occasion rule (it was saved \
+                         before ferx recorded one), the model file sets no `iov_occasion` and \
+                         the data carries no occasion labels, so the per-occasion kappas \
+                         cannot be assigned to occasions. Refit so the rule is recorded, or \
+                         give the data the occasion column the model's `iov_column` names."
+                    ));
+                }
+                rule
+            }
+        };
+        apply_occasion_rule(population, &rule);
+        Ok(OccasionNotes(notes))
+    }
+
+    /// A design read without a fit: occasions from the model file's own
+    /// `iov_occasion` rule, as `fit()` would derive them (ferx-r #523). A no-op for
+    /// a model without kappa or under a `Column` rule. Returns core's override note
+    /// when the file also names an `iov_column`, whose labels the rule replaces, as
+    /// `fit()` warns (`apply_iov_occasion_rule`'s `had_column`).
+    pub(super) fn derive_file_occasions(parsed: &ParsedModel, population: &mut Population) -> OccasionNotes {
+        let rule = &parsed.fit_options.iov_occasion;
+        if parsed.model.n_kappa == 0 || *rule == ferx_core::IovOccasionRule::Column {
+            return OccasionNotes(Vec::new());
+        }
+        apply_occasion_rule(population, rule);
+        OccasionNotes(if parsed.fit_options.iov_column.is_some() {
+            vec!["iov_occasion is set in [fit_options], so the model-side occasion rule is used and \
+                  the iov_column dataset column is ignored."
+                .to_string()]
+        } else {
+            Vec::new()
+        })
+    }
 }
 
-/// A design read without a fit: occasions from the model file's own
-/// `iov_occasion` rule, as `fit()` would derive them (ferx-r #523). A no-op for
-/// a model without kappa or under a `Column` rule. Returns core's override note
-/// when the file also names an `iov_column`, whose labels the rule replaces, as
-/// `fit()` warns (`apply_iov_occasion_rule`'s `had_column`).
-fn derive_file_occasions(parsed: &ParsedModel, population: &mut Population) -> Vec<String> {
-    let rule = &parsed.fit_options.iov_occasion;
-    if parsed.model.n_kappa == 0 || *rule == ferx_core::IovOccasionRule::Column {
-        return Vec::new();
-    }
-    apply_occasion_rule(population, rule);
-    if parsed.fit_options.iov_column.is_some() {
-        vec!["iov_occasion is set in [fit_options], so the model-side occasion rule is used and \
-              the iov_column dataset column is ignored."
-            .to_string()]
-    } else {
-        Vec::new()
-    }
-}
+use occasion_notes::{derive_file_occasions, derive_fit_occasions, OccasionNotes};
 
 /// Core's `apply_iov_occasion_rule` (`api/validation.rs`), which is
 /// `pub(crate)`: each subject's occasion labels derived from a model-side rule,
@@ -7569,6 +7776,23 @@ fn fit_skeleton(
     Ok(fit)
 }
 
+/// The worker-pool width of a standalone `ferx_sir()` / `ferx_covariance()`
+/// step (ferx-r #527), and the width to report as its `n_threads_used`.
+///
+/// `threads > 0` pins the pool; anything else leaves `FitOptions::threads`
+/// unset, which the engine runs on its default width. That width is read
+/// through `PoolPlan::from_budget(0, 1)`, which resolves a zero budget with
+/// the same function the engine sizes an unpinned pool with. The skeleton's
+/// own `n_threads_used` is a placeholder, so the engine's result cannot say.
+fn posthoc_step_threads(threads: i32) -> (Option<usize>, i32) {
+    if threads > 0 {
+        (Some(threads as usize), threads)
+    } else {
+        let n = ferx_core::PoolPlan::from_budget(0, 1).threads_per_fit();
+        (None, n as i32)
+    }
+}
+
 /// Standalone SIR — run Sampling Importance Resampling against an existing fit.
 ///
 /// The R wrapper `ferx_sir()` flattens the fit list into the primitives this
@@ -7636,11 +7860,15 @@ fn fit_skeleton(
 /// @param ebe_kappas_flat `fit$ebe_kappas` kappa columns, row-major, one row
 ///   per (subject, occasion) in fit order; empty for a fit without IOV.
 /// @param ebe_kappa_ids The `ID` of each `ebe_kappas` row.
+/// @param threads Worker threads the step runs on: `0` the engine default,
+///   `n > 0` pinned. `ferx_sir()` passes the fit's `n_threads_used` unless
+///   told otherwise (ferx-r #527).
 /// @param verbose When TRUE, the engine prints progress to stderr.
 /// @return Named list with `sir_ess`, `sir_ci_theta`, `sir_ci_omega`, `sir_ci_sigma`,
 ///   `sir_ci_kappa`,
 ///   `sir_resamples`, `sir_resamples_n`, `sir_resamples_dim`, `sir_seed_used`,
-///   `sir_settings` (the record this run made), `theta_levels`, and `warnings`.
+///   `sir_settings` (the record this run made), `theta_levels`,
+///   `n_threads_used` (the width this run's pool had), and `warnings`.
 #[extendr]
 #[allow(clippy::too_many_arguments)]
 fn ferx_rust_sir(
@@ -7674,6 +7902,7 @@ fn ferx_rust_sir(
     method_chain: Vec<String>,
     ebe_kappas_flat: Vec<f64>,
     ebe_kappa_ids: Vec<String>,
+    threads: i32,
     verbose: bool,
     fit_bindings: List,
 ) -> Robj {
@@ -7742,6 +7971,8 @@ fn ferx_rust_sir(
         let mut opts = FitOptions::default();
         opts.interaction = interaction;
         opts.verbose = verbose;
+        let (step_threads, n_threads_used) = posthoc_step_threads(threads);
+        opts.threads = step_threads;
 
         // ferx_core::run_sir verifies hashes (when set), re-parses model + data,
         // reconstructs the inner ModelParameters, and runs SIR. We pass None for
@@ -7807,6 +8038,7 @@ fn ferx_rust_sir(
                 None => Robj::from(()),
             },
             theta_levels = theta_levels,
+            n_threads_used = n_threads_used,
             warnings = new_fit.warnings.clone()
         )
         .into())
@@ -7878,10 +8110,14 @@ fn ferx_rust_sir(
 ///   per (subject, occasion) in fit order; empty for a fit without IOV.
 /// @param ebe_kappa_ids The `ID` of each `ebe_kappas` row.
 /// @param covariance_method Covariance estimator: "r"/"hessian", "s"/"cross_product", or "rsr"/"sandwich".
+/// @param threads Worker threads the step runs on: `0` the engine default,
+///   `n > 0` pinned. `ferx_covariance()` passes the fit's `n_threads_used`
+///   unless told otherwise (ferx-r #527).
 /// @param verbose When TRUE, the engine prints progress to stderr.
 /// @return Named list with `cov_matrix`, `cov_matrix_dim`, `se_theta`, `se_omega`,
 ///   `se_sigma`, `se_kappa`, `covariance_status`, `cov_eigenvalues`,
-///   `cov_condition_number`, `theta_levels` (NA intervals), and `warnings`.
+///   `cov_condition_number`, `theta_levels` (NA intervals), `n_threads_used`
+///   (the width this run's pool had), and `warnings`.
 #[extendr]
 #[allow(clippy::too_many_arguments)]
 fn ferx_rust_covariance(
@@ -7914,6 +8150,7 @@ fn ferx_rust_covariance(
     ebe_kappas_flat: Vec<f64>,
     ebe_kappa_ids: Vec<String>,
     covariance_method: &str,
+    threads: i32,
     verbose: bool,
     fit_bindings: List,
 ) -> Robj {
@@ -7981,6 +8218,8 @@ fn ferx_rust_covariance(
         opts.covariance_method = covariance_method_enum;
         opts.interaction = interaction;
         opts.verbose = verbose;
+        let (step_threads, n_threads_used) = posthoc_step_threads(threads);
+        opts.threads = step_threads;
 
         // Pass None for model/population so run_covariance re-parses model + data
         // from the recorded paths and fires the SHA-256 integrity check — the
@@ -8004,12 +8243,7 @@ fn ferx_rust_covariance(
             None => (Vec::new(), 0i32),
         };
 
-        let covariance_status_str = match new_fit.covariance_status {
-            CovarianceStatus::Computed => "computed",
-            CovarianceStatus::Failed => "failed",
-            CovarianceStatus::NotRequested => "not_requested",
-            CovarianceStatus::SirFallback => "sir_fallback",
-        };
+        let covariance_status_str = covariance_status_str(&new_fit.covariance_status);
 
         // Each theta level's se from the new matrix (#528), off the model and
         // bindings bound above. This step never sees the fit's SIR draws, so
@@ -8060,6 +8294,7 @@ fn ferx_rust_covariance(
                 .map(|c| c.sigma_j as i32 + 1)
                 .collect::<Vec<i32>>(),
             theta_levels = theta_levels,
+            n_threads_used = n_threads_used,
             warnings = new_fit.warnings.clone()
         )
         .into())
@@ -12783,6 +13018,9 @@ extendr_module! {
     fn ferx_rust_test_panic;
     fn ferx_rust_test_fit_outcome;
     fn ferx_rust_known_blocks;
+    fn ferx_rust_fit_option_keys;
+    fn ferx_rust_known_eta_param_types;
+    fn ferx_rust_known_covariance_statuses;
     fn ferx_rust_cov_labels;
     fn ferx_rust_sha256_text;
     fn ferx_rust_sha256_raw;

@@ -78,12 +78,18 @@
 #'   `NULL` (the default) takes the fit's recorded value, else 1000.
 #' @param sir_resamples Number of resampled vectors. Must be `<= sir_samples`.
 #'   `NULL` takes the fit's recorded value, else 250.
-#' @param sir_seed Integer RNG seed for reproducibility. `NULL` takes the
+#' @param sir_seed Integer RNG seed for reproducibility, a whole number from 0
+#'   to 2^53 (it need not fit an R integer). `NULL` takes the
 #'   seed the fit's SIR recorded, else the engine's built-in seed (12345).
 #' @param sir_keep_samples When `TRUE`, retain the resampled packed
 #'   parameter vectors on the returned fit. Required for
 #'   [ferx_simulate_with_uncertainty()] with `method = "sir"`. `NULL` takes
 #'   the fit's recorded value, else `FALSE`.
+#' @param threads Worker threads the step runs on. `NULL` (the default)
+#'   takes the width the fit ran on, `fit$n_threads_used`; `0` asks for the
+#'   engine default; a positive integer pins the width. It does not change
+#'   the result, only the resources the step uses. The returned fit's
+#'   `n_threads_used` reports the width this step ran on.
 #' @param verbose When `TRUE`, the engine prints progress to stderr.
 #'   Default `FALSE`.
 #' @param sir_scale The parameter scale SIR's importance-sampling target is
@@ -110,8 +116,8 @@
 #'   variance, named by `kappa_names`; NULL without IOV), `sir_seed_used`
 #'   (the seed this run resampled with: `sir_seed`, or 12345 when it is
 #'   `NULL`), `sir_settings` (the settings this run used; see [ferx_fit()]),
-#'   and (when the run kept them) `sir_resamples` / `sir_resamples_n` /
-#'   `sir_resamples_dim`.
+#'   `n_threads_used` (the width this run ran on), and (when the run kept
+#'   them) `sir_resamples` / `sir_resamples_n` / `sir_resamples_dim`.
 #'   Any warnings the SIR step emitted are appended to `fit$warnings` and to
 #'   `fit$warnings_structured` under the `sir` category - in particular the
 #'   proposal diagnostics: a covariance that is rank-deficient beyond its
@@ -177,32 +183,36 @@ ferx_sir <- function(fit,
                      sir_keep_samples = NULL,
                      verbose = FALSE,
                      sir_scale = NULL,
-                     sir_df = NULL) {
+                     sir_df = NULL,
+                     threads = NULL) {
   if (!inherits(fit, "ferx_fit")) {
     stop("`fit` must be a ferx_fit object (from ferx_fit() or ferx_load_fit()).")
   }
+  threads_arg <- .ferx_step_threads(threads, fit)
 
   # Validate the SIR knobs up-front so user errors surface as clean R
   # conditions rather than as the engine's "weighted sampler failed"
   # or the binding's i32-clamped 0 after a bad cast.
-  is_positive_count <- function(x) {
-    length(x) == 1L && is.finite(x) && x > 0 && x == as.integer(x)
+  # The range is tested before the whole-number test: `as.integer()` of a
+  # count beyond `.Machine$integer.max` is NA, and an NA in `if` stops with
+  # R's "missing value where TRUE/FALSE needed" instead of ours (#536).
+  is_whole <- function(x, lower, upper) {
+    is.numeric(x) && length(x) == 1L && is.finite(x) && x >= lower &&
+      x <= upper && x == floor(x)
   }
-  if (!is.null(sir_samples) && !is_positive_count(sir_samples)) {
+  if (!is.null(sir_samples) && !is_whole(sir_samples, 1, .Machine$integer.max)) {
     stop("`sir_samples` must be NULL or a single positive integer (got: ",
          paste(format(sir_samples), collapse = ", "), ").")
   }
-  if (!is.null(sir_resamples) && !is_positive_count(sir_resamples)) {
+  if (!is.null(sir_resamples) && !is_whole(sir_resamples, 1, .Machine$integer.max)) {
     stop("`sir_resamples` must be NULL or a single positive integer (got: ",
          paste(format(sir_resamples), collapse = ", "), ").")
   }
-  if (!is.null(sir_seed)) {
-    if (!is_positive_count(sir_seed) && !(length(sir_seed) == 1L &&
-                                          is.finite(sir_seed) &&
-                                          sir_seed == as.integer(sir_seed) &&
-                                          sir_seed >= 0)) {
-      stop("`sir_seed` must be NULL or a single non-negative integer.")
-    }
+  # The engine's seed is a u64, and the seed travels to it as a double, so any
+  # whole number a double holds exactly (up to 2^53) is the seed that runs.
+  if (!is.null(sir_seed) && !is_whole(sir_seed, 0, 2^53)) {
+    stop("`sir_seed` must be NULL or a single non-negative integer no larger ",
+         "than 2^53 (got: ", paste(format(sir_seed), collapse = ", "), ").")
   }
   if (!is.null(sir_keep_samples) &&
         !(is.logical(sir_keep_samples) && length(sir_keep_samples) == 1L &&
@@ -400,6 +410,7 @@ ferx_sir <- function(fit,
     method_chain = method_args$method_chain,
     ebe_kappas_flat = kappa_args$ebe_kappas_flat,
     ebe_kappa_ids = kappa_args$ebe_kappa_ids,
+    threads = threads_arg,
     verbose = isTRUE(verbose),
     fit_bindings = binding_args$fit_bindings
   ), model_path, data_path)
@@ -436,6 +447,10 @@ ferx_sir <- function(fit,
   # The seed and settings this run used (ferx-core #1767), not the input fit's.
   fit$sir_seed_used <- raw$sir_seed_used
   fit$sir_settings <- raw$sir_settings
+  # The width this run's pool had, not the fit's (#527).
+  if (!is.null(raw$n_threads_used)) {
+    fit$n_threads_used <- as.integer(raw$n_threads_used)
+  }
 
   # A run that did not keep its draws drops the input fit's: they belong to
   # an earlier run, and ferx_save_fit() would otherwise write them beside

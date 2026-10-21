@@ -269,3 +269,72 @@ test_that("ferx_fit scores a joint PK-TTE subject whose ODE-accumulated hazard r
   ofv_pk    <- ofv_at_init(write_tad_hazard_fixture(hazard = NULL))
   expect_equal(ofv_joint - ofv_pk, 2 * (3.234 - log(0.118)), tolerance = 1e-4)
 })
+
+# -- Engine findings on the survival predictor (#433) --------------------------
+# Both glue entry points relay the `warnings` of core's `predict_survival_diag`
+# (the non-fit bundle: parse, reader-through-filter, model/data, ODE solver) on
+# the `simulation_warnings` channel `ferx_predict()` uses.
+
+write_exp_tte <- function(extra = character()) {
+  model <- tempfile(fileext = ".ferx")
+  writeLines(c(
+    "[parameters]",
+    "  theta TVLAMBDA(0.1, 0.001, 10.0)",
+    extra,
+    "  omega ETA_LAMBDA ~ 0.09",
+    "",
+    "[event_model]",
+    "  cmt    = 2",
+    "  family = exponential",
+    "  scale  = TVLAMBDA * exp(ETA_LAMBDA)"
+  ), model)
+  model
+}
+
+write_exp_tte_data <- function() {
+  data <- tempfile(fileext = ".csv")
+  writeLines(c(
+    "ID,TIME,DV,EVID,CMT,MDV",
+    "1,7.2,1,0,2,0",
+    "2,24.0,0,0,2,0",
+    "3,3.1,1,0,2,0"
+  ), data)
+  data
+}
+
+unused_theta_note <- "theta 'UNUSED' is declared"
+
+test_that("ferx_predict_survival relays the engine's parse findings (#433)", {
+  model <- write_exp_tte("  theta UNUSED(1.0, 0.1, 10.0)")
+  expect_warning(
+    preds <- ferx_predict_survival(model, write_exp_tte_data(), times = c(0, 6)),
+    unused_theta_note, fixed = TRUE
+  )
+  w <- attr(preds, "simulation_warnings", exact = TRUE)
+  expect_type(w, "character")
+  expect_true(any(grepl(unused_theta_note, w, fixed = TRUE)))
+})
+
+test_that("ferx_predict_survival(fit = ) relays the engine's findings too (#433)", {
+  # The separate glue entry point (`ferx_rust_predict_survival_from_fit`).
+  model <- write_exp_tte("  theta UNUSED(1.0, 0.1, 10.0)")
+  data <- write_exp_tte_data()
+  fit <- suppressWarnings(ferx_fit(model, data, method = "foce", covariance = FALSE))
+  expect_warning(
+    preds <- ferx_predict_survival(model, data, times = c(0, 6), fit = fit),
+    unused_theta_note, fixed = TRUE
+  )
+  expect_true(any(grepl(unused_theta_note,
+                        attr(preds, "simulation_warnings", exact = TRUE),
+                        fixed = TRUE)))
+})
+
+test_that("a clean ferx_predict_survival run carries an empty attribute (#433)", {
+  # A compartment-free TTE model on dose-free data: the reader's moot
+  # `W_NO_DOSES` / `W_CMT_DEFAULTED` stay behind core's filter.
+  expect_no_warning(
+    preds <- ferx_predict_survival(write_exp_tte(), write_exp_tte_data(),
+                                   times = c(0, 6))
+  )
+  expect_identical(attr(preds, "simulation_warnings", exact = TRUE), character(0))
+})

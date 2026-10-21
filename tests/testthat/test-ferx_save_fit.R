@@ -640,6 +640,63 @@ test_that("ferx_fit(output = ...) writes a valid bundle", {
   expect_s3_class(loaded, "ferx_fit")
   expect_equal(loaded$ofv, fit$ofv, tolerance = 1e-12)
 })
+test_that("ferx_fit(output =) relays save-side conditions under its own name (#537)", {
+  relay <- ferx:::.ferx_relay_save
+  # The real save-side warning: a normal SIR proposal has no bundle record.
+  sr <- ferx:::.ferx_default_settings("sir_settings")
+  sr$df <- Inf
+  w <- tryCatch(
+    relay(ferx:::.fitrx_settings_to_wire(list(sir_settings = sr), "sir_settings")),
+    warning = function(w) w
+  )
+  expect_match(conditionMessage(w), "^ferx_fit: the fit's SIR used a normal proposal")
+  expect_null(conditionCall(w))
+  # The real save-side refusal, prefixed by the engine's decoder.
+  sc <- ferx:::.ferx_default_settings("scoring_settings")
+  sc$inner_maxit <- 5L
+  expect_error(
+    relay(ferx:::.fitrx_settings_to_wire(list(scoring_settings = sc), "scoring_settings")),
+    'ferx_fit: `fit$scoring_settings`: unknown key "inner_maxit"', fixed = TRUE
+  )
+  # The `ferx_save_fit(): ` spelling, with its class kept for handlers.
+  e <- tryCatch(relay(stop(errorCondition(
+    "ferx_save_fit(): the data file x has changed", class = "ferx_data_edited_error"
+  ))), error = function(e) e)
+  expect_s3_class(e, "ferx_data_edited_error")
+  expect_identical(conditionMessage(e), "ferx_fit: the data file x has changed")
+  w <- tryCatch(relay(warning(warningCondition(
+    "ferx_save_fit(): the model file x has changed", class = "ferx_model_edited_warning"
+  ))), warning = function(w) w)
+  expect_s3_class(w, "ferx_model_edited_warning")
+  expect_identical(conditionMessage(w), "ferx_fit: the model file x has changed")
+  # Only the leading prefix is rewritten; anything else passes through as is,
+  # and the value comes back.
+  expect_warning(relay(warning("see ferx_save_fit: below")),
+                 "^see ferx_save_fit: below$")
+  expect_error(relay(stop("unrelated")), "^unrelated$")
+  expect_identical(relay(42L), 42L)
+})
+test_that("ferx_fit(output =) never names ferx_save_fit in its warnings (#537)", {
+  skip_on_cran()
+  ex <- ferx_example("warfarin")
+  path <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(path), add = TRUE)
+  testthat::local_mocked_bindings(
+    ferx_save_fit = function(fit, path, ...) {
+      warning("ferx_save_fit: not recorded", call. = FALSE)
+      invisible(path)
+    }
+  )
+  expect_warning(
+    ferx_fit(
+      ex$model, ex$data,
+      method = "focei", verbose = FALSE, covariance = FALSE,
+      settings = list(maxiter = 5L),
+      output = path
+    ),
+    "^ferx_fit: not recorded$"
+  )
+})
 test_that("include_data = TRUE bundles the input CSV", {
   skip_on_cran()
   ex <- ferx_example("warfarin")
@@ -1311,6 +1368,52 @@ test_that("SIR CI rows fall back to THETA<i> / OMEGA(i,i) / SIGMA(i) (#482)", {
   expect_identical(rownames(ci$sir_ci_omega), c("OMEGA(1,1)", "OMEGA(2,2)"))
   expect_identical(rownames(ci$sir_ci_sigma), "SIGMA(1)")
   expect_identical(colnames(ci$sir_ci_sigma), c("lower", "upper"))
+})
+test_that("SIR CI rows fall back per element on an empty or NA name (#557)", {
+  ci <- ferx:::.ferx_sir_ci_matrices(
+    c(1, 2, 3, 4), c(1, 2, 3, 4), c(1, 2, 3, 4),
+    theta_names = c("TVCL", NA), eta_names = c("ETA_CL", ""),
+    sigma_names = c(NA, "EPS_ADD")
+  )
+  expect_identical(rownames(ci$sir_ci_theta), c("TVCL", "THETA2"))
+  expect_identical(rownames(ci$sir_ci_omega), c("ETA_CL", "OMEGA(2,2)"))
+  expect_identical(rownames(ci$sir_ci_sigma), c("SIGMA(1)", "EPS_ADD"))
+  # The kappa intervals and the kappa print labels apply the same rule.
+  expect_identical(
+    rownames(ferx:::.ferx_sir_ci_kappa(c(1, 2, 3, 4), c("", "KAPPA_V"))),
+    c("KAPPA1", "KAPPA_V")
+  )
+  expect_identical(ferx:::.ferx_kappa_labels(c("", "KAPPA_V"), 2L),
+                   c("KAPPA1", "KAPPA_V"))
+})
+test_that("a malformed SIR CI vector is refused, not dropped or shifted (#557)", {
+  # Odd length on the live (FFI) path: no row structure.
+  expect_error(
+    ferx:::.ferx_sir_ci_matrices(c(1, 2, 3), NULL, NULL, NULL, NULL, NULL),
+    "`sir_ci_theta` is not a \\[lower, upper\\] number pair per row \\(got 3 values\\)"
+  )
+  expect_error(ferx:::.ferx_sir_ci_kappa(c(1, 2, 3), "KAPPA_CL"), "`sir_ci_kappa`")
+  # A pair list from a bundle: a `null` cell, a one-cell pair, a text cell.
+  bad <- list(
+    list(list(1, NULL), list(3, 4)),
+    list(list(1), list(3, 4)),
+    list(list(1, "x"), list(3, 4)),
+    list(1, 2, 3, 4)
+  )
+  for (b in bad) {
+    expect_error(
+      ferx:::.ferx_sir_ci_matrices(NULL, b, NULL, NULL, c("A", "B"), NULL, bundle = TRUE),
+      "fit.json: `sir.ci_omega` is not a list of \\[lower, upper\\] number pairs; the bundle is corrupt",
+      info = deparse(b)
+    )
+  }
+  expect_error(ferx:::.ferx_sir_ci_kappa(bad[[1L]], c("A", "B"), bundle = TRUE),
+               "`sir.ci_kappa`.*the bundle is corrupt")
+  # A well-formed pair list still loads, in row order.
+  ok <- ferx:::.ferx_sir_ci_matrices(NULL, list(list(1, 2), list(3, 4)), NULL,
+                                      NULL, c("A", "B"), NULL, bundle = TRUE)
+  expect_identical(ok$sir_ci_omega,
+                   matrix(c(1, 3, 2, 4), 2L, dimnames = list(c("A", "B"), c("lower", "upper"))))
 })
 test_that(".fitrx_subject_string_ids extracts character IDs or NULL", {
   expect_null(ferx:::.fitrx_subject_string_ids(list()))

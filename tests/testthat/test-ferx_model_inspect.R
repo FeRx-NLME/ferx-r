@@ -286,6 +286,43 @@ test_that("pre-fit eta order matches the engine with a diagonal between two bloc
                   covariance = FALSE, settings = list(maxiter = 0L))
   expect_equal(pre$iiv, fit$model_structure$iiv)
 })
+test_that("pre-fit structure matches a maxiter = 0 fit for every bundled model (#363)", {
+  # Generalises the warfarin_block_omega comparison above to every model
+  # ferx_example() ships, so the next divergence between the pre-fit reader
+  # and the engine is a failing test rather than a bug report. theta_names is
+  # left out: a fit expands data-dependent thetas (mbma_placebo's per-level
+  # contrasts) that no reading of the file alone can know.
+  skip_on_cran()
+  for (nm in ferx_example()) {
+    ex <- ferx_example(nm)
+    capture.output(pre <- ferx_model_inspect(ex$model))
+    fit <- suppressWarnings(suppressMessages(
+      ferx_fit(ex$model, ex$data, verbose = FALSE, covariance = FALSE,
+               settings = list(maxiter = 0L))
+    ))
+    for (f in c("model_type", "iiv", "iov", "iov_weights", "residual")) {
+      expect_identical(pre[[f]], fit$model_structure[[f]],
+                       label = sprintf("pre-fit %s of '%s'", f, nm))
+    }
+  }
+})
+test_that("the regex fallback reads IIV/IOV names as the engine does for every bundled model (#363)", {
+  # .ferx_parse_structure() only takes the regex path for a file the engine
+  # refuses, so no bundled model exercises it any more - which is how the
+  # mirror drifted unnoticed before (#358). Pin the fields it was written to
+  # match. theta_names, model_type and residual are independent
+  # implementations whose labels are known to differ (e.g. "1-cpt IG" vs
+  # "1-cpt ig", SDE diffusion thetas), so they are not compared.
+  for (nm in ferx_example()) {
+    path <- ferx_example(nm)$model
+    eng <- ferx:::ferx_rust_model_structure(normalizePath(path))
+    rx  <- suppressWarnings(ferx:::.ferx_parse_structure_regex(path))
+    for (f in c("iiv", "iov", "iov_weights")) {
+      expect_identical(rx[[f]], as.character(eng[[f]]),
+                       label = sprintf("regex %s of '%s'", f, nm))
+    }
+  }
+})
 test_that("ferx_model_inspect(fit) reads from the Rust-supplied structure post-fit", {
   fit <- warfarin_fit()
   out <- capture.output(s <- ferx_model_inspect(fit))
