@@ -815,6 +815,29 @@ test_that("T11d: ferx_sir runs on a block whose levels straddle 0", {
   expect_true(all(ci[neg, "upper"] < 0))
 })
 
+test_that("T11e: SIR keeps samples whose level changes sign (mbma_placebo)", {
+  # T11d's hand-made covariance has a proposal SD of 0.01, so no sampled level
+  # there ever crosses 0 and a regression that rejected or clamped a sample
+  # whose theta changes sign would keep it green (#477). The bundled
+  # mbma_placebo fit's own covariance step gives its PLACEBO levels SEs of
+  # ~0.4 around estimates within ~1 of 0, so here the intervals themselves
+  # straddle 0 (10 of 18 levels at this seed; ESS ~240 of 1000). The fit and
+  # the SIR run take ~1 s together.
+  skip_on_cran()
+  ex <- ferx_example("mbma_placebo")
+  fit <- ferx_fit(ex$model, ex$data, verbose = FALSE)
+  expect_identical(fit$covariance_status, "computed")
+  s <- ferx_sir(fit, sir_samples = 1000L, sir_resamples = 250L, sir_seed = 2L)
+  ci <- s$sir_ci_theta
+  expect_true(all(is.finite(ci)))
+  est <- fit$theta[rownames(ci)]
+  expect_false(anyNA(est))
+  expect_true(all(ci[, "lower"] <= est & est <= ci[, "upper"]))
+  lvl <- grepl("^PLACEBO\\[", rownames(ci))
+  straddle <- lvl & ci[, "lower"] < 0 & ci[, "upper"] > 0
+  expect_gt(sum(straddle), 0L)
+})
+
 test_that("T8b: a reloaded level-block fit runs the covariance step identically", {
   # R's .fitrx carries the bindings under r_extras (#466 moves them to the
   # native slot), and that is enough for the standalone step.
