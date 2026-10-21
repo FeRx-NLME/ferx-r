@@ -1756,16 +1756,20 @@ fn ferx_rust_predict_survival(model_path: &str, data_path: &str, times: Vec<f64>
         // the reader fills them from `iov_column` only.
         let occasion_notes = derive_file_occasions(&parsed, &mut population);
 
-        let results =
-            ferx_core::predict_survival(&parsed.model, &population, &parsed.model.default_params, &times)
-                .map_err(|e| engine_refusal("Error predicting: ", e))?;
-        // The rule-over-column note, if any, on the predict paths' channel.
-        let df = survival_results_to_df(&results);
-        Ok(if occasion_notes.is_empty() {
-            df
-        } else {
-            attach_sim_warnings(df, occasion_notes)
-        })
+        let output = ferx_core::predict_survival_diag(
+            &parsed.model,
+            &population,
+            &parsed.model.default_params,
+            &times,
+        )
+        .map_err(|e| engine_refusal("Error predicting: ", e))?;
+        // The rule-over-column note, if any, then core's non-fit bundle (ferx-r
+        // #433): parse, data-reader (through core's one filter), model/data,
+        // experimental-feature and ODE-solver findings; see `ferx_rust_predict`.
+        Ok(attach_sim_warnings(
+            survival_results_to_df(&output.results),
+            [occasion_notes, output.warnings].concat(),
+        ))
     })
 }
 
@@ -1849,16 +1853,14 @@ fn ferx_rust_predict_survival_from_fit(
             Err(e) => return Err(e),
         };
 
-        let results = ferx_core::predict_survival(&parsed.model, &population, &params, &times)
+        let output = ferx_core::predict_survival_diag(&parsed.model, &population, &params, &times)
             .map_err(|e| engine_refusal("Error predicting: ", e))?;
-        // The legacy-fit occasion note, if any, on the channel the predict and
-        // simulate paths use; without one the frame carries no attribute, as before.
-        let df = survival_results_to_df(&results);
-        Ok(if occasion_notes.is_empty() {
-            df
-        } else {
-            attach_sim_warnings(df, occasion_notes)
-        })
+        // The legacy-fit occasion note, if any, then core's non-fit bundle; see
+        // `ferx_rust_predict_survival` (ferx-r #433).
+        Ok(attach_sim_warnings(
+            survival_results_to_df(&output.results),
+            [occasion_notes, output.warnings].concat(),
+        ))
     })
 }
 

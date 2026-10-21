@@ -329,8 +329,10 @@ test_that("P15: the override note reaches ferx_simulate_adaptive() and ferx_pred
   expect_warning(surv <- ferx_predict_survival(model, data, times = c(0, 6)),
                  msg, fixed = TRUE)
   expect_true(any(grepl(msg, attr(surv, "simulation_warnings"), fixed = TRUE)))
-  # Without the rule the column is the source: no note, and no attribute.
+  # Without the rule the column is the source: no note. (The attribute itself
+  # is always attached since #433, and carries the engine's own findings for
+  # this model, so only the note's absence is asserted.)
   writeLines(append(text, "  iov_column = OCC", after = at), plain)
-  expect_no_warning(surv <- ferx_predict_survival(plain, data, times = c(0, 6)))
-  expect_null(attr(surv, "simulation_warnings"))
+  surv <- suppressWarnings(ferx_predict_survival(plain, data, times = c(0, 6)))
+  expect_false(any(grepl(msg, attr(surv, "simulation_warnings"), fixed = TRUE)))
 })
