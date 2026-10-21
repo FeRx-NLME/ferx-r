@@ -5471,6 +5471,42 @@ fn ferx_rust_known_blocks() -> Vec<String> {
     })
 }
 
+/// Every estimation method, for `ferx_rust_fit_option_keys()`.
+const FIT_OPTION_METHODS: [EstimationMethod; 10] = [
+    EstimationMethod::Foce,
+    EstimationMethod::FoceI,
+    EstimationMethod::FoceGn,
+    EstimationMethod::FoceGnHybrid,
+    EstimationMethod::Saem,
+    EstimationMethod::Imp,
+    EstimationMethod::Impmap,
+    EstimationMethod::Bayes,
+    EstimationMethod::Laplace,
+    EstimationMethod::Vi,
+];
+
+/// Exhaustive on purpose: a method the engine adds fails to compile here
+/// until it is listed in `FIT_OPTION_METHODS`, so its keys cannot be left out.
+#[allow(dead_code)]
+fn fit_option_method_listed(m: EstimationMethod) {
+    match m {
+        EstimationMethod::Foce
+        | EstimationMethod::FoceI
+        | EstimationMethod::FoceGn
+        | EstimationMethod::FoceGnHybrid
+        | EstimationMethod::Saem
+        | EstimationMethod::Imp
+        | EstimationMethod::Impmap
+        | EstimationMethod::Bayes
+        | EstimationMethod::Laplace
+        | EstimationMethod::Vi => {}
+    }
+}
+
+/// The `[data_selection]` keys. The engine has no public list of these; they
+/// mirror the exemption in ferx-core's `apply_fit_option` arm guard.
+const FIT_OPTION_DATA_SELECTION_KEYS: [&str; 3] = ["ignore", "accept", "ignore_subjects"];
+
 /// Every `settings` key the engine's `apply_fit_option` accepts.
 ///
 /// The union of `framework_keys()`, every method's `method_specific_keys()`
@@ -5485,44 +5521,15 @@ fn ferx_rust_known_blocks() -> Vec<String> {
 /// @export
 #[extendr]
 fn ferx_rust_fit_option_keys() -> Vec<String> {
-    use ferx_core::EstimationMethod as M;
-    // Exhaustive on purpose: a method the engine adds fails to compile here
-    // until it is listed in `METHODS`, so its keys cannot be left out.
-    fn listed(m: M) {
-        match m {
-            M::Foce
-            | M::FoceI
-            | M::FoceGn
-            | M::FoceGnHybrid
-            | M::Saem
-            | M::Imp
-            | M::Impmap
-            | M::Bayes
-            | M::Laplace
-            | M::Vi => {}
-        }
-    }
-    const METHODS: [M; 10] = [
-        M::Foce,
-        M::FoceI,
-        M::FoceGn,
-        M::FoceGnHybrid,
-        M::Saem,
-        M::Imp,
-        M::Impmap,
-        M::Bayes,
-        M::Laplace,
-        M::Vi,
-    ];
-    // The engine has no public list of these; they mirror the exemption in
-    // ferx-core's `apply_fit_option` arm guard.
-    const DATA_SELECTION: [&str; 3] = ["ignore", "accept", "ignore_subjects"];
     entry(move || {
-        METHODS.iter().for_each(|m| listed(*m));
         let mut keys: Vec<String> = ferx_core::framework_keys()
             .iter()
-            .chain(METHODS.iter().flat_map(|m| ferx_core::method_specific_keys(*m)))
-            .chain(DATA_SELECTION.iter())
+            .chain(
+                FIT_OPTION_METHODS
+                    .iter()
+                    .flat_map(|m| ferx_core::method_specific_keys(*m)),
+            )
+            .chain(FIT_OPTION_DATA_SELECTION_KEYS.iter())
             .map(|k| k.to_string())
             .collect();
         keys.sort();
