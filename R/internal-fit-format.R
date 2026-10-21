@@ -178,6 +178,25 @@
   strsplit(rows, "\n", fixed = TRUE)[[1L]]
 }
 
+# The off-diagonal pairs print.ferx_fit()'s `--- Correlations ---` blocks
+# report, under the OMEGA rows and a block_kappa's KAPPA rows: ferx-core's own
+# offdiag_corrs (ferx-core #2231), so which pairs are reported (|cov| > 1e-15,
+# row-major lower triangle) and each one's correlation (the param_corr entry,
+# else cov / sqrt(var_i * var_j), 0 when a variance is not positive) are the
+# engine console's, not an R copy (#547). The lines themselves keep R's label
+# convention, so they are formatted by the caller. A data frame with one row
+# per pair: i, j (1-based, j < i), cov, corr, and param_corr (TRUE when corr
+# came from the param_corr matrix, FALSE for the fallback).
+.ferx_offdiag_corrs <- function(m, param_corr = NULL) {
+  if (is.null(dim(m))) m <- matrix(m, 1L, 1L)
+  if (!is.null(param_corr)) {
+    param_corr <- as.matrix(param_corr)
+    storage.mode(param_corr) <- "double"
+  }
+  out <- ferx_rust_offdiag_corrs(as.numeric(m), nrow(m), param_corr)
+  as.data.frame(out, stringsAsFactors = FALSE)
+}
+
 # The label of each parameter in output: its declared name, or its entry in
 # `fallback` (AGENTS.md, Output Label Convention) when the fit carries no
 # names, the wrong number of them, or an empty / NA one. The one rule every

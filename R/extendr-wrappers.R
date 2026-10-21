@@ -219,6 +219,12 @@ ferx_rust_fitrx_omega_rows <- function(path) {
 
 #' @title Internal Rust backend binding
 #' @keywords internal
+ferx_rust_offdiag_corrs <- function(m, n, param_corr) {
+  .Call("wrap__ferx_rust_offdiag_corrs", m, n, param_corr)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
 ferx_rust_structural_theta_labels <- function(theta_names, profiled_blocks) {
   .Call("wrap__ferx_rust_structural_theta_labels", theta_names, profiled_blocks)
 }

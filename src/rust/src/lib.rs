@@ -6138,6 +6138,65 @@ fn ferx_rust_fitrx_omega_rows(path: &str) -> String {
     })
 }
 
+/// The off-diagonal entries of a random-effect covariance matrix that
+/// `print.ferx_fit()`'s `--- Correlations ---` blocks report, under the OMEGA
+/// rows and under a `block_kappa`'s KAPPA rows: ferx-core's own
+/// `offdiag_corrs` (#2231), the walk behind the engine's console and
+/// `format_summary`. Core owns which pairs are reported (`|cov| > 1e-15`, in
+/// row-major lower-triangle order) and each one's correlation (the
+/// `param_corr` entry, else cov over sqrt(var_i * var_j), 0 when a variance is
+/// not positive); R formats each line with its own label convention (ferx-r
+/// #547).
+///
+/// @param m Numeric, the `n` x `n` matrix flattened column-major.
+/// @param n Integer, its dimension.
+/// @param param_corr The parameter-correlation matrix
+///   (`fit$omega_param_corr` / `fit$omega_iov_param_corr`), or `NULL`.
+/// @return A list of parallel vectors, one element per reported pair: `i`,
+///   `j` (1-based, `j < i`), `cov`, `corr`, and `param_corr` (`TRUE` when
+///   `corr` is the `param_corr` entry, `FALSE` for the fallback).
+/// @export
+#[extendr]
+fn ferx_rust_offdiag_corrs(m: Vec<f64>, n: i32, param_corr: Robj) -> List {
+    entry(move || {
+        use ferx_core::io::output::{offdiag_corrs, OffDiagCorrSource};
+        let n = n.max(0) as usize;
+        if m.len() != n * n {
+            return Err(format!("m has {} values, not {n} x {n}", m.len()));
+        }
+        let m = nalgebra::DMatrix::from_column_slice(n, n, &m);
+        let param_corr = if param_corr.is_null() {
+            None
+        } else {
+            let values = param_corr
+                .as_real_vector()
+                .ok_or("param_corr must be a numeric matrix")?;
+            let dim = param_corr
+                .get_attrib("dim")
+                .and_then(|d| d.as_integer_vector());
+            let (nr, nc) = match dim.as_deref() {
+                Some(&[nr, nc]) if nr >= 0 && nc >= 0 => (nr as usize, nc as usize),
+                _ => return Err("param_corr must be a numeric matrix".to_string()),
+            };
+            if values.len() != nr * nc {
+                return Err(format!("param_corr has {} values, not {nr} x {nc}", values.len()));
+            }
+            Some(nalgebra::DMatrix::from_column_slice(nr, nc, &values))
+        };
+        let corrs = offdiag_corrs(&m, param_corr.as_ref(), &[], "");
+        Ok(list!(
+            i = corrs.iter().map(|c| c.i as i32 + 1).collect::<Vec<_>>(),
+            j = corrs.iter().map(|c| c.j as i32 + 1).collect::<Vec<_>>(),
+            cov = corrs.iter().map(|c| c.cov).collect::<Vec<_>>(),
+            corr = corrs.iter().map(|c| c.corr).collect::<Vec<_>>(),
+            param_corr = corrs
+                .iter()
+                .map(|c| c.corr_source == OffDiagCorrSource::ParamCorr)
+                .collect::<Vec<_>>()
+        ))
+    })
+}
+
 /// A theta transform as R spells it (`fit$theta_transforms`) read back.
 fn theta_transform_from_str(s: &str) -> std::result::Result<ThetaTransform, String> {
     match s {
@@ -12973,6 +13032,7 @@ extendr_module! {
     fn ferx_rust_omega_rows;
     fn ferx_rust_structural_theta_labels;
     fn ferx_rust_fitrx_omega_rows;
+    fn ferx_rust_offdiag_corrs;
     fn ferx_rust_theta_levels_from_fit;
     fn ferx_rust_fitrx_engine_resave;
     fn ferx_rust_eta_info_by_name;

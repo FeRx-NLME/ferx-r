@@ -3205,7 +3205,7 @@ print.ferx_fit <- function(x, ...) {
   # report. Printing the header above an empty body reads as an estimation that
   # failed rather than one that was never requested; ferx-core's own console
   # output suppresses the same section. Everything below is already a no-op at
-  # n_eta = 0 (the loops are over seq_len(n_eta), and has_offdiag stays FALSE).
+  # n_eta = 0 (the loops are over seq_len(n_eta), and om_corrs stays NULL).
   if (n_eta > 0L) {
     cat("\n", .ferx_style("OMEGA  (between-subject variability)", "bold"), "\n", sep = "")
     cat(strrep("-", 60), "\n", sep = "")
@@ -3213,50 +3213,40 @@ print.ferx_fit <- function(x, ...) {
   # The rows - CV%/SD note, scale tag, FIX, SE - are ferx-core's console rows
   # (#543), the same formatter as the OMEGA_IOV rows below.
   cat(paste0(omega_rows, "\n"), sep = "")
-  has_offdiag <- n_eta > 1L && any(abs(om[lower.tri(om)]) > 1e-15)
-  if (has_offdiag) {
+  # Which pairs are reported, and each one's correlation, are ferx-core's
+  # (offdiag_corrs, #547): a zero covariance - a structural zero of a
+  # `block_omega` declared beside a diagonal `omega` (ferx-core #1018) - is
+  # not reported. The line format is R's own label convention.
+  om_corrs <- if (n_eta > 1L) .ferx_offdiag_corrs(om, x$omega_param_corr) else NULL
+  if (!is.null(om_corrs) && nrow(om_corrs) > 0L) {
     cat("  --- Correlations ---\n")
-    for (i in seq_len(n_eta)) {
-      for (j in seq_len(i - 1L)) {
-        cov_ij <- om[i, j]
-        # A zero covariance is a pair the model does not correlate: a structural
-        # zero of a `block_omega` declared beside a diagonal `omega` (ferx-core
-        # #1018). `has_offdiag` opens this section when *any* pair is non-zero,
-        # so without this skip every other pair printed as well, as
-        # "cov = 0.000000 ... SE = 0.000000". Same 1e-15 threshold as that gate
-        # and as ferx-core's own summary and YAML writers.
-        if (abs(cov_ij) <= 1e-15) next
-        param_corr <- if (!is.null(x$omega_param_corr)) {
-          x$omega_param_corr[i, j]
-        } else {
-          var_i <- om[i, i]
-          var_j <- om[j, j]
-          if (var_i > 0 && var_j > 0) cov_ij / (sqrt(var_i) * sqrt(var_j)) else 0
-        }
-        corr_label <- if (!is.null(x$omega_param_corr)) "param corr" else "corr"
-        se_ij <- .omega_se_at(x$se_omega, n_eta, i, j)
-        # FIX spelled as on the rows above: ferx-core's `SE = ---` (#543).
-        se_part <- if (.ferx_omega_is_fixed(x$omega_fixed, i, j)) {
-          "  SE = ---"
-        } else if (!is.na(se_ij)) {
-          sprintf("  SE = %.6f", se_ij)
-        } else {
-          ""
-        }
-        has_nms <- !is.null(x$eta_names) && length(x$eta_names) >= i
-        if (has_nms) {
-          lbl_i <- if (nzchar(x$eta_names[i])) x$eta_names[i] else sprintf("OMEGA(%d,%d)", i, i)
-          lbl_j <- if (nzchar(x$eta_names[j])) x$eta_names[j] else sprintf("OMEGA(%d,%d)", j, j)
-          cat(sprintf(
-            "  %s ~ %s : cov = %.6f  (%s = %.4f)%s\n",
-            lbl_i, lbl_j, cov_ij, corr_label, param_corr, se_part
-          ))
-        } else {
-          cat(sprintf(
-            "  OMEGA(%d,%d) : cov = %.6f  (%s = %.4f)%s\n",
-            i, j, cov_ij, corr_label, param_corr, se_part
-          ))
-        }
+    for (k in seq_len(nrow(om_corrs))) {
+      i <- om_corrs$i[k]
+      j <- om_corrs$j[k]
+      cov_ij <- om_corrs$cov[k]
+      corr_label <- if (om_corrs$param_corr[k]) "param corr" else "corr"
+      se_ij <- .omega_se_at(x$se_omega, n_eta, i, j)
+      # FIX spelled as on the rows above: ferx-core's `SE = ---` (#543).
+      se_part <- if (.ferx_omega_is_fixed(x$omega_fixed, i, j)) {
+        "  SE = ---"
+      } else if (!is.na(se_ij)) {
+        sprintf("  SE = %.6f", se_ij)
+      } else {
+        ""
+      }
+      has_nms <- !is.null(x$eta_names) && length(x$eta_names) >= i
+      if (has_nms) {
+        lbl_i <- if (nzchar(x$eta_names[i])) x$eta_names[i] else sprintf("OMEGA(%d,%d)", i, i)
+        lbl_j <- if (nzchar(x$eta_names[j])) x$eta_names[j] else sprintf("OMEGA(%d,%d)", j, j)
+        cat(sprintf(
+          "  %s ~ %s : cov = %.6f  (%s = %.4f)%s\n",
+          lbl_i, lbl_j, cov_ij, corr_label, om_corrs$corr[k], se_part
+        ))
+      } else {
+        cat(sprintf(
+          "  OMEGA(%d,%d) : cov = %.6f  (%s = %.4f)%s\n",
+          i, j, cov_ij, corr_label, om_corrs$corr[k], se_part
+        ))
       }
     }
   }
@@ -3272,27 +3262,16 @@ print.ferx_fit <- function(x, ...) {
     # The rows - CV%/SD note, SE, a weighted kappa's weight line - are
     # ferx-core's console rows (#470); pooled shrinkage is in SHRINKAGE below.
     cat(paste0(kappa_rows, "\n"), sep = "")
-    iov_has_offdiag <- any(abs(m_iov[lower.tri(m_iov)]) > 1e-15)
-    if (iov_has_offdiag) {
+    # block_kappa: pairs and correlations from ferx-core, as for OMEGA above.
+    iov_corrs <- .ferx_offdiag_corrs(m_iov, x$omega_iov_param_corr)
+    if (nrow(iov_corrs) > 0L) {
       cat("  --- Correlations ---\n")
-      for (i in seq_len(n_kap)) {
-        for (j in seq_len(i - 1L)) {
-          cov_ij <- m_iov[i, j]
-          # Uncorrelated kappa pair (structural zero): skip, as for OMEGA above.
-          if (abs(cov_ij) <= 1e-15) next
-          param_corr <- if (!is.null(x$omega_iov_param_corr)) {
-            x$omega_iov_param_corr[i, j]
-          } else {
-            var_i <- m_iov[i, i]
-            var_j <- m_iov[j, j]
-            if (var_i > 0 && var_j > 0) cov_ij / (sqrt(var_i) * sqrt(var_j)) else 0
-          }
-          corr_label <- if (!is.null(x$omega_iov_param_corr)) "param corr" else "corr"
-          cat(sprintf(
-            "  %s ~ %s : cov = %.6f  (%s = %.4f)\n",
-            kap_names[i], kap_names[j], cov_ij, corr_label, param_corr
-          ))
-        }
+      for (k in seq_len(nrow(iov_corrs))) {
+        cat(sprintf(
+          "  %s ~ %s : cov = %.6f  (%s = %.4f)\n",
+          kap_names[iov_corrs$i[k]], kap_names[iov_corrs$j[k]], iov_corrs$cov[k],
+          if (iov_corrs$param_corr[k]) "param corr" else "corr", iov_corrs$corr[k]
+        ))
       }
     }
     if (!is.null(x$shrinkage_kappa_by_occ) &&
