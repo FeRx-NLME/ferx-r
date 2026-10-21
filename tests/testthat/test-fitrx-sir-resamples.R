@@ -250,6 +250,28 @@ test_that("ferx_load_fit() refuses resamples_packed rows that are not n x dim nu
   corrupt(function(rp) { rp[[1L]][[3L]] <- "x"; rp })
 })
 
+test_that("ferx_load_fit() refuses a sir.ci_* pair list with a hole in it (#557)", {
+  fit <- sir_res_standalone()
+  skip_if(is.null(fit), sir_res_cov_skip)
+  path <- withr::local_tempfile(fileext = ".fitrx")
+  ferx_save_fit(fit, path, include_data = TRUE)
+  corrupt <- function(field, edit) {
+    p <- fitrx_edit_bundle(path, function(w) {
+      w$sir[[field]] <- edit(w$sir[[field]])
+      w
+    })
+    expect_error(ferx_load_fit(p), paste0("`sir.", field, "`.*the bundle is corrupt"),
+                 info = field)
+  }
+  # A `null` bound, as a NaN would be written: unlist() would shift every
+  # later row up by one.
+  corrupt("ci_theta", function(ci) { ci[[1L]][2L] <- list(NULL); ci })
+  # A pair with one cell.
+  corrupt("ci_omega", function(ci) { ci[[1L]] <- ci[[1L]][1L]; ci })
+  # A text bound.
+  corrupt("ci_sigma", function(ci) { ci[[1L]][[1L]] <- "x"; ci })
+})
+
 test_that("ferx_sir() without sir_keep_samples drops the input fit's draws", {
   fit <- sir_res_standalone()
   skip_if(is.null(fit), sir_res_cov_skip)

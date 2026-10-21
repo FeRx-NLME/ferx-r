@@ -493,7 +493,7 @@ ferx_load_fit <- function(path) {
     # Rows named as on the live fit (#482).
     ci <- .ferx_sir_ci_matrices(
       w$sir$ci_theta, w$sir$ci_omega, w$sir$ci_sigma,
-      names(out$theta), out$eta_names, out$sigma_names
+      names(out$theta), out$eta_names, out$sigma_names, bundle = TRUE
     )
     out$sir_ci_theta <- ci$sir_ci_theta
     out$sir_ci_omega <- ci$sir_ci_omega
@@ -609,7 +609,7 @@ ferx_load_fit <- function(path) {
   }
   # SIR kappa intervals (ferx-core #1705), named once kappa_names is known.
   # Absent from a bundle written before #1705 and from a non-IOV fit: NULL.
-  out$sir_ci_kappa <- .ferx_sir_ci_kappa(w$sir$ci_kappa, out$kappa_names)
+  out$sir_ci_kappa <- .ferx_sir_ci_kappa(w$sir$ci_kappa, out$kappa_names, bundle = TRUE)
 
   # `omega_init` travels as a matrix on the wire but as a flat row-major
   # vector + dimension in the fit list (the shape the FFI ships), so the

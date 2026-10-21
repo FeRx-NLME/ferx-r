@@ -69,18 +69,42 @@
 }
 
 # SIR 95% intervals for the IOV kappa variances (ferx-core #1705), from the
-# flat [lo1, hi1, lo2, hi2, ...] vector the FFI list and a .fitrx bundle both
-# carry, as the (n_kappa, 2) lower/upper matrix the other sir_ci_* fields are.
-# One row per kappa, in kappa_names order; KAPPA<i> rows when the names do not
-# line up. NULL when the model has no kappa, SIR did not run, or the bundle
-# predates #1705.
-.ferx_sir_ci_kappa <- function(v, kappa_names) {
-  v <- as.numeric(unlist(v, use.names = FALSE))
-  if (length(v) == 0L || length(v) %% 2L != 0L) return(NULL)
+# flat [lo1, hi1, lo2, hi2, ...] vector the FFI list carries or the
+# [[lo, hi], ...] pair list a .fitrx bundle does (`bundle = TRUE`), as the
+# (n_kappa, 2) lower/upper matrix the other sir_ci_* fields are. One row per
+# kappa, labelled as .ferx_kappa_labels() labels it. NULL when the model has
+# no kappa, SIR did not run, or the bundle predates #1705; an error for a
+# malformed vector (.ferx_sir_ci_flat()).
+.ferx_sir_ci_kappa <- function(v, kappa_names, bundle = FALSE) {
+  v <- .ferx_sir_ci_flat(v, if (bundle) "sir.ci_kappa" else "sir_ci_kappa", bundle)
+  if (length(v) == 0L) return(NULL)
   m <- matrix(v, ncol = 2L, byrow = TRUE)
-  rn <- if (length(kappa_names) == nrow(m)) as.character(kappa_names) else paste0("KAPPA", seq_len(nrow(m)))
-  dimnames(m) <- list(rn, c("lower", "upper"))
+  dimnames(m) <- list(.ferx_kappa_labels(kappa_names, nrow(m)), c("lower", "upper"))
   m
+}
+
+# One SIR interval field as the flat [lo1, hi1, lo2, hi2, ...] numeric vector,
+# or numeric() when it is empty. The FFI list carries that vector already; a
+# .fitrx bundle carries one [lo, hi] array per row, which must be exactly two
+# cells of one number each (#557): `unlist()` would otherwise drop a `null`
+# cell (a NaN written as JSON) and shift every later row, and an odd count
+# would leave no row structure at all. Anything else is refused, naming
+# `field`, never dropped or reshaped.
+.ferx_sir_ci_flat <- function(v, field, bundle = FALSE) {
+  if (length(v) == 0L) return(numeric())
+  pair_ok <- function(p) {
+    length(p) == 2L && all(lengths(p) == 1L) && is.numeric(unlist(p, use.names = FALSE))
+  }
+  ok <- if (is.list(v)) all(vapply(v, pair_ok, NA)) else is.numeric(v) && length(v) %% 2L == 0L
+  if (!ok) {
+    if (bundle) {
+      stop("fit.json: `", field, "` is not a list of [lower, upper] number ",
+           "pairs; the bundle is corrupt.", call. = FALSE)
+    }
+    stop("`", field, "` is not a [lower, upper] number pair per row (got ",
+         length(unlist(v, use.names = FALSE)), " values).", call. = FALSE)
+  }
+  as.numeric(unlist(v, use.names = FALSE))
 }
 
 # The OMEGA_IOV rows print.ferx_fit() prints: ferx-core's own formatter
@@ -154,51 +178,53 @@
   strsplit(rows, "\n", fixed = TRUE)[[1L]]
 }
 
-# The label of each of `n` ETAs in print output: its declared name, or the
-# OMEGA(i,i) fallback (AGENTS.md, Output Label Convention) when the fit carries
-# no names, the wrong number of them, or an empty / NA one.
-.ferx_eta_labels <- function(eta_names, n) {
-  fallback <- sprintf("OMEGA(%d,%d)", seq_len(n), seq_len(n))
-  if (length(eta_names) != n) return(fallback)
-  out <- as.character(eta_names)
+# The label of each parameter in output: its declared name, or its entry in
+# `fallback` (AGENTS.md, Output Label Convention) when the fit carries no
+# names, the wrong number of them, or an empty / NA one. The one rule every
+# label helper below applies, element by element (#557).
+.ferx_param_labels <- function(names, fallback) {
+  if (length(names) != length(fallback)) return(fallback)
+  out <- as.character(names)
   bad <- is.na(out) | !nzchar(out)
   out[bad] <- fallback[bad]
   out
+}
+
+# The label of each of `n` ETAs: OMEGA(i,i) when its name is missing.
+.ferx_eta_labels <- function(eta_names, n) {
+  .ferx_param_labels(eta_names, sprintf("OMEGA(%d,%d)", seq_len(n), seq_len(n)))
 }
 
 # SIR 95% intervals for theta, omega and sigma, from the flat
-# [lo1, hi1, lo2, hi2, ...] vectors the FFI list and a .fitrx bundle both
-# carry, as (n, 2) lower/upper matrices. Rows follow the output label
-# convention (AGENTS.md): the bare declared name, THETA<i> / OMEGA(i,i) /
-# SIGMA(i) when the names do not line up with the rows. One rule for
-# ferx_fit(), ferx_sir() and ferx_load_fit() (#482). NULL for an empty vector.
+# [lo1, hi1, lo2, hi2, ...] vectors the FFI list carries or the [[lo, hi], ...]
+# pair lists a .fitrx bundle does (`bundle = TRUE`), as (n, 2) lower/upper
+# matrices. Rows follow the output label convention (AGENTS.md): the bare
+# declared name, THETA<i> / OMEGA(i,i) / SIGMA(i) for each one missing
+# (.ferx_param_labels()). One rule for ferx_fit(), ferx_sir() and
+# ferx_load_fit() (#482). NULL for an empty vector; an error for a malformed
+# one (.ferx_sir_ci_flat()).
 .ferx_sir_ci_matrices <- function(ci_theta, ci_omega, ci_sigma,
-                                  theta_names, eta_names, sigma_names) {
-  reshape <- function(v, nms, fallback) {
-    v <- as.numeric(unlist(v, use.names = FALSE))
-    if (length(v) == 0L || length(v) %% 2L != 0L) return(NULL)
+                                  theta_names, eta_names, sigma_names,
+                                  bundle = FALSE) {
+  reshape <- function(v, field, nms, fallback) {
+    v <- .ferx_sir_ci_flat(v, if (bundle) paste0("sir.", field) else paste0("sir_", field), bundle)
+    if (length(v) == 0L) return(NULL)
     n <- length(v) %/% 2L
-    rn <- if (length(nms) == n) as.character(nms) else fallback(seq_len(n))
+    rn <- .ferx_param_labels(nms, fallback(seq_len(n)))
     matrix(v, ncol = 2L, byrow = TRUE, dimnames = list(rn, c("lower", "upper")))
   }
   list(
-    sir_ci_theta = reshape(ci_theta, theta_names, function(i) paste0("THETA", i)),
-    sir_ci_omega = reshape(ci_omega, eta_names, function(i) paste0("OMEGA(", i, ",", i, ")")),
-    sir_ci_sigma = reshape(ci_sigma, sigma_names, function(i) paste0("SIGMA(", i, ")"))
+    sir_ci_theta = reshape(ci_theta, "ci_theta", theta_names, function(i) paste0("THETA", i)),
+    sir_ci_omega = reshape(ci_omega, "ci_omega", eta_names, function(i) paste0("OMEGA(", i, ",", i, ")")),
+    sir_ci_sigma = reshape(ci_sigma, "ci_sigma", sigma_names, function(i) paste0("SIGMA(", i, ")"))
   )
 }
 
-# The label of each of `n` kappas in print output: its declared name, or the
-# KAPPA<i> fallback (AGENTS.md, Output Label Convention) when the fit carries
-# no names, the wrong number of them, or an empty / NA one. The rows, the
-# correlations under them and the SHRINKAGE line all read this.
+# The label of each of `n` kappas: KAPPA<i> when its name is missing. The
+# rows, the correlations under them, the SHRINKAGE line and sir_ci_kappa all
+# read this.
 .ferx_kappa_labels <- function(kappa_names, n) {
-  fallback <- paste0("KAPPA", seq_len(n))
-  if (length(kappa_names) != n) return(fallback)
-  out <- as.character(kappa_names)
-  bad <- is.na(out) | !nzchar(out)
-  out[bad] <- fallback[bad]
-  out
+  .ferx_param_labels(kappa_names, paste0("KAPPA", seq_len(n)))
 }
 
 # The fields .ferx_kappa_rows() and .ferx_omega_rows() cannot hand to
