@@ -176,6 +176,24 @@ test_that("unnamed kappas print the KAPPA<i> fallback on every line that names t
   expect_true(any(startsWith(out, "  KAPPA2 ~ KAPPA_CL : cov = 0.010000")))
 })
 
+test_that("an NA se_kappa entry prints SE = N/A, not NaN (#546)", {
+  # A .fitrx whose se_kappa has a null entry reloads as NA; the glue hands it
+  # to core as NaN, and core prints a non-finite SE as a missing one
+  # (ferx-core #2225).
+  fit <- make_fake_fit(
+    omega = matrix(0.10, 1, 1),
+    omega_iov = diag(c(0.04, 0.09)), kappa_names = c("KA", "KB"),
+    se_kappa = c(0.01, NA), kappa_param_types = c("log_normal", "log_normal"),
+    covariance_status = "computed"
+  )
+  rows <- printed_kappa_rows(fit)
+  expect_length(rows, 2L)
+  expect_match(rows[1L], "SE = 0.010000$")
+  expect_match(rows[2L], "^  KB +=")
+  expect_match(rows[2L], "SE = N/A$")
+  expect_false(any(grepl("NaN", rows, fixed = TRUE)))
+})
+
 test_that("print refuses an unreadable kappa scale or covariance status by name (#545)", {
   base <- make_fake_fit(
     omega = matrix(0.10, 1, 1),
