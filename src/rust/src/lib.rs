@@ -905,7 +905,8 @@ fn ferx_rust_simulate(
         // makes moot), so relaying `population.warnings` too would say each twice.
         Ok(attach_sim_warnings(
             sim_results_to_df(&output.results),
-            [occasion_notes, output.warnings].concat(),
+            occasion_notes,
+            &output,
         ))
     })
 }
@@ -1026,7 +1027,8 @@ fn ferx_rust_simulate_from_fit(
         // Reader findings are already in `output.warnings`; see `ferx_rust_simulate`.
         Ok(attach_sim_warnings(
             sim_results_to_df(&output.results),
-            [occasion_notes, output.warnings].concat(),
+            occasion_notes,
+            &output,
         ))
     })
 }
@@ -1265,10 +1267,7 @@ fn simulate_adaptive(
         // filter, which on this path also withholds `W_NO_DOSES`: the controller
         // supplies the whole regimen, so an observation grid alone is the normal
         // input (ferx-r #426).
-        Ok(mut result) => {
-            let warnings = [occasion_notes, std::mem::take(&mut result.warnings)].concat();
-            attach_sim_warnings(adaptive_result_to_list(&result), warnings)
-        }
+        Ok(result) => attach_sim_warnings(adaptive_result_to_list(&result), occasion_notes, &result),
         Err(e) => return Err(engine_refusal("ferx_simulate_adaptive: ", e)),
     })
 }
@@ -1519,7 +1518,8 @@ fn ferx_rust_simulate_with_uncertainty(
         Ok(match ferx_core::simulate_with_uncertainty_diag(&parsed.model, &population, &fit_result, &opts) {
             Ok(output) => attach_sim_warnings(
                 sim_results_to_df(&output.results),
-                [occasion_notes, output.warnings].concat(),
+                occasion_notes,
+                &output,
             ),
             Err(e) => return Err(engine_refusal("simulate_with_uncertainty error: ", e)),
         })
@@ -1585,7 +1585,8 @@ fn ferx_rust_predict(
         // which still holds the ones a compartment-free model makes moot.
         Ok(attach_sim_warnings(
             data_frame!(ID = id, TIME = time, PRED = pred).into(),
-            [occasion_notes, output.warnings].concat(),
+            occasion_notes,
+            &output,
         ))
     })
 }
@@ -1682,7 +1683,8 @@ fn ferx_rust_predict_from_fit(
         // Core's non-fit bundle; see `ferx_rust_predict` (ferx-r #426).
         Ok(attach_sim_warnings(
             data_frame!(ID = id, TIME = time, PRED = pred).into(),
-            [occasion_notes, output.warnings].concat(),
+            occasion_notes,
+            &output,
         ))
     })
 }
@@ -1769,7 +1771,8 @@ fn ferx_rust_predict_survival(model_path: &str, data_path: &str, times: Vec<f64>
         // experimental-feature and ODE-solver findings; see `ferx_rust_predict`.
         Ok(attach_sim_warnings(
             survival_results_to_df(&output.results),
-            [occasion_notes, output.warnings].concat(),
+            occasion_notes,
+            &output,
         ))
     })
 }
@@ -1860,7 +1863,8 @@ fn ferx_rust_predict_survival_from_fit(
         // `ferx_rust_predict_survival` (ferx-r #433).
         Ok(attach_sim_warnings(
             survival_results_to_df(&output.results),
-            [occasion_notes, output.warnings].concat(),
+            occasion_notes,
+            &output,
         ))
     })
 }
@@ -3681,14 +3685,51 @@ fn default_fit_result(
 /// the run was clean). Mirrors how the fit path exposes `FitResult.warnings`,
 /// but as an attribute since simulate and predict return a bare frame.
 ///
-/// `warnings` is always the `warnings` of a ferx-core `*_diag` result, never
+/// The engine's findings come from `diag`, a ferx-core `*_diag` result, never
 /// `Population.warnings`: core folds the data reader's findings into that bundle
 /// through its one suppression filter, and the raw list still holds the ones it
 /// withholds (`W_NO_DOSES` / `W_CMT_DEFAULTED` on a compartment-free model,
-/// `W_NO_DOSES` on the adaptive path; ferx-r #426, ferx-core #1645).
-fn attach_sim_warnings(mut df: Robj, warnings: Vec<String>) -> Robj {
+/// `W_NO_DOSES` on the adaptive path; ferx-r #426, ferx-core #1645). Taking the
+/// result rather than a `Vec<String>` makes relaying the raw list a compile
+/// error (ferx-r #432). `glue_notes` is for notes the glue itself writes, such
+/// as `derive_file_occasions`' and `derive_fit_occasions`'; they come first.
+fn attach_sim_warnings(mut df: Robj, glue_notes: Vec<String>, diag: &impl CoreDiag) -> Robj {
+    let warnings = [glue_notes.as_slice(), diag.warnings()].concat();
     df.set_attrib("simulation_warnings", warnings).unwrap();
     df
+}
+
+/// A ferx-core result whose `warnings` is core's non-fit diagnostics bundle,
+/// the only source `attach_sim_warnings` accepts for the engine's findings
+/// (ferx-r #432). Implement it only for a core result built by
+/// `postfit::non_fit_diagnostics` (or folded through the same filter) - never
+/// for `Population` or a wrapper around its `warnings`.
+trait CoreDiag {
+    fn warnings(&self) -> &[String];
+}
+
+impl CoreDiag for ferx_core::SimulationOutput {
+    fn warnings(&self) -> &[String] {
+        &self.warnings
+    }
+}
+
+impl CoreDiag for ferx_core::PredictionOutput {
+    fn warnings(&self) -> &[String] {
+        &self.warnings
+    }
+}
+
+impl CoreDiag for ferx_core::SurvivalPredictionOutput {
+    fn warnings(&self) -> &[String] {
+        &self.warnings
+    }
+}
+
+impl CoreDiag for ferx_core::AdaptiveSimulationResult {
+    fn warnings(&self) -> &[String] {
+        &self.warnings
+    }
 }
 
 fn sim_results_to_df(results: &[ferx_core::api::SimulationResult]) -> Robj {
