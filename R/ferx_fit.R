@@ -2524,10 +2524,37 @@ ferx_fit <- function(model, data = NULL,
     if (!is.character(output) || length(output) != 1L || is.na(output)) {
       stop("`output` must be a single .fitrx file path or NULL")
     }
-    ferx_save_fit(result, output, include_data = isTRUE(include_data))
+    .ferx_relay_save(
+      ferx_save_fit(result, output, include_data = isTRUE(include_data))
+    )
   }
 
   result
+}
+
+# `ferx_fit(output =)` saves through `ferx_save_fit()`, whose warnings and
+# errors name it (`ferx_save_fit: ...`, `ferx_save_fit(): ...`): a function
+# the caller never called (#537). Re-signal them under `ferx_fit`'s name,
+# keeping the condition's class and fields so a handler for e.g.
+# `ferx_data_edited_error` still catches it. Conditions without the prefix
+# pass through untouched.
+.ferx_relay_save <- function(expr, as = "ferx_fit") {
+  pattern <- "^ferx_save_fit(\\(\\))?: "
+  rename <- function(cond) {
+    cond$message <- sub(pattern, paste0(as, ": "), conditionMessage(cond))
+    cond
+  }
+  withCallingHandlers(
+    expr,
+    warning = function(w) {
+      if (!grepl(pattern, conditionMessage(w))) return()
+      warning(rename(w))
+      invokeRestart("muffleWarning")
+    },
+    error = function(e) {
+      if (grepl(pattern, conditionMessage(e))) stop(rename(e))
+    }
+  )
 }
 
 # Extract legacy mu-reference detection entries from the warnings vector.

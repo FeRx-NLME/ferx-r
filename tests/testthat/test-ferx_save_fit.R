@@ -640,6 +640,63 @@ test_that("ferx_fit(output = ...) writes a valid bundle", {
   expect_s3_class(loaded, "ferx_fit")
   expect_equal(loaded$ofv, fit$ofv, tolerance = 1e-12)
 })
+test_that("ferx_fit(output =) relays save-side conditions under its own name (#537)", {
+  relay <- ferx:::.ferx_relay_save
+  # The real save-side warning: a normal SIR proposal has no bundle record.
+  sr <- ferx:::.ferx_default_settings("sir_settings")
+  sr$df <- Inf
+  w <- tryCatch(
+    relay(ferx:::.fitrx_settings_to_wire(list(sir_settings = sr), "sir_settings")),
+    warning = function(w) w
+  )
+  expect_match(conditionMessage(w), "^ferx_fit: the fit's SIR used a normal proposal")
+  expect_null(conditionCall(w))
+  # The real save-side refusal, prefixed by the engine's decoder.
+  sc <- ferx:::.ferx_default_settings("scoring_settings")
+  sc$inner_maxit <- 5L
+  expect_error(
+    relay(ferx:::.fitrx_settings_to_wire(list(scoring_settings = sc), "scoring_settings")),
+    'ferx_fit: `fit$scoring_settings`: unknown key "inner_maxit"', fixed = TRUE
+  )
+  # The `ferx_save_fit(): ` spelling, with its class kept for handlers.
+  e <- tryCatch(relay(stop(errorCondition(
+    "ferx_save_fit(): the data file x has changed", class = "ferx_data_edited_error"
+  ))), error = function(e) e)
+  expect_s3_class(e, "ferx_data_edited_error")
+  expect_identical(conditionMessage(e), "ferx_fit: the data file x has changed")
+  w <- tryCatch(relay(warning(warningCondition(
+    "ferx_save_fit(): the model file x has changed", class = "ferx_model_edited_warning"
+  ))), warning = function(w) w)
+  expect_s3_class(w, "ferx_model_edited_warning")
+  expect_identical(conditionMessage(w), "ferx_fit: the model file x has changed")
+  # Only the leading prefix is rewritten; anything else passes through as is,
+  # and the value comes back.
+  expect_warning(relay(warning("see ferx_save_fit: below")),
+                 "^see ferx_save_fit: below$")
+  expect_error(relay(stop("unrelated")), "^unrelated$")
+  expect_identical(relay(42L), 42L)
+})
+test_that("ferx_fit(output =) never names ferx_save_fit in its warnings (#537)", {
+  skip_on_cran()
+  ex <- ferx_example("warfarin")
+  path <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(path), add = TRUE)
+  testthat::local_mocked_bindings(
+    ferx_save_fit = function(fit, path, ...) {
+      warning("ferx_save_fit: not recorded", call. = FALSE)
+      invisible(path)
+    }
+  )
+  expect_warning(
+    ferx_fit(
+      ex$model, ex$data,
+      method = "focei", verbose = FALSE, covariance = FALSE,
+      settings = list(maxiter = 5L),
+      output = path
+    ),
+    "^ferx_fit: not recorded$"
+  )
+})
 test_that("include_data = TRUE bundles the input CSV", {
   skip_on_cran()
   ex <- ferx_example("warfarin")
