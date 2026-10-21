@@ -247,13 +247,13 @@ test_that("ferx_covariance labels a block omega's rows column-major", {
 
   d <- diag(out$cov_matrix)
   expect_true(all(
-    c("ETA_CL,ETA_CL", "ETA_V,ETA_CL", "ETA_KA,ETA_CL",
-      "ETA_V,ETA_V", "ETA_KA,ETA_V", "ETA_KA,ETA_KA") %in% names(d)
+    c("ETA_CL", "ETA_V ~ ETA_CL", "ETA_KA ~ ETA_CL",
+      "ETA_V", "ETA_KA ~ ETA_V", "ETA_KA") %in% names(d)
   ))
   # The held covariances of the partial block are the zeros; no variance is.
-  expect_identical(unname(d[["ETA_KA,ETA_CL"]]), 0)
-  expect_identical(unname(d[["ETA_KA,ETA_V"]]), 0)
-  expect_gt(d[["ETA_V,ETA_V"]], 0)
+  expect_identical(unname(d[["ETA_KA ~ ETA_CL"]]), 0)
+  expect_identical(unname(d[["ETA_KA ~ ETA_V"]]), 0)
+  expect_gt(d[["ETA_V"]], 0)
   expect_identical(rownames(out$cor_matrix), rownames(out$cov_matrix))
 })
 
@@ -315,14 +315,14 @@ block_kappa_iov <- function(txt) {
 # then the one kappa.
 block_omega_iov_labels <- c(
   "TVCL", "TVV", "TVKA",
-  "ETA_CL,ETA_CL", "ETA_V,ETA_CL", "ETA_KA,ETA_CL",
-  "ETA_V,ETA_V", "ETA_KA,ETA_V", "ETA_KA,ETA_KA",
+  "ETA_CL", "ETA_V ~ ETA_CL", "ETA_KA ~ ETA_CL",
+  "ETA_V", "ETA_KA ~ ETA_V", "ETA_KA",
   "PROP_ERR", "KAPPA_CL"
 )
 
 block_kappa_iov_labels <- c(
   "TVCL", "TVV", "TVKA", "ETA_CL", "ETA_V", "ETA_KA", "PROP_ERR",
-  "KAPPA_CL,KAPPA_CL", "KAPPA_V,KAPPA_CL", "KAPPA_V,KAPPA_V"
+  "KAPPA_CL", "KAPPA_V ~ KAPPA_CL", "KAPPA_V"
 )
 
 test_that("ferx_fit(): a block omega with a diagonal kappa labels kappa after sigma", {

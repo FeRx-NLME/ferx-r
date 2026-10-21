@@ -3960,9 +3960,10 @@ fn cov_matrix_held(model: &CompiledModel, cov_matrix_dim: i32) -> Vec<bool> {
 /// mislabel rows without an error; the end-to-end tests in
 /// `test-ferx_covariance.R` pin the order for every pair the engine accepts.
 ///
-/// A diagonal Ω / Ω_IOV entry is the bare declared name; a block one, in the
-/// column-major lower-triangle order `pack_params` uses, is `ROW,COL` - its
-/// diagonal too (`ETA_CL,ETA_CL`), the spelling R gave the Ω block (#367).
+/// Every variance is the bare declared name, block or diagonal alike; a block
+/// covariance, in the column-major lower-triangle order `pack_params` uses, is
+/// `ROW ~ COL` (`ETA_V ~ ETA_CL`), the one off-diagonal spelling of the
+/// output-label convention, shared with the `block_sigma` ρ's (ferx-r #440).
 /// Fallbacks per the output-label convention: `THETA<i>`, `OMEGA(i,j)`,
 /// `SIGMA(i)`, `KAPPA<i>` (`KAPPA(i,j)` off the diagonal). A mixture override is
 /// the overridden name with its class, `ETA_CL (class 2)`. Empty, like the mask,
@@ -3981,8 +3982,8 @@ fn cov_matrix_labels(model: &CompiledModel, cov_matrix_dim: i32) -> Vec<String> 
     let mut labels: Vec<String> = (0..p.theta.len()).map(theta).collect();
     for (r, c) in lower_tri(p.omega.dim(), p.omega.diagonal) {
         labels.push(match (eta(r), eta(c)) {
-            (Some(a), _) if p.omega.diagonal => a,
-            (Some(a), Some(b)) => format!("{a},{b}"),
+            (Some(a), _) if r == c => a,
+            (Some(a), Some(b)) => format!("{a} ~ {b}"),
             _ => format!("OMEGA({},{})", r + 1, c + 1),
         });
     }
@@ -3991,9 +3992,9 @@ fn cov_matrix_labels(model: &CompiledModel, cov_matrix_dim: i32) -> Vec<String> 
         let kappa = |k: usize| named(&iov.eta_names, k).or_else(|| named(&model.kappa_names, k));
         for (r, c) in lower_tri(iov.dim(), iov.diagonal) {
             labels.push(match (kappa(r), kappa(c)) {
-                (Some(a), _) if iov.diagonal => a,
-                (Some(a), Some(b)) => format!("{a},{b}"),
-                _ if iov.diagonal => format!("KAPPA{}", r + 1),
+                (Some(a), _) if r == c => a,
+                (Some(a), Some(b)) => format!("{a} ~ {b}"),
+                _ if r == c => format!("KAPPA{}", r + 1),
                 _ => format!("KAPPA({},{})", r + 1, c + 1),
             });
         }

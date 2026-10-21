@@ -3388,8 +3388,9 @@ test_that("a block_omega beside a diagonal omega keeps the cross covariances at 
 # omega's rows as the lower triangle COLUMN-major - the packing `se_omega` is
 # documented with and `.omega_se_at()` indexes - but the dimnames were built
 # row-major, so on this 3x3 block two labels sat on the wrong rows: the held
-# (KA,CL) covariance was labelled `ETA_V,ETA_V`, reporting an estimated
-# variance as exactly zero.
+# (KA,CL) covariance was labelled as the (V,V) variance, reporting an estimated
+# variance as exactly zero. Variances carry the bare name and covariances
+# `ROW ~ COL`, as everywhere else in the output (#440).
 test_that("cov_matrix labels a block omega's rows in the order it stores them", {
   ex  <- ferx_example("warfarin_block_omega")
   fit <- suppressWarnings(ferx_fit(ex$model, ex$data, verbose = FALSE))
@@ -3397,20 +3398,20 @@ test_that("cov_matrix labels a block omega's rows in the order it stores them", 
 
   d <- diag(fit$cov_matrix)
   expect_true(all(
-    c("ETA_CL,ETA_CL", "ETA_V,ETA_CL", "ETA_KA,ETA_CL",
-      "ETA_V,ETA_V", "ETA_KA,ETA_V", "ETA_KA,ETA_KA") %in% names(d)
+    c("ETA_CL", "ETA_V ~ ETA_CL", "ETA_KA ~ ETA_CL",
+      "ETA_V", "ETA_KA ~ ETA_V", "ETA_KA") %in% names(d)
   ))
   # The partial block holds (KA,CL) and (KA,V) at zero; every declared
   # parameter is estimated, so no *variance* row may be zero.
-  expect_identical(unname(d[["ETA_KA,ETA_CL"]]), 0)
-  expect_identical(unname(d[["ETA_KA,ETA_V"]]), 0)
-  expect_gt(d[["ETA_V,ETA_V"]], 0)
-  expect_gt(d[["ETA_CL,ETA_CL"]], 0)
-  expect_gt(d[["ETA_KA,ETA_KA"]], 0)
+  expect_identical(unname(d[["ETA_KA ~ ETA_CL"]]), 0)
+  expect_identical(unname(d[["ETA_KA ~ ETA_V"]]), 0)
+  expect_gt(d[["ETA_V"]], 0)
+  expect_gt(d[["ETA_CL"]], 0)
+  expect_gt(d[["ETA_KA"]], 0)
 
   # `se_omega` is packed in that same order, so the held entries - the only
   # zeros either vector carries - have to line up slot for slot.
-  om_rows <- grep(",", names(d), fixed = TRUE, value = TRUE)
+  om_rows <- grep("^ETA_", names(d), value = TRUE)
   expect_equal(length(om_rows), length(fit$se_omega))
   expect_identical(which(unname(d[om_rows]) == 0), which(fit$se_omega == 0))
 
