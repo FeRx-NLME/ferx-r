@@ -35,6 +35,7 @@ ferx_rust_sir(
   method_chain,
   ebe_kappas_flat,
   ebe_kappa_ids,
+  threads,
   verbose,
   fit_bindings
 )
