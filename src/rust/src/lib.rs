@@ -7572,6 +7572,23 @@ fn fit_skeleton(
     Ok(fit)
 }
 
+/// The worker-pool width of a standalone `ferx_sir()` / `ferx_covariance()`
+/// step (ferx-r #527), and the width to report as its `n_threads_used`.
+///
+/// `threads > 0` pins the pool; anything else leaves `FitOptions::threads`
+/// unset, which the engine runs on its default width. That width is read
+/// through `PoolPlan::from_budget(0, 1)`, which resolves a zero budget with
+/// the same function the engine sizes an unpinned pool with. The skeleton's
+/// own `n_threads_used` is a placeholder, so the engine's result cannot say.
+fn posthoc_step_threads(threads: i32) -> (Option<usize>, i32) {
+    if threads > 0 {
+        (Some(threads as usize), threads)
+    } else {
+        let n = ferx_core::PoolPlan::from_budget(0, 1).threads_per_fit();
+        (None, n as i32)
+    }
+}
+
 /// Standalone SIR — run Sampling Importance Resampling against an existing fit.
 ///
 /// The R wrapper `ferx_sir()` flattens the fit list into the primitives this
@@ -7639,11 +7656,15 @@ fn fit_skeleton(
 /// @param ebe_kappas_flat `fit$ebe_kappas` kappa columns, row-major, one row
 ///   per (subject, occasion) in fit order; empty for a fit without IOV.
 /// @param ebe_kappa_ids The `ID` of each `ebe_kappas` row.
+/// @param threads Worker threads the step runs on: `0` the engine default,
+///   `n > 0` pinned. `ferx_sir()` passes the fit's `n_threads_used` unless
+///   told otherwise (ferx-r #527).
 /// @param verbose When TRUE, the engine prints progress to stderr.
 /// @return Named list with `sir_ess`, `sir_ci_theta`, `sir_ci_omega`, `sir_ci_sigma`,
 ///   `sir_ci_kappa`,
 ///   `sir_resamples`, `sir_resamples_n`, `sir_resamples_dim`, `sir_seed_used`,
-///   `sir_settings` (the record this run made), `theta_levels`, and `warnings`.
+///   `sir_settings` (the record this run made), `theta_levels`,
+///   `n_threads_used` (the width this run's pool had), and `warnings`.
 #[extendr]
 #[allow(clippy::too_many_arguments)]
 fn ferx_rust_sir(
@@ -7677,6 +7698,7 @@ fn ferx_rust_sir(
     method_chain: Vec<String>,
     ebe_kappas_flat: Vec<f64>,
     ebe_kappa_ids: Vec<String>,
+    threads: i32,
     verbose: bool,
     fit_bindings: List,
 ) -> Robj {
@@ -7745,6 +7767,8 @@ fn ferx_rust_sir(
         let mut opts = FitOptions::default();
         opts.interaction = interaction;
         opts.verbose = verbose;
+        let (step_threads, n_threads_used) = posthoc_step_threads(threads);
+        opts.threads = step_threads;
 
         // ferx_core::run_sir verifies hashes (when set), re-parses model + data,
         // reconstructs the inner ModelParameters, and runs SIR. We pass None for
@@ -7810,6 +7834,7 @@ fn ferx_rust_sir(
                 None => Robj::from(()),
             },
             theta_levels = theta_levels,
+            n_threads_used = n_threads_used,
             warnings = new_fit.warnings.clone()
         )
         .into())
@@ -7881,10 +7906,14 @@ fn ferx_rust_sir(
 ///   per (subject, occasion) in fit order; empty for a fit without IOV.
 /// @param ebe_kappa_ids The `ID` of each `ebe_kappas` row.
 /// @param covariance_method Covariance estimator: "r"/"hessian", "s"/"cross_product", or "rsr"/"sandwich".
+/// @param threads Worker threads the step runs on: `0` the engine default,
+///   `n > 0` pinned. `ferx_covariance()` passes the fit's `n_threads_used`
+///   unless told otherwise (ferx-r #527).
 /// @param verbose When TRUE, the engine prints progress to stderr.
 /// @return Named list with `cov_matrix`, `cov_matrix_dim`, `se_theta`, `se_omega`,
 ///   `se_sigma`, `se_kappa`, `covariance_status`, `cov_eigenvalues`,
-///   `cov_condition_number`, `theta_levels` (NA intervals), and `warnings`.
+///   `cov_condition_number`, `theta_levels` (NA intervals), `n_threads_used`
+///   (the width this run's pool had), and `warnings`.
 #[extendr]
 #[allow(clippy::too_many_arguments)]
 fn ferx_rust_covariance(
@@ -7917,6 +7946,7 @@ fn ferx_rust_covariance(
     ebe_kappas_flat: Vec<f64>,
     ebe_kappa_ids: Vec<String>,
     covariance_method: &str,
+    threads: i32,
     verbose: bool,
     fit_bindings: List,
 ) -> Robj {
@@ -7984,6 +8014,8 @@ fn ferx_rust_covariance(
         opts.covariance_method = covariance_method_enum;
         opts.interaction = interaction;
         opts.verbose = verbose;
+        let (step_threads, n_threads_used) = posthoc_step_threads(threads);
+        opts.threads = step_threads;
 
         // Pass None for model/population so run_covariance re-parses model + data
         // from the recorded paths and fires the SHA-256 integrity check — the
@@ -8058,6 +8090,7 @@ fn ferx_rust_covariance(
                 .map(|c| c.sigma_j as i32 + 1)
                 .collect::<Vec<i32>>(),
             theta_levels = theta_levels,
+            n_threads_used = n_threads_used,
             warnings = new_fit.warnings.clone()
         )
         .into())

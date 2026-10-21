@@ -85,6 +85,11 @@
 #'   parameter vectors on the returned fit. Required for
 #'   [ferx_simulate_with_uncertainty()] with `method = "sir"`. `NULL` takes
 #'   the fit's recorded value, else `FALSE`.
+#' @param threads Worker threads the step runs on. `NULL` (the default)
+#'   takes the width the fit ran on, `fit$n_threads_used`; `0` asks for the
+#'   engine default; a positive integer pins the width. It does not change
+#'   the result, only the resources the step uses. The returned fit's
+#'   `n_threads_used` reports the width this step ran on.
 #' @param verbose When `TRUE`, the engine prints progress to stderr.
 #'   Default `FALSE`.
 #' @param sir_scale The parameter scale SIR's importance-sampling target is
@@ -111,8 +116,8 @@
 #'   variance, named by `kappa_names`; NULL without IOV), `sir_seed_used`
 #'   (the seed this run resampled with: `sir_seed`, or 12345 when it is
 #'   `NULL`), `sir_settings` (the settings this run used; see [ferx_fit()]),
-#'   and (when the run kept them) `sir_resamples` / `sir_resamples_n` /
-#'   `sir_resamples_dim`.
+#'   `n_threads_used` (the width this run ran on), and (when the run kept
+#'   them) `sir_resamples` / `sir_resamples_n` / `sir_resamples_dim`.
 #'   Any warnings the SIR step emitted are appended to `fit$warnings` and to
 #'   `fit$warnings_structured` under the `sir` category - in particular the
 #'   proposal diagnostics: a covariance that is rank-deficient beyond its
@@ -178,10 +183,12 @@ ferx_sir <- function(fit,
                      sir_keep_samples = NULL,
                      verbose = FALSE,
                      sir_scale = NULL,
-                     sir_df = NULL) {
+                     sir_df = NULL,
+                     threads = NULL) {
   if (!inherits(fit, "ferx_fit")) {
     stop("`fit` must be a ferx_fit object (from ferx_fit() or ferx_load_fit()).")
   }
+  threads_arg <- .ferx_step_threads(threads, fit)
 
   # Validate the SIR knobs up-front so user errors surface as clean R
   # conditions rather than as the engine's "weighted sampler failed"
@@ -403,6 +410,7 @@ ferx_sir <- function(fit,
     method_chain = method_args$method_chain,
     ebe_kappas_flat = kappa_args$ebe_kappas_flat,
     ebe_kappa_ids = kappa_args$ebe_kappa_ids,
+    threads = threads_arg,
     verbose = isTRUE(verbose),
     fit_bindings = binding_args$fit_bindings
   ), model_path, data_path)
@@ -439,6 +447,10 @@ ferx_sir <- function(fit,
   # The seed and settings this run used (ferx-core #1767), not the input fit's.
   fit$sir_seed_used <- raw$sir_seed_used
   fit$sir_settings <- raw$sir_settings
+  # The width this run's pool had, not the fit's (#527).
+  if (!is.null(raw$n_threads_used)) {
+    fit$n_threads_used <- as.integer(raw$n_threads_used)
+  }
 
   # A run that did not keep its draws drops the input fit's: they belong to
   # an earlier run, and ferx_save_fit() would otherwise write them beside

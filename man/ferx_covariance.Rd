@@ -8,7 +8,8 @@ ferx_covariance(
   fit,
   covariance_method = "r",
   mu_referencing = NULL,
-  verbose = FALSE
+  verbose = FALSE,
+  threads = NULL
 )
 }
 \arguments{
@@ -27,14 +28,21 @@ overrides the record for this call.}
 
 \item{verbose}{When \code{TRUE}, the engine prints progress to stderr.
 Default \code{FALSE}.}
+
+\item{threads}{Worker threads the step runs on. \code{NULL} (the default)
+takes the width the fit ran on, \code{fit$n_threads_used}; \code{0} asks for the
+engine default; a positive integer pins the width. It does not change
+the result, only the resources the step uses. The returned fit's
+\code{n_threads_used} reports the width this step ran on.}
 }
 \value{
 The input \code{fit}, with \code{cov_matrix}, \code{cor_matrix}, \code{se_theta},
 \code{se_omega}, \code{se_sigma}, \code{se_kappa}, \code{covariance_status}, \code{eigenvalues},
 \code{condition_number}, \code{max_abs_correlation} (the largest absolute
 off-diagonal parameter correlation, \code{NA} when the step produced no
-matrix - the value \code{\link[=check_strictness]{check_strictness()}} gates on), and the \code{se} column of
-\code{residual_correlations} refreshed.
+matrix - the value \code{\link[=check_strictness]{check_strictness()}} gates on), the \code{se} column of
+\code{residual_correlations}, and \code{n_threads_used} (the width this step ran
+on) refreshed.
 }
 \description{
 Run the standard-error covariance step against a fit that was
