@@ -492,6 +492,7 @@ test_that(".ferx_warning_guidance returns negative-autocorrelation guidance", {
     "absorption_twin_declined", "bloq_method", "boundary_estimate", "cancelled",
     "condition_number", "convergence", "covariance_failed",
     "covariance_regularized", "covariance_step", "data_quality",
+    "degenerate_clearance_or_volume",
     "dw_autocorrelation", "ebe_start_dependent", "eps_shrinkage",
     "eta_normality", "eta_shrinkage",
     "experimental", "flat_parameter", "flip_flop", "gradient_fallback",
