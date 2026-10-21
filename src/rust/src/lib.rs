@@ -632,19 +632,24 @@ fn ferx_rust_fit(
             // foce/focei): it follows the chain's last *estimating* stage, on
             // only for FOCEI. IMP is skipped so `c("focei", "imp")` still reports
             // `interaction = TRUE`. Switching to the file's rule would change the
-            // objective an R `method = "saem"` / `"gn"` fit runs under.
+            // objective an R `method = "saem"` / `"gn"` fit runs under. A chain
+            // with a `vi` stage has no such history - R refused "vi" until #506 -
+            // so it keeps the file's rule, and an explicit `method = "vi"` scores
+            // (`vi_final_ofv`, covariance step) as a model-file one does.
             let chain = if opts.methods.is_empty() {
                 vec![opts.method]
             } else {
                 opts.methods.clone()
             };
-            let last_estimator = chain
-                .iter()
-                .rev()
-                .find(|m| **m != EstimationMethod::Imp)
-                .copied()
-                .unwrap_or(opts.method);
-            opts.interaction = last_estimator == EstimationMethod::FoceI;
+            if !chain.contains(&EstimationMethod::Vi) {
+                let last_estimator = chain
+                    .iter()
+                    .rev()
+                    .find(|m| **m != EstimationMethod::Imp)
+                    .copied()
+                    .unwrap_or(opts.method);
+                opts.interaction = last_estimator == EstimationMethod::FoceI;
+            }
             // The engine marks the method explicitly chosen (its
             // method_default_warning keys off this); a model-file `method` line
             // already did, so keep one entry.

@@ -19,6 +19,24 @@ test_that("ferx_fit(method = \"vi\") runs on warfarin", {
   expect_true(all(is.finite(fit$theta)))
 })
 
+test_that("an explicit method = \"vi\" keeps the inherited interaction flag", {
+  # VI has no R-side history (R refused it until #506), so it follows the
+  # model file's rule - interaction inherited - not the legacy R one, which
+  # turns it off for any final stage but FOCEI. warfarin's `method = foce`
+  # line would itself clear the flag, so it is dropped here.
+  ex <- ferx_example("warfarin")
+  src <- readLines(ex$model)
+  src <- src[!grepl("^\\s*method\\s*=", src)]
+  model <- tempfile(fileext = ".ferx")
+  on.exit(unlink(model), add = TRUE)
+  writeLines(src, model)
+  fit <- suppressWarnings(ferx_fit(
+    model, ex$data, method = "vi", covariance = FALSE, verbose = FALSE,
+    settings = vi_settings()
+  ))
+  expect_true(fit$interaction)
+})
+
 test_that("c(\"vi\", \"laplace\") with agq_eval_only = TRUE scores the VI estimate", {
   ex <- ferx_example("warfarin")
   fit <- suppressWarnings(ferx_fit(
@@ -74,6 +92,7 @@ test_that("a model-file `method = vi` runs with method = NULL", {
   writeLines(src, model)
   fit <- suppressWarnings(ferx_fit(model, ex$data, verbose = FALSE))
   expect_identical(fit$method, "VI")
+  expect_true(fit$interaction)
   expect_true(is.nan(fit$ofv))
   expect_false(is.null(fit$vi))
 })
