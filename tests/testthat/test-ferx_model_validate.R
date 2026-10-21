@@ -516,7 +516,7 @@ test_that("ferx_fit() leaves its own argument refusals uncoded (#517)", {
     expect_identical(d$code, "", info = pattern)
     expect_identical(charToRaw(d$text %||% ""), charToRaw(raised), info = pattern)
   }
-  glue_refusal("agq", character(), character(), "method = \"agq\" has been removed")
+  glue_refusal("agq", character(), character(), "method = agq has been removed")
   glue_refusal(character(), "maxiter", character(),
                "settings keys/values length mismatch (1 vs 0)")
 
