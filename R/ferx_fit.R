@@ -1609,6 +1609,16 @@
 #'   \item{eta_linked_theta}{Character vector parallel to \code{eta_names}: the
 #'     typical-value theta each ETA is attached to, or \code{""} when there is
 #'     none or its statements disagree.}
+#'   \item{eta_param_info}{Data frame with one row per (ETA, individual
+#'     parameter) statement the engine classified, in
+#'     \code{[individual_parameters]} order: \code{eta_name},
+#'     \code{individual_param} (the parameter the ETA enters),
+#'     \code{param_type} (as in \code{eta_param_types}) and
+#'     \code{linked_theta} (\code{""} for none). \code{eta_param_types} and
+#'     \code{eta_linked_theta} are its per-ETA reduction.
+#'     \code{\link{plot_param_dist}} reads it. Zero rows when the engine
+#'     classified nothing; a fit loaded from a \code{.fitrx} saved before it
+#'     existed has \code{individual_param} \code{""}.}
 #'   \item{kappa_param_types}{Named character vector parallel to
 #'     \code{kappa_names}: the scale each IOV kappa enters its parameter on,
 #'     with the values of \code{eta_param_types} except

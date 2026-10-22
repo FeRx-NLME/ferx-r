@@ -90,6 +90,7 @@ export(ferx_sir)
 export(ferx_stop)
 export(ferx_trace)
 export(ferx_xpose)
+export(plot_param_dist)
 importFrom(graphics,
   abline,
   hist,

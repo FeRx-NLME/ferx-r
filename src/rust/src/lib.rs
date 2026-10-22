@@ -4546,6 +4546,15 @@ fn fit_result_to_list(
         .collect();
     let (eta_param_types, eta_linked_theta) =
         eta_info_by_name(&result.eta_names, &info_names, &info_types, &info_linked);
+    // The same entries unreduced, one row per (ETA, individual parameter)
+    // statement, so a consumer that needs the parameter an ETA enters
+    // (`plot_param_dist()`, #478) reads the engine's own pairing.
+    let eta_param_info_df = eta_param_info_to_dataframe(
+        &info_names,
+        &result.eta_param_info.iter().map(|i| i.individual_param_name.clone()).collect::<Vec<_>>(),
+        &info_types,
+        &info_linked,
+    );
     // Scale of each IOV kappa (ferx-core #1643), parallel to `kappa_names`;
     // empty on a result that predates it.
     let kappa_param_types: Vec<String> = result.kappa_param_types.iter()
@@ -4868,6 +4877,7 @@ fn fit_result_to_list(
         eta_log_transformed = eta_log_transformed,
         eta_param_types = eta_param_types,
         eta_linked_theta = eta_linked_theta,
+        eta_param_info = eta_param_info_df,
         kappa_param_types = kappa_param_types,
         eta_names = result.eta_names.clone(),
         theta_transforms = theta_transforms,
@@ -5049,6 +5059,28 @@ fn finish_df(pairs: Vec<(&str, Robj)>, nrow: usize) -> Robj {
     let row_names: Vec<i32> = (1..=nrow as i32).collect();
     df.set_attrib("row.names", row_names).unwrap();
     df.into()
+}
+
+// -- Helper: the engine's `eta_param_info` as a data frame (#478) --
+//
+// One row per entry, in [individual_parameters] statement order: the ETA, the
+// individual parameter it enters, its scale and its linked theta (`""` for
+// none). Zero rows when the engine classified nothing.
+fn eta_param_info_to_dataframe(
+    eta_names: &[String],
+    params: &[String],
+    types: &[String],
+    linked: &[String],
+) -> Robj {
+    finish_df(
+        vec![
+            ("eta_name", eta_names.to_vec().into()),
+            ("individual_param", params.to_vec().into()),
+            ("param_type", types.to_vec().into()),
+            ("linked_theta", linked.to_vec().into()),
+        ],
+        eta_names.len(),
+    )
 }
 
 // -- Helper: per-parameter prior report as a data frame (ferx-core #254) --

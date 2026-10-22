@@ -44,6 +44,7 @@ reference:
       - ferx_get_warnings
       - ferx_cov_screen
       - plot.ferx_fit
+      - plot_param_dist
       - ferx_trace
       - ferx_calc_npde
       - ferx_contrast_vpc

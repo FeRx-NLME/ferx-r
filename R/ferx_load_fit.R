@@ -482,9 +482,14 @@ ferx_load_fit <- function(path) {
     )
     out$eta_param_types <- by_name$eta_param_types
     out$eta_linked_theta <- by_name$eta_linked_theta
+    out$eta_param_info <- .fitrx_eta_param_info_df(
+      field("eta_name"), field("individual_param_name"),
+      field("param_type"), field("linked_theta")
+    )
   } else {
     out$eta_param_types <- character()
     out$eta_linked_theta <- character()
+    out$eta_param_info <- .fitrx_eta_param_info_df()
   }
 
   # SIR
@@ -1138,4 +1143,18 @@ ferx_load_fit <- function(path) {
   Encoding(txt) <- "UTF-8"
   if (!validUTF8(txt)) return(NULL)
   txt
+}
+
+# `fit$eta_param_info` as the live fit spells it (#478): one row per entry.
+# A bundle written before the field existed carries `individual_param_name`
+# as "" (or not at all), so its rows name no parameter.
+.fitrx_eta_param_info_df <- function(eta_name = character(),
+                                     individual_param = character(),
+                                     param_type = character(),
+                                     linked_theta = character()) {
+  data.frame(
+    eta_name = eta_name, individual_param = individual_param,
+    param_type = param_type, linked_theta = linked_theta,
+    stringsAsFactors = FALSE
+  )
 }
