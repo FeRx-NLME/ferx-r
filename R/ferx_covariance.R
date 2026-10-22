@@ -306,6 +306,8 @@ ferx_covariance <- function(fit,
     method_chain = method_args$method_chain,
     ebe_kappas_flat = kappa_args$ebe_kappas_flat,
     ebe_kappa_ids = kappa_args$ebe_kappa_ids,
+    # The thetas the fit held, the engine's auto-frozen ones included (#613).
+    theta_fixed = .ferx_fit_theta_fixed(fit),
     covariance_method = cov_method,
     threads = threads_arg,
     verbose = isTRUE(verbose),

@@ -59,6 +59,16 @@
   identical(last_method, "FOCEI")
 }
 
+# The thetas the fit held, as ferx_covariance() and ferx_sir() hand them to the
+# engine (#613): its FIX flags plus any theta the engine froze during the fit
+# for having no effect on the objective, which the model file does not record.
+# The glue holds them on the step's skeleton as the fit's own step did; NA
+# reads as not held, and logical() (a fit without the field) leaves the model
+# file's FIX alone.
+.ferx_fit_theta_fixed <- function(fit) {
+  as.logical(fit$theta_fixed %||% logical())
+}
+
 # The fit's method and method chain in the engine's labels ("SAEM", "FOCEI",
 # ...), as ferx_covariance() and ferx_sir() hand them to the engine (#591).
 # The engine scores the objective of the fit's method and routes the
