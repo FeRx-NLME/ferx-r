@@ -636,6 +636,45 @@ test_that(".ferx_fit_subject_ids falls back to one ID per sdtab subject block (#
                    c("100000", "7", "9", "7", "2.5"))
 })
 
+test_that(".ferx_fit_subject_id_set names the field the IDs came from (#555)", {
+  id_set <- getFromNamespace(".ferx_fit_subject_id_set", "ferx")
+  sdtab <- data.frame(ID = c(1, 1, 2))
+  expect_identical(id_set(list(subject_ids = c("A", "B"), sdtab = sdtab), "ferx_sir"),
+                   list(ids = c("A", "B"), source = "fit$subject_ids"))
+  expect_identical(id_set(list(sdtab = sdtab), "ferx_sir"),
+                   list(ids = c("1", "2"), source = "fit$sdtab$ID"))
+})
+
+test_that(".ferx_sdtab_ids_hint adds the re-fit advice only to an sdtab-ID mismatch (#555)", {
+  hint <- getFromNamespace(".ferx_sdtab_ids_hint", "ferx")
+  refusal <- function(code) {
+    structure(class = c("ferx_engine_error", "error", "condition"),
+              list(message = paste0("run_covariance: no [", code, "]"),
+                   call = NULL, code = code))
+  }
+  msg_of <- function(code, source) {
+    tryCatch(hint(stop(refusal(code)), source), error = function(e) e)
+  }
+  for (code in c("E_FIT_SUBJECTS_MISMATCH", "E_POPULATION_MISMATCH")) {
+    e <- msg_of(code, "fit$sdtab$ID")
+    expect_s3_class(e, "ferx_engine_error")
+    expect_identical(e$code, code)
+    expect_match(conditionMessage(e),
+                 paste0("^run_covariance: no \\[", code, "\\]\n",
+                        "The fit predates fit\\$subject_ids"))
+    expect_match(conditionMessage(e), "Re-fit with ferx_fit(model, data).", fixed = TRUE)
+    # IDs from any other field are the fit's own: re-fitting would not help.
+    expect_identical(conditionMessage(msg_of(code, "fit$subject_ids")),
+                     paste0("run_covariance: no [", code, "]"))
+  }
+  # Another refusal is not about the IDs, so it passes through untouched.
+  other <- msg_of("E_HASH_MISMATCH", "fit$sdtab$ID")
+  expect_identical(conditionMessage(other), "run_covariance: no [E_HASH_MISMATCH]")
+  plain <- tryCatch(hint(stop("boom"), "fit$sdtab$ID"), error = conditionMessage)
+  expect_identical(plain, "boom")
+  expect_identical(hint(42, "fit$sdtab$ID"), 42)
+})
+
 test_that(".ferx_fit_subject_ids refuses a fit with no IDs, naming every field (#468)", {
   subject_ids <- getFromNamespace(".ferx_fit_subject_ids", "ferx")
   none <- list(ebe_etas = NULL, individual_estimates = NULL, n_subjects = 10L)
