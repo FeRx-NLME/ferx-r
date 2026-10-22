@@ -69,6 +69,11 @@ diagnostic appended to \code{warnings}, mirroring \code{\link[=ferx_fit]{ferx_fi
 reserved for input problems (missing / hash-mismatched model or data, or a
 fit whose parameters do not match the model, such as a \code{kappa} model whose
 fit carries no \code{omega_iov}).
+
+A fit with a \code{profile} theta level block (\code{fit$profiled_blocks}) has only
+the \code{"r"} covariance step: \code{covariance_method = "s"} or \code{"rsr"} on such a
+fit is an error of class \code{ferx_engine_error} with \code{code = "E_PROFILE_SCOPE"},
+the refusal \code{\link[=ferx_fit]{ferx_fit()}} gives the same request.
 \subsection{Settings}{
 
 The step scores the objective under the inner-loop and ODE settings the fit

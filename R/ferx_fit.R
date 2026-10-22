@@ -1003,9 +1003,9 @@
 #'     parameters; the OFV, the levels and their standard errors are those of
 #'     the unprofiled fit, and the structural standard errors account for the
 #'     levels. \code{\link{ferx_covariance}} repeats the profiled covariance
-#'     step with \code{covariance_method = "r"}, the only method it has; with
-#'     \code{"s"} or \code{"rsr"} it returns no standard errors and says so in
-#'     \code{fit$warnings}.}
+#'     step with \code{covariance_method = "r"}, the only method it has, and
+#'     refuses \code{"s"} or \code{"rsr"} with \code{E_PROFILE_SCOPE} on
+#'     \code{e$code}, as \code{ferx_fit()} does.}
 #'   \item{covariate_stats}{Data frame of the statistics a
 #'     \code{[covariate_model]} relation stated symbolically
 #'     (\code{center = median}, \code{ref = mode}, \code{levels = auto}) was
