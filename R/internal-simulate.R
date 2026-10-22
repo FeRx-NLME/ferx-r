@@ -133,8 +133,14 @@ validate_fit_for_params <- function(fit) {
 # per `fit$sdtab` subject block. That last one is the engine's number for the
 # ID (a text ID becomes its position) and misses a subject without
 # observations, so it is right only for numeric IDs; the engine's own check
-# refuses it otherwise.
+# refuses it otherwise, and `.ferx_sdtab_ids_hint()` says why (#555).
 .ferx_fit_subject_ids <- function(fit, caller) {
+  .ferx_fit_subject_id_set(fit, caller)$ids
+}
+
+# `.ferx_fit_subject_ids()` with the field the IDs were read from (`source`,
+# e.g. "fit$sdtab$ID"), for a caller whose refusal depends on it (#555).
+.ferx_fit_subject_id_set <- function(fit, caller) {
   ids <- NULL
   source <- NULL
   if (!is.null(fit$ebe_etas) && nrow(fit$ebe_etas) > 0L) {
@@ -180,7 +186,31 @@ validate_fit_for_params <- function(fit) {
       call. = FALSE
     )
   }
-  as.character(ids)
+  list(ids = as.character(ids), source = source)
+}
+
+# The engine's refusals of a subject list that is not the fit's (#468, #462).
+.ferx_subject_mismatch_codes <- c("E_FIT_SUBJECTS_MISMATCH", "E_POPULATION_MISMATCH")
+
+# Evaluate `call`, an engine call handed the IDs from `.ferx_fit_subject_id_set()`,
+# and add the reason to a subject-mismatch refusal when they came from
+# `fit$sdtab$ID` (#555). That fallback holds a text ID's position, so on a fit
+# made before `fit$subject_ids` with text IDs the engine refuses the population
+# the fit did see; the advice that helps is to re-fit. The engine's message,
+# class and code stay as they are; any other refusal passes through untouched.
+.ferx_sdtab_ids_hint <- function(call, source) {
+  if (!identical(source, "fit$sdtab$ID")) return(call)
+  tryCatch(call, ferx_engine_error = function(e) {
+    if (isTRUE(e$code %in% .ferx_subject_mismatch_codes)) {
+      e$message <- paste0(
+        e$message, "\n",
+        "The fit predates fit$subject_ids, so its subject IDs were taken from ",
+        "fit$sdtab$ID, which holds a text ID's position rather than the ID. ",
+        "Re-fit with ferx_fit(model, data)."
+      )
+    }
+    stop(e)
+  })
 }
 
 # The fit's reader settings and population fingerprint (#462), as the JSON

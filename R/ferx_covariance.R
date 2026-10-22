@@ -231,7 +231,7 @@ ferx_covariance <- function(fit,
   # The fit's own subject IDs, in fit order (#468); their count is the
   # subject count, and in the n_eta > 0 branch they come from the same
   # `ebe_etas` rows as `eta_mat`.
-  subject_ids <- .ferx_fit_subject_ids(fit, "ferx_covariance")
+  subject_ids <- .ferx_fit_subject_id_set(fit, "ferx_covariance")
 
   # Hash plumbing, identical to ferx_sir(): non-empty hex string forwards and
   # Rust enforces equality; NULL (older binary) or NA (hashing failed at fit
@@ -273,7 +273,8 @@ ferx_covariance <- function(fit,
   )
   # A refusal reaches the caller as `ferx_engine_error` with ferx-core's code
   # when the engine gave it one (#498); see `.ferx_engine_call()`.
-  raw <- .ferx_engine_call(ferx_rust_covariance(
+  # IDs from the sdtab fallback get the reason a mismatch refusal names (#555).
+  raw <- .ferx_sdtab_ids_hint(.ferx_engine_call(ferx_rust_covariance(
     model_path = model_path,
     data_path = data_path,
     model_hash = model_hash_arg,
@@ -290,7 +291,7 @@ ferx_covariance <- function(fit,
     residual_rho = .ferx_residual_rho_vec(fit),
     residual_rho_pairs = .ferx_residual_rho_pairs(fit),
     eta_hats_flat = eta_hats_flat,
-    subject_ids = subject_ids,
+    subject_ids = subject_ids$ids,
     # The occasion rule the fit derived its occasions with; without it the
     # engine falls back to the model file's and refuses a rule passed only
     # through `settings =` (#512).
@@ -318,7 +319,7 @@ ferx_covariance <- function(fit,
     threads = threads_arg,
     verbose = isTRUE(verbose),
     fit_bindings = binding_args$fit_bindings
-  ), model_path, data_path)
+  ), model_path, data_path), subject_ids$source)
 
   # All error paths inside `ferx_rust_covariance` raise an R condition and
   # never return `NULL`, so we don't test for that here.
