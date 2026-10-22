@@ -70,9 +70,14 @@ cs_subject_wt <- function(rows) {
 # The symbolic fit, its literal twin, and a design of the heavier half of the
 # subjects, whose median weight is not the fit's. Shared by the tests that only
 # read them.
+#
+# Every helper builds its fixture in locals and stores it in `cs_cache` in one
+# assignment, keyed by fixture: the cache holds a whole fixture or nothing, so
+# a fit that fails leaves nothing behind, and the next test rebuilds and shows
+# the same error instead of a NULL field (#497).
 cs_cache <- new.env(parent = emptyenv())
 cs_base <- function() {
-  if (is.null(cs_cache$fit)) {
+  if (is.null(cs_cache$base)) {
     data <- ferx_example("two_cpt_oral_cov")$data
     rows <- utils::read.csv(data)
     wt <- cs_subject_wt(rows)
@@ -82,16 +87,12 @@ cs_base <- function() {
     sym <- cs_model("median")
     fit <- ferx_fit(sym, data, verbose = FALSE)
     twin <- cs_model(sprintf("%.17g", fit$covariate_stats$median))
-    cs_cache$data <- data
-    cs_cache$wt <- wt
-    cs_cache$design <- design
-    cs_cache$design_wt <- cs_subject_wt(heavy)
-    cs_cache$sym <- sym
-    cs_cache$twin <- twin
-    cs_cache$fit <- fit
-    cs_cache$twin_fit <- ferx_fit(twin, data, verbose = FALSE)
+    twin_fit <- ferx_fit(twin, data, verbose = FALSE)
+    cs_cache$base <- list(data = data, wt = wt, design = design,
+                          design_wt = cs_subject_wt(heavy), sym = sym,
+                          twin = twin, fit = fit, twin_fit = twin_fit)
   }
-  as.list(cs_cache)
+  cs_cache$base
 }
 
 # A copy of `fit` carrying a hand-made positive-definite covariance matrix in
@@ -340,7 +341,7 @@ test_that("C8d: the engine's own .fitrx loader reads the statistics slot", {
 # `ref = mode` its reference level from `mode`. `GRP` cycles 1, 2, 2, 3 over
 # the subjects, so the mode (2) is neither the smallest nor the largest level.
 cs_categorical <- function() {
-  if (is.null(cs_cache$cat_fit)) {
+  if (is.null(cs_cache$cat)) {
     rows <- utils::read.csv(ferx_example("two_cpt_oral_cov")$data)
     ids <- sort(unique(rows$ID))
     grp <- stats::setNames(rep(c(1, 2, 2, 3), length.out = length(ids)), ids)
@@ -355,16 +356,14 @@ cs_categorical <- function() {
       cs_model(covariates = sprintf("GRP categorical(levels = %s)", levels),
                relation = sprintf("CL ~ GRP categorical(ref = %s)", ref))
     }
-    cs_cache$cat_data <- data
-    cs_cache$cat_design <- design
-    cs_cache$cat_sym <- model("auto", "mode")
-    cs_cache$cat_twin <- model("[1, 2, 3]", "2")
-    cs_cache$cat_fit <- ferx_fit(cs_cache$cat_sym, data, verbose = FALSE)
-    cs_cache$cat_twin_fit <- ferx_fit(cs_cache$cat_twin, data, verbose = FALSE)
+    sym <- model("auto", "mode")
+    twin <- model("[1, 2, 3]", "2")
+    fit <- ferx_fit(sym, data, verbose = FALSE)
+    twin_fit <- ferx_fit(twin, data, verbose = FALSE)
+    cs_cache$cat <- list(data = data, design = design, sym = sym, twin = twin,
+                         fit = fit, twin_fit = twin_fit)
   }
-  list(data = cs_cache$cat_data, design = cs_cache$cat_design,
-       sym = cs_cache$cat_sym, twin = cs_cache$cat_twin,
-       fit = cs_cache$cat_fit, twin_fit = cs_cache$cat_twin_fit)
+  cs_cache$cat
 }
 
 test_that("C9: levels = auto / ref = mode fit and bind from the fit like their twin", {
@@ -408,10 +407,9 @@ cs_shifted <- function() {
     rows$WT <- rows$WT + 15
     path <- tempfile(fileext = ".csv")
     utils::write.csv(rows, path, row.names = FALSE, quote = FALSE, na = ".")
-    cs_cache$shifted <- path
-    cs_cache$shifted_wt <- cs_subject_wt(rows)
+    cs_cache$shifted <- list(data = path, wt = cs_subject_wt(rows))
   }
-  list(data = cs_cache$shifted, wt = cs_cache$shifted_wt)
+  cs_cache$shifted
 }
 
 test_that("C10a: ferx_simulate_with_uncertainty() centres on the fit's median", {
@@ -492,7 +490,7 @@ cs_tte_model <- function(center) {
 
 # The symbolic TTE fit, its twin, and a design of the heavier half.
 cs_tte <- function() {
-  if (is.null(cs_cache$tte_fit)) {
+  if (is.null(cs_cache$tte)) {
     rows <- utils::read.csv(ferx_example("tte_exponential")$data)
     # Heavier subjects tend to have their events earlier (a fixed scramble of
     # the event order), so the fit estimates an exponent inside its bounds: at
@@ -513,18 +511,12 @@ cs_tte <- function() {
     sym <- cs_tte_model("median")
     fit <- ferx_fit(sym, data, verbose = FALSE)
     twin <- cs_tte_model(sprintf("%.17g", fit$covariate_stats$median))
-    cs_cache$tte_wt <- wt
-    cs_cache$tte_design <- design
-    cs_cache$tte_design_wt <- unname(wt[heavy])
-    cs_cache$tte_sym <- sym
-    cs_cache$tte_twin <- twin
-    cs_cache$tte_fit <- fit
-    cs_cache$tte_twin_fit <- ferx_fit(twin, data, verbose = FALSE)
+    twin_fit <- ferx_fit(twin, data, verbose = FALSE)
+    cs_cache$tte <- list(wt = wt, design = design,
+                         design_wt = unname(wt[heavy]), sym = sym, twin = twin,
+                         fit = fit, twin_fit = twin_fit)
   }
-  list(wt = cs_cache$tte_wt,
-       design = cs_cache$tte_design, design_wt = cs_cache$tte_design_wt,
-       sym = cs_cache$tte_sym, twin = cs_cache$tte_twin,
-       fit = cs_cache$tte_fit, twin_fit = cs_cache$tte_twin_fit)
+  cs_cache$tte
 }
 
 test_that("C11: ferx_predict_survival() centres on a TTE fit's median", {
@@ -614,7 +606,7 @@ cs_combo_model <- function(center) {
 # and 3, and the data with every weight raised by 15 (median 87) for NPDE.
 # Without the fits, so C12b's no-fit paths are measured on their own.
 cs_combo_files <- function() {
-  if (is.null(cs_cache$combo_data)) {
+  if (is.null(cs_cache$combo_files)) {
     data <- tempfile(fileext = ".csv")
     writeLines(cs_combo_data, data)
     rows <- utils::read.csv(data)
@@ -624,25 +616,23 @@ cs_combo_files <- function() {
     rows$WT <- rows$WT + 15
     shifted <- tempfile(fileext = ".csv")
     utils::write.csv(rows, shifted, row.names = FALSE, quote = FALSE, na = ".")
-    cs_cache$combo_design <- design
-    cs_cache$combo_shifted <- shifted
-    cs_cache$combo_sym <- cs_combo_model("median")
-    cs_cache$combo_twin <- cs_combo_model("72")
-    cs_cache$combo_data <- data
+    cs_cache$combo_files <- list(data = data, design = design,
+                                 shifted = shifted,
+                                 sym = cs_combo_model("median"),
+                                 twin = cs_combo_model("72"))
   }
-  list(data = cs_cache$combo_data, design = cs_cache$combo_design,
-       shifted = cs_cache$combo_shifted, sym = cs_cache$combo_sym,
-       twin = cs_cache$combo_twin)
+  cs_cache$combo_files
 }
 
 # The files above plus the symbolic fit and the twin's.
 cs_combo <- function() {
-  b <- cs_combo_files()
-  if (is.null(cs_cache$combo_fit)) {
-    cs_cache$combo_fit <- ferx_fit(b$sym, b$data, verbose = FALSE)
-    cs_cache$combo_twin_fit <- ferx_fit(b$twin, b$data, verbose = FALSE)
+  if (is.null(cs_cache$combo)) {
+    b <- cs_combo_files()
+    fit <- ferx_fit(b$sym, b$data, verbose = FALSE)
+    twin_fit <- ferx_fit(b$twin, b$data, verbose = FALSE)
+    cs_cache$combo <- c(b, list(fit = fit, twin_fit = twin_fit))
   }
-  c(b, list(fit = cs_cache$combo_fit, twin_fit = cs_cache$combo_twin_fit))
+  cs_cache$combo
 }
 
 test_that("C12a: a level block plus a symbolic centre binds both, like its twin", {
@@ -965,4 +955,40 @@ test_that("C16: a level + symbolic fit round-trips R -> engine -> R with both ha
     ferx_predict(b$sym, b$data, fit = loaded),
     ferx_predict(b$sym, b$data, fit = b$fit)
   )
+})
+
+# --- C17: a failed fit leaves no fixture behind (#497) -----------------------
+
+# Each fixture helper runs two fits, the symbolic one and then the twin's. With
+# the twin's mocked to fail, the helper raises that error, `cs_cache` holds
+# nothing under the fixture's key, and a second call raises the same error
+# instead of handing a later test a NULL `twin_fit`. The symbolic fit is a
+# stand-in carrying only the median the base and TTE twins are built from. The
+# real fixtures are set aside and put back, so the tests above and below keep
+# them.
+test_that("C17: a failed twin fit leaves no fixture cached, and fails again the same way", {
+  helpers <- list(base = cs_base, cat = cs_categorical, tte = cs_tte,
+                  combo = cs_combo)
+  kept <- mget(names(helpers), envir = cs_cache, ifnotfound = list(NULL))
+  withr::defer({
+    for (key in names(kept)) assign(key, kept[[key]], envir = cs_cache)
+  })
+  calls <- 0L
+  local_mocked_bindings(
+    ferx_fit = function(model, ...) {
+      calls <<- calls + 1L
+      # Odd calls are the symbolic fit, even ones the twin's.
+      if (calls %% 2L == 1L) return(list(covariate_stats = list(median = 70)))
+      stop("twin fit failed (mocked)")
+    },
+    .package = "ferx"
+  )
+  for (key in names(helpers)) {
+    assign(key, NULL, envir = cs_cache)
+    expect_error(helpers[[key]](), "twin fit failed (mocked)", fixed = TRUE)
+    expect_null(cs_cache[[key]])
+    expect_error(helpers[[key]](), "twin fit failed (mocked)", fixed = TRUE)
+    expect_null(cs_cache[[key]])
+  }
+  expect_identical(calls, 4L * length(helpers))
 })
