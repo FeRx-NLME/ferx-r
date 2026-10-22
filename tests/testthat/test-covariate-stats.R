@@ -974,15 +974,19 @@ test_that("C17: a failed twin fit leaves no fixture cached, and fails again the 
     for (key in names(kept)) assign(key, kept[[key]], envir = cs_cache)
   })
   calls <- 0L
-  local_mocked_bindings(
-    ferx_fit = function(model, ...) {
-      calls <<- calls + 1L
-      # Odd calls are the symbolic fit, even ones the twin's.
-      if (calls %% 2L == 1L) return(list(covariate_stats = list(median = 70)))
-      stop("twin fit failed (mocked)")
-    },
-    .package = "ferx"
-  )
+  # The mock shadows `ferx_fit` in the environment the helpers are defined in,
+  # where their lookup starts. local_mocked_bindings() would rebind the
+  # namespace, which the helpers only reach through testthat's copy of it on
+  # testthat >= 3.2.2; DESCRIPTION allows 3.1.5.
+  helper_env <- environment(cs_base)
+  stopifnot(!exists("ferx_fit", envir = helper_env, inherits = FALSE))
+  assign("ferx_fit", function(model, ...) {
+    calls <<- calls + 1L
+    # Odd calls are the symbolic fit, even ones the twin's.
+    if (calls %% 2L == 1L) return(list(covariate_stats = list(median = 70)))
+    stop("twin fit failed (mocked)")
+  }, envir = helper_env)
+  withr::defer(rm("ferx_fit", envir = helper_env))
   for (key in names(helpers)) {
     assign(key, NULL, envir = cs_cache)
     expect_error(helpers[[key]](), "twin fit failed (mocked)", fixed = TRUE)
