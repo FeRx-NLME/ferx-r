@@ -33,6 +33,7 @@ ferx_rust_covariance(
   method_chain,
   ebe_kappas_flat,
   ebe_kappa_ids,
+  theta_fixed,
   covariance_method,
   threads,
   verbose,

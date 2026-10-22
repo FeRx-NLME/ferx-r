@@ -3982,8 +3982,18 @@ fn declared_model_name(name: &str) -> &str {
 /// told from a degenerate one without reading it off a zero diagonal. Empty when
 /// there is no matrix, or when the model's packed layout does not have the
 /// matrix's dimension - R then has no mask rather than a misaligned one.
-fn cov_matrix_held(model: &CompiledModel, cov_matrix_dim: i32) -> Vec<bool> {
-    let mask = ferx_core::estimation::parameterization::packed_fixed_mask(&model.default_params);
+///
+/// `theta_fixed` is the fit's own record, which adds to the model file's FIX
+/// every theta the engine froze during the fit for having no effect on the
+/// objective (ferx-r #613); its step held those too.
+fn cov_matrix_held(model: &CompiledModel, theta_fixed: &[bool], cov_matrix_dim: i32) -> Vec<bool> {
+    let mut params = model.default_params.clone();
+    if theta_fixed.len() == params.theta_fixed.len() {
+        for (f, &held) in params.theta_fixed.iter_mut().zip(theta_fixed) {
+            *f |= held;
+        }
+    }
+    let mask = ferx_core::estimation::parameterization::packed_fixed_mask(&params);
     if cov_matrix_dim > 0 && mask.len() == cov_matrix_dim as usize {
         mask
     } else {
@@ -4816,7 +4826,7 @@ fn fit_result_to_list(
         ferx_version = result.ferx_version.clone(),
         cov_matrix = cov_matrix_flat,
         cov_matrix_dim = cov_matrix_dim,
-        cov_fixed = cov_matrix_held(model, cov_matrix_dim),
+        cov_fixed = cov_matrix_held(model, &result.theta_fixed, cov_matrix_dim),
         cov_labels = cov_matrix_labels(model, cov_matrix_dim),
         cov_eigenvalues = result.cov_eigenvalues.clone().unwrap_or_default(),
         cov_condition_number = result.cov_condition_number.unwrap_or(f64::NAN),
@@ -6690,6 +6700,43 @@ struct FitSkeletonInputs<'a> {
     /// the fit carries none (ferx-r #591).
     ebe_kappas_flat: &'a [f64],
     ebe_kappa_ids: &'a [String],
+    /// `fit$theta_fixed`: the thetas the fit held, one flag per theta; empty
+    /// when the fit carries none (ferx-r #613).
+    theta_fixed: &'a [bool],
+}
+
+/// `fit$theta_fixed` as the engine's flags: NA reads as not held.
+fn theta_fixed_from_r(theta_fixed: &Logicals) -> Vec<bool> {
+    theta_fixed.iter().map(|b| b.is_true()).collect()
+}
+
+/// The thetas a skeleton `FitResult` holds (ferx-r #613): the model file's FIX
+/// and every theta the fit itself held. The engine freezes a theta that has no
+/// effect on the objective at the fit's start ("`X` has no effect on the
+/// objective ... Freezing it"), and records it in the fit's `theta_fixed`, not
+/// in the model file. `run_covariance` / `run_sir` take the mask off the
+/// skeleton, so one built from the file alone differentiated the frozen theta
+/// and failed on its zero diagonal where the fit's own step computed.
+fn skeleton_theta_fixed(
+    entry_point: &str,
+    model: &CompiledModel,
+    fit_fixed: &[bool],
+) -> std::result::Result<Vec<bool>, String> {
+    let mut fixed = model.default_params.theta_fixed.clone();
+    if fit_fixed.is_empty() {
+        return Ok(fixed);
+    }
+    if fit_fixed.len() != fixed.len() {
+        return Err(format!(
+            "{entry_point}: fit$theta_fixed has {} entries but the model has {} thetas",
+            fit_fixed.len(),
+            fixed.len()
+        ));
+    }
+    for (f, &held) in fixed.iter_mut().zip(fit_fixed) {
+        *f |= held;
+    }
+    Ok(fixed)
 }
 
 /// The `EstimationMethod` whose engine label (`EstimationMethod::label()`, the
@@ -7582,6 +7629,7 @@ fn fit_skeleton(
             .map_err(|e| format!("{entry_point}: {e}"))?;
     let (method, method_chain) = skeleton_methods(entry_point, x)?;
     let ebe_kappas = ebe_kappas_from_r(entry_point, x, model.n_kappa)?;
+    let theta_fixed = skeleton_theta_fixed(entry_point, model, x.theta_fixed)?;
 
     let mut fit = FitResult {
         // ferx-core main added a checkpoint-restore flag; neither step reads it.
@@ -7685,7 +7733,7 @@ fn fit_skeleton(
         se_theta: None,
         se_omega: None,
         se_sigma: None,
-        theta_fixed: template.theta_fixed.clone(),
+        theta_fixed,
         omega_fixed: template.omega_fixed.clone(),
         sigma_fixed: template.sigma_fixed.clone(),
         subjects,
@@ -7911,6 +7959,9 @@ fn posthoc_step_threads(threads: i32) -> (Option<usize>, i32) {
 /// @param ebe_kappas_flat `fit$ebe_kappas` kappa columns, row-major, one row
 ///   per (subject, occasion) in fit order; empty for a fit without IOV.
 /// @param ebe_kappa_ids The `ID` of each `ebe_kappas` row.
+/// @param theta_fixed `fit$theta_fixed`: the thetas the fit held, the ones
+///   the engine froze for having no effect on the objective included; empty
+///   for a fit without the field (ferx-r #613).
 /// @param threads Worker threads the step runs on: `0` the engine default,
 ///   `n > 0` pinned. `ferx_sir()` passes the fit's `n_threads_used` unless
 ///   told otherwise (ferx-r #527).
@@ -7953,6 +8004,7 @@ fn ferx_rust_sir(
     method_chain: Vec<String>,
     ebe_kappas_flat: Vec<f64>,
     ebe_kappa_ids: Vec<String>,
+    theta_fixed: Logicals,
     threads: i32,
     verbose: bool,
     fit_bindings: List,
@@ -7984,6 +8036,7 @@ fn ferx_rust_sir(
             ));
         }
         let cov_mat = DMatrix::from_row_slice(n_packed, n_packed, &cov_matrix_flat);
+        let theta_fixed = theta_fixed_from_r(&theta_fixed);
         let inputs = FitSkeletonInputs {
             model_path,
             data_path,
@@ -8013,6 +8066,7 @@ fn ferx_rust_sir(
             method_chain: &method_chain,
             ebe_kappas_flat: &ebe_kappas_flat,
             ebe_kappa_ids: &ebe_kappa_ids,
+            theta_fixed: &theta_fixed,
         };
         let mut fit = fit_skeleton("ferx_sir", model, &inputs, Some(cov_mat))?;
         fit.profiled_blocks = profiled_blocks_from_r(&fit_bindings)?;
@@ -8160,6 +8214,9 @@ fn ferx_rust_sir(
 /// @param ebe_kappas_flat `fit$ebe_kappas` kappa columns, row-major, one row
 ///   per (subject, occasion) in fit order; empty for a fit without IOV.
 /// @param ebe_kappa_ids The `ID` of each `ebe_kappas` row.
+/// @param theta_fixed `fit$theta_fixed`: the thetas the fit held, the ones
+///   the engine froze for having no effect on the objective included; empty
+///   for a fit without the field (ferx-r #613).
 /// @param covariance_method Covariance estimator: "r"/"hessian", "s"/"cross_product", or "rsr"/"sandwich".
 /// @param threads Worker threads the step runs on: `0` the engine default,
 ///   `n > 0` pinned. `ferx_covariance()` passes the fit's `n_threads_used`
@@ -8200,6 +8257,7 @@ fn ferx_rust_covariance(
     method_chain: Vec<String>,
     ebe_kappas_flat: Vec<f64>,
     ebe_kappa_ids: Vec<String>,
+    theta_fixed: Logicals,
     covariance_method: &str,
     threads: i32,
     verbose: bool,
@@ -8229,6 +8287,7 @@ fn ferx_rust_covariance(
             )),
         };
 
+        let theta_fixed = theta_fixed_from_r(&theta_fixed);
         let inputs = FitSkeletonInputs {
             model_path,
             data_path,
@@ -8258,6 +8317,7 @@ fn ferx_rust_covariance(
             method_chain: &method_chain,
             ebe_kappas_flat: &ebe_kappas_flat,
             ebe_kappa_ids: &ebe_kappa_ids,
+            theta_fixed: &theta_fixed,
         };
         let mut fit = fit_skeleton("ferx_covariance", model, &inputs, None)?;
         fit.profiled_blocks = profiled_blocks_from_r(&fit_bindings)?;
@@ -8312,7 +8372,7 @@ fn ferx_rust_covariance(
         Ok(list!(
             cov_matrix = cov_matrix_flat,
             cov_matrix_dim = cov_matrix_dim,
-            cov_fixed = cov_matrix_held(model, cov_matrix_dim),
+            cov_fixed = cov_matrix_held(model, &new_fit.theta_fixed, cov_matrix_dim),
             cov_labels = cov_matrix_labels(model, cov_matrix_dim),
             se_theta = new_fit.se_theta.clone().unwrap_or_default(),
             se_omega = new_fit.se_omega.clone().unwrap_or_default(),

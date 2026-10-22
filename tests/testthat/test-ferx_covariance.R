@@ -989,3 +989,75 @@ test_that("ferx_sir and ferx_covariance hand the engine the fit's method and kap
                      as.numeric(t(as.matrix(fit$ebe_kappas[, kcols, drop = FALSE]))))
   }
 })
+
+# Warfarin with a theta nothing uses. The engine freezes it at the start of the
+# fit ("`TVUNUSED` has no effect on the objective ... Freezing it") and records
+# that in `fit$theta_fixed`, not in the model file (#613).
+unused_theta_warfarin_fit <- local({
+  out <- list()
+  function(method = "focei", covariance = TRUE) {
+    key <- paste(c(method, covariance), collapse = "/")
+    if (is.null(out[[key]])) {
+      ex <- ferx_example("warfarin")
+      model <- tempfile(fileext = ".ferx")
+      txt <- readLines(ex$model)
+      txt <- append(txt, "  theta TVUNUSED(1.0, 0.01, 100.0)",
+                    after = grep("^  theta TVKA", txt))
+      writeLines(txt, model)
+      out[[key]] <<- suppressWarnings(ferx_fit(
+        model, ex$data, method = method, verbose = FALSE,
+        covariance = covariance, settings = list(maxiter = 30L)
+      ))
+    }
+    out[[key]]
+  }
+})
+
+test_that("ferx_covariance holds a theta the engine froze during the fit (#613)", {
+  skip_on_cran()
+  for (method in list("focei", c("saem", "focei"))) {
+    fit <- unused_theta_warfarin_fit(method)
+    expect_identical(unname(fit$theta_fixed), c(FALSE, FALSE, FALSE, TRUE))
+    skip_if(is.null(fit$cov_matrix), cov_skip)
+    expect_identical(fit$cov_fixed[["TVUNUSED"]], TRUE)
+
+    # The replay is the in-fit step: it computes, the frozen theta's SE is 0,
+    # and the matrix is the fit's own. It used to differentiate TVUNUSED and
+    # fail on its zero diagonal.
+    out <- suppressWarnings(ferx_covariance(fit))
+    expect_identical(out$covariance_status, "computed")
+    expect_identical(out$se_theta[["TVUNUSED"]], 0)
+    expect_identical(out$cov_matrix, fit$cov_matrix)
+    expect_identical(out$se_theta, fit$se_theta)
+    expect_identical(out$cov_fixed, fit$cov_fixed)
+    expect_false(any(grepl("^Covariance step failed", out$warnings)))
+  }
+})
+
+test_that("a fit whose step never ran holds its frozen theta too, saved or not (#613)", {
+  skip_on_cran()
+  ref <- unused_theta_warfarin_fit()
+  skip_if(is.null(ref$cov_matrix), cov_skip)
+  fit <- unused_theta_warfarin_fit(covariance = FALSE)
+  out <- suppressWarnings(ferx_covariance(fit))
+  expect_identical(out$covariance_status, "computed")
+  expect_identical(out$cov_matrix, ref$cov_matrix)
+
+  # `theta_fixed` survives a .fitrx round trip, and with it the freeze.
+  path <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(path), add = TRUE)
+  ferx_save_fit(fit, path)
+  loaded <- suppressWarnings(ferx_covariance(ferx_load_fit(path)))
+  expect_identical(loaded$covariance_status, "computed")
+  expect_identical(loaded$se_theta[["TVUNUSED"]], 0)
+})
+
+test_that("a theta_fixed of the wrong length is refused by name (#613)", {
+  skip_on_cran()
+  fit <- unused_theta_warfarin_fit()
+  fit$theta_fixed <- c(FALSE, TRUE)
+  expect_error(ferx_covariance(fit),
+               "fit$theta_fixed has 2 entries but the model has 4 thetas",
+               fixed = TRUE)
+  expect_identical(ferx:::.ferx_fit_theta_fixed(list()), logical())
+})
