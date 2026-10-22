@@ -224,9 +224,10 @@ trajectory-transparent. Although it leaves the OFV value unchanged at any
 fixed point, it rescales the gradient the optimizer sees, and that
 gradient feeds the SLSQP overshoot cap, the quasi-Newton Hessian estimate,
 and the xtol/ftol termination - all of which act in the scaled coordinate
-system. The scaling layer only ever runs on log/Cholesky-packed
-coordinates (it auto-disables when any identity-packed theta is present),
-and for those, dividing by \code{|log value|} is counterproductive: a
+system. On the NLopt optimizers this scaling is switched off for every
+coordinate when any theta is identity-packed (negative lower bound), so
+in practice it runs on log/Cholesky-packed coordinates, and for those,
+dividing by \code{|log value|} is counterproductive: a
 coordinate like \code{log(V) = log(20) ~ 3} gets scale 3, so the
 optimizer's unit step becomes a 3-unit move in log space - an
 \code{e^3 ~ 20x} multiplicative jump in V. That large step both overshoots
@@ -346,14 +347,29 @@ Inert under \code{method = "bayes"}, which runs no covariance step -- see
 \item{\code{parameter_scaling}}{\code{"auto"} (default), \code{"none"},
 \code{"abs"} or \code{"rescale2"}. Parameter-scaling strategy for the
 outer optimizer; supersedes \code{scale_params} when not \code{"none"}.
-\code{"auto"} applies \code{"rescale2"} to the gradient-based optimizers
-that benefit (\code{nlopt_lbfgs}, \code{slsqp}) and leaves the
-derivative-free \code{bobyqa} unscaled, where it would distort the trust
-region. \code{"rescale2"} is the nlmixr2-style normalisation -- each
-packed coordinate divided by its bound half-range -- which markedly
-improves cold-start convergence. \code{"abs"} is the legacy
-\code{|packed value|} normalisation, equivalent to
-\code{scale_params = TRUE}.}
+\code{"auto"} applies \code{"abs"} to the gradient-based optimizers
+(\code{nlopt_lbfgs}, \code{slsqp}) and leaves \code{bobyqa},
+\code{mma} and \code{trust_region} unscaled: per-coordinate scaling
+distorts BOBYQA's trust-region model. \code{"auto"} uses
+\code{"rescale2"} for no optimizer. \code{"abs"} divides each packed
+coordinate by its \code{|packed value|} (1 near zero); on the NLopt
+optimizers it is switched off for every coordinate when any theta is
+identity-packed (negative lower bound), since a near-zero covariate
+effect beside O(1) log-packed coordinates hurts the quasi-Newton
+Hessian estimate. \code{"rescale2"} is the nlmixr2-style normalisation
+-- each packed coordinate divided by its bound half-range -- and is
+opt-in only: ferx-core measured it as the wrong preconditioner for the
+gradient-based optimizers (it drove L-BFGS into a bound on warfarin
+FOCEI, OFV -286 to -243), so prefer the default. \code{"none"}
+disables this scaling for every optimizer, leaving only
+\code{scale_params} (and the IOV + \code{slsqp} auto-scaling). Under
+\code{"auto"} and \code{"abs"} only, an identity-packed theta started
+near zero (\code{|theta0| < 0.1}) whose minimizer the pre-fit probes
+predict within ten times its own size is divided by its initial
+magnitude (ferx-core #2159). That probe is the one difference between
+\code{"abs"} and \code{parameter_scaling = "none"} with
+\code{scale_params = TRUE}, which otherwise build the same scale
+vector.}
 \item{\code{ebe_warm_start}}{(default \code{FALSE}) When an inner EBE
 solve fails its BFGS step and falls back to Nelder-Mead, warm-start the
 simplex from the BFGS partial eta-hat rather than cold-starting from
