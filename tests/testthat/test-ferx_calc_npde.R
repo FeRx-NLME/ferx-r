@@ -280,3 +280,22 @@ test_that("ferx_calc_npde(fit) verifies a level-block fit's population after bin
   expect_identical(nrow(out$sdtab), nrow(fit$sdtab))
   expect_false(anyNA(out$sdtab$NPD))
 })
+
+test_that("ferx_calc_npde(fit) raises the fingerprint check's note as a warning (#559)", {
+  # A fingerprint of another scheme cannot be compared: the engine checks
+  # nothing, returns its note in the glue's `npde_notes` attribute, and R raises
+  # it. NPDE is still computed: the note is not a refusal.
+  fit <- foreign_scheme_fit(warfarin_fit())
+  w <- character(0)
+  out <- withCallingHandlers(
+    ferx_calc_npde(fit, nsim = 20L, seed = 1L),
+    warning = function(cnd) {
+      w <<- c(w, conditionMessage(cnd))
+      invokeRestart("muffleWarning")
+    }
+  )
+  expect_identical(w, paste0("ferx_calc_npde: ", foreign_scheme_note))
+  expect_identical(nrow(out$sdtab), nrow(fit$sdtab))
+  expect_true(all(c("NPDE", "NPD") %in% names(out$sdtab)))
+  expect_true(all(is.finite(out$sdtab$NPD)))
+})

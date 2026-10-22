@@ -766,6 +766,18 @@ test_that("the engine checks the re-read population against the fit's fingerprin
                fixed = TRUE)
 })
 
+test_that("ferx_covariance records the fingerprint check's note on the fit (#559)", {
+  # A fingerprint of another scheme is not compared; run_covariance says so in
+  # its warnings, which reach the flat vector and the structured table.
+  fit <- foreign_scheme_fit(warfarin_fit())
+  expect_false(foreign_scheme_note %in% fit$warnings)
+  out <- suppressWarnings(ferx_covariance(fit))
+  expect_true(foreign_scheme_note %in% out$warnings)
+  row <- out$warnings_structured[out$warnings_structured$message == foreign_scheme_note, ]
+  expect_identical(row$category, "general")
+  expect_identical(row$severity, "warning")
+})
+
 test_that("a malformed fit$reader_settings is refused by name, not a panic (#462)", {
   fit <- rs_fit(ignore = rs_ignore)
   fit$reader_settings <- "{not json"
