@@ -128,6 +128,48 @@ test_that("ferx_covariance() repeats the profiled covariance step, live and relo
   check(quiet(ferx_covariance(back)))
 })
 
+test_that("ferx_covariance() refuses s / rsr on a profiled fit with E_PROFILE_SCOPE (#597)", {
+  skip_on_cran()
+  # The profiled step computes `r` only (ferx-core #2108). The engine's replay
+  # answers `s` / `rsr` with no matrix and a warning, which used to come back
+  # as a fit with no standard errors and no R condition; ferx_fit() refuses
+  # the same request up front, and so does ferx_covariance() now.
+  p <- fits()$profiled
+  for (m in c("s", "rsr", "cross_product", "SANDWICH")) {
+    e <- tryCatch(quiet(ferx_covariance(p, covariance_method = m)),
+                  error = function(e) e)
+    expect_s3_class(e, "ferx_engine_error")
+    expect_identical(e$code, "E_PROFILE_SCOPE")
+    expect_identical(e$block, "parameters")
+    expect_match(conditionMessage(e), "theta PLACEBO[...] is `profile`d",
+                 fixed = TRUE)
+    label <- c(s = "s", rsr = "rsr", cross_product = "s", SANDWICH = "rsr")[[m]]
+    expect_match(conditionMessage(e),
+                 sprintf("asks for `covariance_method = %s`.", label), fixed = TRUE)
+  }
+  # `r` and an unprofiled fit are untouched by the refusal.
+  expect_identical(quiet(ferx_covariance(p, covariance_method = "hessian"))$covariance_status,
+                   "computed")
+  # The unprofiled fit runs its `s` step (its S is singular on mbma_placebo's
+  # few studies, so the step reports failure rather than being refused).
+  expect_s3_class(quiet(ferx_covariance(fits()$base, covariance_method = "s")),
+                  "ferx_fit")
+})
+
+test_that("the profiled covariance refusal names every profiled block (#597)", {
+  refuse <- ferx:::.ferx_refuse_profiled_covariance
+  expect_null(refuse(list(profiled_blocks = character(0)), "s"))
+  expect_null(refuse(list(), "rsr"))
+  expect_null(refuse(list(profiled_blocks = "A"), "r"))
+  e <- tryCatch(refuse(list(profiled_blocks = c("A", "B", "C")), "sandwich"),
+                error = function(e) e)
+  expect_identical(e$code, "E_PROFILE_SCOPE")
+  expect_match(conditionMessage(e),
+               "theta A[...], B[...] and C[...] are `profile`d", fixed = TRUE)
+  expect_match(conditionMessage(e), "`covariance_method = rsr`", fixed = TRUE)
+  expect_match(conditionMessage(e), "[E_PROFILE_SCOPE]", fixed = TRUE)
+})
+
 test_that("profiled_blocks travels in fit.json the way ferx-core writes it", {
   skip_on_cran()
   f <- fits()
