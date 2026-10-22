@@ -281,6 +281,22 @@ test_that("ferx_sir adds no sir rows when the engine reports nothing", {
   expect_identical(out$warnings, fit$warnings)
 })
 
+test_that("ferx_sir records the fingerprint check's note on the fit end-to-end (#559)", {
+  # The live counterpart of the mocked note above: a fingerprint of another
+  # scheme makes the engine's run_sir append the note itself.
+  fit <- warfarin_fit_cov()
+  skip_if(is.null(fit$cov_matrix), sir_cov_skip)
+  fit <- foreign_scheme_fit(fit)
+  expect_false(foreign_scheme_note %in% fit$warnings)
+  out <- suppressWarnings(
+    ferx_sir(fit, sir_samples = 50L, sir_resamples = 20L, sir_seed = 1L)
+  )
+  expect_true(foreign_scheme_note %in% out$warnings)
+  row <- out$warnings_structured[out$warnings_structured$message == foreign_scheme_note, ]
+  expect_identical(row$category, "general")
+  expect_false(is.null(out$sir_ci_theta))
+})
+
 # End-to-end against the real engine. The pin in src/rust/Cargo.lock carries
 # ferx-core#1021 as of #304, so this runs for real rather than skipping. It is
 # deliberately NOT wrapped in a tryCatch that downgrades the pre-#1021
