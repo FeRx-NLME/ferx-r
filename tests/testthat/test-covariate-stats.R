@@ -450,7 +450,12 @@ test_that("C10b: ferx_calc_npde() centres on the fit's median, not the data's", 
 # The bundled exponential TTE data with a per-subject WT and the hazard scaled
 # on it. `[individual_parameters]` needs the structural and error blocks, so
 # the model keeps the bundled example's FIX dummy one-compartment triple.
-cs_tte_model <- function(center) {
+# `covariates` and `relation` are as in cs_model().
+cs_tte_model <- function(center, covariates = "WT continuous",
+                         relation = sprintf(
+                           "LAMBDA ~ WT power(center = %s) => THETA_LAMBDA_WT(0.8, 0.01, 5.0)",
+                           center
+                         )) {
   path <- tempfile(fileext = ".ferx")
   writeLines(sprintf("
 [parameters]
@@ -466,10 +471,10 @@ cs_tte_model <- function(center) {
   V      = DUMMY_V
 
 [covariates]
-  WT continuous
+  %s
 
 [covariate_model]
-  LAMBDA ~ WT power(center = %s) => THETA_LAMBDA_WT(0.8, 0.01, 5.0)
+  %s
 
 [structural_model]
   pk one_cpt_iv(cl=CL, v=V)
@@ -486,7 +491,7 @@ cs_tte_model <- function(center) {
   method   = focei
   maxiter  = 2
   covariance = false
-", center), path)
+", covariates, relation), path)
   path
 }
 
@@ -884,6 +889,91 @@ test_that("C13c: without a fit, written-out levels refuse the value with its cod
   expect_identical(e$code, "E_COV_LEVEL_UNKNOWN")
   expect_identical(e$block, "covariate_model")
   # The literal-levels advice, not the from-fit one.
+  msg <- if (inherits(e, "condition")) conditionMessage(e) else ""
+  expect_match(msg, "use `levels = auto`", fixed = TRUE)
+  expect_no_match(msg, "The fit estimated no", fixed = TRUE)
+})
+
+# --- C13g: survival on a level the fit never saw (#500) ---------------------
+
+# C13 for ferx_predict_survival(), which C13a-d do not reach: C11's TTE data
+# with a categorical `GRP` cycling 1, 2, 2, 3 over the subjects, fitted with
+# `levels = auto` / `ref = mode`, and the first level-3 subject recoded to 4
+# or to the reference 2. The refusal is the engine's (`predict_survival` calls
+# `check_covariate_levels`, ferx-core #1742), but the from-fit glue binds the
+# fit's design first: a glue that bound the design's own levels, or swallowed
+# the `Err`, would let 4 through as the reference. Reddened by the pin before
+# #1740 (202bea5e): C13g and C13i fail there, C13h passes.
+cs_tte_categorical <- function() {
+  if (is.null(cs_cache$tte_cat_fit)) {
+    rows <- utils::read.csv(ferx_example("tte_exponential")$data)
+    ids <- sort(unique(rows$ID))
+    grp <- stats::setNames(rep(c(1, 2, 2, 3), length.out = length(ids)), ids)
+    rows$GRP <- grp[as.character(rows$ID)]
+    data <- tempfile(fileext = ".csv")
+    utils::write.csv(rows, data, row.names = FALSE, quote = FALSE, na = ".")
+    model <- function(levels, ref) {
+      cs_tte_model(covariates = sprintf("GRP categorical(levels = %s)", levels),
+                   relation = sprintf("LAMBDA ~ GRP categorical(ref = %s)", ref))
+    }
+    cs_cache$tte_cat_data <- data
+    cs_cache$tte_cat_sym <- model("auto", "mode")
+    cs_cache$tte_cat_twin <- model("[1, 2, 3]", "2")
+    cs_cache$tte_cat_fit <- ferx_fit(cs_cache$tte_cat_sym, data, verbose = FALSE)
+  }
+  list(data = cs_cache$tte_cat_data, sym = cs_cache$tte_cat_sym,
+       twin = cs_cache$tte_cat_twin, fit = cs_cache$tte_cat_fit)
+}
+
+cs_tte_recoded <- function(to, env = parent.frame()) {
+  rows <- utils::read.csv(cs_tte_categorical()$data)
+  first3 <- rows$ID[rows$GRP == 3][1L]
+  rows$GRP[rows$ID == first3] <- to
+  path <- withr::local_tempfile(fileext = ".csv", .local_envir = env)
+  utils::write.csv(rows, path, row.names = FALSE, quote = FALSE, na = ".")
+  path
+}
+
+cs_tte_times <- c(5, 10, 20)
+
+test_that("C13g: from-fit ferx_predict_survival() refuses a level the fit never saw", {
+  b <- cs_tte_categorical()
+  expect_identical(b$fit$covariate_stats$levels, list(c(1, 2, 3)))
+  expect_identical(b$fit$covariate_stats$mode, 2)
+  e <- tryCatch(
+    ferx_predict_survival(b$sym, cs_tte_recoded(4), cs_tte_times, fit = b$fit),
+    error = function(e) e
+  )
+  expect_s3_class(e, "ferx_engine_error")
+  expect_identical(e$code, "E_COV_LEVEL_UNKNOWN")
+  expect_identical(e$block, "covariate_model")
+  msg <- if (inherits(e, "condition")) conditionMessage(e) else ""
+  expect_match(msg, "has the fit's levels [1.0, 2.0, 3.0] (reference 2)",
+               fixed = TRUE)
+  expect_match(msg, "`GRP` takes [4.0] in this data", fixed = TRUE)
+  # The from-fit advice, once; not the literal-levels one.
+  expect_identical(lengths(regmatches(msg, gregexpr("The fit estimated no", msg,
+                                                    fixed = TRUE))), 1L)
+  expect_no_match(msg, "levels = auto", fixed = TRUE)
+})
+
+test_that("C13h: from-fit ferx_predict_survival() runs on the twin recoded to the reference", {
+  b <- cs_tte_categorical()
+  res <- ferx_predict_survival(b$sym, cs_tte_recoded(2), cs_tte_times,
+                               fit = b$fit)
+  expect_gt(nrow(res), 0L)
+  expect_true(all(is.finite(res$survival)))
+})
+
+test_that("C13i: without a fit, ferx_predict_survival() refuses the value with its code", {
+  b <- cs_tte_categorical()
+  e <- tryCatch(
+    ferx_predict_survival(b$twin, cs_tte_recoded(4), cs_tte_times),
+    error = function(e) e
+  )
+  expect_s3_class(e, "ferx_engine_error")
+  expect_identical(e$code, "E_COV_LEVEL_UNKNOWN")
+  expect_identical(e$block, "covariate_model")
   msg <- if (inherits(e, "condition")) conditionMessage(e) else ""
   expect_match(msg, "use `levels = auto`", fixed = TRUE)
   expect_no_match(msg, "The fit estimated no", fixed = TRUE)
