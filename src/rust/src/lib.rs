@@ -4080,17 +4080,13 @@ fn cov_matrix_labels(model: &CompiledModel, cov_matrix_dim: i32) -> Vec<String> 
 /// `source_method`, `details`): exactly what ferx-core writes to a `.fitrx`
 /// `fit.json:warning_details`, so R keeps them in that one shape, in memory and
 /// on disk. Every other entry is rebuilt from its message, as ferx-core's loader
-/// rebuilds it.
-fn warning_details_json(
-    entries: &[ferx_core::WarningEntry],
-) -> std::result::Result<Vec<String>, String> {
+/// rebuilds it. A `WarningEntry` is enums, strings and a `serde_json::Value`,
+/// which always serialise; a diagnostic never fails the fit it rides on.
+fn warning_details_json(entries: &[ferx_core::WarningEntry]) -> Vec<String> {
     entries
         .iter()
         .filter(|e| e.details.is_some())
-        .map(|e| {
-            serde_json::to_string(e)
-                .map_err(|err| format!("internal: a warning's details did not serialise: {err}"))
-        })
+        .filter_map(|e| serde_json::to_string(e).ok())
         .collect()
 }
 
@@ -4820,7 +4816,7 @@ fn fit_result_to_list(
         warnings_category = warnings_category,
         warnings_message = warnings_message,
         warnings_source_method = warnings_source_method,
-        warning_details = warning_details_json(&result.warnings_structured)?,
+        warning_details = warning_details_json(&result.warnings_structured),
         sir_ess = sir_ess,
         sir_ci_theta = sir_ci_theta,
         sir_ci_omega = sir_ci_omega,
@@ -6292,12 +6288,14 @@ fn ferx_rust_offdiag_corrs(m: Vec<f64>, n: i32, param_corr: Robj) -> List {
 /// @export
 #[extendr]
 fn ferx_rust_warning_details_canonical(entries: Vec<String>) -> Vec<String> {
-    entries
-        .iter()
-        .filter_map(|e| serde_json::from_str::<ferx_core::WarningEntry>(e).ok())
-        .filter(|e| e.details.is_some())
-        .filter_map(|e| serde_json::to_string(&e).ok())
-        .collect()
+    entry(move || {
+        Ok(entries
+            .iter()
+            .filter_map(|e| serde_json::from_str::<ferx_core::WarningEntry>(e).ok())
+            .filter(|e| e.details.is_some())
+            .filter_map(|e| serde_json::to_string(&e).ok())
+            .collect())
+    })
 }
 
 /// `c(min, median, max)` of a compact theta block's coefficients, as
@@ -6311,8 +6309,10 @@ fn ferx_rust_warning_details_canonical(entries: Vec<String>) -> Vec<String> {
 /// @export
 #[extendr]
 fn ferx_rust_block_summary(values: Vec<f64>) -> Vec<f64> {
-    let (min, median, max) = ferx_core::io::output::block_summary(&values);
-    vec![min, median, max]
+    entry(move || {
+        let (min, median, max) = ferx_core::io::output::block_summary(&values);
+        Ok(vec![min, median, max])
+    })
 }
 
 /// A theta transform as R spells it (`fit$theta_transforms`) read back.
@@ -7458,6 +7458,17 @@ fn scoring_settings_from_r(
     Ok(Some(scoring))
 }
 
+/// The record of a run that changed nothing, which R edits an explicit argument
+/// into on a fit that records none: `ScoringSettings::default()` with every
+/// `MissingKey::Unrecorded` field unrecorded. Its `Some(0.0)` NN strengths
+/// would otherwise win over the model file's, as a recorded strength does
+/// (ferx-core #1352), and score a regularized fit without its penalty.
+fn default_scoring_record() -> ferx_core::ScoringSettings {
+    let mut scoring = ferx_core::ScoringSettings::default();
+    clear_unrecorded(&mut scoring, &Robj::from(()));
+    scoring
+}
+
 /// Set to `None` each `MissingKey::Unrecorded` field that `record` (a scoring
 /// record list, already through `apply_settings_record`) leaves out or holds
 /// as NA: `from_options` records every field, but an unrecorded one must keep
@@ -7562,7 +7573,8 @@ fn ferx_rust_settings_record(kind: &str, record: Robj, entry_point: &str, field:
     entry(move || {
         let robj = match kind {
             "scoring_settings" => scoring_settings_to_r(
-                &scoring_settings_from_r(entry_point, field, &record)?.unwrap_or_default(),
+                &scoring_settings_from_r(entry_point, field, &record)?
+                    .unwrap_or_else(default_scoring_record),
             )?,
             "sir_settings" | "sir_settings_wire" => {
                 let record = if kind == "sir_settings_wire" && !record.is_null() {
@@ -7571,9 +7583,12 @@ fn ferx_rust_settings_record(kind: &str, record: Robj, entry_point: &str, field:
                 } else {
                     record
                 };
-                sir_settings_to_r(
-                    &sir_settings_from_r(entry_point, field, &record)?.unwrap_or_default(),
-                )?
+                sir_settings_to_r(&sir_settings_from_r(entry_point, field, &record)?.unwrap_or_else(
+                    || ferx_core::estimation::sir::SirSettings {
+                        scoring: default_scoring_record(),
+                        ..Default::default()
+                    },
+                ))?
             }
             other => return Err(format!("internal: unknown settings record kind `{other}`")),
         };
@@ -8258,7 +8273,7 @@ fn ferx_rust_sir(
             theta_levels = theta_levels,
             n_threads_used = n_threads_used,
             warnings = new_fit.warnings.clone(),
-            warning_details = warning_details_json(&new_fit.warnings_structured)?
+            warning_details = warning_details_json(&new_fit.warnings_structured)
         )
         .into())
     })
@@ -8521,7 +8536,7 @@ fn ferx_rust_covariance(
             theta_levels = theta_levels,
             n_threads_used = n_threads_used,
             warnings = new_fit.warnings.clone(),
-            warning_details = warning_details_json(&new_fit.warnings_structured)?
+            warning_details = warning_details_json(&new_fit.warnings_structured)
         )
         .into())
     })

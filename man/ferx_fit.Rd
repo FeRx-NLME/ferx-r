@@ -903,7 +903,8 @@ per-iteration parameter values into \code{fit$impmap_trace}
 engine). Independent of \code{seed} / \code{saem_seed}.}
 \item{\code{sir_df}}{(default 5) Degrees of freedom for the SIR
 multivariate Student-t proposal; higher values approach a normal
-proposal.}
+proposal, and \code{Inf} (or \code{"normal"}) is the
+multivariate-normal proposal itself.}
 \item{\code{sir_keep_samples}}{(default \code{FALSE}) Retain the resampled
 parameter vectors, which \code{\link{ferx_simulate_with_uncertainty}}
 requires.}

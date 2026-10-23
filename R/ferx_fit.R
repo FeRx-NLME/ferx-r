@@ -862,7 +862,8 @@
 #'       engine). Independent of \code{seed} / \code{saem_seed}.}
 #'     \item{\code{sir_df}}{(default 5) Degrees of freedom for the SIR
 #'       multivariate Student-t proposal; higher values approach a normal
-#'       proposal.}
+#'       proposal, and \code{Inf} (or \code{"normal"}) is the
+#'       multivariate-normal proposal itself.}
 #'     \item{\code{sir_keep_samples}}{(default \code{FALSE}) Retain the resampled
 #'       parameter vectors, which \code{\link{ferx_simulate_with_uncertainty}}
 #'       requires.}
@@ -3950,6 +3951,11 @@ print.ferx_summary <- function(x, ...) {
       return(if (isTRUE(v)) "true" else "false")
     }
     if (is.numeric(v)) {
+      # `sir_df = Inf` is the multivariate-normal proposal, `normal` in
+      # `[fit_options]` (ferx-core #1819), as `ferx_sir(sir_df = Inf)` takes it.
+      if (identical(key, "sir_df") && identical(v, Inf)) {
+        return("normal")
+      }
       if (!is.finite(v)) {
         stop(sprintf("`settings$%s` must be a finite number", key))
       }

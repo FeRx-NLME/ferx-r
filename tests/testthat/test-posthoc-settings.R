@@ -191,7 +191,10 @@ ps_sir_rows <- list(
   # (ferx-core #2279), ode_reltol no longer reaches warfarin_ode's exact linear
   # path, and dropping the record scored the same draws identically.
   list(key = "mm_sir_rtol3", example = "mm_oral",
-       settings = list(ode_reltol = 1e-3))
+       settings = list(ode_reltol = 1e-3)),
+  # A multivariate-normal proposal: `.fitrx` writes its df as "normal" since
+  # ferx-core #1819, so S5's reload repeats it too.
+  list(key = "w_sir_normal", example = "warfarin", settings = list(sir_df = Inf))
 )
 
 ps_sir_fit <- function(row) {
@@ -203,9 +206,12 @@ ps_sir_fit <- function(row) {
 test_that("S4: ferx_sir(fit) with no arguments repeats the in-fit SIR", {
   for (row in ps_sir_rows) {
     fit <- ps_sir_fit(row)
-    # Premise: the same draws without the record score differently.
+    # Premise: the same draws without the records score differently. Both go:
+    # without a SIR record, ferx_sir() scores under the fit's stage record,
+    # which carries the scoring rows' setting too.
     no_record <- fit
     no_record$sir_settings <- NULL
+    no_record$scoring_settings <- NULL
     expect_false(identical(
       ps_sir_fields(ferx_sir(no_record, 300L, 100L, sir_seed = 1L)),
       ps_sir_fields(fit)
@@ -254,9 +260,10 @@ test_that("S5: the SIR record survives the round trip, so ferx_sir(loaded) repea
     expect_identical(loaded$sir_settings, fit$sir_settings, info = row$key)
     expect_identical(loaded$sir_seed_used, 1, info = row$key)
     expect_identical(ps_sir_fields(ferx_sir(loaded)), ps_sir_fields(fit), info = row$key)
-    # Premise: without the record the loaded fit resamples differently.
+    # Premise: without the records the loaded fit resamples differently.
     no_record <- loaded
     no_record$sir_settings <- NULL
+    no_record$scoring_settings <- NULL
     expect_false(identical(
       ps_sir_fields(ferx_sir(no_record, 300L, 100L, sir_seed = 1L)),
       ps_sir_fields(fit)
@@ -289,8 +296,12 @@ test_that("S10: the .fitrx spelling of both records is ferx-core's", {
   expect_identical(from(jsonlite::parse_json(text), "scoring_settings"), sc)
   # The covariate-NN penalty strengths (ferx-core #1352) are optional: a
   # recorded one round-trips, an unrecorded one is NA (JSON null), and a
-  # record written before #1352, without the keys, reads as unrecorded.
-  expect_identical(sc$nn_l2_lambda, 0)
+  # record written before #1352, without the keys, reads as unrecorded. The
+  # default record leaves them unrecorded too: R edits it into a fit with no
+  # record, and a recorded 0 would win over the model file's strength.
+  expect_identical(sc$nn_l2_lambda, NA_real_)
+  expect_identical(ferx:::.ferx_default_settings("sir_settings")$scoring$nn_l2_lambda,
+                   NA_real_)
   sc$nn_l2_lambda <- 0.25
   sc$nn_smooth_lambda <- NA_real_
   text <- json(to(sc, "scoring_settings"))
@@ -302,8 +313,8 @@ test_that("S10: the .fitrx spelling of both records is ferx-core's", {
   back <- from(old, "scoring_settings")
   expect_identical(back$nn_l2_lambda, NA_real_)
   expect_identical(back$nn_smooth_lambda, NA_real_)
-  sc$nn_l2_lambda <- 0
-  sc$nn_smooth_lambda <- 0
+  sc$nn_l2_lambda <- NA_real_
+  sc$nn_smooth_lambda <- NA_real_
 
   sr <- ferx:::.ferx_default_settings("sir_settings")
   sr[c("samples", "resamples", "seed", "df", "scale", "keep_samples")] <-
@@ -597,6 +608,8 @@ test_that("S16: a missing key is filled as ferx-core's wire fills it, or refused
   sc$inner_restarts <- 4L
   sc$inner_screen <- 7L
   sc$gradient_method <- "fd"
+  sc$nn_l2_lambda <- 0.5
+  sc$nn_smooth_lambda <- 0.25
   for (name in names(sc)) {
     rec <- sc[names(sc) != name]
     if (name %in% names(ps_missing_fills)) {
@@ -714,4 +727,58 @@ test_that("S18: a bundle record naming an unknown key is dropped with a warning;
   loaded <- suppressWarnings(ferx_load_fit(newer$scoring_settings))
   expect_identical(ferx_covariance(loaded)$cov_matrix,
                    ferx_covariance(ferx_load_fit(without$scoring_settings))$cov_matrix)
+})
+
+test_that("S17: ferx_sir(fit, args) on a fit with no SIR record scores under its stage record", {
+  skip_on_cran()
+  # `run_sir` scores under the SIR record's scoring half before
+  # fit$scoring_settings, so the record R builds for an explicit argument must
+  # carry the fit's stage settings, not the engine default (#646 review: at
+  # inner_maxiter 5 the default 200 moved the ESS from 119.406 to 119.575).
+  fit <- ps_fit("w_maxit5_nosir", "warfarin", list(inner_maxiter = 5L))
+  expect_null(fit$sir_settings)
+  ran <- ferx_sir(fit, 300L, 100L, sir_seed = 1L)
+  expect_identical(ran$sir_settings$scoring$inner_maxiter, 5L)
+  # The same draws under a SIR record built by hand on the stage record.
+  by_hand <- fit
+  rec <- ferx:::.ferx_default_settings("sir_settings")
+  rec[c("samples", "resamples", "seed")] <- list(300L, 100L, 1)
+  rec$scoring <- fit$scoring_settings
+  by_hand$sir_settings <- rec
+  expect_identical(ps_sir_fields(ran), ps_sir_fields(ferx_sir(by_hand)))
+  # Premise: under the engine default the draws score differently.
+  bare <- fit
+  bare$scoring_settings <- NULL
+  expect_false(identical(ps_sir_fields(ferx_sir(bare, 300L, 100L, sir_seed = 1L)),
+                         ps_sir_fields(ran)))
+})
+
+test_that("S18: a regularized [covariate_nn] fit records its NN penalty strength, and post-hoc records keep it", {
+  skip_on_cran()
+  # warfarin_dcm with `nn_l2 = 0.1`, evaluated at its initial estimates. A
+  # recorded strength wins over the caller's in ferx-core (#1352), so every
+  # record R hands a post-hoc step must carry the fit's, and a record R builds
+  # for a fit with none must leave it unrecorded (NA) so the model file's
+  # strength stands rather than 0.
+  ex <- ferx_example("warfarin_dcm")
+  t <- readLines(ex$model)
+  t <- append(t, "  nn_l2 = 0.1", grep("^  method = focei", t))
+  model <- ps_scratch(".ferx")
+  writeLines(t, model)
+  fit <- suppressWarnings(ferx_fit(model, ex$data, covariance = FALSE, verbose = FALSE,
+                                   settings = list(maxiter = 0L)))
+  expect_identical(fit$scoring_settings$nn_l2_lambda, 0.1)
+  expect_identical(fit$scoring_settings$nn_smooth_lambda, 0)
+  args <- ferx:::.ferx_fit_record_args(fit, scoring = list(mu_referencing = TRUE),
+                                       sir = list(samples = 300L))
+  expect_identical(args$scoring_settings$nn_l2_lambda, 0.1)
+  expect_identical(args$sir_settings$scoring$nn_l2_lambda, 0.1)
+  bare <- fit
+  bare$scoring_settings <- NULL
+  args <- ferx:::.ferx_fit_record_args(bare, scoring = list(mu_referencing = TRUE),
+                                       sir = list(samples = 300L))
+  expect_identical(args$scoring_settings$nn_l2_lambda, NA_real_)
+  expect_identical(args$sir_settings$scoring$nn_l2_lambda, NA_real_)
+  # And the strength survives the bundle.
+  expect_identical(ps_round_trip(fit)$scoring_settings, fit$scoring_settings)
 })

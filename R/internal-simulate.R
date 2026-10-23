@@ -238,8 +238,9 @@ validate_fit_for_params <- function(fit) {
 # record. A fit with no record gets the record the engine would otherwise
 # have used to write them into: for the scoring settings the SIR record's
 # scoring half, which `run_covariance` falls back to (a bundle written between
-# ferx-core #1758 and #426 carries only that), else the engine's default
-# record. With no explicit argument a fit keeps what it has, and a fit with
+# ferx-core #1758 and #426 carries only that), and for the SIR settings the
+# default SIR record scored under the fit's stage record; else the engine's
+# default record, whose covariate-NN strengths are unrecorded (NA). With no explicit argument a fit keeps what it has, and a fit with
 # no record runs as it always did.
 .ferx_fit_record_args <- function(fit, scoring = list(), sir = list()) {
   edit <- function(record, fallback, kind, values) {
@@ -248,10 +249,21 @@ validate_fit_for_params <- function(fit) {
     record[names(values)] <- values
     record
   }
+  # A fit with no SIR record gets one whose scoring half is the fit's own
+  # stage record: `run_sir` scores under the SIR record's scoring half before
+  # `fit$scoring_settings`, so the engine default there would re-score the
+  # draws under settings the fit did not run - its inner budget, and the
+  # covariate-NN penalty strengths (ferx-core #1352) - where ferx_sir(fit)
+  # with no argument scores them under the stage's.
+  sir_fallback <- NULL
+  if (is.null(fit$sir_settings) && !is.null(fit$scoring_settings)) {
+    sir_fallback <- .ferx_default_settings("sir_settings")
+    sir_fallback$scoring <- fit$scoring_settings
+  }
   list(
     scoring_settings = edit(fit$scoring_settings, fit$sir_settings$scoring,
                             "scoring_settings", scoring),
-    sir_settings = edit(fit$sir_settings, NULL, "sir_settings", sir),
+    sir_settings = edit(fit$sir_settings, sir_fallback, "sir_settings", sir),
     packed_estimate = as.numeric(fit$packed_estimate %||% numeric()),
     # The LOQ method the fit scored ("drop" / "m3"), which the post-hoc steps
     # score too (ferx-core #1824); "" leaves the model file's.

@@ -99,6 +99,23 @@ test_that("a bundle without details, or with an unknown category, still loads", 
   expect_identical(back$warnings, fit$warnings)
 })
 
+test_that("a whole-number float in the details reloads as a float", {
+  # `details` is an untyped serde_json::Value, which keeps `50` an integer and
+  # `50.0` a float; R must write a double with its decimal point, or a loaded
+  # `threshold_pct = 50.0` comes back `50L` and is not identical() (#646 review).
+  json <- paste0('{"severity":"Warning","category":"inflated_rse","message":"m",',
+                 '"details":{"threshold_pct":50.0,"n":3,"x":2.5}}')
+  # A live entry is the engine's own serialisation of it.
+  live <- ferx:::.ferx_parse_warning_details(ferx:::ferx_rust_warning_details_canonical(json))
+  expect_identical(live[[1L]]$details$threshold_pct, 50)
+  expect_identical(live[[1L]]$details$n, 3L)
+  wire <- ferx:::.fitrx_warning_details_to_wire(list(warning_details = live, warnings = "m"))
+  back <- ferx:::.fitrx_warning_details_from_wire(
+    list(jsonlite::parse_json(as.character(wire[[1L]]))), "m"
+  )
+  expect_identical(back, live)
+})
+
 test_that("the post-hoc steps keep the details in step with the warnings", {
   skip_on_cran()
   fit <- wd_fit()

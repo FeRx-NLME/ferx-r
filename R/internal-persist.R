@@ -722,10 +722,14 @@
 
 # Each entry as JSON, in R's spelling. On save they are written verbatim; on
 # load they go through the engine's `WarningEntry` and come back in serde's.
+# `details` is an untyped `serde_json::Value`, which keeps `50` an integer and
+# `50.0` a float, so a whole-number double is written with its decimal point
+# (`always_decimal`): otherwise it would reload as an integer, and the loaded
+# list would not be `identical()` to the fit's.
 .fitrx_warning_details_json <- function(entries) {
   vapply(entries, function(e) {
     as.character(jsonlite::toJSON(e, auto_unbox = TRUE, digits = I(17),
-                                  null = "null", na = "null"))
+                                  always_decimal = TRUE, null = "null", na = "null"))
   }, character(1L))
 }
 
