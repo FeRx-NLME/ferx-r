@@ -804,6 +804,10 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
     # ferx-core #1485: ferx_simulate_with_uncertainty() draws whose typical
     # values fall in a twin-less transit / IG closed form's flip-flop regime.
     uncertainty_draws_skipped = "Some uncertainty draws were not simulated, so the prediction intervals come from a truncated sample and are biased, not just noisier. Rewrite the model as an explicit ODE transit() / igd() model to simulate every draw.",
+    # ferx-core #2104 (W_DEGENERATE_CL_V): a closed-form model scores such a
+    # record as concentration 0 (the dose is dropped) or NaN, where NONMEM
+    # would refuse it, so the OFV includes records the model cannot describe.
+    degenerate_clearance_or_volume = "The final estimates give at least one record a non-positive or non-finite CL or V, which the closed-form model scores as a zero (dropped-dose) or NaN concentration. Keep the parameter positive - an exponential form such as TVCL * exp(ETA_CL), a positive lower bound on its theta - and check covariate effects that can drive it through zero.",
     vi_bad_basin       = "VI's final ELBO check found that the flat objective is a bad basin, not a usable variational approximation. Refit from different initial values, raise settings = list(n_starts = 4L), or use method = \"focei\".",
     boundary_estimate  = "A THETA estimate finished on one of its declared bounds, so it is not an interior optimum and its standard error is not meaningful. Widen the bound if it is too tight, FIX the parameter if the boundary value is intended, or simplify the model if the data do not inform it.",
     parameter_at_runaway_guard = "A coordinate is pinned to an internal safety limit (an implicit theta cap, or an omega/sigma guard), so this is not an interior optimum. Give the parameter explicit bounds, fix it, or remove the term it belongs to.",

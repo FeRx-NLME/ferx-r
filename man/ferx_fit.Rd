@@ -117,6 +117,18 @@ convergence diagnostics on \code{$bayes} rather than a point estimate, and
 runs standalone. Supports BSV and zero-mean inter-occasion variability
 (per-occasion \code{kappa}); the IOV variance posterior appears as
 \code{OMEGA_IOV(...)} in \code{$bayes}.
+\code{"vi"} runs variational inference: a Gaussian approximation to each
+subject's random-effects posterior, fitted with the population parameters
+by Adam steps on the evidence lower bound (ELBO); it reports its result on \code{fit$vi}. Its objective is a bound, so
+\code{fit$ofv} is \code{NaN} unless \code{vi_final_ofv} asks for one; the
+two finishing chains are \code{c("vi", "laplace")} with
+\code{settings = list(agq_eval_only = TRUE)} and \code{c("vi", "imp")}
+with \code{settings = list(imp_eval_only = TRUE)}. Its \code{vi_*}
+settings are listed under \code{settings} below.
+Tokens are read by the engine, exactly as a
+\code{[fit_options] method = ...} line is, so the accepted spellings and chain rules (an
+evaluate-only stage - \code{agq_eval_only}, \code{imp_eval_only} - must
+come last) are the same in both places.
 SAEM fully supports inter-occasion variability (IOV / kappa) models.}
 
 \item{covariance}{Logical, or \code{NULL} (the default). Whether to compute
@@ -720,11 +732,12 @@ of \code{seed} / \code{saem_seed}.}
 
 \strong{Variational inference (\code{method = vi})}
 
-VI is selected in the model file (\code{[fit_options] method = vi}) and
-reports its result on \code{fit$vi}. Its objective is a bound, not a
-likelihood, so \code{fit$ofv} is \code{NaN} unless \code{vi_final_ofv}
-asks for one; for a deterministic \code{-2 log L} at the VI estimate,
-chain \code{methods = vi, laplace} with \code{agq_eval_only = true} and
+VI is selected with \code{method = "vi"} (or the model file's
+\code{[fit_options] method = vi}) and reports its result on
+\code{fit$vi}. Its objective is a bound, not a likelihood, so
+\code{fit$ofv} is \code{NaN} unless \code{vi_final_ofv} asks for one;
+for a deterministic \code{-2 log L} at the VI estimate, chain
+\code{method = c("vi", "laplace")} with \code{agq_eval_only = TRUE} and
 \code{n_agq = 21} (see below).
 \describe{
 \item{\code{vi_iters}}{Maximum Adam iterations (default \code{25000}).

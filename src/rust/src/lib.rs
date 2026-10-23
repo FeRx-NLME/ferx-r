@@ -1,7 +1,8 @@
 use extendr_api::prelude::*;
 use ferx_core::cancel::CancelFlag;
 use ferx_core::parser::model_parser::{
-    DataBindings, LevelBinding, LevelBindings, LevelContrast, ParseBindings,
+    apply_method_option, parse_method_token, DataBindings, LevelBinding, LevelBindings,
+    LevelContrast, ParseBindings,
 };
 use ferx_core::types::*;
 use nalgebra::DMatrix;
@@ -618,28 +619,65 @@ fn ferx_rust_fit(
         // `parsed.fit_options`). Only an explicit R-side method overrides it, so a
         // model-file `method = saem` is no longer clobbered by R's default (#558).
         if !method.is_empty() {
-            let chain: Vec<EstimationMethod> = match method.iter().map(|m| parse_method(m)).collect() {
-                Ok(v) => v,
-                Err(e) => return Err(argument_refusal(e)),
+            // ferx-core's own reading of a `method = ...` value (ferx-r #506): the
+            // tokens and the chain go through `apply_method_option`, exactly as a
+            // `[fit_options]` line does, so an engine method (`vi`) cannot be
+            // missing from a copied list here. Chain rules that depend on other
+            // options (an evaluate-only stage last) are the engine's fit-time
+            // validation.
+            let value = method_option_value(&method).map_err(argument_refusal)?;
+            apply_method_option(&mut opts, &value).map_err(argument_refusal)?;
+            // `interaction` keeps the R-side rule, which differs from the model
+            // file's (that one leaves it inherited for any final stage but
+            // foce/focei): it follows the chain's last *estimating* stage, on
+            // only for FOCEI. IMP is skipped so `c("focei", "imp")` still reports
+            // `interaction = TRUE`. Switching to the file's rule would change the
+            // objective an R `method = "saem"` / `"gn"` fit runs under. A fit
+            // whose estimates VI owns has no such history - R refused "vi" until
+            // #506 - so it takes the flag a model file whose method line is this
+            // value would give: applied to fresh options, not on top of the file's
+            // own method line (a `method = foce` there has already cleared it). An
+            // explicit `method = "vi"` then scores (`vi_final_ofv`, covariance
+            // step) as a model-file one does. VI owns the estimates when it is the
+            // last stage that estimates - the last, or followed only by
+            // evaluate-only readouts (ferx-core's `is_last_estimating_stage`, which
+            // is not public); a VI warm start for `gn` or `saem` keeps the R rule.
+            let chain = if opts.methods.is_empty() {
+                vec![opts.method]
+            } else {
+                opts.methods.clone()
             };
-            let final_method = *chain.last().unwrap();
-            // The reported `interaction` flag must reflect the last *estimating* stage
-            // — IMP is a diagnostic terminal stage that does not update parameters, so
-            // a chain like `c("focei", "imp")` should still report `interaction = TRUE`.
-            let last_estimator = chain
+            let eval_only: Vec<EstimationMethod> = [
+                (opts.imp_eval_only, EstimationMethod::Imp),
+                (opts.agq_eval_only, EstimationMethod::Laplace),
+            ]
+            .into_iter()
+            .filter_map(|(on, m)| on.then_some(m))
+            .collect();
+            let vi_owns_estimates = chain
                 .iter()
                 .rev()
-                .find(|m| **m != EstimationMethod::Imp)
-                .copied()
-                .unwrap_or(final_method);
-            opts.method = final_method;
-            opts.interaction = last_estimator == EstimationMethod::FoceI;
-            opts.methods = if chain.len() > 1 { chain } else { Vec::new() };
-            // Mark the method as explicitly chosen so the engine does not warn that
-            // it defaulted (ferx-core's method_default_warning keys off this).
-            if !opts.user_set_keys.iter().any(|k| k == "method") {
-                opts.user_set_keys.push("method".to_string());
+                .find(|m| !eval_only.contains(m))
+                .is_some_and(|m| *m == EstimationMethod::Vi);
+            if vi_owns_estimates {
+                let mut fresh = FitOptions::default();
+                apply_method_option(&mut fresh, &value).map_err(argument_refusal)?;
+                opts.interaction = fresh.interaction;
+            } else {
+                let last_estimator = chain
+                    .iter()
+                    .rev()
+                    .find(|m| **m != EstimationMethod::Imp)
+                    .copied()
+                    .unwrap_or(opts.method);
+                opts.interaction = last_estimator == EstimationMethod::FoceI;
             }
+            // The engine marks the method explicitly chosen (its
+            // method_default_warning keys off this); a model-file `method` line
+            // already did, so keep one entry.
+            let mut first = true;
+            opts.user_set_keys
+                .retain(|k| k != "method" || std::mem::replace(&mut first, false));
         }
         // Boolean fit options forwarded from R as sentinel strings: "" keeps the
         // model file's [fit_options] value (already in `opts` from
@@ -2983,55 +3021,26 @@ fn parse_match_method(
     }
 }
 
-// -- Helper: parse a single R-side method token into EstimationMethod --
+// -- Helper: the `method = ...` value ferx-core reads, from R's method tokens --
+//
+// One token is passed as is, several as a `[a, b, c]` chain - the two
+// `[fit_options]` spellings `apply_method_option` takes. A token carrying the
+// list syntax itself is refused, so one R string cannot smuggle in a chain.
+// Method names are not listed here: the engine's `parse_method_token` reads
+// them (ferx-r #506).
 
-fn parse_method(token: &str) -> std::result::Result<EstimationMethod, String> {
-    let m = token.trim().to_lowercase();
-    if m == "saem" {
-        Ok(EstimationMethod::Saem)
-    } else if m.contains("hybrid") {
-        Ok(EstimationMethod::FoceGnHybrid)
-    } else if m == "laplace" || m == "laplacian" {
-        // NONMEM `$EST METHOD=1 LAPLACIAN` — the exact-anchor quadrature (n_agq = 1 is
-        // Laplace, n_agq > 1 is adaptive Gauss–Hermite quadrature).
-        Ok(EstimationMethod::Laplace)
-    } else if m == "agq"
-        || m == "aghq"
-        || m == "gauss_hermite"
-        || m == "gauss-hermite"
-        || m == "adaptive_gaussian_quadrature"
-        || m == "adaptive-gaussian-quadrature"
-    {
-        // `method = "agq"` was removed (ferx-core #251): adaptive quadrature is
-        // `method = "laplace"` with `settings = list(n_agq = N)`. MUST stay above the
-        // `contains("gauss")` arm below, which would otherwise route `gauss_hermite` into
-        // Gauss-*Newton*. Mirrors ferx-core's `parse_method_token`.
-        Err(
-            "method = \"agq\" has been removed: use method = \"laplace\" with n_agq = N \
-             (n_agq = 1 is the Laplace approximation, n_agq > 1 is adaptive Gauss–Hermite \
-             quadrature). For the Gauss-Newton-anchored quadrature use method = \"focei\" with \
-             n_agq > 1."
-                .to_string(),
-        )
-    } else if m == "gn" || m.contains("gauss") {
-        Ok(EstimationMethod::FoceGn)
-    } else if m == "focei" || m == "foce-i" || m == "foce_i" || m.contains("interaction") {
-        Ok(EstimationMethod::FoceI)
-    } else if m == "foce" {
-        Ok(EstimationMethod::Foce)
-    } else if m == "impmap" || m == "importance_sampling_map" || m == "importance-sampling-map" {
-        Ok(EstimationMethod::Impmap)
-    } else if m == "imp" || m == "importance_sampling" || m == "importance-sampling" {
-        Ok(EstimationMethod::Imp)
-    } else if m == "impmap" || m == "importance_sampling_map" {
-        Ok(EstimationMethod::Impmap)
-    } else if m == "bayes" || m == "bayesian" || m == "mcmc" {
-        Ok(EstimationMethod::Bayes)
-    } else {
-        Err(format!(
-            "Unknown estimation method '{}' — expected one of: foce, focei, laplace, saem, gn, gn_hybrid, imp, impmap, bayes",
-            token.trim()
-        ))
+fn method_option_value(tokens: &[String]) -> std::result::Result<String, String> {
+    if let Some(bad) = tokens.iter().find(|t| t.contains(['[', ']', ','])) {
+        return Err(format!(
+            "method token '{}' contains '[', ']' or ',': pass a chain as a character \
+             vector, e.g. method = c(\"focei\", \"imp\")",
+            bad.trim()
+        ));
+    }
+    match tokens {
+        [] => Err("`method` must be a non-empty character vector".to_string()),
+        [one] => Ok(one.clone()),
+        many => Ok(format!("[{}]", many.join(", "))),
     }
 }
 
@@ -5595,7 +5604,8 @@ fn ferx_rust_fit_option_keys() -> Vec<String> {
 ///
 /// `method` is the one key `apply_fit_option` does not own (ferx-core keeps its
 /// list-chain syntax in the block parser), so it is read here as the chain the
-/// R `method =` argument builds: `foce`, `[saem, imp]` and `saem, imp` alike.
+/// R `method =` argument builds: `foce`, `[saem, imp]` and `saem, imp` alike,
+/// each token through the engine's own `parse_method_token` (ferx-r #506).
 /// Every other key goes through `apply_fit_option` on a fresh `FitOptions`.
 fn fit_option_normalised(key: &str, value: &str) -> Option<String> {
     if key == "method" {
@@ -5604,7 +5614,7 @@ fn fit_option_normalised(key: &str, value: &str) -> Option<String> {
             .split(',')
             .map(str::trim)
             .filter(|s| !s.is_empty())
-            .map(parse_method)
+            .map(parse_method_token)
             .collect::<std::result::Result<_, _>>()
             .ok()?;
         return (!chain.is_empty()).then(|| format!("{chain:?}"));
@@ -5705,6 +5715,42 @@ fn ferx_rust_sha256_raw(bytes: Raw) -> String {
     entry(move || Ok(ferx_core::io::hash::sha256_bytes(bytes.as_slice())))
 }
 
+/// Every estimation method with its `.fitrx` token: the token is what core's
+/// `.fitrx` writer stores for that method (ferx-r #508).
+///
+/// Core keeps its token map private, so the tokens are spelled here, once, in
+/// the `methods!` list below. That one list generates both the table and an
+/// exhaustive `match` over `EstimationMethod`, so a method the engine adds and
+/// the list lacks stops this crate compiling; nothing can be in the match but
+/// missing from the table.
+fn method_table() -> Vec<(EstimationMethod, &'static str)> {
+    macro_rules! methods {
+        ($($variant:ident => $token:literal),+ $(,)?) => {{
+            // Never called: it exists so the compiler checks that the
+            // `methods!` list covers every `EstimationMethod`.
+            #[allow(dead_code)]
+            fn exhaustive(m: EstimationMethod) {
+                match m {
+                    $(EstimationMethod::$variant => {})+
+                }
+            }
+            vec![$((EstimationMethod::$variant, $token)),+]
+        }};
+    }
+    methods! {
+        Foce => "foce",
+        FoceI => "focei",
+        FoceGn => "foce_gn",
+        FoceGnHybrid => "foce_gn_hybrid",
+        Saem => "saem",
+        Imp => "imp",
+        Impmap => "impmap",
+        Bayes => "bayes",
+        Laplace => "laplace",
+        Vi => "vi",
+    }
+}
+
 /// Every estimation method's `.fitrx` token and display label (ferx-r #508):
 /// the label is ferx-core's `EstimationMethod::label()`, the token what core's
 /// `.fitrx` writer stores for that method. `ferx_load_fit()` maps the stored
@@ -5712,46 +5758,44 @@ fn ferx_rust_sha256_raw(bytes: Raw) -> String {
 /// neither keeps a hand-written method list that a new engine method can
 /// outgrow (a reloaded VI fit used to read `"vi"` instead of `"VI"`).
 ///
-/// Core keeps its token map private, so the tokens are spelled here, once, in
-/// the `methods!` list below. That one list generates both the table and an
-/// exhaustive `match` over `EstimationMethod`, so a method the engine adds and
-/// the list lacks stops this crate compiling; nothing can be in the match but
-/// missing from the table.
-///
 /// @return A list with `token` and `label`, character vectors, one entry per
 ///   method, in the same order.
 /// @export
 #[extendr]
 fn ferx_rust_method_labels() -> List {
     entry(move || {
-        macro_rules! methods {
-            ($($variant:ident => $token:literal),+ $(,)?) => {{
-                // Never called: it exists so the compiler checks that the
-                // `methods!` list covers every `EstimationMethod`.
-                #[allow(dead_code)]
-                fn exhaustive(m: EstimationMethod) {
-                    match m {
-                        $(EstimationMethod::$variant => {})+
-                    }
-                }
-                [$((EstimationMethod::$variant, $token)),+]
-            }};
-        }
-        let table = methods! {
-            Foce => "foce",
-            FoceI => "focei",
-            FoceGn => "foce_gn",
-            FoceGnHybrid => "foce_gn_hybrid",
-            Saem => "saem",
-            Imp => "imp",
-            Impmap => "impmap",
-            Bayes => "bayes",
-            Laplace => "laplace",
-            Vi => "vi",
-        };
+        let table = method_table();
         let tokens: Vec<String> = table.iter().map(|(_, t)| t.to_string()).collect();
         let labels: Vec<String> = table.iter().map(|(m, _)| m.label().to_string()).collect();
         Ok(list!(token = tokens, label = labels))
+    })
+}
+
+/// Read `ferx_fit(method = ...)` tokens the way the engine does (ferx-r #506):
+/// each goes through ferx-core's `parse_method_token`, the reader of a
+/// `[fit_options] method = ...` line, so R keeps no method list of its own.
+/// An unknown or removed token (`"agq"`) is refused with the engine's message.
+///
+/// @param tokens Character vector of method tokens, any accepted spelling.
+/// @return Character vector, each token's method as its `.fitrx` token (the
+///   `token` column of `ferx_rust_method_labels()`), in input order.
+/// @export
+#[extendr]
+fn ferx_rust_method_tokens(tokens: Vec<String>) -> Vec<String> {
+    entry(move || {
+        let table = method_table();
+        tokens
+            .iter()
+            .map(|t| {
+                let m = parse_method_token(t)
+                    .map_err(|e| argument_refusal(format!("Invalid `method`: {e}")))?;
+                let (_, token) = table
+                    .iter()
+                    .find(|(x, _)| *x == m)
+                    .expect("method_table covers every EstimationMethod");
+                Ok(token.to_string())
+            })
+            .collect()
     })
 }
 
@@ -13138,6 +13182,7 @@ extendr_module! {
     fn ferx_rust_sha256_raw;
     fn ferx_rust_stage_data_probe;
     fn ferx_rust_method_labels;
+    fn ferx_rust_method_tokens;
     fn ferx_rust_compact_theta_blocks;
     fn ferx_rust_kappa_rows;
     fn ferx_rust_fitrx_kappa_rows;
