@@ -5,10 +5,11 @@
 # agree on the OFV, every theta and the standard errors, within the bands
 # #2130 measured against its own unprofiled restart (theta 1e-3, SE 2e-2;
 # its A1 anchor puts the OFV within 1e-5). Measured here on mbma_placebo
-# (macOS arm64): OFV 2.7e-9 below the unprofiled fit, structural theta within
-# 8.6e-6 relative, the levels within 2.8e-5 of their SE, structural SEs within
-# 0.7%, and ferx_covariance() within 4.2e-6 of the fit's SEs (#2130's replay
-# gap is 5.5e-6, band 1e-4). An engine that ignored `profile` would fit the
+# (macOS arm64) at ferx-core 5bd862b8: OFV 6.6e-7 above the unprofiled fit
+# (1.8e-6 at 59a4fe3f, before #2285 tightened the profiled ftol), structural
+# theta within 8.6e-6 relative, the levels within 2.8e-5 of their SE,
+# structural SEs within 0.7%, and ferx_covariance() identical to the fit's
+# SEs (#2173). An engine that ignored `profile` would fit the
 # same numbers, so the fit must also say which blocks it profiled.
 
 quiet <- function(x) suppressWarnings(suppressMessages(x))
@@ -103,12 +104,12 @@ test_that("the fit says which blocks it profiled", {
 test_that("ferx_covariance() repeats the profiled covariance step, live and reloaded", {
   skip_on_cran()
   p <- fits()$profiled
+  # Bit for bit since ferx-core #2173: the replay re-solves the profile as the
+  # fit's own covariance step did (it used to differ at round-off, 5.5e-6).
   check <- function(cv) {
-    a <- se_parts(cv)
-    e <- se_parts(p)
-    for (k in names(e)) expect_lt(rel(a[[k]], e[[k]]), 1e-4, label = k)
+    expect_identical(se_parts(cv), se_parts(p))
     expect_true(all(cv$theta_levels$profiled))
-    expect_lt(rel(cv$theta_levels$se, p$theta_levels$se), 1e-4)
+    expect_identical(cv$theta_levels$se, p$theta_levels$se)
   }
   check(quiet(ferx_covariance(p)))
   # The glue rebuilds the rows' `profiled` from the fit's record, and the

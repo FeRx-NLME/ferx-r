@@ -454,6 +454,11 @@ ferx_covariance <- function(fit,
   cov_rows <- .ferx_classify_flat_warnings(raw$warnings)
   merged <- rbind(ws %||% assembled[0, , drop = FALSE], assembled, cov_rows)
   fit$warnings_structured <- if (nrow(merged) > 0L) unique(merged) else NULL
+  # Details payloads (ferx-core #2268) follow their warnings: a dropped stale
+  # one loses its entry, and this step's are added.
+  fit$warning_details <- .ferx_merge_warning_details(
+    fit$warning_details, .ferx_parse_warning_details(raw$warning_details), fit$warnings
+  )
 
   # Refresh derived fields (cor_matrix, estimates table) from the new cov_matrix
   # so they can't drift from the fitting path.

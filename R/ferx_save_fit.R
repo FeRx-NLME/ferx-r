@@ -720,6 +720,9 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   # it only when it unpacks exactly to the fit's estimates. Absent when the fit
   # carries none.
   wire$scoring_settings <- .fitrx_settings_to_wire(fit, "scoring_settings")
+  # The structured warnings' `details` payloads, under ferx-core's
+  # `warning_details` key (#2268); absent when no warning carries any.
+  wire$warning_details <- .fitrx_warning_details_to_wire(fit)
   if (length(fit$packed_estimate)) {
     wire$packed_estimate <- as.numeric(fit$packed_estimate)
   }

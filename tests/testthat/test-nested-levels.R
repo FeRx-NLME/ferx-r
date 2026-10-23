@@ -255,6 +255,45 @@ test_that("the post-hoc steps run on a nested fit", {
   expect_identical(dim(sir$sir_ci_kappa), c(2L, 2L))
 })
 
+# The bundled nested_levels example with a `theta PL[cols]` level block added
+# (ferx-core #2034 / #2325). On the baseline it is an offset per level; in the
+# exponent beside the kappas it is read like them.
+nested_with_block <- function(cols, in_exponent = FALSE) {
+  ex <- ferx_example("nested_levels")
+  t <- readLines(ex$model)
+  t <- append(t, sprintf("  theta PL[%s](0.0, -50.0, 50.0)", cols), grep("^  sigma ADD", t) - 1L)
+  t <- if (in_exponent) {
+    sub("exp(ETA_SP + K_ST + K_ARM)", "exp(ETA_SP + K_ST + K_ARM + PL)", t, fixed = TRUE)
+  } else {
+    sub("y = TVE0 +", "y = TVE0 + PL +", t, fixed = TRUE)
+  }
+  model <- withr::local_tempfile(fileext = ".ferx", .local_envir = parent.frame())
+  writeLines(t, model)
+  list(model = model, data = ex$data)
+}
+
+test_that("a theta level block fits beside kappas at nested levels (ferx-core #2034)", {
+  skip_on_cran()
+  # Each block's levels lie inside one study or one arm, which ferx-core
+  # refused outright with E_NESTED_LEVEL_THETA_BLOCK_UNSUPPORTED before #2325.
+  for (cols in c("STUDYID", "ARMID", "STUDYID, TIME")) {
+    m <- nested_with_block(cols)
+    fit <- suppressWarnings(ferx_fit(m$model, m$data, covariance = FALSE, verbose = FALSE))
+    expect_true(fit$converged, label = cols)
+    expect_true(is.finite(fit$ofv), label = cols)
+    expect_true(nrow(fit$theta_levels) > 0L, label = cols)
+  }
+  # A block read like the kappas it lies inside absorbs them: refused with the
+  # binder's own code, naming what it absorbs, not the lifted blanket refusal.
+  m <- nested_with_block("ARMID", in_exponent = TRUE)
+  e <- tryCatch(suppressWarnings(ferx_fit(m$model, m$data, covariance = FALSE,
+                                          verbose = FALSE)),
+                error = function(e) e)
+  expect_s3_class(e, "error")
+  expect_identical(e$code, "E_THETA_LEVEL_BINDING")
+  expect_match(conditionMessage(e), "absorb `ETA_SP`, `K_ST` and `K_ARM`", fixed = TRUE)
+})
+
 test_that("ferx_simulate() draws a nested model's study kappa once per study", {
   # Degenerate design: no subject eta, no arm kappa, so EMAX varies only by
   # the study kappa. It is then one value on every record of a study, across

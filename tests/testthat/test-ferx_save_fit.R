@@ -642,14 +642,13 @@ test_that("ferx_fit(output = ...) writes a valid bundle", {
 })
 test_that("ferx_fit(output =) relays save-side conditions under its own name (#537)", {
   relay <- ferx:::.ferx_relay_save
-  # The real save-side warning: a normal SIR proposal has no bundle record.
-  sr <- ferx:::.ferx_default_settings("sir_settings")
-  sr$df <- Inf
+  # A real save-side warning: a fit that carries no FIX flags. (The normal
+  # SIR proposal this used to take is recorded since ferx-core#1819.)
   w <- tryCatch(
-    relay(ferx:::.fitrx_settings_to_wire(list(sir_settings = sr), "sir_settings")),
+    relay(ferx:::.fitrx_warn_missing_fixed(list(theta = c(TVCL = 1)))),
     warning = function(w) w
   )
-  expect_match(conditionMessage(w), "^ferx_fit: the fit's SIR used a normal proposal")
+  expect_match(conditionMessage(w), "^ferx_fit: the FIX flags for theta are unknown")
   expect_null(conditionCall(w))
   # The real save-side refusal, prefixed by the engine's decoder.
   sc <- ferx:::.ferx_default_settings("scoring_settings")

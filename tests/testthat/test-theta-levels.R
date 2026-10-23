@@ -1455,7 +1455,8 @@ test_that("T16: print.ferx_fit collapses a block of 20 free levels, not one of 1
 
 test_that("T16b: the block summary's median is the lower middle value", {
   s <- ferx:::.ferx_theta_block_summary
-  # ferx-core's own block_summary unit cases (src/io/output.rs).
+  # ferx-core's own block_summary (public since ferx-core #1812) on its unit
+  # cases (src/io/output.rs), as R reaches it.
   expect_identical(s(c(3, -1, 2)), c(-1, 2, 3))
   expect_identical(s(c(4, 1, 3, 2)), c(1, 2, 4))
   expect_identical(s(7.5), c(7.5, 7.5, 7.5))
@@ -1463,6 +1464,8 @@ test_that("T16b: the block summary's median is the lower middle value", {
   # read over all three values and the max is NaN, not a finite value.
   expect_identical(s(c(1, NaN, 2)), c(1, 2, NaN))
   expect_identical(s(c(NaN, NaN)), c(NaN, NaN, NaN))
+  # An empty block has no summary.
+  expect_identical(s(numeric()), c(NaN, NaN, NaN))
 })
 
 # --- T17: the .fitrx native data_bindings.levels slot (#466) ------------------
@@ -2071,4 +2074,23 @@ test_that("T18: THETA BLOCKS counts FIX coefficients apart from free ones", {
   part$theta_fixed[which(is_pla)[4:20]] <- FALSE
   out <- capture.output(print(part))
   expect_true(any(startsWith(out, "PLACEBO  17 free, 3 FIX coefficients   min ")))
+})
+
+test_that("a [STUDY, TIME] block keeps an eta that only the drug arm reads (ferx-core #2131)", {
+  skip_on_cran()
+  # mbma_placebo's two arms of a study share each PLACEBO[STUDY, TIME] level.
+  # An eta on the drug effect is read by the active arm only (DOSE = 0 on
+  # placebo), so the levels cannot reproduce it; the binder used to take the
+  # two arms' records as replicates and refuse it as absorbed with ETA_E0.
+  ex <- ferx_example("mbma_placebo")
+  t <- readLines(ex$model)
+  t <- append(t, "  omega ETA_EM ~ 0.1", grep("^  omega ETA_E0", t))
+  t <- sub("DRUG = EMAX * DOSE", "DRUG = EMAX * exp(ETA_EM) * DOSE", t, fixed = TRUE)
+  model <- withr::local_tempfile(fileext = ".ferx")
+  writeLines(t, model)
+  fit <- suppressWarnings(ferx_fit(model, ex$data, verbose = FALSE))
+  expect_true(fit$converged)
+  expect_true("ETA_EM" %in% rownames(fit$omega))
+  expect_true(any(fit$theta_levels$block == "PLACEBO"))
+  expect_true(is.finite(fit$ofv))
 })

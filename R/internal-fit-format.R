@@ -1140,6 +1140,8 @@
   # ETA normality, dropped `[output]` columns). No string re-parsing of core
   # messages happens here.
   result$warnings_structured <- .ferx_assemble_structured_warnings(raw, result)
+  # The structured warnings' `details` payloads (ferx-core #2268).
+  result$warning_details <- .ferx_parse_warning_details(raw$warning_details)
 
   # Reconstruct the per-iteration IMPMAP parameter trace as a data.frame.
   # The Rust side passes flat vectors + metadata; NULL when not collected.

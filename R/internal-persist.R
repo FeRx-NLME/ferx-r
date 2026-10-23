@@ -616,20 +616,9 @@
   record <- ferx_rust_settings_record(kind, record, "ferx_save_fit", paste0("fit$", kind))
   if (identical(kind, "sir_settings")) {
     # A multivariate-normal proposal records `df = Inf`, which JSON cannot
-    # hold: it would be written as null, which neither ferx-core nor
-    # `ferx_load_fit()` reads as a number, and the bundle would not load. Such
-    # a fit is saved without the record and reloads as one that has none
-    # (ferx-core#1819), which the caller is told.
-    if (!is.finite(record$df)) {
-      warning(
-        "ferx_save_fit: the fit's SIR used a normal proposal (`sir_df = Inf`), ",
-        "which a .fitrx bundle cannot record yet (ferx-core#1819), so its SIR ",
-        "settings are not saved. On the loaded fit, ferx_sir() runs with the ",
-        "defaults unless you pass the settings, `sir_df = Inf` included.",
-        call. = FALSE
-      )
-      return(NULL)
-    }
+    # hold; ferx-core's wire spells it `"normal"` (ferx-core#1819), and both
+    # its reader and `ferx_load_fit()` read that back as `Inf`.
+    if (is.infinite(record$df)) record$df <- "normal"
     record <- c(record[names(record) != "scoring"], record$scoring)
   }
   record
@@ -668,9 +657,10 @@
       record = kind))
     return(NULL)
   }
-  # A normal-proposal record (`df = Inf`) is written by ferx-core's serde as
-  # `"df": null` (ferx-core#1819). It is read as no record, as
-  # `ferx_save_fit()` writes it, so the bundle still loads.
+  # A normal-proposal record (`df = Inf`) is `"df": "normal"` on the wire
+  # since ferx-core#1819, which the decoder reads back as `Inf`. A bundle
+  # written before that holds `"df": null`; it is read as no record, so the
+  # bundle still loads.
   if (is_sir && "df" %in% names(w) && is.null(w$df)) return(NULL)
   w <- lapply(w, function(v) if (is.null(v)) NA else v)
   tryCatch(
@@ -688,4 +678,78 @@
   if (!identical(kind, "sir_settings")) return(names(.ferx_default_settings(kind)))
   c(setdiff(names(.ferx_default_settings("sir_settings")), "scoring"),
     names(.ferx_default_settings("scoring_settings")))
+}
+
+# -- Warning details (ferx-core #2268) --
+#
+# `fit$warning_details` holds the structured warnings that carry a `details`
+# payload, one list per entry with ferx-core's `WarningEntry` fields
+# (`severity`, `category`, `message`, `source_method` when set, `details`):
+# exactly the entries ferx-core writes to a `.fitrx` `fit.json:warning_details`,
+# so an R bundle and an engine bundle carry them alike. Every warning's text
+# stays in `fit$warnings`; `ferx_get_warnings(as_df = TRUE)` puts each entry's
+# `details` beside its row. NULL when no warning carries details.
+
+# Entries from the engine's JSON strings, parsed the one way both the live fit
+# and a reloaded one take, so the two are `identical()`.
+.ferx_parse_warning_details <- function(json) {
+  json <- as.character(unlist(json %||% character(), use.names = FALSE))
+  if (length(json) == 0L) return(NULL)
+  lapply(json, jsonlite::parse_json)
+}
+
+# Whether an entry's warning is among `messages` (a fit's flat warnings). A
+# chained fit's flat message carries the stage as a `[METHOD] ` prefix that the
+# entry keeps apart in `source_method`.
+.ferx_warning_detail_in <- function(entry, messages) {
+  msg <- entry$message
+  if (!is.character(msg) || length(msg) != 1L) return(FALSE)
+  msg %in% messages ||
+    (is.character(entry$source_method) &&
+       paste0("[", entry$source_method, "] ", msg) %in% messages)
+}
+
+# The entries of `old` whose warning the fit still carries in `messages`, then
+# those of `new` (a post-hoc step's) not already there. ferx_covariance() and
+# ferx_sir() drop a stale warning from the flat vector; its details go with it.
+.ferx_merge_warning_details <- function(old, new, messages) {
+  keep <- Filter(function(e) .ferx_warning_detail_in(e, messages), old %||% list())
+  for (e in new %||% list()) {
+    if (!any(vapply(keep, identical, logical(1L), e))) keep <- c(keep, list(e))
+  }
+  if (length(keep) == 0L) NULL else keep
+}
+
+# Each entry as JSON, in R's spelling. On save they are written verbatim; on
+# load they go through the engine's `WarningEntry` and come back in serde's.
+# `details` is an untyped `serde_json::Value`, which keeps `50` an integer and
+# `50.0` a float, so a whole-number double is written with its decimal point
+# (`always_decimal`): otherwise it would reload as an integer, and the loaded
+# list would not be `identical()` to the fit's.
+.fitrx_warning_details_json <- function(entries) {
+  vapply(entries, function(e) {
+    as.character(jsonlite::toJSON(e, auto_unbox = TRUE, digits = I(17),
+                                  always_decimal = TRUE, null = "null", na = "null"))
+  }, character(1L))
+}
+
+# `fit.json:warning_details` for the fit: its entries whose warning it still
+# carries, each written verbatim as the object it is. NULL (key absent, as
+# ferx-core leaves it) when there are none.
+.fitrx_warning_details_to_wire <- function(fit) {
+  entries <- .ferx_merge_warning_details(fit$warning_details, NULL,
+                                         as.character(fit$warnings %||% character()))
+  if (is.null(entries)) return(NULL)
+  lapply(.fitrx_warning_details_json(entries), function(j) structure(j, class = "json"))
+}
+
+# `fit.json:warning_details` back to the fit's entries, matched to the bundle's
+# `warnings` as ferx-core's loader matches them. An entry the engine cannot
+# read (a category this ferx does not know) is dropped, as ferx-core drops it;
+# its message is still in `fit$warnings`. NULL in a bundle written before
+# ferx-core #2268.
+.fitrx_warning_details_from_wire <- function(w, messages) {
+  if (length(w) == 0L) return(NULL)
+  canon <- ferx_rust_warning_details_canonical(.fitrx_warning_details_json(w))
+  .ferx_merge_warning_details(.ferx_parse_warning_details(canon), NULL, messages)
 }
