@@ -231,6 +231,18 @@ ferx_rust_offdiag_corrs <- function(m, n, param_corr) {
 
 #' @title Internal Rust backend binding
 #' @keywords internal
+ferx_rust_block_summary <- function(values) {
+  .Call("wrap__ferx_rust_block_summary", values)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_warning_details_canonical <- function(entries) {
+  .Call("wrap__ferx_rust_warning_details_canonical", entries)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
 ferx_rust_structural_theta_labels <- function(theta_names, profiled_blocks) {
   .Call("wrap__ferx_rust_structural_theta_labels", theta_names, profiled_blocks)
 }

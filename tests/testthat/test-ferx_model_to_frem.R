@@ -511,3 +511,15 @@ test_that("ferx_model_to_frem() `fit` seeds the generated model's PK theta/omega
   expect_s3_class(fit, "ferx_fit")
   expect_true(is.finite(fit$ofv))
 })
+
+test_that("simulating a FREM model at drawn etas says so (W_FREM_DRAWN_ETA, ferx-core #2245)", {
+  skip_on_cran()
+  ex <- ferx_example("two_cpt_oral_cov")
+  fr <- ferx_model_to_frem(model = ex$model, data = ex$data, covariates = "WT",
+                           output_model = withr::local_tempfile(fileext = ".ferx"),
+                           output_data = withr::local_tempfile(fileext = ".csv"))
+  sim <- suppressWarnings(ferx_simulate(fr$model, fr$data, n_sim = 1L, seed = 1L))
+  expect_true(any(startsWith(attr(sim, "simulation_warnings"), "W_FREM_DRAWN_ETA: ")))
+  expect_warning(ferx_simulate(fr$model, fr$data, n_sim = 1L, seed = 1L),
+                 "W_FREM_DRAWN_ETA", fixed = TRUE)
+})

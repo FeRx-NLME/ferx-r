@@ -10,8 +10,13 @@ ferx_get_warnings(fit, as_df = FALSE)
 \item{fit}{A \code{ferx_fit} object returned by \code{\link{ferx_fit}}.}
 
 \item{as_df}{Logical. When \code{TRUE}, returns the raw data frame
-(\code{severity}, \code{category}, \code{message}, \code{source_method})
-instead of pretty-printing. Default \code{FALSE}.}
+(\code{severity}, \code{category}, \code{message}, \code{source_method},
+\code{details}) instead of pretty-printing. Default \code{FALSE}.
+\code{details} is a list column: the warning's structured payload from
+ferx-core (for example \code{unusable_subjects} on
+\code{W_NONFINITE_OBJECTIVE}), as a named list, or \code{NULL} for a
+warning that carries none. The printed summary names the payload's
+fields under each warning that has one.}
 }
 \value{
 When \code{as_df = TRUE}, a data frame. Otherwise the same data

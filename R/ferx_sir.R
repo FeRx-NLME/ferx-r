@@ -25,10 +25,8 @@
 #' each draw was scored with. Every argument left at `NULL` takes the recorded
 #' value, so `ferx_sir(fit)` repeats the fit's SIR: its intervals and effective
 #' sample size are `identical()` to the in-fit ones, also after a
-#' [ferx_save_fit()] / [ferx_load_fit()] round trip. The exception is a
-#' normal proposal (`sir_df = Inf`): a `.fitrx` bundle cannot record it yet
-#' (ferx-core#1819), so `ferx_save_fit()` warns and saves no SIR settings, and
-#' the loaded fit runs as one with no record. An argument you pass
+#' [ferx_save_fit()] / [ferx_load_fit()] round trip, a normal proposal
+#' (`sir_df = Inf`) included (ferx-core#1819). An argument you pass
 #' replaces that one setting and keeps the rest. The returned fit's
 #' `sir_settings` records the run it made. The scoring half includes the
 #' gradient route the fit took (`gradient_method`), so a fit made with
@@ -495,6 +493,11 @@ ferx_sir <- function(fit,
   if (length(raw$warnings) > 0L) {
     fit$warnings <- unique(c(fit$warnings, as.character(raw$warnings)))
   }
+  # Details payloads (ferx-core #2268) follow their warnings: a dropped stale
+  # one loses its entry, and this run's are added.
+  fit$warning_details <- .ferx_merge_warning_details(
+    fit$warning_details, .ferx_parse_warning_details(raw$warning_details), fit$warnings
+  )
   assembled <- .ferx_assemble_structured_warnings(raw, fit)
   engine_rows <- .ferx_classify_flat_warnings(raw$warnings)
   sir_warnings_df <- rbind(assembled, engine_rows)

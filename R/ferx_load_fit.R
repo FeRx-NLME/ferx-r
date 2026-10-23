@@ -364,6 +364,11 @@ ferx_load_fit <- function(path) {
     max_unconverged_subjects = as.integer(w$max_unconverged_subjects %||% 0L),
     total_ebe_fallbacks = as.integer(w$total_ebe_fallbacks %||% 0L),
     warnings = unlist(w$warnings %||% list(), use.names = FALSE),
+    # The structured warnings' `details` payloads (ferx-core #2268), matched to
+    # `warnings`; NULL in a bundle written before them.
+    warning_details = .fitrx_warning_details_from_wire(
+      w$warning_details, as.character(unlist(w$warnings %||% list(), use.names = FALSE))
+    ),
     saem_mu_ref_m_step_evals_saved = .fitrx_unwrap_opt_num(w$saem_mu_ref_m_step_evals_saved),
 
     theta = stats::setNames(

@@ -1118,6 +1118,15 @@
 #'     applicable). Severity/category are assigned by the engine for its
 #'     own warnings and by the R diagnostics layer for the condition-number
 #'     and ETA-normality checks. Inspect with \code{\link{ferx_get_warnings}}.}
+#'   \item{warning_details}{List of the engine warnings that carry a
+#'     structured \code{details} payload (ferx-core #2268), one named list per
+#'     warning with \code{severity}, \code{category}, \code{message},
+#'     \code{source_method} (when set) and \code{details} - for example the
+#'     full \code{unusable_subjects} list of \code{W_NONFINITE_OBJECTIVE},
+#'     whose message names at most ten. \code{\link{ferx_save_fit}} keeps
+#'     it, in the \code{.fitrx} slot ferx-core writes, and
+#'     \code{\link{ferx_get_warnings}(as_df = TRUE)} shows each payload beside
+#'     its warning. \code{NULL} when no warning carries one.}
 #'   \item{sir_ess}{SIR effective sample size (NULL if SIR not run)}
 #'   \item{sir_ci_theta, sir_ci_omega, sir_ci_sigma}{SIR \code{95\%} CI matrices
 #'     with columns \code{lower} and \code{upper} (NULL if SIR not run)}
@@ -1296,9 +1305,13 @@
 #'     \code{inner_screen}, \code{mu_referencing}, \code{n_agq}, \code{inner_optimizer},
 #'     \code{ebe_warm_start}, \code{ode_reltol}, \code{ode_abstol},
 #'     \code{ode_max_steps}, \code{ode_method}, \code{ode_stiff_abort_after}
-#'     (\code{NA} when off), \code{ode_auto_switch} and
+#'     (\code{NA} when off), \code{ode_auto_switch},
 #'     \code{gradient_method} (the gradient route the fit took, \code{"auto"}
-#'     or \code{"fd"}), with the values \code{[fit_options]} spells.
+#'     or \code{"fd"}), and \code{nn_l2_lambda} / \code{nn_smooth_lambda}
+#'     (the \code{[covariate_nn]} penalty strengths the objective carried,
+#'     ferx-core#1352; a recorded one is kept by \code{ferx_covariance()}
+#'     whatever its arguments, \code{NA} when unrecorded), with the values
+#'     \code{[fit_options]} spells.
 #'     \code{\link{ferx_covariance}} scores under them, and
 #'     \code{\link{ferx_save_fit}} keeps them. \code{NULL} when the engine
 #'     recorded none, and on a fit saved before they were recorded; a record
@@ -2958,15 +2971,10 @@ ferx_fit <- function(model, data = NULL,
 
 # c(min, median, max) of every coefficient of a compact theta block, FIX ones
 # included (ferx-core #1891), for the THETA BLOCKS lines of print.ferx_fit
-# (#413). The median is the lower of the
-# two middle values on an even count, never their mean. A NaN is kept and sorts
-# last, as core's `total_cmp` sort puts it. This repeats ferx-core's
-# `block_summary` (src/io/output.rs), which is still private; drop it for the
-# engine's own once FeRx-NLME/ferx-core#1812 makes that public.
+# (#413): ferx-core's own `block_summary` (#1812), the one the engine's console
+# report, format_summary and fit YAML print, so R cannot drift from it.
 .ferx_theta_block_summary <- function(values) {
-  v <- sort(values, na.last = TRUE)
-  n <- length(v)
-  c(v[1L], v[(n - 1L) %/% 2L + 1L], v[n])
+  ferx_rust_block_summary(as.numeric(values))
 }
 
 #' @export

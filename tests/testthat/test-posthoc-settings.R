@@ -54,7 +54,7 @@ ps_scoring_keys <- c(
   "mu_referencing", "n_agq",
   "inner_optimizer", "ebe_warm_start", "ode_reltol", "ode_abstol",
   "ode_max_steps", "ode_method", "ode_stiff_abort_after", "ode_auto_switch",
-  "gradient_method"
+  "gradient_method", "nn_l2_lambda", "nn_smooth_lambda"
 )
 
 test_that("S11: a fit shows its scoring record, and its SIR record only after SIR", {
@@ -187,7 +187,10 @@ ps_sir_rows <- list(
   list(key = "w_sir_maxit5", example = "warfarin", settings = list(inner_maxiter = 5L)),
   list(key = "iov_sir_natural", example = "warfarin_iov",
        settings = list(sir_scale = "natural")),
-  list(key = "ode_sir_rtol3", example = "warfarin_ode",
+  # mm_oral, not warfarin_ode: since SIR re-solves each EBE as the fit did
+  # (ferx-core #2279), ode_reltol no longer reaches warfarin_ode's exact linear
+  # path, and dropping the record scored the same draws identically.
+  list(key = "mm_sir_rtol3", example = "mm_oral",
        settings = list(ode_reltol = 1e-3))
 )
 
@@ -284,6 +287,23 @@ test_that("S10: the .fitrx spelling of both records is ferx-core's", {
   expect_match(text, '"ode_stiff_abort_after":null', fixed = TRUE)
   # Back from JSON: doubles exact, NA restored, every field in its fit type.
   expect_identical(from(jsonlite::parse_json(text), "scoring_settings"), sc)
+  # The covariate-NN penalty strengths (ferx-core #1352) are optional: a
+  # recorded one round-trips, an unrecorded one is NA (JSON null), and a
+  # record written before #1352, without the keys, reads as unrecorded.
+  expect_identical(sc$nn_l2_lambda, 0)
+  sc$nn_l2_lambda <- 0.25
+  sc$nn_smooth_lambda <- NA_real_
+  text <- json(to(sc, "scoring_settings"))
+  expect_match(text, '"nn_smooth_lambda":null', fixed = TRUE)
+  expect_identical(from(jsonlite::parse_json(text), "scoring_settings"), sc)
+  old <- jsonlite::parse_json(text)
+  old$nn_l2_lambda <- NULL
+  old$nn_smooth_lambda <- NULL
+  back <- from(old, "scoring_settings")
+  expect_identical(back$nn_l2_lambda, NA_real_)
+  expect_identical(back$nn_smooth_lambda, NA_real_)
+  sc$nn_l2_lambda <- 0
+  sc$nn_smooth_lambda <- 0
 
   sr <- ferx:::.ferx_default_settings("sir_settings")
   sr[c("samples", "resamples", "seed", "df", "scale", "keep_samples")] <-
@@ -300,13 +320,14 @@ test_that("S10: the .fitrx spelling of both records is ferx-core's", {
   back$inner_restarts <- NULL
   expect_identical(from(back, "sir_settings")$scoring$inner_restarts,
                    sc$inner_restarts)
-  # A normal proposal (`df = Inf`) has no JSON spelling (ferx-core#1819), so no
-  # record is written rather than one nothing can load, and the caller is told.
+  # A normal proposal (`df = Inf`) is `"df": "normal"` on the wire, ferx-core's
+  # own spelling (ferx-core#1819), and reads back as `Inf`.
   sr$df <- Inf
-  expect_warning(expect_null(to(sr, "sir_settings")),
-                 "normal proposal (`sir_df = Inf`)", fixed = TRUE)
-  # ferx-core's serde writes that record with `"df": null`; it reads as no
-  # record, so the bundle loads.
+  wn <- expect_silent(to(sr, "sir_settings"))
+  expect_match(json(wn), '"df":"normal"', fixed = TRUE)
+  expect_identical(from(jsonlite::parse_json(json(wn)), "sir_settings"), sr)
+  # A bundle written before #1819 holds `"df": null`; it reads as no record,
+  # so the bundle loads.
   back["df"] <- list(NULL)
   expect_null(from(back, "sir_settings"))
 })
@@ -564,7 +585,8 @@ test_that("S14: settings = list(inner_screen =) reaches the engine as the model 
 # The keys a record may lack, and the value each is read as. Every other key
 # is refused when missing. A key added to the records must be added here or
 # to the refusals on purpose: the test walks the engine's own record.
-ps_missing_fills <- list(inner_restarts = 1L, inner_screen = 0L, gradient_method = "auto")
+ps_missing_fills <- list(inner_restarts = 1L, inner_screen = 0L, gradient_method = "auto",
+                         nn_l2_lambda = NA_real_, nn_smooth_lambda = NA_real_)
 
 test_that("S16: a missing key is filled as ferx-core's wire fills it, or refused with the way out (#535)", {
   decode <- function(kind, record, field) {

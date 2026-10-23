@@ -4075,6 +4075,25 @@ fn cov_matrix_labels(model: &CompiledModel, cov_matrix_dim: i32) -> Vec<String> 
     }
 }
 
+/// The structured warnings that carry a `details` payload (ferx-core #2268), each
+/// as its `WarningEntry` JSON (`severity`, `category`, `message`,
+/// `source_method`, `details`): exactly what ferx-core writes to a `.fitrx`
+/// `fit.json:warning_details`, so R keeps them in that one shape, in memory and
+/// on disk. Every other entry is rebuilt from its message, as ferx-core's loader
+/// rebuilds it.
+fn warning_details_json(
+    entries: &[ferx_core::WarningEntry],
+) -> std::result::Result<Vec<String>, String> {
+    entries
+        .iter()
+        .filter(|e| e.details.is_some())
+        .map(|e| {
+            serde_json::to_string(e)
+                .map_err(|err| format!("internal: a warning's details did not serialise: {err}"))
+        })
+        .collect()
+}
+
 fn fit_result_to_list(
     result: &FitResult,
     population: &Population,
@@ -4801,6 +4820,7 @@ fn fit_result_to_list(
         warnings_category = warnings_category,
         warnings_message = warnings_message,
         warnings_source_method = warnings_source_method,
+        warning_details = warning_details_json(&result.warnings_structured)?,
         sir_ess = sir_ess,
         sir_ci_theta = sir_ci_theta,
         sir_ci_omega = sir_ci_omega,
@@ -6258,6 +6278,43 @@ fn ferx_rust_offdiag_corrs(m: Vec<f64>, n: i32, param_corr: Robj) -> List {
     })
 }
 
+/// `.fitrx` `warning_details` entries (ferx-core #2268) read back through
+/// ferx-core's own `WarningEntry`, and written again in serde's spelling: the
+/// string `fit_result_to_list` gave the live fit, so a reloaded fit's
+/// `fit$warning_details` is `identical()` to the one it was saved from (jsonlite
+/// and serde spell numbers differently). An entry the engine cannot read - a
+/// `category` this ferx does not know, written by a newer ferx-core - is
+/// dropped, as ferx-core's loader drops it; its message stays in
+/// `fit$warnings`.
+///
+/// @param entries Character vector, one JSON object per entry.
+/// @return Character vector of the entries kept, in order.
+/// @export
+#[extendr]
+fn ferx_rust_warning_details_canonical(entries: Vec<String>) -> Vec<String> {
+    entries
+        .iter()
+        .filter_map(|e| serde_json::from_str::<ferx_core::WarningEntry>(e).ok())
+        .filter(|e| e.details.is_some())
+        .filter_map(|e| serde_json::to_string(&e).ok())
+        .collect()
+}
+
+/// `c(min, median, max)` of a compact theta block's coefficients, as
+/// `print.ferx_fit()`'s THETA BLOCKS lines report them: ferx-core's own
+/// `block_summary` (#1812), the one behind the engine's console report,
+/// `format_summary` and fit YAML (median = lower middle value on an even
+/// count; NaN ordered by `total_cmp`; all NaN for an empty block).
+///
+/// @param values Numeric, the block's coefficients.
+/// @return Numeric of length 3.
+/// @export
+#[extendr]
+fn ferx_rust_block_summary(values: Vec<f64>) -> Vec<f64> {
+    let (min, median, max) = ferx_core::io::output::block_summary(&values);
+    vec![min, median, max]
+}
+
 /// A theta transform as R spells it (`fit$theta_transforms`) read back.
 fn theta_transform_from_str(s: &str) -> std::result::Result<ThetaTransform, String> {
     match s {
@@ -7053,6 +7110,10 @@ enum MissingKey {
     /// Recorded since a later ferx-core, whose wire fills today's
     /// `FitOptions::default()`; the key is left at that default, as there.
     EngineDefault,
+    /// An optional value (`Option` in ferx-core's record): absent, or NA, is
+    /// unrecorded (`None`), and a post-hoc step keeps the caller's value, as
+    /// ferx-core's wire reads a record without it.
+    Unrecorded,
 }
 
 /// One key of a settings record: its list name, the `[fit_options]` key it is,
@@ -7098,6 +7159,11 @@ const SCORING_KEYS: &[RecordKey] = &[
     // `default_gradient_method`, and a post-hoc step on that fit takes the
     // caller's route as it did before.
     record_key("gradient_method", "gradient_method", MissingKey::Fill("auto")),
+    // The covariate-NN penalty strengths the stage's objective carried (ferx-core
+    // #1352); a recorded one wins over the caller's. Absent from a record written
+    // before #1352, and NA when unrecorded.
+    record_key("nn_l2_lambda", "nn_l2", MissingKey::Unrecorded),
+    record_key("nn_smooth_lambda", "nn_smooth", MissingKey::Unrecorded),
 ];
 
 /// `fit$sir_settings` names beside its nested `scoring` list, with the
@@ -7170,7 +7236,10 @@ fn scoring_settings_to_r(s: &ferx_core::ScoringSettings) -> std::result::Result<
         ode_stiff_abort_after,
         ode_auto_switch,
         gradient_method,
+        nn_l2_lambda,
+        nn_smooth_lambda,
     } = s;
+    let unrecorded_to_r = |v: &Option<f64>| v.map(Robj::from).unwrap_or_else(|| Rfloat::na().into());
     let out = list!(
         inner_maxiter = count_to_r(*inner_maxiter),
         inner_tol = *inner_tol,
@@ -7189,7 +7258,10 @@ fn scoring_settings_to_r(s: &ferx_core::ScoringSettings) -> std::result::Result<
             .map(|v| count_to_r(v as usize))
             .unwrap_or_else(|| Robj::from(i32::MIN)),
         ode_auto_switch = *ode_auto_switch,
-        gradient_method = fit_option_token(serde_json::to_value(gradient_method))?
+        gradient_method = fit_option_token(serde_json::to_value(gradient_method))?,
+        // NA_real_ when unrecorded.
+        nn_l2_lambda = unrecorded_to_r(nn_l2_lambda),
+        nn_smooth_lambda = unrecorded_to_r(nn_smooth_lambda)
     );
     check_record_names("fit$scoring_settings", &out, SCORING_KEYS, None)?;
     Ok(out.into())
@@ -7257,6 +7329,17 @@ fn record_value_text(v: &Robj, na_text: &str) -> std::result::Result<String, Str
     }
 }
 
+/// A single NA of any atomic type: an unrecorded optional value.
+fn is_na_scalar(v: &Robj) -> bool {
+    v.len() == 1
+        && match v.rtype() {
+            Rtype::Logicals => v.as_logical_slice().map_or(false, |s| s[0].is_na()),
+            Rtype::Integers => v.as_integer_slice().map_or(false, |s| s[0] == i32::MIN),
+            Rtype::Doubles => v.as_real_slice().map_or(false, |s| s[0].is_nan()),
+            _ => false,
+        }
+}
+
 /// How to recover from a settings record this ferx cannot read, for a record
 /// on a fit in memory (`fit$scoring_settings`, `fit$sir_settings$scoring`):
 /// drop the record, and the step runs as on a fit that records none (ferx-r
@@ -7312,6 +7395,9 @@ fn apply_settings_record(
     for RecordKey { name, key, missing } in keys {
         let filled;
         let v = match (given.get(name), missing) {
+            // Absent or NA: set to `None` by the caller (`clear_unrecorded`).
+            (None, MissingKey::Unrecorded) => continue,
+            (Some(v), MissingKey::Unrecorded) if is_na_scalar(v) => continue,
             (Some(v), _) => v,
             // Left at `FitOptions::default()`, as ferx-core's wire fills it.
             (None, MissingKey::EngineDefault) => continue,
@@ -7367,7 +7453,32 @@ fn scoring_settings_from_r(
     }
     let mut opts = FitOptions::default();
     apply_settings_record(entry_point, field, record, SCORING_KEYS, None, &mut opts)?;
-    Ok(Some(ferx_core::ScoringSettings::from_options(&opts)))
+    let mut scoring = ferx_core::ScoringSettings::from_options(&opts);
+    clear_unrecorded(&mut scoring, record);
+    Ok(Some(scoring))
+}
+
+/// Set to `None` each `MissingKey::Unrecorded` field that `record` (a scoring
+/// record list, already through `apply_settings_record`) leaves out or holds
+/// as NA: `from_options` records every field, but an unrecorded one must keep
+/// the caller's value, as ferx-core's wire reads it.
+fn clear_unrecorded(scoring: &mut ferx_core::ScoringSettings, record: &Robj) {
+    let given: HashMap<&str, Robj> =
+        record.as_list().map(|l| l.iter().collect()).unwrap_or_default();
+    let unrecorded = |name: &str| match given.get(name) {
+        None => true,
+        Some(v) => is_na_scalar(v),
+    };
+    for RecordKey { name, missing, .. } in SCORING_KEYS {
+        if *missing != MissingKey::Unrecorded || !unrecorded(name) {
+            continue;
+        }
+        match *name {
+            "nn_l2_lambda" => scoring.nn_l2_lambda = None,
+            "nn_smooth_lambda" => scoring.nn_smooth_lambda = None,
+            other => unreachable!("SCORING_KEYS row `{other}` is Unrecorded but has no field here"),
+        }
+    }
 }
 
 /// `fit$sir_settings` read back into the record `run_sir` resolves its options
@@ -7398,7 +7509,9 @@ fn sir_settings_from_r(
         None,
         &mut opts,
     )?;
-    Ok(Some(ferx_core::estimation::sir::SirSettings::from_options(&opts)))
+    let mut sir = ferx_core::estimation::sir::SirSettings::from_options(&opts);
+    clear_unrecorded(&mut sir.scoring, &scoring);
+    Ok(Some(sir))
 }
 
 /// A `.fitrx` `sir.settings` block (ferx-core's `SirSettingsWire`) as the nested
@@ -8144,7 +8257,8 @@ fn ferx_rust_sir(
             },
             theta_levels = theta_levels,
             n_threads_used = n_threads_used,
-            warnings = new_fit.warnings.clone()
+            warnings = new_fit.warnings.clone(),
+            warning_details = warning_details_json(&new_fit.warnings_structured)?
         )
         .into())
     })
@@ -8406,7 +8520,8 @@ fn ferx_rust_covariance(
                 .collect::<Vec<i32>>(),
             theta_levels = theta_levels,
             n_threads_used = n_threads_used,
-            warnings = new_fit.warnings.clone()
+            warnings = new_fit.warnings.clone(),
+            warning_details = warning_details_json(&new_fit.warnings_structured)?
         )
         .into())
     })
@@ -13145,6 +13260,8 @@ extendr_module! {
     fn ferx_rust_structural_theta_labels;
     fn ferx_rust_fitrx_omega_rows;
     fn ferx_rust_offdiag_corrs;
+    fn ferx_rust_block_summary;
+    fn ferx_rust_warning_details_canonical;
     fn ferx_rust_theta_levels_from_fit;
     fn ferx_rust_fitrx_engine_resave;
     fn ferx_rust_eta_info_by_name;

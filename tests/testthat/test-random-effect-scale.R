@@ -217,12 +217,14 @@ test_that("a .fitrx saved before kappa_param_types loads and prints as before", 
   # An unknown scale reads as ferx-core's console reads it (#470): the
   # log-normal CV%, exact since ferx-core #1858 (sqrt(exp(var) - 1) * 100), at
   # weight 1 for this weighted kappa. This fixture's variance (~156) puts the
-  # CV% near 1e35, where %.1f prints every digit of the double, so the value is
-  # compared numerically rather than as text.
+  # CV% near 1e35, which ferx-core prints to three significant figures in
+  # scientific notation since #1883 (it printed every digit of the double), so
+  # the value is compared numerically, to those three figures.
   expect_true(startsWith(row, sprintf("  KAPPA_ARM            = %.6f  (CV%% = ", var)),
               info = row)
+  expect_match(row, "(CV% = 7.64e35 at weight 1)", fixed = TRUE)
   cv <- as.numeric(sub(".*\\(CV% = ([0-9.e+]+) at weight 1\\).*", "\\1", row))
-  expect_equal(cv, sqrt(exp(var) - 1) * 100, tolerance = 1e-12, info = row)
+  expect_equal(cv, signif(sqrt(exp(var) - 1) * 100, 3), tolerance = 1e-12, info = row)
   expect_false(isTRUE(all.equal(cv, sqrt(var) * 100)), info = row)
   # And it is the row ferx-core itself prints for the same bundle.
   core <- getFromNamespace("ferx_rust_fitrx_kappa_rows", "ferx")(path)

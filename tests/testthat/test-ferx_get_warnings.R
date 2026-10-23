@@ -1,7 +1,10 @@
 test_that("ferx_get_warnings(as_df = TRUE) returns the underlying data frame", {
   fit <- warfarin_fit_cov()
   df <- ferx_get_warnings(fit, as_df = TRUE)
-  expect_identical(df, fit$warnings_structured)
+  # The table, plus each row's `details` payload (ferx-core #2268).
+  expect_identical(df[names(df) != "details"], fit$warnings_structured)
+  expect_true(is.list(df$details))
+  expect_length(df$details, nrow(df))
 })
 test_that("ferx_get_warnings() prints a grouped summary", {
   fit <- warfarin_fit_cov()
@@ -492,6 +495,7 @@ test_that(".ferx_warning_guidance returns negative-autocorrelation guidance", {
     "absorption_twin_declined", "bloq_method", "boundary_estimate", "cancelled",
     "condition_number", "convergence", "covariance_failed",
     "covariance_regularized", "covariance_step", "data_quality",
+    "degenerate_clearance_or_volume",
     "dw_autocorrelation", "ebe_start_dependent", "eps_shrinkage",
     "eta_normality", "eta_shrinkage",
     "experimental", "flat_parameter", "flip_flop", "gradient_fallback",
@@ -1839,7 +1843,8 @@ test_that("a fresh fit's warnings come back exactly as its structured table", {
   # On a fresh fit every flat message is already in the table, so the merge
   # must add nothing - no duplicate rows under a second category.
   fit <- warning_anchor_fit()
-  expect_identical(ferx_get_warnings(fit, as_df = TRUE),
+  df <- ferx_get_warnings(fit, as_df = TRUE)
+  expect_identical(df[names(df) != "details"],
                    fit$warnings_structured[, c("severity", "category", "message",
                                                "source_method")])
 })
