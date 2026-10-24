@@ -1191,6 +1191,20 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
 .fitrx_build_eta_param_info <- function(fit) {
   eta_names <- as.character(fit$eta_names %||% character())
   if (length(eta_names) == 0L) return(list())
+  # The engine's own entries, one per (ETA, parameter) statement (#478), when
+  # the fit carries them: they keep the parameter each ETA enters.
+  info <- fit$eta_param_info
+  if (is.data.frame(info) && nrow(info) > 0L) {
+    return(lapply(seq_len(nrow(info)), function(i) {
+      link <- as.character(info$linked_theta[[i]])
+      list(
+        eta_name = as.character(info$eta_name[[i]]),
+        param_type = as.character(info$param_type[[i]]),
+        linked_theta = if (!is.na(link) && nzchar(link)) link else NULL,
+        individual_param_name = as.character(info$individual_param[[i]])
+      )
+    }))
+  }
   types <- as.character(fit$eta_param_types %||% rep("custom", length(eta_names)))
   linked <- as.character(fit$eta_linked_theta %||% rep("", length(eta_names)))
   entries <- mapply(
@@ -1199,7 +1213,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
         eta_name = name,
         param_type = type,
         linked_theta = if (nzchar(link)) link else NULL,
-        individual_param_name = "" # not exposed by the R shim yet
+        individual_param_name = "" # unknown: the fit has no eta_param_info
       )
     },
     eta_names, types, linked,

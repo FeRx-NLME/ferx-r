@@ -984,7 +984,7 @@ Full slot descriptions:
 \item{interaction}{Logical; the interaction flag the fitted objective
 ran under. \code{TRUE} for FOCEI and \code{FALSE} for FOCE; SAEM, VI and
 Gauss-Newton inherit it from the options they ran under.
-\code{\link{ferx_covariance}()} and \code{\link{ferx_sir}()} hand it back to the engine.}
+\code{\link[=ferx_covariance]{ferx_covariance()}} and \code{\link[=ferx_sir]{ferx_sir()}} hand it back to the engine.}
 \item{n_iterations}{Number of outer iterations run}
 \item{ofv}{Objective function value (-2 log-likelihood). The
 \emph{penalized} objective when the model declares a \code{prior(...)}
@@ -1671,6 +1671,16 @@ loaded one alike. \code{print()} refuses a vector of any other length than
 \item{eta_linked_theta}{Character vector parallel to \code{eta_names}: the
 typical-value theta each ETA is attached to, or \code{""} when there is
 none or its statements disagree.}
+\item{eta_param_info}{Data frame with one row per (ETA, individual
+parameter) statement the engine classified, in
+\code{[individual_parameters]} order: \code{eta_name},
+\code{individual_param} (the parameter the ETA enters),
+\code{param_type} (as in \code{eta_param_types}) and
+\code{linked_theta} (\code{""} for none). \code{eta_param_types} and
+\code{eta_linked_theta} are its per-ETA reduction.
+\code{\link{plot_param_dist}} reads it. Zero rows when the engine
+classified nothing; a fit loaded from a \code{.fitrx} saved before it
+existed has \code{individual_param} \code{""}.}
 \item{kappa_param_types}{Named character vector parallel to
 \code{kappa_names}: the scale each IOV kappa enters its parameter on,
 with the values of \code{eta_param_types} except
@@ -2385,16 +2395,16 @@ starting values before a full run.
 \item \code{\link{plot.ferx_fit}} - convergence trace plot.
 }
 
-Other fitting: 
-\code{\link{ferx_bootstrap}()},
-\code{\link{ferx_bootstrap_summarize}()},
-\code{\link{ferx_check_init}()},
-\code{\link{ferx_coef}()},
-\code{\link{ferx_collect}()},
-\code{\link{ferx_covariance}()},
-\code{\link{ferx_inits_from_nca}()},
-\code{\link{ferx_sir}()},
-\code{\link{ferx_stop}()},
-\code{\link{print.ferx_job}()}
+Other fitting:
+\code{\link[=ferx_bootstrap]{ferx_bootstrap()}},
+\code{\link[=ferx_bootstrap_summarize]{ferx_bootstrap_summarize()}},
+\code{\link[=ferx_check_init]{ferx_check_init()}},
+\code{\link[=ferx_coef]{ferx_coef()}},
+\code{\link[=ferx_collect]{ferx_collect()}},
+\code{\link[=ferx_covariance]{ferx_covariance()}},
+\code{\link[=ferx_inits_from_nca]{ferx_inits_from_nca()}},
+\code{\link[=ferx_sir]{ferx_sir()}},
+\code{\link[=ferx_stop]{ferx_stop()}},
+\code{\link[=print.ferx_job]{print.ferx_job()}}
 }
 \concept{fitting}

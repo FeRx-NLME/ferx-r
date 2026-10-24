@@ -68,6 +68,7 @@ Other diagnostics:
 \code{\link[=ferx_runlog_iters]{ferx_runlog_iters()}},
 \code{\link[=ferx_trace]{ferx_trace()}},
 \code{\link[=plot.ferx_bootstrap]{plot.ferx_bootstrap()}},
+\code{\link[=plot_param_dist]{plot_param_dist()}},
 \code{\link[=summary.ferx_fit]{summary.ferx_fit()}}
 }
 \concept{diagnostics}
