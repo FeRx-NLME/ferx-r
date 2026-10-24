@@ -15,7 +15,11 @@ concurrency:
 jobs:
   test-coverage:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    # The coverage step alone takes ~21 min, and on a slow day for the runner's
+    # Ubuntu mirror setup-r and setup-r-dependencies have taken up to 20 and 22
+    # min between them in apt downloads (#648). At 40 min that cancelled the
+    # job before or during the coverage step; R-CMD-check, at 60, did not.
+    timeout-minutes: 60
 
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
@@ -31,8 +35,17 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache cargo registry and target
-        uses: actions/cache@v6
+      # Restore and save are separate steps so the cache is saved even when the
+      # job is cancelled at its timeout: the combined `actions/cache` skips its
+      # post step then, and the next attempt compiled ferx-core cold (#648).
+      # A run that did not finish the coverage step saves under a per-run
+      # `-partial-` key, never the primary one: a partial target saved there
+      # would be an exact hit from then on, so no later run would save the
+      # finished build. The restore tries the primary key, then the newest
+      # partial save for the same Cargo.toml, then older caches.
+      - name: Restore cargo registry and target
+        id: cargo-cache
+        uses: actions/cache/restore@v6
         with:
           path: |
             ~/.cargo/registry
@@ -40,6 +53,7 @@ jobs:
             src/rust/target
           key: ${{ runner.os }}-cargo-cov-${{ hashFiles('src/rust/Cargo.toml') }}
           restore-keys: |
+            ${{ runner.os }}-cargo-cov-${{ hashFiles('src/rust/Cargo.toml') }}-partial-
             ${{ runner.os }}-cargo-cov-
             ${{ runner.os }}-cargo-
 
@@ -49,6 +63,7 @@ jobs:
           needs: coverage
 
       - name: Test coverage
+        id: coverage
         run: |
           cov <- covr::package_coverage(
             quiet = FALSE,
@@ -57,6 +72,23 @@ jobs:
           )
           covr::to_cobertura(cov)
         shell: Rscript {0}
+
+      # `always()` so a cancelled or failed coverage step still saves what it
+      # compiled; skipped when the coverage step never started (nothing new in
+      # target) or the primary key was already an exact hit (the save would
+      # fail on the existing key).
+      - name: Save cargo registry and target
+        if: >-
+          always()
+          && steps.cargo-cache.outputs.cache-hit != 'true'
+          && contains(fromJSON('["success", "failure", "cancelled"]'), steps.coverage.outcome)
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src/rust/target
+          key: ${{ steps.coverage.outcome == 'success' && steps.cargo-cache.outputs.cache-primary-key || format('{0}-partial-{1}-{2}', steps.cargo-cache.outputs.cache-primary-key, github.run_id, github.run_attempt) }}
 
       - uses: codecov/codecov-action@v7
         with:
