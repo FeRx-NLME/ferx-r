@@ -299,3 +299,41 @@ test_that("ferx_model_set_section() copy-on-write does not collide across indepe
   expect_true(any(grepl("maxiter = 111", ferx_model_get_section(m1$model, "fit_options"))))
   expect_true(any(grepl("maxiter = 222", ferx_model_get_section(m2$model, "fit_options"))))
 })
+
+# ---------------------------------------------------------------------------
+# Instance-named sections (#445)
+# ---------------------------------------------------------------------------
+
+test_that("ferx_model_set_section() replaces one instance and leaves its sibling intact", {
+  path <- tempfile(fileext = ".ferx")
+  on.exit(unlink(path))
+  file.copy(ferx_example("tte_competing_risks")$model, path)
+  before_b <- ferx_model_get_section(path, "event_model cause_b")
+
+  new_a <- c("  cmt    = 2", "  family = weibull", "  scale  = TVLAMBDA_A * exp(ETA_F)")
+  ferx_model_set_section(path, "event_model cause_a", new_a)
+
+  expect_equal(ferx_model_get_section(path, "event_model cause_a"), new_a)
+  expect_equal(ferx_model_get_section(path, "event_model cause_b"), before_b)
+  expect_true("[event_model cause_a]" %in% readLines(path))
+})
+test_that("ferx_model_set_section() refuses a bare type with several instances and leaves the file alone", {
+  path <- tempfile(fileext = ".ferx")
+  on.exit(unlink(path))
+  file.copy(ferx_example("tte_competing_risks")$model, path)
+  before <- readLines(path)
+
+  expect_error(ferx_model_set_section(path, "event_model", "  cmt = 2"),
+               regexp = "ambiguous")
+  expect_identical(readLines(path), before)
+})
+test_that("ferx_model_set_section() round-trips [covariate_nn TYPICAL_PK] by bare type", {
+  path <- tempfile(fileext = ".ferx")
+  on.exit(unlink(path))
+  file.copy(ferx_example("warfarin_dcm")$model, path)
+  before <- readLines(path)
+
+  body <- ferx_model_get_section(path, "covariate_nn")
+  ferx_model_set_section(path, "covariate_nn", body)
+  expect_identical(readLines(path), before)
+})
