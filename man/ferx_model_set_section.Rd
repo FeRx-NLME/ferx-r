@@ -12,8 +12,9 @@ ferx_model_set_section(x, section, lines)
 \item{section}{Name of the section to replace, without brackets (e.g.
 \code{"fit_options"}). Addressed as in
 \code{\link{ferx_model_get_section}}: an instance-named section as
-\code{"event_model cause_a"}, and a bare type only when the model has
-one section of that type. The header line itself is left as written.}
+\code{"event_model cause_a"}, and a bare type as the unnamed header of
+that type or, failing one, its only instance. The header line itself is
+left as written.}
 
 \item{lines}{Character vector of replacement lines (do not include the
 \code{[section]} header line).}

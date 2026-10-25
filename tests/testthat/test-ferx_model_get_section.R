@@ -219,3 +219,35 @@ test_that("ferx_model_get_section() rejects a non-string section", {
   on.exit(unlink(path))
   expect_error(ferx_model_get_section(path, c("a", "b")), regexp = "single string")
 })
+test_that("ferx_model_get_section() reaches an unnamed block beside named instances of its type", {
+  # The engine accepts `[event_model]` and `[event_model NAME]` together.
+  path <- tempfile(fileext = ".ferx")
+  on.exit(unlink(path))
+  writeLines(c(
+    "[parameters]",
+    "  theta TVLAMBDA(0.1, 0.001, 10.0)",
+    "[event_model]",
+    "  cmt = 2",
+    "[event_model cause_a]",
+    "  cmt = 3",
+    "[event_model cause_b]",
+    "  cmt = 4"
+  ), path)
+
+  expect_equal(ferx_model_get_section(path, "event_model"), "  cmt = 2")
+  expect_equal(ferx_model_get_section(path, "event_model cause_a"), "  cmt = 3")
+  expect_equal(ferx_model_get_section(path, "event_model cause_b"), "  cmt = 4")
+
+  ferx_model_set_section(path, "event_model", "  cmt = 5")
+  expect_equal(ferx_model_get_section(path, "event_model"), "  cmt = 5")
+  expect_equal(ferx_model_get_section(path, "event_model cause_a"), "  cmt = 3")
+})
+test_that("ferx_model_get_section() refuses a duplicated header rather than picking one", {
+  path <- tempfile(fileext = ".ferx")
+  on.exit(unlink(path))
+  writeLines(c("[event_model]", "  cmt = 2", "[event_model]", "  cmt = 3",
+               "[event_model cause_a]", "  cmt = 4", "[event_model cause_a]", "  cmt = 5"),
+             path)
+  expect_error(ferx_model_get_section(path, "event_model"), regexp = "2 headers")
+  expect_error(ferx_model_get_section(path, "event_model cause_a"), regexp = "2 headers")
+})

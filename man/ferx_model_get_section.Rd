@@ -12,9 +12,12 @@ ferx_model_get_section(x, section, strip = FALSE)
 \item{section}{Name of the section to extract, without brackets (e.g.
 \code{"parameters"}). An instance-named section is addressed as its
 header reads, type then instance: \code{"event_model cause_a"} for
-\code{[event_model cause_a]}. A bare type such as \code{"covariate_nn"}
-addresses its section when the model has exactly one of that type, and
-is refused, with the instances to choose from, when it has several. The
+\code{[event_model cause_a]}. A bare type such as \code{"event_model"}
+addresses the unnamed \code{[event_model]} header when the model has
+one, even beside named instances of it. Otherwise it addresses the
+type's only instance (\code{"covariate_nn"} for
+\code{[covariate_nn TYPICAL_PK]}), and is refused, with the instances to
+choose from, when there are several. The
 type matches case-insensitively and the instance name exactly, as the
 engine reads them.}
 

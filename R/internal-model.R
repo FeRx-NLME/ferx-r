@@ -47,11 +47,14 @@ ferx_section_headers <- function(lines) {
 # `section` is a block type, optionally followed by an instance name, as in
 # the header without its brackets: `"parameters"`, `"event_model cause_a"`.
 # The type matches case-insensitively and the instance exactly, as the engine
-# reads them. A bare type addresses its block when the file has exactly one
-# of that type, instance-named or not (`"covariate_nn"` in `warfarin_dcm`);
-# when it has several (`[event_model cause_a]` and `[event_model cause_b]`)
-# the call is refused with the instances to choose from, since neither
-# reading nor replacing "every instance" round-trips through one body.
+# reads them. A bare type addresses the unnamed header of that type when
+# there is one - also beside named instances of it, which the engine accepts
+# for `event_model`, `binary_model` and `markov_model` - so every header has
+# exactly one spelling. With no unnamed header, a bare type addresses the
+# type's one instance (`"covariate_nn"` in `warfarin_dcm`); with several
+# (`[event_model cause_a]` and `[event_model cause_b]`) the call is refused
+# with the instances to choose from, since neither reading nor replacing
+# "every instance" round-trips through one body.
 .ferx_section_index <- function(hdr, section) {
   if (!is.character(section) || length(section) != 1L || is.na(section)) {
     stop("'section' must be a single string, e.g. \"parameters\" or ",
@@ -71,15 +74,22 @@ ferx_section_headers <- function(lines) {
   instance <- m[[3L]]
 
   idx <- which(hdr$types == type)
-  if (nzchar(instance)) idx <- idx[!is.na(hdr$instances[idx]) & hdr$instances[idx] == instance]
+  if (nzchar(instance)) {
+    idx <- idx[!is.na(hdr$instances[idx]) & hdr$instances[idx] == instance]
+  } else if (any(is.na(hdr$instances[idx]))) {
+    # The unnamed header of a type the engine accepts in both forms
+    # (`[event_model]` beside `[event_model cause_a]`): the bare type is its
+    # only spelling, so it means that header and never an instance.
+    idx <- idx[is.na(hdr$instances[idx])]
+  }
   if (length(idx) == 0L) not_found()
   if (length(idx) > 1L) {
-    named <- hdr$instances[idx]
-    if (anyNA(named)) {
+    if (nzchar(instance) || anyNA(hdr$instances[idx])) {
       stop("Section '", section, "' has ", length(idx), " headers in the ",
            "model file. Remove the duplicate header before addressing it.",
            call. = FALSE)
     }
+    named <- hdr$instances[idx]
     stop(
       "Section '", section, "' is ambiguous: the model declares ",
       length(idx), " instances (", paste(named, collapse = ", "), "). ",
