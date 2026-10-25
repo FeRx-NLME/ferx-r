@@ -562,10 +562,11 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
       ))
     }
     # The covariance step of a fit with a `profile` theta level block
-    # (ferx-core profile.rs, #1065). None of these carries an eigenvalue list,
-    # so without the arms below every one inherited the generic fallback, which
-    # blames identifiability for failures that are about a sparse level, an
-    # overflow, or an estimator the profiled step does not offer.
+    # (ferx-core profile.rs, #1065). Without the arms below every one
+    # inherited the generic fallback, which blames identifiability for
+    # failures that are about a sparse level, an overflow, or an estimator the
+    # profiled step does not offer. The non-PD one lists its eigenvalues since
+    # ferx-core #2353, so the generic eigenvalue arm above is told to skip it.
     #
     # Asked for "s" / "rsr" on a profiled fit: nothing ran (#2108).
     if (grepl("profiled", message, fixed = TRUE) &&
@@ -662,6 +663,20 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
         "overflows near that level. Check fit$theta_levels for extreme or ",
         "sparsely informed levels. The level steps are fixed; only the ",
         "structural side of the cross terms follows fd_hessian_step."
+      ))
+    }
+    # The Hessian over the structural parameters, the levels re-solved, holds
+    # a NaN or Inf, so its eigenvalues could not be computed (ferx-core
+    # #2353): the model overflows on the stencil, not an identifiability
+    # finding.
+    if (grepl("could not compute eigenvalues of the Hessian of the profile objective",
+              message, fixed = TRUE)) {
+      return(paste0(
+        "The Hessian over the structural parameters, with the profiled levels ",
+        "re-solved, is not finite, so no standard errors were produced: the ",
+        "model overflows or underflows near the estimates. Check for extreme ",
+        "parameter values, constrain thetas to plausible ranges, or try a ",
+        "smaller fd_hessian_step (e.g. ferx_fit(..., fd_hessian_step = 0.005))."
       ))
     }
     # Non-finite at a stencil point over the structural parameters: the model
