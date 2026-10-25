@@ -8384,7 +8384,8 @@ fn ferx_rust_sir(
 /// @return Named list with `cov_matrix`, `cov_matrix_dim`, `se_theta`, `se_omega`,
 ///   `se_sigma`, `se_kappa`, `covariance_status`, `cov_eigenvalues`,
 ///   `cov_condition_number`, `theta_levels` (NA intervals), `n_threads_used`
-///   (the width this run's pool had), and `warnings`.
+///   (the width this run's pool had), `covariance_wall_time_secs` (this
+///   step's time), and `warnings`.
 #[extendr]
 #[allow(clippy::too_many_arguments)]
 fn ferx_rust_covariance(
