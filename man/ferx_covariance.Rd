@@ -103,8 +103,10 @@ restarts it from a cold solve. A fit
 whose estimates were edited after the fit does not use \code{packed_estimate}. A
 fit with no \code{scoring_settings} (a bundle saved before they were recorded) is
 scored with the engine's defaults, as before. A \verb{[mixture]} fit with
-per-class overrides needs \code{packed_estimate} to read the overrides back, so
-the step refuses one loaded from such an older bundle.
+per-class overrides reads them from \code{fit$mixture_overrides} (ferx-core
+#1765), else from \code{packed_estimate}; the step refuses one that carries
+neither, such as an SAEM mixture fit loaded from a bundle saved before
+either was recorded.
 
 The record includes the gradient route the fit took
 (\code{fit$scoring_settings$gradient_method}): a fit made with \code{gradient = "fd"}

@@ -300,7 +300,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   "method_chain", "prior_summary", "method_wall_times_secs",
   "nlopt_missing_algorithms", "warnings", "cov_eigenvalues", "eta_param_info",
   "theta_init", "sigma_init", "final_gradient", "covariate_names",
-  "input_columns", "packed_estimate", "profiled_blocks",
+  "input_columns", "packed_estimate", "mixture_overrides", "profiled_blocks",
   # ThetaWire / OmegaWire / SigmaWire
   "names", "estimates", "se", "fixed", "transform", "log_transformed",
   "shrinkage", "init_as_sd", "types", "residual_correlations",
@@ -725,6 +725,14 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   wire$warning_details <- .fitrx_warning_details_to_wire(fit)
   if (length(fit$packed_estimate)) {
     wire$packed_estimate <- as.numeric(fit$packed_estimate)
+  }
+  # A [mixture] fit's fitted per-class Omega/Sigma overrides, under ferx-core's
+  # `mixture_overrides` key (#1765), at the same 17 digits, so the post-hoc
+  # steps on the loaded fit rebuild the class matrices the fit had - an SAEM
+  # mixture fit has no packed estimate to read them from. Absent when the fit
+  # carries none.
+  if (length(fit$mixture_overrides)) {
+    wire$mixture_overrides <- as.numeric(fit$mixture_overrides)
   }
   # The LOQ method the fit scored, under ferx-core's `bloq_method` key, so the
   # post-hoc steps on the loaded fit score it too (ferx-core #1824); absent

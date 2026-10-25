@@ -142,6 +142,8 @@ ferx_simulate_with_uncertainty <- function(model, data, fit,
       sir_resamples_dim    = unc_pieces$sir_resamples_dim,
       residual_rho         = fit_pieces$residual_rho,
       residual_rho_pairs   = fit_pieces$residual_rho_pairs,
+      # A [mixture] fit's fitted per-class overrides (ferx-core #1765).
+      mixture_overrides    = as.numeric(fit$mixture_overrides %||% numeric()),
       fit_bindings         = fit_pieces$fit_bindings,
       iov_occasion         = fit_pieces$iov_occasion,
       n_uncertainty_draws  = as.integer(n_uncertainty_draws),

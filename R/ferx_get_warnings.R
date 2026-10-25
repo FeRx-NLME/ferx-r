@@ -453,8 +453,11 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
       ))
     }
     # NonPdHessian path: eigenvalue list is present in the message.
+    # The profile objective's non-PD message lists its eigenvalues too since
+    # ferx-core #2353; it keeps its own, more specific arm below.
     if (grepl("not positive definite", message, ignore.case = TRUE) &&
-        grepl("eigenvalue", message, ignore.case = TRUE)) {
+        grepl("eigenvalue", message, ignore.case = TRUE) &&
+        !grepl("Hessian of the profile objective", message, fixed = TRUE)) {
       return(paste0(
         "Inspect the eigenvalue list in the warning: a near-zero minimum ",
         "(e.g. 1e-6) suggests a near-unidentifiable parameter; a clearly ",

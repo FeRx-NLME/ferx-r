@@ -1399,11 +1399,19 @@ keeps it. \code{NULL} when SIR did not run.}
 \item{packed_estimate}{Numeric vector: the optimizer's estimate on its
 packed scale (FOCE, FOCEI, Laplace and Gauss-Newton fits; \code{NULL}
 otherwise). \code{\link{ferx_covariance}} starts from it, which makes
-its result \code{identical()} to the inline covariance step, and reads
-a \code{[mixture]} fit's per-class overrides from it. Ignored once it
-no longer unpacks to the fit's estimates. \code{\link{ferx_save_fit}}
-keeps it bit for bit; \code{NULL} on a fit loaded from a bundle saved
-before it was recorded.}
+its result \code{identical()} to the inline covariance step. Ignored
+once it no longer unpacks to the fit's estimates.
+\code{\link{ferx_save_fit}} keeps it bit for bit; \code{NULL} on a fit
+loaded from a bundle saved before it was recorded.}
+\item{mixture_overrides}{Numeric vector: a \code{[mixture]} fit's fitted
+per-class overrides, one class variance per \code{omega(k)} override
+and then one class sigma per \code{sigma(k)} override, in declaration
+order (every estimator, SAEM included); \code{NULL} for a model without
+overrides. \code{\link{ferx_sir}}, \code{\link{ferx_covariance}} and
+\code{\link{ferx_simulate_with_uncertainty}} rebuild the per-class
+matrices from it. \code{\link{ferx_save_fit}} keeps it bit for bit;
+\code{NULL} on a fit loaded from a bundle saved before it was
+recorded.}
 \item{imp_seed}{Numeric scalar (or \code{NULL}) giving the importance
 sampling seed. \code{NULL} when IS was not run.}
 \item{bloq_method_label}{Character string describing the LOQ-censoring

@@ -476,3 +476,26 @@ test_that("a run whose every draw is skipped is refused, not returned empty", {
   expect_true(endsWith(msg, "[E_TRANSIT_FLIP_FLOP]"), info = msg)
   expect_null(probe$value)
 })
+
+test_that("a [mixture] fit with per-class overrides draws from its fitted overrides", {
+  # The R-built FitResult used to carry no packed estimate and no overrides, so
+  # every [mixture] fit with an omega(k) override was refused here. It now
+  # carries `fit$mixture_overrides` (ferx-core #1765).
+  mod <- test_path("fixtures", "mixture_override.ferx")
+  dat <- test_path("fixtures", "mixture_iv.csv")
+  fit <- suppressWarnings(ferx_fit(mod, dat, method = "focei", covariance = TRUE,
+                                   verbose = FALSE))
+  skip_if(is.null(fit$cov_matrix), "mixture covariance step did not converge")
+  expect_length(fit$mixture_overrides, 1L)
+  sim <- suppressWarnings(ferx_simulate_with_uncertainty(
+    mod, dat, fit, n_uncertainty_draws = 3L, seed = 1L
+  ))
+  expect_identical(sort(unique(sim$DRAW)), 1:3)
+
+  fit$mixture_overrides <- NULL
+  probe <- engine_error_probe(ferx_simulate_with_uncertainty(
+    mod, dat, fit, n_uncertainty_draws = 3L, seed = 1L
+  ))
+  expect_coded_refusal(probe, "records neither their fitted values",
+                       "E_FIT_INPUT_MISSING")
+})

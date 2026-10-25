@@ -935,8 +935,11 @@ test_that("every covariance message ferx-core emits gets non-contradictory guida
     list(cat = "covariance_failed",
          # A over the structural parameters (the Schur complement): this one IS
          # an identifiability finding.
+         # The eigenvalue list is in the message since ferx-core #2353, which
+         # the generic non-PD arm must not take.
          msg = paste0("Covariance step failed: the Hessian of the profile objective ",
-                      "is not positive definite. SE estimates not available."),
+                      "is not positive definite (eigenvalues [5265.2133, 410.5155, ",
+                      "-0.0014]). SE estimates not available."),
          # Asserted on a phrase only this arm has: the generic fallback also
          # says "identifiability" and never "theta_levels".
          ok = "confounded with the level effects", never = "omega/sigma structure"),
