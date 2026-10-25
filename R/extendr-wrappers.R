@@ -195,6 +195,12 @@ ferx_rust_method_labels <- function() {
 
 #' @title Internal Rust backend binding
 #' @keywords internal
+ferx_rust_method_token_labels <- function(tokens) {
+  .Call("wrap__ferx_rust_method_token_labels", tokens)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
 ferx_rust_compact_theta_blocks <- function(theta_names) {
   .Call("wrap__ferx_rust_compact_theta_blocks", theta_names)
 }

@@ -618,28 +618,38 @@ fn ferx_rust_fit(
         // `parsed.fit_options`). Only an explicit R-side method overrides it, so a
         // model-file `method = saem` is no longer clobbered by R's default (#558).
         if !method.is_empty() {
-            let chain: Vec<EstimationMethod> = match method.iter().map(|m| parse_method(m)).collect() {
-                Ok(v) => v,
-                Err(e) => return Err(argument_refusal(e)),
-            };
-            let final_method = *chain.last().unwrap();
-            // The reported `interaction` flag must reflect the last *estimating* stage
-            // — IMP is a diagnostic terminal stage that does not update parameters, so
-            // a chain like `c("focei", "imp")` should still report `interaction = TRUE`.
-            let last_estimator = chain
-                .iter()
-                .rev()
-                .find(|m| **m != EstimationMethod::Imp)
-                .copied()
-                .unwrap_or(final_method);
-            opts.method = final_method;
-            opts.interaction = last_estimator == EstimationMethod::FoceI;
-            opts.methods = if chain.len() > 1 { chain } else { Vec::new() };
-            // Mark the method as explicitly chosen so the engine does not warn that
-            // it defaulted (ferx-core's method_default_warning keys off this).
-            if !opts.user_set_keys.iter().any(|k| k == "method") {
-                opts.user_set_keys.push("method".to_string());
+            // Each token is checked on its own first, so a single R element can
+            // never split into two stages once the chain is joined below.
+            for m in &method {
+                if m.contains([',', '[', ']']) {
+                    return Err(argument_refusal(format!(
+                        "`method`: `{}` is not one method token - pass a chain as a character vector",
+                        m.trim()
+                    )));
+                }
+                method_from_token(m).map_err(argument_refusal)?;
             }
+            // The call's method takes the place of the model file's `method =`
+            // line, so it is applied as that line would be (ferx-core's
+            // `apply_method_option`): stage tokens, `opts.method` / `methods`, and
+            // the `interaction` rule - a final `focei` sets it, a final `foce`
+            // clears it, any other final stage keeps it. "Keeps" means the
+            // default, not what the file's own (replaced) method line left:
+            // `interaction` is set by nothing but a method line. So
+            // `ferx_fit(method = "vi")` and `[fit_options] method = vi` fit and
+            // report the same objective (ferx-r #506).
+            opts.interaction = ferx_core::FitOptions::default().interaction;
+            let value = if method.len() == 1 {
+                method[0].clone()
+            } else {
+                format!("[{}]", method.join(", "))
+            };
+            ferx_core::parser::model_parser::apply_method_option(&mut opts, &value)
+                .map_err(|e| argument_refusal(format!("`method`: {e}")))?;
+            // Recorded once, whether or not the model file also set it; core's
+            // method_default_warning keys off it.
+            let mut seen = false;
+            opts.user_set_keys.retain(|k| k != "method" || !std::mem::replace(&mut seen, true));
         }
         // Boolean fit options forwarded from R as sentinel strings: "" keeps the
         // model file's [fit_options] value (already in `opts` from
@@ -2984,55 +2994,16 @@ fn parse_match_method(
 }
 
 // -- Helper: parse a single R-side method token into EstimationMethod --
+//
+// The token goes through ferx-core's own `parse_method_token`, the parser a
+// `[fit_options]` `method = ...` line uses, so `ferx_fit(method = ...)` accepts
+// exactly the engine's tokens and aliases. The glue used to keep its own copy
+// of the token list, which is how `vi` went missing (ferx-r #506); do not
+// reintroduce one (`test-method-token.R` fails if a `parse_method` comes back).
 
-fn parse_method(token: &str) -> std::result::Result<EstimationMethod, String> {
-    let m = token.trim().to_lowercase();
-    if m == "saem" {
-        Ok(EstimationMethod::Saem)
-    } else if m.contains("hybrid") {
-        Ok(EstimationMethod::FoceGnHybrid)
-    } else if m == "laplace" || m == "laplacian" {
-        // NONMEM `$EST METHOD=1 LAPLACIAN` — the exact-anchor quadrature (n_agq = 1 is
-        // Laplace, n_agq > 1 is adaptive Gauss–Hermite quadrature).
-        Ok(EstimationMethod::Laplace)
-    } else if m == "agq"
-        || m == "aghq"
-        || m == "gauss_hermite"
-        || m == "gauss-hermite"
-        || m == "adaptive_gaussian_quadrature"
-        || m == "adaptive-gaussian-quadrature"
-    {
-        // `method = "agq"` was removed (ferx-core #251): adaptive quadrature is
-        // `method = "laplace"` with `settings = list(n_agq = N)`. MUST stay above the
-        // `contains("gauss")` arm below, which would otherwise route `gauss_hermite` into
-        // Gauss-*Newton*. Mirrors ferx-core's `parse_method_token`.
-        Err(
-            "method = \"agq\" has been removed: use method = \"laplace\" with n_agq = N \
-             (n_agq = 1 is the Laplace approximation, n_agq > 1 is adaptive Gauss–Hermite \
-             quadrature). For the Gauss-Newton-anchored quadrature use method = \"focei\" with \
-             n_agq > 1."
-                .to_string(),
-        )
-    } else if m == "gn" || m.contains("gauss") {
-        Ok(EstimationMethod::FoceGn)
-    } else if m == "focei" || m == "foce-i" || m == "foce_i" || m.contains("interaction") {
-        Ok(EstimationMethod::FoceI)
-    } else if m == "foce" {
-        Ok(EstimationMethod::Foce)
-    } else if m == "impmap" || m == "importance_sampling_map" || m == "importance-sampling-map" {
-        Ok(EstimationMethod::Impmap)
-    } else if m == "imp" || m == "importance_sampling" || m == "importance-sampling" {
-        Ok(EstimationMethod::Imp)
-    } else if m == "impmap" || m == "importance_sampling_map" {
-        Ok(EstimationMethod::Impmap)
-    } else if m == "bayes" || m == "bayesian" || m == "mcmc" {
-        Ok(EstimationMethod::Bayes)
-    } else {
-        Err(format!(
-            "Unknown estimation method '{}' — expected one of: foce, focei, laplace, saem, gn, gn_hybrid, imp, impmap, bayes",
-            token.trim()
-        ))
-    }
+fn method_from_token(token: &str) -> std::result::Result<EstimationMethod, String> {
+    ferx_core::parser::model_parser::parse_method_token(token)
+        .map_err(|e| format!("`method`: {e}"))
 }
 
 // -- Helper: rebuild the fitted IOV covariance from R-side arrays --
@@ -5620,7 +5591,7 @@ fn fit_option_normalised(key: &str, value: &str) -> Option<String> {
             .split(',')
             .map(str::trim)
             .filter(|s| !s.is_empty())
-            .map(parse_method)
+            .map(method_from_token)
             .collect::<std::result::Result<_, _>>()
             .ok()?;
         return (!chain.is_empty()).then(|| format!("{chain:?}"));
@@ -5719,6 +5690,27 @@ fn ferx_rust_sha256_text(text: &str) -> String {
 #[extendr]
 fn ferx_rust_sha256_raw(bytes: Raw) -> String {
     entry(move || Ok(ferx_core::io::hash::sha256_bytes(bytes.as_slice())))
+}
+
+/// The engine's display label for each `method` token, in order (ferx-r #506):
+/// `"vi"` -> `"VI"`, `"importance_sampling"` -> `"IMP"`. Each token is read by
+/// ferx-core's `parse_method_token`, the parser a `[fit_options]` `method =`
+/// line goes through, so `ferx_fit()` validates its `method` argument against
+/// the engine instead of a list of its own. An unknown or removed token
+/// (`"agq"`) is an error carrying the engine's message.
+///
+/// @param tokens Character vector of method tokens.
+/// @return Character vector of labels, one per token.
+/// @export
+#[extendr]
+fn ferx_rust_method_token_labels(tokens: Vec<String>) -> Vec<String> {
+    entry(move || {
+        tokens
+            .iter()
+            .map(|t| method_from_token(t).map(|m| m.label().to_string()))
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(argument_refusal)
+    })
 }
 
 /// Every estimation method's `.fitrx` token and display label (ferx-r #508):
@@ -13268,6 +13260,7 @@ extendr_module! {
     fn ferx_rust_sha256_raw;
     fn ferx_rust_stage_data_probe;
     fn ferx_rust_method_labels;
+    fn ferx_rust_method_token_labels;
     fn ferx_rust_compact_theta_blocks;
     fn ferx_rust_kappa_rows;
     fn ferx_rust_fitrx_kappa_rows;

@@ -361,101 +361,74 @@ test_that("errors on missing model file", {
   )
 })
 test_that("method = 'imp' passes the ferx_fit validation step", {
-  # Tier 1: validate that the method-normalisation block in `ferx_fit()`
-  # accepts the new `imp` token (single or chained, plus documented aliases)
-  # without erroring. The actual IMP run is exercised in the integration tests
-  # once the engine supports it; here we only cover the R-side allowlist + the
-  # IMP alias fold. Mirrors the logic in `R/fit.R::ferx_fit()`.
-  # Exercises the real `.normalize_method_token` used by `ferx_fit()` so the
-  # allowlist and alias folds register coverage instead of a test-local copy.
-  normalize_token <- getFromNamespace(".normalize_method_token", "ferx")
-  normalize <- function(m) vapply(m, normalize_token, character(1L), USE.NAMES = FALSE)
-  expect_equal(normalize("imp"), "imp")
-  expect_equal(normalize("IMP"), "imp")
-  # The two documented aliases — partial-prefix matching in `match.arg` can't
-  # resolve these to `"imp"`, so the wrapper has to fold them explicitly.
-  expect_equal(normalize("importance_sampling"), "imp")
-  expect_equal(normalize("importance-sampling"), "imp")
-  expect_equal(normalize("Importance_Sampling"), "imp")
-  expect_equal(normalize(c("focei", "imp")), c("focei", "imp"))
-  expect_equal(normalize(c("saem", "imp")), c("saem", "imp"))
-  expect_equal(
-    normalize(c("focei", "importance_sampling")),
-    c("focei", "imp")
-  )
-  # IMPMAP: exact token, the long alias, and case-insensitivity. Exact-match
-  # semantics keep "imp" and "impmap" unambiguous despite the shared prefix.
-  expect_equal(normalize("impmap"), "impmap")
-  expect_equal(normalize("IMPMAP"), "impmap")
-  expect_equal(normalize("importance_sampling_map"), "impmap")
-  expect_equal(normalize("importance-sampling-map"), "impmap")
-  expect_equal(normalize(c("focei", "impmap")), c("focei", "impmap"))
+  # Tier 1: `ferx_fit()` validates its `method` tokens through the engine's own
+  # parser (#506), so the `imp` token, its chains and its documented aliases
+  # must come back as the engine's IMP / IMPMAP labels.
+  labels <- getFromNamespace(".ferx_method_labels", "ferx")
+  expect_equal(labels("imp"), "IMP")
+  expect_equal(labels("IMP"), "IMP")
+  expect_equal(labels("importance_sampling"), "IMP")
+  expect_equal(labels("importance-sampling"), "IMP")
+  expect_equal(labels("Importance_Sampling"), "IMP")
+  expect_equal(labels(c("focei", "imp")), c("FOCEI", "IMP"))
+  expect_equal(labels(c("saem", "imp")), c("SAEM", "IMP"))
+  expect_equal(labels(c("focei", "importance_sampling")), c("FOCEI", "IMP"))
+  # IMPMAP: exact token, the long alias, and case-insensitivity; the shared
+  # prefix with "imp" must not make either ambiguous.
+  expect_equal(labels("impmap"), "IMPMAP")
+  expect_equal(labels("IMPMAP"), "IMPMAP")
+  expect_equal(labels("importance_sampling_map"), "IMPMAP")
+  expect_equal(labels("importance-sampling-map"), "IMPMAP")
+  expect_equal(labels(c("focei", "impmap")), c("FOCEI", "IMPMAP"))
 })
 
 test_that("method = 'agq' is rejected with a pointer to laplace + n_agq", {
-  # Tier 1: `method = "agq"` was removed (ferx-core #251) — adaptive quadrature is
-  # `method = "laplace"` with `n_agq > 1`. The old tokens must error at the R
-  # boundary with a message naming the replacement. Exercises the real
-  # `.normalize_method_token`.
-  normalize_token <- getFromNamespace(".normalize_method_token", "ferx")
+  # Tier 1: `method = "agq"` was removed (ferx-core #251) - adaptive quadrature is
+  # `method = "laplace"` with `n_agq > 1`. The old tokens must error with the
+  # engine's message naming the replacement, before any fit runs.
+  labels <- getFromNamespace(".ferx_method_labels", "ferx")
+  ex <- ferx_example("warfarin")
   for (tok in c("agq", "AGQ", "aghq", "gauss_hermite",
                 "gauss-hermite", "adaptive_gaussian_quadrature")) {
+    expect_error(labels(tok), "has been removed.*laplace.*n_agq", info = tok)
     expect_error(
-      normalize_token(tok),
-      "has been removed.*laplace.*n_agq"
+      ferx_fit(ex$model, ex$data, method = tok),
+      "has been removed.*laplace.*n_agq",
+      info = tok
     )
   }
 
   # THE TRAP: rejecting the AGQ aliases must NOT take the Gauss-Newton tokens with
-  # them — `gauss_hermite` is a `contains("gauss")` near-miss for Gauss-Newton.
-  normalize <- function(m) vapply(m, normalize_token, character(1L), USE.NAMES = FALSE)
-  expect_equal(normalize("gn"), "gn")
-  expect_equal(normalize("gn_hybrid"), "gn_hybrid")
+  # them - `gauss_hermite` is a `contains("gauss")` near-miss for Gauss-Newton.
+  expect_equal(labels("gn"), "FOCE-GN")
+  expect_equal(labels("gn_hybrid"), "FOCE-GN-Hybrid")
 })
 
 test_that("method = 'laplace' and its alias pass the ferx_fit validation step", {
-  # Tier 1: R-side allowlist for the Laplace estimator (ferx-core #251) — the
-  # exact-Hessian Laplace approximation, i.e. NONMEM `$EST METHOD=1 LAPLACIAN`.
-  # It is the exact-anchor quadrature: `n_agq = 1` is Laplace, `n_agq > 1` is
-  # adaptive Gauss-Hermite quadrature over the same objective.
-  normalize_token <- getFromNamespace(".normalize_method_token", "ferx")
-  normalize <- function(m) vapply(m, normalize_token, character(1L), USE.NAMES = FALSE)
-
-  expect_equal(normalize("laplace"), "laplace")
-  expect_equal(normalize("LAPLACE"), "laplace")
-  # NONMEM's spelling, folded before `match.arg` (which would not partial-match it
-  # against "laplace" — "laplacian" is longer, not a prefix).
-  expect_equal(normalize("laplacian"), "laplace")
-  expect_equal(normalize(c("saem", "laplace")), c("saem", "laplace"))
+  # Tier 1: the Laplace estimator (ferx-core #251) - the exact-Hessian Laplace
+  # approximation, i.e. NONMEM `$EST METHOD=1 LAPLACIAN` - and its NONMEM alias.
+  labels <- getFromNamespace(".ferx_method_labels", "ferx")
+  expect_equal(labels("laplace"), "LAPLACE")
+  expect_equal(labels("LAPLACE"), "LAPLACE")
+  expect_equal(labels("laplacian"), "LAPLACE")
+  expect_equal(labels(c("saem", "laplace")), c("SAEM", "LAPLACE"))
 })
 test_that("method = 'bayes' passes the ferx_fit validation step", {
-  # Tier 1: R-side allowlist + alias fold for the Bayesian estimator. Mirrors
-  # the normalisation block in `R/fit.R::ferx_fit()`. The actual MCMC run is
-  # exercised in the integration tests.
-  normalize <- function(m) {
-    vapply(
-      m,
-      function(s) {
-        normalised <- gsub("[^a-z0-9]", "_", tolower(s))
-        if (normalised %in% c("importance_sampling", "importancesampling")) {
-          normalised <- "imp"
-        }
-        if (normalised %in% c("bayesian", "mcmc")) {
-          normalised <- "bayes"
-        }
-        match.arg(
-          normalised,
-          c("foce", "focei", "saem", "gn", "gn_hybrid", "imp", "bayes")
-        )
-      },
-      character(1L),
-      USE.NAMES = FALSE
-    )
-  }
-  expect_equal(normalize("bayes"), "bayes")
-  expect_equal(normalize("BAYES"), "bayes")
-  expect_equal(normalize("bayesian"), "bayes")
-  expect_equal(normalize("mcmc"), "bayes")
+  # Tier 1: the Bayesian estimator's token and aliases, as the engine reads them.
+  labels <- getFromNamespace(".ferx_method_labels", "ferx")
+  expect_equal(labels("bayes"), "BAYES")
+  expect_equal(labels("BAYES"), "BAYES")
+  expect_equal(labels("bayesian"), "BAYES")
+  expect_equal(labels("mcmc"), "BAYES")
+})
+test_that("ferx_fit rejects 'bayes' in a method chain spelled by an alias", {
+  # The standalone rule keys off the engine's label, so an alias is caught too.
+  ex <- ferx_example("warfarin")
+  expect_error(
+    ferx_fit(ex$model, ex$data, method = c("focei", "mcmc")),
+    regexp = "standalone|only method",
+    ignore.case = TRUE
+  )
 })
 test_that("ferx_fit rejects 'bayes' in a method chain (standalone only)", {
   # Tier 1: chaining bayes would run the MCMC then discard its posterior (the

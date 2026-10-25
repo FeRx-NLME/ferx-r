@@ -117,7 +117,23 @@ convergence diagnostics on \code{$bayes} rather than a point estimate, and
 runs standalone. Supports BSV and zero-mean inter-occasion variability
 (per-occasion \code{kappa}); the IOV variance posterior appears as
 \code{OMEGA_IOV(...)} in \code{$bayes}.
-SAEM fully supports inter-occasion variability (IOV / kappa) models.}
+SAEM fully supports inter-occasion variability (IOV / kappa) models.
+\code{"vi"} runs variational inference: it maximises an evidence lower
+bound jointly over the population parameters and a per-subject posterior,
+with no inner loop, and reports its result on \code{fit$vi}. Its objective
+is a bound, not a likelihood, so \code{fit$ofv} is \code{NaN} unless
+\code{vi_final_ofv} asks for one. For a deterministic \code{-2 log L} at
+the VI estimate, finish with an evaluate-only stage:
+\code{method = c("vi", "laplace")} with
+\code{settings = list(agq_eval_only = TRUE)}, or
+\code{method = c("vi", "imp")} with
+\code{settings = list(imp_eval_only = TRUE)}. It is tuned by the
+\code{vi_*} settings (see \code{settings} below). Does not support IOV or
+non-Gaussian endpoints.
+The tokens and their aliases are the engine's own, as a model file's
+\code{[fit_options] method} line reads them (case-insensitive); an unknown
+token is an error, and an evaluate-only stage (\code{agq_eval_only},
+\code{imp_eval_only}) must come last in a chain.}
 
 \item{covariance}{Logical, or \code{NULL} (the default). Whether to compute
 the covariance step for standard errors. \code{NULL} uses the model file's
@@ -720,11 +736,12 @@ of \code{seed} / \code{saem_seed}.}
 
 \strong{Variational inference (\code{method = vi})}
 
-VI is selected in the model file (\code{[fit_options] method = vi}) and
-reports its result on \code{fit$vi}. Its objective is a bound, not a
-likelihood, so \code{fit$ofv} is \code{NaN} unless \code{vi_final_ofv}
-asks for one; for a deterministic \code{-2 log L} at the VI estimate,
-chain \code{methods = vi, laplace} with \code{agq_eval_only = true} and
+VI is selected with \code{method = "vi"} or in the model file
+(\code{[fit_options] method = vi}) and reports its result on
+\code{fit$vi}. Its objective is a bound, not a likelihood, so
+\code{fit$ofv} is \code{NaN} unless \code{vi_final_ofv} asks for one; for
+a deterministic \code{-2 log L} at the VI estimate, chain
+\code{method = c("vi", "laplace")} with \code{agq_eval_only = TRUE} and
 \code{n_agq = 21} (see below).
 \describe{
 \item{\code{vi_iters}}{Maximum Adam iterations (default \code{25000}).
