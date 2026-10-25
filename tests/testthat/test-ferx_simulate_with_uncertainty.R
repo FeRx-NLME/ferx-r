@@ -477,22 +477,19 @@ test_that("a run whose every draw is skipped is refused, not returned empty", {
   expect_null(probe$value)
 })
 
-test_that("a [mixture] fit with per-class overrides draws from its fitted overrides", {
-  # The R-built FitResult used to carry no packed estimate and no overrides, so
-  # every [mixture] fit with an omega(k) override was refused here. It now
-  # carries `fit$mixture_overrides` (ferx-core #1765).
+test_that("a [mixture] fit with per-class overrides is still refused (ferx-core #2163)", {
+  # The fit records its overrides (ferx-core #1765), but they are not handed
+  # to the engine here: its simulation runs every [mixture] subject as class 1
+  # (#2163, fix in #2373), and with the overrides it returned draws that did
+  # not move with the class-2 theta, the mixing probability or the overrides.
+  # Until #2373 is pinned the call stays refused, even though the fit carries
+  # them.
   mod <- test_path("fixtures", "mixture_override.ferx")
   dat <- test_path("fixtures", "mixture_iv.csv")
   fit <- suppressWarnings(ferx_fit(mod, dat, method = "focei", covariance = TRUE,
                                    verbose = FALSE))
   skip_if(is.null(fit$cov_matrix), "mixture covariance step did not converge")
   expect_length(fit$mixture_overrides, 1L)
-  sim <- suppressWarnings(ferx_simulate_with_uncertainty(
-    mod, dat, fit, n_uncertainty_draws = 3L, seed = 1L
-  ))
-  expect_identical(sort(unique(sim$DRAW)), 1:3)
-
-  fit$mixture_overrides <- NULL
   probe <- engine_error_probe(ferx_simulate_with_uncertainty(
     mod, dat, fit, n_uncertainty_draws = 3L, seed = 1L
   ))

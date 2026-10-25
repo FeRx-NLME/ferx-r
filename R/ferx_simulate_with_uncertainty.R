@@ -142,8 +142,12 @@ ferx_simulate_with_uncertainty <- function(model, data, fit,
       sir_resamples_dim    = unc_pieces$sir_resamples_dim,
       residual_rho         = fit_pieces$residual_rho,
       residual_rho_pairs   = fit_pieces$residual_rho_pairs,
-      # A [mixture] fit's fitted per-class overrides (ferx-core #1765).
-      mixture_overrides    = as.numeric(fit$mixture_overrides %||% numeric()),
+      # Deliberately none, though the fit records them (ferx-core #1765): the
+      # engine's simulation still runs every [mixture] subject as class 1
+      # (ferx-core #2163, fix in #2373), so with them a mixture fit would
+      # return draws that ignore its classes. Without them it is refused, as
+      # before. Pass `fit$mixture_overrides` once #2373 is in the pin.
+      mixture_overrides    = numeric(),
       fit_bindings         = fit_pieces$fit_bindings,
       iov_occasion         = fit_pieces$iov_occasion,
       n_uncertainty_draws  = as.integer(n_uncertainty_draws),
