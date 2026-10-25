@@ -1399,7 +1399,7 @@
 #'     \code{se}, \code{rse_pct}, \code{lower_95}, \code{upper_95},
 #'     \code{estimate_natural}, \code{lower_95_natural},
 #'     \code{upper_95_natural}, \code{init_as_sd}, \code{weight},
-#'     \code{scale}. \code{fixed} is \code{TRUE} for a parameter the fit held
+#'     \code{scale}, \code{level}. \code{fixed} is \code{TRUE} for a parameter the fit held
 #'     (from \code{theta_fixed} / \code{omega_fixed} / \code{sigma_fixed} /
 #'     \code{kappa_fixed}); its \code{se}, \code{rse_pct} and intervals are
 #'     \code{NA}, since a held parameter has no standard error, and
@@ -1433,6 +1433,11 @@
 #'     and is \code{NA} on every other row; on such a row \code{estimate} is
 #'     the \emph{unweighted} variance, so the between-occasion SD at a weight
 #'     \code{W} is \code{sqrt(estimate / W)}, not \code{sqrt(estimate)}.
+#'     \code{level} is the level a kappa row is drawn at on a model with
+#'     nested levels (see \code{kappa_levels}; \code{print()} shows it as
+#'     \code{K_ST at STUDY}) and \code{NA} on every other row and model, so
+#'     \code{param} stays the bare declared name. \code{cor_matrix} and
+#'     \code{sir_ci_kappa} are likewise labelled by the bare name.
 #'     Row names are the parameter names, so \code{fit$estimates["TVCL", ]}
 #'     works; a name declared in more than one block is qualified by that block
 #'     (\code{"CL.theta"} / \code{"CL.omega"}), so no bare name silently

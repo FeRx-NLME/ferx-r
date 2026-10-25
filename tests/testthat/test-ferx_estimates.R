@@ -81,6 +81,40 @@ test_that(".ferx_compute_estimates() carries a weighted kappa's weight expressio
   expect_true(all(is.na(tab$weight[!grepl("^KAPPA", tab$param)])))
 })
 
+test_that(".ferx_compute_estimates() carries a nested kappa's level in its own column (#588)", {
+  # print() labels these rows `K_ST at STUDY`; the table keeps `param` bare
+  # so it still joins on the declared name, and says the level beside it.
+  fit <- make_fake_fit(
+    theta        = c(TVCL = 1.0),
+    omega        = 0.09,
+    sigma        = 0.05,
+    sigma_types  = "proportional",
+    omega_iov    = diag(c(0.04, 0.02)),
+    kappa_names  = c("K_ST", "K_ARM"),
+    kappa_levels = c(K_ST = "STUDY", K_ARM = "ARM")
+  )
+  tab <- .compute_estimates(fit)
+  expect_true("level" %in% names(tab))
+  expect_identical(tab$level[tab$param %in% c("K_ST", "K_ARM")], c("STUDY", "ARM"))
+  expect_identical(rownames(tab)[tab$param == "K_ST"], "K_ST")
+  expect_true(all(is.na(tab$level[!tab$param %in% c("K_ST", "K_ARM")])))
+})
+
+test_that(".ferx_compute_estimates() leaves level NA without nested levels (#588)", {
+  fit <- make_fake_fit(
+    theta       = c(TVCL = 1.0),
+    omega       = 0.09,
+    sigma       = 0.05,
+    sigma_types = "proportional",
+    omega_iov   = 0.04,
+    kappa_names = "KAPPA_CL"
+  )
+  tab <- .compute_estimates(fit)
+  expect_true("level" %in% names(tab))
+  expect_true(all(is.na(tab$level)))
+  expect_type(tab$level, "character")
+})
+
 test_that(".ferx_compute_estimates() leaves weight NA for an unweighted IOV model", {
   fit <- make_fake_fit(
     theta       = c(TVCL = 1.0),

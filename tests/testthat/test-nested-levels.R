@@ -97,6 +97,15 @@ test_that("print() labels a nested fit's kappa rows and shrinkage with their lev
   expect_match(sh, "K_ARM at ARM: ", fixed = TRUE)
 })
 
+test_that("a nested fit's estimates say each kappa's level beside its bare name (#588)", {
+  fit <- nested_fit()
+  est <- fit$estimates
+  kap <- est[est$param %in% names(fit$kappa_levels), ]
+  expect_identical(kap$param, c("K_ST", "K_ARM"))
+  expect_identical(kap$level, c("STUDY", "ARM"))
+  expect_true(all(is.na(est$level[!est$param %in% names(fit$kappa_levels)])))
+})
+
 test_that("a one-level IOV fit has no level fields and prints no level", {
   ex <- ferx_example("warfarin_iov")
   fit <- suppressWarnings(ferx_fit(ex$model, ex$data, method = "foce",
