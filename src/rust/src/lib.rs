@@ -618,7 +618,7 @@ fn ferx_rust_fit(
         // `parsed.fit_options`). Only an explicit R-side method overrides it, so a
         // model-file `method = saem` is no longer clobbered by R's default (#558).
         if !method.is_empty() {
-            let chain: Vec<EstimationMethod> = match method.iter().map(|m| parse_method(m)).collect() {
+            let chain: Vec<EstimationMethod> = match method.iter().map(|m| method_from_token(m)).collect() {
                 Ok(v) => v,
                 Err(e) => return Err(argument_refusal(e)),
             };
@@ -2984,55 +2984,16 @@ fn parse_match_method(
 }
 
 // -- Helper: parse a single R-side method token into EstimationMethod --
+//
+// The token goes through ferx-core's own `parse_method_token`, the parser a
+// `[fit_options]` `method = ...` line uses, so `ferx_fit(method = ...)` accepts
+// exactly the engine's tokens and aliases. The glue used to keep its own copy
+// of the token list, which is how `vi` went missing (ferx-r #506); do not
+// reintroduce one (`test-method-token.R` fails if a `parse_method` comes back).
 
-fn parse_method(token: &str) -> std::result::Result<EstimationMethod, String> {
-    let m = token.trim().to_lowercase();
-    if m == "saem" {
-        Ok(EstimationMethod::Saem)
-    } else if m.contains("hybrid") {
-        Ok(EstimationMethod::FoceGnHybrid)
-    } else if m == "laplace" || m == "laplacian" {
-        // NONMEM `$EST METHOD=1 LAPLACIAN` — the exact-anchor quadrature (n_agq = 1 is
-        // Laplace, n_agq > 1 is adaptive Gauss–Hermite quadrature).
-        Ok(EstimationMethod::Laplace)
-    } else if m == "agq"
-        || m == "aghq"
-        || m == "gauss_hermite"
-        || m == "gauss-hermite"
-        || m == "adaptive_gaussian_quadrature"
-        || m == "adaptive-gaussian-quadrature"
-    {
-        // `method = "agq"` was removed (ferx-core #251): adaptive quadrature is
-        // `method = "laplace"` with `settings = list(n_agq = N)`. MUST stay above the
-        // `contains("gauss")` arm below, which would otherwise route `gauss_hermite` into
-        // Gauss-*Newton*. Mirrors ferx-core's `parse_method_token`.
-        Err(
-            "method = \"agq\" has been removed: use method = \"laplace\" with n_agq = N \
-             (n_agq = 1 is the Laplace approximation, n_agq > 1 is adaptive Gauss–Hermite \
-             quadrature). For the Gauss-Newton-anchored quadrature use method = \"focei\" with \
-             n_agq > 1."
-                .to_string(),
-        )
-    } else if m == "gn" || m.contains("gauss") {
-        Ok(EstimationMethod::FoceGn)
-    } else if m == "focei" || m == "foce-i" || m == "foce_i" || m.contains("interaction") {
-        Ok(EstimationMethod::FoceI)
-    } else if m == "foce" {
-        Ok(EstimationMethod::Foce)
-    } else if m == "impmap" || m == "importance_sampling_map" || m == "importance-sampling-map" {
-        Ok(EstimationMethod::Impmap)
-    } else if m == "imp" || m == "importance_sampling" || m == "importance-sampling" {
-        Ok(EstimationMethod::Imp)
-    } else if m == "impmap" || m == "importance_sampling_map" {
-        Ok(EstimationMethod::Impmap)
-    } else if m == "bayes" || m == "bayesian" || m == "mcmc" {
-        Ok(EstimationMethod::Bayes)
-    } else {
-        Err(format!(
-            "Unknown estimation method '{}' — expected one of: foce, focei, laplace, saem, gn, gn_hybrid, imp, impmap, bayes",
-            token.trim()
-        ))
-    }
+fn method_from_token(token: &str) -> std::result::Result<EstimationMethod, String> {
+    ferx_core::parser::model_parser::parse_method_token(token)
+        .map_err(|e| format!("`method`: {e}"))
 }
 
 // -- Helper: rebuild the fitted IOV covariance from R-side arrays --
@@ -5620,7 +5581,7 @@ fn fit_option_normalised(key: &str, value: &str) -> Option<String> {
             .split(',')
             .map(str::trim)
             .filter(|s| !s.is_empty())
-            .map(parse_method)
+            .map(method_from_token)
             .collect::<std::result::Result<_, _>>()
             .ok()?;
         return (!chain.is_empty()).then(|| format!("{chain:?}"));
@@ -5719,6 +5680,27 @@ fn ferx_rust_sha256_text(text: &str) -> String {
 #[extendr]
 fn ferx_rust_sha256_raw(bytes: Raw) -> String {
     entry(move || Ok(ferx_core::io::hash::sha256_bytes(bytes.as_slice())))
+}
+
+/// The engine's display label for each `method` token, in order (ferx-r #506):
+/// `"vi"` -> `"VI"`, `"importance_sampling"` -> `"IMP"`. Each token is read by
+/// ferx-core's `parse_method_token`, the parser a `[fit_options]` `method =`
+/// line goes through, so `ferx_fit()` validates its `method` argument against
+/// the engine instead of a list of its own. An unknown or removed token
+/// (`"agq"`) is an error carrying the engine's message.
+///
+/// @param tokens Character vector of method tokens.
+/// @return Character vector of labels, one per token.
+/// @export
+#[extendr]
+fn ferx_rust_method_token_labels(tokens: Vec<String>) -> Vec<String> {
+    entry(move || {
+        tokens
+            .iter()
+            .map(|t| method_from_token(t).map(|m| m.label().to_string()))
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(argument_refusal)
+    })
 }
 
 /// Every estimation method's `.fitrx` token and display label (ferx-r #508):
@@ -13268,6 +13250,7 @@ extendr_module! {
     fn ferx_rust_sha256_raw;
     fn ferx_rust_stage_data_probe;
     fn ferx_rust_method_labels;
+    fn ferx_rust_method_token_labels;
     fn ferx_rust_compact_theta_blocks;
     fn ferx_rust_kappa_rows;
     fn ferx_rust_fitrx_kappa_rows;

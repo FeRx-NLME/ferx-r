@@ -89,6 +89,22 @@
 #'   (per-occasion \code{kappa}); the IOV variance posterior appears as
 #'   \code{OMEGA_IOV(...)} in \code{$bayes}.
 #'   SAEM fully supports inter-occasion variability (IOV / kappa) models.
+#'   \code{"vi"} runs variational inference: it maximises an evidence lower
+#'   bound jointly over the population parameters and a per-subject posterior,
+#'   with no inner loop, and reports its result on \code{fit$vi}. Its objective
+#'   is a bound, not a likelihood, so \code{fit$ofv} is \code{NaN} unless
+#'   \code{vi_final_ofv} asks for one. For a deterministic \code{-2 log L} at
+#'   the VI estimate, finish with an evaluate-only stage:
+#'   \code{method = c("vi", "laplace")} with
+#'   \code{settings = list(agq_eval_only = TRUE)}, or
+#'   \code{method = c("vi", "imp")} with
+#'   \code{settings = list(imp_eval_only = TRUE)}. It is tuned by the
+#'   \code{vi_*} settings (see \code{settings} below). Does not support IOV or
+#'   non-Gaussian endpoints.
+#'   The tokens and their aliases are the engine's own, as a model file's
+#'   \code{[fit_options] method} line reads them (case-insensitive); an unknown
+#'   token is an error, and an evaluate-only stage (\code{agq_eval_only},
+#'   \code{imp_eval_only}) must come last in a chain.
 #' @param covariance Logical, or \code{NULL} (the default). Whether to compute
 #'   the covariance step for standard errors. \code{NULL} uses the model file's
 #'   \code{[fit_options] covariance} (engine default \code{TRUE} when unset); a
@@ -679,11 +695,12 @@
 #'
 #'   \strong{Variational inference (\code{method = vi})}
 #'
-#'   VI is selected in the model file (\code{[fit_options] method = vi}) and
-#'   reports its result on \code{fit$vi}. Its objective is a bound, not a
-#'   likelihood, so \code{fit$ofv} is \code{NaN} unless \code{vi_final_ofv}
-#'   asks for one; for a deterministic \code{-2 log L} at the VI estimate,
-#'   chain \code{methods = vi, laplace} with \code{agq_eval_only = true} and
+#'   VI is selected with \code{method = "vi"} or in the model file
+#'   (\code{[fit_options] method = vi}) and reports its result on
+#'   \code{fit$vi}. Its objective is a bound, not a likelihood, so
+#'   \code{fit$ofv} is \code{NaN} unless \code{vi_final_ofv} asks for one; for
+#'   a deterministic \code{-2 log L} at the VI estimate, chain
+#'   \code{method = c("vi", "laplace")} with \code{agq_eval_only = TRUE} and
 #'   \code{n_agq = 21} (see below).
 #'   \describe{
 #'     \item{\code{vi_iters}}{Maximum Adam iterations (default \code{25000}).
@@ -2475,8 +2492,14 @@ ferx_fit <- function(model, data = NULL,
     if (!is.character(method) || length(method) == 0L) {
       stop("`method` must be a non-empty character vector")
     }
-    method <- vapply(method, .normalize_method_token, character(1L), USE.NAMES = FALSE)
+    method <- trimws(method)
   }
+  # The engine's label for each stage ("IMP", "BAYES", ...), which also
+  # validates the tokens: they are read by ferx-core's own method parser, the
+  # one a `[fit_options] method =` line goes through, so this accepts exactly
+  # the engine's methods and aliases (#506). The tokens themselves go to the
+  # engine as given.
+  method_labels <- .ferx_method_labels(method)
   # `imp` may appear at most once. By default it is an estimator (NONMEM
   # METHOD=IMP) and may sit anywhere in the chain; with `imp_eval_only = TRUE`
   # (NONMEM EONLY=1) it only evaluates the marginal -2 log L and must be the
@@ -2484,7 +2507,7 @@ ferx_fit <- function(model, data = NULL,
   # error R-side avoids a round-trip and gives a clearer message. (`imp_eval_only`
   # set via the model file's [fit_options] rather than `settings` is enforced
   # engine-side.)
-  imp_positions <- which(method == "imp")
+  imp_positions <- which(method_labels == "IMP")
   if (length(imp_positions) > 0L) {
     if (length(imp_positions) > 1L) {
       stop(
@@ -2506,7 +2529,7 @@ ferx_fit <- function(model, data = NULL,
   # another stage, and chaining it would run the (expensive) sampler and then
   # silently discard its posterior (the final stage's result wins). Reject
   # chains R-side rather than waste the run.
-  if (any(method == "bayes") && length(method) > 1L) {
+  if (any(method_labels == "BAYES") && length(method) > 1L) {
     stop(
       "`\"bayes\"` must be the only method (it runs standalone); got ",
       "method = c(\"", paste(method, collapse = "\", \""), "\")"
@@ -2883,58 +2906,15 @@ ferx_fit <- function(model, data = NULL,
   }))
 }
 
-# Internal: canonicalise a single `method` token to its engine name, folding
-# the documented case-insensitive aliases before `match.arg`.
-.normalize_method_token <- function(m) {
-  # `tolower` *before* the `[^a-z0-9]` strip - otherwise uppercase letters
-  # get smashed to underscores ("IMP" -> "___") before tolower runs on
-  # them, and the canonicalisation silently drops the case-insensitive
-  # entry points the docs advertise.
-  normalised <- gsub("[^a-z0-9]", "_", tolower(m))
-  # Fold IMP aliases before `match.arg` - partial matching won't see
-  # `importance_sampling` as a prefix of `imp`, so the documented
-  # `c("focei", "importance_sampling")` form has to be mapped explicitly.
-  if (normalised %in% c("importance_sampling", "importancesampling")) {
-    normalised <- "imp"
-  }
-  # IMPMAP aliases. Fold before the IMP set would never match these (they
-  # carry the `_map` suffix), so order is irrelevant; kept explicit for
-  # the documented `"importance_sampling_map"` long form.
-  if (normalised %in% c("importance_sampling_map", "importancesamplingmap")) {
-    normalised <- "impmap"
-  }
-  if (normalised %in% c("bayesian", "mcmc")) {
-    normalised <- "bayes"
-  }
-  # `method = "agq"` was removed (ferx-core #251): adaptive quadrature is now
-  # `method = "laplace"` with `settings = list(n_agq = N)` (exact Hessian anchor),
-  # or `method = "focei"` with `n_agq > 1` (Gauss-Newton anchor). Reject the old
-  # tokens with a pointer rather than routing them to a method that no longer
-  # exists. These `contains("gauss")` near-misses must be caught here before the
-  # Gauss-Newton fold below. Mirrors ferx-core's `parse_method_token`.
-  if (normalised %in% c(
-    "agq", "aghq", "gauss_hermite", "adaptive_gaussian_quadrature"
-  )) {
-    stop(
-      "method = \"agq\" has been removed: use method = \"laplace\" with ",
-      "settings = list(n_agq = N) (n_agq = 1 is the Laplace approximation, ",
-      "n_agq > 1 is adaptive Gauss-Hermite quadrature). For the ",
-      "Gauss-Newton-anchored quadrature use method = \"focei\" with n_agq > 1.",
-      call. = FALSE
-    )
-  }
-  # `laplacian` is NONMEM's spelling; fold it onto the canonical `laplace`.
-  if (normalised == "laplacian") {
-    normalised <- "laplace"
-  }
-  # `match.arg` uses exact-match-first semantics, so listing both "imp" and
-  # "impmap" is unambiguous (each exact token wins over the other's prefix).
-  match.arg(
-    normalised,
-    c(
-      "foce", "focei", "laplace", "saem", "gn", "gn_hybrid",
-      "imp", "impmap", "bayes"
-    )
+# Internal: the engine's display label for each `method` token, or the
+# engine's error for one it does not take. There is no method list on the R
+# side, nor in the glue: a copy drifts each time the engine gains a method,
+# which is how `"vi"` came to be refused (#506).
+.ferx_method_labels <- function(method) {
+  if (length(method) == 0L) return(character(0L))
+  tryCatch(
+    ferx_rust_method_token_labels(method),
+    error = function(e) stop(conditionMessage(e), call. = FALSE)
   )
 }
 
