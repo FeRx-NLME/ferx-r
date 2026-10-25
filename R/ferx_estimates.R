@@ -27,6 +27,12 @@
   om    <- fit$omega
   if (is.null(dim(om))) om <- matrix(om, 1L, 1L)
   n_eta <- nrow(om)
+  # A scale vector of the wrong length cannot be aligned with the rows: a long
+  # one read by position labelled each ETA with another's scale, with no error
+  # (#566). Refuse it, as print() does (#562), rather than report NA - a fit
+  # that print() refuses should not yield a table that looks fine. Empty (a
+  # fit from before ferx-core #1643) stays NA for every row.
+  .ferx_check_row_count(fit$eta_param_types, "eta_param_types", n_eta, "omega")
   for (i in seq_len(n_eta)) {
     pname    <- if (!is.null(fit$eta_names) && length(fit$eta_names) >= i && nzchar(fit$eta_names[i])) fit$eta_names[i] else sprintf("OMEGA(%d,%d)", i, i)
     se       <- .omega_se_at(fit$se_omega, n_eta, i, i)
@@ -54,6 +60,7 @@
     m_iov  <- fit$omega_iov
     if (is.null(dim(m_iov))) m_iov <- matrix(m_iov, 1L, 1L)
     n_kap  <- nrow(m_iov)
+    .ferx_check_row_count(fit$kappa_param_types, "kappa_param_types", n_kap, "omega_iov")
     kap_names <- if (!is.null(fit$kappa_names) && length(fit$kappa_names) == n_kap) fit$kappa_names else paste0("KAPPA", seq_len(n_kap))
     # One SE per kappa, block_kappa included (ferx-core postfit.rs).
     n_se   <- length(fit$se_kappa)

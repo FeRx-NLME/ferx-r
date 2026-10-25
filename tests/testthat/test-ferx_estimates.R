@@ -573,3 +573,63 @@ test_that("an unused ETA next to a classified one has scale NA, live and reloade
     expect_no_match(row_v, "[log-normal]", fixed = TRUE)
   }
 })
+
+# --- .compute_estimates() scale column: wrong-length types refused (#566) ---
+# A types vector read by position must carry one entry per row. A long one
+# used to label each ETA / kappa with another's scale and no error; a short
+# one gave NA for the missing rows. Both are refused, as print() refuses them
+# (#562), so the estimates table and print() accept the same fits.
+.scale_fit <- function(...) {
+  make_fake_fit(
+    theta       = c(TVCL = 1.0, TVV = 10.0),
+    omega       = diag(c(0.09, 0.04)),
+    eta_names   = c("ETA_CL", "ETA_V"),
+    sigma       = c(PROP_ERR = 0.01),
+    sigma_names = "PROP_ERR",
+    omega_iov   = diag(c(0.02, 0.01)),
+    kappa_names = c("KAPPA_CL", "KAPPA_V"),
+    ...
+  )
+}
+
+test_that(".ferx_compute_estimates() reads a one-per-row scale vector by position", {
+  est <- .compute_estimates(.scale_fit(
+    eta_param_types   = c(ETA_CL = "log_normal", ETA_V = "additive"),
+    kappa_param_types = c(KAPPA_CL = "additive", KAPPA_V = "logit")
+  ))
+  expect_identical(est["ETA_CL", "scale"], "log_normal")
+  expect_identical(est["ETA_V", "scale"], "additive")
+  expect_identical(est["KAPPA_CL", "scale"], "additive")
+  expect_identical(est["KAPPA_V", "scale"], "logit")
+})
+
+test_that(".ferx_compute_estimates() leaves every scale NA for an empty or NULL vector", {
+  for (empty in list(NULL, character())) {
+    est <- .compute_estimates(.scale_fit(eta_param_types = empty,
+                                         kappa_param_types = empty))
+    expect_true(all(is.na(est[c("ETA_CL", "ETA_V", "KAPPA_CL", "KAPPA_V"), "scale"])))
+  }
+})
+
+test_that(".ferx_compute_estimates() refuses an eta_param_types of the wrong length", {
+  for (types in list(c("additive", "log_normal", "logit"), "additive")) {
+    err <- expect_error(.compute_estimates(.scale_fit(eta_param_types = types)),
+                        class = "ferx_fit_field_error")
+    expect_identical(err$field, "eta_param_types")
+    expect_match(conditionMessage(err),
+                 sprintf("has %d entr.*expected 2, one per row of fit\\$omega", length(types)))
+  }
+})
+
+test_that(".ferx_compute_estimates() refuses a kappa_param_types of the wrong length", {
+  for (types in list(c("additive", "log_normal", "logit"), "additive")) {
+    err <- expect_error(
+      .compute_estimates(.scale_fit(eta_param_types = c("log_normal", "log_normal"),
+                                    kappa_param_types = types)),
+      class = "ferx_fit_field_error"
+    )
+    expect_identical(err$field, "kappa_param_types")
+    expect_match(conditionMessage(err),
+                 sprintf("has %d entr.*expected 2, one per row of fit\\$omega_iov", length(types)))
+  }
+})

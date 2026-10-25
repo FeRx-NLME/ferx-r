@@ -259,13 +259,7 @@
 # naming the field; `field` carries its name. The known scales and statuses
 # come from the glue that reads them, never a copy here (#551).
 .ferx_check_row_fields <- function(types, types_field, n, rows_field, status, na_ok = FALSE) {
-  if (length(types) > 0L && length(types) != n) {
-    .ferx_fit_field_error(types_field, sprintf(
-      "fit$%s has %d %s; expected %d, one per row of fit$%s, or none.",
-      types_field, length(types), ngettext(length(types), "entry", "entries"),
-      n, rows_field
-    ))
-  }
+  .ferx_check_row_count(types, types_field, n, rows_field)
   known_types <- ferx_rust_known_eta_param_types()
   bad <- if (na_ok) !is.na(types) & !types %in% known_types else is.na(types) | !types %in% known_types
   if (any(bad)) {
@@ -286,6 +280,22 @@
       if (length(status) == 1L && !is.na(status)) sprintf("\"%s\"", status)
       else paste(deparse(status), collapse = ""),
       paste(known_status, collapse = ", ")
+    ))
+  }
+  invisible(NULL)
+}
+
+# The length rule of .ferx_check_row_fields(), on its own: a `types` vector
+# (the fit field named by `types_field`) must be empty or carry one entry per
+# row of the `n`-row matrix `rows_field`. Also applied by
+# .ferx_compute_estimates() to its `scale` column (#566), so the estimates
+# table and print() accept and refuse the same fits.
+.ferx_check_row_count <- function(types, types_field, n, rows_field) {
+  if (length(types) > 0L && length(types) != n) {
+    .ferx_fit_field_error(types_field, sprintf(
+      "fit$%s has %d %s; expected %d, one per row of fit$%s, or none.",
+      types_field, length(types), ngettext(length(types), "entry", "entries"),
+      n, rows_field
     ))
   }
   invisible(NULL)
