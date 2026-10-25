@@ -160,6 +160,11 @@ test_that("covariance_wall_time_secs times the profiled covariance step (ferx-co
   quiet(ferx_save_fit(p, path))
   expect_identical(quiet(ferx_load_fit(path))$covariance_wall_time_secs,
                    p$covariance_wall_time_secs)
+  # Under ferx-core's own key: an R writer and reader that agreed on another
+  # name would pass the round trip above while the engine's loader read 0.
+  trip <- quiet(fitrx_engine_trip(p))
+  expect_identical(fitrx_fit_json(trip$core_path)$covariance_wall_time_secs,
+                   p$covariance_wall_time_secs)
 })
 
 test_that("ferx_covariance() refuses s / rsr on a profiled fit with E_PROFILE_SCOPE (#597)", {

@@ -162,6 +162,10 @@ test_that("car1 by OCC fits with a profiled PLACEBO block, to the unprofiled opt
   expect_true(all(p$theta_levels$profiled))
   expect_true(p$converged)
   expect_identical(p$covariance_status, "computed")
+  # The route the measurement above was taken on; the header records where
+  # BOBYQA stopped on this model.
+  expect_identical(p$optimizer, "auto (nlopt_lbfgs)")
+  expect_identical(p$gradient_method_outer, "analytic (Dual2)")
 
   expect_lt(abs(p$ofv - b$ofv), 1e-5)
   expect_lt(abs(p$ofv - 89.451278), 1e-4)
@@ -171,6 +175,7 @@ test_that("car1 by OCC fits with a profiled PLACEBO block, to the unprofiled opt
   expect_lt(rel(p$theta[structural], b$theta[structural]), 1e-3)
   expect_lt(rel(p$se_theta[structural], b$se_theta[structural]), 2e-2)
   expect_lt(rel(unlist(p$se_kappa), unlist(b$se_kappa)), 2e-2)
+  expect_lt(rel(unlist(p$se_omega), unlist(b$se_omega)), 2e-2)
   pl <- p$theta_levels
   bl <- b$theta_levels
   expect_identical(pl$theta_name, bl$theta_name)
