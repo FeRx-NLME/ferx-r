@@ -404,6 +404,11 @@ test_that("S6: an explicit argument overrides the fit's record, even at its defa
   # edits that half, not the engine default (review round 1, finding 4).
   sir_only <- ps_sir_fit(ps_sir_rows[[2L]])  # warfarin, inner_maxiter = 5
   sir_only$scoring_settings <- NULL
+  # inner_maxiter = 5 no longer binds the covariance step since ferx-core
+  # #2280 (its near-mode inner BFGS converges sooner; the record moved the
+  # matrix 8.8e-10 relative before, 0 after), so the record also carries a
+  # loose inner_tol, which does (1.9e-8 relative).
+  sir_only$sir_settings$scoring$inner_tol <- 1e-2
   expect_identical(ferx_covariance(sir_only, mu_referencing = TRUE)$cov_matrix,
                    ferx_covariance(sir_only)$cov_matrix)
   # Premise: the SIR record's scoring half moves this fixture's covariance.
@@ -467,22 +472,53 @@ test_that("S9: a [mixture] per-class override fit is scored in memory and after 
   ex <- list(model = test_path("fixtures", "mixture_override.ferx"),
              data = test_path("fixtures", "mixture_iv.csv"))
   fit <- ps_fit("mix_override", ex, method = "focei")
-  refusal <- "does not store their fitted values"
+  # The fit records the fitted class-2 variance on its own (ferx-core #1765),
+  # which the engine reads ahead of the packed estimate, so a fit without the
+  # latter is still scored as the fit was.
+  expect_length(fit$mixture_overrides, 1L)
   no_packed <- fit
   no_packed$packed_estimate <- NULL
-  expect_error(ferx_covariance(no_packed), refusal, fixed = TRUE)
+  expect_identical(ferx_covariance(no_packed)$cov_matrix, fit$cov_matrix)
+  neither <- no_packed
+  neither$mixture_overrides <- NULL
+  expect_error(ferx_covariance(neither), "records neither their fitted values",
+               fixed = TRUE)
 
   cov <- ferx_covariance(fit)
   expect_identical(cov$cov_matrix, fit$cov_matrix)
   expect_identical(cov$se_theta, fit$se_theta)
 
-  # The bundle carries the packed estimate (ferx-core #1815), which holds the
-  # overrides, so the reloaded fit is scored too.
+  # The bundle carries both the packed estimate (ferx-core #1815) and the
+  # overrides (#1765), bit for bit, so the reloaded fit is scored too.
   loaded <- ps_round_trip(fit)
   expect_identical(loaded$packed_estimate, fit$packed_estimate)
+  expect_identical(loaded$mixture_overrides, fit$mixture_overrides)
   cov <- ferx_covariance(loaded)
   expect_identical(cov$cov_matrix, fit$cov_matrix)
   expect_identical(cov$se_theta, fit$se_theta)
+
+  # The engine reads the overrides R wrote, not only R itself: its loader
+  # takes `mixture_overrides` as a sequence, which a one-override fit writes as
+  # a length-1 vector unless the key is kept an array (#379). Re-saved by the
+  # engine and read back, they are the fit's bit for bit.
+  trip <- fitrx_engine_trip(fit)
+  expect_identical(ferx_load_fit(trip$core_path)$mixture_overrides,
+                   fit$mixture_overrides)
+})
+
+test_that("S9b: an SAEM [mixture] override fit is scored in memory and after a reload", {
+  # SAEM carries no packed estimate, so before ferx-core #1765 the post-hoc
+  # steps refused this fit outright; its recorded overrides now let
+  # ferx_covariance(fit) repeat the in-fit step.
+  ex <- list(model = test_path("fixtures", "mixture_override.ferx"),
+             data = test_path("fixtures", "mixture_iv.csv"))
+  fit <- ps_fit("mix_override_saem", ex, method = "saem")
+  expect_null(fit$packed_estimate)
+  expect_length(fit$mixture_overrides, 1L)
+  expect_identical(ferx_covariance(fit)$cov_matrix, fit$cov_matrix)
+  loaded <- ps_round_trip(fit)
+  expect_identical(loaded$mixture_overrides, fit$mixture_overrides)
+  expect_identical(ferx_covariance(loaded)$cov_matrix, fit$cov_matrix)
 })
 
 # Since ferx-core #1824 `run_covariance` / `run_sir` score the LOQ method the

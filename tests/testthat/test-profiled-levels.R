@@ -5,11 +5,11 @@
 # agree on the OFV, every theta and the standard errors, within the bands
 # #2130 measured against its own unprofiled restart (theta 1e-3, SE 2e-2;
 # its A1 anchor puts the OFV within 1e-5). Measured here on mbma_placebo
-# (macOS arm64) at ferx-core 5bd862b8: OFV 6.6e-7 above the unprofiled fit
-# (1.8e-6 at 59a4fe3f, before #2285 tightened the profiled ftol), structural
-# theta within 8.6e-6 relative, the levels within 2.8e-5 of their SE,
-# structural SEs within 0.7%, and ferx_covariance() identical to the fit's
-# SEs (#2173). An engine that ignored `profile` would fit the
+# (macOS arm64) at ferx-core d66c0c51: OFV 7.8e-9 below the unprofiled fit
+# (6.6e-7 above at 5bd862b8, before #2285's verified stop; 1.8e-6 at
+# 59a4fe3f), structural theta within 2.0e-6 relative, the levels within
+# 7.1e-6 of their SE, structural SEs within 0.4%, and ferx_covariance()
+# identical to the fit's SEs (#2173). An engine that ignored `profile` would fit the
 # same numbers, so the fit must also say which blocks it profiled.
 
 quiet <- function(x) suppressWarnings(suppressMessages(x))
@@ -74,6 +74,18 @@ test_that("a profiled PLACEBO block fits to the unprofiled optimum", {
   # Level SEs come from the profiled covariance, derived levels included.
   expect_true(all(is.finite(pl$se)))
   expect_lt(rel(pl$se, bl$se), 2e-2)
+})
+
+test_that("a profiled fit writes its optimizer trace (ferx-core #2136)", {
+  skip_on_cran()
+  # The profiled outer loop skipped the trace, checkpoints, the flat-theta
+  # freeze and the SIR fallback until ferx-core #2136.
+  m <- mbma_profiled_model()
+  p <- quiet(ferx_fit(m$model, m$data, verbose = FALSE, optimizer_trace = TRUE))
+  expect_identical(p$profiled_blocks, "PLACEBO")
+  tr <- ferx_trace(p)
+  expect_true(is.data.frame(tr))
+  expect_gt(nrow(tr), 0L)
 })
 
 test_that("the fit says which blocks it profiled", {
@@ -207,22 +219,45 @@ test_that("a bounded profiled block is refused with E_PROFILE_SCOPE", {
 })
 
 # A profiled fit whose covariance step fails on a reason any profiled model can
-# reach: an unused theta gives the profile objective's Hessian a zero row.
-unused_theta_fit <- local({
+# reach: a theta added to TVE0 is confounded with it, so the profile
+# objective's Hessian is singular. This used an unused theta until ferx-core
+# #2136, which made a profiled fit freeze a theta the objective never reads
+# (as an unprofiled fit does), so that fit's covariance step now succeeds.
+confounded_theta_fit <- local({
   out <- list()
   function(covariance = TRUE) {
     key <- as.character(covariance)
     if (is.null(out[[key]])) {
       m <- mbma_profiled_model()
       txt <- readLines(m$model)
-      txt <- append(txt, "  theta TVUNUSED(1.0, 0.01, 100.0)",
+      txt <- append(txt, "  theta TVSHIFT(1.0, -100.0, 100.0)",
                     after = grep("^  theta PLACEBO\\[", txt))
+      txt <- sub("BASE = TVE0 +", "BASE = TVE0 + TVSHIFT +", txt, fixed = TRUE)
       writeLines(txt, m$model)
       out[[key]] <<- quiet(ferx_fit(m$model, m$data, verbose = FALSE,
                                     covariance = covariance))
     }
     out[[key]]
   }
+})
+
+test_that("a profiled fit freezes a theta the objective never reads (ferx-core #2136)", {
+  skip_on_cran()
+  m <- mbma_profiled_model()
+  txt <- readLines(m$model)
+  txt <- append(txt, "  theta TVUNUSED(1.0, 0.01, 100.0)",
+                after = grep("^  theta PLACEBO\\[", txt))
+  writeLines(txt, m$model)
+  fit <- quiet(ferx_fit(m$model, m$data, verbose = FALSE))
+  expect_identical(fit$profiled_blocks, "PLACEBO")
+  expect_identical(names(fit$theta)[fit$theta_fixed], "TVUNUSED")
+  expect_identical(fit$covariance_status, "computed")
+  # With the warning an unprofiled fit gives for the same theta.
+  ws <- fit$warnings_structured
+  flat <- ws[ws$category == "flat_parameter", , drop = FALSE]
+  expect_identical(nrow(flat), 1L)
+  expect_match(flat$message, "`TVUNUSED` has no effect on the objective", fixed = TRUE)
+  expect_match(flat$message, "Freezing it at its initial value", fixed = TRUE)
 })
 
 test_that("a profiled fit's failed covariance step is reported in the covariance class", {
@@ -233,7 +268,7 @@ test_that("a profiled fit's failed covariance step is reported in the covariance
   # replay_covariance() only when the level solve breaks at the estimates,
   # which no bundled model does; the classifier table in
   # test-ferx_get_warnings.R holds its text.
-  fit <- unused_theta_fit()
+  fit <- confounded_theta_fit()
   expect_identical(fit$profiled_blocks, "PLACEBO")
   expect_identical(fit$covariance_status, "failed")
 
@@ -262,20 +297,20 @@ test_that("a replayed covariance warning keeps the in-fit row's class and severi
   # never ran printed the replay's failure as a plain warning, missing from the
   # STATUS line.
   cols <- c("severity", "category", "message", "source_method")
-  in_fit <- unused_theta_fit()$warnings_structured
+  in_fit <- confounded_theta_fit()$warnings_structured
   in_fit <- in_fit[grepl("^Covariance step failed", in_fit$message), cols]
   expect_identical(nrow(in_fit), 1L)
   expect_identical(in_fit$severity, "critical")
 
   # Replayed on top of the failed in-fit step: one row, the fit's.
-  ws <- quiet(ferx_covariance(unused_theta_fit()))$warnings_structured
+  ws <- quiet(ferx_covariance(confounded_theta_fit()))$warnings_structured
   rows <- ws[grepl("^Covariance step failed", ws$message), cols]
   rownames(rows) <- rownames(in_fit) <- NULL
   expect_identical(rows, in_fit)
 
   # Replayed on a fit whose step never ran: the replay's row alone, classed as
   # the fit's would have been, and it reaches the STATUS line.
-  recov <- quiet(ferx_covariance(unused_theta_fit(covariance = FALSE)))
+  recov <- quiet(ferx_covariance(confounded_theta_fit(covariance = FALSE)))
   ws <- recov$warnings_structured
   rows <- ws[grepl("^Covariance step failed", ws$message), cols]
   rownames(rows) <- NULL

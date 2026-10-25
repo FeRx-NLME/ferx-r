@@ -448,6 +448,11 @@ ferx_load_fit <- function(path) {
     packed_estimate = if (is.null(w$packed_estimate)) NULL else
       vapply(w$packed_estimate, function(v) if (is.null(v)) NA_real_ else as.numeric(v),
              numeric(1L)),
+    # A [mixture] fit's fitted per-class overrides (ferx-core #1765); NULL in a
+    # bundle written without them (before #1765, or from a fit that has none).
+    mixture_overrides = if (is.null(w$mixture_overrides)) NULL else
+      vapply(w$mixture_overrides, function(v) if (is.null(v)) NA_real_ else as.numeric(v),
+             numeric(1L)),
 
     input_columns   = as.character(unlist(w$input_columns   %||% list(), use.names = FALSE)),
     covariate_names = as.character(unlist(w$covariate_names %||% list(), use.names = FALSE))

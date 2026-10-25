@@ -498,12 +498,30 @@ test_that("ferx_covariance on a [mixture] fit matches the in-fit step (#441)", {
   loaded <- ferx_covariance(ferx_load_fit(path))
   expect_identical(loaded$covariance_status, "computed")
   expect_identical(loaded$cov_matrix, res$in_fit$cov_matrix)
-  # Without the packed estimate the overrides cannot be recovered: a clear
-  # refusal, never a matrix centred on the declared override inits.
+  # The fit records its fitted overrides on their own (ferx-core #1765), one
+  # class variance per omega(k) and one class sigma per sigma(k), and the
+  # engine reads them ahead of the packed estimate: without it the step is
+  # still computed at the fitted overrides, in memory and after a reload. Not
+  # bit for bit: without the packed vector Omega is re-decomposed from
+  # `omega`, a machine-epsilon shift the FD Hessian amplifies (measured 6.6e-8
+  # relative at worst here).
+  expect_length(res$bare$mixture_overrides, 2L)
   no_packed <- res$bare
   no_packed$packed_estimate <- NULL
-  expect_error(ferx_covariance(no_packed),
-               "does not store their fitted values", fixed = TRUE)
+  expect_equal(ferx_covariance(no_packed)$cov_matrix, res$in_fit$cov_matrix,
+               tolerance = 1e-6)
+  ferx_save_fit(no_packed, path)
+  reloaded <- ferx_load_fit(path)
+  expect_null(reloaded$packed_estimate)
+  expect_identical(reloaded$mixture_overrides, res$bare$mixture_overrides)
+  expect_identical(ferx_covariance(reloaded)$cov_matrix,
+                   ferx_covariance(no_packed)$cov_matrix)
+  # With neither, the overrides cannot be recovered: a clear refusal, never a
+  # matrix centred on the declared override inits.
+  neither <- no_packed
+  neither$mixture_overrides <- NULL
+  expect_error(ferx_covariance(neither),
+               "records neither their fitted values", fixed = TRUE)
 })
 
 test_that("ferx_covariance on a [mixture] fit with kappa matches the in-fit step (#441)", {

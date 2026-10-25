@@ -935,8 +935,11 @@ test_that("every covariance message ferx-core emits gets non-contradictory guida
     list(cat = "covariance_failed",
          # A over the structural parameters (the Schur complement): this one IS
          # an identifiability finding.
+         # The eigenvalue list is in the message since ferx-core #2353, which
+         # the generic non-PD arm must not take.
          msg = paste0("Covariance step failed: the Hessian of the profile objective ",
-                      "is not positive definite. SE estimates not available."),
+                      "is not positive definite (eigenvalues [5265.2133, 410.5155, ",
+                      "-0.0014]). SE estimates not available."),
          # Asserted on a phrase only this arm has: the generic fallback also
          # says "identifiability" and never "theta_levels".
          ok = "confounded with the level effects", never = "omega/sigma structure"),
@@ -949,7 +952,14 @@ test_that("every covariance message ferx-core emits gets non-contradictory guida
     list(cat = "covariance_failed",
          msg = paste0("Covariance step failed: a profiled level has no curvature ",
                       "at the estimate. SE estimates not available."),
-         ok = "no observation informs it", never = "identifiability")
+         ok = "no observation informs it", never = "identifiability"),
+    list(cat = "covariance_failed",
+         # A_p holds a NaN or Inf (ferx-core #2353): an overflow, which the
+         # generic fallback would blame on identifiability.
+         msg = paste0("Covariance step failed: could not compute eigenvalues of the ",
+                      "Hessian of the profile objective (it may contain NaN or Inf). ",
+                      "SE estimates not available."),
+         ok = "profiled levels re-solved, is not finite", never = "omega/sigma structure")
   )
   for (case in cases) {
     # `cat` is the category the engine assigns, not one chosen by hand.
@@ -1137,7 +1147,10 @@ test_that("no covariance message ferx-core emits is missing from the inventory",
     "not finite at some finite-difference point",
     "the Hessian of the profile objective is not positive",
     "in the profiled levels is not positive definite",
-    "a profiled level has no curvature"
+    "a profiled level has no curvature",
+    # Also matched by the unprofiled "could not compute eigenvalues" fragment
+    # above; listed so the profiled form is accounted for in its own right.
+    "of the Hessian of the profile objective (it may"
   )
   accounted <- function(lit) any(vapply(c(exempt, covered),
                                         function(k) grepl(k, lit, fixed = TRUE),

@@ -1410,6 +1410,9 @@ fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult) -> Robj
 /// @param residual_rho_pairs The 1-based `(sigma_i, sigma_j)` pair of each
 ///   entry of `residual_rho`, flattened `i1, j1, i2, j2, ...`; matched against
 ///   the model's declared pairs, so the row order does not matter
+/// @param mixture_overrides `fit$mixture_overrides`, a `[mixture]` fit's
+///   fitted per-class Omega/Sigma override values (ferx-core #1765); empty
+///   when the fit carries none
 /// @param n_uncertainty_draws Number of parameter sets to draw from the
 ///   uncertainty distribution
 /// @param n_sim_per_draw Number of eta/eps replicates per parameter draw
@@ -1437,6 +1440,7 @@ fn ferx_rust_simulate_with_uncertainty(
     sir_resamples_dim: i32,
     residual_rho: Vec<f64>,
     residual_rho_pairs: Vec<i32>,
+    mixture_overrides: Vec<f64>,
     fit_bindings: List,
     iov_occasion: &str,
     n_uncertainty_draws: i32,
@@ -1505,6 +1509,7 @@ fn ferx_rust_simulate_with_uncertainty(
                 sir_resamples_dim,
                 &residual_rho,
                 &residual_rho_pairs,
+                &mixture_overrides,
             ) {
                 Ok(f) => f,
                 Err(e) => return Err(e),
@@ -3344,6 +3349,7 @@ fn build_fit_result_for_uncertainty(
     sir_resamples_dim: i32,
     residual_rho: &[f64],
     residual_rho_pairs: &[i32],
+    mixture_overrides: &[f64],
 ) -> std::result::Result<FitResult, String> {
     let template = &model.default_params;
     if theta.len() != template.theta.len() {
@@ -3432,6 +3438,7 @@ fn build_fit_result_for_uncertainty(
         sir_resamples_packed,
         residual_correlations_from_fit(model, residual_rho, residual_rho_pairs)
             .map_err(|e| format!("Uncertainty error: {e}"))?,
+        (!mixture_overrides.is_empty()).then(|| mixture_overrides.to_vec()),
     ))
 }
 
@@ -3448,6 +3455,7 @@ fn default_fit_result(
     covariance_matrix: Option<DMatrix<f64>>,
     sir_resamples_packed: Option<Vec<Vec<f64>>>,
     residual_correlations_resolved: Vec<ResidualCorrelation>,
+    mixture_overrides: Option<Vec<f64>>,
 ) -> FitResult {
     let template = &model.default_params;
     FitResult {
@@ -3572,6 +3580,10 @@ fn default_fit_result(
         // `#[serde(skip)]` upstream, so a reconstructed result legitimately carries `None`
         // and `run_covariance` re-packs from `omega`. No `.fitrx` / R format change.
         packed_estimate: None,
+        // A [mixture] fit's fitted per-class overrides (ferx-core #1765), the
+        // one part of its parameters theta/omega/sigma do not rebuild; without
+        // them `simulate_with_uncertainty` refuses such a fit.
+        mixture_overrides,
         // No outer optimizer ran in this scaffold, so there is no init-escape
         // verdict, and no packed tally to classify: `model_selection::bic()`
         // reports NaN on the default `BicInputs` rather than a wrong penalty
@@ -4707,6 +4719,11 @@ fn fit_result_to_list(
         .clone()
         .map(Robj::from)
         .unwrap_or_else(null);
+    let mixture_overrides = result
+        .mixture_overrides
+        .clone()
+        .map(Robj::from)
+        .unwrap_or_else(null);
 
     // One row per theta level-block level (ferx-r #370), with its fitted value
     // (#430) and its se and SIR interval (#528); zero rows for a model with no
@@ -4888,6 +4905,9 @@ fn fit_result_to_list(
         scoring_settings = scoring_settings,
         sir_settings = sir_settings,
         packed_estimate = packed_estimate,
+        // A [mixture] fit's fitted per-class Omega/Sigma override values, in
+        // the engine's order (ferx-core #1765); NULL for any other fit.
+        mixture_overrides = mixture_overrides,
         uses_sde = result.uses_sde,
         // Whether the fit integrated an `[odes]` system, and whether that system
         // was instead solved exactly by the matrix exponential at the final
@@ -6735,6 +6755,9 @@ struct FitSkeletonInputs<'a> {
     sir_settings: &'a Robj,
     /// `fit$packed_estimate`; empty when the fit carries none.
     packed_estimate: &'a [f64],
+    /// `fit$mixture_overrides`: a `[mixture]` fit's fitted per-class Omega /
+    /// Sigma override values (ferx-core #1765); empty when the fit carries none.
+    mixture_overrides: &'a [f64],
     /// `fit$bloq_method_label` (`"drop"` / `"m3"`); "" when the fit carries
     /// none. Since ferx-core #1824 the post-hoc steps score the method the fit
     /// reports, so it must be the fit's, not a placeholder.
@@ -7900,10 +7923,14 @@ fn fit_skeleton(
         // from the fit's own Cholesky factor instead of re-decomposing `omega`
         // (a machine-epsilon shift the FD Hessian amplifies), and a [mixture]
         // fit's per-class overrides can be read (ferx-r #511). Kept below only
-        // if it unpacks to the estimates this skeleton carries. `.fitrx` has no
-        // key for it (ferx-core#1815), so a loaded fit carries none and the step
-        // re-packs from `omega`.
+        // if it unpacks to the estimates this skeleton carries.
         packed_estimate: (!x.packed_estimate.is_empty()).then(|| x.packed_estimate.to_vec()),
+        // A [mixture] fit's fitted per-class overrides, which the engine reads
+        // ahead of `packed_estimate` (ferx-core #1765): with them an SAEM
+        // mixture fit, which has no packed estimate, and a reloaded one whose
+        // packed estimate went stale still rebuild their class matrices.
+        mixture_overrides: (!x.mixture_overrides.is_empty())
+            .then(|| x.mixture_overrides.to_vec()),
         // No outer optimizer ran in this scaffold, so there is no init-escape
         // verdict, and no packed tally to classify: `model_selection::bic()`
         // reports NaN on the default `BicInputs` rather than a wrong penalty
@@ -8070,6 +8097,9 @@ fn posthoc_step_threads(threads: i32) -> (Option<usize>, i32) {
 /// @param packed_estimate `fit$packed_estimate`, the optimizer's packed
 ///   estimate; empty when the fit carries none. Dropped unless it unpacks to
 ///   the fit's estimates bit for bit.
+/// @param mixture_overrides `fit$mixture_overrides`, a `[mixture]` fit's
+///   fitted per-class Omega/Sigma override values (ferx-core #1765); empty
+///   when the fit carries none.
 /// @param bloq_method `fit$bloq_method_label`, the LOQ method the fit scored
 ///   (`"drop"` / `"m3"`); "" when the fit records none (the model file's).
 /// @param method `fit$method`, the engine label of the method that produced
@@ -8119,6 +8149,7 @@ fn ferx_rust_sir(
     scoring_settings: Robj,
     sir_settings: Robj,
     packed_estimate: Vec<f64>,
+    mixture_overrides: Vec<f64>,
     bloq_method: &str,
     method: &str,
     method_chain: Vec<String>,
@@ -8181,6 +8212,7 @@ fn ferx_rust_sir(
             scoring_settings: &scoring_settings,
             sir_settings: &sir_settings,
             packed_estimate: &packed_estimate,
+            mixture_overrides: &mixture_overrides,
             bloq_method,
             method,
             method_chain: &method_chain,
@@ -8326,6 +8358,9 @@ fn ferx_rust_sir(
 /// @param packed_estimate `fit$packed_estimate`, the optimizer's packed
 ///   estimate; empty when the fit carries none. Dropped unless it unpacks to
 ///   the fit's estimates bit for bit.
+/// @param mixture_overrides `fit$mixture_overrides`, a `[mixture]` fit's
+///   fitted per-class Omega/Sigma override values (ferx-core #1765); empty
+///   when the fit carries none.
 /// @param bloq_method `fit$bloq_method_label`, the LOQ method the fit scored
 ///   (`"drop"` / `"m3"`); "" when the fit records none (the model file's).
 /// @param method `fit$method`, the engine label of the method that produced
@@ -8373,6 +8408,7 @@ fn ferx_rust_covariance(
     scoring_settings: Robj,
     sir_settings: Robj,
     packed_estimate: Vec<f64>,
+    mixture_overrides: Vec<f64>,
     bloq_method: &str,
     method: &str,
     method_chain: Vec<String>,
@@ -8433,6 +8469,7 @@ fn ferx_rust_covariance(
             scoring_settings: &scoring_settings,
             sir_settings: &sir_settings,
             packed_estimate: &packed_estimate,
+            mixture_overrides: &mixture_overrides,
             bloq_method,
             method,
             method_chain: &method_chain,

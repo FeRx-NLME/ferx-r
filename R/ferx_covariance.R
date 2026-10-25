@@ -58,8 +58,10 @@
 #' whose estimates were edited after the fit does not use `packed_estimate`. A
 #' fit with no `scoring_settings` (a bundle saved before they were recorded) is
 #' scored with the engine's defaults, as before. A `[mixture]` fit with
-#' per-class overrides needs `packed_estimate` to read the overrides back, so
-#' the step refuses one loaded from such an older bundle.
+#' per-class overrides reads them from `fit$mixture_overrides` (ferx-core
+#' #1765), else from `packed_estimate`; the step refuses one that carries
+#' neither, such as an SAEM mixture fit loaded from a bundle saved before
+#' either was recorded.
 #'
 #' The record includes the gradient route the fit took
 #' (`fit$scoring_settings$gradient_method`): a fit made with `gradient = "fd"`
@@ -305,6 +307,8 @@ ferx_covariance <- function(fit,
     scoring_settings = record_args$scoring_settings,
     sir_settings = record_args$sir_settings,
     packed_estimate = record_args$packed_estimate,
+    # A [mixture] fit's fitted per-class overrides (ferx-core #1765).
+    mixture_overrides = record_args$mixture_overrides,
     bloq_method = record_args$bloq_method,
     # The fit's method, which the engine scores and routes the covariance
     # step on, and its per-occasion kappa EBEs, which the covariance step

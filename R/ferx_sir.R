@@ -401,6 +401,8 @@ ferx_sir <- function(fit,
     scoring_settings = record_args$scoring_settings,
     sir_settings = record_args$sir_settings,
     packed_estimate = record_args$packed_estimate,
+    # A [mixture] fit's fitted per-class overrides (ferx-core #1765).
+    mixture_overrides = record_args$mixture_overrides,
     bloq_method = record_args$bloq_method,
     # The fit's method, which the engine scores and routes the covariance
     # step on, and its per-occasion kappa EBEs, which the covariance step

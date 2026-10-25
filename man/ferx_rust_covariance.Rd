@@ -28,6 +28,7 @@ ferx_rust_covariance(
   scoring_settings,
   sir_settings,
   packed_estimate,
+  mixture_overrides,
   bloq_method,
   method,
   method_chain,
