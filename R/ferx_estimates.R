@@ -77,8 +77,17 @@
       else
         NA_character_
       if (!isTRUE(nzchar(wt))) wt <- NA_character_
+      # Nested levels (ferx-core #1082, #588): the level the kappa is drawn
+      # at, which print() shows as `K_ST at STUDY`. Its own column, so `param`
+      # stays the bare declared name and still joins; NA on a model without
+      # nested levels, whose `kappa_levels` is NULL.
+      lvl <- if (length(fit$kappa_levels) == n_kap)
+        as.character(fit$kappa_levels[[i]])
+      else
+        NA_character_
+      if (!isTRUE(nzchar(lvl))) lvl <- NA_character_
       rows[[length(rows) + 1L]] <- .ferx_est_row(kap_names[i], m_iov[i, i], se, "variance", init_sd,
-                                                 weight = wt, scale = scale,
+                                                 weight = wt, scale = scale, level = lvl,
                                                  fixed = .ferx_is_fixed(fit$kappa_fixed, i))
       blocks <- c(blocks, "kappa")
     }
@@ -115,7 +124,7 @@
 
 .ferx_est_row <- function(param, estimate, se, transform = "identity", init_as_sd = FALSE,
                           weight = NA_character_, scale = NA_character_,
-                          fixed = FALSE) {
+                          fixed = FALSE, level = NA_character_) {
   # A FIX parameter was not estimated, so it has no standard error: the
   # engine's 0 would read as a perfectly determined estimate, with RSE 0% and
   # a zero-width interval. NA, with `fixed` saying why (#451). The point
@@ -194,5 +203,6 @@
              init_as_sd       = init_as_sd,
              weight           = weight,
              scale            = scale,
+             level            = level,
              stringsAsFactors = FALSE)
 }
