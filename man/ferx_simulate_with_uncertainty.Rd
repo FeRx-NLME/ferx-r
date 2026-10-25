@@ -94,6 +94,14 @@ estimate is not strictly inside (0, 1) has no logit, so the engine refuses
 to draw it. Declare its upper bound below 1 (e.g. \code{0.999}) and refit.
 }
 
+\section{Mixture models}{
+
+A \code{[mixture]} fit with per-class overrides (\code{fit$mixture_overrides})
+is refused with \code{code = "E_MIXTURE_SIMULATION"}: the engine still
+simulates every \code{[mixture]} subject as class 1 (ferx-core #2163), so its
+draws would ignore the classes.
+}
+
 \section{Errors raised by the engine}{
 
 A model or dataset the engine refuses is an R error, never a \code{NULL}
