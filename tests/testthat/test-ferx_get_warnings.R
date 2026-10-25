@@ -969,7 +969,16 @@ test_that("every covariance message ferx-core emits gets non-contradictory guida
                       "their inner start. The EBE guard rejects an unconverged ",
                       "fraction above max_unconverged_frac = 0.1. SE estimates ",
                       "not available."),
-         ok = "inner_maxiter", never = "identifiability")
+         ok = "larger inner_maxiter", never = "identifiability"),
+    list(cat = "covariance_failed",
+         # The same site's start-rejected form: a hard reject no setting
+         # moves, so the fraction form's "raise inner_maxiter" would be false.
+         msg = paste0("Covariance step failed: the profile solve at the estimates ",
+                      "left 0 of 6 subjects' EBEs unconverged and rejected 1 at ",
+                      "their inner start. The EBE guard rejects any subject ",
+                      "rejected at its inner start, whatever max_unconverged_frac ",
+                      "is. SE estimates not available."),
+         ok = "inner_maxiter does not reach it", never = "larger inner_maxiter")
   )
   for (case in cases) {
     # `cat` is the category the engine assigns, not one chosen by hand.
