@@ -1,9 +1,34 @@
-# Parse section header positions and names from a character vector of file
-# lines. Returns a list with $positions (integer indices) and $names (strings).
+# The engine's block-header grammar (ferx-core `extract_blocks`), the one
+# header parser in R: `[type]` or `[type INSTANCE]`, e.g.
+# `[event_model cause_a]` or `[covariate_nn TYPICAL_PK]`. `line` is matched
+# after the engine's own preprocessing - a trailing `#` / `//` comment
+# stripped, surrounding whitespace trimmed - and anchored on the whole line,
+# so `states=[central]` or a `[0.1, 0.2]` row of a block matrix is not a
+# header. Returns NULL for a non-header line, otherwise a list with `type`
+# (lowercased, as the engine keys it) and `instance` (as written - the engine
+# keeps its case - or NA_character_ for an unnamed block).
+.ferx_parse_block_header <- function(line) {
+  stripped <- trimws(sub("(#|//).*$", "", line))
+  m <- regmatches(stripped, regexec("^\\[(\\w+)(?:\\s+(\\w+))?\\]$", stripped,
+                                    perl = TRUE))[[1L]]
+  if (length(m) == 0L) return(NULL)
+  list(type = tolower(m[[2L]]), instance = if (nzchar(m[[3L]])) m[[3L]] else NA_character_)
+}
+
+# Parse section header positions from a character vector of file lines, with
+# `.ferx_parse_block_header()`. Returns a list with $positions (integer
+# indices), $types (lowercased block types), $instances (instance names, NA
+# for an unnamed block) and $names (the display label: `type` or
+# `type instance`), all parallel.
 ferx_section_headers <- function(lines) {
-  pos   <- grep("^\\s*\\[.+\\]\\s*$", lines)
-  names <- gsub("^\\s*\\[|\\]\\s*$", "", lines[pos])
-  list(positions = pos, names = names)
+  parsed    <- lapply(lines, .ferx_parse_block_header)
+  pos       <- which(!vapply(parsed, is.null, logical(1L)))
+  types     <- vapply(parsed[pos], `[[`, character(1L), "type")
+  instances <- vapply(parsed[pos], `[[`, character(1L), "instance")
+  names     <- types
+  named     <- !is.na(instances)
+  names[named] <- paste(types[named], instances[named])
+  list(positions = pos, types = types, instances = instances, names = names)
 }
 
 # Shared validation for ferx_model_get_section()/ferx_model_set_section():
@@ -15,16 +40,51 @@ ferx_section_headers <- function(lines) {
 }
 
 # Locate a named section's header index within already-parsed `hdr`
-# (from ferx_section_headers()). Errors with the available section names
-# when `section` isn't present. Shared by ferx_model_get_section() and
-# ferx_model_set_section() so the "not found" message can't drift between
-# the two.
+# (from ferx_section_headers()). Shared by ferx_model_get_section() and
+# ferx_model_set_section() so the addressing and its errors can't drift
+# between the two (#445).
+#
+# `section` is a block type, optionally followed by an instance name, as in
+# the header without its brackets: `"parameters"`, `"event_model cause_a"`.
+# The type matches case-insensitively and the instance exactly, as the engine
+# reads them. A bare type addresses its block when the file has exactly one
+# of that type, instance-named or not (`"covariate_nn"` in `warfarin_dcm`);
+# when it has several (`[event_model cause_a]` and `[event_model cause_b]`)
+# the call is refused with the instances to choose from, since neither
+# reading nor replacing "every instance" round-trips through one body.
 .ferx_section_index <- function(hdr, section) {
-  idx <- which(hdr$names == section)
-  if (length(idx) == 0L) {
+  if (!is.character(section) || length(section) != 1L || is.na(section)) {
+    stop("'section' must be a single string, e.g. \"parameters\" or ",
+         "\"event_model cause_a\"")
+  }
+  m <- regmatches(section, regexec("^\\s*(\\w+)(?:\\s+(\\w+))?\\s*$", section,
+                                   perl = TRUE))[[1L]]
+  not_found <- function() {
     stop(
       "Section '", section, "' not found. ",
-      "Available sections: ", paste(hdr$names, collapse = ", ")
+      "Available sections: ", paste(hdr$names, collapse = ", "),
+      call. = FALSE
+    )
+  }
+  if (length(m) == 0L) not_found()
+  type     <- tolower(m[[2L]])
+  instance <- m[[3L]]
+
+  idx <- which(hdr$types == type)
+  if (nzchar(instance)) idx <- idx[!is.na(hdr$instances[idx]) & hdr$instances[idx] == instance]
+  if (length(idx) == 0L) not_found()
+  if (length(idx) > 1L) {
+    named <- hdr$instances[idx]
+    if (anyNA(named)) {
+      stop("Section '", section, "' has ", length(idx), " headers in the ",
+           "model file. Remove the duplicate header before addressing it.",
+           call. = FALSE)
+    }
+    stop(
+      "Section '", section, "' is ambiguous: the model declares ",
+      length(idx), " instances (", paste(named, collapse = ", "), "). ",
+      "Address one by name, e.g. section = \"", type, " ", named[[1L]], "\".",
+      call. = FALSE
     )
   }
   idx
@@ -47,14 +107,14 @@ ferx_section_headers <- function(lines) {
   for (line in raw) {
     stripped <- trimws(sub("(#|//).*$", "", line))
     if (!nzchar(stripped)) next
-    # The engine's own header pattern (ferx-core `extract_blocks`): `[type]` or
-    # `[type INSTANCE]`, e.g. `[event_model cause_a]`. A bare `\w+` used to miss
-    # the instance form, so the header and its whole body were appended to the
-    # block before it (#306). Every instance is keyed on its type; whether a
-    # type takes an instance name is the engine's check, not this one.
-    m <- regmatches(stripped, regexec("^\\[(\\w+)(?:\\s+\\w+)?\\]$", stripped, perl = TRUE))[[1L]]
-    if (length(m) > 0L) {
-      current <- tolower(m[[2L]])
+    # The instance form `[type INSTANCE]` must be recognised as a header: a
+    # bare `\w+` used to miss it, so the header and its whole body were
+    # appended to the block before it (#306). Every instance is keyed on its
+    # type; whether a type takes an instance name is the engine's check, not
+    # this one.
+    h <- .ferx_parse_block_header(stripped)
+    if (!is.null(h)) {
+      current <- h$type
       if (is.null(blocks[[current]])) blocks[[current]] <- character(0)
       next
     }
