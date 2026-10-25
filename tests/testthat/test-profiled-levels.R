@@ -252,6 +252,12 @@ test_that("a profiled fit freezes a theta the objective never reads (ferx-core #
   expect_identical(fit$profiled_blocks, "PLACEBO")
   expect_identical(names(fit$theta)[fit$theta_fixed], "TVUNUSED")
   expect_identical(fit$covariance_status, "computed")
+  # With the warning an unprofiled fit gives for the same theta.
+  ws <- fit$warnings_structured
+  flat <- ws[ws$category == "flat_parameter", , drop = FALSE]
+  expect_identical(nrow(flat), 1L)
+  expect_match(flat$message, "`TVUNUSED` has no effect on the objective", fixed = TRUE)
+  expect_match(flat$message, "Freezing it at its initial value", fixed = TRUE)
 })
 
 test_that("a profiled fit's failed covariance step is reported in the covariance class", {
