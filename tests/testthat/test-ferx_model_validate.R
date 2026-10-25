@@ -501,8 +501,8 @@ test_that("ferx_fit() leaves its own argument refusals uncoded (#517)", {
   plain(fit(settings = list(iov_occasion = "weekly")),
         "fit option `iov_occasion`: unknown value `weekly`")
 
-  # Two refusals of the call only the raw glue can reach: a method token R's
-  # own check does not list, and `settings` keys without values (R builds the
+  # Two refusals of the call only the raw glue can reach: a method token the
+  # engine's parser refuses, and `settings` keys without values (R builds the
   # two vectors together). Each record is taken straight after its raise: the
   # next raise overwrites the slot.
   glue_refusal <- function(method, keys, values, pattern) {
@@ -516,7 +516,7 @@ test_that("ferx_fit() leaves its own argument refusals uncoded (#517)", {
     expect_identical(d$code, "", info = pattern)
     expect_identical(charToRaw(d$text %||% ""), charToRaw(raised), info = pattern)
   }
-  glue_refusal("agq", character(), character(), "method = \"agq\" has been removed")
+  glue_refusal("agq", character(), character(), "method = agq has been removed")
   glue_refusal(character(), "maxiter", character(),
                "settings keys/values length mismatch (1 vs 0)")
 

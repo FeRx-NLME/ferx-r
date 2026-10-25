@@ -956,8 +956,9 @@ test_that("ferx_covariance on an SAEM IOV fit is identical to the in-fit step (#
 
 test_that("ferx_covariance on a model-file `method = saem` IOV fit keeps its interaction (#591)", {
   # A method chosen in [fit_options] runs SAEM with the options' interaction
-  # (TRUE), where `method = "saem"` from R runs it with FALSE. R used to read
-  # FALSE for every SAEM fit; fit$interaction now carries the fit's own.
+  # (TRUE). `method = "saem"` from R used to run it with FALSE (it now applies
+  # the method as the file line does, #506), and R used to read FALSE for every
+  # SAEM fit; fit$interaction now carries the fit's own.
   ex <- ferx_example("warfarin_iov")
   txt <- readLines(ex$model)
   out_txt <- sub("method\\s*=\\s*foce[a-z]*", "method = saem", txt)
@@ -973,12 +974,15 @@ test_that("ferx_covariance on a model-file `method = saem` IOV fit keeps its int
 })
 
 test_that("ferx_covariance on a Gauss-Newton IOV fit is identical to the in-fit step (#591)", {
-  # one_cpt_transit_iov, where GN converges (it does not on warfarin_iov).
+  # The identity holds at whatever estimates the fit stopped at, so it does
+  # not wait on convergence: since `method = "gn"` keeps the default
+  # interaction as a model-file `method = gn` does (#506), GN no longer
+  # converges on any bundled IOV example (it did on this one without it).
   ex <- ferx_example("one_cpt_transit_iov")
   fit <- suppressWarnings(ferx_fit(ex$model, ex$data, method = "gn", covariance = TRUE))
-  expect_true(fit$converged)
   skip_if(is.null(fit$cov_matrix), cov_skip)
   expect_identical(fit$method, "FOCE-GN")
+  expect_true(fit$interaction)
   expect_false(is.null(fit$ebe_kappas))
   expect_same_covariance(suppressWarnings(ferx_covariance(fit)), fit, "gn")
 })

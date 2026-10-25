@@ -78,24 +78,69 @@ test_that("an evaluate-only stage that is not last is refused", {
   )
 })
 
-test_that("a model-file `method = vi` runs with `method = NULL`", {
+# The warfarin model with its own `method` line replaced by `method_line`
+# (dropped when NULL) and the VI settings `vi_call_fit()` passes.
+vi_model_file <- function(method_line, extra = character(0L)) {
   ex <- ferx_example("warfarin")
   src <- readLines(ex$model)
   at <- grep("^\\[fit_options\\]", src)
   opts <- src[-seq_len(at)]
   opts <- opts[!grepl("^\\s*(method|covariance)\\s*=", opts)]
   model <- tempfile(fileext = ".ferx")
-  on.exit(unlink(model), add = TRUE)
   writeLines(c(
     src[seq_len(at - 1L)], "[fit_options]", opts,
-    "  method     = vi",
+    if (!is.null(method_line)) paste0("  method     = ", method_line),
     "  vi_iters   = 30",
     "  vi_seed    = 42",
+    extra,
     "  covariance = false"
   ), model)
+  model
+}
+
+test_that("a model-file `method = vi` runs with `method = NULL`", {
+  ex <- ferx_example("warfarin")
+  model <- vi_model_file("vi")
+  on.exit(unlink(model), add = TRUE)
   fit <- suppressWarnings(ferx_fit(model, ex$data, method = NULL, verbose = FALSE))
   expect_identical(fit$method, "VI")
   expect_false(is.null(fit$vi))
+})
+
+test_that("a call-time method fits as the same model-file method line does", {
+  # The call's `method` takes the place of the file's `method =` line, so the
+  # two routes must leave the engine the same options - `interaction` included,
+  # which core sets from the final stage (on for focei, off for foce, the
+  # default otherwise) and which scores CWRES, SIR and the reported objective.
+  # The warfarin model's own `method = foce` must not leak into the call route.
+  ex <- ferx_example("warfarin")
+  cases <- list(
+    list(r = "vi", file = "vi", extra = character(0L)),
+    list(r = c("vi", "laplace"), file = "[vi, laplace]",
+         extra = "  agq_eval_only = true"),
+    list(r = c("vi", "foce"), file = "[vi, foce]", extra = character(0L))
+  )
+  for (cs in cases) {
+    model <- vi_model_file(cs$file, cs$extra)
+    by_file <- suppressWarnings(ferx_fit(model, ex$data, verbose = FALSE))
+    unlink(model)
+    settings <- if (length(cs$extra)) list(agq_eval_only = TRUE) else list()
+    by_call <- vi_call_fit(cs$r, settings)
+    label <- paste(cs$r, collapse = ", ")
+    expect_identical(by_call$interaction, by_file$interaction, info = label)
+    expect_identical(by_call$method_chain, by_file$method_chain, info = label)
+    expect_identical(by_call$ofv, by_file$ofv, info = label)
+  }
+  expect_true(vi_call_fit("vi")$interaction)
+  expect_false(vi_call_fit(c("vi", "foce"))$interaction)
+})
+
+test_that("one `method` element cannot smuggle in a second stage", {
+  ex <- ferx_example("warfarin")
+  expect_error(
+    ferx_fit(ex$model, ex$data, method = "gn_hybrid, saem"),
+    "not one method token|unknown estimation method"
+  )
 })
 
 test_that("the glue keeps no method parser of its own", {
