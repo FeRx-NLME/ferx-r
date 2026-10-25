@@ -609,6 +609,36 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
         "estimates, so no standard errors were produced. ", why
       ))
     }
+    # The re-solve of the levels at the estimates went through the
+    # optimizer's EBE guard and was rejected (ferx-core #2214). The engine
+    # names which trigger fired (profile_resolve_guarded_msg), and the two
+    # need different advice. A subject rejected at its inner start is a hard
+    # reject (a pathological ODE + IOV warm start, a nested-level subject
+    # with no cells, a cancel): no max_unconverged_frac or inner_maxiter
+    # moves it. Otherwise the unconverged fraction passed the limit, which
+    # the inner budget does reach. This solve is not counted in the fit's
+    # EBE-convergence warnings, so the advice points at the message's own
+    # counts.
+    if (grepl("the profile solve at the estimates left", message, fixed = TRUE)) {
+      if (grepl("whatever max_unconverged_frac is", message, fixed = TRUE)) {
+        return(paste0(
+          "Re-solving the profiled theta levels at the estimates rejected a ",
+          "subject at its inner start (its objective at the starting EBEs was ",
+          "unusable), so no standard errors were produced. The guard rejects ",
+          "that whatever max_unconverged_frac is, and inner_maxiter does not ",
+          "reach it. Check the estimates for extreme values and the rejected ",
+          "subject's data, occasions and level assignment."
+        ))
+      }
+      return(paste0(
+        "Re-solving the profiled theta levels at the estimates left more ",
+        "subjects' EBEs unconverged than max_unconverged_frac allows (the ",
+        "message gives the counts and the limit), so the step stopped ",
+        "instead of computing standard errors from them. Re-fit with a ",
+        "larger inner_maxiter, or a larger max_unconverged_frac only if ",
+        "unconverged EBEs for that many subjects are acceptable."
+      ))
+    }
     # A level the data do not inform: its conditional curvature is zero, so
     # no finite-difference step can be sized for it.
     if (grepl("a profiled level has no curvature", message, fixed = TRUE)) {

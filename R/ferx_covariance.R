@@ -114,8 +114,9 @@
 #'   `condition_number`, `max_abs_correlation` (the largest absolute
 #'   off-diagonal parameter correlation, `NA` when the step produced no
 #'   matrix - the value [check_strictness()] gates on), the `se` column of
-#'   `residual_correlations`, and `n_threads_used` (the width this step ran
-#'   on) refreshed.
+#'   `residual_correlations`, `n_threads_used` (the width this step ran
+#'   on) and `covariance_wall_time_secs` (this step's wall-clock time)
+#'   refreshed.
 #'
 #' @examples
 #' \dontrun{
@@ -338,6 +339,10 @@ ferx_covariance <- function(fit,
   # that produced the fit's standard errors (#527).
   if (!is.null(raw$n_threads_used)) {
     fit$n_threads_used <- as.integer(raw$n_threads_used)
+  }
+  # Likewise the time: this step's, not the fit's own covariance step's.
+  if (!is.null(raw$covariance_wall_time_secs)) {
+    fit$covariance_wall_time_secs <- as.numeric(raw$covariance_wall_time_secs)
   }
   # The correlation gate check_strictness() applies is read off the matrix this
   # call just produced, so it is refreshed with it (ferx-core #1177); NaN when

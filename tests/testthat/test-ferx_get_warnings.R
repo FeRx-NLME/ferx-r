@@ -959,7 +959,26 @@ test_that("every covariance message ferx-core emits gets non-contradictory guida
          msg = paste0("Covariance step failed: could not compute eigenvalues of the ",
                       "Hessian of the profile objective (it may contain NaN or Inf). ",
                       "SE estimates not available."),
-         ok = "profiled levels re-solved, is not finite", never = "omega/sigma structure")
+         ok = "profiled levels re-solved, is not finite", never = "omega/sigma structure"),
+    list(cat = "covariance_failed",
+         # The re-solve at the estimates rejected by the EBE guard (ferx-core
+         # #2214, profile_resolve_guarded_msg): about the inner solves, so not
+         # the generic fallback's identifiability advice.
+         msg = paste0("Covariance step failed: the profile solve at the estimates ",
+                      "left 3 of 6 subjects' EBEs unconverged and rejected 0 at ",
+                      "their inner start. The EBE guard rejects an unconverged ",
+                      "fraction above max_unconverged_frac = 0.1. SE estimates ",
+                      "not available."),
+         ok = "larger inner_maxiter", never = "identifiability"),
+    list(cat = "covariance_failed",
+         # The same site's start-rejected form: a hard reject no setting
+         # moves, so the fraction form's "raise inner_maxiter" would be false.
+         msg = paste0("Covariance step failed: the profile solve at the estimates ",
+                      "left 0 of 6 subjects' EBEs unconverged and rejected 1 at ",
+                      "their inner start. The EBE guard rejects any subject ",
+                      "rejected at its inner start, whatever max_unconverged_frac ",
+                      "is. SE estimates not available."),
+         ok = "inner_maxiter does not reach it", never = "larger inner_maxiter")
   )
   for (case in cases) {
     # `cat` is the category the engine assigns, not one chosen by hand.
@@ -1150,7 +1169,9 @@ test_that("no covariance message ferx-core emits is missing from the inventory",
     "a profiled level has no curvature",
     # Also matched by the unprofiled "could not compute eigenvalues" fragment
     # above; listed so the profiled form is accounted for in its own right.
-    "of the Hessian of the profile objective (it may"
+    "of the Hessian of the profile objective (it may",
+    # The re-solve at the estimates rejected by the EBE guard (#2214).
+    "the profile solve at the estimates left"
   )
   accounted <- function(lit) any(vapply(c(exempt, covered),
                                         function(k) grepl(k, lit, fixed = TRUE),
