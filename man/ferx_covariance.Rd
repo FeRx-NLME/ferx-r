@@ -41,8 +41,9 @@ The input \code{fit}, with \code{cov_matrix}, \code{cor_matrix}, \code{se_theta}
 \code{condition_number}, \code{max_abs_correlation} (the largest absolute
 off-diagonal parameter correlation, \code{NA} when the step produced no
 matrix - the value \code{\link[=check_strictness]{check_strictness()}} gates on), the \code{se} column of
-\code{residual_correlations}, and \code{n_threads_used} (the width this step ran
-on) refreshed.
+\code{residual_correlations}, \code{n_threads_used} (the width this step ran
+on) and \code{covariance_wall_time_secs} (this step's wall-clock time)
+refreshed.
 }
 \description{
 Run the standard-error covariance step against a fit that was

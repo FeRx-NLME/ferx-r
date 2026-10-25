@@ -1279,6 +1279,12 @@ IWRES values.}
 subjects. Positive values indicate under-fitting, negative values
 indicate over-fitting. \code{NA} when insufficient observations.}
 \item{wall_time_secs}{Total wall-clock time for the fit in seconds.}
+\item{covariance_wall_time_secs}{Wall-clock seconds spent in the
+covariance step, part of \code{wall_time_secs}; \code{0} when the step
+did not run. On a fit with a \code{profile}d theta level block it
+includes the re-solve of the levels at the estimates, also when that
+re-solve fails the step. \code{\link{ferx_covariance}} replaces it with
+its own step's time.}
 \item{model_name}{Model name declared in the \code{.ferx} file by a
 top-level \code{model <name>} line (outside any \code{[block]}, e.g.
 \code{model warfarin_pk}); the name is a single word. There is no

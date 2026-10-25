@@ -141,6 +141,27 @@ test_that("ferx_covariance() repeats the profiled covariance step, live and relo
   check(quiet(ferx_covariance(back)))
 })
 
+test_that("covariance_wall_time_secs times the profiled covariance step (ferx-core #2214)", {
+  skip_on_cran()
+  # The step's time includes the re-solve of the levels at the estimates
+  # since ferx-core #2214. The re-solve cannot be timed apart from R, so this
+  # checks the field is the step's, live, replayed and reloaded.
+  p <- fits()$profiled
+  expect_true(is.numeric(p$covariance_wall_time_secs))
+  expect_gt(p$covariance_wall_time_secs, 0)
+  expect_lt(p$covariance_wall_time_secs, p$wall_time_secs)
+  # No step, no time; ferx_covariance() then reports its own step's.
+  m <- mbma_profiled_model()
+  none <- quiet(ferx_fit(m$model, m$data, verbose = FALSE, covariance = FALSE))
+  expect_identical(none$covariance_wall_time_secs, 0)
+  expect_gt(quiet(ferx_covariance(none))$covariance_wall_time_secs, 0)
+
+  path <- withr::local_tempfile(fileext = ".fitrx")
+  quiet(ferx_save_fit(p, path))
+  expect_identical(quiet(ferx_load_fit(path))$covariance_wall_time_secs,
+                   p$covariance_wall_time_secs)
+})
+
 test_that("ferx_covariance() refuses s / rsr on a profiled fit with E_PROFILE_SCOPE (#597)", {
   skip_on_cran()
   # The profiled step computes `r` only (ferx-core #2108). The engine's replay

@@ -126,6 +126,75 @@ test_that("ferx_covariance() repeats the car1 + kappa fit's SEs, live and reload
   expect_identical(cov_parts(quiet(ferx_covariance(back))), cov_parts(fit))
 })
 
+# The car1 + kappa model with its PLACEBO block profiled (ferx-core #2110,
+# #2390). Until that the pair was refused with E_PROFILE_SCOPE ("a
+# `correlation` line is not yet supported together with `profile`", measured
+# at d66c0c51). The oracle is the unprofiled fit above, which has the same
+# objective: measured on macOS at 81468734, the profiled OFV is 8.8e-10 below
+# it, the structural thetas within 1.3e-6 relative, RHO within 1e-6, the
+# levels within 1.2e-5 of their SE, the structural SEs within 0.45%, the level
+# SEs within 0.15% and the kappa/omega SEs within 6.1e-5. The bands are the
+# ones test-profiled-levels.R takes from ferx-core #2130.
+mbma_car1_profiled_fit <- local({
+  fit <- NULL
+  function() {
+    if (is.null(fit)) {
+      m <- mbma_with_line("correlation car1(RHO) by OCC", car1_rho("0.6"))
+      txt <- readLines(m$model)
+      at <- grep("^  theta PLACEBO\\[", txt)
+      stopifnot(length(at) == 1L, grepl("(0.0, -50.0, 50.0)", txt[at], fixed = TRUE))
+      # A profiled block is solved without constraints, so the bounds go.
+      txt[at] <- paste(sub("(0.0, -50.0, 50.0)", "(0.0)", txt[at], fixed = TRUE),
+                       "profile")
+      writeLines(txt, m$model)
+      fit <<- quiet(ferx_fit(m$model, m$data, verbose = FALSE))
+    }
+    fit
+  }
+})
+
+test_that("car1 by OCC fits with a profiled PLACEBO block, to the unprofiled optimum", {
+  skip_on_cran()
+  p <- mbma_car1_profiled_fit()
+  b <- mbma_car1_fit()
+  # An engine that ignored `profile` would fit the same numbers.
+  expect_identical(p$profiled_blocks, "PLACEBO")
+  expect_true(all(p$theta_levels$profiled))
+  expect_true(p$converged)
+  expect_identical(p$covariance_status, "computed")
+
+  expect_lt(abs(p$ofv - b$ofv), 1e-5)
+  expect_lt(abs(p$ofv - 89.451278), 1e-4)
+  expect_lt(abs(p$theta[["RHO"]] - b$theta[["RHO"]]), 1e-3)
+  structural <- c("TVE0", "EMAX", "ED50", "ET50", "RHO")
+  rel <- function(a, b) max(abs(a - b) / abs(b))
+  expect_lt(rel(p$theta[structural], b$theta[structural]), 1e-3)
+  expect_lt(rel(p$se_theta[structural], b$se_theta[structural]), 2e-2)
+  expect_lt(rel(unlist(p$se_kappa), unlist(b$se_kappa)), 2e-2)
+  pl <- p$theta_levels
+  bl <- b$theta_levels
+  expect_identical(pl$theta_name, bl$theta_name)
+  expect_lt(max(abs(pl$value - bl$value) / bl$se), 1e-3)
+  expect_lt(rel(pl$se, bl$se), 2e-2)
+})
+
+test_that("ferx_covariance() repeats the profiled car1 fit's SEs, live and reloaded", {
+  skip_on_cran()
+  p <- mbma_car1_profiled_fit()
+  check <- function(cv) {
+    expect_identical(cov_parts(cv), cov_parts(p))
+    expect_identical(cv$theta_levels$se, p$theta_levels$se)
+  }
+  check(quiet(ferx_covariance(p)))
+
+  path <- withr::local_tempfile(fileext = ".fitrx")
+  quiet(ferx_save_fit(p, path))
+  back <- quiet(ferx_load_fit(path))
+  expect_identical(back$profiled_blocks, "PLACEBO")
+  expect_identical(back$theta, p$theta)
+  check(quiet(ferx_covariance(back)))
+})
+
 test_that("cs over the kappa's own occasions is refused as confounded", {
   skip_on_cran()
   m <- mbma_with_line("correlation cs(RHO) by OCC")

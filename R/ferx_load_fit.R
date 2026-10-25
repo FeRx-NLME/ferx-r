@@ -331,6 +331,9 @@ ferx_load_fit <- function(path) {
     n_iterations = as.integer(w$n_iterations),
     interaction = isTRUE(w$interaction),
     wall_time_secs = as.numeric(w$wall_time_secs),
+    # Absent on a bundle ferx_save_fit() wrote before it carried the key;
+    # read as ferx-core's loader reads it.
+    covariance_wall_time_secs = as.numeric(w$covariance_wall_time_secs %||% 0),
     n_threads_used = as.integer(w$n_threads_used %||% NA_integer_),
     uses_ode_solver = isTRUE(w$uses_ode_solver),
     # ferx-core #2021. Absent on a bundle written before the exact linear

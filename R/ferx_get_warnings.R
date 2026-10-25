@@ -609,6 +609,21 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
         "estimates, so no standard errors were produced. ", why
       ))
     }
+    # The re-solve of the levels at the estimates went through the
+    # optimizer's EBE guard and was rejected (ferx-core #2214): too many
+    # subjects' inner solves unconverged, or one rejected at its inner start.
+    # The generic fallback would blame identifiability, which nothing tested.
+    if (grepl("the profile solve at the estimates left", message, fixed = TRUE)) {
+      return(paste0(
+        "Re-solving the profiled theta levels at the estimates left subjects' ",
+        "EBEs unconverged (or rejected at their inner start), so the step ",
+        "stopped instead of computing standard errors from them. The message ",
+        "gives the counts and the max_unconverged_frac limit the fit ran with. ",
+        "Check the subjects in the EBE-convergence warnings; re-fit with a ",
+        "larger inner_maxiter, or a larger max_unconverged_frac only if those ",
+        "subjects' EBEs are acceptable."
+      ))
+    }
     # A level the data do not inform: its conditional curvature is zero, so
     # no finite-difference step can be sized for it.
     if (grepl("a profiled level has no curvature", message, fixed = TRUE)) {

@@ -533,6 +533,8 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
     n_iterations = as.integer(fit$n_iterations),
     interaction = isTRUE(fit$interaction),
     wall_time_secs = as.numeric(fit$wall_time_secs %||% NA_real_),
+    # ferx-core's own key; its loader reads a missing one as 0.
+    covariance_wall_time_secs = as.numeric(fit$covariance_wall_time_secs %||% 0),
     n_threads_used = as.integer(fit$n_threads_used %||% NA_integer_),
     uses_ode_solver = isTRUE(fit$uses_ode_solver),
     ode_linear_exact = isTRUE(fit$ode_linear_exact),

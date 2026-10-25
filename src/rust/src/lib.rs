@@ -4826,6 +4826,9 @@ fn fit_result_to_list(
         shrinkage_eta = result.shrinkage_eta.clone(),
         shrinkage_eps = result.shrinkage_eps,
         wall_time_secs = result.wall_time_secs,
+        // The covariance step's own share of it; a profiled fit's includes the
+        // re-solve of its levels at the estimates (ferx-core #2214).
+        covariance_wall_time_secs = result.covariance_wall_time_secs,
         model_name = declared_model_name(&result.model_name).to_string(),
         ferx_version = result.ferx_version.clone(),
         cov_matrix = cov_matrix_flat,
@@ -8537,6 +8540,7 @@ fn ferx_rust_covariance(
             se_sigma = new_fit.se_sigma.clone().unwrap_or_default(),
             se_kappa = new_fit.se_kappa.clone().unwrap_or_default(),
             covariance_status = covariance_status_str,
+            covariance_wall_time_secs = new_fit.covariance_wall_time_secs,
             cov_eigenvalues = new_fit.cov_eigenvalues.clone().unwrap_or_default(),
             cov_condition_number = new_fit.cov_condition_number.unwrap_or(f64::NAN),
             // Refreshed alongside the matrix it is read off, so a fit that gains a
