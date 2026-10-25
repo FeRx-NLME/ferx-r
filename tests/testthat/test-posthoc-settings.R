@@ -496,6 +496,14 @@ test_that("S9: a [mixture] per-class override fit is scored in memory and after 
   cov <- ferx_covariance(loaded)
   expect_identical(cov$cov_matrix, fit$cov_matrix)
   expect_identical(cov$se_theta, fit$se_theta)
+
+  # The engine reads the overrides R wrote, not only R itself: its loader
+  # takes `mixture_overrides` as a sequence, which a one-override fit writes as
+  # a length-1 vector unless the key is kept an array (#379). Re-saved by the
+  # engine and read back, they are the fit's bit for bit.
+  trip <- fitrx_engine_trip(fit)
+  expect_identical(ferx_load_fit(trip$core_path)$mixture_overrides,
+                   fit$mixture_overrides)
 })
 
 test_that("S9b: an SAEM [mixture] override fit is scored in memory and after a reload", {
