@@ -54,14 +54,15 @@
 #' in-fit step does.
 #'
 #' The step's own settings are the fit's too: `fd_hessian_step`,
-#' `analytic_cov_hessian` and `cov_inner_tol`, as the fit was given them
-#' (`ferx_fit()`'s argument or `settings`, recorded in `fit$call_settings`,
-#' ahead of the model file's `[fit_options]`, recorded in
-#' `fit$model_file_settings`). The engine does not record them, so a fit made
-#' with `fd_hessian_step = 0.1` used to be replayed at the default step, and a
-#' profiled fit made with `fd_hessian_step = 0.01` at the profiled default
-#' `3e-3` (ferx-core #2414). A fit that sets none of them, or a bundle written
-#' by ferx-core rather than [ferx_save_fit()], gets the engine defaults.
+#' `analytic_cov_hessian` and `cov_inner_tol`, as the fit was given them -
+#' the model file's `[fit_options]`, overridden by `ferx_fit()`'s argument or
+#' `settings` (recorded in `fit$call_settings`). The engine does not record
+#' them, so a fit made with `fd_hessian_step = 0.1` used to be replayed at the
+#' default step, and a profiled fit made with `fd_hessian_step = 0.01` at the
+#' profiled default `3e-3` (ferx-core #2414). The model file's values are read
+#' from the model file itself, so a bundle written by ferx-core, which carries
+#' no `fit$call_settings`, keeps them; only call-time overrides need the R
+#' record.
 #'
 #' A fit loaded with [ferx_load_fit()] keeps both, so its result is
 #' `identical()` to the in-fit one too. A fit loaded from a bundle saved before
@@ -503,21 +504,19 @@ ferx_covariance <- function(fit,
   fit
 }
 
-# The covariance step's own settings the fit ran with, as the parallel
-# key / value strings `ferx_rust_covariance()` applies through ferx-core's
-# `apply_fit_option`: the value the fit was called with (`fit$call_settings`)
-# ahead of the model file's (`fit$model_file_settings`), which is the
-# precedence ferx_fit() gave them. ferx-core's `run_covariance` takes these
-# from its caller and does not record them, so they come from here or not at
-# all. Not `covariance_method`: that is ferx_covariance()'s own argument.
+# The covariance step's own settings the fit's call gave it
+# (`fit$call_settings`), as the parallel key / value strings
+# `ferx_rust_covariance()` applies through ferx-core's `apply_fit_option` over
+# the model file's `[fit_options]` values, which the glue reads from the
+# hash-checked model file itself: the precedence ferx_fit() gave them.
+# ferx-core's `run_covariance` takes these from its caller and does not record
+# them. Not `covariance_method`: that is ferx_covariance()'s own argument.
 .ferx_fit_cov_step_settings <- function(fit) {
   call_s <- fit$call_settings %||% list()
-  file_s <- fit$model_file_settings %||% list()
   picked <- list()
   for (k in c("fd_hessian_step", "analytic_cov_hessian", "cov_inner_tol")) {
-    given <- function(v) length(v) == 1L && !is.na(v)
-    v <- if (given(call_s[[k]])) call_s[[k]] else file_s[[k]]
-    if (given(v)) picked[[k]] <- v
+    v <- call_s[[k]]
+    if (length(v) == 1L && !is.na(v)) picked[[k]] <- v
   }
   .ferx_settings_to_strings(picked)
 }

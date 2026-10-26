@@ -8464,13 +8464,13 @@ fn ferx_rust_sir(
 ///   for a fit without the field (ferx-r #613).
 /// @param covariance_method Covariance estimator: "r"/"hessian", "s"/"cross_product", or "rsr"/"sandwich".
 /// @param step_settings_keys,step_settings_values The covariance step's own
-///   settings the fit ran its step with, as `settings` key / value strings:
+///   settings the fit's call gave it, as `settings` key / value strings:
 ///   only `fd_hessian_step`, `analytic_cov_hessian` and `cov_inner_tol`.
-///   `run_covariance` takes these from its caller, not from the fit, so
-///   without them the replay steps at the engine defaults whatever the fit used.
-///   Applied through ferx-core's `apply_fit_option`, which parses them as
-///   `ferx_fit()` and `[fit_options]` do and raises `fd_hessian_step_set`
-///   (ferx-core #2414).
+///   `run_covariance` takes these from its caller, not from the fit, so the
+///   replay starts from the model file's `[fit_options]` values and applies
+///   these over them, as the fit did. Applied through ferx-core's
+///   `apply_fit_option`, which parses them as `ferx_fit()` does and raises
+///   `fd_hessian_step_set` (ferx-core #2414).
 /// @param threads Worker threads the step runs on: `0` the engine default,
 ///   `n > 0` pinned. `ferx_covariance()` passes the fit's `n_threads_used`
 ///   unless told otherwise (ferx-r #527).
@@ -8589,6 +8589,15 @@ fn ferx_rust_covariance(
         opts.covariance_method = covariance_method_enum;
         opts.interaction = interaction;
         opts.verbose = verbose;
+        // The step's own settings, which `run_covariance` takes from its caller:
+        // first the model file's `[fit_options]` (the hash-checked file the fit
+        // read, so a bundle ferx-core wrote gets them too), then the call's
+        // overrides, the precedence `ferx_rust_fit` gives them.
+        let file = &parsed.fit_options;
+        opts.fd_hessian_step = file.fd_hessian_step;
+        opts.fd_hessian_step_set = file.fd_hessian_step_set;
+        opts.analytic_cov_hessian = file.analytic_cov_hessian;
+        opts.cov_inner_tol = file.cov_inner_tol;
         apply_covariance_step_settings(&mut opts, &step_settings_keys, &step_settings_values)?;
         let (step_threads, n_threads_used) = posthoc_step_threads(threads);
         opts.threads = step_threads;

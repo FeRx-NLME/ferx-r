@@ -100,14 +100,15 @@ floor is replaced by S^-1 (warning \code{W_COV_NON_STATIONARY_ESTIMATE}), as the
 in-fit step does.
 
 The step's own settings are the fit's too: \code{fd_hessian_step},
-\code{analytic_cov_hessian} and \code{cov_inner_tol}, as the fit was given them
-(\code{ferx_fit()}'s argument or \code{settings}, recorded in \code{fit$call_settings},
-ahead of the model file's \verb{[fit_options]}, recorded in
-\code{fit$model_file_settings}). The engine does not record them, so a fit made
-with \code{fd_hessian_step = 0.1} used to be replayed at the default step, and a
-profiled fit made with \code{fd_hessian_step = 0.01} at the profiled default
-\code{3e-3} (ferx-core #2414). A fit that sets none of them, or a bundle written
-by ferx-core rather than \code{\link[=ferx_save_fit]{ferx_save_fit()}}, gets the engine defaults.
+\code{analytic_cov_hessian} and \code{cov_inner_tol}, as the fit was given them -
+the model file's \verb{[fit_options]}, overridden by \code{ferx_fit()}'s argument or
+\code{settings} (recorded in \code{fit$call_settings}). The engine does not record
+them, so a fit made with \code{fd_hessian_step = 0.1} used to be replayed at the
+default step, and a profiled fit made with \code{fd_hessian_step = 0.01} at the
+profiled default \code{3e-3} (ferx-core #2414). The model file's values are read
+from the model file itself, so a bundle written by ferx-core, which carries
+no \code{fit$call_settings}, keeps them; only call-time overrides need the R
+record.
 
 A fit loaded with \code{\link[=ferx_load_fit]{ferx_load_fit()}} keeps both, so its result is
 \code{identical()} to the in-fit one too. A fit loaded from a bundle saved before

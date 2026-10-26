@@ -238,24 +238,35 @@ test_that("ferx_covariance replays the fit's own covariance-step settings", {
   # The settings are the replay's, not a coincidence of defaults: the call's
   # step differs from the default and from the file's.
   expect_false(isTRUE(all.equal(se(fits$call), se(fits$file))))
+  # The model file's values come from the model file, not from R's record of
+  # it: a fit without `call_settings` / `model_file_settings` (a bundle
+  # ferx-core wrote) replays the file's step too.
+  bare <- fits$file
+  bare$call_settings <- list()
+  bare$model_file_settings <- list()
+  expect_identical(se(q(ferx_covariance(bare))), se(fits$file))
+  # ... and the call's override of it is R's to hand back: without the record
+  # the call fit replays at the model file's (here: the defaults) and moves.
+  bare <- fits$call
+  bare$call_settings <- list()
+  expect_false(isTRUE(all.equal(se(q(ferx_covariance(bare))), se(fits$call))))
 })
 
-test_that("the replayed covariance-step settings take the call ahead of the model file", {
+test_that("the replayed covariance-step overrides are the call's step keys only", {
   pick <- ferx:::.ferx_fit_cov_step_settings
   none <- list(keys = character(0), values = character(0))
   expect_identical(pick(list()), none)
   expect_identical(pick(list(call_settings = list(maxiter = 10L))), none)
+  # The model file's values are the glue's to read from the file; R's copy of
+  # them is not sent, and `NA` in the call is no value.
   got <- pick(list(
     call_settings = list(fd_hessian_step = 0.1, cov_inner_tol = NA, maxiter = 5),
-    model_file_settings = list(fd_hessian_step = "0.05", analytic_cov_hessian = "false",
-                               cov_inner_tol = "1e-7")
+    model_file_settings = list(analytic_cov_hessian = "false", cov_inner_tol = "1e-7")
   ))
-  # `cov_inner_tol = NA` in the call is no value, so the file's stands.
-  expect_identical(got$keys, c("fd_hessian_step", "analytic_cov_hessian", "cov_inner_tol"))
+  expect_identical(got$keys, "fd_hessian_step")
   # Numbers are written as ferx_fit() writes them for the engine, so the
   # replay parses the very value the fit did.
-  expect_identical(got$values, c(format(0.1, scientific = FALSE, trim = TRUE, digits = 17),
-                                 "false", "1e-7"))
+  expect_identical(got$values, format(0.1, scientific = FALSE, trim = TRUE, digits = 17))
   expect_identical(pick(list(call_settings = list(analytic_cov_hessian = FALSE)))$values,
                    "false")
 })
