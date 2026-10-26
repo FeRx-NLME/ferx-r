@@ -421,24 +421,23 @@ test_that("a held level the fit does not have is refused, not dropped", {
 # ~1e-5 against -0.0014 at 1e-2, measured at 32dbb309): the step reports
 # standard errors, flagged only by a TVE0 ~ TVSHIFT correlation of -1.00 and
 # a condition number of 1.6e5. The same model failed at either step before.
-# ferx_covariance() steps at the engine default whatever the fit used (an
-# explicit fd_hessian_step, in the call or in [fit_options], is not replayed),
-# so its replay of this fit computes; the replay test below uses a failure no
-# step size moves.
+# ferx_covariance() replays the fit's step, so its replays fail too.
 confounded_theta_fit <- local({
-  out <- NULL
-  function() {
-    if (is.null(out)) {
+  out <- list()
+  function(covariance = TRUE) {
+    key <- as.character(covariance)
+    if (is.null(out[[key]])) {
       m <- mbma_profiled_model()
       txt <- readLines(m$model)
       txt <- append(txt, "  theta TVSHIFT(1.0, -100.0, 100.0)",
                     after = grep("^  theta PLACEBO\\[", txt))
       txt <- sub("BASE = TVE0 +", "BASE = TVE0 + TVSHIFT +", txt, fixed = TRUE)
       writeLines(txt, m$model)
-      out <<- quiet(ferx_fit(m$model, m$data, verbose = FALSE,
-                             fd_hessian_step = 0.01))
+      out[[key]] <<- quiet(ferx_fit(m$model, m$data, verbose = FALSE,
+                                    covariance = covariance,
+                                    fd_hessian_step = 0.01))
     }
-    out
+    out[[key]]
   }
 })
 
@@ -473,29 +472,21 @@ test_that("a profiled fit's failed covariance step is reported in the covariance
   expect_identical(fit$profiled_blocks, "PLACEBO")
   expect_identical(fit$covariance_status, "failed")
 
-  ws <- fit$warnings_structured
-  cov <- grepl("^Covariance step failed", ws$message)
-  expect_identical(ws$category[cov], "covariance_failed")
-  expect_match(ws$message[cov], "Hessian of the profile objective", fixed = TRUE)
-  g <- ferx:::.ferx_warning_guidance(ws$category[cov], message = ws$message[cov])
-  expect_match(g, "confounded with the level effects", fixed = TRUE)
-})
-
-# mbma_placebo profiled, with the `s` step: six subjects make S singular, so
-# the step fails at any fd_hessian_step (it differences nothing) and its
-# replay fails the same way.
-cross_product_failed_fit <- local({
-  out <- list()
-  function(covariance = TRUE) {
-    key <- as.character(covariance)
-    if (is.null(out[[key]])) {
-      m <- mbma_profiled_model()
-      out[[key]] <<- quiet(ferx_fit(m$model, m$data, verbose = FALSE,
-                                    covariance = covariance,
-                                    settings = list(covariance_method = "s")))
+  # `categories` is exact, one per matching row in table order. The replay's
+  # row is classified by the engine like the fit's own (#611), so it is the
+  # same row and ferx_covariance() leaves one.
+  check <- function(ws, categories) {
+    cov <- grepl("^Covariance step failed", ws$message)
+    expect_identical(ws$category[cov], categories)
+    for (i in which(cov)) {
+      expect_match(ws$message[i], "Hessian of the profile objective", fixed = TRUE)
+      g <- ferx:::.ferx_warning_guidance(ws$category[i], message = ws$message[i])
+      expect_match(g, "confounded with the level effects", fixed = TRUE)
     }
-    out[[key]]
   }
+  check(fit$warnings_structured, "covariance_failed")
+  check(ferx_get_warnings(quiet(ferx_covariance(fit)), as_df = TRUE),
+        "covariance_failed")
 })
 
 test_that("a replayed covariance warning keeps the in-fit row's class and severity (#611)", {
@@ -506,24 +497,20 @@ test_that("a replayed covariance warning keeps the in-fit row's class and severi
   # never ran printed the replay's failure as a plain warning, missing from the
   # STATUS line.
   cols <- c("severity", "category", "message", "source_method")
-  in_fit <- cross_product_failed_fit()$warnings_structured
+  in_fit <- confounded_theta_fit()$warnings_structured
   in_fit <- in_fit[grepl("^Covariance step failed", in_fit$message), cols]
   expect_identical(nrow(in_fit), 1L)
   expect_identical(in_fit$severity, "critical")
-  expect_identical(in_fit$category, "covariance_failed")
-  expect_match(in_fit$message, "score cross-product matrix S", fixed = TRUE)
 
   # Replayed on top of the failed in-fit step: one row, the fit's.
-  ws <- quiet(ferx_covariance(cross_product_failed_fit(),
-                              covariance_method = "s"))$warnings_structured
+  ws <- quiet(ferx_covariance(confounded_theta_fit()))$warnings_structured
   rows <- ws[grepl("^Covariance step failed", ws$message), cols]
   rownames(rows) <- rownames(in_fit) <- NULL
   expect_identical(rows, in_fit)
 
   # Replayed on a fit whose step never ran: the replay's row alone, classed as
   # the fit's would have been, and it reaches the STATUS line.
-  recov <- quiet(ferx_covariance(cross_product_failed_fit(covariance = FALSE),
-                                 covariance_method = "s"))
+  recov <- quiet(ferx_covariance(confounded_theta_fit(covariance = FALSE)))
   ws <- recov$warnings_structured
   rows <- ws[grepl("^Covariance step failed", ws$message), cols]
   rownames(rows) <- NULL

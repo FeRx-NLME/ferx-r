@@ -53,6 +53,16 @@
 #' floor is replaced by S^-1 (warning `W_COV_NON_STATIONARY_ESTIMATE`), as the
 #' in-fit step does.
 #'
+#' The step's own settings are the fit's too: `fd_hessian_step`,
+#' `analytic_cov_hessian` and `cov_inner_tol`, as the fit was given them
+#' (`ferx_fit()`'s argument or `settings`, recorded in `fit$call_settings`,
+#' ahead of the model file's `[fit_options]`, recorded in
+#' `fit$model_file_settings`). The engine does not record them, so a fit made
+#' with `fd_hessian_step = 0.1` used to be replayed at the default step, and a
+#' profiled fit made with `fd_hessian_step = 0.01` at the profiled default
+#' `3e-3` (ferx-core #2414). A fit that sets none of them, or a bundle written
+#' by ferx-core rather than [ferx_save_fit()], gets the engine defaults.
+#'
 #' A fit loaded with [ferx_load_fit()] keeps both, so its result is
 #' `identical()` to the in-fit one too. A fit loaded from a bundle saved before
 #' `packed_estimate` was recorded differs from the in-fit one in the last
@@ -173,6 +183,7 @@ ferx_covariance <- function(fit,
   # Before the model-file checks, so a loaded fit without a layout is refused
   # for that reason even when its bundle had no model file (#531).
   .ferx_refuse_unavailable_levels(fit)
+  step_args <- .ferx_fit_cov_step_settings(fit)
 
   model_path <- fit$model_path
   if (is.null(model_path) || is.na(model_path) || !nzchar(model_path)) {
@@ -325,6 +336,10 @@ ferx_covariance <- function(fit,
     # The thetas the fit held, the engine's auto-frozen ones included (#613).
     theta_fixed = .ferx_fit_theta_fixed(fit),
     covariance_method = cov_method,
+    # The step's own settings, which the engine takes from its caller, not
+    # from the fit: without them the replay steps at the engine defaults.
+    step_settings_keys = step_args$keys,
+    step_settings_values = step_args$values,
     threads = threads_arg,
     verbose = isTRUE(verbose),
     fit_bindings = binding_args$fit_bindings
@@ -486,4 +501,23 @@ ferx_covariance <- function(fit,
   )
 
   fit
+}
+
+# The covariance step's own settings the fit ran with, as the parallel
+# key / value strings `ferx_rust_covariance()` applies through ferx-core's
+# `apply_fit_option`: the value the fit was called with (`fit$call_settings`)
+# ahead of the model file's (`fit$model_file_settings`), which is the
+# precedence ferx_fit() gave them. ferx-core's `run_covariance` takes these
+# from its caller and does not record them, so they come from here or not at
+# all. Not `covariance_method`: that is ferx_covariance()'s own argument.
+.ferx_fit_cov_step_settings <- function(fit) {
+  call_s <- fit$call_settings %||% list()
+  file_s <- fit$model_file_settings %||% list()
+  picked <- list()
+  for (k in c("fd_hessian_step", "analytic_cov_hessian", "cov_inner_tol")) {
+    given <- function(v) length(v) == 1L && !is.na(v)
+    v <- if (given(call_s[[k]])) call_s[[k]] else file_s[[k]]
+    if (given(v)) picked[[k]] <- v
+  }
+  .ferx_settings_to_strings(picked)
 }

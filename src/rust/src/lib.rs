@@ -2741,6 +2741,37 @@ fn profiled_blocks_from_r(r: &List) -> std::result::Result<Vec<String>, String> 
     }
 }
 
+/// The keys `ferx_covariance()` replays from the fit: the covariance step's
+/// own settings, which `run_covariance` takes from its caller.
+const COVARIANCE_STEP_KEYS: [&str; 3] = ["fd_hessian_step", "analytic_cov_hessian", "cov_inner_tol"];
+
+/// Apply the fit's covariance-step settings to the replay's options, through
+/// the parser `ferx_fit()` uses, so a value is read exactly as the fit read it.
+fn apply_covariance_step_settings(
+    opts: &mut FitOptions,
+    keys: &[String],
+    values: &[String],
+) -> std::result::Result<(), String> {
+    if keys.len() != values.len() {
+        return Err(format!(
+            "internal: {} covariance step setting keys but {} values",
+            keys.len(),
+            values.len()
+        ));
+    }
+    for (k, v) in keys.iter().zip(values) {
+        if !COVARIANCE_STEP_KEYS.contains(&k.as_str()) {
+            return Err(format!("internal: `{k}` is not a covariance step setting"));
+        }
+        match ferx_core::parser::model_parser::apply_fit_option(opts, k, v) {
+            Ok(true) => {}
+            Ok(false) => return Err(format!("internal: the engine does not know `{k}`")),
+            Err(e) => return Err(format!("ferx_covariance: the fit's `{k}`: {e}")),
+        }
+    }
+    Ok(())
+}
+
 /// The fit's `profiled_levels_at_bound` (ferx-core #2112) from the `fit_bindings`
 /// list, as the engine's θ indices: R carries the held levels by name. Empty
 /// when the entry is absent; a name that is not one of the fit's θ is refused
@@ -8432,6 +8463,14 @@ fn ferx_rust_sir(
 ///   the engine froze for having no effect on the objective included; empty
 ///   for a fit without the field (ferx-r #613).
 /// @param covariance_method Covariance estimator: "r"/"hessian", "s"/"cross_product", or "rsr"/"sandwich".
+/// @param step_settings_keys,step_settings_values The covariance step's own
+///   settings the fit ran its step with, as `settings` key / value strings:
+///   only `fd_hessian_step`, `analytic_cov_hessian` and `cov_inner_tol`.
+///   `run_covariance` takes these from its caller, not from the fit, so
+///   without them the replay steps at the engine defaults whatever the fit used.
+///   Applied through ferx-core's `apply_fit_option`, which parses them as
+///   `ferx_fit()` and `[fit_options]` do and raises `fd_hessian_step_set`
+///   (ferx-core #2414).
 /// @param threads Worker threads the step runs on: `0` the engine default,
 ///   `n > 0` pinned. `ferx_covariance()` passes the fit's `n_threads_used`
 ///   unless told otherwise (ferx-r #527).
@@ -8475,6 +8514,8 @@ fn ferx_rust_covariance(
     ebe_kappa_ids: Vec<String>,
     theta_fixed: Logicals,
     covariance_method: &str,
+    step_settings_keys: Vec<String>,
+    step_settings_values: Vec<String>,
     threads: i32,
     verbose: bool,
     fit_bindings: List,
@@ -8548,6 +8589,7 @@ fn ferx_rust_covariance(
         opts.covariance_method = covariance_method_enum;
         opts.interaction = interaction;
         opts.verbose = verbose;
+        apply_covariance_step_settings(&mut opts, &step_settings_keys, &step_settings_values)?;
         let (step_threads, n_threads_used) = posthoc_step_threads(threads);
         opts.threads = step_threads;
 
