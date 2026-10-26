@@ -268,7 +268,12 @@ where bad starting values can stall the optimizer. See
 \code{\link{ferx_inits_from_nca}} to inspect the values without fitting.}
 
 \item{fd_hessian_step}{Positive finite numeric. Relative step size for the
-finite-difference Hessian used in the covariance step (default \code{0.01}).
+finite-difference Hessian used in the covariance step. \code{NULL} (the
+default) leaves it to the engine: \code{0.01}, or \code{3e-3} for the
+structural stencil of a fit with a \code{profile}d theta level block,
+whose profile objective's finite-difference Hessian needs the smaller
+step (ferx-core #2414). A value passed here is used as written, on a
+profiled fit too, \code{0.01} included.
 The actual perturbation for parameter \emph{i} is
 \code{fd_hessian_step * (1 + |x_hat[i]|)}.
 Increase (e.g. \code{0.1}) when the fit warns about ill-conditioned Hessian
@@ -1068,10 +1073,21 @@ levels are solved exactly inside the FOCE / FOCEI objective at every
 outer evaluation, so the optimizer searches only the structural
 parameters; the OFV, the levels and their standard errors are those of
 the unprofiled fit, and the structural standard errors account for the
-levels. \code{\link{ferx_covariance}} repeats the profiled covariance
-step with \code{covariance_method = "r"}, the only method it has, and
-refuses \code{"s"} or \code{"rsr"} with \code{E_PROFILE_SCOPE} on
-\code{e$code}, as \code{ferx_fit()} does.}
+levels. All three \code{covariance_method}s run on a profiled fit
+(ferx-core #2108), and \code{\link{ferx_covariance}} repeats any of
+them bit for bit. A profiled block may declare bounds,
+\code{theta NAME[COL](init, lower, upper) profile} (ferx-core #2112):
+the levels are then the exact minimiser over that box.}
+\item{profiled_levels_at_bound}{Character vector of the theta names of
+the profiled levels that ended exactly on their block's declared bound
+(ferx-core #2112); \code{character(0)} when none did. The fit reports
+them in a \code{BoundaryEstimate} warning, and the covariance step holds
+each at its bound as it holds a FIX theta: \code{print()} shows its SE
+as \code{N/A}, \code{fit$estimates} and \code{fit$theta_levels} give
+it an \code{NA} \code{se}, and every other standard error is computed
+with it held. \code{fit$se_theta} keeps the engine's \code{0} for it,
+as for a FIX theta. Survives \code{ferx_save_fit()} /
+\code{ferx_load_fit()}.}
 \item{covariate_stats}{Data frame of the statistics a
 \code{[covariate_model]} relation stated symbolically
 (\code{center = median}, \code{ref = mode}, \code{levels = auto}) was

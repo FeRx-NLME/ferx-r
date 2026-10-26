@@ -24,10 +24,15 @@
 #' fit whose parameters do not match the model, such as a `kappa` model whose
 #' fit carries no `omega_iov`).
 #'
-#' A fit with a `profile` theta level block (`fit$profiled_blocks`) has only
-#' the `"r"` covariance step: `covariance_method = "s"` or `"rsr"` on such a
-#' fit is an error of class `ferx_engine_error` with `code = "E_PROFILE_SCOPE"`,
-#' the refusal [ferx_fit()] gives the same request.
+#' A fit with a `profile` theta level block (`fit$profiled_blocks`) takes
+#' all three methods (ferx-core #2108). `"rsr"` is the unprofiled sandwich with
+#' the profiled R^-1; `"s"` is S^-1 over every parameter, levels included, and
+#' still needs more subjects than free parameters. A profiled level the fit
+#' holds on its declared bound (`fit$profiled_levels_at_bound`, ferx-core
+#' #2112) is held by the step too, as a FIX theta is: it gets no standard
+#' error, and the others are computed with it held. The step rebuilds that
+#' list from the estimates and the bound, so the returned fit carries this
+#' step's.
 #'
 #' ## Settings
 #'
@@ -47,6 +52,17 @@
 #' importance-sampling or VI estimate, an R matrix that needs an eigenvalue
 #' floor is replaced by S^-1 (warning `W_COV_NON_STATIONARY_ESTIMATE`), as the
 #' in-fit step does.
+#'
+#' The step's own settings are the fit's too: `fd_hessian_step`,
+#' `analytic_cov_hessian` and `cov_inner_tol`, as the fit was given them -
+#' the model file's `[fit_options]`, overridden by `ferx_fit()`'s argument or
+#' `settings` (recorded in `fit$call_settings`). The engine does not record
+#' them, so a fit made with `fd_hessian_step = 0.1` used to be replayed at the
+#' default step, and a profiled fit made with `fd_hessian_step = 0.01` at the
+#' profiled default `3e-3` (ferx-core #2414). The model file's values are read
+#' from the model file itself, so a bundle written by ferx-core, which carries
+#' no `fit$call_settings`, keeps them; only call-time overrides need the R
+#' record.
 #'
 #' A fit loaded with [ferx_load_fit()] keeps both, so its result is
 #' `identical()` to the in-fit one too. A fit loaded from a bundle saved before
@@ -168,7 +184,7 @@ ferx_covariance <- function(fit,
   # Before the model-file checks, so a loaded fit without a layout is refused
   # for that reason even when its bundle had no model file (#531).
   .ferx_refuse_unavailable_levels(fit)
-  .ferx_refuse_profiled_covariance(fit, cov_method)
+  step_args <- .ferx_fit_cov_step_settings(fit)
 
   model_path <- fit$model_path
   if (is.null(model_path) || is.na(model_path) || !nzchar(model_path)) {
@@ -321,6 +337,10 @@ ferx_covariance <- function(fit,
     # The thetas the fit held, the engine's auto-frozen ones included (#613).
     theta_fixed = .ferx_fit_theta_fixed(fit),
     covariance_method = cov_method,
+    # The step's own settings, which the engine takes from its caller, not
+    # from the fit: without them the replay steps at the engine defaults.
+    step_settings_keys = step_args$keys,
+    step_settings_values = step_args$values,
     threads = threads_arg,
     verbose = isTRUE(verbose),
     fit_bindings = binding_args$fit_bindings
@@ -344,6 +364,9 @@ ferx_covariance <- function(fit,
   if (!is.null(raw$covariance_wall_time_secs)) {
     fit$covariance_wall_time_secs <- as.numeric(raw$covariance_wall_time_secs)
   }
+  # The profiled levels this step held on their bound (ferx-core #2112): the
+  # step rebuilds the list from the estimates, so it replaces the fit's.
+  fit$profiled_levels_at_bound <- as.character(raw$profiled_levels_at_bound %||% character(0))
   # The correlation gate check_strictness() applies is read off the matrix this
   # call just produced, so it is refreshed with it (ferx-core #1177); NaN when
   # the step still produced no matrix.
@@ -481,38 +504,19 @@ ferx_covariance <- function(fit,
   fit
 }
 
-# A profiled theta level block's covariance step computes `r` only (ferx-core
-# #2108). The engine's post-hoc step (`profile::replay_covariance`) answers an
-# `s` / `rsr` request with no matrix and a warning, so the call returned a fit
-# with no standard errors and no R condition (#597). `ferx_fit()` refuses the
-# same request up front with `E_PROFILE_SCOPE` (ferx-core
-# `check_profiled_levels`); this raises that refusal, in its words, before the
-# step runs. `cov_method` is the lower-cased, validated token.
-.ferx_refuse_profiled_covariance <- function(fit, cov_method) {
-  blocks <- as.character(fit$profiled_blocks %||% character(0))
-  if (length(blocks) == 0L || cov_method %in% c("r", "hessian")) return(invisible())
-  label <- switch(cov_method, cross_product = "s", sandwich = "rsr", cov_method)
-  subject <- if (length(blocks) == 1L) {
-    sprintf("theta %s[...] is", blocks)
-  } else {
-    n <- length(blocks)
-    sprintf("theta %s and %s[...] are",
-            paste0(blocks[-n], "[...]", collapse = ", "), blocks[n])
+# The covariance step's own settings the fit's call gave it
+# (`fit$call_settings`), as the parallel key / value strings
+# `ferx_rust_covariance()` applies through ferx-core's `apply_fit_option` over
+# the model file's `[fit_options]` values, which the glue reads from the
+# hash-checked model file itself: the precedence ferx_fit() gave them.
+# ferx-core's `run_covariance` takes these from its caller and does not record
+# them. Not `covariance_method`: that is ferx_covariance()'s own argument.
+.ferx_fit_cov_step_settings <- function(fit) {
+  call_s <- fit$call_settings %||% list()
+  picked <- list()
+  for (k in c("fd_hessian_step", "analytic_cov_hessian", "cov_inner_tol")) {
+    v <- call_s[[k]]
+    if (length(v) == 1L && !is.na(v)) picked[[k]] <- v
   }
-  text <- sprintf(paste0(
-    "%s `profile`d, whose covariance step computes `r` only for now; this ",
-    "call asks for `covariance_method = %s`."
-  ), subject, label)
-  suggestion <- "Use `covariance_method = r`, or remove `profile`."
-  stop(structure(
-    class = c("ferx_engine_error", "error", "condition"),
-    list(
-      message    = .ferx_engine_message(text, "E_PROFILE_SCOPE", suggestion),
-      call       = sys.call(-1L),
-      code       = "E_PROFILE_SCOPE",
-      block      = "parameters",
-      line       = NA_integer_,
-      suggestion = suggestion
-    )
-  ))
+  .ferx_settings_to_strings(picked)
 }

@@ -206,6 +206,71 @@ test_that("ferx_covariance can re-run with a different covariance_method", {
   expect_identical(rownames(out_r$cov_matrix), rownames(out_rsr$cov_matrix))
 })
 
+test_that("ferx_covariance replays the fit's own covariance-step settings", {
+  skip_on_cran()
+  # ferx-core's run_covariance takes fd_hessian_step, analytic_cov_hessian and
+  # cov_inner_tol from its caller and does not record them, so ferx_covariance()
+  # stepped at the engine defaults whatever the fit used: on warfarin with the
+  # FD route and fd_hessian_step = 0.1 its SEs sat up to 6.5% from the fit's,
+  # 0.8% with fd_hessian_step = 0.05 from [fit_options] (measured at ferx-core
+  # 32dbb309). It now hands them back, from the call ahead of the model file,
+  # and the replay is the fit's step, live and after a reload.
+  q <- function(x) suppressWarnings(suppressMessages(x))
+  se <- function(f) lapply(f[c("se_theta", "se_omega", "se_sigma")], unname)
+  ex <- ferx_example("warfarin")
+  file_model <- withr::local_tempfile(fileext = ".ferx")
+  writeLines(c(readLines(ex$model), "", "[fit_options]",
+               "  analytic_cov_hessian = false", "  fd_hessian_step = 0.05"),
+             file_model)
+  fits <- list(
+    call = q(ferx_fit(ex$model, ex$data, verbose = FALSE, fd_hessian_step = 0.1,
+                      settings = list(analytic_cov_hessian = FALSE))),
+    file = q(ferx_fit(file_model, ex$data, verbose = FALSE))
+  )
+  for (nm in names(fits)) {
+    f <- fits[[nm]]
+    expect_identical(f$covariance_status, "computed", info = nm)
+    expect_identical(se(q(ferx_covariance(f))), se(f), info = nm)
+    path <- withr::local_tempfile(fileext = ".fitrx")
+    q(ferx_save_fit(f, path))
+    expect_identical(se(q(ferx_covariance(q(ferx_load_fit(path))))), se(f), info = nm)
+  }
+  # The settings are the replay's, not a coincidence of defaults: the call's
+  # step differs from the default and from the file's.
+  expect_false(isTRUE(all.equal(se(fits$call), se(fits$file))))
+  # The model file's values come from the model file, not from R's record of
+  # it: a fit without `call_settings` / `model_file_settings` (a bundle
+  # ferx-core wrote) replays the file's step too.
+  bare <- fits$file
+  bare$call_settings <- list()
+  bare$model_file_settings <- list()
+  expect_identical(se(q(ferx_covariance(bare))), se(fits$file))
+  # ... and the call's override of it is R's to hand back: without the record
+  # the call fit replays at the model file's (here: the defaults) and moves.
+  bare <- fits$call
+  bare$call_settings <- list()
+  expect_false(isTRUE(all.equal(se(q(ferx_covariance(bare))), se(fits$call))))
+})
+
+test_that("the replayed covariance-step overrides are the call's step keys only", {
+  pick <- ferx:::.ferx_fit_cov_step_settings
+  none <- list(keys = character(0), values = character(0))
+  expect_identical(pick(list()), none)
+  expect_identical(pick(list(call_settings = list(maxiter = 10L))), none)
+  # The model file's values are the glue's to read from the file; R's copy of
+  # them is not sent, and `NA` in the call is no value.
+  got <- pick(list(
+    call_settings = list(fd_hessian_step = 0.1, cov_inner_tol = NA, maxiter = 5),
+    model_file_settings = list(analytic_cov_hessian = "false", cov_inner_tol = "1e-7")
+  ))
+  expect_identical(got$keys, "fd_hessian_step")
+  # Numbers are written as ferx_fit() writes them for the engine, so the
+  # replay parses the very value the fit did.
+  expect_identical(got$values, format(0.1, scientific = FALSE, trim = TRUE, digits = 17))
+  expect_identical(pick(list(call_settings = list(analytic_cov_hessian = FALSE)))$values,
+                   "false")
+})
+
 test_that("ferx_covariance refuses to run after the model file is tampered with", {
   src <- ferx_example("warfarin")
   tmp <- tempfile("ferx_cov_tamper_")

@@ -832,6 +832,17 @@ test_that("every covariance message ferx-core emits gets non-contradictory guida
                       "fd_hessian_step."),
          ok = "over-optimistic", never = "set to zero"),
     list(cat = "covariance_step",
+         # A successful rsr step whose level SEs a single subject informs
+         # (ferx-core #2415), as ferx-core words it on mbma_placebo.
+         msg = paste0("W_COV_RSR_ONE_SUBJECT_LEVELS: under covariance_method = ",
+                      "rsr, 24 of the 24 levels of theta PLACEBO[...] (e.g. ",
+                      "STUDY=1,TIME=0) are each read by a single subject. At the ",
+                      "estimate such a level's own score is zero or nearly so, so ",
+                      "the sandwich carries almost none of its variability and its ",
+                      "standard error is not usable. Read those levels' standard ",
+                      "errors from covariance_method = r."),
+         ok = "covariance_method = \"r\"", never = "unavailable"),
+    list(cat = "covariance_step",
          # Informational salvage note after a successful hybrid covariance.
          msg = paste0("W_COV_ANALYTIC_SALVAGE: 1 of 30 subjects (ID 7) is outside ",
                       "the exact analytic covariance R-matrix scope; its information ",
@@ -890,13 +901,6 @@ test_that("every covariance message ferx-core emits gets non-contradictory guida
          ok = "covariance_method = \"rsr\"", never = "identifiability"),
     # The profiled theta level block's covariance step (ferx-core profile.rs,
     # #1065). Before these arms every one fell to the generic fallback.
-    list(cat = "general",
-         # replay_covariance(), asked for an estimator the profiled step does
-         # not offer (#2108): nothing ran.
-         msg = paste0("Covariance step not run: a profiled θ level block's ",
-                      "covariance step computes `r` only for now (#2108); this ",
-                      "call asks for `covariance_method = s`."),
-         ok = "covariance_method = \"r\"", never = "identifiability"),
     list(cat = "covariance_failed",
          # Classed `convergence` until ferx-core #2158, which tested "did not
          # converge" first and so sent it to the optimizer's re-fit-from-new-
@@ -1160,7 +1164,6 @@ test_that("no covariance message ferx-core emits is missing from the inventory",
     "score cross-product matrix",
     # The profiled theta level block's covariance step (profile.rs). The two
     # stencil-point forms share "not finite at some finite-difference point".
-    "computes `r` only",
     "the profile solve did not converge",
     "the profile objective is not finite at the estimate",
     "not finite at some finite-difference point",

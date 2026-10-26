@@ -2490,12 +2490,17 @@ fn level_contrast_from_token(token: &str) -> std::result::Result<LevelContrast, 
 /// `ref` reference level, for every level without a covariance (`se`) or
 /// without kept SIR draws (`sir_lo`, `sir_hi`). `profiled` is TRUE on every
 /// level of a block the fit solved for rather than searched (ferx-core #1065),
-/// read from the fit's `profiled_blocks`. Zero rows for a model with no level
-/// block.
+/// read from the fit's `profiled_blocks`. `se` is also NA for a profiled level
+/// the covariance step held on its declared bound (`held`, the fit's
+/// `profiled_levels_at_bound`, ferx-core #2112): the engine reports `0.0` there,
+/// as for a FIX theta, which is not a standard error. Zero rows for a model with
+/// no level block.
+#[allow(clippy::too_many_arguments)]
 fn level_bindings_to_r(
     model: &CompiledModel,
     bindings: &LevelBindings,
     profiled_blocks: &[String],
+    held: &[usize],
     theta_names: &[String],
     theta: &[f64],
     covariance: Option<&DMatrix<f64>>,
@@ -2556,7 +2561,7 @@ fn level_bindings_to_r(
             profiled.push(profiled_blocks.iter().any(|p| p == name));
             theta_name.push(theta_names.contains(&tn).then_some(tn));
             value.push(v.value);
-            se.push(v.se);
+            se.push(v.se.filter(|_| !v.theta_index.is_some_and(|k| held.contains(&k))));
             sir_lo.push(v.sir_ci.map(|(lo, _)| lo));
             sir_hi.push(v.sir_ci.map(|(_, hi)| hi));
         }
@@ -2655,6 +2660,7 @@ fn ferx_rust_theta_levels_from_fit(
             &parsed.model,
             &fitted.levels,
             &profiled_blocks_from_r(&fit_bindings)?,
+            &profiled_levels_at_bound_from_r(&fit_bindings, &theta_names)?,
             &theta_names,
             &theta,
             covariance.as_ref(),
@@ -2733,6 +2739,72 @@ fn profiled_blocks_from_r(r: &List) -> std::result::Result<Vec<String>, String> 
             "internal: `fit_bindings$profiled_blocks` is not a character vector".to_string()
         }),
     }
+}
+
+/// The keys `ferx_covariance()` replays from the fit: the covariance step's
+/// own settings, which `run_covariance` takes from its caller.
+const COVARIANCE_STEP_KEYS: [&str; 3] = ["fd_hessian_step", "analytic_cov_hessian", "cov_inner_tol"];
+
+/// Apply the fit's covariance-step settings to the replay's options, through
+/// the parser `ferx_fit()` uses, so a value is read exactly as the fit read it.
+fn apply_covariance_step_settings(
+    opts: &mut FitOptions,
+    keys: &[String],
+    values: &[String],
+) -> std::result::Result<(), String> {
+    if keys.len() != values.len() {
+        return Err(format!(
+            "internal: {} covariance step setting keys but {} values",
+            keys.len(),
+            values.len()
+        ));
+    }
+    for (k, v) in keys.iter().zip(values) {
+        if !COVARIANCE_STEP_KEYS.contains(&k.as_str()) {
+            return Err(format!("internal: `{k}` is not a covariance step setting"));
+        }
+        match ferx_core::parser::model_parser::apply_fit_option(opts, k, v) {
+            Ok(true) => {}
+            Ok(false) => return Err(format!("internal: the engine does not know `{k}`")),
+            Err(e) => return Err(format!("ferx_covariance: the fit's `{k}`: {e}")),
+        }
+    }
+    Ok(())
+}
+
+/// The fit's `profiled_levels_at_bound` (ferx-core #2112) from the `fit_bindings`
+/// list, as the engine's θ indices: R carries the held levels by name. Empty
+/// when the entry is absent; a name that is not one of the fit's θ is refused
+/// rather than dropped, since the level it meant would then report an SE.
+fn profiled_levels_at_bound_from_r(
+    r: &List,
+    theta_names: &[String],
+) -> std::result::Result<Vec<usize>, String> {
+    let names = match r.iter().find(|(k, _)| *k == "profiled_levels_at_bound") {
+        None => return Ok(Vec::new()),
+        Some((_, v)) if v.is_null() => return Ok(Vec::new()),
+        Some((_, v)) => v.as_string_vector().ok_or_else(|| {
+            "internal: `fit_bindings$profiled_levels_at_bound` is not a character vector"
+                .to_string()
+        })?,
+    };
+    let mut held = names
+        .iter()
+        .map(|n| {
+            theta_names.iter().position(|t| t == n).ok_or_else(|| {
+                format!("fit$profiled_levels_at_bound names `{n}`, which is not one of the fit's thetas")
+            })
+        })
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    held.sort_unstable();
+    Ok(held)
+}
+
+/// θ indices as the θ names R carries them by (`profiled_levels_at_bound`).
+fn theta_names_at(theta_names: &[String], idx: &[usize]) -> Vec<String> {
+    idx.iter()
+        .filter_map(|&k| theta_names.get(k).cloned())
+        .collect()
 }
 
 /// An R integer as R prints it: `NA_integer_` arrives as `i32::MIN`.
@@ -3572,6 +3644,9 @@ fn default_fit_result(
         // ferx-core #1065: the uncertainty draws do not read which blocks were
         // profiled; the fit's level values are already in `theta`.
         profiled_blocks: Vec::new(),
+        // ferx-core #2112: nor which levels a covariance step held on a bound;
+        // the matrix handed in already has their rows zero.
+        profiled_levels_at_bound: Vec::new(),
         n_threads_used: 1,
         nlopt_missing_algorithms: Vec::new(),
         covariance_n_evals_estimated: None,
@@ -4732,6 +4807,7 @@ fn fit_result_to_list(
         model,
         &bindings.levels,
         &result.profiled_blocks,
+        &result.profiled_levels_at_bound,
         &theta_names,
         &result.theta,
         result.covariance_matrix.as_ref(),
@@ -4767,6 +4843,10 @@ fn fit_result_to_list(
         // The level blocks the fit solved for rather than searched (ferx-core
         // #1065), in declaration order; empty for a fit without one.
         profiled_blocks = result.profiled_blocks.clone(),
+        // The profiled levels the covariance step held on their declared bound
+        // (ferx-core #2112), by θ name: no standard error for them, the others
+        // conditional on them. Empty for a fit with none.
+        profiled_levels_at_bound = theta_names_at(&theta_names, &result.profiled_levels_at_bound),
         // The `[covariate_model]` statistics the fit was bound with (ferx-r
         // #412); empty for a model that states none symbolically.
         covariate_stats = covariate_stats_to_r(&bindings.covariate_stats),
@@ -7918,6 +7998,9 @@ fn fit_skeleton(
         // record on their skeleton; the engine's covariance replay of a profiled
         // block reads the model's `profile` declarations, not this field.
         profiled_blocks: Vec::new(),
+        // ferx-core #2112: set from the fit's record alongside `profiled_blocks`;
+        // `run_covariance` rebuilds it from the estimates and the box regardless.
+        profiled_levels_at_bound: Vec::new(),
         n_threads_used: 1,
         nlopt_missing_algorithms: Vec::new(),
         covariance_n_evals_estimated: None,
@@ -8225,6 +8308,8 @@ fn ferx_rust_sir(
         };
         let mut fit = fit_skeleton("ferx_sir", model, &inputs, Some(cov_mat))?;
         fit.profiled_blocks = profiled_blocks_from_r(&fit_bindings)?;
+        fit.profiled_levels_at_bound =
+            profiled_levels_at_bound_from_r(&fit_bindings, &fit.theta_names)?;
 
         // Every SIR and scoring setting comes from the skeleton's records
         // (ferx-r #472): default options defer to them.
@@ -8269,6 +8354,7 @@ fn ferx_rust_sir(
             model,
             &fitted.levels,
             &fit.profiled_blocks,
+            &new_fit.profiled_levels_at_bound,
             &new_fit.theta_names,
             &new_fit.theta,
             new_fit.covariance_matrix.as_ref(),
@@ -8377,6 +8463,14 @@ fn ferx_rust_sir(
 ///   the engine froze for having no effect on the objective included; empty
 ///   for a fit without the field (ferx-r #613).
 /// @param covariance_method Covariance estimator: "r"/"hessian", "s"/"cross_product", or "rsr"/"sandwich".
+/// @param step_settings_keys,step_settings_values The covariance step's own
+///   settings the fit's call gave it, as `settings` key / value strings:
+///   only `fd_hessian_step`, `analytic_cov_hessian` and `cov_inner_tol`.
+///   `run_covariance` takes these from its caller, not from the fit, so the
+///   replay starts from the model file's `[fit_options]` values and applies
+///   these over them, as the fit did. Applied through ferx-core's
+///   `apply_fit_option`, which parses them as `ferx_fit()` does and raises
+///   `fd_hessian_step_set` (ferx-core #2414).
 /// @param threads Worker threads the step runs on: `0` the engine default,
 ///   `n > 0` pinned. `ferx_covariance()` passes the fit's `n_threads_used`
 ///   unless told otherwise (ferx-r #527).
@@ -8420,6 +8514,8 @@ fn ferx_rust_covariance(
     ebe_kappa_ids: Vec<String>,
     theta_fixed: Logicals,
     covariance_method: &str,
+    step_settings_keys: Vec<String>,
+    step_settings_values: Vec<String>,
     threads: i32,
     verbose: bool,
     fit_bindings: List,
@@ -8483,6 +8579,8 @@ fn ferx_rust_covariance(
         };
         let mut fit = fit_skeleton("ferx_covariance", model, &inputs, None)?;
         fit.profiled_blocks = profiled_blocks_from_r(&fit_bindings)?;
+        fit.profiled_levels_at_bound =
+            profiled_levels_at_bound_from_r(&fit_bindings, &fit.theta_names)?;
 
         let mut opts = FitOptions::default();
         // run_covariance_step is ignored by run_covariance (calling it *is* the
@@ -8491,6 +8589,16 @@ fn ferx_rust_covariance(
         opts.covariance_method = covariance_method_enum;
         opts.interaction = interaction;
         opts.verbose = verbose;
+        // The step's own settings, which `run_covariance` takes from its caller:
+        // first the model file's `[fit_options]` (the hash-checked file the fit
+        // read, so a bundle ferx-core wrote gets them too), then the call's
+        // overrides, the precedence `ferx_rust_fit` gives them.
+        let file = &parsed.fit_options;
+        opts.fd_hessian_step = file.fd_hessian_step;
+        opts.fd_hessian_step_set = file.fd_hessian_step_set;
+        opts.analytic_cov_hessian = file.analytic_cov_hessian;
+        opts.cov_inner_tol = file.cov_inner_tol;
+        apply_covariance_step_settings(&mut opts, &step_settings_keys, &step_settings_values)?;
         let (step_threads, n_threads_used) = posthoc_step_threads(threads);
         opts.threads = step_threads;
 
@@ -8525,6 +8633,7 @@ fn ferx_rust_covariance(
             model,
             &fitted.levels,
             &fit.profiled_blocks,
+            &new_fit.profiled_levels_at_bound,
             &new_fit.theta_names,
             &new_fit.theta,
             new_fit.covariance_matrix.as_ref(),
@@ -8542,6 +8651,9 @@ fn ferx_rust_covariance(
             se_kappa = new_fit.se_kappa.clone().unwrap_or_default(),
             covariance_status = covariance_status_str,
             covariance_wall_time_secs = new_fit.covariance_wall_time_secs,
+            // Rebuilt by the step from the estimates and the box (ferx-core #2112).
+            profiled_levels_at_bound =
+                theta_names_at(&new_fit.theta_names, &new_fit.profiled_levels_at_bound),
             cov_eigenvalues = new_fit.cov_eigenvalues.clone().unwrap_or_default(),
             cov_condition_number = new_fit.cov_condition_number.unwrap_or(f64::NAN),
             // Refreshed alongside the matrix it is read off, so a fit that gains a

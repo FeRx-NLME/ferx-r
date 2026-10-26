@@ -71,10 +71,15 @@ reserved for input problems (missing / hash-mismatched model or data, or a
 fit whose parameters do not match the model, such as a \code{kappa} model whose
 fit carries no \code{omega_iov}).
 
-A fit with a \code{profile} theta level block (\code{fit$profiled_blocks}) has only
-the \code{"r"} covariance step: \code{covariance_method = "s"} or \code{"rsr"} on such a
-fit is an error of class \code{ferx_engine_error} with \code{code = "E_PROFILE_SCOPE"},
-the refusal \code{\link[=ferx_fit]{ferx_fit()}} gives the same request.
+A fit with a \code{profile} theta level block (\code{fit$profiled_blocks}) takes
+all three methods (ferx-core #2108). \code{"rsr"} is the unprofiled sandwich with
+the profiled R^-1; \code{"s"} is S^-1 over every parameter, levels included, and
+still needs more subjects than free parameters. A profiled level the fit
+holds on its declared bound (\code{fit$profiled_levels_at_bound}, ferx-core
+#2112) is held by the step too, as a FIX theta is: it gets no standard
+error, and the others are computed with it held. The step rebuilds that
+list from the estimates and the bound, so the returned fit carries this
+step's.
 \subsection{Settings}{
 
 The step scores the objective under the inner-loop and ODE settings the fit
@@ -93,6 +98,17 @@ and VI start from the EBEs the fit reports - \code{fit$ebe_etas} and, under IOV,
 importance-sampling or VI estimate, an R matrix that needs an eigenvalue
 floor is replaced by S^-1 (warning \code{W_COV_NON_STATIONARY_ESTIMATE}), as the
 in-fit step does.
+
+The step's own settings are the fit's too: \code{fd_hessian_step},
+\code{analytic_cov_hessian} and \code{cov_inner_tol}, as the fit was given them -
+the model file's \verb{[fit_options]}, overridden by \code{ferx_fit()}'s argument or
+\code{settings} (recorded in \code{fit$call_settings}). The engine does not record
+them, so a fit made with \code{fd_hessian_step = 0.1} used to be replayed at the
+default step, and a profiled fit made with \code{fd_hessian_step = 0.01} at the
+profiled default \code{3e-3} (ferx-core #2414). The model file's values are read
+from the model file itself, so a bundle written by ferx-core, which carries
+no \code{fit$call_settings}, keeps them; only call-time overrides need the R
+record.
 
 A fit loaded with \code{\link[=ferx_load_fit]{ferx_load_fit()}} keeps both, so its result is
 \code{identical()} to the in-fit one too. A fit loaded from a bundle saved before

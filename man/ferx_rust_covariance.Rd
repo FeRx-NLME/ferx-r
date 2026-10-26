@@ -36,6 +36,8 @@ ferx_rust_covariance(
   ebe_kappa_ids,
   theta_fixed,
   covariance_method,
+  step_settings_keys,
+  step_settings_values,
   threads,
   verbose,
   fit_bindings

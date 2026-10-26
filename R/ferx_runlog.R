@@ -162,7 +162,13 @@ ferx_runlog <- function(fit, gradient_tol = 0.1, show_iterations = TRUE, verbose
     final_str <- .runlog_value(thetas[i], fixed)
     se_str    <- ""
     rse_str   <- ""
-    if (has_se && !fixed && !is.null(se_th) && i <= length(se_th)) {
+    # A profiled level the covariance step held on its declared bound
+    # (ferx-core #2112): its SE 0 is not one. `N/A`, as print() shows it.
+    held <- nm %in% fit$profiled_levels_at_bound
+    if (has_se && !fixed && held) {
+      se_str  <- sprintf("%8s", "N/A")
+      rse_str <- sprintf("%7s", "N/A")
+    } else if (has_se && !fixed && !is.null(se_th) && i <= length(se_th)) {
       se_val  <- se_th[i]
       se_str  <- if (is.finite(se_val)) sprintf("%8.4g", se_val) else sprintf("%8s", "N/A")
       rse_val <- if (is.finite(se_val) && thetas[i] != 0) abs(se_val / thetas[i]) * 100 else NA

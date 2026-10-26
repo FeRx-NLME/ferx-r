@@ -342,6 +342,12 @@ ferx_load_fit <- function(path) {
     # ferx-core #1065: the level blocks the fit profiled. Absent on a bundle
     # without one, which every bundle saved before the profile solve is.
     profiled_blocks = as.character(unlist(w$profiled_blocks %||% list(), use.names = FALSE)),
+    # ferx-core #2112: the profiled levels held on their bound, which the wire
+    # carries as 0-based theta indices; R keeps their names. Absent on a
+    # bundle with none, and on every bundle saved before the field existed.
+    profiled_levels_at_bound = .fitrx_theta_names_at(
+      w$profiled_levels_at_bound, w$theta$names
+    ),
     uses_sde = isTRUE(w$uses_sde),
     gradient_method_inner = as.character(w$gradient_method_inner %||% ""),
     gradient_method_outer = as.character(w$gradient_method_outer %||% ""),
@@ -837,7 +843,8 @@ ferx_load_fit <- function(path) {
   # names that cause, rather than the bindings.
   args <- .ferx_fit_binding_args(list(
     theta_levels = wire, covariate_stats = fit$covariate_stats,
-    profiled_blocks = fit$profiled_blocks
+    profiled_blocks = fit$profiled_blocks,
+    profiled_levels_at_bound = fit$profiled_levels_at_bound
   ))
   # The fit's covariance and kept SIR draws, restored before this runs, give
   # each level the se and SIR interval the fresh fit reported (#528).
@@ -1151,4 +1158,19 @@ ferx_load_fit <- function(path) {
   Encoding(txt) <- "UTF-8"
   if (!validUTF8(txt)) return(NULL)
   txt
+}
+
+# Internal: the theta names at a `.fitrx` wire's 0-based theta indices
+# (`profiled_levels_at_bound`, ferx-core #2112). An index outside the bundle's
+# theta is refused: a level it meant would otherwise report a standard error.
+.fitrx_theta_names_at <- function(idx, theta_names) {
+  idx <- as.integer(unlist(idx %||% list(), use.names = FALSE))
+  theta_names <- as.character(unlist(theta_names %||% list(), use.names = FALSE))
+  if (length(idx) == 0L) return(character(0))
+  if (anyNA(idx) || any(idx < 0L | idx >= length(theta_names))) {
+    stop("ferx_load_fit: fit.json `profiled_levels_at_bound` holds a theta ",
+         "index outside the bundle's ", length(theta_names), " thetas.",
+         call. = FALSE)
+  }
+  theta_names[idx + 1L]
 }

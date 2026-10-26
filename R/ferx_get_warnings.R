@@ -564,20 +564,11 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
     # The covariance step of a fit with a `profile` theta level block
     # (ferx-core profile.rs, #1065). Without the arms below every one
     # inherited the generic fallback, which blames identifiability for
-    # failures that are about a sparse level, an overflow, or an estimator the
-    # profiled step does not offer. The non-PD one lists its eigenvalues since
-    # ferx-core #2353, so the generic eigenvalue arm above is told to skip it.
+    # failures that are about a sparse level or an overflow. The non-PD one
+    # lists its eigenvalues since ferx-core #2353, so the generic eigenvalue arm
+    # above is told to skip it. (Its "computes `r` only" refusal of `s` / `rsr`
+    # went with ferx-core #2108, which runs both.)
     #
-    # Asked for "s" / "rsr" on a profiled fit: nothing ran (#2108).
-    if (grepl("profiled", message, fixed = TRUE) &&
-        grepl("computes `r` only", message, fixed = TRUE)) {
-      return(paste0(
-        "The covariance step did not run: on a fit with a profiled theta ",
-        "level block only covariance_method = \"r\" is available, so nothing ",
-        "was diagnosed about the model. Use ferx_covariance(fit, ",
-        "covariance_method = \"r\")."
-      ))
-    }
     # Re-profiling the levels at the fit's own estimates failed, so the step
     # never reached a Hessian. The parenthesis is ferx-core's ProfileFailure:
     # `Singular` is an unidentified level, `NonFinite` an overflow, and
@@ -841,6 +832,22 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
         "analytic covariance R-matrix scope, so only their terms were ",
         "finite-differenced; every other subject was assembled analytically. ",
         "No action needed."
+      ))
+    }
+    # ferx-core #2415: a successful `rsr` step on a theta level block, some of
+    # whose levels a single subject reads. The step produced every standard
+    # error; only those levels' are unusable. Matched on its token; without
+    # this arm it inherits the failure fallback below, which says the
+    # standard errors are unavailable.
+    if (grepl("W_COV_RSR_ONE_SUBJECT_LEVELS", message, fixed = TRUE)) {
+      return(paste0(
+        "The rsr standard errors were produced, but those of the theta levels ",
+        "the message counts are not usable: a level read by a single subject ",
+        "has a near-zero score at the estimate, so the sandwich carries almost ",
+        "none of its variability and understates its standard error. Read ",
+        "those levels' standard errors from ferx_covariance(fit, ",
+        "covariance_method = \"r\"); the rsr ones of the other parameters ",
+        "stand."
       ))
     }
     # Generic fallback for older or unrecognised covariance messages.

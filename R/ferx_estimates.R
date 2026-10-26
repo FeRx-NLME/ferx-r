@@ -17,6 +17,8 @@
   if (is.null(theta_names)) theta_names <- paste0("THETA", seq_along(fit$theta))
   for (i in seq_along(fit$theta)) {
     se        <- if (!is.null(fit$se_theta) && length(fit$se_theta) >= i) fit$se_theta[i] else NA_real_
+    # A profiled level held on its bound has no SE; the engine's 0 is not one (ferx-core #2112).
+    if (theta_names[i] %in% fit$profiled_levels_at_bound) se <- NA_real_
     transform <- if (!is.null(fit$theta_transforms) && length(fit$theta_transforms) >= i) fit$theta_transforms[i] else "identity"
     rows[[length(rows) + 1L]] <- .ferx_est_row(theta_names[i], fit$theta[i], se, transform, FALSE,
                                                fixed = .ferx_is_fixed(fit$theta_fixed, i))

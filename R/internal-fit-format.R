@@ -773,6 +773,7 @@
     tl$value, tl$se, tl$sir_lo, tl$sir_hi, tl$profiled
   )
   result$profiled_blocks <- as.character(result$profiled_blocks %||% character(0))
+  result$profiled_levels_at_bound <- as.character(result$profiled_levels_at_bound %||% character(0))
   # `[covariate_model]` statistics (#412), through the constructor
   # `ferx_load_fit()` uses. Zero rows for a model with no symbolic centre.
   cs <- result$covariate_stats
