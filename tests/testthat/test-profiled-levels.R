@@ -345,6 +345,12 @@ test_that("a bounded profiled block fits, holding a level on its bound (ferx-cor
   out <- utils::capture.output(quiet(print(b)))
   row <- strsplit(trimws(grep(held, out, value = TRUE, fixed = TRUE)), "[[:space:]]+")[[1]]
   expect_identical(row, c(held, "4.000000", "N/A", "N/A"))
+  # ferx_runlog() too: it printed the engine's 0 as the SE and 0.0% as %RSE.
+  rl <- utils::capture.output(quiet(ferx_runlog(b)))
+  row <- strsplit(trimws(grep(held, rl, value = TRUE, fixed = TRUE)), "[[:space:]]+")[[1]]
+  expect_identical(tail(row, 2L), c("N/A", "N/A"))
+  row <- strsplit(trimws(grep(free, rl, value = TRUE, fixed = TRUE)), "[[:space:]]+")[[1]]
+  expect_match(tail(row, 1L), "%", fixed = TRUE)
 
   # One BoundaryEstimate warning names it.
   w <- ferx_get_warnings(b, as_df = TRUE)
@@ -368,6 +374,11 @@ test_that("a level held on its bound survives ferx_covariance() and .fitrx (ferx
     expect_identical(cv$theta_levels$se, b$theta_levels$se)
   }
   check(quiet(ferx_covariance(b)))
+  # The step rebuilds the list from the estimates and the box, and the
+  # replay takes the step's: a fit that lost it gets it back.
+  lost <- b
+  lost$profiled_levels_at_bound <- character(0)
+  expect_identical(quiet(ferx_covariance(lost))$profiled_levels_at_bound, held)
 
   path <- withr::local_tempfile(fileext = ".fitrx")
   quiet(ferx_save_fit(b, path))
