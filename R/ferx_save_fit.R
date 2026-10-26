@@ -301,6 +301,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   "nlopt_missing_algorithms", "warnings", "cov_eigenvalues", "eta_param_info",
   "theta_init", "sigma_init", "final_gradient", "covariate_names",
   "input_columns", "packed_estimate", "mixture_overrides", "profiled_blocks",
+  "profiled_levels_at_bound",
   # ThetaWire / OmegaWire / SigmaWire
   "names", "estimates", "se", "fixed", "transform", "log_transformed",
   "shrinkage", "init_as_sd", "types", "residual_correlations",
@@ -678,6 +679,16 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   # as none, but would refuse a null, so it is written only when non-empty.
   if (length(fit$profiled_blocks)) {
     wire$profiled_blocks <- as.character(fit$profiled_blocks)
+  }
+  # ferx-core #2112: the profiled levels held on their bound, as the engine's
+  # 0-based theta indices, ascending; written only when non-empty, as above.
+  if (length(fit$profiled_levels_at_bound)) {
+    idx <- match(as.character(fit$profiled_levels_at_bound), names(fit$theta))
+    if (anyNA(idx)) {
+      stop("ferx_save_fit: fit$profiled_levels_at_bound names a theta the fit ",
+           "does not have.", call. = FALSE)
+    }
+    wire$profiled_levels_at_bound <- sort(idx - 1L)
   }
   # A fit loaded from a pre-#366 bundle has its prior half recovered from the
   # stored AIC but no per-parameter report, so the halves are written on a

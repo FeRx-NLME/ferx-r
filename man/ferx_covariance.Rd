@@ -71,10 +71,15 @@ reserved for input problems (missing / hash-mismatched model or data, or a
 fit whose parameters do not match the model, such as a \code{kappa} model whose
 fit carries no \code{omega_iov}).
 
-A fit with a \code{profile} theta level block (\code{fit$profiled_blocks}) has only
-the \code{"r"} covariance step: \code{covariance_method = "s"} or \code{"rsr"} on such a
-fit is an error of class \code{ferx_engine_error} with \code{code = "E_PROFILE_SCOPE"},
-the refusal \code{\link[=ferx_fit]{ferx_fit()}} gives the same request.
+A fit with a \code{profile} theta level block (\code{fit$profiled_blocks}) takes
+all three methods (ferx-core #2108). \code{"rsr"} is the unprofiled sandwich with
+the profiled R^-1; \code{"s"} is S^-1 over every parameter, levels included, and
+still needs more subjects than free parameters. A profiled level the fit
+holds on its declared bound (\code{fit$profiled_levels_at_bound}, ferx-core
+#2112) is held by the step too, as a FIX theta is: it gets no standard
+error, and the others are computed with it held. The step rebuilds that
+list from the estimates and the bound, so the returned fit carries this
+step's.
 \subsection{Settings}{
 
 The step scores the objective under the inner-loop and ODE settings the fit

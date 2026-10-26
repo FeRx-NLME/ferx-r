@@ -24,10 +24,15 @@
 #' fit whose parameters do not match the model, such as a `kappa` model whose
 #' fit carries no `omega_iov`).
 #'
-#' A fit with a `profile` theta level block (`fit$profiled_blocks`) has only
-#' the `"r"` covariance step: `covariance_method = "s"` or `"rsr"` on such a
-#' fit is an error of class `ferx_engine_error` with `code = "E_PROFILE_SCOPE"`,
-#' the refusal [ferx_fit()] gives the same request.
+#' A fit with a `profile` theta level block (`fit$profiled_blocks`) takes
+#' all three methods (ferx-core #2108). `"rsr"` is the unprofiled sandwich with
+#' the profiled R^-1; `"s"` is S^-1 over every parameter, levels included, and
+#' still needs more subjects than free parameters. A profiled level the fit
+#' holds on its declared bound (`fit$profiled_levels_at_bound`, ferx-core
+#' #2112) is held by the step too, as a FIX theta is: it gets no standard
+#' error, and the others are computed with it held. The step rebuilds that
+#' list from the estimates and the bound, so the returned fit carries this
+#' step's.
 #'
 #' ## Settings
 #'
@@ -168,7 +173,6 @@ ferx_covariance <- function(fit,
   # Before the model-file checks, so a loaded fit without a layout is refused
   # for that reason even when its bundle had no model file (#531).
   .ferx_refuse_unavailable_levels(fit)
-  .ferx_refuse_profiled_covariance(fit, cov_method)
 
   model_path <- fit$model_path
   if (is.null(model_path) || is.na(model_path) || !nzchar(model_path)) {
@@ -344,6 +348,9 @@ ferx_covariance <- function(fit,
   if (!is.null(raw$covariance_wall_time_secs)) {
     fit$covariance_wall_time_secs <- as.numeric(raw$covariance_wall_time_secs)
   }
+  # The profiled levels this step held on their bound (ferx-core #2112): the
+  # step rebuilds the list from the estimates, so it replaces the fit's.
+  fit$profiled_levels_at_bound <- as.character(raw$profiled_levels_at_bound %||% character(0))
   # The correlation gate check_strictness() applies is read off the matrix this
   # call just produced, so it is refreshed with it (ferx-core #1177); NaN when
   # the step still produced no matrix.
@@ -479,40 +486,4 @@ ferx_covariance <- function(fit,
   )
 
   fit
-}
-
-# A profiled theta level block's covariance step computes `r` only (ferx-core
-# #2108). The engine's post-hoc step (`profile::replay_covariance`) answers an
-# `s` / `rsr` request with no matrix and a warning, so the call returned a fit
-# with no standard errors and no R condition (#597). `ferx_fit()` refuses the
-# same request up front with `E_PROFILE_SCOPE` (ferx-core
-# `check_profiled_levels`); this raises that refusal, in its words, before the
-# step runs. `cov_method` is the lower-cased, validated token.
-.ferx_refuse_profiled_covariance <- function(fit, cov_method) {
-  blocks <- as.character(fit$profiled_blocks %||% character(0))
-  if (length(blocks) == 0L || cov_method %in% c("r", "hessian")) return(invisible())
-  label <- switch(cov_method, cross_product = "s", sandwich = "rsr", cov_method)
-  subject <- if (length(blocks) == 1L) {
-    sprintf("theta %s[...] is", blocks)
-  } else {
-    n <- length(blocks)
-    sprintf("theta %s and %s[...] are",
-            paste0(blocks[-n], "[...]", collapse = ", "), blocks[n])
-  }
-  text <- sprintf(paste0(
-    "%s `profile`d, whose covariance step computes `r` only for now; this ",
-    "call asks for `covariance_method = %s`."
-  ), subject, label)
-  suggestion <- "Use `covariance_method = r`, or remove `profile`."
-  stop(structure(
-    class = c("ferx_engine_error", "error", "condition"),
-    list(
-      message    = .ferx_engine_message(text, "E_PROFILE_SCOPE", suggestion),
-      call       = sys.call(-1L),
-      code       = "E_PROFILE_SCOPE",
-      block      = "parameters",
-      line       = NA_integer_,
-      suggestion = suggestion
-    )
-  ))
 }

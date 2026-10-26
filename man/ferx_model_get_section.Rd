@@ -42,6 +42,10 @@ ferx_model_get_section(ex$model, "parameters", strip = TRUE)
 m <- ferx_model(ex$data, ex$model)
 ferx_model_get_section(m, "parameters")
 
+# An instance-named section
+tte <- ferx_example("tte_competing_risks")
+ferx_model_get_section(tte$model, "event_model cause_a")
+
 }
 \seealso{
 \code{\link{ferx_model_show}}, \code{\link{ferx_model_edit}},

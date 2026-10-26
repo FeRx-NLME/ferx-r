@@ -80,6 +80,9 @@ validate_fit_for_params <- function(fit) {
     # The blocks the fit solved for rather than searched (ferx-core #1065);
     # the glue sets them on the SIR / covariance skeleton and its level rows.
     profiled_blocks = as.character(fit$profiled_blocks %||% character(0)),
+    # The profiled levels the fit held on their bound (ferx-core #2112), by
+    # name: the glue gives them no level `se` and sets them on the skeleton.
+    profiled_levels_at_bound = as.character(fit$profiled_levels_at_bound %||% character(0)),
     stat_covariate = as.character(cs$covariate),
     stat_median = as.numeric(cs$median),
     stat_mean = as.numeric(cs$mean),
