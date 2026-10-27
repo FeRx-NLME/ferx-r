@@ -5795,6 +5795,46 @@ fn ferx_rust_sha256_raw(bytes: Raw) -> String {
     entry(move || Ok(ferx_core::io::hash::sha256_bytes(bytes.as_slice())))
 }
 
+/// Write the files `entries` (names relative to `dir`) into a new zip archive
+/// at `output`, deflate-compressed, each stored under its bare name.
+///
+/// `ferx_save_fit()` used `utils::zip()`, which shells out to the external
+/// `zip` program named by `R_ZIPCMD`. A Linux box without Info-ZIP installed
+/// leaves that empty, and the save - and with it `ferx_fit(output =)`, after
+/// the whole estimation - failed with "'zip' must be a non-empty character
+/// string" (ferx-r #662). The `zip` crate is already in the graph for
+/// ferx-core's own `.fitrx` writer, so the bundle is written here instead.
+///
+/// @param dir Directory holding the files.
+/// @param entries Character vector of file names within `dir`, in archive order.
+/// @param output Path of the archive to create (overwritten if present).
+/// @return `NULL`, invisibly.
+/// @export
+#[extendr]
+fn ferx_rust_zip_files(dir: &str, entries: Vec<String>, output: &str) {
+    entry(move || {
+        use std::io::Write;
+        let dir = std::path::Path::new(dir);
+        let file = std::fs::File::create(output)
+            .map_err(|e| format!("cannot create {output}: {e}"))?;
+        let mut zw = zip::ZipWriter::new(file);
+        let opts = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated)
+            .unix_permissions(0o644);
+        for name in &entries {
+            let bytes = std::fs::read(dir.join(name))
+                .map_err(|e| format!("cannot read {name}: {e}"))?;
+            zw.start_file(name.as_str(), opts)
+                .map_err(|e| format!("cannot add {name} to {output}: {e}"))?;
+            zw.write_all(&bytes)
+                .map_err(|e| format!("cannot write {name} to {output}: {e}"))?;
+        }
+        zw.finish()
+            .map_err(|e| format!("cannot finish {output}: {e}"))?;
+        Ok(())
+    })
+}
+
 /// The engine's display label for each `method` token, in order (ferx-r #506):
 /// `"vi"` -> `"VI"`, `"importance_sampling"` -> `"IMP"`. Each token is read by
 /// ferx-core's `parse_method_token`, the parser a `[fit_options]` `method =`
@@ -13412,6 +13452,7 @@ extendr_module! {
     fn ferx_rust_cov_labels;
     fn ferx_rust_sha256_text;
     fn ferx_rust_sha256_raw;
+    fn ferx_rust_zip_files;
     fn ferx_rust_stage_data_probe;
     fn ferx_rust_method_labels;
     fn ferx_rust_method_token_labels;
