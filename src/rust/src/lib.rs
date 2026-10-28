@@ -5813,20 +5813,29 @@ fn ferx_rust_sha256_raw(bytes: Raw) -> String {
 #[extendr]
 fn ferx_rust_zip_files(dir: &str, entries: Vec<String>, output: &str) {
     entry(move || {
-        use std::io::Write;
         let dir = std::path::Path::new(dir);
         let file = std::fs::File::create(output)
             .map_err(|e| format!("cannot create {output}: {e}"))?;
-        let mut zw = zip::ZipWriter::new(file);
-        let opts = zip::write::SimpleFileOptions::default()
-            .compression_method(zip::CompressionMethod::Deflated)
-            .unix_permissions(0o644);
+        let mut zw = zip::ZipWriter::new(std::io::BufWriter::new(file));
         for name in &entries {
-            let bytes = std::fs::read(dir.join(name))
+            // Streamed, never read whole: predictions.csv, data.csv or a
+            // SIR-heavy fit.json can run to hundreds of MB, and the save
+            // happens inside an R process that has just held the fit.
+            let mut src = std::fs::File::open(dir.join(name))
                 .map_err(|e| format!("cannot read {name}: {e}"))?;
+            let size = src
+                .metadata()
+                .map_err(|e| format!("cannot read {name}: {e}"))?
+                .len();
+            let opts = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated)
+                .unix_permissions(0o644)
+                // ZIP64 headers only for an entry past the 4 GiB limit, so
+                // ordinary bundles stay plain zip for every reader.
+                .large_file(size >= u64::from(u32::MAX));
             zw.start_file(name.as_str(), opts)
                 .map_err(|e| format!("cannot add {name} to {output}: {e}"))?;
-            zw.write_all(&bytes)
+            std::io::copy(&mut src, &mut zw)
                 .map_err(|e| format!("cannot write {name} to {output}: {e}"))?;
         }
         zw.finish()
