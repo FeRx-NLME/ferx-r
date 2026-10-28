@@ -535,6 +535,9 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
     gradient_method_outer = as.character(fit$gradient_method_outer %||% ""),
     nlopt_missing_algorithms = as.character(fit$nlopt_missing_algorithms %||% character()),
     covariance_status = .fitrx_covariance_status_to_token(fit$covariance_status),
+    # ferx-core #1382's own key: the estimator that produced the matrix, absent
+    # when there is none (#659).
+    covariance_method = .fitrx_opt_chr(fit$covariance_method),
     covariance_n_evals_estimated = .fitrx_opt_num(fit$covariance_n_evals_estimated),
     trace_path = .fitrx_opt_chr(fit$trace_path),
     ebe_convergence_warnings = as.integer(fit$ebe_convergence_warnings %||% 0L),

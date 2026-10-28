@@ -355,6 +355,10 @@ ferx_load_fit <- function(path) {
     # The engine's snake_case token, as ferx_fit() carries it; print() shows
     # it verbatim (#455). Absent reads as "not_requested".
     covariance_status = .fitrx_covariance_status_to_token(w$covariance_status),
+    # The estimator that produced the matrix (ferx-core #1382); NA on a bundle
+    # with no matrix or saved before it was recorded, which ferx_covariance()
+    # notes when it replays the fit's method (#659).
+    covariance_method = .fitrx_unwrap_opt_chr(w$covariance_method) %||% NA_character_,
     # ferx-core #1177. `bic_inputs` is absent on a bundle written before the
     # tally existed; ferx_bic() reports NA on that rather than a wrong penalty.
     # `left_init` is NA when no optimizer recorded an init-escape verdict.
