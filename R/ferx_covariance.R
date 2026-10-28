@@ -588,7 +588,7 @@ ferx_covariance <- function(fit,
         call. = FALSE
       )
     }
-  } else if (had_matrix && !source %in% c("call_settings", "model_file")) {
+  } else if (had_matrix && !(source %||% "") %in% c("call_settings", "model_file")) {
     message(
       "ferx_covariance: the fit does not record which covariance_method its ",
       "step ran (a fit made or saved before ferx-r #659); replaying \"",

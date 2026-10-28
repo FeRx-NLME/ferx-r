@@ -275,3 +275,11 @@ test_that("the call's covariance_method wins over [fit_options], in the fit and 
                "ran \"rsr\" (requested \"rsr\", from the model file's [fit_options])",
                fixed = TRUE)
 })
+
+test_that("a replay with no method source reads as the default", {
+  # The glue always names one; a missing field must not turn the note's
+  # source test into `TRUE && logical(0)`, an error since R 4.3.
+  check <- getFromNamespace(".ferx_cov_method_replay_check", "ferx")
+  expect_message(check(NULL, "r", "r", NULL, had_matrix = TRUE),
+                 "replaying \"r\", from the default", fixed = TRUE)
+})
