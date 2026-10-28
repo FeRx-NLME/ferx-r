@@ -128,7 +128,8 @@ the caller repeated it. The estimator a step ran is recorded as
 runs another estimator than the recorded one warns, naming the method to
 pass. A fit whose step produced a matrix but recorded no estimator, such as
 a bundle saved before #659, is replayed from its call settings, then the
-model file's \verb{[fit_options]}, then \code{"r"}, with a message naming which.
+model file's \verb{[fit_options]}, then \code{"r"}; when it falls back to \code{"r"}
+because neither records a method, a message says so.
 
 A fit loaded with \code{\link[=ferx_load_fit]{ferx_load_fit()}} keeps both, so its result is
 \code{identical()} to the in-fit one too. A fit loaded from a bundle saved before

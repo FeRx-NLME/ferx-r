@@ -74,7 +74,8 @@
 #' runs another estimator than the recorded one warns, naming the method to
 #' pass. A fit whose step produced a matrix but recorded no estimator, such as
 #' a bundle saved before #659, is replayed from its call settings, then the
-#' model file's `[fit_options]`, then `"r"`, with a message naming which.
+#' model file's `[fit_options]`, then `"r"`; when it falls back to `"r"`
+#' because neither records a method, a message says so.
 #'
 #' A fit loaded with [ferx_load_fit()] keeps both, so its result is
 #' `identical()` to the in-fit one too. A fit loaded from a bundle saved before
@@ -564,9 +565,12 @@ ferx_covariance <- function(fit,
 # recorded (NULL when it records none), `ran` the one this replay ran (NA when
 # it produced no matrix), `requested` / `source` what the glue asked for and
 # from where. A fit that recorded its estimator and was replayed under another
-# is warned about: its standard errors were not reproduced. A fit whose step
-# produced a matrix but recorded no estimator (made or saved before #659) gets
-# a note naming the method the replay fell back to.
+# is warned about: its standard errors were not reproduced; one whose replay
+# formed no matrix is not, as covariance_status already says so. A fit whose
+# step produced a matrix but recorded no estimator (made or saved before #659)
+# gets a note only when the replay fell back to the default: its call settings
+# travelled in the bundle and its model file is hash-checked, so a request read
+# from either is the fit's own.
 .ferx_cov_method_replay_check <- function(fit_ran, ran, requested, source,
                                           had_matrix) {
   from <- switch(source %||% "",
@@ -584,7 +588,7 @@ ferx_covariance <- function(fit,
         call. = FALSE
       )
     }
-  } else if (had_matrix) {
+  } else if (had_matrix && !source %in% c("call_settings", "model_file")) {
     message(
       "ferx_covariance: the fit does not record which covariance_method its ",
       "step ran (a fit made or saved before ferx-r #659); replaying \"",
