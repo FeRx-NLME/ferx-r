@@ -825,3 +825,15 @@ test_that("a model that does not parse is still labelled with call-time settings
   expect_s3_class(e, "ferx_engine_error")
   expect_identical(e$code, "E_UNKNOWN_BLOCK")
 })
+
+test_that("an info row is printed but does not make the result 'with warnings' (ferx-core #2427)", {
+  ex <- ferx_example("nested_levels")
+  out <- capture.output(v <- ferx_model_validate(ex$model, data = ex$data))
+  info <- v$diagnostics[v$diagnostics$code == "W_LEVEL_SUMMARY", , drop = FALSE]
+  expect_gt(nrow(info), 0L)
+  expect_true(all(info$severity == "info"))
+  expect_true(v$ok)
+  expect_false(any(v$diagnostics$severity == "warning"))
+  expect_true("Result: VALID" %in% out)
+  expect_true(any(grepl("^  \\* info W_LEVEL_SUMMARY", out)))
+})

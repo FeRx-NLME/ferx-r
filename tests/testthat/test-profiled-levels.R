@@ -432,7 +432,13 @@ test_that("a held level the fit does not have is refused, not dropped", {
 # ~1e-5 against -0.0014 at 1e-2, measured at 32dbb309): the step reports
 # standard errors, flagged only by a TVE0 ~ TVSHIFT correlation of -1.00 and
 # a condition number of 1.6e5. The same model failed at either step before.
-# ferx_covariance() replays the fit's step, so its replays fail too.
+# Since ferx-core #2417 the adjoint route does not read the step at all: it
+# takes the exact Schur-complement Hessian, where this pair is singular only to
+# rounding and comes out positive definite (STATUS: CONVERGED
+# (condition_number)). So the fixture takes the finite-difference route
+# (`analytic_cov_hessian = FALSE`), which #2417 left unchanged.
+# ferx_covariance() replays the fit's step, settings included, so its replays
+# fail too.
 confounded_theta_fit <- local({
   out <- list()
   function(covariance = TRUE) {
@@ -446,7 +452,8 @@ confounded_theta_fit <- local({
       writeLines(txt, m$model)
       out[[key]] <<- quiet(ferx_fit(m$model, m$data, verbose = FALSE,
                                     covariance = covariance,
-                                    fd_hessian_step = 0.01))
+                                    fd_hessian_step = 0.01,
+                                    settings = list(analytic_cov_hessian = FALSE)))
     }
     out[[key]]
   }

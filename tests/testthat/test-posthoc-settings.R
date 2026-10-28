@@ -51,7 +51,7 @@ ps_sir_fields <- function(fit) {
 
 ps_scoring_keys <- c(
   "inner_maxiter", "inner_tol", "inner_restarts", "inner_screen",
-  "mu_referencing", "n_agq",
+  "inner_twin_seed", "mu_referencing", "n_agq",
   "inner_optimizer", "ebe_warm_start", "ode_reltol", "ode_abstol",
   "ode_max_steps", "ode_method", "ode_stiff_abort_after", "ode_auto_switch",
   "gradient_method", "nn_l2_lambda", "nn_smooth_lambda"
@@ -602,6 +602,49 @@ test_that("S13: inner_screen is recorded, round-trips, and reads 0 when absent (
   )
 })
 
+test_that("S13b: inner_twin_seed is recorded, round-trips, and reads FALSE when absent (ferx-core #2095)", {
+  sc <- ferx:::.ferx_default_settings("scoring_settings")
+  expect_identical(sc$inner_twin_seed, TRUE)
+  to <- function(record, kind) ferx:::.fitrx_settings_to_wire(stats::setNames(list(record), kind), kind)
+  from <- ferx:::.fitrx_settings_from_wire
+  json <- function(w) {
+    jsonlite::parse_json(as.character(jsonlite::toJSON(
+      w, auto_unbox = TRUE, null = "null", na = "null", digits = I(17)
+    )))
+  }
+  for (v in c(FALSE, TRUE)) {
+    sc$inner_twin_seed <- v
+    expect_identical(from(json(to(sc, "scoring_settings")), "scoring_settings"), sc)
+    sr <- ferx:::.ferx_default_settings("sir_settings")
+    sr$scoring <- sc
+    expect_identical(from(json(to(sr, "sir_settings")), "sir_settings"), sr)
+  }
+
+  # A record written before ferx-core #2095 has no inner_twin_seed: that fit ran
+  # no twin seed, so it reads as FALSE, not the default TRUE - on the wire, flat
+  # or nested, and in a fit list made before the field existed.
+  sc$inner_twin_seed <- TRUE
+  old <- json(to(sc, "scoring_settings"))
+  old$inner_twin_seed <- NULL
+  expect_identical(from(old, "scoring_settings")$inner_twin_seed, FALSE)
+  sr <- ferx:::.ferx_default_settings("sir_settings")
+  old_sir <- json(to(sr, "sir_settings"))
+  old_sir$inner_twin_seed <- NULL
+  expect_identical(from(old_sir, "sir_settings")$scoring$inner_twin_seed, FALSE)
+  mem <- sc[names(sc) != "inner_twin_seed"]
+  expect_identical(
+    ferx:::ferx_rust_settings_record("scoring_settings", mem, "", "")$inner_twin_seed, FALSE
+  )
+  # settings = list(inner_twin_seed =) reaches the engine's record.
+  ex <- ferx_example("warfarin")
+  fit_r <- function(settings) {
+    suppressWarnings(ferx_fit(ex$model, ex$data, covariance = FALSE,
+                              verbose = FALSE, settings = settings))
+  }
+  expect_identical(fit_r(list(inner_twin_seed = FALSE))$scoring_settings$inner_twin_seed, FALSE)
+  expect_identical(fit_r(list())$scoring_settings$inner_twin_seed, TRUE)
+})
+
 test_that("S14: settings = list(inner_screen =) reaches the engine as the model file's does (#589)", {
   ex <- ferx_example("warfarin")
   fit_r <- function(settings) {
@@ -632,7 +675,8 @@ test_that("S14: settings = list(inner_screen =) reaches the engine as the model 
 # The keys a record may lack, and the value each is read as. Every other key
 # is refused when missing. A key added to the records must be added here or
 # to the refusals on purpose: the test walks the engine's own record.
-ps_missing_fills <- list(inner_restarts = 1L, inner_screen = 0L, gradient_method = "auto",
+ps_missing_fills <- list(inner_restarts = 1L, inner_screen = 0L, inner_twin_seed = FALSE,
+                         gradient_method = "auto",
                          nn_l2_lambda = NA_real_, nn_smooth_lambda = NA_real_)
 
 test_that("S16: a missing key is filled as ferx-core's wire fills it, or refused with the way out (#535)", {
@@ -643,6 +687,7 @@ test_that("S16: a missing key is filled as ferx-core's wire fills it, or refused
   # A non-default value everywhere a fill could be confused with the default.
   sc$inner_restarts <- 4L
   sc$inner_screen <- 7L
+  sc$inner_twin_seed <- TRUE
   sc$gradient_method <- "fd"
   sc$nn_l2_lambda <- 0.5
   sc$nn_smooth_lambda <- 0.25

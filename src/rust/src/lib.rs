@@ -6623,6 +6623,7 @@ fn ferx_rust_validate_model(model_path: &str, data_path: &str) -> List {
             severity.push(match d.severity {
                 ferx_core::Severity::Error => "error".to_string(),
                 ferx_core::Severity::Warning => "warning".to_string(),
+                ferx_core::Severity::Info => "info".to_string(),
             });
             code.push(d.code.clone());
             message.push(d.message.clone());
@@ -7243,6 +7244,10 @@ const SCORING_KEYS: &[RecordKey] = &[
     // inner screen: `0`, as ferx-core's wire fills it - not today's default
     // (`100`), which would screen where the fit did not.
     record_key("inner_screen", "inner_screen", MissingKey::Fill("0")),
+    // Absent from a record written before ferx-core #2095, whose fit ran no
+    // flip-flop twin seed: `false`, as ferx-core's wire fills it - not today's
+    // default (`true`), which would seed where the fit did not.
+    record_key("inner_twin_seed", "inner_twin_seed", MissingKey::Fill("false")),
     record_key("mu_referencing", "mu_referencing", MissingKey::Refuse),
     record_key("n_agq", "n_agq", MissingKey::Refuse),
     record_key("inner_optimizer", "inner_optimizer", MissingKey::Refuse),
@@ -7323,6 +7328,7 @@ fn scoring_settings_to_r(s: &ferx_core::ScoringSettings) -> std::result::Result<
         inner_tol,
         inner_restarts,
         inner_screen,
+        inner_twin_seed,
         mu_referencing,
         n_agq,
         inner_optimizer,
@@ -7343,6 +7349,7 @@ fn scoring_settings_to_r(s: &ferx_core::ScoringSettings) -> std::result::Result<
         inner_tol = *inner_tol,
         inner_restarts = count_to_r(*inner_restarts),
         inner_screen = count_to_r(*inner_screen),
+        inner_twin_seed = *inner_twin_seed,
         mu_referencing = *mu_referencing,
         n_agq = count_to_r(*n_agq),
         inner_optimizer = fit_option_token(serde_json::to_value(inner_optimizer))?,
@@ -7626,7 +7633,8 @@ fn sir_settings_from_r(
 /// A `.fitrx` `sir.settings` block (ferx-core's `SirSettingsWire`) as the nested
 /// list `fit$sir_settings` is: the scoring keys sit flattened beside the SIR
 /// ones on the wire. A scoring key the block lacks (`inner_restarts`, absent
-/// between ferx-core #1758 and #426; `inner_screen`, absent before #2013) is
+/// between ferx-core #1758 and #426; `inner_screen`, absent before #2013;
+/// `inner_twin_seed`, absent before #2095) is
 /// filled by the decoder from `SCORING_KEYS`, as for the top-level record. Any other name stays at the top
 /// level, where the decoder refuses it by name.
 fn sir_settings_unflatten(record: &Robj) -> std::result::Result<Robj, String> {

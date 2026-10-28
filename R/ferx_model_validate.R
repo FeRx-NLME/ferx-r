@@ -25,8 +25,12 @@
 #'   \code{data}, and a \code{diagnostics} data frame with one row per finding
 #'   (\code{severity}, \code{code}, \code{message}, \code{block}, \code{line},
 #'   \code{suggestion}). The function always prints a report to the console.
-#'   Codes are stable identifiers (\code{E_*} for errors, \code{W_*} for
-#'   warnings) suitable for programmatic handling - the registry lives in
+#'   \code{severity} is \code{"error"}, \code{"warning"} or \code{"info"}; an
+#'   \code{"info"} row reports a fact about the model rather than a finding
+#'   (\code{W_LEVEL_SUMMARY}'s per-level counts) and does not make the result
+#'   "with warnings". Codes are stable identifiers (\code{E_*} for errors,
+#'   \code{W_*} for warnings and informational rows) suitable for programmatic
+#'   handling - the registry lives in
 #'   ferx-core's \code{docs/src/file-formats/check-report.md}. A missing file
 #'   or non-\code{.ferx} extension raises an error rather than returning a
 #'   failed diagnostic.
@@ -141,7 +145,10 @@ ferx_model_validate <- function(path, data = NULL) {
   }
   cat("\n")
 
-  if (ok && nrow(diag) == 0L) {
+  # An `info` row reports a fact about the model (W_LEVEL_SUMMARY's per-level
+  # counts, ferx-core #2427), not a finding: it is printed but does not make
+  # the result "with warnings", as `ferx check` does not count it.
+  if (ok && !any(diag$severity == "warning")) {
     cat("Result: VALID\n")
   } else if (ok) {
     cat("Result: VALID (with warnings)\n")
@@ -150,7 +157,7 @@ ferx_model_validate <- function(path, data = NULL) {
   }
   if (nrow(diag) > 0L) {
     for (i in seq_len(nrow(diag))) {
-      tag <- if (diag$severity[i] == "error") "ERROR" else "warning"
+      tag <- switch(diag$severity[i], error = "ERROR", info = "info", "warning")
       loc <- if (!is.na(diag$block[i])) {
         if (!is.na(diag$line[i])) sprintf(" [%s:%d]", diag$block[i], diag$line[i])
         else sprintf(" [%s]", diag$block[i])
