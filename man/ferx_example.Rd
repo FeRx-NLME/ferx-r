@@ -280,9 +280,10 @@ depends on the drug concentration, fit jointly with the PK. The
 references the ODE PK state; ferx appends it as a cumulative-hazard ODE
 state (\code{d/dt(__chz) = hazard}) and estimates PK + TTE together by
 FOCEI, sharing the CL random effect (ferx-core #564). Oral dose on CMT 1,
-PK observed on CMT 2, event on CMT 3. \code{ferx_fit()} and
-\code{ferx_predict_survival()} are supported; simulating an ODE-accumulated
-hazard is not yet (a later slice adds the event-time root-finder).}
+PK observed on CMT 2, event on CMT 3. \code{ferx_fit()},
+\code{ferx_predict_survival()} and \code{ferx_simulate()} are supported;
+simulating the event needs a finite \code{horizon} (administrative
+censoring time), e.g. \code{ferx_simulate(..., horizon = 24)}.}
 \item{binary_logistic}{Binary / logistic endpoint (\code{[binary_model]},
 ferx-core #760). A fixed-effects (\code{n_eta = 0}) logistic regression: the
 0/1 outcome DV on CMT 3 is Bernoulli with
