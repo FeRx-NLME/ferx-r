@@ -3860,6 +3860,9 @@ fn default_fit_result(
 /// * a free `block_sigma` takes the fitted residual covariance
 ///   (`seed_block_sigmas`): `SeedInits` leaves it at its declared values,
 ///   so a refit from the file started the residual model off the optimum;
+/// * a `[mixture]` fit's per-class `omega(k)` / `sigma(k)` overrides take
+///   their fitted values (`seed_mixture_overrides`), which `SeedInits` does
+///   not read;
 /// * a comment at the end of a declaration `SeedInits` rewrote is put back
 ///   (`restore_trailing_comments`): the engine writes such a line afresh from
 ///   its comment-stripped code.
@@ -3877,6 +3880,8 @@ fn default_fit_result(
 ///   (`omega_iov_dim = 0` for none), by kappa name.
 /// @param residual_rho,residual_rho_pairs Fitted `block_sigma` correlations
 ///   and their 1-based sigma pairs, flattened `i1, j1, i2, j2, ...`.
+/// @param mixture_overrides A `[mixture]` fit's fitted per-class overrides
+///   (`fit$mixture_overrides`; empty for none).
 /// @return A list: `text`, the rendered model, and `notes`, one line per
 ///   declaration left as written that a refit would want seeded.
 /// @export
@@ -3896,6 +3901,7 @@ fn ferx_rust_update_model(
     kappa_names: Vec<String>,
     residual_rho: Vec<f64>,
     residual_rho_pairs: Vec<i32>,
+    mixture_overrides: Vec<f64>,
 ) -> Robj {
     entry(move || {
         let parsed = ferx_core::parser::model_parser::parse_full_model(model_text)
@@ -3944,6 +3950,11 @@ fn ferx_rust_update_model(
             &residual_rho_pairs,
             &mut notes,
         );
+        let seeded = if parsed.model.default_params.mixture.is_some() {
+            seed_mixture_overrides(&seeded, &mixture_overrides, &mut notes)
+        } else {
+            seeded
+        };
         let mut text = ferx_core::edit::ModelText::parse(&seeded)?;
         let mut fit = default_fit_result(
             &parsed.model,
@@ -4000,7 +4011,8 @@ fn split_terminator(line: &str) -> (&str, &str) {
 /// `block_sigma` declaration of `[parameters]`: the lower triangle, row by
 /// row, of `rho_ij * sd_i * sd_j` (`sd_i^2` on the diagonal) - the scale the
 /// parser reads it on, variances and covariances. Only the numbers between
-/// the brackets change. A `FIX` block is a statement about the model and is
+/// the brackets change. A `FIX` block - `FIX` on the line, or on a line the
+/// parser folds onto it (`folded_fix`) - is a statement about the model and is
 /// left alone, as `SeedInits` leaves a `FIX` `block_omega`; a block the fit
 /// carries no value for (a sigma or a correlation missing, or not finite) is
 /// left as written, and one whose bracket spans lines is left as written with
@@ -4033,9 +4045,10 @@ fn seed_block_sigmas(
             .any(|w| w.eq_ignore_ascii_case("FIX"))
     };
 
+    let lines: Vec<&str> = model_text.split_inclusive('\n').collect();
     let mut in_parameters = false;
     let mut out = String::with_capacity(model_text.len());
-    for line in model_text.split_inclusive('\n') {
+    for (at, &line) in lines.iter().enumerate() {
         let (body, term) = split_terminator(line);
         let code_len = split_comment(body).map_or(body.trim_end().len(), |(end, _)| end);
         let code = body[..code_len].trim();
@@ -4046,7 +4059,7 @@ fn seed_block_sigmas(
         let declares = in_parameters
             && lower.starts_with("block_sigma")
             && lower["block_sigma".len()..].trim_start().starts_with('(');
-        if !declares || is_fix(code) {
+        if !declares || is_fix(code) || folded_fix(&lines[at + 1..]) {
             out.push_str(line);
             continue;
         }
@@ -4112,6 +4125,113 @@ fn declaration_head(line: &str) -> &str {
         Some(at) => code[..at].trim_end(),
         None => "",
     }
+}
+
+/// Whether the lines after a block declaration fold a `FIX` onto it: the
+/// parser folds a line holding only `FIX` or a scale tag onto the block
+/// declaration before it (`folds_onto_block_declaration`, crate-private), so
+/// `block_sigma (A, B) = [...]` with `FIX` on the next line is a `FIX` block.
+/// Blank and comment-only lines between them are skipped, as the parser
+/// skips them.
+fn folded_fix(after: &[&str]) -> bool {
+    for line in after {
+        let (body, _) = split_terminator(line);
+        let code = split_comment(body).map_or(body, |(end, _)| &body[..end]).trim();
+        if code.is_empty() {
+            continue;
+        }
+        if code.eq_ignore_ascii_case("FIX") {
+            return true;
+        }
+        let tag = code
+            .strip_prefix('(')
+            .and_then(|c| c.strip_suffix(')'))
+            .map(|c| c.trim().to_ascii_lowercase());
+        if !matches!(tag.as_deref(), Some("sd" | "variance" | "var")) {
+            return false;
+        }
+    }
+    false
+}
+
+/// Write a `[mixture]` fit's per-class overrides into their declarations
+/// (ferx-r #678), which `SeedInits` does not read: `overrides` is
+/// `FitResult::mixture_overrides`, each `omega(k)` override's class variance
+/// and then each `sigma(k)` override's class SD, in declaration order. A value
+/// is written on its line's own scale - the variance, or the SD under `(sd)`,
+/// for either kind - and replaces only the number after `~`. A `FIX` override
+/// is left as written, as a `FIX` base parameter is. A fit that records no
+/// overrides, or another count than the block declares, leaves every override
+/// as written, with a note.
+fn seed_mixture_overrides(model_text: &str, overrides: &[f64], notes: &mut Vec<String>) -> String {
+    // (line index, is_omega) of every override declaration, in file order.
+    let lines: Vec<&str> = model_text.split_inclusive('\n').collect();
+    let mut decls: Vec<(usize, bool)> = Vec::new();
+    let mut in_mixture = false;
+    for (at, line) in lines.iter().enumerate() {
+        let (body, _) = split_terminator(line);
+        let code = split_comment(body).map_or(body, |(end, _)| &body[..end]).trim();
+        if code.starts_with('[') && code.ends_with(']') {
+            in_mixture = code[1..code.len() - 1].trim().eq_ignore_ascii_case("mixture");
+            continue;
+        }
+        let lower = code.to_ascii_lowercase();
+        let kind = ["omega", "sigma"].into_iter().find(|k| {
+            in_mixture && lower.starts_with(k) && lower[k.len()..].trim_start().starts_with('(')
+        });
+        if let Some(k) = kind {
+            decls.push((at, k == "omega"));
+        }
+    }
+    if decls.is_empty() {
+        return model_text.to_string();
+    }
+    if overrides.len() != decls.len() {
+        notes.push(format!(
+            "the fit records {} [mixture] override values but the model declares {} \
+             `omega(k)` / `sigma(k)` overrides; they were left as written",
+            overrides.len(),
+            decls.len()
+        ));
+        return model_text.to_string();
+    }
+    // The fit's layout: every omega override first, then every sigma one.
+    let n_omega = decls.iter().filter(|(_, o)| *o).count();
+    let (mut next_omega, mut next_sigma) = (0usize, n_omega);
+    let mut value_at: HashMap<usize, (bool, f64)> = HashMap::new();
+    for &(at, is_omega) in &decls {
+        let slot = if is_omega { &mut next_omega } else { &mut next_sigma };
+        value_at.insert(at, (is_omega, overrides[*slot]));
+        *slot += 1;
+    }
+
+    let mut out = String::with_capacity(model_text.len());
+    for (at, line) in lines.iter().enumerate() {
+        let rewritten = value_at.get(&at).and_then(|&(is_omega, v)| {
+            let (body, term) = split_terminator(line);
+            let code_len = split_comment(body).map_or(body.trim_end().len(), |(end, _)| end);
+            let code = &body[..code_len];
+            let words = code.split(|c: char| !c.is_ascii_alphanumeric() && c != '_');
+            if words.clone().any(|w| w.eq_ignore_ascii_case("FIX")) || !v.is_finite() {
+                return None;
+            }
+            let as_sd = code.to_ascii_lowercase().replace(' ', "").contains("(sd)");
+            let value = match (is_omega, as_sd) {
+                (true, true) => v.sqrt(),
+                (true, false) => v,
+                (false, true) => v,
+                (false, false) => v * v,
+            };
+            let tilde = code.find('~')?;
+            let start = tilde + 1 + (code[tilde + 1..].len() - code[tilde + 1..].trim_start().len());
+            let len = code[start..]
+                .find(|c: char| !(c.is_ascii_digit() || matches!(c, '.' | 'e' | 'E' | '+' | '-')))
+                .unwrap_or(code.len() - start);
+            (len > 0).then(|| format!("{}{value}{}{term}", &body[..start], &body[start + len..]))
+        });
+        out.push_str(rewritten.as_deref().unwrap_or(line));
+    }
+    out
 }
 
 /// Put back the trailing comments `SeedInits` drops. It rewrites a

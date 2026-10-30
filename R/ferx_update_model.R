@@ -20,6 +20,10 @@
 #'     triangle on the variance scale it is declared on: \code{sigma_i^2} on
 #'     the diagonal, \code{rho_ij * sigma_i * sigma_j} off it (a block whose
 #'     bracket spans lines is left as written, with a warning);
+#'   \item a \code{[mixture]} fit's per-class \code{omega(k)} /
+#'     \code{sigma(k)} overrides take their fitted class values
+#'     (\code{fit$mixture_overrides}), on each line's own scale; a fit that
+#'     records none leaves them as written, with a warning;
 #'   \item a \code{FIX}ed parameter is left as declared, as is a vector theta
 #'     (\code{theta NAME[...]}) and any estimate that is not finite.
 #' }
@@ -112,7 +116,10 @@ ferx_update_model <- function(fit, path = NULL, overwrite = FALSE) {
     # Fitted `block_sigma` correlations by sigma pair: the engine's edit does
     # not seed `block_sigma`, so the glue writes the residual covariance.
     residual_rho       = .ferx_residual_rho_vec(fit),
-    residual_rho_pairs = .ferx_residual_rho_pairs(fit)
+    residual_rho_pairs = .ferx_residual_rho_pairs(fit),
+    # A [mixture] fit's per-class omega(k) / sigma(k) overrides, which the
+    # engine's edit does not read either (numeric(0) when none).
+    mixture_overrides  = as.numeric(fit$mixture_overrides %||% numeric())
   )
   for (note in res$notes) warning("ferx_update_model: ", note, call. = FALSE)
   res$text

@@ -42,6 +42,10 @@ triangle, keeping its block structure;
 triangle on the variance scale it is declared on: \code{sigma_i^2} on
 the diagonal, \code{rho_ij * sigma_i * sigma_j} off it (a block whose
 bracket spans lines is left as written, with a warning);
+\item a \code{[mixture]} fit's per-class \code{omega(k)} /
+\code{sigma(k)} overrides take their fitted class values
+(\code{fit$mixture_overrides}), on each line's own scale; a fit that
+records none leaves them as written, with a warning;
 \item a \code{FIX}ed parameter is left as declared, as is a vector theta
 (\code{theta NAME[...]}) and any estimate that is not finite.
 }

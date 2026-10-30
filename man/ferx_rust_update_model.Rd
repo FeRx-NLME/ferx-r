@@ -17,7 +17,8 @@ ferx_rust_update_model(
   omega_iov_dim,
   kappa_names,
   residual_rho,
-  residual_rho_pairs
+  residual_rho_pairs,
+  mixture_overrides
 )
 }
 \description{

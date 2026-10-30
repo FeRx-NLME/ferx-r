@@ -276,3 +276,87 @@ test_that("a block_sigma written over lines is left as written, with a warning (
   lines <- strsplit(text, "\n", fixed = TRUE)[[1]]
   expect_true(all(src[at + 0:1] %in% lines))
 })
+
+test_that("a FIX folded onto block_sigma from the next line is left as declared (#678)", {
+  case <- block_sigma_case(c(
+    "  block_sigma (PROP_ERR, ADD_ERR) = [0.04, 0.10, 0.30]",
+    "    FIX"
+  ))
+  on.exit(unlink(dirname(case$model), recursive = TRUE), add = TRUE)
+  expect_identical(case$fit$residual_correlations$fixed, TRUE)
+  lines <- strsplit(ferx_update_model(case$fit), "\n", fixed = TRUE)[[1]]
+  at <- grep("block_sigma", lines)
+  expect_identical(lines[at + 0:1],
+                   c("  block_sigma (PROP_ERR, ADD_ERR) = [0.04, 0.10, 0.30]",
+                     "    FIX"))
+})
+
+# A two-class [mixture] model with per-class overrides - the shape of
+# test-ferx_covariance.R's `mixture_fit()` - on each scale, plus a FIX one.
+mixture_update_fit <- function() {
+  mod <- tempfile(fileext = ".ferx")
+  writeLines(c(
+    "[parameters]",
+    "  theta TVCL1(0.1, 0.001, 10.0)",
+    "  theta TVCL2(0.2, 0.001, 10.0)",
+    "  theta TVV(8.0, 0.1, 500.0)",
+    "  theta TVKA(1.0, 0.01, 50.0)",
+    "  theta P1(0.5, 0.01, 0.99)",
+    "  omega ETA_CL ~ 0.07",
+    "  omega ETA_V ~ 0.02",
+    "  sigma PROP_ERR ~ 0.01",
+    "[mixture]",
+    "  nsub = 2",
+    "  p(1) = P1",
+    "  omega(2) ETA_CL ~ 0.10   # class-2 IIV",
+    "  omega(2) ETA_V ~ 0.03 FIX",
+    "  sigma(2) PROP_ERR ~ 0.15 (sd)",
+    "[individual_parameters]",
+    "  CL = if (MIXNUM == 1) TVCL1 * exp(ETA_CL) else TVCL2 * exp(ETA_CL)",
+    "  V  = TVV * exp(ETA_V)",
+    "  KA = TVKA",
+    "[structural_model]",
+    "  pk one_cpt_oral(cl=CL, v=V, ka=KA)",
+    "[error_model]",
+    "  DV ~ proportional(PROP_ERR)"
+  ), mod)
+  suppressWarnings(ferx_fit(mod, ferx_example("warfarin")$data, method = "foce",
+                            verbose = FALSE, covariance = FALSE,
+                            settings = list(maxiter = 30L)))
+}
+
+test_that("a [mixture] fit's per-class overrides take their fitted values (#678)", {
+  fit <- mixture_update_fit()
+  on.exit(unlink(fit$model_path), add = TRUE)
+  ov <- fit$mixture_overrides
+  expect_length(ov, 3L)  # omega(2) ETA_CL, omega(2) ETA_V, sigma(2) PROP_ERR
+  out <- tempfile(fileext = ".ferx")
+  on.exit(unlink(out), add = TRUE)
+  ferx_update_model(fit, out)
+  lines <- trimws(readLines(out))
+
+  cl <- grep("^omega\\(2\\) ETA_CL", lines, value = TRUE)
+  expect_match(cl, "   # class-2 IIV$")
+  expect_equal(as.numeric(sub("^omega\\(2\\) ETA_CL ~ (\\S+).*$", "\\1", cl)),
+               ov[1], tolerance = 1e-12)
+  expect_true("omega(2) ETA_V ~ 0.03 FIX" %in% lines)
+  sg <- grep("^sigma\\(2\\) PROP_ERR", lines, value = TRUE)
+  expect_equal(as.numeric(sub("^sigma\\(2\\) PROP_ERR ~ (\\S+) \\(sd\\)$", "\\1", sg)),
+               ov[3], tolerance = 1e-12)
+
+  refit <- suppressWarnings(ferx_fit(out, ferx_example("warfarin")$data,
+                                     method = "foce", verbose = FALSE,
+                                     covariance = FALSE,
+                                     settings = list(maxiter = 0L)))
+  expect_equal(refit$ofv, fit$ofv, tolerance = 1e-6)
+  expect_equal(refit$mixture_overrides, ov, tolerance = 1e-10)
+})
+
+test_that("a [mixture] fit without recorded overrides warns and leaves them (#678)", {
+  fit <- mixture_update_fit()
+  on.exit(unlink(fit$model_path), add = TRUE)
+  fit$mixture_overrides <- NULL
+  expect_warning(text <- ferx_update_model(fit), "left as written")
+  expect_true("  omega(2) ETA_CL ~ 0.10   # class-2 IIV" %in%
+                strsplit(text, "\n", fixed = TRUE)[[1]])
+})
