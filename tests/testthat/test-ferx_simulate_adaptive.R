@@ -103,15 +103,16 @@ test_that("trajectories carry MIXNUM on a [mixture] model only (ferx-core #2372)
   lines <- sub("  CL = TVCL * exp(ETA_CL)",
                "  CL = if (MIXNUM == 1) TVCL * exp(ETA_CL) else 2 * TVCL * exp(ETA_CL)",
                lines, fixed = TRUE)
+  # The rewrite must have landed, or the model has no class-dependent CL.
+  expect_true(any(grepl("if (MIXNUM == 1)", lines, fixed = TRUE)))
   lines <- append(lines, c("  theta MIXL(-0.8472979, -10.0, 10.0)"), after = 3L)
   lines <- append(lines, c("[mixture]", "  nsub = 2", "  logit(1) = MIXL"),
                   after = which(lines == "[individual_parameters]") - 1L)
   writeLines(lines, path)
 
-  # suppressWarnings: the engine calls MIXL "not referenced in any model
-  # expression" - its unused-parameter lint does not read [mixture]
-  # (ferx-core #2483). Drop this once the fix is in the pin.
-  res <- suppressWarnings(ferx_simulate_adaptive(path, data, n_sim = 50L, seed = 1L))
+  # The engine calls MIXL "not referenced" (ferx-core #2483); see
+  # helper-mixture-lint.R.
+  res <- muffle_mixl_lint(ferx_simulate_adaptive(path, data, n_sim = 50L, seed = 1L))
   traj <- res$trajectories
   expect_identical(tail(names(traj), 1L), "MIXNUM")
   expect_type(traj$MIXNUM, "integer")
