@@ -3849,6 +3849,92 @@ fn default_fit_result(
     }
 }
 
+/// Write a fit's final estimates into its model text as the initial values
+/// (ferx-r #678): ferx-core's `ModelEdit::SeedInits`, the edit every search
+/// writes its `final.ferx` with, then `ModelText::render`. Bounds, `FIX`
+/// (left as declared), `(sd)` scale, block structure, comments and every other
+/// block are kept as written.
+///
+/// `SeedInits` reads only the estimates and their names, so the `FitResult`
+/// is the uncertainty path's skeleton with the fit's own names laid over the
+/// model's: a level-block model's theta names are data-derived and exist only
+/// in the fit.
+///
+/// @param model_text The fitted model's source.
+/// @param theta,theta_names Fitted theta, by name.
+/// @param omega_flat,omega_dim,eta_names Fitted omega, row-major, by eta name.
+/// @param sigma,sigma_names Fitted sigma on the SD scale, by name.
+/// @param omega_iov_flat,omega_iov_dim,kappa_names Fitted kappa covariance
+///   (`omega_iov_dim = 0` for none), by kappa name.
+/// @return The rendered model text.
+/// @export
+#[extendr]
+#[allow(clippy::too_many_arguments)]
+fn ferx_rust_update_model(
+    model_text: &str,
+    theta: Vec<f64>,
+    theta_names: Vec<String>,
+    omega_flat: Vec<f64>,
+    omega_dim: i32,
+    eta_names: Vec<String>,
+    sigma: Vec<f64>,
+    sigma_names: Vec<String>,
+    omega_iov_flat: Vec<f64>,
+    omega_iov_dim: i32,
+    kappa_names: Vec<String>,
+) -> String {
+    entry(move || {
+        let parsed = ferx_core::parser::model_parser::parse_full_model(model_text)
+            .map_err(|e| format!("Error parsing model: {e}"))?;
+        let mut text = ferx_core::edit::ModelText::parse(model_text)?;
+        let same_len = |what: &str, values: usize, names: usize| {
+            if values == names {
+                Ok(())
+            } else {
+                Err(format!(
+                    "ferx_update_model: the fit carries {values} {what} estimates but {names} names"
+                ))
+            }
+        };
+        let d = omega_dim.max(0) as usize;
+        if omega_flat.len() != d * d {
+            return Err(format!(
+                "ferx_update_model: omega_flat length {} does not match {d} x {d}",
+                omega_flat.len()
+            ));
+        }
+        let k = omega_iov_dim.max(0) as usize;
+        if omega_iov_flat.len() != k * k {
+            return Err(format!(
+                "ferx_update_model: omega_iov_flat length {} does not match {k} x {k}",
+                omega_iov_flat.len()
+            ));
+        }
+        same_len("theta", theta.len(), theta_names.len())?;
+        same_len("omega", d, eta_names.len())?;
+        same_len("sigma", sigma.len(), sigma_names.len())?;
+        same_len("kappa", k, kappa_names.len())?;
+
+        let mut fit = default_fit_result(
+            &parsed.model,
+            theta,
+            DMatrix::from_row_slice(d, d, &omega_flat),
+            sigma,
+            (k > 0).then(|| DMatrix::from_row_slice(k, k, &omega_iov_flat)),
+            None,
+            None,
+            Vec::new(),
+            None,
+        );
+        fit.theta_names = theta_names;
+        fit.eta_names = eta_names;
+        fit.sigma_names = sigma_names;
+        fit.kappa_names = kappa_names;
+        text.apply(ferx_core::edit::ModelEdit::SeedInits(&fit))?;
+        Ok(text.render())
+    })
+}
+
 // -- Helper: SimulationResult slice → R data frame --
 
 /// Attach simulation / data-reader diagnostics as a `simulation_warnings`
@@ -13636,6 +13722,7 @@ extendr_module! {
     fn ferx_rust_warning_details_canonical;
     fn ferx_rust_theta_levels_from_fit;
     fn ferx_rust_fitrx_engine_resave;
+    fn ferx_rust_update_model;
     fn ferx_rust_eta_info_by_name;
     fn ferx_rust_classify_warnings;
     fn ferx_rust_validate_model;

@@ -60,6 +60,12 @@ FITRX_FORMAT_VERSION <- "1"
 #'   A fit whose \code{data} was a data.frame (\code{fit$data_source} set)
 #'   always embeds it: its file lives only in a temporary directory, so a
 #'   bundle without it could not be re-read.
+#' @param write_model Logical. When \code{TRUE}, also write the fitted model
+#'   with its final estimates as initial values (\code{\link{ferx_update_model}})
+#'   next to the bundle, as \code{<name>_final.ferx} for an \code{output} of
+#'   \code{<name>.fitrx}. An existing file of that name is replaced, unless it
+#'   is the fit's own model file (\code{fit$model_path}), which is an error.
+#'   Default \code{FALSE}.
 #' @return Invisibly returns \code{fit}, so the function can be used inside a
 #'   pipe without breaking the chain:
 #'   \preformatted{
@@ -76,7 +82,8 @@ FITRX_FORMAT_VERSION <- "1"
 #' ferx_save_fit(fit, tmp)
 #' fit2 <- ferx_load_fit(tmp)
 #' identical(fit$theta, fit2$theta)
-ferx_save_fit <- function(fit, output, include_data = FALSE) {
+ferx_save_fit <- function(fit, output, include_data = FALSE,
+                          write_model = FALSE) {
   if (!inherits(fit, "ferx_fit")) {
     stop("`fit` must be a ferx_fit object (returned by ferx_fit()).")
   }
@@ -86,6 +93,9 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   if (!is.logical(include_data) || length(include_data) != 1L || is.na(include_data)) {
     stop("`include_data` must be TRUE or FALSE.")
   }
+  if (!is.logical(write_model) || length(write_model) != 1L || is.na(write_model)) {
+    stop("`write_model` must be TRUE or FALSE.")
+  }
 
   # Default the archive extension to `.fitrx` when the caller passes a bare
   # path with no extension, so `ferx_save_fit(fit, "results/run1")` lands at
@@ -94,6 +104,23 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   # `ferx_load_fit()` mirrors this by falling back to `<path>.fitrx`.
   if (!nzchar(tools::file_ext(output))) {
     output <- paste0(output, ".fitrx")
+  }
+
+  # The updated model is rendered before anything is written, so a fit the
+  # engine cannot seed fails without leaving a bundle behind. Its name never
+  # takes the fit's own model file: `run1.fitrx` saved beside `run1.ferx`
+  # writes `run1_final.ferx`, and a path that still lands on the model file
+  # is refused rather than overwriting the source.
+  if (write_model) {
+    model_out_path <- paste0(tools::file_path_sans_ext(output), "_final.ferx")
+    src <- fit$model_path
+    if (is.character(src) && length(src) == 1L && !is.na(src) &&
+        file.exists(src) && file.exists(model_out_path) &&
+        identical(normalizePath(src), normalizePath(model_out_path))) {
+      stop("write_model = TRUE would overwrite the fit's own model file ",
+           src, "; save the bundle under another name.")
+    }
+    updated_model <- .ferx_updated_model_text(fit)
   }
 
   staging <- tempfile("fitrx_")
@@ -260,6 +287,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   if (!file.copy(zip_tmp, out_abs, overwrite = TRUE)) {
     stop(sprintf("failed to move zip archive into place at %s", out_abs))
   }
+  if (write_model) writeBin(charToRaw(updated_model), model_out_path)
 
   invisible(fit)
 }

@@ -89,6 +89,7 @@ export(ferx_simulate_with_uncertainty)
 export(ferx_sir)
 export(ferx_stop)
 export(ferx_trace)
+export(ferx_update_model)
 export(ferx_xpose)
 importFrom(graphics,
   abline,

@@ -273,6 +273,12 @@ ferx_rust_fitrx_engine_resave <- function(path, out_path) {
 
 #' @title Internal Rust backend binding
 #' @keywords internal
+ferx_rust_update_model <- function(model_text, theta, theta_names, omega_flat, omega_dim, eta_names, sigma, sigma_names, omega_iov_flat, omega_iov_dim, kappa_names) {
+  .Call("wrap__ferx_rust_update_model", model_text, theta, theta_names, omega_flat, omega_dim, eta_names, sigma, sigma_names, omega_iov_flat, omega_iov_dim, kappa_names)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
 ferx_rust_eta_info_by_name <- function(eta_names, info_names, info_types, info_linked) {
   .Call("wrap__ferx_rust_eta_info_by_name", eta_names, info_names, info_types, info_linked)
 }
