@@ -2378,7 +2378,10 @@ fn bind_design_from_fit(
 /// mismatch` text, the one `resolve_fit_inputs` raises - before the from-fit
 /// prologue can blame the fit for lacking bindings the edit asked for (ferx-r
 /// #492). The text and the parse it returns are that same read, which is what
-/// `bind_layout_from_fit` lays out.
+/// `bind_layout_from_fit` lays out. The refusal is coded (ferx-core #2027):
+/// an edited file reaches R as `E_FIT_INPUT_CHANGED`, as an edited data file
+/// does, and a file that no longer parses with its parse code. `entry` is the
+/// error's context, which its `Display` prints, so no prefix is added.
 fn read_fit_model(
     entry: &str,
     model_path: &str,
@@ -2389,6 +2392,7 @@ fn read_fit_model(
         (!model_hash.is_empty()).then_some(model_hash),
         entry,
     )
+    .map_err(|e| engine_refusal("", e))
 }
 
 /// Lay the glue's own parse out on a fit's data-derived bindings, for SIR and
@@ -2630,8 +2634,9 @@ fn ferx_rust_theta_levels_from_fit(
         let src = read_fit_model("ferx_load_fit", model_path, model_hash)?;
         let mut parsed = src.parsed;
         let fitted = fit_bindings_from_r(&fit_bindings)?;
-        // Not `engine_refusal`: the caller words this as a malformed bundle,
-        // and no diagnostic code should outlive the call.
+        // The layout refusal is uncoded on purpose (not `engine_refusal`): the
+        // caller words it as a malformed bundle. The read above is coded, so
+        // an edited model file reaches the caller as E_FIT_INPUT_CHANGED.
         bind_layout_from_fit(&mut parsed, &src.text, &fitted).map_err(|e| e.to_string())?;
         // The same covariance and draws a live fit hands the engine (#528),
         // rebuilt from R's flat copies. A shape that does not match is
@@ -7309,6 +7314,10 @@ const SCORING_KEYS: &[RecordKey] = &[
     // inner screen: `0`, as ferx-core's wire fills it - not today's default
     // (`100`), which would screen where the fit did not.
     record_key("inner_screen", "inner_screen", MissingKey::Fill("0")),
+    // Absent from a record written before ferx-core #2095, whose fit ran no
+    // flip-flop twin seed: `false`, as ferx-core's wire fills it - not today's
+    // default (`true`), which would seed where the fit did not.
+    record_key("inner_twin_seed", "inner_twin_seed", MissingKey::Fill("false")),
     record_key("mu_referencing", "mu_referencing", MissingKey::Refuse),
     record_key("n_agq", "n_agq", MissingKey::Refuse),
     record_key("inner_optimizer", "inner_optimizer", MissingKey::Refuse),
@@ -7389,6 +7398,7 @@ fn scoring_settings_to_r(s: &ferx_core::ScoringSettings) -> std::result::Result<
         inner_tol,
         inner_restarts,
         inner_screen,
+        inner_twin_seed,
         mu_referencing,
         n_agq,
         inner_optimizer,
@@ -7409,6 +7419,7 @@ fn scoring_settings_to_r(s: &ferx_core::ScoringSettings) -> std::result::Result<
         inner_tol = *inner_tol,
         inner_restarts = count_to_r(*inner_restarts),
         inner_screen = count_to_r(*inner_screen),
+        inner_twin_seed = *inner_twin_seed,
         mu_referencing = *mu_referencing,
         n_agq = count_to_r(*n_agq),
         inner_optimizer = fit_option_token(serde_json::to_value(inner_optimizer))?,
@@ -7692,7 +7703,8 @@ fn sir_settings_from_r(
 /// A `.fitrx` `sir.settings` block (ferx-core's `SirSettingsWire`) as the nested
 /// list `fit$sir_settings` is: the scoring keys sit flattened beside the SIR
 /// ones on the wire. A scoring key the block lacks (`inner_restarts`, absent
-/// between ferx-core #1758 and #426; `inner_screen`, absent before #2013) is
+/// between ferx-core #1758 and #426; `inner_screen`, absent before #2013;
+/// `inner_twin_seed`, absent before #2095) is
 /// filled by the decoder from `SCORING_KEYS`, as for the top-level record. Any other name stays at the top
 /// level, where the decoder refuses it by name.
 fn sir_settings_unflatten(record: &Robj) -> std::result::Result<Robj, String> {

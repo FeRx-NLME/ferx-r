@@ -420,55 +420,61 @@ test_that("a held level the fit does not have is refused, not dropped", {
   expect_identical(ferx:::.fitrx_theta_names_at(NULL, list("A")), character(0))
 })
 
-# A profiled fit whose covariance step fails on a reason any profiled model can
-# reach: a theta added to TVE0 is confounded with it, so the profile
-# objective's Hessian is singular. This used an unused theta until ferx-core
-# #2136, which made a profiled fit freeze a theta the objective never reads
-# (as an unprofiled fit does), so that fit's covariance step now succeeds.
-#
-# At fd_hessian_step = 1e-2. Since ferx-core #2414 a profiled fit's
-# structural stencil steps at 3e-3 by default, and at that step this
-# confounded pair's Hessian comes out positive definite (smallest eigenvalue
-# ~1e-5 against -0.0014 at 1e-2, measured at 32dbb309): the step reports
-# standard errors, flagged only by a TVE0 ~ TVSHIFT correlation of -1.00 and
-# a condition number of 1.6e5. The same model failed at either step before.
-# ferx_covariance() replays the fit's step, so its replays fail too.
-confounded_theta_fit <- local({
+# A profiled fit whose covariance step fails. Until ferx-core #2421 this was a
+# theta added to TVE0 (and, before #2136, an unused theta), which made the
+# profile objective's Hessian singular. The binder now rank-checks every model
+# with a level block and refuses both before the fit starts (tested below), so
+# no aliased model reaches a covariance step any more. The fixture fails it on
+# a reason that binds: `covariance_method = "s"` on mbma_placebo's six
+# subjects, whose score cross-product S is singular (the step reports it as
+# `covariance_failed`, profiled or not). ferx_covariance() replays the fit's
+# covariance_method (#659), so its replays fail too, also on a fit whose own
+# step never ran. The "Hessian of the profile objective" texts keep their
+# cases in test-ferx_get_warnings.R's inventory.
+failed_cov_fit <- local({
   out <- list()
   function(covariance = TRUE) {
     key <- as.character(covariance)
     if (is.null(out[[key]])) {
       m <- mbma_profiled_model()
-      txt <- readLines(m$model)
-      txt <- append(txt, "  theta TVSHIFT(1.0, -100.0, 100.0)",
-                    after = grep("^  theta PLACEBO\\[", txt))
-      txt <- sub("BASE = TVE0 +", "BASE = TVE0 + TVSHIFT +", txt, fixed = TRUE)
-      writeLines(txt, m$model)
       out[[key]] <<- quiet(ferx_fit(m$model, m$data, verbose = FALSE,
                                     covariance = covariance,
-                                    fd_hessian_step = 0.01))
+                                    settings = list(covariance_method = "s")))
     }
     out[[key]]
   }
 })
 
-test_that("a profiled fit freezes a theta the objective never reads (ferx-core #2136)", {
+test_that("a profiled model with a theta the objective never reads is refused (ferx-core #2421)", {
   skip_on_cran()
+  # ferx-core #2136 froze such a theta during a profiled fit, with the
+  # unprofiled fit's flat_parameter warning. The bind-time rank check now
+  # refuses it before the fit, naming it.
   m <- mbma_profiled_model()
   txt <- readLines(m$model)
   txt <- append(txt, "  theta TVUNUSED(1.0, 0.01, 100.0)",
                 after = grep("^  theta PLACEBO\\[", txt))
   writeLines(txt, m$model)
-  fit <- quiet(ferx_fit(m$model, m$data, verbose = FALSE))
-  expect_identical(fit$profiled_blocks, "PLACEBO")
-  expect_identical(names(fit$theta)[fit$theta_fixed], "TVUNUSED")
-  expect_identical(fit$covariance_status, "computed")
-  # With the warning an unprofiled fit gives for the same theta.
-  ws <- fit$warnings_structured
-  flat <- ws[ws$category == "flat_parameter", , drop = FALSE]
-  expect_identical(nrow(flat), 1L)
-  expect_match(flat$message, "`TVUNUSED` has no effect on the objective", fixed = TRUE)
-  expect_match(flat$message, "Freezing it at its initial value", fixed = TRUE)
+  e <- tryCatch(quiet(ferx_fit(m$model, m$data, verbose = FALSE)),
+                error = function(e) e)
+  expect_s3_class(e, "ferx_engine_error")
+  expect_identical(e$code, "E_THETA_LEVEL_BINDING")
+  expect_match(conditionMessage(e), "`TVUNUSED` is not identified", fixed = TRUE)
+})
+
+test_that("a profiled model with a theta confounded with TVE0 is refused (ferx-core #2421)", {
+  skip_on_cran()
+  m <- mbma_profiled_model()
+  txt <- readLines(m$model)
+  txt <- append(txt, "  theta TVSHIFT(1.0, -100.0, 100.0)",
+                after = grep("^  theta PLACEBO\\[", txt))
+  txt <- sub("BASE = TVE0 +", "BASE = TVE0 + TVSHIFT +", txt, fixed = TRUE)
+  writeLines(txt, m$model)
+  e <- tryCatch(quiet(ferx_fit(m$model, m$data, verbose = FALSE)),
+                error = function(e) e)
+  expect_s3_class(e, "ferx_engine_error")
+  expect_identical(e$code, "E_THETA_LEVEL_BINDING")
+  expect_match(conditionMessage(e), "`TVE0` and `TVSHIFT` are aliased", fixed = TRUE)
 })
 
 test_that("a profiled fit's failed covariance step is reported in the covariance class", {
@@ -479,7 +485,7 @@ test_that("a profiled fit's failed covariance step is reported in the covariance
   # replay_covariance() only when the level solve breaks at the estimates,
   # which no bundled model does; the classifier table in
   # test-ferx_get_warnings.R holds its text.
-  fit <- confounded_theta_fit()
+  fit <- failed_cov_fit()
   expect_identical(fit$profiled_blocks, "PLACEBO")
   expect_identical(fit$covariance_status, "failed")
 
@@ -487,12 +493,11 @@ test_that("a profiled fit's failed covariance step is reported in the covariance
   # row is classified by the engine like the fit's own (#611), so it is the
   # same row and ferx_covariance() leaves one.
   check <- function(ws, categories) {
-    cov <- grepl("^Covariance step failed", ws$message)
+    cov <- grepl("score cross-product matrix S is singular", ws$message, fixed = TRUE)
     expect_identical(ws$category[cov], categories)
     for (i in which(cov)) {
-      expect_match(ws$message[i], "Hessian of the profile objective", fixed = TRUE)
       g <- ferx:::.ferx_warning_guidance(ws$category[i], message = ws$message[i])
-      expect_match(g, "confounded with the level effects", fixed = TRUE)
+      expect_match(g, "fewer subjects than free parameters", fixed = TRUE)
     }
   }
   check(fit$warnings_structured, "covariance_failed")
@@ -508,22 +513,24 @@ test_that("a replayed covariance warning keeps the in-fit row's class and severi
   # never ran printed the replay's failure as a plain warning, missing from the
   # STATUS line.
   cols <- c("severity", "category", "message", "source_method")
-  in_fit <- confounded_theta_fit()$warnings_structured
-  in_fit <- in_fit[grepl("^Covariance step failed", in_fit$message), cols]
+  failed <- function(ws) grepl("score cross-product matrix S is singular", ws$message,
+                               fixed = TRUE)
+  in_fit <- failed_cov_fit()$warnings_structured
+  in_fit <- in_fit[failed(in_fit), cols]
   expect_identical(nrow(in_fit), 1L)
   expect_identical(in_fit$severity, "critical")
 
   # Replayed on top of the failed in-fit step: one row, the fit's.
-  ws <- quiet(ferx_covariance(confounded_theta_fit()))$warnings_structured
-  rows <- ws[grepl("^Covariance step failed", ws$message), cols]
+  ws <- quiet(ferx_covariance(failed_cov_fit()))$warnings_structured
+  rows <- ws[failed(ws), cols]
   rownames(rows) <- rownames(in_fit) <- NULL
   expect_identical(rows, in_fit)
 
   # Replayed on a fit whose step never ran: the replay's row alone, classed as
   # the fit's would have been, and it reaches the STATUS line.
-  recov <- quiet(ferx_covariance(confounded_theta_fit(covariance = FALSE)))
+  recov <- quiet(ferx_covariance(failed_cov_fit(covariance = FALSE)))
   ws <- recov$warnings_structured
-  rows <- ws[grepl("^Covariance step failed", ws$message), cols]
+  rows <- ws[failed(ws), cols]
   rownames(rows) <- NULL
   expect_identical(rows, in_fit)
   status <- grep("STATUS:", capture.output(print(recov)), value = TRUE)

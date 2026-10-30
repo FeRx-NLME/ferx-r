@@ -982,6 +982,22 @@ test_that("every covariance message ferx-core emits gets non-contradictory guida
                       "their inner start. The EBE guard rejects any subject ",
                       "rejected at its inner start, whatever max_unconverged_frac ",
                       "is. SE estimates not available."),
+         ok = "inner_maxiter does not reach it", never = "larger inner_maxiter"),
+    list(cat = "covariance_failed",
+         # The held-layout re-solve a level on its bound takes, through the
+         # same guard since ferx-core #2420; the text names which solve fired.
+         msg = paste0("Covariance step failed: the profile re-solve with the levels ",
+                      "on their bound held there left 2 of 6 subjects' EBEs ",
+                      "unconverged and rejected 0 at their inner start. The EBE ",
+                      "guard rejects an unconverged fraction above ",
+                      "max_unconverged_frac = 0.1. SE estimates not available."),
+         ok = "on their bound held there left more", never = "identifiability"),
+    list(cat = "covariance_failed",
+         msg = paste0("Covariance step failed: the profile re-solve with the levels ",
+                      "on their bound held there left 0 of 6 subjects' EBEs ",
+                      "unconverged and rejected 1 at their inner start. The EBE ",
+                      "guard rejects any subject rejected at its inner start, ",
+                      "whatever max_unconverged_frac is. SE estimates not available."),
          ok = "inner_maxiter does not reach it", never = "larger inner_maxiter")
   )
   for (case in cases) {
@@ -1173,8 +1189,10 @@ test_that("no covariance message ferx-core emits is missing from the inventory",
     # Also matched by the unprofiled "could not compute eigenvalues" fragment
     # above; listed so the profiled form is accounted for in its own right.
     "of the Hessian of the profile objective (it may",
-    # The re-solve at the estimates rejected by the EBE guard (#2214).
-    "the profile solve at the estimates left"
+    # A profile re-solve rejected by the EBE guard (#2214), at the estimates
+    # or, since ferx-core #2420, with the levels on their bound held: one
+    # templated emit site (`{which} left ...`).
+    "subjects' EBEs unconverged and rejected"
   )
   accounted <- function(lit) any(vapply(c(exempt, covered),
                                         function(k) grepl(k, lit, fixed = TRUE),

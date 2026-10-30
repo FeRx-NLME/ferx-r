@@ -58,13 +58,17 @@ tl_fit_options <- "
 # it is kept only so the fit has an eta at all, since a fit without one cannot
 # make the persistence round trips T8 and T12 take (FeRx-NLME/ferx-r#461).
 # Pass `z = NULL` to drop both.
+#
+# `TVV` is FIX, as in ferx-core's fixture since #2421: with a level at every
+# observation any free theta besides the intercept is aliased with the levels,
+# and the binder's rank check refuses the model.
 tl_model <- function(thetas, cl,
                      structure = "[structural_model]\n  pk one_cpt_iv(cl=CL, v=V)\n",
                      eta = "  omega ETA_V ~ 0.04", v = "TVV",
                      z = "TVV * exp(ETA_V)") {
   paste0(
     "[parameters]\n", thetas, "\n",
-    "  theta TVV(10.0, 0.1, 500.0)\n",
+    "  theta TVV(10.0, FIX)\n",
     eta, "\n",
     "  sigma PROP_ERR ~ 0.05\n\n",
     "[individual_parameters]\n",
@@ -1673,9 +1677,13 @@ test_that("T17g: malformed data_bindings.levels are refused by name", {
 # (PR #529 review, finding 4). AST's reference level is derived; `ref` takes
 # init 0 only, and the fit moves its free level off it.
 tl_two_block_model <- function() {
+  # ZPLA is centred within each study, so it carries no study mean that AST
+  # and TVCL would duplicate (under `contrast = none` it spans every
+  # observation, and the binder refuses the model as aliased since ferx-core
+  # #2421).
   tl_write(tl_model(paste0(
     "  theta TVCL(2.0, 0.001, 20.0)\n",
-    "  theta ZPLA[STUDY, TIME, contrast = none](0.1, -5.0, 5.0)\n",
+    "  theta ZPLA[STUDY, TIME, contrast = sum_to_zero_within](0.0, -5.0, 5.0)\n",
     "  theta AST[STUDY, contrast = ref](0.0, -5.0, 5.0)"
   ), "TVCL + ZPLA + AST"), ".ferx")
 }
@@ -1715,10 +1723,15 @@ test_that("T17i: a model file edited since the fit is named, not laid out by pos
     w
   }, drop = "model.ferx")
   # Engine-written: no layout, for the model's hash, instead of AST reading
-  # ZPLA's values. The estimates still load (#531).
+  # ZPLA's values. The estimates still load (#531). The engine codes the edit
+  # (ferx-core #2027), and the from-fit refusal keeps that code.
   core <- tl_load_unavailable(drop_model(trip$core_path), "model hash mismatch")
   expect_identical(core$theta, fit$theta)
-  expect_true(is.na(core$unavailable_theta_levels$code))
+  expect_identical(core$unavailable_theta_levels$code, "E_FIT_INPUT_CHANGED")
+  e <- tryCatch(ferx_sir(core, sir_samples = 10L, sir_resamples = 5L),
+                error = function(e) e)
+  expect_s3_class(e, "ferx_levels_unavailable_error")
+  expect_identical(e$code, "E_FIT_INPUT_CHANGED")
   # R-written, both copies present: the model is named, neither copy is.
   w <- NULL
   r <- withCallingHandlers(ferx_load_fit(drop_model(trip$r_path)),
@@ -1733,7 +1746,7 @@ test_that("T17i: a model file edited since the fit is named, not laid out by pos
   # so the parse error's code is not the failure's (#531 review, finding 2).
   cat("\n[not_a_block]\n  x = 1\n", file = model, append = TRUE)
   broken <- tl_load_unavailable(drop_model(trip$core_path), "model hash mismatch")
-  expect_true(is.na(broken$unavailable_theta_levels$code))
+  expect_identical(broken$unavailable_theta_levels$code, "E_FIT_INPUT_CHANGED")
   expect_no_match(broken$unavailable_theta_levels$message, "E_UNKNOWN_BLOCK",
                   fixed = TRUE)
 })
@@ -1754,7 +1767,7 @@ test_that("T17k: a model file edited after the fit still bundles the fitted byte
   # The line-ending variants are the bytes readLines() would not keep.
   text <- tl_model(paste0(
     "  theta TVCL(2.0, 0.001, 20.0)\n",
-    "  theta ZPLA[STUDY, TIME, contrast = none](0.1, -5.0, 5.0)\n",
+    "  theta ZPLA[STUDY, TIME, contrast = sum_to_zero_within](0.0, -5.0, 5.0)\n",
     "  theta AST[STUDY, contrast = ref](0.0, -5.0, 5.0)"
   ), "TVCL + ZPLA + AST")
   text <- sub("\n+$", "", text)

@@ -567,14 +567,16 @@ cs_combo_data <- "ID,TIME,DV,EVID,AMT,CMT,RATE,MDV,STUDY,WT
 3,12,2.5,0,.,1,0,0,3,95"
 
 # `CL` must stay a top-level product for the relation to multiply in, hence
-# `exp(PLACEBO)` rather than core's `TVCL + PLACEBO`.
+# `exp(PLACEBO)` rather than core's `TVCL + PLACEBO`. `TVV` is FIX, as in
+# core's level-block fixtures since #2421: on the two-subject design C12b
+# predicts on, a free `TVV` is aliased with the levels and the binder refuses.
 cs_combo_model <- function(center) {
   path <- tempfile(fileext = ".ferx")
   writeLines(sprintf("
 [parameters]
   theta TVCL(2.0, 0.001, 20.0)
   theta PLACEBO[STUDY, TIME](0.0, -5.0, 5.0)
-  theta TVV(10.0, 0.1, 500.0)
+  theta TVV(10.0, FIX)
   omega ETA_V ~ 0.04
   sigma PROP_ERR ~ 0.05
 

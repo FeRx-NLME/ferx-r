@@ -609,11 +609,17 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
     # moves it. Otherwise the unconverged fraction passed the limit, which
     # the inner budget does reach. This solve is not counted in the fit's
     # EBE-convergence warnings, so the advice points at the message's own
-    # counts.
-    if (grepl("the profile solve at the estimates left", message, fixed = TRUE)) {
+    # counts. Since ferx-core #2420 the second re-solve, with the levels on
+    # their bound held there, goes through the same guard and says so.
+    if (grepl("subjects' EBEs unconverged and rejected", message, fixed = TRUE)) {
+      what <- if (grepl("on their bound held there", message, fixed = TRUE)) {
+        "Re-solving the profiled theta levels with the levels on their bound held there"
+      } else {
+        "Re-solving the profiled theta levels at the estimates"
+      }
       if (grepl("whatever max_unconverged_frac is", message, fixed = TRUE)) {
         return(paste0(
-          "Re-solving the profiled theta levels at the estimates rejected a ",
+          what, " rejected a ",
           "subject at its inner start (its objective at the starting EBEs was ",
           "unusable), so no standard errors were produced. The guard rejects ",
           "that whatever max_unconverged_frac is, and inner_maxiter does not ",
@@ -622,7 +628,7 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
         ))
       }
       return(paste0(
-        "Re-solving the profiled theta levels at the estimates left more ",
+        what, " left more ",
         "subjects' EBEs unconverged than max_unconverged_frac allows (the ",
         "message gives the counts and the limit), so the step stopped ",
         "instead of computing standard errors from them. Re-fit with a ",

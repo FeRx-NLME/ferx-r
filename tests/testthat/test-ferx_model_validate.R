@@ -828,7 +828,8 @@ test_that("a model that does not parse is still labelled with call-time settings
 
 test_that("an info diagnostic prints as info, not as a warning (#660)", {
   # ferx-core #2427 added `Severity::Info` (W_LEVEL_SUMMARY is the first). The
-  # pinned engine may not emit one yet, so the engine result is mocked.
+  # engine result is mocked so every mix of severities is covered; the test
+  # below checks the real engine's rows.
   ex <- ferx_example("warfarin")
   validate_with <- function(severity, code) {
     n <- length(severity)
@@ -861,4 +862,16 @@ test_that("an info diagnostic prints as info, not as a warning (#660)", {
 
   v <- validate_with("warning", "W_SOMETHING")
   expect_true(any(grepl("Result: VALID (with warnings)", v$out, fixed = TRUE)))
+})
+
+test_that("the engine's W_LEVEL_SUMMARY rows arrive as info notes (ferx-core #2427)", {
+  ex <- ferx_example("nested_levels")
+  out <- capture.output(v <- ferx_model_validate(ex$model, data = ex$data))
+  info <- v$diagnostics[v$diagnostics$code == "W_LEVEL_SUMMARY", , drop = FALSE]
+  expect_gt(nrow(info), 0L)
+  expect_true(all(info$severity == "info"))
+  expect_true(v$ok)
+  expect_false(any(v$diagnostics$severity == "warning"))
+  expect_true("Result: VALID (with notes)" %in% out)
+  expect_true(any(grepl("^  \\* info W_LEVEL_SUMMARY", out)))
 })

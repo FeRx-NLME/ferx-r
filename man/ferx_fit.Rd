@@ -343,6 +343,16 @@ off every axis, such as the flip-flop twin of a one-compartment oral
 subject, which the per-coordinate restarts cannot. The points depend
 on the subject's ID only, so results do not change with the thread
 count or the row order. The IOV inner solve runs no screen.}
+\item{\code{inner_twin_seed}}{(default \code{TRUE}) Seed that multi-start
+with the subject's flip-flop twin. On a closed-form \code{one_cpt_oral}
+model, swapping \code{ka} and \code{k = CL/V}, with \code{V} becoming
+\code{V * k / ka}, gives the same concentration curve, so each cold
+solve also descends once from the incumbent mode's twin, and keeps the
+result under the screen's acceptance rule. Runs on the solves \code{inner_restarts}
+gates, before the screen, so \code{inner_restarts = 0} disables it
+too. Applies only where \code{V} and \code{KA} each carry a log-normal
+random effect of their own and every dose goes into the depot; any
+other model or subject solves exactly as with \code{FALSE}.}
 \item{\code{inner_optimizer}}{\code{"auto"} (default), \code{"bfgs"},
 \code{"lbfgs"} or \code{"nelder_mead"}. Inner-loop algorithm.
 \code{"auto"} uses dense BFGS, switching to limited-memory L-BFGS above
@@ -450,28 +460,27 @@ optimizer can land in a worse basin.}
 \item{\code{fd_hessian_step}}{Also available as the dedicated
 \code{fd_hessian_step} argument above.}
 \item{\code{analytic_cov_hessian}}{\code{TRUE} (default) or
-\code{FALSE}. When \code{TRUE} and the model is in scope, the
-covariance step assembles the \strong{exact analytic R-matrix} from
-third-order sensitivities of the closed-form prediction instead of
-differencing the objective. That removes both the \code{fd_hessian_step}
-tuning knob and the \code{eps/h^2} differencing noise, and costs
-\code{2 * (n_theta + n_eta) + 1} sensitivity evaluations per subject
-rather than roughly \code{2 * n_free^2} objective evaluations that each
-re-solve every subject's inner loop. Serves \code{method = "focei"} and
-\code{method = "foce"} alike, from two separate assemblies rather than
-one shared formula -- the non-interaction case is built on the
-Sheiner-Beal gradient and carries no \code{log|H~|} term -- so both are
-exact, and \code{interaction} does not silently drop you back onto
-finite differences. Scope is otherwise deliberately narrow --
-plain analytical (closed-form) Gaussian models only: no IOV, LTBS,
-\code{[scaling]}, Form-C readout, \code{[initial_conditions]},
-\code{iiv_on_ruv}, \code{block_sigma} or custom-magnitude residual, M3
-censoring, FREM, non-Gaussian (TTE / categorical / Markov) endpoint, and
-not \code{method = "laplace"} at any node count, \code{method = "focei"}
-with \code{n_agq > 1}, a covariate-\code{Selected} error spec, or
-\code{gradient = "fd"}. Anything
-outside it -- including a single out-of-scope subject -- silently keeps
-the finite-difference stencil, all-or-nothing across the population.
+\code{FALSE}. When \code{TRUE}, the covariance step uses the
+\strong{exact analytic R-matrix} for every subject it serves instead
+of differencing the objective: the second derivative of the profile
+objective along the mode's tangent, from the same recorder as the
+exact outer gradient. That removes both the \code{fd_hessian_step}
+tuning knob and the \code{eps/h^2} differencing noise, and avoids the
+roughly \code{2 * n_free^2} objective evaluations (each re-solving
+every subject's inner loop) of the stencil. It covers the subjects the
+exact outer gradient covers, for every objective: \code{"foce"}
+(including its frozen-variance EBE), \code{"focei"},
+\code{"laplace"} and AGQ (\code{n_agq > 1}) under either anchor, on
+closed-form and ODE models, with or without IOV, for up to 48 random
+effects per subject (the stacked \code{[eta, kappa]} under IOV;
+Laplace's exact Hessian anchor up to 8). It is unavailable for SDE
+models, non-Gaussian (TTE / categorical / Markov) endpoints and
+\code{gradient = "fd"}, which keep the finite-difference stencil for
+the whole fit. A subject outside the scope does not: the in-scope
+subjects keep their exact terms, only the declining subjects' own
+terms are differenced into the same information sum, and the fit
+says so with a \code{W_COV_ANALYTIC_SALVAGE} note; when at least half
+the population declines, the whole-population stencil is used instead.
 Set \code{FALSE} to force finite differences for an in-scope model,
 e.g. to reproduce standard errors from an earlier run.}
 \item{\code{covariance_method}}{Covariance estimator, mirroring NONMEM
@@ -1400,7 +1409,7 @@ on a search's final fit, which carries the fingerprint alone.}
 the stage that produced the estimates scored the objective under:
 \code{inner_maxiter}, \code{inner_tol} (as the stage ran it, after the
 tightening ferx applies for LTBS and quadrature), \code{inner_restarts},
-\code{inner_screen}, \code{mu_referencing}, \code{n_agq}, \code{inner_optimizer},
+\code{inner_screen}, \code{inner_twin_seed}, \code{mu_referencing}, \code{n_agq}, \code{inner_optimizer},
 \code{ebe_warm_start}, \code{ode_reltol}, \code{ode_abstol},
 \code{ode_max_steps}, \code{ode_method}, \code{ode_stiff_abort_after}
 (\code{NA} when off), \code{ode_auto_switch},
@@ -1416,7 +1425,8 @@ recorded none, and on a fit saved before they were recorded; a record
 saved before \code{gradient_method} was recorded reads it as
 \code{"auto"}, one before \code{inner_restarts} was recorded as
 the default, \code{1}, and one saved before \code{inner_screen} was
-recorded reads it as \code{0}, the screen that fit did not run. A
+recorded reads it as \code{0}, the screen that fit did not run (and
+one before \code{inner_twin_seed} was recorded as \code{FALSE}). A
 record that names a setting this ferx does not know (one written by a
 newer ferx-core) is refused by name; set it to \code{NULL} to use the
 fit as one that records none.}

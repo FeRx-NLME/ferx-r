@@ -80,7 +80,7 @@ test_that("?ferx_fit's scoring-setting defaults are the engine's (#510)", {
   engine <- ferx:::.ferx_default_settings("scoring_settings")
   for (key in c("ode_method", "ode_reltol", "ode_abstol", "ode_max_steps",
                 "inner_maxiter", "inner_tol", "inner_restarts", "inner_screen",
-                "inner_optimizer", "ebe_warm_start")) {
+                "inner_twin_seed", "inner_optimizer", "ebe_warm_start")) {
     dd_expect_default(rd, key, engine[[key]])
   }
 })
