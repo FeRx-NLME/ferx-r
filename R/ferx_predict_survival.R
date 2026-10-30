@@ -103,6 +103,7 @@ ferx_predict_survival <- function(model, data = NULL, times, fit = NULL) {
       omega_iov_dim = fit_pieces$omega_iov_dim,
       residual_rho = fit_pieces$residual_rho,
       residual_rho_pairs = fit_pieces$residual_rho_pairs,
+      mixture_overrides = fit_pieces$mixture_overrides,
       fit_bindings = fit_pieces$fit_bindings,
       iov_occasion = fit_pieces$iov_occasion
     ),

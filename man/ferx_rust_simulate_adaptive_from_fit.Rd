@@ -15,6 +15,7 @@ ferx_rust_simulate_adaptive_from_fit(
   omega_iov_dim,
   residual_rho,
   residual_rho_pairs,
+  mixture_overrides,
   fit_bindings,
   n_sim,
   seed,

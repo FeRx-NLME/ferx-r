@@ -811,7 +811,7 @@ cs_raise_coded <- function(data) {
     ferx:::ferx_rust_predict_from_fit(
       b$sym, data, as.numeric(b$fit$theta), as.numeric(t(b$fit$omega)),
       nrow(b$fit$omega), as.numeric(b$fit$sigma), numeric(0), 0L, numeric(0),
-      integer(0), args$fit_bindings, ""
+      integer(0), numeric(0), args$fit_bindings, ""
     ),
     error = function(e) conditionMessage(e)
   )

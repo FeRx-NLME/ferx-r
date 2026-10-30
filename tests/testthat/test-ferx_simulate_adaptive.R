@@ -558,3 +558,53 @@ test_that("fit = with data omitted simulates the fit's own data", {
     .quiet_design_dv(ferx_simulate_adaptive(model, data, n_sim = 1L, seed = 3L, fit = fit))
   )
 })
+
+test_that("ferx_simulate_adaptive(fit = ) refuses a [mixture] fit without override values, coded (#672)", {
+  # The mixture_override fixture as an ODE model with an [adaptive_dosing]
+  # block. The fit list carries no `mixture_overrides` (a .fitrx saved before
+  # #655), so the class rebuild refuses before anything is simulated. The
+  # adaptive prefix on the message must not cost the refusal its code.
+  path <- tempfile(fileext = ".ferx")
+  writeLines(c(
+    "[parameters]",
+    "  theta TVCL1(1.2, 0.01, 100.0)",
+    "  theta TVCL2(2.5, 0.01, 100.0)",
+    "  theta TVV(10.0, 0.1, 1000.0)",
+    "  theta MIXL(0.0, -10.0, 10.0)",
+    "  omega ETA_CL ~ 0.09",
+    "  sigma EPS ~ 0.04",
+    "[mixture]",
+    "  nsub = 2",
+    "  logit(1) = MIXL",
+    "  omega(2) ETA_CL ~ 0.30",
+    "[individual_parameters]",
+    "  CL = if (MIXNUM == 1) TVCL1 * exp(ETA_CL) else TVCL2 * exp(ETA_CL)",
+    "  V  = TVV",
+    "[structural_model]",
+    "  ode(states=[central])",
+    "[odes]",
+    "  d/dt(central) = -(CL / V) * central",
+    "[scaling]",
+    "  y = central / V",
+    "[error_model]",
+    "  DV ~ proportional(EPS)",
+    "[adaptive_dosing]",
+    "  observe     = central / V",
+    "  at          = every 12 from 0 to 48",
+    "  start_dose  = 100",
+    "  route       = bolus(cmt=1)",
+    "  dose_bounds = [0, 200]",
+    "  confirm     = 1",
+    "  when signal < 1 : increase 25%"
+  ), path)
+  fit <- list(theta = c(TVCL1 = 1.2, TVCL2 = 2.5, TVV = 10, MIXL = 0),
+              omega = matrix(0.02, 1, 1, dimnames = list("ETA_CL", "ETA_CL")),
+              sigma = c(EPS = 0.2))
+  probe <- engine_error_probe(muffle_mixl_lint(ferx_simulate_adaptive(
+    path, test_path("fixtures", "mixture_iv.csv"), n_sim = 1L, seed = 1L, fit = fit
+  )))
+  expect_coded_refusal(probe, "omega(2) ETA_CL", "E_FIT_INPUT_MISSING")
+  expect_true(startsWith(conditionMessage(probe$cond), "ferx_simulate_adaptive: "),
+              info = conditionMessage(probe$cond))
+  expect_null(probe$value)
+})

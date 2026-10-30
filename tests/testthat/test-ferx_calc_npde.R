@@ -301,3 +301,26 @@ test_that("ferx_calc_npde(fit) raises the fingerprint check's note as a warning 
   expect_true(all(c("NPDE", "NPD") %in% names(out$sdtab)))
   expect_true(all(is.finite(out$sdtab$NPD)))
 })
+
+test_that("ferx_calc_npde on a [mixture] fit draws its reference at the fitted class Omega (#672)", {
+  mod <- test_path("fixtures", "mixture_override.ferx")
+  dat <- test_path("fixtures", "mixture_iv.csv")
+  fit <- mixture_override_fit()
+  expect_length(fit$mixture_overrides, 1L)
+  npd_sd <- function(f) {
+    out <- muffle_mixl_lint(ferx_calc_npde(f, nsim = 300L, seed = 4L,
+                                           model = mod, data = dat))
+    expect_true(all(is.finite(out$sdtab$NPD)))
+    stats::sd(out$sdtab$NPD)
+  }
+  # The reference simulation reads the class-2 override from the fit: widening
+  # it twentyfold spreads class 2's reference draws, so the observations fall
+  # nearer their middle and NPD narrows. A reference built at the model file's
+  # classes reads neither value and gives the same NPD for both.
+  wide <- fit
+  wide$mixture_overrides <- 20 * fit$mixture_overrides
+  base_sd <- npd_sd(fit)
+  wide_sd <- npd_sd(wide)
+  expect_lt(wide_sd, 0.85 * base_sd,
+            label = paste(signif(wide_sd, 3), "vs", signif(base_sd, 3)))
+})

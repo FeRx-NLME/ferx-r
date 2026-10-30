@@ -105,7 +105,9 @@
 #' @param seed Random seed for reproducibility
 #' @param fit Optional \code{ferx_fit} result. When provided, simulation uses
 #'   \code{fit$theta}, \code{fit$omega}, and \code{fit$sigma} instead of the
-#'   model file's initial values.
+#'   model file's initial values. On a \code{[mixture]} model each class runs
+#'   under the fitted Omega and Sigma, with any per-class override at its
+#'   fitted value from \code{fit$mixture_overrides}.
 #' @param match Propensity-score matching method (default \code{FALSE}). When
 #'   enabled, each replicate's drawn etas are reassigned to subjects by
 #'   \strong{propensity-score matching} against the subjects' fitted (posthoc)
@@ -256,6 +258,7 @@ ferx_simulate <- function(model, data = NULL, n_sim = 1L, seed = 42L, fit = NULL
         omega_iov_dim = fit_pieces$omega_iov_dim,
         residual_rho = fit_pieces$residual_rho,
         residual_rho_pairs = fit_pieces$residual_rho_pairs,
+        mixture_overrides = fit_pieces$mixture_overrides,
         fit_bindings = fit_pieces$fit_bindings,
         iov_occasion = fit_pieces$iov_occasion,
         n_sim = as.integer(n_sim),
