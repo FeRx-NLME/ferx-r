@@ -311,3 +311,69 @@ test_that("simulating a kappa model from a fit stripped of omega_iov is an error
     "the fit carries no omega_iov"
   )
 })
+
+# -- MIXNUM column (ferx-core #2372 / #2442) --
+
+# A two-class [mixture] model with P(class 1) = 0.3 and class clearances ten-fold
+# apart, so the drawn class shows in the predictions as well as in the column.
+.write_mixture_model <- function() {
+  path <- tempfile(fileext = ".ferx")
+  writeLines(c(
+    "[parameters]",
+    "  theta TVCL1(1.0, 0.01, 100.0)",
+    "  theta TVCL2(10.0, 0.01, 100.0)",
+    "  theta TVV(10.0, 0.1, 1000.0)",
+    "  theta MIXL(-0.8472979, -10.0, 10.0)",
+    "  omega ETA_CL ~ 0.01",
+    "  sigma EPS ~ 0.01",
+    "[mixture]",
+    "  nsub = 2",
+    "  logit(1) = MIXL",
+    "[individual_parameters]",
+    "  CL = if (MIXNUM == 1) TVCL1 * exp(ETA_CL) else TVCL2 * exp(ETA_CL)",
+    "  V  = TVV",
+    "[structural_model]",
+    "  pk one_cpt_iv(cl=CL, v=V)",
+    "[error_model]",
+    "  DV ~ proportional(EPS)"
+  ), path)
+  path
+}
+
+test_that("ferx_simulate on a [mixture] model returns the drawn class as MIXNUM", {
+  # The engine calls MIXL "not referenced" (ferx-core #2483); see
+  # helper-mixture-lint.R.
+  sim <- muffle_mixl_lint(ferx_simulate(.write_mixture_model(),
+                                        test_path("fixtures", "mixture_iv.csv"),
+                                        n_sim = 100L, seed = 7L))
+
+  expect_identical(names(sim), c("DRAW", "SIM", "ID", "TIME", "CMT", "IPRED",
+                                 "DV_SIM", "OBSERVED", "MIXNUM"))
+  expect_type(sim$MIXNUM, "integer")
+  expect_true(all(sim$MIXNUM %in% 1:2))
+
+  # One class per subject and replicate.
+  per_run <- unique(sim[c("SIM", "ID", "MIXNUM")])
+  expect_equal(nrow(per_run), nrow(unique(sim[c("SIM", "ID")])))
+
+  # Shares follow the mixing probabilities: 30 subjects x 100 replicates, so
+  # the class-1 share has an SD of about 0.008 around 0.3; 0.04 is five SDs.
+  expect_lt(abs(mean(per_run$MIXNUM == 1L) - 0.3), 0.04)
+
+  # The class is redrawn per replicate, not fixed per subject.
+  n_classes <- tapply(per_run$MIXNUM, per_run$ID, function(k) length(unique(k)))
+  expect_true(all(n_classes == 2L))
+
+  # MIXNUM labels the class the rows were simulated under: class 2 clears
+  # ten times faster, so its last-sample IPRED is far below class 1's.
+  last <- sim[sim$TIME == max(sim$TIME), ]
+  expect_gt(median(last$IPRED[last$MIXNUM == 1L]),
+            10 * median(last$IPRED[last$MIXNUM == 2L]))
+})
+
+test_that("ferx_simulate on a non-mixture model has no MIXNUM column", {
+  ex <- ferx_example("warfarin")
+  sim <- ferx_simulate(ex$model, ex$data, n_sim = 1L, seed = 1L)
+  expect_identical(names(sim), c("DRAW", "SIM", "ID", "TIME", "CMT", "IPRED",
+                                 "DV_SIM", "OBSERVED"))
+})

@@ -837,7 +837,8 @@ fn ferx_rust_fit(
 ///   "optimal", "nearest", or "rank" (requires observed DV)
 /// @return Data frame with DRAW, SIM, ID, TIME, CMT, IPRED, DV_SIM, OBSERVED
 ///   columns. DV_SIM carries the simulated 0/1 outcome for a `[binary_model]`
-///   endpoint row; OBSERVED is set only for TTE rows (NA otherwise).
+///   endpoint row; OBSERVED is set only for TTE rows (NA otherwise). A
+///   `[mixture]` model adds a trailing integer MIXNUM column (ferx-core #2372).
 /// @export
 #[extendr]
 fn ferx_rust_simulate(
@@ -941,7 +942,8 @@ fn ferx_rust_simulate(
 ///   "optimal", "nearest", or "rank" (requires observed DV)
 /// @return Data frame with DRAW, SIM, ID, TIME, CMT, IPRED, DV_SIM, OBSERVED
 ///   columns. DV_SIM carries the simulated 0/1 outcome for a `[binary_model]`
-///   endpoint row; OBSERVED is set only for TTE rows (NA otherwise).
+///   endpoint row; OBSERVED is set only for TTE rows (NA otherwise). A
+///   `[mixture]` model adds a trailing integer MIXNUM column (ferx-core #2372).
 /// @export
 #[extendr]
 #[allow(clippy::too_many_arguments)]
@@ -1419,7 +1421,8 @@ fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult) -> Robj
 /// @param seed Random seed for reproducibility
 /// @return Data frame with DRAW, SIM, ID, TIME, CMT, IPRED, DV_SIM, OBSERVED
 ///   columns. DV_SIM carries the simulated 0/1 outcome for a `[binary_model]`
-///   endpoint row; OBSERVED is set only for TTE rows (NA otherwise).
+///   endpoint row; OBSERVED is set only for TTE rows (NA otherwise). A
+///   `[mixture]` model adds a trailing integer MIXNUM column (ferx-core #2372).
 /// @export
 #[extendr]
 #[allow(clippy::too_many_arguments)]
@@ -3868,17 +3871,29 @@ fn sim_results_to_df(results: &[ferx_core::api::SimulationResult]) -> Robj {
     // DRAW = 1 and downstream code can ignore the column; for
     // `simulate_with_uncertainty` it's the primary grouping variable for
     // computing uncertainty bands.
-    data_frame!(
-        DRAW = draw,
-        SIM = sim,
-        ID = id,
-        TIME = time,
-        CMT = cmt,
-        IPRED = ipred,
-        DV_SIM = dv_sim,
-        OBSERVED = observed
-    )
-    .into()
+    let nrow = results.len();
+    let mut cols: Vec<(&str, Robj)> = vec![
+        ("DRAW", draw.into()),
+        ("SIM", sim.into()),
+        ("ID", id.into()),
+        ("TIME", time.into()),
+        ("CMT", cmt.into()),
+        ("IPRED", ipred.into()),
+        ("DV_SIM", dv_sim.into()),
+        ("OBSERVED", observed.into()),
+    ];
+    // MIXNUM: the 1-based `[mixture]` class core drew for this row's subject in
+    // its (draw, sim) replicate (ferx-core #2372 / #2442) - NONMEM's `$TABLE
+    // MIXNUM` under `$SIMULATION`, the column a VPC split by class groups on.
+    // Core stamps it on every row of a mixture model and on none otherwise, so
+    // the column is appended only when a row carries a class: a non-mixture
+    // frame keeps its eight columns. Last, so positional readers of the frame
+    // are undisturbed.
+    if results.iter().any(|r| r.mixnum.is_some()) {
+        let mixnum: Vec<Option<i32>> = results.iter().map(|r| r.mixnum.map(|k| k as i32)).collect();
+        cols.push(("MIXNUM", mixnum.into()));
+    }
+    finish_df(cols, nrow)
 }
 
 // -- Helper: short label for the structural model. Compartment-free and ODE
