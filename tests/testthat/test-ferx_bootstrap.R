@@ -189,7 +189,10 @@ test_that("argument validation happens before anything is fitted", {
                               run_base_model = FALSE),
                "run_base_model")
   expect_error(ferx_bootstrap(ex$model, ex$data, dofv = NA), "TRUE or FALSE")
-  expect_error(ferx_bootstrap(ex$model, ex$data, progress = NA), "TRUE or FALSE")
+  expect_error(ferx_bootstrap(ex$model, ex$data, progress = NA),
+               "TRUE, FALSE or \"lines\"")
+  expect_error(ferx_bootstrap(ex$model, ex$data, progress = "bar"),
+               "TRUE, FALSE or \"lines\"")
   expect_error(ferx_bootstrap(ex$model, ex$data, stratify_on = NA),
                "single column name")
   expect_error(ferx_bootstrap(ex$model, ex$data, sample_size = c(3, 4)),
@@ -305,7 +308,11 @@ test_that("a watched run reports its fits and returns the same numbers", {
                                        total = total, base_fit = base_fit)
     invisible(NULL)
   }
+  # testthat runs non-interactively, where `progress = TRUE` takes the line
+  # renderer; stub both so the test sees the engine's events either way.
   mockery::stub(ferx_bootstrap, ".ferx_bootstrap_progress_handler",
+                function(...) handler)
+  mockery::stub(ferx_bootstrap, ".ferx_bootstrap_progress_lines",
                 function(...) handler)
 
   watched <- ferx_bootstrap(ex$model, ex$data, samples = 4L, seed = 42,
@@ -323,6 +330,75 @@ test_that("a watched run reports its fits and returns the same numbers", {
 
   # Watching a run must not change it: same seed, same estimates.
   expect_equal(watched$parameters, quiet$parameters)
+})
+
+test_that("progress = TRUE picks the bar interactively and lines in a script", {
+  expect_identical(.ferx_progress_style(TRUE, "f", interactive = TRUE), "console")
+  expect_identical(.ferx_progress_style(TRUE, "f", interactive = FALSE), "lines")
+  expect_identical(.ferx_progress_style("lines", "f", interactive = TRUE), "lines")
+  expect_identical(.ferx_progress_style(FALSE, "f", interactive = FALSE), "off")
+  expect_error(.ferx_progress_style(c(TRUE, TRUE), "f"), "TRUE, FALSE or")
+})
+
+test_that("the line renderer prints one line per fit from a coalesced stream", {
+  out <- character(0)
+  h <- .ferx_bootstrap_progress_lines(say = function(...) {
+    out[[length(out) + 1L]] <<- paste0(...)
+  })
+  # The timer redelivers the latest event, skips some and can step a count
+  # back; every count still gets exactly one line, in order.
+  h("started", 2L, 4L, TRUE)
+  h("started", 2L, 4L, TRUE)
+  h("replicate", 2L, 4L, FALSE)   # base_done coalesced away
+  h("replicate", 1L, 4L, FALSE)   # out-of-order delivery
+  h("replicate", 2L, 4L, FALSE)
+  h("replicate", 4L, 4L, FALSE)
+  h("dofv", 1L, 1L, FALSE)
+  h("finished", 0L, 0L, FALSE)
+  h("finished", 0L, 0L, FALSE)
+  expect_identical(out, c(
+    "bootstrap: reusing 2 replicates already on disk",
+    "bootstrap: 4 replicates to fit",
+    "bootstrap: fitting the base model",
+    "bootstrap: base model fitted",
+    "bootstrap: replicate 1/4 done",
+    "bootstrap: replicate 2/4 done",
+    "bootstrap: replicate 3/4 done",
+    "bootstrap: replicate 4/4 done",
+    "bootstrap: delta-OFV evaluation 1/1 done",
+    "bootstrap: finished"
+  ))
+})
+
+test_that("the line renderer never throws", {
+  h <- .ferx_bootstrap_progress_lines(say = function(...) stop("boom"))
+  expect_silent(h("replicate", 1L, 2L, FALSE))
+  expect_silent(h("replicate", NA_integer_, 2L, FALSE))
+})
+
+test_that("progress = TRUE under Rscript streams one line per replicate to stdout", {
+  skip_on_cran()
+  rscript <- file.path(R.home("bin"), "Rscript")
+  skip_if_not(file.exists(rscript))
+  ex <- ferx_example("warfarin")
+  script <- tempfile(fileext = ".R")
+  on.exit(unlink(script), add = TRUE)
+  # Load the same build the tests run against: an installed copy may predate it.
+  lib <- dirname(find.package("ferx"))
+  writeLines(c(
+    sprintf(".libPaths(c(%s, .libPaths()))", deparse(lib)),
+    "suppressMessages(library(ferx))",
+    sprintf("invisible(ferx_bootstrap(%s, %s, samples = 3L, seed = 1, threads = 1L,",
+            deparse(ex$model), deparse(ex$data)),
+    "                          progress = TRUE))"
+  ), script)
+  out <- suppressWarnings(system2(rscript, c("--vanilla", script),
+                                  stdout = TRUE, stderr = FALSE))
+  skip_if(!is.null(attr(out, "status")) && attr(out, "status") != 0L,
+          "the child R session could not run the bootstrap")
+  expect_identical(grep("^bootstrap: replicate", out, value = TRUE),
+                   sprintf("bootstrap: replicate %d/3 done", 1:3))
+  expect_true("bootstrap: finished" %in% out)
 })
 
 test_that("the progress handler tolerates a coalesced event stream", {

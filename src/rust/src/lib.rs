@@ -9222,14 +9222,13 @@ fn run_bootstrap_cancellable(
 /// R is single-threaded and may only be touched from the thread that entered
 /// `.Call`, while the replicates finish on a Rayon pool - so an event cannot be
 /// forwarded from where it is produced. The fit runs on a scoped thread
-/// instead, and the R thread polls the latest event and hands it to the R
-/// handler. The fits never wait on the drawing: the sink only overwrites a
-/// slot, and a coalesced event is one this thread was too slow to draw.
+/// instead, and the R thread polls the events queued since its last tick and
+/// hands each to the R handler in turn. The fits never wait on the drawing: the
+/// sink only pushes onto a queue under a short lock.
 ///
-/// The poll is a redraw timer, not a sampling rate. An event *is* a completed
-/// fit, so nothing is missed by coalescing, and calling the handler on a timer
-/// rather than only on change is what lets a `cli` spinner animate through a
-/// long base fit.
+/// The poll is a redraw timer, not a sampling rate. Calling the handler on a
+/// timer rather than only on change is what lets a `cli` spinner animate
+/// through a long base fit.
 ///
 /// The same tick services R interrupts, flipping `cancel` as soon as one is
 /// pending - which is what makes a watched run Ctrl-C-able too (#315). The check
@@ -9247,16 +9246,29 @@ fn run_bootstrap_reporting(
     callback: &Function,
     cancel: &CancelFlag,
 ) -> std::result::Result<BootstrapResult, String> {
-    let latest: std::sync::Mutex<Option<BootstrapEvent>> = std::sync::Mutex::new(None);
+    // Every event is queued, not just the latest: the line renderer prints one
+    // record per completed fit, and a run fast enough to finish inside one
+    // redraw interval would otherwise reach R as a bare "finished" (#677).
+    // `last` is what a tick with nothing new redraws.
+    let queued: std::sync::Mutex<(Vec<BootstrapEvent>, Option<BootstrapEvent>)> =
+        std::sync::Mutex::new((Vec::new(), None));
     let sink = |event: BootstrapEvent| {
-        if let Ok(mut slot) = latest.lock() {
-            *slot = Some(event);
+        if let Ok(mut q) = queued.lock() {
+            q.0.push(event);
+            q.1 = Some(event);
         }
     };
-    // Read without clearing: while a phase is slow the same event is delivered
-    // again on every tick, which is what keeps a `cli` spinner animating through
-    // a long base fit. The R handler is idempotent, so a repeat costs a redraw.
-    let take_latest = || latest.lock().ok().and_then(|slot| *slot);
+    // The events that arrived since the last tick, in order - or, while a phase
+    // is slow, the latest one again, which is what keeps a `cli` spinner
+    // animating through a long base fit. The R handlers are idempotent, so a
+    // repeat costs a redraw.
+    let take = || -> Vec<BootstrapEvent> {
+        match queued.lock() {
+            Ok(mut q) if !q.0.is_empty() => std::mem::take(&mut q.0),
+            Ok(q) => q.1.into_iter().collect(),
+            Err(_) => Vec::new(),
+        }
+    };
 
     std::thread::scope(|scope| {
         let worker = scope.spawn(|| {
@@ -9267,13 +9279,13 @@ fn run_bootstrap_reporting(
             if pending_interrupt() {
                 cancel.cancel();
             }
-            if let Some(event) = take_latest() {
+            for event in take() {
                 bootstrap_draw_progress(callback, event);
             }
         }
-        // The last event can land inside the final sleep, and it is the one
-        // that clears the bar.
-        if let Some(event) = take_latest() {
+        // The last events can land inside the final sleep, and the last of
+        // them is the one that clears the bar.
+        for event in take() {
             bootstrap_draw_progress(callback, event);
         }
         match worker.join() {
@@ -10425,6 +10437,70 @@ fn search_config_for_tool(
     Ok(config)
 }
 
+/// Where a search's progress lines go: the R side's `progress` argument, as
+/// `0` (nowhere), `1` (stderr, written from the worker as the engine reports)
+/// or `2` (R's stdout, one line per event, for a log that tails a script's
+/// output - #677).
+///
+/// Stdout goes through R's console rather than the process's file descriptor,
+/// so `sink()`, `capture.output()` and an IDE console see it too. That means
+/// printing from the R thread, so in mode `2` the worker only queues and
+/// [`run_search_cancellable`] prints.
+struct SearchProgress {
+    mode: i32,
+    queued: std::sync::Mutex<Vec<String>>,
+}
+
+impl SearchProgress {
+    fn new(mode: i32) -> Self {
+        SearchProgress {
+            mode,
+            queued: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    fn enabled(&self) -> bool {
+        self.mode == 1 || self.mode == 2
+    }
+
+    /// Report one line. Safe to call from any thread.
+    fn say(&self, line: String) {
+        match self.mode {
+            1 => eprintln!("{line}"),
+            2 => {
+                if let Ok(mut q) = self.queued.lock() {
+                    q.push(line);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Print the queued lines. R thread only.
+    fn flush(&self) {
+        let lines = match self.queued.lock() {
+            Ok(mut q) => std::mem::take(&mut *q),
+            Err(_) => return,
+        };
+        if lines.is_empty() {
+            return;
+        }
+        for line in lines {
+            rprintln!("{line}");
+        }
+        // Rscript block-buffers a non-terminal stdout; a log viewer should see
+        // each line as it is printed, not in one burst at exit.
+        let _ = call!("flush.console");
+    }
+}
+
+/// `eprintln!` for a search's progress: `say!(lines, "...", args)`.
+macro_rules! say {
+    ($lines:expr, $($arg:tt)*) => {
+        $lines.say(format!($($arg)*))
+    };
+}
+
 /// Run a search on a worker thread while this thread services Ctrl-C.
 ///
 /// The same shape as [`run_bootstrap_cancellable`], and for the same reason
@@ -10432,7 +10508,15 @@ fn search_config_for_tool(
 /// `.Call`. The engine's tools take a `CancelFlag` of their own *and* the flag
 /// reaches every candidate fit through the base model's `fit_options`, so an
 /// interrupt stops the in-flight fits as well as the candidate loop.
-fn run_search_cancellable<T, F>(cancel: &CancelFlag, work: F) -> std::result::Result<T, String>
+///
+/// `lines` is the search's progress, when it prints as lines on stdout: the
+/// engine reports from the worker, which may not touch R, so the lines queue
+/// there and this thread prints them on each tick (#677).
+fn run_search_cancellable<T, F>(
+    cancel: &CancelFlag,
+    lines: Option<&SearchProgress>,
+    work: F,
+) -> std::result::Result<T, String>
 where
     T: Send,
     F: FnOnce() -> std::result::Result<T, String> + Send,
@@ -10451,8 +10535,17 @@ where
                     if pending_interrupt() {
                         cancel.cancel();
                     }
+                    // After the interrupt check: printing goes through R's
+                    // evaluator, which consumes a pending interrupt.
+                    if let Some(lines) = lines {
+                        lines.flush();
+                    }
                 }
             }
+        }
+        // The last events land between the final tick and the worker's exit.
+        if let Some(lines) = lines {
+            lines.flush();
         }
         match worker.join() {
             Ok(result) => result,
@@ -10541,7 +10634,8 @@ fn search_final_fit(
 /// @param resume Reuse the fits already journalled in `directory`
 /// @param directory Where journals, `steps.csv` and `final.ferx` go; `""`
 ///   keeps the run in memory
-/// @param progress Print the engine's step progress to stderr
+/// @param progress Print the engine's step progress: 0 off, 1 to stderr,
+///   2 as lines on R's stdout (see [`SearchProgress`])
 /// @return Named list: the step-table columns, `included_*`, `base_model`,
 ///   `final_model`, `final_fit`, `notes` and `cancelled`
 /// @keywords internal
@@ -10563,7 +10657,7 @@ fn ferx_rust_covsearch(
     retries: i32,
     resume: bool,
     directory: &str,
-    progress: bool,
+    progress: i32,
 ) -> Robj {
     entry(move || {
         let mut section = String::from("\n[covsearch]\n");
@@ -10622,21 +10716,22 @@ fn ferx_rust_covsearch(
         base.prepared.parsed.fit_options.cancel = Some(cancel.clone());
 
         let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
+        let lines = SearchProgress::new(progress);
         let report = |event: ferx_tools::covsearch::CovsearchEvent| {
             use ferx_tools::covsearch::{CovsearchEvent as E, Phase};
-            if !progress {
+            if !lines.enabled() {
                 return;
             }
             match event {
-                E::BaseStarted => eprintln!("Fitting the base model..."),
+                E::BaseStarted => say!(lines, "Fitting the base model..."),
                 E::BaseFinished { ofv, n_parameters } => {
-                    eprintln!("Base model: OFV {ofv:.3}, {n_parameters} free parameters")
+                    say!(lines, "Base model: OFV {ofv:.3}, {n_parameters} free parameters")
                 }
                 E::StepStarted {
                     step,
                     phase,
                     candidates,
-                } => eprintln!(
+                } => say!(lines,
                     "Step {step} ({}): fitting {candidates} candidate{}...",
                     phase.label(),
                     if candidates == 1 { "" } else { "s" }
@@ -10646,7 +10741,7 @@ fn ferx_rust_covsearch(
                     phase,
                     selected,
                 } => match selected {
-                    Some((effect, ofv)) => eprintln!(
+                    Some((effect, ofv)) => say!(lines,
                         "Step {step} ({}): {} {} (OFV {ofv:.3})",
                         phase.label(),
                         if phase == Phase::Backward {
@@ -10656,12 +10751,12 @@ fn ferx_rust_covsearch(
                         },
                         effect.label()
                     ),
-                    None => eprintln!("Step {step} ({}): nothing accepted", phase.label()),
+                    None => say!(lines, "Step {step} ({}): nothing accepted", phase.label()),
                 },
             }
         };
 
-        let result = match run_search_cancellable(&cancel, || {
+        let result = match run_search_cancellable(&cancel, Some(&lines), || {
             ferx_tools::covsearch::run_covsearch(
                 &config,
                 &base,
@@ -10936,7 +11031,7 @@ fn ferx_rust_allometry(
         base.prepared.parsed.fit_options.cancel = Some(cancel.clone());
         let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
         let threads = (threads > 0).then_some(threads as usize);
-        let result = match run_search_cancellable(&cancel, || {
+        let result = match run_search_cancellable(&cancel, None, || {
             ferx_tools::allometry::run_allometry(
                 &base,
                 &options,
@@ -11036,7 +11131,8 @@ fn ferx_rust_modelsearch_columns() -> Vec<String> {
 /// @param resume Reuse the fits already journalled in `directory`
 /// @param directory Where journals, `models.csv`, `models/<id>.ferx` and
 ///   `final.ferx` go; `""` keeps the run in memory
-/// @param progress Print the engine's layer progress to stderr
+/// @param progress Print the engine's layer progress: 0 off, 1 to stderr,
+///   2 as lines on R's stdout (see [`SearchProgress`])
 /// @return Named list: the model-table columns, `structure` (the engine's own
 ///   rendering of each row's structure), the candidate model texts,
 ///   `final_model`, `final_fit`, `notes` and `cancelled`
@@ -11056,7 +11152,7 @@ fn ferx_rust_modelsearch(
     retries: i32,
     resume: bool,
     directory: &str,
-    progress: bool,
+    progress: i32,
 ) -> Robj {
     entry(move || {
         let mut section = String::from("\n[modelsearch]\n");
@@ -11106,31 +11202,32 @@ fn ferx_rust_modelsearch(
         base.prepared.parsed.fit_options.cancel = Some(cancel.clone());
 
         let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
+        let lines = SearchProgress::new(progress);
         let report = |event: ferx_tools::modelsearch::ModelsearchEvent| {
             use ferx_tools::modelsearch::ModelsearchEvent as E;
-            if !progress {
+            if !lines.enabled() {
                 return;
             }
             match event {
-                E::InputStarted => eprintln!("Fitting the input model..."),
-                E::BaseStarted => eprintln!("Fitting the base model..."),
+                E::InputStarted => say!(lines, "Fitting the input model..."),
+                E::BaseStarted => say!(lines, "Fitting the base model..."),
                 E::BaseFinished { ofv, criterion } => {
-                    eprintln!("Base model: OFV {ofv:.3}, criterion {criterion:.3}")
+                    say!(lines, "Base model: OFV {ofv:.3}, criterion {criterion:.3}")
                 }
-                E::LayerStarted { layer, candidates } => eprintln!(
+                E::LayerStarted { layer, candidates } => say!(lines,
                     "Layer {layer}: fitting {candidates} candidate{}...",
                     if candidates == 1 { "" } else { "s" }
                 ),
                 E::LayerFinished { layer, best } => match best {
                     Some((id, criterion)) => {
-                        eprintln!("Layer {layer}: best {id} (criterion {criterion:.3})")
+                        say!(lines, "Layer {layer}: best {id} (criterion {criterion:.3})")
                     }
-                    None => eprintln!("Layer {layer}: no candidate passed the gate"),
+                    None => say!(lines, "Layer {layer}: no candidate passed the gate"),
                 },
             }
         };
 
-        let result = match run_search_cancellable(&cancel, || {
+        let result = match run_search_cancellable(&cancel, Some(&lines), || {
             ferx_tools::modelsearch::run_modelsearch(
                 &config,
                 &base,
@@ -11336,7 +11433,8 @@ fn ferx_rust_covsearch_columns() -> Vec<String> {
 /// @param resume Reuse the fits already journalled in `directory`
 /// @param directory Where journals, `steps.csv`, `models/<id>.ferx` and
 ///   `final.ferx` go; `""` keeps the run in memory
-/// @param progress Print the engine's iteration progress to stderr
+/// @param progress Print the engine's iteration progress: 0 off, 1 to stderr,
+///   2 as lines on R's stdout (see [`SearchProgress`])
 /// @return Named list: the step-table columns, `family` and `note` beside
 ///   them, every candidate's model text, `final_model`, `final_fit`, the
 ///   options as the engine read them, `notes` and `cancelled`
@@ -11356,7 +11454,7 @@ fn ferx_rust_ruvsearch(
     retries: i32,
     resume: bool,
     directory: &str,
-    progress: bool,
+    progress: i32,
 ) -> Robj {
     entry(move || {
         let mut section = String::from("\n[ruvsearch]\n");
@@ -11412,46 +11510,47 @@ fn ferx_rust_ruvsearch(
         base.prepared.parsed.fit_options.cancel = Some(cancel.clone());
 
         let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
+        let lines = SearchProgress::new(progress);
         let report = |event: ferx_tools::ruvsearch::RuvsearchEvent| {
             use ferx_tools::ruvsearch::RuvsearchEvent as E;
-            if !progress {
+            if !lines.enabled() {
                 return;
             }
             match event {
-                E::InputStarted => eprintln!("Fitting the input model..."),
-                E::InputFinished { ofv } => eprintln!("Input model: OFV {ofv:.3}"),
-                E::BaseStarted => eprintln!("Fitting the proportional base..."),
-                E::BaseFinished { ofv } => eprintln!("Proportional base: OFV {ofv:.3}"),
+                E::InputStarted => say!(lines, "Fitting the input model..."),
+                E::InputFinished { ofv } => say!(lines, "Input model: OFV {ofv:.3}"),
+                E::BaseStarted => say!(lines, "Fitting the proportional base..."),
+                E::BaseFinished { ofv } => say!(lines, "Proportional base: OFV {ofv:.3}"),
                 E::IterationStarted {
                     iteration,
                     candidates,
                     screening,
-                } => eprintln!(
+                } => say!(lines,
                     "Iteration {iteration}: fitting {candidates} {}candidate{}...",
                     if screening { "screening " } else { "" },
                     if candidates == 1 { "" } else { "s" }
                 ),
                 E::Screened { iteration, feature } => match feature {
-                    Some(f) => eprintln!("Iteration {iteration}: pre-screen picked {}", f.label()),
-                    None => eprintln!("Iteration {iteration}: pre-screen found nothing to refit"),
+                    Some(f) => say!(lines, "Iteration {iteration}: pre-screen picked {}", f.label()),
+                    None => say!(lines, "Iteration {iteration}: pre-screen found nothing to refit"),
                 },
                 E::IterationFinished {
                     iteration,
                     selected,
                 } => match selected {
-                    Some((f, ofv)) => eprintln!(
+                    Some((f, ofv)) => say!(lines,
                         "Iteration {iteration}: accepted {} (OFV {ofv:.3})",
                         f.label()
                     ),
-                    None => eprintln!("Iteration {iteration}: nothing accepted"),
+                    None => say!(lines, "Iteration {iteration}: nothing accepted"),
                 },
                 E::Reverted { to, ofv } => {
-                    eprintln!("Final comparison returned the {to} model (OFV {ofv:.3})")
+                    say!(lines, "Final comparison returned the {to} model (OFV {ofv:.3})")
                 }
             }
         };
 
-        let result = match run_search_cancellable(&cancel, || {
+        let result = match run_search_cancellable(&cancel, Some(&lines), || {
             ferx_tools::ruvsearch::run_ruvsearch(
                 &config,
                 &base,
@@ -11790,7 +11889,8 @@ fn ferx_rust_iovsearch_columns() -> Vec<String> {
 /// @param resume Reuse the fits already journalled in `directory`
 /// @param directory Where journals, `models.csv`, `models/<id>.ferx` and
 ///   `final.ferx` go; `""` keeps the run in memory
-/// @param progress Print the engine's step progress to stderr
+/// @param progress Print the engine's step progress: 0 off, 1 to stderr,
+///   2 as lines on R's stdout (see [`SearchProgress`])
 /// @return Named list: the model-table columns, the label columns, the
 ///   per-step ranking columns, the candidate model texts, `final_model`,
 ///   `final_fit`, the options as the engine read them, `notes` and `cancelled`
@@ -11812,7 +11912,7 @@ fn ferx_rust_iivsearch(
     retries: i32,
     resume: bool,
     directory: &str,
-    progress: bool,
+    progress: i32,
 ) -> Robj {
     entry(move || {
         let mut section = String::from("\n[iivsearch]\n");
@@ -11867,25 +11967,26 @@ fn ferx_rust_iivsearch(
         base.prepared.parsed.fit_options.cancel = Some(cancel.clone());
 
         let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
+        let lines = SearchProgress::new(progress);
         let report = |event: ferx_tools::iivsearch::IivsearchEvent| {
             use ferx_tools::iivsearch::IivsearchEvent as E;
-            if !progress {
+            if !lines.enabled() {
                 return;
             }
             match event {
-                E::InputStarted => eprintln!("Fitting the input model..."),
+                E::InputStarted => say!(lines, "Fitting the input model..."),
                 E::InputFinished { ofv, criterion } => {
-                    eprintln!("Input model: OFV {ofv:.3}, criterion {criterion:.3}")
+                    say!(lines, "Input model: OFV {ofv:.3}, criterion {criterion:.3}")
                 }
-                E::BaseStarted => eprintln!("Fitting the base model..."),
+                E::BaseStarted => say!(lines, "Fitting the base model..."),
                 E::BaseFinished { ofv, criterion } => {
-                    eprintln!("Base model: OFV {ofv:.3}, criterion {criterion:.3}")
+                    say!(lines, "Base model: OFV {ofv:.3}, criterion {criterion:.3}")
                 }
                 E::StepStarted {
                     step,
                     kind,
                     candidates,
-                } => eprintln!(
+                } => say!(lines,
                     "Step {step} ({}): fitting {candidates} candidate{}...",
                     kind.label(),
                     if candidates == 1 { "" } else { "s" }
@@ -11894,19 +11995,19 @@ fn ferx_rust_iivsearch(
                     step,
                     best,
                     improved,
-                } => eprintln!(
+                } => say!(lines,
                     "Step {step}: {} {} (criterion {:.3})",
                     if improved { "best" } else { "kept" },
                     best.0,
                     best.1
                 ),
                 E::Reverted { criterion } => {
-                    eprintln!("Final comparison returned the input model (criterion {criterion:.3})")
+                    say!(lines, "Final comparison returned the input model (criterion {criterion:.3})")
                 }
             }
         };
 
-        let result = match run_search_cancellable(&cancel, || {
+        let result = match run_search_cancellable(&cancel, Some(&lines), || {
             ferx_tools::iivsearch::run_iivsearch(
                 &config,
                 &base,
@@ -12178,7 +12279,8 @@ fn ferx_rust_iivsearch(
 /// @param resume Reuse the fits already journalled in `directory`
 /// @param directory Where journals, `models.csv`, `models/<id>.ferx` and
 ///   `final.ferx` go; `""` keeps the run in memory
-/// @param progress Print the engine's step progress to stderr
+/// @param progress Print the engine's step progress: 0 off, 1 to stderr,
+///   2 as lines on R's stdout (see [`SearchProgress`])
 /// @return Named list: the model-table columns, the label columns, the
 ///   per-step ranking columns, the candidate model texts, `final_model`,
 ///   `final_fit`, the options as the engine read them, `notes` and `cancelled`
@@ -12200,7 +12302,7 @@ fn ferx_rust_iovsearch(
     retries: i32,
     resume: bool,
     directory: &str,
-    progress: bool,
+    progress: i32,
 ) -> Robj {
     entry(move || {
         let mut section = String::from("\n[iovsearch]\n");
@@ -12255,24 +12357,25 @@ fn ferx_rust_iovsearch(
         base.prepared.parsed.fit_options.cancel = Some(cancel.clone());
 
         let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
+        let lines = SearchProgress::new(progress);
         let report = |event: ferx_tools::iovsearch::IovsearchEvent| {
             use ferx_tools::iovsearch::IovsearchEvent as E;
-            if !progress {
+            if !lines.enabled() {
                 return;
             }
             match event {
-                E::InputStarted => eprintln!("Fitting the input model..."),
+                E::InputStarted => say!(lines, "Fitting the input model..."),
                 E::InputFinished { ofv, criterion } => {
-                    eprintln!("Input model: OFV {ofv:.3}, criterion {criterion:.3}")
+                    say!(lines, "Input model: OFV {ofv:.3}, criterion {criterion:.3}")
                 }
-                E::FullIovStarted { parameters } => eprintln!(
+                E::FullIovStarted { parameters } => say!(lines,
                     "Fitting the full-IOV model ({parameters} parameter{})...",
                     if parameters == 1 { "" } else { "s" }
                 ),
                 E::FullIovFinished { ofv, criterion } => {
-                    eprintln!("Full-IOV model: OFV {ofv:.3}, criterion {criterion:.3}")
+                    say!(lines, "Full-IOV model: OFV {ofv:.3}, criterion {criterion:.3}")
                 }
-                E::StepStarted { step, candidates } => eprintln!(
+                E::StepStarted { step, candidates } => say!(lines,
                     "Step {step}: fitting {candidates} candidate{}...",
                     if candidates == 1 { "" } else { "s" }
                 ),
@@ -12280,7 +12383,7 @@ fn ferx_rust_iovsearch(
                     step,
                     best,
                     improved,
-                } => eprintln!(
+                } => say!(lines,
                     "Step {step}: {} {} (criterion {:.3})",
                     if improved { "best" } else { "kept" },
                     best.0,
@@ -12289,7 +12392,7 @@ fn ferx_rust_iovsearch(
             }
         };
 
-        let result = match run_search_cancellable(&cancel, || {
+        let result = match run_search_cancellable(&cancel, Some(&lines), || {
             ferx_tools::iovsearch::run_iovsearch(
                 &config,
                 &base,
@@ -12761,7 +12864,8 @@ fn ferx_rust_amd_plan(
 /// @param resume Reuse the fits already journalled in `directory`
 /// @param directory Where every step's directory, `steps.csv`,
 ///   `candidates.csv` and `final.ferx` go
-/// @param progress Print the engine's step progress to stderr
+/// @param progress Print the engine's step progress: 0 off, 1 to stderr,
+///   2 as lines on R's stdout (see [`SearchProgress`])
 /// @return Named list: the step-table columns, the candidate-table columns,
 ///   `input_model`, `final_model`, `final_fit`, the options as the engine read
 ///   them, `notes` and `cancelled`
@@ -12782,7 +12886,7 @@ fn ferx_rust_amd(
     retries: i32,
     resume: bool,
     directory: &str,
-    progress: bool,
+    progress: i32,
 ) -> Robj {
     entry(move || {
         if directory.is_empty() {
@@ -12809,9 +12913,10 @@ fn ferx_rust_amd(
         let cancel = CancelFlag::new();
         base.prepared.parsed.fit_options.cancel = Some(cancel.clone());
 
+        let lines = SearchProgress::new(progress);
         let report = |event: ferx_tools::amd::AmdEvent| {
             use ferx_tools::amd::AmdEvent as E;
-            if !progress {
+            if !lines.enabled() {
                 return;
             }
             let show = |v: Option<f64>| {
@@ -12823,30 +12928,30 @@ fn ferx_rust_amd(
                     for s in &steps {
                         match &s.skipped {
                             Some(reason) => {
-                                eprintln!("  {} {:<12} skipped: {reason}", s.index, s.step.label())
+                                say!(lines, "  {} {:<12} skipped: {reason}", s.index, s.step.label())
                             }
-                            None => eprintln!("  {} {:<12} -> {}", s.index, s.step.label(), s.dir),
+                            None => say!(lines, "  {} {:<12} -> {}", s.index, s.step.label(), s.dir),
                         }
                     }
                 }
-                E::StartStarted => eprintln!("Fitting the starting model..."),
-                E::StartFinished { ofv } => eprintln!("Starting model: OFV {}", show(ofv)),
+                E::StartStarted => say!(lines, "Fitting the starting model..."),
+                E::StartFinished { ofv } => say!(lines, "Starting model: OFV {}", show(ofv)),
                 E::StepStarted {
                     position,
                     total,
                     step,
                     rerun,
                     ..
-                } => eprintln!(
+                } => say!(lines,
                     "Step {position}/{total}: {}{} ({})...",
                     step.label(),
                     if rerun { " (rerun)" } else { "" },
                     step.tool()
                 ),
                 E::StepSkipped { step, reason, .. } => {
-                    eprintln!("Skipping {}: {reason}", step.label())
+                    say!(lines, "Skipping {}: {reason}", step.label())
                 }
-                E::StepFailed { step, error, .. } => eprintln!(
+                E::StepFailed { step, error, .. } => say!(lines,
                     "Step {} failed: {error}; carrying on from the model it was handed",
                     step.label()
                 ),
@@ -12857,7 +12962,7 @@ fn ferx_rust_amd(
                     after,
                     selected,
                     ..
-                } => eprintln!(
+                } => say!(lines,
                     "  {} done: {criterion} {} -> {}; selected {}",
                     step.label(),
                     show(before),
@@ -12869,9 +12974,9 @@ fn ferx_rust_amd(
                     }
                 ),
                 E::RetriesStarted { starts, .. } => {
-                    eprintln!("  retries: refitting the selected model with {starts} starts...")
+                    say!(lines, "  retries: refitting the selected model with {starts} starts...")
                 }
-                E::RetriesFinished { improved, ofv } => eprintln!(
+                E::RetriesFinished { improved, ofv } => say!(lines,
                     "  retries: {} (OFV {})",
                     if improved { "improved" } else { "kept" },
                     show(ofv)
@@ -12880,7 +12985,7 @@ fn ferx_rust_amd(
         };
 
         let dir = std::path::PathBuf::from(directory);
-        let result = match run_search_cancellable(&cancel, || {
+        let result = match run_search_cancellable(&cancel, Some(&lines), || {
             ferx_tools::amd::run_amd(
                 &config,
                 &base,
@@ -13231,7 +13336,8 @@ fn globalsearch_section(
 /// @param resume Reuse the fits already journalled in `directory`
 /// @param directory Where journals, `models.csv`, `generations.csv`,
 ///   `models/<id>.ferx` and `final.ferx` go; `""` keeps the run in memory
-/// @param progress Print the engine's batch progress to stderr
+/// @param progress Print the engine's batch progress: 0 off, 1 to stderr,
+///   2 as lines on R's stdout (see [`SearchProgress`])
 /// @return Named list: the model-table columns, the per-row charges, the axes,
 ///   the GA generations, the candidate model texts, `final_model`,
 ///   `final_fit`, the options as the engine read them, `notes` and `cancelled`
@@ -13256,7 +13362,7 @@ fn ferx_rust_globalsearch(
     retries: i32,
     resume: bool,
     directory: &str,
-    progress: bool,
+    progress: i32,
 ) -> Robj {
     entry(move || {
         let section = globalsearch_section(
@@ -13308,17 +13414,18 @@ fn ferx_rust_globalsearch(
         base.prepared.parsed.fit_options.cancel = Some(cancel.clone());
 
         let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
+        let lines = SearchProgress::new(progress);
         let report = |event: ferx_tools::globalsearch::GlobalsearchEvent| {
             use ferx_tools::globalsearch::GlobalsearchEvent as E;
-            if !progress {
+            if !lines.enabled() {
                 return;
             }
             match event {
-                E::InputStarted => eprintln!("Fitting the input model..."),
+                E::InputStarted => say!(lines, "Fitting the input model..."),
                 E::InputFinished { ofv, criterion } => {
-                    eprintln!("Input model: OFV {ofv:.3}, criterion {criterion:.3}")
+                    say!(lines, "Input model: OFV {ofv:.3}, criterion {criterion:.3}")
                 }
-                E::Space { axes, size } => eprintln!(
+                E::Space { axes, size } => say!(lines,
                     "Grid: {size} point{} over {axes} ax{}",
                     if size == 1 { "" } else { "s" },
                     if axes == 1 { "is" } else { "es" }
@@ -13327,18 +13434,18 @@ fn ferx_rust_globalsearch(
                     step,
                     proposed,
                     candidates,
-                } => eprintln!(
+                } => say!(lines,
                     "{step}: {proposed} genome{} proposed, {candidates} to fit...",
                     if proposed == 1 { "" } else { "s" }
                 ),
                 E::BatchFinished { step, best } => match best {
-                    Some((id, fitness)) => eprintln!("{step}: best {id} (fitness {fitness:.3})"),
-                    None => eprintln!("{step}: no candidate passed the gate"),
+                    Some((id, fitness)) => say!(lines, "{step}: best {id} (fitness {fitness:.3})"),
+                    None => say!(lines, "{step}: no candidate passed the gate"),
                 },
             }
         };
 
-        let result = match run_search_cancellable(&cancel, || {
+        let result = match run_search_cancellable(&cancel, Some(&lines), || {
             ferx_tools::globalsearch::run_globalsearch(
                 &config,
                 &base,

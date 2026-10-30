@@ -276,3 +276,24 @@ test_that("print() shows the step table and the final relations", {
   expect_match(out, "ferx covariate search")
   expect_match(out, "Final covariate relations")
 })
+
+test_that("progress = \"lines\" prints the step progress as lines on stdout", {
+  skip_on_cran()
+  expect_identical(.ferx_search_progress(FALSE, "f"), 0L)
+  expect_identical(.ferx_search_progress("lines", "f"), 2L)
+  expect_error(.ferx_search_progress(NA, "f"), "TRUE, FALSE or")
+
+  ex <- ferx_example("two_cpt_oral_base")
+  # Through R's console, not the process's stdout, so capture.output() sees it.
+  out <- capture.output(ferx_covsearch(
+    model        = ex$model,
+    data         = ex$data,
+    search_space = "COVARIATE?(CL, WT, pow)",
+    max_steps    = 1,
+    retries      = 0,
+    progress     = "lines"
+  ))
+  expect_true("Fitting the base model..." %in% out)
+  expect_true(any(grepl("^Base model: OFV ", out)))
+  expect_true(any(grepl("^Step 1 \\(forward\\): fitting 1 candidate", out)))
+})

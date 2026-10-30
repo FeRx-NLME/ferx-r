@@ -137,13 +137,17 @@
 #' @param retry_failed Refit the replicates a resumed run finds recorded as
 #'   *failed*, instead of carrying the failure forward. Default `FALSE` (PsN's
 #'   default). Needs `resume = TRUE`.
-#' @param progress Show a progress bar while the replicates fit. Default
-#'   `interactive()`, so a script or a knitted document prints nothing. Uses
-#'   the cli package when it is installed and [utils::txtProgressBar()]
-#'   otherwise. The bar is drawn by this R session while the fits run in the
-#'   engine, and reports what the run will actually do: a `resume = TRUE` run
-#'   whose `directory` already holds most of the replicates counts only the
-#'   ones still to fit.
+#' @param progress Report progress while the replicates fit. Default
+#'   `interactive()`, so a script or a knitted document prints nothing unless
+#'   asked. `TRUE` in an interactive session shows a progress bar - the cli
+#'   package's when it is installed, [utils::txtProgressBar()] otherwise. `TRUE`
+#'   in a script (`Rscript`), or `"lines"` in either kind of session, prints
+#'   plain lines on stdout instead, one per completed fit
+#'   (`bootstrap: replicate 3/200 done`), so a log viewer tailing the output
+#'   sees the run move. Either form is drawn by this R session while the fits
+#'   run in the engine, and reports what the run will actually do: a
+#'   `resume = TRUE` run whose `directory` already holds most of the replicates
+#'   counts only the ones still to fit.
 #' @param verbose Print a one-line run header to stderr. Default `FALSE`.
 #'
 #' @return An object of class `ferx_bootstrap`, a list with:
@@ -243,7 +247,7 @@ ferx_bootstrap <- function(model,
   for (nm in c("update_inits", "run_base_model", "keep_covariance", "dofv",
                "skip_minimization_terminated", "skip_estimate_near_boundary",
                "skip_covariance_step_terminated", "skip_with_covstep_warnings",
-               "resume", "retry_failed", "progress", "verbose")) {
+               "resume", "retry_failed", "verbose")) {
     v <- get(nm)
     if (!is.logical(v) || length(v) != 1L || is.na(v)) {
       stop("`", nm, "` must be TRUE or FALSE.")
@@ -284,6 +288,14 @@ ferx_bootstrap <- function(model,
 
   dir_arg <- if (is.null(directory)) "" else normalizePath(directory, mustWork = FALSE)
 
+  # NULL is what tells the engine not to open a reporting thread at all.
+  progress_style <- .ferx_progress_style(progress, "ferx_bootstrap")
+  progress_handler <- if (progress_style == "console") {
+    .ferx_bootstrap_progress_handler()
+  } else if (progress_style == "lines") {
+    .ferx_bootstrap_progress_lines()
+  }
+
   res <- ferx_rust_bootstrap(
     normalizePath(model),
     if (is.null(data)) "" else normalizePath(data),
@@ -306,8 +318,7 @@ ferx_bootstrap <- function(model,
     resume,
     retry_failed,
     verbose,
-    # NULL is what tells the engine not to open a reporting thread at all.
-    if (isTRUE(progress)) .ferx_bootstrap_progress_handler() else NULL
+    progress_handler
   )
   if (length(res) == 0L) {
     stop("ferx_bootstrap: backend returned no result.")
@@ -720,6 +731,80 @@ plot.ferx_bootstrap <- function(x, y = NULL, parameters = NULL,
         advance("dofv", completed)
       } else if (identical(stage, "finished")) {
         close_bar()
+      }
+    }, error = function(e) NULL)
+    invisible(NULL)
+  }
+}
+
+# The line-oriented counterpart of the bar handler above, for `progress = TRUE`
+# in a script or `progress = "lines"` (#677): one plain record per completed
+# fit on stdout, so a log viewer tailing the output sees the run move.
+#
+# The engine hands the R thread the latest event on a timer, not every event:
+# the counts may jump (3 straight to 5), the same event comes round again on
+# every tick, and the count can even step back when two workers finish close
+# together. So every record is keyed on what has already been printed - each
+# count from the last one printed up to the new one gets its line, once, and a
+# stage is announced once however many times its event repeats. A count
+# jumping past a stage the timer skipped still prints that stage's line first.
+#
+# The events carry counts only, not which replicate finished or how it went;
+# per-sample OFV and status need the engine to report them (ferx-core #2512).
+# `say` prints one line; it is an argument for the tests.
+.ferx_bootstrap_progress_lines <- function(say = .ferx_progress_line) {
+  state <- new.env(parent = emptyenv())
+  state$said <- character(0)   # one-off records already printed
+  state$replicate <- 0L        # highest replicate count printed
+  state$dofv <- 0L             # highest delta-OFV count printed
+  state$base_fit <- FALSE      # the run starts with a base fit
+
+  once <- function(key, ...) {
+    if (key %in% state$said) return(invisible(NULL))
+    state$said <- c(state$said, key)
+    say(...)
+  }
+
+  # The base fit is over once a replicate or delta-OFV event arrives, whether
+  # or not its own "base_done" survived the coalescing.
+  base_done <- function() {
+    if (state$base_fit) once("base_done", "bootstrap: base model fitted")
+  }
+
+  count <- function(slot, label, completed, total) {
+    if (length(completed) != 1L || is.na(completed)) return(invisible(NULL))
+    if (completed <= state[[slot]]) return(invisible(NULL))
+    for (k in seq.int(state[[slot]] + 1L, completed)) {
+      say(sprintf("bootstrap: %s %d/%d done", label, k, total))
+    }
+    state[[slot]] <- completed
+    invisible(NULL)
+  }
+
+  function(stage, completed, total, base_fit) {
+    tryCatch({
+      if (identical(stage, "started")) {
+        if (!"started" %in% state$said) {
+          state$base_fit <- isTRUE(base_fit)
+          # `completed` carries the reused count on this one event.
+          if (completed > 0L) {
+            once("reused", "bootstrap: reusing ", completed,
+                 " replicates already on disk")
+          }
+          once("started", "bootstrap: ", total, " replicates to fit")
+          if (state$base_fit) once("base", "bootstrap: fitting the base model")
+        }
+      } else if (identical(stage, "base_done")) {
+        state$base_fit <- TRUE
+        base_done()
+      } else if (identical(stage, "replicate")) {
+        base_done()
+        count("replicate", "replicate", completed, total)
+      } else if (identical(stage, "dofv")) {
+        base_done()
+        count("dofv", "delta-OFV evaluation", completed, total)
+      } else if (identical(stage, "finished")) {
+        once("finished", "bootstrap: finished")
       }
     }, error = function(e) NULL)
     invisible(NULL)

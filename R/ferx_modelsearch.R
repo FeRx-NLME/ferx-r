@@ -68,7 +68,11 @@
 #'   \code{models/<id>.ferx} and \code{final.ferx} are written. \code{NULL}
 #'   keeps the run in memory, which also means it cannot be resumed.
 #' @param resume Reuse the fits already journalled in \code{directory}.
-#' @param progress Print the engine's layer progress to the console.
+#' @param progress Print the engine's layer progress. `TRUE` prints it to
+#'   stderr in an interactive session and, in a script (`Rscript`), as
+#'   plain lines on stdout, one record per line, so a log viewer tailing the
+#'   output sees each layer as it finishes. `"lines"` asks for the stdout
+#'   lines in either kind of session; `FALSE` prints nothing.
 #'
 #' @return An object of class \code{ferx_modelsearch}:
 #'   \describe{
@@ -190,7 +194,7 @@ ferx_modelsearch <- function(model = NULL,
     retries      = .ferx_search_count(retries, "retries", what, below = -1L, min = 0L),
     resume       = .ferx_search_bool(resume, "resume", what),
     directory    = dir_arg,
-    progress     = .ferx_search_bool(progress, "progress", what)
+    progress     = .ferx_search_progress(progress, what)
   )
 
   # The engine's 21 columns in the engine's order, then `structure` - the

@@ -109,13 +109,17 @@ larger \code{samples} does not extend the earlier run.}
 \emph{failed}, instead of carrying the failure forward. Default \code{FALSE} (PsN's
 default). Needs \code{resume = TRUE}.}
 
-\item{progress}{Show a progress bar while the replicates fit. Default
-\code{interactive()}, so a script or a knitted document prints nothing. Uses
-the cli package when it is installed and \code{\link[utils:txtProgressBar]{utils::txtProgressBar()}}
-otherwise. The bar is drawn by this R session while the fits run in the
-engine, and reports what the run will actually do: a \code{resume = TRUE} run
-whose \code{directory} already holds most of the replicates counts only the
-ones still to fit.}
+\item{progress}{Report progress while the replicates fit. Default
+\code{interactive()}, so a script or a knitted document prints nothing unless
+asked. \code{TRUE} in an interactive session shows a progress bar - the cli
+package's when it is installed, \code{\link[utils:txtProgressBar]{utils::txtProgressBar()}} otherwise. \code{TRUE}
+in a script (\code{Rscript}), or \code{"lines"} in either kind of session, prints
+plain lines on stdout instead, one per completed fit
+(\verb{bootstrap: replicate 3/200 done}), so a log viewer tailing the output
+sees the run move. Either form is drawn by this R session while the fits
+run in the engine, and reports what the run will actually do: a
+\code{resume = TRUE} run whose \code{directory} already holds most of the replicates
+counts only the ones still to fit.}
 
 \item{verbose}{Print a one-line run header to stderr. Default \code{FALSE}.}
 }

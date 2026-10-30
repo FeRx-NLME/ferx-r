@@ -102,7 +102,11 @@
 #'   returns - the tables come back on the object either way, but nothing is
 #'   left to read afterwards and the run cannot be resumed.
 #' @param resume Reuse the fits already journalled in \code{directory}.
-#' @param progress Print the engine's step progress to the console.
+#' @param progress Print the engine's step progress. `TRUE` prints it to
+#'   stderr in an interactive session and, in a script (`Rscript`), as
+#'   plain lines on stdout, one record per line, so a log viewer tailing the
+#'   output sees each step as it finishes. `"lines"` asks for the stdout
+#'   lines in either kind of session; `FALSE` prints nothing.
 #'
 #' @return An object of class \code{ferx_amd}:
 #'   \describe{
@@ -245,7 +249,7 @@ ferx_amd <- function(model = NULL,
     retries     = .ferx_search_count(retries, "retries", what, below = -1L, min = 0L),
     resume      = .ferx_search_bool(resume, "resume", what),
     directory   = dir_arg,
-    progress    = .ferx_search_bool(progress, "progress", what)
+    progress    = .ferx_search_progress(progress, what)
   )
 
   # Every candidate of every step, as `CANDIDATE_COLUMNS` orders it.

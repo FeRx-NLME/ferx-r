@@ -102,7 +102,11 @@ before the first fit when there is nothing to resume from - no
 \code{directory}, or a \code{directory} no earlier run wrote - rather
 than quietly searching from scratch.}
 
-\item{progress}{Print the engine's batch progress to the console.}
+\item{progress}{Print the engine's batch progress. \code{TRUE} prints it to
+stderr in an interactive session and, in a script (\code{Rscript}), as
+plain lines on stdout, one record per line, so a log viewer tailing the
+output sees each batch as it finishes. \code{"lines"} asks for the stdout
+lines in either kind of session; \code{FALSE} prints nothing.}
 
 \item{x}{A \code{ferx_globalsearch} object.}
 
