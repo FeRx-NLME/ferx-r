@@ -480,47 +480,68 @@ test_that("a run whose every draw is skipped is refused, not returned empty", {
 test_that("a [mixture] fit with per-class overrides simulates each class under its own Omega (ferx-core #2163, ferx-r #656)", {
   mod <- test_path("fixtures", "mixture_override.ferx")
   dat <- test_path("fixtures", "mixture_iv.csv")
-  fit <- suppressWarnings(ferx_fit(mod, dat, method = "focei", covariance = TRUE,
+  # The engine calls MIXL "not referenced" (ferx-core #2483); see
+  # helper-mixture-lint.R.
+  fit <- muffle_mixl_lint(ferx_fit(mod, dat, method = "focei", covariance = TRUE,
                                    verbose = FALSE))
   skip_if(is.null(fit$cov_matrix), "mixture covariance step did not converge")
   expect_length(fit$mixture_overrides, 1L)
 
+  # The data are one IV bolus per subject and V carries no eta, so
+  # log(log(C(0.25) / C(12)) / 11.75) = log(CL) - log(V): within one DRAW and
+  # class its mean is log(TVCL_k / TVV) and its variance that class's ETA_CL
+  # variance, the base omega for class 1 and the omega(2) override for class 2.
+  log_k_by <- function(sim) {
+    early <- sim[sim$TIME == 0.25, ]
+    late <- sim[sim$TIME == 12, ]
+    expect_identical(paste(early$DRAW, early$SIM, early$ID),
+                     paste(late$DRAW, late$SIM, late$ID))
+    data.frame(DRAW = early$DRAW, MIXNUM = early$MIXNUM,
+               log_k = log(log(early$IPRED / late$IPRED) / (12 - 0.25)))
+  }
+  class_stat <- function(lk, f) tapply(lk$log_k, list(lk$DRAW, lk$MIXNUM), f)
+
   # The fit as it stands: the call runs, both classes are drawn, and the class
   # is redrawn per replicate rather than fixed per subject.
-  sim <- suppressWarnings(ferx_simulate_with_uncertainty(
-    mod, dat, fit, n_uncertainty_draws = 3L, n_sim_per_draw = 20L, seed = 1L
+  sim <- muffle_mixl_lint(ferx_simulate_with_uncertainty(
+    mod, dat, fit, n_uncertainty_draws = 8L, n_sim_per_draw = 100L, seed = 3L
   ))
   expect_true(is.data.frame(sim))
   expect_setequal(unique(sim$MIXNUM), 1:2)
   per_id <- tapply(sim$MIXNUM, sim$ID, function(k) length(unique(k)))
   expect_true(all(per_id == 2L))
+  # The override is an estimate like any other, so it is drawn from the
+  # covariance matrix, not held at its fitted value: class 2's spread moves
+  # from draw to draw by far more than its sampling error (about 4% per draw).
+  v <- class_stat(log_k_by(sim), stats::var)
+  expect_gt(diff(range(log(v[, "2"]))), 0.3,
+            label = paste(signif(v[, "2"], 3), collapse = " "))
 
-  # The override reaches the draws. This fixture's Omega SEs are wide, so one
-  # draw's Omega is far from the estimate; shrinking the covariance matrix
-  # puts every draw on it, and each class's spread can be read off exactly.
-  # The data are one IV bolus per subject and V carries no eta, so
-  # log(log(C(0.25) / C(12)) / 11.75) = log(CL) - log(V), whose variance
-  # within one DRAW and class is that class's ETA_CL variance: the base omega
-  # for class 1, the omega(2) override for class 2. Without the override
-  # class 2 would run at the base omega, about a sixth of its fitted value.
+  # The override reaches the draws at its fitted value. Shrinking the
+  # covariance matrix puts every draw on the estimate, so each class's mean and
+  # spread can be read off exactly. Without the override class 2 would run at
+  # the base omega, about a sixth of its fitted value.
   tight <- fit
   tight$cov_matrix <- fit$cov_matrix * 1e-10
-  sim <- suppressWarnings(ferx_simulate_with_uncertainty(
+  sim <- muffle_mixl_lint(ferx_simulate_with_uncertainty(
     mod, dat, tight, n_uncertainty_draws = 3L, n_sim_per_draw = 100L, seed = 11L
   ))
-  early <- sim[sim$TIME == 0.25, ]
-  late <- sim[sim$TIME == 12, ]
-  expect_identical(paste(early$DRAW, early$SIM, early$ID),
-                   paste(late$DRAW, late$SIM, late$ID))
-  log_k <- log(log(early$IPRED / late$IPRED) / (12 - 0.25))
-  v <- tapply(log_k, list(early$DRAW, early$MIXNUM), stats::var)
+  lk <- log_k_by(sim)
+  v <- class_stat(lk, stats::var)
+  m <- class_stat(lk, mean)
   omega1 <- fit$omega[1L, 1L]
   omega2 <- fit$mixture_overrides[[1L]]
   expect_true(all(abs(log(v[, "1"] / omega1)) < 0.15),
               label = paste(c(signif(v[, "1"], 3), "vs", signif(omega1, 3)), collapse = " "))
   expect_true(all(abs(log(v[, "2"] / omega2)) < 0.15),
               label = paste(c(signif(v[, "2"], 3), "vs", signif(omega2, 3)), collapse = " "))
+  # Each class runs at its own typical CL (TVCL1 vs TVCL2, about 3x apart).
+  th <- fit$theta
+  expect_true(all(abs(m[, "1"] - log(th[["TVCL1"]] / th[["TVV"]])) < 0.05),
+              label = paste(signif(m[, "1"], 4), collapse = " "))
+  expect_true(all(abs(m[, "2"] - log(th[["TVCL2"]] / th[["TVV"]])) < 0.05),
+              label = paste(signif(m[, "2"], 4), collapse = " "))
   # Each subject draws class 1 with the fitted mixing probability.
-  expect_equal(mean(early$MIXNUM == 1L), stats::plogis(fit$theta[["MIXL"]]),
+  expect_equal(mean(lk$MIXNUM == 1L), stats::plogis(th[["MIXL"]]),
                tolerance = 0.03)
 })
