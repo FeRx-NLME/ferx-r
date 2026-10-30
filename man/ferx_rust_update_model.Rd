@@ -15,7 +15,9 @@ ferx_rust_update_model(
   sigma_names,
   omega_iov_flat,
   omega_iov_dim,
-  kappa_names
+  kappa_names,
+  residual_rho,
+  residual_rho_pairs
 )
 }
 \description{

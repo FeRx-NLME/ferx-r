@@ -16,15 +16,19 @@
 #'     scale (variance, or SD with \code{(sd)});
 #'   \item a \code{block_omega} / \code{block_kappa} takes the fitted lower
 #'     triangle, keeping its block structure;
+#'   \item a \code{block_sigma} takes the fitted residual covariance, lower
+#'     triangle on the variance scale it is declared on: \code{sigma_i^2} on
+#'     the diagonal, \code{rho_ij * sigma_i * sigma_j} off it (a block whose
+#'     bracket spans lines is left as written, with a warning);
 #'   \item a \code{FIX}ed parameter is left as declared, as is a vector theta
 #'     (\code{theta NAME[...]}) and any estimate that is not finite.
 #' }
 #' A model with a vector theta therefore refits from the vector's declared
 #' values, not its fitted ones, and does not start at the fit's OFV.
-#' Whole-line comments, formatting and every other block are kept as written.
-#' A comment at the end of a declaration whose value is rewritten is not: the
-#' engine writes that line afresh. Residual correlations of a
-#' \code{block_sigma} are not rewritten.
+#' Comments - whole-line ones and those at the end of a rewritten
+#' declaration - formatting and every other block are kept as written. A
+#' declaration written over several lines is rewritten onto its first line,
+#' carrying the comments of the others.
 #'
 #' The model text is the one that was fitted (\code{fit$model_text}, when it
 #' still hashes to \code{fit$model_hash}), whatever has happened to the file at
@@ -93,7 +97,7 @@ ferx_update_model <- function(fit, path = NULL, overwrite = FALSE) {
   } else {
     character()
   }
-  ferx_rust_update_model(
+  res <- ferx_rust_update_model(
     model_text     = model_text,
     theta          = theta,
     theta_names    = theta_names,
@@ -104,8 +108,14 @@ ferx_update_model <- function(fit, path = NULL, overwrite = FALSE) {
     sigma_names    = sigma_names,
     omega_iov_flat = iov$omega_iov_flat,
     omega_iov_dim  = iov$omega_iov_dim,
-    kappa_names    = kappa_names
+    kappa_names    = kappa_names,
+    # Fitted `block_sigma` correlations by sigma pair: the engine's edit does
+    # not seed `block_sigma`, so the glue writes the residual covariance.
+    residual_rho       = .ferx_residual_rho_vec(fit),
+    residual_rho_pairs = .ferx_residual_rho_pairs(fit)
   )
+  for (note in res$notes) warning("ferx_update_model: ", note, call. = FALSE)
+  res$text
 }
 
 # The text the fit was made from: `fit$model_text` when it is the fitted one
