@@ -38,7 +38,9 @@ subjects, and so on - travels the same channel.}
 
 \item{fit}{Optional \code{ferx_fit} result. When provided, simulation uses
 \code{fit$theta}, \code{fit$omega}, and \code{fit$sigma} instead of the
-model file's initial values.}
+model file's initial values. On a \code{[mixture]} model each class runs
+under the fitted Omega and Sigma, with any per-class override at its
+fitted value from \code{fit$mixture_overrides}.}
 
 \item{match}{Propensity-score matching method (default \code{FALSE}). When
 enabled, each replicate's drawn etas are reassigned to subjects by

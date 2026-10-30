@@ -27,8 +27,8 @@ ferx_rust_simulate <- function(model_path, data_path, n_sim, seed, match_method,
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_simulate_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, residual_rho_pairs, fit_bindings, iov_occasion, n_sim, seed, match_method, horizon) {
-  .Call("wrap__ferx_rust_simulate_from_fit", model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, as.integer(residual_rho_pairs), fit_bindings, iov_occasion, n_sim, seed, match_method, horizon)
+ferx_rust_simulate_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, residual_rho_pairs, mixture_overrides, fit_bindings, iov_occasion, n_sim, seed, match_method, horizon) {
+  .Call("wrap__ferx_rust_simulate_from_fit", model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, as.integer(residual_rho_pairs), mixture_overrides, fit_bindings, iov_occasion, n_sim, seed, match_method, horizon)
 }
 
 #' @title Internal Rust backend binding
@@ -39,8 +39,8 @@ ferx_rust_simulate_adaptive <- function(model_path, data_path, n_sim, seed, veri
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_simulate_adaptive_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, residual_rho_pairs, fit_bindings, n_sim, seed, verify, max_decisions) {
-  .Call("wrap__ferx_rust_simulate_adaptive_from_fit", model_path, data_path, theta, omega_flat, as.integer(omega_dim), sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, as.integer(residual_rho_pairs), fit_bindings, as.integer(n_sim), as.integer(seed), verify, as.integer(max_decisions))
+ferx_rust_simulate_adaptive_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, residual_rho_pairs, mixture_overrides, fit_bindings, n_sim, seed, verify, max_decisions) {
+  .Call("wrap__ferx_rust_simulate_adaptive_from_fit", model_path, data_path, theta, omega_flat, as.integer(omega_dim), sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, as.integer(residual_rho_pairs), mixture_overrides, fit_bindings, as.integer(n_sim), as.integer(seed), verify, as.integer(max_decisions))
 }
 
 #' @title Internal Rust backend binding
@@ -57,8 +57,8 @@ ferx_rust_predict <- function(model_path, data_path) {
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_predict_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, residual_rho_pairs, fit_bindings, iov_occasion) {
-  .Call("wrap__ferx_rust_predict_from_fit", model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, as.integer(residual_rho_pairs), fit_bindings, iov_occasion)
+ferx_rust_predict_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, residual_rho_pairs, mixture_overrides, fit_bindings, iov_occasion) {
+  .Call("wrap__ferx_rust_predict_from_fit", model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, as.integer(residual_rho_pairs), mixture_overrides, fit_bindings, iov_occasion)
 }
 
 #' @title Internal Rust backend binding
@@ -69,14 +69,14 @@ ferx_rust_predict_survival <- function(model_path, data_path, times) {
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_predict_survival_from_fit <- function(model_path, data_path, times, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, residual_rho_pairs, fit_bindings, iov_occasion) {
-  .Call("wrap__ferx_rust_predict_survival_from_fit", model_path, data_path, times, theta, omega_flat, omega_dim, sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, as.integer(residual_rho_pairs), fit_bindings, iov_occasion)
+ferx_rust_predict_survival_from_fit <- function(model_path, data_path, times, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, residual_rho_pairs, mixture_overrides, fit_bindings, iov_occasion) {
+  .Call("wrap__ferx_rust_predict_survival_from_fit", model_path, data_path, times, theta, omega_flat, omega_dim, sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, as.integer(residual_rho_pairs), mixture_overrides, fit_bindings, iov_occasion)
 }
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_npde_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, residual_rho_pairs, fit_bindings, reader_settings, model_is_fits, population_fingerprint, iov_occasion, nsim, seed) {
-  .Call("wrap__ferx_rust_npde_from_fit", model_path, data_path, theta, omega_flat, as.integer(omega_dim), sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, as.integer(residual_rho_pairs), fit_bindings, reader_settings, model_is_fits, population_fingerprint, iov_occasion, as.integer(nsim), as.integer(seed))
+ferx_rust_npde_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, residual_rho_pairs, mixture_overrides, fit_bindings, reader_settings, model_is_fits, population_fingerprint, iov_occasion, nsim, seed) {
+  .Call("wrap__ferx_rust_npde_from_fit", model_path, data_path, theta, omega_flat, as.integer(omega_dim), sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, as.integer(residual_rho_pairs), mixture_overrides, fit_bindings, reader_settings, model_is_fits, population_fingerprint, iov_occasion, as.integer(nsim), as.integer(seed))
 }
 
 #' @title Internal Rust backend binding

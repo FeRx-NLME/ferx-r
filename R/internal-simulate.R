@@ -24,6 +24,11 @@ validate_fit_for_params <- function(fit) {
     # correlation is FIX, and refuses an estimated one (#480).
     residual_rho = .ferx_residual_rho_vec(fit),
     residual_rho_pairs = .ferx_residual_rho_pairs(fit),
+    # A [mixture] fit's fitted per-class Omega/Sigma override values
+    # (numeric(0) when none). The engine rebuilds every class from the fitted
+    # base Omega/Sigma plus these; without them a from-fit simulation drew each
+    # class at the model file's values (#672).
+    mixture_overrides = as.numeric(fit$mixture_overrides %||% numeric()),
     # The IOV occasion rule the fit derived its occasions with, so a rule
     # passed only through `ferx_fit(settings = )` reaches predict / simulate /
     # npde, as it reaches ferx_sir() / ferx_covariance() (#512, #523). "" for a

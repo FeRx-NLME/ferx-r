@@ -377,3 +377,56 @@ test_that("ferx_simulate on a non-mixture model has no MIXNUM column", {
   expect_identical(names(sim), c("DRAW", "SIM", "ID", "TIME", "CMT", "IPRED",
                                  "DV_SIM", "OBSERVED"))
 })
+
+test_that("ferx_simulate(fit = ) on a [mixture] fit draws each class at its fitted Omega (#672)", {
+  mod <- test_path("fixtures", "mixture_override.ferx")
+  dat <- test_path("fixtures", "mixture_iv.csv")
+  fit <- mixture_override_fit()
+  expect_length(fit$mixture_overrides, 1L)
+  omega1 <- fit$omega[1L, 1L]
+  omega2 <- fit$mixture_overrides[[1L]]
+  # The oracle needs the fitted values to sit well away from the model file's
+  # (0.09 base, 0.30 override), or simulating at the file's would pass too.
+  expect_gt(abs(log(omega1 / 0.09)), 0.5)
+  expect_gt(abs(log(omega2 / 0.30)), 0.5)
+
+  # One IV bolus per subject and no eta on V, so
+  # log(log(C(0.25) / C(12)) / 11.75) = log(CL) - log(V): within one class its
+  # variance is that class's ETA_CL variance - the base omega for class 1, the
+  # omega(2) override for class 2. 30 subjects x 200 replicates put about 3000
+  # draws in each class, a variance SE of about 3%; 0.15 on the log scale is
+  # five SEs, and the model file's values miss by 1.07 and 1.6.
+  sim <- muffle_mixl_lint(ferx_simulate(mod, dat, n_sim = 200L, seed = 5L, fit = fit))
+  early <- sim[sim$TIME == 0.25, ]
+  late <- sim[sim$TIME == 12, ]
+  expect_identical(paste(early$SIM, early$ID), paste(late$SIM, late$ID))
+  log_k <- log(log(early$IPRED / late$IPRED) / (12 - 0.25))
+  v <- tapply(log_k, early$MIXNUM, stats::var)
+  expect_lt(abs(log(v[["1"]] / omega1)), 0.15,
+            label = paste(signif(v[["1"]], 3), "vs", signif(omega1, 3)))
+  expect_lt(abs(log(v[["2"]] / omega2)), 0.15,
+            label = paste(signif(v[["2"]], 3), "vs", signif(omega2, 3)))
+
+  # The override is read from the fit, not from the model file: doubling it
+  # doubles class 2's spread and leaves class 1's.
+  wide <- fit
+  wide$mixture_overrides <- 2 * omega2
+  sim <- muffle_mixl_lint(ferx_simulate(mod, dat, n_sim = 200L, seed = 5L, fit = wide))
+  early <- sim[sim$TIME == 0.25, ]
+  late <- sim[sim$TIME == 12, ]
+  v <- tapply(log(log(early$IPRED / late$IPRED) / (12 - 0.25)), early$MIXNUM, stats::var)
+  expect_lt(abs(log(v[["1"]] / omega1)), 0.15)
+  expect_lt(abs(log(v[["2"]] / (2 * omega2))), 0.15)
+})
+
+test_that("ferx_simulate(fit = ) refuses a [mixture] fit that lost its override values (#672)", {
+  fit <- mixture_override_fit()
+  fit$mixture_overrides <- NULL
+  probe <- engine_error_probe(muffle_mixl_lint(ferx_simulate(
+    test_path("fixtures", "mixture_override.ferx"),
+    test_path("fixtures", "mixture_iv.csv"),
+    n_sim = 1L, seed = 1L, fit = fit
+  )))
+  expect_refusal(probe, "omega(2) ETA_CL")
+  expect_null(probe$value)
+})

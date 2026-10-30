@@ -156,7 +156,7 @@ ferx_simulate_with_uncertainty <- function(model, data, fit,
       residual_rho_pairs   = fit_pieces$residual_rho_pairs,
       # The fitted per-class overrides (ferx-core #1765); each subject runs
       # under its drawn class's Omega and Sigma (ferx-core #2163).
-      mixture_overrides    = as.numeric(fit$mixture_overrides),
+      mixture_overrides    = fit_pieces$mixture_overrides,
       fit_bindings         = fit_pieces$fit_bindings,
       iov_occasion         = fit_pieces$iov_occasion,
       n_uncertainty_draws  = as.integer(n_uncertainty_draws),

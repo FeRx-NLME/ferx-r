@@ -933,6 +933,10 @@ fn ferx_rust_simulate(
 /// @param omega_iov_flat Row-major flattened fitted IOV (kappa) omega matrix;
 ///   empty when the model declares no `kappa`.
 /// @param omega_iov_dim Side length of the IOV omega matrix; 0 when no IOV.
+/// @param mixture_overrides `fit$mixture_overrides`, a `[mixture]` fit's
+///   fitted per-class Omega/Sigma override values (ferx-core #1765); empty
+///   when the fit carries none. Each class is rebuilt from the fitted base
+///   Omega/Sigma plus these (ferx-r #672).
 /// @param iov_occasion `fit$iov_occasion`, the IOV occasion rule the fit ran
 ///   with (ferx-r #523): the population's occasions are derived with it, as
 ///   the fit derived them. "" when the fit records none.
@@ -958,6 +962,7 @@ fn ferx_rust_simulate_from_fit(
     omega_iov_dim: i32,
     residual_rho: Vec<f64>,
     residual_rho_pairs: Vec<i32>,
+    mixture_overrides: Vec<f64>,
     fit_bindings: List,
     iov_occasion: &str,
     n_sim: i32,
@@ -1014,6 +1019,7 @@ fn ferx_rust_simulate_from_fit(
             omega_iov_dim,
             &residual_rho,
             &residual_rho_pairs,
+            &mixture_overrides,
         ) {
             Ok(p) => p,
             Err(e) => return Err(e),
@@ -1102,6 +1108,10 @@ fn ferx_rust_simulate_adaptive(
 /// @param omega_iov_flat Row-major flattened fitted IOV (kappa) omega matrix;
 ///   empty when the model declares no `kappa`.
 /// @param omega_iov_dim Side length of the IOV omega matrix; 0 when no IOV.
+/// @param mixture_overrides `fit$mixture_overrides`, a `[mixture]` fit's
+///   fitted per-class Omega/Sigma override values (ferx-core #1765); empty
+///   when the fit carries none. Each class is rebuilt from the fitted base
+///   Omega/Sigma plus these (ferx-r #672).
 /// @param residual_rho Fitted `block_sigma` residual correlations (empty when
 ///   the model declares none), one per row of `fit$residual_correlations`
 /// @param residual_rho_pairs The 1-based `(sigma_i, sigma_j)` pair of each
@@ -1128,6 +1138,7 @@ fn ferx_rust_simulate_adaptive_from_fit(
     omega_iov_dim: i32,
     residual_rho: Vec<f64>,
     residual_rho_pairs: Vec<i32>,
+    mixture_overrides: Vec<f64>,
     fit_bindings: List,
     n_sim: i32,
     seed: i32,
@@ -1144,6 +1155,7 @@ fn ferx_rust_simulate_adaptive_from_fit(
             omega_iov_dim,
             residual_rho: &residual_rho,
             residual_rho_pairs: &residual_rho_pairs,
+            mixture_overrides: &mixture_overrides,
             fitted: fit_bindings_from_r(&fit_bindings)?,
         };
         simulate_adaptive(model_path, data_path, n_sim, seed, verify, max_decisions, Some(fit))
@@ -1160,6 +1172,7 @@ struct AdaptiveFit<'a> {
     omega_iov_dim: i32,
     residual_rho: &'a [f64],
     residual_rho_pairs: &'a [i32],
+    mixture_overrides: &'a [f64],
     fitted: DataBindings,
 }
 
@@ -1240,6 +1253,7 @@ fn simulate_adaptive(
                 f.omega_iov_dim,
                 f.residual_rho,
                 f.residual_rho_pairs,
+                f.mixture_overrides,
             )
             .map_err(|e| format!("ferx_simulate_adaptive: {e}"))?;
             (params, OccasionNotes::none())
@@ -1620,6 +1634,10 @@ fn ferx_rust_predict(
 /// @param omega_iov_flat Row-major flattened fitted IOV (kappa) omega matrix;
 ///   empty when the model declares no `kappa`.
 /// @param omega_iov_dim Side length of the IOV omega matrix; 0 when no IOV.
+/// @param mixture_overrides `fit$mixture_overrides`, a `[mixture]` fit's
+///   fitted per-class Omega/Sigma override values (ferx-core #1765); empty
+///   when the fit carries none. Each class is rebuilt from the fitted base
+///   Omega/Sigma plus these (ferx-r #672).
 /// @param iov_occasion `fit$iov_occasion`, the IOV occasion rule the fit ran
 ///   with (ferx-r #523): the population's occasions are derived with it, as
 ///   the fit derived them. "" when the fit records none.
@@ -1637,6 +1655,7 @@ fn ferx_rust_predict_from_fit(
     omega_iov_dim: i32,
     residual_rho: Vec<f64>,
     residual_rho_pairs: Vec<i32>,
+    mixture_overrides: Vec<f64>,
     fit_bindings: List,
     iov_occasion: &str,
 ) -> Robj {
@@ -1685,6 +1704,7 @@ fn ferx_rust_predict_from_fit(
             omega_iov_dim,
             &residual_rho,
             &residual_rho_pairs,
+            &mixture_overrides,
         ) {
             Ok(p) => p,
             Err(e) => return Err(e),
@@ -1807,6 +1827,10 @@ fn ferx_rust_predict_survival(model_path: &str, data_path: &str, times: Vec<f64>
 /// @param omega_iov_flat Row-major flattened fitted IOV (kappa) omega matrix;
 ///   empty when the model declares no `kappa`.
 /// @param omega_iov_dim Side length of the IOV omega matrix; 0 when no IOV.
+/// @param mixture_overrides `fit$mixture_overrides`, a `[mixture]` fit's
+///   fitted per-class Omega/Sigma override values (ferx-core #1765); empty
+///   when the fit carries none. Each class is rebuilt from the fitted base
+///   Omega/Sigma plus these (ferx-r #672).
 /// @param iov_occasion `fit$iov_occasion`, the IOV occasion rule the fit ran
 ///   with (ferx-r #523): the population's occasions are derived with it, as
 ///   the fit derived them. "" when the fit records none.
@@ -1827,6 +1851,7 @@ fn ferx_rust_predict_survival_from_fit(
     omega_iov_dim: i32,
     residual_rho: Vec<f64>,
     residual_rho_pairs: Vec<i32>,
+    mixture_overrides: Vec<f64>,
     fit_bindings: List,
     iov_occasion: &str,
 ) -> Robj {
@@ -1870,6 +1895,7 @@ fn ferx_rust_predict_survival_from_fit(
             omega_iov_dim,
             &residual_rho,
             &residual_rho_pairs,
+            &mixture_overrides,
         ) {
             Ok(p) => p,
             Err(e) => return Err(e),
@@ -1902,6 +1928,10 @@ fn ferx_rust_predict_survival_from_fit(
 /// @param omega_iov_flat Row-major flattened fitted IOV (kappa) omega matrix;
 ///   empty when the model declares no `kappa`.
 /// @param omega_iov_dim Side length of the IOV omega matrix; 0 when no IOV.
+/// @param mixture_overrides `fit$mixture_overrides`, a `[mixture]` fit's
+///   fitted per-class Omega/Sigma override values (ferx-core #1765); empty
+///   when the fit carries none. Each class is rebuilt from the fitted base
+///   Omega/Sigma plus these (ferx-r #672).
 /// @param reader_settings `fit$reader_settings` as JSON; "" when the fit
 ///   records none (read with the model file's `[data_selection]`).
 /// @param model_is_fits TRUE when `model_path` is the fit's own model file:
@@ -1932,6 +1962,7 @@ fn ferx_rust_npde_from_fit(
     omega_iov_dim: i32,
     residual_rho: Vec<f64>,
     residual_rho_pairs: Vec<i32>,
+    mixture_overrides: Vec<f64>,
     fit_bindings: List,
     reader_settings: &str,
     model_is_fits: bool,
@@ -2021,6 +2052,7 @@ fn ferx_rust_npde_from_fit(
             omega_iov_dim,
             &residual_rho,
             &residual_rho_pairs,
+            &mixture_overrides,
         ) {
             Ok(p) => p,
             Err(e) => return Err(e),
@@ -3339,6 +3371,7 @@ fn params_from_fit(
     omega_iov_dim: i32,
     residual_rho: &[f64],
     residual_rho_pairs: &[i32],
+    mixture_overrides: &[f64],
 ) -> std::result::Result<ModelParameters, String> {
     let template = &model.default_params;
 
@@ -3376,6 +3409,43 @@ fn params_from_fit(
     // the matrix is symmetric in the intended use (covariance); reconstruct
     // via DMatrix::from_row_slice to be explicit.
     let omega_mat = DMatrix::from_row_slice(d, d, omega_flat);
+    let omega_iov = omega_iov_from_fit(model, omega_iov_flat, omega_iov_dim)?;
+    // ferx-core #847 moved the residual correlations (and their FIX flags)
+    // into the parameter set. The pairing comes from the parsed model and
+    // the value from the fit; a free correlation the fit carries no value
+    // for is refused rather than rebuilt at its declared initial value.
+    let residual_correlations =
+        residual_correlations_from_fit(model, residual_rho, residual_rho_pairs)
+            .map_err(|e| format!("Fit error: {e}"))?;
+    // A `[mixture]` model's per-class Omega/Sigma (ferx-core #977/#985) are
+    // part of the fit: every class starts from the fitted base Omega/Sigma and
+    // each declared override takes its fitted value from `fit$mixture_overrides`
+    // (ferx-core #1765). The template's classes hold the model file's values,
+    // so carrying them simulated every class at its initial spread (ferx-r
+    // #672). ferx-core's rebuild (`mixture_from_overrides`) is crate-private;
+    // its public route is `fitted_params_from_result`, the one
+    // `ferx_simulate_with_uncertainty()` takes, so it gets the same skeleton.
+    let mixture = match template.mixture {
+        None => None,
+        Some(_) => {
+            let skeleton = default_fit_result(
+                model,
+                theta.to_vec(),
+                omega_mat.clone(),
+                sigma.to_vec(),
+                omega_iov.as_ref().map(|m| m.matrix.clone()),
+                None,
+                None,
+                residual_correlations.clone(),
+                (!mixture_overrides.is_empty()).then(|| mixture_overrides.to_vec()),
+            );
+            ferx_core::estimation::uncertainty_samples::fitted_params_from_result(
+                &skeleton, model,
+            )
+            .map_err(|e| format!("Fit error: {e}"))?
+            .mixture
+        }
+    };
     let omega = OmegaMatrix::from_matrix(
         omega_mat,
         template.omega.eta_names.clone(),
@@ -3395,25 +3465,10 @@ fn params_from_fit(
             names: template.sigma.names.clone(),
         },
         sigma_fixed: template.sigma_fixed.clone(),
-        omega_iov: omega_iov_from_fit(model, omega_iov_flat, omega_iov_dim)?,
+        omega_iov,
         kappa_fixed: template.kappa_fixed.clone(),
-        // ferx-core #977/#985 added per-class Omega/Sigma for `[mixture]` models.
-        // Carry the template's value rather than `None`: this function rebuilds
-        // parameters from R-supplied theta/omega/sigma *against* the parsed model,
-        // so dropping the mixture spec here would silently turn a `[mixture]` fit
-        // into a single-population one. Every other structural field on this
-        // initializer is likewise taken from `template`.
-        mixture: template.mixture.clone(),
-        // ferx-core #847 moved the residual correlations (and their FIX flags)
-        // into the parameter set. The pairing comes from the parsed model and
-        // the value from the fit; a free correlation the fit carries no value
-        // for is refused rather than rebuilt at its declared initial value.
-        residual_correlations: residual_correlations_from_fit(
-            model,
-            residual_rho,
-            residual_rho_pairs,
-        )
-        .map_err(|e| format!("Fit error: {e}"))?,
+        mixture,
+        residual_correlations,
         residual_correlation_fixed: template.residual_correlation_fixed.clone(),
     })
 }
