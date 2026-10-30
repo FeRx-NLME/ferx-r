@@ -75,9 +75,10 @@
 #' On a \code{[mixture]} fit each subject draws its class from the mixing
 #' probabilities afresh in every \code{DRAW} and \code{SIM}, as NONMEM's
 #' \code{$SIM} does under \code{$MIX}, and is simulated under that class's
-#' Omega and Sigma: the drawn Omega and Sigma, with any per-class override
-#' (\code{omega(k)} / \code{sigma(k)} in \code{[mixture]}) at its fitted value
-#' from \code{fit$mixture_overrides}. \code{MIXNUM} reports the class drawn.
+#' Omega and Sigma, drawn with the rest of the parameters: a per-class override
+#' (\code{omega(k)} / \code{sigma(k)} in \code{[mixture]}) is drawn around its
+#' fitted value in \code{fit$mixture_overrides}, and a FIX one is held there.
+#' \code{MIXNUM} reports the class drawn.
 #'
 #' @inheritSection ferx_simulate Errors raised by the engine
 #' @inheritSection ferx_simulate Theta level blocks
