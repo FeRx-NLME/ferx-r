@@ -825,3 +825,40 @@ test_that("a model that does not parse is still labelled with call-time settings
   expect_s3_class(e, "ferx_engine_error")
   expect_identical(e$code, "E_UNKNOWN_BLOCK")
 })
+
+test_that("an info diagnostic prints as info, not as a warning (#660)", {
+  # ferx-core #2427 added `Severity::Info` (W_LEVEL_SUMMARY is the first). The
+  # pinned engine may not emit one yet, so the engine result is mocked.
+  ex <- ferx_example("warfarin")
+  validate_with <- function(severity, code) {
+    n <- length(severity)
+    testthat::local_mocked_bindings(
+      ferx_rust_validate_model = function(model_path, data_path) {
+        list(ok = TRUE, model = "warfarin", data = "",
+             severity = severity, code = code,
+             message = paste("finding", code), block = rep("", n),
+             line = rep(0L, n), suggestion = rep("", n))
+      },
+      .package = "ferx"
+    )
+    out <- capture.output(res <- ferx_model_validate(ex$model))
+    list(out = out, res = res)
+  }
+
+  v <- validate_with("info", "W_LEVEL_SUMMARY")
+  expect_true(v$res$ok)
+  expect_identical(v$res$diagnostics$severity, "info")
+  expect_true(any(grepl("Result: VALID (with notes)", v$out, fixed = TRUE)))
+  expect_false(any(grepl("with warnings", v$out, fixed = TRUE)))
+  expect_true(any(grepl("* info W_LEVEL_SUMMARY", v$out, fixed = TRUE)))
+  expect_false(any(grepl("* warning W_LEVEL_SUMMARY", v$out, fixed = TRUE)))
+
+  v <- validate_with(c("warning", "info"), c("W_SOMETHING", "W_LEVEL_SUMMARY"))
+  expect_true(any(grepl("Result: VALID (with warnings and notes)", v$out,
+                        fixed = TRUE)))
+  expect_true(any(grepl("* warning W_SOMETHING", v$out, fixed = TRUE)))
+  expect_true(any(grepl("* info W_LEVEL_SUMMARY", v$out, fixed = TRUE)))
+
+  v <- validate_with("warning", "W_SOMETHING")
+  expect_true(any(grepl("Result: VALID (with warnings)", v$out, fixed = TRUE)))
+})

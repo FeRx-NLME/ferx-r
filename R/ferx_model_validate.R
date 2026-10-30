@@ -25,8 +25,10 @@
 #'   \code{data}, and a \code{diagnostics} data frame with one row per finding
 #'   (\code{severity}, \code{code}, \code{message}, \code{block}, \code{line},
 #'   \code{suggestion}). The function always prints a report to the console.
+#'   \code{severity} is \code{"error"}, \code{"warning"} or \code{"info"};
+#'   an \code{info} row is a note and does not count as a warning.
 #'   Codes are stable identifiers (\code{E_*} for errors, \code{W_*} for
-#'   warnings) suitable for programmatic handling - the registry lives in
+#'   warnings and notes) suitable for programmatic handling - the registry lives in
 #'   ferx-core's \code{docs/src/file-formats/check-report.md}. A missing file
 #'   or non-\code{.ferx} extension raises an error rather than returning a
 #'   failed diagnostic.
@@ -141,16 +143,26 @@ ferx_model_validate <- function(path, data = NULL) {
   }
   cat("\n")
 
-  if (ok && nrow(diag) == 0L) {
-    cat("Result: VALID\n")
-  } else if (ok) {
-    cat("Result: VALID (with warnings)\n")
-  } else {
+  # Three severities (ferx-core #2427 added `info`, ferx-r #660). An info row
+  # is a note, not a warning: it prints as `info` and leaves a model whose only
+  # findings are informational "VALID (with notes)", matching the fit path,
+  # which counts `info` separately from `warning`.
+  n_info <- sum(diag$severity == "info")
+  n_warn <- nrow(diag) - n_info - sum(diag$severity == "error")
+  if (!ok) {
     cat("Result: INVALID\n")
+  } else if (n_warn > 0L && n_info > 0L) {
+    cat("Result: VALID (with warnings and notes)\n")
+  } else if (n_warn > 0L) {
+    cat("Result: VALID (with warnings)\n")
+  } else if (n_info > 0L) {
+    cat("Result: VALID (with notes)\n")
+  } else {
+    cat("Result: VALID\n")
   }
   if (nrow(diag) > 0L) {
     for (i in seq_len(nrow(diag))) {
-      tag <- if (diag$severity[i] == "error") "ERROR" else "warning"
+      tag <- switch(diag$severity[i], error = "ERROR", info = "info", "warning")
       loc <- if (!is.na(diag$block[i])) {
         if (!is.na(diag$line[i])) sprintf(" [%s:%d]", diag$block[i], diag$line[i])
         else sprintf(" [%s]", diag$block[i])

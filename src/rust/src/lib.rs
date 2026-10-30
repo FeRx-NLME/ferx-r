@@ -6667,7 +6667,8 @@ fn ferx_rust_classify_warnings(messages: Vec<String>) -> List {
 ///   * `model` (chr) — model file stem
 ///   * `data` (chr) — data path used, or `""`
 ///   * `severity` / `code` / `message` / `block` / `line` / `suggestion`
-///     — parallel vectors, one entry per diagnostic
+///     — parallel vectors, one entry per diagnostic; `severity` is
+///     `"error"`, `"warning"` or `"info"`
 /// @export
 #[extendr]
 fn ferx_rust_validate_model(model_path: &str, data_path: &str) -> List {
@@ -6683,10 +6684,12 @@ fn ferx_rust_validate_model(model_path: &str, data_path: &str) -> List {
         let mut line:     Vec<i32>    = Vec::with_capacity(n);
         let mut suggestion: Vec<String> = Vec::with_capacity(n);
         for d in &report.diagnostics {
-            severity.push(match d.severity {
-                ferx_core::Severity::Error => "error".to_string(),
-                ferx_core::Severity::Warning => "warning".to_string(),
-            });
+            // Lowercased variant name, as `ferx_rust_classify_warnings()` does,
+            // rather than an exhaustive match: ferx-core #2427 added
+            // `Severity::Info`, and a match over the variants this crate knew
+            // stopped compiling against it (ferx-r #660). The R side reads
+            // "error", "warning" and "info".
+            severity.push(format!("{:?}", d.severity).to_lowercase());
             code.push(d.code.clone());
             message.push(d.message.clone());
             block.push(d.block.clone().unwrap_or_default());
