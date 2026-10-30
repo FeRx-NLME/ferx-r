@@ -477,25 +477,50 @@ test_that("a run whose every draw is skipped is refused, not returned empty", {
   expect_null(probe$value)
 })
 
-test_that("a [mixture] fit with per-class overrides is still refused (ferx-core #2163)", {
-  # The fit records its overrides (ferx-core #1765), but they are not handed
-  # to the engine here: its simulation runs every [mixture] subject as class 1
-  # (#2163, fix in #2373), and with the overrides it returned draws that did
-  # not move with the class-2 theta, the mixing probability or the overrides.
-  # Until #2373 is pinned the call stays refused, even though the fit carries
-  # them, and says why: the engine's own refusal (no overrides reach it) told
-  # the user the fit records none (review round 2).
+test_that("a [mixture] fit with per-class overrides simulates each class under its own Omega (ferx-core #2163, ferx-r #656)", {
   mod <- test_path("fixtures", "mixture_override.ferx")
   dat <- test_path("fixtures", "mixture_iv.csv")
   fit <- suppressWarnings(ferx_fit(mod, dat, method = "focei", covariance = TRUE,
                                    verbose = FALSE))
   skip_if(is.null(fit$cov_matrix), "mixture covariance step did not converge")
   expect_length(fit$mixture_overrides, 1L)
-  probe <- engine_error_probe(ferx_simulate_with_uncertainty(
-    mod, dat, fit, n_uncertainty_draws = 3L, seed = 1L
+
+  # The fit as it stands: the call runs, both classes are drawn, and the class
+  # is redrawn per replicate rather than fixed per subject.
+  sim <- suppressWarnings(ferx_simulate_with_uncertainty(
+    mod, dat, fit, n_uncertainty_draws = 3L, n_sim_per_draw = 20L, seed = 1L
   ))
-  expect_coded_refusal(probe, "runs every [mixture] subject as class 1 (ferx-core #2163)",
-                       "E_MIXTURE_SIMULATION")
-  expect_false(grepl("records neither", conditionMessage(probe$cond), fixed = TRUE))
-  expect_null(probe$value)
+  expect_true(is.data.frame(sim))
+  expect_setequal(unique(sim$MIXNUM), 1:2)
+  per_id <- tapply(sim$MIXNUM, sim$ID, function(k) length(unique(k)))
+  expect_true(all(per_id == 2L))
+
+  # The override reaches the draws. This fixture's Omega SEs are wide, so one
+  # draw's Omega is far from the estimate; shrinking the covariance matrix
+  # puts every draw on it, and each class's spread can be read off exactly.
+  # The data are one IV bolus per subject and V carries no eta, so
+  # log(log(C(0.25) / C(12)) / 11.75) = log(CL) - log(V), whose variance
+  # within one DRAW and class is that class's ETA_CL variance: the base omega
+  # for class 1, the omega(2) override for class 2. Without the override
+  # class 2 would run at the base omega, about a sixth of its fitted value.
+  tight <- fit
+  tight$cov_matrix <- fit$cov_matrix * 1e-10
+  sim <- suppressWarnings(ferx_simulate_with_uncertainty(
+    mod, dat, tight, n_uncertainty_draws = 3L, n_sim_per_draw = 100L, seed = 11L
+  ))
+  early <- sim[sim$TIME == 0.25, ]
+  late <- sim[sim$TIME == 12, ]
+  expect_identical(paste(early$DRAW, early$SIM, early$ID),
+                   paste(late$DRAW, late$SIM, late$ID))
+  log_k <- log(log(early$IPRED / late$IPRED) / (12 - 0.25))
+  v <- tapply(log_k, list(early$DRAW, early$MIXNUM), stats::var)
+  omega1 <- fit$omega[1L, 1L]
+  omega2 <- fit$mixture_overrides[[1L]]
+  expect_true(all(abs(log(v[, "1"] / omega1)) < 0.15),
+              label = paste(c(signif(v[, "1"], 3), "vs", signif(omega1, 3)), collapse = " "))
+  expect_true(all(abs(log(v[, "2"] / omega2)) < 0.15),
+              label = paste(c(signif(v[, "2"], 3), "vs", signif(omega2, 3)), collapse = " "))
+  # Each subject draws class 1 with the fitted mixing probability.
+  expect_equal(mean(early$MIXNUM == 1L), stats::plogis(fit$theta[["MIXL"]]),
+               tolerance = 0.03)
 })

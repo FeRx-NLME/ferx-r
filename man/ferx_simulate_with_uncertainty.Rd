@@ -99,10 +99,12 @@ to draw it. Declare its upper bound below 1 (e.g. \code{0.999}) and refit.
 
 \section{Mixture models}{
 
-A \code{[mixture]} fit with per-class overrides (\code{fit$mixture_overrides})
-is refused with \code{code = "E_MIXTURE_SIMULATION"}: the engine still
-simulates every \code{[mixture]} subject as class 1 (ferx-core #2163), so its
-draws would ignore the classes.
+On a \code{[mixture]} fit each subject draws its class from the mixing
+probabilities afresh in every \code{DRAW} and \code{SIM}, as NONMEM's
+\code{$SIM} does under \code{$MIX}, and is simulated under that class's
+Omega and Sigma: the drawn Omega and Sigma, with any per-class override
+(\code{omega(k)} / \code{sigma(k)} in \code{[mixture]}) at its fitted value
+from \code{fit$mixture_overrides}. \code{MIXNUM} reports the class drawn.
 }
 
 \section{Errors raised by the engine}{

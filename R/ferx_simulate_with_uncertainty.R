@@ -72,10 +72,12 @@
 #'   Row count: \code{n_uncertainty_draws * n_sim_per_draw * n_obs}.
 #'
 #' @section Mixture models:
-#' A \code{[mixture]} fit with per-class overrides (\code{fit$mixture_overrides})
-#' is refused with \code{code = "E_MIXTURE_SIMULATION"}: the engine still
-#' simulates every \code{[mixture]} subject as class 1 (ferx-core #2163), so its
-#' draws would ignore the classes.
+#' On a \code{[mixture]} fit each subject draws its class from the mixing
+#' probabilities afresh in every \code{DRAW} and \code{SIM}, as NONMEM's
+#' \code{$SIM} does under \code{$MIX}, and is simulated under that class's
+#' Omega and Sigma: the drawn Omega and Sigma, with any per-class override
+#' (\code{omega(k)} / \code{sigma(k)} in \code{[mixture]}) at its fitted value
+#' from \code{fit$mixture_overrides}. \code{MIXNUM} reports the class drawn.
 #'
 #' @inheritSection ferx_simulate Errors raised by the engine
 #' @inheritSection ferx_simulate Theta level blocks
@@ -129,7 +131,6 @@ ferx_simulate_with_uncertainty <- function(model, data, fit,
     stop("`n_sim_per_draw` must be >= 1.")
   }
 
-  .ferx_refuse_mixture_uncertainty(fit)
   fit_pieces <- validate_fit_for_params(fit)
   unc_pieces <- validate_fit_for_uncertainty(fit, method)
 
@@ -152,11 +153,9 @@ ferx_simulate_with_uncertainty <- function(model, data, fit,
       sir_resamples_dim    = unc_pieces$sir_resamples_dim,
       residual_rho         = fit_pieces$residual_rho,
       residual_rho_pairs   = fit_pieces$residual_rho_pairs,
-      # Deliberately none: a fit that records them (ferx-core #1765) was
-      # refused above, since the engine's simulation still runs every
-      # [mixture] subject as class 1 (ferx-core #2163, fix in #2373). Pass
-      # `fit$mixture_overrides`, and drop that refusal, once #2373 is pinned.
-      mixture_overrides    = numeric(),
+      # The fitted per-class overrides (ferx-core #1765); each subject runs
+      # under its drawn class's Omega and Sigma (ferx-core #2163).
+      mixture_overrides    = as.numeric(fit$mixture_overrides),
       fit_bindings         = fit_pieces$fit_bindings,
       iov_occasion         = fit_pieces$iov_occasion,
       n_uncertainty_draws  = as.integer(n_uncertainty_draws),
@@ -217,36 +216,4 @@ validate_fit_for_uncertainty <- function(fit, method) {
       sir_resamples_dim  = as.integer(d)
     )
   }
-}
-
-# A [mixture] fit with per-class overrides is refused before the engine runs.
-# The engine's simulation still runs every [mixture] subject as class 1
-# (ferx-core #2163, fix in #2373), so draws from such a fit would ignore its
-# classes. Without this the glue's empty `mixture_overrides` made the engine
-# refuse it anyway, but with E_FIT_INPUT_MISSING, telling the user the fit
-# records no overrides when `fit$mixture_overrides` holds them. Remove this,
-# and hand the glue `fit$mixture_overrides`, once #2373 is in the pin.
-.ferx_refuse_mixture_uncertainty <- function(fit) {
-  if (length(fit$mixture_overrides) == 0L) return(invisible())
-  text <- paste0(
-    "This [mixture] fit has per-class overrides, which ",
-    "ferx_simulate_with_uncertainty() cannot simulate yet: the engine runs ",
-    "every [mixture] subject as class 1 (ferx-core #2163), so the draws ",
-    "would ignore the fit's classes."
-  )
-  suggestion <- paste0(
-    "Simulate the fit's uncertainty once a ferx release includes ",
-    "ferx-core #2373."
-  )
-  stop(structure(
-    class = c("ferx_engine_error", "error", "condition"),
-    list(
-      message    = .ferx_engine_message(text, "E_MIXTURE_SIMULATION", suggestion),
-      call       = sys.call(-1L),
-      code       = "E_MIXTURE_SIMULATION",
-      block      = "mixture",
-      line       = NA_integer_,
-      suggestion = suggestion
-    )
-  ))
 }
