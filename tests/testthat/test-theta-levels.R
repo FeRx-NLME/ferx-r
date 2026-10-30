@@ -1723,10 +1723,15 @@ test_that("T17i: a model file edited since the fit is named, not laid out by pos
     w
   }, drop = "model.ferx")
   # Engine-written: no layout, for the model's hash, instead of AST reading
-  # ZPLA's values. The estimates still load (#531).
+  # ZPLA's values. The estimates still load (#531). The engine codes the edit
+  # (ferx-core #2027), and the from-fit refusal keeps that code.
   core <- tl_load_unavailable(drop_model(trip$core_path), "model hash mismatch")
   expect_identical(core$theta, fit$theta)
-  expect_true(is.na(core$unavailable_theta_levels$code))
+  expect_identical(core$unavailable_theta_levels$code, "E_FIT_INPUT_CHANGED")
+  e <- tryCatch(ferx_sir(core, sir_samples = 10L, sir_resamples = 5L),
+                error = function(e) e)
+  expect_s3_class(e, "ferx_levels_unavailable_error")
+  expect_identical(e$code, "E_FIT_INPUT_CHANGED")
   # R-written, both copies present: the model is named, neither copy is.
   w <- NULL
   r <- withCallingHandlers(ferx_load_fit(drop_model(trip$r_path)),
@@ -1741,7 +1746,7 @@ test_that("T17i: a model file edited since the fit is named, not laid out by pos
   # so the parse error's code is not the failure's (#531 review, finding 2).
   cat("\n[not_a_block]\n  x = 1\n", file = model, append = TRUE)
   broken <- tl_load_unavailable(drop_model(trip$core_path), "model hash mismatch")
-  expect_true(is.na(broken$unavailable_theta_levels$code))
+  expect_identical(broken$unavailable_theta_levels$code, "E_FIT_INPUT_CHANGED")
   expect_no_match(broken$unavailable_theta_levels$message, "E_UNKNOWN_BLOCK",
                   fixed = TRUE)
 })

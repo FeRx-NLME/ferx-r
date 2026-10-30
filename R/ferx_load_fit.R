@@ -854,7 +854,10 @@ ferx_load_fit <- function(path) {
   # each level the se and SIR interval the fresh fit reported (#528).
   cov <- fit$cov_matrix
   has_cov <- is.matrix(cov) && nrow(cov) > 0L
-  # The layout call, returning the frame or the condition it failed with.
+  # The layout call, returning the frame or the condition it failed with. The
+  # engine's record of a coded refusal is read at once, before anything else
+  # calls the engine: an edited model file is coded E_FIT_INPUT_CHANGED
+  # (ferx-core #2027), and the retry below would replace that record.
   lay_out <- function(hash) {
     tryCatch(
       ferx_rust_theta_levels_from_fit(
@@ -866,7 +869,7 @@ ferx_load_fit <- function(path) {
         sir_resamples_n = as.integer(fit$sir_resamples_n %||% 0L),
         sir_resamples_dim = as.integer(fit$sir_resamples_dim %||% 0L)
       ),
-      error = function(e) e
+      error = function(e) .ferx_engine_coded_error(e, conditionMessage(e)) %||% e
     )
   }
   hash <- .ferx_hash_arg(fit$model_hash)
@@ -908,12 +911,14 @@ ferx_load_fit <- function(path) {
 # parses gets its parse code (`E_UNKNOWN_BLOCK`, `E_DEPRECATED_BLOCK`, ...).
 # `model_path` is NULL when there is no model to validate, or when the hash is
 # what refused it (the caller tells): an edited file's own errors are not why
-# the layout was refused. Neither is coded, nor is a binding the engine
-# refuses, which the glue raises without one; those carry NA, and the text
-# says "no diagnostic code".
+# the layout was refused. An edited file arrives already coded
+# E_FIT_INPUT_CHANGED by the engine (ferx-core #2027), and a coded refusal is
+# not re-validated. A missing model file is not coded, nor is a binding the
+# engine refuses, which the glue raises without one; those carry NA, and the
+# text says "no diagnostic code".
 .fitrx_unavailable_theta_levels <- function(levels, e, model_path) {
   msg <- conditionMessage(e)
-  if (!is.null(model_path)) {
+  if (!is.null(model_path) && !inherits(e, "ferx_engine_error")) {
     e <- .ferx_engine_error(e, model_path, NULL)
     msg <- conditionMessage(e)
   }
