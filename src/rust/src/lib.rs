@@ -10453,6 +10453,13 @@ fn search_config_for_tool(
 /// OFV, criterion and verdict - so the run directory is tailed for new rows
 /// before each step line is queued and on every tick. A step's candidates
 /// therefore print before the line that summarises the step.
+///
+/// A row is identified by its whole record, not its candidate hash alone: a
+/// directory can already hold rows for the hashes this run is about to fit (a
+/// fresh run in a reused directory, or a resumed run retrying a failure), and
+/// those refits must still print. A row the engine *reuses* is rewritten as it
+/// was, so it matches a row that was on disk before the run and prints marked
+/// `(reused)`; a refit carries its own `seconds` and so never matches.
 struct SearchProgress {
     mode: i32,
     queued: std::sync::Mutex<Vec<String>>,
@@ -10465,12 +10472,30 @@ struct JournalTail {
     root: Option<std::path::PathBuf>,
     /// A directory made for a run that was given none; removed on drop.
     scratch: Option<std::path::PathBuf>,
-    /// Each journal's size at its last read: an unchanged file is not re-read.
-    sizes: HashMap<std::path::PathBuf, u64>,
-    /// `(journal, candidate hash)` rows already printed. Keyed by hash because a
-    /// journal is rewritten from the rows it keeps whenever a layer's runner
-    /// opens it, and a resumed run's rows are the previous run's.
-    seen: std::collections::HashSet<(std::path::PathBuf, String)>,
+    /// Each journal's size and modification time at its last read: an
+    /// unchanged file is not re-read. Both, because a layer's runner rewrites
+    /// its journal from the rows it keeps, which can leave the size as it was.
+    stamps: HashMap<std::path::PathBuf, (u64, Option<std::time::SystemTime>)>,
+    /// Rows that were on disk before the run started, by [`journal_row_key`].
+    before: std::collections::HashSet<String>,
+    /// Rows already printed, by [`journal_row_key`]: a journal is rewritten from the
+    /// rows it keeps whenever a layer's runner opens it.
+    printed: std::collections::HashSet<String>,
+}
+
+/// What identifies one journal row: the candidate and the fit that produced
+/// it. The fit's wall time is part of it, so a refit of the same candidate is
+/// a different row from the one an earlier run left, while a reused row -
+/// rewritten unchanged - is the same.
+fn journal_row_key(path: &Path, r: &ferx_tools::search::journal::CandidateRecord) -> String {
+    format!(
+        "{}|{}|{:x}|{:?}|{:?}",
+        path.display(),
+        r.hash,
+        r.seconds.to_bits(),
+        r.ofv.map(f64::to_bits),
+        r.error
+    )
 }
 
 impl SearchProgress {
@@ -10517,8 +10542,9 @@ impl SearchProgress {
         Some(root)
     }
 
-    /// Queue a line for every journal row not printed yet (or, with `print`
-    /// false, only mark them printed). Safe to call from any thread.
+    /// Queue a line for every journal row not printed yet. With `print` false -
+    /// before the run starts - record the rows already on disk instead, so that
+    /// the ones this run reuses can say so. Safe to call from any thread.
     fn collect(&self, print: bool) {
         let Ok(mut tail) = self.journals.lock() else {
             return;
@@ -10533,15 +10559,26 @@ impl SearchProgress {
             let Ok(meta) = std::fs::metadata(&path) else {
                 continue;
             };
-            if tail.sizes.get(&path) == Some(&meta.len()) {
+            let stamp = (meta.len(), meta.modified().ok());
+            if tail.stamps.get(&path) == Some(&stamp) {
                 continue;
             }
-            tail.sizes.insert(path.clone(), meta.len());
+            tail.stamps.insert(path.clone(), stamp);
             // Drops a torn final row; it is read again once its newline lands.
             for record in ferx_tools::search::journal::read_records(&path) {
-                if tail.seen.insert((path.clone(), record.hash.clone())) && print {
-                    lines.push(candidate_line(&record));
+                let key = journal_row_key(&path, &record);
+                if !print {
+                    tail.before.insert(key);
+                    continue;
                 }
+                if !tail.printed.insert(key.clone()) {
+                    continue;
+                }
+                let mut line = candidate_line(&record);
+                if tail.before.contains(&key) {
+                    line.push_str(" (reused)");
+                }
+                lines.push(line);
             }
         }
         drop(tail);

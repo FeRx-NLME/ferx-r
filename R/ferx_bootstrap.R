@@ -803,7 +803,9 @@ plot.ferx_bootstrap <- function(x, y = NULL, parameters = NULL,
   skipping <- function(name) isTRUE(skip[name])
 
   describe <- function(row) {
-    if (nzchar(row$error)) return(paste0("failed: ", row$error))
+    # One record per line, whatever the engine's message spans.
+    error <- trimws(gsub("[[:space:]]+", " ", row$error))
+    if (nzchar(error)) return(paste0("failed: ", error))
     flags <- character(0)
     excluded <- character(0)
     if (!row$minimization_successful) {

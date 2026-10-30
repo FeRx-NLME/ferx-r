@@ -405,7 +405,7 @@ test_that("the line renderer reports each replicate's index, OFV and outcome fro
                "2,1,0,0,0,99.75,1.000,0.1,",
                "5,0,1,0,0,98.125,2.000,0.1,",
                "4,1,0,0,0,97.5,1.500,0.1,",
-               "3,0,0,0,0,,0.500,,\"Error: singular, x\""))
+               "3,0,0,0,0,,0.500,,\"Error: singular,\n  x\""))
   h("replicate", 3L, 3L, FALSE)
   # The finished run rewrites the file in index order: nothing is new.
   write_rows(c("0,1,0,0,0,100.5,1.000,0.1,",

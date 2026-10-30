@@ -314,3 +314,39 @@ test_that("progress = \"lines\" prints the step progress as lines on stdout", {
     expect_match(line, ": (OFV -?[0-9.]+, criterion -?[0-9.]+(, not converged)?, (passed|failed(: .+)?)|error: .+)$")
   }
 })
+
+test_that("progress = \"lines\" reports refits in a reused directory, and marks reuse", {
+  skip_on_cran()
+  ex <- ferx_example("two_cpt_oral_base")
+  dir <- tempfile("covsearch-lines-")
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  run <- function(resume) {
+    capture.output(ferx_covsearch(
+      model        = ex$model,
+      data         = ex$data,
+      search_space = "COVARIATE?(CL, WT, pow)",
+      max_steps    = 1,
+      retries      = 0,
+      directory    = dir,
+      resume       = resume,
+      progress     = "lines"
+    ))
+  }
+  cand <- function(out) grep("^  candidate ", out, value = TRUE)
+
+  first <- cand(run(FALSE))
+  expect_gt(length(first), 0L)
+  expect_false(any(grepl("\\(reused\\)$", first)))
+
+  # A fresh run over the same directory refits the same candidates - the
+  # journal already holds their hashes, and every one must still print.
+  again <- cand(run(FALSE))
+  expect_identical(sub(":.*", "", again), sub(":.*", "", first))
+  expect_false(any(grepl("\\(reused\\)$", again)))
+
+  # A resumed run fits nothing new: each candidate it takes from the journal
+  # prints once, marked as reused.
+  resumed <- cand(run(TRUE))
+  expect_identical(sub(":.*", "", resumed), sub(":.*", "", first))
+  expect_true(all(grepl("\\(reused\\)$", resumed)))
+})
