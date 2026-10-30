@@ -10460,6 +10460,11 @@ fn search_config_for_tool(
 /// those refits must still print. A row the engine *reuses* is rewritten as it
 /// was, so it matches a row that was on disk before the run and prints marked
 /// `(reused)`; a refit carries its own `seconds` and so never matches.
+///
+/// A candidate whose model another in its batch already carries is never
+/// fitted and never journalled. Those come from the `candidates.csv` the
+/// runner writes once the batch is done, as `duplicate of <id>` lines - so
+/// every candidate a search returns has its line.
 struct SearchProgress {
     mode: i32,
     queued: std::sync::Mutex<Vec<String>>,
@@ -10554,6 +10559,10 @@ impl SearchProgress {
         };
         let mut found = Vec::new();
         find_search_journals(&root, 0, &mut found);
+        let dirs: Vec<std::path::PathBuf> = found
+            .iter()
+            .filter_map(|p| p.parent().map(Path::to_path_buf))
+            .collect();
         let mut lines = Vec::new();
         for path in found {
             let Ok(meta) = std::fs::metadata(&path) else {
@@ -10579,6 +10588,34 @@ impl SearchProgress {
                     line.push_str(" (reused)");
                 }
                 lines.push(line);
+            }
+        }
+        // The duplicates, from the table each runner writes once its batch is
+        // done - before the event that closes the step. Read only once the run
+        // has rewritten it: a table left by an earlier run in the directory
+        // keeps the stamp it had before this run started.
+        for dir in dirs {
+            for table in ["candidates.csv", "candidates.partial.csv"] {
+                let path = dir.join(table);
+                let Ok(meta) = std::fs::metadata(&path) else {
+                    continue;
+                };
+                let stamp = (meta.len(), meta.modified().ok());
+                if tail.stamps.get(&path) == Some(&stamp) {
+                    continue;
+                }
+                tail.stamps.insert(path.clone(), stamp);
+                if !print {
+                    continue;
+                }
+                let Ok(text) = std::fs::read_to_string(&path) else {
+                    continue;
+                };
+                for (key, line) in duplicate_lines(&text) {
+                    if tail.printed.insert(format!("dup|{}|{key}", dir.display())) {
+                        lines.push(line);
+                    }
+                }
             }
         }
         drop(tail);
@@ -10663,29 +10700,163 @@ fn find_search_journals(dir: &Path, depth: usize, out: &mut Vec<std::path::PathB
 
 /// One candidate as a progress line: id, what it is, OFV, criterion, verdict.
 fn candidate_line(r: &ferx_tools::search::journal::CandidateRecord) -> String {
+    format_candidate(&CandidateFields {
+        id: &r.id,
+        features: &r.features.render(),
+        duplicate_of: None,
+        ofv: r.ofv,
+        criterion: r.criterion,
+        converged: Some(r.converged),
+        passed: r.passed,
+        failures: &r.failures.join("; "),
+        error: r.error.as_deref(),
+    })
+}
+
+/// What a candidate line says, from a journal row or a `candidates.csv` row.
+struct CandidateFields<'a> {
+    id: &'a str,
+    features: &'a str,
+    duplicate_of: Option<&'a str>,
+    ofv: Option<f64>,
+    criterion: Option<f64>,
+    converged: Option<bool>,
+    passed: bool,
+    failures: &'a str,
+    error: Option<&'a str>,
+}
+
+fn format_candidate(c: &CandidateFields) -> String {
     let one_line = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
     let num = |v: Option<f64>| v.map_or("NA".to_string(), |x| format!("{x:.3}"));
-    let mut line = format!("  candidate {}", r.id);
-    let what = r.features.render();
-    if !what.is_empty() {
-        line.push_str(&format!(" [{what}]"));
+    let mut line = format!("  candidate {}", c.id);
+    if !c.features.is_empty() {
+        line.push_str(&format!(" [{}]", c.features));
     }
-    if let Some(e) = &r.error {
-        line.push_str(&format!(": error: {}", one_line(e)));
+    line.push(':');
+    if let Some(of) = c.duplicate_of {
+        line.push_str(&format!(" duplicate of {of}:"));
+    }
+    if let Some(e) = c.error.filter(|e| !e.is_empty()) {
+        line.push_str(&format!(" error: {}", one_line(e)));
         return line;
     }
-    line.push_str(&format!(": OFV {}, criterion {}", num(r.ofv), num(r.criterion)));
-    if !r.converged {
+    line.push_str(&format!(" OFV {}, criterion {}", num(c.ofv), num(c.criterion)));
+    if c.converged == Some(false) {
         line.push_str(", not converged");
     }
-    if r.passed {
+    if c.passed {
         line.push_str(", passed");
-    } else if r.failures.is_empty() {
+    } else if c.failures.is_empty() {
         line.push_str(", failed");
     } else {
-        line.push_str(&format!(", failed: {}", one_line(&r.failures.join("; "))));
+        line.push_str(&format!(", failed: {}", one_line(c.failures)));
     }
     line
+}
+
+/// The records of a CSV file the engine wrote: RFC 4180 quoting, so a reason
+/// holding a comma or a quote survives. The glue reads `candidates.csv` with
+/// it - the engine writes that table through a temporary renamed into place,
+/// so it is never read half-written.
+fn read_csv_records(text: &str) -> Vec<Vec<String>> {
+    let mut records = Vec::new();
+    let mut record = Vec::new();
+    let mut field = String::new();
+    let mut quoted = false;
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        match (quoted, c) {
+            (true, '"') if chars.peek() == Some(&'"') => {
+                field.push('"');
+                chars.next();
+            }
+            (true, '"') => quoted = false,
+            (true, c) => field.push(c),
+            (false, '"') => quoted = true,
+            (false, ',') => record.push(std::mem::take(&mut field)),
+            (false, '\r') => {}
+            (false, '\n') => {
+                record.push(std::mem::take(&mut field));
+                records.push(std::mem::take(&mut record));
+            }
+            (false, c) => field.push(c),
+        }
+    }
+    if !field.is_empty() || !record.is_empty() {
+        record.push(field);
+        records.push(record);
+    }
+    records
+}
+
+/// The lines for the duplicates in one `candidates.csv`: a candidate whose
+/// model another in the same batch already carries is never fitted, so it has
+/// no journal row - it appears only in the table the runner writes once the
+/// batch is done, carrying its representative's verdict. Rows that are not
+/// duplicates came through the journal and are skipped here.
+fn duplicate_lines(text: &str) -> Vec<(String, String)> {
+    let mut rows = read_csv_records(text).into_iter();
+    let Some(header) = rows.next() else {
+        return Vec::new();
+    };
+    let col = |name: &str| header.iter().position(|h| h == name);
+    let (Some(id), Some(dup)) = (col("id"), col("duplicate_of")) else {
+        return Vec::new();
+    };
+    let get = |row: &Vec<String>, i: Option<usize>| -> String {
+        i.and_then(|i| row.get(i).cloned()).unwrap_or_default()
+    };
+    let num = |v: String| v.parse::<f64>().ok();
+    rows.filter(|row| !get(row, Some(dup)).is_empty())
+        .map(|row| {
+            let id_v = get(&row, Some(id));
+            let dup_v = get(&row, Some(dup));
+            let hash = get(&row, col("hash"));
+            let line = format_candidate(&CandidateFields {
+                id: &id_v,
+                features: &get(&row, col("features")),
+                duplicate_of: Some(&dup_v),
+                ofv: num(get(&row, col("ofv"))),
+                criterion: num(get(&row, col("criterion"))),
+                converged: match get(&row, col("converged")).as_str() {
+                    "true" => Some(true),
+                    "false" => Some(false),
+                    _ => None,
+                },
+                passed: get(&row, col("passed")) == "true",
+                failures: &get(&row, col("failures")),
+                error: Some(get(&row, col("error"))).as_deref(),
+            });
+            (format!("{id_v}|{hash}|{dup_v}"), line)
+        })
+        .collect()
+}
+
+/// The candidate lines a line-mode search prints for what is on disk in a run
+/// directory: every journal row and every duplicate in its candidate tables.
+/// It drives the same tail a running search does, so the tests can check the
+/// duplicate path, which no tool reaches on demand: each one dedups its own
+/// proposals before a batch is handed to the runner.
+///
+/// @param directory A search run directory
+/// @return Character vector, one line per candidate
+/// @keywords internal
+#[extendr]
+fn ferx_rust_search_progress_lines(directory: &str) -> Vec<String> {
+    entry(move || {
+        let lines = SearchProgress::new(2);
+        if let Ok(mut tail) = lines.journals.lock() {
+            tail.root = Some(std::path::PathBuf::from(directory));
+        }
+        lines.collect(true);
+        let out = lines
+            .queued
+            .lock()
+            .map(|mut q| std::mem::take(&mut *q))
+            .unwrap_or_default();
+        Ok(out)
+    })
 }
 
 /// `eprintln!` for a search's progress: `say!(lines, "...", args)`.
@@ -13986,6 +14157,7 @@ extendr_module! {
     fn ferx_rust_amd_plan;
     fn ferx_rust_amd_step_columns;
     fn ferx_rust_amd_candidate_columns;
+    fn ferx_rust_search_progress_lines;
     fn ferx_rust_globalsearch;
     fn ferx_rust_globalsearch_columns;
     fn ferx_rust_globalsearch_option_keys;

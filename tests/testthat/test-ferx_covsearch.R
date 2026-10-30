@@ -350,3 +350,53 @@ test_that("progress = \"lines\" reports refits in a reused directory, and marks 
   expect_identical(sub(":.*", "", resumed), sub(":.*", "", first))
   expect_true(all(grepl("\\(reused\\)$", resumed)))
 })
+
+test_that("line mode prints deduplicated candidates, which have no journal row", {
+  skip_on_cran()
+  ex <- ferx_example("two_cpt_oral_base")
+  dir <- tempfile("covsearch-dups-")
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  ferx_covsearch(
+    model        = ex$model,
+    data         = ex$data,
+    search_space = "COVARIATE?(CL, WT, pow)",
+    max_steps    = 1,
+    retries      = 0,
+    directory    = dir,
+    progress     = FALSE
+  )
+
+  # The runner never fits a candidate whose model another in its batch already
+  # carries: it shares that one's verdict and appears only in the batch's
+  # `candidates.csv`. No tool produces one on demand - each dedups its own
+  # proposals first - so one is added to a real run's table here.
+  tables <- list.files(dir, "^candidates\\.csv$", recursive = TRUE,
+                       full.names = TRUE)
+  expect_gt(length(tables), 0L)
+  tbl <- tables[[length(tables)]]
+  d <- utils::read.csv(tbl, colClasses = "character", na.strings = character(0),
+                       check.names = FALSE)
+  src <- d[nrow(d), ]
+  dup <- src
+  dup$id <- "dupe1"
+  dup$duplicate_of <- src$id
+  dup$passed <- "false"
+  dup$failures <- 'gate one, with a comma; "quoted" gate'
+  dup$error <- ""
+  utils::write.csv(rbind(d, dup), tbl, row.names = FALSE, na = "")
+
+  out <- ferx_rust_search_progress_lines(dir)
+  line <- grep("^  candidate dupe1( |:)", out, value = TRUE)
+  expect_length(line, 1L)
+  expect_match(line, paste0(": duplicate of ", src$id, ": OFV "), fixed = TRUE)
+  expect_match(line, 'failed: gate one, with a comma; "quoted" gate', fixed = TRUE)
+
+  # Every candidate any table lists has exactly one line: the fitted ones from
+  # the journal, the duplicate from the table.
+  ids <- unique(unlist(lapply(tables, function(t) {
+    utils::read.csv(t, colClasses = "character")$id
+  })))
+  printed <- sub("^  candidate ([^ :]+).*", "\\1", grep("^  candidate ", out, value = TRUE))
+  expect_setequal(printed, ids)
+  expect_false(anyDuplicated(printed) > 0L)
+})
