@@ -417,6 +417,21 @@ test_that("ferx_simulate(fit = ) on a [mixture] fit draws each class at its fitt
   v <- tapply(log(log(early$IPRED / late$IPRED) / (12 - 0.25)), early$MIXNUM, stats::var)
   expect_lt(abs(log(v[["1"]] / omega1)), 0.15)
   expect_lt(abs(log(v[["2"]] / (2 * omega2))), 0.15)
+
+  # Each class's residual error is the fitted sigma too. Proportional error,
+  # so DV_SIM / IPRED - 1 is eps, with variance sigma^2 in every class. The
+  # fitted sigma (about 0.21) is too close to the model file's (0.2) to tell
+  # apart, so the check doubles it: the file's classes would stay at 0.04.
+  loud <- fit
+  loud$sigma <- 2 * fit$sigma
+  sim <- muffle_mixl_lint(ferx_simulate(mod, dat, n_sim = 200L, seed = 5L, fit = loud))
+  obs <- sim[sim$TIME > 0, ]
+  v <- tapply(obs$DV_SIM / obs$IPRED - 1, obs$MIXNUM, stats::var)
+  s2 <- (2 * fit$sigma[[1L]])^2
+  expect_lt(abs(log(v[["1"]] / s2)), 0.15,
+            label = paste(signif(v[["1"]], 3), "vs", signif(s2, 3)))
+  expect_lt(abs(log(v[["2"]] / s2)), 0.15,
+            label = paste(signif(v[["2"]], 3), "vs", signif(s2, 3)))
 })
 
 test_that("ferx_simulate(fit = ) refuses a [mixture] fit that lost its override values (#672)", {
@@ -427,6 +442,20 @@ test_that("ferx_simulate(fit = ) refuses a [mixture] fit that lost its override 
     test_path("fixtures", "mixture_iv.csv"),
     n_sim = 1L, seed = 1L, fit = fit
   )))
-  expect_refusal(probe, "omega(2) ETA_CL")
+  # Coded, as the same refusal from ferx_simulate_with_uncertainty() is.
+  expect_coded_refusal(probe, "omega(2) ETA_CL", "E_FIT_INPUT_MISSING")
   expect_null(probe$value)
+})
+
+test_that("ferx_predict(fit = ) on a [mixture] fit without override values still predicts (#672)", {
+  mod <- test_path("fixtures", "mixture_override.ferx")
+  dat <- test_path("fixtures", "mixture_iv.csv")
+  fit <- mixture_override_fit()
+  # PRED reads no class Omega/Sigma, so a fit that lost its override values
+  # (a .fitrx saved before #655) predicts as the full fit does, not refused.
+  legacy <- fit
+  legacy$mixture_overrides <- NULL
+  full <- muffle_mixl_lint(ferx_predict(mod, dat, fit = fit))
+  expect_true(is.data.frame(full))
+  expect_identical(muffle_mixl_lint(ferx_predict(mod, dat, fit = legacy)), full)
 })

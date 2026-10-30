@@ -1020,6 +1020,7 @@ fn ferx_rust_simulate_from_fit(
             &residual_rho,
             &residual_rho_pairs,
             &mixture_overrides,
+            MixtureClasses::Read,
         ) {
             Ok(p) => p,
             Err(e) => return Err(e),
@@ -1254,6 +1255,7 @@ fn simulate_adaptive(
                 f.residual_rho,
                 f.residual_rho_pairs,
                 f.mixture_overrides,
+                MixtureClasses::Read,
             )
             .map_err(|e| format!("ferx_simulate_adaptive: {e}"))?;
             (params, OccasionNotes::none())
@@ -1705,6 +1707,7 @@ fn ferx_rust_predict_from_fit(
             &residual_rho,
             &residual_rho_pairs,
             &mixture_overrides,
+            MixtureClasses::NotRead,
         ) {
             Ok(p) => p,
             Err(e) => return Err(e),
@@ -1896,6 +1899,7 @@ fn ferx_rust_predict_survival_from_fit(
             &residual_rho,
             &residual_rho_pairs,
             &mixture_overrides,
+            MixtureClasses::NotRead,
         ) {
             Ok(p) => p,
             Err(e) => return Err(e),
@@ -2053,6 +2057,7 @@ fn ferx_rust_npde_from_fit(
             &residual_rho,
             &residual_rho_pairs,
             &mixture_overrides,
+            MixtureClasses::Read,
         ) {
             Ok(p) => p,
             Err(e) => return Err(e),
@@ -3359,8 +3364,23 @@ fn residual_correlations_from_fit(
     Ok(rc)
 }
 
+/// Whether a `params_from_fit` caller reads a `[mixture]` model's per-class
+/// Omega/Sigma.
+#[derive(Clone, Copy, PartialEq)]
+enum MixtureClasses {
+    /// Simulate / NPDE / adaptive draw each class's etas and eps from them,
+    /// so a fit whose override values cannot be read is refused.
+    Read,
+    /// Predict / predict_survival read no class matrix (ferx-core
+    /// `api/predict.rs` at b259dd10), so a fit without recorded override
+    /// values (a `.fitrx` saved before #655) keeps the model file's classes
+    /// rather than refusing output that does not depend on them (#676 review).
+    NotRead,
+}
+
 // `residual_rho` / `residual_rho_pairs` carry the fitted `block_sigma`
 // correlations and their sigma pairs; see `residual_correlations_from_fit`.
+#[allow(clippy::too_many_arguments)]
 fn params_from_fit(
     model: &CompiledModel,
     theta: &[f64],
@@ -3372,6 +3392,7 @@ fn params_from_fit(
     residual_rho: &[f64],
     residual_rho_pairs: &[i32],
     mixture_overrides: &[f64],
+    classes: MixtureClasses,
 ) -> std::result::Result<ModelParameters, String> {
     let template = &model.default_params;
 
@@ -3439,11 +3460,15 @@ fn params_from_fit(
                 residual_correlations.clone(),
                 (!mixture_overrides.is_empty()).then(|| mixture_overrides.to_vec()),
             );
-            ferx_core::estimation::uncertainty_samples::fitted_params_from_result(
+            match ferx_core::estimation::uncertainty_samples::fitted_params_from_result(
                 &skeleton, model,
-            )
-            .map_err(|e| format!("Fit error: {e}"))?
-            .mixture
+            ) {
+                Ok(p) => p.mixture,
+                Err(_) if classes == MixtureClasses::NotRead => template.mixture.clone(),
+                // Coded (E_FIT_INPUT_MISSING / E_FIT_INPUT_MODEL), as the same
+                // refusal from `ferx_simulate_with_uncertainty()` is.
+                Err(e) => return Err(engine_refusal("Fit error: ", e)),
+            }
         }
     };
     let omega = OmegaMatrix::from_matrix(
