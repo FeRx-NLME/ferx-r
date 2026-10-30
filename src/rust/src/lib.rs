@@ -3950,6 +3950,7 @@ fn ferx_rust_update_model(
             &residual_rho_pairs,
             &mut notes,
         );
+        level_block_notes(model_text, &theta_names, &mut notes);
         let seeded = if parsed.model.default_params.mixture.is_some() {
             seed_mixture_overrides(&seeded, &mixture_overrides, &mut notes)
         } else {
@@ -4007,16 +4008,18 @@ fn split_terminator(line: &str) -> (&str, &str) {
     (body, &line[body.len()..])
 }
 
-/// Write a fit's residual covariance into every free single-line
-/// `block_sigma` declaration of `[parameters]`: the lower triangle, row by
-/// row, of `rho_ij * sd_i * sd_j` (`sd_i^2` on the diagonal) - the scale the
-/// parser reads it on, variances and covariances. Only the numbers between
-/// the brackets change. A `FIX` block - `FIX` on the line, or on a line the
-/// parser folds onto it (`folded_fix`) - is a statement about the model and is
-/// left alone, as `SeedInits` leaves a `FIX` `block_omega`; a block the fit
-/// carries no value for (a sigma or a correlation missing, or not finite) is
-/// left as written, and one whose bracket spans lines is left as written with
-/// a note.
+/// Write a fit's residual covariance into every free `block_sigma`
+/// declaration of `[parameters]`: the lower triangle, row by row, of
+/// `rho_ij * sd_i * sd_j` (`sd_i^2` on the diagonal) - the scale the parser
+/// reads it on, variances and covariances. Only the numbers between the
+/// brackets change, each in place, so a bracket written over several lines
+/// keeps its lines, their layout and their comments. A `FIX` block - `FIX` on
+/// the declaration, or on a line the parser folds onto it (`folded_fix`) - is
+/// a statement about the model and is left alone, as `SeedInits` leaves a
+/// `FIX` `block_omega`. A free block that cannot be seeded (the fit carries no
+/// value for one of its sigmas or correlations, or its text is not the shape
+/// the parser reads) is left as written with a note, so the caller can say the
+/// file is not the fit's optimum.
 fn seed_block_sigmas(
     model_text: &str,
     sigma: &[f64],
@@ -4044,67 +4047,156 @@ fn seed_block_sigmas(
         code.split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
             .any(|w| w.eq_ignore_ascii_case("FIX"))
     };
+    // A line's code: its body up to the comment, as (body, code_end).
+    let code_of = |line: &str| -> (usize, usize) {
+        let (body, _) = split_terminator(line);
+        (body.len(), split_comment(body).map_or(body.trim_end().len(), |(end, _)| end))
+    };
 
-    let lines: Vec<&str> = model_text.split_inclusive('\n').collect();
+    let mut lines: Vec<String> = model_text.split_inclusive('\n').map(String::from).collect();
     let mut in_parameters = false;
-    let mut out = String::with_capacity(model_text.len());
-    for (at, &line) in lines.iter().enumerate() {
-        let (body, term) = split_terminator(line);
-        let code_len = split_comment(body).map_or(body.trim_end().len(), |(end, _)| end);
-        let code = body[..code_len].trim();
+    let mut at = 0;
+    while at < lines.len() {
+        let (_, code_len) = code_of(&lines[at]);
+        let code = lines[at][..code_len].trim().to_string();
+        at += 1;
         if code.starts_with('[') && code.ends_with(']') {
             in_parameters = code[1..code.len() - 1].trim().eq_ignore_ascii_case("parameters");
-        }
-        let lower = code.to_ascii_lowercase();
-        let declares = in_parameters
-            && lower.starts_with("block_sigma")
-            && lower["block_sigma".len()..].trim_start().starts_with('(');
-        if !declares || is_fix(code) || folded_fix(&lines[at + 1..]) {
-            out.push_str(line);
             continue;
         }
-        let rewritten = (|| {
-            let open_names = body.find('(')?;
-            let close_names = open_names + body[open_names..].find(')')?;
-            let bracket = body[close_names..code_len.max(close_names)]
-                .find('[')
-                .map(|c| close_names + c)
-                .and_then(|open| body[open..code_len].find(']').map(|c| (open, open + c)));
-            let Some((open, close)) = bracket else {
-                notes.push(format!(
-                    "block_sigma ({}) spans more than one line; its initial values were left as written",
-                    body[open_names + 1..close_names].trim()
-                ));
-                return None;
-            };
-            let names: Vec<&str> =
-                body[open_names + 1..close_names].split(',').map(str::trim).collect();
-            let idx: Vec<(usize, f64)> =
-                names.iter().map(|n| sd.get(n).copied()).collect::<Option<_>>()?;
-            let mut values = Vec::new();
+        let lower = code.to_ascii_lowercase();
+        if !(in_parameters
+            && lower.starts_with("block_sigma")
+            && lower["block_sigma".len()..].trim_start().starts_with('('))
+        {
+            continue;
+        }
+        let first = at - 1;
+        let label = code
+            .find('(')
+            .and_then(|o| code[o..].find(')').map(|c| code[o + 1..o + c].trim().to_string()))
+            .unwrap_or_default();
+        let mut leave = |why: String| {
+            notes.push(format!(
+                "block_sigma ({label}) {why}; its initial values were left as written, so a \
+                 refit does not start at the fit's optimum"
+            ))
+        };
+
+        // The bracket's extent: from the `[` after the names to the first `]`,
+        // on as many lines as it takes, as (line, start, end) code ranges.
+        let mut ranges: Vec<(usize, usize, usize)> = Vec::new();
+        let mut decl_code = String::new();
+        let mut last = first;
+        let mut closed = false;
+        let open = {
+            let line = &lines[first];
+            let (_, end) = code_of(line);
+            line[..end]
+                .find(')')
+                .and_then(|c| line[c..end].find('[').map(|o| c + o + 1))
+        };
+        let Some(open) = open else {
+            leave("does not open its bracket on the declaration line".to_string());
+            continue;
+        };
+        let mut start = open;
+        for (k, line) in lines.iter().enumerate().skip(first) {
+            let (_, end) = code_of(line);
+            decl_code.push_str(&line[..end]);
+            decl_code.push(' ');
+            last = k;
+            if k > first && line[..end].trim().starts_with('[') {
+                break;
+            }
+            match line[start.min(end)..end].find(']') {
+                Some(c) => {
+                    ranges.push((k, start, start + c));
+                    closed = true;
+                    break;
+                }
+                None => ranges.push((k, start.min(end), end)),
+            }
+            start = 0;
+        }
+        if !closed {
+            leave("does not close its bracket".to_string());
+            continue;
+        }
+        at = last + 1;
+        let tail_fix = {
+            let refs: Vec<&str> = lines[at..].iter().map(String::as_str).collect();
+            folded_fix(&refs)
+        };
+        if is_fix(&decl_code) || tail_fix {
+            continue;
+        }
+
+        let names: Vec<&str> = label.split(',').map(str::trim).collect();
+        let mut missing: Vec<String> = Vec::new();
+        let idx: Vec<(usize, f64)> = names
+            .iter()
+            .filter_map(|n| {
+                let got = sd.get(n).copied().filter(|(_, v)| v.is_finite());
+                if got.is_none() {
+                    missing.push(format!("sigma {n}"));
+                }
+                got
+            })
+            .collect();
+        let mut values = Vec::new();
+        if missing.is_empty() {
             for (r, &(ir, sr)) in idx.iter().enumerate() {
-                for &(ic, sc) in idx.iter().take(r + 1) {
-                    let v = if ir == ic {
-                        sr * sr
-                    } else {
-                        rho_of.get(&(ir.min(ic), ir.max(ic)))? * sr * sc
-                    };
-                    if !v.is_finite() {
-                        return None;
+                for (c, &(ic, sc)) in idx.iter().enumerate().take(r + 1) {
+                    if r == c {
+                        values.push(sr * sr);
+                        continue;
                     }
-                    values.push(format!("{v}"));
+                    match rho_of.get(&(ir.min(ic), ir.max(ic))).filter(|v| v.is_finite()) {
+                        Some(rho) => values.push(rho * sr * sc),
+                        None => missing.push(format!("the {} ~ {} correlation", names[r], names[c])),
+                    }
                 }
             }
-            Some(format!(
-                "{}{}{}{term}",
-                &body[..=open],
-                values.join(", "),
-                &body[close..]
-            ))
-        })();
-        out.push_str(rewritten.as_deref().unwrap_or(line));
+        }
+        if !missing.is_empty() {
+            leave(format!("has no fitted value in the fit for {}", missing.join(", ")));
+            continue;
+        }
+
+        // The numbers in the bracket, in order: each maximal run of number
+        // characters between separators.
+        let is_num = |c: char| c.is_ascii_digit() || matches!(c, '.' | 'e' | 'E' | '+' | '-');
+        let mut tokens: Vec<(usize, usize, usize)> = Vec::new();
+        for &(k, s, e) in &ranges {
+            let seg = &lines[k][s..e];
+            let mut i = 0;
+            while i < seg.len() {
+                let c = seg[i..].chars().next().expect("in bounds");
+                if is_num(c) {
+                    let len = seg[i..].find(|c: char| !is_num(c)).unwrap_or(seg.len() - i);
+                    tokens.push((k, s + i, s + i + len));
+                    i += len;
+                } else {
+                    i += c.len_utf8();
+                }
+            }
+        }
+        if tokens.len() != values.len() {
+            leave(format!(
+                "holds {} numbers where its {} sigmas take {}",
+                tokens.len(),
+                names.len(),
+                values.len()
+            ));
+            continue;
+        }
+        // Right to left within a line, so earlier offsets stay valid.
+        for (&(k, s, e), v) in tokens.iter().zip(values.iter()).rev() {
+            lines[k].replace_range(s..e, &format!("{v}"));
+        }
     }
-    out
+    lines.concat()
 }
 
 /// The comment after a line's code, with the whitespace before it: `None` for
@@ -4124,6 +4216,46 @@ fn declaration_head(line: &str) -> &str {
     match code.find(['(', '~', '=', '[']) {
         Some(at) => code[..at].trim_end(),
         None => "",
+    }
+}
+
+/// A note for every free `theta NAME[...]` level block, which no edit can
+/// seed: the DSL gives a block one `(init, lower, upper)` for all its levels
+/// (and a constrained `contrast` block must start at 0), so the fitted level
+/// values have nowhere to go and `SeedInits` leaves the declaration as
+/// written. The file is then not the fit's optimum, and the caller says so
+/// rather than hand back a model that looks final.
+fn level_block_notes(model_text: &str, theta_names: &[String], notes: &mut Vec<String>) {
+    let mut in_parameters = false;
+    for line in model_text.split_inclusive('\n') {
+        let (body, _) = split_terminator(line);
+        let code = split_comment(body).map_or(body, |(end, _)| &body[..end]).trim();
+        if code.starts_with('[') && code.ends_with(']') {
+            in_parameters = code[1..code.len() - 1].trim().eq_ignore_ascii_case("parameters");
+            continue;
+        }
+        let Some(rest) = code.strip_prefix("theta").filter(|_| in_parameters) else {
+            continue;
+        };
+        let rest = rest.trim_start();
+        let name_len = rest
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+            .unwrap_or(rest.len());
+        if name_len == 0 || !rest[name_len..].starts_with('[') {
+            continue;
+        }
+        let words = code.split(|c: char| !c.is_ascii_alphanumeric() && c != '_');
+        if words.clone().any(|w| w.eq_ignore_ascii_case("FIX")) {
+            continue;
+        }
+        let name = &rest[..name_len];
+        let prefix = format!("{name}[");
+        let n = theta_names.iter().filter(|t| t.starts_with(&prefix)).count();
+        notes.push(format!(
+            "theta {name}[...] has {n} fitted level values, but a level block takes one initial \
+             value for all its levels; it was left as written, so a refit does not start at the \
+             fit's optimum"
+        ));
     }
 }
 

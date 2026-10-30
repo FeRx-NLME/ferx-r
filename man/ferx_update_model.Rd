@@ -24,7 +24,9 @@ model text as a single character string.
 Writes the model a fit was made with as a \code{.ferx} file whose initial
 values are the fit's final estimates - NONMEM's \code{final.mod}, Pharmpy's
 \code{update_inits}. Refitting from the written file starts at the fit's
-optimum: its objective function value at iteration 0 is the fit's OFV.
+optimum: its objective function value at iteration 0 is the fit's OFV. When
+some estimate cannot be written (below), a warning names it, so a file that
+is not the fit's optimum is never returned silently.
 }
 \details{
 The edit is the engine's own (\code{ModelEdit::SeedInits} in ferx-core),
@@ -40,17 +42,25 @@ scale (variance, or SD with \code{(sd)});
 triangle, keeping its block structure;
 \item a \code{block_sigma} takes the fitted residual covariance, lower
 triangle on the variance scale it is declared on: \code{sigma_i^2} on
-the diagonal, \code{rho_ij * sigma_i * sigma_j} off it (a block whose
-bracket spans lines is left as written, with a warning);
+the diagonal, \code{rho_ij * sigma_i * sigma_j} off it. Each number is
+replaced in place, so a bracket written over several lines keeps its
+lines. A free block the fit holds no value for (a fit from an older
+bundle without \code{residual_correlations}) is left as written, with a
+warning;
 \item a \code{[mixture]} fit's per-class \code{omega(k)} /
 \code{sigma(k)} overrides take their fitted class values
 (\code{fit$mixture_overrides}), on each line's own scale; a fit that
 records none leaves them as written, with a warning;
-\item a \code{FIX}ed parameter is left as declared, as is a vector theta
-(\code{theta NAME[...]}) and any estimate that is not finite.
+\item a \code{FIX}ed parameter is left as declared, as is any estimate
+that is not finite.
 }
-A model with a vector theta therefore refits from the vector's declared
-values, not its fitted ones, and does not start at the fit's OFV.
+A theta level block (\code{theta NAME[N]} or \code{theta NAME[COL, ...]})
+cannot be written: the model language gives a block one
+\code{(init, lower, upper)} for all its levels, and a constrained
+(\code{contrast = ...}) block must start at 0, so its fitted level values
+have no place in the file. Such a block is left as declared, with a warning
+naming it; a refit then starts its levels at the declared value, not at
+the fit's OFV.
 Comments - whole-line ones and those at the end of a rewritten
 declaration - formatting and every other block are kept as written. A
 declaration written over several lines is rewritten onto its first line,

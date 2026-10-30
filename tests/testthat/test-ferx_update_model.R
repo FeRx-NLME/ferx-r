@@ -260,21 +260,53 @@ test_that("comments on a declaration spread over lines are kept (#678)", {
                    grep("^  omega ETA_KA", lines, value = TRUE))
 })
 
-test_that("a block_sigma written over lines is left as written, with a warning (#678)", {
-  case <- block_sigma_case("  block_sigma (PROP_ERR, ADD_ERR) = [0.04, 0.10, 0.30]")
+test_that("a block_sigma written over lines is seeded in place (#678)", {
+  decl <- c("  block_sigma (PROP_ERR, ADD_ERR) = [0.04,   # var PROP",
+            "                                    0.10, 0.30]  # cov, var ADD")
+  case <- block_sigma_case(decl)
   on.exit(unlink(dirname(case$model), recursive = TRUE), add = TRUE)
-  copy <- case$fit
-  copy$model_text <- NULL
-  copy$model_hash <- NULL
-  src <- readLines(case$model)
-  at <- grep("block_sigma", src)
-  src <- append(src[-at], c("  block_sigma (PROP_ERR, ADD_ERR) = [0.04,",
-                            "                                    0.10, 0.30]"),
-                after = at - 1L)
-  writeLines(src, case$model)
-  expect_warning(text <- ferx_update_model(copy), "spans more than one line")
-  lines <- strsplit(text, "\n", fixed = TRUE)[[1]]
-  expect_true(all(src[at + 0:1] %in% lines))
+  fit <- case$fit
+  out <- tempfile(fileext = ".ferx")
+  on.exit(unlink(out), add = TRUE)
+  expect_silent(ferx_update_model(fit, out))
+  lines <- readLines(out)
+  at <- grep("block_sigma", lines)
+  expect_match(lines[at], "^  block_sigma \\(PROP_ERR, ADD_ERR\\) = \\[[^,]+,   # var PROP$")
+  expect_match(lines[at + 1L], "^ +[^,]+, [^]]+\\]  # cov, var ADD$")
+  nums <- as.numeric(unlist(regmatches(
+    paste(sub("#.*$", "", lines[at + 0:1]), collapse = " "),
+    gregexpr("[0-9.eE+-]+(?=[],])", paste(sub("#.*$", "", lines[at + 0:1]), collapse = " "),
+             perl = TRUE))))
+  sd <- unname(fit$sigma)
+  rho <- fit$residual_correlations$rho
+  expect_equal(nums, c(sd[1]^2, rho * sd[1] * sd[2], sd[2]^2), tolerance = 1e-12)
+
+  refit <- ferx_fit(out, case$data, verbose = FALSE, covariance = FALSE,
+                    settings = list(maxiter = 0L))
+  expect_equal(refit$ofv, fit$ofv, tolerance = 1e-6)
+  expect_equal(refit$residual_correlations$rho, rho, tolerance = 1e-10)
+})
+
+test_that("a free block_sigma the fit has no correlation for warns (#678)", {
+  decl <- "  block_sigma (PROP_ERR, ADD_ERR) = [0.04, 0.10, 0.30]"
+  case <- block_sigma_case(decl)
+  on.exit(unlink(dirname(case$model), recursive = TRUE), add = TRUE)
+  fit <- case$fit
+  fit$residual_correlations <- NULL  # as on a fit from an older bundle
+  expect_warning(text <- ferx_update_model(fit),
+                 "no fitted value in the fit for the ADD_ERR ~ PROP_ERR correlation")
+  expect_true(decl %in% strsplit(text, "\n", fixed = TRUE)[[1]])
+})
+
+test_that("a level-block theta warns that its levels are not seeded (#678)", {
+  ex <- ferx_example("mbma_placebo")
+  fit <- suppressWarnings(ferx_fit(ex$model, ex$data, verbose = FALSE,
+                                   covariance = FALSE,
+                                   settings = list(maxiter = 2L)))
+  n <- sum(startsWith(fit$theta_names %||% names(fit$theta), "PLACEBO["))
+  expect_gt(n, 0L)
+  expect_warning(ferx_update_model(fit),
+                 sprintf("theta PLACEBO\\[\\.\\.\\.\\] has %d fitted level values", n))
 })
 
 test_that("a FIX folded onto block_sigma from the next line is left as declared (#678)", {
