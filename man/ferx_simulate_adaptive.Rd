@@ -67,7 +67,9 @@ A list of four data frames:
 \item{\code{trajectories}}{DRAW, SIM, ID, TIME, CMT, IPRED, DV_SIM,
 OBSERVED - the per-observation predictions, as in
 \code{\link{ferx_simulate}} (\code{OBSERVED} is \code{NA} here: the
-adaptive path has no time-to-event endpoint).}
+adaptive path has no time-to-event endpoint). A \code{[mixture]}
+model adds an integer \code{MIXNUM} column, the class each subject
+was drawn into for that replicate; it is absent otherwise.}
 \item{\code{doses}}{The realized dose ledger, \strong{controller-issued
 doses only} (pre-scheduled base doses are excluded): DRAW, SIM, ID, TIME,
 AMT, CMT, RATE, DECISION, SIGNAL (the value the controller titrated on -

@@ -91,6 +91,35 @@ test_that("same seed is deterministic", {
   b  <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 2L, seed = 7L)
   expect_equal(a, b)
 })
+test_that("trajectories carry MIXNUM on a [mixture] model only (ferx-core #2372)", {
+  data <- ferx_example("adaptive_tdm")$data
+  plain <- ferx_simulate_adaptive(.write_adaptive_model("  when signal < 10 : increase 25%"),
+                                  data, n_sim = 1L, seed = 1L)
+  expect_false("MIXNUM" %in% names(plain$trajectories))
+
+  # The same model with two classes, P(class 1) = 0.3, class 2 clearing faster.
+  path <- tempfile(fileext = ".ferx")
+  lines <- readLines(.write_adaptive_model("  when signal < 10 : increase 25%"))
+  lines <- sub("  CL = TVCL * exp(ETA_CL)",
+               "  CL = if (MIXNUM == 1) TVCL * exp(ETA_CL) else 2 * TVCL * exp(ETA_CL)",
+               lines, fixed = TRUE)
+  lines <- append(lines, c("  theta MIXL(-0.8472979, -10.0, 10.0)"), after = 3L)
+  lines <- append(lines, c("[mixture]", "  nsub = 2", "  logit(1) = MIXL"),
+                  after = which(lines == "[individual_parameters]") - 1L)
+  writeLines(lines, path)
+
+  # suppressWarnings: the engine calls MIXL "not referenced in any model
+  # expression" - its unused-parameter lint does not read [mixture].
+  res <- suppressWarnings(ferx_simulate_adaptive(path, data, n_sim = 50L, seed = 1L))
+  traj <- res$trajectories
+  expect_identical(tail(names(traj), 1L), "MIXNUM")
+  expect_type(traj$MIXNUM, "integer")
+  per_run <- unique(traj[c("SIM", "ID", "MIXNUM")])
+  expect_equal(nrow(per_run), nrow(unique(traj[c("SIM", "ID")])))
+  expect_true(all(per_run$MIXNUM %in% 1:2))
+  # Five SDs of the class-1 share around 0.3 over these subject-replicates.
+  expect_lt(abs(mean(per_run$MIXNUM == 1L) - 0.3), 5 * sqrt(0.21 / nrow(per_run)))
+})
 test_that("the controller titrates: a sub-therapeutic trough escalates the dose", {
   ex  <- ferx_example("adaptive_tdm")
   res <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 5L, seed = 1L)

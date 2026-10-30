@@ -93,6 +93,14 @@ right-censored at it - and \code{NA} on every other row. It is
 data file's observations, since simulation is what produces that
 column. Compare against the observed data by joining \code{data} on
 ID/TIME yourself.}
+\item{\code{MIXNUM}}{\strong{Only for a \code{[mixture]} model}: the
+1-based class the subject was simulated under, an integer. The class
+is drawn from the mixing probabilities once per subject and replicate,
+so every row of one subject in one \code{SIM} carries the same value,
+and a new replicate draws it again. This is NONMEM's
+\code{$TABLE MIXNUM} under \code{$SIMULATION}: split a VPC by class
+with \code{split(sim, sim$MIXNUM)}. The column is absent for any
+other model.}
 }
 Gaussian rows carry DRAW, SIM, ID, TIME, CMT, IPRED and DV_SIM, with
 \code{OBSERVED = NA}. For a joint PK-TTE model each subject also yields a
