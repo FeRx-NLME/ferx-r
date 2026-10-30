@@ -66,6 +66,9 @@
 #'   \code{NA} throughout (this path is Gaussian-only - a drug-driven ODE-TTE
 #'   endpoint is not supported here, and \code{OBSERVED} never echoes the input
 #'   \code{DV}; see \code{\link{ferx_simulate}} for what each column holds).
+#'   A \code{[mixture]} model adds an integer \code{MIXNUM} column, the class
+#'   each subject was drawn into for that \code{DRAW} and \code{SIM}; it is
+#'   absent for any other model.
 #'   Row count: \code{n_uncertainty_draws * n_sim_per_draw * n_obs}.
 #'
 #' @section Mixture models:
