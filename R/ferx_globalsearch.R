@@ -125,7 +125,15 @@
 #'   before the first fit when there is nothing to resume from - no
 #'   \code{directory}, or a \code{directory} no earlier run wrote - rather
 #'   than quietly searching from scratch.
-#' @param progress Print the engine's batch progress to the console.
+#' @param progress Print the engine's batch progress. `TRUE` prints it to
+#'   stderr in an interactive session and, in a script (`Rscript`), as
+#'   plain lines on stdout, one record per line: a line per candidate as
+#'   its fit finishes (id, features, OFV, criterion, and passed or the
+#'   gates it failed), between the engine's batch lines. `"lines"` asks
+#'   for the stdout lines in either kind of session; `FALSE` prints
+#'   nothing. The candidate lines are read from the run's journal, so
+#'   without a `directory` the run journals into a temporary one that is
+#'   removed afterwards.
 #'
 #' @return An object of class \code{ferx_globalsearch}:
 #'   \describe{
@@ -292,7 +300,7 @@ ferx_globalsearch <- function(model = NULL,
                                         below = -1L, min = 0L),
     resume         = .ferx_search_bool(resume, "resume", what),
     directory      = dir_arg,
-    progress       = .ferx_search_bool(progress, "progress", what)
+    progress       = .ferx_search_progress(progress, what)
   )
 
   # The engine's 24 columns in the engine's order, then the three charges -

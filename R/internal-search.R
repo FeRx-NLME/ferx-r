@@ -211,6 +211,35 @@
   x
 }
 
+# `progress` as the bindings take it: 0 off, 1 the console form (stderr), 2
+# plain lines on stdout (#677). See .ferx_progress_style().
+.ferx_search_progress <- function(x, what) {
+  switch(.ferx_progress_style(x, what), off = 0L, console = 1L, lines = 2L)
+}
+
+# Resolve a `progress` argument to "off", "console" or "lines".
+#
+# TRUE means the console form - a bar, or the engine's own messages on stderr -
+# in an interactive session, and "lines" in a script: under Rscript a bar is
+# noise in a log and stderr is often not what a job viewer shows, so the
+# non-interactive form is one plain record per line on stdout (#677).
+# "lines" asks for that form explicitly, in either kind of session.
+.ferx_progress_style <- function(x, what, interactive = base::interactive()) {
+  if (identical(x, "lines")) return("lines")
+  if (!is.logical(x) || length(x) != 1L || is.na(x)) {
+    stop(sprintf("%s: `progress` must be TRUE, FALSE or \"lines\"", what))
+  }
+  if (!x) "off" else if (interactive) "console" else "lines"
+}
+
+# Print one progress line on stdout, now: a log tailing the output should see
+# it as it happens, not when a buffer fills.
+.ferx_progress_line <- function(...) {
+  cat(..., "\n", sep = "")
+  utils::flush.console()
+  invisible(NULL)
+}
+
 # "" is the bindings' "no directory": the run stays in memory, writes nothing
 # and cannot be resumed.
 #

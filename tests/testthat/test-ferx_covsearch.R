@@ -276,3 +276,127 @@ test_that("print() shows the step table and the final relations", {
   expect_match(out, "ferx covariate search")
   expect_match(out, "Final covariate relations")
 })
+
+test_that("progress = \"lines\" prints the step progress as lines on stdout", {
+  skip_on_cran()
+  expect_identical(.ferx_search_progress(FALSE, "f"), 0L)
+  expect_identical(.ferx_search_progress("lines", "f"), 2L)
+  expect_error(.ferx_search_progress(NA, "f"), "TRUE, FALSE or")
+
+  ex <- ferx_example("two_cpt_oral_base")
+  # Through R's console, not the process's stdout, so capture.output() sees it.
+  # No `directory`: line mode journals into a scratch one it removes.
+  out <- capture.output(res <- ferx_covsearch(
+    model        = ex$model,
+    data         = ex$data,
+    search_space = "COVARIATE?(CL, WT, pow)",
+    max_steps    = 1,
+    retries      = 0,
+    progress     = "lines"
+  ))
+  expect_true(is.na(res$directory))
+  expect_true("Fitting the base model..." %in% out)
+  expect_true(any(grepl("^Base model: OFV ", out)))
+  started <- grep("^Step 1 \\(forward\\): fitting 1 candidate", out)
+  finished <- grep("^Step 1 \\(forward\\): (added|nothing accepted)", out)
+  expect_length(started, 1L)
+  expect_length(finished, 1L)
+
+  # One line per candidate, as it finishes - between the step's start and its
+  # summary - naming it and giving its OFV, criterion and verdict.
+  cand <- grep("^  candidate ", out)
+  step_cands <- cand[cand > started & cand < finished]
+  ids <- res$steps$candidate[res$steps$step == 1L]
+  expect_length(step_cands, length(ids))
+  for (id in ids) {
+    line <- out[step_cands][startsWith(out[step_cands], paste0("  candidate ", id, " "))]
+    expect_length(line, 1L)
+    expect_match(line, ": (OFV -?[0-9.]+, criterion -?[0-9.]+(, not converged)?, (passed|failed(: .+)?)|error: .+)$")
+  }
+})
+
+test_that("progress = \"lines\" reports refits in a reused directory, and marks reuse", {
+  skip_on_cran()
+  ex <- ferx_example("two_cpt_oral_base")
+  dir <- tempfile("covsearch-lines-")
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  run <- function(resume) {
+    capture.output(ferx_covsearch(
+      model        = ex$model,
+      data         = ex$data,
+      search_space = "COVARIATE?(CL, WT, pow)",
+      max_steps    = 1,
+      retries      = 0,
+      directory    = dir,
+      resume       = resume,
+      progress     = "lines"
+    ))
+  }
+  cand <- function(out) grep("^  candidate ", out, value = TRUE)
+
+  first <- cand(run(FALSE))
+  expect_gt(length(first), 0L)
+  expect_false(any(grepl("\\(reused\\)$", first)))
+
+  # A fresh run over the same directory refits the same candidates - the
+  # journal already holds their hashes, and every one must still print.
+  again <- cand(run(FALSE))
+  expect_identical(sub(":.*", "", again), sub(":.*", "", first))
+  expect_false(any(grepl("\\(reused\\)$", again)))
+
+  # A resumed run fits nothing new: each candidate it takes from the journal
+  # prints once, marked as reused.
+  resumed <- cand(run(TRUE))
+  expect_identical(sub(":.*", "", resumed), sub(":.*", "", first))
+  expect_true(all(grepl("\\(reused\\)$", resumed)))
+})
+
+test_that("line mode prints deduplicated candidates, which have no journal row", {
+  skip_on_cran()
+  ex <- ferx_example("two_cpt_oral_base")
+  dir <- tempfile("covsearch-dups-")
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  ferx_covsearch(
+    model        = ex$model,
+    data         = ex$data,
+    search_space = "COVARIATE?(CL, WT, pow)",
+    max_steps    = 1,
+    retries      = 0,
+    directory    = dir,
+    progress     = FALSE
+  )
+
+  # The runner never fits a candidate whose model another in its batch already
+  # carries: it shares that one's verdict and appears only in the batch's
+  # `candidates.csv`. No tool produces one on demand - each dedups its own
+  # proposals first - so one is added to a real run's table here.
+  tables <- list.files(dir, "^candidates\\.csv$", recursive = TRUE,
+                       full.names = TRUE)
+  expect_gt(length(tables), 0L)
+  tbl <- tables[[length(tables)]]
+  d <- utils::read.csv(tbl, colClasses = "character", na.strings = character(0),
+                       check.names = FALSE)
+  src <- d[nrow(d), ]
+  dup <- src
+  dup$id <- "dupe1"
+  dup$duplicate_of <- src$id
+  dup$passed <- "false"
+  dup$failures <- 'gate one, with a comma; "quoted" gate'
+  dup$error <- ""
+  utils::write.csv(rbind(d, dup), tbl, row.names = FALSE, na = "")
+
+  out <- ferx_rust_search_progress_lines(dir)
+  line <- grep("^  candidate dupe1( |:)", out, value = TRUE)
+  expect_length(line, 1L)
+  expect_match(line, paste0(": duplicate of ", src$id, ": OFV "), fixed = TRUE)
+  expect_match(line, 'failed: gate one, with a comma; "quoted" gate', fixed = TRUE)
+
+  # Every candidate any table lists has exactly one line: the fitted ones from
+  # the journal, the duplicate from the table.
+  ids <- unique(unlist(lapply(tables, function(t) {
+    utils::read.csv(t, colClasses = "character")$id
+  })))
+  printed <- sub("^  candidate ([^ :]+).*", "\\1", grep("^  candidate ", out, value = TRUE))
+  expect_setequal(printed, ids)
+  expect_false(anyDuplicated(printed) > 0L)
+})

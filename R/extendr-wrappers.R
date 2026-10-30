@@ -453,6 +453,12 @@ ferx_rust_amd_candidate_columns <- function() {
 
 #' @title Internal Rust backend binding
 #' @keywords internal
+ferx_rust_search_progress_lines <- function(directory) {
+  .Call("wrap__ferx_rust_search_progress_lines", directory)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
 ferx_rust_globalsearch <- function(config_path, model_path, data_path, mfl, algorithm, iiv_strategy, max_models, ga_keys, ga_values, penalty_keys, penalty_values, rank, rank_cutoff, threads, retries, resume, directory, progress) {
   .Call("wrap__ferx_rust_globalsearch", config_path, model_path, data_path, mfl, algorithm, iiv_strategy, as.integer(max_models), as.character(ga_keys), as.character(ga_values), as.character(penalty_keys), as.character(penalty_values), rank, rank_cutoff, as.integer(threads), as.integer(retries), resume, directory, progress)
 }

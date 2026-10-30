@@ -82,7 +82,15 @@ keeps the run in memory, which also means it cannot be resumed.}
 
 \item{resume}{Reuse the fits already journalled in \code{directory}.}
 
-\item{progress}{Print the engine's step progress to the console.}
+\item{progress}{Print the engine's step progress. \code{TRUE} prints it to
+stderr in an interactive session and, in a script (\code{Rscript}), as
+plain lines on stdout, one record per line: a line per candidate as
+its fit finishes (id, features, OFV, criterion, and passed or the
+gates it failed), between the engine's step lines. \code{"lines"} asks
+for the stdout lines in either kind of session; \code{FALSE} prints
+nothing. The candidate lines are read from the run's journal, so
+without a \code{directory} the run journals into a temporary one that is
+removed afterwards.}
 
 \item{x}{A \code{ferx_iovsearch} object.}
 
