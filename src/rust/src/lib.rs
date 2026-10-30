@@ -329,6 +329,21 @@ fn engine_refusal(prefix: &str, e: ferx_core::EngineError) -> String {
     text
 }
 
+/// `prefix` and `text`, for a refusal raised further down and prefixed on its
+/// way out. A diagnostic recorded for `text` is prefixed the same way, so
+/// `entry()` still finds it by its text and hands R its code; a plain
+/// `format!` there dropped the code (#676 review round 2).
+fn prefix_refusal(prefix: &str, text: String) -> String {
+    let mut slot = PENDING_DIAGNOSTIC.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(d) = slot.as_mut() {
+        if d.text == text {
+            d.text = format!("{prefix}{}", d.text);
+            d.message = format!("{prefix}{}", d.message);
+        }
+    }
+    format!("{prefix}{text}")
+}
+
 /// The text an entry point raises when it refuses its own call - an argument
 /// or a `settings` entry - rather than the model or the data (ferx-r #517).
 /// It is recorded with an empty code, which tells `.ferx_engine_error()` there
@@ -1257,7 +1272,7 @@ fn simulate_adaptive(
                 f.mixture_overrides,
                 MixtureClasses::Read,
             )
-            .map_err(|e| format!("ferx_simulate_adaptive: {e}"))?;
+            .map_err(|e| prefix_refusal("ferx_simulate_adaptive: ", e))?;
             (params, OccasionNotes::none())
         }
     };
