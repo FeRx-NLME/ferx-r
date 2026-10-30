@@ -10439,16 +10439,38 @@ fn search_config_for_tool(
 
 /// Where a search's progress lines go: the R side's `progress` argument, as
 /// `0` (nowhere), `1` (stderr, written from the worker as the engine reports)
-/// or `2` (R's stdout, one line per event, for a log that tails a script's
+/// or `2` (R's stdout, one line per record, for a log that tails a script's
 /// output - #677).
 ///
 /// Stdout goes through R's console rather than the process's file descriptor,
 /// so `sink()`, `capture.output()` and an IDE console see it too. That means
 /// printing from the R thread, so in mode `2` the worker only queues and
 /// [`run_search_cancellable`] prints.
+///
+/// Mode `2` also reports every candidate as it finishes. The engine's events
+/// are per step, but its candidate journal (`search_journal.jsonl`, ferx-core
+/// #1178) is flushed a row per candidate as each fit lands - id, features,
+/// OFV, criterion and verdict - so the run directory is tailed for new rows
+/// before each step line is queued and on every tick. A step's candidates
+/// therefore print before the line that summarises the step.
 struct SearchProgress {
     mode: i32,
     queued: std::sync::Mutex<Vec<String>>,
+    journals: std::sync::Mutex<JournalTail>,
+}
+
+/// The candidate journals a mode-`2` search tails, and what has been printed.
+#[derive(Default)]
+struct JournalTail {
+    root: Option<std::path::PathBuf>,
+    /// A directory made for a run that was given none; removed on drop.
+    scratch: Option<std::path::PathBuf>,
+    /// Each journal's size at its last read: an unchanged file is not re-read.
+    sizes: HashMap<std::path::PathBuf, u64>,
+    /// `(journal, candidate hash)` rows already printed. Keyed by hash because a
+    /// journal is rewritten from the rows it keeps whenever a layer's runner
+    /// opens it, and a resumed run's rows are the previous run's.
+    seen: std::collections::HashSet<(std::path::PathBuf, String)>,
 }
 
 impl SearchProgress {
@@ -10456,6 +10478,7 @@ impl SearchProgress {
         SearchProgress {
             mode,
             queued: std::sync::Mutex::new(Vec::new()),
+            journals: std::sync::Mutex::new(JournalTail::default()),
         }
     }
 
@@ -10463,11 +10486,79 @@ impl SearchProgress {
         self.mode == 1 || self.mode == 2
     }
 
+    /// The directory the search should run in, and in mode `2` the one tailed
+    /// for candidates. A run given no directory gets a scratch one, since the
+    /// journal exists only on disk; the caller still reports the run as having
+    /// none. Rows already there - a resumed run's - count as printed.
+    fn run_dir(&self, dir: Option<std::path::PathBuf>) -> Option<std::path::PathBuf> {
+        if self.mode != 2 {
+            return dir;
+        }
+        let (root, scratch) = match dir {
+            Some(d) => (d, None),
+            None => {
+                let nanos = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0);
+                let d = std::env::temp_dir()
+                    .join(format!("ferx-search-{}-{nanos}", std::process::id()));
+                if std::fs::create_dir_all(&d).is_err() {
+                    return None;
+                }
+                (d.clone(), Some(d))
+            }
+        };
+        if let Ok(mut tail) = self.journals.lock() {
+            tail.root = Some(root.clone());
+            tail.scratch = scratch;
+        }
+        self.collect(false);
+        Some(root)
+    }
+
+    /// Queue a line for every journal row not printed yet (or, with `print`
+    /// false, only mark them printed). Safe to call from any thread.
+    fn collect(&self, print: bool) {
+        let Ok(mut tail) = self.journals.lock() else {
+            return;
+        };
+        let Some(root) = tail.root.clone() else {
+            return;
+        };
+        let mut found = Vec::new();
+        find_search_journals(&root, 0, &mut found);
+        let mut lines = Vec::new();
+        for path in found {
+            let Ok(meta) = std::fs::metadata(&path) else {
+                continue;
+            };
+            if tail.sizes.get(&path) == Some(&meta.len()) {
+                continue;
+            }
+            tail.sizes.insert(path.clone(), meta.len());
+            // Drops a torn final row; it is read again once its newline lands.
+            for record in ferx_tools::search::journal::read_records(&path) {
+                if tail.seen.insert((path.clone(), record.hash.clone())) && print {
+                    lines.push(candidate_line(&record));
+                }
+            }
+        }
+        drop(tail);
+        if !lines.is_empty() {
+            if let Ok(mut q) = self.queued.lock() {
+                q.extend(lines);
+            }
+        }
+    }
+
     /// Report one line. Safe to call from any thread.
     fn say(&self, line: String) {
         match self.mode {
             1 => eprintln!("{line}"),
             2 => {
+                // The candidates that finished before this event come first.
+                self.collect(true);
                 if let Ok(mut q) = self.queued.lock() {
                     q.push(line);
                 }
@@ -10478,6 +10569,9 @@ impl SearchProgress {
 
     /// Print the queued lines. R thread only.
     fn flush(&self) {
+        if self.mode == 2 {
+            self.collect(true);
+        }
         let lines = match self.queued.lock() {
             Ok(mut q) => std::mem::take(&mut *q),
             Err(_) => return,
@@ -10492,6 +10586,69 @@ impl SearchProgress {
         // each line as it is printed, not in one burst at exit.
         let _ = call!("flush.console");
     }
+}
+
+impl Drop for SearchProgress {
+    fn drop(&mut self) {
+        if let Ok(tail) = self.journals.lock() {
+            if let Some(dir) = &tail.scratch {
+                let _ = std::fs::remove_dir_all(dir);
+            }
+        }
+    }
+}
+
+/// Every `search_journal.jsonl` under `dir`: a tool keeps one per step, layer
+/// or `ferx_amd()` stage, in its own subdirectory. The per-candidate fit and
+/// model caches are skipped, and the depth is bounded, so a tick stays cheap.
+fn find_search_journals(dir: &Path, depth: usize, out: &mut Vec<std::path::PathBuf>) {
+    let name = ferx_tools::search::journal::journal_path(dir);
+    if name.is_file() {
+        out.push(name);
+    }
+    if depth >= 4 {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut subdirs: Vec<std::path::PathBuf> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+        .filter(|e| !matches!(e.file_name().to_str(), Some("fits") | Some("models")))
+        .map(|e| e.path())
+        .collect();
+    subdirs.sort();
+    for sub in subdirs {
+        find_search_journals(&sub, depth + 1, out);
+    }
+}
+
+/// One candidate as a progress line: id, what it is, OFV, criterion, verdict.
+fn candidate_line(r: &ferx_tools::search::journal::CandidateRecord) -> String {
+    let one_line = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let num = |v: Option<f64>| v.map_or("NA".to_string(), |x| format!("{x:.3}"));
+    let mut line = format!("  candidate {}", r.id);
+    let what = r.features.render();
+    if !what.is_empty() {
+        line.push_str(&format!(" [{what}]"));
+    }
+    if let Some(e) = &r.error {
+        line.push_str(&format!(": error: {}", one_line(e)));
+        return line;
+    }
+    line.push_str(&format!(": OFV {}, criterion {}", num(r.ofv), num(r.criterion)));
+    if !r.converged {
+        line.push_str(", not converged");
+    }
+    if r.passed {
+        line.push_str(", passed");
+    } else if r.failures.is_empty() {
+        line.push_str(", failed");
+    } else {
+        line.push_str(&format!(", failed: {}", one_line(&r.failures.join("; "))));
+    }
+    line
 }
 
 /// `eprintln!` for a search's progress: `say!(lines, "...", args)`.
@@ -10717,6 +10874,9 @@ fn ferx_rust_covsearch(
 
         let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
         let lines = SearchProgress::new(progress);
+        // In line mode the candidate journal is what reports each candidate,
+        // so a run without a directory journals into a scratch one.
+        let dir = lines.run_dir(dir);
         let report = |event: ferx_tools::covsearch::CovsearchEvent| {
             use ferx_tools::covsearch::{CovsearchEvent as E, Phase};
             if !lines.enabled() {
@@ -11203,6 +11363,9 @@ fn ferx_rust_modelsearch(
 
         let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
         let lines = SearchProgress::new(progress);
+        // In line mode the candidate journal is what reports each candidate,
+        // so a run without a directory journals into a scratch one.
+        let dir = lines.run_dir(dir);
         let report = |event: ferx_tools::modelsearch::ModelsearchEvent| {
             use ferx_tools::modelsearch::ModelsearchEvent as E;
             if !lines.enabled() {
@@ -11511,6 +11674,9 @@ fn ferx_rust_ruvsearch(
 
         let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
         let lines = SearchProgress::new(progress);
+        // In line mode the candidate journal is what reports each candidate,
+        // so a run without a directory journals into a scratch one.
+        let dir = lines.run_dir(dir);
         let report = |event: ferx_tools::ruvsearch::RuvsearchEvent| {
             use ferx_tools::ruvsearch::RuvsearchEvent as E;
             if !lines.enabled() {
@@ -11968,6 +12134,9 @@ fn ferx_rust_iivsearch(
 
         let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
         let lines = SearchProgress::new(progress);
+        // In line mode the candidate journal is what reports each candidate,
+        // so a run without a directory journals into a scratch one.
+        let dir = lines.run_dir(dir);
         let report = |event: ferx_tools::iivsearch::IivsearchEvent| {
             use ferx_tools::iivsearch::IivsearchEvent as E;
             if !lines.enabled() {
@@ -12358,6 +12527,9 @@ fn ferx_rust_iovsearch(
 
         let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
         let lines = SearchProgress::new(progress);
+        // In line mode the candidate journal is what reports each candidate,
+        // so a run without a directory journals into a scratch one.
+        let dir = lines.run_dir(dir);
         let report = |event: ferx_tools::iovsearch::IovsearchEvent| {
             use ferx_tools::iovsearch::IovsearchEvent as E;
             if !lines.enabled() {
@@ -12985,6 +13157,7 @@ fn ferx_rust_amd(
         };
 
         let dir = std::path::PathBuf::from(directory);
+        lines.run_dir(Some(dir.clone()));
         let result = match run_search_cancellable(&cancel, Some(&lines), || {
             ferx_tools::amd::run_amd(
                 &config,
@@ -13415,6 +13588,9 @@ fn ferx_rust_globalsearch(
 
         let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
         let lines = SearchProgress::new(progress);
+        // In line mode the candidate journal is what reports each candidate,
+        // so a run without a directory journals into a scratch one.
+        let dir = lines.run_dir(dir);
         let report = |event: ferx_tools::globalsearch::GlobalsearchEvent| {
             use ferx_tools::globalsearch::GlobalsearchEvent as E;
             if !lines.enabled() {

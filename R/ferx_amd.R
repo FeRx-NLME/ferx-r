@@ -104,9 +104,12 @@
 #' @param resume Reuse the fits already journalled in \code{directory}.
 #' @param progress Print the engine's step progress. `TRUE` prints it to
 #'   stderr in an interactive session and, in a script (`Rscript`), as
-#'   plain lines on stdout, one record per line, so a log viewer tailing the
-#'   output sees each step as it finishes. `"lines"` asks for the stdout
-#'   lines in either kind of session; `FALSE` prints nothing.
+#'   plain lines on stdout, one record per line: a line per candidate as
+#'   its fit finishes (id, features, OFV, criterion, and passed or the
+#'   gates it failed), between the engine's step lines. `"lines"` asks
+#'   for the stdout lines in either kind of session; `FALSE` prints
+#'   nothing. The candidate lines are read from each step's journal in
+#'   `directory`.
 #'
 #' @return An object of class \code{ferx_amd}:
 #'   \describe{

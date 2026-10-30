@@ -285,7 +285,8 @@ test_that("progress = \"lines\" prints the step progress as lines on stdout", {
 
   ex <- ferx_example("two_cpt_oral_base")
   # Through R's console, not the process's stdout, so capture.output() sees it.
-  out <- capture.output(ferx_covsearch(
+  # No `directory`: line mode journals into a scratch one it removes.
+  out <- capture.output(res <- ferx_covsearch(
     model        = ex$model,
     data         = ex$data,
     search_space = "COVARIATE?(CL, WT, pow)",
@@ -293,7 +294,23 @@ test_that("progress = \"lines\" prints the step progress as lines on stdout", {
     retries      = 0,
     progress     = "lines"
   ))
+  expect_true(is.na(res$directory))
   expect_true("Fitting the base model..." %in% out)
   expect_true(any(grepl("^Base model: OFV ", out)))
-  expect_true(any(grepl("^Step 1 \\(forward\\): fitting 1 candidate", out)))
+  started <- grep("^Step 1 \\(forward\\): fitting 1 candidate", out)
+  finished <- grep("^Step 1 \\(forward\\): (added|nothing accepted)", out)
+  expect_length(started, 1L)
+  expect_length(finished, 1L)
+
+  # One line per candidate, as it finishes - between the step's start and its
+  # summary - naming it and giving its OFV, criterion and verdict.
+  cand <- grep("^  candidate ", out)
+  step_cands <- cand[cand > started & cand < finished]
+  ids <- res$steps$candidate[res$steps$step == 1L]
+  expect_length(step_cands, length(ids))
+  for (id in ids) {
+    line <- out[step_cands][startsWith(out[step_cands], paste0("  candidate ", id, " "))]
+    expect_length(line, 1L)
+    expect_match(line, ": (OFV -?[0-9.]+, criterion -?[0-9.]+(, not converged)?, (passed|failed(: .+)?)|error: .+)$")
+  }
 })

@@ -75,9 +75,12 @@ left to read afterwards and the run cannot be resumed.}
 
 \item{progress}{Print the engine's step progress. \code{TRUE} prints it to
 stderr in an interactive session and, in a script (\code{Rscript}), as
-plain lines on stdout, one record per line, so a log viewer tailing the
-output sees each step as it finishes. \code{"lines"} asks for the stdout
-lines in either kind of session; \code{FALSE} prints nothing.}
+plain lines on stdout, one record per line: a line per candidate as
+its fit finishes (id, features, OFV, criterion, and passed or the
+gates it failed), between the engine's step lines. \code{"lines"} asks
+for the stdout lines in either kind of session; \code{FALSE} prints
+nothing. The candidate lines are read from each step's journal in
+\code{directory}.}
 
 \item{x}{A \code{ferx_amd} object.}
 

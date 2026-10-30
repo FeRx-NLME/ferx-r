@@ -340,16 +340,16 @@ test_that("progress = TRUE picks the bar interactively and lines in a script", {
   expect_error(.ferx_progress_style(c(TRUE, TRUE), "f"), "TRUE, FALSE or")
 })
 
-test_that("the line renderer prints one line per fit from a coalesced stream", {
+test_that("without a journal the line renderer prints one line per counted fit", {
   out <- character(0)
   h <- .ferx_bootstrap_progress_lines(say = function(...) {
     out[[length(out) + 1L]] <<- paste0(...)
   })
-  # The timer redelivers the latest event, skips some and can step a count
-  # back; every count still gets exactly one line, in order.
+  # Events repeat on the redraw timer and a count can step back when two
+  # workers finish close together; every count still gets exactly one line.
   h("started", 2L, 4L, TRUE)
   h("started", 2L, 4L, TRUE)
-  h("replicate", 2L, 4L, FALSE)   # base_done coalesced away
+  h("replicate", 2L, 4L, FALSE)   # base_done never arrived
   h("replicate", 1L, 4L, FALSE)   # out-of-order delivery
   h("replicate", 2L, 4L, FALSE)
   h("replicate", 4L, 4L, FALSE)
@@ -370,35 +370,123 @@ test_that("the line renderer prints one line per fit from a coalesced stream", {
   ))
 })
 
+test_that("the line renderer reports each replicate's index, OFV and outcome from the journal", {
+  dir <- tempfile("journal-")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  path <- file.path(dir, "raw_results.csv")
+  header <- paste("sample,minimization_successful,estimate_near_boundary",
+                  "covariance_step_successful,covariance_step_warnings,ofv",
+                  "seconds,TVCL,error", sep = ",")
+  write_rows <- function(rows, torn = NULL) {
+    txt <- paste0(paste(c(header, rows), collapse = "\n"), "\n", torn %||% "")
+    writeBin(charToRaw(txt), path)
+  }
+
+  out <- character(0)
+  h <- .ferx_bootstrap_progress_lines(
+    directory = dir,
+    skip = c(minimization_terminated = TRUE, estimate_near_boundary = FALSE),
+    say = function(...) out[[length(out) + 1L]] <<- paste0(...)
+  )
+
+  # A resumed run: the journal opens with the base fit and the two replicates
+  # it reuses, then gains rows in completion order - not index order.
+  h("started", 2L, 3L, FALSE)
+  write_rows(c("0,1,0,0,0,100.5,1.000,0.1,",
+               "1,1,0,0,0,101.25,1.000,0.1,",
+               "2,1,0,0,0,99.75,1.000,0.1,",
+               "5,0,1,0,0,98.125,2.000,0.1,"),
+             torn = "4,1,0,0,0,97")   # still being written: not read yet
+  h("replicate", 1L, 3L, FALSE)
+  h("replicate", 1L, 3L, FALSE)       # a repeat prints nothing
+  write_rows(c("0,1,0,0,0,100.5,1.000,0.1,",
+               "1,1,0,0,0,101.25,1.000,0.1,",
+               "2,1,0,0,0,99.75,1.000,0.1,",
+               "5,0,1,0,0,98.125,2.000,0.1,",
+               "4,1,0,0,0,97.5,1.500,0.1,",
+               "3,0,0,0,0,,0.500,,\"Error: singular, x\""))
+  h("replicate", 3L, 3L, FALSE)
+  # The finished run rewrites the file in index order: nothing is new.
+  write_rows(c("0,1,0,0,0,100.5,1.000,0.1,",
+               "1,1,0,0,0,101.25,1.000,0.1,",
+               "2,1,0,0,0,99.75,1.000,0.1,",
+               "3,0,0,0,0,,0.500,,\"Error: singular, x\"",
+               "4,1,0,0,0,97.5,1.500,0.1,",
+               "5,0,1,0,0,98.125,2.000,0.1,"))
+  h("finished", 0L, 0L, FALSE)
+
+  expect_identical(out, c(
+    "bootstrap: reusing 2 replicates already on disk",
+    "bootstrap: 3 replicates to fit",
+    "bootstrap: base model: OFV 100.500, converged (1.0 s)",
+    "bootstrap: sample 1: OFV 101.250, converged (1.0 s) (reused)",
+    "bootstrap: sample 2: OFV 99.750, converged (1.0 s) (reused)",
+    paste("bootstrap: [1/3] sample 5: OFV 98.125, minimization terminated,",
+          "estimate near boundary - excluded (2.0 s)"),
+    "bootstrap: [2/3] sample 4: OFV 97.500, converged (1.5 s)",
+    "bootstrap: [3/3] sample 3: failed: Error: singular, x",
+    "bootstrap: finished"
+  ))
+})
+
 test_that("the line renderer never throws", {
   h <- .ferx_bootstrap_progress_lines(say = function(...) stop("boom"))
   expect_silent(h("replicate", 1L, 2L, FALSE))
   expect_silent(h("replicate", NA_integer_, 2L, FALSE))
+  h <- .ferx_bootstrap_progress_lines(directory = tempfile("absent-"),
+                                      say = function(...) NULL)
+  expect_silent(h("replicate", 1L, 2L, FALSE))
 })
 
-test_that("progress = TRUE under Rscript streams one line per replicate to stdout", {
+test_that("progress = TRUE under Rscript streams a line per replicate while the run is going", {
   skip_on_cran()
   rscript <- file.path(R.home("bin"), "Rscript")
   skip_if_not(file.exists(rscript))
   ex <- ferx_example("warfarin")
   script <- tempfile(fileext = ".R")
-  on.exit(unlink(script), add = TRUE)
+  # Written by the child once ferx_bootstrap() has returned. A line read while
+  # it is absent was printed while the run was still going - output held back
+  # in a buffer until exit would only arrive after it.
+  done <- tempfile("bootstrap-done-")
+  on.exit(unlink(c(script, done)), add = TRUE)
   # Load the same build the tests run against: an installed copy may predate it.
   lib <- dirname(find.package("ferx"))
   writeLines(c(
     sprintf(".libPaths(c(%s, .libPaths()))", deparse(lib)),
     "suppressMessages(library(ferx))",
-    sprintf("invisible(ferx_bootstrap(%s, %s, samples = 3L, seed = 1, threads = 1L,",
+    sprintf("invisible(ferx_bootstrap(%s, %s, samples = 8L, seed = 1, threads = 1L,",
             deparse(ex$model), deparse(ex$data)),
-    "                          progress = TRUE))"
+    "                          progress = TRUE))",
+    sprintf("invisible(file.create(%s))", deparse(done))
   ), script)
-  out <- suppressWarnings(system2(rscript, c("--vanilla", script),
-                                  stdout = TRUE, stderr = FALSE))
-  skip_if(!is.null(attr(out, "status")) && attr(out, "status") != 0L,
-          "the child R session could not run the bootstrap")
-  expect_identical(grep("^bootstrap: replicate", out, value = TRUE),
-                   sprintf("bootstrap: replicate %d/3 done", 1:3))
-  expect_true("bootstrap: finished" %in% out)
+
+  con <- pipe(paste(shQuote(rscript), "--vanilla", shQuote(script), "2>/dev/null"),
+              open = "r")
+  out <- character(0)
+  first_seen_running <- NA
+  repeat {
+    line <- readLines(con, n = 1L)
+    if (length(line) == 0L) break
+    if (is.na(first_seen_running) && grepl("^bootstrap: \\[1/8\\]", line)) {
+      first_seen_running <- !file.exists(done)
+    }
+    out <- c(out, line)
+  }
+  close(con)
+  skip_if(!file.exists(done), "the child R session could not run the bootstrap")
+
+  expect_true(isTRUE(first_seen_running))
+  fitted <- grep("^bootstrap: \\[[0-9]+/8\\] sample [0-9]+: ", out, value = TRUE)
+  expect_length(fitted, 8L)
+  expect_identical(sub("^bootstrap: \\[([0-9]+)/8\\].*", "\\1", fitted),
+                   as.character(1:8))
+  # Every replicate is named once, by its own index, with its OFV or failure.
+  idx <- as.integer(sub(".* sample ([0-9]+): .*", "\\1", fitted))
+  expect_setequal(idx, 1:8)
+  expect_true(all(grepl(": (OFV -?[0-9.]+, |failed: )", fitted)))
+  expect_true(any(grepl("^bootstrap: base model: OFV ", out)))
+  expect_identical(out[length(out)], "bootstrap: finished")
 })
 
 test_that("the progress handler tolerates a coalesced event stream", {

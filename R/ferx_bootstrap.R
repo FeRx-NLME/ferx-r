@@ -142,9 +142,14 @@
 #'   asked. `TRUE` in an interactive session shows a progress bar - the cli
 #'   package's when it is installed, [utils::txtProgressBar()] otherwise. `TRUE`
 #'   in a script (`Rscript`), or `"lines"` in either kind of session, prints
-#'   plain lines on stdout instead, one per completed fit
-#'   (`bootstrap: replicate 3/200 done`), so a log viewer tailing the output
-#'   sees the run move. Either form is drawn by this R session while the fits
+#'   plain lines on stdout instead, one per replicate as it finishes, with its
+#'   sample index, OFV and outcome
+#'   (`bootstrap: [3/200] sample 17: OFV -1185.462, converged (2.1 s)`, or
+#'   `minimization terminated`, `failed: ...`, and `- excluded` when the
+#'   `skip_*` filters will drop it), so a log viewer tailing the output sees
+#'   the run move. The lines are read from the run's journal, so without a
+#'   `directory` the run journals into a temporary one that is removed
+#'   afterwards. Either form is drawn by this R session while the fits
 #'   run in the engine, and reports what the run will actually do: a
 #'   `resume = TRUE` run whose `directory` already holds most of the replicates
 #'   counts only the ones still to fit.
@@ -290,10 +295,25 @@ ferx_bootstrap <- function(model,
 
   # NULL is what tells the engine not to open a reporting thread at all.
   progress_style <- .ferx_progress_style(progress, "ferx_bootstrap")
+  # The line renderer reads each replicate's outcome from the journal the
+  # engine flushes as the replicate lands (`raw_results.csv`), which exists
+  # only in a run directory - so a run without one journals into a scratch
+  # directory that is removed afterwards and never reported as the run's.
+  run_dir <- dir_arg
+  if (progress_style == "lines" && !nzchar(run_dir)) {
+    run_dir <- tempfile("ferx-bootstrap-")
+    on.exit(unlink(run_dir, recursive = TRUE), add = TRUE)
+  }
   progress_handler <- if (progress_style == "console") {
     .ferx_bootstrap_progress_handler()
   } else if (progress_style == "lines") {
-    .ferx_bootstrap_progress_lines()
+    .ferx_bootstrap_progress_lines(
+      directory = run_dir,
+      skip = c(minimization_terminated = skip_minimization_terminated,
+               estimate_near_boundary = skip_estimate_near_boundary,
+               covariance_step_terminated = skip_covariance_step_terminated,
+               with_covstep_warnings = skip_with_covstep_warnings)
+    )
   }
 
   res <- ferx_rust_bootstrap(
@@ -313,7 +333,7 @@ ferx_bootstrap <- function(model,
     skip_covariance_step_terminated,
     skip_with_covstep_warnings,
     dofv,
-    dir_arg,
+    run_dir,
     as.numeric(ci),
     resume,
     retry_failed,
@@ -738,24 +758,39 @@ plot.ferx_bootstrap <- function(x, y = NULL, parameters = NULL,
 }
 
 # The line-oriented counterpart of the bar handler above, for `progress = TRUE`
-# in a script or `progress = "lines"` (#677): one plain record per completed
-# fit on stdout, so a log viewer tailing the output sees the run move.
+# in a script or `progress = "lines"` (#677): one plain record per replicate
+# on stdout as it finishes, so a log viewer tailing the output sees the run
+# move.
 #
-# The engine hands the R thread the latest event on a timer, not every event:
-# the counts may jump (3 straight to 5), the same event comes round again on
-# every tick, and the count can even step back when two workers finish close
-# together. So every record is keyed on what has already been printed - each
-# count from the last one printed up to the new one gets its line, once, and a
-# stage is announced once however many times its event repeats. A count
-# jumping past a stage the timer skipped still prints that stage's line first.
+# The engine's events carry counts only, so what a replicate *was* comes from
+# the journal it flushes into `<directory>/raw_results.csv` before announcing
+# the replicate (ferx-core #1143): its `sample` index, OFV, termination flags
+# and error. Each event re-reads the journal and prints the rows not printed
+# yet, keyed on `sample` - rows land in completion order, a resumed run's file
+# starts with the replicates it reuses, and the finished run rewrites the file
+# in index order, none of which changes which samples are new. The `[k/N]` in
+# front is this run's own count; the sample index is the replicate's.
 #
-# The events carry counts only, not which replicate finished or how it went;
-# per-sample OFV and status need the engine to report them (ferx-core #2512).
-# `say` prints one line; it is an argument for the tests.
-.ferx_bootstrap_progress_lines <- function(say = .ferx_progress_line) {
+# Events can repeat (a slow phase is redrawn on every tick), so a stage is
+# announced once however often its event comes round. Without a journal
+# (`directory` NULL) the renderer falls back to one line per counted fit.
+# `skip` is the run's exclusion filters, so a line can say a replicate will be
+# dropped from the summary. `say` prints one line; it is an argument for the
+# tests.
+.ferx_bootstrap_progress_lines <- function(directory = NULL,
+                                           skip = logical(0),
+                                           say = .ferx_progress_line) {
+  journal <- if (!is.null(directory) && nzchar(directory)) {
+    file.path(directory, "raw_results.csv")
+  }
   state <- new.env(parent = emptyenv())
   state$said <- character(0)   # one-off records already printed
-  state$replicate <- 0L        # highest replicate count printed
+  state$seen <- integer(0)     # journal samples already printed
+  state$size <- -1             # journal size at the last read
+  state$reused <- 0L           # replicates the run reuses, not yet printed
+  state$fresh <- 0L            # replicates this run fitted, printed
+  state$total <- NA_integer_   # replicates this run fits
+  state$replicate <- 0L        # highest count printed (no journal)
   state$dofv <- 0L             # highest delta-OFV count printed
   state$base_fit <- FALSE      # the run starts with a base fit
 
@@ -765,8 +800,67 @@ plot.ferx_bootstrap <- function(x, y = NULL, parameters = NULL,
     say(...)
   }
 
-  # The base fit is over once a replicate or delta-OFV event arrives, whether
-  # or not its own "base_done" survived the coalescing.
+  skipping <- function(name) isTRUE(skip[name])
+
+  describe <- function(row) {
+    if (nzchar(row$error)) return(paste0("failed: ", row$error))
+    flags <- character(0)
+    excluded <- character(0)
+    if (!row$minimization_successful) {
+      flags <- c(flags, "minimization terminated")
+      if (skipping("minimization_terminated")) excluded <- c(excluded, "minimization")
+    } else {
+      flags <- c(flags, "converged")
+    }
+    if (row$estimate_near_boundary) {
+      flags <- c(flags, "estimate near boundary")
+      if (skipping("estimate_near_boundary")) excluded <- c(excluded, "boundary")
+    }
+    if (skipping("covariance_step_terminated") && !row$covariance_step_successful) {
+      flags <- c(flags, "covariance step failed")
+      excluded <- c(excluded, "covariance step")
+    }
+    if (skipping("with_covstep_warnings") && row$covariance_step_warnings) {
+      flags <- c(flags, "covariance step warnings")
+      excluded <- c(excluded, "covariance warnings")
+    }
+    out <- sprintf("OFV %.3f, %s", row$ofv, paste(flags, collapse = ", "))
+    if (length(excluded) > 0L) out <- paste0(out, " - excluded")
+    if (!is.na(row$seconds)) out <- sprintf("%s (%.1f s)", out, row$seconds)
+    out
+  }
+
+  # Print the journal rows not printed yet. FALSE when there is no journal to
+  # read, so the caller can fall back to counts.
+  read_journal <- function() {
+    if (is.null(journal)) return(FALSE)
+    size <- file.size(journal)
+    if (is.na(size)) return(FALSE)
+    if (size == state$size) return(TRUE)
+    rows <- .ferx_bootstrap_journal_rows(journal)
+    if (is.null(rows)) return(FALSE)
+    state$size <- size
+    for (i in seq_len(nrow(rows))) {
+      row <- rows[i, , drop = FALSE]
+      if (is.na(row$sample) || row$sample %in% state$seen) next
+      state$seen <- c(state$seen, row$sample)
+      if (row$sample == 0L) {
+        once("base_done", "bootstrap: base model: ", describe(row))
+      } else if (state$reused > 0L) {
+        # A resumed run's file opens with the replicates it reuses.
+        state$reused <- state$reused - 1L
+        say(sprintf("bootstrap: sample %d: %s (reused)", row$sample, describe(row)))
+      } else {
+        state$fresh <- state$fresh + 1L
+        say(sprintf("bootstrap: [%d/%s] sample %d: %s", state$fresh,
+                    if (is.na(state$total)) "?" else state$total,
+                    row$sample, describe(row)))
+      }
+    }
+    TRUE
+  }
+
+  # The base fit is over once a later event arrives.
   base_done <- function() {
     if (state$base_fit) once("base_done", "bootstrap: base model fitted")
   }
@@ -784,10 +878,14 @@ plot.ferx_bootstrap <- function(x, y = NULL, parameters = NULL,
   function(stage, completed, total, base_fit) {
     tryCatch({
       if (identical(stage, "started")) {
+        # Not read here: on a resume the file may still be the previous run's,
+        # holding failed rows `retry_failed` is about to refit.
         if (!"started" %in% state$said) {
           state$base_fit <- isTRUE(base_fit)
+          state$total <- as.integer(total)
           # `completed` carries the reused count on this one event.
           if (completed > 0L) {
+            state$reused <- as.integer(completed)
             once("reused", "bootstrap: reusing ", completed,
                  " replicates already on disk")
           }
@@ -796,19 +894,56 @@ plot.ferx_bootstrap <- function(x, y = NULL, parameters = NULL,
         }
       } else if (identical(stage, "base_done")) {
         state$base_fit <- TRUE
+        read_journal()
         base_done()
       } else if (identical(stage, "replicate")) {
-        base_done()
-        count("replicate", "replicate", completed, total)
+        if (is.na(state$total)) state$total <- as.integer(total)
+        if (!read_journal()) {
+          base_done()
+          count("replicate", "replicate", completed, total)
+        }
       } else if (identical(stage, "dofv")) {
+        read_journal()
         base_done()
         count("dofv", "delta-OFV evaluation", completed, total)
       } else if (identical(stage, "finished")) {
+        read_journal()
         once("finished", "bootstrap: finished")
       }
     }, error = function(e) NULL)
     invisible(NULL)
   }
+}
+
+# The complete rows of a bootstrap journal (`raw_results.csv`), in file order,
+# with the columns the line renderer reads; NULL when there are none. The file
+# is being appended to while this reads it, so a row counts only once its
+# newline is on disk.
+.ferx_bootstrap_journal_rows <- function(path) {
+  size <- file.size(path)
+  if (is.na(size) || size == 0) return(NULL)
+  con <- file(path, "rb")
+  on.exit(close(con))
+  bytes <- readBin(con, "raw", size)
+  newlines <- which(bytes == as.raw(10L))
+  if (length(newlines) < 2L) return(NULL)   # the header alone
+  rows <- utils::read.csv(text = rawToChar(bytes[seq_len(max(newlines))]),
+                          colClasses = "character", check.names = FALSE,
+                          na.strings = character(0))
+  if (nrow(rows) == 0L) return(NULL)
+  flag <- function(x) if (is.null(x)) rep(FALSE, nrow(rows)) else x %in% "1"
+  num <- function(x) if (is.null(x)) rep(NA_real_, nrow(rows)) else suppressWarnings(as.numeric(x))
+  data.frame(
+    sample = suppressWarnings(as.integer(rows$sample)),
+    minimization_successful = flag(rows$minimization_successful),
+    estimate_near_boundary = flag(rows$estimate_near_boundary),
+    covariance_step_successful = flag(rows$covariance_step_successful),
+    covariance_step_warnings = flag(rows$covariance_step_warnings),
+    ofv = num(rows$ofv),
+    seconds = num(rows$seconds),
+    error = rows$error %||% rep("", nrow(rows)),
+    stringsAsFactors = FALSE
+  )
 }
 
 
