@@ -24,5 +24,13 @@ print(fit)
 surv <- ferx_predict_survival(ex$model, ex$data, times = seq(0, 24, by = 2), fit = fit)
 head(surv)
 
-# Note: simulating an ODE-accumulated hazard is not yet supported (a later slice
-# adds the event-time root-finder); ferx_simulate() on this model errors clearly.
+# Simulate from the fit. A drug-driven hazard needs a finite `horizon`: each
+# subject's event time is sampled off the integrated cumulative hazard, and a
+# subject with no event by `horizon` is right-censored there. On the event rows
+# (CMT 3) TIME is the sampled event or censoring time and OBSERVED is 1 for an
+# event, 0 for censored.
+sim <- ferx_simulate(ex$model, ex$data, n_sim = 20L, seed = 1L, fit = fit,
+                     horizon = 24)
+events <- sim[!is.na(sim$OBSERVED), ]
+head(events)
+mean(events$OBSERVED)  # share of simulated subjects (all 20 replicates) with an event by t = 24
