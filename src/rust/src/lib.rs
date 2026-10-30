@@ -2637,8 +2637,9 @@ fn ferx_rust_theta_levels_from_fit(
         let src = read_fit_model("ferx_load_fit", model_path, model_hash)?;
         let mut parsed = src.parsed;
         let fitted = fit_bindings_from_r(&fit_bindings)?;
-        // Not `engine_refusal`: the caller words this as a malformed bundle,
-        // and no diagnostic code should outlive the call.
+        // The layout refusal is uncoded on purpose (not `engine_refusal`): the
+        // caller words it as a malformed bundle. The read above is coded, so
+        // an edited model file reaches the caller as E_FIT_INPUT_CHANGED.
         bind_layout_from_fit(&mut parsed, &src.text, &fitted).map_err(|e| e.to_string())?;
         // The same covariance and draws a live fit hands the engine (#528),
         // rebuilt from R's flat copies. A shape that does not match is
