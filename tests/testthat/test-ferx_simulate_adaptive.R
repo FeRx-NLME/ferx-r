@@ -109,7 +109,8 @@ test_that("trajectories carry MIXNUM on a [mixture] model only (ferx-core #2372)
   writeLines(lines, path)
 
   # suppressWarnings: the engine calls MIXL "not referenced in any model
-  # expression" - its unused-parameter lint does not read [mixture].
+  # expression" - its unused-parameter lint does not read [mixture]
+  # (ferx-core #2483). Drop this once the fix is in the pin.
   res <- suppressWarnings(ferx_simulate_adaptive(path, data, n_sim = 50L, seed = 1L))
   traj <- res$trajectories
   expect_identical(tail(names(traj), 1L), "MIXNUM")
