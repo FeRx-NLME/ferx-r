@@ -3849,6 +3849,442 @@ fn default_fit_result(
     }
 }
 
+/// Write a fit's final estimates into its model text as the initial values
+/// (ferx-r #678): ferx-core's `ModelEdit::SeedInits`, the edit every search
+/// writes its `final.ferx` with, then `ModelText::render`. Bounds, `FIX`
+/// (left as declared), `(sd)` scale, block structure and every other block
+/// are kept as written.
+///
+/// Two things `SeedInits` does not do are done here, around it:
+///
+/// * a free `block_sigma` takes the fitted residual covariance
+///   (`seed_block_sigmas`): `SeedInits` leaves it at its declared values,
+///   so a refit from the file started the residual model off the optimum;
+/// * a `[mixture]` fit's per-class `omega(k)` / `sigma(k)` overrides take
+///   their fitted values (`seed_mixture_overrides`), which `SeedInits` does
+///   not read;
+/// * a comment at the end of a declaration `SeedInits` rewrote is put back
+///   (`restore_trailing_comments`): the engine writes such a line afresh from
+///   its comment-stripped code.
+///
+/// `SeedInits` reads only the estimates and their names, so the `FitResult`
+/// is the uncertainty path's skeleton with the fit's own names laid over the
+/// model's: a level-block model's theta names are data-derived and exist only
+/// in the fit.
+///
+/// @param model_text The fitted model's source.
+/// @param theta,theta_names Fitted theta, by name.
+/// @param omega_flat,omega_dim,eta_names Fitted omega, row-major, by eta name.
+/// @param sigma,sigma_names Fitted sigma on the SD scale, by name.
+/// @param omega_iov_flat,omega_iov_dim,kappa_names Fitted kappa covariance
+///   (`omega_iov_dim = 0` for none), by kappa name.
+/// @param residual_rho,residual_rho_pairs Fitted `block_sigma` correlations
+///   and their 1-based sigma pairs, flattened `i1, j1, i2, j2, ...`.
+/// @param mixture_overrides A `[mixture]` fit's fitted per-class overrides
+///   (`fit$mixture_overrides`; empty for none).
+/// @return A list: `text`, the rendered model, and `notes`, one line per
+///   declaration left as written that a refit would want seeded.
+/// @export
+#[extendr]
+#[allow(clippy::too_many_arguments)]
+fn ferx_rust_update_model(
+    model_text: &str,
+    theta: Vec<f64>,
+    theta_names: Vec<String>,
+    omega_flat: Vec<f64>,
+    omega_dim: i32,
+    eta_names: Vec<String>,
+    sigma: Vec<f64>,
+    sigma_names: Vec<String>,
+    omega_iov_flat: Vec<f64>,
+    omega_iov_dim: i32,
+    kappa_names: Vec<String>,
+    residual_rho: Vec<f64>,
+    residual_rho_pairs: Vec<i32>,
+    mixture_overrides: Vec<f64>,
+) -> Robj {
+    entry(move || {
+        let parsed = ferx_core::parser::model_parser::parse_full_model(model_text)
+            .map_err(|e| format!("Error parsing model: {e}"))?;
+        let same_len = |what: &str, values: usize, names: usize| {
+            if values == names {
+                Ok(())
+            } else {
+                Err(format!(
+                    "ferx_update_model: the fit carries {values} {what} estimates but {names} names"
+                ))
+            }
+        };
+        let d = omega_dim.max(0) as usize;
+        if omega_flat.len() != d * d {
+            return Err(format!(
+                "ferx_update_model: omega_flat length {} does not match {d} x {d}",
+                omega_flat.len()
+            ));
+        }
+        let k = omega_iov_dim.max(0) as usize;
+        if omega_iov_flat.len() != k * k {
+            return Err(format!(
+                "ferx_update_model: omega_iov_flat length {} does not match {k} x {k}",
+                omega_iov_flat.len()
+            ));
+        }
+        if residual_rho_pairs.len() != 2 * residual_rho.len() {
+            return Err(format!(
+                "ferx_update_model: {} residual correlations but {} pair indices",
+                residual_rho.len(),
+                residual_rho_pairs.len()
+            ));
+        }
+        same_len("theta", theta.len(), theta_names.len())?;
+        same_len("omega", d, eta_names.len())?;
+        same_len("sigma", sigma.len(), sigma_names.len())?;
+        same_len("kappa", k, kappa_names.len())?;
+
+        let mut notes = Vec::new();
+        let seeded = seed_block_sigmas(
+            model_text,
+            &sigma,
+            &sigma_names,
+            &residual_rho,
+            &residual_rho_pairs,
+            &mut notes,
+        );
+        let seeded = if parsed.model.default_params.mixture.is_some() {
+            seed_mixture_overrides(&seeded, &mixture_overrides, &mut notes)
+        } else {
+            seeded
+        };
+        let mut text = ferx_core::edit::ModelText::parse(&seeded)?;
+        let mut fit = default_fit_result(
+            &parsed.model,
+            theta,
+            DMatrix::from_row_slice(d, d, &omega_flat),
+            sigma,
+            (k > 0).then(|| DMatrix::from_row_slice(k, k, &omega_iov_flat)),
+            None,
+            None,
+            Vec::new(),
+            None,
+        );
+        fit.theta_names = theta_names;
+        fit.eta_names = eta_names;
+        fit.sigma_names = sigma_names;
+        fit.kappa_names = kappa_names;
+        text.apply(ferx_core::edit::ModelEdit::SeedInits(&fit))?;
+        let rendered = restore_trailing_comments(&seeded, &text.render());
+        Ok(list!(text = rendered, notes = notes).into())
+    })
+}
+
+/// A model line split as ferx-core's editor splits it (`edit::code_of`, which
+/// is crate-private): `(code_end, comment_start)` byte offsets into `line`,
+/// the comment starting at the first `#` or `//` outside quotes. `None` for a
+/// line with no comment.
+fn split_comment(line: &str) -> Option<(usize, usize)> {
+    let bytes = line.as_bytes();
+    let mut quote: Option<u8> = None;
+    for (i, &b) in bytes.iter().enumerate() {
+        match quote {
+            Some(q) => {
+                if b == q {
+                    quote = None;
+                }
+            }
+            None if b == b'"' || b == b'\'' => quote = Some(b),
+            None if b == b'#' || (b == b'/' && bytes.get(i + 1) == Some(&b'/')) => {
+                return Some((line[..i].trim_end().len(), i));
+            }
+            None => {}
+        }
+    }
+    None
+}
+
+/// A line and its terminator (`\r\n`, `\n` or none).
+fn split_terminator(line: &str) -> (&str, &str) {
+    let body = line.trim_end_matches(['\n', '\r']);
+    (body, &line[body.len()..])
+}
+
+/// Write a fit's residual covariance into every free single-line
+/// `block_sigma` declaration of `[parameters]`: the lower triangle, row by
+/// row, of `rho_ij * sd_i * sd_j` (`sd_i^2` on the diagonal) - the scale the
+/// parser reads it on, variances and covariances. Only the numbers between
+/// the brackets change. A `FIX` block - `FIX` on the line, or on a line the
+/// parser folds onto it (`folded_fix`) - is a statement about the model and is
+/// left alone, as `SeedInits` leaves a `FIX` `block_omega`; a block the fit
+/// carries no value for (a sigma or a correlation missing, or not finite) is
+/// left as written, and one whose bracket spans lines is left as written with
+/// a note.
+fn seed_block_sigmas(
+    model_text: &str,
+    sigma: &[f64],
+    sigma_names: &[String],
+    rho: &[f64],
+    rho_pairs: &[i32],
+    notes: &mut Vec<String>,
+) -> String {
+    let sd: HashMap<&str, (usize, f64)> = sigma_names
+        .iter()
+        .zip(sigma.iter())
+        .enumerate()
+        .map(|(i, (n, v))| (n.as_str(), (i, *v)))
+        .collect();
+    let rho_of: HashMap<(usize, usize), f64> = rho_pairs
+        .chunks(2)
+        .zip(rho.iter())
+        .filter(|(p, _)| p[0] >= 1 && p[1] >= 1)
+        .map(|(p, r)| {
+            let (a, b) = (p[0] as usize - 1, p[1] as usize - 1);
+            ((a.min(b), a.max(b)), *r)
+        })
+        .collect();
+    let is_fix = |code: &str| {
+        code.split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+            .any(|w| w.eq_ignore_ascii_case("FIX"))
+    };
+
+    let lines: Vec<&str> = model_text.split_inclusive('\n').collect();
+    let mut in_parameters = false;
+    let mut out = String::with_capacity(model_text.len());
+    for (at, &line) in lines.iter().enumerate() {
+        let (body, term) = split_terminator(line);
+        let code_len = split_comment(body).map_or(body.trim_end().len(), |(end, _)| end);
+        let code = body[..code_len].trim();
+        if code.starts_with('[') && code.ends_with(']') {
+            in_parameters = code[1..code.len() - 1].trim().eq_ignore_ascii_case("parameters");
+        }
+        let lower = code.to_ascii_lowercase();
+        let declares = in_parameters
+            && lower.starts_with("block_sigma")
+            && lower["block_sigma".len()..].trim_start().starts_with('(');
+        if !declares || is_fix(code) || folded_fix(&lines[at + 1..]) {
+            out.push_str(line);
+            continue;
+        }
+        let rewritten = (|| {
+            let open_names = body.find('(')?;
+            let close_names = open_names + body[open_names..].find(')')?;
+            let bracket = body[close_names..code_len.max(close_names)]
+                .find('[')
+                .map(|c| close_names + c)
+                .and_then(|open| body[open..code_len].find(']').map(|c| (open, open + c)));
+            let Some((open, close)) = bracket else {
+                notes.push(format!(
+                    "block_sigma ({}) spans more than one line; its initial values were left as written",
+                    body[open_names + 1..close_names].trim()
+                ));
+                return None;
+            };
+            let names: Vec<&str> =
+                body[open_names + 1..close_names].split(',').map(str::trim).collect();
+            let idx: Vec<(usize, f64)> =
+                names.iter().map(|n| sd.get(n).copied()).collect::<Option<_>>()?;
+            let mut values = Vec::new();
+            for (r, &(ir, sr)) in idx.iter().enumerate() {
+                for &(ic, sc) in idx.iter().take(r + 1) {
+                    let v = if ir == ic {
+                        sr * sr
+                    } else {
+                        rho_of.get(&(ir.min(ic), ir.max(ic)))? * sr * sc
+                    };
+                    if !v.is_finite() {
+                        return None;
+                    }
+                    values.push(format!("{v}"));
+                }
+            }
+            Some(format!(
+                "{}{}{}{term}",
+                &body[..=open],
+                values.join(", "),
+                &body[close..]
+            ))
+        })();
+        out.push_str(rewritten.as_deref().unwrap_or(line));
+    }
+    out
+}
+
+/// The comment after a line's code, with the whitespace before it: `None` for
+/// a line without one, or one that is only a comment.
+fn trailing_comment(line: &str) -> Option<(&str, &str)> {
+    let (body, _) = split_terminator(line);
+    let (end, start) = split_comment(body)?;
+    (!body[..end].trim().is_empty()).then(|| (&body[end..start], &body[start..]))
+}
+
+/// What a declaration line names before its value - `theta TVCL`,
+/// `omega ETA_V`, `block_omega` - which a rewrite keeps; a continuation line
+/// (`0.02, 0.02]`) has none. Comment-stripped and trimmed.
+fn declaration_head(line: &str) -> &str {
+    let (body, _) = split_terminator(line);
+    let code = split_comment(body).map_or(body, |(end, _)| &body[..end]).trim();
+    match code.find(['(', '~', '=', '[']) {
+        Some(at) => code[..at].trim_end(),
+        None => "",
+    }
+}
+
+/// Whether the lines after a block declaration fold a `FIX` onto it: the
+/// parser folds a line holding only `FIX` or a scale tag onto the block
+/// declaration before it (`folds_onto_block_declaration`, crate-private), so
+/// `block_sigma (A, B) = [...]` with `FIX` on the next line is a `FIX` block.
+/// Blank and comment-only lines between them are skipped, as the parser
+/// skips them.
+fn folded_fix(after: &[&str]) -> bool {
+    for line in after {
+        let (body, _) = split_terminator(line);
+        let code = split_comment(body).map_or(body, |(end, _)| &body[..end]).trim();
+        if code.is_empty() {
+            continue;
+        }
+        if code.eq_ignore_ascii_case("FIX") {
+            return true;
+        }
+        let tag = code
+            .strip_prefix('(')
+            .and_then(|c| c.strip_suffix(')'))
+            .map(|c| c.trim().to_ascii_lowercase());
+        if !matches!(tag.as_deref(), Some("sd" | "variance" | "var")) {
+            return false;
+        }
+    }
+    false
+}
+
+/// Write a `[mixture]` fit's per-class overrides into their declarations
+/// (ferx-r #678), which `SeedInits` does not read: `overrides` is
+/// `FitResult::mixture_overrides`, each `omega(k)` override's class variance
+/// and then each `sigma(k)` override's class SD, in declaration order. A value
+/// is written on its line's own scale - the variance, or the SD under `(sd)`,
+/// for either kind - and replaces only the number after `~`. A `FIX` override
+/// is left as written, as a `FIX` base parameter is. A fit that records no
+/// overrides, or another count than the block declares, leaves every override
+/// as written, with a note.
+fn seed_mixture_overrides(model_text: &str, overrides: &[f64], notes: &mut Vec<String>) -> String {
+    // (line index, is_omega) of every override declaration, in file order.
+    let lines: Vec<&str> = model_text.split_inclusive('\n').collect();
+    let mut decls: Vec<(usize, bool)> = Vec::new();
+    let mut in_mixture = false;
+    for (at, line) in lines.iter().enumerate() {
+        let (body, _) = split_terminator(line);
+        let code = split_comment(body).map_or(body, |(end, _)| &body[..end]).trim();
+        if code.starts_with('[') && code.ends_with(']') {
+            in_mixture = code[1..code.len() - 1].trim().eq_ignore_ascii_case("mixture");
+            continue;
+        }
+        let lower = code.to_ascii_lowercase();
+        let kind = ["omega", "sigma"].into_iter().find(|k| {
+            in_mixture && lower.starts_with(k) && lower[k.len()..].trim_start().starts_with('(')
+        });
+        if let Some(k) = kind {
+            decls.push((at, k == "omega"));
+        }
+    }
+    if decls.is_empty() {
+        return model_text.to_string();
+    }
+    if overrides.len() != decls.len() {
+        notes.push(format!(
+            "the fit records {} [mixture] override values but the model declares {} \
+             `omega(k)` / `sigma(k)` overrides; they were left as written",
+            overrides.len(),
+            decls.len()
+        ));
+        return model_text.to_string();
+    }
+    // The fit's layout: every omega override first, then every sigma one.
+    let n_omega = decls.iter().filter(|(_, o)| *o).count();
+    let (mut next_omega, mut next_sigma) = (0usize, n_omega);
+    let mut value_at: HashMap<usize, (bool, f64)> = HashMap::new();
+    for &(at, is_omega) in &decls {
+        let slot = if is_omega { &mut next_omega } else { &mut next_sigma };
+        value_at.insert(at, (is_omega, overrides[*slot]));
+        *slot += 1;
+    }
+
+    let mut out = String::with_capacity(model_text.len());
+    for (at, line) in lines.iter().enumerate() {
+        let rewritten = value_at.get(&at).and_then(|&(is_omega, v)| {
+            let (body, term) = split_terminator(line);
+            let code_len = split_comment(body).map_or(body.trim_end().len(), |(end, _)| end);
+            let code = &body[..code_len];
+            let words = code.split(|c: char| !c.is_ascii_alphanumeric() && c != '_');
+            if words.clone().any(|w| w.eq_ignore_ascii_case("FIX")) || !v.is_finite() {
+                return None;
+            }
+            let as_sd = code.to_ascii_lowercase().replace(' ', "").contains("(sd)");
+            let value = match (is_omega, as_sd) {
+                (true, true) => v.sqrt(),
+                (true, false) => v,
+                (false, true) => v,
+                (false, false) => v * v,
+            };
+            let tilde = code.find('~')?;
+            let start = tilde + 1 + (code[tilde + 1..].len() - code[tilde + 1..].trim_start().len());
+            let len = code[start..]
+                .find(|c: char| !(c.is_ascii_digit() || matches!(c, '.' | 'e' | 'E' | '+' | '-')))
+                .unwrap_or(code.len() - start);
+            (len > 0).then(|| format!("{}{value}{}{term}", &body[..start], &body[start + len..]))
+        });
+        out.push_str(rewritten.as_deref().unwrap_or(line));
+    }
+    out
+}
+
+/// Put back the trailing comments `SeedInits` drops. It rewrites a
+/// declaration's first line from its comment-stripped code and deletes the
+/// declaration's continuation lines, changing nothing else, so `rendered` is
+/// `source` with some lines replaced in place and some removed after them.
+/// Walking the two together, a source line that differs from the rendered one
+/// is a rewritten declaration, the source lines after it that are missing from
+/// `rendered` are its continuations (whole-line comments among them), and
+/// every comment on them is appended to the rewritten line, with the first
+/// one's spacing.
+fn restore_trailing_comments(source: &str, rendered: &str) -> String {
+    let src: Vec<&str> = source.split_inclusive('\n').collect();
+    let out: Vec<&str> = rendered.split_inclusive('\n').collect();
+    let mut result = String::with_capacity(rendered.len());
+    let (mut i, mut j) = (0usize, 0usize);
+    while j < out.len() {
+        if i >= src.len() || src[i] == out[j] {
+            result.push_str(out[j]);
+            i += 1;
+            j += 1;
+            continue;
+        }
+        let mut comments: Vec<(&str, &str)> = trailing_comment(src[i]).into_iter().collect();
+        i += 1;
+        // A continuation line is one `rendered` no longer has: neither the
+        // next rendered line nor the declaration it was rewritten from.
+        while i < src.len()
+            && src.len() - i > out.len() - (j + 1)
+            && out
+                .get(j + 1)
+                .is_none_or(|next| *next != src[i] && declaration_head(next) != declaration_head(src[i]))
+        {
+            let (body, _) = split_terminator(src[i]);
+            if let Some((end, start)) = split_comment(body) {
+                comments.push((&body[end..start], &body[start..]));
+            }
+            i += 1;
+        }
+        let (body, term) = split_terminator(out[j]);
+        result.push_str(body);
+        if split_comment(body).is_none() {
+            for (n, (gap, comment)) in comments.iter().enumerate() {
+                result.push_str(if n == 0 && !gap.is_empty() { gap } else { "  " });
+                result.push_str(comment);
+            }
+        }
+        result.push_str(term);
+        j += 1;
+    }
+    result
+}
+
 // -- Helper: SimulationResult slice → R data frame --
 
 /// Attach simulation / data-reader diagnostics as a `simulation_warnings`
@@ -13636,6 +14072,7 @@ extendr_module! {
     fn ferx_rust_warning_details_canonical;
     fn ferx_rust_theta_levels_from_fit;
     fn ferx_rust_fitrx_engine_resave;
+    fn ferx_rust_update_model;
     fn ferx_rust_eta_info_by_name;
     fn ferx_rust_classify_warnings;
     fn ferx_rust_validate_model;
