@@ -1208,6 +1208,13 @@
 #'     \code{"not_requested"}, or \code{"sir_fallback"} (the finite-difference
 #'     Hessian was not positive definite and \code{covariance_fallback = "sir"}
 #'     produced SIR-based intervals).}
+#'   \item{covariance_method}{The estimator that produced \code{cov_matrix}
+#'     and the standard errors: \code{"r"}, \code{"s"} or \code{"rsr"}, the
+#'     \code{[fit_options]} token (ferx-core #1382). Not always the one asked
+#'     for: on finite differences a defaulted \code{"r"} above the engine's
+#'     size limit runs as \code{"s"}. \code{NA} when the step produced no
+#'     matrix. \code{\link{ferx_covariance}} replays the fit's request and
+#'     refreshes this field; \code{\link{ferx_save_fit}} keeps it.}
 #'   \item{bic_inputs}{Named list of the free-parameter tally by Delattre
 #'     class - \code{n_obs}, \code{theta_random}, \code{theta_fixed},
 #'     \code{omega}, \code{kappa}, \code{sigma}, \code{sigma_random} - which

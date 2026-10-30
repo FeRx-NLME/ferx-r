@@ -41,9 +41,9 @@
 #' `inner_maxiter`, `inner_tol`, `inner_optimizer`, `mu_referencing`,
 #' `ode_reltol`, ...), and starts from the optimizer's exact estimate
 #' `fit$packed_estimate`. With both, `ferx_covariance(fit)` is `identical()` to
-#' the covariance `ferx_fit(..., covariance = TRUE)` reports, unless
-#' `covariance_method` differs from the fit's (it is a setting of the step, not
-#' of the fit, and is not recorded). That holds on every estimation method with
+#' the covariance `ferx_fit(..., covariance = TRUE)` reports, unless a
+#' `covariance_method` other than the fit's is passed. That holds on every
+#' estimation method with
 #' an in-fit step, with or without `kappa` (IOV): the step is taken for the
 #' fit's own method (`fit$method`), and Gauss-Newton, SAEM, importance sampling
 #' and VI start from the EBEs the fit reports - `fit$ebe_etas` and, under IOV,
@@ -53,8 +53,9 @@
 #' floor is replaced by S^-1 (warning `W_COV_NON_STATIONARY_ESTIMATE`), as the
 #' in-fit step does.
 #'
-#' The step's own settings are the fit's too: `fd_hessian_step`,
-#' `analytic_cov_hessian` and `cov_inner_tol`, as the fit was given them -
+#' The step's own settings are the fit's too: `covariance_method` (unless
+#' passed), `fd_hessian_step`, `analytic_cov_hessian` and `cov_inner_tol`, as
+#' the fit was given them -
 #' the model file's `[fit_options]`, overridden by `ferx_fit()`'s argument or
 #' `settings` (recorded in `fit$call_settings`). The engine does not record
 #' them, so a fit made with `fd_hessian_step = 0.1` used to be replayed at the
@@ -63,6 +64,18 @@
 #' from the model file itself, so a bundle written by ferx-core, which carries
 #' no `fit$call_settings`, keeps them; only call-time overrides need the R
 #' record.
+#'
+#' Until ferx-r #659 `covariance_method` defaulted to `"r"` whatever the fit
+#' ran, so a fit made with `settings = list(covariance_method = "rsr")`, or with
+#' `covariance_method = rsr` in `[fit_options]`, was replayed as `"r"` unless
+#' the caller repeated it. The estimator a step ran is recorded as
+#' `fit$covariance_method` (`NA` when it produced no matrix), and is kept by
+#' [ferx_save_fit()] / [ferx_load_fit()]. A replay of the fit's own method that
+#' runs another estimator than the recorded one warns, naming the method to
+#' pass. A fit whose step produced a matrix but recorded no estimator, such as
+#' a bundle saved before #659, is replayed from its call settings, then the
+#' model file's `[fit_options]`, then `"r"`; when it falls back to `"r"`
+#' because neither records a method, a message says so.
 #'
 #' A fit loaded with [ferx_load_fit()] keeps both, so its result is
 #' `identical()` to the in-fit one too. A fit loaded from a bundle saved before
@@ -109,10 +122,17 @@
 #'
 #' @param fit A `ferx_fit` object produced by [ferx_fit()] or
 #'   [ferx_load_fit()].
-#' @param covariance_method Covariance estimator: `"r"` (inverse Hessian, the
-#'   default, NONMEM `MATRIX=R`), `"s"` (inverse cross-product,
-#'   `MATRIX=S`), or `"rsr"` (the Huber-White sandwich, `MATRIX=RSR`).
-#'   `"hessian"` / `"cross_product"` / `"sandwich"` are accepted as aliases.
+#' @param covariance_method Covariance estimator. `NULL` (the default) replays
+#'   the fit's own: `fit$call_settings$covariance_method`, else the model
+#'   file's `[fit_options]`, else the engine default `"r"`, asked for as the
+#'   fit asked for it. Otherwise `"r"` (inverse Hessian, NONMEM `MATRIX=R`),
+#'   `"s"` (inverse cross-product, `MATRIX=S`), or `"rsr"` (the Huber-White
+#'   sandwich, `MATRIX=RSR`), which overrides the fit's; `"hessian"` /
+#'   `"cross_product"` / `"sandwich"` are accepted as aliases. Passed
+#'   explicitly, `"r"` is held to even above the size at which the engine
+#'   routes a defaulted `"r"` on finite differences onto `"s"`, as
+#'   `ferx_fit(settings = list(covariance_method = "r"))` is. Before ferx-r
+#'   #659 the default was `"r"`.
 #' @param mu_referencing Use mu-referencing for the inner-loop warm restart.
 #'   `NULL` (the default) takes the fit's recorded value
 #'   (`fit$scoring_settings$mu_referencing`), else `TRUE`. `TRUE` or `FALSE`
@@ -126,7 +146,8 @@
 #'   Default `FALSE`.
 #'
 #' @return The input `fit`, with `cov_matrix`, `cor_matrix`, `se_theta`,
-#'   `se_omega`, `se_sigma`, `se_kappa`, `covariance_status`, `eigenvalues`,
+#'   `se_omega`, `se_sigma`, `se_kappa`, `covariance_status`,
+#'   `covariance_method` (the estimator this step ran), `eigenvalues`,
 #'   `condition_number`, `max_abs_correlation` (the largest absolute
 #'   off-diagonal parameter correlation, `NA` when the step produced no
 #'   matrix - the value [check_strictness()] gates on), the `se` column of
@@ -154,7 +175,7 @@
 #' @family fitting
 #' @export
 ferx_covariance <- function(fit,
-                            covariance_method = "r",
+                            covariance_method = NULL,
                             mu_referencing = NULL,
                             verbose = FALSE,
                             threads = NULL) {
@@ -165,16 +186,20 @@ ferx_covariance <- function(fit,
 
   # Normalise + validate covariance_method up-front so a typo surfaces as a
   # clean R condition rather than the engine's "unknown value" further in.
-  if (!is.character(covariance_method) || length(covariance_method) != 1L ||
-        is.na(covariance_method)) {
-    stop("`covariance_method` must be a single string (\"r\", \"s\", or \"rsr\").")
-  }
-  cov_method <- tolower(covariance_method)
-  valid_methods <- c("r", "hessian", "s", "cross_product", "rsr", "sandwich")
-  if (!cov_method %in% valid_methods) {
-    stop("`covariance_method` must be one of \"r\"/\"hessian\", ",
-         "\"s\"/\"cross_product\", or \"rsr\"/\"sandwich\" (got: ",
-         covariance_method, ").")
+  # NULL replays the fit's own (#659); the glue reads it as "".
+  cov_method <- ""
+  if (!is.null(covariance_method)) {
+    if (!is.character(covariance_method) || length(covariance_method) != 1L ||
+          is.na(covariance_method)) {
+      stop("`covariance_method` must be NULL or a single string (\"r\", \"s\", or \"rsr\").")
+    }
+    cov_method <- tolower(covariance_method)
+    valid_methods <- c("r", "hessian", "s", "cross_product", "rsr", "sandwich")
+    if (!cov_method %in% valid_methods) {
+      stop("`covariance_method` must be one of \"r\"/\"hessian\", ",
+           "\"s\"/\"cross_product\", or \"rsr\"/\"sandwich\" (got: ",
+           covariance_method, ").")
+    }
   }
   if (!is.null(mu_referencing) &&
         !(is.logical(mu_referencing) && length(mu_referencing) == 1L &&
@@ -354,7 +379,19 @@ ferx_covariance <- function(fit,
   # reading parameter names off the (already-finalised) fit object so a fit and
   # a run_covariance-refreshed fit carry identical shapes.
 
+  # Read before the merge below replaces it: the estimator the fit's own step
+  # ran, which a replay of the fit's method should reproduce (#659).
+  fit_method <- .fitrx_unwrap_opt_chr(fit$covariance_method)
   fit$covariance_status <- raw$covariance_status %||% "not_requested"
+  # The estimator this step ran, which labels the matrix it produced; NA with
+  # no matrix, as on ferx_fit() (ferx-core #1382).
+  fit$covariance_method <- .fitrx_unwrap_opt_chr(raw$covariance_method) %||% NA_character_
+  if (!nzchar(cov_method)) {
+    .ferx_cov_method_replay_check(
+      fit_method, fit$covariance_method, raw$covariance_method_requested,
+      raw$covariance_method_source, had_matrix = !is.null(fit$cov_matrix)
+    )
+  }
   # The width this step ran on, not the fit's: the field describes the step
   # that produced the fit's standard errors (#527).
   if (!is.null(raw$n_threads_used)) {
@@ -510,13 +547,53 @@ ferx_covariance <- function(fit,
 # the model file's `[fit_options]` values, which the glue reads from the
 # hash-checked model file itself: the precedence ferx_fit() gave them.
 # ferx-core's `run_covariance` takes these from its caller and does not record
-# them. Not `covariance_method`: that is ferx_covariance()'s own argument.
+# them. `covariance_method` too (#659); ferx_covariance()'s own argument, when
+# given, overrides it in the glue.
 .ferx_fit_cov_step_settings <- function(fit) {
   call_s <- fit$call_settings %||% list()
   picked <- list()
-  for (k in c("fd_hessian_step", "analytic_cov_hessian", "cov_inner_tol")) {
+  for (k in c("covariance_method", "fd_hessian_step", "analytic_cov_hessian",
+              "cov_inner_tol")) {
     v <- call_s[[k]]
     if (length(v) == 1L && !is.na(v)) picked[[k]] <- v
   }
   .ferx_settings_to_strings(picked)
+}
+
+# What a replay of the fit's own covariance method (no `covariance_method`
+# argument) says about it (#659). `fit_ran` is the estimator the fit's step
+# recorded (NULL when it records none), `ran` the one this replay ran (NA when
+# it produced no matrix), `requested` / `source` what the glue asked for and
+# from where. A fit that recorded its estimator and was replayed under another
+# is warned about: its standard errors were not reproduced; one whose replay
+# formed no matrix is not, as covariance_status already says so. A fit whose
+# step produced a matrix but recorded no estimator (made or saved before #659)
+# gets a note only when the replay fell back to the default: its call settings
+# travelled in the bundle and its model file is hash-checked, so a request read
+# from either is the fit's own.
+.ferx_cov_method_replay_check <- function(fit_ran, ran, requested, source,
+                                          had_matrix) {
+  from <- switch(source %||% "",
+    call_settings = "the fit's call settings",
+    model_file = "the model file's [fit_options]",
+    "the default, as neither the fit's call settings nor the model file set one"
+  )
+  if (!is.null(fit_ran)) {
+    if (!is.na(ran) && !identical(ran, fit_ran)) {
+      warning(
+        "ferx_covariance: the fit's covariance step ran covariance_method = \"",
+        fit_ran, "\", but this replay ran \"", ran, "\" (requested \"",
+        requested, "\", from ", from, "), so its standard errors are not the ",
+        "fit's. Pass covariance_method = \"", fit_ran, "\" to repeat the fit's.",
+        call. = FALSE
+      )
+    }
+  } else if (had_matrix && !(source %||% "") %in% c("call_settings", "model_file")) {
+    message(
+      "ferx_covariance: the fit does not record which covariance_method its ",
+      "step ran (a fit made or saved before ferx-r #659); replaying \"",
+      requested, "\", from ", from, "."
+    )
+  }
+  invisible(NULL)
 }

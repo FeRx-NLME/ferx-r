@@ -850,6 +850,10 @@
     result$iwres_lag1_r <- NA_real_
   }
 
+  # The estimator that produced the covariance matrix (ferx-core #1382, ferx-r
+  # #659): the glue sends "" when there is no matrix, NA here.
+  result$covariance_method <- .fitrx_unwrap_opt_chr(result$covariance_method) %||%
+    NA_character_
   # Normalize covariance_status: missing from older binaries ? "not_requested"
   if (is.null(result$covariance_status)) {
     result$covariance_status <- "not_requested"

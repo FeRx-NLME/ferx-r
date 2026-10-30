@@ -2741,9 +2741,20 @@ fn profiled_blocks_from_r(r: &List) -> std::result::Result<Vec<String>, String> 
     }
 }
 
+/// The `[fit_options]` token of the estimator a fit's covariance step ran
+/// (`r` / `s` / `rsr`), or "" when it produced no matrix (ferx-core #1382).
+fn covariance_method_label(m: Option<ferx_core::types::CovarianceMethod>) -> &'static str {
+    m.map_or("", |m| m.label())
+}
+
 /// The keys `ferx_covariance()` replays from the fit: the covariance step's
 /// own settings, which `run_covariance` takes from its caller.
-const COVARIANCE_STEP_KEYS: [&str; 3] = ["fd_hessian_step", "analytic_cov_hessian", "cov_inner_tol"];
+const COVARIANCE_STEP_KEYS: [&str; 4] = [
+    "covariance_method",
+    "fd_hessian_step",
+    "analytic_cov_hessian",
+    "cov_inner_tol",
+];
 
 /// Apply the fit's covariance-step settings to the replay's options, through
 /// the parser `ferx_fit()` uses, so a value is read exactly as the fit read it.
@@ -4903,6 +4914,9 @@ fn fit_result_to_list(
         max_unconverged_subjects = result.max_unconverged_subjects as i32,
         total_ebe_fallbacks = result.total_ebe_fallbacks as i32,
         covariance_status = covariance_status_str,
+        // ferx-core #1382: the estimator that produced the covariance matrix,
+        // "" when there is none (ferx-r #659).
+        covariance_method = covariance_method_label(result.covariance_method),
         shrinkage_eta = result.shrinkage_eta.clone(),
         shrinkage_eps = result.shrinkage_eps,
         wall_time_secs = result.wall_time_secs,
@@ -5795,6 +5809,55 @@ fn ferx_rust_sha256_raw(bytes: Raw) -> String {
     entry(move || Ok(ferx_core::io::hash::sha256_bytes(bytes.as_slice())))
 }
 
+/// Write the files `entries` (names relative to `dir`) into a new zip archive
+/// at `output`, deflate-compressed, each stored under its bare name.
+///
+/// `ferx_save_fit()` used `utils::zip()`, which shells out to the external
+/// `zip` program named by `R_ZIPCMD`. A Linux box without Info-ZIP installed
+/// leaves that empty, and the save - and with it `ferx_fit(output =)`, after
+/// the whole estimation - failed with "'zip' must be a non-empty character
+/// string" (ferx-r #662). The `zip` crate is already in the graph for
+/// ferx-core's own `.fitrx` writer, so the bundle is written here instead.
+///
+/// @param dir Directory holding the files.
+/// @param entries Character vector of file names within `dir`, in archive order.
+/// @param output Path of the archive to create (overwritten if present).
+/// @return `NULL`, invisibly.
+/// @export
+#[extendr]
+fn ferx_rust_zip_files(dir: &str, entries: Vec<String>, output: &str) {
+    entry(move || {
+        let dir = std::path::Path::new(dir);
+        let file = std::fs::File::create(output)
+            .map_err(|e| format!("cannot create {output}: {e}"))?;
+        let mut zw = zip::ZipWriter::new(std::io::BufWriter::new(file));
+        for name in &entries {
+            // Streamed, never read whole: predictions.csv, data.csv or a
+            // SIR-heavy fit.json can run to hundreds of MB, and the save
+            // happens inside an R process that has just held the fit.
+            let mut src = std::fs::File::open(dir.join(name))
+                .map_err(|e| format!("cannot read {name}: {e}"))?;
+            let size = src
+                .metadata()
+                .map_err(|e| format!("cannot read {name}: {e}"))?
+                .len();
+            let opts = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated)
+                .unix_permissions(0o644)
+                // ZIP64 headers only for an entry past the 4 GiB limit, so
+                // ordinary bundles stay plain zip for every reader.
+                .large_file(size >= u64::from(u32::MAX));
+            zw.start_file(name.as_str(), opts)
+                .map_err(|e| format!("cannot add {name} to {output}: {e}"))?;
+            std::io::copy(&mut src, &mut zw)
+                .map_err(|e| format!("cannot write {name} to {output}: {e}"))?;
+        }
+        zw.finish()
+            .map_err(|e| format!("cannot finish {output}: {e}"))?;
+        Ok(())
+    })
+}
+
 /// The engine's display label for each `method` token, in order (ferx-r #506):
 /// `"vi"` -> `"VI"`, `"importance_sampling"` -> `"IMP"`. Each token is read by
 /// ferx-core's `parse_method_token`, the parser a `[fit_options]` `method =`
@@ -6604,7 +6667,8 @@ fn ferx_rust_classify_warnings(messages: Vec<String>) -> List {
 ///   * `model` (chr) — model file stem
 ///   * `data` (chr) — data path used, or `""`
 ///   * `severity` / `code` / `message` / `block` / `line` / `suggestion`
-///     — parallel vectors, one entry per diagnostic
+///     — parallel vectors, one entry per diagnostic; `severity` is
+///     `"error"`, `"warning"` or `"info"`
 /// @export
 #[extendr]
 fn ferx_rust_validate_model(model_path: &str, data_path: &str) -> List {
@@ -6620,11 +6684,12 @@ fn ferx_rust_validate_model(model_path: &str, data_path: &str) -> List {
         let mut line:     Vec<i32>    = Vec::with_capacity(n);
         let mut suggestion: Vec<String> = Vec::with_capacity(n);
         for d in &report.diagnostics {
-            severity.push(match d.severity {
-                ferx_core::Severity::Error => "error".to_string(),
-                ferx_core::Severity::Warning => "warning".to_string(),
-                ferx_core::Severity::Info => "info".to_string(),
-            });
+            // Lowercased variant name, as `ferx_rust_classify_warnings()` does,
+            // rather than an exhaustive match: ferx-core #2427 added
+            // `Severity::Info`, and a match over the variants this crate knew
+            // stopped compiling against it (ferx-r #660). The R side reads
+            // "error", "warning" and "info".
+            severity.push(format!("{:?}", d.severity).to_lowercase());
             code.push(d.code.clone());
             message.push(d.message.clone());
             block.push(d.block.clone().unwrap_or_default());
@@ -8470,10 +8535,13 @@ fn ferx_rust_sir(
 /// @param theta_fixed `fit$theta_fixed`: the thetas the fit held, the ones
 ///   the engine froze for having no effect on the objective included; empty
 ///   for a fit without the field (ferx-r #613).
-/// @param covariance_method Covariance estimator: "r"/"hessian", "s"/"cross_product", or "rsr"/"sandwich".
+/// @param covariance_method Covariance estimator: "r"/"hessian", "s"/"cross_product", or "rsr"/"sandwich";
+///   "" replays the fit's own (the model file's `[fit_options]`, then the call's
+///   `step_settings`), with its explicit-or-defaulted flag (ferx-r #659).
 /// @param step_settings_keys,step_settings_values The covariance step's own
 ///   settings the fit's call gave it, as `settings` key / value strings:
-///   only `fd_hessian_step`, `analytic_cov_hessian` and `cov_inner_tol`.
+///   only `covariance_method`, `fd_hessian_step`, `analytic_cov_hessian` and
+///   `cov_inner_tol`.
 ///   `run_covariance` takes these from its caller, not from the fit, so the
 ///   replay starts from the model file's `[fit_options]` values and applies
 ///   these over them, as the fit did. Applied through ferx-core's
@@ -8484,7 +8552,9 @@ fn ferx_rust_sir(
 ///   unless told otherwise (ferx-r #527).
 /// @param verbose When TRUE, the engine prints progress to stderr.
 /// @return Named list with `cov_matrix`, `cov_matrix_dim`, `se_theta`, `se_omega`,
-///   `se_sigma`, `se_kappa`, `covariance_status`, `cov_eigenvalues`,
+///   `se_sigma`, `se_kappa`, `covariance_status`, `covariance_method` (the
+///   estimator that ran, "" without a matrix), `covariance_method_requested`,
+///   `covariance_method_source`, `cov_eigenvalues`,
 ///   `cov_condition_number`, `theta_levels` (NA intervals), `n_threads_used`
 ///   (the width this run's pool had), `covariance_wall_time_secs` (this
 ///   step's time), and `warnings`.
@@ -8542,16 +8612,6 @@ fn ferx_rust_covariance(
             .map_err(|e| e.refusal(""))?;
         let model = &parsed.model;
 
-        let covariance_method_enum = match covariance_method.to_lowercase().as_str() {
-            "r" | "hessian" => CovarianceMethod::Hessian,
-            "s" | "cross_product" => CovarianceMethod::CrossProduct,
-            "rsr" | "sandwich" => CovarianceMethod::Sandwich,
-            other => return Err(format!(
-                "ferx_covariance: unknown covariance_method `{}` — expected r/s/rsr",
-                other
-            )),
-        };
-
         let theta_fixed = theta_fixed_from_r(&theta_fixed);
         let inputs = FitSkeletonInputs {
             model_path,
@@ -8594,7 +8654,6 @@ fn ferx_rust_covariance(
         // run_covariance_step is ignored by run_covariance (calling it *is* the
         // request); set it anyway for clarity.
         opts.run_covariance_step = true;
-        opts.covariance_method = covariance_method_enum;
         opts.interaction = interaction;
         opts.verbose = verbose;
         // The step's own settings, which `run_covariance` takes from its caller:
@@ -8602,11 +8661,32 @@ fn ferx_rust_covariance(
         // read, so a bundle ferx-core wrote gets them too), then the call's
         // overrides, the precedence `ferx_rust_fit` gives them.
         let file = &parsed.fit_options;
+        // The estimator with its `_set` flag: a defaulted `r` is routed onto
+        // the cross-product above `COV_HESSIAN_MAX_DIM` free parameters on the
+        // FD stencil, an explicit one is not, so the replay asks exactly as the
+        // fit did (ferx-r #659).
+        opts.covariance_method = file.covariance_method;
+        opts.covariance_method_set = file.covariance_method_set;
         opts.fd_hessian_step = file.fd_hessian_step;
         opts.fd_hessian_step_set = file.fd_hessian_step_set;
         opts.analytic_cov_hessian = file.analytic_cov_hessian;
         opts.cov_inner_tol = file.cov_inner_tol;
+        let mut method_source = if file.covariance_method_set { "model_file" } else { "default" };
         apply_covariance_step_settings(&mut opts, &step_settings_keys, &step_settings_values)?;
+        if step_settings_keys.iter().any(|k| k == "covariance_method") {
+            method_source = "call_settings";
+        }
+        // `ferx_covariance(covariance_method =)` overrides the fit's; "" keeps it.
+        if !covariance_method.is_empty() {
+            ferx_core::parser::model_parser::apply_fit_option(
+                &mut opts,
+                "covariance_method",
+                covariance_method,
+            )
+            .map_err(|e| format!("ferx_covariance: {e}"))?;
+            method_source = "argument";
+        }
+        let method_requested = opts.covariance_method.label();
         let (step_threads, n_threads_used) = posthoc_step_threads(threads);
         opts.threads = step_threads;
 
@@ -8658,6 +8738,12 @@ fn ferx_rust_covariance(
             se_sigma = new_fit.se_sigma.clone().unwrap_or_default(),
             se_kappa = new_fit.se_kappa.clone().unwrap_or_default(),
             covariance_status = covariance_status_str,
+            // The estimator that ran ("" when the step produced no matrix), the
+            // one this replay asked for, and where that request came from:
+            // "argument", "call_settings", "model_file" or "default" (#659).
+            covariance_method = covariance_method_label(new_fit.covariance_method),
+            covariance_method_requested = method_requested,
+            covariance_method_source = method_source,
             covariance_wall_time_secs = new_fit.covariance_wall_time_secs,
             // Rebuilt by the step from the estimates and the box (ferx-core #2112).
             profiled_levels_at_bound =
@@ -13420,6 +13506,7 @@ extendr_module! {
     fn ferx_rust_cov_labels;
     fn ferx_rust_sha256_text;
     fn ferx_rust_sha256_raw;
+    fn ferx_rust_zip_files;
     fn ferx_rust_stage_data_probe;
     fn ferx_rust_method_labels;
     fn ferx_rust_method_token_labels;

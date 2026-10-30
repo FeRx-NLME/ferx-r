@@ -183,6 +183,12 @@ ferx_rust_sha256_raw <- function(bytes) {
 
 #' @title Internal Rust backend binding
 #' @keywords internal
+ferx_rust_zip_files <- function(dir, entries, output) {
+  invisible(.Call("wrap__ferx_rust_zip_files", dir, entries, output))
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
 ferx_rust_stage_data_probe <- function(bytes) {
   .Call("wrap__ferx_rust_stage_data_probe", bytes)
 }

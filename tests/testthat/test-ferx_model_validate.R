@@ -826,7 +826,45 @@ test_that("a model that does not parse is still labelled with call-time settings
   expect_identical(e$code, "E_UNKNOWN_BLOCK")
 })
 
-test_that("an info row is printed but does not make the result 'with warnings' (ferx-core #2427)", {
+test_that("an info diagnostic prints as info, not as a warning (#660)", {
+  # ferx-core #2427 added `Severity::Info` (W_LEVEL_SUMMARY is the first). The
+  # engine result is mocked so every mix of severities is covered; the test
+  # below checks the real engine's rows.
+  ex <- ferx_example("warfarin")
+  validate_with <- function(severity, code) {
+    n <- length(severity)
+    testthat::local_mocked_bindings(
+      ferx_rust_validate_model = function(model_path, data_path) {
+        list(ok = TRUE, model = "warfarin", data = "",
+             severity = severity, code = code,
+             message = paste("finding", code), block = rep("", n),
+             line = rep(0L, n), suggestion = rep("", n))
+      },
+      .package = "ferx"
+    )
+    out <- capture.output(res <- ferx_model_validate(ex$model))
+    list(out = out, res = res)
+  }
+
+  v <- validate_with("info", "W_LEVEL_SUMMARY")
+  expect_true(v$res$ok)
+  expect_identical(v$res$diagnostics$severity, "info")
+  expect_true(any(grepl("Result: VALID (with notes)", v$out, fixed = TRUE)))
+  expect_false(any(grepl("with warnings", v$out, fixed = TRUE)))
+  expect_true(any(grepl("* info W_LEVEL_SUMMARY", v$out, fixed = TRUE)))
+  expect_false(any(grepl("* warning W_LEVEL_SUMMARY", v$out, fixed = TRUE)))
+
+  v <- validate_with(c("warning", "info"), c("W_SOMETHING", "W_LEVEL_SUMMARY"))
+  expect_true(any(grepl("Result: VALID (with warnings and notes)", v$out,
+                        fixed = TRUE)))
+  expect_true(any(grepl("* warning W_SOMETHING", v$out, fixed = TRUE)))
+  expect_true(any(grepl("* info W_LEVEL_SUMMARY", v$out, fixed = TRUE)))
+
+  v <- validate_with("warning", "W_SOMETHING")
+  expect_true(any(grepl("Result: VALID (with warnings)", v$out, fixed = TRUE)))
+})
+
+test_that("the engine's W_LEVEL_SUMMARY rows arrive as info notes (ferx-core #2427)", {
   ex <- ferx_example("nested_levels")
   out <- capture.output(v <- ferx_model_validate(ex$model, data = ex$data))
   info <- v$diagnostics[v$diagnostics$code == "W_LEVEL_SUMMARY", , drop = FALSE]
@@ -834,6 +872,6 @@ test_that("an info row is printed but does not make the result 'with warnings' (
   expect_true(all(info$severity == "info"))
   expect_true(v$ok)
   expect_false(any(v$diagnostics$severity == "warning"))
-  expect_true("Result: VALID" %in% out)
+  expect_true("Result: VALID (with notes)" %in% out)
   expect_true(any(grepl("^  \\* info W_LEVEL_SUMMARY", out)))
 })

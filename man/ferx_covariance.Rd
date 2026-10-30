@@ -6,7 +6,7 @@
 \usage{
 ferx_covariance(
   fit,
-  covariance_method = "r",
+  covariance_method = NULL,
   mu_referencing = NULL,
   verbose = FALSE,
   threads = NULL
@@ -16,10 +16,17 @@ ferx_covariance(
 \item{fit}{A \code{ferx_fit} object produced by \code{\link[=ferx_fit]{ferx_fit()}} or
 \code{\link[=ferx_load_fit]{ferx_load_fit()}}.}
 
-\item{covariance_method}{Covariance estimator: \code{"r"} (inverse Hessian, the
-default, NONMEM \code{MATRIX=R}), \code{"s"} (inverse cross-product,
-\code{MATRIX=S}), or \code{"rsr"} (the Huber-White sandwich, \code{MATRIX=RSR}).
-\code{"hessian"} / \code{"cross_product"} / \code{"sandwich"} are accepted as aliases.}
+\item{covariance_method}{Covariance estimator. \code{NULL} (the default) replays
+the fit's own: \code{fit$call_settings$covariance_method}, else the model
+file's \verb{[fit_options]}, else the engine default \code{"r"}, asked for as the
+fit asked for it. Otherwise \code{"r"} (inverse Hessian, NONMEM \code{MATRIX=R}),
+\code{"s"} (inverse cross-product, \code{MATRIX=S}), or \code{"rsr"} (the Huber-White
+sandwich, \code{MATRIX=RSR}), which overrides the fit's; \code{"hessian"} /
+\code{"cross_product"} / \code{"sandwich"} are accepted as aliases. Passed
+explicitly, \code{"r"} is held to even above the size at which the engine
+routes a defaulted \code{"r"} on finite differences onto \code{"s"}, as
+\code{ferx_fit(settings = list(covariance_method = "r"))} is. Before ferx-r
+#659 the default was \code{"r"}.}
 
 \item{mu_referencing}{Use mu-referencing for the inner-loop warm restart.
 \code{NULL} (the default) takes the fit's recorded value
@@ -37,7 +44,8 @@ the result, only the resources the step uses. The returned fit's
 }
 \value{
 The input \code{fit}, with \code{cov_matrix}, \code{cor_matrix}, \code{se_theta},
-\code{se_omega}, \code{se_sigma}, \code{se_kappa}, \code{covariance_status}, \code{eigenvalues},
+\code{se_omega}, \code{se_sigma}, \code{se_kappa}, \code{covariance_status},
+\code{covariance_method} (the estimator this step ran), \code{eigenvalues},
 \code{condition_number}, \code{max_abs_correlation} (the largest absolute
 off-diagonal parameter correlation, \code{NA} when the step produced no
 matrix - the value \code{\link[=check_strictness]{check_strictness()}} gates on), the \code{se} column of
@@ -87,9 +95,9 @@ recorded as \code{fit$scoring_settings} (the stage that produced the estimates:
 \code{inner_maxiter}, \code{inner_tol}, \code{inner_optimizer}, \code{mu_referencing},
 \code{ode_reltol}, ...), and starts from the optimizer's exact estimate
 \code{fit$packed_estimate}. With both, \code{ferx_covariance(fit)} is \code{identical()} to
-the covariance \code{ferx_fit(..., covariance = TRUE)} reports, unless
-\code{covariance_method} differs from the fit's (it is a setting of the step, not
-of the fit, and is not recorded). That holds on every estimation method with
+the covariance \code{ferx_fit(..., covariance = TRUE)} reports, unless a
+\code{covariance_method} other than the fit's is passed. That holds on every
+estimation method with
 an in-fit step, with or without \code{kappa} (IOV): the step is taken for the
 fit's own method (\code{fit$method}), and Gauss-Newton, SAEM, importance sampling
 and VI start from the EBEs the fit reports - \code{fit$ebe_etas} and, under IOV,
@@ -99,8 +107,9 @@ importance-sampling or VI estimate, an R matrix that needs an eigenvalue
 floor is replaced by S^-1 (warning \code{W_COV_NON_STATIONARY_ESTIMATE}), as the
 in-fit step does.
 
-The step's own settings are the fit's too: \code{fd_hessian_step},
-\code{analytic_cov_hessian} and \code{cov_inner_tol}, as the fit was given them -
+The step's own settings are the fit's too: \code{covariance_method} (unless
+passed), \code{fd_hessian_step}, \code{analytic_cov_hessian} and \code{cov_inner_tol}, as
+the fit was given them -
 the model file's \verb{[fit_options]}, overridden by \code{ferx_fit()}'s argument or
 \code{settings} (recorded in \code{fit$call_settings}). The engine does not record
 them, so a fit made with \code{fd_hessian_step = 0.1} used to be replayed at the
@@ -109,6 +118,18 @@ profiled default \code{3e-3} (ferx-core #2414). The model file's values are read
 from the model file itself, so a bundle written by ferx-core, which carries
 no \code{fit$call_settings}, keeps them; only call-time overrides need the R
 record.
+
+Until ferx-r #659 \code{covariance_method} defaulted to \code{"r"} whatever the fit
+ran, so a fit made with \code{settings = list(covariance_method = "rsr")}, or with
+\code{covariance_method = rsr} in \verb{[fit_options]}, was replayed as \code{"r"} unless
+the caller repeated it. The estimator a step ran is recorded as
+\code{fit$covariance_method} (\code{NA} when it produced no matrix), and is kept by
+\code{\link[=ferx_save_fit]{ferx_save_fit()}} / \code{\link[=ferx_load_fit]{ferx_load_fit()}}. A replay of the fit's own method that
+runs another estimator than the recorded one warns, naming the method to
+pass. A fit whose step produced a matrix but recorded no estimator, such as
+a bundle saved before #659, is replayed from its call settings, then the
+model file's \verb{[fit_options]}, then \code{"r"}; when it falls back to \code{"r"}
+because neither records a method, a message says so.
 
 A fit loaded with \code{\link[=ferx_load_fit]{ferx_load_fit()}} keeps both, so its result is
 \code{identical()} to the in-fit one too. A fit loaded from a bundle saved before

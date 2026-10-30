@@ -1976,3 +1976,35 @@ test_that("ferx_save_fit() warns when the model file changed since the fit (#531
   nohash$model_hash <- NA_character_
   expect_no_warning(ferx_save_fit(nohash, path), class = "ferx_model_edited_warning")
 })
+
+test_that("ferx_save_fit needs no external zip program (#662)", {
+  # A Linux box without Info-ZIP leaves R_ZIPCMD empty, and utils::zip()
+  # refused with "'zip' must be a non-empty character string" - after the
+  # whole fit, when it came through ferx_fit(output =). The bundle is now
+  # written by the Rust glue, so an empty R_ZIPCMD changes nothing.
+  withr::local_envvar(R_ZIPCMD = "")
+  fit <- warfarin_fit_cov()
+  path <- withr::local_tempfile(fileext = ".fitrx")
+  ferx_save_fit(fit, path, include_data = TRUE)
+
+  names <- utils::unzip(path, list = TRUE)$Name
+  staging <- withr::local_tempdir()
+  utils::unzip(path, files = "manifest.json", exdir = staging)
+  manifest <- jsonlite::read_json(file.path(staging, "manifest.json"),
+                                  simplifyVector = TRUE)
+  expect_setequal(names, manifest$entries)
+  expect_false(any(grepl("/", names, fixed = TRUE)))
+
+  loaded <- ferx_load_fit(path)
+  expect_equal(loaded$ofv, fit$ofv)
+  expect_equal(loaded$theta, fit$theta)
+  # The engine's own reader opens it too, not just R's.
+  core_path <- withr::local_tempfile(fileext = ".fitrx")
+  expect_no_error(ferx:::ferx_rust_fitrx_engine_resave(path, core_path))
+
+  # A bare path still lands at <path>.fitrx, not at Info-ZIP's <path>.zip.
+  bare <- file.path(withr::local_tempdir(), "run1")
+  ferx_save_fit(fit, bare)
+  expect_true(file.exists(paste0(bare, ".fitrx")))
+  expect_false(file.exists(paste0(bare, ".zip")))
+})

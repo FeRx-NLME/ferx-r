@@ -28,12 +28,10 @@ never knew, one it has retired, or one behind a disabled feature),
 \code{data}, and a \code{diagnostics} data frame with one row per finding
 (\code{severity}, \code{code}, \code{message}, \code{block}, \code{line},
 \code{suggestion}). The function always prints a report to the console.
-\code{severity} is \code{"error"}, \code{"warning"} or \code{"info"}; an
-\code{"info"} row reports a fact about the model rather than a finding
-(\code{W_LEVEL_SUMMARY}'s per-level counts) and does not make the result
-"with warnings". Codes are stable identifiers (\code{E_*} for errors,
-\code{W_*} for warnings and informational rows) suitable for programmatic
-handling - the registry lives in
+\code{severity} is \code{"error"}, \code{"warning"} or \code{"info"};
+an \code{info} row is a note and does not count as a warning.
+Codes are stable identifiers (\code{E_*} for errors, \code{W_*} for
+warnings and notes) suitable for programmatic handling - the registry lives in
 ferx-core's \code{docs/src/file-formats/check-report.md}. A missing file
 or non-\code{.ferx} extension raises an error rather than returning a
 failed diagnostic.

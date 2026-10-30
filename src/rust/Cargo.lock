@@ -298,6 +298,7 @@ dependencies = [
  "ferx-tools",
  "nalgebra",
  "serde_json",
+ "zip",
 ]
 
 [[package]]

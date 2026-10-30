@@ -240,35 +240,26 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
     null = "null"
   )
 
-  # Zip everything into `output`. utils::zip needs relative paths from cwd.
+  # Zip everything into `output`.
   out_abs <- normalizePath(dirname(output), mustWork = FALSE)
   if (!dir.exists(out_abs)) dir.create(out_abs, recursive = TRUE)
   out_abs <- file.path(out_abs, basename(output))
 
   files_to_zip <- c("manifest.json", entries)
-  # Info-ZIP appends `.zip` when the archive name has no extension, so a
-  # bare `output` like "results/run1" would silently land at "results/run1.zip"
-  # and `ferx_load_fit("results/run1")` would then fail with "File does not
-  # exist". Zip into a temp `.zip` (extension present -> no rename by zip) and
-  # move it onto the exact requested path afterwards.
+  # Written by the Rust glue, not `utils::zip()`: that shells out to the
+  # external `zip` program (`R_ZIPCMD`), which a Linux box without Info-ZIP
+  # does not have, and the save then failed after the whole fit (#662).
+  # Archive into a temp file and copy it onto the exact requested path, so a
+  # failed write never leaves a truncated bundle at `output`.
   zip_tmp <- tempfile("fitrx_zip_", fileext = ".zip")
-  old_wd <- getwd()
-  setwd(staging)
-  zip_status <- tryCatch(
-    utils::zip(zip_tmp, files_to_zip, flags = "-q9X"),
-    finally = setwd(old_wd)
-  )
-  if (!is.null(zip_status) && is.numeric(zip_status) && zip_status != 0L) {
-    stop(sprintf("zip command failed with status %d while writing %s", zip_status, output))
-  }
+  on.exit(unlink(zip_tmp), add = TRUE)
+  ferx_rust_zip_files(staging, files_to_zip, zip_tmp)
   if (!file.exists(zip_tmp)) {
-    stop(sprintf("zip command did not produce an archive while writing %s", output))
+    stop(sprintf("ferx_save_fit(): no archive was produced while writing %s", output))
   }
   if (!file.copy(zip_tmp, out_abs, overwrite = TRUE)) {
-    unlink(zip_tmp)
     stop(sprintf("failed to move zip archive into place at %s", out_abs))
   }
-  unlink(zip_tmp)
 
   invisible(fit)
 }
@@ -544,6 +535,9 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
     gradient_method_outer = as.character(fit$gradient_method_outer %||% ""),
     nlopt_missing_algorithms = as.character(fit$nlopt_missing_algorithms %||% character()),
     covariance_status = .fitrx_covariance_status_to_token(fit$covariance_status),
+    # ferx-core #1382's own key: the estimator that produced the matrix, absent
+    # when there is none (#659).
+    covariance_method = .fitrx_opt_chr(fit$covariance_method),
     covariance_n_evals_estimated = .fitrx_opt_num(fit$covariance_n_evals_estimated),
     trace_path = .fitrx_opt_chr(fit$trace_path),
     ebe_convergence_warnings = as.integer(fit$ebe_convergence_warnings %||% 0L),
