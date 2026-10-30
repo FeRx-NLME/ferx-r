@@ -97,6 +97,13 @@ hf_msg <- function(expr) {
   }, error = function(e) conditionMessage(e))
 }
 
+hf_error <- function(expr) {
+  tryCatch({
+    expr
+    NULL
+  }, error = function(e) e)
+}
+
 hf_calls <- list(
   ferx_sir = function(fit) {
     ferx_sir(fit, sir_samples = 20L, sir_resamples = 10L, sir_seed = 1L)
@@ -110,7 +117,8 @@ test_that("an edited model file is refused as edited, not as a fit lacking bindi
     hf_edit(h$model, hf_edits[[edit]]$edit)
     for (entry in names(hf_calls)) {
       info <- paste(edit, entry)
-      msg <- hf_msg(hf_calls[[entry]](h$fit))
+      e <- hf_error(hf_calls[[entry]](h$fit))
+      msg <- conditionMessage(e)
       # Core's text, under this entry's name, naming the file.
       expect_match(msg, paste0("^", entry, ": model hash mismatch for "),
                    info = info)
@@ -119,10 +127,10 @@ test_that("an edited model file is refused as edited, not as a fit lacking bindi
                    fixed = TRUE, info = info)
       # Not either from-fit refusal the edit used to reach.
       expect_no_match(msg, "carries no", fixed = TRUE, info = info)
-      # Core gives the stale-source refusal no diagnostic code (ferx-core
-      # #1746), and R does not borrow one. A borrowed code ends the first
-      # line, with a `hint:` line after it when it has a suggestion (#504).
-      expect_no_match(msg, "\\[E_[A-Z_]+\\](\n|$)", info = info)
+      # Core codes the stale-source refusal (ferx-core #2027, #2451) as it
+      # codes an edited data file, and the glue hands that code to R.
+      expect_s3_class(e, "ferx_engine_error")
+      expect_identical(e$code, "E_FIT_INPUT_CHANGED", info = info)
     }
   }
 })

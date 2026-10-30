@@ -173,6 +173,8 @@ test_that("ferx_calc_npde refuses a legacy fit whose model file was edited (#526
   msg <- conditionMessage(e)
   expect_match(msg, "ferx_calc_npde: model hash mismatch", fixed = TRUE)
   expect_no_match(msg, "predates the record", fixed = TRUE)
+  # Coded since ferx-core #2027 (#2451), the same code as an edited data file.
+  expect_identical(e$code, "E_FIT_INPUT_CHANGED")
 })
 
 test_that("ferx_calc_npde on a `model =` override keeps that file's reader settings (#526)", {

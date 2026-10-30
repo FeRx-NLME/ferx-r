@@ -2378,7 +2378,10 @@ fn bind_design_from_fit(
 /// mismatch` text, the one `resolve_fit_inputs` raises - before the from-fit
 /// prologue can blame the fit for lacking bindings the edit asked for (ferx-r
 /// #492). The text and the parse it returns are that same read, which is what
-/// `bind_layout_from_fit` lays out.
+/// `bind_layout_from_fit` lays out. The refusal is coded (ferx-core #2027):
+/// an edited file reaches R as `E_FIT_INPUT_CHANGED`, as an edited data file
+/// does, and a file that no longer parses with its parse code. `entry` is the
+/// error's context, which its `Display` prints, so no prefix is added.
 fn read_fit_model(
     entry: &str,
     model_path: &str,
@@ -2389,6 +2392,7 @@ fn read_fit_model(
         (!model_hash.is_empty()).then_some(model_hash),
         entry,
     )
+    .map_err(|e| engine_refusal("", e))
 }
 
 /// Lay the glue's own parse out on a fit's data-derived bindings, for SIR and
