@@ -341,10 +341,9 @@ test_that("simulating a kappa model from a fit stripped of omega_iov is an error
 }
 
 test_that("ferx_simulate on a [mixture] model returns the drawn class as MIXNUM", {
-  # suppressWarnings: the engine calls MIXL "not referenced in any model
-  # expression" - its unused-parameter lint does not read [mixture]
-  # (ferx-core #2483). Drop this once the fix is in the pin.
-  sim <- suppressWarnings(ferx_simulate(.write_mixture_model(),
+  # The engine calls MIXL "not referenced" (ferx-core #2483); see
+  # helper-mixture-lint.R.
+  sim <- muffle_mixl_lint(ferx_simulate(.write_mixture_model(),
                                         test_path("fixtures", "mixture_iv.csv"),
                                         n_sim = 100L, seed = 7L))
 
