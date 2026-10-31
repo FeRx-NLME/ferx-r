@@ -333,9 +333,9 @@ test_that("ferx_covariance labels a block omega's rows column-major", {
 # their total length is checked against the matrix. So the tests below pin the
 # order of every segment, one model per neighbouring pair: a block omega ahead
 # of a diagonal kappa, a diagonal omega ahead of a block kappa, kappa ahead of
-# the mixture overrides, and the mixture overrides ahead of rho. (kappa next to
-# rho cannot be built: the engine rejects block_sigma with IOV,
-# E_BLOCK_SIGMA_IOV_UNSUPPORTED.)
+# the mixture overrides, the mixture overrides ahead of rho, and kappa ahead of
+# rho. (That last pair could not be built until ferx-core #979 accepted
+# block_sigma with IOV, which was refused as E_BLOCK_SIGMA_IOV_UNSUPPORTED.)
 #
 # The two IOV variants are checked at both call sites, ferx_fit()'s covariance
 # step and ferx_covariance() on a fit that skipped it, one test per site so a
@@ -398,6 +398,23 @@ test_that("ferx_fit(): a block omega with a diagonal kappa labels kappa after si
 test_that("ferx_covariance(): a block omega with a diagonal kappa labels kappa after sigma", {
   fit <- iov_variant_fit(block_omega_iov, covariance = FALSE)
   expect_cov_labels(suppressWarnings(ferx_covariance(fit)), block_omega_iov_labels)
+})
+
+block_sigma_iov <- function(txt) {
+  txt <- sub("^\\s*sigma PROP_ERR ~ .*$",
+             "  block_sigma (PROP_ERR, ADD_ERR) = [0.01, 0.005, 0.10]", txt)
+  txt <- sub("DV ~ proportional(PROP_ERR)", "DV ~ combined(PROP_ERR, ADD_ERR)",
+             txt, fixed = TRUE)
+  stopifnot(sum(grepl("block_sigma", txt)) == 1L,
+            sum(grepl("combined(PROP_ERR, ADD_ERR)", txt, fixed = TRUE)) == 1L)
+  txt
+}
+
+test_that("ferx_fit(): kappa packs ahead of the block_sigma correlation (#979)", {
+  expect_cov_labels(iov_variant_fit(block_sigma_iov, covariance = TRUE), c(
+    "TVCL", "TVV", "TVKA", "ETA_CL", "ETA_V", "ETA_KA",
+    "PROP_ERR", "ADD_ERR", "KAPPA_CL", "ADD_ERR ~ PROP_ERR"
+  ))
 })
 
 test_that("ferx_fit(): a diagonal omega with a block kappa labels kappa column-major", {
