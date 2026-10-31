@@ -8,9 +8,12 @@ PKG_LIBS = -L$(LIBDIR) -lferx -lm -ldl -lpthread
 # NT syscalls directly (NtReadFile, NtWriteFile, RtlNtStatusToDosError) and
 # getrandom uses bcrypt; we have to name those import libs explicitly. The
 # extras (advapi32, userenv, ws2_32, kernel32, psapi) cover the rest of the
-# stdlib's surface so we don't have to iterate one symbol at a time.
+# stdlib's surface so we don't have to iterate one symbol at a time. shell32 and
+# user32 are the two libs mimalloc's C code (the global allocator, src/rust/src/lib.rs)
+# links on Windows beyond those: libmimalloc-sys's build.rs names psapi, shell32,
+# user32, advapi32 and bcrypt.
 ifeq ($(OS),Windows_NT)
-  PKG_LIBS += -lntdll -lbcrypt -ladvapi32 -luserenv -lws2_32 -lkernel32 -lpsapi
+  PKG_LIBS += -lntdll -lbcrypt -ladvapi32 -luserenv -lws2_32 -lkernel32 -lpsapi -lshell32 -luser32
 endif
 
 # ferx-core's gradients are pure stable Rust — the Enzyme autodiff path was
