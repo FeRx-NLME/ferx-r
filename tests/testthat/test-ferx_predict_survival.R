@@ -338,3 +338,105 @@ test_that("a clean ferx_predict_survival run carries an empty attribute (#433)",
   )
   expect_identical(attr(preds, "simulation_warnings", exact = TRUE), character(0))
 })
+
+# -- type = "individual": each subject's curve at its EBEs (ferx-core #1885) ---
+#
+# On the bundled exponential model the hazard is TVLAMBDA * exp(ETA_LAMBDA), so
+# a subject's individual cumulative hazard is the population one times
+# exp(eta_hat): an oracle that needs no second implementation of the curve.
+tte_exp_fit <- local({
+  fit <- NULL
+  function() {
+    if (is.null(fit)) {
+      ex <- ferx_example("tte_exponential")
+      fit <<- suppressWarnings(ferx_fit(ex$model, ex$data, method = "focei",
+                                        covariance = FALSE, verbose = FALSE))
+    }
+    fit
+  }
+})
+
+test_that("type = \"individual\" scales each subject's H(t) by exp(eta_hat)", {
+  ex <- ferx_example("tte_exponential")
+  fit <- tte_exp_fit()
+  times <- c(0, 5, 20)
+  pop <- ferx_predict_survival(ex$model, ex$data, times = times, fit = fit)
+  ind <- ferx_predict_survival(ex$model, ex$data, times = times, fit = fit,
+                               type = "individual")
+
+  expect_identical(names(ind), names(pop))
+  expect_identical(ind$ID, pop$ID)
+  expect_identical(ind$TIME, pop$TIME)
+  eta <- setNames(fit$ebe_etas$ETA_LAMBDA, as.character(fit$ebe_etas$ID))
+  expect_gt(stats::sd(eta), 0)
+  later <- ind$TIME > 0
+  expect_equal(ind$cum_hazard[later] / pop$cum_hazard[later],
+               unname(exp(eta[as.character(ind$ID[later])])), tolerance = 1e-10)
+  expect_equal(ind$survival, exp(-ind$cum_hazard), tolerance = 1e-12)
+  # Subjects now differ from one another; the population curve is shared.
+  at20 <- ind$TIME == 20
+  expect_gt(length(unique(round(ind$survival[at20], 12))), 1L)
+  expect_length(unique(round(pop$survival[pop$TIME == 20], 12)), 1L)
+})
+
+test_that("type defaults to \"population\" and needs a fit for \"individual\"", {
+  ex <- ferx_example("tte_exponential")
+  fit <- tte_exp_fit()
+  expect_identical(
+    ferx_predict_survival(ex$model, ex$data, times = c(0, 10), fit = fit),
+    ferx_predict_survival(ex$model, ex$data, times = c(0, 10), fit = fit,
+                          type = "population")
+  )
+  expect_error(
+    ferx_predict_survival(ex$model, ex$data, times = c(0, 10), type = "individual"),
+    "type = \"individual\" needs `fit`", fixed = TRUE
+  )
+  expect_error(
+    ferx_predict_survival(ex$model, ex$data, times = c(0, 10), fit = fit,
+                          type = "posthoc"),
+    "should be one of"
+  )
+})
+
+test_that("type = \"individual\" takes a subset of the fitted subjects, refuses a new one", {
+  ex <- ferx_example("tte_exponential")
+  fit <- tte_exp_fit()
+  rows <- utils::read.csv(ex$data)
+  ids <- unique(rows$ID)[1:3]
+  subset <- tempfile(fileext = ".csv")
+  utils::write.csv(rows[rows$ID %in% ids, ], subset, row.names = FALSE)
+  ind <- ferx_predict_survival(ex$model, subset, times = c(0, 10), fit = fit,
+                               type = "individual")
+  expect_setequal(unique(as.character(ind$ID)), as.character(ids))
+
+  extra <- rows[rows$ID == ids[1], ]
+  extra$ID <- 999999L
+  stranger <- tempfile(fileext = ".csv")
+  utils::write.csv(rbind(rows[rows$ID %in% ids, ], extra), stranger, row.names = FALSE)
+  e <- expect_error(
+    ferx_predict_survival(ex$model, stranger, times = c(0, 10), fit = fit,
+                          type = "individual")
+  )
+  expect_match(conditionMessage(e), "E_SUPPLIED_ETAS|999999")
+})
+
+test_that("type = \"individual\" on a fit without random effects is the population curve", {
+  model <- tempfile(fileext = ".ferx")
+  writeLines(c(
+    "[parameters]",
+    "  theta TVLAMBDA(0.1, 0.001, 10.0)",
+    "",
+    "[event_model]",
+    "  cmt    = 2",
+    "  family = exponential",
+    "  scale  = TVLAMBDA"
+  ), model)
+  data <- write_exp_tte_data()
+  fit <- suppressWarnings(ferx_fit(model, data, method = "foce",
+                                   covariance = FALSE, verbose = FALSE))
+  expect_null(fit$ebe_etas)
+  expect_identical(
+    ferx_predict_survival(model, data, times = c(0, 6), fit = fit, type = "individual"),
+    ferx_predict_survival(model, data, times = c(0, 6), fit = fit)
+  )
+})

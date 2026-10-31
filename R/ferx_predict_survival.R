@@ -4,8 +4,10 @@
 #' the survival function \eqn{S(t)}, cumulative hazard \eqn{H(t)} and hazard
 #' \eqn{h(t)} on a user-supplied time grid, for every subject and every TTE CMT.
 #' Population-level (\eqn{\eta = 0}) unless a \code{fit} is supplied, in which
-#' case its fitted \code{theta} is used. Each subject also carries its median and
-#' mean survival time (analytic where available).
+#' case its fitted \code{theta} is used. With \code{type = "individual"} each
+#' subject's curves are evaluated at its own empirical Bayes estimates from
+#' \code{fit} instead. Each subject also carries its median and mean survival
+#' time (analytic where available).
 #'
 #' For a model with multiple TTE CMTs (competing risks), each row also carries the
 #' cause-specific cumulative incidence \code{cif} (\eqn{F_k(t)}) and the all-cause
@@ -24,6 +26,19 @@
 #'   \eqn{H(t)}, \eqn{h(t)}.
 #' @param fit Optional \code{ferx_fit} result. When provided, predictions use
 #'   \code{fit$theta} instead of the model file's initial theta.
+#' @param type \code{"population"} (the default) evaluates every subject at
+#'   \eqn{\eta = 0}. \code{"individual"} evaluates each subject at its own
+#'   EBEs, \code{fit$ebe_etas} (requires \code{fit}): the individual curves
+#'   \eqn{\hat S_i(t)}, \eqn{\hat H_i(t)}, \eqn{\hat h_i(t)} and CIF. Every
+#'   subject in \code{data} needs a row in \code{fit$ebe_etas}, matched by
+#'   \code{ID}, so \code{data} is the fitted data or a subset of it. IOV
+#'   kappas are taken as 0, which is exact since no hazard can read one. The
+#'   EBEs are point estimates, so a subject with few observations (high
+#'   shrinkage) gets a curve close to the population one. A \code{[mixture]}
+#'   model is refused (\code{E_SUPPLIED_ETAS}). For an analytic hazard and a
+#'   single-event record without delayed entry, \code{cum_hazard} at the
+#'   record's time is the \eqn{H(T_i)} the fit's likelihood evaluated
+#'   (ferx-core #1885).
 #'
 #' @return A data.frame with columns: ID, CMT, TIME, survival, cum_hazard,
 #'   hazard, cif, survival_all, median_survival, mean_survival (one row per
@@ -52,11 +67,24 @@
 #'   times = seq(0, 24, by = 2)
 #' )
 #' head(preds)
+#'
+#' # Each subject's curve at its fitted EBEs.
+#' fit <- ferx_fit("tte_model.ferx", "tte_data.csv")
+#' indiv <- ferx_predict_survival(
+#'   "tte_model.ferx", times = seq(0, 24, by = 2),
+#'   fit = fit, type = "individual"
+#' )
 #' }
 #'
 #' @family simulation
 #' @export
-ferx_predict_survival <- function(model, data = NULL, times, fit = NULL) {
+ferx_predict_survival <- function(model, data = NULL, times, fit = NULL,
+                                  type = c("population", "individual")) {
+  type <- match.arg(type)
+  if (type == "individual" && is.null(fit)) {
+    stop("ferx_predict_survival: type = \"individual\" needs `fit`, whose ",
+         "EBEs (`fit$ebe_etas`) give each subject's etas.", call. = FALSE)
+  }
   if (is.null(data)) data <- .ferx_default_data(model, fit)
   if (is.null(data)) {
     stop(
@@ -88,6 +116,7 @@ ferx_predict_survival <- function(model, data = NULL, times, fit = NULL) {
   }
 
   fit_pieces <- validate_fit_for_params(fit)
+  etas <- .ferx_survival_etas(fit, type)
   # A note on how the fit's occasions were derived (#523) comes back on the
   # simulate paths' `simulation_warnings` channel.
   res <- .ferx_engine_call(
@@ -105,9 +134,32 @@ ferx_predict_survival <- function(model, data = NULL, times, fit = NULL) {
       residual_rho_pairs = fit_pieces$residual_rho_pairs,
       mixture_overrides = fit_pieces$mixture_overrides,
       fit_bindings = fit_pieces$fit_bindings,
-      iov_occasion = fit_pieces$iov_occasion
+      iov_occasion = fit_pieces$iov_occasion,
+      individual = type == "individual",
+      eta_ids = etas$ids,
+      eta_names = etas$names,
+      eta_flat = etas$flat
     ),
     model, data
   )
   .ferx_surface_sim_warnings(res, "ferx_predict_survival")
+}
+
+# Each fitted subject's EBEs for `type = "individual"` (ferx-core #1885): IDs
+# verbatim, eta names in the model's order (the engine checks them), values
+# row-major. A fit without random effects carries no `ebe_etas`; its subjects
+# then get empty rows, and the individual curves are the population ones.
+.ferx_survival_etas <- function(fit, type) {
+  if (type != "individual") {
+    return(list(ids = character(0), names = character(0), flat = numeric(0)))
+  }
+  ids <- .ferx_fit_subject_id_set(fit, "ferx_predict_survival")$ids
+  ebes <- fit$ebe_etas
+  if (is.null(ebes) || nrow(ebes) == 0L) {
+    return(list(ids = ids, names = character(0), flat = numeric(0)))
+  }
+  eta_cols <- setdiff(names(ebes), "ID")
+  eta_mat <- as.matrix(ebes[, eta_cols, drop = FALSE])
+  storage.mode(eta_mat) <- "double"
+  list(ids = ids, names = eta_cols, flat = as.numeric(t(eta_mat)))
 }

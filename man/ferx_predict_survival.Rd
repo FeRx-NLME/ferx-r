@@ -4,7 +4,13 @@
 \alias{ferx_predict_survival}
 \title{Survival-function predictions for time-to-event endpoints}
 \usage{
-ferx_predict_survival(model, data = NULL, times, fit = NULL)
+ferx_predict_survival(
+  model,
+  data = NULL,
+  times,
+  fit = NULL,
+  type = c("population", "individual")
+)
 }
 \arguments{
 \item{model}{Path to a .ferx model file containing at least one
@@ -20,6 +26,20 @@ be found), otherwise the model file's \code{[data]} block
 
 \item{fit}{Optional \code{ferx_fit} result. When provided, predictions use
 \code{fit$theta} instead of the model file's initial theta.}
+
+\item{type}{\code{"population"} (the default) evaluates every subject at
+\eqn{\eta = 0}. \code{"individual"} evaluates each subject at its own
+EBEs, \code{fit$ebe_etas} (requires \code{fit}): the individual curves
+\eqn{\hat S_i(t)}, \eqn{\hat H_i(t)}, \eqn{\hat h_i(t)} and CIF. Every
+subject in \code{data} needs a row in \code{fit$ebe_etas}, matched by
+\code{ID}, so \code{data} is the fitted data or a subset of it. IOV
+kappas are taken as 0, which is exact since no hazard can read one. The
+EBEs are point estimates, so a subject with few observations (high
+shrinkage) gets a curve close to the population one. A \code{[mixture]}
+model is refused (\code{E_SUPPLIED_ETAS}). For an analytic hazard and a
+single-event record without delayed entry, \code{cum_hazard} at the
+record's time is the \eqn{H(T_i)} the fit's likelihood evaluated
+(ferx-core #1885).}
 }
 \value{
 A data.frame with columns: ID, CMT, TIME, survival, cum_hazard,
@@ -43,8 +63,10 @@ For a model with one or more \code{[event_model]} (TTE) endpoints, evaluates
 the survival function \eqn{S(t)}, cumulative hazard \eqn{H(t)} and hazard
 \eqn{h(t)} on a user-supplied time grid, for every subject and every TTE CMT.
 Population-level (\eqn{\eta = 0}) unless a \code{fit} is supplied, in which
-case its fitted \code{theta} is used. Each subject also carries its median and
-mean survival time (analytic where available).
+case its fitted \code{theta} is used. With \code{type = "individual"} each
+subject's curves are evaluated at its own empirical Bayes estimates from
+\code{fit} instead. Each subject also carries its median and mean survival
+time (analytic where available).
 }
 \details{
 For a model with multiple TTE CMTs (competing risks), each row also carries the
@@ -100,6 +122,13 @@ preds <- ferx_predict_survival(
   times = seq(0, 24, by = 2)
 )
 head(preds)
+
+# Each subject's curve at its fitted EBEs.
+fit <- ferx_fit("tte_model.ferx", "tte_data.csv")
+indiv <- ferx_predict_survival(
+  "tte_model.ferx", times = seq(0, 24, by = 2),
+  fit = fit, type = "individual"
+)
 }
 
 }
