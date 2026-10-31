@@ -1852,6 +1852,13 @@ fn ferx_rust_predict_survival(model_path: &str, data_path: &str, times: Vec<f64>
 /// @param iov_occasion `fit$iov_occasion`, the IOV occasion rule the fit ran
 ///   with (ferx-r #523): the population's occasions are derived with it, as
 ///   the fit derived them. "" when the fit records none.
+/// @param individual `FALSE` for the population (eta = 0) curves; `TRUE` for
+///   each subject's curves at its row of `eta_ids` / `eta_names` / `eta_flat`
+///   (ferx-core #1885).
+/// @param eta_ids Subject IDs of the supplied etas, verbatim (`fit$ebe_etas$ID`);
+///   ignored unless `individual`.
+/// @param eta_names The eta names, in the model's order.
+/// @param eta_flat Row-major `length(eta_ids)` x `length(eta_names)` etas.
 /// @return Data frame with ID, CMT, TIME, survival, cum_hazard, hazard, cif,
 ///   survival_all, median_survival, mean_survival
 /// @export
@@ -1872,6 +1879,10 @@ fn ferx_rust_predict_survival_from_fit(
     mixture_overrides: Vec<f64>,
     fit_bindings: List,
     iov_occasion: &str,
+    individual: bool,
+    eta_ids: Vec<String>,
+    eta_names: Vec<String>,
+    eta_flat: Vec<f64>,
 ) -> Robj {
     entry(move || {
         let mut parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
@@ -1903,6 +1914,24 @@ fn ferx_rust_predict_survival_from_fit(
         let occasion_notes =
             derive_fit_occasions("ferx_predict_survival", &parsed, &mut population, iov_occasion)?;
 
+        // Each subject's own etas (ferx-core #1885), as the R side read them off
+        // `fit$ebe_etas`. The engine checks the names against the model's and
+        // refuses a population subject without a row, or a `[mixture]` model.
+        let supplied = if individual {
+            let n = eta_names.len();
+            let rows: Vec<Vec<f64>> = if n == 0 {
+                vec![Vec::new(); eta_ids.len()]
+            } else {
+                eta_flat.chunks(n).map(<[f64]>::to_vec).collect()
+            };
+            Some(
+                ferx_core::SuppliedEtas::from_table(eta_ids, eta_names, rows)
+                    .map_err(|e| engine_refusal("Error predicting: ", e))?,
+            )
+        } else {
+            None
+        };
+
         let params = match params_from_fit(
             &parsed.model,
             &theta,
@@ -1920,8 +1949,17 @@ fn ferx_rust_predict_survival_from_fit(
             Err(e) => return Err(e),
         };
 
-        let output = ferx_core::predict_survival_diag(&parsed.model, &population, &params, &times)
-            .map_err(|e| engine_refusal("Error predicting: ", e))?;
+        let output = match &supplied {
+            Some(etas) => ferx_core::predict_survival_at_etas_diag(
+                &parsed.model,
+                &population,
+                &params,
+                etas,
+                &times,
+            ),
+            None => ferx_core::predict_survival_diag(&parsed.model, &population, &params, &times),
+        }
+        .map_err(|e| engine_refusal("Error predicting: ", e))?;
         // The legacy-fit occasion note, if any, then core's non-fit bundle; see
         // `ferx_rust_predict_survival` (ferx-r #433).
         Ok(attach_sim_warnings(

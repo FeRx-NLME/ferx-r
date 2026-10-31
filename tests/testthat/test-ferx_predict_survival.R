@@ -338,3 +338,180 @@ test_that("a clean ferx_predict_survival run carries an empty attribute (#433)",
   )
   expect_identical(attr(preds, "simulation_warnings", exact = TRUE), character(0))
 })
+
+# -- type = "individual": each subject's curve at its EBEs (ferx-core #1885) ---
+#
+# On the bundled exponential model the hazard is TVLAMBDA * exp(ETA_LAMBDA), so
+# a subject's individual cumulative hazard is the population one times
+# exp(eta_hat): an oracle that needs no second implementation of the curve.
+# The median and mean survival time scale by exp(-eta_hat).
+#
+# The bundled model's parse findings (an unused `LAMBDA`) come back as a
+# warning on every predict call; `surv()` keeps them out of the test output.
+surv <- function(...) suppressWarnings(ferx_predict_survival(...))
+
+# Rows in a fixed order: on a multi-CMT model the engine's row order within a
+# subject can differ between calls (ferx-core #2531).
+by_row <- function(d) {
+  d <- d[order(as.character(d$ID), d$CMT, d$TIME), ]
+  rownames(d) <- NULL
+  d
+}
+
+tte_exp_fit <- local({
+  fit <- NULL
+  function() {
+    if (is.null(fit)) {
+      ex <- ferx_example("tte_exponential")
+      fit <<- suppressWarnings(ferx_fit(ex$model, ex$data, method = "focei",
+                                        covariance = FALSE, verbose = FALSE))
+    }
+    fit
+  }
+})
+
+test_that("type = \"individual\" scales each subject's curve by exp(eta_hat)", {
+  ex <- ferx_example("tte_exponential")
+  fit <- tte_exp_fit()
+  times <- c(0, 5, 20)
+  pop <- surv(ex$model, ex$data, times = times, fit = fit)
+  ind <- surv(ex$model, ex$data, times = times, fit = fit, type = "individual")
+
+  expect_identical(names(ind), names(pop))
+  expect_identical(ind$ID, pop$ID)
+  expect_identical(ind$TIME, pop$TIME)
+  eta <- setNames(fit$ebe_etas$ETA_LAMBDA, as.character(fit$ebe_etas$ID))
+  expect_gt(stats::sd(eta), 0)
+  e_row <- unname(exp(eta[as.character(ind$ID)]))
+  later <- ind$TIME > 0
+  expect_equal(ind$cum_hazard[later] / pop$cum_hazard[later], e_row[later],
+               tolerance = 1e-10)
+  # Both curves report hazard 0 at TIME = 0, so the ratios start at t > 0.
+  expect_equal(ind$hazard[later] / pop$hazard[later], e_row[later], tolerance = 1e-10)
+  expect_equal(ind$median_survival / pop$median_survival, 1 / e_row, tolerance = 1e-10)
+  expect_equal(ind$mean_survival / pop$mean_survival, 1 / e_row, tolerance = 1e-10)
+  expect_equal(ind$survival, exp(-ind$cum_hazard), tolerance = 1e-12)
+  # Subjects now differ from one another; the population curve is shared.
+  at20 <- ind$TIME == 20
+  expect_gt(length(unique(round(ind$survival[at20], 12))), 1L)
+  expect_length(unique(round(pop$survival[pop$TIME == 20], 12)), 1L)
+})
+
+# With one eta the row-major flatten of `fit$ebe_etas` is invisible; two etas,
+# one per cause, make a transposed or misnamed table read the wrong eta.
+test_that("type = \"individual\" reads each eta by name on a two-eta model", {
+  ex <- ferx_example("tte_competing_risks")
+  model <- tempfile(fileext = ".ferx")
+  writeLines(c(
+    "[parameters]",
+    "  theta TVLAMBDA_A(0.10, 0.001, 10.0)",
+    "  theta TVLAMBDA_B(0.06, 0.001, 10.0)",
+    "  omega ETA_A ~ 0.25",
+    "  omega ETA_B ~ 0.25",
+    "[event_model cause_a]",
+    "  cmt    = 2",
+    "  family = exponential",
+    "  scale  = TVLAMBDA_A * exp(ETA_A)",
+    "[event_model cause_b]",
+    "  cmt    = 3",
+    "  family = exponential",
+    "  scale  = TVLAMBDA_B * exp(ETA_B)"
+  ), model)
+  fit <- suppressWarnings(ferx_fit(model, ex$data, method = "focei",
+                                   covariance = FALSE, verbose = FALSE))
+  expect_identical(names(fit$ebe_etas), c("ID", "ETA_A", "ETA_B"))
+  times <- c(0, 5, 10)
+  pop <- by_row(surv(model, ex$data, times = times, fit = fit))
+  ind <- by_row(surv(model, ex$data, times = times, fit = fit, type = "individual"))
+  expect_identical(ind[c("ID", "CMT", "TIME")], pop[c("ID", "CMT", "TIME")])
+
+  etas <- fit$ebe_etas
+  row_of <- match(as.character(ind$ID), as.character(etas$ID))
+  eta <- ifelse(ind$CMT == 2, etas$ETA_A[row_of], etas$ETA_B[row_of])
+  expect_gt(stats::sd(etas$ETA_A - etas$ETA_B), 0)
+  later <- ind$TIME > 0
+  expect_equal(ind$cum_hazard[later] / pop$cum_hazard[later], exp(eta[later]),
+               tolerance = 1e-10)
+  expect_equal(ind$hazard[later] / pop$hazard[later], exp(eta[later]), tolerance = 1e-10)
+})
+
+test_that("type defaults to \"population\" and needs a fit for \"individual\"", {
+  ex <- ferx_example("tte_exponential")
+  fit <- tte_exp_fit()
+  expect_identical(
+    surv(ex$model, ex$data, times = c(0, 10), fit = fit),
+    surv(ex$model, ex$data, times = c(0, 10), fit = fit, type = "population")
+  )
+  expect_error(
+    ferx_predict_survival(ex$model, ex$data, times = c(0, 10), type = "individual"),
+    "type = \"individual\" needs `fit`", fixed = TRUE
+  )
+  expect_error(
+    ferx_predict_survival(ex$model, ex$data, times = c(0, 10), fit = fit,
+                          type = "posthoc"),
+    "should be one of"
+  )
+})
+
+test_that("type = \"individual\" takes a subset of the fitted subjects, refuses a new one", {
+  ex <- ferx_example("tte_exponential")
+  fit <- tte_exp_fit()
+  rows <- utils::read.csv(ex$data)
+  # Not the leading subjects: an eta matched by position instead of by ID
+  # would give these subjects the first rows' values.
+  all_ids <- unique(rows$ID)
+  ids <- rev(all_ids)[c(1, 3, 5)]
+  subset <- tempfile(fileext = ".csv")
+  utils::write.csv(rows[rows$ID %in% ids, ], subset, row.names = FALSE)
+  ind <- by_row(surv(ex$model, subset, times = c(0, 10), fit = fit,
+                     type = "individual"))
+  expect_setequal(unique(as.character(ind$ID)), as.character(ids))
+  full <- by_row(surv(ex$model, ex$data, times = c(0, 10), fit = fit,
+                      type = "individual"))
+  full <- by_row(full[as.character(full$ID) %in% as.character(ids), ])
+  expect_identical(ind, full)
+
+  extra <- rows[rows$ID == ids[1], ]
+  extra$ID <- 999999L
+  stranger <- tempfile(fileext = ".csv")
+  utils::write.csv(rbind(rows[rows$ID %in% ids, ], extra), stranger, row.names = FALSE)
+  e <- expect_error(
+    surv(ex$model, stranger, times = c(0, 10), fit = fit, type = "individual"),
+    "999999", fixed = TRUE
+  )
+  expect_s3_class(e, "ferx_engine_error")
+  expect_identical(e$code, "E_SUPPLIED_ETAS")
+})
+
+test_that("type = \"individual\" gives the same curves on a reloaded .fitrx fit", {
+  ex <- ferx_example("tte_exponential")
+  fit <- tte_exp_fit()
+  path <- tempfile(fileext = ".fitrx")
+  suppressWarnings(ferx_save_fit(fit, path))
+  loaded <- suppressWarnings(ferx_load_fit(path))
+  expect_identical(
+    surv(ex$model, ex$data, times = c(0, 10), fit = loaded, type = "individual"),
+    surv(ex$model, ex$data, times = c(0, 10), fit = fit, type = "individual")
+  )
+})
+
+test_that("type = \"individual\" on a fit without random effects is the population curve", {
+  model <- tempfile(fileext = ".ferx")
+  writeLines(c(
+    "[parameters]",
+    "  theta TVLAMBDA(0.1, 0.001, 10.0)",
+    "",
+    "[event_model]",
+    "  cmt    = 2",
+    "  family = exponential",
+    "  scale  = TVLAMBDA"
+  ), model)
+  data <- write_exp_tte_data()
+  fit <- suppressWarnings(ferx_fit(model, data, method = "foce",
+                                   covariance = FALSE, verbose = FALSE))
+  expect_null(fit$ebe_etas)
+  expect_identical(
+    surv(model, data, times = c(0, 6), fit = fit, type = "individual"),
+    surv(model, data, times = c(0, 6), fit = fit)
+  )
+})
