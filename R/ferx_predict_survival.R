@@ -28,14 +28,16 @@
 #'   \code{fit$theta} instead of the model file's initial theta.
 #' @param type \code{"population"} (the default) evaluates every subject at
 #'   \eqn{\eta = 0}. \code{"individual"} evaluates each subject at its own
-#'   EBEs, \code{fit$ebe_etas} (requires \code{fit}): the individual curves
+#'   etas in \code{fit$ebe_etas} (requires \code{fit}; EBEs, or posterior
+#'   means for a VI fit): the individual curves
 #'   \eqn{\hat S_i(t)}, \eqn{\hat H_i(t)}, \eqn{\hat h_i(t)} and CIF. Every
 #'   subject in \code{data} needs a row in \code{fit$ebe_etas}, matched by
 #'   \code{ID}, so \code{data} is the fitted data or a subset of it. IOV
 #'   kappas are taken as 0, which is exact since no hazard can read one. The
 #'   EBEs are point estimates, so a subject with few observations (high
 #'   shrinkage) gets a curve close to the population one. A \code{[mixture]}
-#'   model is refused (\code{E_SUPPLIED_ETAS}). For an analytic hazard and a
+#'   model is refused (\code{E_SUPPLIED_ETAS}). On a fit whose
+#'   \code{ebe_etas} are EBEs (modes), for an analytic hazard and a
 #'   single-event record without delayed entry, \code{cum_hazard} at the
 #'   record's time is the \eqn{H(T_i)} the fit's likelihood evaluated
 #'   (ferx-core #1885).
