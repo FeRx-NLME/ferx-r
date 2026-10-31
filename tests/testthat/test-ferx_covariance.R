@@ -337,7 +337,7 @@ test_that("ferx_covariance labels a block omega's rows column-major", {
 # rho. (That last pair could not be built until ferx-core #979 accepted
 # block_sigma with IOV, which was refused as E_BLOCK_SIGMA_IOV_UNSUPPORTED.)
 #
-# The two IOV variants are checked at both call sites, ferx_fit()'s covariance
+# The three IOV variants are checked at both call sites, ferx_fit()'s covariance
 # step and ferx_covariance() on a fit that skipped it, one test per site so a
 # site that stops producing a matrix shows as a skip of its own.
 
@@ -410,11 +410,19 @@ block_sigma_iov <- function(txt) {
   txt
 }
 
+block_sigma_iov_labels <- c(
+  "TVCL", "TVV", "TVKA", "ETA_CL", "ETA_V", "ETA_KA",
+  "PROP_ERR", "ADD_ERR", "KAPPA_CL", "ADD_ERR ~ PROP_ERR"
+)
+
 test_that("ferx_fit(): kappa packs ahead of the block_sigma correlation (#979)", {
-  expect_cov_labels(iov_variant_fit(block_sigma_iov, covariance = TRUE), c(
-    "TVCL", "TVV", "TVKA", "ETA_CL", "ETA_V", "ETA_KA",
-    "PROP_ERR", "ADD_ERR", "KAPPA_CL", "ADD_ERR ~ PROP_ERR"
-  ))
+  expect_cov_labels(iov_variant_fit(block_sigma_iov, covariance = TRUE),
+                    block_sigma_iov_labels)
+})
+
+test_that("ferx_covariance(): kappa packs ahead of the block_sigma correlation (#979)", {
+  fit <- iov_variant_fit(block_sigma_iov, covariance = FALSE)
+  expect_cov_labels(suppressWarnings(ferx_covariance(fit)), block_sigma_iov_labels)
 })
 
 test_that("ferx_fit(): a diagonal omega with a block kappa labels kappa column-major", {
