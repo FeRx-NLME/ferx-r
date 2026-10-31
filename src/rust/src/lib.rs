@@ -1,4 +1,16 @@
 use extendr_api::prelude::*;
+
+/// mimalloc rather than the system allocator for the package's Rust code: an estimation
+/// allocates many small, short-lived buffers per subject per evaluation. Measured with
+/// `ferx_fit(threads = 1)` on the bundled examples, 1.06–1.13× faster fits with identical
+/// results (FeRx-NLME/ferx-core#2549). The ferx CLI has used it since ferx-core #2435; the
+/// engine library leaves the choice to its embedder, which is this package.
+///
+/// It governs only allocations made by Rust. R's own objects are allocated by R, and every
+/// value handed to R is copied into an R allocation, so no pointer crosses allocators.
+/// `local_dynamic_tls` (Cargo.toml) is what lets it load inside R at all.
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 use ferx_core::cancel::CancelFlag;
 use ferx_core::parser::model_parser::{
     DataBindings, LevelBinding, LevelBindings, LevelContrast, ParseBindings,

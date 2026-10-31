@@ -44,6 +44,12 @@ extendr-macros = "=0.9.0"
 ferx-core = { git = "https://github.com/FeRx-NLME/ferx-core", branch = "main", default-features = false }
 ferx-tools = { git = "https://github.com/FeRx-NLME/ferx-core", branch = "main" }
 nalgebra = "0.35"
+# Global allocator for the package's Rust code (see `GLOBAL` in src/lib.rs). `v2`
+# pins mimalloc's C line explicitly, as the ferx CLI does (ferx-core #2435).
+# `local_dynamic_tls` is required here and not in the CLI: R loads this package with
+# `dlopen`, and mimalloc's default initial-exec TLS needs a static TLS block a
+# dynamically loaded object cannot get ("cannot allocate memory in static TLS block").
+mimalloc = { version = "0.1", features = ["v2", "local_dynamic_tls"] }
 serde_json = "1"
 # Writes the .fitrx bundle in `ferx_save_fit()` without an external `zip`
 # program (ferx-r #662). Same spec as ferx-core's, so one copy in the graph.
