@@ -9138,9 +9138,15 @@ fn bootstrap_draw_progress(callback: &Function, event: BootstrapEvent) {
             base_fit,
         } => ("started", reused, replicates, base_fit),
         BootstrapEvent::BaseFitDone => ("base_done", 0, 0, false),
-        BootstrapEvent::ReplicateDone { completed, total } => ("replicate", completed, total, false),
-        BootstrapEvent::DeltaOfvDone { completed, total } => ("dofv", completed, total, false),
+        BootstrapEvent::ReplicateDone {
+            completed, total, ..
+        } => ("replicate", completed, total, false),
+        BootstrapEvent::DeltaOfvDone {
+            completed, total, ..
+        } => ("dofv", completed, total, false),
         BootstrapEvent::Finished => ("finished", 0, 0, false),
+        // The enum is #[non_exhaustive] (ferx-core #2512).
+        _ => return,
     };
     // `Function::call` goes through `R_tryEval`, so an error in the handler
     // comes back as an `Err` rather than a longjmp out of a frame that still
@@ -10658,6 +10664,9 @@ fn ferx_rust_covsearch(
                     ),
                     None => eprintln!("Step {step} ({}): nothing accepted", phase.label()),
                 },
+                // Per-candidate events (ferx-core #2512) are not drawn here; the
+                // event enums are #[non_exhaustive].
+                _ => {}
             }
         };
 
@@ -11127,6 +11136,9 @@ fn ferx_rust_modelsearch(
                     }
                     None => eprintln!("Layer {layer}: no candidate passed the gate"),
                 },
+                // Per-candidate events (ferx-core #2512) are not drawn here; the
+                // event enums are #[non_exhaustive].
+                _ => {}
             }
         };
 
@@ -11448,6 +11460,9 @@ fn ferx_rust_ruvsearch(
                 E::Reverted { to, ofv } => {
                     eprintln!("Final comparison returned the {to} model (OFV {ofv:.3})")
                 }
+                // Per-candidate events (ferx-core #2512) are not drawn here; the
+                // event enums are #[non_exhaustive].
+                _ => {}
             }
         };
 
@@ -11903,6 +11918,9 @@ fn ferx_rust_iivsearch(
                 E::Reverted { criterion } => {
                     eprintln!("Final comparison returned the input model (criterion {criterion:.3})")
                 }
+                // Per-candidate events (ferx-core #2512) are not drawn here; the
+                // event enums are #[non_exhaustive].
+                _ => {}
             }
         };
 
@@ -12286,6 +12304,9 @@ fn ferx_rust_iovsearch(
                     best.0,
                     best.1
                 ),
+                // Per-candidate events (ferx-core #2512) are not drawn here; the
+                // event enums are #[non_exhaustive].
+                _ => {}
             }
         };
 
@@ -12876,6 +12897,9 @@ fn ferx_rust_amd(
                     if improved { "improved" } else { "kept" },
                     show(ofv)
                 ),
+                // Per-candidate events (ferx-core #2512) are not drawn here; the
+                // event enums are #[non_exhaustive].
+                _ => {}
             }
         };
 
@@ -13335,6 +13359,9 @@ fn ferx_rust_globalsearch(
                     Some((id, fitness)) => eprintln!("{step}: best {id} (fitness {fitness:.3})"),
                     None => eprintln!("{step}: no candidate passed the gate"),
                 },
+                // Per-candidate events (ferx-core #2512) are not drawn here; the
+                // event enums are #[non_exhaustive].
+                _ => {}
             }
         };
 
