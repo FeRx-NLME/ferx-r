@@ -850,7 +850,8 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
       !all(c("ID", .FITRX_SUBJECT_COLS) %in% names(summ))) {
     return(NULL)
   }
-  if (complete && (anyNA(summ$n_obs) || anyNA(summ$n_obs_discrete))) {
+  if (complete && (anyNA(summ$n_obs) || anyNA(summ$n_obs_discrete) ||
+                   anyNA(summ$n_obs_tte))) {
     return(NULL)
   }
   summ
@@ -868,13 +869,17 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   n_obs <- as.integer(n_obs)
   n_obs_discrete <- as.integer(n_obs_discrete)
   n_obs_tte <- as.integer(n_obs_tte)
+  # A scalar is the same count for every subject (0: no TTE rows); any other
+  # length is not one count per subject.
+  if (length(n_obs_tte) == 1L) n_obs_tte <- rep_len(n_obs_tte, length(n_obs))
   if (anyNA(n_obs) || anyNA(n_obs_discrete) || anyNA(n_obs_tte) ||
+      length(n_obs_tte) != length(n_obs) ||
       sum(n_obs) + sum(n_obs_discrete) + sum(n_obs_tte) != n_rows) {
     return(NULL)
   }
   pos <- seq_along(n_obs)
   list(gaussian = rep.int(pos, n_obs), discrete = rep.int(pos, n_obs_discrete),
-       tte = rep.int(pos, rep_len(n_obs_tte, length(pos))))
+       tte = rep.int(pos, n_obs_tte))
 }
 
 # The sdtab columns ferx-core creates for time-to-event rows only (#901).
@@ -928,14 +933,22 @@ ferx_save_fit <- function(fit, output, include_data = FALSE) {
   }
   # The time-to-event rows (ferx-core #901) come last; the bundle keeps none
   # of them, as ferx-core's own checkpoint keeps none (#911), and none of the
-  # columns only they fill.
-  n_tte <- if (is.null(rows)) 0L else length(rows$tte)
-  if (n_tte > 0L) {
-    .fitrx_warn_tte_rows_dropped(n_tte)
-    sdtab <- sdtab[seq_len(nrow(sdtab) - n_tte), , drop = FALSE]
-    rows$tte <- integer()
+  # columns only they fill. Without usable counts they are the rows with a
+  # COXSNELL value, in a table carrying all four TTE columns. A fit without
+  # TTE rows keeps every column, so an `[output]` column that happens to be
+  # called PIT survives.
+  tte_rows <- if (!is.null(rows)) {
+    nrow(sdtab) - rev(seq_along(rows$tte)) + 1L
+  } else if (all(.FITRX_TTE_COLS %in% names(sdtab))) {
+    which(!is.na(sdtab$COXSNELL))
+  } else {
+    integer()
   }
-  sdtab <- sdtab[setdiff(names(sdtab), .FITRX_TTE_COLS)]
+  if (length(tte_rows) > 0L) {
+    .fitrx_warn_tte_rows_dropped(length(tte_rows))
+    sdtab <- sdtab[-tte_rows, setdiff(names(sdtab), .FITRX_TTE_COLS), drop = FALSE]
+    if (!is.null(rows)) rows$tte <- integer()
+  }
   if (is.null(rows)) {
     # A fit from before fit$subject_summary: the run-length of the ID number
     # is all there is, right only when no two adjacent subjects share a
