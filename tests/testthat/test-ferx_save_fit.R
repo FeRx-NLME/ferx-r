@@ -1425,8 +1425,16 @@ test_that(".fitrx_sdtab_subject assigns rows from the per-subject counts (#540)"
   # a subject with no rows of a kind takes none.
   expect_identical(
     ferx:::.fitrx_sdtab_subject(c(2L, 0L, 1L), c(1L, 1L, 0L), 5L),
-    list(gaussian = c(1L, 1L, 3L), discrete = c(1L, 2L))
+    list(gaussian = c(1L, 1L, 3L), discrete = c(1L, 2L), tte = integer())
   )
+  # Time-to-event rows come last, subject by subject (ferx-core #901).
+  expect_identical(
+    ferx:::.fitrx_sdtab_subject(c(2L, 0L, 1L), c(1L, 1L, 0L), 7L, c(1L, 0L, 1L)),
+    list(gaussian = c(1L, 1L, 3L), discrete = c(1L, 2L), tte = c(1L, 3L))
+  )
+  expect_null(ferx:::.fitrx_sdtab_subject(c(2L, 0L, 1L), c(1L, 1L, 0L), 5L, c(1L, 0L, 1L)))
+  # Not one TTE count per subject: assigns nothing, even when the sum fits.
+  expect_null(ferx:::.fitrx_sdtab_subject(c(2L, 0L, 1L), c(1L, 1L, 0L), 7L, c(1L, 1L)))
   # Counts that do not add up to the rows, or are missing, assign nothing.
   expect_null(ferx:::.fitrx_sdtab_subject(c(2L, 1L), c(0L, 0L), 4L))
   expect_null(ferx:::.fitrx_sdtab_subject(c(2L, NA), c(0L, 0L), 2L))

@@ -36,7 +36,9 @@
 #' (\code{RATE}) base dose \emph{under} a time-varying covariate or IOV (these
 #' are supported on the constant-covariate path); and an \code{auc_target} metric
 #' combined with a time-varying covariate, a \code{TIME}-dependent PK parameter,
-#' IOV, or a reset.
+#' or IOV. An \code{auc_target} metric on a subject with resets is accepted: the
+#' window AUC is integrated on the run's own trajectory, so a dose or reset
+#' inside a decision window is integrated exactly.
 #'
 #' @param model Path to a .ferx model file containing an \code{[adaptive_dosing]}
 #'   block
@@ -133,9 +135,12 @@
 #'       decisions that recorded a signal), and PCT_TIME_IN_WINDOW - the fraction
 #'       of signal-bearing decisions whose observed value fell inside the model's
 #'       \code{[adaptive_dosing]} \code{target_window} (NA when no
-#'       \code{target_window} is declared), and ETA_SUPPLIED (\code{TRUE}
-#'       when the run used the subject's row of \code{etas}, \code{FALSE}
-#'       when its eta was drawn).}
+#'       \code{target_window} is declared), AUC_TARGET_ATTAINMENT - the
+#'       fraction of windows between consecutive realized decisions whose area
+#'       under the monitored signal fell inside the \code{auc_target} band
+#'       (NA when no \code{auc_target} is declared, or with fewer than two
+#'       decisions), and ETA_SUPPLIED (\code{TRUE} when the run used the
+#'       subject's row of \code{etas}, \code{FALSE} when its eta was drawn).}
 #'   }
 #'
 #' @inheritSection ferx_simulate Errors raised by the engine

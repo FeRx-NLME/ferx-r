@@ -1151,6 +1151,13 @@ automatically.  Columns declared in \code{[derived]} (per-row
 expressions, aggregates, integrals) and \code{[output]} (individual
 PK parameters or covariates echoed by name) appear at the end of the
 data frame in declaration order.
+On a model with a time-to-event endpoint, every TTE record adds a
+row after the Gaussian and discrete rows, with \code{COXSNELL},
+\code{MARTINGALE}, \code{DEVIANCE} and \code{PIT} residuals at the
+subject's EBE (\code{DV} is the event indicator, \code{PRED},
+\code{IPRED} and the Gaussian residuals are \code{NaN}); those four
+columns are \code{NaN} on every other row, and absent without a TTE
+endpoint. \code{ferx_save_fit()} does not keep the TTE rows.
 sdtab carries no ETA columns: it is per-observation, and an EBE is one
 value per subject. Naming an eta in \code{[output]} therefore does not
 add a column - the fit warns that the declaration was ignored. Use
@@ -1180,11 +1187,14 @@ subject.}
 \item{subject_summary}{Data frame with one row per subject, in fit order
 (the entries of \code{subject_ids}): \code{ID}; \code{ofv_contribution},
 the subject's contribution to the OFV; \code{n_obs}, its continuous
-(Gaussian) observations; and \code{n_obs_discrete}, its discrete
-(binary) observation records. \code{sdtab} holds each subject's
-\code{n_obs} rows in subject order, then each subject's
-\code{n_obs_discrete} rows in subject order. The values
-\code{ferx_save_fit()} writes to the bundle's \code{ebes.csv}.}
+(Gaussian) observations; \code{n_obs_discrete}, its discrete
+(binary) observation records; and \code{n_obs_tte}, its time-to-event
+records. \code{sdtab} holds each subject's \code{n_obs} rows in
+subject order, then each subject's \code{n_obs_discrete} rows in
+subject order, then each subject's \code{n_obs_tte} rows.
+\code{ferx_save_fit()} writes the first three to the bundle's
+\code{ebes.csv}; the bundle keeps no time-to-event rows, so
+\code{n_obs_tte} is 0 on a reloaded fit.}
 \item{individual_estimates}{Data frame with one row per subject containing
 each subject's individual parameter values: \code{ID} plus one column
 per parameter declared in the \code{[individual_parameters]} block
