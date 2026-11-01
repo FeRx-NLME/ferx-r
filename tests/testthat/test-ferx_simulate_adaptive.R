@@ -799,10 +799,30 @@ test_that("a data subject without a row: \"refuse\" is coded, \"draw\" draws it 
   expect_coded_refusal(probe, "have no supplied", "E_SUPPLIED_ETAS")
   expect_true(grepl("'3'", conditionMessage(probe$cond), fixed = TRUE),
               info = conditionMessage(probe$cond))
+  # The advice is spelled the R way, never as the engine's Rust enum.
+  expect_true(grepl("`unmatched = \"draw\"`", conditionMessage(probe$cond),
+                    fixed = TRUE),
+              info = conditionMessage(probe$cond))
+  expect_false(grepl("UnmatchedSubjects", conditionMessage(probe$cond),
+                     fixed = TRUE),
+               info = conditionMessage(probe$cond))
+  expect_false(isTRUE(grepl("UnmatchedSubjects", probe$cond$suggestion,
+                            fixed = TRUE)))
   expect_identical(
     engine_error_probe(run(etas = partial, unmatched = "refuse"))$cond$code,
     "E_SUPPLIED_ETAS"
   )
+  # The same on the `fit =` route, which goes through the other glue entry.
+  fit <- list(theta = c(TVCL = 4, TVV = 50),
+              omega = diag(c(0.09, 0.04)), sigma = c(PROP = 0.1))
+  from_fit <- engine_error_probe(run(fit = fit, etas = partial))
+  expect_coded_refusal(from_fit, "have no supplied", "E_SUPPLIED_ETAS")
+  expect_true(grepl("`unmatched = \"draw\"`", conditionMessage(from_fit$cond),
+                    fixed = TRUE),
+              info = conditionMessage(from_fit$cond))
+  expect_false(grepl("UnmatchedSubjects", conditionMessage(from_fit$cond),
+                     fixed = TRUE),
+               info = conditionMessage(from_fit$cond))
 
   # Two of three matched: the intended mix, so no no-match warning.
   expect_no_warning(mixed <- run(etas = partial, unmatched = "draw"))
