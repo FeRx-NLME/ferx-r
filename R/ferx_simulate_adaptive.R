@@ -199,7 +199,9 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
   # prose and no code, never another finding's code.
   verify_arg <- if (isTRUE(verify)) "true" else "false"
   supplied <- .ferx_adaptive_etas(etas)
-  res <- if (is.null(fit)) {
+  # The engine's unmatched-subject refusal names `UnmatchedSubjects::Draw`,
+  # the Rust spelling of `unmatched = "draw"`.
+  res <- .ferx_engine_spelling(if (is.null(fit)) {
     .ferx_engine_call(
       ferx_rust_simulate_adaptive(
         model_path = normalizePath(model),
@@ -247,7 +249,7 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
       ),
       model, data
     )
-  }
+  }, "E_SUPPLIED_ETAS", "`UnmatchedSubjects::Draw`", "`unmatched = \"draw\"`")
 
   # Under "draw" an `etas` keyed differently from the data (`01` against `1`)
   # matches nobody and every subject is drawn - the mistake "refuse" exists to

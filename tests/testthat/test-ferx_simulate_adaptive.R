@@ -813,10 +813,28 @@ test_that("a data subject without a row: \"refuse\" is coded, \"draw\" draws it 
   expect_coded_refusal(probe, "have no supplied", "E_SUPPLIED_ETAS")
   expect_true(grepl("'3'", conditionMessage(probe$cond), fixed = TRUE),
               info = conditionMessage(probe$cond))
+  # The advice is spelled the R way, never as the engine's Rust enum.
+  expect_true(grepl("`unmatched = \"draw\"`", conditionMessage(probe$cond),
+                    fixed = TRUE),
+              info = conditionMessage(probe$cond))
+  expect_false(grepl("UnmatchedSubjects", conditionMessage(probe$cond),
+                     fixed = TRUE),
+               info = conditionMessage(probe$cond))
   expect_identical(
     engine_error_probe(run(etas = partial, unmatched = "refuse"))$cond$code,
     "E_SUPPLIED_ETAS"
   )
+  # The same on the `fit =` route, which goes through the other glue entry.
+  fit <- list(theta = c(TVCL = 4, TVV = 50),
+              omega = diag(c(0.09, 0.04)), sigma = c(PROP = 0.1))
+  from_fit <- engine_error_probe(run(fit = fit, etas = partial))
+  expect_coded_refusal(from_fit, "have no supplied", "E_SUPPLIED_ETAS")
+  expect_true(grepl("`unmatched = \"draw\"`", conditionMessage(from_fit$cond),
+                    fixed = TRUE),
+              info = conditionMessage(from_fit$cond))
+  expect_false(grepl("UnmatchedSubjects", conditionMessage(from_fit$cond),
+                     fixed = TRUE),
+               info = conditionMessage(from_fit$cond))
 
   # Two of three matched: the intended mix, so no no-match warning.
   expect_no_warning(mixed <- run(etas = partial, unmatched = "draw"))
@@ -852,6 +870,34 @@ test_that("\"draw\" with etas matching no data subject warns, naming both ID set
   # The run itself is the all-drawn one.
   expect_identical(res$trajectories,
                    ferx_simulate_adaptive(model, data, n_sim = 1L, seed = 4L)$trajectories)
+})
+
+# The engine builds today's refusals with no suggestion, so the suggestion half
+# of the swap is pinned on a condition made here (#690 review r1 #2): for the
+# day the engine moves its advice there.
+test_that(".ferx_engine_spelling() swaps message and suggestion, for its code only", {
+  refusal <- function(code, suggestion) {
+    structure(
+      class = c("ferx_engine_error", "error", "condition"),
+      list(message = "or pass `X::Y` [E_A]", call = NULL, code = code,
+           suggestion = suggestion)
+    )
+  }
+  spell <- function(cond) {
+    tryCatch(
+      ferx:::.ferx_engine_spelling(stop(cond), "E_A", "`X::Y`", "`y = \"z\"`"),
+      error = function(e) e
+    )
+  }
+  hit <- spell(refusal("E_A", "pass `X::Y` instead"))
+  expect_s3_class(hit, "ferx_engine_error")
+  expect_identical(hit$code, "E_A")
+  expect_identical(conditionMessage(hit), "or pass `y = \"z\"` [E_A]")
+  expect_identical(hit$suggestion, "pass `y = \"z\"` instead")
+  expect_identical(spell(refusal("E_A", NA_character_))$suggestion, NA_character_)
+  other <- spell(refusal("E_B", "pass `X::Y` instead"))
+  expect_identical(conditionMessage(other), "or pass `X::Y` [E_A]")
+  expect_identical(other$suggestion, "pass `X::Y` instead")
 })
 
 # Review r1 #6: an explicit `unmatched` with no `etas` cannot do anything.

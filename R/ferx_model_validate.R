@@ -376,6 +376,29 @@ ferx_model_validate <- function(path, data = NULL) {
   sprintf("%s\nhint: %s", msg, suggestion)
 }
 
+# Evaluate `call` and, on a `ferx_engine_error` with code `code`, replace
+# `from` with `to` in its message and suggestion. For a refusal whose advice
+# names a Rust API (an enum variant, an entry point) where an R user needs the
+# R argument: only that spelling changes, never the engine's prose, class or
+# code, and any other condition passes through untouched. `from` is matched
+# fixed, never with `useBytes`, which would drop the message's UTF-8 mark.
+# Should the engine reword the advice, nothing is swapped, and the test that
+# pins the R spelling at each call site fails rather than an R user meeting
+# the Rust.
+.ferx_engine_spelling <- function(call, code, from, to) {
+  tryCatch(call, ferx_engine_error = function(e) {
+    if (identical(e$code, code)) {
+      swap <- function(x) {
+        if (length(x) != 1L || is.na(x)) return(x)
+        gsub(from, to, x, fixed = TRUE)
+      }
+      e$message <- swap(e$message)
+      e$suggestion <- swap(e$suggestion)
+    }
+    stop(e)
+  })
+}
+
 # Whether `text` contains `part`, ignoring case. Byte-wise, like the message
 # match in `.ferx_engine_error()`: outside a UTF-8 locale `tolower()` refuses
 # the engine's non-ASCII characters (em-dashes), so it folds only ASCII
