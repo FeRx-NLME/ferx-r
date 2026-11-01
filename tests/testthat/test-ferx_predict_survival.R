@@ -481,6 +481,12 @@ test_that("type = \"individual\" takes a subset of the fitted subjects, refuses 
   )
   expect_s3_class(e, "ferx_engine_error")
   expect_identical(e$code, "E_SUPPLIED_ETAS")
+  # The remedy is spelled the R way, never as the engine's Rust entry point.
+  expect_true(grepl("pass `type = \"population\"`", conditionMessage(e),
+                    fixed = TRUE),
+              info = conditionMessage(e))
+  expect_false(grepl("predict_survival_diag", conditionMessage(e), fixed = TRUE),
+               info = conditionMessage(e))
 })
 
 test_that("type = \"individual\" gives the same curves on a reloaded .fitrx fit", {

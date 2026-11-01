@@ -121,7 +121,9 @@ ferx_predict_survival <- function(model, data = NULL, times, fit = NULL,
   etas <- .ferx_survival_etas(fit, type)
   # A note on how the fit's occasions were derived (#523) comes back on the
   # simulate paths' `simulation_warnings` channel.
-  res <- .ferx_engine_call(
+  # The engine tells a subject with no supplied eta to call
+  # `predict_survival_diag`, the Rust entry point behind `type = "population"`.
+  res <- .ferx_engine_spelling(.ferx_engine_call(
     ferx_rust_predict_survival_from_fit(
       model_path = normalizePath(model),
       data_path = normalizePath(data),
@@ -143,7 +145,7 @@ ferx_predict_survival <- function(model, data = NULL, times, fit = NULL,
       eta_flat = etas$flat
     ),
     model, data
-  )
+  ), "E_SUPPLIED_ETAS", "call `predict_survival_diag`", "pass `type = \"population\"`")
   .ferx_surface_sim_warnings(res, "ferx_predict_survival")
 }
 

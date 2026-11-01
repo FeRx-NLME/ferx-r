@@ -194,7 +194,9 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
   # prose and no code, never another finding's code.
   verify_arg <- if (isTRUE(verify)) "true" else "false"
   supplied <- .ferx_adaptive_etas(etas)
-  res <- .ferx_adaptive_unmatched_spelling(if (is.null(fit)) {
+  # The engine's unmatched-subject refusal names `UnmatchedSubjects::Draw`,
+  # the Rust spelling of `unmatched = "draw"`.
+  res <- .ferx_engine_spelling(if (is.null(fit)) {
     .ferx_engine_call(
       ferx_rust_simulate_adaptive(
         model_path = normalizePath(model),
@@ -242,7 +244,7 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
       ),
       model, data
     )
-  })
+  }, "E_SUPPLIED_ETAS", "`UnmatchedSubjects::Draw`", "`unmatched = \"draw\"`")
 
   # Under "draw" an `etas` keyed differently from the data (`01` against `1`)
   # matches nobody and every subject is drawn - the mistake "refuse" exists to
@@ -265,28 +267,6 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
   # Same `simulation_warnings` channel `ferx_simulate()` uses - here it carries
   # the engine's warning bundle for the run (ferx-r #426).
   .ferx_surface_sim_warnings(res, "ferx_simulate_adaptive")
-}
-
-# The engine's unmatched-subject refusal (`E_SUPPLIED_ETAS`) tells the caller
-# to pass `UnmatchedSubjects::Draw`, the Rust spelling of this function's
-# `unmatched = "draw"`. Only the spelling is swapped, in the message and in
-# the suggestion (should the engine move its advice there): the engine's
-# prose, class and code stay as they are, and any other refusal passes through
-# untouched. Should the engine reword the advice, nothing is swapped, and the
-# test that pins the R spelling fails rather than an R user meeting the Rust.
-.ferx_adaptive_unmatched_spelling <- function(call) {
-  tryCatch(call, ferx_engine_error = function(e) {
-    if (identical(e$code, "E_SUPPLIED_ETAS")) {
-      swap <- function(x) {
-        if (length(x) != 1L || is.na(x)) return(x)
-        gsub("`UnmatchedSubjects::Draw`", "`unmatched = \"draw\"`", x,
-             fixed = TRUE)
-      }
-      e$message <- swap(e$message)
-      e$suggestion <- swap(e$suggestion)
-    }
-    stop(e)
-  })
 }
 
 # `etas =` flattened for the engine (ferx-core #1594): IDs as text, matched to
