@@ -86,7 +86,11 @@ TIME_TO_DISCONT, SIGNAL_MIN / SIGNAL_MAX / SIGNAL_MEAN (over the
 decisions that recorded a signal), and PCT_TIME_IN_WINDOW - the fraction
 of signal-bearing decisions whose observed value fell inside the model's
 \code{[adaptive_dosing]} \code{target_window} (NA when no
-\code{target_window} is declared).}
+\code{target_window} is declared), and AUC_TARGET_ATTAINMENT - the
+fraction of windows between consecutive realized decisions whose area
+under the monitored signal fell inside the \code{auc_target} band
+(NA when no \code{auc_target} is declared, or with fewer than two
+decisions).}
 }
 }
 \description{
@@ -127,7 +131,9 @@ time-varying covariate or IOV; a steady-state, lag-timed, or modeled-rate
 (\code{RATE}) base dose \emph{under} a time-varying covariate or IOV (these
 are supported on the constant-covariate path); and an \code{auc_target} metric
 combined with a time-varying covariate, a \code{TIME}-dependent PK parameter,
-IOV, or a reset.
+or IOV. An \code{auc_target} metric on a subject with resets is accepted: the
+window AUC is integrated on the run's own trajectory, so a dose or reset
+inside a decision window is integrated exactly.
 }
 \section{Errors raised by the engine}{
 

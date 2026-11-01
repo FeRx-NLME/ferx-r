@@ -1391,6 +1391,10 @@ fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult) -> Robj
         PCT_TIME_IN_WINDOW = m
             .iter()
             .map(|e| e.pct_time_in_window)
+            .collect::<Vec<Option<f64>>>(),
+        AUC_TARGET_ATTAINMENT = m
+            .iter()
+            .map(|e| e.auc_target_attainment)
             .collect::<Vec<Option<f64>>>()
     );
 
@@ -5446,11 +5450,12 @@ fn build_ebe_etas(result: &FitResult) -> Robj {
 // -- Helper: the engine's per-subject result as a data frame --
 //
 // One row per `result.subjects`, in fit order: `ID`, `ofv_contribution` and
-// `n_obs` as ferx-core's `write_ebes_csv` writes them, and `n_obs_discrete`,
-// the subject's discrete (binary) observation records. `io::output::sdtab`
-// writes each subject's `n_obs` Gaussian rows in subject order, then each
-// subject's `n_obs_discrete` discrete rows in subject order, so these two
-// counts say which subject owns every sdtab row - read back from the ID
+// `n_obs` as ferx-core's `write_ebes_csv` writes them, `n_obs_discrete`, the
+// subject's discrete (binary) observation records, and `n_obs_tte`, its
+// time-to-event records (ferx-core #901). `io::output::sdtab` writes each
+// subject's `n_obs` Gaussian rows in subject order, then each subject's
+// `n_obs_discrete` discrete rows, then each subject's `n_obs_tte` TTE rows,
+// so these counts say which subject owns every sdtab row - read back from the ID
 // number, the rows of two adjacent subjects with the same number run
 // together, and a subject without observations has none (ferx-r #540). The
 // .fitrx writer reads them from here, not from sdtab, whose `N_OBS` is blank
@@ -5476,12 +5481,23 @@ fn build_subject_summary(result: &FitResult) -> Robj {
         .collect();
     #[cfg(not(feature = "survival"))]
     let n_discrete: Vec<i32> = vec![0; n_subj];
+    // The subject's time-to-event residual rows (ferx-core #901), which
+    // `sdtab` appends after every discrete row.
+    #[cfg(feature = "survival")]
+    let n_tte: Vec<i32> = result
+        .subjects
+        .iter()
+        .map(|sr| sr.tte_rows.len() as i32)
+        .collect();
+    #[cfg(not(feature = "survival"))]
+    let n_tte: Vec<i32> = vec![0; n_subj];
     finish_df(
         vec![
             ("ID", ids.into()),
             ("ofv_contribution", ofv.into()),
             ("n_obs", n_obs.into()),
             ("n_obs_discrete", n_discrete.into()),
+            ("n_obs_tte", n_tte.into()),
         ],
         n_subj,
     )
@@ -8065,6 +8081,10 @@ fn fit_skeleton(
             npd: Vec::new(),
             // ferx-core #900 added categorical sdtab rows; neither step reads them.
             discrete_rows: Vec::new(),
+            // ferx-core #901 added time-to-event residual rows; neither step
+            // reads them.
+            #[cfg(feature = "survival")]
+            tte_rows: Vec::new(),
             // ferx-core #977 added per-subject mixture posteriors; neither step
             // reads them, and these scaffolds carry no class assignment.
             pmix: None,

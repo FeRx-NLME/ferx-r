@@ -359,18 +359,32 @@ test_that("an EVID=4 row resets then doses (reset before dose)", {
   expect_lt(s_evid4, s_none)
 })
 
-test_that("unsupported adaptive combinations raise a typed error", {
-  # auc_target combined with a system reset is rejected (the per-window trapezoid
-  # grid carries no node at the reset instant), not silently mis-scored.
+test_that("auc_target runs on a subject with a system reset (ferx-core #943)", {
+  # Refused until ferx-core #2546: the window AUC is now integrated on the
+  # run's own trajectory, with a node on each side of the reset.
   auc_model <- .write_vanco_model(dosing_extra = c(
     "  target_window = [10, 15]",
     "  auc_target    = [400, 600]",
     "  when signal < 10 : increase 25%"
   ))
-  expect_error(
-    ferx_simulate_adaptive(auc_model, .write_vanco_data("evid3"), n_sim = 1L, seed = 1L),
-    "auc_target"
-  )
+  res <- ferx_simulate_adaptive(auc_model, .write_vanco_data("evid3"),
+                                n_sim = 1L, seed = 1L)
+  att <- res$metrics$AUC_TARGET_ATTAINMENT
+  expect_length(att, 1L)
+  expect_true(is.finite(att) && att >= 0 && att <= 1)
+})
+
+test_that("AUC_TARGET_ATTAINMENT is NA without an auc_target", {
+  model <- .write_vanco_model(dosing_extra = c(
+    "  target_window = [10, 15]",
+    "  when signal < 10 : increase 25%"
+  ))
+  res <- ferx_simulate_adaptive(model, .write_vanco_data("none"),
+                                n_sim = 1L, seed = 1L)
+  expect_identical(res$metrics$AUC_TARGET_ATTAINMENT, NA_real_)
+})
+
+test_that("unsupported adaptive combinations raise a typed error", {
   # A base regimen combined with a reset UNDER IOV is rejected (base x reset is
   # supported on the constant-covariate path only).
   iov_model <- .write_vanco_model(

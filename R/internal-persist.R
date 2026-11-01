@@ -481,6 +481,9 @@
     ofv_contribution = as.numeric(ebes$ofv_contribution),
     n_obs = as.integer(ebes$n_obs),
     n_obs_discrete = as.integer(disc),
+    # A bundle keeps no time-to-event rows (ferx-core #911), so the reloaded
+    # sdtab has none.
+    n_obs_tte = integer(n),
     stringsAsFactors = FALSE
   )
 }
