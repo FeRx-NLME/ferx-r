@@ -11,7 +11,9 @@ ferx_simulate_adaptive(
   seed = 42L,
   verify = TRUE,
   max_decisions = 0L,
-  fit = NULL
+  fit = NULL,
+  etas = NULL,
+  unmatched = c("refuse", "draw")
 )
 }
 \arguments{
@@ -59,7 +61,35 @@ own fitted value; a level the fit never observed is an error. Random
 effects are still drawn from the fitted omega - a subject's own
 individual estimates are not carried over, and the per-occasion kappas
 are drawn per decision window, so the fit's IOV occasion rule plays no
-part.}
+part. To simulate each subject at its own estimates instead, pass
+\code{etas = fit$ebe_etas}.}
+
+\item{etas}{Optional data frame of each known subject's own random effects:
+an \code{ID} column plus one column per eta, named and ordered as the
+model declares them (\code{fit$ebe_etas} has exactly this shape, so
+\code{ferx_simulate_adaptive(model, fit = fit, etas = fit$ebe_etas)}
+simulates every fitted subject at its EBEs). A subject with a row is
+simulated at those etas in every replicate instead of a draw from omega;
+its kappas (IOV, drawn per decision window) and the controller's assay
+error are still drawn, so without either its replicates are identical.
+Rows are matched to the data's subjects by \code{ID}; a row whose
+subject is not in the data is ignored. A row gives every eta of the
+model - there is no partial row, since under a block omega the missing
+eta would need a conditional draw. Each supplied subject still consumes
+its eta draw, so the drawn subjects get the etas the same \code{seed}
+gives without \code{etas}. Works with and without \code{fit}. Refused,
+coded \code{E_SUPPLIED_ETAS}: eta columns that are not the model's
+names in its order, a repeated \code{ID}, a non-finite value, and a
+\code{[mixture]} model (each subject's eta was estimated under its own
+class, but the run draws each subject's class). Supplied etas are point
+estimates treated as exact, which is optimistic for a subject with few
+observations (high shrinkage).}
+
+\item{unmatched}{What to do with a data subject that has no row in
+\code{etas}: \code{"refuse"} (the default) errors with
+\code{E_SUPPLIED_ETAS}, listing the subjects; \code{"draw"} draws their
+etas from omega, so known patients and virtual ones run in one
+population. Ignored without \code{etas}.}
 }
 \value{
 A list of four data frames:
@@ -86,7 +116,9 @@ TIME_TO_DISCONT, SIGNAL_MIN / SIGNAL_MAX / SIGNAL_MEAN (over the
 decisions that recorded a signal), and PCT_TIME_IN_WINDOW - the fraction
 of signal-bearing decisions whose observed value fell inside the model's
 \code{[adaptive_dosing]} \code{target_window} (NA when no
-\code{target_window} is declared).}
+\code{target_window} is declared), and ETA_SUPPLIED (\code{TRUE}
+when the run used the subject's row of \code{etas}, \code{FALSE}
+when its eta was drawn).}
 }
 }
 \description{
@@ -149,6 +181,11 @@ ex  <- ferx_example("adaptive_tdm")
 res <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 20L, seed = 1L)
 head(res$doses)         # how the dose was titrated per decision
 head(res$trajectories)  # the resulting concentration-time profiles
+
+# Each fitted subject at its own EBEs; a new subject in `data` draws its eta.
+fit <- ferx_fit(ex$model, ex$data)
+res <- ferx_simulate_adaptive(ex$model, ex$data, fit = fit,
+                              etas = fit$ebe_etas, unmatched = "draw")
 }
 
 }
