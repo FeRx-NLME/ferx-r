@@ -20,7 +20,12 @@ ferx_rust_simulate_adaptive_from_fit(
   n_sim,
   seed,
   verify,
-  max_decisions
+  max_decisions,
+  supply_etas,
+  eta_ids,
+  eta_names,
+  eta_flat,
+  unmatched
 )
 }
 \description{

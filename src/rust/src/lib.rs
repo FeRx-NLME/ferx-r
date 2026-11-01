@@ -1087,14 +1087,25 @@ fn ferx_rust_simulate_from_fit(
 ///   every (subject, replicate); a divergence is a hard error, not a warning
 /// @param max_decisions Per-run decision cap (runaway / closed-loop guard);
 ///   `<= 0` keeps the engine default
+/// @param supply_etas `FALSE` draws every subject's eta from Omega; `TRUE`
+///   simulates each subject with a row of `eta_ids` / `eta_names` / `eta_flat`
+///   at those etas (ferx-core #1594).
+/// @param eta_ids Subject IDs of the supplied etas, verbatim; ignored unless
+///   `supply_etas`.
+/// @param eta_names The eta names, which the engine checks against the model's
+///   (names and order).
+/// @param eta_flat Row-major `length(eta_ids)` x `length(eta_names)` etas.
+/// @param unmatched "refuse" or "draw": what to do with a data subject that has
+///   no row in the supplied etas.
 /// @return Named list of four data frames: `trajectories` (DRAW, SIM, ID, TIME,
 ///   CMT, IPRED, DV_SIM, OBSERVED), `doses` (the realized dose ledger), `decisions` (one row
 ///   per decision, including holds), and `metrics` (one row per realized run —
 ///   the per-subject outcome summary: cumulative dose, dose-change counts, holds,
-///   discontinuation, observed-signal summary, and `% time in window` when the
-///   model declares a `target_window`)
+///   discontinuation, observed-signal summary, `% time in window` when the
+///   model declares a `target_window`, and whether the run's eta was supplied)
 /// @export
 #[extendr]
+#[allow(clippy::too_many_arguments)]
 fn ferx_rust_simulate_adaptive(
     model_path: &str,
     data_path: &str,
@@ -1102,8 +1113,16 @@ fn ferx_rust_simulate_adaptive(
     seed: i32,
     verify: &str,
     max_decisions: i32,
+    supply_etas: bool,
+    eta_ids: Vec<String>,
+    eta_names: Vec<String>,
+    eta_flat: Vec<f64>,
+    unmatched: &str,
 ) -> Robj {
-    entry(move || simulate_adaptive(model_path, data_path, n_sim, seed, verify, max_decisions, None))
+    entry(move || {
+        let etas = AdaptiveEtas::from_r(supply_etas, eta_ids, eta_names, eta_flat, unmatched)?;
+        simulate_adaptive(model_path, data_path, n_sim, seed, verify, max_decisions, None, etas)
+    })
 }
 
 /// Simulate state-reactive dosing at a fit's estimates.
@@ -1139,6 +1158,8 @@ fn ferx_rust_simulate_adaptive(
 /// @param seed Random seed
 /// @param verify "true"/"false", as in `ferx_rust_simulate_adaptive`
 /// @param max_decisions Per-run decision cap; `<= 0` keeps the engine default
+/// @param supply_etas,eta_ids,eta_names,eta_flat,unmatched Supplied
+///   per-subject etas, as in `ferx_rust_simulate_adaptive`
 /// @return The four-data-frame list `ferx_rust_simulate_adaptive` returns.
 /// @export
 #[extendr]
@@ -1160,8 +1181,14 @@ fn ferx_rust_simulate_adaptive_from_fit(
     seed: i32,
     verify: &str,
     max_decisions: i32,
+    supply_etas: bool,
+    eta_ids: Vec<String>,
+    eta_names: Vec<String>,
+    eta_flat: Vec<f64>,
+    unmatched: &str,
 ) -> Robj {
     entry(move || {
+        let etas = AdaptiveEtas::from_r(supply_etas, eta_ids, eta_names, eta_flat, unmatched)?;
         let fit = AdaptiveFit {
             theta: &theta,
             omega_flat: &omega_flat,
@@ -1174,8 +1201,52 @@ fn ferx_rust_simulate_adaptive_from_fit(
             mixture_overrides: &mixture_overrides,
             fitted: fit_bindings_from_r(&fit_bindings)?,
         };
-        simulate_adaptive(model_path, data_path, n_sim, seed, verify, max_decisions, Some(fit))
+        simulate_adaptive(model_path, data_path, n_sim, seed, verify, max_decisions, Some(fit), etas)
     })
+}
+
+/// Each known subject's own etas for an adaptive run (ferx-core #1594), as the
+/// R side flattened `etas =`, and the policy for a data subject without a row.
+struct AdaptiveEtas {
+    etas: ferx_core::SuppliedEtas,
+    unmatched: ferx_core::UnmatchedSubjects,
+}
+
+impl AdaptiveEtas {
+    /// `None` when `supply_etas` is `FALSE`: every subject's eta is drawn. The
+    /// table checks (row shape, finite values, a repeated ID) are
+    /// `SuppliedEtas::from_table`'s; the name check and the unmatched-subject
+    /// refusal come later, from the run itself, so all of them reach R coded
+    /// `E_SUPPLIED_ETAS`.
+    fn from_r(
+        supply_etas: bool,
+        eta_ids: Vec<String>,
+        eta_names: Vec<String>,
+        eta_flat: Vec<f64>,
+        unmatched: &str,
+    ) -> std::result::Result<Option<Self>, String> {
+        if !supply_etas {
+            return Ok(None);
+        }
+        let unmatched = match unmatched {
+            "refuse" => ferx_core::UnmatchedSubjects::Refuse,
+            "draw" => ferx_core::UnmatchedSubjects::Draw,
+            other => {
+                return Err(format!(
+                    "ferx_simulate_adaptive: `unmatched` must be \"refuse\" or \"draw\", not \"{other}\""
+                ))
+            }
+        };
+        let n = eta_names.len();
+        let rows: Vec<Vec<f64>> = if n == 0 {
+            vec![Vec::new(); eta_ids.len()]
+        } else {
+            eta_flat.chunks(n).map(<[f64]>::to_vec).collect()
+        };
+        let etas = ferx_core::SuppliedEtas::from_table(eta_ids, eta_names, rows)
+            .map_err(|e| engine_refusal("ferx_simulate_adaptive: ", e))?;
+        Ok(Some(Self { etas, unmatched }))
+    }
 }
 
 /// The fit pieces `ferx_rust_simulate_adaptive_from_fit` simulates at.
@@ -1193,7 +1264,9 @@ struct AdaptiveFit<'a> {
 }
 
 /// The body of both adaptive entry points: at the model file's initial values
-/// when `fit` is `None`, otherwise at the fit's.
+/// when `fit` is `None`, otherwise at the fit's; each subject `etas` carries at
+/// its own etas, the rest drawn from Omega.
+#[allow(clippy::too_many_arguments)]
 fn simulate_adaptive(
     model_path: &str,
     data_path: &str,
@@ -1202,6 +1275,7 @@ fn simulate_adaptive(
     verify: &str,
     max_decisions: i32,
     fit: Option<AdaptiveFit>,
+    etas: Option<AdaptiveEtas>,
 ) -> std::result::Result<Robj, String> {
     let mut parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
         Ok(p) => p,
@@ -1295,10 +1369,19 @@ fn simulate_adaptive(
     // returned as NULL: the adaptive path has more — and more consequential —
     // failure modes than a plain simulate, and a verify divergence in particular
     // must not be silently missable.
-    Ok(match ferx_core::simulate_adaptive_from_spec(
+    // Supplied etas (ferx-core #1594): the engine refuses a `[mixture]` model,
+    // names that are not the model's in its order, and under "refuse" a data
+    // subject with no row, all before any subject runs. A supplied subject still
+    // consumes its draw from the eta stream, so every drawn subject gets the eta
+    // the same seed gives without supplied etas.
+    let mut inputs = ferx_core::AdaptiveInputs::new(&params);
+    if let Some(e) = &etas {
+        inputs = inputs.with_etas(&e.etas).with_unmatched(e.unmatched);
+    }
+    Ok(match ferx_core::simulate_adaptive_from_spec_with_inputs(
         &parsed.model,
         &population,
-        &params,
+        &inputs,
         n_sim as usize,
         &spec,
         &opts,
@@ -1395,7 +1478,8 @@ fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult) -> Robj
         AUC_TARGET_ATTAINMENT = m
             .iter()
             .map(|e| e.auc_target_attainment)
-            .collect::<Vec<Option<f64>>>()
+            .collect::<Vec<Option<f64>>>(),
+        ETA_SUPPLIED = m.iter().map(|e| e.eta_supplied).collect::<Vec<bool>>()
     );
 
     list!(
