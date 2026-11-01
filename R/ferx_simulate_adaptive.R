@@ -76,7 +76,38 @@
 #'   effects are still drawn from the fitted omega - a subject's own
 #'   individual estimates are not carried over, and the per-occasion kappas
 #'   are drawn per decision window, so the fit's IOV occasion rule plays no
-#'   part.
+#'   part. To simulate each subject at its own estimates instead, pass
+#'   \code{etas = fit$ebe_etas}.
+#' @param etas Optional data frame of each known subject's own random effects:
+#'   an \code{ID} column plus one column per eta, named and ordered as the
+#'   model declares them (\code{fit$ebe_etas} has exactly this shape, so
+#'   \code{ferx_simulate_adaptive(model, fit = fit, etas = fit$ebe_etas)}
+#'   simulates every fitted subject at its EBEs). A subject with a row is
+#'   simulated at those etas in every replicate instead of a draw from omega;
+#'   its kappas (IOV, drawn per decision window) and the controller's assay
+#'   error are still drawn, so without either its replicates are identical.
+#'   Rows are matched to the data's subjects by \code{ID}; a row whose
+#'   subject is not in the data is ignored. A row gives every eta of the
+#'   model - there is no partial row, since under a block omega the missing
+#'   eta would need a conditional draw. Each supplied subject still consumes
+#'   its eta draw, so the drawn subjects get the etas the same \code{seed}
+#'   gives without \code{etas}. Works with and without \code{fit}. Refused,
+#'   coded \code{E_SUPPLIED_ETAS}: eta columns that are not the model's
+#'   names in its order, a repeated \code{ID}, a non-finite value, and a
+#'   \code{[mixture]} model (each subject's eta was estimated under its own
+#'   class, but the run draws each subject's class). A repeated column name
+#'   is refused before the engine is called. Supplied etas are point
+#'   estimates treated as exact, which is optimistic for a subject with few
+#'   observations (high shrinkage).
+#' @param unmatched What to do with a data subject that has no row in
+#'   \code{etas}: \code{"refuse"} (the default) errors with
+#'   \code{E_SUPPLIED_ETAS}, listing the subjects; \code{"draw"} draws their
+#'   etas from omega, so known patients and virtual ones run in one
+#'   population. Under \code{"draw"}, an \code{etas} whose IDs match no
+#'   data subject (\code{"01"} against \code{"1"}, say) is warned about,
+#'   since every subject was then drawn. IDs are matched as text; a numeric
+#'   \code{ID} is spelled as a data.frame \code{data} writes it. Passing
+#'   \code{unmatched} without \code{etas} has no effect and warns.
 #'
 #' @return A list of four data frames:
 #'   \describe{
@@ -102,7 +133,9 @@
 #'       decisions that recorded a signal), and PCT_TIME_IN_WINDOW - the fraction
 #'       of signal-bearing decisions whose observed value fell inside the model's
 #'       \code{[adaptive_dosing]} \code{target_window} (NA when no
-#'       \code{target_window} is declared).}
+#'       \code{target_window} is declared), and ETA_SUPPLIED (\code{TRUE}
+#'       when the run used the subject's row of \code{etas}, \code{FALSE}
+#'       when its eta was drawn).}
 #'   }
 #'
 #' @inheritSection ferx_simulate Errors raised by the engine
@@ -113,13 +146,28 @@
 #' res <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 20L, seed = 1L)
 #' head(res$doses)         # how the dose was titrated per decision
 #' head(res$trajectories)  # the resulting concentration-time profiles
+#'
+#' # Subjects 1 and 2 at known etas; the other subjects draw theirs.
+#' known <- data.frame(ID = c("1", "2"), ETA_CL = c(0.3, -0.2))
+#' res <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 20L, seed = 1L,
+#'                               etas = known, unmatched = "draw")
+#' table(res$metrics$ID, res$metrics$ETA_SUPPLIED)
+#'
+#' # With a fit to observed data, each fitted subject at its own EBEs:
+#' # ferx_simulate_adaptive(model, data, fit = fit, etas = fit$ebe_etas)
 #' }
 #'
 #' @family simulation
 #' @export
 ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
                                    verify = TRUE, max_decisions = 0L,
-                                   fit = NULL) {
+                                   fit = NULL, etas = NULL,
+                                   unmatched = c("refuse", "draw")) {
+  if (!missing(unmatched) && is.null(etas)) {
+    warning("ferx_simulate_adaptive: `unmatched` has no effect without ",
+            "`etas`; every subject's eta is drawn.", call. = FALSE)
+  }
+  unmatched <- match.arg(unmatched)
   if (is.null(data)) data <- .ferx_default_data(model, fit)
   if (is.null(data)) {
     stop(
@@ -145,6 +193,7 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
   # regimen refusal the validation pass cannot name still gets the engine's
   # prose and no code, never another finding's code.
   verify_arg <- if (isTRUE(verify)) "true" else "false"
+  supplied <- .ferx_adaptive_etas(etas)
   res <- if (is.null(fit)) {
     .ferx_engine_call(
       ferx_rust_simulate_adaptive(
@@ -153,7 +202,12 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
         n_sim = n_sim,
         seed = as.integer(seed),
         verify = verify_arg,
-        max_decisions = as.integer(max_decisions)
+        max_decisions = as.integer(max_decisions),
+        supply_etas = !is.null(etas),
+        eta_ids = supplied$ids,
+        eta_names = supplied$names,
+        eta_flat = supplied$flat,
+        unmatched = unmatched
       ),
       model, data
     )
@@ -179,13 +233,76 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
         n_sim = n_sim,
         seed = as.integer(seed),
         verify = verify_arg,
-        max_decisions = as.integer(max_decisions)
+        max_decisions = as.integer(max_decisions),
+        supply_etas = !is.null(etas),
+        eta_ids = supplied$ids,
+        eta_names = supplied$names,
+        eta_flat = supplied$flat,
+        unmatched = unmatched
       ),
       model, data
+    )
+  }
+
+  # Under "draw" an `etas` keyed differently from the data (`01` against `1`)
+  # matches nobody and every subject is drawn - the mistake "refuse" exists to
+  # catch. Say so rather than return an all-drawn run as if etas were used.
+  if (length(supplied$ids) > 0L && nrow(res$metrics) > 0L &&
+      !any(res$metrics$ETA_SUPPLIED)) {
+    some <- function(x) {
+      x <- unique(x)
+      paste0(paste(utils::head(x, 3L), collapse = ", "),
+             if (length(x) > 3L) ", ..." else "")
+    }
+    warning(
+      "ferx_simulate_adaptive: no row of `etas` matched a subject in `data`, ",
+      "so every subject's eta was drawn. IDs are matched as text: `etas` has ",
+      some(supplied$ids), "; `data` has ", some(res$metrics$ID), ".",
+      call. = FALSE
     )
   }
 
   # Same `simulation_warnings` channel `ferx_simulate()` uses - here it carries
   # the engine's warning bundle for the run (ferx-r #426).
   .ferx_surface_sim_warnings(res, "ferx_simulate_adaptive")
+}
+
+# `etas =` flattened for the engine (ferx-core #1594): IDs as text, matched to
+# the data's verbatim subject IDs; eta columns in the order given, which the
+# engine checks against the model's names and order; values row-major. The
+# table's own checks (finite, one row per ID) are the engine's too, so every
+# refusal of the values carries `E_SUPPLIED_ETAS`.
+.ferx_adaptive_etas <- function(etas) {
+  if (is.null(etas)) {
+    return(list(ids = character(0), names = character(0), flat = numeric(0)))
+  }
+  if (!is.data.frame(etas) || !"ID" %in% names(etas)) {
+    stop("ferx_simulate_adaptive: `etas` must be a data frame with an ID ",
+         "column and one column per eta (e.g. `fit$ebe_etas`).", call. = FALSE)
+  }
+  # A repeated column name would pass the engine's name check on its first
+  # copy and drop the second, as a repeated `data` column would.
+  dup <- unique(names(etas)[duplicated(names(etas))])
+  if (length(dup) > 0L) {
+    stop("ferx_simulate_adaptive: `etas` has more than one column named ",
+         paste0("`", dup, "`", collapse = ", "), ".", call. = FALSE)
+  }
+  etas <- as.data.frame(etas)
+  ids <- etas$ID
+  if (anyNA(ids)) {
+    stop("ferx_simulate_adaptive: `etas$ID` has ", sum(is.na(ids)), " NA ",
+         "value(s); every row needs its subject's ID.", call. = FALSE)
+  }
+  # A double ID is spelled as a data.frame `data` writes it
+  # (`.ferx_data_column_text()`), so the two match as text.
+  ids <- if (is.double(ids)) .fitrx_double_text(ids) else as.character(ids)
+  eta_cols <- setdiff(names(etas), "ID")
+  not_num <- eta_cols[!vapply(etas[eta_cols], is.numeric, logical(1))]
+  if (length(not_num) > 0L) {
+    stop("ferx_simulate_adaptive: `etas` column(s) ",
+         paste(not_num, collapse = ", "), " are not numeric.", call. = FALSE)
+  }
+  eta_mat <- as.matrix(etas[, eta_cols, drop = FALSE])
+  storage.mode(eta_mat) <- "double"
+  list(ids = ids, names = eta_cols, flat = as.numeric(t(eta_mat)))
 }
