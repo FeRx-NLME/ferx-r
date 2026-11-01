@@ -804,7 +804,8 @@ test_that("a data subject without a row: \"refuse\" is coded, \"draw\" draws it 
     "E_SUPPLIED_ETAS"
   )
 
-  mixed <- run(etas = partial, unmatched = "draw")
+  # Two of three matched: the intended mix, so no no-match warning.
+  expect_no_warning(mixed <- run(etas = partial, unmatched = "draw"))
   m <- mixed$metrics
   expect_identical(m$ETA_SUPPLIED, m$ID != "3")
   traj <- function(res, ids) {
@@ -818,6 +819,39 @@ test_that("a data subject without a row: \"refuse\" is coded, \"draw\" draws it 
   # Subject 3 draws: the supplied subjects still consume their draws, so it
   # gets the eta the same seed gives with no etas at all.
   expect_identical(traj(mixed, "3"), traj(run(), "3"))
+})
+
+# Review r1 #1: under "draw" an `etas` keyed differently from the data matches
+# nobody, the mistake "refuse" exists to catch. The run goes ahead (every
+# subject drawn, as asked) but says so, naming IDs from both sides.
+test_that("\"draw\" with etas matching no data subject warns, naming both ID sets", {
+  model <- .write_supplied_eta_model()
+  data <- .supplied_eta_data()
+  padded <- .supplied_etas
+  padded$ID <- sprintf("%02d", as.integer(padded$ID))
+  expect_warning(
+    res <- ferx_simulate_adaptive(model, data, n_sim = 1L, seed = 4L,
+                                  etas = padded, unmatched = "draw"),
+    "no row of `etas` matched a subject in `data`.*`etas` has 01, 02, 03; `data` has 1, 2, 3"
+  )
+  expect_false(any(res$metrics$ETA_SUPPLIED))
+  # The run itself is the all-drawn one.
+  expect_identical(res$trajectories,
+                   ferx_simulate_adaptive(model, data, n_sim = 1L, seed = 4L)$trajectories)
+})
+
+# Review r1 #6: an explicit `unmatched` with no `etas` cannot do anything.
+test_that("`unmatched` without `etas` warns; the default does not", {
+  model <- .write_supplied_eta_model()
+  data <- .supplied_eta_data()
+  expect_warning(
+    ferx_simulate_adaptive(model, data, n_sim = 1L, seed = 1L, unmatched = "draw"),
+    "`unmatched` has no effect without `etas`"
+  )
+  expect_no_warning(ferx_simulate_adaptive(model, data, n_sim = 1L, seed = 1L))
+  expect_no_warning(ferx_simulate_adaptive(model, data, n_sim = 1L, seed = 1L,
+                                           etas = .supplied_etas,
+                                           unmatched = "refuse"))
 })
 
 test_that("eta columns that are not the model's are refused with the engine's code", {
@@ -876,8 +910,34 @@ test_that("a malformed `etas` is refused in R before the engine", {
   chr$ETA_V <- as.character(chr$ETA_V)
   expect_error(run(chr), "ETA_V are not numeric")
   expect_error(run(.supplied_etas, unmatched = "skip"), "should be one of")
-  # Numeric IDs match the data's text IDs.
+  # Review r1 #4: a repeated eta column would pass the engine's name check on
+  # its first copy and drop the second.
+  twice <- cbind(.supplied_etas, data.frame(ETA_V = 0.7))
+  expect_error(run(twice), "more than one column named `ETA_V`")
+  # Integer IDs match the data's text IDs.
   num <- .supplied_etas
   num$ID <- as.integer(num$ID)
   expect_identical(run(num), run(.supplied_etas))
+})
+
+# Review r1 #3 / #5: a double ID is matched as a data.frame `data` spells it
+# (`.fitrx_double_text()`). The IDs are chosen where the plausible spellings
+# part: `as.character(1e5)` is "1e+05", `format(1e15, digits = 15)` is
+# "1000000000000000" and `format(0.1 + 0.2, digits = 15)` "0.3", while the data
+# writer gives "100000", "1e+15" and "0.30000000000000004". Under "refuse" a
+# mis-spelled ID is a refusal, so the run passing is the check.
+test_that("double IDs in etas match a data.frame data's double IDs", {
+  model <- .write_supplied_eta_model()
+  map <- c("1" = 1e5, "2" = 1e15, "3" = 0.1 + 0.2)
+  data <- .supplied_eta_data()
+  data$ID <- unname(map[data$ID])
+  etas <- .supplied_etas
+  etas$ID <- unname(map[etas$ID])
+  res <- ferx_simulate_adaptive(model, data, n_sim = 1L, seed = 1L, etas = etas)
+  expect_true(all(res$metrics$ETA_SUPPLIED))
+  expect_setequal(res$metrics$ID, c("100000", "1e+15", "0.30000000000000004"))
+  # Each subject on its own row: the IPRED of the character-ID run.
+  chr <- ferx_simulate_adaptive(model, .supplied_eta_data(), n_sim = 1L,
+                                seed = 1L, etas = .supplied_etas)
+  expect_identical(res$trajectories$IPRED, chr$trajectories$IPRED)
 })

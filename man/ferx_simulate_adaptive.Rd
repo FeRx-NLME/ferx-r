@@ -81,7 +81,8 @@ gives without \code{etas}. Works with and without \code{fit}. Refused,
 coded \code{E_SUPPLIED_ETAS}: eta columns that are not the model's
 names in its order, a repeated \code{ID}, a non-finite value, and a
 \code{[mixture]} model (each subject's eta was estimated under its own
-class, but the run draws each subject's class). Supplied etas are point
+class, but the run draws each subject's class). A repeated column name
+is refused before the engine is called. Supplied etas are point
 estimates treated as exact, which is optimistic for a subject with few
 observations (high shrinkage).}
 
@@ -89,7 +90,11 @@ observations (high shrinkage).}
 \code{etas}: \code{"refuse"} (the default) errors with
 \code{E_SUPPLIED_ETAS}, listing the subjects; \code{"draw"} draws their
 etas from omega, so known patients and virtual ones run in one
-population. Ignored without \code{etas}.}
+population. Under \code{"draw"}, an \code{etas} whose IDs match no
+data subject (\code{"01"} against \code{"1"}, say) is warned about,
+since every subject was then drawn. IDs are matched as text; a numeric
+\code{ID} is spelled as a data.frame \code{data} writes it. Passing
+\code{unmatched} without \code{etas} has no effect and warns.}
 }
 \value{
 A list of four data frames:
@@ -182,10 +187,14 @@ res <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 20L, seed = 1L)
 head(res$doses)         # how the dose was titrated per decision
 head(res$trajectories)  # the resulting concentration-time profiles
 
-# Each fitted subject at its own EBEs; a new subject in `data` draws its eta.
-fit <- ferx_fit(ex$model, ex$data)
-res <- ferx_simulate_adaptive(ex$model, ex$data, fit = fit,
-                              etas = fit$ebe_etas, unmatched = "draw")
+# Subjects 1 and 2 at known etas; the other subjects draw theirs.
+known <- data.frame(ID = c("1", "2"), ETA_CL = c(0.3, -0.2))
+res <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 20L, seed = 1L,
+                              etas = known, unmatched = "draw")
+table(res$metrics$ID, res$metrics$ETA_SUPPLIED)
+
+# With a fit to observed data, each fitted subject at its own EBEs:
+# ferx_simulate_adaptive(model, data, fit = fit, etas = fit$ebe_etas)
 }
 
 }
