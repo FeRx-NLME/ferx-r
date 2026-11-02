@@ -297,6 +297,26 @@ list(controller_only   = cum_controller,
      loading_in_ledger = any(res$doses$AMT == loading_dose))
 ```
 
+The controller can change *when* it doses as well as how much. Declare an
+interval ladder and a starting interval in the block, and step it from a rule
+with `lengthen` / `shorten`, alone or after one dose effect:
+
+```
+[adaptive_dosing]
+  at             = every 12 from 0 to 144
+  intervals      = [12, 24, 36, 48]
+  start_interval = 24
+  when signal > 20 : decrease 25%, lengthen
+  when signal < 10 : shorten
+```
+
+The review grid `at` stays fixed, and on an `every S` grid each interval must be
+a whole multiple of `S`. At a grid point that is not due under the interval in
+force the controller is not consulted: `decisions$OUTCOME` reads `"not_due"`,
+`SIGNAL` still holds what the monitor read, and `metrics$N_NOT_DUE` counts these
+points (`N_HOLDS` counts only consulted decisions that gave no dose).
+`decisions$INTERVAL` is the interval in force after each decision.
+
 ---
 
 ## Choosing between the four

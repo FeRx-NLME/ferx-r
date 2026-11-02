@@ -109,14 +109,21 @@ was drawn into for that replicate; it is absent otherwise.}
 doses only} (pre-scheduled base doses are excluded): DRAW, SIM, ID, TIME,
 AMT, CMT, RATE, DECISION, SIGNAL (the value the controller titrated on -
 assay-noised when \code{with_assay_error}), RULE (the rule that fired).}
-\item{\code{decisions}}{One row per decision including holds: DRAW, SIM,
-ID, DECISION, TIME, SIGNAL, OUTCOME ("dosed" / "hold" / "stop"),
-N_DOSED.}
+\item{\code{decisions}}{One row per review-grid point including holds:
+DRAW, SIM, ID, DECISION, TIME, SIGNAL, OUTCOME ("dosed" / "hold" /
+"not_due" / "stop"), N_DOSED, INTERVAL. "not_due" marks a grid point
+at which no dose was due under the dosing interval in force (the
+block declares \code{intervals} and \code{start_interval}): the
+controller was not consulted and gave no dose, but SIGNAL still holds
+what the monitor read. INTERVAL is the dosing interval in force after
+the decision, NA when the block declares no \code{intervals}.}
 \item{\code{metrics}}{One row per realized run (subject x draw x
 replicate) - the per-subject outcome summary: DRAW, SIM, ID, CUM_DOSE
 (sum of controller-issued doses; excludes the base regimen), N_DOSES
 (controller doses only), N_INCREASES / N_DECREASES (realized
-dose-change counts, by dose delta), N_HOLDS, DISCONTINUED,
+dose-change counts, by dose delta), N_HOLDS (consulted decisions that
+gave no dose; not-due points are not counted), N_NOT_DUE (grid points
+that were not due), DISCONTINUED,
 TIME_TO_DISCONT, SIGNAL_MIN / SIGNAL_MAX / SIGNAL_MEAN (over the
 decisions that recorded a signal), and PCT_TIME_IN_WINDOW - the fraction
 of signal-bearing decisions whose observed value fell inside the model's
@@ -161,15 +168,16 @@ trough), and a base dose scheduled after a \code{stop} still lands - a
 \strong{System resets.} An \code{EVID = 3} row zeroes the compartments (and
 re-seeds any \code{init(state) = expr}) at its time; \code{EVID = 4} does the
 same and then doses. Ordering at a shared time is reset, then dose, then
-observation. Some combinations remain rejected with a typed error rather than
-silently mis-integrated: a base regimen combined with a reset \emph{under} a
-time-varying covariate or IOV; a steady-state, lag-timed, or modeled-rate
-(\code{RATE}) base dose \emph{under} a time-varying covariate or IOV (these
-are supported on the constant-covariate path); and an \code{auc_target} metric
-combined with a time-varying covariate, a \code{TIME}-dependent PK parameter,
-or IOV. An \code{auc_target} metric on a subject with resets is accepted: the
-window AUC is integrated on the run's own trajectory, so a dose or reset
-inside a decision window is integrated exactly.
+observation. A base regimen combined with resets runs on the
+constant-covariate path and under a time-varying covariate or IOV. One
+combination remains rejected with a typed error rather than silently
+mis-integrated: a steady-state, lag-timed, or modeled-rate (\code{RATE})
+base dose \emph{under} a time-varying covariate or IOV (supported on the
+constant-covariate path). An \code{auc_target} metric is accepted on a
+subject with resets, under a time-varying covariate, a \code{TIME}-dependent
+PK parameter, or IOV: the window AUC is integrated on the run's own
+trajectory, so a dose or reset inside a decision window is integrated
+exactly.
 }
 \section{Errors raised by the engine}{
 
