@@ -222,8 +222,11 @@ jobs:
   # tarball, and install it inside a network namespace with nothing in it -
   # so a crate missing from the vendored set, or a source cargo still tries to
   # fetch, fails here rather than at a validation site. Runs as its own job so
-  # it adds no time to R-CMD-check above.
+  # it adds no time to R-CMD-check above, and only on pushes to main and manual
+  # runs: it is one more full Rust build, and a PR rarely changes what it tests
+  # (run it on a branch with `gh workflow run R-CMD-check.yaml --ref <branch>`).
   offline-install:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     name: offline install of the vendored source tarball
