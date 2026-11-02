@@ -63,7 +63,7 @@ the crates.io crates. To build where there is no network (a validation
 image, an air-gapped server), make a source tarball that carries them all:
 
 ```bash
-tools/vendor-rust.sh                 # writes src/rust/vendor.tar.xz (~18 MB)
+tools/vendor-rust.sh                 # writes src/rust/vendor.tar.xz (~25 MB)
 R CMD build --no-build-vignettes .   # the tarball now includes it
 ```
 

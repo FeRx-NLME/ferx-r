@@ -3,7 +3,7 @@
 # built afterwards (`R CMD build .`) installs with no network and a read-only
 # CARGO_HOME (ferx-r #666).
 #
-# The tarball is a release artifact, not a tracked file: it is ~18 MB and would
+# The tarball is a release artifact, not a tracked file: it is ~25 MB (26 MB at ferx-core 497f918b) and would
 # grow git history by that much on every ferx-core pin bump. It is gitignored
 # but not Rbuildignored, so `R CMD build` picks it up when it is present and a
 # GitHub install (which builds from the repository) never sees it. src/Makevars
