@@ -491,17 +491,11 @@ ferx_xpose <- function(fit,
   roles <- tbl$roles
   cols  <- names(tbl$data)
   type  <- rep("na", length(cols))
-  set <- function(role, value) type[cols %in% roles[[role]]] <<- value
-  set("id", "id")
-  set("idv", "idv")
-  set("dv", "dv")
-  set("occ", "occ")
-  set("pred", "pred")
-  set("res", "res")
-  set("param", "param")
-  set("eta", "eta")
-  set("contcov", "contcov")
-  set("catcov", "catcov")
+  # Each role's xpose type string is the role's own name.
+  for (role in c("id", "idv", "dv", "occ", "pred", "res", "param", "eta",
+                 "contcov", "catcov")) {
+    type[cols %in% roles[[role]]] <- role
+  }
   # xpose treats individual predictions as their own column type (`ipred`),
   # distinct from population `pred`; templates like dv_vs_ipred() require it.
   type[cols == "IPRED"] <- "ipred"
