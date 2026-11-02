@@ -30,15 +30,16 @@
 #' \strong{System resets.} An \code{EVID = 3} row zeroes the compartments (and
 #' re-seeds any \code{init(state) = expr}) at its time; \code{EVID = 4} does the
 #' same and then doses. Ordering at a shared time is reset, then dose, then
-#' observation. Some combinations remain rejected with a typed error rather than
-#' silently mis-integrated: a base regimen combined with a reset \emph{under} a
-#' time-varying covariate or IOV; a steady-state, lag-timed, or modeled-rate
-#' (\code{RATE}) base dose \emph{under} a time-varying covariate or IOV (these
-#' are supported on the constant-covariate path); and an \code{auc_target} metric
-#' combined with a time-varying covariate, a \code{TIME}-dependent PK parameter,
-#' or IOV. An \code{auc_target} metric on a subject with resets is accepted: the
-#' window AUC is integrated on the run's own trajectory, so a dose or reset
-#' inside a decision window is integrated exactly.
+#' observation. A base regimen combined with resets runs on the
+#' constant-covariate path and under a time-varying covariate or IOV. One
+#' combination remains rejected with a typed error rather than silently
+#' mis-integrated: a steady-state, lag-timed, or modeled-rate (\code{RATE})
+#' base dose \emph{under} a time-varying covariate or IOV (supported on the
+#' constant-covariate path). An \code{auc_target} metric is accepted on a
+#' subject with resets, under a time-varying covariate, a \code{TIME}-dependent
+#' PK parameter, or IOV: the window AUC is integrated on the run's own
+#' trajectory, so a dose or reset inside a decision window is integrated
+#' exactly.
 #'
 #' @param model Path to a .ferx model file containing an \code{[adaptive_dosing]}
 #'   block
