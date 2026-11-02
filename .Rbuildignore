@@ -19,3 +19,7 @@
 ^codecov\.yml$
 ^vignettes/articles$
 ^changelog\.d$
+^src/rust/vendor$
+^src/rust/vendor-config\.toml$
+^src/rust/vendor-Cargo\.lock$
+^\.git$

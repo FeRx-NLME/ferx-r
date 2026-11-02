@@ -55,6 +55,23 @@ Keep `ci` and `survival`: they carry the covariance step and time-to-event
 support. A build without `nn` rejects a model declaring `[covariate_nn]` with
 `E_NN_FEATURE_DISABLED`; everything else is unchanged.
 
+#### Installing without network access
+
+An install from GitHub or a local clone downloads the Rust dependencies
+during the build: ferx-core at the commit `src/rust/Cargo.lock` pins, and
+the crates.io crates. To build where there is no network (a validation
+image, an air-gapped server), make a source tarball that carries them all:
+
+```bash
+tools/vendor-rust.sh                 # writes src/rust/vendor.tar.xz (~18 MB)
+R CMD build --no-build-vignettes .   # the tarball now includes it
+```
+
+`R CMD INSTALL ferx_<version>.tar.gz` then builds offline, with no network
+and a read-only `CARGO_HOME`. The vendored crates are the same pinned
+revisions an online install would fetch. `vendor.tar.xz` is not committed
+(it is gitignored), so a GitHub install is unaffected by any of this.
+
 ### Windows
 
 Native Windows installs are supported.
