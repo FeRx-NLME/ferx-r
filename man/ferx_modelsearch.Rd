@@ -69,7 +69,15 @@ keeps the run in memory, which also means it cannot be resumed.}
 
 \item{resume}{Reuse the fits already journalled in \code{directory}.}
 
-\item{progress}{Print the engine's layer progress to the console.}
+\item{progress}{Report the run as it goes: \code{TRUE}, \code{FALSE},
+\code{"bar"} or \code{"lines"}. \code{"bar"} prints the engine's layer
+summary to stderr. \code{"lines"} prints that summary and one line per
+candidate as its fit finishes - step, id, features, OFV, criterion value,
+and \code{passed} or \code{failed (<gate>)} - to stdout, flushed line
+by line so it streams into a log. \code{TRUE} picks \code{"bar"} in an
+interactive session and \code{"lines"} otherwise (e.g. under
+\code{Rscript}); the default, \code{interactive()}, prints nothing in a
+script unless asked.}
 
 \item{x}{A \code{ferx_modelsearch} object.}
 

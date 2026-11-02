@@ -370,7 +370,7 @@ ferx_rust_search_table_columns <- function() {
 #' @title Internal Rust backend binding
 #' @keywords internal
 ferx_rust_covsearch <- function(config_path, model_path, data_path, mfl, algorithm, p_forward, p_backward, max_steps, adaptive, rank, rank_cutoff, threads, retries, resume, directory, progress) {
-  .Call("wrap__ferx_rust_covsearch", config_path, model_path, data_path, mfl, algorithm, p_forward, p_backward, as.integer(max_steps), as.integer(adaptive), rank, rank_cutoff, as.integer(threads), as.integer(retries), resume, directory, progress)
+  .Call("wrap__ferx_rust_covsearch", config_path, model_path, data_path, mfl, algorithm, p_forward, p_backward, as.integer(max_steps), as.integer(adaptive), rank, rank_cutoff, as.integer(threads), as.integer(retries), resume, directory, as.integer(progress))
 }
 
 #' @title Internal Rust backend binding
@@ -382,7 +382,7 @@ ferx_rust_allometry <- function(config_path, model_path, data_path, covariate, r
 #' @title Internal Rust backend binding
 #' @keywords internal
 ferx_rust_modelsearch <- function(config_path, model_path, data_path, mfl, algorithm, iiv_strategy, rank, rank_cutoff, threads, retries, resume, directory, progress) {
-  .Call("wrap__ferx_rust_modelsearch", config_path, model_path, data_path, mfl, algorithm, iiv_strategy, rank, rank_cutoff, as.integer(threads), as.integer(retries), resume, directory, progress)
+  .Call("wrap__ferx_rust_modelsearch", config_path, model_path, data_path, mfl, algorithm, iiv_strategy, rank, rank_cutoff, as.integer(threads), as.integer(retries), resume, directory, as.integer(progress))
 }
 
 #' @title Internal Rust backend binding
@@ -394,7 +394,7 @@ ferx_rust_modelsearch_columns <- function() {
 #' @title Internal Rust backend binding
 #' @keywords internal
 ferx_rust_ruvsearch <- function(config_path, model_path, data_path, groups, p_value, skip, max_iter, cwres_prescreen, threads, retries, resume, directory, progress) {
-  .Call("wrap__ferx_rust_ruvsearch", config_path, model_path, data_path, as.integer(groups), p_value, skip, as.integer(max_iter), as.integer(cwres_prescreen), as.integer(threads), as.integer(retries), resume, directory, progress)
+  .Call("wrap__ferx_rust_ruvsearch", config_path, model_path, data_path, as.integer(groups), p_value, skip, as.integer(max_iter), as.integer(cwres_prescreen), as.integer(threads), as.integer(retries), resume, directory, as.integer(progress))
 }
 
 #' @title Internal Rust backend binding
@@ -412,7 +412,7 @@ ferx_rust_covsearch_columns <- function() {
 #' @title Internal Rust backend binding
 #' @keywords internal
 ferx_rust_iivsearch <- function(config_path, model_path, data_path, mfl, algorithm, correlation_algorithm, as_fullblock, block_retries, rank, rank_cutoff, threads, retries, resume, directory, progress) {
-  .Call("wrap__ferx_rust_iivsearch", config_path, model_path, data_path, mfl, algorithm, correlation_algorithm, as.integer(as_fullblock), as.integer(block_retries), rank, rank_cutoff, as.integer(threads), as.integer(retries), resume, directory, progress)
+  .Call("wrap__ferx_rust_iivsearch", config_path, model_path, data_path, mfl, algorithm, correlation_algorithm, as.integer(as_fullblock), as.integer(block_retries), rank, rank_cutoff, as.integer(threads), as.integer(retries), resume, directory, as.integer(progress))
 }
 
 #' @title Internal Rust backend binding
@@ -424,7 +424,7 @@ ferx_rust_iivsearch_columns <- function() {
 #' @title Internal Rust backend binding
 #' @keywords internal
 ferx_rust_iovsearch <- function(config_path, model_path, data_path, mfl, column, distribution, groups, block_retries, rank, rank_cutoff, threads, retries, resume, directory, progress) {
-  .Call("wrap__ferx_rust_iovsearch", config_path, model_path, data_path, mfl, column, distribution, groups, as.integer(block_retries), rank, rank_cutoff, as.integer(threads), as.integer(retries), resume, directory, progress)
+  .Call("wrap__ferx_rust_iovsearch", config_path, model_path, data_path, mfl, column, distribution, groups, as.integer(block_retries), rank, rank_cutoff, as.integer(threads), as.integer(retries), resume, directory, as.integer(progress))
 }
 
 #' @title Internal Rust backend binding
@@ -436,7 +436,7 @@ ferx_rust_iovsearch_columns <- function() {
 #' @title Internal Rust backend binding
 #' @keywords internal
 ferx_rust_amd <- function(config_path, model_path, data_path, mfl, strategy, retries_on, skip, rank, rank_cutoff, threads, retries, resume, directory, progress) {
-  .Call("wrap__ferx_rust_amd", config_path, model_path, data_path, mfl, strategy, retries_on, skip, rank, rank_cutoff, as.integer(threads), as.integer(retries), resume, directory, progress)
+  .Call("wrap__ferx_rust_amd", config_path, model_path, data_path, mfl, strategy, retries_on, skip, rank, rank_cutoff, as.integer(threads), as.integer(retries), resume, directory, as.integer(progress))
 }
 
 #' @title Internal Rust backend binding
@@ -460,7 +460,7 @@ ferx_rust_amd_candidate_columns <- function() {
 #' @title Internal Rust backend binding
 #' @keywords internal
 ferx_rust_globalsearch <- function(config_path, model_path, data_path, mfl, algorithm, iiv_strategy, max_models, ga_keys, ga_values, penalty_keys, penalty_values, rank, rank_cutoff, threads, retries, resume, directory, progress) {
-  .Call("wrap__ferx_rust_globalsearch", config_path, model_path, data_path, mfl, algorithm, iiv_strategy, as.integer(max_models), as.character(ga_keys), as.character(ga_values), as.character(penalty_keys), as.character(penalty_values), rank, rank_cutoff, as.integer(threads), as.integer(retries), resume, directory, progress)
+  .Call("wrap__ferx_rust_globalsearch", config_path, model_path, data_path, mfl, algorithm, iiv_strategy, as.integer(max_models), as.character(ga_keys), as.character(ga_values), as.character(penalty_keys), as.character(penalty_values), rank, rank_cutoff, as.integer(threads), as.integer(retries), resume, directory, as.integer(progress))
 }
 
 #' @title Internal Rust backend binding

@@ -189,7 +189,10 @@ test_that("argument validation happens before anything is fitted", {
                               run_base_model = FALSE),
                "run_base_model")
   expect_error(ferx_bootstrap(ex$model, ex$data, dofv = NA), "TRUE or FALSE")
-  expect_error(ferx_bootstrap(ex$model, ex$data, progress = NA), "TRUE or FALSE")
+  expect_error(ferx_bootstrap(ex$model, ex$data, progress = NA),
+               '"bar" or "lines"')
+  expect_error(ferx_bootstrap(ex$model, ex$data, progress = "verbose"),
+               '"bar" or "lines"')
   expect_error(ferx_bootstrap(ex$model, ex$data, stratify_on = NA),
                "single column name")
   expect_error(ferx_bootstrap(ex$model, ex$data, sample_size = c(3, 4)),
@@ -300,7 +303,7 @@ test_that("a watched run reports its fits and returns the same numbers", {
   ex <- ferx_example("warfarin")
 
   seen <- list()
-  handler <- function(stage, completed, total, base_fit) {
+  handler <- function(stage, completed, total, base_fit, ...) {
     seen[[length(seen) + 1L]] <<- list(stage = stage, completed = completed,
                                        total = total, base_fit = base_fit)
     invisible(NULL)
@@ -309,7 +312,7 @@ test_that("a watched run reports its fits and returns the same numbers", {
                 function(...) handler)
 
   watched <- ferx_bootstrap(ex$model, ex$data, samples = 4L, seed = 42,
-                            threads = 2L, progress = TRUE)
+                            threads = 2L, progress = "bar")
   quiet <- ferx_bootstrap(ex$model, ex$data, samples = 4L, seed = 42,
                           threads = 2L, progress = FALSE)
 
@@ -323,6 +326,78 @@ test_that("a watched run reports its fits and returns the same numbers", {
 
   # Watching a run must not change it: same seed, same estimates.
   expect_equal(watched$parameters, quiet$parameters)
+})
+
+test_that("progress = \"lines\" prints one stdout line per replicate (#677)", {
+  ex <- ferx_example("warfarin")
+
+  out <- utils::capture.output(
+    bs <- ferx_bootstrap(ex$model, ex$data, samples = 4L, seed = 42,
+                         threads = 2L, progress = "lines"),
+    type = "output"
+  )
+
+  # The run header, the base fit, one record per replicate, the end marker.
+  expect_identical(out[1], "bootstrap: fitting the base model, then 4 replicates to fit")
+  expect_true("bootstrap: base model fitted" %in% out)
+  expect_identical(out[length(out)], "bootstrap: done")
+
+  reps <- grep("^replicate ", out, value = TRUE)
+  expect_length(reps, 4L)
+  expect_match(reps, paste0("^replicate [0-9]+ \\([1-4]/4\\): OFV (-|-?[0-9.]+), ",
+                            "(converged|not_converged|stalled|failed)"))
+  # Each replicate exactly once: completion order, but every sample index and
+  # every completion count appears once, the redraw timer's repeats suppressed.
+  samples <- as.integer(sub("^replicate ([0-9]+) .*", "\\1", reps))
+  expect_setequal(samples, bs$raw$sample[bs$raw$sample > 0])
+  counts <- as.integer(sub("^replicate [0-9]+ \\(([0-9]+)/4\\).*", "\\1", reps))
+  expect_setequal(counts, 1:4)
+
+  # Each line's OFV is that replicate's own.
+  for (r in reps) {
+    k <- as.integer(sub("^replicate ([0-9]+) .*", "\\1", r))
+    ofv <- bs$raw$ofv[bs$raw$sample == k]
+    if (!is.na(ofv)) expect_match(r, sprintf("OFV %.3f", ofv), fixed = TRUE)
+  }
+})
+
+test_that("progress = TRUE picks lines outside an interactive session (#677)", {
+  expect_identical(.ferx_progress_mode(TRUE, "f", interactive = FALSE), "lines")
+  expect_identical(.ferx_progress_mode(TRUE, "f", interactive = TRUE), "bar")
+  expect_identical(.ferx_progress_mode(FALSE, "f", interactive = FALSE), "off")
+  expect_identical(.ferx_progress_mode("bar", "f", interactive = FALSE), "bar")
+  expect_identical(.ferx_progress_mode("lines", "f", interactive = TRUE), "lines")
+  expect_error(.ferx_progress_mode(NA, "f"), "f: `progress` must be")
+  expect_error(.ferx_progress_mode(c(TRUE, FALSE), "f"), "must be")
+  expect_error(.ferx_progress_mode("text", "f"), "must be")
+  expect_identical(.ferx_search_progress("lines", "f"), 2L)
+  expect_identical(.ferx_search_progress(FALSE, "f"), 0L)
+})
+
+test_that("the line renderer prints fresh events only and never throws", {
+  h <- .ferx_bootstrap_progress_lines()
+  out <- utils::capture.output({
+    h("started", 2L, 3L, FALSE)
+    h("started", 2L, 3L, FALSE, fresh = FALSE)
+    h("replicate", 1L, 3L, FALSE, 7L, 501.23456, "converged", "")
+    h("replicate", 1L, 3L, FALSE, 7L, 501.23456, "converged", "", FALSE)
+    h("replicate", 2L, 3L, FALSE, 2L, NA_real_, "failed", "fit failed")
+    h("replicate", 3L, 3L, FALSE, 5L, 499, "stalled", "estimate near boundary")
+    h("dofv", 1L, 3L, FALSE, 7L, 1.5, "", "")
+    h("dofv", 2L, 3L, FALSE, 2L, NA_real_, "", "")
+    h("finished", 0L, 0L, FALSE)
+    # A malformed event is dropped, not raised: a log line must not cost a run.
+    h("started", NULL, NULL, NULL)
+  })
+  expect_identical(out, c(
+    "bootstrap: 3 replicates to fit (2 reused from the directory)",
+    "replicate 7 (1/3): OFV 501.235, converged",
+    "replicate 2 (2/3): OFV -, failed, skipped: fit failed",
+    "replicate 5 (3/3): OFV 499.000, stalled, skipped: estimate near boundary",
+    "delta-OFV 7 (1/3): 1.500",
+    "delta-OFV 2 (2/3): skipped",
+    "bootstrap: done"
+  ))
 })
 
 test_that("the progress handler tolerates a coalesced event stream", {

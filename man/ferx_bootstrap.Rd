@@ -109,13 +109,18 @@ larger \code{samples} does not extend the earlier run.}
 \emph{failed}, instead of carrying the failure forward. Default \code{FALSE} (PsN's
 default). Needs \code{resume = TRUE}.}
 
-\item{progress}{Show a progress bar while the replicates fit. Default
-\code{interactive()}, so a script or a knitted document prints nothing. Uses
+\item{progress}{Report the replicates as they fit: \code{TRUE}, \code{FALSE},
+\code{"bar"} or \code{"lines"}. Default \code{interactive()}, so a script or a knitted
+document prints nothing unless asked. \code{"bar"} draws a progress bar, with
 the cli package when it is installed and \code{\link[utils:txtProgressBar]{utils::txtProgressBar()}}
-otherwise. The bar is drawn by this R session while the fits run in the
-engine, and reports what the run will actually do: a \code{resume = TRUE} run
-whose \code{directory} already holds most of the replicates counts only the
-ones still to fit.}
+otherwise; it reports what the run will actually do, so a \code{resume = TRUE}
+run whose \code{directory} already holds most of the replicates counts only the
+ones still to fit. \code{"lines"} prints plain text on stdout instead, one line
+per replicate as it finishes - its sample index, OFV and how the fit ended
+(\code{converged}, \code{not_converged}, \code{stalled} or \code{failed}), plus the exclusion
+filter that leaves it out of the summary, if any - flushed line by line so
+it streams into a log. \code{TRUE} picks \code{"bar"} in an interactive session and
+\code{"lines"} otherwise, e.g. under \code{Rscript}.}
 
 \item{verbose}{Print a one-line run header to stderr. Default \code{FALSE}.}
 }
@@ -182,7 +187,8 @@ This is \code{samples} (+ 1) complete fits. At PsN's rule-of-thumb 200 samples a
 model that takes a minute to fit takes over three hours, so \code{threads} is the
 argument that matters most. \code{progress} (on by default in an interactive
 session) draws a bar as the replicates come in, so a long run says where it
-is.
+is; \code{progress = "lines"} - what \code{progress = TRUE} picks under \code{Rscript} -
+prints a line per replicate to stdout instead, for a log.
 
 A run is interruptible: Ctrl-C is checked several times a second, the fits
 in flight stop at their next iteration, and the call raises \verb{ferx_bootstrap: cancelled by user} rather than returning. It raises rather than returning
