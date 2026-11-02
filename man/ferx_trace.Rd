@@ -15,7 +15,9 @@ CSV file written by ferx. If omitted, uses the trace from the last
 \value{
 A data frame with columns:
 \item{iter}{Iteration / evaluation index (integer)}
-\item{method}{Estimation method: "foce", "focei", "gn", "gn_hybrid", "saem"}
+\item{method}{Estimation method: "foce", "focei", "gn", "gn_hybrid",
+"saem", or the objective a Laplace fit scores: "laplace" (one quadrature
+node) or "agq" (\code{n_agq > 1})}
 \item{phase}{Sub-phase label (empty string for single-phase methods)}
 \item{ofv}{Objective function value at this iteration}
 \item{wall_ms}{Wall-clock milliseconds elapsed since the start of the fit}

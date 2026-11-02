@@ -109,14 +109,21 @@ was drawn into for that replicate; it is absent otherwise.}
 doses only} (pre-scheduled base doses are excluded): DRAW, SIM, ID, TIME,
 AMT, CMT, RATE, DECISION, SIGNAL (the value the controller titrated on -
 assay-noised when \code{with_assay_error}), RULE (the rule that fired).}
-\item{\code{decisions}}{One row per decision including holds: DRAW, SIM,
-ID, DECISION, TIME, SIGNAL, OUTCOME ("dosed" / "hold" / "stop"),
-N_DOSED.}
+\item{\code{decisions}}{One row per review-grid point including holds:
+DRAW, SIM, ID, DECISION, TIME, SIGNAL, OUTCOME ("dosed" / "hold" /
+"not_due" / "stop"), N_DOSED, INTERVAL. "not_due" marks a grid point
+at which no dose was due under the dosing interval in force (the
+block declares \code{intervals} and \code{start_interval}): the
+controller was not consulted and gave no dose, but SIGNAL still holds
+what the monitor read. INTERVAL is the dosing interval in force after
+the decision, NA when the block declares no \code{intervals}.}
 \item{\code{metrics}}{One row per realized run (subject x draw x
 replicate) - the per-subject outcome summary: DRAW, SIM, ID, CUM_DOSE
 (sum of controller-issued doses; excludes the base regimen), N_DOSES
 (controller doses only), N_INCREASES / N_DECREASES (realized
-dose-change counts, by dose delta), N_HOLDS, DISCONTINUED,
+dose-change counts, by dose delta), N_HOLDS (consulted decisions that
+gave no dose; not-due points are not counted), N_NOT_DUE (grid points
+that were not due), DISCONTINUED,
 TIME_TO_DISCONT, SIGNAL_MIN / SIGNAL_MAX / SIGNAL_MEAN (over the
 decisions that recorded a signal), and PCT_TIME_IN_WINDOW - the fraction
 of signal-bearing decisions whose observed value fell inside the model's

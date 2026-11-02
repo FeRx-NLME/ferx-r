@@ -70,9 +70,9 @@ test_that("the result tables carry the documented columns", {
   expect_true(all(c("DRAW", "SIM", "ID", "TIME", "AMT", "CMT", "RATE", "DECISION",
     "SIGNAL", "RULE") %in% names(res$doses)))
   expect_true(all(c("DRAW", "SIM", "ID", "DECISION", "TIME", "SIGNAL", "OUTCOME",
-    "N_DOSED") %in% names(res$decisions)))
+    "N_DOSED", "INTERVAL") %in% names(res$decisions)))
   expect_true(all(c("DRAW", "SIM", "ID", "CUM_DOSE", "N_DOSES", "N_INCREASES",
-    "N_DECREASES", "N_HOLDS", "DISCONTINUED", "TIME_TO_DISCONT", "SIGNAL_MIN",
+    "N_DECREASES", "N_HOLDS", "N_NOT_DUE", "DISCONTINUED", "TIME_TO_DISCONT", "SIGNAL_MIN",
     "SIGNAL_MAX", "SIGNAL_MEAN", "PCT_TIME_IN_WINDOW") %in% names(res$metrics)))
 })
 test_that("n_sim = 3 produces three replicates across all three tables", {
@@ -164,7 +164,7 @@ test_that("a non-logical `verify` is rejected before touching the engine", {
 test_that("decisions tag every realized dose with a valid outcome (Dosed path)", {
   ex  <- ferx_example("adaptive_tdm")
   res <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 2L, seed = 1L)
-  expect_true(all(res$decisions$OUTCOME %in% c("dosed", "hold", "stop")))
+  expect_true(all(res$decisions$OUTCOME %in% c("dosed", "hold", "not_due", "stop")))
   # The TDM titration has no hold/stop rule, so every decision issues a dose;
   # the converter must mark each "dosed" with N_DOSED >= 1.
   expect_true(all(res$decisions$OUTCOME == "dosed"))
@@ -236,6 +236,51 @@ test_that("a stop rule discontinues after the first decision", {
   expect_true(all(res$metrics$DISCONTINUED))
   expect_true(all(res$metrics$TIME_TO_DISCONT == 0))
   expect_true(all(res$metrics$N_DOSES == 0L))
+})
+test_that("a 24 h interval on a 12 h grid logs every second point not_due (ferx-core #945)", {
+  # The review grid stays at 0, 12, 24, 36, 48; a 24 h interval makes only 0, 24
+  # and 48 due. The rule never fires, so each due point re-issues the dose.
+  model <- .write_adaptive_model(c(
+    "  intervals      = [24]",
+    "  start_interval = 24",
+    "  when signal > 1000000 : hold"
+  ))
+  data <- ferx_example("adaptive_tdm")$data
+  res  <- ferx_simulate_adaptive(model, data, n_sim = 1L, seed = 1L)
+  d    <- res$decisions
+  due  <- d$TIME %% 24 == 0
+  expect_true(all(d$OUTCOME[due] == "dosed"))
+  expect_true(all(d$OUTCOME[!due] == "not_due"))
+  expect_true(all(d$N_DOSED[!due] == 0L))
+  expect_true(all(d$INTERVAL == 24))
+  # Not-due points still record what the monitor read.
+  expect_false(anyNA(d$SIGNAL[!due]))
+  # Doses only at the due points.
+  expect_gt(nrow(res$doses), 0L)
+  expect_true(all(res$doses$TIME %% 24 == 0))
+  # N_NOT_DUE counts the not-due points; N_HOLDS does not.
+  m <- res$metrics
+  n_not_due <- tapply(!due, d$ID, sum)
+  expect_equal(m$N_NOT_DUE, as.integer(n_not_due[m$ID]))
+  expect_true(all(m$N_NOT_DUE == 2L))
+  expect_true(all(m$N_HOLDS == 0L))
+  expect_true(all(m$N_DOSES == 3L))
+})
+test_that("decisions$INTERVAL is NA when the block declares no intervals", {
+  model <- .write_adaptive_model("  when signal > 1000000 : hold")
+  data  <- ferx_example("adaptive_tdm")$data
+  res   <- ferx_simulate_adaptive(model, data, n_sim = 1L, seed = 1L)
+  expect_true(all(is.na(res$decisions$INTERVAL)))
+  expect_true(all(res$metrics$N_NOT_DUE == 0L))
+})
+test_that("intervals without start_interval is a parse error naming start_interval", {
+  model <- .write_adaptive_model(c(
+    "  intervals = [24]",
+    "  when signal > 1000000 : hold"
+  ))
+  data <- ferx_example("adaptive_tdm")$data
+  expect_error(ferx_simulate_adaptive(model, data, n_sim = 1L, seed = 1L),
+               "start_interval")
 })
 
 # ---- Pre-scheduled base regimen (loading dose) + system resets (ferx-core #702 / #716 / #929) ----
@@ -384,9 +429,8 @@ test_that("AUC_TARGET_ATTAINMENT is NA without an auc_target", {
   expect_identical(res$metrics$AUC_TARGET_ATTAINMENT, NA_real_)
 })
 
-test_that("unsupported adaptive combinations raise a typed error", {
-  # A base regimen combined with a reset UNDER IOV is rejected (base x reset is
-  # supported on the constant-covariate path only).
+test_that("a base regimen with a reset runs under IOV (ferx-core #932)", {
+  # Refused with E_ADAPTIVE_UNSUPPORTED before ferx-core #2556.
   iov_model <- .write_vanco_model(
     cl_expr      = "TVCL * exp(ETA_CL + KAPPA_CL)",
     extra_params = "  kappa KAPPA_CL ~ 0.09",
@@ -394,9 +438,29 @@ test_that("unsupported adaptive combinations raise a typed error", {
       "  target_window = [10, 15]",
       "  when signal < 10 : increase 25%"
     ))
+  res <- ferx_simulate_adaptive(iov_model, .write_vanco_data("evid3"),
+                                n_sim = 1L, seed = 1L)
+  # The t = 12 reset zeroes CENT under IOV as on the constant path, so the
+  # t = 24 trough is ~0 and the controller escalates from there.
+  expect_lt(.first_signal(res), 1)
+  expect_gt(nrow(res$doses), 0L)
+})
+
+test_that("an adaptive model the driver cannot simulate raises a typed error", {
+  # A closed-form model (no [odes]) is refused before any subject runs.
+  model <- .write_adaptive_model("  when signal > 1000000 : hold")
+  text  <- readLines(model)
+  text  <- sub("  ode(states=[central])",
+               "  pk one_cpt_iv(cl=CL, v=V)", text, fixed = TRUE)
+  text  <- text[!(text %in% c("[odes]", "  d/dt(central) = -(CL / V) * central",
+                              "[scaling]", "  y = central / V"))]
+  text  <- sub("observe     = central / V", "observe     = C", text, fixed = TRUE)
+  writeLines(text, model)
   expect_error(
-    ferx_simulate_adaptive(iov_model, .write_vanco_data("evid3"), n_sim = 1L, seed = 1L),
-    "base regimen combined with system"
+    ferx_simulate_adaptive(model, ferx_example("adaptive_tdm")$data,
+                           n_sim = 1L, seed = 1L),
+    "requires an ODE model.*E_ADAPTIVE_UNSUPPORTED",
+    class = "ferx_engine_error"
   )
 })
 
