@@ -442,6 +442,9 @@ test_that("ferx_xpose keeps only pktte_joint's Gaussian rows (#688)", {
   expect_equal(nrow(df), 12L)
   expect_false(any(c("COXSNELL", "MARTINGALE", "DEVIANCE", "PIT") %in% names(df)))
   expect_message(.ferx_xpose_frame(fit), "6 time-to-event sdtab rows")
+  # message(<condition>) prints the text as is: the line ends in the text.
+  m <- tryCatch(.ferx_xpose_frame(fit), message = conditionMessage)
+  expect_match(m, "\n$")
 })
 
 test_that("ferx_xpose reports pktte_joint's nobs as its 12 observations (#688)", {
