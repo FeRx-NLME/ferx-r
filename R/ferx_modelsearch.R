@@ -68,7 +68,15 @@
 #'   \code{models/<id>.ferx} and \code{final.ferx} are written. \code{NULL}
 #'   keeps the run in memory, which also means it cannot be resumed.
 #' @param resume Reuse the fits already journalled in \code{directory}.
-#' @param progress Print the engine's layer progress to the console.
+#' @param progress Report the run as it goes: \code{TRUE}, \code{FALSE},
+#'   \code{"bar"} or \code{"lines"}. \code{"bar"} prints the engine's layer
+#'   summary to stderr. \code{"lines"} prints that summary and one line per
+#'   candidate as its fit finishes - step, id, features, OFV, criterion value,
+#'   and \code{passed} or \code{failed (<gate>)} - to stdout, flushed line
+#'   by line so it streams into a log. \code{TRUE} picks \code{"bar"} in an
+#'   interactive session and \code{"lines"} otherwise (e.g. under
+#'   \code{Rscript}); the default, \code{interactive()}, prints nothing in a
+#'   script unless asked.
 #'
 #' @return An object of class \code{ferx_modelsearch}:
 #'   \describe{
@@ -190,7 +198,7 @@ ferx_modelsearch <- function(model = NULL,
     retries      = .ferx_search_count(retries, "retries", what, below = -1L, min = 0L),
     resume       = .ferx_search_bool(resume, "resume", what),
     directory    = dir_arg,
-    progress     = .ferx_search_bool(progress, "progress", what)
+    progress     = .ferx_search_progress(progress, what)
   )
 
   # The engine's 21 columns in the engine's order, then `structure` - the

@@ -276,3 +276,49 @@ test_that("print() shows the step table and the final relations", {
   expect_match(out, "ferx covariate search")
   expect_match(out, "Final covariate relations")
 })
+
+test_that("progress = \"lines\" prints a stdout line per candidate (#677)", {
+  skip_on_cran()
+  ex <- ferx_example("two_cpt_oral_base")
+
+  # In memory, so no candidate is read back from an earlier run's journal.
+  out <- utils::capture.output(
+    res <- ferx_covsearch(
+      model        = ex$model,
+      data         = ex$data,
+      search_space = "COVARIATE?(CL, WT, pow)",
+      max_steps    = 1,
+      retries      = 0,
+      progress     = "lines"
+    ),
+    type = "output"
+  )
+
+  # The per-step summary moves to stdout with the candidate lines, so the log
+  # carries both in the order they happened.
+  expect_true(any(grepl("^Fitting the base model", out)))
+  expect_true(any(grepl("^Step 1 \\(forward\\): fitting", out)))
+
+  cands <- grep("^candidate ", out, value = TRUE)
+  expect_gte(length(cands), nrow(res$steps))
+  expect_match(cands, paste0("^candidate \\S+ \\S+( \\[.*\\])?: OFV \\S+, ",
+                             "criterion \\S+, (passed|failed \\(.+\\))"))
+  # Every candidate of the step table has its line, with its own OFV.
+  ids <- sub("^candidate \\S+ (\\S+?)(:| \\[).*$", "\\1", cands, perl = TRUE)
+  for (i in seq_len(nrow(res$steps))) {
+    line <- cands[ids == res$steps$candidate[i]]
+    expect_length(line, 1L)
+    if (!is.na(res$steps$ofv[i])) {
+      expect_match(line, sprintf("OFV %.3f", res$steps$ofv[i]), fixed = TRUE)
+    }
+  }
+})
+
+test_that("a malformed `progress` is refused before the search runs", {
+  ex <- ferx_example("two_cpt_oral_base")
+  expect_error(
+    ferx_covsearch(model = ex$model, data = ex$data,
+                   search_space = "COVARIATE?(CL, WT, pow)", progress = NA),
+    '"bar" or "lines"'
+  )
+})
