@@ -424,7 +424,7 @@ expect_gaussian_only <- function(fit, n_dropped) {
   expect_equal(nrow(df), n_gauss)
   expect_equal(df$TIME, fit$sdtab$TIME[seq_len(n_gauss)])
   expect_equal(df$DV, fit$sdtab$DV[seq_len(n_gauss)])
-  expect_false(any(!is.na(df[["COXSNELL"]])))
+  expect_false(any(.FITRX_TTE_COLS %in% names(df)))
   subject <- rep.int(seq_len(nrow(summ)), summ$n_obs)
   for (eta in setdiff(names(fit$ebe_etas), "ID")) {
     expect_equal(df[[eta]], fit$ebe_etas[[eta]][subject], info = eta)
@@ -458,6 +458,45 @@ test_that("ferx_xpose joins pktte_joint etas by subject, not ID (#688)", {
   # The reuse leaves the third subject with etas of its own to pick up.
   expect_false(isTRUE(all.equal(fit$ebe_etas$ETA_CL[1], fit$ebe_etas$ETA_CL[3])))
   expect_gaussian_only(fit, n_dropped = 6L)
+  # One subject per subject_summary row, though the data has five distinct IDs.
+  s <- .ferx_xpose_new_summary(fit, 1L)
+  expect_equal(s$value[s$label == "nind"], "6")
+})
+
+test_that("ferx_xpose joins by subject position when IDs share a number (#688)", {
+  # Subject 2 is "0" + subject 1's ID: a distinct subject in the data, but
+  # sdtab writes both IDs as the same number, so the run-length index merges
+  # their rows and an ID join gives subject 2 subject 1's etas.
+  fit <- xpose_edited_fit("warfarin", "zero_padded_id", edit = function(d) {
+    subj <- .ferx_subject_index(d$ID)
+    d$ID <- as.character(d$ID)
+    d$ID[subj == 2L] <- paste0("0", d$ID[match(1L, subj)])
+    d
+  })
+  summ <- fit$subject_summary
+  n_obs <- summ$n_obs
+  expect_equal(fit$sdtab$ID[n_obs[1] + 1L], fit$sdtab$ID[1])
+  expect_false(isTRUE(all.equal(fit$ebe_etas$ETA_CL[1], fit$ebe_etas$ETA_CL[2])))
+  expect_no_message(df <- .ferx_xpose_frame(fit)$data)
+  subject <- rep.int(seq_len(nrow(summ)), n_obs)
+  for (eta in setdiff(names(fit$ebe_etas), "ID")) {
+    expect_equal(df[[eta]], fit$ebe_etas[[eta]][subject], info = eta)
+  }
+  for (p in setdiff(names(fit$individual_estimates), "ID")) {
+    expect_equal(df[[p]], fit$individual_estimates[[p]][subject], info = p)
+  }
+})
+
+test_that("ferx_xpose refuses a fit with no Gaussian observations (#688)", {
+  for (case in list(c("binary_logistic", "discrete-endpoint"),
+                    c("tte_exponential", "time-to-event"))) {
+    fit <- xpose_edited_fit(case[1], "plain")
+    expect_equal(sum(fit$subject_summary$n_obs), 0L)
+    expect_error(.ferx_xpose_frame(fit), class = "ferx_xpose_no_gaussian_rows_error")
+    expect_error(.ferx_xpose_frame(fit),
+                 sprintf("no Gaussian observation rows \\(%d %s sdtab rows only\\)",
+                         nrow(fit$sdtab), case[2]))
+  }
 })
 
 test_that("ferx_xpose keeps only a binary model's Gaussian rows (#688)", {
@@ -495,4 +534,26 @@ test_that("xpose rows: without counts, the COXSNELL rows are left out (#688)", {
   expect_equal(nrow(tbl$data), 4L)
   expect_false("COXSNELL" %in% names(tbl$data))
   expect_equal(tbl$data$ETA_CL, fit$ebe_etas$ETA_CL[c(1, 1, 2, 2)])
+})
+
+test_that("xpose rows: without counts, rows with no N_OBS are left out (#688)", {
+  fit <- fake_fit()
+  fit$sdtab$N_OBS <- 2
+  disc <- fit$sdtab[c(1, 3, 3), ]
+  disc$TIME <- c(6, 6, 7)
+  disc$DV <- c(1, 0, 1)
+  disc$N_OBS <- NaN
+  tte <- disc[1:2, ]
+  tte$TIME <- c(9, 9)
+  for (col in .FITRX_TTE_COLS) {
+    fit$sdtab[[col]] <- NA_real_
+    disc[[col]] <- NA_real_
+    tte[[col]] <- c(0.4, 0.2)
+  }
+  fit$sdtab <- rbind(fit$sdtab, disc, tte)
+  expect_message(tbl <- .ferx_xpose_frame(fit),
+                 "3 discrete-endpoint and 2 time-to-event sdtab rows")
+  expect_equal(nrow(tbl$data), 4L)
+  expect_equal(tbl$data$TIME, c(1, 4, 1, 4))
+  expect_false(any(.FITRX_TTE_COLS %in% names(tbl$data)))
 })

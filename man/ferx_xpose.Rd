@@ -56,7 +56,8 @@ Only the Gaussian observation rows are used: the binary-endpoint rows
 and the time-to-event residual rows (\code{COXSNELL}, \code{MARTINGALE},
 \code{DEVIANCE}, \code{PIT}) that \code{fit$sdtab} carries after them are left out,
 with a message saying how many, so \code{nobs} and the DV plots count
-observations only.
+observations only. A fit with no Gaussian observations (a binary- or
+time-to-event-only model) is refused with an error.
 \item \strong{patab}: individual parameter values (\code{fit$individual_estimates})
 and empirical-Bayes etas (\code{fit$ebe_etas}), repeated for every observation
 row of each subject.

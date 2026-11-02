@@ -33,7 +33,8 @@
 #'     and the time-to-event residual rows (`COXSNELL`, `MARTINGALE`,
 #'     `DEVIANCE`, `PIT`) that `fit$sdtab` carries after them are left out,
 #'     with a message saying how many, so `nobs` and the DV plots count
-#'     observations only.
+#'     observations only. A fit with no Gaussian observations (a binary- or
+#'     time-to-event-only model) is refused with an error.
 #'   \item \strong{patab}: individual parameter values (`fit$individual_estimates`)
 #'     and empirical-Bayes etas (`fit$ebe_etas`), repeated for every observation
 #'     row of each subject.
@@ -214,9 +215,11 @@ ferx_xpose <- function(fit,
 # the leading `sum(n_obs)`. A subject_summary without an `n_obs_discrete` /
 # `n_obs_tte` column (an older fit, or a reloaded .fitrx bundle, which keeps
 # no TTE rows) has none of those rows. Without usable counts `subject` is
-# NULL, and the TTE rows are the ones with a COXSNELL value, as in
-# `.fitrx_write_predictions_csv()`. The rows left out are reported in a
-# `ferx_xpose_rows_dropped_message`.
+# NULL, the TTE rows are the ones with a COXSNELL value (as in
+# `.fitrx_write_predictions_csv()`) and the discrete rows the other ones
+# without an N_OBS value. The rows left out are reported in a
+# `ferx_xpose_rows_dropped_message`; a fit with no Gaussian rows at all is
+# refused (`ferx_xpose_no_gaussian_rows_error`).
 .ferx_xpose_gaussian_rows <- function(fit, sdtab) {
   summ <- fit$subject_summary
   count <- function(col) {
@@ -233,18 +236,28 @@ ferx_xpose <- function(fit,
     n_tte   <- length(rows$tte)
     keep <- seq_len(n_gauss)
   } else {
+    # ferx-core writes N_OBS (the subject's Gaussian count) on every Gaussian
+    # row and leaves it empty on every discrete and TTE row.
     tte <- if (all(.FITRX_TTE_COLS %in% names(sdtab))) {
       !is.na(sdtab$COXSNELL)
     } else {
       rep(FALSE, nrow(sdtab))
     }
-    n_disc <- 0L
+    other <- if ("N_OBS" %in% names(sdtab)) is.na(sdtab$N_OBS) else tte
     n_tte  <- sum(tte)
-    keep <- which(!tte)
+    n_disc <- sum(other & !tte)
+    keep <- which(!(other | tte))
+  }
+  what <- c(if (n_disc > 0L) sprintf("%d discrete-endpoint", n_disc),
+            if (n_tte > 0L) sprintf("%d time-to-event", n_tte))
+  if (length(keep) == 0L) {
+    stop(errorCondition(sprintf(paste0(
+      "ferx_xpose(): the fit has no Gaussian observation rows (%s sdtab ",
+      "rows only); Xpose's diagnostics need them."),
+      paste(what, collapse = " and ")),
+      class = "ferx_xpose_no_gaussian_rows_error"))
   }
   if (n_disc + n_tte > 0L) {
-    what <- c(if (n_disc > 0L) sprintf("%d discrete-endpoint", n_disc),
-              if (n_tte > 0L) sprintf("%d time-to-event", n_tte))
     message(messageCondition(sprintf(paste0(
       "ferx_xpose(): left out %s sdtab rows; the Xpose data holds the %d ",
       "Gaussian observation rows only."),
@@ -504,8 +517,9 @@ ferx_xpose <- function(fit,
 
 # `nobs` is the number of Gaussian observation rows in the Xpose data; the
 # default (the whole sdtab) is right only for a fit without discrete or TTE
-# rows. `nind` counts subject IDs over the whole sdtab, so a subject whose
-# only records are discrete or TTE is still counted.
+# rows. `nind` is the subject count from `fit$subject_summary`, which counts
+# a reused ID once per subject and a subject whose only records are discrete
+# or TTE; without it, the distinct sdtab IDs.
 .ferx_xpose_new_summary <- function(fit, runno, files = NULL,
                                     nobs = nrow(fit$sdtab)) {
   rows <- function(label, value, ...) {
@@ -519,7 +533,12 @@ ferx_xpose <- function(fit,
     rows("run", runno),
     rows("ofv", if (!is.null(fit$ofv)) fit$ofv else NA),
     rows("nobs", nobs),
-    rows("nind", length(unique(fit$sdtab$ID)))
+    rows("nind", if (is.data.frame(fit$subject_summary) &&
+                     nrow(fit$subject_summary) > 0L) {
+      nrow(fit$subject_summary)
+    } else {
+      length(unique(fit$sdtab$ID))
+    })
   )
   # The iteration plots' title/subtitle/caption templates reference the
   # `method`, `runtime`, `term` and `dir` keys; supply them (only when a trace
