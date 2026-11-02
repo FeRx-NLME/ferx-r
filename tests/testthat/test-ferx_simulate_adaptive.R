@@ -261,7 +261,7 @@ test_that("a 24 h interval on a 12 h grid logs every second point not_due (ferx-
   # N_NOT_DUE counts the not-due points; N_HOLDS does not.
   m <- res$metrics
   n_not_due <- tapply(!due, d$ID, sum)
-  expect_equal(m$N_NOT_DUE, as.integer(n_not_due[m$ID]))
+  expect_equal(m$N_NOT_DUE, as.integer(n_not_due[as.character(m$ID)]))
   expect_true(all(m$N_NOT_DUE == 2L))
   expect_true(all(m$N_HOLDS == 0L))
   expect_true(all(m$N_DOSES == 3L))
@@ -438,11 +438,15 @@ test_that("a base regimen with a reset runs under IOV (ferx-core #932)", {
       "  target_window = [10, 15]",
       "  when signal < 10 : increase 25%"
     ))
+  s_none <- .first_signal(
+    ferx_simulate_adaptive(iov_model, .write_vanco_data("none"), n_sim = 1L, seed = 1L))
   res <- ferx_simulate_adaptive(iov_model, .write_vanco_data("evid3"),
                                 n_sim = 1L, seed = 1L)
   # The t = 12 reset zeroes CENT under IOV as on the constant path, so the
-  # t = 24 trough is ~0 and the controller escalates from there.
+  # t = 24 trough is ~0. Without the reset the integrated base dose leaves a
+  # material trough, which a driver that dropped the base regimen would not.
   expect_lt(.first_signal(res), 1)
+  expect_gt(s_none, 3)
   expect_gt(nrow(res$doses), 0L)
 })
 
