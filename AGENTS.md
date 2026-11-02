@@ -19,7 +19,7 @@ When working on a feature branch or any branch other than `main`, always use `En
 --config 'patch."https://github.com/FeRx-NLME/ferx-core".ferx-tools.path="<...>/crates/ferx-tools"'
 ```
 
-`tools/sibling-cargo-build.sh` builds that command line, and snapshots and restores `src/rust/Cargo.lock` around it. **The patch is not written to a file** (ferx-r #353). `src/rust/.cargo/config.toml` is still generated on every build — `src/rust/.cargo/` is gitignored, and Makevars truncates and rewrites it — but it now holds only `[build]`, so nothing outside that one build sees a patch: cargo by hand and an editor's rust-analyzer resolve the pinned revision, and leave the lock alone.
+`tools/sibling-cargo-build.sh` builds that command line, and snapshots and restores `src/rust/Cargo.lock` around it. **The patch is not written to a file** (ferx-r #353). `src/rust/.cargo/config.toml` is still generated on every build — `src/rust/.cargo/` is gitignored, and Makevars truncates and rewrites it — but it now holds only `[build]` (plus, after an offline build from a vendored tarball, the `[source]` replacement pointing at `src/rust/vendor/` - never a patch; see "Vendored release tarballs"), so nothing outside that one build sees a patch: cargo by hand and an editor's rust-analyzer resolve the pinned revision, and leave the lock alone.
 
 Cargo patches **per package name**: an entry for `ferx-core` alone leaves `ferx-tools` resolving to GitHub `main` while `ferx-core` comes from your working tree — two revisions of a workspace whose halves move together, with no error to say so. Both entries, or neither. The wrapper passes both, and refuses a build in which only one of them lands (below).
 
@@ -91,6 +91,10 @@ Building against the sibling is an explicit opt-in: the two R-driven commands ta
 The cargo feature set is `CARGO_FEATURES` in `src/Makevars`, assigned with `?=` so the environment wins (#288): `CARGO_FEATURES="--no-default-features --features ci,survival" R CMD INSTALL .` builds without `nn` (Deep Compartment Models), the heaviest part of the dependency graph. Unset, the default `ci,nn,survival` is used - that is what CI and every release build compile, so never assume a local no-`nn` build's block list matches theirs.
 
 **With a sibling `../ferx-core` patched in, all three commands rewrite `src/rust/Cargo.lock`** — `roxygenize()` too, since it compiles through `src/Makevars` — so run `tools/check-ferx-core-pin.sh` before staging (see the dependency section).
+
+### Vendored release tarballs (#666)
+
+A release source tarball must build offline (GxP validation rebuilds it with no network and a read-only `CARGO_HOME`). Before `R CMD build`, run `tools/vendor-rust.sh`: it vendors every crate `Cargo.lock` pins (ferx-core/ferx-tools at the pinned commit included) into `src/rust/vendor.tar.xz`, together with the `[source]` replacement `cargo vendor` printed. When that file is present and no sibling checkout is, `src/Makevars` unpacks it, appends the replacement to `.cargo/config.toml` and runs `cargo build --offline --locked`; without it the build is the usual online one. **Never commit `vendor.tar.xz`** (~25 MB per pin bump; it is gitignored): GitHub installs must keep fetching the pinned ferx-core online. `tools/vendor-rust.sh --clean` removes it - do that after building a release tarball, or every later local build in that checkout tries the vendored set first. A lock bump makes that set stale; Makevars compares the lock packed into the tarball with the current one and refuses a mismatch by name. CI's `offline-install` job installs a vendored tarball inside `unshare --net`.
 
 ## Architecture
 

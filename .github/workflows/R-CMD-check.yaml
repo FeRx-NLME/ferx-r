@@ -215,3 +215,54 @@ jobs:
           # out of scope for this initial CI bring-up. Tighten to "warning"
           # once those are cleaned up.
           error-on: '"error"'
+
+  # A release source tarball must build with no network and a read-only
+  # CARGO_HOME (#666): GxP validation rebuilds every package that way. Vendor
+  # the crates exactly as a release does (tools/vendor-rust.sh), build the
+  # tarball, and install it inside a network namespace with nothing in it -
+  # so a crate missing from the vendored set, or a source cargo still tries to
+  # fetch, fails here rather than at a validation site. Runs as its own job so
+  # it adds no time to R-CMD-check above, and only on pushes to main and manual
+  # runs: it is one more full Rust build, and a PR rarely changes what it tests
+  # (run it on a branch with `gh workflow run R-CMD-check.yaml --ref <branch>`).
+  offline-install:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    name: offline install of the vendored source tarball
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+          use-public-rspm: true
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          dependencies: '"hard"'
+
+      - name: Vendor the Rust dependencies and build the source tarball
+        run: |
+          bash tools/vendor-rust.sh
+          R CMD build --no-build-vignettes --no-manual .
+          tar -tzf ferx_*.tar.gz | grep -qx 'ferx/src/rust/vendor.tar.xz'
+
+      # `unshare --net` needs root to create the namespace, but root writes
+      # straight through mode 0555, so the install itself drops back to this
+      # user inside it: only then is the empty CARGO_HOME really read-only, as
+      # on a validation image. sudo resets the environment, so the rustup,
+      # cargo and R library locations are handed over explicitly.
+      - name: Install with no network and a read-only CARGO_HOME
+        run: |
+          mkdir -p "$RUNNER_TEMP/cargo-home" "$RUNNER_TEMP/lib"
+          chmod 555 "$RUNNER_TEMP/cargo-home"
+          tarball=$(ls ferx_*.tar.gz)
+          sudo unshare --net -- sudo -u "$(id -un)" env \
+            "HOME=$HOME" "PATH=$PATH" "RUSTUP_HOME=${RUSTUP_HOME:-$HOME/.rustup}" \
+            "CARGO_HOME=$RUNNER_TEMP/cargo-home" "R_LIBS=$(Rscript -e 'cat(.libPaths(), sep=":")')" \
+            R CMD INSTALL -l "$RUNNER_TEMP/lib" "$tarball"
+          Rscript -e 'library(ferx, lib.loc = file.path(Sys.getenv("RUNNER_TEMP"), "lib")); cat(ferx:::ferx_rust_known_blocks(), "\n")'

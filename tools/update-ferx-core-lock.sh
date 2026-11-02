@@ -12,8 +12,9 @@
 # unpins ferx-core for everyone who builds without the sibling (CI, downstream
 # users). That happened twice, both times in a lock bump (commits 1ce7f59,
 # b96c867). Since #353 the patch is passed to one cargo run with --config
-# (tools/sibling-cargo-build.sh) and config.toml holds only [build], so a plain
-# `cargo update` here is already safe.
+# (tools/sibling-cargo-build.sh) and config.toml holds only [build] (or, after
+# an offline build from a vendored tarball, a [source] replacement - #666), so a
+# plain `cargo update` here is already safe of a patch.
 #
 # This script still moves any config.toml out of the way, because a checkout
 # that has not been rebuilt since #353 keeps the old [patch] in it until the
