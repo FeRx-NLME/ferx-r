@@ -29,6 +29,11 @@
 #'     derived; `WRES` is set to `NA` (ferx does not compute the FO-weighted
 #'     residual). `NPDE`/`NPD` (present when the fit ran with `npde_nsim > 0`)
 #'     are mapped to the residual role, so Xpose residual plots can use them.
+#'     Only the Gaussian observation rows are used: the binary-endpoint rows
+#'     and the time-to-event residual rows (`COXSNELL`, `MARTINGALE`,
+#'     `DEVIANCE`, `PIT`) that `fit$sdtab` carries after them are left out,
+#'     with a message saying how many, so `nobs` and the DV plots count
+#'     observations only.
 #'   \item \strong{patab}: individual parameter values (`fit$individual_estimates`)
 #'     and empirical-Bayes etas (`fit$ebe_etas`), repeated for every observation
 #'     row of each subject.
@@ -129,7 +134,9 @@ ferx_xpose <- function(fit,
     stop("`fit$sdtab` must contain ID and TIME columns.", call. = FALSE)
   }
 
-  df <- sdtab
+  gauss <- .ferx_xpose_gaussian_rows(fit, sdtab)
+  df <- gauss$data
+  subj <- gauss$subject
 
   # Derived residuals. RES/IRES are cheap; WRES is unavailable in ferx (FO
   # weighting is not computed) and is emitted as NA so Xpose still finds the
@@ -146,11 +153,12 @@ ferx_xpose <- function(fit,
 
   # Parameters + etas, one value per subject, repeated down the observation
   # rows by an ID join.
-  params <- .ferx_join_by_id(df, fit$individual_estimates, "individual_estimates")
+  params <- .ferx_join_by_id(df, fit$individual_estimates, "individual_estimates",
+                             subj = subj)
   df <- params$data
   param_cols <- params$added
 
-  etas <- .ferx_join_by_id(df, fit$ebe_etas, "ebe_etas")
+  etas <- .ferx_join_by_id(df, fit$ebe_etas, "ebe_etas", subj = subj)
   df <- etas$data
   eta_cols <- etas$added
 
@@ -199,10 +207,65 @@ ferx_xpose <- function(fit,
   )
 }
 
+# The Gaussian observation rows of `sdtab`, and the subject (1-based position
+# in fit order) of each. ferx-core's `io::output::sdtab` writes every
+# subject's Gaussian rows, then every subject's discrete (binary, #900) rows,
+# then every subject's time-to-event rows (#901), so the Gaussian rows are
+# the leading `sum(n_obs)`. A subject_summary without an `n_obs_discrete` /
+# `n_obs_tte` column (an older fit, or a reloaded .fitrx bundle, which keeps
+# no TTE rows) has none of those rows. Without usable counts `subject` is
+# NULL, and the TTE rows are the ones with a COXSNELL value, as in
+# `.fitrx_write_predictions_csv()`. The rows left out are reported in a
+# `ferx_xpose_rows_dropped_message`.
+.ferx_xpose_gaussian_rows <- function(fit, sdtab) {
+  summ <- fit$subject_summary
+  count <- function(col) {
+    v <- summ[[col]]
+    if (is.null(v)) 0L else v
+  }
+  rows <- if (is.data.frame(summ) && nrow(summ) > 0L && !is.null(summ$n_obs)) {
+    .fitrx_sdtab_subject(summ$n_obs, count("n_obs_discrete"), nrow(sdtab),
+                         count("n_obs_tte"))
+  }
+  if (!is.null(rows)) {
+    n_gauss <- length(rows$gaussian)
+    n_disc  <- length(rows$discrete)
+    n_tte   <- length(rows$tte)
+    keep <- seq_len(n_gauss)
+  } else {
+    tte <- if (all(.FITRX_TTE_COLS %in% names(sdtab))) {
+      !is.na(sdtab$COXSNELL)
+    } else {
+      rep(FALSE, nrow(sdtab))
+    }
+    n_disc <- 0L
+    n_tte  <- sum(tte)
+    keep <- which(!tte)
+  }
+  if (n_disc + n_tte > 0L) {
+    what <- c(if (n_disc > 0L) sprintf("%d discrete-endpoint", n_disc),
+              if (n_tte > 0L) sprintf("%d time-to-event", n_tte))
+    message(messageCondition(sprintf(paste0(
+      "ferx_xpose(): left out %s sdtab rows; the Xpose data holds the %d ",
+      "Gaussian observation rows only."),
+      paste(what, collapse = " and "), length(keep)),
+      class = "ferx_xpose_rows_dropped_message"))
+    sdtab <- sdtab[keep, setdiff(names(sdtab), if (n_tte > 0L) .FITRX_TTE_COLS),
+                   drop = FALSE]
+    rownames(sdtab) <- NULL
+  }
+  subject <- if (!is.null(rows)) {
+    structure(rows$gaussian, n_subjects = nrow(summ))
+  }
+  list(data = sdtab, subject = subject)
+}
+
 # Repeat one-row-per-subject columns down `df` by an ID join. `src` is a data
-# frame whose first column is ID (e.g. fit$ebe_etas). Returns updated data and
-# the names of the columns that were added.
-.ferx_join_by_id <- function(df, src, what) {
+# frame whose first column is ID (e.g. fit$ebe_etas). `subj`, when given, is
+# the subject position (in fit order) of every `df` row, from the
+# subject_summary counts; it is used whenever `src` has one row per subject.
+# Returns updated data and the names of the columns that were added.
+.ferx_join_by_id <- function(df, src, what, subj = NULL) {
   if (is.null(src) || !is.data.frame(src) || nrow(src) == 0L) {
     return(list(data = df, added = character(0)))
   }
@@ -224,18 +287,21 @@ ferx_xpose <- function(fit,
       what, paste(collide, collapse = ", ")), call. = FALSE)
   }
   # `src` holds one row per subject in subject order; `df` (sdtab) holds each
-  # subject's observations contiguously in that same order. Assign an ordinal
-  # subject index and join on it, so two subjects that share a textual ID (a
+  # subject's observations contiguously in that same order. Join on the
+  # subject position `subj` from the subject_summary counts, which also places
+  # a subject without observations; without it, on the run-length index of
+  # the ID. Either way two subjects that share a textual ID (a
   # reused ID in a non-contiguous data block) each pick up their own row rather
   # than both matching the first via ID. Fall back to a character-space ID match
   # when the counts don't line up (e.g. a hand-built src covering a subset) -
   # sdtab IDs are numeric (Rust writes them as f64) while ebe_etas /
   # individual_estimates IDs are character, so match in character space
   # (cf. diagnostics.R).
-  subj <- .ferx_subject_index(df[["ID"]])
-  n_subj <- if (length(subj)) max(subj) else 0L
-  if (nrow(src) == n_subj) {
+  if (!is.null(subj) && length(subj) == nrow(df) &&
+      identical(attr(subj, "n_subjects"), nrow(src))) {
     idx <- subj
+  } else if (nrow(src) == .ferx_n_subjects(df[["ID"]])) {
+    idx <- .ferx_subject_index(df[["ID"]])
   } else {
     idx <- match(as.character(df[["ID"]]), as.character(src[["ID"]]))
   }
@@ -403,7 +469,7 @@ ferx_xpose <- function(fit,
   data_tbl$data     <- list(df)
   data_tbl$modified <- FALSE
 
-  summary <- .ferx_xpose_new_summary(fit, runno, files = files)
+  summary <- .ferx_xpose_new_summary(fit, runno, files = files, nobs = nrow(df))
 
   structure(
     list(
@@ -442,7 +508,12 @@ ferx_xpose <- function(fit,
   type
 }
 
-.ferx_xpose_new_summary <- function(fit, runno, files = NULL) {
+# `nobs` is the number of Gaussian observation rows in the Xpose data; the
+# default (the whole sdtab) is right only for a fit without discrete or TTE
+# rows. `nind` counts subject IDs over the whole sdtab, so a subject whose
+# only records are discrete or TTE is still counted.
+.ferx_xpose_new_summary <- function(fit, runno, files = NULL,
+                                    nobs = nrow(fit$sdtab)) {
   rows <- function(label, value, ...) {
     data.frame(problem = 1L, subprob = 0L, descr = label,
                label = label, value = as.character(value),
@@ -453,7 +524,7 @@ ferx_xpose <- function(fit,
     # xpose's title-template engine looks up the key "run" (not "runno").
     rows("run", runno),
     rows("ofv", if (!is.null(fit$ofv)) fit$ofv else NA),
-    rows("nobs", nrow(fit$sdtab)),
+    rows("nobs", nobs),
     rows("nind", length(unique(fit$sdtab$ID)))
   )
   # The iteration plots' title/subtitle/caption templates reference the
