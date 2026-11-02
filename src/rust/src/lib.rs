@@ -3916,6 +3916,7 @@ fn default_fit_result(
         ebe_convergence_warnings: 0,
         max_unconverged_subjects: 0,
         total_ebe_fallbacks: 0,
+        total_ebe_nm_polished: 0,
         covariance_status: CovarianceStatus::Computed,
         shrinkage_eta: Vec::new(),
         shrinkage_eps: f64::NAN,
@@ -8364,6 +8365,7 @@ fn fit_skeleton(
         ebe_convergence_warnings: 0,
         max_unconverged_subjects: 0,
         total_ebe_fallbacks: 0,
+        total_ebe_nm_polished: 0,
         shrinkage_eta: Vec::new(),
         shrinkage_eps: f64::NAN,
         wall_time_secs: 0.0,
@@ -9255,6 +9257,133 @@ fn ferx_rust_prepare_frem(
             n_total_etas = result.n_total_etas as i32,
             warnings = warnings
         ))
+    })
+}
+
+/// Export a fitted DCM as a plain population PK model (ferx-r #344, ferx-core
+/// #1331): every `[covariate_nn]` block of the model written out as ordinary
+/// `[individual_parameters]` equations at the fitted weights.
+///
+/// Two entry points into `ferx_core::nn::export`, picked by `from_fit`:
+///
+/// - `from_fit = TRUE`: `export_dcm_from_fit`, which checks the model is the
+///   fit's own (against `fit_model_text`) and writes every other estimate too.
+///   R holds no `FitResult`, so one is rebuilt here from the R fit's pieces.
+///   Its template is the model with the networks written out as FIXed weight
+///   thetas, not the model itself: that text parses in every build, where a
+///   `[covariate_nn]` block parses only with the `nn` feature, and it declares
+///   the same omega / sigma / kappa / residual correlations, which are all the
+///   export reads from the template. The names come from the R fit.
+/// - `from_fit = FALSE`: `export_dcm_as_analytic`, the network weights alone
+///   (looked up by name in `theta_names` / `theta`), every other value as the
+///   model declares it. Reads no fit and checks nothing against one.
+///
+/// The exported text is written to `output_model_path`.
+///
+/// @param model_path Path to the DCM .ferx model file
+/// @param output_model_path Path the exported .ferx is written to
+/// @param weight_form "literal" (weights inlined) or "fixed_theta"
+/// @param network_only Keep every non-network value at the model's own
+/// @param from_fit Whether the fit pieces below describe a fit to check against
+/// @param fit_model_text The fit's `model_text` ("" when `from_fit` is FALSE)
+/// @param theta_names,theta The full theta vector, network weights included
+/// @param omega_flat,omega_dim,eta_names Fitted omega, row-major
+/// @param sigma,sigma_names Fitted sigma (SDs)
+/// @param omega_iov_flat,omega_iov_dim,kappa_names Fitted kappa covariance
+/// @param residual_rho,residual_rho_pairs Fitted residual correlations
+/// @return Named list with model_path
+/// @export
+#[extendr]
+#[allow(clippy::too_many_arguments)]
+fn ferx_rust_export_dcm(
+    model_path: &str,
+    output_model_path: &str,
+    weight_form: &str,
+    network_only: bool,
+    from_fit: bool,
+    fit_model_text: &str,
+    theta_names: Vec<String>,
+    theta: Vec<f64>,
+    omega_flat: Vec<f64>,
+    omega_dim: i32,
+    eta_names: Vec<String>,
+    sigma: Vec<f64>,
+    sigma_names: Vec<String>,
+    omega_iov_flat: Vec<f64>,
+    omega_iov_dim: i32,
+    kappa_names: Vec<String>,
+    residual_rho: Vec<f64>,
+    residual_rho_pairs: Vec<i32>,
+) -> List {
+    entry(move || {
+        use ferx_core::nn::export::{
+            export_dcm_as_analytic, export_dcm_from_fit, DcmExportOptions, DcmWeightForm,
+        };
+        let mut opts = DcmExportOptions::default();
+        opts.weight_form = match weight_form {
+            "literal" => DcmWeightForm::Literal,
+            "fixed_theta" => DcmWeightForm::FixedTheta,
+            other => {
+                return Err(format!(
+                    "Error exporting DCM: unknown weight form `{other}` \
+                     (expected \"literal\" or \"fixed_theta\")"
+                ))
+            }
+        };
+        opts.network_only = network_only;
+        let model_text = std::fs::read_to_string(model_path)
+            .map_err(|e| format!("Error reading model file {model_path}: {e}"))?;
+
+        let exported = if from_fit {
+            let mut stage_opts = DcmExportOptions::default();
+            stage_opts.weight_form = DcmWeightForm::FixedTheta;
+            stage_opts.network_only = true;
+            let stage = export_dcm_as_analytic(&model_text, &theta_names, &theta, &stage_opts)
+                .map_err(|e| format!("Error exporting DCM: {e}"))?;
+            let template = ferx_core::parse_model_string(&stage)
+                .map_err(|e| format!("Error exporting DCM: {e}"))?;
+            let d = omega_dim.max(0) as usize;
+            if omega_flat.len() != d * d {
+                return Err(format!(
+                    "Error exporting DCM: omega_flat length {} does not match dim²={}",
+                    omega_flat.len(),
+                    d * d
+                ));
+            }
+            let mut fit = default_fit_result(
+                &template,
+                theta,
+                DMatrix::from_row_slice(d, d, &omega_flat),
+                sigma,
+                omega_iov_from_fit(&template, &omega_iov_flat, omega_iov_dim)?.map(|m| m.matrix),
+                None,
+                None,
+                residual_correlations_from_fit(&template, &residual_rho, &residual_rho_pairs)
+                    .map_err(|e| format!("Error exporting DCM: {e}"))?,
+                None,
+            );
+            // The fit's own names: the template declares the weights where the
+            // export puts them, which need not be the fit's order.
+            fit.theta_names = theta_names;
+            if !eta_names.is_empty() {
+                fit.eta_names = eta_names;
+            }
+            if !sigma_names.is_empty() {
+                fit.sigma_names = sigma_names;
+            }
+            if !kappa_names.is_empty() {
+                fit.kappa_names = kappa_names;
+            }
+            fit.model_text = (!fit_model_text.is_empty()).then(|| fit_model_text.to_string());
+            export_dcm_from_fit(&model_text, &fit, &opts)
+        } else {
+            export_dcm_as_analytic(&model_text, &theta_names, &theta, &opts)
+        }
+        .map_err(|e| format!("Error exporting DCM: {e}"))?;
+
+        std::fs::write(output_model_path, exported)
+            .map_err(|e| format!("Error writing {output_model_path}: {e}"))?;
+        Ok(list!(model_path = output_model_path))
     })
 }
 
@@ -13821,6 +13950,7 @@ extendr_module! {
     fn ferx_rust_model_structure;
     fn ferx_rust_inits_from_nca;
     fn ferx_rust_prepare_frem;
+    fn ferx_rust_export_dcm;
     fn ferx_rust_bootstrap;
     fn ferx_rust_bootstrap_summarize;
     fn ferx_rust_gam_screen;

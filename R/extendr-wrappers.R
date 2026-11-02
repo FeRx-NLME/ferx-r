@@ -321,6 +321,12 @@ ferx_rust_prepare_frem <- function(model_path, data_path, covariates, categorica
 
 #' @title Internal Rust backend binding
 #' @keywords internal
+ferx_rust_export_dcm <- function(model_path, output_model_path, weight_form, network_only, from_fit, fit_model_text, theta_names, theta, omega_flat, omega_dim, eta_names, sigma, sigma_names, omega_iov_flat, omega_iov_dim, kappa_names, residual_rho, residual_rho_pairs) {
+  .Call("wrap__ferx_rust_export_dcm", model_path, output_model_path, weight_form, network_only, from_fit, fit_model_text, as.character(theta_names), as.numeric(theta), as.numeric(omega_flat), as.integer(omega_dim), as.character(eta_names), as.numeric(sigma), as.character(sigma_names), as.numeric(omega_iov_flat), as.integer(omega_iov_dim), as.character(kappa_names), as.numeric(residual_rho), as.integer(residual_rho_pairs))
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
 ferx_rust_bootstrap <- function(model_path, data_path, samples, seed, sample_size_keys, sample_size_values, stratify_on, update_inits, run_base_model, keep_covariance, threads, skip_minimization_terminated, skip_estimate_near_boundary, skip_covariance_step_terminated, skip_with_covstep_warnings, dofv, directory, confidence_level, resume, retry_failed, verbose, progress) {
   .Call("wrap__ferx_rust_bootstrap", model_path, data_path, as.integer(samples), seed, as.character(sample_size_keys), sample_size_values, stratify_on, update_inits, run_base_model, keep_covariance, as.integer(threads), skip_minimization_terminated, skip_estimate_near_boundary, skip_covariance_step_terminated, skip_with_covstep_warnings, dofv, directory, confidence_level, resume, retry_failed, verbose, progress)
 }
