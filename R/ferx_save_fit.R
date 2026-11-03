@@ -693,6 +693,11 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
     r_extras = .fitrx_collect_r_extras(fit)
   )
 
+  # The gradient at the estimates and where it came from (ferx-core #997).
+  gradient <- .fitrx_final_gradient_wire(fit)
+  wire$final_gradient <- gradient$final_gradient
+  wire$final_gradient_source <- gradient$final_gradient_source
+
   # Parameter priors (ferx-core #254). Written only for a priored fit - the
   # three fields are `Option` / `skip_serializing_if` on the wire, and
   # `prior_summary` deserialises as a `Vec`, which an explicit `null` would
@@ -1348,6 +1353,19 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
     out$cov_fixed <- as.list(unname(as.logical(fit$cov_fixed)))
   }
   out
+}
+
+# `final_gradient` and `final_gradient_source` for the wire, which the engine
+# keeps absent together. JSON has no NaN / Inf: a non-finite component would be
+# written as `null`, which the engine's `Vec<f64>` refuses, taking the whole
+# bundle with it. A gradient that cannot be written is dropped with its label,
+# so the bundle reads as a fit that reported none.
+.fitrx_final_gradient_wire <- function(fit) {
+  # `[[`: `$` would partial-match `final_gradient_source` when this is absent.
+  grad <- .fitrx_opt_num_vec(fit[["final_gradient"]])
+  if (is.null(grad) || !all(is.finite(grad))) return(list())
+  list(final_gradient = grad,
+       final_gradient_source = .fitrx_opt_chr(fit$final_gradient_source))
 }
 
 # `fit$theta_levels` as columns of JSON arrays. `r_extras` is skipped by the

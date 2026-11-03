@@ -5634,6 +5634,11 @@ fn fit_result_to_list(
         Some(g) => g.clone().into(),
         None => ().into(),
     };
+    // NULL exactly when `final_gradient` is, as the engine keeps them.
+    let final_gradient_source_robj: Robj = match &result.final_gradient_source {
+        Some(s) => s.clone().into(),
+        None => ().into(),
+    };
 
     // Data-selection exclusion summary (None → NULL; Some → named list).
     let exclusions_robj: Robj = match &result.exclusions {
@@ -5972,9 +5977,12 @@ fn fit_result_to_list(
         sigma_init = result.sigma_init.clone(),
         // obs_time_range: c(min_time, max_time) or NULL.
         obs_time_range = obs_time_range_robj,
-        // final_gradient: optimizer gradient, or a post-fit FD gradient for BOBYQA
-        // (ferx-core #1380); NULL for built-in BFGS and SAEM.
+        // final_gradient: the optimizer's own gradient, or for BOBYQA one computed
+        // after the fit, exact where the model allows it and else a central
+        // difference; NULL for built-in BFGS and SAEM. final_gradient_source says
+        // which: "optimizer", "analytic" or "finite_difference" (ferx-core #997).
         final_gradient = final_gradient_robj,
+        final_gradient_source = final_gradient_source_robj,
         // ── run-settings fields (ferx-core#172 Step 7) ────────────────────
         // optimizer: human-readable label string.
         optimizer_label   = result.optimizer.clone(),
