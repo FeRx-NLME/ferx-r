@@ -118,6 +118,19 @@ diagnostics from ferx-core (e.g. a degenerate or pathological hazard that
 censored a subject with no event) together with the engine's data-reader
 diagnostics for \code{data} - the same ones \code{ferx_fit()} returns in
 \code{fit$warnings}; these are also raised as an R warning.
+
+It also carries a \code{parameters} attribute: the parameters each
+subject was drawn with (random effects, individual parameters,
+\code{[derived]} / \code{[output]} values), one row per
+\code{(DRAW, SIM, ID)} rather than per observation. Read it with
+\code{\link{ferx_sim_parameters}}, which documents its columns. Each
+value is taken at the subject's \strong{first observation row}, as with
+NONMEM's \code{$TABLE ... FIRSTONLY}; the table's \code{varying}
+attribute names every column that changes within a subject (a
+time-varying covariate, a \code{TIME}-dependent parameter, IOV), so those
+values are known to be first-row snapshots. For steady-state exposure,
+for example, \code{F * dose / CL} from that table is the AUC over one
+dosing interval of a linear model, without integrating \code{IPRED}.
 }
 \description{
 Simulates observations from a parsed model with between-subject variability
@@ -243,6 +256,7 @@ Other simulation:
 \code{\link[=ferx_contrast_vpc]{ferx_contrast_vpc()}},
 \code{\link[=ferx_predict]{ferx_predict()}},
 \code{\link[=ferx_predict_survival]{ferx_predict_survival()}},
+\code{\link[=ferx_sim_parameters]{ferx_sim_parameters()}},
 \code{\link[=ferx_simulate_adaptive]{ferx_simulate_adaptive()}},
 \code{\link[=ferx_simulate_with_uncertainty]{ferx_simulate_with_uncertainty()}}
 }

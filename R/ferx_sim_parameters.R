@@ -1,0 +1,103 @@
+#' Per-subject drawn parameters of a simulation
+#'
+#' Returns the parameters each simulated subject was drawn with - its random
+#' effects, its individual parameters and its \code{[derived]} /
+#' \code{[output]} values - from the result of \code{\link{ferx_simulate}} or
+#' \code{\link{ferx_simulate_with_uncertainty}}. The table travels with the
+#' simulation as \code{attr(sim, "parameters")}; this accessor reads it and
+#' refuses an object that does not carry one.
+#'
+#' The table has one row per simulated subject and replicate, not per
+#' observation, so it is not added to the observation rows. Join it back on
+#' \code{DRAW}, \code{SIM} and \code{ID}:
+#' \code{merge(sim, ferx_sim_parameters(sim), by = c("DRAW", "SIM", "ID"))}.
+#'
+#' @section First-row values (FIRSTONLY) and \code{varying}:
+#' Every value is the subject's value at its \strong{first observation row} -
+#' its covariates and \code{TIME} there, and the occasion of that row - the
+#' convention of NONMEM's \code{$TABLE ... FIRSTONLY}. For most models that is
+#' the subject's value at every row. It is not when a parameter reads a
+#' time-varying covariate, depends on \code{TIME}, or carries inter-occasion
+#' variability: then the value differs between the subject's rows and the table
+#' holds only the first one. \code{attr(params, "varying")} names every
+#' individual-parameter and \code{[derived]} / \code{[output]} column whose
+#' value changed across the observation rows of at least one simulated subject
+#' (a character vector, empty when none did), and printing the table repeats
+#' that list, so a first-row snapshot is not read as a constant.
+#'
+#' A subject with no continuous (Gaussian) observation - only a time-to-event or
+#' binary endpoint - reports its individual parameters at its baseline
+#' covariates and \code{TIME = 0}, and \code{NA} for every \code{[derived]} /
+#' \code{[output]} column.
+#'
+#' @param sim The data frame returned by \code{\link{ferx_simulate}} or
+#'   \code{\link{ferx_simulate_with_uncertainty}}.
+#' @return A data frame of class \code{ferx_sim_parameters}, one row per
+#'   \code{(DRAW, SIM, ID)}, in the order the observation rows produced them,
+#'   with these columns:
+#'   \describe{
+#'     \item{\code{DRAW}, \code{SIM}, \code{ID}}{The keys, spelled and typed as
+#'       in the simulation's own rows. \code{DRAW} is always 1 for
+#'       \code{ferx_simulate()}.}
+#'     \item{\code{MIXNUM}}{\strong{Only for a \code{[mixture]} model}: the
+#'       1-based class the subject was simulated under, as in the observation
+#'       rows.}
+#'     \item{eta columns}{One per between-subject random effect, named as the
+#'       model declares it (e.g. \code{ETA_CL}): the drawn value.}
+#'     \item{kappa columns}{\strong{Only for a model with \code{kappa}
+#'       (IOV)}: one \code{<kappa>_<k>} column per kappa and occasion
+#'       \code{k} (e.g. \code{KAPPA_CL_1}, \code{KAPPA_CL_2}), the kappa drawn
+#'       for the subject's \code{k}-th occasion, counting from 1 in the order
+#'       the subject's occasions occur; \code{NA} past a subject's last
+#'       occasion.}
+#'     \item{individual parameters}{One column per
+#'       \code{[individual_parameters]} entry, in declaration order (e.g.
+#'       \code{CL}, \code{V}, \code{KA}).}
+#'     \item{derived columns}{One per \code{[derived]} / \code{[output]} column,
+#'       computed with the simulated random effects, \code{IPRED} and \code{DV}.}
+#'   }
+#'   Attribute \code{varying}: see the section above.
+#'
+#' @examples
+#' ex <- ferx_example("warfarin")
+#' sim <- ferx_simulate(ex$model, ex$data, n_sim = 2L, seed = 1L)
+#' params <- ferx_sim_parameters(sim)
+#' head(params)
+#' attr(params, "varying")
+#'
+#' @family simulation
+#' @export
+ferx_sim_parameters <- function(sim) {
+  params <- attr(sim, "parameters", exact = TRUE)
+  if (!is.data.frame(params)) {
+    stop(
+      "`sim` carries no drawn-parameter table: pass the data frame ",
+      "ferx_simulate() or ferx_simulate_with_uncertainty() returned, before ",
+      "subsetting it (subsetting a data frame drops its attributes).",
+      call. = FALSE
+    )
+  }
+  params
+}
+
+#' @export
+print.ferx_sim_parameters <- function(x, ...) {
+  varying <- attr(x, "varying", exact = TRUE)
+  print(.ferx_strip_sim_parameters(x), ...)
+  if (length(varying) > 0L) {
+    cat(
+      "Varying within subject (first-observation-row values shown): ",
+      paste(varying, collapse = ", "), "\n",
+      sep = ""
+    )
+  }
+  invisible(x)
+}
+
+# Drop the `ferx_sim_parameters` class and `varying` attribute, leaving the
+# plain data frame.
+.ferx_strip_sim_parameters <- function(x) {
+  class(x) <- setdiff(class(x), "ferx_sim_parameters")
+  attr(x, "varying") <- NULL
+  x
+}

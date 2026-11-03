@@ -931,7 +931,7 @@ fn ferx_rust_simulate(
         // #1410 folds `population.warnings` into it (minus the ones the model
         // makes moot), so relaying `population.warnings` too would say each twice.
         Ok(attach_sim_warnings(
-            sim_results_to_df(&output.results),
+            attach_sim_parameters(sim_results_to_df(&output.results), &output, &parsed.model),
             occasion_notes,
             &output,
         ))
@@ -1061,7 +1061,7 @@ fn ferx_rust_simulate_from_fit(
         };
         // Reader findings are already in `output.warnings`; see `ferx_rust_simulate`.
         Ok(attach_sim_warnings(
-            sim_results_to_df(&output.results),
+            attach_sim_parameters(sim_results_to_df(&output.results), &output, &parsed.model),
             occasion_notes,
             &output,
         ))
@@ -1663,7 +1663,7 @@ fn ferx_rust_simulate_with_uncertainty(
         // reader findings included through its one filter (ferx-r #426).
         Ok(match ferx_core::simulate_with_uncertainty_diag(&parsed.model, &population, &fit_result, &opts) {
             Ok(output) => attach_sim_warnings(
-                sim_results_to_df(&output.results),
+                attach_sim_parameters(sim_results_to_df(&output.results), &output, &parsed.model),
                 occasion_notes,
                 &output,
             ),
@@ -4694,6 +4694,94 @@ fn sim_results_to_df(results: &[ferx_core::api::SimulationResult]) -> Robj {
         cols.push(("MIXNUM", mixnum.into()));
     }
     finish_df(cols, nrow)
+}
+
+/// Attach the per-subject drawn parameters of a simulation (ferx-core #2505) as a
+/// `parameters` attribute on the observation frame: one row per `(DRAW, SIM, ID)`,
+/// keyed on the frame's own columns so it joins back to the rows, never repeated
+/// across them (a value is taken at the subject's first observation row, NONMEM's
+/// `$TABLE ... FIRSTONLY`, and repeating it per row would hide that). R's
+/// `ferx_sim_parameters()` is the accessor.
+fn attach_sim_parameters(
+    mut df: Robj,
+    output: &ferx_core::SimulationOutput,
+    model: &CompiledModel,
+) -> Robj {
+    df.set_attrib("parameters", sim_parameters_to_df(&output.parameters, model))
+        .unwrap();
+    df
+}
+
+/// [`ferx_core::SimulatedParameters`] as an R data frame (ferx-core #2505).
+///
+/// Columns: DRAW, SIM, ID (as `sim_results_to_df` spells them), MIXNUM on a
+/// `[mixture]` model only (as in the observation frame), the eta names, then one
+/// `<kappa>_<k>` column per kappa and occasion group `k` (1-based, in the order the
+/// engine indexes a subject's occasions; NA past a subject's last occasion), the
+/// `[individual_parameters]`, then the `[derived]` / `[output]` columns. `varying`
+/// (the columns that change across some subject's observation rows) rides along as
+/// a character attribute, and the frame is classed `ferx_sim_parameters` so its
+/// print method can say so.
+fn sim_parameters_to_df(table: &ferx_core::SimulatedParameters, model: &CompiledModel) -> Robj {
+    let rows = &table.rows;
+    let nrow = rows.len();
+    let na_if_nan = |v: f64| if v.is_nan() { None } else { Some(v) };
+    let mut names: Vec<String> = vec!["DRAW".into(), "SIM".into(), "ID".into()];
+    let mut values: Vec<Robj> = vec![
+        rows.iter().map(|r| r.draw as i32).collect::<Vec<i32>>().into(),
+        rows.iter().map(|r| r.sim as i32).collect::<Vec<i32>>().into(),
+        rows.iter().map(|r| r.id.clone()).collect::<Vec<String>>().into(),
+    ];
+    if rows.iter().any(|r| r.mixnum.is_some()) {
+        names.push("MIXNUM".into());
+        values.push(
+            rows.iter()
+                .map(|r| r.mixnum.map(|k| k as i32))
+                .collect::<Vec<Option<i32>>>()
+                .into(),
+        );
+    }
+    let mut push_block = |labels: &[String], pick: &dyn Fn(&ferx_core::SimulatedSubjectParameters, usize) -> Option<f64>| {
+        for (j, label) in labels.iter().enumerate() {
+            names.push(label.clone());
+            values.push(
+                rows.iter()
+                    .map(|r| pick(r, j).and_then(na_if_nan))
+                    .collect::<Vec<Option<f64>>>()
+                    .into(),
+            );
+        }
+    };
+    push_block(&table.eta_names, &|r, j| r.eta.get(j).copied());
+    let n_kappa = rows
+        .iter()
+        .flat_map(|r| r.kappas.iter().map(Vec::len))
+        .max()
+        .unwrap_or(0);
+    let n_occ = rows.iter().map(|r| r.kappas.len()).max().unwrap_or(0);
+    if n_kappa > 0 {
+        for occ in 0..n_occ {
+            let labels: Vec<String> = (0..n_kappa)
+                .map(|k| {
+                    let base = model
+                        .kappa_names
+                        .get(k)
+                        .filter(|n| !n.is_empty())
+                        .cloned()
+                        .unwrap_or_else(|| format!("KAPPA{}", k + 1));
+                    format!("{base}_{}", occ + 1)
+                })
+                .collect();
+            push_block(&labels, &|r, k| r.kappas.get(occ).and_then(|v| v.get(k)).copied());
+        }
+    }
+    push_block(&table.individual_names, &|r, j| r.individual.get(j).copied());
+    push_block(&table.derived_names, &|r, j| r.derived.get(j).copied());
+    let pairs: Vec<(&str, Robj)> = names.iter().map(String::as_str).zip(values).collect();
+    let mut df = finish_df(pairs, nrow);
+    df.set_class(&["ferx_sim_parameters", "data.frame"]).unwrap();
+    df.set_attrib("varying", table.varying.clone()).unwrap();
+    df
 }
 
 // -- Helper: short label for the structural model. Compartment-free and ODE
