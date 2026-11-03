@@ -71,6 +71,12 @@
 #'   absent for any other model.
 #'   Row count: \code{n_uncertainty_draws * n_sim_per_draw * n_obs}.
 #'
+#'   The frame carries the parameters each subject was drawn with - under its
+#'   own \code{DRAW}'s theta - as \code{attr(sim, "parameters")}, one row per
+#'   \code{(DRAW, SIM, ID)}; read it with \code{\link{ferx_sim_parameters}},
+#'   which documents its columns and the first-observation-row
+#'   (\code{FIRSTONLY}) convention its values follow.
+#'
 #' @section Mixture models:
 #' On a \code{[mixture]} fit each subject draws its class from the mixing
 #' probabilities afresh in every \code{DRAW} and \code{SIM}, as NONMEM's

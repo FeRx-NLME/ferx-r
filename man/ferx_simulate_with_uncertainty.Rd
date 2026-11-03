@@ -53,6 +53,12 @@ A \code{[mixture]} model adds an integer \code{MIXNUM} column, the class
 each subject was drawn into for that \code{DRAW} and \code{SIM}; it is
 absent for any other model.
 Row count: \code{n_uncertainty_draws * n_sim_per_draw * n_obs}.
+
+The frame carries the parameters each subject was drawn with - under its
+own \code{DRAW}'s theta - as \code{attr(sim, "parameters")}, one row per
+\code{(DRAW, SIM, ID)}; read it with \code{\link{ferx_sim_parameters}},
+which documents its columns and the first-observation-row
+(\code{FIRSTONLY}) convention its values follow.
 }
 \description{
 For each parameter set drawn from the uncertainty distribution, the
@@ -181,6 +187,7 @@ Other simulation:
 \code{\link[=ferx_contrast_vpc]{ferx_contrast_vpc()}},
 \code{\link[=ferx_predict]{ferx_predict()}},
 \code{\link[=ferx_predict_survival]{ferx_predict_survival()}},
+\code{\link[=ferx_sim_parameters]{ferx_sim_parameters()}},
 \code{\link[=ferx_simulate]{ferx_simulate()}},
 \code{\link[=ferx_simulate_adaptive]{ferx_simulate_adaptive()}}
 }

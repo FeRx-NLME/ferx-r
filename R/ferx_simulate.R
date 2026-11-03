@@ -183,6 +183,19 @@
 #'   diagnostics for \code{data} - the same ones \code{ferx_fit()} returns in
 #'   \code{fit$warnings}; these are also raised as an R warning.
 #'
+#'   It also carries a \code{parameters} attribute: the parameters each
+#'   subject was drawn with (random effects, individual parameters,
+#'   \code{[derived]} / \code{[output]} values), one row per
+#'   \code{(DRAW, SIM, ID)} rather than per observation. Read it with
+#'   \code{\link{ferx_sim_parameters}}, which documents its columns. Each
+#'   value is taken at the subject's \strong{first observation row}, as with
+#'   NONMEM's \code{$TABLE ... FIRSTONLY}; the table's \code{varying}
+#'   attribute names every column that changes within a subject (a
+#'   time-varying covariate, a \code{TIME}-dependent parameter, IOV), so those
+#'   values are known to be first-row snapshots. For steady-state exposure,
+#'   for example, \code{F * dose / CL} from that table is the AUC over one
+#'   dosing interval of a linear model, without integrating \code{IPRED}.
+#'
 #' @section Errors raised by the engine:
 #' A model or dataset the engine refuses is an R error, never a \code{NULL}
 #' result. Where the engine's validation pass names the finding, the error has
