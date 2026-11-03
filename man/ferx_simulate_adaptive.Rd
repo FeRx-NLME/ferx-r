@@ -11,7 +11,9 @@ ferx_simulate_adaptive(
   seed = 42L,
   verify = TRUE,
   max_decisions = 0L,
-  fit = NULL
+  fit = NULL,
+  etas = NULL,
+  unmatched = c("refuse", "draw")
 )
 }
 \arguments{
@@ -59,7 +61,40 @@ own fitted value; a level the fit never observed is an error. Random
 effects are still drawn from the fitted omega - a subject's own
 individual estimates are not carried over, and the per-occasion kappas
 are drawn per decision window, so the fit's IOV occasion rule plays no
-part.}
+part. To simulate each subject at its own estimates instead, pass
+\code{etas = fit$ebe_etas}.}
+
+\item{etas}{Optional data frame of each known subject's own random effects:
+an \code{ID} column plus one column per eta, named and ordered as the
+model declares them (\code{fit$ebe_etas} has exactly this shape, so
+\code{ferx_simulate_adaptive(model, fit = fit, etas = fit$ebe_etas)}
+simulates every fitted subject at its EBEs). A subject with a row is
+simulated at those etas in every replicate instead of a draw from omega;
+its kappas (IOV, drawn per decision window) and the controller's assay
+error are still drawn, so without either its replicates are identical.
+Rows are matched to the data's subjects by \code{ID}; a row whose
+subject is not in the data is ignored. A row gives every eta of the
+model - there is no partial row, since under a block omega the missing
+eta would need a conditional draw. Each supplied subject still consumes
+its eta draw, so the drawn subjects get the etas the same \code{seed}
+gives without \code{etas}. Works with and without \code{fit}. Refused,
+coded \code{E_SUPPLIED_ETAS}: eta columns that are not the model's
+names in its order, a repeated \code{ID}, a non-finite value, and a
+\code{[mixture]} model (each subject's eta was estimated under its own
+class, but the run draws each subject's class). A repeated column name
+is refused before the engine is called. Supplied etas are point
+estimates treated as exact, which is optimistic for a subject with few
+observations (high shrinkage).}
+
+\item{unmatched}{What to do with a data subject that has no row in
+\code{etas}: \code{"refuse"} (the default) errors with
+\code{E_SUPPLIED_ETAS}, listing the subjects; \code{"draw"} draws their
+etas from omega, so known patients and virtual ones run in one
+population. Under \code{"draw"}, an \code{etas} whose IDs match no
+data subject (\code{"01"} against \code{"1"}, say) is warned about,
+since every subject was then drawn. IDs are matched as text; a numeric
+\code{ID} is spelled as a data.frame \code{data} writes it. Passing
+\code{unmatched} without \code{etas} has no effect and warns.}
 }
 \value{
 A list of four data frames:
@@ -74,19 +109,31 @@ was drawn into for that replicate; it is absent otherwise.}
 doses only} (pre-scheduled base doses are excluded): DRAW, SIM, ID, TIME,
 AMT, CMT, RATE, DECISION, SIGNAL (the value the controller titrated on -
 assay-noised when \code{with_assay_error}), RULE (the rule that fired).}
-\item{\code{decisions}}{One row per decision including holds: DRAW, SIM,
-ID, DECISION, TIME, SIGNAL, OUTCOME ("dosed" / "hold" / "stop"),
-N_DOSED.}
+\item{\code{decisions}}{One row per review-grid point including holds:
+DRAW, SIM, ID, DECISION, TIME, SIGNAL, OUTCOME ("dosed" / "hold" /
+"not_due" / "stop"), N_DOSED, INTERVAL. "not_due" marks a grid point
+at which no dose was due under the dosing interval in force (the
+block declares \code{intervals} and \code{start_interval}): the
+controller was not consulted and gave no dose, but SIGNAL still holds
+what the monitor read. INTERVAL is the dosing interval in force after
+the decision, NA when the block declares no \code{intervals}.}
 \item{\code{metrics}}{One row per realized run (subject x draw x
 replicate) - the per-subject outcome summary: DRAW, SIM, ID, CUM_DOSE
 (sum of controller-issued doses; excludes the base regimen), N_DOSES
 (controller doses only), N_INCREASES / N_DECREASES (realized
-dose-change counts, by dose delta), N_HOLDS, DISCONTINUED,
+dose-change counts, by dose delta), N_HOLDS (consulted decisions that
+gave no dose; not-due points are not counted), N_NOT_DUE (grid points
+that were not due), DISCONTINUED,
 TIME_TO_DISCONT, SIGNAL_MIN / SIGNAL_MAX / SIGNAL_MEAN (over the
 decisions that recorded a signal), and PCT_TIME_IN_WINDOW - the fraction
 of signal-bearing decisions whose observed value fell inside the model's
 \code{[adaptive_dosing]} \code{target_window} (NA when no
-\code{target_window} is declared).}
+\code{target_window} is declared), AUC_TARGET_ATTAINMENT - the
+fraction of windows between consecutive realized decisions whose area
+under the monitored signal fell inside the \code{auc_target} band
+(NA when no \code{auc_target} is declared, or with fewer than two
+decisions), and ETA_SUPPLIED (\code{TRUE} when the run used the
+subject's row of \code{etas}, \code{FALSE} when its eta was drawn).}
 }
 }
 \description{
@@ -121,13 +168,16 @@ trough), and a base dose scheduled after a \code{stop} still lands - a
 \strong{System resets.} An \code{EVID = 3} row zeroes the compartments (and
 re-seeds any \code{init(state) = expr}) at its time; \code{EVID = 4} does the
 same and then doses. Ordering at a shared time is reset, then dose, then
-observation. Some combinations remain rejected with a typed error rather than
-silently mis-integrated: a base regimen combined with a reset \emph{under} a
-time-varying covariate or IOV; a steady-state, lag-timed, or modeled-rate
-(\code{RATE}) base dose \emph{under} a time-varying covariate or IOV (these
-are supported on the constant-covariate path); and an \code{auc_target} metric
-combined with a time-varying covariate, a \code{TIME}-dependent PK parameter,
-IOV, or a reset.
+observation. A base regimen combined with resets runs on the
+constant-covariate path and under a time-varying covariate or IOV. One
+combination remains rejected with a typed error rather than silently
+mis-integrated: a steady-state, lag-timed, or modeled-rate (\code{RATE})
+base dose \emph{under} a time-varying covariate or IOV (supported on the
+constant-covariate path). An \code{auc_target} metric is accepted on a
+subject with resets, under a time-varying covariate, a \code{TIME}-dependent
+PK parameter, or IOV: the window AUC is integrated on the run's own
+trajectory, so a dose or reset inside a decision window is integrated
+exactly.
 }
 \section{Errors raised by the engine}{
 
@@ -149,6 +199,15 @@ ex  <- ferx_example("adaptive_tdm")
 res <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 20L, seed = 1L)
 head(res$doses)         # how the dose was titrated per decision
 head(res$trajectories)  # the resulting concentration-time profiles
+
+# Subjects 1 and 2 at known etas; the other subjects draw theirs.
+known <- data.frame(ID = c("1", "2"), ETA_CL = c(0.3, -0.2))
+res <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 20L, seed = 1L,
+                              etas = known, unmatched = "draw")
+table(res$metrics$ID, res$metrics$ETA_SUPPLIED)
+
+# With a fit to observed data, each fitted subject at its own EBEs:
+# ferx_simulate_adaptive(model, data, fit = fit, etas = fit$ebe_etas)
 }
 
 }

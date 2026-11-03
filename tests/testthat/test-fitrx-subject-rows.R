@@ -150,11 +150,12 @@ test_that("fit$subject_summary holds the engine's per-subject values (#554)", {
     fit <- case$fit
     summ <- fit$subject_summary
     expect_identical(names(summ),
-                     c("ID", "ofv_contribution", "n_obs", "n_obs_discrete"))
+                     c("ID", "ofv_contribution", "n_obs", "n_obs_discrete", "n_obs_tte"))
     expect_identical(summ$ID, fit$subject_ids)
     expect_identical(summ$ID, fit$ebe_etas$ID)
     expect_identical(summ$n_obs, data_n_obs(case$data))
     expect_identical(summ$n_obs_discrete, integer(nrow(summ)))
+    expect_identical(summ$n_obs_tte, integer(nrow(summ)))
     # Each subject's sdtab rows, counted off from the data, carry its value.
     owner <- rep.int(seq_len(nrow(summ)), summ$n_obs)
     expect_identical(fit$sdtab$EBE_OFV, summ$ofv_contribution[owner])
@@ -342,9 +343,12 @@ test_that("a TTE fit's bundle loads in ferx-core (#554)", {
   trip <- fitrx_engine_trip(fit)
   from_core <- ferx_load_fit(trip$core_path)
   expect_core_summary(from_core, fit)
-  expect_identical(from_core$sdtab$ID, fit$sdtab$ID)
+  # Neither bundle keeps the time-to-event residual rows (ferx-core #901,
+  # #911), which come last in the live sdtab.
+  kept <- fit$sdtab$ID[seq_len(nrow(fit$sdtab) - sum(fit$subject_summary$n_obs_tte))]
+  expect_identical(from_core$sdtab$ID, kept)
   loaded <- ferx_load_fit(trip$r_path)
-  expect_identical(loaded$sdtab$ID, fit$sdtab$ID)
+  expect_identical(loaded$sdtab$ID, kept)
 })
 
 test_that("a no-eta fit's ebes.csv is the engine's, up to its six decimals (#554)", {

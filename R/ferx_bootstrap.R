@@ -37,7 +37,8 @@
 #' model that takes a minute to fit takes over three hours, so `threads` is the
 #' argument that matters most. `progress` (on by default in an interactive
 #' session) draws a bar as the replicates come in, so a long run says where it
-#' is.
+#' is; `progress = "lines"` - what `progress = TRUE` picks under `Rscript` -
+#' prints a line per replicate to stdout instead, for a log.
 #'
 #' A run is interruptible: Ctrl-C is checked several times a second, the fits
 #' in flight stop at their next iteration, and the call raises `ferx_bootstrap:
@@ -137,13 +138,18 @@
 #' @param retry_failed Refit the replicates a resumed run finds recorded as
 #'   *failed*, instead of carrying the failure forward. Default `FALSE` (PsN's
 #'   default). Needs `resume = TRUE`.
-#' @param progress Show a progress bar while the replicates fit. Default
-#'   `interactive()`, so a script or a knitted document prints nothing. Uses
+#' @param progress Report the replicates as they fit: `TRUE`, `FALSE`,
+#'   `"bar"` or `"lines"`. Default `interactive()`, so a script or a knitted
+#'   document prints nothing unless asked. `"bar"` draws a progress bar, with
 #'   the cli package when it is installed and [utils::txtProgressBar()]
-#'   otherwise. The bar is drawn by this R session while the fits run in the
-#'   engine, and reports what the run will actually do: a `resume = TRUE` run
-#'   whose `directory` already holds most of the replicates counts only the
-#'   ones still to fit.
+#'   otherwise; it reports what the run will actually do, so a `resume = TRUE`
+#'   run whose `directory` already holds most of the replicates counts only the
+#'   ones still to fit. `"lines"` prints plain text on stdout instead, one line
+#'   per replicate as it finishes - its sample index, OFV and how the fit ended
+#'   (`converged`, `not_converged`, `stalled` or `failed`), plus the exclusion
+#'   filter that leaves it out of the summary, if any - flushed line by line so
+#'   it streams into a log. `TRUE` picks `"bar"` in an interactive session and
+#'   `"lines"` otherwise, e.g. under `Rscript`.
 #' @param verbose Print a one-line run header to stderr. Default `FALSE`.
 #'
 #' @return An object of class `ferx_bootstrap`, a list with:
@@ -243,7 +249,7 @@ ferx_bootstrap <- function(model,
   for (nm in c("update_inits", "run_base_model", "keep_covariance", "dofv",
                "skip_minimization_terminated", "skip_estimate_near_boundary",
                "skip_covariance_step_terminated", "skip_with_covstep_warnings",
-               "resume", "retry_failed", "progress", "verbose")) {
+               "resume", "retry_failed", "verbose")) {
     v <- get(nm)
     if (!is.logical(v) || length(v) != 1L || is.na(v)) {
       stop("`", nm, "` must be TRUE or FALSE.")
@@ -274,6 +280,7 @@ ferx_bootstrap <- function(model,
        is.na(stratify_on) || !nzchar(stratify_on))) {
     stop("`stratify_on` must be a single column name, or NULL.")
   }
+  progress <- .ferx_progress_mode(progress, "ferx_bootstrap")
   ss <- .ferx_bootstrap_sample_size(sample_size)
 
   # An unstratified run with per-stratum counts is a user error the engine
@@ -307,7 +314,10 @@ ferx_bootstrap <- function(model,
     retry_failed,
     verbose,
     # NULL is what tells the engine not to open a reporting thread at all.
-    if (isTRUE(progress)) .ferx_bootstrap_progress_handler() else NULL
+    switch(progress,
+           bar   = .ferx_bootstrap_progress_handler(),
+           lines = .ferx_bootstrap_progress_lines(),
+           off   = NULL)
   )
   if (length(res) == 0L) {
     stop("ferx_bootstrap: backend returned no result.")
@@ -687,7 +697,11 @@ plot.ferx_bootstrap <- function(x, y = NULL, parameters = NULL,
     invisible(NULL)
   }
 
-  function(stage, completed, total, base_fit) {
+  # The engine also passes the replicate's own record (`sample`, `ofv`,
+  # `outcome`, `skipped`) and `fresh`; a bar draws counts only, and a stale
+  # redelivery is exactly what keeps its spinner turning.
+  function(stage, completed, total, base_fit, sample = NA_integer_,
+           ofv = NA_real_, outcome = "", skipped = "", fresh = TRUE) {
     tryCatch({
       if (identical(stage, "started")) {
         state$replicates <- total
@@ -720,6 +734,61 @@ plot.ferx_bootstrap <- function(x, y = NULL, parameters = NULL,
         advance("dofv", completed)
       } else if (identical(stage, "finished")) {
         close_bar()
+      }
+    }, error = function(e) NULL)
+    invisible(NULL)
+  }
+}
+
+# The line renderer (#677): `progress = "lines"`, and what `progress = TRUE`
+# picks outside an interactive session. One plain record per line on stdout,
+# flushed as it is written, so a log viewer tailing a script's output sees each
+# replicate as it lands rather than a bar redrawn with carriage returns:
+#
+#   bootstrap: fitting the base model, then 200 replicates
+#   bootstrap: base model fitted
+#   replicate 17 (1/200): OFV 512.345, converged
+#   replicate 3 (2/200): OFV -, failed, skipped: fit failed
+#   delta-OFV 17 (1/200): 2.104
+#   bootstrap: done
+#
+# The engine delivers every event once with `fresh = TRUE` and redelivers the
+# latest with `fresh = FALSE` on its redraw timer; only the fresh ones print.
+# Replicates finish in completion order, which on a thread pool is not sample
+# order - the `(k/n)` count is the completion count. Like the bar, nothing here
+# may throw.
+.ferx_bootstrap_progress_lines <- function() {
+  out <- .ferx_progress_line
+  num <- .ferx_progress_num
+  state <- new.env(parent = emptyenv())
+  state$replicates <- NA_integer_
+
+  function(stage, completed, total, base_fit, sample = NA_integer_,
+           ofv = NA_real_, outcome = "", skipped = "", fresh = TRUE) {
+    if (!isTRUE(fresh)) return(invisible(NULL))
+    tryCatch({
+      if (identical(stage, "started")) {
+        state$replicates <- total
+        reused <- if (completed > 0L) {
+          paste0(" (", completed, " reused from the directory)")
+        } else {
+          ""
+        }
+        out("bootstrap: ",
+            if (isTRUE(base_fit)) "fitting the base model, then " else "",
+            total, " replicate", if (total == 1L) "" else "s", " to fit",
+            reused)
+      } else if (identical(stage, "base_done")) {
+        out("bootstrap: base model fitted")
+      } else if (identical(stage, "replicate")) {
+        out("replicate ", sample, " (", completed, "/", total, "): OFV ",
+            num(ofv), ", ", if (nzchar(outcome)) outcome else "done",
+            if (nzchar(skipped)) paste0(", skipped: ", skipped) else "")
+      } else if (identical(stage, "dofv")) {
+        out("delta-OFV ", sample, " (", completed, "/", total, "): ",
+            if (is.na(ofv)) "skipped" else num(ofv))
+      } else if (identical(stage, "finished")) {
+        out("bootstrap: done")
       }
     }, error = function(e) NULL)
     invisible(NULL)

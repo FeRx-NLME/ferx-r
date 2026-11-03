@@ -36,6 +36,7 @@ reference:
       - ferx_model_set_section
       - ferx_model_to_frem
       - ferx_update_model
+      - ferx_model_from_dcm
 
   - title: "Diagnostics & output"
     desc: "Extract and visualise parameter estimates, ETAs, and optimizer traces."

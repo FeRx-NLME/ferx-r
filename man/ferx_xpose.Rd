@@ -52,6 +52,12 @@ The mapping from \code{fit} to the standard NONMEM table columns is:
 derived; \code{WRES} is set to \code{NA} (ferx does not compute the FO-weighted
 residual). \code{NPDE}/\code{NPD} (present when the fit ran with \code{npde_nsim > 0})
 are mapped to the residual role, so Xpose residual plots can use them.
+Only the Gaussian observation rows are used: the binary-endpoint rows
+and the time-to-event residual rows (\code{COXSNELL}, \code{MARTINGALE},
+\code{DEVIANCE}, \code{PIT}) that \code{fit$sdtab} carries after them are left out,
+with a message saying how many, so \code{nobs} and the DV plots count
+observations only. A fit with no Gaussian observations (a binary- or
+time-to-event-only model) is refused with an error.
 \item \strong{patab}: individual parameter values (\code{fit$individual_estimates})
 and empirical-Bayes etas (\code{fit$ebe_etas}), repeated for every observation
 row of each subject.

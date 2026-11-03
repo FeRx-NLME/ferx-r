@@ -167,7 +167,8 @@ ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = 
     warning("ferx_calc_npde: ", note, call. = FALSE)
   }
 
-  fit$sdtab <- .ferx_attach_npde(fit$sdtab, npde_tbl)
+  fit$sdtab <- .ferx_attach_npde(fit$sdtab, npde_tbl,
+                                 n_tte = sum(fit$subject_summary$n_obs_tte))
   fit
 }
 
@@ -181,7 +182,22 @@ ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = 
 # `data`/`model` differ from the fit, or the model has non-Gaussian (e.g. TTE)
 # rows that sdtab and the NPDE table count differently - both cases should be a
 # clear error, not a quietly wrong or NA-filled column.
-.ferx_attach_npde <- function(sdtab, npde_tbl) {
+#
+# The one exception is the `n_tte` time-to-event residual rows ferx-core
+# appends after every other sdtab row (#901): the NPDE table has no rows for
+# them, so NPDE/NPD go on the leading rows and are NA on those.
+.ferx_attach_npde <- function(sdtab, npde_tbl, n_tte = 0L) {
+  n_tte <- as.integer(n_tte)
+  if (length(n_tte) == 1L && !is.na(n_tte) && n_tte > 0L &&
+      nrow(sdtab) - n_tte == nrow(npde_tbl)) {
+    lead <- seq_len(nrow(npde_tbl))
+    head <- .ferx_attach_npde(sdtab[lead, , drop = FALSE], npde_tbl)
+    sdtab$NPDE <- NA_real_
+    sdtab$NPD  <- NA_real_
+    sdtab$NPDE[lead] <- head$NPDE
+    sdtab$NPD[lead]  <- head$NPD
+    return(sdtab)
+  }
   if (nrow(sdtab) != nrow(npde_tbl)) {
     stop(sprintf(paste0(
       "ferx_calc_npde: the NPDE table has %d row(s) but fit$sdtab has %d; cannot align. ",

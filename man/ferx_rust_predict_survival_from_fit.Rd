@@ -18,7 +18,11 @@ ferx_rust_predict_survival_from_fit(
   residual_rho_pairs,
   mixture_overrides,
   fit_bindings,
-  iov_occasion
+  iov_occasion,
+  individual,
+  eta_ids,
+  eta_names,
+  eta_flat
 )
 }
 \description{

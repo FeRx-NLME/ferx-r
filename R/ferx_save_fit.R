@@ -878,7 +878,8 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
       !all(c("ID", .FITRX_SUBJECT_COLS) %in% names(summ))) {
     return(NULL)
   }
-  if (complete && (anyNA(summ$n_obs) || anyNA(summ$n_obs_discrete))) {
+  if (complete && (anyNA(summ$n_obs) || anyNA(summ$n_obs_discrete) ||
+                   anyNA(summ$n_obs_tte))) {
     return(NULL)
   }
   summ
@@ -887,20 +888,30 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
 # The subject (1-based position in fit order) of every sdtab row, from the
 # per-subject row counts: each subject's `n_obs` Gaussian rows in subject
 # order, then each subject's `n_obs_discrete` discrete rows in subject order,
-# as `io::output::sdtab` writes them. Not from the ID number, which runs two
+# then each subject's `n_obs_tte` time-to-event rows (ferx-core #901), as
+# `io::output::sdtab` writes them. Not from the ID number, which runs two
 # adjacent subjects with the same number together and has no rows for a
 # subject without observations (#540). NULL when the counts do not add up to
 # `n_rows`.
-.fitrx_sdtab_subject <- function(n_obs, n_obs_discrete, n_rows) {
+.fitrx_sdtab_subject <- function(n_obs, n_obs_discrete, n_rows, n_obs_tte = 0L) {
   n_obs <- as.integer(n_obs)
   n_obs_discrete <- as.integer(n_obs_discrete)
-  if (anyNA(n_obs) || anyNA(n_obs_discrete) ||
-      sum(n_obs) + sum(n_obs_discrete) != n_rows) {
+  n_obs_tte <- as.integer(n_obs_tte)
+  # A scalar is the same count for every subject (0: no TTE rows); any other
+  # length is not one count per subject.
+  if (length(n_obs_tte) == 1L) n_obs_tte <- rep_len(n_obs_tte, length(n_obs))
+  if (anyNA(n_obs) || anyNA(n_obs_discrete) || anyNA(n_obs_tte) ||
+      length(n_obs_tte) != length(n_obs) ||
+      sum(n_obs) + sum(n_obs_discrete) + sum(n_obs_tte) != n_rows) {
     return(NULL)
   }
   pos <- seq_along(n_obs)
-  list(gaussian = rep.int(pos, n_obs), discrete = rep.int(pos, n_obs_discrete))
+  list(gaussian = rep.int(pos, n_obs), discrete = rep.int(pos, n_obs_discrete),
+       tte = rep.int(pos, n_obs_tte))
 }
+
+# The sdtab columns ferx-core creates for time-to-event rows only (#901).
+.FITRX_TTE_COLS <- c("COXSNELL", "MARTINGALE", "DEVIANCE", "PIT")
 
 .fitrx_write_ebes_kappa_csv <- function(fit, path) {
   k <- fit$ebe_kappas
@@ -917,6 +928,15 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
 .fitrx_has_cond_dist <- function(fit) {
   cd <- fit$cond_dist
   !is.null(cd) && is.data.frame(cd$data) && nrow(cd$data) > 0L
+}
+
+.fitrx_warn_tte_rows_dropped <- function(n_tte) {
+  warning(warningCondition(sprintf(paste0(
+    "ferx_save_fit(): the bundle does not keep the %d time-to-event sdtab ",
+    "rows (COXSNELL, MARTINGALE, DEVIANCE, PIT); the reloaded fit's sdtab ",
+    "has the Gaussian and discrete rows only. Refit to get them back ",
+    "(ferx-core #911)."), n_tte),
+    class = "ferx_tte_rows_dropped_warning"))
 }
 
 # Writes predictions.csv into `staging`, and predictions_discrete.csv when the
@@ -936,7 +956,26 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
   ids <- .fitrx_subject_string_ids(fit)
   summ <- .fitrx_subject_summary(fit)
   rows <- if (!is.null(summ) && !is.null(ids) && nrow(summ) == length(ids)) {
-    .fitrx_sdtab_subject(summ$n_obs, summ$n_obs_discrete, nrow(sdtab))
+    .fitrx_sdtab_subject(summ$n_obs, summ$n_obs_discrete, nrow(sdtab),
+                         if (is.null(summ$n_obs_tte)) 0L else summ$n_obs_tte)
+  }
+  # The time-to-event rows (ferx-core #901) come last; the bundle keeps none
+  # of them, as ferx-core's own checkpoint keeps none (#911), and none of the
+  # columns only they fill. Without usable counts they are the rows with a
+  # COXSNELL value, in a table carrying all four TTE columns. A fit without
+  # TTE rows keeps every column, so an `[output]` column that happens to be
+  # called PIT survives.
+  tte_rows <- if (!is.null(rows)) {
+    nrow(sdtab) - rev(seq_along(rows$tte)) + 1L
+  } else if (all(.FITRX_TTE_COLS %in% names(sdtab))) {
+    which(!is.na(sdtab$COXSNELL))
+  } else {
+    integer()
+  }
+  if (length(tte_rows) > 0L) {
+    .fitrx_warn_tte_rows_dropped(length(tte_rows))
+    sdtab <- sdtab[-tte_rows, setdiff(names(sdtab), .FITRX_TTE_COLS), drop = FALSE]
+    if (!is.null(rows)) rows$tte <- integer()
   }
   if (is.null(rows)) {
     # A fit from before fit$subject_summary: the run-length of the ID number

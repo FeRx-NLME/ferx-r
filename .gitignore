@@ -16,3 +16,9 @@ ROADMAP.md
 ..Rcheck/
 tests/testthat/Rplots.pdf
 Rplots.pdf
+
+# Vendored Rust dependencies: a release artifact written by tools/vendor-rust.sh (#666)
+src/rust/vendor.tar.xz
+src/rust/vendor/
+src/rust/vendor-config.toml
+src/rust/vendor-Cargo.lock

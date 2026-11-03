@@ -70,9 +70,9 @@ test_that("the result tables carry the documented columns", {
   expect_true(all(c("DRAW", "SIM", "ID", "TIME", "AMT", "CMT", "RATE", "DECISION",
     "SIGNAL", "RULE") %in% names(res$doses)))
   expect_true(all(c("DRAW", "SIM", "ID", "DECISION", "TIME", "SIGNAL", "OUTCOME",
-    "N_DOSED") %in% names(res$decisions)))
+    "N_DOSED", "INTERVAL") %in% names(res$decisions)))
   expect_true(all(c("DRAW", "SIM", "ID", "CUM_DOSE", "N_DOSES", "N_INCREASES",
-    "N_DECREASES", "N_HOLDS", "DISCONTINUED", "TIME_TO_DISCONT", "SIGNAL_MIN",
+    "N_DECREASES", "N_HOLDS", "N_NOT_DUE", "DISCONTINUED", "TIME_TO_DISCONT", "SIGNAL_MIN",
     "SIGNAL_MAX", "SIGNAL_MEAN", "PCT_TIME_IN_WINDOW") %in% names(res$metrics)))
 })
 test_that("n_sim = 3 produces three replicates across all three tables", {
@@ -164,7 +164,7 @@ test_that("a non-logical `verify` is rejected before touching the engine", {
 test_that("decisions tag every realized dose with a valid outcome (Dosed path)", {
   ex  <- ferx_example("adaptive_tdm")
   res <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 2L, seed = 1L)
-  expect_true(all(res$decisions$OUTCOME %in% c("dosed", "hold", "stop")))
+  expect_true(all(res$decisions$OUTCOME %in% c("dosed", "hold", "not_due", "stop")))
   # The TDM titration has no hold/stop rule, so every decision issues a dose;
   # the converter must mark each "dosed" with N_DOSED >= 1.
   expect_true(all(res$decisions$OUTCOME == "dosed"))
@@ -236,6 +236,51 @@ test_that("a stop rule discontinues after the first decision", {
   expect_true(all(res$metrics$DISCONTINUED))
   expect_true(all(res$metrics$TIME_TO_DISCONT == 0))
   expect_true(all(res$metrics$N_DOSES == 0L))
+})
+test_that("a 24 h interval on a 12 h grid logs every second point not_due (ferx-core #945)", {
+  # The review grid stays at 0, 12, 24, 36, 48; a 24 h interval makes only 0, 24
+  # and 48 due. The rule never fires, so each due point re-issues the dose.
+  model <- .write_adaptive_model(c(
+    "  intervals      = [24]",
+    "  start_interval = 24",
+    "  when signal > 1000000 : hold"
+  ))
+  data <- ferx_example("adaptive_tdm")$data
+  res  <- ferx_simulate_adaptive(model, data, n_sim = 1L, seed = 1L)
+  d    <- res$decisions
+  due  <- d$TIME %% 24 == 0
+  expect_true(all(d$OUTCOME[due] == "dosed"))
+  expect_true(all(d$OUTCOME[!due] == "not_due"))
+  expect_true(all(d$N_DOSED[!due] == 0L))
+  expect_true(all(d$INTERVAL == 24))
+  # Not-due points still record what the monitor read.
+  expect_false(anyNA(d$SIGNAL[!due]))
+  # Doses only at the due points.
+  expect_gt(nrow(res$doses), 0L)
+  expect_true(all(res$doses$TIME %% 24 == 0))
+  # N_NOT_DUE counts the not-due points; N_HOLDS does not.
+  m <- res$metrics
+  n_not_due <- tapply(!due, d$ID, sum)
+  expect_equal(m$N_NOT_DUE, as.integer(n_not_due[as.character(m$ID)]))
+  expect_true(all(m$N_NOT_DUE == 2L))
+  expect_true(all(m$N_HOLDS == 0L))
+  expect_true(all(m$N_DOSES == 3L))
+})
+test_that("decisions$INTERVAL is NA when the block declares no intervals", {
+  model <- .write_adaptive_model("  when signal > 1000000 : hold")
+  data  <- ferx_example("adaptive_tdm")$data
+  res   <- ferx_simulate_adaptive(model, data, n_sim = 1L, seed = 1L)
+  expect_true(all(is.na(res$decisions$INTERVAL)))
+  expect_true(all(res$metrics$N_NOT_DUE == 0L))
+})
+test_that("intervals without start_interval is a parse error naming start_interval", {
+  model <- .write_adaptive_model(c(
+    "  intervals = [24]",
+    "  when signal > 1000000 : hold"
+  ))
+  data <- ferx_example("adaptive_tdm")$data
+  expect_error(ferx_simulate_adaptive(model, data, n_sim = 1L, seed = 1L),
+               "start_interval")
 })
 
 # ---- Pre-scheduled base regimen (loading dose) + system resets (ferx-core #702 / #716 / #929) ----
@@ -359,20 +404,33 @@ test_that("an EVID=4 row resets then doses (reset before dose)", {
   expect_lt(s_evid4, s_none)
 })
 
-test_that("unsupported adaptive combinations raise a typed error", {
-  # auc_target combined with a system reset is rejected (the per-window trapezoid
-  # grid carries no node at the reset instant), not silently mis-scored.
+test_that("auc_target runs on a subject with a system reset (ferx-core #943)", {
+  # Refused until ferx-core #2546: the window AUC is now integrated on the
+  # run's own trajectory, with a node on each side of the reset.
   auc_model <- .write_vanco_model(dosing_extra = c(
     "  target_window = [10, 15]",
     "  auc_target    = [400, 600]",
     "  when signal < 10 : increase 25%"
   ))
-  expect_error(
-    ferx_simulate_adaptive(auc_model, .write_vanco_data("evid3"), n_sim = 1L, seed = 1L),
-    "auc_target"
-  )
-  # A base regimen combined with a reset UNDER IOV is rejected (base x reset is
-  # supported on the constant-covariate path only).
+  res <- ferx_simulate_adaptive(auc_model, .write_vanco_data("evid3"),
+                                n_sim = 1L, seed = 1L)
+  att <- res$metrics$AUC_TARGET_ATTAINMENT
+  expect_length(att, 1L)
+  expect_true(is.finite(att) && att >= 0 && att <= 1)
+})
+
+test_that("AUC_TARGET_ATTAINMENT is NA without an auc_target", {
+  model <- .write_vanco_model(dosing_extra = c(
+    "  target_window = [10, 15]",
+    "  when signal < 10 : increase 25%"
+  ))
+  res <- ferx_simulate_adaptive(model, .write_vanco_data("none"),
+                                n_sim = 1L, seed = 1L)
+  expect_identical(res$metrics$AUC_TARGET_ATTAINMENT, NA_real_)
+})
+
+test_that("a base regimen with a reset runs under IOV (ferx-core #932)", {
+  # Refused with E_ADAPTIVE_UNSUPPORTED before ferx-core #2556.
   iov_model <- .write_vanco_model(
     cl_expr      = "TVCL * exp(ETA_CL + KAPPA_CL)",
     extra_params = "  kappa KAPPA_CL ~ 0.09",
@@ -380,9 +438,33 @@ test_that("unsupported adaptive combinations raise a typed error", {
       "  target_window = [10, 15]",
       "  when signal < 10 : increase 25%"
     ))
+  s_none <- .first_signal(
+    ferx_simulate_adaptive(iov_model, .write_vanco_data("none"), n_sim = 1L, seed = 1L))
+  res <- ferx_simulate_adaptive(iov_model, .write_vanco_data("evid3"),
+                                n_sim = 1L, seed = 1L)
+  # The t = 12 reset zeroes CENT under IOV as on the constant path, so the
+  # t = 24 trough is ~0. Without the reset the integrated base dose leaves a
+  # material trough, which a driver that dropped the base regimen would not.
+  expect_lt(.first_signal(res), 1)
+  expect_gt(s_none, 3)
+  expect_gt(nrow(res$doses), 0L)
+})
+
+test_that("an adaptive model the driver cannot simulate raises a typed error", {
+  # A closed-form model (no [odes]) is refused before any subject runs.
+  model <- .write_adaptive_model("  when signal > 1000000 : hold")
+  text  <- readLines(model)
+  text  <- sub("  ode(states=[central])",
+               "  pk one_cpt_iv(cl=CL, v=V)", text, fixed = TRUE)
+  text  <- text[!(text %in% c("[odes]", "  d/dt(central) = -(CL / V) * central",
+                              "[scaling]", "  y = central / V"))]
+  text  <- sub("observe     = central / V", "observe     = C", text, fixed = TRUE)
+  writeLines(text, model)
   expect_error(
-    ferx_simulate_adaptive(iov_model, .write_vanco_data("evid3"), n_sim = 1L, seed = 1L),
-    "base regimen combined with system"
+    ferx_simulate_adaptive(model, ferx_example("adaptive_tdm")$data,
+                           n_sim = 1L, seed = 1L),
+    "requires an ODE model.*E_ADAPTIVE_UNSUPPORTED",
+    class = "ferx_engine_error"
   )
 })
 
@@ -559,11 +641,8 @@ test_that("fit = with data omitted simulates the fit's own data", {
   )
 })
 
-test_that("ferx_simulate_adaptive(fit = ) refuses a [mixture] fit without override values, coded (#672)", {
-  # The mixture_override fixture as an ODE model with an [adaptive_dosing]
-  # block. The fit list carries no `mixture_overrides` (a .fitrx saved before
-  # #655), so the class rebuild refuses before anything is simulated. The
-  # adaptive prefix on the message must not cost the refusal its code.
+# The mixture_override fixture as an ODE model with an [adaptive_dosing] block.
+.write_mixture_adaptive_model <- function() {
   path <- tempfile(fileext = ".ferx")
   writeLines(c(
     "[parameters]",
@@ -597,6 +676,14 @@ test_that("ferx_simulate_adaptive(fit = ) refuses a [mixture] fit without overri
     "  confirm     = 1",
     "  when signal < 1 : increase 25%"
   ), path)
+  path
+}
+
+test_that("ferx_simulate_adaptive(fit = ) refuses a [mixture] fit without override values, coded (#672)", {
+  # The fit list carries no `mixture_overrides` (a .fitrx saved before #655),
+  # so the class rebuild refuses before anything is simulated. The adaptive
+  # prefix on the message must not cost the refusal its code.
+  path <- .write_mixture_adaptive_model()
   fit <- list(theta = c(TVCL1 = 1.2, TVCL2 = 2.5, TVV = 10, MIXL = 0),
               omega = matrix(0.02, 1, 1, dimnames = list("ETA_CL", "ETA_CL")),
               sigma = c(EPS = 0.2))
@@ -607,4 +694,378 @@ test_that("ferx_simulate_adaptive(fit = ) refuses a [mixture] fit without overri
   expect_true(startsWith(conditionMessage(probe$cond), "ferx_simulate_adaptive: "),
               info = conditionMessage(probe$cond))
   expect_null(probe$value)
+})
+
+# ---- supplied etas: `etas =` / `unmatched =` (ferx-core #1594 part 2) ----
+
+# A 1-cpt IV model with two etas, so a column-order mix-up cannot pass. With
+# `adaptive = TRUE` it carries an always-hold controller deciding on the dose
+# times, so every dose is a base dose from the data and the adaptive run is the
+# model's individual prediction; with `covariate_etas = TRUE` (and no
+# controller) the etas are read from the data columns ECL / EV, so
+# `ferx_predict()`'s PRED (eta = 0) is the IPRED at those etas.
+.write_supplied_eta_model <- function(adaptive = TRUE, covariate_etas = FALSE) {
+  path <- tempfile(fileext = ".ferx")
+  shift <- function(eta, col) if (covariate_etas) paste0(eta, " + ", col) else eta
+  writeLines(c(
+    "[parameters]",
+    "  theta TVCL(4.0, 0.5, 20.0)",
+    "  theta TVV(50.0, 5.0, 200.0)",
+    "  omega ETA_CL ~ 0.09",
+    "  omega ETA_V ~ 0.04",
+    "  sigma PROP ~ 0.10 (sd)",
+    "[individual_parameters]",
+    paste0("  CL = TVCL * exp(", shift("ETA_CL", "ECL"), ")"),
+    paste0("  V  = TVV * exp(", shift("ETA_V", "EV"), ")"),
+    "[structural_model]",
+    "  ode(states=[central])",
+    "[odes]",
+    "  d/dt(central) = -(CL / V) * central",
+    "[scaling]",
+    "  y = central / V",
+    "[error_model]",
+    "  DV ~ proportional(PROP)",
+    if (adaptive) c(
+      "[adaptive_dosing]",
+      "  observe     = central / V",
+      "  at          = [0, 24]",
+      "  start_dose  = 100",
+      "  route       = bolus(cmt=1)",
+      "  dose_bounds = [0, 1000]",
+      "  when signal >= 0 : hold"
+    )
+  ), path)
+  path
+}
+
+# Three subjects with 100 mg at 0 and 24 h. `etas` (rows keyed by ID) adds the
+# ECL / EV columns the covariate twin reads.
+.supplied_eta_data <- function(etas = NULL) {
+  obs <- c(2, 8, 20, 26, 32, 44)
+  rows <- do.call(rbind, lapply(c("1", "2", "3"), function(id) {
+    data.frame(
+      ID = id,
+      TIME = c(0, obs[1:3], 24, obs[4:6]),
+      DV = 0,
+      EVID = c(1, 0, 0, 0, 1, 0, 0, 0),
+      AMT = c(100, NA, NA, NA, 100, NA, NA, NA),
+      CMT = 1,
+      MDV = c(1, 0, 0, 0, 1, 0, 0, 0)
+    )
+  }))
+  if (!is.null(etas)) {
+    rows$ECL <- etas$ETA_CL[match(rows$ID, etas$ID)]
+    rows$EV <- etas$ETA_V[match(rows$ID, etas$ID)]
+  }
+  rows
+}
+
+.supplied_etas <- data.frame(
+  ID = c("1", "2", "3"),
+  ETA_CL = c(0.3, -0.4, 0.05),
+  ETA_V = c(-0.2, 0.1, 0.25)
+)
+
+# The run's IPRED keyed "ID@TIME", sorted, for comparison across engines.
+.ipred_by_key <- function(df, col = "IPRED") {
+  key <- paste0(as.character(df$ID), "@", format(df$TIME, digits = 15))
+  v <- stats::setNames(df[[col]], key)
+  v[order(names(v))]
+}
+
+# The baseline a zero-eta table must reproduce: the same model with every
+# omega declared `0.0 FIX`, which draws eta as exactly 0 (ferx-core #1605).
+# The bundled TDM example titrates on the assay-noised trough, so the dose
+# ledger, the decisions and the assay draws all have to line up too, not just
+# one trajectory. Comparator: `expect_identical()` on every table (bitwise on
+# doubles), except `ETA_SUPPLIED`, which by design says TRUE on one run and
+# FALSE on the other.
+test_that("etas = all zeros equals the run at eta = 0, bit for bit", {
+  ex <- ferx_example("adaptive_tdm")
+  zero_model <- tempfile(fileext = ".ferx")
+  text <- readLines(ex$model)
+  expect_length(grep("omega ETA_CL ~ 0.09", text, fixed = TRUE), 1L)
+  writeLines(sub("omega ETA_CL ~ 0.09", "omega ETA_CL ~ 0.0 FIX", text,
+                 fixed = TRUE), zero_model)
+  ids <- unique(as.character(utils::read.csv(ex$data)$ID))
+  zeros <- data.frame(ID = ids, ETA_CL = 0)
+
+  supplied <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 2L, seed = 11L,
+                                     etas = zeros)
+  at_zero <- ferx_simulate_adaptive(zero_model, ex$data, n_sim = 2L, seed = 11L)
+  for (tbl in c("trajectories", "doses", "decisions")) {
+    expect_identical(supplied[[tbl]], at_zero[[tbl]], label = tbl)
+  }
+  expect_true(all(supplied$metrics$ETA_SUPPLIED))
+  expect_false(any(at_zero$metrics$ETA_SUPPLIED))
+  keep <- setdiff(names(supplied$metrics), "ETA_SUPPLIED")
+  expect_identical(supplied$metrics[keep], at_zero$metrics[keep])
+  # The fixture would not notice etas being ignored unless the drawn run differs.
+  drawn <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 2L, seed = 11L)
+  expect_false(isTRUE(all.equal(drawn$trajectories$IPRED,
+                                supplied$trajectories$IPRED)))
+})
+
+# The oracle is `ferx_predict()` on a twin that reads each subject's etas from
+# data columns: its PRED (eta = 0) is exp(0 + eta) = exp(eta), the same
+# arithmetic the supplied run does. `ferx_predict()` itself has no per-subject
+# eta argument, hence the twin. Mutations that redden this: the glue dropping
+# the supplied etas (the drawn run), or flattening the table column-major.
+test_that("supplied etas: each subject's IPRED matches ferx_predict at those etas", {
+  model <- .write_supplied_eta_model()
+  data <- .supplied_eta_data()
+  res <- ferx_simulate_adaptive(model, data, n_sim = 2L, seed = 3L,
+                                etas = .supplied_etas)
+  expect_equal(nrow(res$doses), 0L) # the controller holds throughout
+  expect_true(all(res$metrics$ETA_SUPPLIED))
+  # A supplied eta stays fixed across replicates; nothing else is drawn here.
+  r1 <- res$trajectories[res$trajectories$SIM == 1L, ]
+  r2 <- res$trajectories[res$trajectories$SIM == 2L, ]
+  expect_identical(r1$IPRED, r2$IPRED)
+
+  pred <- ferx_predict(.write_supplied_eta_model(adaptive = FALSE,
+                                                 covariate_etas = TRUE),
+                       .supplied_eta_data(.supplied_etas))
+  got <- .ipred_by_key(r1)
+  want <- .ipred_by_key(pred, "PRED")
+  expect_identical(names(got), names(want))
+  # Bit-identical, measured (macOS, 2026-11-01): the decisions sit on the dose
+  # times, so both engines integrate the same segments at the same etas.
+  expect_identical(unname(got), unname(want))
+  # The three subjects differ, so a subject mix-up cannot pass.
+  expect_equal(length(unique(round(got, 8))), length(got))
+})
+
+test_that("etas = fit$ebe_etas reproduces the fit's own IPRED (from-fit path)", {
+  model <- .write_fit_adaptive_model(c(2, 10, 0.09, 0.1))
+  text <- readLines(model)
+  text <- sub("at          = every 12 from 12 to 36", "at          = [0]", text,
+              fixed = TRUE)
+  text <- sub("when signal < 2 : increase 25%", "when signal >= 0 : hold", text,
+              fixed = TRUE)
+  writeLines(text, model)
+  data <- .fit_adaptive_data()
+  fit <- ferx_fit(model, data, verbose = FALSE)
+  expect_true(all(abs(fit$ebe_etas$ETA_CL) > 1e-6))
+
+  res <- .quiet_design_dv(
+    ferx_simulate_adaptive(model, data, n_sim = 1L, seed = 2L, fit = fit,
+                           etas = fit$ebe_etas)
+  )
+  expect_true(all(res$metrics$ETA_SUPPLIED))
+  sd <- fit$sdtab
+  got <- .ipred_by_key(res$trajectories)
+  want <- .ipred_by_key(sd)
+  got <- got[names(want)]
+  expect_false(anyNA(got))
+  # Bit-identical, measured (macOS, 2026-11-01), as ferx-core's own B1 oracle
+  # (`tests/adaptive_supplied_etas.rs`) asserts.
+  expect_identical(unname(got), unname(want))
+  # With data omitted it simulates the fit's own data, as `fit =` alone does.
+  expect_identical(
+    .quiet_design_dv(ferx_simulate_adaptive(model, n_sim = 1L, seed = 2L,
+                                            fit = fit, etas = fit$ebe_etas)),
+    res
+  )
+})
+
+test_that("a data subject without a row: \"refuse\" is coded, \"draw\" draws it alone", {
+  model <- .write_supplied_eta_model()
+  data <- .supplied_eta_data()
+  partial <- .supplied_etas[.supplied_etas$ID != "3", ]
+  run <- function(...) {
+    ferx_simulate_adaptive(model, data, n_sim = 2L, seed = 9L, ...)
+  }
+
+  probe <- engine_error_probe(run(etas = partial))
+  expect_coded_refusal(probe, "have no supplied", "E_SUPPLIED_ETAS")
+  expect_true(grepl("'3'", conditionMessage(probe$cond), fixed = TRUE),
+              info = conditionMessage(probe$cond))
+  # The advice is spelled the R way, never as the engine's Rust enum.
+  expect_true(grepl("`unmatched = \"draw\"`", conditionMessage(probe$cond),
+                    fixed = TRUE),
+              info = conditionMessage(probe$cond))
+  expect_false(grepl("UnmatchedSubjects", conditionMessage(probe$cond),
+                     fixed = TRUE),
+               info = conditionMessage(probe$cond))
+  expect_identical(
+    engine_error_probe(run(etas = partial, unmatched = "refuse"))$cond$code,
+    "E_SUPPLIED_ETAS"
+  )
+  # The same on the `fit =` route, which goes through the other glue entry.
+  fit <- list(theta = c(TVCL = 4, TVV = 50),
+              omega = diag(c(0.09, 0.04)), sigma = c(PROP = 0.1))
+  from_fit <- engine_error_probe(run(fit = fit, etas = partial))
+  expect_coded_refusal(from_fit, "have no supplied", "E_SUPPLIED_ETAS")
+  expect_true(grepl("`unmatched = \"draw\"`", conditionMessage(from_fit$cond),
+                    fixed = TRUE),
+              info = conditionMessage(from_fit$cond))
+  expect_false(grepl("UnmatchedSubjects", conditionMessage(from_fit$cond),
+                     fixed = TRUE),
+               info = conditionMessage(from_fit$cond))
+
+  # Two of three matched: the intended mix, so no no-match warning.
+  expect_no_warning(mixed <- run(etas = partial, unmatched = "draw"))
+  m <- mixed$metrics
+  expect_identical(m$ETA_SUPPLIED, m$ID != "3")
+  traj <- function(res, ids) {
+    t <- res$trajectories[res$trajectories$ID %in% ids, ]
+    rownames(t) <- NULL
+    t
+  }
+  # Subjects 1 and 2 use their rows: as in the run that supplies everyone.
+  expect_identical(traj(mixed, c("1", "2")),
+                   traj(run(etas = .supplied_etas), c("1", "2")))
+  # Subject 3 draws: the supplied subjects still consume their draws, so it
+  # gets the eta the same seed gives with no etas at all.
+  expect_identical(traj(mixed, "3"), traj(run(), "3"))
+})
+
+# Review r1 #1: under "draw" an `etas` keyed differently from the data matches
+# nobody, the mistake "refuse" exists to catch. The run goes ahead (every
+# subject drawn, as asked) but says so, naming IDs from both sides.
+test_that("\"draw\" with etas matching no data subject warns, naming both ID sets", {
+  model <- .write_supplied_eta_model()
+  data <- .supplied_eta_data()
+  padded <- .supplied_etas
+  padded$ID <- sprintf("%02d", as.integer(padded$ID))
+  expect_warning(
+    res <- ferx_simulate_adaptive(model, data, n_sim = 1L, seed = 4L,
+                                  etas = padded, unmatched = "draw"),
+    "no row of `etas` matched a subject in `data`.*`etas` has 01, 02, 03; `data` has 1, 2, 3"
+  )
+  expect_false(any(res$metrics$ETA_SUPPLIED))
+  # The run itself is the all-drawn one.
+  expect_identical(res$trajectories,
+                   ferx_simulate_adaptive(model, data, n_sim = 1L, seed = 4L)$trajectories)
+})
+
+# The engine builds today's refusals with no suggestion, so the suggestion half
+# of the swap is pinned on a condition made here (#690 review r1 #2): for the
+# day the engine moves its advice there.
+test_that(".ferx_engine_spelling() swaps message and suggestion, for its code only", {
+  refusal <- function(code, suggestion) {
+    structure(
+      class = c("ferx_engine_error", "error", "condition"),
+      list(message = "or pass `X::Y` [E_A]", call = NULL, code = code,
+           suggestion = suggestion)
+    )
+  }
+  spell <- function(cond) {
+    tryCatch(
+      ferx:::.ferx_engine_spelling(stop(cond), "E_A", "`X::Y`", "`y = \"z\"`"),
+      error = function(e) e
+    )
+  }
+  hit <- spell(refusal("E_A", "pass `X::Y` instead"))
+  expect_s3_class(hit, "ferx_engine_error")
+  expect_identical(hit$code, "E_A")
+  expect_identical(conditionMessage(hit), "or pass `y = \"z\"` [E_A]")
+  expect_identical(hit$suggestion, "pass `y = \"z\"` instead")
+  expect_identical(spell(refusal("E_A", NA_character_))$suggestion, NA_character_)
+  other <- spell(refusal("E_B", "pass `X::Y` instead"))
+  expect_identical(conditionMessage(other), "or pass `X::Y` [E_A]")
+  expect_identical(other$suggestion, "pass `X::Y` instead")
+})
+
+# Review r1 #6: an explicit `unmatched` with no `etas` cannot do anything.
+test_that("`unmatched` without `etas` warns; the default does not", {
+  model <- .write_supplied_eta_model()
+  data <- .supplied_eta_data()
+  expect_warning(
+    ferx_simulate_adaptive(model, data, n_sim = 1L, seed = 1L, unmatched = "draw"),
+    "`unmatched` has no effect without `etas`"
+  )
+  expect_no_warning(ferx_simulate_adaptive(model, data, n_sim = 1L, seed = 1L))
+  expect_no_warning(ferx_simulate_adaptive(model, data, n_sim = 1L, seed = 1L,
+                                           etas = .supplied_etas,
+                                           unmatched = "refuse"))
+})
+
+test_that("eta columns that are not the model's are refused with the engine's code", {
+  model <- .write_supplied_eta_model()
+  data <- .supplied_eta_data()
+  refuse <- function(etas) {
+    engine_error_probe(ferx_simulate_adaptive(model, data, n_sim = 1L,
+                                              seed = 1L, etas = etas))
+  }
+  e <- .supplied_etas
+  wrong <- stats::setNames(e, c("ID", "ETA_CL", "ETA_VC"))
+  expect_coded_refusal(refuse(wrong), "[ETA_CL, ETA_VC]", "E_SUPPLIED_ETAS")
+  expect_coded_refusal(refuse(e[c("ID", "ETA_CL")]), "[ETA_CL]",
+                       "E_SUPPLIED_ETAS")
+  # Same names, another order: refused, not silently reordered.
+  expect_coded_refusal(refuse(e[c("ID", "ETA_V", "ETA_CL")]), "[ETA_V, ETA_CL]",
+                       "E_SUPPLIED_ETAS")
+  # The table checks are the engine's as well.
+  dup <- rbind(e, e[1, ])
+  expect_coded_refusal(refuse(dup), "appears more than once", "E_SUPPLIED_ETAS")
+  bad <- e
+  bad$ETA_CL[2] <- NA
+  expect_coded_refusal(refuse(bad), "non-finite", "E_SUPPLIED_ETAS")
+  # The from-fit path refuses the same way.
+  fit <- list(theta = c(TVCL = 4, TVV = 50),
+              omega = diag(c(0.09, 0.04)), sigma = c(PROP = 0.1))
+  probe <- engine_error_probe(ferx_simulate_adaptive(
+    model, data, n_sim = 1L, seed = 1L, fit = fit, etas = wrong
+  ))
+  expect_coded_refusal(probe, "[ETA_CL, ETA_VC]", "E_SUPPLIED_ETAS")
+})
+
+test_that("supplied etas on a [mixture] model are refused, coded", {
+  ids <- unique(as.character(
+    utils::read.csv(test_path("fixtures", "mixture_iv.csv"))$ID
+  ))
+  probe <- engine_error_probe(muffle_mixl_lint(ferx_simulate_adaptive(
+    .write_mixture_adaptive_model(), test_path("fixtures", "mixture_iv.csv"),
+    n_sim = 1L, seed = 1L, etas = data.frame(ID = ids, ETA_CL = 0)
+  )))
+  expect_coded_refusal(probe, "[mixture]", "E_SUPPLIED_ETAS")
+})
+
+test_that("a malformed `etas` is refused in R before the engine", {
+  model <- .write_supplied_eta_model()
+  data <- .supplied_eta_data()
+  run <- function(etas, ...) {
+    ferx_simulate_adaptive(model, data, n_sim = 1L, seed = 1L, etas = etas, ...)
+  }
+  expect_error(run(as.matrix(.supplied_etas[-1])), "must be a data frame")
+  expect_error(run(.supplied_etas[-1]), "with an ID")
+  na_id <- .supplied_etas
+  na_id$ID[1] <- NA
+  expect_error(run(na_id), "NA")
+  chr <- .supplied_etas
+  chr$ETA_V <- as.character(chr$ETA_V)
+  expect_error(run(chr), "ETA_V are not numeric")
+  expect_error(run(.supplied_etas, unmatched = "skip"), "should be one of")
+  # Review r1 #4: a repeated eta column would pass the engine's name check on
+  # its first copy and drop the second.
+  twice <- cbind(.supplied_etas, data.frame(ETA_V = 0.7))
+  expect_error(run(twice), "more than one column named `ETA_V`")
+  # Integer IDs match the data's text IDs.
+  num <- .supplied_etas
+  num$ID <- as.integer(num$ID)
+  expect_identical(run(num), run(.supplied_etas))
+})
+
+# Review r1 #3 / #5: a double ID is matched as a data.frame `data` spells it
+# (`.fitrx_double_text()`). The IDs are chosen where the plausible spellings
+# part: `as.character(1e5)` is "1e+05", `format(1e15, digits = 15)` is
+# "1000000000000000" and `format(0.1 + 0.2, digits = 15)` "0.3", while the data
+# writer gives "100000", "1e+15" and "0.30000000000000004". Under "refuse" a
+# mis-spelled ID is a refusal, so the run passing is the check.
+test_that("double IDs in etas match a data.frame data's double IDs", {
+  model <- .write_supplied_eta_model()
+  map <- c("1" = 1e5, "2" = 1e15, "3" = 0.1 + 0.2)
+  data <- .supplied_eta_data()
+  data$ID <- unname(map[data$ID])
+  etas <- .supplied_etas
+  etas$ID <- unname(map[etas$ID])
+  res <- ferx_simulate_adaptive(model, data, n_sim = 1L, seed = 1L, etas = etas)
+  expect_true(all(res$metrics$ETA_SUPPLIED))
+  expect_setequal(res$metrics$ID, c("100000", "1e+15", "0.30000000000000004"))
+  # Each subject on its own row: the IPRED of the character-ID run.
+  chr <- ferx_simulate_adaptive(model, .supplied_eta_data(), n_sim = 1L,
+                                seed = 1L, etas = .supplied_etas)
+  expect_identical(res$trajectories$IPRED, chr$trajectories$IPRED)
 })
