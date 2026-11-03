@@ -258,11 +258,14 @@ ferx_xpose <- function(fit,
       class = "ferx_xpose_no_gaussian_rows_error"))
   }
   if (n_disc + n_tte > 0L) {
-    message(messageCondition(sprintf(paste0(
-      "ferx_xpose(): left out %s sdtab rows; the Xpose data holds the %d ",
-      "Gaussian observation rows only.\n"),
-      paste(what, collapse = " and "), length(keep)),
-      class = "ferx_xpose_rows_dropped_message"))
+    # Built by hand: base R only gained messageCondition() in 4.6.0 (#702).
+    message(structure(
+      class = c("ferx_xpose_rows_dropped_message", "message", "condition"),
+      list(message = sprintf(paste0(
+        "ferx_xpose(): left out %s sdtab rows; the Xpose data holds the %d ",
+        "Gaussian observation rows only.\n"),
+        paste(what, collapse = " and "), length(keep)),
+        call = NULL)))
     sdtab <- sdtab[keep, setdiff(names(sdtab), if (n_tte > 0L) .FITRX_TTE_COLS),
                    drop = FALSE]
     rownames(sdtab) <- NULL
