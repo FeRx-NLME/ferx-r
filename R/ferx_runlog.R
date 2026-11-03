@@ -415,7 +415,8 @@ ferx_runlog <- function(fit, gradient_tol = 0.1, show_iterations = TRUE, verbose
   }
 
   # -- Final gradient ---------------------------------------------------------
-  grad <- fit$final_gradient
+  # `[[`: `$` would partial-match `final_gradient_source` when this is absent.
+  grad <- fit[["final_gradient"]]
   if (!is.null(grad) && length(grad) > 0L) {
     lines <- c(lines, .sec("Final gradient"))
 
