@@ -1281,9 +1281,16 @@ The five counts sum to \code{n_parameters}.}
 \item{left_init}{The outer optimizer's own verdict on whether it left the
 initial estimates: \code{TRUE}, \code{FALSE}, or \code{NA} when the
 method recorded none.}
+\item{stationary_start}{\code{TRUE} when a fit that did not leave its
+start was restarted from a perturbation of it and converged back to the
+same objective: a warm start at an optimum (a bootstrap replicate, a
+refit from earlier estimates), not a stall. \code{FALSE} otherwise,
+including for SAEM, IMP, Bayes and VI, which run no such restart
+(ferx-core #2506).}
 \item{stalled_at_init}{\code{TRUE} when no free parameter moved more than
 1\\% of its initial value, \code{NA} when the fit carries nothing to
-judge by. Prefers \code{left_init} to comparing estimates.}
+judge by. Prefers \code{left_init} to comparing estimates, and is
+\code{FALSE} when \code{stationary_start} is \code{TRUE}.}
 \item{estimate_near_boundary}{\code{TRUE} when a theta is pinned to a
 declared bound - the predicate \code{\link{ferx_bootstrap}} applies as
 \code{skip_estimate_near_boundary}.}

@@ -364,6 +364,8 @@ ferx_load_fit <- function(path) {
     # `left_init` is NA when no optimizer recorded an init-escape verdict.
     bic_inputs = .fitrx_bic_inputs_from_wire(w$bic_inputs),
     left_init = .fitrx_unwrap_opt_lgl(w$left_init),
+    # Omitted from the wire when FALSE, and from bundles older than #2506.
+    stationary_start = isTRUE(w$stationary_start),
     # Initial estimates (written alongside `left_init` so the engine's own
     # stalled_at_init() shape check passes on an R-written bundle) and the
     # packed Omega / kappa layout the natural-scale covariance needs.

@@ -3918,6 +3918,7 @@ fn default_fit_result(
         max_unconverged_subjects: 0,
         total_ebe_fallbacks: 0,
         total_ebe_nm_polished: 0,
+        stationary_start: false,
         covariance_status: CovarianceStatus::Computed,
         shrinkage_eta: Vec::new(),
         shrinkage_eps: f64::NAN,
@@ -5660,6 +5661,7 @@ fn fit_result_to_list(
         bic = result.bic,
         bic_inputs = bic_inputs,
         left_init = result.left_init,
+        stationary_start = result.stationary_start,
         stalled_at_init = ferx_core::model_selection::stalled_at_init(result),
         estimate_near_boundary = ferx_core::model_selection::estimate_near_boundary(result),
         max_abs_correlation =
@@ -8935,6 +8937,7 @@ fn fit_skeleton(
         max_unconverged_subjects: 0,
         total_ebe_fallbacks: 0,
         total_ebe_nm_polished: 0,
+        stationary_start: false,
         shrinkage_eta: Vec::new(),
         shrinkage_eps: f64::NAN,
         wall_time_secs: 0.0,

@@ -350,6 +350,7 @@ test_that("the model-selection surface survives round-trip", {
   # FitWire fields); the three derived verdicts travel under r_extras.
   expect_equal(loaded$bic_inputs, fit$bic_inputs)
   expect_equal(loaded$left_init, fit$left_init)
+  expect_identical(loaded$stationary_start, fit$stationary_start)
   expect_equal(loaded$stalled_at_init, fit$stalled_at_init)
   expect_equal(loaded$estimate_near_boundary, fit$estimate_near_boundary)
   expect_equal(loaded$max_abs_correlation, fit$max_abs_correlation,
@@ -382,6 +383,37 @@ test_that("the model-selection surface survives round-trip", {
   expect_equal(strict_loaded$failures, strict_fresh$failures)
   expect_equal(strict_loaded$skipped, strict_fresh$skipped)
   expect_equal(strict_loaded$passed, strict_fresh$passed)
+})
+
+test_that("a warm start at an optimum reloads as one, not as a stall", {
+  skip_on_cran()
+  # Refit from the fitted estimates: the engine's restart probe confirms the
+  # start (ferx-core #2506). The bundle has to carry `stationary_start`: the
+  # engine's stalled_at_init() reads it beside `left_init`, and without it
+  # calls the reloaded fit a stall. R's own `stalled_at_init` travels in
+  # r_extras and is not recomputed on load, so it is no oracle here.
+  ex <- ferx_example("warfarin")
+  model <- tempfile(fileext = ".ferx")
+  on.exit(unlink(model), add = TRUE)
+  ferx_update_model(warfarin_fit(), model)
+  fit <- suppressWarnings(ferx_fit(model, ex$data, method = "focei",
+                                   verbose = FALSE,
+                                   settings = list(maxiter = 30L)))
+  expect_true(fit$stationary_start)
+  expect_false(fit$left_init)
+  expect_false(fit$stalled_at_init)
+
+  path <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(path), add = TRUE)
+  ferx_save_fit(fit, path)
+  expect_true(ferx_load_fit(path)$stationary_start)
+
+  # The engine's reader takes the key R wrote: its writer emits
+  # `stationary_start` only when the FitResult it read holds TRUE.
+  trip <- fitrx_engine_trip(fit)
+  on.exit(unlink(c(trip$r_path, trip$core_path)), add = TRUE)
+  expect_true(isTRUE(fitrx_fit_json(trip$core_path)$stationary_start))
+  expect_true(ferx_load_fit(trip$core_path)$stationary_start)
 })
 
 test_that("tri-state verdicts stay NA across round-trip when unrecorded", {
