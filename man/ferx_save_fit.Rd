@@ -4,7 +4,7 @@
 \alias{ferx_save_fit}
 \title{Save a ferx fit to a portable \code{.fitrx} bundle}
 \usage{
-ferx_save_fit(fit, output, include_data = FALSE)
+ferx_save_fit(fit, output, include_data = FALSE, write_model = FALSE)
 }
 \arguments{
 \item{fit}{A \code{ferx_fit} object returned by \code{\link{ferx_fit}}.}
@@ -27,6 +27,13 @@ unchecked. Default \code{FALSE}.
 A fit whose \code{data} was a data.frame (\code{fit$data_source} set)
 always embeds it: its file lives only in a temporary directory, so a
 bundle without it could not be re-read.}
+
+\item{write_model}{Logical. When \code{TRUE}, also write the fitted model
+with its final estimates as initial values (\code{\link{ferx_update_model}})
+next to the bundle, as \code{<name>_final.ferx} for an \code{output} of
+\code{<name>.fitrx}. An existing file of that name is replaced, unless it
+is the fit's own model file (\code{fit$model_path}), which is an error.
+Default \code{FALSE}.}
 }
 \value{
 Invisibly returns \code{fit}, so the function can be used inside a

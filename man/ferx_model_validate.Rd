@@ -87,6 +87,7 @@ Other model-editing:
 \code{\link[=ferx_model_get_section]{ferx_model_get_section()}},
 \code{\link[=ferx_model_inspect]{ferx_model_inspect()}},
 \code{\link[=ferx_model_set_section]{ferx_model_set_section()}},
-\code{\link[=ferx_model_show]{ferx_model_show()}}
+\code{\link[=ferx_model_show]{ferx_model_show()}},
+\code{\link[=ferx_update_model]{ferx_update_model()}}
 }
 \concept{model-editing}
