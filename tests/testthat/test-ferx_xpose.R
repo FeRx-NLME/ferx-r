@@ -539,6 +539,23 @@ test_that("xpose rows: without counts, the COXSNELL rows are left out (#688)", {
   expect_equal(tbl$data$ETA_CL, fit$ebe_etas$ETA_CL[c(1, 1, 2, 2)])
 })
 
+test_that("xpose rows: the rows-left-out note is an ordinary message (#702)", {
+  fit <- fake_fit()
+  tte <- fit$sdtab[c(1, 3), ]
+  tte$TIME <- c(9, 9)
+  for (col in .FITRX_TTE_COLS) {
+    fit$sdtab[[col]] <- NA_real_
+    tte[[col]] <- c(0.4, 0.2)
+  }
+  fit$sdtab <- rbind(fit$sdtab, tte)
+  cond <- tryCatch(.ferx_xpose_frame(fit), message = identity)
+  expect_s3_class(cond, c("ferx_xpose_rows_dropped_message", "message",
+                          "condition"), exact = TRUE)
+  expect_match(conditionMessage(cond), "2 time-to-event sdtab rows")
+  expect_null(conditionCall(cond))
+  expect_silent(suppressMessages(.ferx_xpose_frame(fit)))
+})
+
 test_that("xpose rows: without counts, rows with no N_OBS are left out (#688)", {
   fit <- fake_fit()
   fit$sdtab$N_OBS <- 2
