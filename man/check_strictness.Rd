@@ -41,11 +41,15 @@ bound - the same predicate \code{\link{ferx_bootstrap}} applies as
 \code{skip_estimate_near_boundary}.}
 
 \item{reject_init_stall}{Fail a fit that never left its initial estimates.
-This gate assumes a cold start from the model file's initial estimates.
-A candidate warm-started from its parent's final estimates legitimately
-converges within a tolerance of where it began and the fit carries nothing
-that separates the two, so turn this off for such a search and rely on
-\code{require_converged}.}
+A candidate warm-started from its parent's final estimates (or a refit of
+a stored winner) legitimately converges within a tolerance of where it
+began. The outer optimizer tells that apart from a stall by restarting
+from a perturbation of the start and checking that it converges back
+(\code{fit$stationary_start}, ferx-core #2506), so such a fit passes this
+gate. Results without that check - SAEM, IMP, Bayes, VI, a restart that was
+inconclusive or out of budget, a \code{.fitrx} bundle saved before it - are
+judged by displacement alone, which assumes a cold start: turn the gate off
+for a warm-started search over those and rely on \code{require_converged}.}
 }
 \value{
 A list with elements:

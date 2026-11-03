@@ -388,8 +388,10 @@ test_that("the model-selection surface survives round-trip", {
 test_that("a warm start at an optimum reloads as one, not as a stall", {
   skip_on_cran()
   # Refit from the fitted estimates: the engine's restart probe confirms the
-  # start (ferx-core #2506). The bundle has to carry `stationary_start`, or a
-  # reload reads `left_init = FALSE` alone and calls the fit a stall.
+  # start (ferx-core #2506). The bundle has to carry `stationary_start`: the
+  # engine's stalled_at_init() reads it beside `left_init`, and without it
+  # calls the reloaded fit a stall. R's own `stalled_at_init` travels in
+  # r_extras and is not recomputed on load, so it is no oracle here.
   ex <- ferx_example("warfarin")
   model <- tempfile(fileext = ".ferx")
   on.exit(unlink(model), add = TRUE)
@@ -404,9 +406,14 @@ test_that("a warm start at an optimum reloads as one, not as a stall", {
   path <- tempfile(fileext = ".fitrx")
   on.exit(unlink(path), add = TRUE)
   ferx_save_fit(fit, path)
-  loaded <- ferx_load_fit(path)
-  expect_true(loaded$stationary_start)
-  expect_false(loaded$stalled_at_init)
+  expect_true(ferx_load_fit(path)$stationary_start)
+
+  # The engine's reader takes the key R wrote: its writer emits
+  # `stationary_start` only when the FitResult it read holds TRUE.
+  trip <- fitrx_engine_trip(fit)
+  on.exit(unlink(c(trip$r_path, trip$core_path)), add = TRUE)
+  expect_true(isTRUE(fitrx_fit_json(trip$core_path)$stationary_start))
+  expect_true(ferx_load_fit(trip$core_path)$stationary_start)
 })
 
 test_that("tri-state verdicts stay NA across round-trip when unrecorded", {
