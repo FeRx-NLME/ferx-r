@@ -350,6 +350,7 @@ test_that("the model-selection surface survives round-trip", {
   # FitWire fields); the three derived verdicts travel under r_extras.
   expect_equal(loaded$bic_inputs, fit$bic_inputs)
   expect_equal(loaded$left_init, fit$left_init)
+  expect_identical(loaded$stationary_start, fit$stationary_start)
   expect_equal(loaded$stalled_at_init, fit$stalled_at_init)
   expect_equal(loaded$estimate_near_boundary, fit$estimate_near_boundary)
   expect_equal(loaded$max_abs_correlation, fit$max_abs_correlation,
@@ -382,6 +383,30 @@ test_that("the model-selection surface survives round-trip", {
   expect_equal(strict_loaded$failures, strict_fresh$failures)
   expect_equal(strict_loaded$skipped, strict_fresh$skipped)
   expect_equal(strict_loaded$passed, strict_fresh$passed)
+})
+
+test_that("a warm start at an optimum reloads as one, not as a stall", {
+  skip_on_cran()
+  # Refit from the fitted estimates: the engine's restart probe confirms the
+  # start (ferx-core #2506). The bundle has to carry `stationary_start`, or a
+  # reload reads `left_init = FALSE` alone and calls the fit a stall.
+  ex <- ferx_example("warfarin")
+  model <- tempfile(fileext = ".ferx")
+  on.exit(unlink(model), add = TRUE)
+  ferx_update_model(warfarin_fit(), model)
+  fit <- suppressWarnings(ferx_fit(model, ex$data, method = "focei",
+                                   verbose = FALSE,
+                                   settings = list(maxiter = 30L)))
+  expect_true(fit$stationary_start)
+  expect_false(fit$left_init)
+  expect_false(fit$stalled_at_init)
+
+  path <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(path), add = TRUE)
+  ferx_save_fit(fit, path)
+  loaded <- ferx_load_fit(path)
+  expect_true(loaded$stationary_start)
+  expect_false(loaded$stalled_at_init)
 })
 
 test_that("tri-state verdicts stay NA across round-trip when unrecorded", {

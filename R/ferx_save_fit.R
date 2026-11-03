@@ -633,6 +633,9 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
     # is, and `ferx_bic()` reports NA on it rather than a wrong penalty.
     bic_inputs = .fitrx_bic_inputs_wire(fit),
     left_init = .fitrx_opt_lgl(fit$left_init),
+    # The engine's stalled_at_init() reads this beside `left_init` (ferx-core
+    # #2506): without it a warm start at an optimum reloads as a stall.
+    stationary_start = isTRUE(fit$stationary_start),
     # `stalled_at_init()` in the engine returns None unless theta/sigma/omega
     # inits match the estimates in shape - it checks that *before* consulting
     # `left_init` - so the inits ship with the verdict or the verdict is inert.
