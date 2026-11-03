@@ -695,6 +695,25 @@ prevents block-Omega collapse. When \code{n_leapfrog > 0} it applies to
 the subjects that fall back to MH. Consumed by \code{"saem"} and
 \code{"bayes"}; \code{"bayes"} does not apply the \code{"auto"} rule
 and keeps 20 unless you set a number.}
+\item{\code{saem_kernel}}{(default \code{"rw"}) The SAEM E-step kernel.
+\code{"imh"} is the f-SAEM independent Metropolis-Hastings kernel: each
+subject's block random-walk proposals become draws from a Laplace
+proposal centred on its conditional mode, with a small defensive prior
+component, while the componentwise sweep still runs. It declines to
+the random walk, with a warning, on models outside its scope and on
+data below \code{saem_imh_min_obs_per_eta}. When a theta carries no
+eta, pair it with \code{mstep_solver = "score_sa"}.}
+\item{\code{saem_imh_proposals}}{(default 2) Independent proposals per
+subject per iteration under \code{saem_kernel = "imh"}; they replace
+the \code{n_mh_steps} block proposals. At least 1.}
+\item{\code{saem_imh_refresh}}{(default 5) Iterations between rebuilds
+of a subject's cached proposal. At least 1.}
+\item{\code{saem_imh_defensive}}{(default 0.05) Weight of the defensive
+prior component of the proposal, in \code{[0, 0.5]}. \code{0} disables
+it.}
+\item{\code{saem_imh_min_obs_per_eta}}{(default 2) Fewest mean
+observations per subject per random effect at which
+\code{saem_kernel = "imh"} runs. \code{0} disables the gate.}
 \item{\code{scale_adaptation} / \code{saem_scale_adaptation}}{(default
 \code{"robbins_monro"}) How the MH step scales are adapted.
 \code{"interval"} is the rule used before ferx-core 0.4.0.}
