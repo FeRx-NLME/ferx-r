@@ -852,7 +852,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
   # etas, and a mixture's MIXEST / PMIX_* columns by name after them, so the
   # per-subject columns go between the two: a reloaded ferx-core mixture
   # bundle carries MIXEST / PMIX_* in fit$ebe_etas.
-  summ <- .fitrx_subject_summary(fit, complete = FALSE)
+  summ <- .fitrx_subject_summary(fit)
   if (!is.null(summ) && nrow(summ) == nrow(ebes)) {
     mix <- grep("^(MIXEST|PMIX_[0-9]+)$", names(ebes), value = TRUE)
     per_subject <- data.frame(
@@ -876,18 +876,14 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
 # The per-subject columns ebes.csv carries next to the etas.
 .FITRX_SUBJECT_COLS <- c("ofv_contribution", "n_obs", "n_obs_discrete")
 
-# `fit$subject_summary`, else NULL (a fit from before it existed). With
-# `complete`, also NULL when a count is missing, as in a reloaded bundle
-# written before #554, whose n_obs may be empty: its values still go back to
-# ebes.csv, but its rows cannot be assigned from the counts.
-.fitrx_subject_summary <- function(fit, complete = TRUE) {
+# `fit$subject_summary`, else NULL (a fit from before it existed). A count
+# may be missing, as in a reloaded bundle written before #554, whose n_obs
+# may be empty: its values still go back to ebes.csv. Which sdtab rows are
+# whose is `.fitrx_sdtab_blocks()`'s job (#696).
+.fitrx_subject_summary <- function(fit) {
   summ <- fit$subject_summary
   if (!is.data.frame(summ) || nrow(summ) == 0L ||
       !all(c("ID", .FITRX_SUBJECT_COLS) %in% names(summ))) {
-    return(NULL)
-  }
-  if (complete && (anyNA(summ$n_obs) || anyNA(summ$n_obs_discrete) ||
-                   anyNA(summ$n_obs_tte))) {
     return(NULL)
   }
   summ
