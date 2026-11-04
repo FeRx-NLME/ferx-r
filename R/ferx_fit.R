@@ -401,12 +401,15 @@
 #'       with fewer observations than this is left out of the
 #'       \code{max_unconverged_frac} count. It is still fitted normally.}
 #'     \item{\code{report_final_gradient}}{(default \code{TRUE}) After a
-#'       derivative-free outer optimizer (BOBYQA) finishes, compute a
-#'       finite-difference gradient at the estimates, so that
-#'       \code{converged = TRUE} can be checked against it. Reporting only: it
-#'       never steers the fit. It costs \code{2 x} the number of free parameters
-#'       in objective evaluations; set \code{FALSE} to skip it on a model whose
-#'       every evaluation is slow.}
+#'       derivative-free outer optimizer (BOBYQA) finishes, compute a gradient
+#'       at the estimates, so that \code{converged = TRUE} can be checked
+#'       against it: the exact one when the model can use the analytic outer
+#'       gradient, else a central finite difference
+#'       (\code{fit$final_gradient_source} says which). Reporting only: it
+#'       never steers the fit. It costs one gradient, which for the finite
+#'       difference is \code{2 x} the number of free parameters in objective
+#'       evaluations; set \code{FALSE} to skip it on a model whose every
+#'       evaluation is slow.}
 #'     \item{\code{inner_tol}}{Gradient-norm convergence tolerance for the inner
 #'       (per-subject EBE) loop (default \code{1e-5}). A looser tolerance leaves
 #'       residual noise in each subject's EBE solution, which propagates into the
@@ -1351,14 +1354,21 @@
 #'     log-theta, Cholesky-omega, log-sigma). For a gradient-based NLopt
 #'     optimizer, trust-region or Gauss-Newton it is the optimizer's own
 #'     gradient. For a derivative-free NLopt run (BOBYQA, which
-#'     \code{optimizer = "auto"} picks for ODE models) it is a central
-#'     finite-difference gradient computed after the fit at the reported
-#'     estimates, so \code{converged} can be checked there too (ferx-core
-#'     #1380). That costs one gradient's worth of extra objective
-#'     evaluations; \code{report_final_gradient = false} in
-#'     \code{[fit_options]} turns it off. \code{NULL} for the built-in BFGS and
-#'     for SAEM. Use
+#'     \code{optimizer = "auto"} picks for ODE models) it is computed after
+#'     the fit at the reported estimates, so \code{converged} can be checked
+#'     there too (ferx-core #1380): the exact gradient when the model can use
+#'     the analytic outer gradient, otherwise a central finite difference.
+#'     \code{final_gradient_source} says which. That costs one extra gradient;
+#'     \code{report_final_gradient = false} in \code{[fit_options]} turns it
+#'     off. \code{NULL} for the built-in BFGS and for SAEM. Use
 #'     \code{\link{ferx_runlog}} to interpret with a convergence threshold.}
+#'   \item{final_gradient_source}{Character scalar saying where
+#'     \code{final_gradient} came from: \code{"optimizer"} (the optimizer's own
+#'     gradient, evaluated during the fit), \code{"analytic"} (the exact
+#'     gradient, computed after a derivative-free fit) or
+#'     \code{"finite_difference"} (a central difference, computed after a
+#'     derivative-free fit the analytic gradient does not cover). \code{NULL}
+#'     exactly when \code{final_gradient} is \code{NULL} (ferx-core #997).}
 #'   \item{optimizer_label}{Human-readable label for the outer optimizer used
 #'     (e.g. \code{"LBFGS"}, \code{"BOBYQA"}). Mirrors the \code{optimizer}
 #'     enum value from ferx-core. Used by \code{\link{ferx_runlog}}.}

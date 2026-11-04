@@ -373,6 +373,11 @@ ferx_load_fit <- function(path) {
     sigma_init = as.numeric(unlist(w$sigma_init %||% list(), use.names = FALSE)),
     omega_is_diagonal = .fitrx_unwrap_opt_lgl(w$omega_is_diagonal),
     kappa_is_diagonal = .fitrx_unwrap_opt_lgl(w$kappa_is_diagonal),
+    # NULL when the fit reported no gradient, and on a bundle this package
+    # wrote before it carried them (ferx-core #997).
+    # `[[`: `$` would partial-match the source when the gradient is absent.
+    final_gradient = .fitrx_unwrap_opt_num_vec(w[["final_gradient"]]),
+    final_gradient_source = .fitrx_unwrap_opt_chr(w$final_gradient_source),
     covariance_n_evals_estimated = .fitrx_unwrap_opt_num(w$covariance_n_evals_estimated),
     trace_path = .fitrx_unwrap_opt_chr(w$trace_path),
     ebe_convergence_warnings = as.integer(w$ebe_convergence_warnings %||% 0L),
