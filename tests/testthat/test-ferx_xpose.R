@@ -490,6 +490,79 @@ test_that("ferx_xpose joins by subject position when IDs share a number (#688)",
   }
 })
 
+# --- the covariate LOCF join keys on the subject (#695) ----------------------
+
+# Warfarin with WT declared, and a WT that differs on every record: an
+# observation that picks up any record but its own shows in the value.
+add_time_varying_wt <- function(d) {
+  d$WT <- 60 + 5 * .ferx_subject_index(d$ID) + d$TIME / 10
+  d
+}
+declare_wt <- function(m) c(m, "", "[covariates]", "  WT continuous")
+
+# Every observation record of `d`, whose WT the Xpose data should hold in order.
+expect_own_wt <- function(fit, d) {
+  obs <- d[d$EVID == 0L, ]
+  df <- .ferx_xpose_frame(fit)$data
+  expect_equal(df$TIME, obs$TIME)
+  expect_equal(df$WT, obs$WT)
+}
+
+test_that("ferx_xpose carries covariates by subject when IDs share a number (#695)", {
+  # Subject 2 is "0" + subject 1's ID, so sdtab has one run fewer than covtab,
+  # and "01" itself is no sdtab ID: an ID join leaves subject 2 with no WT.
+  edit <- function(d) {
+    subj <- .ferx_subject_index(d$ID)
+    d <- add_time_varying_wt(d)
+    d$ID <- as.character(d$ID)
+    d$ID[subj == 2L] <- paste0("0", d$ID[match(1L, subj)])
+    d
+  }
+  fit <- xpose_edited_fit("warfarin", "zero_padded_id_wt", edit = edit,
+                          model_edit = declare_wt)
+  expect_equal(.ferx_n_subjects(fit$sdtab$ID), nrow(fit$subject_summary) - 1L)
+  expect_equal(.ferx_n_subjects(fit$covtab$ID), nrow(fit$subject_summary))
+  ex <- ferx_example("warfarin")
+  expect_own_wt(fit, edit(utils::read.csv(ex$data, stringsAsFactors = FALSE)))
+})
+
+test_that("ferx_xpose carries covariates past a subject with no observations (#695)", {
+  # Subject 2 keeps only its dose, so it has covtab records and no sdtab rows.
+  # Subject 3 reuses subject 1's ID: an ID join puts their records in one
+  # group, and subject 1's later observations take subject 3's WT.
+  edit <- function(d) {
+    subj <- .ferx_subject_index(d$ID)
+    d <- reuse_third_id(add_time_varying_wt(d))
+    d[subj != 2L | d$EVID != 0L, ]
+  }
+  fit <- xpose_edited_fit("warfarin", "dose_only_subject_wt", edit = edit,
+                          model_edit = declare_wt)
+  expect_equal(fit$subject_summary$n_obs[2], 0L)
+  ex <- ferx_example("warfarin")
+  expect_own_wt(fit, edit(utils::read.csv(ex$data, stringsAsFactors = FALSE)))
+})
+
+test_that("covariate join: covtab runs that are not the subjects fall back to the ID (#695)", {
+  # A subject [data_selection] removed whole keeps its covtab records.
+  fit <- fake_fit()
+  fit$subject_summary <- data.frame(ID = c("1", "2"), n_obs = c(2L, 2L))
+  fit$covtab <- rbind(fit$covtab[1:2, ],
+                      data.frame(ID = "9", TIME = 0, EVID = 1, WT = 99, SEX = 1),
+                      fit$covtab[3:4, ])
+  df <- .ferx_xpose_frame(fit)$data
+  expect_equal(df$WT, c(70, 70, 80, 80))
+})
+
+test_that("covariate join: without counts, sdtab's runs key a reused ID (#695)", {
+  fit <- fake_fit()
+  fit$covtab <- rbind(fit$covtab, transform(fit$covtab[1:2, ], WT = 90))
+  fit$sdtab <- rbind(fit$sdtab, fit$sdtab[1:2, ])
+  fit$individual_estimates <- NULL
+  fit$ebe_etas <- NULL
+  df <- .ferx_xpose_frame(fit)$data
+  expect_equal(df$WT, c(70, 70, 80, 80, 90, 90))
+})
+
 test_that("ferx_xpose refuses a fit with no Gaussian observations (#688)", {
   for (case in list(c("binary_logistic", "discrete-endpoint"),
                     c("tte_exponential", "time-to-event"))) {

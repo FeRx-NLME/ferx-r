@@ -168,7 +168,7 @@ ferx_xpose <- function(fit,
 
   # Covariate values at observation grain: prefer columns already echoed into
   # sdtab (via [output]); otherwise LOCF-carry them from covtab.
-  cov_added <- .ferx_attach_covariates(df, fit, cov_split$all)
+  cov_added <- .ferx_attach_covariates(df, fit, cov_split$all, subj = subj)
   df <- cov_added$data
   cont_cols <- intersect(cov_split$continuous, names(df))
   cat_cols  <- intersect(cov_split$categorical, names(df))
@@ -247,6 +247,13 @@ ferx_xpose <- function(fit,
   list(data = sdtab, subject = subject)
 }
 
+# Whether `subj`, the subject position of every `df` row, can key a join
+# against a table of `n_subjects` subjects.
+.ferx_subject_positions_fit <- function(subj, df, n_subjects) {
+  !is.null(subj) && length(subj) == nrow(df) &&
+    identical(attr(subj, "n_subjects"), n_subjects)
+}
+
 # Repeat one-row-per-subject columns down `df` by an ID join. `src` is a data
 # frame whose first column is ID (e.g. fit$ebe_etas). `subj`, when given, is
 # the subject position (in fit order) of every `df` row, from the
@@ -284,8 +291,7 @@ ferx_xpose <- function(fit,
   # sdtab IDs are numeric (Rust writes them as f64) while ebe_etas /
   # individual_estimates IDs are character, so match in character space
   # (cf. diagnostics.R).
-  if (!is.null(subj) && length(subj) == nrow(df) &&
-      identical(attr(subj, "n_subjects"), nrow(src))) {
+  if (.ferx_subject_positions_fit(subj, df, nrow(src))) {
     idx <- subj
   } else if (nrow(src) == .ferx_n_subjects(df[["ID"]])) {
     idx <- .ferx_subject_index(df[["ID"]])
@@ -356,8 +362,9 @@ ferx_xpose <- function(fit,
 # Make covariate columns available at observation grain. If a covariate is
 # already a column of `df` (echoed into sdtab via [output]) it is left as-is.
 # Otherwise it is carried forward (LOCF) from `fit$covtab`, which has one row
-# per dataset record (doses + observations).
-.ferx_attach_covariates <- function(df, fit, cov_names) {
+# per dataset record (doses + observations). `subj` is as in
+# `.ferx_join_by_id()`.
+.ferx_attach_covariates <- function(df, fit, cov_names, subj = NULL) {
   if (length(cov_names) == 0L) {
     return(list(data = df, added = character(0)))
   }
@@ -369,18 +376,28 @@ ferx_xpose <- function(fit,
       warning(sprintf("covariate(s) not in sdtab and no usable covtab, dropped: %s",
                       paste(missing, collapse = ", ")), call. = FALSE)
     } else {
-      # Key the LOCF join on the ordinal subject index rather than the raw ID
-      # when sdtab and covtab agree on the subject count: a dataset that reuses
+      # Key the LOCF join on the subject, not the raw ID: a dataset that reuses
       # an ID in a non-contiguous block otherwise puts both cohorts' covtab
       # records in one group, and the first block's later observations then
-      # carry forward the second block's covariate values. Fall back to the raw
-      # ID when the counts disagree (e.g. covtab keeps a subject that has no
-      # observations in sdtab), which preserves the previous behaviour.
+      # carry forward the second block's covariate values.
+      #
+      # covtab echoes every dataset record with its ID as text, so its runs are
+      # the subjects. The sdtab side takes the subject position `subj` from the
+      # subject_summary counts: sdtab's own runs miss a subject with no Gaussian
+      # observations and merge adjacent subjects whose IDs parse to one number
+      # ("1", "01"). Without usable counts, sdtab's runs stand in when they
+      # agree with covtab's. Otherwise fall back to the raw ID: covtab also
+      # echoes the records of a subject [data_selection] removed whole, whose
+      # run has no subject to line up with.
       df_key  <- as.character(df[["ID"]])
       cov_key <- as.character(covtab[["ID"]])
-      if (.ferx_n_subjects(df_key) == .ferx_n_subjects(cov_key)) {
-        df_key  <- as.character(.ferx_subject_index(df_key))
-        cov_key <- as.character(.ferx_subject_index(cov_key))
+      n_cov <- .ferx_n_subjects(cov_key)
+      if (.ferx_subject_positions_fit(subj, df, n_cov)) {
+        df_key  <- subj
+        cov_key <- .ferx_subject_index(cov_key)
+      } else if (.ferx_n_subjects(df_key) == n_cov) {
+        df_key  <- .ferx_subject_index(df_key)
+        cov_key <- .ferx_subject_index(cov_key)
       }
       for (cov in missing) {
         if (!cov %in% names(covtab)) {
