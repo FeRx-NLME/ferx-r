@@ -131,7 +131,9 @@
     if (is.null(fit$kappa_weight_typical)) NULL else as.numeric(fit$kappa_weight_typical),
     as.character(fit$kappa_levels %||% character()),
     as.character(status),
-    ascii
+    ascii,
+    # ferx-core #1716: a κ density's distribution note; NULL on an older fit.
+    if (length(fit$kappa_distribution_notes) == nrow(m)) as.character(fit$kappa_distribution_notes) else NULL
   )
   strsplit(rows, "\n", fixed = TRUE)[[1L]]
 }

@@ -9,7 +9,10 @@
   percentiles of its effect in place of a CV%/SD. The fit carries them as
   `fit$eta_distribution_notes` and the metadata as `fit$eta_distributions` (form,
   kind, shape thetas, truncation), which `ferx_save_fit()` / `ferx_load_fit()`
-  round-trip.
+  round-trip. A κ with a density gets the same note on its KAPPA row
+  (`fit$kappa_distribution_notes`), and `fit$ebe_effects` gives the EBEs on the
+  effect's scale. `fit$ebe_etas` stays on the latent scale, which is what
+  `ferx_predict(etas = …)` takes back.
 
 # ferx 0.4.0
 
