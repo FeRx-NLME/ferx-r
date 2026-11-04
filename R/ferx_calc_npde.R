@@ -168,7 +168,7 @@ ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = 
   }
 
   fit$sdtab <- .ferx_attach_npde(fit$sdtab, npde_tbl,
-                                 n_tte = sum(fit$subject_summary$n_obs_tte))
+                                 tte_rows = .fitrx_sdtab_blocks(fit)$tte)
   fit
 }
 
@@ -183,19 +183,18 @@ ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = 
 # rows that sdtab and the NPDE table count differently - both cases should be a
 # clear error, not a quietly wrong or NA-filled column.
 #
-# The one exception is the `n_tte` time-to-event residual rows ferx-core
-# appends after every other sdtab row (#901): the NPDE table has no rows for
-# them, so NPDE/NPD go on the leading rows and are NA on those.
-.ferx_attach_npde <- function(sdtab, npde_tbl, n_tte = 0L) {
-  n_tte <- as.integer(n_tte)
-  if (length(n_tte) == 1L && !is.na(n_tte) && n_tte > 0L &&
-      nrow(sdtab) - n_tte == nrow(npde_tbl)) {
-    lead <- seq_len(nrow(npde_tbl))
-    head <- .ferx_attach_npde(sdtab[lead, , drop = FALSE], npde_tbl)
+# The one exception is the time-to-event residual rows ferx-core appends
+# after every other sdtab row (#901), `tte_rows` as `.fitrx_sdtab_blocks()`
+# finds them (#696): the NPDE table has no rows for them, so NPDE/NPD go on
+# the other rows and are NA on those.
+.ferx_attach_npde <- function(sdtab, npde_tbl, tte_rows = integer()) {
+  rest <- setdiff(seq_len(nrow(sdtab)), tte_rows)
+  if (length(tte_rows) > 0L && length(rest) == nrow(npde_tbl)) {
+    head <- .ferx_attach_npde(sdtab[rest, , drop = FALSE], npde_tbl)
     sdtab$NPDE <- NA_real_
     sdtab$NPD  <- NA_real_
-    sdtab$NPDE[lead] <- head$NPDE
-    sdtab$NPD[lead]  <- head$NPD
+    sdtab$NPDE[rest] <- head$NPDE
+    sdtab$NPD[rest]  <- head$NPD
     return(sdtab)
   }
   if (nrow(sdtab) != nrow(npde_tbl)) {

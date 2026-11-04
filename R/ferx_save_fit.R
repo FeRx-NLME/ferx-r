@@ -852,7 +852,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
   # etas, and a mixture's MIXEST / PMIX_* columns by name after them, so the
   # per-subject columns go between the two: a reloaded ferx-core mixture
   # bundle carries MIXEST / PMIX_* in fit$ebe_etas.
-  summ <- .fitrx_subject_summary(fit, complete = FALSE)
+  summ <- .fitrx_subject_summary(fit)
   if (!is.null(summ) && nrow(summ) == nrow(ebes)) {
     mix <- grep("^(MIXEST|PMIX_[0-9]+)$", names(ebes), value = TRUE)
     per_subject <- data.frame(
@@ -876,18 +876,14 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
 # The per-subject columns ebes.csv carries next to the etas.
 .FITRX_SUBJECT_COLS <- c("ofv_contribution", "n_obs", "n_obs_discrete")
 
-# `fit$subject_summary`, else NULL (a fit from before it existed). With
-# `complete`, also NULL when a count is missing, as in a reloaded bundle
-# written before #554, whose n_obs may be empty: its values still go back to
-# ebes.csv, but its rows cannot be assigned from the counts.
-.fitrx_subject_summary <- function(fit, complete = TRUE) {
+# `fit$subject_summary`, else NULL (a fit from before it existed). A count
+# may be missing, as in a reloaded bundle written before #554, whose n_obs
+# may be empty: its values still go back to ebes.csv. Which sdtab rows are
+# whose is `.fitrx_sdtab_blocks()`'s job (#696).
+.fitrx_subject_summary <- function(fit) {
   summ <- fit$subject_summary
   if (!is.data.frame(summ) || nrow(summ) == 0L ||
       !all(c("ID", .FITRX_SUBJECT_COLS) %in% names(summ))) {
-    return(NULL)
-  }
-  if (complete && (anyNA(summ$n_obs) || anyNA(summ$n_obs_discrete) ||
-                   anyNA(summ$n_obs_tte))) {
     return(NULL)
   }
   summ
@@ -920,6 +916,59 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
 
 # The sdtab columns ferx-core creates for time-to-event rows only (#901).
 .FITRX_TTE_COLS <- c("COXSNELL", "MARTINGALE", "DEVIANCE", "PIT")
+
+# The one place that splits `sdtab` (default `fit$sdtab`) into its Gaussian,
+# discrete (ferx-core #900) and time-to-event (#901) row blocks (#696). Used
+# by `ferx_xpose()`, `ferx_save_fit()` and `ferx_calc_npde()`.
+#
+# Returns `gaussian`, `discrete` and `tte` (integer row indices into `sdtab`,
+# increasing) and `subject`: NULL, or a list with the same three names giving
+# the subject (1-based position in fit order) of each of those rows, with an
+# `n_subjects` attribute.
+#
+# One fallback order:
+# 1. The `fit$subject_summary` counts (`.fitrx_sdtab_subject()`), a missing
+#    `n_obs_discrete` / `n_obs_tte` column counting as 0, when they add up
+#    to the sdtab's rows. `subject` is set.
+# 2. Otherwise the columns, and `subject` is NULL: the TTE rows are those
+#    with a COXSNELL value, in a table carrying all of `.FITRX_TTE_COLS`; the
+#    discrete rows the others without an N_OBS value (ferx-core writes N_OBS,
+#    the subject's Gaussian count, on every Gaussian row only); the rest are
+#    Gaussian.
+.fitrx_sdtab_blocks <- function(fit, sdtab = fit$sdtab) {
+  n_rows <- if (is.null(sdtab)) 0L else nrow(sdtab)
+  summ <- fit$subject_summary
+  count <- function(col) {
+    v <- summ[[col]]
+    if (is.null(v)) 0L else v
+  }
+  pos <- if (is.data.frame(summ) && nrow(summ) > 0L && !is.null(summ$n_obs)) {
+    .fitrx_sdtab_subject(summ$n_obs, count("n_obs_discrete"), n_rows,
+                         count("n_obs_tte"))
+  }
+  if (!is.null(pos)) {
+    n_gauss <- length(pos$gaussian)
+    n_disc <- length(pos$discrete)
+    return(list(
+      gaussian = seq_len(n_gauss),
+      discrete = n_gauss + seq_len(n_disc),
+      tte = n_gauss + n_disc + seq_along(pos$tte),
+      subject = structure(pos, n_subjects = nrow(summ))
+    ))
+  }
+  tte <- if (n_rows > 0L && all(.FITRX_TTE_COLS %in% names(sdtab))) {
+    !is.na(sdtab$COXSNELL)
+  } else {
+    rep(FALSE, n_rows)
+  }
+  disc <- if (n_rows > 0L && "N_OBS" %in% names(sdtab)) {
+    is.na(sdtab$N_OBS) & !tte
+  } else {
+    rep(FALSE, n_rows)
+  }
+  list(gaussian = which(!(tte | disc)), discrete = which(disc),
+       tte = which(tte), subject = NULL)
+}
 
 .fitrx_write_ebes_kappa_csv <- function(fit, path) {
   k <- fit$ebe_kappas
@@ -962,30 +1011,23 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
   # the same: `NA`, `007` and `Smith, 2019` all differ from their number
   # (#475). The loader turns it back (`.fitrx_sdtab_id_number()`).
   ids <- .fitrx_subject_string_ids(fit)
-  summ <- .fitrx_subject_summary(fit)
-  rows <- if (!is.null(summ) && !is.null(ids) && nrow(summ) == length(ids)) {
-    .fitrx_sdtab_subject(summ$n_obs, summ$n_obs_discrete, nrow(sdtab),
-                         if (is.null(summ$n_obs_tte)) 0L else summ$n_obs_tte)
+  blocks <- .fitrx_sdtab_blocks(fit, sdtab)
+  rows <- blocks$subject
+  if (is.null(ids) || !identical(attr(rows, "n_subjects"), length(ids))) {
+    rows <- NULL
   }
-  # The time-to-event rows (ferx-core #901) come last; the bundle keeps none
-  # of them, as ferx-core's own checkpoint keeps none (#911), and none of the
-  # columns only they fill. Without usable counts they are the rows with a
-  # COXSNELL value, in a table carrying all four TTE columns. A fit without
-  # TTE rows keeps every column, so an `[output]` column that happens to be
-  # called PIT survives.
-  tte_rows <- if (!is.null(rows)) {
-    nrow(sdtab) - rev(seq_along(rows$tte)) + 1L
-  } else if (all(.FITRX_TTE_COLS %in% names(sdtab))) {
-    which(!is.na(sdtab$COXSNELL))
-  } else {
-    integer()
-  }
+  # The time-to-event rows (ferx-core #901); the bundle keeps none of them,
+  # as ferx-core's own checkpoint keeps none (#911), and none of the columns
+  # only they fill. A fit without TTE rows keeps every column, so an
+  # `[output]` column that happens to be called PIT survives.
+  tte_rows <- blocks$tte
   if (length(tte_rows) > 0L) {
     .fitrx_warn_tte_rows_dropped(length(tte_rows))
     sdtab <- sdtab[-tte_rows, setdiff(names(sdtab), .FITRX_TTE_COLS), drop = FALSE]
-    if (!is.null(rows)) rows$tte <- integer()
   }
   if (is.null(rows)) {
+    # Without the counts every row left goes to predictions.csv, discrete
+    # ones included, as before #696.
     # A fit from before fit$subject_summary: the run-length of the ID number
     # is all there is, right only when no two adjacent subjects share a
     # number and every subject has observations.

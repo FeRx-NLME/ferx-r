@@ -209,45 +209,15 @@ ferx_xpose <- function(fit,
 }
 
 # The Gaussian observation rows of `sdtab`, and the subject (1-based position
-# in fit order) of each. ferx-core's `io::output::sdtab` writes every
-# subject's Gaussian rows, then every subject's discrete (binary, #900) rows,
-# then every subject's time-to-event rows (#901), so the Gaussian rows are
-# the leading `sum(n_obs)`. A subject_summary without an `n_obs_discrete` /
-# `n_obs_tte` column (an older fit, or a reloaded .fitrx bundle, which keeps
-# no TTE rows) has none of those rows. Without usable counts `subject` is
-# NULL, the TTE rows are the ones with a COXSNELL value (as in
-# `.fitrx_write_predictions_csv()`) and the discrete rows the other ones
-# without an N_OBS value. The rows left out are reported in a
-# `ferx_xpose_rows_dropped_message`; a fit with no Gaussian rows at all is
-# refused (`ferx_xpose_no_gaussian_rows_error`).
+# in fit order) of each, as `.fitrx_sdtab_blocks()` splits them (#696):
+# `subject` is NULL when it had no usable subject_summary counts. The rows
+# left out are reported in a `ferx_xpose_rows_dropped_message`; a fit with no
+# Gaussian rows at all is refused (`ferx_xpose_no_gaussian_rows_error`).
 .ferx_xpose_gaussian_rows <- function(fit, sdtab) {
-  summ <- fit$subject_summary
-  count <- function(col) {
-    v <- summ[[col]]
-    if (is.null(v)) 0L else v
-  }
-  rows <- if (is.data.frame(summ) && nrow(summ) > 0L && !is.null(summ$n_obs)) {
-    .fitrx_sdtab_subject(summ$n_obs, count("n_obs_discrete"), nrow(sdtab),
-                         count("n_obs_tte"))
-  }
-  if (!is.null(rows)) {
-    n_gauss <- length(rows$gaussian)
-    n_disc  <- length(rows$discrete)
-    n_tte   <- length(rows$tte)
-    keep <- seq_len(n_gauss)
-  } else {
-    # ferx-core writes N_OBS (the subject's Gaussian count) on every Gaussian
-    # row and leaves it empty on every discrete and TTE row.
-    tte <- if (all(.FITRX_TTE_COLS %in% names(sdtab))) {
-      !is.na(sdtab$COXSNELL)
-    } else {
-      rep(FALSE, nrow(sdtab))
-    }
-    other <- if ("N_OBS" %in% names(sdtab)) is.na(sdtab$N_OBS) else tte
-    n_tte  <- sum(tte)
-    n_disc <- sum(other & !tte)
-    keep <- which(!(other | tte))
-  }
+  blocks <- .fitrx_sdtab_blocks(fit, sdtab)
+  keep <- blocks$gaussian
+  n_disc <- length(blocks$discrete)
+  n_tte <- length(blocks$tte)
   what <- c(if (n_disc > 0L) sprintf("%d discrete-endpoint", n_disc),
             if (n_tte > 0L) sprintf("%d time-to-event", n_tte))
   if (length(keep) == 0L) {
@@ -270,8 +240,9 @@ ferx_xpose <- function(fit,
                    drop = FALSE]
     rownames(sdtab) <- NULL
   }
-  subject <- if (!is.null(rows)) {
-    structure(rows$gaussian, n_subjects = nrow(summ))
+  subject <- if (!is.null(blocks$subject)) {
+    structure(blocks$subject$gaussian,
+              n_subjects = attr(blocks$subject, "n_subjects"))
   }
   list(data = sdtab, subject = subject)
 }
