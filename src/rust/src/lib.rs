@@ -3927,6 +3927,7 @@ fn default_fit_result(
         ferx_version: String::new(),
         eta_param_info: Vec::new(),
         kappa_param_types: Vec::new(),
+        kappa_distributions: Vec::new(),
         // `draw_asymptotic` reads this to draw a `logit_probability` theta on the
         // logit scale (ferx-core #1548). Left empty, the engine falls back to
         // log-normal draws that leave (0, 1) - the bug in ferx-r #373.
@@ -5538,6 +5539,41 @@ fn fit_result_to_list(
         .collect();
     let (eta_param_types, eta_linked_theta) =
         eta_info_by_name(&result.eta_names, &info_names, &info_types, &info_linked);
+    // Non-Gaussian random-effect distributions (ferx-core #1716): one note per ETA, in
+    // omega order — its distribution and the 5th/50th/95th percentiles of its effect —
+    // and "" for a Gaussian ETA, whose CV%/SD its type gives.
+    let eta_distribution_notes: Vec<String> = (0..result.omega.nrows())
+        .map(|i| ferx_core::io::output::eta_distribution_note(&result, i).unwrap_or_default())
+        .collect();
+    let kappa_distribution_notes: Vec<String> = (0..result.kappa_names.len())
+        .map(|k| ferx_core::io::output::kappa_distribution_note(&result, k).unwrap_or_default())
+        .collect();
+    // The EBEs on the effect's scale (m(ẑ) for a density ETA). `ebe_etas` stays the
+    // latent the estimators and `ferx_predict(etas = …)` use.
+    let ebe_effects_df: Robj = build_ebe_effects(&result);
+    // ... and the metadata itself, per ETA (NULL for a Gaussian one), which
+    // `ferx_save_fit()` writes back into `eta_param_info` so a bundle keeps it.
+    let eta_distributions: List = result
+        .eta_names
+        .iter()
+        .map(|name| match ferx_core::io::output::eta_distribution(&result, name) {
+            None => Robj::from(()),
+            Some(d) => {
+                let side = |b: Option<f64>| b.unwrap_or(f64::NAN);
+                let truncation: Robj = match d.truncation {
+                    Some((lo, hi)) => Robj::from(vec![side(lo), side(hi)]),
+                    None => Robj::from(()),
+                };
+                list!(
+                    form = d.form.clone(),
+                    kind = d.kind.clone(),
+                    shape_thetas = d.shape_thetas.clone(),
+                    truncation = truncation
+                )
+                .into()
+            }
+        })
+        .collect();
     // Scale of each IOV kappa (ferx-core #1643), parallel to `kappa_names`;
     // empty on a result that predates it.
     let kappa_param_types: Vec<String> = result.kappa_param_types.iter()
@@ -5883,6 +5919,10 @@ fn fit_result_to_list(
         eta_log_transformed = eta_log_transformed,
         eta_param_types = eta_param_types,
         eta_linked_theta = eta_linked_theta,
+        eta_distribution_notes = eta_distribution_notes,
+        kappa_distribution_notes = kappa_distribution_notes,
+        ebe_effects = ebe_effects_df,
+        eta_distributions = eta_distributions,
         kappa_param_types = kappa_param_types,
         eta_names = result.eta_names.clone(),
         theta_transforms = theta_transforms,
@@ -6203,6 +6243,28 @@ fn build_ebe_etas(result: &FitResult) -> Robj {
     pairs.push(("ID", ids.into()));
     for k in 0..n_eta {
         pairs.push((eta_names[k].as_str(), eta_cols[k].clone().into()));
+    }
+    finish_df(pairs, n_subj)
+}
+
+/// `fit$ebe_effects`: [`build_ebe_etas`]'s table on the effect's scale
+/// (ferx-core's `eta_effects`: `m(ẑ)` for a density ETA, the EBE otherwise).
+fn build_ebe_effects(result: &FitResult) -> Robj {
+    let n_subj = result.subjects.len();
+    let n_eta = result.subjects.first().map_or(0, |s| s.eta.len());
+    if n_subj == 0 || n_eta == 0 {
+        return ().into();
+    }
+    let eta_names = resolve_eta_names(result, n_eta);
+    let effects = ferx_core::io::output::eta_effects(result);
+    let mut pairs: Vec<(&str, Robj)> = Vec::new();
+    pairs.push((
+        "ID",
+        result.subjects.iter().map(|s| s.id.clone()).collect::<Vec<_>>().into(),
+    ));
+    for k in 0..n_eta {
+        let col: Vec<f64> = effects.iter().map(|e| e.get(k).copied().unwrap_or(f64::NAN)).collect();
+        pairs.push((eta_names[k].as_str(), col.into()));
     }
     finish_df(pairs, n_subj)
 }
@@ -7003,6 +7065,7 @@ fn ferx_rust_kappa_rows(
     kappa_levels: Vec<String>,
     covariance_status: &str,
     ascii: bool,
+    kappa_distribution_notes: Robj,
 ) -> String {
     entry(move || {
         use ferx_core::io::output::{format_kappa_rows_from, KappaRowsInput, KappaRowsOptions};
@@ -7052,6 +7115,12 @@ fn ferx_rust_kappa_rows(
             kappa_fixed: &kappa_fixed,
             se_kappa: se_kappa.as_deref(),
             kappa_param_types: &kappa_param_types,
+            // ferx-core #1716: a κ density's distribution note; "" / NA prints the
+            // type's CV%/SD.
+            kappa_distribution_notes: opt_strings_from_robj(
+                kappa_distribution_notes,
+                "kappa_distribution_notes",
+            )?,
             kappa_weights: &kappa_weights,
             kappa_weight_typical: &kappa_weight_typical,
             kappa_levels: &kappa_levels,
@@ -7220,6 +7289,7 @@ fn ferx_rust_omega_rows(
     linked_theta_values: Robj,
     linked_theta_transforms: Robj,
     covariance_status: &str,
+    eta_distribution_notes: Robj,
 ) -> String {
     entry(move || {
         use ferx_core::io::output::{format_omega_rows_from, EtaLinkedTheta, OmegaRowsInput};
@@ -7275,6 +7345,11 @@ fn ferx_rust_omega_rows(
             omega_init_as_sd: &omega_init_as_sd,
             eta_linked_thetas,
             covariance_status: covariance_status_from_str(covariance_status)?,
+            // "" (a Gaussian ETA) and NA print the type's CV%/SD.
+            eta_distribution_notes: opt_strings_from_robj(
+                eta_distribution_notes,
+                "eta_distribution_notes",
+            )?,
         };
         Ok(format_omega_rows_from(&input, r_print_omega_rows_options()))
     })
@@ -9041,6 +9116,7 @@ fn fit_skeleton(
         ferx_version: String::new(),
         eta_param_info: Vec::new(),
         kappa_param_types: Vec::new(),
+        kappa_distributions: Vec::new(),
         theta_transform: Vec::new(),
         sigma_types: Vec::new(),
         cov_eigenvalues: None,

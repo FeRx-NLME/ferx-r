@@ -1,5 +1,19 @@
 # ferx 0.4.0.9000 (development version)
 
+## New features
+
+- **Non-Gaussian random-effect distributions are reported**
+  ([ferx-core #1716](https://github.com/FeRx-NLME/ferx-core/issues/1716)): a fit
+  of a model whose `omega` lines carry `density KIND(...)` or `transform KIND(...)`
+  prints, on that ETA's OMEGA row, its distribution and the 5th/50th/95th
+  percentiles of its effect in place of a CV%/SD. The fit carries them as
+  `fit$eta_distribution_notes` and the metadata as `fit$eta_distributions` (form,
+  kind, shape thetas, truncation), which `ferx_save_fit()` / `ferx_load_fit()`
+  round-trip. A κ with a density gets the same note on its KAPPA row
+  (`fit$kappa_distribution_notes`), and `fit$ebe_effects` gives the EBEs on the
+  effect's scale. `fit$ebe_etas` stays on the latent scale, which is what
+  `ferx_predict(etas = …)` takes back.
+
 # ferx 0.4.0
 
 ## Breaking changes

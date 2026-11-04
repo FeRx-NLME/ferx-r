@@ -1325,16 +1325,26 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
   if (length(eta_names) == 0L) return(list())
   types <- as.character(fit$eta_param_types %||% rep("custom", length(eta_names)))
   linked <- as.character(fit$eta_linked_theta %||% rep("", length(eta_names)))
+  # A non-Gaussian ETA's distribution (ferx-core #1716), NULL for a Gaussian one.
+  dists <- fit$eta_distributions
+  if (length(dists) != length(eta_names)) dists <- vector("list", length(eta_names))
   entries <- mapply(
-    function(name, type, link) {
+    function(name, type, link, dist) {
       list(
         eta_name = name,
         param_type = type,
         linked_theta = if (nzchar(link)) link else NULL,
-        individual_param_name = "" # not exposed by the R shim yet
+        individual_param_name = "", # not exposed by the R shim yet
+        distribution = if (is.null(dist)) NULL else list(
+          form = as.character(dist$form),
+          kind = as.character(dist$kind),
+          shape_thetas = I(as.character(dist$shape_thetas)),
+          # `[lo, hi]`, NA (an open side) written as null.
+          truncation = if (is.null(dist$truncation)) NULL else as.numeric(dist$truncation)
+        )
       )
     },
-    eta_names, types, linked,
+    eta_names, types, linked, dists,
     SIMPLIFY = FALSE, USE.NAMES = FALSE
   )
   # An ETA whose scale is unknown (NA, #447) gets no entry, as the engine
