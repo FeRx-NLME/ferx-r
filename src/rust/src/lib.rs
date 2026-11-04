@@ -5233,6 +5233,7 @@ fn fit_result_to_list(
                 proposal_df = is.proposal_df,
                 ess_min = is.ess_min,
                 ess_median = is.ess_median,
+                adapt_passes = is.adapt_passes as f64,
                 kappa_treatment = kappa_treatment_str,
                 low_ess_subject_ids = low_ess_ids,
                 low_ess_subject_frac = low_ess_frac,
