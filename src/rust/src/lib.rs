@@ -1426,25 +1426,10 @@ fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult) -> Robj
 
     // -- decisions: one row per decision time, including holds --
     let d = &result.decisions;
-    let outcome_label = |o: &ferx_core::DecisionOutcome| -> String {
-        match o {
-            ferx_core::DecisionOutcome::Dosed { .. } => "dosed".to_string(),
-            ferx_core::DecisionOutcome::Hold => "hold".to_string(),
-            ferx_core::DecisionOutcome::Stop { .. } => "stop".to_string(),
-            ferx_core::DecisionOutcome::NotDue => "not_due".to_string(),
-            // `DecisionOutcome` is `#[non_exhaustive]` (ferx-core #2563).
-            _ => "other".to_string(),
-        }
-    };
-    let outcome_n = |o: &ferx_core::DecisionOutcome| -> i32 {
-        match o {
-            ferx_core::DecisionOutcome::Dosed { n } => *n as i32,
-            ferx_core::DecisionOutcome::Hold => 0,
-            ferx_core::DecisionOutcome::Stop { dosed } => *dosed as i32,
-            ferx_core::DecisionOutcome::NotDue => 0,
-            _ => 0,
-        }
-    };
+    // OUTCOME / N_DOSED come from the engine: `DecisionOutcome` is
+    // `#[non_exhaustive]`, and `label()` / `n_dosed()` are exhaustive matches
+    // inside ferx-core, so a new variant cannot reach R without a label and a
+    // dose count (ferx-core #2581).
     let decisions = data_frame!(
         DRAW = d.iter().map(|e| e.draw as i32).collect::<Vec<i32>>(),
         SIM = d.iter().map(|e| e.sim as i32).collect::<Vec<i32>>(),
@@ -1452,8 +1437,8 @@ fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult) -> Robj
         DECISION = d.iter().map(|e| e.decision_idx as i32).collect::<Vec<i32>>(),
         TIME = d.iter().map(|e| e.time).collect::<Vec<f64>>(),
         SIGNAL = d.iter().map(|e| first_signal(&e.observed_signals)).collect::<Vec<f64>>(),
-        OUTCOME = d.iter().map(|e| outcome_label(&e.outcome)).collect::<Vec<String>>(),
-        N_DOSED = d.iter().map(|e| outcome_n(&e.outcome)).collect::<Vec<i32>>(),
+        OUTCOME = d.iter().map(|e| e.outcome.label().to_string()).collect::<Vec<String>>(),
+        N_DOSED = d.iter().map(|e| e.outcome.n_dosed() as i32).collect::<Vec<i32>>(),
         // The dosing interval in force after the decision; NA while none is set.
         INTERVAL = d.iter().map(|e| e.interval).collect::<Vec<Option<f64>>>()
     );
