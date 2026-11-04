@@ -507,6 +507,20 @@ ferx_load_fit <- function(path) {
     )
     out$eta_param_types <- by_name$eta_param_types
     out$eta_linked_theta <- by_name$eta_linked_theta
+    # ferx-core #1716: each ETA's distribution, NULL for a Gaussian one (and on a
+    # bundle written before it).
+    out$eta_distributions <- lapply(as.character(out$eta_names %||% character()), function(nm) {
+      hit <- Filter(function(x) identical(x$eta_name, nm) && !is.null(x$distribution), epi)
+      if (!length(hit)) return(NULL)
+      d <- hit[[1L]]$distribution
+      list(
+        form = as.character(d$form),
+        kind = as.character(d$kind),
+        shape_thetas = as.character(unlist(d$shape_thetas)),
+        truncation = if (is.null(d$truncation)) NULL else
+          vapply(d$truncation, function(v) if (is.null(v)) NA_real_ else as.numeric(v), numeric(1L))
+      )
+    })
   } else {
     out$eta_param_types <- character()
     out$eta_linked_theta <- character()

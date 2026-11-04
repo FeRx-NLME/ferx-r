@@ -173,7 +173,10 @@
     ifelse(is.na(idx), NA_character_, linked),
     as.numeric(unname(fit$theta))[idx],
     if (length(tf) == length(fit$theta)) tf[idx] else rep(NA_character_, n),
-    as.character(status)
+    as.character(status),
+    # ferx-core #1716: a non-Gaussian ETA's distribution and effect percentiles;
+    # NULL on a fit from before it.
+    if (length(fit$eta_distribution_notes) == n) as.character(fit$eta_distribution_notes) else NULL
   )
   strsplit(rows, "\n", fixed = TRUE)[[1L]]
 }

@@ -5538,6 +5538,35 @@ fn fit_result_to_list(
         .collect();
     let (eta_param_types, eta_linked_theta) =
         eta_info_by_name(&result.eta_names, &info_names, &info_types, &info_linked);
+    // Non-Gaussian random-effect distributions (ferx-core #1716): one note per ETA, in
+    // omega order — its distribution and the 5th/50th/95th percentiles of its effect —
+    // and "" for a Gaussian ETA, whose CV%/SD its type gives.
+    let eta_distribution_notes: Vec<String> = (0..result.omega.nrows())
+        .map(|i| ferx_core::io::output::eta_distribution_note(&result, i).unwrap_or_default())
+        .collect();
+    // ... and the metadata itself, per ETA (NULL for a Gaussian one), which
+    // `ferx_save_fit()` writes back into `eta_param_info` so a bundle keeps it.
+    let eta_distributions: List = result
+        .eta_names
+        .iter()
+        .map(|name| match ferx_core::io::output::eta_distribution(&result, name) {
+            None => Robj::from(()),
+            Some(d) => {
+                let side = |b: Option<f64>| b.unwrap_or(f64::NAN);
+                let truncation: Robj = match d.truncation {
+                    Some((lo, hi)) => Robj::from(vec![side(lo), side(hi)]),
+                    None => Robj::from(()),
+                };
+                list!(
+                    form = d.form.clone(),
+                    kind = d.kind.clone(),
+                    shape_thetas = d.shape_thetas.clone(),
+                    truncation = truncation
+                )
+                .into()
+            }
+        })
+        .collect();
     // Scale of each IOV kappa (ferx-core #1643), parallel to `kappa_names`;
     // empty on a result that predates it.
     let kappa_param_types: Vec<String> = result.kappa_param_types.iter()
@@ -5878,6 +5907,8 @@ fn fit_result_to_list(
         eta_log_transformed = eta_log_transformed,
         eta_param_types = eta_param_types,
         eta_linked_theta = eta_linked_theta,
+        eta_distribution_notes = eta_distribution_notes,
+        eta_distributions = eta_distributions,
         kappa_param_types = kappa_param_types,
         eta_names = result.eta_names.clone(),
         theta_transforms = theta_transforms,
@@ -7212,6 +7243,7 @@ fn ferx_rust_omega_rows(
     linked_theta_values: Robj,
     linked_theta_transforms: Robj,
     covariance_status: &str,
+    eta_distribution_notes: Robj,
 ) -> String {
     entry(move || {
         use ferx_core::io::output::{format_omega_rows_from, EtaLinkedTheta, OmegaRowsInput};
@@ -7267,6 +7299,11 @@ fn ferx_rust_omega_rows(
             omega_init_as_sd: &omega_init_as_sd,
             eta_linked_thetas,
             covariance_status: covariance_status_from_str(covariance_status)?,
+            // "" (a Gaussian ETA) and NA print the type's CV%/SD.
+            eta_distribution_notes: opt_strings_from_robj(
+                eta_distribution_notes,
+                "eta_distribution_notes",
+            )?,
         };
         Ok(format_omega_rows_from(&input, r_print_omega_rows_options()))
     })

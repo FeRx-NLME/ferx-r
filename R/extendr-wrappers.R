@@ -225,8 +225,8 @@ ferx_rust_fitrx_kappa_rows <- function(path) {
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_omega_rows <- function(omega, n_eta, eta_names, omega_fixed, se_omega, eta_param_types, omega_init_as_sd, linked_theta_names, linked_theta_values, linked_theta_transforms, covariance_status) {
-  .Call("wrap__ferx_rust_omega_rows", omega, n_eta, eta_names, omega_fixed, se_omega, eta_param_types, omega_init_as_sd, linked_theta_names, linked_theta_values, linked_theta_transforms, covariance_status)
+ferx_rust_omega_rows <- function(omega, n_eta, eta_names, omega_fixed, se_omega, eta_param_types, omega_init_as_sd, linked_theta_names, linked_theta_values, linked_theta_transforms, covariance_status, eta_distribution_notes) {
+  .Call("wrap__ferx_rust_omega_rows", omega, n_eta, eta_names, omega_fixed, se_omega, eta_param_types, omega_init_as_sd, linked_theta_names, linked_theta_values, linked_theta_transforms, covariance_status, eta_distribution_notes)
 }
 
 #' @title Internal Rust backend binding

@@ -305,3 +305,24 @@ test_that("the glue refuses what it cannot read rather than guessing", {
   expect_match(call(linked_theta_names = NA_character_, linked_theta_values = NA_real_),
                "(SD = 0.2000)  SE", fixed = TRUE)
 })
+
+# ferx-core #1716: a Gamma-distributed clearance (`density gamma`, read as
+# CL = TVCL * ETA_CL). Its row is ferx-core's — the distribution and its
+# effect's 5/50/95% percentiles in place of a CV% — through a saved bundle too,
+# so the glue and ferx_save_fit() both carry the distribution metadata.
+test_that("a density ETA's row reports its distribution, as ferx-core does", {
+  skip_on_cran()
+  fit <- omega_fit("density", "warfarin", function(txt) {
+    txt <- edit_line("  omega ETA_CL ~ 0.07", "  omega ETA_CL ~ 0.07 density gamma")(txt)
+    edit_line("  CL = TVCL * exp(ETA_CL)", "  CL = TVCL * ETA_CL")(txt)
+  })
+  expect_match(fit$eta_distribution_notes[1], "^density gamma: 5/50/95% = ")
+  expect_identical(fit$eta_distribution_notes[-1], rep("", nrow(fit$omega) - 1L))
+  expect_identical(fit$eta_distributions[[1]]$kind, "gamma")
+  core <- expect_core_omega_rows(fit, "density")
+  expect_match(core[1], fit$eta_distribution_notes[1], fixed = TRUE)
+  f <- withr::local_tempfile(fileext = ".fitrx")
+  suppressWarnings(ferx_save_fit(fit, f))
+  back <- ferx_load_fit(f)
+  expect_identical(back$eta_distributions, fit$eta_distributions)
+})
