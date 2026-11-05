@@ -944,6 +944,7 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
     optimizer_config   = .ferx_optimizer_config_guidance(message),
     multi_start        = "Multi-start information (informational).",
     threads            = "Thread-pool sizing note. Consider matching threads to the subject count.",
+    ode_rhs_route      = "Informational: the [odes] right-hand side does not run as native code, so the fit is slower; the results are unchanged. Rewrite the construct the message names to speed it up - a statement-level if (...) { ... } block as an inline if expression, for example.",
     cancelled          = "The fit was cancelled before completion.",
     unused_parameter   = "A declared parameter is never referenced in [individual_parameters] or [error_model]. Remove it from [parameters] or complete the expression that uses it.",
     output             = "A name in [output] produced no sdtab column. Drop it from the block, or read the quantity where it does live (etas: fit$ebe_etas).",

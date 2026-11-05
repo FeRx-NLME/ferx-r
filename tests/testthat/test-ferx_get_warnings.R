@@ -501,7 +501,7 @@ test_that(".ferx_warning_guidance returns negative-autocorrelation guidance", {
     "experimental", "flat_parameter", "flip_flop", "gradient_fallback",
     "high_correlation", "importance_sampling", "inflated_rse",
     "init_not_representable", "init_outside_bounds", "mu_referencing",
-    "multi_start", "ode_solver", "omega_structure", "optimizer_config",
+    "multi_start", "ode_rhs_route", "ode_solver", "omega_structure", "optimizer_config",
     "optimizer_health", "parameter_at_runaway_guard", "simulation", "sir",
     "stalled_at_init", "threads", "uncertainty_draws_skipped", "vi_bad_basin"
   )
