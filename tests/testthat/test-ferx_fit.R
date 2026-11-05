@@ -1352,6 +1352,23 @@ test_that("importance-sampling settings use imp_* names", {
   ))
   expect_identical(parts$values, c("2000", "4", "1", "0.10000000000000001"))
 })
+test_that("fit$importance_sampling reports the pilot passes the engine ran (ferx-core #2653)", {
+  skip_on_cran()
+  ex <- ferx_example("warfarin")
+  fit_is <- function(passes) {
+    suppressWarnings(ferx_fit(ex$model, ex$data, method = c("focei", "imp"),
+      settings = list(imp_eval_only = TRUE, imp_samples = 200L,
+                      imp_auto = FALSE, imp_seed = 1L,
+                      imp_adapt_passes = passes),
+      covariance = FALSE, verbose = FALSE))
+  }
+  is2 <- fit_is(2L)$importance_sampling
+  expect_type(is2, "list")
+  expect_identical(is2$adapt_passes, 2)
+  expect_true(is.finite(is2$minus2_log_likelihood))
+  # 0 is the single Laplace proposal, so the count is not a constant.
+  expect_identical(fit_is(0L)$importance_sampling$adapt_passes, 0)
+})
 test_that("short-lived is_* settings are not translated by R", {
   parts <- to_strings(list(is_seed = 7L))
 
