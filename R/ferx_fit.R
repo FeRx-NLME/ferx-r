@@ -880,8 +880,10 @@
 #'       against the full-dimensional sampler.}
 #'     \item{\code{imp_max_time}}{(default none) Wall-clock limit on the IMP
 #'       iterations, in seconds, checked after each iteration so the last one
-#'       always completes. A fit that reaches it stops there, keeps its current
-#'       estimate, still runs the post-fit work (final EBEs, covariance step,
+#'       always completes. A fit that reaches it stops there and reports the
+#'       mean of the averaging iterations it reached (the last iteration's
+#'       parameters when it stopped before the averaging window), still runs
+#'       the post-fit work (final EBEs, covariance step,
 #'       marginal) and reports \code{converged = FALSE} with a warning. In a
 #'       method chain it covers the IMP stage alone.}
 #'     \item{\code{imp_low_ess_threshold}}{ESS fraction below which a subject is
