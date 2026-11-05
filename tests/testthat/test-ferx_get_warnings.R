@@ -410,6 +410,37 @@ test_that("a legacy fit's `general` covariance message still gets guidance", {
   # A `general` message that is not about the covariance step stays unhandled.
   expect_null(ferx:::.ferx_warning_guidance("general", message = "Something else"))
 })
+test_that("ode_rhs_route guidance tells the two RHS-route notes apart (ferx-core #2681)", {
+  # The engine's own texts (rhs_route_note(), ferx-core src/parser/rhs_regcode.rs).
+  interpreted <- paste0(
+    "W_ODE_RHS_INTERPRETED: the [odes] right-hand side runs on the bytecode ",
+    "interpreter, not compiled code, because of a statement-level `if` block ",
+    "in [odes] line 30. The constructs that keep the interpreter are listed in ",
+    "the ODE models page of the documentation, under \"Native right-hand side\"."
+  )
+  not_native <- paste0(
+    "W_ODE_RHS_NOT_NATIVE: the [odes] right-hand side runs as register code ",
+    "rather than native code, because the environment variable ",
+    "`FERX_NO_RHS_JIT=1` switches native code off. The results are identical; ",
+    "only the speed differs."
+  )
+  g_int <- ferx:::.ferx_warning_guidance("ode_rhs_route", message = interpreted)
+  g_nn <- ferx:::.ferx_warning_guidance("ode_rhs_route", message = not_native)
+  # An interpreted RHS names a construct, so the advice is to rewrite it.
+  expect_match(g_int, "Rewrite the construct the message names", fixed = TRUE)
+  # A register-code RHS names none: no rewrite advice, and the one remedy the
+  # user controls, the environment switch, is named.
+  expect_false(grepl("Rewrite", g_nn, fixed = TRUE))
+  expect_match(g_nn, "Nothing in the model needs rewriting", fixed = TRUE)
+  expect_match(g_nn, "FERX_NO_RHS_JIT=1", fixed = TRUE)
+  expect_match(g_nn, "results are identical", fixed = TRUE)
+  # The other two causes carry no environment variable; they still get the
+  # register-code advice, keyed on the phrase every cause shares.
+  host <- sub("the environment variable `FERX_NO_RHS_JIT=1` switches native code off",
+              "Cranelift cannot generate code for this host", not_native, fixed = TRUE)
+  host <- sub("W_ODE_RHS_NOT_NATIVE: ", "", host, fixed = TRUE)
+  expect_identical(ferx:::.ferx_warning_guidance("ode_rhs_route", message = host), g_nn)
+})
 test_that("ferx_get_warnings() shows guidance for an unused declaration", {
   # End to end through the printer, with the category ferx-core actually
   # assigns: its unused-declaration messages classify to `general`, not to
