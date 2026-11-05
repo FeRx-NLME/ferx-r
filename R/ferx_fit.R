@@ -825,8 +825,15 @@
 #'       engine).}
 #'     \item{\code{imp_auto}}{(default \code{TRUE}) Adaptive sample count (NONMEM
 #'       \code{AUTO}). With this on, \code{imp_samples} is the \emph{starting}
-#'       count and is ramped up (doubling per iteration, capped at 10000) while the
-#'       per-subject objective Monte-Carlo SE (total SE / sqrt(N)) exceeds 0.05.
+#'       count and the floor. The count rises (at most doubling per iteration,
+#'       capped at 10000) while the per-subject objective Monte-Carlo SE (total
+#'       SE / sqrt(N), a median of the last five iterations) exceeds 0.05, but
+#'       only once the objective has settled or the averaging window is about to
+#'       start, so a cold start's descent cannot set it for the whole run. It
+#'       halves again, down to the starting count, when the SE falls below
+#'       0.025, and stops rising once extra samples no longer lower the SE.
+#'       Fits that used it can land on different numbers at the same seed than
+#'       before ferx-core #2687.
 #'       Strongly recommended for FREM and
 #'       other high-dimensional models, where a fixed count leaves a
 #'       sample-count-dependent bias in the typical-value and Omega estimates.
@@ -871,6 +878,12 @@
 #'       brute-force sampling of the near-singular covariate dimensions has very
 #'       poor ESS. Set \code{FALSE} only to diagnose the Rao-Blackwell path
 #'       against the full-dimensional sampler.}
+#'     \item{\code{imp_max_time}}{(default none) Wall-clock limit on the IMP
+#'       iterations, in seconds, checked after each iteration so the last one
+#'       always completes. A fit that reaches it stops there, keeps its current
+#'       estimate, still runs the post-fit work (final EBEs, covariance step,
+#'       marginal) and reports \code{converged = FALSE} with a warning. In a
+#'       method chain it covers the IMP stage alone.}
 #'     \item{\code{imp_low_ess_threshold}}{ESS fraction below which a subject is
 #'       flagged in \code{fit$importance_sampling$low_ess_subject_ids} (default
 #'       \code{0.1}, i.e. \code{10\%} of \code{imp_samples}).}
@@ -896,6 +909,8 @@
 #'     \item{\code{impmap_auto}}{(default \code{TRUE}) Adaptive sample count, as
 #'       \code{imp_auto} above -- \code{impmap_samples} is the \emph{starting}
 #'       count.}
+#'     \item{\code{impmap_max_time}}{(default none) Wall-clock limit on the
+#'       IMPMAP iterations, in seconds, as \code{imp_max_time} above.}
 #'     \item{\code{impmap_mceta}}{(default 0) Additional random starting points
 #'       for the per-subject MAP optimization (NONMEM \code{MCETA}). Each start
 #'       draws eta from \code{N(0, Omega)} and the lowest individual NLL wins; 0
