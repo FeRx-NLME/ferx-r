@@ -826,13 +826,25 @@
 #'     \item{\code{imp_auto}}{(default \code{TRUE}) Adaptive sample count (NONMEM
 #'       \code{AUTO}). With this on, \code{imp_samples} is the \emph{starting}
 #'       count and is ramped up (doubling per iteration, capped at 10000) while the
-#'       objective's Monte-Carlo SE exceeds 1.0. Strongly recommended for FREM and
+#'       per-subject objective Monte-Carlo SE (total SE / sqrt(N)) exceeds 0.05.
+#'       Strongly recommended for FREM and
 #'       other high-dimensional models, where a fixed count leaves a
 #'       sample-count-dependent bias in the typical-value and Omega estimates.
 #'       Note this makes the "quadruple the samples to halve the MC SE" rule of
 #'       thumb apply only when it is \code{FALSE}.}
+#'     \item{\code{imp_adapt_passes}}{(default \code{5}) Pilot passes that adapt
+#'       each subject's proposal before a marginal \eqn{-2 \log L} is reported,
+#'       under \code{imp_eval_only} and after an estimating \code{imp} or
+#'       \code{impmap} stage (NONMEM \code{EONLY=1 NITER=5}). The MCEM
+#'       iterations are not affected. Each pass costs one more
+#'       \code{imp_samples} draws per subject. While it is above \code{0}, the
+#'       marginal's proposal keeps at least \code{0.1} of the prior whatever
+#'       \code{imp_defensive_alpha} says. \code{0} keeps the single Laplace
+#'       proposal, which reads high on sparse subjects.}
 #'     \item{\code{imp_defensive_alpha} / \code{impmap_defensive_alpha}}{(default
-#'       \code{0}, i.e. off) Defensive-mixture weight in
+#'       \code{0}, i.e. off for the MCEM iterations; a reported marginal keeps
+#'       at least \code{0.1} while \code{imp_adapt_passes} is above \code{0})
+#'       Defensive-mixture weight in
 #'       \code{[0, 1)}. Each subject draws this fraction of its samples from the
 #'       prior \code{N(0, Omega)} rather than the mode-centred proposal, and every
 #'       sample is scored under the mixture density. That bounds the importance
@@ -993,7 +1005,13 @@
 #'   \item{n_iterations}{Number of outer iterations run}
 #'   \item{ofv}{Objective function value (-2 log-likelihood). The
 #'     \emph{penalized} objective when the model declares a \code{prior(...)}
-#'     on any parameter, i.e. \code{ofv_data + ofv_prior}.}
+#'     on any parameter, i.e. \code{ofv_data + ofv_prior}. After an
+#'     estimating \code{"imp"} or \code{"impmap"} stage it is a final Laplace
+#'     objective (AIC and BIC follow it); after a trailing
+#'     \code{imp_eval_only} stage it is the previous estimator's objective.
+#'     Compare NONMEM \code{METHOD=IMP} objectives with the
+#'     importance-sampling marginal,
+#'     \code{importance_sampling$minus2_log_likelihood}, not with \code{ofv}.}
 #'   \item{ofv_data}{The data half of \code{ofv} - the -2 log-likelihood the
 #'     AIC and BIC are computed from, and the value to compare against an
 #'     unpriored fit of the same model. Equal to \code{ofv} when no prior is
@@ -1211,14 +1229,16 @@
 #'     no IOV)}
 #'   \item{importance_sampling}{Importance-sampling marginal log-likelihood
 #'     diagnostics, populated only when the method chain ends with an
-#'     \code{"imp"} stage (\code{NULL} otherwise). A list with
-#'     \code{minus2_log_likelihood} (the IS estimate of \eqn{-2 \log L},
-#'     comparable across models in the same nesting family),
+#'     \code{"imp"} or \code{"impmap"} stage (\code{NULL} otherwise). A list
+#'     with \code{minus2_log_likelihood} (the IS estimate of \eqn{-2 \log L},
+#'     comparable across models in the same nesting family, and the number
+#'     to compare with a NONMEM \code{METHOD=IMP} objective; see \code{ofv}),
 #'     \code{mc_standard_error} (Monte-Carlo SE; scales as
 #'     \eqn{1/\sqrt{imp\_samples}}), \code{n_samples},
 #'     \code{proposal_df}, \code{ess_min} and \code{ess_median}
 #'     (per-subject effective sample size as a fraction of
-#'     \code{imp_samples}), \code{kappa_treatment}
+#'     \code{imp_samples}), \code{adapt_passes} (pilot passes that adapted
+#'     the proposal, see \code{imp_adapt_passes}), \code{kappa_treatment}
 #'     (\code{"not_applicable"}, \code{"fixed_at_mode"} for partial-marginal
 #'     IOV fits, or \code{"marginalized"}), and parallel vectors
 #'     \code{low_ess_subject_ids} / \code{low_ess_subject_frac} flagging
