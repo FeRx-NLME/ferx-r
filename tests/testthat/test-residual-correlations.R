@@ -366,22 +366,14 @@ test_that("a FIX correlation has se NA, not the engine's 0, on every path (#458)
 })
 
 test_that("each frame builder blanks the SE of the FIX rows only (#458)", {
-  # A FIX block alongside a free one, in the engine's two shapes: the FFI's
-  # parallel vectors (ferx_fit()) and the bundle wire (ferx_load_fit()). The
-  # engine reports 0 for the held entry.
+  # A FIX block alongside a free one, in the FFI's parallel vectors. The engine
+  # reports 0 for the held entry.
   raw <- list(residual_correlation_i = c(1L, 3L), residual_correlation_j = c(2L, 4L),
               residual_correlation_names = c("A ~ B", "C ~ D"),
               residual_correlation_rho = c(0.3, 0.5),
               residual_correlation_fixed = c(TRUE, FALSE),
               se_residual_correlation = c(0, 0.07))
-  expect_identical(.ferx_residual_corr_frame(raw)$se, c(NA, 0.07))
-  wire <- list(
-    residual_correlations = list(list(sigma_i = 0L, sigma_j = 1L, rho = 0.3),
-                                 list(sigma_i = 2L, sigma_j = 3L, rho = 0.5)),
-    residual_correlation_fixed = list(TRUE, FALSE),
-    se_residual_correlations = list(0, 0.07)
-  )
-  rc <- .fitrx_residual_corr_from_wire(wire)
+  rc <- .ferx_residual_corr_frame(raw)
   expect_identical(rc$se, c(NA, 0.07))
   # The writer gives the engine back its 0 for the held entry.
   expect_identical(.fitrx_residual_corr_se(list(residual_correlations = rc)), c(0, 0.07))

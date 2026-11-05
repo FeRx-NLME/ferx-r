@@ -275,11 +275,10 @@ test_that("a fit with continuous and binary rows keeps both on their subjects (#
   # subject_summary, not counted as etas.
   expect_identical(names(loaded$ebe_etas), names(fit$ebe_etas))
 
-  # ferx-core reads the continuous rows on their subjects; its own writer
-  # does not carry the binary rows yet (ferx-core #911).
+  # ferx-core reads the rows on their subjects, and writes the binary ones too.
   trip <- fitrx_engine_trip(fit)
   from_core <- ferx_load_fit(trip$core_path)
-  expect_identical(from_core$sdtab$ID, fit$sdtab$ID[seq_len(sum(summ$n_obs))])
+  expect_identical(from_core$sdtab$ID, fit$sdtab$ID)
   expect_core_summary(from_core, fit)
 
   live <- ferx_covariance(fit)
@@ -306,49 +305,18 @@ test_that("ebes.csv puts ofv_contribution and n_obs before a mixture's columns (
                      "1,0.1,3.5,4,1,0.9,0.1"))
 })
 
-test_that("a bundle written before #554 keeps its ofv through a reload and re-save", {
-  # The pre-#554 writer's binary bundle: ofv_contribution filled, n_obs
-  # empty, binary rows in predictions.csv, no n_obs_discrete.
-  fit <- binary_case()$fit
-  path <- withr::local_tempfile(fileext = ".fitrx")
-  ferx_save_fit(fit, path)
-  staging <- withr::local_tempdir()
-  utils::unzip(path, exdir = staging)
-  ebes <- bundle_csv(path, "ebes.csv")
-  ebes$n_obs <- ""
-  ebes$n_obs_discrete <- NULL
-  utils::write.csv(ebes, file.path(staging, "ebes.csv"), row.names = FALSE,
-                   quote = FALSE)
-  disc <- file.path(staging, "predictions_discrete.csv")
-  cat(readLines(disc)[-1], file = file.path(staging, "predictions.csv"),
-      sep = "\n", append = TRUE)
-  unlink(disc)
-  old <- withr::local_tempfile(fileext = ".fitrx")
-  utils::zip(old, list.files(staging, full.names = TRUE), flags = "-j -q")
-
-  loaded <- ferx_load_fit(old)
-  expect_identical(loaded$sdtab$ID, fit$sdtab$ID)
-  expect_identical(loaded$subject_summary$ofv_contribution,
-                   fit$subject_summary$ofv_contribution)
-  expect_true(all(is.na(loaded$subject_summary$n_obs)))
-  again <- withr::local_tempfile(fileext = ".fitrx")
-  ferx_save_fit(loaded, again)
-  expect_identical(bundle_csv(again, "ebes.csv")$ofv_contribution,
-                   ebes$ofv_contribution)
-})
-
 test_that("a TTE fit's bundle loads in ferx-core (#554)", {
   ex <- ferx_example("tte_exponential")
   fit <- quiet_fit(ex$model, ex$data)
   trip <- fitrx_engine_trip(fit)
   from_core <- ferx_load_fit(trip$core_path)
   expect_core_summary(from_core, fit)
-  # Neither bundle keeps the time-to-event residual rows (ferx-core #901,
-  # #911), which come last in the live sdtab.
+  # Core's own writer keeps no time-to-event rows (ferx-core #911), which come
+  # last in the live sdtab; an R bundle does.
   kept <- fit$sdtab$ID[seq_len(nrow(fit$sdtab) - sum(fit$subject_summary$n_obs_tte))]
   expect_identical(from_core$sdtab$ID, kept)
   loaded <- ferx_load_fit(trip$r_path)
-  expect_identical(loaded$sdtab$ID, kept)
+  expect_identical(loaded$sdtab, fit$sdtab)
 })
 
 test_that("a no-eta fit's ebes.csv is the engine's, up to its six decimals (#554)", {
@@ -366,22 +334,4 @@ test_that("a no-eta fit's ebes.csv is the engine's, up to its six decimals (#554
   expect_identical(r_ebes$ID, fit$subject_ids)
   expect_equal(as.numeric(core_ebes$ofv_contribution),
                as.numeric(r_ebes$ofv_contribution), tolerance = core_tol)
-})
-
-test_that("a bundle written before fit$subject_summary still loads (#540, #554)", {
-  # The old writer's shape: no subject_summary, so ebes.csv's per-subject
-  # columns are empty and every sdtab row, discrete ones too, is in
-  # predictions.csv. The loader walks the ID text instead.
-  for (fit in list(repeat_case()$fit, binary_case()$fit)) {
-    old <- fit
-    old$subject_summary <- NULL
-    path <- withr::local_tempfile(fileext = ".fitrx")
-    ferx_save_fit(old, path)
-    expect_false("predictions_discrete.csv" %in% utils::unzip(path, list = TRUE)$Name)
-    expect_true(all(bundle_csv(path, "ebes.csv")$n_obs == ""))
-    loaded <- ferx_load_fit(path)
-    expect_identical(loaded$sdtab$ID, fit$sdtab$ID)
-    expect_equal(as_doubles(loaded$sdtab), fit$sdtab)
-    expect_true(all(is.na(loaded$subject_summary$n_obs)))
-  }
 })

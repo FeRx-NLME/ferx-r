@@ -273,7 +273,6 @@ test_that("S5: the SIR record survives the round trip, so ferx_sir(loaded) repea
 
 test_that("S10: the .fitrx spelling of both records is ferx-core's", {
   to <- function(record, kind) ferx:::.fitrx_settings_to_wire(stats::setNames(list(record), kind), kind)
-  from <- ferx:::.fitrx_settings_from_wire
   json <- function(w) {
     as.character(jsonlite::toJSON(w, auto_unbox = TRUE, null = "null", na = "null",
                                   digits = I(17)))
@@ -292,13 +291,9 @@ test_that("S10: the .fitrx spelling of both records is ferx-core's", {
   expect_match(text, '"inner_optimizer":"lbfgs"', fixed = TRUE)
   expect_match(text, '"ode_method":"rodas5p"', fixed = TRUE)
   expect_match(text, '"ode_stiff_abort_after":null', fixed = TRUE)
-  # Back from JSON: doubles exact, NA restored, every field in its fit type.
-  expect_identical(from(jsonlite::parse_json(text), "scoring_settings"), sc)
-  # The covariate-NN penalty strengths (ferx-core #1352) are optional: a
-  # recorded one round-trips, an unrecorded one is NA (JSON null), and a
-  # record written before #1352, without the keys, reads as unrecorded. The
-  # default record leaves them unrecorded too: R edits it into a fit with no
-  # record, and a recorded 0 would win over the model file's strength.
+  # The covariate-NN penalty strengths (ferx-core #1352) are optional, and the
+  # default record leaves them unrecorded: R edits it into a fit with no record,
+  # and a recorded 0 would win over the model file's strength.
   expect_identical(sc$nn_l2_lambda, NA_real_)
   expect_identical(ferx:::.ferx_default_settings("sir_settings")$scoring$nn_l2_lambda,
                    NA_real_)
@@ -306,13 +301,6 @@ test_that("S10: the .fitrx spelling of both records is ferx-core's", {
   sc$nn_smooth_lambda <- NA_real_
   text <- json(to(sc, "scoring_settings"))
   expect_match(text, '"nn_smooth_lambda":null', fixed = TRUE)
-  expect_identical(from(jsonlite::parse_json(text), "scoring_settings"), sc)
-  old <- jsonlite::parse_json(text)
-  old$nn_l2_lambda <- NULL
-  old$nn_smooth_lambda <- NULL
-  back <- from(old, "scoring_settings")
-  expect_identical(back$nn_l2_lambda, NA_real_)
-  expect_identical(back$nn_smooth_lambda, NA_real_)
   sc$nn_l2_lambda <- NA_real_
   sc$nn_smooth_lambda <- NA_real_
 
@@ -325,22 +313,11 @@ test_that("S10: the .fitrx spelling of both records is ferx-core's", {
   expect_setequal(names(ws), c("samples", "resamples", "seed", "df", "scale",
                                "keep_samples", ps_scoring_keys))
   expect_match(json(ws), '"scale":"natural"', fixed = TRUE)
-  back <- jsonlite::parse_json(json(ws))
-  expect_identical(from(back, "sir_settings"), sr)
-  # A block written between ferx-core #1758 and #426 has no inner_restarts.
-  back$inner_restarts <- NULL
-  expect_identical(from(back, "sir_settings")$scoring$inner_restarts,
-                   sc$inner_restarts)
   # A normal proposal (`df = Inf`) is `"df": "normal"` on the wire, ferx-core's
   # own spelling (ferx-core#1819), and reads back as `Inf`.
   sr$df <- Inf
   wn <- expect_silent(to(sr, "sir_settings"))
   expect_match(json(wn), '"df":"normal"', fixed = TRUE)
-  expect_identical(from(jsonlite::parse_json(json(wn)), "sir_settings"), sr)
-  # A bundle written before #1819 holds `"df": null`; it reads as no record,
-  # so the bundle loads.
-  back["df"] <- list(NULL)
-  expect_null(from(back, "sir_settings"))
 })
 
 test_that("S12: a record the engine would refuse is refused by name", {
@@ -567,70 +544,18 @@ test_that("S15: ferx_sir(fit) on an M3 fit repeats the in-fit SIR", {
   expect_identical(ps_sir_fields(ferx_sir(fit)), ps_sir_fields(fit))
 })
 
-test_that("S13: inner_screen is recorded, round-trips, and reads 0 when absent (#589)", {
+test_that("S13: inner_screen is recorded, and reads 0 when absent (#589)", {
   sc <- ferx:::.ferx_default_settings("scoring_settings")
   expect_identical(sc$inner_screen, 100L)
-  to <- function(record, kind) ferx:::.fitrx_settings_to_wire(stats::setNames(list(record), kind), kind)
-  from <- ferx:::.fitrx_settings_from_wire
-  json <- function(w) {
-    jsonlite::parse_json(as.character(jsonlite::toJSON(
-      w, auto_unbox = TRUE, null = "null", na = "null", digits = I(17)
-    )))
-  }
-  for (n in c(0L, 7L)) {
-    sc$inner_screen <- n
-    expect_identical(from(json(to(sc, "scoring_settings")), "scoring_settings"), sc)
-    sr <- ferx:::.ferx_default_settings("sir_settings")
-    sr$scoring <- sc
-    expect_identical(from(json(to(sr, "sir_settings")), "sir_settings"), sr)
-  }
-
-  # A record written before ferx-core #2013 has no inner_screen: that fit ran no
-  # screen, so it reads as 0, not the default 100 - on the wire, flat or nested,
-  # and in a fit list made before the field existed.
-  sc$inner_screen <- 100L
-  old <- json(to(sc, "scoring_settings"))
-  old$inner_screen <- NULL
-  expect_identical(from(old, "scoring_settings")$inner_screen, 0L)
-  sr <- ferx:::.ferx_default_settings("sir_settings")
-  old_sir <- json(to(sr, "sir_settings"))
-  old_sir$inner_screen <- NULL
-  expect_identical(from(old_sir, "sir_settings")$scoring$inner_screen, 0L)
   mem <- sc[names(sc) != "inner_screen"]
   expect_identical(
     ferx:::ferx_rust_settings_record("scoring_settings", mem, "", "")$inner_screen, 0L
   )
 })
 
-test_that("S13b: inner_twin_seed is recorded, round-trips, and reads FALSE when absent (ferx-core #2095)", {
+test_that("S13b: inner_twin_seed is recorded, and reads FALSE when absent (ferx-core #2095)", {
   sc <- ferx:::.ferx_default_settings("scoring_settings")
   expect_identical(sc$inner_twin_seed, TRUE)
-  to <- function(record, kind) ferx:::.fitrx_settings_to_wire(stats::setNames(list(record), kind), kind)
-  from <- ferx:::.fitrx_settings_from_wire
-  json <- function(w) {
-    jsonlite::parse_json(as.character(jsonlite::toJSON(
-      w, auto_unbox = TRUE, null = "null", na = "null", digits = I(17)
-    )))
-  }
-  for (v in c(FALSE, TRUE)) {
-    sc$inner_twin_seed <- v
-    expect_identical(from(json(to(sc, "scoring_settings")), "scoring_settings"), sc)
-    sr <- ferx:::.ferx_default_settings("sir_settings")
-    sr$scoring <- sc
-    expect_identical(from(json(to(sr, "sir_settings")), "sir_settings"), sr)
-  }
-
-  # A record written before ferx-core #2095 has no inner_twin_seed: that fit ran
-  # no twin seed, so it reads as FALSE, not the default TRUE - on the wire, flat
-  # or nested, and in a fit list made before the field existed.
-  sc$inner_twin_seed <- TRUE
-  old <- json(to(sc, "scoring_settings"))
-  old$inner_twin_seed <- NULL
-  expect_identical(from(old, "scoring_settings")$inner_twin_seed, FALSE)
-  sr <- ferx:::.ferx_default_settings("sir_settings")
-  old_sir <- json(to(sr, "sir_settings"))
-  old_sir$inner_twin_seed <- NULL
-  expect_identical(from(old_sir, "sir_settings")$scoring$inner_twin_seed, FALSE)
   mem <- sc[names(sc) != "inner_twin_seed"]
   expect_identical(
     ferx:::ferx_rust_settings_record("scoring_settings", mem, "", "")$inner_twin_seed, FALSE
@@ -757,57 +682,6 @@ test_that("S17: an unknown key on a fit in memory is refused by name, with the w
   err <- tryCatch(ferx_sir(sfit), error = conditionMessage)
   expect_match(err, '`fit$sir_settings$scoring`: unknown key "inner_future"', fixed = TRUE)
   expect_match(err, "set `fit$sir_settings <- NULL`", fixed = TRUE)
-})
-
-test_that("S18: a bundle record naming an unknown key is dropped with a warning; the rest loads (#535)", {
-  fit <- ps_sir_fit(ps_sir_rows[[1L]])
-  path <- ps_scratch(".fitrx")
-  unlink(path)
-  ferx_save_fit(fit, path, include_data = TRUE)
-  newer <- list(
-    scoring_settings = fitrx_edit_bundle(path, function(w) {
-      w$scoring_settings$inner_future <- 7L
-      w
-    }),
-    sir_settings = fitrx_edit_bundle(path, function(w) {
-      w$sir$settings$inner_future <- 7L
-      w
-    })
-  )
-  without <- list(
-    scoring_settings = fitrx_edit_bundle(path, function(w) {
-      w$scoring_settings <- NULL
-      w
-    }),
-    sir_settings = fitrx_edit_bundle(path, function(w) {
-      w$sir$settings <- NULL
-      w
-    })
-  )
-  for (kind in names(newer)) {
-    # ferx-core's own reader ignores the key and loads the bundle.
-    expect_no_error(ferx:::ferx_rust_fitrx_engine_resave(newer[[kind]],
-                                                         tempfile(fileext = ".fitrx")))
-    w <- expect_warning(loaded <- ferx_load_fit(newer[[kind]]),
-                        class = "ferx_settings_record_dropped_warning")
-    expect_match(conditionMessage(w), '"inner_future"', fixed = TRUE)
-    expect_identical(w$keys, "inner_future")
-    expect_identical(w$record, kind)
-    expect_null(loaded[[kind]])
-    other <- setdiff(names(newer), kind)
-    expect_identical(loaded[[other]], fit[[other]], info = kind)
-    expect_identical(loaded$theta, fit$theta, info = kind)
-    # Exactly the fit a bundle without the record loads as (bar the paths each
-    # load stages its bundled files to), so ferx_covariance() and ferx_sir()
-    # run on it as on that one.
-    staged <- c("model_path", "data_path")
-    expect_identical(loaded[setdiff(names(loaded), staged)],
-                     ferx_load_fit(without[[kind]])[setdiff(names(loaded), staged)],
-                     info = kind)
-  }
-  loaded <- suppressWarnings(ferx_load_fit(newer$scoring_settings))
-  expect_identical(ferx_covariance(loaded)$cov_matrix,
-                   ferx_covariance(ferx_load_fit(without$scoring_settings))$cov_matrix)
 })
 
 test_that("S17: ferx_sir(fit, args) on a fit with no SIR record scores under its stage record", {

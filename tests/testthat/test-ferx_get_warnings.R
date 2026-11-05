@@ -1855,15 +1855,14 @@ test_that("the #308 message texts are still what the engine emits", {
 })
 
 test_that("a loaded fit's warnings get the same categories and guidance as the fresh fit", {
-  # ferx_load_fit() does not restore warnings_structured, so before #308 every
-  # row of a reloaded fit arrived as `general` and all but three guidance arms
-  # were dead for it. This drives the real round trip.
+  # Before #308 every row of a reloaded fit arrived as `general` and all but
+  # three guidance arms were dead for it. This drives the real round trip.
   fit <- warning_anchor_fit()
   path <- tempfile(fileext = ".fitrx")
   on.exit(unlink(path))
   ferx_save_fit(fit, path)
   loaded <- ferx_load_fit(path)
-  expect_null(loaded$warnings_structured)
+  expect_true(is.data.frame(loaded$warnings_structured))
 
   fresh_ws  <- ferx_get_warnings(fit, as_df = TRUE)
   loaded_ws <- ferx_get_warnings(loaded, as_df = TRUE)
@@ -1971,7 +1970,7 @@ test_that("a loaded fit keeps its older warnings after ferx_sir()", {
   on.exit(unlink(path))
   ferx_save_fit(fit, path)
   loaded <- ferx_load_fit(path)
-  expect_null(loaded$warnings_structured)
+  expect_true(is.data.frame(loaded$warnings_structured))
 
   sired <- suppressWarnings(ferx_sir(loaded, sir_samples = 200L,
                                      sir_resamples = 50L, sir_seed = 1L))
@@ -1987,7 +1986,7 @@ test_that("print() of a reloaded fit tallies the recovered severities", {
   on.exit(unlink(path))
   ferx_save_fit(fit, path)
   loaded <- ferx_load_fit(path)
-  expect_null(loaded$warnings_structured)
+  expect_true(is.data.frame(loaded$warnings_structured))
   out <- paste(capture.output(print(loaded)), collapse = "\n")
   # The anchor fit's covariance failure is critical; before the fix a loaded
   # fit printed only "N warning(s) -- inspect fit$warnings".

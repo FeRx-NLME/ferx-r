@@ -12,7 +12,8 @@ mixed_fit <- function(n_obs = c(2L, 1L), n_disc = c(1L, 2L), n_tte = c(1L, 1L)) 
   pos <- c(rep.int(1:2, n_obs), rep.int(1:2, n_disc), rep.int(1:2, n_tte))
   kind <- rep(c("g", "d", "t"), c(sum(n_obs), sum(n_disc), sum(n_tte)))
   sdtab <- data.frame(ID = c(11, 12)[pos], TIME = seq_along(pos), DV = 0,
-                      PRED = 1, N_OBS = ifelse(kind == "g", n_obs[pos], NA))
+                      CMT = 1, PRED = 1, IPRED = 1, IWRES = 0,
+                      N_OBS = ifelse(kind == "g", n_obs[pos], NA))
   for (col in tte_cols) sdtab[[col]] <- ifelse(kind == "t", 0.5, NA_real_)
   list(sdtab = sdtab,
        subject_summary = data.frame(ID = c("11", "12"), ofv_contribution = 1,
@@ -156,24 +157,26 @@ for (case in c("counts", "columns")) {
     expect_false(any(tte_cols %in% names(g$data)))
     if (case == "counts") expect_identical(as.integer(g$subject), c(1L, 1L, 2L))
 
-    # ferx_save_fit(): TTE rows dropped; with the counts the discrete rows
-    # get a file of their own.
+    # ferx_save_fit(): the Gaussian rows in predictions.csv; with the counts the
+    # discrete rows in core's layout and the others in full. Without the counts
+    # the rows cannot be placed, so it refuses.
     write_preds <- getFromNamespace(".fitrx_write_predictions_csv", "ferx")
     staging <- tempfile()
     dir.create(staging)
-    expect_warning(wrote_disc <- write_preds(fit, staging),
-                   class = "ferx_tte_rows_dropped_warning")
-    preds <- utils::read.csv(file.path(staging, "predictions.csv"))
-    expect_false(any(tte_cols %in% names(preds)))
     if (case == "counts") {
-      expect_true(wrote_disc)
+      expect_identical(write_preds(fit, staging),
+                       c("predictions.csv", "predictions_discrete.csv",
+                         "sdtab_endpoint_rows.csv"))
+      preds <- utils::read.csv(file.path(staging, "predictions.csv"))
       disc <- utils::read.csv(file.path(staging, "predictions_discrete.csv"))
+      rest <- utils::read.csv(file.path(staging, "sdtab_endpoint_rows.csv"))
       expect_identical(preds$TIME, 1:3)
       expect_identical(disc$TIME, 4:6)
       expect_identical(disc$ID, c(11L, 12L, 12L))
+      expect_identical(rest$TIME, 4:8)
+      expect_identical(rest$SUBJECT, c(1L, 2L, 2L, 1L, 2L))
     } else {
-      expect_false(wrote_disc)
-      expect_identical(preds$TIME, 1:6)
+      expect_error(write_preds(fit, staging), "cannot be placed", fixed = TRUE)
     }
 
     # ferx_calc_npde(): the engine's NPDE table has the Gaussian rows only

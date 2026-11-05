@@ -76,12 +76,4 @@ test_that("ode_linear_exact survives ferx_save_fit() / ferx_load_fit()", {
   loaded <- ferx_load_fit(path)
   expect_identical(loaded$ode_linear_exact, TRUE)
   expect_identical(loaded$uses_ode_solver, TRUE)
-
-  # A bundle written before the field existed has no key, and reads back
-  # FALSE, as ferx-core's `#[serde(default)]` does.
-  old <- fitrx_edit_bundle(path, function(w) {
-    w$ode_linear_exact <- NULL
-    w
-  })
-  expect_identical(ferx_load_fit(old)$ode_linear_exact, FALSE)
 })

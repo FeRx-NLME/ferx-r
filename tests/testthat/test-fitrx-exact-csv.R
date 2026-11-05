@@ -124,32 +124,3 @@ test_that("conddist.csv crosses both writers: COND_MODE is checked by value", {
   expect_identical(back$ebe_etas, fit$ebe_etas)
   expect_identical(cov_parts(quiet(ferx_covariance(back))), cov_parts(fit))
 })
-
-test_that("a bundle written at six decimals before #1847 still loads", {
-  fit <- nested_cov_fit()
-  f <- withr::local_tempfile(fileext = ".fitrx")
-  quiet(ferx_save_fit(fit, f, include_data = TRUE))
-  old <- six_decimal_bundle(f)
-  expect_match(bundle_entry(old, "ebes.csv")[2], "^1,-?[0-9]+\\.[0-9]{6},")
-  # ferx-core's loader takes it too.
-  expect_no_error(quiet(ferx:::ferx_rust_fitrx_engine_resave(
-    old, withr::local_tempfile(fileext = ".fitrx"))))
-  back <- quiet(ferx_load_fit(old))
-  expect_equal(back$ebe_kappas_by_level, fit$ebe_kappas_by_level, tolerance = 1e-5)
-  expect_false(identical(back$ebe_etas, fit$ebe_etas))
-  # Six-decimal EBEs within 1e-6 of the cold solve run from the cold solve,
-  # which is what the inline FOCEI step started from.
-  expect_identical(cov_parts(quiet(ferx_covariance(back))), cov_parts(fit))
-
-  # gn's inline step started from its warm EBEs, which the bundle rounded
-  # away: the reloaded step is close, not exact.
-  gn <- warfarin_gn_fit()
-  g <- withr::local_tempfile(fileext = ".fitrx")
-  quiet(ferx_save_fit(gn, g, include_data = TRUE))
-  gn_back <- quiet(ferx_load_fit(six_decimal_bundle(g)))
-  gn_cov <- quiet(ferx_covariance(gn_back))
-  expect_equal(gn_cov$se_theta, gn$se_theta, tolerance = 1e-6)
-  expect_equal(gn_cov$se_omega, gn$se_omega, tolerance = 1e-6)
-  # ...and not the warm path: from the rounded EBEs the step runs cold.
-  expect_false(identical(cov_parts(gn_cov), cov_parts(gn)))
-})

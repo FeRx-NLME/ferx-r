@@ -2,8 +2,7 @@
 #
 # One constructor, `.ferx_vi_from_raw()`, builds `fit$vi` from the engine's
 # layout - per-subject vectors, matrices flattened row-major - for both the
-# live fit (the glue's `vi` list) and a reloaded one (`.fitrx_vi_from_wire()`),
-# so the two cannot drift. `.fitrx_build_vi_wire()` writes it back in the
+# live fit and a reloaded one, both the glue's `vi` list, so the two cannot drift. `.fitrx_build_vi_wire()` writes it back in the
 # layout ferx-core's own `.fitrx` uses (`ViWire` in src/io/fitrx.rs, the YAML
 # writer's `vi:` section, ferx-core #2058), so either side loads the other's
 # bundle.
@@ -153,50 +152,4 @@
     out$eta_posterior <- posterior
   }
   out[!vapply(out, is.null, logical(1L))]
-}
-
-# fit.json's `vi` back to `fit$vi`. Each `eta_posterior` entry must name the
-# subject at its position in ebes.csv, as ferx-core's loader requires: the
-# posteriors are stored by position, so a reordered bundle would otherwise
-# attach one subject's posterior to another.
-.fitrx_vi_from_wire <- function(w, eta_names, kappa_names, subject_ids) {
-  if (is.null(w)) return(NULL)
-  post <- w$eta_posterior %||% list()
-  ids <- vapply(post, function(p) as.character(p$id %||% NA_character_), "")
-  n <- min(length(ids), length(subject_ids))
-  bad <- which(ids[seq_len(n)] != as.character(subject_ids)[seq_len(n)])
-  if (length(bad)) {
-    i <- bad[[1L]]
-    stop(sprintf(paste0(
-      "ferx_load_fit: fit.json's vi.eta_posterior[%d] is subject %s, but ",
-      "ebes.csv row %d is %s; the bundle is corrupt."),
-      i - 1L, ids[[i]], i, subject_ids[[i]]), call. = FALSE)
-  }
-  # Matrices as row-major vectors, kept to the last subject that has one (an
-  # absent key after it is the engine's "list stopped short").
-  flat <- function(key) {
-    has <- which(vapply(post, function(p) !is.null(p[[key]]), NA))
-    keep <- post[seq_len(if (length(has)) max(has) else 0L)]
-    rows <- lapply(keep, function(p) p[[key]] %||% list())
-    list(
-      vals = lapply(rows, function(r) {
-        unlist(lapply(r, .fitrx_unwrap_nan_num_vec), use.names = FALSE) %||% numeric()
-      }),
-      nrow = vapply(rows, length, integer(1L))
-    )
-  }
-  covs <- flat("cov")
-  kappas <- flat("kappa_means")
-  raw <- w
-  raw$ids <- ids
-  raw$eta_means <- lapply(post, function(p) .fitrx_unwrap_nan_num_vec(p$mean) %||% numeric())
-  raw$eta_covs <- covs$vals
-  raw$eta_covs_nrow <- covs$nrow
-  raw$kappa_means <- kappas$vals
-  raw$kappa_means_nrow <- kappas$nrow
-  raw$elbo_trace <- .fitrx_unwrap_nan_num_vec(w$elbo_trace)
-  raw$objective_trace <- .fitrx_unwrap_nan_num_vec(w$objective_trace)
-  names_wire <- as.character(unlist(w$eta_names, use.names = FALSE))
-  .ferx_vi_from_raw(raw, if (length(names_wire)) names_wire else eta_names,
-                    kappa_names)
 }

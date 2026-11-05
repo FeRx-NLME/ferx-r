@@ -47,29 +47,15 @@ test_that("a fit without a TTE endpoint has no TTE columns and n_obs_tte = 0", {
                    integer(nrow(fit$subject_summary)))
 })
 
-test_that("ferx_save_fit() drops the TTE rows with a warning and keeps the rest", {
+test_that("ferx_save_fit() keeps the TTE rows through a reload (#689, #711)", {
   fit <- joint_fit()
   path <- tempfile(fileext = ".fitrx")
-  dropped <- 0L
-  withCallingHandlers(
-    ferx_save_fit(fit, path),
-    ferx_tte_rows_dropped_warning = function(w) {
-      dropped <<- dropped + 1L
-      invokeRestart("muffleWarning")
-    },
-    warning = function(w) invokeRestart("muffleWarning")
-  )
-  expect_identical(dropped, 1L)
-
+  expect_no_warning(ferx_save_fit(fit, path),
+                    class = "ferx_tte_rows_dropped_warning")
   loaded <- suppressWarnings(ferx_load_fit(path))
-  n_keep <- nrow(fit$sdtab) - sum(fit$subject_summary$n_obs_tte)
-  live <- fit$sdtab[seq_len(n_keep), setdiff(names(fit$sdtab), tte_cols)]
-  rownames(live) <- NULL
-  rownames(loaded$sdtab) <- NULL
-  expect_identical(loaded$sdtab, live)
-  expect_identical(loaded$subject_summary$n_obs, fit$subject_summary$n_obs)
-  expect_identical(loaded$subject_summary$n_obs_tte,
-                   integer(nrow(loaded$subject_summary)))
+  expect_identical(loaded$sdtab, fit$sdtab)
+  expect_identical(loaded$subject_summary, fit$subject_summary)
+  expect_gt(sum(loaded$subject_summary$n_obs_tte), 0L)
 })
 
 test_that("a non-TTE fit keeps an [output] column called PIT through save/load", {
@@ -94,24 +80,6 @@ test_that("a non-TTE fit keeps an [output] column called PIT through save/load",
   expect_identical(dropped, 0L)
   loaded <- suppressWarnings(ferx_load_fit(path))
   expect_identical(loaded$sdtab$PIT, fit$sdtab$PIT)
-})
-
-test_that("without per-subject counts, the TTE rows are still dropped with a warning", {
-  # A fit whose subject_summary is gone (as on a fit made before it existed):
-  # the TTE rows are found by their COXSNELL value, not written as Gaussian rows.
-  fit <- joint_fit()
-  fit$subject_summary <- NULL
-  path <- tempfile(fileext = ".fitrx")
-  dropped <- 0L
-  withCallingHandlers(
-    ferx_save_fit(fit, path),
-    ferx_tte_rows_dropped_warning = function(w) dropped <<- dropped + 1L,
-    warning = function(w) invokeRestart("muffleWarning")
-  )
-  expect_identical(dropped, 1L)
-  loaded <- suppressWarnings(ferx_load_fit(path))
-  expect_identical(nrow(loaded$sdtab), sum(is.na(fit$sdtab$COXSNELL)))
-  expect_false(any(tte_cols %in% names(loaded$sdtab)))
 })
 
 test_that("ferx_calc_npde() on a joint PK-TTE fit fills the Gaussian rows, NA on TTE rows", {

@@ -17,11 +17,13 @@ A \code{ferx_fit}-classed list.
 }
 \description{
 Reads a portable \code{.fitrx} archive written by \code{\link{ferx_save_fit}}
-(or by the ferx-core Rust CLI's \code{--output} flag) and reconstructs a
-\code{ferx_fit}-classed list. The returned object is structurally
-compatible with one returned by \code{\link{ferx_fit}} for the fields
-covered by the cross-language schema, plus any R-specific fields the
-writer preserved under \code{r_extras}.
+(or by the ferx-core Rust CLI's \code{--output} flag) with ferx-core's own
+loader, and builds the list with the converter \code{\link{ferx_fit}} uses,
+so a loaded fit has the fields a fresh one has, plus the R-specific fields
+the writer kept in the bundle's \code{interface_extras.json}.
+\code{fit$individual_estimates} needs the data, so it is \code{NULL} for a
+bundle without \code{data.csv}. Only bundles of format version 2 load: an
+older one fails with a version error, and the model must be refitted.
 }
 \details{
 A bundle carrying SIR draws (\code{sir.resamples_packed}, written when the

@@ -166,7 +166,7 @@ This applies to: `print.ferx_fit`, `ferx_estimates()`, `ferx_cor_matrix()` (via 
 **Implementation rules:**
 - Use `eta_names[i]` / `sigma_names[i]` / `kappa_names[i]` directly as labels.
 - Always set `rownames`/`colnames` on any new matrix field holding omega/sigma values.
-- Use `.fitrx_named_omega()` in `persist.R` when deserialising the omega matrix so dimnames survive a `ferx_save`/`ferx_load` round-trip.
+- `ferx_load_fit()` goes through `.ferx_fit_from_raw()`, as `ferx_fit()` does, so dimnames set there survive a `ferx_save_fit()`/`ferx_load_fit()` round trip.
 - Update `roxygen2` `@return` docs when adding new output fields.
 
 ## Roxygen / Documentation

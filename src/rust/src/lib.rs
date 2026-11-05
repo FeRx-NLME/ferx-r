@@ -839,7 +839,8 @@ fn ferx_rust_fit(
         result.reader_settings = Some(reader_settings);
 
         // Convert to R list
-        fit_result_to_list(&result, &population, &parsed.model, &parsed.bindings)
+        let model_text = result.model_text.clone().unwrap_or_default();
+        fit_result_to_list(&result, &population, &parsed.model, &parsed.bindings, &model_text)
     })
 }
 
@@ -2849,6 +2850,383 @@ fn ferx_rust_theta_levels_from_fit(
     })
 }
 
+/// R's `NULL`.
+fn r_null() -> Robj {
+    ().into()
+}
+
+/// The bundle entry `name`, or `None` when the bundle has none.
+fn bundle_entry(bundle: &[u8], name: &str) -> std::result::Result<Option<Vec<u8>>, String> {
+    use std::io::Read;
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bundle))
+        .map_err(|e| format!("not a .fitrx archive: {e}"))?;
+    let Some(i) = archive.index_for_name(name) else {
+        return Ok(None);
+    };
+    let mut file = archive.by_index(i).map_err(|e| format!("{name}: {e}"))?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).map_err(|e| format!("{name}: {e}"))?;
+    Ok(Some(bytes))
+}
+
+/// A bundle CSV entry as its header and its rows of cells, or `None` when absent.
+fn bundle_csv(
+    bundle: &[u8],
+    name: &str,
+) -> std::result::Result<Option<(Vec<String>, Vec<Vec<String>>)>, String> {
+    let Some(bytes) = bundle_entry(bundle, name)? else {
+        return Ok(None);
+    };
+    let text = String::from_utf8(bytes).map_err(|e| format!("{name}: {e}"))?;
+    let mut lines = text.lines().filter(|l| !l.trim().is_empty());
+    let header = csv_cells(lines.next().unwrap_or_default());
+    Ok(Some((header, lines.map(csv_cells).collect())))
+}
+
+/// One CSV line's cells; a cell may be double-quoted, a `""` inside it one quote.
+/// The writers put no newline in a cell, so a line is a row.
+fn csv_cells(line: &str) -> Vec<String> {
+    let mut cells = Vec::new();
+    let mut cell = String::new();
+    let mut quoted = false;
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' if quoted && chars.peek() == Some(&'"') => {
+                cell.push('"');
+                chars.next();
+            }
+            '"' => quoted = !quoted,
+            ',' if !quoted => cells.push(std::mem::take(&mut cell)),
+            c => cell.push(c),
+        }
+    }
+    cells.push(cell);
+    cells
+}
+
+/// A bundle's numeric CSV cell: empty, or anything that is not a number, is `NaN`.
+fn csv_number(cell: &str) -> f64 {
+    cell.parse().unwrap_or(f64::NAN)
+}
+
+/// The sdtab ID of subject `position` (0-based): its ID as a number, else its
+/// 1-based position, as `ferx_core::io::output::sdtab` numbers it.
+fn sdtab_id(id: &str, position: usize) -> f64 {
+    id.parse::<f64>().unwrap_or(position as f64 + 1.0)
+}
+
+/// The bundle entry holding the discrete and time-to-event rows of `fit$sdtab` in
+/// full: `SUBJECT` (the row's subject, by 1-based position), then the sdtab columns,
+/// discrete rows before time-to-event ones. `ferx_save_fit()` writes it because
+/// `predictions_discrete.csv` has a fixed, narrower layout and core has no entry for
+/// time-to-event rows (ferx-core #911). Core carries it as an unknown entry.
+const ENDPOINT_ROWS_ENTRY: &str = "sdtab_endpoint_rows.csv";
+
+/// `fit$sdtab` and each subject's occasion labels, read from the rows the bundle
+/// records, since a bundle need not hold the data they were computed from.
+///
+/// The Gaussian rows are `predictions.csv`. The other rows are
+/// [`ENDPOINT_ROWS_ENTRY`], or for a bundle without it (one core wrote) the discrete
+/// rows core loaded, under the columns they have. The time-to-event rows also go back
+/// on `fit`, as the subject counts in `fit$subject_summary` read them from there.
+fn recorded_rows(
+    bundle: &[u8],
+    fit: &mut FitResult,
+) -> std::result::Result<(Vec<(String, Vec<f64>)>, Vec<Vec<u32>>), String> {
+    let (header, rows) = bundle_csv(bundle, "predictions.csv")?
+        .ok_or_else(|| "the bundle has no predictions.csv".to_string())?;
+    let mut cols: Vec<(String, Vec<f64>)> = header
+        .iter()
+        .enumerate()
+        .map(|(c, name)| (name.clone(), rows.iter().map(|r| csv_number(&r[c])).collect()))
+        .collect();
+    let column = |cols: &[(String, Vec<f64>)], name: &str| cols.iter().position(|(n, _)| n == name);
+
+    // Each row's subject: core has checked `predictions.csv` holds `ipred.len()` rows
+    // for each subject in turn.
+    let positions: Vec<usize> = fit
+        .subjects
+        .iter()
+        .enumerate()
+        .flat_map(|(si, sr)| std::iter::repeat_n(si, sr.ipred.len()))
+        .collect();
+    let mut occasions: Vec<Vec<u32>> = vec![Vec::new(); fit.subjects.len()];
+    if let Some(occ) = column(&cols, "OCC") {
+        for (&si, &label) in positions.iter().zip(&cols[occ].1) {
+            occasions[si].push(label as u32);
+        }
+    }
+    if let Some(id) = column(&cols, "ID") {
+        cols[id].1 = positions.iter().map(|&si| sdtab_id(&fit.subjects[si].id, si)).collect();
+    }
+
+    if let Some((extra_header, extra_rows)) = bundle_csv(bundle, ENDPOINT_ROWS_ENTRY)? {
+        fn cell<'a>(header: &[String], name: &str, row: &'a [String]) -> Option<&'a str> {
+            header.iter().position(|h| h == name).map(|c| row[c].as_str())
+        }
+        let mut seen = vec![0usize; fit.subjects.len()];
+        for row in &extra_rows {
+            let si = cell(&extra_header, "SUBJECT", row)
+                .and_then(|s| s.parse::<usize>().ok())
+                .filter(|&s| (1..=fit.subjects.len()).contains(&s))
+                .ok_or_else(|| format!("{ENDPOINT_ROWS_ENTRY}: a row names no subject"))?
+                - 1;
+            for (name, values) in &mut cols {
+                values.push(if name == "ID" {
+                    sdtab_id(&fit.subjects[si].id, si)
+                } else {
+                    cell(&extra_header, name, row).map_or(f64::NAN, csv_number)
+                });
+            }
+            let is_tte = seen[si] >= fit.subjects[si].discrete_rows.len();
+            seen[si] += 1;
+            #[cfg(feature = "survival")]
+            if is_tte {
+                let number = |name: &str| cell(&extra_header, name, row).map_or(f64::NAN, csv_number);
+                fit.subjects[si].tte_rows.push(ferx_core::types::TteObsDiagnostic {
+                    cmt: number("CMT") as usize,
+                    time: number("TIME"),
+                    dv: number("DV"),
+                    coxsnell: number("COXSNELL"),
+                    martingale: number("MARTINGALE"),
+                    deviance: number("DEVIANCE"),
+                    pit: number("PIT"),
+                });
+            }
+            #[cfg(not(feature = "survival"))]
+            let _ = is_tte;
+        }
+    } else if fit.subjects.iter().any(|s| !s.discrete_rows.is_empty()) {
+        if column(&cols, "CMT").is_none() {
+            let n = positions.len();
+            let at = column(&cols, "PRED").unwrap_or(cols.len());
+            cols.insert(at, ("CMT".to_string(), vec![1.0; n]));
+        }
+        for (si, sr) in fit.subjects.iter().enumerate() {
+            for d in &sr.discrete_rows {
+                for (name, values) in &mut cols {
+                    values.push(match name.as_str() {
+                        "ID" => sdtab_id(&sr.id, si),
+                        "CMT" => d.cmt as f64,
+                        "TIME" => d.time,
+                        "DV" => d.dv,
+                        "PRED" => d.pred,
+                        "IPRED" => d.ipred,
+                        "IWRES" => d.iwres,
+                        _ => f64::NAN,
+                    });
+                }
+            }
+        }
+    }
+    Ok((cols, occasions))
+}
+
+/// The bundle's model, parsed and laid out on the fit's bindings as the fitted one was,
+/// or `None` when it is not the fitted text, does not parse here or does not lay out.
+fn loaded_model(fit: &FitResult, model_text: &str) -> Option<ferx_core::ParsedModel> {
+    if fit
+        .model_hash
+        .as_deref()
+        .is_some_and(|h| h != ferx_core::io::hash::sha256_bytes(model_text.as_bytes()))
+    {
+        return None;
+    }
+    let mut parsed = ferx_core::parser::model_parser::parse_full_model(model_text).ok()?;
+    bind_layout_from_fit(&mut parsed, model_text, &fit.data_bindings).ok()?;
+    Some(parsed)
+}
+
+/// `fit$individual_estimates` for a loaded fit, which needs the bundle's data and its
+/// model. `NULL` without them: the rest of the fit does not depend on them.
+fn loaded_individual_estimates(
+    fit: &FitResult,
+    population: Option<&Population>,
+    model: Option<&CompiledModel>,
+) -> Robj {
+    let (Some(population), Some(model)) = (
+        population.filter(|p| p.subjects.len() == fit.subjects.len()),
+        model,
+    ) else {
+        return r_null();
+    };
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        build_individual_estimates(fit, population, model)
+    }))
+    .unwrap_or_else(|_| r_null())
+}
+
+/// A fit's level bindings as `fit$theta_levels`'s model-free columns, block by block
+/// in name order. `ferx_load_fit()` lays them out on the model.
+fn level_bindings_frame(levels: &LevelBindings) -> Robj {
+    let sorted: std::collections::BTreeMap<_, _> = levels.iter().collect();
+    let (mut block, mut index, mut label, mut group, mut contrast) =
+        (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    for (name, b) in sorted {
+        for (i, l) in b.labels.iter().enumerate() {
+            block.push(name.clone());
+            index.push(i as i32 + 1);
+            label.push(l.clone());
+            group.push(b.groups.get(i).map_or(i32::MIN, |g| *g as i32));
+            contrast.push(level_contrast_token(b.contrast).to_string());
+        }
+    }
+    let n = block.len();
+    finish_df(
+        vec![
+            ("block", block.into()),
+            ("index", index.into()),
+            ("label", label.into()),
+            ("group", group.into()),
+            ("contrast", contrast.into()),
+        ],
+        n,
+    )
+}
+
+/// What the fit list relies on and core's loader leaves unchecked.
+fn check_loaded_fit(fit: &FitResult) -> std::result::Result<(), String> {
+    let refuse = |why: String| Err(format!("cannot read this .fitrx bundle: {why}"));
+    // The draws reach R flat, so a ragged pool would shift every later draw.
+    if let Some(rows) = fit.sir_resamples_packed.as_ref().filter(|r| !r.is_empty()) {
+        let width = rows[0].len();
+        if width == 0 || rows.iter().any(|r| r.len() != width) {
+            return refuse("`sir.resamples_packed` rows are empty or differ in length".into());
+        }
+    }
+    for level in &fit.ebe_kappas_by_level {
+        for k in &level.kappa_names {
+            let at = fit
+                .kappa_names
+                .iter()
+                .position(|n| n == k)
+                .and_then(|i| fit.kappa_levels.get(i));
+            if at != Some(&level.level) {
+                return refuse(format!(
+                    "iov.levels names kappa `{k}` at level `{}`, but iov.kappa_levels puts it \
+                     at {}",
+                    level.level,
+                    at.map_or("no level".to_string(), |l| format!("`{l}`"))
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Read a `.fitrx` bundle with ferx-core's loader and build the list a fresh fit
+/// returns from it, through the same [`fit_view_to_list`] (ferx-r #711).
+///
+/// The fit reads its `sdtab` and occasions from the rows the bundle records, so a
+/// bundle with no `data.csv` loads, and `individual_estimates` is `NULL` then. What
+/// needs the model file (`cov_labels`, `theta_levels`) is left to the caller, which has
+/// staged it and turns a failure into a warning; `model_structure` is `NULL` when the
+/// model does not lay out here.
+///
+/// @param bundle The bundle's bytes.
+/// @return A list: `fit` (the fit list), `model_text`, `data_csv` (raw, or NULL),
+///   `interface_extras` and `trace_csv` (text, or NULL) and `levels` (the level
+///   bindings).
+/// @export
+#[extendr]
+fn ferx_rust_load_fit(bundle: Raw) -> List {
+    entry(move || {
+        use ferx_core::io::fitrx::{load_fit_from_bytes, load_fit_from_bytes_without_population};
+        let bytes = bundle.as_slice();
+        // Re-reading `data.csv` parses the bundled model to learn its columns, which
+        // a `[covariate_nn]` model fails in a build without `nn`. That costs the
+        // fields read from the data, not the fit.
+        let loaded = load_fit_from_bytes(bytes)
+            .or_else(|_| load_fit_from_bytes_without_population(bytes))
+            .map_err(|e| format!("cannot read this .fitrx bundle: {e}"))?;
+        let mut fit = loaded.fit;
+        check_loaded_fit(&fit)?;
+        let (sdtab, occasions) = recorded_rows(bytes, &mut fit)?;
+        let parsed = loaded_model(&fit, &loaded.model_source);
+        let model = parsed.as_ref().map(|p| &p.model);
+        let individual_estimates =
+            loaded_individual_estimates(&fit, loaded.population.as_ref(), model);
+        let view = FitView {
+            sdtab,
+            occasions,
+            individual_estimates,
+            theta_levels: r_null(),
+            covariate_stats: covariate_stats_to_r(&fit.data_bindings.covariate_stats),
+            cov_fixed: fit.cov_fixed.clone(),
+            cov_labels: Vec::new(),
+            model_structure: model.map_or_else(r_null, model_structure_list),
+            bundle: r_null(),
+            bundle_error: r_null(),
+        };
+        let levels = level_bindings_frame(&fit.data_bindings.levels);
+        let extras: Robj = fit.interface_extras.clone().map_or_else(r_null, Robj::from);
+        let trace_csv: Robj = fit.trace_csv.clone().map_or_else(r_null, Robj::from);
+        let data_csv: Robj = bundle_entry(bytes, "data.csv")?
+            .map_or_else(r_null, |d| Raw::from_bytes(&d).into());
+        let list = fit_view_to_list(&fit, view)?;
+        Ok(list!(
+            fit = list,
+            model_text = loaded.model_source,
+            data_csv = data_csv,
+            interface_extras = extras,
+            trace_csv = trace_csv,
+            levels = levels
+        ))
+    })
+}
+
+/// The JSON text of top-level `fit.json` keys of a bundle, `NA` for a key it lacks.
+/// `ferx_save_fit()` carries over, verbatim, the keys core writes and the R fit does
+/// not hold (ferx-r #711).
+///
+/// @param bundle The bundle's bytes.
+/// @param keys The keys to read.
+/// @return A character vector parallel to `keys`.
+/// @export
+#[extendr]
+fn ferx_rust_fitrx_wire_keys(bundle: Raw, keys: Vec<String>) -> Strings {
+    entry(move || {
+        let bytes = bundle_entry(bundle.as_slice(), "fit.json")?
+            .ok_or_else(|| "the bundle has no fit.json".to_string())?;
+        let wire: serde_json::Value = serde_json::from_slice(&bytes)
+            .map_err(|e| format!("fit.json: {e}"))?;
+        Ok(keys
+            .iter()
+            .map(|k| wire.get(k).map_or(Rstr::na(), |v| Rstr::from(v.to_string())))
+            .collect())
+    })
+}
+
+/// A mixture fit's per-subject `MIXEST` and `PMIX_*` columns of a bundle's `ebes.csv`,
+/// which the R fit holds per row of `sdtab` only, so a subject with no observations has
+/// them nowhere else. `NULL` for a bundle with none.
+///
+/// @param bundle The bundle's bytes.
+/// @return A list of numeric columns, or NULL.
+/// @export
+#[extendr]
+fn ferx_rust_fitrx_mixture_columns(bundle: Raw) -> Robj {
+    entry(move || {
+        let (header, rows) = bundle_csv(bundle.as_slice(), "ebes.csv")?
+            .ok_or_else(|| "the bundle has no ebes.csv".to_string())?;
+        let is_mixture = |name: &String| {
+            name == "MIXEST"
+                || name.strip_prefix("PMIX_").is_some_and(|k| k.parse::<usize>().is_ok())
+        };
+        let pairs: Vec<(&str, Robj)> = header
+            .iter()
+            .enumerate()
+            .filter(|(_, name)| is_mixture(name))
+            .map(|(c, name)| {
+                let column: Vec<f64> = rows.iter().map(|r| csv_number(&r[c])).collect();
+                (name.as_str(), column.into())
+            })
+            .collect();
+        Ok(if pairs.is_empty() { r_null() } else { List::from_pairs(pairs).into() })
+    })
+}
+
 /// Read a `.fitrx` bundle with ferx-core's own loader and write it back with
 /// ferx-core's own writer (ferx-r #466): the engine's side of a bundle round
 /// trip, for the tests that hold `ferx_save_fit()` / `ferx_load_fit()` to the
@@ -3768,6 +4146,10 @@ fn default_fit_result(
         // ferx-core main added a checkpoint-restore flag; a defaulted FitResult is
         // never a restored one.
         restored_from_checkpoint: false,
+        // ferx-core #2695: bundle slots no skeleton step reads.
+        cov_fixed: Vec::new(),
+        interface_extras: None,
+        trace_csv: None,
         // ferx-core #1082 PR4: per-level kappa output. Only the console, sdtab
         // and .fitrx writers read it; the uncertainty draws take each kappa's
         // level from the model.
@@ -5052,12 +5434,75 @@ fn warning_details_json(entries: &[ferx_core::WarningEntry]) -> Vec<String> {
         .collect()
 }
 
+/// What the fit list holds beyond the `FitResult` itself: the fields read from
+/// the data and the model, which a fresh fit and a loaded one get from different
+/// places. [`fit_result_to_list`] fills it from the live population and parse, and
+/// [`ferx_rust_load_fit`] from the bundle, which may hold no `data.csv` and a model
+/// this build cannot parse. Everything else in the list comes from the `FitResult`,
+/// by one code path, so a loaded fit matches a fresh one by construction.
+struct FitView {
+    /// The `sdtab` columns.
+    sdtab: Vec<(String, Vec<f64>)>,
+    /// Each subject's occasion label per observation row, for `ebe_kappas`.
+    occasions: Vec<Vec<u32>>,
+    individual_estimates: Robj,
+    theta_levels: Robj,
+    covariate_stats: Robj,
+    cov_fixed: Vec<bool>,
+    cov_labels: Vec<String>,
+    model_structure: Robj,
+    /// The fit's `.fitrx` bundle as raw bytes, or `NULL` when it could not be built.
+    bundle: Robj,
+    /// Why there is no `bundle`, or `NULL`.
+    bundle_error: Robj,
+}
+
+/// The list a fresh fit returns: the fit, its data and model, and its bundle.
 fn fit_result_to_list(
     result: &FitResult,
     population: &Population,
     model: &CompiledModel,
     bindings: &ParseBindings,
+    model_text: &str,
 ) -> std::result::Result<List, String> {
+    let cov_matrix_dim = result.covariance_matrix.as_ref().map_or(0, |m| m.nrows() as i32);
+    // A fit that cannot be serialized is still a fit, so this does not fail it:
+    // R warns, and only `ferx_save_fit()` refuses.
+    let (bundle, bundle_error): (Robj, Robj) = match ferx_core::io::fitrx::save_fit_to_bytes(
+        result,
+        population,
+        model_text,
+        ferx_core::io::fitrx::SaveFitOptions::default(),
+    ) {
+        Ok(bytes) => (Raw::from_bytes(&bytes).into(), r_null()),
+        Err(e) => (r_null(), e.to_string().into()),
+    };
+    let view = FitView {
+        sdtab: ferx_core::io::output::sdtab(result, population),
+        occasions: population.subjects.iter().map(|s| s.occasions.clone()).collect(),
+        individual_estimates: build_individual_estimates(result, population, model),
+        theta_levels: level_bindings_to_r(
+            model,
+            &bindings.levels,
+            &result.profiled_blocks,
+            &result.profiled_levels_at_bound,
+            &result.theta_names,
+            &result.theta,
+            result.covariance_matrix.as_ref(),
+            result.sir_resamples_packed.as_deref(),
+        )?,
+        covariate_stats: covariate_stats_to_r(&bindings.covariate_stats),
+        cov_fixed: cov_matrix_held(model, &result.theta_fixed, cov_matrix_dim),
+        cov_labels: cov_matrix_labels(model, cov_matrix_dim),
+        model_structure: model_structure_list(model),
+        bundle,
+        bundle_error,
+    };
+    fit_view_to_list(result, view)
+}
+
+/// The fit list, for a fresh fit and a loaded one alike.
+fn fit_view_to_list(result: &FitResult, view: FitView) -> std::result::Result<List, String> {
     // Theta
     let theta_names: Vec<String> = result.theta_names.clone();
     let theta_values: Vec<f64> = result.theta.clone();
@@ -5077,8 +5522,7 @@ fn fit_result_to_list(
     let se_sigma: Vec<f64> = result.se_sigma.clone().unwrap_or_default();
 
     // SDTAB as data frame
-    let sdtab_cols = ferx_core::io::output::sdtab(result, population);
-    let sdtab = sdtab_to_dataframe(&sdtab_cols);
+    let sdtab = sdtab_to_dataframe(&view.sdtab);
 
     // Covariate table (NULL unless the model declared a `[covariates]` block).
     let covtab = covtab_to_dataframe(result.covariate_table.as_ref());
@@ -5399,7 +5843,7 @@ fn fit_result_to_list(
     // (#675); `shrinkage` is parallel to top-level `eta_names`.
     let cond_dist: Robj = match &result.cond_dist {
         Some(cd) => list!(
-            data = build_cond_dist_df(result, population, cd),
+            data = build_cond_dist_df(result, cd),
             shrinkage = cd.shrinkage.clone(),
             nsamp = cd.nsamp as i32,
             burnin = cd.burnin as i32,
@@ -5552,16 +5996,15 @@ fn fit_result_to_list(
         let mut occs: Vec<i32> = Vec::new();
         let mut kappa_cols: Vec<Vec<f64>> = vec![Vec::new(); n_kappa];
         for (si, subj_kappas) in result.ebe_kappas.iter().enumerate() {
-            let subj = &population.subjects[si];
             // Unique occasion labels in first-seen order (matches kappa[k]).
             let mut unique_occs: Vec<u32> = Vec::new();
-            for &occ in &subj.occasions {
+            for &occ in view.occasions.get(si).map_or(&[][..], Vec::as_slice) {
                 if !unique_occs.contains(&occ) {
                     unique_occs.push(occ);
                 }
             }
             for (oi, kappa_vec) in subj_kappas.iter().enumerate() {
-                ids.push(subj.id.clone());
+                ids.push(result.subjects[si].id.clone());
                 let occ_label = unique_occs.get(oi).copied().unwrap_or(oi as u32 + 1);
                 occs.push(occ_label as i32);
                 for k in 0..n_kappa {
@@ -5608,7 +6051,7 @@ fn fit_result_to_list(
     // mixture class, so each value is the subject's typical (kappa-free)
     // parameter under the model's covariate effects. Per-occasion variation
     // lives in `ebe_kappas`.
-    let individual_estimates_df: Robj = build_individual_estimates(result, population, model);
+    let individual_estimates_df: Robj = view.individual_estimates;
 
     // Pre-compute Option<Vec<f64>> fields as Robj (list! macro can't infer
     // From<Option<Vec<f64>>> because Vec<f64> has multiple ToVectorValue impls).
@@ -5713,16 +6156,7 @@ fn fit_result_to_list(
     // One row per theta level-block level (ferx-r #370), with its fitted value
     // (#430) and its se and SIR interval (#528); zero rows for a model with no
     // level block.
-    let theta_levels = level_bindings_to_r(
-        model,
-        &bindings.levels,
-        &result.profiled_blocks,
-        &result.profiled_levels_at_bound,
-        &theta_names,
-        &result.theta,
-        result.covariance_matrix.as_ref(),
-        result.sir_resamples_packed.as_deref(),
-    )?;
+    let theta_levels = view.theta_levels;
 
     Ok(list!(
         converged = result.converged,
@@ -5760,7 +6194,7 @@ fn fit_result_to_list(
         profiled_levels_at_bound = theta_names_at(&theta_names, &result.profiled_levels_at_bound),
         // The `[covariate_model]` statistics the fit was bound with (ferx-r
         // #412); empty for a model that states none symbolically.
-        covariate_stats = covariate_stats_to_r(&bindings.covariate_stats),
+        covariate_stats = view.covariate_stats,
         theta_names = theta_names,
         omega = omega_flat,
         omega_dim = n_eta as i32,
@@ -5827,8 +6261,8 @@ fn fit_result_to_list(
         ferx_version = result.ferx_version.clone(),
         cov_matrix = cov_matrix_flat,
         cov_matrix_dim = cov_matrix_dim,
-        cov_fixed = cov_matrix_held(model, &result.theta_fixed, cov_matrix_dim),
-        cov_labels = cov_matrix_labels(model, cov_matrix_dim),
+        cov_fixed = view.cov_fixed,
+        cov_labels = view.cov_labels,
         cov_eigenvalues = result.cov_eigenvalues.clone().unwrap_or_default(),
         cov_condition_number = result.cov_condition_number.unwrap_or(f64::NAN),
         // Packed Omega / kappa layout (ferx-core #1177). `.fitrx` bundles
@@ -5863,7 +6297,9 @@ fn fit_result_to_list(
         subject_ids = subject_ids,
         subject_summary = subject_summary_df,
         individual_estimates = individual_estimates_df,
-        model_structure = model_structure_list(model),
+        model_structure = view.model_structure,
+        bundle = view.bundle,
+        bundle_error = view.bundle_error,
         omega_param_corr = omega_param_corr_flat,
         omega_iov_param_corr = omega_iov_param_corr_flat,
         eta_log_transformed = eta_log_transformed,
@@ -6255,7 +6691,7 @@ fn build_subject_summary(result: &FitResult) -> Robj {
 // the existing EBE on `SubjectResult.eta`, mirroring ferx-core's own
 // `conddist.csv` .fitrx layout, #675). Returns NULL when there are no
 // subjects or the model declares no etas.
-fn build_cond_dist_df(result: &FitResult, population: &Population, cd: &CondDist) -> Robj {
+fn build_cond_dist_df(result: &FitResult, cd: &CondDist) -> Robj {
     let n_subj = result.subjects.len();
     if n_subj == 0 {
         return ().into();
@@ -6274,9 +6710,8 @@ fn build_cond_dist_df(result: &FitResult, population: &Population, cd: &CondDist
     let mut cond_mode: Vec<f64> = Vec::with_capacity(n_subj * n_eta);
 
     for (si, sr) in result.subjects.iter().enumerate() {
-        let subj = &population.subjects[si];
         for k in 0..n_eta {
-            ids.push(subj.id.clone());
+            ids.push(sr.id.clone());
             etas.push(eta_names[k].clone());
             cond_mean.push(cd.cond_mean.get(si).and_then(|v| v.get(k)).copied().unwrap_or(f64::NAN));
             cond_sd.push(cd.cond_sd.get(si).and_then(|v| v.get(k)).copied().unwrap_or(f64::NAN));
@@ -8852,6 +9287,10 @@ fn fit_skeleton(
     let mut fit = FitResult {
         // ferx-core main added a checkpoint-restore flag; neither step reads it.
         restored_from_checkpoint: false,
+        // ferx-core #2695: bundle slots neither step reads.
+        cov_fixed: Vec::new(),
+        interface_extras: None,
+        trace_csv: None,
         // ferx-core #1082 PR4: per-level kappa output. Only the console, sdtab
         // and .fitrx writers read it; neither step reaches them.
         kappa_levels: Vec::new(),
@@ -11648,6 +12087,7 @@ fn search_final_fit(
                 &prepared.population,
                 &prepared.parsed.model,
                 &prepared.parsed.bindings,
+                model_text,
             )
         });
 
@@ -14797,6 +15237,9 @@ extendr_module! {
     fn ferx_rust_sha256_text;
     fn ferx_rust_sha256_raw;
     fn ferx_rust_zip_files;
+    fn ferx_rust_load_fit;
+    fn ferx_rust_fitrx_wire_keys;
+    fn ferx_rust_fitrx_mixture_columns;
     fn ferx_rust_stage_data_probe;
     fn ferx_rust_method_labels;
     fn ferx_rust_method_token_labels;

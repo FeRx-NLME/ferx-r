@@ -1,25 +1,20 @@
-# Write-path (ferx_save_fit) and read-path (ferx_load_fit) scalar/vector
-# NULL-or-value coercion helpers. Kept side by side (rather than split across
-# ferx_save_fit.R / ferx_load_fit.R) since they are mirror images of each
-# other and a change to one direction's coercion rule usually needs checking
-# against the other. Not merged into single functions: the two directions
-# have different semantics (write coerces R values for JSON serialisation,
-# read coerces JSON-decoded values back, including its own NA/length quirks),
-# so the small differences between e.g. .fitrx_opt_num and
-# .fitrx_unwrap_opt_num are intentional, not accidental drift.
+# NULL-or-value coercion helpers: `.fitrx_opt_*` shape R values for the JSON
+# ferx_save_fit() writes, `.fitrx_unwrap_opt_*` read the engine's optional
+# values back on a fit. ferx_load_fit() reads bundles with ferx-core's loader.
+
+# A scalar that may be `null`: the JSON writers turn NaN into `null`, and a VI
+# fit under `vi_final_ofv = none` has a NaN OFV by design (#508), which
+# `as.numeric(NULL)` would read as `numeric(0)`.
+.fitrx_num_or_nan <- function(x) {
+  v <- as.numeric(unlist(x, use.names = FALSE))
+  if (length(v) == 0L) NaN else v[[1L]]
+}
 
 .fitrx_opt_num <- function(x) {
   if (is.null(x)) return(NULL)
   if (length(x) == 0L) return(NULL)
   v <- as.numeric(x)
   if (is.na(v)) return(NULL)
-  v
-}
-
-.fitrx_unwrap_opt_num <- function(x) {
-  if (is.null(x)) return(NULL)
-  v <- suppressWarnings(as.numeric(x))
-  if (length(v) == 0L || is.na(v)) return(NULL)
   v
 }
 
@@ -36,29 +31,6 @@
 }
 
 .fitrx_unwrap_opt_chr_vec <- function(x) .fitrx_unwrap_nullable_vec(x, NA_character_)
-
-.fitrx_unwrap_nullable_num_vec <- function(x) .fitrx_unwrap_nullable_vec(x, NA_real_)
-
-# A float vector the engine writes with non-finite entries as `null` (its
-# `serde_nan` adapter), such as kappa shrinkage, whose slot reads NaN when no
-# observation informs it (ferx-core #1911). `null` comes back as NaN, as the
-# engine reads it, so a round trip returns the live fit's value.
-.fitrx_unwrap_nan_num_vec <- function(x) .fitrx_unwrap_nullable_vec(x, NaN)
-
-.fitrx_opt_int <- function(x) {
-  if (is.null(x)) return(NULL)
-  if (length(x) == 0L) return(NULL)
-  v <- suppressWarnings(as.integer(x))
-  if (is.na(v)) return(NULL)
-  v
-}
-
-.fitrx_unwrap_opt_int <- function(x) {
-  if (is.null(x)) return(NULL)
-  v <- suppressWarnings(as.integer(x))
-  if (length(v) == 0L || is.na(v)) return(NULL)
-  v
-}
 
 # A Rust `Option<bool>`. Both directions treat NA as absent: a tri-state flag
 # reaches R as NA when the engine recorded no verdict, and writing NA back
@@ -99,13 +71,6 @@
   v
 }
 
-.fitrx_unwrap_opt_num_vec <- function(x) {
-  if (is.null(x)) return(NULL)
-  v <- as.numeric(unlist(x, use.names = FALSE))
-  if (length(v) == 0L) return(NULL)
-  v
-}
-
 # Fields derived from other fields already present on `result` (correlation
 # matrix, tidy estimates table, eta-covariate correlations). Shared between
 # ferx_fit() and ferx_load_fit() - the two fit-construction entry points -
@@ -142,78 +107,6 @@
       prior_upper_95     = as.numeric(ps$prior_upper_95[[i]])
     )
   })
-}
-
-.fitrx_prior_summary_from_wire <- function(x) {
-  if (is.null(x) || length(x) == 0L) return(NULL)
-  num <- function(el, k) {
-    v <- suppressWarnings(as.numeric(el[[k]] %||% NA_real_))
-    if (length(v) != 1L) NA_real_ else v
-  }
-  chr <- function(el, k) {
-    v <- as.character(el[[k]] %||% NA_character_)
-    if (length(v) != 1L) NA_character_ else v
-  }
-  data.frame(
-    name               = vapply(x, chr, character(1L), "name"),
-    prior_value        = vapply(x, num, numeric(1L), "prior_value"),
-    estimate           = vapply(x, num, numeric(1L), "estimate"),
-    shift_in_prior_sds = vapply(x, num, numeric(1L), "shift_in_prior_sds"),
-    penalty            = vapply(x, num, numeric(1L), "penalty"),
-    family             = vapply(x, chr, character(1L), "family"),
-    prior_lower_95     = vapply(x, num, numeric(1L), "prior_lower_95"),
-    prior_upper_95     = vapply(x, num, numeric(1L), "prior_upper_95"),
-    stringsAsFactors   = FALSE
-  )
-}
-
-# Recover the objective's data / prior split from a bundle that does not carry
-# it, returning list(ofv_data =, ofv_prior =).
-#
-# ferx-core's own loader reads a missing split as "this file predates priors",
-# and for a bundle *it* wrote that is sound: once the feature existed, its
-# writer always emitted the split for a priored fit. It is NOT sound for a
-# bundle this package wrote. `ferx_save_fit()` shipped before ferx-r #366 and
-# emitted neither half, while R could already fit a priored model - so an
-# R-written bundle of a priored fit carries a penalized `ofv` and nothing to
-# say so. Reading that as the data half relabels the penalized objective as the
-# likelihood, breaks the `aic == ofv_data + 2k` invariant the stored AIC was
-# computed under, and hands `ferx_sir()` back the #366 double count.
-#
-# The split is recoverable from what such a bundle does carry: the engine
-# computes `aic = ofv_data + 2 * n_parameters` for every fit, priored or not
-# (ferx-core api/fit.rs), and both `aic` and `n_parameters` are on the wire. So
-# `ofv_data = aic - 2 * n_parameters` and `ofv_prior = ofv - ofv_data`.
-#
-# Guarded, because the identity is only as good as the two fields it reads. A
-# penalty is a sum of squares, so a recovered prior half below zero means the
-# identity does not hold for this file (a hand-edited bundle, a writer that
-# computed AIC differently) and the unpriored reading is restored. A recovered
-# half within rounding distance of zero is taken as exactly zero, which is what
-# the overwhelmingly common unpriored bundle should report.
-.fitrx_recover_ofv_split <- function(w) {
-  # A null OFV (a VI fit's NaN, #508) gives a NaN data half, as on the fit.
-  ofv <- suppressWarnings(.fitrx_num_or_nan(w$ofv))
-  unpriored <- list(ofv_data = ofv, ofv_prior = 0, recovered = FALSE)
-  if (length(ofv) != 1L || !is.finite(ofv)) return(unpriored)
-
-  aic <- suppressWarnings(as.numeric(w$aic %||% NA_real_))
-  k <- suppressWarnings(as.numeric(w$n_parameters %||% NA_real_))
-  if (length(aic) != 1L || !is.finite(aic) ||
-        length(k) != 1L || !is.finite(k) || k < 0) {
-    return(unpriored)
-  }
-
-  ofv_data <- aic - 2 * k
-  ofv_prior <- ofv - ofv_data
-  if (!is.finite(ofv_prior)) return(unpriored)
-  # The JSON carries full f64 precision, so the identity round-trips to within
-  # rounding; anything below this is noise, not a prior.
-  tol <- 1e-9 * max(1, abs(ofv))
-  if (ofv_prior < -tol) return(unpriored)
-  if (ofv_prior <= tol) return(unpriored)
-
-  list(ofv_data = ofv_data, ofv_prior = ofv_prior, recovered = TRUE)
 }
 
 # -- Exact doubles in the bundle --
@@ -346,175 +239,9 @@
   df
 }
 
-# The per-level kappa estimates of a nested-level fit (ferx-core #1082 PR4):
-# one data frame per entry of fit.json's `iov.levels`, read from its
-# `ebes_kappa_<LEVEL>.csv`, in the live fit's shape - ID (text, verbatim),
-# GROUP (integer), the level's label columns and its kappas (double). An empty
-# kappa cell is a NaN estimate, as ferx-core writes and reads it. NULL when
-# fit.json names no level. Whatever ferx-core's own loader refuses is refused
-# here too, in its words (`parse_level_kappa_csv` and the `iov` checks in
-# io/fitrx.rs): a level naming a kappa that `kappa_levels` puts elsewhere, a
-# missing CSV, a header that is not the level's, a row with the wrong number
-# of fields, an ID that is not a subject of the fit (`subject_ids`), and a
-# subject whose GROUPs do not run 1..n.
-.fitrx_read_level_kappas <- function(staging, levels, kappa_names = character(),
-                                     kappa_levels = character(),
-                                     subject_ids = NULL) {
-  if (length(levels) == 0L) return(NULL)
-  out <- list()
-  for (lv in levels) {
-    name <- as.character(lv$name)
-    columns <- as.character(unlist(lv$columns, use.names = FALSE))
-    kappas <- as.character(unlist(lv$kappa_names, use.names = FALSE))
-    for (k in kappas) {
-      at <- unname(kappa_levels[match(k, kappa_names)])
-      if (length(at) != 1L || is.na(at) || !identical(at, name)) {
-        stop(sprintf(
-          "iov.levels names kappa `%s` at level `%s`, but iov.kappa_levels puts it at %s",
-          k, name, if (length(at) != 1L || is.na(at)) "no level" else sprintf("`%s`", at)
-        ))
-      }
-    }
-    entry <- .fitrx_level_kappa_entry(name)
-    path <- file.path(staging, entry)
-    if (!file.exists(path)) {
-      stop(sprintf("fit.json names level `%s`, but the bundle has no %s", name, entry))
-    }
-    expected <- c("ID", "GROUP", columns, kappas)
-    # read.csv() pads a short row and folds a long one into the next, so the
-    # field count is checked on the raw lines first.
-    n_fields <- utils::count.fields(path, sep = ",", quote = "\"", blank.lines.skip = TRUE)
-    bad <- which(n_fields != length(expected))
-    if (length(bad) > 0L && bad[1L] > 1L) {
-      stop(sprintf("%s: row %d has %d fields, expected %d",
-                   entry, bad[1L] - 1L, n_fields[bad[1L]], length(expected)))
-    }
-    df <- .fitrx_read_csv_exact(path, id_cols = "ID")
-    if (!identical(names(df), expected)) {
-      stop(sprintf("%s: header %s does not match fit.json's level (expected %s)",
-                   entry, paste(names(df), collapse = ","),
-                   paste(expected, collapse = ",")))
-    }
-    if (!is.null(subject_ids)) {
-      unknown <- setdiff(df$ID, subject_ids)
-      if (length(unknown) > 0L) {
-        stop(sprintf("%s: unknown ID \"%s\"", entry, unknown[1L]))
-      }
-    }
-    df$GROUP <- as.integer(df$GROUP)
-    for (id in unique(df$ID)) {
-      g <- df$GROUP[df$ID == id]
-      if (anyNA(g) || !identical(sort(g), seq_along(g))) {
-        stop(sprintf("%s: subject \"%s\": GROUP must run 1..n without gaps or repeats",
-                     entry, id))
-      }
-    }
-    for (col in columns) df[[col]] <- as.double(df[[col]])
-    for (col in kappas) {
-      v <- as.double(df[[col]])
-      v[is.na(v)] <- NaN
-      df[[col]] <- v
-    }
-    out[[name]] <- df
-  }
-  out
-}
-
 # The bundle entry of one level's kappa estimates, as ferx-core names it
 # (`level_kappa_entry` in io/fitrx.rs).
 .fitrx_level_kappa_entry <- function(level) paste0("ebes_kappa_", level, ".csv")
-
-# `predictions.csv`'s subject IDs (text) as the number ferx-core puts in
-# `sdtab$ID`: the ID parsed as Rust parses an f64, else the subject's
-# position, 1-based, among ALL subjects (`io::output::sdtab`). A subject with
-# no observations has no rows here but still takes a position, so positions
-# come from `subject_ids` (the bundle's ebes.csv IDs, every subject in order):
-# each block takes the next subject with its text. Without them, or when a
-# block's text is not found, a block takes its own index. A bundle written
-# before #475 holds the number already, which parses to itself.
-#
-# `row_subject`, when given, is every row's position, from the per-subject row
-# counts (`.fitrx_sdtab_subject()`), and replaces that walk: the walk reads a
-# block from the text, so two adjacent subjects with the same text are one
-# block (#540). The walk is for a bundle whose counts are missing or do not
-# fit its rows.
-.fitrx_sdtab_id_number <- function(ids, subject_ids = NULL, row_subject = NULL) {
-  if (is.null(row_subject)) {
-    blk <- .ferx_subject_index(ids)
-    pos <- seq_len(if (length(blk)) max(blk) else 0L)
-    if (length(subject_ids) > 0L) {
-      first <- ids[!duplicated(blk)]
-      walked <- integer(length(first))
-      j <- 0L
-      for (k in seq_along(first)) {
-        rest <- subject_ids[seq.int(j + 1L, length.out = length(subject_ids) - j)]
-        hit <- match(first[k], rest)
-        if (is.na(hit)) break
-        j <- j + hit
-        walked[k] <- j
-      }
-      if (all(walked > 0L)) pos <- walked
-    }
-    row_subject <- pos[blk]
-  }
-  out <- as.numeric(row_subject)
-  s <- tolower(ids)
-  dec <- grepl("^[-+]?([0-9]+\\.?[0-9]*|\\.[0-9]+)(e[-+]?[0-9]+)?$", s)
-  out[dec] <- .fitrx_parse_doubles(sub("^\\+", "", s[dec]))
-  inf <- grepl("^[-+]?inf(inity)?$", s)
-  out[inf] <- ifelse(startsWith(s[inf], "-"), -Inf, Inf)
-  out[grepl("^[-+]?nan$", s)] <- NaN
-  out
-}
-
-# `fit$subject_summary` from ebes.csv's per-subject columns, as the live fit
-# carries it. A bundle without n_obs_discrete has no discrete rows (0); one
-# written before #554 may have empty n_obs (NA). NULL when ebes.csv has no
-# ofv_contribution / n_obs.
-.fitrx_read_subject_summary <- function(ebes) {
-  if (!all(c("ID", "ofv_contribution", "n_obs") %in% names(ebes))) return(NULL)
-  n <- nrow(ebes)
-  if (n == 0L) return(NULL)
-  disc <- if ("n_obs_discrete" %in% names(ebes)) ebes$n_obs_discrete else rep(0L, n)
-  data.frame(
-    ID = as.character(ebes$ID),
-    ofv_contribution = as.numeric(ebes$ofv_contribution),
-    n_obs = as.integer(ebes$n_obs),
-    n_obs_discrete = as.integer(disc),
-    # A bundle keeps no time-to-event rows (ferx-core #911), so the reloaded
-    # sdtab has none.
-    n_obs_tte = integer(n),
-    stringsAsFactors = FALSE
-  )
-}
-
-# The bundle's sdtab: predictions.csv's Gaussian rows, then
-# predictions_discrete.csv's discrete rows when present, in the live fit's
-# order. Each row's ID goes back to the engine's number for its subject, the
-# subject read from the per-subject row counts when they fit the rows and the
-# rows' IDs (`.fitrx_sdtab_subject()`, #540), else walked from the text.
-.fitrx_read_sdtab <- function(staging, subject_ids, summ) {
-  # Every sdtab column is double on the live fit, ID included (#417).
-  sdtab <- .fitrx_read_csv_exact(file.path(staging, "predictions.csv"),
-                                 id_cols = "ID", integer_cols = character())
-  n_gauss <- nrow(sdtab)
-  disc_path <- file.path(staging, "predictions_discrete.csv")
-  if (file.exists(disc_path)) {
-    sdtab <- rbind(sdtab, .fitrx_read_csv_exact(disc_path, id_cols = "ID",
-                                                 integer_cols = character()))
-  }
-  if (is.null(sdtab$ID)) return(sdtab)
-  rows <- if (!is.null(summ) && length(subject_ids) == nrow(summ)) {
-    .fitrx_sdtab_subject(summ$n_obs, summ$n_obs_discrete, nrow(sdtab))
-  }
-  row_subject <- NULL
-  if (!is.null(rows) && length(rows$gaussian) == n_gauss) {
-    pos <- c(rows$gaussian, rows$discrete)
-    if (identical(sdtab$ID, subject_ids[pos])) row_subject <- pos
-  }
-  sdtab$ID <- .fitrx_sdtab_id_number(sdtab$ID, subject_ids, row_subject)
-  sdtab
-}
 
 # `fit$iov_occasion` (the `settings = list(iov_occasion = ...)` spelling the
 # glue writes: "column", "dose" or "time(24, 48.5)") to and from the `.fitrx`
@@ -547,63 +274,6 @@
   list(time_windows = as.list(edges))
 }
 
-.fitrx_iov_occasion_from_wire <- function(w) {
-  if (is.null(w)) return(NULL)
-  if (is.character(w) && length(w) == 1L) {
-    if (identical(w, "column")) return("column")
-    if (identical(w, "per_dose")) return("dose")
-  }
-  windows <- if (is.list(w) && identical(names(w), "time_windows")) w$time_windows
-  is_edge <- function(e) is.numeric(e) && length(e) == 1L && is.finite(e)
-  if (is.list(windows) && length(windows) && all(vapply(windows, is_edge, logical(1)))) {
-    edges <- as.numeric(unlist(windows, use.names = FALSE))
-    # The shortest spelling that reads back to the same double, as the glue
-    # writes it: 120.1, not 120.09999999999999; 100000, not 1e+05 (Rust's
-    # `{}` never writes an exponent).
-    spell <- vapply(edges, function(e) {
-      for (d in 15:17) {
-        s <- format(e, digits = d, trim = TRUE, scientific = FALSE)
-        if (as.numeric(s) == e) return(s)
-      }
-      s
-    }, character(1))
-    return(sprintf("time(%s)", paste(spell, collapse = ", ")))
-  }
-  value <- tryCatch(
-    as.character(jsonlite::toJSON(w, auto_unbox = TRUE, digits = I(17),
-                                  null = "null", na = "null")),
-    error = function(e) paste(format(w), collapse = " ")
-  )
-  warning(warningCondition(paste0(
-    "ferx_load_fit: the bundle's `iov_occasion` is ", value, ", not \"column\", ",
-    "\"per_dose\" or {\"time_windows\": [...]}, so fit$iov_occasion is not ",
-    "loaded; it was likely written by a newer ferx-core. The rest of the fit ",
-    "loads, and ferx_covariance() / ferx_sir() derive occasions from the model ",
-    "file's rule, as on a fit that records none. Update ferx to keep it."),
-    class = "ferx_iov_occasion_dropped_warning", value = w))
-  NULL
-}
-
-# A JSON-carried fit field (`fit$reader_settings`, `fit$population_fingerprint`,
-# #462) back from the wire, where `ferx_save_fit()` wrote it verbatim and
-# `read_json(simplifyVector = FALSE)` read it as nested lists. jsonlite spells
-# numbers its own way (`[0, 1]` for serde's `[0.0, 1.0]`), so the lists are
-# written back losslessly - arrays stay arrays (lists never unbox), scalars
-# unbox, 17 significant digits identify every double - and the engine
-# re-serialises them in its own spelling, which is the string the fit carried
-# (#526 review 2). NULL when the bundle carries none.
-.fitrx_json_from_wire <- function(w, field) {
-  if (is.null(w)) return(NULL)
-  json <- as.character(jsonlite::toJSON(w, auto_unbox = TRUE, null = "null",
-                                        digits = I(17)))
-  tryCatch(
-    ferx_rust_fit_json_canonical(field, json),
-    error = function(e) {
-      stop("ferx_load_fit: the bundle's ", conditionMessage(e), call. = FALSE)
-    }
-  )
-}
-
 # `fit$scoring_settings` / `fit$sir_settings` (#511, #472) on the wire, in
 # ferx-core's own layout (`ScoringSettingsWire` / `SirSettingsWire`), so the
 # engine reads an R bundle's records and R reads an engine bundle's: the
@@ -625,62 +295,6 @@
     record <- c(record[names(record) != "scoring"], record$scoring)
   }
   record
-}
-
-# The two records back from the wire, through the engine's decoder, so the
-# loaded list is `identical()` to the one the fit carried: `read_json()` reads
-# a whole-number double as an integer and JSON null as NULL, and the decoder
-# writes each field back in the type `ferx_fit()` gives it. `sir.settings`
-# comes back un-flattened. NULL when the bundle carries none (one saved before
-# the records existed), which keeps today's behaviour.
-#
-# Migration (#535): a key the record lacks is filled by the decoder as
-# ferx-core's wire fills it (the glue's `SCORING_KEYS` / `SIR_KEYS` table). A
-# key this ferx does not know - a bundle written by a newer ferx-core, whose
-# record gained a setting - drops that record with a
-# `ferx_settings_record_dropped_warning` naming it, and the rest of the bundle
-# loads: the fit is then one that records none, as a bundle saved before the
-# records existed. ferx-core's own reader ignores such a key and keeps the
-# record; R does not, since re-scoring under the record without a setting the
-# writer used would not repeat the writer's run.
-.fitrx_settings_from_wire <- function(w, kind) {
-  if (is.null(w)) return(NULL)
-  is_sir <- identical(kind, "sir_settings")
-  unknown <- setdiff(names(w), .fitrx_settings_wire_keys(kind))
-  if (length(unknown) > 0L) {
-    block <- if (is_sir) "sir.settings" else "scoring_settings"
-    warning(warningCondition(paste0(
-      "ferx_load_fit: the bundle's `", block, "` record names ",
-      if (length(unknown) == 1L) "a setting" else "settings",
-      " this ferx does not know (", paste0("\"", unknown, "\"", collapse = ", "),
-      "), so fit$", kind, " is not loaded; it was likely written by a newer ",
-      "ferx-core. The rest of the fit loads, and ferx_covariance() / ferx_sir() ",
-      "run as on a fit that records no ", kind, ". Update ferx to keep it."),
-      class = "ferx_settings_record_dropped_warning", keys = unknown,
-      record = kind))
-    return(NULL)
-  }
-  # A normal-proposal record (`df = Inf`) is `"df": "normal"` on the wire
-  # since ferx-core#1819, which the decoder reads back as `Inf`. A bundle
-  # written before that holds `"df": null`; it is read as no record, so the
-  # bundle still loads.
-  if (is_sir && "df" %in% names(w) && is.null(w$df)) return(NULL)
-  w <- lapply(w, function(v) if (is.null(v)) NA else v)
-  tryCatch(
-    ferx_rust_settings_record(
-      if (is_sir) "sir_settings_wire" else kind, w, "ferx_load_fit",
-      if (is_sir) "sir.settings" else "scoring_settings"
-    ),
-    error = function(e) stop(conditionMessage(e), call. = FALSE)
-  )
-}
-
-# The names a record may carry on the wire: the engine's default record's, with
-# `sir.settings`' scoring half flattened beside the SIR keys.
-.fitrx_settings_wire_keys <- function(kind) {
-  if (!identical(kind, "sir_settings")) return(names(.ferx_default_settings(kind)))
-  c(setdiff(names(.ferx_default_settings("sir_settings")), "scoring"),
-    names(.ferx_default_settings("scoring_settings")))
 }
 
 # -- Warning details (ferx-core #2268) --
@@ -744,15 +358,4 @@
                                          as.character(fit$warnings %||% character()))
   if (is.null(entries)) return(NULL)
   lapply(.fitrx_warning_details_json(entries), function(j) structure(j, class = "json"))
-}
-
-# `fit.json:warning_details` back to the fit's entries, matched to the bundle's
-# `warnings` as ferx-core's loader matches them. An entry the engine cannot
-# read (a category this ferx does not know) is dropped, as ferx-core drops it;
-# its message is still in `fit$warnings`. NULL in a bundle written before
-# ferx-core #2268.
-.fitrx_warning_details_from_wire <- function(w, messages) {
-  if (length(w) == 0L) return(NULL)
-  canon <- ferx_rust_warning_details_canonical(.fitrx_warning_details_json(w))
-  .ferx_merge_warning_details(.ferx_parse_warning_details(canon), NULL, messages)
 }

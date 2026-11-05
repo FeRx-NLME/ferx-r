@@ -1418,6 +1418,10 @@ method. Prefer \code{gradient_used} for display.}
 \item{gradient_method_outer}{Engine label for the population-level
 optimizer's gradient method.}
 \item{ferx_version}{ferx-core library version string.}
+\item{bundle}{The fit's \code{.fitrx} bundle as a raw vector, as ferx-core
+  serialized it: the copy of the fit \code{\link{ferx_save_fit}} starts from.
+  \code{ferx_load_fit()} sets it to the file's bytes. Roughly doubles the size
+  of a fit saved with \code{saveRDS()}.}
 \item{model_text}{Verbatim content of the \code{.ferx} model file as a
 character string. \code{NULL} for in-memory fits that were never
 associated with a file, or for fits produced by older engine versions.
