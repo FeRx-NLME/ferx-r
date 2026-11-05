@@ -254,6 +254,33 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
   )
 }
 
+# Guidance for the `ode_rhs_route` category (ferx-core#2681). Two notes share it
+# (rhs_route_note() in ferx-core src/parser/rhs_regcode.rs):
+# W_ODE_RHS_INTERPRETED names a construct that keeps the bytecode interpreter,
+# so the model can be rewritten; W_ODE_RHS_NOT_NATIVE runs as register code for
+# a reason outside the model (FERX_NO_RHS_JIT=1, the host, or the program size)
+# and names no construct, so rewriting advice would send the user looking for
+# one that is not there.
+.ferx_ode_rhs_route_guidance <- function(message = "") {
+  if (grepl("W_ODE_RHS_NOT_NATIVE", message, fixed = TRUE) ||
+      grepl("runs as register code", message, fixed = TRUE)) {
+    return(paste0(
+      "Informational: the [odes] right-hand side runs as register code rather ",
+      "than native code, so the fit is slower; the results are identical. ",
+      "Nothing in the model needs rewriting. If the message names ",
+      "FERX_NO_RHS_JIT=1, unset that environment variable; otherwise the host ",
+      "or the program's size keeps native code off, and there is nothing to ",
+      "change."
+    ))
+  }
+  paste0(
+    "Informational: the [odes] right-hand side does not run as native code, ",
+    "so the fit is slower; the results are unchanged. Rewrite the construct ",
+    "the message names to speed it up - a statement-level if (...) { ... } ",
+    "block as an inline if expression, for example."
+  )
+}
+
 # Message phrases that say which clauses an `ode_solver` statistics warning
 # carries. ferx-core builds that warning as one message with a clause per
 # non-zero solver counter (ode_solver_diagnostics_warning() in
@@ -944,6 +971,7 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
     optimizer_config   = .ferx_optimizer_config_guidance(message),
     multi_start        = "Multi-start information (informational).",
     threads            = "Thread-pool sizing note. Consider matching threads to the subject count.",
+    ode_rhs_route      = .ferx_ode_rhs_route_guidance(message),
     cancelled          = "The fit was cancelled before completion.",
     unused_parameter   = "A declared parameter is never referenced in [individual_parameters] or [error_model]. Remove it from [parameters] or complete the expression that uses it.",
     output             = "A name in [output] produced no sdtab column. Drop it from the block, or read the quantity where it does live (etas: fit$ebe_etas).",
