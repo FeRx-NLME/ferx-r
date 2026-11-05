@@ -98,6 +98,7 @@ ferx_load_fit <- function(path) {
            call. = FALSE)
     }
   )
+  .fitrx_warn_dropped_records(loaded)
   raw <- loaded$fit
   extras <- .fitrx_read_interface_extras(loaded$interface_extras)
 
@@ -153,6 +154,48 @@ ferx_load_fit <- function(path) {
 # The keys of `interface_extras.json` a loaded fit takes as they are.
 .FITRX_INTERFACE_KEYS <- c("call_settings", "model_file_settings", "data_name",
                            "gradient", "gradient_used")
+
+# Warn about what `ferx_rust_load_fit()` dropped from a bundle before core read it.
+#
+# A key this ferx does not know in a settings record - a bundle written by a newer
+# ferx-core, whose record gained a setting - drops that record with a
+# `ferx_settings_record_dropped_warning` naming it (#535): the fit is then one
+# that records none. ferx-core's own reader ignores such a key and keeps the
+# record; R does not, since re-scoring under the record without a setting the
+# writer used would not repeat the writer's run. An `iov_occasion` of another
+# shape drops the field with a `ferx_iov_occasion_dropped_warning` naming the
+# value (#524), and the post-hoc steps fall back to the model file's rule.
+.fitrx_warn_dropped_records <- function(loaded) {
+  records <- list(
+    list(kind = "scoring_settings", block = "scoring_settings",
+         unknown = loaded$dropped_scoring),
+    list(kind = "sir_settings", block = "sir.settings", unknown = loaded$dropped_sir)
+  )
+  for (r in records) {
+    if (length(r$unknown) == 0L) next
+    warning(warningCondition(paste0(
+      "ferx_load_fit: the bundle's `", r$block, "` record names ",
+      if (length(r$unknown) == 1L) "a setting" else "settings",
+      " this ferx does not know (", paste0("\"", r$unknown, "\"", collapse = ", "),
+      "), so fit$", r$kind, " is not loaded; it was likely written by a newer ",
+      "ferx-core. The rest of the fit loads, and ferx_covariance() / ferx_sir() ",
+      "run as on a fit that records no ", r$kind, ". Update ferx to keep it."),
+      class = "ferx_settings_record_dropped_warning", keys = r$unknown,
+      record = r$kind))
+  }
+  value <- loaded$dropped_iov_occasion
+  if (!is.null(value)) {
+    warning(warningCondition(paste0(
+      "ferx_load_fit: the bundle's `iov_occasion` is ", value, ", not \"column\", ",
+      "\"per_dose\" or {\"time_windows\": [...]}, so fit$iov_occasion is not ",
+      "loaded; it was likely written by a newer ferx-core. The rest of the fit ",
+      "loads, and ferx_covariance() / ferx_sir() derive occasions from the model ",
+      "file's rule, as on a fit that records none. Update ferx to keep it."),
+      class = "ferx_iov_occasion_dropped_warning",
+      value = jsonlite::parse_json(value, simplifyVector = FALSE)))
+  }
+  invisible()
+}
 
 # This interface's part of a bundle's `interface_extras.json`, which core stores
 # and never reads: an empty list for a bundle another writer made.

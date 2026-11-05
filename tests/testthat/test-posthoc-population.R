@@ -327,3 +327,25 @@ test_that("P15: the override note reaches ferx_simulate_adaptive() and ferx_pred
   surv <- suppressWarnings(ferx_predict_survival(plain, data, times = c(0, 6)))
   expect_false(any(grepl(msg, attr(surv, "simulation_warnings"), fixed = TRUE)))
 })
+
+test_that("P16: a bundle with an unknown iov_occasion loads without the rule (#524)", {
+  # The model file's rule, so the steps on the loaded fit derive the occasions
+  # the fit did once the bundle's own rule is dropped.
+  fit <- pp_fit(pp_iov_model("  iov_occasion = dose"), pp_iov_data())
+  expect_identical(fit$iov_occasion, "dose")
+  path <- pp_scratch(".fitrx")
+  unlink(path)
+  ferx_save_fit(fit, path)
+  edited <- fitrx_edit_bundle(path, function(w) {
+    w$iov_occasion <- list(per_calendar_day = list(start = 0))
+    w
+  })
+  expect_warning(loaded <- ferx_load_fit(edited),
+                 class = "ferx_iov_occasion_dropped_warning")
+  expect_null(loaded$iov_occasion)
+  expect_identical(loaded$theta, ferx_load_fit(path)$theta)
+  if (!is.null(fit$cov_matrix)) {
+    expect_identical(ferx_covariance(loaded)$se_theta,
+                     ferx_covariance(fit)$se_theta)
+  }
+})

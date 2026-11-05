@@ -737,3 +737,54 @@ test_that("S18: a regularized [covariate_nn] fit records its NN penalty strength
   # And the strength survives the bundle.
   expect_identical(ps_round_trip(fit)$scoring_settings, fit$scoring_settings)
 })
+
+test_that("S18: a bundle record naming an unknown key is dropped with a warning; the rest loads (#535)", {
+  fit <- ps_sir_fit(ps_sir_rows[[1L]])
+  path <- ps_scratch(".fitrx")
+  unlink(path)
+  ferx_save_fit(fit, path, include_data = TRUE)
+  newer <- list(
+    scoring_settings = fitrx_edit_bundle(path, function(w) {
+      w$scoring_settings$inner_future <- 7L
+      w
+    }),
+    sir_settings = fitrx_edit_bundle(path, function(w) {
+      w$sir$settings$inner_future <- 7L
+      w
+    })
+  )
+  without <- list(
+    scoring_settings = fitrx_edit_bundle(path, function(w) {
+      w$scoring_settings <- NULL
+      w
+    }),
+    sir_settings = fitrx_edit_bundle(path, function(w) {
+      w$sir$settings <- NULL
+      w
+    })
+  )
+  for (kind in names(newer)) {
+    # ferx-core's own reader ignores the key and loads the bundle.
+    expect_no_error(ferx:::ferx_rust_fitrx_engine_resave(newer[[kind]],
+                                                         tempfile(fileext = ".fitrx")))
+    w <- expect_warning(loaded <- ferx_load_fit(newer[[kind]]),
+                        class = "ferx_settings_record_dropped_warning")
+    expect_match(conditionMessage(w), '"inner_future"', fixed = TRUE)
+    expect_identical(w$keys, "inner_future")
+    expect_identical(w$record, kind)
+    expect_null(loaded[[kind]])
+    other <- setdiff(names(newer), kind)
+    expect_identical(loaded[[other]], fit[[other]], info = kind)
+    expect_identical(loaded$theta, fit$theta, info = kind)
+    # Exactly the fit a bundle without the record loads as (bar the paths each
+    # load stages its bundled files to), so ferx_covariance() and ferx_sir()
+    # run on it as on that one.
+    staged <- c("bundle", "model_path", "data_path")
+    expect_identical(loaded[setdiff(names(loaded), staged)],
+                     ferx_load_fit(without[[kind]])[setdiff(names(loaded), staged)],
+                     info = kind)
+  }
+  loaded <- suppressWarnings(ferx_load_fit(newer$scoring_settings))
+  expect_identical(ferx_covariance(loaded)$cov_matrix,
+                   ferx_covariance(ferx_load_fit(without$scoring_settings))$cov_matrix)
+})

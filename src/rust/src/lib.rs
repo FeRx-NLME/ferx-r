@@ -2878,36 +2878,214 @@ fn bundle_csv(
         return Ok(None);
     };
     let text = String::from_utf8(bytes).map_err(|e| format!("{name}: {e}"))?;
-    let mut lines = text.lines().filter(|l| !l.trim().is_empty());
-    let header = csv_cells(lines.next().unwrap_or_default());
-    Ok(Some((header, lines.map(csv_cells).collect())))
+    let mut records = csv_records(&text).into_iter();
+    let header = records.next().unwrap_or_default();
+    Ok(Some((header, records.collect())))
 }
 
-/// One CSV line's cells; a cell may be double-quoted, a `""` inside it one quote.
-/// The writers put no newline in a cell, so a line is a row.
-fn csv_cells(line: &str) -> Vec<String> {
-    let mut cells = Vec::new();
+/// The rows of a CSV text, as cells. A cell may be double-quoted, a `""` inside it
+/// one quote, and a quoted cell may hold a newline, as a subject ID can. Blank lines
+/// are skipped.
+fn csv_records(text: &str) -> Vec<Vec<String>> {
+    let mut records = Vec::new();
+    let mut row = Vec::new();
     let mut cell = String::new();
     let mut quoted = false;
-    let mut chars = line.chars().peekable();
+    let mut was_quoted = false;
+    let mut chars = text.chars().peekable();
     while let Some(c) = chars.next() {
         match c {
             '"' if quoted && chars.peek() == Some(&'"') => {
                 cell.push('"');
                 chars.next();
             }
-            '"' => quoted = !quoted,
-            ',' if !quoted => cells.push(std::mem::take(&mut cell)),
+            '"' => {
+                quoted = !quoted;
+                was_quoted = true;
+            }
+            ',' if !quoted => row.push(std::mem::take(&mut cell)),
+            '\r' if !quoted && chars.peek() == Some(&'\n') => {}
+            '\n' if !quoted => {
+                if !row.is_empty() || !cell.is_empty() || was_quoted {
+                    row.push(std::mem::take(&mut cell));
+                    records.push(std::mem::take(&mut row));
+                }
+                was_quoted = false;
+            }
             c => cell.push(c),
         }
     }
-    cells.push(cell);
-    cells
+    if !row.is_empty() || !cell.is_empty() || was_quoted {
+        row.push(cell);
+        records.push(row);
+    }
+    records
 }
 
 /// A bundle's numeric CSV cell: empty, or anything that is not a number, is `NaN`.
 fn csv_number(cell: &str) -> f64 {
     cell.parse().unwrap_or(f64::NAN)
+}
+
+/// What stands in for a newline and a carriage return inside a quoted CSV cell while
+/// ferx-core reads a bundle: private-use characters, which no ID holds.
+const ESCAPED_NEWLINE: char = '\u{E000}';
+const ESCAPED_RETURN: char = '\u{E001}';
+
+/// A CSV text with the line breaks inside its quoted cells escaped, or `None` when it
+/// has none. ferx-core reads its entries line by line (`str::lines`), so a subject ID
+/// holding a newline, which its own writer quotes, would split the row.
+fn escape_quoted_newlines(csv: &[u8]) -> Option<Vec<u8>> {
+    let mut quoted = false;
+    let mut out = Vec::with_capacity(csv.len());
+    let mut changed = false;
+    let mut buf = [0u8; 4];
+    for &b in csv {
+        match b {
+            b'"' => quoted = !quoted,
+            b'\n' | b'\r' if quoted => {
+                let c = if b == b'\n' { ESCAPED_NEWLINE } else { ESCAPED_RETURN };
+                out.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
+                changed = true;
+                continue;
+            }
+            _ => {}
+        }
+        out.push(b);
+    }
+    changed.then_some(out)
+}
+
+fn unescape_newlines(id: &str) -> String {
+    id.replace(ESCAPED_NEWLINE, "\n").replace(ESCAPED_RETURN, "\r")
+}
+
+/// `bundle` with the entries `replaced` swapped in and every other entry copied as it is.
+fn bundle_with_entries(
+    bundle: &[u8],
+    replaced: &HashMap<String, Vec<u8>>,
+) -> std::result::Result<Vec<u8>, String> {
+    use std::io::Write;
+    let fail = |e: zip::result::ZipError| format!("not a .fitrx archive: {e}");
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bundle)).map_err(fail)?;
+    let mut out = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+    for i in 0..archive.len() {
+        let file = archive.by_index_raw(i).map_err(fail)?;
+        let name = file.name().map_err(fail)?.to_string();
+        match replaced.get(&name) {
+            Some(bytes) => {
+                out.start_file(name.as_str(), options).map_err(fail)?;
+                out.write_all(bytes).map_err(|e| format!("{name}: {e}"))?;
+            }
+            None => out.raw_copy_file(file).map_err(fail)?,
+        }
+    }
+    Ok(out.finish().map_err(fail)?.into_inner())
+}
+
+/// The keys of a settings record (`fit.json` object) that are not in `known`.
+fn unknown_record_keys(record: Option<&serde_json::Value>, known: &[&str]) -> Vec<String> {
+    record
+        .and_then(serde_json::Value::as_object)
+        .map_or_else(Vec::new, |r| {
+            r.keys().filter(|k| !known.contains(&k.as_str())).cloned().collect()
+        })
+}
+
+/// Whether `value` is an `iov_occasion` this ferx can read.
+fn known_iov_occasion(value: &serde_json::Value) -> bool {
+    match serde_json::from_value::<IovOccasionRule>(value.clone()) {
+        Ok(IovOccasionRule::TimeWindows(edges)) => {
+            !edges.is_empty() && edges.iter().all(|e| e.is_finite())
+        }
+        Ok(_) => true,
+        Err(_) => false,
+    }
+}
+
+/// What [`prepare_bundle`] did to a bundle.
+#[derive(Default)]
+struct PreparedBundle {
+    /// The bundle to hand core, when it differs from the one read.
+    bytes: Option<Vec<u8>>,
+    /// The unknown keys that dropped `scoring_settings` / `sir.settings`.
+    dropped_scoring: Vec<String>,
+    dropped_sir: Vec<String>,
+    /// The JSON of an `iov_occasion` this ferx cannot read.
+    dropped_iov_occasion: Option<String>,
+}
+
+/// Make a bundle fit to hand ferx-core's loader, which would otherwise misread it.
+///
+/// Core ignores a key it does not know inside `scoring_settings` and `sir.settings`, so
+/// a bundle from a newer ferx-core would load a part of its record as the whole, and
+/// the post-hoc steps would replay the fit under other settings. Such a record is
+/// dropped, and the caller warns (ferx-r #535). An `iov_occasion` of an unknown shape
+/// fails core's whole read, and is dropped the same way (ferx-r #524).
+///
+/// Line breaks inside quoted cells are escaped, as core reads its CSV entries by line.
+/// `data.csv` stays verbatim: core reads it with a real CSV reader.
+fn prepare_bundle(bundle: &[u8]) -> std::result::Result<PreparedBundle, String> {
+    let mut prepared = PreparedBundle::default();
+    let mut replaced: HashMap<String, Vec<u8>> = HashMap::new();
+    // A bundle that does not get this far is core's to refuse, in its own words.
+    let Ok(archive) = zip::ZipArchive::new(std::io::Cursor::new(bundle)) else {
+        return Ok(prepared);
+    };
+    let names: Vec<String> = archive
+        .file_names()
+        .filter_map(|name| name.ok().map(|n| n.into_owned()))
+        .collect();
+    for name in names.iter().filter(|n| n.ends_with(".csv") && *n != "data.csv") {
+        let Some(csv) = bundle_entry(bundle, name)? else { continue };
+        if let Some(escaped) = escape_quoted_newlines(&csv) {
+            replaced.insert(name.clone(), escaped);
+        }
+    }
+
+    let wire = bundle_entry(bundle, "fit.json")?
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+    if let Some(mut wire) = wire {
+        let scoring: Vec<&str> = SCORING_KEYS.iter().map(|k| k.name).collect();
+        let sir: Vec<&str> = scoring
+            .iter()
+            .copied()
+            .chain(SIR_KEYS.iter().map(|k| k.name))
+            .collect();
+        prepared.dropped_scoring = unknown_record_keys(wire.get("scoring_settings"), &scoring);
+        prepared.dropped_sir =
+            unknown_record_keys(wire.pointer("/sir/settings"), &sir);
+        prepared.dropped_iov_occasion = wire
+            .get("iov_occasion")
+            .filter(|v| !v.is_null() && !known_iov_occasion(v))
+            .map(serde_json::Value::to_string);
+
+        let edited = !prepared.dropped_scoring.is_empty()
+            || !prepared.dropped_sir.is_empty()
+            || prepared.dropped_iov_occasion.is_some();
+        if edited {
+            let top = wire.as_object_mut().ok_or("fit.json: not an object")?;
+            if !prepared.dropped_scoring.is_empty() {
+                top.remove("scoring_settings");
+            }
+            if prepared.dropped_iov_occasion.is_some() {
+                top.remove("iov_occasion");
+            }
+            if !prepared.dropped_sir.is_empty() {
+                if let Some(sir) = top.get_mut("sir").and_then(|s| s.as_object_mut()) {
+                    sir.remove("settings");
+                }
+            }
+            let json = serde_json::to_vec(&wire).map_err(|e| format!("fit.json: {e}"))?;
+            replaced.insert("fit.json".to_string(), json);
+        }
+    }
+    if !replaced.is_empty() {
+        prepared.bytes = Some(bundle_with_entries(bundle, &replaced)?);
+    }
+    Ok(prepared)
 }
 
 /// The sdtab ID of subject `position` (0-based): its ID as a number, else its
@@ -3126,8 +3304,9 @@ fn check_loaded_fit(fit: &FitResult) -> std::result::Result<(), String> {
 ///
 /// @param bundle The bundle's bytes.
 /// @return A list: `fit` (the fit list), `model_text`, `data_csv` (raw, or NULL),
-///   `interface_extras` and `trace_csv` (text, or NULL) and `levels` (the level
-///   bindings).
+///   `interface_extras` and `trace_csv` (text, or NULL), `levels` (the level
+///   bindings), and what [`prepare_bundle`] dropped: `dropped_scoring` and
+///   `dropped_sir` (the unknown keys) and `dropped_iov_occasion` (JSON, or NULL).
 /// @export
 #[extendr]
 fn ferx_rust_load_fit(bundle: Raw) -> List {
@@ -3137,10 +3316,20 @@ fn ferx_rust_load_fit(bundle: Raw) -> List {
         // Re-reading `data.csv` parses the bundled model to learn its columns, which
         // a `[covariate_nn]` model fails in a build without `nn`. That costs the
         // fields read from the data, not the fit.
-        let loaded = load_fit_from_bytes(bytes)
-            .or_else(|_| load_fit_from_bytes_without_population(bytes))
+        let prepared = prepare_bundle(bytes)?;
+        let for_core = prepared.bytes.as_deref().unwrap_or(bytes);
+        let loaded = load_fit_from_bytes(for_core)
+            .or_else(|_| load_fit_from_bytes_without_population(for_core))
             .map_err(|e| format!("cannot read this .fitrx bundle: {e}"))?;
         let mut fit = loaded.fit;
+        for subject in &mut fit.subjects {
+            subject.id = unescape_newlines(&subject.id);
+        }
+        if let Some(table) = &mut fit.covariate_table {
+            for row in &mut table.rows {
+                row.id = unescape_newlines(&row.id);
+            }
+        }
         check_loaded_fit(&fit)?;
         let (sdtab, occasions) = recorded_rows(bytes, &mut fit)?;
         let parsed = loaded_model(&fit, &loaded.model_source);
@@ -3171,7 +3360,10 @@ fn ferx_rust_load_fit(bundle: Raw) -> List {
             data_csv = data_csv,
             interface_extras = extras,
             trace_csv = trace_csv,
-            levels = levels
+            levels = levels,
+            dropped_scoring = prepared.dropped_scoring,
+            dropped_sir = prepared.dropped_sir,
+            dropped_iov_occasion = prepared.dropped_iov_occasion.map_or_else(r_null, Robj::from)
         ))
     })
 }

@@ -99,7 +99,7 @@ fitrx_parity_cases <- list(
     ex <- ferx_example("warfarin")
     d <- read.csv(ex$data, colClasses = c(ID = "character"))
     ids <- unique(d$ID)
-    labels <- c("NA", "007", "Smith, 2019", "say \"hi\"", "1e3")
+    labels <- c("NA", "007", "Smith, 2019", "say \"hi\"", "1e3", "two\nlines")
     d$ID <- c(labels, ids)[match(d$ID, ids)]
     fitrx_parity_fit(ex$model, d, method = "foce", covariance = FALSE)
   },
@@ -178,4 +178,13 @@ test_that("a model the engine cannot read leaves cov_matrix unnamed (#417)", {
   writeLines("[not_a_block]", bad)
   raw <- list(cov_matrix_dim = 2L, model_path = bad, model_hash = "")
   expect_identical(ferx:::.fitrx_cov_labels(raw, NULL), character())
+})
+
+test_that("a subject ID holding a newline reads back from both writers (#711)", {
+  skip_on_cran()
+  fit <- fitrx_parity_cases$text_ids()
+  expect_true("two\nlines" %in% fit$subject_ids)
+  raw <- ferx:::ferx_rust_load_fit(fit$bundle)$fit
+  expect_identical(raw$subject_ids, fit$subject_ids)
+  expect_identical(raw$ebe_etas$ID, fit$ebe_etas$ID)
 })
