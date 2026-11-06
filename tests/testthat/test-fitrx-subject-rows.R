@@ -333,9 +333,11 @@ test_that("an [output] MIXNUM column stays blank on binary rows rebuilt from cor
   path <- withr::local_tempfile(fileext = ".fitrx")
   ferx_save_fit(fit, path)
   # The R package's wide predictions.csv and core's predictions_discrete.csv
-  # without the glue's sdtab_endpoint_rows.csv: the shape of every bundle the
-  # R writer of ferx 0.4.0 and before saved. The glue rebuilds the binary rows
-  # from core's, and used to fill MIXNUM on them from the Gaussian rows.
+  # without the glue's sdtab_endpoint_rows.csv, as the R writer saved them in
+  # the one development build between format_version "2" (#716) and the glue's
+  # entry (#717); older bundles are format "1", which the loader refuses. The
+  # glue rebuilds the binary rows from core's, and used to fill MIXNUM on them
+  # from the Gaussian rows.
   status <- utils::zip(path, "sdtab_endpoint_rows.csv", flags = "-qd")
   skip_if(status != 0L, "zip -d failed")
   expect_false("sdtab_endpoint_rows.csv" %in% utils::unzip(path, list = TRUE)$Name)
