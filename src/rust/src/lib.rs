@@ -3206,8 +3206,10 @@ fn sdtab_id(id: &str, position: usize) -> f64 {
 /// The bundle entry holding the discrete and time-to-event rows of `fit$sdtab` in
 /// full: `SUBJECT` (the row's subject, by 1-based position), then the sdtab columns,
 /// discrete rows before time-to-event ones. The glue adds it because
-/// `predictions_discrete.csv` has a fixed, narrower layout and core has no entry for
-/// time-to-event rows (ferx-core #911). Core's loader ignores it.
+/// `predictions_discrete.csv` has a fixed, narrower layout. Core keeps the
+/// time-to-event rows in its own `predictions_tte.csv` since ferx-core #911; they
+/// stay here too, so a bundle still loads whole in a ferx built before that. Core's
+/// loader ignores this entry.
 const ENDPOINT_ROWS_ENTRY: &str = "sdtab_endpoint_rows.csv";
 
 /// A CSV text cell, quoted as core's writer quotes one, carriage returns too.
@@ -3465,6 +3467,11 @@ fn recorded_rows(
             header.iter().position(|h| h == name).map(|c| row[c].as_str())
         }
         let mut seen = vec![0usize; fit.subjects.len()];
+        // Since ferx-core #911 core restores a subject's time-to-event rows from its
+        // own `predictions_tte.csv`; this entry still carries them for older readers,
+        // and fills them only for a bundle written before that.
+        #[cfg(feature = "survival")]
+        let restored: Vec<bool> = fit.subjects.iter().map(|s| !s.tte_rows.is_empty()).collect();
         for row in &extra_rows {
             let si = cell(&extra_header, "SUBJECT", row)
                 .and_then(|s| s.parse::<usize>().ok())
@@ -3481,7 +3488,7 @@ fn recorded_rows(
             let is_tte = seen[si] >= fit.subjects[si].discrete_rows.len();
             seen[si] += 1;
             #[cfg(feature = "survival")]
-            if is_tte {
+            if is_tte && !restored[si] {
                 let number = |name: &str| cell(&extra_header, name, row).map_or(f64::NAN, csv_number);
                 fit.subjects[si].tte_rows.push(ferx_core::types::TteObsDiagnostic {
                     cmt: number("CMT") as usize,
@@ -3496,7 +3503,7 @@ fn recorded_rows(
             #[cfg(not(feature = "survival"))]
             let _ = is_tte;
         }
-    } else if fit.subjects.iter().any(|s| !s.discrete_rows.is_empty()) {
+    } else if fit.subjects.iter().any(|s| !s.discrete_rows.is_empty() || has_tte_rows(s)) {
         if column(&cols, "CMT").is_none() {
             let n = positions.len();
             let at = column(&cols, "PRED").unwrap_or(cols.len());
@@ -3518,8 +3525,48 @@ fn recorded_rows(
                 }
             }
         }
+        // A core-written bundle's time-to-event rows, which core restores since
+        // ferx-core #911, after every discrete row as `ferx_core::io::output::sdtab`
+        // orders them.
+        #[cfg(feature = "survival")]
+        if fit.subjects.iter().any(has_tte_rows) {
+            let n = cols.first().map_or(0, |(_, v)| v.len());
+            for name in ferx_core::io::output::TTE_RESIDUAL_COLUMNS {
+                if column(&cols, name).is_none() {
+                    cols.push((name.to_string(), vec![f64::NAN; n]));
+                }
+            }
+            for (si, sr) in fit.subjects.iter().enumerate() {
+                for t in &sr.tte_rows {
+                    for (name, values) in &mut cols {
+                        values.push(match name.as_str() {
+                            "ID" => sdtab_id(&sr.id, si),
+                            "CMT" => t.cmt as f64,
+                            "TIME" => t.time,
+                            "DV" => t.dv,
+                            "COXSNELL" => t.coxsnell,
+                            "MARTINGALE" => t.martingale,
+                            "DEVIANCE" => t.deviance,
+                            "PIT" => t.pit,
+                            _ => f64::NAN,
+                        });
+                    }
+                }
+            }
+        }
     }
     Ok((cols, occasions))
+}
+
+/// Whether `subject` holds time-to-event rows (none without the `survival` feature).
+fn has_tte_rows(subject: &SubjectResult) -> bool {
+    #[cfg(feature = "survival")]
+    return !subject.tte_rows.is_empty();
+    #[cfg(not(feature = "survival"))]
+    {
+        let _ = subject;
+        false
+    }
 }
 
 /// The bundle's model, parsed and laid out on the fit's bindings as the fitted one was,
@@ -3804,7 +3851,8 @@ fn ferx_rust_bundle_with_sdtab(bundle: Raw, sdtab: List) -> Raw {
     entry(move || {
         let bytes = bundle.as_slice();
         let mut fit = read_bundle_fit(bytes)?.fit;
-        // The time-to-event rows are the glue's entry, not core's.
+        // A bundle written before ferx-core #911 keeps its time-to-event rows only
+        // in the glue's entry.
         recorded_rows(bytes, &mut fit)?;
         let columns = sdtab
             .iter()
@@ -5757,11 +5805,18 @@ fn pk_model_type_label(model: &CompiledModel) -> &'static str {
     }
 }
 
-fn error_model_to_string(em: ErrorModel) -> &'static str {
+/// One endpoint's residual-error label. Under log-transform-both-sides the error
+/// is on the log scale and the label says so: `log(DV) ~ additive` /
+/// `DV ~ log_additive` is `Additive`, and `log(DV) ~ combined` /
+/// `DV ~ log_combined` is `LogCombined` (ferx-core #2729), which the engine
+/// accepts only with `log_transform`.
+fn error_model_to_string(em: ErrorModel, log_transform: bool) -> &'static str {
     match em {
+        ErrorModel::Additive if log_transform => "additive (log-transformed)",
         ErrorModel::Additive => "additive",
         ErrorModel::Proportional => "proportional",
         ErrorModel::Combined => "combined",
+        ErrorModel::LogCombined => "combined (log-transformed)",
     }
 }
 
@@ -5769,7 +5824,8 @@ fn error_model_to_string(em: ErrorModel) -> &'static str {
 // the bare error type ("proportional"); multi-endpoint (per-CMT) models report
 // each compartment's error type, e.g. "per-CMT (CMT2=proportional,
 // CMT3=additive)". Log-transform-both-sides (LTBS) models report
-// "additive (log-transformed)", matching the R-side `.ferx_parse_structure`
+// "additive (log-transformed)" or "combined (log-transformed)" per endpoint,
+// matching the R-side `.ferx_parse_structure`
 // label so the fit object's `model_structure$residual` survives a `.fitrx`
 // round-trip with the LTBS distinction intact.
 fn residual_label(model: &CompiledModel) -> String {
@@ -5795,12 +5851,9 @@ fn residual_label(model: &CompiledModel) -> String {
 }
 
 fn residual_error_label(model: &CompiledModel) -> String {
-    if model.log_transform {
-        // LTBS (`log(DV) ~ additive` / `DV ~ log_additive`): additive error on
-        // the log scale. The engine rejects LTBS with per-CMT, so this is always
-        // the single-endpoint additive case.
-        return "additive (log-transformed)".to_string();
-    }
+    // LTBS applies to every endpoint; per-CMT LTBS is accepted since ferx-core
+    // #2729 when every endpoint is on the log scale.
+    let error_model_to_string = |em: ErrorModel| error_model_to_string(em, model.log_transform);
     match &model.error_spec {
         ErrorSpec::Single(em) => error_model_to_string(*em).to_string(),
         ErrorSpec::PerCmt(map) => {

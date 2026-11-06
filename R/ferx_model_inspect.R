@@ -27,10 +27,11 @@
 #'   \code{block_kappa}, which cannot carry a weight - and
 #'   \code{character(0)} when no kappa is weighted),
 #'   and \code{residual} (error type - one of
-#'   \code{"proportional"}, \code{"additive"}, \code{"combined"}, or
+#'   \code{"proportional"}, \code{"additive"}, \code{"combined"},
 #'   \code{"additive (log-transformed)"} for log-transform-both-sides
 #'   models written as \code{log(DV) ~ additive(...)} or
-#'   \code{DV ~ log_additive(...)}). For multi-endpoint (per-CMT) error
+#'   \code{DV ~ log_additive(...)}, or \code{"combined (log-transformed)"}
+#'   for \code{log(DV) ~ combined(...)} or \code{DV ~ log_combined(...)}). For multi-endpoint (per-CMT) error
 #'   models, \code{residual} is reported as a string of the form
 #'   \code{"per-CMT (CMT2=proportional, CMT3=additive)"}.
 #'

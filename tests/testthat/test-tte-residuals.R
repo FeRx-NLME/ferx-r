@@ -1,5 +1,6 @@
 # Time-to-event residual rows in fit$sdtab (ferx-core #901), and what
-# ferx_save_fit() does with them (ferx-core #911: a bundle keeps none).
+# ferx_save_fit() does with them (ferx-core #911: core keeps them in
+# predictions_tte.csv, the glue in sdtab_endpoint_rows.csv).
 
 tte_cols <- c("COXSNELL", "MARTINGALE", "DEVIANCE", "PIT")
 
@@ -50,12 +51,34 @@ test_that("a fit without a TTE endpoint has no TTE columns and n_obs_tte = 0", {
 test_that("ferx_save_fit() keeps the TTE rows through a reload (#689, #711)", {
   fit <- joint_fit()
   path <- tempfile(fileext = ".fitrx")
-  expect_no_warning(ferx_save_fit(fit, path),
-                    class = "ferx_tte_rows_dropped_warning")
+  ferx_save_fit(fit, path)
   loaded <- suppressWarnings(ferx_load_fit(path))
+  # Core restores the rows from its own entry (ferx-core #911) and the glue's
+  # entry carries them too: each row counts once.
   expect_identical(loaded$sdtab, fit$sdtab)
   expect_identical(loaded$subject_summary, fit$subject_summary)
   expect_gt(sum(loaded$subject_summary$n_obs_tte), 0L)
+})
+
+test_that("a bundle without the glue's endpoint entry rebuilds its TTE rows from core's", {
+  skip_if(!nzchar(Sys.which("zip")), "needs a zip binary")
+  fit <- joint_fit()
+  path <- tempfile(fileext = ".fitrx")
+  ferx_save_fit(fit, path)
+  # What a bundle written by ferx-core alone holds (ferx-core #911): the TTE
+  # rows only in predictions_tte.csv.
+  status <- utils::zip(path, "sdtab_endpoint_rows.csv", flags = "-qd")
+  skip_if(status != 0L, "zip -d failed")
+  expect_false("sdtab_endpoint_rows.csv" %in% utils::unzip(path, list = TRUE)$Name)
+
+  loaded <- suppressWarnings(ferx_load_fit(path))
+  expect_identical(loaded$subject_summary$n_obs_tte, fit$subject_summary$n_obs_tte)
+  expect_identical(nrow(loaded$sdtab), nrow(fit$sdtab))
+  n_tte <- sum(fit$subject_summary$n_obs_tte)
+  tte <- seq.int(nrow(fit$sdtab) - n_tte + 1L, nrow(fit$sdtab))
+  for (col in c("ID", "CMT", "TIME", "DV", tte_cols)) {
+    expect_identical(loaded$sdtab[[col]][tte], fit$sdtab[[col]][tte], info = col)
+  }
 })
 
 test_that("a non-TTE fit keeps an [output] column called PIT through save/load", {
@@ -71,13 +94,7 @@ test_that("a non-TTE fit keeps an [output] column called PIT through save/load",
                                    verbose = FALSE))
   expect_true("PIT" %in% names(fit$sdtab))
   path <- tempfile(fileext = ".fitrx")
-  dropped <- 0L
-  withCallingHandlers(
-    ferx_save_fit(fit, path),
-    ferx_tte_rows_dropped_warning = function(w) dropped <<- dropped + 1L,
-    warning = function(w) invokeRestart("muffleWarning")
-  )
-  expect_identical(dropped, 0L)
+  suppressWarnings(ferx_save_fit(fit, path))
   loaded <- suppressWarnings(ferx_load_fit(path))
   expect_identical(loaded$sdtab$PIT, fit$sdtab$PIT)
 })

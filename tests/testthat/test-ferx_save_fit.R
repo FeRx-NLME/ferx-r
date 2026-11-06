@@ -618,6 +618,21 @@ test_that("LTBS residual label survives a .fitrx round-trip", {
   ferx_save_fit(fit, path)
   loaded <- ferx_load_fit(path)
   expect_equal(loaded$model_structure$residual, "additive (log-transformed)")
+
+  # Combined error under LTBS (ferx-core #2729): the glue's label and the R
+  # parser's agree, and survive the round-trip.
+  src <- readLines(md)
+  src <- sub("  sigma ADD_LOG ~ 0.15 (sd)",
+             "  sigma PROP ~ 0.15 (sd)\n  sigma ADD ~ 0.1 (sd)", src, fixed = TRUE)
+  src <- sub("log(DV) ~ additive(ADD_LOG)", "log(DV) ~ combined(PROP, ADD)", src,
+             fixed = TRUE)
+  writeLines(src, md)
+  fit <- suppressWarnings(ferx_fit(md, data = dd, verbose = FALSE,
+                                   settings = list(maxiter = 30L)))
+  expect_equal(fit$model_structure$residual, "combined (log-transformed)")
+  ferx_save_fit(fit, path)
+  loaded <- ferx_load_fit(path)
+  expect_equal(loaded$model_structure$residual, "combined (log-transformed)")
 })
 test_that("FIX flags of an in-memory fit survive a .fitrx round-trip (#436)", {
   skip_on_cran()
