@@ -8,7 +8,6 @@
 # ferx_fit() saves a valid bundle.
 
 # Local aliases avoid the ::: operator (undesirable_operator_linter).
-.fitrx_wire_to_fit      <- getFromNamespace(".fitrx_wire_to_fit",      "ferx")
 .fitrx_build_iov_wire   <- getFromNamespace(".fitrx_build_iov_wire",   "ferx")
 
 
@@ -38,43 +37,6 @@ test_that("bad path errors cleanly", {
   on.exit(unlink(bogus), add = TRUE)
   expect_error(ferx_load_fit(bogus))
 })
-test_that("ferx_load_fit on old .fitrx without init_as_sd produces empty logicals", {
-  # Build a fake wire list that omits init_as_sd (pre-PR#57 bundle)
-  wire_omega <- list(
-    names = list("ETA_CL"),
-    matrix = list(list(0.09)),
-    fixed = list(FALSE),
-    log_transformed = list(TRUE),
-    shrinkage = list(0.1),
-    se = NULL,
-    param_corr = NULL
-    # init_as_sd intentionally absent
-  )
-  wire_sigma <- list(
-    names = list("PROP_ERR"),
-    estimates = list(0.01),
-    fixed = list(FALSE),
-    types = list("proportional"),
-    se = NULL
-    # init_as_sd intentionally absent
-  )
-  wire <- list(
-    method = "focei", method_chain = list("focei"),
-    converged = TRUE, ofv = -100, aic = -90, bic = -80,
-    n_obs = 10L, n_subjects = 2L, n_parameters = 2L, n_iterations = 5L,
-    interaction = TRUE, wall_time_secs = 1.0,
-    gradient_method_inner = "", gradient_method_outer = "",
-    covariance_status = "not_requested",
-    omega = wire_omega, sigma = wire_sigma,
-    theta = list(names = list("TVCL"), estimates = list(1.0),
-                 fixed = list(FALSE), transform = list("log"), se = NULL)
-  )
-  result <- .fitrx_wire_to_fit(wire)
-  expect_equal(result$omega_init_as_sd, logical(0L))
-  expect_equal(result$sigma_init_as_sd, logical(0L))
-  expect_equal(result$kappa_init_as_sd, logical(0L))
-})
-
 # ---- header from test-persist-helpers.R ----
 # Unit tests for the pure-R serialization helpers in persist.R. These convert
 # between the in-memory ferx_fit fields and the cross-language .fitrx wire
@@ -127,46 +89,6 @@ test_that("ferx_load_fit on old .fitrx without init_as_sd produces empty logical
 # ---------------------------------------------------------------------------
 
 
-test_that(".fitrx_method_label is the inverse for every known token", {
-  # One entry per token ferx-core's `method_to_str()` can write into a .fitrx. The test
-  # name has always claimed "every known token" but the list had drifted: imp, impmap and
-  # bayes were missing and fell through the `as.character()` passthrough, so a reloaded IMP
-  # fit reported its method as lowercase "imp" instead of "IMP". Keep this exhaustive — a
-  # missing entry does not error, it silently reports the wrong label.
-  expect_identical(ferx:::.fitrx_method_label(NULL), "FOCEI")
-  expect_identical(ferx:::.fitrx_method_label(""), "FOCEI")
-  expect_identical(ferx:::.fitrx_method_label("foce"), "FOCE")
-  expect_identical(ferx:::.fitrx_method_label("focei"), "FOCEI")
-  expect_identical(ferx:::.fitrx_method_label("laplace"), "LAPLACE")
-  expect_identical(ferx:::.fitrx_method_label("agq"), "AGQ")
-  expect_identical(ferx:::.fitrx_method_label("foce_gn"), "FOCE-GN")
-  expect_identical(ferx:::.fitrx_method_label("foce_gn_hybrid"), "FOCE-GN-Hybrid")
-  expect_identical(ferx:::.fitrx_method_label("saem"), "SAEM")
-  expect_identical(ferx:::.fitrx_method_label("imp"), "IMP")
-  expect_identical(ferx:::.fitrx_method_label("impmap"), "IMPMAP")
-  expect_identical(ferx:::.fitrx_method_label("bayes"), "BAYES")
-  # #508: "vi" had no entry and read back lowercase; the labels now come from
-  # the engine, so this one is no longer hand-listed.
-  expect_identical(ferx:::.fitrx_method_label("vi"), "VI")
-  # A token this engine does not know comes back upper-cased, the shape of
-  # every engine label, not as the raw lowercase token.
-  expect_identical(ferx:::.fitrx_method_label("other"), "OTHER")
-})
-test_that(".fitrx_method_label maps every engine token to the engine's label (#508)", {
-  # The table is the glue's exhaustive match over ferx-core's
-  # `EstimationMethod`, with labels from `EstimationMethod::label()`; every
-  # token in it must read back as its label, VI included.
-  tab <- ferx:::ferx_rust_method_labels()
-  expect_true(length(tab$token) >= 10L)
-  expect_identical(length(tab$token), length(tab$label))
-  expect_false(anyDuplicated(tab$token) > 0L)
-  expect_true("vi" %in% tab$token)
-  expect_identical(tab$label[tab$token == "vi"], "VI")
-  for (i in seq_along(tab$token)) {
-    expect_identical(ferx:::.fitrx_method_label(tab$token[[i]]), tab$label[[i]])
-    expect_identical(ferx:::.fitrx_method_to_token(tab$label[[i]]), tab$token[[i]])
-  }
-})
 test_that(".fitrx_num_or_nan reads a JSON null back as NaN (#508)", {
   expect_identical(ferx:::.fitrx_num_or_nan(NULL), NaN)
   expect_identical(ferx:::.fitrx_num_or_nan(list()), NaN)
@@ -174,21 +96,6 @@ test_that(".fitrx_num_or_nan reads a JSON null back as NaN (#508)", {
   expect_identical(ferx:::.fitrx_num_or_nan(12.5), 12.5)
   expect_identical(ferx:::.fitrx_num_or_nan(list(-3)), -3)
 })
-test_that(".fitrx_matrix_from_wire rebuilds the matrix and guards bad input", {
-  expect_null(ferx:::.fitrx_matrix_from_wire(NULL))
-  expect_null(ferx:::.fitrx_matrix_from_wire(list(rows = 0L, cols = 0L, data = numeric())))
-  expect_null(ferx:::.fitrx_matrix_from_wire(list(rows = 2L, cols = 3L, data = c(1, 2)))) # length mismatch
-})
-test_that(".fitrx_unwrap_named_se names values when lengths match", {
-  expect_null(ferx:::.fitrx_unwrap_named_se(NULL, NULL))
-  expect_identical(
-    ferx:::.fitrx_unwrap_named_se(c(1, 2), c("a", "b")),
-    stats::setNames(c(1, 2), c("a", "b"))
-  )
-  # Mismatched name length -> unnamed values
-  expect_identical(ferx:::.fitrx_unwrap_named_se(c(1, 2), c("only_one")), c(1, 2))
-})
-
 test_that("a loaded fit with zero-padded IDs runs ferx_covariance like the live one (#468)", {
   fit <- relabelled_fit("warfarin", "padded", function(id) sprintf("%03d", id),
                         covariance = FALSE)
@@ -252,63 +159,6 @@ test_that("ferx-core's loader reads an R-written bundle with the same text IDs (
     expect_identical(from_core$ebe_etas$ID, fit$ebe_etas$ID, info = key)
     expect_identical(from_core$sdtab$ID, fit$sdtab$ID, info = key)
   }
-})
-
-test_that("predictions.csv IDs read back as the engine's sdtab number (#475)", {
-  # Rust's f64 parse where it succeeds, else the subject's 1-based position.
-  expect_identical(
-    ferx:::.fitrx_sdtab_id_number(c("NA", "NA", "007", "Smith, 2019", "1.",
-                                    "+.5", "1E2", "-inf", "Infinity", "nan",
-                                    "0x10", " 7")),
-    c(1, 1, 7, 3, 1, 0.5, 100, -Inf, Inf, NaN, 10, 11)
-  )
-  # A subject with no observations has no rows but keeps its position, so the
-  # positions come from every subject's ID (ebes.csv), not the block count.
-  expect_identical(
-    ferx:::.fitrx_sdtab_id_number(c("B", "B", "C", "7"), c("Z", "B", "C", "7")),
-    c(2, 2, 3, 7)
-  )
-  # A block whose text is not among the subjects: block indices, as without.
-  expect_identical(ferx:::.fitrx_sdtab_id_number(c("B", "Q"), c("Z", "B")), c(1, 2))
-})
-
-test_that("ferx_load_fit numbers a core-spelled predictions.csv past a zero-obs subject (#475)", {
-  # ferx-core's writer puts the text ID in predictions.csv and leaves out a
-  # subject with no observations; its sdtab number for `B` is then 2, not 1.
-  fake <- structure(
-    list(
-      sdtab = data.frame(ID = c(2, 2), TIME = c(0.5, 1), DV = c(5, 6),
-                         PRED = c(5, 6), IPRED = c(5, 6), CWRES = c(0, 0),
-                         IWRES = c(0, 0)),
-      ebe_etas = data.frame(ID = c("Z", "B"), ETA_CL = c(0, 0.1),
-                            stringsAsFactors = FALSE),
-      theta = c(TVCL = 1.0),
-      omega = matrix(0.04, 1L, 1L, dimnames = list("ETA_CL", "ETA_CL")),
-      eta_names = "ETA_CL",
-      sigma = c(prop = 0.05), sigma_names = "prop", sigma_types = "proportional",
-      theta_fixed = FALSE, omega_fixed = FALSE, sigma_fixed = FALSE,
-      ofv = 0, aic = 2, bic = 4,
-      n_obs = 2L, n_subjects = 2L, n_parameters = 1L, n_iterations = 1L,
-      method = "FOCEI", method_chain = "FOCEI", converged = TRUE,
-      warnings = character(), shrinkage_eta = 0, shrinkage_eps = 0,
-      wall_time_secs = 0, model_name = "fake", ferx_version = "0.1.0",
-      gradient_method_inner = "Enzyme AD", gradient_method_outer = "N/A",
-      covariance_status = "NotRequested", model_source = "model fake\n",
-      data_path = NA_character_
-    ),
-    class = "ferx_fit"
-  )
-  path <- withr::local_tempfile(fileext = ".fitrx")
-  ferx_save_fit(fake, path)
-  staging <- withr::local_tempdir()
-  utils::unzip(path, exdir = staging)
-  preds <- file.path(staging, "predictions.csv")
-  lines <- readLines(preds)
-  lines[-1] <- sub("^[^,]*", "B", lines[-1])
-  writeLines(lines, preds)
-  core_spelled <- withr::local_tempfile(fileext = ".fitrx")
-  utils::zip(core_spelled, list.files(staging, full.names = TRUE), flags = "-j -q")
-  expect_identical(ferx_load_fit(core_spelled)$sdtab$ID, c(2, 2))
 })
 
 test_that("a bundle without reader settings loads with neither field and still runs (#462)", {

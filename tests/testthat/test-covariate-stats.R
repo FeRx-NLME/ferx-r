@@ -288,26 +288,12 @@ test_that("C8: ferx_save_fit / ferx_load_fit keep covariate_stats", {
   expect_null(wire$r_extras$covariate_stats)
 })
 
-test_that("C8b: no statistic round-trips as zero rows; an absent slot loads NULL", {
+test_that("C8b: no statistic round-trips as zero rows", {
   b <- cs_base()
   bundle <- withr::local_tempfile(fileext = ".fitrx")
   ferx_save_fit(b$twin_fit, bundle)
   expect_identical(ferx_load_fit(bundle)$covariate_stats,
                    b$twin_fit$covariate_stats)
-  # A bundle that does not record them (before #412): unknown, not empty.
-  expect_null(ferx:::.fitrx_covariate_stats_from_wire(NULL))
-})
-
-test_that("C8c: a malformed statistics entry in a bundle is refused by name", {
-  w <- list(covariate_stats = list(WT = list(
-    median = 70, mean = 70, min = 45, max = 93, levels = list(45, 93)
-  )))
-  expect_error(ferx:::.fitrx_covariate_stats_from_wire(w),
-               "covariate `WT` lacks one of median, mean, min, max, mode",
-               fixed = TRUE)
-  w$covariate_stats$WT$mode <- list(45)
-  expect_error(ferx:::.fitrx_covariate_stats_from_wire(w),
-               "covariate `WT` has a `mode` that is not a number", fixed = TRUE)
 })
 
 test_that("C8d: the engine's own .fitrx loader reads the statistics slot", {

@@ -198,37 +198,3 @@ test_that("kappa_param_types survives a save/load round trip", {
                    printed_row(fit, "^  KAPPA_ARM +="))
 })
 
-test_that("a .fitrx saved before kappa_param_types loads and prints as before", {
-  skip_on_cran()
-  fit <- mbma_fit()
-  path <- withr::local_tempfile(fileext = ".fitrx")
-  ferx_save_fit(fit, path)
-  # The writer before this change never emitted the key.
-  edit_bundle(path, function(w) {
-    w$iov$kappa_param_types <- NULL
-    w
-  })
-  loaded <- ferx_load_fit(path)
-  expect_length(loaded$kappa_param_types, 0L)
-  # The reloaded variance, not the fit's: the JSON round trip can move its
-  # last digit.
-  var <- loaded$omega_iov[1L, 1L]
-  row <- printed_row(loaded, "^  KAPPA_ARM +=")
-  # An unknown scale reads as ferx-core's console reads it (#470): the
-  # log-normal CV%, exact since ferx-core #1858 (sqrt(exp(var) - 1) * 100), at
-  # weight 1 for this weighted kappa. This fixture's variance (~156) puts the
-  # CV% near 1e35, which ferx-core prints to three significant figures in
-  # scientific notation since #1883 (it printed every digit of the double), so
-  # the value is compared numerically, to those three figures.
-  expect_true(startsWith(row, sprintf("  KAPPA_ARM            = %.6f  (CV%% = ", var)),
-              info = row)
-  expect_match(row, "(CV% = 7.64e35 at weight 1)", fixed = TRUE)
-  cv <- as.numeric(sub(".*\\(CV% = ([0-9.e+]+) at weight 1\\).*", "\\1", row))
-  expect_equal(cv, signif(sqrt(exp(var) - 1) * 100, 3), tolerance = 1e-12, info = row)
-  expect_false(isTRUE(all.equal(cv, sqrt(var) * 100)), info = row)
-  # And it is the row ferx-core itself prints for the same bundle.
-  core <- getFromNamespace("ferx_rust_fitrx_kappa_rows", "ferx")(path)
-  expect_identical(row, strsplit(core, "\n", fixed = TRUE)[[1L]][[1L]])
-  expect_true(is.na(loaded$estimates["KAPPA_ARM", "scale"]))
-  expect_identical(loaded$estimates["KAPPA_ARM", "transform"], "variance")
-})

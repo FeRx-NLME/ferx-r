@@ -1,4 +1,4 @@
-FITRX_FORMAT_VERSION <- "1"
+FITRX_FORMAT_VERSION <- "2"
 
 # ----- save -----------------------------------------------------------------
 
@@ -96,6 +96,11 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
   if (!is.logical(write_model) || length(write_model) != 1L || is.na(write_model)) {
     stop("`write_model` must be TRUE or FALSE.")
   }
+  if (!is.raw(fit$bundle) || length(fit$bundle) == 0L) {
+    stop("This fit carries no .fitrx bundle: it was made by an older ferx, or ",
+         "the engine could not serialize it. Refit with ferx_fit().",
+         call. = FALSE)
+  }
 
   # Default the archive extension to `.fitrx` when the caller passes a bare
   # path with no extension, so `ferx_save_fit(fit, "results/run1")` lands at
@@ -165,15 +170,11 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
     entries <- c(entries, "conddist.csv")
   }
 
-  # predictions.csv - the Gaussian sdtab rows, as ferx-core writes them;
-  # predictions_discrete.csv - the discrete (binary) rows, present only when
-  # the fit has any. ferx-core's loader refuses a predictions.csv row past
-  # each subject's n_obs, and does not read this second entry (#554).
-  if (.fitrx_write_predictions_csv(fit, staging)) {
-    entries <- c(entries, "predictions.csv", "predictions_discrete.csv")
-  } else {
-    entries <- c(entries, "predictions.csv")
-  }
+  # predictions.csv - the Gaussian sdtab rows, every column; and when the fit
+  # has other rows, predictions_discrete.csv in core's fixed layout and
+  # sdtab_endpoint_rows.csv with those rows in full. ferx-core's loader refuses
+  # a predictions.csv row past each subject's n_obs.
+  entries <- c(entries, .fitrx_write_predictions_csv(fit, staging))
 
   # covtab.csv - present only when the model declares a [covariates] block
   if (!is.null(fit$covtab) && nrow(fit$covtab) > 0L) {
@@ -250,6 +251,15 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
     entries <- c(entries, "data.csv")
   }
 
+  # interface_extras.json - the fields only this interface reads, which core
+  # stores and never interprets.
+  jsonlite::write_json(
+    list(r = .fitrx_collect_r_extras(fit)),
+    file.path(staging, "interface_extras.json"),
+    auto_unbox = TRUE, pretty = TRUE, digits = I(17), null = "null", na = "null"
+  )
+  entries <- c(entries, "interface_extras.json")
+
   # manifest.json - last so it can list every entry
   manifest <- list(
     format_version = FITRX_FORMAT_VERSION,
@@ -312,8 +322,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
 # Matched by name at any depth. That is sound because every occurrence of each
 # name below is an array in the schema - `names` / `estimates` / `se` /
 # `fixed` occur under theta, omega and sigma alike, `data` only inside a
-# matrix wire - and `r_extras` is skipped entirely, so an R-only field that
-# happens to share a name keeps whatever shape it has today.
+# matrix wire.
 .FITRX_ARRAY_KEYS <- c(
   # FitWire
   "method_chain", "prior_summary", "method_wall_times_secs",
@@ -373,14 +382,12 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
   nms <- names(x)
   for (i in seq_along(x)) {
     key <- if (is.null(nms)) "" else nms[[i]]
-    # R-only payload: left exactly as it is written today, so this cannot move
-    # anything on the `ferx_save_fit()` -> `ferx_load_fit()` path.
-    if (identical(key, "r_extras")) next
     # Built in its final shape by `.fitrx_covariate_stats_to_wire()`: its
     # `median` / `mean` are scalars, which the name match above would wrap.
     if (identical(key, "data_bindings")) next
     v <- x[[i]]
-    if (is.null(v) || length(v) == 0L) next
+    # Written verbatim (`json_verbatim`), in the shape it already has.
+    if (is.null(v) || length(v) == 0L || inherits(v, "json")) next
     if (key %in% .FITRX_ARRAY_OF_ARRAY_KEYS) {
       x[[i]] <- lapply(unname(as.list(v)), function(e) as.list(unname(e)))
     } else if (key %in% .FITRX_ARRAY_KEYS && !is.list(v)) {
@@ -534,7 +541,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
 
 # Build the on-disk fit.json from the in-memory ferx_fit list. The schema
 # matches the Rust FitWire layout (see ferx-core/src/io/fitrx.rs); R-only
-# fields land under `r_extras` and are ignored by non-R readers.
+# fields go to interface_extras.json (`.fitrx_collect_r_extras()`).
 .fitrx_write_fit_json <- function(fit, path) {
   .fitrx_warn_missing_fixed(fit)
   wire <- list(
@@ -545,6 +552,8 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
     ),
     converged = isTRUE(fit$converged),
     ofv = as.numeric(fit$ofv),
+    ofv_data = as.numeric(fit$ofv_data %||% fit$ofv),
+    ofv_prior = .ferx_ofv_prior(fit),
     aic = as.numeric(fit$aic),
     bic = as.numeric(fit$bic),
     n_obs = as.integer(fit$n_obs),
@@ -611,8 +620,9 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
     ),
     error_model = .fitrx_error_model_from_sigma_types(fit$sigma_types),
     shrinkage_eps = as.numeric(fit$shrinkage_eps %||% NA_real_),
-    dw_statistic = .fitrx_opt_num(fit$dw_statistic),
-    iwres_lag1_r = .fitrx_opt_num(fit$iwres_lag1_r),
+    # Required keys on the wire, a NaN written as `null`.
+    dw_statistic = as.numeric(fit$dw_statistic %||% NA_real_),
+    iwres_lag1_r = as.numeric(fit$iwres_lag1_r %||% NA_real_),
     covariance_matrix = .fitrx_matrix_to_wire(fit$cov_matrix),
     # ferx_fit() and ferx_covariance() rename these to `eigenvalues` /
     # `condition_number` and clear the wire names (.ferx_apply_cov_sentinels);
@@ -625,7 +635,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
       fit$cov_condition_number %||% fit$condition_number
     ),
     # Free-parameter tally by Delattre class and the optimizer's init-escape
-    # verdict (ferx-core #1177). Written at wire level, not under `r_extras`,
+    # verdict (ferx-core #1177). Written at wire level,
     # so a bundle this package saves ranks and gates the same way in the
     # engine's own tooling. `bic_inputs` is a plain (non-Option) field on the
     # Rust side whose `#[serde(default)]` only covers a *missing* key, so it is
@@ -641,7 +651,10 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
     # `left_init` - so the inits ship with the verdict or the verdict is inert.
     theta_init = as.numeric(fit$theta_init %||% numeric()),
     sigma_init = as.numeric(fit$sigma_init %||% numeric()),
-    omega_init = .fitrx_matrix_to_wire(.fitrx_omega_init_matrix(fit)),
+    # A required key: 0 x 0 for a fit without random effects.
+    omega_init = .fitrx_matrix_to_wire(
+      .fitrx_omega_init_matrix(fit) %||% matrix(numeric(0), 0L, 0L)
+    ),
     # The packed Omega / kappa layout. `natural_scale_covariance()` returns the
     # covariance matrix as stored when this is absent, so a bundle written
     # without it makes the engine read correlations off the Cholesky scale for
@@ -650,7 +663,6 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
     kappa_is_diagonal = .fitrx_opt_lgl(fit$kappa_is_diagonal),
 
     sir = .fitrx_build_sir_wire(fit),
-    bayes = .fitrx_build_bayes_wire(fit),
     iov = .fitrx_build_iov_wire(fit),
 
     eta_param_info = .fitrx_build_eta_param_info(fit),
@@ -667,31 +679,23 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
     input_columns    = as.character(fit$input_columns    %||% character()),
     covariate_names  = as.character(fit$covariate_names  %||% character()),
 
-    exclusions = if (!is.null(fit$exclusions)) {
-      ex <- fit$exclusions
-      list(
-        n_records_total      = as.integer(ex$n_records_total  %||% 0L),
-        n_obs_excluded       = as.integer(ex$n_obs_excluded   %||% 0L),
-        n_dose_excluded      = as.integer(ex$n_dose_excluded  %||% 0L),
-        n_other_excluded     = as.integer(ex$n_other_excluded %||% 0L),
-        excluded_subject_ids = as.character(ex$excluded_subject_ids %||% character()),
-        fired_ignore         = as.character(ex$fired_ignore          %||% character()),
-        fired_accept         = as.character(ex$fired_accept          %||% character())
-      )
-    } else {
-      NULL
-    },
-
-    # Named covariate -> "continuous"/"categorical" map, as a JSON object.
-    # `as.list` keeps the names; NULL when no [covariates] block was declared.
-    covariate_types = if (length(fit$covariate_types)) {
-      as.list(fit$covariate_types)
-    } else {
-      NULL
-    },
-
-    r_extras = .fitrx_collect_r_extras(fit)
+    # The verdicts the engine derives from a fit (ferx-core #1177) and its
+    # held-coordinate mask over `cov_matrix` (#424), in core's slots (#2695).
+    stalled_at_init = .fitrx_opt_lgl(fit$stalled_at_init),
+    estimate_near_boundary = isTRUE(fit$estimate_near_boundary),
+    max_abs_correlation = .fitrx_opt_num(fit$max_abs_correlation)
   )
+  if (length(fit$cov_fixed)) wire$cov_fixed <- as.logical(unname(fit$cov_fixed))
+  # Named covariate -> "continuous"/"categorical" map, as a JSON object, which
+  # core reads a null as refusing: absent with no [covariates] block.
+  if (length(fit$covariate_types)) wire$covariate_types <- as.list(fit$covariate_types)
+  # What core writes and an R fit does not hold, verbatim from the fit's own
+  # bundle. The rest of the wire is written from the fit below, so what
+  # `ferx_covariance()` and `ferx_sir()` changed on it is what is saved.
+  core_only <- ferx_rust_fitrx_wire_keys(fit$bundle, .FITRX_CORE_ONLY_KEYS)
+  for (i in which(!is.na(core_only))) {
+    wire[[.FITRX_CORE_ONLY_KEYS[[i]]]] <- structure(core_only[[i]], class = "json")
+  }
 
   # The gradient at the estimates and where it came from (ferx-core #997).
   gradient <- .fitrx_final_gradient_wire(fit)
@@ -720,15 +724,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
     }
     wire$profiled_levels_at_bound <- sort(idx - 1L)
   }
-  # A fit loaded from a pre-#366 bundle has its prior half recovered from the
-  # stored AIC but no per-parameter report, so the halves are written on a
-  # non-zero `ofv_prior` alone - otherwise re-saving such a fit would drop the
-  # split again and put the next reader back where this PR found them.
-  if (!is.null(prior_rows) || .ferx_ofv_prior(fit) != 0) {
-    wire$ofv_data <- as.numeric(fit$ofv_data %||% fit$ofv)
-    wire$ofv_prior <- .ferx_ofv_prior(fit)
-    if (!is.null(prior_rows)) wire$prior_summary <- prior_rows
-  }
+  if (!is.null(prior_rows)) wire$prior_summary <- prior_rows
 
   # The fit's data-derived bindings in ferx-core's own slot (`data_bindings`,
   # its `DataBindingsWire`), so the engine reads an R bundle's bindings and R
@@ -853,6 +849,13 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
   # per-subject columns go between the two: a reloaded ferx-core mixture
   # bundle carries MIXEST / PMIX_* in fit$ebe_etas.
   summ <- .fitrx_subject_summary(fit)
+  # A mixture fit's class and posteriors, from its bundle: the loader needs them
+  # to evaluate each subject's individual parameters in its own class.
+  mixture <- if (is.raw(fit$bundle)) ferx_rust_fitrx_mixture_columns(fit$bundle)
+  if (!is.null(mixture) && length(mixture[[1L]]) == nrow(ebes)) {
+    mixture$MIXEST <- as.integer(mixture$MIXEST)
+    ebes[names(mixture)] <- mixture
+  }
   if (!is.null(summ) && nrow(summ) == nrow(ebes)) {
     mix <- grep("^(MIXEST|PMIX_[0-9]+)$", names(ebes), value = TRUE)
     per_subject <- data.frame(
@@ -987,63 +990,50 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
   !is.null(cd) && is.data.frame(cd$data) && nrow(cd$data) > 0L
 }
 
-.fitrx_warn_tte_rows_dropped <- function(n_tte) {
-  warning(warningCondition(sprintf(paste0(
-    "ferx_save_fit(): the bundle does not keep the %d time-to-event sdtab ",
-    "rows (COXSNELL, MARTINGALE, DEVIANCE, PIT); the reloaded fit's sdtab ",
-    "has the Gaussian and discrete rows only. Refit to get them back ",
-    "(ferx-core #911)."), n_tte),
-    class = "ferx_tte_rows_dropped_warning"))
-}
-
-# Writes predictions.csv into `staging`, and predictions_discrete.csv when the
-# fit has discrete rows; TRUE when it wrote the second.
+# Writes predictions.csv into `staging`, and the entries for the fit's other
+# rows when it has any; returns the names of the entries it wrote.
 .fitrx_write_predictions_csv <- function(fit, staging) {
   path <- file.path(staging, "predictions.csv")
   sdtab <- fit$sdtab
   if (is.null(sdtab) || nrow(sdtab) == 0L) {
     cat("ID,TIME,DV,PRED,IPRED,CWRES,IWRES,EBE_OFV,N_OBS\n", file = path)
-    return(FALSE)
+    return("predictions.csv")
   }
   # sdtab$ID is a number: the subject ID parsed as one, else the subject's
   # position. ferx-core's writer puts the subject ID itself here, as text, and
   # its loader refuses a row whose ID is not its ebes.csv subject's, so write
   # the same: `NA`, `007` and `Smith, 2019` all differ from their number
-  # (#475). The loader turns it back (`.fitrx_sdtab_id_number()`).
+  # (#475). The loader turns it back from the row's subject.
   ids <- .fitrx_subject_string_ids(fit)
-  blocks <- .fitrx_sdtab_blocks(fit, sdtab)
-  rows <- blocks$subject
+  rows <- .fitrx_sdtab_blocks(fit, sdtab)$subject
   if (is.null(ids) || !identical(attr(rows, "n_subjects"), length(ids))) {
-    rows <- NULL
-  }
-  # The time-to-event rows (ferx-core #901); the bundle keeps none of them,
-  # as ferx-core's own checkpoint keeps none (#911), and none of the columns
-  # only they fill. A fit without TTE rows keeps every column, so an
-  # `[output]` column that happens to be called PIT survives.
-  tte_rows <- blocks$tte
-  if (length(tte_rows) > 0L) {
-    .fitrx_warn_tte_rows_dropped(length(tte_rows))
-    sdtab <- sdtab[-tte_rows, setdiff(names(sdtab), .FITRX_TTE_COLS), drop = FALSE]
-  }
-  if (is.null(rows)) {
-    # Without the counts every row left goes to predictions.csv, discrete
-    # ones included, as before #696.
-    # A fit from before fit$subject_summary: the run-length of the ID number
-    # is all there is, right only when no two adjacent subjects share a
-    # number and every subject has observations.
-    subj <- .ferx_subject_index(sdtab$ID)
-    if (!is.null(ids) && max(subj) == length(ids)) sdtab$ID <- ids[subj]
-    .fitrx_write_csv_exact(sdtab, path)
-    return(FALSE)
+    stop("ferx_save_fit: fit$sdtab does not have the rows fit$subject_summary ",
+         "counts, so its rows cannot be placed; it was edited after the fit.",
+         call. = FALSE)
   }
   n_gauss <- length(rows$gaussian)
-  sdtab$ID <- ids[c(rows$gaussian, rows$discrete)]
+  endpoint <- c(rows$discrete, rows$tte)
+  sdtab$ID <- ids[c(rows$gaussian, endpoint)]
   .fitrx_write_csv_exact(sdtab[seq_len(n_gauss), , drop = FALSE], path)
-  if (length(rows$discrete) == 0L) return(FALSE)
-  .fitrx_write_csv_exact(sdtab[n_gauss + seq_along(rows$discrete), , drop = FALSE],
-                         file.path(staging, "predictions_discrete.csv"))
-  TRUE
+  if (length(endpoint) == 0L) return("predictions.csv")
+  # In full, with each row's subject: an ID can repeat, and every column of the
+  # fit's sdtab reads back from here (see the glue's `ENDPOINT_ROWS_ENTRY`).
+  .fitrx_write_csv_exact(
+    cbind(SUBJECT = endpoint, sdtab[n_gauss + seq_along(endpoint), , drop = FALSE]),
+    file.path(staging, "sdtab_endpoint_rows.csv")
+  )
+  if (length(rows$discrete) == 0L) {
+    return(c("predictions.csv", "sdtab_endpoint_rows.csv"))
+  }
+  .fitrx_write_csv_exact(
+    sdtab[n_gauss + seq_along(rows$discrete), .FITRX_DISCRETE_COLS, drop = FALSE],
+    file.path(staging, "predictions_discrete.csv")
+  )
+  c("predictions.csv", "predictions_discrete.csv", "sdtab_endpoint_rows.csv")
 }
+
+# The columns of ferx-core's predictions_discrete.csv, whose loader checks them.
+.FITRX_DISCRETE_COLS <- c("ID", "CMT", "TIME", "DV", "PRED", "IPRED", "IWRES")
 
 .fitrx_write_covtab_csv <- function(fit, path) {
   covtab <- fit$covtab
@@ -1216,35 +1206,6 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
   matrix(as.numeric(v), nrow = n, ncol = d, byrow = TRUE)
 }
 
-# Bayes posterior summary (method = "bayes"). Stored as scalar metadata plus
-# parallel per-parameter vectors, mirroring the in-memory `$bayes` list so the
-# posterior survives a save/load round-trip (the engine's binary .fitrx does
-# not carry it). NULL for non-Bayes fits.
-.fitrx_build_bayes_wire <- function(fit) {
-  b <- fit$bayes
-  if (is.null(b)) return(NULL)
-  list(
-    n_chains = .fitrx_opt_num(b$n_chains),
-    n_warmup = .fitrx_opt_num(b$n_warmup),
-    n_draws_per_chain = .fitrx_opt_num(b$n_draws_per_chain),
-    n_divergent = .fitrx_opt_num(b$n_divergent),
-    max_rhat = .fitrx_opt_num(b$max_rhat),
-    param_names = as.list(as.character(b$param_names %||% character())),
-    mean = .fitrx_opt_num_vec(b$mean),
-    sd = .fitrx_opt_num_vec(b$sd),
-    q025 = .fitrx_opt_num_vec(b$q025),
-    median = .fitrx_opt_num_vec(b$median),
-    q975 = .fitrx_opt_num_vec(b$q975),
-    rhat = .fitrx_opt_num_vec(b$rhat),
-    ess_bulk = .fitrx_opt_num_vec(b$ess_bulk),
-    ess_tail = .fitrx_opt_num_vec(b$ess_tail),
-    mcse = .fitrx_opt_num_vec(b$mcse)
-  )
-}
-
-# CIs on the R side are either NULL, a 2-column matrix (rows = params), or a
-# flat numeric of length 2k (legacy FFI layout). Normalise to a list of
-# 2-element lists, which JSON encodes as an array of [lo, hi] pairs.
 .fitrx_ci_to_wire <- function(ci) {
   if (is.null(ci) || length(ci) == 0L) return(NULL)
   if (is.matrix(ci) && ncol(ci) == 2L) {
@@ -1276,29 +1237,16 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
     omega_iov_param_corr = .fitrx_matrix_to_wire(fit$omega_iov_param_corr),
     kappa_init_as_sd = as.logical(fit$kappa_init_as_sd %||% rep(FALSE, length(fit$kappa_names)))
   )
-  # Sample-size-weighted IOV (ferx-core #1031). The two keys must be *absent*
-  # (not JSON `null`) for an unweighted model: the engine declares them
-  # `#[serde(default)] Vec<Option<..>>`, and `serde(default)` only fires for a
-  # missing key - an explicit `null` fails with "invalid type: null, expected a
-  # sequence". Assigning NULL into a list() literal keeps the name, so the
-  # fields are appended here only when a weight exists. That also keeps the
-  # bundle byte-identical to a pre-#1031 one for every unweighted model.
-  # `as.list()` keeps them JSON arrays under `auto_unbox = TRUE` (a single
-  # weighted kappa is the common MBMA case), and `na = "null"` maps an
-  # unweighted slot to `null`, which is what `Vec<Option<..>>` expects.
-  if (!is.null(fit$kappa_weights)) {
-    wire$kappa_weights <- as.list(as.character(fit$kappa_weights))
-    wire$kappa_weight_typical <- as.list(as.numeric(
-      fit$kappa_weight_typical %||% rep(NA_real_, length(fit$kappa_weights))
-    ))
-  }
-  # The scale of each kappa (ferx-core #1643), parallel to kappa_names. The
-  # engine declares it `#[serde(default)]`, so, like the weights, it is
-  # written only when the fit has it: a fit from before #1643 (or loaded from
-  # such a bundle) writes the bundle it always wrote.
-  if (length(fit$kappa_param_types) > 0L) {
-    wire$kappa_param_types <- as.list(unname(as.character(fit$kappa_param_types)))
-  }
+  # Sample-size-weighted IOV (ferx-core #1031) and each kappa's scale (#1643):
+  # required keys, empty for a model without them. `as.list()` keeps them JSON
+  # arrays under `auto_unbox = TRUE` (a single weighted kappa is the common MBMA
+  # case), and `na = "null"` maps an unweighted slot to `null`, which is what
+  # `Vec<Option<..>>` expects.
+  wire$kappa_weights <- as.list(as.character(fit$kappa_weights))
+  wire$kappa_weight_typical <- as.list(as.numeric(
+    fit$kappa_weight_typical %||% rep(NA_real_, length(fit$kappa_weights))
+  ))
+  wire$kappa_param_types <- as.list(unname(as.character(fit$kappa_param_types)))
   # Nested levels (ferx-core #1082 PR4): each kappa's level, and per level its
   # label columns and kappas, which name the columns of its
   # ebes_kappa_<LEVEL>.csv. The engine skips both when empty, so they are
@@ -1366,36 +1314,27 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
 
 # Fields that have no place in the cross-language schema but matter for R
 # users (R-side derived labels, call settings, model file settings, etc.).
-# Stored under fit.json:r_extras so the Rust loader silently ignores them.
+# Stored in interface_extras.json, which core keeps and never reads.
 .fitrx_collect_r_extras <- function(fit) {
-  r_only_keys <- c(
-    "call_settings", "model_file_settings", "model_structure",
-    "data_name", "gradient", "gradient_used", "model_file_path",
-    # Verdicts the engine derives from a live FitResult (ferx-core #1177) and
-    # the cross-language schema has no slot for. Two of them cannot be redone
-    # in R at all - the boundary predicate reads structured warning details the
-    # wire drops, and the correlation needs the natural-scale covariance, a
-    # Cholesky Jacobian away from the packed matrix the wire stores - so they
-    # travel with the bundle rather than being recomputed on load.
-    "stalled_at_init", "estimate_near_boundary", "max_abs_correlation"
-  )
   out <- list()
-  for (k in r_only_keys) {
+  for (k in c(.FITRX_INTERFACE_KEYS, "model_structure")) {
     if (!is.null(fit[[k]])) out[[k]] <- fit[[k]]
   }
-  # Theta level-block bindings (#370). Since #466 they are written to the
-  # schema's own slot, `data_bindings.levels`, and the loader reads them from
-  # there. This copy stays for one release, so a ferx that predates #466
-  # still finds them in a bundle written by this one.
-  tl <- .fitrx_theta_levels_to_wire(fit$theta_levels)
-  if (!is.null(tl)) out$theta_levels <- tl
-  # The engine's held-coordinate mask over `cov_matrix` (#424); the schema has
-  # no slot for it. Wrapped as a list so a one-parameter mask stays an array.
-  if (!is.null(fit$cov_fixed)) {
-    out$cov_fixed <- as.list(unname(as.logical(fit$cov_fixed)))
-  }
+  # Core's conddist.csv keeps neither count.
+  cd <- fit$cond_dist
+  if (!is.null(cd)) out$cond_dist <- list(nsamp = cd$nsamp, burnin = cd$burnin)
   out
 }
+
+# The `fit.json` keys core writes and an R fit does not hold, or holds only as a
+# view of them. `ferx_save_fit()` carries them over from the fit's bundle.
+.FITRX_CORE_ONLY_KEYS <- c(
+  "method_wall_times_secs", "total_ebe_nm_polished", "saem_n_subjects_hmc",
+  "saem_mh_accept_tail", "importance_sampling", "impmap_trace", "environment",
+  "obs_time_range", "optimizer", "n_starts", "multi_start_seed", "saem_seed",
+  "imp_seed", "npde_seed", "outer_maxiter", "outer_gtol", "inits_from_nca",
+  "neural_networks", "bayes", "exclusions"
+)
 
 # `final_gradient` and `final_gradient_source` for the wire, which the engine
 # keeps absent together. JSON has no NaN / Inf: a non-finite component would be
@@ -1408,22 +1347,6 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
   if (is.null(grad) || !all(is.finite(grad))) return(list())
   list(final_gradient = grad,
        final_gradient_source = .fitrx_opt_chr(fit$final_gradient_source))
-}
-
-# `fit$theta_levels` as columns of JSON arrays. `r_extras` is skipped by the
-# array-key table, so every column is wrapped here: `auto_unbox` would write a
-# one-level block's columns as bare scalars, and the loader insists on arrays.
-# NA (a derived level's `theta_name`) is written as JSON null. `value` (#430)
-# is written for a ferx that predates #466. The level se and SIR interval
-# (#528) are not: every bundle this writes carries `data_bindings$levels`, so
-# the loader recomputes them from the bundle's covariance and draws.
-.fitrx_theta_levels_to_wire <- function(tl) {
-  if (!is.data.frame(tl)) return(NULL)
-  cols <- c("block", "index", "label", "group", "contrast", "theta_name", "value")
-  cols <- intersect(cols, names(tl))
-  out <- lapply(cols, function(k) as.list(unname(tl[[k]])))
-  names(out) <- cols
-  out
 }
 
 # `fit$theta_levels` as ferx-core's `data_bindings.levels` wire (#466): an

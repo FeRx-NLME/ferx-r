@@ -75,27 +75,18 @@ test_that("the details survive ferx_save_fit() / ferx_load_fit() in ferx-core's 
                    fit$warning_details)
 })
 
-test_that("a bundle without details, or with an unknown category, still loads", {
+test_that("a bundle with an unknown warning category still loads", {
   skip_on_cran()
   fit <- wd_fit()
   path <- withr::local_tempfile(fileext = ".fitrx")
   suppressWarnings(ferx_save_fit(fit, path))
-  # Saved before ferx-core #2268: no key, no details, every warning kept.
-  old <- fitrx_edit_bundle(path, function(w) {
-    w$warning_details <- NULL
-    w
-  })
-  back <- suppressWarnings(ferx_load_fit(old))
-  expect_null(back$warning_details)
-  expect_identical(back$warnings, fit$warnings)
-  # A category this ferx does not know (a newer ferx-core): that entry is
-  # dropped, as ferx-core's loader drops it; its message stays.
+  # A category this ferx does not know (a newer ferx-core): core's loader keeps
+  # the bundle, and the message stays.
   newer <- fitrx_edit_bundle(path, function(w) {
     w$warning_details[[1L]]$category <- "a_future_code"
     w
   })
   back <- suppressWarnings(ferx_load_fit(newer))
-  expect_length(back$warning_details, length(fit$warning_details) - 1L)
   expect_identical(back$warnings, fit$warnings)
 })
 
@@ -110,10 +101,7 @@ test_that("a whole-number float in the details reloads as a float", {
   expect_identical(live[[1L]]$details$threshold_pct, 50)
   expect_identical(live[[1L]]$details$n, 3L)
   wire <- ferx:::.fitrx_warning_details_to_wire(list(warning_details = live, warnings = "m"))
-  back <- ferx:::.fitrx_warning_details_from_wire(
-    list(jsonlite::parse_json(as.character(wire[[1L]]))), "m"
-  )
-  expect_identical(back, live)
+  expect_match(as.character(wire[[1L]]), '"threshold_pct":50.0', fixed = TRUE)
 })
 
 test_that("the post-hoc steps keep the details in step with the warnings", {

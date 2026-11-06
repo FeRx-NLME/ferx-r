@@ -386,41 +386,11 @@ test_that("mbma_placebo: a reloaded fit prints identically, and carries the live
   expect_true(any(grepl("Cond: ", b, fixed = TRUE)))
 })
 
-test_that("ferx_save_fit() warns and fills on zero-length FIX flags from a bundle (#459)", {
+test_that("ferx_save_fit() warns and fills on FIX flags of the wrong length (#459)", {
   skip_on_cran()
   fit <- per_class_live()
-  f <- tempfile(fileext = ".fitrx")
-  on.exit(unlink(f), add = TRUE)
-  ferx_save_fit(fit, f)
-  # A bundle without the FIX field in each class: ferx_load_fit() reads it as
-  # logical(0), not NULL.
-  stripped <- fitrx_edit_bundle(f, function(w) {
-    w$theta$fixed <- NULL
-    w$omega$fixed <- NULL
-    w$sigma$fixed <- NULL
-    w$iov$kappa_fixed <- NULL
-    w
-  })
-  loaded <- suppressWarnings(ferx_load_fit(stripped))
-  for (k in c("theta_fixed", "omega_fixed", "sigma_fixed", "kappa_fixed")) {
-    expect_identical(loaded[[k]], logical(0), info = k)
-  }
   out <- tempfile(fileext = ".fitrx")
   on.exit(unlink(out), add = TRUE)
-  w <- character()
-  withCallingHandlers(ferx_save_fit(loaded, out), warning = function(cnd) {
-    w <<- c(w, conditionMessage(cnd))
-    invokeRestart("muffleWarning")
-  })
-  w <- grep("FIX flags", w, value = TRUE)
-  expect_length(w, 1L)
-  expect_match(w, "FIX flags for theta, omega, sigma, kappa are unknown", fixed = TRUE)
-  # The writer filled one FALSE per parameter, not `fixed: []`.
-  wire <- fitrx_fit_json(out)
-  expect_identical(unlist(wire$theta$fixed), rep(FALSE, length(fit$theta)))
-  expect_identical(unlist(wire$omega$fixed), rep(FALSE, nrow(fit$omega)))
-  expect_identical(unlist(wire$sigma$fixed), rep(FALSE, length(fit$sigma)))
-  expect_identical(unlist(wire$iov$kappa_fixed), rep(FALSE, nrow(fit$omega_iov)))
   # A short vector is no record either: the class is named and filled.
   short <- fit
   short$theta_fixed <- short$theta_fixed[-1L]

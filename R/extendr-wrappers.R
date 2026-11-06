@@ -189,6 +189,24 @@ ferx_rust_zip_files <- function(dir, entries, output) {
 
 #' @title Internal Rust backend binding
 #' @keywords internal
+ferx_rust_load_fit <- function(bundle) {
+  .Call("wrap__ferx_rust_load_fit", bundle)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_fitrx_wire_keys <- function(bundle, keys) {
+  .Call("wrap__ferx_rust_fitrx_wire_keys", bundle, keys)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_fitrx_mixture_columns <- function(bundle) {
+  .Call("wrap__ferx_rust_fitrx_mixture_columns", bundle)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
 ferx_rust_stage_data_probe <- function(bytes) {
   .Call("wrap__ferx_rust_stage_data_probe", bytes)
 }

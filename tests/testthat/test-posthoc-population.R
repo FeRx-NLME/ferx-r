@@ -116,7 +116,6 @@ test_that("P4: the rule survives ferx_save_fit() / ferx_load_fit() (#512)", {
 
 test_that("P5: the .fitrx spelling of the rule is ferx-core's", {
   to <- ferx:::.fitrx_iov_occasion_to_wire
-  from <- ferx:::.fitrx_iov_occasion_from_wire
   expect_null(to(NULL))
   expect_identical(to("column"), "column")
   expect_identical(to("dose"), "per_dose")
@@ -126,45 +125,7 @@ test_that("P5: the .fitrx spelling of the rule is ferx-core's", {
     as.character(jsonlite::toJSON(to("time(24)"), auto_unbox = TRUE)),
     '{"time_windows":[24]}'
   )
-  expect_identical(from("per_dose"), "dose")
-  expect_identical(from(list(time_windows = list(24, 48.5))), "time(24, 48.5)")
-  expect_identical(from(list(time_windows = list(0.1 + 0.2))), "time(0.30000000000000004)")
-  # No exponent, as Rust's `{}` writes none: round edges are where R's
-  # format() would switch to scientific notation.
-  expect_identical(from(list(time_windows = list(1e5, 2e6))), "time(100000, 2000000)")
-  expect_identical(from(list(time_windows = list(1e-5))), "time(0.00001)")
   expect_error(to("weekly"), "not \"column\"", fixed = TRUE)
-  # An unrecognised shape drops the field with a warning naming the value,
-  # rather than refusing the bundle (#524).
-  for (bad in list("weekly", list(calendar_days = list(7)), list(time_windows = list()),
-                   list(time_windows = list("24")), 3)) {
-    expect_warning(got <- from(bad), class = "ferx_iov_occasion_dropped_warning")
-    expect_null(got)
-  }
-  expect_warning(from(list(calendar_days = list(7))),
-                 'the bundle\'s `iov_occasion` is {"calendar_days":[7]}', fixed = TRUE)
-})
-
-test_that("P16: a bundle with an unknown iov_occasion loads without the rule (#524)", {
-  # The model file's rule, so the steps on the loaded fit derive the occasions
-  # the fit did once the bundle's own rule is dropped.
-  fit <- pp_fit(pp_iov_model("  iov_occasion = dose"), pp_iov_data())
-  expect_identical(fit$iov_occasion, "dose")
-  path <- pp_scratch(".fitrx")
-  unlink(path)
-  ferx_save_fit(fit, path)
-  edited <- fitrx_edit_bundle(path, function(w) {
-    w$iov_occasion <- list(per_calendar_day = list(start = 0))
-    w
-  })
-  expect_warning(loaded <- ferx_load_fit(edited),
-                 class = "ferx_iov_occasion_dropped_warning")
-  expect_null(loaded$iov_occasion)
-  expect_identical(loaded$theta, ferx_load_fit(path)$theta)
-  if (!is.null(fit$cov_matrix)) {
-    expect_identical(ferx_covariance(loaded)$se_theta,
-                     ferx_covariance(fit)$se_theta)
-  }
 })
 
 # #523 / #519: the from-fit predict / simulate / npde paths read the data with
@@ -365,4 +326,26 @@ test_that("P15: the override note reaches ferx_simulate_adaptive() and ferx_pred
   writeLines(append(text, "  iov_column = OCC", after = at), plain)
   surv <- suppressWarnings(ferx_predict_survival(plain, data, times = c(0, 6)))
   expect_false(any(grepl(msg, attr(surv, "simulation_warnings"), fixed = TRUE)))
+})
+
+test_that("P16: a bundle with an unknown iov_occasion loads without the rule (#524)", {
+  # The model file's rule, so the steps on the loaded fit derive the occasions
+  # the fit did once the bundle's own rule is dropped.
+  fit <- pp_fit(pp_iov_model("  iov_occasion = dose"), pp_iov_data())
+  expect_identical(fit$iov_occasion, "dose")
+  path <- pp_scratch(".fitrx")
+  unlink(path)
+  ferx_save_fit(fit, path)
+  edited <- fitrx_edit_bundle(path, function(w) {
+    w$iov_occasion <- list(per_calendar_day = list(start = 0))
+    w
+  })
+  expect_warning(loaded <- ferx_load_fit(edited),
+                 class = "ferx_iov_occasion_dropped_warning")
+  expect_null(loaded$iov_occasion)
+  expect_identical(loaded$theta, ferx_load_fit(path)$theta)
+  if (!is.null(fit$cov_matrix)) {
+    expect_identical(ferx_covariance(loaded)$se_theta,
+                     ferx_covariance(fit)$se_theta)
+  }
 })

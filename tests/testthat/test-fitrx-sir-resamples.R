@@ -237,7 +237,7 @@ test_that("ferx_load_fit() refuses resamples_packed rows that are not n x dim nu
       w$sir$resamples_packed <- edit(w$sir$resamples_packed)
       w
     })
-    expect_error(ferx_load_fit(p), "the bundle is corrupt")
+    expect_error(ferx_load_fit(p), "cannot read this .fitrx bundle", fixed = TRUE)
   }
   # A shorter row.
   corrupt(function(rp) { rp[[2L]] <- rp[[2L]][-1L]; rp })
@@ -260,7 +260,7 @@ test_that("ferx_load_fit() refuses a sir.ci_* pair list with a hole in it (#557)
       w$sir[[field]] <- edit(w$sir[[field]])
       w
     })
-    expect_error(ferx_load_fit(p), paste0("`sir.", field, "`.*the bundle is corrupt"),
+    expect_error(ferx_load_fit(p), "cannot read this .fitrx bundle", fixed = TRUE,
                  info = field)
   }
   # A `null` bound, as a NaN would be written: unlist() would shift every

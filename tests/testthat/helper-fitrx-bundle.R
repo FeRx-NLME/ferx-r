@@ -41,5 +41,16 @@ fitrx_edit_bundle <- function(path, edit, drop = character()) {
   out
 }
 
+# A copy of the bundle at `path` with the entry `name` replaced by `file`.
+fitrx_replace_entry <- function(path, name, file) {
+  staging <- tempfile("fitrx_edit_")
+  dir.create(staging)
+  utils::unzip(path, exdir = staging, junkpaths = TRUE)
+  file.copy(file, file.path(staging, name), overwrite = TRUE)
+  out <- tempfile(fileext = ".fitrx")
+  utils::zip(out, list.files(staging, full.names = TRUE), flags = "-j -q")
+  out
+}
+
 # The columns of `fit$theta_levels` the wire carries.
 fitrx_layout_cols <- c("block", "label", "group", "contrast")

@@ -46,23 +46,6 @@ fake_bayes <- function(max_rhat = 1.004) {
 
 
 
-test_that(".fitrx_build_bayes_wire returns NULL when there is no posterior", {
-  expect_null(ferx:::.fitrx_build_bayes_wire(list(bayes = NULL)))
-  expect_null(ferx:::.fitrx_build_bayes_wire(list()))
-})
-test_that(".fitrx_build_bayes_wire serialises every posterior field", {
-  wire <- ferx:::.fitrx_build_bayes_wire(list(bayes = fake_bayes()))
-  expect_false(is.null(wire))
-  # Scalars survive as plain numerics; param_names become a JSON-friendly list.
-  expect_equal(wire$n_chains, 2)
-  expect_equal(wire$n_draws_per_chain, 600)
-  expect_equal(wire$max_rhat, 1.004)
-  expect_equal(unlist(wire$param_names), c("TVCL", "TVV", "OMEGA_CL", "SIGMA_PROP"))
-  # Per-parameter vectors round-trip through the unwrap helpers unchanged.
-  expect_equal(ferx:::.fitrx_unwrap_opt_num_vec(wire$mean), fake_bayes()$mean)
-  expect_equal(ferx:::.fitrx_unwrap_opt_num_vec(wire$ess_bulk), fake_bayes()$ess_bulk)
-})
-
 # ---- header from test-persist.R ----
 # ferx_save_fit() / ferx_load_fit() round-trip and CLI-flag tests.
 #
@@ -72,7 +55,6 @@ test_that(".fitrx_build_bayes_wire serialises every posterior field", {
 # ferx_fit() saves a valid bundle.
 
 # Local aliases avoid the ::: operator (undesirable_operator_linter).
-.fitrx_wire_to_fit      <- getFromNamespace(".fitrx_wire_to_fit",      "ferx")
 .fitrx_build_iov_wire   <- getFromNamespace(".fitrx_build_iov_wire",   "ferx")
 
 
@@ -260,41 +242,6 @@ test_that("a level-block fit's cov_matrix is named on load (#417)", {
   expect_identical(loaded$cor_matrix, fit$cor_matrix)
 })
 
-test_that("a bundle whose model the engine cannot read loads unnamed (#417)", {
-  cov <- matrix(c(1, 0, 0, 1), 2L)
-  expect_identical(
-    ferx:::.fitrx_name_cov_matrix(cov, list(model_path = NA_character_)), cov
-  )
-  bad <- tempfile(fileext = ".ferx")
-  on.exit(unlink(bad), add = TRUE)
-  writeLines("[not_a_block]", bad)
-  expect_identical(
-    ferx:::.fitrx_name_cov_matrix(cov, list(model_path = bad)), cov
-  )
-})
-
-test_that("a model file that is not the fitted one leaves cov_matrix unnamed (#417)", {
-  skip_on_cran()
-  fit <- warfarin_fit_cov()
-  skip_if(is.null(fit$cov_matrix), "no covariance step in this fit")
-  # Labels are placed by position, so a file that does not hash to the fit's
-  # model_hash names nothing.
-  edited <- tempfile(fileext = ".ferx")
-  on.exit(unlink(edited), add = TRUE)
-  writeLines(c(fit$model_text, "# edited"), edited)
-  probe <- fit
-  probe$model_path <- edited
-  expect_identical(
-    ferx:::.fitrx_name_cov_matrix(unname(fit$cov_matrix), probe),
-    unname(fit$cov_matrix)
-  )
-  probe$model_hash <- NULL
-  expect_identical(
-    ferx:::.fitrx_name_cov_matrix(unname(fit$cov_matrix), probe),
-    fit$cov_matrix
-  )
-})
-
 test_that("bare (extension-less) output path defaults to .fitrx and round-trips (#268)", {
   skip_on_cran()
   fit <- warfarin_fit_cov()
@@ -416,30 +363,6 @@ test_that("a warm start at an optimum reloads as one, not as a stall", {
   expect_true(ferx_load_fit(trip$core_path)$stationary_start)
 })
 
-test_that("tri-state verdicts stay NA across round-trip when unrecorded", {
-  skip_on_cran()
-  fit <- warfarin_fit_cov()
-
-  # An optimizer that recorded no verdict leaves these NA. NA serialises to
-  # JSON null, and assigning NULL back would drop the key entirely - so
-  # `is.na(loaded$stalled_at_init)` would error on a zero-length vector
-  # instead of reporting "no verdict".
-  fit$stalled_at_init <- NA
-  fit$estimate_near_boundary <- NA
-  fit$max_abs_correlation <- NA_real_
-
-  path <- tempfile(fileext = ".fitrx")
-  on.exit(unlink(path), add = TRUE)
-  ferx_save_fit(fit, path)
-  loaded <- ferx_load_fit(path)
-
-  expect_true(is.na(loaded$stalled_at_init))
-  expect_true(is.na(loaded$estimate_near_boundary))
-  expect_true(is.na(loaded$max_abs_correlation))
-  expect_length(loaded$stalled_at_init, 1L)
-  expect_length(loaded$max_abs_correlation, 1L)
-})
-
 test_that("bayes posterior summary survives round-trip", {
   skip_on_cran()
   fit <- warfarin_bayes_fit()
@@ -508,128 +431,6 @@ test_that(".fitrx_has_cond_dist / .fitrx_write_conddist_csv (synthetic)", {
   expect_equal(written$ID, c(1L, 1L, 2L, 2L))
   expect_equal(written$ETA, cd_data$ETA)
   expect_equal(written$COND_MEAN, cd_data$COND_MEAN, tolerance = 1e-12)
-})
-test_that("conddist.csv survives a ferx_save_fit / ferx_load_fit round-trip (synthetic)", {
-  cd_data <- data.frame(
-    ID = c("1", "1", "2", "2"),
-    ETA = c("ETA_CL", "ETA_V", "ETA_CL", "ETA_V"),
-    COND_MEAN = c(0.05, -0.02, -0.03, 0.01),
-    COND_SD = c(0.12, 0.15, 0.11, 0.14),
-    COND_MODE = c(0.04, -0.01, -0.02, 0.02),
-    stringsAsFactors = FALSE
-  )
-  fake <- structure(
-    list(
-      theta = c(TVCL = 1.0, TVV = 10.0),
-      omega = matrix(c(0.04, 0, 0, 0.09), 2L, 2L,
-                     dimnames = list(c("ETA_CL", "ETA_V"), c("ETA_CL", "ETA_V"))),
-      eta_names = c("ETA_CL", "ETA_V"),
-      sigma = c(prop = 0.05),
-      sigma_names = "prop",
-      sigma_types = "proportional",
-      cond_dist = list(data = cd_data, shrinkage = c(0.1, 0.05),
-                        nsamp = 20L, burnin = 5L),
-      # Numeric-looking IDs: ebe_etas$ID and cond_dist$data$ID must come back
-      # the same type after a round-trip (#248 review).
-      ebe_etas = data.frame(ID = c("1", "2"), ETA_CL = c(0.04, -0.02),
-                             ETA_V = c(-0.01, 0.02), stringsAsFactors = FALSE),
-      ofv = 0, aic = 2, bic = 4,
-      n_obs = 3L, n_subjects = 2L, n_parameters = 2L, n_iterations = 1L,
-      method = "SAEM", method_chain = "SAEM",
-      converged = TRUE,
-      warnings = character(),
-      shrinkage_eta = c(0, 0), shrinkage_eps = 0,
-      wall_time_secs = 0, model_name = "fake", ferx_version = "0.1.0",
-      gradient_method_inner = "Enzyme AD",
-      gradient_method_outer = "N/A",
-      covariance_status = "NotRequested",
-      model_source = "model fake\n",
-      data_path = NA_character_
-    ),
-    class = "ferx_fit"
-  )
-  path <- tempfile(fileext = ".fitrx")
-  on.exit(unlink(path), add = TRUE)
-
-  ferx_save_fit(fake, path)
-  entries <- utils::unzip(path, list = TRUE)$Name
-  expect_true("conddist.csv" %in% entries)
-
-  loaded <- ferx_load_fit(path)
-  expect_equal(loaded$cond_dist$data$ID, cd_data$ID)
-  expect_equal(loaded$cond_dist$data$ETA, cd_data$ETA)
-  expect_equal(loaded$cond_dist$data$COND_MEAN, cd_data$COND_MEAN, tolerance = 1e-12)
-  # nsamp/burnin aren't recoverable from conddist.csv alone (#244); NA (not
-  # 0L) so "unknown after reload" isn't confused with "zero draws retained".
-  expect_equal(loaded$cond_dist$nsamp, NA_integer_)
-  expect_equal(loaded$cond_dist$burnin, NA_integer_)
-  # Shrinkage is recomputed from cond_mean + omega, matching ferx-core's own
-  # conddist.csv reader formula.
-  expect_equal(
-    unname(loaded$cond_dist$shrinkage),
-    c(
-      1 - stats::sd(cd_data$COND_MEAN[cd_data$ETA == "ETA_CL"]) / sqrt(0.04),
-      1 - stats::sd(cd_data$COND_MEAN[cd_data$ETA == "ETA_V"]) / sqrt(0.09)
-    ),
-    tolerance = 1e-9
-  )
-  # ebe_etas$ID and cond_dist$data$ID must have the same type after a
-  # round-trip, so joins between the two tables don't silently break for
-  # numeric-looking subject IDs (#248 review).
-  expect_type(loaded$ebe_etas$ID, "character")
-  expect_type(loaded$cond_dist$data$ID, "character")
-})
-test_that("recomputed shrinkage matches ferx-core's near-singular-omega floor (synthetic)", {
-  # ferx-core's own conddist.csv reader (src/io/fitrx.rs) treats
-  # Omega_jj < SAEM_OMEGA_DIAG_FLOOR (1e-6) as NaN, not just Omega_jj <= 0;
-  # the R reimplementation must match or shrinkage silently diverges for a
-  # near-singular (but positive) omega diagonal.
-  cd_data <- data.frame(
-    ID = c("1", "2", "3"),
-    ETA = c("ETA_CL", "ETA_CL", "ETA_CL"),
-    COND_MEAN = c(0.05, -0.03, 0.01),
-    COND_SD = c(0.12, 0.11, 0.10),
-    COND_MODE = c(0.04, -0.02, 0.02),
-    stringsAsFactors = FALSE
-  )
-  omega <- matrix(1e-8, 1L, 1L, dimnames = list("ETA_CL", "ETA_CL"))
-  shrink <- ferx:::.fitrx_cond_dist_shrinkage(cd_data, omega, "ETA_CL")
-  expect_true(is.na(shrink))
-})
-test_that("a fit with no cond_dist has no conddist.csv entry and loads NULL", {
-  fake <- structure(
-    list(
-      theta = c(TVCL = 1.0),
-      omega = matrix(0.04, 1L, 1L, dimnames = list("ETA_CL", "ETA_CL")),
-      eta_names = "ETA_CL",
-      sigma = c(prop = 0.05),
-      sigma_names = "prop",
-      sigma_types = "proportional",
-      cond_dist = NULL,
-      ofv = 0, aic = 2, bic = 4,
-      n_obs = 3L, n_subjects = 2L, n_parameters = 1L, n_iterations = 1L,
-      method = "FOCEI", method_chain = "FOCEI",
-      converged = TRUE,
-      warnings = character(),
-      shrinkage_eta = 0, shrinkage_eps = 0,
-      wall_time_secs = 0, model_name = "fake", ferx_version = "0.1.0",
-      gradient_method_inner = "Enzyme AD",
-      gradient_method_outer = "N/A",
-      covariance_status = "NotRequested",
-      model_source = "model fake\n",
-      data_path = NA_character_
-    ),
-    class = "ferx_fit"
-  )
-  path <- tempfile(fileext = ".fitrx")
-  on.exit(unlink(path), add = TRUE)
-
-  ferx_save_fit(fake, path)
-  entries <- utils::unzip(path, list = TRUE)$Name
-  expect_false("conddist.csv" %in% entries)
-
-  loaded <- ferx_load_fit(path)
-  expect_null(loaded$cond_dist)
 })
 test_that("predictions survive round-trip (per-row equality)", {
   skip_on_cran()
@@ -749,7 +550,7 @@ test_that("include_data = TRUE bundles the input CSV", {
   expect_true(!is.na(loaded$data_path))
   expect_true(file.exists(loaded$data_path))
 })
-test_that("manifest reports format_version 1", {
+test_that("manifest reports format_version 2", {
   skip_on_cran()
   fit <- warfarin_fit()
   path <- tempfile(fileext = ".fitrx")
@@ -762,7 +563,7 @@ test_that("manifest reports format_version 1", {
   utils::unzip(path, exdir = staging)
   manifest <- jsonlite::read_json(file.path(staging, "manifest.json"),
                                   simplifyVector = TRUE)
-  expect_equal(manifest$format_version, "1")
+  expect_equal(manifest$format_version, "2")
   expect_true("fit.json" %in% manifest$entries)
 })
 test_that("ferx_save_fit rejects non-ferx_fit inputs", {
@@ -783,232 +584,6 @@ test_that("save -> load -> save again works (warfarin)", {
   ferx_save_fit(reloaded, second)
   twice <- ferx_load_fit(second)
   expect_equal(twice$ofv, fit$ofv, tolerance = 1e-12)
-})
-test_that(".fitrx_write_predictions_csv handles character sdtab$ID", {
-  # Regression for the Copilot review on PR #21: the writer used to assume
-  # sdtab$ID was numeric and called max(sdtab$ID, ...), which errors on
-  # character input. This synthesises a fit where IDs are alphanumeric (as
-  # they would be after loading a study with non-numeric subject IDs from a
-  # .fitrx) and verifies that saving and reloading succeed.
-  fake <- structure(
-    list(
-      sdtab = data.frame(
-        ID = c("PT001", "PT001", "PT002"),
-        TIME = c(0.5, 1.0, 0.5),
-        DV = c(5, 6, 4),
-        PRED = c(5, 6, 4), IPRED = c(5, 6, 4),
-        CWRES = c(0, 0, 0), IWRES = c(0, 0, 0),
-        EBE_OFV = c(-1, -1, -2), N_OBS = c(2L, 2L, 1L),
-        stringsAsFactors = FALSE
-      ),
-      ebe_etas = data.frame(
-        ID = c("PT001", "PT002"),
-        ETA_CL = c(0.1, -0.1),
-        stringsAsFactors = FALSE
-      ),
-      theta = c(TVCL = 1.0),
-      omega = matrix(0.04, 1L, 1L, dimnames = list("ETA_CL", "ETA_CL")),
-      eta_names = "ETA_CL",
-      sigma = c(prop = 0.05),
-      sigma_names = "prop",
-      sigma_types = "proportional",
-      # The FIX flags a current fit carries; without them ferx_save_fit()
-      # warns that they are unknown (#452), which is not what this tests.
-      theta_fixed = FALSE, omega_fixed = FALSE, sigma_fixed = FALSE,
-      ofv = 0, aic = 2, bic = 4,
-      n_obs = 3L, n_subjects = 2L, n_parameters = 1L, n_iterations = 1L,
-      method = "FOCEI", method_chain = "FOCEI",
-      converged = TRUE,
-      warnings = character(),
-      shrinkage_eta = 0, shrinkage_eps = 0,
-      wall_time_secs = 0, model_name = "fake", ferx_version = "0.1.0",
-      gradient_method_inner = "Enzyme AD",
-      gradient_method_outer = "N/A",
-      covariance_status = "NotRequested",
-      model_source = "model fake\n",
-      data_path = NA_character_
-    ),
-    class = "ferx_fit"
-  )
-  path <- tempfile(fileext = ".fitrx")
-  on.exit(unlink(path), add = TRUE)
-
-  expect_silent(ferx_save_fit(fake, path))
-  loaded <- ferx_load_fit(path)
-  # predictions.csv carries the subject IDs as text, as ferx-core writes it;
-  # the loader turns them into the number a live fit's sdtab holds, the
-  # subject's position for IDs that do not parse (#475).
-  expect_identical(loaded$sdtab$ID, c(1, 1, 2))
-  expect_equal(loaded$n_subjects, 2L)
-})
-test_that("init_as_sd flags survive a ferx_save_fit / ferx_load_fit round-trip (synthetic)", {
-  # CI-runnable regression for the .fitrx writer dropping the SD-init flags.
-  # The flags were read on load (omega/sigma/iov wire blocks) but never
-  # written on save, so they silently vanished on round-trip. A synthetic
-  # fit (no real estimation) keeps this in the default CI test pass; the
-  # gated test below additionally exercises the path on a real fit.
-  fake <- structure(
-    list(
-      theta = c(TVCL = 1.0, TVV = 10.0),
-      omega = matrix(c(0.04, 0, 0, 0.09), 2L, 2L,
-                     dimnames = list(c("ETA_CL", "ETA_V"), c("ETA_CL", "ETA_V"))),
-      eta_names = c("ETA_CL", "ETA_V"),
-      omega_init_as_sd = c(TRUE, FALSE),
-      sigma = c(prop = 0.05),
-      sigma_names = "prop",
-      sigma_types = "proportional",
-      sigma_init_as_sd = TRUE,
-      # Minimal IOV so the iov wire (and kappa_init_as_sd) is written.
-      omega_iov = matrix(0.02, 1L, 1L,
-                         dimnames = list("KAPPA_CL", "KAPPA_CL")),
-      kappa_names = "KAPPA_CL",
-      kappa_fixed = FALSE,
-      kappa_init_as_sd = TRUE,
-      ofv = 0, aic = 2, bic = 4,
-      n_obs = 3L, n_subjects = 2L, n_parameters = 2L, n_iterations = 1L,
-      method = "FOCEI", method_chain = "FOCEI",
-      converged = TRUE,
-      warnings = character(),
-      shrinkage_eta = c(0, 0), shrinkage_eps = 0,
-      wall_time_secs = 0, model_name = "fake", ferx_version = "0.1.0",
-      gradient_method_inner = "Enzyme AD",
-      gradient_method_outer = "N/A",
-      covariance_status = "NotRequested",
-      model_source = "model fake\n",
-      data_path = NA_character_
-    ),
-    class = "ferx_fit"
-  )
-  path <- tempfile(fileext = ".fitrx")
-  on.exit(unlink(path), add = TRUE)
-
-  ferx_save_fit(fake, path)
-  loaded <- ferx_load_fit(path)
-
-  expect_equal(loaded$omega_init_as_sd, c(TRUE, FALSE))
-  expect_equal(loaded$sigma_init_as_sd, TRUE)
-  expect_equal(loaded$kappa_init_as_sd, TRUE)
-})
-test_that("fit$trace survives a ferx_save_fit / ferx_load_fit round-trip (synthetic)", {
-  # fit$trace_path is a temp file and typically won't exist on reload; the
-  # bundled trace.csv is what actually needs to round-trip (see #228).
-  trace_path <- write_fake_trace(n = 3L, method = "gn")
-  on.exit(unlink(trace_path), add = TRUE)
-  fake <- structure(
-    list(
-      theta = c(TVCL = 1.0),
-      omega = matrix(0.04, 1L, 1L, dimnames = list("ETA_CL", "ETA_CL")),
-      eta_names = "ETA_CL",
-      sigma = c(prop = 0.05),
-      sigma_names = "prop",
-      sigma_types = "proportional",
-      ofv = 0, aic = 2, bic = 4,
-      n_obs = 3L, n_subjects = 2L, n_parameters = 1L, n_iterations = 1L,
-      method = "GN", method_chain = "GN",
-      converged = TRUE,
-      warnings = character(),
-      shrinkage_eta = 0, shrinkage_eps = 0,
-      wall_time_secs = 0, model_name = "fake", ferx_version = "0.1.0",
-      gradient_method_inner = "Enzyme AD",
-      gradient_method_outer = "N/A",
-      covariance_status = "NotRequested",
-      model_source = "model fake\n",
-      data_path = NA_character_,
-      trace_path = trace_path,
-      trace = ferx_trace(trace_path)
-    ),
-    class = "ferx_fit"
-  )
-  path <- tempfile(fileext = ".fitrx")
-  on.exit(unlink(path), add = TRUE)
-
-  ferx_save_fit(fake, path)
-  loaded <- ferx_load_fit(path)
-
-  expect_s3_class(loaded$trace, "data.frame")
-  expect_equal(nrow(loaded$trace), 3L)
-  expect_equal(loaded$trace$iter, fake$trace$iter)
-  expect_equal(loaded$trace$ofv, fake$trace$ofv, tolerance = 1e-12)
-  # grad_norm/step_norm are set by write_fake_trace(); lm_lambda etc. are NA
-  # in a "gn" trace's non-applicable columns and must stay NA (not NaN or 0)
-  # after the JSON-free CSV round-trip.
-  expect_equal(loaded$trace$grad_norm, fake$trace$grad_norm, tolerance = 1e-12)
-  expect_true(all(is.na(loaded$trace$lm_lambda)))
-})
-test_that("fit$trace bundles even as a header-only (zero-row) data.frame", {
-  # A valid zero-iteration trace must still round-trip -- gating on
-  # `nrow() > 0L` would silently drop it (see PR #246 review).
-  trace_path <- write_fake_trace(n = 3L, method = "gn")
-  on.exit(unlink(trace_path), add = TRUE)
-  empty_trace <- ferx_trace(trace_path)[0, , drop = FALSE]
-  fake <- structure(
-    list(
-      theta = c(TVCL = 1.0),
-      omega = matrix(0.04, 1L, 1L, dimnames = list("ETA_CL", "ETA_CL")),
-      eta_names = "ETA_CL",
-      sigma = c(prop = 0.05),
-      sigma_names = "prop",
-      sigma_types = "proportional",
-      ofv = 0, aic = 2, bic = 4,
-      n_obs = 3L, n_subjects = 2L, n_parameters = 1L, n_iterations = 1L,
-      method = "GN", method_chain = "GN",
-      converged = TRUE,
-      warnings = character(),
-      shrinkage_eta = 0, shrinkage_eps = 0,
-      wall_time_secs = 0, model_name = "fake", ferx_version = "0.1.0",
-      gradient_method_inner = "Enzyme AD",
-      gradient_method_outer = "N/A",
-      covariance_status = "NotRequested",
-      model_source = "model fake\n",
-      data_path = NA_character_,
-      trace_path = trace_path,
-      trace = empty_trace
-    ),
-    class = "ferx_fit"
-  )
-  path <- tempfile(fileext = ".fitrx")
-  on.exit(unlink(path), add = TRUE)
-
-  ferx_save_fit(fake, path)
-  expect_true("trace.csv" %in% unzip(path, list = TRUE)$Name)
-  loaded <- ferx_load_fit(path)
-  expect_s3_class(loaded$trace, "data.frame")
-  expect_equal(nrow(loaded$trace), 0L)
-})
-test_that("fit$trace is absent from the bundle (and NULL on load) when no trace was collected", {
-  fake <- structure(
-    list(
-      theta = c(TVCL = 1.0),
-      omega = matrix(0.04, 1L, 1L, dimnames = list("ETA_CL", "ETA_CL")),
-      eta_names = "ETA_CL",
-      sigma = c(prop = 0.05),
-      sigma_names = "prop",
-      sigma_types = "proportional",
-      ofv = 0, aic = 2, bic = 4,
-      n_obs = 3L, n_subjects = 2L, n_parameters = 1L, n_iterations = 1L,
-      method = "FOCEI", method_chain = "FOCEI",
-      converged = TRUE,
-      warnings = character(),
-      shrinkage_eta = 0, shrinkage_eps = 0,
-      wall_time_secs = 0, model_name = "fake", ferx_version = "0.1.0",
-      gradient_method_inner = "Enzyme AD",
-      gradient_method_outer = "N/A",
-      covariance_status = "NotRequested",
-      model_source = "model fake\n",
-      data_path = NA_character_
-    ),
-    class = "ferx_fit"
-  )
-  path <- tempfile(fileext = ".fitrx")
-  on.exit(unlink(path), add = TRUE)
-
-  ferx_save_fit(fake, path)
-  expect_setequal(unzip(path, list = TRUE)$Name, c(
-    "manifest.json", "fit.json", "ebes.csv", "predictions.csv",
-    "model.ferx", "warnings.txt"
-  ))
-  loaded <- ferx_load_fit(path)
-  expect_null(loaded$trace)
 })
 test_that("init_as_sd flags survive ferx_save_fit / ferx_load_fit round-trip", {
   skip_if_not(nzchar(Sys.getenv("FERX_RUN_REAL_FIT", "")),
@@ -1164,12 +739,9 @@ test_that(".fitrx_build_iov_wire uses empty list when shrinkage_kappa_by_occ is 
   wire <- .fitrx_build_iov_wire(fake_iov_fit)
   expect_equal(wire$shrinkage_kappa_by_occ, list())
 })
-test_that(".fitrx_build_iov_wire omits the #1031 weight keys for an unweighted model", {
-  # Regression: `list(kappa_weights = NULL)` keeps the *name*, so write_json()
-  # emitted `"kappa_weights": null`. ferx-core declares the field as
-  # `#[serde(default)] Vec<Option<String>>`, and serde(default) only fires for
-  # a missing key - an explicit null fails with "invalid type: null, expected
-  # a sequence". The keys must be absent, not null.
+test_that(".fitrx_build_iov_wire writes the required weight keys empty when unweighted", {
+  # Regression: an explicit null fails core with "invalid type: null, expected
+  # a sequence", and v2 requires the keys, so they are arrays, empty here.
   fake_iov_fit <- list(
     omega_iov       = matrix(0.09, 1, 1),
     kappa_names     = "KAPPA_CL",
@@ -1177,12 +749,10 @@ test_that(".fitrx_build_iov_wire omits the #1031 weight keys for an unweighted m
     shrinkage_kappa = 0.15,
     kappa_weights   = NULL
   )
-  wire <- .fitrx_build_iov_wire(fake_iov_fit)
-  expect_false("kappa_weights" %in% names(wire))
-  expect_false("kappa_weight_typical" %in% names(wire))
-  json <- as.character(jsonlite::toJSON(wire, auto_unbox = TRUE,
-                                        null = "null", na = "null"))
-  expect_false(grepl("kappa_weight", json, fixed = TRUE))
+  json <- as.character(jsonlite::toJSON(.fitrx_build_iov_wire(fake_iov_fit),
+                                        auto_unbox = TRUE, null = "null", na = "null"))
+  expect_match(json, '"kappa_weights":[]', fixed = TRUE)
+  expect_match(json, '"kappa_weight_typical":[]', fixed = TRUE)
 })
 test_that(".fitrx_build_iov_wire writes the #1031 weight keys as null-holed arrays", {
   fake_iov_fit <- list(
@@ -1219,53 +789,6 @@ test_that("shrinkage_kappa_by_occ survives a ferx_save/ferx_load round-trip", {
   expect_equal(loaded$shrinkage_kappa_by_occ$occ,
                fit$shrinkage_kappa_by_occ$occ)
 })
-test_that("covariate_names and input_columns survive ferx_save/ferx_load round-trip", {
-  # Regression guard: covariate_names was not serialised before PR#126, so it
-  # silently vanished after a save/load cycle. ferx_fit() populates both fields
-  # from the engine result; the test injects them into a fake fit so the check
-  # runs fast without a real fit.
-  fake <- structure(
-    list(
-      sdtab = data.frame(
-        ID = 1L, TIME = 1.0, DV = 1.0,
-        PRED = 1.0, IPRED = 1.0,
-        CWRES = 0.0, IWRES = 0.0,
-        EBE_OFV = -1.0, N_OBS = 1L
-      ),
-      ebe_etas      = data.frame(ID = 1L, ETA_CL = 0.0),
-      theta         = c(TVCL = 1.0),
-      omega         = matrix(0.04, 1L, 1L,
-                             dimnames = list("ETA_CL", "ETA_CL")),
-      eta_names     = "ETA_CL",
-      sigma         = c(prop = 0.05),
-      sigma_names   = "prop",
-      sigma_types   = "proportional",
-      ofv = 0, aic = 2, bic = 4,
-      n_obs = 1L, n_subjects = 1L,
-      n_parameters = 1L, n_iterations = 1L,
-      method = "FOCEI", method_chain = "FOCEI",
-      converged = TRUE,
-      warnings = character(),
-      shrinkage_eta = 0, shrinkage_eps = 0,
-      wall_time_secs = 0, model_name = "fake", ferx_version = "0.1.0",
-      gradient_method_inner = "FD", gradient_method_outer = "N/A",
-      covariance_status = "NotRequested",
-      model_source = "model fake\n",
-      data_path = NA_character_,
-      covariate_names = c("WT", "AGE"),
-      input_columns  = c("ID", "TIME", "DV", "EVID", "AMT", "WT", "AGE")
-    ),
-    class = "ferx_fit"
-  )
-  path <- tempfile(fileext = ".fitrx")
-  on.exit(unlink(path), add = TRUE)
-  ferx_save_fit(fake, path)
-  loaded <- ferx_load_fit(path)
-  expect_equal(loaded$covariate_names, c("WT", "AGE"))
-  expect_equal(loaded$input_columns,
-               c("ID", "TIME", "DV", "EVID", "AMT", "WT", "AGE"))
-})
-
 # ---- header from test-persist-helpers.R ----
 # Unit tests for the pure-R serialization helpers in persist.R. These convert
 # between the in-memory ferx_fit fields and the cross-language .fitrx wire
@@ -1331,12 +854,6 @@ test_that(".fitrx_method_to_token normalises labels and defaults to focei", {
   expect_identical(ferx:::.fitrx_method_to_token("LAPLACE"), "laplace")
   expect_identical(ferx:::.fitrx_method_to_token("Mystery"), "mystery") # unknown -> tolower
 })
-test_that("method label/token round-trips through the canonical display names", {
-  for (lbl in c("FOCE", "FOCEI", "FOCE-GN", "FOCE-GN-Hybrid", "SAEM", "IMP",
-                 "IMPMAP", "BAYES", "LAPLACE", "VI")) {
-    expect_identical(ferx:::.fitrx_method_label(ferx:::.fitrx_method_to_token(lbl)), lbl)
-  }
-})
 test_that(".fitrx_covariance_status_to_token normalises and defaults", {
   expect_identical(ferx:::.fitrx_covariance_status_to_token(NULL), "not_requested")
   expect_identical(ferx:::.fitrx_covariance_status_to_token(""), "not_requested")
@@ -1364,10 +881,6 @@ test_that(".fitrx_matrix_to_wire emits row-major data and dims", {
 test_that(".fitrx_matrix_to_wire returns NULL for NULL / non-matrix input", {
   expect_null(ferx:::.fitrx_matrix_to_wire(NULL))
   expect_null(ferx:::.fitrx_matrix_to_wire(c(1, 2, 3)))
-})
-test_that("matrix round-trips through wire form unchanged", {
-  m <- matrix(c(0.1, 0.0, 0.0, 0.2), nrow = 2)
-  expect_equal(ferx:::.fitrx_matrix_from_wire(ferx:::.fitrx_matrix_to_wire(m)), m)
 })
 test_that(".fitrx_ci_to_wire accepts a 2-column matrix", {
   ci <- matrix(c(1, 2, 3, 4), ncol = 2, byrow = TRUE) # rows (1,2) (3,4)
@@ -1505,34 +1018,6 @@ test_that(".fitrx_write_ebes_csv writes a stable header when ebes are absent", {
 
 
 
-
-test_that("uses_sde survives a ferx_save_fit / ferx_load_fit round-trip (TRUE)", {
-  fit <- make_fake_fit(
-    uses_sde = TRUE,
-    theta    = c(TVCL = 5.0, TVV = 50.0, DIFF_CENTRAL = 0.5),
-    omega    = matrix(0.09, 1, 1),
-    sigma    = 1.0,
-    sigma_names = "ADD"
-  )
-  tmp <- tempfile(fileext = ".fitrx")
-  on.exit(unlink(tmp))
-  ferx_save_fit(fit, tmp)
-  fit2 <- ferx_load_fit(tmp)
-  expect_true(isTRUE(fit2$uses_sde))
-})
-test_that("uses_sde survives a ferx_save_fit / ferx_load_fit round-trip (FALSE)", {
-  fit <- make_fake_fit(
-    uses_sde = FALSE,
-    omega    = matrix(0.09, 1, 1),
-    sigma    = 1.0,
-    sigma_names = "ADD"
-  )
-  tmp <- tempfile(fileext = ".fitrx")
-  on.exit(unlink(tmp))
-  ferx_save_fit(fit, tmp)
-  fit2 <- ferx_load_fit(tmp)
-  expect_false(isTRUE(fit2$uses_sde))
-})
 
 # ---- header from test-covtab.R ----
 # Covariate table (`fit$covtab`) + types (`fit$covariate_types`), surfaced from
@@ -1709,93 +1194,6 @@ test_that("ferx_save/ferx_load round-trip preserves exclusions", {
   expect_equal(loaded$exclusions$excluded_subject_ids, fit$exclusions$excluded_subject_ids)
 })
 
-test_that("sample-size-weighted IOV survives a ferx_save_fit / ferx_load_fit round-trip", {
-  # ferx-core #1031: `kappa K ~ g2 weight = NARM`. The .fitrx `iov` block must
-  # carry both the weight source text and the typical (median) arm size, and
-  # both must come back as JSON *arrays* - a single weighted kappa is the
-  # common MBMA case, and auto_unbox would otherwise write a bare scalar that
-  # the engine's Vec<Option<..>> reader rejects.
-  fake <- structure(
-    list(
-      theta = c(TVCL = 1.0),
-      omega = matrix(0.04, 1L, 1L,
-                     dimnames = list("ETA_CL", "ETA_CL")),
-      eta_names = "ETA_CL",
-      sigma = c(prop = 0.05),
-      sigma_names = "prop",
-      sigma_types = "proportional",
-      omega_iov = matrix(2.0, 1L, 1L,
-                         dimnames = list("KAPPA_CL", "KAPPA_CL")),
-      kappa_names = "KAPPA_CL",
-      kappa_fixed = FALSE,
-      kappa_init_as_sd = TRUE,
-      kappa_weights = c(KAPPA_CL = "NARM"),
-      kappa_weight_typical = c(KAPPA_CL = 400),
-      ofv = 0, aic = 2, bic = 4,
-      n_obs = 3L, n_subjects = 2L, n_parameters = 2L, n_iterations = 1L,
-      method = "FOCE", method_chain = "FOCE",
-      converged = TRUE,
-      warnings = character(),
-      shrinkage_eta = 0, shrinkage_eps = 0,
-      wall_time_secs = 0, model_name = "fake", ferx_version = "0.1.0",
-      gradient_method_inner = "analytic",
-      gradient_method_outer = "N/A",
-      covariance_status = "NotRequested",
-      model_source = "model fake\n",
-      data_path = NA_character_
-    ),
-    class = "ferx_fit"
-  )
-  path <- tempfile(fileext = ".fitrx")
-  on.exit(unlink(path), add = TRUE)
-
-  ferx_save_fit(fake, path)
-  loaded <- ferx_load_fit(path)
-
-  expect_equal(loaded$kappa_weights, c(KAPPA_CL = "NARM"))
-  expect_equal(loaded$kappa_weight_typical, c(KAPPA_CL = 400))
-})
-test_that("an unweighted IOV fit writes no kappa weight fields", {
-  # A pre-#1031 bundle carries neither field, and an unweighted model must
-  # keep producing exactly that bundle.
-  fake <- structure(
-    list(
-      theta = c(TVCL = 1.0),
-      omega = matrix(0.04, 1L, 1L, dimnames = list("ETA_CL", "ETA_CL")),
-      eta_names = "ETA_CL",
-      sigma = c(prop = 0.05),
-      sigma_names = "prop",
-      sigma_types = "proportional",
-      omega_iov = matrix(0.02, 1L, 1L,
-                         dimnames = list("KAPPA_CL", "KAPPA_CL")),
-      kappa_names = "KAPPA_CL",
-      kappa_fixed = FALSE,
-      kappa_init_as_sd = FALSE,
-      ofv = 0, aic = 2, bic = 4,
-      n_obs = 3L, n_subjects = 2L, n_parameters = 2L, n_iterations = 1L,
-      method = "FOCE", method_chain = "FOCE",
-      converged = TRUE,
-      warnings = character(),
-      shrinkage_eta = 0, shrinkage_eps = 0,
-      wall_time_secs = 0, model_name = "fake", ferx_version = "0.1.0",
-      gradient_method_inner = "analytic",
-      gradient_method_outer = "N/A",
-      covariance_status = "NotRequested",
-      model_source = "model fake\n",
-      data_path = NA_character_
-    ),
-    class = "ferx_fit"
-  )
-  path <- tempfile(fileext = ".fitrx")
-  on.exit(unlink(path), add = TRUE)
-
-  ferx_save_fit(fake, path)
-  loaded <- ferx_load_fit(path)
-
-  expect_null(loaded$kappa_weights)
-  expect_null(loaded$kappa_weight_typical)
-})
-
 # A synthetic fit whose four subject tables (`ebe_etas`, `covtab`,
 # `ebe_kappas`, `cond_dist$data`) carry the two subject IDs `ids`.
 id_trip_fake <- function(ids) {
@@ -1841,77 +1239,6 @@ id_trip_fake <- function(ids) {
     class = "ferx_fit"
   )
 }
-
-test_that("every ID column survives a save / load round-trip verbatim (synthetic, #468)", {
-  # `001` and `1.0` are what a type-inferring read turns into `1`; the old
-  # loader then put back only the type, so `ferx_sir()` / `ferx_covariance()`
-  # on the loaded fit handed the engine IDs the data does not carry.
-  ids <- c("001", "1.0")
-  fake <- id_trip_fake(ids)
-  path <- tempfile(fileext = ".fitrx")
-  on.exit(unlink(path), add = TRUE)
-  ferx_save_fit(fake, path)
-  entries <- utils::unzip(path, list = TRUE)$Name
-  expect_true(all(c("ebes.csv", "covtab.csv", "ebes_kappa.csv", "conddist.csv") %in% entries))
-
-  loaded <- ferx_load_fit(path)
-  expect_identical(loaded$ebe_etas$ID, ids)
-  expect_identical(loaded$covtab$ID, ids)
-  expect_identical(loaded$ebe_kappas$ID, rep(ids, each = 2L))
-  expect_identical(loaded$cond_dist$data$ID, rep(ids, each = 2L))
-  # Only the ID columns are read as text; the others keep their types.
-  expect_identical(loaded$ebe_etas$ETA_CL, fake$ebe_etas$ETA_CL)
-  expect_identical(loaded$covtab$WT, fake$covtab$WT)
-})
-
-test_that("text IDs survive a save / load round-trip in every subject table (#475)", {
-  # read.csv() reads `NA` as missing even when quoted; a comma or quote in an
-  # unquoted cell splits the row. In MBMA the ID is a study name.
-  for (ids in list(c("NA", "Smith, 2019"), c("q\"x", "007"), c("a \"b\", c", "12"))) {
-    info <- paste(ids, collapse = " | ")
-    path <- withr::local_tempfile(fileext = ".fitrx")
-    ferx_save_fit(id_trip_fake(ids), path)
-    loaded <- ferx_load_fit(path)
-    expect_identical(loaded$ebe_etas$ID, ids, info = info)
-    expect_identical(loaded$covtab$ID, ids, info = info)
-    expect_identical(loaded$ebe_kappas$ID, rep(ids, each = 2L), info = info)
-    expect_identical(loaded$cond_dist$data$ID, rep(ids, each = 2L), info = info)
-  }
-})
-
-test_that("predictions.csv keeps sdtab's number when sdtab merges two subjects (#475)", {
-  # Subjects `a` (position 1) and `1` both have sdtab number 1, so sdtab shows
-  # one block for two subjects and cannot say which rows are whose. The text
-  # IDs would be misaligned, so the writer keeps the numbers.
-  fake <- id_trip_fake(c("a", "1"))
-  fake$sdtab <- data.frame(ID = c(1, 1, 1, 1), TIME = c(0.5, 1, 0.5, 1),
-                           DV = c(5, 6, 4, 3), PRED = c(5, 6, 4, 3),
-                           IPRED = c(5, 6, 4, 3), CWRES = 0, IWRES = 0)
-  path <- withr::local_tempfile(fileext = ".fitrx")
-  ferx_save_fit(fake, path)
-  staging <- withr::local_tempdir()
-  utils::unzip(path, exdir = staging)
-  preds <- utils::read.csv(file.path(staging, "predictions.csv"),
-                           colClasses = c(ID = "character"))
-  expect_identical(preds$ID, rep("1", 4L))
-  expect_identical(ferx_load_fit(path)$sdtab$ID, fake$sdtab$ID)
-})
-
-test_that("bundle text cells are quoted as ferx-core's writer quotes them (#475)", {
-  # Quoted, with `"` doubled, only when the cell holds a comma, a quote or a
-  # newline (`csv_escape()` in ferx-core's io/fitrx.rs); NA is an empty cell.
-  expect_identical(
-    ferx:::.fitrx_csv_escape(c("NA", "007", "Smith, 2019", "q\"x", "a\nb", NA)),
-    c("NA", "007", "\"Smith, 2019\"", "\"q\"\"x\"", "\"a\nb\"", NA)
-  )
-  path <- withr::local_tempfile(fileext = ".fitrx")
-  ferx_save_fit(id_trip_fake(c("NA", "Smith, 2019")), path)
-  staging <- withr::local_tempdir()
-  utils::unzip(path, exdir = staging)
-  ebes <- readLines(file.path(staging, "ebes.csv"))
-  expect_identical(sub(",.*", "", ebes[2]), "NA")
-  expect_match(ebes[3], "^\"Smith, 2019\",", perl = TRUE)
-})
 
 # --- #462: the fit's reader settings and population fingerprint ------------
 

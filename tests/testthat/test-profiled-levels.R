@@ -414,10 +414,6 @@ test_that("a held level the fit does not have is refused, not dropped", {
                "names a theta the fit does not have", fixed = TRUE)
   expect_error(quiet(ferx_sir(bad, sir_samples = 10L, sir_resamples = 5L)),
                "which is not one of the fit's thetas", fixed = TRUE)
-  expect_error(ferx:::.fitrx_theta_names_at(list(3L), list("A", "B")),
-               "outside the bundle's 2 thetas", fixed = TRUE)
-  expect_identical(ferx:::.fitrx_theta_names_at(list(1L, 0L), list("A", "B")), c("B", "A"))
-  expect_identical(ferx:::.fitrx_theta_names_at(NULL, list("A")), character(0))
 })
 
 # A profiled fit whose covariance step fails. Until ferx-core #2421 this was a

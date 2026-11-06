@@ -170,7 +170,7 @@ test_that("ferx_load_fit() refuses a malformed nested bundle as ferx-core's load
   # #587 review, finding 3: a header that is not the level's.
   refuses(function(d) edit_lines(d, "ebes_kappa_ARM.csv",
                                  function(l) { l[1] <- sub("K_ARM", "K_X", l[1]); l }),
-          "ebes_kappa_ARM.csv: header ID,GROUP,STUDY,ARM,K_X does not match fit.json's level")
+          "ebes_kappa_ARM.csv: header \"ID,GROUP,STUDY,ARM,K_X\" does not match fit.json's level")
   # Finding 4: what core's loader refuses beyond that.
   refuses(function(d) edit_fit_json(d, function(j) {
             j$iov$kappa_levels <- list("STUDY"); j

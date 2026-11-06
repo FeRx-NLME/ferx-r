@@ -311,7 +311,7 @@
 # Kappa labels for a model_structure list, with a sample-size-weighted kappa
 # (ferx-core #1031) annotated by its weight expression: `KAPPA_EMAX (weight =
 # NARM)`. `iov_weights` is absent (or all NA) for every model that declares no
-# weight. `model_structure` is persisted verbatim under r_extras and read back
+# weight. `model_structure` is persisted verbatim in interface_extras and read back
 # with `simplifyVector = FALSE`, so after a save/load round-trip both vectors
 # arrive as *lists* whose NA slots are NULL holes - `is.na()` is FALSE for
 # those and `as.character(NULL)` is "NULL", which would render
@@ -395,7 +395,12 @@
       stringsAsFactors = FALSE
     )
   }
-  if (length(extra) > 0L) df <- rbind(df, do.call(rbind, extra))
+  if (length(extra) > 0L) {
+    extra <- do.call(rbind, extra)
+    # A loaded fit's warnings already hold these, classified by message.
+    df <- rbind(df[!df$message %in% extra$message, , drop = FALSE], extra)
+    rownames(df) <- NULL
+  }
   df
 }
 
@@ -743,6 +748,9 @@
 # @param raw The list `ferx_rust_fit()` (or a tool binding) returned.
 # @param model,data Paths to the model and dataset, for the name / path /
 #   source fields the engine does not carry.
+# @param loaded TRUE when `raw` came from a bundle (`ferx_load_fit()`): the
+#   fit is not being made now, so nothing is announced or read from the
+#   engine's trace file.
 # @return A `ferx_fit` object. Saving it (`output=`) stays with the caller.
 .ferx_fit_from_raw <- function(raw,
                                model,
@@ -750,9 +758,18 @@
                                gradient_arg = "",
                                settings_used = list(),
                                model_file_opts = list(),
-                               fit_started_at = Sys.time()) {
+                               fit_started_at = Sys.time(),
+                               loaded = FALSE) {
   # Structure the result
   result <- raw
+
+  # The bundle bytes (#711): the engine could not serialize this fit, which
+  # costs its `ferx_save_fit()`, not the fit.
+  if (!is.null(result$bundle_error)) {
+    warning("This fit could not be serialized, so ferx_save_fit() will refuse ",
+            "it: ", result$bundle_error, call. = FALSE)
+  }
+  result$bundle_error <- NULL
 
   # Name the theta vector
   if (length(result$theta) > 0 && length(result$theta_names) > 0) {
@@ -815,6 +832,10 @@
   result$sir_ci_omega <- ci$sir_ci_omega
   result$sir_ci_sigma <- ci$sir_ci_sigma
   result$sir_ci_kappa <- .ferx_sir_ci_kappa(result$sir_ci_kappa, result$kappa_names)
+  # No kept draws is NULL on all three, whichever step made the fit.
+  if (length(result$sir_resamples) == 0L) {
+    result[c("sir_resamples", "sir_resamples_n", "sir_resamples_dim")] <- NULL
+  }
 
   # The variational-inference result (#507), through the constructor
   # `ferx_load_fit()` uses. NULL for every method but VI.
@@ -825,7 +846,7 @@
   if (is.null(tp) || length(tp) == 0L || !nzchar(tp[[1L]])) {
     result$trace_path <- NULL
     result$trace <- NULL
-  } else {
+  } else if (!loaded) {
     .ferx_state$last_trace_path <- result$trace_path
     .ferx_state$last_trace_time <- fit_started_at
     .ferx_state$last_trace_model <- model
@@ -907,7 +928,7 @@
   result$eta_normality <- .ferx_compute_eta_normality(result$ebe_etas)
   nn_msg <- .ferx_eta_normality_warning(result$eta_normality)
   if (!is.null(nn_msg)) {
-    result$warnings <- c(result$warnings, nn_msg)
+    result$warnings <- union(result$warnings, nn_msg)
   }
 
   # Reshape omega_iov into a named matrix (NULL when no IOV)
@@ -1035,8 +1056,10 @@
   result$omega_iov_dim <- NULL
 
   # Print mu-referencing detections as informational messages.
-  for (eta_names in .ferx_mu_ref_detection_names(result$warnings)) {
-    message("Mu-referencing detected for: ", eta_names)
+  if (!loaded) {
+    for (eta_names in .ferx_mu_ref_detection_names(result$warnings)) {
+      message("Mu-referencing detected for: ", eta_names)
+    }
   }
 
   # Store the dataset name (basename without extension) from the data path
