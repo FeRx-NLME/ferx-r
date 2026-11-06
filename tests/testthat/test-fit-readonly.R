@@ -324,7 +324,7 @@ test_that("the reader unpacks data and nothing else", {
     sprintf('{"type":"double","attributes":{"x":%s},"value":[1]}',
             as.character(jsonlite::serializeJSON(sum))),
     '{"type":"double"',
-    '[1, 2]'
+    "[1, 2]"
   )
   for (text in hostile) {
     expect_error(ferx:::.fitrx_addition_from_wire(text), info = text)

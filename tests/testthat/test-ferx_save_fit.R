@@ -590,13 +590,14 @@ test_that("init_as_sd flags survive ferx_save_fit / ferx_load_fit round-trip", {
               "Set FERX_RUN_REAL_FIT=1 to run real-fit persist tests")
   fit <- warfarin_fit()
   # Inject flags so we can round-trip them without a real (sd)-annotated fit
+  fit <- editable_fit(fit)
   fit$omega_init_as_sd <- c(TRUE, FALSE)
   fit$sigma_init_as_sd <- TRUE
   fit$kappa_init_as_sd <- logical(0L)
 
   path <- tempfile(fileext = ".fitrx")
   on.exit(unlink(path), add = TRUE)
-  ferx_save_fit(fit, path)
+  ferx_save_fit(resealed_fit(fit), path)
   loaded <- ferx_load_fit(path)
 
   expect_equal(loaded$omega_init_as_sd, c(TRUE, FALSE))
@@ -1333,7 +1334,9 @@ test_that("ferx_save_fit() warns when the model file changed since the fit (#531
   # A fit from before the fitted bytes were carried falls back to the file:
   # the bundle is still written, with the file as it is now, and the warning
   # names it.
+  fit <- editable_fit(fit)
   fit$model_text <- NULL
+  fit <- resealed_fit(fit)
   expect_warning(ferx_save_fit(fit, path), class = "ferx_model_edited_warning")
   w <- tryCatch(ferx_save_fit(fit, path), ferx_model_edited_warning = conditionMessage)
   expect_match(w, basename(model), fixed = TRUE)
@@ -1341,9 +1344,10 @@ test_that("ferx_save_fit() warns when the model file changed since the fit (#531
   expect_true(file.exists(path))
   expect_identical(fitrx_fit_json(path)$model_hash, fit$model_hash)
   # No recorded hash: nothing to compare against.
-  nohash <- fit
+  nohash <- editable_fit(fit)
   nohash$model_hash <- NA_character_
-  expect_no_warning(ferx_save_fit(nohash, path), class = "ferx_model_edited_warning")
+  expect_no_warning(ferx_save_fit(resealed_fit(nohash), path),
+                    class = "ferx_model_edited_warning")
 })
 
 test_that("ferx_save_fit needs no external zip program (#662)", {
