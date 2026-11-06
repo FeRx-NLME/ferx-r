@@ -404,12 +404,18 @@ ferx_section_headers <- function(lines) {
   err_lines <- err_lines[nzchar(trimws(err_lines)) & !grepl("^\\s*#", err_lines)]
   err_type <- function(line) {
     # Log-transform-both-sides (LTBS): `log(DV) ~ additive(...)` (engine logs DV)
-    # or `DV ~ log_additive(...)` (DV already log). Both are additive error on
-    # the log scale - detect them BEFORE the plain `additive` branch, since both
-    # forms contain the substring "additive".
-    if (grepl("log_additive", line, ignore.case = TRUE) ||
+    # or `DV ~ log_additive(...)` (DV already log) is additive error on the log
+    # scale; `log(DV) ~ combined(...)` / `DV ~ log_combined(...)` is combined
+    # error under LTBS (ferx-core #2729). Detect them BEFORE the plain branches,
+    # since both forms contain "additive" / "combined".
+    if (grepl("log_(additive|combined)", line, ignore.case = TRUE) ||
         grepl("log\\s*\\(\\s*DV\\s*\\)", line, ignore.case = TRUE)) {
-      "additive (log-transformed)"
+      # The error function, not a sigma name such as `SD_COMBINED`.
+      if (grepl("combined\\s*\\(", line, ignore.case = TRUE)) {
+        "combined (log-transformed)"
+      } else {
+        "additive (log-transformed)"
+      }
     } else if (grepl("proportional", line, ignore.case = TRUE)) {
       "proportional"
     } else if (grepl("additive", line, ignore.case = TRUE)) {

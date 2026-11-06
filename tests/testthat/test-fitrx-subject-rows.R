@@ -256,6 +256,27 @@ test_that("a fit with continuous and binary rows keeps both on their subjects (#
   expect_identical(ferx_covariance(loaded)$se_theta, live$se_theta)
 })
 
+test_that("a bundle ferx-core wrote alone rebuilds its binary rows as core's sdtab fills them", {
+  skip_if(!nzchar(Sys.which("zip")), "needs a zip binary")
+  fit <- joint_case()$fit
+  summ <- fit$subject_summary
+  saved <- withr::local_tempfile(fileext = ".fitrx")
+  ferx_save_fit(fit, saved)
+  # No sdtab_endpoint_rows.csv: the binary rows are only in core's
+  # predictions_discrete.csv, and the glue rebuilds them.
+  path <- fitrx_core_only_bundle(saved)
+
+  loaded <- ferx_load_fit(path)
+  expect_identical(nrow(loaded$sdtab), nrow(fit$sdtab))
+  expect_identical(loaded$subject_summary$n_obs_discrete, summ$n_obs_discrete)
+  disc <- sum(summ$n_obs) + seq_len(sum(summ$n_obs_discrete))
+  # Every column the bundle carries, EBE_OFV included, on the binary rows.
+  for (col in names(loaded$sdtab)) {
+    expect_identical(as_doubles(loaded$sdtab)[[col]][disc], fit$sdtab[[col]][disc],
+                     info = col)
+  }
+})
+
 test_that("ebes.csv puts ofv_contribution and n_obs before a mixture's columns (#561)", {
   # ferx-core reads the two by position right after the etas, and MIXEST /
   # PMIX_* by name; a reloaded mixture bundle carries those in fit$ebe_etas.

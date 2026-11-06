@@ -534,7 +534,8 @@ plot.ferx_contrast_vpc <- function(x, y = NULL, facet = c("by", "none"), ...) {
 # the engine transforms itself, simulating DV on the log scale while the data
 # hold it on the natural scale. `DV ~ log_additive(...)` keeps both on the
 # data's (already log) scale and is FALSE here. One answer per model is
-# enough: the engine refuses LTBS in a per-CMT (multi-endpoint) error model.
+# enough: the engine accepts LTBS in a per-CMT (multi-endpoint) error model
+# only when every endpoint is on the log scale (ferx-core #2729).
 .ferx_cvpc_log_dv_readout <- function(model) {
   err <- .ferx_extract_blocks(model)[["error_model"]] %||% character(0)
   any(grepl("^(CMT\\s*=\\s*[0-9]+\\s*:\\s*)?log\\s*\\(\\s*DV\\s*\\)\\s*~",
