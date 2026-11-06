@@ -3504,6 +3504,17 @@ fn recorded_rows(
             let _ = is_tte;
         }
     } else if fit.subjects.iter().any(|s| !s.discrete_rows.is_empty() || has_tte_rows(s)) {
+        // The discrete and time-to-event rows below are filled as core's
+        // `append_discrete_rows` / `append_tte_rows` fill them. Core reads MIXNUM from
+        // the population, which a bundle need not carry; it is one value per subject,
+        // so it is taken from the subject's Gaussian rows.
+        let mut mixnum = vec![f64::NAN; fit.subjects.len()];
+        if let Some(m) = column(&cols, "MIXNUM") {
+            // `positions` covers the Gaussian rows, which are all `cols` holds so far.
+            for (&si, &k) in positions.iter().zip(&cols[m].1) {
+                mixnum[si] = k;
+            }
+        }
         if column(&cols, "CMT").is_none() {
             let n = positions.len();
             let at = column(&cols, "PRED").unwrap_or(cols.len());
@@ -3520,26 +3531,18 @@ fn recorded_rows(
                         "PRED" => d.pred,
                         "IPRED" => d.ipred,
                         "IWRES" => d.iwres,
+                        "EBE_OFV" => sr.ofv_contribution,
+                        "MIXNUM" => mixnum[si],
                         _ => f64::NAN,
                     });
                 }
             }
         }
         // A core-written bundle's time-to-event rows, which core restores since
-        // ferx-core #911, after every discrete row and filled as core's
-        // `append_tte_rows` fills them. Core reads MIXNUM from the population, which
-        // a bundle need not carry; it is one value per subject, so it is taken from
-        // the subject's Gaussian rows.
+        // ferx-core #911, after every discrete row.
         #[cfg(feature = "survival")]
         if fit.subjects.iter().any(has_tte_rows) {
             let n = cols.first().map_or(0, |(_, v)| v.len());
-            let mut mixnum = vec![f64::NAN; fit.subjects.len()];
-            if let Some(m) = column(&cols, "MIXNUM") {
-                // `positions` covers the Gaussian rows, the first ones in `cols`.
-                for (&si, &k) in positions.iter().zip(&cols[m].1) {
-                    mixnum[si] = k;
-                }
-            }
             for name in ferx_core::io::output::TTE_RESIDUAL_COLUMNS {
                 if column(&cols, name).is_none() {
                     cols.push((name.to_string(), vec![f64::NAN; n]));

@@ -84,6 +84,29 @@ test_that("a bundle without the glue's endpoint entry rebuilds its TTE rows from
   }
 })
 
+test_that("a bundle ferx-core wrote alone loads its TTE rows, with CMT and the TTE columns", {
+  skip_if(!nzchar(Sys.which("zip")), "needs a zip binary")
+  fit <- joint_fit()
+  saved <- tempfile(fileext = ".fitrx")
+  ferx_save_fit(fit, saved)
+  # Core's narrow predictions.csv: no CMT and none of the TTE columns, so the
+  # glue adds both before it appends core's TTE rows.
+  path <- fitrx_core_only_bundle(saved)
+  expect_false(any(c("CMT", tte_cols) %in%
+                     names(utils::read.csv(unz(path, "predictions.csv")))))
+
+  loaded <- suppressWarnings(ferx_load_fit(path))
+  expect_identical(loaded$subject_summary$n_obs_tte, fit$subject_summary$n_obs_tte)
+  expect_identical(nrow(loaded$sdtab), nrow(fit$sdtab))
+  expect_true(all(c("CMT", tte_cols, "EBE_OFV") %in% names(loaded$sdtab)))
+  n_tte <- sum(fit$subject_summary$n_obs_tte)
+  tte <- seq.int(nrow(fit$sdtab) - n_tte + 1L, nrow(fit$sdtab))
+  # Every column the bundle carries, on the TTE rows, as the live fit has it.
+  for (col in names(loaded$sdtab)) {
+    expect_identical(loaded$sdtab[[col]][tte], fit$sdtab[[col]][tte], info = col)
+  }
+})
+
 test_that("a non-TTE fit keeps an [output] column called PIT through save/load", {
   # The four TTE column names are dropped only with the TTE rows; on a fit
   # without them, a user column that shares a name is the user's.

@@ -66,5 +66,28 @@ fitrx_replace_entry <- function(path, name, file) {
   out
 }
 
+# A copy of the bundle at `path` as ferx-core alone writes it: `predictions.csv`
+# narrowed to core's own columns (`write_predictions_csv` in core's
+# src/io/fitrx.rs, in that order; no CMT, no TTE or [output] columns), and
+# without the R package's `sdtab_endpoint_rows.csv`. The discrete and
+# time-to-event rows are then only in core's `predictions_discrete.csv` and
+# `predictions_tte.csv` (ferx-core #911).
+fitrx_core_only_bundle <- function(path) {
+  staging <- tempfile("fitrx_core_")
+  dir.create(staging)
+  utils::unzip(path, exdir = staging, junkpaths = TRUE)
+  unlink(file.path(staging, "sdtab_endpoint_rows.csv"))
+  preds <- file.path(staging, "predictions.csv")
+  wide <- utils::read.csv(preds, colClasses = "character", check.names = FALSE,
+                          na.strings = character())
+  core <- c("ID", "TIME", "DV", "PRED", "IPRED", "CWRES", "IWRES", "NPDE", "NPD",
+            "EBE_OFV", "N_OBS", "CENS", "OCC")
+  utils::write.table(wide[intersect(core, names(wide))], preds, sep = ",",
+                     quote = FALSE, row.names = FALSE)
+  out <- tempfile(fileext = ".fitrx")
+  utils::zip(out, list.files(staging, full.names = TRUE), flags = "-j -q")
+  out
+}
+
 # The columns of `fit$theta_levels` the wire carries.
 fitrx_layout_cols <- c("block", "label", "group", "contrast")
