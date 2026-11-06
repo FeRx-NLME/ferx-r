@@ -3431,9 +3431,13 @@ fn rewritten_bundle(
 /// [`ENDPOINT_ROWS_ENTRY`], or for a bundle without it (one core wrote) the discrete
 /// rows core loaded, under the columns they have. The time-to-event rows also go back
 /// on `fit`, as the subject counts in `fit$subject_summary` read them from there.
+///
+/// `population` is the bundle's `data.csv` as core reads it, when it has one: the
+/// Gaussian rows' `CMT` for a bundle whose `predictions.csv` has none (core's own).
 fn recorded_rows(
     bundle: &[u8],
     fit: &mut FitResult,
+    population: Option<&Population>,
 ) -> std::result::Result<(Vec<(String, Vec<f64>)>, Vec<Vec<u32>>), String> {
     let (header, rows) = bundle_csv(bundle, "predictions.csv")?
         .ok_or_else(|| "the bundle has no predictions.csv".to_string())?;
@@ -3516,9 +3520,22 @@ fn recorded_rows(
             }
         }
         if column(&cols, "CMT").is_none() {
-            let n = positions.len();
+            // Each Gaussian row's compartment, as core's sdtab takes it from the
+            // data's `obs_cmts`; 1, core's own fallback, without the data.
+            let obs_cmts = population.filter(|p| p.subjects.len() == fit.subjects.len());
+            let mut seen = vec![0usize; fit.subjects.len()];
+            let cmt: Vec<f64> = positions
+                .iter()
+                .map(|&si| {
+                    let j = seen[si];
+                    seen[si] += 1;
+                    obs_cmts
+                        .and_then(|p| p.subjects[si].obs_cmts.get(j))
+                        .map_or(1.0, |&c| c as f64)
+                })
+                .collect();
             let at = column(&cols, "PRED").unwrap_or(cols.len());
-            cols.insert(at, ("CMT".to_string(), vec![1.0; n]));
+            cols.insert(at, ("CMT".to_string(), cmt));
         }
         for (si, sr) in fit.subjects.iter().enumerate() {
             for d in &sr.discrete_rows {
@@ -3714,7 +3731,7 @@ fn ferx_rust_load_fit(bundle: Raw) -> List {
         let mut fit = loaded.fit;
         restore_subject_ids(&mut fit, prepared.escapes);
         check_loaded_fit(&fit)?;
-        let (sdtab, occasions) = recorded_rows(bytes, &mut fit)?;
+        let (sdtab, occasions) = recorded_rows(bytes, &mut fit, loaded.population.as_ref())?;
         let parsed = loaded_model(&fit, &loaded.model_source);
         let model = parsed.as_ref().map(|p| &p.model);
         let individual_estimates =
@@ -3866,8 +3883,8 @@ fn ferx_rust_bundle_with_sdtab(bundle: Raw, sdtab: List) -> Raw {
         let bytes = bundle.as_slice();
         let mut fit = read_bundle_fit(bytes)?.fit;
         // A bundle written before ferx-core #911 keeps its time-to-event rows only
-        // in the glue's entry.
-        recorded_rows(bytes, &mut fit)?;
+        // in the glue's entry. Only `fit` is wanted here, not the rows.
+        recorded_rows(bytes, &mut fit, None)?;
         let columns = sdtab
             .iter()
             .map(|(name, column)| {

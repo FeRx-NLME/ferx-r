@@ -88,7 +88,8 @@ test_that("a bundle ferx-core wrote alone loads its TTE rows, with CMT and the T
   skip_if(!nzchar(Sys.which("zip")), "needs a zip binary")
   fit <- joint_fit()
   saved <- tempfile(fileext = ".fitrx")
-  ferx_save_fit(fit, saved)
+  # With data.csv: the only place a bundle keeps the Gaussian rows' CMT.
+  ferx_save_fit(fit, saved, include_data = TRUE)
   # Core's narrow predictions.csv: no CMT and none of the TTE columns, so the
   # glue adds both before it appends core's TTE rows.
   path <- fitrx_core_only_bundle(saved)
@@ -99,11 +100,12 @@ test_that("a bundle ferx-core wrote alone loads its TTE rows, with CMT and the T
   expect_identical(loaded$subject_summary$n_obs_tte, fit$subject_summary$n_obs_tte)
   expect_identical(nrow(loaded$sdtab), nrow(fit$sdtab))
   expect_true(all(c("CMT", tte_cols, "EBE_OFV") %in% names(loaded$sdtab)))
-  n_tte <- sum(fit$subject_summary$n_obs_tte)
-  tte <- seq.int(nrow(fit$sdtab) - n_tte + 1L, nrow(fit$sdtab))
-  # Every column the bundle carries, on the TTE rows, as the live fit has it.
+  # Every column the bundle carries, on every row, as the live fit has it. The
+  # Gaussian rows' CMT (2 here, not core's fallback 1) comes from the bundle's
+  # data.csv, as core's sdtab takes it from the data.
+  expect_true(all(fit$sdtab$CMT[seq_len(sum(fit$subject_summary$n_obs))] == 2))
   for (col in names(loaded$sdtab)) {
-    expect_identical(loaded$sdtab[[col]][tte], fit$sdtab[[col]][tte], info = col)
+    expect_identical(loaded$sdtab[[col]], fit$sdtab[[col]], info = col)
   }
 })
 
