@@ -1,7 +1,7 @@
 # Regression tests for #252: a dataset that reuses a subject ID in a
 # non-contiguous block carries two distinct subjects sharing one textual ID
 # (ferx-core, like NONMEM, splits subjects sequentially). The per-subject joins
-# in xpose / save_fit / eta_cov / cov_screen must key on subject order, not on
+# in xpose / eta_cov / cov_screen must key on subject order, not on
 # the raw ID, or the second block silently inherits the first subject's values.
 
 test_that(".ferx_subject_index breaks on every ID change", {
@@ -28,30 +28,6 @@ test_that("xpose join still matches by ID when counts don't line up", {
   src <- data.frame(ID = c("1", "2"), P = c(7, 8))
   res <- .ferx_join_by_id(df, src, "individual_estimates")
   expect_identical(res$data$P, c(7, 7, 8, NA_real_))
-})
-
-test_that("save_fit per-subject values keep both blocks of a reused ID", {
-  fit <- list(
-    sdtab = data.frame(
-      ID      = c(12, 12, 12, 5, 5, 12),
-      EBE_OFV = c(1, 1, 1, 2, 2, 9),
-      N_OBS   = c(3, 3, 3, 2, 2, 1)
-    ),
-    ebe_etas = data.frame(ID = c("12", "5", "12"), ETA_CL = c(0.1, 0.2, 0.9)),
-    subject_summary = data.frame(ID = c("12", "5", "12"),
-                                 ofv_contribution = c(1, 2, 9),
-                                 n_obs = c(3L, 2L, 1L),
-                                 n_obs_discrete = c(0L, 0L, 0L))
-  )
-
-  tf <- tempfile()
-  on.exit(unlink(tf), add = TRUE)
-  .fitrx_write_ebes_csv(fit, tf)
-  eb <- utils::read.csv(tf)
-  # The two ID-12 rows must carry their own n_obs (3 and 1), not both = 3,
-  # otherwise ebes.csv disagrees with predictions.csv and the loader rejects it.
-  expect_identical(as.integer(eb$n_obs), c(3L, 2L, 1L))
-  expect_identical(as.numeric(eb$ofv_contribution), c(1, 2, 9))
 })
 
 test_that("eta_cov treats a reused ID as two subjects with distinct covariates", {

@@ -1,6 +1,5 @@
-# NULL-or-value coercion helpers: `.fitrx_opt_*` shape R values for the JSON
-# ferx_save_fit() writes, `.fitrx_unwrap_opt_*` read the engine's optional
-# values back on a fit. ferx_load_fit() reads bundles with ferx-core's loader.
+# Reading the engine's optional values back on a fit: `.fitrx_unwrap_opt_*`.
+# ferx_load_fit() reads bundles with ferx-core's loader.
 
 # A scalar that may be `null`: the JSON writers turn NaN into `null`, and a VI
 # fit under `vi_final_ofv = none` has a NaN OFV by design (#508), which
@@ -8,14 +7,6 @@
 .fitrx_num_or_nan <- function(x) {
   v <- as.numeric(unlist(x, use.names = FALSE))
   if (length(v) == 0L) NaN else v[[1L]]
-}
-
-.fitrx_opt_num <- function(x) {
-  if (is.null(x)) return(NULL)
-  if (length(x) == 0L) return(NULL)
-  v <- as.numeric(x)
-  if (is.na(v)) return(NULL)
-  v
 }
 
 # Read back a JSON array that may contain nulls - a Rust `Vec<Option<T>>` such
@@ -32,16 +23,6 @@
 
 .fitrx_unwrap_opt_chr_vec <- function(x) .fitrx_unwrap_nullable_vec(x, NA_character_)
 
-# A Rust `Option<bool>`. Both directions treat NA as absent: a tri-state flag
-# reaches R as NA when the engine recorded no verdict, and writing NA back
-# would claim a verdict of "false" to any reader that coerces it.
-.fitrx_opt_lgl <- function(x) {
-  if (is.null(x)) return(NULL)
-  v <- suppressWarnings(as.logical(x))
-  if (length(v) != 1L || is.na(v)) return(NULL)
-  v
-}
-
 .fitrx_unwrap_opt_lgl <- function(x) {
   if (is.null(x)) return(NA)
   v <- suppressWarnings(as.logical(unlist(x, use.names = FALSE)))
@@ -49,25 +30,10 @@
   v
 }
 
-.fitrx_opt_chr <- function(x) {
-  if (is.null(x)) return(NULL)
-  if (length(x) == 0L) return(NULL)
-  v <- as.character(x)
-  if (is.na(v) || !nzchar(v)) return(NULL)
-  v
-}
-
 .fitrx_unwrap_opt_chr <- function(x) {
   if (is.null(x)) return(NULL)
   v <- as.character(x)
   if (length(v) == 0L || is.na(v) || !nzchar(v)) return(NULL)
-  v
-}
-
-.fitrx_opt_num_vec <- function(x) {
-  if (is.null(x)) return(NULL)
-  v <- as.numeric(x)
-  if (length(v) == 0L) return(NULL)
   v
 }
 
@@ -92,22 +58,6 @@
 # for a priored fit, matching ferx-core's own writer: absent means "this bundle
 # predates priors", and the loader then reconstructs `ofv_data = ofv`, which is
 # right for every such file because no prior could have been applied.
-
-.fitrx_prior_summary_to_wire <- function(ps) {
-  if (!is.data.frame(ps) || nrow(ps) == 0L) return(NULL)
-  lapply(seq_len(nrow(ps)), function(i) {
-    list(
-      name               = as.character(ps$name[[i]]),
-      prior_value        = as.numeric(ps$prior_value[[i]]),
-      estimate           = as.numeric(ps$estimate[[i]]),
-      shift_in_prior_sds = as.numeric(ps$shift_in_prior_sds[[i]]),
-      penalty            = as.numeric(ps$penalty[[i]]),
-      family             = as.character(ps$family[[i]]),
-      prior_lower_95     = as.numeric(ps$prior_lower_95[[i]]),
-      prior_upper_95     = as.numeric(ps$prior_upper_95[[i]])
-    )
-  })
-}
 
 # -- Exact doubles in the bundle --
 #
@@ -171,40 +121,12 @@
   out
 }
 
-# A text cell as ferx-core's `.fitrx` writer spells it (`csv_escape()` in
-# `io/fitrx.rs`): quoted, with `"` doubled, only when it holds a comma, a quote
-# or a newline; verbatim otherwise. NA stays NA (an empty cell). R's reader
-# and ferx-core's both take a quoted comma or quote, so a subject ID such as
-# `Smith, 2019` round-trips (#475). A newline makes the trip through R only:
-# ferx-core's reader is line-based (`parse_csv_row`).
-.fitrx_csv_escape <- function(x) {
-  x <- as.character(x)
-  hit <- !is.na(x) & grepl("[,\"\n]", x)
-  x[hit] <- paste0("\"", gsub("\"", "\"\"", x[hit], fixed = TRUE), "\"")
-  x
-}
-
-# Write a data frame as a bundle CSV with every double column in
-# `.fitrx_double_text()` form and every text column in `.fitrx_csv_escape()`
-# form, the quoting ferx-core's own writer uses. A number is never quoted.
-.fitrx_write_csv_exact <- function(df, path) {
-  for (j in which(vapply(df, function(v) is.character(v) || is.factor(v),
-                         logical(1)))) {
-    df[[j]] <- .fitrx_csv_escape(df[[j]])
-  }
-  for (j in which(vapply(df, is.double, logical(1)))) {
-    df[[j]] <- .fitrx_double_text(df[[j]])
-  }
-  utils::write.table(df, path, row.names = FALSE, sep = ",", na = "",
-                     quote = FALSE)
-}
-
 # `read.csv()`, with every column it types as double re-parsed by
 # `.fitrx_parse_doubles()`. read.csv() still decides the column types, so a
 # loaded table has the shape it always had - except the `id_cols`, which are
 # read as text, verbatim: inferring a type turns the IDs `001` and `1.0` into
 # `1`, and `as.character()` afterwards only puts the type back (#468). They
-# come from a pass with no NA strings, since the writers never put an NA in an
+# come from a pass with no NA strings, since no writer puts an NA in an
 # ID column and read.csv() reads `NA` as one even when quoted (#475).
 #
 # With `integer_cols` given, the table is one whose live columns are double
@@ -239,64 +161,6 @@
   df
 }
 
-# The bundle entry of one level's kappa estimates, as ferx-core names it
-# (`level_kappa_entry` in io/fitrx.rs).
-.fitrx_level_kappa_entry <- function(level) paste0("ebes_kappa_", level, ".csv")
-
-# `fit$iov_occasion` (the `settings = list(iov_occasion = ...)` spelling the
-# glue writes: "column", "dose" or "time(24, 48.5)") to and from the `.fitrx`
-# key ferx-core writes for `FitResult::iov_occasion` (#1783): "column",
-# "per_dose" or {"time_windows": [24, 48.5]}. NULL both ways when the fit
-# records no rule, so `ferx_sir()` / `ferx_covariance()` on a reloaded fit
-# derive its occasions as the fit did (#512).
-#
-# A wire value of any other shape (a newer ferx-core's variant, a hand-edited
-# key) drops the field with a `ferx_iov_occasion_dropped_warning` naming the
-# value, and the rest of the bundle loads (#524): the fit is then one that
-# records no rule, as a bundle saved before ferx-core #1783, and the post-hoc
-# steps fall back to the model file's rule.
-.fitrx_iov_occasion_to_wire <- function(rule) {
-  rule <- .fitrx_opt_chr(rule)
-  if (is.null(rule)) return(NULL)
-  if (identical(rule, "column")) return("column")
-  if (identical(rule, "dose")) return("per_dose")
-  edges <- sub("^time\\((.*)\\)$", "\\1", rule)
-  if (identical(edges, rule)) {
-    stop("ferx_save_fit: `fit$iov_occasion` is \"", rule, "\", not \"column\", ",
-         "\"dose\" or \"time(...)\".", call. = FALSE)
-  }
-  edges <- suppressWarnings(as.numeric(strsplit(edges, ",", fixed = TRUE)[[1]]))
-  if (!length(edges) || anyNA(edges)) {
-    stop("ferx_save_fit: `fit$iov_occasion` \"", rule, "\" has a breakpoint ",
-         "that is not a number.", call. = FALSE)
-  }
-  # A list, so `auto_unbox` keeps a one-edge rule an array.
-  list(time_windows = as.list(edges))
-}
-
-# `fit$scoring_settings` / `fit$sir_settings` (#511, #472) on the wire, in
-# ferx-core's own layout (`ScoringSettingsWire` / `SirSettingsWire`), so the
-# engine reads an R bundle's records and R reads an engine bundle's: the
-# top-level `scoring_settings` block keyed as the R list is, and `sir.settings`
-# with the `scoring` half flattened beside the SIR keys. Enums are their
-# `[fit_options]` tokens on both sides; NA (`ode_stiff_abort_after` off) is
-# written as JSON null. The record is first read through the engine's own
-# decoder, so one edited into something the engine would refuse is refused
-# here, by name, rather than written into a bundle nothing loads.
-.fitrx_settings_to_wire <- function(fit, kind) {
-  record <- fit[[kind]]
-  if (is.null(record)) return(NULL)
-  record <- ferx_rust_settings_record(kind, record, "ferx_save_fit", paste0("fit$", kind))
-  if (identical(kind, "sir_settings")) {
-    # A multivariate-normal proposal records `df = Inf`, which JSON cannot
-    # hold; ferx-core's wire spells it `"normal"` (ferx-core#1819), and both
-    # its reader and `ferx_load_fit()` read that back as `Inf`.
-    if (is.infinite(record$df)) record$df <- "normal"
-    record <- c(record[names(record) != "scoring"], record$scoring)
-  }
-  record
-}
-
 # -- Warning details (ferx-core #2268) --
 #
 # `fit$warning_details` holds the structured warnings that carry a `details`
@@ -315,47 +179,85 @@
   lapply(json, jsonlite::parse_json)
 }
 
-# Whether an entry's warning is among `messages` (a fit's flat warnings). A
-# chained fit's flat message carries the stage as a `[METHOD] ` prefix that the
-# entry keeps apart in `source_method`.
-.ferx_warning_detail_in <- function(entry, messages) {
-  msg <- entry$message
-  if (!is.character(msg) || length(msg) != 1L) return(FALSE)
-  msg %in% messages ||
-    (is.character(entry$source_method) &&
-       paste0("[", entry$source_method, "] ", msg) %in% messages)
-}
+# -- The sdtab's row blocks --
 
-# The entries of `old` whose warning the fit still carries in `messages`, then
-# those of `new` (a post-hoc step's) not already there. ferx_covariance() and
-# ferx_sir() drop a stale warning from the flat vector; its details go with it.
-.ferx_merge_warning_details <- function(old, new, messages) {
-  keep <- Filter(function(e) .ferx_warning_detail_in(e, messages), old %||% list())
-  for (e in new %||% list()) {
-    if (!any(vapply(keep, identical, logical(1L), e))) keep <- c(keep, list(e))
+# The subject (1-based position in fit order) of every sdtab row, from the
+# per-subject row counts: each subject's `n_obs` Gaussian rows in subject
+# order, then each subject's `n_obs_discrete` discrete rows in subject order,
+# then each subject's `n_obs_tte` time-to-event rows (ferx-core #901), as
+# `io::output::sdtab` writes them. Not from the ID number, which runs two
+# adjacent subjects with the same number together and has no rows for a
+# subject without observations (#540). NULL when the counts do not add up to
+# `n_rows`.
+.fitrx_sdtab_subject <- function(n_obs, n_obs_discrete, n_rows, n_obs_tte = 0L) {
+  n_obs <- as.integer(n_obs)
+  n_obs_discrete <- as.integer(n_obs_discrete)
+  n_obs_tte <- as.integer(n_obs_tte)
+  # A scalar is the same count for every subject (0: no TTE rows); any other
+  # length is not one count per subject.
+  if (length(n_obs_tte) == 1L) n_obs_tte <- rep_len(n_obs_tte, length(n_obs))
+  if (anyNA(n_obs) || anyNA(n_obs_discrete) || anyNA(n_obs_tte) ||
+      length(n_obs_tte) != length(n_obs) ||
+      sum(n_obs) + sum(n_obs_discrete) + sum(n_obs_tte) != n_rows) {
+    return(NULL)
   }
-  if (length(keep) == 0L) NULL else keep
+  pos <- seq_along(n_obs)
+  list(gaussian = rep.int(pos, n_obs), discrete = rep.int(pos, n_obs_discrete),
+       tte = rep.int(pos, n_obs_tte))
 }
 
-# Each entry as JSON, in R's spelling. On save they are written verbatim; on
-# load they go through the engine's `WarningEntry` and come back in serde's.
-# `details` is an untyped `serde_json::Value`, which keeps `50` an integer and
-# `50.0` a float, so a whole-number double is written with its decimal point
-# (`always_decimal`): otherwise it would reload as an integer, and the loaded
-# list would not be `identical()` to the fit's.
-.fitrx_warning_details_json <- function(entries) {
-  vapply(entries, function(e) {
-    as.character(jsonlite::toJSON(e, auto_unbox = TRUE, digits = I(17),
-                                  always_decimal = TRUE, null = "null", na = "null"))
-  }, character(1L))
-}
+# The sdtab columns ferx-core creates for time-to-event rows only (#901).
+.FITRX_TTE_COLS <- c("COXSNELL", "MARTINGALE", "DEVIANCE", "PIT")
 
-# `fit.json:warning_details` for the fit: its entries whose warning it still
-# carries, each written verbatim as the object it is. NULL (key absent, as
-# ferx-core leaves it) when there are none.
-.fitrx_warning_details_to_wire <- function(fit) {
-  entries <- .ferx_merge_warning_details(fit$warning_details, NULL,
-                                         as.character(fit$warnings %||% character()))
-  if (is.null(entries)) return(NULL)
-  lapply(.fitrx_warning_details_json(entries), function(j) structure(j, class = "json"))
+# The one place that splits `sdtab` (default `fit$sdtab`) into its Gaussian,
+# discrete (ferx-core #900) and time-to-event (#901) row blocks (#696). Used
+# by `ferx_xpose()`, `ferx_save_fit()` and `ferx_calc_npde()`.
+#
+# Returns `gaussian`, `discrete` and `tte` (integer row indices into `sdtab`,
+# increasing) and `subject`: NULL, or a list with the same three names giving
+# the subject (1-based position in fit order) of each of those rows, with an
+# `n_subjects` attribute.
+#
+# One fallback order:
+# 1. The `fit$subject_summary` counts (`.fitrx_sdtab_subject()`), a missing
+#    `n_obs_discrete` / `n_obs_tte` column counting as 0, when they add up
+#    to the sdtab's rows. `subject` is set.
+# 2. Otherwise the columns, and `subject` is NULL: the TTE rows are those
+#    with a COXSNELL value, in a table carrying all of `.FITRX_TTE_COLS`; the
+#    discrete rows the others without an N_OBS value (ferx-core writes N_OBS,
+#    the subject's Gaussian count, on every Gaussian row only); the rest are
+#    Gaussian.
+.fitrx_sdtab_blocks <- function(fit, sdtab = fit$sdtab) {
+  n_rows <- if (is.null(sdtab)) 0L else nrow(sdtab)
+  summ <- fit$subject_summary
+  count <- function(col) {
+    v <- summ[[col]]
+    if (is.null(v)) 0L else v
+  }
+  pos <- if (is.data.frame(summ) && nrow(summ) > 0L && !is.null(summ$n_obs)) {
+    .fitrx_sdtab_subject(summ$n_obs, count("n_obs_discrete"), n_rows,
+                         count("n_obs_tte"))
+  }
+  if (!is.null(pos)) {
+    n_gauss <- length(pos$gaussian)
+    n_disc <- length(pos$discrete)
+    return(list(
+      gaussian = seq_len(n_gauss),
+      discrete = n_gauss + seq_len(n_disc),
+      tte = n_gauss + n_disc + seq_along(pos$tte),
+      subject = structure(pos, n_subjects = nrow(summ))
+    ))
+  }
+  tte <- if (n_rows > 0L && all(.FITRX_TTE_COLS %in% names(sdtab))) {
+    !is.na(sdtab$COXSNELL)
+  } else {
+    rep(FALSE, n_rows)
+  }
+  disc <- if (n_rows > 0L && "N_OBS" %in% names(sdtab)) {
+    is.na(sdtab$N_OBS) & !tte
+  } else {
+    rep(FALSE, n_rows)
+  }
+  list(gaussian = which(!(tte | disc)), discrete = which(disc),
+       tte = which(tte), subject = NULL)
 }

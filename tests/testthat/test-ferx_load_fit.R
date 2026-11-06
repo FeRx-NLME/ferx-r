@@ -3,12 +3,9 @@
 # ferx_save_fit() / ferx_load_fit() round-trip and CLI-flag tests.
 #
 # These exercise the .fitrx bundle format. The cross-tool test (Rust CLI
-# writes, R reads) lives in ferx-core; here we only verify the R-side
-# writer + reader are inverses, and that the `output` argument of
-# ferx_fit() saves a valid bundle.
-
-# Local aliases avoid the ::: operator (undesirable_operator_linter).
-.fitrx_build_iov_wire   <- getFromNamespace(".fitrx_build_iov_wire",   "ferx")
+# writes, R reads) lives in ferx-core; here we only verify a saved bundle reads
+# back as the fit, and that the `output` argument of ferx_fit() saves a valid
+# bundle.
 
 
 
@@ -149,22 +146,27 @@ test_that("a reloaded fit keeps text IDs and runs ferx_covariance and ferx_sir (
   }
 })
 
-test_that("ferx-core's loader reads an R-written bundle with the same text IDs (#475)", {
-  # The oracle is the engine's own load_fit / save_fit, not R reading back
-  # what R wrote; its loader also checks predictions.csv against ebes.csv.
+test_that("a saved bundle loads with the same text IDs (#475)", {
+  # The engine's loader also checks predictions.csv against ebes.csv.
   for (key in names(text_id_labels)) {
     fit <- text_id_fit(key)
-    trip <- fitrx_engine_trip(fit)
-    from_core <- ferx_load_fit(trip$core_path)
-    expect_identical(from_core$ebe_etas$ID, fit$ebe_etas$ID, info = key)
-    expect_identical(from_core$sdtab$ID, fit$sdtab$ID, info = key)
+    path <- withr::local_tempfile(fileext = ".fitrx")
+    ferx_save_fit(fit, path)
+    back <- ferx_load_fit(path)
+    expect_identical(back$ebe_etas$ID, fit$ebe_etas$ID, info = key)
+    expect_identical(back$sdtab$ID, fit$sdtab$ID, info = key)
   }
 })
 
 test_that("a bundle without reader settings loads with neither field and still runs (#462)", {
   # As written before #462: a fit that records neither leaves both keys out.
-  fit <- rs_legacy(warfarin_fit_cov())
+  fit <- warfarin_fit_cov()
   skip_if(is.null(fit$cov_matrix), "covariance step did not converge - skipping")
+  fit <- fitrx_edit_fit(fit, function(w) {
+    w$reader_settings <- NULL
+    w$population_fingerprint <- NULL
+    w
+  })
   path <- withr::local_tempfile(fileext = ".fitrx")
   ferx_save_fit(fit, path)
   staging <- withr::local_tempdir()

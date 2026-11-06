@@ -13,7 +13,9 @@ ferx_save_fit(fit, output, include_data = FALSE, write_model = FALSE)
 conventional \code{.fitrx} extension is appended automatically (so
 \code{"results/run1"} is written as \code{"results/run1.fitrx"});
 \code{\link{ferx_load_fit}} accepts either the bare or the extended
-path. An explicit extension is honoured as given.}
+path. An explicit extension is honoured as given. The bundle replaces the
+file in one step, after anything else the call writes, so a failed save
+leaves what was at \code{output}.}
 
 \item{include_data}{Logical. When \code{TRUE}, the input NONMEM CSV used
 to fit the model is embedded verbatim inside the archive (as
@@ -21,9 +23,8 @@ to fit the model is embedded verbatim inside the archive (as
 path captured at fit time (\code{fit$data_path}), unchanged since the
 fit: a file whose SHA-256 no longer matches \code{fit$data_hash} is not
 the data that was fitted, and \code{ferx_save_fit()} refuses it with an
-error of class \code{ferx_data_edited_error} rather than bundle it. A fit
-with no recorded \code{data_hash} (one made by an older ferx) is bundled
-unchecked. Default \code{FALSE}.
+error of class \code{ferx_data_edited_error} rather than bundle it.
+Default \code{FALSE}.
 A fit whose \code{data} was a data.frame (\code{fit$data_source} set)
 always embeds it: its file lives only in a temporary directory, so a
 bundle without it could not be re-read.}
@@ -43,12 +44,22 @@ pipe without breaking the chain:
   }
 }
 \description{
-Writes a single, self-describing zip archive that any language with stdlib
-JSON + CSV + zip readers can open (R, Python, Julia, Rust). The archive
-includes parameter estimates, per-subject EBEs, per-observation
-predictions, and the verbatim \code{.ferx} model source.
+Writes the fit's bundle, the bytes ferx-core serialized it to, as a single,
+self-describing zip archive that any language with stdlib JSON + CSV + zip
+readers can open (R, Python, Julia, Rust). The archive includes parameter
+estimates, per-subject EBEs, per-observation predictions, and the verbatim
+\code{.ferx} model source. The file is the same one the ferx-core command
+line reads and writes: \code{ferx summary run1.fitrx} works on it.
 }
 \details{
+A fit's bundle (\code{fit$bundle}) is what is saved, not its list: the
+engine wrote it when the fit was made, and \code{\link{ferx_covariance}},
+\code{\link{ferx_sir}} and \code{\link{ferx_calc_npde}} return a new fit with
+new bytes. A change made to the list by hand is not saved, and does not reach
+\code{write_model}'s file either. A fit with no
+bundle, such as one from an \code{.rds} written by an older ferx, is refused
+with an error of class \code{ferx_no_bundle_error}: refit it.
+
 Every number is written so that it reads back exactly: every
 double value in the estimates and in the per-subject and per-observation
 tables reads back as the same double, and the predictions and simulations
@@ -67,20 +78,11 @@ log-packed, for one), and the bundle does not yet name the columns or
 their packing.
 
 The bundle's \code{model.ferx} holds the bytes that were fitted, the ones
-\code{fit$model_hash} names, taken from \code{fit$model_text}: editing the
-model file after \code{\link{ferx_fit}} does not change what is saved. A
-fit that does not carry them (one made by an older ferx, or one whose
-\code{model_text} was changed by hand) falls back to a copy of the file at
-\code{fit$model_path} as it is when you save. If that file has been edited
-since the fit (its SHA-256 no longer matches \code{fit$model_hash}), the
-bundle is still written, but a warning of class
-\code{ferx_model_edited_warning} says so: on reload the theta level layout
-cannot be made, and \code{\link{ferx_sir}} / \code{\link{ferx_covariance}}
-refuse the fit. Restore the file and save again, or refit. That check needs
-R 4.5 or later (\code{tools::sha256sum()}) and is skipped on older R.
+\code{fit$model_hash} names: editing the model file after
+\code{\link{ferx_fit}} does not change what is saved.
 
-The schema is shared with the ferx-core Rust crate; see its
-\code{docs/src/file-formats/fitrx.md} for the full field reference.
+The schema is ferx-core's; see its \code{docs/src/file-formats/fitrx.md} for
+the full field reference.
 }
 \examples{
 ex  <- ferx_example("warfarin")

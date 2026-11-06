@@ -45,6 +45,25 @@ ps_round_trip <- function(fit, env = parent.frame()) {
   ferx_load_fit(path)
 }
 
+# `fit` with the fields `keys` gone from its bytes, which is what the steps read.
+# "sir_settings" is the `sir.settings` record.
+ps_without <- function(fit, ...) {
+  keys <- c(...)
+  fitrx_edit_fit(fit, function(w) {
+    for (k in setdiff(keys, "sir_settings")) w[[k]] <- NULL
+    if ("sir_settings" %in% keys && !is.null(w$sir)) w$sir$settings <- NULL
+    w
+  })
+}
+
+# `fit` with one key of its scoring record set in its bytes (NULL drops it).
+ps_scoring <- function(fit, key, value) {
+  fitrx_edit_fit(fit, function(w) {
+    w$scoring_settings[[key]] <- value
+    w
+  })
+}
+
 ps_sir_fields <- function(fit) {
   fit[c("sir_ess", "sir_ci_theta", "sir_ci_omega", "sir_ci_sigma", "sir_ci_kappa")]
 }
@@ -82,8 +101,7 @@ test_that("S12: a gradient = \"fd\" fit stays on finite differences in ferx_cova
   expect_identical(ps_fit("w_default", "warfarin")$scoring_settings$gradient_method,
                    "auto")
   # Premise: the analytic route moves this fit's covariance.
-  as_auto <- fd
-  as_auto$scoring_settings$gradient_method <- "auto"
+  as_auto <- ps_scoring(fd, "gradient_method", "auto")
   expect_false(identical(ferx_covariance(as_auto)$cov_matrix, fd$cov_matrix))
 
   cov <- ferx_covariance(fd)
@@ -94,11 +112,7 @@ test_that("S12: a gradient = \"fd\" fit stays on finite differences in ferx_cova
 })
 
 test_that("S13: a scoring record without gradient_method (saved before ferx-core #1835) reads it as auto", {
-  fit <- ps_fit("w_default", "warfarin")
-  old <- fit
-  old$scoring_settings$gradient_method <- NULL
-  expect_identical(ferx_covariance(old)$cov_matrix, fit$cov_matrix)
-  # The same in the SIR record's scoring half, read through the record decoder.
+  # In the SIR record's scoring half, read through the record decoder.
   rec <- ferx:::ferx_rust_settings_record("sir_settings", NULL, "test", "rec")
   rec$scoring$gradient_method <- NULL
   back <- ferx:::ferx_rust_settings_record("sir_settings", rec, "test", "rec")
@@ -128,8 +142,7 @@ test_that("S1b: on gradient = \"fd\" the packed estimate is what makes S1 identi
   # back bit-equal (ubuntu at ferx-core 497a7a9) and the premise cannot be shown
   # there.
   fd <- ps_fit("iov_fd", "warfarin_iov", gradient = "fd")
-  no_packed <- fd
-  no_packed$packed_estimate <- NULL
+  no_packed <- ps_without(fd, "packed_estimate")
   moved <- !identical(ferx_covariance(no_packed)$cov_matrix, fd$cov_matrix)
   skip_if(!moved, "the repack of the reported estimates is bit-equal here")
   expect_true(moved)
@@ -171,8 +184,7 @@ test_that("S2: ferx_covariance(fit) follows the fit's scoring record", {
     # The record holds the setting as the stage ran it.
     expect_identical(fit$scoring_settings[[row$setting]], row$value, info = row$key)
     # Premise: on this fixture the setting moves the covariance.
-    no_record <- fit
-    no_record$scoring_settings <- NULL
+    no_record <- ps_without(fit, "scoring_settings")
     expect_false(identical(ferx_covariance(no_record)$cov_matrix, fit$cov_matrix),
                  info = row$key)
     cov <- ferx_covariance(fit)
@@ -209,9 +221,7 @@ test_that("S4: ferx_sir(fit) with no arguments repeats the in-fit SIR", {
     # Premise: the same draws without the records score differently. Both go:
     # without a SIR record, ferx_sir() scores under the fit's stage record,
     # which carries the scoring rows' setting too.
-    no_record <- fit
-    no_record$sir_settings <- NULL
-    no_record$scoring_settings <- NULL
+    no_record <- ps_without(fit, "sir_settings", "scoring_settings")
     expect_false(identical(
       ps_sir_fields(ferx_sir(no_record, 300L, 100L, sir_seed = 1L)),
       ps_sir_fields(fit)
@@ -232,8 +242,7 @@ test_that("S3: the scoring record survives ferx_save_fit() / ferx_load_fit()", {
     expect_identical(cov$cov_matrix, fit$cov_matrix, info = row$key)
     expect_identical(cov$se_theta, fit$se_theta, info = row$key)
     # Premise: the record still moves the loaded fit's covariance.
-    no_record <- loaded
-    no_record$scoring_settings <- NULL
+    no_record <- ps_without(loaded, "scoring_settings")
     expect_false(identical(ferx_covariance(no_record)$cov_matrix, cov$cov_matrix),
                  info = row$key)
   }
@@ -261,9 +270,7 @@ test_that("S5: the SIR record survives the round trip, so ferx_sir(loaded) repea
     expect_identical(loaded$sir_seed_used, 1, info = row$key)
     expect_identical(ps_sir_fields(ferx_sir(loaded)), ps_sir_fields(fit), info = row$key)
     # Premise: without the records the loaded fit resamples differently.
-    no_record <- loaded
-    no_record$sir_settings <- NULL
-    no_record$scoring_settings <- NULL
+    no_record <- ps_without(loaded, "sir_settings", "scoring_settings")
     expect_false(identical(
       ps_sir_fields(ferx_sir(no_record, 300L, 100L, sir_seed = 1L)),
       ps_sir_fields(fit)
@@ -272,92 +279,69 @@ test_that("S5: the SIR record survives the round trip, so ferx_sir(loaded) repea
 })
 
 test_that("S10: the .fitrx spelling of both records is ferx-core's", {
-  to <- function(record, kind) ferx:::.fitrx_settings_to_wire(stats::setNames(list(record), kind), kind)
-  json <- function(w) {
-    as.character(jsonlite::toJSON(w, auto_unbox = TRUE, null = "null", na = "null",
-                                  digits = I(17)))
-  }
-
-  sc <- ferx:::.ferx_default_settings("scoring_settings")
-  sc$inner_optimizer <- "lbfgs"
-  sc$ode_method <- "rodas5p"
-  sc$inner_tol <- 1e-3
-  sc$ode_reltol <- 0.1 + 0.2
-  sc$ode_stiff_abort_after <- NA_integer_
-  w <- to(sc, "scoring_settings")
   # ferx-core's ScoringSettingsWire keys, enums as their [fit_options] tokens.
+  w <- fitrx_fit_json(ps_cov_fit(ps_cov_rows[[1L]])$bundle)$scoring_settings
   expect_setequal(names(w), ps_scoring_keys)
-  text <- json(w)
-  expect_match(text, '"inner_optimizer":"lbfgs"', fixed = TRUE)
-  expect_match(text, '"ode_method":"rodas5p"', fixed = TRUE)
-  expect_match(text, '"ode_stiff_abort_after":null', fixed = TRUE)
+  expect_identical(w$inner_optimizer, "lbfgs")
+  expect_null(w$ode_stiff_abort_after)
+
   # The covariate-NN penalty strengths (ferx-core #1352) are optional, and the
   # default record leaves them unrecorded: R edits it into a fit with no record,
   # and a recorded 0 would win over the model file's strength.
+  sc <- ferx:::.ferx_default_settings("scoring_settings")
   expect_identical(sc$nn_l2_lambda, NA_real_)
+  expect_identical(sc$nn_smooth_lambda, NA_real_)
   expect_identical(ferx:::.ferx_default_settings("sir_settings")$scoring$nn_l2_lambda,
                    NA_real_)
-  sc$nn_l2_lambda <- 0.25
-  sc$nn_smooth_lambda <- NA_real_
-  text <- json(to(sc, "scoring_settings"))
-  expect_match(text, '"nn_smooth_lambda":null', fixed = TRUE)
-  sc$nn_l2_lambda <- NA_real_
-  sc$nn_smooth_lambda <- NA_real_
 
-  sr <- ferx:::.ferx_default_settings("sir_settings")
-  sr[c("samples", "resamples", "seed", "df", "scale", "keep_samples")] <-
-    list(300L, 100L, 4242, 3, "natural", TRUE)
-  sr$scoring <- sc
-  ws <- to(sr, "sir_settings")
   # SirSettingsWire: the scoring half flattened beside the SIR keys.
+  ws <- fitrx_fit_json(ps_sir_fit(ps_sir_rows[[3L]])$bundle)$sir$settings
   expect_setequal(names(ws), c("samples", "resamples", "seed", "df", "scale",
                                "keep_samples", ps_scoring_keys))
-  expect_match(json(ws), '"scale":"natural"', fixed = TRUE)
+  expect_identical(ws$scale, "natural")
   # A normal proposal (`df = Inf`) is `"df": "normal"` on the wire, ferx-core's
   # own spelling (ferx-core#1819), and reads back as `Inf`.
-  sr$df <- Inf
-  wn <- expect_silent(to(sr, "sir_settings"))
-  expect_match(json(wn), '"df":"normal"', fixed = TRUE)
+  normal <- ps_sir_fit(ps_sir_rows[[5L]])
+  expect_identical(fitrx_fit_json(normal$bundle)$sir$settings$df, "normal")
+  expect_identical(normal$sir_settings$df, Inf)
 })
 
 test_that("S12: a record the engine would refuse is refused by name", {
   sc <- ferx:::.ferx_default_settings("scoring_settings")
-  save_as <- function(record) {
-    ferx:::.fitrx_settings_to_wire(list(scoring_settings = record), "scoring_settings")
+  decode <- function(record) {
+    ferx:::ferx_rust_settings_record("scoring_settings", record, "ferx_covariance",
+                                     "fit$scoring_settings")
   }
   extra <- c(sc, list(inner_maxit = 5L))
-  expect_error(save_as(extra),
-               'ferx_save_fit: `fit$scoring_settings`: unknown key "inner_maxit"',
+  expect_error(decode(extra),
+               'ferx_covariance: `fit$scoring_settings`: unknown key "inner_maxit"',
                fixed = TRUE)
   missing <- sc[names(sc) != "n_agq"]
-  expect_error(save_as(missing),
-               'ferx_save_fit: `fit$scoring_settings`: missing key "n_agq"',
+  expect_error(decode(missing),
+               'ferx_covariance: `fit$scoring_settings`: missing key "n_agq"',
                fixed = TRUE)
   bad <- sc
   bad$inner_optimizer <- "newton"
-  expect_error(save_as(bad),
-               "ferx_save_fit: `fit$scoring_settings`: fit option `inner_optimizer`: unknown value `newton`",
+  expect_error(decode(bad),
+               "ferx_covariance: `fit$scoring_settings`: fit option `inner_optimizer`: unknown value `newton`",
                fixed = TRUE)
   bad <- sc
   bad$ode_reltol <- -1
-  expect_error(save_as(bad),
-               "ferx_save_fit: `fit$scoring_settings`: ode_reltol must be a positive finite value, got -1",
+  expect_error(decode(bad),
+               "ferx_covariance: `fit$scoring_settings`: ode_reltol must be a positive finite value, got -1",
                fixed = TRUE)
-  # The same decoder guards the post-hoc steps: no serde error, no "corrupt".
-  w <- ps_fit("w_default", "warfarin")
-  w$scoring_settings$inner_optimizer <- "newton"
-  err <- tryCatch(ferx_covariance(w), error = conditionMessage)
-  expect_match(err, "ferx_covariance: `fit$scoring_settings`: fit option `inner_optimizer`",
-               fixed = TRUE)
-  expect_no_match(err, "corrupt|serde", ignore.case = TRUE)
+  # A bundle holding such a record does not load at all.
+  expect_error(fitrx_edit_fit(ps_fit("w_default", "warfarin"), function(b) {
+    b$scoring_settings$inner_optimizer <- "newton"
+    b
+  }), 'unknown scoring_settings.inner_optimizer "newton"', fixed = TRUE)
 })
 
 test_that("S6: an explicit argument overrides the fit's record, even at its default value", {
   # The engine resolves a record by value, so an explicit default passed as an
   # option would lose to it (plan section 0c); the argument edits the record.
   fit <- ps_cov_fit(ps_cov_rows[[3L]])  # warfarin_iov, recorded mu_referencing = FALSE
-  no_record <- fit
-  no_record$scoring_settings <- NULL
+  no_record <- ps_without(fit, "scoring_settings")
   over <- ferx_covariance(fit, mu_referencing = TRUE)$cov_matrix
   expect_identical(over, ferx_covariance(no_record)$cov_matrix)
   expect_false(identical(over, fit$cov_matrix))
@@ -366,8 +350,7 @@ test_that("S6: an explicit argument overrides the fit's record, even at its defa
 
   nat <- ps_sir_fit(ps_sir_rows[[3L]])  # warfarin_iov, recorded sir_scale = "natural"
   packed <- ferx_sir(nat, sir_scale = "packed")
-  ref <- nat
-  ref$sir_settings <- NULL
+  ref <- ps_without(nat, "sir_settings")
   expect_identical(ps_sir_fields(packed),
                    ps_sir_fields(ferx_sir(ref, 300L, 100L, sir_seed = 1L)))
   expect_false(identical(ps_sir_fields(packed), ps_sir_fields(nat)))
@@ -379,18 +362,19 @@ test_that("S6: an explicit argument overrides the fit's record, even at its defa
   # A fit carrying only a SIR record (a bundle from between ferx-core #1758 and
   # #426) is scored under that record's scoring half; an explicit argument
   # edits that half, not the engine default (review round 1, finding 4).
-  sir_only <- ps_sir_fit(ps_sir_rows[[2L]])  # warfarin, inner_maxiter = 5
-  sir_only$scoring_settings <- NULL
   # inner_maxiter = 5 no longer binds the covariance step since ferx-core
   # #2280 (its near-mode inner BFGS converges sooner; the record moved the
   # matrix 8.8e-10 relative before, 0 after), so the record also carries a
   # loose inner_tol, which does (1.9e-8 relative).
-  sir_only$sir_settings$scoring$inner_tol <- 1e-2
+  sir_only <- fitrx_edit_fit(ps_sir_fit(ps_sir_rows[[2L]]), function(w) {  # warfarin, inner_maxiter = 5
+    w$scoring_settings <- NULL
+    w$sir$settings$inner_tol <- 1e-2
+    w
+  })
   expect_identical(ferx_covariance(sir_only, mu_referencing = TRUE)$cov_matrix,
                    ferx_covariance(sir_only)$cov_matrix)
   # Premise: the SIR record's scoring half moves this fixture's covariance.
-  neither <- sir_only
-  neither$sir_settings <- NULL
+  neither <- ps_without(sir_only, "sir_settings")
   expect_false(identical(ferx_covariance(neither)$cov_matrix,
                          ferx_covariance(sir_only)$cov_matrix))
 })
@@ -400,8 +384,7 @@ test_that("S13: a resamples > samples refusal names where each value came from",
   expect_error(ferx_sir(fit, sir_samples = 50L),
                "`sir_resamples` (100, recorded on the fit) must be <= `sir_samples` (50)",
                fixed = TRUE)
-  bare <- fit
-  bare$sir_settings <- NULL
+  bare <- ps_without(fit, "sir_settings")
   expect_error(ferx_sir(bare, sir_samples = 100L),
                "`sir_resamples` (250, the default) must be <= `sir_samples` (100)",
                fixed = TRUE)
@@ -411,10 +394,7 @@ test_that("S13: a resamples > samples refusal names where each value came from",
 
 test_that("S7: a fit with no record is scored as it always was, and says nothing", {
   bare <- function(fit) {
-    fit$scoring_settings <- NULL
-    fit$sir_settings <- NULL
-    fit$packed_estimate <- NULL
-    fit
+    ps_without(fit, "scoring_settings", "sir_settings", "sir_seed", "packed_estimate")
   }
   f0 <- bare(ps_cov_fit(ps_cov_rows[[3L]]))
   expect_no_warning(cov <- ferx_covariance(f0))
@@ -434,10 +414,11 @@ test_that("S7: a fit with no record is scored as it always was, and says nothing
 
 test_that("S8: a fit whose estimates were edited does not keep its packed estimate", {
   fit <- ps_fit("w_default", "warfarin")
-  edited <- fit
-  edited$theta[1L] <- edited$theta[1L] * 1.01
-  edited_np <- edited
-  edited_np$packed_estimate <- NULL
+  edited <- fitrx_edit_fit(fit, function(w) {
+    w$theta$estimates[[1L]] <- w$theta$estimates[[1L]] * 1.01
+    w
+  })
+  edited_np <- ps_without(edited, "packed_estimate")
   # With the packed vector the step would differentiate at the unedited point,
   # which is the in-fit covariance.
   cov <- ferx_covariance(edited)$cov_matrix
@@ -453,11 +434,9 @@ test_that("S9: a [mixture] per-class override fit is scored in memory and after 
   # which the engine reads ahead of the packed estimate, so a fit without the
   # latter is still scored as the fit was.
   expect_length(fit$mixture_overrides, 1L)
-  no_packed <- fit
-  no_packed$packed_estimate <- NULL
+  no_packed <- ps_without(fit, "packed_estimate")
   expect_identical(ferx_covariance(no_packed)$cov_matrix, fit$cov_matrix)
-  neither <- no_packed
-  neither$mixture_overrides <- NULL
+  neither <- ps_without(no_packed, "mixture_overrides")
   expect_error(ferx_covariance(neither), "records neither their fitted values",
                fixed = TRUE)
 
@@ -473,14 +452,6 @@ test_that("S9: a [mixture] per-class override fit is scored in memory and after 
   cov <- ferx_covariance(loaded)
   expect_identical(cov$cov_matrix, fit$cov_matrix)
   expect_identical(cov$se_theta, fit$se_theta)
-
-  # The engine reads the overrides R wrote, not only R itself: its loader
-  # takes `mixture_overrides` as a sequence, which a one-override fit writes as
-  # a length-1 vector unless the key is kept an array (#379). Re-saved by the
-  # engine and read back, they are the fit's bit for bit.
-  trip <- fitrx_engine_trip(fit)
-  expect_identical(ferx_load_fit(trip$core_path)$mixture_overrides,
-                   fit$mixture_overrides)
 })
 
 test_that("S9b: an SAEM [mixture] override fit is scored in memory and after a reload", {
@@ -520,8 +491,10 @@ test_that("S14: ferx_covariance(fit) on an M3 fit scores M3, in memory and after
   for (fit in list(file_m3, arg_m3)) {
     expect_identical(fit$bloq_method_label, "m3")
     # Premise: scored as drop, the censored rows move the covariance.
-    as_drop <- fit
-    as_drop$bloq_method_label <- "drop"
+    as_drop <- fitrx_edit_fit(fit, function(w) {
+      w$bloq_method <- "drop"
+      w
+    })
     expect_false(identical(ferx_covariance(as_drop)$se_theta, fit$se_theta))
 
     cov <- ferx_covariance(fit)
@@ -531,11 +504,6 @@ test_that("S14: ferx_covariance(fit) on an M3 fit scores M3, in memory and after
     expect_identical(loaded$bloq_method_label, "m3")
     expect_identical(ferx_covariance(loaded)$se_theta, fit$se_theta)
   }
-  # A fit that records no method (a bundle saved before the key) falls back
-  # to the model file's: still M3 for the file fit.
-  no_label <- file_m3
-  no_label$bloq_method_label <- NULL
-  expect_identical(ferx_covariance(no_label)$se_theta, file_m3$se_theta)
 })
 
 test_that("S15: ferx_sir(fit) on an M3 fit repeats the in-fit SIR", {
@@ -643,45 +611,6 @@ test_that("S16: a missing key is filled as ferx-core's wire fills it, or refused
     expect_match(err, sprintf('missing key "%s"', name), fixed = TRUE, info = name)
     expect_match(err, "set `fit$sir_settings <- NULL`", fixed = TRUE, info = name)
   }
-
-  # A fit saveRDS()'d before a key was recorded runs as the filled record.
-  fit <- ps_fit("w_default", "warfarin")
-  expect_identical(fit$scoring_settings$inner_restarts, ps_missing_fills$inner_restarts)
-  old <- fit
-  old$scoring_settings$inner_restarts <- NULL
-  expect_identical(ferx_covariance(old)$cov_matrix, ferx_covariance(fit)$cov_matrix)
-  # One saved before inner_screen was recorded ran no screen (ferx-core #2013):
-  # it re-scores as the record with the screen off, not at today's default.
-  old <- fit
-  old$scoring_settings$inner_screen <- NULL
-  off <- fit
-  off$scoring_settings$inner_screen <- 0L
-  expect_identical(ferx_covariance(old)$cov_matrix, ferx_covariance(off)$cov_matrix)
-})
-
-test_that("S17: an unknown key on a fit in memory is refused by name, with the way out (#535)", {
-  fit <- ps_fit("w_default", "warfarin")
-  edited <- fit
-  edited$scoring_settings$inner_future <- 1L
-  for (step in list(
-    list("ferx_covariance", function() ferx_covariance(edited)),
-    list("ferx_save_fit", function() ferx_save_fit(edited, ps_scratch(".fitrx")))
-  )) {
-    err <- tryCatch(step[[2L]](), error = conditionMessage)
-    expect_match(err, sprintf('%s: `fit$scoring_settings`: unknown key "inner_future"',
-                              step[[1L]]), fixed = TRUE)
-    expect_match(err, "Remove that key, or set `fit$scoring_settings <- NULL`",
-                 fixed = TRUE)
-  }
-  # The way out works: the fit runs as one that records none.
-  edited$scoring_settings <- NULL
-  expect_no_error(ferx_covariance(edited))
-
-  sfit <- ps_sir_fit(ps_sir_rows[[1L]])
-  sfit$sir_settings$scoring$inner_future <- 1L
-  err <- tryCatch(ferx_sir(sfit), error = conditionMessage)
-  expect_match(err, '`fit$sir_settings$scoring`: unknown key "inner_future"', fixed = TRUE)
-  expect_match(err, "set `fit$sir_settings <- NULL`", fixed = TRUE)
 })
 
 test_that("S17: ferx_sir(fit, args) on a fit with no SIR record scores under its stage record", {
@@ -694,16 +623,10 @@ test_that("S17: ferx_sir(fit, args) on a fit with no SIR record scores under its
   expect_null(fit$sir_settings)
   ran <- ferx_sir(fit, 300L, 100L, sir_seed = 1L)
   expect_identical(ran$sir_settings$scoring$inner_maxiter, 5L)
-  # The same draws under a SIR record built by hand on the stage record.
-  by_hand <- fit
-  rec <- ferx:::.ferx_default_settings("sir_settings")
-  rec[c("samples", "resamples", "seed")] <- list(300L, 100L, 1)
-  rec$scoring <- fit$scoring_settings
-  by_hand$sir_settings <- rec
-  expect_identical(ps_sir_fields(ran), ps_sir_fields(ferx_sir(by_hand)))
+  # The record it wrote repeats the same draws.
+  expect_identical(ps_sir_fields(ran), ps_sir_fields(ferx_sir(ran)))
   # Premise: under the engine default the draws score differently.
-  bare <- fit
-  bare$scoring_settings <- NULL
+  bare <- ps_without(fit, "scoring_settings")
   expect_false(identical(ps_sir_fields(ferx_sir(bare, 300L, 100L, sir_seed = 1L)),
                          ps_sir_fields(ran)))
 })
@@ -764,9 +687,6 @@ test_that("S18: a bundle record naming an unknown key is dropped with a warning;
     })
   )
   for (kind in names(newer)) {
-    # ferx-core's own reader ignores the key and loads the bundle.
-    expect_no_error(ferx:::ferx_rust_fitrx_engine_resave(newer[[kind]],
-                                                         tempfile(fileext = ".fitrx")))
     w <- expect_warning(loaded <- ferx_load_fit(newer[[kind]]),
                         class = "ferx_settings_record_dropped_warning")
     expect_match(conditionMessage(w), '"inner_future"', fixed = TRUE)

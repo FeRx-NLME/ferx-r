@@ -95,8 +95,10 @@ test_that("a failed or SIR-fallback covariance step hides the SD on both lines",
   skip_on_cran()
   fit <- mbma_variant("weighted")
   for (status in c("failed", "sir_fallback", "computed", "not_requested")) {
-    f <- fit
-    f$covariance_status <- status
+    f <- fitrx_edit_fit(fit, function(w) {
+      w$covariance_status <- status
+      w
+    })
     core <- expect_core_rows(f, status)
     shown <- !status %in% c("failed", "sir_fallback")
     # Both sides of the gate, on the row and on the weight line.

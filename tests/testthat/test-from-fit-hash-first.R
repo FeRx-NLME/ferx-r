@@ -56,7 +56,7 @@ hf_edits <- list(
   level_block = list(
     edit = c("theta TVKA(1.0, 0.01, 10.0)",
              "theta TVKA[ID, contrast = none](1.0, 0.01, 10.0)"),
-    no_hash = "this fit carries no theta level bindings"
+    no_hash = "its theta level block(s) `TVKA[ID]` take their level layout"
   ),
   symbolic_centre = list(
     edit = c("center = 70", "center = median"),
@@ -69,8 +69,8 @@ hf_edits <- list(
 )
 
 # A fit of the unedited model, in its own directory so the edit cannot reach
-# another test's file. The covariance matrix is a placeholder: SIR needs one
-# to run at all, and no assertion here reaches the resampling.
+# another test's file. The covariance matrix in its bytes is a placeholder: SIR
+# needs one to run at all, and no assertion here reaches the resampling.
 hf_fit <- function() {
   dir <- tempfile("ferx_hash_first_")
   dir.create(dir)
@@ -80,7 +80,11 @@ hf_fit <- function() {
   file.copy(ferx_example("two_cpt_oral_cov")$data, data)
   fit <- ferx_fit(model, data, verbose = FALSE)
   n <- length(fit$theta) + nrow(fit$omega) + length(fit$sigma)
-  fit$cov_matrix <- diag(1e-4, n)
+  fit <- fitrx_edit_fit(fit, function(w) {
+    w$covariance_matrix <- list(rows = n, cols = n,
+                                data = as.list(as.numeric(diag(1e-4, n))))
+    w
+  })
   list(fit = fit, model = model)
 }
 
@@ -143,8 +147,10 @@ test_that("a fit with no model_hash is not checked: the from-fit prologue still 
   for (edit in names(hf_edits)) {
     h <- hf_fit()
     hf_edit(h$model, hf_edits[[edit]]$edit)
-    fit <- h$fit
-    fit$model_hash <- NA_character_
+    fit <- fitrx_edit_fit(h$fit, function(w) {
+      w$model_hash <- NULL
+      w
+    })
     for (entry in names(hf_calls)) {
       info <- paste(edit, entry)
       msg <- hf_msg(suppressWarnings(hf_calls[[entry]](fit)))

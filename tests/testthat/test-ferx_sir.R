@@ -8,13 +8,8 @@
 
 sir_cov_skip <- "covariance step did not converge - skipping"
 
-
-
-
-
-
-
-
+# The step reads the fit's bytes, so a fit in another state is edited there.
+# A fit as one made before #462 recorded its selection: neither field.
 
 test_that("ferx_sir rejects fits without a covariance matrix", {
   fit <- warfarin_fit()  # covariance = FALSE
@@ -193,21 +188,15 @@ test_that("path/hash fields round-trip through .fitrx save/load", {
 # just wrote are qualified, so it has to reach the fit - both the flat vector
 # and the structured table.
 #
-# The merge is tested against a mocked binding rather than a real engine run:
-# the behaviour under test is R-side, and gating it on the engine would make it
-# unrunnable until the ferx-core pin in src/rust/Cargo.lock catches up. The
-# end-to-end test below covers the real engine when it is new enough.
-fake_sir_return <- function(warnings, n_theta, n_eta, n_sigma) {
-  list(
-    sir_ess = 4,
-    sir_ci_theta = rep(c(0.1, 0.2), n_theta),
-    sir_ci_omega = rep(c(0.01, 0.02), n_eta),
-    sir_ci_sigma = rep(c(0.001, 0.002), n_sigma),
-    sir_resamples = numeric(0),
-    sir_resamples_n = 0L,
-    sir_resamples_dim = 0L,
-    warnings = warnings
-  )
+# The merge is tested against a mocked binding rather than a real engine run,
+# which would have to produce these lines: the binding returns the new bytes,
+# here the fit's own with `warnings` added, and the list is their view. The
+# end-to-end test below covers the real engine.
+fake_sir_bytes <- function(fit, warnings) {
+  fitrx_edit_fit(fit, function(w) {
+    w$warnings <- c(w$warnings, warnings)
+    w
+  })$bundle
 }
 
 test_that("ferx_sir merges engine SIR warnings onto the fit", {
@@ -230,10 +219,7 @@ test_that("ferx_sir merges engine SIR warnings onto the fit", {
     "so the population was not verified against the one the fit was given"
   )
   testthat::local_mocked_bindings(
-    ferx_rust_sir = function(...) {
-      fake_sir_return(c(shrunk, note), length(fit$theta), nrow(fit$omega),
-                      length(fit$sigma))
-    },
+    ferx_rust_sir = function(...) fake_sir_bytes(fit, c(shrunk, note)),
     .package = "ferx"
   )
 
@@ -254,13 +240,6 @@ test_that("ferx_sir merges engine SIR warnings onto the fit", {
   # warning actionable.
   expect_true(any(grepl("TVCL", sir_rows$message, fixed = TRUE)))
 
-  # A second pass over the same fit must not stack a duplicate of either row.
-  twice <- ferx_sir(out, sir_samples = 8L, sir_resamples = 4L, sir_seed = 1L)
-  expect_equal(sum(grepl("shrunk", twice$warnings, fixed = TRUE)), 1L)
-  expect_equal(
-    sum(grepl("shrunk", twice$warnings_structured$message, fixed = TRUE)),
-    1L
-  )
 })
 
 test_that("ferx_sir adds no sir rows when the engine reports nothing", {
@@ -268,9 +247,7 @@ test_that("ferx_sir adds no sir rows when the engine reports nothing", {
   skip_if(is.null(fit$cov_matrix), sir_cov_skip)
 
   testthat::local_mocked_bindings(
-    ferx_rust_sir = function(...) {
-      fake_sir_return(character(0), length(fit$theta), nrow(fit$omega), length(fit$sigma))
-    },
+    ferx_rust_sir = function(...) fit$bundle,
     .package = "ferx"
   )
   out <- ferx_sir(fit, sir_samples = 8L, sir_resamples = 4L, sir_seed = 1L)
@@ -286,7 +263,10 @@ test_that("ferx_sir records the fingerprint check's note on the fit end-to-end (
   # scheme makes the engine's run_sir append the note itself.
   fit <- warfarin_fit_cov()
   skip_if(is.null(fit$cov_matrix), sir_cov_skip)
-  fit <- foreign_scheme_fit(fit)
+  fit <- fitrx_edit_fit(fit, function(w) {
+    w$population_fingerprint$scheme <- 1L
+    w
+  })
   expect_false(foreign_scheme_note %in% fit$warnings)
   out <- suppressWarnings(
     ferx_sir(fit, sir_samples = 50L, sir_resamples = 20L, sir_seed = 1L)
@@ -309,8 +289,10 @@ test_that("ferx_sir surfaces engine proposal-conditioning warnings end-to-end", 
 
   # Adding to a diagonal keeps the matrix PSD, so this is a covariance a real
   # (non-identified) fit could produce rather than a malformed input.
-  degenerate <- fit
-  degenerate$cov_matrix[1L, 1L] <- degenerate$cov_matrix[1L, 1L] + 1e8
+  degenerate <- fitrx_edit_fit(fit, function(w) {
+    w$covariance_matrix$data[[1L]] <- w$covariance_matrix$data[[1L]] + 1e8
+    w
+  })
 
   out <- ferx_sir(degenerate, sir_samples = 8L, sir_resamples = 4L, sir_seed = 1L)
 
@@ -320,6 +302,14 @@ test_that("ferx_sir surfaces engine proposal-conditioning warnings end-to-end", 
   sir_rows <- sir_rows[sir_rows$category == "sir", , drop = FALSE]
   expect_true(any(grepl("shrunk", sir_rows$message, fixed = TRUE)))
   expect_true(any(grepl(names(fit$theta)[1L], sir_rows$message, fixed = TRUE)))
+
+  # A second pass over the same fit must not stack a duplicate of the line.
+  twice <- ferx_sir(out, sir_samples = 8L, sir_resamples = 4L, sir_seed = 1L)
+  expect_equal(sum(grepl("shrunk", twice$warnings, fixed = TRUE)), 1L)
+  expect_equal(
+    sum(grepl("shrunk", twice$warnings_structured$message, fixed = TRUE)),
+    1L
+  )
 })
 
 test_that("ferx_sir leaves a healthy fit free of sir warnings", {
@@ -415,8 +405,11 @@ test_that("in-fit SIR on a model-file `method = foce` fit scores under FOCE (fer
 test_that("ferx_sir on an IOV fit follows the fit's kappa, not the model file's (#465)", {
   fit <- warfarin_iov_sir_fit()
   skip_if(is.null(fit$cov_matrix) || is.null(fit$sir_ess), sir_cov_skip)
-  scaled <- fit
-  scaled$omega_iov <- fit$omega_iov * 10
+  scaled <- fitrx_edit_fit(fit, function(w) {
+    w$iov$omega_iov$data <- lapply(w$iov$omega_iov$data, function(x) x * 10)
+    w
+  })
+  expect_equal(scaled$omega_iov, fit$omega_iov * 10)
 
   base <- standalone_sir(fit)
   moved <- standalone_sir(scaled)
@@ -429,12 +422,18 @@ test_that("ferx_sir on an IOV fit follows the fit's kappa, not the model file's 
 test_that("ferx_sir refuses a kappa fit that has lost its omega_iov (#465)", {
   fit <- warfarin_iov_sir_fit()
   skip_if(is.null(fit$cov_matrix), sir_cov_skip)
-  fit$omega_iov <- NULL
+  fit <- fitrx_edit_fit(fit, function(w) {
+    w$iov <- NULL
+    w
+  }, drop = "ebes_kappa.csv")
+  expect_null(fit$omega_iov)
   # Resampling around the model file's initial kappa would be a silently wrong
-  # answer, so the binding refuses instead.
-  # Anchored on the binding's prefix, the shared builder's one per-binding input.
-  expect_error(standalone_sir(fit), "^ferx_sir: .*carries no omega_iov",
-               info = "ferx_sir side of the shared skeleton (#473)")
+  # answer, so the engine refuses instead.
+  e <- tryCatch(standalone_sir(fit), error = function(e) e)
+  expect_s3_class(e, "ferx_engine_error")
+  expect_identical(e$code, "E_PARAM_SHAPE")
+  # The prefix is the step's: anchoring it catches the wrong caller's label.
+  expect_match(conditionMessage(e), "^ferx_sir: .*carry no omega_iov")
 })
 
 test_that("ferx_sir on a fit without IOV still reproduces the in-fit SIR (#465)", {
@@ -504,7 +503,6 @@ test_that("sir_ci_kappa survives a .fitrx round trip (#1705)", {
   skip_if(is.null(fit$cov_matrix) || is.null(fit$sir_ess), sir_cov_skip)
   path <- withr::local_tempfile(fileext = ".fitrx")
   ferx_save_fit(fit, path)
-  # Mutation: drop `ci_kappa` from .fitrx_build_sir_wire() or from the loader.
   expect_identical(ferx_load_fit(path)$sir_ci_kappa, fit$sir_ci_kappa)
 })
 
@@ -533,9 +531,8 @@ test_that("a .fitrx written before #1705 loads with no sir_ci_kappa", {
 })
 
 test_that("an IOV SIR bundle from ferx_save_fit() still loads in the engine (#1705)", {
-  # `ci_kappa` is `Option<Vec<(f64, f64)>>` on the engine's SirWire, written
-  # through `.FITRX_ARRAY_OF_ARRAY_KEYS` like the other SIR intervals. The
-  # engine has to accept what R writes for it.
+  # `ci_kappa` is `Option<Vec<(f64, f64)>>` on the engine's SirWire. The engine
+  # has to read the saved bundle back through a model's `from_fit`.
   fit <- warfarin_iov_sir_fit()
   skip_if(is.null(fit$cov_matrix) || is.null(fit$sir_ess), sir_cov_skip)
   bundle <- withr::local_tempfile(fileext = ".fitrx")
@@ -576,12 +573,11 @@ test_that("a fit without IOV carries no sir_ci_kappa, in memory or on disk (#170
 # Found by the #465 skeleton audit: `ferx_sir()` read `fit$interaction`, a field
 # the R fit list never carries, so every FOCEI fit was resampled under the FOCE
 # inner loop (warfarin, 200/100, seed 7: ESS 61.27 against the in-fit 78.37).
-# `.ferx_fit_interaction()` derives it from the method chain, as
-# `ferx_covariance()` already did.
+# The fit's bytes now carry the flag the fit ran under.
 test_that("ferx_sir on a FOCEI fit resamples under the FOCEI inner loop", {
   fit <- sir_fit_with_infit_sir("warfarin", method = "focei")
   skip_if(is.null(fit$cov_matrix) || is.null(fit$sir_ess), sir_cov_skip)
-  expect_true(.ferx_fit_interaction(fit))
+  expect_true(fit$interaction)
 
   expect_same_sir(standalone_sir(fit), fit)
 })
@@ -602,16 +598,15 @@ test_that("ferx_sir gives the same draw on any subject labels (#468)", {
   expect_identical(out_gappy$sir_ci_theta, out_base$sir_ci_theta)
 })
 
-test_that("ferx_sir hands the binding the fit's IDs verbatim (#468)", {
+test_that("ferx_sir hands the binding the fit's own bytes (#468)", {
   skip_if_not_installed("mockery")
   gappy <- relabelled_fit("warfarin", "gappy", relabel_gappy)
   skip_if(is.null(gappy$cov_matrix), sir_cov_skip)
   cap <- capture_binding_args()
   mockery::stub(ferx_sir, "ferx_rust_sir", cap$fake)
   expect_error(ferx_sir(gappy, sir_samples = 4L, sir_resamples = 2L), "captured")
-  args <- cap$seen()
-  expect_identical(args$subject_ids, gappy$ebe_etas$ID)
-  expect_null(args$n_subjects)
+  # The IDs travel in them, as ebes.csv has them.
+  expect_identical(cap$seen()$bundle, gappy$bundle)
 })
 
 # -- Low-ESS warning and sir_scale (ferx-core #1723) ---------------------------
@@ -723,20 +718,16 @@ test_that("ferx_sir drops only the replaced run's SIR lines (ferx-core #1723)", 
             "SIR requested but no covariance")
   stale <- c("SIR: effective sample size is 3.5 of 1000 draws",
              "SIR failed: covariance not positive definite")
-  fit$warnings <- c(kept, stale)
-  fit$warnings_structured <- data.frame(
-    severity = "warning", category = "sir", message = c(kept, stale),
-    source_method = "", stringsAsFactors = FALSE
-  )
-  fresh <- "SIR: effective sample size is 140.2 of 1000 draws"
-  testthat::local_mocked_bindings(
-    ferx_rust_sir = function(...) {
-      fake_sir_return(fresh, length(fit$theta), nrow(fit$omega), length(fit$sigma))
-    },
-    .package = "ferx"
-  )
+  fit <- fitrx_edit_fit(fit, function(w) {
+    w$warnings <- c(kept, stale)
+    w
+  })
+  expect_identical(fit$warnings, c(kept, stale))
   out <- ferx_sir(fit, sir_samples = 8L, sir_resamples = 4L, sir_seed = 1L)
-  # Mutation: drop the stale filter -> the two stale lines survive.
+  # This run's line takes the stale ones' place; the others stay, in order.
+  fresh <- setdiff(out$warnings, kept)
+  expect_length(fresh, 1L)
+  expect_match(fresh, "^SIR: effective sample size is ")
   expect_identical(out$warnings, c(kept, fresh))
   expect_identical(out$warnings_structured$message, c(kept, fresh))
 })
@@ -764,7 +755,9 @@ test_that("ferx_sir sets sir_seed_used to the seed of its own run", {
 # in `if` with "missing value where TRUE/FALSE needed" (#536). The knobs are
 # checked before anything reads the fit, so a bare ferx_fit is enough.
 test_that("ferx_sir refuses out-of-range counts and seeds with its own message (#536)", {
-  bare <- structure(list(), class = "ferx_fit")
+  # Bytes the step never parses: the checks under test come first, or read the list.
+  bare <- structure(list(bundle = as.raw(1)), class = "ferx_fit")
+  testthat::local_mocked_bindings(.ferx_fit_canonical = function(fit, who) fit)
   for (bad in list(3e9, Inf, -Inf, NaN, NA_real_, 0, 2.5, c(4, 5), "4")) {
     expect_error(ferx_sir(bare, sir_samples = bad),
                  "`sir_samples` must be NULL or a single positive integer",

@@ -21,15 +21,20 @@ test_that(".ferx_step_threads: NULL takes the fit's width, 0 / n pass through (#
   }
 })
 
+# `fit` recording a run on two threads.
+two_threads <- function(fit) {
+  fitrx_edit_fit(fit, function(w) {
+    w$n_threads_used <- 2L
+    w
+  })
+}
+
 test_that("ferx_covariance / ferx_sir hand the binding the step's width (#527)", {
   skip_if_not_installed("mockery")
-  fit <- warfarin_fit()
-  fit$n_threads_used <- 2L
-  # ferx_sir() refuses a fit without a covariance matrix before the binding;
-  # any square matrix of the right size gets it there.
-  n <- length(fit$theta) + nrow(fit$omega) + length(fit$sigma)
-  sir_fit <- fit
-  sir_fit$cov_matrix <- diag(n)
+  fit <- two_threads(warfarin_fit())
+  # ferx_sir() refuses a fit without a covariance matrix before the binding.
+  sir_fit <- two_threads(warfarin_fit_cov())
+  skip_if(is.null(sir_fit$cov_matrix), "covariance step did not converge - skipping")
 
   seen <- function(f, binding, x, ...) {
     cap <- capture_binding_args()
@@ -49,9 +54,8 @@ test_that("ferx_covariance / ferx_sir hand the binding the step's width (#527)",
 })
 
 test_that("ferx_covariance reports the width it ran on (#527)", {
-  fit <- warfarin_fit()
   # The fit's width is what a NULL `threads` runs on.
-  fit$n_threads_used <- 2L
+  fit <- two_threads(warfarin_fit())
   out <- ferx_covariance(fit)
   expect_identical(out$n_threads_used, 2L)
 
@@ -67,7 +71,7 @@ test_that("ferx_covariance reports the width it ran on (#527)", {
 test_that("ferx_sir reports the width it ran on (#527)", {
   fit <- warfarin_fit_cov()
   skip_if(is.null(fit$cov_matrix), "covariance step did not converge - skipping")
-  fit$n_threads_used <- 2L
+  fit <- two_threads(fit)
   run <- function(...) {
     ferx_sir(fit, sir_samples = 8L, sir_resamples = 4L, sir_seed = 1L, ...)
   }

@@ -89,8 +89,10 @@ test_that("P3: an iov_occasion passed only through settings = reaches the steps 
   expect_equal(fit$ofv, col$ofv, tolerance = 1e-8)
 
   # Without the rule the engine has nothing to derive occasions with.
-  bare <- fit
-  bare$iov_occasion <- NULL
+  bare <- fitrx_edit_fit(fit, function(w) {
+    w$iov_occasion <- NULL
+    w
+  })
   expect_error(ferx_covariance(bare), "records no IOV occasion rule", fixed = TRUE)
 })
 
@@ -115,17 +117,18 @@ test_that("P4: the rule survives ferx_save_fit() / ferx_load_fit() (#512)", {
 })
 
 test_that("P5: the .fitrx spelling of the rule is ferx-core's", {
-  to <- ferx:::.fitrx_iov_occasion_to_wire
-  expect_null(to(NULL))
-  expect_identical(to("column"), "column")
-  expect_identical(to("dose"), "per_dose")
-  expect_identical(to("time(24, 48.5)"), list(time_windows = list(24, 48.5)))
+  data <- pp_iov_data()
+  model <- pp_iov_model(NULL)
+  wire <- function(rule) {
+    fit <- pp_fit(model, data, settings = list(iov_occasion = rule))
+    fitrx_fit_json(fit$bundle)$iov_occasion
+  }
+  expect_identical(wire("dose"), "per_dose")
+  expect_identical(wire("time(48, 120.1)"), list(time_windows = list(48, 120.1)))
   # One edge stays an array on the wire.
-  expect_identical(
-    as.character(jsonlite::toJSON(to("time(24)"), auto_unbox = TRUE)),
-    '{"time_windows":[24]}'
-  )
-  expect_error(to("weekly"), "not \"column\"", fixed = TRUE)
+  expect_identical(wire("time(120.1)"), list(time_windows = list(120.1)))
+  col <- pp_fit(ferx_example("warfarin_iov")$model, ferx_example("warfarin_iov")$data)
+  expect_identical(fitrx_fit_json(col$bundle)$iov_occasion, "column")
 })
 
 # #523 / #519: the from-fit predict / simulate / npde paths read the data with
@@ -206,7 +209,12 @@ test_that("P11: a fit that records no rule falls back to the model file's, or is
   # No rule in the model file and no OCC column: nothing to derive occasions with.
   expect_error(ferx_simulate(tw$model, tw$data, fit = legacy, n_sim = 1L, seed = 1L),
                "records no IOV occasion rule", fixed = TRUE)
-  expect_error(ferx_calc_npde(legacy, nsim = 50L, seed = 1L),
+  # ... and in the bytes, which is what this step reads.
+  no_rule <- fitrx_edit_fit(tw$fit, function(w) {
+    w$iov_occasion <- NULL
+    w
+  })
+  expect_error(ferx_calc_npde(no_rule, nsim = 50L, seed = 1L),
                "records no IOV occasion rule", fixed = TRUE)
   # The model file's rule is used, and the result says it was a guess.
   file_model <- pp_iov_model("  iov_occasion = dose")

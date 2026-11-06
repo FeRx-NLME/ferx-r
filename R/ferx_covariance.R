@@ -7,13 +7,17 @@
 #' `covariance_method` (e.g. the `rsr` sandwich), or when working with a fit
 #' loaded from a `.fitrx` bundle.
 #'
-#' `ferx_covariance()` reconstructs the fitted parameters from the fit,
-#' including the IOV (kappa) covariance `fit$omega_iov`, re-runs the inner
-#' loop to rebuild the covariance-step inputs, and calls the same covariance
-#' step [ferx_fit()] runs inline. The returned fit is the input with
+#' `ferx_covariance()` runs on the fit's bundle (`fit$bundle`), the bytes the
+#' engine serialized it to: it reads the fit from them, re-runs the inner loop
+#' to rebuild the covariance-step inputs, and calls the same covariance step
+#' [ferx_fit()] runs inline. It returns a new fit with new bytes, in which
 #' `cov_matrix`, `cor_matrix`, `se_theta` / `se_omega` / `se_sigma` /
 #' `se_kappa`, `covariance_status`, `eigenvalues`, and `condition_number`
-#' refreshed.
+#' are refreshed. The input `fit` is not altered. A change made to the fit's
+#' list by hand does not reach the step, and a fit with no bundle, such as one
+#' from an `.rds` written by an older ferx, is refused with an error of class
+#' `ferx_no_bundle_error`: refit it. The model and data files are the ones at
+#' `fit$model_path` and `fit$data_path`, checked against the hashes in the bytes.
 #'
 #' A covariance step that runs but cannot produce a usable matrix (a
 #' non-positive-definite or structurally-unusable covariance Hessian, from the
@@ -145,7 +149,8 @@
 #' @param verbose When `TRUE`, the engine prints progress to stderr.
 #'   Default `FALSE`.
 #'
-#' @return The input `fit`, with `cov_matrix`, `cor_matrix`, `se_theta`,
+#' @return A new fit with new bytes, the input `fit` being left as it was, with
+#'   `cov_matrix`, `cor_matrix`, `se_theta`,
 #'   `se_omega`, `se_sigma`, `se_kappa`, `covariance_status`,
 #'   `covariance_method` (the estimator this step ran), `eigenvalues`,
 #'   `condition_number`, `max_abs_correlation` (the largest absolute
@@ -182,7 +187,7 @@ ferx_covariance <- function(fit,
   if (!inherits(fit, "ferx_fit")) {
     stop("`fit` must be a ferx_fit object (from ferx_fit() or ferx_load_fit()).")
   }
-  threads_arg <- .ferx_step_threads(threads, fit)
+  .ferx_step_threads(threads, fit)  # refuses a bad `threads` before the bytes are read
 
   # Normalise + validate covariance_method up-front so a typo surfaces as a
   # clean R condition rather than the engine's "unknown value" further in.
@@ -206,6 +211,9 @@ ferx_covariance <- function(fit,
             !is.na(mu_referencing))) {
     stop("`mu_referencing` must be NULL, TRUE or FALSE.")
   }
+  # Everything below reads the fit as its bytes say it is, not the caller's list.
+  fit <- .ferx_fit_canonical(fit, "ferx_covariance")
+  threads_arg <- .ferx_step_threads(threads, fit)
   # Before the model-file checks, so a loaded fit without a layout is refused
   # for that reason even when its bundle had no model file (#531).
   .ferx_refuse_unavailable_levels(fit)
@@ -233,57 +241,10 @@ ferx_covariance <- function(fit,
     stop("ferx_covariance: data file not found at ", data_path)
   }
 
-  # Build the flat eta_hats matrix (warm-start for the inner loop). `ebe_etas`
-  # is a data frame: first column ID, subsequent columns one per ETA. Strip ID
-  # and flatten row-major so each subject contributes `n_eta` contiguous
-  # values. Identical handling to ferx_sir().
-  ebes <- fit$ebe_etas
-  n_eta <- nrow(fit$omega)
-  if (is.null(n_eta)) n_eta <- 0L
-
-  if (n_eta == 0L) {
-    # Fixed-effects-only (naive-pooled) fit - ferx-core #989. There is no inner
-    # empirical-Bayes problem, so there are no EBEs to warm-start from and
-    # `fit$ebe_etas` is NULL rather than an empty data frame. The covariance
-    # step still applies: it is the theta/sigma block that carries the standard
-    # errors, and that block is exactly what a naive-pooled user needs, since
-    # NONMEM's `$COVARIANCE` default (`rsr`) is the estimator that accounts for
-    # the within-subject correlation such a model deliberately ignores.
-    eta_hats_flat <- numeric(0)
-  } else {
-    if (is.null(ebes) || nrow(ebes) == 0L) {
-      stop(
-        "ferx_covariance: fit$ebe_etas is empty, but fit$omega is ", n_eta, "x",
-        n_eta, " so this fit should carry per-subject EBEs. Cannot warm-start ",
-        "the inner loop."
-      )
-    }
-    eta_cols <- setdiff(names(ebes), c("ID", "ofv_contribution", "n_obs"))
-    if (length(eta_cols) != n_eta) {
-      stop(
-        "ferx_covariance: fit$ebe_etas has ", length(eta_cols), " ETA columns (",
-        paste(eta_cols, collapse = ", "),
-        ") but fit$omega is ", n_eta, "x", n_eta, ". ",
-        "The EBE table and the omega matrix must agree on n_eta - was ",
-        "this fit object hand-edited or assembled from incompatible parts?"
-      )
-    }
-    eta_mat <- as.matrix(ebes[, eta_cols, drop = FALSE])
-    storage.mode(eta_mat) <- "double"
-    eta_hats_flat <- as.numeric(t(eta_mat))  # row-major
-  }
-  # The fit's own subject IDs, in fit order (#468); their count is the
-  # subject count, and in the n_eta > 0 branch they come from the same
-  # `ebe_etas` rows as `eta_mat`.
-  subject_ids <- .ferx_fit_subject_id_set(fit, "ferx_covariance")
-
-  # Hash plumbing, identical to ferx_sir(): non-empty hex string forwards and
-  # Rust enforces equality; NULL (older binary) or NA (hashing failed at fit
-  # time) both coerce to "" so Rust skips the check on that side. See
-  # `.ferx_hash_arg()` in zzz.R.
-  model_hash_arg <- .ferx_hash_arg(fit$model_hash)
-  data_hash_arg <- .ferx_hash_arg(fit$data_hash)
-  if (!nzchar(model_hash_arg) || !nzchar(data_hash_arg)) {
+  # The engine checks the files against the hashes the bytes record; a fit that
+  # records none is not checked (`.ferx_hash_arg()` in zzz.R reads NULL and NA
+  # alike).
+  if (!nzchar(.ferx_hash_arg(fit$model_hash)) || !nzchar(.ferx_hash_arg(fit$data_hash))) {
     warning(
       "ferx_covariance: one or more file hashes are missing on the fit; ",
       "the integrity check will be skipped for the affected file(s). ",
@@ -291,254 +252,43 @@ ferx_covariance <- function(fit,
     )
   }
 
-  # FOCEI (interaction) vs FOCE controls the inner-loop NLL the covariance step
-  # differentiates, so it must match the original fit. FOCE / FOCEI fix it from
-  # the method chain; other methods take the fit's record - see
-  # .ferx_fit_interaction().
-  interaction <- .ferx_fit_interaction(fit)
-
-  omega_flat <- as.numeric(t(fit$omega))
-
-  # The fitted kappa (IOV) covariance (empty when no IOV). Without it the engine
-  # would rebuild the fit at the model file's initial kappa, so the glue refuses
-  # a kappa model whose fit carries no matching matrix (#473).
-  iov_args <- .ferx_omega_iov_args(fit)
-
-  binding_args <- .ferx_fit_binding_args(fit)
-  method_args <- .ferx_fit_method_args(fit)
-  kappa_args <- .ferx_ebe_kappa_args(fit)
-  reader_args <- .ferx_fit_reader_args(fit)
-  record_args <- .ferx_fit_record_args(
-    fit, scoring = list(mu_referencing = mu_referencing)[!is.null(mu_referencing)]
-  )
   .ferx_refuse_unrecorded_selection(
     fit, "ferx_covariance",
     "Refit with `ferx_fit(..., covariance = TRUE)`, or refit and call ferx_covariance() on the new fit."
   )
+  # `mu_referencing` is the one scoring setting a caller edits; the step reads
+  # the fit's record from the bytes otherwise.
+  scoring <- if (!is.null(mu_referencing)) {
+    .ferx_fit_record_args(fit, scoring = list(mu_referencing = mu_referencing))$scoring_settings
+  }
   # A refusal reaches the caller as `ferx_engine_error` with ferx-core's code
   # when the engine gave it one (#498); see `.ferx_engine_call()`.
-  # IDs from the sdtab fallback get the reason a mismatch refusal names (#555).
-  raw <- .ferx_sdtab_ids_hint(.ferx_engine_call(ferx_rust_covariance(
+  raw <- .ferx_engine_call(ferx_rust_covariance(
+    bundle = fit$bundle,
     model_path = model_path,
     data_path = data_path,
-    model_hash = model_hash_arg,
-    data_hash = data_hash_arg,
-    ofv = as.numeric(fit$ofv),
-    ofv_prior = .ferx_ofv_prior(fit),
-    interaction = interaction,
-    theta = as.numeric(fit$theta),
-    omega_flat = omega_flat,
-    omega_dim = nrow(fit$omega),
-    sigma = as.numeric(fit$sigma),
-    omega_iov_flat = iov_args$omega_iov_flat,
-    omega_iov_dim = iov_args$omega_iov_dim,
-    residual_rho = .ferx_residual_rho_vec(fit),
-    residual_rho_pairs = .ferx_residual_rho_pairs(fit),
-    eta_hats_flat = eta_hats_flat,
-    subject_ids = subject_ids$ids,
-    # The occasion rule the fit derived its occasions with; without it the
-    # engine falls back to the model file's and refuses a rule passed only
-    # through `settings =` (#512).
-    iov_occasion = as.character(fit$iov_occasion %||% ""),
-    # The reader settings the fit read its data with and the fingerprint of
-    # what it read: the engine re-reads the fit's own rows and verifies them
-    # (#462).
-    reader_settings = reader_args$reader_settings,
-    population_fingerprint = reader_args$population_fingerprint,
-    # How the fit was scored, and its exact packed estimate (#511).
-    scoring_settings = record_args$scoring_settings,
-    sir_settings = record_args$sir_settings,
-    packed_estimate = record_args$packed_estimate,
-    # A [mixture] fit's fitted per-class overrides (ferx-core #1765).
-    mixture_overrides = record_args$mixture_overrides,
-    bloq_method = record_args$bloq_method,
-    # The fit's method, which the engine scores and routes the covariance
-    # step on, and its per-occasion kappa EBEs, which the covariance step
-    # starts from (#591).
-    method = method_args$method,
-    method_chain = method_args$method_chain,
-    ebe_kappas_flat = kappa_args$ebe_kappas_flat,
-    ebe_kappa_ids = kappa_args$ebe_kappa_ids,
-    # The thetas the fit held, the engine's auto-frozen ones included (#613).
-    theta_fixed = .ferx_fit_theta_fixed(fit),
+    scoring_settings = scoring,
     covariance_method = cov_method,
     # The step's own settings, which the engine takes from its caller, not
     # from the fit: without them the replay steps at the engine defaults.
     step_settings_keys = step_args$keys,
     step_settings_values = step_args$values,
     threads = threads_arg,
-    verbose = isTRUE(verbose),
-    fit_bindings = binding_args$fit_bindings
-  ), model_path, data_path), subject_ids$source)
+    verbose = isTRUE(verbose)
+  ), model_path, data_path)
 
-  # All error paths inside `ferx_rust_covariance` raise an R condition and
-  # never return `NULL`, so we don't test for that here.
-
-  # --- Merge the refreshed covariance fields onto the fit --------------------
-  # The reshaping mirrors the covariance block in ferx_fit()'s post-processing,
-  # reading parameter names off the (already-finalised) fit object so a fit and
-  # a run_covariance-refreshed fit carry identical shapes.
-
-  # Read before the merge below replaces it: the estimator the fit's own step
-  # ran, which a replay of the fit's method should reproduce (#659).
-  fit_method <- .fitrx_unwrap_opt_chr(fit$covariance_method)
-  fit$covariance_status <- raw$covariance_status %||% "not_requested"
-  # The estimator this step ran, which labels the matrix it produced; NA with
-  # no matrix, as on ferx_fit() (ferx-core #1382).
-  fit$covariance_method <- .fitrx_unwrap_opt_chr(raw$covariance_method) %||% NA_character_
+  # A new fit from the new bytes: `fit` is left as it was.
+  new_fit <- .ferx_fit_with_bundle(fit, raw$bundle)
   if (!nzchar(cov_method)) {
+    # The estimator the fit's own step ran, which a replay of the fit's method
+    # should reproduce (#659).
     .ferx_cov_method_replay_check(
-      fit_method, fit$covariance_method, raw$covariance_method_requested,
-      raw$covariance_method_source, had_matrix = !is.null(fit$cov_matrix)
+      .fitrx_unwrap_opt_chr(fit$covariance_method), new_fit$covariance_method,
+      raw$covariance_method_requested, raw$covariance_method_source,
+      had_matrix = !is.null(fit$cov_matrix)
     )
   }
-  # The width this step ran on, not the fit's: the field describes the step
-  # that produced the fit's standard errors (#527).
-  if (!is.null(raw$n_threads_used)) {
-    fit$n_threads_used <- as.integer(raw$n_threads_used)
-  }
-  # Likewise the time: this step's, not the fit's own covariance step's.
-  if (!is.null(raw$covariance_wall_time_secs)) {
-    fit$covariance_wall_time_secs <- as.numeric(raw$covariance_wall_time_secs)
-  }
-  # The profiled levels this step held on their bound (ferx-core #2112): the
-  # step rebuilds the list from the estimates, so it replaces the fit's.
-  fit$profiled_levels_at_bound <- as.character(raw$profiled_levels_at_bound %||% character(0))
-  # The correlation gate check_strictness() applies is read off the matrix this
-  # call just produced, so it is refreshed with it (ferx-core #1177); NaN when
-  # the step still produced no matrix.
-  fit$max_abs_correlation <- if (!is.null(raw$max_abs_correlation) &&
-                                   is.finite(raw$max_abs_correlation)) {
-    as.numeric(raw$max_abs_correlation)
-  } else {
-    NA_real_
-  }
-
-  theta_names <- names(fit$theta)
-  n_rho <- length(.ferx_residual_corr_labels(fit))
-
-  # Row / column names come from the glue, in the engine's packing order
-  # (#437), the same labels ferx_fit() puts on its matrix.
-  d <- raw$cov_matrix_dim %||% 0L
-  if (!is.null(raw$cov_matrix) && length(raw$cov_matrix) > 0L && d > 0L) {
-    m <- matrix(raw$cov_matrix, nrow = d, ncol = d, byrow = TRUE)
-    m <- .ferx_cov_dimnames(m, raw$cov_labels)
-    fit$cov_matrix <- m
-  } else {
-    fit$cov_matrix <- NULL
-  }
-  fit$cov_fixed <- .ferx_cov_fixed_named(raw$cov_fixed, fit$cov_matrix)
-
-  # Standard errors: name theta SEs, drop empties to NULL (consistent with
-  # ferx_fit()). se_omega / se_sigma stay as bare vectors - the printers index
-  # them positionally via helpers.
-  se_theta <- raw$se_theta
-  if (length(se_theta) > 0L) {
-    if (length(se_theta) == length(theta_names)) names(se_theta) <- theta_names
-    fit$se_theta <- se_theta
-  } else {
-    fit$se_theta <- NULL
-  }
-  fit$se_omega <- if (length(raw$se_omega) > 0L) raw$se_omega else NULL
-  fit$se_sigma <- if (length(raw$se_sigma) > 0L) raw$se_sigma else NULL
-  # `block_sigma` correlation SEs come out of the same step; write them back
-  # onto the frame so a refreshed fit carries uncertainty for every estimated
-  # parameter, not just theta/omega/sigma.
-  # The engine returns them in the model's declaration order, with their sigma
-  # pairs; each lands on the frame row with the same pair, so a reordered
-  # frame does not take another block's SE (#486).
-  if (n_rho > 0L && is.data.frame(fit$residual_correlations)) {
-    rc <- fit$residual_correlations
-    se_rho <- as.numeric(raw$se_residual_correlation %||% numeric())
-    se_i <- raw$se_residual_correlation_i %||% integer()
-    row <- .ferx_residual_corr_match(rc, se_i, raw$se_residual_correlation_j)
-    se <- if (length(se_rho) == length(se_i)) se_rho[row] else NA_real_
-    fit$residual_correlations$se <- .ferx_residual_corr_se(
-      rep_len(se, n_rho), rc$fixed
-    )
-  }
-
-  # se_kappa: one SE per kappa, the diagonal, block_kappa included (ferx-core
-  # postfit.rs), named by kappa_names. NULL when no IOV or the step produced none.
-  d_iov <- if (!is.null(fit$omega_iov) && is.matrix(fit$omega_iov)) nrow(fit$omega_iov) else 0L
-  if (length(raw$se_kappa) == 0L || d_iov == 0L) {
-    fit$se_kappa <- NULL
-  } else {
-    se_kappa <- raw$se_kappa
-    if (length(se_kappa) == d_iov && length(fit$kappa_names) == d_iov) {
-      names(se_kappa) <- fit$kappa_names
-    }
-    fit$se_kappa <- se_kappa
-  }
-
-  # Eigenvalues / condition number. Stage the raw FFI values on the wire-named
-  # fields and let the shared .ferx_apply_cov_sentinels() do the conversion:
-  # it sets fit$eigenvalues / fit$condition_number, clears the (now stale) wire
-  # fields, and appends the flat high-condition-number warning - exactly what
-  # ferx_fit() does, so the two paths can't drift. A loaded fit carries the
-  # same `eigenvalues` / `condition_number` names (#455), which this replaces.
-  #
-  # This run's covariance-step warnings replace the fit's own, as its
-  # cov_matrix replaces the fit's: a fit whose step failed and whose replay
-  # computes must not keep reporting `covariance_failed` beside the new matrix
-  # (#611 review). They go from the flat vector too, or .ferx_fit_warnings()
-  # would re-add them from it - the fit's high-condition-number string with
-  # them, here, before .ferx_apply_cov_sentinels() appends the current one.
-  stale_cov <- function(category, message) {
-    as.logical(mapply(.ferx_is_covariance_warning, category, message,
-                      USE.NAMES = FALSE))
-  }
-  if (length(fit$warnings) > 0L) {
-    flat <- .ferx_classify_flat_warnings(fit$warnings)
-    fit$warnings <- fit$warnings[flat$category != "condition_number" &
-                                   !stale_cov(flat$category, flat$message)]
-  }
-  fit$cov_eigenvalues <- if (length(raw$cov_eigenvalues) == 0L) NULL else raw$cov_eigenvalues
-  fit$cov_condition_number <- raw$cov_condition_number
-  fit <- .ferx_apply_cov_sentinels(fit)
-
-  # Covariance-step warnings must reach the STRUCTURED table, not just the flat
-  # vector: ferx_get_warnings() and the print/summary tally read
-  # fit$warnings_structured and only fall back to fit$warnings when it is
-  # absent (never, on a real fit). Mirror ferx_sir()'s handling.
-  if (length(raw$warnings) > 0L) {
-    fit$warnings <- unique(c(fit$warnings, raw$warnings))
-  }
-  ws <- fit$warnings_structured
-  if (!is.data.frame(ws)) ws <- NULL
-  # Drop any stale condition_number row so a re-run that is now well-conditioned
-  # (or has a different condition number) doesn't leave a contradictory flag;
-  # .ferx_assemble_structured_warnings() re-adds the current one below.
-  if (!is.null(ws) && nrow(ws) > 0L) {
-    ws <- ws[ws$category != "condition_number" &
-               !stale_cov(ws$category, ws$message), , drop = FALSE]
-  }
-  # Assembled rows: the current condition_number flag + ETA-normality (both
-  # derived from the fit). The engine's covariance-step warnings arrive as flat
-  # strings; classify them with the engine's own classify_warning, as every
-  # other flat message is, so a replayed "Covariance step failed ..." is the
-  # same `covariance_failed` row, at the same severity, as the fit's own would
-  # be (#611).
-  assembled <- .ferx_assemble_structured_warnings(raw, fit)
-  cov_rows <- .ferx_classify_flat_warnings(raw$warnings)
-  merged <- rbind(ws %||% assembled[0, , drop = FALSE], assembled, cov_rows)
-  fit$warnings_structured <- if (nrow(merged) > 0L) unique(merged) else NULL
-  # Details payloads (ferx-core #2268) follow their warnings: a dropped stale
-  # one loses its entry, and this step's are added.
-  fit$warning_details <- .ferx_merge_warning_details(
-    fit$warning_details, .ferx_parse_warning_details(raw$warning_details), fit$warnings
-  )
-
-  # Refresh derived fields (cor_matrix, estimates table) from the new cov_matrix
-  # so they can't drift from the fitting path.
-  fit <- .ferx_populate_derived_fields(fit)
-  # Each theta level's se from the new cov_matrix (#528), not the input fit's;
-  # its SIR interval stays the fit's own.
-  fit$theta_levels <- .ferx_theta_levels_refresh(
-    fit, raw$theta_levels, "ferx_covariance", intervals = FALSE
-  )
-
-  fit
+  new_fit
 }
 
 # The covariance step's own settings the fit's call gave it

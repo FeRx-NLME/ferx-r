@@ -6,7 +6,7 @@
 #' (or by the ferx-core Rust CLI's \code{--output} flag) with ferx-core's own
 #' loader, and builds the list with the converter \code{\link{ferx_fit}} uses,
 #' so a loaded fit has the fields a fresh one has, plus the R-specific fields
-#' the writer kept in the bundle's \code{interface_extras.json}.
+#' the fit kept in the bundle's \code{interface_extras.json}.
 #' \code{fit$individual_estimates} needs the data, so it is \code{NULL} for a
 #' bundle without \code{data.csv}. Only bundles of format version 2 load: an
 #' older one fails with a version error, and the model must be refitted.
@@ -30,7 +30,7 @@
 #' bindings - the bundle still loads: \code{theta_levels} is \code{NULL},
 #' \code{unavailable_theta_levels} records why (\code{code}, the engine's
 #' diagnostic code or \code{NA}; \code{message}; and the bundle's
-#' \code{levels}, which \code{\link{ferx_save_fit}} writes back unchanged),
+#' \code{levels}, which the fit's bytes keep as they were),
 #' and one warning of class \code{ferx_levels_unavailable_warning} says so.
 #' Estimates, \code{fit$estimates}, \code{print()} and the runlog work
 #' as usual; \code{\link{ferx_predict}}, \code{\link{ferx_simulate}},
@@ -99,8 +99,6 @@ ferx_load_fit <- function(path) {
     }
   )
   .fitrx_warn_dropped_records(loaded)
-  raw <- loaded$fit
-  extras <- .fitrx_read_interface_extras(loaded$interface_extras)
 
   # The model and the data are staged to files outside any cleanup, and the
   # wire's `model_path` / `data_path` overridden with them, so `ferx_sir(fit)`
@@ -108,9 +106,26 @@ ferx_load_fit <- function(path) {
   # not exist. The stored hashes still match: the bundle holds the source bytes.
   model_path <- tempfile("fitrx_model_", fileext = ".ferx")
   writeBin(charToRaw(loaded$model_text), model_path)
-  wire_data_path <- .fitrx_unwrap_opt_chr(raw$data_path)
+  wire_data_path <- .fitrx_unwrap_opt_chr(loaded$fit$data_path)
+  data_path <- .fitrx_stage_data(loaded$data_csv, wire_data_path)
+  .ferx_fit_view(
+    loaded, bundle, model_path, data_path,
+    data = wire_data_path %||% data_path %||% path,
+    name = tools::file_path_sans_ext(basename(path))
+  )
+}
+
+# The `ferx_fit` a bundle reads as: the one path from bytes to list, for a load
+# and for the steps that return a new fit.
+#
+# `loaded` is `ferx_rust_load_fit(bundle)`. `model_path` and `data_path` are
+# where the fit's files are now, `data` what the dataset is called, and `name`
+# the model's name when the bundle has none.
+.ferx_fit_view <- function(loaded, bundle, model_path, data_path, data, name) {
+  raw <- loaded$fit
+  extras <- .fitrx_read_interface_extras(loaded$interface_extras)
   raw$model_path <- model_path
-  raw$data_path <- .fitrx_stage_data(loaded$data_csv, wire_data_path)
+  raw$data_path <- data_path
 
   # What needs the model file, which the converter leaves to this caller: a
   # failure here costs these fields, not the fit (#531).
@@ -118,9 +133,7 @@ ferx_load_fit <- function(path) {
   raw$theta_levels <- levels$theta_levels
   raw$cov_labels <- .fitrx_cov_labels(raw, levels$theta_levels)
   raw$model_structure <- raw$model_structure %||% extras$model_structure
-  if (!nzchar(raw$model_name %||% "")) {
-    raw$model_name <- tools::file_path_sans_ext(basename(path))
-  }
+  if (!nzchar(raw$model_name %||% "")) raw$model_name <- name
 
   # A fit saved with a trace carries it in the bundle, where the path the
   # engine wrote it to has usually gone.
@@ -129,7 +142,7 @@ ferx_load_fit <- function(path) {
   result <- .ferx_fit_from_raw(
     raw,
     model           = model_path,
-    data            = wire_data_path %||% raw$data_path %||% path,
+    data            = data,
     settings_used   = extras$call_settings %||% list(),
     model_file_opts = extras$model_file_settings %||% list(),
     loaded          = TRUE
@@ -151,9 +164,45 @@ ferx_load_fit <- function(path) {
   result
 }
 
+# A new fit from `bundle`, the bytes a step made from `fit`'s, which it leaves as
+# it is. The list is the bytes' view, as for a load, so the two agree. What the
+# bytes do not say stays the input fit's: where its files are, and the
+# individual estimates, which need the data a bundle may not hold. The view reads
+# the bundle's own model text, so it does not depend on the file at
+# `fit$model_path` still being there and unedited.
+.ferx_fit_with_bundle <- function(fit, bundle) {
+  loaded <- ferx_rust_load_fit(bundle)
+  staged <- tempfile("fitrx_model_", fileext = ".ferx")
+  on.exit(unlink(staged), add = TRUE)
+  writeBin(charToRaw(loaded$model_text), staged)
+  result <- .ferx_fit_view(
+    loaded, bundle, staged, fit$data_path, data = fit$data_path,
+    name = fit$model_name %||% ""
+  )
+  result$model_path <- fit$model_path
+  result$data_source <- fit$data_source
+  if (is.null(result$individual_estimates)) {
+    result["individual_estimates"] <- list(fit$individual_estimates)
+  }
+  result
+}
+
+# `fit` as its bytes say it is, for a step to read in place of the caller's list:
+# a hand edit of the list reaches nothing that starts here. Refuses a fit with no
+# bytes. Only what the bytes do not hold stays the list's: see
+# `.ferx_fit_with_bundle()`. A level layout the engine cannot make is not warned
+# about again; the view records it, and the step refuses it by that record.
+.ferx_fit_canonical <- function(fit, who) {
+  bundle <- .ferx_fit_bundle(fit, who)
+  withCallingHandlers(
+    .ferx_fit_with_bundle(fit, bundle),
+    ferx_levels_unavailable_warning = function(w) invokeRestart("muffleWarning")
+  )
+}
+
 # The keys of `interface_extras.json` a loaded fit takes as they are.
 .FITRX_INTERFACE_KEYS <- c("call_settings", "model_file_settings", "data_name",
-                           "gradient", "gradient_used")
+                           "model_name", "gradient", "gradient_used")
 
 # Warn about what `ferx_rust_load_fit()` dropped from a bundle before core read it.
 #
@@ -254,8 +303,8 @@ ferx_load_fit <- function(path) {
 #
 # Returns `list(theta_levels =, unavailable =)`; `unavailable` is NULL when the
 # layout was made, else a list of the engine's `code` (NA when it gave none), its
-# `message`, and the bundle's `levels` wire, which `ferx_save_fit()` writes back
-# as it found it, so a re-saved bundle loses nothing.
+# `message`, and the bundle's `levels` wire. The fit's bytes keep the bindings as
+# they are, so a re-saved bundle loses nothing.
 .fitrx_theta_levels_from_bindings <- function(raw, levels, bundle) {
   if (is.null(levels) || nrow(levels) == 0L) {
     return(list(theta_levels = NULL, unavailable = NULL))
@@ -342,19 +391,6 @@ ferx_load_fit <- function(path) {
     class = "ferx_levels_unavailable_warning", code = code
   ))
   list(theta_levels = NULL, unavailable = why)
-}
-
-# The engine's method table (#508): each method's `.fitrx` token and the label
-# a live fit reports (ferx-core's `EstimationMethod::label()`), read once from
-# the glue, whose exhaustive match fails to compile when the engine gains a
-# method. Cached in `.ferx_state`.
-.fitrx_method_table <- function() {
-  tab <- .ferx_state$method_table
-  if (is.null(tab)) {
-    tab <- ferx_rust_method_labels()
-    .ferx_state$method_table <- tab
-  }
-  tab
 }
 
 # The engine's labels for `raw$cov_matrix`, read from the bundle's model file

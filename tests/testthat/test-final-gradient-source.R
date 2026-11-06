@@ -62,33 +62,23 @@ test_that("the gradient and its source survive a .fitrx round trip", {
   expect_null(loaded$final_gradient_source)
 })
 
-test_that("the engine reads the gradient and its source from an R bundle", {
+test_that("the bundle holds the gradient and its source in the engine's keys", {
   skip_on_cran()
-  # R's writer and reader agreeing proves nothing about the wire (#379): the
-  # engine's writer only emits these keys if its reader took them.
   fit <- gradient_fit("bobyqa", gradient = "fd")
-  trip <- fitrx_engine_trip(fit)
-  on.exit(unlink(c(trip$r_path, trip$core_path)), add = TRUE)
-  wire <- fitrx_fit_json(trip$core_path)
+  wire <- fitrx_fit_json(fit$bundle)
   expect_identical(wire$final_gradient_source, "finite_difference")
   expect_equal(as.numeric(unlist(wire$final_gradient)), fit$final_gradient,
                tolerance = 1e-12)
-
-  # And R reads what the engine wrote.
-  loaded <- ferx_load_fit(trip$core_path)
-  expect_identical(loaded$final_gradient_source, "finite_difference")
-  expect_equal(loaded$final_gradient, fit$final_gradient, tolerance = 1e-12)
 })
 
-test_that("a one-component gradient is written as an array", {
+test_that("a one-component gradient reads back from its array", {
   skip_on_cran()
-  # `auto_unbox` would collapse it to the scalar the engine refuses.
-  fit <- gradient_fit()
-  fit$final_gradient <- 0.25
-  trip <- fitrx_engine_trip(fit)
-  on.exit(unlink(c(trip$r_path, trip$core_path)), add = TRUE)
-  expect_type(fitrx_fit_json(trip$r_path)$final_gradient, "list")
-  expect_equal(ferx_load_fit(trip$core_path)$final_gradient, 0.25)
+  fit <- fitrx_edit_fit(gradient_fit(), function(w) {
+    w$final_gradient <- list(0.25)
+    w
+  })
+  expect_type(fitrx_fit_json(fit$bundle)$final_gradient, "list")
+  expect_equal(fit$final_gradient, 0.25)
 })
 
 test_that("a non-finite gradient does not cost the bundle its engine load", {
@@ -96,14 +86,13 @@ test_that("a non-finite gradient does not cost the bundle its engine load", {
   # JSON has no NaN: it would be written as a null the engine's `Vec<f64>`
   # refuses. The gradient goes, its label with it, and the bundle still loads.
   fit <- gradient_fit("bobyqa", gradient = "fd")
-  fit$final_gradient[[1L]] <- NaN
-  trip <- fitrx_engine_trip(fit)
-  on.exit(unlink(c(trip$r_path, trip$core_path)), add = TRUE)
-  wire <- fitrx_fit_json(trip$r_path)
+  expect_false(is.null(fit[["final_gradient"]]))
+  bytes <- ferx:::ferx_rust_test_nan_gradient_bundle(fit$bundle)
+  wire <- fitrx_fit_json(bytes)
   expect_null(wire$final_gradient)
   expect_null(wire$final_gradient_source)
-  loaded <- ferx_load_fit(trip$r_path)
-  expect_null(loaded$final_gradient)
+  loaded <- ferx:::.ferx_fit_with_bundle(fit, bytes)
+  expect_null(loaded[["final_gradient"]])
   expect_null(loaded$final_gradient_source)
 })
 

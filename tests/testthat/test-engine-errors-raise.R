@@ -146,8 +146,7 @@ test_that("the fit = forms raise a fit that cannot drive the model's kappa", {
   calls <- list(
     function() ferx_simulate(ex$model, ex$data, n_sim = 1L, seed = 1L, fit = fit),
     function() ferx_predict(ex$model, ex$data, fit = fit),
-    function() ferx_predict_survival(ex$model, ex$data, times = c(1, 2), fit = fit),
-    function() ferx_calc_npde(fit, nsim = 20L, seed = 1L)
+    function() ferx_predict_survival(ex$model, ex$data, times = c(1, 2), fit = fit)
   )
   for (call_it in calls) {
     expect_uncoded_refusal(engine_error_probe(call_it()), "the fit carries no omega_iov")
@@ -167,11 +166,6 @@ test_that("a fit that does not fit the model is not labelled with the data's dia
   data  <- infusion_into_cmt0_data()
 
   probe <- engine_error_probe(ferx_predict(ex$model, data, fit = short))
-  expect_uncoded_refusal(probe, "theta length 2 does not match model (3 expected)")
-
-  probe <- engine_error_probe(
-    ferx_calc_npde(short, nsim = 20L, seed = 1L, model = ex$model, data = data)
-  )
   expect_uncoded_refusal(probe, "theta length 2 does not match model (3 expected)")
 
   probe <- engine_error_probe(ferx_simulate_with_uncertainty(

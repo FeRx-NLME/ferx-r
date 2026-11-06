@@ -593,7 +593,7 @@ test_that("an unused ETA next to a classified one has scale NA, live and reloade
     individual = c("  CL = TVCL * exp(ETA_CL)", "  V = TVV", "  KA = TVKA")
   ))
   # The bundle records no scale for ETA_V.
-  wire <- .fitrx_build_eta_param_info(fit)
+  wire <- fitrx_fit_json(fit$bundle)$eta_param_info
   expect_identical(vapply(wire, `[[`, "", "eta_name"), "ETA_CL")
   loaded <- reload(fit)
   again <- reload(loaded)

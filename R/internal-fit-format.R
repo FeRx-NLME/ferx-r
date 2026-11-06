@@ -1145,7 +1145,10 @@
   # Data passed as a data.frame was read from a session-temporary file; the
   # fit keeps that file's text, so the steps that re-read the data still find
   # it once the file is gone (#419). NULL for a fit of the user's own CSV.
-  result$data_source <- .ferx_data_cache_text(result$data_path)
+  # A file that has become unreadable costs this field, not the fit: a step that
+  # rebuilds a fit has the text already.
+  result$data_source <- tryCatch(.ferx_data_cache_text(result$data_path),
+                                 error = function(e) NULL)
   result$model_hash <- empty_to_null(result$model_hash) %||% NA_character_
   result$data_hash <- empty_to_null(result$data_hash) %||% NA_character_
   # The IOV occasion rule the fit ran with (ferx-core #1783), in the
@@ -1161,10 +1164,8 @@
   result$population_fingerprint <- empty_to_null(result$population_fingerprint)
 
   # The dropped-`[output]` finding also goes into the flat vector, not only the
-  # structured table: `fit$warnings` is what `ferx_save_fit()` serialises, and
-  # `ferx_load_fit()` does not restore `warnings_structured`, so a
-  # structured-only row would vanish across a `.fitrx` round trip - a warning
-  # about a silently missing column going silently missing itself. Deduplicated
+  # structured table, as every view of a fit derives it here, so the row and the
+  # flat line cannot disagree. Deduplicated
   # by exact string so a future engine-side `W_OUTPUT_DUPLICATE` cannot double
   # it up with an identical message.
   do_msg <- .ferx_dropped_output_warning(result)
@@ -1203,6 +1204,14 @@
   # above), not the raw `data` argument, so a fresh fit and a loaded fit of
   # the same model resolve the dataset identically.
   result <- .ferx_populate_derived_fields(result)
+
+  # What this interface adds goes into the bytes, so a fit's list and its bytes
+  # agree from here on; a loaded fit's bytes hold it already.
+  if (!loaded && is.raw(result$bundle)) {
+    result$bundle <- ferx_rust_bundle_with_extras(
+      result$bundle, .fitrx_interface_extras(result)
+    )
+  }
 
   class(result) <- "ferx_fit"
 
