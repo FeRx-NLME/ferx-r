@@ -307,24 +307,73 @@ test_that(".ferx_parse_structure detects LTBS via DV ~ log_additive (case 1)", {
   # `log_additive` must not be misread as plain `additive`.
   expect_equal(s$residual, "additive (log-transformed)")
 })
-test_that(".ferx_parse_structure labels combined error under LTBS (ferx-core #2729)", {
+# LTBS residual labels (ferx-core #2729): each model below is one the engine
+# parses, so `.ferx_parse_structure()` returns the Rust glue's label, and the
+# regex fallback must give the same string for the same file.
+ltbs_label_model <- function(sigmas, error_lines, ode = FALSE) {
+  structure <- if (ode) {
+    c("[structural_model]",
+      "  ode(states=[depot, central, effect])",
+      "[odes]",
+      "  d/dt(depot) = -KA * depot",
+      "  d/dt(central) = KA * depot - CL/V * central",
+      "  d/dt(effect) = KE0 * (central/V - effect)",
+      "[scaling]",
+      "  y[CMT=2] = central / V",
+      "  y[CMT=3] = effect")
+  } else {
+    c("[structural_model]", "  pk one_cpt_oral(cl=CL, v=V, ka=KA)")
+  }
+  write_ferx(c(
+    "[parameters]",
+    "  theta TVCL(5.0, 0.1, 50.0)",
+    "  theta TVV(50.0, 5.0, 500.0)",
+    "  theta TVKA(1.0, 0.05, 20.0)",
+    "  theta TVKE0(0.3, 0.01, 5.0)",
+    "  omega ETA_CL ~ 0.09",
+    paste0("  sigma ", sigmas, " ~ 0.1 (sd)"),
+    "[individual_parameters]",
+    "  CL = TVCL * exp(ETA_CL)",
+    "  V = TVV",
+    "  KA = TVKA",
+    "  KE0 = TVKE0",
+    structure,
+    "[error_model]",
+    error_lines
+  ))
+}
+expect_ltbs_label <- function(path, expected) {
+  engine <- ferx:::ferx_rust_model_structure(normalizePath(path))$residual
+  expect_equal(engine, expected)
+  expect_equal(ferx:::.ferx_parse_structure(path)$residual, expected)
+  expect_equal(ferx:::.ferx_parse_structure_regex(path)$residual, expected)
+}
+test_that("combined error under LTBS is labelled alike by the engine and the regex reader", {
   for (line in c("  log(DV) ~ combined(PROP, ADD)",
                  "  DV ~ log_combined(PROP, ADD)")) {
-    path <- write_ferx(c(
-      "[parameters]",
-      "  theta TVCL(0.2)",
-      "  sigma PROP ~ 0.1",
-      "  sigma ADD ~ 0.1",
-      "[structural_model]",
-      "  pk one_cpt_oral(cl=CL, v=V, ka=KA)",
-      "[error_model]",
-      line
-    ))
-    s <- ferx:::.ferx_parse_structure(path)
-    unlink(path)
+    path <- ltbs_label_model(c("PROP", "ADD"), line)
     # Neither the plain `combined` label nor the additive LTBS one.
-    expect_equal(s$residual, "combined (log-transformed)", info = line)
+    expect_ltbs_label(path, "combined (log-transformed)")
+    unlink(path)
   }
+})
+test_that("an LTBS sigma named *COMBINED* stays additive in both readers", {
+  path <- ltbs_label_model("SD_COMBINED", "  log(DV) ~ additive(SD_COMBINED)")
+  on.exit(unlink(path))
+  expect_ltbs_label(path, "additive (log-transformed)")
+})
+test_that("per-CMT LTBS is labelled per endpoint by both readers", {
+  path <- ltbs_label_model(
+    c("PROP2", "ADD2", "ADD3"),
+    c("  CMT=3: log(DV) ~ additive(ADD3)",
+      "  CMT=2: log(DV) ~ combined(PROP2, ADD2)"),
+    ode = TRUE
+  )
+  on.exit(unlink(path))
+  expect_ltbs_label(
+    path,
+    "per-CMT (CMT2=combined (log-transformed), CMT3=additive (log-transformed))"
+  )
 })
 test_that(".ferx_parse_structure warns and returns 'unknown' for unrecognised error type", {
   path <- write_ferx(c(

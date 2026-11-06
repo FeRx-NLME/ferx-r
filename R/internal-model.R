@@ -410,7 +410,8 @@ ferx_section_headers <- function(lines) {
     # since both forms contain "additive" / "combined".
     if (grepl("log_(additive|combined)", line, ignore.case = TRUE) ||
         grepl("log\\s*\\(\\s*DV\\s*\\)", line, ignore.case = TRUE)) {
-      if (grepl("combined", line, ignore.case = TRUE)) {
+      # The error function, not a sigma name such as `SD_COMBINED`.
+      if (grepl("combined\\s*\\(", line, ignore.case = TRUE)) {
         "combined (log-transformed)"
       } else {
         "additive (log-transformed)"
