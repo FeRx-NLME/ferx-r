@@ -65,8 +65,10 @@ test_that("a bundle without the glue's endpoint entry rebuilds its TTE rows from
   fit <- joint_fit()
   path <- tempfile(fileext = ".fitrx")
   ferx_save_fit(fit, path)
-  # What a bundle written by ferx-core alone holds (ferx-core #911): the TTE
-  # rows only in predictions_tte.csv.
+  # The TTE rows only in core's predictions_tte.csv (ferx-core #911), as in a
+  # bundle written by ferx-core alone. This bundle keeps the R package's wide
+  # predictions.csv, so it already has CMT and the TTE columns: the branch
+  # that adds them for core's narrow predictions.csv is not reached here.
   status <- utils::zip(path, "sdtab_endpoint_rows.csv", flags = "-qd")
   skip_if(status != 0L, "zip -d failed")
   expect_false("sdtab_endpoint_rows.csv" %in% utils::unzip(path, list = TRUE)$Name)
@@ -76,7 +78,8 @@ test_that("a bundle without the glue's endpoint entry rebuilds its TTE rows from
   expect_identical(nrow(loaded$sdtab), nrow(fit$sdtab))
   n_tte <- sum(fit$subject_summary$n_obs_tte)
   tte <- seq.int(nrow(fit$sdtab) - n_tte + 1L, nrow(fit$sdtab))
-  for (col in c("ID", "CMT", "TIME", "DV", tte_cols)) {
+  # Every column of the TTE block, EBE_OFV included, as core's sdtab fills it.
+  for (col in names(fit$sdtab)) {
     expect_identical(loaded$sdtab[[col]][tte], fit$sdtab[[col]][tte], info = col)
   }
 })
