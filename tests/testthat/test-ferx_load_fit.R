@@ -168,7 +168,7 @@ test_that("a bundle without reader settings loads with neither field and still r
     w
   })
   path <- withr::local_tempfile(fileext = ".fitrx")
-  ferx_save_fit(fit, path)
+  ferx_save_fit(resealed_fit(fit), path)
   staging <- withr::local_tempdir()
   utils::unzip(path, exdir = staging)
   wire <- jsonlite::read_json(file.path(staging, "fit.json"), simplifyVector = FALSE)

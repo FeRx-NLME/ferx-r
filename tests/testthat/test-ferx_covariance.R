@@ -279,6 +279,7 @@ test_that("ferx_covariance refuses to run after the model file is tampered with"
 
 test_that("ferx_covariance errors when the fit has no recorded model path", {
   fit <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$model_path <- NULL
   expect_error(ferx_covariance(fit), "no recorded model_path")
 })
@@ -943,6 +944,7 @@ test_that("a legacy fit on an edited model file hears the hash mismatch, not the
   fit <- rs_legacy(rs_fit(ignore = rs_ignore))
   model <- withr::local_tempfile(fileext = ".ferx")
   writeLines(c(readLines(fit$model_path), "# edited"), model)
+  fit <- editable_fit(fit)
   fit$model_path <- model
   e <- tryCatch(ferx_covariance(fit), error = function(e) e)
   msg <- conditionMessage(e)

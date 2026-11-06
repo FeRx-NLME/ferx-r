@@ -48,6 +48,7 @@ test_that("ferx_fit input resolves correctly", {
 })
 test_that("ferx_fit with NA data_path errors informatively", {
   fit            <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$data_path  <- NA_character_
   expect_error(ferx_get_columns(fit), regexp = "valid data_path")
 })

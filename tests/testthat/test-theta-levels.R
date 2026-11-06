@@ -104,6 +104,7 @@ tl_fit <- function(model, data, ...) {
 tl_cache <- new.env(parent = emptyenv())
 tl_base <- function() {
   if (is.null(tl_cache$fit)) {
+    tl_cache <- editable_fit(tl_cache)
     tl_cache$model <- tl_col_model()
     tl_cache$data <- tl_write(tl_data, ".csv")
     tl_cache$fit <- tl_fit(tl_cache$model, tl_cache$data)
@@ -160,6 +161,7 @@ tl_expect_refused <- function(fit, edit, engine, loaded = engine) {
   bad <- tl_loaded_bad(fit, edit)
   # The caller's list saying otherwise changes nothing: the step reads the bytes.
   good_list <- fit
+  good_list <- editable_fit(good_list)
   good_list$bundle <- bad$bundle
   for (x in list(bad, good_list)) {
     errs <- tl_step_errors(x)
@@ -315,6 +317,7 @@ test_that("T3c: the block binds to the data after ignore =", {
 test_that("T4: a subset design reads the fit's theta, checked in closed form", {
   b <- tl_base()
   fit <- b$fit
+  fit <- editable_fit(fit)
   fit$theta[] <- c(2, 0.1, 0.2, 0.3, 0.4, 0.5, 10)
   # Study 2 only: its levels are the fit's 4, 5 and 6.
   rows <- strsplit(tl_data, "\n")[[1]]
@@ -513,6 +516,7 @@ test_that("T7b: from-fit predictions reproduce the fit's own PRED, per contrast"
   # carry the five free thetas.
   ref_model <- cases$ref[[1]]
   fit <- tl_fit(ref_model, data)
+  fit <- editable_fit(fit)
   fit$theta[] <- c(2, 0.1, 0.2, 0.3, 0.4, 0.5, 10)
   level <- c(0, 0.1, 0.2, 0.3, 0.4, 0.5)
   dt <- c(1, 3, 8)
@@ -610,6 +614,7 @@ test_that("T9: a level-block model with a fit lacking bindings is refused", {
   b <- tl_base()
   fit <- b$fit
   # The shape of a fit saved before ferx recorded its bindings (#370).
+  fit <- editable_fit(fit)
   fit$theta_levels <- NULL
   err <- tryCatch(ferx_simulate(b$model, b$data, fit = fit), error = function(e) e)
   expect_s3_class(err, "error")
@@ -778,6 +783,7 @@ tl_twin_data <- function() {
     d$PLA_IDX <- match(lab, unique(lab))
     path <- tempfile(fileext = ".csv")
     utils::write.csv(d, path, row.names = FALSE, quote = FALSE)
+    tl_cache <- editable_fit(tl_cache)
     tl_cache$twin_data <- path
   }
   tl_cache$twin_data
@@ -797,6 +803,7 @@ tl_twin <- function() {
       sprintf("PLACEBO[%d]", n_levels), "PLACEBO[PLA_IDX]",
       "  PLA_IDX continuous\n"
     ), ".ferx")
+    tl_cache <- editable_fit(tl_cache)
     tl_cache$twin <- list(
       col = tl_fit(tl_twin_col_model(), data),
       cnt = tl_fit(counted, data)
@@ -1183,6 +1190,7 @@ test_that("T14c: ferx_simulate_adaptive(fit = ) reads each level's fitted theta"
   expect_identical(names(fit$theta), c(
     "TVCL", "PLACEBO[STUDY=1]", "PLACEBO[STUDY=2]", "TVV"
   ))
+  fit <- editable_fit(fit)
   fit$theta[] <- c(2, 0.3, -0.5, 10)
   # Studies 2 and 3: the fit's second free level, and its derived third.
   rows <- strsplit(tl_data3, "\n")[[1]]
@@ -1203,6 +1211,7 @@ test_that("T14c: ferx_simulate_adaptive(fit = ) reads each level's fitted theta"
   # levels it is refused, naming the label. Levels are sorted, so reordering
   # the design's subjects cannot tell the binders apart.
   unseen <- rows
+  unseen <- editable_fit(unseen)
   unseen[10:13] <- sub(",3$", ",4", unseen[10:13])
   err <- tryCatch(
     ferx_simulate_adaptive(model, tl_write(paste(unseen, collapse = "\n"), ".csv"),
@@ -1221,33 +1230,40 @@ test_that("R1: the glue refuses a theta_levels table it cannot trust", {
   b <- tl_base()
   refused <- function(tl, pattern) {
     fit <- b$fit
+    fit <- editable_fit(fit)
     fit$theta_levels <- tl
     expect_error(ferx_predict(b$model, b$data, fit = fit), pattern, fixed = TRUE)
   }
   tl <- b$fit$theta_levels
   # Columns that are not parallel (a list, since a data frame cannot be).
   ragged <- as.list(tl)
+  ragged <- editable_fit(ragged)
   ragged$label <- ragged$label[-1]
   refused(ragged, "columns have 6, 6, 5, 6 and 6 rows; they must be parallel")
   # A level missing from the block.
   refused(tl[-3, ], "has the level indices [1, 2, 4, 5, 6]; they must be exactly 1..5")
   # An NA index, shown as R shows it.
   na_index <- tl
+  na_index <- editable_fit(na_index)
   na_index$index[2] <- NA_integer_
   refused(na_index, "has the level indices [NA, 1, 3, 4, 5, 6]")
   # Two levels under one label: the engine would blame an unseen level.
   dup <- tl
+  dup <- editable_fit(dup)
   dup$label[2] <- dup$label[1]
   refused(dup, "gives the label `STUDY=1,TIME=1` to levels 1 and 2")
   # A contrast that changes inside the block.
   mixed <- tl
+  mixed <- editable_fit(mixed)
   mixed$contrast[2] <- "none"
   refused(mixed, "mixes the contrasts")
   # A missing or negative group.
   na_group <- tl
+  na_group <- editable_fit(na_group)
   na_group$group[2] <- NA_integer_
   refused(na_group, "level 2 has the group NA")
   neg_group <- tl
+  neg_group <- editable_fit(neg_group)
   neg_group$group[2] <- -1L
   refused(neg_group, "level 2 has the group -1")
 })
@@ -1389,6 +1405,7 @@ test_that("T16: print.ferx_fit collapses a block of 20 free levels, not one of 1
   # A profiled block (ferx-core #1065) carries core's own suffix on this line.
   # Set on the record in process: the line is print's, whatever fitted it.
   prof <- fit
+  prof <- editable_fit(prof)
   prof$profiled_blocks <- "PLACEBO"
   expect_true(any(capture.output(print(prof)) == sprintf(
     "PLACEBO  20 free coefficients, profiled (not searched)   min %.4f  median %.4f  max %.4f",
@@ -1788,6 +1805,7 @@ tl_cache_mbma <- new.env(parent = emptyenv())
 tl_mbma_sir <- function() {
   if (is.null(tl_cache_mbma$fit)) {
     ex <- ferx_example("mbma_placebo")
+    tl_cache_mbma <- editable_fit(tl_cache_mbma)
     tl_cache_mbma$fit <- ferx_fit(
       ex$model, ex$data, verbose = FALSE, sir = TRUE,
       settings = list(sir_samples = 400L, sir_resamples = 150L,
@@ -1914,6 +1932,7 @@ test_that("T18: THETA BLOCKS counts FIX coefficients apart from free ones", {
 
   # A partly fixed block splits the same way.
   part <- fit
+  part <- editable_fit(part)
   part$theta_fixed[which(is_pla)[4:20]] <- FALSE
   out <- capture.output(print(part))
   expect_true(any(startsWith(out, "PLACEBO  17 free, 3 FIX coefficients   min ")))

@@ -24,6 +24,7 @@ mbma_profiled_model <- function() {
   txt <- readLines(ex$model)
   at <- grep("^  theta PLACEBO\\[", txt)
   stopifnot(length(at) == 1L, grepl("(0.0, -50.0, 50.0)", txt[at], fixed = TRUE))
+  txt <- editable_fit(txt)
   txt[at] <- sub("(0.0, -50.0, 50.0)", "(0.0)", txt[at], fixed = TRUE)
   txt[at] <- paste(txt[at], "profile")
   model <- tempfile(fileext = ".ferx")
@@ -183,6 +184,7 @@ visit_profiled_model <- function() {
   txt <- readLines(ex$model)
   at <- grep("^  theta PLACEBO\\[", txt)
   stopifnot(length(at) == 1L)
+  txt <- editable_fit(txt)
   txt[at] <- "  theta PLACEBO[TIME, contrast = sum_to_zero](0.0) profile"
   model <- tempfile(fileext = ".ferx")
   writeLines(txt, model)
@@ -411,7 +413,7 @@ test_that("a held level the fit does not have is refused, not dropped", {
                fixed = TRUE)
   # A step reads the same bytes through the same check.
   bytes <- readBin(bad, "raw", n = file.size(bad))
-  expect_error(quiet(ferx_sir(modifyList(b, list(bundle = bytes)),
+  expect_error(quiet(ferx_sir(modifyList(editable_fit(b), list(bundle = bytes)),
                               sir_samples = 10L, sir_resamples = 5L)),
                "`profiled_levels_at_bound` names theta index 999", fixed = TRUE)
 })

@@ -35,6 +35,11 @@ fit. A bundle without them leaves all three \code{NULL}. The
 \code{sir_ci_*} matrices keep their row names (the declared parameter
 names).
 
+What was added to the fit under a new name comes back as it was saved (see
+\dQuote{Read-only fits} in \code{\link{ferx_fit}}). An addition that is not
+plain data, or whose name is a core field of this ferx, is left out with a
+warning of class \code{ferx_fit_addition_dropped_warning} (\code{fields}).
+
 To call \code{\link{ferx_predict}} on a loaded fit, the embedded model
 source can be re-parsed through the existing pipeline.
 

@@ -58,6 +58,7 @@ crafted_fit <- function(se = c("zero", "real", "none"), flags = TRUE) {
     se_kappa = switch(se, zero = c(0, 0), real = c(0.008, 0), none = NULL)
   )
   if (flags) {
+    fit <- editable_fit(fit)
     fit$theta_fixed <- c(FALSE, TRUE)
     fit$omega_fixed <- c(TRUE, TRUE, FALSE)
     fit$sigma_fixed <- c(FALSE, TRUE)
@@ -153,6 +154,7 @@ test_that("estimates: fixed column, NA SE / RSE / CI for FIX, free SE 0 kept", {
 test_that("estimates: a FIX log or logit theta keeps its natural-scale estimate, without an interval", {
   for (tf in c("log", "logit")) {
     fit <- crafted_fit("zero")
+    fit <- editable_fit(fit)
     fit$theta_transforms[["TVKA"]] <- tf
     est <- .compute_estimates(fit)
     want <- if (tf == "log") exp(1.0) else stats::plogis(1.0)
@@ -164,11 +166,13 @@ test_that("estimates: a FIX log or logit theta keeps its natural-scale estimate,
 
 test_that("ferx_se(): NA for a FIX parameter, without the no-standard-errors warning", {
   fit <- crafted_fit("zero")
+  fit <- editable_fit(fit)
   fit$estimates <- .compute_estimates(fit)
   expect_silent(se <- ferx_se(fit, c("TVKA", "ADD_ERR")))
   expect_identical(se, c(TVKA = NA_real_, ADD_ERR = NA_real_))
   # A free parameter with no SE still warns.
   none <- crafted_fit("none")
+  none <- editable_fit(none)
   none$estimates <- .compute_estimates(none)
   expect_warning(ferx_se(none, c("TVCL", "TVKA")), "no standard errors")
 })

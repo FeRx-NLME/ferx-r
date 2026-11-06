@@ -48,6 +48,7 @@ rho_fixture <- function(sigma_lines) {
       CMT  = 1,
       MDV  = rep(c(1, 0, 0, 0), 3)
     ), data, row.names = FALSE, quote = FALSE)
+    cache <- editable_fit(cache)
     cache$v <- list(model = model, data = data,
                     fit = ferx_fit(model, data, verbose = FALSE,
                                    covariance = TRUE))
@@ -151,6 +152,7 @@ test_that("reconstruction paths run against a free block_sigma fit", {
 
 # The fit as an older ferx (or a caller's list surgery) leaves it.
 without_rho <- function(fit) {
+  fit <- editable_fit(fit)
   fit$residual_correlations <- NULL
   fit
 }
@@ -219,6 +221,7 @@ test_that("a zero-row residual_correlations frame is refused like NULL", {
   skip_on_cran()
   case <- rho_case()
   fit <- case$fit
+  fit <- editable_fit(fit)
   fit$residual_correlations <- fit$residual_correlations[0, ]
 
   expect_error(ferx_predict(case$model, case$data, fit = fit),
@@ -240,6 +243,7 @@ test_that("an intact free fit is rebuilt at its fitted rho", {
   # simulate reads rho through the residual draw, so moving it to the
   # declared value has to change DV_SIM.
   at_declared <- fit
+  at_declared <- editable_fit(at_declared)
   at_declared$residual_correlations$rho <- declared_rho
   sim_fit <- ferx_simulate(case$model, case$data, n_sim = 2L, seed = 1L,
                            fit = fit)
@@ -408,6 +412,7 @@ test_that("a non-finite or out-of-range fitted rho is refused", {
   label <- case$fit$residual_correlations$name
 
   na_fit <- case$fit
+  na_fit <- editable_fit(na_fit)
   na_fit$residual_correlations$rho <- NA_real_
   msg <- refusal(ferx_predict(case$model, case$data, fit = na_fit),
                  "^Fit error: the block_sigma correlation ")
@@ -420,6 +425,7 @@ test_that("a non-finite or out-of-range fitted rho is refused", {
   expect_no_match(msg, "0.3.x", fixed = TRUE)
 
   one_fit <- case$fit
+  one_fit <- editable_fit(one_fit)
   one_fit$residual_correlations$rho <- 1
   msg <- refusal(
     ferx_simulate(case$model, case$data, n_sim = 1L, seed = 1L,
@@ -525,6 +531,7 @@ rho2_fixture <- function(fix_b) {
       CMT  = rep(c(1, 1, 1, 1, 2, 2, 2), 4),
       MDV  = rep(c(1, 0, 0, 0, 0, 0, 0), 4)
     ), data, row.names = FALSE, quote = FALSE)
+    cache <- editable_fit(cache)
     cache$v <- list(model = model, data = data,
                     fit = ferx_fit(model, data, verbose = FALSE))
     cache$v
@@ -539,9 +546,12 @@ rho2_spread <- function() {
   fit <- case$fit
   rc <- fit$residual_correlations
   expect_identical(nrow(rc), 2L)
+  rc <- editable_fit(rc)
   rc$rho[rc$name == "ADD_A ~ PROP_A"] <- 0.5
   rc$rho[rc$name == "ADD_B ~ PROP_B"] <- -0.5
+  fit <- editable_fit(fit)
   fit$residual_correlations <- rc
+  case <- editable_fit(case)
   case$fit <- fit
   case
 }
@@ -558,10 +568,12 @@ test_that("a reordered residual_correlations frame keeps each block's rho (#486)
 
   # Sorted the other way round: same rows, so the same fit.
   reordered <- fit
+  reordered <- editable_fit(reordered)
   reordered$residual_correlations <- rc[2:1, ]
   # The control: the two rhos actually swapped between the blocks. Up to #486
   # the reordered frame was read as this one.
   swapped <- fit
+  swapped <- editable_fit(swapped)
   swapped$residual_correlations$rho <- rev(rc$rho)
 
   at_fit <- sim_dv(case, fit)
@@ -570,6 +582,7 @@ test_that("a reordered residual_correlations frame keeps each block's rho (#486)
 
   # A pair given the other way round names the same correlation.
   flipped <- fit
+  flipped <- editable_fit(flipped)
   flipped$residual_correlations$sigma_i <- rc$sigma_j
   flipped$residual_correlations$sigma_j <- rc$sigma_i
   expect_identical(sim_dv(case, flipped), at_fit)
@@ -604,6 +617,7 @@ test_that("a pair the model does not declare is refused (#486)", {
 
   # ADD_A paired with ADD_B: two real sigmas, no declared block.
   undeclared <- fit
+  undeclared <- editable_fit(undeclared)
   undeclared$residual_correlations$sigma_j[1] <- rc$sigma_i[2]
   msg <- refusal(ferx_predict(case$model, case$data, fit = undeclared),
                  "^Fit error: fit\\$residual_correlations row 1 pairs")
@@ -612,6 +626,7 @@ test_that("a pair the model does not declare is refused (#486)", {
 
   # Both rows on the first block leave the second without a value.
   twice <- fit
+  twice <- editable_fit(twice)
   twice$residual_correlations[2, c("sigma_i", "sigma_j")] <- rc[1, c("sigma_i", "sigma_j")]
   expect_error(ferx_predict(case$model, case$data, fit = twice),
                "^Fit error: fit\\$residual_correlations rows 1 and 2 both give the block_sigma correlation ADD_A ~ PROP_A")
@@ -627,6 +642,7 @@ test_that("a pair the model does not declare is refused (#486)", {
 
   # An NA index names it as R does.
   na_pair <- fit
+  na_pair <- editable_fit(na_pair)
   na_pair$residual_correlations$sigma_i[2] <- NA_integer_
   expect_error(ferx_simulate(case$model, case$data, n_sim = 1L, seed = 1L,
                              fit = na_pair),
@@ -635,6 +651,7 @@ test_that("a pair the model does not declare is refused (#486)", {
   # Without the pair columns there is nothing to match on. The refusal fires
   # while the fit is rebuilt, before any draw is sampled.
   no_pairs <- fit
+  no_pairs <- editable_fit(no_pairs)
   no_pairs$residual_correlations$sigma_i <- NULL
   expect_error(ferx_simulate_with_uncertainty(case$model, case$data, no_pairs,
                                               n_uncertainty_draws = 5L),
@@ -645,6 +662,7 @@ test_that("a row-count mismatch names fit$residual_correlations (#486)", {
   skip_on_cran()
   case <- rho2_spread()
   short <- case$fit
+  short <- editable_fit(short)
   short$residual_correlations <- short$residual_correlations[1, ]
   msg <- refusal(ferx_predict(case$model, case$data, fit = short),
                  "^Fit error: fit\\$residual_correlations has 1 row\\(s\\), but the model declares 2 block_sigma correlation\\(s\\)")

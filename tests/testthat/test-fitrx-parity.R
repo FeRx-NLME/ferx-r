@@ -327,6 +327,7 @@ test_that("a step does not lose what the bundle cannot rebuild (#712)", {
 test_that("a fit with no bytes is refused everywhere, saying to refit, with no fallback (#712)", {
   skip_on_cran()
   fit <- fitrx_parity_cases$plain()
+  fit <- editable_fit(fit)
   fit$bundle <- NULL
   # The way such a fit arrives: an old `.rds`.
   rds <- withr::local_tempfile(fileext = ".rds")
@@ -348,9 +349,12 @@ test_that("a fit with no bytes is refused everywhere, saying to refit, with no f
 test_that("a hand edit of the list is not saved: the bytes are the fit (#712)", {
   skip_on_cran()
   fit <- fitrx_parity_cases$plain()
-  edited <- fit
+  # Refused (#713), and even resealed the edit does not reach the file.
+  edited <- unclass(fit)
   edited$theta[[1L]] <- 99
-  expect_identical(fitrx_round_trip(edited)$theta, fit$theta)
+  class(edited) <- "ferx_fit"
+  expect_error(fitrx_round_trip(edited), class = "ferx_fit_modified_error")
+  expect_identical(fitrx_round_trip(resealed_fit(edited))$theta, fit$theta)
 })
 
 test_that("a hand edit of the list reaches no step: each reads the bytes (#712)", {
@@ -361,6 +365,7 @@ test_that("a hand edit of the list reaches no step: each reads the bytes (#712)"
   sir_args <- list(sir_samples = 50L, sir_resamples = 20L, sir_seed = 1L)
   clean <- suppressWarnings(do.call(ferx_sir, c(list(fit), sir_args)))
   edited <- clean
+  edited <- editable_fit(edited)
   edited$sir_settings$df <- 1
   edited$sir_settings$samples <- 60L
   again <- suppressWarnings(ferx_sir(edited))
@@ -370,11 +375,13 @@ test_that("a hand edit of the list reaches no step: each reads the bytes (#712)"
   # Covariance: the call's step settings and the scoring record are the bytes'.
   cov <- suppressWarnings(ferx_covariance(fit))
   edited <- fit
+  edited <- editable_fit(edited)
   edited$call_settings$covariance_method <- "s"
   out <- suppressWarnings(ferx_covariance(edited))
   expect_identical(out$covariance_method, cov$covariance_method)
   expect_identical(out$cov_matrix, cov$cov_matrix)
   edited <- fit
+  edited <- editable_fit(edited)
   edited$scoring_settings$inner_maxiter <- 1L
   expect_identical(
     suppressWarnings(ferx_covariance(edited, mu_referencing = TRUE))$cov_matrix,
@@ -384,6 +391,7 @@ test_that("a hand edit of the list reaches no step: each reads the bytes (#712)"
   # NPDE: computed at the fit's estimates, on the fit's table.
   clean <- fitrx_steps$npde(fit)
   edited <- fit
+  edited <- editable_fit(edited)
   edited$theta[[1L]] <- edited$theta[[1L]] * 3
   edited$sdtab$PRED <- 0
   out <- fitrx_steps$npde(edited)
@@ -398,11 +406,12 @@ test_that("write_model renders the bytes, not an edited list (#712)", {
   dir <- withr::local_tempdir()
   ferx_save_fit(fit, file.path(dir, "clean.fitrx"), write_model = TRUE)
   edited <- fit
+  edited <- editable_fit(edited)
   edited$theta[[1L]] <- 99
   edited$omega[1L, 1L] <- 9
   edited$sigma[[1L]] <- 9
   edited$model_text <- "not the model"
-  ferx_save_fit(edited, file.path(dir, "edited.fitrx"), write_model = TRUE)
+  ferx_save_fit(resealed_fit(edited), file.path(dir, "edited.fitrx"), write_model = TRUE)
   expect_identical(readLines(file.path(dir, "edited_final.ferx")),
                    readLines(file.path(dir, "clean_final.ferx")))
 })

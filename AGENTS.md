@@ -147,6 +147,12 @@ Before treating example work as done:
 
 `ferx_predict()` returns a data frame: ID, TIME, PRED.
 
+A `ferx_fit` is read-only (#713), and `R/internal-fit-guard.R` says how. `$<-`, `[[<-` and `[<-` refuse a core field; `ferx_save_fit()` compares the core fields with the digest in the `ferx_seal` attribute, taken when the fit was built. Names added by the user live beside the core fields, outside the digest. `ferx_save_fit()` splices them into the bytes it writes, in `interface_extras.json` under `r.user_additions`; `fit$bundle` itself does not change.
+
+- A step returns a new fit from new bytes (`.ferx_fit_with_bundle()`), which seals it and carries the input's additions over; check the input first with `.ferx_fit_check_unmodified()`, or forged bytes come out as a fit. Code that must edit a finished fit, as `ferx_collect()` does, works on the plain list: `fit <- .ferx_fit_unseal(fit)`, assign, `.ferx_fit_reseal(fit)`.
+- A new field that a build can leave out goes in `.FERX_FIT_OPTIONAL_FIELDS`, and a wire name the builder drops but the package still reads goes in `.FERX_FIT_WIRE_NAMES`. Otherwise the name passes as a user addition: writable, outside the digest, and read as if the engine had set it.
+- A test that needs an impossible fit uses `editable_fit()`, and `resealed_fit()` to save one (`tests/testthat/helper-editable-fit.R`). Both live in the tests: production code has no way past the guards but the unseal above.
+
 ## Output Label Convention
 
 All output functions must display the **bare declared variable name** — never wrap in `OMEGA()`, `SIGMA()`, or `KAPPA()`:

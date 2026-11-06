@@ -61,6 +61,7 @@ mbma_file_model <- function(m, profiled = FALSE) {
   if (profiled) {
     at <- grep("^  theta PLACEBO\\[", txt)
     stopifnot(length(at) == 1L)
+    txt <- editable_fit(txt)
     txt[at] <- paste(sub("(0.0, -50.0, 50.0)", "(0.0)", txt[at], fixed = TRUE),
                      "profile")
   }
@@ -180,6 +181,7 @@ test_that("an `s` the fit could not form is not formed by the replay either", {
   # estimator": covariance_status says the step failed, and there is no ran
   # label to set against the fit's.
   labelled <- f
+  labelled <- editable_fit(labelled)
   labelled$covariance_method <- "s"
   got <- replay(labelled)
   expect_identical(got$fit$covariance_status, "failed")

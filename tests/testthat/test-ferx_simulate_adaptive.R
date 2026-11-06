@@ -615,6 +615,7 @@ test_that("fit = ignores the fit's IOV occasion rule (kappa per decision window)
                   settings = list(iov_occasion = "time(6)"))
   expect_identical(fit$iov_occasion, "time(6)")
   legacy <- fit
+  legacy <- editable_fit(legacy)
   legacy$iov_occasion <- NULL
 
   run <- function(fit) {
@@ -626,6 +627,7 @@ test_that("fit = ignores the fit's IOV occasion rule (kappa per decision window)
   expect_identical(run(legacy), recorded)
   # The kappa draw reaches the output: a larger fitted kappa variance moves it.
   wider <- fit
+  wider <- editable_fit(wider)
   wider$omega_iov <- fit$omega_iov * 4
   expect_false(isTRUE(all.equal(run(wider)$trajectories$IPRED,
                                 recorded$trajectories$IPRED)))

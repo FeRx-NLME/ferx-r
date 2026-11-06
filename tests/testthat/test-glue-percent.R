@@ -42,6 +42,7 @@ percent_model_callers <- function() {
       w$data_hash <- NULL
       w
     })
+    fit <- editable_fit(fit)
     fit$model_path <- m
     fit
   }

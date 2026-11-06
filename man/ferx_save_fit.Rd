@@ -55,8 +55,7 @@ line reads and writes: \code{ferx summary run1.fitrx} works on it.
 A fit's bundle (\code{fit$bundle}) is what is saved, not its list: the
 engine wrote it when the fit was made, and \code{\link{ferx_covariance}},
 \code{\link{ferx_sir}} and \code{\link{ferx_calc_npde}} return a new fit with
-new bytes. A change made to the list by hand is not saved, and does not reach
-\code{write_model}'s file either. A fit with no
+new bytes. A fit with no
 bundle, such as one from an \code{.rds} written by an older ferx, is refused
 with an error of class \code{ferx_no_bundle_error}: refit it.
 
@@ -80,6 +79,17 @@ their packing.
 The bundle's \code{model.ferx} holds the bytes that were fitted, the ones
 \code{fit$model_hash} names: editing the model file after
 \code{\link{ferx_fit}} does not change what is saved.
+
+A fit is read-only (see \dQuote{Read-only fits} in \code{\link{ferx_fit}}).
+Its core fields are compared with the digest taken when it was built, and a
+fit that does not match, such as one edited through \code{unclass()}, or that
+carries no digest, is refused with an error of class
+\code{ferx_fit_modified_error}. What was added under a new name is written to
+the bundle's \code{interface_extras.json} and comes back with
+\code{\link{ferx_load_fit}}; an addition that is not plain data (a function,
+an environment, a fitted \code{lm}) cannot be written as JSON and is left out
+with a warning of class \code{ferx_fit_addition_dropped_warning}, whose
+\code{fields} names it.
 
 The schema is ferx-core's; see its \code{docs/src/file-formats/fitrx.md} for
 the full field reference.

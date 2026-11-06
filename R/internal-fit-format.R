@@ -751,7 +751,10 @@
 # @param loaded TRUE when `raw` came from a bundle (`ferx_load_fit()`): the
 #   fit is not being made now, so nothing is announced or read from the
 #   engine's trace file.
-# @return A `ferx_fit` object. Saving it (`output=`) stays with the caller.
+# @param seal FALSE returns the plain list, for a caller with fields of its own
+#   to set: it hands the list to `.ferx_fit_seal()` when they are in, so the
+#   digest covers them (#713).
+# @return A sealed `ferx_fit`. Saving it (`output=`) stays with the caller.
 .ferx_fit_from_raw <- function(raw,
                                model,
                                data,
@@ -759,7 +762,8 @@
                                settings_used = list(),
                                model_file_opts = list(),
                                fit_started_at = Sys.time(),
-                               loaded = FALSE) {
+                               loaded = FALSE,
+                               seal = TRUE) {
   # Structure the result
   result <- raw
 
@@ -1213,9 +1217,7 @@
     )
   }
 
-  class(result) <- "ferx_fit"
-
-  result
+  if (seal) .ferx_fit_seal(result) else result
 }
 
 # One line reporting the parameter-prior split of a fit's objective, or NULL

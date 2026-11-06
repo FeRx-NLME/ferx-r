@@ -67,6 +67,7 @@
 ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = NULL) {
   # Reject a non-fit before asking it for bytes.
   validate_fit_for_params(fit)
+  .ferx_fit_check_unmodified(fit, "ferx_calc_npde")
   .ferx_fit_bundle(fit, "ferx_calc_npde")
 
   nsim <- as.integer(nsim)

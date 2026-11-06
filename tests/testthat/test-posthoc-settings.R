@@ -28,6 +28,7 @@ ps_fit <- function(key, example, settings = list(), sir = FALSE, ...) {
   if (is.null(ps_cache[[key]])) {
     ex <- if (is.list(example)) example else ferx_example(example)
     if (sir) settings <- c(settings, ps_sir_settings)
+    ps_cache <- editable_fit(ps_cache)
     ps_cache[[key]] <- suppressWarnings(ferx_fit(
       ex$model, ex$data, covariance = TRUE, verbose = FALSE, sir = sir,
       settings = if (length(settings)) settings else NULL, ...
@@ -652,6 +653,7 @@ test_that("S18: a regularized [covariate_nn] fit records its NN penalty strength
   expect_identical(args$scoring_settings$nn_l2_lambda, 0.1)
   expect_identical(args$sir_settings$scoring$nn_l2_lambda, 0.1)
   bare <- fit
+  bare <- editable_fit(bare)
   bare$scoring_settings <- NULL
   args <- ferx:::.ferx_fit_record_args(bare, scoring = list(mu_referencing = TRUE),
                                        sir = list(samples = 300L))

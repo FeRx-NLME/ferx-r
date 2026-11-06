@@ -23,7 +23,7 @@ make_fake_fit <- function(...) {
     shrinkage_eps = NULL,
     warnings      = character(0)
   )
-  structure(modifyList(defaults, list(...)), class = "ferx_fit")
+  structure(modifyList(defaults, list(...)), class = c("ferx_editable_fit", "ferx_fit"))
 }
 
 # Build a minimal trace CSV mirroring the columns the Rust backend writes,

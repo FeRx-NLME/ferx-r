@@ -211,6 +211,7 @@ test_that("ferx_calc_npde's legacy guard compares the `model =` file it reads (#
   expect_identical(nrow(out$sdtab), nrow(fit$sdtab))
   # A moved `fit$model_path` is not what is compared: the `model =` file is,
   # and it does not state the clause.
+  fit <- editable_fit(fit)
   fit$model_path <- file.path(tempdir(), "moved-away.ferx")
   e <- tryCatch(ferx_calc_npde(fit, nsim = 20L, seed = 5L, model = ex$model),
                 error = function(e) e)

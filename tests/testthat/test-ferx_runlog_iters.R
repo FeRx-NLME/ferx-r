@@ -110,6 +110,7 @@ test_that("ferx_runlog_iters verbose=TRUE prints and returns invisibly", {
 })
 test_that("ferx_runlog_iters errors on fit without trace", {
   fit <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$trace_path <- NULL
   expect_error(ferx_runlog_iters(fit), regexp = "No trace file found")
 })

@@ -20,6 +20,11 @@
 #' \code{sir_ci_*} matrices keep their row names (the declared parameter
 #' names).
 #'
+#' What was added to the fit under a new name comes back as it was saved (see
+#' \dQuote{Read-only fits} in \code{\link{ferx_fit}}). An addition that is not
+#' plain data, or whose name is a core field of this ferx, is left out with a
+#' warning of class \code{ferx_fit_addition_dropped_warning} (\code{fields}).
+#'
 #' To call \code{\link{ferx_predict}} on a loaded fit, the embedded model
 #' source can be re-parsed through the existing pipeline.
 #'
@@ -121,7 +126,11 @@ ferx_load_fit <- function(path) {
 # `loaded` is `ferx_rust_load_fit(bundle)`. `model_path` and `data_path` are
 # where the fit's files are now, `data` what the dataset is called, and `name`
 # the model's name when the bundle has none.
-.ferx_fit_view <- function(loaded, bundle, model_path, data_path, data, name) {
+#
+# The view is sealed and carries the additions the bundle holds; with `seal =
+# FALSE` it is the plain list, without them, for a caller with fields to set.
+.ferx_fit_view <- function(loaded, bundle, model_path, data_path, data, name,
+                           seal = TRUE) {
   raw <- loaded$fit
   extras <- .fitrx_read_interface_extras(loaded$interface_extras)
   raw$model_path <- model_path
@@ -145,7 +154,8 @@ ferx_load_fit <- function(path) {
     data            = data,
     settings_used   = extras$call_settings %||% list(),
     model_file_opts = extras$model_file_settings %||% list(),
-    loaded          = TRUE
+    loaded          = TRUE,
+    seal            = FALSE
   )
   # Never a name that starts with `theta_levels`: `$` matches partially, so
   # with `theta_levels` absent, `fit$theta_levels` would read that record.
@@ -161,7 +171,8 @@ ferx_load_fit <- function(path) {
     result$cond_dist$nsamp <- as.integer(extras$cond_dist$nsamp %||% NA_integer_)
     result$cond_dist$burnin <- as.integer(extras$cond_dist$burnin %||% NA_integer_)
   }
-  result
+  if (!seal) return(result)
+  .fitrx_restore_user_additions(.ferx_fit_seal(result), extras$user_additions)
 }
 
 # A new fit from `bundle`, the bytes a step made from `fit`'s, which it leaves as
@@ -169,7 +180,9 @@ ferx_load_fit <- function(path) {
 # bytes do not say stays the input fit's: where its files are, and the
 # individual estimates, which need the data a bundle may not hold. The view reads
 # the bundle's own model text, so it does not depend on the file at
-# `fit$model_path` still being there and unedited.
+# `fit$model_path` still being there and unedited. The additions are the input
+# fit's as they stand, not the ones the bytes hold from a load: one removed since
+# stays removed.
 .ferx_fit_with_bundle <- function(fit, bundle) {
   loaded <- ferx_rust_load_fit(bundle)
   staged <- tempfile("fitrx_model_", fileext = ".ferx")
@@ -177,14 +190,14 @@ ferx_load_fit <- function(path) {
   writeBin(charToRaw(loaded$model_text), staged)
   result <- .ferx_fit_view(
     loaded, bundle, staged, fit$data_path, data = fit$data_path,
-    name = fit$model_name %||% ""
+    name = fit$model_name %||% "", seal = FALSE
   )
   result$model_path <- fit$model_path
   result$data_source <- fit$data_source
   if (is.null(result$individual_estimates)) {
     result["individual_estimates"] <- list(fit$individual_estimates)
   }
-  result
+  .ferx_fit_carry_additions(.ferx_fit_seal(result), fit)
 }
 
 # `fit` as its bytes say it is, for a step to read in place of the caller's list:

@@ -187,6 +187,7 @@ ferx_covariance <- function(fit,
   if (!inherits(fit, "ferx_fit")) {
     stop("`fit` must be a ferx_fit object (from ferx_fit() or ferx_load_fit()).")
   }
+  .ferx_fit_check_unmodified(fit, "ferx_covariance")
   .ferx_step_threads(threads, fit)  # refuses a bad `threads` before the bytes are read
 
   # Normalise + validate covariance_method up-front so a typo surfaces as a

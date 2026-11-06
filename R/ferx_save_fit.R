@@ -12,8 +12,7 @@
 #' A fit's bundle (\code{fit$bundle}) is what is saved, not its list: the
 #' engine wrote it when the fit was made, and \code{\link{ferx_covariance}},
 #' \code{\link{ferx_sir}} and \code{\link{ferx_calc_npde}} return a new fit with
-#' new bytes. A change made to the list by hand is not saved, and does not reach
-#' \code{write_model}'s file either. A fit with no
+#' new bytes. A fit with no
 #' bundle, such as one from an \code{.rds} written by an older ferx, is refused
 #' with an error of class \code{ferx_no_bundle_error}: refit it.
 #'
@@ -37,6 +36,17 @@
 #' The bundle's \code{model.ferx} holds the bytes that were fitted, the ones
 #' \code{fit$model_hash} names: editing the model file after
 #' \code{\link{ferx_fit}} does not change what is saved.
+#'
+#' A fit is read-only (see \dQuote{Read-only fits} in \code{\link{ferx_fit}}).
+#' Its core fields are compared with the digest taken when it was built, and a
+#' fit that does not match, such as one edited through \code{unclass()}, or that
+#' carries no digest, is refused with an error of class
+#' \code{ferx_fit_modified_error}. What was added under a new name is written to
+#' the bundle's \code{interface_extras.json} and comes back with
+#' \code{\link{ferx_load_fit}}; an addition that is not plain data (a function,
+#' an environment, a fitted \code{lm}) cannot be written as JSON and is left out
+#' with a warning of class \code{ferx_fit_addition_dropped_warning}, whose
+#' \code{fields} names it.
 #'
 #' The schema is ferx-core's; see its \code{docs/src/file-formats/fitrx.md} for
 #' the full field reference.
@@ -97,6 +107,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
     stop("`write_model` must be TRUE or FALSE.")
   }
   bundle <- .ferx_fit_bundle(fit, "ferx_save_fit")
+  .ferx_fit_check_saveable(fit, "ferx_save_fit")
   bundles_data <- isTRUE(include_data) || !is.null(fit$data_source)
   # What goes beside the bytes is read from them too, so a hand edit of the list
   # cannot make a `_final.ferx` or a data check disagree with the bundle.
@@ -145,6 +156,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
   } else {
     bundle <- ferx_rust_bundle_without_data(bundle)
   }
+  bundle <- .fitrx_bundle_with_additions(bundle, fit)
 
   out_abs <- normalizePath(dirname(output), mustWork = FALSE)
   if (!dir.exists(out_abs)) dir.create(out_abs, recursive = TRUE)

@@ -190,6 +190,7 @@ ferx_sir <- function(fit,
   if (!inherits(fit, "ferx_fit")) {
     stop("`fit` must be a ferx_fit object (from ferx_fit() or ferx_load_fit()).")
   }
+  .ferx_fit_check_unmodified(fit, "ferx_sir")
   .ferx_step_threads(threads, fit)  # refuses a bad `threads` before the bytes are read
 
   # Validate the SIR knobs up-front so user errors surface as clean R

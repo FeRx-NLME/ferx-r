@@ -144,12 +144,14 @@ test_that("ferx_runlog shows subject and observation counts when available", {
 })
 test_that("ferx_runlog shows time range when obs_time_range is present", {
   fit <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$obs_time_range <- c(0.5, 144)
   out <- ferx_runlog(fit, verbose = FALSE)
   expect_match(out, "Time range:", fixed = TRUE)
 })
 test_that("ferx_runlog data summary falls back gracefully when counts missing", {
   fit <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$n_subjects     <- NULL
   fit$n_obs          <- NULL
   fit$obs_time_range <- NULL
@@ -159,6 +161,7 @@ test_that("ferx_runlog data summary falls back gracefully when counts missing", 
 })
 test_that("ferx_runlog shows input_columns line when field is present", {
   fit <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$input_columns <- c("ID", "TIME", "AMT", "EVID", "DV", "WT")
   out <- ferx_runlog(fit, verbose = FALSE)
   expect_match(out, "Input columns:", fixed = TRUE)
@@ -166,6 +169,7 @@ test_that("ferx_runlog shows input_columns line when field is present", {
 })
 test_that("ferx_runlog fallback message absent when only input_columns is present", {
   fit <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$n_subjects     <- NULL
   fit$n_obs          <- NULL
   fit$obs_time_range <- NULL
@@ -176,6 +180,7 @@ test_that("ferx_runlog fallback message absent when only input_columns is presen
 })
 test_that("ferx_runlog omits input_columns line when field is empty", {
   fit <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$input_columns <- character(0)
   out <- ferx_runlog(fit, verbose = FALSE)
   expect_no_match(out, "Input columns:", fixed = TRUE)
@@ -206,6 +211,7 @@ test_that("ferx_runlog parameter table does NOT wrap eta names in OMEGA()", {
 })
 test_that("ferx_runlog fallback omega labels use OMEGA(i,i) format", {
   fit <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$eta_names <- NULL
   out <- ferx_runlog(fit, verbose = FALSE)
   expect_match(out, "OMEGA(1,1)", fixed = TRUE)
@@ -219,6 +225,7 @@ test_that("ferx_runlog shows SE and %RSE columns when covariance step ran", {
 })
 test_that("ferx_runlog shows INITIAL column when theta_init is present", {
   fit <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$theta_init <- fit$theta * 0.9   # synthetic inits
   out <- ferx_runlog(fit, verbose = FALSE)
   expect_match(out, "INITIAL", fixed = TRUE)
@@ -232,6 +239,7 @@ test_that("ferx_runlog covariance section present when eigenvalues available", {
 })
 test_that("ferx_runlog flags condition number > 1000", {
   fit <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$condition_number <- 1500
   fit$eigenvalues      <- c(0.1, 1500)
   out <- ferx_runlog(fit, verbose = FALSE)
@@ -239,6 +247,7 @@ test_that("ferx_runlog flags condition number > 1000", {
 })
 test_that("ferx_runlog covariance section absent when no cov data", {
   fit <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$condition_number <- NULL
   fit$eigenvalues      <- NULL
   out <- ferx_runlog(fit, verbose = FALSE)
@@ -246,6 +255,7 @@ test_that("ferx_runlog covariance section absent when no cov data", {
 })
 test_that("ferx_runlog estimation settings section present when optimizer_label available", {
   fit <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$optimizer_label       <- "LBFGS"
   fit$bloq_method_label     <- "drop"
   fit$outer_maxiter         <- 200L
@@ -261,6 +271,7 @@ test_that("ferx_runlog estimation settings section present when optimizer_label 
 })
 test_that("ferx_runlog estimation settings shows NCA warm-start method", {
   fit <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$optimizer_label <- "lbfgs"
   fit$inits_from_nca  <- "nca_sweep"
   out <- ferx_runlog(fit, verbose = FALSE)
@@ -269,6 +280,7 @@ test_that("ferx_runlog estimation settings shows NCA warm-start method", {
 })
 test_that("ferx_runlog estimation settings shows multi-start count", {
   fit <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$optimizer_label  <- "LBFGS"
   fit$n_starts         <- 5L
   fit$multi_start_seed <- 42
@@ -279,6 +291,7 @@ test_that("ferx_runlog estimation settings shows multi-start count", {
 })
 test_that("ferx_runlog estimation settings shows covariate names", {
   fit <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$optimizer_label  <- "LBFGS"
   fit$covariate_names  <- c("WT", "AGE", "SEX")
   out <- ferx_runlog(fit, verbose = FALSE)
@@ -288,6 +301,7 @@ test_that("ferx_runlog estimation settings shows covariate names", {
 })
 test_that("ferx_runlog estimation settings section absent when no settings fields", {
   fit <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$optimizer_label   <- NULL
   fit$bloq_method_label <- NULL
   fit$inits_from_nca    <- NULL
@@ -304,6 +318,7 @@ test_that("ferx_runlog diagnostics section present when shrinkage available", {
 })
 test_that("ferx_runlog diagnostics section present when DW statistic available", {
   fit <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$dw_statistic <- 1.95
   fit$iwres_lag1_r <- 0.05
   out <- ferx_runlog(fit, verbose = FALSE)
@@ -311,12 +326,14 @@ test_that("ferx_runlog diagnostics section present when DW statistic available",
 })
 test_that("ferx_runlog DW section flags positive autocorrelation correctly", {
   fit <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$dw_statistic <- 1.1
   out <- ferx_runlog(fit, verbose = FALSE)
   expect_match(out, "positive autocorrelation", fixed = TRUE)
 })
 test_that("ferx_runlog diagnostics section absent when nothing available", {
   fit <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$shrinkage_eta  <- NULL
   fit$shrinkage_eps  <- NULL
   fit$dw_statistic   <- NA_real_
@@ -326,6 +343,7 @@ test_that("ferx_runlog diagnostics section absent when nothing available", {
 })
 test_that("ferx_runlog normality section flags p < 0.05", {
   fit <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$eta_normality <- data.frame(
     eta   = c("ETA_CL", "ETA_V"),
     W     = c(0.97,      0.85),
@@ -340,6 +358,7 @@ test_that("ferx_runlog normality section flags p < 0.05", {
 })
 test_that("ferx_runlog warns when gradient components exceed tolerance", {
   fit <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$final_gradient <- c(0.001, 0.5, 0.002)
   out <- ferx_runlog(fit, verbose = FALSE)
   expect_match(out, "WARNING", fixed = TRUE)
@@ -347,6 +366,7 @@ test_that("ferx_runlog warns when gradient components exceed tolerance", {
 })
 test_that("ferx_runlog reports all-good when gradient within tolerance", {
   fit <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$final_gradient <- c(0.001, 0.002, 0.003)
   out <- ferx_runlog(fit, verbose = FALSE)
   expect_match(out, "satisfy |grad", fixed = TRUE)
@@ -354,6 +374,7 @@ test_that("ferx_runlog reports all-good when gradient within tolerance", {
 })
 test_that("ferx_runlog gradient_tol argument is respected", {
   fit <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$final_gradient <- 0.005
   out_strict <- ferx_runlog(fit, gradient_tol = 0.001, verbose = FALSE)
   out_lax    <- ferx_runlog(fit, gradient_tol = 0.01,  verbose = FALSE)
@@ -362,6 +383,7 @@ test_that("ferx_runlog gradient_tol argument is respected", {
 })
 test_that("ferx_runlog wraps long gradient at 8 components per line", {
   fit <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$final_gradient <- seq(0.001, 0.001 * 10, by = 0.001)  # 10 components
   out <- ferx_runlog(fit, verbose = FALSE)
   # Two lines of [ ... ] expected: 8 + 2
@@ -370,6 +392,7 @@ test_that("ferx_runlog wraps long gradient at 8 components per line", {
 })
 test_that("ferx_runlog gradient section says N/A for derivative-free optimizer", {
   fit <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$final_gradient        <- NULL
   fit$gradient_method_outer <- "N/A"
   out <- ferx_runlog(fit, verbose = FALSE)
@@ -377,6 +400,7 @@ test_that("ferx_runlog gradient section says N/A for derivative-free optimizer",
 })
 test_that("ferx_runlog gradient section mentions older engine for missing gradient", {
   fit <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$final_gradient        <- NULL
   fit$gradient_method_outer <- "Enzyme AD"
   out <- ferx_runlog(fit, verbose = FALSE)
@@ -420,6 +444,7 @@ test_that("ferx_runlog is pure ASCII in its output", {
 })
 test_that("ferx_runlog does not emit 'Optimizer: NA' when optimizer_label is NA", {
   fit <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$optimizer_label  <- NA_character_
   fit$covariate_names  <- "WT"   # triggers has_settings = TRUE via covariate arm
   out <- ferx_runlog(fit, verbose = FALSE)
@@ -428,6 +453,7 @@ test_that("ferx_runlog does not emit 'Optimizer: NA' when optimizer_label is NA"
 })
 test_that("ferx_runlog does not emit 'Censoring: NA' when bloq_method_label is NA", {
   fit <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$bloq_method_label <- NA_character_
   fit$covariate_names   <- "WT"
   out <- ferx_runlog(fit, verbose = FALSE)
@@ -438,6 +464,7 @@ test_that("ferx_runlog model_text is populated after ferx_load_fit round-trip", 
   fit <- warfarin_fit()
   # Simulate what ferx_load_fit sets (persist.R line 253-254):
   # result$model_source is restored; result$model_text must match.
+  fit <- editable_fit(fit)
   fit$model_source <- "[parameters]\n  theta TVCL(0.134, 0.001, 10.0)\n"
   fit$model_text   <- fit$model_source  # as set by the fix in persist.R
   out <- ferx_runlog(fit, verbose = FALSE)
@@ -446,6 +473,7 @@ test_that("ferx_runlog model_text is populated after ferx_load_fit round-trip", 
 })
 test_that("ferx_runlog omits model file section gracefully when model_text NULL", {
   fit <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$model_text <- NULL
   out <- ferx_runlog(fit, verbose = FALSE)
   expect_no_match(out, "MODEL FILE", fixed = TRUE)
@@ -454,6 +482,7 @@ test_that("ferx_runlog omits model file section gracefully when model_text NULL"
 })
 test_that("ferx_runlog iteration section absent when no trace_path", {
   fit <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$trace_path <- NULL
   out <- ferx_runlog(fit, verbose = FALSE)
   expect_no_match(out, "ITERATION HISTORY", fixed = TRUE)
@@ -462,6 +491,7 @@ test_that("ferx_runlog iteration section absent when show_iterations = FALSE", {
   path <- write_fake_trace()
   on.exit(unlink(path))
   fit <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$trace_path <- path
   out <- ferx_runlog(fit, show_iterations = FALSE, verbose = FALSE)
   expect_no_match(out, "ITERATION HISTORY", fixed = TRUE)
@@ -470,6 +500,7 @@ test_that("ferx_runlog iteration section present with trace and show_iterations 
   path <- write_fake_trace()
   on.exit(unlink(path))
   fit <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$trace_path <- path
   out <- ferx_runlog(fit, verbose = FALSE)
   expect_match(out, "ITERATION HISTORY", fixed = TRUE)
@@ -479,6 +510,7 @@ test_that("ferx_runlog iteration section present with trace and show_iterations 
 })
 test_that("ferx_runlog iteration section absent when trace file deleted", {
   fit <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$trace_path <- file.path(tempdir(), "nonexistent_trace.csv")
   out <- ferx_runlog(fit, verbose = FALSE)
   expect_no_match(out, "ITERATION HISTORY", fixed = TRUE)
@@ -615,6 +647,7 @@ test_that("ferx_runlog does NOT show exclusion line for plain fit", {
 test_that("ferx_runlog shows fired_accept and excluded_subject_ids when present", {
   skip_on_cran()
   fit <- warfarin_sel_fit()
+  fit <- editable_fit(fit)
   fit$exclusions$fired_accept         <- c("accept: DV > -999")
   fit$exclusions$excluded_subject_ids <- c("3")
   out <- ferx_runlog(fit, verbose = FALSE)
@@ -629,6 +662,7 @@ test_that("ferx_runlog shows a held value marked (FIX), and FIXED in SE / %RSE (
   # Hold the last theta, the last eta and the only sigma. The flags are what
   # the runlog reads; the values stay the fit's own.
   n_eta <- nrow(fit$omega)
+  fit <- editable_fit(fit)
   fit$theta_fixed <- c(rep(FALSE, length(fit$theta) - 1L), TRUE)
   fit$omega_fixed <- c(rep(FALSE, n_eta - 1L), TRUE)
   fit$sigma_fixed <- TRUE

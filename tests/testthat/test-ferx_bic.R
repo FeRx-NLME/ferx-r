@@ -14,7 +14,7 @@ bic_fit <- function(ofv = 100, n_parameters = 5L, n_subjects = 20L,
   structure(
     list(ofv = ofv, n_parameters = n_parameters, n_subjects = n_subjects,
          n_obs = n_obs, bic_inputs = inputs),
-    class = "ferx_fit"
+    class = c("ferx_editable_fit", "ferx_fit")
   )
 }
 

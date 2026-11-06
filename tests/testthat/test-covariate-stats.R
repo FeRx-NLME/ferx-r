@@ -88,6 +88,7 @@ cs_base <- function() {
     fit <- ferx_fit(sym, data, verbose = FALSE)
     twin <- cs_model(sprintf("%.17g", fit$covariate_stats$median))
     twin_fit <- ferx_fit(twin, data, verbose = FALSE)
+    cs_cache <- editable_fit(cs_cache)
     cs_cache$base <- list(data = data, wt = wt, design = design,
                           design_wt = cs_subject_wt(heavy), sym = sym,
                           twin = twin, fit = fit, twin_fit = twin_fit)
@@ -230,6 +231,7 @@ test_that("C5: a symbolic model with a fit lacking statistics gets core's refusa
 test_that("C6: statistics for a covariate the model does not read are refused", {
   b <- cs_base()
   fit <- b$fit
+  fit <- editable_fit(fit)
   fit$covariate_stats$covariate <- "AGE"
   msg <- cs_msg(ferx_predict(b$sym, b$design, fit = fit))
   expect_match(msg, "carry no entry for it", fixed = TRUE)
@@ -259,6 +261,7 @@ test_that("C6b: from-fit statistics refusals carry E_COVARIATE_STATS_BINDING", {
   coded(ferx_covariance(bare), "covariance")
   coded(ferx_sir(bare, sir_samples = 20L, sir_resamples = 10L), "sir")
   other <- b$fit
+  other <- editable_fit(other)
   other$covariate_stats$covariate <- "AGE"
   coded(ferx_predict(b$sym, b$design, fit = other), "predict, unread covariate")
 })
@@ -266,10 +269,12 @@ test_that("C6b: from-fit statistics refusals carry E_COVARIATE_STATS_BINDING", {
 test_that("C7: malformed statistics are refused in R's terms", {
   b <- cs_base()
   dup <- b$fit
+  dup <- editable_fit(dup)
   dup$covariate_stats <- rbind(dup$covariate_stats, dup$covariate_stats)
   expect_match(cs_msg(ferx_predict(b$sym, b$design, fit = dup)),
                "covariate `WT` is listed twice", fixed = TRUE)
   na <- b$fit
+  na <- editable_fit(na)
   na$covariate_stats$median <- NA_real_
   expect_match(cs_msg(ferx_predict(b$sym, b$design, fit = na)),
                "covariate `WT` has a `median` that is not a finite number",
@@ -340,6 +345,7 @@ cs_categorical <- function() {
     rows <- utils::read.csv(ferx_example("two_cpt_oral_cov")$data)
     ids <- sort(unique(rows$ID))
     grp <- stats::setNames(rep(c(1, 2, 2, 3), length.out = length(ids)), ids)
+    rows <- editable_fit(rows)
     rows$GRP <- grp[as.character(rows$ID)]
     data <- tempfile(fileext = ".csv")
     utils::write.csv(rows, data, row.names = FALSE, quote = FALSE, na = ".")
@@ -355,6 +361,7 @@ cs_categorical <- function() {
     twin <- model("[1, 2, 3]", "2")
     fit <- ferx_fit(sym, data, verbose = FALSE)
     twin_fit <- ferx_fit(twin, data, verbose = FALSE)
+    cs_cache <- editable_fit(cs_cache)
     cs_cache$cat <- list(data = data, design = design, sym = sym, twin = twin,
                          fit = fit, twin_fit = twin_fit)
   }
@@ -399,9 +406,11 @@ test_that("C9: levels = auto / ref = mode fit and bind from the fit like their t
 cs_shifted <- function() {
   if (is.null(cs_cache$shifted)) {
     rows <- utils::read.csv(cs_base()$data)
+    rows <- editable_fit(rows)
     rows$WT <- rows$WT + 15
     path <- tempfile(fileext = ".csv")
     utils::write.csv(rows, path, row.names = FALSE, quote = FALSE, na = ".")
+    cs_cache <- editable_fit(cs_cache)
     cs_cache$shifted <- list(data = path, wt = cs_subject_wt(rows))
   }
   cs_cache$shifted
@@ -501,6 +510,7 @@ cs_tte <- function() {
     rank <- seq_along(ids)
     wt <- 100 - 2 * rank + 12 * ((rank * 7) %% 5 - 2) + 40 * (rank <= 3)
     wt <- stats::setNames(wt, ids)
+    rows <- editable_fit(rows)
     rows$WT <- wt[as.character(rows$ID)]
     data <- tempfile(fileext = ".csv")
     utils::write.csv(rows, data, row.names = FALSE, quote = FALSE, na = ".")
@@ -512,6 +522,7 @@ cs_tte <- function() {
     fit <- ferx_fit(sym, data, verbose = FALSE)
     twin <- cs_tte_model(sprintf("%.17g", fit$covariate_stats$median))
     twin_fit <- ferx_fit(twin, data, verbose = FALSE)
+    cs_cache <- editable_fit(cs_cache)
     cs_cache$tte <- list(wt = wt, design = design,
                          design_wt = unname(wt[heavy]), sym = sym, twin = twin,
                          fit = fit, twin_fit = twin_fit)
@@ -615,9 +626,11 @@ cs_combo_files <- function() {
     design <- tempfile(fileext = ".csv")
     utils::write.csv(rows[rows$ID %in% c(1, 3), ], design, row.names = FALSE,
                      quote = FALSE, na = ".")
+    rows <- editable_fit(rows)
     rows$WT <- rows$WT + 15
     shifted <- tempfile(fileext = ".csv")
     utils::write.csv(rows, shifted, row.names = FALSE, quote = FALSE, na = ".")
+    cs_cache <- editable_fit(cs_cache)
     cs_cache$combo_files <- list(data = data, design = design,
                                  shifted = shifted,
                                  sym = cs_combo_model("median"),
@@ -632,6 +645,7 @@ cs_combo <- function() {
     b <- cs_combo_files()
     fit <- ferx_fit(b$sym, b$data, verbose = FALSE)
     twin_fit <- ferx_fit(b$twin, b$data, verbose = FALSE)
+    cs_cache <- editable_fit(cs_cache)
     cs_cache$combo <- c(b, list(fit = fit, twin_fit = twin_fit))
   }
   cs_cache$combo
@@ -714,6 +728,7 @@ test_that("C12c: every from-fit path on the combined model matches its twin", {
 cs_recoded <- function(to, env = parent.frame()) {
   rows <- utils::read.csv(cs_categorical()$data)
   first3 <- rows$ID[rows$GRP == 3][1L]
+  rows <- editable_fit(rows)
   rows$GRP[rows$ID == first3] <- to
   path <- withr::local_tempfile(fileext = ".csv", .local_envir = env)
   utils::write.csv(rows, path, row.names = FALSE, quote = FALSE, na = ".")
@@ -731,6 +746,7 @@ cs_from_fit_paths <- function(data, drop_fingerprint = FALSE) {
     if (drop_fingerprint) w$population_fingerprint <- NULL
     w
   })
+  fit <- editable_fit(fit)
   fit$data_path <- data
   grab <- function(expr) {
     tryCatch(
@@ -898,6 +914,7 @@ cs_tte_categorical <- function() {
     rows <- utils::read.csv(ferx_example("tte_exponential")$data)
     ids <- sort(unique(rows$ID))
     grp <- stats::setNames(rep(c(1, 2, 2, 3), length.out = length(ids)), ids)
+    rows <- editable_fit(rows)
     rows$GRP <- grp[as.character(rows$ID)]
     data <- tempfile(fileext = ".csv")
     utils::write.csv(rows, data, row.names = FALSE, quote = FALSE, na = ".")
@@ -905,6 +922,7 @@ cs_tte_categorical <- function() {
       cs_tte_model(covariates = sprintf("GRP categorical(levels = %s)", levels),
                    relation = sprintf("LAMBDA ~ GRP categorical(ref = %s)", ref))
     }
+    cs_cache <- editable_fit(cs_cache)
     cs_cache$tte_cat_data <- data
     cs_cache$tte_cat_sym <- model("auto", "mode")
     cs_cache$tte_cat_twin <- model("[1, 2, 3]", "2")
@@ -917,6 +935,7 @@ cs_tte_categorical <- function() {
 cs_tte_recoded <- function(to, env = parent.frame()) {
   rows <- utils::read.csv(cs_tte_categorical()$data)
   first3 <- rows$ID[rows$GRP == 3][1L]
+  rows <- editable_fit(rows)
   rows$GRP[rows$ID == first3] <- to
   path <- withr::local_tempfile(fileext = ".csv", .local_envir = env)
   utils::write.csv(rows, path, row.names = FALSE, quote = FALSE, na = ".")
