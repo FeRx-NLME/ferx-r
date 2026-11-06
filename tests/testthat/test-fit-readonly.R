@@ -83,10 +83,36 @@ test_that("a new field needs a name", {
   expect_error(fit[[""]] <- 1, "needs a name", class = "ferx_fit_readonly_error")
 })
 
-test_that("a list with the class and no seal is not guarded", {
-  fit <- structure(list(theta = 1), class = "ferx_fit")
-  fit$theta <- 2
-  expect_identical(fit$theta, 2)
+test_that("a fit with no seal still guards the fields it holds", {
+  # An `.rds` from before seals, or a seal stripped or overwritten by hand.
+  for (fit in list(structure(list(theta = 1), class = "ferx_fit"),
+                   structure(list(theta = 1), class = "ferx_fit",
+                             ferx_seal = "nonsense"))) {
+    expect_error(fit$theta <- 2, class = "ferx_fit_readonly_error")
+    expect_error(fit[["theta"]] <- 2, class = "ferx_fit_readonly_error")
+    expect_error(fit["theta"] <- list(2), class = "ferx_fit_readonly_error")
+    expect_error(fit$se_theta <- 2, class = "ferx_fit_readonly_error")
+    fit$note <- "new"
+    expect_identical(fit$note, "new")
+  }
+})
+
+test_that("the engine's wire names cannot be added", {
+  fit <- sealed()
+  for (name in ferx:::.FERX_FIT_WIRE_NAMES) {
+    expect_false(name %in% names(fit))
+    expect_error(fit[[name]] <- 1, class = "ferx_fit_readonly_error", info = name)
+  }
+  expect_error(fit$cov_condition_number <- 1, class = "ferx_fit_readonly_error")
+  expect_error(fit["cov_eigenvalues"] <- list(1),
+               class = "ferx_fit_readonly_error")
+})
+
+test_that("every interface field the writer keeps is reserved", {
+  fit <- sealed()
+  for (name in c(ferx:::.FITRX_INTERFACE_KEYS, "model_structure", "cond_dist")) {
+    expect_error(fit[[name]] <- 1, class = "ferx_fit_readonly_error", info = name)
+  }
 })
 
 test_that("the digest follows the values, not how R holds them", {
@@ -116,6 +142,21 @@ test_that("every way past the assignment methods breaks the digest", {
   forged <- fit
   attr(forged, "ferx_seal") <- "nonsense"
   expect_false(ferx:::.ferx_fit_intact(forged))
+})
+
+test_that("a name the assignment methods refuse breaks the digest when forced in", {
+  force_in <- function(name) {
+    x <- unclass(sealed())
+    x[[name]] <- 1
+    class(x) <- "ferx_fit"
+    x
+  }
+  # Absent core field, wire name, and a name `$` would read as an absent field.
+  for (name in c("se_theta", "cov_condition_number", "se_theta_note")) {
+    expect_false(ferx:::.ferx_fit_intact(force_in(name)), info = name)
+  }
+  # An ordinary name is an addition however it arrived.
+  expect_true(ferx:::.ferx_fit_intact(force_in("note")))
 })
 
 test_that("internal code building a fit is not tripped by the guards", {
@@ -182,6 +223,22 @@ test_that("unclass(), edit, reclass, save is refused", {
   expect_error(ferx_save_fit(edited, path), "core fields",
                class = "ferx_fit_modified_error")
   expect_false(file.exists(path))
+})
+
+test_that("nothing added past the methods reaches the bundle", {
+  skip_on_cran()
+  path <- tempfile(fileext = ".fitrx")
+  fit <- warfarin_fit()
+  expect_null(fit$se_theta)
+  for (name in c("se_theta", "se_theta_note", "cov_condition_number",
+                 "cov_eigenvalues")) {
+    edited <- unclass(fit)
+    edited[[name]] <- rep(0.1, length(fit$theta))
+    class(edited) <- "ferx_fit"
+    expect_error(ferx_save_fit(edited, path), class = "ferx_fit_modified_error",
+                 info = name)
+    expect_false(file.exists(path), info = name)
+  }
 })
 
 test_that("a fit with its digest removed is refused", {

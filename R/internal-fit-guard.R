@@ -9,8 +9,8 @@
 #
 # The record is the `ferx_seal` attribute: `fields`, the names that were core
 # when the fit was built, and `digest`. A list with the class and no record (one
-# built by hand, or read from an `.rds` older than this) is not guarded, because
-# nothing says what was fitted; `ferx_save_fit()` refuses it for the same reason.
+# built by hand, or read from an `.rds` older than this) has no list of what was
+# fitted, so every name it holds counts as core, and `ferx_save_fit()` refuses it.
 #
 # Code in this package that builds or refreshes a fit works on the plain list:
 # `.ferx_fit_unseal()`, then assign, then `.ferx_fit_seal()`.
@@ -21,8 +21,8 @@
 # `fit$se_theta <- 0.1` on a fit without a covariance step would pass as a new
 # name. A new field the builders can leave out belongs here.
 .FERX_FIT_OPTIONAL_FIELDS <- c(
-  "bundle", "call_settings", "condition_number", "cor_matrix", "cov_fixed",
-  "cov_matrix", "covariance_method", "covariance_status",
+  "bundle", "call_settings", "cond_dist", "condition_number", "cor_matrix",
+  "cov_fixed", "cov_matrix", "covariance_method", "covariance_status",
   "covariance_wall_time_secs", "covariate_stats", "data_hash", "data_name",
   "data_path", "data_source", "dw_statistic", "ebe_kappas",
   "ebe_kappas_by_level", "eigenvalues", "estimates", "eta_cov",
@@ -31,17 +31,32 @@
   "individual_estimates", "iov_occasion", "kappa_is_diagonal", "kappa_levels",
   "kappa_names", "kappa_param_types", "kappa_weight_typical", "kappa_weights",
   "left_init", "max_abs_correlation", "model_file_settings", "model_hash",
-  "model_name", "model_path", "model_source", "model_text", "n_threads_used",
-  "omega", "omega_iov", "omega_iov_param_corr", "omega_is_diagonal",
-  "omega_param_corr", "population_fingerprint", "profiled_blocks",
-  "profiled_levels_at_bound", "reader_settings", "residual_correlations",
-  "scoring_settings", "se_kappa", "se_omega", "se_sigma", "se_theta",
-  "shrinkage_eps", "shrinkage_kappa", "shrinkage_kappa_by_occ", "sigma_types",
-  "sir_ci_kappa", "sir_ci_omega", "sir_ci_sigma", "sir_ci_theta", "sir_ess",
-  "sir_resamples", "sir_resamples_dim", "sir_resamples_n", "sir_seed_used",
-  "sir_settings", "stalled_at_init", "theta_levels", "theta_transforms",
-  "trace", "trace_path", "unavailable_theta_levels", "vi", "warning_details",
+  "model_name", "model_path", "model_source", "model_structure", "model_text",
+  "n_threads_used", "omega", "omega_iov", "omega_iov_param_corr",
+  "omega_is_diagonal", "omega_param_corr", "population_fingerprint",
+  "profiled_blocks", "profiled_levels_at_bound", "reader_settings",
+  "residual_correlations", "scoring_settings", "se_kappa", "se_omega",
+  "se_sigma", "se_theta", "shrinkage_eps", "shrinkage_kappa",
+  "shrinkage_kappa_by_occ", "sigma_types", "sir_ci_kappa", "sir_ci_omega",
+  "sir_ci_sigma", "sir_ci_theta", "sir_ess", "sir_resamples",
+  "sir_resamples_dim", "sir_resamples_n", "sir_seed_used", "sir_settings",
+  "stalled_at_init", "theta_levels", "theta_transforms", "trace",
+  "trace_path", "unavailable_theta_levels", "vi", "warning_details",
   "warnings", "warnings_structured"
+)
+
+# Names a finished fit never holds and the package reads all the same: the
+# engine's wire names, which `.ferx_fit_from_raw()` turns into the fields above
+# and drops. The writer takes `fit$cov_condition_number` before
+# `fit$condition_number`, for one, so an addition under such a name would reach
+# the bundle in place of the fitted value. Anything the package reads off a fit
+# belongs here or in the list above.
+.FERX_FIT_WIRE_NAMES <- c(
+  "bundle_error", "cov_condition_number", "cov_eigenvalues", "cov_labels",
+  "cov_matrix_dim", "omega_dim", "omega_iov_dim", "residual_correlation_fixed",
+  "residual_correlation_i", "residual_correlation_j",
+  "residual_correlation_names", "residual_correlation_rho",
+  "se_residual_correlation", "theta_names"
 )
 
 # `typeof()`s of what a user addition may hold, at any depth and in its
@@ -70,11 +85,16 @@
   ferx_rust_sha256_raw(bytes[-seq_len(14L)])
 }
 
+# What no addition may be called, whether or not this fit has it.
+.ferx_fit_reserved_names <- function() {
+  c(.FERX_FIT_OPTIONAL_FIELDS, .FERX_FIT_WIRE_NAMES)
+}
+
 # The names added to a sealed fit since it was built.
 .ferx_fit_user_fields <- function(x) {
   seal <- .ferx_fit_seal_of(x)
   if (is.null(seal)) return(character())
-  setdiff(names(x), c(seal$fields, .FERX_FIT_OPTIONAL_FIELDS))
+  setdiff(names(x), c(seal$fields, .ferx_fit_reserved_names()))
 }
 
 # The list `x` (or a fit) as a sealed `ferx_fit`. On a fit being refreshed, what
@@ -101,12 +121,18 @@
   x
 }
 
-# Do the core fields still match the record? FALSE for a fit with none.
+# Do the core fields still match the record? FALSE for a fit with none. The
+# digest covers the names the fit was built with, so a name that arrived since
+# must be one the assignment methods would have let in: `unclass()` can otherwise
+# add `se_theta` to a fit with no covariance step, and the writer would read it.
 .ferx_fit_intact <- function(fit) {
   seal <- .ferx_fit_seal_of(fit)
   is.character(seal$digest) && length(seal$digest) == 1L &&
     is.character(seal$fields) &&
-    identical(.ferx_fit_digest(fit, seal$fields), seal$digest)
+    identical(.ferx_fit_digest(fit, seal$fields), seal$digest) &&
+    all(vapply(setdiff(names(fit), seal$fields), function(name) {
+      is.null(.ferx_fit_addition_refusal(fit, name))
+    }, logical(1L)))
 }
 
 .ferx_fit_modified_stop <- function(who) {
@@ -146,12 +172,12 @@
                       call = NULL))
 }
 
-# Why `name` cannot be added to the sealed fit `x`, or NULL if it can. `$` matches
+# Why `name` cannot be added to the fit `x`, or NULL if it can. `$` matches
 # partially, so with `se_theta` absent, `se_theta_note` would be what
 # `fit$se_theta` reads: in `print()` and everywhere else in this package.
 .ferx_fit_addition_refusal <- function(x, name) {
   seal <- .ferx_fit_seal_of(x)
-  core <- union(seal$fields, .FERX_FIT_OPTIONAL_FIELDS)
+  core <- union(seal$fields %||% names(x), .ferx_fit_reserved_names())
   if (name %in% core) {
     return(paste0("fit$", name, " is read-only: the core fields of a ferx fit ",
                   "cannot be changed. Refit, or keep your own value under a new ",
@@ -171,7 +197,6 @@
 # Refuse the assignment to `names` (NA for a position past the end, or a name
 # that is not one).
 .ferx_fit_guard <- function(x, names) {
-  if (is.null(.ferx_fit_seal_of(x))) return(invisible())
   if (anyNA(names) || !all(nzchar(names))) {
     .ferx_fit_readonly_stop(paste0(
       "A new field on a ferx fit needs a name: use fit$my_value <- ... or ",

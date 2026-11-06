@@ -45,7 +45,7 @@ fake_fit <- function(with_covtab = TRUE, echo_wt = FALSE) {
       stringsAsFactors = FALSE
     )
   }
-  class(fit) <- "ferx_fit"
+  class(fit) <- c("ferx_editable_fit", "ferx_fit")
   fit
 }
 

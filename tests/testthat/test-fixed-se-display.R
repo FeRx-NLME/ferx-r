@@ -64,7 +64,7 @@ crafted_fit <- function(se = c("zero", "real", "none"), flags = TRUE) {
     fit$sigma_fixed <- c(FALSE, TRUE)
     fit$kappa_fixed <- c(FALSE, TRUE)
   }
-  class(fit) <- "ferx_fit"
+  class(fit) <- c("ferx_editable_fit", "ferx_fit")
   fit
 }
 

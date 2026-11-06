@@ -1472,7 +1472,7 @@ make_fake_fit <- function(...) {
     saem_n_subjects_hmc = NULL,
     warnings = character(0)
   )
-  structure(modifyList(defaults, list(...)), class = "ferx_fit")
+  structure(modifyList(defaults, list(...)), class = c("ferx_editable_fit", "ferx_fit"))
 }
 
 # summary.ferx_fit structure -------------------------------------------
