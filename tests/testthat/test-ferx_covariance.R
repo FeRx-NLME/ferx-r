@@ -8,46 +8,26 @@
 
 cov_skip <- "covariance step did not converge - skipping"
 
-test_that(".ferx_fit_interaction follows the last estimating (non-IMP) stage", {
-  # FOCE / FOCEI fix the flag from the method chain. A trailing IMP stage is
-  # diagnostic-only and must be skipped, otherwise the covariance step would
-  # differentiate the wrong (FOCE) NLL.
-  expect_true(ferx:::.ferx_fit_interaction(list(method_chain = "FOCEI")))
-  expect_false(ferx:::.ferx_fit_interaction(list(method_chain = "FOCE")))
-  # c("focei", "imp"): interaction TRUE despite the terminal IMP.
-  expect_true(ferx:::.ferx_fit_interaction(list(method_chain = c("FOCEI", "IMP"))))
-  expect_false(ferx:::.ferx_fit_interaction(list(method_chain = c("FOCE", "IMP"))))
-  # Falls back to fit$method when method_chain is absent.
-  expect_true(ferx:::.ferx_fit_interaction(list(method = "FOCEI")))
-  # Degenerate / all-IMP chains don't error.
-  expect_false(ferx:::.ferx_fit_interaction(list(method_chain = character(0))))
-  expect_false(ferx:::.ferx_fit_interaction(list(method_chain = "IMP")))
-})
-
-test_that(".ferx_fit_interaction takes the recorded flag only where the method inherits it (#591)", {
-  f <- ferx:::.ferx_fit_interaction
-  # A bundle ferx-r wrote before #591 records FALSE for every fit: FOCEI wins.
-  expect_true(f(list(method = "FOCEI", method_chain = "FOCEI", interaction = FALSE)))
-  expect_false(f(list(method = "FOCE", method_chain = "FOCE", interaction = TRUE)))
-  # SAEM / Gauss-Newton inherit the flag, so a recorded TRUE decides...
-  expect_true(f(list(method = "SAEM", method_chain = "SAEM", interaction = TRUE)))
-  expect_true(f(list(method = "FOCE-GN", method_chain = "FOCE-GN", interaction = TRUE)))
-  expect_false(f(list(method = "SAEM", method_chain = "SAEM", interaction = FALSE)))
-  # ...and a fit without one keeps the old reading.
-  expect_false(f(list(method = "SAEM", method_chain = "SAEM")))
-  expect_false(f(list(method = "SAEM", method_chain = "SAEM", interaction = NA)))
-  # An estimating IMP (`fit$method` is "IMP") inherits the flag: a model-file
-  # `method = [foce, imp]` runs it with interaction, which the chain reading
-  # (last non-IMP stage, FOCE) would have called FALSE (#591 review 1).
-  expect_true(f(list(method = "IMP", method_chain = c("FOCE", "IMP"), interaction = TRUE)))
-  # ferx_fit(method = c("focei", "imp")) runs it with FOCEI's flag; a legacy
-  # record of FALSE falls back to the chain, which agrees.
-  expect_true(f(list(method = "IMP", method_chain = c("FOCEI", "IMP"), interaction = FALSE)))
-  # An evaluation-only IMP (`imp_eval_only`) leaves `fit$method` on the stage
-  # before it, which fixes the flag whatever the record says.
-  expect_false(f(list(method = "FOCE", method_chain = c("FOCE", "IMP"), interaction = TRUE)))
-  expect_true(f(list(method = "FOCEI", method_chain = c("FOCEI", "IMP"), interaction = FALSE)))
-})
+# The step reads the fit's bytes, so a fit in another state is edited there.
+# A fit as one made before #462 recorded its selection: neither field.
+# `fit` with CSV entries of its bundle rewritten: `edits` maps an entry's name
+# to a function of its rows, read as text so the other cells stay as written.
+fitrx_edit_csvs <- function(fit, edits) {
+  staging <- tempfile("fitrx_csv_")
+  dir.create(staging)
+  path <- tempfile(fileext = ".fitrx")
+  writeBin(fit$bundle, path)
+  utils::unzip(path, exdir = staging, junkpaths = TRUE)
+  for (name in names(edits)) {
+    csv <- file.path(staging, name)
+    rows <- utils::read.csv(csv, colClasses = "character", check.names = FALSE,
+                            na.strings = character())
+    utils::write.csv(edits[[name]](rows), csv, row.names = FALSE, quote = FALSE)
+  }
+  out <- tempfile(fileext = ".fitrx")
+  utils::zip(out, list.files(staging, full.names = TRUE), flags = "-j -q")
+  ferx:::.ferx_fit_with_bundle(fit, readBin(out, "raw", n = file.size(out)))
+}
 
 test_that("ferx_covariance surfaces cov-step warnings in the structured table", {
   # Covariance-step warnings must reach fit$warnings_structured, not just the
@@ -73,27 +53,25 @@ test_that("a replay that computes replaces the fit's failed covariance rows (#61
   # go, from the table and the flat vector alike, as an earlier SIR run's do
   # in ferx_sir(). Otherwise a fit whose step failed keeps printing
   # `(covariance_failed)` beside the matrix the replay just computed.
-  # Mutation that reddens this: drop the `stale_cov()` filters from
-  # ferx_covariance().
-  fit <- warfarin_fit()
   failed <- paste0(
     "Covariance step failed: Hessian is not positive definite. Standard ",
     "errors are unavailable."
   )
   row <- ferx:::.ferx_classify_flat_warnings(failed)
   expect_identical(row$category, "covariance_failed")
-  fit <- editable_fit(fit)
-  fit$warnings <- c(fit$warnings, failed)
-  fit$warnings_structured <- rbind(fit$warnings_structured, row)
-  fit$covariance_status <- "failed"
-  # A condition number the replay does not reproduce, flat and as a row: the
-  # flat string must go too, or .ferx_fit_warnings() re-adds it (#611 review
-  # round 2).
+  # A condition number the replay does not reproduce: its line must go too.
   high <- "High condition number (5000.0) -- parameter space may be ill-conditioned"
   high_row <- ferx:::.ferx_classify_flat_warnings(high)
   expect_identical(high_row$category, "condition_number")
-  fit$warnings <- c(fit$warnings, high)
-  fit$warnings_structured <- rbind(fit$warnings_structured, high_row)
+  fit <- fitrx_edit_fit(warfarin_fit(), function(w) {
+    w$warnings <- c(w$warnings, failed, high)
+    w$covariance_status <- "failed"
+    w
+  })
+  expect_identical(fit$covariance_status, "failed")
+  expect_true(all(c(failed, high) %in% fit$warnings))
+  expect_true(all(c("covariance_failed", "condition_number") %in%
+                    fit$warnings_structured$category))
 
   out <- ferx_covariance(fit)
   skip_if(is.null(out$cov_matrix), cov_skip)
@@ -242,15 +220,18 @@ test_that("ferx_covariance replays the fit's own covariance-step settings", {
   # The model file's values come from the model file, not from R's record of
   # it: a fit without `call_settings` / `model_file_settings` (a bundle
   # ferx-core wrote) replays the file's step too.
-  bare <- fits$file
-  bare <- editable_fit(bare)
-  bare$call_settings <- list()
-  bare$model_file_settings <- list()
+  bare <- fitrx_edit_extras(fits$file, function(r) {
+    r$call_settings <- list()
+    r$model_file_settings <- list()
+    r
+  })
   expect_identical(se(q(ferx_covariance(bare))), se(fits$file))
   # ... and the call's override of it is R's to hand back: without the record
   # the call fit replays at the model file's (here: the defaults) and moves.
-  bare <- editable_fit(fits$call)
-  bare$call_settings <- list()
+  bare <- fitrx_edit_extras(fits$call, function(r) {
+    r$call_settings <- list()
+    r
+  })
   expect_false(isTRUE(all.equal(se(q(ferx_covariance(bare))), se(fits$call))))
 })
 
@@ -485,23 +466,28 @@ test_that("ferx_covariance on an IOV fit reproduces the inline covariance step (
 })
 
 test_that("ferx_covariance refuses a kappa fit that has lost its omega_iov (#473)", {
-  fit <- warfarin_iov_cov_fit()
-  fit <- editable_fit(fit)
-  fit$omega_iov <- NULL
-  # The prefix is the shared builder's only per-binding input: anchoring it
-  # catches the two call sites swapping labels.
-  expect_error(ferx_covariance(fit), "^ferx_covariance: .*carries no omega_iov",
-               info = "ferx_covariance side of the shared skeleton (#473)")
+  fit <- fitrx_edit_fit(warfarin_iov_cov_fit(), function(w) {
+    w$iov <- NULL
+    w
+  }, drop = "ebes_kappa.csv")
+  expect_null(fit$omega_iov)
+  e <- tryCatch(ferx_covariance(fit), error = function(e) e)
+  expect_s3_class(e, "ferx_engine_error")
+  expect_identical(e$code, "E_PARAM_SHAPE")
+  # The prefix is the step's: anchoring it catches the wrong caller's label.
+  expect_match(conditionMessage(e), "^ferx_covariance: .*carry no omega_iov")
 })
 
-test_that("ferx_covariance refuses a kappa matrix of the wrong size (#473)", {
+test_that("a bundle with a kappa matrix of the wrong size does not load (#473)", {
   fit <- block_kappa_cov_free_fit()
   expect_identical(dim(fit$omega_iov), c(2L, 2L))
-  fit <- editable_fit(fit)
-  fit$omega_iov <- fit$omega_iov[1L, 1L, drop = FALSE]
-  expect_error(ferx_covariance(fit),
-               "omega_iov dim 1 does not match model (2 expected)", fixed = TRUE,
-               info = "ferx_covariance side of the shared skeleton (#473)")
+  expect_error(
+    fitrx_edit_fit(fit, function(w) {
+      w$iov$omega_iov <- list(rows = 1L, cols = 1L, data = w$iov$omega_iov$data[1L])
+      w
+    }),
+    "iov.omega_iov dim (1) does not match iov.kappa_names (2)", fixed = TRUE
+  )
 })
 
 # A two-class [mixture] model with an omega(2) and a sigma(2) override and a
@@ -601,12 +587,13 @@ test_that("ferx_covariance on a [mixture] fit matches the in-fit step (#441)", {
   # `omega`, a machine-epsilon shift the FD Hessian amplifies (measured 6.6e-8
   # relative at worst here).
   expect_length(res$bare$mixture_overrides, 2L)
-  no_packed <- res$bare
-  no_packed <- editable_fit(no_packed)
-  no_packed$packed_estimate <- NULL
+  no_packed <- fitrx_edit_fit(res$bare, function(w) {
+    w$packed_estimate <- NULL
+    w
+  })
   expect_equal(ferx_covariance(no_packed)$cov_matrix, res$in_fit$cov_matrix,
                tolerance = 1e-6)
-  ferx_save_fit(resealed_fit(no_packed), path)
+  ferx_save_fit(no_packed, path)
   reloaded <- ferx_load_fit(path)
   expect_null(reloaded$packed_estimate)
   expect_identical(reloaded$mixture_overrides, res$bare$mixture_overrides)
@@ -614,9 +601,10 @@ test_that("ferx_covariance on a [mixture] fit matches the in-fit step (#441)", {
                    ferx_covariance(no_packed)$cov_matrix)
   # With neither, the overrides cannot be recovered: a clear refusal, never a
   # matrix centred on the declared override inits.
-  neither <- no_packed
-  neither <- editable_fit(neither)
-  neither$mixture_overrides <- NULL
+  neither <- fitrx_edit_fit(no_packed, function(w) {
+    w$mixture_overrides <- NULL
+    w
+  })
   expect_error(ferx_covariance(neither),
                "records neither their fitted values", fixed = TRUE)
 })
@@ -678,10 +666,16 @@ test_that("a fit without random effects takes its IDs from individual_estimates 
 
 test_that("the IDs reach the engine's check in fit order, not sorted or re-read (#468)", {
   gappy <- relabelled_fit("warfarin", "gappy", relabel_gappy)
-  rotated <- gappy
+  # The rows of each subject carry the next subject's ID, in the two entries
+  # that have to agree for the bundle to load.
   ids <- gappy$ebe_etas$ID
-  rotated <- editable_fit(rotated)
-  rotated$ebe_etas$ID <- c(ids[-1], ids[1])
+  moved <- stats::setNames(c(ids[-1], ids[1]), ids)
+  relabel <- function(rows) {
+    rows$ID <- unname(moved[rows$ID])
+    rows
+  }
+  rotated <- fitrx_edit_csvs(gappy, list(ebes.csv = relabel, predictions.csv = relabel))
+  expect_identical(rotated$ebe_etas$ID, c(ids[-1], ids[1]))
   # ferx-core #1813: one coded refusal. A live fit carries its fingerprint, so
   # the population is verified as the fit's and what differs is the fit's own
   # per-subject rows (E_FIT_SUBJECTS_MISMATCH).
@@ -695,23 +689,23 @@ test_that("the IDs reach the engine's check in fit order, not sorted or re-read 
 
   # Without a fingerprint (a fit saved before it was recorded) the subject
   # list is all there is to compare: the population is not the fit's.
-  legacy <- rotated
-  legacy <- editable_fit(legacy)
-  legacy$population_fingerprint <- NULL
+  legacy <- fitrx_edit_fit(rotated, function(w) {
+    w$population_fingerprint <- NULL
+    w
+  })
   e2 <- tryCatch(ferx_covariance(legacy), error = function(e) e)
   expect_s3_class(e2, "ferx_engine_error")
   expect_identical(e2$code, "E_POPULATION_MISMATCH")
 })
 
-test_that("ferx_covariance hands the binding the fit's IDs verbatim (#468)", {
+test_that("ferx_covariance hands the binding the fit's own bytes (#468)", {
   skip_if_not_installed("mockery")
   gappy <- relabelled_fit("warfarin", "gappy", relabel_gappy)
   cap <- capture_binding_args()
   mockery::stub(ferx_covariance, "ferx_rust_covariance", cap$fake)
   expect_error(ferx_covariance(gappy), "captured")
-  args <- cap$seen()
-  expect_identical(args$subject_ids, gappy$ebe_etas$ID)
-  expect_null(args$n_subjects)
+  # The IDs travel in them, as ebes.csv has them.
+  expect_identical(cap$seen()$bundle, gappy$bundle)
 })
 
 test_that(".ferx_fit_subject_ids reads ebe_etas, then individual_estimates (#468)", {
@@ -760,36 +754,6 @@ test_that(".ferx_fit_subject_id_set names the field the IDs came from (#555)", {
                    list(ids = c("A", "B"), source = "fit$subject_ids"))
   expect_identical(id_set(list(sdtab = sdtab), "ferx_sir"),
                    list(ids = c("1", "2"), source = "fit$sdtab$ID"))
-})
-
-test_that(".ferx_sdtab_ids_hint adds the re-fit advice only to an sdtab-ID mismatch (#555)", {
-  hint <- getFromNamespace(".ferx_sdtab_ids_hint", "ferx")
-  refusal <- function(code) {
-    structure(class = c("ferx_engine_error", "error", "condition"),
-              list(message = paste0("run_covariance: no [", code, "]"),
-                   call = NULL, code = code))
-  }
-  msg_of <- function(code, source) {
-    tryCatch(hint(stop(refusal(code)), source), error = function(e) e)
-  }
-  for (code in c("E_FIT_SUBJECTS_MISMATCH", "E_POPULATION_MISMATCH")) {
-    e <- msg_of(code, "fit$sdtab$ID")
-    expect_s3_class(e, "ferx_engine_error")
-    expect_identical(e$code, code)
-    expect_match(conditionMessage(e),
-                 paste0("^run_covariance: no \\[", code, "\\]\n",
-                        "The fit predates fit\\$subject_ids"))
-    expect_match(conditionMessage(e), "Re-fit with ferx_fit(model, data).", fixed = TRUE)
-    # IDs from any other field are the fit's own: re-fitting would not help.
-    expect_identical(conditionMessage(msg_of(code, "fit$subject_ids")),
-                     paste0("run_covariance: no [", code, "]"))
-  }
-  # Another refusal is not about the IDs, so it passes through untouched.
-  other <- msg_of("E_HASH_MISMATCH", "fit$sdtab$ID")
-  expect_identical(conditionMessage(other), "run_covariance: no [E_HASH_MISMATCH]")
-  plain <- tryCatch(hint(stop("boom"), "fit$sdtab$ID"), error = conditionMessage)
-  expect_identical(plain, "boom")
-  expect_identical(hint(42, "fit$sdtab$ID"), 42)
 })
 
 test_that(".ferx_fit_subject_ids refuses a fit with no IDs, naming every field (#468)", {
@@ -876,18 +840,24 @@ test_that("the engine checks the re-read population against the fit's fingerprin
   # still matches with the settings alone. Editing the recorded selection makes
   # the re-read keep a record the fit dropped.
   fit <- rs_fit(ignore = rs_ignore)
-  edited <- sub("DV < 1.0", "DV < 0.9", fit$reader_settings, fixed = TRUE)
-  expect_false(identical(edited, fit$reader_settings))
-  fit <- editable_fit(fit)
-  fit$reader_settings <- edited
-  expect_error(ferx_covariance(fit), "is not the one the fit was given",
+  edited <- fitrx_edit_fit(fit, function(w) {
+    w$reader_settings$ignore_exprs <- lapply(
+      w$reader_settings$ignore_exprs, function(x) sub("DV < 1.0", "DV < 0.9", x, fixed = TRUE)
+    )
+    w
+  })
+  expect_false(identical(edited$reader_settings, fit$reader_settings))
+  expect_error(ferx_covariance(edited), "is not the one the fit was given",
                fixed = TRUE)
 })
 
 test_that("ferx_covariance records the fingerprint check's note on the fit (#559)", {
   # A fingerprint of another scheme is not compared; run_covariance says so in
   # its warnings, which reach the flat vector and the structured table.
-  fit <- foreign_scheme_fit(warfarin_fit())
+  fit <- fitrx_edit_fit(warfarin_fit(), function(w) {
+    w$population_fingerprint$scheme <- 1L
+    w
+  })
   expect_false(foreign_scheme_note %in% fit$warnings)
   out <- suppressWarnings(ferx_covariance(fit))
   expect_true(foreign_scheme_note %in% out$warnings)
@@ -896,16 +866,19 @@ test_that("ferx_covariance records the fingerprint check's note on the fit (#559
   expect_identical(row$severity, "warning")
 })
 
-test_that("a malformed fit$reader_settings is refused by name, not a panic (#462)", {
+test_that("a malformed reader_settings is refused by name, not a panic (#462)", {
   fit <- rs_fit(ignore = rs_ignore)
-  fit <- editable_fit(fit)
-  fit$reader_settings <- "{not json"
-  expect_error(ferx_covariance(fit), "ferx_covariance: `fit$reader_settings`",
-               fixed = TRUE)
-  fit <- editable_fit(rs_fit(ignore = rs_ignore))
-  fit$population_fingerprint <- "{not json"
-  expect_error(ferx_covariance(fit), "ferx_covariance: `fit$population_fingerprint`",
-               fixed = TRUE)
+  # In the bytes the two records are typed, so the bundle does not read.
+  garbled <- function(key) {
+    function(w) {
+      w[[key]] <- "{not json"
+      w
+    }
+  }
+  expect_error(fitrx_edit_fit(fit, garbled("reader_settings")),
+               "expected struct ReaderSettings", fixed = TRUE)
+  expect_error(fitrx_edit_fit(fit, garbled("population_fingerprint")),
+               "expected struct PopulationFingerprint", fixed = TRUE)
 })
 
 test_that("a fit records a `settings =` iov_column in its reader settings (#462)", {
@@ -1123,26 +1096,27 @@ test_that("ferx_covariance on a model-file `method = [foce, imp]` fit keeps the 
   expect_identical(fit$method, "IMP")
   expect_identical(fit$method_chain, c("FOCE", "IMP"))
   expect_true(fit$interaction)
-  expect_true(ferx:::.ferx_fit_interaction(fit))
   expect_same_covariance(suppressWarnings(ferx_covariance(fit)), fit, "model-file [foce, imp]")
 })
 
 test_that("ferx_covariance refuses kappa EBEs that do not line up with the subjects (#591)", {
-  fit <- saem_iov_fit()
   # A subject with no rows is refused here. A subject with the wrong number
   # of occasions is the engine's to catch: it does not line up with the
   # occasions it re-reads, and the step starts from a cold inner solve.
-  short <- fit
-  last <- utils::tail(short$ebe_kappas$ID, 1L)
-  short <- editable_fit(short)
-  short$ebe_kappas <- short$ebe_kappas[short$ebe_kappas$ID != last, , drop = FALSE]
-  expect_error(ferx_covariance(short),
-               "^ferx_covariance: fit\\$ebe_kappas has no rows for subject")
-  extra <- fit
-  extra <- editable_fit(extra)
-  extra$ebe_kappas <- rbind(extra$ebe_kappas, extra$ebe_kappas[1L, , drop = FALSE])
-  expect_error(ferx_covariance(extra),
-               "^ferx_covariance: fit\\$ebe_kappas row [0-9]+ .* does not belong")
+  short <- fitrx_edit_csvs(saem_iov_fit(), list(ebes_kappa.csv = function(rows) {
+    rows[rows$ID != utils::tail(rows$ID, 1L), , drop = FALSE]
+  }))
+  expect_error(ferx_covariance(short), "^ferx_covariance: the fit has no kappa EBEs for subject")
+  expect_error(ferx_sir(short), "^ferx_sir: the fit has no kappa EBEs for subject")
+})
+
+test_that("a bundle with a kappa EBE row out of sequence does not load (#591)", {
+  expect_error(
+    fitrx_edit_csvs(saem_iov_fit(), list(ebes_kappa.csv = function(rows) {
+      rbind(rows, rows[1L, , drop = FALSE])
+    })),
+    "rows must form a", fixed = TRUE
+  )
 })
 
 test_that("ferx_sir and ferx_covariance hand the engine the fit's method and kappa EBEs (#591)", {
@@ -1157,14 +1131,16 @@ test_that("ferx_sir and ferx_covariance hand the engine the fit's method and kap
   mockery::stub(ferx_covariance, "ferx_rust_covariance", capture)
   expect_error(suppressWarnings(ferx_sir(fit)), "captured")
   expect_error(suppressWarnings(ferx_covariance(fit)), "captured")
-  kcols <- setdiff(names(fit$ebe_kappas), c("ID", "OCC"))
-  for (args in seen) {
-    expect_identical(args$method, "SAEM")
-    expect_identical(args$method_chain, "SAEM")
-    expect_identical(args$ebe_kappa_ids, as.character(fit$ebe_kappas$ID))
-    expect_identical(args$ebe_kappas_flat,
-                     as.numeric(t(as.matrix(fit$ebe_kappas[, kcols, drop = FALSE]))))
-  }
+  expect_length(seen, 2L)
+  # Both travel in the fit's bytes.
+  wire <- fitrx_fit_json(fit$bundle)
+  expect_identical(fit$method, "SAEM")
+  expect_identical(wire$method, "saem")
+  expect_identical(unlist(wire$method_chain), "saem")
+  for (args in seen) expect_identical(args$bundle, fit$bundle)
+  path <- withr::local_tempfile(fileext = ".fitrx")
+  writeBin(fit$bundle, path)
+  expect_true("ebes_kappa.csv" %in% utils::unzip(path, list = TRUE)$Name)
 })
 
 # Warfarin with a theta nothing uses. The engine freezes it at the start of the
@@ -1229,13 +1205,14 @@ test_that("a fit whose step never ran holds its frozen theta too, saved or not (
   expect_identical(loaded$se_theta[["TVUNUSED"]], 0)
 })
 
-test_that("a theta_fixed of the wrong length is refused by name (#613)", {
+test_that("a theta.fixed of the wrong length is refused by name (#613)", {
   skip_on_cran()
   fit <- unused_theta_warfarin_fit()
-  fit <- editable_fit(fit)
-  fit$theta_fixed <- c(FALSE, TRUE)
-  expect_error(ferx_covariance(fit),
-               "fit$theta_fixed has 2 entries but the model has 4 thetas",
-               fixed = TRUE)
-  expect_identical(ferx:::.ferx_fit_theta_fixed(list()), logical())
+  expect_error(
+    fitrx_edit_fit(fit, function(w) {
+      w$theta$fixed <- list(FALSE, TRUE)
+      w
+    }),
+    "theta.fixed (2) does not match theta.estimates (4)", fixed = TRUE
+  )
 })

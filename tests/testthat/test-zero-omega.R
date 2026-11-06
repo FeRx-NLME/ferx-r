@@ -200,46 +200,6 @@ test_that("non-1..n and text IDs give the binary fit's own SIR and SEs (#550, #4
   }
 })
 
-# A fit made before `fit$subject_ids` (#555): with neither EBE rows nor
-# `[individual_parameters]`, its IDs come from `fit$sdtab$ID`, the engine's
-# number for each subject. A numeric ID is that number; a text ID's is its
-# position, which the engine refuses, so the refusal says to re-fit.
-predating_ids <- function(f) {
-  f <- editable_fit(f)
-  f$subject_ids <- NULL
-  f
-}
-
-test_that("a gappy-ID fit predating fit$subject_ids still runs (#555, #550)", {
-  fit <- relabelled_fit("binary_logistic", "gappy", relabel_gappy)
-  cov <- ferx_covariance(fit)
-  skip_if(is.null(cov$cov_matrix), "covariance step did not converge - skipping")
-  old <- predating_ids(fit)
-  expect_identical(ferx_covariance(old)$se_theta, cov$se_theta)
-  expect_identical(binary_sir(old)$sir_ess, binary_sir(fit)$sir_ess)
-})
-
-test_that("a text-ID fit predating fit$subject_ids is refused with the re-fit advice (#555)", {
-  old <- predating_ids(relabelled_fit("binary_logistic", "text", relabel_text))
-  refit <- paste0(
-    "The fit predates fit$subject_ids, so its subject IDs were taken from ",
-    "fit$sdtab$ID, which holds a text ID's position rather than the ID. ",
-    "Re-fit with ferx_fit(model, data)."
-  )
-  for (step in list(ferx_covariance, binary_sir)) {
-    e <- tryCatch(step(old), error = function(e) e)
-    expect_s3_class(e, "ferx_engine_error")
-    expect_true(e$code %in% c("E_FIT_SUBJECTS_MISMATCH", "E_POPULATION_MISMATCH"))
-    msg <- conditionMessage(e)
-    # The engine's message - code and hint line included - stays in front, as
-    # it raised it; the cause and the advice follow on a line of their own.
-    expect_true(endsWith(msg, paste0("\n", refit)))
-    engine <- substr(msg, 1L, nchar(msg) - nchar(refit) - 1L)
-    expect_match(engine, "`PT110`", fixed = TRUE)
-    expect_match(engine, paste0("[", e$code, "]"), fixed = TRUE)
-  }
-})
-
 test_that("a no-eta fit survives a .fitrx round trip, IDs and all (#461, #550)", {
   fit <- relabelled_fit("binary_logistic", "text", relabel_text)
   back <- fitrx_reload(fit)
@@ -254,12 +214,9 @@ test_that("a no-eta fit survives a .fitrx round trip, IDs and all (#461, #550)",
   expect_identical(binary_sir(back)$sir_ess, binary_sir(fit)$sir_ess)
 })
 
-test_that("ferx-core reads the R-written bundle of a no-eta fit (#461)", {
-  # Pooled, not binary: a binary fit's sdtab N_OBS is NaN, so its ebes.csv
-  # n_obs is empty and the engine's loader refuses it for that reason alone.
+test_that("a pooled text-ID fit reloads with its IDs and no etas (#461)", {
   fit <- relabelled_fit("one_cpt_iv_pooled", "text", relabel_text)
-  trip <- fitrx_engine_trip(fit)
-  back <- ferx_load_fit(trip$core_path)
+  back <- fitrx_reload(fit)
   expect_identical(back$subject_ids, fit$subject_ids)
   expect_null(back$ebe_etas)
 })

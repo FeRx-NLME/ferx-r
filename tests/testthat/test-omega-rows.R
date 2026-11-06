@@ -14,7 +14,7 @@ fitrx_omega_rows <- getFromNamespace("ferx_rust_fitrx_omega_rows", "ferx")
 # The engine's rows for `fit`, via a saved bundle.
 core_omega_rows <- function(fit) {
   f <- withr::local_tempfile(fileext = ".fitrx")
-  suppressWarnings(ferx_save_fit(resealed_fit(fit), f))
+  suppressWarnings(ferx_save_fit(fit, f))
   strsplit(fitrx_omega_rows(f), "\n", fixed = TRUE)[[1L]]
 }
 
@@ -165,9 +165,10 @@ test_that("a failed or SIR-fallback covariance step hides every CV%/SD", {
   skip_on_cran()
   fit <- scales_fit()
   for (status in c("failed", "sir_fallback", "computed", "not_requested")) {
-    f <- fit
-    f <- editable_fit(f)
-    f$covariance_status <- status
+    f <- fitrx_edit_fit(fit, function(w) {
+      w$covariance_status <- status
+      w
+    })
     core <- expect_core_omega_rows(f, status)
     shown <- !status %in% c("failed", "sir_fallback")
     # Both sides of the gate, on every row.
@@ -184,7 +185,7 @@ test_that("a reloaded .fitrx prints the same ferx-core rows", {
       scales = scales_fit()
     )
     f <- withr::local_tempfile(fileext = ".fitrx")
-    suppressWarnings(ferx_save_fit(resealed_fit(fit), f))
+    suppressWarnings(ferx_save_fit(fit, f))
     loaded <- suppressWarnings(ferx_load_fit(f))
     expect_identical(omega_rows(loaded),
                      strsplit(fitrx_omega_rows(f), "\n", fixed = TRUE)[[1L]], info = name)

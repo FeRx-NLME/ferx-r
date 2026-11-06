@@ -207,7 +207,7 @@ test_that("a post-hoc step cannot launder an edit", {
   expect_error(ferx_calc_npde(edited), class = "ferx_fit_modified_error")
 })
 
-test_that("a post-hoc step does not make a fit with no seal saveable", {
+test_that("resealing does not make a fit with no seal saveable", {
   raw <- unclass(sealed())
   attr(raw, "ferx_seal") <- NULL
   expect_s3_class(ferx:::.ferx_fit_reseal(raw), "ferx_fit")
@@ -283,6 +283,85 @@ test_that("a user addition survives a round trip, exactly", {
   again <- ferx_load_fit(resaved)
   expect_identical(again$note, "reviewed")
   expect_identical(again$frame, additions$frame)
+})
+
+test_that("a fit with no additions saves its bytes untouched", {
+  skip_on_cran()
+  fit <- warfarin_fit()
+  expect_identical(ferx:::.fitrx_bundle_with_additions(fit$bundle, fit), fit$bundle)
+})
+
+test_that("an addition removed after a load is gone from the next save", {
+  skip_on_cran()
+  fit <- warfarin_fit()
+  fit$note <- "draft"
+  fit$kept <- 1
+  first <- tempfile(fileext = ".fitrx")
+  second <- tempfile(fileext = ".fitrx")
+  third <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(c(first, second, third)))
+  ferx_save_fit(fit, first)
+
+  loaded <- ferx_load_fit(first)
+  loaded$note <- NULL
+  ferx_save_fit(loaded, second)
+  again <- ferx_load_fit(second)
+  expect_false("note" %in% names(again))
+  expect_identical(again$kept, 1)
+
+  # The last addition going leaves none, not an empty record.
+  again$kept <- NULL
+  ferx_save_fit(again, third)
+  expect_length(ferx:::.ferx_fit_user_fields(ferx_load_fit(third)), 0L)
+})
+
+test_that("a step keeps the fit's additions, not the ones its bytes hold", {
+  skip_on_cran()
+  fit <- warfarin_fit()
+  fit$note <- "draft"
+  path <- tempfile(fileext = ".fitrx")
+  on.exit(unlink(path))
+  ferx_save_fit(fit, path)
+
+  loaded <- ferx_load_fit(path)
+  loaded$note <- NULL
+  loaded$other <- 2
+  cov <- suppressWarnings(ferx_covariance(loaded))
+  expect_identical(ferx:::.ferx_fit_user_fields(cov), "other")
+  expect_identical(cov$other, 2)
+  expect_true(ferx:::.ferx_fit_intact(cov))
+})
+
+test_that("additions leave what else is in the bundle's extras alone", {
+  skip_on_cran()
+  fit <- warfarin_fit()
+  extras <- function(bundle) {
+    jsonlite::parse_json(ferx:::ferx_rust_load_fit(bundle)$interface_extras)
+  }
+  before <- extras(fit$bundle)
+  foreign <- ferx:::ferx_rust_bundle_with_extras(fit$bundle, as.character(
+    jsonlite::toJSON(c(before, list(python = list(a = 1))), auto_unbox = TRUE,
+                     digits = I(17), null = "null", na = "null")
+  ))
+  fit$note <- "x"
+  after <- extras(ferx:::.fitrx_bundle_with_additions(foreign, fit))
+  expect_identical(after$python, list(a = 1L))
+  expect_named(after$r$user_additions, "note")
+  after$r$user_additions <- NULL
+  expect_identical(after$r, before$r)
+})
+
+test_that("a step that takes a field away warns about an addition it would shadow", {
+  with_se <- ferx:::.ferx_fit_seal(list(theta = 1, se_theta = 0.1))
+  with_se$se_theta_note <- "checked"
+  with_se$note <- "kept"
+  without_se <- ferx:::.ferx_fit_seal(list(theta = 1))
+  w <- expect_warning(out <- ferx:::.ferx_fit_carry_additions(without_se, with_se),
+                      class = "ferx_fit_addition_dropped_warning")
+  expect_identical(w$fields, "se_theta_note")
+  expect_identical(out$note, "kept")
+  expect_null(out$se_theta)
+  expect_true(ferx:::.ferx_fit_intact(out))
 })
 
 test_that("an unserializable addition warns and is left out", {

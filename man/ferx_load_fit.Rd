@@ -20,7 +20,7 @@ Reads a portable \code{.fitrx} archive written by \code{\link{ferx_save_fit}}
 (or by the ferx-core Rust CLI's \code{--output} flag) with ferx-core's own
 loader, and builds the list with the converter \code{\link{ferx_fit}} uses,
 so a loaded fit has the fields a fresh one has, plus the R-specific fields
-the writer kept in the bundle's \code{interface_extras.json}.
+the fit kept in the bundle's \code{interface_extras.json}.
 \code{fit$individual_estimates} needs the data, so it is \code{NULL} for a
 bundle without \code{data.csv}. Only bundles of format version 2 load: an
 older one fails with a version error, and the model must be refitted.
@@ -50,7 +50,7 @@ the fit, its engine no longer parses the model, or no longer accepts the
 bindings - the bundle still loads: \code{theta_levels} is \code{NULL},
 \code{unavailable_theta_levels} records why (\code{code}, the engine's
 diagnostic code or \code{NA}; \code{message}; and the bundle's
-\code{levels}, which \code{\link{ferx_save_fit}} writes back unchanged),
+\code{levels}, which the fit's bytes keep as they were),
 and one warning of class \code{ferx_levels_unavailable_warning} says so.
 Estimates, \code{fit$estimates}, \code{print()} and the runlog work
 as usual; \code{\link{ferx_predict}}, \code{\link{ferx_simulate}},

@@ -88,6 +88,7 @@ cs_base <- function() {
     fit <- ferx_fit(sym, data, verbose = FALSE)
     twin <- cs_model(sprintf("%.17g", fit$covariate_stats$median))
     twin_fit <- ferx_fit(twin, data, verbose = FALSE)
+    cs_cache <- editable_fit(cs_cache)
     cs_cache$base <- list(data = data, wt = wt, design = design,
                           design_wt = cs_subject_wt(heavy), sym = sym,
                           twin = twin, fit = fit, twin_fit = twin_fit)
@@ -95,14 +96,25 @@ cs_base <- function() {
   cs_cache$base
 }
 
-# A copy of `fit` carrying a hand-made positive-definite covariance matrix in
-# the packed space, so SIR and the covariance step reach the engine without
-# relying on a two-iteration covariance step.
+# A copy of `fit` whose bytes carry a hand-made positive-definite covariance
+# matrix in the packed space, so SIR and the covariance step reach the engine
+# without relying on a two-iteration covariance step.
 cs_with_cov <- function(fit) {
   n <- length(fit$theta) + nrow(fit$omega) + length(fit$sigma)
-  fit <- editable_fit(fit)
-  fit$cov_matrix <- diag(1e-4, n)
-  fit
+  fitrx_edit_fit(fit, function(w) {
+    w$covariance_matrix <- list(rows = n, cols = n,
+                                data = as.list(as.numeric(diag(1e-4, n))))
+    w
+  })
+}
+
+# `fit` with no statistics in its bytes, the shape of a fit saved before ferx
+# recorded them.
+cs_without_stats <- function(fit) {
+  fitrx_edit_fit(fit, function(w) {
+    w$data_bindings$covariate_stats <- NULL
+    w
+  })
 }
 
 cs_msg <- function(expr) {
@@ -195,10 +207,7 @@ test_that("C4: ferx_covariance / ferx_sir run on a symbolic fit like its twin", 
 
 test_that("C5: a symbolic model with a fit lacking statistics gets core's refusal on every path", {
   b <- cs_base()
-  fit <- cs_with_cov(b$fit)
-  # The shape of a fit saved before ferx recorded the statistics.
-  fit <- editable_fit(fit)
-  fit$covariate_stats <- NULL
+  fit <- cs_without_stats(cs_with_cov(b$fit))
   msgs <- c(
     predict = cs_msg(ferx_predict(b$sym, b$design, fit = fit)),
     simulate = cs_msg(ferx_simulate(b$sym, b$design, fit = fit)),
@@ -215,8 +224,8 @@ test_that("C5: a symbolic model with a fit lacking statistics gets core's refusa
     expect_no_match(msgs[[k]], "bind_covariate_stats", fixed = TRUE, info = k)
     expect_no_match(msgs[[k]], "theta level", fixed = TRUE, info = k)
   }
-  # One engine writes it for every path.
-  expect_length(unique(unname(msgs)), 1L)
+  # One engine writes it for every path; the steps open with their own names.
+  expect_length(unique(sub("^ferx_[a-z]+: run_[a-z]+: ", "", unname(msgs))), 1L)
 })
 
 test_that("C6: statistics for a covariate the model does not read are refused", {
@@ -245,9 +254,7 @@ test_that("C6b: from-fit statistics refusals carry E_COVARIATE_STATS_BINDING", {
     expect_identical(e$code, "E_COVARIATE_STATS_BINDING", info = who)
     expect_identical(e$block, "covariate_model", info = who)
   }
-  bare <- cs_with_cov(b$fit)
-  bare <- editable_fit(bare)
-  bare$covariate_stats <- NULL
+  bare <- cs_without_stats(cs_with_cov(b$fit))
   coded(ferx_predict(b$sym, b$design, fit = bare), "predict")
   coded(ferx_simulate(b$sym, b$design, fit = bare), "simulate")
   coded(ferx_calc_npde(bare, nsim = 10L, model = b$sym, data = b$design), "npde")
@@ -313,7 +320,7 @@ test_that("C8d: the engine's own .fitrx loader reads the statistics slot", {
   fit <- ferx_covariance(cs_with_cov(b$fit))
   expect_identical(fit$covariate_stats, b$fit$covariate_stats)
   bundle <- withr::local_tempfile(fileext = ".fitrx")
-  ferx_save_fit(resealed_fit(fit), bundle)
+  ferx_save_fit(fit, bundle)
   model <- withr::local_tempfile(fileext = ".ferx")
   writeLines(
     c(readLines(b$sym), "", "[priors]",
@@ -338,6 +345,7 @@ cs_categorical <- function() {
     rows <- utils::read.csv(ferx_example("two_cpt_oral_cov")$data)
     ids <- sort(unique(rows$ID))
     grp <- stats::setNames(rep(c(1, 2, 2, 3), length.out = length(ids)), ids)
+    rows <- editable_fit(rows)
     rows$GRP <- grp[as.character(rows$ID)]
     data <- tempfile(fileext = ".csv")
     utils::write.csv(rows, data, row.names = FALSE, quote = FALSE, na = ".")
@@ -353,6 +361,7 @@ cs_categorical <- function() {
     twin <- model("[1, 2, 3]", "2")
     fit <- ferx_fit(sym, data, verbose = FALSE)
     twin_fit <- ferx_fit(twin, data, verbose = FALSE)
+    cs_cache <- editable_fit(cs_cache)
     cs_cache$cat <- list(data = data, design = design, sym = sym, twin = twin,
                          fit = fit, twin_fit = twin_fit)
   }
@@ -397,9 +406,11 @@ test_that("C9: levels = auto / ref = mode fit and bind from the fit like their t
 cs_shifted <- function() {
   if (is.null(cs_cache$shifted)) {
     rows <- utils::read.csv(cs_base()$data)
+    rows <- editable_fit(rows)
     rows$WT <- rows$WT + 15
     path <- tempfile(fileext = ".csv")
     utils::write.csv(rows, path, row.names = FALSE, quote = FALSE, na = ".")
+    cs_cache <- editable_fit(cs_cache)
     cs_cache$shifted <- list(data = path, wt = cs_subject_wt(rows))
   }
   cs_cache$shifted
@@ -499,6 +510,7 @@ cs_tte <- function() {
     rank <- seq_along(ids)
     wt <- 100 - 2 * rank + 12 * ((rank * 7) %% 5 - 2) + 40 * (rank <= 3)
     wt <- stats::setNames(wt, ids)
+    rows <- editable_fit(rows)
     rows$WT <- wt[as.character(rows$ID)]
     data <- tempfile(fileext = ".csv")
     utils::write.csv(rows, data, row.names = FALSE, quote = FALSE, na = ".")
@@ -510,6 +522,7 @@ cs_tte <- function() {
     fit <- ferx_fit(sym, data, verbose = FALSE)
     twin <- cs_tte_model(sprintf("%.17g", fit$covariate_stats$median))
     twin_fit <- ferx_fit(twin, data, verbose = FALSE)
+    cs_cache <- editable_fit(cs_cache)
     cs_cache$tte <- list(wt = wt, design = design,
                          design_wt = unname(wt[heavy]), sym = sym, twin = twin,
                          fit = fit, twin_fit = twin_fit)
@@ -613,9 +626,11 @@ cs_combo_files <- function() {
     design <- tempfile(fileext = ".csv")
     utils::write.csv(rows[rows$ID %in% c(1, 3), ], design, row.names = FALSE,
                      quote = FALSE, na = ".")
+    rows <- editable_fit(rows)
     rows$WT <- rows$WT + 15
     shifted <- tempfile(fileext = ".csv")
     utils::write.csv(rows, shifted, row.names = FALSE, quote = FALSE, na = ".")
+    cs_cache <- editable_fit(cs_cache)
     cs_cache$combo_files <- list(data = data, design = design,
                                  shifted = shifted,
                                  sym = cs_combo_model("median"),
@@ -630,6 +645,7 @@ cs_combo <- function() {
     b <- cs_combo_files()
     fit <- ferx_fit(b$sym, b$data, verbose = FALSE)
     twin_fit <- ferx_fit(b$twin, b$data, verbose = FALSE)
+    cs_cache <- editable_fit(cs_cache)
     cs_cache$combo <- c(b, list(fit = fit, twin_fit = twin_fit))
   }
   cs_cache$combo
@@ -712,6 +728,7 @@ test_that("C12c: every from-fit path on the combined model matches its twin", {
 cs_recoded <- function(to, env = parent.frame()) {
   rows <- utils::read.csv(cs_categorical()$data)
   first3 <- rows$ID[rows$GRP == 3][1L]
+  rows <- editable_fit(rows)
   rows$GRP[rows$ID == first3] <- to
   path <- withr::local_tempfile(fileext = ".csv", .local_envir = env)
   utils::write.csv(rows, path, row.names = FALSE, quote = FALSE, na = ".")
@@ -719,16 +736,18 @@ cs_recoded <- function(to, env = parent.frame()) {
 }
 
 # The four from-fit paths on design `data`, each a value or the condition it
-# raised. SIR and the covariance step re-read `fit$data_path`; a fit without a
-# data hash is how they reach other data. Only the missing-hash warning that
-# this causes is muffled; any other warning still reaches the test.
+# raised. SIR and the covariance step re-read `fit$data_path`; a fit whose bytes
+# record no data hash is how they reach other data. Only the missing-hash warning
+# that this causes is muffled; any other warning still reaches the test.
 cs_from_fit_paths <- function(data, drop_fingerprint = FALSE) {
   b <- cs_categorical()
-  fit <- cs_with_cov(b$fit)
+  fit <- fitrx_edit_fit(cs_with_cov(b$fit), function(w) {
+    w$data_hash <- NULL
+    if (drop_fingerprint) w$population_fingerprint <- NULL
+    w
+  })
   fit <- editable_fit(fit)
   fit$data_path <- data
-  fit$data_hash <- NA_character_
-  if (drop_fingerprint) fit$population_fingerprint <- NULL
   grab <- function(expr) {
     tryCatch(
       withCallingHandlers(expr, warning = function(w) {
@@ -895,6 +914,7 @@ cs_tte_categorical <- function() {
     rows <- utils::read.csv(ferx_example("tte_exponential")$data)
     ids <- sort(unique(rows$ID))
     grp <- stats::setNames(rep(c(1, 2, 2, 3), length.out = length(ids)), ids)
+    rows <- editable_fit(rows)
     rows$GRP <- grp[as.character(rows$ID)]
     data <- tempfile(fileext = ".csv")
     utils::write.csv(rows, data, row.names = FALSE, quote = FALSE, na = ".")
@@ -902,6 +922,7 @@ cs_tte_categorical <- function() {
       cs_tte_model(covariates = sprintf("GRP categorical(levels = %s)", levels),
                    relation = sprintf("LAMBDA ~ GRP categorical(ref = %s)", ref))
     }
+    cs_cache <- editable_fit(cs_cache)
     cs_cache$tte_cat_data <- data
     cs_cache$tte_cat_sym <- model("auto", "mode")
     cs_cache$tte_cat_twin <- model("[1, 2, 3]", "2")
@@ -914,6 +935,7 @@ cs_tte_categorical <- function() {
 cs_tte_recoded <- function(to, env = parent.frame()) {
   rows <- utils::read.csv(cs_tte_categorical()$data)
   first3 <- rows$ID[rows$GRP == 3][1L]
+  rows <- editable_fit(rows)
   rows$GRP[rows$ID == first3] <- to
   path <- withr::local_tempfile(fileext = ".csv", .local_envir = env)
   utils::write.csv(rows, path, row.names = FALSE, quote = FALSE, na = ".")
@@ -1029,12 +1051,16 @@ test_that("C15: a symbolic-centre relation's theta is not reported unused", {
 # and an engine bundle read in R took the statistics and dropped the levels,
 # so every from-fit path refused it. Both halves go through the engine's own
 # reader and writer here.
-test_that("C16: a level + symbolic fit round-trips R -> engine -> R with both halves", {
+test_that("C16: a level + symbolic fit round-trips through the engine's bytes with both halves", {
   b <- cs_combo()
-  trip <- fitrx_engine_trip(b$fit)
-  expect_identical(trip$read, b$fit$theta_levels[fitrx_layout_cols])
-  loaded <- ferx_load_fit(trip$core_path)
-  expect_null(fitrx_fit_json(trip$core_path)$r_extras)
+  # What the engine's own loader reads from the fit's bytes, before R lays it
+  # out on the model.
+  read <- ferx:::ferx_rust_load_fit(b$fit$bundle)
+  expect_identical(read$levels[fitrx_layout_cols], b$fit$theta_levels[fitrx_layout_cols])
+  path <- withr::local_tempfile(fileext = ".fitrx")
+  ferx_save_fit(b$fit, path, include_data = TRUE)
+  loaded <- ferx_load_fit(path)
+  expect_null(fitrx_fit_json(path)$r_extras)
   expect_identical(loaded$theta_levels, b$fit$theta_levels)
   expect_identical(loaded$covariate_stats, b$fit$covariate_stats)
   expect_identical(

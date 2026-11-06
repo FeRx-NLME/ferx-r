@@ -5,42 +5,15 @@
 \title{Internal Rust backend binding}
 \usage{
 ferx_rust_covariance(
+  bundle,
   model_path,
   data_path,
-  model_hash,
-  data_hash,
-  ofv,
-  ofv_prior,
-  interaction,
-  theta,
-  omega_flat,
-  omega_dim,
-  sigma,
-  omega_iov_flat,
-  omega_iov_dim,
-  residual_rho,
-  residual_rho_pairs,
-  eta_hats_flat,
-  subject_ids,
-  iov_occasion,
-  reader_settings,
-  population_fingerprint,
   scoring_settings,
-  sir_settings,
-  packed_estimate,
-  mixture_overrides,
-  bloq_method,
-  method,
-  method_chain,
-  ebe_kappas_flat,
-  ebe_kappa_ids,
-  theta_fixed,
   covariance_method,
   step_settings_keys,
   step_settings_values,
   threads,
-  verbose,
-  fit_bindings
+  verbose
 )
 }
 \description{

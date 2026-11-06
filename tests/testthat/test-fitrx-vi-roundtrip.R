@@ -109,42 +109,26 @@ test_that("a VI fit round-trips fit$vi, method \"VI\" and its NaN OFV (#508)", {
   expect_identical(again$vi, fit$vi)
 })
 
-test_that("ferx-core loads an R VI bundle and R loads core's (#508)", {
-  fit <- vi_fit()
-  trip <- fitrx_engine_trip(fit)
-  # The engine's writer puts back the `vi` section it read, byte for byte as
-  # data: R writes the engine's layout.
-  r_vi <- fitrx_fit_json(trip$r_path)$vi
-  core_vi <- fitrx_fit_json(trip$core_path)$vi
-  expect_false(is.null(core_vi))
-  expect_identical(core_vi, r_vi)
-  # And R reads the engine's bundle back to the same fit$vi.
-  expect_identical(ferx_load_fit(trip$core_path)$vi, fit$vi)
-})
-
 test_that("a distinct objective trace and a superseding stage round-trip (#508)", {
   # A live warfarin fit takes the sentinel branches only (objective trace ==
-  # bound, nothing superseded); set both the other way, as a regularized
-  # `[covariate_nn]` fit and a `methods = [vi, focei]` chain would, so a
-  # writer that always omitted either field fails here.
-  fit <- vi_fit()
-  fit <- editable_fit(fit)
-  fit$vi$objective_trace <- fit$vi$elbo_trace + 1.5
-  fit$vi$superseded_by <- "FOCEI"
+  # bound, nothing superseded); set both the other way in the bytes, as a
+  # regularized `[covariate_nn]` fit and a `methods = [vi, focei]` chain would.
+  base <- vi_fit()
+  trace <- base$vi$elbo_trace + 1.5
+  fit <- fitrx_edit_fit(base, function(w) {
+    w$vi$objective_trace <- as.list(trace)
+    w$vi$superseded_by <- "FOCEI"
+    w
+  })
+  expect_identical(fit$vi$objective_trace, trace)
+  expect_identical(fit$vi$superseded_by, "FOCEI")
 
   path <- tempfile(fileext = ".fitrx")
-  ferx_save_fit(resealed_fit(fit), path)
+  ferx_save_fit(fit, path)
   wire <- fitrx_fit_json(path)$vi
-  expect_equal(unlist(wire$objective_trace), fit$vi$objective_trace,
-               tolerance = 0)
+  expect_equal(unlist(wire$objective_trace), trace, tolerance = 0)
   expect_identical(wire$superseded_by, "FOCEI")
   expect_identical(ferx_load_fit(path)$vi, fit$vi)
-
-  # The engine reads both and writes them back.
-  trip <- fitrx_engine_trip(fit)
-  expect_identical(fitrx_fit_json(trip$core_path)$vi,
-                   fitrx_fit_json(trip$r_path)$vi)
-  expect_identical(ferx_load_fit(trip$core_path)$vi, fit$vi)
 })
 
 test_that("an IOV VI fit round-trips its per-occasion kappa means (#508)", {
@@ -157,8 +141,6 @@ test_that("an IOV VI fit round-trips its per-occasion kappa means (#508)", {
   path <- tempfile(fileext = ".fitrx")
   ferx_save_fit(fit, path)
   expect_identical(ferx_load_fit(path)$vi, fit$vi)
-  trip <- fitrx_engine_trip(fit)
-  expect_identical(ferx_load_fit(trip$core_path)$vi, fit$vi)
 })
 
 test_that("a VI posterior filed under the wrong subject is refused (#508)", {

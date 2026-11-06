@@ -141,13 +141,15 @@ Before treating example work as done:
 
 `ferx_fit()` returns an S3 "ferx_fit" list: converged, method, ofv/aic/bic, theta (named), omega (matrix), sigma, standard errors, sdtab (diagnostic data frame with PRED/IPRED/CWRES/IWRES/ETAs), and warnings.
 
+**A fit's bytes are the fit** (ferx-core #2693). `fit$bundle` is core's `.fitrx` serialization, and the list is a view of it: `ferx_save_fit()` writes those bytes, and every step that produces a changed fit (`ferx_covariance()`, `ferx_sir()`, `ferx_calc_npde()`, `ferx_collect()`) reads them, makes new ones in the glue, and rebuilds the list with `.ferx_fit_with_bundle()`. Such a step starts from `.ferx_fit_canonical()`, the fit as its bytes say it is, and reads nothing from the caller's list. Never graft fields onto a fit: what is not in the bytes is lost on save, and a list edit does not reach the engine. In tests, put a fit in another state with `fitrx_edit_fit()`, which edits the bytes. R-only fields go in `interface_extras.json` (`.fitrx_interface_extras()`), and the glue swaps in the wide `predictions.csv` and `sdtab_endpoint_rows.csv`, since core's table has fixed columns. `fit$model_path` and `fit$data_path` stay list fields: they say where the files are now. A subject ID's line break is escaped by the glue, since core reads its CSV entries by line: `subject_id_line_breaks.json` names the two private-use characters a bundle uses, so anything else in an ID is the ID's own.
+
 `ferx_simulate()` returns a data frame: SIM, ID, TIME, IPRED, DV_SIM.
 
 `ferx_predict()` returns a data frame: ID, TIME, PRED.
 
-A `ferx_fit` is read-only (#713), and `R/internal-fit-guard.R` says how. `$<-`, `[[<-` and `[<-` refuse a core field; `ferx_save_fit()` compares the core fields with the digest in the `ferx_seal` attribute, taken when the fit was built. Names added by the user live beside the core fields, outside the digest, and travel in `interface_extras.json` under `r.user_additions`.
+A `ferx_fit` is read-only (#713), and `R/internal-fit-guard.R` says how. `$<-`, `[[<-` and `[<-` refuse a core field; `ferx_save_fit()` compares the core fields with the digest in the `ferx_seal` attribute, taken when the fit was built. Names added by the user live beside the core fields, outside the digest. `ferx_save_fit()` splices them into the bytes it writes, in `interface_extras.json` under `r.user_additions`; `fit$bundle` itself does not change.
 
-- Code that refreshes a fit works on the plain list: `fit <- .ferx_fit_unseal(fit)`, assign, `.ferx_fit_reseal(fit)`. Check the input first with `.ferx_fit_check_unmodified()`, or the step seals in an edit.
+- A step returns a new fit from new bytes (`.ferx_fit_with_bundle()`), which seals it and carries the input's additions over; check the input first with `.ferx_fit_check_unmodified()`, or forged bytes come out as a fit. Code that must edit a finished fit, as `ferx_collect()` does, works on the plain list: `fit <- .ferx_fit_unseal(fit)`, assign, `.ferx_fit_reseal(fit)`.
 - A new field that a build can leave out goes in `.FERX_FIT_OPTIONAL_FIELDS`, and a wire name the builder drops but the package still reads goes in `.FERX_FIT_WIRE_NAMES`. Otherwise the name passes as a user addition: writable, outside the digest, and read as if the engine had set it.
 - A test that needs an impossible fit uses `editable_fit()`, and `resealed_fit()` to save one (`tests/testthat/helper-editable-fit.R`). Both live in the tests: production code has no way past the guards but the unseal above.
 

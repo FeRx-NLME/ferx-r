@@ -5,12 +5,11 @@
 # note. `scheme` is a plain field of the fingerprint's JSON, so an edit of it
 # stays a valid fingerprint. Scheme 1 is long retired, never the current one.
 foreign_scheme_fit <- function(fit) {
-  fp <- fit$population_fingerprint
-  edited <- sub('"scheme":[0-9]+', '"scheme":1', fp)
-  stopifnot(is.character(fp), !identical(edited, fp))
-  fit <- editable_fit(fit)
-  fit$population_fingerprint <- edited
-  fit
+  fitrx_edit_fit(fit, function(w) {
+    stopifnot(!identical(w$population_fingerprint$scheme, 1L))
+    w$population_fingerprint$scheme <- 1L
+    w
+  })
 }
 
 # The note verify returns for it, word for word.

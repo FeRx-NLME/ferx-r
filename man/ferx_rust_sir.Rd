@@ -4,43 +4,7 @@
 \alias{ferx_rust_sir}
 \title{Internal Rust backend binding}
 \usage{
-ferx_rust_sir(
-  model_path,
-  data_path,
-  model_hash,
-  data_hash,
-  ofv,
-  ofv_prior,
-  interaction,
-  theta,
-  omega_flat,
-  omega_dim,
-  sigma,
-  omega_iov_flat,
-  omega_iov_dim,
-  residual_rho,
-  residual_rho_pairs,
-  cov_matrix_flat,
-  cov_matrix_dim,
-  eta_hats_flat,
-  subject_ids,
-  iov_occasion,
-  reader_settings,
-  population_fingerprint,
-  scoring_settings,
-  sir_settings,
-  packed_estimate,
-  mixture_overrides,
-  bloq_method,
-  method,
-  method_chain,
-  ebe_kappas_flat,
-  ebe_kappa_ids,
-  theta_fixed,
-  threads,
-  verbose,
-  fit_bindings
-)
+ferx_rust_sir(bundle, model_path, data_path, sir_settings, threads, verbose)
 }
 \description{
 Internal Rust backend binding

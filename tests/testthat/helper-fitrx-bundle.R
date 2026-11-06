@@ -1,24 +1,38 @@
-# .fitrx bundles through the engine's own reader and writer (#466), for the
-# tests of the native `data_bindings` slot (test-theta-levels.R T17,
-# test-covariate-stats.R C16). The oracle is ferx-core's `load_fit` /
-# `save_fit` (`ferx_rust_fitrx_engine_resave()`), never ferx_load_fit()
-# reading back what ferx_save_fit() wrote: R's two halves agreeing with each
-# other is what let #379 survive.
+# .fitrx bundles in the tests. A fit's bytes (`fit$bundle`) are the fit (#712): the
+# post-hoc steps and ferx_save_fit() read them and not the list, so a test that
+# needs a fit in another state edits the bytes, with `fitrx_edit_fit()`. An edit to
+# the list reaches neither.
 
-# Save `fit` from R (data bundled, which the engine's writer needs), read it
-# with the engine's loader and write it back with the engine's writer. Returns
-# the R bundle, the engine-written one, and the level layout the engine read
-# (`block`, `label`, `group`, `contrast`; blocks in sorted order).
-fitrx_engine_trip <- function(fit) {
-  r_path <- tempfile(fileext = ".fitrx")
-  ferx_save_fit(resealed_fit(fit), r_path, include_data = TRUE)
-  core_path <- tempfile(fileext = ".fitrx")
-  read <- ferx:::ferx_rust_fitrx_engine_resave(r_path, core_path)
-  list(r_path = r_path, core_path = core_path, read = read)
+# `fit` with its bytes edited: `edit` takes and returns `fit.json` as lists, and the
+# archive entries `drop` go. The list is rebuilt from the new bytes, the way a step
+# that returns a new fit builds it, so the paths stay the fit's.
+fitrx_edit_fit <- function(fit, edit = identity, drop = character()) {
+  path <- tempfile(fileext = ".fitrx")
+  writeBin(fit$bundle, path)
+  out <- fitrx_edit_bundle(path, edit, drop)
+  ferx:::.ferx_fit_with_bundle(fit, readBin(out, "raw", n = file.size(out)))
 }
 
-# A bundle's fit.json, as lists.
+# `fit` with its bytes' `interface_extras.json` edited: `edit` takes and returns this
+# interface's fields (`call_settings`, `model_file_settings`, ...) as lists.
+fitrx_edit_extras <- function(fit, edit) {
+  text <- ferx:::ferx_rust_load_fit(fit$bundle)$interface_extras
+  extras <- jsonlite::parse_json(text, simplifyVector = FALSE)
+  extras$r <- edit(extras$r)
+  json <- jsonlite::toJSON(extras, auto_unbox = TRUE, digits = I(17), null = "null",
+                           na = "null")
+  ferx:::.ferx_fit_with_bundle(
+    fit, ferx:::ferx_rust_bundle_with_extras(fit$bundle, as.character(json))
+  )
+}
+
+# A bundle's fit.json, as lists, from its path or its bytes.
 fitrx_fit_json <- function(path) {
+  if (is.raw(path)) {
+    bytes <- path
+    path <- tempfile(fileext = ".fitrx")
+    writeBin(bytes, path)
+  }
   staging <- tempfile("fitrx_json_")
   dir.create(staging)
   utils::unzip(path, exdir = staging, junkpaths = TRUE)

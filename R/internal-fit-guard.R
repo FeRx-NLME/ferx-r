@@ -12,8 +12,9 @@
 # built by hand, or read from an `.rds` older than this) has no list of what was
 # fitted, so every name it holds counts as core, and `ferx_save_fit()` refuses it.
 #
-# Code in this package that builds or refreshes a fit works on the plain list:
-# `.ferx_fit_unseal()`, then assign, then `.ferx_fit_seal()`.
+# Code in this package that builds a fit works on the plain list and seals it
+# last. A step returns a new fit from new bytes (`.ferx_fit_with_bundle()`); what
+# has to edit a finished one uses `.ferx_fit_unseal()` and `.ferx_fit_reseal()`.
 
 # The fields a fit can lack. A fit records the names it has when it is built,
 # which covers everything else; these are the ones a build can leave out (no
@@ -144,8 +145,8 @@
 }
 
 # For a step that builds on a fit: an edited one is refused, since the step
-# would otherwise seal the edit in. A fit with no record has nothing to compare,
-# and stays unsaveable (`.ferx_fit_reseal()`).
+# reads `fit$bundle` and seals what it makes from it, which is how forged bytes
+# would come out as a fit. A fit with no record has nothing to compare.
 .ferx_fit_check_unmodified <- function(fit, who) {
   if (!is.null(.ferx_fit_seal_of(fit)) && !.ferx_fit_intact(fit)) {
     .ferx_fit_modified_stop(who)
@@ -285,6 +286,44 @@
   lapply(stats::setNames(fields[ok], fields[ok]), function(f) {
     as.character(jsonlite::serializeJSON(fit[[f]], digits = I(17)))
   })
+}
+
+# `bundle` with the additions `fit` holds now, spliced into its
+# `interface_extras.json` under `r.user_additions`, so what else is there, another
+# interface's key included, stays. Left as it is when they already agree, which
+# is every fit with no additions and no addition in its bytes.
+.fitrx_bundle_with_additions <- function(bundle, fit) {
+  additions <- .fitrx_user_additions_wire(fit)
+  text <- ferx_rust_load_fit(bundle)$interface_extras
+  extras <- if (is.null(text)) list() else jsonlite::parse_json(text)
+  if (identical(extras$r$user_additions %||% list(),
+                if (length(additions) > 0L) additions else list())) {
+    return(bundle)
+  }
+  extras$r$user_additions <- if (length(additions) > 0L) additions
+  ferx_rust_bundle_with_extras(bundle, as.character(jsonlite::toJSON(
+    extras, auto_unbox = TRUE, digits = I(17), null = "null", na = "null"
+  )))
+}
+
+# The sealed `fit` with `from`'s additions. A step can take away the field an
+# addition's name would then shadow, which costs that addition, with a warning.
+.ferx_fit_carry_additions <- function(fit, from) {
+  dropped <- character()
+  for (name in .ferx_fit_user_fields(from)) {
+    if (is.null(.ferx_fit_addition_refusal(fit, name))) {
+      fit[name] <- unclass(from)[name]
+    } else {
+      dropped <- c(dropped, name)
+    }
+  }
+  if (length(dropped) > 0L) {
+    .ferx_fit_addition_warning(paste0(
+      paste0("fit$", dropped, collapse = ", "), " left out of the new fit: `$` ",
+      "would read ", if (length(dropped) == 1L) "it" else "them",
+      " in place of a field this fit lacks."), dropped)
+  }
+  fit
 }
 
 # Is this parsed `serializeJSON()` tree data? Read before it is unpacked, which

@@ -6,9 +6,8 @@
 # first row of each run. Two adjacent subjects with the same number are one
 # run, a subject without observations has no rows, and a discrete (binary)
 # row has a blank N_OBS. They now come from `fit$subject_summary`, the
-# engine's per-subject result. The oracles are the data the fit read (row
-# counts per subject) and ferx-core's own loader (`fitrx_engine_trip()`),
-# never R's loader agreeing with R's writer.
+# engine's per-subject result. The oracle is the data the fit read (row counts
+# per subject), and ferx-core's loader, which reads every bundle here.
 
 # `ferx_fit()` without a covariance step, muffling only the notes that a
 # call-time argument overrides the model file's [fit_options].
@@ -26,24 +25,12 @@ quiet_fit <- function(model, data, maxiter = NULL) {
   )
 }
 
-# ferx-core's .fitrx writer prints doubles with six decimals; R's is exact.
-core_tol <- 1e-6
-
 # A table with its all-empty columns as doubles. A column with no value in a
 # bundle reads back as logical NA where the live one holds NaN, as it always
 # has; the rows are what is under test here.
 as_doubles <- function(df) {
   df[] <- lapply(df, function(v) if (is.logical(v)) as.numeric(v) else v)
   df
-}
-
-# A fit reloaded from the bundle ferx-core wrote after reading R's carries
-# the same per-subject values: IDs and counts exactly, ofv to six decimals.
-expect_core_summary <- function(from_core, fit) {
-  expect_identical(from_core$subject_summary[c("ID", "n_obs")],
-                   fit$subject_summary[c("ID", "n_obs")])
-  expect_equal(from_core$subject_summary$ofv_contribution,
-               fit$subject_summary$ofv_contribution, tolerance = core_tol)
 }
 
 # Fit `example` on its data after `edit` (a function of the data frame), and
@@ -194,12 +181,7 @@ test_that("a bundle with repeated and gapped IDs reloads every row on its subjec
     expect_identical(loaded$sdtab$ID, fit$sdtab$ID)
     expect_identical(loaded$subject_summary, fit$subject_summary)
     expect_equal(loaded$sdtab, fit$sdtab)
-
-    trip <- fitrx_engine_trip(fit)
-    from_core <- ferx_load_fit(trip$core_path)
-    expect_identical(from_core$sdtab$ID, fit$sdtab$ID)
-    expect_identical(from_core$ebe_etas$ID, fit$ebe_etas$ID)
-    expect_core_summary(from_core, fit)
+    expect_identical(loaded$ebe_etas$ID, fit$ebe_etas$ID)
   }
 })
 
@@ -228,6 +210,9 @@ test_that("a binary fit's bundle loads in ferx-core, discrete rows apart (#554)"
   ebes <- bundle_csv(path, "ebes.csv")
   expect_identical(ebes$n_obs, rep("0", nrow(summ)))
   expect_identical(ebes$n_obs_discrete, rep("3", nrow(summ)))
+  expect_identical(ebes$ID, summ$ID)
+  expect_identical(ferx:::.fitrx_parse_doubles(ebes$ofv_contribution),
+                   summ$ofv_contribution)
   expect_identical(nrow(bundle_csv(path, "predictions.csv")), 0L)
   disc <- bundle_csv(path, "predictions_discrete.csv")
   expect_identical(disc$ID, rep(summ$ID, each = 3L))
@@ -239,15 +224,6 @@ test_that("a binary fit's bundle loads in ferx-core, discrete rows apart (#554)"
   # n_obs_discrete is a per-subject column, not an eta: still no etas.
   expect_null(fit$ebe_etas)
   expect_null(loaded$ebe_etas)
-
-  # The engine reads the R bundle: ebes.csv's n_obs is a count, and
-  # predictions.csv has no row past it.
-  trip <- fitrx_engine_trip(fit)
-  core_ebes <- bundle_csv(trip$core_path, "ebes.csv")
-  expect_identical(core_ebes$ID, summ$ID)
-  expect_identical(core_ebes$n_obs, ebes$n_obs)
-  expect_equal(as.numeric(core_ebes$ofv_contribution), summ$ofv_contribution,
-               tolerance = core_tol)
 })
 
 test_that("a fit with continuous and binary rows keeps both on their subjects (#561)", {
@@ -275,12 +251,6 @@ test_that("a fit with continuous and binary rows keeps both on their subjects (#
   # subject_summary, not counted as etas.
   expect_identical(names(loaded$ebe_etas), names(fit$ebe_etas))
 
-  # ferx-core reads the rows on their subjects, and writes the binary ones too.
-  trip <- fitrx_engine_trip(fit)
-  from_core <- ferx_load_fit(trip$core_path)
-  expect_identical(from_core$sdtab$ID, fit$sdtab$ID)
-  expect_core_summary(from_core, fit)
-
   live <- ferx_covariance(fit)
   skip_if(is.null(live$cov_matrix), "covariance step did not converge - skipping")
   expect_identical(ferx_covariance(loaded)$se_theta, live$se_theta)
@@ -288,50 +258,38 @@ test_that("a fit with continuous and binary rows keeps both on their subjects (#
 
 test_that("ebes.csv puts ofv_contribution and n_obs before a mixture's columns (#561)", {
   # ferx-core reads the two by position right after the etas, and MIXEST /
-  # PMIX_* by name; a reloaded ferx-core mixture bundle carries those in
-  # fit$ebe_etas.
-  fit <- list(
-    ebe_etas = data.frame(ID = c("1", "2"), ETA_CL = c(0.1, -0.1),
-                          MIXEST = c(1L, 2L), PMIX_1 = c(0.9, 0.2),
-                          PMIX_2 = c(0.1, 0.8), stringsAsFactors = FALSE),
-    subject_summary = data.frame(ID = c("1", "2"), ofv_contribution = c(3.5, 4.5),
-                                 n_obs = c(4L, 5L), n_obs_discrete = c(0L, 0L),
-                                 stringsAsFactors = FALSE)
-  )
-  path <- withr::local_tempfile(fileext = ".csv")
-  ferx:::.fitrx_write_ebes_csv(fit, path)
-  expect_identical(readLines(path)[1:2],
-                   c("ID,ETA_CL,ofv_contribution,n_obs,MIXEST,PMIX_1,PMIX_2",
-                     "1,0.1,3.5,4,1,0.9,0.1"))
+  # PMIX_* by name; a reloaded mixture bundle carries those in fit$ebe_etas.
+  fit <- mixture_override_fit()
+  path <- withr::local_tempfile(fileext = ".fitrx")
+  suppressWarnings(ferx_save_fit(fit, path))
+  cols <- names(bundle_csv(path, "ebes.csv"))
+  etas <- fit$eta_names
+  expect_identical(cols[seq_len(length(etas) + 3L)],
+                   c("ID", etas, "ofv_contribution", "n_obs"))
+  expect_true("MIXEST" %in% cols)
+  expect_gt(match("MIXEST", cols), match("n_obs", cols))
 })
 
-test_that("a TTE fit's bundle loads in ferx-core (#554)", {
+test_that("a TTE fit's bundle keeps its time-to-event rows (#554)", {
   ex <- ferx_example("tte_exponential")
   fit <- quiet_fit(ex$model, ex$data)
-  trip <- fitrx_engine_trip(fit)
-  from_core <- ferx_load_fit(trip$core_path)
-  expect_core_summary(from_core, fit)
-  # Core's own writer keeps no time-to-event rows (ferx-core #911), which come
-  # last in the live sdtab; an R bundle does.
-  kept <- fit$sdtab$ID[seq_len(nrow(fit$sdtab) - sum(fit$subject_summary$n_obs_tte))]
-  expect_identical(from_core$sdtab$ID, kept)
-  loaded <- ferx_load_fit(trip$r_path)
+  path <- withr::local_tempfile(fileext = ".fitrx")
+  ferx_save_fit(fit, path)
+  loaded <- ferx_load_fit(path)
+  expect_identical(loaded$subject_summary, fit$subject_summary)
   expect_identical(loaded$sdtab, fit$sdtab)
 })
 
-test_that("a no-eta fit's ebes.csv is the engine's, up to its six decimals (#554)", {
-  # Byte for byte only where ferx-core's writer is exact: it prints ofv to six
-  # decimals, R to the last bit. Header, IDs and n_obs are the same text.
+test_that("a no-eta fit's ebes.csv has the engine's columns (#554)", {
   ex <- ferx_example("one_cpt_iv_pooled")
   fit <- quiet_fit(ex$model, ex$data)
   expect_null(fit$ebe_etas)
-  trip <- fitrx_engine_trip(fit)
-  r_ebes <- bundle_csv(trip$r_path, "ebes.csv")
-  core_ebes <- bundle_csv(trip$core_path, "ebes.csv")
-  expect_identical(names(r_ebes), c("ID", "ofv_contribution", "n_obs"))
-  expect_identical(names(r_ebes), names(core_ebes))
-  expect_identical(r_ebes[c("ID", "n_obs")], core_ebes[c("ID", "n_obs")])
-  expect_identical(r_ebes$ID, fit$subject_ids)
-  expect_equal(as.numeric(core_ebes$ofv_contribution),
-               as.numeric(r_ebes$ofv_contribution), tolerance = core_tol)
+  path <- withr::local_tempfile(fileext = ".fitrx")
+  ferx_save_fit(fit, path)
+  ebes <- bundle_csv(path, "ebes.csv")
+  expect_identical(names(ebes), c("ID", "ofv_contribution", "n_obs"))
+  expect_identical(ebes$ID, fit$subject_ids)
+  expect_identical(as.integer(ebes$n_obs), fit$subject_summary$n_obs)
+  expect_identical(ferx:::.fitrx_parse_doubles(ebes$ofv_contribution),
+                   fit$subject_summary$ofv_contribution)
 })

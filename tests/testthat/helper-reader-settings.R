@@ -40,10 +40,11 @@ rs_rel <- function(a, b) max(abs(unname(a) - unname(b)) / abs(unname(b)))
 
 # A fit as one made before #462 recorded its selection: neither field.
 rs_legacy <- function(fit) {
-  fit <- editable_fit(fit)
-  fit$reader_settings <- NULL
-  fit$population_fingerprint <- NULL
-  fit
+  fitrx_edit_fit(fit, function(w) {
+    w$reader_settings <- NULL
+    w$population_fingerprint <- NULL
+    w
+  })
 }
 
 # The three post-hoc steps on `fit`, each returning its value or the condition

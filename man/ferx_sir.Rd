@@ -66,7 +66,11 @@ the result, only the resources the step uses. The returned fit's
 \code{n_threads_used} reports the width this step ran on.}
 }
 \value{
-The input \code{fit}, augmented with \code{sir_ess}, \code{sir_ci_theta},
+A new fit with new bytes, the input \code{fit} being left as it was: the
+step runs on \code{fit$bundle}, so a change made to the fit's list by hand does
+not reach it, and a fit with no bundle, such as one from an \code{.rds} written
+by an older ferx, is refused with an error of class
+\code{ferx_no_bundle_error}: refit it. The new fit has \code{sir_ess}, \code{sir_ci_theta},
 \code{sir_ci_omega}, \code{sir_ci_sigma}, \code{sir_ci_kappa} (one row per IOV kappa
 variance, named by \code{kappa_names}; NULL without IOV), \code{sir_seed_used}
 (the seed this run resampled with: \code{sir_seed}, or 12345 when it is

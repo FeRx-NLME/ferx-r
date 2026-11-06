@@ -98,10 +98,12 @@ test_that("ferx_save_fit(include_data = TRUE) refuses a data file edited since t
   expect_false("data.csv" %in% utils::unzip(refused, list = TRUE)$Name)
 
   # A fit with no recorded hash (an older ferx) bundles the file as it is.
-  nohash <- fit
-  nohash <- editable_fit(nohash)
-  nohash$data_hash <- NA_character_
-  ferx_save_fit(resealed_fit(nohash), path, include_data = TRUE)
+  nohash <- fitrx_edit_fit(fit, function(w) {
+    w$data_hash <- NULL
+    w
+  })
+  expect_null(fitrx_fit_json(nohash$bundle)$data_hash)
+  ferx_save_fit(nohash, path, include_data = TRUE)
   expect_identical(fitrx_entry_bytes(path, "data.csv"), dh_bytes(data))
 })
 

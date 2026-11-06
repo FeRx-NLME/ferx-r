@@ -1,11 +1,9 @@
 # SIR draws kept with `sir_keep_samples = TRUE` survive a .fitrx round trip
 # (#549), and the sir_ci_* intervals keep their row names (#482).
 #
-# Before #549 `.fitrx_build_sir_wire()` wrote `resamples_packed = NULL`, so a
-# reloaded fit could not drive `ferx_simulate_with_uncertainty(method =
-# "sir")`, and the loader rebuilt sir_ci_theta / _omega / _sigma without
-# dimnames. The oracle for the wire shape is ferx-core's own reader and writer
-# (`fitrx_engine_trip()`), not R's loader agreeing with R's writer.
+# Before #549 a bundle held `resamples_packed = NULL`, so a reloaded fit could
+# not drive `ferx_simulate_with_uncertainty(method = "sir")`, and the loader
+# rebuilt sir_ci_theta / _omega / _sigma without dimnames.
 
 sir_res_cov_skip <- "covariance step did not converge - skipping"
 
@@ -48,7 +46,7 @@ sir_res_fields <- c("sir_resamples", "sir_resamples_n", "sir_resamples_dim",
 
 sir_res_roundtrip <- function(fit) {
   path <- withr::local_tempfile(fileext = ".fitrx", .local_envir = parent.frame())
-  ferx_save_fit(resealed_fit(fit), path)
+  ferx_save_fit(fit, path)
   ferx_load_fit(path)
 }
 
@@ -97,82 +95,41 @@ test_that("in-fit SIR draws and intervals survive save -> load (#549, #482)", {
 test_that("fit.json carries the draws in ferx-core's resamples_packed shape", {
   fit <- sir_res_standalone()
   skip_if(is.null(fit), sir_res_cov_skip)
-  trip <- fitrx_engine_trip(fit)
-  r_wire <- fitrx_fit_json(trip$r_path)$sir$resamples_packed
-  core_wire <- fitrx_fit_json(trip$core_path)$sir$resamples_packed
+  wire <- fitrx_fit_json(fit$bundle)$sir$resamples_packed
 
   # One array per resample, each one row of the flat row-major vector.
-  expect_length(r_wire, fit$sir_resamples_n)
-  expect_identical(lengths(r_wire), rep(fit$sir_resamples_dim, fit$sir_resamples_n))
+  expect_length(wire, fit$sir_resamples_n)
+  expect_identical(lengths(wire), rep(fit$sir_resamples_dim, fit$sir_resamples_n))
   m <- matrix(fit$sir_resamples, nrow = fit$sir_resamples_n, byrow = TRUE)
-  expect_identical(as.numeric(unlist(r_wire[[2L]])), m[2L, ])
-  # ferx-core read the R bundle's draws and wrote back the same values.
-  expect_identical(core_wire, r_wire)
-
-  # And R reads the engine-written bundle exactly as it reads its own.
-  expect_sir_fields_identical(ferx_load_fit(trip$core_path), fit)
+  expect_identical(as.numeric(unlist(wire[[2L]])), m[2L, ])
 })
 
 # A fit whose kept draws are replaced by an n x dim pool of distinct values,
 # for the shapes the standalone fixture does not have. Only the wire is under
 # test, so the draws need not be the model's own.
 sir_res_reshaped <- function(fit, n, d) {
-  fit <- editable_fit(fit)
-  fit$sir_resamples <- seq_len(n * d) / 3 + 0.1
-  fit$sir_resamples_n <- as.integer(n)
-  fit$sir_resamples_dim <- as.integer(d)
-  fit
+  draws <- seq_len(n * d) / 3 + 0.1
+  rows <- matrix(draws, nrow = n, byrow = TRUE)
+  fitrx_edit_fit(fit, function(w) {
+    w$sir$resamples_packed <- lapply(seq_len(n), function(i) as.list(rows[i, ]))
+    w
+  })
 }
 
-test_that("resamples_packed reaches jsonlite as one array per row at every shape (#556)", {
-  # The writer hands jsonlite the n x dim matrix instead of a list per cell;
-  # the edge shapes must still be `Vec<Vec<f64>>`, not unboxed scalars.
-  cases <- list(
-    list(n = 1L, d = 1L, json = "[[1.5]]"),
-    list(n = 2L, d = 1L, json = "[[1],[2]]"),
-    list(n = 1L, d = 2L, json = "[[1,2]]")
-  )
-  for (cs in cases) {
-    v <- seq_len(cs$n * cs$d) + if (cs$n * cs$d == 1L) 0.5 else 0
-    fit <- list(sir_resamples = v, sir_resamples_n = cs$n,
-                sir_resamples_dim = cs$d)
-    wire <- ferx:::.fitrx_wire_arrays(
-      list(sir = list(resamples_packed = ferx:::.fitrx_resamples_to_wire(fit)))
-    )
-    expect_identical(
-      as.character(jsonlite::toJSON(wire, auto_unbox = TRUE, digits = I(17))),
-      paste0("{\"sir\":{\"resamples_packed\":", cs$json, "}}"),
-      info = paste(cs$n, "x", cs$d)
-    )
-  }
-  # Rows are the flat vector's row-major cuts, at 17 significant digits.
-  fit <- list(sir_resamples = c(0.1, 1 / 3, 2, 3), sir_resamples_n = 2L,
-              sir_resamples_dim = 2L)
-  json <- jsonlite::toJSON(
-    ferx:::.fitrx_wire_arrays(list(resamples_packed = ferx:::.fitrx_resamples_to_wire(fit))),
-    auto_unbox = TRUE, digits = I(17)
-  )
-  expect_identical(
-    as.character(json),
-    "{\"resamples_packed\":[[0.10000000000000001,0.33333333333333331],[2,3]]}"
-  )
-})
-
-test_that("one-draw and one-dimension pools survive R and the engine (#556)", {
+test_that("one-draw and one-dimension pools survive the bundle (#556)", {
   fit <- sir_res_standalone()
   skip_if(is.null(fit), sir_res_cov_skip)
   for (shape in list(c(1L, 1L), c(1L, 4L), c(5L, 1L))) {
     f <- sir_res_reshaped(fit, shape[[1L]], shape[[2L]])
     info <- paste(shape, collapse = " x ")
+    expect_identical(f$sir_resamples, seq_len(prod(shape)) / 3 + 0.1, info = info)
+    expect_identical(f$sir_resamples_n, shape[[1L]], info = info)
+    expect_identical(f$sir_resamples_dim, shape[[2L]], info = info)
     expect_sir_fields_identical(sir_res_roundtrip(f), f)
 
-    trip <- fitrx_engine_trip(f)
-    r_wire <- fitrx_fit_json(trip$r_path)$sir$resamples_packed
-    expect_length(r_wire, shape[[1L]])
-    expect_identical(lengths(r_wire), rep(shape[[2L]], shape[[1L]]), info = info)
-    expect_identical(fitrx_fit_json(trip$core_path)$sir$resamples_packed,
-                     r_wire, info = info)
-    expect_sir_fields_identical(ferx_load_fit(trip$core_path), f)
+    wire <- fitrx_fit_json(f$bundle)$sir$resamples_packed
+    expect_length(wire, shape[[1L]])
+    expect_identical(lengths(wire), rep(shape[[2L]], shape[[1L]]), info = info)
   }
 })
 
@@ -198,36 +155,6 @@ test_that("a bundle without resamples_packed still loads, draws NULL", {
     expect_null(loaded$sir_resamples_dim)
     expect_identical(loaded$sir_ci_theta, fit$sir_ci_theta)
     expect_error(sir_res_simulate(loaded), "sir_resamples` is empty")
-  }
-})
-
-test_that("ferx_save_fit() refuses draws that do not fill n x dim", {
-  fit <- sir_res_standalone()
-  skip_if(is.null(fit), sir_res_cov_skip)
-  path <- withr::local_tempfile(fileext = ".fitrx")
-  short <- fit
-  short <- editable_fit(short)
-  short$sir_resamples <- short$sir_resamples[-1L]
-  expect_error(ferx_save_fit(resealed_fit(short), path),
-               paste0("holds ", length(short$sir_resamples), " values.*edited after the fit"))
-  # Draws without their shape are the same edit, not a silent drop (round 1 #3).
-  for (field in c("sir_resamples_n", "sir_resamples_dim")) {
-    no_shape <- fit
-    no_shape <- editable_fit(no_shape)
-    no_shape[field] <- list(NULL)
-    expect_error(ferx_save_fit(resealed_fit(no_shape), path), "edited after the fit", info = field)
-  }
-})
-
-test_that("ferx_save_fit() refuses non-finite draws (round 1 #1)", {
-  fit <- sir_res_standalone()
-  skip_if(is.null(fit), sir_res_cov_skip)
-  path <- withr::local_tempfile(fileext = ".fitrx")
-  for (bad in c(NaN, NA, Inf, -Inf)) {
-    f <- fit
-    f <- editable_fit(f)
-    f$sir_resamples[3L] <- bad
-    expect_error(ferx_save_fit(resealed_fit(f), path), "1 non-finite value", info = format(bad))
   }
 })
 

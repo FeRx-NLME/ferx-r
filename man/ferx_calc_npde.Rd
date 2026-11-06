@@ -26,9 +26,13 @@ full-rank simulated covariance; subjects that fail this get \code{NA} NPDE
 \code{\link{ferx_fit}}). Defaults to the fit's own data.}
 }
 \value{
-The input \code{fit}, with \code{NPDE} and \code{NPD} columns added
-to its \code{sdtab} data frame (replacing any existing ones). Because the
-diagnostics live in \code{fit$sdtab}, downstream consumers such as
+A new fit with new bytes, the input \code{fit} being left as it was,
+with \code{NPDE} and \code{NPD} columns added to its \code{sdtab} data
+frame (replacing any existing ones). They are in the fit's bundle, so they
+survive \code{\link{ferx_save_fit}}. A fit with no bundle, such as one from
+an \code{.rds} written by an older ferx, is refused with an error of class
+\code{ferx_no_bundle_error}: refit it. Because the diagnostics live in
+\code{fit$sdtab}, downstream consumers such as
 \code{\link{ferx_xpose}} and goodness-of-fit plots pick them up
 automatically.
 }

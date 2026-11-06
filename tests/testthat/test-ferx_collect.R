@@ -126,34 +126,39 @@ test_that("ferx_job$other_field still falls through to plain list access", {
   expect_identical(handle$model_label, "m.ferx")
   expect_null(handle$not_a_field)
 })
+# A real fit that carries a trace, in its bytes and on disk, as one made with the
+# optimizer trace ferx_fit_async() forces on. ferx_collect() strips it from the
+# bytes, so a fake fit cannot stand in.
+traced_fit <- function() {
+  ex <- ferx::ferx_example("warfarin")
+  fit <- suppressWarnings(ferx_fit(ex$model, ex$data, method = "focei", verbose = FALSE,
+                                   covariance = FALSE,
+                                   settings = list(maxiter = 3L, optimizer_trace = TRUE)))
+  expect_false(is.null(fit$trace))
+  expect_true(file.exists(fit$trace_path))
+  fit
+}
 test_that("ferx_collect drops fit$trace (not just trace_path) when trace wasn't requested", {
   skip_if_not_installed("mockery")
   fn_collect <- ferx::ferx_collect
-  fake_trace_path <- write_fake_trace(n = 2L)
-  on.exit(unlink(fake_trace_path))
-  mockery::stub(
-    fn_collect, ".ferx_collect_rstudio",
-    function(handle, verbose) {
-      make_fake_fit(trace_path = fake_trace_path, trace = ferx_trace(fake_trace_path))
-    }
-  )
+  traced <- traced_fit()
+  on.exit(unlink(traced$trace_path))
+  mockery::stub(fn_collect, ".ferx_collect_rstudio", function(handle, verbose) traced)
   handle <- structure(list(backend = "rstudio", user_wanted_trace = FALSE),
                       class = "ferx_job")
   fit <- fn_collect(handle)
   expect_null(fit$trace_path)
   expect_null(fit$trace)
+  expect_false(file.exists(traced$trace_path))
+  # Out of the bytes too, so a save does not bring it back.
+  expect_null(fitrx_fit_json(fit$bundle)$trace_path)
 })
 test_that("ferx_collect treats a NULL user_wanted_trace as FALSE (hand-built handle)", {
   skip_if_not_installed("mockery")
   fn_collect <- ferx::ferx_collect
-  fake_trace_path <- write_fake_trace(n = 2L)
-  on.exit(unlink(fake_trace_path))
-  mockery::stub(
-    fn_collect, ".ferx_collect_rstudio",
-    function(handle, verbose) {
-      make_fake_fit(trace_path = fake_trace_path, trace = ferx_trace(fake_trace_path))
-    }
-  )
+  traced <- traced_fit()
+  on.exit(unlink(traced$trace_path))
+  mockery::stub(fn_collect, ".ferx_collect_rstudio", function(handle, verbose) traced)
   # No user_wanted_trace field at all -- `handle$user_wanted_trace` is NULL,
   # and `if (!NULL)` errors with "argument is of length zero".
   handle <- structure(list(backend = "rstudio"), class = "ferx_job")
@@ -263,7 +268,7 @@ test_that("ferx_collect dispatches to the rstudio backend", {
   skip_if_not_installed("mockery")
   fn_collect <- ferx::ferx_collect
   mockery::stub(fn_collect, ".ferx_collect_rstudio",
-                function(handle, verbose) make_fake_fit(trace_path = NULL))
+                function(handle, verbose) warfarin_fit())
   handle <- structure(list(backend = "rstudio", user_wanted_trace = FALSE),
                       class = "ferx_job")
   fit <- fn_collect(handle)

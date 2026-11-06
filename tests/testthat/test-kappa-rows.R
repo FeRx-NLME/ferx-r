@@ -12,7 +12,7 @@ fitrx_kappa_rows <- getFromNamespace("ferx_rust_fitrx_kappa_rows", "ferx")
 # The engine console's rows for `fit`, via a saved bundle.
 core_rows <- function(fit) {
   f <- withr::local_tempfile(fileext = ".fitrx")
-  suppressWarnings(ferx_save_fit(resealed_fit(fit), f))
+  suppressWarnings(ferx_save_fit(fit, f))
   strsplit(fitrx_kappa_rows(f), "\n", fixed = TRUE)[[1L]]
 }
 
@@ -95,9 +95,10 @@ test_that("a failed or SIR-fallback covariance step hides the SD on both lines",
   skip_on_cran()
   fit <- mbma_variant("weighted")
   for (status in c("failed", "sir_fallback", "computed", "not_requested")) {
-    f <- fit
-    f <- editable_fit(f)
-    f$covariance_status <- status
+    f <- fitrx_edit_fit(fit, function(w) {
+      w$covariance_status <- status
+      w
+    })
     core <- expect_core_rows(f, status)
     shown <- !status %in% c("failed", "sir_fallback")
     # Both sides of the gate, on the row and on the weight line.
@@ -110,7 +111,7 @@ test_that("a reloaded .fitrx prints the same ferx-core rows", {
   skip_on_cran()
   fit <- mbma_variant("weighted")
   f <- withr::local_tempfile(fileext = ".fitrx")
-  suppressWarnings(ferx_save_fit(resealed_fit(fit), f))
+  suppressWarnings(ferx_save_fit(fit, f))
   loaded <- suppressWarnings(ferx_load_fit(f))
   expect_identical(kappa_rows(loaded, ascii = FALSE),
                    strsplit(fitrx_kappa_rows(f), "\n", fixed = TRUE)[[1L]])

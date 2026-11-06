@@ -48,6 +48,7 @@ rho_fixture <- function(sigma_lines) {
       CMT  = 1,
       MDV  = rep(c(1, 0, 0, 0), 3)
     ), data, row.names = FALSE, quote = FALSE)
+    cache <- editable_fit(cache)
     cache$v <- list(model = model, data = data,
                     fit = ferx_fit(model, data, verbose = FALSE,
                                    covariance = TRUE))
@@ -156,6 +157,16 @@ without_rho <- function(fit) {
   fit
 }
 
+# The steps that return a fit read its bytes, where such a fit comes only by an edit.
+without_rho_bytes <- function(fit) {
+  fitrx_edit_fit(fit, function(w) {
+    w$sigma$residual_correlations <- list()
+    w$sigma$residual_correlation_fixed <- list()
+    w$sigma$se_residual_correlations <- NULL
+    w
+  })
+}
+
 declared_rho <- 0.10 / sqrt(0.04 * 0.30)
 
 # Assert that `expr` raises a message matching `regexp`, and return that
@@ -169,7 +180,7 @@ refusal <- function(expr, regexp) {
 
 test_that("covariance and SIR refuse a free fit without its fitted rho", {
   skip_on_cran()
-  fit <- without_rho(rho_case()$fit)
+  fit <- without_rho_bytes(rho_case()$fit)
 
   expect_error(ferx_covariance(fit), "^ferx_covariance: the model estimates")
   expect_error(ferx_sir(fit, sir_samples = 50L, sir_resamples = 20L,
@@ -190,7 +201,7 @@ test_that("predict, simulate and NPDE refuse a free fit without its fitted rho",
   expect_error(ferx_simulate(case$model, case$data, n_sim = 1L, seed = 1L,
                              fit = fit),
                "^Fit error: the model estimates")
-  expect_error(ferx_calc_npde(fit, nsim = 20L, seed = 1L,
+  expect_error(ferx_calc_npde(without_rho_bytes(case$fit), nsim = 20L, seed = 1L,
                               model = case$model, data = case$data),
                "^Fit error: the model estimates")
 })
@@ -208,11 +219,13 @@ test_that("simulate_with_uncertainty refuses a free fit without its fitted rho",
 
 test_that("a zero-row residual_correlations frame is refused like NULL", {
   skip_on_cran()
-  fit <- rho_case()$fit
+  case <- rho_case()
+  fit <- case$fit
   fit <- editable_fit(fit)
   fit$residual_correlations <- fit$residual_correlations[0, ]
 
-  expect_error(ferx_covariance(fit), "^ferx_covariance: the model estimates")
+  expect_error(ferx_predict(case$model, case$data, fit = fit),
+               "^Fit error: the model estimates")
 })
 
 test_that("an intact free fit is rebuilt at its fitted rho", {
@@ -298,9 +311,10 @@ test_that("ferx_calc_npde draws block_sigma residuals at the fitted rho", {
   expect_lt(rho, -0.3)
 
   npde_at <- function(r) {
-    f <- fit
-    f <- editable_fit(f)
-    f$residual_correlations$rho <- r
+    f <- fitrx_edit_fit(fit, function(w) {
+      w$sigma$residual_correlations[[1L]]$rho <- r
+      w
+    })
     ferx_calc_npde(f, nsim = 200L, seed = 1L)$sdtab
   }
   at_fit      <- npde_at(rho)
@@ -379,8 +393,6 @@ test_that("each frame builder blanks the SE of the FIX rows only (#458)", {
               se_residual_correlation = c(0, 0.07))
   rc <- .ferx_residual_corr_frame(raw)
   expect_identical(rc$se, c(NA, 0.07))
-  # The writer gives the engine back its 0 for the held entry.
-  expect_identical(.fitrx_residual_corr_se(list(residual_correlations = rc)), c(0, 0.07))
 })
 
 test_that("a diagonal-sigma fit runs without a residual_correlations field", {
@@ -402,8 +414,8 @@ test_that("a non-finite or out-of-range fitted rho is refused", {
   na_fit <- case$fit
   na_fit <- editable_fit(na_fit)
   na_fit$residual_correlations$rho <- NA_real_
-  msg <- refusal(ferx_covariance(na_fit),
-                 "^ferx_covariance: the block_sigma correlation ")
+  msg <- refusal(ferx_predict(case$model, case$data, fit = na_fit),
+                 "^Fit error: the block_sigma correlation ")
   expect_match(msg, label, fixed = TRUE)
   # NA_real_ is named as R names it, not as the NaN it crosses the FFI as.
   expect_match(msg, "rho = NA ", fixed = TRUE)
@@ -423,13 +435,27 @@ test_that("a non-finite or out-of-range fitted rho is refused", {
   expect_match(msg, "rho = 1 ", fixed = TRUE)
   expect_match(msg, "must be finite and strictly between -1 and 1",
                fixed = TRUE)
+
+  # In the bytes neither loads, so no step reaches a singular block.
+  rho_of <- function(rho) {
+    function(w) {
+      w$sigma$residual_correlations[[1L]]["rho"] <- list(rho)
+      w
+    }
+  }
+  expect_error(fitrx_edit_fit(case$fit, rho_of(1)),
+               "invalid sigma residual correlation (1, 0, rho=1)", fixed = TRUE)
+  expect_error(fitrx_edit_fit(case$fit, rho_of(NULL)),
+               "invalid type: null, expected f64", fixed = TRUE)
 })
 
 test_that("the refusal names the correlation and the remedy", {
   skip_on_cran()
   fit <- rho_case()$fit
   label <- fit$residual_correlations$name
-  msg <- refusal(ferx_covariance(without_rho(fit)), "^ferx_covariance: ")
+  case <- rho_case()
+  msg <- refusal(ferx_predict(case$model, case$data, fit = without_rho(fit)),
+                 "^Fit error: ")
 
   expect_match(
     msg,
@@ -453,20 +479,6 @@ test_that("the refusal names the correlation and the remedy", {
   # Editing the model to FIX is no remedy: covariance and SIR check the
   # model hash against the fit.
   expect_no_match(msg, "FIX", fixed = TRUE)
-})
-
-test_that("a v0.3.x-shaped fit gets the rho refusal from SIR, not a dimension error", {
-  skip_on_cran()
-  fit <- without_rho(rho_case()$fit)
-  skip_if(is.null(fit$cov_matrix), "covariance step produced no matrix")
-  # A v0.3.x fit has no rho coordinate in its covariance matrix either.
-  n <- nrow(fit$cov_matrix) - 1L
-  fit <- editable_fit(fit)
-  fit$cov_matrix <- fit$cov_matrix[seq_len(n), seq_len(n)]
-
-  expect_error(ferx_sir(fit, sir_samples = 50L, sir_resamples = 20L,
-                        sir_seed = 7L),
-               "^ferx_sir: .*estimates the block_sigma correlation")
 })
 
 # -- #486 / #485: two block_sigma blocks --
@@ -519,6 +531,7 @@ rho2_fixture <- function(fix_b) {
       CMT  = rep(c(1, 1, 1, 1, 2, 2, 2), 4),
       MDV  = rep(c(1, 0, 0, 0, 0, 0, 0), 4)
     ), data, row.names = FALSE, quote = FALSE)
+    cache <- editable_fit(cache)
     cache$v <- list(model = model, data = data,
                     fit = ferx_fit(model, data, verbose = FALSE))
     cache$v
@@ -533,10 +546,12 @@ rho2_spread <- function() {
   fit <- case$fit
   rc <- fit$residual_correlations
   expect_identical(nrow(rc), 2L)
+  rc <- editable_fit(rc)
   rc$rho[rc$name == "ADD_A ~ PROP_A"] <- 0.5
   rc$rho[rc$name == "ADD_B ~ PROP_B"] <- -0.5
   fit <- editable_fit(fit)
   fit$residual_correlations <- rc
+  case <- editable_fit(case)
   case$fit <- fit
   case
 }
@@ -577,9 +592,14 @@ test_that("ferx_covariance() writes each correlation SE onto its own row (#486)"
   skip_on_cran()
   fit <- rho2_case()$fit
   rc <- fit$residual_correlations
-  reordered <- fit
-  reordered <- editable_fit(reordered)
-  reordered$residual_correlations <- rc[2:1, ]
+  # The bytes in the other order, with each SE and FIX flag still on its row.
+  reordered <- fitrx_edit_fit(fit, function(w) {
+    w$sigma$residual_correlations <- rev(w$sigma$residual_correlations)
+    w$sigma$residual_correlation_fixed <- rev(w$sigma$residual_correlation_fixed)
+    w$sigma$se_residual_correlations <- rev(w$sigma$se_residual_correlations)
+    w
+  })
+  expect_identical(reordered$residual_correlations$name, rc$name[2:1])
 
   fresh <- ferx_covariance(fit)$residual_correlations
   skip_if(!all(is.finite(fresh$se)), "covariance step produced no rho SEs")
@@ -608,8 +628,17 @@ test_that("a pair the model does not declare is refused (#486)", {
   twice <- fit
   twice <- editable_fit(twice)
   twice$residual_correlations[2, c("sigma_i", "sigma_j")] <- rc[1, c("sigma_i", "sigma_j")]
-  expect_error(ferx_covariance(twice),
-               "^ferx_covariance: fit\\$residual_correlations rows 1 and 2 both give the block_sigma correlation ADD_A ~ PROP_A")
+  expect_error(ferx_predict(case$model, case$data, fit = twice),
+               "^Fit error: fit\\$residual_correlations rows 1 and 2 both give the block_sigma correlation ADD_A ~ PROP_A")
+  # In the bytes, such a pair does not load.
+  expect_error(
+    fitrx_edit_fit(fit, function(w) {
+      w$sigma$residual_correlations[[2L]][c("sigma_i", "sigma_j")] <-
+        w$sigma$residual_correlations[[1L]][c("sigma_i", "sigma_j")]
+      w
+    }),
+    "cannot read this .fitrx bundle", fixed = TRUE
+  )
 
   # An NA index names it as R does.
   na_pair <- fit
@@ -622,6 +651,7 @@ test_that("a pair the model does not declare is refused (#486)", {
   # Without the pair columns there is nothing to match on. The refusal fires
   # while the fit is rebuilt, before any draw is sampled.
   no_pairs <- fit
+  no_pairs <- editable_fit(no_pairs)
   no_pairs$residual_correlations$sigma_i <- NULL
   expect_error(ferx_simulate_with_uncertainty(case$model, case$data, no_pairs,
                                               n_uncertainty_draws = 5L),
@@ -657,8 +687,8 @@ test_that("the #480 refusal names only the free correlation next to a FIX block 
 test_that("the #480 refusal is plural throughout for two free correlations (#485)", {
   skip_on_cran()
   case <- rho2_case()
-  msg <- refusal(ferx_covariance(without_rho(case$fit)),
-                 "^ferx_covariance: the model estimates the block_sigma correlations ADD_A ~ PROP_A, ADD_B ~ PROP_B, but")
+  msg <- refusal(ferx_predict(case$model, case$data, fit = without_rho(case$fit)),
+                 "^Fit error: the model estimates the block_sigma correlations ADD_A ~ PROP_A, ADD_B ~ PROP_B, but")
   expect_match(msg, "no value for them ", fixed = TRUE)
   expect_match(msg, "so they would be rebuilt at their declared initial correlations",
                fixed = TRUE)

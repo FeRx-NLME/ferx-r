@@ -1,5 +1,4 @@
-# FIX parameters in print.ferx_fit() and fit$estimates (#451), and the
-# missing-flags warning in ferx_save_fit() (#452).
+# FIX parameters in print.ferx_fit() and fit$estimates (#451).
 #
 # The engine reports SE 0 for a FIX entry. print() must label it
 # `NAME [FIX]` with `SE = ---` (THETA: `---` in the SE and %RSE columns), and
@@ -59,12 +58,13 @@ crafted_fit <- function(se = c("zero", "real", "none"), flags = TRUE) {
     se_kappa = switch(se, zero = c(0, 0), real = c(0.008, 0), none = NULL)
   )
   if (flags) {
+    fit <- editable_fit(fit)
     fit$theta_fixed <- c(FALSE, TRUE)
     fit$omega_fixed <- c(TRUE, TRUE, FALSE)
     fit$sigma_fixed <- c(FALSE, TRUE)
     fit$kappa_fixed <- c(FALSE, TRUE)
   }
-  class(fit) <- c("ferx_editable_fit", "ferx_fit")
+  class(fit) <- "ferx_fit"
   fit
 }
 
@@ -154,6 +154,7 @@ test_that("estimates: fixed column, NA SE / RSE / CI for FIX, free SE 0 kept", {
 test_that("estimates: a FIX log or logit theta keeps its natural-scale estimate, without an interval", {
   for (tf in c("log", "logit")) {
     fit <- crafted_fit("zero")
+    fit <- editable_fit(fit)
     fit$theta_transforms[["TVKA"]] <- tf
     est <- .compute_estimates(fit)
     want <- if (tf == "log") exp(1.0) else stats::plogis(1.0)
@@ -165,46 +166,15 @@ test_that("estimates: a FIX log or logit theta keeps its natural-scale estimate,
 
 test_that("ferx_se(): NA for a FIX parameter, without the no-standard-errors warning", {
   fit <- crafted_fit("zero")
+  fit <- editable_fit(fit)
   fit$estimates <- .compute_estimates(fit)
   expect_silent(se <- ferx_se(fit, c("TVKA", "ADD_ERR")))
   expect_identical(se, c(TVKA = NA_real_, ADD_ERR = NA_real_))
   # A free parameter with no SE still warns.
   none <- crafted_fit("none")
+  none <- editable_fit(none)
   none$estimates <- .compute_estimates(none)
   expect_warning(ferx_se(none, c("TVCL", "TVKA")), "no standard errors")
-})
-
-# -- ferx_save_fit() with flags missing (#452) ---------------------------------
-
-test_that("ferx_save_fit() warns, per class, when a fit carries no FIX flags", {
-  skip_on_cran()
-  ex  <- ferx_example("warfarin_iov")
-  fit <- suppressWarnings(ferx_fit(ex$model, ex$data, covariance = FALSE, verbose = FALSE))
-  f <- tempfile(fileext = ".fitrx")
-  on.exit(unlink(f), add = TRUE)
-  # With every flag present: quiet.
-  expect_no_warning(ferx_save_fit(fit, f), message = "FIX flags")
-  old <- fit
-  old <- editable_fit(old)
-  old[c("theta_fixed", "omega_fixed", "sigma_fixed", "kappa_fixed")] <- NULL
-  w <- character()
-  withCallingHandlers(ferx_save_fit(resealed_fit(old), f),
-                      warning = function(cnd) {
-                        w <<- c(w, conditionMessage(cnd))
-                        invokeRestart("muffleWarning")
-                      })
-  w <- grep("FIX flags", w, value = TRUE)
-  expect_length(w, 1L)
-  expect_match(w, "theta, omega, sigma, kappa", fixed = TRUE)
-  expect_match(w, "made before ferx recorded them", fixed = TRUE)
-  expect_match(w, "recorded as estimated", fixed = TRUE)
-  expect_match(w, "reload as free", fixed = TRUE)
-  expect_match(w, "Refit", fixed = TRUE)
-  # One class missing: only that one is named.
-  part <- fit
-  part <- editable_fit(part)
-  part$sigma_fixed <- NULL
-  expect_warning(ferx_save_fit(resealed_fit(part), f), "FIX flags for sigma are unknown")
 })
 
 # -- Live fits -----------------------------------------------------------------
@@ -337,7 +307,7 @@ test_that(".fitrx round trip prints the same SE / [FIX] as the live fit", {
   for (nm in names(cases)) {
     cs <- cases[[nm]]
     f <- tempfile(fileext = ".fitrx")
-    expect_no_warning(ferx_save_fit(cs$fit, f), message = "FIX flags")
+    ferx_save_fit(cs$fit, f)
     fit2 <- suppressWarnings(ferx_load_fit(f))
     unlink(f)
     a <- capture.output(print(cs$fit))
@@ -388,29 +358,10 @@ test_that("mbma_placebo: a reloaded fit prints identically, and carries the live
   expect_true(any(grepl("Cond: ", b, fixed = TRUE)))
 })
 
-test_that("ferx_save_fit() warns and fills on FIX flags of the wrong length (#459)", {
+test_that("the bundle's fit.json holds the fit's FIX flags (#453)", {
   skip_on_cran()
   fit <- per_class_live()
-  out <- tempfile(fileext = ".fitrx")
-  on.exit(unlink(out), add = TRUE)
-  # A short vector is no record either: the class is named and filled.
-  short <- fit
-  short <- editable_fit(short)
-  short$theta_fixed <- short$theta_fixed[-1L]
-  expect_warning(ferx_save_fit(resealed_fit(short), out), "FIX flags for theta are unknown",
-                 fixed = TRUE)
-  expect_identical(unlist(fitrx_fit_json(out)$theta$fixed),
-                   rep(FALSE, length(fit$theta)))
-})
-
-test_that("ferx-core's own .fitrx loader reads the FIX flags ferx_save_fit() writes (#453)", {
-  skip_on_cran()
-  fit <- per_class_live()
-  # Core's load_fit() reads the R bundle into its FitResult and core's
-  # save_fit() writes that FitResult back: the flags in the core-written
-  # fit.json are the ones core's loader read, never R's reading of R's file.
-  trip <- fitrx_engine_trip(fit)
-  core <- fitrx_fit_json(trip$core_path)
+  core <- fitrx_fit_json(fit$bundle)
   expect_identical(unlist(core$theta$fixed), c(FALSE, FALSE, TRUE))
   expect_identical(unlist(core$omega$fixed), c(TRUE, TRUE, FALSE))
   expect_identical(unlist(core$sigma$fixed), c(FALSE, TRUE))

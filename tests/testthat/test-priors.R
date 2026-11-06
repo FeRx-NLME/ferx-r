@@ -127,27 +127,34 @@ test_that(".ferx_ofv_prior reads 0 off a fit that predates the field", {
 # `capture_binding_args()` lives in helper-relabelled-fit.R, shared with the
 # subject-ID forwarding tests (#468).
 
+# The step reads its reference objective from the fit's bytes, so the bytes are
+# what must carry the fit's own prior half.
+expect_forwards_prior_half <- function(args, fit) {
+  expect_identical(args$bundle, fit$bundle)
+  wire <- fitrx_fit_json(args$bundle)
+  expect_equal(wire$ofv_prior, fit$ofv_prior)
+  # `ofv` stays the penalized total - the engine subtracts the half itself.
+  # The data half here instead would double-subtract.
+  expect_equal(wire$ofv, fit$ofv)
+}
+
 test_that("ferx_sir forwards the fit's own prior half to the binding", {
   skip_if_not_installed("mockery")
   fit <- priored_warfarin_fit()
 
   # This is the assertion that actually pins ferx-r #366. Nothing in SIR's
   # *output* can: the engine takes its reference objective as
-  # `ofv - ofv_prior` and adds the prior penalty back itself, so passing a
-  # penalized `ofv` beside a zero prior half shifts `ofv_hat` by a constant -
-  # and that constant cancels in the normalized importance weights, leaving the
+  # `ofv - ofv_prior` and adds the prior penalty back itself, so a penalized
+  # `ofv` beside a zero prior half shifts `ofv_hat` by a constant - and that
+  # constant cancels in the normalized importance weights, leaving the
   # weights, the ESS and every interval bit-identical. The double count is only
   # visible at the call boundary, so that is where it is checked.
   cap <- capture_binding_args()
   mockery::stub(ferx_sir, "ferx_rust_sir", cap$fake)
   expect_error(ferx_sir(fit, sir_samples = 4L, sir_resamples = 2L), "captured")
 
-  args <- cap$seen()
-  expect_true(args$ofv_prior > 0)
-  expect_equal(args$ofv_prior, fit$ofv_prior)
-  # `ofv` still crosses as the penalized total - the engine subtracts the half
-  # itself. Handing it the data half here instead would double-subtract.
-  expect_equal(args$ofv, fit$ofv)
+  expect_gt(fit$ofv_prior, 0)
+  expect_forwards_prior_half(cap$seen(), fit)
 })
 
 test_that("ferx_covariance forwards the fit's own prior half to the binding", {
@@ -158,9 +165,7 @@ test_that("ferx_covariance forwards the fit's own prior half to the binding", {
   mockery::stub(ferx_covariance, "ferx_rust_covariance", cap$fake)
   expect_error(ferx_covariance(fit), "captured")
 
-  args <- cap$seen()
-  expect_equal(args$ofv_prior, fit$ofv_prior)
-  expect_equal(args$ofv, fit$ofv)
+  expect_forwards_prior_half(cap$seen(), fit)
 })
 
 test_that("an unpriored fit forwards a zero prior half", {
@@ -171,7 +176,7 @@ test_that("an unpriored fit forwards a zero prior half", {
   cap <- capture_binding_args()
   mockery::stub(ferx_sir, "ferx_rust_sir", cap$fake)
   expect_error(ferx_sir(fit, sir_samples = 4L, sir_resamples = 2L), "captured")
-  expect_equal(cap$seen()$ofv_prior, 0)
+  expect_equal(fitrx_fit_json(cap$seen()$bundle)$ofv_prior, 0)
 })
 
 test_that("SIR output is unchanged by which spelling of the reference it gets", {
@@ -184,10 +189,12 @@ test_that("SIR output is unchanged by which spelling of the reference it gets", 
   # apart. It is worth keeping because the cancellation is what makes the
   # pre-#366 double count harmless: if a future engine used `ofv_hat` as
   # anything but a normalized difference, this would start failing and say so.
-  as_data_half <- fit
-  as_data_half <- editable_fit(as_data_half)
-  as_data_half$ofv <- fit$ofv_data
-  as_data_half$ofv_prior <- 0
+  as_data_half <- fitrx_edit_fit(fit, function(w) {
+    w$ofv <- w$ofv_data
+    w$ofv_prior <- 0
+    w
+  })
+  expect_equal(as_data_half$ofv, fit$ofv_data)
 
   a <- ferx_sir(fit, sir_samples = 8L, sir_resamples = 4L, sir_seed = 1L)
   b <- ferx_sir(as_data_half, sir_samples = 8L, sir_resamples = 4L, sir_seed = 1L)
@@ -202,11 +209,9 @@ test_that("ferx_covariance re-derives the prior curvature from the model file", 
   fit <- priored_warfarin_fit()
   skip_if(is.null(fit$cov_matrix), prior_cov_skip)
 
-  # The standalone covariance step is handed a skeleton FitResult that carries
-  # no prior information beyond the model path, and re-derives the penalty's
-  # curvature from the model's own `prior(...)` declaration. So its standard
-  # errors must match the ones the inline covariance step produced. Not
-  # bit-exact: the standalone path cold-starts the EBEs (see PR #253).
+  # The standalone covariance step re-derives the penalty's curvature from the
+  # model's own `prior(...)` declaration. So its standard errors must match the
+  # ones the inline covariance step produced.
   out <- ferx_covariance(fit)
   skip_if(is.null(out$cov_matrix), prior_cov_skip)
   expect_equal(out$se_theta, fit$se_theta, tolerance = 1e-3)

@@ -11,10 +11,11 @@
 
 # A minimal structurally-valid fit that passes validate_fit_for_params and the
 # sdtab gate but carries no model/data path, so the nsim/seed/file guards fire
-# before any FFI call.
+# before any FFI call. Its bytes are never parsed: the guards come first, or the
+# test mocks `.ferx_fit_canonical()`.
 .stub_fit <- function() {
   list(theta = c(1, 2), omega = matrix(c(0.1, 0, 0, 0.1), 2, 2), sigma = 0.05,
-       sdtab = data.frame(ID = 1, TIME = 1, DV = 5))
+       sdtab = data.frame(ID = 1, TIME = 1, DV = 5), bundle = as.raw(1))
 }
 
 
@@ -53,6 +54,7 @@ test_that("ferx_calc_npde rejects a negative seed (would silently become the def
   expect_error(ferx_calc_npde(.stub_fit(), seed = -5L), "non-negative integer")
 })
 test_that("ferx_calc_npde errors when no model/data path is available", {
+  testthat::local_mocked_bindings(.ferx_fit_canonical = function(fit, who) fit)
   expect_error(ferx_calc_npde(.stub_fit()), "model file")
   expect_error(ferx_calc_npde(.stub_fit(), model = "no_such.ferx"), "model file")
 })
@@ -110,7 +112,8 @@ test_that("ferx_calc_npde uses fit$model_path / fit$data_path by default", {
 })
 test_that("ferx_calc_npde errors when the fit carries no sdtab", {
   bad <- list(theta = c(1, 2), omega = matrix(c(0.1, 0, 0, 0.1), 2, 2),
-              sigma = 0.05)  # no sdtab
+              sigma = 0.05, bundle = as.raw(1))  # no sdtab
+  testthat::local_mocked_bindings(.ferx_fit_canonical = function(fit, who) fit)
   expect_error(ferx_calc_npde(bad), "sdtab` is empty")
 })
 test_that("ferx_calc_npde surfaces a clean error when the engine returns NULL", {
@@ -119,9 +122,10 @@ test_that("ferx_calc_npde surfaces a clean error when the engine returns NULL", 
   fit <- list(theta = c(1, 2), omega = matrix(c(0.1, 0, 0, 0.1), 2, 2),
               sigma = 0.05, sdtab = data.frame(ID = 1, TIME = 1, DV = 5),
               model_path = tempfile(fileext = ".ferx"),
-              data_path  = tempfile(fileext = ".csv"))
+              data_path  = tempfile(fileext = ".csv"), bundle = as.raw(1))
   file.create(fit$model_path, fit$data_path)
-  testthat::local_mocked_bindings(ferx_rust_npde_from_fit = function(...) NULL)
+  testthat::local_mocked_bindings(ferx_rust_npde_from_fit = function(...) NULL,
+                                  .ferx_fit_canonical = function(fit, who) fit)
   expect_error(ferx_calc_npde(fit), "engine returned no NPDE table")
 })
 
@@ -318,9 +322,10 @@ test_that("ferx_calc_npde on a [mixture] fit draws its reference at the fitted c
   # it twentyfold spreads class 2's reference draws, so the observations fall
   # nearer their middle and NPD narrows. A reference built at the model file's
   # classes reads neither value and gives the same NPD for both.
-  wide <- fit
-  wide <- editable_fit(wide)
-  wide$mixture_overrides <- 20 * fit$mixture_overrides
+  wide <- fitrx_edit_fit(fit, function(w) {
+    w$mixture_overrides <- lapply(w$mixture_overrides, function(v) 20 * v)
+    w
+  })
   base_sd <- npd_sd(fit)
   wide_sd <- npd_sd(wide)
   expect_lt(wide_sd, 0.85 * base_sd,

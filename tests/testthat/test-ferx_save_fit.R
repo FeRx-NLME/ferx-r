@@ -50,12 +50,9 @@ fake_bayes <- function(max_rhat = 1.004) {
 # ferx_save_fit() / ferx_load_fit() round-trip and CLI-flag tests.
 #
 # These exercise the .fitrx bundle format. The cross-tool test (Rust CLI
-# writes, R reads) lives in ferx-core; here we only verify the R-side
-# writer + reader are inverses, and that the `output` argument of
-# ferx_fit() saves a valid bundle.
-
-# Local aliases avoid the ::: operator (undesirable_operator_linter).
-.fitrx_build_iov_wire   <- getFromNamespace(".fitrx_build_iov_wire",   "ferx")
+# writes, R reads) lives in ferx-core; here we only verify a saved bundle reads
+# back as the fit, and that the `output` argument of ferx_fit() saves a valid
+# bundle.
 
 
 
@@ -122,7 +119,8 @@ test_that("bundle doubles are written and read back bit for bit", {
                    n = 1:3, stringsAsFactors = FALSE)
   path <- tempfile(fileext = ".csv")
   on.exit(unlink(path), add = TRUE)
-  ferx:::.fitrx_write_csv_exact(df, path)
+  writeLines(c("ID,x,n", "\"a,1\",0.30000000000000004,1", "2,,2",
+               "3,0.3333333333333333,3"), path)
   expect_identical(ferx:::.fitrx_read_csv_exact(path), df)
 
   # The random doubles above only catch an inexact parser on aarch64: x86_64
@@ -200,7 +198,7 @@ test_that("bundle tables keep double columns double when every value is whole (#
                    stringsAsFactors = FALSE)
   path <- tempfile(fileext = ".csv")
   on.exit(unlink(path), add = TRUE)
-  ferx:::.fitrx_write_csv_exact(df, path)
+  writeLines(c("ID,TIME,WT,EVID,EMPTY", "1,0,70,1,", "2,24,100000,0,"), path)
   # Without the live types, read.csv() decides: WT integer, EMPTY logical.
   plain <- ferx:::.fitrx_read_csv_exact(path, id_cols = "ID")
   expect_type(plain$WT, "integer")
@@ -211,15 +209,14 @@ test_that("bundle tables keep double columns double when every value is whole (#
   )
 })
 
-test_that("a cov_matrix is named on load for the engine-written bundle too (#417)", {
+test_that("a cov_matrix is named on load (#417)", {
   skip_on_cran()
   fit <- warfarin_fit_cov()
   skip_if(is.null(fit$cov_matrix), "no covariance step in this fit")
-  trip <- fitrx_engine_trip(fit)
-  on.exit(unlink(c(trip$r_path, trip$core_path)), add = TRUE)
-  # ferx-core's own writer stores no names either, so this is the path every
-  # bundle written before #417 takes.
-  loaded <- suppressWarnings(ferx_load_fit(trip$core_path))
+  path <- withr::local_tempfile(fileext = ".fitrx")
+  ferx_save_fit(fit, path)
+  # ferx-core's writer stores no names, so they come from the model.
+  loaded <- suppressWarnings(ferx_load_fit(path))
   expect_identical(dimnames(loaded$cov_matrix), dimnames(fit$cov_matrix))
   expect_identical(dimnames(loaded$cor_matrix), dimnames(fit$cor_matrix))
 })
@@ -337,8 +334,7 @@ test_that("a warm start at an optimum reloads as one, not as a stall", {
   # Refit from the fitted estimates: the engine's restart probe confirms the
   # start (ferx-core #2506). The bundle has to carry `stationary_start`: the
   # engine's stalled_at_init() reads it beside `left_init`, and without it
-  # calls the reloaded fit a stall. R's own `stalled_at_init` travels in
-  # r_extras and is not recomputed on load, so it is no oracle here.
+  # calls the reloaded fit a stall.
   ex <- ferx_example("warfarin")
   model <- tempfile(fileext = ".ferx")
   on.exit(unlink(model), add = TRUE)
@@ -353,14 +349,10 @@ test_that("a warm start at an optimum reloads as one, not as a stall", {
   path <- tempfile(fileext = ".fitrx")
   on.exit(unlink(path), add = TRUE)
   ferx_save_fit(fit, path)
-  expect_true(ferx_load_fit(path)$stationary_start)
-
-  # The engine's reader takes the key R wrote: its writer emits
-  # `stationary_start` only when the FitResult it read holds TRUE.
-  trip <- fitrx_engine_trip(fit)
-  on.exit(unlink(c(trip$r_path, trip$core_path)), add = TRUE)
-  expect_true(isTRUE(fitrx_fit_json(trip$core_path)$stationary_start))
-  expect_true(ferx_load_fit(trip$core_path)$stationary_start)
+  expect_true(isTRUE(fitrx_fit_json(path)$stationary_start))
+  loaded <- ferx_load_fit(path)
+  expect_true(loaded$stationary_start)
+  expect_false(loaded$stalled_at_init)
 })
 
 test_that("bayes posterior summary survives round-trip", {
@@ -405,33 +397,6 @@ test_that("SAEM conditional-distribution results survive round-trip (real fit)",
   expect_equal(loaded$cond_dist$data$COND_MODE, fit$cond_dist$data$COND_MODE,
                tolerance = 1e-9)
 })
-test_that(".fitrx_has_cond_dist / .fitrx_write_conddist_csv (synthetic)", {
-  no_cd <- structure(list(cond_dist = NULL), class = "ferx_fit")
-  expect_false(ferx:::.fitrx_has_cond_dist(no_cd))
-
-  cd_data <- data.frame(
-    ID = c("1", "1", "2", "2"),
-    ETA = c("ETA_CL", "ETA_V", "ETA_CL", "ETA_V"),
-    COND_MEAN = c(0.05, -0.02, -0.03, 0.01),
-    COND_SD = c(0.12, 0.15, 0.11, 0.14),
-    COND_MODE = c(0.04, -0.01, -0.02, 0.02),
-    stringsAsFactors = FALSE
-  )
-  with_cd <- structure(
-    list(cond_dist = list(data = cd_data, shrinkage = c(0.1, 0.05),
-                           nsamp = 20L, burnin = 5L)),
-    class = "ferx_fit"
-  )
-  expect_true(ferx:::.fitrx_has_cond_dist(with_cd))
-
-  path <- tempfile(fileext = ".csv")
-  on.exit(unlink(path), add = TRUE)
-  ferx:::.fitrx_write_conddist_csv(with_cd, path)
-  written <- utils::read.csv(path, stringsAsFactors = FALSE, check.names = FALSE)
-  expect_equal(written$ID, c(1L, 1L, 2L, 2L))
-  expect_equal(written$ETA, cd_data$ETA)
-  expect_equal(written$COND_MEAN, cd_data$COND_MEAN, tolerance = 1e-12)
-})
 test_that("predictions survive round-trip (per-row equality)", {
   skip_on_cran()
   fit <- warfarin_fit_cov()
@@ -475,19 +440,19 @@ test_that("ferx_fit(output = ...) writes a valid bundle", {
 })
 test_that("ferx_fit(output =) relays save-side conditions under its own name (#537)", {
   relay <- ferx:::.ferx_relay_save
-  # A real save-side warning: a fit that carries no FIX flags. (The normal
-  # SIR proposal this used to take is recorded since ferx-core#1819.)
+  # A save-side warning, its call left as it was raised.
   w <- tryCatch(
-    relay(ferx:::.fitrx_warn_missing_fixed(list(theta = c(TVCL = 1)))),
+    relay(warning("ferx_save_fit: not recorded", call. = FALSE)),
     warning = function(w) w
   )
-  expect_match(conditionMessage(w), "^ferx_fit: the FIX flags for theta are unknown")
+  expect_identical(conditionMessage(w), "ferx_fit: not recorded")
   expect_null(conditionCall(w))
-  # The real save-side refusal, prefixed by the engine's decoder.
+  # A save-side refusal, as the engine's decoder prefixes one.
   sc <- ferx:::.ferx_default_settings("scoring_settings")
   sc$inner_maxit <- 5L
   expect_error(
-    relay(ferx:::.fitrx_settings_to_wire(list(scoring_settings = sc), "scoring_settings")),
+    relay(ferx:::ferx_rust_settings_record("scoring_settings", sc, "ferx_save_fit",
+                                           "fit$scoring_settings")),
     'ferx_fit: `fit$scoring_settings`: unknown key "inner_maxit"', fixed = TRUE
   )
   # The `ferx_save_fit(): ` spelling, with its class kept for handlers.
@@ -590,18 +555,21 @@ test_that("init_as_sd flags survive ferx_save_fit / ferx_load_fit round-trip", {
               "Set FERX_RUN_REAL_FIT=1 to run real-fit persist tests")
   fit <- warfarin_fit()
   # Inject flags so we can round-trip them without a real (sd)-annotated fit
-  fit <- editable_fit(fit)
-  fit$omega_init_as_sd <- c(TRUE, FALSE)
-  fit$sigma_init_as_sd <- TRUE
-  fit$kappa_init_as_sd <- logical(0L)
+  omega_flags <- rep_len(c(TRUE, FALSE), length(fit$eta_names))
+  sigma_flags <- rep_len(TRUE, length(fit$sigma))
+  fit <- fitrx_edit_fit(fit, function(w) {
+    w$omega$init_as_sd <- as.list(omega_flags)
+    w$sigma$init_as_sd <- as.list(sigma_flags)
+    w
+  })
 
   path <- tempfile(fileext = ".fitrx")
   on.exit(unlink(path), add = TRUE)
-  ferx_save_fit(resealed_fit(fit), path)
+  ferx_save_fit(fit, path)
   loaded <- ferx_load_fit(path)
 
-  expect_equal(loaded$omega_init_as_sd, c(TRUE, FALSE))
-  expect_equal(loaded$sigma_init_as_sd, TRUE)
+  expect_equal(loaded$omega_init_as_sd, omega_flags)
+  expect_equal(loaded$sigma_init_as_sd, sigma_flags)
   expect_equal(loaded$kappa_init_as_sd, logical(0L))
 })
 test_that("LTBS residual label survives a .fitrx round-trip", {
@@ -727,52 +695,6 @@ test_that("FIX flags of an in-memory fit survive a .fitrx round-trip (#436)", {
   }
   check_runlog(loaded, "loaded")
 })
-test_that(".fitrx_build_iov_wire uses empty list when shrinkage_kappa_by_occ is absent", {
-  fake_iov_fit <- list(
-    omega_iov              = matrix(0.09, 1, 1),
-    kappa_names            = "KAPPA_CL",
-    kappa_fixed            = FALSE,
-    se_kappa               = NULL,
-    shrinkage_kappa        = 0.15,
-    shrinkage_kappa_by_occ = NULL,
-    omega_iov_param_corr   = NULL
-  )
-  wire <- .fitrx_build_iov_wire(fake_iov_fit)
-  expect_equal(wire$shrinkage_kappa_by_occ, list())
-})
-test_that(".fitrx_build_iov_wire writes the required weight keys empty when unweighted", {
-  # Regression: an explicit null fails core with "invalid type: null, expected
-  # a sequence", and v2 requires the keys, so they are arrays, empty here.
-  fake_iov_fit <- list(
-    omega_iov       = matrix(0.09, 1, 1),
-    kappa_names     = "KAPPA_CL",
-    kappa_fixed     = FALSE,
-    shrinkage_kappa = 0.15,
-    kappa_weights   = NULL
-  )
-  json <- as.character(jsonlite::toJSON(.fitrx_build_iov_wire(fake_iov_fit),
-                                        auto_unbox = TRUE, null = "null", na = "null"))
-  expect_match(json, '"kappa_weights":[]', fixed = TRUE)
-  expect_match(json, '"kappa_weight_typical":[]', fixed = TRUE)
-})
-test_that(".fitrx_build_iov_wire writes the #1031 weight keys as null-holed arrays", {
-  fake_iov_fit <- list(
-    omega_iov            = matrix(0.09, 2, 2),
-    kappa_names          = c("KAPPA_CL", "KAPPA_V"),
-    kappa_fixed          = c(FALSE, FALSE),
-    shrinkage_kappa      = c(0.15, 0.2),
-    kappa_weights        = c(NA_character_, "NARM"),
-    kappa_weight_typical = c(NA_real_, 400)
-  )
-  wire <- .fitrx_build_iov_wire(fake_iov_fit)
-  expect_equal(wire$kappa_weights, list(NA_character_, "NARM"))
-  expect_equal(wire$kappa_weight_typical, list(NA_real_, 400))
-  # `na = "null"` is what the writer uses; the holes must survive as JSON null
-  # so `Vec<Option<..>>` keeps every entry lined up with its kappa.
-  expect_equal(as.character(jsonlite::toJSON(wire$kappa_weights,
-                                             auto_unbox = TRUE, na = "null")),
-               '[null,"NARM"]')
-})
 test_that("shrinkage_kappa_by_occ survives a ferx_save/ferx_load round-trip", {
   skip_on_cran()
   ex  <- ferx_example("warfarin_iov")
@@ -842,63 +764,10 @@ test_that("shrinkage_kappa_by_occ survives a ferx_save/ferx_load round-trip", {
 # ---------------------------------------------------------------------------
 
 
-test_that(".fitrx_method_to_token normalises labels and defaults to focei", {
-  expect_identical(ferx:::.fitrx_method_to_token(NULL), "focei")
-  expect_identical(ferx:::.fitrx_method_to_token(""), "focei")
-  expect_identical(ferx:::.fitrx_method_to_token("FOCEI"), "focei")   # case-insensitive
-  expect_identical(ferx:::.fitrx_method_to_token("FOCE"), "foce")
-  expect_identical(ferx:::.fitrx_method_to_token("foce-gn"), "foce_gn")
-  expect_identical(ferx:::.fitrx_method_to_token("foce_gn"), "foce_gn")
-  expect_identical(ferx:::.fitrx_method_to_token("foce-gn-hybrid"), "foce_gn_hybrid")
-  expect_identical(ferx:::.fitrx_method_to_token("SAEM"), "saem")
-  expect_identical(ferx:::.fitrx_method_to_token("VI"), "vi")
-  expect_identical(ferx:::.fitrx_method_to_token("LAPLACE"), "laplace")
-  expect_identical(ferx:::.fitrx_method_to_token("Mystery"), "mystery") # unknown -> tolower
-})
-test_that(".fitrx_covariance_status_to_token normalises and defaults", {
-  expect_identical(ferx:::.fitrx_covariance_status_to_token(NULL), "not_requested")
-  expect_identical(ferx:::.fitrx_covariance_status_to_token(""), "not_requested")
-  expect_identical(ferx:::.fitrx_covariance_status_to_token("Computed"), "computed")
-  expect_identical(ferx:::.fitrx_covariance_status_to_token("FAILED"), "failed")
-  expect_identical(ferx:::.fitrx_covariance_status_to_token("NotRequested"), "not_requested")
-  expect_identical(ferx:::.fitrx_covariance_status_to_token("sir_fallback"), "sir_fallback")
-  expect_identical(ferx:::.fitrx_covariance_status_to_token("SirFallback"), "sir_fallback")
-  expect_identical(ferx:::.fitrx_covariance_status_to_token("weird"), "weird")
-})
-test_that(".fitrx_error_model_from_sigma_types classifies sigma vectors", {
-  expect_identical(ferx:::.fitrx_error_model_from_sigma_types(NULL), "proportional")
-  expect_identical(ferx:::.fitrx_error_model_from_sigma_types(character(0)), "proportional")
-  expect_identical(ferx:::.fitrx_error_model_from_sigma_types(c("proportional", "Proportional")), "proportional")
-  expect_identical(ferx:::.fitrx_error_model_from_sigma_types(c("additive")), "additive")
-  expect_identical(ferx:::.fitrx_error_model_from_sigma_types(c("additive", "proportional")), "combined")
-})
-test_that(".fitrx_matrix_to_wire emits row-major data and dims", {
-  m <- matrix(c(1, 2, 3, 4, 5, 6), nrow = 2, byrow = TRUE) # [[1,2,3],[4,5,6]]
-  w <- ferx:::.fitrx_matrix_to_wire(m)
-  expect_identical(w$rows, 2L)
-  expect_identical(w$cols, 3L)
-  expect_identical(w$data, c(1, 2, 3, 4, 5, 6)) # row-major
-})
-test_that(".fitrx_matrix_to_wire returns NULL for NULL / non-matrix input", {
-  expect_null(ferx:::.fitrx_matrix_to_wire(NULL))
-  expect_null(ferx:::.fitrx_matrix_to_wire(c(1, 2, 3)))
-})
-test_that(".fitrx_ci_to_wire accepts a 2-column matrix", {
-  ci <- matrix(c(1, 2, 3, 4), ncol = 2, byrow = TRUE) # rows (1,2) (3,4)
-  w  <- ferx:::.fitrx_ci_to_wire(ci)
-  expect_length(w, 2L)
-  expect_identical(w[[1L]], c(1, 2))
-  expect_identical(w[[2L]], c(3, 4))
-})
-test_that(".fitrx_ci_to_wire accepts the legacy flat layout and rejects odd length", {
-  expect_equal(ferx:::.fitrx_ci_to_wire(c(1, 2, 3, 4)), list(c(1, 2), c(3, 4)))
-  expect_null(ferx:::.fitrx_ci_to_wire(c(1, 2, 3)))   # odd length
-  expect_null(ferx:::.fitrx_ci_to_wire(NULL))
-})
-test_that("CI round-trips matrix -> wire -> matrix", {
+test_that("CI pairs read back as a named matrix", {
   ci <- matrix(c(0.5, 1.5, 2.5, 3.5), ncol = 2, byrow = TRUE,
                dimnames = list(c("TVCL", "TVV"), c("lower", "upper")))
-  wire <- ferx:::.fitrx_ci_to_wire(ci)
+  wire <- list(c(0.5, 1.5), c(2.5, 3.5))
   back <- ferx:::.ferx_sir_ci_matrices(wire, NULL, NULL, rownames(ci), NULL, NULL)
   expect_identical(back$sir_ci_theta, ci)
   expect_null(back$sir_ci_omega)
@@ -960,12 +829,6 @@ test_that("a malformed SIR CI vector is refused, not dropped or shifted (#557)",
   expect_identical(ok$sir_ci_omega,
                    matrix(c(1, 3, 2, 4), 2L, dimnames = list(c("A", "B"), c("lower", "upper"))))
 })
-test_that(".fitrx_subject_string_ids extracts character IDs or NULL", {
-  expect_null(ferx:::.fitrx_subject_string_ids(list()))
-  expect_null(ferx:::.fitrx_subject_string_ids(list(ebe_etas = data.frame(x = 1))))
-  fit <- list(ebe_etas = data.frame(ID = c(1, 2, 10), eta = c(0, 0, 0)))
-  expect_identical(ferx:::.fitrx_subject_string_ids(fit), c("1", "2", "10"))
-})
 test_that(".fitrx_sdtab_subject assigns rows from the per-subject counts (#540)", {
   # Gaussian rows subject by subject, then discrete rows subject by subject;
   # a subject with no rows of a kind takes none.
@@ -985,13 +848,6 @@ test_that(".fitrx_sdtab_subject assigns rows from the per-subject counts (#540)"
   expect_null(ferx:::.fitrx_sdtab_subject(c(2L, 1L), c(0L, 0L), 4L))
   expect_null(ferx:::.fitrx_sdtab_subject(c(2L, NA), c(0L, 0L), 2L))
 })
-test_that(".fitrx_write_ebes_csv writes a stable header when ebes are absent", {
-  path <- tempfile(fileext = ".csv")
-  on.exit(unlink(path), add = TRUE)
-  ferx:::.fitrx_write_ebes_csv(list(ebe_etas = NULL), path)
-  expect_identical(readLines(path), "ID,ofv_contribution,n_obs")
-})
-
 # ---- header from test-sde.R ----
 # Tests for SDE (diffusion / EKF) surface on the R side.
 # All tests use make_fake_fit() from helper-trace.R — no real fit needed.
@@ -1292,28 +1148,8 @@ test_that("reader settings with categorical levels survive a .fitrx round trip v
   }
 })
 
-test_that("ferx_save_fit refuses reader settings that are not JSON, by name (#526)", {
-  fit <- rs_fit(ignore = rs_ignore)
-  for (bad in list("{not json", NA_character_, c("{}", "{}"))) {
-    edited <- fit
-    edited <- editable_fit(edited)
-    edited$reader_settings <- bad
-    path <- withr::local_tempfile(fileext = ".fitrx")
-    expect_error(ferx_save_fit(resealed_fit(edited), path), "`fit$reader_settings` is not the engine's JSON",
-                 fixed = TRUE)
-  }
-  edited <- fit
-  edited <- editable_fit(edited)
-  edited$population_fingerprint <- "{not json"
-  path <- withr::local_tempfile(fileext = ".fitrx")
-  expect_error(ferx_save_fit(resealed_fit(edited), path),
-               "`fit$population_fingerprint` is not the engine's JSON", fixed = TRUE)
-})
-
-test_that("ferx_save_fit() warns when the model file changed since the fit (#531 review)", {
+test_that("an edit to the model file after the fit does not reach the bundle (#531 review)", {
   skip_on_cran()
-  skip_if_not(exists("sha256sum", envir = asNamespace("tools")),
-              "tools::sha256sum() needs R >= 4.5")
   ex <- ferx_example("warfarin")
   model <- withr::local_tempfile(fileext = ".ferx")
   file.copy(ex$model, model)
@@ -1326,28 +1162,15 @@ test_that("ferx_save_fit() warns when the model file changed since the fit (#531
   expect_no_warning(ferx_save_fit(fit, path), class = "ferx_model_edited_warning")
   loaded <- suppressWarnings(ferx_load_fit(path))
   expect_no_warning(ferx_save_fit(loaded, path), class = "ferx_model_edited_warning")
-  # One comment line appended after the fit. The fit carries the fitted
-  # bytes (#577), so the bundle is written from them and there is nothing to
+  # One comment line appended after the fit. The fit's bytes hold the fitted
+  # model (#577), so the bundle is written from them and there is nothing to
   # warn about.
+  fitted <- readLines(ex$model)
   cat("# edited after the fit\n", file = model, append = TRUE)
   expect_no_warning(ferx_save_fit(fit, path), class = "ferx_model_edited_warning")
-  # A fit from before the fitted bytes were carried falls back to the file:
-  # the bundle is still written, with the file as it is now, and the warning
-  # names it.
-  fit <- editable_fit(fit)
-  fit$model_text <- NULL
-  fit <- resealed_fit(fit)
-  expect_warning(ferx_save_fit(fit, path), class = "ferx_model_edited_warning")
-  w <- tryCatch(ferx_save_fit(fit, path), ferx_model_edited_warning = conditionMessage)
-  expect_match(w, basename(model), fixed = TRUE)
-  expect_match(w, "no longer matches fit$model_hash", fixed = TRUE)
-  expect_true(file.exists(path))
-  expect_identical(fitrx_fit_json(path)$model_hash, fit$model_hash)
-  # No recorded hash: nothing to compare against.
-  nohash <- editable_fit(fit)
-  nohash$model_hash <- NA_character_
-  expect_no_warning(ferx_save_fit(resealed_fit(nohash), path),
-                    class = "ferx_model_edited_warning")
+  staging <- withr::local_tempdir()
+  utils::unzip(path, files = "model.ferx", exdir = staging)
+  expect_identical(readLines(file.path(staging, "model.ferx")), fitted)
 })
 
 test_that("ferx_save_fit needs no external zip program (#662)", {
@@ -1371,9 +1194,6 @@ test_that("ferx_save_fit needs no external zip program (#662)", {
   loaded <- ferx_load_fit(path)
   expect_equal(loaded$ofv, fit$ofv)
   expect_equal(loaded$theta, fit$theta)
-  # The engine's own reader opens it too, not just R's.
-  core_path <- withr::local_tempfile(fileext = ".fitrx")
-  expect_no_error(ferx:::ferx_rust_fitrx_engine_resave(path, core_path))
 
   # A bare path still lands at <path>.fitrx, not at Info-ZIP's <path>.zip.
   bare <- file.path(withr::local_tempdir(), "run1")
