@@ -100,6 +100,7 @@ cs_base <- function() {
 # relying on a two-iteration covariance step.
 cs_with_cov <- function(fit) {
   n <- length(fit$theta) + nrow(fit$omega) + length(fit$sigma)
+  fit <- editable_fit(fit)
   fit$cov_matrix <- diag(1e-4, n)
   fit
 }
@@ -196,6 +197,7 @@ test_that("C5: a symbolic model with a fit lacking statistics gets core's refusa
   b <- cs_base()
   fit <- cs_with_cov(b$fit)
   # The shape of a fit saved before ferx recorded the statistics.
+  fit <- editable_fit(fit)
   fit$covariate_stats <- NULL
   msgs <- c(
     predict = cs_msg(ferx_predict(b$sym, b$design, fit = fit)),
@@ -220,6 +222,7 @@ test_that("C5: a symbolic model with a fit lacking statistics gets core's refusa
 test_that("C6: statistics for a covariate the model does not read are refused", {
   b <- cs_base()
   fit <- b$fit
+  fit <- editable_fit(fit)
   fit$covariate_stats$covariate <- "AGE"
   msg <- cs_msg(ferx_predict(b$sym, b$design, fit = fit))
   expect_match(msg, "carry no entry for it", fixed = TRUE)
@@ -243,6 +246,7 @@ test_that("C6b: from-fit statistics refusals carry E_COVARIATE_STATS_BINDING", {
     expect_identical(e$block, "covariate_model", info = who)
   }
   bare <- cs_with_cov(b$fit)
+  bare <- editable_fit(bare)
   bare$covariate_stats <- NULL
   coded(ferx_predict(b$sym, b$design, fit = bare), "predict")
   coded(ferx_simulate(b$sym, b$design, fit = bare), "simulate")
@@ -250,6 +254,7 @@ test_that("C6b: from-fit statistics refusals carry E_COVARIATE_STATS_BINDING", {
   coded(ferx_covariance(bare), "covariance")
   coded(ferx_sir(bare, sir_samples = 20L, sir_resamples = 10L), "sir")
   other <- b$fit
+  other <- editable_fit(other)
   other$covariate_stats$covariate <- "AGE"
   coded(ferx_predict(b$sym, b$design, fit = other), "predict, unread covariate")
 })
@@ -257,10 +262,12 @@ test_that("C6b: from-fit statistics refusals carry E_COVARIATE_STATS_BINDING", {
 test_that("C7: malformed statistics are refused in R's terms", {
   b <- cs_base()
   dup <- b$fit
+  dup <- editable_fit(dup)
   dup$covariate_stats <- rbind(dup$covariate_stats, dup$covariate_stats)
   expect_match(cs_msg(ferx_predict(b$sym, b$design, fit = dup)),
                "covariate `WT` is listed twice", fixed = TRUE)
   na <- b$fit
+  na <- editable_fit(na)
   na$covariate_stats$median <- NA_real_
   expect_match(cs_msg(ferx_predict(b$sym, b$design, fit = na)),
                "covariate `WT` has a `median` that is not a finite number",
@@ -306,7 +313,7 @@ test_that("C8d: the engine's own .fitrx loader reads the statistics slot", {
   fit <- ferx_covariance(cs_with_cov(b$fit))
   expect_identical(fit$covariate_stats, b$fit$covariate_stats)
   bundle <- withr::local_tempfile(fileext = ".fitrx")
-  ferx_save_fit(fit, bundle)
+  ferx_save_fit(resealed_fit(fit), bundle)
   model <- withr::local_tempfile(fileext = ".ferx")
   writeLines(
     c(readLines(b$sym), "", "[priors]",
@@ -718,6 +725,7 @@ cs_recoded <- function(to, env = parent.frame()) {
 cs_from_fit_paths <- function(data, drop_fingerprint = FALSE) {
   b <- cs_categorical()
   fit <- cs_with_cov(b$fit)
+  fit <- editable_fit(fit)
   fit$data_path <- data
   fit$data_hash <- NA_character_
   if (drop_fingerprint) fit$population_fingerprint <- NULL

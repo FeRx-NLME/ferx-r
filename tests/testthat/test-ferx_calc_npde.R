@@ -207,6 +207,7 @@ test_that("ferx_calc_npde's legacy guard compares the `model =` file it reads (#
   expect_identical(nrow(out$sdtab), nrow(fit$sdtab))
   # A moved `fit$model_path` is not what is compared: the `model =` file is,
   # and it does not state the clause.
+  fit <- editable_fit(fit)
   fit$model_path <- file.path(tempdir(), "moved-away.ferx")
   e <- tryCatch(ferx_calc_npde(fit, nsim = 20L, seed = 5L, model = ex$model),
                 error = function(e) e)
@@ -318,6 +319,7 @@ test_that("ferx_calc_npde on a [mixture] fit draws its reference at the fitted c
   # nearer their middle and NPD narrows. A reference built at the model file's
   # classes reads neither value and gives the same NPD for both.
   wide <- fit
+  wide <- editable_fit(wide)
   wide$mixture_overrides <- 20 * fit$mixture_overrides
   base_sd <- npd_sd(fit)
   wide_sd <- npd_sd(wide)

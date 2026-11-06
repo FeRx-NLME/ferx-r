@@ -1295,15 +1295,17 @@ test_that("ferx_save_fit refuses reader settings that are not JSON, by name (#52
   fit <- rs_fit(ignore = rs_ignore)
   for (bad in list("{not json", NA_character_, c("{}", "{}"))) {
     edited <- fit
+    edited <- editable_fit(edited)
     edited$reader_settings <- bad
     path <- withr::local_tempfile(fileext = ".fitrx")
-    expect_error(ferx_save_fit(edited, path), "`fit$reader_settings` is not the engine's JSON",
+    expect_error(ferx_save_fit(resealed_fit(edited), path), "`fit$reader_settings` is not the engine's JSON",
                  fixed = TRUE)
   }
   edited <- fit
+  edited <- editable_fit(edited)
   edited$population_fingerprint <- "{not json"
   path <- withr::local_tempfile(fileext = ".fitrx")
-  expect_error(ferx_save_fit(edited, path),
+  expect_error(ferx_save_fit(resealed_fit(edited), path),
                "`fit$population_fingerprint` is not the engine's JSON", fixed = TRUE)
 })
 

@@ -169,8 +169,9 @@ test_that("a bundle of the old format fails with a version error (#711)", {
 test_that("a fit that carries no bundle is refused by ferx_save_fit() (#711)", {
   skip_on_cran()
   fit <- fitrx_parity_cases$plain()
+  fit <- editable_fit(fit)
   fit$bundle <- NULL
-  expect_error(ferx_save_fit(fit, tempfile(fileext = ".fitrx")), "Refit")
+  expect_error(ferx_save_fit(resealed_fit(fit), tempfile(fileext = ".fitrx")), "Refit")
 })
 
 test_that("a model the engine cannot read leaves cov_matrix unnamed (#417)", {

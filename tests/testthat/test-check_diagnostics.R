@@ -50,6 +50,7 @@ test_that("dw_statistic and iwres_lag1_r on fit are numeric scalars or NA", {
 test_that("check_diagnostics works on a fit with no shrinkage data", {
   fit <- warfarin_fit()
   fit2 <- fit
+  fit2 <- editable_fit(fit2)
   fit2$shrinkage_eta <- NULL
   fit2$shrinkage_eps <- NULL
   d <- check_diagnostics(fit2)
@@ -58,6 +59,7 @@ test_that("check_diagnostics works on a fit with no shrinkage data", {
 test_that("check_diagnostics works on a fit with no autocorrelation data", {
   fit <- warfarin_fit()
   fit2 <- fit
+  fit2 <- editable_fit(fit2)
   fit2$dw_statistic <- NA_real_
   fit2$iwres_lag1_r <- NA_real_
   d <- check_diagnostics(fit2)
@@ -65,6 +67,7 @@ test_that("check_diagnostics works on a fit with no autocorrelation data", {
 })
 test_that("check_diagnostics flag values match .dw_label output", {
   fit <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$dw_statistic <- 1.2
   fit$iwres_lag1_r <- 0.4
   d <- check_diagnostics(fit)
@@ -80,6 +83,7 @@ test_that("check_diagnostics flag values match .dw_label output", {
 })
 test_that("check_diagnostics handles multi-sigma shrinkage_eps vector", {
   fit <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$shrinkage_eps  <- c(0.10, 0.15)
   fit$sigma_names    <- c("EPS_PROP", "EPS_ADD")
   fit$shrinkage_eta  <- NULL
@@ -90,6 +94,7 @@ test_that("check_diagnostics handles multi-sigma shrinkage_eps vector", {
 })
 test_that("check_diagnostics uses EPS1/EPS2 fallback when sigma_names absent for multi-sigma", {
   fit <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$shrinkage_eps <- c(0.08, 0.12)
   fit$sigma_names   <- NULL
   fit$shrinkage_eta <- NULL

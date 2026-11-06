@@ -11,7 +11,7 @@
 # (`block`, `label`, `group`, `contrast`; blocks in sorted order).
 fitrx_engine_trip <- function(fit) {
   r_path <- tempfile(fileext = ".fitrx")
-  ferx_save_fit(fit, r_path, include_data = TRUE)
+  ferx_save_fit(resealed_fit(fit), r_path, include_data = TRUE)
   core_path <- tempfile(fileext = ".fitrx")
   read <- ferx:::ferx_rust_fitrx_engine_resave(r_path, core_path)
   list(r_path = r_path, core_path = core_path, read = read)

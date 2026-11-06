@@ -2276,6 +2276,31 @@ ferx_fit(m, d, settings = list(n_starts = 8L, multi_start_seed = 123L))
 }
 }
 
+\section{Read-only fits}{
+
+A fit is a record of what the engine estimated, so its core fields cannot be
+changed: \code{fit$theta <- ...}, \code{fit[["theta"]] <- ...} and
+\code{fit["theta"] <- ...} are errors of class
+\code{ferx_fit_readonly_error}, as is any other assignment to a field the fit
+has or could have. To change an estimate, refit; to add to a fit, use
+\code{\link{ferx_covariance}}, \code{\link{ferx_sir}} or
+\code{\link{ferx_calc_npde}}, which return a new fit.
+
+Your own objects can sit beside the results under a new name, such as
+\code{fit$reviewer_note <- "final run"}. They are yours to change, keep through
+those steps, and survive \code{\link{ferx_save_fit}} and
+\code{\link{ferx_load_fit}} when they are plain data. A name that starts with
+a field the fit lacks is refused, since \code{fit$se_theta} would read
+\code{fit$se_theta_note} by partial matching when there is no
+\code{se_theta}.
+
+R cannot stop every edit: \code{unclass()} gets past these checks. The fit
+therefore carries a digest of its core fields, and
+\code{\link{ferx_save_fit}}, \code{\link{ferx_covariance}},
+\code{\link{ferx_sir}} and \code{\link{ferx_calc_npde}} refuse one that does
+not match, with an error of class \code{ferx_fit_modified_error}.
+}
+
 \section{Post-fit outputs and pipe extensions}{
 
 

@@ -205,6 +205,7 @@ test_that("non-1..n and text IDs give the binary fit's own SIR and SEs (#550, #4
 # number for each subject. A numeric ID is that number; a text ID's is its
 # position, which the engine refuses, so the refusal says to re-fit.
 predating_ids <- function(f) {
+  f <- editable_fit(f)
   f$subject_ids <- NULL
   f
 }

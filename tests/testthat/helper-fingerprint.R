@@ -8,6 +8,7 @@ foreign_scheme_fit <- function(fit) {
   fp <- fit$population_fingerprint
   edited <- sub('"scheme":[0-9]+', '"scheme":1', fp)
   stopifnot(is.character(fp), !identical(edited, fp))
+  fit <- editable_fit(fit)
   fit$population_fingerprint <- edited
   fit
 }

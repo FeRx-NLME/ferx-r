@@ -185,6 +185,7 @@ test_that("SIR output is unchanged by which spelling of the reference it gets", 
   # pre-#366 double count harmless: if a future engine used `ofv_hat` as
   # anything but a normalized difference, this would start failing and say so.
   as_data_half <- fit
+  as_data_half <- editable_fit(as_data_half)
   as_data_half$ofv <- fit$ofv_data
   as_data_half$ofv_prior <- 0
 

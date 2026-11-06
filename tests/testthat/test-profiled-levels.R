@@ -129,6 +129,7 @@ test_that("ferx_covariance() repeats the profiled covariance step, live and relo
   # refresh compares it: a record that disagrees with the fit's own column is
   # refused, never written onto the wrong rows.
   bad <- p
+  bad <- editable_fit(bad)
   bad$profiled_blocks <- character(0)
   expect_error(quiet(ferx_covariance(bad)), "laid the theta levels out differently",
                fixed = TRUE)
@@ -377,6 +378,7 @@ test_that("a level held on its bound survives ferx_covariance() and .fitrx (ferx
   # The step rebuilds the list from the estimates and the box, and the
   # replay takes the step's: a fit that lost it gets it back.
   lost <- b
+  lost <- editable_fit(lost)
   lost$profiled_levels_at_bound <- character(0)
   expect_identical(quiet(ferx_covariance(lost))$profiled_levels_at_bound, held)
 
@@ -409,8 +411,9 @@ test_that("a held level the fit does not have is refused, not dropped", {
   skip_on_cran()
   b <- bounded_fits()$profiled
   bad <- b
+  bad <- editable_fit(bad)
   bad$profiled_levels_at_bound <- "PLACEBO[STUDY=9,TIME=0]"
-  expect_error(quiet(ferx_save_fit(bad, withr::local_tempfile(fileext = ".fitrx"))),
+  expect_error(quiet(ferx_save_fit(resealed_fit(bad), withr::local_tempfile(fileext = ".fitrx"))),
                "names a theta the fit does not have", fixed = TRUE)
   expect_error(quiet(ferx_sir(bad, sir_samples = 10L, sir_resamples = 5L)),
                "which is not one of the fit's thetas", fixed = TRUE)

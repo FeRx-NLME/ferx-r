@@ -381,6 +381,7 @@ test_that("ferx_calc_npde() checks a frame equal to the fit's data against the f
   fit <- .fit_quiet(ex$model, df, covariance = FALSE, settings = list(maxiter = 2L))
   expect_true(nzchar(fit$population_fingerprint))
   # As in a later session: the recorded path is another session's.
+  fit <- editable_fit(fit)
   fit$data_path <- file.path(tempdir(), "other-session", "ferx-data",
                              basename(fit$data_path))
   seen <- NULL
@@ -431,6 +432,7 @@ test_that("simulate and predict with `fit =` and no `data` use the fit's own dat
 
   # A fit whose data can no longer be found falls back to the [data] block.
   lost <- fit
+  lost <- editable_fit(lost)
   lost$data_source <- NULL
   lost$data_path <- file.path(tempdir(), "no-such-data.csv")
   expect_setequal(unique(ferx_simulate(model, n_sim = 1L, seed = 1L, fit = lost)$ID),

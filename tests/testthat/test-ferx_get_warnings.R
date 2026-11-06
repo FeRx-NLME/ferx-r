@@ -1965,10 +1965,11 @@ test_that("a loaded fit keeps its older warnings after ferx_sir()", {
   skip_if(is.null(fit$cov_matrix), "covariance step did not produce a matrix")
   # Give the loaded fit an older warning of a known category to track.
   old <- "Outer optimization did not converge"
+  fit <- editable_fit(fit)
   fit$warnings <- unique(c(fit$warnings, old))
   path <- tempfile(fileext = ".fitrx")
   on.exit(unlink(path))
-  ferx_save_fit(fit, path)
+  ferx_save_fit(resealed_fit(fit), path)
   loaded <- ferx_load_fit(path)
   expect_true(is.data.frame(loaded$warnings_structured))
 

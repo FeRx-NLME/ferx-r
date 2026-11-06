@@ -82,6 +82,7 @@ test_that("a replay that computes replaces the fit's failed covariance rows (#61
   )
   row <- ferx:::.ferx_classify_flat_warnings(failed)
   expect_identical(row$category, "covariance_failed")
+  fit <- editable_fit(fit)
   fit$warnings <- c(fit$warnings, failed)
   fit$warnings_structured <- rbind(fit$warnings_structured, row)
   fit$covariance_status <- "failed"
@@ -242,12 +243,13 @@ test_that("ferx_covariance replays the fit's own covariance-step settings", {
   # it: a fit without `call_settings` / `model_file_settings` (a bundle
   # ferx-core wrote) replays the file's step too.
   bare <- fits$file
+  bare <- editable_fit(bare)
   bare$call_settings <- list()
   bare$model_file_settings <- list()
   expect_identical(se(q(ferx_covariance(bare))), se(fits$file))
   # ... and the call's override of it is R's to hand back: without the record
   # the call fit replays at the model file's (here: the defaults) and moves.
-  bare <- fits$call
+  bare <- editable_fit(fits$call)
   bare$call_settings <- list()
   expect_false(isTRUE(all.equal(se(q(ferx_covariance(bare))), se(fits$call))))
 })
@@ -296,6 +298,7 @@ test_that("ferx_covariance refuses to run after the model file is tampered with"
 
 test_that("ferx_covariance errors when the fit has no recorded model path", {
   fit <- warfarin_fit()
+  fit <- editable_fit(fit)
   fit$model_path <- NULL
   expect_error(ferx_covariance(fit), "no recorded model_path")
 })
@@ -483,6 +486,7 @@ test_that("ferx_covariance on an IOV fit reproduces the inline covariance step (
 
 test_that("ferx_covariance refuses a kappa fit that has lost its omega_iov (#473)", {
   fit <- warfarin_iov_cov_fit()
+  fit <- editable_fit(fit)
   fit$omega_iov <- NULL
   # The prefix is the shared builder's only per-binding input: anchoring it
   # catches the two call sites swapping labels.
@@ -493,6 +497,7 @@ test_that("ferx_covariance refuses a kappa fit that has lost its omega_iov (#473
 test_that("ferx_covariance refuses a kappa matrix of the wrong size (#473)", {
   fit <- block_kappa_cov_free_fit()
   expect_identical(dim(fit$omega_iov), c(2L, 2L))
+  fit <- editable_fit(fit)
   fit$omega_iov <- fit$omega_iov[1L, 1L, drop = FALSE]
   expect_error(ferx_covariance(fit),
                "omega_iov dim 1 does not match model (2 expected)", fixed = TRUE,
@@ -597,10 +602,11 @@ test_that("ferx_covariance on a [mixture] fit matches the in-fit step (#441)", {
   # relative at worst here).
   expect_length(res$bare$mixture_overrides, 2L)
   no_packed <- res$bare
+  no_packed <- editable_fit(no_packed)
   no_packed$packed_estimate <- NULL
   expect_equal(ferx_covariance(no_packed)$cov_matrix, res$in_fit$cov_matrix,
                tolerance = 1e-6)
-  ferx_save_fit(no_packed, path)
+  ferx_save_fit(resealed_fit(no_packed), path)
   reloaded <- ferx_load_fit(path)
   expect_null(reloaded$packed_estimate)
   expect_identical(reloaded$mixture_overrides, res$bare$mixture_overrides)
@@ -609,6 +615,7 @@ test_that("ferx_covariance on a [mixture] fit matches the in-fit step (#441)", {
   # With neither, the overrides cannot be recovered: a clear refusal, never a
   # matrix centred on the declared override inits.
   neither <- no_packed
+  neither <- editable_fit(neither)
   neither$mixture_overrides <- NULL
   expect_error(ferx_covariance(neither),
                "records neither their fitted values", fixed = TRUE)
@@ -673,6 +680,7 @@ test_that("the IDs reach the engine's check in fit order, not sorted or re-read 
   gappy <- relabelled_fit("warfarin", "gappy", relabel_gappy)
   rotated <- gappy
   ids <- gappy$ebe_etas$ID
+  rotated <- editable_fit(rotated)
   rotated$ebe_etas$ID <- c(ids[-1], ids[1])
   # ferx-core #1813: one coded refusal. A live fit carries its fingerprint, so
   # the population is verified as the fit's and what differs is the fit's own
@@ -688,6 +696,7 @@ test_that("the IDs reach the engine's check in fit order, not sorted or re-read 
   # Without a fingerprint (a fit saved before it was recorded) the subject
   # list is all there is to compare: the population is not the fit's.
   legacy <- rotated
+  legacy <- editable_fit(legacy)
   legacy$population_fingerprint <- NULL
   e2 <- tryCatch(ferx_covariance(legacy), error = function(e) e)
   expect_s3_class(e2, "ferx_engine_error")
@@ -869,6 +878,7 @@ test_that("the engine checks the re-read population against the fit's fingerprin
   fit <- rs_fit(ignore = rs_ignore)
   edited <- sub("DV < 1.0", "DV < 0.9", fit$reader_settings, fixed = TRUE)
   expect_false(identical(edited, fit$reader_settings))
+  fit <- editable_fit(fit)
   fit$reader_settings <- edited
   expect_error(ferx_covariance(fit), "is not the one the fit was given",
                fixed = TRUE)
@@ -888,10 +898,11 @@ test_that("ferx_covariance records the fingerprint check's note on the fit (#559
 
 test_that("a malformed fit$reader_settings is refused by name, not a panic (#462)", {
   fit <- rs_fit(ignore = rs_ignore)
+  fit <- editable_fit(fit)
   fit$reader_settings <- "{not json"
   expect_error(ferx_covariance(fit), "ferx_covariance: `fit$reader_settings`",
                fixed = TRUE)
-  fit <- rs_fit(ignore = rs_ignore)
+  fit <- editable_fit(rs_fit(ignore = rs_ignore))
   fit$population_fingerprint <- "{not json"
   expect_error(ferx_covariance(fit), "ferx_covariance: `fit$population_fingerprint`",
                fixed = TRUE)
@@ -960,6 +971,7 @@ test_that("a legacy fit on an edited model file hears the hash mismatch, not the
   fit <- rs_legacy(rs_fit(ignore = rs_ignore))
   model <- withr::local_tempfile(fileext = ".ferx")
   writeLines(c(readLines(fit$model_path), "# edited"), model)
+  fit <- editable_fit(fit)
   fit$model_path <- model
   e <- tryCatch(ferx_covariance(fit), error = function(e) e)
   msg <- conditionMessage(e)
@@ -1122,10 +1134,12 @@ test_that("ferx_covariance refuses kappa EBEs that do not line up with the subje
   # occasions it re-reads, and the step starts from a cold inner solve.
   short <- fit
   last <- utils::tail(short$ebe_kappas$ID, 1L)
+  short <- editable_fit(short)
   short$ebe_kappas <- short$ebe_kappas[short$ebe_kappas$ID != last, , drop = FALSE]
   expect_error(ferx_covariance(short),
                "^ferx_covariance: fit\\$ebe_kappas has no rows for subject")
   extra <- fit
+  extra <- editable_fit(extra)
   extra$ebe_kappas <- rbind(extra$ebe_kappas, extra$ebe_kappas[1L, , drop = FALSE])
   expect_error(ferx_covariance(extra),
                "^ferx_covariance: fit\\$ebe_kappas row [0-9]+ .* does not belong")
@@ -1218,6 +1232,7 @@ test_that("a fit whose step never ran holds its frozen theta too, saved or not (
 test_that("a theta_fixed of the wrong length is refused by name (#613)", {
   skip_on_cran()
   fit <- unused_theta_warfarin_fit()
+  fit <- editable_fit(fit)
   fit$theta_fixed <- c(FALSE, TRUE)
   expect_error(ferx_covariance(fit),
                "fit$theta_fixed has 2 entries but the model has 4 thetas",

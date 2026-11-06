@@ -62,6 +62,7 @@
 #' @export
 ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = NULL) {
   fit_pieces <- validate_fit_for_params(fit)
+  .ferx_fit_check_unmodified(fit, "ferx_calc_npde")
   if (is.null(fit$sdtab) || !is.data.frame(fit$sdtab) || nrow(fit$sdtab) == 0L) {
     stop("`fit$sdtab` is empty; cannot attach NPDE/NPD. Refit so the fit carries an sdtab.")
   }
@@ -167,9 +168,10 @@ ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = 
     warning("ferx_calc_npde: ", note, call. = FALSE)
   }
 
-  fit$sdtab <- .ferx_attach_npde(fit$sdtab, npde_tbl,
-                                 tte_rows = .fitrx_sdtab_blocks(fit)$tte)
-  fit
+  tte_rows <- .fitrx_sdtab_blocks(fit)$tte
+  fit <- .ferx_fit_unseal(fit)
+  fit$sdtab <- .ferx_attach_npde(fit$sdtab, npde_tbl, tte_rows = tte_rows)
+  .ferx_fit_reseal(fit)
 }
 
 # Internal: splice NPDE/NPD onto an sdtab by position.

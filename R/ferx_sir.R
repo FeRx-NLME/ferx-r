@@ -186,6 +186,7 @@ ferx_sir <- function(fit,
   if (!inherits(fit, "ferx_fit")) {
     stop("`fit` must be a ferx_fit object (from ferx_fit() or ferx_load_fit()).")
   }
+  .ferx_fit_check_unmodified(fit, "ferx_sir")
   threads_arg <- .ferx_step_threads(threads, fit)
 
   # Validate the SIR knobs up-front so user errors surface as clean R
@@ -428,6 +429,7 @@ ferx_sir <- function(fit,
   # Non-finite ESS shouldn't happen in the standalone path (the engine
   # would have thrown an error before returning), but if it does, warn
   # before discarding it so users know the run was degenerate.
+  fit <- .ferx_fit_unseal(fit)
   if (!is.finite(raw$sir_ess)) {
     warning(
       "ferx_sir: effective sample size is not finite (got ", raw$sir_ess,
@@ -516,5 +518,5 @@ ferx_sir <- function(fit,
     fit, raw$theta_levels, "ferx_sir", intervals = TRUE
   )
 
-  fit
+  .ferx_fit_reseal(fit)
 }

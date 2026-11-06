@@ -182,6 +182,7 @@ ferx_covariance <- function(fit,
   if (!inherits(fit, "ferx_fit")) {
     stop("`fit` must be a ferx_fit object (from ferx_fit() or ferx_load_fit()).")
   }
+  .ferx_fit_check_unmodified(fit, "ferx_covariance")
   threads_arg <- .ferx_step_threads(threads, fit)
 
   # Normalise + validate covariance_method up-front so a typo surfaces as a
@@ -382,6 +383,7 @@ ferx_covariance <- function(fit,
   # Read before the merge below replaces it: the estimator the fit's own step
   # ran, which a replay of the fit's method should reproduce (#659).
   fit_method <- .fitrx_unwrap_opt_chr(fit$covariance_method)
+  fit <- .ferx_fit_unseal(fit)
   fit$covariance_status <- raw$covariance_status %||% "not_requested"
   # The estimator this step ran, which labels the matrix it produced; NA with
   # no matrix, as on ferx_fit() (ferx-core #1382).
@@ -538,7 +540,7 @@ ferx_covariance <- function(fit,
     fit, raw$theta_levels, "ferx_covariance", intervals = FALSE
   )
 
-  fit
+  .ferx_fit_reseal(fit)
 }
 
 # The covariance step's own settings the fit's call gave it

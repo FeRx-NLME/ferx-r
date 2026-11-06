@@ -90,6 +90,7 @@ test_that("P3: an iov_occasion passed only through settings = reaches the steps 
 
   # Without the rule the engine has nothing to derive occasions with.
   bare <- fit
+  bare <- editable_fit(bare)
   bare$iov_occasion <- NULL
   expect_error(ferx_covariance(bare), "records no IOV occasion rule", fixed = TRUE)
 })
@@ -144,6 +145,7 @@ pp_twins <- function(rule, env = parent.frame()) {
   model <- pp_iov_model(NULL, env)
   fit <- pp_fit(model, data, settings = list(iov_occasion = rule))
   expect_identical(fit$iov_occasion, rule)
+  fit <- editable_fit(fit)
   for (k in c("theta", "omega", "sigma", "omega_iov", "cov_matrix")) fit[[k]] <- col[[k]]
   list(col = col, fit = fit, model = model, data = data)
 }
@@ -202,6 +204,7 @@ test_that("P10: a model-file iov_occasion reaches ferx_simulate() without a fit 
 test_that("P11: a fit that records no rule falls back to the model file's, or is refused (#523)", {
   tw <- pp_twins("dose")
   legacy <- tw$fit
+  legacy <- editable_fit(legacy)
   legacy$iov_occasion <- NULL
   # No rule in the model file and no OCC column: nothing to derive occasions with.
   expect_error(ferx_simulate(tw$model, tw$data, fit = legacy, n_sim = 1L, seed = 1L),
@@ -225,10 +228,12 @@ test_that("P12: from-fit ferx_predict() reads fit$iov_occasion (#523 review r1)"
   # pinned by what it does with a rule it cannot use, and with none at all.
   tw <- pp_twins("dose")
   bad <- tw$fit
+  bad <- editable_fit(bad)
   bad$iov_occasion <- "weekly"
   expect_error(ferx_predict(tw$model, tw$data, fit = bad),
                "ferx_predict: `fit$iov_occasion`", fixed = TRUE)
   legacy <- tw$fit
+  legacy <- editable_fit(legacy)
   legacy$iov_occasion <- NULL
   expect_error(ferx_predict(tw$model, tw$data, fit = legacy),
                "records no IOV occasion rule", fixed = TRUE)
@@ -258,6 +263,7 @@ test_that("P13: from-fit ferx_predict_survival() reads fit$iov_occasion (#523 re
   fit <- suppressWarnings(ferx_fit(model, data, method = "focei", verbose = FALSE))
   expect_identical(fit$iov_occasion, "column")
   expect_no_error(ferx_predict_survival(model, data, times = c(0, 6), fit = fit))
+  fit <- editable_fit(fit)
   fit$iov_occasion <- "weekly"
   expect_error(ferx_predict_survival(model, data, times = c(0, 6), fit = fit),
                "ferx_predict_survival: `fit$iov_occasion`", fixed = TRUE)

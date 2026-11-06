@@ -38,6 +38,7 @@ percent_model_callers <- function() {
   ex <- ferx_example("warfarin")
   repointed <- function(m) {
     fit <- warfarin_fit_cov()
+    fit <- editable_fit(fit)
     fit$model_path <- m
     fit$model_hash <- NULL
     fit$data_hash <- NULL

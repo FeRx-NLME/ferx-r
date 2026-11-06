@@ -29,8 +29,8 @@ FITRX_FORMAT_VERSION <- "2"
 #' The bundle's \code{model.ferx} holds the bytes that were fitted, the ones
 #' \code{fit$model_hash} names, taken from \code{fit$model_text}: editing the
 #' model file after \code{\link{ferx_fit}} does not change what is saved. A
-#' fit that does not carry them (one made by an older ferx, or one whose
-#' \code{model_text} was changed by hand) falls back to a copy of the file at
+#' fit that does not carry them (one made by an older ferx) falls back to a
+#' copy of the file at
 #' \code{fit$model_path} as it is when you save. If that file has been edited
 #' since the fit (its SHA-256 no longer matches \code{fit$model_hash}), the
 #' bundle is still written, but a warning of class
@@ -38,6 +38,17 @@ FITRX_FORMAT_VERSION <- "2"
 #' cannot be made, and \code{\link{ferx_sir}} / \code{\link{ferx_covariance}}
 #' refuse the fit. Restore the file and save again, or refit. That check needs
 #' R 4.5 or later (\code{tools::sha256sum()}) and is skipped on older R.
+#'
+#' A fit is read-only (see \dQuote{Read-only fits} in \code{\link{ferx_fit}}).
+#' Its core fields are compared with the digest taken when it was built, and a
+#' fit that does not match, such as one edited through \code{unclass()}, or that
+#' carries no digest, is refused with an error of class
+#' \code{ferx_fit_modified_error}. What was added under a new name is written to
+#' the bundle's \code{interface_extras.json} and comes back with
+#' \code{\link{ferx_load_fit}}; an addition that is not plain data (a function,
+#' an environment, a fitted \code{lm}) cannot be written as JSON and is left out
+#' with a warning of class \code{ferx_fit_addition_dropped_warning}, whose
+#' \code{fields} names it.
 #'
 #' The schema is shared with the ferx-core Rust crate; see its
 #' \code{docs/src/file-formats/fitrx.md} for the full field reference.
@@ -96,6 +107,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
   if (!is.logical(write_model) || length(write_model) != 1L || is.na(write_model)) {
     stop("`write_model` must be TRUE or FALSE.")
   }
+  .ferx_fit_check_saveable(fit, "ferx_save_fit")
   if (!is.raw(fit$bundle) || length(fit$bundle) == 0L) {
     stop("This fit carries no .fitrx bundle: it was made by an older ferx, or ",
          "the engine could not serialize it. Refit with ferx_fit().",
@@ -204,8 +216,8 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
   #
   # Fall back to copying the file at `fit$model_path` only when the text does
   # not hash to `fit$model_hash`: a fit made before the glue took both from one
-  # read, a fit loaded by a ferx that read the bundle's text with `readLines()`,
-  # or a `model_text` changed by hand. The copy keeps the bytes as they are
+  # read, or a fit loaded by a ferx that read the bundle's text with
+  # `readLines()`. The copy keeps the bytes as they are
   # now, so it warns when they are not the fitted ones (#576). With no file
   # either (a hand-constructed fit), `fit$model_source` is the best
   # representation there is.
@@ -1323,6 +1335,8 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
   # Core's conddist.csv keeps neither count.
   cd <- fit$cond_dist
   if (!is.null(cd)) out$cond_dist <- list(nsamp = cd$nsamp, burnin = cd$burnin)
+  additions <- .fitrx_user_additions_wire(fit)
+  if (length(additions) > 0L) out$user_additions <- additions
   out
 }
 

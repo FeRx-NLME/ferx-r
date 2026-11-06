@@ -522,6 +522,7 @@ test_that("a [mixture] fit with per-class overrides simulates each class under i
   # spread can be read off exactly. Without the override class 2 would run at
   # the base omega, about a sixth of its fitted value.
   tight <- fit
+  tight <- editable_fit(tight)
   tight$cov_matrix <- fit$cov_matrix * 1e-10
   sim <- muffle_mixl_lint(ferx_simulate_with_uncertainty(
     mod, dat, tight, n_uncertainty_draws = 3L, n_sim_per_draw = 100L, seed = 11L

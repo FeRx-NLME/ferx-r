@@ -100,6 +100,7 @@ test_that("ferx_update_model() takes the fitted text, not the edited file (#678)
   fit <- update_model_fit()
   before <- ferx_update_model(fit)
   copy <- fit
+  copy <- editable_fit(copy)
   copy$model_path <- tempfile(fileext = ".ferx")
   writeLines("not a model", copy$model_path)
   on.exit(unlink(copy$model_path), add = TRUE)
@@ -145,9 +146,10 @@ test_that("ferx_save_fit(write_model = TRUE) never overwrites the fit's model (#
   dir.create(dir)
   on.exit(unlink(dir, recursive = TRUE), add = TRUE)
   copy <- fit
+  copy <- editable_fit(copy)
   copy$model_path <- file.path(dir, "run1_final.ferx")
   file.copy(fit$model_path, copy$model_path)
-  expect_error(ferx_save_fit(copy, file.path(dir, "run1.fitrx"), write_model = TRUE),
+  expect_error(ferx_save_fit(resealed_fit(copy), file.path(dir, "run1.fitrx"), write_model = TRUE),
                "overwrite the fit's own model file")
   expect_false(file.exists(file.path(dir, "run1.fitrx")))
 })
@@ -230,6 +232,7 @@ test_that("a FIX block_sigma is left as declared (#678)", {
 test_that("comments on a declaration spread over lines are kept (#678)", {
   fit <- update_model_fit()
   copy <- fit
+  copy <- editable_fit(copy)
   copy$model_text <- NULL
   copy$model_path <- write_test_model(list(
     parameters = c(
@@ -292,6 +295,7 @@ test_that("a free block_sigma the fit has no correlation for warns (#678)", {
   case <- block_sigma_case(decl)
   on.exit(unlink(dirname(case$model), recursive = TRUE), add = TRUE)
   fit <- case$fit
+  fit <- editable_fit(fit)
   fit$residual_correlations <- NULL  # as on a fit from an older bundle
   expect_warning(text <- ferx_update_model(fit),
                  "no fitted value in the fit for the ADD_ERR ~ PROP_ERR correlation")
@@ -387,6 +391,7 @@ test_that("a [mixture] fit's per-class overrides take their fitted values (#678)
 test_that("a [mixture] fit without recorded overrides warns and leaves them (#678)", {
   fit <- mixture_update_fit()
   on.exit(unlink(fit$model_path), add = TRUE)
+  fit <- editable_fit(fit)
   fit$mixture_overrides <- NULL
   expect_warning(text <- ferx_update_model(fit), "left as written")
   expect_true("  omega(2) ETA_CL ~ 0.10   # class-2 IIV" %in%

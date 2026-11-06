@@ -80,6 +80,7 @@ hf_fit <- function() {
   file.copy(ferx_example("two_cpt_oral_cov")$data, data)
   fit <- ferx_fit(model, data, verbose = FALSE)
   n <- length(fit$theta) + nrow(fit$omega) + length(fit$sigma)
+  fit <- editable_fit(fit)
   fit$cov_matrix <- diag(1e-4, n)
   list(fit = fit, model = model)
 }
@@ -144,6 +145,7 @@ test_that("a fit with no model_hash is not checked: the from-fit prologue still 
     h <- hf_fit()
     hf_edit(h$model, hf_edits[[edit]]$edit)
     fit <- h$fit
+    fit <- editable_fit(fit)
     fit$model_hash <- NA_character_
     for (entry in names(hf_calls)) {
       info <- paste(edit, entry)

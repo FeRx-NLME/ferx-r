@@ -166,7 +166,7 @@ test_that("a bundle without reader settings loads with neither field and still r
   fit <- rs_legacy(warfarin_fit_cov())
   skip_if(is.null(fit$cov_matrix), "covariance step did not converge - skipping")
   path <- withr::local_tempfile(fileext = ".fitrx")
-  ferx_save_fit(fit, path)
+  ferx_save_fit(resealed_fit(fit), path)
   staging <- withr::local_tempdir()
   utils::unzip(path, exdir = staging)
   wire <- jsonlite::read_json(file.path(staging, "fit.json"), simplifyVector = FALSE)

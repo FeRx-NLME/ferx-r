@@ -40,6 +40,7 @@ rs_rel <- function(a, b) max(abs(unname(a) - unname(b)) / abs(unname(b)))
 
 # A fit as one made before #462 recorded its selection: neither field.
 rs_legacy <- function(fit) {
+  fit <- editable_fit(fit)
   fit$reader_settings <- NULL
   fit$population_fingerprint <- NULL
   fit
@@ -109,6 +110,7 @@ rs_late_dose_fit <- local({
 rs_edited_model <- function(fit, env = parent.frame()) {
   model <- withr::local_tempfile(fileext = ".ferx", .local_envir = env)
   writeLines(c(readLines(fit$model_path), "# edited after the fit"), model)
+  fit <- editable_fit(fit)
   fit$model_path <- model
   fit
 }

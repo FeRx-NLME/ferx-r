@@ -185,9 +185,10 @@ test_that("ferx_save_fit() warns, per class, when a fit carries no FIX flags", {
   # With every flag present: quiet.
   expect_no_warning(ferx_save_fit(fit, f), message = "FIX flags")
   old <- fit
+  old <- editable_fit(old)
   old[c("theta_fixed", "omega_fixed", "sigma_fixed", "kappa_fixed")] <- NULL
   w <- character()
-  withCallingHandlers(ferx_save_fit(old, f),
+  withCallingHandlers(ferx_save_fit(resealed_fit(old), f),
                       warning = function(cnd) {
                         w <<- c(w, conditionMessage(cnd))
                         invokeRestart("muffleWarning")
@@ -201,8 +202,9 @@ test_that("ferx_save_fit() warns, per class, when a fit carries no FIX flags", {
   expect_match(w, "Refit", fixed = TRUE)
   # One class missing: only that one is named.
   part <- fit
+  part <- editable_fit(part)
   part$sigma_fixed <- NULL
-  expect_warning(ferx_save_fit(part, f), "FIX flags for sigma are unknown")
+  expect_warning(ferx_save_fit(resealed_fit(part), f), "FIX flags for sigma are unknown")
 })
 
 # -- Live fits -----------------------------------------------------------------
@@ -393,8 +395,9 @@ test_that("ferx_save_fit() warns and fills on FIX flags of the wrong length (#45
   on.exit(unlink(out), add = TRUE)
   # A short vector is no record either: the class is named and filled.
   short <- fit
+  short <- editable_fit(short)
   short$theta_fixed <- short$theta_fixed[-1L]
-  expect_warning(ferx_save_fit(short, out), "FIX flags for theta are unknown",
+  expect_warning(ferx_save_fit(resealed_fit(short), out), "FIX flags for theta are unknown",
                  fixed = TRUE)
   expect_identical(unlist(fitrx_fit_json(out)$theta$fixed),
                    rep(FALSE, length(fit$theta)))

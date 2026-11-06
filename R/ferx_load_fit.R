@@ -20,6 +20,11 @@
 #' \code{sir_ci_*} matrices keep their row names (the declared parameter
 #' names).
 #'
+#' What was added to the fit under a new name comes back as it was saved (see
+#' \dQuote{Read-only fits} in \code{\link{ferx_fit}}). An addition that is not
+#' plain data, or whose name is a core field of this ferx, is left out with a
+#' warning of class \code{ferx_fit_addition_dropped_warning} (\code{fields}).
+#'
 #' To call \code{\link{ferx_predict}} on a loaded fit, the embedded model
 #' source can be re-parsed through the existing pipeline.
 #'
@@ -132,7 +137,8 @@ ferx_load_fit <- function(path) {
     data            = wire_data_path %||% raw$data_path %||% path,
     settings_used   = extras$call_settings %||% list(),
     model_file_opts = extras$model_file_settings %||% list(),
-    loaded          = TRUE
+    loaded          = TRUE,
+    seal            = FALSE
   )
   # Never a name that starts with `theta_levels`: `$` matches partially, so
   # with `theta_levels` absent, `fit$theta_levels` would read that record.
@@ -148,7 +154,7 @@ ferx_load_fit <- function(path) {
     result$cond_dist$nsamp <- as.integer(extras$cond_dist$nsamp %||% NA_integer_)
     result$cond_dist$burnin <- as.integer(extras$cond_dist$burnin %||% NA_integer_)
   }
-  result
+  .fitrx_restore_user_additions(.ferx_fit_seal(result), extras$user_additions)
 }
 
 # The keys of `interface_extras.json` a loaded fit takes as they are.

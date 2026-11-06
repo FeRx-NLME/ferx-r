@@ -145,6 +145,12 @@ Before treating example work as done:
 
 `ferx_predict()` returns a data frame: ID, TIME, PRED.
 
+A `ferx_fit` is read-only (#713), and `R/internal-fit-guard.R` says how. `$<-`, `[[<-` and `[<-` refuse a core field; `ferx_save_fit()` compares the core fields with the digest in the `ferx_seal` attribute, taken when the fit was built. Names added by the user live beside the core fields, outside the digest, and travel in `interface_extras.json` under `r.user_additions`.
+
+- Code that refreshes a fit works on the plain list: `fit <- .ferx_fit_unseal(fit)`, assign, `.ferx_fit_reseal(fit)`. Check the input first with `.ferx_fit_check_unmodified()`, or the step seals in an edit.
+- A new field that a build can leave out goes in `.FERX_FIT_OPTIONAL_FIELDS`. Otherwise, on a fit without it, the name passes as a user addition: writable, and outside the digest.
+- A test that needs an impossible fit uses `editable_fit()`, and `resealed_fit()` to save one (`tests/testthat/helper-editable-fit.R`).
+
 ## Output Label Convention
 
 All output functions must display the **bare declared variable name** — never wrap in `OMEGA()`, `SIGMA()`, or `KAPPA()`:

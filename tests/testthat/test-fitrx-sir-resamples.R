@@ -48,7 +48,7 @@ sir_res_fields <- c("sir_resamples", "sir_resamples_n", "sir_resamples_dim",
 
 sir_res_roundtrip <- function(fit) {
   path <- withr::local_tempfile(fileext = ".fitrx", .local_envir = parent.frame())
-  ferx_save_fit(fit, path)
+  ferx_save_fit(resealed_fit(fit), path)
   ferx_load_fit(path)
 }
 
@@ -117,6 +117,7 @@ test_that("fit.json carries the draws in ferx-core's resamples_packed shape", {
 # for the shapes the standalone fixture does not have. Only the wire is under
 # test, so the draws need not be the model's own.
 sir_res_reshaped <- function(fit, n, d) {
+  fit <- editable_fit(fit)
   fit$sir_resamples <- seq_len(n * d) / 3 + 0.1
   fit$sir_resamples_n <- as.integer(n)
   fit$sir_resamples_dim <- as.integer(d)
@@ -205,14 +206,16 @@ test_that("ferx_save_fit() refuses draws that do not fill n x dim", {
   skip_if(is.null(fit), sir_res_cov_skip)
   path <- withr::local_tempfile(fileext = ".fitrx")
   short <- fit
+  short <- editable_fit(short)
   short$sir_resamples <- short$sir_resamples[-1L]
-  expect_error(ferx_save_fit(short, path),
+  expect_error(ferx_save_fit(resealed_fit(short), path),
                paste0("holds ", length(short$sir_resamples), " values.*edited after the fit"))
   # Draws without their shape are the same edit, not a silent drop (round 1 #3).
   for (field in c("sir_resamples_n", "sir_resamples_dim")) {
     no_shape <- fit
+    no_shape <- editable_fit(no_shape)
     no_shape[field] <- list(NULL)
-    expect_error(ferx_save_fit(no_shape, path), "edited after the fit", info = field)
+    expect_error(ferx_save_fit(resealed_fit(no_shape), path), "edited after the fit", info = field)
   }
 })
 
@@ -222,8 +225,9 @@ test_that("ferx_save_fit() refuses non-finite draws (round 1 #1)", {
   path <- withr::local_tempfile(fileext = ".fitrx")
   for (bad in c(NaN, NA, Inf, -Inf)) {
     f <- fit
+    f <- editable_fit(f)
     f$sir_resamples[3L] <- bad
-    expect_error(ferx_save_fit(f, path), "1 non-finite value", info = format(bad))
+    expect_error(ferx_save_fit(resealed_fit(f), path), "1 non-finite value", info = format(bad))
   }
 })
 

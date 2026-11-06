@@ -310,6 +310,7 @@ test_that("ferx_sir surfaces engine proposal-conditioning warnings end-to-end", 
   # Adding to a diagonal keeps the matrix PSD, so this is a covariance a real
   # (non-identified) fit could produce rather than a malformed input.
   degenerate <- fit
+  degenerate <- editable_fit(degenerate)
   degenerate$cov_matrix[1L, 1L] <- degenerate$cov_matrix[1L, 1L] + 1e8
 
   out <- ferx_sir(degenerate, sir_samples = 8L, sir_resamples = 4L, sir_seed = 1L)
@@ -416,6 +417,7 @@ test_that("ferx_sir on an IOV fit follows the fit's kappa, not the model file's 
   fit <- warfarin_iov_sir_fit()
   skip_if(is.null(fit$cov_matrix) || is.null(fit$sir_ess), sir_cov_skip)
   scaled <- fit
+  scaled <- editable_fit(scaled)
   scaled$omega_iov <- fit$omega_iov * 10
 
   base <- standalone_sir(fit)
@@ -429,6 +431,7 @@ test_that("ferx_sir on an IOV fit follows the fit's kappa, not the model file's 
 test_that("ferx_sir refuses a kappa fit that has lost its omega_iov (#465)", {
   fit <- warfarin_iov_sir_fit()
   skip_if(is.null(fit$cov_matrix), sir_cov_skip)
+  fit <- editable_fit(fit)
   fit$omega_iov <- NULL
   # Resampling around the model file's initial kappa would be a silently wrong
   # answer, so the binding refuses instead.
@@ -468,6 +471,7 @@ test_that("ferx_sir reports the in-fit kappa interval, and print() shows it (#17
   fit <- warfarin_iov_sir_fit()
   skip_if(is.null(fit$cov_matrix) || is.null(fit$sir_ess), sir_cov_skip)
   bare <- fit
+  bare <- editable_fit(bare)
   bare$sir_ci_kappa <- NULL
   # Mutation: drop `sir_ci_kappa` from ferx_rust_sir()'s list, or from
   # ferx_sir()'s reshape -> NULL, not identical().
@@ -723,6 +727,7 @@ test_that("ferx_sir drops only the replaced run's SIR lines (ferx-core #1723)", 
             "SIR requested but no covariance")
   stale <- c("SIR: effective sample size is 3.5 of 1000 draws",
              "SIR failed: covariance not positive definite")
+  fit <- editable_fit(fit)
   fit$warnings <- c(kept, stale)
   fit$warnings_structured <- data.frame(
     severity = "warning", category = "sir", message = c(kept, stale),

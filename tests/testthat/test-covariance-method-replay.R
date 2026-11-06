@@ -74,9 +74,10 @@ mbma_file_model <- function(m, profiled = FALSE) {
 
 # A bundle saved before #659: the same fit, without the estimator's label.
 legacy <- function(f) {
+  f <- editable_fit(f)
   f$covariance_method <- NULL
   path <- withr::local_tempfile(fileext = ".fitrx", .local_envir = parent.frame())
-  q(ferx_save_fit(f, path))
+  q(ferx_save_fit(resealed_fit(f), path))
   q(ferx_load_fit(path))
 }
 
@@ -142,6 +143,7 @@ test_that("[fit_options] covariance_method is replayed on mbma_placebo, profiled
     # The glue reads it from the hash-checked model file, so a fit without R's
     # records of the call and the file (a bundle ferx-core wrote) keeps it.
     bare <- f
+    bare <- editable_fit(bare)
     bare$call_settings <- list()
     bare$model_file_settings <- list()
     expect_identical(se(replay(bare)$fit), se(f), info = info)
@@ -170,6 +172,7 @@ test_that("an `s` the fit could not form is not formed by the replay either", {
   # estimator": covariance_status says the step failed, and there is no ran
   # label to set against the fit's.
   labelled <- f
+  labelled <- editable_fit(labelled)
   labelled$covariance_method <- "s"
   got <- replay(labelled)
   expect_identical(got$fit$covariance_status, "failed")
@@ -193,6 +196,7 @@ test_that("a fit saved before #659 loads, and falls back to its call, the model 
   expect_identical(c(got$msgs, got$warns), character())
 
   # With no record of the call either, the default, and a note saying so.
+  old <- editable_fit(old)
   old$call_settings <- list()
   got <- replay(old)
   expect_identical(se(got$fit), se(fits$r))
@@ -205,7 +209,7 @@ test_that("a fit saved before #659 loads, and falls back to its call, the model 
   # The model file's [fit_options] in between: hash-checked, so also the fit's.
   m <- mbma_file_model("rsr")
   f <- q(ferx_fit(m$model, m$data, verbose = FALSE))
-  old <- legacy(f)
+  old <- editable_fit(legacy(f))
   old$call_settings <- list()
   got <- replay(old)
   expect_identical(se(got$fit), se(f))
@@ -222,6 +226,7 @@ test_that("a replay that runs another estimator than the fit recorded warns", {
   fits <- warfarin_by_method()
   # The label survives, the record of the call that asked for it does not.
   f <- fits$rsr
+  f <- editable_fit(f)
   f$call_settings <- list()
   got <- replay(f)
   expect_identical(se(got$fit), se(fits$r))
@@ -238,6 +243,7 @@ test_that("a replay that runs another estimator than the fit recorded warns", {
 
   # The same, with the call record asking for another estimator than ran.
   f <- fits$rsr
+  f <- editable_fit(f)
   f$call_settings$covariance_method <- "r"
   got <- replay(f)
   expect_identical(se(got$fit), se(fits$r))
@@ -267,6 +273,7 @@ test_that("the call's covariance_method wins over [fit_options], in the fit and 
   expect_identical(c(got$msgs, got$warns), character())
   # With the call record gone the file's rsr is replayed, against the label.
   bare <- f
+  bare <- editable_fit(bare)
   bare$call_settings <- list()
   got <- replay(bare)
   expect_identical(se(got$fit), se(rsr))

@@ -84,6 +84,7 @@ test_that("a one-component gradient is written as an array", {
   skip_on_cran()
   # `auto_unbox` would collapse it to the scalar the engine refuses.
   fit <- gradient_fit()
+  fit <- editable_fit(fit)
   fit$final_gradient <- 0.25
   trip <- fitrx_engine_trip(fit)
   on.exit(unlink(c(trip$r_path, trip$core_path)), add = TRUE)
@@ -96,6 +97,7 @@ test_that("a non-finite gradient does not cost the bundle its engine load", {
   # JSON has no NaN: it would be written as a null the engine's `Vec<f64>`
   # refuses. The gradient goes, its label with it, and the bundle still loads.
   fit <- gradient_fit("bobyqa", gradient = "fd")
+  fit <- editable_fit(fit)
   fit$final_gradient[[1L]] <- NaN
   trip <- fitrx_engine_trip(fit)
   on.exit(unlink(c(trip$r_path, trip$core_path)), add = TRUE)

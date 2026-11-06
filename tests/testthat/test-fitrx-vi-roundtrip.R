@@ -128,11 +128,12 @@ test_that("a distinct objective trace and a superseding stage round-trip (#508)"
   # `[covariate_nn]` fit and a `methods = [vi, focei]` chain would, so a
   # writer that always omitted either field fails here.
   fit <- vi_fit()
+  fit <- editable_fit(fit)
   fit$vi$objective_trace <- fit$vi$elbo_trace + 1.5
   fit$vi$superseded_by <- "FOCEI"
 
   path <- tempfile(fileext = ".fitrx")
-  ferx_save_fit(fit, path)
+  ferx_save_fit(resealed_fit(fit), path)
   wire <- fitrx_fit_json(path)$vi
   expect_equal(unlist(wire$objective_trace), fit$vi$objective_trace,
                tolerance = 0)
