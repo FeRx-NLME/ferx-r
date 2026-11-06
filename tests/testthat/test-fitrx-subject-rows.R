@@ -284,9 +284,9 @@ test_that("a bundle ferx-core wrote alone rebuilds its binary rows as core's sdt
 # simulated under, ferx-core #2372) is only on a fit of data drawn from a
 # [simulation] block, which ferx_fit() never makes.
 mixnum_output_case <- local({
-  case <- NULL
+  cache <- new.env(parent = emptyenv())
   function() {
-    if (is.null(case)) {
+    if (is.null(cache$case)) {
       d <- utils::read.csv(test_path("fixtures", "mixture_iv.csv"))
       ids <- unique(d$ID)
       n <- length(ids)
@@ -312,9 +312,9 @@ mixnum_output_case <- local({
       writeLines(m, model)
       fit <- muffle_mixl_lint(ferx_fit(model, data, method = "focei",
                                        covariance = FALSE, verbose = FALSE))
-      case <<- list(fit = fit, data = d)
+      cache$case <- list(fit = fit, data = d)
     }
-    case
+    cache$case
   }
 })
 
