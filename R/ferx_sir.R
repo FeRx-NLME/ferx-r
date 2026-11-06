@@ -109,7 +109,11 @@
 #'   `settings = list(sir_df = ...)` in [ferx_fit()]. `NULL` (the default)
 #'   takes the fit's recorded value, else 5.
 #'
-#' @return The input `fit`, augmented with `sir_ess`, `sir_ci_theta`,
+#' @return A new fit with new bytes, the input `fit` being left as it was: the
+#'   step runs on `fit$bundle`, so a change made to the fit's list by hand does
+#'   not reach it, and a fit with no bundle, such as one from an `.rds` written
+#'   by an older ferx, is refused with an error of class
+#'   `ferx_no_bundle_error`: refit it. The new fit has `sir_ess`, `sir_ci_theta`,
 #'   `sir_ci_omega`, `sir_ci_sigma`, `sir_ci_kappa` (one row per IOV kappa
 #'   variance, named by `kappa_names`; NULL without IOV), `sir_seed_used`
 #'   (the seed this run resampled with: `sir_seed`, or 12345 when it is
@@ -222,6 +226,7 @@ ferx_sir <- function(fit,
         !(is.numeric(sir_df) && length(sir_df) == 1L && !is.na(sir_df) && sir_df >= 1)) {
     stop("`sir_df` must be NULL or a single number >= 1 (`Inf` for a normal proposal).")
   }
+  bundle <- .ferx_fit_bundle(fit, "ferx_sir")
   # Before the model-file checks, so a loaded fit without a layout is refused
   # for that reason even when its bundle had no model file (#531).
   .ferx_refuse_unavailable_levels(fit)
@@ -282,65 +287,10 @@ ferx_sir <- function(fit,
          ") must be <= `sir_samples` (", resolved$samples, source_of(sir_samples), ")")
   }
 
-  # Build the flat eta_hats matrix. `ebe_etas` is a data frame: first column
-  # ID, subsequent columns are one per ETA. We strip ID and flatten row-major
-  # so each subject contributes `n_eta` contiguous values.
-  ebes <- fit$ebe_etas
-  n_eta <- nrow(fit$omega)
-  if (is.null(n_eta)) n_eta <- 0L
-
-  if (n_eta == 0L) {
-    # Fixed-effects-only (naive-pooled) fit - ferx-core #989. No inner
-    # empirical-Bayes problem means no EBEs to warm-start from, and
-    # `fit$ebe_etas` is NULL rather than an empty data frame. SIR itself still
-    # applies: it resamples the theta/sigma block, which is the whole parameter
-    # vector here.
-    eta_hats_flat <- numeric(0)
-  } else {
-    if (is.null(ebes) || nrow(ebes) == 0L) {
-      stop(
-        "ferx_sir: fit$ebe_etas is empty, but fit$omega is ", n_eta, "x", n_eta,
-        " so this fit should carry per-subject EBEs. Cannot warm-start the ",
-        "inner loop."
-      )
-    }
-    eta_cols <- setdiff(names(ebes), c("ID", "ofv_contribution", "n_obs"))
-    if (length(eta_cols) != n_eta) {
-      stop(
-        "ferx_sir: fit$ebe_etas has ", length(eta_cols), " ETA columns (",
-        paste(eta_cols, collapse = ", "),
-        ") but fit$omega is ", n_eta, "x", n_eta, ". ",
-        "The EBE table and the omega matrix must agree on n_eta - was ",
-        "this fit object hand-edited or assembled from incompatible parts?"
-      )
-    }
-    eta_mat <- as.matrix(ebes[, eta_cols, drop = FALSE])
-    storage.mode(eta_mat) <- "double"
-    eta_hats_flat <- as.numeric(t(eta_mat))  # row-major
-  }
-  # The fit's own subject IDs, in fit order (#468); their count is the
-  # subject count, and in the n_eta > 0 branch they come from the same
-  # `ebe_etas` rows as `eta_mat`.
-  subject_ids <- .ferx_fit_subject_id_set(fit, "ferx_sir")
-
-  # The Rust binding wants row-major matrices and treats empty hash strings
-  # as "no integrity check needed". Pass the recorded hashes through; the
-  # Rust wrapper enforces equality when non-empty.
-  #
-  # Hash plumbing has three states we need to handle:
-  #   1. Non-empty hex string: forward it; Rust enforces equality.
-  #   2. NULL (older binary that didn't populate the field): forward "";
-  #      Rust skips the check. (This is the "as-given" semantics.)
-  #   3. NA_character_ (Rust ran but sha256_file failed; the post-fit
-  #      `.ok()` in api.rs converts the Err to None, which the R wrapper
-  #      stores as NA): we MUST coerce to "" here. `%||%` only catches
-  #      NULL, and NA at the FFI boundary stringifies to "NA", which
-  #      compares unequal to any real digest and would trigger a
-  #      spurious "hash mismatch" error.
-  # (`.ferx_hash_arg()` in zzz.R implements the NULL/NA -> "" coercion.)
-  model_hash_arg <- .ferx_hash_arg(fit$model_hash)
-  data_hash_arg <- .ferx_hash_arg(fit$data_hash)
-  if (!nzchar(model_hash_arg) || !nzchar(data_hash_arg)) {
+  # The engine checks the files against the hashes the bytes record; a fit that
+  # records none is not checked (`.ferx_hash_arg()` in zzz.R reads NULL and NA
+  # alike).
+  if (!nzchar(.ferx_hash_arg(fit$model_hash)) || !nzchar(.ferx_hash_arg(fit$data_hash))) {
     warning(
       "ferx_sir: one or more file hashes are missing on the fit; ",
       "the integrity check will be skipped for the affected file(s). ",
@@ -348,173 +298,30 @@ ferx_sir <- function(fit,
     )
   }
 
-  omega_flat <- as.numeric(t(fit$omega))
-  cov_flat <- as.numeric(t(fit$cov_matrix))
-
-  # The fitted kappa (IOV) covariance: without it the engine would rebuild the
-  # fit at the model file's initial kappa and resample around the wrong centre,
-  # so the glue refuses a kappa fit that lacks it (#465).
-  iov_args <- .ferx_omega_iov_args(fit)
-  binding_args <- .ferx_fit_binding_args(fit)
-  method_args <- .ferx_fit_method_args(fit)
-  kappa_args <- .ferx_ebe_kappa_args(fit)
-  reader_args <- .ferx_fit_reader_args(fit)
   .ferx_refuse_unrecorded_selection(
     fit, "ferx_sir",
     "Refit with `ferx_fit(..., sir = TRUE)`, or refit and call ferx_sir() on the new fit."
   )
   # A refusal reaches the caller as `ferx_engine_error` with ferx-core's code
   # when the engine gave it one (#498); see `.ferx_engine_call()`.
-  # IDs from the sdtab fallback get the reason a mismatch refusal names (#555).
-  raw <- .ferx_sdtab_ids_hint(.ferx_engine_call(ferx_rust_sir(
+  new_bundle <- .ferx_engine_call(ferx_rust_sir(
+    bundle = bundle,
     model_path = model_path,
     data_path = data_path,
-    model_hash = model_hash_arg,
-    data_hash = data_hash_arg,
-    ofv = as.numeric(fit$ofv),
-    ofv_prior = .ferx_ofv_prior(fit),
-    # Read through `.ferx_fit_interaction()`: a FOCEI fit's record can say
-    # FALSE (a bundle written before #591), which resampled it under FOCE.
-    interaction = .ferx_fit_interaction(fit),
-    theta = as.numeric(fit$theta),
-    omega_flat = omega_flat,
-    omega_dim = nrow(fit$omega),
-    sigma = as.numeric(fit$sigma),
-    omega_iov_flat = iov_args$omega_iov_flat,
-    omega_iov_dim = iov_args$omega_iov_dim,
-    residual_rho = .ferx_residual_rho_vec(fit),
-    residual_rho_pairs = .ferx_residual_rho_pairs(fit),
-    cov_matrix_flat = cov_flat,
-    cov_matrix_dim = nrow(fit$cov_matrix),
-    eta_hats_flat = eta_hats_flat,
-    subject_ids = subject_ids$ids,
-    # The occasion rule the fit derived its occasions with; without it the
-    # engine falls back to the model file's and refuses a rule passed only
-    # through `settings =` (#512).
-    iov_occasion = as.character(fit$iov_occasion %||% ""),
-    # The reader settings the fit read its data with and the fingerprint of
-    # what it read: the engine re-reads the fit's own rows and verifies them
-    # (#462).
-    reader_settings = reader_args$reader_settings,
-    population_fingerprint = reader_args$population_fingerprint,
-    # How the fit was scored, and its exact packed estimate (#472).
-    scoring_settings = record_args$scoring_settings,
     sir_settings = record_args$sir_settings,
-    packed_estimate = record_args$packed_estimate,
-    # A [mixture] fit's fitted per-class overrides (ferx-core #1765).
-    mixture_overrides = record_args$mixture_overrides,
-    bloq_method = record_args$bloq_method,
-    # The fit's method, which the engine scores and routes the covariance
-    # step on, and its per-occasion kappa EBEs, which the covariance step
-    # starts from (#591).
-    method = method_args$method,
-    method_chain = method_args$method_chain,
-    ebe_kappas_flat = kappa_args$ebe_kappas_flat,
-    ebe_kappa_ids = kappa_args$ebe_kappa_ids,
-    # The thetas the fit held, the engine's auto-frozen ones included (#613).
-    theta_fixed = .ferx_fit_theta_fixed(fit),
     threads = threads_arg,
-    verbose = isTRUE(verbose),
-    fit_bindings = binding_args$fit_bindings
-  ), model_path, data_path), subject_ids$source)
+    verbose = isTRUE(verbose)
+  ), model_path, data_path)
 
-  # All error paths inside `ferx_rust_sir` raise an R condition and never
-  # return `NULL`, so we don't need to test for that here.
-
-  # Merge results onto the fit object. Mirrors the post-processing
-  # `ferx_fit()` applies to its inline SIR output so downstream code sees
-  # the same shapes regardless of which entry point produced them.
-  #
-  # Non-finite ESS shouldn't happen in the standalone path (the engine
-  # would have thrown an error before returning), but if it does, warn
-  # before discarding it so users know the run was degenerate.
-  if (!is.finite(raw$sir_ess)) {
+  # A new fit from the new bytes: `fit` is left as it was.
+  new_fit <- .ferx_fit_with_bundle(fit, new_bundle)
+  ess <- new_fit$sir_ess
+  if (length(ess) == 1L && !is.finite(ess)) {
     warning(
-      "ferx_sir: effective sample size is not finite (got ", raw$sir_ess,
+      "ferx_sir: effective sample size is not finite (got ", ess,
       "). The proposal distribution may be a poor match for the true ",
       "uncertainty - increase `sir_samples`, or reconsider the underlying fit."
     )
-    fit$sir_ess <- NULL
-  } else {
-    fit$sir_ess <- raw$sir_ess
   }
-
-  ci <- .ferx_sir_ci_matrices(
-    raw$sir_ci_theta, raw$sir_ci_omega, raw$sir_ci_sigma,
-    names(fit$theta), fit$eta_names, fit$sigma_names
-  )
-  fit$sir_ci_theta <- ci$sir_ci_theta
-  fit$sir_ci_omega <- ci$sir_ci_omega
-  fit$sir_ci_sigma <- ci$sir_ci_sigma
-  fit$sir_ci_kappa <- .ferx_sir_ci_kappa(raw$sir_ci_kappa, fit$kappa_names)
-  # The seed and settings this run used (ferx-core #1767), not the input fit's.
-  fit$sir_seed_used <- raw$sir_seed_used
-  fit$sir_settings <- raw$sir_settings
-  # The width this run's pool had, not the fit's (#527).
-  if (!is.null(raw$n_threads_used)) {
-    fit$n_threads_used <- as.integer(raw$n_threads_used)
-  }
-
-  # A run that did not keep its draws drops the input fit's: they belong to
-  # an earlier run, and ferx_save_fit() would otherwise write them beside
-  # this run's intervals (#549).
-  keep <- isTRUE(fit$sir_settings$keep_samples)
-  fit$sir_resamples <- if (keep) as.numeric(raw$sir_resamples)
-  fit$sir_resamples_n <- if (keep) as.integer(raw$sir_resamples_n)
-  fit$sir_resamples_dim <- if (keep) as.integer(raw$sir_resamples_dim)
-
-  # Append any SIR-step warnings to the structured warnings table. The engine
-  # can emit warnings during the SIR run (e.g. ESS collapse, proposal issues);
-  # they would otherwise be silently dropped since only ferx_fit() calls the
-  # assembler. We append rather than replace so pre-SIR warnings are preserved.
-  #
-  # Two sources feed the table: rows derived R-side by the assembler, and the
-  # engine's own SIR-step messages, which the binding returns as a flat
-  # character vector with no severity/category (ferx-core#1021 added the
-  # proposal-conditioning diagnostics that make this matter: a rank-deficient
-  # proposal, or one shrunk to keep draws inside the parameter bounds, qualifies
-  # the CIs this very call just wrote onto the fit). Classify them with the
-  # engine's classify_warning, as ferx_covariance() does for its own (#611):
-  # it files the `SIR` lines under `sir` itself, and anything else under the
-  # class the same message gets in a fit.
-  #
-  # This run's `SIR: ` lines replace an earlier SIR run's, and its success
-  # replaces an in-fit `SIR failed: ` line, as ferx-core's own run_sir does
-  # (#1723): otherwise a re-run with `sir_scale = "natural"` - the low-ESS
-  # warning's own advice - would print the old run's "ESS 3.5" beside the new
-  # intervals. `SIR requested ...` and `SIR fallback ...` lines describe a
-  # different step and stay.
-  stale_sir <- function(msg) startsWith(msg, "SIR: ") | startsWith(msg, "SIR failed: ")
-  if (length(fit$warnings) > 0L) {
-    fit$warnings <- fit$warnings[!stale_sir(as.character(fit$warnings))]
-  }
-  if (is.data.frame(fit$warnings_structured) && nrow(fit$warnings_structured) > 0L) {
-    fit$warnings_structured <- fit$warnings_structured[
-      !stale_sir(as.character(fit$warnings_structured$message)), , drop = FALSE]
-  }
-  if (length(raw$warnings) > 0L) {
-    fit$warnings <- unique(c(fit$warnings, as.character(raw$warnings)))
-  }
-  # Details payloads (ferx-core #2268) follow their warnings: a dropped stale
-  # one loses its entry, and this run's are added.
-  fit$warning_details <- .ferx_merge_warning_details(
-    fit$warning_details, .ferx_parse_warning_details(raw$warning_details), fit$warnings
-  )
-  assembled <- .ferx_assemble_structured_warnings(raw, fit)
-  engine_rows <- .ferx_classify_flat_warnings(raw$warnings)
-  sir_warnings_df <- rbind(assembled, engine_rows)
-  if (nrow(sir_warnings_df) > 0L) {
-    existing <- fit$warnings_structured
-    fit$warnings_structured <- if (is.data.frame(existing) && nrow(existing) > 0L)
-      unique(rbind(existing, sir_warnings_df))
-    else
-      unique(sir_warnings_df)
-  }
-  # Each theta level's SIR interval from this run's draws (#528); NA when the
-  # run kept none, never an earlier run's.
-  fit$theta_levels <- .ferx_theta_levels_refresh(
-    fit, raw$theta_levels, "ferx_sir", intervals = TRUE
-  )
-
-  fit
+  new_fit
 }

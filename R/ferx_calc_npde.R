@@ -43,9 +43,13 @@
 #' @param data Path to the NONMEM-format CSV, or a data.frame (see
 #'   \code{\link{ferx_fit}}). Defaults to the fit's own data.
 #'
-#' @return The input \code{fit}, with \code{NPDE} and \code{NPD} columns added
-#'   to its \code{sdtab} data frame (replacing any existing ones). Because the
-#'   diagnostics live in \code{fit$sdtab}, downstream consumers such as
+#' @return A new fit with new bytes, the input \code{fit} being left as it was,
+#'   with \code{NPDE} and \code{NPD} columns added to its \code{sdtab} data
+#'   frame (replacing any existing ones). They are in the fit's bundle, so they
+#'   survive \code{\link{ferx_save_fit}}. A fit with no bundle, such as one from
+#'   an \code{.rds} written by an older ferx, is refused with an error of class
+#'   \code{ferx_no_bundle_error}: refit it. Because the diagnostics live in
+#'   \code{fit$sdtab}, downstream consumers such as
 #'   \code{\link{ferx_xpose}} and goodness-of-fit plots pick them up
 #'   automatically.
 #'
@@ -62,6 +66,7 @@
 #' @export
 ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = NULL) {
   fit_pieces <- validate_fit_for_params(fit)
+  bundle <- .ferx_fit_bundle(fit, "ferx_calc_npde")
   if (is.null(fit$sdtab) || !is.data.frame(fit$sdtab) || nrow(fit$sdtab) == 0L) {
     stop("`fit$sdtab` is empty; cannot attach NPDE/NPD. Refit so the fit carries an sdtab.")
   }
@@ -167,9 +172,12 @@ ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = 
     warning("ferx_calc_npde: ", note, call. = FALSE)
   }
 
-  fit$sdtab <- .ferx_attach_npde(fit$sdtab, npde_tbl,
-                                 tte_rows = .fitrx_sdtab_blocks(fit)$tte)
-  fit
+  # A new fit from new bytes, the columns in them; `fit` is left as it was.
+  sdtab <- .ferx_attach_npde(fit$sdtab, npde_tbl,
+                             tte_rows = .fitrx_sdtab_blocks(fit)$tte)
+  .ferx_fit_with_bundle(
+    fit, ferx_rust_bundle_with_sdtab(bundle, lapply(sdtab, as.numeric))
+  )
 }
 
 # Internal: splice NPDE/NPD onto an sdtab by position.

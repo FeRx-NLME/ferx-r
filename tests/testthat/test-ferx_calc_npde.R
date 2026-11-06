@@ -11,10 +11,10 @@
 
 # A minimal structurally-valid fit that passes validate_fit_for_params and the
 # sdtab gate but carries no model/data path, so the nsim/seed/file guards fire
-# before any FFI call.
+# before any FFI call. Its bytes are never parsed: the guards come first.
 .stub_fit <- function() {
   list(theta = c(1, 2), omega = matrix(c(0.1, 0, 0, 0.1), 2, 2), sigma = 0.05,
-       sdtab = data.frame(ID = 1, TIME = 1, DV = 5))
+       sdtab = data.frame(ID = 1, TIME = 1, DV = 5), bundle = as.raw(1))
 }
 
 
@@ -110,7 +110,7 @@ test_that("ferx_calc_npde uses fit$model_path / fit$data_path by default", {
 })
 test_that("ferx_calc_npde errors when the fit carries no sdtab", {
   bad <- list(theta = c(1, 2), omega = matrix(c(0.1, 0, 0, 0.1), 2, 2),
-              sigma = 0.05)  # no sdtab
+              sigma = 0.05, bundle = as.raw(1))  # no sdtab
   expect_error(ferx_calc_npde(bad), "sdtab` is empty")
 })
 test_that("ferx_calc_npde surfaces a clean error when the engine returns NULL", {
@@ -119,7 +119,7 @@ test_that("ferx_calc_npde surfaces a clean error when the engine returns NULL", 
   fit <- list(theta = c(1, 2), omega = matrix(c(0.1, 0, 0, 0.1), 2, 2),
               sigma = 0.05, sdtab = data.frame(ID = 1, TIME = 1, DV = 5),
               model_path = tempfile(fileext = ".ferx"),
-              data_path  = tempfile(fileext = ".csv"))
+              data_path  = tempfile(fileext = ".csv"), bundle = as.raw(1))
   file.create(fit$model_path, fit$data_path)
   testthat::local_mocked_bindings(ferx_rust_npde_from_fit = function(...) NULL)
   expect_error(ferx_calc_npde(fit), "engine returned no NPDE table")

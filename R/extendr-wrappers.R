@@ -81,14 +81,14 @@ ferx_rust_npde_from_fit <- function(model_path, data_path, theta, omega_flat, om
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_sir <- function(model_path, data_path, model_hash, data_hash, ofv, ofv_prior, interaction, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, residual_rho_pairs, cov_matrix_flat, cov_matrix_dim, eta_hats_flat, subject_ids, iov_occasion, reader_settings, population_fingerprint, scoring_settings, sir_settings, packed_estimate, mixture_overrides, bloq_method, method, method_chain, ebe_kappas_flat, ebe_kappa_ids, theta_fixed, threads, verbose, fit_bindings) {
-  .Call("wrap__ferx_rust_sir", model_path, data_path, model_hash, data_hash, ofv, ofv_prior, interaction, theta, omega_flat, as.integer(omega_dim), sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, as.integer(residual_rho_pairs), cov_matrix_flat, as.integer(cov_matrix_dim), eta_hats_flat, as.character(subject_ids), iov_occasion, reader_settings, population_fingerprint, scoring_settings, sir_settings, packed_estimate, mixture_overrides, bloq_method, method, as.character(method_chain), ebe_kappas_flat, as.character(ebe_kappa_ids), theta_fixed, as.integer(threads), verbose, fit_bindings)
+ferx_rust_sir <- function(bundle, model_path, data_path, sir_settings, threads, verbose) {
+  .Call("wrap__ferx_rust_sir", bundle, model_path, data_path, sir_settings, as.integer(threads), verbose)
 }
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_covariance <- function(model_path, data_path, model_hash, data_hash, ofv, ofv_prior, interaction, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, residual_rho_pairs, eta_hats_flat, subject_ids, iov_occasion, reader_settings, population_fingerprint, scoring_settings, sir_settings, packed_estimate, mixture_overrides, bloq_method, method, method_chain, ebe_kappas_flat, ebe_kappa_ids, theta_fixed, covariance_method, step_settings_keys, step_settings_values, threads, verbose, fit_bindings) {
-  .Call("wrap__ferx_rust_covariance", model_path, data_path, model_hash, data_hash, ofv, ofv_prior, interaction, theta, omega_flat, as.integer(omega_dim), sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, as.integer(residual_rho_pairs), eta_hats_flat, as.character(subject_ids), iov_occasion, reader_settings, population_fingerprint, scoring_settings, sir_settings, packed_estimate, mixture_overrides, bloq_method, method, as.character(method_chain), ebe_kappas_flat, as.character(ebe_kappa_ids), theta_fixed, covariance_method, as.character(step_settings_keys), as.character(step_settings_values), as.integer(threads), verbose, fit_bindings)
+ferx_rust_covariance <- function(bundle, model_path, data_path, scoring_settings, covariance_method, step_settings_keys, step_settings_values, threads, verbose) {
+  .Call("wrap__ferx_rust_covariance", bundle, model_path, data_path, scoring_settings, covariance_method, as.character(step_settings_keys), as.character(step_settings_values), as.integer(threads), verbose)
 }
 
 #' @title Internal Rust backend binding
@@ -183,12 +183,6 @@ ferx_rust_sha256_raw <- function(bytes) {
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_zip_files <- function(dir, entries, output) {
-  invisible(.Call("wrap__ferx_rust_zip_files", dir, entries, output))
-}
-
-#' @title Internal Rust backend binding
-#' @keywords internal
 ferx_rust_load_fit <- function(bundle) {
   .Call("wrap__ferx_rust_load_fit", bundle)
 }
@@ -201,20 +195,44 @@ ferx_rust_fitrx_wire_keys <- function(bundle, keys) {
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_fitrx_mixture_columns <- function(bundle) {
-  .Call("wrap__ferx_rust_fitrx_mixture_columns", bundle)
+ferx_rust_bundle_with_extras <- function(bundle, extras) {
+  .Call("wrap__ferx_rust_bundle_with_extras", bundle, extras)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_bundle_with_data <- function(bundle, data, name) {
+  .Call("wrap__ferx_rust_bundle_with_data", bundle, data, name)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_bundle_without_data <- function(bundle) {
+  .Call("wrap__ferx_rust_bundle_without_data", bundle)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_bundle_with_sdtab <- function(bundle, sdtab) {
+  .Call("wrap__ferx_rust_bundle_with_sdtab", bundle, sdtab)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_bundle_without_trace <- function(bundle) {
+  .Call("wrap__ferx_rust_bundle_without_trace", bundle)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_test_nan_gradient_bundle <- function(bundle) {
+  .Call("wrap__ferx_rust_test_nan_gradient_bundle", bundle)
 }
 
 #' @title Internal Rust backend binding
 #' @keywords internal
 ferx_rust_stage_data_probe <- function(bytes) {
   .Call("wrap__ferx_rust_stage_data_probe", bytes)
-}
-
-#' @title Internal Rust backend binding
-#' @keywords internal
-ferx_rust_method_labels <- function() {
-  .Call("wrap__ferx_rust_method_labels")
 }
 
 #' @title Internal Rust backend binding
@@ -281,12 +299,6 @@ ferx_rust_structural_theta_labels <- function(theta_names, profiled_blocks) {
 #' @keywords internal
 ferx_rust_theta_levels_from_fit <-function(model_path, model_hash, theta, theta_names, fit_bindings, cov_matrix_flat, cov_matrix_dim, sir_resamples_flat, sir_resamples_n, sir_resamples_dim) {
   .Call("wrap__ferx_rust_theta_levels_from_fit", model_path, model_hash, theta, theta_names, fit_bindings, cov_matrix_flat, as.integer(cov_matrix_dim), sir_resamples_flat, as.integer(sir_resamples_n), as.integer(sir_resamples_dim))
-}
-
-#' @title Internal Rust backend binding
-#' @keywords internal
-ferx_rust_fitrx_engine_resave <- function(path, out_path) {
-  .Call("wrap__ferx_rust_fitrx_engine_resave", path, out_path)
 }
 
 #' @title Internal Rust backend binding

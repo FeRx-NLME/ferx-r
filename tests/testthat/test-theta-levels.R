@@ -111,13 +111,74 @@ tl_base <- function() {
   list(model = tl_cache$model, data = tl_cache$data, fit = tl_cache$fit)
 }
 
-# A copy of `fit` carrying a hand-made positive-definite covariance matrix in
-# the packed space (theta, omega, sigma), so the uncertainty and SIR legs reach
-# the engine without relying on a two-iteration covariance step.
+# A copy of `fit` whose bytes carry a hand-made positive-definite covariance
+# matrix in the packed space (theta, omega, sigma), so the uncertainty and SIR
+# legs reach the engine without relying on a two-iteration covariance step.
 tl_with_cov <- function(fit) {
   n <- length(fit$theta) + nrow(fit$omega) + length(fit$sigma)
-  fit$cov_matrix <- diag(1e-4, n)
+  fitrx_edit_fit(fit, function(w) {
+    w$covariance_matrix <- list(rows = n, cols = n,
+                                data = as.list(as.numeric(diag(1e-4, n))))
+    w
+  })
+}
+
+# Two ways level bindings a model cannot lay out reach a post-hoc step. Read
+# back as a fit, the bytes lose their layout at the load, which warns, and R
+# refuses the step with the load's reason (`tl_loaded_bad()`). Under a list that
+# still has its layout, R lets the step run, and the engine reads the bindings
+# from the bytes and answers itself, with its code (`tl_bytes_bad()`).
+tl_loaded_bad <- function(fit, edit) {
+  suppressWarnings(fitrx_edit_fit(fit, edit),
+                   classes = "ferx_levels_unavailable_warning")
+}
+tl_bytes_bad <- function(fit, edit) {
+  fit$bundle <- tl_loaded_bad(fit, edit)$bundle
   fit
+}
+
+# The theta levels of `fit`'s bytes put through `edit` (the wire's block record,
+# by block), for tl_loaded_bad() / tl_bytes_bad().
+tl_edit_block <- function(block, edit) {
+  function(w) {
+    w$data_bindings$levels[[block]] <- edit(w$data_bindings$levels[[block]])
+    w
+  }
+}
+
+# The refusals of both post-hoc steps on `fit`, by name.
+tl_step_errors <- function(fit) {
+  grab <- function(expr) {
+    tryCatch({
+      suppressWarnings(expr)
+      NULL
+    }, error = function(e) e)
+  }
+  list(
+    ferx_covariance = grab(ferx_covariance(fit)),
+    ferx_sir = grab(ferx_sir(fit, sir_samples = 20L, sir_resamples = 10L))
+  )
+}
+
+# `edit` refused both ways by both steps: `engine` is the step's text, coded, and
+# `loaded` the load's, carried by the refusal R raises itself.
+tl_expect_refused <- function(fit, edit, engine, loaded = engine) {
+  errs <- tl_step_errors(tl_bytes_bad(fit, edit))
+  for (who in names(errs)) {
+    e <- errs[[who]]
+    expect_s3_class(e, "ferx_engine_error")
+    expect_identical(e$code, "E_THETA_LEVEL_BINDING", info = who)
+    msg <- if (inherits(e, "condition")) conditionMessage(e) else ""
+    expect_match(msg, engine, fixed = TRUE, info = who)
+    expect_no_match(msg, "is not contiguous", fixed = TRUE, info = who)
+  }
+  errs <- tl_step_errors(tl_loaded_bad(fit, edit))
+  for (who in names(errs)) {
+    e <- errs[[who]]
+    expect_s3_class(e, "ferx_levels_unavailable_error")
+    msg <- if (inherits(e, "condition")) conditionMessage(e) else ""
+    expect_match(msg, loaded, fixed = TRUE, info = who)
+  }
 }
 
 # --- T1: the fit binds ---------------------------------------------------------
@@ -353,8 +414,11 @@ test_that("T5b: from-fit level refusals carry E_THETA_LEVEL_BINDING on every pat
            "  theta VSHIFT[STUDY](0.0, -5.0, 5.0)"),
     "TVCL + PLACEBO", v = "TVV * exp(VSHIFT)"
   ), ".ferx")
-  fit <- tl_with_cov(tl_fit(model, tl_write(tl_data, ".csv")))
-  fit$theta_levels <- fit$theta_levels[fit$theta_levels$block != "VSHIFT", ]
+  fit <- tl_bytes_bad(tl_with_cov(tl_fit(model, tl_write(tl_data, ".csv"))),
+                      function(w) {
+                        w$data_bindings$levels$VSHIFT <- NULL
+                        w
+                      })
   for (who in c("ferx_covariance", "ferx_sir")) {
     msg <- coded(if (who == "ferx_sir") {
       ferx_sir(fit, sir_samples = 20L, sir_resamples = 10L)
@@ -567,10 +631,12 @@ test_that("T9: a level-block model with a fit lacking bindings is refused", {
   expect_no_match(msg, "was the model edited", fixed = TRUE)
 })
 
-test_that("T9b: ferx_sir / ferx_covariance give the predict paths' refusal", {
+test_that("T9b: a fit whose bytes carry no bindings is refused on every path", {
   b <- tl_base()
-  fit <- tl_with_cov(b$fit)
-  fit$theta_levels <- NULL
+  fit <- fitrx_edit_fit(tl_with_cov(b$fit), function(w) {
+    w$data_bindings$levels <- NULL
+    w
+  })
   msg_of <- function(expr) {
     tryCatch({
       expr
@@ -581,45 +647,43 @@ test_that("T9b: ferx_sir / ferx_covariance give the predict paths' refusal", {
   sim <- msg_of(ferx_simulate(b$model, b$data, fit = fit))
   expect_match(sim, "this fit carries no theta level bindings", fixed = TRUE)
   expect_identical(msg_of(ferx_predict(b$model, b$data, fit = fit)), sim)
-  expect_identical(msg_of(ferx_covariance(fit)), sim)
-  expect_identical(
-    msg_of(ferx_sir(fit, sir_samples = 20L, sir_resamples = 10L)), sim
-  )
   expect_no_match(sim, "theta length", fixed = TRUE)
   expect_no_match(sim, "expected)", fixed = TRUE)
+  # The steps read the bytes in the engine, which says it in its own words.
+  errs <- tl_step_errors(fit)
+  for (who in names(errs)) {
+    msg <- conditionMessage(errs[[who]])
+    expect_identical(errs[[who]]$code, "E_THETA_LEVEL_BINDING", info = who)
+    expect_match(msg, "this fit carries no data-derived bindings", fixed = TRUE, info = who)
+    expect_match(msg, "theta level block(s) `PLACEBO[STUDY, TIME]`", fixed = TRUE, info = who)
+    expect_match(msg, "Refit the model to record them", fixed = TRUE, info = who)
+    expect_no_match(msg, "theta length", fixed = TRUE, info = who)
+    expect_no_match(msg, "expected)", fixed = TRUE, info = who)
+  }
 })
 
 test_that("T9c: bindings that no longer lay out the fit's theta are named", {
   b <- tl_base()
-  fit <- tl_with_cov(b$fit)
-  # An edited fit: one level row gone, so the layout is one theta short.
-  fit$theta_levels <- fit$theta_levels[-nrow(fit$theta_levels), ]
-  check <- function(expr, who) {
-    err <- tryCatch({
-      expr
-      NULL
-    }, error = function(e) e)
-    expect_s3_class(err, "error")
-    msg <- conditionMessage(err)
-    # The count is the whole model's (TVCL, TVV and four free levels), not the
-    # block's alone.
-    expect_match(msg, paste0(
-      who, ": the model file, laid out on the fit's theta level bindings ",
-      "(`fit$theta_levels`) for its level block(s) `PLACEBO`, has 6 thetas, ",
-      "but the fit carries 7 (`fit$theta`). Either the model file was edited ",
-      "since the fit, or `fit$theta_levels` was"
-    ), fixed = TRUE)
-    expect_no_match(msg, "does not match model", fixed = TRUE)
-  }
-  check(ferx_covariance(fit), "ferx_covariance")
-  check(ferx_sir(fit, sir_samples = 20L, sir_resamples = 10L), "ferx_sir")
+  # Edited bytes: one level gone, so the layout is one theta short. The count is
+  # the whole model's (TVCL, TVV and four free levels), not the block's alone;
+  # the engine, laying the fit's data on the bindings, names the level.
+  tl_expect_refused(
+    tl_with_cov(b$fit),
+    tl_edit_block("PLACEBO", function(block) {
+      block$labels <- block$labels[-6L]
+      block$groups <- block$groups[-6L]
+      block
+    }),
+    engine = "the design has 1 level(s) the fit estimated no theta for: `STUDY=2,TIME=12`",
+    loaded = "the supplied theta has 7 values but this model has 6"
+  )
 })
 
 test_that("T9d: a model file edited after the fit is named as a possible cause", {
-  # The model file is checked against `fit$model_hash` before the theta
-  # count (#492), so with a hash the edit is reported as an edit. Only a fit
-  # that carries no hash reaches the count check, and there an edited model
-  # file must not be blamed on `fit$theta_levels` alone.
+  # The model file is checked against the fit's hash before the theta count
+  # (#492), so with a hash the edit is reported as an edit. Only a fit that
+  # carries no hash reaches the count check, and there the engine names the
+  # model as the thing to check.
   b <- tl_base()
   model <- tl_col_model()
   fit <- tl_with_cov(tl_fit(model, b$data))
@@ -638,17 +702,19 @@ test_that("T9d: a model file edited after the fit is named as a possible cause",
     ferx_covariance = function(f) ferx_covariance(f),
     ferx_sir = function(f) ferx_sir(f, sir_samples = 20L, sir_resamples = 10L)
   )
-  no_hash <- fit
-  no_hash$model_hash <- NA_character_
+  no_hash <- fitrx_edit_fit(fit, function(w) {
+    w$model_hash <- NULL
+    w
+  })
   for (who in names(calls)) {
     msg <- msg_of(calls[[who]](fit))
     expect_match(msg, paste0(who, ": model hash mismatch for "), fixed = TRUE)
     expect_no_match(msg, "laid out", fixed = TRUE)
 
     msg <- msg_of(suppressWarnings(calls[[who]](no_hash)))
-    expect_match(msg, paste0(who, ": the model file, laid out"), fixed = TRUE)
-    expect_match(msg, "has 8 thetas, but the fit carries 7", fixed = TRUE)
-    expect_match(msg, "Either the model file was edited since the fit", fixed = TRUE)
+    expect_match(msg, paste0("^", who, ": run_[a-z]+: the model has n_theta = 8 but the fit has 7"))
+    expect_match(msg, "Verify you supplied the same model the fit used", fixed = TRUE)
+    expect_match(msg, "[E_THETA_LENGTH]", fixed = TRUE)
   }
 })
 
@@ -867,45 +933,26 @@ test_that("R7: bindings on a model without a level block are refused", {
     "  theta TVCL(2.0, 0.001, 20.0)\n  theta PLACEBO[6](0.0, -5.0, 5.0)",
     "TVCL + PLACEBO[PLA_IDX]"
   ), ".ferx")
-  fit <- tl_with_cov(tl_fit(counted, b$data))
-  # Stray rows from another fit: before #463 both steps ignored them.
-  fit$theta_levels <- b$fit$theta_levels
-  check <- function(expr) {
-    err <- tryCatch({
-      expr
-      NULL
-    }, error = function(e) e)
-    expect_s3_class(err, "error")
-    expect_match(conditionMessage(err),
-                 "carry the block(s) `PLACEBO`, which this model does not declare",
-                 fixed = TRUE)
-  }
-  check(ferx_covariance(fit))
-  check(ferx_sir(fit, sir_samples = 20L, sir_resamples = 10L))
+  # Stray bindings from another fit: before #463 both steps ignored them.
+  stray <- fitrx_fit_json(b$fit$bundle)$data_bindings$levels
+  tl_expect_refused(
+    tl_with_cov(tl_fit(counted, b$data)),
+    function(w) {
+      w$data_bindings$levels <- stray
+      w
+    },
+    "carry the block(s) `PLACEBO`, which this model does not declare"
+  )
 })
 
-# --- R8: the skeleton is laid out by core's layout_from_fit (ferx-r #469) ------
+# --- R8: a step lays the model out by core's layout_from_fit (ferx-r #469) -----
 
-test_that("R8a: the SIR / covariance skeleton keeps the fit's theta count, names and FIX flags", {
+test_that("R8a: ferx_sir / ferx_covariance keep the fit's theta count, names and FIX flags", {
   # A FIX theta declared *after* the level block, so its position in the FIX
   # mask depends on the layout: last of the bound thetas, but third of the
   # unbound parse's, which carries no PLACEBO theta at all. Declared before the
   # block, as the twin model has it, ET50 is third in both layouts and no mask
   # check can tell them apart (ferx-r #488).
-  #
-  # Only `cov_fixed` and the `cov_matrix` dimnames come from the glue's
-  # layout. `names(cv$theta)`, `estimates$fixed` and the SIR row names are
-  # built in R from `fit$theta` / `fit$theta_fixed`, so they can only check
-  # that the glue's count agreed; they are kept for that.
-  #
-  # Mutations that redden this (ferx-r #488, each built into a scratch
-  # library): drop the `layout_from_fit` call in bind_layout_from_fit() (the
-  # count check refuses); return the unbound parse's FIX mask, padded with free
-  # entries to the bound count (`cov_fixed` flags the third theta; green before
-  # ET50 moved below the block); return the unbound parse's mask unpadded (no
-  # mask comes back); label the theta rows from the unbound parse, padded with
-  # `THETA<i>` (dimnames); reverse the level labels before the layout
-  # (dimnames).
   placebo <- "PLACEBO[STUDY, TIME, contrast = none]"
   text <- sub(
     paste0("  theta ET50(2.0, 0.01, 100.0)\n  theta ", placebo, "(45.0, 0.0, 200.0)\n"),
@@ -927,57 +974,48 @@ test_that("R8a: the SIR / covariance skeleton keeps the fit's theta count, names
   expect_identical(rownames(s$sir_ci_theta), names(fit$theta))
 })
 
-test_that("R8b: malformed level bindings are refused before the skeleton is built", {
-  # Before ferx-r #469 the glue re-parsed on the edited bindings itself: a split group
-  # failed in the parser's words ("is not contiguous"), and an `auto` contrast
-  # was laid out and refused only later, by the engine (`run_sir:` /
-  # `run_covariance:`). Now core's layout_from_fit, the validation
-  # bind_from_fit runs, refuses both up front. Mutation that reddens this:
-  # restore the hand-copied `parse_full_model_with` re-parse.
-  refused <- function(fit, text) {
-    for (who in c("ferx_covariance", "ferx_sir")) {
-      msg <- tryCatch({
-        if (who == "ferx_sir") {
-          ferx_sir(fit, sir_samples = 20L, sir_resamples = 10L)
-        } else {
-          ferx_covariance(fit)
-        }
-        NA_character_
-      }, error = function(e) conditionMessage(e))
-      expect_match(msg, text, fixed = TRUE, info = who)
-      expect_no_match(msg, "run_sir:", fixed = TRUE, info = who)
-      expect_no_match(msg, "run_covariance:", fixed = TRUE, info = who)
-      expect_no_match(msg, "is not contiguous", fixed = TRUE, info = who)
-    }
-  }
+test_that("R8b: malformed level bindings in the bytes are refused by name", {
+  # Before ferx-r #469 the glue re-parsed on the edited bindings itself: a split
+  # group failed in the parser's words ("is not contiguous"). Now core's
+  # layout_from_fit, the validation bind_from_fit runs, refuses it.
+  #
   # A split contrast group, on the nested (sum_to_zero_within) fit.
   nested <- tl_with_cov(tl_fit(tl_nested_model(), tl_write(tl_data3, ".csv")))
   expect_identical(nested$theta_levels$group, rep(0:2, each = 3L))
-  split <- nested
-  split$theta_levels$group <- c(0L, 0L, 1L, 0L, 1L, 1L, 2L, 2L, 2L)
-  refused(split, paste0(
-    "theta PLACEBO[STUDY, TIME]: the fit's level bindings are malformed: the ",
-    "levels of contrast group 0 are split"
-  ))
+  tl_expect_refused(
+    nested,
+    tl_edit_block("PLACEBO", function(block) {
+      block$groups <- as.list(c(0L, 0L, 1L, 0L, 1L, 1L, 2L, 2L, 2L))
+      block
+    }),
+    paste0("theta PLACEBO[STUDY, TIME]: the fit's level bindings are malformed: the ",
+           "levels of contrast group 0 are split")
+  )
   # `auto` recorded as the contrast: a fit records the contrast it resolved to.
-  auto <- tl_with_cov(tl_base()$fit)
-  auto$theta_levels$contrast <- "auto"
-  refused(auto, paste0(
-    "theta PLACEBO[STUDY, TIME]: the fit's level bindings are malformed: they ",
-    "record the contrast `auto`"
-  ))
-  # A repeated label never reaches core: the glue's own table check names it
-  # (as for the predict paths, R1). Mutation that reddens this: delete the
-  # label loop in level_bindings_from_r(), and core's wording comes back.
-  dup <- tl_with_cov(tl_base()$fit)
-  dup$theta_levels$label[2] <- dup$theta_levels$label[1]
-  refused(dup, "gives the label `STUDY=1,TIME=1` to levels 1 and 2")
+  tl_expect_refused(
+    tl_with_cov(tl_base()$fit),
+    tl_edit_block("PLACEBO", function(block) {
+      block$contrast <- "auto"
+      block
+    }),
+    paste0("theta PLACEBO[STUDY, TIME]: the fit's level bindings are malformed: they ",
+           "record the contrast `auto`")
+  )
+  # A repeated label: the load reads the bindings through the glue's own table
+  # check (as for the predict paths, R1), the step through core's.
+  tl_expect_refused(
+    tl_with_cov(tl_base()$fit),
+    tl_edit_block("PLACEBO", function(block) {
+      block$labels[[2L]] <- block$labels[[1L]]
+      block
+    }),
+    engine = "the fit's level bindings list 1 level(s) more than once: `STUDY=1,TIME=1`",
+    loaded = "gives the label `STUDY=1,TIME=1` to levels 1 and 2"
+  )
 })
 
 test_that("R8c: a fit that lost one block's rows names the missing block", {
-  # The case ferx-r #469 was filed for. Mutation that reddens this: restore
-  # the hand-copied re-parse, which never checks that every declared block is
-  # bound.
+  # The case ferx-r #469 was filed for.
   model <- tl_write(tl_model(
     paste0("  theta TVCL(2.0, 0.001, 20.0)\n",
            "  theta PLACEBO[STUDY, TIME](0.0, -5.0, 5.0)\n",
@@ -986,13 +1024,16 @@ test_that("R8c: a fit that lost one block's rows names the missing block", {
   ), ".ferx")
   fit <- tl_with_cov(tl_fit(model, tl_write(tl_data, ".csv")))
   expect_setequal(unique(fit$theta_levels$block), c("PLACEBO", "VSHIFT"))
-  fit$theta_levels <- fit$theta_levels[fit$theta_levels$block != "VSHIFT", ]
-  text <- paste0("theta VSHIFT[STUDY]: the fit's level bindings carry no `VSHIFT`, ",
-                 "so there is no fitted layout to bind the design against ",
-                 "(was the model edited since the fit?)")
-  expect_error(ferx_covariance(fit), text, fixed = TRUE)
-  expect_error(ferx_sir(fit, sir_samples = 20L, sir_resamples = 10L), text,
-               fixed = TRUE)
+  tl_expect_refused(
+    fit,
+    function(w) {
+      w$data_bindings$levels$VSHIFT <- NULL
+      w
+    },
+    paste0("theta VSHIFT[STUDY]: the fit's level bindings carry no `VSHIFT`, ",
+           "so there is no fitted layout to bind the design against ",
+           "(was the model edited since the fit?)")
+  )
 })
 
 # Load a bundle whose level layout the engine cannot make (#531): exactly one
@@ -1447,27 +1488,29 @@ test_that("T17b: a model without a level block writes no levels slot", {
   expect_identical(ferx_load_fit(path)$theta_levels, fit$theta_levels)
 })
 
-test_that("T17c: the engine's loader reads an R bundle's layout, per contrast", {
+test_that("T17c: the engine's loader reads a fit's layout from its bytes, per contrast", {
   fits <- tl_contrast_fits()
   for (contrast in names(fits)) {
     f <- fits[[contrast]]$fit
     expect_identical(unique(f$theta_levels$contrast), contrast)
-    trip <- fitrx_engine_trip(f)
+    read <- ferx:::ferx_rust_load_fit(f$bundle)$levels
     # One block per fixture, so the engine's sorted order is the fit's.
-    expect_identical(trip$read, f$theta_levels[fitrx_layout_cols], info = contrast)
+    expect_identical(read[fitrx_layout_cols], f$theta_levels[fitrx_layout_cols],
+                     info = contrast)
   }
 })
 
-test_that("T17d: an engine-written bundle loads the fit's theta_levels, per contrast", {
+test_that("T17d: a saved bundle loads the fit's theta_levels, per contrast", {
   fits <- tl_contrast_fits()
   for (contrast in names(fits)) {
     f <- fits[[contrast]]
-    trip <- fitrx_engine_trip(f$fit)
-    wire <- fitrx_fit_json(trip$core_path)
+    path <- tempfile(fileext = ".fitrx")
+    ferx_save_fit(f$fit, path, include_data = TRUE)
+    wire <- fitrx_fit_json(path)
     # Written by the engine: no R copy for the loader to fall back on.
     expect_null(wire$r_extras, info = contrast)
     expect_false(is.null(wire$data_bindings$levels), info = contrast)
-    loaded <- ferx_load_fit(trip$core_path)
+    loaded <- ferx_load_fit(path)
     expect_identical(loaded$theta_levels, f$fit$theta_levels, info = contrast)
     expect_identical(
       ferx_predict(f$model, f$data, fit = loaded),
@@ -1505,11 +1548,13 @@ test_that("T17h: two blocks keep declaration order, theta names and values throu
   tl <- fit$theta_levels
   expect_identical(unique(tl$block), c("ZPLA", "AST"))
   expect_true(all(tl$value[!is.na(tl$theta_name)] != 0))
-  trip <- fitrx_engine_trip(fit)
   # The engine reads its wire in sorted order: the order is not on the wire.
-  expect_identical(unique(trip$read$block), c("AST", "ZPLA"))
-  loaded <- ferx_load_fit(trip$core_path)
-  expect_null(fitrx_fit_json(trip$core_path)$r_extras)
+  expect_identical(unique(ferx:::ferx_rust_load_fit(fit$bundle)$levels$block),
+                   c("AST", "ZPLA"))
+  path <- tempfile(fileext = ".fitrx")
+  ferx_save_fit(fit, path, include_data = TRUE)
+  loaded <- ferx_load_fit(path)
+  expect_null(fitrx_fit_json(path)$r_extras)
   expect_identical(loaded$theta_levels, tl)
   expect_identical(ferx_predict(model, data, fit = loaded),
                    ferx_predict(model, data, fit = fit))
@@ -1521,36 +1566,28 @@ test_that("T17i: a model file edited since the fit is named, not laid out by pos
   model <- tl_two_block_model()
   data <- tl_write(tl_data, ".csv")
   fit <- tl_fit(model, data)
-  trip <- fitrx_engine_trip(fit)
+  path <- tempfile(fileext = ".fitrx")
+  ferx_save_fit(fit, path, include_data = TRUE)
   lines <- readLines(model)
   z <- grep("theta ZPLA[", lines, fixed = TRUE)
   a <- grep("theta AST[", lines, fixed = TRUE)
   lines[c(z, a)] <- lines[c(a, z)]
   writeLines(lines, model)
   drop_model <- function(path) fitrx_replace_entry(path, "model.ferx", model)
-  # Engine-written: no layout, for the model's hash, instead of AST reading
-  # ZPLA's values. The estimates still load (#531). The engine codes the edit
-  # (ferx-core #2027), and the from-fit refusal keeps that code.
-  core <- tl_load_unavailable(drop_model(trip$core_path), "model hash mismatch")
+  # No layout, for the model's hash, instead of AST reading ZPLA's values. The
+  # estimates still load (#531). The engine codes the edit (ferx-core #2027), and
+  # the from-fit refusal keeps that code.
+  core <- tl_load_unavailable(drop_model(path), "model hash mismatch")
   expect_identical(core$theta, fit$theta)
   expect_identical(core$unavailable_theta_levels$code, "E_FIT_INPUT_CHANGED")
   e <- tryCatch(ferx_sir(core, sir_samples = 10L, sir_resamples = 5L),
                 error = function(e) e)
   expect_s3_class(e, "ferx_levels_unavailable_error")
   expect_identical(e$code, "E_FIT_INPUT_CHANGED")
-  # R-written: the model is named.
-  w <- NULL
-  r <- withCallingHandlers(ferx_load_fit(drop_model(trip$r_path)),
-    ferx_levels_unavailable_warning = function(cnd) {
-      w <<- conditionMessage(cnd)
-      invokeRestart("muffleWarning")
-    })
-  expect_match(w, "model hash mismatch", fixed = TRUE)
-  expect_null(r$theta_levels)
   # Edited so that it no longer parses either: the hash is still the cause,
   # so the parse error's code is not the failure's (#531 review, finding 2).
   cat("\n[not_a_block]\n  x = 1\n", file = model, append = TRUE)
-  broken <- tl_load_unavailable(drop_model(trip$core_path), "model hash mismatch")
+  broken <- tl_load_unavailable(drop_model(path), "model hash mismatch")
   expect_identical(broken$unavailable_theta_levels$code, "E_FIT_INPUT_CHANGED")
   expect_no_match(broken$unavailable_theta_levels$message, "E_UNKNOWN_BLOCK",
                   fixed = TRUE)

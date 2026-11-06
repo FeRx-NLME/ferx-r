@@ -197,30 +197,6 @@ validate_fit_for_params <- function(fit) {
   list(ids = as.character(ids), source = source)
 }
 
-# The engine's refusals of a subject list that is not the fit's (#468, #462).
-.ferx_subject_mismatch_codes <- c("E_FIT_SUBJECTS_MISMATCH", "E_POPULATION_MISMATCH")
-
-# Evaluate `call`, an engine call handed the IDs from `.ferx_fit_subject_id_set()`,
-# and add the reason to a subject-mismatch refusal when they came from
-# `fit$sdtab$ID` (#555). That fallback holds a text ID's position, so on a fit
-# made before `fit$subject_ids` with text IDs the engine refuses the population
-# the fit did see; the advice that helps is to re-fit. The engine's message,
-# class and code stay as they are; any other refusal passes through untouched.
-.ferx_sdtab_ids_hint <- function(call, source) {
-  if (!identical(source, "fit$sdtab$ID")) return(call)
-  tryCatch(call, ferx_engine_error = function(e) {
-    if (isTRUE(e$code %in% .ferx_subject_mismatch_codes)) {
-      e$message <- paste0(
-        e$message, "\n",
-        "The fit predates fit$subject_ids, so its subject IDs were taken from ",
-        "fit$sdtab$ID, which holds a text ID's position rather than the ID. ",
-        "Re-fit with ferx_fit(model, data)."
-      )
-    }
-    stop(e)
-  })
-}
-
 # The fit's reader settings and population fingerprint (#462), as the JSON
 # strings the glue reads back; "" for a fit that records neither. The one
 # source of these arguments for `ferx_sir()` and `ferx_covariance()`;
@@ -424,43 +400,6 @@ validate_fit_for_params <- function(fit) {
   )
 }
 
-# The layout columns of `fit$theta_levels`: which level is which. Everything
-# else in the frame is a value read at the fit's estimates.
-.ferx_theta_levels_layout <- c("block", "index", "label", "group", "contrast",
-                               "theta_name")
-
-# `fit$theta_levels` refreshed from a post-hoc step's rows (#528): the engine's
-# `se` and, when `intervals` is TRUE, its `sir_lo` / `sir_hi`; otherwise the
-# fit's own intervals are kept (a covariance step never sees the draws, and
-# moves neither theta nor them). `new` must lay the levels out exactly as the
-# fit does, or the refresh is refused rather than written onto the wrong rows.
-.ferx_theta_levels_refresh <- function(fit, new, who, intervals) {
-  old <- fit$theta_levels
-  if (NROW(old) == 0L) return(old)
-  new <- .ferx_theta_levels_frame(
-    new$block, new$index, new$label, new$group, new$contrast, new$theta_name,
-    new$value, new$se, new$sir_lo, new$sir_hi, new$profiled
-  )
-  # `profiled` (ferx-core #1065) is compared too: the glue rebuilds it from the
-  # fit's own `profiled_blocks`, so engine rows that disagree were laid out for
-  # another fit. Only when the fit has the column - an R object saved before
-  # it existed does not.
-  cols <- c(.ferx_theta_levels_layout, intersect("profiled", names(old)))
-  same <- nrow(new) == nrow(old) && all(vapply(
-    cols, function(k) identical(new[[k]], old[[k]]), logical(1L)
-  ))
-  if (!same) {
-    stop(who, ": the engine laid the theta levels out differently from ",
-         "`fit$theta_levels`; refit with ferx_fit().", call. = FALSE)
-  }
-  old$se <- new$se
-  if (intervals) {
-    old$sir_lo <- new$sir_lo
-    old$sir_hi <- new$sir_hi
-  }
-  old
-}
-
 # The one constructor of `fit$covariate_stats` (#412), shared by `ferx_fit()`
 # and `ferx_load_fit()` so a fresh fit and a reloaded one are `identical()`:
 # one row per covariate a `[covariate_model]` relation reads, with the
@@ -506,20 +445,6 @@ validate_fit_for_params <- function(fit) {
   i <- suppressWarnings(as.integer(rc$sigma_i))
   j <- suppressWarnings(as.integer(rc$sigma_j))
   as.vector(rbind(i, j))
-}
-
-# For each row of a residual_correlations frame, the position of the same
-# (sigma_i, sigma_j) pair - in either orientation - among the engine's pairs
-# `i`, `j`; NA for a row the engine does not report. Used to read
-# per-correlation engine output, which comes in the model's declaration order,
-# back onto a frame the user may have reordered (#486).
-.ferx_residual_corr_match <- function(rc, i, j) {
-  i <- as.integer(i %||% integer())
-  j <- as.integer(j %||% integer())
-  ri <- as.integer(rc$sigma_i)
-  rj <- as.integer(rc$sigma_j)
-  key <- function(a, b) paste(pmin(a, b), pmax(a, b))
-  match(key(ri, rj), key(i, j))
 }
 
 # The prior half of a fit's objective, for the FFI.

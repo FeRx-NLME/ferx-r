@@ -1161,10 +1161,8 @@
   result$population_fingerprint <- empty_to_null(result$population_fingerprint)
 
   # The dropped-`[output]` finding also goes into the flat vector, not only the
-  # structured table: `fit$warnings` is what `ferx_save_fit()` serialises, and
-  # `ferx_load_fit()` does not restore `warnings_structured`, so a
-  # structured-only row would vanish across a `.fitrx` round trip - a warning
-  # about a silently missing column going silently missing itself. Deduplicated
+  # structured table, as every view of a fit derives it here, so the row and the
+  # flat line cannot disagree. Deduplicated
   # by exact string so a future engine-side `W_OUTPUT_DUPLICATE` cannot double
   # it up with an identical message.
   do_msg <- .ferx_dropped_output_warning(result)
@@ -1203,6 +1201,14 @@
   # above), not the raw `data` argument, so a fresh fit and a loaded fit of
   # the same model resolve the dataset identically.
   result <- .ferx_populate_derived_fields(result)
+
+  # What this interface adds goes into the bytes, so a fit's list and its bytes
+  # agree from here on; a loaded fit's bytes hold it already.
+  if (!loaded && is.raw(result$bundle)) {
+    result$bundle <- ferx_rust_bundle_with_extras(
+      result$bundle, .fitrx_interface_extras(result)
+    )
+  }
 
   class(result) <- "ferx_fit"
 

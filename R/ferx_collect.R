@@ -50,8 +50,15 @@ ferx_collect <- function(handle, verbose = TRUE) {
     if (!is.null(result$trace_path) && file.exists(result$trace_path)) {
       unlink(result$trace_path)
     }
-    result$trace_path <- NULL
-    result$trace <- NULL
+    if (is.raw(result$bundle)) {
+      result <- .ferx_fit_with_bundle(
+        result, ferx_rust_bundle_without_trace(result$bundle)
+      )
+    } else {
+      # A fit the engine could not serialize is still a fit: only a save refuses it.
+      result$trace_path <- NULL
+      result$trace <- NULL
+    }
   }
   result
 }

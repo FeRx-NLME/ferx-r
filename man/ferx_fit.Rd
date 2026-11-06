@@ -1197,8 +1197,8 @@ theta, per eta (the omega diagonal; every eta of a fixed block is
 \code{TRUE}) and per sigma. \code{TRUE} also marks a theta the engine
 held at its initial value because it had no effect on the objective
 (see the \code{flat_parameter} warning), even without \code{FIX} in
-the model. \code{ferx_save_fit()} writes them into the bundle, so a
-reloaded fit carries the same flags.}
+the model. The bundle holds them, so a reloaded fit carries the same
+flags.}
 \item{sdtab}{Data frame with ID, TIME, DV, PRED, IPRED, CWRES, IWRES,
 EBE_OFV, N_OBS; OCC if any subject carries an occasion column; CENS
 if any rows are LOQ-censored; CMT if the dataset has more than one
@@ -1249,9 +1249,8 @@ the subject's contribution to the OFV; \code{n_obs}, its continuous
 records. \code{sdtab} holds each subject's \code{n_obs} rows in
 subject order, then each subject's \code{n_obs_discrete} rows in
 subject order, then each subject's \code{n_obs_tte} rows.
-\code{ferx_save_fit()} writes the first three to the bundle's
-\code{ebes.csv}; the bundle keeps no time-to-event rows, so
-\code{n_obs_tte} is 0 on a reloaded fit.}
+The bundle holds all of these rows, so a reloaded fit has the same
+counts.}
 \item{individual_estimates}{Data frame with one row per subject containing
 each subject's individual parameter values: \code{ID} plus one column
 per parameter declared in the \code{[individual_parameters]} block
@@ -1419,7 +1418,10 @@ method. Prefer \code{gradient_used} for display.}
 optimizer's gradient method.}
 \item{ferx_version}{ferx-core library version string.}
 \item{bundle}{The fit's \code{.fitrx} bundle as a raw vector, as ferx-core
-  serialized it: the copy of the fit \code{\link{ferx_save_fit}} starts from.
+  serialized it. These bytes are the fit: \code{\link{ferx_save_fit}} writes
+  them, and \code{\link{ferx_covariance}}, \code{\link{ferx_sir}} and
+  \code{\link{ferx_calc_npde}} read them and return a new fit with new ones,
+  so a change made to the list by hand reaches none of these.
   \code{ferx_load_fit()} sets it to the file's bytes. Roughly doubles the size
   of a fit saved with \code{saveRDS()}.}
 \item{model_text}{Verbatim content of the \code{.ferx} model file as a

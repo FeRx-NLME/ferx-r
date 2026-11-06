@@ -95,13 +95,25 @@ cs_base <- function() {
   cs_cache$base
 }
 
-# A copy of `fit` carrying a hand-made positive-definite covariance matrix in
-# the packed space, so SIR and the covariance step reach the engine without
-# relying on a two-iteration covariance step.
+# A copy of `fit` whose bytes carry a hand-made positive-definite covariance
+# matrix in the packed space, so SIR and the covariance step reach the engine
+# without relying on a two-iteration covariance step.
 cs_with_cov <- function(fit) {
   n <- length(fit$theta) + nrow(fit$omega) + length(fit$sigma)
-  fit$cov_matrix <- diag(1e-4, n)
-  fit
+  fitrx_edit_fit(fit, function(w) {
+    w$covariance_matrix <- list(rows = n, cols = n,
+                                data = as.list(as.numeric(diag(1e-4, n))))
+    w
+  })
+}
+
+# `fit` with no statistics in its bytes, the shape of a fit saved before ferx
+# recorded them.
+cs_without_stats <- function(fit) {
+  fitrx_edit_fit(fit, function(w) {
+    w$data_bindings$covariate_stats <- NULL
+    w
+  })
 }
 
 cs_msg <- function(expr) {
@@ -194,9 +206,7 @@ test_that("C4: ferx_covariance / ferx_sir run on a symbolic fit like its twin", 
 
 test_that("C5: a symbolic model with a fit lacking statistics gets core's refusal on every path", {
   b <- cs_base()
-  fit <- cs_with_cov(b$fit)
-  # The shape of a fit saved before ferx recorded the statistics.
-  fit$covariate_stats <- NULL
+  fit <- cs_without_stats(cs_with_cov(b$fit))
   msgs <- c(
     predict = cs_msg(ferx_predict(b$sym, b$design, fit = fit)),
     simulate = cs_msg(ferx_simulate(b$sym, b$design, fit = fit)),
@@ -213,8 +223,8 @@ test_that("C5: a symbolic model with a fit lacking statistics gets core's refusa
     expect_no_match(msgs[[k]], "bind_covariate_stats", fixed = TRUE, info = k)
     expect_no_match(msgs[[k]], "theta level", fixed = TRUE, info = k)
   }
-  # One engine writes it for every path.
-  expect_length(unique(unname(msgs)), 1L)
+  # One engine writes it for every path; the steps open with their own names.
+  expect_length(unique(sub("^ferx_[a-z]+: run_[a-z]+: ", "", unname(msgs))), 1L)
 })
 
 test_that("C6: statistics for a covariate the model does not read are refused", {
@@ -242,8 +252,7 @@ test_that("C6b: from-fit statistics refusals carry E_COVARIATE_STATS_BINDING", {
     expect_identical(e$code, "E_COVARIATE_STATS_BINDING", info = who)
     expect_identical(e$block, "covariate_model", info = who)
   }
-  bare <- cs_with_cov(b$fit)
-  bare$covariate_stats <- NULL
+  bare <- cs_without_stats(cs_with_cov(b$fit))
   coded(ferx_predict(b$sym, b$design, fit = bare), "predict")
   coded(ferx_simulate(b$sym, b$design, fit = bare), "simulate")
   coded(ferx_calc_npde(bare, nsim = 10L, model = b$sym, data = b$design), "npde")
@@ -712,15 +721,17 @@ cs_recoded <- function(to, env = parent.frame()) {
 }
 
 # The four from-fit paths on design `data`, each a value or the condition it
-# raised. SIR and the covariance step re-read `fit$data_path`; a fit without a
-# data hash is how they reach other data. Only the missing-hash warning that
-# this causes is muffled; any other warning still reaches the test.
+# raised. SIR and the covariance step re-read `fit$data_path`; a fit whose bytes
+# record no data hash is how they reach other data. Only the missing-hash warning
+# that this causes is muffled; any other warning still reaches the test.
 cs_from_fit_paths <- function(data, drop_fingerprint = FALSE) {
   b <- cs_categorical()
-  fit <- cs_with_cov(b$fit)
+  fit <- fitrx_edit_fit(cs_with_cov(b$fit), function(w) {
+    w$data_hash <- NULL
+    if (drop_fingerprint) w$population_fingerprint <- NULL
+    w
+  })
   fit$data_path <- data
-  fit$data_hash <- NA_character_
-  if (drop_fingerprint) fit$population_fingerprint <- NULL
   grab <- function(expr) {
     tryCatch(
       withCallingHandlers(expr, warning = function(w) {
@@ -1021,12 +1032,16 @@ test_that("C15: a symbolic-centre relation's theta is not reported unused", {
 # and an engine bundle read in R took the statistics and dropped the levels,
 # so every from-fit path refused it. Both halves go through the engine's own
 # reader and writer here.
-test_that("C16: a level + symbolic fit round-trips R -> engine -> R with both halves", {
+test_that("C16: a level + symbolic fit round-trips through the engine's bytes with both halves", {
   b <- cs_combo()
-  trip <- fitrx_engine_trip(b$fit)
-  expect_identical(trip$read, b$fit$theta_levels[fitrx_layout_cols])
-  loaded <- ferx_load_fit(trip$core_path)
-  expect_null(fitrx_fit_json(trip$core_path)$r_extras)
+  # What the engine's own loader reads from the fit's bytes, before R lays it
+  # out on the model.
+  read <- ferx:::ferx_rust_load_fit(b$fit$bundle)
+  expect_identical(read$levels[fitrx_layout_cols], b$fit$theta_levels[fitrx_layout_cols])
+  path <- withr::local_tempfile(fileext = ".fitrx")
+  ferx_save_fit(b$fit, path, include_data = TRUE)
+  loaded <- ferx_load_fit(path)
+  expect_null(fitrx_fit_json(path)$r_extras)
   expect_identical(loaded$theta_levels, b$fit$theta_levels)
   expect_identical(loaded$covariate_stats, b$fit$covariate_stats)
   expect_identical(

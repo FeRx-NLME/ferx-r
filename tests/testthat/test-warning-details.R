@@ -61,17 +61,13 @@ test_that("ferx_get_warnings() puts the details beside their row", {
 test_that("the details survive ferx_save_fit() / ferx_load_fit() in ferx-core's slot", {
   skip_on_cran()
   fit <- wd_fit()
-  trip <- fitrx_engine_trip(fit)
-  # The R writer uses ferx-core's key, one WarningEntry object per payload.
-  r_wire <- fitrx_fit_json(trip$r_path)
-  expect_length(r_wire$warning_details, length(fit$warning_details))
-  # ferx-core's loader read them and its writer wrote them back.
-  core_wire <- fitrx_fit_json(trip$core_path)
-  expect_length(core_wire$warning_details, length(fit$warning_details))
-  # Both bundles load to the fit's own list, bit for bit.
-  expect_identical(suppressWarnings(ferx_load_fit(trip$r_path))$warning_details,
-                   fit$warning_details)
-  expect_identical(suppressWarnings(ferx_load_fit(trip$core_path))$warning_details,
+  # ferx-core's key, one WarningEntry object per payload.
+  wire <- fitrx_fit_json(fit$bundle)
+  expect_length(wire$warning_details, length(fit$warning_details))
+  # The bundle loads to the fit's own list, bit for bit.
+  path <- withr::local_tempfile(fileext = ".fitrx")
+  suppressWarnings(ferx_save_fit(fit, path))
+  expect_identical(suppressWarnings(ferx_load_fit(path))$warning_details,
                    fit$warning_details)
 })
 
@@ -92,16 +88,29 @@ test_that("a bundle with an unknown warning category still loads", {
 
 test_that("a whole-number float in the details reloads as a float", {
   # `details` is an untyped serde_json::Value, which keeps `50` an integer and
-  # `50.0` a float; R must write a double with its decimal point, or a loaded
-  # `threshold_pct = 50.0` comes back `50L` and is not identical() (#646 review).
+  # `50.0` a float; a loaded `threshold_pct = 50.0` must not come back `50L`,
+  # which is not identical() (#646 review).
   json <- paste0('{"severity":"Warning","category":"inflated_rse","message":"m",',
                  '"details":{"threshold_pct":50.0,"n":3,"x":2.5}}')
   # A live entry is the engine's own serialisation of it.
   live <- ferx:::.ferx_parse_warning_details(ferx:::ferx_rust_warning_details_canonical(json))
   expect_identical(live[[1L]]$details$threshold_pct, 50)
   expect_identical(live[[1L]]$details$n, 3L)
-  wire <- ferx:::.fitrx_warning_details_to_wire(list(warning_details = live, warnings = "m"))
-  expect_match(as.character(wire[[1L]]), '"threshold_pct":50.0', fixed = TRUE)
+
+  # And one in a bundle, spelled as the engine spells it.
+  skip_on_cran()
+  fit <- wd_fit()
+  path <- withr::local_tempfile(fileext = ".fitrx")
+  suppressWarnings(ferx_save_fit(fit, path))
+  staging <- withr::local_tempdir()
+  utils::unzip(path, files = "fit.json", exdir = staging)
+  json <- file.path(staging, "fit.json")
+  text <- readLines(json, warn = FALSE)
+  edited <- sub('("durbin_watson": *)[-+0-9.eE]+', "\\150.0", text)
+  expect_false(identical(edited, text))
+  writeLines(edited, json)
+  back <- suppressWarnings(ferx_load_fit(fitrx_replace_entry(path, "fit.json", json)))
+  expect_identical(wd_dw(back)[[1L]]$details$durbin_watson, 50)
 })
 
 test_that("the post-hoc steps keep the details in step with the warnings", {
@@ -112,14 +121,4 @@ test_that("the post-hoc steps keep the details in step with the warnings", {
   sir <- suppressWarnings(ferx_sir(fit, sir_samples = 200L, sir_resamples = 50L,
                                    sir_seed = 1L))
   expect_identical(wd_dw(sir), wd_dw(fit))
-  # An entry whose warning a step dropped goes with it.
-  merge <- ferx:::.ferx_merge_warning_details
-  e <- wd_dw(fit)[[1L]]
-  expect_null(merge(list(e), NULL, character()))
-  expect_identical(merge(list(e), list(e), e$message), list(e))
-  # A chained fit's flat message carries the stage prefix the entry keeps apart.
-  chained <- e
-  chained$source_method <- "FOCEI"
-  expect_identical(merge(list(chained), NULL, paste0("[FOCEI] ", e$message)),
-                   list(chained))
 })

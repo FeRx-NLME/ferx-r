@@ -824,9 +824,8 @@ fn ferx_rust_fit(
         // `model_hash` and `model_text` are the one read the fit was parsed
         // and bound from (above), so the text is exactly the bytes the hash
         // names (CRLF, BOM and a missing trailing newline included).
-        // `ferx_save_fit()` writes the bundle's `model.ferx` from that text
-        // rather than re-reading a file that may have been edited since
-        // (ferx-r #577).
+        // The bundle's `model.ferx` is that text, rather than a re-read of a
+        // file that may have been edited since (ferx-r #577).
         result.model_hash = Some(model_hash);
         result.data_hash = Some(data_hash);
         result.model_text = Some(model_text);
@@ -2594,7 +2593,8 @@ fn bind_layout_from_fit(
 }
 
 /// The refusal for a level model paired with a fit that carries no bindings,
-/// shared by every from-fit path so the text cannot drift between them.
+/// shared by the glue's from-fit paths so the text cannot drift between them.
+/// `ferx_sir()` and `ferx_covariance()` get core's own refusal instead.
 fn no_fit_levels_error(model: &CompiledModel) -> String {
     format!(
         "the model declares the theta level block(s) {}, but this fit carries no theta \
@@ -2602,27 +2602,6 @@ fn no_fit_levels_error(model: &CompiledModel) -> String {
          theta layout to place the design on. A fit made, or a .fitrx bundle saved, before \
          ferx recorded the bindings does not carry them. Refit with \
          `ferx_fit()` to record them.",
-        level_block_names(model)
-    )
-}
-
-/// The theta-count refusal of SIR and the standalone covariance step. On a
-/// level model the count is the whole model's, laid out on `fit$theta_levels`,
-/// so either side can be the edited one: the model file or the bindings. Both
-/// are named. The model file is checked against the fit's `model_hash` first
-/// (`read_fit_model`, ferx-r #492), so it is the edited side here only on a fit
-/// that carries no hash.
-fn theta_length_error(entry_point: &str, model: &CompiledModel, n_theta: usize, expected: usize) -> String {
-    if model.theta_blocks().level_blocks().is_empty() {
-        return format!(
-            "{entry_point}: theta length {n_theta} does not match model ({expected} expected)"
-        );
-    }
-    format!(
-        "{entry_point}: the model file, laid out on the fit's theta level bindings \
-         (`fit$theta_levels`) for its level block(s) {}, has {expected} thetas, but the fit \
-         carries {n_theta} (`fit$theta`). Either the model file was edited since the fit, or \
-         `fit$theta_levels` was; refit with `ferx_fit()`.",
         level_block_names(model)
     )
 }
@@ -2960,27 +2939,59 @@ fn unescape_newlines(id: &str) -> String {
     id.replace(ESCAPED_NEWLINE, "\n").replace(ESCAPED_RETURN, "\r")
 }
 
-/// `bundle` with the entries `replaced` swapped in and every other entry copied as it is.
+/// `bundle` with each entry of `changes` set to its bytes, or removed for `None`, and
+/// every other entry copied as it is. The manifest goes last, as core writes it, and
+/// lists what the new bundle holds; one that does not parse is copied, for core's
+/// loader to refuse in its own words.
 fn bundle_with_entries(
     bundle: &[u8],
-    replaced: &HashMap<String, Vec<u8>>,
+    changes: &HashMap<String, Option<Vec<u8>>>,
 ) -> std::result::Result<Vec<u8>, String> {
     use std::io::Write;
+    const MANIFEST: &str = "manifest.json";
     let fail = |e: zip::result::ZipError| format!("not a .fitrx archive: {e}");
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bundle)).map_err(fail)?;
     let mut out = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
     let options = zip::write::SimpleFileOptions::default()
         .compression_method(zip::CompressionMethod::Deflated);
+    let put = |out: &mut zip::ZipWriter<_>, name: &str, bytes: &[u8]| {
+        out.start_file(name, options).map_err(fail)?;
+        out.write_all(bytes).map_err(|e| format!("{name}: {e}"))
+    };
+    let mut entries = vec![MANIFEST.to_string()];
     for i in 0..archive.len() {
         let file = archive.by_index_raw(i).map_err(fail)?;
         let name = file.name().map_err(fail)?.to_string();
-        match replaced.get(&name) {
-            Some(bytes) => {
-                out.start_file(name.as_str(), options).map_err(fail)?;
-                out.write_all(bytes).map_err(|e| format!("{name}: {e}"))?;
-            }
+        if name == MANIFEST {
+            continue;
+        }
+        match changes.get(&name) {
+            Some(None) => continue,
+            Some(Some(bytes)) => put(&mut out, &name, bytes)?,
             None => out.raw_copy_file(file).map_err(fail)?,
         }
+        entries.push(name);
+    }
+    let mut added: Vec<&String> = changes
+        .iter()
+        .filter(|(name, bytes)| bytes.is_some() && !entries.contains(name))
+        .map(|(name, _)| name)
+        .collect();
+    added.sort();
+    for name in added {
+        if let Some(Some(bytes)) = changes.get(name) {
+            put(&mut out, name, bytes)?;
+            entries.push(name.clone());
+        }
+    }
+    if let Some(manifest) = bundle_entry(bundle, MANIFEST)? {
+        let updated = serde_json::from_slice::<serde_json::Value>(&manifest)
+            .ok()
+            .and_then(|mut wire| {
+                *wire.get_mut("entries")? = entries.into();
+                serde_json::to_vec_pretty(&wire).ok()
+            });
+        put(&mut out, MANIFEST, updated.as_deref().unwrap_or(&manifest))?;
     }
     Ok(out.finish().map_err(fail)?.into_inner())
 }
@@ -3029,7 +3040,7 @@ struct PreparedBundle {
 /// `data.csv` stays verbatim: core reads it with a real CSV reader.
 fn prepare_bundle(bundle: &[u8]) -> std::result::Result<PreparedBundle, String> {
     let mut prepared = PreparedBundle::default();
-    let mut replaced: HashMap<String, Vec<u8>> = HashMap::new();
+    let mut replaced: HashMap<String, Option<Vec<u8>>> = HashMap::new();
     // A bundle that does not get this far is core's to refuse, in its own words.
     let Ok(archive) = zip::ZipArchive::new(std::io::Cursor::new(bundle)) else {
         return Ok(prepared);
@@ -3041,7 +3052,7 @@ fn prepare_bundle(bundle: &[u8]) -> std::result::Result<PreparedBundle, String> 
     for name in names.iter().filter(|n| n.ends_with(".csv") && *n != "data.csv") {
         let Some(csv) = bundle_entry(bundle, name)? else { continue };
         if let Some(escaped) = escape_quoted_newlines(&csv) {
-            replaced.insert(name.clone(), escaped);
+            replaced.insert(name.clone(), Some(escaped));
         }
     }
 
@@ -3079,7 +3090,7 @@ fn prepare_bundle(bundle: &[u8]) -> std::result::Result<PreparedBundle, String> 
                 }
             }
             let json = serde_json::to_vec(&wire).map_err(|e| format!("fit.json: {e}"))?;
-            replaced.insert("fit.json".to_string(), json);
+            replaced.insert("fit.json".to_string(), Some(json));
         }
     }
     if !replaced.is_empty() {
@@ -3096,10 +3107,218 @@ fn sdtab_id(id: &str, position: usize) -> f64 {
 
 /// The bundle entry holding the discrete and time-to-event rows of `fit$sdtab` in
 /// full: `SUBJECT` (the row's subject, by 1-based position), then the sdtab columns,
-/// discrete rows before time-to-event ones. `ferx_save_fit()` writes it because
+/// discrete rows before time-to-event ones. The glue adds it because
 /// `predictions_discrete.csv` has a fixed, narrower layout and core has no entry for
-/// time-to-event rows (ferx-core #911). Core carries it as an unknown entry.
+/// time-to-event rows (ferx-core #911). Core's loader ignores it.
 const ENDPOINT_ROWS_ENTRY: &str = "sdtab_endpoint_rows.csv";
+
+/// A CSV text cell, quoted as core's writer quotes one, carriage returns too.
+fn csv_text_cell(text: &str) -> String {
+    if text.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", text.replace('"', "\"\""))
+    } else {
+        text.to_string()
+    }
+}
+
+/// A CSV number cell: the shortest text that reads back as the same double, in
+/// positional form so a count stays a whole number for core's integer columns. A
+/// missing value is empty.
+fn csv_number_cell(value: f64) -> String {
+    if value.is_nan() {
+        String::new()
+    } else {
+        format!("{value}")
+    }
+}
+
+/// The entries holding `sdtab`, every column of it, for `fit`: the Gaussian rows as
+/// `predictions.csv` and the others as [`ENDPOINT_ROWS_ENTRY`]. Core's own
+/// `predictions.csv` has a fixed set of columns, and its loader reads the ones it
+/// knows from a wider table by name. Rows follow `ferx_core::io::output::sdtab`: each
+/// subject's Gaussian rows in subject order, then each subject's discrete rows, then
+/// each subject's time-to-event rows. The `ID` cell is the subject's ID as text, which
+/// core's loader checks against `ebes.csv`.
+fn sdtab_entries(
+    fit: &FitResult,
+    sdtab: &[(String, Vec<f64>)],
+) -> std::result::Result<HashMap<String, Option<Vec<u8>>>, String> {
+    let repeat = |count: &dyn Fn(&SubjectResult) -> usize| -> Vec<usize> {
+        fit.subjects
+            .iter()
+            .enumerate()
+            .flat_map(|(si, sr)| std::iter::repeat_n(si, count(sr)))
+            .collect()
+    };
+    let gaussian = repeat(&|sr| sr.ipred.len());
+    #[cfg_attr(not(feature = "survival"), allow(unused_mut))]
+    let mut endpoint = repeat(&|sr| sr.discrete_rows.len());
+    #[cfg(feature = "survival")]
+    endpoint.extend(repeat(&|sr| sr.tte_rows.len()));
+
+    let n_rows = sdtab.first().map_or(0, |(_, values)| values.len());
+    if n_rows != gaussian.len() + endpoint.len() || sdtab.iter().any(|(_, v)| v.len() != n_rows) {
+        return Err(format!(
+            "the sdtab has {n_rows} rows, and the fit's subjects count {} Gaussian and {} other \
+             rows",
+            gaussian.len(),
+            endpoint.len()
+        ));
+    }
+    let names: Vec<&str> = sdtab.iter().map(|(name, _)| name.as_str()).collect();
+    let row = |at: usize, si: usize| -> String {
+        sdtab
+            .iter()
+            .map(|(name, values)| match name.as_str() {
+                "ID" => csv_text_cell(&fit.subjects[si].id),
+                _ => csv_number_cell(values[at]),
+            })
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    let mut predictions = names.join(",");
+    predictions.push('\n');
+    for (at, &si) in gaussian.iter().enumerate() {
+        predictions.push_str(&row(at, si));
+        predictions.push('\n');
+    }
+    let mut changes = HashMap::from([(
+        "predictions.csv".to_string(),
+        Some(predictions.into_bytes()),
+    )]);
+    let endpoint_rows = (!endpoint.is_empty()).then(|| {
+        let mut text = format!("SUBJECT,{}\n", names.join(","));
+        for (k, &si) in endpoint.iter().enumerate() {
+            text.push_str(&format!("{},{}\n", si + 1, row(gaussian.len() + k, si)));
+        }
+        text.into_bytes()
+    });
+    changes.insert(ENDPOINT_ROWS_ENTRY.to_string(), endpoint_rows);
+    Ok(changes)
+}
+
+/// A fit's bundle read back for a step that writes a new one.
+struct BundleFit {
+    /// The fit, its subject IDs as the data has them.
+    fit: FitResult,
+    /// The bundle as core reads it (see [`prepare_bundle`]).
+    for_core: Vec<u8>,
+}
+
+/// Read `bundle` for a step that returns new bytes. The population is left to the step,
+/// which re-reads it from the fit's data file.
+fn read_bundle_fit(bundle: &[u8]) -> std::result::Result<BundleFit, String> {
+    let prepared = prepare_bundle(bundle)?;
+    let for_core = prepared.bytes.unwrap_or_else(|| bundle.to_vec());
+    let loaded = ferx_core::io::fitrx::load_fit_from_bytes_without_population(&for_core)
+        .map_err(|e| format!("cannot read this fit's bundle: {e}"))?;
+    let mut fit = loaded.fit;
+    map_subject_ids(&mut fit, &unescape_newlines);
+    check_loaded_fit(&fit)?;
+    Ok(BundleFit { fit, for_core })
+}
+
+/// Refuse what the bytes lack for a post-hoc step on `model`, where core would carry
+/// on and give another answer. Core rebuilds a free `block_sigma` correlation the fit
+/// has no value for at its declared value (ferx-r #480), and re-solves cold from kappa
+/// EBEs that do not cover every subject, which only FOCE and FOCEI repeat exactly
+/// (ferx-r #591). Bundles core wrote pass; these are for an edited or damaged one.
+fn check_step_fit(
+    entry_point: &str,
+    fit: &FitResult,
+    model: &CompiledModel,
+) -> std::result::Result<(), String> {
+    let rho: Vec<f64> = fit.residual_correlations.iter().map(|c| c.rho).collect();
+    let pairs: Vec<i32> = fit
+        .residual_correlations
+        .iter()
+        .flat_map(|c| [c.sigma_i as i32 + 1, c.sigma_j as i32 + 1])
+        .collect();
+    residual_correlations_from_fit(model, &rho, &pairs)
+        .map_err(|e| format!("{entry_point}: {e}"))?;
+    if !fit.ebe_kappas.is_empty() {
+        let empty = |i: usize| fit.ebe_kappas.get(i).is_none_or(Vec::is_empty);
+        if let Some(i) = (0..fit.subjects.len()).find(|&i| empty(i)) {
+            return Err(format!(
+                "{entry_point}: the fit has no kappa EBEs for subject `{}`",
+                fit.subjects[i].id
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// `result` as a bundle can hold it. JSON has no NaN or infinity, so core writes a
+/// non-finite gradient component as `null`, and its reader then refuses the whole
+/// bundle (`Vec<f64>`). The gradient goes, with its label, and the fit reads as one that
+/// reported none.
+fn writable_fit(result: &FitResult) -> std::borrow::Cow<'_, FitResult> {
+    use std::borrow::Cow;
+    let finite = result
+        .final_gradient
+        .as_ref()
+        .is_none_or(|g| g.iter().all(|v| v.is_finite()));
+    if finite {
+        return Cow::Borrowed(result);
+    }
+    let mut fit = result.clone();
+    fit.final_gradient = None;
+    fit.final_gradient_source = None;
+    Cow::Owned(fit)
+}
+
+/// `edit` applied to every subject ID a fit holds.
+fn map_subject_ids(fit: &mut FitResult, edit: &dyn Fn(&str) -> String) {
+    for subject in &mut fit.subjects {
+        subject.id = edit(&subject.id);
+    }
+    if let Some(table) = &mut fit.covariate_table {
+        for row in &mut table.rows {
+            row.id = edit(&row.id);
+        }
+    }
+}
+
+/// The bundle of `result`, a fit read from `original` by [`read_bundle_fit`] whose
+/// subjects' rows have not changed. Core writes it from `result` with no population,
+/// taking the data columns and any `data.csv` from the bundle; `original`'s sdtab
+/// entries then go back, as core writes its narrower table. Core reads IDs by line, so
+/// an ID holding a line break stays escaped in the entries it writes, and
+/// [`unescape_newlines`] restores it on the next read.
+fn rewritten_bundle(
+    result: &FitResult,
+    read: &BundleFit,
+    original: &[u8],
+) -> std::result::Result<Vec<u8>, String> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let mut result = writable_fit(result).into_owned();
+    map_subject_ids(&mut result, &|id| {
+        id.replace('\n', &ESCAPED_NEWLINE.to_string())
+            .replace('\r', &ESCAPED_RETURN.to_string())
+    });
+    // Core's bundle-based save writes to a path only.
+    let path = std::env::temp_dir().join(format!(
+        "ferx_bundle_{}_{}.fitrx",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    let saved = ferx_core::io::fitrx::save_fit_from_bundle(
+        &result,
+        &read.for_core,
+        &path,
+        ferx_core::io::fitrx::SaveFitOptions::default(),
+    )
+    .map_err(|e| e.to_string())
+    .and_then(|()| std::fs::read(&path).map_err(|e| e.to_string()));
+    let _ = std::fs::remove_file(&path);
+    let bytes = saved?;
+    let mut changes = HashMap::new();
+    for name in ["predictions.csv", ENDPOINT_ROWS_ENTRY] {
+        changes.insert(name.to_string(), bundle_entry(original, name)?);
+    }
+    bundle_with_entries(&bytes, &changes)
+}
 
 /// `fit$sdtab` and each subject's occasion labels, read from the rows the bundle
 /// records, since a bundle need not hold the data they were computed from.
@@ -3273,6 +3492,14 @@ fn check_loaded_fit(fit: &FitResult) -> std::result::Result<(), String> {
             return refuse("`sir.resamples_packed` rows are empty or differ in length".into());
         }
     }
+    // R carries these by theta name, so an index past the thetas would silently
+    // drop a level the fit held, which would then report a standard error.
+    if let Some(k) = fit.profiled_levels_at_bound.iter().find(|&&k| k >= fit.theta.len()) {
+        return refuse(format!(
+            "`profiled_levels_at_bound` names theta index {k}, and the fit has {} thetas",
+            fit.theta.len()
+        ));
+    }
     for level in &fit.ebe_kappas_by_level {
         for k in &level.kappa_names {
             let at = fit
@@ -3322,14 +3549,7 @@ fn ferx_rust_load_fit(bundle: Raw) -> List {
             .or_else(|_| load_fit_from_bytes_without_population(for_core))
             .map_err(|e| format!("cannot read this .fitrx bundle: {e}"))?;
         let mut fit = loaded.fit;
-        for subject in &mut fit.subjects {
-            subject.id = unescape_newlines(&subject.id);
-        }
-        if let Some(table) = &mut fit.covariate_table {
-            for row in &mut table.rows {
-                row.id = unescape_newlines(&row.id);
-            }
-        }
+        map_subject_ids(&mut fit, &unescape_newlines);
         check_loaded_fit(&fit)?;
         let (sdtab, occasions) = recorded_rows(bytes, &mut fit)?;
         let parsed = loaded_model(&fit, &loaded.model_source);
@@ -3369,8 +3589,8 @@ fn ferx_rust_load_fit(bundle: Raw) -> List {
 }
 
 /// The JSON text of top-level `fit.json` keys of a bundle, `NA` for a key it lacks.
-/// `ferx_save_fit()` carries over, verbatim, the keys core writes and the R fit does
-/// not hold (ferx-r #711).
+/// `ferx_load_fit()` keeps a bundle's level bindings this way when they cannot be laid
+/// out on its model file (ferx-r #531).
 ///
 /// @param bundle The bundle's bytes.
 /// @param keys The keys to read.
@@ -3390,92 +3610,116 @@ fn ferx_rust_fitrx_wire_keys(bundle: Raw, keys: Vec<String>) -> Strings {
     })
 }
 
-/// A mixture fit's per-subject `MIXEST` and `PMIX_*` columns of a bundle's `ebes.csv`,
-/// which the R fit holds per row of `sdtab` only, so a subject with no observations has
-/// them nowhere else. `NULL` for a bundle with none.
+/// Set a bundle's `interface_extras.json`, the fields only this interface reads.
 ///
 /// @param bundle The bundle's bytes.
-/// @return A list of numeric columns, or NULL.
+/// @param extras The entry's JSON text.
+/// @return The new bundle's bytes.
 /// @export
 #[extendr]
-fn ferx_rust_fitrx_mixture_columns(bundle: Raw) -> Robj {
+fn ferx_rust_bundle_with_extras(bundle: Raw, extras: &str) -> Raw {
     entry(move || {
-        let (header, rows) = bundle_csv(bundle.as_slice(), "ebes.csv")?
-            .ok_or_else(|| "the bundle has no ebes.csv".to_string())?;
-        let is_mixture = |name: &String| {
-            name == "MIXEST"
-                || name.strip_prefix("PMIX_").is_some_and(|k| k.parse::<usize>().is_ok())
-        };
-        let pairs: Vec<(&str, Robj)> = header
-            .iter()
-            .enumerate()
-            .filter(|(_, name)| is_mixture(name))
-            .map(|(c, name)| {
-                let column: Vec<f64> = rows.iter().map(|r| csv_number(&r[c])).collect();
-                (name.as_str(), column.into())
-            })
-            .collect();
-        Ok(if pairs.is_empty() { r_null() } else { List::from_pairs(pairs).into() })
+        let bytes =
+            ferx_core::io::fitrx::bundle_with_interface_extras(bundle.as_slice(), Some(extras))
+                .map_err(|e| e.to_string())?;
+        Ok(Raw::from_bytes(&bytes))
     })
 }
 
-/// Read a `.fitrx` bundle with ferx-core's own loader and write it back with
-/// ferx-core's own writer (ferx-r #466): the engine's side of a bundle round
-/// trip, for the tests that hold `ferx_save_fit()` / `ferx_load_fit()` to the
-/// engine's wire rather than to each other.
+/// Add `data.csv` to a bundle, after core checks it against the fit's `data_hash`.
 ///
-/// The bundle must carry `data.csv` (`ferx_save_fit(include_data = TRUE)`):
-/// core's writer re-derives the predictions table from the population. The
-/// re-written bundle bundles no data.
-///
-/// @param path The bundle to read.
-/// @param out_path Where core writes it back.
-/// @return The level bindings core's loader read, one row per level in core's
-///   order (blocks sorted by name, levels in level order): `block`, `label`,
-///   `group` and `contrast`.
+/// @param bundle The bundle's bytes.
+/// @param data The data file's bytes.
+/// @param name What a refusal calls them.
+/// @return The new bundle's bytes.
 /// @export
 #[extendr]
-fn ferx_rust_fitrx_engine_resave(path: &str, out_path: &str) -> Robj {
+fn ferx_rust_bundle_with_data(bundle: Raw, data: Raw, name: &str) -> Raw {
     entry(move || {
-        use ferx_core::io::fitrx::{load_fit, save_fit, SaveFitOptions};
-        let loaded = load_fit(Path::new(path))
-            .map_err(|e| format!("ferx-core's .fitrx loader refused `{path}`: {e}"))?;
-        let population = loaded.population.as_ref().ok_or_else(|| {
-            format!("`{path}` bundles no data.csv; save it with `include_data = TRUE`")
-        })?;
-        save_fit(
-            &loaded.fit,
-            population,
-            &loaded.model_source,
-            Path::new(out_path),
-            SaveFitOptions::default(),
-        )
-        .map_err(|e| format!("ferx-core's .fitrx writer refused `{out_path}`: {e}"))?;
+        let bytes =
+            ferx_core::io::fitrx::bundle_with_data(bundle.as_slice(), data.as_slice(), name)
+                .map_err(|e| e.to_string())?;
+        Ok(Raw::from_bytes(&bytes))
+    })
+}
 
-        let levels: std::collections::BTreeMap<_, _> =
-            loaded.fit.data_bindings.levels.iter().collect();
-        let mut block: Vec<String> = Vec::new();
-        let mut label: Vec<String> = Vec::new();
-        let mut group: Vec<i32> = Vec::new();
-        let mut contrast: Vec<String> = Vec::new();
-        for (name, b) in levels {
-            for (i, l) in b.labels.iter().enumerate() {
-                block.push(name.clone());
-                label.push(l.clone());
-                group.push(b.groups.get(i).map_or(i32::MIN, |g| *g as i32));
-                contrast.push(level_contrast_token(b.contrast).to_string());
-            }
-        }
-        let n = block.len();
-        Ok(finish_df(
-            vec![
-                ("block", block.into()),
-                ("label", label.into()),
-                ("group", group.into()),
-                ("contrast", contrast.into()),
-            ],
-            n,
-        ))
+/// A bundle without its `data.csv`, for a save that did not ask for the data.
+///
+/// @param bundle The bundle's bytes.
+/// @return The new bundle's bytes.
+/// @export
+#[extendr]
+fn ferx_rust_bundle_without_data(bundle: Raw) -> Raw {
+    entry(move || {
+        let changes = HashMap::from([("data.csv".to_string(), None)]);
+        Ok(Raw::from_bytes(&bundle_with_entries(bundle.as_slice(), &changes)?))
+    })
+}
+
+/// A bundle whose sdtab entries hold `sdtab`, for a step that adds columns to the
+/// table, as `ferx_calc_npde()` does. The rows must be the fit's.
+///
+/// @param bundle The bundle's bytes.
+/// @param sdtab The table as a list of numeric columns.
+/// @return The new bundle's bytes.
+/// @export
+#[extendr]
+fn ferx_rust_bundle_with_sdtab(bundle: Raw, sdtab: List) -> Raw {
+    entry(move || {
+        let bytes = bundle.as_slice();
+        let mut fit = read_bundle_fit(bytes)?.fit;
+        // The time-to-event rows are the glue's entry, not core's.
+        recorded_rows(bytes, &mut fit)?;
+        let columns = sdtab
+            .iter()
+            .map(|(name, column)| {
+                column
+                    .as_real_vector()
+                    .map(|values| (name.to_string(), values))
+                    .ok_or_else(|| format!("internal: sdtab column `{name}` is not numeric"))
+            })
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let changes = sdtab_entries(&fit, &columns)?;
+        Ok(Raw::from_bytes(&bundle_with_entries(bytes, &changes)?))
+    })
+}
+
+/// `bundle` rewritten with a NaN in the fit's gradient, which no test can get from a
+/// fit on demand: the path a fit with one takes to its bytes ([`writable_fit`]).
+///
+/// @param bundle The bundle's bytes; the fit must report a gradient.
+/// @return The new bundle's bytes.
+/// @export
+#[extendr]
+fn ferx_rust_test_nan_gradient_bundle(bundle: Raw) -> Raw {
+    entry(move || {
+        let bytes = bundle.as_slice();
+        let read = read_bundle_fit(bytes)?;
+        let mut fit = read.fit.clone();
+        fit.final_gradient
+            .as_mut()
+            .and_then(|g| g.first_mut())
+            .map(|v| *v = f64::NAN)
+            .ok_or("internal: the fit reports no gradient")?;
+        Ok(Raw::from_bytes(&rewritten_bundle(&fit, &read, bytes)?))
+    })
+}
+
+/// A bundle without the fit's optimizer trace, for a background job whose caller did
+/// not ask for one (`ferx_collect()`).
+///
+/// @param bundle The bundle's bytes.
+/// @return The new bundle's bytes.
+/// @export
+#[extendr]
+fn ferx_rust_bundle_without_trace(bundle: Raw) -> Raw {
+    entry(move || {
+        let bytes = bundle.as_slice();
+        let read = read_bundle_fit(bytes)?;
+        let mut fit = read.fit.clone();
+        fit.trace_path = None;
+        fit.trace_csv = None;
+        Ok(Raw::from_bytes(&rewritten_bundle(&fit, &read, bytes)?))
     })
 }
 
@@ -5657,20 +5901,27 @@ fn fit_result_to_list(
     bindings: &ParseBindings,
     model_text: &str,
 ) -> std::result::Result<List, String> {
+    // The view is of what the bytes hold, so the two agree.
+    let writable = writable_fit(result);
+    let result = writable.as_ref();
     let cov_matrix_dim = result.covariance_matrix.as_ref().map_or(0, |m| m.nrows() as i32);
+    let sdtab = ferx_core::io::output::sdtab(result, population);
     // A fit that cannot be serialized is still a fit, so this does not fail it:
     // R warns, and only `ferx_save_fit()` refuses.
-    let (bundle, bundle_error): (Robj, Robj) = match ferx_core::io::fitrx::save_fit_to_bytes(
+    let bytes = ferx_core::io::fitrx::save_fit_to_bytes(
         result,
         population,
         model_text,
         ferx_core::io::fitrx::SaveFitOptions::default(),
-    ) {
+    )
+    .map_err(|e| e.to_string())
+    .and_then(|bytes| bundle_with_entries(&bytes, &sdtab_entries(result, &sdtab)?));
+    let (bundle, bundle_error): (Robj, Robj) = match bytes {
         Ok(bytes) => (Raw::from_bytes(&bytes).into(), r_null()),
-        Err(e) => (r_null(), e.to_string().into()),
+        Err(e) => (r_null(), e.into()),
     };
     let view = FitView {
-        sdtab: ferx_core::io::output::sdtab(result, population),
+        sdtab,
         occasions: population.subjects.iter().map(|s| s.occasions.clone()).collect(),
         individual_estimates: build_individual_estimates(result, population, model),
         theta_levels: level_bindings_to_r(
@@ -6410,8 +6661,7 @@ fn fit_view_to_list(result: &FitResult, view: FitView) -> std::result::Result<Li
         se_omega = se_omega,
         se_sigma = se_sigma,
         // Per-parameter FIX flags, parallel to `theta`, the omega diagonal and
-        // `sigma` (ferx-r #436). `ferx_save_fit()` writes them into the bundle;
-        // without them an in-memory fit saved every FIX parameter as free.
+        // `sigma` (ferx-r #436).
         theta_fixed = result.theta_fixed.clone(),
         omega_fixed = result.omega_fixed.clone(),
         sigma_fixed = result.sigma_fixed.clone(),
@@ -6742,9 +6992,8 @@ fn prior_summary_to_dataframe(result: &FitResult) -> Robj {
 // data frame per level, outermost first: `ID` (the subject, verbatim),
 // `GROUP` (1-based, the subject's groups of the level in first-record order),
 // one column per label column of the level's path (`STUDY`, `ARM`), then one
-// per kappa at the level. The columns of ferx-core's `ebes_kappa_<LEVEL>.csv`,
-// so `ferx_save_fit()` writes the frame as it stands. NULL for a fit without
-// nested levels.
+// per kappa at the level. The columns of ferx-core's `ebes_kappa_<LEVEL>.csv`.
+// NULL for a fit without nested levels.
 fn build_ebe_kappas_by_level(result: &FitResult) -> Robj {
     if result.ebe_kappas_by_level.is_empty() {
         return ().into();
@@ -7351,55 +7600,6 @@ fn ferx_rust_sha256_raw(bytes: Raw) -> String {
     entry(move || Ok(ferx_core::io::hash::sha256_bytes(bytes.as_slice())))
 }
 
-/// Write the files `entries` (names relative to `dir`) into a new zip archive
-/// at `output`, deflate-compressed, each stored under its bare name.
-///
-/// `ferx_save_fit()` used `utils::zip()`, which shells out to the external
-/// `zip` program named by `R_ZIPCMD`. A Linux box without Info-ZIP installed
-/// leaves that empty, and the save - and with it `ferx_fit(output =)`, after
-/// the whole estimation - failed with "'zip' must be a non-empty character
-/// string" (ferx-r #662). The `zip` crate is already in the graph for
-/// ferx-core's own `.fitrx` writer, so the bundle is written here instead.
-///
-/// @param dir Directory holding the files.
-/// @param entries Character vector of file names within `dir`, in archive order.
-/// @param output Path of the archive to create (overwritten if present).
-/// @return `NULL`, invisibly.
-/// @export
-#[extendr]
-fn ferx_rust_zip_files(dir: &str, entries: Vec<String>, output: &str) {
-    entry(move || {
-        let dir = std::path::Path::new(dir);
-        let file = std::fs::File::create(output)
-            .map_err(|e| format!("cannot create {output}: {e}"))?;
-        let mut zw = zip::ZipWriter::new(std::io::BufWriter::new(file));
-        for name in &entries {
-            // Streamed, never read whole: predictions.csv, data.csv or a
-            // SIR-heavy fit.json can run to hundreds of MB, and the save
-            // happens inside an R process that has just held the fit.
-            let mut src = std::fs::File::open(dir.join(name))
-                .map_err(|e| format!("cannot read {name}: {e}"))?;
-            let size = src
-                .metadata()
-                .map_err(|e| format!("cannot read {name}: {e}"))?
-                .len();
-            let opts = zip::write::SimpleFileOptions::default()
-                .compression_method(zip::CompressionMethod::Deflated)
-                .unix_permissions(0o644)
-                // ZIP64 headers only for an entry past the 4 GiB limit, so
-                // ordinary bundles stay plain zip for every reader.
-                .large_file(size >= u64::from(u32::MAX));
-            zw.start_file(name.as_str(), opts)
-                .map_err(|e| format!("cannot add {name} to {output}: {e}"))?;
-            std::io::copy(&mut src, &mut zw)
-                .map_err(|e| format!("cannot write {name} to {output}: {e}"))?;
-        }
-        zw.finish()
-            .map_err(|e| format!("cannot finish {output}: {e}"))?;
-        Ok(())
-    })
-}
-
 /// The engine's display label for each `method` token, in order (ferx-r #506):
 /// `"vi"` -> `"VI"`, `"importance_sampling"` -> `"IMP"`. Each token is read by
 /// ferx-core's `parse_method_token`, the parser a `[fit_options]` `method =`
@@ -7418,56 +7618,6 @@ fn ferx_rust_method_token_labels(tokens: Vec<String>) -> Vec<String> {
             .map(|t| method_from_token(t).map(|m| m.label().to_string()))
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(argument_refusal)
-    })
-}
-
-/// Every estimation method's `.fitrx` token and display label (ferx-r #508):
-/// the label is ferx-core's `EstimationMethod::label()`, the token what core's
-/// `.fitrx` writer stores for that method. `ferx_load_fit()` maps the stored
-/// token to the label a live fit reports, and `ferx_save_fit()` maps back, so
-/// neither keeps a hand-written method list that a new engine method can
-/// outgrow (a reloaded VI fit used to read `"vi"` instead of `"VI"`).
-///
-/// Core keeps its token map private, so the tokens are spelled here, once, in
-/// the `methods!` list below. That one list generates both the table and an
-/// exhaustive `match` over `EstimationMethod`, so a method the engine adds and
-/// the list lacks stops this crate compiling; nothing can be in the match but
-/// missing from the table.
-///
-/// @return A list with `token` and `label`, character vectors, one entry per
-///   method, in the same order.
-/// @export
-#[extendr]
-fn ferx_rust_method_labels() -> List {
-    entry(move || {
-        macro_rules! methods {
-            ($($variant:ident => $token:literal),+ $(,)?) => {{
-                // Never called: it exists so the compiler checks that the
-                // `methods!` list covers every `EstimationMethod`.
-                #[allow(dead_code)]
-                fn exhaustive(m: EstimationMethod) {
-                    match m {
-                        $(EstimationMethod::$variant => {})+
-                    }
-                }
-                [$((EstimationMethod::$variant, $token)),+]
-            }};
-        }
-        let table = methods! {
-            Foce => "foce",
-            FoceI => "focei",
-            FoceGn => "foce_gn",
-            FoceGnHybrid => "foce_gn_hybrid",
-            Saem => "saem",
-            Imp => "imp",
-            Impmap => "impmap",
-            Bayes => "bayes",
-            Laplace => "laplace",
-            Vi => "vi",
-        };
-        let tokens: Vec<String> = table.iter().map(|(_, t)| t.to_string()).collect();
-        let labels: Vec<String> = table.iter().map(|(m, _)| m.label().to_string()).collect();
-        Ok(list!(token = tokens, label = labels))
     })
 }
 
@@ -8413,205 +8563,6 @@ fn ferx_rust_inits_from_nca(model_path: &str, data_path: &str, method: &str) -> 
     })
 }
 
-/// What a fit object hands the standalone SIR and covariance steps: the fitted
-/// point, the per-subject EBEs, and the provenance the engine re-reads and
-/// verifies. The R side sends the same set to both bindings.
-struct FitSkeletonInputs<'a> {
-    model_path: &'a str,
-    data_path: &'a str,
-    model_hash: &'a str,
-    data_hash: &'a str,
-    ofv: f64,
-    ofv_prior: f64,
-    interaction: bool,
-    theta: &'a [f64],
-    omega_flat: &'a [f64],
-    omega_dim: i32,
-    sigma: &'a [f64],
-    omega_iov_flat: &'a [f64],
-    omega_iov_dim: i32,
-    residual_rho: &'a [f64],
-    residual_rho_pairs: &'a [i32],
-    eta_hats_flat: &'a [f64],
-    subject_ids: &'a [String],
-    /// `fit$iov_occasion`; "" when the fit carries none.
-    iov_occasion: &'a str,
-    /// `fit$reader_settings` / `fit$population_fingerprint` as JSON; "" when
-    /// the fit carries none (ferx-r #462).
-    reader_settings: &'a str,
-    population_fingerprint: &'a str,
-    /// `fit$scoring_settings` / `fit$sir_settings`: the record lists, or NULL
-    /// when the fit carries none (ferx-r #511 / #472).
-    scoring_settings: &'a Robj,
-    sir_settings: &'a Robj,
-    /// `fit$packed_estimate`; empty when the fit carries none.
-    packed_estimate: &'a [f64],
-    /// `fit$mixture_overrides`: a `[mixture]` fit's fitted per-class Omega /
-    /// Sigma override values (ferx-core #1765); empty when the fit carries none.
-    mixture_overrides: &'a [f64],
-    /// `fit$bloq_method_label` (`"drop"` / `"m3"`); "" when the fit carries
-    /// none. Since ferx-core #1824 the post-hoc steps score the method the fit
-    /// reports, so it must be the fit's, not a placeholder.
-    bloq_method: &'a str,
-    /// `fit$method` and `fit$method_chain`, in the engine's labels (`"SAEM"`,
-    /// `"FOCEI"`, ...); "" / empty when the fit carries none, which falls back
-    /// to FOCE / FOCEI from `interaction` (ferx-r #591).
-    method: &'a str,
-    method_chain: &'a [String],
-    /// `fit$ebe_kappas`: the kappa columns flattened row-major, one row per
-    /// (subject, occasion) in fit order, and the `ID` of each row. Empty when
-    /// the fit carries none (ferx-r #591).
-    ebe_kappas_flat: &'a [f64],
-    ebe_kappa_ids: &'a [String],
-    /// `fit$theta_fixed`: the thetas the fit held, one flag per theta; empty
-    /// when the fit carries none (ferx-r #613).
-    theta_fixed: &'a [bool],
-}
-
-/// `fit$theta_fixed` as the engine's flags: NA reads as not held.
-fn theta_fixed_from_r(theta_fixed: &Logicals) -> Vec<bool> {
-    theta_fixed.iter().map(|b| b.is_true()).collect()
-}
-
-/// The thetas a skeleton `FitResult` holds (ferx-r #613): the model file's FIX
-/// and every theta the fit itself held. The engine freezes a theta that has no
-/// effect on the objective at the fit's start ("`X` has no effect on the
-/// objective ... Freezing it"), and records it in the fit's `theta_fixed`, not
-/// in the model file. `run_covariance` / `run_sir` take the mask off the
-/// skeleton, so one built from the file alone differentiated the frozen theta
-/// and failed on its zero diagonal where the fit's own step computed.
-fn skeleton_theta_fixed(
-    entry_point: &str,
-    model: &CompiledModel,
-    fit_fixed: &[bool],
-) -> std::result::Result<Vec<bool>, String> {
-    let mut fixed = model.default_params.theta_fixed.clone();
-    if fit_fixed.is_empty() {
-        return Ok(fixed);
-    }
-    if fit_fixed.len() != fixed.len() {
-        return Err(format!(
-            "{entry_point}: fit$theta_fixed has {} entries but the model has {} thetas",
-            fit_fixed.len(),
-            fixed.len()
-        ));
-    }
-    for (f, &held) in fixed.iter_mut().zip(fit_fixed) {
-        *f |= held;
-    }
-    Ok(fixed)
-}
-
-/// The `EstimationMethod` whose engine label (`EstimationMethod::label()`, the
-/// spelling of `fit$method` / `fit$method_chain`) is `label`.
-fn method_from_label(label: &str) -> Option<EstimationMethod> {
-    use EstimationMethod::*;
-    // Never called: it makes the compiler check that the list below covers
-    // every `EstimationMethod`.
-    #[allow(dead_code)]
-    fn exhaustive(m: EstimationMethod) {
-        match m {
-            Foce | FoceI | FoceGn | FoceGnHybrid | Saem | Imp | Impmap | Bayes | Laplace | Vi => {}
-        }
-    }
-    [Foce, FoceI, FoceGn, FoceGnHybrid, Saem, Imp, Impmap, Bayes, Laplace, Vi]
-        .into_iter()
-        .find(|m| m.label().eq_ignore_ascii_case(label.trim()))
-}
-
-/// The method and method chain a skeleton `FitResult` reports (ferx-r #591).
-///
-/// `run_covariance` and `run_sir` score the objective of `fit.method`, and the
-/// covariance step routes on it: at an SAEM / IMP / IMPMAP / VI estimate, an R
-/// matrix that needs an eigenvalue floor is replaced by S^-1, because those
-/// engines do not minimise the FOCE objective R is the Hessian of. A skeleton
-/// that always said FOCE kept the floored R instead, and an SAEM IOV fit's
-/// standalone standard errors came out ~2000x the in-fit ones. A fit that
-/// records no method (one built by hand) keeps the old FOCE / FOCEI reading of
-/// `interaction`; an unknown label is refused rather than guessed.
-fn skeleton_methods(
-    entry_point: &str,
-    x: &FitSkeletonInputs,
-) -> std::result::Result<(EstimationMethod, Vec<EstimationMethod>), String> {
-    let parse = |label: &str| {
-        method_from_label(label).ok_or_else(|| {
-            format!("{entry_point}: unknown estimation method `{label}` on the fit")
-        })
-    };
-    let fallback = if x.interaction {
-        EstimationMethod::FoceI
-    } else {
-        EstimationMethod::Foce
-    };
-    let chain: Vec<EstimationMethod> = x
-        .method_chain
-        .iter()
-        .filter(|m| !m.trim().is_empty())
-        .map(|m| parse(m))
-        .collect::<std::result::Result<_, _>>()?;
-    let method = if x.method.trim().is_empty() {
-        chain.last().copied().unwrap_or(fallback)
-    } else {
-        parse(x.method)?
-    };
-    let chain = if chain.is_empty() { vec![method] } else { chain };
-    Ok((method, chain))
-}
-
-/// The fit's per-occasion kappa EBEs (`fit$ebe_kappas`) in `FitResult::ebe_kappas`
-/// shape: one list per subject, one vector of `n_kappa` per occasion (ferx-r #591).
-///
-/// `run_covariance` starts from the EBEs the fit reports only when the kappas
-/// come with them; without them it re-solves cold, which repeats FOCE / FOCEI
-/// exactly but not the warm-started engines (ferx-core #1847). The rows are in
-/// fit order, so each subject owns the run of rows carrying its ID; two
-/// adjacent subjects never share an ID (the reader starts a new subject on an
-/// ID change). Rows that do not line up with the subjects are refused.
-fn ebe_kappas_from_r(
-    entry_point: &str,
-    x: &FitSkeletonInputs,
-    n_kappa: usize,
-) -> std::result::Result<Vec<Vec<nalgebra::DVector<f64>>>, String> {
-    if x.ebe_kappa_ids.is_empty() && x.ebe_kappas_flat.is_empty() {
-        return Ok(Vec::new());
-    }
-    let n_rows = x.ebe_kappa_ids.len();
-    if n_kappa == 0 || x.ebe_kappas_flat.len() != n_rows * n_kappa {
-        return Err(format!(
-            "{entry_point}: fit$ebe_kappas has {} values over {n_rows} rows, which does not \
-             match the model's {n_kappa} kappa(s)",
-            x.ebe_kappas_flat.len()
-        ));
-    }
-    let mut out = Vec::with_capacity(x.subject_ids.len());
-    let mut row = 0;
-    for id in x.subject_ids {
-        let mut occasions = Vec::new();
-        while row < n_rows && &x.ebe_kappa_ids[row] == id {
-            occasions.push(nalgebra::DVector::from_column_slice(
-                &x.ebe_kappas_flat[row * n_kappa..(row + 1) * n_kappa],
-            ));
-            row += 1;
-        }
-        if occasions.is_empty() {
-            return Err(format!(
-                "{entry_point}: fit$ebe_kappas has no rows for subject `{id}` where fit order \
-                 expects them"
-            ));
-        }
-        out.push(occasions);
-    }
-    if row != n_rows {
-        return Err(format!(
-            "{entry_point}: fit$ebe_kappas row {} (ID `{}`) does not belong to any subject in \
-             fit order",
-            row + 1,
-            x.ebe_kappa_ids[row]
-        ));
-    }
-    Ok(out)
-}
-
 /// An IOV occasion rule in the spelling `ferx_fit(settings = list(iov_occasion =
 /// ...))` takes, which `iov_occasion_from_r` reads back to the same rule: an
 /// edge's `{}` is the shortest text that parses to the same `f64`.
@@ -9309,430 +9260,6 @@ fn ferx_rust_settings_record(kind: &str, record: Robj, entry_point: &str, field:
     })
 }
 
-/// Whether the skeleton's `packed_estimate` is the packed form of its own
-/// estimates: unpacked against the parameters the skeleton rebuilds from its
-/// theta / Omega / sigma / kappa / residual rho, every value must come back
-/// bit for bit. `run_covariance` evaluates at the packed point whenever it has
-/// one, so a fit list whose estimates were edited after the fit must not keep
-/// the original's packed vector (ferx-r #511). A mixture fit's per-class
-/// override segment has no counterpart on the skeleton to compare with; ferx-core
-/// length-checks it.
-fn packed_estimate_matches(model: &CompiledModel, fit: &FitResult) -> bool {
-    use ferx_core::estimation::parameterization::{packed_len, unpack_params};
-    let Some(v) = fit.packed_estimate.as_deref() else {
-        return false;
-    };
-    let Ok(base) = ferx_core::estimation::uncertainty_samples::fitted_params_from_result(fit, model)
-    else {
-        return false;
-    };
-    if v.len() != packed_len(&base) {
-        return false;
-    }
-    let u = unpack_params(v, &base);
-    let same = |a: &[f64], b: &[f64]| {
-        a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.to_bits() == y.to_bits())
-    };
-    let same_mat = |a: &DMatrix<f64>, b: &DMatrix<f64>| a.shape() == b.shape() && same(a.as_slice(), b.as_slice());
-    let same_iov = match (&u.omega_iov, &base.omega_iov) {
-        (None, None) => true,
-        (Some(a), Some(b)) => same_mat(&a.matrix, &b.matrix),
-        _ => false,
-    };
-    let same_rho = u.residual_correlations.len() == base.residual_correlations.len()
-        && u
-            .residual_correlations
-            .iter()
-            .zip(&base.residual_correlations)
-            .all(|(a, b)| {
-                a.sigma_i == b.sigma_i && a.sigma_j == b.sigma_j && a.rho.to_bits() == b.rho.to_bits()
-            });
-    same(&u.theta, &base.theta)
-        && same_mat(&u.omega.matrix, &base.omega.matrix)
-        && same(&u.sigma.values, &base.sigma.values)
-        && same_iov
-        && same_rho
-}
-
-/// The skeleton `FitResult` `ferx_core::run_sir` and `ferx_core::run_covariance`
-/// both start from, rebuilt from the R fit list. Only the fields those two read
-/// (through `fitted_params_from_result` and the inner loop) carry real values;
-/// the rest get neutral defaults.
-///
-/// One builder for both bindings (ferx-r #473): the covariance twin used to
-/// keep its own copy, which passed `omega_iov: None` for a kappa fit without a
-/// matching matrix - and `None` makes the engine rebuild the fit at the model
-/// file's *initial* kappa, so the standard errors were computed around the
-/// wrong point, with no error. SIR had been fixed (#465) and the copy had not.
-///
-/// `covariance_matrix` is the only caller-specific input: SIR hands in the
-/// proposal covariance, the covariance step has none yet - computing it is the
-/// point. `n_parameters` and `covariance_status` follow from it.
-fn fit_skeleton(
-    entry_point: &str,
-    model: &CompiledModel,
-    x: &FitSkeletonInputs,
-    covariance_matrix: Option<DMatrix<f64>>,
-) -> std::result::Result<FitResult, String> {
-    let template = &model.default_params;
-    let n_theta = x.theta.len();
-    let n_sigma = x.sigma.len();
-    let n_eta = x.omega_dim.max(0) as usize;
-    let n_subj = x.subject_ids.len();
-    let iov_occasion = iov_occasion_from_r(entry_point, x.iov_occasion)?;
-    let scoring_settings =
-        scoring_settings_from_r(entry_point, "fit$scoring_settings", x.scoring_settings)?;
-    let sir_settings = sir_settings_from_r(entry_point, "fit$sir_settings", x.sir_settings)?;
-
-    if n_theta != template.theta.len() {
-        return Err(theta_length_error(entry_point, model, n_theta, template.theta.len()));
-    }
-    if n_sigma != template.sigma.values.len() {
-        return Err(format!(
-            "{entry_point}: sigma length {} does not match model ({} expected)",
-            n_sigma,
-            template.sigma.values.len()
-        ));
-    }
-    if n_eta != template.omega.dim() {
-        return Err(format!(
-            "{entry_point}: omega dim {} does not match model ({} expected)",
-            n_eta,
-            template.omega.dim()
-        ));
-    }
-    if x.omega_flat.len() != n_eta * n_eta {
-        return Err(format!(
-            "{entry_point}: omega_flat length {} does not match dim^2 = {}",
-            x.omega_flat.len(),
-            n_eta * n_eta
-        ));
-    }
-    if x.eta_hats_flat.len() != n_subj * n_eta {
-        return Err(format!(
-            "{entry_point}: eta_hats_flat length {} does not match n_subjects * n_eta = {}",
-            x.eta_hats_flat.len(),
-            n_subj * n_eta
-        ));
-    }
-
-    let omega_mat = DMatrix::from_row_slice(n_eta, n_eta, x.omega_flat);
-    // The fitted kappa (IOV) covariance. `fitted_params_from_result` used to fall
-    // back to the model file's *initial* kappa when the skeleton carried `None`, so
-    // SIR resampled, and the covariance step differentiated, around the wrong
-    // point (ferx-r #465, #473); since ferx-core #1789 / #1833 it refuses that
-    // with E_PARAM_SHAPE. Refused here first, by name: a kappa model whose fit
-    // carries no matching matrix.
-    let omega_iov = omega_iov_from_fit(model, x.omega_iov_flat, x.omega_iov_dim)
-        .map_err(|e| format!("{entry_point}: {e}"))?
-        .map(|m| m.matrix);
-
-    // Only `eta` is populated - the warm start both steps reconverge from - plus
-    // the fit's own IDs, which the engine checks by position against the
-    // population it re-reads from the data (ferx-r #468).
-
-    let mut subjects: Vec<SubjectResult> = Vec::with_capacity(n_subj);
-    for i in 0..n_subj {
-        let mut eta = nalgebra::DVector::<f64>::zeros(n_eta);
-        for k in 0..n_eta {
-            eta[k] = x.eta_hats_flat[i * n_eta + k];
-        }
-        subjects.push(SubjectResult {
-            id: x.subject_ids[i].clone(),
-            eta,
-            ipred: Vec::new(),
-            pred: Vec::new(),
-            iwres: Vec::new(),
-            cwres: Vec::new(),
-            ofv_contribution: 0.0,
-            cens: Vec::new(),
-            n_obs: 0,
-            extra_columns: Vec::new(),
-            per_obs_tad: Vec::new(),
-            compartment_states: Vec::new(),
-            npde: Vec::new(),
-            npd: Vec::new(),
-            // ferx-core #900 added categorical sdtab rows; neither step reads them.
-            discrete_rows: Vec::new(),
-            // ferx-core #901 added time-to-event residual rows; neither step
-            // reads them.
-            #[cfg(feature = "survival")]
-            tte_rows: Vec::new(),
-            // ferx-core #977 added per-subject mixture posteriors; neither step
-            // reads them, and these scaffolds carry no class assignment.
-            pmix: None,
-            mixest: None,
-        });
-    }
-
-    // The fitted `block_sigma` correlations on the model's declared pairing:
-    // both steps work at the fitted point, so the declared rho would centre
-    // them on the wrong parameters. A free correlation without a fitted value
-    // is refused, not filled from the model.
-    let residual_correlations_resolved =
-        residual_correlations_from_fit(model, x.residual_rho, x.residual_rho_pairs)
-            .map_err(|e| format!("{entry_point}: {e}"))?;
-    let (method, method_chain) = skeleton_methods(entry_point, x)?;
-    let ebe_kappas = ebe_kappas_from_r(entry_point, x, model.n_kappa)?;
-    let theta_fixed = skeleton_theta_fixed(entry_point, model, x.theta_fixed)?;
-
-    let mut fit = FitResult {
-        // ferx-core main added a checkpoint-restore flag; neither step reads it.
-        restored_from_checkpoint: false,
-        // ferx-core #2695: bundle slots neither step reads.
-        cov_fixed: Vec::new(),
-        interface_extras: None,
-        trace_csv: None,
-        // ferx-core #1082 PR4: per-level kappa output. Only the console, sdtab
-        // and .fitrx writers read it; neither step reaches them.
-        kappa_levels: Vec::new(),
-        ebe_kappas_by_level: Vec::new(),
-        // ferx-core #1767 / #1805: the settings the fit's SIR and its estimating
-        // stage ran under, so `run_sir` / `run_covariance` with default options
-        // score what the fit scored (ferx-r #472 / #511). `None` for a fit that
-        // records none: the steps then resolve them from the options R passes.
-        sir_settings,
-        scoring_settings,
-        // ferx-core #1776: the reader settings the fit read `data_path` with,
-        // and the fingerprint of what it read, so the steps re-read the fit's
-        // own rows and the engine verifies them (ferx-r #462). A fit that
-        // records neither takes the engine's unverified re-read with the model
-        // file's selection; the R entry points refuse that case when the fit's
-        // exclusions show a selection the file does not state.
-        reader_settings: (!x.reader_settings.is_empty())
-            .then(|| serde_json::from_str(x.reader_settings))
-            .transpose()
-            .map_err(|e| format!("{entry_point}: `fit$reader_settings`: {e}"))?,
-        population_fingerprint: (!x.population_fingerprint.is_empty())
-            .then(|| serde_json::from_str(x.population_fingerprint))
-            .transpose()
-            .map_err(|e| format!("{entry_point}: `fit$population_fingerprint`: {e}"))?,
-        // ferx-core #1783: the rule the fit derived its occasions with (ferx-r #512).
-        iov_occasion,
-        // ferx-core #1668: the bindings the model was compiled from, as fit() copies them.
-        data_bindings: model.data_bindings().clone(),
-        // ferx-core #1444 / covariance-estimator label: a skeleton FitResult ran
-        // neither SAEM nor a covariance step of its own.
-        saem_mh_accept_tail: None,
-        covariance_method: None,
-        // ferx-core main grew `residual_correlations` and `vi` after the rev
-        // this branch originally pinned. The *pairing* is a property of the
-        // compiled model and is taken from there, but a plain `block_sigma`
-        // estimates rho, so the fitted value is overlaid on top - reading the
-        // model's own value would reconstruct this fit at its declared initial
-        // correlation. This scaffold carries no VI run. The two weighted-kappa
-        // fields it also grew (#1031) are set below, beside `kappa_init_as_sd`.
-        residual_correlations: residual_correlations_resolved,
-        // Parallel FIX flags and standard errors for those correlations
-        // (ferx-core #847): the declaration is structural and comes from the
-        // template; the SEs would come from a covariance step this scaffold
-        // never runs.
-        residual_correlation_fixed: template.residual_correlation_fixed.clone(),
-        se_residual_correlations: None,
-        // The packed Omega / kappa layout (ferx-core #1177). `fit()` records it
-        // as `Some(params.omega.diagonal)`; the covariance matrix handed in
-        // here was packed with the model's own layout, so report that rather
-        // than `None` - `natural_scale_covariance()` needs it to put a
-        // `block_omega` covariance back on the natural scale.
-        omega_is_diagonal: Some(template.omega.diagonal),
-        kappa_is_diagonal: template.omega_iov.as_ref().map(|m| m.diagonal),
-        vi: None,
-        // The fit's own method (ferx-r #591): the steps score, and route the
-        // covariance step on, `fit.method`. See `skeleton_methods`.
-        method,
-        method_chain,
-        bayes: None,
-        cond_dist: None,
-        converged: true,
-        ofv: x.ofv,
-        // ferx-core main split the objective into a data and a prior half
-        // (#254). `run_sir` takes its reference objective as
-        // `data_ofv(fit) = fit.ofv - fit.ofv_prior`, deliberately not `ofv_data`,
-        // which a deserialised legacy fit carries as 0, and `run_sir_core` adds
-        // the penalty back on top (ferx-r #366). So the prior half has to arrive
-        // as itself: `ofv` is the penalized total for a priored fit, and
-        // `ofv_prior = 0` beside it would count the penalty twice - a constant
-        // offset that cancels in today's normalized importance weights, so no
-        // SIR test would notice, and a wrong number the moment `ofv_hat` is used
-        // as anything but a difference.
-        // `run_covariance` reads neither - it re-derives the prior curvature from
-        // `model.priors` - but gets the same split rather than an "unpriored" one,
-        // so it does not depend on the engine continuing not to look.
-        //
-        // `prior_summary` stays empty: it is a report, not an input.
-        ofv_data: x.ofv - x.ofv_prior,
-        ofv_prior: x.ofv_prior,
-        prior_summary: Vec::new(),
-        aic: 0.0,
-        bic: 0.0,
-        theta: x.theta.to_vec(),
-        theta_names: template.theta_names.clone(),
-        eta_names: template.omega.eta_names.clone(),
-        omega: omega_mat,
-        sigma: x.sigma.to_vec(),
-        sigma_names: template.sigma.names.clone(),
-        error_model: model.error_model,
-        n_parameters: covariance_matrix.as_ref().map_or(0, |m| m.nrows()),
-        covariance_status: if covariance_matrix.is_some() {
-            CovarianceStatus::Computed
-        } else {
-            CovarianceStatus::NotRequested
-        },
-        covariance_matrix,
-        se_theta: None,
-        se_omega: None,
-        se_sigma: None,
-        theta_fixed,
-        omega_fixed: template.omega_fixed.clone(),
-        sigma_fixed: template.sigma_fixed.clone(),
-        subjects,
-        n_obs: 0,
-        n_subjects: n_subj,
-        n_iterations: 0,
-        interaction: x.interaction,
-        warnings: Vec::new(),
-        sir_ci_theta: None,
-        sir_ci_omega: None,
-        sir_ci_sigma: None,
-        sir_ci_kappa: None,
-        sir_ess: None,
-        sir_resamples_packed: None,
-        importance_sampling: None,
-        impmap_trace: None,
-        omega_iov,
-        kappa_names: model.kappa_names.clone(),
-        kappa_fixed: template.kappa_fixed.clone(),
-        se_kappa: None,
-        shrinkage_kappa: Vec::new(),
-        shrinkage_kappa_by_occ: Vec::new(),
-        // The fit's per-occasion kappa EBEs, so `run_covariance` starts from
-        // the EBEs the in-fit step was handed rather than a cold solve
-        // (ferx-r #591). `run_sir` does not read them.
-        ebe_kappas,
-        saem_mu_ref_m_step_evals_saved: None,
-        saem_n_subjects_hmc: None,
-        gradient_method_inner: String::new(),
-        gradient_method_outer: String::new(),
-        uses_ode_solver: model.is_ode_based(),
-        // ferx-core #2021: set only by a fit that ran the exact linear
-        // (matrix exponential) path; this one was synthesized, not run.
-        ode_linear_exact: false,
-        // ferx-core #1065: `ferx_rust_sir` / `ferx_rust_covariance` set the fit's own
-        // record on their skeleton; the engine's covariance replay of a profiled
-        // block reads the model's `profile` declarations, not this field.
-        profiled_blocks: Vec::new(),
-        // ferx-core #2112: set from the fit's record alongside `profiled_blocks`;
-        // `run_covariance` rebuilds it from the estimates and the box regardless.
-        profiled_levels_at_bound: Vec::new(),
-        n_threads_used: 1,
-        nlopt_missing_algorithms: Vec::new(),
-        covariance_n_evals_estimated: None,
-        trace_path: None,
-        // The optimizer's exact packed vector, so `run_covariance` builds Omega
-        // from the fit's own Cholesky factor instead of re-decomposing `omega`
-        // (a machine-epsilon shift the FD Hessian amplifies), and a [mixture]
-        // fit's per-class overrides can be read (ferx-r #511). Kept below only
-        // if it unpacks to the estimates this skeleton carries.
-        packed_estimate: (!x.packed_estimate.is_empty()).then(|| x.packed_estimate.to_vec()),
-        // A [mixture] fit's fitted per-class overrides, which the engine reads
-        // ahead of `packed_estimate` (ferx-core #1765): with them an SAEM
-        // mixture fit, which has no packed estimate, and a reloaded one whose
-        // packed estimate went stale still rebuild their class matrices.
-        mixture_overrides: (!x.mixture_overrides.is_empty())
-            .then(|| x.mixture_overrides.to_vec()),
-        // No outer optimizer ran in this scaffold, so there is no init-escape
-        // verdict, and no packed tally to classify: `model_selection::bic()`
-        // reports NaN on the default `BicInputs` rather than a wrong penalty
-        // (ferx-core #1177).
-        left_init: None,
-        bic_inputs: BicInputs::default(),
-        ebe_convergence_warnings: 0,
-        max_unconverged_subjects: 0,
-        total_ebe_fallbacks: 0,
-        total_ebe_nm_polished: 0,
-        stationary_start: false,
-        shrinkage_eta: Vec::new(),
-        shrinkage_eps: f64::NAN,
-        wall_time_secs: 0.0,
-        model_name: model.name.clone(),
-        ferx_version: String::new(),
-        eta_param_info: Vec::new(),
-        kappa_param_types: Vec::new(),
-        theta_transform: Vec::new(),
-        sigma_types: Vec::new(),
-        cov_eigenvalues: None,
-        cov_condition_number: None,
-        eta_log_transformed: Vec::new(),
-        omega_param_corr: None,
-        omega_iov_param_corr: None,
-        model_path: Some(x.model_path.to_string()),
-        data_path: Some(x.data_path.to_string()),
-        model_hash: if x.model_hash.is_empty() {
-            None
-        } else {
-            Some(x.model_hash.to_string())
-        },
-        data_hash: if x.data_hash.is_empty() {
-            None
-        } else {
-            Some(x.data_hash.to_string())
-        },
-        dw_statistic: f64::NAN,
-        iwres_lag1_r: f64::NAN,
-        uses_sde: false,
-        omega_init_as_sd: Vec::new(),
-        sigma_init_as_sd: Vec::new(),
-        kappa_init_as_sd: Vec::new(),
-        // ferx-core #1031 added the sample-size weight (`kappa K ~ g2 weight = N`)
-        // to `FitResult` for reporting only; these skeleton results are never
-        // printed, so both stay empty.
-        kappa_weights: Vec::new(),
-        kappa_weight_typical: Vec::new(),
-        warnings_structured: Vec::new(),
-        model_text: None,
-        theta_init: Vec::new(),
-        omega_init: nalgebra::DMatrix::zeros(0, 0),
-        sigma_init: Vec::new(),
-        obs_time_range: None,
-        final_gradient: None,
-        final_gradient_source: None,
-        optimizer: "auto".to_string(),
-        n_starts: 1,
-        multi_start_seed: None,
-        saem_seed: None,
-        sir_seed: None,
-        imp_seed: None,
-        npde_seed: None,
-        // The fit's LOQ method (ferx-r #558 review 1): `run_covariance` /
-        // `run_sir` score the method this field names (ferx-core #1824), so a
-        // hard-coded "drop" re-scored every M3 fit without its censored rows.
-        // "" leaves the caller's options, which carry the model file's.
-        bloq_method: x.bloq_method.to_string(),
-        outer_maxiter: 0,
-        outer_gtol: 0.0,
-        inits_from_nca: None,
-        covariate_names: Vec::new(),
-        input_columns: Vec::new(),
-        covariate_table: None,
-        // ferx-core #1111 added the [covariate_model] relation echo; neither
-        // step reads it.
-        covariate_relations: Vec::new(),
-        exclusions: None,
-        method_wall_times_secs: Vec::new(),
-        covariance_wall_time_secs: 0.0,
-        environment: ferx_core::environment::EnvironmentInfo::default(),
-        #[cfg(feature = "nn")]
-        neural_networks: Vec::new(),
-    };
-    // A fit list whose estimates were edited after the fit (a test dropping
-    // `omega_iov`, a user nudging theta) keeps the original's packed vector,
-    // which `run_covariance` would evaluate at instead of the edited point.
-    if !packed_estimate_matches(model, &fit) {
-        fit.packed_estimate = None;
-    }
-    Ok(fit)
-}
-
 /// The worker-pool width of a standalone `ferx_sir()` / `ferx_covariance()`
 /// step (ferx-r #527), and the width to report as its `n_threads_used`.
 ///
@@ -9750,469 +9277,140 @@ fn posthoc_step_threads(threads: i32) -> (Option<usize>, i32) {
     }
 }
 
-/// Standalone SIR — run Sampling Importance Resampling against an existing fit.
+/// Standalone SIR: run Sampling Importance Resampling against an existing fit and
+/// return the new fit's bundle.
 ///
-/// The R wrapper `ferx_sir()` flattens the fit list into the primitives this
-/// binding expects: parameter estimates, per-subject EBE etas, the asymptotic
-/// covariance matrix, the original fit's OFV, and the source paths + hashes
-/// captured at fit time. We rebuild a minimal `FitResult` Rust-side (only the
-/// fields `ferx_core::run_sir` reads), then call the standalone wrapper which
-/// re-parses model + data from the paths, verifies hashes, and runs SIR.
+/// The fit is read from its bundle, whole, and `ferx_core::run_sir` runs on it. Core
+/// re-reads the model and the data from the paths given and checks them against the
+/// hashes the fit recorded, so a fit that has moved names where its files are now.
 ///
-/// @param model_path Path to the `.ferx` model file as recorded on the fit.
-/// @param data_path Path to the NONMEM CSV as recorded on the fit.
-/// @param model_hash Expected SHA-256 of the model file; empty string disables the check.
-/// @param data_hash Expected SHA-256 of the data file; empty string disables the check.
-/// @param ofv Original fit's OFV (= 2 * nll). The *penalized* total when the
-///   model declares a `prior(...)`.
-/// @param ofv_prior The prior half of `ofv`; 0 when the model declares no
-///   prior. SIR's reference objective is the data half, `ofv - ofv_prior`,
-///   and the engine adds the penalty back itself (ferx-r #366).
-/// @param interaction TRUE for a FOCEI fit, FALSE for FOCE. Controls the inner-loop NLL.
-/// @param theta Vector of theta point estimates.
-/// @param omega_flat Row-major flattened omega matrix.
-/// @param omega_dim Dimension of the omega matrix.
-/// @param sigma Vector of sigma point estimates.
-/// @param omega_iov_flat Row-major flattened fitted IOV kappa covariance; empty when no IOV.
-/// @param omega_iov_dim Dimension of the IOV kappa covariance; 0 when no IOV.
-/// @param cov_matrix_flat Row-major flattened parameter covariance matrix.
-/// @param cov_matrix_dim Dimension of the covariance matrix.
-/// @param residual_rho Fitted `block_sigma` residual correlations (empty when
-///   the model declares none), one per row of `fit$residual_correlations`
-/// @param residual_rho_pairs The 1-based `(sigma_i, sigma_j)` pair of each
-///   entry of `residual_rho`, flattened `i1, j1, i2, j2, ...`; matched against
-///   the model's declared pairs, so the row order does not matter.
-/// @param eta_hats_flat Row-major flattened per-subject EBE etas (one row per
-///   entry of `subject_ids`, n_eta columns).
-/// @param subject_ids The fit's subject IDs, verbatim and in fit order. The
-///   engine checks them against the population it re-reads from the data
-///   (ferx-r #468); their length is the subject count.
-/// @param iov_occasion `fit$iov_occasion`, the IOV occasion rule the fit ran
-///   with (ferx-r #512); "" when the fit records none.
-/// @param reader_settings `fit$reader_settings`, the reader settings the fit
-///   read `data_path` with, as JSON (ferx-r #462); "" when the fit records none.
-/// @param population_fingerprint `fit$population_fingerprint`, the engine's
-///   fingerprint of the population the fit read, as JSON; "" when none.
-/// @param scoring_settings `fit$scoring_settings`, the inner-loop and ODE
-///   settings of the stage that produced the estimates (ferx-r #511); NULL
-///   when the fit records none. Decoded through `[fit_options]`.
-/// @param sir_settings `fit$sir_settings`, what the fit's SIR ran under
-///   (ferx-r #472); NULL when it ran none.
-///   The SIR sample sizes, seed, proposal df, scale and `keep_samples` travel
-///   in this record, never as engine options: the engine takes a recorded
-///   value wherever an option equals its default, so an explicit default
-///   passed as an option would lose to the record. `ferx_sir()` edits its
-///   explicit arguments into it, starting from the default record
-///   (`ferx_rust_settings_record("sir_settings", NULL, ...)`) when the fit has
-///   none.
-/// @param packed_estimate `fit$packed_estimate`, the optimizer's packed
-///   estimate; empty when the fit carries none. Dropped unless it unpacks to
-///   the fit's estimates bit for bit.
-/// @param mixture_overrides `fit$mixture_overrides`, a `[mixture]` fit's
-///   fitted per-class Omega/Sigma override values (ferx-core #1765); empty
-///   when the fit carries none.
-/// @param bloq_method `fit$bloq_method_label`, the LOQ method the fit scored
-///   (`"drop"` / `"m3"`); "" when the fit records none (the model file's).
-/// @param method `fit$method`, the engine label of the method that produced
-///   the estimates (`"SAEM"`, `"FOCEI"`, ...); "" when the fit records none.
-///   The step scores, and routes its covariance on, this method (ferx-r #591).
-/// @param method_chain `fit$method_chain`, the engine labels of every stage.
-/// @param ebe_kappas_flat `fit$ebe_kappas` kappa columns, row-major, one row
-///   per (subject, occasion) in fit order; empty for a fit without IOV.
-/// @param ebe_kappa_ids The `ID` of each `ebe_kappas` row.
-/// @param theta_fixed `fit$theta_fixed`: the thetas the fit held, the ones
-///   the engine froze for having no effect on the objective included; empty
-///   for a fit without the field (ferx-r #613).
-/// @param threads Worker threads the step runs on: `0` the engine default,
-///   `n > 0` pinned. `ferx_sir()` passes the fit's `n_threads_used` unless
-///   told otherwise (ferx-r #527).
+/// @param bundle The fit's bundle.
+/// @param model_path Path to the fit's `.ferx` model file.
+/// @param data_path Path to the fit's data file.
+/// @param sir_settings The SIR record to run under, with the caller's arguments edited
+///   in; NULL keeps the fit's. Every setting comes from it: default options defer to
+///   the record (ferx-r #472).
+/// @param threads Worker threads the step runs on: `0` the engine default, `n > 0`
+///   pinned. `ferx_sir()` passes the fit's `n_threads_used` unless told otherwise
+///   (ferx-r #527).
 /// @param verbose When TRUE, the engine prints progress to stderr.
-/// @return Named list with `sir_ess`, `sir_ci_theta`, `sir_ci_omega`, `sir_ci_sigma`,
-///   `sir_ci_kappa`,
-///   `sir_resamples`, `sir_resamples_n`, `sir_resamples_dim`, `sir_seed_used`,
-///   `sir_settings` (the record this run made), `theta_levels`,
-///   `n_threads_used` (the width this run's pool had), and `warnings`.
+/// @return The new fit's bundle.
+/// @export
 #[extendr]
-#[allow(clippy::too_many_arguments)]
 fn ferx_rust_sir(
+    bundle: Raw,
     model_path: &str,
     data_path: &str,
-    model_hash: &str,
-    data_hash: &str,
-    ofv: f64,
-    ofv_prior: f64,
-    interaction: bool,
-    theta: Vec<f64>,
-    omega_flat: Vec<f64>,
-    omega_dim: i32,
-    sigma: Vec<f64>,
-    omega_iov_flat: Vec<f64>,
-    omega_iov_dim: i32,
-    residual_rho: Vec<f64>,
-    residual_rho_pairs: Vec<i32>,
-    cov_matrix_flat: Vec<f64>,
-    cov_matrix_dim: i32,
-    eta_hats_flat: Vec<f64>,
-    subject_ids: Vec<String>,
-    iov_occasion: &str,
-    reader_settings: &str,
-    population_fingerprint: &str,
-    scoring_settings: Robj,
     sir_settings: Robj,
-    packed_estimate: Vec<f64>,
-    mixture_overrides: Vec<f64>,
-    bloq_method: &str,
-    method: &str,
-    method_chain: Vec<String>,
-    ebe_kappas_flat: Vec<f64>,
-    ebe_kappa_ids: Vec<String>,
-    theta_fixed: Logicals,
     threads: i32,
     verbose: bool,
-    fit_bindings: List,
-) -> Robj {
+) -> Raw {
     entry(move || {
-        // All error paths in this binding return `Err`, which `entry` raises as
-        // an R condition, rather than printing to stderr + returning NULL. The
-        // latter pattern loses the engine message to stderr — callers using
-        // `tryCatch()` or `expect_error(..., regexp = ...)` see only a generic
-        // "backend returned no result" from the R wrapper. Raising propagates
-        // the actual message (e.g. "hash mismatch") into the R condition, which
-        // is what test code expects and what users want.
-        let src = read_fit_model("ferx_sir", model_path, model_hash)?;
-        let mut parsed = src.parsed;
-        // On a level-block fit, the theta is the fit's layout: size the skeleton
-        // from it, and carry it to the engine in the skeleton's `data_bindings`.
-        let fitted = fit_bindings_from_r(&fit_bindings)?;
-        bind_layout_from_fit(&mut parsed, &src.text, &fitted)
-            .map_err(|e| e.refusal(""))?;
-        let model = &parsed.model;
-
-        let n_packed = cov_matrix_dim.max(0) as usize;
-        if n_packed == 0 || cov_matrix_flat.len() != n_packed * n_packed {
-            return Err(format!(
-                "ferx_sir: cov_matrix is missing or malformed (dim={}, len={}). \
-                 Re-fit with `covariance = TRUE`.",
-                n_packed,
-                cov_matrix_flat.len()
-            ));
-        }
-        let cov_mat = DMatrix::from_row_slice(n_packed, n_packed, &cov_matrix_flat);
-        let theta_fixed = theta_fixed_from_r(&theta_fixed);
-        let inputs = FitSkeletonInputs {
+        let bytes = bundle.as_slice();
+        let read = read_bundle_fit(bytes)?;
+        let mut fit = read.fit.clone();
+        // Hash-checked before anything else, so an edited model file is refused for
+        // that, in core's own text, and not for what the edit changed.
+        let src = read_fit_model(
+            "ferx_sir",
             model_path,
-            data_path,
-            model_hash,
-            data_hash,
-            ofv,
-            ofv_prior,
-            interaction,
-            theta: &theta,
-            omega_flat: &omega_flat,
-            omega_dim,
-            sigma: &sigma,
-            omega_iov_flat: &omega_iov_flat,
-            omega_iov_dim,
-            residual_rho: &residual_rho,
-            residual_rho_pairs: &residual_rho_pairs,
-            eta_hats_flat: &eta_hats_flat,
-            subject_ids: &subject_ids,
-            iov_occasion,
-            reader_settings,
-            population_fingerprint,
-            scoring_settings: &scoring_settings,
-            sir_settings: &sir_settings,
-            packed_estimate: &packed_estimate,
-            mixture_overrides: &mixture_overrides,
-            bloq_method,
-            method,
-            method_chain: &method_chain,
-            ebe_kappas_flat: &ebe_kappas_flat,
-            ebe_kappa_ids: &ebe_kappa_ids,
-            theta_fixed: &theta_fixed,
-        };
-        let mut fit = fit_skeleton("ferx_sir", model, &inputs, Some(cov_mat))?;
-        fit.profiled_blocks = profiled_blocks_from_r(&fit_bindings)?;
-        fit.profiled_levels_at_bound =
-            profiled_levels_at_bound_from_r(&fit_bindings, &fit.theta_names)?;
-
-        // Every SIR and scoring setting comes from the skeleton's records
-        // (ferx-r #472): default options defer to them.
+            fit.model_hash.as_deref().unwrap_or_default(),
+        )?;
+        check_step_fit("ferx_sir", &fit, &src.parsed.model)?;
+        fit.model_path = Some(model_path.to_string());
+        fit.data_path = Some(data_path.to_string());
+        if !sir_settings.is_null() {
+            fit.sir_settings = sir_settings_from_r("ferx_sir", "sir_settings", &sir_settings)?;
+        }
         let mut opts = FitOptions::default();
-        opts.interaction = interaction;
+        opts.interaction = fit.interaction;
         opts.verbose = verbose;
         let (step_threads, n_threads_used) = posthoc_step_threads(threads);
         opts.threads = step_threads;
 
-        // ferx_core::run_sir verifies hashes (when set), re-parses model + data,
-        // reconstructs the inner ModelParameters, and runs SIR. We pass None for
-        // model/population so that path goes through and the integrity check
-        // fires — that is the whole point of having hashes here.
-        let new_fit = match ferx_core::run_sir(&fit, None, None, &opts) {
-            Ok(f) => f,
-            Err(e) => return Err(engine_refusal("ferx_sir: ", e)),
-        };
-
-        let flatten_ci = |ci: &Option<Vec<(f64, f64)>>| -> Vec<f64> {
-            ci.as_ref()
-                .map(|v| v.iter().flat_map(|(lo, hi)| [*lo, *hi]).collect())
-                .unwrap_or_default()
-        };
-        let (sir_resamples_flat, sir_resamples_n, sir_resamples_dim): (Vec<f64>, i32, i32) =
-            match &new_fit.sir_resamples_packed {
-                Some(pool) if !pool.is_empty() => {
-                    let n = pool.len();
-                    let d = pool[0].len();
-                    let mut v = Vec::with_capacity(n * d);
-                    for row in pool {
-                        v.extend_from_slice(row);
-                    }
-                    (v, n as i32, d as i32)
-                }
-                _ => (Vec::new(), 0i32, 0i32),
-            };
-
-        // Each theta level's se and SIR interval from this run (#528), off the
-        // model and bindings bound above rather than a second parse: NA
-        // intervals when the run kept no draws, never an earlier run's.
-        let theta_levels = level_bindings_to_r(
-            model,
-            &fitted.levels,
-            &fit.profiled_blocks,
-            &new_fit.profiled_levels_at_bound,
-            &new_fit.theta_names,
-            &new_fit.theta,
-            new_fit.covariance_matrix.as_ref(),
-            new_fit.sir_resamples_packed.as_deref(),
-        )?;
-
-        // SIR-step warnings (ferx-core#1021: a rank-deficient or bound-shrunk
-        // proposal) live on the returned fit's `warnings`. The skeleton FitResult
-        // we passed in carries none, so everything here was produced by this SIR
-        // run — no filtering needed. Mirrors `ferx_rust_covariance`.
-        Ok(list!(
-            sir_ess = new_fit.sir_ess.unwrap_or(f64::NAN),
-            sir_ci_theta = flatten_ci(&new_fit.sir_ci_theta),
-            sir_ci_omega = flatten_ci(&new_fit.sir_ci_omega),
-            sir_ci_sigma = flatten_ci(&new_fit.sir_ci_sigma),
-            sir_ci_kappa = flatten_ci(&new_fit.sir_ci_kappa),
-            sir_resamples = sir_resamples_flat,
-            sir_resamples_n = sir_resamples_n,
-            sir_resamples_dim = sir_resamples_dim,
-            // The seed this run resampled with, resolved (ferx-core #1767):
-            // `sir_seed`, or the engine's default when R passed none.
-            sir_seed_used = new_fit.sir_seed.map(|s| s as f64),
-            // The settings this run scored under (ferx-core #1767), so the
-            // returned fit's `sir_settings` describes its own intervals.
-            sir_settings = match &new_fit.sir_settings {
-                Some(st) => sir_settings_to_r(st)?,
-                None => Robj::from(()),
-            },
-            theta_levels = theta_levels,
-            n_threads_used = n_threads_used,
-            warnings = new_fit.warnings.clone(),
-            warning_details = warning_details_json(&new_fit.warnings_structured)
-        )
-        .into())
+        // None for model and population: core re-parses and re-reads from the paths,
+        // which is what fires the integrity check.
+        let mut new_fit = ferx_core::run_sir(&fit, None, None, &opts)
+            .map_err(|e| engine_refusal("ferx_sir: ", e))?;
+        new_fit.n_threads_used = n_threads_used as usize;
+        Ok(Raw::from_bytes(&rewritten_bundle(&new_fit, &read, bytes)?))
     })
 }
 
-/// Run the FD-Hessian covariance step against an existing fit.
+/// Run the FD-Hessian covariance step against an existing fit and return the new
+/// fit's bundle.
 ///
-/// The covariance-step analogue of `ferx_rust_sir`. The R wrapper
-/// `ferx_covariance()` flattens the fit list into the primitives this binding
-/// expects: parameter estimates, per-subject EBE etas, the original fit's OFV,
-/// and the source paths + hashes captured at fit time. We rebuild a minimal
-/// `FitResult` Rust-side (only the fields `ferx_core::run_covariance` reads),
-/// then call the standalone wrapper which re-parses model + data from the
-/// paths, verifies hashes, reconstructs the covariance-step inputs, and runs
-/// the same FD-Hessian covariance step `fit()` runs inline.
+/// The covariance-step analogue of `ferx_rust_sir`: the fit is read from its bundle,
+/// whole, and `ferx_core::run_covariance` runs on it, the step `fit()` runs inline.
 ///
-/// Unlike SIR there is no proposal covariance to pass in — the whole point of
-/// this step is to *compute* the covariance matrix.
-///
-/// @param model_path Path to the `.ferx` model file as recorded on the fit.
-/// @param data_path Path to the NONMEM CSV as recorded on the fit.
-/// @param model_hash Expected SHA-256 of the model file; empty string disables the check.
-/// @param data_hash Expected SHA-256 of the data file; empty string disables the check.
-/// @param ofv Original fit's OFV (= 2 * nll). The *penalized* total when the
-///   model declares a `prior(...)`.
-/// @param ofv_prior The prior half of `ofv`; 0 when the model declares no
-///   prior. The covariance step re-derives the prior curvature from
-///   `model.priors` rather than reading either half, but the skeleton records
-///   the split it was handed rather than asserting an unpriored fit.
-/// @param interaction TRUE for a FOCEI fit, FALSE for FOCE. Controls the inner-loop NLL.
-/// @param theta Vector of theta point estimates.
-/// @param omega_flat Row-major flattened omega matrix.
-/// @param omega_dim Dimension of the omega matrix.
-/// @param sigma Vector of sigma point estimates.
-/// @param omega_iov_flat Row-major flattened IOV kappa omega matrix; empty when no IOV.
-/// @param omega_iov_dim Dimension of the IOV omega matrix; 0 when no IOV.
-/// @param residual_rho Fitted `block_sigma` residual correlations (empty when
-///   the model declares none), one per row of `fit$residual_correlations`
-/// @param residual_rho_pairs The 1-based `(sigma_i, sigma_j)` pair of each
-///   entry of `residual_rho`, flattened `i1, j1, i2, j2, ...`; matched against
-///   the model's declared pairs, so the row order does not matter.
-/// @param eta_hats_flat Row-major flattened per-subject EBE etas (one row per
-///   entry of `subject_ids`, n_eta columns).
-/// @param subject_ids The fit's subject IDs, verbatim and in fit order. The
-///   engine checks them against the population it re-reads from the data
-///   (ferx-r #468); their length is the subject count.
-/// @param iov_occasion `fit$iov_occasion`, the IOV occasion rule the fit ran
-///   with (ferx-r #512); "" when the fit records none.
-/// @param reader_settings `fit$reader_settings`, the reader settings the fit
-///   read `data_path` with, as JSON (ferx-r #462); "" when the fit records none.
-/// @param population_fingerprint `fit$population_fingerprint`, the engine's
-///   fingerprint of the population the fit read, as JSON; "" when none.
-/// @param scoring_settings `fit$scoring_settings`, the inner-loop and ODE
-///   settings of the stage that produced the estimates (ferx-r #511); NULL
-///   when the fit records none. Decoded through `[fit_options]`.
-/// @param sir_settings `fit$sir_settings`, what the fit's SIR ran under
-///   (ferx-r #472); NULL when it ran none.
-/// @param packed_estimate `fit$packed_estimate`, the optimizer's packed
-///   estimate; empty when the fit carries none. Dropped unless it unpacks to
-///   the fit's estimates bit for bit.
-/// @param mixture_overrides `fit$mixture_overrides`, a `[mixture]` fit's
-///   fitted per-class Omega/Sigma override values (ferx-core #1765); empty
-///   when the fit carries none.
-/// @param bloq_method `fit$bloq_method_label`, the LOQ method the fit scored
-///   (`"drop"` / `"m3"`); "" when the fit records none (the model file's).
-/// @param method `fit$method`, the engine label of the method that produced
-///   the estimates (`"SAEM"`, `"FOCEI"`, ...); "" when the fit records none.
-///   The step scores, and routes its covariance on, this method (ferx-r #591).
-/// @param method_chain `fit$method_chain`, the engine labels of every stage.
-/// @param ebe_kappas_flat `fit$ebe_kappas` kappa columns, row-major, one row
-///   per (subject, occasion) in fit order; empty for a fit without IOV.
-/// @param ebe_kappa_ids The `ID` of each `ebe_kappas` row.
-/// @param theta_fixed `fit$theta_fixed`: the thetas the fit held, the ones
-///   the engine froze for having no effect on the objective included; empty
-///   for a fit without the field (ferx-r #613).
-/// @param covariance_method Covariance estimator: "r"/"hessian", "s"/"cross_product", or "rsr"/"sandwich";
-///   "" replays the fit's own (the model file's `[fit_options]`, then the call's
-///   `step_settings`), with its explicit-or-defaulted flag (ferx-r #659).
-/// @param step_settings_keys,step_settings_values The covariance step's own
-///   settings the fit's call gave it, as `settings` key / value strings:
-///   only `covariance_method`, `fd_hessian_step`, `analytic_cov_hessian` and
-///   `cov_inner_tol`.
-///   `run_covariance` takes these from its caller, not from the fit, so the
-///   replay starts from the model file's `[fit_options]` values and applies
-///   these over them, as the fit did. Applied through ferx-core's
-///   `apply_fit_option`, which parses them as `ferx_fit()` does and raises
-///   `fd_hessian_step_set` (ferx-core #2414).
-/// @param threads Worker threads the step runs on: `0` the engine default,
-///   `n > 0` pinned. `ferx_covariance()` passes the fit's `n_threads_used`
-///   unless told otherwise (ferx-r #527).
+/// @param bundle The fit's bundle.
+/// @param model_path Path to the fit's `.ferx` model file.
+/// @param data_path Path to the fit's data file.
+/// @param scoring_settings The scoring record to run under, with the caller's arguments
+///   edited in; NULL keeps the fit's. The new fit records the fit's own either way: it
+///   describes how the estimates were scored, which this step did not change.
+/// @param covariance_method Covariance estimator: "r"/"hessian", "s"/"cross_product", or
+///   "rsr"/"sandwich"; "" replays the fit's own (the model file's `[fit_options]`, then
+///   the call's `step_settings`), with its explicit-or-defaulted flag (ferx-r #659).
+/// @param step_settings_keys,step_settings_values The covariance step's own settings
+///   the fit's call gave it, as `settings` key / value strings: only
+///   `covariance_method`, `fd_hessian_step`, `analytic_cov_hessian` and `cov_inner_tol`.
+///   `run_covariance` takes these from its caller, not from the fit, so the replay
+///   starts from the model file's `[fit_options]` values and applies these over them,
+///   as the fit did, through ferx-core's `apply_fit_option`.
+/// @param threads Worker threads the step runs on: `0` the engine default, `n > 0`
+///   pinned. `ferx_covariance()` passes the fit's `n_threads_used` unless told otherwise
+///   (ferx-r #527).
 /// @param verbose When TRUE, the engine prints progress to stderr.
-/// @return Named list with `cov_matrix`, `cov_matrix_dim`, `se_theta`, `se_omega`,
-///   `se_sigma`, `se_kappa`, `covariance_status`, `covariance_method` (the
-///   estimator that ran, "" without a matrix), `covariance_method_requested`,
-///   `covariance_method_source`, `cov_eigenvalues`,
-///   `cov_condition_number`, `theta_levels` (NA intervals), `n_threads_used`
-///   (the width this run's pool had), `covariance_wall_time_secs` (this
-///   step's time), and `warnings`.
+/// @return A list: `bundle`, the new fit's bytes, `covariance_method_requested`, the
+///   estimator this replay asked for, and `covariance_method_source`, where that
+///   request came from: "argument", "call_settings", "model_file" or "default" (#659).
+/// @export
 #[extendr]
 #[allow(clippy::too_many_arguments)]
 fn ferx_rust_covariance(
+    bundle: Raw,
     model_path: &str,
     data_path: &str,
-    model_hash: &str,
-    data_hash: &str,
-    ofv: f64,
-    ofv_prior: f64,
-    interaction: bool,
-    theta: Vec<f64>,
-    omega_flat: Vec<f64>,
-    omega_dim: i32,
-    sigma: Vec<f64>,
-    omega_iov_flat: Vec<f64>,
-    omega_iov_dim: i32,
-    residual_rho: Vec<f64>,
-    residual_rho_pairs: Vec<i32>,
-    eta_hats_flat: Vec<f64>,
-    subject_ids: Vec<String>,
-    iov_occasion: &str,
-    reader_settings: &str,
-    population_fingerprint: &str,
     scoring_settings: Robj,
-    sir_settings: Robj,
-    packed_estimate: Vec<f64>,
-    mixture_overrides: Vec<f64>,
-    bloq_method: &str,
-    method: &str,
-    method_chain: Vec<String>,
-    ebe_kappas_flat: Vec<f64>,
-    ebe_kappa_ids: Vec<String>,
-    theta_fixed: Logicals,
     covariance_method: &str,
     step_settings_keys: Vec<String>,
     step_settings_values: Vec<String>,
     threads: i32,
     verbose: bool,
-    fit_bindings: List,
-) -> Robj {
+) -> List {
     entry(move || {
-        // All error paths in this binding return `Err`, which `entry` raises as
-        // an R condition, mirroring `ferx_rust_sir`, so the engine message
-        // (e.g. "hash mismatch") propagates into the R condition rather than
-        // being lost to stderr.
-        let src = read_fit_model("ferx_covariance", model_path, model_hash)?;
-        let mut parsed = src.parsed;
-        // On a level-block fit, the theta is the fit's layout: size the skeleton
-        // from it, and carry it to the engine in the skeleton's `data_bindings`.
-        let fitted = fit_bindings_from_r(&fit_bindings)?;
-        bind_layout_from_fit(&mut parsed, &src.text, &fitted)
-            .map_err(|e| e.refusal(""))?;
-        let model = &parsed.model;
-
-        let theta_fixed = theta_fixed_from_r(&theta_fixed);
-        let inputs = FitSkeletonInputs {
+        let bytes = bundle.as_slice();
+        let read = read_bundle_fit(bytes)?;
+        let mut fit = read.fit.clone();
+        // Hash-checked before anything else, as in `ferx_rust_sir`.
+        let src = read_fit_model(
+            "ferx_covariance",
             model_path,
-            data_path,
-            model_hash,
-            data_hash,
-            ofv,
-            ofv_prior,
-            interaction,
-            theta: &theta,
-            omega_flat: &omega_flat,
-            omega_dim,
-            sigma: &sigma,
-            omega_iov_flat: &omega_iov_flat,
-            omega_iov_dim,
-            residual_rho: &residual_rho,
-            residual_rho_pairs: &residual_rho_pairs,
-            eta_hats_flat: &eta_hats_flat,
-            subject_ids: &subject_ids,
-            iov_occasion,
-            reader_settings,
-            population_fingerprint,
-            scoring_settings: &scoring_settings,
-            sir_settings: &sir_settings,
-            packed_estimate: &packed_estimate,
-            mixture_overrides: &mixture_overrides,
-            bloq_method,
-            method,
-            method_chain: &method_chain,
-            ebe_kappas_flat: &ebe_kappas_flat,
-            ebe_kappa_ids: &ebe_kappa_ids,
-            theta_fixed: &theta_fixed,
-        };
-        let mut fit = fit_skeleton("ferx_covariance", model, &inputs, None)?;
-        fit.profiled_blocks = profiled_blocks_from_r(&fit_bindings)?;
-        fit.profiled_levels_at_bound =
-            profiled_levels_at_bound_from_r(&fit_bindings, &fit.theta_names)?;
+            fit.model_hash.as_deref().unwrap_or_default(),
+        )?;
+        check_step_fit("ferx_covariance", &fit, &src.parsed.model)?;
+        fit.model_path = Some(model_path.to_string());
+        fit.data_path = Some(data_path.to_string());
+        if !scoring_settings.is_null() {
+            fit.scoring_settings = scoring_settings_from_r(
+                "ferx_covariance",
+                "scoring_settings",
+                &scoring_settings,
+            )?;
+        }
 
         let mut opts = FitOptions::default();
         // run_covariance_step is ignored by run_covariance (calling it *is* the
         // request); set it anyway for clarity.
         opts.run_covariance_step = true;
-        opts.interaction = interaction;
+        opts.interaction = fit.interaction;
         opts.verbose = verbose;
         // The step's own settings, which `run_covariance` takes from its caller:
         // first the model file's `[fit_options]` (the hash-checked file the fit
         // read, so a bundle ferx-core wrote gets them too), then the call's
         // overrides, the precedence `ferx_rust_fit` gives them.
-        let file = &parsed.fit_options;
+        let file = &src.parsed.fit_options;
         // The estimator with its `_set` flag: a defaulted `r` is routed onto
         // the cross-product above `COV_HESSIAN_MAX_DIM` free parameters on the
         // FD stencil, an explicit one is not, so the replay asks exactly as the
@@ -10242,95 +9440,17 @@ fn ferx_rust_covariance(
         let (step_threads, n_threads_used) = posthoc_step_threads(threads);
         opts.threads = step_threads;
 
-        // Pass None for model/population so run_covariance re-parses model + data
-        // from the recorded paths and fires the SHA-256 integrity check — the
-        // whole point of forwarding the hashes here.
-        let new_fit = match ferx_core::run_covariance(&fit, None, None, &opts) {
-            Ok(f) => f,
-            Err(e) => return Err(engine_refusal("ferx_covariance: ", e)),
-        };
-
-        let (cov_matrix_flat, cov_matrix_dim): (Vec<f64>, i32) = match &new_fit.covariance_matrix {
-            Some(m) => {
-                let d = m.nrows();
-                let mut v = Vec::with_capacity(d * d);
-                for i in 0..d {
-                    for j in 0..d {
-                        v.push(m[(i, j)]);
-                    }
-                }
-                (v, d as i32)
-            }
-            None => (Vec::new(), 0i32),
-        };
-
-        let covariance_status_str = covariance_status_str(&new_fit.covariance_status);
-
-        // Each theta level's se from the new matrix (#528), off the model and
-        // bindings bound above. This step never sees the fit's SIR draws, so
-        // its intervals come back NA; `ferx_covariance()` keeps the fit's own.
-        let theta_levels = level_bindings_to_r(
-            model,
-            &fitted.levels,
-            &fit.profiled_blocks,
-            &new_fit.profiled_levels_at_bound,
-            &new_fit.theta_names,
-            &new_fit.theta,
-            new_fit.covariance_matrix.as_ref(),
-            None,
-        )?;
-
+        // None for model and population: core re-parses and re-reads from the paths,
+        // which is what fires the integrity check.
+        let mut new_fit = ferx_core::run_covariance(&fit, None, None, &opts)
+            .map_err(|e| engine_refusal("ferx_covariance: ", e))?;
+        new_fit.n_threads_used = n_threads_used as usize;
+        new_fit.scoring_settings = read.fit.scoring_settings.clone();
         Ok(list!(
-            cov_matrix = cov_matrix_flat,
-            cov_matrix_dim = cov_matrix_dim,
-            cov_fixed = cov_matrix_held(model, &new_fit.theta_fixed, cov_matrix_dim),
-            cov_labels = cov_matrix_labels(model, cov_matrix_dim),
-            se_theta = new_fit.se_theta.clone().unwrap_or_default(),
-            se_omega = new_fit.se_omega.clone().unwrap_or_default(),
-            se_sigma = new_fit.se_sigma.clone().unwrap_or_default(),
-            se_kappa = new_fit.se_kappa.clone().unwrap_or_default(),
-            covariance_status = covariance_status_str,
-            // The estimator that ran ("" when the step produced no matrix), the
-            // one this replay asked for, and where that request came from:
-            // "argument", "call_settings", "model_file" or "default" (#659).
-            covariance_method = covariance_method_label(new_fit.covariance_method),
+            bundle = Raw::from_bytes(&rewritten_bundle(&new_fit, &read, bytes)?),
             covariance_method_requested = method_requested,
-            covariance_method_source = method_source,
-            covariance_wall_time_secs = new_fit.covariance_wall_time_secs,
-            // Rebuilt by the step from the estimates and the box (ferx-core #2112).
-            profiled_levels_at_bound =
-                theta_names_at(&new_fit.theta_names, &new_fit.profiled_levels_at_bound),
-            cov_eigenvalues = new_fit.cov_eigenvalues.clone().unwrap_or_default(),
-            cov_condition_number = new_fit.cov_condition_number.unwrap_or(f64::NAN),
-            // Refreshed alongside the matrix it is read off, so a fit that gains a
-            // covariance step here also gains the correlation gate that step feeds
-            // (ferx-core #1177) instead of keeping the pre-step NA.
-            max_abs_correlation =
-                ferx_core::model_selection::max_abs_correlation(&new_fit).unwrap_or(f64::NAN),
-            // The `block_sigma` correlation SEs come out of the same step, in
-            // the model's declaration order; their 1-based sigma pairs ship
-            // alongside so R writes each SE onto its own row of
-            // fit$residual_correlations, whatever that frame's order (#486).
-            se_residual_correlation = new_fit
-                .se_residual_correlations
-                .clone()
-                .unwrap_or_default(),
-            se_residual_correlation_i = new_fit
-                .residual_correlations
-                .iter()
-                .map(|c| c.sigma_i as i32 + 1)
-                .collect::<Vec<i32>>(),
-            se_residual_correlation_j = new_fit
-                .residual_correlations
-                .iter()
-                .map(|c| c.sigma_j as i32 + 1)
-                .collect::<Vec<i32>>(),
-            theta_levels = theta_levels,
-            n_threads_used = n_threads_used,
-            warnings = new_fit.warnings.clone(),
-            warning_details = warning_details_json(&new_fit.warnings_structured)
-        )
-        .into())
+            covariance_method_source = method_source
+        ))
     })
 }
 
@@ -15428,12 +14548,15 @@ extendr_module! {
     fn ferx_rust_cov_labels;
     fn ferx_rust_sha256_text;
     fn ferx_rust_sha256_raw;
-    fn ferx_rust_zip_files;
     fn ferx_rust_load_fit;
     fn ferx_rust_fitrx_wire_keys;
-    fn ferx_rust_fitrx_mixture_columns;
+    fn ferx_rust_bundle_with_extras;
+    fn ferx_rust_bundle_with_data;
+    fn ferx_rust_bundle_without_data;
+    fn ferx_rust_bundle_with_sdtab;
+    fn ferx_rust_bundle_without_trace;
+    fn ferx_rust_test_nan_gradient_bundle;
     fn ferx_rust_stage_data_probe;
-    fn ferx_rust_method_labels;
     fn ferx_rust_method_token_labels;
     fn ferx_rust_compact_theta_blocks;
     fn ferx_rust_kappa_rows;
@@ -15445,7 +14568,6 @@ extendr_module! {
     fn ferx_rust_block_summary;
     fn ferx_rust_warning_details_canonical;
     fn ferx_rust_theta_levels_from_fit;
-    fn ferx_rust_fitrx_engine_resave;
     fn ferx_rust_update_model;
     fn ferx_rust_eta_info_by_name;
     fn ferx_rust_classify_warnings;

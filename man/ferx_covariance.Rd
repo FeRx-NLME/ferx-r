@@ -62,13 +62,17 @@ without re-estimating, when you want to re-run the step with a different
 loaded from a \code{.fitrx} bundle.
 }
 \details{
-\code{ferx_covariance()} reconstructs the fitted parameters from the fit,
-including the IOV (kappa) covariance \code{fit$omega_iov}, re-runs the inner
-loop to rebuild the covariance-step inputs, and calls the same covariance
-step \code{\link[=ferx_fit]{ferx_fit()}} runs inline. The returned fit is the input with
+\code{ferx_covariance()} runs on the fit's bundle (\code{fit$bundle}), the bytes the
+engine serialized it to: it reads the fit from them, re-runs the inner loop
+to rebuild the covariance-step inputs, and calls the same covariance step
+\code{\link[=ferx_fit]{ferx_fit()}} runs inline. It returns a new fit with new bytes, in which
 \code{cov_matrix}, \code{cor_matrix}, \code{se_theta} / \code{se_omega} / \code{se_sigma} /
 \code{se_kappa}, \code{covariance_status}, \code{eigenvalues}, and \code{condition_number}
-refreshed.
+are refreshed. The input \code{fit} is not altered. A change made to the fit's
+list by hand does not reach the step, and a fit with no bundle, such as one
+from an \code{.rds} written by an older ferx, is refused with an error of class
+\code{ferx_no_bundle_error}: refit it. The model and data files are the ones at
+\code{fit$model_path} and \code{fit$data_path}, checked against the hashes in the bytes.
 
 A covariance step that runs but cannot produce a usable matrix (a
 non-positive-definite or structurally-unusable covariance Hessian, from the

@@ -74,10 +74,10 @@ mbma_file_model <- function(m, profiled = FALSE) {
 
 # A bundle saved before #659: the same fit, without the estimator's label.
 legacy <- function(f) {
-  f$covariance_method <- NULL
-  path <- withr::local_tempfile(fileext = ".fitrx", .local_envir = parent.frame())
-  q(ferx_save_fit(f, path))
-  q(ferx_load_fit(path))
+  q(fitrx_edit_fit(f, function(w) {
+    w$covariance_method <- NULL
+    w
+  }))
 }
 
 test_that("ferx_covariance(fit) repeats each estimator the call asked for, live and reloaded", {

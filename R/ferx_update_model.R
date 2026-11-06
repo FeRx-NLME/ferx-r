@@ -137,8 +137,7 @@ ferx_update_model <- function(fit, path = NULL, overwrite = FALSE) {
 
 # The text the fit was made from: `fit$model_text` when it is the fitted one
 # (see `.fitrx_fitted_model_text()`), otherwise the file at `fit$model_path`
-# as it is now, warning when that file has been edited since the fit - the
-# same order `ferx_save_fit()` writes the bundle's model.ferx in.
+# as it is now, warning when that file has been edited since the fit.
 .ferx_fit_source_text <- function(fit) {
   txt <- .fitrx_fitted_model_text(fit)
   if (!is.null(txt)) return(txt)
@@ -156,4 +155,41 @@ ferx_update_model <- function(fit, path = NULL, overwrite = FALSE) {
   }
   stop("The fit carries no model text (fit$model_text) and its model file ",
        "(fit$model_path) cannot be read.")
+}
+
+# `fit$model_text` as UTF-8, when it is the text that was fitted: its bytes
+# hash to `fit$model_hash`. NULL otherwise - no text, no hash to check it
+# against, or a text that is not the fitted one (see the model.ferx block in
+# `ferx_save_fit()`). The hash is the engine's own (`sha256_bytes`), so this
+# check needs no file and works on every R version.
+.fitrx_fitted_model_text <- function(fit) {
+  txt <- fit$model_text
+  hash <- fit$model_hash
+  if (!is.character(txt) || length(txt) != 1L || is.na(txt)) return(NULL)
+  if (!is.character(hash) || length(hash) != 1L || is.na(hash) ||
+      !nzchar(hash)) {
+    return(NULL)
+  }
+  txt <- enc2utf8(txt)
+  if (!validUTF8(txt)) return(NULL)
+  if (!identical(ferx_rust_sha256_text(txt), tolower(hash))) return(NULL)
+  txt
+}
+
+# The file is about to stand in for the fitted text: warn when it is not that text.
+.fitrx_warn_model_edited <- function(model_path, model_hash) {
+  if (length(model_hash) != 1L || is.na(model_hash) || !nzchar(model_hash)) {
+    return(invisible())
+  }
+  sha256 <- get0("sha256sum", envir = asNamespace("tools"), mode = "function")
+  if (is.null(sha256)) return(invisible())
+  now <- unname(sha256(model_path))
+  if (identical(tolower(now), tolower(model_hash))) return(invisible())
+  warning(warningCondition(sprintf(paste0(
+    "ferx_update_model(): the model file %s has changed since the fit (its ",
+    "SHA-256 no longer matches fit$model_hash). The bundle carries the ",
+    "file as it is now; on reload the theta level layout cannot be made, and ",
+    "ferx_sir() / ferx_covariance() refuse the fit. Restore the file and ",
+    "save again, or refit."), model_path),
+    class = "ferx_model_edited_warning"))
 }

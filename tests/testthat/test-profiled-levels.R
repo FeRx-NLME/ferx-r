@@ -125,13 +125,6 @@ test_that("ferx_covariance() repeats the profiled covariance step, live and relo
     expect_identical(cv$theta_levels$se, p$theta_levels$se)
   }
   check(quiet(ferx_covariance(p)))
-  # The glue rebuilds the rows' `profiled` from the fit's record, and the
-  # refresh compares it: a record that disagrees with the fit's own column is
-  # refused, never written onto the wrong rows.
-  bad <- p
-  bad$profiled_blocks <- character(0)
-  expect_error(quiet(ferx_covariance(bad)), "laid the theta levels out differently",
-               fixed = TRUE)
 
   path <- withr::local_tempfile(fileext = ".fitrx")
   quiet(ferx_save_fit(p, path))
@@ -161,10 +154,8 @@ test_that("covariance_wall_time_secs times the profiled covariance step (ferx-co
   quiet(ferx_save_fit(p, path))
   expect_identical(quiet(ferx_load_fit(path))$covariance_wall_time_secs,
                    p$covariance_wall_time_secs)
-  # Under ferx-core's own key: an R writer and reader that agreed on another
-  # name would pass the round trip above while the engine's loader read 0.
-  trip <- quiet(fitrx_engine_trip(p))
-  expect_identical(fitrx_fit_json(trip$core_path)$covariance_wall_time_secs,
+  # Under ferx-core's own key.
+  expect_identical(fitrx_fit_json(path)$covariance_wall_time_secs,
                    p$covariance_wall_time_secs)
 })
 
@@ -267,13 +258,13 @@ test_that("profiled_blocks travels in fit.json the way ferx-core writes it", {
   # missing key as none and refuses a null.
   expect_false("profiled_blocks" %in% names(read_fit_json(f$base)))
 
-  # ferx-core's own loader reads the R-written key, and its writer writes it
-  # back where ferx_load_fit() finds it.
+  # ferx-core's own loader reads the key, and ferx_load_fit() finds it in a
+  # saved bundle.
+  expect_identical(ferx:::ferx_rust_load_fit(f$profiled$bundle)$fit$profiled_blocks,
+                   "PLACEBO")
   a <- withr::local_tempfile(fileext = ".fitrx")
-  b <- withr::local_tempfile(fileext = ".fitrx")
   quiet(ferx_save_fit(f$profiled, a, include_data = TRUE))
-  quiet(getFromNamespace("ferx_rust_fitrx_engine_resave", "ferx")(a, b))
-  back <- quiet(ferx_load_fit(b))
+  back <- quiet(ferx_load_fit(a))
   expect_identical(back$profiled_blocks, "PLACEBO")
   expect_true(all(back$theta_levels$profiled))
 })
@@ -376,8 +367,11 @@ test_that("a level held on its bound survives ferx_covariance() and .fitrx (ferx
   check(quiet(ferx_covariance(b)))
   # The step rebuilds the list from the estimates and the box, and the
   # replay takes the step's: a fit that lost it gets it back.
-  lost <- b
-  lost$profiled_levels_at_bound <- character(0)
+  lost <- fitrx_edit_fit(b, function(w) {
+    w$profiled_levels_at_bound <- NULL
+    w
+  })
+  expect_identical(lost$profiled_levels_at_bound, character(0))
   expect_identical(quiet(ferx_covariance(lost))$profiled_levels_at_bound, held)
 
   path <- withr::local_tempfile(fileext = ".fitrx")
@@ -390,10 +384,9 @@ test_that("a level held on its bound survives ferx_covariance() and .fitrx (ferx
   expect_identical(back$theta_levels, b$theta_levels)
   expect_identical(back$estimates, b$estimates)
   check(quiet(ferx_covariance(back)))
-  # The engine's own loader and writer round-trip the R-written key.
-  trip <- quiet(fitrx_engine_trip(b))
-  expect_identical(fitrx_fit_json(trip$core_path)$profiled_levels_at_bound,
-                   list(match(held, names(b$theta)) - 1L))
+  # The engine's own loader reads the key back as the level's name.
+  expect_identical(ferx:::ferx_rust_load_fit(b$bundle)$fit$profiled_levels_at_bound,
+                   held)
   # Omitted, not empty, on a fit that holds none, as the engine writes it.
   quiet(ferx_save_fit(fits()$profiled, path))
   expect_false("profiled_levels_at_bound" %in% names(fitrx_fit_json(path)))
@@ -408,12 +401,19 @@ test_that("a level held on its bound survives ferx_covariance() and .fitrx (ferx
 test_that("a held level the fit does not have is refused, not dropped", {
   skip_on_cran()
   b <- bounded_fits()$profiled
-  bad <- b
-  bad$profiled_levels_at_bound <- "PLACEBO[STUDY=9,TIME=0]"
-  expect_error(quiet(ferx_save_fit(bad, withr::local_tempfile(fileext = ".fitrx"))),
-               "names a theta the fit does not have", fixed = TRUE)
-  expect_error(quiet(ferx_sir(bad, sir_samples = 10L, sir_resamples = 5L)),
-               "which is not one of the fit's thetas", fixed = TRUE)
+  path <- withr::local_tempfile(fileext = ".fitrx")
+  ferx_save_fit(b, path)
+  bad <- fitrx_edit_bundle(path, function(w) {
+    w$profiled_levels_at_bound <- list(999L)
+    w
+  })
+  expect_error(ferx_load_fit(bad), "`profiled_levels_at_bound` names theta index 999",
+               fixed = TRUE)
+  # A step reads the same bytes through the same check.
+  bytes <- readBin(bad, "raw", n = file.size(bad))
+  expect_error(quiet(ferx_sir(modifyList(b, list(bundle = bytes)),
+                              sir_samples = 10L, sir_resamples = 5L)),
+               "`profiled_levels_at_bound` names theta index 999", fixed = TRUE)
 })
 
 # A profiled fit whose covariance step fails. Until ferx-core #2421 this was a

@@ -37,10 +37,12 @@ PERCENT_PARSE <- "malformed filter expression 'DV < 5%': right-hand side '5%' is
 percent_model_callers <- function() {
   ex <- ferx_example("warfarin")
   repointed <- function(m) {
-    fit <- warfarin_fit_cov()
+    fit <- fitrx_edit_fit(warfarin_fit_cov(), function(w) {
+      w$model_hash <- NULL
+      w$data_hash <- NULL
+      w
+    })
     fit$model_path <- m
-    fit$model_hash <- NULL
-    fit$data_hash <- NULL
     fit
   }
   list(

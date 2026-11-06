@@ -1149,8 +1149,8 @@
 #'     \code{TRUE}) and per sigma. \code{TRUE} also marks a theta the engine
 #'     held at its initial value because it had no effect on the objective
 #'     (see the \code{flat_parameter} warning), even without \code{FIX} in
-#'     the model. \code{ferx_save_fit()} writes them into the bundle, so a
-#'     reloaded fit carries the same flags.}
+#'     the model. The bundle holds them, so a reloaded fit carries the same
+#'     flags.}
 #'   \item{sdtab}{Data frame with ID, TIME, DV, PRED, IPRED, CWRES, IWRES,
 #'     EBE_OFV, N_OBS; OCC if any subject carries an occasion column; CENS
 #'     if any rows are LOQ-censored; CMT if the dataset has more than one
@@ -1201,9 +1201,8 @@
 #'     records. \code{sdtab} holds each subject's \code{n_obs} rows in
 #'     subject order, then each subject's \code{n_obs_discrete} rows in
 #'     subject order, then each subject's \code{n_obs_tte} rows.
-#'     \code{ferx_save_fit()} writes the first three to the bundle's
-#'     \code{ebes.csv}; the bundle keeps no time-to-event rows, so
-#'     \code{n_obs_tte} is 0 on a reloaded fit.}
+#'     The bundle holds all of these rows, so a reloaded fit has the same
+#'     counts.}
 #'   \item{individual_estimates}{Data frame with one row per subject containing
 #'     each subject's individual parameter values: \code{ID} plus one column
 #'     per parameter declared in the \code{[individual_parameters]} block
@@ -1371,7 +1370,10 @@
 #'     optimizer's gradient method.}
 #'   \item{ferx_version}{ferx-core library version string.}
 #'   \item{bundle}{The fit's \code{.fitrx} bundle as a raw vector, as ferx-core
-#'   serialized it: the copy of the fit \code{\link{ferx_save_fit}} starts from.
+#'   serialized it. These bytes are the fit: \code{\link{ferx_save_fit}} writes
+#'   them, and \code{\link{ferx_covariance}}, \code{\link{ferx_sir}} and
+#'   \code{\link{ferx_calc_npde}} read them and return a new fit with new ones,
+#'   so a change made to the list by hand reaches none of these.
 #'   \code{ferx_load_fit()} sets it to the file's bytes. Roughly doubles the size
 #'   of a fit saved with \code{saveRDS()}.}
 #'   \item{model_text}{Verbatim content of the \code{.ferx} model file as a
@@ -2950,26 +2952,10 @@ ferx_fit <- function(model, data = NULL,
 # the engine's 0 would read as a perfectly determined rho. NA, with `fixed`
 # saying why, as fit$estimates does (#451, #458). Every builder of
 # fit$residual_correlations (ferx_fit(), ferx_covariance(), ferx_load_fit())
-# goes through here. The bundle writer puts the engine's 0 back.
+# goes through here. The bundle keeps the engine's 0.
 .ferx_residual_corr_se <- function(se, fixed) {
   se[!is.na(fixed) & fixed] <- NA_real_
   se
-}
-
-# Covariance-matrix labels for the trailing residual-correlation coordinates.
-# Reads either the raw FFI shape (parallel vectors) or a finished fit (the
-# data frame above), so ferx_fit() and ferx_covariance() label alike.
-.ferx_residual_corr_labels <- function(x) {
-  rc <- x$residual_correlations
-  if (is.data.frame(rc)) {
-    if (nrow(rc) == 0L) return(character(0L))
-    return(as.character(rc$name))
-  }
-  nms <- as.character(x$residual_correlation_names %||% character())
-  if (length(nms) > 0L) return(nms)
-  n <- length(x$residual_correlation_rho %||% numeric())
-  if (n == 0L) return(character(0L))
-  paste0("RHO(", seq_len(n), ")")
 }
 
 .ferx_apply_cov_sentinels <- function(result) {
