@@ -192,6 +192,40 @@ test_that("a subject ID holding a newline reads back from both writers (#711)", 
   expect_identical(raw$ebe_etas$ID, fit$ebe_etas$ID)
 })
 
+test_that("a private-use character in a subject ID is the ID's own (#712)", {
+  skip_on_cran()
+  ex <- ferx_example("warfarin")
+  d <- read.csv(ex$data, colClasses = c(ID = "character"))
+  ids <- unique(d$ID)
+  # Alone, and beside a line break, which needs escapes that are not these.
+  for (labels in list(c("a\ue000b", "c\ue001d"),
+                      c("a\ue000b", "c\ue001d", "two\nlines", "\ue002"))) {
+    d2 <- d
+    d2$ID <- c(labels, ids)[match(d$ID, ids)]
+    fit <- fitrx_parity_fit(ex$model, d2, method = "foce", covariance = FALSE)
+    expect_true(all(labels %in% fit$subject_ids))
+    expect_identical(fitrx_round_trip(fit)$subject_ids, fit$subject_ids)
+    out <- suppressWarnings(ferx_covariance(fit))
+    expect_identical(out$subject_ids, fit$subject_ids)
+    expect_identical(fitrx_round_trip(out)$subject_ids, fit$subject_ids)
+  }
+})
+
+test_that("a bundle naming bad line-break escapes is refused (#712)", {
+  skip_on_cran()
+  fit <- fitrx_parity_cases$text_ids()
+  path <- tempfile(fileext = ".fitrx")
+  ferx_save_fit(fit, path)
+  bytes <- readBin(path, "raw", file.size(path))
+  expect_true("subject_id_line_breaks.json" %in% fitrx_entries(bytes))
+  dir <- withr::local_tempdir()
+  utils::unzip(path, exdir = dir)
+  writeLines("{}", file.path(dir, "subject_id_line_breaks.json"))
+  bad <- tempfile(fileext = ".fitrx")
+  utils::zip(bad, list.files(dir, full.names = TRUE), flags = "-j -q")
+  expect_error(ferx_load_fit(bad), "subject_id_line_breaks.json")
+})
+
 # -- Phase 4 (#712): the bytes are the fit --
 
 # Fails with the fields where `x`'s list and its bytes disagree.
@@ -468,6 +502,33 @@ test_that("a rewrite does not write through a planted temp path (#712)", {
   expect_setequal(list.files(dir, all.files = TRUE, no.. = TRUE), basename(planted))
 })
 
+test_that("a save stages its files in a directory only this user can enter (#712)", {
+  skip_on_cran()
+  skip_on_os("windows")
+  fit <- fitrx_parity_cases$plain()
+  dir <- withr::local_tempdir()
+  seen <- character()
+  real <- ferx_rust_replace_file
+  testthat::local_mocked_bindings(ferx_rust_replace_file = function(from, to) {
+    seen <<- c(seen, format(file.mode(dirname(from))))
+    real(from, to)
+  }, .package = "ferx")
+  ferx_save_fit(fit, file.path(dir, "run.fitrx"), write_model = TRUE)
+  expect_identical(seen, c("700", "700"))
+  expect_setequal(list.files(dir, all.files = TRUE, no.. = TRUE),
+                  c("run.fitrx", "run_final.ferx"))
+})
+
+test_that("a staging name another user took first is refused, not followed (#712)", {
+  skip_on_os("windows")
+  dir <- withr::local_tempdir()
+  victim <- withr::local_tempfile(lines = "untouched")
+  planted <- file.path(dir, "fitrx_taken")
+  expect_true(file.symlink(victim, planted))
+  expect_error(ferx:::.ferx_private_dir(dir, planted), "staging directory")
+  expect_identical(readLines(victim), "untouched")
+})
+
 # The CLI is ferx-core's, so CI has it only when pointed at one: FERX_CLI, else
 # `ferx` on the PATH.
 fitrx_cli <- function() {
@@ -487,6 +548,20 @@ test_that("a bundle saved from R loads in the CLI (#712)", {
                                     stdout = TRUE, stderr = TRUE))
     expect_null(attr(out, "status"), info = case)
     expect_true(any(grepl(names(fit$theta)[[1L]], out, fixed = TRUE)), info = case)
+  }
+})
+
+test_that("a bundle with a line break in a subject ID loads in the CLI (#712)", {
+  skip_on_cran()
+  cli <- fitrx_cli()
+  fit <- fitrx_parity_cases$text_ids()
+  for (x in list(fit, suppressWarnings(ferx_covariance(fit)))) {
+    path <- tempfile(fileext = ".fitrx")
+    ferx_save_fit(x, path, include_data = TRUE)
+    out <- suppressWarnings(system2(cli, c("summary", shQuote(path)),
+                                    stdout = TRUE, stderr = TRUE))
+    expect_null(attr(out, "status"))
+    expect_identical(ferx_load_fit(path)$subject_ids, fit$subject_ids)
   }
 })
 

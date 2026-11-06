@@ -2906,37 +2906,143 @@ fn csv_number(cell: &str) -> f64 {
     cell.parse().unwrap_or(f64::NAN)
 }
 
-/// What stands in for a newline and a carriage return inside a quoted CSV cell while
-/// ferx-core reads a bundle: private-use characters, which no ID holds.
-const ESCAPED_NEWLINE: char = '\u{E000}';
-const ESCAPED_RETURN: char = '\u{E001}';
+/// The entry naming the characters that stand in for line breaks in a bundle's CSV
+/// entries. A bundle without it holds none: any private-use character in it is an ID's
+/// own. Core copies nothing it does not know, so the glue carries it across a rewrite.
+const LINE_BREAKS_ENTRY: &str = "subject_id_line_breaks.json";
 
-/// A CSV text with the line breaks inside its quoted cells escaped, or `None` when it
-/// has none. ferx-core reads its entries line by line (`str::lines`), so a subject ID
-/// holding a newline, which its own writer quotes, would split the row.
-fn escape_quoted_newlines(csv: &[u8]) -> Option<Vec<u8>> {
-    let mut quoted = false;
-    let mut out = Vec::with_capacity(csv.len());
-    let mut changed = false;
-    let mut buf = [0u8; 4];
-    for &b in csv {
-        match b {
-            b'"' => quoted = !quoted,
-            b'\n' | b'\r' if quoted => {
-                let c = if b == b'\n' { ESCAPED_NEWLINE } else { ESCAPED_RETURN };
-                out.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
-                changed = true;
-                continue;
-            }
-            _ => {}
-        }
-        out.push(b);
-    }
-    changed.then_some(out)
+/// What stands in for a newline and a carriage return inside a quoted CSV cell, as
+/// ferx-core reads its entries line by line (`str::lines`): a subject ID holding a
+/// newline, which its own writer quotes, would split the row. Both are private-use
+/// characters no CSV entry of the bundle holds, so what they restore is unambiguous.
+#[derive(Clone, Copy)]
+struct LineBreakEscapes {
+    newline: char,
+    carriage_return: char,
 }
 
-fn unescape_newlines(id: &str) -> String {
-    id.replace(ESCAPED_NEWLINE, "\n").replace(ESCAPED_RETURN, "\r")
+impl LineBreakEscapes {
+    /// Two characters no entry of `csvs` holds.
+    fn unused_in(csvs: &[(String, Vec<u8>)]) -> std::result::Result<Self, String> {
+        let used: std::collections::HashSet<char> = csvs
+            .iter()
+            .flat_map(|(_, csv)| String::from_utf8_lossy(csv).chars().collect::<Vec<_>>())
+            .collect();
+        let mut free = ('\u{E000}'..='\u{F8FF}').filter(|c| !used.contains(c));
+        match (free.next(), free.next()) {
+            (Some(newline), Some(carriage_return)) => Ok(Self { newline, carriage_return }),
+            _ => Err("no private-use character is free to escape a line break".to_string()),
+        }
+    }
+
+    /// The escapes `bundle` records. One it records badly is refused: its IDs could not
+    /// be restored.
+    fn recorded(bundle: &[u8]) -> std::result::Result<Option<Self>, String> {
+        let Some(bytes) = bundle_entry(bundle, LINE_BREAKS_ENTRY)? else {
+            return Ok(None);
+        };
+        let wire = serde_json::from_slice::<serde_json::Value>(&bytes).ok();
+        let one_char = |key: &str| {
+            let text = wire.as_ref()?.get(key)?.as_str()?;
+            let mut chars = text.chars();
+            chars.next().filter(|_| chars.next().is_none())
+        };
+        match (one_char("newline"), one_char("carriage_return")) {
+            (Some(newline), Some(carriage_return)) => {
+                Ok(Some(Self { newline, carriage_return }))
+            }
+            _ => Err(format!("{LINE_BREAKS_ENTRY}: not two single characters")),
+        }
+    }
+
+    fn to_json(self) -> Vec<u8> {
+        serde_json::json!({
+            "newline": self.newline.to_string(),
+            "carriage_return": self.carriage_return.to_string(),
+        })
+        .to_string()
+        .into_bytes()
+    }
+
+    /// `csv` with the line breaks inside its quoted cells escaped.
+    fn escape_csv(self, csv: &[u8]) -> Vec<u8> {
+        let mut quoted = false;
+        let mut out = Vec::with_capacity(csv.len());
+        let mut buf = [0u8; 4];
+        for &b in csv {
+            match b {
+                b'"' => quoted = !quoted,
+                b'\n' | b'\r' if quoted => {
+                    let c = if b == b'\n' { self.newline } else { self.carriage_return };
+                    out.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
+                    continue;
+                }
+                _ => {}
+            }
+            out.push(b);
+        }
+        out
+    }
+
+    fn escape_id(self, id: &str) -> String {
+        id.replace('\n', &self.newline.to_string())
+            .replace('\r', &self.carriage_return.to_string())
+    }
+
+    fn restore_id(self, id: &str) -> String {
+        id.replace(self.newline, "\n").replace(self.carriage_return, "\r")
+    }
+}
+
+/// Whether a quoted cell of `csv` holds a line break.
+fn has_quoted_line_break(csv: &[u8]) -> bool {
+    let mut quoted = false;
+    csv.iter().any(|&b| {
+        if b == b'"' {
+            quoted = !quoted;
+        }
+        quoted && (b == b'\n' || b == b'\r')
+    })
+}
+
+/// The escapes that make `bundle` readable line by line, and the entries to change for
+/// them: none when no CSV entry needs it. `data.csv` stays verbatim, as core reads it
+/// with a real CSV reader.
+fn line_break_changes(
+    bundle: &[u8],
+) -> std::result::Result<(Option<LineBreakEscapes>, HashMap<String, Option<Vec<u8>>>), String> {
+    let recorded = LineBreakEscapes::recorded(bundle)?;
+    let mut changes = HashMap::new();
+    let archive = zip::ZipArchive::new(std::io::Cursor::new(bundle))
+        .map_err(|e| format!("not a .fitrx archive: {e}"))?;
+    let names: Vec<String> = archive
+        .file_names()
+        .filter_map(|name| name.ok().map(|n| n.into_owned()))
+        .filter(|n| n.ends_with(".csv") && n != "data.csv")
+        .collect();
+    let mut csvs = Vec::with_capacity(names.len());
+    for name in names {
+        if let Some(csv) = bundle_entry(bundle, &name)? {
+            csvs.push((name, csv));
+        }
+    }
+    if !csvs.iter().any(|(_, csv)| has_quoted_line_break(csv)) {
+        return Ok((recorded, changes));
+    }
+    let escapes = match recorded {
+        Some(escapes) => escapes,
+        None => {
+            let escapes = LineBreakEscapes::unused_in(&csvs)?;
+            changes.insert(LINE_BREAKS_ENTRY.to_string(), Some(escapes.to_json()));
+            escapes
+        }
+    };
+    for (name, csv) in &csvs {
+        if has_quoted_line_break(csv) {
+            changes.insert(name.clone(), Some(escapes.escape_csv(csv)));
+        }
+    }
+    Ok((Some(escapes), changes))
 }
 
 /// `bundle` with each entry of `changes` set to its bytes, or removed for `None`, and
@@ -3021,6 +3127,8 @@ fn known_iov_occasion(value: &serde_json::Value) -> bool {
 struct PreparedBundle {
     /// The bundle to hand core, when it differs from the one read.
     bytes: Option<Vec<u8>>,
+    /// What stands in for line breaks in the IDs core reads from it.
+    escapes: Option<LineBreakEscapes>,
     /// The unknown keys that dropped `scoring_settings` / `sir.settings`.
     dropped_scoring: Vec<String>,
     dropped_sir: Vec<String>,
@@ -3036,25 +3144,15 @@ struct PreparedBundle {
 /// dropped, and the caller warns (ferx-r #535). An `iov_occasion` of an unknown shape
 /// fails core's whole read, and is dropped the same way (ferx-r #524).
 ///
-/// Line breaks inside quoted cells are escaped, as core reads its CSV entries by line.
-/// `data.csv` stays verbatim: core reads it with a real CSV reader.
+/// Line breaks inside quoted cells are escaped (see [`line_break_changes`]).
 fn prepare_bundle(bundle: &[u8]) -> std::result::Result<PreparedBundle, String> {
     let mut prepared = PreparedBundle::default();
-    let mut replaced: HashMap<String, Option<Vec<u8>>> = HashMap::new();
     // A bundle that does not get this far is core's to refuse, in its own words.
-    let Ok(archive) = zip::ZipArchive::new(std::io::Cursor::new(bundle)) else {
+    if zip::ZipArchive::new(std::io::Cursor::new(bundle)).is_err() {
         return Ok(prepared);
-    };
-    let names: Vec<String> = archive
-        .file_names()
-        .filter_map(|name| name.ok().map(|n| n.into_owned()))
-        .collect();
-    for name in names.iter().filter(|n| n.ends_with(".csv") && *n != "data.csv") {
-        let Some(csv) = bundle_entry(bundle, name)? else { continue };
-        if let Some(escaped) = escape_quoted_newlines(&csv) {
-            replaced.insert(name.clone(), Some(escaped));
-        }
     }
+    let (escapes, mut replaced) = line_break_changes(bundle)?;
+    prepared.escapes = escapes;
 
     let wire = bundle_entry(bundle, "fit.json")?
         .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
@@ -3203,19 +3301,22 @@ struct BundleFit {
     fit: FitResult,
     /// The bundle as core reads it (see [`prepare_bundle`]).
     for_core: Vec<u8>,
+    /// What stands in for line breaks in `for_core`.
+    escapes: Option<LineBreakEscapes>,
 }
 
 /// Read `bundle` for a step that returns new bytes. The population is left to the step,
 /// which re-reads it from the fit's data file.
 fn read_bundle_fit(bundle: &[u8]) -> std::result::Result<BundleFit, String> {
     let prepared = prepare_bundle(bundle)?;
+    let escapes = prepared.escapes;
     let for_core = prepared.bytes.unwrap_or_else(|| bundle.to_vec());
     let loaded = ferx_core::io::fitrx::load_fit_from_bytes_without_population(&for_core)
         .map_err(|e| format!("cannot read this fit's bundle: {e}"))?;
     let mut fit = loaded.fit;
-    map_subject_ids(&mut fit, &unescape_newlines);
+    restore_subject_ids(&mut fit, escapes);
     check_loaded_fit(&fit)?;
-    Ok(BundleFit { fit, for_core })
+    Ok(BundleFit { fit, for_core, escapes })
 }
 
 /// Refuse what the bytes lack for a post-hoc step on `model`, where core would carry
@@ -3279,22 +3380,26 @@ fn map_subject_ids(fit: &mut FitResult, edit: &dyn Fn(&str) -> String) {
     }
 }
 
-/// The bundle of `result`, a fit read from `original` by [`read_bundle_fit`] whose
-/// subjects' rows have not changed. Core writes it from `result` with no population,
-/// taking the data columns and any `data.csv` from the bundle; `original`'s sdtab
-/// entries then go back, as core writes its narrower table. Core reads IDs by line, so
-/// an ID holding a line break stays escaped in the entries it writes, and
-/// [`unescape_newlines`] restores it on the next read.
+/// `fit`'s subject IDs as the data has them.
+fn restore_subject_ids(fit: &mut FitResult, escapes: Option<LineBreakEscapes>) {
+    if let Some(escapes) = escapes {
+        map_subject_ids(fit, &|id| escapes.restore_id(id));
+    }
+}
+
+/// The bundle of `result`, a fit [`read_bundle_fit`] read as `read`, whose subjects'
+/// rows have not changed. Core writes it from `result` with no population, taking the
+/// data columns and any `data.csv` from the bundle; the bundle's sdtab entries then go
+/// back, as core writes its narrower table. An ID holding a line break stays escaped,
+/// and the new bundle records how.
 fn rewritten_bundle(
     result: &FitResult,
     read: &BundleFit,
-    original: &[u8],
 ) -> std::result::Result<Vec<u8>, String> {
     let mut result = writable_fit(result).into_owned();
-    map_subject_ids(&mut result, &|id| {
-        id.replace('\n', &ESCAPED_NEWLINE.to_string())
-            .replace('\r', &ESCAPED_RETURN.to_string())
-    });
+    if let Some(escapes) = read.escapes {
+        map_subject_ids(&mut result, &|id| escapes.escape_id(id));
+    }
     // Core's bundle-based save writes to a path only, and follows a symlink there, so
     // the path is in a new directory only this user can enter, under a name nobody can
     // guess: a predictable one in a shared temp directory would let another local user
@@ -3311,8 +3416,8 @@ fn rewritten_bundle(
     .and_then(|()| std::fs::read(&path).map_err(|e| e.to_string()));
     let bytes = saved?;
     let mut changes = HashMap::new();
-    for name in ["predictions.csv", ENDPOINT_ROWS_ENTRY] {
-        changes.insert(name.to_string(), bundle_entry(original, name)?);
+    for name in ["predictions.csv", ENDPOINT_ROWS_ENTRY, LINE_BREAKS_ENTRY] {
+        changes.insert(name.to_string(), bundle_entry(&read.for_core, name)?);
     }
     bundle_with_entries(&bytes, &changes)
 }
@@ -3546,7 +3651,7 @@ fn ferx_rust_load_fit(bundle: Raw) -> List {
             .or_else(|_| load_fit_from_bytes_without_population(for_core))
             .map_err(|e| format!("cannot read this .fitrx bundle: {e}"))?;
         let mut fit = loaded.fit;
-        map_subject_ids(&mut fit, &unescape_newlines);
+        restore_subject_ids(&mut fit, prepared.escapes);
         check_loaded_fit(&fit)?;
         let (sdtab, occasions) = recorded_rows(bytes, &mut fit)?;
         let parsed = loaded_model(&fit, &loaded.model_source);
@@ -3655,6 +3760,25 @@ fn ferx_rust_replace_file(from: &str, to: &str) {
     })
 }
 
+/// A bundle as a file holds it: readable by ferx-core's loader, and so by the CLI,
+/// where a line break in a subject ID would otherwise split a row. The CLI shows such
+/// an ID with the escape in place of the break; `ferx_load_fit()` restores it.
+///
+/// @param bundle The bundle's bytes.
+/// @return The new bundle's bytes, the same ones when nothing needs escaping.
+/// @export
+#[extendr]
+fn ferx_rust_bundle_for_file(bundle: Raw) -> Raw {
+    entry(move || {
+        let bytes = bundle.as_slice();
+        let (_, changes) = line_break_changes(bytes)?;
+        if changes.is_empty() {
+            return Ok(Raw::from_bytes(bytes));
+        }
+        Ok(Raw::from_bytes(&bundle_with_entries(bytes, &changes)?))
+    })
+}
+
 /// A bundle without its `data.csv`, for a save that did not ask for the data.
 ///
 /// @param bundle The bundle's bytes.
@@ -3713,7 +3837,7 @@ fn ferx_rust_test_nan_gradient_bundle(bundle: Raw) -> Raw {
             .and_then(|g| g.first_mut())
             .map(|v| *v = f64::NAN)
             .ok_or("internal: the fit reports no gradient")?;
-        Ok(Raw::from_bytes(&rewritten_bundle(&fit, &read, bytes)?))
+        Ok(Raw::from_bytes(&rewritten_bundle(&fit, &read)?))
     })
 }
 
@@ -3731,7 +3855,7 @@ fn ferx_rust_bundle_without_trace(bundle: Raw) -> Raw {
         let mut fit = read.fit.clone();
         fit.trace_path = None;
         fit.trace_csv = None;
-        Ok(Raw::from_bytes(&rewritten_bundle(&fit, &read, bytes)?))
+        Ok(Raw::from_bytes(&rewritten_bundle(&fit, &read)?))
     })
 }
 
@@ -9345,7 +9469,7 @@ fn ferx_rust_sir(
         let mut new_fit = ferx_core::run_sir(&fit, None, None, &opts)
             .map_err(|e| engine_refusal("ferx_sir: ", e))?;
         new_fit.n_threads_used = n_threads_used as usize;
-        Ok(Raw::from_bytes(&rewritten_bundle(&new_fit, &read, bytes)?))
+        Ok(Raw::from_bytes(&rewritten_bundle(&new_fit, &read)?))
     })
 }
 
@@ -9459,7 +9583,7 @@ fn ferx_rust_covariance(
         new_fit.n_threads_used = n_threads_used as usize;
         new_fit.scoring_settings = read.fit.scoring_settings.clone();
         Ok(list!(
-            bundle = Raw::from_bytes(&rewritten_bundle(&new_fit, &read, bytes)?),
+            bundle = Raw::from_bytes(&rewritten_bundle(&new_fit, &read)?),
             covariance_method_requested = method_requested,
             covariance_method_source = method_source
         ))
@@ -14563,6 +14687,7 @@ extendr_module! {
     fn ferx_rust_load_fit;
     fn ferx_rust_fitrx_wire_keys;
     fn ferx_rust_bundle_with_extras;
+    fn ferx_rust_bundle_for_file;
     fn ferx_rust_bundle_with_data;
     fn ferx_rust_bundle_without_data;
     fn ferx_rust_replace_file;

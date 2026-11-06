@@ -159,12 +159,11 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
     stop("ferx_save_fit: ", targets[dir.exists(targets)][[1L]],
          " is a directory, so the save cannot replace it.", call. = FALSE)
   }
-  staged <- vapply(targets, function(target) {
-    tempfile("fitrx_", tmpdir = dirname(target), fileext = ".tmp")
-  }, character(1L))
-  on.exit(unlink(staged), add = TRUE)
+  stage <- .ferx_private_dir(dirname(out_abs))
+  on.exit(unlink(stage, recursive = TRUE), add = TRUE)
+  staged <- file.path(stage, basename(targets))
   if (write_model) writeBin(charToRaw(updated_model), staged[[1L]])
-  writeBin(bundle, staged[[length(staged)]])
+  writeBin(ferx_rust_bundle_for_file(bundle), staged[[length(staged)]])
   for (i in seq_along(targets)) {
     # An existing file keeps its permissions.
     if (file.exists(targets[[i]])) {
@@ -177,6 +176,19 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
 }
 
 # ----- internals ------------------------------------------------------------
+
+# A new directory in `parent` only this user can enter. `tempfile()` picks a name
+# without creating anything, so a file staged at such a name in a shared directory
+# could meet a symlink another user put there first, and the write would follow it.
+# mkdir does not follow one and fails on any name already taken, which is why its
+# result decides here.
+.ferx_private_dir <- function(parent, path = tempfile("fitrx_", tmpdir = parent)) {
+  if (!dir.create(path, showWarnings = FALSE, mode = "0700")) {
+    stop("ferx_save_fit: cannot create a staging directory in ", parent, ".",
+         call. = FALSE)
+  }
+  path
+}
 
 # A fit's bundle, the bytes every step that reads or replaces them starts from.
 # A fit has none when it comes from an `.rds` written by an older ferx, or when

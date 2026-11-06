@@ -213,6 +213,12 @@ ferx_rust_bundle_without_data <- function(bundle) {
 
 #' @title Internal Rust backend binding
 #' @keywords internal
+ferx_rust_bundle_for_file <- function(bundle) {
+  .Call("wrap__ferx_rust_bundle_for_file", bundle)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
 ferx_rust_replace_file <- function(from, to) {
   invisible(.Call("wrap__ferx_rust_replace_file", from, to))
 }
