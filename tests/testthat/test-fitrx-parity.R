@@ -387,6 +387,27 @@ test_that("a save whose model file cannot be written leaves the bundle (#712)", 
   expect_setequal(list.files(dir), c("run.fitrx", "run_final.ferx"))
 })
 
+test_that("a save replaces an existing bundle and model file, keeping their mode (#712)", {
+  skip_on_cran()
+  fit <- fitrx_parity_cases$plain()
+  later <- suppressWarnings(ferx_covariance(fit))
+  dir <- withr::local_tempdir()
+  out <- file.path(dir, "run.fitrx")
+  model <- file.path(dir, "run_final.ferx")
+  ferx_save_fit(fit, out, write_model = TRUE)
+  cat("# stale\n", file = model)
+  Sys.chmod(c(out, model), "600", use_umask = FALSE)
+
+  ferx_save_fit(later, out, write_model = TRUE)
+
+  expect_identical(ferx_load_fit(out)$cov_matrix, later$cov_matrix)
+  expect_false(any(grepl("# stale", readLines(model), fixed = TRUE)))
+  expect_setequal(list.files(dir, all.files = TRUE, no.. = TRUE),
+                  c("run.fitrx", "run_final.ferx"))
+  skip_on_os("windows")
+  expect_identical(as.character(file.mode(c(out, model))), c("600", "600"))
+})
+
 test_that("a failed save leaves what was at the path, and no stray file (#712)", {
   skip_on_cran()
   ex <- ferx_example("warfarin")

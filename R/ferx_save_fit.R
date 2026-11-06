@@ -170,9 +170,7 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
     if (file.exists(targets[[i]])) {
       Sys.chmod(staged[[i]], file.mode(targets[[i]]), use_umask = FALSE)
     }
-    if (!file.rename(staged[[i]], targets[[i]])) {
-      stop(sprintf("failed to move the file into place at %s", targets[[i]]))
-    }
+    ferx_rust_replace_file(staged[[i]], targets[[i]])
   }
 
   invisible(fit)

@@ -3640,6 +3640,21 @@ fn ferx_rust_bundle_with_data(bundle: Raw, data: Raw, name: &str) -> Raw {
     })
 }
 
+/// Move a staged file onto `to`, replacing a file already there, in one step.
+/// `std::fs::rename` promises that on every platform, where R's `file.rename()` leaves
+/// it to the system call; `file.copy()` would replace but could stop halfway.
+///
+/// @param from The staged file, on the same volume as `to`.
+/// @param to The path it replaces.
+/// @return `NULL`, invisibly.
+/// @export
+#[extendr]
+fn ferx_rust_replace_file(from: &str, to: &str) {
+    entry(move || {
+        std::fs::rename(from, to).map_err(|e| format!("cannot move the file into place at {to}: {e}"))
+    })
+}
+
 /// A bundle without its `data.csv`, for a save that did not ask for the data.
 ///
 /// @param bundle The bundle's bytes.
@@ -14550,6 +14565,7 @@ extendr_module! {
     fn ferx_rust_bundle_with_extras;
     fn ferx_rust_bundle_with_data;
     fn ferx_rust_bundle_without_data;
+    fn ferx_rust_replace_file;
     fn ferx_rust_bundle_with_sdtab;
     fn ferx_rust_bundle_without_trace;
     fn ferx_rust_test_nan_gradient_bundle;
