@@ -319,6 +319,74 @@ test_that("a hand edit of the list is not saved: the bytes are the fit (#712)", 
   expect_identical(fitrx_round_trip(edited)$theta, fit$theta)
 })
 
+test_that("a hand edit of the list reaches no step: each reads the bytes (#712)", {
+  skip_on_cran()
+  fit <- fitrx_parity_cases$plain()
+
+  # SIR: an edited record is not run; an explicit argument still is.
+  sir_args <- list(sir_samples = 50L, sir_resamples = 20L, sir_seed = 1L)
+  clean <- suppressWarnings(do.call(ferx_sir, c(list(fit), sir_args)))
+  edited <- clean
+  edited$sir_settings$df <- 1
+  edited$sir_settings$samples <- 60L
+  again <- suppressWarnings(ferx_sir(edited))
+  expect_identical(again$sir_settings, clean$sir_settings)
+  expect_identical(again$sir_ci_theta, clean$sir_ci_theta)
+
+  # Covariance: the call's step settings and the scoring record are the bytes'.
+  cov <- suppressWarnings(ferx_covariance(fit))
+  edited <- fit
+  edited$call_settings$covariance_method <- "s"
+  out <- suppressWarnings(ferx_covariance(edited))
+  expect_identical(out$covariance_method, cov$covariance_method)
+  expect_identical(out$cov_matrix, cov$cov_matrix)
+  edited <- fit
+  edited$scoring_settings$inner_maxiter <- 1L
+  expect_identical(
+    suppressWarnings(ferx_covariance(edited, mu_referencing = TRUE))$cov_matrix,
+    suppressWarnings(ferx_covariance(fit, mu_referencing = TRUE))$cov_matrix
+  )
+
+  # NPDE: computed at the fit's estimates, on the fit's table.
+  clean <- fitrx_steps$npde(fit)
+  edited <- fit
+  edited$theta[[1L]] <- edited$theta[[1L]] * 3
+  edited$sdtab$PRED <- 0
+  out <- fitrx_steps$npde(edited)
+  expect_identical(out$theta, fit$theta)
+  expect_identical(out$sdtab, clean$sdtab)
+  expect_bytes_agree(out, "npde on an edited list")
+})
+
+test_that("write_model renders the bytes, not an edited list (#712)", {
+  skip_on_cran()
+  fit <- fitrx_parity_cases$plain()
+  dir <- withr::local_tempdir()
+  ferx_save_fit(fit, file.path(dir, "clean.fitrx"), write_model = TRUE)
+  edited <- fit
+  edited$theta[[1L]] <- 99
+  edited$omega[1L, 1L] <- 9
+  edited$sigma[[1L]] <- 9
+  edited$model_text <- "not the model"
+  ferx_save_fit(edited, file.path(dir, "edited.fitrx"), write_model = TRUE)
+  expect_identical(readLines(file.path(dir, "edited_final.ferx")),
+                   readLines(file.path(dir, "clean_final.ferx")))
+})
+
+test_that("a save whose model file cannot be written leaves the bundle (#712)", {
+  skip_on_cran()
+  fit <- fitrx_parity_cases$plain()
+  dir <- withr::local_tempdir()
+  out <- file.path(dir, "run.fitrx")
+  ferx_save_fit(fit, out)
+  before <- readBin(out, "raw", n = file.size(out))
+  dir.create(file.path(dir, "run_final.ferx"))
+  later <- suppressWarnings(ferx_covariance(fit))
+  expect_error(ferx_save_fit(later, out, write_model = TRUE), "is a directory")
+  expect_identical(readBin(out, "raw", n = file.size(out)), before)
+  expect_setequal(list.files(dir), c("run.fitrx", "run_final.ferx"))
+})
+
 test_that("a failed save leaves what was at the path, and no stray file (#712)", {
   skip_on_cran()
   ex <- ferx_example("warfarin")

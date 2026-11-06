@@ -149,7 +149,8 @@
 #' @param verbose When `TRUE`, the engine prints progress to stderr.
 #'   Default `FALSE`.
 #'
-#' @return The input `fit`, with `cov_matrix`, `cor_matrix`, `se_theta`,
+#' @return A new fit with new bytes, the input `fit` being left as it was, with
+#'   `cov_matrix`, `cor_matrix`, `se_theta`,
 #'   `se_omega`, `se_sigma`, `se_kappa`, `covariance_status`,
 #'   `covariance_method` (the estimator this step ran), `eigenvalues`,
 #'   `condition_number`, `max_abs_correlation` (the largest absolute
@@ -186,7 +187,7 @@ ferx_covariance <- function(fit,
   if (!inherits(fit, "ferx_fit")) {
     stop("`fit` must be a ferx_fit object (from ferx_fit() or ferx_load_fit()).")
   }
-  threads_arg <- .ferx_step_threads(threads, fit)
+  .ferx_step_threads(threads, fit)  # refuses a bad `threads` before the bytes are read
 
   # Normalise + validate covariance_method up-front so a typo surfaces as a
   # clean R condition rather than the engine's "unknown value" further in.
@@ -210,7 +211,9 @@ ferx_covariance <- function(fit,
             !is.na(mu_referencing))) {
     stop("`mu_referencing` must be NULL, TRUE or FALSE.")
   }
-  bundle <- .ferx_fit_bundle(fit, "ferx_covariance")
+  # Everything below reads the fit as its bytes say it is, not the caller's list.
+  fit <- .ferx_fit_canonical(fit, "ferx_covariance")
+  threads_arg <- .ferx_step_threads(threads, fit)
   # Before the model-file checks, so a loaded fit without a layout is refused
   # for that reason even when its bundle had no model file (#531).
   .ferx_refuse_unavailable_levels(fit)
@@ -261,7 +264,7 @@ ferx_covariance <- function(fit,
   # A refusal reaches the caller as `ferx_engine_error` with ferx-core's code
   # when the engine gave it one (#498); see `.ferx_engine_call()`.
   raw <- .ferx_engine_call(ferx_rust_covariance(
-    bundle = bundle,
+    bundle = fit$bundle,
     model_path = model_path,
     data_path = data_path,
     scoring_settings = scoring,

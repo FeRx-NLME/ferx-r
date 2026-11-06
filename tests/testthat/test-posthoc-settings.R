@@ -330,14 +330,6 @@ test_that("S12: a record the engine would refuse is refused by name", {
   expect_error(decode(bad),
                "ferx_covariance: `fit$scoring_settings`: ode_reltol must be a positive finite value, got -1",
                fixed = TRUE)
-  # The same decoder guards the record an explicit argument edits: no serde
-  # error, no "corrupt".
-  w <- ps_fit("w_default", "warfarin")
-  w$scoring_settings$inner_optimizer <- "newton"
-  err <- tryCatch(ferx_covariance(w, mu_referencing = TRUE), error = conditionMessage)
-  expect_match(err, "ferx_covariance: `scoring_settings`: fit option `inner_optimizer`",
-               fixed = TRUE)
-  expect_no_match(err, "corrupt|serde", ignore.case = TRUE)
   # A bundle holding such a record does not load at all.
   expect_error(fitrx_edit_fit(ps_fit("w_default", "warfarin"), function(b) {
     b$scoring_settings$inner_optimizer <- "newton"
@@ -621,25 +613,6 @@ test_that("S16: a missing key is filled as ferx-core's wire fills it, or refused
   }
 })
 
-test_that("S17: an unknown key on a fit in memory is refused by name (#535)", {
-  fit <- ps_fit("w_default", "warfarin")
-  edited <- fit
-  edited$scoring_settings$inner_future <- 1L
-  # The list's record is read only when an explicit argument edits it.
-  err <- tryCatch(ferx_covariance(edited, mu_referencing = TRUE), error = conditionMessage)
-  expect_match(err, 'ferx_covariance: `scoring_settings`: unknown key "inner_future"',
-               fixed = TRUE)
-  # Without the key the fit runs as one that records none.
-  edited$scoring_settings <- NULL
-  expect_no_error(ferx_covariance(edited, mu_referencing = TRUE))
-
-  sfit <- ps_sir_fit(ps_sir_rows[[1L]])
-  sfit$sir_settings$scoring$inner_future <- 1L
-  err <- tryCatch(ferx_sir(sfit), error = conditionMessage)
-  expect_match(err, 'ferx_sir: `sir_settings$scoring`: unknown key "inner_future"',
-               fixed = TRUE)
-})
-
 test_that("S17: ferx_sir(fit, args) on a fit with no SIR record scores under its stage record", {
   skip_on_cran()
   # `run_sir` scores under the SIR record's scoring half before
@@ -650,13 +623,8 @@ test_that("S17: ferx_sir(fit, args) on a fit with no SIR record scores under its
   expect_null(fit$sir_settings)
   ran <- ferx_sir(fit, 300L, 100L, sir_seed = 1L)
   expect_identical(ran$sir_settings$scoring$inner_maxiter, 5L)
-  # The same draws under a SIR record built by hand on the stage record.
-  by_hand <- fit
-  rec <- ferx:::.ferx_default_settings("sir_settings")
-  rec[c("samples", "resamples", "seed")] <- list(300L, 100L, 1)
-  rec$scoring <- fit$scoring_settings
-  by_hand$sir_settings <- rec
-  expect_identical(ps_sir_fields(ran), ps_sir_fields(ferx_sir(by_hand)))
+  # The record it wrote repeats the same draws.
+  expect_identical(ps_sir_fields(ran), ps_sir_fields(ferx_sir(ran)))
   # Premise: under the engine default the draws score differently.
   bare <- ps_without(fit, "scoring_settings")
   expect_false(identical(ps_sir_fields(ferx_sir(bare, 300L, 100L, sir_seed = 1L)),

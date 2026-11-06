@@ -65,11 +65,9 @@
 #' @family simulation
 #' @export
 ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = NULL) {
-  fit_pieces <- validate_fit_for_params(fit)
-  bundle <- .ferx_fit_bundle(fit, "ferx_calc_npde")
-  if (is.null(fit$sdtab) || !is.data.frame(fit$sdtab) || nrow(fit$sdtab) == 0L) {
-    stop("`fit$sdtab` is empty; cannot attach NPDE/NPD. Refit so the fit carries an sdtab.")
-  }
+  # Reject a non-fit before asking it for bytes.
+  validate_fit_for_params(fit)
+  .ferx_fit_bundle(fit, "ferx_calc_npde")
 
   nsim <- as.integer(nsim)
   if (length(nsim) != 1L || is.na(nsim) || nsim <= 0L) {
@@ -84,6 +82,14 @@ ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = 
   }
   if (!is.null(seed) && seed_int < 0L) {
     stop("`seed` must be a non-negative integer (or NULL for the engine default).")
+  }
+
+  # Everything below reads the fit as its bytes say it is, not the caller's list:
+  # diagnostics computed at an edited theta would land on a fit that does not have it.
+  fit <- .ferx_fit_canonical(fit, "ferx_calc_npde")
+  fit_pieces <- validate_fit_for_params(fit)
+  if (is.null(fit$sdtab) || !is.data.frame(fit$sdtab) || nrow(fit$sdtab) == 0L) {
+    stop("`fit$sdtab` is empty; cannot attach NPDE/NPD. Refit so the fit carries an sdtab.")
   }
 
   # A `model =` override keeps its own reader settings and has no recorded
@@ -176,7 +182,7 @@ ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = 
   sdtab <- .ferx_attach_npde(fit$sdtab, npde_tbl,
                              tte_rows = .fitrx_sdtab_blocks(fit)$tte)
   .ferx_fit_with_bundle(
-    fit, ferx_rust_bundle_with_sdtab(bundle, lapply(sdtab, as.numeric))
+    fit, ferx_rust_bundle_with_sdtab(fit$bundle, lapply(sdtab, as.numeric))
   )
 }
 

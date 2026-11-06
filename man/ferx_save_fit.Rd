@@ -14,7 +14,8 @@ conventional \code{.fitrx} extension is appended automatically (so
 \code{"results/run1"} is written as \code{"results/run1.fitrx"});
 \code{\link{ferx_load_fit}} accepts either the bare or the extended
 path. An explicit extension is honoured as given. The bundle replaces the
-file in one step, so a failed save leaves what was at \code{output}.}
+file in one step, after anything else the call writes, so a failed save
+leaves what was at \code{output}.}
 
 \item{include_data}{Logical. When \code{TRUE}, the input NONMEM CSV used
 to fit the model is embedded verbatim inside the archive (as
@@ -54,7 +55,8 @@ line reads and writes: \code{ferx summary run1.fitrx} works on it.
 A fit's bundle (\code{fit$bundle}) is what is saved, not its list: the
 engine wrote it when the fit was made, and \code{\link{ferx_covariance}},
 \code{\link{ferx_sir}} and \code{\link{ferx_calc_npde}} return a new fit with
-new bytes. A change made to the list by hand is not saved. A fit with no
+new bytes. A change made to the list by hand is not saved, and does not reach
+\code{write_model}'s file either. A fit with no
 bundle, such as one from an \code{.rds} written by an older ferx, is refused
 with an error of class \code{ferx_no_bundle_error}: refit it.
 

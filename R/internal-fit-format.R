@@ -1145,7 +1145,10 @@
   # Data passed as a data.frame was read from a session-temporary file; the
   # fit keeps that file's text, so the steps that re-read the data still find
   # it once the file is gone (#419). NULL for a fit of the user's own CSV.
-  result$data_source <- .ferx_data_cache_text(result$data_path)
+  # A file that has become unreadable costs this field, not the fit: a step that
+  # rebuilds a fit has the text already.
+  result$data_source <- tryCatch(.ferx_data_cache_text(result$data_path),
+                                 error = function(e) NULL)
   result$model_hash <- empty_to_null(result$model_hash) %||% NA_character_
   result$data_hash <- empty_to_null(result$data_hash) %||% NA_character_
   # The IOV occasion rule the fit ran with (ferx-core #1783), in the

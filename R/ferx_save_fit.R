@@ -12,7 +12,8 @@
 #' A fit's bundle (\code{fit$bundle}) is what is saved, not its list: the
 #' engine wrote it when the fit was made, and \code{\link{ferx_covariance}},
 #' \code{\link{ferx_sir}} and \code{\link{ferx_calc_npde}} return a new fit with
-#' new bytes. A change made to the list by hand is not saved. A fit with no
+#' new bytes. A change made to the list by hand is not saved, and does not reach
+#' \code{write_model}'s file either. A fit with no
 #' bundle, such as one from an \code{.rds} written by an older ferx, is refused
 #' with an error of class \code{ferx_no_bundle_error}: refit it.
 #'
@@ -46,7 +47,8 @@
 #'   \code{"results/run1"} is written as \code{"results/run1.fitrx"});
 #'   \code{\link{ferx_load_fit}} accepts either the bare or the extended
 #'   path. An explicit extension is honoured as given. The bundle replaces the
-#'   file in one step, so a failed save leaves what was at \code{output}.
+#'   file in one step, after anything else the call writes, so a failed save
+#'   leaves what was at \code{output}.
 #' @param include_data Logical. When \code{TRUE}, the input NONMEM CSV used
 #'   to fit the model is embedded verbatim inside the archive (as
 #'   \code{data.csv}). Requires that the file is still accessible at the
@@ -95,6 +97,10 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
     stop("`write_model` must be TRUE or FALSE.")
   }
   bundle <- .ferx_fit_bundle(fit, "ferx_save_fit")
+  bundles_data <- isTRUE(include_data) || !is.null(fit$data_source)
+  # What goes beside the bytes is read from them too, so a hand edit of the list
+  # cannot make a `_final.ferx` or a data check disagree with the bundle.
+  view <- if (write_model || bundles_data) .ferx_fit_canonical(fit, "ferx_save_fit")
 
   # Default the archive extension to `.fitrx` when the caller passes a bare
   # path with no extension, so `ferx_save_fit(fit, "results/run1")` lands at
@@ -119,22 +125,22 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
       stop("write_model = TRUE would overwrite the fit's own model file ",
            src, "; save the bundle under another name.")
     }
-    updated_model <- .ferx_updated_model_text(fit)
+    updated_model <- .ferx_updated_model_text(view)
   }
 
   # data.csv: when asked, and always for a fit of a data.frame (#419). A bundled
   # copy of the user's own CSV goes when this save did not ask for it.
-  if (isTRUE(include_data) || !is.null(fit$data_source)) {
-    data_path <- .ferx_fit_data_path(fit)
+  if (bundles_data) {
+    data_path <- .ferx_fit_data_path(view)
     if (is.null(data_path) || is.na(data_path) || !file.exists(data_path)) {
-      stop(if (is.null(fit$data_source)) {
+      stop(if (is.null(view$data_source)) {
         "include_data = TRUE but fit$data_path is missing or does not exist."
       } else {
         "The fit's data (fit$data_source) could not be written to a file to bundle."
       })
     }
     bundle <- ferx_rust_bundle_with_data(
-      bundle, .fitrx_fitted_data_bytes(fit, data_path), data_path
+      bundle, .fitrx_fitted_data_bytes(view, data_path), data_path
     )
   } else {
     bundle <- ferx_rust_bundle_without_data(bundle)
@@ -144,16 +150,30 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
   if (!dir.exists(out_abs)) dir.create(out_abs, recursive = TRUE)
   out_abs <- file.path(out_abs, basename(output))
 
-  # Written beside the target and moved onto it, so a failed write never leaves
-  # a truncated bundle at `output`, and an existing file keeps its permissions.
-  staged <- tempfile("fitrx_", tmpdir = dirname(out_abs), fileext = ".tmp")
-  on.exit(unlink(staged), add = TRUE)
-  writeBin(bundle, staged)
-  if (file.exists(out_abs)) Sys.chmod(staged, file.mode(out_abs), use_umask = FALSE)
-  if (!file.rename(staged, out_abs)) {
-    stop(sprintf("failed to move the bundle into place at %s", out_abs))
+  # Both files are written beside their targets before either moves, so a failed
+  # write changes nothing. A target that cannot be replaced is refused first, and
+  # the bundle moves last: whatever goes wrong, a failed save leaves what was at
+  # `output`.
+  targets <- c(if (write_model) model_out_path, out_abs)
+  if (any(dir.exists(targets))) {
+    stop("ferx_save_fit: ", targets[dir.exists(targets)][[1L]],
+         " is a directory, so the save cannot replace it.", call. = FALSE)
   }
-  if (write_model) writeBin(charToRaw(updated_model), model_out_path)
+  staged <- vapply(targets, function(target) {
+    tempfile("fitrx_", tmpdir = dirname(target), fileext = ".tmp")
+  }, character(1L))
+  on.exit(unlink(staged), add = TRUE)
+  if (write_model) writeBin(charToRaw(updated_model), staged[[1L]])
+  writeBin(bundle, staged[[length(staged)]])
+  for (i in seq_along(targets)) {
+    # An existing file keeps its permissions.
+    if (file.exists(targets[[i]])) {
+      Sys.chmod(staged[[i]], file.mode(targets[[i]]), use_umask = FALSE)
+    }
+    if (!file.rename(staged[[i]], targets[[i]])) {
+      stop(sprintf("failed to move the file into place at %s", targets[[i]]))
+    }
+  }
 
   invisible(fit)
 }

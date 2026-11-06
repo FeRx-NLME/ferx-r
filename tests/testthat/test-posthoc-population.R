@@ -209,7 +209,12 @@ test_that("P11: a fit that records no rule falls back to the model file's, or is
   # No rule in the model file and no OCC column: nothing to derive occasions with.
   expect_error(ferx_simulate(tw$model, tw$data, fit = legacy, n_sim = 1L, seed = 1L),
                "records no IOV occasion rule", fixed = TRUE)
-  expect_error(ferx_calc_npde(legacy, nsim = 50L, seed = 1L),
+  # ... and in the bytes, which is what this step reads.
+  no_rule <- fitrx_edit_fit(tw$fit, function(w) {
+    w$iov_occasion <- NULL
+    w
+  })
+  expect_error(ferx_calc_npde(no_rule, nsim = 50L, seed = 1L),
                "records no IOV occasion rule", fixed = TRUE)
   # The model file's rule is used, and the result says it was a guess.
   file_model <- pp_iov_model("  iov_occasion = dose")

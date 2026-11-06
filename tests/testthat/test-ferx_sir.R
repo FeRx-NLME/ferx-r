@@ -10,21 +10,6 @@ sir_cov_skip <- "covariance step did not converge - skipping"
 
 # The step reads the fit's bytes, so a fit in another state is edited there.
 # A fit as one made before #462 recorded its selection: neither field.
-rs_legacy <- function(fit) {
-  fitrx_edit_fit(fit, function(w) {
-    w$reader_settings <- NULL
-    w$population_fingerprint <- NULL
-    w
-  })
-}
-
-
-
-
-
-
-
-
 
 test_that("ferx_sir rejects fits without a covariance matrix", {
   fit <- warfarin_fit()  # covariance = FALSE
@@ -770,8 +755,9 @@ test_that("ferx_sir sets sir_seed_used to the seed of its own run", {
 # in `if` with "missing value where TRUE/FALSE needed" (#536). The knobs are
 # checked before anything reads the fit, so a bare ferx_fit is enough.
 test_that("ferx_sir refuses out-of-range counts and seeds with its own message (#536)", {
-  # Bytes the step never parses: the checks under test come first.
+  # Bytes the step never parses: the checks under test come first, or read the list.
   bare <- structure(list(bundle = as.raw(1)), class = "ferx_fit")
+  testthat::local_mocked_bindings(.ferx_fit_canonical = function(fit, who) fit)
   for (bad in list(3e9, Inf, -Inf, NaN, NA_real_, 0, 2.5, c(4, 5), "4")) {
     expect_error(ferx_sir(bare, sir_samples = bad),
                  "`sir_samples` must be NULL or a single positive integer",

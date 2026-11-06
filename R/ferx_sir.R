@@ -190,7 +190,7 @@ ferx_sir <- function(fit,
   if (!inherits(fit, "ferx_fit")) {
     stop("`fit` must be a ferx_fit object (from ferx_fit() or ferx_load_fit()).")
   }
-  threads_arg <- .ferx_step_threads(threads, fit)
+  .ferx_step_threads(threads, fit)  # refuses a bad `threads` before the bytes are read
 
   # Validate the SIR knobs up-front so user errors surface as clean R
   # conditions rather than as the engine's "weighted sampler failed"
@@ -226,7 +226,9 @@ ferx_sir <- function(fit,
         !(is.numeric(sir_df) && length(sir_df) == 1L && !is.na(sir_df) && sir_df >= 1)) {
     stop("`sir_df` must be NULL or a single number >= 1 (`Inf` for a normal proposal).")
   }
-  bundle <- .ferx_fit_bundle(fit, "ferx_sir")
+  # Everything below reads the fit as its bytes say it is, not the caller's list.
+  fit <- .ferx_fit_canonical(fit, "ferx_sir")
+  threads_arg <- .ferx_step_threads(threads, fit)
   # Before the model-file checks, so a loaded fit without a layout is refused
   # for that reason even when its bundle had no model file (#531).
   .ferx_refuse_unavailable_levels(fit)
@@ -305,7 +307,7 @@ ferx_sir <- function(fit,
   # A refusal reaches the caller as `ferx_engine_error` with ferx-core's code
   # when the engine gave it one (#498); see `.ferx_engine_call()`.
   new_bundle <- .ferx_engine_call(ferx_rust_sir(
-    bundle = bundle,
+    bundle = fit$bundle,
     model_path = model_path,
     data_path = data_path,
     sir_settings = record_args$sir_settings,

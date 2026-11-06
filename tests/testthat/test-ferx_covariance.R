@@ -10,14 +10,6 @@ cov_skip <- "covariance step did not converge - skipping"
 
 # The step reads the fit's bytes, so a fit in another state is edited there.
 # A fit as one made before #462 recorded its selection: neither field.
-rs_legacy <- function(fit) {
-  fitrx_edit_fit(fit, function(w) {
-    w$reader_settings <- NULL
-    w$population_fingerprint <- NULL
-    w
-  })
-}
-
 # `fit` with CSV entries of its bundle rewritten: `edits` maps an entry's name
 # to a function of its rows, read as text so the other cells stay as written.
 fitrx_edit_csvs <- function(fit, edits) {
@@ -228,14 +220,18 @@ test_that("ferx_covariance replays the fit's own covariance-step settings", {
   # The model file's values come from the model file, not from R's record of
   # it: a fit without `call_settings` / `model_file_settings` (a bundle
   # ferx-core wrote) replays the file's step too.
-  bare <- fits$file
-  bare$call_settings <- list()
-  bare$model_file_settings <- list()
+  bare <- fitrx_edit_extras(fits$file, function(r) {
+    r$call_settings <- list()
+    r$model_file_settings <- list()
+    r
+  })
   expect_identical(se(q(ferx_covariance(bare))), se(fits$file))
   # ... and the call's override of it is R's to hand back: without the record
   # the call fit replays at the model file's (here: the defaults) and moves.
-  bare <- fits$call
-  bare$call_settings <- list()
+  bare <- fitrx_edit_extras(fits$call, function(r) {
+    r$call_settings <- list()
+    r
+  })
   expect_false(isTRUE(all.equal(se(q(ferx_covariance(bare))), se(fits$call))))
 })
 
@@ -882,15 +878,6 @@ test_that("a malformed reader_settings is refused by name, not a panic (#462)", 
                "expected struct ReaderSettings", fixed = TRUE)
   expect_error(fitrx_edit_fit(fit, garbled("population_fingerprint")),
                "expected struct PopulationFingerprint", fixed = TRUE)
-  # ferx_calc_npde() reads them from the list, as JSON text.
-  bad <- fit
-  bad$reader_settings <- "{not json"
-  expect_error(ferx_calc_npde(bad, nsim = 20L, seed = 1L),
-               "ferx_calc_npde: `fit$reader_settings`", fixed = TRUE)
-  bad <- fit
-  bad$population_fingerprint <- "{not json"
-  expect_error(ferx_calc_npde(bad, nsim = 20L, seed = 1L),
-               "ferx_calc_npde: `fit$population_fingerprint`", fixed = TRUE)
 })
 
 test_that("a fit records a `settings =` iov_column in its reader settings (#462)", {

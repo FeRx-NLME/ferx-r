@@ -13,6 +13,19 @@ fitrx_edit_fit <- function(fit, edit = identity, drop = character()) {
   ferx:::.ferx_fit_with_bundle(fit, readBin(out, "raw", n = file.size(out)))
 }
 
+# `fit` with its bytes' `interface_extras.json` edited: `edit` takes and returns this
+# interface's fields (`call_settings`, `model_file_settings`, ...) as lists.
+fitrx_edit_extras <- function(fit, edit) {
+  text <- ferx:::ferx_rust_load_fit(fit$bundle)$interface_extras
+  extras <- jsonlite::parse_json(text, simplifyVector = FALSE)
+  extras$r <- edit(extras$r)
+  json <- jsonlite::toJSON(extras, auto_unbox = TRUE, digits = I(17), null = "null",
+                           na = "null")
+  ferx:::.ferx_fit_with_bundle(
+    fit, ferx:::ferx_rust_bundle_with_extras(fit$bundle, as.character(json))
+  )
+}
+
 # A bundle's fit.json, as lists, from its path or its bytes.
 fitrx_fit_json <- function(path) {
   if (is.raw(path)) {

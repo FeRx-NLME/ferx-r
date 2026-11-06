@@ -43,7 +43,8 @@ the result, only the resources the step uses. The returned fit's
 \code{n_threads_used} reports the width this step ran on.}
 }
 \value{
-The input \code{fit}, with \code{cov_matrix}, \code{cor_matrix}, \code{se_theta},
+A new fit with new bytes, the input \code{fit} being left as it was, with
+\code{cov_matrix}, \code{cor_matrix}, \code{se_theta},
 \code{se_omega}, \code{se_sigma}, \code{se_kappa}, \code{covariance_status},
 \code{covariance_method} (the estimator this step ran), \code{eigenvalues},
 \code{condition_number}, \code{max_abs_correlation} (the largest absolute

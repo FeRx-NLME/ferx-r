@@ -123,22 +123,16 @@ tl_with_cov <- function(fit) {
   })
 }
 
-# Two ways level bindings a model cannot lay out reach a post-hoc step. Read
-# back as a fit, the bytes lose their layout at the load, which warns, and R
-# refuses the step with the load's reason (`tl_loaded_bad()`). Under a list that
-# still has its layout, R lets the step run, and the engine reads the bindings
-# from the bytes and answers itself, with its code (`tl_bytes_bad()`).
+# Level bindings a model cannot lay out reach a post-hoc step in the bytes. They lose
+# their layout when the bytes are read, which warns on a load, and R refuses the step
+# with that reason, whatever the caller's list says.
 tl_loaded_bad <- function(fit, edit) {
   suppressWarnings(fitrx_edit_fit(fit, edit),
                    classes = "ferx_levels_unavailable_warning")
 }
-tl_bytes_bad <- function(fit, edit) {
-  fit$bundle <- tl_loaded_bad(fit, edit)$bundle
-  fit
-}
 
 # The theta levels of `fit`'s bytes put through `edit` (the wire's block record,
-# by block), for tl_loaded_bad() / tl_bytes_bad().
+# by block), for tl_loaded_bad().
 tl_edit_block <- function(block, edit) {
   function(w) {
     w$data_bindings$levels[[block]] <- edit(w$data_bindings$levels[[block]])
@@ -160,24 +154,22 @@ tl_step_errors <- function(fit) {
   )
 }
 
-# `edit` refused both ways by both steps: `engine` is the step's text, coded, and
-# `loaded` the load's, carried by the refusal R raises itself.
+# `edit` refused by both steps, whether the list has seen it or not, with the load's
+# text `loaded`. `engine` is what the layout's own refusal says.
 tl_expect_refused <- function(fit, edit, engine, loaded = engine) {
-  errs <- tl_step_errors(tl_bytes_bad(fit, edit))
-  for (who in names(errs)) {
-    e <- errs[[who]]
-    expect_s3_class(e, "ferx_engine_error")
-    expect_identical(e$code, "E_THETA_LEVEL_BINDING", info = who)
-    msg <- if (inherits(e, "condition")) conditionMessage(e) else ""
-    expect_match(msg, engine, fixed = TRUE, info = who)
-    expect_no_match(msg, "is not contiguous", fixed = TRUE, info = who)
-  }
-  errs <- tl_step_errors(tl_loaded_bad(fit, edit))
-  for (who in names(errs)) {
-    e <- errs[[who]]
-    expect_s3_class(e, "ferx_levels_unavailable_error")
-    msg <- if (inherits(e, "condition")) conditionMessage(e) else ""
-    expect_match(msg, loaded, fixed = TRUE, info = who)
+  bad <- tl_loaded_bad(fit, edit)
+  # The caller's list saying otherwise changes nothing: the step reads the bytes.
+  good_list <- fit
+  good_list$bundle <- bad$bundle
+  for (x in list(bad, good_list)) {
+    errs <- tl_step_errors(x)
+    for (who in names(errs)) {
+      e <- errs[[who]]
+      expect_s3_class(e, "ferx_levels_unavailable_error")
+      msg <- if (inherits(e, "condition")) conditionMessage(e) else ""
+      expect_match(msg, loaded, fixed = TRUE, info = who)
+      expect_no_match(msg, "is not contiguous", fixed = TRUE, info = who)
+    }
   }
 }
 
@@ -414,19 +406,18 @@ test_that("T5b: from-fit level refusals carry E_THETA_LEVEL_BINDING on every pat
            "  theta VSHIFT[STUDY](0.0, -5.0, 5.0)"),
     "TVCL + PLACEBO", v = "TVV * exp(VSHIFT)"
   ), ".ferx")
-  fit <- tl_bytes_bad(tl_with_cov(tl_fit(model, tl_write(tl_data, ".csv"))),
-                      function(w) {
-                        w$data_bindings$levels$VSHIFT <- NULL
-                        w
-                      })
-  for (who in c("ferx_covariance", "ferx_sir")) {
-    msg <- coded(if (who == "ferx_sir") {
-      ferx_sir(fit, sir_samples = 20L, sir_resamples = 10L)
-    } else {
-      ferx_covariance(fit)
-    }, who)
-    expect_match(msg, "the fit's level bindings carry no `VSHIFT`", fixed = TRUE,
-                 info = who)
+  fit <- tl_loaded_bad(tl_with_cov(tl_fit(model, tl_write(tl_data, ".csv"))),
+                       function(w) {
+                         w$data_bindings$levels$VSHIFT <- NULL
+                         w
+                       })
+  # The steps read the bytes, so they refuse as for any fit loaded from them, with
+  # the reason the layout gave.
+  errs <- tl_step_errors(fit)
+  for (who in names(errs)) {
+    expect_s3_class(errs[[who]], "ferx_levels_unavailable_error")
+    expect_match(conditionMessage(errs[[who]]),
+                 "the fit's level bindings carry no `VSHIFT`", fixed = TRUE, info = who)
   }
 })
 

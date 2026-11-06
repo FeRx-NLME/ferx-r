@@ -187,6 +187,19 @@ ferx_load_fit <- function(path) {
   result
 }
 
+# `fit` as its bytes say it is, for a step to read in place of the caller's list:
+# a hand edit of the list reaches nothing that starts here. Refuses a fit with no
+# bytes. Only what the bytes do not hold stays the list's: see
+# `.ferx_fit_with_bundle()`. A level layout the engine cannot make is not warned
+# about again; the view records it, and the step refuses it by that record.
+.ferx_fit_canonical <- function(fit, who) {
+  bundle <- .ferx_fit_bundle(fit, who)
+  withCallingHandlers(
+    .ferx_fit_with_bundle(fit, bundle),
+    ferx_levels_unavailable_warning = function(w) invokeRestart("muffleWarning")
+  )
+}
+
 # The keys of `interface_extras.json` a loaded fit takes as they are.
 .FITRX_INTERFACE_KEYS <- c("call_settings", "model_file_settings", "data_name",
                            "model_name", "gradient", "gradient_used")

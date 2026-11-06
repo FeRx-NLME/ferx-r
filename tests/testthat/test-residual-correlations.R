@@ -155,6 +155,16 @@ without_rho <- function(fit) {
   fit
 }
 
+# The steps that return a fit read its bytes, where such a fit comes only by an edit.
+without_rho_bytes <- function(fit) {
+  fitrx_edit_fit(fit, function(w) {
+    w$sigma$residual_correlations <- list()
+    w$sigma$residual_correlation_fixed <- list()
+    w$sigma$se_residual_correlations <- NULL
+    w
+  })
+}
+
 declared_rho <- 0.10 / sqrt(0.04 * 0.30)
 
 # Assert that `expr` raises a message matching `regexp`, and return that
@@ -168,13 +178,7 @@ refusal <- function(expr, regexp) {
 
 test_that("covariance and SIR refuse a free fit without its fitted rho", {
   skip_on_cran()
-  # The steps read the bytes, where such a fit reaches them only by an edit.
-  fit <- fitrx_edit_fit(rho_case()$fit, function(w) {
-    w$sigma$residual_correlations <- list()
-    w$sigma$residual_correlation_fixed <- list()
-    w$sigma$se_residual_correlations <- NULL
-    w
-  })
+  fit <- without_rho_bytes(rho_case()$fit)
 
   expect_error(ferx_covariance(fit), "^ferx_covariance: the model estimates")
   expect_error(ferx_sir(fit, sir_samples = 50L, sir_resamples = 20L,
@@ -195,7 +199,7 @@ test_that("predict, simulate and NPDE refuse a free fit without its fitted rho",
   expect_error(ferx_simulate(case$model, case$data, n_sim = 1L, seed = 1L,
                              fit = fit),
                "^Fit error: the model estimates")
-  expect_error(ferx_calc_npde(fit, nsim = 20L, seed = 1L,
+  expect_error(ferx_calc_npde(without_rho_bytes(case$fit), nsim = 20L, seed = 1L,
                               model = case$model, data = case$data),
                "^Fit error: the model estimates")
 })
@@ -303,8 +307,10 @@ test_that("ferx_calc_npde draws block_sigma residuals at the fitted rho", {
   expect_lt(rho, -0.3)
 
   npde_at <- function(r) {
-    f <- fit
-    f$residual_correlations$rho <- r
+    f <- fitrx_edit_fit(fit, function(w) {
+      w$sigma$residual_correlations[[1L]]$rho <- r
+      w
+    })
     ferx_calc_npde(f, nsim = 200L, seed = 1L)$sdtab
   }
   at_fit      <- npde_at(rho)
