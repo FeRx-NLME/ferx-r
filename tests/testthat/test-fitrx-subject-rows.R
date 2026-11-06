@@ -348,6 +348,61 @@ test_that("an [output] MIXNUM column stays blank on binary rows rebuilt from cor
   expect_identical(loaded$sdtab$MIXNUM, fit$sdtab$MIXNUM)
 })
 
+# The bundled pktte_joint model with two CL classes and the same per-subject
+# MIXNUM covariate in [output]: one TTE row per subject, after the Gaussian
+# rows. The time-to-event half of mixnum_output_case().
+mixnum_output_tte_case <- local({
+  cache <- new.env(parent = emptyenv())
+  function() {
+    if (is.null(cache$fit)) {
+      ex <- ferx_example("pktte_joint")
+      d <- utils::read.csv(ex$data, stringsAsFactors = FALSE)
+      ids <- unique(d$ID)
+      d$MIXNUM <- rep_len(1:2, length(ids))[match(d$ID, ids)]
+      data <- tempfile(fileext = ".csv")
+      utils::write.csv(d, data, row.names = FALSE, quote = FALSE)
+
+      m <- readLines(ex$model)
+      cl <- "  CL   = TVCL * exp(ETA_CL)"
+      stopifnot(sum(m == cl) == 1L)
+      m[m == cl] <- "  CL   = if (MIXNUM == 1) TVCL * exp(ETA_CL) else 3 * TVCL * exp(ETA_CL)"
+      at <- grep("^\\s*omega ", m)[1L]
+      m <- append(m, "  theta MIXL(0.0, -10.0, 10.0)", after = at - 1L)
+      m <- append(m, c("[mixture]", "  nsub = 2", "  logit(1) = MIXL", ""),
+                  after = which(m == "[individual_parameters]") - 1L)
+      m <- c(m, "", "[output]", "  MIXNUM")
+      model <- tempfile(fileext = ".ferx")
+      writeLines(m, model)
+      cache$fit <- muffle_mixl_lint(ferx_fit(model, data, covariance = FALSE,
+                                             verbose = FALSE))
+    }
+    cache$fit
+  }
+})
+
+test_that("an [output] MIXNUM column stays blank on TTE rows rebuilt from core's", {
+  skip_if(!nzchar(Sys.which("zip")), "needs a zip binary")
+  fit <- mixnum_output_tte_case()
+  summ <- fit$subject_summary
+  n_gauss <- sum(summ$n_obs)
+  tte <- n_gauss + seq_len(sum(summ$n_obs_tte))
+  expect_identical(summ$n_obs_tte, rep(1L, nrow(summ)))
+  expect_identical(nrow(fit$sdtab), max(tte))
+  expect_setequal(unique(fit$sdtab$MIXNUM[seq_len(n_gauss)]), c(1, 2))
+  expect_true(all(is.nan(fit$sdtab$MIXNUM[tte])))
+
+  path <- withr::local_tempfile(fileext = ".fitrx")
+  ferx_save_fit(fit, path)
+  status <- utils::zip(path, "sdtab_endpoint_rows.csv", flags = "-qd")
+  skip_if(status != 0L, "zip -d failed")
+  expect_false("sdtab_endpoint_rows.csv" %in% utils::unzip(path, list = TRUE)$Name)
+  expect_true("MIXNUM" %in% names(bundle_csv(path, "predictions.csv")))
+
+  loaded <- suppressWarnings(ferx_load_fit(path))
+  expect_identical(nrow(loaded$sdtab), nrow(fit$sdtab))
+  expect_identical(loaded$sdtab$MIXNUM, fit$sdtab$MIXNUM)
+})
+
 test_that("ebes.csv puts ofv_contribution and n_obs before a mixture's columns (#561)", {
   # ferx-core reads the two by position right after the etas, and MIXEST /
   # PMIX_* by name; a reloaded mixture bundle carries those in fit$ebe_etas.
