@@ -430,6 +430,23 @@ test_that("an untraced job leaves no trace in the bytes (#712)", {
   expect_bytes_agree(out, "untraced")
 })
 
+test_that("a rewrite does not write through a planted temp path (#712)", {
+  skip_on_cran()
+  skip_on_os("windows")
+  fit <- fitrx_parity_cases$trace()
+  dir <- withr::local_tempdir()
+  victim <- withr::local_tempfile(lines = "untouched")
+  # Every name of the predictable scheme this process could have reached.
+  planted <- file.path(dir, sprintf("ferx_bundle_%d_%d.fitrx", Sys.getpid(), 0:4999))
+  expect_true(all(file.symlink(victim, planted)))
+  withr::local_envvar(TMPDIR = dir)
+  bytes <- ferx:::ferx_rust_bundle_without_trace(fit$bundle)
+  expect_false("trace.csv" %in% fitrx_entries(bytes))
+  expect_identical(readLines(victim), "untouched")
+  # The private directory goes with the call.
+  expect_setequal(list.files(dir, all.files = TRUE, no.. = TRUE), basename(planted))
+})
+
 # The CLI is ferx-core's, so CI has it only when pointed at one: FERX_CLI, else
 # `ferx` on the PATH.
 fitrx_cli <- function() {

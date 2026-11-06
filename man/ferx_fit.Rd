@@ -1214,7 +1214,7 @@ row after the Gaussian and discrete rows, with \code{COXSNELL},
 subject's EBE (\code{DV} is the event indicator, \code{PRED},
 \code{IPRED} and the Gaussian residuals are \code{NaN}); those four
 columns are \code{NaN} on every other row, and absent without a TTE
-endpoint. \code{ferx_save_fit()} does not keep the TTE rows.
+endpoint. \code{ferx_save_fit()} keeps the TTE rows.
 sdtab carries no ETA columns: it is per-observation, and an EBE is one
 value per subject. Naming an eta in \code{[output]} therefore does not
 add a column - the fit warns that the declaration was ignored. Use

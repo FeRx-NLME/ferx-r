@@ -3290,19 +3290,17 @@ fn rewritten_bundle(
     read: &BundleFit,
     original: &[u8],
 ) -> std::result::Result<Vec<u8>, String> {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static NEXT: AtomicU64 = AtomicU64::new(0);
     let mut result = writable_fit(result).into_owned();
     map_subject_ids(&mut result, &|id| {
         id.replace('\n', &ESCAPED_NEWLINE.to_string())
             .replace('\r', &ESCAPED_RETURN.to_string())
     });
-    // Core's bundle-based save writes to a path only.
-    let path = std::env::temp_dir().join(format!(
-        "ferx_bundle_{}_{}.fitrx",
-        std::process::id(),
-        NEXT.fetch_add(1, Ordering::Relaxed)
-    ));
+    // Core's bundle-based save writes to a path only, and follows a symlink there, so
+    // the path is in a new directory only this user can enter, under a name nobody can
+    // guess: a predictable one in a shared temp directory would let another local user
+    // aim the write at any file this process can write. Dropped, it goes with the file.
+    let dir = tempfile::tempdir().map_err(|e| format!("cannot create a temp directory: {e}"))?;
+    let path = dir.path().join("bundle.fitrx");
     let saved = ferx_core::io::fitrx::save_fit_from_bundle(
         &result,
         &read.for_core,
@@ -3311,7 +3309,6 @@ fn rewritten_bundle(
     )
     .map_err(|e| e.to_string())
     .and_then(|()| std::fs::read(&path).map_err(|e| e.to_string()));
-    let _ = std::fs::remove_file(&path);
     let bytes = saved?;
     let mut changes = HashMap::new();
     for name in ["predictions.csv", ENDPOINT_ROWS_ENTRY] {
