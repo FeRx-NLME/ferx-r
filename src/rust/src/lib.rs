@@ -3509,16 +3509,11 @@ fn recorded_rows(
         }
     } else if fit.subjects.iter().any(|s| !s.discrete_rows.is_empty() || has_tte_rows(s)) {
         // The discrete and time-to-event rows below are filled as core's
-        // `append_discrete_rows` / `append_tte_rows` fill them. Core reads MIXNUM from
-        // the population, which a bundle need not carry; it is one value per subject,
-        // so it is taken from the subject's Gaussian rows.
-        let mut mixnum = vec![f64::NAN; fit.subjects.len()];
-        if let Some(m) = column(&cols, "MIXNUM") {
-            // `positions` covers the Gaussian rows, which are all `cols` holds so far.
-            for (&si, &k) in positions.iter().zip(&cols[m].1) {
-                mixnum[si] = k;
-            }
-        }
+        // `append_discrete_rows` / `append_tte_rows` fill them. Core's sdtab also
+        // fills MIXNUM there, from `Population::simulated_mixnum`, which only a fit of
+        // data drawn from a `[simulation]` block has; a fit from a data file, every
+        // one this package makes, has none, so a MIXNUM column here is the user's
+        // `[output]` column and is blank on these rows, as every `[output]` column is.
         if column(&cols, "CMT").is_none() {
             // Each Gaussian row's compartment, as core's sdtab takes it from the
             // data's `obs_cmts`; 1, core's own fallback, without the data.
@@ -3549,7 +3544,6 @@ fn recorded_rows(
                         "IPRED" => d.ipred,
                         "IWRES" => d.iwres,
                         "EBE_OFV" => sr.ofv_contribution,
-                        "MIXNUM" => mixnum[si],
                         _ => f64::NAN,
                     });
                 }
@@ -3574,7 +3568,6 @@ fn recorded_rows(
                             "TIME" => t.time,
                             "DV" => t.dv,
                             "EBE_OFV" => sr.ofv_contribution,
-                            "MIXNUM" => mixnum[si],
                             "COXSNELL" => t.coxsnell,
                             "MARTINGALE" => t.martingale,
                             "DEVIANCE" => t.deviance,
