@@ -62,9 +62,12 @@ if [ "$mode" = attestations ]; then
   expect_provenance=no
   case "$mediatype" in
     *image.index*|*manifest.list*)
-      if docker buildx imagetools inspect "$image" \
-           --format '{{range .Manifest.Manifests}}{{with .Platform}}{{.OS}}{{end}}{{println}}{{end}}' 2>/dev/null \
-           | grep -qx unknown; then
+      # A failed listing is "could not read", never "no provenance expected":
+      # that would let an unreadable provenance ({}) pass as clean.
+      platforms="$(docker buildx imagetools inspect "$image" \
+           --format '{{range .Manifest.Manifests}}{{with .Platform}}{{.OS}}{{end}}{{println}}{{end}}' 2>/dev/null)" \
+        || { echo "SECRET-SCAN: could not list the manifests of $image" >&2; exit 2; }
+      if printf '%s\n' "$platforms" | grep -qx unknown; then
         expect_provenance=yes
       fi ;;
   esac
