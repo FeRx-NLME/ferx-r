@@ -5,18 +5,28 @@
 # license banners. Exits 1 with every hit listed, 0 when clean.
 #
 #   tools/scan-image-secrets.sh <image>
+#   tools/scan-image-secrets.sh --attestations <registry ref>
 #
-# Run by .github/workflows/docker.yml on every image it builds (both
-# Dockerfiles), before anything is pushed. It looks at three places:
+# .github/workflows/docker.yml runs it on every image it builds (both
+# Dockerfiles) before anything is pushed, and again on the exact image it
+# pushed (pulled back by digest) before any tag points at it. An image scan
+# looks at three places:
 #   1. the image config: environment variables and labels;
 #   2. the build history (every RUN/ENV/ARG line baked into the layers);
 #   3. the filesystem, as root, outside /proc, /sys and /dev.
 # The CA bundles every base image carries (/etc/ssl/certs,
 # /usr/share/ca-certificates) are public certificates, not keys: they are not
 # flagged, because the key check reads file content (PRIVATE KEY), not names.
+#
+# --attestations scans what a registry publishes next to the image: the
+# provenance (build args, the Dockerfile, build metadata) and SBOM
+# attestations of a pushed index. `docker pull` never fetches those, so an
+# image scan alone would not see them. Needs buildx and registry access.
 set -eu
 
-image="${1:?usage: tools/scan-image-secrets.sh <image>}"
+mode=image
+if [ "${1:-}" = "--attestations" ]; then mode=attestations; shift; fi
+image="${1:?usage: tools/scan-image-secrets.sh [--attestations] <image>}"
 hits=0
 report() { echo "SECRET-SCAN: $*" >&2; hits=1; }
 
@@ -35,6 +45,21 @@ redact() {
   sed -E 's/(gh[pousr]_|github_pat_|AKIA|xox[baprs]-)[A-Za-z0-9_-]+/\1<redacted>/g;
           s/((TOKEN|PAT|KEY|PASSWORD|PASSWD|SECRET|LICENSE)=)[^[:space:]"'"'"']+/\1<redacted>/g'
 }
+
+if [ "$mode" = attestations ]; then
+  # A secret-named key with a non-empty value, as JSON (provenance records
+  # build args as "build-arg:NAME": "value", not NAME=value).
+  JSON_ASSIGN_RE='"(build-arg:)?(GITHUB_TOKEN|GH_TOKEN|GITHUB_PAT|NPM_TOKEN|AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN|PASSWORD|PASSWD|SECRET|API_KEY|NONMEM_LICENSE|NMLICENSE)"[[:space:]]*:[[:space:]]*"[^"]'
+  att="$(docker buildx imagetools inspect "$image" --format '{{json .Provenance}}{{println}}{{json .SBOM}}')" \
+    || { echo "SECRET-SCAN: could not read the attestations of $image" >&2; exit 2; }
+  if printf '%s\n' "$att" | grep -Eq "$TOKEN_RE|$PEM_RE|$ASSIGN_RE|$JSON_ASSIGN_RE"; then
+    report "attestations (provenance/SBOM) of $image:"
+    printf '%s\n' "$att" | grep -Eo ".{0,40}($TOKEN_RE|$PEM_RE|$ASSIGN_RE|$JSON_ASSIGN_RE).{0,20}" \
+      | redact | sed -E 's/("(build-arg:)?[A-Z_]+"[[:space:]]*:[[:space:]]*")[^"]+/\1<redacted>/g; s/^/  /' >&2
+  fi
+  [ "$hits" -eq 0 ] && echo "secret scan: attestations of $image are clean (provenance, SBOM)"
+  exit "$hits"
+fi
 
 # 1. Config: environment and labels.
 config="$(docker image inspect --format '{{range .Config.Env}}{{println .}}{{end}}{{range $k, $v := .Config.Labels}}{{$k}}={{$v}}{{println}}{{end}}' "$image")"

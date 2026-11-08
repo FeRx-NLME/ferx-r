@@ -96,6 +96,7 @@ jobs:
       # Build once into the local daemon so the image can be smoke-tested
       # before anything is published.
       - name: Build
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -143,33 +144,85 @@ jobs:
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
 
       # The push above is a cache rebuild, not the ferx-r:smoke image scanned
-      # earlier. Pull the bytes that were actually pushed (by digest, still
-      # untagged) and scan those, so "what was scanned" and "what is
-      # published" are provably the same image. Runs before the digest is
-      # handed to the publish job: a failure here means no tag ever points at
-      # it.
+      # earlier. The steps below scan what was actually pushed, before the
+      # digest is handed to the publish job: a failure means no tag ever points
+      # at it. The pushed digest is an index holding the platform image and
+      # its attestation manifest; GHCR lists each as its own package version.
+      - name: Resolve the pushed image
+        id: resolve
+        if: github.event_name == 'push'
+        env:
+          INDEX: ${{ steps.push.outputs.digest }}
+          SCANNED: ${{ steps.build.outputs.digest }}
+        run: |
+          listing="$(docker buildx imagetools inspect "$IMAGE@$INDEX" \
+            --format '{{range .Manifest.Manifests}}{{.Digest}} {{with .Platform}}{{.OS}}/{{.Architecture}}{{end}}{{println}}{{end}}')"
+          echo "$listing"
+          platform_manifest="$(printf '%s\n' "$listing" | awk -v p="${{ matrix.platform }}" '$2 == p {print $1; exit}')"
+          if [ -z "$platform_manifest" ]; then
+            # Not an index (no attestations): the pushed digest is the image.
+            platform_manifest="$INDEX"
+          fi
+          children="$(printf '%s\n' "$listing" | awk 'NF {print $1}' | tr '\n' ' ')"
+          echo "platform_manifest=$platform_manifest" >> "$GITHUB_OUTPUT"
+          echo "children=$children" >> "$GITHUB_OUTPUT"
+          if [ "$platform_manifest" = "$SCANNED" ]; then
+            echo "The pushed platform image $platform_manifest is byte-identical to the scanned ferx-r:smoke."
+          else
+            echo "::notice::Pushed platform image $platform_manifest differs from the scanned ferx-r:smoke ($SCANNED); its own scan below decides."
+          fi
+
+      # Pulling is not scanning: a registry hiccup must not be mistaken for a
+      # failed scan (which deletes the image), so it gets its own step and
+      # retries.
+      - name: Pull the pushed image
+        if: github.event_name == 'push'
+        env:
+          REF: ${{ env.IMAGE }}@${{ steps.resolve.outputs.platform_manifest }}
+        run: |
+          for attempt in 1 2 3; do
+            docker pull "$REF" && exit 0
+            echo "pull attempt $attempt failed; retrying"; sleep 20
+          done
+          exit 1
+
       - name: Secret scan of the pushed image
         id: pushed-scan
         if: github.event_name == 'push'
-        run: |
-          ref="${{ env.IMAGE }}@${{ steps.push.outputs.digest }}"
-          docker pull --platform "${{ matrix.platform }}" "$ref"
-          tools/scan-image-secrets.sh "$ref"
+        run: tools/scan-image-secrets.sh "$IMAGE@${{ steps.resolve.outputs.platform_manifest }}"
 
-      # If that scan failed, the untagged image is still in the registry, where
-      # anyone could pull it by digest once the package is public. Delete it.
+      # Published next to the image but never pulled: provenance (build args,
+      # Dockerfile, build metadata) and SBOM.
+      - name: Secret scan of the attestations
+        id: attestation-scan
+        if: github.event_name == 'push'
+        run: tools/scan-image-secrets.sh --attestations "$IMAGE@${{ steps.push.outputs.digest }}"
+
+      # After a failed scan the untagged index, its platform image and its
+      # attestation are still in the registry, where anyone could pull them by
+      # digest once the package is public. Delete all of them.
       - name: Delete the pushed image after a failed scan
-        if: failure() && steps.pushed-scan.outcome == 'failure'
+        if: >-
+          failure() && (steps.pushed-scan.outcome == 'failure' ||
+                        steps.attestation-scan.outcome == 'failure')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DIGEST: ${{ steps.push.outputs.digest }}
+          INDEX: ${{ steps.push.outputs.digest }}
+          CHILDREN: ${{ steps.resolve.outputs.children }}
         run: |
-          id="$(gh api --paginate "/orgs/FeRx-NLME/packages/container/ferx-r/versions" \
-                  --jq ".[] | select(.name == \"$DIGEST\") | .id")"
-          if [ -n "$id" ] && gh api -X DELETE "/orgs/FeRx-NLME/packages/container/ferx-r/versions/$id"; then
-            echo "Deleted $DIGEST (package version $id) after its secret scan failed."
-          else
-            echo "::error title=Delete it by hand::$DIGEST failed its secret scan and could not be deleted automatically. Remove it in the package settings now."
+          versions="$(gh api --paginate "/orgs/FeRx-NLME/packages/container/ferx-r/versions" \
+                        --jq '.[] | "\(.name) \(.id)"')" || versions=""
+          left=""
+          for digest in $INDEX $CHILDREN; do
+            id="$(printf '%s\n' "$versions" | awk -v d="$digest" '$1 == d {print $2; exit}')"
+            if [ -n "$id" ] && gh api -X DELETE "/orgs/FeRx-NLME/packages/container/ferx-r/versions/$id"; then
+              echo "Deleted $digest (package version $id)."
+            else
+              left="$left $digest"
+            fi
+          done
+          if [ -n "$left" ]; then
+            echo "::error title=Delete these by hand::A pushed image failed its secret scan and these versions could not be deleted automatically:$left. Remove them in the package settings now."
           fi
 
       - name: Export digest
