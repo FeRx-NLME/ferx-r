@@ -11,4 +11,13 @@ src/entrypoint.o
 inst/doc/
 docs/
 Dockerfile
+Dockerfile.slim
+.claude/
+.github/
+src/rust/.cargo/
+src/rust/vendor/
+src/rust/vendor.tar.xz
+src/rust/rust-toolchain.toml
 .dockerignore
+*.Rcheck/
+*.tar.gz

@@ -1,9 +1,25 @@
 version: 2
 
 # Dependabot has no R/CRAN ecosystem, so the R package's own dependencies are
-# not covered here — this watches the Rust glue's crate deps and the GitHub
-# Actions used in CI.
+# not covered here — this watches the Rust glue's crate deps, the GitHub
+# Actions used in CI, and the Docker base images (which fix the R version).
 updates:
+  # Docker base images: rocker/r-ver in Dockerfile.slim (both stages) and
+  # rocker/tidyverse in the root Dockerfile. The tag IS the R version, so a
+  # bump is a deliberate R upgrade: one grouped PR moves all three FROM lines
+  # together, and the docker workflow builds and smoke-tests both images on it
+  # (it does not publish from a PR). Monthly, since R releases are rare.
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: "chore(docker)"
+    groups:
+      r-base-images:
+        patterns: ["rocker/*"]
+
   # GitHub Actions pinned in .github/workflows/*.
   - package-ecosystem: github-actions
     directory: "/"

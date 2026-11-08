@@ -1,0 +1,258 @@
+name: docker
+
+# Builds the slim image (Dockerfile.slim: R + ferx + the ferx CLI, no RStudio)
+# for linux/amd64 and linux/arm64 and publishes it to ghcr.io/ferx-nlme/ferx-r.
+#
+#   push to main  -> :<full sha>, :<short sha>, :latest
+#   tag vX.Y.Z    -> :vX.Y.Z, :X.Y.Z (the commit's :sha tags come from main)
+#   pull request  -> build + smoke test only, nothing is pushed
+#   manual run    -> build + smoke test only, nothing is pushed (from any branch)
+#
+# Pull requests and manual runs also build and smoke-test the RStudio image
+# (root Dockerfile, never published), so a Dependabot base-image bump
+# (.github/dependabot.yml) is tested for both images before merge.
+#
+# Only `push` events publish, and `on.push` below admits only main and v* tags,
+# so an unreviewed branch can never reach the registry.
+#
+# Each architecture builds natively on its own runner (no QEMU: emulating the
+# Rust release build would take hours), pushes by digest, and a final job
+# stitches the digests into one multi-arch manifest under the tags above.
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    # A merge that cannot change the image publishes nothing (that commit then
+    # has no :sha tag; the README says so). Later patterns win, and `!` only
+    # works under `paths`, hence this shape rather than paths-ignore. GitHub
+    # ignores paths filters for tag pushes, so a release always builds.
+    paths:
+      - '**'
+      - '!**.md'
+      - '!changelog.d/**'
+      - '!vignettes/**'
+      - '!tests/**'
+      - '!.github/**'
+      - '.github/workflows/docker.yml'
+  pull_request:
+    branches: [main]
+    # A PR build is a full Rust release build per arch (~20-30 min); run it
+    # only when something that shapes the image changes.
+    paths:
+      - Dockerfile.slim
+      - Dockerfile
+      - .dockerignore
+      - .github/workflows/docker.yml
+      - DESCRIPTION
+      - src/Makevars
+      - src/rust/Cargo.toml
+      - src/rust/Cargo.lock
+  workflow_dispatch:
+
+# One run per ref at a time. On main a run is never cancelled, but GitHub keeps
+# only one *pending* run per group: in a burst of merges the commits in between
+# are skipped and get no :sha tag (the README says so). Grouping by SHA instead
+# would let an older commit finish last and repoint :latest.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  IMAGE: ghcr.io/ferx-nlme/ferx-r
+
+jobs:
+  build:
+    name: build (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {platform: linux/amd64, runner: ubuntu-24.04,     arch: amd64}
+          - {platform: linux/arm64, runner: ubuntu-24.04-arm, arch: arm64}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Build once into the local daemon so the image can be smoke-tested
+      # before anything is published.
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.slim
+          platforms: ${{ matrix.platform }}
+          build-args: FERX_R_REVISION=${{ github.sha }}
+          load: true
+          tags: ferx-r:smoke
+          cache-from: type=gha,scope=slim-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=slim-${{ matrix.arch }}
+
+      - name: Smoke test
+        run: |
+          docker run --rm ferx-r:smoke ferx --help
+          docker run --rm ferx-r:smoke Rscript -e '
+            library(ferx)
+            ex <- ferx_example("warfarin")
+            fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
+            print(fit)
+            stopifnot(is.finite(fit$ofv))'
+          docker image ls ferx-r:smoke
+
+      # Same inputs, so every layer comes from the cache above; this only
+      # pushes the platform image by digest.
+      - name: Push by digest
+        id: push
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.slim
+          platforms: ${{ matrix.platform }}
+          build-args: FERX_R_REVISION=${{ github.sha }}
+          cache-from: type=gha,scope=slim-${{ matrix.arch }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export digest
+        if: github.event_name == 'push'
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          digest="${{ steps.push.outputs.digest }}"
+          touch "$RUNNER_TEMP/digests/${digest#sha256:}"
+
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'push'
+        with:
+          name: digest-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digest-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          flavor: latest=false
+          # SHA tags come from main pushes only: a release tag's commit is also
+          # built by main's run, and two builds must not race for one :sha.
+          tags: |
+            type=sha,format=long,prefix=,enable=${{ github.ref_type == 'branch' }}
+            type=sha,prefix=,enable=${{ github.ref_type == 'branch' }}
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create multi-arch manifest
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.IMAGE }}@sha256:%s ' *)
+
+      - name: Inspect
+        run: docker buildx imagetools inspect "${{ env.IMAGE }}:${{ steps.meta.outputs.version }}"
+
+      # GHCR creates a new package as private, and only an org owner can make
+      # it public (a one-time step after the first publish). Until then, users'
+      # `docker pull` fails without a login. This step checks what an
+      # anonymous user sees (empty Docker config: no credentials) and leaves a
+      # warning on every publish run until the package is public. It never
+      # fails the run.
+      - name: Check anonymous pull (package visibility)
+        run: |
+          export DOCKER_CONFIG="$(mktemp -d)"
+          ref="${{ env.IMAGE }}:${{ steps.meta.outputs.version }}"
+          if docker buildx imagetools inspect "$ref" >/dev/null 2>&1; then
+            echo "Anonymous pull of $ref works: the package is public."
+          else
+            msg="Anonymous pull of $ref fails: the ghcr.io package is not public. An org owner must open https://github.com/orgs/FeRx-NLME/packages/container/package/ferx-r/settings and use Danger Zone > Change visibility > Public (one time)."
+            echo "::warning title=GHCR package is private::$msg"
+            echo "### GHCR package is private" >> "$GITHUB_STEP_SUMMARY"
+            echo "$msg" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # The RStudio image (root Dockerfile) is not published. It is built and
+  # smoke-tested on pull requests and manual runs so that a change to it, or a
+  # Dependabot rocker/tidyverse bump, is tested before merge. amd64 only: the
+  # recipe has no arch-specific step, and the slim job covers arm64.
+  rstudio:
+    if: github.event_name != 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          load: true
+          tags: ferx-r:rstudio
+          cache-from: type=gha,scope=rstudio
+          cache-to: type=gha,mode=max,scope=rstudio
+
+      - name: Smoke test
+        run: |
+          docker run --rm ferx-r:rstudio Rscript -e '
+            library(ferx)
+            ex <- ferx_example("warfarin")
+            fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
+            stopifnot(is.finite(fit$ofv))
+            cat("OFV", fit$ofv, "\n")'
+          # The CLI must carry the survival feature, like the R package.
+          docker run --rm ferx-r:rstudio \
+            ferx check /usr/local/lib/R/site-library/ferx/examples/models/tte_exponential.ferx
+          # RStudio Server comes up.
+          docker run -d --name rs -p 8787:8787 -e PASSWORD=ferx ferx-r:rstudio
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8787/auth-sign-in || true)
+            [ "$code" = "200" ] && break
+            sleep 2
+          done
+          docker logs rs | tail -20
+          docker rm -f rs
+          test "$code" = "200"
+          docker image ls ferx-r:rstudio

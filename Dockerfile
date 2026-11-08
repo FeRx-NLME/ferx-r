@@ -43,22 +43,40 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
     && chmod -R a+rX /opt/cargo /opt/rustup
 
 # ---------------------------------------------------------------------------
-# 3. Clone ferx-core from GitHub, build the `ferx` CLI binary, keep the
-#    source tree at /opt/ferx-core (the R package's Cargo.toml has a
-#    relative path dep). Drop build artifacts and cargo caches.
+# 3. Build the `ferx` CLI at the ferx-core commit src/rust/Cargo.lock pins -
+#    the same engine the R package builds below - with the package's feature
+#    set (CARGO_FEATURES in src/Makevars). `+stable` because ferx-core's own
+#    rust-toolchain.toml names nightly, which rustup would auto-install.
+#    The source goes to /tmp/ferx-core and is deleted: a checkout at
+#    /opt/ferx-core would sit exactly where src/Makevars looks for a sibling
+#    (../../ferx-core from /opt/ferx/src) and be patched into the package build.
+#    Same recipe as Dockerfile.slim.
 # ---------------------------------------------------------------------------
+COPY src/rust/Cargo.lock /tmp/ferx-Cargo.lock
 RUN set -eux; \
-    git clone --depth 1 https://github.com/FeRx-NLME/ferx-core /opt/ferx-core; \
-    cd /opt/ferx-core; \
-    cargo build --release; \
+    rev="$(sed -n 's|^source = "git+https://github.com/FeRx-NLME/ferx-core?branch=main#\([0-9a-f]\{40\}\)"$|\1|p' \
+             /tmp/ferx-Cargo.lock | sort -u)"; \
+    case "$rev" in \
+        ''|*[!0-9a-f]*) \
+            echo "Dockerfile: expected exactly one ferx-core revision in src/rust/Cargo.lock, got: '$rev'" >&2; \
+            exit 1;; \
+    esac; \
+    git init -q /tmp/ferx-core; \
+    cd /tmp/ferx-core; \
+    git fetch -q --depth 1 https://github.com/FeRx-NLME/ferx-core "$rev"; \
+    git checkout -q FETCH_HEAD; \
+    cargo +stable build --release --locked -p ferx-cli \
+        --features ferx-core/ci,ferx-core/nn,ferx-core/survival; \
     install -m 0755 target/release/ferx /usr/local/bin/ferx; \
-    rm -rf target .git; \
-    rm -rf /opt/cargo/registry/cache /opt/cargo/registry/src /opt/cargo/git
+    cd /; \
+    rm -rf /tmp/ferx-core /tmp/ferx-Cargo.lock \
+           /opt/cargo/registry/cache /opt/cargo/registry/src /opt/cargo/git
 
 # ---------------------------------------------------------------------------
-# 4. Copy the R package source, install it (which rebuilds the Rust staticlib
-#    against the retained /opt/ferx-core via the relative path dep in
-#    src/rust/Cargo.toml), then clean all build/caching state.
+# 4. Copy the R package source and install it. With no sibling checkout, the
+#    Rust staticlib builds from the ferx-core commit src/rust/Cargo.lock pins
+#    (on stable: src/Makevars writes the toolchain file). Then clean all
+#    build/caching state.
 # ---------------------------------------------------------------------------
 COPY . /opt/ferx
 RUN set -eux; \
