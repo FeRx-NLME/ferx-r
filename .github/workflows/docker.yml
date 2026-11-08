@@ -125,9 +125,12 @@ jobs:
         run: tools/scan-image-secrets.sh ferx-r:smoke
 
       # The scanner still catches what it is meant to: one planted fake per
-      # detection route, a decoy it must ignore, and no secret value printed.
+      # detection route, a decoy it must ignore, and no secret value printed;
+      # and, against a throwaway local registry, the attestation scan finds a
+      # build-arg token, passes clean provenance, and reports unreadable
+      # provenance as "could not read" rather than clean.
       - name: Secret scan self-test
-        run: tools/test-scan-image-secrets.sh ferx-r:smoke
+        run: tools/test-scan-image-secrets.sh --with-attestations ferx-r:smoke
 
       # Same inputs, so every layer comes from the cache above; this only
       # pushes the platform image by digest.
@@ -155,15 +158,21 @@ jobs:
           INDEX: ${{ steps.push.outputs.digest }}
           SCANNED: ${{ steps.build.outputs.digest }}
         run: |
-          listing="$(docker buildx imagetools inspect "$IMAGE@$INDEX" \
-            --format '{{range .Manifest.Manifests}}{{.Digest}} {{with .Platform}}{{.OS}}/{{.Architecture}}{{end}}{{println}}{{end}}')"
-          echo "$listing"
-          platform_manifest="$(printf '%s\n' "$listing" | awk -v p="${{ matrix.platform }}" '$2 == p {print $1; exit}')"
-          if [ -z "$platform_manifest" ]; then
-            # Not an index (no attestations): the pushed digest is the image.
-            platform_manifest="$INDEX"
-          fi
-          children="$(printf '%s\n' "$listing" | awk 'NF {print $1}' | tr '\n' ' ')"
+          mediatype="$(docker buildx imagetools inspect "$IMAGE@$INDEX" --format '{{.Manifest.MediaType}}')"
+          case "$mediatype" in
+            *image.index*|*manifest.list*)
+              listing="$(docker buildx imagetools inspect "$IMAGE@$INDEX" \
+                --format '{{range .Manifest.Manifests}}{{.Digest}} {{with .Platform}}{{.OS}}/{{.Architecture}}{{end}}{{println}}{{end}}')"
+              echo "$listing"
+              platform_manifest="$(printf '%s\n' "$listing" | awk -v p="${{ matrix.platform }}" '$2 == p {print $1; exit}')"
+              children="$(printf '%s\n' "$listing" | awk 'NF {print $1}' | tr '\n' ' ')"
+              if [ -z "$platform_manifest" ]; then
+                echo "::error::No ${{ matrix.platform }} image in the pushed index $INDEX"; exit 1
+              fi ;;
+            *)
+              # A single image manifest (no attestations): it is the image.
+              platform_manifest="$INDEX"; children="" ;;
+          esac
           echo "platform_manifest=$platform_manifest" >> "$GITHUB_OUTPUT"
           echo "children=$children" >> "$GITHUB_OUTPUT"
           if [ "$platform_manifest" = "$SCANNED" ]; then
@@ -186,25 +195,38 @@ jobs:
           done
           exit 1
 
+      # The scanner exits 1 for "found a secret" and 2 for "could not check".
+      # Both fail the job (nothing is tagged), but only a finding deletes the
+      # pushed image: an unreadable registry must not destroy a clean one.
       - name: Secret scan of the pushed image
         id: pushed-scan
         if: github.event_name == 'push'
-        run: tools/scan-image-secrets.sh "$IMAGE@${{ steps.resolve.outputs.platform_manifest }}"
+        run: |
+          set +e
+          tools/scan-image-secrets.sh "$IMAGE@${{ steps.resolve.outputs.platform_manifest }}"
+          code=$?
+          [ "$code" -eq 1 ] && echo "found=true" >> "$GITHUB_OUTPUT"
+          exit "$code"
 
       # Published next to the image but never pulled: provenance (build args,
       # Dockerfile, build metadata) and SBOM.
       - name: Secret scan of the attestations
         id: attestation-scan
         if: github.event_name == 'push'
-        run: tools/scan-image-secrets.sh --attestations "$IMAGE@${{ steps.push.outputs.digest }}"
+        run: |
+          set +e
+          tools/scan-image-secrets.sh --attestations "$IMAGE@${{ steps.push.outputs.digest }}"
+          code=$?
+          [ "$code" -eq 1 ] && echo "found=true" >> "$GITHUB_OUTPUT"
+          exit "$code"
 
-      # After a failed scan the untagged index, its platform image and its
-      # attestation are still in the registry, where anyone could pull them by
-      # digest once the package is public. Delete all of them.
+      # After a scan found something, the untagged index, its platform image
+      # and its attestation are still in the registry, where anyone could pull
+      # them by digest once the package is public. Delete all of them.
       - name: Delete the pushed image after a failed scan
         if: >-
-          failure() && (steps.pushed-scan.outcome == 'failure' ||
-                        steps.attestation-scan.outcome == 'failure')
+          failure() && (steps.pushed-scan.outputs.found == 'true' ||
+                        steps.attestation-scan.outputs.found == 'true')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           INDEX: ${{ steps.push.outputs.digest }}

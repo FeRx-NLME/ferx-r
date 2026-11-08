@@ -2,7 +2,9 @@
 # Scan a built Docker image for credentials and license files that must never
 # ship: GitHub/AWS/Slack tokens, private keys, .netrc/.git-credentials/.env
 # files, license files (*.lic: NONMEM's nonmem.lic and friends) and NONMEM
-# license banners. Exits 1 with every hit listed, 0 when clean.
+# license banners. Exits 1 with every hit listed, 0 when clean, and 2 when it
+# could not check (image or registry unreadable): 2 never means "clean" and
+# never means "found".
 #
 #   tools/scan-image-secrets.sh <image>
 #   tools/scan-image-secrets.sh --attestations <registry ref>
@@ -50,8 +52,36 @@ if [ "$mode" = attestations ]; then
   # A secret-named key with a non-empty value, as JSON (provenance records
   # build args as "build-arg:NAME": "value", not NAME=value).
   JSON_ASSIGN_RE='"(build-arg:)?(GITHUB_TOKEN|GH_TOKEN|GITHUB_PAT|NPM_TOKEN|AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN|PASSWORD|PASSWD|SECRET|API_KEY|NONMEM_LICENSE|NMLICENSE)"[[:space:]]*:[[:space:]]*"[^"]'
-  att="$(docker buildx imagetools inspect "$image" --format '{{json .Provenance}}{{println}}{{json .SBOM}}')" \
-    || { echo "SECRET-SCAN: could not read the attestations of $image" >&2; exit 2; }
+  # buildx does not fail when it cannot fetch or decode an attestation blob:
+  # it prints {} and exits 0. So when the index carries an attestation
+  # manifest, the provenance must actually be there (every SLSA provenance
+  # predicate names its "buildType"), or this is "could not read" (exit 2),
+  # never "clean". Three attempts against transient registry errors.
+  mediatype="$(docker buildx imagetools inspect "$image" --format '{{.Manifest.MediaType}}' 2>/dev/null)" \
+    || { echo "SECRET-SCAN: could not read $image" >&2; exit 2; }
+  expect_provenance=no
+  case "$mediatype" in
+    *image.index*|*manifest.list*)
+      if docker buildx imagetools inspect "$image" \
+           --format '{{range .Manifest.Manifests}}{{with .Platform}}{{.OS}}{{end}}{{println}}{{end}}' 2>/dev/null \
+           | grep -qx unknown; then
+        expect_provenance=yes
+      fi ;;
+  esac
+  att=""
+  for attempt in 1 2 3; do
+    if att="$(docker buildx imagetools inspect "$image" --format '{{json .Provenance}}{{println}}{{json .SBOM}}' 2>/dev/null)"; then
+      if [ "$expect_provenance" = no ] || printf '%s' "$att" | grep -q '"buildType"'; then
+        break
+      fi
+    fi
+    att=""
+    [ "$attempt" -lt 3 ] && sleep 10
+  done
+  if [ -z "$att" ]; then
+    echo "SECRET-SCAN: could not read the attestations of $image (expected provenance: $expect_provenance)" >&2
+    exit 2
+  fi
   if printf '%s\n' "$att" | grep -Eq "$TOKEN_RE|$PEM_RE|$ASSIGN_RE|$JSON_ASSIGN_RE"; then
     report "attestations (provenance/SBOM) of $image:"
     printf '%s\n' "$att" | grep -Eo ".{0,40}($TOKEN_RE|$PEM_RE|$ASSIGN_RE|$JSON_ASSIGN_RE).{0,20}" \
@@ -61,15 +91,18 @@ if [ "$mode" = attestations ]; then
   exit "$hits"
 fi
 
-# 1. Config: environment and labels.
-config="$(docker image inspect --format '{{range .Config.Env}}{{println .}}{{end}}{{range $k, $v := .Config.Labels}}{{$k}}={{$v}}{{println}}{{end}}' "$image")"
+# 1. Config: environment and labels. (A docker failure anywhere is exit 2,
+#    "could not check": exit 1 is reserved for "found something".)
+config="$(docker image inspect --format '{{range .Config.Env}}{{println .}}{{end}}{{range $k, $v := .Config.Labels}}{{$k}}={{$v}}{{println}}{{end}}' "$image")" \
+  || { echo "SECRET-SCAN: could not inspect $image" >&2; exit 2; }
 if printf '%s\n' "$config" | grep -Eq "$TOKEN_RE|$PEM_RE|$ASSIGN_RE"; then
   report "image config (ENV/LABEL) of $image:"
   printf '%s\n' "$config" | grep -E "$TOKEN_RE|$PEM_RE|$ASSIGN_RE" | redact | sed 's/^/  /' >&2
 fi
 
 # 2. Build history.
-history="$(docker image history --no-trunc --format '{{.CreatedBy}}' "$image")"
+history="$(docker image history --no-trunc --format '{{.CreatedBy}}' "$image")" \
+  || { echo "SECRET-SCAN: could not read the history of $image" >&2; exit 2; }
 if printf '%s\n' "$history" | grep -Eq "$TOKEN_RE|$PEM_RE|$ASSIGN_RE"; then
   report "build history of $image:"
   printf '%s\n' "$history" | grep -Eo ".{0,40}($TOKEN_RE|$PEM_RE|$ASSIGN_RE).{0,20}" | redact | sed 's/^/  /' >&2
@@ -111,7 +144,7 @@ for d in /usr/local /opt /home /root /work /srv; do
 done
 exit 0
 SCAN
-)"
+)" || { echo "SECRET-SCAN: could not scan the filesystem of $image" >&2; exit 2; }
 # Known public third-party files that look like secrets but are not. Each
 # entry is a whole hit line (kind: path glob) with its reason; anything else
 # fails. Only add an entry after reading the file, and only for a file that is
