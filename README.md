@@ -105,10 +105,30 @@ and `linux/arm64`, so you skip the Rust build:
 docker pull ghcr.io/ferx-nlme/ferx-r:latest
 ```
 
-Tags: `latest` (current `main`), the ferx-r commit SHA (full or 7-character
-short, e.g. `ghcr.io/ferx-nlme/ferx-r:e4dd415`), and each release (`v0.4.0` and
-`0.4.0`, from the next release on). Pin a SHA or release tag in pipelines;
-`latest` moves with every merge.
+Tags: `latest` (current `main`), the ferx-r commit SHA of each published `main`
+build (full or 7-character short: `ghcr.io/ferx-nlme/ferx-r:<sha>`), and each
+release (`v0.4.0` and `0.4.0`, from the next release on). Pin a SHA or release
+tag in pipelines; `latest` moves with every merge. Not every `main` commit has
+an image: merges that only touch docs, tests or CI publish nothing, and when
+several PRs merge in quick succession the commits in between may be skipped.
+Pick a SHA from the package's tag list. Release tags and `latest` are kept for
+good, SHA tags for the 30 most recent published commits (a weekly cleanup
+deletes older ones), so pipelines that must stay reproducible for longer should
+pin a release.
+
+The image carries ferx's hard dependencies only (no Suggests such as testthat
+or xpose), and the default user cannot write to the site library. Add packages
+your pipeline needs (targets, crew, ...) in a derived image. Use pak, which
+also installs the system libraries a binary package needs (targets pulls in
+igraph, which needs `libglpk`):
+
+```dockerfile
+FROM ghcr.io/ferx-nlme/ferx-r:<sha>
+USER root
+RUN R -q -e 'install.packages("pak"); pak::pkg_install(c("targets", "crew"))' \
+    && rm -rf /var/lib/apt/lists/*
+USER ferx
+```
 
 Mount your project at `/work` (the image's working directory) and run R or the
 CLI there:

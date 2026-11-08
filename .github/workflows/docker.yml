@@ -4,8 +4,12 @@ name: docker
 # for linux/amd64 and linux/arm64 and publishes it to ghcr.io/ferx-nlme/ferx-r.
 #
 #   push to main  -> :<full sha>, :<short sha>, :latest
-#   tag vX.Y.Z    -> :<full sha>, :<short sha>, :vX.Y.Z, :X.Y.Z
+#   tag vX.Y.Z    -> :vX.Y.Z, :X.Y.Z (the commit's :sha tags come from main)
 #   pull request  -> build + smoke test only, nothing is pushed
+#   manual run    -> build + smoke test only, nothing is pushed (from any branch)
+#
+# Only `push` events publish, and `on.push` below admits only main and v* tags,
+# so an unreviewed branch can never reach the registry.
 #
 # Each architecture builds natively on its own runner (no QEMU: emulating the
 # Rust release build would take hours), pushes by digest, and a final job
@@ -15,6 +19,18 @@ on:
   push:
     branches: [main]
     tags: ['v*']
+    # A merge that cannot change the image publishes nothing (that commit then
+    # has no :sha tag; the README says so). Later patterns win, and `!` only
+    # works under `paths`, hence this shape rather than paths-ignore. GitHub
+    # ignores paths filters for tag pushes, so a release always builds.
+    paths:
+      - '**'
+      - '!**.md'
+      - '!changelog.d/**'
+      - '!vignettes/**'
+      - '!tests/**'
+      - '!.github/**'
+      - '.github/workflows/docker.yml'
   pull_request:
     branches: [main]
     # A PR build is a full Rust release build per arch (~20-30 min); run it
@@ -29,6 +45,10 @@ on:
       - src/rust/Cargo.lock
   workflow_dispatch:
 
+# One run per ref at a time. On main a run is never cancelled, but GitHub keeps
+# only one *pending* run per group: in a burst of merges the commits in between
+# are skipped and get no :sha tag (the README says so). Grouping by SHA instead
+# would let an older commit finish last and repoint :latest.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -52,12 +72,12 @@ jobs:
           - {platform: linux/arm64, runner: ubuntu-24.04-arm, arch: arm64}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -93,7 +113,7 @@ jobs:
       # pushes the platform image by digest.
       - name: Push by digest
         id: push
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -104,14 +124,14 @@ jobs:
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push'
         run: |
           mkdir -p "$RUNNER_TEMP/digests"
           digest="${{ steps.push.outputs.digest }}"
           touch "$RUNNER_TEMP/digests/${digest#sha256:}"
 
       - uses: actions/upload-artifact@v4
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push'
         with:
           name: digest-${{ matrix.arch }}
           path: ${{ runner.temp }}/digests/*
@@ -120,7 +140,7 @@ jobs:
 
   publish:
     needs: build
-    if: github.event_name != 'pull_request'
+    if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -140,9 +160,11 @@ jobs:
         with:
           images: ${{ env.IMAGE }}
           flavor: latest=false
+          # SHA tags come from main pushes only: a release tag's commit is also
+          # built by main's run, and two builds must not race for one :sha.
           tags: |
-            type=sha,format=long,prefix=
-            type=sha,prefix=
+            type=sha,format=long,prefix=,enable=${{ github.ref_type == 'branch' }}
+            type=sha,prefix=,enable=${{ github.ref_type == 'branch' }}
             type=ref,event=tag
             type=semver,pattern={{version}}
             type=raw,value=latest,enable={{is_default_branch}}
