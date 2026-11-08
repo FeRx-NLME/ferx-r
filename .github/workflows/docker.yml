@@ -203,7 +203,7 @@ jobs:
           if docker buildx imagetools inspect "$ref" >/dev/null 2>&1; then
             echo "Anonymous pull of $ref works: the package is public."
           else
-            msg="Anonymous pull of $ref fails: the ghcr.io package is not public. An org owner must open https://github.com/orgs/FeRx-NLME/packages/container/package/ferx-r/settings and use Danger Zone > Change visibility > Public (one time)."
+            msg="Anonymous pull of $ref fails: the ghcr.io package is not public. An org owner must open https://github.com/orgs/FeRx-NLME/packages/container/ferx-r/settings (or: org page > Packages > ferx-r > Package settings) and use Danger Zone > Change visibility > Public (one time)."
             echo "::warning title=GHCR package is private::$msg"
             echo "### GHCR package is private" >> "$GITHUB_STEP_SUMMARY"
             echo "$msg" >> "$GITHUB_STEP_SUMMARY"
