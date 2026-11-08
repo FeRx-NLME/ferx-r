@@ -1141,9 +1141,11 @@
 #'   \item{se_omega}{Standard errors for omega elements. For diagonal omega,
 #'     a vector of length n_eta (one per variance). For block omega, a vector
 #'     of length n_eta*(n_eta+1)/2 (full lower triangle, column-major) including
-#'     off-diagonal covariance SEs.}
+#'     off-diagonal covariance SEs. Named like the rows of \code{cov_matrix}:
+#'     the eta name for a variance, \code{"ETA_V ~ ETA_CL"} for a block
+#'     covariance, \code{"OMEGA(i,j)"} for an unnamed eta.}
 #'   \item{se_sigma}{Standard errors for sigma (on the SD scale, like
-#'     \code{sigma} itself)}
+#'     \code{sigma} itself). Named like \code{sigma}.}
 #'   \item{theta_fixed, omega_fixed, sigma_fixed}{Logical FIX flags, one per
 #'     theta, per eta (the omega diagonal; every eta of a fixed block is
 #'     \code{TRUE}) and per sigma. \code{TRUE} also marks a theta the engine
@@ -1326,7 +1328,8 @@
 #'     \code{NA} when the model declares no IOV.}
 #'   \item{shrinkage_eta}{Numeric vector of ETA shrinkage per random effect
 #'     (\code{1 - SD(eta_hat_k) / sqrt(omega_kk)}). \code{NA} when
-#'     \code{omega_kk = 0} or fewer than 2 subjects.}
+#'     \code{omega_kk = 0} or fewer than 2 subjects. Named like the rows of
+#'     \code{omega}.}
 #'   \item{shrinkage_eps}{EPS shrinkage: \code{1 - SD(IWRES)}. \code{NA} when
 #'     fewer than 2 valid residuals.}
 #'   \item{dw_statistic}{Pooled Durbin-Watson statistic for IWRES within
@@ -1706,9 +1709,11 @@
 #'   \item{omega_param_corr}{Parameter-level correlation matrix for block omega.
 #'     Uses the bivariate lognormal formula for lognormal pairs and falls back
 #'     to the eta-level formula for additive or unknown parameterisations.
-#'     \code{NULL} when omega is diagonal (no off-diagonal elements to report).}
+#'     \code{NULL} when omega is diagonal (no off-diagonal elements to report).
+#'     Its dimnames are those of \code{omega}.}
 #'   \item{omega_iov_param_corr}{Same as \code{omega_param_corr} but for the
-#'     IOV kappa block. \code{NULL} when kappa is diagonal or absent.}
+#'     IOV kappa block, with the dimnames of \code{omega_iov}. \code{NULL}
+#'     when kappa is diagonal or absent.}
 #'   \item{eta_names}{Character vector of ETA parameter names as declared in the
 #'     model file (e.g. \code{"ETA_CL"}, \code{"ETA_V"}). Used to label OMEGA
 #'     rows in \code{fit$estimates} and \code{print.ferx_fit()}.}

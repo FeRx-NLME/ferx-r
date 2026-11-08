@@ -819,6 +819,22 @@
   if (length(result$se_theta) == 0) result$se_theta <- NULL
   if (length(result$se_omega) == 0) result$se_omega <- NULL
   if (length(result$se_sigma) == 0) result$se_sigma <- NULL
+  # The omega and sigma SEs, and the eta shrinkage, by the names `omega` and
+  # `sigma` carry (#722): a vector of another length stays unnamed. The glue
+  # labels `se_omega` with the function that labels `cov_matrix`'s rows, so a
+  # block covariance is `ETA_V ~ ETA_CL` in both.
+  n_eta_nm <- nrow(result$omega)
+  om_se_nms <- as.character(unlist(result$se_omega_labels, use.names = FALSE))
+  if (length(result$se_omega) > 0L && length(om_se_nms) == length(result$se_omega)) {
+    names(result$se_omega) <- om_se_nms
+  }
+  result$se_omega_labels <- NULL
+  if (length(result$se_sigma) > 0L && length(result$sigma_names) == length(result$se_sigma)) {
+    names(result$se_sigma) <- result$sigma_names
+  }
+  if (length(result$shrinkage_eta) > 0L && length(result$shrinkage_eta) == n_eta_nm) {
+    names(result$shrinkage_eta) <- rownames(result$omega)
+  }
 
   # SIR: NaN ess => not computed; flat [lo, hi, lo, hi, ...] => (n, 2) matrix
   if (is.null(result$sir_ess) || !is.finite(result$sir_ess)) {
@@ -998,6 +1014,9 @@
       result$omega_param_corr <- matrix(
         result$omega_param_corr, nrow = d_pc, ncol = d_pc, byrow = TRUE
       )
+      if (isTRUE(nrow(result$omega) == d_pc)) {
+        dimnames(result$omega_param_corr) <- dimnames(result$omega)
+      }
     } else {
       result$omega_param_corr <- NULL
     }
@@ -1012,6 +1031,9 @@
       result$omega_iov_param_corr <- matrix(
         result$omega_iov_param_corr, nrow = d_ipc, ncol = d_ipc, byrow = TRUE
       )
+      if (is.matrix(result$omega_iov) && isTRUE(nrow(result$omega_iov) == d_ipc)) {
+        dimnames(result$omega_iov_param_corr) <- dimnames(result$omega_iov)
+      }
     } else {
       result$omega_iov_param_corr <- NULL
     }

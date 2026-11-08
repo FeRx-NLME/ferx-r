@@ -191,10 +191,10 @@ ferx_gam_screen <- function(fit,
   }
 
   # -- Shrinkage vector -------------------------------------------------------
-  # `fit$shrinkage_eta` is an unnamed numeric vector, one entry per random
-  # effect in declaration order, with the labels carried separately in
-  # `fit$eta_names` (see `print.ferx_fit`). So the name lookup has to consult
-  # `fit$eta_names` too, and the positional fallback has to index the
+  # `fit$shrinkage_eta` is one entry per random effect in declaration order,
+  # named by `fit$eta_names` since #722; a fit list built before that carries
+  # it unnamed. So the name lookup falls back to `fit$eta_names`, and the
+  # positional fallback has to index the
   # *unfiltered* ETA column order - indexing `all_etas` would report the first
   # ETA's shrinkage for whatever ETA `etas` happened to select.
   shrink_vec  <- fit$shrinkage_eta

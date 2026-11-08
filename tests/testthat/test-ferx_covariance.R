@@ -427,6 +427,14 @@ test_that("ferx_covariance(): a diagonal omega with a block kappa labels kappa c
   expect_cov_labels(suppressWarnings(ferx_covariance(fit)), block_kappa_iov_labels)
 })
 
+test_that("a block kappa's omega_iov_param_corr carries omega_iov's names (#722)", {
+  fit <- block_kappa_cov_free_fit()
+  expect_true(is.matrix(fit$omega_iov_param_corr))
+  expect_identical(dimnames(fit$omega_iov_param_corr),
+                   list(c("KAPPA_CL", "KAPPA_V"), c("KAPPA_CL", "KAPPA_V")))
+  expect_identical(dimnames(fit$omega_iov_param_corr), dimnames(fit$omega_iov))
+})
+
 # -- IOV fits: the covariance step runs at the fitted kappa (#473) -------------
 #
 # The twin of the #465 SIR block in test-ferx_sir.R. The binding used to pass
