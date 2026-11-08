@@ -1,0 +1,164 @@
+name: docker
+
+# Builds the slim image (Dockerfile.slim: R + ferx + the ferx CLI, no RStudio)
+# for linux/amd64 and linux/arm64 and publishes it to ghcr.io/ferx-nlme/ferx-r.
+#
+#   push to main  -> :<full sha>, :<short sha>, :latest
+#   tag vX.Y.Z    -> :<full sha>, :<short sha>, :vX.Y.Z, :X.Y.Z
+#   pull request  -> build + smoke test only, nothing is pushed
+#
+# Each architecture builds natively on its own runner (no QEMU: emulating the
+# Rust release build would take hours), pushes by digest, and a final job
+# stitches the digests into one multi-arch manifest under the tags above.
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+    # A PR build is a full Rust release build per arch (~20-30 min); run it
+    # only when something that shapes the image changes.
+    paths:
+      - Dockerfile.slim
+      - .dockerignore
+      - .github/workflows/docker.yml
+      - DESCRIPTION
+      - src/Makevars
+      - src/rust/Cargo.toml
+      - src/rust/Cargo.lock
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  IMAGE: ghcr.io/ferx-nlme/ferx-r
+
+jobs:
+  build:
+    name: build (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {platform: linux/amd64, runner: ubuntu-24.04,     arch: amd64}
+          - {platform: linux/arm64, runner: ubuntu-24.04-arm, arch: arm64}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Build once into the local daemon so the image can be smoke-tested
+      # before anything is published.
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.slim
+          platforms: ${{ matrix.platform }}
+          build-args: FERX_R_REVISION=${{ github.sha }}
+          load: true
+          tags: ferx-r:smoke
+          cache-from: type=gha,scope=slim-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=slim-${{ matrix.arch }}
+
+      - name: Smoke test
+        run: |
+          docker run --rm ferx-r:smoke ferx --help
+          docker run --rm ferx-r:smoke Rscript -e '
+            library(ferx)
+            ex <- ferx_example("warfarin")
+            fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
+            print(fit)
+            stopifnot(is.finite(fit$ofv))'
+          docker image ls ferx-r:smoke
+
+      # Same inputs, so every layer comes from the cache above; this only
+      # pushes the platform image by digest.
+      - name: Push by digest
+        id: push
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.slim
+          platforms: ${{ matrix.platform }}
+          build-args: FERX_R_REVISION=${{ github.sha }}
+          cache-from: type=gha,scope=slim-${{ matrix.arch }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export digest
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          digest="${{ steps.push.outputs.digest }}"
+          touch "$RUNNER_TEMP/digests/${digest#sha256:}"
+
+      - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
+        with:
+          name: digest-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digest-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          flavor: latest=false
+          tags: |
+            type=sha,format=long,prefix=
+            type=sha,prefix=
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create multi-arch manifest
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.IMAGE }}@sha256:%s ' *)
+
+      - name: Inspect
+        run: docker buildx imagetools inspect "${{ env.IMAGE }}:${{ steps.meta.outputs.version }}"

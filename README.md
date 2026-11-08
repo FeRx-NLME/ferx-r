@@ -95,6 +95,47 @@ pak::pak("FeRx-NLME/ferx-r")
 
 ### Docker
 
+#### Slim image (pipelines, CI, clusters)
+
+A slim image with R, the ferx package and the `ferx` CLI - no RStudio, no Rust
+toolchain - is published to the GitHub Container Registry for `linux/amd64`
+and `linux/arm64`, so you skip the Rust build:
+
+```bash
+docker pull ghcr.io/ferx-nlme/ferx-r:latest
+```
+
+Tags: `latest` (current `main`), the ferx-r commit SHA (full or 7-character
+short, e.g. `ghcr.io/ferx-nlme/ferx-r:e4dd415`), and each release (`v0.4.0` and
+`0.4.0`, from the next release on). Pin a SHA or release tag in pipelines;
+`latest` moves with every merge.
+
+Mount your project at `/work` (the image's working directory) and run R or the
+CLI there:
+
+```bash
+docker run --rm -v "$PWD:/work" ghcr.io/ferx-nlme/ferx-r:latest Rscript fit.R
+docker run --rm -v "$PWD:/work" ghcr.io/ferx-nlme/ferx-r:latest \
+  ferx model.ferx --data data.csv
+docker run --rm -it -v "$PWD:/work" ghcr.io/ferx-nlme/ferx-r:latest   # R console
+```
+
+The container runs as an unprivileged user `ferx` (uid 1000). If your host uid
+differs and the outputs must be yours, add `--user "$(id -u):$(id -g)"`.
+
+**Threads.** By default the engine uses the available cores minus one, capped
+at 8. Inside a container "available" honours a CPU quota (`docker run
+--cpus 4`, a Kubernetes CPU *limit*) and CPU pinning (`--cpuset-cpus`), but not
+a Kubernetes CPU *request* without a limit, or a Slurm allocation that is not
+enforced through cgroups: there the engine sees every core of the node. When
+several workers share a node, set the count explicitly - `ferx_fit(...,
+threads = N)` in R, `--threads N` for the CLI - to match what each job was
+given.
+
+To build it yourself: `docker build -f Dockerfile.slim -t ferx-r:slim .`
+
+#### RStudio image
+
 A Docker image is available that bundles ferx CLI, the ferx R package, and RStudio Server.
 
 ```bash

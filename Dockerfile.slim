@@ -1,0 +1,94 @@
+# syntax=docker/dockerfile:1.7
+#
+# ferx (slim): R + the ferx package + the `ferx` CLI. No RStudio, no Rust
+# toolchain in the final image. Meant for pipelines - targets/crew workers, CI,
+# Slurm or Kubernetes jobs. The RStudio image is the root `Dockerfile`.
+#
+# Published by .github/workflows/docker.yml to ghcr.io/ferx-nlme/ferx-r.
+#
+# Build (from the repository root):
+#   docker build -f Dockerfile.slim -t ferx-r:slim .
+#
+# Run R / the CLI on a mounted project:
+#   docker run --rm -v "$PWD:/work" ferx-r:slim Rscript fit.R
+#   docker run --rm -v "$PWD:/work" ferx-r:slim ferx model.ferx --data data.csv
+#
+# Both the R package and the CLI are built from the ferx-core commit pinned in
+# src/rust/Cargo.lock, so they run the same engine (the root Dockerfile builds
+# the CLI from ferx-core `main` HEAD instead).
+
+ARG R_VERSION=4.6.0
+
+# ===========================================================================
+# Build stage: Rust toolchain, ferx CLI, R package.
+# ===========================================================================
+FROM rocker/r-ver:${R_VERSION} AS build
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential cmake pkg-config libnlopt-dev \
+        curl git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Stable rustup under /opt, so the toolchain does not depend on root's $HOME.
+ENV CARGO_HOME=/opt/cargo \
+    RUSTUP_HOME=/opt/rustup \
+    PATH=/opt/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+        | sh -s -- -y --default-toolchain stable --profile minimal
+
+# R dependencies first: this layer only changes with DESCRIPTION.
+COPY DESCRIPTION /src/ferx/DESCRIPTION
+RUN R -q -e "install.packages('remotes')" \
+    && R -q -e "remotes::install_deps('/src/ferx', dependencies = NA, upgrade = 'never')"
+
+# The `ferx` CLI, at the ferx-core commit src/rust/Cargo.lock pins. Same
+# engine feature set as the R package (CARGO_FEATURES in src/Makevars).
+# ferx-core is cloned to /src/core/, NOT /src/ferx-core: src/Makevars treats
+# ../../ferx-core (relative to /src/ferx/src) as a sibling checkout and would
+# patch it into the R package build.
+COPY src/rust/Cargo.lock /src/ferx/src/rust/Cargo.lock
+RUN set -eux; \
+    rev="$(sed -n 's|^source = "git+https://github.com/FeRx-NLME/ferx-core?branch=main#\([0-9a-f]\{40\}\)"$|\1|p' \
+             /src/ferx/src/rust/Cargo.lock | sort -u)"; \
+    test "$(printf '%s\n' "$rev" | wc -l)" -eq 1 && test -n "$rev"; \
+    git init -q /src/core; \
+    cd /src/core; \
+    git fetch -q --depth 1 https://github.com/FeRx-NLME/ferx-core "$rev"; \
+    git checkout -q FETCH_HEAD; \
+    cargo build --release --locked -p ferx-cli \
+        --features ferx-core/ci,ferx-core/nn,ferx-core/survival; \
+    install -m 0755 target/release/ferx /usr/local/bin/ferx; \
+    printf '%s\n' "$rev" > /usr/local/share/ferx-core-rev
+
+# The R package (rebuilds the Rust staticlib from the same pinned commit).
+COPY . /src/ferx
+RUN R CMD INSTALL --no-multiarch /src/ferx
+
+# ===========================================================================
+# Runtime stage: R + installed packages + the CLI. No compilers, no Rust.
+# ===========================================================================
+FROM rocker/r-ver:${R_VERSION}
+
+ARG FERX_R_REVISION=unknown
+LABEL org.opencontainers.image.title="ferx-r (slim)" \
+      org.opencontainers.image.description="R + the ferx NLME package + the ferx CLI, no RStudio" \
+      org.opencontainers.image.source="https://github.com/FeRx-NLME/ferx-r" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.revision="${FERX_R_REVISION}"
+
+# rocker/r-ver installs packages into /usr/local/lib/R/site-library.
+COPY --from=build /usr/local/lib/R/site-library /usr/local/lib/R/site-library
+COPY --from=build /usr/local/bin/ferx /usr/local/bin/ferx
+COPY --from=build /usr/local/share/ferx-core-rev /usr/local/share/ferx-core-rev
+
+# Unprivileged default user, uid 1000 so files written to a mounted project
+# usually belong to the host user. Ubuntu 24.04 bases ship an `ubuntu` user at
+# uid 1000; drop it first. Run with `--user "$(id -u):$(id -g)"` to match any
+# other host uid. /work is the conventional mount point.
+RUN if id -u ubuntu >/dev/null 2>&1; then userdel --remove ubuntu; fi \
+    && useradd --create-home --uid 1000 --user-group --shell /bin/bash ferx \
+    && mkdir -p /work && chown ferx:ferx /work
+USER ferx
+WORKDIR /work
+
+CMD ["R"]
